@@ -1,5 +1,5 @@
 
-
+当前你所处中国大陆，所以有些外网是较难访问的，比如github可以通过增加前缀https://gh-proxy.com,比如一个github的网址是https://github.com/abc,可以通过https://gh-proxy.com/https://github.com/abc去访问
 
 
 我找到的几个资料，在写vibecoding 和 claudecode的时候可以供你参考
