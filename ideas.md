@@ -11,12 +11,8 @@ https://github.com/GeeeekExplorer/nano-vllm
 https://github.com/skyzh/tiny-llm
 https://github.com/sgl-project/mini-sglang
 
-已将 AI Infra 独立成第二十三册：`book-23-ai-infra/`。
-
-后续可重点补充资料方向：GPU 集群、训练平台、推理平台、Kubernetes 调度、Ray、Slurm、vLLM/SGLang serving、可观测性、成本治理和 LLMOps。
 
 已将大模型推理框架独立成第二十四册：`book-24-llm-inference-engine/`。
-
 参考项目：
 
 1. `nano-vLLM`：https://github.com/GeeeekExplorer/nano-vllm
@@ -28,3 +24,9 @@ https://github.com/sgl-project/mini-sglang
 
 苏剑林的博客
 https://kexue.fm/category/Big-Data
+
+
+第二次从头到尾先完善：
+1）将所有符合数学公式的，都进行公式化，
+第三次从头到尾：
+1）
