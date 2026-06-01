@@ -28,13 +28,16 @@
 20. 第二十册：大纲完成；第 1-16 章已扩写，正文第一版完成
 21. 第二十一册：大纲完成；第 1-12 章已扩写，正文第一版完成
 22. 第二十二册：大纲完成；第 1-50 章已扩写，正文第一版完成
-23. 第二十三册：大纲完成；第 1-60 章已扩写，正文第一版完成
+23. 第二十三册：大纲完成；第 1-60 章已扩写，正文第一版完成；另有早期 7 个合并版章节文件保留作历史材料或后续清理参考
 24. 第二十四册：大纲完成；第 1-60 章已扩写，正文第一版完成
 25. 大模型工程师面试补充章节：第 60-82 章已扩写，补充篇第一版完成
 
 ## 第二轮精修进度
 
 1. 第一册 `book-01-core-30/chapters/01-基础与语言模型.md`：第 1-5 讲已完成首轮公式可读性修正与 demo 补充；新增批量 cross entropy、学习率对比、AdamW 解耦 weight decay 的 NumPy demo，并已用 `uv run python` 验证可运行。
+2. 第一册 `book-01-core-30/chapters/02-transformer核心.md`：第 7-9 讲和第 11 讲 causal mask 相关内容已完成首轮公式可读性修正与 demo 补充；新增 Embedding/位置编码、scaled dot-product attention、attention 复杂度、mask-before-softmax 的最小 demo，并已用 `uv run --no-sync python` 验证可运行。
+3. 第一册 `book-01-core-30/chapters/02-transformer核心.md`：第 10 讲 Multi-Head Attention 已完成首轮公式可读性修正与 demo 补充；将 `d_model`、`d_head` 等 shape 表达改为 GitHub Markdown 更稳的文本或简化数学符号，新增带 shape 断言和 causal mask 的最小 MHA demo，并已用 `uv run --no-sync python` 验证可运行。
+4. 第一册 `book-01-core-30/chapters/02-transformer核心.md`：第 12 讲 Transformer Block 已完成首轮公式可读性修正与 demo 补充；将 Pre-LN/Post-LN、MLP 和残差公式改为 fenced math 或文本 shape 表达，新增带 shape 断言的 TinyPreLNBlock demo，用于验证 attention/MLP 输出必须和残差分支同形，并已用 `uv run --no-sync python` 验证可运行。
 
 ## 项目完成度
 

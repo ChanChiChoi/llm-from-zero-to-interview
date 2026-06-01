@@ -335,7 +335,9 @@
 2. 第二册进阶 120 讲正文第一版已完成。
 3. 第三册已完成第 1-72 讲，正文第一版完成。
 4. 第四册到第十九册正文第一版已完成。
-5. 下一步继续扩写第二十册《Agent Harness、Coding Agent Runtime 与智能体工程框架》，并同步补充根目录项目路线、题库、练习和术语。
+5. 第二十册到第二十四册正文第一版已完成，覆盖 Agent Harness、Transformer 架构演进、工具协议生态、AI Infra 和 LLM Serving Engine。
+6. `book-llm-engineer/` 补充篇第一版已完成。
+7. 第二轮全系列精修已启动，详见 `SECOND_PASS_REVIEW_PLAN.md`。
 
 ## 质量自查标准
 
@@ -365,7 +367,7 @@
 
 后续扩写时按以下方式推进：
 
-1. 当前优先继续扩写第二十册《Agent Harness、Coding Agent Runtime 与智能体工程框架》，从第 1 章开始。
+1. 当前优先执行第二轮全系列精修，从第一册开始逐章修正公式、变量说明、GitHub Markdown 渲染问题和代码 demo 缺口。
 2. 每写完一讲，同步更新 `PROGRESS.md`。
 3. 每完成一个主题，同步补百科、题库、练习、术语和项目路线中相关内容。
 4. 每完成一个部分，检查 `README.md`、`BOOK_SERIES.md`、`ROADMAP.md`、`PROJECTS.md` 等根目录总控文件是否需要同步。

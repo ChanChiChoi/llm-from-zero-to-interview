@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-第三册已完成项目作品集实战第 51-56 讲，并进入第十一部分“多模态实战”。本文件用于把可写进简历的项目统一整理成路线、产出物和面试表达。
+24 本主书正文第一版已完成，第三册已完成项目作品集和多模态实战。本文件用于把可写进简历的项目统一整理成路线、产出物和面试表达。第二轮精修时，本文件需要继续补齐 Agent Harness、工具协议生态、AI Infra 和推理框架方向的项目任务。
 
 ## 项目 1：miniGPT from scratch
 
@@ -81,3 +81,27 @@
 目标：管理 prompt set、模型版本、自动评估、人工评估、LLM-as-Judge 和 bad case 回归。
 
 简历表达：构建可复现的大模型评估和回归测试工具，支持版本对比、pairwise 评测、硬门禁、评测报告和 bad case 管理。
+
+## 项目 14：Coding Agent Harness Mini Version
+
+目标：实现一个最小 coding agent runtime，支持任务输入、文件读写、命令执行、权限检查、trace 记录和 replay。
+
+简历表达：设计并实现 coding agent harness，包含 planner、tool executor、workspace patch、shell sandbox、permission gate、trace/replay 和失败复盘机制，能够分析 Claude Code、OpenCode、Codex 类系统的工程取舍。
+
+## 项目 15：工具协议与 MCP Server Demo
+
+目标：实现一个最小工具协议 demo，覆盖 tool schema、参数校验、权限边界、MCP server 接入和工具调用评估。
+
+简历表达：构建企业工具调用 demo，支持结构化 function calling、工具注册、参数 schema 校验、权限控制、调用 trace 和错误处理，并设计工具选择、参数正确率、执行成功率和安全性的评估表。
+
+## 项目 16：AI Infra 可观测性与成本 Dashboard
+
+目标：模拟训练和推理平台的核心指标，构建可观测性、容量规划和成本分析 dashboard。
+
+简历表达：设计 AI Infra dashboard，覆盖 GPU 利用率、MFU/HFU、队列等待、训练故障、TTFT、TPOT、tokens/s、KV Cache、P95/P99、错误率和单位 token 成本，并能用指标定位训练和推理瓶颈。
+
+## 项目 17：Mini LLM Serving Engine
+
+目标：从 naive generate loop 升级到支持 continuous batching、KV Cache 管理、prefix cache、流式输出和简单调度的教学版 serving engine。
+
+简历表达：实现 mini LLM serving engine，包含 request queue、prefill/decode 分离、token budget 调度、KV block 管理、流式返回和压测脚本，并对比 naive generate、vLLM/SGLang 思路下的延迟、吞吐和显存 trade-off。
