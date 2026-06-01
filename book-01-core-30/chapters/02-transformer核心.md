@@ -666,6 +666,18 @@ $$
 PE(pos,2i+1)=\cos\left(\frac{pos}{10000^{2i/d_{\text{model}}}}\right)
 $$
 
+为了避免公式里的变量名影响 Markdown 阅读，也可以写成：
+
+$$
+\mathrm{PE}(p,2i)=\sin\left(\frac{p}{10000^{2i/d}}\right)
+$$
+
+$$
+\mathrm{PE}(p,2i+1)=\cos\left(\frac{p}{10000^{2i/d}}\right)
+$$
+
+其中 $p$ 是位置编号，$i$ 是维度对编号，$d$ 是 hidden size。
+
 直觉：不同维度用不同频率的正弦和余弦表示位置。
 
 优点：
@@ -707,6 +719,49 @@ RoPE 是现代 LLM 常见的位置编码方法。
 3. 两个 token 的 attention score 会自然包含相对位置信息。
 
 本讲只需要知道 RoPE 是一种相对位置友好的方法，详细数学后面再讲。
+
+### 用 NumPy 理解 Embedding 和位置编码
+
+下面这个 demo 不依赖 PyTorch，只演示两个核心事实：
+
+1. token embedding 本质是按 token id 查表。
+2. 位置编码可以和 token embedding 相加，让同一个 token 在不同位置有不同输入表示。
+
+```python
+import numpy as np
+
+
+def sinusoidal_position_encoding(seq_len, hidden_size):
+    positions = np.arange(seq_len)[:, None]
+    dims = np.arange(hidden_size)[None, :]
+    angle_rates = 1.0 / (10000 ** (2 * (dims // 2) / hidden_size))
+    angles = positions * angle_rates
+
+    pe = np.zeros((seq_len, hidden_size))
+    pe[:, 0::2] = np.sin(angles[:, 0::2])
+    pe[:, 1::2] = np.cos(angles[:, 1::2])
+    return pe
+
+
+vocab_size = 6
+hidden_size = 4
+input_ids = np.array([1, 2, 1, 3])
+
+np.random.seed(0)
+embedding_table = np.random.normal(size=(vocab_size, hidden_size))
+token_embeddings = embedding_table[input_ids]
+position_embeddings = sinusoidal_position_encoding(seq_len=len(input_ids), hidden_size=hidden_size)
+inputs = token_embeddings + position_embeddings
+
+print("token embeddings shape:", token_embeddings.shape)
+print("position embeddings shape:", position_embeddings.shape)
+print("same token id at pos 0 and 2 has same token embedding:")
+print(token_embeddings[0], token_embeddings[2])
+print("after adding position encoding, representations differ:")
+print(inputs[0], inputs[2])
+```
+
+注意 `input_ids[0]` 和 `input_ids[2]` 都是同一个 token id `1`，查到的 token embedding 完全相同；但加上不同位置编码后，它们进入 Transformer 的输入表示不同。
 
 ### 输出层和 Embedding 权重共享
 
@@ -1257,7 +1312,7 @@ $$
 其中：
 
 $$
-B=\text{batch size},\qquad T=\text{sequence length},\qquad d_{\text{model}}=\text{hidden size}
+B=\mathrm{batch\ size},\qquad T=\mathrm{sequence\ length},\qquad d_{\mathrm{model}}=\mathrm{hidden\ size}
 $$
 
 Self-attention 会通过三个线性变换得到 Q、K、V：
@@ -1277,7 +1332,7 @@ $$
 如果单头 attention 的 head dimension 是 `d_k`，那么：
 
 $$
-W_Q:[d_{\text{model}},d_k],\qquad W_K:[d_{\text{model}},d_k],\qquad W_V:[d_{\text{model}},d_v]
+W_Q:[d_{\mathrm{model}},d_k],\qquad W_K:[d_{\mathrm{model}},d_k],\qquad W_V:[d_{\mathrm{model}},d_v]
 $$
 
 $$
@@ -1312,7 +1367,7 @@ $$
 计算 attention scores：
 
 $$
-\text{scores}=QK^T
+S=QK^T
 $$
 
 shape：
@@ -1326,7 +1381,7 @@ $$
 softmax 后：
 
 $$
-\text{weights}:[B,T,T]
+A:[B,T,T]
 $$
 
 再乘 V：
@@ -1376,8 +1431,10 @@ Q · K: 我想找的东西和你的索引匹配程度
 对于 causal LM，不能看到未来 token。通常会在 softmax 前对未来位置加一个很大的负数：
 
 $$
-\text{scores}=\text{scores}+\text{mask}
+S=S+M
 $$
+
+这里 $S$ 是 attention scores，$M$ 是 mask 矩阵。未来位置通常填一个很大的负数，例如 `-1e9`，softmax 后概率会接近 0。
 
 其中未来位置 mask 为：
 
@@ -1431,6 +1488,56 @@ print(causal_mask)
 ```
 
 mask 形状可以 broadcast 到 `[B, T, T]`。
+
+### 用 NumPy 从零实现 Attention
+
+下面这个 demo 演示 scaled dot-product attention 的完整数据流，包括 softmax、加权求和和 causal mask。
+
+```python
+import numpy as np
+
+
+def softmax(x, axis=-1):
+    x = x - x.max(axis=axis, keepdims=True)
+    exp_x = np.exp(x)
+    return exp_x / exp_x.sum(axis=axis, keepdims=True)
+
+
+def attention(q, k, v, causal=False):
+    # q, k, v: [T, d]
+    d_k = q.shape[-1]
+    scores = q @ k.T / np.sqrt(d_k)  # [T, T]
+
+    if causal:
+        mask = np.triu(np.ones_like(scores), k=1).astype(bool)
+        scores = np.where(mask, -1e9, scores)
+
+    weights = softmax(scores, axis=-1)
+    output = weights @ v
+    return output, weights
+
+
+np.random.seed(0)
+T, d = 4, 3
+x = np.random.normal(size=(T, d))
+wq = np.random.normal(size=(d, d))
+wk = np.random.normal(size=(d, d))
+wv = np.random.normal(size=(d, d))
+
+q = x @ wq
+k = x @ wk
+v = x @ wv
+
+full_output, full_weights = attention(q, k, v, causal=False)
+causal_output, causal_weights = attention(q, k, v, causal=True)
+
+print("full attention weights:")
+print(np.round(full_weights, 3))
+print("causal attention weights:")
+print(np.round(causal_weights, 3))
+```
+
+观察 `causal attention weights` 的右上角：当前位置不能关注未来 token，所以对应概率接近 0。
 
 ### 复杂度分析
 
