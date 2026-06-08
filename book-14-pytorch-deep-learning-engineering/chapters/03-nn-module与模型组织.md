@@ -8,6 +8,14 @@
 
 本章目标是把 `nn.Module` 在工程中的规则讲清楚：如何写 `forward`，什么是 `Parameter`，子模块如何注册，`state_dict` 保存什么，`train()` 和 `eval()` 到底影响什么，模型保存加载应该怎么做，以及如何组织一个可维护的大模型代码结构。
 
+## 0. 本讲资料边界与第二轮精修口径
+
+本讲第二轮精修前，已核对 PyTorch 官方 `nn.Module`、`nn.Parameter`、`register_buffer`、`state_dict`、`load_state_dict`、`ModuleList`、`ModuleDict`、`ParameterList`、`ParameterDict`、`train()` / `eval()`、模型保存加载教程和 `torch.compile` 文档口径。
+
+本章聚焦大模型工程最常用的 Module 组织问题：参数注册、子模块注册、buffer、`state_dict`、保存加载、训练/推理模式、device / dtype 迁移、参数冻结、参数分组、hook、DDP / FSDP 依赖的模块边界，以及最小可运行的 Module 审计 demo。
+
+本章不展开 C++ dispatcher、底层 autograd engine、完整分布式训练实现、FSDP wrap policy 细节、`torch.export` / AOTAutograd 编译器内部机制或生产级 checkpoint shard 格式。这些内容会分别放到分布式训练、profiling、推理部署和 AI Infra 相关章节中讲。
+
 ## 3.1 nn.Module 解决什么问题
 
 先看一个不用 `nn.Module` 的极简线性模型：
@@ -65,6 +73,82 @@ optimizer.step()
 ```text
 nn.Module 是 PyTorch 中组织模型的核心抽象。它不仅封装 forward，还会自动注册 Parameter、子模块和 buffer，并支持递归遍历参数、移动 device、切换 train/eval、保存和加载 state_dict。optimizer、DDP、AMP、checkpoint 基本都依赖 Module 提供的统一结构。
 ```
+
+## 3.1.1 关键机制公式与 Module 调试速查
+
+`nn.Module` 本身不是一个数学层，而是一套工程组织规则。面试和 debug 时，可以把它拆成几条稳定口径。
+
+第一，参数量来自注册参数，而不是来自 Python 变量名。线性层参数量为：
+
+$$
+N = d_{in} d_{out} + d_{out}
+$$
+
+如果 `bias=False`，则只有：
+
+$$
+N = d_{in} d_{out}
+$$
+
+Embedding 表的参数量为：
+
+$$
+N_{emb} = V d
+$$
+
+其中 `V` 是词表大小，`d` 是 hidden size。一个两层 MLP 的参数量常写成：
+
+$$
+N_{mlp} = d_{in} d_h + d_h + d_h d_{out} + d_{out}
+$$
+
+第二，optimizer 更新的是它拿到的 `Parameter`。单个参数的 SGD 更新可以写成：
+
+$$
+\theta_{t+1} = \theta_t - \eta g_t
+$$
+
+$$
+g_t = \frac{\partial L}{\partial \theta_t}
+$$
+
+如果某个 tensor 没有注册成 `Parameter`，或者某个子模块藏在普通 list / dict 中，它即使参与 forward，也不会自动出现在 `model.parameters()` 里，optimizer 通常不会更新它。
+
+第三，`state_dict` 不是保存整个 Python 对象，而是保存注册权重和持久化 buffer：
+
+$$
+S(M) = P(M) \cup B_p(M)
+$$
+
+其中 `P(M)` 表示 module 树上的注册参数，`B_p(M)` 表示 `persistent=True` 的 buffer。普通属性、临时 tensor、`persistent=False` 的 buffer、`forward` 代码和 Python 类定义都不在模型 `state_dict` 里。
+
+第四，参数高效微调或冻结模型时，先看可训练参数比例：
+
+$$
+r = \frac{\sum_{p \in P_{train}} |p|}{\sum_{p \in P_{all}} |p|}
+$$
+
+其中 `|p|` 是一个参数 tensor 的元素个数。LoRA、adapter、prompt tuning 的核心工程检查就是：应该训练的参数是否都被注册、`requires_grad=True`、进入 optimizer，并且保存时能从 `state_dict` 或 `named_parameters()` 中筛出来。
+
+第五，`train()` / `eval()` 改的是模块状态，不是梯度开关：
+
+```python
+model.eval()
+with torch.no_grad():
+    outputs = model(inputs)
+```
+
+`eval()` 递归设置 `training=False`，影响 Dropout、BatchNorm 等层；`no_grad()` / `inference_mode()` 关闭 autograd 记录。验证和推理通常两者都要用。
+
+最小 Module 审计清单：
+
+1. `list(model.named_parameters())` 中是否出现目标层参数。
+2. `list(model.named_buffers())` 中是否出现固定 mask、统计量或位置编码。
+3. `model.state_dict().keys()` 是否包含该保存的权重，是否排除了临时缓存。
+4. `sum(p.numel() for p in model.parameters() if p.requires_grad)` 是否等于 optimizer 参数组里的元素数。
+5. `model.train()` / `model.eval()` 是否递归影响所有子模块。
+6. 保存、加载后同一输入在 eval 模式下输出是否一致。
+7. `strict=False` 加载时的 missing / unexpected keys 是否符合预期，而不是被忽略。
 
 ## 3.2 最小 Module 写法
 
@@ -1341,60 +1425,214 @@ model = torch.compile(model)
 
 对面试来说，关键不是背 compile 参数，而是知道：`nn.Module` 仍然是模型结构入口，`forward` 的 Python 写法会影响编译器是否能稳定捕获计算图。
 
-## 3.27 一个完整小例子：可训练分类模型
+## 3.27 最小可运行 Module 审计 demo
 
-下面是一个相对完整的分类模型例子，包含 module、参数遍历、保存加载和训练/推理模式。
+下面的 demo 把本章最容易踩坑的机制放到一个小例子里：普通 list 不注册子模块、`ModuleList` 会注册子模块、`Parameter` 会进入参数表、buffer 会进入 `state_dict`、`persistent=False` buffer 不保存、`train/eval` 会递归切换、冻结参数后 optimizer 需要重新按可训练参数创建、保存加载后 eval 输出应一致。
 
 ```python
+import tempfile
+from pathlib import Path
+
 import torch
 from torch import nn
 
 
-class Classifier(nn.Module):
-    def __init__(self, input_size, hidden_size, num_classes):
+class ResidualBlock(nn.Module):
+    def __init__(self, hidden_size):
         super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size),
+            nn.LayerNorm(hidden_size),
+            nn.GELU(),
+        )
+
+    def forward(self, x):
+        return x + self.net(x)
+
+
+class BadStack(nn.Module):
+    def __init__(self, hidden_size, num_layers):
+        super().__init__()
+        self.layers = [nn.Linear(hidden_size, hidden_size) for _ in range(num_layers)]
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+
+class GoodStack(nn.Module):
+    def __init__(self, hidden_size, num_layers):
+        super().__init__()
+        self.layers = nn.ModuleList([
+            nn.Linear(hidden_size, hidden_size) for _ in range(num_layers)
+        ])
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+
+class TinyClassifier(nn.Module):
+    def __init__(self, input_size, hidden_size, num_classes, num_blocks):
+        super().__init__()
+        self.input_scale = nn.Parameter(torch.ones(input_size))
+        self.register_buffer("feature_mean", torch.zeros(input_size))
+        self.register_buffer("scratch_mask", torch.ones(1, input_size), persistent=False)
+
         self.encoder = nn.Sequential(
             nn.Linear(input_size, hidden_size),
             nn.LayerNorm(hidden_size),
             nn.GELU(),
-            nn.Dropout(0.1),
-            nn.Linear(hidden_size, hidden_size),
-            nn.GELU(),
         )
+        self.blocks = nn.ModuleList([
+            ResidualBlock(hidden_size) for _ in range(num_blocks)
+        ])
+        self.dropout = nn.Dropout(p=0.2)
         self.head = nn.Linear(hidden_size, num_classes)
 
     def forward(self, x, labels=None):
+        x = (x - self.feature_mean) * self.input_scale
         hidden = self.encoder(x)
+        for block in self.blocks:
+            hidden = block(hidden)
+        hidden = self.dropout(hidden)
         logits = self.head(hidden)
         loss = None
         if labels is not None:
             loss = nn.functional.cross_entropy(logits, labels)
-        return {"loss": loss, "logits": logits}
+        return {"loss": loss, "logits": logits, "hidden": hidden}
 
 
-model = Classifier(input_size=128, hidden_size=256, num_classes=3)
-optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+torch.manual_seed(7)
+
+input_size = 6
+hidden_size = 12
+num_classes = 2
+
+bad_stack = BadStack(hidden_size, num_layers=2)
+good_stack = GoodStack(hidden_size, num_layers=2)
+model = TinyClassifier(input_size, hidden_size, num_classes, num_blocks=2)
+
+bad_stack_param_names = [name for name, _ in bad_stack.named_parameters()]
+good_stack_param_names = [name for name, _ in good_stack.named_parameters()]
+param_names = [name for name, _ in model.named_parameters()]
+buffer_names = [name for name, _ in model.named_buffers()]
+state_keys = list(model.state_dict().keys())
+module_names = [name for name, _ in model.named_modules() if name]
 
 model.train()
-x = torch.randn(32, 128)
-labels = torch.randint(0, 3, (32,))
-outputs = model(x, labels=labels)
-loss = outputs["loss"]
-loss.backward()
-optimizer.step()
-optimizer.zero_grad(set_to_none=True)
+recursive_train = all(module.training for module in model.modules())
+model.eval()
+recursive_eval = not any(module.training for module in model.modules())
 
-torch.save(model.state_dict(), "classifier.pt")
+x = torch.randn(64, input_size)
+labels = (x[:, 0] + 0.5 * x[:, 1] > 0).long()
 
-model2 = Classifier(input_size=128, hidden_size=256, num_classes=3)
-model2.load_state_dict(torch.load("classifier.pt", map_location="cpu"))
+model.train()
+model.dropout.p = 0.0
+optimizer = torch.optim.AdamW(model.parameters(), lr=0.03)
+losses = []
 
-model2.eval()
-with torch.inference_mode():
-    logits = model2(torch.randn(4, 128))["logits"]
+for _ in range(40):
+    optimizer.zero_grad(set_to_none=True)
+    outputs = model(x, labels=labels)
+    loss = outputs["loss"]
+    loss.backward()
+    optimizer.step()
+    losses.append(round(float(loss.detach()), 4))
+
+for name, param in model.named_parameters():
+    if name.startswith("encoder") or name.startswith("blocks"):
+        param.requires_grad = False
+
+trainable_params = [param for param in model.parameters() if param.requires_grad]
+frozen_optimizer = torch.optim.AdamW(trainable_params, lr=0.01)
+num_model_trainable = sum(param.numel() for param in trainable_params)
+num_optimizer_params = sum(
+    param.numel()
+    for group in frozen_optimizer.param_groups
+    for param in group["params"]
+)
+
+with tempfile.TemporaryDirectory() as tmpdir:
+    path = Path(tmpdir) / "tiny_classifier.pt"
+    torch.save(model.state_dict(), path)
+
+    clone = TinyClassifier(input_size, hidden_size, num_classes, num_blocks=2)
+    clone.load_state_dict(torch.load(path, map_location="cpu"))
+
+    model.eval()
+    clone.eval()
+    with torch.inference_mode():
+        same_after_load = torch.allclose(
+            model(x)["logits"],
+            clone(x)["logits"],
+            atol=1e-6,
+        )
+
+partial_state = dict(model.state_dict())
+partial_state.pop("head.weight")
+partial_state.pop("head.bias")
+fresh = TinyClassifier(input_size, hidden_size, num_classes, num_blocks=2)
+missing, unexpected = fresh.load_state_dict(partial_state, strict=False)
+
+report = {
+    "bad_stack_param_names": bad_stack_param_names,
+    "good_stack_param_count": len(good_stack_param_names),
+    "module_count": len(module_names),
+    "has_input_scale": "input_scale" in param_names,
+    "buffer_names": buffer_names,
+    "state_has_feature_mean": "feature_mean" in state_keys,
+    "state_has_scratch_mask": "scratch_mask" in state_keys,
+    "loss_first_last": (losses[0], losses[-1]),
+    "trainable_after_freeze": num_model_trainable,
+    "optimizer_param_count": num_optimizer_params,
+    "missing_keys": sorted(missing),
+    "unexpected_keys": unexpected,
+}
+
+checks = {
+    "bad_stack_unregistered": len(bad_stack_param_names) == 0,
+    "modulelist_registered": len(good_stack_param_names) == 4,
+    "parameter_registered": "input_scale" in param_names,
+    "buffer_registered": "feature_mean" in buffer_names,
+    "buffer_saved": "feature_mean" in state_keys,
+    "nonpersistent_buffer_skipped": "scratch_mask" not in state_keys,
+    "train_eval_recursive": recursive_train and recursive_eval,
+    "loss_decreased": losses[-1] < losses[0],
+    "optimizer_matches_trainable": num_model_trainable == num_optimizer_params,
+    "strict_false_reports_missing": (
+        sorted(missing) == ["head.bias", "head.weight"] and unexpected == []
+    ),
+    "load_roundtrip_same_logits": same_after_load,
+}
+
+print("module audit report:")
+for key, value in report.items():
+    print(f"{key}: {value}")
+
+print("checks:")
+for key, value in checks.items():
+    print(f"{key}: {value}")
+
+assert all(checks.values())
 ```
 
-这个例子覆盖了最常见工程路径：定义模型、训练、保存、加载、推理。
+如果这个 demo 在有 PyTorch 的环境里运行，应该看到：
+
+1. `BadStack` 的参数名为空，说明普通 list 没有注册子模块。
+2. `GoodStack` 有 4 个参数 tensor，来自两个 Linear 的 weight 和 bias。
+3. `input_scale` 出现在 `named_parameters()` 中。
+4. `feature_mean` 出现在 buffer 和 `state_dict` 中。
+5. `scratch_mask` 是非持久化 buffer，不出现在 `state_dict` 中。
+6. `train()` / `eval()` 递归切换所有子模块。
+7. 冻结后 optimizer 参数量和可训练参数量一致。
+8. 保存加载后 eval 模式下 logits 一致。
+9. `strict=False` 只报告有意删除的 `head.weight` 和 `head.bias`。
+
+这个例子的重点不是分类任务本身，而是建立 Module 工程审计习惯：每次遇到“参数没更新、checkpoint 加载不对、eval 行为异常、LoRA 参数没保存”这类问题，先从注册树、`state_dict`、`requires_grad` 和 optimizer 参数组查起。
 
 ## 3.28 面试高频问题
 

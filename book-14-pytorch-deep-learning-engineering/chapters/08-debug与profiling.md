@@ -4,6 +4,14 @@
 
 本章不追求列出所有 PyTorch 调试工具，而是建立一套优先级清楚的排查方法：先确认数据和 shape，再确认 loss 和梯度，再确认数值稳定，再看显存，再看性能瓶颈。很多时候，系统化排查比背 API 更重要。
 
+## 0. 本讲资料边界与第二轮精修口径
+
+本讲第二轮精修前，已核对 PyTorch 官方 `torch.autograd.detect_anomaly` / `set_detect_anomaly`、CUDA semantics、CUDA memory management、`torch.cuda.memory_allocated` / `memory_reserved`、`torch.cuda.synchronize`、`torch.profiler`、PyTorch profiler recipe、Performance Tuning Guide 和 DataLoader 相关文档口径。
+
+本章聚焦 PyTorch 训练调试和性能定位中最常见的问题：shape / dtype / device、loss 与 label 对齐、NaN / Inf、梯度为 None 或异常、forward hook、OOM、DataLoader 瓶颈、CPU-GPU 拷贝、CUDA 异步计时、`torch.profiler` 基础用法、分布式日志和最小可复现 bug。
+
+本章不展开 Nsight Systems / Nsight Compute、CUDA kernel 级优化、`torch.compile` / Inductor profiler、NCCL 深度 profiling、生产级 observability 平台、分布式 trace 聚合或复杂性能建模。这些内容会在 AI Infra、推理框架和性能优化章节中继续展开。
+
 ## 8.1 Debug 的基本原则
 
 遇到训练问题时，不要一上来改模型结构或调学习率。更稳的顺序是：
@@ -23,6 +31,73 @@
 ```text
 我 debug 训练问题时会先缩小范围：确认数据样本和 label 是否正确，再检查 tensor 的 shape、dtype、device，然后看 loss 是否依赖参数、梯度是否为 None 或 NaN，最后再看优化器、学习率、混合精度、显存和分布式通信。不要一开始就盲目改模型或调参。
 ```
+
+## 8.1.1 关键公式与 debug/profiling 速查
+
+第一，调试一个 tensor 时不要只看数值，还要看元信息：
+
+```math
+m(X)=(\mathrm{shape}(X),\mathrm{dtype}(X),\mathrm{device}(X),\mathrm{requires\_grad}(X),\mathrm{stride}(X))
+```
+
+shape / dtype / device 错误往往比模型结构错误更常见。
+
+第二，causal LM loss 展平前后必须满足：
+
+```math
+N_{\mathrm{logit}} = B(T-1),\qquad N_{\mathrm{label}} = B(T-1)
+```
+
+也就是 `shift_logits.reshape(-1, V)` 的第 0 维必须和 `shift_labels.reshape(-1)` 的长度一致。
+
+第三，非有限值检查可以抽象为：
+
+```math
+I_{\mathrm{finite}}(X)=\prod_i I(|x_i|<\infty)
+```
+
+如果 logits、loss、grad 或参数中任一关键张量 `I_finite=0`，应先定位非有限值第一次出现的位置，再调学习率或改模型。
+
+第四，梯度检查常看每个参数的梯度范数：
+
+```math
+G_l=\|\nabla_{\theta_l} L\|_2
+```
+
+`G_l=None`、`G_l=0`、`G_l` 非有限或异常大，分别对应断图、无信号、数值错误或梯度爆炸等不同问题。
+
+第五，OOM 要区分峰值过高和持续增长：
+
+```math
+\Delta M_t=M_t-M_{t-1}
+```
+
+如果每步结束后 `M_t` 持续上升，常见原因是保存了带计算图的 tensor、验证没关梯度或评估缓存过多输出；如果只有峰值超限，常见方向是 batch、sequence length、activation、optimizer state 和临时 workspace。
+
+第六，吞吐可以粗略写成：
+
+```math
+R_{\mathrm{tok/s}}=\frac{B T}{t_{\mathrm{step}}}
+```
+
+其中 `B` 是 batch size，`T` 是序列长度，`t_step` 是 step 耗时。优化前要先区分数据加载、拷贝、forward、backward、optimizer 和通信分别占多少。
+
+第七，CUDA 计时需要同步：
+
+```math
+t_{\mathrm{cuda}}=t_{\mathrm{end\ after\ sync}}-t_{\mathrm{start\ after\ sync}}
+```
+
+因为 CUDA kernel 默认异步执行，不同步时 Python 侧计时可能只测到 launch 开销。
+
+第八，profiler 的核心输出是按算子聚合的时间和内存：
+
+```math
+T_{\mathrm{op}}=\sum_k t_{\mathrm{op},k},\qquad
+M_{\mathrm{op}}=\sum_k m_{\mathrm{op},k}
+```
+
+真正要看的是瓶颈归因：DataLoader、CPU-GPU copy、forward、backward、optimizer、通信，还是少数高频小算子。
 
 ## 8.2 打印 tensor 元信息
 
@@ -593,7 +668,182 @@ loss.backward()
 
 如果最小例子不复现，说明问题可能来自数据、分布式、混合精度、DataLoader 或训练循环外围逻辑。
 
-## 8.19 面试官会怎么问
+## 8.19 最小可运行 debug/profiling 审计 demo
+
+下面这个 demo 在 CPU 上即可运行。它把本章的核心检查点串起来：tensor 元信息、causal LM shift loss 对齐、finite 检查、forward hook、梯度范数、optimizer 参数覆盖、简单 step 计时，以及可选的 `torch.profiler` 入口。
+
+当前机器如果 CUDA driver 不匹配，`torch.profiler` 可能产生底层驱动探测日志。为了让章节 demo 输出稳定，下面默认不启动 profiler；需要真实 profiler 时，把环境变量 `RUN_TORCH_PROFILER=1` 打开即可。
+
+```python
+import os
+import time
+import warnings
+
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
+warnings.filterwarnings("ignore", message="CUDA initialization.*")
+
+import torch
+import torch.nn.functional as F
+from torch import nn
+
+
+def debug_tensor(name, x):
+    return {
+        "name": name,
+        "shape": tuple(x.shape),
+        "dtype": str(x.dtype).replace("torch.", ""),
+        "device": x.device.type,
+        "requires_grad": bool(x.requires_grad),
+        "contiguous": bool(x.is_contiguous()),
+    }
+
+
+def finite_status(name, x):
+    finite = torch.isfinite(x)
+    return {
+        "name": name,
+        "all_finite": bool(finite.all()),
+        "nan": bool(torch.isnan(x).any()),
+        "inf": bool(torch.isinf(x).any()),
+    }
+
+
+class TinyLM(nn.Module):
+    def __init__(self, vocab_size=16, hidden_size=8):
+        super().__init__()
+        self.embed = nn.Embedding(vocab_size, hidden_size)
+        self.norm = nn.LayerNorm(hidden_size)
+        self.head = nn.Linear(hidden_size, vocab_size)
+
+    def forward(self, input_ids):
+        hidden = self.norm(self.embed(input_ids))
+        return self.head(hidden)
+
+
+torch.manual_seed(0)
+model = TinyLM()
+optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+batch = {
+    "input_ids": torch.tensor([[1, 2, 3, 4], [2, 3, 4, 0]], dtype=torch.long),
+    "labels": torch.tensor([[1, 2, 3, 4], [2, 3, 4, -100]], dtype=torch.long),
+}
+activation_shapes = {}
+
+
+def hook(module, inputs, output):
+    activation_shapes["norm"] = tuple(output.shape)
+
+
+handle = model.norm.register_forward_hook(hook)
+optimizer.zero_grad(set_to_none=True)
+logits = model(batch["input_ids"])
+shift_logits = logits[:, :-1, :]
+shift_labels = batch["labels"][:, 1:]
+loss = F.cross_entropy(
+    shift_logits.reshape(-1, shift_logits.size(-1)),
+    shift_labels.reshape(-1),
+    ignore_index=-100,
+)
+loss.backward()
+grad_norms = {
+    name: round(float(param.grad.norm()), 4)
+    for name, param in model.named_parameters()
+    if param.grad is not None
+}
+optimizer_param_ids = {id(param) for group in optimizer.param_groups for param in group["params"]}
+all_trainable_in_optimizer = all(
+    id(param) in optimizer_param_ids
+    for param in model.parameters()
+    if param.requires_grad
+)
+handle.remove()
+
+bad_logits = torch.tensor([[0.0, float("inf")], [float("nan"), 1.0]])
+nonfinite_report = finite_status("bad_logits", bad_logits)
+
+timing_start = time.perf_counter()
+for _ in range(5):
+    timed_logits = model(batch["input_ids"])
+    timed_loss = timed_logits.sum()
+    timed_loss.backward()
+    model.zero_grad(set_to_none=True)
+elapsed_ms = round((time.perf_counter() - timing_start) * 1000, 3)
+
+profiler_enabled = os.environ.get("RUN_TORCH_PROFILER") == "1"
+profiler_summary = {"enabled": profiler_enabled, "event_count_positive": False, "has_addmm": False}
+if profiler_enabled:
+    with torch.profiler.profile(
+        activities=[torch.profiler.ProfilerActivity.CPU],
+        record_shapes=True,
+        profile_memory=True,
+    ) as prof:
+        prof_logits = model(batch["input_ids"])
+        prof_loss = prof_logits.sum()
+        prof_loss.backward()
+    events = prof.key_averages()
+    profiler_summary = {
+        "enabled": True,
+        "event_count_positive": len(events) > 0,
+        "has_addmm": any("addmm" in event.key for event in events),
+    }
+
+valid_label_count = int((shift_labels != -100).sum())
+metadata = [
+    debug_tensor("input_ids", batch["input_ids"]),
+    debug_tensor("logits", logits),
+    debug_tensor("shift_logits", shift_logits),
+    debug_tensor("shift_labels", shift_labels),
+]
+checks = {
+    "loss_is_scalar": loss.ndim == 0,
+    "shift_flat_match": shift_logits.reshape(-1, shift_logits.size(-1)).shape[0]
+    == shift_labels.reshape(-1).shape[0],
+    "valid_labels_exist": valid_label_count > 0,
+    "loss_finite": bool(torch.isfinite(loss)),
+    "grads_present": set(grad_norms)
+    == {"embed.weight", "norm.weight", "norm.bias", "head.weight", "head.bias"},
+    "optimizer_covers_trainable": all_trainable_in_optimizer,
+    "hook_removed": len(model.norm._forward_hooks) == 0,
+    "detects_nonfinite": not nonfinite_report["all_finite"],
+    "timing_positive": elapsed_ms > 0,
+}
+
+print("metadata=", metadata)
+print("valid_label_count=", valid_label_count)
+print("loss=", round(float(loss.detach()), 4))
+print("activation_shapes=", activation_shapes)
+print("grad_norms=", grad_norms)
+print("nonfinite_report=", nonfinite_report)
+print("elapsed_ms_positive=", elapsed_ms > 0)
+print("profiler_summary=", profiler_summary)
+print("checks=", checks)
+```
+
+期望输出：
+
+```text
+metadata= [{'name': 'input_ids', 'shape': (2, 4), 'dtype': 'int64', 'device': 'cpu', 'requires_grad': False, 'contiguous': True}, {'name': 'logits', 'shape': (2, 4, 16), 'dtype': 'float32', 'device': 'cpu', 'requires_grad': True, 'contiguous': True}, {'name': 'shift_logits', 'shape': (2, 3, 16), 'dtype': 'float32', 'device': 'cpu', 'requires_grad': True, 'contiguous': False}, {'name': 'shift_labels', 'shape': (2, 3), 'dtype': 'int64', 'device': 'cpu', 'requires_grad': False, 'contiguous': False}]
+valid_label_count= 5
+loss= 3.1516
+activation_shapes= {'norm': (2, 4, 8)}
+grad_norms= {'embed.weight': 0.2852, 'norm.weight': 0.2617, 'norm.bias': 0.3396, 'head.weight': 1.7006, 'head.bias': 0.5929}
+nonfinite_report= {'name': 'bad_logits', 'all_finite': False, 'nan': True, 'inf': True}
+elapsed_ms_positive= True
+profiler_summary= {'enabled': False, 'event_count_positive': False, 'has_addmm': False}
+checks= {'loss_is_scalar': True, 'shift_flat_match': True, 'valid_labels_exist': True, 'loss_finite': True, 'grads_present': True, 'optimizer_covers_trainable': True, 'hook_removed': True, 'detects_nonfinite': True, 'timing_positive': True}
+```
+
+这段输出要检查几件事：
+
+1. `shift_logits` 和 `shift_labels` 第一维展平后能对齐，并且有效 label 数不是 0。
+2. `loss_finite=True` 说明当前 batch 的 loss 没有 NaN / Inf。
+3. `grad_norms` 覆盖了所有可训练参数，说明 loss 确实连到了参数。
+4. `nonfinite_report` 能发现手工构造的 NaN / Inf，说明 finite 检查函数有效。
+5. `hook_removed=True` 避免 forward hook 长期挂在模型上。
+6. `elapsed_ms_positive=True` 说明至少可以做基础 step timing；真实 GPU timing 还需要 CUDA synchronize。
+7. `profiler_summary.enabled=False` 是默认稳定运行模式；需要真实 profiler 时打开环境变量再看 CPU 算子事件。
+
+## 8.20 面试官会怎么问
 
 ### 问题一：loss 不下降你怎么排查？
 
@@ -635,7 +885,7 @@ loss.backward()
 torch.profiler 可以统计 CPU 和 CUDA 算子的耗时、调用次数、shape 和显存信息，帮助定位耗时最多的算子、CPU/GPU 时间分布、DataLoader 或拷贝瓶颈。但 profiler 有额外开销，通常只在少量 step 上开启。
 ```
 
-## 8.20 常见误区
+## 8.21 常见误区
 
 1. 一看到 loss 不下降就改模型结构，不先查数据和 loss。
 2. 只打印 loss，不打印 shape、dtype、device。
@@ -646,7 +896,7 @@ torch.profiler 可以统计 CPU 和 CUDA 算子的耗时、调用次数、shape 
 7. 分布式日志不带 rank，导致错误信息无法定位。
 8. 用 `find_unused_parameters=True` 掩盖模型分支 bug。
 
-## 8.21 小练习
+## 8.22 小练习
 
 1. 写一个 `debug_tensor` 函数，打印 shape、dtype、device 和 contiguous 状态。
 2. 构造一个 shape mismatch 的 loss 例子，并修复它。
@@ -658,7 +908,7 @@ torch.profiler 可以统计 CPU 和 CUDA 算子的耗时、调用次数、shape 
 8. 写一份 OOM 排查 checklist。
 9. 写一份 loss 不下降排查 checklist。
 
-## 8.22 本章总结
+## 8.23 本章总结
 
 Debug 和 profiling 的核心是把问题分层。先确认数据、shape、dtype、device，再确认 loss、梯度和参数更新，然后看 NaN、OOM 和分布式同步，最后才做性能 profiling。
 

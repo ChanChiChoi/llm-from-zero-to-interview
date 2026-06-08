@@ -4,6 +4,18 @@
 
 面试重点：AI Safety 不是只做模型训练和红队测试，最终必须落实到文档、流程、责任、发布门禁、使用边界和持续监控。Model card 和 system card 是把技术评估转成治理沟通的重要工具。
 
+## 0. 本讲资料边界与第二轮精修口径
+
+本章第二轮精修时，重点核对了 Datasheets for Datasets、Model Cards for Model Reporting、NIST AI Risk Management Framework、NIST Generative AI Profile、OpenAI System Cards / Preparedness Framework、Anthropic Responsible Scaling Policy、EU AI Act 风险分级和透明度要求，以及前序 safety eval、red teaming、privacy、unlearning、tool safety 和 data governance 章节。
+
+本章采用工程治理和面试表达口径：
+
+1. policy 只写抽象类别、期望动作、责任边界和评估要求，不列可复用违规样例或规避策略。
+2. model card / system card 强调能力、限制、风险、评估覆盖、缓解措施和版本责任，不写成营销材料。
+3. governance 关注发布门禁、审批、审计、监控、事故响应和持续更新，不把“有文档”当成治理完成。
+4. responsible scaling 只讲“能力越强、评估与控制越严格”的原则，不照搬单一机构条款作为通用法律结论。
+5. 合规内容只作技术团队面试和工程治理背景，不替代法律意见。
+
 ## 本章目标
 
 学完本章，你要能回答：
@@ -519,6 +531,90 @@ Anthropic RSP 中的 AI Safety Levels 是一种公开示例。面试中不必背
 
 System card 要把模型外部系统也写清楚。
 
+### 13.1 关键公式与治理门禁指标速查
+
+把一次模型发布审计写成：
+
+$$
+g_i=(m_i,s_i,p_i,e_i,r_i,a_i,o_i)
+$$
+
+其中 `m_i` 是 model card，`s_i` 是 system card，`p_i` 是 policy 覆盖，`e_i` 是评估结果，`r_i` 是风险问题，`a_i` 是审批记录，`o_i` 是上线后监控和事故响应准备状态。
+
+model card 完整度：
+
+$$
+C_{model}=
+\frac{1}{|M|}\sum_{j\in M} I[c_j=1]
+$$
+
+其中 `M` 是必填章节集合，`c_j=1` 表示第 `j` 个章节有具体内容和证据，而不是空话。
+
+system card 完整度：
+
+$$
+C_{system}=
+\frac{1}{|S|}\sum_{j\in S} I[s_j=1]
+$$
+
+policy 覆盖率：
+
+$$
+C_{policy}=
+\frac{|P_{covered}|}{|P_{required}|}
+$$
+
+评估切片覆盖率：
+
+$$
+C_{eval}=
+\frac{1}{|E|}\sum_{k\in E} I[e_k=1]
+$$
+
+未解决风险可以按严重度加权：
+
+$$
+R_{open}=
+\frac{\sum_j w_j I[u_j=1]}{\sum_j w_j}
+$$
+
+其中 `u_j=1` 表示风险问题未解决，`w_j` 是严重度权重。P0 / P1 问题通常不应该被平均指标掩盖。
+
+高风险缓解覆盖率：
+
+$$
+C_{mit}=
+\frac{\sum_j I[h_j=1\land b_j=1]}
+{\sum_j I[h_j=1]}
+$$
+
+其中 `h_j=1` 表示高风险问题，`b_j=1` 表示已经修复、限制访问、加监控或有明确缓解。
+
+审批覆盖率：
+
+$$
+C_{approve}=
+\frac{|A_{approved}|}{|A_{required}|}
+$$
+
+治理发布门禁可以写成：
+
+$$
+G_{gov}=
+I[
+C_{model}\ge\tau_m
+\land C_{system}\ge\tau_s
+\land C_{policy}\ge\tau_p
+\land C_{eval}\ge\tau_e
+\land R_{open}\le\tau_r
+\land C_{mit}\ge\tau_h
+\land C_{approve}\ge\tau_a
+\land G_{release}=1
+]
+$$
+
+其中 `G_release` 是发布硬检查，例如 P0 未解决数为 0、隐私门禁通过、工具权限通过、监控和回滚就绪。面试中要强调：`G_gov=1` 不是说模型没有风险，而是当前证据、文档、责任和控制条件达到可发布阈值。
+
 ## 14. 真实项目中的坑
 
 ### 14.1 只写优点，不写边界
@@ -660,7 +756,174 @@ Model card 是模型发布时的说明文档，记录模型基本信息、预期
 
 纠正：门禁应在评估前定义，避免被结果和业务压力影响。
 
-## 19. 小练习
+## 19. 最小可运行治理审计 demo
+
+下面的 demo 不涉及真实机构政策，只模拟一个发布审计表：检查 model card / system card 是否完整，policy 是否覆盖关键风险，评估切片是否充分，未解决问题是否按严重度加权，高风险问题是否缓解，审批和发布硬检查是否达标。
+
+```python
+def ratio(values):
+    return round(sum(1 for value in values if value) / len(values), 3)
+
+
+model_card_sections = {
+    "overview": True,
+    "intended_use": True,
+    "out_of_scope": True,
+    "training_data": True,
+    "evaluation": True,
+    "safety_eval": True,
+    "limitations": True,
+    "ethical_risks": False,
+    "mitigations": True,
+    "deployment_conditions": False,
+    "monitoring_feedback": True,
+    "version_history": True,
+}
+
+system_card_sections = {
+    "system_overview": True,
+    "model_components": True,
+    "tool_rag_components": True,
+    "user_permissions": True,
+    "safety_policies": True,
+    "red_teaming": True,
+    "privacy_data_handling": True,
+    "known_risks": True,
+    "guardrails": True,
+    "release_restrictions": False,
+    "monitoring_incident_response": True,
+    "update_policy": False,
+}
+
+required_policy_categories = {
+    "harmful_content",
+    "privacy",
+    "prompt_injection",
+    "tool_misuse",
+    "high_risk_advice",
+    "copyright",
+    "children_safety",
+    "appeals",
+}
+covered_policy_categories = {
+    "harmful_content",
+    "privacy",
+    "prompt_injection",
+    "tool_misuse",
+    "high_risk_advice",
+    "copyright",
+}
+
+eval_slices = {
+    "core_capability": True,
+    "safety": True,
+    "privacy": False,
+    "red_team": True,
+    "tool_use": True,
+    "rag": True,
+    "multilingual": False,
+    "accessibility": False,
+}
+
+risk_issues = [
+    {"id": "jailbreak_regression", "severity": "P1", "weight": 4, "resolved": True, "mitigated": True},
+    {"id": "privacy_logging_gap", "severity": "P1", "weight": 4, "resolved": False, "mitigated": False},
+    {"id": "tool_permission_edge", "severity": "P2", "weight": 2, "resolved": False, "mitigated": True},
+    {"id": "multilingual_overrefusal", "severity": "P2", "weight": 2, "resolved": False, "mitigated": False},
+    {"id": "model_card_gap", "severity": "P3", "weight": 1, "resolved": False, "mitigated": False},
+]
+
+release_checks = {
+    "core_quality_not_regressed": True,
+    "p0_unresolved_zero": True,
+    "p1_mitigated": False,
+    "privacy_gate": False,
+    "tool_permission_gate": True,
+    "monitoring_ready": True,
+    "rollback_ready": True,
+    "model_card_ready": False,
+    "system_card_ready": False,
+    "approval_quorum": True,
+}
+
+approval_votes = {
+    "model_owner": True,
+    "safety_owner": True,
+    "privacy_owner": False,
+    "legal_owner": True,
+    "incident_owner": True,
+}
+
+model_card_completion = ratio(model_card_sections.values())
+system_card_completion = ratio(system_card_sections.values())
+policy_coverage = round(len(covered_policy_categories) / len(required_policy_categories), 3)
+eval_coverage = ratio(eval_slices.values())
+unresolved_weight = sum(issue["weight"] for issue in risk_issues if not issue["resolved"])
+total_weight = sum(issue["weight"] for issue in risk_issues)
+severity_weighted_unresolved = round(unresolved_weight / total_weight, 3)
+high_risk = [issue for issue in risk_issues if issue["severity"] in {"P0", "P1"}]
+high_risk_mitigation = round(sum(issue["mitigated"] for issue in high_risk) / len(high_risk), 3)
+approval_coverage = ratio(approval_votes.values())
+release_gate_pass = all(release_checks.values())
+
+metrics = {
+    "model_card_completion": model_card_completion,
+    "system_card_completion": system_card_completion,
+    "policy_coverage": policy_coverage,
+    "eval_coverage": eval_coverage,
+    "severity_weighted_unresolved": severity_weighted_unresolved,
+    "high_risk_mitigation": high_risk_mitigation,
+    "approval_coverage": approval_coverage,
+}
+missing_model_card = [name for name, ok in model_card_sections.items() if not ok]
+missing_system_card = [name for name, ok in system_card_sections.items() if not ok]
+missing_policy = sorted(required_policy_categories - covered_policy_categories)
+missing_eval = [name for name, ok in eval_slices.items() if not ok]
+unresolved_issues = [issue["id"] for issue in risk_issues if not issue["resolved"]]
+failed_release_checks = [name for name, ok in release_checks.items() if not ok]
+governance_gates = {
+    "model_card": model_card_completion >= 0.90,
+    "system_card": system_card_completion >= 0.90,
+    "policy": policy_coverage >= 0.85,
+    "eval": eval_coverage >= 0.80,
+    "risk": severity_weighted_unresolved <= 0.20,
+    "high_risk": high_risk_mitigation >= 1.0,
+    "approval": approval_coverage >= 0.80,
+    "release_checks": release_gate_pass,
+}
+
+print("metrics=", metrics)
+print("missing_model_card=", missing_model_card)
+print("missing_system_card=", missing_system_card)
+print("missing_policy=", missing_policy)
+print("missing_eval=", missing_eval)
+print("unresolved_issues=", unresolved_issues)
+print("failed_release_checks=", failed_release_checks)
+print("governance_gates=", governance_gates)
+print("release_ready=", all(governance_gates.values()))
+```
+
+运行后可以看到：
+
+```text
+metrics= {'model_card_completion': 0.833, 'system_card_completion': 0.833, 'policy_coverage': 0.75, 'eval_coverage': 0.625, 'severity_weighted_unresolved': 0.692, 'high_risk_mitigation': 0.5, 'approval_coverage': 0.8}
+missing_model_card= ['ethical_risks', 'deployment_conditions']
+missing_system_card= ['release_restrictions', 'update_policy']
+missing_policy= ['appeals', 'children_safety']
+missing_eval= ['privacy', 'multilingual', 'accessibility']
+unresolved_issues= ['privacy_logging_gap', 'tool_permission_edge', 'multilingual_overrefusal', 'model_card_gap']
+failed_release_checks= ['p1_mitigated', 'privacy_gate', 'model_card_ready', 'system_card_ready']
+governance_gates= {'model_card': False, 'system_card': False, 'policy': False, 'eval': False, 'risk': False, 'high_risk': False, 'approval': True, 'release_checks': False}
+release_ready= False
+```
+
+这个 demo 的关键观察：
+
+1. 审批覆盖达标不等于可以发布；文档、评估、风险缓解和硬门禁仍可能失败。
+2. model card / system card 的缺口要能映射到真实证据，例如缺少部署条件或更新策略。
+3. severity-weighted unresolved risk 可以防止平均指标掩盖 P1 问题。
+
+## 20. 小练习
 
 ### 练习 1
 
@@ -688,7 +951,7 @@ Model card 是模型发布时的说明文档，记录模型基本信息、预期
 
 写一段好的风险披露，说明模型在医疗建议场景的边界。
 
-## 20. 本章总结
+## 21. 本章总结
 
 Policy 定义规则，governance 负责把规则落地。
 

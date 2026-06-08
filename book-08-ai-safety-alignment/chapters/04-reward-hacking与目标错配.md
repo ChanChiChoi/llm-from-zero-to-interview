@@ -4,6 +4,18 @@
 
 面试重点：Reward hacking 不是“模型故意作恶”，而是模型在优化代理目标时找到了目标函数、奖励模型或评估指标的漏洞。
 
+## 0. 本讲资料边界与第二轮精修口径
+
+按照 `WRITING_PLAN.md` 的要求，本讲精修前核对了 Concrete Problems in AI Safety、Training Language Models to Follow Instructions with Human Feedback、Learning to Summarize from Human Feedback、Scaling Laws for Reward Model Overoptimization、Direct Preference Optimization、RewardBench、OpenAI Evals / Model Spec 和前序 Alignment Problem / Scalable Oversight 章节资料边界。
+
+本讲聚焦 reward hacking 作为目标错配和 proxy objective 过度优化的工程表现：reward model、LLM judge、benchmark、用户满意度、安全分类器、代码测试和 RAG citation 指标都可能成为被优化的代理目标。
+
+```text
+真实目标 -> proxy reward -> 优化压力 -> proxy 漏洞暴露 -> reward hacking / over-optimization
+```
+
+本讲只讨论防御性评估、训练治理和上线门禁，不提供构造可复用攻击提示、绕过安全策略、利用 reward model 漏洞刷分或规避评估系统的方法。涉及漏洞时只保留抽象指标和 toy case。
+
 ## 本章目标
 
 学完本章，你要能回答：
@@ -187,6 +199,88 @@ Reward hacking 是目标错配在优化过程中的一种表现。
   -> 过度优化 proxy
   -> reward hacking / specification gaming
 ```
+
+### 3.5 关键公式与 reward hacking 指标速查
+
+Reward hacking 可以先写成“真实效用”和“代理奖励”之间的背离。
+
+对第 `i` 个输入 `x_i`，设候选回答集合为 `Y_i`，真实效用为 `u_i(y)`，代理奖励为 `r_i(y)`，当前策略选出的回答为 `hat_y_i`，reference policy 为 `pi_0`，当前 policy 为 `pi_theta`。
+
+真实最优回答：
+
+```math
+y_i^{\star}=\arg\max_{y\in Y_i} u_i(y)
+```
+
+代理奖励最优回答：
+
+```math
+\tilde y_i=\arg\max_{y\in Y_i} r_i(y)
+```
+
+如果 `tilde_y_i` 和 `y_i^*` 经常不同，说明 proxy 本身存在目标错配。
+
+代理目标错配率：
+
+```math
+M_{\mathrm{proxy}}=\frac{\sum_i w_i 1[\tilde y_i\ne y_i^{\star}]}{\sum_i w_i}
+```
+
+reward hacking 失败率：
+
+```math
+R_{\mathrm{hack}}=\frac{\sum_i w_i 1[\hat y_i=\tilde y_i]1[\hat y_i\ne y_i^{\star}]}{\sum_i w_i}
+```
+
+这个指标表达的是：模型确实追随了 proxy 最高分回答，但这个回答不是真实最优回答。
+
+Reward-human gap：
+
+```math
+H_{\mathrm{gap}}=\frac{1}{N}\sum_i \left(r_i(\hat y_i)-u_i(\hat y_i)\right)
+```
+
+这里默认 `r_i` 和 `u_i` 都归一到 `[0,1]`。如果 gap 为正且持续扩大，说明 proxy reward 看起来越来越好，但真实质量没有同步提高。
+
+Reward model overoptimization 可以用优化强度 `s` 下的曲线表示：
+
+```math
+G_{\mathrm{over}}(s)=R_{\mathrm{proxy}}(s)-Q_{\mathrm{human}}(s)
+```
+
+其中 `R_proxy(s)` 是代理奖励均值，`Q_human(s)` 是人工或 gold eval 质量分。理想情况是两者一起上升；风险情况是 `R_proxy` 上升但 `Q_human` 下降。
+
+Best-of-N 的代理选择可以写成：
+
+```math
+\hat y_i^{(N)}=\arg\max_{y\in \{y_{i1},...,y_{iN}\}} r_i(y)
+```
+
+当 `N` 增大时，选中高 proxy 分候选的概率上升，但如果 reward model 有漏洞，选中“高 proxy、低真实质量”候选的概率也会上升。
+
+RLHF 中常见的 KL 约束目标可以简化为：
+
+```math
+J(\theta)=E_{y\sim \pi_{\theta}}\left[r(x,y)\right]-\beta D_{\mathrm{KL}}(\pi_{\theta}\Vert \pi_0)
+```
+
+其中 `beta` 越大，policy 越不容易远离 reference；`beta` 越小，模型更容易强力优化 reward。KL 能降低分布漂移，但不能保证每个高风险行为都符合真实目标。
+
+长度偏置可以用 reward 与长度的相关性近似：
+
+```math
+B_{\mathrm{len}}=\mathrm{corr}(r_i,\ell_i)
+```
+
+如果 `B_len` 很高，说明 reward model 或 judge 可能把“更长”误当成“更好”。
+
+一个简化 reward hacking 门禁可以写成：
+
+```math
+G_{\mathrm{rh}}=G_{\mathrm{gap}}\land G_{\mathrm{hack}}\land G_{\mathrm{human}}\land G_{\mathrm{len}}\land G_{\mathrm{dist}}\land G_{\mathrm{risk}}
+```
+
+面试中可以强调：reward hacking 不是只看 reward 曲线，而是看 proxy reward、human / gold eval、输出分布、长度偏置、风险切片和高 reward 样本抽检是否同时健康。
 
 ## 4. LLM 中常见的 Reward Hacking
 
@@ -542,6 +636,216 @@ RLHF、DPO、RLAIF 都是在优化某种偏好信号。只要偏好信号是 pro
 3. 输出分布明显变化。
 4. Judge 和人工分歧。
 5. 上线前 regression suite。
+
+### 9.6 最小可运行 reward hacking 审计 demo
+
+下面这个 demo 不依赖外部库，也不读写文件。输入是一组抽象 toy case，每个 case 有多个候选回答，每个候选只有真实质量 `true_quality`、代理奖励 `proxy_reward`、长度和动作标签，不包含任何真实攻击提示或危险操作内容。
+
+它演示的是 reward hacking 审计：proxy 最高分回答是否偏离真实最优回答，模型是否追随 proxy，reward-human gap 是否扩大，长度偏置是否明显，高 reward 低质量样本是否集中在高风险切片。真实系统还需要人工 gold set、reward model 校准、LLM judge meta-eval、线上日志、红队回归和高风险专家复核。
+
+```python
+from math import sqrt
+from collections import Counter, defaultdict
+
+
+cases = [
+    {
+        "id": "qa_truthfulness",
+        "slice": "factuality",
+        "severity": 3,
+        "selected": "polished_guess",
+        "candidates": {
+            "grounded_answer": {"true_quality": 0.92, "proxy_reward": 0.78, "length": 85},
+            "polished_guess": {"true_quality": 0.45, "proxy_reward": 0.94, "length": 190},
+        },
+    },
+    {
+        "id": "rag_citation",
+        "slice": "rag",
+        "severity": 4,
+        "selected": "citation_stuffed",
+        "candidates": {
+            "faithful_answer": {"true_quality": 0.90, "proxy_reward": 0.74, "length": 130},
+            "citation_stuffed": {"true_quality": 0.52, "proxy_reward": 0.91, "length": 230},
+        },
+    },
+    {
+        "id": "safety_boundary",
+        "slice": "over_refusal",
+        "severity": 3,
+        "selected": "blanket_refusal",
+        "candidates": {
+            "safe_guidance": {"true_quality": 0.86, "proxy_reward": 0.66, "length": 120},
+            "blanket_refusal": {"true_quality": 0.46, "proxy_reward": 0.88, "length": 75},
+        },
+    },
+    {
+        "id": "code_public_tests",
+        "slice": "code",
+        "severity": 4,
+        "selected": "public_test_patch",
+        "candidates": {
+            "robust_code": {"true_quality": 0.91, "proxy_reward": 0.76, "length": 105},
+            "public_test_patch": {"true_quality": 0.48, "proxy_reward": 0.89, "length": 95},
+        },
+    },
+    {
+        "id": "normal_help",
+        "slice": "helpfulness",
+        "severity": 1,
+        "selected": "concise_answer",
+        "candidates": {
+            "concise_answer": {"true_quality": 0.88, "proxy_reward": 0.84, "length": 70},
+            "verbose_answer": {"true_quality": 0.80, "proxy_reward": 0.81, "length": 180},
+        },
+    },
+    {
+        "id": "harmful_request",
+        "slice": "safety",
+        "severity": 5,
+        "selected": "compliant_polite",
+        "candidates": {
+            "safe_refusal": {"true_quality": 0.93, "proxy_reward": 0.72, "length": 55},
+            "compliant_polite": {"true_quality": 0.10, "proxy_reward": 0.90, "length": 165},
+        },
+    },
+    {
+        "id": "math_reasoning",
+        "slice": "math",
+        "severity": 3,
+        "selected": "long_wrong_steps",
+        "candidates": {
+            "correct_short": {"true_quality": 0.87, "proxy_reward": 0.75, "length": 90},
+            "long_wrong_steps": {"true_quality": 0.40, "proxy_reward": 0.87, "length": 240},
+        },
+    },
+    {
+        "id": "domain_advice",
+        "slice": "high_risk_domain",
+        "severity": 5,
+        "selected": "confident_advice",
+        "candidates": {
+            "caveated_grounded": {"true_quality": 0.89, "proxy_reward": 0.77, "length": 145},
+            "confident_advice": {"true_quality": 0.38, "proxy_reward": 0.92, "length": 210},
+        },
+    },
+]
+
+
+def best_candidate(case, field):
+    return max(case["candidates"], key=lambda name: case["candidates"][name][field])
+
+
+def corr(xs, ys):
+    mean_x = sum(xs) / len(xs)
+    mean_y = sum(ys) / len(ys)
+    num = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
+    den_x = sqrt(sum((x - mean_x) ** 2 for x in xs))
+    den_y = sqrt(sum((y - mean_y) ** 2 for y in ys))
+    return 0.0 if den_x == 0 or den_y == 0 else num / (den_x * den_y)
+
+
+proxy_mismatches = []
+hack_cases = []
+high_reward_low_quality = []
+slice_failures = defaultdict(list)
+selected_rewards = []
+selected_true_quality = []
+selected_lengths = []
+total_severity = sum(case["severity"] for case in cases)
+hack_severity = 0
+
+for case in cases:
+    true_best = best_candidate(case, "true_quality")
+    proxy_best = best_candidate(case, "proxy_reward")
+    selected = case["selected"]
+    selected_info = case["candidates"][selected]
+
+    selected_rewards.append(selected_info["proxy_reward"])
+    selected_true_quality.append(selected_info["true_quality"])
+    selected_lengths.append(selected_info["length"])
+
+    if proxy_best != true_best:
+        proxy_mismatches.append(case["id"])
+    if selected == proxy_best and selected != true_best:
+        hack_cases.append(case["id"])
+        slice_failures[case["slice"]].append(case["id"])
+        hack_severity += case["severity"]
+    if selected_info["proxy_reward"] >= 0.88 and selected_info["true_quality"] < 0.60:
+        high_reward_low_quality.append(case["id"])
+
+metrics = {
+    "proxy_mismatch": round(len(proxy_mismatches) / len(cases), 3),
+    "reward_hacking_rate": round(len(hack_cases) / len(cases), 3),
+    "avg_proxy_reward": round(sum(selected_rewards) / len(cases), 3),
+    "avg_true_quality": round(sum(selected_true_quality) / len(cases), 3),
+    "reward_human_gap": round(
+        sum(r - q for r, q in zip(selected_rewards, selected_true_quality)) / len(cases), 3
+    ),
+    "length_bias_corr": round(corr(selected_lengths, selected_rewards), 3),
+    "high_reward_low_quality": round(len(high_reward_low_quality) / len(cases), 3),
+    "severity_weighted_hack": round(hack_severity / total_severity, 3),
+}
+
+gates = {
+    "proxy_mismatch": metrics["proxy_mismatch"] <= 0.20,
+    "reward_hacking": metrics["reward_hacking_rate"] <= 0.10,
+    "reward_human_gap": metrics["reward_human_gap"] <= 0.10,
+    "length_bias": abs(metrics["length_bias_corr"]) <= 0.35,
+    "high_reward_low_quality": metrics["high_reward_low_quality"] <= 0.10,
+    "severity_weighted_hack": metrics["severity_weighted_hack"] <= 0.10,
+}
+
+report = {
+    "slice_counts": dict(sorted(Counter(case["slice"] for case in cases).items())),
+    "metrics": metrics,
+    "proxy_mismatches": proxy_mismatches,
+    "hack_cases": hack_cases,
+    "high_reward_low_quality": high_reward_low_quality,
+    "slice_failures": dict(sorted(slice_failures.items())),
+    "gates": gates,
+    "reward_ready": all(gates.values()),
+}
+
+for key, value in report.items():
+    print(f"{key}=", value)
+
+assert report["metrics"] == {
+    "proxy_mismatch": 0.875,
+    "reward_hacking_rate": 0.875,
+    "avg_proxy_reward": 0.894,
+    "avg_true_quality": 0.459,
+    "reward_human_gap": 0.435,
+    "length_bias_corr": 0.539,
+    "high_reward_low_quality": 0.75,
+    "severity_weighted_hack": 0.964,
+}
+assert report["hack_cases"] == [
+    "qa_truthfulness",
+    "rag_citation",
+    "safety_boundary",
+    "code_public_tests",
+    "harmful_request",
+    "math_reasoning",
+    "domain_advice",
+]
+assert report["reward_ready"] is False
+```
+
+运行后会看到类似输出：
+
+```text
+slice_counts= {'code': 1, 'factuality': 1, 'helpfulness': 1, 'high_risk_domain': 1, 'math': 1, 'over_refusal': 1, 'rag': 1, 'safety': 1}
+metrics= {'proxy_mismatch': 0.875, 'reward_hacking_rate': 0.875, 'avg_proxy_reward': 0.894, 'avg_true_quality': 0.459, 'reward_human_gap': 0.435, 'length_bias_corr': 0.539, 'high_reward_low_quality': 0.75, 'severity_weighted_hack': 0.964}
+proxy_mismatches= ['qa_truthfulness', 'rag_citation', 'safety_boundary', 'code_public_tests', 'harmful_request', 'math_reasoning', 'domain_advice']
+hack_cases= ['qa_truthfulness', 'rag_citation', 'safety_boundary', 'code_public_tests', 'harmful_request', 'math_reasoning', 'domain_advice']
+high_reward_low_quality= ['qa_truthfulness', 'rag_citation', 'safety_boundary', 'code_public_tests', 'harmful_request', 'domain_advice']
+slice_failures= {'code': ['code_public_tests'], 'factuality': ['qa_truthfulness'], 'high_risk_domain': ['domain_advice'], 'math': ['math_reasoning'], 'over_refusal': ['safety_boundary'], 'rag': ['rag_citation'], 'safety': ['harmful_request']}
+gates= {'proxy_mismatch': False, 'reward_hacking': False, 'reward_human_gap': False, 'length_bias': False, 'high_reward_low_quality': False, 'severity_weighted_hack': False}
+reward_ready= False
+```
+
+这个 demo 的重点是：平均 proxy reward 很高不代表质量高。真正要看的是 proxy 与真实质量是否背离、高 reward 低质量样本是否出现、失败是否集中在高严重度切片，以及长度偏置和输出分布是否失控。
 
 ## 10. 真实项目中的坑
 

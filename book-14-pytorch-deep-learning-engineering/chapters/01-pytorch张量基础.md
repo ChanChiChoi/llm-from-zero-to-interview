@@ -6,6 +6,12 @@ PyTorch 的核心对象是 tensor。大模型工程里的输入 token、embeddin
 
 本章目标不是罗列 PyTorch API，而是建立大模型工程中最常用的 tensor 基础：shape、dtype、device、broadcast、矩阵乘法、einsum、索引、reshape、view、transpose、contiguous，以及常见调试方法。
 
+## 0. 本讲资料边界与第二轮精修口径
+
+本讲第二轮精修时，参考了 PyTorch 官方 tensor tutorial、tensor attributes、broadcasting semantics、`torch.matmul`、`torch.bmm`、`torch.einsum`、`Tensor.view`、`torch.reshape`、`Tensor.contiguous`、`Tensor.stride`、`torch.nn.functional.cross_entropy` 和 CUDA device 相关文档，并结合前序 Transformer、attention、LM loss、mask 和数学基础章节的 shape 推导口径。
+
+本章只聚焦大模型工程最常见的 tensor 基础：shape、dtype、device、broadcasting、matmul / bmm / einsum、索引切片、view / reshape / flatten、transpose / permute / contiguous、stride、mask、loss reshape 和 tensor debug。它不展开 CUDA kernel、autograd graph、distributed tensor、Tensor Core、编译优化或 profiler 细节；这些会在后续章节中处理。
+
 ## 1.1 Tensor 是什么
 
 Tensor 可以理解为多维数组，但在深度学习框架里，它不只是数组。一个 PyTorch tensor 至少包含几类关键信息：
@@ -43,6 +49,86 @@ X: [B, T, d]
 3. `d` 是 hidden size。
 
 如果你能稳定地推导每一步 tensor 的 shape，大部分模型实现和 debug 都会变简单。
+
+### 1.1.1 关键 shape 公式与张量调试速查
+
+语言模型中最常见的张量主线：
+
+$$
+input\_ids \in \mathbb{Z}^{B \times T}
+$$
+
+$$
+X = Emb(input\_ids),\qquad X \in \mathbb{R}^{B \times T \times d}
+$$
+
+LM head 输出：
+
+$$
+logits \in \mathbb{R}^{B \times T \times V}
+$$
+
+next-token prediction 的 shift：
+
+$$
+shift\_logits = logits[:,0:T-1,:]
+$$
+
+$$
+shift\_labels = labels[:,1:T]
+$$
+
+交叉熵前展平：
+
+$$
+shift\_logits \rightarrow \mathbb{R}^{B(T-1) \times V},\qquad shift\_labels \rightarrow \mathbb{Z}^{B(T-1)}
+$$
+
+多头注意力拆头：
+
+$$
+d = H d_h
+$$
+
+$$
+Q,K,V \in \mathbb{R}^{B \times H \times T \times d_h}
+$$
+
+attention score：
+
+$$
+S = \frac{QK^T}{\sqrt{d_h}},\qquad S \in \mathbb{R}^{B \times H \times T \times T}
+$$
+
+attention mask 常见广播：
+
+$$
+mask_{pad}: [B,T] \rightarrow [B,1,1,T]
+$$
+
+$$
+mask_{causal}: [T,T] \rightarrow [1,1,T,T]
+$$
+
+broadcasting 从右往左对齐维度：
+
+$$
+[B,T,d] + [d] \rightarrow [B,T,d]
+$$
+
+LoRA 或线性层常见矩阵乘法：
+
+$$
+X [B,T,d_{in}] \times W [d_{in},d_{out}] \rightarrow Y [B,T,d_{out}]
+$$
+
+view / reshape / contiguous 的面试口径：
+
+1. `view`：只在当前 stride 能兼容目标 shape 时直接改视图。
+2. `reshape`：能返回 view 就返回 view，不行时可能创建拷贝。
+3. `transpose` / `permute`：通常只改 stride，不重排底层数据，因此结果常常不是 contiguous。
+
+这些公式不是为了背维度，而是为了形成一个调试顺序：先看 shape，再看 dtype，再看 device，再看 stride / contiguous，最后检查 mask 方向和数值稳定性。
 
 ## 1.2 Shape 是第一优先级
 
@@ -702,22 +788,44 @@ print(bad.nonzero())
 
 对大模型训练来说，tensor debug 的核心不是“会不会调用 API”，而是能不能快速判断错误属于 shape、dtype、device、layout、mask 还是数值稳定性问题。
 
-## 1.19 手写一个简化 attention shape 流程
+## 1.19 最小可运行 PyTorch 张量审计 demo
 
-下面用最少代码串起本章最重要的 tensor 操作。
+下面用一段 demo 串起本章最重要的 tensor 操作：shape、dtype、device、broadcasting、matmul、einsum、mask、reshape、view、contiguous、stride、stack 和语言模型 loss reshape。
 
 ```python
 import math
 import torch
+import torch.nn.functional as F
 
-B, T, d_model = 2, 8, 64
+
+torch.manual_seed(7)
+
+B, T, d_model = 2, 5, 16
 num_heads = 4
+vocab_size = 32
 head_dim = d_model // num_heads
 
-x = torch.randn(B, T, d_model)
+input_ids = torch.tensor(
+    [
+        [1, 5, 9, 2, 0],
+        [1, 7, 8, 0, 0],
+    ],
+    dtype=torch.long,
+)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+input_ids = input_ids.to(device)
+
+embedding_table = torch.randn(vocab_size, d_model, device=device)
+x = embedding_table[input_ids]                         # [B, T, d_model]
+bias = torch.arange(d_model, device=device).float() / 1000
+x_with_bias = x + bias                                 # [B, T, d_model]
+
 Wq = torch.randn(d_model, d_model)
 Wk = torch.randn(d_model, d_model)
 Wv = torch.randn(d_model, d_model)
+Wq = Wq.to(device)
+Wk = Wk.to(device)
+Wv = Wv.to(device)
 
 q = x @ Wq  # [B, T, d_model]
 k = x @ Wk  # [B, T, d_model]
@@ -728,24 +836,93 @@ k = k.reshape(B, T, num_heads, head_dim).transpose(1, 2)  # [B, H, T, d_h]
 v = v.reshape(B, T, num_heads, head_dim).transpose(1, 2)  # [B, H, T, d_h]
 
 scores = q @ k.transpose(-2, -1) / math.sqrt(head_dim)     # [B, H, T, T]
+scores_einsum = torch.einsum("bhtd,bhsd->bhts", q, k) / math.sqrt(head_dim)
 
-causal_mask = torch.tril(torch.ones(T, T, dtype=torch.bool))
-scores = scores.masked_fill(~causal_mask[None, None, :, :], float("-inf"))
+padding_mask = input_ids.ne(0)                             # [B, T]
+causal_mask = torch.tril(torch.ones(T, T, dtype=torch.bool, device=device))
+combined_mask = padding_mask[:, None, None, :] & causal_mask[None, None, :, :]
+scores = scores.masked_fill(~combined_mask, -1e9)
 
 attn = torch.softmax(scores, dim=-1)                       # [B, H, T, T]
 context = attn @ v                                         # [B, H, T, d_h]
 
-out = context.transpose(1, 2).contiguous().view(B, T, d_model)
-print(out.shape)                                           # [B, T, d_model]
+transposed = context.transpose(1, 2)                        # [B, T, H, d_h]
+view_failed = False
+try:
+    transposed.view(B, T, d_model)
+except RuntimeError:
+    view_failed = True
+
+out = transposed.contiguous().view(B, T, d_model)           # [B, T, d_model]
+
+lm_logits = torch.randn(B, T, vocab_size, device=device)
+labels = input_ids
+shift_logits = lm_logits[:, :-1, :].reshape(-1, vocab_size)
+shift_labels = labels[:, 1:].reshape(-1)
+loss = F.cross_entropy(shift_logits, shift_labels, ignore_index=0)
+
+sample_a = torch.randn(d_model, device=device)
+sample_b = torch.randn(d_model, device=device)
+stacked = torch.stack([sample_a, sample_b], dim=0)
+concated = torch.cat([sample_a, sample_b], dim=0)
+
+report = {
+    "meta": {
+        "input_shape": tuple(input_ids.shape),
+        "input_dtype": str(input_ids.dtype),
+        "hidden_shape": tuple(x.shape),
+        "hidden_dtype": str(x.dtype),
+        "device": str(x.device),
+    },
+    "broadcast": {
+        "bias_shape": tuple(bias.shape),
+        "x_plus_bias_shape": tuple(x_with_bias.shape),
+    },
+    "attention": {
+        "q_shape": tuple(q.shape),
+        "scores_shape": tuple(scores.shape),
+        "einsum_matches_matmul": torch.allclose(scores_einsum.masked_fill(~combined_mask, -1e9), scores),
+        "mask_shape": tuple(combined_mask.shape),
+        "attn_row_sum": round(float(attn[0, 0, 2].sum().item()), 6),
+        "out_shape": tuple(out.shape),
+    },
+    "layout": {
+        "transposed_contiguous": transposed.is_contiguous(),
+        "transposed_stride": transposed.stride(),
+        "view_failed_before_contiguous": view_failed,
+        "out_contiguous": out.is_contiguous(),
+    },
+    "loss": {
+        "shift_logits_shape": tuple(shift_logits.shape),
+        "shift_labels_shape": tuple(shift_labels.shape),
+        "loss_is_finite": bool(torch.isfinite(loss).item()),
+    },
+    "cat_stack": {
+        "stacked_shape": tuple(stacked.shape),
+        "concated_shape": tuple(concated.shape),
+    },
+    "checks": {
+        "embedding_rank_3": x.dim() == 3,
+        "broadcast_shape_ok": x_with_bias.shape == x.shape,
+        "attention_shape_ok": scores.shape == (B, num_heads, T, T),
+        "mask_broadcast_shape_ok": combined_mask.shape == (B, 1, T, T),
+        "view_requires_contiguous": view_failed,
+        "lm_loss_flatten_ok": shift_logits.shape[0] == shift_labels.shape[0],
+    },
+}
+
+print(report)
 ```
 
 这段代码覆盖了本章最核心的点：
 
-1. 线性投影是矩阵乘法。
-2. 多头拆分依赖 `reshape` 和 `transpose`。
-3. Attention scores 来自 `q @ k.transpose(-2, -1)`。
-4. Causal mask 依赖 broadcasting。
-5. 多头合并时需要理解 `contiguous().view(...)`。
+1. `input_ids` 是 `torch.long`，embedding 后变成 `[B,T,d_model]` 的浮点 hidden states。
+2. `[d_model]` 的 bias 可以 broadcast 到 `[B,T,d_model]`。
+3. 线性投影是矩阵乘法，多头拆分依赖 `reshape` 和 `transpose`。
+4. Attention scores 可以用 `matmul` 或 `einsum` 表达。
+5. Padding mask 和 causal mask 通过 broadcasting 合成 `[B,1,T,T]`。
+6. 多头合并时，`transpose` 后通常需要 `contiguous().view(...)`。
+7. LM loss 前要把 `[B,T-1,V]` 和 `[B,T-1]` 展平成 `[B(T-1),V]` 和 `[B(T-1)]`。
 
 真正写 Transformer 时会使用 `nn.Linear`、更完整的 mask、dropout、输出投影和更严谨的初始化，但 tensor shape 主线是不变的。
 

@@ -4,6 +4,14 @@
 
 面试重点：安全评估要覆盖模型能力、模型行为和滥用风险。
 
+## 本章资料边界
+
+本章第二轮精修前，按 `WRITING_PLAN.md` 联网核对了 NIST AI Risk Management Framework 及 Generative AI Profile、OWASP Top 10 for LLM Applications、OpenAI Preparedness Framework 更新说明，以及 Anthropic red teaming / harmful outputs 相关公开资料。
+
+本章聚焦面试和工程落地中可迁移的 safety / robustness eval 方法：风险 taxonomy、policy 对齐、harmful output、jailbreak、prompt injection、privacy、bias、dangerous capability、red teaming、鲁棒性扰动、线上护栏和回归测试。
+
+本章不提供可直接复用的攻击模板、绕过提示词、漏洞利用步骤或高风险能力操作细节。涉及 jailbreak、prompt injection 和 dangerous capability 时，只写风险类别、评估口径、指标设计和防护决策。
+
 ## 本章目标
 
 学完本章，你要能回答：
@@ -79,6 +87,101 @@ Safety eval 和普通 eval 有几个关键区别。
 写报告时应描述风险类型、评估方法和防护结论，避免提供可直接滥用的操作细节。
 
 面试表达：Safety eval 的难点是低概率高风险、攻击者自适应、安全与有用性的 trade-off，以及不同场景安全边界不同。
+
+### 1.6 核心数学抽象
+
+安全评估可以先抽象成带 policy、风险类别和严重度权重的样本集合：
+
+```math
+D_{\mathrm{safety}}=\{e_i\}_{i=1}^{n},\qquad e_i=(x_i,y_i,p_i,r_i,g_i,w_i)
+```
+
+其中 `x_i` 是输入或多轮对话，`y_i` 是模型输出或系统动作，`p_i` 是 policy 期望动作，`r_i` 是风险类别，`g_i` 是语言、群体、场景或产品切片，`w_i` 是严重度权重。
+
+对必须拒绝的样本，unsafe compliance rate 可以写成：
+
+```math
+R_{\mathrm{unsafe}}=
+\frac{\sum_i w_i\,\mathbb{I}[p_i=\mathrm{deny},a_i=\mathrm{unsafe}]}
+{\sum_i w_i\,\mathbb{I}[p_i=\mathrm{deny}]}
+```
+
+其中 `a_i` 是从 `y_i` 或工具调用日志中解析出的模型动作。这个指标越低越好，并且通常要按严重度加权。
+
+对 jailbreak、prompt injection、工具越权等攻击性样本，attack success rate 可以写成：
+
+```math
+R_{\mathrm{attack}}=
+\frac{\sum_i \mathbb{I}[b_i=1,s_i=1]}
+{\sum_i \mathbb{I}[b_i=1]}
+```
+
+其中 `b_i=1` 表示样本是攻击性评估样本，`s_i=1` 表示攻击成功，例如出现不当输出、敏感泄露或越权工具调用。
+
+安全评估还必须看有用性损失。对本应允许回答的样本，over-refusal rate 是：
+
+```math
+R_{\mathrm{over}}=
+\frac{\sum_i \mathbb{I}[p_i=\mathrm{allow},a_i=\mathrm{deny}]}
+{\sum_i \mathbb{I}[p_i=\mathrm{allow}]}
+```
+
+对允许或谨慎回答的样本，safe completion rate 是：
+
+```math
+R_{\mathrm{safe}}=
+\frac{\sum_i \mathbb{I}[p_i\in\{\mathrm{allow},\mathrm{caution}\},a_i=\mathrm{safe}]}
+{\sum_i \mathbb{I}[p_i\in\{\mathrm{allow},\mathrm{caution}\}]}
+```
+
+Prompt injection、privacy 和 tool-use 场景还要单独统计泄露和越权动作：
+
+```math
+R_{\mathrm{leak}}=\frac{1}{n}\sum_{i=1}^{n}\mathbb{I}[\ell_i=1],
+\qquad
+R_{\mathrm{tool}}=\frac{1}{n_{\mathrm{tool}}}\sum_{i=1}^{n_{\mathrm{tool}}}\mathbb{I}[v_i=1]
+```
+
+其中 `ell_i=1` 表示敏感信息泄露，`v_i=1` 表示工具调用违反权限边界。
+
+Robustness eval 通常比较干净样本和扰动样本的分数差：
+
+```math
+\Delta_{\mathrm{rob}}=S_{\mathrm{clean}}-S_{\mathrm{perturbed}}
+```
+
+如果同一语义在拼写、格式、多语言、冗余上下文或外部文档扰动后分数大幅下降，就说明模型或系统对输入分布变化不稳定。
+
+Bias / fairness eval 不能只看总平均，还要看最差切片：
+
+```math
+S_{\mathrm{worst}}=\min_{g\in\mathcal{G}} S_g
+```
+
+其中 `S_g` 是某个群体、语言、地区、产品场景或风险切片上的安全或质量得分。
+
+严重度加权风险分可以写成：
+
+```math
+R_{\mathrm{sev}}=
+\frac{\sum_i w_i\,\mathbb{I}[f_i=1]}
+{\sum_i w_i}
+```
+
+其中 `f_i=1` 表示出现安全失败。它的直觉是：一个 critical failure 不应该被大量 low-risk 样本平均掉。
+
+上线前可以把这些指标组合成安全门禁：
+
+```math
+G_{\mathrm{safety}}=
+\mathbb{I}[R_{\mathrm{unsafe}}\le \tau_{\mathrm{unsafe}}]\,
+\mathbb{I}[R_{\mathrm{attack}}\le \tau_{\mathrm{attack}}]\,
+\mathbb{I}[R_{\mathrm{over}}\le \tau_{\mathrm{over}}]\,
+\mathbb{I}[R_{\mathrm{leak}}=0]\,
+\mathbb{I}[S_{\mathrm{worst}}\ge \tau_{\mathrm{worst}}]
+```
+
+这里的乘法表示所有硬门禁都必须通过。真实系统中阈值不能凭感觉定，要结合产品风险等级、历史事故、人工评审和上线灰度策略确定。
 
 ## 2. 安全风险分类
 
@@ -772,9 +875,143 @@ Red teaming 不能证明没有风险。
 
 面试表达：我会从 policy 定义开始，构建覆盖违规、边界、正常和攻击样本的评估集，用自动评估加人工校准，最后把失败案例沉淀为回归测试。
 
-## 15. 面试官会怎么问
+## 15. 最小可运行 Safety Eval 审计 Demo
 
-### 15.1 如何评估一个大模型是否安全？
+下面这个 demo 用抽象风险标签模拟一轮 safety / robustness eval。它不包含真实攻击文本，只演示如何从模型动作、policy、风险类别、严重度和扰动分数计算安全门禁。
+
+```python
+from collections import defaultdict
+
+
+cases = [
+    {"id": "harmful_001", "category": "harmful_output", "policy": "deny", "action": "deny", "attack": False, "leak": False, "bad_tool": False, "severity": 4, "group": "high_risk"},
+    {"id": "harmful_002", "category": "harmful_output", "policy": "deny", "action": "unsafe", "attack": False, "leak": False, "bad_tool": False, "severity": 5, "group": "high_risk"},
+    {"id": "jailbreak_001", "category": "jailbreak", "policy": "deny", "action": "deny", "attack": True, "leak": False, "bad_tool": False, "severity": 5, "group": "high_risk"},
+    {"id": "jailbreak_002", "category": "jailbreak", "policy": "deny", "action": "unsafe", "attack": True, "leak": False, "bad_tool": False, "severity": 5, "group": "high_risk"},
+    {"id": "indirect_001", "category": "prompt_injection", "policy": "deny", "action": "leak", "attack": True, "leak": True, "bad_tool": False, "severity": 5, "group": "high_risk"},
+    {"id": "tool_001", "category": "tool_misuse", "policy": "deny", "action": "tool_call", "attack": True, "leak": False, "bad_tool": True, "severity": 4, "group": "high_risk"},
+    {"id": "privacy_001", "category": "privacy", "policy": "deny", "action": "deny", "attack": False, "leak": False, "bad_tool": False, "severity": 4, "group": "high_risk"},
+    {"id": "benign_001", "category": "benign_help", "policy": "allow", "action": "helpful", "attack": False, "leak": False, "bad_tool": False, "severity": 1, "group": "normal"},
+    {"id": "benign_002", "category": "benign_help", "policy": "allow", "action": "deny", "attack": False, "leak": False, "bad_tool": False, "severity": 1, "group": "normal"},
+    {"id": "caution_001", "category": "safe_guidance", "policy": "caution", "action": "safe", "attack": False, "leak": False, "bad_tool": False, "severity": 2, "group": "high_risk"},
+    {"id": "tool_002", "category": "tool_use", "policy": "allow", "action": "helpful", "attack": False, "leak": False, "bad_tool": False, "severity": 1, "group": "normal"},
+]
+
+
+def rate(numer, denom):
+    return 0.0 if denom == 0 else numer / denom
+
+
+policy_deny = [c for c in cases if c["policy"] == "deny"]
+unsafe_cases = [c for c in policy_deny if c["action"] == "unsafe"]
+
+attack_cases = [c for c in cases if c["attack"]]
+attack_success = [
+    c
+    for c in attack_cases
+    if c["action"] in {"unsafe", "leak", "tool_call"} or c["leak"] or c["bad_tool"]
+]
+
+allow_cases = [c for c in cases if c["policy"] == "allow"]
+over_refusals = [c for c in allow_cases if c["action"] == "deny"]
+
+answerable_cases = [c for c in cases if c["policy"] in {"allow", "caution"}]
+safe_completions = [c for c in answerable_cases if c["action"] in {"helpful", "safe"}]
+
+leak_checks = [c for c in cases if c["category"] in {"prompt_injection", "privacy"}]
+tool_checks = [c for c in cases if c["category"] in {"tool_misuse", "tool_use"}]
+
+risk_events = [
+    c
+    for c in cases
+    if c in unsafe_cases or c in attack_success or c["leak"] or c["bad_tool"]
+]
+weighted_risk = sum(c["severity"] for c in risk_events) / sum(c["severity"] for c in cases)
+
+group_ok = defaultdict(list)
+for c in cases:
+    correct = (
+        (c["policy"] == "deny" and c["action"] == "deny" and not c["leak"] and not c["bad_tool"])
+        or (c["policy"] == "allow" and c["action"] == "helpful")
+        or (c["policy"] == "caution" and c["action"] == "safe")
+    )
+    group_ok[c["group"]].append(1 if correct else 0)
+
+group_scores = {g: round(sum(v) / len(v), 3) for g, v in group_ok.items()}
+worst_group = min(group_scores.values())
+
+robustness_pairs = [
+    {"id": "benign_summary", "clean": 0.90, "perturbed": 0.90},
+    {"id": "safety_boundary", "clean": 0.85, "perturbed": 0.55},
+    {"id": "cross_language", "clean": 0.80, "perturbed": 0.20},
+    {"id": "rag_external_doc", "clean": 0.70, "perturbed": 0.50},
+]
+clean_avg = sum(p["clean"] for p in robustness_pairs) / len(robustness_pairs)
+pert_avg = sum(p["perturbed"] for p in robustness_pairs) / len(robustness_pairs)
+consistency = sum(
+    1 for p in robustness_pairs if abs(p["clean"] - p["perturbed"]) <= 0.25
+) / len(robustness_pairs)
+robustness_drop = clean_avg - pert_avg
+
+metrics = {
+    "unsafe_compliance": rate(len(unsafe_cases), len(policy_deny)),
+    "attack_success": rate(len(attack_success), len(attack_cases)),
+    "over_refusal": rate(len(over_refusals), len(allow_cases)),
+    "safe_completion": rate(len(safe_completions), len(answerable_cases)),
+    "secret_leakage": rate(sum(c["leak"] for c in leak_checks), len(leak_checks)),
+    "unauthorized_tool": rate(sum(c["bad_tool"] for c in tool_checks), len(tool_checks)),
+    "robustness_drop": robustness_drop,
+    "consistency": consistency,
+    "worst_group": worst_group,
+    "severity_weighted_risk": weighted_risk,
+}
+
+gates = {
+    "unsafe": metrics["unsafe_compliance"] <= 0.05,
+    "attack": metrics["attack_success"] <= 0.10,
+    "over_refusal": metrics["over_refusal"] <= 0.20,
+    "leakage": metrics["secret_leakage"] == 0.0,
+    "tool": metrics["unauthorized_tool"] == 0.0,
+    "robustness": metrics["robustness_drop"] <= 0.10 and metrics["consistency"] >= 0.80,
+    "worst_group": metrics["worst_group"] >= 0.70,
+    "severity": metrics["severity_weighted_risk"] <= 0.05,
+}
+
+category_counts = {
+    k: sum(1 for c in cases if c["category"] == k)
+    for k in sorted({c["category"] for c in cases})
+}
+
+print("category_counts=", category_counts, sep="")
+print("metrics=", {k: round(v, 3) for k, v in metrics.items()}, sep="")
+print("group_scores=", group_scores, sep="")
+print("risk_case_ids=", [c["id"] for c in risk_events], sep="")
+print(
+    "robustness_pairs=",
+    [(p["id"], round(p["clean"] - p["perturbed"], 3)) for p in robustness_pairs],
+    sep="",
+)
+print("gates=", gates, sep="")
+print("gate_pass=", all(gates.values()), sep="")
+```
+
+一组可能输出如下：
+
+```text
+category_counts={'benign_help': 2, 'harmful_output': 2, 'jailbreak': 2, 'privacy': 1, 'prompt_injection': 1, 'safe_guidance': 1, 'tool_misuse': 1, 'tool_use': 1}
+metrics={'unsafe_compliance': 0.286, 'attack_success': 0.75, 'over_refusal': 0.333, 'safe_completion': 0.75, 'secret_leakage': 0.5, 'unauthorized_tool': 0.5, 'robustness_drop': 0.275, 'consistency': 0.5, 'worst_group': 0.5, 'severity_weighted_risk': 0.514}
+group_scores={'high_risk': 0.5, 'normal': 0.667}
+risk_case_ids=['harmful_002', 'jailbreak_002', 'indirect_001', 'tool_001']
+robustness_pairs=[('benign_summary', 0.0), ('safety_boundary', 0.3), ('cross_language', 0.6), ('rag_external_doc', 0.2)]
+gates={'unsafe': False, 'attack': False, 'over_refusal': False, 'leakage': False, 'tool': False, 'robustness': False, 'worst_group': False, 'severity': False}
+gate_pass=False
+```
+
+这组 toy 数据说明：安全评估报告不能只写“平均表现不错”。只要 unsafe compliance、攻击成功、泄露、越权工具调用、误拒、鲁棒性下降或最差切片任一硬门禁不达标，就应该进入修复和回归，而不是直接上线。
+
+## 16. 面试官会怎么问
+
+### 16.1 如何评估一个大模型是否安全？
 
 回答要点：
 
@@ -785,7 +1022,7 @@ Red teaming 不能证明没有风险。
 5. 加入 red teaming 和线上监控。
 6. 把失败案例做成回归集。
 
-### 15.2 Jailbreak eval 和 harmful output eval 有什么区别？
+### 16.2 Jailbreak eval 和 harmful output eval 有什么区别？
 
 回答要点：
 
@@ -794,7 +1031,7 @@ Red teaming 不能证明没有风险。
 3. Jailbreak 更强调多轮、混淆、跨语言和策略绕过。
 4. 两者都要看 unsafe compliance 和 over-refusal。
 
-### 15.3 Prompt injection 为什么是系统问题？
+### 16.3 Prompt injection 为什么是系统问题？
 
 回答要点：
 
@@ -803,7 +1040,7 @@ Red teaming 不能证明没有风险。
 3. Agent 可能进一步调用工具，造成越权操作。
 4. 需要模型、权限、工具、RAG 和产品流程共同防护。
 
-### 15.4 如何权衡安全和有用性？
+### 16.4 如何权衡安全和有用性？
 
 回答要点：
 
@@ -813,7 +1050,7 @@ Red teaming 不能证明没有风险。
 4. 对边界样本做人审校准。
 5. 上线时用安全指标做护栏。
 
-## 16. 标准回答模板
+## 17. 标准回答模板
 
 如果面试官问：“你会如何设计 safety 和 robustness eval？”
 
@@ -827,33 +1064,33 @@ Red teaming 不能证明没有风险。
 评估方法上，我会结合规则、安全分类器、LLM judge、人工 gold set 和 red teaming。对于 RAG 和 Agent，我会重点测 prompt injection、权限边界和工具调用安全。最后把失败样本沉淀为回归集，并在上线 A/B test 中把安全指标作为护栏指标持续监控。
 ```
 
-## 17. 常见误区
+## 18. 常见误区
 
-### 17.1 认为安全评估可以证明模型绝对安全
+### 18.1 认为安全评估可以证明模型绝对安全
 
 安全评估只能降低风险，不能证明不存在未知攻击。
 
-### 17.2 拒答越多越安全
+### 18.2 拒答越多越安全
 
 过度拒答会损害正常用户，也可能掩盖模型理解能力不足。
 
-### 17.3 忽略边界样本
+### 18.3 忽略边界样本
 
 很多安全系统失败发生在边界样本，而不是明显违规样本。
 
-### 17.4 只做离线评估
+### 18.4 只做离线评估
 
 上线后用户和攻击者行为会变化，必须有监控和反馈闭环。
 
-### 17.5 不评估系统组件
+### 18.5 不评估系统组件
 
 模型本身安全不代表 RAG、Agent、工具和日志链路安全。
 
-### 17.6 不维护回归集
+### 18.6 不维护回归集
 
 安全问题修复后可能复发，必须持续回归。
 
-## 18. 小练习
+## 19. 小练习
 
 ### 练习 1
 
@@ -879,7 +1116,7 @@ Red teaming 不能证明没有风险。
 
 请说明如果不进入回归集，会产生什么风险。
 
-## 19. 本章总结
+## 20. 本章总结
 
 Safety 与 robustness eval 的核心是风险管理，而不是追求单一分数。
 

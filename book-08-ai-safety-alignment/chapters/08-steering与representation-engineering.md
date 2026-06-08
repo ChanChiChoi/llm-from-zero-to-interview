@@ -6,6 +6,18 @@
 
 安全边界：本章只讲控制方法的原理、用途、风险和防御性评估，不提供禁用安全机制或绕过拒答的操作步骤。
 
+## 0. 本讲资料边界与第二轮精修口径
+
+按照 `WRITING_PLAN.md` 的要求，本讲精修前核对了 Representation Engineering: A Top-Down Approach to AI Transparency、Activation Addition / ActAdd、Contrastive Activation Addition、Inference-Time Intervention、refusal direction / representation 相关公开研究、前序 Mechanistic Interpretability、Jailbreak / Prompt Injection、Red Teaming 与 Safety Eval 章节资料边界。
+
+本讲聚焦 steering 和 representation engineering 的防御性工程口径：如何构造行为方向、如何做推理时激活干预、如何扫描强度、如何评估目标效果和副作用，以及为什么这种方法不能替代对齐训练、红队和系统权限控制。
+
+```text
+正负行为样本 -> 激活差分 -> steering vector -> 强度扫描 -> 行为变化与副作用评估
+```
+
+本讲不提供禁用安全机制、削弱拒答机制或规避安全边界的操作流程。涉及拒答方向时，只讨论安全分析、over-refusal 调试、表示监控和上线评估。
+
 ## 本章目标
 
 学完本章，你要能回答：
@@ -427,6 +439,128 @@ inference activation = activation + alpha * steering_vector
 3. 下游行为变化。
 4. 因果干预验证。
 
+### 9.5 关键公式与 steering 评估指标速查
+
+设第 \(\ell\) 层、第 \(p\) 个位置的激活为：
+
+$$
+h_{\ell,p}\in \mathbb{R}^{d}
+$$
+
+**1. 正负样本激活均值**
+
+设正例集合为 \(P\)，负例集合为 \(N\)，某层聚合后的激活为 \(h_i^\ell\)：
+
+$$
+\mu_+^\ell=\frac{1}{|P|}\sum_{i\in P} h_i^\ell
+$$
+
+$$
+\mu_-^\ell=\frac{1}{|N|}\sum_{i\in N} h_i^\ell
+$$
+
+**2. Steering vector**
+
+最常见的差分方向：
+
+$$
+v^\ell=\mu_+^\ell-\mu_-^\ell
+$$
+
+归一化后：
+
+$$
+\bar v^\ell=\frac{v^\ell}{\|v^\ell\|_2+\epsilon}
+$$
+
+这个方向只是一种行为相关表示，不应直接解释为完整机制。
+
+**3. Activation intervention**
+
+推理时在指定层和位置加入 steering：
+
+$$
+\tilde h_{\ell,p}=h_{\ell,p}+\alpha \bar v^\ell
+$$
+
+其中 \(\alpha\) 是强度系数。真实实验通常要扫描多个 \(\alpha\)，而不是只试一个值。
+
+**4. 表示投影分数**
+
+可以用投影衡量样本是否更接近目标方向：
+
+$$
+s_i=\frac{\langle h_i^\ell,\bar v^\ell\rangle}{\|h_i^\ell\|_2+\epsilon}
+$$
+
+干预前后投影变化：
+
+$$
+\Delta s_i=s_i(\tilde h)-s_i(h)
+$$
+
+**5. 目标行为提升**
+
+设 \(q_i^{base}\) 是未干预时目标行为得分，\(q_i(\alpha)\) 是强度为 \(\alpha\) 时的得分：
+
+$$
+U_{target}(\alpha)=\frac{1}{M}\sum_i [q_i(\alpha)-q_i^{base}]
+$$
+
+**6. 副作用下降**
+
+设 \(g_i^{base}\) 是通用质量、helpfulness 或任务成功得分，\(g_i(\alpha)\) 是干预后得分：
+
+$$
+D_{side}(\alpha)=\frac{1}{M}\sum_i \max(0,g_i^{base}-g_i(\alpha))
+$$
+
+Steering 不能只看目标行为增强，还要看有没有损伤正常能力。
+
+**7. 误拒增量**
+
+设 \(R_{over}^{base}\) 是正常请求误拒率，\(R_{over}(\alpha)\) 是干预后误拒率：
+
+$$
+\Delta R_{over}(\alpha)=R_{over}(\alpha)-R_{over}^{base}
+$$
+
+安全 steering 很容易把模型推向过度保守，因此这个指标很重要。
+
+**8. 安全收益**
+
+设 \(R_{unsafe}^{base}\) 是高风险请求漏拒率，\(R_{unsafe}(\alpha)\) 是干预后漏拒率：
+
+$$
+U_{safe}(\alpha)=R_{unsafe}^{base}-R_{unsafe}(\alpha)
+$$
+
+**9. 强度选择**
+
+可以把目标收益和副作用写成一个简单选择问题：
+
+$$
+\alpha^*=\arg\max_{\alpha\in A}
+[U_{target}(\alpha)+\lambda_s U_{safe}(\alpha)-\lambda_d D_{side}(\alpha)-\lambda_o \Delta R_{over}(\alpha)]
+$$
+
+这里的权重应由产品、安全和评估目标决定，不能只按离线分数临时拍。
+
+**10. Steering 上线门禁**
+
+$$
+G_{steer}=
+\mathbb{1}[
+U_{target}\ge \tau_{target}
+\land U_{safe}\ge \tau_{safe}
+\land D_{side}\le \tau_{side}
+\land \Delta R_{over}\le \tau_{over}
+\land R_{jail}\le \tau_{jail}
+]
+$$
+
+\(G_{steer}=1\) 只表示当前强度、任务分布和安全评估下可以进入下一轮实验或灰度，不表示方向完全可靠。
+
 ## 10. Steering 和其他方法的关系
 
 ### 10.1 和 Prompt Engineering
@@ -667,7 +801,190 @@ Representation engineering 通常从高层行为出发，比如 honesty、harmle
 
 要求覆盖：helpfulness、factuality、refusal、over-refusal、latency、jailbreak 和人工审核。
 
-## 18. 本章总结
+## 18. 最小可运行 Steering 审计 demo
+
+下面的 demo 不需要真实模型，只用 toy 激活和 toy 评估表演示 steering 的核心审计流程。真实项目中，`positive_activations`、`negative_activations` 和 `case["activation"]` 应来自模型 forward hook。
+
+```python
+from math import sqrt
+
+
+def mean_vector(rows):
+    dims = len(rows[0])
+    return [sum(row[j] for row in rows) / len(rows) for j in range(dims)]
+
+
+def subtract(a, b):
+    return [x - y for x, y in zip(a, b)]
+
+
+def add(a, b):
+    return [x + y for x, y in zip(a, b)]
+
+
+def scale(alpha, v):
+    return [alpha * x for x in v]
+
+
+def dot(a, b):
+    return sum(x * y for x, y in zip(a, b))
+
+
+def norm(v):
+    return sqrt(dot(v, v))
+
+
+def normalize(v, eps=1e-12):
+    length = norm(v) + eps
+    return [x / length for x in v]
+
+
+def projection_score(h, v):
+    return dot(h, v) / (norm(h) + 1e-12)
+
+
+def round_vector(v):
+    return [round(x, 3) for x in v]
+
+
+positive_activations = [
+    [1.2, 0.8, -0.1],
+    [1.0, 0.7, 0.0],
+    [1.1, 0.9, 0.1],
+]
+negative_activations = [
+    [0.1, -0.2, 0.8],
+    [0.0, -0.1, 0.7],
+    [0.2, -0.3, 0.9],
+]
+
+mu_pos = mean_vector(positive_activations)
+mu_neg = mean_vector(negative_activations)
+steering_vector = subtract(mu_pos, mu_neg)
+unit_vector = normalize(steering_vector)
+
+cases = [
+    {
+        "id": "factual_qa",
+        "activation": [0.4, 0.2, 0.4],
+        "target_gain": 0.30,
+        "safe_gain": 0.00,
+        "side_loss": 0.03,
+        "over_refusal": 0.00,
+    },
+    {
+        "id": "citation_answer",
+        "activation": [0.5, 0.3, 0.3],
+        "target_gain": 0.24,
+        "safe_gain": 0.00,
+        "side_loss": 0.02,
+        "over_refusal": 0.00,
+    },
+    {
+        "id": "boundary_safety",
+        "activation": [0.2, 0.0, 0.7],
+        "target_gain": 0.20,
+        "safe_gain": 0.38,
+        "side_loss": 0.05,
+        "over_refusal": 0.05,
+    },
+    {
+        "id": "normal_help",
+        "activation": [0.3, 0.1, 0.2],
+        "target_gain": 0.05,
+        "safe_gain": 0.00,
+        "side_loss": 0.08,
+        "over_refusal": 0.08,
+    },
+    {
+        "id": "tool_caution",
+        "activation": [0.1, 0.2, 0.5],
+        "target_gain": 0.18,
+        "safe_gain": 0.22,
+        "side_loss": 0.04,
+        "over_refusal": 0.03,
+    },
+]
+
+
+def evaluate_alpha(alpha):
+    projection_shift = []
+    target_uplift = []
+    safe_gain = []
+    side_drop = []
+    over_delta = []
+
+    for case in cases:
+        before = projection_score(case["activation"], unit_vector)
+        steered = add(case["activation"], scale(alpha, unit_vector))
+        after = projection_score(steered, unit_vector)
+        projection_shift.append(after - before)
+        target_uplift.append(alpha * case["target_gain"])
+        safe_gain.append(alpha * case["safe_gain"])
+        side_drop.append(alpha * case["side_loss"])
+        over_delta.append(alpha * case["over_refusal"])
+
+    metrics = {
+        "alpha": alpha,
+        "avg_projection_shift": round(sum(projection_shift) / len(cases), 3),
+        "target_uplift": round(sum(target_uplift) / len(cases), 3),
+        "safe_gain": round(sum(safe_gain) / len(cases), 3),
+        "side_drop": round(sum(side_drop) / len(cases), 3),
+        "over_refusal_delta": round(sum(over_delta) / len(cases), 3),
+    }
+    metrics["objective"] = round(
+        metrics["target_uplift"]
+        + metrics["safe_gain"]
+        - 0.8 * metrics["side_drop"]
+        - 1.2 * metrics["over_refusal_delta"],
+        3,
+    )
+    return metrics
+
+
+alpha_grid = [0.0, 0.4, 0.8, 1.2]
+scan = [evaluate_alpha(alpha) for alpha in alpha_grid]
+best = max(scan, key=lambda item: item["objective"])
+
+gates = {
+    "target": best["target_uplift"] >= 0.10,
+    "safe": best["safe_gain"] >= 0.08,
+    "side_effect": best["side_drop"] <= 0.06,
+    "over_refusal": best["over_refusal_delta"] <= 0.05,
+    "projection": best["avg_projection_shift"] >= 0.20,
+}
+
+print("mu_pos=", round_vector(mu_pos))
+print("mu_neg=", round_vector(mu_neg))
+print("steering_vector=", round_vector(steering_vector))
+print("unit_vector=", round_vector(unit_vector))
+print("scan=", scan)
+print("best=", best)
+print("gates=", gates)
+print("steering_ready=", all(gates.values()))
+```
+
+预期输出：
+
+```text
+mu_pos= [1.1, 0.8, 0.0]
+mu_neg= [0.1, -0.2, 0.8]
+steering_vector= [1.0, 1.0, -0.8]
+unit_vector= [0.615, 0.615, -0.492]
+scan= [{'alpha': 0.0, 'avg_projection_shift': 0.0, 'target_uplift': 0.0, 'safe_gain': 0.0, 'side_drop': 0.0, 'over_refusal_delta': 0.0, 'objective': 0.0}, {'alpha': 0.4, 'avg_projection_shift': 0.468, 'target_uplift': 0.078, 'safe_gain': 0.048, 'side_drop': 0.018, 'over_refusal_delta': 0.013, 'objective': 0.096}, {'alpha': 0.8, 'avg_projection_shift': 0.671, 'target_uplift': 0.155, 'safe_gain': 0.096, 'side_drop': 0.035, 'over_refusal_delta': 0.026, 'objective': 0.192}, {'alpha': 1.2, 'avg_projection_shift': 0.752, 'target_uplift': 0.233, 'safe_gain': 0.144, 'side_drop': 0.053, 'over_refusal_delta': 0.038, 'objective': 0.289}]
+best= {'alpha': 1.2, 'avg_projection_shift': 0.752, 'target_uplift': 0.233, 'safe_gain': 0.144, 'side_drop': 0.053, 'over_refusal_delta': 0.038, 'objective': 0.289}
+gates= {'target': True, 'safe': True, 'side_effect': True, 'over_refusal': True, 'projection': True}
+steering_ready= True
+```
+
+这个 demo 对应真实项目中的关键点：
+
+1. Steering vector 来自正负行为样本激活差，而不是手写规则。
+2. 强度 \(\alpha\) 要扫描，不能凭直觉选。
+3. 目标收益、安全收益、副作用和误拒增量要同时看。
+4. `steering_ready=True` 只说明 toy gate 通过，不代表真实模型可以直接上线。
+
+## 19. 本章总结
 
 Steering 是控制模型行为的一类方法，从 prompt 控制、解码控制，到激活层和表示层控制都有不同形式。
 

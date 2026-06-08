@@ -4,6 +4,18 @@
 
 本章重点讲多模态 SFT 的数据格式、image token、chat template、assistant-only loss mask、OCR、图表理解、grounding、多轮图文对话、数据质量和评估思路。
 
+## 0. 本讲资料边界与第二轮精修口径
+
+本讲第二轮精修前，重点校准了 LLaVA / Visual Instruction Tuning、InstructBLIP、LLaVA-1.5 和 MiniGPT-4 等公开论文资料。它们共同说明了一点：把视觉特征接入 LLM 之后，还需要多模态指令数据教模型如何按人类问题使用图片、如何组织回答、如何处理 OCR / 图表 / grounding / 多轮对话，以及如何在证据不足或高风险场景中拒答。
+
+本讲只讨论多模态 instruction tuning 的数据与训练审计，不展开第 4 章已经讲过的 VLM connector 结构，也不提前进入第 6 章 diffusion 的图像生成训练。重点放在：样本 schema、chat template、image placeholder、assistant-only loss mask、任务覆盖、证据支持、拒答边界、mixture 和数据质量门禁。
+
+第二轮新增内容按三个目标补齐：
+
+1. 把多模态 SFT 的样本、label mask、token budget、任务覆盖、证据支持和拒答准确率写成可检查公式。
+2. 给出一个 0 依赖 Python demo，帮助读者审计图文对话样本能否进入训练。
+3. 同步第四册百科、题库、练习、术语表、项目路线、知识图谱和进度记录中的多模态 SFT 数据审计入口。
+
 ## 5.1 为什么需要多模态 Instruction Tuning
 
 一个 VLM 即使有 vision encoder 和 LLM，也可能只会把图片特征接入语言模型，但不会稳定完成用户任务。
@@ -132,6 +144,113 @@ labels:    [-100 ...    ][-100 ... ][-100       ][assistant token ids]
 ```text
 多模态 SFT 中通常只对 assistant 回复计算 loss。system、user、image token、visual tokens 和 padding 都应该 mask 成 -100。这样训练目标才是让模型基于图像和指令生成正确回答，而不是复述输入或预测图片占位符。
 ```
+
+### 5.4.1 关键公式与多模态 SFT 数据速查
+
+一条多模态 SFT 样本可以抽象为：
+
+```math
+s_i=(M_i,U_i,A_i,T_i,Q_i,R_i)
+```
+
+其中 `M_i` 是图片或其他媒体集合，`U_i` 是用户指令与对话历史，`A_i` 是 assistant 目标回答，`T_i` 是任务类型，`Q_i` 是质量标签，`R_i` 是风险或拒答标签。
+
+图片数量必须和 prompt 里的 image placeholder 数量一致：
+
+```math
+C_{\mathrm{img}}(s_i)=C_{\mathrm{placeholder}}(s_i)
+```
+
+直接拼接视觉 token 的上下文长度可以写成：
+
+```math
+L_i=T_{\mathrm{user},i}+T_{\mathrm{assistant},i}+T_{\mathrm{special},i}+C_{\mathrm{img}}(s_i)N_v
+```
+
+训练前要保证：
+
+```math
+L_i\le T_{\mathrm{ctx}}
+```
+
+其中 `N_v` 是每张图进入 LLM 的视觉 token 数，`T_ctx` 是上下文上限。
+
+assistant-only label mask 可以写成：
+
+```math
+m_{i,t}=
+\begin{cases}
+1,& y_{i,t}\in A_i\\
+0,& y_{i,t}\notin A_i
+\end{cases}
+```
+
+对应的 SFT loss 是：
+
+```math
+L_{\mathrm{mm\_sft}}=
+-\frac{1}{\sum_i\sum_t m_{i,t}}
+\sum_i\sum_t
+m_{i,t}\log p_\theta(y_{i,t}\mid y_{i,1:t-1},M_i,U_i)
+```
+
+这个式子强调：视觉 token、user prompt、system prompt、padding 都是条件，不是预测目标。
+
+任务覆盖率可以用 required task set 检查：
+
+```math
+C_{\mathrm{task}}=
+\frac{
+\left|\mathcal{T}_{\mathrm{train}}\cap\mathcal{T}_{\mathrm{req}}\right|
+}{
+\left|\mathcal{T}_{\mathrm{req}}\right|
+}
+```
+
+其中 `T_req` 通常至少包含 caption、VQA、OCR、chart、grounding、多轮对话和 refusal。
+
+证据支持率衡量答案是否被图片或媒体证据支持：
+
+```math
+S_{\mathrm{support}}=
+\frac{1}{N}
+\sum_{i=1}^{N}
+\mathbf{1}[A_i\ \mathrm{is\ supported\ by}\ M_i]
+```
+
+对资料不足样本，拒答准确率可以写成：
+
+```math
+A_{\mathrm{refuse}}=
+\frac{
+\sum_i \mathbf{1}[r_i=1\land \hat r_i=1]
+}{
+\sum_i \mathbf{1}[r_i=1]
+}
+```
+
+其中 `r_i=1` 表示样本确实需要拒答或表达不确定，`\hat r_i=1` 表示目标回答采用了正确拒答。
+
+一个多模态 SFT 数据门禁可以写成：
+
+```math
+G_{\mathrm{mm\_sft}}=
+\mathbf{1}\left[
+C_{\mathrm{img}}=C_{\mathrm{placeholder}}
+\land
+L_i\le T_{\mathrm{ctx}}
+\land
+C_{\mathrm{label}}=T_{\mathrm{assistant}}
+\land
+C_{\mathrm{task}}\ge\tau_t
+\land
+S_{\mathrm{support}}\ge\tau_s
+\land
+A_{\mathrm{refuse}}\ge\tau_r
+\right]
+```
+
+面试里可以把这组公式说成一句话：多模态 SFT 数据不是“有图有答案”就能训练，必须同时满足格式对齐、上下文预算、label mask、任务覆盖、视觉证据支持和拒答边界。
 
 ## 5.5 图像描述数据
 
@@ -352,6 +471,21 @@ VLM 不应该总是回答。图片信息不足时，应说明无法确定。
 
 自动检查可以做格式和一致性，关键样本仍需要人工抽检。
 
+### 5.12.1 数据审计指标
+
+数据质量检查最好输出可复盘的指标，而不是只说“人工看过”。常用指标包括：
+
+| 指标 | 含义 | 典型用途 |
+| --- | --- | --- |
+| placeholder mismatch rate | 图片数量和占位符数量不一致比例 | 检查模板和 collator |
+| unsupported answer rate | 回答不被图像证据支持比例 | 控制视觉幻觉 |
+| missing refusal rate | 该拒答却硬答的比例 | 控制资料不足场景 |
+| task coverage | 必要任务类型覆盖率 | 防止只会 caption |
+| max total tokens | 样本最大上下文长度 | 防止训练截断 |
+| valid label count | assistant 有效 label 数 | 检查 loss mask |
+
+这些指标要按任务切片看。OCR、图表、grounding 和拒答样本的错误成本通常高于普通 caption，不能被总体平均数掩盖。
+
 ## 5.13 多模态数据混合
 
 训练 VLM 不能只用一种数据。
@@ -393,7 +527,7 @@ batch 里可能包含：
 {
     "input_ids": ...,
     "labels": ...,
-    "pixel_values": [image tensors per sample],
+    "pixel_values": ["image_tensors_per_sample"],
     "num_images": ...,
 }
 ```
@@ -510,8 +644,238 @@ batch 里可能包含：
 6. 构造 3 个资料不足必须拒答的样本。
 7. 设计一个多模态 SFT 数据质量 checklist。
 8. 设计一个 VLM SFT 后的评估表。
+9. 写一个 0 依赖数据审计脚本，检查 placeholder、label mask、任务覆盖、证据支持和拒答边界。
 
-## 5.19 本章总结
+## 5.19 最小可运行多模态 SFT 数据审计 demo
+
+下面这个 demo 不依赖深度学习框架，用 toy 样本检查多模态 SFT 数据是否满足训练前的基本门禁：图片占位符一致、上下文不超预算、assistant-only label 数正确、任务覆盖完整、回答被视觉证据支持、资料不足样本能正确拒答。
+
+```python
+import re
+from collections import Counter
+
+
+IGNORE_INDEX = -100
+VISUAL_TOKENS_PER_IMAGE = 576
+CONTEXT_LIMIT = 2048
+REQUIRED_TASKS = {
+    "caption",
+    "vqa",
+    "ocr",
+    "chart",
+    "grounding",
+    "multi_turn",
+    "refusal",
+}
+
+records = [
+    {
+        "id": "caption_001",
+        "task": "caption",
+        "images": 1,
+        "prompt": "<image> Describe this street scene.",
+        "user_tokens": 18,
+        "assistant_tokens": 22,
+        "special_tokens": 4,
+        "supported": True,
+        "needs_refusal": False,
+        "refused": False,
+        "safe": True,
+    },
+    {
+        "id": "vqa_count_001",
+        "task": "vqa",
+        "images": 1,
+        "prompt": "<image> How many cups are on the table?",
+        "user_tokens": 16,
+        "assistant_tokens": 8,
+        "special_tokens": 4,
+        "supported": True,
+        "needs_refusal": False,
+        "refused": False,
+        "safe": True,
+    },
+    {
+        "id": "ocr_001",
+        "task": "ocr",
+        "images": 1,
+        "prompt": "<image> What is the total amount on the receipt?",
+        "user_tokens": 18,
+        "assistant_tokens": 10,
+        "special_tokens": 4,
+        "supported": True,
+        "needs_refusal": False,
+        "refused": False,
+        "safe": True,
+    },
+    {
+        "id": "chart_001",
+        "task": "chart",
+        "images": 1,
+        "prompt": "<image> Which quarter has the highest sales?",
+        "user_tokens": 17,
+        "assistant_tokens": 9,
+        "special_tokens": 4,
+        "supported": True,
+        "needs_refusal": False,
+        "refused": False,
+        "safe": True,
+    },
+    {
+        "id": "grounding_001",
+        "task": "grounding",
+        "images": 1,
+        "prompt": "<image> Locate the red button.",
+        "user_tokens": 14,
+        "assistant_tokens": 12,
+        "special_tokens": 4,
+        "supported": True,
+        "needs_refusal": False,
+        "refused": False,
+        "safe": True,
+    },
+    {
+        "id": "multi_turn_001",
+        "task": "multi_turn",
+        "images": 1,
+        "prompt": "<image> What room is this?\nWhat color is the sofa?",
+        "user_tokens": 42,
+        "assistant_tokens": 20,
+        "special_tokens": 8,
+        "supported": True,
+        "needs_refusal": False,
+        "refused": False,
+        "safe": True,
+    },
+    {
+        "id": "refusal_001",
+        "task": "refusal",
+        "images": 1,
+        "prompt": "<image> What is the blurry license plate number?",
+        "user_tokens": 20,
+        "assistant_tokens": 18,
+        "special_tokens": 4,
+        "supported": True,
+        "needs_refusal": True,
+        "refused": True,
+        "safe": True,
+    },
+    {
+        "id": "bad_ocr_001",
+        "task": "ocr",
+        "images": 1,
+        "prompt": "<image_1> <image_2> Read the account number.",
+        "user_tokens": 18,
+        "assistant_tokens": 12,
+        "special_tokens": 4,
+        "supported": False,
+        "needs_refusal": True,
+        "refused": False,
+        "safe": False,
+    },
+]
+
+
+def count_placeholders(prompt):
+    return len(re.findall(r"<image(?:_\d+)?>", prompt))
+
+
+def total_tokens(record):
+    return (
+        record["images"] * VISUAL_TOKENS_PER_IMAGE
+        + record["user_tokens"]
+        + record["assistant_tokens"]
+        + record["special_tokens"]
+    )
+
+
+def label_count(record):
+    labels = [IGNORE_INDEX] * (record["user_tokens"] + record["special_tokens"])
+    labels += list(range(record["assistant_tokens"]))
+    return sum(label != IGNORE_INDEX for label in labels)
+
+
+def audit(record):
+    issues = []
+    if count_placeholders(record["prompt"]) != record["images"]:
+        issues.append("placeholder_mismatch")
+    if total_tokens(record) > CONTEXT_LIMIT:
+        issues.append("context_over_budget")
+    if label_count(record) != record["assistant_tokens"]:
+        issues.append("label_mask_error")
+    if not record["supported"]:
+        issues.append("unsupported_answer")
+    if record["needs_refusal"] and not record["refused"]:
+        issues.append("missing_refusal")
+    if not record["safe"]:
+        issues.append("safety_risk")
+    return issues
+
+
+reports = {record["id"]: audit(record) for record in records}
+accepted = [record for record in records if not reports[record["id"]]]
+rejected = [sample_id for sample_id, issues in reports.items() if issues]
+accepted_tasks = {record["task"] for record in accepted}
+task_counts = Counter(record["task"] for record in accepted)
+issue_counts = Counter(issue for issues in reports.values() for issue in issues)
+
+label_tokens = sum(label_count(record) for record in accepted)
+assistant_tokens = sum(record["assistant_tokens"] for record in accepted)
+max_total_tokens = max(total_tokens(record) for record in accepted)
+task_coverage = len(accepted_tasks & REQUIRED_TASKS) / len(REQUIRED_TASKS)
+support_rate = sum(record["supported"] for record in accepted) / len(accepted)
+refusal_needed = [record for record in accepted if record["needs_refusal"]]
+refusal_accuracy = sum(record["refused"] for record in refusal_needed) / max(
+    1, len(refusal_needed)
+)
+
+checks = {
+    "bad_sample_rejected": rejected == ["bad_ocr_001"],
+    "required_tasks_covered": task_coverage == 1.0,
+    "labels_match_answers": label_tokens == assistant_tokens,
+    "within_context": max_total_tokens <= CONTEXT_LIMIT,
+    "support_ok": support_rate == 1.0,
+    "refusal_ok": refusal_accuracy == 1.0,
+}
+
+print("accepted_ids=", [record["id"] for record in accepted])
+print("rejected=", {sample_id: reports[sample_id] for sample_id in rejected})
+print("task_counts=", dict(sorted(task_counts.items())))
+print("task_coverage=", round(task_coverage, 3))
+print("label_tokens=", label_tokens)
+print("assistant_tokens=", assistant_tokens)
+print("max_total_tokens=", max_total_tokens)
+print("support_rate=", round(support_rate, 3))
+print("refusal_accuracy=", round(refusal_accuracy, 3))
+print("issue_counts=", dict(sorted(issue_counts.items())))
+print("checks=", checks)
+print("gate_pass=", all(checks.values()))
+```
+
+一组期望输出如下：
+
+```text
+accepted_ids= ['caption_001', 'vqa_count_001', 'ocr_001', 'chart_001', 'grounding_001', 'multi_turn_001', 'refusal_001']
+rejected= {'bad_ocr_001': ['placeholder_mismatch', 'unsupported_answer', 'missing_refusal', 'safety_risk']}
+task_counts= {'caption': 1, 'chart': 1, 'grounding': 1, 'multi_turn': 1, 'ocr': 1, 'refusal': 1, 'vqa': 1}
+task_coverage= 1.0
+label_tokens= 99
+assistant_tokens= 99
+max_total_tokens= 646
+support_rate= 1.0
+refusal_accuracy= 1.0
+issue_counts= {'missing_refusal': 1, 'placeholder_mismatch': 1, 'safety_risk': 1, 'unsupported_answer': 1}
+checks= {'bad_sample_rejected': True, 'required_tasks_covered': True, 'labels_match_answers': True, 'within_context': True, 'support_ok': True, 'refusal_ok': True}
+gate_pass= True
+```
+
+面试表达：
+
+```text
+我会把多模态 instruction tuning 数据先做成可审计表，而不是直接丢进训练。每条样本检查图片数量和 placeholder 是否一致、上下文是否超预算、assistant label 数是否等于回答 token 数、答案是否被视觉证据支持、资料不足时是否正确拒答。然后再看 caption、VQA、OCR、chart、grounding、多轮和 refusal 是否都有覆盖。这样能在训练前发现很多 VLM 幻觉和格式 bug。
+```
+
+## 5.20 本章总结
 
 多模态 instruction tuning 是让 VLM 从“能接收图片”变成“能按指令使用图片”的关键阶段。它的核心不只是增加图像输入，而是构造高质量图文对话数据，并正确处理 image token、chat template、assistant-only loss mask、多轮对话、OCR、图表、grounding 和拒答边界。
 
@@ -524,5 +888,6 @@ batch 里可能包含：
 5. 拒答数据能减少视觉证据不足时的幻觉。
 6. 数据质量和 mixture 决定模型能力分布。
 7. 评估要覆盖视觉理解、OCR、图表、幻觉、安全和文本能力回归。
+8. 训练前要用数据审计门禁检查 placeholder、label mask、证据支持、拒答边界和任务覆盖。
 
 下一章会进入 diffusion 基础，讲清加噪、去噪、噪声预测、采样过程和为什么 diffusion 能生成图像。

@@ -4,6 +4,14 @@
 
 面试重点：评估的目的不只是排名，还要指导下一步改进。
 
+## 本章资料边界
+
+本章第二轮精修前，按 `WRITING_PLAN.md` 联网核对了 OpenAI Evals、HELM、CheckList 行为测试、前序 human eval / LLM-as-a-Judge / safety eval / 在线实验章节，以及通用机器学习 error analysis、回归测试和 root cause analysis 的公开资料边界。
+
+本章聚焦大模型评估闭环里的可迁移方法：错误 taxonomy、能力维度拆解、失败样例聚类、root cause 假设、对照实验验证、regression suite、样本级版本 diff、上线门禁和从错误分析到改进动作的闭环。
+
+本章不展开生产级标注平台、向量聚类算法细节、复杂因果发现算法或完整评测平台实现；目标是让读者能把“模型分数变化”转成“可定位、可修复、可回归验证的问题清单”。
+
 ## 本章目标
 
 学完本章，你要能回答：
@@ -212,6 +220,80 @@ LLM judge 成本低，但需要校准。
 8. 安全等级：普通、敏感、高风险。
 
 聚合目标是找到高频、高严重度、可修复的问题簇。
+
+### 2.5 核心数学抽象
+
+Error analysis 可以把评估样本写成：
+
+```math
+e_i=(x_i,y_i,s_i,r_i,c_i,w_i,z_i)
+```
+
+其中 `x_i` 是输入，`y_i` 是模型输出，`s_i` 是通过或得分，`r_i` 是错误类型，`c_i` 是能力或场景切片，`w_i` 是严重度权重，`z_i` 是版本、模型、prompt、RAG 或工具链配置。
+
+失败集合可以写成：
+
+```math
+\mathcal{F}=\{i:s_i=0\}
+```
+
+某个错误类型 `k` 的失败数量和占比是：
+
+```math
+N_k=\sum_{i\in\mathcal{F}}\mathbb{I}[r_i=k],
+\qquad
+P_k=\frac{N_k}{|\mathcal{F}|}
+```
+
+如果要考虑严重程度，可以计算 severity-weighted loss：
+
+```math
+L_k=\sum_{i\in\mathcal{F}}w_i\,\mathbb{I}[r_i=k]
+```
+
+修复优先级可以用一个简单的可解释评分近似：
+
+```math
+H_k=N_k\,\bar{w}_k\,q_k
+```
+
+其中 `N_k` 是频次，`w_bar_k` 是平均严重度，`q_k` 是可修复性分数。这个公式不是科学定律，而是帮助团队避免只追高频、忽略高风险或可快速修复的问题。
+
+版本 diff 中最关键的是回归率：
+
+```math
+R_{\mathrm{reg}}=
+\frac{\sum_i \mathbb{I}[o_i=1,n_i=0]}{m}
+```
+
+其中 `o_i` 表示旧版本是否通过，`n_i` 表示新版本是否通过，`m` 是对齐后的样本数。
+
+修复率可以写成：
+
+```math
+R_{\mathrm{fix}}=
+\frac{\sum_i \mathbb{I}[o_i=0,n_i=1]}{m}
+```
+
+Regression suite 的覆盖率可以按近期关键能力集合估算：
+
+```math
+C_{\mathrm{suite}}=
+\frac{|\mathcal{C}_{\mathrm{suite}}\cap\mathcal{C}_{\mathrm{recent}}|}
+{|\mathcal{C}_{\mathrm{recent}}|}
+```
+
+上线门禁可以写成：
+
+```math
+G_{\mathrm{reg}}=
+\mathbb{I}[N_{\mathrm{high\_reg}}=0]\,
+\mathbb{I}[N_{\mathrm{safety\_reg}}=0]\,
+\mathbb{I}[C_{\mathrm{suite}}\ge \tau_{\mathrm{coverage}}]\,
+\mathbb{I}[R_{\mathrm{fix}}>R_{\mathrm{reg}}]
+```
+
+直觉是：新版本不仅要有总体收益，还不能引入高严重度或安全回归，regression suite 还要覆盖近期关键问题。
 
 ## 3. 能力维度拆解
 
@@ -794,9 +876,131 @@ Regression suite 常用于上线门禁。
 
 高风险业务中，一个严重 regression 就可能阻止上线。
 
-## 10. 真实项目中的坑
+## 10. 最小可运行 Error Analysis 审计 Demo
 
-### 10.1 错误分类太粗
+下面这个 demo 模拟一次版本对比后的错误分析。它把样本级 diff、错误类型统计、严重度加权优先级、root cause 聚合、regression suite 覆盖率和上线门禁放到一个流程里。
+
+```python
+from collections import Counter, defaultdict
+
+
+cases = [
+    {"id": "rag_finance", "old_ok": False, "new_ok": True, "error": "none", "severity": 0, "fixability": 0.0, "capability": "rag", "in_suite": True},
+    {"id": "json_schema", "old_ok": True, "new_ok": False, "error": "formatting", "severity": 3, "fixability": 0.9, "capability": "schema", "in_suite": True},
+    {"id": "safety_refusal", "old_ok": True, "new_ok": False, "error": "safety", "severity": 5, "fixability": 0.6, "capability": "safety", "in_suite": True},
+    {"id": "math_word", "old_ok": False, "new_ok": False, "error": "reasoning", "severity": 4, "fixability": 0.5, "capability": "reasoning", "in_suite": False},
+    {"id": "tool_call", "old_ok": False, "new_ok": True, "error": "none", "severity": 0, "fixability": 0.0, "capability": "tool", "in_suite": False},
+    {"id": "citation", "old_ok": True, "new_ok": False, "error": "citation_error", "severity": 4, "fixability": 0.8, "capability": "rag", "in_suite": True},
+    {"id": "stale_knowledge", "old_ok": False, "new_ok": False, "error": "retrieval_miss", "severity": 4, "fixability": 0.7, "capability": "rag", "in_suite": False},
+    {"id": "harmless_chat", "old_ok": True, "new_ok": True, "error": "none", "severity": 0, "fixability": 0.0, "capability": "chat", "in_suite": False},
+    {"id": "privacy", "old_ok": True, "new_ok": False, "error": "privacy", "severity": 5, "fixability": 0.7, "capability": "privacy", "in_suite": True},
+    {"id": "code_edge", "old_ok": False, "new_ok": False, "error": "edge_case", "severity": 3, "fixability": 0.8, "capability": "code", "in_suite": False},
+]
+
+root_map = {
+    "formatting": "prompt_schema",
+    "safety": "policy_boundary",
+    "privacy": "policy_boundary",
+    "citation_error": "rag_grounding",
+    "retrieval_miss": "rag_retrieval",
+    "reasoning": "reasoning_data",
+    "edge_case": "code_tests",
+}
+
+buckets = Counter()
+regressions = []
+fixes = []
+new_failures = []
+
+for case in cases:
+    if case["old_ok"] and case["new_ok"]:
+        bucket = "stable_correct"
+    elif (not case["old_ok"]) and case["new_ok"]:
+        bucket = "fixed"
+        fixes.append(case["id"])
+    elif case["old_ok"] and (not case["new_ok"]):
+        bucket = "regressed"
+        regressions.append(case["id"])
+    else:
+        bucket = "stable_wrong"
+
+    buckets[bucket] += 1
+    if not case["new_ok"]:
+        new_failures.append(case)
+
+error_counts = Counter(case["error"] for case in new_failures)
+weighted_loss = defaultdict(float)
+fixability = defaultdict(list)
+
+for case in new_failures:
+    weighted_loss[case["error"]] += case["severity"]
+    fixability[case["error"]].append(case["fixability"])
+
+priority = {}
+for error, count in error_counts.items():
+    avg_severity = weighted_loss[error] / count
+    avg_fix = sum(fixability[error]) / len(fixability[error])
+    priority[error] = round(count * avg_severity * avg_fix, 3)
+
+root_counts = Counter(root_map[case["error"]] for case in new_failures)
+
+recent_caps = {"rag", "safety", "schema", "tool", "reasoning", "privacy"}
+suite_caps = {case["capability"] for case in cases if case["in_suite"]}
+coverage = len(recent_caps & suite_caps) / len(recent_caps)
+missing_caps = sorted(recent_caps - suite_caps)
+
+high_regressions = [
+    case["id"]
+    for case in cases
+    if case["old_ok"] and not case["new_ok"] and case["severity"] >= 4
+]
+safety_regressions = [
+    case["id"]
+    for case in cases
+    if case["old_ok"] and not case["new_ok"] and case["error"] in {"safety", "privacy"}
+]
+
+gates = {
+    "no_high_regression": len(high_regressions) == 0,
+    "no_safety_regression": len(safety_regressions) == 0,
+    "coverage": coverage >= 0.80,
+    "fixes_exceed_regressions": len(fixes) > len(regressions),
+}
+
+print("version_buckets=", dict(buckets), sep="")
+print("regressions=", regressions, sep="")
+print("fixes=", fixes, sep="")
+print("error_counts=", dict(error_counts), sep="")
+print("priority=", dict(sorted(priority.items(), key=lambda item: item[1], reverse=True)), sep="")
+print("root_counts=", dict(root_counts), sep="")
+print("suite_coverage=", {"coverage": round(coverage, 3), "missing": missing_caps}, sep="")
+print("high_regressions=", high_regressions, sep="")
+print("safety_regressions=", safety_regressions, sep="")
+print("gates=", gates, sep="")
+print("gate_pass=", all(gates.values()), sep="")
+```
+
+一组可能输出如下：
+
+```text
+version_buckets={'fixed': 2, 'regressed': 4, 'stable_wrong': 3, 'stable_correct': 1}
+regressions=['json_schema', 'safety_refusal', 'citation', 'privacy']
+fixes=['rag_finance', 'tool_call']
+error_counts={'formatting': 1, 'safety': 1, 'reasoning': 1, 'citation_error': 1, 'retrieval_miss': 1, 'privacy': 1, 'edge_case': 1}
+priority={'privacy': 3.5, 'citation_error': 3.2, 'safety': 3.0, 'retrieval_miss': 2.8, 'formatting': 2.7, 'edge_case': 2.4, 'reasoning': 2.0}
+root_counts={'prompt_schema': 1, 'policy_boundary': 2, 'reasoning_data': 1, 'rag_grounding': 1, 'rag_retrieval': 1, 'code_tests': 1}
+suite_coverage={'coverage': 0.667, 'missing': ['reasoning', 'tool']}
+high_regressions=['safety_refusal', 'citation', 'privacy']
+safety_regressions=['safety_refusal', 'privacy']
+gates={'no_high_regression': False, 'no_safety_regression': False, 'coverage': False, 'fixes_exceed_regressions': False}
+gate_pass=False
+```
+
+这个结果说明：新版本虽然修复了两个样例，但引入了四个回归，其中包含 safety、privacy 和 citation 这类高严重度问题；同时 regression suite 对近期 reasoning 和 tool 能力覆盖不足。这样的版本不应该直接上线，而应该先修复高严重度回归、补齐 suite 覆盖，再重新跑版本 diff。
+
+## 11. 真实项目中的坑
+
+### 11.1 错误分类太粗
 
 如果只有“正确”和“错误”，就无法指导修复。
 
@@ -804,13 +1008,13 @@ Regression suite 常用于上线门禁。
 
 建议从 8 到 15 个一级错误类型开始，再为重点任务增加二级标签。
 
-### 10.2 把 judge 的解释当成事实
+### 11.2 把 judge 的解释当成事实
 
 LLM judge 可以辅助分析，但它也会误判。
 
 尤其在数学、代码、安全、医疗、法律等任务中，高风险样例需要人工复核。
 
-### 10.3 Regression suite 越积越脏
+### 11.3 Regression suite 越积越脏
 
 长期维护中，regression suite 可能出现：
 
@@ -822,13 +1026,13 @@ LLM judge 可以辅助分析，但它也会误判。
 
 因此需要定期清理和版本化。
 
-### 10.4 只加测试，不修 root cause
+### 11.4 只加测试，不修 root cause
 
 把失败样例加入 regression suite 只是防止复发。
 
 如果不修 root cause，模型仍然会在同类新样例上失败。
 
-### 10.5 用训练集污染 regression suite
+### 11.5 用训练集污染 regression suite
 
 如果把 regression suite 直接用于训练，然后再用同一套 suite 报告提升，评估结论会失真。
 
@@ -838,7 +1042,7 @@ LLM judge 可以辅助分析，但它也会误判。
 2. 同时构造未见过的等价 holdout 样例。
 3. 报告时区分 train-fix set 和 held-out regression set。
 
-### 10.6 忽略线上新分布
+### 11.6 忽略线上新分布
 
 Regression suite 主要覆盖已知问题。
 
@@ -846,9 +1050,9 @@ Regression suite 主要覆盖已知问题。
 
 新用户、新产品形态和新攻击方式会带来未知错误。
 
-## 11. 优点、缺点和适用场景
+## 12. 优点、缺点和适用场景
 
-### 11.1 Error analysis 的优点
+### 12.1 Error analysis 的优点
 
 1. 能把分数变化转成具体原因。
 2. 能指导数据、训练、prompt 和系统改进。
@@ -856,7 +1060,7 @@ Regression suite 主要覆盖已知问题。
 4. 能帮助团队建立共享问题语言。
 5. 能提高评估报告的可信度。
 
-### 11.2 Error analysis 的局限
+### 12.2 Error analysis 的局限
 
 1. 人工成本高。
 2. 错误 taxonomy 需要迭代。
@@ -864,7 +1068,7 @@ Regression suite 主要覆盖已知问题。
 4. 聚类和 LLM 分析可能引入偏差。
 5. 很难覆盖未知未知问题。
 
-### 11.3 Regression testing 的适用场景
+### 12.3 Regression testing 的适用场景
 
 特别适合：
 
@@ -879,9 +1083,9 @@ Regression suite 主要覆盖已知问题。
 
 它必须和 broader benchmark、线上监控、人工抽检、新样本探索结合。
 
-## 12. 常见改进方向
+## 13. 常见改进方向
 
-### 12.1 Active error mining
+### 13.1 Active error mining
 
 主动挖掘容易失败的样例。
 
@@ -895,13 +1099,13 @@ Regression suite 主要覆盖已知问题。
 
 这些样本通常比随机样本更有分析价值。
 
-### 12.2 自动标签和人工复核结合
+### 13.2 自动标签和人工复核结合
 
 用 LLM 做初标，再让人工复核关键样例。
 
 这样可以降低成本，同时保留质量。
 
-### 12.3 从 case 到 capability benchmark
+### 13.3 从 case 到 capability benchmark
 
 单个失败 case 修复后，可以扩展成一组能力测试。
 
@@ -915,7 +1119,7 @@ Regression suite 主要覆盖已知问题。
 
 这样可以测试模型是否真正掌握能力，而不是记住单个样例。
 
-### 12.4 Eval-driven development
+### 13.4 Eval-driven development
 
 类似软件工程中的 test-driven development，大模型系统可以采用 eval-driven development。
 
@@ -923,7 +1127,7 @@ Regression suite 主要覆盖已知问题。
 
 这样可以减少“改了很多但不知道是否更好”的情况。
 
-## 13. 面试官会怎么问
+## 14. 面试官会怎么问
 
 ### 问题 1：模型总体分数提升了，为什么还要做 error analysis？
 
@@ -974,7 +1178,7 @@ Regression suite 主要覆盖已知问题。
 3. 应保留独立 holdout 或构造等价新样例验证泛化。
 4. 报告结果时区分训练修复集和未见过的 regression set。
 
-## 14. 标准回答模板
+## 15. 标准回答模板
 
 面试中可以这样回答：
 
@@ -988,35 +1192,35 @@ Regression suite 主要覆盖已知问题。
 最后我会把 error analysis 结果转成具体改进动作：数据补强、hard negative 构造、prompt/schema 修改、retriever/reranker 优化、工具链修复、训练或对齐目标调整。上线前不仅看主指标，还要看分层指标、严重 regression、护栏指标和人工复核结果。
 ```
 
-## 15. 常见误区
+## 16. 常见误区
 
-### 15.1 只报告总体分数
+### 16.1 只报告总体分数
 
 总体分数不能说明局部能力变化，也不能指导修复。
 
-### 15.2 错误 taxonomy 不连接修复动作
+### 16.2 错误 taxonomy 不连接修复动作
 
 如果错误标签不能指导下一步行动，分类价值有限。
 
-### 15.3 把所有失败都加入 regression suite
+### 16.3 把所有失败都加入 regression suite
 
 这样会让 suite 膨胀、噪声增加、维护成本变高。
 
-### 15.4 不做样本级 diff
+### 16.4 不做样本级 diff
 
 只比较聚合指标会漏掉新版本修好的样例和退化的样例。
 
-### 15.5 不区分模型问题和系统问题
+### 16.5 不区分模型问题和系统问题
 
 RAG、Agent、多工具系统中，很多错误来自检索、上下文、工具、权限、后处理或 UI，而不是模型权重。
 
-### 15.6 用被训练过的样例证明模型变强
+### 16.6 用被训练过的样例证明模型变强
 
 这会造成评估污染。
 
 修复样例可以进训练，但最终结论要靠未见过的 holdout 或独立测试集支持。
 
-## 16. 小练习
+## 17. 小练习
 
 ### 练习 1
 
@@ -1042,7 +1246,7 @@ RAG、Agent、多工具系统中，很多错误来自检索、上下文、工具
 
 参考方向：planning、tool selection、tool arguments、observation reading、permission、final answer。
 
-## 17. 本章总结
+## 18. 本章总结
 
 Error analysis 的核心是把评估结果从“一个分数”拆成“可定位、可修复、可复查的问题”。
 

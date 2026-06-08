@@ -8,6 +8,18 @@
 
 本章重点：通用文本、代码、数学、多语言、专业领域数据的混合策略和实验方法。
 
+## 0. 本讲资料边界与第二轮精修口径
+
+按照 `WRITING_PLAN.md` 的要求，本讲精修前核对了 Chinchilla、T5 / mT5、Gopher / MassiveText、RefinedWeb、FineWeb、Dolma、DataComp-LM / DCLM、Llama 系列公开报告和 phi-1 / textbook-quality data 相关资料。
+
+本讲聚焦 data mixture 作为训练目标设计的一部分：数据池标签、token 配比、温度采样、质量加权、目标能力权重、风险约束、effective epoch、配比 ablation 和版本审计。
+
+```text
+数据池 -> 清洗去重后 token 数 -> 质量 / 风险 / 能力标签 -> 采样权重 -> 训练预算分配 -> 评估矩阵 -> ablation -> 版本化
+```
+
+本讲不把任何公开模型的数据比例写成通用最佳答案。真实项目的 mixture 要由模型目标、token budget、数据质量、tokenizer、许可证、安全约束和评估结果共同决定。
+
 ---
 
 ## 1. 先建立直觉：配比决定模型“读过什么世界”
@@ -70,6 +82,96 @@ data mixture 不只是“网页占多少”。它至少包含以下维度：
 如果多语言数据占比提高，非英语能力会提升，但在固定 token budget 下，英语和高资源领域的比例会下降。
 
 这就是配比的基本 trade-off：训练 token 是有限预算。提高一种数据的采样权重，通常意味着降低另一种数据的有效权重。
+
+### 4.1 关键公式与审计指标
+
+设清洗、去重和污染隔离后的数据池集合为：
+
+```math
+\mathcal{P}=\{P_1,P_2,\ldots,P_K\}
+```
+
+每个数据池 `P_k` 有 token 数 `n_k`、质量分 `q_k`、风险分 `r_k` 和能力标签向量：
+
+```math
+a_k=(a_{k,\mathrm{general}},a_{k,\mathrm{code}},a_{k,\mathrm{math}},a_{k,\mathrm{multi}},a_{k,\mathrm{safety}})
+```
+
+最简单的自然配比是按清洗后 token 数采样：
+
+```math
+p_k^{\mathrm{nat}}=\frac{n_k}{\sum_j n_j}
+```
+
+多语言和多领域常用平滑采样。用 `0\le \alpha\le 1` 表示平滑强度，可以写成：
+
+```math
+p_k(\alpha)=\frac{n_k^\alpha}{\sum_j n_j^\alpha}
+```
+
+其中 `\alpha=1` 接近自然规模采样，`\alpha=0` 接近均匀采样。实际工程里也可以把 `\alpha` 写成温度的倒数，面试时重点讲清“平滑大池、抬高小池”的作用。
+
+如果还要考虑质量、目标能力和风险，可以定义目标能力权重 `v_m`，数据池效用为：
+
+```math
+u_k=\sum_m v_m a_{km}
+```
+
+一个可解释的采样分数可以写成：
+
+```math
+s_k=n_k^\alpha \exp(\beta q_k+\gamma u_k-\lambda r_k)
+```
+
+最终采样配比为：
+
+```math
+p_k=\frac{s_k}{\sum_j s_j}
+```
+
+如果总训练预算是 `B` 个 token，则第 `k` 个数据池计划采样 token 数为：
+
+```math
+b_k=Bp_k
+```
+
+effective epoch 用于衡量小数据池被重复使用的程度：
+
+```math
+e_k=\frac{b_k}{n_k}
+```
+
+如果 `e_k` 过高，说明该数据池被重复上采样，可能带来记忆、过拟合或污染风险。
+
+对于某个能力维度 `m`，mixture 的能力覆盖估计可以写成：
+
+```math
+A_m(p)=\sum_k p_k a_{km}
+```
+
+配比方案的多目标效用可以粗略写成：
+
+```math
+U(p)=\sum_m v_m A_m(p)-\lambda_r\sum_k p_kr_k-\lambda_e\sum_k \max(0,e_k-e_{\max})
+```
+
+这里第一项鼓励目标能力覆盖，第二项惩罚风险，第三项惩罚过度重复小数据池。
+
+配比相对 baseline 的漂移可以用 KL divergence 监控：
+
+```math
+D_{\mathrm{KL}}(p\Vert p^0)=\sum_k p_k\log\frac{p_k}{p_k^0}
+```
+
+它不是越小越好，而是帮助审计“这次 mixture 改动到底有多大”。
+
+上线训练前可以把门禁写成：
+
+```math
+G_{\mathrm{mix}}=I(\min_m A_m(p)\ge a_m^{\min})I(\max_k e_k\le e_{\max})I(\sum_k p_kr_k\le r_{\max})I(D_{\mathrm{KL}}\le d_{\max})
+```
+
+面试里要强调：这些公式只是把配比思路显式化。真实训练仍要靠 ablation、小模型预实验、多维评估和大规模复验来校准。
 
 ---
 
@@ -440,6 +542,136 @@ data mixture 不能只靠直觉，必须通过实验闭环。
 第十步，迭代优化。根据训练结果、产品反馈和安全评估继续调整。
 
 这套回答比直接报一个比例更好，因为真实项目中没有放之四海皆准的比例，只有目标驱动的实验闭环。
+
+### 21.1 最小可运行 data mixture 审计 demo
+
+下面这个 demo 不依赖外部库，也不读写文件。输入是一组 toy 数据池，每个池有清洗后 token 数、质量分、风险分和能力标签；输出包括自然配比、目标采样配比、计划采样 token、effective epoch、上采样倍数、能力覆盖、平均质量、风险和门禁结果。
+
+它演示的是配比审计机制，不是生产级 sampler。真实训练还需要和 tokenizer 统计、数据版本、分布式采样器、训练曲线、验证 loss、下游评估和安全审计联动。
+
+```python
+import math
+
+
+pools = [
+    {"name": "general_web", "tokens": 500_000, "quality": 0.72, "risk": 0.06, "cap": {"general": 0.85, "code": 0.10, "math": 0.10, "multilingual": 0.25, "safety": 0.25}},
+    {"name": "books_reference", "tokens": 120_000, "quality": 0.88, "risk": 0.02, "cap": {"general": 0.75, "code": 0.05, "math": 0.25, "multilingual": 0.15, "safety": 0.15}},
+    {"name": "code_docs", "tokens": 80_000, "quality": 0.90, "risk": 0.04, "cap": {"general": 0.25, "code": 0.95, "math": 0.30, "multilingual": 0.10, "safety": 0.15}},
+    {"name": "math_reasoning", "tokens": 30_000, "quality": 0.93, "risk": 0.03, "cap": {"general": 0.20, "code": 0.25, "math": 0.95, "multilingual": 0.08, "safety": 0.10}},
+    {"name": "zh_multilingual", "tokens": 70_000, "quality": 0.82, "risk": 0.04, "cap": {"general": 0.45, "code": 0.05, "math": 0.15, "multilingual": 0.95, "safety": 0.20}},
+    {"name": "domain_science", "tokens": 40_000, "quality": 0.87, "risk": 0.05, "cap": {"general": 0.55, "code": 0.10, "math": 0.45, "multilingual": 0.10, "safety": 0.10}},
+    {"name": "synthetic_reasoning", "tokens": 20_000, "quality": 0.86, "risk": 0.08, "cap": {"general": 0.35, "code": 0.30, "math": 0.85, "multilingual": 0.08, "safety": 0.20}},
+    {"name": "safety_data", "tokens": 10_000, "quality": 0.92, "risk": 0.02, "cap": {"general": 0.15, "code": 0.05, "math": 0.15, "multilingual": 0.20, "safety": 0.98}},
+]
+
+target = {"general": 0.35, "code": 0.20, "math": 0.20, "multilingual": 0.15, "safety": 0.10}
+BUDGET = 200_000
+SMOOTHING_POWER = 0.65
+QUALITY_BETA = 1.2
+TARGET_GAMMA = 0.9
+RISK_LAMBDA = 1.8
+MAX_EPOCH = 2.5
+
+
+def normalize(weights):
+    total = sum(weights.values())
+    return {k: v / total for k, v in weights.items()}
+
+
+def utility(pool):
+    return sum(target[k] * pool["cap"][k] for k in target)
+
+
+raw_mix = normalize({p["name"]: p["tokens"] for p in pools})
+raw_ability = {
+    cap: round(sum(raw_mix[p["name"]] * p["cap"][cap] for p in pools), 3)
+    for cap in target
+}
+
+scores = {}
+for p in pools:
+    scores[p["name"]] = (
+        (p["tokens"] ** SMOOTHING_POWER)
+        * math.exp(
+            QUALITY_BETA * (p["quality"] - 0.75)
+            + TARGET_GAMMA * utility(p)
+            - RISK_LAMBDA * p["risk"]
+        )
+    )
+mixture = normalize(scores)
+
+plan = {}
+for p in pools:
+    name = p["name"]
+    planned = round(BUDGET * mixture[name])
+    plan[name] = {
+        "mix": round(mixture[name], 3),
+        "raw_mix": round(raw_mix[name], 3),
+        "planned_tokens": planned,
+        "effective_epoch": round(planned / p["tokens"], 3),
+        "utility": round(utility(p), 3),
+    }
+
+ability = {
+    cap: round(sum(mixture[p["name"]] * p["cap"][cap] for p in pools), 3)
+    for cap in target
+}
+risk = round(sum(mixture[p["name"]] * p["risk"] for p in pools), 3)
+avg_quality = round(sum(mixture[p["name"]] * p["quality"] for p in pools), 3)
+up_sampling = {
+    name: round(plan[name]["mix"] / max(plan[name]["raw_mix"], 1e-9), 2)
+    for name in sorted(plan)
+}
+watchlist = sorted(
+    name for name, row in plan.items()
+    if row["effective_epoch"] > MAX_EPOCH
+)
+gates = {
+    "code_floor": ability["code"] >= 0.21,
+    "math_floor": ability["math"] >= 0.28,
+    "multilingual_floor": ability["multilingual"] >= 0.25,
+    "safety_floor": ability["safety"] >= 0.21,
+    "risk_ok": risk <= 0.055,
+    "epoch_ok": not watchlist,
+}
+
+print("raw_mix=", {k: round(raw_mix[k], 3) for k in sorted(raw_mix)})
+print("target_mix=", {k: plan[k]["mix"] for k in sorted(plan)})
+print("planned_tokens=", {k: plan[k]["planned_tokens"] for k in sorted(plan)})
+print("effective_epoch=", {k: plan[k]["effective_epoch"] for k in sorted(plan)})
+print("upsampling=", up_sampling)
+print("raw_ability=", raw_ability)
+print("target_ability=", ability)
+print("avg_quality=", avg_quality, "risk=", risk)
+print("watchlist=", watchlist)
+print("gates=", gates)
+print("gate_pass=", all(gates.values()))
+
+assert round(sum(mixture.values()), 6) == 1.0
+assert watchlist == []
+assert ability == {"general": 0.591, "code": 0.218, "math": 0.285, "multilingual": 0.256, "safety": 0.212}
+assert avg_quality == 0.823
+assert risk == 0.045
+assert all(gates.values())
+```
+
+运行后会看到类似输出：
+
+```text
+raw_mix= {'books_reference': 0.138, 'code_docs': 0.092, 'domain_science': 0.046, 'general_web': 0.575, 'math_reasoning': 0.034, 'safety_data': 0.011, 'synthetic_reasoning': 0.023, 'zh_multilingual': 0.08}
+target_mix= {'books_reference': 0.174, 'code_docs': 0.133, 'domain_science': 0.078, 'general_web': 0.351, 'math_reasoning': 0.072, 'safety_data': 0.032, 'synthetic_reasoning': 0.049, 'zh_multilingual': 0.11}
+planned_tokens= {'books_reference': 34896, 'code_docs': 26671, 'domain_science': 15534, 'general_web': 70245, 'math_reasoning': 14412, 'safety_data': 6421, 'synthetic_reasoning': 9755, 'zh_multilingual': 22066}
+effective_epoch= {'books_reference': 0.291, 'code_docs': 0.333, 'domain_science': 0.388, 'general_web': 0.14, 'math_reasoning': 0.48, 'safety_data': 0.642, 'synthetic_reasoning': 0.488, 'zh_multilingual': 0.315}
+upsampling= {'books_reference': 1.26, 'code_docs': 1.45, 'domain_science': 1.7, 'general_web': 0.61, 'math_reasoning': 2.12, 'safety_data': 2.91, 'synthetic_reasoning': 2.13, 'zh_multilingual': 1.38}
+raw_ability= {'general': 0.693, 'code': 0.176, 'math': 0.206, 'multilingual': 0.261, 'safety': 0.218}
+target_ability= {'general': 0.591, 'code': 0.218, 'math': 0.285, 'multilingual': 0.256, 'safety': 0.212}
+avg_quality= 0.823 risk= 0.045
+watchlist= []
+gates= {'code_floor': True, 'math_floor': True, 'multilingual_floor': True, 'safety_floor': True, 'risk_ok': True, 'epoch_ok': True}
+gate_pass= True
+```
+
+这个 demo 刻意把 `general_web` 从自然分布的 `0.575` 下调到 `0.351`，同时上采样代码、数学、安全和合成推理数据。结果是通用能力覆盖下降，但代码和数学覆盖上升；这正是 data mixture 的 trade-off，不能只看单项指标。
 
 ---
 

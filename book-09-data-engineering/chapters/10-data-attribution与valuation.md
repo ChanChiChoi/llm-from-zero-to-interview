@@ -12,6 +12,18 @@ Data Attribution 关注归因：模型某个行为、某个错误、某个能力
 
 合规边界：本章讨论数据价值评估、错误分析、训练数据治理和审计，不提供训练数据反推、隐私抽取或绕过数据保护的方法。
 
+## 0. 本讲资料边界与第二轮精修口径
+
+按照 `WRITING_PLAN.md` 的要求，本讲精修前核对了 influence functions、Data Shapley、高效 Shapley 近似、TracIn、Dataset Cartography、DSIR、LESS 和 DataInf 等公开论文资料。
+
+本讲聚焦大模型数据工程中可落地的数据归因和估值：源级 / 簇级 / 样本级近似、目标依赖效用函数、influence 近似、Shapley 近似、小模型 proxy、消融实验、数据选择、主动标注优先级、负价值数据识别和版本化审计。
+
+```text
+目标指标 -> 数据单元 -> 弱信号估值 -> 小规模验证 -> 风险成本修正 -> 数据选择 -> 版本审计
+```
+
+本讲不把任何估值方法写成“大模型训练数据价值的精确答案”。大模型数据价值通常只能通过多种弱证据近似：小模型实验、源级 ablation、梯度相似、相似检索、人工审计、下游评测和成本风险分析共同支撑。
+
 ---
 
 ## 1. 先建立直觉：为什么需要数据归因和估值？
@@ -89,6 +101,80 @@ Data Valuation 问的是“某个数据有多值钱”。
 第五，数据质量和配比耦合。一个数据源本身好，但比例过高会过拟合；一个数据源噪声大，但少量保留可增加多样性。
 
 所以，大模型中的数据价值不是静态属性，而是相对于模型、阶段、目标、配比和评估集定义的。
+
+### 4.1 关键公式与估值指标
+
+把训练数据写成样本集合：
+
+```math
+D=\{z_i\}_{i=1}^{n}
+```
+
+其中 `z_i` 可以是一条预训练文档、一条 SFT 样本、一对 chosen / rejected 偏好样本，也可以是一个数据源 `C_k` 中的样本。大模型数据工程里更常见的估值单元不是单条样本，而是数据源、数据簇、任务池或数据版本：
+
+```math
+C_k=\{z_i: c_i=k\}
+```
+
+其中 `c_i` 表示样本所属来源、领域、任务或标注批次。
+
+估值必须先定义目标效用函数。一个常见写法是：
+
+```math
+U(S)=\sum_{m=1}^{M} w_m M_m(S)-\lambda_R R(S)-\lambda_C C(S)
+```
+
+其中 `S` 是被选中的数据集合，`M_m(S)` 是第 `m` 个目标指标，例如数学、代码、安全、通用能力或人工质量，`w_m` 是业务权重，`R(S)` 是隐私、版权、安全和污染风险，`C(S)` 是采购、清洗、标注、训练和维护成本。
+
+数据源级 ablation 的加入价值可以写成：
+
+```math
+\Delta_k^{\mathrm{add}}=U(S_{\mathrm{base}}\cup C_k)-U(S_{\mathrm{base}})
+```
+
+删除价值可以写成：
+
+```math
+\Delta_k^{\mathrm{drop}}=U(S_{\mathrm{base}})-U(S_{\mathrm{base}}\setminus C_k)
+```
+
+如果 `Delta_add` 为正，说明加入数据源有收益；如果 `Delta_drop` 为正，说明删掉它会损失收益。两者都要结合风险和成本解释。
+
+Influence functions 关心训练点 `z_i` 对测试点 `z_*` 的 loss 影响。经典近似形式是：
+
+```math
+I_{\mathrm{up}}(z_i,z_*)=-\nabla_\theta \ell(z_*,\hat{\theta})^\top H_{\hat{\theta}}^{-1}\nabla_\theta \ell(z_i,\hat{\theta})
+```
+
+其中 `ell` 是 loss，`theta_hat` 是训练后的参数，`H_theta_hat` 是经验风险 Hessian。这个公式表达的是“如果稍微上调训练点 `z_i` 的权重，测试点 `z_*` 的 loss 如何变化”。在大模型中直接求 `H^{-1}` 通常不可行，因此常用梯度相似、TracIn 式训练轨迹或小模型 proxy 做近似。
+
+梯度相似 proxy 可以写成：
+
+```math
+A_i=\frac{g_i^\top g_T}{\|g_i\|_2\|g_T\|_2}
+```
+
+其中 `g_i` 是训练样本或数据源的梯度特征，`g_T` 是目标任务、目标验证集或错误样本的梯度特征。`A_i` 越高，说明方向越接近，但它仍然不是严格因果证明。
+
+Data Shapley 把每条数据看成参与者，价值为平均边际贡献：
+
+```math
+\phi_i=\sum_{S\subseteq D\setminus \{z_i\}}\frac{|S|!(n-|S|-1)!}{n!}\left[U(S\cup \{z_i\})-U(S)\right]
+```
+
+这个公式理论性质好，但精确计算需要枚举大量子集。大模型里通常只在小数据池上做近似，或者把 Shapley 思想用于源级、簇级和任务级估值。
+
+最终数据选择可以写成一个带约束的预算问题：
+
+```math
+\max_{s_i\in\{0,1\}}\sum_i s_i v_i
+```
+
+```math
+\sum_i s_i b_i\le B,\quad R(\{z_i:s_i=1\})\le \tau_R
+```
+
+其中 `v_i` 是估计数据价值，`b_i` 是 token、标注或训练成本，`B` 是预算，`tau_R` 是风险上限。工程上还会加语言、领域、任务、来源和多样性约束。
 
 ---
 
@@ -419,6 +505,142 @@ Data valuation 直接服务 data mixture。
 第八步，形成决策。保留、扩充、上采样、降权、隔离、重洗或删除。
 
 第九步，版本化记录。保存实验配置、数据版本、评估结果和决策理由。
+
+### 19.1 最小可运行数据归因与估值 demo
+
+下面这个 demo 不依赖外部库，也不读写文件。输入是一组 toy 数据源，输出包括源级价值排名、目标任务 attribution proxy、token budget 下的数据选择、小规模 Shapley 估值、负价值 / 阻断数据和污染阻断清单。
+
+它演示的是数据估值工程闭环，不是真实 influence function、生产级 Shapley、完整小模型训练或大规模数据选择系统。真实系统需要接入训练日志、数据版本、评估矩阵、embedding / gradient 特征、消融实验、人工审计和合规风险系统。
+
+```python
+from itertools import permutations
+from math import sqrt
+
+
+weights = {"math": 0.35, "code": 0.25, "safety": 0.20, "general": 0.20}
+target_grad = [0.70, 0.55, 0.20, 0.10]
+
+sources = [
+    {"id": "math_verified", "tokens": 900, "quality": 0.92, "coverage": 0.78, "risk": 0.03, "cost": 0.22, "license_ok": True, "privacy": False, "contam": False, "grad": [0.82, 0.28, 0.12, 0.06], "delta": {"math": 0.080, "code": 0.010, "safety": 0.000, "general": 0.015}},
+    {"id": "code_tests", "tokens": 760, "quality": 0.88, "coverage": 0.71, "risk": 0.04, "cost": 0.18, "license_ok": True, "privacy": False, "contam": False, "grad": [0.34, 0.86, 0.10, 0.04], "delta": {"math": 0.010, "code": 0.070, "safety": 0.000, "general": 0.010}},
+    {"id": "safety_boundary", "tokens": 640, "quality": 0.84, "coverage": 0.66, "risk": 0.05, "cost": 0.15, "license_ok": True, "privacy": False, "contam": False, "grad": [0.18, 0.12, 0.88, 0.18], "delta": {"math": -0.005, "code": 0.000, "safety": 0.060, "general": -0.005}},
+    {"id": "zh_domain", "tokens": 820, "quality": 0.80, "coverage": 0.73, "risk": 0.06, "cost": 0.12, "license_ok": True, "privacy": False, "contam": False, "grad": [0.40, 0.20, 0.15, 0.80], "delta": {"math": 0.000, "code": 0.000, "safety": 0.005, "general": 0.050}},
+    {"id": "synthetic_template", "tokens": 700, "quality": 0.50, "coverage": 0.42, "risk": 0.22, "cost": 0.05, "license_ok": True, "privacy": False, "contam": False, "grad": [0.20, 0.18, 0.10, 0.15], "delta": {"math": 0.020, "code": 0.010, "safety": -0.020, "general": -0.030}},
+    {"id": "old_legal_forum", "tokens": 680, "quality": 0.46, "coverage": 0.35, "risk": 0.36, "cost": 0.08, "license_ok": True, "privacy": False, "contam": False, "grad": [0.08, 0.04, 0.20, 0.34], "delta": {"math": 0.000, "code": 0.000, "safety": -0.030, "general": -0.020}},
+    {"id": "benchmark_leak", "tokens": 520, "quality": 0.90, "coverage": 0.40, "risk": 0.70, "cost": 0.04, "license_ok": True, "privacy": False, "contam": True, "grad": [0.75, 0.25, 0.05, 0.05], "delta": {"math": 0.090, "code": 0.000, "safety": 0.000, "general": 0.000}},
+]
+
+
+def dot(a, b):
+    return sum(x * y for x, y in zip(a, b))
+
+
+def norm(a):
+    return sqrt(dot(a, a))
+
+
+def cosine(a, b):
+    return dot(a, b) / (norm(a) * norm(b))
+
+
+def weighted_delta(src):
+    return sum(weights[k] * src["delta"].get(k, 0.0) for k in weights)
+
+
+def source_value(src):
+    if not src["license_ok"] or src["privacy"] or src["contam"]:
+        return -1.0
+    raw = (
+        weighted_delta(src)
+        + 0.08 * src["quality"]
+        + 0.05 * src["coverage"]
+        + 0.05 * cosine(src["grad"], target_grad)
+        - 0.12 * src["risk"]
+        - 0.04 * src["cost"]
+    )
+    if src["risk"] > 0.30 or src["quality"] < 0.48:
+        return -abs(raw)
+    return raw
+
+
+rows = []
+for src in sources:
+    rows.append({
+        "id": src["id"],
+        "weighted_delta": round(weighted_delta(src), 4),
+        "grad_sim": round(cosine(src["grad"], target_grad), 3),
+        "value": round(source_value(src), 4),
+    })
+
+ranked = sorted(rows, key=lambda x: x["value"], reverse=True)
+negative = [row["id"] for row in ranked if row["value"] < 0]
+
+budget = 2600
+selected, used_tokens = [], 0
+for row in sorted(rows, key=lambda r: r["value"] / next(s["tokens"] for s in sources if s["id"] == r["id"]), reverse=True):
+    src = next(s for s in sources if s["id"] == row["id"])
+    if row["value"] <= 0 or used_tokens + src["tokens"] > budget:
+        continue
+    selected.append(row["id"])
+    used_tokens += src["tokens"]
+
+players = ["math_verified", "code_tests", "synthetic_template"]
+base_gain = {"math_verified": 0.30, "code_tests": 0.22, "synthetic_template": -0.06}
+
+
+def utility(subset):
+    subset = set(subset)
+    score = sum(base_gain[p] for p in subset)
+    if {"math_verified", "code_tests"}.issubset(subset):
+        score += 0.08
+    if "synthetic_template" in subset and "math_verified" not in subset:
+        score -= 0.05
+    return score
+
+
+shapley = {p: 0.0 for p in players}
+orders = list(permutations(players))
+for order in orders:
+    prefix = []
+    for p in order:
+        shapley[p] += utility(prefix + [p]) - utility(prefix)
+        prefix.append(p)
+shapley = {k: round(v / len(orders), 4) for k, v in shapley.items()}
+
+report = {
+    "ranked_sources": [(row["id"], row["value"]) for row in ranked],
+    "top_attribution": [(row["id"], row["grad_sim"]) for row in sorted(rows, key=lambda x: x["grad_sim"], reverse=True)[:3]],
+    "selected_under_budget": selected,
+    "used_tokens": used_tokens,
+    "negative_or_blocked": negative,
+    "shapley_demo": shapley,
+    "total_selected_value": round(sum(row["value"] for row in rows if row["id"] in selected), 4),
+    "blocked_contamination": [src["id"] for src in sources if src["contam"]],
+}
+
+for key, value in report.items():
+    print(f"{key}=", value)
+
+assert report["selected_under_budget"] == ["code_tests", "math_verified", "safety_boundary"]
+assert report["used_tokens"] == 2300
+assert report["negative_or_blocked"] == ["old_legal_forum", "benchmark_leak"]
+assert report["shapley_demo"] == {"math_verified": 0.365, "code_tests": 0.26, "synthetic_template": -0.085}
+```
+
+运行后会看到类似输出：
+
+```text
+ranked_sources= [('math_verified', 0.1808), ('code_tests', 0.1599), ('zh_domain', 0.1288), ('safety_boundary', 0.1202), ('synthetic_template', 0.0782), ('old_legal_forum', -0.0184), ('benchmark_leak', -1.0)]
+top_attribution= [('math_verified', 0.942), ('benchmark_leak', 0.93), ('synthetic_template', 0.922)]
+selected_under_budget= ['code_tests', 'math_verified', 'safety_boundary']
+used_tokens= 2300
+negative_or_blocked= ['old_legal_forum', 'benchmark_leak']
+shapley_demo= {'math_verified': 0.365, 'code_tests': 0.26, 'synthetic_template': -0.085}
+total_selected_value= 0.4609
+blocked_contamination= ['benchmark_leak']
+```
+
+这个 demo 的重点是：高 attribution 相似度不等于可训练价值。`benchmark_leak` 和目标梯度很相似，但因为评测污染必须被阻断；`old_legal_forum` 虽然有一点覆盖度，但质量低、风险高且带来负向指标，应进入重洗或降权候选。
 
 ---
 

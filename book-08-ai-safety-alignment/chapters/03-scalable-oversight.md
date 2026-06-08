@@ -4,6 +4,18 @@
 
 面试重点：Scalable Oversight 的核心问题是：当模型能力超过单个人类直接判断能力时，我们如何仍然给出可靠监督信号？
 
+## 0. 本讲资料边界与第二轮精修口径
+
+按照 `WRITING_PLAN.md` 的要求，本讲精修前核对了 AI Safety via Debate、Iterated Amplification、Scalable agent alignment via reward modeling、Constitutional AI、Learning to Summarize from Human Feedback、Let's Verify Step by Step、weak-to-strong generalization、OpenAI Evals / Model Spec、NIST AI RMF / Generative AI Profile 等公开资料。
+
+本讲定位为 scalable oversight 的方法谱系和工程落地章，重点是回答一个面试高频问题：当任务复杂到单个人类难以直接判断时，怎样仍然构造可校准、可审计、可扩展的监督信号。
+
+```text
+复杂任务 -> 监督瓶颈 -> 分解 / AI critique / debate / verifier / 人工审计 -> 监督门禁
+```
+
+本讲不把 Debate、Iterated Amplification、Recursive Reward Modeling、Constitutional AI 或 AI feedback 写成已经解决 alignment 的银弹。它们都是监督增强方案，需要人工 gold set、工具验证、高风险人工复核、分布外评估和上线回归共同约束。
+
 ## 本章目标
 
 学完本章，你要能回答：
@@ -222,6 +234,90 @@ Scalable oversight 研究的就是这些路线在 AI 监督中的对应形式。
 代表方向：self-evaluation、calibration、abstention。
 
 例如 “Language Models (Mostly) Know What They Know” 探索了模型评估自己答案正确概率和是否知道答案的能力。
+
+### 4.6 关键公式与监督覆盖指标速查
+
+Scalable oversight 可以抽象成“复杂任务监督信号是否可靠”的度量问题。
+
+设第 `i` 个监督样本为：
+
+```math
+o_i=(x_i,y_i,g_i,h_i,a_i,v_i,c_i,w_i)
+```
+
+其中 `x_i` 是任务输入，`y_i` 是模型输出，`g_i` 是高质量 gold label 或专家复核结果，`h_i` 是单个人类直接判断，`a_i` 是 AI feedback 或 judge 判断，`v_i` 是工具 / verifier 判断，`c_i` 是复杂度或风险类别，`w_i` 是样本权重。
+
+人类直接监督覆盖率：
+
+```math
+C_{\mathrm{direct}}=\frac{\sum_i w_i 1[q_i^{\mathrm{human}}\ge \tau_{\mathrm{human}}]}{\sum_i w_i}
+```
+
+其中 `q_i_human` 是人类直接判断的置信度或可审查性分数。复杂代码、长文档、专业领域和长工具 trace 会让这个覆盖率下降。
+
+人类直接监督错误率：
+
+```math
+E_{\mathrm{direct}}=\frac{\sum_i w_i 1[h_i\ne g_i]}{\sum_i w_i}
+```
+
+这个指标衡量“普通标注是否能跟上任务复杂度”。如果人类直接错误率很高，单纯扩大人工标注规模会把错误监督信号也一起放大。
+
+AI feedback 校准错误率：
+
+```math
+E_{\mathrm{ai}}=\frac{\sum_i w_i 1[a_i\ne g_i]}{\sum_i w_i}
+```
+
+AI feedback 成本低、覆盖广，但必须用人工 gold set 或专家复核校准。否则模型可能把自身偏差扩展成更大规模的伪监督。
+
+工具 / verifier 覆盖率：
+
+```math
+C_{\mathrm{ver}}=\frac{\sum_i w_i 1[v_i\ne \varnothing]}{\sum_i w_i}
+```
+
+代码单元测试、数学答案检查、检索证据核验、policy checker 和工具权限校验都可以看作 verifier。它们通常比纯自然语言 judge 更可审计，但覆盖范围有限。
+
+过程监督准确率：
+
+```math
+A_{\mathrm{proc}}=\frac{\sum_i \sum_j 1[s_{ij}=g_{ij}]}{\sum_i n_i}
+```
+
+其中 `s_ij` 是第 `i` 个样本第 `j` 个中间步骤的监督判断，`g_ij` 是该步骤的 gold label，`n_i` 是步骤数。过程监督适合数学、代码、规划和 Agent trace，但标注成本更高。
+
+证据支持率：
+
+```math
+S_{\mathrm{evidence}}=\frac{\sum_i m_i^{\mathrm{supported}}}{\sum_i m_i^{\mathrm{claim}}}
+```
+
+这个指标适合 RAG、长文档 QA 和专业建议场景。它要求监督系统检查回答中的 claim 是否真的被证据支持，而不是只看回答是否流畅。
+
+人工升级覆盖率：
+
+```math
+C_{\mathrm{audit}}=\frac{\sum_i w_i 1[r_i^{\mathrm{high}}=1]1[b_i^{\mathrm{audit}}=1]}{\sum_i w_i 1[r_i^{\mathrm{high}}=1]}
+```
+
+其中 `r_i_high=1` 表示高风险样本，`b_i_audit=1` 表示进入人工或专家复核。AI feedback 可以扩展规模，但高风险样本不能完全无人审计。
+
+监督成本节省率：
+
+```math
+R_{\mathrm{cost}}=1-\frac{\sum_i k_i^{\mathrm{mixed}}}{\sum_i k_i^{\mathrm{human}}}
+```
+
+其中 `k_i_human` 是全人工专家审查成本，`k_i_mixed` 是 AI 辅助 + 工具验证 + 必要人审的混合成本。成本节省必须和监督错误率一起看，不能只追求便宜。
+
+一个简化的 scalable oversight 门禁可以写成：
+
+```math
+G_{\mathrm{over}}=G_{\mathrm{direct}}\land G_{\mathrm{ai}}\land G_{\mathrm{ver}}\land G_{\mathrm{proc}}\land G_{\mathrm{audit}}\land G_{\mathrm{cost}}
+```
+
+面试中可以强调：scalable oversight 的目标不是让 AI 自己给自己打分，而是把人类原则、AI 辅助、工具验证和人工复核组织成一个可量化的监督闭环。
 
 ## 5. Iterated Amplification
 
@@ -582,6 +678,140 @@ Scalable oversight 还包括让模型帮助判断自己的输出是否可靠。
 6. 是否需要用户确认。
 
 Scalable oversight 可以把长 trace 拆成可审核片段。
+
+### 11.5 最小可运行监督覆盖审计 demo
+
+下面这个 demo 不依赖外部库，也不读写文件。输入是一组抽象 toy oversight case，只有任务类别、gold label、人类直接判断、AI feedback、verifier / tool 判断、debate 判断、过程步骤、证据支持、高风险标记、审计标记和成本，不包含任何可复用攻击提示或危险操作细节。
+
+它演示的是监督闭环审计：人类直接判断覆盖是否不足，AI feedback 是否被 gold set 校准，工具验证覆盖了多少复杂样本，高风险样本是否进入人审，以及混合监督是否真的降低成本但不放大错误。真实系统还需要专家标注规范、完整 trace、评估平台、权限日志、模型版本管理和上线后监控。
+
+```python
+from collections import Counter, defaultdict
+
+
+cases = [
+    {"id": "rag_long_context", "slice": "rag", "gold": True, "human_label": True, "human_conf": 0.55, "ai_label": True, "verifier_label": True, "debate_label": None, "process_ok": 4, "process_total": 5, "claims_supported": 4, "claims_total": 5, "high_risk": False, "human_audit": False, "severity": 2, "human_cost": 40, "mixed_cost": 9},
+    {"id": "code_patch_security", "slice": "code", "gold": False, "human_label": True, "human_conf": 0.42, "ai_label": False, "verifier_label": False, "debate_label": False, "process_ok": 5, "process_total": 6, "claims_supported": 0, "claims_total": 0, "high_risk": True, "human_audit": True, "severity": 5, "human_cost": 60, "mixed_cost": 18},
+    {"id": "math_proof", "slice": "math", "gold": False, "human_label": True, "human_conf": 0.60, "ai_label": True, "verifier_label": False, "debate_label": False, "process_ok": 3, "process_total": 5, "claims_supported": 0, "claims_total": 0, "high_risk": False, "human_audit": False, "severity": 3, "human_cost": 45, "mixed_cost": 10},
+    {"id": "medical_summary", "slice": "high_risk_domain", "gold": False, "human_label": True, "human_conf": 0.70, "ai_label": True, "verifier_label": None, "debate_label": None, "process_ok": 2, "process_total": 4, "claims_supported": 2, "claims_total": 4, "high_risk": True, "human_audit": False, "severity": 5, "human_cost": 80, "mixed_cost": 14},
+    {"id": "simple_faq", "slice": "normal_help", "gold": True, "human_label": True, "human_conf": 0.92, "ai_label": True, "verifier_label": None, "debate_label": None, "process_ok": 1, "process_total": 1, "claims_supported": 2, "claims_total": 2, "high_risk": False, "human_audit": False, "severity": 1, "human_cost": 8, "mixed_cost": 3},
+    {"id": "agent_tool_trace", "slice": "agent", "gold": False, "human_label": False, "human_conf": 0.50, "ai_label": False, "verifier_label": False, "debate_label": None, "process_ok": 4, "process_total": 6, "claims_supported": 0, "claims_total": 0, "high_risk": True, "human_audit": True, "severity": 5, "human_cost": 70, "mixed_cost": 20},
+    {"id": "legal_contract", "slice": "high_risk_domain", "gold": False, "human_label": True, "human_conf": 0.45, "ai_label": False, "verifier_label": None, "debate_label": False, "process_ok": 3, "process_total": 4, "claims_supported": 3, "claims_total": 4, "high_risk": True, "human_audit": True, "severity": 4, "human_cost": 90, "mixed_cost": 25},
+    {"id": "summary_grounded", "slice": "summarization", "gold": True, "human_label": True, "human_conf": 0.82, "ai_label": True, "verifier_label": True, "debate_label": None, "process_ok": 2, "process_total": 2, "claims_supported": 3, "claims_total": 3, "high_risk": False, "human_audit": False, "severity": 2, "human_cost": 25, "mixed_cost": 8},
+    {"id": "policy_boundary", "slice": "safety_boundary", "gold": True, "human_label": False, "human_conf": 0.68, "ai_label": False, "verifier_label": True, "debate_label": True, "process_ok": 2, "process_total": 3, "claims_supported": 1, "claims_total": 1, "high_risk": True, "human_audit": True, "severity": 3, "human_cost": 35, "mixed_cost": 13},
+    {"id": "unsupported_research_claim", "slice": "research", "gold": False, "human_label": True, "human_conf": 0.73, "ai_label": False, "verifier_label": False, "debate_label": None, "process_ok": 2, "process_total": 3, "claims_supported": 2, "claims_total": 5, "high_risk": False, "human_audit": False, "severity": 3, "human_cost": 50, "mixed_cost": 12},
+]
+
+
+def majority_label(case):
+    votes = [case["ai_label"]]
+    for key in ("verifier_label", "debate_label"):
+        if case[key] is not None:
+            votes.append(case[key])
+    positives = sum(1 for vote in votes if vote is True)
+    negatives = sum(1 for vote in votes if vote is False)
+    if positives == negatives:
+        return case["ai_label"]
+    return positives > negatives
+
+
+human_threshold = 0.75
+direct_covered = [case for case in cases if case["human_conf"] >= human_threshold]
+verifier_cases = [case for case in cases if case["verifier_label"] is not None]
+high_risk_cases = [case for case in cases if case["high_risk"]]
+
+oversight_errors = []
+slice_errors = defaultdict(list)
+severity_error = 0
+total_severity = sum(case["severity"] for case in cases)
+total_process = sum(case["process_total"] for case in cases)
+total_claims = sum(case["claims_total"] for case in cases)
+total_human_cost = sum(case["human_cost"] for case in cases)
+total_mixed_cost = sum(case["mixed_cost"] for case in cases)
+
+oversight_labels = {}
+for case in cases:
+    label = majority_label(case)
+    oversight_labels[case["id"]] = label
+    if label != case["gold"]:
+        oversight_errors.append(case["id"])
+        slice_errors[case["slice"]].append(case["id"])
+        severity_error += case["severity"]
+
+high_risk_missing_audit = [case["id"] for case in high_risk_cases if not case["human_audit"]]
+
+metrics = {
+    "direct_coverage": round(len(direct_covered) / len(cases), 3),
+    "direct_accuracy_on_covered": round(
+        sum(case["human_label"] == case["gold"] for case in direct_covered) / max(1, len(direct_covered)), 3
+    ),
+    "human_direct_error": round(sum(case["human_label"] != case["gold"] for case in cases) / len(cases), 3),
+    "ai_feedback_accuracy": round(sum(case["ai_label"] == case["gold"] for case in cases) / len(cases), 3),
+    "verifier_coverage": round(len(verifier_cases) / len(cases), 3),
+    "oversight_accuracy": round(sum(oversight_labels[case["id"]] == case["gold"] for case in cases) / len(cases), 3),
+    "process_step_accuracy": round(sum(case["process_ok"] for case in cases) / total_process, 3),
+    "evidence_support": round(sum(case["claims_supported"] for case in cases) / max(1, total_claims), 3),
+    "high_risk_audit_coverage": round(
+        sum(case["human_audit"] for case in high_risk_cases) / max(1, len(high_risk_cases)), 3
+    ),
+    "cost_saving": round(1 - total_mixed_cost / total_human_cost, 3),
+    "severity_weighted_error": round(severity_error / total_severity, 3),
+}
+
+gates = {
+    "ai_feedback": metrics["ai_feedback_accuracy"] >= 0.75,
+    "oversight_accuracy": metrics["oversight_accuracy"] >= 0.90,
+    "process": metrics["process_step_accuracy"] >= 0.80,
+    "evidence": metrics["evidence_support"] >= 0.75,
+    "high_risk_audit": metrics["high_risk_audit_coverage"] >= 1.00,
+    "severity_error": metrics["severity_weighted_error"] <= 0.10,
+    "cost": metrics["cost_saving"] >= 0.50,
+}
+
+report = {
+    "slice_counts": dict(sorted(Counter(case["slice"] for case in cases).items())),
+    "metrics": metrics,
+    "oversight_errors": oversight_errors,
+    "high_risk_missing_audit": high_risk_missing_audit,
+    "slice_errors": dict(sorted(slice_errors.items())),
+    "gates": gates,
+    "oversight_ready": all(gates.values()),
+}
+
+for key, value in report.items():
+    print(f"{key}=", value)
+
+assert report["metrics"] == {
+    "direct_coverage": 0.2,
+    "direct_accuracy_on_covered": 1.0,
+    "human_direct_error": 0.6,
+    "ai_feedback_accuracy": 0.7,
+    "verifier_coverage": 0.7,
+    "oversight_accuracy": 0.9,
+    "process_step_accuracy": 0.718,
+    "evidence_support": 0.708,
+    "high_risk_audit_coverage": 0.8,
+    "cost_saving": 0.738,
+    "severity_weighted_error": 0.152,
+}
+assert report["oversight_errors"] == ["medical_summary"]
+assert report["high_risk_missing_audit"] == ["medical_summary"]
+assert report["oversight_ready"] is False
+```
+
+运行后会看到类似输出：
+
+```text
+slice_counts= {'agent': 1, 'code': 1, 'high_risk_domain': 2, 'math': 1, 'normal_help': 1, 'rag': 1, 'research': 1, 'safety_boundary': 1, 'summarization': 1}
+metrics= {'direct_coverage': 0.2, 'direct_accuracy_on_covered': 1.0, 'human_direct_error': 0.6, 'ai_feedback_accuracy': 0.7, 'verifier_coverage': 0.7, 'oversight_accuracy': 0.9, 'process_step_accuracy': 0.718, 'evidence_support': 0.708, 'high_risk_audit_coverage': 0.8, 'cost_saving': 0.738, 'severity_weighted_error': 0.152}
+oversight_errors= ['medical_summary']
+high_risk_missing_audit= ['medical_summary']
+slice_errors= {'high_risk_domain': ['medical_summary']}
+gates= {'ai_feedback': False, 'oversight_accuracy': True, 'process': False, 'evidence': False, 'high_risk_audit': False, 'severity_error': False, 'cost': True}
+oversight_ready= False
+```
+
+这个 demo 的重点是：混合监督可以显著省成本，`oversight_accuracy` 也可能看起来不错，但只要高风险样本没有人审、证据支持不足或 AI feedback 未校准，就不能说 scalable oversight 已经可靠上线。
 
 ## 12. Scalable Oversight 的优缺点
 

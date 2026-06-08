@@ -10,6 +10,18 @@
 
 合规边界：本章讨论数据治理、权限控制、审计、删除机制和合规文档，不提供绕过访问控制、规避审计、保留应删除数据或滥用个人信息的方法。
 
+## 0. 本讲资料边界与第二轮精修口径
+
+按照 `WRITING_PLAN.md` 的要求，本讲精修前核对了 Datasheets for Datasets、Model Cards、W3C PROV、DVC 数据版本控制文档、OpenLineage、Hugging Face Dataset Cards、NIST AI RMF / Generative AI Profile 和 GDPR Article 17 删除权等公开资料。
+
+本讲聚焦训练数据版本和治理的工程闭环：不可变快照、manifest、checksum、lineage、schema 演进、权限分级、删除请求、datasheet、model card 输入、审计指标和训练可复现记录。
+
+```text
+数据来源 -> 处理流水线 -> 不可变快照 -> manifest -> lineage -> 权限 / 删除 / 审计 -> 训练日志 -> 发布文档
+```
+
+本讲不提供规避权限、保留应删除数据、绕过审计或滥用个人信息的方法。涉及删除请求和隐私治理时，正文只讨论工程机制和审计口径；具体法律义务应由合规和法务团队结合适用地区判断。
+
 ---
 
 ## 1. 先建立直觉：为什么数据需要版本？
@@ -119,6 +131,74 @@ Lineage 要回答：这条样本来自哪里，经过哪些处理，为什么被
 这些字段不是为了好看，而是服务训练、审计、删除、配比和复现。
 
 例如，如果要删除某个来源的数据，需要 source_id；如果要分析低资源语言表现，需要 language；如果要隔离 benchmark 污染，需要 contamination_flag；如果要重现实验，需要 processing_version 和 dataset_version。
+
+### 5.1 关键公式与治理指标
+
+一个数据版本可以抽象为：
+
+```math
+V_t=(D_t,M_t,P_t,S_t,A_t)
+```
+
+其中 `D_t` 是数据快照，`M_t` 是 manifest，`P_t` 是处理 pipeline 和配置版本，`S_t` 是 schema 版本，`A_t` 是审计记录。训练日志必须能引用这个整体，而不是只记录一个数据目录名。
+
+Manifest 可以写成 shard 清单：
+
+```math
+M_t=\{(h_j,n_j,b_j,c_j)\}_{j=1}^{K_t}
+```
+
+其中 `h_j` 是第 `j` 个 shard 的内容 hash 或 checksum，`n_j` 是样本数，`b_j` 是 token 数或字节数，`c_j` 是来源、语言、license、质量和风险统计。
+
+样本级 lineage 可以写成有序处理路径：
+
+```math
+L_i=(s_i,o_i,p_{i1},p_{i2},\ldots,p_{im},v_i)
+```
+
+其中 `s_i` 是 source id，`o_i` 是原始对象 hash，`p_ij` 是第 `j` 个处理步骤，例如 parse、quality、PII scan、dedup、contamination scan，`v_i` 是样本进入的数据版本。lineage 的价值是同时支持“从样本追来源”和“从来源追模型版本”。
+
+Lineage 覆盖率可以写成：
+
+```math
+C_{\mathrm{lineage}}=\frac{|\{i:L_i\ \mathrm{complete}\}|}{N}
+```
+
+License 记录完整率可以写成：
+
+```math
+C_{\mathrm{license}}=\frac{|\{i:\ell_i\neq \varnothing\}|}{N}
+```
+
+删除请求的执行时延可以写成：
+
+```math
+T_{\mathrm{delete},r}=t_{\mathrm{closed},r}-t_{\mathrm{received},r}
+```
+
+如果请求 `r` 对应的来源、hash、用户或 license 状态无法映射到版本和 shard，就不能声称删除机制可靠。
+
+权限违规率可以写成：
+
+```math
+R_{\mathrm{access}}=\frac{N_{\mathrm{denied\ or\ invalid}}}{N_{\mathrm{access}}}
+```
+
+这个指标不是越低越好：如果高风险数据被低权限角色访问成功，说明权限系统失效。审计时要同时看违规访问尝试是否被阻断。
+
+数据文档完整率可以写成：
+
+```math
+C_{\mathrm{doc}}=\frac{N_{\mathrm{completed\ sections}}}{N_{\mathrm{required\ sections}}}
+```
+
+最终治理门禁可以写成：
+
+```math
+G_{\mathrm{gov}}=G_{\mathrm{manifest}}\land G_{\mathrm{lineage}}\land G_{\mathrm{license}}\land G_{\mathrm{access}}\land G_{\mathrm{delete}}\land G_{\mathrm{doc}}
+```
+
+其中任何一项失败，都意味着该数据版本不应直接进入正式训练或对外发布说明。
 
 ---
 
@@ -385,6 +465,138 @@ Schema 演进要注意兼容性：
 第八步，审计和监控。定期检查 license、PII、权限、污染、删除请求和数据版本可复现性。
 
 第九步，训练集成。训练日志必须记录数据版本、mixture、sampler、tokenizer 和评测集版本。
+
+### 18.1 最小可运行数据版本治理 demo
+
+下面这个 demo 不依赖外部库，也不读写文件。输入是一组 toy 样本、访问请求、删除请求和文档完成状态；输出包括 manifest、可训练样本、license 分布、lineage 覆盖率、访问阻断、删除请求命中、datasheet 完成度、model card 输入是否完整和治理门禁。
+
+它演示的是治理机制，不是真实 DVC、对象存储、权限系统、合规系统或生产数据平台。真实系统需要接入对象存储版本、数据目录、权限服务、审计日志、删除工单、dataset card / datasheet 文档和训练日志。
+
+```python
+import hashlib
+from collections import Counter, defaultdict
+
+
+samples = [
+    {"id": "s1", "source": "web_blog", "shard": "shard-a", "tokens": 520, "license": "permissive", "pii": False, "contam": False, "access": "public", "lineage": ["crawl", "parse", "quality", "dedup"], "deleted": False},
+    {"id": "s2", "source": "math_docs", "shard": "shard-a", "tokens": 610, "license": "permissive", "pii": False, "contam": False, "access": "public", "lineage": ["crawl", "parse", "quality", "dedup"], "deleted": False},
+    {"id": "s3", "source": "user_forum", "shard": "shard-b", "tokens": 430, "license": "review", "pii": True, "contam": False, "access": "restricted", "lineage": ["crawl", "parse", "quality"], "deleted": False},
+    {"id": "s4", "source": "benchmark_site", "shard": "shard-b", "tokens": 390, "license": "blocked", "pii": False, "contam": True, "access": "quarantine", "lineage": ["crawl", "parse", "quality", "contam_scan"], "deleted": False},
+    {"id": "s5", "source": "code_repo", "shard": "shard-c", "tokens": 740, "license": "permissive", "pii": False, "contam": False, "access": "internal", "lineage": ["crawl", "parse", "secret_scan", "dedup"], "deleted": False},
+    {"id": "s6", "source": "old_vendor", "shard": "shard-c", "tokens": 300, "license": "expired", "pii": False, "contam": False, "access": "blocked", "lineage": ["import", "quality"], "deleted": True},
+]
+
+required_lineage = {"crawl", "parse", "quality"}
+required_docs = {"purpose", "composition", "collection", "processing", "risks", "maintenance"}
+datasheet = {"purpose": True, "composition": True, "collection": True, "processing": True, "risks": True, "maintenance": False}
+model_card_inputs = {"training_data": True, "eval_data": True, "limitations": True, "risk_summary": True, "deletion_policy": False}
+
+access_requests = [
+    {"user": "trainer", "sample": "s1", "allowed_levels": {"public", "internal"}},
+    {"user": "contractor", "sample": "s5", "allowed_levels": {"public"}},
+    {"user": "auditor", "sample": "s3", "allowed_levels": {"public", "internal", "restricted"}},
+    {"user": "researcher", "sample": "s4", "allowed_levels": {"public", "internal"}},
+]
+deletion_requests = [{"request_id": "del-001", "source": "old_vendor"}, {"request_id": "del-002", "source": "missing_source"}]
+
+
+def digest(text):
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+
+
+def sample_hash(item):
+    payload = f"{item['id']}|{item['source']}|{item['tokens']}|{item['license']}|{item['access']}"
+    return digest(payload)
+
+
+shards = defaultdict(list)
+for item in samples:
+    shards[item["shard"]].append(item)
+
+manifest = []
+for shard, rows in sorted(shards.items()):
+    joined = ";".join(sample_hash(row) for row in sorted(rows, key=lambda x: x["id"]))
+    manifest.append({"shard": shard, "sample_count": len(rows), "tokens": sum(row["tokens"] for row in rows), "checksum": digest(joined)})
+
+eligible = [item for item in samples if item["license"] == "permissive" and not item["pii"] and not item["contam"] and not item["deleted"]]
+license_counts = Counter(item["license"] for item in samples)
+lineage_ok = [item["id"] for item in samples if required_lineage.issubset(set(item["lineage"]))]
+lineage_coverage = round(len(lineage_ok) / len(samples), 3)
+
+blocked_access = []
+for req in access_requests:
+    item = next(row for row in samples if row["id"] == req["sample"])
+    if item["access"] not in req["allowed_levels"]:
+        blocked_access.append((req["user"], req["sample"], item["access"]))
+
+deletion_hits = {}
+for req in deletion_requests:
+    deletion_hits[req["request_id"]] = [item["id"] for item in samples if item["source"] == req["source"]]
+
+deletion_compliant = all(
+    item["deleted"] for req in deletion_requests for item in samples if item["source"] == req["source"]
+)
+
+datasheet_completion = round(sum(datasheet.values()) / len(required_docs), 3)
+model_card_ready = all(model_card_inputs.values())
+
+report = {
+    "dataset_version": "data-v2026-06-06.1",
+    "manifest": manifest,
+    "eligible_ids": [item["id"] for item in eligible],
+    "license_counts": dict(sorted(license_counts.items())),
+    "lineage_coverage": lineage_coverage,
+    "lineage_missing": [item["id"] for item in samples if item["id"] not in lineage_ok],
+    "blocked_access": blocked_access,
+    "deletion_hits": deletion_hits,
+    "deletion_compliant": deletion_compliant,
+    "datasheet_completion": datasheet_completion,
+    "model_card_ready": model_card_ready,
+}
+
+gates = {
+    "manifest_checksums": all(row["checksum"] for row in manifest),
+    "lineage_minimum": report["lineage_coverage"] >= 0.65,
+    "blocked_bad_data": set(report["eligible_ids"]) == {"s1", "s2", "s5"},
+    "access_controls": len(blocked_access) == 2,
+    "deletion_traceable": deletion_hits["del-001"] == ["s6"],
+    "deletion_compliant": deletion_compliant,
+    "datasheet_ready": datasheet_completion >= 0.80,
+    "model_card_ready": model_card_ready,
+}
+report["gates"] = gates
+report["governance_ready"] = all(gates.values())
+
+for key, value in report.items():
+    print(f"{key}=", value)
+
+assert report["eligible_ids"] == ["s1", "s2", "s5"]
+assert report["lineage_coverage"] == 0.667
+assert report["lineage_missing"] == ["s5", "s6"]
+assert report["blocked_access"] == [("contractor", "s5", "internal"), ("researcher", "s4", "quarantine")]
+assert report["deletion_hits"] == {"del-001": ["s6"], "del-002": []}
+assert report["datasheet_completion"] == 0.833
+assert report["governance_ready"] is False
+```
+
+运行后会看到类似输出：
+
+```text
+dataset_version= data-v2026-06-06.1
+manifest= [{'shard': 'shard-a', 'sample_count': 2, 'tokens': 1130, 'checksum': '8ee90eff217c'}, {'shard': 'shard-b', 'sample_count': 2, 'tokens': 820, 'checksum': '83cc9bdbbafe'}, {'shard': 'shard-c', 'sample_count': 2, 'tokens': 1040, 'checksum': 'b5bf80f8852a'}]
+eligible_ids= ['s1', 's2', 's5']
+license_counts= {'blocked': 1, 'expired': 1, 'permissive': 3, 'review': 1}
+lineage_coverage= 0.667
+lineage_missing= ['s5', 's6']
+blocked_access= [('contractor', 's5', 'internal'), ('researcher', 's4', 'quarantine')]
+deletion_hits= {'del-001': ['s6'], 'del-002': []}
+deletion_compliant= True
+datasheet_completion= 0.833
+model_card_ready= False
+governance_ready= False
+```
+
+这个 demo 的重点是：`eligible_ids` 只能说明样本通过了训练准入门禁，不代表整个数据版本已经治理完备。这里 `model_card_ready=False`，说明发布文档所需的删除策略事实基础仍缺失，因此 `governance_ready=False` 是正确结果。
 
 ---
 

@@ -63,6 +63,44 @@ loss spike
 
 面试表达：训练 debug 要从数据、loss、梯度、优化器、精度、分布式和恢复状态逐层排查，而不是直接调学习率。
 
+### 训练稳定性 Debug 的资料边界
+
+按照 `WRITING_PLAN.md` 的要求，本章第二轮精修前核对了 PyTorch autograd anomaly detection、`clip_grad_norm_` 的 non-finite 检查、PyTorch AMP / `GradScaler`、Hugging Face Trainer 日志指标，以及前序训练循环、优化器、分布式训练、显存和数值精度章节资料。
+
+本章聚焦训练稳定性排查的工程闭环：loss spike、NaN / Inf、grad norm、数据 batch、label mask、学习率、optimizer state、mixed precision、分布式 rank 状态和 checkpoint 恢复。它不展开特定训练平台的监控系统、生产告警规则、NCCL 深层故障诊断和模型架构级稳定性理论。
+
+### 训练健康指标口径
+
+每个训练 step 可以记录一组健康指标：
+
+```math
+h_t=
+(L_t,L_{\mathrm{val},t},G_t,\eta_t,S_t,R_t,U_t)
+```
+
+其中 `L_t` 是 train loss，`L_val,t` 是 validation loss，`G_t` 是 grad norm，`eta_t` 是 learning rate，`S_t` 是 loss scale，`R_t` 是 tokens/sec，`U_t` 是 GPU utilization 或类似系统利用率。debug 的目标是从时间序列 `h_t` 中找到第一次异常：
+
+```math
+t^\*=
+\min\{t\mid G_{\mathrm{health}}(h_t)=0\}
+```
+
+一个简化健康门禁可以写成：
+
+```math
+G_{\mathrm{health}}=
+g_{\mathrm{loss}}\,
+g_{\mathrm{grad}}\,
+g_{\mathrm{data}}\,
+g_{\mathrm{mask}}\,
+g_{\mathrm{lr}}\,
+g_{\mathrm{precision}}\,
+g_{\mathrm{rank}}\,
+g_{\mathrm{ckpt}}
+```
+
+这些 `g` 都是 0/1 检查项：loss 有限且无异常 spike、梯度范数可控、batch 数据正常、label mask 正确、学习率和 warmup 符合预期、精度没有 overflow / underflow、分布式 rank 状态一致、checkpoint 恢复字段完整。
+
 ## 1. 先建立健康训练的基线
 
 Debug 的前提是知道“正常训练”应该长什么样。
@@ -128,6 +166,22 @@ grad norm 同步变大
 5. 查看 learning rate 是否刚到 peak。
 6. 检查是否从 checkpoint 恢复后不久发生。
 
+一个实用的 spike 判定不要只看单点 loss，而要和前面一小段窗口比较。设最近 `k` 个健康 step 的 loss 中位数为基线：
+
+```math
+r_t=
+\frac{L_t}
+{\mathrm{median}(L_{t-k},\ldots,L_{t-1})+\epsilon}
+```
+
+当下面条件成立时，可以先把该 step 标成候选异常点：
+
+```math
+r_t\ge \tau_{\mathrm{spike}}
+```
+
+其中 `tau_spike` 是 spike 阈值，工程上常用 2 到 3 倍作为初筛，再结合 batch、grad norm、lr 和 loss scale 复核。这个公式不是为了替代人工分析，而是为了让告警和日志定位有稳定口径。
+
 ### 3.3 处理方法
 
 1. 过滤异常数据。
@@ -174,6 +228,16 @@ optimizer state 出现 inf
 6. 检查是所有 rank NaN，还是某个 rank 先 NaN。
 ```
 
+有限性检查可以写成：
+
+```math
+g_{\mathrm{finite}}=
+\mathbf{1}[\mathrm{isfinite}(L_t)]
+\mathbf{1}[\mathrm{isfinite}(G_t)]
+```
+
+如果 `g_finite=0`，就不要继续让 optimizer 更新参数，而应该保存现场、定位第一个坏张量，并回滚到上一个健康 checkpoint。PyTorch 里常见做法是对关键张量显式检查 finite，在必要时打开 autograd anomaly detection；梯度裁剪接口也可以要求遇到 non-finite total norm 时直接报错。
+
 ### 4.3 处理方法
 
 1. 使用 BF16。
@@ -215,6 +279,23 @@ loss spike
 4. 检查异常 batch。
 5. 检查 loss 是否平均方式错误。
 
+全局梯度范数通常按所有可训练参数的梯度拼接后计算：
+
+```math
+G_t=
+\sqrt{\sum_i \lVert g_{t,i}\rVert_2^2}
+```
+
+如果最大允许范数为 `c`，global norm clipping 可以抽象成：
+
+```math
+g'_t=
+g_t
+\min\left(1,\frac{c}{G_t+\epsilon}\right)
+```
+
+这说明 clipping 只在 `G_t>c` 时缩小梯度方向的长度，不会在正常梯度范围内改变更新。面试里要能说清楚：clipping 是稳定训练的保护机制，不是修复坏数据、错误 label mask 或过大学习率的根本替代品。
+
 ### 5.2 梯度消失或过小
 
 表现：
@@ -250,6 +331,15 @@ grad norm 很小
 7. prompt 和 answer 错位。
 8. 重复样本比例过高。
 9. benchmark 或测试集泄漏。
+
+对 SFT 或指令微调，异常 batch 的一个关键指标是有效 label 比例：
+
+```math
+q_{\mathrm{label}}=
+\frac{\sum_{j=1}^{T}\mathbf{1}[y_j\ne -100]}{T}
+```
+
+如果 `q_label` 接近 0，说明这一批几乎没有监督 token；如果 prompt token 也参与了 loss，则模型可能在学复读 prompt。稳定训练不只要求 batch shape 正确，还要求有效监督区域正确。
 
 ### 6.1 怎么检查 batch
 
@@ -292,6 +382,17 @@ Loss mask 错误非常隐蔽。
 4. 多轮对话只训练最后一轮。
 5. label 没有 shift。
 6. 截断后只剩 prompt，没有 answer。
+
+loss mask 的门禁可以简化为：
+
+```math
+g_{\mathrm{mask}}=
+\mathbf{1}[q_{\mathrm{label}}\ge q_{\min}]
+\mathbf{1}[\Delta_{\mathrm{shift}}=1]
+\mathbf{1}[\Delta_{\mathrm{pad}}=1]
+```
+
+其中 `Delta_shift=1` 表示 causal LM 的 input / label shift 正确，`Delta_pad=1` 表示 padding token 没有参与 loss。这个门禁不追求覆盖所有格式错误，但能拦住最常见、最隐蔽的训练目标错误。
 
 检查方式：
 
@@ -360,6 +461,25 @@ FP16 训练容易遇到 overflow 或 underflow。
 4. 对高风险操作使用 FP32。
 5. 检查 softmax、norm 和自定义 kernel。
 
+loss scaling 的核心关系是：
+
+```math
+\tilde{L}_t=
+S_tL_t
+```
+
+```math
+\tilde{g}_t=
+S_tg_t
+```
+
+```math
+g_t=
+\frac{\tilde{g}_t}{S_t}
+```
+
+如果缩放后的梯度出现 Inf / NaN，scaler 通常会跳过本次 optimizer step 并调整 scale。调试时要记录 `S_t` 是否频繁下降，以及跳过更新是否和 loss spike、坏 batch 或 rank 异常发生在同一段时间。
+
 面试表达：混合精度问题不只是 dtype 选择，也和 loss scaling、kernel 实现和梯度尺度有关。
 
 ## 10. 分布式同步错误
@@ -391,6 +511,23 @@ FP16 训练容易遇到 overflow 或 underflow。
 4. 打印每个 rank 的 step、loss、batch size。
 5. 确认所有 rank collective 调用一致。
 
+每个 rank 的 loss 至少要做一致性观察：
+
+```math
+\Delta_{\mathrm{rank}}=
+\max_r L_{t,r}-\min_r L_{t,r}
+```
+
+对应的分布式健康门禁可以写成：
+
+```math
+g_{\mathrm{rank}}=
+\mathbf{1}[\Delta_{\mathrm{rank}}\le \tau_{\mathrm{rank}}]
+\prod_r \mathbf{1}[\mathrm{isfinite}(L_{t,r})]
+```
+
+如果某个 rank 先变 NaN，其他 rank 可能只是被 collective 卡住。排查时要看 per-rank loss、batch id、有效 token 数和 collective 调用位置，而不是只看主进程日志。
+
 面试表达：分布式 debug 要先缩小到单卡和单机多卡，确认问题是模型/数据问题还是通信/并行问题。
 
 ## 11. Checkpoint 恢复问题
@@ -416,9 +553,170 @@ Checkpoint 恢复错误很容易导致训练曲线异常。
 4. FSDP/ZeRO checkpoint 加载方式不匹配。
 5. 数据继续位置错乱。
 
+完整 checkpoint 的恢复门禁可以写成：
+
+```math
+G_{\mathrm{ckpt}}=
+g_{\mathrm{model}}\,
+g_{\mathrm{opt}}\,
+g_{\mathrm{sched}}\,
+g_{\mathrm{scaler}}\,
+g_{\mathrm{rng}}\,
+g_{\mathrm{data}}
+```
+
+只要其中一项为 0，就只能说“加载了部分状态”，不能说“恢复了训练”。对训练恢复来说，optimizer 动量、scheduler step、loss scaler、随机状态和 dataloader 位置都可能影响接下来的 loss 曲线。
+
 面试表达：checkpoint 能用于推理不代表能无缝恢复训练。恢复训练需要 optimizer、scheduler、scaler、随机状态和数据位置一致。
 
-## 12. 一个实用 debug checklist
+## 12. 最小可运行训练健康审计 demo
+
+下面的 demo 用标准库模拟一次训练健康审计。输入是 step 级训练日志、batch 元信息、per-rank loss 和 checkpoint 字段；输出是 spike、NaN、梯度爆炸、坏 batch、rank 不一致、checkpoint 缺项和建议动作。
+
+```python
+import math
+from statistics import median
+
+history = [
+    {"step": 1, "loss": 2.40, "grad_norm": 0.8, "lr": 1e-5, "loss_scale": 4096, "tokens_sec": 980},
+    {"step": 2, "loss": 2.18, "grad_norm": 0.9, "lr": 2e-5, "loss_scale": 4096, "tokens_sec": 1005},
+    {"step": 3, "loss": 2.05, "grad_norm": 1.0, "lr": 3e-5, "loss_scale": 4096, "tokens_sec": 996},
+    {"step": 4, "loss": 5.80, "grad_norm": 7.5, "lr": 4e-5, "loss_scale": 4096, "tokens_sec": 991},
+    {"step": 5, "loss": 2.02, "grad_norm": 1.1, "lr": 5e-5, "loss_scale": 4096, "tokens_sec": 997},
+    {"step": 6, "loss": float("nan"), "grad_norm": float("inf"), "lr": 6e-5, "loss_scale": 2048, "tokens_sec": 990},
+]
+
+batches = {
+    1: {"id": "batch_001", "max_len": 2048, "valid_label_ratio": 0.82, "has_nan_token": False, "source": "web_clean"},
+    2: {"id": "batch_002", "max_len": 2048, "valid_label_ratio": 0.80, "has_nan_token": False, "source": "web_clean"},
+    3: {"id": "batch_003", "max_len": 2048, "valid_label_ratio": 0.79, "has_nan_token": False, "source": "code_clean"},
+    4: {"id": "batch_004_bad_mask", "max_len": 8192, "valid_label_ratio": 0.03, "has_nan_token": False, "source": "sft_mixed"},
+    5: {"id": "batch_005", "max_len": 2048, "valid_label_ratio": 0.78, "has_nan_token": False, "source": "web_clean"},
+    6: {"id": "batch_006_nan", "max_len": 2048, "valid_label_ratio": 0.81, "has_nan_token": True, "source": "math_synth"},
+}
+
+rank_losses = {4: [5.8, 5.7, 5.9, 5.8], 6: [2.1, float("nan"), 2.0, 2.1]}
+
+checkpoint = {
+    "model": True,
+    "optimizer": True,
+    "scheduler": False,
+    "scaler": False,
+    "random_state": True,
+    "data_position": False,
+}
+
+seq_limit = 4096
+valid_label_min = 0.2
+grad_threshold = 5.0
+spike_ratio = 2.0
+
+def is_finite(x):
+    return math.isfinite(x)
+
+def finite_losses_before(step):
+    return [r["loss"] for r in history if r["step"] < step and is_finite(r["loss"])]
+
+spike_steps = []
+nan_steps = []
+grad_explosion_steps = []
+bad_batches = []
+rank_mismatch_steps = []
+
+for record in history:
+    step = record["step"]
+    loss = record["loss"]
+    grad_norm = record["grad_norm"]
+
+    if not is_finite(loss) or not is_finite(grad_norm):
+        nan_steps.append(step)
+
+    previous = finite_losses_before(step)
+    if previous and is_finite(loss):
+        baseline = median(previous[-3:])
+        if loss / baseline >= spike_ratio:
+            spike_steps.append((step, round(loss / baseline, 2)))
+
+    if is_finite(grad_norm) and grad_norm > grad_threshold:
+        grad_explosion_steps.append((step, grad_norm))
+
+    batch = batches[step]
+    reasons = []
+    if batch["max_len"] > seq_limit:
+        reasons.append("too_long")
+    if batch["valid_label_ratio"] < valid_label_min:
+        reasons.append("low_valid_label_ratio")
+    if batch["has_nan_token"]:
+        reasons.append("nan_token")
+    if reasons:
+        bad_batches.append((step, batch["id"], reasons))
+
+for step, losses in rank_losses.items():
+    finite = [x for x in losses if is_finite(x)]
+    has_nonfinite = len(finite) != len(losses)
+    spread = max(finite) - min(finite) if finite else float("inf")
+    if has_nonfinite or spread > 0.5:
+        rank_mismatch_steps.append((step, has_nonfinite, round(spread, 3) if is_finite(spread) else "inf"))
+
+missing_checkpoint = [name for name, ok in checkpoint.items() if not ok]
+healthy_steps = [
+    r["step"]
+    for r in history
+    if r["step"] not in nan_steps and r["step"] not in [s for s, _ in spike_steps]
+]
+rollback_step = max(step for step in healthy_steps if step < min(nan_steps or [10**9]))
+
+recommendations = []
+if bad_batches:
+    recommendations.append("quarantine_bad_batches")
+if grad_explosion_steps:
+    recommendations.append("lower_lr_or_enable_clipping")
+if nan_steps:
+    recommendations.append("switch_bf16_or_check_loss_scaling")
+if missing_checkpoint:
+    recommendations.append("resume_only_from_complete_checkpoint")
+if rank_mismatch_steps:
+    recommendations.append("compare_rank_batches_and_collectives")
+
+checks = {
+    "spike_detected": spike_steps == [(4, 2.66)],
+    "nan_detected": nan_steps == [6],
+    "bad_batch_detected": bad_batches[0][1] == "batch_004_bad_mask",
+    "checkpoint_gap_detected": missing_checkpoint == ["scheduler", "scaler", "data_position"],
+    "rank_mismatch_detected": rank_mismatch_steps == [(6, True, 0.1)],
+    "rollback_before_nan": rollback_step == 5,
+}
+
+print("spike_steps=", spike_steps)
+print("nan_steps=", nan_steps)
+print("grad_explosion_steps=", grad_explosion_steps)
+print("bad_batches=", bad_batches)
+print("rank_mismatch_steps=", rank_mismatch_steps)
+print("missing_checkpoint=", missing_checkpoint)
+print("rollback_step=", rollback_step)
+print("recommendations=", recommendations)
+print("checks=", checks)
+print("gate_pass=", all(checks.values()))
+```
+
+期望输出：
+
+```text
+spike_steps= [(4, 2.66)]
+nan_steps= [6]
+grad_explosion_steps= [(4, 7.5)]
+bad_batches= [(4, 'batch_004_bad_mask', ['too_long', 'low_valid_label_ratio']), (6, 'batch_006_nan', ['nan_token'])]
+rank_mismatch_steps= [(6, True, 0.1)]
+missing_checkpoint= ['scheduler', 'scaler', 'data_position']
+rollback_step= 5
+recommendations= ['quarantine_bad_batches', 'lower_lr_or_enable_clipping', 'switch_bf16_or_check_loss_scaling', 'resume_only_from_complete_checkpoint', 'compare_rank_batches_and_collectives']
+checks= {'spike_detected': True, 'nan_detected': True, 'bad_batch_detected': True, 'checkpoint_gap_detected': True, 'rank_mismatch_detected': True, 'rollback_before_nan': True}
+gate_pass= True
+```
+
+这个 demo 的重点不是模拟真实训练，而是把训练 debug 的日志口径固定下来：先定位 step，再关联 batch、grad、rank 和 checkpoint。真实项目里可以把这些检查接到 Trainer callback、训练日志、数据样本落盘和告警系统里。
+
+## 13. 一个实用 debug checklist
 
 遇到训练异常，可以按下面清单走：
 
@@ -437,7 +735,7 @@ Checkpoint 恢复错误很容易导致训练曲线异常。
 
 这比“感觉是学习率问题”可靠得多。
 
-## 13. 面试官会怎么问
+## 14. 面试官会怎么问
 
 ### 问法 1：训练 loss 突然 spike，你怎么排查？
 
@@ -479,7 +777,7 @@ NaN 要定位第一个坏掉的 step 和第一个坏掉的张量。我会检查 
 我会检查是否完整恢复了 model、optimizer、scheduler、scaler、random state 和数据位置。如果只恢复模型权重，AdamW 动量和学习率 schedule 不连续，loss 可能跳变。还要确认 tokenizer、config、并行切分和 checkpoint 格式一致。
 ```
 
-## 14. 本章小结
+## 15. 本章小结
 
 本章核心结论：
 

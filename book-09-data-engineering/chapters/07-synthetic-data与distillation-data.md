@@ -12,6 +12,18 @@
 
 合规边界：本章讨论合成数据的训练、评估、治理和风险控制，不提供绕过模型服务条款、复制专有模型能力、生成有害内容或规避安全策略的方法。
 
+## 0. 本讲资料边界与第二轮精修口径
+
+按照 `WRITING_PLAN.md` 的要求，本讲精修前核对了 Self-Instruct、WizardLM / Evol-Instruct、phi-1 / Textbooks Are All You Need、Orca、经典 knowledge distillation、Distilling Step-by-Step 和 model collapse / generated data recursion 等公开论文资料。
+
+本讲聚焦 synthetic data 与 distillation data 的防御性数据工程闭环：目标能力定义、seed 设计、teacher 授权、prompt / sampling 记录、生成后过滤、正确性验证、去重和污染隔离、合成比例控制、自然数据锚点、训练 ablation 与版本审计。
+
+```text
+目标能力 -> seed 数据 -> teacher / 规则生成 -> 验证 -> 去重 -> 安全与污染扫描 -> 配比 -> 小规模训练实验 -> 版本审计
+```
+
+本讲不讨论绕过模型服务条款、无授权复制专有模型输出、生成有害样本、规避安全策略或用合成数据替代真实合规审计。合成数据只能作为可验证、可追踪、可配比的训练信号。
+
 ---
 
 ## 1. 先建立直觉：为什么要合成数据？
@@ -59,6 +71,82 @@ Distillation data 强调 teacher-student 关系。强模型生成回答、解释
 5. 用 teacher 模型给多个回答排序：偏好蒸馏数据。
 
 面试中可以这样说：合成数据关注“数据来源是否生成”，蒸馏数据关注“是否把 teacher 能力迁移给 student”。
+
+### 3.1 关键公式与审计指标
+
+训练数据可以分成自然数据、合成数据和蒸馏数据：
+
+```math
+D=D_{\mathrm{nat}}\cup D_{\mathrm{syn}}\cup D_{\mathrm{distill}}
+```
+
+一条合成或蒸馏样本可以表示为：
+
+```math
+s_i=(x_i,y_i,a_i,t_i,p_i,q_i,r_i,z_i)
+```
+
+其中 `x_i` 是指令或上下文，`y_i` 是生成答案或轨迹，`a_i` 是目标能力标签，`t_i` 是 teacher / generator 标识，`p_i` 是 prompt 和采样参数版本，`q_i` 是质量分，`r_i` 是风险分，`z_i` 是授权、验证、去重、污染和版本元数据。
+
+如果是普通 SFT 合成样本，目标仍是条件语言建模：
+
+```math
+L_{\mathrm{sft}}=-\frac{1}{N_{\mathrm{tok}}}\sum_i w_i\sum_j \log p_{\theta}(y_{i,j}\mid x_i,y_{i,<j})
+```
+
+其中 `w_i` 是样本权重，`N_tok` 是有效训练 token 数。`w_i` 不应该只由 teacher 分数决定，还要叠加验证、风险、重复和多样性审计。
+
+如果 teacher 提供 soft distribution，蒸馏损失常写成 KL 形式：
+
+```math
+L_{\mathrm{kd}}=\tau^2\sum_i \mathrm{KL}(p_T^{\tau}(\cdot\mid c_i)\|p_S^{\tau}(\cdot\mid c_i))
+```
+
+其中 `p_T` 是 teacher 分布，`p_S` 是 student 分布，`\tau` 是 distillation temperature，`c_i` 是上下文。如果只有 teacher 的 hard answer，则退化为对 teacher output 做 supervised learning。
+
+合成样本质量分可以写成可审计的加权形式：
+
+```math
+q_i=w_vV_i+w_eE_i+w_dD_i+w_sS_i-\lambda_hH_i-\lambda_uU_i-\lambda_cC_i
+```
+
+其中 `V_i` 是正确性验证，`E_i` 是证据或测试支持，`D_i` 是多样性贡献，`S_i` 是安全边界通过情况，`H_i` 是 hallucination 风险，`U_i` 是近重复或模板化风险，`C_i` 是评测污染风险。
+
+合成数据样本门禁可以写成：
+
+```math
+G_i=I(q_i\ge \tau_q)I_{\mathrm{auth},i}I_{\mathrm{verify},i}I_{\mathrm{dedup},i}I_{\mathrm{safe},i}I_{\mathrm{contam},i}I_{\mathrm{privacy},i}
+```
+
+这里 `I_auth` 表示 teacher 输出或生成规则的使用授权成立；`I_verify` 表示答案、代码、引用、安全边界或工具参数通过验证；`I_contam` 表示没有命中评测污染。
+
+合成和蒸馏数据在训练集合中的 token 占比为：
+
+```math
+R_{\mathrm{syn}}=\frac{\sum_{i:o_i\in\{\mathrm{syn},\mathrm{distill}\}}G_iT_i}{\sum_iG_iT_i}
+```
+
+其中 `o_i` 是样本来源类型，`T_i` 是 token 数。`R_syn` 过高时，要警惕同质化、teacher 偏差和 model collapse 风险。
+
+能力覆盖可以按标签集合计算：
+
+```math
+C_{\mathrm{cover}}=\frac{|A_{\mathrm{target}}\cap A_{\mathrm{kept}}|}{|A_{\mathrm{target}}|}
+```
+
+同质化或近重复率可以写成：
+
+```math
+R_{\mathrm{dup}}=\frac{\sum_i I(\max_{j<i}\mathrm{sim}(s_i,s_j)>\tau_{\mathrm{sim}})}{n}
+```
+
+最终训练前门禁可以写成：
+
+```math
+G_{\mathrm{syn}}=I(R_{\mathrm{syn}}\le r_{\max})I(C_{\mathrm{cover}}\ge c_{\min})I(R_{\mathrm{dup}}\le d_{\max})I(R_{\mathrm{risk}}\le \rho_{\max})
+```
+
+面试里要强调：合成数据不是“便宜 token”，而是对训练分布的主动编辑。必须同时记录 teacher、prompt、sampling、验证、过滤、配比和训练效果。
 
 ---
 
@@ -388,6 +476,145 @@ SFT 是合成指令数据最常用的阶段。instruction-response、multi-turn 
 第九步，和自然数据混合。控制合成数据比例，避免同质化和分布退化。
 
 第十步，版本化和合规审计。记录 teacher、prompt、采样参数、过滤规则、授权信息、质量评估和训练效果。
+
+### 18.1 最小可运行合成与蒸馏数据审计 demo
+
+下面这个 demo 不依赖外部库，也不读写文件。输入是一组 toy natural / synthetic / distillation 样本；输出包括保留样本、拒绝原因、来源配比、任务配比、teacher 配比、多样性覆盖和门禁结果。
+
+它演示的是合成数据治理机制，不是生产级合规审查、LLM judge、数学 verifier、代码沙箱、安全分类器或版权系统。真实系统要接入授权审查、teacher 版本管理、prompt registry、测试执行、检索证据、人工抽样、污染检测和训练 ablation。
+
+```python
+from collections import Counter, defaultdict
+
+
+samples = [
+    {"id": "seed_user_math", "origin": "natural", "task": "math", "tokens": 420, "quality": 0.86, "validated": True, "diversity": {"math", "seed"}, "teacher": None, "authorized": True, "duplicate": False, "contam": False, "safety_ok": True, "pii": False, "natural_anchor": True},
+    {"id": "seed_user_domain", "origin": "natural", "task": "domain", "tokens": 1200, "quality": 0.84, "validated": True, "diversity": {"domain", "seed"}, "teacher": None, "authorized": True, "duplicate": False, "contam": False, "safety_ok": True, "pii": False, "natural_anchor": True},
+    {"id": "syn_math_verified", "origin": "synthetic", "task": "math", "tokens": 620, "quality": 0.88, "validated": True, "diversity": {"math", "reasoning"}, "teacher": "rule_solver", "authorized": True, "duplicate": False, "contam": False, "safety_ok": True, "pii": False, "natural_anchor": False},
+    {"id": "syn_math_wrong", "origin": "synthetic", "task": "math", "tokens": 560, "quality": 0.83, "validated": False, "diversity": {"math"}, "teacher": "rule_solver", "authorized": True, "duplicate": False, "contam": False, "safety_ok": True, "pii": False, "natural_anchor": False},
+    {"id": "distill_tool_trace", "origin": "distill", "task": "tool", "tokens": 780, "quality": 0.91, "validated": True, "diversity": {"tool", "multi_step"}, "teacher": "owned_teacher", "authorized": True, "duplicate": False, "contam": False, "safety_ok": True, "pii": False, "natural_anchor": False},
+    {"id": "distill_unauthorized", "origin": "distill", "task": "general", "tokens": 700, "quality": 0.90, "validated": True, "diversity": {"general"}, "teacher": "restricted_api", "authorized": False, "duplicate": False, "contam": False, "safety_ok": True, "pii": False, "natural_anchor": False},
+    {"id": "syn_code_tests", "origin": "synthetic", "task": "code", "tokens": 900, "quality": 0.87, "validated": True, "diversity": {"code", "tests"}, "teacher": "owned_teacher", "authorized": True, "duplicate": False, "contam": False, "safety_ok": True, "pii": False, "natural_anchor": False},
+    {"id": "syn_code_duplicate", "origin": "synthetic", "task": "code", "tokens": 880, "quality": 0.86, "validated": True, "diversity": {"code", "tests"}, "teacher": "owned_teacher", "authorized": True, "duplicate": True, "contam": False, "safety_ok": True, "pii": False, "natural_anchor": False},
+    {"id": "syn_benchmark_leak", "origin": "synthetic", "task": "eval_like", "tokens": 500, "quality": 0.84, "validated": True, "diversity": {"eval"}, "teacher": "owned_teacher", "authorized": True, "duplicate": False, "contam": True, "safety_ok": True, "pii": False, "natural_anchor": False},
+    {"id": "syn_safety_refusal", "origin": "synthetic", "task": "safety", "tokens": 640, "quality": 0.82, "validated": True, "diversity": {"safety", "boundary"}, "teacher": "policy_template", "authorized": True, "duplicate": False, "contam": False, "safety_ok": True, "pii": False, "natural_anchor": False},
+    {"id": "syn_unsafe_answer", "origin": "synthetic", "task": "safety", "tokens": 610, "quality": 0.74, "validated": True, "diversity": {"safety"}, "teacher": "weak_teacher", "authorized": True, "duplicate": False, "contam": False, "safety_ok": False, "pii": False, "natural_anchor": False},
+    {"id": "real_user_private", "origin": "natural", "task": "domain", "tokens": 540, "quality": 0.78, "validated": True, "diversity": {"domain"}, "teacher": None, "authorized": True, "duplicate": False, "contam": False, "safety_ok": True, "pii": True, "natural_anchor": True},
+]
+
+TARGET_TAGS = {"math", "reasoning", "tool", "multi_step", "code", "tests", "safety", "boundary", "domain", "seed"}
+MIN_QUALITY = 0.80
+MAX_SYN_RATIO = 0.72
+
+
+def reject_reason(item):
+    if not item["authorized"]:
+        return "unauthorized_teacher"
+    if item["pii"]:
+        return "privacy_or_pii"
+    if item["contam"]:
+        return "eval_contamination"
+    if item["duplicate"]:
+        return "near_duplicate"
+    if not item["safety_ok"]:
+        return "unsafe_or_policy_fail"
+    if not item["validated"]:
+        return "unverified_output"
+    if item["quality"] < MIN_QUALITY:
+        return "low_quality"
+    return None
+
+
+kept, rejected = [], {}
+for item in samples:
+    reason = reject_reason(item)
+    if reason:
+        rejected[item["id"]] = reason
+    else:
+        kept.append(item)
+
+raw_tokens = sum(item["tokens"] for item in samples)
+kept_tokens = sum(item["tokens"] for item in kept)
+origin_tokens = defaultdict(int)
+task_tokens = defaultdict(int)
+teacher_tokens = defaultdict(int)
+covered_tags = set()
+
+for item in kept:
+    origin_tokens[item["origin"]] += item["tokens"]
+    task_tokens[item["task"]] += item["tokens"]
+    teacher_tokens[item["teacher"] or "human_or_seed"] += item["tokens"]
+    covered_tags.update(item["diversity"])
+
+synthetic_like_tokens = origin_tokens["synthetic"] + origin_tokens["distill"]
+report = {
+    "kept_ids": [item["id"] for item in kept],
+    "rejected": dict(sorted(rejected.items())),
+    "reason_counts": dict(sorted(Counter(rejected.values()).items())),
+    "retention": round(kept_tokens / raw_tokens, 3),
+    "origin_mix": {k: round(origin_tokens[k] / kept_tokens, 3) for k in sorted(origin_tokens)},
+    "task_mix": {k: round(task_tokens[k] / kept_tokens, 3) for k in sorted(task_tokens)},
+    "teacher_mix": {k: round(teacher_tokens[k] / kept_tokens, 3) for k in sorted(teacher_tokens)},
+    "synthetic_like_ratio": round(synthetic_like_tokens / kept_tokens, 3),
+    "diversity_coverage": round(len(covered_tags & TARGET_TAGS) / len(TARGET_TAGS), 3),
+}
+
+gates = {
+    "authorization": "unauthorized_teacher" in report["reason_counts"],
+    "validation": "unverified_output" in report["reason_counts"],
+    "contamination": "eval_contamination" in report["reason_counts"],
+    "safety": "unsafe_or_policy_fail" in report["reason_counts"],
+    "privacy": "privacy_or_pii" in report["reason_counts"],
+    "diversity": report["diversity_coverage"] >= 0.85,
+    "synthetic_ratio": report["synthetic_like_ratio"] <= MAX_SYN_RATIO,
+    "natural_anchor": origin_tokens["natural"] > 0,
+}
+report["gates"] = gates
+report["gate_pass"] = all(gates.values())
+
+for key, value in report.items():
+    print(f"{key}=", value)
+
+assert report["kept_ids"] == [
+    "seed_user_math",
+    "seed_user_domain",
+    "syn_math_verified",
+    "distill_tool_trace",
+    "syn_code_tests",
+    "syn_safety_refusal",
+]
+assert report["reason_counts"] == {
+    "eval_contamination": 1,
+    "near_duplicate": 1,
+    "privacy_or_pii": 1,
+    "unauthorized_teacher": 1,
+    "unsafe_or_policy_fail": 1,
+    "unverified_output": 1,
+}
+assert report["retention"] == 0.546
+assert report["origin_mix"] == {"distill": 0.171, "natural": 0.355, "synthetic": 0.474}
+assert report["synthetic_like_ratio"] == 0.645
+assert report["diversity_coverage"] == 1.0
+assert report["gate_pass"] is True
+```
+
+运行后会看到类似输出：
+
+```text
+kept_ids= ['seed_user_math', 'seed_user_domain', 'syn_math_verified', 'distill_tool_trace', 'syn_code_tests', 'syn_safety_refusal']
+rejected= {'distill_unauthorized': 'unauthorized_teacher', 'real_user_private': 'privacy_or_pii', 'syn_benchmark_leak': 'eval_contamination', 'syn_code_duplicate': 'near_duplicate', 'syn_math_wrong': 'unverified_output', 'syn_unsafe_answer': 'unsafe_or_policy_fail'}
+reason_counts= {'eval_contamination': 1, 'near_duplicate': 1, 'privacy_or_pii': 1, 'unauthorized_teacher': 1, 'unsafe_or_policy_fail': 1, 'unverified_output': 1}
+retention= 0.546
+origin_mix= {'distill': 0.171, 'natural': 0.355, 'synthetic': 0.474}
+task_mix= {'code': 0.197, 'domain': 0.263, 'math': 0.228, 'safety': 0.14, 'tool': 0.171}
+teacher_mix= {'human_or_seed': 0.355, 'owned_teacher': 0.368, 'policy_template': 0.14, 'rule_solver': 0.136}
+synthetic_like_ratio= 0.645
+diversity_coverage= 1.0
+gates= {'authorization': True, 'validation': True, 'contamination': True, 'safety': True, 'privacy': True, 'diversity': True, 'synthetic_ratio': True, 'natural_anchor': True}
+gate_pass= True
+```
+
+这个 demo 的重点是：合成数据进入训练前必须被当成可审计数据产品，而不是 teacher 随手生成的文本。它要能证明授权成立、错误被验证拦截、污染被隔离、PII 被过滤、近重复被降掉，并且合成 / 蒸馏 token 没有压过自然数据锚点。
 
 ---
 

@@ -25,6 +25,8 @@
 
 所以本讲先把字符级语言模型的数据管线讲清楚。
 
+本讲精修时按 `WRITING_PLAN.md` 核对了 PyTorch 官方 `nn.Embedding`、`torch.randint`、`torch.stack`、`torch.utils.data.Dataset` 和 `DataLoader` 文档资料边界，确认 embedding 输入应是整数 id，`torch.randint` 的上界是右开区间，`Dataset.__len__` 应返回可采样样本数，`DataLoader` 会按 batch 维堆叠样本。
+
 ---
 
 ### 一、什么是字符级语言模型
@@ -74,6 +76,14 @@ h, e, l, l, o
 ### 二、语言模型训练数据长什么样
 
 语言模型的目标是预测下一个 token。
+
+更形式化地说，给定 token 序列 `t_0,t_1,\ldots,t_{N-1}`，训练目标是让模型在每个位置预测下一个 token：
+
+```math
+p(t_0,\ldots,t_{N-1})
+=
+\prod_{i=0}^{N-1}p(t_i\mid t_0,\ldots,t_{i-1})
+```
 
 假设文本是：
 
@@ -322,6 +332,12 @@ y 长度也是 block_size。
 y 比 x 向右移动一位。
 ```
 
+如果起点是 `i`、上下文长度是 `T`，可以写成：
+
+```math
+x_j = d_{i+j},\qquad y_j=d_{i+j+1},\qquad j=0,\ldots,T-1
+```
+
 示例：
 
 ```python
@@ -349,7 +365,11 @@ print("y text:", decode(y.tolist()))
 def get_batch(split, batch_size=4, block_size=8):
     source = train_data if split == "train" else val_data
 
-    ix = torch.randint(0, len(source) - block_size - 1, (batch_size,))
+    max_start = len(source) - block_size
+    if max_start <= 0:
+        raise ValueError(f"{split} split is too short for block_size={block_size}")
+
+    ix = torch.randint(0, max_start, (batch_size,))
 
     x = torch.stack([source[i:i + block_size] for i in ix])
     y = torch.stack([source[i + 1:i + block_size + 1] for i in ix])
@@ -400,6 +420,8 @@ logits: [batch, seq_len, vocab_size]
 import torch
 
 
+torch.manual_seed(42)
+
 text = """
 hello world
 hello transformer
@@ -432,7 +454,10 @@ val_data = data[n:]
 
 def get_batch(split, batch_size=4, block_size=8):
     source = train_data if split == "train" else val_data
-    ix = torch.randint(0, len(source) - block_size - 1, (batch_size,))
+    max_start = len(source) - block_size
+    if max_start <= 0:
+        raise ValueError(f"{split} split is too short for block_size={block_size}")
+    ix = torch.randint(0, max_start, (batch_size,))
     x = torch.stack([source[i:i + block_size] for i in ix])
     y = torch.stack([source[i + 1:i + block_size + 1] for i in ix])
     return x, y
@@ -440,6 +465,9 @@ def get_batch(split, batch_size=4, block_size=8):
 
 if __name__ == "__main__":
     print("vocab_size:", vocab_size)
+    print("data_dtype:", data.dtype)
+    print("train_len:", len(train_data))
+    print("val_len:", len(val_data))
     print("chars:", chars)
 
     sample = "hello"
@@ -447,12 +475,33 @@ if __name__ == "__main__":
     print("sample:", sample)
     print("ids:", ids)
     print("decode:", decode(ids))
+    print("roundtrip_ok:", decode(encode(text)) == text)
 
     xb, yb = get_batch("train", batch_size=4, block_size=8)
     print("xb shape:", xb.shape)
     print("yb shape:", yb.shape)
-    print("first x:", decode(xb[0].tolist()))
-    print("first y:", decode(yb[0].tolist()))
+    print("shift_ok:", torch.equal(xb[:, 1:], yb[:, :-1]))
+    print("first x:", repr(decode(xb[0].tolist())))
+    print("first y:", repr(decode(yb[0].tolist())))
+```
+
+参考输出：
+
+```text
+vocab_size: 22
+data_dtype: torch.int64
+train_len: 121
+val_len: 14
+chars: ['\n', ' ', 'a', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'k', 'l', 'm', 'n', 'o', 'p', 'r', 's', 't', 'u', 'w', 'x']
+sample: hello
+ids: [8, 5, 11, 11, 14]
+decode: hello
+roundtrip_ok: True
+xb shape: torch.Size([4, 8])
+yb shape: torch.Size([4, 8])
+shift_ok: True
+first x: 'model\ntr'
+first y: 'odel\ntra'
 ```
 
 这份脚本可以作为后续训练小 GPT 的数据准备部分。
@@ -568,6 +617,15 @@ torch.randint(0, len(source), ...)
 后面切片可能长度不足。
 
 正确上界要留出 `block_size + 1`。
+
+因为 `torch.randint(low, high, ...)` 的 `high` 不会被取到，所以常用写法是：
+
+```python
+max_start = len(source) - block_size
+ix = torch.randint(0, max_start, (batch_size,))
+```
+
+这样最大起点是 `len(source) - block_size - 1`，刚好还能取到长度为 `block_size` 的 `x` 和右移一位的 `y`。
 
 #### 坑 4：验证集太短
 
@@ -690,6 +748,8 @@ autoregressive generation
 
 因为你会亲手跑通一次从文本到生成的完整闭环。
 
+本讲精修时按 `WRITING_PLAN.md` 核对了 PyTorch 官方 `nn.Embedding`、`nn.Linear`、`nn.ModuleList`、`nn.Sequential`、`F.cross_entropy`、`torch.optim.AdamW` 和 `Module.train/eval` 文档资料边界，确认 embedding 输入是整数 id，`F.cross_entropy` 可接收 class index target，常见训练写法需要把 `[B,T,V]` logits 展平成 `[B*T,V]`、把 `[B,T]` labels 展平成 `[B*T]`，`AdamW` 是解耦 weight decay 优化器，`model.eval()` / `model.train()` 会切换 dropout 等模块行为。
+
 ---
 
 ### 一、整体训练流程
@@ -729,6 +789,19 @@ y: [B, T]
 
 ```text
 每个位置预测下一个字符。
+```
+
+如果 `V` 是词表大小，模型输出 logits 为 `z_{b,t,c}`，标签为 `y_{b,t}`，next-token 交叉熵可以写成：
+
+```math
+L=
+\frac{1}{BT}
+\sum_{b=1}^{B}
+\sum_{t=1}^{T}
+\left(
+-z_{b,t,y_{b,t}}+
+\log\sum_{c=1}^{V}\exp(z_{b,t,c})
+\right)
 ```
 
 ---
@@ -803,7 +876,10 @@ dropout = 0.1
 ```python
 def get_batch(split):
     source = train_data if split == "train" else val_data
-    ix = torch.randint(0, len(source) - block_size - 1, (batch_size,))
+    max_start = len(source) - block_size
+    if max_start <= 0:
+        raise ValueError(f"{split} split is too short for block_size={block_size}")
+    ix = torch.randint(0, max_start, (batch_size,))
     x = torch.stack([source[i:i + block_size] for i in ix])
     y = torch.stack([source[i + 1:i + block_size + 1] for i in ix])
     return x.to(device), y.to(device)
@@ -834,7 +910,7 @@ class Head(nn.Module):
         self.value = nn.Linear(d_model, head_size, bias=False)
         self.register_buffer(
             "tril",
-            torch.tril(torch.ones(block_size, block_size)),
+            torch.tril(torch.ones(block_size, block_size, dtype=torch.bool)),
         )
         self.dropout = nn.Dropout(dropout)
 
@@ -847,7 +923,8 @@ class Head(nn.Module):
 
         wei = q @ k.transpose(-2, -1)
         wei = wei * (k.shape[-1] ** -0.5)
-        wei = wei.masked_fill(self.tril[:seq_len, :seq_len] == 0, float("-inf"))
+        mask = self.tril[:seq_len, :seq_len]
+        wei = wei.masked_fill(~mask, torch.finfo(wei.dtype).min)
         wei = F.softmax(wei, dim=-1)
         wei = self.dropout(wei)
 
@@ -982,8 +1059,8 @@ class GPTLanguageModel(nn.Module):
             loss = None
         else:
             batch_size, seq_len, vocab_size_ = logits.shape
-            logits_flat = logits.view(batch_size * seq_len, vocab_size_)
-            targets_flat = targets.view(batch_size * seq_len)
+            logits_flat = logits.reshape(batch_size * seq_len, vocab_size_)
+            targets_flat = targets.reshape(batch_size * seq_len)
             loss = F.cross_entropy(logits_flat, targets_flat)
 
         return logits, loss
@@ -1015,6 +1092,8 @@ target: [N]
 [B, T, vocab_size] -> [B*T, vocab_size]
 [B, T]             -> [B*T]
 ```
+
+这里用 `reshape` 而不是强依赖连续内存的 `view`，可以减少因为前面张量布局变化带来的误用风险。
 
 ---
 
@@ -1089,8 +1168,8 @@ class GPTLanguageModel(nn.Module):
             loss = None
         else:
             batch_size, seq_len, vocab_size_ = logits.shape
-            logits_flat = logits.view(batch_size * seq_len, vocab_size_)
-            targets_flat = targets.view(batch_size * seq_len)
+            logits_flat = logits.reshape(batch_size * seq_len, vocab_size_)
+            targets_flat = targets.reshape(batch_size * seq_len)
             loss = F.cross_entropy(logits_flat, targets_flat)
 
         return logits, loss
@@ -1206,33 +1285,245 @@ print(decode(generated[0].tolist()))
 
 ---
 
-### 十四、完整训练脚本骨架
+### 十四、完整可运行训练脚本
 
-真实文件可以组织成：
+下面是一份可以直接复制运行的短脚本。
 
-```text
-train_char_gpt.py
-```
-
-结构如下：
+它不是追求效果最强，而是验证从数据、模型、loss、训练到生成的完整闭环。
 
 ```python
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# 1. hyperparameters
-# 2. text, vocab, encode/decode
-# 3. train/val split
-# 4. get_batch
-# 5. Head
-# 6. MultiHeadAttention
-# 7. FeedForward
-# 8. Block
-# 9. GPTLanguageModel
-# 10. estimate_loss
-# 11. training loop
-# 12. generation
+
+torch.manual_seed(42)
+
+device = "cpu"
+batch_size = 8
+block_size = 16
+max_iters = 40
+eval_iters = 5
+learning_rate = 1e-3
+d_model = 32
+num_heads = 4
+num_layers = 2
+dropout = 0.0
+
+text = """
+hello world
+hello transformer
+hello large language model
+transformer learns patterns from text
+language model predicts the next token
+attention mixes information across tokens
+small gpt learns to generate characters
+"""
+
+chars = sorted(list(set(text)))
+vocab_size = len(chars)
+stoi = {ch: i for i, ch in enumerate(chars)}
+itos = {i: ch for i, ch in enumerate(chars)}
+
+
+def encode(s):
+    return [stoi[ch] for ch in s]
+
+
+def decode(ids):
+    return "".join([itos[i] for i in ids])
+
+
+data = torch.tensor(encode(text), dtype=torch.long)
+n = int(0.9 * len(data))
+train_data = data[:n]
+val_data = data[n:]
+
+
+def get_batch(split):
+    source = train_data if split == "train" else val_data
+    max_start = len(source) - block_size
+    if max_start <= 0:
+        raise ValueError(f"{split} split is too short for block_size={block_size}")
+
+    ix = torch.randint(0, max_start, (batch_size,))
+    x = torch.stack([source[i:i + block_size] for i in ix])
+    y = torch.stack([source[i + 1:i + block_size + 1] for i in ix])
+    return x.to(device), y.to(device)
+
+
+class Head(nn.Module):
+    def __init__(self, head_size):
+        super().__init__()
+        self.key = nn.Linear(d_model, head_size, bias=False)
+        self.query = nn.Linear(d_model, head_size, bias=False)
+        self.value = nn.Linear(d_model, head_size, bias=False)
+        mask = torch.tril(torch.ones(block_size, block_size, dtype=torch.bool))
+        self.register_buffer("causal_mask", mask)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        batch_size, seq_len, channels = x.shape
+        k = self.key(x)
+        q = self.query(x)
+        v = self.value(x)
+
+        scores = q @ k.transpose(-2, -1)
+        scores = scores / math.sqrt(k.size(-1))
+        mask = self.causal_mask[:seq_len, :seq_len]
+        scores = scores.masked_fill(~mask, torch.finfo(scores.dtype).min)
+
+        weights = F.softmax(scores, dim=-1)
+        weights = self.dropout(weights)
+        return weights @ v
+
+
+class MultiHeadAttention(nn.Module):
+    def __init__(self, num_heads, head_size):
+        super().__init__()
+        self.heads = nn.ModuleList([Head(head_size) for _ in range(num_heads)])
+        self.proj = nn.Linear(num_heads * head_size, d_model)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        out = torch.cat([head(x) for head in self.heads], dim=-1)
+        return self.dropout(self.proj(out))
+
+
+class FeedForward(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(d_model, 4 * d_model),
+            nn.GELU(),
+            nn.Linear(4 * d_model, d_model),
+            nn.Dropout(dropout),
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+
+class Block(nn.Module):
+    def __init__(self):
+        super().__init__()
+        head_size = d_model // num_heads
+        self.sa = MultiHeadAttention(num_heads, head_size)
+        self.ffwd = FeedForward()
+        self.ln1 = nn.LayerNorm(d_model)
+        self.ln2 = nn.LayerNorm(d_model)
+
+    def forward(self, x):
+        x = x + self.sa(self.ln1(x))
+        x = x + self.ffwd(self.ln2(x))
+        return x
+
+
+class GPTLanguageModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.token_embedding_table = nn.Embedding(vocab_size, d_model)
+        self.position_embedding_table = nn.Embedding(block_size, d_model)
+        self.blocks = nn.Sequential(*[Block() for _ in range(num_layers)])
+        self.ln_f = nn.LayerNorm(d_model)
+        self.lm_head = nn.Linear(d_model, vocab_size)
+
+    def forward(self, idx, targets=None):
+        batch_size, seq_len = idx.shape
+        if seq_len > block_size:
+            raise ValueError("sequence length exceeds block_size")
+
+        token_emb = self.token_embedding_table(idx)
+        pos = torch.arange(seq_len, device=idx.device)
+        pos_emb = self.position_embedding_table(pos)
+        x = token_emb + pos_emb
+        x = self.blocks(x)
+        x = self.ln_f(x)
+        logits = self.lm_head(x)
+
+        loss = None
+        if targets is not None:
+            logits_flat = logits.reshape(batch_size * seq_len, vocab_size)
+            targets_flat = targets.reshape(batch_size * seq_len)
+            loss = F.cross_entropy(logits_flat, targets_flat)
+
+        return logits, loss
+
+    @torch.no_grad()
+    def generate(self, idx, max_new_tokens):
+        was_training = self.training
+        self.eval()
+        for _ in range(max_new_tokens):
+            idx_cond = idx[:, -block_size:]
+            logits, _ = self(idx_cond)
+            logits = logits[:, -1, :]
+            probs = F.softmax(logits, dim=-1)
+            idx_next = torch.multinomial(probs, num_samples=1)
+            idx = torch.cat((idx, idx_next), dim=1)
+        if was_training:
+            self.train()
+        return idx
+
+
+@torch.no_grad()
+def estimate_loss(model):
+    was_training = model.training
+    model.eval()
+    out = {}
+    for split in ["train", "val"]:
+        losses = []
+        for _ in range(eval_iters):
+            xb, yb = get_batch(split)
+            _, loss = model(xb, yb)
+            losses.append(loss.item())
+        out[split] = sum(losses) / len(losses)
+    if was_training:
+        model.train()
+    return out
+
+
+model = GPTLanguageModel().to(device)
+optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+
+xb, yb = get_batch("train")
+logits, loss = model(xb, yb)
+initial_losses = estimate_loss(model)
+
+for step in range(max_iters):
+    xb, yb = get_batch("train")
+    logits, loss = model(xb, yb)
+    optimizer.zero_grad(set_to_none=True)
+    loss.backward()
+    optimizer.step()
+
+final_losses = estimate_loss(model)
+context = torch.tensor([encode("hello")], dtype=torch.long, device=device)
+generated = model.generate(context, max_new_tokens=40)
+
+print("vocab_size=", vocab_size)
+print("batch_shape=", tuple(xb.shape))
+print("logits_shape=", tuple(logits.shape))
+print("initial_train_loss=", round(initial_losses["train"], 4))
+print("final_train_loss=", round(final_losses["train"], 4))
+print("initial_val_loss=", round(initial_losses["val"], 4))
+print("final_val_loss=", round(final_losses["val"], 4))
+print("param_count=", sum(p.numel() for p in model.parameters()))
+print("generated=", repr(decode(generated[0].tolist())))
+```
+
+参考输出：
+
+```text
+vocab_size= 22
+batch_shape= (8, 16)
+logits_shape= (8, 16, 22)
+initial_train_loss= 3.281
+final_train_loss= 2.5838
+initial_val_loss= 3.1977
+final_val_loss= 2.8169
+param_count= 27222
+generated= 'hello rfwngeootn ioterehial\nephifr mouordnmrt'
 ```
 
 先不要急着拆很多文件。
@@ -1256,14 +1547,16 @@ generate.py
 
 随机初始化时，初始 loss 大约接近：
 
-```text
-log(vocab_size)
+```math
+L_0 \approx \log V
 ```
+
+其中 `V` 是 vocab size。
 
 如果 `vocab_size = 32`，则：
 
-```text
-log(32) ≈ 3.47
+```math
+\log 32 \approx 3.47
 ```
 
 训练后 loss 应该逐渐下降。
@@ -1422,6 +1715,8 @@ top_p
 
 本讲专门实现这些采样策略。
 
+资料边界说明：本讲第二轮精修时按 `WRITING_PLAN.md` 核对 PyTorch 官方 `F.softmax`、`torch.multinomial`、`torch.topk`、`torch.sort`、`torch.cumsum` 文档，以及 Holtzman 等人的 nucleus sampling 论文。这里重点讲教学版实现：数学目标与常见框架接口一致，但不会覆盖 beam search、repetition penalty、presence penalty、grammar constrained decoding 等更完整的生产解码系统。
+
 ---
 
 ### 一、为什么需要采样策略
@@ -1478,13 +1773,13 @@ token D: 0.08
 
 temperature 控制分布的尖锐程度。
 
-公式：
+给定最后一个位置的 logits $z_1,\ldots,z_V$，temperature sampling 先用正数 $\tau$ 缩放 logits，再做 softmax：
 
-```text
-logits = logits / temperature
+```math
+p_i(\tau)=\frac{\exp(z_i/\tau)}{\sum_{j=1}^{V}\exp(z_j/\tau)}
 ```
 
-然后再 softmax。
+其中 `V` 是词表大小，$\tau$ 就是代码里的 `temperature`。
 
 如果：
 
@@ -1551,6 +1846,18 @@ top-k 的思想是：
 只保留概率最高的 k 个 token，其余 token 禁止采样。
 ```
 
+记 $S_k$ 为 logits 最大的 `k` 个 token 索引集合。过滤后的 logits 可以写成：
+
+```math
+\tilde z_i=
+\begin{cases}
+z_i, & i\in S_k \\
+-M, & i\notin S_k
+\end{cases}
+```
+
+这里 $M$ 是一个足够大的正数。工程实现中不建议手写 `-1e9` 或 `float("-inf")` 到处传递，更稳妥的做法是用当前 dtype 的最小有限值 `torch.finfo(logits.dtype).min`，再让 softmax 把被 mask 的位置变成接近 0 的概率。
+
 例如词表有 10000 个 token，`top_k=50`。
 
 模型每一步只会从概率最高的 50 个 token 中采样。
@@ -1573,12 +1880,15 @@ top-k 的思想是：
 def apply_top_k(logits, top_k=None):
     if top_k is None:
         return logits
+    if top_k <= 0:
+        raise ValueError("top_k must be positive")
 
     top_k = min(top_k, logits.size(-1))
     values, indices = torch.topk(logits, top_k, dim=-1)
 
-    threshold = values[:, [-1]]
-    filtered_logits = logits.masked_fill(logits < threshold, float("-inf"))
+    mask_value = torch.finfo(logits.dtype).min
+    filtered_logits = torch.full_like(logits, mask_value)
+    filtered_logits.scatter_(dim=-1, index=indices, src=values)
     return filtered_logits
 ```
 
@@ -1586,24 +1896,14 @@ def apply_top_k(logits, top_k=None):
 
 ```text
 torch.topk 找到每行最大的 k 个 logits。
-threshold 是第 k 大的 logit。
-低于 threshold 的 token 全部设为 -inf。
-softmax 后这些 token 概率为 0。
+torch.full_like 先把全部位置设成当前 dtype 的最小有限值。
+scatter_ 再把 top-k 位置的原始 logits 放回去。
+softmax 后非 top-k token 的概率接近 0。
 ```
 
-注意：
+注意，`torch.topk` 在遇到相同 logit 时不承诺稳定返回哪几个并列 token；这不影响采样教学逻辑，但生产系统如果强依赖 tie-breaking，需要自己定义确定性规则。
 
-```python
-threshold = values[:, [-1]]
-```
-
-这样 shape 是：
-
-```text
-[B, 1]
-```
-
-可以 broadcast 到 `[B, vocab_size]`。
+输出 shape 仍然是 `[B, vocab_size]`，只是大部分位置已经被 mask。
 
 ---
 
@@ -1630,6 +1930,20 @@ top-p 又叫 nucleus sampling，中文常译为核采样。
 ```
 
 前三个 token。
+
+更正式地说，先把概率从大到小排序为：
+
+```math
+p_{(1)}\ge p_{(2)}\ge \cdots \ge p_{(V)}
+```
+
+再找到最小的 $m$：
+
+```math
+m=\min\left\{r:\sum_{i=1}^{r}p_{(i)}\ge p\right\}
+```
+
+top-p 候选集合就是排序后的前 $m$ 个 token。它保留的是“累计概率质量”，不是固定 token 数。
 
 如果分布很尖锐，保留 token 少。
 
@@ -1659,9 +1973,10 @@ def apply_top_p(logits, top_p=None):
     sorted_mask[:, 1:] = sorted_mask[:, :-1].clone()
     sorted_mask[:, 0] = False
 
-    sorted_logits = sorted_logits.masked_fill(sorted_mask, float("-inf"))
+    mask_value = torch.finfo(logits.dtype).min
+    sorted_logits = sorted_logits.masked_fill(sorted_mask, mask_value)
 
-    filtered_logits = torch.full_like(logits, float("-inf"))
+    filtered_logits = torch.full_like(logits, mask_value)
     filtered_logits.scatter_(dim=-1, index=sorted_indices, src=sorted_logits)
     return filtered_logits
 ```
@@ -1714,6 +2029,10 @@ def sample_next_token(logits, temperature=1.0, top_k=None, top_p=None):
     logits = apply_top_k(logits, top_k)
     logits = apply_top_p(logits, top_p)
     probs = F.softmax(logits, dim=-1)
+
+    if not torch.isfinite(probs).all() or (probs.sum(dim=-1) <= 0).any():
+        raise RuntimeError("invalid probability distribution after filtering")
+
     idx_next = torch.multinomial(probs, num_samples=1)
     return idx_next
 ```
@@ -1724,6 +2043,123 @@ def sample_next_token(logits, temperature=1.0, top_k=None, top_p=None):
 logits:   [B, vocab_size]
 idx_next: [B, 1]
 ```
+
+下面是一个可以独立复制运行的最小 demo，用来同时验证 temperature、top-k 和 top-p 的效果：
+
+```python
+import torch
+import torch.nn.functional as F
+
+
+torch.manual_seed(7)
+vocab = ["A", "B", "C", "D", "E", "F"]
+logits = torch.tensor([[3.0, 2.0, 1.0, 0.5, -0.5, -1.0]])
+
+
+def apply_temperature(logits, temperature=1.0):
+    if temperature <= 0:
+        raise ValueError("temperature must be positive")
+    return logits / temperature
+
+
+def apply_top_k(logits, top_k=None):
+    if top_k is None:
+        return logits
+    if top_k <= 0:
+        raise ValueError("top_k must be positive")
+
+    top_k = min(top_k, logits.size(-1))
+    values, indices = torch.topk(logits, top_k, dim=-1)
+    mask_value = torch.finfo(logits.dtype).min
+    filtered_logits = torch.full_like(logits, mask_value)
+    filtered_logits.scatter_(dim=-1, index=indices, src=values)
+    return filtered_logits
+
+
+def apply_top_p(logits, top_p=None):
+    if top_p is None:
+        return logits
+    if not 0 < top_p <= 1:
+        raise ValueError("top_p must be in (0, 1]")
+
+    sorted_logits, sorted_indices = torch.sort(logits, descending=True, dim=-1)
+    sorted_probs = F.softmax(sorted_logits, dim=-1)
+    cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
+
+    sorted_mask = cumulative_probs > top_p
+    sorted_mask[:, 1:] = sorted_mask[:, :-1].clone()
+    sorted_mask[:, 0] = False
+
+    mask_value = torch.finfo(logits.dtype).min
+    sorted_logits = sorted_logits.masked_fill(sorted_mask, mask_value)
+    filtered_logits = torch.full_like(logits, mask_value)
+    filtered_logits.scatter_(dim=-1, index=sorted_indices, src=sorted_logits)
+    return filtered_logits
+
+
+def sample_next_token(logits, temperature=1.0, top_k=None, top_p=None):
+    logits = apply_temperature(logits, temperature)
+    logits = apply_top_k(logits, top_k)
+    logits = apply_top_p(logits, top_p)
+    probs = F.softmax(logits, dim=-1)
+
+    if not torch.isfinite(probs).all() or (probs.sum(dim=-1) <= 0).any():
+        raise RuntimeError("invalid probability distribution after filtering")
+
+    return torch.multinomial(probs, num_samples=1)
+
+
+def rounded(probs):
+    return [round(x, 4) for x in probs.squeeze(0).tolist()]
+
+
+def entropy(probs):
+    safe_probs = probs.clamp_min(1e-12)
+    return float(-(safe_probs * safe_probs.log()).sum(dim=-1).item())
+
+
+def kept_tokens(filtered_logits):
+    mask_value = torch.finfo(filtered_logits.dtype).min
+    return [
+        vocab[i]
+        for i, value in enumerate(filtered_logits[0])
+        if value.item() != mask_value
+    ]
+
+
+base_probs = F.softmax(logits, dim=-1)
+cold_probs = F.softmax(apply_temperature(logits, 0.5), dim=-1)
+hot_probs = F.softmax(apply_temperature(logits, 2.0), dim=-1)
+topk_logits = apply_top_k(logits, top_k=3)
+topp_logits = apply_top_p(logits, top_p=0.8)
+topk_probs = F.softmax(topk_logits, dim=-1)
+topp_probs = F.softmax(topp_logits, dim=-1)
+idx_next = sample_next_token(logits, temperature=0.8, top_k=4, top_p=0.9)
+
+print("base_probs=", rounded(base_probs))
+print("cold_entropy=", round(entropy(cold_probs), 4))
+print("hot_entropy=", round(entropy(hot_probs), 4))
+print("topk_kept=", kept_tokens(topk_logits))
+print("topk_nonzero=", int((topk_probs > 0).sum().item()))
+print("topp_kept=", kept_tokens(topp_logits))
+print("topp_nonzero=", int((topp_probs > 0).sum().item()))
+print("sampled_shape=", tuple(idx_next.shape))
+```
+
+输出应类似：
+
+```text
+base_probs= [0.6121, 0.2252, 0.0828, 0.0502, 0.0185, 0.0112]
+cold_entropy= 0.4827
+hot_entropy= 1.5681
+topk_kept= ['A', 'B', 'C']
+topk_nonzero= 3
+topp_kept= ['A', 'B']
+topp_nonzero= 2
+sampled_shape= (1, 1)
+```
+
+这段输出说明三件事：低 temperature 会降低熵、让分布更尖；高 temperature 会提高熵、让分布更平；`top_k=3` 只保留 3 个候选，而 `top_p=0.8` 会根据当前概率质量只保留 `A` 和 `B`。
 
 ---
 
@@ -1742,23 +2178,28 @@ def generate(
     top_k=None,
     top_p=None,
 ):
+    was_training = model.training
     model.eval()
 
-    for _ in range(max_new_tokens):
-        idx_cond = idx[:, -block_size:]
-        logits, loss = model(idx_cond)
-        logits = logits[:, -1, :]
+    try:
+        for _ in range(max_new_tokens):
+            idx_cond = idx[:, -block_size:]
+            logits, loss = model(idx_cond)
+            logits = logits[:, -1, :]
 
-        idx_next = sample_next_token(
-            logits,
-            temperature=temperature,
-            top_k=top_k,
-            top_p=top_p,
-        )
+            idx_next = sample_next_token(
+                logits,
+                temperature=temperature,
+                top_k=top_k,
+                top_p=top_p,
+            )
 
-        idx = torch.cat((idx, idx_next), dim=1)
+            idx = torch.cat((idx, idx_next), dim=1)
 
-    return idx
+        return idx
+    finally:
+        if was_training:
+            model.train()
 ```
 
 也可以把这个方法放进 `GPTLanguageModel` 类里。
@@ -2107,6 +2548,8 @@ temperature=1.2, top_p=0.95
 
 本讲把训练脚本升级为可恢复、可观察、可对比的版本。
 
+资料边界说明：本讲第二轮精修时按 `WRITING_PLAN.md` 核对 PyTorch 官方 saving/loading tutorial、`torch.save`、`torch.load`、`state_dict` / `load_state_dict`、`torch.no_grad` 和 `Module.train/eval` 资料边界。这里采用教学项目最常见的字典式 checkpoint：保存模型参数、优化器状态、训练步数、验证集最优指标、配置和词表元信息；生产训练还会额外保存随机数状态、分布式 rank 状态、学习率调度器状态、混合精度 scaler、数据迭代器进度和实验追踪信息。
+
 ---
 
 ### 一、为什么需要 checkpoint
@@ -2123,6 +2566,14 @@ best validation loss
 training config
 vocab metadata
 ```
+
+如果用数学符号表示，一个最小 checkpoint 可以看成：
+
+```math
+C_t=(\theta_t,s_t,t,L_{\mathrm{best}},h,v)
+```
+
+其中 $\theta_t$ 是第 `t` 步的模型参数，$s_t$ 是优化器内部状态，$L_{\mathrm{best}}$ 是目前最好的验证集 loss，$h$ 是训练配置，$v$ 是词表或 tokenizer 元信息。
 
 如果训练中断，比如：
 
@@ -2217,6 +2668,17 @@ config = {
 
 这里稍微工程化一下。
 
+如果每次评估抽取 `K` 个 batch，验证集平均 loss 可以写成：
+
+```math
+L_{\mathrm{val}}(t)=
+\frac{1}{K}
+\sum_{k=1}^{K}
+L_{\mathrm{batch}}^{(k)}(t)
+```
+
+训练集评估同理。注意这里的 train loss 是“评估模式下抽样估计的训练集 loss”，不是训练循环刚刚反传的那个单 batch loss；这样 train/val 两条曲线更可比。
+
 ```python
 @torch.no_grad()
 def estimate_loss(model, get_batch, eval_iters):
@@ -2224,16 +2686,17 @@ def estimate_loss(model, get_batch, eval_iters):
     was_training = model.training
     model.eval()
 
-    for split in ["train", "val"]:
-        losses = torch.zeros(eval_iters)
-        for k in range(eval_iters):
-            xb, yb = get_batch(split)
-            logits, loss = model(xb, yb)
-            losses[k] = loss.item()
-        out[split] = losses.mean().item()
-
-    if was_training:
-        model.train()
+    try:
+        for split in ["train", "val"]:
+            losses = torch.zeros(eval_iters)
+            for k in range(eval_iters):
+                xb, yb = get_batch(split)
+                logits, loss = model(xb, yb)
+                losses[k] = loss.item()
+            out[split] = losses.mean().item()
+    finally:
+        if was_training:
+            model.train()
 
     return out
 ```
@@ -2301,7 +2764,7 @@ def save_checkpoint(
 
 ```python
 def load_checkpoint(path, model, optimizer=None, map_location="cpu"):
-    checkpoint = torch.load(path, map_location=map_location)
+    checkpoint = torch.load(path, map_location=map_location, weights_only=True)
     model.load_state_dict(checkpoint["model_state_dict"])
 
     if optimizer is not None and "optimizer_state_dict" in checkpoint:
@@ -2324,9 +2787,23 @@ def load_checkpoint(path, model, optimizer=None, map_location="cpu"):
 
 如果只是推理，可以不传 optimizer。
 
+加载外部来源 checkpoint 时要有安全边界：PyTorch checkpoint 本质上经过 Python 反序列化流程，生产环境不要直接加载不可信文件；教学项目里显式使用 `weights_only=True`，可以减少不必要对象反序列化，但仍应只加载自己训练或可信来源的文件。
+
 如果要恢复训练，必须加载 optimizer state。
 
 原因是 AdamW 内部有动量和二阶矩估计。
+
+简化写成：
+
+```math
+m_t=\beta_1m_{t-1}+(1-\beta_1)g_t
+```
+
+```math
+v_t=\beta_2v_{t-1}+(1-\beta_2)g_t^2
+```
+
+如果只恢复 $\theta_t$，不恢复 $m_t$ 和 $v_t$，下一步更新方向和尺度都会变。
 
 只恢复模型参数、不恢复优化器，训练轨迹会变。
 
@@ -2377,15 +2854,19 @@ CSV 的好处是：
 ```python
 @torch.no_grad()
 def save_sample(model, step, prompt, max_new_tokens, path):
+    was_training = model.training
     model.eval()
-    context = torch.tensor([encode(prompt)], dtype=torch.long, device=device)
-    generated = model.generate(context, max_new_tokens=max_new_tokens)
-    text_out = decode(generated[0].tolist())
 
-    with path.open("w", encoding="utf-8") as f:
-        f.write(text_out)
+    try:
+        context = torch.tensor([encode(prompt)], dtype=torch.long, device=device)
+        generated = model.generate(context, max_new_tokens=max_new_tokens)
+        text_out = decode(generated[0].tolist())
 
-    model.train()
+        with path.open("w", encoding="utf-8") as f:
+            f.write(text_out)
+    finally:
+        if was_training:
+            model.train()
 ```
 
 如果你的 `generate` 是外部函数，也可以改成：
@@ -2417,6 +2898,18 @@ best.pt：验证集 loss 最好的 checkpoint，用于最终评估或推理。
 ```
 
 逻辑：
+
+```math
+t^*=
+\underset{t\in E}{\mathrm{argmin}}\ L_{\mathrm{val}}(t)
+```
+
+```math
+L_{\mathrm{best}}=
+\min_{t\in E}L_{\mathrm{val}}(t)
+```
+
+其中 `E` 是已经执行过评估的 step 集合。也就是说，`best.pt` 应该由验证集 loss 决定，而不是由训练集 loss 或最近一次 loss 决定。
 
 ```python
 best_val_loss = float("inf")
@@ -2525,6 +3018,203 @@ for step in range(start_step, config["max_iters"]):
 ```
 
 这个循环已经具备真实训练脚本的基本能力。
+
+下面是一份可以直接运行的最小 checkpoint demo。为了让代码短一些，它用一个小回归模型代替 GPT，但演示的工程动作完全一样：评估 train/val loss、写 CSV 日志、保存 `best.pt` 和 `last.pt`、恢复模型与优化器状态、确认词表元信息一起保存。
+
+```python
+import csv
+import tempfile
+from pathlib import Path
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+torch.manual_seed(0)
+
+config = {
+    "learning_rate": 0.05,
+    "max_iters": 10,
+    "eval_interval": 5,
+    "eval_iters": 3,
+    "seed": 0,
+}
+
+x_train = torch.linspace(-1.0, 1.0, steps=16).unsqueeze(1)
+y_train = 2.0 * x_train + 1.0
+x_val = torch.tensor([[-0.75], [-0.25], [0.25], [0.75]])
+y_val = 2.0 * x_val + 1.0
+stoi = {"x": 0, "y": 1}
+itos = {0: "x", 1: "y"}
+
+
+class TinyRegressor(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(1, 8),
+            nn.Tanh(),
+            nn.Linear(8, 1),
+        )
+
+    def forward(self, x, y=None):
+        pred = self.net(x)
+        loss = None if y is None else F.mse_loss(pred, y)
+        return pred, loss
+
+
+def get_batch(split):
+    if split == "train":
+        idx = torch.randint(0, len(x_train), (4,))
+        return x_train[idx], y_train[idx]
+    return x_val, y_val
+
+
+@torch.no_grad()
+def estimate_loss(model, eval_iters):
+    out = {}
+    was_training = model.training
+    model.eval()
+    try:
+        for split in ["train", "val"]:
+            losses = []
+            for _ in range(eval_iters):
+                xb, yb = get_batch(split)
+                _, loss = model(xb, yb)
+                losses.append(loss.item())
+            out[split] = sum(losses) / len(losses)
+    finally:
+        if was_training:
+            model.train()
+    return out
+
+
+def save_checkpoint(path, model, optimizer, step, best_val_loss, config, stoi, itos):
+    checkpoint = {
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "step": step,
+        "best_val_loss": best_val_loss,
+        "config": config,
+        "stoi": stoi,
+        "itos": itos,
+    }
+    torch.save(checkpoint, path)
+
+
+def load_checkpoint(path, model, optimizer=None, map_location="cpu"):
+    checkpoint = torch.load(path, map_location=map_location, weights_only=True)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    if optimizer is not None:
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+    return {
+        "step": checkpoint["step"],
+        "best_val_loss": checkpoint["best_val_loss"],
+        "config": checkpoint["config"],
+        "stoi": checkpoint["stoi"],
+        "itos": checkpoint["itos"],
+    }
+
+
+def init_log_file(path):
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["step", "train_loss", "val_loss", "best_val_loss"])
+
+
+def append_log(path, step, train_loss, val_loss, best_val_loss):
+    with path.open("a", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            step,
+            round(train_loss, 6),
+            round(val_loss, 6),
+            round(best_val_loss, 6),
+        ])
+
+
+with tempfile.TemporaryDirectory() as tmpdir:
+    out_dir = Path(tmpdir)
+    ckpt_dir = out_dir / "checkpoints"
+    log_dir = out_dir / "logs"
+    ckpt_dir.mkdir()
+    log_dir.mkdir()
+    log_path = log_dir / "train_log.csv"
+    init_log_file(log_path)
+
+    model = TinyRegressor()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=config["learning_rate"])
+    best_val_loss = float("inf")
+
+    for step in range(config["max_iters"] + 1):
+        if step % config["eval_interval"] == 0:
+            losses = estimate_loss(model, config["eval_iters"])
+            if losses["val"] < best_val_loss:
+                best_val_loss = losses["val"]
+                save_checkpoint(
+                    ckpt_dir / "best.pt",
+                    model,
+                    optimizer,
+                    step,
+                    best_val_loss,
+                    config,
+                    stoi,
+                    itos,
+                )
+            save_checkpoint(
+                ckpt_dir / "last.pt",
+                model,
+                optimizer,
+                step,
+                best_val_loss,
+                config,
+                stoi,
+                itos,
+            )
+            append_log(log_path, step, losses["train"], losses["val"], best_val_loss)
+
+        if step == config["max_iters"]:
+            break
+        xb, yb = get_batch("train")
+        _, loss = model(xb, yb)
+        optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        optimizer.step()
+
+    resumed_model = TinyRegressor()
+    resumed_optimizer = torch.optim.AdamW(
+        resumed_model.parameters(),
+        lr=config["learning_rate"],
+    )
+    meta = load_checkpoint(ckpt_dir / "last.pt", resumed_model, resumed_optimizer)
+    best_meta = load_checkpoint(ckpt_dir / "best.pt", TinyRegressor())
+    log_rows = list(csv.DictReader(log_path.open(encoding="utf-8")))
+
+    print("log_steps=", [int(row["step"]) for row in log_rows])
+    print("last_step=", meta["step"])
+    print("resume_start_step=", meta["step"] + 1)
+    print("best_step=", best_meta["step"])
+    print("best_val_loss=", round(best_meta["best_val_loss"], 6))
+    print("vocab_roundtrip=", meta["itos"][meta["stoi"]["x"]] == "x")
+    print("optimizer_state_nonempty=", len(resumed_optimizer.state_dict()["state"]) > 0)
+    print("files=", sorted(path.name for path in ckpt_dir.iterdir()))
+```
+
+参考输出：
+
+```text
+log_steps= [0, 5, 10]
+last_step= 10
+resume_start_step= 11
+best_step= 10
+best_val_loss= 0.128653
+vocab_roundtrip= True
+optimizer_state_nonempty= True
+files= ['best.pt', 'last.pt']
+```
+
+这段输出说明：日志按评估步写入，`last.pt` 能恢复到最近 step，恢复训练应从 `step+1` 开始，`best.pt` 由验证集 loss 选择，词表映射和优化器状态都确实被保存并加载回来。
 
 ---
 
@@ -2796,6 +3486,8 @@ CSV 日志
 
 本讲就围绕这些问题展开。
 
+资料边界说明：本讲第二轮精修时按 `WRITING_PLAN.md` 核对 PyTorch 官方 `CrossEntropyLoss`、`Module.train/eval`、`torch.no_grad`、`clip_grad_norm_` 文档，以及 pandas `read_csv` 和 Matplotlib `savefig` 文档。这里的分析脚本仍定位为教学项目：重点是读懂 loss 曲线、best checkpoint 和生成样例，不引入 TensorBoard、W&B 或复杂实验追踪系统。
+
 ---
 
 ### 一、为什么要分析训练曲线
@@ -2803,6 +3495,18 @@ CSV 日志
 训练 loss 是模型在训练集上的平均预测错误。
 
 验证 loss 是模型在未参与训练的数据上的平均预测错误。
+
+设第 `t` 次评估时模型参数为 `theta_t`，单个样本的 next-token 负对数似然为 `ell_i(theta_t)`，则可以把训练集和验证集 loss 写成：
+
+```math
+L_{\mathrm{train}}(t)=\frac{1}{N_{\mathrm{train}}}\sum_{i=1}^{N_{\mathrm{train}}}\ell_i(\theta_t)
+```
+
+```math
+L_{\mathrm{val}}(t)=\frac{1}{N_{\mathrm{val}}}\sum_{i=1}^{N_{\mathrm{val}}}\ell_i(\theta_t)
+```
+
+这里 `N_train` 和 `N_val` 分别是训练集和验证集用于评估的 token 或样本数量。直觉上，train loss 看模型能否拟合训练分布，val loss 看这种拟合是否能迁移到未参与训练的数据。
 
 二者一起看，才能判断训练状态。
 
@@ -2813,6 +3517,20 @@ CSV 日志
 只看 val loss 也不够。
 
 因为你还需要知道模型是否正在有效拟合训练数据。
+
+一个常用的辅助量是 train/val gap：
+
+```math
+G(t)=L_{\mathrm{val}}(t)-L_{\mathrm{train}}(t)
+```
+
+`G(t)` 越来越大，通常说明模型对训练集越来越熟，但对验证集没有同步变好。选择 best checkpoint 时，通常不看最后一步，而看验证 loss 最低的 step：
+
+```math
+t_{\mathrm{best}}=\arg\min_{t\in\mathcal{T}} L_{\mathrm{val}}(t)
+```
+
+其中 `\mathcal{T}` 是所有做过验证集评估的 step 集合。
 
 常见判断：
 
@@ -2862,17 +3580,17 @@ print(df.tail())
 import matplotlib.pyplot as plt
 
 
-plt.figure(figsize=(8, 5))
-plt.plot(df["step"], df["train_loss"], label="train loss")
-plt.plot(df["step"], df["val_loss"], label="val loss")
-plt.xlabel("step")
-plt.ylabel("loss")
-plt.title("Training and Validation Loss")
-plt.legend()
-plt.grid(True)
-plt.tight_layout()
-plt.savefig("mini_char_gpt/logs/loss_curve.png", dpi=150)
-plt.show()
+fig, ax = plt.subplots(figsize=(8, 5))
+ax.plot(df["step"], df["train_loss"], label="train loss")
+ax.plot(df["step"], df["val_loss"], label="val loss")
+ax.set_xlabel("step")
+ax.set_ylabel("loss")
+ax.set_title("Training and Validation Loss")
+ax.legend()
+ax.grid(True)
+fig.tight_layout()
+fig.savefig("mini_char_gpt/logs/loss_curve.png", dpi=150)
+plt.close(fig)
 ```
 
 如果是在服务器上没有图形界面，可以只保存图片：
@@ -2889,19 +3607,21 @@ plt.savefig("mini_char_gpt/logs/loss_curve.png", dpi=150)
 
 随机初始化模型在一开始接近均匀猜测。
 
-如果词表大小是 `vocab_size`，均匀分布下的交叉熵约为：
+如果词表大小为 `V`，均匀分布下每个 token 的概率是 `1/V`。此时单 token 交叉熵为：
 
-```text
-log(vocab_size)
+```math
+L_0=-\log\frac{1}{V}=\log V
 ```
+
+这就是为什么初始 loss 往往接近 `log V`。这个判断只适合 logits 近似均匀、没有严重初始化异常、label 构造正确的情况。
 
 例如：
 
 ```python
 import math
 
-vocab_size = 32
-print(math.log(vocab_size))
+V = 32
+print(math.log(V))
 ```
 
 输出约为：
@@ -2922,7 +3642,7 @@ print(math.log(vocab_size))
 
 ```text
 logits shape
-labels 范围
+labels 范围是否在 [0, V)
 cross entropy 输入
 学习率
 mask
@@ -3062,6 +3782,7 @@ mask 造成全 -inf 行。
 gradient clipping 示例：
 
 ```python
+optimizer.zero_grad(set_to_none=True)
 loss.backward()
 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 optimizer.step()
@@ -3176,7 +3897,7 @@ prompt 不在训练分布内。
 3. 用训练语料中的 prompt 开始生成。
 4. 检查 train/val loss 是否合理。
 5. 检查 decode 是否正确。
-6. 确认模型处于 eval 模式。
+6. 确认模型处于 eval 模式，并在生成时使用 `torch.no_grad()`。
 ```
 
 生成差不一定说明训练错。
@@ -3265,8 +3986,8 @@ targets: [B, T]
 计算交叉熵前：
 
 ```python
-logits_flat = logits.view(B * T, V)
-targets_flat = targets.view(B * T)
+logits_flat = logits.reshape(B * T, V)
+targets_flat = targets.reshape(B * T)
 ```
 
 shape 应该是：
@@ -3276,13 +3997,116 @@ logits_flat:  [B*T, V]
 targets_flat: [B*T]
 ```
 
+PyTorch 的 `CrossEntropyLoss` 接收的是未归一化 logits，目标 label 如果是类别索引，取值范围应该在 `[0, V)`，并且通常是整数类型。教学代码里先把 `[B, T, V]` 展平到 `[B*T, V]`，再把 `[B, T]` 展平到 `[B*T]`，是为了让每个 token 位置都变成一个独立分类样本。
+
 如果这里错了，loss 可能无意义。
 
 ---
 
 ### 十五、一个简单分析脚本
 
-可以创建：
+先看一个 0 依赖、可直接运行的最小 demo。它不画图，而是演示如何从 CSV 日志中找 best step、计算 train/val gap、识别过拟合起点，并用一个很粗的重复率检查生成样例。
+
+```python
+import csv
+import math
+from io import StringIO
+
+
+CSV_LOG = """
+step,train_loss,val_loss,best_val_loss
+0,3.47,3.46,3.46
+100,2.80,2.90,2.90
+300,1.95,2.35,2.35
+600,1.10,2.60,2.35
+1000,0.55,3.10,2.35
+"""
+
+SAMPLES = {
+    0: "qzae lmx trrpp oo",
+    300: "hello model the text",
+    1000: "hello hello hello hello language model",
+}
+
+
+def read_log(text):
+    rows = []
+    for row in csv.DictReader(StringIO(text.strip())):
+        rows.append(
+            {
+                "step": int(row["step"]),
+                "train_loss": float(row["train_loss"]),
+                "val_loss": float(row["val_loss"]),
+            }
+        )
+    return rows
+
+
+def first_overfit_step(rows, min_delta=0.05):
+    best_val = float("inf")
+    previous_train = None
+    for row in rows:
+        improved = row["val_loss"] < best_val - min_delta
+        if improved:
+            best_val = row["val_loss"]
+        train_still_falling = (
+            previous_train is not None and row["train_loss"] < previous_train
+        )
+        if (not improved) and train_still_falling:
+            return row["step"]
+        previous_train = row["train_loss"]
+    return None
+
+
+def adjacent_repeat_ratio(text):
+    words = text.split()
+    if len(words) < 2:
+        return 0.0
+    repeats = sum(a == b for a, b in zip(words, words[1:]))
+    return repeats / (len(words) - 1)
+
+
+rows = read_log(CSV_LOG)
+best = min(rows, key=lambda row: row["val_loss"])
+last = rows[-1]
+overfit_start = first_overfit_step(rows)
+diagnosis = "overfitting" if overfit_start is not None else "normal_or_underfit"
+
+print(f"expected_uniform_loss={math.log(32):.4f}")
+print(f"best_step={best['step']}")
+print(f"best_val_loss={best['val_loss']:.2f}")
+print(f"last_gap={last['val_loss'] - last['train_loss']:.2f}")
+print(f"overfit_start={overfit_start}")
+print(f"diagnosis={diagnosis}")
+
+for step, text in SAMPLES.items():
+    ratio = adjacent_repeat_ratio(text)
+    print(f"sample_{step}_repeat_ratio={ratio:.2f}")
+```
+
+运行后会看到类似输出：
+
+```text
+expected_uniform_loss=3.4657
+best_step=300
+best_val_loss=2.35
+last_gap=2.55
+overfit_start=600
+diagnosis=overfitting
+sample_0_repeat_ratio=0.00
+sample_300_repeat_ratio=0.00
+sample_1000_repeat_ratio=0.60
+```
+
+这段 demo 说明三件事：
+
+```text
+初始 loss 可以和 log V 对齐，先检查训练是否在合理尺度。
+best checkpoint 应该选 validation loss 最低的 step。
+train loss 继续下降、val loss 反弹、重复率升高时，要警惕过拟合和背诵。
+```
+
+实际项目中，可以再加 pandas 和 Matplotlib 画曲线。可以创建：
 
 ```text
 analyze_training.py
@@ -3293,8 +4117,8 @@ analyze_training.py
 ```python
 from pathlib import Path
 
-import pandas as pd
 import matplotlib.pyplot as plt
+import pandas as pd
 
 
 run_dir = Path("mini_char_gpt")
@@ -3310,16 +4134,17 @@ best_row = df.loc[df["val_loss"].idxmin()]
 print("best step:", int(best_row["step"]))
 print("best val loss:", float(best_row["val_loss"]))
 
-plt.figure(figsize=(8, 5))
-plt.plot(df["step"], df["train_loss"], label="train")
-plt.plot(df["step"], df["val_loss"], label="val")
-plt.xlabel("step")
-plt.ylabel("loss")
-plt.title("Mini Char GPT Loss Curve")
-plt.legend()
-plt.grid(True)
-plt.tight_layout()
-plt.savefig(run_dir / "logs" / "loss_curve.png", dpi=150)
+fig, ax = plt.subplots(figsize=(8, 5))
+ax.plot(df["step"], df["train_loss"], label="train")
+ax.plot(df["step"], df["val_loss"], label="val")
+ax.set_xlabel("step")
+ax.set_ylabel("loss")
+ax.set_title("Mini Char GPT Loss Curve")
+ax.legend()
+ax.grid(True)
+fig.tight_layout()
+fig.savefig(run_dir / "logs" / "loss_curve.png", dpi=150)
+plt.close(fig)
 
 for path in sorted(sample_dir.glob("sample_step_*.txt")):
     print("=" * 80)
@@ -3344,7 +4169,7 @@ for path in sorted(sample_dir.glob("sample_step_*.txt")):
 示例：
 
 ```text
-本实验从零训练了一个字符级 GPT。训练初始 loss 接近 log(vocab_size)，说明模型初始输出接近均匀分布。随着训练进行，train loss 和 val loss 均下降，生成样例从随机字符逐渐变成包含空格、换行和语料中高频词的文本。后期 train loss 继续下降但 val loss 开始上升，说明小语料上出现过拟合，因此最终采用 validation loss 最低的 best checkpoint 作为生成模型。
+本实验从零训练了一个字符级 GPT。训练初始 loss 接近 log V，其中 V 是词表大小，说明模型初始输出接近均匀分布。随着训练进行，train loss 和 val loss 均下降，生成样例从随机字符逐渐变成包含空格、换行和语料中高频词的文本。后期 train loss 继续下降但 val loss 开始上升，说明小语料上出现过拟合，因此最终采用 validation loss 最低的 best checkpoint 作为生成模型。
 ```
 
 这类结论很适合写到项目 README 或简历项目说明里。
@@ -3388,7 +4213,7 @@ train loss 低不代表泛化好。
 如果面试官问“你怎么判断小 GPT 训练是否正常”，可以这样回答：
 
 ```text
-我会同时看 train loss、validation loss 和定期保存的生成样例。初始 loss 应该接近 log(vocab_size)，训练过程中 train loss 应该下降；如果 val loss 也下降，说明模型在泛化上有提升。如果 train loss 下降但 val loss 上升，说明过拟合。生成样例则用于观察模型是否从随机字符逐渐学会空格、换行、词形和局部语法模式。
+我会同时看 train loss、validation loss 和定期保存的生成样例。初始 loss 应该接近 log V，其中 V 是词表大小；训练过程中 train loss 应该下降。如果 val loss 也下降，说明模型在泛化上有提升。如果 train loss 下降但 val loss 上升，说明过拟合。生成样例则用于观察模型是否从随机字符逐渐学会空格、换行、词形和局部语法模式。
 ```
 
 如果追问“loss 下降但生成不好怎么办”，可以回答：
@@ -3413,7 +4238,7 @@ train loss 低不代表泛化好。
 
 #### 练习 2
 
-计算 `log(vocab_size)`，和 step 0 的 loss 对比。
+计算 `log V`，和 step 0 的 loss 对比。
 
 #### 练习 3
 
@@ -3436,7 +4261,7 @@ train loss 低不代表泛化好。
 核心结论如下：
 
 1. train loss 和 val loss 要一起看。
-2. 初始 loss 通常接近 `log(vocab_size)`。
+2. 初始 loss 通常接近 `log V`。
 3. train/val 同时下降通常表示正常学习。
 4. train loss 下降但 val loss 上升通常表示过拟合。
 5. loss 曲线能反映优化状态，生成样例能反映模型行为。
@@ -3467,6 +4292,8 @@ train loss 低不代表泛化好。
 它们通常使用 BPE、SentencePiece、Unigram 或类似的子词 tokenizer。
 
 本讲把前面的项目扩展到 BPE tokenizer，让小 GPT 项目更接近真实训练流程。
+
+资料边界说明：本讲第二轮精修时按 `WRITING_PLAN.md` 核对 Hugging Face Transformers tokenizer、GPT-2 tokenizer、`add_special_tokens` / `resize_token_embeddings` 文档，Hugging Face tokenizers 训练接口，以及 PyTorch `nn.Embedding`、`nn.Linear`、`torch.randint` 文档。这里的代码仍定位为教学项目：重点是讲清 tokenizer 切换、id 序列、vocab size、embedding/lm head shape 和 checkpoint 元信息，不把 tokenizer 训练扩展成完整工程。
 
 ---
 
@@ -3552,6 +4379,16 @@ low
 
 模型训练更高效。
 
+更形式化地说，BPE 每一步会统计当前 token 序列中相邻 pair 的频次，选择最高频的 pair 合并：
+
+```math
+(a^*,b^*)=\underset{(a,b)\in P}{\mathrm{argmax}}\ c(a,b)
+```
+
+这里 `P` 是当前所有相邻 token pair 的集合，`c(a,b)` 是 pair `(a,b)` 在语料中的出现次数。合并后，所有相邻的 `a,b` 会被替换成一个新 token `ab`。重复这个过程直到达到目标词表大小，或没有值得继续合并的高频 pair。
+
+这只是 BPE 的核心直觉。真实 tokenizer 还会涉及 byte-level 预处理、normalization、pre-tokenization、special tokens、未知字符处理和训练语料选择。
+
 ---
 
 ### 三、BPE 和字符级的对比
@@ -3590,6 +4427,15 @@ transform er
 同样 block_size 下，BPE 能覆盖更长文本。
 同样文本长度下，BPE 的训练和推理步数更少。
 ```
+
+如果字符级长度为 `T_char`，BPE 后长度为 `T_bpe`，在标准 full attention 里，attention score 矩阵大小大致从 `T_char*T_char` 变成 `T_bpe*T_bpe`：
+
+```math
+R_{\mathrm{attn}}=
+\frac{T_{\mathrm{bpe}}^2}{T_{\mathrm{char}}^2}
+```
+
+当 `T_bpe` 明显小于 `T_char` 时，attention 计算和显存压力都会下降。这个结论只比较序列长度，不代表 BPE 永远更省，因为 BPE 的词表更大，会增加 embedding、lm head 和 softmax 相关成本。
 
 代价是：
 
@@ -3710,6 +4556,20 @@ vocab_size = len(tokenizer)
 
 并确保模型 embedding 大小匹配。
 
+为了避免符号混乱，后面统一记：
+
+```math
+V=\operatorname{len}(\mathrm{tokenizer})
+```
+
+其中 `V` 是模型可见的 token id 总数。训练数据里的所有 token id 都必须满足：
+
+```math
+0 \le d_i < V
+```
+
+如果某个输入 id 大于等于 `V`，`nn.Embedding(V, D)` 查表时就会越界。
+
 ---
 
 ### 七、改造数据准备代码
@@ -3727,6 +4587,14 @@ ids = tokenizer.encode(text)
 data = torch.tensor(ids, dtype=torch.long)
 ```
 
+给定 BPE 后的连续 token id 序列 `d_0,d_1,...,d_{N-1}`，第 `i` 个训练样本仍然是 next-token prediction：
+
+```math
+x_j=d_{i+j},\qquad y_j=d_{i+j+1},\qquad j=0,\ldots,T-1
+```
+
+这里 `T` 就是 `block_size`。换成 BPE 后，公式不变，只是 `d_i` 的含义从字符 id 变成 BPE token id。
+
 完整示例：
 
 ```python
@@ -3736,15 +4604,18 @@ from transformers import AutoTokenizer
 
 tokenizer = AutoTokenizer.from_pretrained("gpt2")
 
-text = """
+text = (
+    """
 hello world
 hello transformer
 hello large language model
 transformer learns patterns from text
 language model predicts the next token
 """
+    * 20
+)
 
-ids = tokenizer.encode(text)
+ids = tokenizer.encode(text, add_special_tokens=False)
 data = torch.tensor(ids, dtype=torch.long)
 
 n = int(0.9 * len(data))
@@ -3761,7 +4632,10 @@ vocab_size = len(tokenizer)
 ```python
 def get_batch(split):
     source = train_data if split == "train" else val_data
-    ix = torch.randint(0, len(source) - block_size - 1, (batch_size,))
+    max_start = len(source) - block_size
+    if max_start <= 0:
+        raise ValueError(f"{split} split is too short for block_size={block_size}")
+    ix = torch.randint(0, max_start, (batch_size,))
     x = torch.stack([source[i:i + block_size] for i in ix])
     y = torch.stack([source[i + 1:i + block_size + 1] for i in ix])
     return x.to(device), y.to(device)
@@ -3881,6 +4755,20 @@ self.lm_head = nn.Linear(d_model, vocab_size)
 
 必须使用新的 `vocab_size`。
 
+如果 hidden size 记为 `D`，词表大小记为 `V`，那么 token embedding 参数量是：
+
+```math
+N_{\mathrm{embed}}=V D
+```
+
+普通未绑权重的 lm head 参数量约为：
+
+```math
+N_{\mathrm{head}}=D V + V
+```
+
+其中最后的 `+V` 是 bias。如果使用 tied embedding，lm head 可以复用 token embedding 权重，参数量会少一块 `D V`，但输出 softmax 的类别数仍然是 `V`。
+
 如果 GPT-2 tokenizer 的词表约 50257，而字符级词表只有几十个，那么 lm head 会大很多。
 
 这意味着：
@@ -3937,11 +4825,12 @@ from transformers import AutoTokenizer
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 batch_size = 16
-block_size = 64
+block_size = 8
 
 tokenizer = AutoTokenizer.from_pretrained("gpt2")
 
-text = """
+text = (
+    """
 hello world
 hello transformer
 hello large language model
@@ -3950,8 +4839,10 @@ language model predicts the next token
 attention mixes information across tokens
 small gpt learns to generate text
 """
+    * 20
+)
 
-ids = tokenizer.encode(text)
+ids = tokenizer.encode(text, add_special_tokens=False)
 data = torch.tensor(ids, dtype=torch.long)
 
 n = int(0.9 * len(data))
@@ -3969,7 +4860,10 @@ def decode(ids):
 
 def get_batch(split):
     source = train_data if split == "train" else val_data
-    ix = torch.randint(0, len(source) - block_size - 1, (batch_size,))
+    max_start = len(source) - block_size
+    if max_start <= 0:
+        raise ValueError(f"{split} split is too short for block_size={block_size}")
+    ix = torch.randint(0, max_start, (batch_size,))
     x = torch.stack([source[i:i + block_size] for i in ix])
     y = torch.stack([source[i + 1:i + block_size + 1] for i in ix])
     return x.to(device), y.to(device)
@@ -3993,6 +4887,125 @@ if __name__ == "__main__":
 ```
 
 因为 BPE 词表很大，小语料很难覆盖足够 token。
+
+如果当前环境没有 `transformers`，也可以先用下面这个纯 Python toy demo 理解“从字符级切到 BPE 级”到底改了什么。它不是完整 BPE 训练器，只手动给出一组 merge 规则，用来演示 token 数缩短、id 序列构造、右移标签和词表相关参数量变化。
+
+```python
+TEXT = "low lower lowest low lower transformer transformer low"
+MERGES = [
+    ("l", "o"), ("lo", "w"), ("low", "e"), ("lowe", "r"),
+    ("lowe", "s"), ("lowes", "t"), ("t", "r"), ("tr", "a"),
+    ("tra", "n"), ("tran", "s"), ("trans", "f"), ("transf", "o"),
+    ("transfo", "r"), ("transfor", "m"), ("transform", "e"),
+    ("transforme", "r"),
+]
+SPECIAL_TOKENS = ["<pad>", "<bos>", "<eos>", "<unk>"]
+
+
+def split_initial(text):
+    return [" " if ch == " " else ch for ch in text]
+
+
+def apply_merges(tokens, merges):
+    tokens = list(tokens)
+    for left, right in merges:
+        merged = []
+        i = 0
+        while i < len(tokens):
+            if i + 1 < len(tokens) and tokens[i] == left and tokens[i + 1] == right:
+                merged.append(left + right)
+                i += 2
+            else:
+                merged.append(tokens[i])
+                i += 1
+        tokens = merged
+    return tokens
+
+
+def build_vocab(tokens):
+    vocab = {token: idx for idx, token in enumerate(SPECIAL_TOKENS)}
+    for token in tokens:
+        if token not in vocab:
+            vocab[token] = len(vocab)
+    return vocab
+
+
+def encode(tokens, vocab):
+    return [vocab.get(token, vocab["<unk>"]) for token in tokens]
+
+
+def decode(ids, id_to_token):
+    pieces = []
+    for idx in ids:
+        token = id_to_token[idx]
+        if token not in {"<pad>", "<bos>", "<eos>"}:
+            pieces.append(token)
+    return "".join(pieces)
+
+
+def vocab_dependent_params(vocab_size, d_model, tied_embedding=False, bias=True):
+    embedding_params = vocab_size * d_model
+    head_params = 0 if tied_embedding else d_model * vocab_size
+    if bias and not tied_embedding:
+        head_params += vocab_size
+    return embedding_params + head_params
+
+
+char_tokens = split_initial(TEXT)
+bpe_tokens = ["<bos>"] + apply_merges(char_tokens, MERGES) + ["<eos>"]
+vocab = build_vocab(bpe_tokens)
+ids = encode(bpe_tokens, vocab)
+id_to_token = {idx: token for token, idx in vocab.items()}
+
+block_size = 8
+max_start = len(ids) - block_size
+starts = [0, max_start - 1]
+x = [ids[i:i + block_size] for i in starts]
+y = [ids[i + 1:i + block_size + 1] for i in starts]
+
+char_vocab_size = len(set(char_tokens)) + len(SPECIAL_TOKENS)
+bpe_vocab_size = len(vocab)
+d_model = 32
+
+print("char_token_count=", len(char_tokens))
+print("bpe_token_count=", len(bpe_tokens))
+print("compression_ratio=", round(len(bpe_tokens) / len(char_tokens), 3))
+print("bpe_tokens=", bpe_tokens)
+print("ids=", ids)
+print("roundtrip_ok=", decode(ids, id_to_token) == TEXT)
+print("vocab_size=", bpe_vocab_size)
+print("x_shape=", (len(x), block_size))
+print("shift_ok=", all(row_x[1:] == row_y[:-1] for row_x, row_y in zip(x, y)))
+print("char_vocab_params=", vocab_dependent_params(char_vocab_size, d_model))
+print("toy_bpe_vocab_params=", vocab_dependent_params(bpe_vocab_size, d_model))
+print("gpt2_vocab_params=", vocab_dependent_params(50257, d_model))
+```
+
+运行后会看到类似输出：
+
+```text
+char_token_count= 54
+bpe_token_count= 17
+compression_ratio= 0.315
+bpe_tokens= ['<bos>', 'low', ' ', 'lower', ' ', 'lowest', ' ', 'low', ' ', 'lower', ' ', 'transformer', ' ', 'transformer', ' ', 'low', '<eos>']
+ids= [1, 4, 5, 6, 5, 7, 5, 4, 5, 6, 5, 8, 5, 8, 5, 4, 2]
+roundtrip_ok= True
+vocab_size= 9
+x_shape= (2, 8)
+shift_ok= True
+char_vocab_params= 1040
+toy_bpe_vocab_params= 585
+gpt2_vocab_params= 3266705
+```
+
+这个 demo 说明四件事：
+
+```text
+BPE 合并后 token 数可以明显少于字符数。
+模型训练仍然只看到 token id 序列，x/y 仍然是右移一位。
+词表大小会直接改变 embedding 和 lm head 相关参数量。
+大词表 tokenizer 对小模型不一定划算，因为大量参数会花在很少出现的 token 上。
+```
 
 ---
 

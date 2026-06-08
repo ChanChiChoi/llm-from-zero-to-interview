@@ -19,6 +19,18 @@
 7. 如何做数据来源记录和版本治理？
 8. 面试中如何回答“如何从零构建 web-scale 训练数据集”？
 
+## 0. 本讲资料边界与第二轮精修口径
+
+按照 `WRITING_PLAN.md` 的要求，本讲精修前核对了 Common Crawl 的 WARC / WAT / WET 数据形态、IETF RFC 9309 的 Robots Exclusion Protocol、T5 / C4、The Pile、RefinedWeb、FineWeb、Dolma 和 DataComp-LM / DCLM 等公开资料。
+
+本讲聚焦大模型训练数据采集的工程闭环：
+
+```text
+数据源规划 -> 合规审查 -> 公开或授权采集 -> 原始存储 -> 解析 -> 过滤 -> 去重 -> 配比 -> 版本审计
+```
+
+本讲不提供绕过登录、破解访问控制、规避反爬、批量抓取未授权内容或违反网站条款的做法。法律、版权和隐私问题在真实项目中需要法务、安全、隐私和业务团队共同确认；面试中也不应把技术可访问性说成“天然可用于训练”。
+
 ## 1. 来龙去脉：为什么 Web 成了大模型的数据源
 
 ### 1.1 早期 NLP 的数据规模很小
@@ -383,6 +395,92 @@ Web-scale 数据也是这样。
 5. 最终训练集版本。
 6. 样本级 provenance。
 
+### 4.11 关键公式与采集审计指标
+
+把 web-scale 采集看成一个数据流，而不是一个爬虫脚本。
+
+设候选数据源集合为：
+
+```math
+\mathcal{S}=\{s_1,s_2,\ldots,s_M\}
+```
+
+每个数据源可以记录成：
+
+```math
+s_k=(a_k,l_k,r_k,p_k,w_k)
+```
+
+其中 `a_k` 是访问方式，`l_k` 是 license / ToS 状态，`r_k` 是 robots 或访问策略，`p_k` 是隐私风险，`w_k` 是目标配比权重。
+
+对第 `i` 个原始样本，采集准入门禁可以抽象为：
+
+```math
+A_i=g_{\mathrm{license}}(i)\,g_{\mathrm{tos}}(i)\,g_{\mathrm{robots}}(i)\,g_{\mathrm{privacy}}(i)\,g_{\mathrm{access}}(i)
+```
+
+这里每个 `g` 都是 0/1 检查项。任意一项为 0，样本就不应进入训练数据候选集。它不是法律结论，而是工程系统中必须显式记录的审计状态。
+
+设原始样本集合为 `D_raw`，解析后的集合为 `D_parse`，通过质量、隐私、安全、污染和去重后的集合为 `D_keep`。按 token 数计算的保留率为：
+
+```math
+R_{\mathrm{keep}}=\frac{\sum_{x_i \in D_{\mathrm{keep}}} T_i}{\sum_{x_i \in D_{\mathrm{raw}}} T_i}
+```
+
+其中 `T_i` 是样本 `x_i` 的 token 数。这个指标帮助你判断过滤是否过松或过严。
+
+对某个语言、领域或来源分组 `c`，最终配比为：
+
+```math
+m_c=\frac{\sum_{x_i \in D_{\mathrm{keep}},\,c_i=c} T_i}{\sum_{x_i \in D_{\mathrm{keep}}} T_i}
+```
+
+如果目标覆盖集合是 `C_target`，可以定义覆盖率：
+
+```math
+C_{\mathrm{cover}}=\frac{1}{|C_{\mathrm{target}}|}\sum_{c \in C_{\mathrm{target}}} I[T_c \ge \tau_c]
+```
+
+其中 `T_c` 是分组 `c` 的保留 token 数，`\tau_c` 是最低覆盖阈值。这个公式适合说明低资源语言、代码、数学、科学和安全数据不能只靠自然网页比例决定。
+
+去重率可以写成：
+
+```math
+R_{\mathrm{dup}}=\frac{|D_{\mathrm{parse}}|-|D_{\mathrm{dedup}}|}{|D_{\mathrm{parse}}|}
+```
+
+PII 或密钥风险率可以写成：
+
+```math
+R_{\mathrm{risk}}=\frac{1}{|D_{\mathrm{parse}}|}\sum_i I_i
+```
+
+其中 `I_i=1` 表示样本命中隐私、密钥、评估污染或高风险安全规则。
+
+样本级 provenance 至少应包含：
+
+```math
+p_i=(\mathrm{source}_i,\mathrm{crawl}_i,\mathrm{urlhash}_i,\mathrm{hash}_i,\mathrm{license}_i,t_i,v_i)
+```
+
+也就是来源、crawl 批次、URL hash、内容 hash、许可状态、采集时间和数据版本。没有 provenance，后续删除请求、污染排查、风险回溯和模型版本追责都会很困难。
+
+一个最小 web 数据采集门禁可以写成：
+
+```math
+G_{\mathrm{web}}=
+g_{\mathrm{source}}\,
+g_{\mathrm{policy}}\,
+g_{\mathrm{parse}}\,
+g_{\mathrm{quality}}\,
+g_{\mathrm{pii}}\,
+g_{\mathrm{contam}}\,
+g_{\mathrm{dedup}}\,
+g_{\mathrm{version}}
+```
+
+这些检查项任意一个缺失，都说明项目还只是“拿到一些文本”，不能算完成了可审计的训练数据采集 pipeline。
+
 ## 5. 数据采集中的合规问题
 
 ### 5.1 版权
@@ -622,6 +720,312 @@ Web 数据覆盖广，但质量参差不齐。
 5. 去重率。
 6. 质量分布。
 7. 许可证分布。
+
+### 12.5 最小可运行 Web 采集审计 demo
+
+下面这个 demo 不联网、不读取真实网页，也不需要第三方库。它用内存里的 toy HTML 模拟一个合规采集 pipeline，覆盖 source policy、HTML 解析、质量过滤、PII / 密钥扫描、评估污染扫描、exact dedup、元数据和配比统计。
+
+它演示的不是“怎么爬网站”，而是“采集系统上线前应该检查什么”。
+
+```python
+import hashlib
+import re
+from collections import Counter, defaultdict
+
+
+sources = {
+    "tech_blog": {"license": "cc-by", "tos_train": True, "robots_allowed": True, "access": "public"},
+    "oss_docs": {"license": "apache-2.0", "tos_train": True, "robots_allowed": True, "access": "public"},
+    "science_preprint": {"license": "cc-by", "tos_train": True, "robots_allowed": True, "access": "public"},
+    "zh_news": {"license": "authorized", "tos_train": True, "robots_allowed": True, "access": "public"},
+    "private_forum": {"license": "unknown", "tos_train": False, "robots_allowed": False, "access": "login_required"},
+}
+
+documents = [
+    {
+        "id": "blog_attention",
+        "source_id": "tech_blog",
+        "url": "https://example.org/blog/attention",
+        "crawl_time": "2026-06-01T00:00:00Z",
+        "mime": "text/html",
+        "language": "en",
+        "domain": "web_ml",
+        "html": """
+        <html><body><nav>Home Archive</nav><article>
+        Transformer attention uses queries keys and values for language model training.
+        This article explains data quality, deduplication, provenance, and evaluation contamination.
+        </article><footer>Contact</footer></body></html>
+        """,
+    },
+    {
+        "id": "oss_vector_db",
+        "source_id": "oss_docs",
+        "url": "https://docs.example.org/vector-db",
+        "crawl_time": "2026-06-01T00:05:00Z",
+        "mime": "text/html",
+        "language": "en",
+        "domain": "code_docs",
+        "html": """
+        <main>Open source vector database documentation explains indexes, tests,
+        examples, licenses, failure modes, and reproducible deployment commands.</main>
+        """,
+    },
+    {
+        "id": "blog_attention_dup",
+        "source_id": "tech_blog",
+        "url": "https://mirror.example.org/blog/attention-copy",
+        "crawl_time": "2026-06-01T00:10:00Z",
+        "mime": "text/html",
+        "language": "en",
+        "domain": "web_ml",
+        "html": """
+        <html><body><nav>Home Archive</nav><article>
+        Transformer attention uses queries keys and values for language model training.
+        This article explains data quality, deduplication, provenance, and evaluation contamination.
+        </article><footer>Contact</footer></body></html>
+        """,
+    },
+    {
+        "id": "forum_private",
+        "source_id": "private_forum",
+        "url": "https://forum.example.org/private/thread/7",
+        "crawl_time": "2026-06-01T00:15:00Z",
+        "mime": "text/html",
+        "language": "en",
+        "domain": "forum",
+        "html": "<article>Private member discussion with personal project details.</article>",
+    },
+    {
+        "id": "spam_seo",
+        "source_id": "tech_blog",
+        "url": "https://example.org/seo/spam",
+        "crawl_time": "2026-06-01T00:20:00Z",
+        "mime": "text/html",
+        "language": "en",
+        "domain": "spam",
+        "html": "<body>Buy now!!! promo promo promo $$$ click click click</body>",
+    },
+    {
+        "id": "pii_secret",
+        "source_id": "tech_blog",
+        "url": "https://example.org/leak",
+        "crawl_time": "2026-06-01T00:25:00Z",
+        "mime": "text/html",
+        "language": "en",
+        "domain": "security",
+        "html": "<article>Contact jane@example.com and use api key sk-live-abcdef for tests.</article>",
+    },
+    {
+        "id": "eval_leak",
+        "source_id": "tech_blog",
+        "url": "https://example.org/benchmark/answer",
+        "crawl_time": "2026-06-01T00:30:00Z",
+        "mime": "text/html",
+        "language": "en",
+        "domain": "eval",
+        "html": "<article>Benchmark answer key: GSM8K solution and hidden test answer.</article>",
+    },
+    {
+        "id": "paper_scaling",
+        "source_id": "science_preprint",
+        "url": "https://papers.example.org/scaling",
+        "crawl_time": "2026-06-01T00:35:00Z",
+        "mime": "text/html",
+        "language": "en",
+        "domain": "science",
+        "html": """
+        <article>Scaling law experiments compare model size, data tokens, compute budget,
+        validation loss, ablation controls, and reproducible training recipes.</article>
+        """,
+    },
+    {
+        "id": "zh_data_quality",
+        "source_id": "zh_news",
+        "url": "https://news.example.cn/data-quality",
+        "crawl_time": "2026-06-01T00:40:00Z",
+        "mime": "text/html",
+        "language": "zh",
+        "domain": "zh_web",
+        "html": """
+        <article>高质量中文语料需要覆盖教育、科技、政策、生活服务和真实问答，
+        同时记录来源、许可、时间、语言、质量分、隐私风险和去重状态。</article>
+        """,
+    },
+]
+
+REQUIRED_META = ["id", "source_id", "url", "crawl_time", "mime", "language", "domain"]
+PII_OR_SECRET = [re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+"), re.compile(r"sk-[A-Za-z0-9-]{8,}")]
+CONTAMINATION = ["benchmark answer", "gsm8k solution", "hidden test answer"]
+
+
+def strip_html(html):
+    html = re.sub(r"<script.*?</script>|<style.*?</style>", " ", html, flags=re.I | re.S)
+    text = re.sub(r"<[^>]+>", " ", html)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def tokenize(text):
+    return re.findall(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]", text.lower())
+
+
+def content_hash(text):
+    normalized = " ".join(tokenize(text))
+    return hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:12]
+
+
+def quality_score(text):
+    toks = tokenize(text)
+    if not toks:
+        return 0.0
+    unique_ratio = len(set(toks)) / len(toks)
+    alpha_ratio = sum(ch.isalpha() for ch in text) / max(len(text), 1)
+    length_score = min(len(toks) / 24, 1.0)
+    return round(0.45 * length_score + 0.35 * unique_ratio + 0.20 * min(alpha_ratio / 0.65, 1.0), 3)
+
+
+def policy_allowed(doc):
+    source = sources[doc["source_id"]]
+    return (
+        source["license"] not in {"unknown", "restricted"}
+        and source["tos_train"]
+        and source["robots_allowed"]
+        and source["access"] == "public"
+    )
+
+
+def has_pii_or_secret(text):
+    return any(pattern.search(text) for pattern in PII_OR_SECRET)
+
+
+def has_eval_contamination(text):
+    lower = text.lower()
+    return any(term in lower for term in CONTAMINATION)
+
+
+def sum_tokens(items, field):
+    sums = defaultdict(int)
+    for item in items:
+        sums[item[field]] += item["tokens"]
+    return sums
+
+
+def audit_web_collection(items):
+    seen_hashes = set()
+    kept = []
+    rejected = {}
+    stage_counts = Counter(raw=len(items))
+
+    for doc in items:
+        missing = [field for field in REQUIRED_META if not doc.get(field)]
+        if missing:
+            rejected[doc["id"]] = "missing_metadata"
+            continue
+
+        text = strip_html(doc["html"])
+        doc_hash = content_hash(text)
+        score = quality_score(text)
+
+        if not policy_allowed(doc):
+            rejected[doc["id"]] = "policy_block"
+            continue
+        stage_counts["policy_pass"] += 1
+
+        if has_pii_or_secret(text):
+            rejected[doc["id"]] = "pii_or_secret"
+            continue
+        stage_counts["pii_pass"] += 1
+
+        if has_eval_contamination(text):
+            rejected[doc["id"]] = "eval_contamination"
+            continue
+        stage_counts["contamination_pass"] += 1
+
+        if score < 0.62:
+            rejected[doc["id"]] = "low_quality"
+            continue
+        stage_counts["quality_pass"] += 1
+
+        if doc_hash in seen_hashes:
+            rejected[doc["id"]] = "exact_duplicate"
+            continue
+        seen_hashes.add(doc_hash)
+        kept.append({**doc, "text": text, "hash": doc_hash, "tokens": len(tokenize(text)), "quality": score})
+        stage_counts["dedup_pass"] += 1
+
+    raw_tokens = sum(len(tokenize(strip_html(doc["html"]))) for doc in items)
+    kept_tokens = sum(doc["tokens"] for doc in kept)
+    language_mix = {lang: round(count / kept_tokens, 3) for lang, count in sorted(sum_tokens(kept, "language").items())}
+    domain_mix = {dom: round(count / kept_tokens, 3) for dom, count in sorted(sum_tokens(kept, "domain").items())}
+    gates = {
+        "policy": rejected.get("forum_private") == "policy_block",
+        "pii": rejected.get("pii_secret") == "pii_or_secret",
+        "contamination": rejected.get("eval_leak") == "eval_contamination",
+        "quality": rejected.get("spam_seo") == "low_quality",
+        "dedup": rejected.get("blog_attention_dup") == "exact_duplicate",
+        "provenance": all(doc.get("hash") and doc.get("url") and doc.get("crawl_time") for doc in kept),
+    }
+
+    return {
+        "kept_ids": [doc["id"] for doc in kept],
+        "rejected": dict(sorted(rejected.items())),
+        "stage_counts": dict(stage_counts),
+        "retention": round(kept_tokens / max(raw_tokens, 1), 3),
+        "language_mix": language_mix,
+        "domain_mix": domain_mix,
+        "avg_quality": round(sum(doc["quality"] for doc in kept) / max(len(kept), 1), 3),
+        "gates": gates,
+        "gate_pass": all(gates.values()),
+    }
+
+
+report = audit_web_collection(documents)
+print("kept_ids=", report["kept_ids"])
+print("rejected=", report["rejected"])
+print("stage_counts=", report["stage_counts"])
+print("retention=", report["retention"])
+print("language_mix=", report["language_mix"])
+print("domain_mix=", report["domain_mix"])
+print("avg_quality=", report["avg_quality"])
+print("gates=", report["gates"])
+print("gate_pass=", report["gate_pass"])
+
+assert report["kept_ids"] == ["blog_attention", "oss_vector_db", "paper_scaling", "zh_data_quality"]
+assert report["rejected"] == {
+    "blog_attention_dup": "exact_duplicate",
+    "eval_leak": "eval_contamination",
+    "forum_private": "policy_block",
+    "pii_secret": "pii_or_secret",
+    "spam_seo": "low_quality",
+}
+assert report["stage_counts"] == {
+    "raw": 9,
+    "policy_pass": 8,
+    "pii_pass": 7,
+    "contamination_pass": 6,
+    "quality_pass": 5,
+    "dedup_pass": 4,
+}
+assert report["retention"] == 0.639
+assert report["language_mix"] == {"en": 0.537, "zh": 0.463}
+assert report["domain_mix"] == {"code_docs": 0.148, "science": 0.167, "web_ml": 0.222, "zh_web": 0.463}
+assert report["gate_pass"] is True
+```
+
+预期输出类似：
+
+```text
+kept_ids= ['blog_attention', 'oss_vector_db', 'paper_scaling', 'zh_data_quality']
+rejected= {'blog_attention_dup': 'exact_duplicate', 'eval_leak': 'eval_contamination', 'forum_private': 'policy_block', 'pii_secret': 'pii_or_secret', 'spam_seo': 'low_quality'}
+stage_counts= {'raw': 9, 'policy_pass': 8, 'pii_pass': 7, 'contamination_pass': 6, 'quality_pass': 5, 'dedup_pass': 4}
+retention= 0.639
+language_mix= {'en': 0.537, 'zh': 0.463}
+domain_mix= {'code_docs': 0.148, 'science': 0.167, 'web_ml': 0.222, 'zh_web': 0.463}
+avg_quality= 0.922
+gates= {'policy': True, 'pii': True, 'contamination': True, 'quality': True, 'dedup': True, 'provenance': True}
+gate_pass= True
+```
+
+这个 demo 的关键不是分数阈值本身，而是工程习惯：每个样本都要有来源、许可、时间、内容 hash、拒绝原因和最终版本。真正的 web-scale pipeline 只是把这里的 toy 规则替换成更强的解析器、质量模型、PII 检测器、污染检测器、near-dedup 和数据版本系统。
 
 ## 13. 面向专家：采集策略会改变模型行为
 

@@ -8,6 +8,18 @@
 
 安全边界：本章只提供防御性、治理性和评估性回答模板，不提供 jailbreak、数据抽取、网络滥用、生物风险等可操作攻击步骤。
 
+## 0. 本讲资料边界与第二轮精修口径
+
+本章第二轮精修时，重点核对了第八册前 1-11 章、本地 `INTERVIEW_BANK.md`、NIST AI RMF / Generative AI Profile、OpenAI Preparedness Framework / system card、OWASP Top 10 for LLM Applications、Model Cards / Datasheets、Responsible Scaling 公开资料和前序评估、数据治理、部署安全章节。
+
+本章不继续扩展新攻击技术，而是训练面试表达：
+
+1. 回答要覆盖目标定义、风险 taxonomy、失败模式、缓解方法、评估指标、上线门禁和 trade-off。
+2. 讲 jailbreak、prompt injection、privacy、dangerous capability 时，只说抽象风险、评估指标和防护架构，不写可复用攻击步骤。
+3. 所有“上线”判断都必须有 gate、回归测试、监控和回滚，不能只说“模型更安全”。
+4. 机制可解释性、steering、model editing、unlearning、watermarking 和 governance 都要说边界，不能包装成单独安全保证。
+5. 本章 demo 只做面试回答自评，不运行任何高风险能力测试。
+
 ## 本章目标
 
 学完本章，你要能做到：
@@ -53,6 +65,84 @@
 ```text
 我会先定义安全目标，例如降低 harmful compliance，同时避免 over-refusal。然后建立风险 taxonomy，覆盖有害内容、隐私、jailbreak、prompt injection、工具滥用和高风险专业建议。训练上可以做安全 SFT、偏好优化和拒答样本；系统上加入 policy layer、权限控制、输出过滤和人工确认。评估上要跑 safety eval、红队、多轮攻击、正常请求误拒评估和线上监控。最后用发布门禁控制 P0/P1 风险，并持续把失败样本加入 regression suite。
 ```
+
+### 1.1 关键公式与 Safety 面试自评指标速查
+
+把一道 safety 面试题的回答记录写成：
+
+$$
+a_i=(q_i,d_i,r_i,m_i,g_i,t_i,b_i,w_i)
+$$
+
+其中 `q_i` 是题目，`d_i` 是定义和问题边界，`r_i` 是风险 taxonomy，`m_i` 是缓解方法，`g_i` 是评估指标和 gate，`t_i` 是 trade-off，`b_i` 是是否触碰不该展开的高风险细节，`w_i` 是题目权重。
+
+回答覆盖率：
+
+$$
+C_{ans}=
+\frac{\sum_i w_i C_i}{\sum_i w_i}
+$$
+
+其中 `C_i` 是第 `i` 题已经覆盖的必要维度比例。
+
+风险 taxonomy 覆盖率：
+
+$$
+C_{risk}=
+\frac{|R_{covered}|}{|R_{required}|}
+$$
+
+常见 `R_required` 至少应包含 harmful content、privacy、jailbreak、prompt injection、tool misuse、dangerous capability、over-refusal 和 governance。
+
+指标覆盖率：
+
+$$
+C_{metric}=
+\frac{|M_{covered}|}{|M_{required}|}
+$$
+
+常见 `M_required` 包含 unsafe compliance、over-refusal、attack success、unauthorized tool、severity-weighted risk、privacy leak、capability uplift 和 governance completion。
+
+门禁覆盖率：
+
+$$
+C_{gate}=
+\frac{|G_{covered}|}{|G_{required}|}
+$$
+
+常见 `G_required` 包含 safety gate、red team gate、prompt injection gate、privacy gate、tool gate、governance gate 和 release gate。
+
+trade-off 覆盖率：
+
+$$
+C_{trade}=
+\frac{|T_{covered}|}{|T_{required}|}
+$$
+
+常见 trade-off 包含 helpfulness vs harmlessness、privacy vs utility、transparency vs security、open release vs controlled access。
+
+危险细节扣分：
+
+$$
+P_{unsafe}=
+\frac{1}{N}\sum_i I[b_i=1]
+$$
+
+Safety 面试准备度可以写成：
+
+$$
+G_{interview}=
+I[
+C_{ans}\ge\tau_a
+\land C_{risk}\ge\tau_r
+\land C_{metric}\ge\tau_m
+\land C_{gate}\ge\tau_g
+\land C_{trade}\ge\tau_t
+\land P_{unsafe}=0
+]
+$$
+
+`G_interview=1` 不代表真实系统已经安全，只代表你的面试回答结构、指标、门禁和边界意识达到要求。
 
 ## 2. 问题 1：AI Safety 和 Alignment 有什么区别？
 
@@ -549,7 +639,188 @@ Safety 和 helpfulness、privacy 和 utility、transparency 和 security 都有 
 4. 设计一个危险能力发布门禁。
 5. 设计一个隐私和数据治理流程。
 
-## 21. 小练习
+## 21. 最小可运行 Safety 面试复盘 demo
+
+下面的 demo 不测试真实模型，也不包含任何攻击步骤，只把模拟面试回答拆成覆盖维度，计算回答覆盖、风险分类覆盖、指标覆盖、门禁覆盖、trade-off 覆盖和安全边界扣分。
+
+```python
+def ratio(count, total):
+    return round(count / total, 3) if total else 0.0
+
+
+answer_records = [
+    {
+        "question": "safety_vs_alignment",
+        "weight": 2,
+        "expected": ["definition", "risk_taxonomy", "metrics", "tradeoff", "governance"],
+        "covered": ["definition", "risk_taxonomy", "tradeoff", "governance"],
+        "unsafe_detail": False,
+    },
+    {
+        "question": "rlhf_limits",
+        "weight": 3,
+        "expected": ["definition", "proxy", "reward_hacking", "mitigation", "metrics", "gate", "tradeoff"],
+        "covered": ["definition", "proxy", "reward_hacking", "mitigation", "metrics", "tradeoff"],
+        "unsafe_detail": False,
+    },
+    {
+        "question": "prompt_injection_defense",
+        "weight": 3,
+        "expected": ["definition", "instruction_boundary", "mitigation", "metrics", "gate", "normal_task", "safe_boundary"],
+        "covered": ["definition", "instruction_boundary", "mitigation", "metrics", "gate", "safe_boundary"],
+        "unsafe_detail": False,
+    },
+    {
+        "question": "dangerous_capability_eval",
+        "weight": 4,
+        "expected": ["definition", "capability_elicitation", "baseline", "metrics", "gate", "governance", "safe_boundary"],
+        "covered": ["definition", "capability_elicitation", "baseline", "metrics", "gate", "governance", "safe_boundary"],
+        "unsafe_detail": False,
+    },
+    {
+        "question": "safety_platform_design",
+        "weight": 5,
+        "expected": ["risk", "data", "training", "eval", "system", "governance", "monitoring", "incident"],
+        "covered": ["risk", "data", "training", "eval", "system", "governance", "monitoring"],
+        "unsafe_detail": False,
+    },
+    {
+        "question": "privacy_governance",
+        "weight": 3,
+        "expected": ["lifecycle", "pii", "memorization", "rag", "logging", "metrics", "gate"],
+        "covered": ["lifecycle", "pii", "memorization", "rag", "metrics", "gate"],
+        "unsafe_detail": False,
+    },
+]
+
+required_risks = {
+    "harmful_content",
+    "privacy",
+    "jailbreak",
+    "prompt_injection",
+    "tool_misuse",
+    "dangerous_capability",
+    "over_refusal",
+    "governance",
+}
+covered_risks = {
+    "harmful_content",
+    "privacy",
+    "jailbreak",
+    "prompt_injection",
+    "tool_misuse",
+    "dangerous_capability",
+    "governance",
+}
+required_metrics = {
+    "unsafe_compliance",
+    "over_refusal",
+    "attack_success",
+    "unauthorized_tool",
+    "severity_weighted_risk",
+    "privacy_leak",
+    "capability_uplift",
+    "governance_completion",
+}
+covered_metrics = {
+    "unsafe_compliance",
+    "over_refusal",
+    "attack_success",
+    "unauthorized_tool",
+    "privacy_leak",
+    "capability_uplift",
+}
+required_gates = {
+    "safety_gate",
+    "red_team_gate",
+    "prompt_injection_gate",
+    "privacy_gate",
+    "tool_gate",
+    "governance_gate",
+    "release_gate",
+}
+covered_gates = {
+    "safety_gate",
+    "red_team_gate",
+    "prompt_injection_gate",
+    "privacy_gate",
+    "tool_gate",
+    "release_gate",
+}
+required_tradeoffs = {
+    "helpful_harmless",
+    "privacy_utility",
+    "transparency_security",
+    "open_controlled_release",
+}
+covered_tradeoffs = {"helpful_harmless", "privacy_utility", "transparency_security"}
+
+weighted_score = 0.0
+total_weight = 0
+question_scores = {}
+missing_by_question = {}
+for record in answer_records:
+    expected = set(record["expected"])
+    covered = set(record["covered"])
+    score = ratio(len(expected & covered), len(expected))
+    question_scores[record["question"]] = score
+    missing_by_question[record["question"]] = sorted(expected - covered)
+    weighted_score += score * record["weight"]
+    total_weight += record["weight"]
+
+summary = {
+    "answer_coverage": round(weighted_score / total_weight, 3),
+    "risk_coverage": ratio(len(required_risks & covered_risks), len(required_risks)),
+    "metric_coverage": ratio(len(required_metrics & covered_metrics), len(required_metrics)),
+    "gate_coverage": ratio(len(required_gates & covered_gates), len(required_gates)),
+    "tradeoff_coverage": ratio(len(required_tradeoffs & covered_tradeoffs), len(required_tradeoffs)),
+    "unsafe_detail_count": sum(1 for record in answer_records if record["unsafe_detail"]),
+}
+
+readiness_gates = {
+    "answer": summary["answer_coverage"] >= 0.85,
+    "risk": summary["risk_coverage"] >= 0.85,
+    "metrics": summary["metric_coverage"] >= 0.85,
+    "gates": summary["gate_coverage"] >= 0.85,
+    "tradeoffs": summary["tradeoff_coverage"] >= 0.75,
+    "safe_boundary": summary["unsafe_detail_count"] == 0,
+}
+revision_plan = []
+if not readiness_gates["metrics"]:
+    revision_plan.append("补齐 severity-weighted risk 和 governance completion 指标")
+if not readiness_gates["gates"]:
+    revision_plan.append("把 governance gate 和 release gate 区分清楚")
+if missing_by_question["safety_platform_design"]:
+    revision_plan.append("Safety Platform 回答补 incident response 闭环")
+if "over_refusal" not in covered_risks:
+    revision_plan.append("风险 taxonomy 补 over-refusal")
+
+print("question_scores=", question_scores)
+print("missing_by_question=", missing_by_question)
+print("summary=", summary)
+print("readiness_gates=", readiness_gates)
+print("revision_plan=", revision_plan)
+print("interview_ready=", all(readiness_gates.values()))
+```
+
+运行后可以看到：
+
+```text
+question_scores= {'safety_vs_alignment': 0.8, 'rlhf_limits': 0.857, 'prompt_injection_defense': 0.857, 'dangerous_capability_eval': 1.0, 'safety_platform_design': 0.875, 'privacy_governance': 0.857}
+missing_by_question= {'safety_vs_alignment': ['metrics'], 'rlhf_limits': ['gate'], 'prompt_injection_defense': ['normal_task'], 'dangerous_capability_eval': [], 'safety_platform_design': ['incident'], 'privacy_governance': ['logging']}
+summary= {'answer_coverage': 0.884, 'risk_coverage': 0.875, 'metric_coverage': 0.75, 'gate_coverage': 0.857, 'tradeoff_coverage': 0.75, 'unsafe_detail_count': 0}
+readiness_gates= {'answer': True, 'risk': True, 'metrics': False, 'gates': True, 'tradeoffs': True, 'safe_boundary': True}
+revision_plan= ['补齐 severity-weighted risk 和 governance completion 指标', 'Safety Platform 回答补 incident response 闭环', '风险 taxonomy 补 over-refusal']
+interview_ready= False
+```
+
+这个 demo 的重点：
+
+1. 面试回答可以主观，但复盘必须结构化。
+2. 答案覆盖率高，不代表指标和门禁覆盖足够。
+3. 没有危险细节扣分只是底线，还要补齐指标、gate、incident response 和 over-refusal。
+
+## 22. 小练习
 
 ### 练习 1
 
@@ -579,7 +850,7 @@ Safety 和 helpfulness、privacy 和 utility、transparency 和 security 都有 
 
 要求覆盖：风险严重度、分层、门禁、灰度、修复和回滚。
 
-## 22. 本章总结
+## 23. 本章总结
 
 Safety 面试考察的是系统思维，而不是单点术语。
 

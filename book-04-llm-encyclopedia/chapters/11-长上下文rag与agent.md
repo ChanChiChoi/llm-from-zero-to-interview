@@ -1,6 +1,6 @@
 # K. 长上下文、RAG 与 Agent
 
-条目：Long Context、Context Window、Position Extrapolation、RAG、Dense Retrieval、Reranker、Vector Database、Agent、Tool Use、Function Calling、ReAct、Memory。
+条目：Long Context、Context Window、Position Extrapolation、RAG、Dense Retrieval、Reranker、Vector Database、RAG Prompt Injection、Agent、Tool Use、Function Calling、Tool Result Injection、ReAct、Memory。
 
 ## Long Context
 
@@ -79,6 +79,18 @@
 缺点：系统链路更长，延迟更高，依赖检索质量；如果检索错了，生成模型可能基于错误证据给出更有迷惑性的答案。
 
 面试表达：RAG 不是简单的“向量库加大模型”，而是一条检索、排序、上下文构造、生成、引用校验和评估的完整链路。RAG 的上限经常由检索和证据组织决定。
+
+## RAG Prompt Injection
+
+一句话定义：RAG prompt injection 是检索文档、网页片段、工单、邮件或知识库 chunk 中包含不可信指令，诱导模型偏离用户任务或系统策略。
+
+为什么出现：RAG 会把外部文本放进模型上下文，模型需要同时阅读“可信指令”和“不可信证据”。如果上下文构造没有区分二者，文档中的指令可能被误当成任务规则。
+
+常见风险：回答被劫持、引用被污染、系统提示或上下文泄露、跨用户数据泄露、工具调用参数被外部内容影响。
+
+防护方式：文档来源评级、权限过滤、不可信内容标记、检索前注入模式检测、检索后只按证据回答、引用一致性检查、敏感信息不进入不可信上下文。
+
+面试表达：RAG prompt injection 不是检索质量问题本身，而是应用安全边界问题。外部文档只能作为证据，不能成为更高优先级指令。
 
 ## Chunking
 
@@ -217,6 +229,16 @@
 风险：参数生成错误、工具返回误读、调用顺序错误、权限控制不足、把工具失败结果当成真实结果。
 
 面试表达：tool use 的关键不是“能调用工具”，而是能否在正确时机调用正确工具，并正确解释工具结果。
+
+## Tool Result Injection
+
+一句话定义：tool result injection 是工具返回结果中包含不可信指令或污染内容，诱导模型改变任务、泄露信息或调用其他工具。
+
+为什么危险：很多 agent 会把工具返回直接写回上下文，再让模型决定下一步。如果工具返回来自网页、第三方 API、用户上传文件或搜索结果，它本质上仍是不可信数据。
+
+防护方式：把 tool result 标记为 observation，不让它覆盖 system / developer / user 指令；对高风险工具做 allowlist、参数校验、二次确认和审计；必要时对工具返回做清洗、截断、脱敏和引用约束。
+
+面试表达：工具返回不是开发者指令。Agent 安全评估必须看 action trace，检查不可信 observation 是否直接驱动了高权限动作。
 
 ## Function Calling
 
