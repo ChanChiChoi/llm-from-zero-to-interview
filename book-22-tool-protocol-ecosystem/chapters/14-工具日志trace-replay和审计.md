@@ -1,5 +1,11 @@
 # 第十四章：工具日志、Trace、Replay 和审计
 
+## 14.0 本讲资料边界与第二轮精修口径
+
+本讲按第二轮精修要求，重点补齐工具日志、trace、replay 和审计的指标公式、变量解释和最小可运行 demo。资料边界对齐 OpenAI Agents SDK tracing 对 trace、span、processor 和 workflow 可观测性的抽象，OpenTelemetry 对 trace / span / context propagation 的通用语义，W3C Trace Context 对跨服务 traceparent / tracestate 传播的标准化要求，以及 MCP logging 对工具协议内日志消息、级别和进度通知的边界。
+
+本章只抽象生产工具调用系统的稳定可观测层，不绑定某一家 provider 的 trace 字段、SDK 回调、日志平台、存储后端或审计产品。重点不是“多打日志”，而是证明每一次模型意图、工具选择、参数变化、权限判定、执行结果、脱敏动作、审计事件和 replay 证据都有结构化记录，并且能在隐私和权限边界内用于调试、评估、追责和回归。
+
 ## 14.1 本章定位
 
 前面讲了 Tool Registry、Router、Executor、权限和安全。本章讲可观测性和审计：工具调用发生后，我们如何知道系统到底做了什么。
@@ -570,57 +576,658 @@ Trace 保存用户请求、工具参数和结果，可能涉及隐私合规。
 
 可观测性不能以牺牲隐私为代价。
 
-## 14.21 常见错误
+## 14.21 Trace / Replay 审计指标与最小 demo
 
-### 14.21.1 只记录最终回答
+Trace、Replay 和审计要从“有日志”升级成“可验证的链路证据”。可以把一条工具执行 trace 样本抽象为：
+
+```math
+q_i=(m_i,r_i,a_i,p_i,e_i,o_i,v_i,\ell_i,b_i,z_i)
+```
+
+其中，`m_i` 是模型输入输出和 tool call，`r_i` 是 Router 决策，`a_i` 是参数解析、规范化和修复链路，`p_i` 是权限决策，`e_i` 是 Executor 执行记录，`o_i` 是 tool result 和最终回答，`v_i` 是模型、prompt、schema、registry、policy 和 adapter 版本，`\ell_i` 是结构化日志和指标导出，`b_i` 是 replay / audit / privacy 边界，`z_i` 是期望审计结论。
+
+### 14.21.1 Trace schema 完整率
+
+```math
+C_{\mathrm{trace}}=
+\frac{\sum_i I_i^{\mathrm{trace\_complete}}}{N}
+```
+
+其中，`I_i^{trace_complete}` 表示 trace 至少包含 run、turn、tool call、execution、tool name、status、latency 等核心字段。这个指标回答的是：一条线上问题能不能被查到基本链路。
+
+### 14.21.2 ID 与 span tree 完整率
+
+```math
+C_{\mathrm{id}}=
+\frac{\sum_i I_i^{\mathrm{id\_ok}} I_i^{\mathrm{tree\_ok}}}{N}
+```
+
+其中，`I_i^{id_ok}` 表示 run id、tool call id、execution id、job id 能跨服务对齐，`I_i^{tree_ok}` 表示 span parent / child 关系合法。缺少这层，trace UI 看起来有很多事件，但无法说明因果关系。
+
+### 14.21.3 版本捕获覆盖率
+
+```math
+C_{\mathrm{version}}=
+\frac{\sum_i I_i^{\mathrm{version\_complete}}}{N}
+```
+
+版本字段至少应覆盖 model、prompt、tool schema、registry、router policy 和 provider adapter。没有版本捕获，replay 只能“看历史”，不能比较新旧模型、新工具 schema 或新权限策略是否修复了问题。
+
+### 14.21.4 参数 lineage 覆盖率
+
+```math
+C_{\mathrm{arg}}=
+\frac{\sum_i I_i^{\mathrm{has\_args}}I_i^{\mathrm{arg\_lineage}}}
+{\sum_i I_i^{\mathrm{has\_args}}}
+```
+
+其中，`I_i^{arg_lineage}` 表示 raw arguments、parsed arguments、normalized arguments、final arguments、validation result 和 evidence map 都被记录。它回答的是：执行参数到底来自模型、用户证据、runtime 规范化，还是修复逻辑。
+
+### 14.21.5 权限与结果 trace 完整率
+
+```math
+C_{\mathrm{perm\_trace}}=
+\frac{\sum_i I_i^{\mathrm{perm}}I_i^{\mathrm{perm\_complete}}}
+{\sum_i I_i^{\mathrm{perm}}}
+```
+
+```math
+C_{\mathrm{result\_trace}}=
+\frac{\sum_i I_i^{\mathrm{result}}I_i^{\mathrm{result\_complete}}}
+{\sum_i I_i^{\mathrm{result}}}
+```
+
+权限 trace 至少应记录 user、tenant、tool、action、resource、decision、reason 和 policy version；结果 trace 至少应记录 status、schema validation、raw size、projected size、sensitivity、redaction 和是否进入模型上下文。
+
+### 14.21.6 隐私脱敏和审计事件完整率
+
+```math
+C_{\mathrm{privacy}}=
+\frac{\sum_i I_i^{\mathrm{pii}}I_i^{\mathrm{masked}}}
+{\sum_i I_i^{\mathrm{pii}}}
+```
+
+```math
+C_{\mathrm{audit}}=
+\frac{\sum_i I_i^{\mathrm{audit}}I_i^{\mathrm{audit\_complete}}}
+{\sum_i I_i^{\mathrm{audit}}}
+```
+
+隐私脱敏指标关注 trace 是否把手机号、邮箱、密钥、付款信息、客户备注、私有文档等敏感信息最小化、脱敏、加密或短 TTL。审计事件完整率关注 audit id、actor、tenant、tool、action、resource、decision、timestamp、trace id 和 outcome 是否完整。
+
+### 14.21.7 Replay readiness 与副作用安全率
+
+```math
+C_{\mathrm{replay}}=
+\frac{\sum_i I_i^{\mathrm{replay}}I_i^{\mathrm{replay\_ready}}}
+{\sum_i I_i^{\mathrm{replay}}}
+```
+
+```math
+C_{\mathrm{side}}=
+\frac{\sum_i I_i^{\mathrm{replay}}I_i^{\mathrm{side}}I_i^{\mathrm{live\_blocked}}}
+{\sum_i I_i^{\mathrm{replay}}I_i^{\mathrm{side}}}
+```
+
+Replay readiness 依赖输入、输出、版本、工具 schema、工具结果、权限策略和 mock / sandbox 条件；副作用安全率要求发邮件、支付、删除、发布和权限修改等动作默认禁止 live replay，只能 dry-run、mock 或审批后执行。
+
+### 14.21.8 指标、告警和 eval 链接覆盖率
+
+```math
+C_{\mathrm{metric}}=
+\frac{\sum_i I_i^{\mathrm{metric\_complete}}}{N}
+```
+
+```math
+C_{\mathrm{alert}}=
+\frac{\sum_i I_i^{\mathrm{alert}}I_i^{\mathrm{owner}}}
+{\sum_i I_i^{\mathrm{alert}}}
+```
+
+```math
+C_{\mathrm{eval}}=
+\frac{\sum_i I_i^{\mathrm{eval\_linked}}}{N}
+```
+
+指标导出要覆盖 tool success、latency、error rate、permission denied 和 trace missing 等核心监控；告警要有 owner；eval 链接表示 trace 能进入失败样本库、离线回归集或 golden trace 对比。
+
+综合门禁可以写成：
+
+```math
+G_{\mathrm{trace}}=
+I[
+C_{\mathrm{trace}}\ge \tau_{\mathrm{trace}}
+\land C_{\mathrm{id}}\ge \tau_{\mathrm{id}}
+\land C_{\mathrm{version}}\ge \tau_{\mathrm{version}}
+\land C_{\mathrm{arg}}\ge \tau_{\mathrm{arg}}
+\land C_{\mathrm{perm\_trace}}\ge \tau_{\mathrm{perm}}
+\land C_{\mathrm{result\_trace}}\ge \tau_{\mathrm{result}}
+\land C_{\mathrm{privacy}}\ge \tau_{\mathrm{privacy}}
+\land C_{\mathrm{audit}}\ge \tau_{\mathrm{audit}}
+\land C_{\mathrm{replay}}\ge \tau_{\mathrm{replay}}
+\land C_{\mathrm{side}}\ge \tau_{\mathrm{side}}
+\land C_{\mathrm{metric}}\ge \tau_{\mathrm{metric}}
+\land C_{\mathrm{alert}}\ge \tau_{\mathrm{alert}}
+\land C_{\mathrm{eval}}\ge \tau_{\mathrm{eval}}
+]
+```
+
+下面的 demo 用 0 依赖 Python 模拟一批工具 trace。输入是 list-of-dict，每个 dict 代表一条工具调用链路；输出是 trace / replay / audit 指标、失败样本、失败门禁和最终是否通过上线门禁。
+
+```python
+REQUIRED_TRACE = {"run_id", "turn_id", "tool_call_id", "execution_id", "tool_name", "status", "latency_ms"}
+REQUIRED_VERSION = {"model", "prompt", "tool_schema", "registry", "router_policy", "adapter"}
+REQUIRED_ARGS = {"raw_args", "parsed_args", "normalized_args", "final_args", "validation", "evidence"}
+REQUIRED_PERMISSION = {"user_id", "tenant_id", "tool", "action", "resource", "decision", "reason", "policy_version"}
+REQUIRED_RESULT = {"status", "schema_valid", "raw_size", "projected_size", "sensitivity", "redacted", "sent_to_model"}
+REQUIRED_AUDIT = {"audit_id", "actor", "tenant_id", "tool", "action", "resource", "decision", "timestamp", "trace_id", "outcome"}
+REQUIRED_METRICS = {"tool_success", "latency", "error_rate", "permission_denied", "trace_missing"}
+
+cases = [
+    {
+        "id": "full_trace_ok",
+        "trace_fields": REQUIRED_TRACE,
+        "id_integrity": True,
+        "span_tree_valid": True,
+        "version_fields": REQUIRED_VERSION,
+        "has_args": True,
+        "arg_fields": REQUIRED_ARGS,
+        "permission_required": True,
+        "permission_fields": REQUIRED_PERMISSION,
+        "result_required": True,
+        "result_fields": REQUIRED_RESULT,
+        "pii_present": True,
+        "pii_masked": True,
+        "audit_required": True,
+        "audit_fields": REQUIRED_AUDIT,
+        "replay_needed": True,
+        "replay_ready": True,
+        "side_effect": False,
+        "live_replay_blocked": True,
+        "metric_exported": REQUIRED_METRICS,
+        "alert_required": False,
+        "alert_owner": True,
+        "eval_linked": True,
+    },
+    {
+        "id": "missing_span_parent_bad",
+        "trace_fields": REQUIRED_TRACE,
+        "id_integrity": True,
+        "span_tree_valid": False,
+        "version_fields": REQUIRED_VERSION,
+        "has_args": True,
+        "arg_fields": REQUIRED_ARGS,
+        "permission_required": False,
+        "permission_fields": set(),
+        "result_required": True,
+        "result_fields": REQUIRED_RESULT,
+        "pii_present": False,
+        "pii_masked": True,
+        "audit_required": False,
+        "audit_fields": set(),
+        "replay_needed": True,
+        "replay_ready": False,
+        "side_effect": False,
+        "live_replay_blocked": True,
+        "metric_exported": {"tool_success", "latency", "error_rate"},
+        "alert_required": True,
+        "alert_owner": False,
+        "eval_linked": False,
+    },
+    {
+        "id": "trace_id_mismatch_bad",
+        "trace_fields": REQUIRED_TRACE,
+        "id_integrity": False,
+        "span_tree_valid": True,
+        "version_fields": REQUIRED_VERSION,
+        "has_args": False,
+        "arg_fields": set(),
+        "permission_required": False,
+        "permission_fields": set(),
+        "result_required": False,
+        "result_fields": set(),
+        "pii_present": False,
+        "pii_masked": True,
+        "audit_required": False,
+        "audit_fields": set(),
+        "replay_needed": True,
+        "replay_ready": False,
+        "side_effect": False,
+        "live_replay_blocked": True,
+        "metric_exported": REQUIRED_METRICS,
+        "alert_required": True,
+        "alert_owner": True,
+        "eval_linked": False,
+    },
+    {
+        "id": "no_version_bad",
+        "trace_fields": REQUIRED_TRACE,
+        "id_integrity": True,
+        "span_tree_valid": True,
+        "version_fields": {"model", "prompt"},
+        "has_args": True,
+        "arg_fields": REQUIRED_ARGS,
+        "permission_required": True,
+        "permission_fields": REQUIRED_PERMISSION,
+        "result_required": True,
+        "result_fields": REQUIRED_RESULT,
+        "pii_present": False,
+        "pii_masked": True,
+        "audit_required": True,
+        "audit_fields": REQUIRED_AUDIT,
+        "replay_needed": True,
+        "replay_ready": False,
+        "side_effect": False,
+        "live_replay_blocked": True,
+        "metric_exported": REQUIRED_METRICS,
+        "alert_required": False,
+        "alert_owner": True,
+        "eval_linked": True,
+    },
+    {
+        "id": "arguments_no_lineage_bad",
+        "trace_fields": REQUIRED_TRACE,
+        "id_integrity": True,
+        "span_tree_valid": True,
+        "version_fields": REQUIRED_VERSION,
+        "has_args": True,
+        "arg_fields": {"raw_args", "final_args"},
+        "permission_required": True,
+        "permission_fields": REQUIRED_PERMISSION,
+        "result_required": False,
+        "result_fields": set(),
+        "pii_present": False,
+        "pii_masked": True,
+        "audit_required": False,
+        "audit_fields": set(),
+        "replay_needed": False,
+        "replay_ready": False,
+        "side_effect": False,
+        "live_replay_blocked": True,
+        "metric_exported": REQUIRED_METRICS,
+        "alert_required": False,
+        "alert_owner": True,
+        "eval_linked": True,
+    },
+    {
+        "id": "permission_missing_reason_bad",
+        "trace_fields": REQUIRED_TRACE,
+        "id_integrity": True,
+        "span_tree_valid": True,
+        "version_fields": REQUIRED_VERSION,
+        "has_args": True,
+        "arg_fields": REQUIRED_ARGS,
+        "permission_required": True,
+        "permission_fields": {"user_id", "tenant_id", "tool", "action", "resource", "decision"},
+        "result_required": False,
+        "result_fields": set(),
+        "pii_present": False,
+        "pii_masked": True,
+        "audit_required": True,
+        "audit_fields": REQUIRED_AUDIT - {"decision"},
+        "replay_needed": False,
+        "replay_ready": False,
+        "side_effect": False,
+        "live_replay_blocked": True,
+        "metric_exported": {"tool_success", "latency", "permission_denied", "trace_missing"},
+        "alert_required": True,
+        "alert_owner": True,
+        "eval_linked": True,
+    },
+    {
+        "id": "tool_result_no_projection_bad",
+        "trace_fields": REQUIRED_TRACE,
+        "id_integrity": True,
+        "span_tree_valid": True,
+        "version_fields": REQUIRED_VERSION,
+        "has_args": False,
+        "arg_fields": set(),
+        "permission_required": False,
+        "permission_fields": set(),
+        "result_required": True,
+        "result_fields": {"status", "raw_size", "sensitivity", "sent_to_model"},
+        "pii_present": True,
+        "pii_masked": False,
+        "audit_required": False,
+        "audit_fields": set(),
+        "replay_needed": True,
+        "replay_ready": False,
+        "side_effect": False,
+        "live_replay_blocked": True,
+        "metric_exported": REQUIRED_METRICS,
+        "alert_required": True,
+        "alert_owner": True,
+        "eval_linked": False,
+    },
+    {
+        "id": "raw_pii_unmasked_bad",
+        "trace_fields": REQUIRED_TRACE,
+        "id_integrity": True,
+        "span_tree_valid": True,
+        "version_fields": REQUIRED_VERSION,
+        "has_args": True,
+        "arg_fields": REQUIRED_ARGS,
+        "permission_required": False,
+        "permission_fields": set(),
+        "result_required": False,
+        "result_fields": set(),
+        "pii_present": True,
+        "pii_masked": False,
+        "audit_required": False,
+        "audit_fields": set(),
+        "replay_needed": False,
+        "replay_ready": False,
+        "side_effect": False,
+        "live_replay_blocked": True,
+        "metric_exported": REQUIRED_METRICS,
+        "alert_required": True,
+        "alert_owner": True,
+        "eval_linked": True,
+    },
+    {
+        "id": "audit_missing_actor_bad",
+        "trace_fields": REQUIRED_TRACE,
+        "id_integrity": True,
+        "span_tree_valid": True,
+        "version_fields": REQUIRED_VERSION,
+        "has_args": False,
+        "arg_fields": set(),
+        "permission_required": True,
+        "permission_fields": REQUIRED_PERMISSION,
+        "result_required": False,
+        "result_fields": set(),
+        "pii_present": False,
+        "pii_masked": True,
+        "audit_required": True,
+        "audit_fields": REQUIRED_AUDIT - {"actor", "resource"},
+        "replay_needed": False,
+        "replay_ready": False,
+        "side_effect": True,
+        "live_replay_blocked": True,
+        "metric_exported": REQUIRED_METRICS,
+        "alert_required": True,
+        "alert_owner": False,
+        "eval_linked": True,
+    },
+    {
+        "id": "replay_ready_ok",
+        "trace_fields": REQUIRED_TRACE,
+        "id_integrity": True,
+        "span_tree_valid": True,
+        "version_fields": REQUIRED_VERSION,
+        "has_args": True,
+        "arg_fields": REQUIRED_ARGS,
+        "permission_required": True,
+        "permission_fields": REQUIRED_PERMISSION,
+        "result_required": True,
+        "result_fields": REQUIRED_RESULT,
+        "pii_present": True,
+        "pii_masked": True,
+        "audit_required": True,
+        "audit_fields": REQUIRED_AUDIT,
+        "replay_needed": True,
+        "replay_ready": True,
+        "side_effect": True,
+        "live_replay_blocked": True,
+        "metric_exported": REQUIRED_METRICS,
+        "alert_required": False,
+        "alert_owner": True,
+        "eval_linked": True,
+    },
+    {
+        "id": "live_replay_side_effect_bad",
+        "trace_fields": REQUIRED_TRACE,
+        "id_integrity": True,
+        "span_tree_valid": True,
+        "version_fields": REQUIRED_VERSION,
+        "has_args": True,
+        "arg_fields": REQUIRED_ARGS,
+        "permission_required": True,
+        "permission_fields": REQUIRED_PERMISSION,
+        "result_required": True,
+        "result_fields": REQUIRED_RESULT,
+        "pii_present": False,
+        "pii_masked": True,
+        "audit_required": True,
+        "audit_fields": REQUIRED_AUDIT,
+        "replay_needed": True,
+        "replay_ready": True,
+        "side_effect": True,
+        "live_replay_blocked": False,
+        "metric_exported": REQUIRED_METRICS,
+        "alert_required": True,
+        "alert_owner": True,
+        "eval_linked": False,
+    },
+    {
+        "id": "metric_missing_bad",
+        "trace_fields": REQUIRED_TRACE,
+        "id_integrity": True,
+        "span_tree_valid": True,
+        "version_fields": REQUIRED_VERSION,
+        "has_args": False,
+        "arg_fields": set(),
+        "permission_required": False,
+        "permission_fields": set(),
+        "result_required": False,
+        "result_fields": set(),
+        "pii_present": False,
+        "pii_masked": True,
+        "audit_required": False,
+        "audit_fields": set(),
+        "replay_needed": False,
+        "replay_ready": False,
+        "side_effect": False,
+        "live_replay_blocked": True,
+        "metric_exported": {"latency"},
+        "alert_required": False,
+        "alert_owner": True,
+        "eval_linked": True,
+    },
+    {
+        "id": "alert_no_owner_bad",
+        "trace_fields": REQUIRED_TRACE,
+        "id_integrity": True,
+        "span_tree_valid": True,
+        "version_fields": REQUIRED_VERSION,
+        "has_args": False,
+        "arg_fields": set(),
+        "permission_required": False,
+        "permission_fields": set(),
+        "result_required": False,
+        "result_fields": set(),
+        "pii_present": False,
+        "pii_masked": True,
+        "audit_required": False,
+        "audit_fields": set(),
+        "replay_needed": False,
+        "replay_ready": False,
+        "side_effect": False,
+        "live_replay_blocked": True,
+        "metric_exported": REQUIRED_METRICS,
+        "alert_required": True,
+        "alert_owner": False,
+        "eval_linked": True,
+    },
+    {
+        "id": "eval_link_missing_bad",
+        "trace_fields": REQUIRED_TRACE,
+        "id_integrity": True,
+        "span_tree_valid": True,
+        "version_fields": REQUIRED_VERSION,
+        "has_args": True,
+        "arg_fields": REQUIRED_ARGS,
+        "permission_required": False,
+        "permission_fields": set(),
+        "result_required": True,
+        "result_fields": REQUIRED_RESULT,
+        "pii_present": False,
+        "pii_masked": True,
+        "audit_required": False,
+        "audit_fields": set(),
+        "replay_needed": True,
+        "replay_ready": True,
+        "side_effect": False,
+        "live_replay_blocked": True,
+        "metric_exported": REQUIRED_METRICS,
+        "alert_required": False,
+        "alert_owner": True,
+        "eval_linked": False,
+    },
+]
+
+
+def rate(num, den):
+    return round(num / den, 3) if den else 1.0
+
+
+def complete(case, key, required):
+    return required.issubset(case.get(key, set()))
+
+
+arg_cases = [case for case in cases if case.get("has_args")]
+permission_cases = [case for case in cases if case.get("permission_required")]
+result_cases = [case for case in cases if case.get("result_required")]
+pii_cases = [case for case in cases if case.get("pii_present")]
+audit_cases = [case for case in cases if case.get("audit_required")]
+replay_cases = [case for case in cases if case.get("replay_needed")]
+side_effect_replay = [case for case in cases if case.get("replay_needed") and case.get("side_effect")]
+alert_cases = [case for case in cases if case.get("alert_required")]
+
+metrics = {
+    "trace_schema_completeness": rate(sum(complete(c, "trace_fields", REQUIRED_TRACE) for c in cases), len(cases)),
+    "id_tree_integrity": rate(sum(c.get("id_integrity") and c.get("span_tree_valid") for c in cases), len(cases)),
+    "version_capture_coverage": rate(sum(complete(c, "version_fields", REQUIRED_VERSION) for c in cases), len(cases)),
+    "argument_lineage_coverage": rate(sum(complete(c, "arg_fields", REQUIRED_ARGS) for c in arg_cases), len(arg_cases)),
+    "permission_trace_completeness": rate(sum(complete(c, "permission_fields", REQUIRED_PERMISSION) for c in permission_cases), len(permission_cases)),
+    "tool_result_trace_completeness": rate(sum(complete(c, "result_fields", REQUIRED_RESULT) for c in result_cases), len(result_cases)),
+    "privacy_masking_coverage": rate(sum(c.get("pii_masked") for c in pii_cases), len(pii_cases)),
+    "audit_event_completeness": rate(sum(complete(c, "audit_fields", REQUIRED_AUDIT) for c in audit_cases), len(audit_cases)),
+    "replay_readiness_rate": rate(sum(c.get("replay_ready") for c in replay_cases), len(replay_cases)),
+    "side_effect_replay_safety": rate(sum(c.get("live_replay_blocked") for c in side_effect_replay), len(side_effect_replay)),
+    "metric_export_coverage": rate(sum(complete(c, "metric_exported", REQUIRED_METRICS) for c in cases), len(cases)),
+    "alert_owner_coverage": rate(sum(c.get("alert_owner") for c in alert_cases), len(alert_cases)),
+    "eval_linkage_coverage": rate(sum(c.get("eval_linked") for c in cases), len(cases)),
+}
+
+thresholds = {
+    "trace_schema_completeness": 1.0,
+    "id_tree_integrity": 1.0,
+    "version_capture_coverage": 1.0,
+    "argument_lineage_coverage": 1.0,
+    "permission_trace_completeness": 1.0,
+    "tool_result_trace_completeness": 1.0,
+    "privacy_masking_coverage": 1.0,
+    "audit_event_completeness": 1.0,
+    "replay_readiness_rate": 0.95,
+    "side_effect_replay_safety": 1.0,
+    "metric_export_coverage": 1.0,
+    "alert_owner_coverage": 1.0,
+    "eval_linkage_coverage": 0.95,
+}
+
+failed_cases = []
+for case in cases:
+    failed = []
+    if not complete(case, "trace_fields", REQUIRED_TRACE):
+        failed.append("trace_fields")
+    if not (case.get("id_integrity") and case.get("span_tree_valid")):
+        failed.append("id_tree")
+    if not complete(case, "version_fields", REQUIRED_VERSION):
+        failed.append("version")
+    if case.get("has_args") and not complete(case, "arg_fields", REQUIRED_ARGS):
+        failed.append("argument_lineage")
+    if case.get("permission_required") and not complete(case, "permission_fields", REQUIRED_PERMISSION):
+        failed.append("permission_trace")
+    if case.get("result_required") and not complete(case, "result_fields", REQUIRED_RESULT):
+        failed.append("tool_result_trace")
+    if case.get("pii_present") and not case.get("pii_masked"):
+        failed.append("privacy_masking")
+    if case.get("audit_required") and not complete(case, "audit_fields", REQUIRED_AUDIT):
+        failed.append("audit_event")
+    if case.get("replay_needed") and not case.get("replay_ready"):
+        failed.append("replay_readiness")
+    if case.get("replay_needed") and case.get("side_effect") and not case.get("live_replay_blocked"):
+        failed.append("side_effect_replay")
+    if not complete(case, "metric_exported", REQUIRED_METRICS):
+        failed.append("metric_export")
+    if case.get("alert_required") and not case.get("alert_owner"):
+        failed.append("alert_owner")
+    if not case.get("eval_linked"):
+        failed.append("eval_linkage")
+    if failed:
+        failed_cases.append(case["id"])
+
+failed_gates = [name for name, value in metrics.items() if value < thresholds[name]]
+
+print("metrics=", metrics)
+print("failed_cases=", failed_cases)
+print("failed_gates=", failed_gates)
+print("trace_replay_gate_pass=", not failed_gates)
+```
+
+输出示例：
+
+```text
+metrics= {'trace_schema_completeness': 1.0, 'id_tree_integrity': 0.857, 'version_capture_coverage': 0.929, 'argument_lineage_coverage': 0.889, 'permission_trace_completeness': 0.857, 'tool_result_trace_completeness': 0.857, 'privacy_masking_coverage': 0.5, 'audit_event_completeness': 0.667, 'replay_readiness_rate': 0.5, 'side_effect_replay_safety': 0.5, 'metric_export_coverage': 0.786, 'alert_owner_coverage': 0.625, 'eval_linkage_coverage': 0.643}
+failed_cases= ['missing_span_parent_bad', 'trace_id_mismatch_bad', 'no_version_bad', 'arguments_no_lineage_bad', 'permission_missing_reason_bad', 'tool_result_no_projection_bad', 'raw_pii_unmasked_bad', 'audit_missing_actor_bad', 'live_replay_side_effect_bad', 'metric_missing_bad', 'alert_no_owner_bad', 'eval_link_missing_bad']
+failed_gates= ['id_tree_integrity', 'version_capture_coverage', 'argument_lineage_coverage', 'permission_trace_completeness', 'tool_result_trace_completeness', 'privacy_masking_coverage', 'audit_event_completeness', 'replay_readiness_rate', 'side_effect_replay_safety', 'metric_export_coverage', 'alert_owner_coverage', 'eval_linkage_coverage']
+trace_replay_gate_pass= False
+```
+
+这个结果故意不通过门禁，因为 toy 数据里存在 span tree 断链、trace id 不一致、版本缺失、参数 lineage 缺失、权限缺 reason、结果未投影、PII 未脱敏、审计事件缺 actor、有副作用工具 live replay、指标导出缺失、告警无 owner 和 eval 链接缺失。面试中要强调：Trace / Replay 不是排障时临时补日志，而是工具调用系统的事实层。
+
+## 14.22 常见错误
+
+### 14.22.1 只记录最终回答
 
 问题：无法知道工具是否正确调用。
 
 修复：记录完整 tool trace。
 
-### 14.21.2 不记录版本
+### 14.22.2 不记录版本
 
 问题：schema 和模型变化后无法复现。
 
 修复：记录 model、prompt、tool schema、registry、policy、adapter 版本。
 
-### 14.21.3 raw 日志无脱敏
+### 14.22.3 raw 日志无脱敏
 
 问题：日志系统变成敏感数据泄露源。
 
 修复：脱敏、加密、权限控制和 TTL。
 
-### 14.21.4 有副作用工具可 live replay
+### 14.22.4 有副作用工具可 live replay
 
 问题：调试时重复发送、扣款、删除。
 
 修复：默认 dry-run，副作用工具禁止生产 replay。
 
-### 14.21.5 审计日志可被篡改
+### 14.22.5 审计日志可被篡改
 
 问题：安全事故无法追责。
 
 修复：不可篡改存储、权限控制和完整性校验。
 
-### 14.21.6 Trace ID 不统一
+### 14.22.6 Trace ID 不统一
 
 问题：跨模型、runtime、工具服务无法串联。
 
 修复：统一 run_id、tool_call_id、execution_id 并透传。
 
-### 14.21.7 不记录被过滤工具
+### 14.22.7 不记录被过滤工具
 
 问题：无法解释模型为什么没有某个工具。
 
 修复：Router trace 记录过滤原因。
 
-### 14.21.8 指标没有按工具拆分
+### 14.22.8 指标没有按工具拆分
 
 问题：总体成功率掩盖单个工具故障。
 
 修复：按 tool_name、version、tenant、model、scenario 聚合。
 
-## 14.22 面试题：如何设计工具调用 Trace 和审计
+## 14.23 面试题：如何设计工具调用 Trace 和审计
 
 面试官可能问：
 
@@ -683,7 +1290,7 @@ Agent 调用工具出了问题，你怎么排查？系统应该记录什么？
 我会把工具调用看成一条可追踪的因果链，记录从 router 到 executor 到 final answer 的结构化 trace，并对高风险动作做不可篡改审计和安全 replay。
 ```
 
-## 14.23 小练习
+## 14.24 小练习
 
 ### 练习 1：排查工具选错
 
@@ -715,7 +1322,7 @@ Agent 调用工具出了问题，你怎么排查？系统应该记录什么？
 
 参考答案：日志系统会变成敏感数据泄露源。应脱敏、加密、限制访问，并设置保留周期。
 
-## 14.24 本章小结
+## 14.25 本章小结
 
 本章讲了工具日志、trace、replay 和审计。
 

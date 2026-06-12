@@ -4,6 +4,98 @@
 
 Agent 面试回答要避免两个极端：一是只说“Agent 就是能调用工具的大模型”，过于浅；二是堆砌 ReAct、planner、memory、multi-agent 等术语，但不讲工程边界。高质量回答要能说明：Agent 解决什么问题，系统怎么设计，如何评估，如何控制风险。
 
+## 0. 本讲资料边界与第二轮精修口径
+
+本讲第二轮精修前，已按 `WRITING_PLAN.md` 联网核对 OpenAI Agents SDK 的 tools / guardrails / tracing 公开文档、OpenAI Evals、OpenAI Model Spec 的指令层级口径，以及 SWE-bench、WebArena、OSWorld、AgentBench、GAIA 和 tau-bench 等公开 Agent 评估资料。
+
+本章定位是第十七册的面试总复盘，不重新展开第 1-11 章的全部细节。正文重点是把 Agent 架构、工具调用、planning、memory、RAG、Code Agent、Browser / Computer Use、Multi-Agent、评估和安全，组织成可在面试中稳定表达、可自查、可迭代的回答框架。
+
+本章只做防御性、教学性和面试表达层面的总结，不提供可复用注入提示、绕过权限、规避审计、高风险自动操作或破坏系统的方法。
+
+## 12.0 Agent 面试总框架
+
+Agent 面试的标准答案不要从“模型很聪明”开始，而要从系统闭环开始：
+
+```text
+我会把 Agent 看成目标驱动的多步任务执行系统。它有 goal、state、action、tool、observation、memory、controller、evaluator 和 logger。模型可以提出下一步动作，但动作是否执行要经过 schema 校验、权限门禁、预算控制和高风险确认。评估时不能只看最终答案，要看 trace 中工具选择、参数、observation 使用、状态更新、错误恢复、成本和安全。
+```
+
+这段话可以拆成 8 个必须覆盖的维度：
+
+1. 任务目标：Agent 解决需要多步行动、外部工具和环境反馈的问题。
+2. 系统结构：goal、state、tool registry、executor、observation、controller、memory 和 logger。
+3. 工具调用：schema、参数校验、权限、执行、错误恢复和 trace。
+4. 规划与状态：任务分解、动态重规划、状态更新、停止条件和预算。
+5. 特殊场景：Agentic RAG、Code Agent、Browser / Computer Use、Multi-Agent。
+6. 评估指标：任务成功、部分成功、工具、参数、trace、summary、成本和延迟。
+7. 安全控制：最小权限、沙箱、不可信内容、人工确认、数据流和审计。
+8. 项目表达：baseline、指标、bad case、个人贡献、取舍和下一步改进。
+
+## 12.0.1 关键公式与 Agent 面试自评指标
+
+面试准备可以抽象成一组回答样本。第 `i` 个回答记为：
+
+```math
+a_i=(q_i,C_i,F_i,D_i,M_i,S_i,E_i,P_i,T_i,R_i)
+```
+
+变量含义：
+
+1. `q_i` 是问题。
+2. `C_i` 是回答覆盖的概念集合。
+3. `F_i` 是回答覆盖的公式或指标集合。
+4. `D_i` 是回答能举出的 demo 或代码集合。
+5. `M_i` 是 trace、成本、延迟、成功率等评估指标集合。
+6. `S_i` 是安全边界集合。
+7. `E_i` 是评估方法集合。
+8. `P_i` 是项目证据集合。
+9. `T_i` 是 trade-off 集合。
+10. `R_i` 是红旗问题集合，例如“只背术语”“没有指标”“没有安全边界”“夸大项目”。
+
+概念覆盖率：
+
+```math
+R_{\mathrm{concept}}=\frac{|C_i\cap C_i^\star|}{|C_i^\star|}
+```
+
+公式覆盖率：
+
+```math
+R_{\mathrm{formula}}=\frac{|F_i\cap F_i^\star|}{|F_i^\star|}
+```
+
+demo 覆盖率：
+
+```math
+R_{\mathrm{demo}}=\frac{|D_i\cap D_i^\star|}{|D_i^\star|}
+```
+
+trace 指标覆盖率：
+
+```math
+R_{\mathrm{metric}}=\frac{|M_i\cap M_i^\star|}{|M_i^\star|}
+```
+
+项目证据得分：
+
+```math
+S_{\mathrm{project}}=\frac{|P_i\cap P_i^\star|}{|P_i^\star|}
+```
+
+单题面试得分可以写成加权和：
+
+```math
+S_i=w_cR_{\mathrm{concept}}+w_fR_{\mathrm{formula}}+w_dR_{\mathrm{demo}}+w_mR_{\mathrm{metric}}+w_sR_{\mathrm{safety}}+w_eR_{\mathrm{eval}}+w_pS_{\mathrm{project}}+w_tR_{\mathrm{trade}}
+```
+
+其中各权重相加为 1。准备度门禁可以写成：
+
+```math
+G_{\mathrm{agentint}}=\mathbf{1}[\bar S\ge \tau_s \land \min_i S_i\ge \tau_m \land N_{\mathrm{red}}=0 \land R_{\mathrm{safety}}\ge \tau_{\mathrm{safe}}]
+```
+
+直觉：Agent 面试不是背 25 道题，而是证明你能用结构、公式、demo、评估、安全和项目证据支撑回答。
+
 ## 12.1 什么是 Agent
 
 回答要点：
@@ -234,8 +326,295 @@ RAG 通常检索外部知识库，解决知识获取问题；memory 检索用户
 要根据失败类型处理。参数错误可以修正重试，权限不足需要请求授权或降级，工具不可用可以换工具，目标不明确要问用户，达到预算上限要停止并报告已完成和未完成内容。
 ```
 
-## 12.26 本章小结
+## 12.26 面试回答的常见红旗
+
+红旗 1：只说“Agent 是会调用工具的 LLM”。
+
+修正：补上 goal、state、action、observation、controller、trace、evaluation 和 safety。
+
+红旗 2：把 function calling 当成安全机制。
+
+修正：function calling 只是结构化接口，仍然需要 schema 校验、业务校验、权限、确认、沙箱和审计。
+
+红旗 3：只讲 ReAct 或 planning，不讲停止条件。
+
+修正：Agent loop 必须有 step limit、budget、success criteria、blocked action recovery 和 stop correctness。
+
+红旗 4：项目表达只有“做了一个 Agent”。
+
+修正：改成“做了什么任务、baseline 是什么、提升了什么指标、失败样本是什么、我负责了什么、为什么这样取舍”。
+
+红旗 5：评估只报最终成功率。
+
+修正：补充 trace completeness、tool accuracy、argument validity、observation use、state update、summary faithfulness、claim support、cost、latency 和 safety gate。
+
+红旗 6：安全只说“加 prompt 防护”。
+
+修正：强调系统层最小权限、工具权限矩阵、不可信内容边界、数据流门禁、沙箱、人工确认、dry-run 和 audit log。
+
+## 12.27 最小可运行 Agent interview readiness demo
+
+下面这个 demo 不调用外部模型，而是模拟 5 道 Agent 面试题的回答记录，检查每题是否覆盖概念、公式 / 指标、demo、trace 指标、安全边界、评估口径、项目证据和 trade-off。
+
+它演示的问题是：面试复盘不能只写“这题不会”，而要把每个弱点绑定到缺失概念、缺失公式、缺失 demo 或缺失项目证据。
+
+```python
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class AnswerRecord:
+    question_id: str
+    title: str
+    concepts: set
+    formulas: set
+    demos: set
+    trace_metrics: set
+    safety: set
+    evaluation: set
+    project_evidence: set
+    tradeoffs: set
+    red_flags: set
+
+
+expected = {
+    "q1": {
+        "concepts": {"goal", "state", "action", "observation", "controller", "trace"},
+        "formulas": {"agent_gate"},
+        "demos": {"agent_trace_audit"},
+        "trace_metrics": {"task_success_rate", "observation_use_rate", "state_update_coverage"},
+        "safety": {"permission_gate"},
+        "evaluation": {"trace_eval"},
+        "project_evidence": set(),
+        "tradeoffs": {"agent_vs_workflow"},
+    },
+    "q2": {
+        "concepts": {"tool_registry", "tool_executor", "schema", "function_calling"},
+        "formulas": {"tool_selection_accuracy", "argument_validity"},
+        "demos": {"tool_call_audit"},
+        "trace_metrics": {"schema_valid_rate", "execution_success_rate", "error_recovery_rate"},
+        "safety": {"least_privilege", "human_confirmation"},
+        "evaluation": {"tool_eval"},
+        "project_evidence": set(),
+        "tradeoffs": {"schema_vs_business_rule"},
+    },
+    "q3": {
+        "concepts": {"agentic_rag", "retrieval_controller", "evidence_state", "citation"},
+        "formulas": {"context_precision", "citation_accuracy"},
+        "demos": {"agentic_rag_audit"},
+        "trace_metrics": {"new_evidence_gain", "claim_support_rate"},
+        "safety": {"untrusted_content", "permission_filter"},
+        "evaluation": {"rag_eval"},
+        "project_evidence": {"bad_cases", "metrics"},
+        "tradeoffs": {"quality_vs_cost"},
+    },
+    "q4": {
+        "concepts": {"code_agent", "repo_understanding", "minimal_patch", "test_feedback"},
+        "formulas": {"patch_localization", "validation_coverage"},
+        "demos": {"code_agent_audit"},
+        "trace_metrics": {"test_pass_rate", "unrelated_change_rate", "command_success_rate"},
+        "safety": {"code_sandbox", "user_change_protection"},
+        "evaluation": {"programmatic_eval"},
+        "project_evidence": {"tests", "owned_work", "bad_cases"},
+        "tradeoffs": {"minimal_patch_vs_refactor"},
+    },
+    "q5": {
+        "concepts": {"agent_evaluation", "agent_safety", "multi_agent", "ui_agent"},
+        "formulas": {"summary_faithfulness", "unauthorized_action_rate", "agent_safety_gate"},
+        "demos": {"agent_eval_audit", "agent_safety_audit"},
+        "trace_metrics": {"trace_completeness", "claim_support_rate", "p95_latency", "cost_per_success"},
+        "safety": {"least_privilege", "sandbox", "data_flow_guard", "audit_log"},
+        "evaluation": {"regression_suite", "human_rubric"},
+        "project_evidence": {"baseline", "metrics", "bad_cases"},
+        "tradeoffs": {"autonomy_vs_control", "single_vs_multi"},
+    },
+}
+
+
+answers = [
+    AnswerRecord(
+        "q1",
+        "Agent 和普通应用区别",
+        {"goal", "state", "action", "observation", "controller", "trace"},
+        {"agent_gate"},
+        {"agent_trace_audit"},
+        {"task_success_rate", "observation_use_rate", "state_update_coverage"},
+        {"permission_gate"},
+        {"trace_eval"},
+        set(),
+        {"agent_vs_workflow"},
+        set(),
+    ),
+    AnswerRecord(
+        "q2",
+        "工具调用系统设计",
+        {"tool_registry", "tool_executor", "schema", "function_calling"},
+        {"tool_selection_accuracy"},
+        {"tool_call_audit"},
+        {"schema_valid_rate", "execution_success_rate"},
+        {"least_privilege"},
+        {"tool_eval"},
+        set(),
+        {"schema_vs_business_rule"},
+        {"missing_confirmation"},
+    ),
+    AnswerRecord(
+        "q3",
+        "Agentic RAG",
+        {"agentic_rag", "retrieval_controller", "evidence_state", "citation"},
+        {"context_precision", "citation_accuracy"},
+        {"agentic_rag_audit"},
+        {"new_evidence_gain", "claim_support_rate"},
+        {"untrusted_content", "permission_filter"},
+        {"rag_eval"},
+        {"bad_cases", "metrics"},
+        {"quality_vs_cost"},
+        set(),
+    ),
+    AnswerRecord(
+        "q4",
+        "Code Agent 项目深挖",
+        {"code_agent", "repo_understanding", "minimal_patch", "test_feedback"},
+        {"patch_localization", "validation_coverage"},
+        {"code_agent_audit"},
+        {"test_pass_rate", "unrelated_change_rate", "command_success_rate"},
+        {"code_sandbox", "user_change_protection"},
+        {"programmatic_eval"},
+        {"tests", "owned_work"},
+        {"minimal_patch_vs_refactor"},
+        {"weak_project_evidence"},
+    ),
+    AnswerRecord(
+        "q5",
+        "Agent 评估与安全",
+        {"agent_evaluation", "agent_safety", "multi_agent"},
+        {"summary_faithfulness", "unauthorized_action_rate"},
+        {"agent_eval_audit"},
+        {"trace_completeness", "claim_support_rate", "p95_latency"},
+        {"least_privilege", "sandbox", "audit_log"},
+        {"regression_suite"},
+        {"baseline", "metrics"},
+        {"autonomy_vs_control"},
+        set(),
+    ),
+]
+
+
+def coverage(got, want):
+    if not want:
+        return 1.0
+    return round(len(got & want) / len(want), 3)
+
+
+def union(records, field):
+    values = set()
+    for record in records:
+        values |= getattr(record, field)
+    return values
+
+
+def expected_union(field):
+    values = set()
+    for spec in expected.values():
+        values |= spec[field]
+    return values
+
+
+weights = {
+    "concepts": 0.18,
+    "formulas": 0.14,
+    "demos": 0.12,
+    "trace_metrics": 0.16,
+    "safety": 0.16,
+    "evaluation": 0.10,
+    "project_evidence": 0.08,
+    "tradeoffs": 0.06,
+}
+
+question_scores = {}
+weak_questions = []
+revision_plan = {}
+
+for answer in answers:
+    spec = expected[answer.question_id]
+    parts = {field: coverage(getattr(answer, field), spec[field]) for field in weights}
+    score = round(sum(weights[field] * parts[field] for field in weights), 3)
+    question_scores[answer.question_id] = score
+    missing = {
+        field: sorted(spec[field] - getattr(answer, field))
+        for field in weights
+        if spec[field] - getattr(answer, field)
+    }
+    if score < 0.85 or answer.red_flags:
+        weak_questions.append(answer.question_id)
+        revision_plan[answer.question_id] = {
+            "missing": missing,
+            "red_flags": sorted(answer.red_flags),
+            "next_action": "补一个公式、一个 demo、一个 bad case 和一个 3 分钟回答模板",
+        }
+
+overall = {
+    "concept_coverage": coverage(union(answers, "concepts"), expected_union("concepts")),
+    "formula_coverage": coverage(union(answers, "formulas"), expected_union("formulas")),
+    "demo_coverage": coverage(union(answers, "demos"), expected_union("demos")),
+    "trace_metric_coverage": coverage(union(answers, "trace_metrics"), expected_union("trace_metrics")),
+    "safety_coverage": coverage(union(answers, "safety"), expected_union("safety")),
+    "evaluation_coverage": coverage(union(answers, "evaluation"), expected_union("evaluation")),
+    "project_evidence_score": coverage(union(answers, "project_evidence"), expected_union("project_evidence")),
+    "tradeoff_score": coverage(union(answers, "tradeoffs"), expected_union("tradeoffs")),
+}
+
+red_flags = sorted({flag for answer in answers for flag in answer.red_flags})
+average_score = round(sum(question_scores.values()) / len(question_scores), 3)
+readiness_gate = (
+    average_score >= 0.85
+    and min(question_scores.values()) >= 0.75
+    and overall["safety_coverage"] >= 0.90
+    and not red_flags
+)
+
+print(f"question_scores={question_scores}")
+print(f"overall={overall}")
+print(f"red_flags={red_flags}")
+print(f"weak_questions={weak_questions}")
+print(f"average_score={average_score}")
+print(f"readiness_gate={readiness_gate}")
+print(f"revision_plan={revision_plan}")
+```
+
+输出示例：
+
+```text
+question_scores={'q1': 1.0, 'q2': 0.797, 'q3': 1.0, 'q4': 0.973, 'q5': 0.662}
+overall={'concept_coverage': 0.955, 'formula_coverage': 0.8, 'demo_coverage': 0.833, 'trace_metric_coverage': 0.857, 'safety_coverage': 0.8, 'evaluation_coverage': 0.833, 'project_evidence_score': 1.0, 'tradeoff_score': 0.833}
+red_flags=['missing_confirmation', 'weak_project_evidence']
+weak_questions=['q2', 'q4', 'q5']
+average_score=0.886
+readiness_gate=False
+revision_plan={'q2': {'missing': {'formulas': ['argument_validity'], 'trace_metrics': ['error_recovery_rate'], 'safety': ['human_confirmation']}, 'red_flags': ['missing_confirmation'], 'next_action': '补一个公式、一个 demo、一个 bad case 和一个 3 分钟回答模板'}, 'q4': {'missing': {'project_evidence': ['bad_cases']}, 'red_flags': ['weak_project_evidence'], 'next_action': '补一个公式、一个 demo、一个 bad case 和一个 3 分钟回答模板'}, 'q5': {'missing': {'concepts': ['ui_agent'], 'formulas': ['agent_safety_gate'], 'demos': ['agent_safety_audit'], 'trace_metrics': ['cost_per_success'], 'safety': ['data_flow_guard'], 'evaluation': ['human_rubric'], 'project_evidence': ['bad_cases'], 'tradeoffs': ['single_vs_multi']}, 'red_flags': [], 'next_action': '补一个公式、一个 demo、一个 bad case 和一个 3 分钟回答模板'}}
+```
+
+这个 demo 的 `readiness_gate=False` 不是程序错误，而是在提醒面试准备还存在三个阻断点：工具调用题缺少高风险确认口径，Code Agent 项目证据缺少 bad case，评估与安全题缺少 safety gate、成本指标、数据流门禁、人评口径和 single-vs-multi 取舍。
+
+## 12.28 第十七册总复盘清单
+
+完成第十七册后，建议用下面的清单做最后一轮自查：
+
+1. 能用 3 分钟讲清楚 Agent 和普通 LLM 应用、RAG、workflow 的区别。
+2. 能画出 Agent loop，并解释 goal、state、action、observation、controller 和 trace。
+3. 能设计 tool registry、tool schema、tool executor、权限检查和错误恢复。
+4. 能解释 ReAct、Plan-Act-Observe、任务分解、动态重规划和停止条件。
+5. 能区分 short-term memory、long-term memory、RAG 和 memory pollution。
+6. 能讲 Agentic RAG 的 retrieval controller、evidence state、query drift、citation 和评估。
+7. 能讲 Code Agent 如何理解仓库、做最小 patch、运行测试和保护用户改动。
+8. 能讲 Browser / Computer Use Agent 的 observation、GUI action、误点击、表单、状态重观测和高风险确认。
+9. 能讲 Multi-Agent 的角色、coordinator、blackboard、通信协议、冲突、单 Agent baseline 和成本。
+10. 能列出 Agent 评估指标：task success、partial score、tool accuracy、argument validity、trace completeness、summary faithfulness、claim support、recovery、cost、P95 latency 和 regression suite。
+11. 能列出 Agent 安全指标：least privilege、permission matrix、untrusted content boundary、data flow guard、sandbox、human confirmation、dry-run、audit log 和 safety gate。
+12. 能把自己的 Agent 项目讲成 baseline、指标、trace、bad case、个人贡献、trade-off 和下一步改进，而不是只讲“做了一个智能体”。
+
+## 12.29 本章小结
 
 Agent 面试的核心是把“大模型 + 工具”讲成一个可落地、可评估、可控制的系统。一个完整答案应该覆盖目标、状态、工具、观察、规划、memory、执行、评估和安全。
 
-到这里，第十七册《Agent 与工具调用专题》的正文第一版完成。本册的主线是：Agent 如何从回答问题走向执行任务，如何通过工具调用、ReAct、规划、memory、RAG、代码和浏览器操作完成复杂目标，以及如何评估和安全地控制这些能力。后续可以在第二轮修订时补充更多真实 Agent benchmark、框架对比和工程案例。
+到这里，第十七册《Agent 与工具调用专题》的第二轮阶段性精修完成。本册的主线是：Agent 如何从回答问题走向执行任务，如何通过工具调用、ReAct、规划、memory、RAG、代码和浏览器操作完成复杂目标，以及如何用 trace、评估指标和系统层安全控制这些能力。

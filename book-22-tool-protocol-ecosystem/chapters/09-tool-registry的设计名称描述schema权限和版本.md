@@ -1,5 +1,15 @@
 # 第九章：Tool Registry 的设计：名称、描述、Schema、权限和版本
 
+## 9.0 本讲资料边界与第二轮精修口径
+
+本章按第二轮精修要求，对齐 OpenAI tools / function calling 和 Apps SDK tool descriptor 的公开资料、Anthropic tool use 的工具定义方式、Google Gemini function calling 的 function declaration 设计、MCP specification 中 tools / resources / prompts 的能力边界，以及 JSON Schema 对 JSON 数据结构描述和校验的标准词汇。这里抽象的是企业 Tool Registry 的稳定工程层：工具身份、描述、schema、权限、风险、运行时、版本、生命周期、provider 投影、eval 和审计。
+
+需要注意三点：
+
+1. 本章不把某一家 provider 的 `tools` 字段、tool descriptor 字段、function declaration 格式、MCP capability 字段或 schema 子集写成永久标准。
+2. Tool Registry 是企业内部 source of truth，provider tools / MCP tools / function declarations 是它的外部投影。
+3. 本章只讨论防御性的工具治理、版本管理、权限绑定和质量审计，不提供绕过权限、隐藏高风险工具、伪造 registry 审计或规避 provider 限制的方法。
+
 ## 9.1 本章定位
 
 前八章完成了第一部分“工具调用基础”：从 function calling 协议到 schema、tool choice、参数、结果、失败恢复和评估。
@@ -779,7 +789,291 @@ Registry 变更本身也要审计。
 
 修复：工具 archived 后仍保留只读元数据和版本历史。
 
-## 9.24 面试题：如何设计 Tool Registry
+## 9.24 Tool Registry 质量指标与最小 demo
+
+可以把一条 registry item 写成：
+
+```math
+r_i=(n_i,d_i,S_i,O_i,P_i,K_i,V_i,L_i,U_i,Q_i,A_i,Z_i)
+```
+
+其中：
+
+1. `n_i` 是工具身份，包括 namespace、name 和 display name。
+2. `d_i` 是模型可见描述。
+3. `S_i` 是 input schema 和 output schema。
+4. `O_i` 是 runtime execution metadata。
+5. `P_i` 是权限和数据范围策略。
+6. `K_i` 是风险、副作用、确认和幂等策略。
+7. `V_i` 是 version、schema hash 和变更记录。
+8. `L_i` 是生命周期状态。
+9. `U_i` 是 owner、oncall 和 SLO。
+10. `Q_i` 是 eval dataset、回归结果和上线阈值。
+11. `A_i` 是 provider projection 和 adapter 信息。
+12. `Z_i` 是审计字段和发布记录。
+
+工具身份覆盖率衡量工具是否有稳定、唯一、非泛化的身份：
+
+```math
+C_{\mathrm{id}}=
+\frac{\sum_i \mathbb{1}[n_i\ \mathrm{is}\ \mathrm{unique}\ \land n_i\ \mathrm{is}\ \mathrm{stable}]}
+{N}
+```
+
+description 质量可以按必要字段覆盖来估算：
+
+```math
+C_{\mathrm{desc}}=
+\frac{\sum_i \mathbb{1}[d_i\ \mathrm{covers}\ \mathrm{purpose},\mathrm{when},\mathrm{not\ when},\mathrm{source},\mathrm{risk}]}
+{N}
+```
+
+schema 契约覆盖率要求 input、output 和额外字段策略都明确：
+
+```math
+C_{\mathrm{schema}}=
+\frac{\sum_i \mathbb{1}[S_i^{\mathrm{in}}\ \mathrm{valid}\land S_i^{\mathrm{out}}\ \mathrm{valid}\land S_i\ \mathrm{blocks}\ \mathrm{extra}\ \mathrm{args}]}
+{N}
+```
+
+runtime 元数据覆盖率：
+
+```math
+C_{\mathrm{runtime}}=
+\frac{\sum_i \mathbb{1}[O_i\ \mathrm{has}\ \mathrm{executor},\mathrm{timeout},\mathrm{retry},\mathrm{concurrency}]}
+{N}
+```
+
+权限绑定覆盖率：
+
+```math
+C_{\mathrm{perm}}=
+\frac{\sum_i \mathbb{1}[P_i\ \mathrm{declares}\ \mathrm{permission}\land P_i\ \mathrm{declares}\ \mathrm{data}\ \mathrm{scope}]}
+{N}
+```
+
+风险标注覆盖率：
+
+```math
+C_{\mathrm{risk}}=
+\frac{\sum_i \mathbb{1}[K_i\ \mathrm{declares}\ \mathrm{risk}\land K_i\ \mathrm{declares}\ \mathrm{side}\ \mathrm{effect}\land K_i\ \mathrm{protects}\ \mathrm{side}\ \mathrm{effects}]}
+{N}
+```
+
+版本和 trace 绑定覆盖率：
+
+```math
+C_{\mathrm{ver}}=
+\frac{\sum_i \mathbb{1}[V_i\ \mathrm{has}\ \mathrm{version},\mathrm{schema}\ \mathrm{hash},\mathrm{changelog}\land \mathrm{trace}\ \mathrm{captures}\ V_i]}
+{N}
+```
+
+生命周期策略通过率：
+
+```math
+C_{\mathrm{life}}=
+\frac{\sum_i \mathbb{1}[L_i\ \mathrm{state}\ \mathrm{matches}\ \mathrm{model}\ \mathrm{visibility}\ \mathrm{and}\ \mathrm{runtime}\ \mathrm{execution}]}
+{N}
+```
+
+owner / SLO 覆盖率、eval 绑定覆盖率、provider 投影就绪率和审计完整率：
+
+```math
+C_{\mathrm{owner}}=
+\frac{\sum_i \mathbb{1}[U_i\ \mathrm{has}\ \mathrm{team},\mathrm{oncall},\mathrm{SLO}]}
+{N}
+```
+
+```math
+C_{\mathrm{eval}}=
+\frac{\sum_i \mathbb{1}[Q_i\ \mathrm{has}\ \mathrm{dataset}\land Q_i\ \mathrm{passes}\ \mathrm{regression}]}
+{N}
+```
+
+```math
+C_{\mathrm{proj}}=
+\frac{\sum_i \mathbb{1}[A_i\ \mathrm{is}\ \mathrm{not}\ \mathrm{provider}\ \mathrm{bound}\land A_i\ \mathrm{has}\ \mathrm{required}\ \mathrm{projections}]}
+{N}
+```
+
+```math
+C_{\mathrm{audit}}=
+\frac{\sum_i \mathbb{1}[Z_i\ \mathrm{contains}\ \mathrm{creator},\mathrm{approver},\mathrm{update},\mathrm{reason},\mathrm{rollout}]}
+{N}
+```
+
+Tool Registry 上线门禁可以写成：
+
+```math
+G_{\mathrm{registry}}=
+\mathbb{1}[
+C_{\mathrm{id}}\ge \tau_{\mathrm{id}}
+\land C_{\mathrm{desc}}\ge \tau_{\mathrm{desc}}
+\land C_{\mathrm{schema}}\ge \tau_{\mathrm{schema}}
+\land C_{\mathrm{perm}}\ge \tau_{\mathrm{perm}}
+\land C_{\mathrm{risk}}\ge \tau_{\mathrm{risk}}
+\land C_{\mathrm{ver}}\ge \tau_{\mathrm{ver}}
+\land C_{\mathrm{eval}}\ge \tau_{\mathrm{eval}}
+]
+```
+
+下面是一个 0 依赖最小 demo。它不连接真实工具、不调用模型、不访问网络，只审计 toy registry table，用来说明 registry 不是函数数组，而是工具身份、schema、权限、风险、版本、owner、eval、provider 投影和审计的统一契约。
+
+```python
+from copy import deepcopy
+
+BASE = {
+    "namespace": "core",
+    "name": "get_weather_forecast",
+    "description_flags": {"purpose": True, "when": True, "not_when": True, "source": True, "risk": True},
+    "input_schema": True,
+    "output_schema": True,
+    "blocks_extra_args": True,
+    "runtime": {"executor": True, "timeout": True, "retry": True, "concurrency": True},
+    "permission_declared": True,
+    "data_scope": True,
+    "risk_level": "low",
+    "side_effect": False,
+    "requires_confirmation": False,
+    "requires_idempotency_key": False,
+    "version": "1.0.0",
+    "schema_hash": True,
+    "changelog": True,
+    "trace_version_captured": True,
+    "lifecycle": "active",
+    "model_visible": True,
+    "runtime_executable": True,
+    "owner": {"team": True, "oncall": True, "slo": True},
+    "eval_dataset": True,
+    "regression_pass": True,
+    "provider_bound": False,
+    "projections": {"openai": True, "mcp": True},
+    "audit_fields": {"created_by", "approved_by", "updated_at", "change_reason", "rollout"},
+}
+
+
+def tool(tool_id, **updates):
+    item = deepcopy(BASE)
+    item["id"] = tool_id
+    for key, value in updates.items():
+        if isinstance(value, dict) and isinstance(item.get(key), dict):
+            item[key].update(value)
+        else:
+            item[key] = value
+    return item
+
+
+TOOLS = [
+    tool("weather_ok", namespace="public", name="get_weather_forecast", version="1.2.0"),
+    tool("crm_order_ok", namespace="crm", name="get_customer_order_history", risk_level="medium", version="1.3.0"),
+    tool("send_email_missing_confirm_bad", namespace="comms", name="send_email", risk_level="high", side_effect=True, requires_confirmation=False, requires_idempotency_key=False, output_schema=False, description_flags={"not_when": False, "source": False}, runtime={"retry": False}, changelog=False, owner={"oncall": False}, regression_pass=False, projections={"mcp": False}, audit_fields={"created_by", "updated_at", "change_reason"}),
+    tool("refund_ok", namespace="billing", name="create_refund_request", risk_level="critical", side_effect=True, requires_confirmation=True, requires_idempotency_key=True, version="2.1.0"),
+    tool("duplicate_search_bad_a", namespace="support", name="search", output_schema=False, blocks_extra_args=False, description_flags={"when": False, "not_when": False, "risk": False}, runtime={"concurrency": False}, data_scope=False, schema_hash=False, changelog=False, trace_version_captured=False, owner={"team": False, "oncall": False, "slo": False}, eval_dataset=False, regression_pass=False, provider_bound=True, projections={"mcp": False}, audit_fields={"created_by"}),
+    tool("duplicate_search_bad_b", namespace="support", name="search", output_schema=False, blocks_extra_args=False, description_flags={"when": False, "not_when": False, "risk": False}, runtime={"timeout": False, "concurrency": False}, permission_declared=False, data_scope=False, risk_level=None, side_effect=None, version=None, schema_hash=False, changelog=False, trace_version_captured=False, owner={"team": False, "oncall": False, "slo": False}, eval_dataset=False, regression_pass=False, provider_bound=True, projections={"mcp": False}, audit_fields={"created_by"}),
+    tool("query_ambiguous_bad", namespace="ops", name="query", input_schema=False, output_schema=False, blocks_extra_args=False, description_flags={"purpose": False, "when": False, "not_when": False, "source": False, "risk": False}, runtime={"timeout": False, "retry": False, "concurrency": False}, permission_declared=False, data_scope=False, risk_level=None, side_effect=None, version=None, schema_hash=False, changelog=False, trace_version_captured=False, lifecycle="draft", model_visible=False, runtime_executable=False, owner={"team": False, "oncall": False, "slo": False}, eval_dataset=False, regression_pass=False, projections={"openai": False, "mcp": False}, audit_fields=set()),
+    tool("mcp_tool_no_namespace_bad", namespace="", name="get_data", risk_level="medium", description_flags={"not_when": False, "risk": False}, data_scope=False, owner={"slo": False}, regression_pass=False, audit_fields={"created_by", "approved_by", "updated_at"}),
+    tool("deprecated_still_exposed_bad", namespace="crm", name="get_customer_profile_v1", risk_level="medium", lifecycle="deprecated", model_visible=True, audit_fields={"created_by", "approved_by", "updated_at", "change_reason"}),
+    tool("provider_bound_bad", namespace="analytics", name="run_sales_report", risk_level="medium", provider_bound=True, projections={"mcp": False}),
+]
+
+THRESHOLDS = {
+    "identity_coverage": 0.95,
+    "description_quality": 0.90,
+    "schema_contract_coverage": 0.95,
+    "runtime_metadata_coverage": 0.90,
+    "permission_binding_coverage": 0.95,
+    "risk_annotation_coverage": 0.95,
+    "version_trace_coverage": 0.95,
+    "lifecycle_policy_pass_rate": 0.95,
+    "owner_slo_coverage": 0.95,
+    "eval_binding_coverage": 0.90,
+    "provider_projection_readiness": 0.90,
+    "audit_log_completeness": 0.90,
+}
+
+
+def ratio(numerator, denominator):
+    return 1.0 if denominator == 0 else numerator / denominator
+
+
+def rounded(value):
+    return round(value + 1e-12, 3)
+
+
+def audit(tools):
+    counts = {}
+    for item in tools:
+        key = (item["namespace"], item["name"])
+        counts[key] = counts.get(key, 0) + 1
+
+    generic_names = {"query", "search", "tool", "do_action"}
+    audit_required = {"created_by", "approved_by", "updated_at", "change_reason", "rollout"}
+    allowed_lifecycle = {"draft", "review", "staging", "active", "deprecated", "sunset", "disabled", "archived"}
+    rows = []
+
+    for item in tools:
+        key = (item["namespace"], item["name"])
+        lifecycle = item["lifecycle"]
+        lifecycle_ok = lifecycle in allowed_lifecycle
+        if lifecycle in {"draft", "review", "disabled", "archived"}:
+            lifecycle_ok = lifecycle_ok and not item["model_visible"] and not item["runtime_executable"]
+        if lifecycle in {"deprecated", "sunset"}:
+            lifecycle_ok = lifecycle_ok and not item["model_visible"]
+
+        checks = {
+            "identity": bool(item["namespace"]) and item["name"] not in generic_names and counts[key] == 1,
+            "description": all(item["description_flags"].values()),
+            "schema": item["input_schema"] and item["output_schema"] and item["blocks_extra_args"],
+            "runtime": all(item["runtime"].values()),
+            "permission": item["permission_declared"] and item["data_scope"],
+            "risk": item["risk_level"] is not None and item["side_effect"] is not None and ((not item["side_effect"]) or (item["requires_confirmation"] and item["requires_idempotency_key"])),
+            "version": bool(item["version"]) and item["schema_hash"] and item["changelog"] and item["trace_version_captured"],
+            "lifecycle": lifecycle_ok,
+            "owner": all(item["owner"].values()),
+            "eval": item["eval_dataset"] and item["regression_pass"],
+            "projection": (not item["provider_bound"]) and all(item["projections"].values()),
+            "audit": audit_required <= item["audit_fields"],
+        }
+        rows.append((item["id"], checks))
+
+    metrics = {
+        "identity_coverage": rounded(ratio(sum(c["identity"] for _, c in rows), len(rows))),
+        "description_quality": rounded(ratio(sum(c["description"] for _, c in rows), len(rows))),
+        "schema_contract_coverage": rounded(ratio(sum(c["schema"] for _, c in rows), len(rows))),
+        "runtime_metadata_coverage": rounded(ratio(sum(c["runtime"] for _, c in rows), len(rows))),
+        "permission_binding_coverage": rounded(ratio(sum(c["permission"] for _, c in rows), len(rows))),
+        "risk_annotation_coverage": rounded(ratio(sum(c["risk"] for _, c in rows), len(rows))),
+        "version_trace_coverage": rounded(ratio(sum(c["version"] for _, c in rows), len(rows))),
+        "lifecycle_policy_pass_rate": rounded(ratio(sum(c["lifecycle"] for _, c in rows), len(rows))),
+        "owner_slo_coverage": rounded(ratio(sum(c["owner"] for _, c in rows), len(rows))),
+        "eval_binding_coverage": rounded(ratio(sum(c["eval"] for _, c in rows), len(rows))),
+        "provider_projection_readiness": rounded(ratio(sum(c["projection"] for _, c in rows), len(rows))),
+        "audit_log_completeness": rounded(ratio(sum(c["audit"] for _, c in rows), len(rows))),
+    }
+    failed_tools = {tool_id: [name for name, ok in checks.items() if not ok] for tool_id, checks in rows if not all(checks.values())}
+    failed_gates = [name for name, threshold in THRESHOLDS.items() if metrics[name] < threshold]
+    return metrics, failed_tools, failed_gates
+
+
+metrics, failed_tools, failed_gates = audit(TOOLS)
+print("metrics=", metrics)
+print("failed_tools=", failed_tools)
+print("failed_gates=", failed_gates)
+print("tool_registry_gate_pass=", not failed_gates)
+```
+
+输出应类似：
+
+```text
+metrics= {'identity_coverage': 0.6, 'description_quality': 0.5, 'schema_contract_coverage': 0.6, 'runtime_metadata_coverage': 0.6, 'permission_binding_coverage': 0.6, 'risk_annotation_coverage': 0.7, 'version_trace_coverage': 0.6, 'lifecycle_policy_pass_rate': 0.9, 'owner_slo_coverage': 0.5, 'eval_binding_coverage': 0.5, 'provider_projection_readiness': 0.5, 'audit_log_completeness': 0.4}
+failed_tools= {'send_email_missing_confirm_bad': ['description', 'schema', 'runtime', 'risk', 'version', 'owner', 'eval', 'projection', 'audit'], 'duplicate_search_bad_a': ['identity', 'description', 'schema', 'runtime', 'permission', 'version', 'owner', 'eval', 'projection', 'audit'], 'duplicate_search_bad_b': ['identity', 'description', 'schema', 'runtime', 'permission', 'risk', 'version', 'owner', 'eval', 'projection', 'audit'], 'query_ambiguous_bad': ['identity', 'description', 'schema', 'runtime', 'permission', 'risk', 'version', 'owner', 'eval', 'projection', 'audit'], 'mcp_tool_no_namespace_bad': ['identity', 'description', 'permission', 'owner', 'eval', 'audit'], 'deprecated_still_exposed_bad': ['lifecycle', 'audit'], 'provider_bound_bad': ['projection']}
+failed_gates= ['identity_coverage', 'description_quality', 'schema_contract_coverage', 'runtime_metadata_coverage', 'permission_binding_coverage', 'risk_annotation_coverage', 'version_trace_coverage', 'lifecycle_policy_pass_rate', 'owner_slo_coverage', 'eval_binding_coverage', 'provider_projection_readiness', 'audit_log_completeness']
+tool_registry_gate_pass= False
+```
+
+这个 demo 的重点是 registry 缺陷的归因形状：`send_email_missing_confirm_bad` 暴露高风险副作用工具缺确认、缺幂等、缺 output schema 和回归失败；`duplicate_search_bad_a` / `duplicate_search_bad_b` 暴露泛化工具名和重复注册；`query_ambiguous_bad` 暴露把草稿工具当函数占位符；`mcp_tool_no_namespace_bad` 暴露跨 server capability 没有 namespace 和数据范围；`deprecated_still_exposed_bad` 暴露 deprecated 工具仍被模型看到；`provider_bound_bad` 暴露内部定义直接绑定 provider 格式。
+
+## 9.25 面试题：如何设计 Tool Registry
 
 面试官可能问：
 
@@ -848,7 +1142,7 @@ Registry 变更本身也要审计。
 Tool Registry 应该是工具契约、权限、安全、版本、owner、eval 和 provider 投影的统一 source of truth，而不是一个简单函数数组。
 ```
 
-## 9.25 小练习
+## 9.26 小练习
 
 ### 练习 1：判断 Registry 字段缺失
 
@@ -888,7 +1182,7 @@ Tool Registry 应该是工具契约、权限、安全、版本、owner、eval �
 
 参考答案：不能。历史 trace 仍需要解释当时工具 schema、description、权限和版本，因此应 archived 保留只读历史。
 
-## 9.26 本章小结
+## 9.27 本章小结
 
 本章讲了 Tool Registry 的设计。
 

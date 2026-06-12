@@ -8,6 +8,19 @@
 
 > GPU 利用率告诉你 GPU 忙不忙，MFU/HFU 更接近告诉你模型训练到底用了多少理论算力，训练效率要结合吞吐、通信、I/O、显存和稳定性一起看。
 
+## 5.0 本讲资料边界与第二轮精修口径
+
+本章讨论训练效率指标的稳定工程口径，不把某个监控面板字段、某个 GPU 型号、某个 profiler 的事件名或某篇论文里的具体数值写成通用标准。
+
+第二轮精修时，资料边界按官方和论文公开材料校准：NVIDIA DCGM / Nsight Systems 代表了 GPU 利用率、显存、SM、带宽、kernel timeline 和系统级 trace 的常见观测入口；PyTorch profiler 代表了框架层 CPU / CUDA activity、算子耗时、shape、memory 和 trace 的观测入口；Megatron-LM 和 PaLM 等大模型训练论文常用 MFU / FLOPs utilization 说明大规模训练有效算力利用情况；前文带宽瓶颈章节已经说明 GPU utilization 需要和 HBM、PCIe、NVLink / NVSwitch、网络、存储和 checkpoint 一起解释。
+
+因此，本章只抽象四类稳定结论：
+
+1. GPU utilization 是入口指标，不能单独证明训练效率高。
+2. tokens/s、step time 和 loss 曲线是端到端训练是否快且正确的基础证据。
+3. MFU / HFU 需要明确 FLOPs 估算口径、硬件峰值口径和统计窗口。
+4. 训练效率排查必须同时看通信、I/O、checkpoint、rank skew、padding、重计算、kernel 和扩展效率。
+
 ## 5.1 为什么只看 GPU 利用率不够
 
 GPU 利用率通常表示一段时间内 GPU 是否有 kernel 在运行。
@@ -442,7 +455,234 @@ GPU 利用率 95%，是否说明训练效率很好？
 不一定。GPU utilization 只说明 GPU 大部分时间有 kernel 在跑，不代表这些计算都是有效模型计算。还要看 tokens/s、MFU、HFU、step time、通信占比、I/O、padding 浪费和 loss 是否正常。GPU 利用率高但 MFU 低，可能说明硬件忙于低效 kernel、重计算、padding 或其他开销。
 ```
 
-## 5.16 常见误区
+## 5.16 训练效率审计指标与最小 demo
+
+训练效率题不能只说“GPU 利用率 95%”。你需要能把吞吐、FLOPs、step time、通信、I/O、checkpoint、rank skew 和 loss 正确性放进同一个审计表。
+
+先定义一个训练效率审计样本：
+
+```math
+e_i=(u_i,t_i,f_i,h_i,c_i,d_i,r_i,p_i,l_i,z_i)
+```
+
+其中，`u_i` 是 GPU / memory / bandwidth utilization，`t_i` 是 tokens/s、samples/s 和 step time，`f_i` 是模型 FLOPs 估算，`h_i` 是硬件峰值和实际执行 FLOPs，`c_i` 是通信时间和通信量，`d_i` 是 dataloader、存储、H2D 和 checkpoint I/O，`r_i` 是 rank 间差异，`p_i` 是 padding、重计算和 kernel 效率，`l_i` 是 loss / grad / numerics 正确性，`z_i` 是风险标签。
+
+端到端吞吐可以写成：
+
+```math
+Q_{\mathrm{tok}}=\frac{B_{\mathrm{global}}S_{\mathrm{eff}}}{T_{\mathrm{step}}}
+```
+
+其中，`B_global` 是 global batch size，`S_eff` 是每个样本实际参与训练的有效 token 数，`T_step` 是 step time。如果使用 packing 或动态长度，`B_global S_eff` 应替换成真实非 padding token 数。
+
+step time 分解可以写成：
+
+```math
+T_{\mathrm{step}}=T_{\mathrm{data}}+T_{\mathrm{h2d}}+T_{\mathrm{fwd}}+T_{\mathrm{bwd}}+T_{\mathrm{comm}}+T_{\mathrm{opt}}+T_{\mathrm{ckpt}}+T_{\mathrm{misc}}
+```
+
+MFU 可以写成：
+
+```math
+U_{\mathrm{mfu}}=\frac{F_{\mathrm{model}}/T_{\mathrm{step}}}{N_{\mathrm{gpu}}F_{\mathrm{peak}}}
+```
+
+其中，`F_model` 是一个 step 的模型有效 FLOPs，`N_gpu` 是 GPU 数量，`F_peak` 是单 GPU 理论峰值 FLOPs/s。粗略 decoder-only 训练估算常用 `F_model \approx 6NT`，其中 `N` 是参数量，`T` 是 step 内有效 token 数。这个估算适合快速量级判断，不应替代 profiler 和模型结构级 FLOPs 统计。
+
+HFU 可以写成：
+
+```math
+U_{\mathrm{hfu}}=\frac{F_{\mathrm{hw}}/T_{\mathrm{step}}}{N_{\mathrm{gpu}}F_{\mathrm{peak}}}
+```
+
+其中，`F_hw` 是硬件实际执行 FLOPs。若 `U_hfu` 明显高于 `U_mfu`，说明硬件做了不少非模型有效计算，例如 padding、重计算、低效 kernel、格式转换或额外同步。
+
+通信、I/O 和扩展效率可以分别写成：
+
+```math
+R_{\mathrm{comm}}=\frac{T_{\mathrm{comm}}}{T_{\mathrm{step}}}
+```
+
+```math
+R_{\mathrm{io}}=\frac{T_{\mathrm{data}}+T_{\mathrm{h2d}}+T_{\mathrm{ckpt}}}{T_{\mathrm{step}}}
+```
+
+```math
+E_n=\frac{Q_n}{nQ_1}
+```
+
+其中，`Q_n` 是 `n` 卡吞吐，`Q_1` 是单卡吞吐。`E_n` 低时，要优先看通信、I/O、拓扑、batch 粒度和 rank skew。
+
+最后可以定义训练效率门禁：
+
+```math
+G_{\mathrm{eff}}=\mathbf{1}\left[U_{\mathrm{mfu}}\ge \tau_{\mathrm{mfu}} \land E_n\ge \tau_{\mathrm{scale}} \land R_{\mathrm{comm}}\le \rho_{\mathrm{comm}} \land R_{\mathrm{io}}\le \rho_{\mathrm{io}} \land P_0=0\right]
+```
+
+下面是一个 0 依赖 Python demo。它用 toy step profile 计算 tokens/s、MFU、HFU、通信占比、I/O 占比、rank skew 和扩展效率，并用 bad case 检查训练效率门禁。
+
+```python
+METRICS = [
+    "tokens_throughput_accounting",
+    "step_time_breakdown_coverage",
+    "gpu_utilization_interpretation",
+    "mfu_estimation",
+    "hfu_estimation",
+    "model_flops_accounting",
+    "hardware_peak_accounting",
+    "communication_ratio_tracking",
+    "io_dataloader_tracking",
+    "checkpoint_overhead_tracking",
+    "rank_skew_detection",
+    "scaling_efficiency_tracking",
+    "padding_waste_awareness",
+    "recompute_overhead_awareness",
+    "loss_correctness_coupling",
+    "efficiency_gate",
+]
+
+
+def peta_flops(flops):
+    return round(flops / 1_000_000_000_000_000, 3)
+
+
+def model_flops(params_billion, tokens):
+    return 6 * params_billion * 1_000_000_000 * tokens
+
+
+def utilization(flops, step_time_s, gpu_count, peak_tflops_per_gpu):
+    peak_flops_per_s = gpu_count * peak_tflops_per_gpu * 1_000_000_000_000
+    return round((flops / step_time_s) / peak_flops_per_s, 3)
+
+
+def step_total(parts):
+    return round(sum(parts.values()), 3)
+
+
+def ratio(value, total):
+    return round(value / total, 3)
+
+
+def rank_skew(rank_step_times):
+    avg = sum(rank_step_times) / len(rank_step_times)
+    return {
+        "min": min(rank_step_times),
+        "max": max(rank_step_times),
+        "avg": round(avg, 3),
+        "skew_ratio": round((max(rank_step_times) - min(rank_step_times)) / avg, 3),
+    }
+
+
+def scaling_efficiency(single_gpu_tps, multi_gpu_tps, gpu_count):
+    return round(multi_gpu_tps / (single_gpu_tps * gpu_count), 3)
+
+
+def make_case(name, failed_metric=None, p0=False):
+    flags = {metric: True for metric in METRICS}
+    if failed_metric is not None:
+        flags[failed_metric] = False
+    return {"name": name, "flags": flags, "p0": p0}
+
+
+def build_cases():
+    bad_cases = [
+        ("tokens_per_second_missing_bad", "tokens_throughput_accounting"),
+        ("no_step_breakdown_bad", "step_time_breakdown_coverage"),
+        ("gpu_utilization_as_final_answer_bad", "gpu_utilization_interpretation"),
+        ("mfu_not_estimated_bad", "mfu_estimation"),
+        ("hfu_not_separated_bad", "hfu_estimation"),
+        ("model_flops_wrong_bad", "model_flops_accounting"),
+        ("peak_flops_unknown_bad", "hardware_peak_accounting"),
+        ("communication_ratio_missing_bad", "communication_ratio_tracking"),
+        ("dataloader_io_unmeasured_bad", "io_dataloader_tracking"),
+        ("checkpoint_spike_ignored_bad", "checkpoint_overhead_tracking"),
+        ("rank_skew_hidden_bad", "rank_skew_detection"),
+        ("scaling_efficiency_missing_bad", "scaling_efficiency_tracking"),
+        ("padding_waste_ignored_bad", "padding_waste_awareness"),
+        ("recompute_overhead_ignored_bad", "recompute_overhead_awareness"),
+        ("fast_but_loss_wrong_bad", "loss_correctness_coupling"),
+        ("no_efficiency_gate_bad", "efficiency_gate"),
+    ]
+    cases = [make_case("complete_training_efficiency_plan")]
+    cases.extend(make_case(name, metric, p0=True) for name, metric in bad_cases)
+    return cases
+
+
+def audit_efficiency(cases, threshold=0.95):
+    metrics = {}
+    for metric in METRICS:
+        passed = sum(1 for case in cases if case["flags"][metric])
+        metrics[metric] = round(passed / len(cases), 3)
+
+    failed_cases = [
+        case["name"]
+        for case in cases
+        if case["p0"] or any(not case["flags"][metric] for metric in METRICS)
+    ]
+    failed_gates = [
+        metric for metric, score in metrics.items() if score < threshold
+    ]
+    hard_blocker_count = sum(1 for case in cases if case["p0"])
+    gate_pass = not failed_gates and hard_blocker_count == 0
+    return {
+        "metrics": metrics,
+        "hard_blocker_count": hard_blocker_count,
+        "failed_cases": failed_cases,
+        "failed_gates": failed_gates,
+        "efficiency_gate_pass": gate_pass,
+    }
+
+
+global_tokens = 262_144
+step_parts = {
+    "dataloader": 0.25,
+    "h2d_copy": 0.08,
+    "forward": 0.75,
+    "backward": 1.05,
+    "communication": 0.45,
+    "optimizer": 0.25,
+    "checkpoint": 0.12,
+    "misc": 0.05,
+}
+step_time = step_total(step_parts)
+model_step_flops = model_flops(params_billion=7, tokens=global_tokens)
+hardware_step_flops = 14_640_000_000_000_000
+tokens_per_second = round(global_tokens / step_time)
+
+efficiency_examples = {
+    "step_time_s": step_time,
+    "tokens_per_second": tokens_per_second,
+    "model_step_pflops": peta_flops(model_step_flops),
+    "mfu": utilization(model_step_flops, step_time, gpu_count=8, peak_tflops_per_gpu=1000),
+    "hfu": utilization(hardware_step_flops, step_time, gpu_count=8, peak_tflops_per_gpu=1000),
+    "communication_ratio": ratio(step_parts["communication"], step_time),
+    "io_ratio": ratio(step_parts["dataloader"] + step_parts["h2d_copy"] + step_parts["checkpoint"], step_time),
+    "rank_skew": rank_skew([2.85, 2.9, 2.98, 3.0, 3.05, 3.1, 3.3, 3.42]),
+    "scaling_efficiency_8gpu": scaling_efficiency(12_000, tokens_per_second, 8),
+}
+
+cases = build_cases()
+report = audit_efficiency(cases)
+smoke = {
+    "complete_case_passes": "complete_training_efficiency_plan" not in report["failed_cases"],
+    "caught_gpu_util_only": "gpu_utilization_as_final_answer_bad" in report["failed_cases"],
+    "caught_mfu_missing": "mfu_not_estimated_bad" in report["failed_cases"],
+    "caught_rank_skew": "rank_skew_hidden_bad" in report["failed_cases"],
+    "caught_fast_wrong_loss": "fast_but_loss_wrong_bad" in report["failed_cases"],
+}
+
+print("efficiency_examples=", efficiency_examples)
+print("smoke=", smoke)
+print("metrics=", report["metrics"])
+print("hard_blocker_count=", report["hard_blocker_count"])
+print("failed_cases=", report["failed_cases"])
+print("failed_gates=", report["failed_gates"])
+print("efficiency_gate_pass=", report["efficiency_gate_pass"])
+```
+
+这段 demo 故意让 16 个 bad case 分别打穿 16 个审计维度，因此每个维度覆盖率都是 `16/17=0.941`。`efficiency_examples` 里的 `mfu` 低于 `hfu`，说明硬件执行 FLOPs 里有一部分没有变成模型有效 FLOPs；`communication_ratio`、`io_ratio`、`rank_skew` 和 `scaling_efficiency_8gpu` 则帮助你判断瓶颈更像通信、I/O、负载不均还是扩展效率不足。
+
+## 5.17 常见误区
 
 误区一：GPU 利用率越高越好。
 
@@ -464,7 +704,7 @@ MFU 依赖 FLOPs 估算口径，不同模型和实现可能有差异。它适合
 
 训练效率同时受模型结构、数据 pipeline、并行策略、kernel、硬件、网络、存储和调度影响，需要算法和平台一起优化。
 
-## 5.17 面试题
+## 5.18 面试题
 
 ### 题 1：GPU utilization 和 MFU 有什么区别？
 
@@ -486,7 +726,7 @@ MFU 依赖 FLOPs 估算口径，不同模型和实现可能有差异。它适合
 
 答：说明性能指标不能脱离训练正确性。需要检查数据 pipeline、label、mask、loss 计算、混合精度、梯度裁剪、学习率、分布式同步和 checkpoint resume 是否正确。
 
-## 5.18 小练习
+## 5.19 小练习
 
 练习一：设计一个训练效率 dashboard。
 
@@ -504,7 +744,7 @@ MFU 依赖 FLOPs 估算口径，不同模型和实现可能有差异。它适合
 
 配置 A：GPU utilization 96%，MFU 28%，tokens/s 10k。配置 B：GPU utilization 88%，MFU 42%，tokens/s 14k。你认为哪个更好？为什么？
 
-## 5.19 本章小结
+## 5.20 本章小结
 
 本章讲了 GPU 利用率、MFU、HFU 与训练效率指标。
 

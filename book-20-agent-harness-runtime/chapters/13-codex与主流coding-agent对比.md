@@ -1,5 +1,19 @@
 # 第十三章：Codex 与主流 Coding Agent 对比
 
+## 0. 本讲资料边界与第二轮精修口径
+
+本讲第二轮精修时，优先参考各项目官方公开资料：OpenAI Codex / Codex CLI / Codex surfaces 的官方资料、Anthropic Claude Code 官方文档、OpenCode 官方文档和官方仓库、Cursor 官方文档、Aider 官方文档、SWE-agent 官方文档和仓库、OpenHands 官方仓库和文档、GitHub Copilot coding agent 公开文档。Codex manual helper 在当前环境中因官方站点返回 403 未能直接抓取，因此本章只采用可访问的 OpenAI 官方公开页面和仓库说明，不写未核实的 Codex 内部实现。
+
+边界要说清楚：
+
+1. 本章比较的是公开产品形态、官方能力说明和可迁移 harness 设计，不做实时榜单排名。
+2. 闭源产品的内部 prompt、planner、工具排序、trace 存储、沙箱实现和模型路由不能从外部资料反推成确定结论。
+3. 开源项目虽然能读源码，但本章仍以架构学习和面试表达为目标，不逐行复刻实现。
+4. 各系统版本更新很快，正文只写稳定架构维度，例如产品入口、上下文工程、工具执行、权限边界、编辑机制、trace、评估和企业治理。
+5. 本章新增的公式和 demo 用于建立横向比较方法：把“好用不好用”的主观体验拆成可审计指标，而不是替代真实 benchmark 或企业 PoC。
+
+一句话口径：比较 coding agent 时，先比较 harness，再比较模型；先说公开资料边界，再说系统取向；先拆上下文、工具、权限、编辑、验证和评估，再谈个人体验。
+
 ## 13.1 本章定位
 
 前面两章分别分析了 Claude Code 和 OpenCode。本章进入横向比较：Codex、Claude Code、OpenCode、Cursor、Aider、SWE-agent、OpenHands 这些 coding agent 或 coding assistant 到底有什么差异。
@@ -549,7 +563,299 @@ SWE-bench 是 coding agent 评估中最常被提到的 benchmark 之一，因为
 
 面试中如果被问“你怎么看 Claude Code、Codex、Cursor、Aider 这些工具”，不要只说个人体验。更好的回答是：先按产品形态和 harness 层拆开，再比较上下文、工具、权限、编辑、验证和评估。
 
-## 13.19 面试题
+## 13.19 主流 Coding Agent 横向审计指标
+
+横向比较 coding agent 时，可以把第 `i` 个系统抽象为：
+
+```math
+z_i=(n_i,S_i,C_i,T_i,P_i,E_i,V_i,G_i,R_i)
+```
+
+其中 `n_i` 是系统名称，`S_i` 是产品入口集合，`C_i` 是上下文来源集合，`T_i` 是工具集合，`P_i` 是权限和沙箱机制集合，`E_i` 是编辑和恢复机制集合，`V_i` 是验证和评估机制集合，`G_i` 是治理机制集合，`R_i` 是风险标签集合。
+
+产品入口覆盖率：
+
+```math
+C_{\mathrm{surf}}(i)=\frac{|S_i\cap S_{\mathrm{target}}|}{|S_{\mathrm{target}}|}
+```
+
+这里 `S_target` 可以包含 CLI、IDE、Web/Cloud、Desktop、SDK、CI/PR bot 等入口。入口越多，不代表一定更好；它只说明该系统覆盖的使用形态更广。
+
+上下文覆盖率：
+
+```math
+C_{\mathrm{ctx}}(i)=\frac{|C_i\cap C_{\mathrm{need}}|}{|C_{\mathrm{need}}|}
+```
+
+常见上下文包括 repo map / symbol index、current selection、issue / PR、rules / memory、terminal output、test output、external docs、MCP result 和 session summary。
+
+工具执行覆盖率：
+
+```math
+C_{\mathrm{tool}}(i)=\frac{|T_i\cap T_{\mathrm{need}}|}{|T_{\mathrm{need}}|}
+```
+
+权限治理覆盖率：
+
+```math
+C_{\mathrm{perm}}(i)=\frac{|P_i\cap P_{\mathrm{need}}|}{|P_{\mathrm{need}}|}
+```
+
+编辑恢复覆盖率：
+
+```math
+C_{\mathrm{edit}}(i)=\frac{|E_i\cap E_{\mathrm{need}}|}{|E_{\mathrm{need}}|}
+```
+
+评估准备度：
+
+```math
+C_{\mathrm{eval}}(i)=\frac{|V_i\cap V_{\mathrm{need}}|}{|V_{\mathrm{need}}|}
+```
+
+企业治理覆盖率：
+
+```math
+C_{\mathrm{gov}}(i)=\frac{|G_i\cap G_{\mathrm{need}}|}{|G_{\mathrm{need}}|}
+```
+
+高风险治理率：
+
+```math
+C_{\mathrm{risk}}(i)=1-\frac{|R_i\setminus P_i|}{\max(1,|R_i|)}
+```
+
+这个简化公式的意思是：如果系统暴露了 shell、network、MCP、custom tools、cloud workspace、server API、enterprise integration 等风险面，却没有对应权限或治理机制，风险治理率就会下降。
+
+可以组合成一个横向审计分：
+
+```math
+S_{\mathrm{agent}}(i)=
+w_s C_{\mathrm{surf}}(i)+
+w_c C_{\mathrm{ctx}}(i)+
+w_t C_{\mathrm{tool}}(i)+
+w_p C_{\mathrm{perm}}(i)+
+w_e C_{\mathrm{edit}}(i)+
+w_v C_{\mathrm{eval}}(i)+
+w_g C_{\mathrm{gov}}(i)+
+w_r C_{\mathrm{risk}}(i)
+```
+
+其中权重由场景决定。日常 IDE 开发可以提高 `w_c` 和 `w_e`，企业平台可以提高 `w_p`、`w_g` 和 `w_r`，研究 benchmark 可以提高 `w_v`。
+
+最后的门禁不应该只看总分：
+
+```math
+G_{\mathrm{compare}}(i)=
+\mathbb{1}[C_{\mathrm{perm}}(i)\ge \tau_p]
+\mathbb{1}[C_{\mathrm{eval}}(i)\ge \tau_v]
+\mathbb{1}[C_{\mathrm{risk}}(i)\ge \tau_r]
+```
+
+如果一个系统工具很强但权限、评估或高风险治理明显不足，在企业落地场景中仍应判定为需要补治理，而不是因为总分高就上线。
+
+### 13.19.1 最小可运行 Coding Agent 横向对比 demo
+
+下面的 0 依赖 demo 不调用任何真实 coding agent，也不访问网络。它只用 toy capability table 演示如何按不同场景比较 Codex、Claude Code、OpenCode、Cursor、Aider、SWE-agent 和 OpenHands。
+
+```python
+systems = {
+    "codex": {
+        "surface": {"cli", "ide", "desktop", "cloud"},
+        "context": {"repo", "rules", "terminal", "test_output", "session"},
+        "tools": {"read", "edit", "patch", "shell", "git"},
+        "permission": {"confirmation", "workspace", "sandbox"},
+        "edit": {"patch", "diff", "review"},
+        "eval": {"task_trace", "regression"},
+        "governance": {"account_policy"},
+        "risk": {"shell", "cloud"},
+    },
+    "claude_code": {
+        "surface": {"cli", "ide", "desktop", "cloud", "ci", "sdk"},
+        "context": {"repo", "memory", "rules", "terminal", "test_output", "mcp", "session"},
+        "tools": {"read", "edit", "patch", "shell", "git", "mcp", "hooks"},
+        "permission": {"confirmation", "workspace", "sandbox", "allow_deny", "network_control"},
+        "edit": {"patch", "diff", "review", "session_resume"},
+        "eval": {"task_trace", "regression", "ci_checks"},
+        "governance": {"team_memory", "managed_settings"},
+        "risk": {"shell", "mcp", "hooks", "cloud"},
+    },
+    "opencode": {
+        "surface": {"cli", "ide", "desktop", "sdk"},
+        "context": {"repo", "rules", "terminal", "test_output", "mcp", "session"},
+        "tools": {"read", "edit", "patch", "shell", "git", "mcp", "custom_tools", "lsp"},
+        "permission": {"allow_deny", "confirmation", "workspace"},
+        "edit": {"patch", "diff", "snapshot", "revert"},
+        "eval": {"task_trace"},
+        "governance": {"config", "project_policy"},
+        "risk": {"shell", "mcp", "custom_tools", "server"},
+    },
+    "cursor": {
+        "surface": {"ide", "cli"},
+        "context": {"repo", "selection", "diagnostics", "rules", "terminal"},
+        "tools": {"read", "edit", "shell", "mcp"},
+        "permission": {"confirmation", "workspace"},
+        "edit": {"ide_apply", "diff", "review"},
+        "eval": {"manual_review"},
+        "governance": {"rules"},
+        "risk": {"shell", "mcp"},
+    },
+    "aider": {
+        "surface": {"cli"},
+        "context": {"repo", "repo_map", "terminal", "test_output"},
+        "tools": {"read", "edit", "patch", "shell", "git"},
+        "permission": {"confirmation", "git_boundary"},
+        "edit": {"patch", "diff", "git_commit"},
+        "eval": {"lint_test"},
+        "governance": {"local_config"},
+        "risk": {"shell"},
+    },
+    "swe_agent": {
+        "surface": {"cli", "benchmark"},
+        "context": {"repo", "issue", "terminal", "test_output", "trajectory"},
+        "tools": {"read", "edit", "patch", "shell", "test_runner"},
+        "permission": {"sandbox", "environment"},
+        "edit": {"patch", "diff"},
+        "eval": {"benchmark", "trajectory", "batch", "regression"},
+        "governance": {"yaml_config"},
+        "risk": {"shell", "benchmark_leakage"},
+    },
+    "openhands": {
+        "surface": {"cli", "gui", "cloud", "sdk", "enterprise"},
+        "context": {"repo", "issue", "terminal", "test_output", "integration", "session"},
+        "tools": {"read", "edit", "patch", "shell", "git", "browser", "api"},
+        "permission": {"sandbox", "rbac", "confirmation", "workspace", "network_control"},
+        "edit": {"patch", "diff", "review", "session_resume"},
+        "eval": {"benchmark", "task_trace", "regression", "safety_eval"},
+        "governance": {"rbac", "audit", "enterprise_policy"},
+        "risk": {"shell", "cloud", "browser", "enterprise_integration"},
+    },
+}
+
+targets = {
+    "daily_ide": {
+        "surface": {"ide", "cli"},
+        "context": {"repo", "selection", "diagnostics", "rules", "terminal"},
+        "tools": {"read", "edit", "shell", "git"},
+        "permission": {"confirmation", "workspace"},
+        "edit": {"diff", "review", "ide_apply", "patch"},
+        "eval": {"manual_review", "lint_test", "task_trace"},
+        "governance": {"rules", "local_config"},
+        "weights": {"surface": 0.16, "context": 0.22, "tools": 0.16, "permission": 0.12, "edit": 0.16, "eval": 0.1, "governance": 0.08, "risk": 0.0},
+    },
+    "enterprise_platform": {
+        "surface": {"cli", "ide", "cloud", "sdk", "enterprise"},
+        "context": {"repo", "issue", "terminal", "test_output", "integration", "session"},
+        "tools": {"read", "edit", "patch", "shell", "git", "mcp", "api"},
+        "permission": {"sandbox", "rbac", "confirmation", "workspace", "network_control"},
+        "edit": {"patch", "diff", "review", "session_resume"},
+        "eval": {"task_trace", "regression", "safety_eval", "benchmark"},
+        "governance": {"rbac", "audit", "enterprise_policy", "account_policy", "managed_settings"},
+        "weights": {"surface": 0.12, "context": 0.14, "tools": 0.14, "permission": 0.18, "edit": 0.1, "eval": 0.14, "governance": 0.12, "risk": 0.06},
+    },
+    "research_benchmark": {
+        "surface": {"cli", "benchmark", "sdk"},
+        "context": {"repo", "issue", "terminal", "test_output", "trajectory"},
+        "tools": {"read", "edit", "patch", "shell", "test_runner"},
+        "permission": {"sandbox", "environment"},
+        "edit": {"patch", "diff"},
+        "eval": {"benchmark", "trajectory", "batch", "regression"},
+        "governance": {"yaml_config"},
+        "weights": {"surface": 0.08, "context": 0.16, "tools": 0.16, "permission": 0.12, "edit": 0.08, "eval": 0.3, "governance": 0.06, "risk": 0.04},
+    },
+}
+
+
+def coverage(values, needed):
+    if not needed:
+        return 1.0
+    return len(values & needed) / len(needed)
+
+
+def risk_governance(system):
+    risk = systems[system]["risk"]
+    permission = systems[system]["permission"] | systems[system]["governance"]
+    guarded = 0
+    for item in risk:
+        if item == "shell" and ({"confirmation", "sandbox", "git_boundary"} & permission):
+            guarded += 1
+        elif item == "cloud" and ({"account_policy", "rbac", "enterprise_policy"} & permission):
+            guarded += 1
+        elif item == "mcp" and ({"allow_deny", "network_control", "managed_settings"} & permission):
+            guarded += 1
+        elif item == "custom_tools" and "project_policy" in permission:
+            guarded += 1
+        elif item == "server" and ({"rbac", "audit"} & permission):
+            guarded += 1
+        elif item == "hooks" and "managed_settings" in permission:
+            guarded += 1
+        elif item == "browser" and {"sandbox", "rbac"} <= permission:
+            guarded += 1
+        elif item == "enterprise_integration" and {"rbac", "audit"} <= permission:
+            guarded += 1
+        elif item == "benchmark_leakage" and "yaml_config" in permission:
+            guarded += 1
+    return coverage(set(range(guarded)), set(range(len(risk))))
+
+
+def score(system, scenario):
+    spec = targets[scenario]
+    parts = {
+        "surface": coverage(systems[system]["surface"], spec["surface"]),
+        "context": coverage(systems[system]["context"], spec["context"]),
+        "tools": coverage(systems[system]["tools"], spec["tools"]),
+        "permission": coverage(systems[system]["permission"], spec["permission"]),
+        "edit": coverage(systems[system]["edit"], spec["edit"]),
+        "eval": coverage(systems[system]["eval"], spec["eval"]),
+        "governance": coverage(systems[system]["governance"], spec["governance"]),
+        "risk": risk_governance(system),
+    }
+    total = sum(parts[name] * spec["weights"][name] for name in spec["weights"])
+    gates = {
+        "permission": parts["permission"] >= 0.5,
+        "eval": parts["eval"] >= 0.5,
+        "risk": parts["risk"] >= 0.5,
+    }
+    return round(total, 3), {k: round(v, 3) for k, v in parts.items()}, gates
+
+
+for scenario in targets:
+    ranked = []
+    details = {}
+    for system in systems:
+        total, parts, gates = score(system, scenario)
+        ranked.append((system, total, all(gates.values())))
+        details[system] = {"parts": parts, "gates": gates}
+    ranked.sort(key=lambda item: item[1], reverse=True)
+    print(f"{scenario}_ranked={ranked[:3]}")
+    print(f"{scenario}_top_details={details[ranked[0][0]]}")
+
+weak_spots = {
+    system: [
+        name
+        for name, value in score(system, "enterprise_platform")[1].items()
+        if value < 0.5
+    ]
+    for system in systems
+}
+print(f"enterprise_weak_spots={weak_spots}")
+```
+
+一组典型输出：
+
+```text
+daily_ide_ranked=[('cursor', 0.813, False), ('codex', 0.725, False), ('claude_code', 0.725, False)]
+daily_ide_top_details={'parts': {'surface': 1.0, 'context': 1.0, 'tools': 0.75, 'permission': 1.0, 'edit': 0.75, 'eval': 0.333, 'governance': 0.5, 'risk': 0.5}, 'gates': {'permission': True, 'eval': False, 'risk': True}}
+enterprise_platform_ranked=[('openhands', 0.908, True), ('claude_code', 0.692, True), ('codex', 0.602, True)]
+enterprise_platform_top_details={'parts': {'surface': 0.8, 'context': 1.0, 'tools': 0.857, 'permission': 1.0, 'edit': 1.0, 'eval': 1.0, 'governance': 0.6, 'risk': 1.0}, 'gates': {'permission': True, 'eval': True, 'risk': True}}
+research_benchmark_ranked=[('swe_agent', 0.973, True), ('openhands', 0.639, True), ('claude_code', 0.522, False)]
+research_benchmark_top_details={'parts': {'surface': 0.667, 'context': 1.0, 'tools': 1.0, 'permission': 1.0, 'edit': 1.0, 'eval': 1.0, 'governance': 1.0, 'risk': 1.0}, 'gates': {'permission': True, 'eval': True, 'risk': True}}
+enterprise_weak_spots={'codex': ['governance'], 'claude_code': ['governance'], 'opencode': ['permission', 'eval', 'governance'], 'cursor': ['surface', 'context', 'permission', 'eval', 'governance'], 'aider': ['surface', 'permission', 'eval', 'governance'], 'swe_agent': ['surface', 'permission', 'governance'], 'openhands': []}
+```
+
+这个 demo 的重点不是证明谁更强，而是说明“最佳选择”取决于场景。日常 IDE 场景里 Cursor 的上下文和编辑体验更贴近目标，但 eval gate 可能需要额外补；企业平台场景里 OpenHands 的 RBAC、API、Cloud / Enterprise 和审计维度更匹配；研究 benchmark 场景里 SWE-agent 的 trajectory、batch 和 benchmark runner 更匹配。
+
+## 13.20 面试题
 
 ### 题 1：为什么 coding agent 的差异不只来自模型？
 
@@ -591,7 +897,7 @@ SWE-agent 更像研究和 benchmark 取向的 agent framework，目标是让模�
 我会比较七个维度：第一是上下文接入，包括 repo、issue、PR、CI 和内部文档；第二是工具和执行能力，包括 shell、测试、git、MCP 和内部 API；第三是权限和 sandbox，包括 secret、外部目录、网络和高风险命令；第四是编辑和 diff review；第五是 trace、replay 和审计；第六是评估体系，包括私有 issue benchmark、回归测试和人工 review；第七是成本、延迟、部署和 RBAC。企业场景不能只看模型效果。
 ```
 
-## 13.20 小练习
+## 13.21 小练习
 
 1. 画一张表，比较 Codex、Claude Code、OpenCode、Cursor、Aider、SWE-agent、OpenHands 的产品形态、上下文来源、工具执行、权限模型和评估方式。
 2. 选择一个你常用的代码仓库，设计一个 Aider 风格 repo map，列出哪些文件、类、函数应该进入 map。
@@ -600,7 +906,7 @@ SWE-agent 更像研究和 benchmark 取向的 agent framework，目标是让模�
 5. 比较 CLI agent 和 IDE agent 在“修复一个线上 bug”场景中的优缺点。
 6. 设计一个 OpenHands 风格平台架构，包含 SDK、GUI、REST API、workspace、RBAC、trace 和 integrations。
 
-## 13.21 本章总结
+## 13.22 本章总结
 
 本章横向比较了 Codex、Claude Code、OpenCode、Cursor、Aider、SWE-agent、OpenHands 等主流 coding agent 或 coding assistant。
 

@@ -8,6 +8,16 @@
 
 > GPU 集群不是把很多卡堆在一起，而是计算、显存、互联、网络、存储、电力、散热和调度共同组成的系统。
 
+## 7.0 本讲资料边界与第二轮精修口径
+
+本讲第二轮精修时，资料口径按“稳定集群架构抽象”处理，而不是按某一代 GPU 服务器、某个云实例、某个交换机型号或某个调度器实现写死。单机多卡部分参考 NVIDIA HGX / DGX 资料中对 NVLink、NVSwitch、PCIe、CPU、NIC 和本地 NVMe 的系统边界；多机多卡部分参考 NCCL 对 collective communication、PCIe、NVLink / NVSwitch、InfiniBand / RoCE 和多节点通信的工程边界；GPU 到网卡亲和性部分参考 GPUDirect RDMA 文档对 PCIe 拓扑、驱动、权限和 peer-to-peer 访问条件的说明；机柜级 / 集群级部分只抽象 scale-out fabric、oversubscription、故障域、电力散热和调度感知，不把任何单一厂商的数值写成通用标准。
+
+需要注意三点：
+
+1. 本章关注 GPU cluster topology 和 placement，不重复上一章的“任务画像”总览，也不提前展开下一章的 InfiniBand、RoCE 和集合通信细节。
+2. NVLink / NVSwitch 是 scale-up 互联，主要解决同机或同一高速互联域内 GPU 之间通信；InfiniBand / RoCE / Ethernet 是 scale-out 互联，主要解决节点之间和机柜之间通信。
+3. 集群架构的核心不是“GPU 越多越好”，而是让并行策略、通信模式、故障域、数据位置、资源池和调度策略匹配。
+
 ## 7.1 为什么需要 GPU 集群
 
 单张 GPU 再强，也会遇到限制。
@@ -501,7 +511,322 @@ User / Platform Portal / CLI
 5. 评估池可使用低优先级资源。
 6. 监控、安全和成本贯穿所有资源池。
 
-## 7.18 面试中如何回答 GPU 集群架构
+## 7.18 GPU 集群拓扑审计指标与最小 demo
+
+前面讲的是架构直觉。真实平台设计里，还需要把 GPU 集群拓扑写成可检查的数据结构，否则调度系统只能看到“空闲 GPU 数量”，看不到这些 GPU 是否适合同一个任务。
+
+可以把第 `i` 个集群候选资源组写成：
+
+```math
+g_i=(n_i,u_i,p_i,\ell_i,a_i,r_i,b_i,s_i,f_i,c_i,o_i,z_i)
+```
+
+其中，`n_i` 是节点数量，`u_i` 是单节点 GPU 数，`p_i` 是 PCIe / NUMA 拓扑，`\ell_i` 是 NVLink / NVSwitch 等 scale-up 互联，`a_i` 是 GPU 到 NIC 的亲和性，`r_i` 是 rack / pod 位置，`b_i` 是机内和机间带宽，`s_i` 是存储与 checkpoint 路径，`f_i` 是故障域，`c_i` 是电力散热容量，`o_i` 是观测指标，`z_i` 是风险。
+
+总 GPU 和总显存可以先粗略写成：
+
+```math
+G_{\mathrm{total}}=N_{\mathrm{node}}G_{\mathrm{node}}
+```
+
+```math
+M_{\mathrm{total}}=G_{\mathrm{total}}M_{\mathrm{gpu}}
+```
+
+其中，`N_node` 是节点数，`G_node` 是单节点 GPU 数，`M_gpu` 是单 GPU 显存容量。这个公式只说明资源上限，不代表这些显存一定能被一个模型像单卡一样自由使用；跨 GPU 使用显存要付通信代价。
+
+通信耗时可以用简化模型表达：
+
+```math
+T_{\mathrm{comm}}\approx \alpha H+\frac{V}{B_{\mathrm{eff}}}
+```
+
+其中，`\alpha` 是单跳或一次通信启动延迟，`H` 是路径跳数，`V` 是通信量，`B_eff` 是有效带宽。这个式子提醒你：跨机、跨机柜、拥塞链路和 oversubscription 会同时影响延迟和带宽。
+
+通信放置是否合理，可以看跨慢链路通信比例：
+
+```math
+R_{\mathrm{slow}}=\frac{V_{\mathrm{slow}}}{V_{\mathrm{total}}}
+```
+
+如果 tensor parallel 或专家并行的大量通信被放到跨机链路上，`R_slow` 会升高，扩展效率通常会下降。
+
+网络 oversubscription 可以粗略写成：
+
+```math
+O_{\mathrm{net}}=\frac{B_{\mathrm{down}}}{B_{\mathrm{up}}}
+```
+
+其中，`B_down` 是下行接入总带宽，`B_up` 是上行汇聚带宽。`O_net=1` 接近无阻塞，`O_net>1` 表示存在超卖；是否能接受取决于任务通信模式和并发负载。
+
+故障域影响可以写成：
+
+```math
+F_{\mathrm{rack}}=\frac{G_{\mathrm{rack}}}{G_{\mathrm{total}}}
+```
+
+其中，`G_rack` 是单机柜 GPU 数。这个比例越大，单个机柜故障的影响越大；但把任务跨太多故障域铺开，又可能增加通信成本。
+
+最后，可以把 GPU 集群门禁写成：
+
+```math
+G_{\mathrm{cluster}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land R_{\mathrm{slow}}\le \rho_{\mathrm{slow}} \land O_{\mathrm{net}}\le \rho_{\mathrm{over}} \land P_0=0\right]
+```
+
+其中，`C_j` 是第 `j` 个拓扑审计指标覆盖率，`tau_j` 是最低覆盖率阈值，`rho_slow` 是慢链路通信比例阈值，`rho_over` 是 oversubscription 阈值，`P_0` 是 P0 级风险数量。
+
+下面这个 0 依赖 demo 演示如何把 GPU 集群拓扑、并行组放置和资源池隔离写成审计规则。它故意构造 1 个完整样本和 16 个坏样本，让每个关键维度各失败一次。
+
+```python
+import copy
+
+
+METRICS = [
+    "scale_up_domain_fit",
+    "pcie_numa_locality",
+    "nvlink_nvswitch_locality",
+    "gpu_nic_affinity",
+    "inter_node_fabric_readiness",
+    "rack_locality_awareness",
+    "oversubscription_awareness",
+    "collective_communication_fit",
+    "parallel_group_placement",
+    "storage_checkpoint_locality",
+    "fault_domain_isolation",
+    "power_cooling_capacity_fit",
+    "resource_pool_isolation",
+    "topology_aware_scheduling",
+    "observability_topology_coverage",
+    "gpu_cluster_gate",
+]
+
+
+def ring_allreduce_time_s(payload_gib, ranks, bandwidth_gbps):
+    bytes_total = payload_gib * (1024 ** 3)
+    traffic = 2 * (ranks - 1) / ranks * bytes_total
+    return traffic / (bandwidth_gbps * 1_000_000_000)
+
+
+def total_hbm_tib(nodes, gpus_per_node, hbm_gib_per_gpu):
+    return nodes * gpus_per_node * hbm_gib_per_gpu / 1024
+
+
+def oversubscription_ratio(down_gbps, up_gbps):
+    return down_gbps / up_gbps
+
+
+def rack_fault_blast_radius(gpus_per_rack, total_gpus):
+    return gpus_per_rack / total_gpus
+
+
+def build_cluster_cases():
+    complete = {
+        "name": "complete",
+        "nodes": 16,
+        "gpus_per_node": 8,
+        "hbm_gib_per_gpu": 80,
+        "scale_up": {"domain": "node_nvswitch", "gpus": 8, "fits_task": True},
+        "pcie": {"numa_mapped": True, "root_complex_known": True},
+        "nvlink": {"present": True, "nvswitch": True, "topology_known": True},
+        "gpu_nic": {"affinity_mapped": True, "gdr_ready": True},
+        "fabric": {"type": "infiniband_or_roce", "rdma": True, "bandwidth_gbps": 200, "lossless_or_cc": True},
+        "rack": {"rack_locality": True, "nodes_per_rack": 4, "rack_spread_limit": 2},
+        "network": {"down_gbps": 3200, "up_gbps": 3200, "oversubscription_known": True},
+        "collective": {"modeled_ops": ["allreduce", "allgather", "reducescatter"], "nccl_tested": True},
+        "parallel_groups": {"tensor_parallel_within_node": True, "data_parallel_cross_node": True},
+        "storage": {"checkpoint_nearby": True, "data_cache": True, "write_bandwidth_gbps": 80},
+        "fault_domain": {"rack_aware": True, "single_rack_fraction": 0.25, "checkpoint_recoverable": True},
+        "power_cooling": {"power_kw_required": 120, "power_kw_available": 150, "cooling_ready": True},
+        "resource_pools": {"training": "isolated", "inference": "isolated", "eval": "preemptible"},
+        "scheduler": {"topology_aware": True, "gang": True, "quota": True},
+        "observability": {"metrics": ["pcie", "nvlink", "nic", "nccl", "rack", "storage"], "traces": True},
+        "gate": {"enabled": True},
+    }
+
+    def bad_case(name, mutator):
+        case = copy.deepcopy(complete)
+        case["name"] = name
+        mutator(case)
+        return case
+
+    bad_cases = [
+        bad_case("scale_up_domain_missing_bad", lambda c: c["scale_up"].update({"fits_task": False})),
+        bad_case("pcie_numa_unknown_bad", lambda c: c["pcie"].update({"numa_mapped": False})),
+        bad_case("nvlink_nvswitch_ignored_bad", lambda c: c["nvlink"].update({"topology_known": False})),
+        bad_case("gpu_nic_affinity_missing_bad", lambda c: c["gpu_nic"].update({"affinity_mapped": False})),
+        bad_case("inter_node_fabric_unready_bad", lambda c: c["fabric"].update({"rdma": False})),
+        bad_case("rack_locality_missing_bad", lambda c: c["rack"].update({"rack_locality": False})),
+        bad_case("oversubscription_unknown_bad", lambda c: c["network"].update({"oversubscription_known": False})),
+        bad_case("collective_comm_unmodeled_bad", lambda c: c["collective"].update({"modeled_ops": []})),
+        bad_case("parallel_group_random_bad", lambda c: c["parallel_groups"].update({"tensor_parallel_within_node": False})),
+        bad_case("storage_checkpoint_remote_bad", lambda c: c["storage"].update({"checkpoint_nearby": False})),
+        bad_case("fault_domain_single_rack_bad", lambda c: c["fault_domain"].update({"single_rack_fraction": 1.0})),
+        bad_case("power_cooling_overbooked_bad", lambda c: c["power_cooling"].update({"power_kw_available": 100})),
+        bad_case("resource_pool_mixed_bad", lambda c: c["resource_pools"].update({"inference": "shared_with_training"})),
+        bad_case("topology_scheduler_disabled_bad", lambda c: c["scheduler"].update({"topology_aware": False})),
+        bad_case("observability_no_topology_metrics_bad", lambda c: c["observability"].update({"metrics": ["gpu_utilization"]})),
+        bad_case("gpu_cluster_gate_missing_bad", lambda c: c["gate"].update({"enabled": False})),
+    ]
+    return [complete] + bad_cases
+
+
+def check_scale_up(case):
+    return case["scale_up"]["fits_task"] and case["scale_up"]["gpus"] <= case["gpus_per_node"]
+
+
+def check_pcie(case):
+    return case["pcie"]["numa_mapped"] and case["pcie"]["root_complex_known"]
+
+
+def check_nvlink(case):
+    return case["nvlink"]["present"] and case["nvlink"]["topology_known"]
+
+
+def check_gpu_nic(case):
+    return case["gpu_nic"]["affinity_mapped"] and case["gpu_nic"]["gdr_ready"]
+
+
+def check_fabric(case):
+    f = case["fabric"]
+    return f["rdma"] and f["bandwidth_gbps"] >= 100 and f["lossless_or_cc"]
+
+
+def check_rack(case):
+    return case["rack"]["rack_locality"] and case["rack"]["rack_spread_limit"] >= 1
+
+
+def check_oversubscription(case):
+    n = case["network"]
+    return n["oversubscription_known"] and oversubscription_ratio(n["down_gbps"], n["up_gbps"]) <= 2.0
+
+
+def check_collective(case):
+    ops = set(case["collective"]["modeled_ops"])
+    return {"allreduce", "allgather", "reducescatter"}.issubset(ops) and case["collective"]["nccl_tested"]
+
+
+def check_parallel_groups(case):
+    return case["parallel_groups"]["tensor_parallel_within_node"] and case["parallel_groups"]["data_parallel_cross_node"]
+
+
+def check_storage(case):
+    s = case["storage"]
+    return s["checkpoint_nearby"] and s["data_cache"] and s["write_bandwidth_gbps"] >= 40
+
+
+def check_fault_domain(case):
+    f = case["fault_domain"]
+    return f["rack_aware"] and f["single_rack_fraction"] <= 0.5 and f["checkpoint_recoverable"]
+
+
+def check_power_cooling(case):
+    p = case["power_cooling"]
+    return p["power_kw_available"] >= p["power_kw_required"] and p["cooling_ready"]
+
+
+def check_resource_pools(case):
+    pools = case["resource_pools"]
+    return pools["training"] == "isolated" and pools["inference"] == "isolated" and pools["eval"] in {"preemptible", "batch"}
+
+
+def check_scheduler(case):
+    s = case["scheduler"]
+    return s["topology_aware"] and s["gang"] and s["quota"]
+
+
+def check_observability(case):
+    needed = {"pcie", "nvlink", "nic", "nccl", "rack", "storage"}
+    return needed.issubset(set(case["observability"]["metrics"])) and case["observability"]["traces"]
+
+
+def check_gate(case):
+    return case["gate"]["enabled"]
+
+
+CHECKS = {
+    "scale_up_domain_fit": check_scale_up,
+    "pcie_numa_locality": check_pcie,
+    "nvlink_nvswitch_locality": check_nvlink,
+    "gpu_nic_affinity": check_gpu_nic,
+    "inter_node_fabric_readiness": check_fabric,
+    "rack_locality_awareness": check_rack,
+    "oversubscription_awareness": check_oversubscription,
+    "collective_communication_fit": check_collective,
+    "parallel_group_placement": check_parallel_groups,
+    "storage_checkpoint_locality": check_storage,
+    "fault_domain_isolation": check_fault_domain,
+    "power_cooling_capacity_fit": check_power_cooling,
+    "resource_pool_isolation": check_resource_pools,
+    "topology_aware_scheduling": check_scheduler,
+    "observability_topology_coverage": check_observability,
+    "gpu_cluster_gate": check_gate,
+}
+
+
+def audit_gpu_cluster(cases):
+    case_failures = {}
+    for case in cases:
+        failures = [name for name, check in CHECKS.items() if not check(case)]
+        case_failures[case["name"]] = failures
+
+    metrics = {}
+    for name, check in CHECKS.items():
+        metrics[name] = round(sum(int(check(case)) for case in cases) / len(cases), 3)
+
+    failed_cases = [name for name, failures in case_failures.items() if failures]
+    return {
+        "metrics": metrics,
+        "hard_blocker_count": len(failed_cases),
+        "failed_cases": failed_cases,
+        "gpu_cluster_gate_pass": not failed_cases and min(metrics.values()) >= 0.95,
+    }
+
+
+cases = build_cluster_cases()
+case_by_name = {case["name"]: case for case in cases}
+complete = case_by_name["complete"]
+total_gpus = complete["nodes"] * complete["gpus_per_node"]
+
+cluster_examples = {
+    "total_gpus": total_gpus,
+    "total_hbm_tib": round(total_hbm_tib(complete["nodes"], complete["gpus_per_node"], complete["hbm_gib_per_gpu"]), 2),
+    "scale_up_allreduce_8gib_s": round(ring_allreduce_time_s(8, 8, 900), 3),
+    "scale_out_allreduce_8gib_s": round(ring_allreduce_time_s(8, total_gpus, 200), 3),
+    "rack_fault_blast_radius": round(rack_fault_blast_radius(32, total_gpus), 2),
+    "oversubscription_ratio": round(oversubscription_ratio(3200, 1600), 2),
+}
+
+smoke = {
+    "complete_case_passes": all(check(complete) for check in CHECKS.values()),
+    "caught_pcie_numa_gap": not check_pcie(case_by_name["pcie_numa_unknown_bad"]),
+    "caught_gpu_nic_gap": not check_gpu_nic(case_by_name["gpu_nic_affinity_missing_bad"]),
+    "caught_parallel_group_gap": not check_parallel_groups(case_by_name["parallel_group_random_bad"]),
+    "caught_resource_pool_mixing": not check_resource_pools(case_by_name["resource_pool_mixed_bad"]),
+}
+
+audit = audit_gpu_cluster(cases)
+print(f"cluster_examples={cluster_examples}")
+print(f"smoke={smoke}")
+print(f"metrics={audit['metrics']}")
+print(f"hard_blocker_count={audit['hard_blocker_count']}")
+print(f"failed_cases={audit['failed_cases']}")
+print(f"gpu_cluster_gate_pass={audit['gpu_cluster_gate_pass']}")
+```
+
+一组典型输出是：
+
+```text
+cluster_examples={'total_gpus': 128, 'total_hbm_tib': 10.0, 'scale_up_allreduce_8gib_s': 0.017, 'scale_out_allreduce_8gib_s': 0.085, 'rack_fault_blast_radius': 0.25, 'oversubscription_ratio': 2.0}
+smoke={'complete_case_passes': True, 'caught_pcie_numa_gap': True, 'caught_gpu_nic_gap': True, 'caught_parallel_group_gap': True, 'caught_resource_pool_mixing': True}
+metrics={'scale_up_domain_fit': 0.941, 'pcie_numa_locality': 0.941, 'nvlink_nvswitch_locality': 0.941, 'gpu_nic_affinity': 0.941, 'inter_node_fabric_readiness': 0.941, 'rack_locality_awareness': 0.941, 'oversubscription_awareness': 0.941, 'collective_communication_fit': 0.941, 'parallel_group_placement': 0.941, 'storage_checkpoint_locality': 0.941, 'fault_domain_isolation': 0.941, 'power_cooling_capacity_fit': 0.941, 'resource_pool_isolation': 0.941, 'topology_aware_scheduling': 0.941, 'observability_topology_coverage': 0.941, 'gpu_cluster_gate': 0.941}
+hard_blocker_count=16
+failed_cases=['scale_up_domain_missing_bad', 'pcie_numa_unknown_bad', 'nvlink_nvswitch_ignored_bad', 'gpu_nic_affinity_missing_bad', 'inter_node_fabric_unready_bad', 'rack_locality_missing_bad', 'oversubscription_unknown_bad', 'collective_comm_unmodeled_bad', 'parallel_group_random_bad', 'storage_checkpoint_remote_bad', 'fault_domain_single_rack_bad', 'power_cooling_overbooked_bad', 'resource_pool_mixed_bad', 'topology_scheduler_disabled_bad', 'observability_no_topology_metrics_bad', 'gpu_cluster_gate_missing_bad']
+gpu_cluster_gate_pass=False
+```
+
+这个 demo 的重点是把“GPU 集群架构”从机房图变成可验证的 placement 规则。单机内要证明 PCIe / NUMA、NVLink / NVSwitch 和 GPU-NIC 亲和性；多机要证明 fabric、collective、rack locality 和 oversubscription；平台层要证明并行组放置、资源池隔离、故障域、电力散热、存储 checkpoint 和拓扑观测都过线。否则即使 GPU 数量足够，训练也可能因为通信、调度或故障域设计失败而跑不稳。
+
+## 7.19 面试中如何回答 GPU 集群架构
 
 如果面试官问：
 
@@ -519,7 +844,7 @@ User / Platform Portal / CLI
 调度系统不能只找够 GPU 数量，还要拓扑感知，保证通信密集任务放在高速互联范围内。平台还要提供监控、日志、成本、权限、checkpoint 和故障恢复能力。
 ```
 
-## 7.19 常见误区
+## 7.20 常见误区
 
 误区一：GPU 集群就是很多 GPU。
 
@@ -541,7 +866,7 @@ PCIe-only、NVLink、NVSwitch 拓扑差异会显著影响模型并行性能。
 
 大模型任务需要拓扑感知、故障域感知、优先级、配额和数据位置感知。
 
-## 7.20 面试题
+## 7.21 面试题
 
 ### 题 1：单机多卡和多机多卡的主要区别是什么？
 
@@ -563,7 +888,7 @@ PCIe-only、NVLink、NVSwitch 拓扑差异会显著影响模型并行性能。
 
 答：推理是在线服务，有明确延迟和可用性 SLO；训练任务通常长时间运行、资源占用大、可能产生网络和 I/O 干扰。如果混用同一资源池，训练可能影响推理延迟和稳定性。因此通常需要隔离或至少设置严格优先级和资源保障。
 
-## 7.21 小练习
+## 7.22 小练习
 
 练习一：画一个 8 卡单机拓扑图。
 
@@ -581,7 +906,7 @@ PCIe-only、NVLink、NVSwitch 拓扑差异会显著影响模型并行性能。
 
 要求：从单机拓扑、机间网络、parallel group 划分、NCCL、数据加载和 checkpoint 角度列排查清单。
 
-## 7.22 本章小结
+## 7.23 本章小结
 
 本章讲了 GPU 集群架构。
 

@@ -4,6 +4,12 @@
 
 本章重点讲推理时计算扩展的动机、常见方式、预算分配、自适应计算、延迟和成本权衡、工程系统设计，以及面试中如何回答这类问题。
 
+## 0. 本讲资料边界与第二轮精修口径
+
+本讲第二轮精修参考公开资料中的 inference-time / test-time compute scaling 线索，重点包括 [Scaling LLM Test-Time Compute Optimally](https://arxiv.org/abs/2408.03314)、[Large Language Monkeys](https://arxiv.org/abs/2407.21787)、Tree of Thoughts、self-consistency、verifier reranking 和 OpenAI o1 system card 中关于推理时计算、reasoning 与安全评估的公开表述。这些资料共同说明：模型参数固定后，推理阶段的采样数、候选数、搜索深度、verifier 调用和工具反馈仍然可以显著改变任务表现。
+
+本章不把“更多 test-time compute”写成无条件更强。推理时计算扩展必须同时看准确率、边际收益、延迟、成本、候选相关性、verifier 偏差、安全风险和任务价值。尤其要避免两种误区：第一，把长 CoT 或更多采样等同于真实推理能力；第二，只汇报高预算准确率，而不汇报单位正确样本成本、P95 延迟和低价值请求的预算浪费。
+
 ## 7.1 什么是 Test-Time Compute Scaling
 
 传统 scaling law 主要关注训练阶段：参数更多、数据更多、训练 FLOPs 更多，模型能力通常更强。
@@ -24,6 +30,96 @@ Test-time compute scaling 关注的是另一件事：模型已经训练好了，
 ```text
 Test-time compute scaling 指在模型参数固定的情况下，通过增加推理阶段计算来提升输出质量，例如更长思考、多样本采样、自一致性投票、verifier reranking、tree search、工具调用和反思修正。它的核心问题是如何把额外计算预算分配到最有价值的样本和步骤上，同时控制延迟、成本和稳定性。
 ```
+
+### 7.1.1 关键公式与 TTC Scaling 指标速查
+
+对第 `i` 个请求，把推理时预算写成一个向量：
+
+```math
+b_i=(K_i,L_i,D_i,V_i,U_i,T_i)
+```
+
+其中 `K_i` 是候选数或采样数，`L_i` 是允许的推理长度，`D_i` 是搜索深度，`V_i` 是 verifier 调用数，`U_i` 是工具调用数，`T_i` 是总 token 数。Test-time compute scaling 的核心不是让所有分量都变大，而是按任务价值和难度分配这些预算。
+
+给定一种推理策略 `m`，第 `i` 个请求的抽象成本可以写成：
+
+```math
+C_i(m)=
+c_{\mathrm{tok}}T_i
++c_{\mathrm{ver}}V_i
++c_{\mathrm{tool}}U_i
++c_{\mathrm{lat}}R_i
+```
+
+其中 `R_i` 是用户可感知延迟或服务占用时间。不同业务可以调整各项权重，例如交互式产品更重视 `R_i`，批处理评测更重视总 token 和 verifier 调用。
+
+固定预算下的准确率曲线可以写成：
+
+```math
+A(B)=
+\frac{1}{N}
+\sum_{i=1}^{N}
+\mathbb{1}[\hat y_i(B)=y_i^\star]
+```
+
+边际收益衡量多花一段预算换来多少准确率提升：
+
+```math
+g(B_1,B_2)=
+\frac{A(B_2)-A(B_1)}
+{C(B_2)-C(B_1)}
+```
+
+如果每个候选独立命中正确解的概率粗略为 `p_i`，生成 `K` 个候选时“至少出现一个正确候选”的理想化概率为：
+
+```math
+P_i(K)=1-(1-p_i)^K
+```
+
+这个公式只表达直觉：更多候选提高覆盖正确解的概率，但真实候选高度相关，增长会更快进入边际收益递减。
+
+并行候选生成和串行搜索的延迟口径不同。一个简化并行口径是：
+
+```math
+R_i^{\mathrm{parallel}}=
+\max_{1\le k\le K_i}R_{ik}
++R_i^{\mathrm{verify}}
+```
+
+搜索或工具循环更接近串行：
+
+```math
+R_i^{\mathrm{loop}}=
+\sum_{t=1}^{H_i}
+(R_{it}^{\mathrm{gen}}+R_{it}^{\mathrm{tool}}+R_{it}^{\mathrm{verify}})
+```
+
+因此同样的 token 数，在用户体验上可能完全不同。
+
+自适应计算可以写成一个路由函数：
+
+```math
+m_i=\pi(x_i,d_i,v_i,u_i)
+```
+
+其中 `d_i` 是难度估计，`v_i` 是任务价值，`u_i` 是可验证性或工具可用性。路由函数决定该请求走 direct、self-consistency、verifier、search 还是 tool loop。
+
+一个简化上线门禁：
+
+```math
+G_{\mathrm{ttc}}=
+\mathbb{1}[
+A_{\mathrm{adapt}}\ge \alpha
+\land
+C_{\mathrm{adapt}}\le C_{\max}
+\land
+R_{95}\le R_{\max}
+\land
+W_{\mathrm{waste}}\le \omega
+]
+```
+
+其中 `W_waste` 表示高预算但仍失败、或者低价值请求消耗高预算的浪费率。面试里要强调：TTC scaling 的目标不是“所有请求都更慢”，而是把额外计算投给低置信度、高价值、可验证的请求。
 
 ## 7.2 为什么推理时计算有用
 
@@ -225,7 +321,205 @@ Adaptive compute 的难点是如何判断“这题难不难”和“现在是否
 
 推理时计算扩展不是“多生成几次”这么简单，而是要把额外计算用在能提升正确率的位置。
 
-## 7.15 面试题：什么是 Test-Time Compute Scaling
+## 7.15 最小可运行 TTC scaling / 动态预算审计 demo
+
+这个 demo 模拟 6 个 toy 请求，在四种固定策略和一个 adaptive routing 策略之间比较：
+
+1. `direct`：低预算直接回答。
+2. `self_consistency`：多样本采样与聚合。
+3. `verifier`：候选生成加 verifier。
+4. `search`：搜索加 verifier / tool feedback。
+5. `adaptive`：按难度、任务价值和可验证性路由。
+
+它刻意保留 `adversarial_math`：adaptive 给它分配了高于 direct 的预算，但仍然失败，所以 `gate_pass=False`。这个失败用来提醒读者：动态预算系统不能只看平均准确率，也要看高算力浪费和 hard slice。
+
+```python
+CASES = [
+    {
+        "id": "easy_lookup",
+        "difficulty": 0.15,
+        "value": 0.20,
+        "verifiable": False,
+        "modes": {
+            "direct": {"correct": True, "tokens": 32, "verifier_calls": 0, "tool_calls": 0, "latency_ms": 120},
+            "self_consistency": {"correct": True, "tokens": 180, "verifier_calls": 0, "tool_calls": 0, "latency_ms": 260},
+            "verifier": {"correct": True, "tokens": 240, "verifier_calls": 3, "tool_calls": 0, "latency_ms": 430},
+            "search": {"correct": True, "tokens": 520, "verifier_calls": 5, "tool_calls": 0, "latency_ms": 900},
+        },
+    },
+    {
+        "id": "factual_short",
+        "difficulty": 0.25,
+        "value": 0.30,
+        "verifiable": False,
+        "modes": {
+            "direct": {"correct": True, "tokens": 36, "verifier_calls": 0, "tool_calls": 0, "latency_ms": 130},
+            "self_consistency": {"correct": True, "tokens": 210, "verifier_calls": 0, "tool_calls": 0, "latency_ms": 280},
+            "verifier": {"correct": True, "tokens": 260, "verifier_calls": 3, "tool_calls": 0, "latency_ms": 460},
+            "search": {"correct": True, "tokens": 540, "verifier_calls": 5, "tool_calls": 0, "latency_ms": 920},
+        },
+    },
+    {
+        "id": "algebra_hard",
+        "difficulty": 0.62,
+        "value": 0.80,
+        "verifiable": True,
+        "modes": {
+            "direct": {"correct": False, "tokens": 90, "verifier_calls": 0, "tool_calls": 0, "latency_ms": 220},
+            "self_consistency": {"correct": True, "tokens": 520, "verifier_calls": 0, "tool_calls": 0, "latency_ms": 680},
+            "verifier": {"correct": True, "tokens": 430, "verifier_calls": 4, "tool_calls": 0, "latency_ms": 620},
+            "search": {"correct": True, "tokens": 760, "verifier_calls": 6, "tool_calls": 0, "latency_ms": 1180},
+        },
+    },
+    {
+        "id": "code_patch",
+        "difficulty": 0.90,
+        "value": 0.95,
+        "verifiable": True,
+        "modes": {
+            "direct": {"correct": False, "tokens": 120, "verifier_calls": 0, "tool_calls": 0, "latency_ms": 260},
+            "self_consistency": {"correct": False, "tokens": 650, "verifier_calls": 0, "tool_calls": 0, "latency_ms": 760},
+            "verifier": {"correct": False, "tokens": 610, "verifier_calls": 5, "tool_calls": 0, "latency_ms": 820},
+            "search": {"correct": True, "tokens": 940, "verifier_calls": 5, "tool_calls": 2, "latency_ms": 1420},
+        },
+    },
+    {
+        "id": "logic_puzzle",
+        "difficulty": 0.78,
+        "value": 0.70,
+        "verifiable": False,
+        "modes": {
+            "direct": {"correct": False, "tokens": 100, "verifier_calls": 0, "tool_calls": 0, "latency_ms": 240},
+            "self_consistency": {"correct": True, "tokens": 560, "verifier_calls": 0, "tool_calls": 0, "latency_ms": 740},
+            "verifier": {"correct": True, "tokens": 620, "verifier_calls": 5, "tool_calls": 0, "latency_ms": 860},
+            "search": {"correct": True, "tokens": 980, "verifier_calls": 8, "tool_calls": 0, "latency_ms": 1500},
+        },
+    },
+    {
+        "id": "adversarial_math",
+        "difficulty": 0.82,
+        "value": 0.60,
+        "verifiable": True,
+        "modes": {
+            "direct": {"correct": False, "tokens": 110, "verifier_calls": 0, "tool_calls": 0, "latency_ms": 240},
+            "self_consistency": {"correct": False, "tokens": 620, "verifier_calls": 0, "tool_calls": 0, "latency_ms": 760},
+            "verifier": {"correct": False, "tokens": 590, "verifier_calls": 5, "tool_calls": 0, "latency_ms": 840},
+            "search": {"correct": False, "tokens": 900, "verifier_calls": 7, "tool_calls": 0, "latency_ms": 1450},
+        },
+    },
+]
+
+TOKEN_COST = 1.0
+VERIFIER_COST = 45.0
+TOOL_COST = 100.0
+
+
+def unit_cost(stats):
+    return round(
+        TOKEN_COST * stats["tokens"]
+        + VERIFIER_COST * stats["verifier_calls"]
+        + TOOL_COST * stats["tool_calls"],
+        3,
+    )
+
+
+def choose_route(case):
+    if case["difficulty"] <= 0.35:
+        return "direct"
+    if case["verifiable"] and case["value"] >= 0.90:
+        return "search"
+    if case["verifiable"] and case["difficulty"] <= 0.70:
+        return "verifier"
+    if case["difficulty"] >= 0.60:
+        return "self_consistency"
+    return "direct"
+
+
+def summarize(mode):
+    chosen = [case["modes"][mode] for case in CASES]
+    correct = sum(item["correct"] for item in chosen)
+    cost = sum(unit_cost(item) for item in chosen)
+    latencies = sorted(item["latency_ms"] for item in chosen)
+    return {
+        "accuracy": round(correct / len(chosen), 3),
+        "total_cost": round(cost, 3),
+        "cost_per_correct": round(cost / max(1, correct), 3),
+        "p95_latency_ms": latencies[-1],
+    }
+
+
+fixed_modes = ["direct", "self_consistency", "verifier", "search"]
+fixed_summary = {mode: summarize(mode) for mode in fixed_modes}
+
+adaptive_records = []
+for case in CASES:
+    route = choose_route(case)
+    stats = case["modes"][route]
+    adaptive_records.append(
+        {
+            "id": case["id"],
+            "route": route,
+            "correct": stats["correct"],
+            "cost": unit_cost(stats),
+            "latency_ms": stats["latency_ms"],
+        }
+    )
+
+adaptive_correct = sum(item["correct"] for item in adaptive_records)
+adaptive_cost = sum(item["cost"] for item in adaptive_records)
+adaptive_latencies = sorted(item["latency_ms"] for item in adaptive_records)
+adaptive_summary = {
+    "accuracy": round(adaptive_correct / len(adaptive_records), 3),
+    "total_cost": round(adaptive_cost, 3),
+    "cost_per_correct": round(adaptive_cost / max(1, adaptive_correct), 3),
+    "p95_latency_ms": adaptive_latencies[-1],
+}
+
+marginal = {}
+base_acc = fixed_summary["direct"]["accuracy"]
+base_cost = fixed_summary["direct"]["total_cost"]
+for mode in ["self_consistency", "verifier", "search"]:
+    acc_gain = fixed_summary[mode]["accuracy"] - base_acc
+    cost_gain = fixed_summary[mode]["total_cost"] - base_cost
+    marginal[mode] = round(acc_gain / cost_gain, 6) if cost_gain else 0.0
+
+wasted_high_compute = [
+    item["id"]
+    for item in adaptive_records
+    if item["route"] != "direct" and not item["correct"]
+]
+
+gates = {
+    "adaptive_accuracy_ok": adaptive_summary["accuracy"] >= 0.8,
+    "adaptive_cheaper_than_search": adaptive_summary["total_cost"] < fixed_summary["search"]["total_cost"],
+    "latency_ok": adaptive_summary["p95_latency_ms"] <= 1500,
+    "wasted_high_compute_ok": len(wasted_high_compute) == 0,
+}
+
+print(f"fixed_summary={fixed_summary}")
+print(f"adaptive_records={adaptive_records}")
+print(f"adaptive_summary={adaptive_summary}")
+print(f"marginal_accuracy_per_cost={marginal}")
+print(f"wasted_high_compute={wasted_high_compute}")
+print(f"gates={gates}")
+print(f"gate_pass={all(gates.values())}")
+```
+
+预期输出：
+
+```text
+fixed_summary={'direct': {'accuracy': 0.333, 'total_cost': 488.0, 'cost_per_correct': 244.0, 'p95_latency_ms': 260}, 'self_consistency': {'accuracy': 0.667, 'total_cost': 2740.0, 'cost_per_correct': 685.0, 'p95_latency_ms': 760}, 'verifier': {'accuracy': 0.667, 'total_cost': 3875.0, 'cost_per_correct': 968.75, 'p95_latency_ms': 860}, 'search': {'accuracy': 0.833, 'total_cost': 6460.0, 'cost_per_correct': 1292.0, 'p95_latency_ms': 1500}}
+adaptive_records=[{'id': 'easy_lookup', 'route': 'direct', 'correct': True, 'cost': 32.0, 'latency_ms': 120}, {'id': 'factual_short', 'route': 'direct', 'correct': True, 'cost': 36.0, 'latency_ms': 130}, {'id': 'algebra_hard', 'route': 'verifier', 'correct': True, 'cost': 610.0, 'latency_ms': 620}, {'id': 'code_patch', 'route': 'search', 'correct': True, 'cost': 1365.0, 'latency_ms': 1420}, {'id': 'logic_puzzle', 'route': 'self_consistency', 'correct': True, 'cost': 560.0, 'latency_ms': 740}, {'id': 'adversarial_math', 'route': 'self_consistency', 'correct': False, 'cost': 620.0, 'latency_ms': 760}]
+adaptive_summary={'accuracy': 0.833, 'total_cost': 3223.0, 'cost_per_correct': 644.6, 'p95_latency_ms': 1420}
+marginal_accuracy_per_cost={'self_consistency': 0.000148, 'verifier': 9.9e-05, 'search': 8.4e-05}
+wasted_high_compute=['adversarial_math']
+gates={'adaptive_accuracy_ok': True, 'adaptive_cheaper_than_search': True, 'latency_ok': True, 'wasted_high_compute_ok': False}
+gate_pass=False
+```
+
+这个输出说明：固定 search 准确率最高，但成本也最高；adaptive routing 用接近一半的成本达到同样的准确率。不过 `adversarial_math` 暴露了一个上线前必须处理的问题：系统识别到它难，却没有选对有效策略。真实工程里要继续补 hard-slice detector、更强 verifier、工具校验或人工复核，而不是只看平均准确率达标。
+
+## 7.16 面试题：什么是 Test-Time Compute Scaling
 
 回答要点：
 
@@ -233,7 +527,7 @@ Adaptive compute 的难点是如何判断“这题难不难”和“现在是否
 Test-time compute scaling 是指模型参数固定时，通过增加推理阶段计算来提升答案质量。典型方法包括长 CoT、多样本采样、self-consistency、best-of-N、verifier reranking、tree search、工具调用和反思修正。它的关键挑战是预算分配和成本控制，因为更多计算会带来延迟和费用，且存在边际收益递减。
 ```
 
-## 7.16 面试题：如何设计 Adaptive Compute
+## 7.17 面试题：如何设计 Adaptive Compute
 
 回答要点：
 
@@ -241,7 +535,15 @@ Test-time compute scaling 是指模型参数固定时，通过增加推理阶段
 我会先设计一个任务路由和置信度估计模块。简单任务直接回答；中等难度任务使用多样本采样或 self-consistency；高难度任务启动 verifier、搜索或工具调用。系统需要设置 token、延迟、调用次数等预算上限，并记录每一步收益。核心是把计算集中在低置信度、高价值、可验证的样本上，而不是所有请求平均加预算。
 ```
 
-## 7.17 本章小结
+## 7.18 小练习
+
+1. 给一个在线问答产品设计 direct、self-consistency、verifier 和 search 四档预算。
+2. 写出你自己的 TTC 成本函数，至少包含 token、verifier 调用、工具调用和延迟。
+3. 修改本章 demo，让 `adversarial_math` 走 search，观察准确率、成本和 gate 如何变化。
+4. 设计一个 hard-slice 报告，说明哪些题应该升级到人工复核而不是继续增加采样数。
+5. 用 3 句话解释为什么 test-time compute scaling 会有边际收益递减。
+
+## 7.19 本章小结
 
 Test-time compute scaling 是 reasoning model 的重要方向。它说明模型能力不只来自训练阶段，也来自推理阶段如何使用计算。Long CoT、self-consistency、best-of-N、verifier reranking、search、tools 和 reflection 都是推理时扩展的具体形式。
 

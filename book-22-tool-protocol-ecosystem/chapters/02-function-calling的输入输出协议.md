@@ -1,5 +1,15 @@
 # 第二章：Function Calling 的输入输出协议
 
+## 2.0 本讲资料边界与第二轮精修口径
+
+本章第二轮精修前，先对齐 OpenAI function calling / tools / structured outputs、Anthropic tool use、Google Gemini function calling 和 JSON Schema 官方资料中的稳定边界。不同厂商对 `messages`、`tool_calls`、`tool_call_id`、`tool_use`、`tool_result`、function response、finish reason、streaming delta 和 parallel tool calls 的字段名不完全一样，本章不把某一家 API 的字段写成永久标准，而是抽象出模型、runtime 和工具之间的通用输入输出协议。
+
+本章只讨论防御性、教学性和面试表达所需的协议设计，不提供绕过权限、伪造 tool result、重复执行副作用工具或利用 streaming 半截参数触发执行的方法。第二轮重点补三件事：
+
+1. 用公式定义 function calling 输入输出协议的完整性指标。
+2. 用 0 依赖 Python demo 审计消息链、tool call / result 对齐、finish reason、streaming、parallel calls 和幂等键。
+3. 把新增协议指标同步到百科、题库、练习、术语表、项目路线和知识图谱。
+
 ## 2.1 本章定位
 
 上一章讲了为什么工具调用要从 prompt 约定走向 structured function calling。本章进入协议细节。
@@ -982,7 +992,309 @@ streaming 中看到 `{"city":"北京"` 就开始执行。
 
 修复：引入 provider adapter，业务层只处理内部统一的 ToolCall / ToolResult。
 
-## 2.24 面试题：如何设计 Function Calling 协议层
+## 2.24 协议完整性审计指标与最小 demo
+
+Function calling 协议层的评估，不能只看工具是否最终执行成功。更底层的问题是：消息链是否合法、tool result 是否能和 assistant tool call 对齐、参数是否完整解析、finish reason 是否和结构化字段一致、streaming 是否等完整后才执行、parallel calls 是否按 id 对齐、有副作用工具是否具备幂等保护。
+
+可以把一条协议样本记为：
+
+```math
+p_i=(M_i,C_i,R_i,F_i,S_i,E_i,Q_i)
+```
+
+其中，`M_i` 是消息链，`C_i` 是 assistant 产生的 tool calls，`R_i` 是 tool results，`F_i` 是 finish reason，`S_i` 是 streaming delta，`E_i` 是执行记录，`Q_i` 是 provider adapter 归一化后的内部结构。
+
+消息链合法率衡量是否存在正确顺序的 `user -> assistant tool call -> tool result`：
+
+```math
+C_{\mathrm{chain}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{chain}_i=1]
+```
+
+tool result id 对齐率衡量每个 tool result 是否能找到对应的 assistant tool call：
+
+```math
+C_{\mathrm{id}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{ids}(R_i)\subseteq \mathrm{ids}(C_i)]
+```
+
+参数解析成功率衡量 raw arguments 能否在执行前被完整解析为结构化参数：
+
+```math
+R_{\mathrm{parse}}=\frac{1}{K}\sum_{k=1}^{K}\mathbf{1}[a_k\in\mathcal{J}]
+```
+
+其中，`K` 是待解析 tool call 数，`\mathcal{J}` 表示合法 JSON 对象集合。
+
+finish reason 一致率衡量控制流信号和结构化 tool call 字段是否一致：
+
+```math
+C_{\mathrm{finish}}=\frac{1}{N}\sum_{i=1}^{N}
+\mathbf{1}[(F_i=\mathrm{tool\_calls})\Leftrightarrow(|C_i|>0)]
+```
+
+streaming 安全率衡量半截参数或中断流是否没有被执行：
+
+```math
+B_{\mathrm{stream}}=
+\frac{\sum_{i=1}^{N}\mathbf{1}[\mathrm{incomplete}_i=1\land \mathrm{executed}_i=0]}
+{\sum_{i=1}^{N}\mathbf{1}[\mathrm{incomplete}_i=1]}
+```
+
+parallel tool call 对齐率衡量并行结果是否按 tool_call_id 回到正确调用：
+
+```math
+C_{\mathrm{parallel}}=
+\frac{1}{P}\sum_{j=1}^{P}\mathbf{1}[\mathrm{aligned}_j=1]
+```
+
+有副作用工具的重复执行保护率衡量重复请求是否被幂等键拦截：
+
+```math
+B_{\mathrm{idem}}=
+\frac{\sum_{i=1}^{N}\mathbf{1}[\mathrm{repeat}_i=1\land \mathrm{blocked}_i=1]}
+{\sum_{i=1}^{N}\mathbf{1}[\mathrm{repeat}_i=1]}
+```
+
+协议层上线门禁可以写成：
+
+```math
+G_{\mathrm{protocol}}=
+\mathbf{1}[
+C_{\mathrm{chain}}\ge\tau_{\mathrm{chain}}
+\land C_{\mathrm{id}}\ge\tau_{\mathrm{id}}
+\land R_{\mathrm{parse}}\ge\tau_{\mathrm{parse}}
+\land C_{\mathrm{finish}}\ge\tau_{\mathrm{finish}}
+\land B_{\mathrm{stream}}\ge\tau_{\mathrm{stream}}
+\land C_{\mathrm{parallel}}\ge\tau_{\mathrm{parallel}}
+\land B_{\mathrm{idem}}\ge\tau_{\mathrm{idem}}
+]
+```
+
+下面的 0 依赖 demo 不调用真实模型和工具，只审计 toy message traces。它故意构造 7 类样本：正常天气查询、缺 assistant tool call、tool result id 错误、finish reason 不一致、streaming 半截参数被执行、parallel 结果错配和副作用工具重复执行。
+
+```python
+import json
+from pprint import pprint
+
+
+TRACES = [
+    {
+        "id": "weather_ok",
+        "finish_reason": "tool_calls",
+        "tool_calls": [
+            {"id": "call_weather", "name": "get_weather", "arguments": '{"city":"Beijing"}'}
+        ],
+        "tool_results": [
+            {"tool_call_id": "call_weather", "content": '{"city":"Beijing","temperature":22}'}
+        ],
+        "has_assistant_tool_call": True,
+        "stream_complete": True,
+        "executed": True,
+        "parallel": False,
+        "side_effect": False,
+        "repeat": False,
+        "duplicate_blocked": True,
+    },
+    {
+        "id": "missing_assistant_call",
+        "finish_reason": "stop",
+        "tool_calls": [],
+        "tool_results": [
+            {"tool_call_id": "call_orphan", "content": '{"temperature":22}'}
+        ],
+        "has_assistant_tool_call": False,
+        "stream_complete": True,
+        "executed": False,
+        "parallel": False,
+        "side_effect": False,
+        "repeat": False,
+        "duplicate_blocked": True,
+    },
+    {
+        "id": "wrong_tool_result_id",
+        "finish_reason": "tool_calls",
+        "tool_calls": [
+            {"id": "call_bj", "name": "get_weather", "arguments": '{"city":"Beijing"}'}
+        ],
+        "tool_results": [
+            {"tool_call_id": "call_sh", "content": '{"city":"Beijing","temperature":22}'}
+        ],
+        "has_assistant_tool_call": True,
+        "stream_complete": True,
+        "executed": True,
+        "parallel": False,
+        "side_effect": False,
+        "repeat": False,
+        "duplicate_blocked": True,
+    },
+    {
+        "id": "finish_reason_inconsistent",
+        "finish_reason": "stop",
+        "tool_calls": [
+            {"id": "call_sh", "name": "get_weather", "arguments": '{"city":"Shanghai"}'}
+        ],
+        "tool_results": [
+            {"tool_call_id": "call_sh", "content": '{"city":"Shanghai","temperature":25}'}
+        ],
+        "has_assistant_tool_call": True,
+        "stream_complete": True,
+        "executed": True,
+        "parallel": False,
+        "side_effect": False,
+        "repeat": False,
+        "duplicate_blocked": True,
+    },
+    {
+        "id": "streaming_incomplete_executed",
+        "finish_reason": "tool_calls",
+        "tool_calls": [
+            {"id": "call_stream", "name": "get_weather", "arguments": '{"city":"Beijing"'}
+        ],
+        "tool_results": [
+            {"tool_call_id": "call_stream", "content": '{"city":"Beijing","temperature":22}'}
+        ],
+        "has_assistant_tool_call": True,
+        "stream_complete": False,
+        "executed": True,
+        "parallel": False,
+        "side_effect": False,
+        "repeat": False,
+        "duplicate_blocked": True,
+    },
+    {
+        "id": "parallel_result_swapped",
+        "finish_reason": "tool_calls",
+        "tool_calls": [
+            {"id": "call_bj", "name": "get_weather", "arguments": '{"city":"Beijing"}'},
+            {"id": "call_sh", "name": "get_weather", "arguments": '{"city":"Shanghai"}'},
+        ],
+        "tool_results": [
+            {"tool_call_id": "call_bj", "content": '{"city":"Shanghai","temperature":25}'},
+            {"tool_call_id": "call_sh", "content": '{"city":"Beijing","temperature":22}'},
+        ],
+        "has_assistant_tool_call": True,
+        "stream_complete": True,
+        "executed": True,
+        "parallel": True,
+        "side_effect": False,
+        "repeat": False,
+        "duplicate_blocked": True,
+    },
+    {
+        "id": "side_effect_duplicate",
+        "finish_reason": "tool_calls",
+        "tool_calls": [
+            {
+                "id": "call_email",
+                "name": "send_email",
+                "arguments": '{"to":"alice@example.com","subject":"Status"}',
+            }
+        ],
+        "tool_results": [
+            {"tool_call_id": "call_email", "content": '{"status":"sent"}'}
+        ],
+        "has_assistant_tool_call": True,
+        "stream_complete": True,
+        "executed": True,
+        "parallel": False,
+        "side_effect": True,
+        "repeat": True,
+        "duplicate_blocked": False,
+    },
+]
+
+
+def parse_json_object(raw):
+    try:
+        value = json.loads(raw)
+        return isinstance(value, dict), value
+    except json.JSONDecodeError:
+        return False, {}
+
+
+def analyze(trace):
+    call_ids = {call["id"] for call in trace["tool_calls"]}
+    result_ids = {result["tool_call_id"] for result in trace["tool_results"]}
+    parsed_calls = []
+    for call in trace["tool_calls"]:
+        ok, args = parse_json_object(call["arguments"])
+        parsed_calls.append({**call, "parse_ok": ok, "args": args})
+    chain_valid = trace["has_assistant_tool_call"] and bool(call_ids) and result_ids.issubset(call_ids)
+    id_match = bool(result_ids) and result_ids.issubset(call_ids)
+    has_calls = bool(trace["tool_calls"])
+    finish_ok = (trace["finish_reason"] == "tool_calls") == has_calls
+    stream_safe = trace["stream_complete"] or not trace["executed"]
+    parallel_aligned = True
+    if trace["parallel"]:
+        result_by_id = {result["tool_call_id"]: result for result in trace["tool_results"]}
+        for call in parsed_calls:
+            _, result = parse_json_object(result_by_id.get(call["id"], {}).get("content", "{}"))
+            if result.get("city") != call["args"].get("city"):
+                parallel_aligned = False
+    idempotency_ok = (not trace["side_effect"]) or (not trace["repeat"]) or trace["duplicate_blocked"]
+    return {
+        "id": trace["id"],
+        "chain_valid": chain_valid,
+        "id_match": id_match,
+        "all_args_parse": all(call["parse_ok"] for call in parsed_calls) if parsed_calls else True,
+        "finish_ok": finish_ok,
+        "stream_safe": stream_safe,
+        "parallel_aligned": parallel_aligned,
+        "idempotency_ok": idempotency_ok,
+    }
+
+
+rows = [analyze(trace) for trace in TRACES]
+
+
+def rate(values):
+    return round(sum(values) / len(values), 3)
+
+
+parse_rows = [row for row, trace in zip(rows, TRACES) if trace["tool_calls"]]
+stream_rows = [row for row, trace in zip(rows, TRACES) if not trace["stream_complete"]]
+parallel_rows = [row for row, trace in zip(rows, TRACES) if trace["parallel"]]
+repeat_rows = [row for row, trace in zip(rows, TRACES) if trace["side_effect"] and trace["repeat"]]
+
+metrics = {
+    "chain_valid_rate": rate([row["chain_valid"] for row in rows]),
+    "tool_result_id_match_rate": rate([row["id_match"] for row in rows]),
+    "argument_parse_rate": rate([row["all_args_parse"] for row in parse_rows]),
+    "finish_reason_consistency": rate([row["finish_ok"] for row in rows]),
+    "streaming_safety_rate": rate([row["stream_safe"] for row in stream_rows]),
+    "parallel_alignment_rate": rate([row["parallel_aligned"] for row in parallel_rows]),
+    "idempotency_protection_rate": rate([row["idempotency_ok"] for row in repeat_rows]),
+}
+
+thresholds = {
+    "chain_valid_rate": 0.90,
+    "tool_result_id_match_rate": 0.90,
+    "argument_parse_rate": 0.90,
+    "finish_reason_consistency": 0.90,
+    "streaming_safety_rate": 1.00,
+    "parallel_alignment_rate": 1.00,
+    "idempotency_protection_rate": 1.00,
+}
+
+failed_gates = [name for name, threshold in thresholds.items() if metrics[name] < threshold]
+
+print("protocol_rows=")
+pprint(rows)
+print("metrics=", metrics)
+print("failed_gates=", failed_gates)
+print("protocol_gate_pass=", not failed_gates)
+```
+
+运行后可以看到：
+
+```text
+metrics= {'chain_valid_rate': 0.714, 'tool_result_id_match_rate': 0.714, 'argument_parse_rate': 0.833, 'finish_reason_consistency': 0.857, 'streaming_safety_rate': 0.0, 'parallel_alignment_rate': 0.0, 'idempotency_protection_rate': 0.0}
+failed_gates= ['chain_valid_rate', 'tool_result_id_match_rate', 'argument_parse_rate', 'finish_reason_consistency', 'streaming_safety_rate', 'parallel_alignment_rate', 'idempotency_protection_rate']
+protocol_gate_pass= False
+```
+
+这个 demo 的重点是：协议层失败往往发生在工具真正执行之前或之后的消息连接处。即使单个工具函数能跑，消息链、id、finish reason、streaming buffer、parallel result 和幂等记录任何一环出错，系统都不能算是可靠的 function calling runtime。
+
+## 2.25 面试题：如何设计 Function Calling 协议层
 
 面试官可能问：
 
@@ -1043,7 +1355,7 @@ streaming 中看到 `{"city":"北京"` 就开始执行。
 我会把 function calling 设计成“统一消息协议 + 工具 schema 契约 + provider adapter + tool loop runtime + 安全治理”的分层系统，而不是把它写成一个 if tool_calls then call_function 的 demo。
 ```
 
-## 2.25 小练习
+## 2.26 小练习
 
 ### 练习 1：补全消息链
 
@@ -1134,7 +1446,11 @@ user → assistant(tool_call id=call_1) → tool(tool_call_id=call_1)
 
 参考答案：等完整 tool call 结束后再拼接、parse、schema validation，通过后才执行。不能在第一段或第二段就执行。
 
-## 2.26 本章小结
+### 练习 5：写一个协议完整性审计 demo
+
+用纯 Python 构造 7 条 toy function calling trace，覆盖正常调用、缺 assistant tool call、tool result id 错误、finish reason 不一致、streaming 半截参数被执行、parallel result 错配和副作用工具重复执行。输出 `chain_valid_rate`、`tool_result_id_match_rate`、`argument_parse_rate`、`finish_reason_consistency`、`streaming_safety_rate`、`parallel_alignment_rate`、`idempotency_protection_rate` 和 `protocol_gate_pass`。
+
+## 2.27 本章小结
 
 本章讲了 Function Calling 的输入输出协议。
 
@@ -1152,6 +1468,7 @@ user → assistant(tool_call id=call_1) → tool(tool_call_id=call_1)
 10. provider adapter 用来屏蔽不同模型厂商的协议差异。
 11. tool result 是 observation，不是 instruction。
 12. 有副作用工具必须有确认、权限、幂等和审计。
+13. 第二轮新增的协议审计指标说明：可靠 function calling runtime 必须同时证明消息链、id 对齐、参数解析、finish reason、streaming、parallel calls 和幂等保护都过线。
 
 如果只记一句话：
 

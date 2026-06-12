@@ -1,5 +1,18 @@
 # 第四章：Tool Choice、Parallel Tool Calls 与强制工具调用
 
+## 4.0 本讲资料边界与第二轮精修口径
+
+本讲第二轮精修时，按 `WRITING_PLAN.md` 的要求重新核对了 OpenAI function calling / tools、Anthropic tool use、Google Gemini function calling 和并行工具调用相关公开资料。不同平台对 `auto`、`none`、`required`、指定工具、allowed tools、parallel tool calls、streaming tool call 和 strict schema 的字段名与支持程度并不完全一致，所以正文只抽象稳定控制层：候选工具过滤、tool choice 模式、强制工具、并行执行、结果 id 对齐、权限确认、限流、成本预算、loop 上限和 provider capability 降级。
+
+本讲不把某一家 provider 的当前 API 字段写成永久标准，也不把 tool choice 当成权限系统。更稳的边界是：
+
+1. Tool choice 控制模型本轮能看见哪些工具、是否必须调用工具、是否可以并行调用。
+2. Permission 和 confirmation 控制 runtime 是否允许真实执行。
+3. Rate limit、cost budget 和 max step 控制工具调用不会失控。
+4. Provider adapter 负责把内部策略映射到不同平台支持的能力子集。
+
+第二轮重点补强三件事：第一，把 tool choice 从文字策略拆成可审计指标；第二，补一个 0 依赖 Python demo，演示 auto、none、required、forced、parallel、缺参澄清、限流和确认门禁；第三，同步百科、题库、练习、术语表、项目和知识图谱，为后续 Tool Router、Tool Executor 和权限章节复用。
+
 ## 4.1 本章定位
 
 前三章讲了工具调用为什么需要结构化协议、Function Calling 的输入输出格式，以及 Tool Schema 如何约束参数。
@@ -982,7 +995,437 @@ class ProviderCapabilities:
 
 修复：provider capabilities 抽象和 adapter 降级策略。
 
-## 4.26 面试题：怎么设计 Tool Choice 策略
+## 4.26 Tool Choice 策略审计指标与最小 demo
+
+Tool Choice 策略不能只写成几条规则，还要能审计。否则一旦模型误调用、漏调用、并行错配或成本失控，你很难判断问题出在模型、schema、router、policy、permission 还是 provider adapter。
+
+设第 `i` 条工具选择样本为：
+
+```math
+q_i=(x_i,A_i,m_i,C_i,R_i,P_i,K_i)
+```
+
+其中 `x_i` 是用户请求和上下文，`A_i` 是 runtime 暴露给模型的候选工具集合，`m_i` 是本轮 tool choice 模式，`C_i` 是模型生成的 tool calls，`R_i` 是 tool results，`P_i` 是权限和确认结果，`K_i` 是成本、限流和 loop 状态。
+
+候选工具覆盖率可以写成：
+
+```math
+C_{\mathrm{cand}}=\frac{1}{N_{\mathrm{need}}}\sum_{i=1}^{N_{\mathrm{need}}}\mathbf{1}[T_i^\star\subseteq A_i]
+```
+
+其中 `T_i^star` 是该样本完成任务所需的工具集合。这个指标过低，说明 router 过滤太狠，模型根本看不到正确工具。
+
+模式决策准确率可以写成：
+
+```math
+A_{\mathrm{mode}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[m_i=m_i^\star]
+```
+
+其中 `m_i^star` 是期望模式，例如 `none`、`auto`、`required`、`forced` 或 `clarify`。
+
+不该调用或应澄清时的拦截率可以写成：
+
+```math
+B_{\mathrm{clarify}}=\frac{1}{N_{\mathrm{clarify}}}\sum_{i=1}^{N_{\mathrm{clarify}}}\mathbf{1}[|C_i|=0 \vee \mathrm{blocked}_i=1]
+```
+
+它衡量纯文本任务、信息不足任务和达到 loop 上限任务是否真的没有继续调用工具。
+
+强制工具缺参拦截率可以写成：
+
+```math
+B_{\mathrm{miss}}=\frac{1}{N_{\mathrm{miss}}}\sum_{i=1}^{N_{\mathrm{miss}}}\mathbf{1}[\mathrm{missing}_i=1 \Rightarrow \mathrm{blocked}_i=1]
+```
+
+这个指标对 forced tool 很关键。缺少订单号、金额、收件人、路径时，模型不应该为了满足 forced call 而编造参数。
+
+并行安全率可以写成：
+
+```math
+S_{\mathrm{par}}=\frac{1}{N_{\mathrm{par}}}\sum_{i=1}^{N_{\mathrm{par}}}\mathbf{1}[\mathrm{independent}_i=1 \wedge \mathrm{idempotent}_i=1 \wedge \mathrm{safe}_i=1]
+```
+
+它衡量一轮多个 tool calls 是否真的独立、可幂等、无缺失前置依赖且没有未确认高风险副作用。
+
+结果 id 对齐率可以写成：
+
+```math
+A_{\mathrm{id}}=\frac{1}{N_{\mathrm{par}}}\sum_{i=1}^{N_{\mathrm{par}}}\mathbf{1}[\mathrm{ids}(C_i)=\mathrm{ids}(R_i)]
+```
+
+并行结果必须按 `tool_call_id` 对齐，不能靠数组顺序。
+
+限流通过率可以写成：
+
+```math
+R_{\mathrm{limit}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[|C_i|\le L_i]
+```
+
+其中 `L_i` 是本轮最大 tool call 数或最大并发数。
+
+确认执行覆盖率可以写成：
+
+```math
+C_{\mathrm{confirm}}=\frac{1}{N_{\mathrm{risk}}}\sum_{i=1}^{N_{\mathrm{risk}}}\mathbf{1}[\mathrm{confirmed}_i=1 \vee \mathrm{blocked}_i=1]
+```
+
+高风险工具如果没有用户确认，必须被阻断或降级。
+
+成本预算通过率可以写成：
+
+```math
+C_{\mathrm{cost}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{cost}(C_i)\le b_i]
+```
+
+其中 `b_i` 是本轮预算。成本可以来自 token、外部 API、并发资源、检索 top-k 或人工审核。
+
+loop 控制率可以写成：
+
+```math
+C_{\mathrm{loop}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{repeat}_i\le M_i \vee |C_i|=0]
+```
+
+其中 `M_i` 是重复调用或最大步数上限。
+
+最后定义一个门禁：
+
+```math
+G_{\mathrm{choice}}=\mathbf{1}[
+C_{\mathrm{cand}}\ge \tau_c
+\wedge A_{\mathrm{mode}}\ge \tau_m
+\wedge B_{\mathrm{clarify}}\ge \tau_q
+\wedge B_{\mathrm{miss}}\ge \tau_b
+\wedge S_{\mathrm{par}}\ge \tau_p
+\wedge A_{\mathrm{id}}\ge \tau_i
+\wedge R_{\mathrm{limit}}\ge \tau_l
+\wedge C_{\mathrm{confirm}}\ge \tau_f
+\wedge C_{\mathrm{cost}}\ge \tau_o
+\wedge C_{\mathrm{loop}}\ge \tau_u]
+```
+
+下面是一个 0 依赖 demo。它不调用真实模型和工具，只审计 toy policy 与 toy tool calls，适合放进项目回归集。
+
+```python
+TOOLS = {
+    "get_weather": {"risk": "low", "cost": 1, "parallel": True, "idempotent": True, "confirm": False},
+    "search_docs": {"risk": "low", "cost": 1, "parallel": True, "idempotent": True, "confirm": False},
+    "web_search": {"risk": "low", "cost": 3, "parallel": True, "idempotent": True, "confirm": False},
+    "get_account_balance": {"risk": "sensitive_read", "cost": 2, "parallel": False, "idempotent": True, "confirm": False},
+    "get_order_status": {"risk": "sensitive_read", "cost": 2, "parallel": False, "idempotent": True, "confirm": False},
+    "list_orders": {"risk": "sensitive_read", "cost": 2, "parallel": False, "idempotent": True, "confirm": False},
+    "create_refund_request": {"risk": "high", "cost": 5, "parallel": False, "idempotent": False, "confirm": True},
+    "send_email_final": {"risk": "high", "cost": 4, "parallel": False, "idempotent": False, "confirm": True},
+}
+
+
+CASES = [
+    {
+        "id": "knowledge_none_ok",
+        "expected_mode": "none",
+        "policy_mode": "none",
+        "allowed_tools": [],
+        "expected_tools": [],
+        "calls": [],
+        "result_ids": [],
+        "max_parallel": 0,
+        "budget": 0,
+        "confirmed": False,
+        "blocked": False,
+        "missing_required": False,
+        "missing_dependency": False,
+        "repeat_count": 0,
+        "max_repeat": 2,
+    },
+    {
+        "id": "weather_parallel_ok",
+        "expected_mode": "auto",
+        "policy_mode": "auto",
+        "allowed_tools": ["get_weather"],
+        "expected_tools": ["get_weather"],
+        "calls": [
+            {"id": "bj", "name": "get_weather"},
+            {"id": "sh", "name": "get_weather"},
+            {"id": "sz", "name": "get_weather"},
+        ],
+        "result_ids": ["sh", "sz", "bj"],
+        "max_parallel": 3,
+        "budget": 3,
+        "confirmed": False,
+        "blocked": False,
+        "missing_required": False,
+        "missing_dependency": False,
+        "repeat_count": 0,
+        "max_repeat": 2,
+    },
+    {
+        "id": "balance_required_ok",
+        "expected_mode": "required",
+        "policy_mode": "required",
+        "allowed_tools": ["get_account_balance"],
+        "expected_tools": ["get_account_balance"],
+        "calls": [{"id": "bal", "name": "get_account_balance"}],
+        "result_ids": ["bal"],
+        "max_parallel": 1,
+        "budget": 3,
+        "confirmed": False,
+        "blocked": False,
+        "missing_required": False,
+        "missing_dependency": False,
+        "repeat_count": 0,
+        "max_repeat": 2,
+    },
+    {
+        "id": "knowledge_auto_unnecessary",
+        "expected_mode": "none",
+        "policy_mode": "auto",
+        "allowed_tools": ["web_search"],
+        "expected_tools": [],
+        "calls": [{"id": "web", "name": "web_search"}],
+        "result_ids": ["web"],
+        "max_parallel": 1,
+        "budget": 2,
+        "confirmed": False,
+        "blocked": False,
+        "missing_required": False,
+        "missing_dependency": False,
+        "repeat_count": 0,
+        "max_repeat": 2,
+    },
+    {
+        "id": "forced_missing_order_bad",
+        "expected_mode": "clarify",
+        "policy_mode": "forced",
+        "allowed_tools": ["get_order_status"],
+        "expected_tools": ["get_order_status"],
+        "calls": [{"id": "order", "name": "get_order_status"}],
+        "result_ids": ["order"],
+        "max_parallel": 1,
+        "budget": 3,
+        "confirmed": False,
+        "blocked": False,
+        "missing_required": True,
+        "missing_dependency": False,
+        "repeat_count": 0,
+        "max_repeat": 2,
+    },
+    {
+        "id": "refund_parallel_dependency_bad",
+        "expected_mode": "auto",
+        "policy_mode": "auto",
+        "allowed_tools": ["list_orders", "create_refund_request"],
+        "expected_tools": ["list_orders"],
+        "calls": [
+            {"id": "orders", "name": "list_orders"},
+            {"id": "refund", "name": "create_refund_request"},
+        ],
+        "result_ids": ["orders", "refund"],
+        "max_parallel": 3,
+        "budget": 6,
+        "confirmed": False,
+        "blocked": False,
+        "missing_required": False,
+        "missing_dependency": True,
+        "repeat_count": 0,
+        "max_repeat": 2,
+    },
+    {
+        "id": "too_many_parallel_search",
+        "expected_mode": "auto",
+        "policy_mode": "auto",
+        "allowed_tools": ["search_docs"],
+        "expected_tools": ["search_docs"],
+        "calls": [{"id": f"s{i}", "name": "search_docs"} for i in range(5)],
+        "result_ids": [f"s{i}" for i in range(5)],
+        "max_parallel": 3,
+        "budget": 4,
+        "confirmed": False,
+        "blocked": False,
+        "missing_required": False,
+        "missing_dependency": False,
+        "repeat_count": 0,
+        "max_repeat": 2,
+    },
+    {
+        "id": "parallel_result_id_mismatch",
+        "expected_mode": "auto",
+        "policy_mode": "auto",
+        "allowed_tools": ["get_weather"],
+        "expected_tools": ["get_weather"],
+        "calls": [
+            {"id": "city_a", "name": "get_weather"},
+            {"id": "city_b", "name": "get_weather"},
+        ],
+        "result_ids": ["city_a", "city_x"],
+        "max_parallel": 3,
+        "budget": 3,
+        "confirmed": False,
+        "blocked": False,
+        "missing_required": False,
+        "missing_dependency": False,
+        "repeat_count": 0,
+        "max_repeat": 2,
+    },
+    {
+        "id": "loop_should_stop_bad",
+        "expected_mode": "none",
+        "policy_mode": "auto",
+        "allowed_tools": ["search_docs"],
+        "expected_tools": [],
+        "calls": [{"id": "again", "name": "search_docs"}],
+        "result_ids": ["again"],
+        "max_parallel": 1,
+        "budget": 2,
+        "confirmed": False,
+        "blocked": False,
+        "missing_required": False,
+        "missing_dependency": False,
+        "repeat_count": 3,
+        "max_repeat": 2,
+    },
+    {
+        "id": "send_confirm_block_ok",
+        "expected_mode": "forced",
+        "policy_mode": "forced",
+        "allowed_tools": ["send_email_final"],
+        "expected_tools": ["send_email_final"],
+        "calls": [{"id": "send", "name": "send_email_final"}],
+        "result_ids": [],
+        "max_parallel": 1,
+        "budget": 4,
+        "confirmed": False,
+        "blocked": True,
+        "missing_required": False,
+        "missing_dependency": False,
+        "repeat_count": 0,
+        "max_repeat": 2,
+    },
+]
+
+
+def rate(values):
+    return round(sum(values) / len(values), 3) if values else 1.0
+
+
+def call_cost(case):
+    if case["blocked"]:
+        return 0
+    return sum(TOOLS[call["name"]]["cost"] for call in case["calls"])
+
+
+def risky_calls(case):
+    return [call for call in case["calls"] if TOOLS[call["name"]]["confirm"]]
+
+
+def parallel_safe(case):
+    if len(case["calls"]) <= 1:
+        return True
+    if case["missing_dependency"]:
+        return False
+    for call in case["calls"]:
+        meta = TOOLS[call["name"]]
+        if not meta["parallel"] or not meta["idempotent"]:
+            return False
+        if meta["confirm"] and not case["confirmed"] and not case["blocked"]:
+            return False
+    return True
+
+
+def id_aligned(case):
+    if len(case["calls"]) <= 1:
+        return True
+    call_ids = {call["id"] for call in case["calls"]}
+    return call_ids == set(case["result_ids"])
+
+
+reports = []
+for case in CASES:
+    expected_tools = set(case["expected_tools"])
+    allowed_tools = set(case["allowed_tools"])
+    candidate_ok = not expected_tools or expected_tools.issubset(allowed_tools)
+    mode_ok = case["policy_mode"] == case["expected_mode"]
+    should_not_call = case["expected_mode"] in {"none", "clarify"}
+    no_tool_or_blocked = (not case["calls"]) or case["blocked"]
+    clarify_ok = (not should_not_call) or no_tool_or_blocked
+    forced_missing_ok = (not case["missing_required"]) or case["blocked"]
+    rate_limit_ok = len(case["calls"]) <= case["max_parallel"]
+    confirmation_ok = all(case["confirmed"] or case["blocked"] for _ in risky_calls(case))
+    cost_ok = call_cost(case) <= case["budget"]
+    loop_ok = case["repeat_count"] <= case["max_repeat"] or no_tool_or_blocked
+    checks = {
+        "candidate": candidate_ok,
+        "mode": mode_ok,
+        "clarify": clarify_ok,
+        "forced_missing": forced_missing_ok,
+        "parallel_safe": parallel_safe(case),
+        "id_aligned": id_aligned(case),
+        "rate_limit": rate_limit_ok,
+        "confirmation": confirmation_ok,
+        "cost": cost_ok,
+        "loop": loop_ok,
+    }
+    reports.append({
+        "id": case["id"],
+        "parallel_case": len(case["calls"]) > 1,
+        "risky_case": bool(risky_calls(case)),
+        "needs_tool": bool(expected_tools),
+        "missing_required": case["missing_required"],
+        "checks": checks,
+        "failed": [name for name, ok in checks.items() if not ok],
+    })
+
+
+metrics = {
+    "candidate_coverage": rate([r["checks"]["candidate"] for r in reports if r["needs_tool"]]),
+    "mode_decision_accuracy": rate([r["checks"]["mode"] for r in reports]),
+    "no_tool_or_clarify_block_rate": rate([r["checks"]["clarify"] for r in reports if CASES[reports.index(r)]["expected_mode"] in {"none", "clarify"}]),
+    "forced_missing_arg_block_rate": rate([r["checks"]["forced_missing"] for r in reports if r["missing_required"]]),
+    "parallel_safety_rate": rate([r["checks"]["parallel_safe"] for r in reports if r["parallel_case"]]),
+    "parallel_id_alignment_rate": rate([r["checks"]["id_aligned"] for r in reports if r["parallel_case"]]),
+    "rate_limit_pass_rate": rate([r["checks"]["rate_limit"] for r in reports]),
+    "confirmation_enforcement_rate": rate([r["checks"]["confirmation"] for r in reports if r["risky_case"]]),
+    "cost_budget_pass_rate": rate([r["checks"]["cost"] for r in reports]),
+    "loop_control_rate": rate([r["checks"]["loop"] for r in reports]),
+}
+
+thresholds = {
+    "candidate_coverage": 0.99,
+    "mode_decision_accuracy": 0.95,
+    "no_tool_or_clarify_block_rate": 0.95,
+    "forced_missing_arg_block_rate": 0.99,
+    "parallel_safety_rate": 0.95,
+    "parallel_id_alignment_rate": 0.99,
+    "rate_limit_pass_rate": 0.99,
+    "confirmation_enforcement_rate": 0.99,
+    "cost_budget_pass_rate": 0.95,
+    "loop_control_rate": 0.99,
+}
+failed_gates = [name for name, threshold in thresholds.items() if metrics[name] < threshold]
+
+print("metrics=", metrics)
+print("failed_cases=", {r["id"]: r["failed"] for r in reports if r["failed"]})
+print("failed_gates=", failed_gates)
+print("tool_choice_gate_pass=", not failed_gates)
+```
+
+这段 demo 的预期输出类似：
+
+```text
+metrics= {'candidate_coverage': 1.0, 'mode_decision_accuracy': 0.7, 'no_tool_or_clarify_block_rate': 0.25, 'forced_missing_arg_block_rate': 0.0, 'parallel_safety_rate': 0.75, 'parallel_id_alignment_rate': 0.75, 'rate_limit_pass_rate': 0.9, 'confirmation_enforcement_rate': 0.5, 'cost_budget_pass_rate': 0.7, 'loop_control_rate': 0.9}
+failed_cases= {'knowledge_auto_unnecessary': ['mode', 'clarify', 'cost'], 'forced_missing_order_bad': ['mode', 'clarify', 'forced_missing'], 'refund_parallel_dependency_bad': ['parallel_safe', 'confirmation', 'cost'], 'too_many_parallel_search': ['rate_limit', 'cost'], 'parallel_result_id_mismatch': ['id_aligned'], 'loop_should_stop_bad': ['mode', 'clarify', 'loop']}
+failed_gates= ['mode_decision_accuracy', 'no_tool_or_clarify_block_rate', 'forced_missing_arg_block_rate', 'parallel_safety_rate', 'parallel_id_alignment_rate', 'rate_limit_pass_rate', 'confirmation_enforcement_rate', 'cost_budget_pass_rate', 'loop_control_rate']
+tool_choice_gate_pass= False
+```
+
+这个结果说明：
+
+1. `candidate_coverage=1.0` 只说明正确工具没有被过滤掉，不代表策略安全。
+2. `knowledge_auto_unnecessary` 暴露了纯知识问题误开搜索工具的问题。
+3. `forced_missing_order_bad` 暴露了 forced tool 在缺参时诱导编造参数的风险。
+4. `refund_parallel_dependency_bad` 同时违反依赖顺序、高风险确认和成本预算。
+5. `parallel_result_id_mismatch` 专门暴露并行结果没有按 `tool_call_id` 对齐。
+6. `loop_should_stop_bad` 说明达到重复调用上限后应切到 `none` 或有限回答，而不是继续搜索。
+
+## 4.27 面试题：怎么设计 Tool Choice 策略
 
 面试官可能问：
 
@@ -1038,7 +1481,7 @@ class ProviderCapabilities:
 我不会把所有工具直接交给模型自由选择，而会用 policy 先过滤候选集、选择 tool choice 模式、控制并行和风险，最后由 runtime 做校验和执行。
 ```
 
-## 4.27 小练习
+## 4.28 小练习
 
 ### 练习 1：选择 Tool Choice 模式
 
@@ -1100,7 +1543,7 @@ Transformer 的 self-attention 是什么？
 
 参考答案：不要强制模型编造参数，应向用户澄清订单号，或者先调用低风险订单列表工具让用户选择。
 
-## 4.28 本章小结
+## 4.29 本章小结
 
 本章讲了 Tool Choice、Parallel Tool Calls 与强制工具调用。
 

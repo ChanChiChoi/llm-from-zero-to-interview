@@ -12,6 +12,19 @@
 
 > A2A 消息不只是文本消息，而应该包含角色、意图、上下文引用、数据分类、来源、权限、证据和边界约束。
 
+## 28.0 本讲资料边界与第二轮精修口径
+
+本讲第二轮精修前，已按 `WRITING_PLAN.md` 核对 A2A 官方协议规范中 Message、Part、Task、Artifact、TaskStatus 和 metadata 的公开口径。正文采用这些资料里的稳定抽象：Message 用 `messageId` 标识，用 `role` 区分 user / agent 等交互角色，用 `parts` 承载文本、结构化数据、文件或引用，用 `taskId` / `contextId` 和 Task 生命周期关联，用 metadata 承载工程侧的 sender、recipient、intent、source、trust、classification、context policy 和 trace 信息。
+
+本讲不是逐字段翻译某个协议版本，也不实现真实 A2A server、SSE、push notification、资源读取、DLP 或权限系统。不同实现可以把上下文策略放在 metadata、envelope 或内部 trace 里；正文只保留面试和工程设计中稳定的边界：消息不能只是纯文本，内容块要有类型、来源、可信级别、权限、证据和可转发规则，外部数据不能升级成指令，敏感内容优先引用而不是复制。
+
+第二轮补充重点是：
+
+1. 把原文的 `message_id`、`task_id`、`content` 口径调整为更贴近 A2A 的 `messageId`、`taskId`、`contextId` 和 `parts`。
+2. 明确 A2A Message 的协议字段和工程 metadata 的分工，避免把 sender / recipient / intent / context_policy 写成某个协议版本必备字段。
+3. 增加稳定 MathJax 公式，用覆盖率指标表达消息契约、Part 类型、来源可信标注、指令 / 数据分离、最小上下文、引用优先、策略执行、脱敏、claim grounding、摘要约束、预算、trace 和 eval。
+4. 补一个 0 依赖 Python demo，用 toy multi-agent message trace 审计消息边界和上下文污染风险。
+
 ## 28.1 为什么消息格式很重要
 
 在单 Agent 系统里，上下文通常集中在一个 Host 里，虽然也复杂，但至少边界相对清楚。
@@ -54,67 +67,68 @@
 }
 ```
 
-更合理的结构应该包含元数据和内容块：
+更合理的结构应该包含协议字段、内容块和工程 metadata。下面是教学化示例，不要求和某个 SDK 字段逐字一致，但语义上要覆盖 `messageId`、`taskId`、`contextId`、`role`、`parts` 和 metadata：
 
 ```json
 {
-  "message_id": "msg_001",
-  "task_id": "task_123",
-  "sender": {
-    "agent_id": "agent.orchestrator.v1"
-  },
-  "recipient": {
-    "agent_id": "agent.data_analysis.v1"
-  },
-  "role": "requester",
-  "intent": "delegate_task",
-  "created_at": "2026-05-29T11:00:00Z",
-  "content": [
+  "messageId": "msg_001",
+  "taskId": "task_123",
+  "contextId": "ctx_refund_root_001",
+  "role": "agent",
+  "parts": [
     {
-      "type": "text",
+      "kind": "text",
+      "mimeType": "text/plain",
       "text": "Analyze refund rate increase for the last 30 days."
     },
     {
-      "type": "resource_ref",
-      "uri": "kb://docs/refund-rate-definition",
-      "purpose": "metric_definition"
+      "kind": "data",
+      "mimeType": "application/json",
+      "data": {
+        "type": "resource_ref",
+        "uri": "kb://docs/refund-rate-definition",
+        "purpose": "metric_definition"
+      }
     }
   ],
-  "context_policy": {
-    "share_level": "minimal",
-    "allow_forwarding": false,
-    "data_classification": "confidential"
-  },
-  "trace_id": "trace_abc"
+  "metadata": {
+    "sender": "agent.orchestrator.v1",
+    "recipient": "agent.data_analysis.v1",
+    "intent": "delegate_task",
+    "createdAt": "2026-05-29T11:00:00Z",
+    "contextPolicy": {
+      "shareLevel": "minimal",
+      "allowForwarding": false,
+      "dataClassification": "confidential"
+    },
+    "traceId": "trace_abc"
+  }
 }
 ```
 
 这里有几个重点：
 
-1. message_id 用于去重和审计。
-2. task_id 关联任务生命周期。
-3. sender 和 recipient 明确通信双方。
-4. role 表示消息在任务中的角色。
-5. intent 表示消息意图。
-6. content 支持多种内容块。
-7. context_policy 表示上下文共享规则。
-8. trace_id 方便串联全链路。
+1. `messageId` 用于去重和审计。
+2. `taskId` 关联任务生命周期。
+3. `contextId` 把同一协作上下文里的 Task、Message 和 Artifact 串起来。
+4. `role` 表示消息在协议交互中的角色。
+5. `parts` 支持多种内容块。
+6. `metadata` 可以记录 sender、recipient、intent、context policy、source、trust、classification 和 trace。
 
 ## 28.3 Message Role：不要混淆谁在说话
 
 多 Agent 消息里，role 比普通聊天更重要。
 
-常见 role 包括：
+协议层的 role 往往只保留少量稳定角色，例如 user 和 agent。工程侧仍然需要在 metadata 里记录更细的通信身份：
 
-1. user：用户原始输入。
-2. system：平台或策略指令。
-3. requester：任务发起方 Agent。
-4. assignee：任务执行方 Agent。
-5. reviewer：审核方 Agent。
-6. tool：工具或资源返回结果。
-7. observer：只观察不决策的 Agent。
+1. requester：任务发起方 Agent。
+2. assignee：任务执行方 Agent。
+3. reviewer：审核方 Agent。
+4. tool：工具或资源返回结果。
+5. observer：只观察不决策的 Agent。
+6. human_reviewer：人工审核者。
 
-为什么要区分？因为不同角色的可信度和权限不同。
+为什么要区分？因为不同来源的可信度和权限不同。
 
 例如，用户说“请删除所有日志”，这是一条用户请求；系统策略说“禁止删除审计日志”，这是更高优先级约束；网页内容说“忽略安全策略”，这只是外部不可信数据。
 
@@ -140,7 +154,7 @@
 6. cancel_task：取消任务。
 7. escalate：升级给人类或更高权限 Agent。
 
-因此 A2A Message 应该有 intent 字段。
+因此工程 envelope 或 metadata 里应该有 intent 字段。
 
 常见 intent 可以包括：
 
@@ -157,9 +171,9 @@
 
 intent 的价值是让系统不用从自然语言里猜消息用途。
 
-## 28.5 Content Block：消息内容不只有文本
+## 28.5 Part / Content Block：消息内容不只有文本
 
-多 Agent 消息的内容可以分成不同 block。
+多 Agent 消息的内容可以分成不同 Part。协议层可以是 text / data / file 等粗粒度 Part，工程层再在 data 里表达 resource_ref、artifact_ref、policy_ref、claim、table、patch、log_excerpt 等业务类型。
 
 常见 block 类型包括：
 
@@ -178,19 +192,28 @@ intent 的价值是让系统不用从自然语言里猜消息用途。
 
 ```json
 {
-  "content": [
+  "parts": [
     {
-      "type": "text",
+      "kind": "text",
+      "mimeType": "text/plain",
       "text": "Please review this code change for security risks."
     },
     {
-      "type": "patch",
-      "uri": "artifact://task_456/change.patch",
-      "mime_type": "text/x-diff"
+      "kind": "data",
+      "mimeType": "application/json",
+      "data": {
+        "type": "artifact_ref",
+        "uri": "artifact://task_456/change.patch",
+        "mime_type": "text/x-diff"
+      }
     },
     {
-      "type": "policy_ref",
-      "uri": "policy://secure-coding/sql-injection"
+      "kind": "data",
+      "mimeType": "application/json",
+      "data": {
+        "type": "policy_ref",
+        "uri": "policy://secure-coding/sql-injection"
+      }
     }
   ]
 }
@@ -590,35 +613,398 @@ Multi-Agent 系统应该遵守最小上下文原则：
 
 这个消息没有把所有数据库原始结果传给报告 Agent，而是传递聚合结论、证据引用和限制条件。这比全量上下文转发更安全，也更利于下游完成任务。
 
-## 28.16 常见误区
+## 28.16 Multi-Agent 消息边界审计指标与最小 demo
 
-### 28.16.1 把所有消息都当纯文本
+消息边界是否合格，不能靠“看起来结构化”。真正要审计的是：消息能否让 Runtime 判断谁在说话、说的是什么、这段内容能不能当指令、能不能继续转发、有没有敏感数据、是否有证据、摘要有没有丢约束。
+
+设多 Agent 消息审计集为 $\mathcal{M}=\{m_i\}_{i=1}^{N}$。每个样本可以抽象为：
+
+```math
+m_i=(H_i,P_i,S_i,Q_i,B_i,R_i,F_i,U_i,L_i,Z_i)
+```
+
+其中：
+
+1. $H_i$ 是 Message header，包括 `messageId`、`taskId`、`contextId`、`role` 和 metadata。
+2. $P_i$ 是 Part 集合。
+3. $S_i$ 是来源和可信级别。
+4. $Q_i$ 是 context policy。
+5. $B_i$ 是预算、脱敏和引用策略。
+6. $R_i$ 是接收方和转发路径。
+7. $F_i$ 是事实、假设、推断和建议等 claim 标注。
+8. $U_i$ 是摘要中保留的约束、不确定性和证据。
+9. $L_i$ 是 trace 字段。
+10. $Z_i$ 是 eval 标签。
+
+对任意检查项 $k$，统一覆盖率仍然写成：
+
+```math
+C_k=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[p_k(m_i)=1]
+```
+
+核心指标可以写成：
+
+```math
+C_{\mathrm{msg}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{message\_contract\_ok}(H_i)]
+```
+
+```math
+C_{\mathrm{part}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{part\_typing\_ok}(P_i)]
+```
+
+```math
+C_{\mathrm{source}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{source\_trust\_labeled}(S_i)]
+```
+
+```math
+C_{\mathrm{sep}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{instruction\_data\_separated}(P_i,S_i)]
+```
+
+```math
+C_{\mathrm{min}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{minimal\_context\_ok}(P_i,Q_i)]
+```
+
+```math
+C_{\mathrm{ref}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{reference\_over\_copy\_ok}(P_i,B_i)]
+```
+
+```math
+C_{\mathrm{policy}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{context\_policy\_enforced}(Q_i,R_i)]
+```
+
+```math
+C_{\mathrm{redact}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{sensitive\_redaction\_ok}(P_i,B_i)]
+```
+
+```math
+C_{\mathrm{claim}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{claim\_grounding\_ok}(F_i)]
+```
+
+```math
+C_{\mathrm{summary}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{summary\_constraints\_kept}(U_i)]
+```
+
+```math
+C_{\mathrm{trace}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{message\_trace\_ready}(L_i)]
+```
+
+```math
+C_{\mathrm{eval}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{message\_eval\_covered}(Z_i)]
+```
+
+消息边界门禁可以写成：
+
+```math
+G_{\mathrm{a2a\_message}}=
+\mathbf{1}[
+\min(C_{\mathrm{msg}},C_{\mathrm{part}},C_{\mathrm{source}},C_{\mathrm{sep}},
+C_{\mathrm{min}},C_{\mathrm{ref}},C_{\mathrm{policy}},C_{\mathrm{redact}},
+C_{\mathrm{claim}},C_{\mathrm{summary}},C_{\mathrm{trace}},C_{\mathrm{eval}})
+\ge \tau]
+```
+
+这里的核心不是把字段堆满，而是让 Runtime 有足够结构去强制执行边界。
+
+下面是一个 0 依赖 demo。它只审计内存里的 toy message，不读取真实资源、不调用模型、不实现真实权限服务。
+
+```python
+REQUIRED_HEADER = {"messageId", "taskId", "contextId", "role", "parts", "metadata"}
+REQUIRED_METADATA = {"sender", "recipient", "intent", "contextPolicy", "traceId"}
+REQUIRED_POLICY = {"allowForwarding", "allowedRecipients", "dataClassification", "maxTokens"}
+REQUIRED_TRACE = {"message_id", "task_id", "context_id", "sender", "recipient", "policy", "version"}
+VALID_PART_KINDS = {"text", "data", "file"}
+
+
+def message_contract_ok(case):
+    msg = case["message"]
+    metadata = msg.get("metadata", {})
+    policy = metadata.get("contextPolicy", {})
+    return REQUIRED_HEADER <= set(msg) and REQUIRED_METADATA <= set(metadata) and REQUIRED_POLICY <= set(policy)
+
+
+def part_typing_ok(case):
+    for part in case["message"].get("parts", []):
+        if not {"kind", "mimeType", "semanticType"} <= set(part):
+            return False
+        if part["kind"] not in VALID_PART_KINDS:
+            return False
+    return bool(case["message"].get("parts"))
+
+
+def source_trust_labeled(case):
+    return all({"sourceKind", "trust"} <= set(part) for part in case["message"].get("parts", []))
+
+
+def instruction_data_separated(case):
+    for part in case["message"].get("parts", []):
+        if part.get("semanticType") == "instruction" and part.get("trust") == "external_untrusted":
+            return False
+        if part.get("semanticType") == "instruction" and part.get("sourceKind") in {"web_page", "log", "document"}:
+            return False
+    return True
+
+
+def minimal_context_ok(case):
+    policy = case["message"]["metadata"].get("contextPolicy", {})
+    max_tokens = policy.get("maxTokens", 0)
+    total_tokens = sum(part.get("tokens", 0) for part in case["message"].get("parts", []))
+    return total_tokens <= max_tokens and not case.get("irrelevant_context", False)
+
+
+def reference_over_copy_ok(case):
+    for part in case["message"].get("parts", []):
+        if part.get("classification") in {"confidential", "restricted"}:
+            if part.get("copiedSensitive") and not part.get("redacted"):
+                return False
+            if part.get("largeObject") and not part.get("refUri"):
+                return False
+    return True
+
+
+def context_policy_enforced(case):
+    msg = case["message"]
+    policy = msg["metadata"].get("contextPolicy", {})
+    recipient = msg["metadata"].get("recipient")
+    if recipient not in set(policy.get("allowedRecipients", [])):
+        return False
+    if case.get("forwarded") and not policy.get("allowForwarding", False):
+        return False
+    if case.get("contains_forbidden_content", False):
+        return False
+    return True
+
+
+def sensitive_redaction_ok(case):
+    for part in case["message"].get("parts", []):
+        if part.get("classification") == "restricted":
+            if not (part.get("redacted") or part.get("refUri")):
+                return False
+    return True
+
+
+def claim_grounding_ok(case):
+    claims = [part for part in case["message"].get("parts", []) if part.get("semanticType") == "claim"]
+    for claim in claims:
+        if not {"claimType", "confidence", "evidence"} <= set(claim):
+            return False
+        if claim.get("claimType") != "fact" and case.get("promoted_to_fact", False):
+            return False
+    return True
+
+
+def summary_constraints_kept(case):
+    summaries = [part for part in case["message"].get("parts", []) if part.get("semanticType") == "summary"]
+    for summary in summaries:
+        if not summary.get("preservedConstraints"):
+            return False
+        if not summary.get("uncertainties"):
+            return False
+        if not summary.get("evidence"):
+            return False
+    return True
+
+
+def message_trace_ready(case):
+    return REQUIRED_TRACE <= set(case.get("traceFields", []))
+
+
+def message_eval_covered(case):
+    return bool(case.get("evalLabel"))
+
+
+def base_message(name):
+    return {
+        "name": name,
+        "message": {
+            "messageId": "msg_" + name,
+            "taskId": "task_refund_001",
+            "contextId": "ctx_refund_001",
+            "role": "agent",
+            "parts": [
+                {
+                    "kind": "text",
+                    "mimeType": "text/plain",
+                    "semanticType": "instruction",
+                    "text": "Write a business-facing summary.",
+                    "sourceKind": "agent_output",
+                    "trust": "internal",
+                    "classification": "internal",
+                    "tokens": 40,
+                },
+                {
+                    "kind": "data",
+                    "mimeType": "application/json",
+                    "semanticType": "artifact_ref",
+                    "refUri": "artifact://task_data/refund-aggregate.csv",
+                    "sourceKind": "artifact",
+                    "trust": "internal",
+                    "classification": "confidential",
+                    "largeObject": True,
+                    "tokens": 20,
+                },
+                {
+                    "kind": "data",
+                    "mimeType": "application/json",
+                    "semanticType": "claim",
+                    "claimType": "hypothesis",
+                    "confidence": "medium",
+                    "evidence": ["artifact://task_data/refund-aggregate.csv"],
+                    "sourceKind": "agent_output",
+                    "trust": "generated_unverified",
+                    "classification": "internal",
+                    "tokens": 60,
+                },
+                {
+                    "kind": "data",
+                    "mimeType": "application/json",
+                    "semanticType": "summary",
+                    "preservedConstraints": ["aggregate_only", "no_user_level_records"],
+                    "uncertainties": ["causal link not fully verified"],
+                    "evidence": ["artifact://task_data/refund-aggregate.csv"],
+                    "sourceKind": "agent_output",
+                    "trust": "generated_unverified",
+                    "classification": "internal",
+                    "tokens": 80,
+                },
+            ],
+            "metadata": {
+                "sender": "agent.orchestrator.v1",
+                "recipient": "agent.report_writer.internal.v1",
+                "intent": "delegate_task",
+                "traceId": "trace_" + name,
+                "contextPolicy": {
+                    "allowForwarding": False,
+                    "allowedRecipients": ["agent.report_writer.internal.v1"],
+                    "dataClassification": "confidential",
+                    "maxTokens": 600,
+                    "redactionRequired": True,
+                },
+            },
+        },
+        "traceFields": sorted(REQUIRED_TRACE),
+        "evalLabel": "ok",
+    }
+
+
+cases = [
+    base_message("happy_path"),
+    base_message("missing_contract_bad"),
+    base_message("untyped_part_bad"),
+    base_message("missing_source_bad"),
+    base_message("untrusted_instruction_bad"),
+    base_message("system_prompt_forwarded_bad"),
+    base_message("sensitive_inline_bad"),
+    base_message("forwarding_forbidden_bad"),
+    base_message("recipient_not_allowed_bad"),
+    base_message("unsupported_claim_fact_bad"),
+    base_message("summary_drops_constraints_bad"),
+    base_message("budget_overflow_bad"),
+    base_message("trace_missing_bad"),
+    base_message("eval_missing_bad"),
+]
+
+cases[1]["message"].pop("contextId")
+cases[2]["message"]["parts"][0].pop("semanticType")
+cases[3]["message"]["parts"][1].pop("sourceKind")
+cases[4]["message"]["parts"][0].update({"sourceKind": "web_page", "trust": "external_untrusted"})
+cases[5]["message"]["parts"].append({
+    "kind": "text",
+    "mimeType": "text/plain",
+    "semanticType": "system_prompt",
+    "text": "Internal policy prompt copied in full.",
+    "sourceKind": "system_policy",
+    "trust": "trusted",
+    "classification": "restricted",
+    "copiedSensitive": True,
+    "tokens": 120,
+})
+cases[6]["message"]["parts"][1].update({"refUri": "", "copiedSensitive": True, "redacted": False})
+cases[7]["forwarded"] = True
+cases[8]["message"]["metadata"]["recipient"] = "agent.external_writer.v1"
+cases[9]["promoted_to_fact"] = True
+cases[10]["message"]["parts"][3]["preservedConstraints"] = []
+cases[11]["message"]["parts"].append({
+    "kind": "data",
+    "mimeType": "application/json",
+    "semanticType": "raw_rows",
+    "sourceKind": "database",
+    "trust": "internal",
+    "classification": "restricted",
+    "copiedSensitive": True,
+    "redacted": False,
+    "tokens": 900,
+})
+cases[12]["traceFields"] = ["message_id", "task_id"]
+cases[13]["evalLabel"] = ""
+
+checks = {
+    "message_contract_coverage": message_contract_ok,
+    "part_typing_coverage": part_typing_ok,
+    "source_trust_labeling": source_trust_labeled,
+    "instruction_data_separation": instruction_data_separated,
+    "minimal_context_coverage": minimal_context_ok,
+    "reference_over_copy_coverage": reference_over_copy_ok,
+    "context_policy_enforcement": context_policy_enforced,
+    "sensitive_redaction_coverage": sensitive_redaction_ok,
+    "claim_grounding_coverage": claim_grounding_ok,
+    "summary_constraint_retention": summary_constraints_kept,
+    "message_trace_readiness": message_trace_ready,
+    "message_eval_coverage": message_eval_covered,
+}
+
+results = {case["name"]: {metric: check(case) for metric, check in checks.items()} for case in cases}
+metrics = {
+    metric: round(sum(row[metric] for row in results.values()) / len(cases), 3)
+    for metric in checks
+}
+failed_cases = [name for name, row in results.items() if not all(row.values())]
+threshold = 0.95
+failed_gates = [metric for metric, value in metrics.items() if value < threshold]
+smoke = {
+    "valid_happy_path": all(results["happy_path"].values()),
+    "blocked_untrusted_instruction": not results["untrusted_instruction_bad"]["instruction_data_separation"],
+    "blocked_sensitive_copy": not results["sensitive_inline_bad"]["reference_over_copy_coverage"],
+    "blocked_forwarding": not results["forwarding_forbidden_bad"]["context_policy_enforcement"],
+}
+
+print("smoke=", smoke)
+print("metrics=", metrics)
+print("failed_cases=", failed_cases)
+print("failed_gates=", failed_gates)
+print("a2a_message_gate_pass=", not failed_gates)
+```
+
+这段脚本刻意保留很多失败样本。面试里可以这样解释：消息格式不是 JSON 字段漂亮就够了，Runtime 必须能拦住外部网页伪装成指令、系统提示泄露、敏感数据复制、禁止转发却继续转发、下游 Agent 不在接收名单、把假设升级成事实、摘要丢失约束、上下文超预算、trace / eval 缺失等问题。
+
+## 28.17 常见误区
+
+### 28.17.1 把所有消息都当纯文本
 
 纯文本无法稳定表达来源、角色、意图、权限、证据和边界。生产系统应该使用结构化消息。
 
-### 28.16.2 把下游 Agent 输出当成事实
+### 28.17.2 把下游 Agent 输出当成事实
 
 下游 Agent 的输出可能是推断、假设或未验证结论。应该保留 claim_type、confidence、evidence 和 limitations。
 
-### 28.16.3 全量转发上下文
+### 28.17.3 全量转发上下文
 
 全量转发会扩大泄露面，增加上下文污染，并浪费上下文窗口。默认应最小上下文。
 
-### 28.16.4 不区分指令和数据
+### 28.17.4 不区分指令和数据
 
 网页、日志、文档和数据库字段里的文本不一定是指令。必须区分 instruction block 和 data block。
 
-### 28.16.5 摘要时删除约束和不确定性
+### 28.17.5 摘要时删除约束和不确定性
 
 这会让下游 Agent 过度自信。摘要应保留限制、证据和不确定性。
 
-## 28.17 面试高频题
+## 28.18 面试高频题
 
 ### 题 1：A2A Message 应该包含哪些字段？
 
 参考回答：
 
-应包含 message_id、task_id、sender、recipient、role、intent、timestamp、content blocks、context_policy、trace_id 等。content blocks 可以包含 text、structured_json、resource_ref、artifact_ref、evidence_ref、patch、log_excerpt 等。生产系统还应记录来源、可信级别、数据分类和转发限制。
+协议层应包含 `messageId`、`taskId`、`contextId`、`role`、`parts` 和 metadata。工程 metadata 里通常记录 sender、recipient、intent、timestamp、context policy、trace id、来源、可信级别、数据分类和转发限制。`parts` 可以承载 text、data、file 等协议块，业务层再表达 structured_json、resource_ref、artifact_ref、evidence_ref、patch、log_excerpt、policy_ref 等语义。
 
 ### 题 2：Multi-Agent 系统为什么要强调上下文边界？
 
@@ -644,19 +1030,20 @@ Multi-Agent 系统应该遵守最小上下文原则：
 
 输出应标记 claim_type、confidence、evidence 和 limitations。区分 fact、hypothesis、inference、recommendation 和 unsupported_claim。下游 Agent 使用这些信息时应保留不确定性，不能把假设升级成确定事实。
 
-## 28.18 小练习
+## 28.19 小练习
 
 1. 设计一个 A2A Message，用于把代码补丁交给安全审核 Agent。
 2. 为一个从网页提取的内容块添加 source 和 trusted 字段。
 3. 写一个 context_policy，要求禁止转发、保存 24 小时、必须脱敏。
 4. 把一句“可能由支付方式变化导致”改写成结构化 claim，包含 claim_type、confidence 和 evidence。
 5. 思考：如果报告 Agent 需要写报告，但数据 Agent 的结果包含用户级明细，上游 Agent 应该如何处理？
+6. 扩展本章 demo，新增一个 `resource_ref_expired_bad` 样本，检查过期资源引用是否被下游继续使用。
 
-## 28.19 本章小结
+## 28.20 本章小结
 
 本章我们讲了 Multi-Agent 协作中的消息格式和上下文边界。
 
-A2A Message 不应该只是纯文本，而应该包含 message_id、task_id、sender、recipient、role、intent、content blocks、context_policy 和 trace_id。内容块需要区分指令和数据，标记来源和可信级别。上下文传递应遵守最小上下文原则，敏感内容尽量通过引用传递而不是复制。Agent 输出也不能默认当成事实，而要保留 claim_type、confidence、evidence 和 limitations。
+A2A Message 不应该只是纯文本，而应该包含 `messageId`、`taskId`、`contextId`、`role`、`parts` 和 metadata。内容块需要区分指令和数据，标记来源和可信级别。上下文传递应遵守最小上下文原则，敏感内容尽量通过引用传递而不是复制。Agent 输出也不能默认当成事实，而要保留 claim_type、confidence、evidence 和 limitations。
 
 你可以把本章重点记成一句话：
 

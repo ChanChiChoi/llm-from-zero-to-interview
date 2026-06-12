@@ -1,5 +1,15 @@
 # 第十章：Tool Router：什么时候调用哪个工具
 
+## 10.0 本讲资料边界与第二轮精修口径
+
+本章按第二轮精修要求，对齐 OpenAI tools / function calling 中工具列表、tool choice 和 parallel tool calls 的公开能力，Anthropic tool use 中工具定义和 tool choice 的公开能力，Google Gemini function calling 中 function declaration、mode 和 allowed function names 的公开能力，以及 MCP specification 中 tools/list、tools/call 和 server capability discovery 的边界。这里抽象的是 Tool Router 的稳定工程层：候选工具过滤、权限过滤、风险过滤、意图召回、tool choice 决策、并行策略、provider capability 降级、trace 和 eval。
+
+需要注意三点：
+
+1. 本章不把某一家 provider 的 `tool_choice`、allowed tools、function calling mode、parallel calls 或 MCP 消息字段写成通用标准。
+2. Router 的职责是缩小模型可见工具集合和生成 tool choice policy，不替代 Executor 的最终权限检查。
+3. 本章只讨论防御性的候选工具收敛、成本控制和安全门禁，不提供绕过权限、诱导高风险工具暴露或隐藏 router trace 的做法。
+
 ## 10.1 本章定位
 
 上一章讲了 Tool Registry：系统有哪些工具、工具的 schema、权限、版本、owner 和生命周期如何管理。
@@ -746,7 +756,454 @@ Router eval 样例应标注：
 
 修复：Router 输入 provider capabilities，并做降级。
 
-## 10.23 面试题：如何设计 Tool Router
+## 10.23 Tool Router 指标与最小 demo
+
+可以把一次 router 决策样本写成：
+
+```math
+u_i=(m_i,h_i,c_i,p_i,w_i,b_i,\mathcal{R},\mathcal{T}_i,\widehat{\mathcal{T}}_i,g_i,\hat{g}_i,z_i)
+```
+
+其中：
+
+1. `m_i` 是用户当前消息。
+2. `h_i` 是对话历史。
+3. `c_i` 是产品场景、页面、租户和 provider capabilities。
+4. `p_i` 是用户权限和数据范围。
+5. `w_i` 是 workflow 状态。
+6. `b_i` 是成本、步数和并发预算。
+7. `\mathcal{R}` 是 Tool Registry。
+8. `\mathcal{T}_i` 是期望候选工具集合。
+9. `\widehat{\mathcal{T}}_i` 是 router 实际暴露的候选工具集合。
+10. `g_i` 是期望 tool choice / clarify / parallel policy。
+11. `\hat{g}_i` 是实际 router policy。
+12. `z_i` 是评估标签和失败原因。
+
+场景过滤通过率：
+
+```math
+C_{\mathrm{scene}}=
+\frac{\sum_i \mathbb{1}[\widehat{\mathcal{T}}_i\ \mathrm{matches}\ \mathrm{scenario}_i]}
+{N}
+```
+
+权限过滤通过率：
+
+```math
+C_{\mathrm{perm}}=
+\frac{\sum_i \mathbb{1}[\widehat{\mathcal{T}}_i\cap \mathcal{B}^{\mathrm{perm}}_i=\varnothing]}
+{N}
+```
+
+风险过滤通过率：
+
+```math
+C_{\mathrm{risk}}=
+\frac{\sum_i \mathbb{1}[\widehat{\mathcal{T}}_i\cap \mathcal{B}^{\mathrm{risk}}_i=\varnothing]}
+{N}
+```
+
+候选召回率和候选精确率：
+
+```math
+R_{\mathrm{cand}}=
+\frac{\sum_i |\mathcal{T}_i\cap \widehat{\mathcal{T}}_i|}
+{\sum_i |\mathcal{T}_i|}
+```
+
+```math
+P_{\mathrm{cand}}=
+\frac{\sum_i |\mathcal{T}_i\cap \widehat{\mathcal{T}}_i|}
+{\sum_i |\widehat{\mathcal{T}}_i|}
+```
+
+候选数量预算通过率：
+
+```math
+C_{\mathrm{size}}=
+\frac{\sum_i \mathbb{1}[|\widehat{\mathcal{T}}_i|\le k_i]}
+{N}
+```
+
+澄清决策准确率：
+
+```math
+A_{\mathrm{clar}}=
+\frac{\sum_i \mathbb{1}[\hat{g}^{\mathrm{clarify}}_i=g^{\mathrm{clarify}}_i]}
+{N}
+```
+
+Tool choice mode 准确率：
+
+```math
+A_{\mathrm{choice}}=
+\frac{\sum_i \mathbb{1}[\hat{g}^{\mathrm{mode}}_i=g^{\mathrm{mode}}_i]}
+{N}
+```
+
+Forced tool 准确率：
+
+```math
+A_{\mathrm{forced}}=
+\frac{\sum_i \mathbb{1}[\hat{g}^{\mathrm{forced}}_i=g^{\mathrm{forced}}_i]}
+{N}
+```
+
+并行安全率：
+
+```math
+C_{\mathrm{parallel}}=
+\frac{\sum_i \mathbb{1}[\hat{g}^{\mathrm{parallel}}_i=g^{\mathrm{parallel}}_i]}
+{N}
+```
+
+Provider capability 兼容率：
+
+```math
+C_{\mathrm{provider}}=
+\frac{\sum_i \mathbb{1}[\hat{g}^{\mathrm{mode}}_i\in \mathcal{M}^{\mathrm{provider}}_i]}
+{N}
+```
+
+成本预算通过率和 router trace 完整率：
+
+```math
+C_{\mathrm{cost}}=
+\frac{\sum_i \mathbb{1}[\mathrm{tokens}_i\le b^{\mathrm{tok}}_i \land \mathrm{calls}_i\le b^{\mathrm{call}}_i]}
+{N}
+```
+
+```math
+C_{\mathrm{trace}}=
+\frac{\sum_i \mathbb{1}[\mathrm{trace}_i\ \mathrm{contains}\ \mathrm{initial},\mathrm{filters},\mathrm{final},\mathrm{choice},\mathrm{version}]}
+{N}
+```
+
+Router 上线门禁可以写成：
+
+```math
+G_{\mathrm{router}}=
+\mathbb{1}[
+R_{\mathrm{cand}}\ge \tau_{\mathrm{recall}}
+\land P_{\mathrm{cand}}\ge \tau_{\mathrm{precision}}
+\land C_{\mathrm{perm}}\ge \tau_{\mathrm{perm}}
+\land C_{\mathrm{risk}}\ge \tau_{\mathrm{risk}}
+\land A_{\mathrm{choice}}\ge \tau_{\mathrm{choice}}
+\land C_{\mathrm{provider}}\ge \tau_{\mathrm{provider}}
+\land C_{\mathrm{trace}}\ge \tau_{\mathrm{trace}}
+]
+```
+
+下面是一个 0 依赖最小 demo。它不调用模型、不执行真实工具、不访问网络，只审计 toy router decisions，用来说明 router 既要保证正确工具进入候选集，又要控制权限、风险、成本、并行、provider capability 和 trace。
+
+```python
+CASES = [
+    {
+        "id": "order_status_ok",
+        "scenario_ok": True,
+        "expected_tools": {"get_order_status", "get_shipment_tracking"},
+        "actual_tools": ["get_order_status", "get_shipment_tracking"],
+        "forbidden_tools": {"create_refund_request", "delete_order"},
+        "max_tools": 5,
+        "expected_choice": "auto",
+        "actual_choice": "auto",
+        "expected_forced": None,
+        "actual_forced": None,
+        "expected_clarify": False,
+        "actual_clarify": False,
+        "expected_parallel": True,
+        "actual_parallel": True,
+        "provider_modes": {"auto", "none", "required", "forced"},
+        "cost_ok": True,
+        "trace_fields": {"initial", "scenario", "permission", "risk", "semantic", "final", "choice", "version"},
+    },
+    {
+        "id": "concept_none_ok",
+        "scenario_ok": True,
+        "expected_tools": set(),
+        "actual_tools": [],
+        "forbidden_tools": {"search_web", "run_code"},
+        "max_tools": 0,
+        "expected_choice": "none",
+        "actual_choice": "none",
+        "expected_forced": None,
+        "actual_forced": None,
+        "expected_clarify": False,
+        "actual_clarify": False,
+        "expected_parallel": False,
+        "actual_parallel": False,
+        "provider_modes": {"auto", "none", "required", "forced"},
+        "cost_ok": True,
+        "trace_fields": {"initial", "scenario", "permission", "risk", "semantic", "final", "choice", "version"},
+    },
+    {
+        "id": "account_balance_required_ok",
+        "scenario_ok": True,
+        "expected_tools": {"get_account_balance"},
+        "actual_tools": ["get_account_balance"],
+        "forbidden_tools": {"export_all_accounts"},
+        "max_tools": 2,
+        "expected_choice": "required",
+        "actual_choice": "required",
+        "expected_forced": None,
+        "actual_forced": None,
+        "expected_clarify": False,
+        "actual_clarify": False,
+        "expected_parallel": False,
+        "actual_parallel": False,
+        "provider_modes": {"auto", "none", "required", "forced"},
+        "cost_ok": True,
+        "trace_fields": {"initial", "scenario", "permission", "risk", "semantic", "final", "choice", "version"},
+    },
+    {
+        "id": "refund_confirm_block_ok",
+        "scenario_ok": True,
+        "expected_tools": {"check_refund_eligibility"},
+        "actual_tools": ["check_refund_eligibility"],
+        "forbidden_tools": {"create_refund_request"},
+        "max_tools": 2,
+        "expected_choice": "required",
+        "actual_choice": "required",
+        "expected_forced": None,
+        "actual_forced": None,
+        "expected_clarify": False,
+        "actual_clarify": False,
+        "expected_parallel": False,
+        "actual_parallel": False,
+        "provider_modes": {"auto", "none", "required", "forced"},
+        "cost_ok": True,
+        "trace_fields": {"initial", "scenario", "permission", "risk", "semantic", "final", "choice", "version"},
+    },
+    {
+        "id": "refund_exposed_bad",
+        "scenario_ok": True,
+        "expected_tools": {"check_refund_eligibility"},
+        "actual_tools": ["check_refund_eligibility", "create_refund_request"],
+        "forbidden_tools": {"create_refund_request"},
+        "max_tools": 2,
+        "expected_choice": "required",
+        "actual_choice": "auto",
+        "expected_forced": None,
+        "actual_forced": None,
+        "expected_clarify": False,
+        "actual_clarify": False,
+        "expected_parallel": False,
+        "actual_parallel": True,
+        "provider_modes": {"auto", "none", "required", "forced"},
+        "cost_ok": True,
+        "trace_fields": {"initial", "scenario", "final", "choice"},
+    },
+    {
+        "id": "export_permission_bad",
+        "scenario_ok": False,
+        "expected_tools": set(),
+        "actual_tools": ["export_all_customers"],
+        "forbidden_tools": {"export_all_customers"},
+        "max_tools": 0,
+        "expected_choice": "none",
+        "actual_choice": "auto",
+        "expected_forced": None,
+        "actual_forced": None,
+        "expected_clarify": False,
+        "actual_clarify": False,
+        "expected_parallel": False,
+        "actual_parallel": False,
+        "provider_modes": {"auto", "none", "required", "forced"},
+        "cost_ok": True,
+        "trace_fields": {"initial", "scenario", "permission", "final", "choice"},
+    },
+    {
+        "id": "order_candidate_miss_bad",
+        "scenario_ok": True,
+        "expected_tools": {"get_order_status", "get_shipment_tracking"},
+        "actual_tools": ["search_support_policy"],
+        "forbidden_tools": {"create_refund_request"},
+        "max_tools": 5,
+        "expected_choice": "auto",
+        "actual_choice": "auto",
+        "expected_forced": None,
+        "actual_forced": None,
+        "expected_clarify": False,
+        "actual_clarify": False,
+        "expected_parallel": True,
+        "actual_parallel": False,
+        "provider_modes": {"auto", "none", "required", "forced"},
+        "cost_ok": True,
+        "trace_fields": {"initial", "scenario", "permission", "risk", "semantic", "final", "choice", "version"},
+    },
+    {
+        "id": "too_many_tools_cost_bad",
+        "scenario_ok": True,
+        "expected_tools": {"search_internal_policy"},
+        "actual_tools": ["search_internal_policy", "search_web", "search_ticket", "query_logs", "run_sql", "get_user_profile"],
+        "forbidden_tools": {"run_sql"},
+        "max_tools": 3,
+        "expected_choice": "auto",
+        "actual_choice": "auto",
+        "expected_forced": None,
+        "actual_forced": None,
+        "expected_clarify": False,
+        "actual_clarify": False,
+        "expected_parallel": False,
+        "actual_parallel": True,
+        "provider_modes": {"auto", "none", "required", "forced"},
+        "cost_ok": False,
+        "trace_fields": {"initial", "scenario", "permission", "risk", "semantic", "final", "choice", "version"},
+    },
+    {
+        "id": "missing_order_clarify_bad",
+        "scenario_ok": True,
+        "expected_tools": {"list_recent_orders"},
+        "actual_tools": ["get_order_status"],
+        "forbidden_tools": {"create_refund_request"},
+        "max_tools": 2,
+        "expected_choice": "auto",
+        "actual_choice": "forced",
+        "expected_forced": None,
+        "actual_forced": "get_order_status",
+        "expected_clarify": True,
+        "actual_clarify": False,
+        "expected_parallel": False,
+        "actual_parallel": False,
+        "provider_modes": {"auto", "none", "required", "forced"},
+        "cost_ok": True,
+        "trace_fields": {"initial", "scenario", "permission", "risk", "final", "choice"},
+    },
+    {
+        "id": "provider_required_unsupported_bad",
+        "scenario_ok": True,
+        "expected_tools": {"get_weather_forecast"},
+        "actual_tools": ["get_weather_forecast"],
+        "forbidden_tools": set(),
+        "max_tools": 2,
+        "expected_choice": "required",
+        "actual_choice": "required",
+        "expected_forced": None,
+        "actual_forced": None,
+        "expected_clarify": False,
+        "actual_clarify": False,
+        "expected_parallel": False,
+        "actual_parallel": False,
+        "provider_modes": {"auto", "none"},
+        "cost_ok": True,
+        "trace_fields": {"initial", "scenario", "permission", "risk", "semantic", "final", "choice", "version"},
+    },
+    {
+        "id": "injection_risk_block_ok",
+        "scenario_ok": True,
+        "expected_tools": {"web_fetch"},
+        "actual_tools": ["web_fetch"],
+        "forbidden_tools": {"send_email", "create_refund_request"},
+        "max_tools": 2,
+        "expected_choice": "auto",
+        "actual_choice": "auto",
+        "expected_forced": None,
+        "actual_forced": None,
+        "expected_clarify": False,
+        "actual_clarify": False,
+        "expected_parallel": False,
+        "actual_parallel": False,
+        "provider_modes": {"auto", "none", "required", "forced"},
+        "cost_ok": True,
+        "trace_fields": {"initial", "scenario", "permission", "risk", "semantic", "final", "choice", "version"},
+    },
+]
+
+THRESHOLDS = {
+    "scenario_filter_pass_rate": 0.95,
+    "permission_filter_pass_rate": 1.0,
+    "risk_filter_pass_rate": 1.0,
+    "candidate_recall": 0.95,
+    "candidate_precision": 0.80,
+    "candidate_size_pass_rate": 0.95,
+    "clarification_accuracy": 0.95,
+    "tool_choice_mode_accuracy": 0.95,
+    "forced_tool_accuracy": 0.95,
+    "parallel_safety_rate": 0.95,
+    "provider_capability_compatibility": 0.95,
+    "cost_budget_pass_rate": 0.95,
+    "router_trace_completeness": 0.95,
+}
+
+
+def ratio(numerator, denominator):
+    return 1.0 if denominator == 0 else numerator / denominator
+
+
+def rounded(value):
+    return round(value + 1e-12, 3)
+
+
+def audit(cases):
+    required_trace = {"initial", "scenario", "permission", "risk", "semantic", "final", "choice", "version"}
+    expected_total = 0
+    actual_total = 0
+    hit_total = 0
+    rows = []
+
+    for case in cases:
+        expected = case["expected_tools"]
+        actual = set(case["actual_tools"])
+        forbidden_exposed = bool(actual & case["forbidden_tools"])
+        expected_total += len(expected)
+        actual_total += len(actual)
+        hit_total += len(expected & actual)
+        candidate_ok = expected <= actual and not forbidden_exposed and (not expected or len(actual - expected) <= 1)
+        checks = {
+            "scenario": case["scenario_ok"],
+            "permission": not forbidden_exposed,
+            "risk": not forbidden_exposed,
+            "candidate": candidate_ok,
+            "size": len(actual) <= case["max_tools"],
+            "clarify": case["actual_clarify"] == case["expected_clarify"],
+            "choice": case["actual_choice"] == case["expected_choice"],
+            "forced": case["actual_forced"] == case["expected_forced"],
+            "parallel": case["actual_parallel"] == case["expected_parallel"],
+            "provider": case["actual_choice"] in case["provider_modes"],
+            "cost": case["cost_ok"],
+            "trace": required_trace <= case["trace_fields"],
+        }
+        rows.append((case["id"], checks))
+
+    metrics = {
+        "scenario_filter_pass_rate": rounded(ratio(sum(c["scenario"] for _, c in rows), len(rows))),
+        "permission_filter_pass_rate": rounded(ratio(sum(c["permission"] for _, c in rows), len(rows))),
+        "risk_filter_pass_rate": rounded(ratio(sum(c["risk"] for _, c in rows), len(rows))),
+        "candidate_recall": rounded(ratio(hit_total, expected_total)),
+        "candidate_precision": rounded(ratio(hit_total, actual_total)),
+        "candidate_size_pass_rate": rounded(ratio(sum(c["size"] for _, c in rows), len(rows))),
+        "clarification_accuracy": rounded(ratio(sum(c["clarify"] for _, c in rows), len(rows))),
+        "tool_choice_mode_accuracy": rounded(ratio(sum(c["choice"] for _, c in rows), len(rows))),
+        "forced_tool_accuracy": rounded(ratio(sum(c["forced"] for _, c in rows), len(rows))),
+        "parallel_safety_rate": rounded(ratio(sum(c["parallel"] for _, c in rows), len(rows))),
+        "provider_capability_compatibility": rounded(ratio(sum(c["provider"] for _, c in rows), len(rows))),
+        "cost_budget_pass_rate": rounded(ratio(sum(c["cost"] for _, c in rows), len(rows))),
+        "router_trace_completeness": rounded(ratio(sum(c["trace"] for _, c in rows), len(rows))),
+    }
+    failed_cases = {case_id: [name for name, ok in checks.items() if not ok] for case_id, checks in rows if not all(checks.values())}
+    failed_gates = [name for name, threshold in THRESHOLDS.items() if metrics[name] < threshold]
+    return metrics, failed_cases, failed_gates
+
+
+metrics, failed_cases, failed_gates = audit(CASES)
+print("metrics=", metrics)
+print("failed_cases=", failed_cases)
+print("failed_gates=", failed_gates)
+print("tool_router_gate_pass=", not failed_gates)
+```
+
+输出应类似：
+
+```text
+metrics= {'scenario_filter_pass_rate': 0.909, 'permission_filter_pass_rate': 0.727, 'risk_filter_pass_rate': 0.727, 'candidate_recall': 0.727, 'candidate_precision': 0.471, 'candidate_size_pass_rate': 0.818, 'clarification_accuracy': 0.909, 'tool_choice_mode_accuracy': 0.727, 'forced_tool_accuracy': 0.909, 'parallel_safety_rate': 0.727, 'provider_capability_compatibility': 0.909, 'cost_budget_pass_rate': 0.909, 'router_trace_completeness': 0.727}
+failed_cases= {'refund_exposed_bad': ['permission', 'risk', 'candidate', 'choice', 'parallel', 'trace'], 'export_permission_bad': ['scenario', 'permission', 'risk', 'candidate', 'size', 'choice', 'trace'], 'order_candidate_miss_bad': ['candidate', 'parallel'], 'too_many_tools_cost_bad': ['permission', 'risk', 'candidate', 'size', 'parallel', 'cost'], 'missing_order_clarify_bad': ['candidate', 'clarify', 'choice', 'forced', 'trace'], 'provider_required_unsupported_bad': ['provider']}
+failed_gates= ['scenario_filter_pass_rate', 'permission_filter_pass_rate', 'risk_filter_pass_rate', 'candidate_recall', 'candidate_precision', 'candidate_size_pass_rate', 'clarification_accuracy', 'tool_choice_mode_accuracy', 'forced_tool_accuracy', 'parallel_safety_rate', 'provider_capability_compatibility', 'cost_budget_pass_rate', 'router_trace_completeness']
+tool_router_gate_pass= False
+```
+
+这个 demo 的重点是 router 失败的归因形状：`refund_exposed_bad` 暴露高风险工具过早进入候选集；`export_permission_bad` 暴露权限过滤失败；`order_candidate_miss_bad` 暴露正确工具没进候选集；`too_many_tools_cost_bad` 暴露候选集过宽、成本超预算和风险工具误暴露；`missing_order_clarify_bad` 暴露缺参时错误 forced tool；`provider_required_unsupported_bad` 暴露 router 没有按 provider capability 降级。
+
+## 10.24 面试题：如何设计 Tool Router
 
 面试官可能问：
 
@@ -800,7 +1257,7 @@ Router eval 样例应标注：
 Tool Router 应该用确定性规则保证权限和安全，用语义检索或 LLM 做意图召回，再输出候选工具和 tool choice 配置，而不是把所有工具直接交给模型。
 ```
 
-## 10.24 小练习
+## 10.25 小练习
 
 ### 练习 1：该暴露哪些工具
 
@@ -844,7 +1301,7 @@ Tool Router 应该用确定性规则保证权限和安全，用语义检索或 L
 
 参考答案：候选召回率下降。后续模型无法选到正确工具，任务成功率也会下降。
 
-## 10.25 本章小结
+## 10.26 本章小结
 
 本章讲了 Tool Router。
 

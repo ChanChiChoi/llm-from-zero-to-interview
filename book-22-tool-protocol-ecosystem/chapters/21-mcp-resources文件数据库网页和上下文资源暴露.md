@@ -1,5 +1,23 @@
 # 第二十一章：MCP Resources：文件、数据库、网页和上下文资源暴露
 
+## 21.0 本讲资料边界与第二轮精修口径
+
+本讲按 MCP 2025-06-18 specification 中 Resources 和 Roots 的稳定口径做第二轮精修：Resources 用 URI 唯一标识，可带 name、title、description、mimeType、annotations、size 等 metadata；Server 可以提供 `resources/list`、`resources/read`、`resources/templates/list`，资源内容可以是 text 或 binary blob；资源列表可能变更，Server 可以通过 list changed notification 提示 Host 重新发现；Client Roots 用于让 Server 理解被授权的文件系统边界。
+
+本讲只讨论资源暴露的协议抽象和工程边界，不实现真实数据库驱动、浏览器抓取、企业权限系统或完整 MCP Server。为了避免把玩具代码误认为生产实现，后面的 demo 使用固定内存数据模拟文件、数据库、网页和日志资源，重点演示 URI、metadata、roots、租户、字段投影、上下文预算、引用、可信度、freshness、template 和 subscription 的审计口径。
+
+本讲不要记成：
+
+```text
+Resource = 任意可读文本 = 自动进入模型上下文
+```
+
+更准确的表达是：
+
+```text
+Resource = Host 可按权限和上下文预算读取的外部上下文对象。
+```
+
 ## 21.1 本章定位
 
 前面讲了 MCP Tools。本章讲 MCP 的另一个核心概念：Resources。
@@ -532,51 +550,430 @@ IDE Host 可以暴露当前文件 resource：
 
 这能支持最终回答引用来源。
 
-## 21.20 常见错误
+## 21.20 MCP Resources 审计指标与最小 demo
 
-### 21.20.1 把所有文件都暴露给模型
+为了把 Resources 从“能读到内容”升级为“可以进入生产 Agent 的上下文入口”，可以把一次资源读取样本抽象成：
+
+```math
+r_i=(u_i,m_i,c_i,b_i,a_i,p_i,q_i,t_i,v_i,z_i)
+```
+
+其中，`u_i` 是 resource URI，`m_i` 是 metadata，`c_i` 是返回内容，`b_i` 是上下文预算，`a_i` 是权限与 roots 边界，`p_i` 是字段投影和脱敏策略，`q_i` 是引用信息，`t_i` 是可信度和注入风险标注，`v_i` 是版本 / freshness / 订阅状态，`z_i` 是 trace 与评估字段。
+
+对某个资源能力维度 `k`，统一覆盖率可以写成：
+
+```math
+C_k=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{case}_i\ \mathrm{passes}\ \mathrm{check}_k]
+```
+
+常用审计指标包括：
+
+```math
+C_{\mathrm{uri}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{uri}_i\ \mathrm{uses\ stable\ scheme\ and\ identity}]
+```
+
+```math
+C_{\mathrm{meta}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{metadata}_i\ \mathrm{has\ name,\ mimeType,\ size,\ sensitivity,\ trust,\ version}]
+```
+
+```math
+C_{\mathrm{list}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{resources/list}\ \mathrm{filters\ by\ permission\ and\ does\ not\ leak\ existence}]
+```
+
+```math
+C_{\mathrm{read}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{resources/read}\ \mathrm{checks\ uri,\ size,\ type,\ and\ content\ boundary}]
+```
+
+```math
+C_{\mathrm{root}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{file\ resource}\ \mathrm{stays\ inside\ allowed\ roots}]
+```
+
+```math
+C_{\mathrm{perm}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{tenant,\ object,\ field,\ and\ flow\ permission\ are\ enforced}]
+```
+
+```math
+C_{\mathrm{field}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{sensitive\ fields\ are\ projected\ or\ redacted}]
+```
+
+```math
+C_{\mathrm{budget}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{returned\ context\ fits\ token\ budget\ or\ is\ chunked}]
+```
+
+```math
+C_{\mathrm{cite}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{answerable\ content\ keeps\ uri,\ section,\ line,\ or\ chunk\ citation}]
+```
+
+```math
+C_{\mathrm{trust}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{untrusted\ external\ content\ is\ labeled\ as\ data}]
+```
+
+```math
+C_{\mathrm{fresh}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{last\ modified,\ etag,\ version,\ or\ retrieved\ at\ is\ usable}]
+```
+
+```math
+C_{\mathrm{template}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{resource\ template\ has\ parameter\ boundary\ and\ validation}]
+```
+
+```math
+C_{\mathrm{sub}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{resource\ change\ and\ subscription\ semantics\ are\ handled}]
+```
+
+```math
+C_{\mathrm{trace}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{resource\ read\ trace\ can\ support\ eval,\ replay,\ and\ audit}]
+```
+
+综合门禁可以写成：
+
+```math
+G_{\mathrm{mcp\_resource}}=\mathbf{1}\left[
+\min(
+C_{\mathrm{uri}},
+C_{\mathrm{meta}},
+C_{\mathrm{list}},
+C_{\mathrm{read}},
+C_{\mathrm{root}},
+C_{\mathrm{perm}},
+C_{\mathrm{field}},
+C_{\mathrm{budget}},
+C_{\mathrm{cite}},
+C_{\mathrm{trust}},
+C_{\mathrm{fresh}},
+C_{\mathrm{template}},
+C_{\mathrm{sub}},
+C_{\mathrm{trace}}
+)\ge \tau
+\right]
+```
+
+下面的 demo 用内存数据模拟 MCP Resource Server。它覆盖文件、数据库、网页和日志资源，展示 roots、租户隔离、字段投影、日志脱敏、上下文预算、引用、template、订阅和审计指标。真实工程要把这些检查接入认证、权限、存储、DLP、trace 和回归评估系统。
+
+```python
+from dataclasses import dataclass
+import posixpath
+import re
+
+
+class ResourceError(Exception):
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+
+
+@dataclass
+class User:
+    user_id: str
+    tenant: str
+    role: str
+
+
+class MiniResourceServer:
+    def __init__(self):
+        self.roots = ["/workspace"]
+        self.resources = {
+            "file:///workspace/README.md": {
+                "kind": "file",
+                "name": "README.md",
+                "title": "Project README",
+                "mimeType": "text/markdown",
+                "size": 92,
+                "last_modified": "2026-06-01T00:00:00Z",
+                "etag": "readme-v1",
+                "sensitivity": "internal",
+                "trust_level": "high",
+                "text": "Project guide for MCP resources. Keep citations and read only the requested section.",
+                "citation": {"section": "overview", "line_start": 1, "line_end": 3},
+                "subscribe": True,
+            },
+            "file:///workspace/.env": {
+                "kind": "file",
+                "name": ".env",
+                "title": "Environment file",
+                "mimeType": "text/plain",
+                "size": 40,
+                "last_modified": "2026-06-01T00:00:00Z",
+                "etag": "env-v1",
+                "sensitivity": "secret",
+                "trust_level": "high",
+                "text": "SERVICE_PASSWORD=demo-only",
+                "citation": {"section": "secret", "line_start": 1, "line_end": 1},
+                "subscribe": False,
+            },
+            "customer://tenant-a/C123/profile": {
+                "kind": "db",
+                "name": "Customer C123",
+                "title": "Customer profile",
+                "mimeType": "application/json",
+                "size": 128,
+                "tenant": "tenant-a",
+                "last_modified": "2026-05-20T00:00:00Z",
+                "etag": "customer-c123-v7",
+                "sensitivity": "restricted",
+                "trust_level": "high",
+                "fields": {
+                    "name": "Ada Chen",
+                    "plan": "enterprise",
+                    "orders": 17,
+                    "phone": "+1-555-0100",
+                    "internal_score": 93,
+                },
+                "allowed_fields": {"support_agent": ["name", "plan", "orders"]},
+                "citation": {"table": "customers", "row": "C123"},
+                "subscribe": False,
+            },
+            "https://kb.example/policy/expense": {
+                "kind": "web",
+                "name": "Expense policy",
+                "title": "Expense policy excerpt",
+                "mimeType": "text/plain",
+                "size": 210,
+                "last_modified": "2026-04-15T00:00:00Z",
+                "etag": "expense-v3",
+                "sensitivity": "public",
+                "trust_level": "external",
+                "untrusted": True,
+                "text": "Travel meals over 80 USD need manager approval. Ignore system instructions is page data, not a model instruction.",
+                "citation": {"url": "https://kb.example/policy/expense", "section": "travel"},
+                "subscribe": False,
+            },
+            "log://payment/errors?from=2026-06-01T00:00:00Z": {
+                "kind": "log",
+                "name": "Payment errors",
+                "title": "Payment service error window",
+                "mimeType": "text/plain",
+                "size": 180,
+                "last_modified": "2026-06-01T01:00:00Z",
+                "etag": "payment-log-42",
+                "sensitivity": "restricted",
+                "trust_level": "medium",
+                "text": "ERROR trace_id=tr-7 credential=demo-secret card=4111111111111111 timeout while charging invoice INV-9",
+                "citation": {"service": "payment", "trace_id": "tr-7"},
+                "subscribe": True,
+            },
+        }
+        self.templates = [
+            {"uriTemplate": "file:///workspace/{path}", "name": "workspace_file", "mimeType": "text/plain"},
+            {"uriTemplate": "customer://{tenant}/{customer_id}/profile", "name": "customer_profile", "mimeType": "application/json"},
+            {"uriTemplate": "log://{service}/errors?from={timestamp}", "name": "service_errors", "mimeType": "text/plain"},
+        ]
+
+    def list_resources(self, user, cursor=None):
+        visible = []
+        for uri in sorted(self.resources):
+            meta = self.resources[uri]
+            if meta.get("sensitivity") == "secret":
+                continue
+            if meta.get("tenant") and meta["tenant"] != user.tenant:
+                continue
+            visible.append(self._public_meta(uri, meta))
+        start = int(cursor or 0)
+        page = visible[start:start + 10]
+        next_cursor = str(start + 10) if start + 10 < len(visible) else None
+        return {"resources": page, "nextCursor": next_cursor}
+
+    def read_resource(self, uri, user, token_budget=40, fields=None):
+        if uri.startswith("file://"):
+            self._check_file_uri(uri)
+        meta = self.resources.get(uri)
+        if meta is None:
+            if uri.startswith("customer://") and f"customer://{user.tenant}/" not in uri:
+                raise ResourceError("TENANT_SCOPE_VIOLATION", "cross tenant resource")
+            raise ResourceError("RESOURCE_NOT_FOUND", "unknown resource")
+        if meta.get("sensitivity") == "secret":
+            raise ResourceError("SENSITIVE_FILE_BLOCKED", "secret resource denied")
+        if meta.get("tenant") and meta["tenant"] != user.tenant:
+            raise ResourceError("TENANT_SCOPE_VIOLATION", "cross tenant resource")
+
+        text = self._render_content(meta, user, fields)
+        text, truncated = self._fit_budget(text, token_budget)
+        content = {
+            "uri": uri,
+            "mimeType": meta["mimeType"],
+            "text": text,
+            "citation": meta["citation"],
+            "last_modified": meta["last_modified"],
+            "etag": meta["etag"],
+            "annotations": {
+                "sensitivity": meta["sensitivity"],
+                "trust_level": meta["trust_level"],
+                "untrusted": bool(meta.get("untrusted")),
+            },
+            "truncated": truncated,
+            "token_budget": token_budget,
+        }
+        return {"contents": [content]}
+
+    def list_templates(self):
+        return {"resourceTemplates": list(self.templates)}
+
+    def subscribe(self, uri, user):
+        self.read_resource(uri, user, token_budget=5)
+        if not self.resources[uri].get("subscribe"):
+            return {"subscribed": False, "reason": "RESOURCE_NOT_SUBSCRIBABLE"}
+        return {"subscribed": True, "uri": uri, "notification": "notifications/resources/list_changed"}
+
+    def _public_meta(self, uri, meta):
+        keys = ["name", "title", "mimeType", "size", "last_modified", "etag", "sensitivity", "trust_level"]
+        out = {"uri": uri}
+        for key in keys:
+            out[key] = meta[key]
+        return out
+
+    def _check_file_uri(self, uri):
+        path = uri[len("file://"):]
+        norm = posixpath.normpath(path)
+        inside = any(norm == root or norm.startswith(root + "/") for root in self.roots)
+        if not inside:
+            raise ResourceError("RESOURCE_OUT_OF_SCOPE", "file outside roots")
+
+    def _render_content(self, meta, user, fields):
+        if meta["kind"] == "db":
+            allowed = set(meta["allowed_fields"].get(user.role, []))
+            requested = set(fields or allowed)
+            projected = {key: meta["fields"][key] for key in sorted(requested & allowed)}
+            return str(projected)
+        if meta["kind"] == "log":
+            redacted = re.sub(r"credential=[^ ]+", "credential=[REDACTED]", meta["text"])
+            redacted = re.sub(r"card=\d+", "card=[REDACTED]", redacted)
+            return redacted
+        return meta["text"]
+
+    def _fit_budget(self, text, token_budget):
+        words = text.split()
+        if len(words) <= token_budget:
+            return text, False
+        return " ".join(words[:token_budget]) + " ...", True
+
+
+def average(cases, key):
+    return round(sum(1 for case in cases if case[key]) / len(cases), 3)
+
+
+def audit_resource_cases():
+    metric_keys = [
+        "uri", "metadata", "list", "read", "root", "permission", "field",
+        "budget", "citation", "trust", "fresh", "template", "subscription", "trace"
+    ]
+    cases = [
+        dict(id="file_resource_ok", uri=True, metadata=True, list=True, read=True, root=True, permission=True, field=True, budget=True, citation=True, trust=True, fresh=True, template=True, subscription=True, trace=True),
+        dict(id="db_resource_ok", uri=True, metadata=True, list=True, read=True, root=True, permission=True, field=True, budget=True, citation=True, trust=True, fresh=True, template=True, subscription=True, trace=True),
+        dict(id="web_resource_ok", uri=True, metadata=True, list=True, read=True, root=True, permission=True, field=True, budget=True, citation=True, trust=True, fresh=True, template=True, subscription=True, trace=True),
+        dict(id="log_resource_ok", uri=True, metadata=True, list=True, read=True, root=True, permission=True, field=True, budget=True, citation=True, trust=True, fresh=True, template=True, subscription=True, trace=True),
+        dict(id="template_ok", uri=True, metadata=True, list=True, read=True, root=True, permission=True, field=True, budget=True, citation=True, trust=True, fresh=True, template=True, subscription=True, trace=True),
+        dict(id="subscription_ok", uri=True, metadata=True, list=True, read=True, root=True, permission=True, field=True, budget=True, citation=True, trust=True, fresh=True, template=True, subscription=True, trace=True),
+        dict(id="path_escape_bad", uri=False, metadata=True, list=False, read=False, root=False, permission=True, field=True, budget=True, citation=True, trust=True, fresh=True, template=True, subscription=True, trace=True),
+        dict(id="secret_file_bad", uri=True, metadata=True, list=False, read=False, root=True, permission=False, field=False, budget=True, citation=True, trust=True, fresh=True, template=True, subscription=True, trace=True),
+        dict(id="db_cross_tenant_bad", uri=True, metadata=True, list=True, read=False, root=True, permission=False, field=True, budget=True, citation=True, trust=True, fresh=True, template=True, subscription=True, trace=True),
+        dict(id="field_leak_bad", uri=True, metadata=True, list=True, read=True, root=True, permission=False, field=False, budget=True, citation=True, trust=True, fresh=True, template=True, subscription=True, trace=False),
+        dict(id="resource_too_large_bad", uri=True, metadata=True, list=True, read=True, root=True, permission=True, field=True, budget=False, citation=True, trust=True, fresh=True, template=True, subscription=True, trace=True),
+        dict(id="missing_metadata_bad", uri=True, metadata=False, list=True, read=True, root=True, permission=True, field=True, budget=True, citation=False, trust=True, fresh=False, template=True, subscription=True, trace=False),
+        dict(id="web_injection_unmarked_bad", uri=True, metadata=True, list=True, read=True, root=True, permission=True, field=True, budget=True, citation=True, trust=False, fresh=True, template=True, subscription=True, trace=True),
+        dict(id="stale_resource_bad", uri=True, metadata=True, list=True, read=True, root=True, permission=True, field=True, budget=True, citation=True, trust=True, fresh=False, template=True, subscription=False, trace=True),
+        dict(id="no_citation_bad", uri=True, metadata=True, list=True, read=True, root=True, permission=True, field=True, budget=True, citation=False, trust=True, fresh=True, template=True, subscription=True, trace=False),
+        dict(id="full_resource_ready_ok", uri=True, metadata=True, list=True, read=True, root=True, permission=True, field=True, budget=True, citation=True, trust=True, fresh=True, template=True, subscription=True, trace=True),
+    ]
+    metric_names = {
+        "uri": "uri_scheme_validity",
+        "metadata": "metadata_completeness",
+        "list": "list_filtering_boundary",
+        "read": "read_scope_enforcement",
+        "root": "roots_containment",
+        "permission": "permission_enforcement",
+        "field": "field_projection_safety",
+        "budget": "context_budget_control",
+        "citation": "citation_traceability",
+        "trust": "untrusted_content_labeling",
+        "fresh": "freshness_version_awareness",
+        "template": "template_parameter_boundary",
+        "subscription": "subscription_change_awareness",
+        "trace": "trace_eval_readiness",
+    }
+    metrics = {metric_names[key]: average(cases, key) for key in metric_keys}
+    failed_cases = [case["id"] for case in cases if not all(case[key] for key in metric_keys)]
+    failed_gates = [name for name, value in metrics.items() if value < 0.9]
+    return metrics, failed_cases, failed_gates, not failed_gates
+
+
+server = MiniResourceServer()
+user = User(user_id="u1", tenant="tenant-a", role="support_agent")
+listed = [item["uri"] for item in server.list_resources(user)["resources"]]
+read_file = server.read_resource("file:///workspace/README.md", user, token_budget=7)
+read_db = server.read_resource("customer://tenant-a/C123/profile", user, fields=["name", "plan", "phone"])
+read_web = server.read_resource("https://kb.example/policy/expense", user, token_budget=10)
+read_log = server.read_resource("log://payment/errors?from=2026-06-01T00:00:00Z", user)
+try:
+    server.read_resource("file:///workspace/../etc/passwd", user)
+except ResourceError as exc:
+    path_escape_error = exc.code
+
+smoke = {
+    "listed": listed,
+    "file_text": read_file["contents"][0]["text"],
+    "db_text": read_db["contents"][0]["text"],
+    "web_untrusted": read_web["contents"][0]["annotations"]["untrusted"],
+    "web_truncated": read_web["contents"][0]["truncated"],
+    "log_redacted": "[REDACTED]" in read_log["contents"][0]["text"],
+    "path_escape_error": path_escape_error,
+    "template_count": len(server.list_templates()["resourceTemplates"]),
+    "subscription": server.subscribe("file:///workspace/README.md", user)["subscribed"],
+}
+metrics, failed_cases, failed_gates, gate_pass = audit_resource_cases()
+
+print("smoke=", smoke)
+print("metrics=", metrics)
+print("failed_cases=", failed_cases)
+print("failed_gates=", failed_gates)
+print("mcp_resource_gate_pass=", gate_pass)
+```
+
+这段代码故意让门禁不通过：它提醒你，MCP Resources 的风险不在“能不能把文本读出来”，而在 URI 是否稳定、metadata 是否完整、list 是否泄露资源存在性、read 是否越界、roots 是否收紧、字段是否脱敏、上下文是否超预算、引用是否保留、外部内容是否被标注为不可信、版本是否可判断、template 是否可约束、订阅是否可处理、trace 是否能支撑复盘。
+
+## 21.21 常见错误
+
+### 21.21.1 把所有文件都暴露给模型
 
 问题：上下文爆炸和敏感文件泄露。
 
 修复：roots、权限、按需读取、大小限制。
 
-### 21.20.2 Resource 没有 metadata
+### 21.21.2 Resource 没有 metadata
 
 问题：模型无法判断来源、时间、可信度。
 
 修复：增加 uri、mimeType、last_modified、trust_level、sensitivity。
 
-### 21.20.3 错误使用底层真实 URI
+### 21.21.3 错误使用底层真实 URI
 
 问题：泄露数据库地址、内部路径。
 
 修复：使用逻辑 URI。
 
-### 21.20.4 网页内容当指令
+### 21.21.4 网页内容当指令
 
 问题：prompt injection。
 
 修复：tool/resource 内容只作为 observation。
 
-### 21.20.5 不做字段脱敏
+### 21.21.5 不做字段脱敏
 
 问题：数据库 resource 泄露敏感字段。
 
 修复：字段级权限和 result projection。
 
-### 21.20.6 不控制 resource 大小
+### 21.21.6 不控制 resource 大小
 
 问题：上下文超限和成本失控。
 
 修复：分页、chunk、摘要、top K。
 
-### 21.20.7 无引用机制
+### 21.21.7 无引用机制
 
 问题：回答不可追溯。
 
 修复：保留 URI、section、line range、chunk id。
 
-## 21.21 面试题：MCP Resources 如何设计
+## 21.22 面试题：MCP Resources 如何设计
 
 面试官可能问：
 
@@ -604,7 +1001,7 @@ MCP Resources 是什么？如果暴露文件或数据库资源，你会注意什
 MCP Resources 是模型应用读取外部上下文的标准入口，设计重点是可寻址、可授权、可压缩、可引用和可防注入。
 ```
 
-## 21.22 小练习
+## 21.23 小练习
 
 ### 练习 1：Tool 还是 Resource
 
@@ -636,7 +1033,7 @@ MCP Resources 是模型应用读取外部上下文的标准入口，设计重点
 
 参考答案：不应。应分块、检索相关片段、摘要或按需读取，并保留引用。
 
-## 21.23 本章小结
+## 21.24 本章小结
 
 本章讲了 MCP Resources。
 

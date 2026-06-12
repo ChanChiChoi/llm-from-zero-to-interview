@@ -1,5 +1,18 @@
 # 第三章：Tool Schema、JSON Schema 与参数约束
 
+## 3.0 本讲资料边界与第二轮精修口径
+
+本讲第二轮精修时，按 `WRITING_PLAN.md` 的要求重新核对了 OpenAI function calling / structured outputs、Anthropic tool use、Google Gemini function calling 和 JSON Schema 官方资料。各家 API 字段名、strict 模式、schema 支持子集和工具执行流程会随平台演进而变化，所以正文只抽象稳定层：工具名称、工具描述、参数 schema、必填字段、类型、枚举、范围、字符串模式、额外字段限制、runtime 校验、业务校验、权限检查和 trace 审计。
+
+本讲不把某一家 provider 的当前字段名写成永久标准，也不把 JSON Schema 当作完整安全系统。更准确的边界是：
+
+1. Tool Schema 约束模型应如何生成结构化参数。
+2. JSON Schema 校验参数形状、类型和值域。
+3. runtime 负责解析、校验、修复、拒绝、追问和执行。
+4. 业务规则、权限、确认和审计负责判断“是否应该执行”。
+
+第二轮重点补强三件事：第一，把 required、type、enum、pattern、range、additionalProperties 和 business validation 拆成可量化指标；第二，补一个 0 依赖 Python demo，直接演示 schema-valid、schema-invalid、可安全修复和业务规则失败的差别；第三，同步百科、题库、练习、术语表、项目和知识图谱，方便后续章节继续复用这些指标。
+
 ## 3.1 本章定位
 
 上一章讲了 Function Calling 的输入输出协议：`messages`、`tools`、`tool_calls`、`tool_result`、`finish_reason` 和多轮 tool loop。
@@ -1268,7 +1281,382 @@ Tool Schema 不是写完就结束，要评估。
 
 修复：schema validation 后继续做业务校验、权限检查、确认和审计。
 
-## 3.29 面试题：如何设计一个好的 Tool Schema
+## 3.29 Schema 约束审计指标与最小 demo
+
+Tool Schema 不能只靠“看起来写得不错”来判断质量。生产系统至少要把 schema 约束拆成可统计指标。
+
+设第 `i` 条工具调用样本为：
+
+```math
+s_i=(t_i,a_i,V_i,B_i,r_i)
+```
+
+其中 `t_i` 是工具名，`a_i` 是模型生成的 arguments，`V_i` 是该工具的 JSON Schema validator，`B_i` 是业务校验器，`r_i` 是可选的安全修复或 normalization 结果。
+
+最常用的 schema 指标包括：
+
+```math
+R_{\mathrm{schema}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[V_i(a_i)=1]
+```
+
+其中 `R_schema` 是 schema 合法率，衡量 arguments 是否整体通过 JSON Schema 校验。
+
+```math
+R_{\mathrm{req}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[e_i^{\mathrm{req}}=0]
+```
+
+其中 `e_i^req` 表示第 `i` 条样本是否存在 required 字段缺失错误。
+
+```math
+R_{\mathrm{type}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[e_i^{\mathrm{type}}=0]
+```
+
+其中 `R_type` 衡量类型错误是否被压低。
+
+```math
+R_{\mathrm{enum}}=\frac{1}{N_{\mathrm{enum}}}\sum_{i=1}^{N_{\mathrm{enum}}}\mathbf{1}[e_i^{\mathrm{enum}}=0]
+```
+
+其中 `N_enum` 是包含 enum 约束且模型确实生成了对应字段的样本数。
+
+```math
+R_{\mathrm{pat}}=\frac{1}{N_{\mathrm{pat}}}\sum_{i=1}^{N_{\mathrm{pat}}}\mathbf{1}[e_i^{\mathrm{pat}}=0]
+```
+
+其中 `R_pat` 衡量日期、邮箱、ID 等字符串模式是否满足。
+
+```math
+R_{\mathrm{range}}=\frac{1}{N_{\mathrm{range}}}\sum_{i=1}^{N_{\mathrm{range}}}\mathbf{1}[e_i^{\mathrm{range}}=0]
+```
+
+其中 `R_range` 衡量 `top_k`、`limit`、`amount`、`timeout` 等数值范围是否可靠。
+
+```math
+B_{\mathrm{extra}}=\frac{1}{N_{\mathrm{extra}}}\sum_{i=1}^{N_{\mathrm{extra}}}\mathbf{1}[\mathrm{extra}_i \ \mathrm{blocked}]
+```
+
+其中 `B_extra` 衡量 `additionalProperties: false` 是否真的挡住了未知字段。
+
+```math
+R_{\mathrm{biz}}=\frac{1}{N_{\mathrm{valid}}}\sum_{i=1}^{N_{\mathrm{valid}}}\mathbf{1}[B_i(a_i)=1]
+```
+
+其中 `R_biz` 只在 schema 已通过的样本上统计业务规则通过率，用来提醒读者：schema valid 之后仍可能业务不合法。
+
+```math
+R_{\mathrm{repair}}=\frac{1}{N_{\mathrm{repair}}}\sum_{i=1}^{N_{\mathrm{repair}}}\mathbf{1}[V_i(r_i)=1 \wedge B_i(r_i)=1]
+```
+
+其中 `R_repair` 只统计允许安全修复的样本，例如大小写归一化、`P1` 到 `high` 的低风险映射、明确上下文中的“明天”到标准日期。高风险金额、收件人、删除范围不能为了提高 repair rate 而自动改。
+
+最后可以定义一个门禁：
+
+```math
+G_{\mathrm{schema}}=\mathbf{1}[
+R_{\mathrm{schema}}\ge \tau_s
+\wedge R_{\mathrm{req}}\ge \tau_q
+\wedge R_{\mathrm{type}}\ge \tau_t
+\wedge R_{\mathrm{enum}}\ge \tau_e
+\wedge R_{\mathrm{pat}}\ge \tau_p
+\wedge R_{\mathrm{range}}\ge \tau_r
+\wedge B_{\mathrm{extra}}\ge \tau_x
+\wedge R_{\mathrm{biz}}\ge \tau_b]
+```
+
+其中各个 `tau` 是上线阈值。真实系统里，高风险工具的阈值通常要比只读搜索工具更严格。
+
+下面是一个 0 依赖 demo。它只实现 JSON Schema 的一个教学子集：`type`、`required`、`properties`、`enum`、`minimum`、`maximum`、`pattern`、`additionalProperties`、数组长度和数组元素类型。真实系统应使用成熟 validator，但这个 demo 足够说明指标怎么算。
+
+```python
+import re
+from copy import deepcopy
+
+
+SCHEMAS = {
+    "search_docs": {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "minLength": 2, "maxLength": 200},
+            "top_k": {"type": "integer", "minimum": 1, "maximum": 10},
+            "source_type": {"type": "string", "enum": ["all", "product_doc", "runbook", "faq"]},
+        },
+        "required": ["query"],
+        "additionalProperties": False,
+    },
+    "get_weather": {
+        "type": "object",
+        "properties": {
+            "city": {"type": "string"},
+            "date": {"type": "string", "pattern": r"^\d{4}-\d{2}-\d{2}$"},
+            "units": {"type": "string", "enum": ["metric", "imperial"]},
+        },
+        "required": ["city", "date"],
+        "additionalProperties": False,
+    },
+    "create_ticket": {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "minLength": 1, "maxLength": 120},
+            "priority": {"type": "string", "enum": ["low", "medium", "high"]},
+            "category": {"type": "string", "enum": ["bug", "billing", "security"]},
+            "requester_email": {"type": "string", "pattern": r"^[^@\s]+@[^@\s]+\.[^@\s]+$"},
+            "security_reviewed": {"type": "boolean"},
+        },
+        "required": ["title", "priority", "category", "requester_email"],
+        "additionalProperties": False,
+    },
+}
+
+
+CALLS = [
+    {
+        "id": "search_ok",
+        "tool": "search_docs",
+        "arguments": {"query": "报销政策", "top_k": 5, "source_type": "faq"},
+    },
+    {
+        "id": "missing_required",
+        "tool": "search_docs",
+        "arguments": {"top_k": 3, "source_type": "faq"},
+    },
+    {
+        "id": "wrong_type",
+        "tool": "get_weather",
+        "arguments": {"city": 100, "date": "2026-06-11"},
+    },
+    {
+        "id": "bad_enum_repairable",
+        "tool": "create_ticket",
+        "arguments": {
+            "title": "登录失败",
+            "priority": "P1",
+            "category": "bug",
+            "requester_email": "alice@example.com",
+        },
+    },
+    {
+        "id": "extra_field_blocked",
+        "tool": "get_weather",
+        "arguments": {"city": "北京", "date": "2026-06-11", "include_private_calendar": True},
+    },
+    {
+        "id": "bad_pattern_repairable",
+        "tool": "get_weather",
+        "arguments": {"city": "北京", "date": "tomorrow"},
+    },
+    {
+        "id": "range_too_large",
+        "tool": "search_docs",
+        "arguments": {"query": "SLA", "top_k": 50, "source_type": "all"},
+    },
+    {
+        "id": "business_invalid",
+        "tool": "create_ticket",
+        "arguments": {
+            "title": "导出所有客户数据",
+            "priority": "high",
+            "category": "security",
+            "requester_email": "bob@example.com",
+            "security_reviewed": False,
+        },
+    },
+]
+
+
+def type_matches(value, expected):
+    if expected == "object":
+        return isinstance(value, dict)
+    if expected == "array":
+        return isinstance(value, list)
+    if expected == "string":
+        return isinstance(value, str)
+    if expected == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if expected == "number":
+        return (isinstance(value, int) or isinstance(value, float)) and not isinstance(value, bool)
+    if expected == "boolean":
+        return isinstance(value, bool)
+    if expected == "null":
+        return value is None
+    return True
+
+
+def validate(value, schema):
+    errors = []
+    expected_type = schema.get("type")
+    if expected_type and not type_matches(value, expected_type):
+        return ["type"]
+
+    if expected_type == "object":
+        properties = schema.get("properties", {})
+        for name in schema.get("required", []):
+            if name not in value:
+                errors.append("required")
+        if schema.get("additionalProperties") is False:
+            for name in value:
+                if name not in properties:
+                    errors.append("additional")
+        for name, child_schema in properties.items():
+            if name in value:
+                errors.extend(validate(value[name], child_schema))
+
+    if expected_type == "array":
+        if "minItems" in schema and len(value) < schema["minItems"]:
+            errors.append("array_length")
+        if "maxItems" in schema and len(value) > schema["maxItems"]:
+            errors.append("array_length")
+        if schema.get("uniqueItems") and len(set(map(repr, value))) != len(value):
+            errors.append("array_unique")
+        if "items" in schema:
+            for item in value:
+                errors.extend(validate(item, schema["items"]))
+
+    if expected_type == "string":
+        if "minLength" in schema and len(value) < schema["minLength"]:
+            errors.append("length")
+        if "maxLength" in schema and len(value) > schema["maxLength"]:
+            errors.append("length")
+        if "enum" in schema and value not in schema["enum"]:
+            errors.append("enum")
+        if "pattern" in schema and re.fullmatch(schema["pattern"], value) is None:
+            errors.append("pattern")
+
+    if expected_type in ("integer", "number"):
+        if "minimum" in schema and value < schema["minimum"]:
+            errors.append("range")
+        if "maximum" in schema and value > schema["maximum"]:
+            errors.append("range")
+
+    return errors
+
+
+def has_present_constraint(value, schema, constraint):
+    if not isinstance(value, dict) or schema.get("type") != "object":
+        return constraint in schema
+    for name, child_schema in schema.get("properties", {}).items():
+        if name in value and has_present_constraint(value[name], child_schema, constraint):
+            return True
+    return False
+
+
+def has_range_constraint(value, schema):
+    if not isinstance(value, dict) or schema.get("type") != "object":
+        return "minimum" in schema or "maximum" in schema
+    for name, child_schema in schema.get("properties", {}).items():
+        if name in value and has_range_constraint(value[name], child_schema):
+            return True
+    return False
+
+
+def has_extra_field(value, schema):
+    if schema.get("type") != "object" or not isinstance(value, dict):
+        return False
+    properties = schema.get("properties", {})
+    return any(name not in properties for name in value)
+
+
+def business_check(call):
+    if call["tool"] == "create_ticket":
+        args = call["arguments"]
+        if args.get("category") == "security" and args.get("priority") == "high":
+            if not args.get("security_reviewed"):
+                return False
+    return True
+
+
+def repair(call):
+    repaired = deepcopy(call)
+    args = repaired["arguments"]
+    changed = False
+    if repaired["tool"] == "create_ticket" and args.get("priority") == "P1":
+        args["priority"] = "high"
+        changed = True
+    if repaired["tool"] == "get_weather" and args.get("date") == "tomorrow":
+        args["date"] = "2026-06-11"
+        changed = True
+    return repaired if changed else None
+
+
+def rate(values):
+    return round(sum(values) / len(values), 3) if values else 1.0
+
+
+reports = []
+for call in CALLS:
+    schema = SCHEMAS[call["tool"]]
+    errors = sorted(set(validate(call["arguments"], schema)))
+    raw_valid = not errors
+    biz_ok = raw_valid and business_check(call)
+    fixed = repair(call)
+    repair_ok = False
+    if fixed:
+        fixed_errors = validate(fixed["arguments"], schema)
+        repair_ok = not fixed_errors and business_check(fixed)
+    reports.append({
+        "id": call["id"],
+        "errors": errors,
+        "schema_valid": raw_valid,
+        "business_ok": biz_ok,
+        "repair_attempted": fixed is not None,
+        "repair_ok": repair_ok,
+        "has_enum": has_present_constraint(call["arguments"], schema, "enum"),
+        "has_pattern": has_present_constraint(call["arguments"], schema, "pattern"),
+        "has_range": has_range_constraint(call["arguments"], schema),
+        "has_extra": has_extra_field(call["arguments"], schema),
+    })
+
+metrics = {
+    "schema_valid_rate": rate([r["schema_valid"] for r in reports]),
+    "required_field_pass_rate": rate(["required" not in r["errors"] for r in reports]),
+    "type_valid_rate": rate(["type" not in r["errors"] for r in reports]),
+    "enum_valid_rate": rate(["enum" not in r["errors"] for r in reports if r["has_enum"]]),
+    "pattern_valid_rate": rate(["pattern" not in r["errors"] for r in reports if r["has_pattern"]]),
+    "range_valid_rate": rate(["range" not in r["errors"] for r in reports if r["has_range"]]),
+    "additional_properties_block_rate": rate(["additional" in r["errors"] for r in reports if r["has_extra"]]),
+    "business_rule_pass_rate": rate([r["business_ok"] for r in reports if r["schema_valid"]]),
+    "repair_success_rate": rate([r["repair_ok"] for r in reports if r["repair_attempted"]]),
+}
+
+thresholds = {
+    "schema_valid_rate": 0.95,
+    "required_field_pass_rate": 0.98,
+    "type_valid_rate": 0.98,
+    "enum_valid_rate": 0.98,
+    "pattern_valid_rate": 0.98,
+    "range_valid_rate": 0.98,
+    "additional_properties_block_rate": 1.0,
+    "business_rule_pass_rate": 0.99,
+    "repair_success_rate": 0.90,
+}
+failed_gates = [name for name, threshold in thresholds.items() if metrics[name] < threshold]
+
+print("metrics=", metrics)
+print("schema_failures=", {r["id"]: r["errors"] for r in reports if r["errors"]})
+print("business_failures=", [r["id"] for r in reports if r["schema_valid"] and not r["business_ok"]])
+print("repaired_calls=", [r["id"] for r in reports if r["repair_ok"]])
+print("failed_gates=", failed_gates)
+print("schema_gate_pass=", not failed_gates)
+```
+
+这段 demo 的预期输出类似：
+
+```text
+metrics= {'schema_valid_rate': 0.25, 'required_field_pass_rate': 0.875, 'type_valid_rate': 0.875, 'enum_valid_rate': 0.8, 'pattern_valid_rate': 0.8, 'range_valid_rate': 0.667, 'additional_properties_block_rate': 1.0, 'business_rule_pass_rate': 0.5, 'repair_success_rate': 1.0}
+schema_failures= {'missing_required': ['required'], 'wrong_type': ['type'], 'bad_enum_repairable': ['enum'], 'extra_field_blocked': ['additional'], 'bad_pattern_repairable': ['pattern'], 'range_too_large': ['range']}
+business_failures= ['business_invalid']
+repaired_calls= ['bad_enum_repairable', 'bad_pattern_repairable']
+failed_gates= ['schema_valid_rate', 'required_field_pass_rate', 'type_valid_rate', 'enum_valid_rate', 'pattern_valid_rate', 'range_valid_rate', 'business_rule_pass_rate']
+schema_gate_pass= False
+```
+
+这个结果说明四件事：
+
+1. `schema_valid_rate` 很低，证明模型参数生成或 schema 约束仍有明显问题。
+2. `additional_properties_block_rate=1.0` 是好事，说明额外字段被挡住了。
+3. `business_invalid` 通过了 schema，但业务规则不允许执行，证明 schema validation 不能替代业务校验。
+4. `bad_enum_repairable` 和 `bad_pattern_repairable` 可以安全修复，但这类修复必须白名单化，不能把高风险参数也自动改掉。
+
+## 3.30 面试题：如何设计一个好的 Tool Schema
 
 面试官可能问：
 
@@ -1325,7 +1713,7 @@ Tool Schema 不是写完就结束，要评估。
 好的 Tool Schema 应该让模型容易选对工具、生成正确参数，让 runtime 能严格校验和安全执行，让平台能版本管理、审计和评估。
 ```
 
-## 3.30 小练习
+## 3.31 小练习
 
 ### 练习 1：改进搜索工具
 
@@ -1383,7 +1771,7 @@ schema 要求 `date` 是 `YYYY-MM-DD`。
 
 参考答案：因为它把底层通用执行能力交给模型，存在越权、大查询、敏感字段泄露、错误 SQL 和审计困难等风险。更好的方式是设计业务语义明确的受控查询工具，用 enum、日期范围、权限和聚合维度约束查询空间。
 
-## 3.31 本章小结
+## 3.32 本章小结
 
 本章讲了 Tool Schema、JSON Schema 与参数约束。
 

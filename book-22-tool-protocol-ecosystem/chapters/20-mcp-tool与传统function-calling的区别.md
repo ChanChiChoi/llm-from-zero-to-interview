@@ -1,5 +1,11 @@
 # 第二十章：MCP Tool 与传统 Function Calling 的区别
 
+## 20.0 本讲资料边界与第二轮精修口径
+
+本讲第二轮精修时，参考 MCP 官方 2025-06-18 specification 中 tools、resources、prompts、lifecycle、transport 的协议口径，OpenAI function calling / tools / structured outputs 的模型 API 口径，以及 OpenAI Agents SDK 中 MCP server 接入、tool filtering、approval、tracing 和 hosted / streamable HTTP / stdio server 的工程抽象。正文只讨论稳定分层：模型 API 层的 function calling、Host / runtime 层的工具执行、MCP Client / Server 层的能力发现与连接，不把某一家 provider 的字段名、某个 SDK 的装饰器、某个 IDE 配置或某个 MCP server 模板写成通用标准。
+
+本章新增公式和 demo 只用于面试与工程审计：它们帮助判断一个回答是否真正区分了 Function Calling 与 MCP Tool 的层次、发现方式、能力范围、执行边界、adapter、生命周期、安全和选型 trade-off。真实项目中，MCP Tool 常常会被 Host 投影成模型 API 的 function / tool schema；这说明二者可以组合，不说明二者是同一个协议层。
+
 ## 20.1 本章定位
 
 前面讲了 MCP 的背景、基本概念和最小 server。本章专门回答一个高频问题：MCP Tool 和传统 Function Calling 到底有什么区别？
@@ -410,29 +416,261 @@ Executor calls MCP Server or internal API
 
 三者分工清楚。
 
-## 20.19 常见误区
+## 20.19 MCP Tool / Function Calling 对比指标与最小 demo
 
-### 20.19.1 MCP 替代 Function Calling
+面试里常见的浅回答是：MCP Tool 也是一个 tool，Function Calling 也是一个 tool，所以差不多。这个回答的问题在于没有区分协议层次。可以把第 `i` 个对比样本记为：
+
+```math
+d_i=(l_i,f_i,u_i,e_i,p_i,a_i,v_i,g_i,s_i,q_i,z_i)
+```
+
+其中 `l_i` 表示协议层次是否清晰，`f_i` 表示工具来源和发现方式，`u_i` 表示 tools / resources / prompts 能力范围，`e_i` 表示执行边界，`p_i` 表示 MCP Tool 到 provider function calling tool 的投影映射，`a_i` 表示 Provider Adapter 和 MCP Adapter 是否分离，`v_i` 表示生命周期与版本意识，`g_i` 表示治理接入，`s_i` 表示安全边界，`q_i` 表示选型 trade-off，`z_i` 表示 trace、错误和可用性证据。
+
+统一覆盖率可以写成：
+
+```math
+C_k=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[d_i\ \mathrm{passes}\ k]
+```
+
+这一章重点看这些门禁：
+
+```math
+C_{\mathrm{layer}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{model\ API\ layer\ and\ MCP\ layer\ are\ separated}]
+```
+
+```math
+C_{\mathrm{discover}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{tool\ discovery\ boundary\ is\ clear}]
+```
+
+```math
+C_{\mathrm{scope}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{tools\ resources\ prompts\ scope\ is\ covered}]
+```
+
+```math
+C_{\mathrm{exec}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{execution\ boundary\ is\ explicit}]
+```
+
+```math
+C_{\mathrm{proj}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{MCP\ tool\ projection\ is\ mapped}]
+```
+
+```math
+C_{\mathrm{adapter}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{provider\ adapter\ and\ MCP\ adapter\ are\ separated}]
+```
+
+```math
+C_{\mathrm{life}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{lifecycle\ and\ version\ change\ are\ handled}]
+```
+
+```math
+C_{\mathrm{gov}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{MCP\ tools\ enter\ governance\ registry}]
+```
+
+```math
+C_{\mathrm{safe}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{security\ boundary\ is\ enforced}]
+```
+
+```math
+C_{\mathrm{choice}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{use\ case\ selection\ is\ justified}]
+```
+
+```math
+C_{\mathrm{error}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{error\ surface\ is\ separated}]
+```
+
+```math
+C_{\mathrm{avail}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{latency\ and\ availability\ tradeoff\ is\ considered}]
+```
+
+综合门禁：
+
+```math
+G_{\mathrm{mcp\_fc}}=\mathbf{1}\left[
+\min_k C_k \ge \tau
+\right]
+```
+
+这里 `\tau` 不是协议标准，而是教学审计阈值。回答 MCP 与 Function Calling 区别时，`C_{\mathrm{layer}}`、`C_{\mathrm{scope}}`、`C_{\mathrm{exec}}` 和 `C_{\mathrm{proj}}` 是最关键的四项：说不清这四项，基本就是把 MCP 当成另一种工具调用字段。
+
+下面的 demo 不实现真实 MCP 或真实 provider API，只演示三件事：
+
+1. MCP Tool 可以被 Host 投影成 provider tool。
+2. 模型返回的 provider tool call 可以被 Host 映射回 MCP `tools/call`。
+3. 对比二者时要同时检查协议层、发现层、能力层、执行层和治理层。
+
+```python
+from dataclasses import dataclass
+from typing import Any
+
+
+def project_mcp_tool_to_provider(server_name: str, tool: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "name": f"{server_name}.{tool['name']}",
+        "description": f"[from MCP server {server_name}] {tool['description']}",
+        "parameters": tool["input_schema"],
+        "source": {"protocol": "mcp", "server": server_name, "tool": tool["name"]},
+    }
+
+
+def map_provider_call_to_mcp(tool_call: dict[str, Any]) -> dict[str, Any]:
+    server_name, tool_name = tool_call["name"].split(".", 1)
+    return {
+        "server": server_name,
+        "method": "tools/call",
+        "params": {"name": tool_name, "arguments": tool_call["arguments"]},
+    }
+
+
+def bridge_smoke_test() -> dict[str, Any]:
+    mcp_server = {
+        "name": "kb",
+        "tools": [
+            {
+                "name": "search_docs",
+                "description": "Search approved knowledge base documents.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                    "additionalProperties": False,
+                },
+            }
+        ],
+        "resources": ["kb://policy/refund"],
+        "prompts": ["summarize_policy"],
+    }
+    provider_tool = project_mcp_tool_to_provider(mcp_server["name"], mcp_server["tools"][0])
+    provider_call = {"name": "kb.search_docs", "arguments": {"query": "refund policy"}}
+    mcp_call = map_provider_call_to_mcp(provider_call)
+    return {
+        "provider_tool_name": provider_tool["name"],
+        "provider_tool_source": provider_tool["source"],
+        "mcp_call": mcp_call,
+        "has_resources": bool(mcp_server["resources"]),
+        "has_prompts": bool(mcp_server["prompts"]),
+        "adapter_layers": ["mcp_adapter", "tool_registry", "provider_adapter"],
+    }
+
+
+@dataclass
+class CompareCase:
+    name: str
+    protocol_layer: bool = True
+    discovery_boundary: bool = True
+    capability_scope: bool = True
+    execution_boundary: bool = True
+    projection_mapping: bool = True
+    adapter_separation: bool = True
+    lifecycle_version: bool = True
+    governance_registry: bool = True
+    security_boundary: bool = True
+    use_case_selection: bool = True
+    error_surface: bool = True
+    latency_availability: bool = True
+
+
+CASES = [
+    CompareCase("simple_function_calling_ok"),
+    CompareCase("mcp_discovery_ok"),
+    CompareCase("resources_prompts_ok"),
+    CompareCase("projection_chain_ok"),
+    CompareCase("adapter_registry_ok"),
+    CompareCase("fc_equals_mcp_bad", protocol_layer=False, capability_scope=False),
+    CompareCase("mcp_replaces_fc_bad", projection_mapping=False, protocol_layer=False),
+    CompareCase("server_direct_to_model_bad", protocol_layer=False, execution_boundary=False),
+    CompareCase("discovery_auto_trust_bad", discovery_boundary=False, governance_registry=False, security_boundary=False),
+    CompareCase("resources_ignored_bad", capability_scope=False),
+    CompareCase("schema_trust_bad", governance_registry=False, security_boundary=False),
+    CompareCase("no_registry_import_bad", adapter_separation=False, governance_registry=False),
+    CompareCase("adapter_mixed_bad", adapter_separation=False, projection_mapping=False),
+    CompareCase("lifecycle_ignored_bad", lifecycle_version=False, error_surface=False, latency_availability=False),
+    CompareCase("latency_tradeoff_ignored_bad", use_case_selection=False, latency_availability=False),
+    CompareCase("full_boundary_ready_ok"),
+]
+
+
+METRIC_FIELDS = {
+    "protocol_layer_clarity": "protocol_layer",
+    "tool_discovery_boundary": "discovery_boundary",
+    "capability_scope_coverage": "capability_scope",
+    "execution_boundary_clarity": "execution_boundary",
+    "projection_mapping_coverage": "projection_mapping",
+    "adapter_separation_coverage": "adapter_separation",
+    "lifecycle_version_awareness": "lifecycle_version",
+    "governance_registry_import": "governance_registry",
+    "security_boundary_enforcement": "security_boundary",
+    "use_case_selection_fit": "use_case_selection",
+    "error_surface_separation": "error_surface",
+    "latency_availability_tradeoff": "latency_availability",
+}
+
+
+def ratio(values: list[bool]) -> float:
+    return round(sum(values) / len(values), 3)
+
+
+def audit_compare_cases(cases: list[CompareCase], threshold: float = 0.9) -> dict[str, Any]:
+    metrics = {
+        metric: ratio([getattr(case, field) for case in cases])
+        for metric, field in METRIC_FIELDS.items()
+    }
+    failed_cases = [
+        case.name
+        for case in cases
+        if not all(getattr(case, field) for field in METRIC_FIELDS.values())
+    ]
+    failed_gates = [metric for metric, value in metrics.items() if value < threshold]
+    return {
+        "metrics": metrics,
+        "failed_cases": failed_cases,
+        "failed_gates": failed_gates,
+        "mcp_function_calling_gate_pass": not failed_gates,
+    }
+
+
+print("bridge=", bridge_smoke_test())
+report = audit_compare_cases(CASES)
+print("metrics=", report["metrics"])
+print("failed_cases=", report["failed_cases"])
+print("failed_gates=", report["failed_gates"])
+print("mcp_function_calling_gate_pass=", report["mcp_function_calling_gate_pass"])
+```
+
+一组输出示例：
+
+```text
+bridge= {'provider_tool_name': 'kb.search_docs', 'provider_tool_source': {'protocol': 'mcp', 'server': 'kb', 'tool': 'search_docs'}, 'mcp_call': {'server': 'kb', 'method': 'tools/call', 'params': {'name': 'search_docs', 'arguments': {'query': 'refund policy'}}}, 'has_resources': True, 'has_prompts': True, 'adapter_layers': ['mcp_adapter', 'tool_registry', 'provider_adapter']}
+metrics= {'protocol_layer_clarity': 0.812, 'tool_discovery_boundary': 0.938, 'capability_scope_coverage': 0.875, 'execution_boundary_clarity': 0.938, 'projection_mapping_coverage': 0.875, 'adapter_separation_coverage': 0.875, 'lifecycle_version_awareness': 0.938, 'governance_registry_import': 0.812, 'security_boundary_enforcement': 0.875, 'use_case_selection_fit': 0.938, 'error_surface_separation': 0.938, 'latency_availability_tradeoff': 0.875}
+failed_cases= ['fc_equals_mcp_bad', 'mcp_replaces_fc_bad', 'server_direct_to_model_bad', 'discovery_auto_trust_bad', 'resources_ignored_bad', 'schema_trust_bad', 'no_registry_import_bad', 'adapter_mixed_bad', 'lifecycle_ignored_bad', 'latency_tradeoff_ignored_bad']
+failed_gates= ['protocol_layer_clarity', 'capability_scope_coverage', 'projection_mapping_coverage', 'adapter_separation_coverage', 'governance_registry_import', 'security_boundary_enforcement', 'latency_availability_tradeoff']
+mcp_function_calling_gate_pass= False
+```
+
+这个 demo 的关键不是 `kb.search_docs` 这个命名，而是桥接责任：MCP Adapter 负责把 MCP Server 暴露的能力导入内部 Registry，Provider Adapter 负责把内部 ToolSpec 投影成模型 API 需要的 tool schema。模型输出的 tool call 仍要由 Host 映射回 MCP `tools/call`，并经过权限、安全、trace 和错误规范化。
+
+## 20.20 常见误区
+
+### 20.20.1 MCP 替代 Function Calling
 
 不准确。MCP Tool 常常仍需要被 Host 投影成模型 API 的 function/tool call。
 
-### 20.19.2 Function Calling 替代 MCP
+### 20.20.2 Function Calling 替代 MCP
 
 也不准确。Function Calling 不解决跨客户端能力发现、resources、prompts 和本地 server 生态问题。
 
-### 20.19.3 MCP Server 暴露工具后模型自动安全
+### 20.20.3 MCP Server 暴露工具后模型自动安全
 
 错误。Host 和企业平台仍要做权限、安全、确认和审计。
 
-### 20.19.4 MCP 一定更好
+### 20.20.4 MCP 一定更好
 
 不一定。小系统直接 function calling 更简单，MCP 引入了 server、transport 和连接治理复杂度。
 
-### 20.19.5 MCP Tool 不需要 Registry
+### 20.20.5 MCP Tool 不需要 Registry
 
 企业场景不建议。MCP Tool 应映射到 Registry 统一治理。
 
-## 20.20 面试题：MCP Tool 与 Function Calling 的区别
+## 20.21 面试题：MCP Tool 与 Function Calling 的区别
 
 面试官可能问：
 
@@ -480,7 +718,7 @@ MCP Tool 和 OpenAI/Anthropic 这类 Function Calling 有什么区别？
 Function Calling 是模型调用工具的语言，MCP 是工具和上下文接入模型应用的连接协议。
 ```
 
-## 20.21 小练习
+## 20.22 小练习
 
 ### 练习 1：协议层次
 
@@ -512,7 +750,7 @@ Function Calling 是否原生解决 resources 和 prompts？
 
 参考答案：不应该。应把 MCP tools 映射进 Registry，统一做权限、安全、trace、eval 和发布治理。
 
-## 20.22 本章小结
+## 20.23 本章小结
 
 本章讲了 MCP Tool 与传统 Function Calling 的区别。
 

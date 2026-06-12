@@ -10,6 +10,18 @@
 
 > 跨 Agent 协作系统的核心不是“让很多 Agent 聊天”，而是让不同能力边界的 Agent 在可控上下文、可追踪任务和可治理权限下完成协同工作。
 
+## 49.0 本讲资料边界与第二轮精修口径
+
+本讲按 `WRITING_PLAN.md` 做第二轮精修，资料口径对齐 A2A Protocol 1.0 规范中 Agent Card、Task、Message、Part、Artifact、TaskState、streaming / push notification、认证授权和企业治理相关公开边界，同时复用前文 Agent Card 服务发现、A2A 任务委派、A2A 消息边界、A2A/MCP 分工、跨 Agent 安全、多 Agent 失败治理、A2A 系统设计和企业 MCP 工具平台已经建立的审计口径。
+
+需要先划清三条边界。
+
+1. A2A 解决 Agent 到 Agent 的任务协作，不等于普通聊天协议，也不替代 MCP。跨 Agent 系统里，A2A 管任务、消息、状态和产物；MCP 管 Agent 内部访问工具、资源和 prompt。
+2. 协作系统可以有内部状态，例如 `created`、`planned`、`assigned`、`running`、`waiting_for_approval` 和 `timed_out`，但对外协议状态要能映射到 A2A 的 `submitted`、`working`、`input-required`、`auth-required`、`completed`、`failed`、`canceled`、`rejected` 等稳定语义。
+3. 本章只讨论合规的企业跨 Agent 协作系统设计，不提供绕过授权、转交工具凭据、隐藏审计、跨租户访问、诱导下游 Agent 执行危险动作、规避人工审批或伪造 trace / eval 的方法。
+
+第二轮重点不是重复前面每个 A2A 子主题，而是把系统设计题落到可验收门禁：任务图是否有效、Agent 发现和路由是否受治理、上下文是否最小化、委派权限是否衰减、MCP 工具权限是否不被转交、产物和证据是否可追溯、冲突和循环是否可终止、是否证明多 Agent 比单 Agent 或固定 workflow 更适合。
+
 ## 49.1 面试题描述
 
 题目可以这样问：
@@ -306,13 +318,19 @@ Artifact 示例：
 
 ## 49.10 任务生命周期
 
-一个任务可以有如下状态：
+系统内部可以维护比协议更细的状态，例如：
 
 ```text
 created -> planned -> assigned -> running -> waiting_for_input -> waiting_for_approval -> completed
                                       -> failed
-                                      -> cancelled
+                                      -> canceled
                                       -> timed_out
+```
+
+但对外进入 A2A Runtime 时，要映射到稳定 TaskState，例如：
+
+```text
+submitted -> working -> input-required / auth-required -> completed / failed / canceled / rejected
 ```
 
 常见状态解释：
@@ -321,12 +339,12 @@ created -> planned -> assigned -> running -> waiting_for_input -> waiting_for_ap
 2. planned：任务已被拆解。
 3. assigned：已分配给某个 Agent。
 4. running：Agent 正在处理。
-5. waiting_for_input：缺少必要信息。
-6. waiting_for_approval：高风险动作等待人工确认。
+5. waiting_for_input：内部等待输入状态，对外可映射为 `input-required`。
+6. waiting_for_approval：内部等待审批状态，对外可映射为 `auth-required` 或平台自定义审批事件。
 7. completed：完成并产生 artifact。
 8. failed：失败，可重试或转人工。
-9. cancelled：被用户或系统取消。
-10. timed_out：超过截止时间。
+9. canceled：被用户或系统取消。
+10. timed_out：超过截止时间，通常映射为 `failed` 并带上 timeout 错误分类，或者由平台记录内部超时原因。
 
 状态机很重要，因为它决定了系统能否可靠恢复。没有状态机，多 Agent 协作会变成不可控的长对话。
 
@@ -770,7 +788,181 @@ Human Review Console 应展示：
 重点风险包括循环委派、冲突升级、幻觉传播、上下文泄露和权限放大。我会用任务深度限制、委派图环检测、证据引用、策略引擎、人工审批和审计回放来控制这些风险。
 ```
 
-## 49.24 常见扣分回答
+## 49.24 跨 Agent 协作系统审计指标与最小 demo
+
+系统设计题里，跨 Agent 协作最容易被讲成“一个主 Agent 调多个子 Agent”。第二轮精修时建议把它变成可审计对象：每个 root task、subtask、Agent Card、Message、Artifact、Policy decision、MCP tool call、human approval 和 final answer 都要能串起来。
+
+把第 `i` 个跨 Agent 协作设计样本写成：
+
+$$
+a_i=(q_i,G_i,A_i,T_i,M_i,C_i,P_i,U_i,O_i,H_i,E_i,B_i,z_i)
+$$
+
+其中：
+
+1. `q_i` 表示用户目标、需求澄清、成功标准和风险假设。
+2. `G_i` 表示任务图，包括子任务、依赖、深度、循环检查和终止条件。
+3. `A_i` 表示 Agent Card、Registry、能力发现、路由和版本治理。
+4. `T_i` 表示 A2A Task / Message / Artifact / TaskState 的协议契约。
+5. `M_i` 表示 MCP 工具平台边界和下游工具权限治理。
+6. `C_i` 表示 Context Manager 的最小上下文、脱敏、source / trust / taint 标注。
+7. `P_i` 表示 OBO 权限、权限衰减、租户隔离、高风险审批和策略链。
+8. `U_i` 表示冲突仲裁、claim 类型、证据引用、置信度和限制说明。
+9. `O_i` 表示 trace、audit、replay、artifact lineage 和责任链。
+10. `H_i` 表示人工接管、审批台、终止策略和失败恢复。
+11. `E_i` 表示 offline eval、trace replay、baseline、回归集和安全切片。
+12. `B_i` 表示成本、延迟、并发、幂等、背压和扩展性预算。
+13. `z_i` 表示租户、风险等级、数据分类、上线状态和版本标签。
+
+对任意审计项 `j`，定义谓词 `g_j(a_i)`：如果样本 `a_i` 通过第 `j` 项检查则为 1，否则为 0。统一通过率写成：
+
+$$
+C_j=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[g_j(a_i)=1]
+$$
+
+多 Agent 协作里有两类指标要单独看。第一类是不安全协作放行率：
+
+$$
+R_{\mathrm{unsafe\_collab}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{unsafe\_collab}_i=1]
+$$
+
+第二类是不必要多 Agent 化率：
+
+$$
+R_{\mathrm{unnecessary}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{unnecessary\_multi\_agent}_i=1]
+$$
+
+系统上线门禁可以写成：
+
+$$
+G_{\mathrm{cross\_agent}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land R_{\mathrm{unsafe\_collab}}=0 \land R_{\mathrm{unnecessary}}=0 \land P_0=0\right]
+$$
+
+这里 `P_0` 是硬阻断问题数量，例如任务图有环、上下文整包广播、下游权限放大、MCP 工具凭据被转交、trace 断链、循环委派无终止、人审缺失或 eval 只测最终答案。直觉是：多 Agent 不是越多越高级，必须同时证明“值得多 Agent”“不会越权”“证据可追踪”“失败可终止”。
+
+下面的 0 依赖 demo 用 toy case 演示如何把跨 Agent 协作系统设计变成审计门禁。
+
+```python
+CHECKS = [
+    ("requirement_goal_clarity", "Requirements, root goal, success criteria and risk assumptions are explicit."),
+    ("collaboration_module_coverage", "Orchestrator, planner, registry, runtime, context, policy, tool gateway and observability exist."),
+    ("agent_registry_routing_governance", "Agent discovery and routing use card fields, tenant, permission, health, cost and version."),
+    ("task_graph_validity", "Task graph is acyclic, dependency-aware, bounded and retryable per subtask."),
+    ("a2a_lifecycle_alignment", "External states align with submitted/working/input-required/auth-required/completed/failed/canceled/rejected."),
+    ("context_minimization_enforcement", "Every assignee receives minimal, redacted, sourced and policy-labeled context."),
+    ("permission_attenuation_binding", "Delegation uses OBO scopes and downstream permissions only shrink."),
+    ("mcp_tool_boundary_governance", "Agent delegation never transfers upstream MCP tool credentials or raw tool access."),
+    ("artifact_evidence_grounding", "Outputs are artifact-backed with source refs, confidence and limitations."),
+    ("conflict_arbitration_readiness", "Conflicts trigger evidence comparison, domain authority, verifier or human review."),
+    ("hallucination_propagation_control", "Claims keep type, evidence and confidence so hypotheses do not become facts."),
+    ("delegation_loop_containment", "Delegation graph has loop detection, max depth and termination policy."),
+    ("human_handoff_approval_readiness", "High-risk, ambiguous or repeatedly failing tasks can reach a review console."),
+    ("trace_audit_replay_coverage", "Trace links root task, subtasks, agents, messages, policies, tools, artifacts and final answer."),
+    ("eval_baseline_regression_coverage", "Eval compares single-agent/workflow baselines and includes regression/safety slices."),
+    ("cost_latency_budget_control", "Root task budgets cover agents, depth, subtasks, tool calls, tokens, cost and deadline."),
+    ("scalability_idempotency_readiness", "Runtime has idempotency, event sequence, queueing, backpressure and health handling."),
+    ("collaboration_fit_overengineering_control", "The design avoids multi-agent orchestration when a single agent or workflow is sufficient."),
+]
+
+
+def good_checks():
+    return {name: True for name, _ in CHECKS}
+
+
+def case(name, failed=None, unsafe=False, unnecessary=False):
+    checks = good_checks()
+    if failed:
+        checks[failed] = False
+    return {"name": name, "checks": checks, "unsafe": unsafe, "unnecessary": unnecessary}
+
+
+CASES = [
+    case("complete_cross_agent_system"),
+    case("requirements_missing_bad", "requirement_goal_clarity"),
+    case("modules_missing_bad", "collaboration_module_coverage"),
+    case("registry_routing_bad", "agent_registry_routing_governance"),
+    case("task_graph_cycle_bad", "task_graph_validity"),
+    case("a2a_lifecycle_misaligned_bad", "a2a_lifecycle_alignment"),
+    case("context_broadcast_bad", "context_minimization_enforcement", unsafe=True),
+    case("permission_amplification_bad", "permission_attenuation_binding", unsafe=True),
+    case("mcp_tool_permission_leak_bad", "mcp_tool_boundary_governance", unsafe=True),
+    case("artifact_evidence_missing_bad", "artifact_evidence_grounding"),
+    case("conflict_unresolved_bad", "conflict_arbitration_readiness"),
+    case("hallucination_propagated_bad", "hallucination_propagation_control"),
+    case("delegation_loop_bad", "delegation_loop_containment"),
+    case("human_handoff_missing_bad", "human_handoff_approval_readiness"),
+    case("trace_replay_missing_bad", "trace_audit_replay_coverage"),
+    case("eval_baseline_missing_bad", "eval_baseline_regression_coverage"),
+    case("budget_unbounded_bad", "cost_latency_budget_control"),
+    case("idempotency_missing_bad", "scalability_idempotency_readiness"),
+    case("unnecessary_multi_agent_bad", "collaboration_fit_overengineering_control", unnecessary=True),
+]
+
+
+def audit_cross_agent_system(cases, threshold=0.95):
+    total = len(cases)
+    metrics = {
+        name: round(sum(1 for item in cases if item["checks"].get(name, False)) / total, 3)
+        for name, _ in CHECKS
+    }
+    failed_cases = [item["name"] for item in cases if not all(item["checks"].values())]
+    failed_gates = [name for name, value in metrics.items() if value < threshold]
+    unsafe_rate = round(sum(1 for item in cases if item["unsafe"]) / total, 3)
+    unnecessary_rate = round(sum(1 for item in cases if item["unnecessary"]) / total, 3)
+    hard_blocker_count = len(failed_cases)
+    gate_pass = (
+        min(metrics.values()) >= threshold
+        and unsafe_rate == 0
+        and unnecessary_rate == 0
+        and hard_blocker_count == 0
+    )
+    smoke = {
+        "complete_case_passes": all(cases[0]["checks"].values()),
+        "caught_task_cycle": "task_graph_cycle_bad" in failed_cases,
+        "caught_permission_amplification": "permission_amplification_bad" in failed_cases,
+        "caught_loop": "delegation_loop_bad" in failed_cases,
+        "caught_overengineering": "unnecessary_multi_agent_bad" in failed_cases,
+    }
+    return {
+        "smoke": smoke,
+        "metrics": metrics,
+        "unsafe_collaboration_rate": unsafe_rate,
+        "unnecessary_multi_agent_rate": unnecessary_rate,
+        "hard_blocker_count": hard_blocker_count,
+        "failed_cases": failed_cases,
+        "failed_gates": failed_gates,
+        "cross_agent_collaboration_gate_pass": gate_pass,
+    }
+
+
+if __name__ == "__main__":
+    report = audit_cross_agent_system(CASES)
+    print("smoke=", report["smoke"])
+    print("metrics=", report["metrics"])
+    print("unsafe_collaboration_rate=", report["unsafe_collaboration_rate"])
+    print("unnecessary_multi_agent_rate=", report["unnecessary_multi_agent_rate"])
+    print("hard_blocker_count=", report["hard_blocker_count"])
+    print("failed_cases=", report["failed_cases"])
+    print("failed_gates=", report["failed_gates"])
+    print("cross_agent_collaboration_gate_pass=", report["cross_agent_collaboration_gate_pass"])
+```
+
+一次运行的输出形态如下：
+
+```text
+smoke= {'complete_case_passes': True, 'caught_task_cycle': True, 'caught_permission_amplification': True, 'caught_loop': True, 'caught_overengineering': True}
+metrics= {'requirement_goal_clarity': 0.947, 'collaboration_module_coverage': 0.947, 'agent_registry_routing_governance': 0.947, 'task_graph_validity': 0.947, 'a2a_lifecycle_alignment': 0.947, 'context_minimization_enforcement': 0.947, 'permission_attenuation_binding': 0.947, 'mcp_tool_boundary_governance': 0.947, 'artifact_evidence_grounding': 0.947, 'conflict_arbitration_readiness': 0.947, 'hallucination_propagation_control': 0.947, 'delegation_loop_containment': 0.947, 'human_handoff_approval_readiness': 0.947, 'trace_audit_replay_coverage': 0.947, 'eval_baseline_regression_coverage': 0.947, 'cost_latency_budget_control': 0.947, 'scalability_idempotency_readiness': 0.947, 'collaboration_fit_overengineering_control': 0.947}
+unsafe_collaboration_rate= 0.158
+unnecessary_multi_agent_rate= 0.053
+hard_blocker_count= 18
+failed_cases= ['requirements_missing_bad', 'modules_missing_bad', 'registry_routing_bad', 'task_graph_cycle_bad', 'a2a_lifecycle_misaligned_bad', 'context_broadcast_bad', 'permission_amplification_bad', 'mcp_tool_permission_leak_bad', 'artifact_evidence_missing_bad', 'conflict_unresolved_bad', 'hallucination_propagated_bad', 'delegation_loop_bad', 'human_handoff_missing_bad', 'trace_replay_missing_bad', 'eval_baseline_missing_bad', 'budget_unbounded_bad', 'idempotency_missing_bad', 'unnecessary_multi_agent_bad']
+failed_gates= ['requirement_goal_clarity', 'collaboration_module_coverage', 'agent_registry_routing_governance', 'task_graph_validity', 'a2a_lifecycle_alignment', 'context_minimization_enforcement', 'permission_attenuation_binding', 'mcp_tool_boundary_governance', 'artifact_evidence_grounding', 'conflict_arbitration_readiness', 'hallucination_propagation_control', 'delegation_loop_containment', 'human_handoff_approval_readiness', 'trace_audit_replay_coverage', 'eval_baseline_regression_coverage', 'cost_latency_budget_control', 'scalability_idempotency_readiness', 'collaboration_fit_overengineering_control']
+cross_agent_collaboration_gate_pass= False
+```
+
+面试里可以这样解释这段 demo：跨 Agent 系统不是把 Agent 连起来就完事，而是要把任务图、路由、状态、上下文、权限、MCP 边界、证据、冲突、循环、人审、trace、eval、预算和扩展性都变成可检查项。只要出现上下文广播、权限放大、工具凭据转交、循环委派或简单任务过度多 Agent 化，就应该阻断或降级。
+
+## 49.25 常见扣分回答
 
 扣分回答一：只说“用一个主 Agent 调多个子 Agent”。
 
@@ -796,7 +988,7 @@ Human Review Console 应展示：
 
 多 Agent 系统在生产中很容易出现互相调用、互相否定和重复重试。
 
-## 49.25 面试题
+## 49.26 面试题
 
 ### 题 1：跨 Agent 系统为什么需要 Task，而不是只需要 Message？
 
@@ -818,7 +1010,7 @@ Human Review Console 应展示：
 
 答：A2A 处理 Agent 之间的任务委派、状态同步、消息交换和结果返回。MCP 处理 Agent 与工具/资源之间的连接，例如数据库、知识库、代码仓库和终端。二者处在不同层，Policy Engine 和 Trace 系统横跨两层。
 
-## 49.26 小练习
+## 49.27 小练习
 
 练习一：设计一个客服跨 Agent 系统。
 
@@ -836,7 +1028,7 @@ Human Review Console 应展示：
 
 要求：构造 5 类任务，分别评估任务拆解、Agent 选择、上下文裁剪、结果聚合和失败恢复。
 
-## 49.27 本章小结
+## 49.28 本章小结
 
 本章用系统设计题串起了跨 Agent 协作系统。
 

@@ -1,5 +1,17 @@
 # 第十七章：MCP 出现的背景：模型与外部上下文的标准化连接
 
+## 17.0 本讲资料边界与第二轮精修口径
+
+本讲按 `WRITING_PLAN.md` 的第二轮要求，先对齐 MCP 官方介绍、MCP 2025-06-18 specification 中 lifecycle、tools、resources、prompts、authorization、logging 等口径，以及 OpenAI Agents SDK 对 MCP server 接入的工程抽象。MCP 官方定位是让应用以标准方式向 LLM 提供上下文；本章只讲它为什么出现、解决什么集成问题、和 Function Calling / HTTP API / 插件 / 企业工具平台 / A2A 的边界，不展开后续章节会细讲的 MCP Client、Server、Tool、Resource、Prompt、权限、本地沙箱和企业 MCP 平台实现。
+
+本章不是协议字段手册，也不把某个 MCP server、某个 SDK、某家模型 provider、某个 IDE 插件或某个云服务的实现细节写成通用标准。对面试来说，你要掌握的是：MCP 的历史动机来自模型应用与外部上下文之间的集成爆炸；它提供的是 Host / Client / Server 之间的连接协议；它统一暴露 tools、resources 和 prompts；它降低重复适配，但不替代权限、安全、trace、eval 和企业治理。
+
+第二轮精修重点放在三件事：
+
+1. 用简单公式解释没有协议时的集成爆炸，以及 MCP 这种 client-server 协议带来的适配成本下降。
+2. 用指标区分“只是接了几个工具 demo”和“真的具备 MCP 背景所要求的标准化连接能力”。
+3. 增加 0 依赖 Python demo，用 toy case 审计一个方案是否真正解决 Function Calling 局限、HTTP API 局限、插件锁定、本地上下文、server 边界、MCP / A2A 区分和治理接入问题。
+
 ## 17.1 本章定位
 
 前两部分讲了 Function Calling 和企业工具平台。本章开始进入 MCP 协议生态。
@@ -398,29 +410,376 @@ MCP 为什么出现？它解决了什么问题？
 MCP 的出现，是为了把模型应用连接外部工具和上下文的方式从各自为战的插件集成，推进到统一协议和可复用生态。
 ```
 
-## 17.16 常见误区
+## 17.16 MCP 背景指标与最小 demo
 
-### 17.16.1 MCP 等于 Function Calling
+MCP 背景题最容易答成“某个新协议可以调用工具”。更完整的回答应该能量化两个问题：
+
+1. 它为什么比每个客户端自己接每个系统更可扩展。
+2. 它是否真的覆盖模型应用需要的上下文对象、协议边界和治理证据。
+
+假设有 `H` 个 host application，有 `S` 个外部系统，有 `K` 类上下文能力，例如 tools、resources、prompts。没有统一协议时，最粗略的适配数量是：
+
+```math
+N_{\mathrm{direct}}=|H|\cdot |S|\cdot |K|
+```
+
+如果 host 侧统一实现 MCP Client，外部系统侧统一暴露 MCP Server，适配数量近似变成：
+
+```math
+N_{\mathrm{mcp}}=|H|+|S|
+```
+
+标准化带来的集成减少比例可以写成：
+
+```math
+R_{\mathrm{int}}=1-\frac{N_{\mathrm{mcp}}}{N_{\mathrm{direct}}}
+```
+
+这里的公式不是精确成本模型，而是帮助你讲清楚“集成爆炸”为什么会出现，以及为什么开放协议能降低重复适配。
+
+对一个 MCP 背景审计样本，可以写成：
+
+```math
+m_i=(h_i,s_i,k_i,d_i,b_i,l_i,g_i,t_i,z_i)
+```
+
+其中，`h_i` 是 host / client 场景，`s_i` 是外部系统，`k_i` 是 tools / resources / prompts 等能力集合，`d_i` 是 discovery / schema / capability negotiation 信息，`b_i` 是 host-server 边界，`l_i` 是本地上下文控制，`g_i` 是权限、安全和企业治理接入，`t_i` 是 trace / eval 证据，`z_i` 是问题标签。
+
+常见指标可以写成统一形式：
+
+```math
+C_j=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[q_j(m_i)=1]
+```
+
+其中，`q_j(m_i)` 是第 `j` 类能力是否满足的检查函数。对 MCP 背景题，建议重点看：
+
+```math
+C_{\mathrm{cap}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{tools\ resources\ prompts\ modeled}_i]
+```
+
+```math
+C_{\mathrm{ctx}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{context\ objects\ not\ only\ function\ calls}_i]
+```
+
+```math
+C_{\mathrm{disc}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{standard\ discovery\ path}_i]
+```
+
+```math
+C_{\mathrm{schema}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{schema\ and\ message\ contract}_i]
+```
+
+```math
+C_{\mathrm{boundary}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{host\ client\ server\ boundary}_i]
+```
+
+```math
+C_{\mathrm{local}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{local\ context\ controlled}_i]
+```
+
+```math
+C_{\mathrm{reuse}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{cross\ client\ reuse}_i]
+```
+
+```math
+C_{\mathrm{gov}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{governance\ boundary\ clear}_i]
+```
+
+```math
+C_{\mathrm{trace}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{trace\ eval\ readiness}_i]
+```
+
+```math
+C_{\mathrm{a2a}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{MCP\ A2A\ distinction}_i]
+```
+
+综合门禁可以写成：
+
+```math
+G_{\mathrm{mcp\_bg}}=\mathbf{1}[R_{\mathrm{int}}\ge \tau_{\mathrm{int}}]\cdot
+\mathbf{1}[C_{\mathrm{cap}}\ge \tau_{\mathrm{cap}}]\cdot
+\mathbf{1}[C_{\mathrm{ctx}}\ge \tau_{\mathrm{ctx}}]\cdot
+\mathbf{1}[C_{\mathrm{disc}}\ge \tau_{\mathrm{disc}}]\cdot
+\mathbf{1}[C_{\mathrm{schema}}\ge \tau_{\mathrm{schema}}]\cdot
+\mathbf{1}[C_{\mathrm{boundary}}\ge \tau_{\mathrm{boundary}}]\cdot
+\mathbf{1}[C_{\mathrm{local}}\ge \tau_{\mathrm{local}}]\cdot
+\mathbf{1}[C_{\mathrm{reuse}}\ge \tau_{\mathrm{reuse}}]\cdot
+\mathbf{1}[C_{\mathrm{gov}}\ge \tau_{\mathrm{gov}}]\cdot
+\mathbf{1}[C_{\mathrm{trace}}\ge \tau_{\mathrm{trace}}]\cdot
+\mathbf{1}[C_{\mathrm{a2a}}\ge \tau_{\mathrm{a2a}}]
+```
+
+下面的 demo 用 toy 审计样本说明：一个方案如果只做 Function Calling、只包装 HTTP API、绑定单个平台插件、让 server 直接连模型、缺 resources / prompts、缺本地权限控制、把 MCP 当成 A2A 或没有 trace / eval，都不能算真正理解 MCP 出现的背景。
+
+```python
+clients = ["chat_app", "ide_agent", "data_agent", "support_agent", "office_agent"]
+systems = ["files", "git", "database", "browser", "kb", "ticket", "email", "calendar"]
+capability_types = ["tools", "resources", "prompts"]
+
+direct_integrations = len(clients) * len(systems) * len(capability_types)
+mcp_integrations = len(clients) + len(systems)
+integration_cost = {
+    "direct": direct_integrations,
+    "mcp": mcp_integrations,
+    "reduction": round(1 - mcp_integrations / direct_integrations, 3),
+}
+
+checks = [
+    "capability_model_coverage",
+    "context_object_coverage",
+    "discovery_standardization",
+    "schema_contract_coverage",
+    "host_server_boundary_clarity",
+    "local_context_control",
+    "cross_client_reuse",
+    "governance_boundary_clarity",
+    "trace_eval_readiness",
+    "mcp_a2a_distinction",
+]
+
+cases = [
+    {
+        "name": "function_calling_limit_ok",
+        "capability_model_coverage": True,
+        "context_object_coverage": True,
+        "discovery_standardization": True,
+        "schema_contract_coverage": True,
+        "host_server_boundary_clarity": True,
+        "local_context_control": True,
+        "cross_client_reuse": True,
+        "governance_boundary_clarity": True,
+        "trace_eval_readiness": True,
+        "mcp_a2a_distinction": True,
+    },
+    {
+        "name": "integration_explosion_ok",
+        "capability_model_coverage": True,
+        "context_object_coverage": True,
+        "discovery_standardization": True,
+        "schema_contract_coverage": True,
+        "host_server_boundary_clarity": True,
+        "local_context_control": True,
+        "cross_client_reuse": True,
+        "governance_boundary_clarity": True,
+        "trace_eval_readiness": True,
+        "mcp_a2a_distinction": True,
+    },
+    {
+        "name": "host_server_boundary_ok",
+        "capability_model_coverage": True,
+        "context_object_coverage": True,
+        "discovery_standardization": True,
+        "schema_contract_coverage": True,
+        "host_server_boundary_clarity": True,
+        "local_context_control": True,
+        "cross_client_reuse": True,
+        "governance_boundary_clarity": True,
+        "trace_eval_readiness": True,
+        "mcp_a2a_distinction": True,
+    },
+    {
+        "name": "tools_resources_prompts_ok",
+        "capability_model_coverage": True,
+        "context_object_coverage": True,
+        "discovery_standardization": True,
+        "schema_contract_coverage": True,
+        "host_server_boundary_clarity": True,
+        "local_context_control": True,
+        "cross_client_reuse": True,
+        "governance_boundary_clarity": True,
+        "trace_eval_readiness": True,
+        "mcp_a2a_distinction": True,
+    },
+    {
+        "name": "local_context_control_ok",
+        "capability_model_coverage": True,
+        "context_object_coverage": True,
+        "discovery_standardization": True,
+        "schema_contract_coverage": True,
+        "host_server_boundary_clarity": True,
+        "local_context_control": True,
+        "cross_client_reuse": True,
+        "governance_boundary_clarity": True,
+        "trace_eval_readiness": True,
+        "mcp_a2a_distinction": True,
+    },
+    {
+        "name": "only_function_calling_bad",
+        "capability_model_coverage": True,
+        "context_object_coverage": False,
+        "discovery_standardization": False,
+        "schema_contract_coverage": True,
+        "host_server_boundary_clarity": True,
+        "local_context_control": True,
+        "cross_client_reuse": False,
+        "governance_boundary_clarity": True,
+        "trace_eval_readiness": True,
+        "mcp_a2a_distinction": True,
+    },
+    {
+        "name": "raw_http_api_bad",
+        "capability_model_coverage": False,
+        "context_object_coverage": True,
+        "discovery_standardization": False,
+        "schema_contract_coverage": False,
+        "host_server_boundary_clarity": True,
+        "local_context_control": True,
+        "cross_client_reuse": True,
+        "governance_boundary_clarity": True,
+        "trace_eval_readiness": True,
+        "mcp_a2a_distinction": True,
+    },
+    {
+        "name": "platform_plugin_lockin_bad",
+        "capability_model_coverage": True,
+        "context_object_coverage": True,
+        "discovery_standardization": True,
+        "schema_contract_coverage": True,
+        "host_server_boundary_clarity": True,
+        "local_context_control": True,
+        "cross_client_reuse": False,
+        "governance_boundary_clarity": True,
+        "trace_eval_readiness": True,
+        "mcp_a2a_distinction": True,
+    },
+    {
+        "name": "server_direct_to_model_bad",
+        "capability_model_coverage": True,
+        "context_object_coverage": True,
+        "discovery_standardization": True,
+        "schema_contract_coverage": True,
+        "host_server_boundary_clarity": False,
+        "local_context_control": True,
+        "cross_client_reuse": True,
+        "governance_boundary_clarity": True,
+        "trace_eval_readiness": True,
+        "mcp_a2a_distinction": True,
+    },
+    {
+        "name": "missing_resources_bad",
+        "capability_model_coverage": True,
+        "context_object_coverage": False,
+        "discovery_standardization": True,
+        "schema_contract_coverage": True,
+        "host_server_boundary_clarity": True,
+        "local_context_control": True,
+        "cross_client_reuse": True,
+        "governance_boundary_clarity": True,
+        "trace_eval_readiness": True,
+        "mcp_a2a_distinction": True,
+    },
+    {
+        "name": "local_context_no_permission_bad",
+        "capability_model_coverage": True,
+        "context_object_coverage": True,
+        "discovery_standardization": True,
+        "schema_contract_coverage": True,
+        "host_server_boundary_clarity": True,
+        "local_context_control": False,
+        "cross_client_reuse": True,
+        "governance_boundary_clarity": False,
+        "trace_eval_readiness": True,
+        "mcp_a2a_distinction": True,
+    },
+    {
+        "name": "a2a_confused_bad",
+        "capability_model_coverage": True,
+        "context_object_coverage": True,
+        "discovery_standardization": True,
+        "schema_contract_coverage": True,
+        "host_server_boundary_clarity": True,
+        "local_context_control": True,
+        "cross_client_reuse": True,
+        "governance_boundary_clarity": True,
+        "trace_eval_readiness": True,
+        "mcp_a2a_distinction": False,
+    },
+    {
+        "name": "no_trace_eval_bad",
+        "capability_model_coverage": True,
+        "context_object_coverage": True,
+        "discovery_standardization": True,
+        "schema_contract_coverage": True,
+        "host_server_boundary_clarity": True,
+        "local_context_control": True,
+        "cross_client_reuse": True,
+        "governance_boundary_clarity": True,
+        "trace_eval_readiness": False,
+        "mcp_a2a_distinction": True,
+    },
+    {
+        "name": "full_mcp_background_ready_ok",
+        "capability_model_coverage": True,
+        "context_object_coverage": True,
+        "discovery_standardization": True,
+        "schema_contract_coverage": True,
+        "host_server_boundary_clarity": True,
+        "local_context_control": True,
+        "cross_client_reuse": True,
+        "governance_boundary_clarity": True,
+        "trace_eval_readiness": True,
+        "mcp_a2a_distinction": True,
+    },
+]
+
+
+def pass_rate(key):
+    return round(sum(1 for case in cases if case[key]) / len(cases), 3)
+
+
+metrics = {key: pass_rate(key) for key in checks}
+failed_cases = [
+    case["name"]
+    for case in cases
+    if any(case[key] is False for key in checks)
+]
+failed_gates = [key for key, value in metrics.items() if value < 1.0]
+mcp_background_gate_pass = (
+    integration_cost["reduction"] >= 0.8 and not failed_gates
+)
+
+print("integration_cost=", integration_cost)
+print("metrics=", metrics)
+print("failed_cases=", failed_cases)
+print("failed_gates=", failed_gates)
+print("mcp_background_gate_pass=", mcp_background_gate_pass)
+```
+
+一组稳定输出如下：
+
+```text
+integration_cost= {'direct': 120, 'mcp': 13, 'reduction': 0.892}
+metrics= {'capability_model_coverage': 0.929, 'context_object_coverage': 0.857, 'discovery_standardization': 0.857, 'schema_contract_coverage': 0.929, 'host_server_boundary_clarity': 0.929, 'local_context_control': 0.929, 'cross_client_reuse': 0.857, 'governance_boundary_clarity': 0.929, 'trace_eval_readiness': 0.929, 'mcp_a2a_distinction': 0.929}
+failed_cases= ['only_function_calling_bad', 'raw_http_api_bad', 'platform_plugin_lockin_bad', 'server_direct_to_model_bad', 'missing_resources_bad', 'local_context_no_permission_bad', 'a2a_confused_bad', 'no_trace_eval_bad']
+failed_gates= ['capability_model_coverage', 'context_object_coverage', 'discovery_standardization', 'schema_contract_coverage', 'host_server_boundary_clarity', 'local_context_control', 'cross_client_reuse', 'governance_boundary_clarity', 'trace_eval_readiness', 'mcp_a2a_distinction']
+mcp_background_gate_pass= False
+```
+
+这段 demo 想表达的核心不是“公式越多越好”，而是：MCP 的背景题可以被转化成一个标准化连接审计。如果候选人只能说“它能调用工具”，但讲不清 resources、prompts、host / client / server、跨客户端复用、本地上下文权限、企业治理和 A2A 边界，就还没有真正理解 MCP 为什么出现。
+
+## 17.17 常见误区
+
+### 17.17.1 MCP 等于 Function Calling
 
 不对。Function Calling 主要是模型 API 表达工具调用。MCP 是 client 和 server 之间暴露 tools、resources、prompts 的协议。
 
-### 17.16.2 MCP Server 直接连模型
+### 17.17.2 MCP Server 直接连模型
 
 通常不是。MCP Server 连接 MCP Client / Host Application，Host 再把能力提供给模型使用。
 
-### 17.16.3 有 MCP 就不需要权限
+### 17.17.3 有 MCP 就不需要权限
 
 不对。MCP 提供连接方式，不替代企业权限、安全和审计。
 
-### 17.16.4 MCP 只适合远程 API
+### 17.17.4 MCP 只适合远程 API
 
 不对。MCP 很适合本地上下文，例如文件系统、IDE、Git 仓库、本地数据库。
 
-### 17.16.5 MCP 是 Agent-to-Agent 协议
+### 17.17.5 MCP 是 Agent-to-Agent 协议
 
 不准确。MCP 更偏 Agent-to-Tool / Agent-to-Context。Agent-to-Agent 通信更接近 A2A 讨论范围。
 
-## 17.17 小练习
+## 17.18 小练习
 
 ### 练习 1：Function Calling 与 MCP
 
@@ -452,7 +811,13 @@ MCP 和 A2A 如何区分？
 
 参考答案：MCP 偏 Agent-to-Tool / Agent-to-Context，A2A 偏 Agent-to-Agent 通信和任务委派。
 
-## 17.18 本章小结
+### 练习 6：MCP 背景审计
+
+给一个方案做 MCP 背景审计：它只把 HTTP API 包装成工具，没有 resources、prompts、discovery、host / server 边界、权限和 trace。它解决了 MCP 背景中的哪些问题？还缺什么？
+
+参考答案：它只解决了“能调用某个动作”的一小部分问题，没有解决模型上下文对象统一、能力发现、跨客户端复用、本地上下文控制、server 权限、安全审计、trace / eval 和 MCP / A2A 边界。因此不能把它说成完整 MCP 方案。
+
+## 17.19 本章小结
 
 本章讲了 MCP 出现的背景。
 
@@ -467,6 +832,7 @@ MCP 和 A2A 如何区分？
 7. MCP 对本地上下文、IDE、文件系统、Git、数据库等场景很有价值。
 8. MCP 不替代权限、安全、trace、eval 和企业治理。
 9. MCP 与 A2A 的区别是 Agent-to-Context 与 Agent-to-Agent。
+10. MCP 背景可以用 direct integrations、MCP integrations、integration reduction、capability coverage、context object coverage、discovery、schema、boundary、local context、reuse、governance、trace 和 A2A distinction 等指标解释。
 
 如果只记一句话：
 

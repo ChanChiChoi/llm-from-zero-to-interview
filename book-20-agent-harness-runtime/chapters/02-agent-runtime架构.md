@@ -1,5 +1,17 @@
 # 第二章：Agent Runtime 架构
 
+## 0. 本讲资料边界与第二轮精修口径
+
+本讲第二轮精修前，重点核对了 OpenAI Agents SDK 关于 run lifecycle、sessions、tracing、guardrails、tool execution 和 handoff 的公开文档，OpenAI Agents SDK tracing 对 LLM generation、tool call、handoff、guardrail 和 custom event 的记录口径，Claude Code hooks / permissions / skills / MCP 等公开说明中对生命周期事件、权限请求、工具前后置处理和会话扩展点的描述，OpenHands runtime / sandbox / evaluation 公开资料，以及 SWE-agent / mini-SWE-agent 围绕 agent-computer interface、工具交互、仓库导航、测试执行和 SWE-bench 评估的公开资料。
+
+因此，本章只讨论 agent runtime 的工程内核：session 和 task 如何隔离，context 如何构造，模型调用如何适配，动作如何解析和修复，工具如何调度，错误如何分类恢复，状态如何 checkpoint，trace 如何支持 replay。它不是某个具体产品的内部实现，不提供绕过权限、规避沙箱、执行危险命令或读取敏感文件的方法。
+
+第二轮新增内容聚焦三点：
+
+1. 把 runtime 从“一个 while loop”拆成可审计的 step：session isolation、phase transition、context budget、adapter retry、action parse repair、execution result、error handling、checkpoint、trace 和 cancel / timeout。
+2. 用公式说明 runtime 可靠性不是最终答案分数，而是状态机、错误恢复和 replay 证据共同构成。
+3. 补充一个 0 依赖 Python demo，用 toy runtime step 日志输出 runtime gate、root causes 和修复优先级。
+
 ## 2.1 本章目标
 
 第一章从整体上解释了 harness 是什么：它是把模型能力变成可执行系统的工程层。本章进一步拆解 runtime 架构，也就是一个 agent 在真实环境里如何被调度、执行、观察、恢复和记录。
@@ -735,6 +747,413 @@ def run_agent(session_id, user_request):
 误区五：权限系统放到工具内部即可。
 
 纠正：权限策略应集中管理，工具内部可以二次校验，但不能每个工具各写一套规则。
+
+## 2.21.1 关键公式与 Runtime 运行指标速查
+
+把第 `i` 个 session 中第 `j` 个 task 的第 `t` 个 runtime step 抽象为：
+
+$$
+u_{i,j,t}=(s_i,q_j,\phi_{j,t},c_{j,t},m_{j,t},a_{j,t},e_{j,t},r_{j,t},k_{j,t},\ell_{j,t})
+$$
+
+其中，`s_i` 是 session，`q_j` 是 task，`\phi_{j,t}` 是 runtime phase，`c_{j,t}` 是 context，`m_{j,t}` 是模型调用，`a_{j,t}` 是解析后的 action，`e_{j,t}` 是 execution result，`r_{j,t}` 是 error / recovery 决策，`k_{j,t}` 是 checkpoint，`\ell_{j,t}` 是 trace event。
+
+定义指示函数：
+
+$$
+I(z)=
+\begin{cases}
+1,& z=\mathrm{true}\\
+0,& z=\mathrm{false}
+\end{cases}
+$$
+
+Session 隔离率：
+
+$$
+R_{\mathrm{iso}}=1-\frac{N_{\mathrm{cross}}}{N_{\mathrm{access}}}
+$$
+
+其中，`N_cross` 是跨 session 读取上下文、状态、权限或工具结果的违规次数，`N_access` 是所有 session 资源访问次数。这个指标应该接近 1。
+
+状态转移合法率：
+
+$$
+A_{\mathrm{phase}}=\frac{1}{N}\sum_{j,t} I((\phi_{j,t},\phi_{j,t+1})\in P_{\mathrm{valid}})
+$$
+
+其中，`P_valid` 是 runtime 状态机允许的转移集合。比如 `EXECUTING_ACTION -> OBSERVING_RESULT -> UPDATING_STATE` 是正常路径，`EXECUTING_ACTION -> COMPLETED` 但没有 observation 和验证就很可疑。
+
+Context 预算通过率：
+
+$$
+C_{\mathrm{ctx}}=\frac{1}{N}\sum_{j,t} I(T(c_{j,t})\le B_{\mathrm{ctx}})I(R(c_{j,t})\ge R_{\min})
+$$
+
+其中，`T(c)` 是 context token 数，`B_ctx` 是预算，`R(c)` 是与当前 phase 相关的必要信息覆盖率。上下文不是越多越好，要同时满足预算和相关性。
+
+模型适配成功率：
+
+$$
+S_{\mathrm{adapter}}=\frac{N_{\mathrm{model\_ok}}}{N_{\mathrm{model\_call}}}
+$$
+
+它统计模型 adapter 是否成功完成消息格式转换、tool schema 注入、streaming 收集、错误标准化和重试。模型 API 失败不是 runtime 失败，但 adapter 必须把失败转成结构化事件。
+
+动作解析恢复率：
+
+$$
+R_{\mathrm{parse\_recover}}=\frac{N_{\mathrm{parse\_fixed}}}{N_{\mathrm{parse\_error}}}
+$$
+
+其中，`N_parse_error` 是非法 action 输出次数，`N_parse_fixed` 是通过自动修复、重新询问模型或返回 observation 后成功恢复的次数。恢复率低说明 action parser 和模型输出协议需要重构。
+
+执行结果标准化率：
+
+$$
+C_{\mathrm{exec}}=\frac{1}{N_{\mathrm{exec}}}\sum_{j,t} I(e_{j,t}\ \mathrm{has}\ status,stdout,stderr,exit,kind)
+$$
+
+工具结果必须结构化，否则模型、trace、evaluation 和 error handler 都无法稳定使用。
+
+错误恢复成功率：
+
+$$
+S_{\mathrm{recover}}=\frac{N_{\mathrm{recovered}}}{N_{\mathrm{error}}}
+$$
+
+这里的恢复不是“盲目 retry”，而是按错误类型采取 repair、retry、ask user、rollback、degrade 或 abort，并且最终状态一致。
+
+Checkpoint 覆盖率：
+
+$$
+C_{\mathrm{ckpt}}=\frac{N_{\mathrm{checkpointed}}}{N_{\mathrm{mutating}}+N_{\mathrm{long}}}
+$$
+
+其中，`N_mutating` 是写文件、应用 patch、更新状态等会改变环境的步骤数，`N_long` 是长命令或长任务步骤数。没有 checkpoint，session 中断后很难安全恢复。
+
+取消 / 超时处理覆盖率：
+
+$$
+C_{\mathrm{cancel}}=\frac{N_{\mathrm{cancel\_handled}}+N_{\mathrm{timeout\_handled}}}{N_{\mathrm{cancel}}+N_{\mathrm{timeout}}}
+$$
+
+取消不是简单停止输出，runtime 还要处理子进程、部分输出、文件 diff、trace 状态和恢复点。
+
+Runtime 门禁可以写成：
+
+$$
+G_{\mathrm{runtime}}=I(R_{\mathrm{iso}}\ge 0.99)I(A_{\mathrm{phase}}\ge 0.95)I(C_{\mathrm{ctx}}\ge 0.90)I(S_{\mathrm{adapter}}\ge 0.95)I(C_{\mathrm{exec}}\ge 0.95)I(S_{\mathrm{recover}}\ge 0.70)I(C_{\mathrm{ckpt}}\ge 0.90)I(C_{\mathrm{cancel}}\ge 0.80)
+$$
+
+这个门禁强调 runtime 的工程可靠性：能不能隔离 session，能不能按状态机运行，能不能把失败变成可恢复状态，能不能从 checkpoint 和 trace 重放，而不是只看模型某次回答是否正确。
+
+## 2.21.2 最小可运行 Runtime Step 审计 demo
+
+下面的 demo 用 toy runtime step 日志审计一个 agent runtime。它不调用模型，也不执行真实命令，只检查 runtime 事件是否满足 session 隔离、状态机、context budget、adapter、parser、execution result、error handling、checkpoint、cancel / timeout 和 trace 要求。
+
+```python
+from pprint import pprint
+
+VALID_TRANSITIONS = {
+    ("RECEIVED_TASK", "BUILDING_CONTEXT"),
+    ("BUILDING_CONTEXT", "CALLING_MODEL"),
+    ("CALLING_MODEL", "PARSING_ACTION"),
+    ("PARSING_ACTION", "WAITING_PERMISSION"),
+    ("PARSING_ACTION", "COMPLETED"),
+    ("WAITING_PERMISSION", "EXECUTING_ACTION"),
+    ("WAITING_PERMISSION", "CANCELLED"),
+    ("EXECUTING_ACTION", "OBSERVING_RESULT"),
+    ("EXECUTING_ACTION", "FAILED"),
+    ("OBSERVING_RESULT", "UPDATING_STATE"),
+    ("UPDATING_STATE", "BUILDING_CONTEXT"),
+    ("UPDATING_STATE", "COMPLETED"),
+}
+
+REQUIRED_EXEC_FIELDS = {"status", "stdout", "stderr", "exit_code", "error_type"}
+REQUIRED_TRACE_FIELDS = {
+    "session",
+    "task",
+    "phase",
+    "context",
+    "model",
+    "action",
+    "execution",
+    "recovery",
+    "checkpoint",
+    "budget",
+}
+
+steps = [
+    {
+        "id": "s1:t_login:1",
+        "session": "s1",
+        "task": "t_login",
+        "phase": "RECEIVED_TASK",
+        "next_phase": "BUILDING_CONTEXT",
+        "resource_session": "s1",
+        "context_tokens": 1200,
+        "context_relevance": 0.92,
+        "model_ok": True,
+        "parse_error": False,
+        "parse_fixed": False,
+        "exec_fields": set(),
+        "error": False,
+        "recovered": False,
+        "mutating": False,
+        "long_running": False,
+        "checkpointed": True,
+        "cancel_or_timeout": False,
+        "cancel_handled": False,
+        "trace_fields": REQUIRED_TRACE_FIELDS,
+    },
+    {
+        "id": "s1:t_login:2",
+        "session": "s1",
+        "task": "t_login",
+        "phase": "EXECUTING_ACTION",
+        "next_phase": "OBSERVING_RESULT",
+        "resource_session": "s1",
+        "context_tokens": 3800,
+        "context_relevance": 0.88,
+        "model_ok": True,
+        "parse_error": False,
+        "parse_fixed": False,
+        "exec_fields": REQUIRED_EXEC_FIELDS,
+        "error": False,
+        "recovered": False,
+        "mutating": True,
+        "long_running": False,
+        "checkpointed": True,
+        "cancel_or_timeout": False,
+        "cancel_handled": False,
+        "trace_fields": REQUIRED_TRACE_FIELDS,
+    },
+    {
+        "id": "s2:t_report:1",
+        "session": "s2",
+        "task": "t_report",
+        "phase": "BUILDING_CONTEXT",
+        "next_phase": "CALLING_MODEL",
+        "resource_session": "s1",
+        "context_tokens": 9200,
+        "context_relevance": 0.55,
+        "model_ok": True,
+        "parse_error": False,
+        "parse_fixed": False,
+        "exec_fields": set(),
+        "error": False,
+        "recovered": False,
+        "mutating": False,
+        "long_running": False,
+        "checkpointed": False,
+        "cancel_or_timeout": False,
+        "cancel_handled": False,
+        "trace_fields": REQUIRED_TRACE_FIELDS - {"context"},
+    },
+    {
+        "id": "s2:t_report:2",
+        "session": "s2",
+        "task": "t_report",
+        "phase": "CALLING_MODEL",
+        "next_phase": "PARSING_ACTION",
+        "resource_session": "s2",
+        "context_tokens": 3600,
+        "context_relevance": 0.82,
+        "model_ok": False,
+        "parse_error": True,
+        "parse_fixed": True,
+        "exec_fields": set(),
+        "error": True,
+        "recovered": True,
+        "mutating": False,
+        "long_running": False,
+        "checkpointed": False,
+        "cancel_or_timeout": False,
+        "cancel_handled": False,
+        "trace_fields": REQUIRED_TRACE_FIELDS - {"model"},
+    },
+    {
+        "id": "s3:t_refactor:1",
+        "session": "s3",
+        "task": "t_refactor",
+        "phase": "EXECUTING_ACTION",
+        "next_phase": "COMPLETED",
+        "resource_session": "s3",
+        "context_tokens": 4100,
+        "context_relevance": 0.9,
+        "model_ok": True,
+        "parse_error": False,
+        "parse_fixed": False,
+        "exec_fields": {"status", "stdout"},
+        "error": True,
+        "recovered": False,
+        "mutating": True,
+        "long_running": True,
+        "checkpointed": False,
+        "cancel_or_timeout": True,
+        "cancel_handled": False,
+        "trace_fields": REQUIRED_TRACE_FIELDS - {"execution", "checkpoint"},
+    },
+]
+
+CTX_BUDGET = 6000
+MIN_RELEVANCE = 0.75
+
+
+def ratio(num, den):
+    return 0.0 if den == 0 else num / den
+
+
+session_access = len(steps)
+cross_session = [s["id"] for s in steps if s["session"] != s["resource_session"]]
+phase_invalid = [
+    s["id"]
+    for s in steps
+    if (s["phase"], s["next_phase"]) not in VALID_TRANSITIONS
+]
+context_bad = [
+    s["id"]
+    for s in steps
+    if s["context_tokens"] > CTX_BUDGET or s["context_relevance"] < MIN_RELEVANCE
+]
+exec_steps = [s for s in steps if s["phase"] == "EXECUTING_ACTION"]
+exec_bad = [
+    s["id"]
+    for s in exec_steps
+    if not REQUIRED_EXEC_FIELDS.issubset(s["exec_fields"])
+]
+errors = [s for s in steps if s["error"]]
+mutating_or_long = [s for s in steps if s["mutating"] or s["long_running"]]
+cancel_steps = [s for s in steps if s["cancel_or_timeout"]]
+trace_scores = [
+    len(s["trace_fields"] & REQUIRED_TRACE_FIELDS) / len(REQUIRED_TRACE_FIELDS)
+    for s in steps
+]
+
+metrics = {
+    "session_isolation": round(1 - ratio(len(cross_session), session_access), 3),
+    "phase_transition_valid": round(1 - ratio(len(phase_invalid), len(steps)), 3),
+    "context_budget_ok": round(1 - ratio(len(context_bad), len(steps)), 3),
+    "adapter_success": round(ratio(sum(s["model_ok"] for s in steps), len(steps)), 3),
+    "parse_recovery": round(
+        ratio(sum(s["parse_fixed"] for s in steps if s["parse_error"]), sum(s["parse_error"] for s in steps)),
+        3,
+    ),
+    "execution_standardized": round(1 - ratio(len(exec_bad), len(exec_steps)), 3),
+    "error_recovery": round(ratio(sum(s["recovered"] for s in errors), len(errors)), 3),
+    "checkpoint_coverage": round(ratio(sum(s["checkpointed"] for s in mutating_or_long), len(mutating_or_long)), 3),
+    "cancel_timeout_handled": round(ratio(sum(s["cancel_handled"] for s in cancel_steps), len(cancel_steps)), 3),
+    "trace_completeness": round(sum(trace_scores) / len(trace_scores), 3),
+}
+
+root_causes = {}
+for s in steps:
+    causes = []
+    if s["id"] in cross_session:
+        causes.append("session_leak")
+    if s["id"] in phase_invalid:
+        causes.append("invalid_phase_transition")
+    if s["id"] in context_bad:
+        causes.append("context_budget_or_relevance")
+    if not s["model_ok"]:
+        causes.append("model_adapter_error")
+    if s["id"] in exec_bad:
+        causes.append("unstructured_execution_result")
+    if s["error"] and not s["recovered"]:
+        causes.append("unrecovered_error")
+    if (s["mutating"] or s["long_running"]) and not s["checkpointed"]:
+        causes.append("missing_checkpoint")
+    if s["cancel_or_timeout"] and not s["cancel_handled"]:
+        causes.append("cancel_or_timeout_unhandled")
+    if len(s["trace_fields"] & REQUIRED_TRACE_FIELDS) < len(REQUIRED_TRACE_FIELDS):
+        causes.append("trace_incomplete")
+    if not causes:
+        causes.append("pass")
+    root_causes[s["id"]] = causes
+
+gates = {
+    "session_ok": metrics["session_isolation"] >= 0.99,
+    "phase_ok": metrics["phase_transition_valid"] >= 0.95,
+    "context_ok": metrics["context_budget_ok"] >= 0.90,
+    "adapter_ok": metrics["adapter_success"] >= 0.95,
+    "execution_ok": metrics["execution_standardized"] >= 0.95,
+    "recovery_ok": metrics["error_recovery"] >= 0.70,
+    "checkpoint_ok": metrics["checkpoint_coverage"] >= 0.90,
+    "cancel_ok": metrics["cancel_timeout_handled"] >= 0.80,
+    "trace_ok": metrics["trace_completeness"] >= 0.90,
+}
+
+failed_gates = [name for name, ok in gates.items() if not ok]
+runtime_gate_pass = all(gates.values())
+
+print("metrics:")
+pprint(metrics)
+print("\ncross_session:")
+pprint(cross_session)
+print("\nphase_invalid:")
+pprint(phase_invalid)
+print("\ncontext_bad:")
+pprint(context_bad)
+print("\nroot_causes:")
+pprint(root_causes)
+print("\nfailed_gates:")
+pprint(failed_gates)
+print("\nruntime_gate_pass:", runtime_gate_pass)
+```
+
+一组可能输出如下：
+
+```text
+metrics:
+{'adapter_success': 0.8,
+ 'cancel_timeout_handled': 0.0,
+ 'checkpoint_coverage': 0.5,
+ 'context_budget_ok': 0.8,
+ 'error_recovery': 0.5,
+ 'execution_standardized': 0.5,
+ 'parse_recovery': 1.0,
+ 'phase_transition_valid': 0.8,
+ 'session_isolation': 0.8,
+ 'trace_completeness': 0.92}
+
+cross_session:
+['s2:t_report:1']
+
+phase_invalid:
+['s3:t_refactor:1']
+
+context_bad:
+['s2:t_report:1']
+
+root_causes:
+{'s1:t_login:1': ['pass'],
+ 's1:t_login:2': ['pass'],
+ 's2:t_report:1': ['session_leak',
+                   'context_budget_or_relevance',
+                   'trace_incomplete'],
+ 's2:t_report:2': ['model_adapter_error', 'trace_incomplete'],
+ 's3:t_refactor:1': ['invalid_phase_transition',
+                     'unstructured_execution_result',
+                     'unrecovered_error',
+                     'missing_checkpoint',
+                     'cancel_or_timeout_unhandled',
+                     'trace_incomplete']}
+
+failed_gates:
+['session_ok',
+ 'phase_ok',
+ 'context_ok',
+ 'adapter_ok',
+ 'execution_ok',
+ 'recovery_ok',
+ 'checkpoint_ok',
+ 'cancel_ok']
+
+runtime_gate_pass: False
+```
+
+这里 `runtime_gate_pass=False` 是故意设计的：它暴露了跨 session 泄漏、非法状态转移、context 预算和相关性失败、adapter 错误、执行结果不结构化、错误未恢复、缺 checkpoint、取消 / 超时未处理和 trace 不完整。Runtime 架构的价值，就是把这些失败变成可定位、可恢复、可回放的工程事件。
 
 ## 2.22 面试题：Agent Runtime 包含哪些组件
 

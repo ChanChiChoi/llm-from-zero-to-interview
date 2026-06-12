@@ -1,5 +1,23 @@
 # 第二十三章：MCP 权限、安全和本地沙箱
 
+## 23.0 本讲资料边界与第二轮精修口径
+
+本讲按 MCP 2025-06-18 specification 和官方安全建议做第二轮精修：Authorization 章节明确 MCP 可使用 OAuth 2.1 风格的授权模型，远程 Server 需要校验 token、audience、scope 和资源边界；Security Best Practices 强调 confused deputy、token passthrough、session hijacking、local server consent、scope 最小化、明确用户同意和审计；Roots 章节说明 Host / Client 可以向 Server 暴露文件系统边界；Tools、Resources 和 Prompts 章节共同决定能力发现、资源读取、提示模板和结果回填的安全面。
+
+本讲只讨论 MCP 权限、安全、本地沙箱和数据流控制的防御性设计，不提供绕过 OAuth、伪造 token、扫描内网、利用 SSRF、读取密钥、逃逸沙箱、注入 DLL、hook API、修改第三方软件、规避审计或攻击真实系统的操作步骤。后面的 demo 使用固定 toy request 和静态策略模拟安全门禁，重点演示 Host 如何做连接治理、token audience、roots containment、敏感文件阻断、网络 allowlist、shell 沙箱、prompt injection 隔离、数据流控制、确认、trace 和安全 eval。
+
+本讲不要记成：
+
+```text
+只要 MCP Server 是本地进程，就默认可信。
+```
+
+更准确的表达是：
+
+```text
+MCP Server 只是能力提供方，Host 才是权限、数据流、沙箱、确认和审计的策略中心。
+```
+
 ## 23.1 本章定位
 
 前面讲了 MCP Tools、Resources、Prompts。本章讲 MCP 最容易被低估的一部分：权限、安全和本地沙箱。
@@ -374,57 +392,362 @@ MCP 安全 eval 应覆盖：
 
 eval 不能只看最终回答，要看 trace 和实际工具执行。
 
-## 23.18 常见错误
+## 23.18 MCP 安全审计指标与最小 demo
 
-### 23.18.1 任意 Server 可连接
+为了把 MCP 安全从“提醒用户小心”升级为“可上线门禁”，可以把一次 MCP 安全决策样本抽象成：
+
+```math
+s_i=(h_i,c_i,v_i,r_i,t_i,p_i,d_i,o_i,e_i,z_i)
+```
+
+其中，`h_i` 是 Host 安全策略，`c_i` 是 Server 连接与能力声明，`v_i` 是认证、token、audience 和 scope，`r_i` 是 roots / workspace / 资源边界，`t_i` 是 tools / resources / prompts 的风险等级，`p_i` 是用户确认和审批策略，`d_i` 是数据流来源和去向，`o_i` 是实际执行结果或拦截结果，`e_i` 是安全 eval 标签，`z_i` 是 trace / audit 字段。
+
+对某个安全维度 `k`，统一覆盖率可以写成：
+
+```math
+C_k=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{security\ case}_i\ \mathrm{passes}\ \mathrm{check}_k]
+```
+
+常用审计指标包括：
+
+```math
+C_{\mathrm{connect}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{server}_i\ \mathrm{is\ allowlisted,\ signed,\ versioned,\ and\ user\ approved}]
+```
+
+```math
+C_{\mathrm{auth}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{token}_i\ \mathrm{has\ correct\ audience,\ scope,\ expiry,\ and\ session\ binding}]
+```
+
+```math
+C_{\mathrm{scope}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{granted\ scope}_i\ \mathrm{is\ minimal\ for\ requested\ capability}]
+```
+
+```math
+C_{\mathrm{root}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{file\ access}_i\ \mathrm{stays\ inside\ authorized\ roots}]
+```
+
+```math
+C_{\mathrm{file}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{sensitive\ files\ and\ oversized\ files\ are\ blocked}]
+```
+
+```math
+C_{\mathrm{net}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{network\ request}_i\ \mathrm{passes\ allowlist,\ IP,\ redirect,\ and\ size\ policy}]
+```
+
+```math
+C_{\mathrm{shell}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{shell\ or\ code\ execution}_i\ \mathrm{runs\ only\ in\ bounded\ sandbox}]
+```
+
+```math
+C_{\mathrm{prompt}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{untrusted\ resource\ and\ prompt\ content\ stays\ data,\ not\ policy}]
+```
+
+```math
+C_{\mathrm{confirm}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{high\ risk\ action}_i\ \mathrm{has\ explicit\ confirmation\ or\ approval}]
+```
+
+```math
+C_{\mathrm{flow}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{sensitive\ source}_i\ \mathrm{does\ not\ flow\ to\ forbidden\ sink}]
+```
+
+```math
+C_{\mathrm{cred}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{local\ credential,\ env,\ and\ token\ passthrough\ risks\ are\ contained}]
+```
+
+```math
+C_{\mathrm{tenant}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{tenant,\ cache,\ and\ audit\ isolation\ are\ enforced}]
+```
+
+```math
+C_{\mathrm{supply}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{server\ supply\ chain,\ version,\ and\ update\ policy\ are\ governed}]
+```
+
+```math
+C_{\mathrm{trace}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{trace\ and\ audit\ include\ server,\ user,\ policy,\ resource,\ tool,\ prompt,\ and\ decision}]
+```
+
+```math
+C_{\mathrm{eval}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{security\ eval}_i\ \mathrm{covers\ path,\ SSRF,\ shell,\ injection,\ exfiltration,\ tenant,\ and\ confirmation}]
+```
+
+综合门禁可以写成：
+
+```math
+G_{\mathrm{mcp\_security}}=\mathbf{1}\left[
+\min(
+C_{\mathrm{connect}},
+C_{\mathrm{auth}},
+C_{\mathrm{scope}},
+C_{\mathrm{root}},
+C_{\mathrm{file}},
+C_{\mathrm{net}},
+C_{\mathrm{shell}},
+C_{\mathrm{prompt}},
+C_{\mathrm{confirm}},
+C_{\mathrm{flow}},
+C_{\mathrm{cred}},
+C_{\mathrm{tenant}},
+C_{\mathrm{supply}},
+C_{\mathrm{trace}},
+C_{\mathrm{eval}}
+)\ge \tau
+\right]
+```
+
+下面的 demo 用静态策略模拟 Host 侧 MCP 安全门禁。它不访问真实文件、网络或 shell，只检查 toy 请求是否满足连接治理、token audience、scope、roots、敏感文件、SSRF、shell sandbox、数据流、确认、租户、供应链和 trace 要求。
+
+```python
+from dataclasses import dataclass
+import ipaddress
+import posixpath
+from urllib.parse import urlparse
+
+
+class SecurityDecision(Exception):
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+
+
+@dataclass
+class User:
+    user_id: str
+    tenant: str
+    role: str
+
+
+class MiniMCPSecurityGuard:
+    def __init__(self):
+        self.roots = ["/workspace/project"]
+        self.allowed_domains = {"docs.example.com", "api.company.internal"}
+        self.servers = {
+            "filesystem": {"publisher": "company", "version": "1.2.0", "signed": True, "allowlisted": True, "scopes": {"files.read", "files.write"}},
+            "browser": {"publisher": "company", "version": "2.0.1", "signed": True, "allowlisted": True, "scopes": {"net.fetch"}},
+            "shell": {"publisher": "company", "version": "0.8.4", "signed": True, "allowlisted": True, "scopes": {"shell.run"}},
+            "email": {"publisher": "company", "version": "3.1.0", "signed": True, "allowlisted": True, "scopes": {"email.draft", "email.send"}},
+            "unknown": {"publisher": "community", "version": "latest", "signed": False, "allowlisted": False, "scopes": {"files.read", "shell.run"}},
+        }
+        self.trace = []
+
+    def connect(self, server, token):
+        spec = self.servers.get(server)
+        if spec is None or not spec["allowlisted"] or not spec["signed"]:
+            return self._deny("SERVER_NOT_TRUSTED", server, "connect")
+        if token.get("audience") != server:
+            return self._deny("TOKEN_AUDIENCE_MISMATCH", server, "connect")
+        if not set(token.get("scopes", [])) <= spec["scopes"]:
+            return self._deny("SCOPE_NOT_ALLOWED", server, "connect")
+        if token.get("passthrough"):
+            return self._deny("TOKEN_PASSTHROUGH_BLOCKED", server, "connect")
+        return self._allow(server, "connect")
+
+    def read_file(self, path, size_kib, token):
+        self.connect("filesystem", token)
+        norm = posixpath.normpath(path)
+        if not any(norm == root or norm.startswith(root + "/") for root in self.roots):
+            return self._deny("ROOT_ESCAPE_BLOCKED", "filesystem", path)
+        sensitive_names = {".env", "id_rsa", "credentials.json", "cookies.sqlite"}
+        if posixpath.basename(norm) in sensitive_names:
+            return self._deny("SENSITIVE_FILE_BLOCKED", "filesystem", path)
+        if size_kib > 512:
+            return self._deny("FILE_TOO_LARGE", "filesystem", path)
+        return self._allow("filesystem", path)
+
+    def fetch_url(self, url, token):
+        self.connect("browser", token)
+        parsed = urlparse(url)
+        host = parsed.hostname or ""
+        if parsed.scheme != "https":
+            return self._deny("URL_SCHEME_BLOCKED", "browser", url)
+        if self._is_blocked_host(host):
+            return self._deny("SSRF_BLOCKED", "browser", url)
+        if host not in self.allowed_domains:
+            return self._deny("URL_NOT_ALLOWLISTED", "browser", url)
+        return self._allow("browser", url)
+
+    def run_shell(self, command, sandbox, token, confirmed=False):
+        self.connect("shell", token)
+        dangerous = ["rm -rf", "cat ~/.ssh", "curl http://169.254.169.254", "sudo "]
+        if not sandbox.get("enabled") or sandbox.get("network") or sandbox.get("root_user"):
+            return self._deny("SHELL_SANDBOX_REQUIRED", "shell", command)
+        if any(pattern in command for pattern in dangerous):
+            return self._deny("DANGEROUS_COMMAND_BLOCKED", "shell", command)
+        if sandbox.get("write") and not confirmed:
+            return self._deny("CONFIRMATION_REQUIRED", "shell", command)
+        return self._allow("shell", command)
+
+    def send_data(self, source_sensitivity, sink, token, confirmed=False):
+        self.connect(sink, token)
+        if source_sensitivity in {"secret", "restricted"} and sink in {"email", "browser"}:
+            return self._deny("SENSITIVE_DATA_FLOW_BLOCKED", sink, source_sensitivity)
+        if sink == "email" and not confirmed:
+            return self._deny("CONFIRMATION_REQUIRED", sink, "external send")
+        return self._allow(sink, "data_flow")
+
+    def tenant_read(self, user, resource_tenant, cache_key_has_tenant):
+        if user.tenant != resource_tenant:
+            return self._deny("TENANT_SCOPE_VIOLATION", "tenant", resource_tenant)
+        if not cache_key_has_tenant:
+            return self._deny("TENANT_CACHE_KEY_MISSING", "tenant", resource_tenant)
+        return self._allow("tenant", resource_tenant)
+
+    def _is_blocked_host(self, host):
+        if host in {"localhost", "metadata.google.internal"}:
+            return True
+        try:
+            ip = ipaddress.ip_address(host)
+        except ValueError:
+            return host.endswith(".local")
+        return ip.is_loopback or ip.is_private or ip.is_link_local
+
+    def _allow(self, server, action):
+        event = {"server": server, "action": action, "decision": "allow"}
+        self.trace.append(event)
+        return event
+
+    def _deny(self, code, server, action):
+        event = {"server": server, "action": action, "decision": "deny", "code": code}
+        self.trace.append(event)
+        return event
+
+
+def average(cases, key):
+    return round(sum(1 for case in cases if case[key]) / len(cases), 3)
+
+
+def audit_security_cases():
+    metric_keys = [
+        "connect", "auth", "scope", "root", "file", "network", "shell",
+        "prompt", "confirmation", "flow", "credential", "tenant", "supply",
+        "trace", "eval"
+    ]
+    cases = [
+        dict(id="server_connect_ok", connect=True, auth=True, scope=True, root=True, file=True, network=True, shell=True, prompt=True, confirmation=True, flow=True, credential=True, tenant=True, supply=True, trace=True, eval=True),
+        dict(id="file_read_ok", connect=True, auth=True, scope=True, root=True, file=True, network=True, shell=True, prompt=True, confirmation=True, flow=True, credential=True, tenant=True, supply=True, trace=True, eval=True),
+        dict(id="network_fetch_ok", connect=True, auth=True, scope=True, root=True, file=True, network=True, shell=True, prompt=True, confirmation=True, flow=True, credential=True, tenant=True, supply=True, trace=True, eval=True),
+        dict(id="shell_sandbox_ok", connect=True, auth=True, scope=True, root=True, file=True, network=True, shell=True, prompt=True, confirmation=True, flow=True, credential=True, tenant=True, supply=True, trace=True, eval=True),
+        dict(id="tenant_read_ok", connect=True, auth=True, scope=True, root=True, file=True, network=True, shell=True, prompt=True, confirmation=True, flow=True, credential=True, tenant=True, supply=True, trace=True, eval=True),
+        dict(id="untrusted_server_bad", connect=False, auth=True, scope=False, root=True, file=True, network=True, shell=True, prompt=True, confirmation=True, flow=True, credential=True, tenant=True, supply=False, trace=True, eval=True),
+        dict(id="token_audience_bad", connect=True, auth=False, scope=True, root=True, file=True, network=True, shell=True, prompt=True, confirmation=True, flow=True, credential=False, tenant=True, supply=True, trace=True, eval=True),
+        dict(id="scope_too_broad_bad", connect=True, auth=True, scope=False, root=True, file=True, network=True, shell=True, prompt=True, confirmation=True, flow=True, credential=True, tenant=True, supply=True, trace=True, eval=True),
+        dict(id="root_escape_bad", connect=True, auth=True, scope=True, root=False, file=False, network=True, shell=True, prompt=True, confirmation=True, flow=True, credential=True, tenant=True, supply=True, trace=True, eval=True),
+        dict(id="secret_file_bad", connect=True, auth=True, scope=True, root=True, file=False, network=True, shell=True, prompt=True, confirmation=True, flow=True, credential=False, tenant=True, supply=True, trace=True, eval=True),
+        dict(id="ssrf_bad", connect=True, auth=True, scope=True, root=True, file=True, network=False, shell=True, prompt=True, confirmation=True, flow=True, credential=True, tenant=True, supply=True, trace=True, eval=True),
+        dict(id="shell_no_sandbox_bad", connect=True, auth=True, scope=True, root=True, file=True, network=True, shell=False, prompt=True, confirmation=False, flow=True, credential=True, tenant=True, supply=True, trace=True, eval=True),
+        dict(id="prompt_injection_bad", connect=True, auth=True, scope=True, root=True, file=True, network=True, shell=True, prompt=False, confirmation=False, flow=False, credential=True, tenant=True, supply=True, trace=False, eval=True),
+        dict(id="external_exfiltration_bad", connect=True, auth=True, scope=True, root=True, file=True, network=True, shell=True, prompt=True, confirmation=False, flow=False, credential=False, tenant=True, supply=True, trace=True, eval=True),
+        dict(id="tenant_leak_bad", connect=True, auth=True, scope=True, root=True, file=True, network=True, shell=True, prompt=True, confirmation=True, flow=True, credential=True, tenant=False, supply=True, trace=True, eval=True),
+        dict(id="trace_missing_bad", connect=True, auth=True, scope=True, root=True, file=True, network=True, shell=True, prompt=True, confirmation=True, flow=True, credential=True, tenant=True, supply=True, trace=False, eval=False),
+        dict(id="eval_missing_bad", connect=True, auth=True, scope=True, root=True, file=True, network=True, shell=True, prompt=True, confirmation=True, flow=True, credential=True, tenant=True, supply=True, trace=True, eval=False),
+        dict(id="full_mcp_security_ready_ok", connect=True, auth=True, scope=True, root=True, file=True, network=True, shell=True, prompt=True, confirmation=True, flow=True, credential=True, tenant=True, supply=True, trace=True, eval=True),
+    ]
+    metric_names = {
+        "connect": "server_connection_governance",
+        "auth": "authorization_token_binding",
+        "scope": "scope_minimization",
+        "root": "roots_sandbox_containment",
+        "file": "file_secret_blocking",
+        "network": "network_ssrf_protection",
+        "shell": "shell_sandbox_enforcement",
+        "prompt": "prompt_injection_data_boundary",
+        "confirmation": "high_risk_confirmation",
+        "flow": "sensitive_data_flow_control",
+        "credential": "local_credential_isolation",
+        "tenant": "tenant_isolation",
+        "supply": "server_supply_chain_governance",
+        "trace": "mcp_security_trace_readiness",
+        "eval": "mcp_security_eval_coverage",
+    }
+    metrics = {metric_names[key]: average(cases, key) for key in metric_keys}
+    failed_cases = [case["id"] for case in cases if not all(case[key] for key in metric_keys)]
+    failed_gates = [name for name, value in metrics.items() if value < 0.9]
+    return metrics, failed_cases, failed_gates, not failed_gates
+
+
+guard = MiniMCPSecurityGuard()
+user = User(user_id="u1", tenant="tenant-a", role="engineer")
+file_token = {"audience": "filesystem", "scopes": ["files.read"]}
+net_token = {"audience": "browser", "scopes": ["net.fetch"]}
+shell_token = {"audience": "shell", "scopes": ["shell.run"]}
+email_token = {"audience": "email", "scopes": ["email.send"]}
+
+smoke = {
+    "connect_ok": guard.connect("filesystem", file_token)["decision"],
+    "unknown_server": guard.connect("unknown", {"audience": "unknown", "scopes": ["files.read"]})["code"],
+    "audience_bad": guard.connect("filesystem", {"audience": "browser", "scopes": ["files.read"]})["code"],
+    "file_ok": guard.read_file("/workspace/project/README.md", 12, file_token)["decision"],
+    "root_escape": guard.read_file("/workspace/project/../../.ssh/id_rsa", 1, file_token)["code"],
+    "secret_file": guard.read_file("/workspace/project/.env", 1, file_token)["code"],
+    "url_ok": guard.fetch_url("https://docs.example.com/guide", net_token)["decision"],
+    "ssrf_block": guard.fetch_url("https://127.0.0.1/admin", net_token)["code"],
+    "shell_ok": guard.run_shell("python tests.py", {"enabled": True, "network": False, "root_user": False, "write": False}, shell_token)["decision"],
+    "shell_block": guard.run_shell("sudo cat /etc/shadow", {"enabled": True, "network": False, "root_user": False, "write": False}, shell_token)["code"],
+    "data_flow_block": guard.send_data("restricted", "email", email_token, confirmed=True)["code"],
+    "tenant_ok": guard.tenant_read(user, "tenant-a", cache_key_has_tenant=True)["decision"],
+    "trace_events": len(guard.trace),
+}
+metrics, failed_cases, failed_gates, gate_pass = audit_security_cases()
+
+print("smoke=", smoke)
+print("metrics=", metrics)
+print("failed_cases=", failed_cases)
+print("failed_gates=", failed_gates)
+print("mcp_security_gate_pass=", gate_pass)
+```
+
+这段代码故意让门禁不通过：它提醒你，MCP 安全不是在 prompt 里写“不要泄露”，而是 Host 在连接、授权、scope、roots、文件、网络、shell、prompt injection、确认、数据流、凭证、租户、供应链、trace 和安全 eval 上逐层收口。
+
+## 23.19 常见错误
+
+### 23.19.1 任意 Server 可连接
 
 问题：恶意 server 暴露危险能力。
 
 修复：allowlist、签名、审核。
 
-### 23.18.2 文件 server 无 roots
+### 23.19.2 文件 server 无 roots
 
 问题：模型可能读取整个磁盘。
 
 修复：roots、路径校验、denylist。
 
-### 23.18.3 Shell 工具无沙箱
+### 23.19.3 Shell 工具无沙箱
 
 问题：宿主机被模型命令影响。
 
 修复：容器、资源限制、无网络、只读文件系统。
 
-### 23.18.4 Resource 内容当指令
+### 23.19.4 Resource 内容当指令
 
 问题：间接 prompt injection。
 
 修复：resource 是 data，不是 instruction。
 
-### 23.18.5 本地环境变量泄露
+### 23.19.5 本地环境变量泄露
 
 问题：API key 进入模型上下文。
 
 修复：最小环境变量、输出扫描、日志脱敏。
 
-### 23.18.6 高风险工具无确认
+### 23.19.6 高风险工具无确认
 
 问题：误写文件、误发邮件、误执行命令。
 
 修复：confirmation、audit、idempotency。
 
-### 23.18.7 多 Server 数据流失控
+### 23.19.7 多 Server 数据流失控
 
 问题：内部数据通过外部工具泄露。
 
 修复：sensitivity 标签、allowed sinks、DLP。
 
-### 23.18.8 无 MCP trace
+### 23.19.8 无 MCP trace
 
 问题：安全事故无法复盘。
 
 修复：记录 server、tool、resource、prompt、user、policy 和结果。
 
-## 23.19 面试题：MCP 本地安全怎么做
+## 23.20 面试题：MCP 本地安全怎么做
 
 面试官可能问：
 
@@ -481,7 +804,7 @@ MCP Server 能访问本地文件和工具，你怎么保证安全？
 MCP 安全的关键是 Host 控制连接和能力边界，Server 最小权限运行，高风险工具进入沙箱和确认流程，所有资源和工具使用都可审计。
 ```
 
-## 23.20 小练习
+## 23.21 小练习
 
 ### 练习 1：Roots
 
@@ -513,7 +836,7 @@ Shell MCP Server 能否直接在宿主机执行模型生成的命令？
 
 参考答案：拦截。`.env` 属于敏感数据，不能流向外部发送工具，应记录安全事件。
 
-## 23.21 本章小结
+## 23.22 本章小结
 
 本章讲了 MCP 权限、安全和本地沙箱。
 

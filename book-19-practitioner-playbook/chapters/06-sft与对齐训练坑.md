@@ -4,6 +4,18 @@
 
 本章系统讲 SFT 与对齐训练坑：能力退化、格式错误、过度拒答、偏好数据不一致、reward model 偏差、RLHF reward hacking、DPO 数据质量、多轮对话角色混乱、评估方法和事故复盘。
 
+## 0. 本讲资料边界与第二轮精修口径
+
+本讲第二轮精修前，按 `WRITING_PLAN.md` 的要求核对了 InstructGPT / RLHF 论文、Direct Preference Optimization 论文、Hugging Face Transformers chat template 文档、TRL SFTTrainer / DPOTrainer 文档，以及 reward model、preference data、assistant-only loss、KL / reference model 和安全拒答边界相关公开资料。
+
+本章只讨论防御性的后训练事故排查：如何发现 SFT mask 错、能力回归、误拒 / 漏拒、偏好 pair 噪声、reward model 偏差、DPO reference 不匹配、工具 schema 漂移和多维评估缺口。这里不提供绕过安全策略、构造攻击性对齐数据、诱导模型输出高风险内容或规避评估门禁的方法。
+
+第二轮补强重点有三点：
+
+1. 把 SFT / RLHF / DPO 的事故从“效果怪”拆成可观测指标：assistant-only label 覆盖率、prompt loss 泄漏率、能力回归、误拒率、漏拒率、偏好间隔、reward-human gap、DPO margin 和工具 schema 一致性。
+2. 用公式说明后训练门禁，而不是只说“多做评估”：对齐训练要同时证明模型会回答、不会乱拒、不会漏拒、不会为了 reward 变长变空，也没有把通用能力训坏。
+3. 增加一个 0 依赖 Python demo，把 toy SFT 样本、偏好 pair、reward 样本、DPO log probability 和工具 schema 统一审计，帮助读者把排查思路迁移到真实 TRL / LoRA / RLHF / DPO 项目。
+
 ## 6.1 核心观点
 
 后训练不是单向提升，而是在做行为分布重塑。
@@ -425,6 +437,322 @@ reward hacking：
 2. 控制 KL。
 3. 增加多维 reward。
 4. 监控长度和模板化。
+
+## 6.19.1 关键公式与后训练事故指标速查
+
+后训练事故排查的第一步，是把样本、标签、偏好、reward 和评估切片放进同一张表。把第 `i` 条后训练样本抽象成：
+
+$$
+a_i=(x_i,y_i,m_i,g_i,r_i,c_i)
+$$
+
+其中，`x_i` 是 system / user / context 条件，`y_i` 是 assistant 目标回答，`m_i` 是 label mask，`g_i` 是 gold 或人工质量标签，`r_i` 是 reward / judge / verifier 代理分数，`c_i` 是样本类别，例如 math、code、safety、tool 或 normal chat。
+
+**1. assistant-only SFT loss**
+
+$$
+L_{\mathrm{sft}}(\theta)=
+-\frac{1}{N_{\mathrm{asst}}}
+\sum_i\sum_t m_{i,t}\log p_\theta(y_{i,t}\mid x_{i,1:t-1})
+$$
+
+这里 `m_{i,t}=1` 表示该 token 参与 loss。SFT 中通常只让 assistant answer 和必要 EOS 参与 loss，system / user / padding 是条件或占位，不应成为模型要模仿输出的目标。
+
+**2. assistant label 覆盖率**
+
+$$
+C_{\mathrm{asst}}=
+\frac{\sum_i\sum_t z^{\mathrm{asst}}_{i,t}m_{i,t}}
+{\max(1,\sum_i\sum_t z^{\mathrm{asst}}_{i,t})}
+$$
+
+`z_asst=1` 表示该位置属于 assistant 回答。`C_asst` 太低，说明回答 token 被误 mask，模型学不到答案；超过 1 不可能，接近 1 才是正常口径。
+
+**3. prompt loss 泄漏率**
+
+$$
+R_{\mathrm{prompt}}=
+\frac{\sum_i\sum_t z^{\mathrm{prompt}}_{i,t}m_{i,t}}
+{\max(1,\sum_i\sum_t z^{\mathrm{prompt}}_{i,t})}
+$$
+
+如果 `R_prompt` 大于 0，模型就在学习复述 system / user / role token。这类事故会导致模型替用户说话、复述问题或生成角色标记。
+
+**4. pad loss 泄漏率与 EOS 覆盖率**
+
+$$
+R_{\mathrm{pad}}=
+\frac{\sum_i\sum_t z^{\mathrm{pad}}_{i,t}m_{i,t}}
+{\max(1,\sum_i\sum_t z^{\mathrm{pad}}_{i,t})}
+$$
+
+$$
+C_{\mathrm{eos}}=
+\frac{\sum_i\sum_t z^{\mathrm{eos}}_{i,t}m_{i,t}}
+{\max(1,\sum_i\sum_t z^{\mathrm{eos}}_{i,t})}
+$$
+
+padding 参与 loss 是硬错误；EOS 完全缺失则会让模型学不会停止，尤其在多轮 SFT 和工具调用场景里影响很大。
+
+**5. 能力回归**
+
+$$
+\Delta_k=M^{\mathrm{after}}_k-M^{\mathrm{before}}_k
+$$
+
+`k` 表示能力切片，例如 instruction、math、code、safety、tool、long context。后训练不能只看聊天分数提升，必须监控每个能力切片的 `Delta_k`。
+
+**6. 误拒率与漏拒率**
+
+$$
+R_{\mathrm{false\_refuse}}=
+\frac{N_{\mathrm{safe,refused}}}{\max(1,N_{\mathrm{safe}})}
+$$
+
+$$
+R_{\mathrm{unsafe\_leak}}=
+\frac{N_{\mathrm{unsafe,answered}}}{\max(1,N_{\mathrm{unsafe}})}
+$$
+
+好的安全对齐不是拒答越多越好。误拒高会损害帮助性，漏拒高会损害安全性，两者都要进门禁。
+
+**7. 偏好间隔**
+
+$$
+\Delta^{\mathrm{pref}}_j=h(c_j)-h(r_j)
+$$
+
+`c_j` 是 chosen response，`r_j` 是 rejected response，`h` 是人工或高可信评审质量分。`Delta_pref` 太小，偏好 pair 的训练信号就接近噪声；如果小于 0，说明 chosen 可能根本不该被选中。
+
+**8. reward-human gap 与长度偏差**
+
+$$
+G_{\mathrm{rh}}=\frac{1}{N}\sum_i |r_i-h_i|
+$$
+
+$$
+B_{\mathrm{len}}=\mathrm{corr}(\ell_i,r_i)
+$$
+
+`G_rh` 衡量 reward 与人工质量差距，`B_len` 衡量 reward 是否偏好长回答。reward 高但人工质量低，是 RLHF / rerank / best-of-N 都会放大的风险。
+
+**9. DPO margin 与 loss**
+
+$$
+m_j=
+\left[\log \pi_\theta(c_j\mid x_j)-\log \pi_\theta(r_j\mid x_j)\right]
+-
+\left[\log \pi_{\mathrm{ref}}(c_j\mid x_j)-\log \pi_{\mathrm{ref}}(r_j\mid x_j)\right]
+$$
+
+$$
+L_{\mathrm{dpo}}=-\log \sigma(\beta m_j)
+$$
+
+DPO 不是简单提高 chosen 概率，而是提高 policy 相对 reference 对 chosen 的偏好优势。reference model 选错、beta 不合适、pair 质量差，都会让 DPO 学到错误风格或长度偏差。
+
+**10. 后训练事故门禁**
+
+$$
+G_{\mathrm{align}}=\mathbf{1}\left[
+C_{\mathrm{asst}}\ge\tau_{\mathrm{asst}}
+\land R_{\mathrm{prompt}}=0
+\land R_{\mathrm{pad}}=0
+\land C_{\mathrm{eos}}\ge\tau_{\mathrm{eos}}
+\land \min_k \Delta_k\ge-\tau_{\mathrm{reg}}
+\land R_{\mathrm{false\_refuse}}\le\tau_{\mathrm{fr}}
+\land R_{\mathrm{unsafe\_leak}}\le\tau_{\mathrm{ul}}
+\land \overline{\Delta}^{\mathrm{pref}}\ge\tau_{\mathrm{pref}}
+\land G_{\mathrm{rh}}\le\tau_{\mathrm{gap}}
+\land |B_{\mathrm{len}}|\le\tau_{\mathrm{len}}
+\right]
+$$
+
+这个门禁的意义不是用一个数替代人工评估，而是防止团队只看 SFT loss、reward curve 或 DPO loss。只要任一门禁失败，就应该先定位数据、mask、偏好、reward 或评估切片，而不是继续扩大训练。
+
+## 6.19.2 最小可运行 SFT / 对齐训练事故审计 demo
+
+下面的 demo 不依赖外部库。它故意构造多个事故：prompt 和 padding 参与 loss、assistant token 被误 mask、训练 / 推理 chat template 不一致、math / code / tool 能力回归、误拒和漏拒同时存在、偏好 pair 间隔过小、reward model 偏好长回答、DPO reference 不匹配以及工具 schema 漂移。
+
+```python
+from math import exp, log, sqrt
+
+sft_samples = [
+    {
+        "id": "good_math",
+        "tokens": {"system": 5, "user": 8, "assistant": 12, "eos": 1, "pad": 4},
+        "labels": {"system": 0, "user": 0, "assistant": 12, "eos": 1, "pad": 0},
+    },
+    {
+        "id": "prompt_leak",
+        "tokens": {"system": 4, "user": 10, "assistant": 9, "eos": 1, "pad": 2},
+        "labels": {"system": 0, "user": 10, "assistant": 9, "eos": 1, "pad": 2},
+    },
+    {
+        "id": "masked_answer",
+        "tokens": {"system": 3, "user": 7, "assistant": 11, "eos": 1, "pad": 0},
+        "labels": {"system": 0, "user": 0, "assistant": 6, "eos": 0, "pad": 0},
+    },
+]
+train_template = "<system>{system}</system><user>{user}</user><assistant>{assistant}</assistant>"
+serving_template = "<|system|>{system}<|user|>{user}<|assistant|>{assistant}"
+
+prompt_tokens = sum(sample["tokens"][role] for sample in sft_samples for role in ("system", "user"))
+prompt_labels = sum(sample["labels"][role] for sample in sft_samples for role in ("system", "user"))
+assistant_tokens = sum(sample["tokens"]["assistant"] for sample in sft_samples)
+assistant_labels = sum(sample["labels"]["assistant"] for sample in sft_samples)
+pad_tokens = sum(sample["tokens"]["pad"] for sample in sft_samples)
+pad_labels = sum(sample["labels"]["pad"] for sample in sft_samples)
+eos_tokens = sum(sample["tokens"]["eos"] for sample in sft_samples)
+eos_labels = sum(sample["labels"]["eos"] for sample in sft_samples)
+
+mask_audit = {
+    "assistant_coverage": round(assistant_labels / assistant_tokens, 3),
+    "prompt_loss_leak_rate": round(prompt_labels / prompt_tokens, 3),
+    "pad_loss_leak_rate": round(pad_labels / max(1, pad_tokens), 3),
+    "eos_coverage": round(eos_labels / eos_tokens, 3),
+    "template_match": train_template == serving_template,
+}
+
+before = {"instruction": 0.62, "math": 0.70, "code": 0.66, "safety": 0.78, "tool": 0.60}
+after = {"instruction": 0.76, "math": 0.55, "code": 0.49, "safety": 0.83, "tool": 0.52}
+capability_delta = {name: round(after[name] - before[name], 3) for name in before}
+regressions = {name: delta for name, delta in capability_delta.items() if delta <= -0.08}
+
+refusal_cases = [
+    {"id": "defensive_security", "should_refuse": False, "refused": True},
+    {"id": "medical_general", "should_refuse": False, "refused": True},
+    {"id": "homework_math", "should_refuse": False, "refused": False},
+    {"id": "high_risk_steps", "should_refuse": True, "refused": False},
+    {"id": "privacy_exposure", "should_refuse": True, "refused": True},
+    {"id": "dangerous_operation", "should_refuse": True, "refused": True},
+]
+safe_cases = [case for case in refusal_cases if not case["should_refuse"]]
+unsafe_cases = [case for case in refusal_cases if case["should_refuse"]]
+false_refusals = [case["id"] for case in safe_cases if case["refused"]]
+unsafe_leaks = [case["id"] for case in unsafe_cases if not case["refused"]]
+refusal_audit = {
+    "over_refusal_rate": round(len(false_refusals) / len(safe_cases), 3),
+    "unsafe_leak_rate": round(len(unsafe_leaks) / len(unsafe_cases), 3),
+    "false_refusals": false_refusals,
+    "unsafe_leaks": unsafe_leaks,
+}
+
+preference_pairs = [
+    {"id": "fact_fix", "chosen_q": 0.90, "rejected_q": 0.40, "chosen_len": 60, "rejected_len": 70, "agreement": 0.90},
+    {"id": "small_margin", "chosen_q": 0.62, "rejected_q": 0.59, "chosen_len": 80, "rejected_len": 75, "agreement": 0.52},
+    {"id": "length_bias", "chosen_q": 0.55, "rejected_q": 0.80, "chosen_len": 220, "rejected_len": 65, "agreement": 0.60},
+    {"id": "safety_boundary", "chosen_q": 0.70, "rejected_q": 0.65, "chosen_len": 120, "rejected_len": 90, "agreement": 0.55},
+]
+preference_margins = {pair["id"]: round(pair["chosen_q"] - pair["rejected_q"], 3) for pair in preference_pairs}
+low_margin_pairs = [pair_id for pair_id, margin in preference_margins.items() if margin < 0.10]
+bad_chosen_pairs = [pair_id for pair_id, margin in preference_margins.items() if margin < 0]
+preference_audit = {
+    "avg_margin": round(sum(preference_margins.values()) / len(preference_margins), 3),
+    "avg_agreement": round(sum(pair["agreement"] for pair in preference_pairs) / len(preference_pairs), 3),
+    "low_margin_pairs": low_margin_pairs,
+    "bad_chosen_pairs": bad_chosen_pairs,
+}
+
+reward_samples = [
+    {"id": "concise_correct", "quality": 0.90, "length": 60, "reward": 0.42},
+    {"id": "verbose_shallow", "quality": 0.45, "length": 240, "reward": 0.88},
+    {"id": "safe_alt", "quality": 0.82, "length": 110, "reward": 0.74},
+    {"id": "long_refusal", "quality": 0.50, "length": 210, "reward": 0.86},
+]
+
+def corr(xs, ys):
+    mean_x = sum(xs) / len(xs)
+    mean_y = sum(ys) / len(ys)
+    num = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
+    den_x = sqrt(sum((x - mean_x) ** 2 for x in xs))
+    den_y = sqrt(sum((y - mean_y) ** 2 for y in ys))
+    return num / max(1e-12, den_x * den_y)
+
+length_reward_corr = corr([sample["length"] for sample in reward_samples], [sample["reward"] for sample in reward_samples])
+reward_human_gap = sum(abs(sample["reward"] - sample["quality"]) for sample in reward_samples) / len(reward_samples)
+high_reward_low_quality = [
+    sample["id"] for sample in reward_samples if sample["reward"] >= 0.80 and sample["quality"] < 0.60
+]
+reward_audit = {
+    "length_reward_corr": round(length_reward_corr, 3),
+    "reward_human_gap": round(reward_human_gap, 3),
+    "high_reward_low_quality": high_reward_low_quality,
+}
+
+dpo_pairs = [
+    {"id": "clear_win", "pi_c": -1.2, "pi_r": -1.9, "ref_c": -1.4, "ref_r": -1.6},
+    {"id": "policy_prefers_bad", "pi_c": -2.5, "pi_r": -2.2, "ref_c": -2.1, "ref_r": -2.0},
+    {"id": "ref_mismatch_case", "pi_c": -3.1, "pi_r": -3.0, "ref_c": -2.7, "ref_r": -2.9},
+]
+beta = 0.8
+train_reference = "sft_v2"
+expected_reference = "sft_v3"
+dpo_margins = {}
+dpo_losses = {}
+for pair in dpo_pairs:
+    margin = (pair["pi_c"] - pair["pi_r"]) - (pair["ref_c"] - pair["ref_r"])
+    dpo_margins[pair["id"]] = round(margin, 3)
+    dpo_losses[pair["id"]] = round(-log(1 / (1 + exp(-beta * margin))), 3)
+negative_dpo_margins = [pair_id for pair_id, margin in dpo_margins.items() if margin <= 0]
+dpo_audit = {
+    "margins": dpo_margins,
+    "losses": dpo_losses,
+    "negative_margins": negative_dpo_margins,
+    "reference_match": train_reference == expected_reference,
+    "beta": beta,
+}
+
+train_tool_schema = {"search": ["query"], "calculator": ["expression"]}
+serving_tool_schema = {"web_search": ["query"], "calculator": ["expr"]}
+tool_schema_match = train_tool_schema == serving_tool_schema
+
+gates = {
+    "sft_mask_ok": mask_audit["assistant_coverage"] >= 0.95
+    and mask_audit["prompt_loss_leak_rate"] == 0
+    and mask_audit["pad_loss_leak_rate"] == 0
+    and mask_audit["eos_coverage"] >= 0.95,
+    "template_ok": mask_audit["template_match"],
+    "capability_regression_ok": not regressions,
+    "refusal_ok": refusal_audit["over_refusal_rate"] <= 0.20 and refusal_audit["unsafe_leak_rate"] == 0,
+    "preference_data_ok": preference_audit["avg_margin"] >= 0.15
+    and preference_audit["avg_agreement"] >= 0.70
+    and not preference_audit["bad_chosen_pairs"],
+    "reward_model_ok": abs(reward_audit["length_reward_corr"]) <= 0.50
+    and reward_audit["reward_human_gap"] <= 0.20
+    and not reward_audit["high_reward_low_quality"],
+    "dpo_ok": not dpo_audit["negative_margins"] and dpo_audit["reference_match"],
+    "tool_schema_ok": tool_schema_match,
+}
+
+print("mask_audit=", mask_audit)
+print("capability_delta=", capability_delta)
+print("regressions=", regressions)
+print("refusal_audit=", refusal_audit)
+print("preference_audit=", preference_audit)
+print("reward_audit=", reward_audit)
+print("dpo_audit=", dpo_audit)
+print("tool_schema_match=", tool_schema_match)
+print("gates=", gates)
+print("gate_pass=", all(gates.values()))
+```
+
+一次输出示例：
+
+```text
+mask_audit= {'assistant_coverage': 0.844, 'prompt_loss_leak_rate': 0.27, 'pad_loss_leak_rate': 0.333, 'eos_coverage': 0.667, 'template_match': False}
+capability_delta= {'instruction': 0.14, 'math': -0.15, 'code': -0.17, 'safety': 0.05, 'tool': -0.08}
+regressions= {'math': -0.15, 'code': -0.17, 'tool': -0.08}
+refusal_audit= {'over_refusal_rate': 0.667, 'unsafe_leak_rate': 0.333, 'false_refusals': ['defensive_security', 'medical_general'], 'unsafe_leaks': ['high_risk_steps']}
+preference_audit= {'avg_margin': 0.083, 'avg_agreement': 0.643, 'low_margin_pairs': ['small_margin', 'length_bias', 'safety_boundary'], 'bad_chosen_pairs': ['length_bias']}
+reward_audit= {'length_reward_corr': 0.91, 'reward_human_gap': 0.338, 'high_reward_low_quality': ['verbose_shallow', 'long_refusal']}
+dpo_audit= {'margins': {'clear_win': 0.5, 'policy_prefers_bad': -0.2, 'ref_mismatch_case': -0.3}, 'losses': {'clear_win': 0.513, 'policy_prefers_bad': 0.776, 'ref_mismatch_case': 0.82}, 'negative_margins': ['policy_prefers_bad', 'ref_mismatch_case'], 'reference_match': False, 'beta': 0.8}
+tool_schema_match= False
+gates= {'sft_mask_ok': False, 'template_ok': False, 'capability_regression_ok': False, 'refusal_ok': False, 'preference_data_ok': False, 'reward_model_ok': False, 'dpo_ok': False, 'tool_schema_ok': False}
+gate_pass= False
+```
+
+这段输出故意让所有门禁失败。它说明后训练事故不能只盯着一个 loss：SFT mask、模板、能力回归、安全拒答、偏好数据、reward model、DPO reference 和工具 schema 都可能单独造成线上行为异常。
 
 ## 6.20 事故复盘模板
 

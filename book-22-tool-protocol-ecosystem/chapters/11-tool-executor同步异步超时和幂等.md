@@ -1,5 +1,17 @@
 # 第十一章：Tool Executor：同步、异步、超时和幂等
 
+## 11.0 本讲资料边界与第二轮精修口径
+
+本章按第二轮精修要求，对齐 OpenAI tools / function calling 中“模型生成结构化 tool call、应用侧执行真实函数、再把 tool result 回填”的公开边界，OpenAI Agents SDK 中 tool、result、trace 和 guardrail 的公开抽象，Anthropic tool use 中工具定义、工具选择、tool use / tool result 轮转的公开能力，Google Gemini function calling 中 function declaration、mode 和 allowed function names 的公开能力，以及 MCP specification 中 `tools/list`、`tools/call` 和 server capability discovery 的协议边界。幂等部分参考公开 API 工程中的 idempotency key 设计惯例：同一用户意图的重复请求应复用稳定 key，并返回已有执行结果或进入一致恢复流程，而不是重复执行副作用。
+
+这里抽象的是 Tool Executor 的稳定工程层：结构化 tool call 解析、schema 和业务校验、权限和确认、同步 / 异步执行、并发、超时、取消、幂等、副作用状态、结果包装、错误规范化、trace、replay 和 eval。
+
+需要注意三点：
+
+1. 本章不把某一家 provider 的 tool call 字段名、result message 格式、trace schema、SDK 回调或 MCP 消息结构写成通用标准。
+2. Executor 的职责不是替模型“决定想做什么”，而是把已经生成的工具意图变成经过校验、授权、限流、幂等、可观测的真实执行。
+3. 本章只讨论防御性的工具执行控制，不提供绕过权限、规避确认、重复执行副作用、隐藏审计日志或攻击外部工具服务的方法。
+
 ## 11.1 本章定位
 
 上一章讲 Tool Router，解决“当前请求应该给模型哪些工具”。本章讲 Tool Executor，解决“模型已经生成 tool call 后，runtime 如何真实执行工具”。
@@ -693,57 +705,660 @@ Executor 也需要 eval。
 
 Executor eval 是工程测试，不应完全依赖 LLM judge。
 
-## 11.23 常见错误
+## 11.23 Tool Executor 指标与最小 demo
 
-### 11.23.1 模型一调用就执行
+为了让 Executor 从 demo 函数调用升级为可上线组件，评估对象不能只看“工具有没有返回”。更稳的做法是把一次执行样本记为：
+
+```math
+e_i=(v_i,\hat{v}_i,s_i,\hat{s}_i,p_i,\hat{p}_i,m_i,\hat{m}_i,a_i,c_i,k_i,u_i,r_i,o_i,z_i)
+```
+
+其中，`v_i` 和 `\hat{v}_i` 分别表示期望接受决策和实际接受决策，`s_i` 和 `\hat{s}_i` 表示期望 schema 结果和实际 schema 结果，`p_i` 和 `\hat{p}_i` 表示期望权限结果和实际权限结果，`m_i` 和 `\hat{m}_i` 表示期望执行模式和实际执行模式，`a_i` 表示异步 job 跟踪是否完整，`c_i` 表示超时后是否取消或进入未知状态接管，`k_i` 表示幂等保护是否生效，`u_i` 表示副作用未知状态是否升级处理，`r_i` 表示重试是否安全，`o_i` 表示结构化结果和错误映射是否完整，`z_i` 表示 trace 字段是否完整。
+
+执行请求有效率：
+
+```math
+C_{\mathrm{valid}}=
+\frac{\sum_i \mathbb{1}[\hat{v}_i=v_i]}
+{N}
+```
+
+Schema 校验通过率、权限执行通过率和执行模式准确率：
+
+```math
+C_{\mathrm{schema}}=
+\frac{\sum_i \mathbb{1}[\hat{s}_i=s_i]}
+{N}
+```
+
+```math
+C_{\mathrm{perm}}=
+\frac{\sum_i \mathbb{1}[\hat{p}_i=p_i]}
+{N}
+```
+
+```math
+A_{\mathrm{mode}}=
+\frac{\sum_i \mathbb{1}[\hat{m}_i=m_i]}
+{N}
+```
+
+异步完成跟踪率和超时取消覆盖率：
+
+```math
+C_{\mathrm{async}}=
+\frac{\sum_i \mathbb{1}[a_i=1]}
+{N}
+```
+
+```math
+C_{\mathrm{timeout}}=
+\frac{\sum_i \mathbb{1}[c_i=1]}
+{N}
+```
+
+幂等保护率和未知状态升级率：
+
+```math
+C_{\mathrm{idem}}=
+\frac{\sum_i \mathbb{1}[k_i=1]}
+{N}
+```
+
+```math
+C_{\mathrm{unknown}}=
+\frac{\sum_i \mathbb{1}[u_i=1]}
+{N}
+```
+
+重试安全率和副作用确认覆盖率：
+
+```math
+C_{\mathrm{retry}}=
+\frac{\sum_i \mathbb{1}[r_i=1]}
+{N}
+```
+
+```math
+C_{\mathrm{confirm}}=
+\frac{\sum_i \mathbb{1}[\mathrm{confirm}_i=1]}
+{N}
+```
+
+结构化结果覆盖率和 executor trace 完整率：
+
+```math
+C_{\mathrm{result}}=
+\frac{\sum_i \mathbb{1}[o_i=1]}
+{N}
+```
+
+```math
+C_{\mathrm{trace}}=
+\frac{\sum_i \mathbb{1}[z_i=1]}
+{N}
+```
+
+Executor 上线门禁可以写成：
+
+```math
+G_{\mathrm{executor}}=
+\mathbb{1}[
+C_{\mathrm{valid}}\ge \tau_{\mathrm{valid}}
+\land C_{\mathrm{schema}}\ge \tau_{\mathrm{schema}}
+\land C_{\mathrm{perm}}\ge \tau_{\mathrm{perm}}
+\land C_{\mathrm{timeout}}\ge \tau_{\mathrm{timeout}}
+\land C_{\mathrm{idem}}\ge \tau_{\mathrm{idem}}
+\land C_{\mathrm{unknown}}\ge \tau_{\mathrm{unknown}}
+\land C_{\mathrm{result}}\ge \tau_{\mathrm{result}}
+\land C_{\mathrm{trace}}\ge \tau_{\mathrm{trace}}
+]
+```
+
+下面是一个 0 依赖最小 demo。它不调用模型、不访问网络、不执行真实外部工具，只审计 toy executor traces，用来说明 executor 的关键不是“函数能跑”，而是 schema、权限、同步 / 异步、超时、取消、幂等、未知状态、结果包装和 trace 都能闭环。
+
+```python
+REQUIRED_TRACE_FIELDS = {
+    "received",
+    "schema",
+    "permission",
+    "mode",
+    "status",
+    "result",
+    "version",
+}
+
+CASES = [
+    {
+        "id": "readonly_sync_ok",
+        "expected_accept": True,
+        "actual_accept": True,
+        "expected_schema": True,
+        "actual_schema": True,
+        "expected_permission": "allow",
+        "actual_permission": "allow",
+        "expected_mode": "sync",
+        "actual_mode": "sync",
+        "async_job_id": False,
+        "async_status_query": False,
+        "async_completion_recorded": False,
+        "timed_out": False,
+        "cancelled": False,
+        "side_effect": False,
+        "high_risk": False,
+        "confirmation": False,
+        "idempotency_key": False,
+        "duplicate_prevented": False,
+        "unknown_state": False,
+        "escalated": False,
+        "retried": False,
+        "retryable": False,
+        "retry_budget_ok": True,
+        "structured_result": True,
+        "error_mapped": True,
+        "trace_fields": REQUIRED_TRACE_FIELDS,
+    },
+    {
+        "id": "async_job_completed_ok",
+        "expected_accept": True,
+        "actual_accept": True,
+        "expected_schema": True,
+        "actual_schema": True,
+        "expected_permission": "allow",
+        "actual_permission": "allow",
+        "expected_mode": "async",
+        "actual_mode": "async",
+        "async_job_id": True,
+        "async_status_query": True,
+        "async_completion_recorded": True,
+        "timed_out": False,
+        "cancelled": False,
+        "side_effect": False,
+        "high_risk": False,
+        "confirmation": False,
+        "idempotency_key": False,
+        "duplicate_prevented": False,
+        "unknown_state": False,
+        "escalated": False,
+        "retried": False,
+        "retryable": False,
+        "retry_budget_ok": True,
+        "structured_result": True,
+        "error_mapped": True,
+        "trace_fields": REQUIRED_TRACE_FIELDS,
+    },
+    {
+        "id": "invalid_schema_blocked_ok",
+        "expected_accept": False,
+        "actual_accept": False,
+        "expected_schema": False,
+        "actual_schema": False,
+        "expected_permission": "deny",
+        "actual_permission": "deny",
+        "expected_mode": "block",
+        "actual_mode": "block",
+        "async_job_id": False,
+        "async_status_query": False,
+        "async_completion_recorded": False,
+        "timed_out": False,
+        "cancelled": False,
+        "side_effect": False,
+        "high_risk": False,
+        "confirmation": False,
+        "idempotency_key": False,
+        "duplicate_prevented": False,
+        "unknown_state": False,
+        "escalated": False,
+        "retried": False,
+        "retryable": False,
+        "retry_budget_ok": True,
+        "structured_result": True,
+        "error_mapped": True,
+        "trace_fields": REQUIRED_TRACE_FIELDS,
+    },
+    {
+        "id": "permission_denied_blocked_ok",
+        "expected_accept": False,
+        "actual_accept": False,
+        "expected_schema": True,
+        "actual_schema": True,
+        "expected_permission": "deny",
+        "actual_permission": "deny",
+        "expected_mode": "block",
+        "actual_mode": "block",
+        "async_job_id": False,
+        "async_status_query": False,
+        "async_completion_recorded": False,
+        "timed_out": False,
+        "cancelled": False,
+        "side_effect": False,
+        "high_risk": False,
+        "confirmation": False,
+        "idempotency_key": False,
+        "duplicate_prevented": False,
+        "unknown_state": False,
+        "escalated": False,
+        "retried": False,
+        "retryable": False,
+        "retry_budget_ok": True,
+        "structured_result": True,
+        "error_mapped": True,
+        "trace_fields": REQUIRED_TRACE_FIELDS,
+    },
+    {
+        "id": "timeout_cancelled_ok",
+        "expected_accept": True,
+        "actual_accept": True,
+        "expected_schema": True,
+        "actual_schema": True,
+        "expected_permission": "allow",
+        "actual_permission": "allow",
+        "expected_mode": "sync",
+        "actual_mode": "sync",
+        "async_job_id": False,
+        "async_status_query": False,
+        "async_completion_recorded": False,
+        "timed_out": True,
+        "cancelled": True,
+        "side_effect": False,
+        "high_risk": False,
+        "confirmation": False,
+        "idempotency_key": False,
+        "duplicate_prevented": False,
+        "unknown_state": False,
+        "escalated": False,
+        "retried": False,
+        "retryable": True,
+        "retry_budget_ok": True,
+        "structured_result": True,
+        "error_mapped": True,
+        "trace_fields": REQUIRED_TRACE_FIELDS,
+    },
+    {
+        "id": "timeout_not_cancelled_bad",
+        "expected_accept": True,
+        "actual_accept": True,
+        "expected_schema": True,
+        "actual_schema": True,
+        "expected_permission": "allow",
+        "actual_permission": "allow",
+        "expected_mode": "sync",
+        "actual_mode": "sync",
+        "async_job_id": False,
+        "async_status_query": False,
+        "async_completion_recorded": False,
+        "timed_out": True,
+        "cancelled": False,
+        "side_effect": False,
+        "high_risk": False,
+        "confirmation": False,
+        "idempotency_key": False,
+        "duplicate_prevented": False,
+        "unknown_state": False,
+        "escalated": False,
+        "retried": False,
+        "retryable": True,
+        "retry_budget_ok": True,
+        "structured_result": True,
+        "error_mapped": True,
+        "trace_fields": REQUIRED_TRACE_FIELDS,
+    },
+    {
+        "id": "side_effect_confirmed_idem_ok",
+        "expected_accept": True,
+        "actual_accept": True,
+        "expected_schema": True,
+        "actual_schema": True,
+        "expected_permission": "allow",
+        "actual_permission": "allow",
+        "expected_mode": "sync",
+        "actual_mode": "sync",
+        "async_job_id": False,
+        "async_status_query": False,
+        "async_completion_recorded": False,
+        "timed_out": False,
+        "cancelled": False,
+        "side_effect": True,
+        "high_risk": True,
+        "confirmation": True,
+        "idempotency_key": True,
+        "duplicate_prevented": True,
+        "unknown_state": False,
+        "escalated": False,
+        "retried": False,
+        "retryable": False,
+        "retry_budget_ok": True,
+        "structured_result": True,
+        "error_mapped": True,
+        "trace_fields": REQUIRED_TRACE_FIELDS,
+    },
+    {
+        "id": "duplicate_side_effect_no_idem_bad",
+        "expected_accept": True,
+        "actual_accept": True,
+        "expected_schema": True,
+        "actual_schema": True,
+        "expected_permission": "allow",
+        "actual_permission": "allow",
+        "expected_mode": "sync",
+        "actual_mode": "sync",
+        "async_job_id": False,
+        "async_status_query": False,
+        "async_completion_recorded": False,
+        "timed_out": False,
+        "cancelled": False,
+        "side_effect": True,
+        "high_risk": True,
+        "confirmation": True,
+        "idempotency_key": False,
+        "duplicate_prevented": False,
+        "unknown_state": False,
+        "escalated": False,
+        "retried": False,
+        "retryable": False,
+        "retry_budget_ok": True,
+        "structured_result": True,
+        "error_mapped": True,
+        "trace_fields": REQUIRED_TRACE_FIELDS,
+    },
+    {
+        "id": "side_effect_unknown_escalated_ok",
+        "expected_accept": True,
+        "actual_accept": True,
+        "expected_schema": True,
+        "actual_schema": True,
+        "expected_permission": "allow",
+        "actual_permission": "allow",
+        "expected_mode": "sync",
+        "actual_mode": "sync",
+        "async_job_id": False,
+        "async_status_query": False,
+        "async_completion_recorded": False,
+        "timed_out": True,
+        "cancelled": False,
+        "side_effect": True,
+        "high_risk": True,
+        "confirmation": True,
+        "idempotency_key": True,
+        "duplicate_prevented": True,
+        "unknown_state": True,
+        "escalated": True,
+        "retried": False,
+        "retryable": True,
+        "retry_budget_ok": True,
+        "structured_result": True,
+        "error_mapped": True,
+        "trace_fields": REQUIRED_TRACE_FIELDS,
+    },
+    {
+        "id": "side_effect_unknown_retried_bad",
+        "expected_accept": True,
+        "actual_accept": True,
+        "expected_schema": True,
+        "actual_schema": True,
+        "expected_permission": "allow",
+        "actual_permission": "allow",
+        "expected_mode": "sync",
+        "actual_mode": "sync",
+        "async_job_id": False,
+        "async_status_query": False,
+        "async_completion_recorded": False,
+        "timed_out": True,
+        "cancelled": False,
+        "side_effect": True,
+        "high_risk": True,
+        "confirmation": True,
+        "idempotency_key": False,
+        "duplicate_prevented": False,
+        "unknown_state": True,
+        "escalated": False,
+        "retried": True,
+        "retryable": True,
+        "retry_budget_ok": True,
+        "structured_result": True,
+        "error_mapped": True,
+        "trace_fields": REQUIRED_TRACE_FIELDS,
+    },
+    {
+        "id": "async_missing_tracking_bad",
+        "expected_accept": True,
+        "actual_accept": True,
+        "expected_schema": True,
+        "actual_schema": True,
+        "expected_permission": "allow",
+        "actual_permission": "allow",
+        "expected_mode": "async",
+        "actual_mode": "async",
+        "async_job_id": True,
+        "async_status_query": False,
+        "async_completion_recorded": False,
+        "timed_out": False,
+        "cancelled": False,
+        "side_effect": False,
+        "high_risk": False,
+        "confirmation": False,
+        "idempotency_key": False,
+        "duplicate_prevented": False,
+        "unknown_state": False,
+        "escalated": False,
+        "retried": False,
+        "retryable": False,
+        "retry_budget_ok": True,
+        "structured_result": True,
+        "error_mapped": True,
+        "trace_fields": REQUIRED_TRACE_FIELDS,
+    },
+    {
+        "id": "missing_structured_result_bad",
+        "expected_accept": True,
+        "actual_accept": True,
+        "expected_schema": True,
+        "actual_schema": True,
+        "expected_permission": "allow",
+        "actual_permission": "allow",
+        "expected_mode": "sync",
+        "actual_mode": "sync",
+        "async_job_id": False,
+        "async_status_query": False,
+        "async_completion_recorded": False,
+        "timed_out": False,
+        "cancelled": False,
+        "side_effect": False,
+        "high_risk": False,
+        "confirmation": False,
+        "idempotency_key": False,
+        "duplicate_prevented": False,
+        "unknown_state": False,
+        "escalated": False,
+        "retried": False,
+        "retryable": False,
+        "retry_budget_ok": True,
+        "structured_result": False,
+        "error_mapped": False,
+        "trace_fields": REQUIRED_TRACE_FIELDS,
+    },
+    {
+        "id": "trace_missing_bad",
+        "expected_accept": True,
+        "actual_accept": True,
+        "expected_schema": True,
+        "actual_schema": True,
+        "expected_permission": "allow",
+        "actual_permission": "allow",
+        "expected_mode": "sync",
+        "actual_mode": "sync",
+        "async_job_id": False,
+        "async_status_query": False,
+        "async_completion_recorded": False,
+        "timed_out": False,
+        "cancelled": False,
+        "side_effect": False,
+        "high_risk": False,
+        "confirmation": False,
+        "idempotency_key": False,
+        "duplicate_prevented": False,
+        "unknown_state": False,
+        "escalated": False,
+        "retried": False,
+        "retryable": False,
+        "retry_budget_ok": True,
+        "structured_result": True,
+        "error_mapped": True,
+        "trace_fields": {"received", "schema", "status"},
+    },
+]
+
+
+def pass_flags(case):
+    async_ok = True
+    if case["expected_mode"] == "async":
+        async_ok = (
+            case["async_job_id"]
+            and case["async_status_query"]
+            and case["async_completion_recorded"]
+        )
+
+    timeout_ok = True
+    if case["timed_out"]:
+        if case["side_effect"] and case["unknown_state"]:
+            timeout_ok = case["escalated"] and not case["retried"]
+        else:
+            timeout_ok = case["cancelled"]
+
+    if case["side_effect"]:
+        idempotency_ok = case["idempotency_key"] and case["duplicate_prevented"]
+    else:
+        idempotency_ok = True
+
+    unknown_ok = True
+    if case["unknown_state"]:
+        unknown_ok = case["escalated"] and not case["retried"]
+
+    if case["retried"]:
+        retry_ok = (
+            case["retryable"]
+            and case["retry_budget_ok"]
+            and not case["unknown_state"]
+            and (not case["side_effect"] or case["idempotency_key"])
+        )
+    else:
+        retry_ok = True
+
+    confirmation_ok = True
+    if case["high_risk"]:
+        confirmation_ok = case["confirmation"]
+
+    return {
+        "execution_request_validity": case["expected_accept"] == case["actual_accept"],
+        "schema_validation_pass_rate": case["expected_schema"] == case["actual_schema"],
+        "permission_enforcement_pass_rate": case["expected_permission"] == case["actual_permission"],
+        "execution_mode_accuracy": case["expected_mode"] == case["actual_mode"],
+        "async_completion_tracking": async_ok,
+        "timeout_cancellation_coverage": timeout_ok,
+        "idempotency_protection_rate": idempotency_ok,
+        "unknown_state_escalation_rate": unknown_ok,
+        "retry_safety_rate": retry_ok,
+        "side_effect_confirmation_coverage": confirmation_ok,
+        "structured_result_coverage": case["structured_result"] and case["error_mapped"],
+        "executor_trace_completeness": REQUIRED_TRACE_FIELDS.issubset(case["trace_fields"]),
+    }
+
+
+def rate(values):
+    return round(sum(values) / len(values), 3)
+
+
+flags_by_case = {case["id"]: pass_flags(case) for case in CASES}
+metric_names = list(next(iter(flags_by_case.values())).keys())
+metrics = {
+    name: rate([flags[name] for flags in flags_by_case.values()])
+    for name in metric_names
+}
+failed_cases = [
+    case_id
+    for case_id, flags in flags_by_case.items()
+    if not all(flags.values())
+]
+
+thresholds = {
+    "execution_request_validity": 0.95,
+    "schema_validation_pass_rate": 0.95,
+    "permission_enforcement_pass_rate": 0.95,
+    "execution_mode_accuracy": 0.95,
+    "async_completion_tracking": 0.95,
+    "timeout_cancellation_coverage": 0.95,
+    "idempotency_protection_rate": 0.95,
+    "unknown_state_escalation_rate": 0.95,
+    "retry_safety_rate": 0.95,
+    "side_effect_confirmation_coverage": 0.95,
+    "structured_result_coverage": 0.95,
+    "executor_trace_completeness": 0.95,
+}
+failed_gates = [
+    name
+    for name, threshold in thresholds.items()
+    if metrics[name] < threshold
+]
+
+print("metrics=", metrics)
+print("failed_cases=", failed_cases)
+print("failed_gates=", failed_gates)
+print("tool_executor_gate_pass=", not failed_gates)
+```
+
+运行后会看到：普通只读同步、异步 job、schema 阻断和权限阻断都能通过；但超时未取消、有副作用缺幂等、未知状态盲目重试、异步任务缺状态查询、结果未结构化和 trace 缺字段会拉低门禁。这个 demo 想表达的是，Executor 的质量不是单一 success rate，而是由“能否执行”和“执行是否安全可恢复”共同决定。
+
+## 11.24 常见错误
+
+### 11.24.1 模型一调用就执行
 
 问题：绕过校验、权限和确认。
 
 修复：Executor 前置 validation、authorization、confirmation。
 
-### 11.23.2 没有超时
+### 11.24.2 没有超时
 
 问题：请求挂死、资源耗尽。
 
 修复：多层 timeout 和 cancellation。
 
-### 11.23.3 有副作用工具无幂等
+### 11.24.3 有副作用工具无幂等
 
 问题：重试导致重复发送、重复扣款。
 
 修复：idempotency key 和执行记录。
 
-### 11.23.4 取消后后台仍执行但无记录
+### 11.24.4 取消后后台仍执行但无记录
 
 问题：用户以为取消了，实际动作完成了。
 
 修复：明确取消语义，记录 job 状态。
 
-### 11.23.5 原始错误直接回填
+### 11.24.5 原始错误直接回填
 
 问题：泄露堆栈、服务地址、敏感信息。
 
 修复：错误规范化和脱敏。
 
-### 11.23.6 输出无限制
+### 11.24.6 输出无限制
 
 问题：上下文爆炸，成本暴涨。
 
 修复：输出大小限制、分页、摘要、引用。
 
-### 11.23.7 并发结果错配
+### 11.24.7 并发结果错配
 
 问题：结果按返回顺序回填，tool_call_id 对不上。
 
 修复：永远按 tool_call_id 对齐。
 
-### 11.23.8 没有 trace
+### 11.24.8 没有 trace
 
 问题：无法审计、回放、评估。
 
 修复：Executor 全链路 trace。
 
-## 11.24 面试题：如何设计 Tool Executor
+## 11.25 面试题：如何设计 Tool Executor
 
 面试官可能问：
 
@@ -806,7 +1421,7 @@ Executor eval 是工程测试，不应完全依赖 LLM judge。
 Tool Executor 是工具调用真正落地的安全执行层，必须把模型生成的意图转成经过校验、授权、限流、幂等、可观测的真实动作。
 ```
 
-## 11.25 小练习
+## 11.26 小练习
 
 ### 练习 1：能否直接执行
 
@@ -844,7 +1459,7 @@ Tool Executor 是工具调用真正落地的安全执行层，必须把模型生
 
 参考答案：限制输出大小，过滤相关片段，摘要或分页，必要时返回对象存储引用，不应直接塞进模型上下文。
 
-## 11.26 本章小结
+## 11.27 本章小结
 
 本章讲了 Tool Executor。
 

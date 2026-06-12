@@ -1,5 +1,17 @@
 # 第四章：工具系统与 Tool Registry
 
+## 0. 本讲资料边界与第二轮精修口径
+
+本讲第二轮精修时，联网核对了 OpenAI Agents SDK 关于 function tools、hosted tools、agents as tools、MCP tools、guardrails 和 tracing 的公开文档，Anthropic Claude Code 关于 tools、permissions、hooks、MCP 和 slash commands 的公开说明，Model Context Protocol 关于 tools list / call、input schema 和 tool result 的公开规范，以及 OpenHands / SWE-agent / mini-SWE-agent 中围绕 sandbox、工具执行、测试命令、轨迹和评估的公开资料。
+
+本讲只讨论防御性的 Tool Registry 与工具执行系统设计：如何定义工具 schema、权限、副作用、执行入口、错误类型、输出压缩、trace 和评估指标。它不提供绕过权限、规避 sandbox、读取密钥、构造危险 shell、批量删除文件、外发敏感数据或自动化高风险操作的方法。
+
+第二轮精修重点放在三件事：
+
+1. 把 Tool Registry 从“工具列表”补成可校验、可治理、可观测的系统组件。
+2. 用 GitHub 兼容公式描述 registry 完整性、schema 严格性、权限绑定、风险确认、输出标准化、版本覆盖和 trace 覆盖。
+3. 增加一个 0 依赖 Python demo，演示如何审计 toy Tool Registry 和 tool calls 的失败根因。
+
 ## 4.1 本章目标
 
 前三章讲了 harness、runtime 和 coding agent 工作流。本章进入工具系统：模型如何知道自己能做什么，runtime 如何把模型的动作请求变成真实工具调用，系统如何校验参数、控制权限、处理错误并记录 trace。
@@ -514,6 +526,368 @@ Evaluation harness 比较不同 agent 版本时，也要固定工具版本，否
 5. 输出截断影响任务成功率。
 
 Tool system 不是只要“能调用”就够，还要可监控、可调优。
+
+### 4.15.1 关键公式与 Tool Registry 指标速查
+
+可以把第 $j$ 个工具定义记为：
+
+```math
+z_j=(n_j,d_j,I_j,O_j,p_j,s_j,q_j,e_j,v_j,a_j)
+```
+
+其中 $n_j$ 是工具名，$d_j$ 是描述，$I_j$ 是 input schema，$O_j$ 是 output schema，$p_j$ 是 permission level，$s_j$ 是 side effect level，$q_j$ 是 timeout / retry / budget 策略，$e_j$ 是 error type 集合，$v_j$ 是工具版本，$a_j$ 是 audit policy。
+
+Registry 字段完整率：
+
+```math
+C_{\mathrm{reg}}=
+\frac{1}{M}\sum_{j=1}^{M}
+\mathbb{1}[\mathrm{required}(z_j)=1]
+```
+
+如果工具缺少权限、副作用、版本、错误类型或审计策略，它可能仍然“能调用”，但不能安全上线、不能复盘，也不能公平评估。
+
+Schema 严格率：
+
+```math
+S_{\mathrm{schema}}=
+\frac{\sum_j \sum_{f\in I_j}\mathbb{1}[\mathrm{typed}(f)\wedge \mathrm{bounded}(f)]}
+{\sum_j |I_j|}
+```
+
+这里的 $\mathrm{typed}(f)$ 表示字段类型明确，$\mathrm{bounded}(f)$ 表示字段有枚举、范围、路径边界、长度限制或 allowlist。`command: string` 这类无限自由字段会降低这个指标。
+
+权限绑定覆盖率：
+
+```math
+C_{\mathrm{perm}}=
+\frac{1}{M}\sum_{j=1}^{M}
+\mathbb{1}[p_j\ne \varnothing \wedge s_j\ne \varnothing]
+```
+
+权限等级和副作用等级要分开看。读文件、写文件、执行命令、访问网络、读取 secret 和外部写入，不应该共用一个模糊的 allow / deny。
+
+高风险保护覆盖率：
+
+```math
+C_{\mathrm{risk}}=
+\frac{\sum_{j\in \mathcal{R}}\mathbb{1}[\mathrm{confirm}(z_j)\vee \mathrm{block}(z_j)]}
+{|\mathcal{R}|}
+```
+
+其中 $\mathcal{R}$ 是高风险工具集合，例如写文件、执行命令、网络访问、secret、系统资源和 destructive action。这个指标应尽量接近 1。
+
+输出标准化率：
+
+```math
+C_{\mathrm{out}}=
+\frac{1}{M}\sum_{j=1}^{M}
+\mathbb{1}[\{status,error,recoverable,truncated\}\subseteq O_j]
+```
+
+工具输出如果没有稳定的 status、error type、recoverable 和 truncated 字段，模型就很难根据失败结果恢复，evaluation harness 也难以统计。
+
+工具版本覆盖率：
+
+```math
+C_{\mathrm{ver}}=
+\frac{1}{M}\sum_{j=1}^{M}\mathbb{1}[v_j\ne \varnothing]
+```
+
+工具版本是 replay 和评估公平性的基础。Search 排序、patch 匹配、输出摘要、超时策略变了，agent 行为就可能改变。
+
+Trace 就绪率：
+
+```math
+C_{\mathrm{trace}}=
+\frac{1}{M}\sum_{j=1}^{M}
+\mathbb{1}[\mathrm{trace}(z_j)\supseteq T_{\mathrm{need}}]
+```
+
+其中 $T_{\mathrm{need}}$ 至少包含 tool name、tool version、arguments、permission decision、status、error type 和 duration。高风险工具还应该记录 confirmation、diff summary、output truncation 和安全拦截原因。
+
+Tool Registry 门禁：
+
+```math
+G_{\mathrm{toolreg}}=
+\mathbb{1}[
+C_{\mathrm{reg}}\ge \alpha_{\mathrm{reg}}
+\wedge S_{\mathrm{schema}}\ge \alpha_{\mathrm{schema}}
+\wedge C_{\mathrm{perm}}\ge \alpha_{\mathrm{perm}}
+\wedge C_{\mathrm{risk}}\ge \alpha_{\mathrm{risk}}
+\wedge C_{\mathrm{out}}\ge \alpha_{\mathrm{out}}
+\wedge C_{\mathrm{ver}}\ge \alpha_{\mathrm{ver}}
+\wedge C_{\mathrm{trace}}\ge \alpha_{\mathrm{trace}}
+]
+```
+
+面试里可以这样总结：Tool Registry 不是 prompt 里的工具说明，而是模型动作能力的治理表。它必须同时服务模型选择、runtime 校验、permission gate、error recovery、trace replay 和 evaluation harness。
+
+### 4.15.2 最小可运行 Tool Registry 审计 demo
+
+下面的 0 依赖脚本构造 6 个 toy 工具定义和 5 条工具调用样本，审计 registry 完整性、schema 严格性、权限绑定、高风险保护、输出标准化、版本覆盖、trace 就绪和不可信工具返回边界。
+
+```python
+from statistics import mean
+
+
+REQUIRED_TOOL_FIELDS = {
+    "name",
+    "description",
+    "input_schema",
+    "output_schema",
+    "permission",
+    "side_effect",
+    "timeout",
+    "retry_policy",
+    "error_types",
+    "visibility",
+    "version",
+    "audit_policy",
+}
+REQUIRED_OUTPUT_FIELDS = {"status", "error_type", "recoverable", "truncated"}
+REQUIRED_TRACE_FIELDS = {
+    "tool_name",
+    "tool_version",
+    "arguments",
+    "permission",
+    "status",
+    "error_type",
+    "duration_ms",
+}
+RISKY_PERMISSIONS = {"write", "execute", "network", "secret", "system"}
+RISKY_SIDE_EFFECTS = {"local_write", "compute", "external_read", "external_write", "destructive"}
+
+
+tools = [
+    {
+        "name": "read_file",
+        "description": "Read a bounded text slice inside the workspace.",
+        "input_schema": {
+            "path": {"type": "string", "required": True, "constraints": ["inside_workspace"]},
+            "offset": {"type": "integer", "required": False, "constraints": ["min_0"]},
+            "limit": {"type": "integer", "required": False, "constraints": ["1_to_400"]},
+        },
+        "output_schema": {"status", "content", "line_count", "error_type", "recoverable", "truncated"},
+        "permission": "read",
+        "side_effect": "none",
+        "timeout": 5,
+        "retry_policy": {"transient_io": 1},
+        "error_types": {"not_found", "permission_denied", "output_too_large"},
+        "visibility": "model",
+        "version": "1.0",
+        "audit_policy": {"trace_fields": REQUIRED_TRACE_FIELDS | {"output_summary"}},
+    },
+    {
+        "name": "search_code",
+        "description": "Search code with a bounded regex in the workspace.",
+        "input_schema": {
+            "pattern": {"type": "string", "required": True, "constraints": ["non_empty", "max_len_120"]},
+            "include": {"type": "string", "required": False, "constraints": ["glob_inside_workspace"]},
+        },
+        "output_schema": {"status", "matches", "truncated"},
+        "permission": "read",
+        "side_effect": "none",
+        "timeout": 10,
+        "retry_policy": {"transient_io": 1},
+        "error_types": {"regex_error", "output_too_large"},
+        "visibility": "model",
+        # missing version and incomplete output normalization
+        "audit_policy": {"trace_fields": {"tool_name", "arguments", "status"}},
+    },
+    {
+        "name": "apply_patch",
+        "description": "Apply a focused patch inside the workspace after diff review.",
+        "input_schema": {
+            "patch": {"type": "string", "required": True, "constraints": ["context_match", "max_files_5"]},
+            "reason": {"type": "string", "required": True, "constraints": ["non_empty"]},
+        },
+        "output_schema": {"status", "modified_files", "diff_summary", "error_type", "recoverable", "truncated"},
+        "permission": "write",
+        "side_effect": "local_write",
+        "timeout": 10,
+        "retry_policy": {"conflict": 0},
+        "error_types": {"conflict", "permission_denied", "schema_error"},
+        "visibility": "model",
+        "version": "1.1",
+        "requires_confirmation": True,
+        "audit_policy": {"trace_fields": REQUIRED_TRACE_FIELDS | {"diff_summary"}},
+    },
+    {
+        "name": "run_command",
+        "description": "Run a shell command in the workspace.",
+        "input_schema": {
+            # This field is intentionally too wide: no risk enum or allowlist.
+            "command": {"type": "string", "required": True, "constraints": []},
+            "working_dir": {"type": "string", "required": True, "constraints": ["inside_workspace"]},
+        },
+        "output_schema": {"status", "stdout", "stderr", "exit_code", "error_type", "recoverable", "truncated"},
+        "permission": "execute",
+        "side_effect": "compute",
+        "timeout": 120,
+        "retry_policy": {"timeout": 0},
+        "error_types": {"timeout", "command_failed", "unsafe_action"},
+        "visibility": "model",
+        "version": "1.0",
+        "requires_confirmation": False,
+        "audit_policy": {"trace_fields": REQUIRED_TRACE_FIELDS},
+    },
+    {
+        "name": "web_fetch",
+        "description": "Fetch an external web document.",
+        "input_schema": {
+            "url": {"type": "string", "required": True, "constraints": ["https_only"]},
+            "purpose": {"type": "string", "required": True, "constraints": ["non_empty"]},
+        },
+        "output_schema": {"status", "content", "source_url", "error_type", "recoverable", "truncated"},
+        "permission": "network",
+        "side_effect": "external_read",
+        "timeout": 20,
+        "retry_policy": {"transient_network": 1},
+        "error_types": {"network_error", "domain_denied", "output_too_large"},
+        "visibility": "model",
+        "version": "1.0",
+        "requires_confirmation": True,
+        "untrusted_output": True,
+        # missing trust_boundary and injection_filter
+        "audit_policy": {"trace_fields": REQUIRED_TRACE_FIELDS | {"source_url"}},
+    },
+    {
+        "name": "read_secret",
+        "description": "Read secrets from environment variables.",
+        "input_schema": {
+            "key": {"type": "string", "required": True, "constraints": []},
+        },
+        "output_schema": {"status", "value", "error_type"},
+        "permission": "secret",
+        "side_effect": "local_read",
+        "timeout": 3,
+        "retry_policy": {},
+        "error_types": {"permission_denied"},
+        "visibility": "model",
+        "version": "0.1",
+        "requires_confirmation": False,
+        "default_block": False,
+        "audit_policy": {"trace_fields": {"tool_name", "arguments", "status"}},
+    },
+]
+
+calls = [
+    {"id": "read_ok", "tool": "read_file", "args_valid": True, "permission": "allow", "executed": True, "success": True, "observation_used": True},
+    {"id": "test_ok", "tool": "run_command", "args_valid": True, "permission": "allow", "executed": True, "success": True, "observation_used": True},
+    {"id": "unknown_tool", "tool": "delete_repo", "args_valid": False, "permission": "deny", "executed": False, "success": False, "observation_used": False},
+    {"id": "unsafe_shell", "tool": "run_command", "args_valid": True, "permission": "allow", "executed": True, "success": False, "observation_used": False, "unsafe": True},
+    {"id": "web_injection", "tool": "web_fetch", "args_valid": True, "permission": "allow", "executed": True, "success": True, "observation_used": False, "injection_blocked": False},
+]
+
+
+def safe_div(num, den, default=1.0):
+    return default if den == 0 else num / den
+
+
+def has_required_fields(tool):
+    return REQUIRED_TOOL_FIELDS <= set(tool)
+
+
+def schema_fields(tool):
+    return list(tool.get("input_schema", {}).values())
+
+
+def strict_field(field):
+    return bool(field.get("type")) and "required" in field and bool(field.get("constraints"))
+
+
+def output_normalized(tool):
+    return REQUIRED_OUTPUT_FIELDS <= set(tool.get("output_schema", set()))
+
+
+def risky(tool):
+    return tool.get("permission") in RISKY_PERMISSIONS or tool.get("side_effect") in RISKY_SIDE_EFFECTS
+
+
+def risk_protected(tool):
+    return (not risky(tool)) or bool(tool.get("requires_confirmation")) or bool(tool.get("default_block"))
+
+
+def injection_safe(tool):
+    if not tool.get("untrusted_output"):
+        return True
+    return tool.get("trust_boundary") == "observation_only" and tool.get("injection_filter") == "enabled"
+
+
+def trace_ready(tool):
+    fields = tool.get("audit_policy", {}).get("trace_fields", set())
+    return REQUIRED_TRACE_FIELDS <= fields
+
+
+def root_causes(tool):
+    causes = []
+    if not has_required_fields(tool):
+        causes.append("missing_registry_fields")
+    if not all(strict_field(f) for f in schema_fields(tool)):
+        causes.append("loose_input_schema")
+    if not output_normalized(tool):
+        causes.append("output_not_normalized")
+    if risky(tool) and not risk_protected(tool):
+        causes.append("risky_tool_without_confirmation_or_block")
+    if tool.get("permission") == "secret" and tool.get("visibility") == "model":
+        causes.append("secret_tool_exposed_to_model")
+    if not injection_safe(tool):
+        causes.append("untrusted_output_boundary_missing")
+    if not trace_ready(tool):
+        causes.append("trace_fields_incomplete")
+    return causes or ["pass"]
+
+
+all_schema_fields = [f for t in tools for f in schema_fields(t)]
+risky_tools = [t for t in tools if risky(t)]
+untrusted_tools = [t for t in tools if t.get("untrusted_output")]
+
+registry_metrics = {
+    "registry_completeness": round(mean(has_required_fields(t) for t in tools), 3),
+    "schema_strictness": round(mean(strict_field(f) for f in all_schema_fields), 3),
+    "permission_binding": round(mean(bool(t.get("permission")) and bool(t.get("side_effect")) for t in tools), 3),
+    "risk_protection": round(safe_div(sum(risk_protected(t) for t in risky_tools), len(risky_tools)), 3),
+    "output_normalization": round(mean(output_normalized(t) for t in tools), 3),
+    "version_coverage": round(mean(bool(t.get("version")) for t in tools), 3),
+    "trace_readiness": round(mean(trace_ready(t) for t in tools), 3),
+    "untrusted_output_boundary": round(safe_div(sum(injection_safe(t) for t in untrusted_tools), len(untrusted_tools)), 3),
+}
+
+tool_names = {t["name"] for t in tools}
+call_metrics = {
+    "known_tool_rate": round(mean(c["tool"] in tool_names for c in calls), 3),
+    "schema_valid_rate": round(mean(c["args_valid"] and c["tool"] in tool_names for c in calls), 3),
+    "permission_allow_rate": round(mean(c["permission"] == "allow" for c in calls), 3),
+    "execution_success_rate": round(
+        safe_div(sum(c["success"] for c in calls if c["executed"]), sum(c["executed"] for c in calls), default=0.0),
+        3,
+    ),
+    "observation_use_rate": round(mean(c["observation_used"] for c in calls if c["executed"]), 3),
+    "unsafe_executed": [c["id"] for c in calls if c.get("unsafe") and c["executed"]],
+    "injection_misses": [c["id"] for c in calls if c.get("injection_blocked") is False],
+}
+
+gates = {
+    "completeness_ok": registry_metrics["registry_completeness"] >= 0.95,
+    "schema_ok": registry_metrics["schema_strictness"] >= 0.9,
+    "risk_ok": registry_metrics["risk_protection"] >= 1.0,
+    "output_ok": registry_metrics["output_normalization"] >= 0.9,
+    "version_ok": registry_metrics["version_coverage"] >= 1.0,
+    "trace_ok": registry_metrics["trace_readiness"] >= 0.95,
+    "injection_ok": registry_metrics["untrusted_output_boundary"] >= 1.0,
+    "execution_ok": call_metrics["execution_success_rate"] >= 0.8,
+    "unsafe_ok": not call_metrics["unsafe_executed"],
+}
+
+print("registry_metrics=", registry_metrics)
+print("call_metrics=", call_metrics)
+print("root_causes=", {t["name"]: root_causes(t) for t in tools})
+print("failed_gates=", [name for name, ok in gates.items() if not ok])
+print("tool_registry_gate_pass=", all(gates.values()))
+```
+
+典型输出会显示 `read_file` 和 `apply_patch` 通过，但 `search_code` 缺版本和完整 trace，`run_command` 的 command 字段过宽且缺高风险确认，`web_fetch` 没有不可信输出边界，`read_secret` 暴露给模型且没有默认阻断。这个 demo 的重点不是构造完美工具，而是让失败能被量化、定位和回归。
 
 ## 4.16 一个 Tool Registry 示例
 

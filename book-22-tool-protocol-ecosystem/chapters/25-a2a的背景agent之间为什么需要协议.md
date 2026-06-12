@@ -20,6 +20,18 @@
 
 > A2A 不是为了让 Agent “互相聊天”而设计的，而是为了让 Agent 之间的能力、任务、状态、上下文和信任关系可描述、可执行、可追踪。
 
+## 25.0 本讲资料边界与第二轮精修口径
+
+本讲第二轮精修前，已按 `WRITING_PLAN.md` 核对 A2A 官方站点、最新文档、协议规范、任务生命周期说明和 Google Developers 发布介绍。正文采用这些公开资料中的稳定抽象：Agent Card / discovery、Task、Message、Artifact、TaskState / lifecycle、流式或异步更新、认证授权、企业治理，以及 A2A 和 MCP 的边界。
+
+本讲只回答一个背景问题：为什么 Agent 之间需要协议。后续章节会继续拆 Agent Card、服务发现、Task、Message、Artifact、安全授权和协议实现细节。本讲不实现真实 A2A server，不联网调用远程 Agent，不讨论闭源产品内部编排策略，也不把 toy demo 的字段名、阈值或状态枚举写成完整标准。
+
+第二轮补充重点是：
+
+1. 把“自然语言聊天不够”“普通 HTTP API 不够”的原因落到协议抽象：能力发现、任务状态、消息结构、产物引用、上下文最小化、权限边界和 trace。
+2. 给出稳定 MathJax 公式，帮助面试时把背景问题转成可审计指标。
+3. 补一个 0 依赖 Python demo，用静态 toy Agent Card / Task / Message / Artifact 表审计 A2A 背景能力，不启动服务、不访问网络、不执行真实任务。
+
 ## 25.1 从单 Agent 到多 Agent
 
 单 Agent 系统通常长这样：
@@ -544,29 +556,456 @@ A2A 提供通信能力，不提供业务答案。
 
 工程上不要为了追协议而引入协议。如果一个简单函数调用就能解决问题，不要强行上 A2A。
 
-## 25.9 常见误区
+## 25.9 A2A 背景审计指标与最小 demo
 
-### 25.9.1 误区一：A2A 就是 Agent 聊天
+面试里讲 A2A 背景，最容易停留在“多个 Agent 要协作，所以要协议”这一层。更好的表达方式是把问题拆成可审计能力：如果没有这些能力，多 Agent 系统就会退回到脆弱 prompt 拼接。
+
+设第 `i` 个候选 Agent 或委派任务的协议能力摘要为：
+
+```math
+a_i=(p_i,c_i,t_i,m_i,s_i,x_i,o_i,r_i,e_i,z_i)
+```
+
+其中：
+
+1. `p_i` 表示 Agent Card 和服务发现信息。
+2. `c_i` 表示 capability / skill 声明。
+3. `t_i` 表示任务委派契约。
+4. `m_i` 表示 message 角色、part 和媒体类型结构。
+5. `s_i` 表示 task lifecycle 和状态同步。
+6. `x_i` 表示可共享上下文边界。
+7. `o_i` 表示 output / artifact 引用方式。
+8. `r_i` 表示 requester、receiver、用户身份和权限。
+9. `e_i` 表示 error、timeout、cancel 和 retry 处理。
+10. `z_i` 表示 trace、eval、version 和治理元数据。
+
+对任意一个审计维度 `k`，可以定义覆盖率：
+
+```math
+C_k=\frac{1}{n}\sum_{i=1}^{n} I(q_{ik}=1)
+```
+
+这里 `q_{ik}=1` 表示第 `i` 个样本通过维度 `k` 的检查。A2A 背景层常见指标包括：
+
+```math
+C_{agent}, C_{discover}, C_{task}, C_{state}, C_{msg}, C_{art}, C_{context}, C_{perm}, C_{mcp}, C_{error}, C_{trace}, C_{eval}
+```
+
+含义分别是 Agent Card 完整度、服务发现就绪率、任务委派契约覆盖率、状态生命周期覆盖率、消息结构覆盖率、Artifact 引用覆盖率、上下文边界控制率、权限边界覆盖率、MCP / A2A 区分率、失败和取消处理覆盖率、trace 就绪率、eval 覆盖率。
+
+可以把背景层上线门禁写成：
+
+```math
+G_{a2a}=I(C_{agent}\ge \tau_{agent})\cdot I(C_{discover}\ge \tau_{discover})\cdot I(C_{task}\ge \tau_{task})\cdot I(C_{state}\ge \tau_{state})\cdot I(C_{perm}\ge \tau_{perm})\cdot I(C_{trace}\ge \tau_{trace})
+```
+
+这条公式的意思不是说 A2A 只看六个指标，而是强调：如果 Agent Card、发现、任务契约、状态机、权限和 trace 任一基础项不过线，多 Agent 协作就不应该被当成可治理系统。
+
+再定义一个加权背景审计分：
+
+```math
+S_{a2a}=\sum_{k=1}^{K} w_k C_k,\quad \sum_{k=1}^{K} w_k=1
+```
+
+权重 `w_k` 应按场景调节。企业流程自动化通常提高 `C_perm`、`C_context` 和 `C_trace` 权重；研究型 multi-agent demo 可以提高 `C_state`、`C_eval` 和失败分析权重；跨组织协作还要额外提高身份、审计和版本捕获权重。
+
+下面的 demo 只做静态审计。它模拟四个 Agent Card 和十三个委派样本，覆盖 happy path、未知 Agent、能力不匹配、缺任务 ID、状态跳跃、`input_required` 缺消息轮次、Artifact 内联、上下文过度共享、缺认证、把 A2A 混成 MCP 工具调用、不能取消、trace 缺字段和 eval 缺标签等 bad case。
+
+```python
+from copy import deepcopy
+
+
+class MiniA2ABackgroundAudit:
+    REQUIRED_CARD_FIELDS = {
+        "agent_id",
+        "name",
+        "version",
+        "supported_interfaces",
+        "skills",
+        "default_input_modes",
+        "default_output_modes",
+        "security",
+        "capabilities",
+        "owner",
+    }
+    REQUIRED_TRACE_FIELDS = {"task_id", "context_id", "agent_id", "state", "message_id", "artifact_id", "version"}
+    REQUIRED_EVAL_LABELS = {"expected_agent", "expected_state", "artifact_check"}
+    ALLOWED_TASK_STATES = {
+        "TASK_STATE_SUBMITTED",
+        "TASK_STATE_WORKING",
+        "TASK_STATE_INPUT_REQUIRED",
+        "TASK_STATE_AUTH_REQUIRED",
+        "TASK_STATE_COMPLETED",
+        "TASK_STATE_FAILED",
+        "TASK_STATE_CANCELED",
+        "TASK_STATE_REJECTED",
+    }
+    TERMINAL_STATES = {
+        "TASK_STATE_COMPLETED",
+        "TASK_STATE_FAILED",
+        "TASK_STATE_CANCELED",
+        "TASK_STATE_REJECTED",
+    }
+
+    def __init__(self):
+        self.agent_cards = {
+            "planner": {
+                "agent_id": "planner",
+                "name": "Planning Agent",
+                "version": "1.0.0",
+                "supported_interfaces": ["json-rpc+https"],
+                "skills": [
+                    {"id": "task_planning", "input_modes": ["text/plain"], "output_modes": ["application/json"]}
+                ],
+                "default_input_modes": ["text/plain", "application/json"],
+                "default_output_modes": ["application/json"],
+                "security": {"auth_required": True, "scopes": ["planning:delegate"]},
+                "capabilities": {"streaming": True, "pushNotifications": False, "cancel": True},
+                "owner": "agent-platform",
+            },
+            "data_analyst": {
+                "agent_id": "data_analyst",
+                "name": "Sales Data Analyst",
+                "version": "2.1.0",
+                "supported_interfaces": ["json-rpc+https", "rest+https"],
+                "skills": [
+                    {"id": "sales_analysis", "input_modes": ["application/json"], "output_modes": ["application/json"]}
+                ],
+                "default_input_modes": ["application/json"],
+                "default_output_modes": ["application/json", "text/markdown"],
+                "security": {"auth_required": True, "scopes": ["sales:read"]},
+                "capabilities": {"streaming": True, "pushNotifications": True, "cancel": True},
+                "owner": "analytics-team",
+            },
+            "report_writer": {
+                "agent_id": "report_writer",
+                "name": "Report Writer",
+                "version": "1.4.0",
+                "supported_interfaces": ["json-rpc+https"],
+                "skills": [
+                    {"id": "report_writing", "input_modes": ["application/json"], "output_modes": ["text/markdown"]}
+                ],
+                "default_input_modes": ["application/json"],
+                "default_output_modes": ["text/markdown"],
+                "security": {"auth_required": True, "scopes": ["report:write"]},
+                "capabilities": {"streaming": False, "pushNotifications": False, "cancel": True},
+                "owner": "docs-team",
+            },
+            "legacy_chat_bot": {
+                "agent_id": "legacy_chat_bot",
+                "name": "Legacy Chat Bot",
+                "skills": [{"id": "chat", "input_modes": ["text/plain"]}],
+                "security": {"auth_required": False, "scopes": []},
+            },
+        }
+        self.base_task = {
+            "task_id": "task_sales_001",
+            "context_id": "ctx_sales_2026q2",
+            "goal": "分析本季度销售异常并返回结构化报告。",
+            "expected_output": "artifact://task_sales_001/report.json",
+            "deadline_s": 900,
+            "timeout_s": 1200,
+            "idempotency_key": "idem-sales-001",
+            "states": [
+                "TASK_STATE_SUBMITTED",
+                "TASK_STATE_WORKING",
+                "TASK_STATE_INPUT_REQUIRED",
+                "TASK_STATE_WORKING",
+                "TASK_STATE_COMPLETED",
+            ],
+            "messages": [
+                {
+                    "message_id": "msg_1",
+                    "role": "ROLE_USER",
+                    "parts": [{"data": {"region": "all"}, "media_type": "application/json"}],
+                },
+                {
+                    "message_id": "msg_2",
+                    "role": "ROLE_AGENT",
+                    "parts": [{"text": "是否排除退款订单？", "media_type": "text/plain"}],
+                },
+                {
+                    "message_id": "msg_3",
+                    "role": "ROLE_USER",
+                    "parts": [{"text": "排除退款订单。", "media_type": "text/plain"}],
+                },
+            ],
+            "artifacts": [
+                {
+                    "artifact_id": "art_report",
+                    "parts": [{"url": "artifact://task_sales_001/report.json", "media_type": "application/json"}],
+                }
+            ],
+            "context_items": [
+                {"id": "user_request", "shared": True, "sensitivity": "low", "tokens": 120},
+                {"id": "sales_schema", "shared": True, "sensitivity": "internal", "tokens": 380},
+                {"id": "raw_customer_table", "shared": False, "sensitivity": "high", "tokens": 5000},
+            ],
+            "context_budget": 1200,
+            "auth": {"scheme": "bearer", "scope": "sales:read", "actor": "planner"},
+            "mcp_vs_a2a": "a2a_task_delegation",
+            "can_cancel": True,
+            "error_policy": {"timeout": "fail_with_status", "retry": "idempotent_only"},
+            "trace_fields": ["task_id", "context_id", "agent_id", "state", "message_id", "artifact_id", "version"],
+            "eval_labels": ["expected_agent", "expected_state", "artifact_check"],
+        }
+        self.cases = self._make_cases()
+
+    def _case(self, case_id, agent_id="data_analyst", required_skill="sales_analysis", mutate=None):
+        task = deepcopy(self.base_task)
+        if mutate:
+            mutate(task)
+        return {"case_id": case_id, "agent_id": agent_id, "required_skill": required_skill, "task": task}
+
+    def _make_cases(self):
+        return [
+            self._case("happy_sales_analysis"),
+            self._case("missing_agent_card_bad", agent_id="unknown_agent"),
+            self._case("unknown_capability_bad", agent_id="report_writer", required_skill="sales_analysis"),
+            self._case("no_task_id_bad", mutate=lambda t: t.pop("task_id")),
+            self._case("state_skip_bad", mutate=lambda t: t.update(states=["TASK_STATE_WORKING", "TASK_STATE_COMPLETED"])),
+            self._case("input_required_missing_bad", mutate=lambda t: t.update(messages=t["messages"][:1])),
+            self._case(
+                "artifact_inline_bad",
+                mutate=lambda t: t.update(
+                    artifacts=[{"artifact_id": "art_raw", "parts": [{"raw": "...", "media_type": "application/json"}]}]
+                ),
+            ),
+            self._case(
+                "context_over_share_bad",
+                mutate=lambda t: t["context_items"].append(
+                    {"id": "customer_email_dump", "shared": True, "sensitivity": "high", "tokens": 3000}
+                ),
+            ),
+            self._case("auth_missing_bad", mutate=lambda t: t.update(auth={})),
+            self._case("mcp_confused_bad", mutate=lambda t: t.update(mcp_vs_a2a="mcp_tool_call")),
+            self._case("cancel_unsupported_bad", mutate=lambda t: t.update(can_cancel=False)),
+            self._case("trace_missing_bad", mutate=lambda t: t.update(trace_fields=["task_id", "context_id", "agent_id", "state"])),
+            self._case("eval_missing_bad", mutate=lambda t: t.update(eval_labels=[])),
+        ]
+
+    def discover(self, required_skill):
+        matches = []
+        for card in self.agent_cards.values():
+            skill_ids = {skill.get("id") for skill in card.get("skills", [])}
+            if required_skill in skill_ids and self._card_complete(card):
+                matches.append(card["agent_id"])
+        return matches
+
+    def delegate(self, case_id):
+        case = next(item for item in self.cases if item["case_id"] == case_id)
+        reasons = self._root_causes(case)
+        task = case["task"]
+        trace = []
+        for state in task.get("states", []):
+            trace.append({"task_id": task.get("task_id", "MISSING"), "agent_id": case["agent_id"], "state": state})
+        artifact_uri = None
+        for artifact in task.get("artifacts", []):
+            for part in artifact.get("parts", []):
+                if "url" in part:
+                    artifact_uri = part["url"]
+        return {"ok": not reasons, "artifact_uri": artifact_uri, "trace": trace, "root_causes": reasons}
+
+    def _card_complete(self, card):
+        if not self.REQUIRED_CARD_FIELDS.issubset(card):
+            return False
+        if not card.get("supported_interfaces") or not card.get("skills"):
+            return False
+        return all({"id", "input_modes", "output_modes"}.issubset(skill) for skill in card["skills"])
+
+    def _discovery_ready(self, case):
+        card = self.agent_cards.get(case["agent_id"])
+        if not card or not self._card_complete(card):
+            return False
+        skill_ids = {skill.get("id") for skill in card.get("skills", [])}
+        return case["required_skill"] in skill_ids
+
+    def _task_contract_ready(self, task):
+        required = {"task_id", "context_id", "goal", "expected_output", "deadline_s", "idempotency_key"}
+        return required.issubset(task)
+
+    def _state_coverage_ready(self, task):
+        states = task.get("states", [])
+        if not states or any(state not in self.ALLOWED_TASK_STATES for state in states):
+            return False
+        if states[0] != "TASK_STATE_SUBMITTED":
+            return False
+        if not any(state in self.TERMINAL_STATES for state in states):
+            return False
+        if "TASK_STATE_INPUT_REQUIRED" in states and not self._has_input_required_round(task):
+            return False
+        return True
+
+    def _has_input_required_round(self, task):
+        roles = [message.get("role") for message in task.get("messages", [])]
+        return roles.count("ROLE_AGENT") >= 1 and roles.count("ROLE_USER") >= 2
+
+    def _message_structure_ready(self, task):
+        for message in task.get("messages", []):
+            if message.get("role") not in {"ROLE_USER", "ROLE_AGENT"}:
+                return False
+            if not message.get("message_id") or not message.get("parts"):
+                return False
+            for part in message["parts"]:
+                present = [key for key in ("text", "raw", "url", "data") if key in part]
+                if len(present) != 1 or not part.get("media_type"):
+                    return False
+        return bool(task.get("messages"))
+
+    def _artifact_reference_ready(self, task):
+        if task.get("states", [])[-1] != "TASK_STATE_COMPLETED":
+            return True
+        for artifact in task.get("artifacts", []):
+            if not artifact.get("artifact_id"):
+                return False
+            for part in artifact.get("parts", []):
+                if "raw" in part:
+                    return False
+                if "url" in part and part["url"].startswith(("artifact://", "https://")):
+                    return True
+        return False
+
+    def _context_boundary_ready(self, task):
+        shared_tokens = 0
+        for item in task.get("context_items", []):
+            if item.get("shared"):
+                shared_tokens += item.get("tokens", 0)
+                if item.get("sensitivity") == "high":
+                    return False
+        return shared_tokens <= task.get("context_budget", 0)
+
+    def _permission_ready(self, case):
+        card = self.agent_cards.get(case["agent_id"], {})
+        security = card.get("security", {})
+        if security.get("auth_required") and not case["task"].get("auth"):
+            return False
+        if security.get("auth_required"):
+            return case["task"].get("auth", {}).get("scope") in set(security.get("scopes", []))
+        return True
+
+    def _mcp_distinction_ready(self, task):
+        return task.get("mcp_vs_a2a") == "a2a_task_delegation"
+
+    def _failure_handling_ready(self, task):
+        return bool(task.get("timeout_s") and task.get("error_policy") and task.get("can_cancel"))
+
+    def _trace_ready(self, task):
+        return self.REQUIRED_TRACE_FIELDS.issubset(set(task.get("trace_fields", [])))
+
+    def _eval_ready(self, task):
+        return self.REQUIRED_EVAL_LABELS.issubset(set(task.get("eval_labels", [])))
+
+    def _root_causes(self, case):
+        task = case["task"]
+        checks = {
+            "agent_discovery": self._discovery_ready(case),
+            "task_contract": self._task_contract_ready(task),
+            "task_lifecycle": self._state_coverage_ready(task),
+            "message_structure": self._message_structure_ready(task),
+            "artifact_reference": self._artifact_reference_ready(task),
+            "context_boundary": self._context_boundary_ready(task),
+            "permission_boundary": self._permission_ready(case),
+            "mcp_a2a_distinction": self._mcp_distinction_ready(task),
+            "failure_handling": self._failure_handling_ready(task),
+            "trace_readiness": self._trace_ready(task),
+            "eval_coverage": self._eval_ready(task),
+        }
+        return [name for name, ok in checks.items() if not ok]
+
+    @staticmethod
+    def _rate(values):
+        return round(sum(1 for value in values if value) / len(values), 3)
+
+    def audit(self):
+        card_scores = []
+        for card in self.agent_cards.values():
+            present = len(self.REQUIRED_CARD_FIELDS.intersection(card))
+            skill_ready = bool(card.get("skills")) and all(
+                {"id", "input_modes", "output_modes"}.issubset(skill) for skill in card.get("skills", [])
+            )
+            card_scores.append((present + int(skill_ready)) / (len(self.REQUIRED_CARD_FIELDS) + 1))
+        metrics = {
+            "agent_card_completeness": round(sum(card_scores) / len(card_scores), 3),
+            "agent_discovery_readiness": self._rate([self._discovery_ready(case) for case in self.cases]),
+            "task_delegation_contract": self._rate([self._task_contract_ready(case["task"]) for case in self.cases]),
+            "task_lifecycle_coverage": self._rate([self._state_coverage_ready(case["task"]) for case in self.cases]),
+            "message_structure_coverage": self._rate([self._message_structure_ready(case["task"]) for case in self.cases]),
+            "artifact_reference_coverage": self._rate([self._artifact_reference_ready(case["task"]) for case in self.cases]),
+            "context_boundary_control": self._rate([self._context_boundary_ready(case["task"]) for case in self.cases]),
+            "permission_boundary_control": self._rate([self._permission_ready(case) for case in self.cases]),
+            "mcp_a2a_distinction": self._rate([self._mcp_distinction_ready(case["task"]) for case in self.cases]),
+            "failure_cancel_timeout_handling": self._rate([self._failure_handling_ready(case["task"]) for case in self.cases]),
+            "trace_readiness": self._rate([self._trace_ready(case["task"]) for case in self.cases]),
+            "eval_coverage": self._rate([self._eval_ready(case["task"]) for case in self.cases]),
+        }
+        failed_cases = [case["case_id"] for case in self.cases if self._root_causes(case)]
+        failed_gates = [name for name, value in metrics.items() if value < 0.9]
+        return {
+            "metrics": metrics,
+            "failed_cases": failed_cases,
+            "failed_gates": failed_gates,
+            "a2a_background_gate_pass": not failed_cases and not failed_gates,
+        }
+
+    def smoke_test(self):
+        delegation = self.delegate("happy_sales_analysis")
+        blocked_context = self.delegate("context_over_share_bad")
+        blocked_auth = self.delegate("auth_missing_bad")
+        return {
+            "discovered_sales_agents": self.discover("sales_analysis"),
+            "delegated_ok": delegation["ok"],
+            "input_required_handled": self._has_input_required_round(self.base_task),
+            "completed_artifact_uri": delegation["artifact_uri"],
+            "blocked_overshare": "context_boundary" in blocked_context["root_causes"],
+            "blocked_missing_auth": "permission_boundary" in blocked_auth["root_causes"],
+            "trace_events": len(delegation["trace"]),
+        }
+
+
+hub = MiniA2ABackgroundAudit()
+print("smoke=", hub.smoke_test())
+report = hub.audit()
+print("metrics=", report["metrics"])
+print("failed_cases=", report["failed_cases"])
+print("failed_gates=", report["failed_gates"])
+print("a2a_background_gate_pass=", report["a2a_background_gate_pass"])
+```
+
+输出应类似：
+
+```text
+smoke= {'discovered_sales_agents': ['data_analyst'], 'delegated_ok': True, 'input_required_handled': True, 'completed_artifact_uri': 'artifact://task_sales_001/report.json', 'blocked_overshare': True, 'blocked_missing_auth': True, 'trace_events': 5}
+metrics= {'agent_card_completeness': 0.841, 'agent_discovery_readiness': 0.846, 'task_delegation_contract': 0.923, 'task_lifecycle_coverage': 0.846, 'message_structure_coverage': 1.0, 'artifact_reference_coverage': 0.923, 'context_boundary_control': 0.923, 'permission_boundary_control': 0.846, 'mcp_a2a_distinction': 0.923, 'failure_cancel_timeout_handling': 0.923, 'trace_readiness': 0.923, 'eval_coverage': 0.923}
+failed_cases= ['missing_agent_card_bad', 'unknown_capability_bad', 'no_task_id_bad', 'state_skip_bad', 'input_required_missing_bad', 'artifact_inline_bad', 'context_over_share_bad', 'auth_missing_bad', 'mcp_confused_bad', 'cancel_unsupported_bad', 'trace_missing_bad', 'eval_missing_bad']
+failed_gates= ['agent_card_completeness', 'agent_discovery_readiness', 'task_lifecycle_coverage', 'permission_boundary_control']
+a2a_background_gate_pass= False
+```
+
+这个 demo 的重点不是复刻完整 A2A 规范，而是训练一种面试表达：A2A 背景问题可以被落到“发现、委派、状态、消息、产物、上下文、权限、失败、trace、eval”这组可检查项上。协议化的价值不在于让 Agent 更会说话，而在于让系统能判断一个协作任务是否被正确委派、是否仍在运行、是否需要输入、结果在哪里、权限是否越界、失败是否可解释。
+
+## 25.10 常见误区
+
+### 25.10.1 误区一：A2A 就是 Agent 聊天
 
 A2A 不只是聊天。聊天只是消息的一种表现形式。真正关键的是能力声明、任务生命周期、状态、上下文边界、产物、权限和审计。
 
-### 25.9.2 误区二：A2A 可以替代 MCP
+### 25.10.2 误区二：A2A 可以替代 MCP
 
 A2A 和 MCP 是互补关系，不是替代关系。A2A 处理 Agent 间协作，MCP 处理 Agent 与工具资源连接。
 
-### 25.9.3 误区三：多 Agent 一定比单 Agent 好
+### 25.10.3 误区三：多 Agent 一定比单 Agent 好
 
 多 Agent 会带来通信成本、上下文丢失、冲突仲裁、错误传播和权限治理问题。只有当任务确实需要分工、异步、专业化或跨组织协作时，多 Agent 才有明显价值。
 
-### 25.9.4 误区四：把所有上下文传给下游 Agent 最安全
+### 25.10.4 误区四：把所有上下文传给下游 Agent 最安全
 
 恰恰相反。全量上下文转发会扩大泄露面，也会让下游 Agent 更容易被无关信息干扰。默认应该是最小必要上下文。
 
-### 25.9.5 误区五：协议定义好了，系统就可靠了
+### 25.10.5 误区五：协议定义好了，系统就可靠了
 
 协议只是基础。可靠性还需要 eval、trace、权限系统、异常处理、重试策略、人工介入和业务规则。
 
-## 25.10 面试高频题
+## 25.11 面试高频题
 
 ### 题 1：为什么 Agent 之间需要 A2A 协议？
 
@@ -598,7 +1037,7 @@ MCP 是 Agent/Host 连接工具、资源和提示模板的协议，核心抽象�
 
 主要风险包括上下文扩散、权限传递不清、错误传播、循环委派、任务状态不一致、产物不可验证、责任边界模糊和审计困难。因此 A2A 系统必须结合最小上下文、身份权限、状态机、trace、证据链、超时取消和人工介入机制。
 
-## 25.11 小练习
+## 25.12 小练习
 
 1. 设计一个“总控 Agent + 数据 Agent + 报告 Agent”的 A2A 流程，写出每个 Agent 的职责。
 2. 为一个“合同审查 Agent”设计一个简化版 Agent Card，包括能力、输入、输出和权限要求。
@@ -606,7 +1045,7 @@ MCP 是 Agent/Host 连接工具、资源和提示模板的协议，核心抽象�
 4. 设计一个任务状态机，包含 submitted、running、input_required、completed、failed 和 cancelled。
 5. 思考：如果下游 Agent 返回的结果和上游 Agent 的判断冲突，系统应该如何仲裁？
 
-## 25.12 本章小结
+## 25.13 本章小结
 
 本章我们从背景角度解释了为什么 Agent 之间需要协议。
 

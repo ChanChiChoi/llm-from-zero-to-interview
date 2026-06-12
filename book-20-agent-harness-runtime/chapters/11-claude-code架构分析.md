@@ -1,5 +1,19 @@
 # 第十一章：Claude Code 架构分析
 
+## 0. 本讲资料边界与第二轮精修口径
+
+本讲第二轮精修时，优先参考 Claude Code 官方公开文档中关于终端 coding agent、权限、设置、记忆、hooks、MCP、sandbox 和安全建议的资料，并结合前十章的 agent harness、runtime、工具、文件编辑、终端执行、权限、trace 和 evaluation harness 框架来分析。
+
+边界要说清楚：
+
+1. 本章分析的是 Claude Code 类终端型 coding agent 的公开产品形态和可迁移架构模式。
+2. 对官方文档明确描述的能力，可以写成公开能力或产品约束。
+3. 对没有公开确认的内部实现，例如隐藏 planner、具体 prompt、模型侧策略、内部 trace 存储格式和排序算法，不能写成确定结论。
+4. 面试中应把 Claude Code 当作“成熟 coding agent 产品案例”来分析，而不是把外部源码阅读笔记或社区猜测当作官方架构。
+5. 本章新增的公式和 demo 不是为了复刻 Claude Code 内部实现，而是给出一种审计公开资料边界、架构组件、权限治理、扩展治理、可观测性和评估准备度的教学方法。
+
+可以把本章的分析口径压缩成一句话：用公开证据约束架构推断，用 harness 指标审计系统边界，不把闭源内部猜测写成事实。
+
 ## 11.1 本章定位
 
 本章用于分析 Claude Code 这类终端型 coding agent 产品的架构思想。
@@ -452,7 +466,227 @@ Claude Code 类产品几乎覆盖了本书前十章的所有主题。
 9. 把产品控制命令和模型工具调用混在一起。
 10. 没有 regression eval，新版本 prompt 改动后质量漂移。
 
-## 11.18 面试题
+## 11.18 Claude Code 类架构审计指标
+
+分析 Claude Code 类闭源或半闭源产品时，最容易犯的错误是把“公开可见能力”“系统设计合理推断”和“未经确认的内部实现”混在一起。第二轮精修建议把架构分析写成可审计对象。
+
+令第 `i` 个架构项为：
+
+```math
+a_i=(n_i,g_i,d_i,p_i,c_i,r_i)
+```
+
+其中 `n_i` 是组件名，`g_i` 是组件分组，`d_i` 表示是否有公开文档或可观察产品行为支撑，`p_i` 表示该组件是否出现在本次架构分析中，`c_i` 表示是否有明确治理机制，`r_i` 表示是否属于高风险能力面。
+
+公开证据覆盖率：
+
+```math
+C_{\mathrm{pub}}=\frac{1}{N}\sum_{i=1}^{N} d_i
+```
+
+必需模块覆盖率：
+
+```math
+C_{\mathrm{mod}}=\frac{\sum_{i\in \mathcal{R}} p_i d_i}{|\mathcal{R}|}
+```
+
+这里 `\mathcal{R}` 是分析 Claude Code 类 coding agent 时必须覆盖的模块集合，例如 CLI 控制面、session、context builder、工具、文件、终端、权限、sandbox、memory、hooks、MCP、trace 和 evaluation。
+
+访问治理覆盖率：
+
+```math
+C_{\mathrm{access}}=\frac{\sum_{i\in \mathcal{A}} c_i}{|\mathcal{A}|}
+```
+
+这里 `\mathcal{A}` 包含 CLI 控制命令、workspace 文件、终端、项目记忆和外部资源访问等入口。
+
+核心循环治理覆盖率：
+
+```math
+C_{\mathrm{loop}}=\frac{\sum_{i\in \mathcal{L}} c_i}{|\mathcal{L}|}
+```
+
+这里 `\mathcal{L}` 包含 session manager、context builder、model adapter、action parser、tool registry、execution engine、state store 和 response renderer。
+
+权限控制覆盖率：
+
+```math
+C_{\mathrm{perm}}=\frac{\sum_{i\in \mathcal{P}} c_i}{|\mathcal{P}|}
+```
+
+状态恢复覆盖率：
+
+```math
+C_{\mathrm{state}}=\frac{\sum_{i\in \mathcal{S}} p_i}{|\mathcal{S}|}
+```
+
+扩展治理覆盖率：
+
+```math
+C_{\mathrm{ext}}=\frac{\sum_{i\in \mathcal{E}} c_i}{|\mathcal{E}|}
+```
+
+这里 `\mathcal{E}` 包含 hooks、MCP、skills、插件和外部工具接入。扩展能力越强，越不能只看“能接入”，还要看 allowlist、权限绑定、输出边界和 trace。
+
+可观测性覆盖率：
+
+```math
+C_{\mathrm{obs}}=\frac{\sum_{i\in \mathcal{O}} p_i c_i}{|\mathcal{O}|}
+```
+
+评估准备度：
+
+```math
+C_{\mathrm{eval}}=\frac{\sum_{i\in \mathcal{V}} p_i c_i}{|\mathcal{V}|}
+```
+
+高风险面治理率：
+
+```math
+C_{\mathrm{risk}}=\frac{\sum_{i:r_i=1} c_i}{\sum_{i=1}^{N} r_i}
+```
+
+最后可以把这些指标组成 Claude Code 类架构分析门禁：
+
+```math
+G_{\mathrm{claude}}=
+\mathbb{1}[C_{\mathrm{pub}}\ge \tau_{\mathrm{pub}}]
+\mathbb{1}[C_{\mathrm{mod}}\ge \tau_{\mathrm{mod}}]
+\mathbb{1}[C_{\mathrm{perm}}\ge \tau_{\mathrm{perm}}]
+\mathbb{1}[C_{\mathrm{risk}}\ge \tau_{\mathrm{risk}}]
+```
+
+工程上不要只看 soft score。只要高风险工具、终端、memory、hooks、MCP、sandbox 或 trace 这类硬边界缺失治理，就应该判定为需要补充证据或重新设计，而不是用“模型足够强”掩盖。
+
+### 11.18.1 最小可运行 Claude Code 架构审计 demo
+
+下面的 0 依赖 demo 不调用模型、不读取真实文件、不执行命令，也不声称复刻 Claude Code 内部实现。它只演示如何把公开架构分析写成一张可审计表，暴露三类问题：没有公开证据的内部实现猜测、必需模块缺失、高风险能力没有治理。
+
+```python
+from collections import defaultdict
+
+
+components = [
+    {"name": "cli_control_commands", "group": "access", "documented": True, "present": True, "governed": True, "required": True, "risk": False},
+    {"name": "slash_command_router", "group": "access", "documented": True, "present": True, "governed": True, "required": True, "risk": False},
+    {"name": "terminal", "group": "access", "documented": True, "present": True, "governed": False, "required": True, "risk": True},
+    {"name": "workspace_files", "group": "access", "documented": True, "present": True, "governed": False, "required": True, "risk": True},
+    {"name": "project_memory", "group": "access", "documented": True, "present": True, "governed": False, "required": True, "risk": True},
+    {"name": "session_manager", "group": "core_loop", "documented": True, "present": True, "governed": True, "required": True, "risk": False},
+    {"name": "context_builder", "group": "core_loop", "documented": True, "present": True, "governed": False, "required": True, "risk": True},
+    {"name": "model_adapter", "group": "core_loop", "documented": True, "present": True, "governed": True, "required": True, "risk": False},
+    {"name": "action_parser", "group": "core_loop", "documented": True, "present": True, "governed": True, "required": True, "risk": False},
+    {"name": "tool_registry", "group": "core_loop", "documented": True, "present": True, "governed": True, "required": True, "risk": False},
+    {"name": "execution_engine", "group": "core_loop", "documented": True, "present": True, "governed": False, "required": True, "risk": True},
+    {"name": "state_store", "group": "core_loop", "documented": True, "present": True, "governed": True, "required": True, "risk": False},
+    {"name": "response_renderer", "group": "core_loop", "documented": True, "present": True, "governed": False, "required": True, "risk": False},
+    {"name": "permission_prompt", "group": "permission", "documented": True, "present": True, "governed": True, "required": True, "risk": False},
+    {"name": "tool_allowlist", "group": "permission", "documented": True, "present": True, "governed": False, "required": True, "risk": False},
+    {"name": "sandbox", "group": "permission", "documented": True, "present": False, "governed": False, "required": True, "risk": True},
+    {"name": "secret_guard", "group": "permission", "documented": True, "present": True, "governed": True, "required": True, "risk": False},
+    {"name": "network_control", "group": "permission", "documented": True, "present": True, "governed": False, "required": True, "risk": True},
+    {"name": "session_resume", "group": "state", "documented": True, "present": True, "governed": True, "required": True, "risk": False},
+    {"name": "context_compaction", "group": "state", "documented": True, "present": True, "governed": True, "required": True, "risk": False},
+    {"name": "local_transcript", "group": "state", "documented": True, "present": True, "governed": True, "required": True, "risk": False},
+    {"name": "auto_memory_scope", "group": "state", "documented": True, "present": False, "governed": False, "required": True, "risk": True},
+    {"name": "hooks", "group": "extension", "documented": True, "present": True, "governed": False, "required": True, "risk": True},
+    {"name": "mcp_allowlist", "group": "extension", "documented": True, "present": False, "governed": False, "required": True, "risk": False},
+    {"name": "skills_extensions", "group": "extension", "documented": True, "present": True, "governed": False, "required": True, "risk": True},
+    {"name": "local_session_transcript", "group": "observability", "documented": True, "present": True, "governed": True, "required": True, "risk": False},
+    {"name": "permission_audit", "group": "observability", "documented": True, "present": True, "governed": True, "required": True, "risk": False},
+    {"name": "trace_logger", "group": "observability", "documented": True, "present": False, "governed": False, "required": True, "risk": False},
+    {"name": "trace_export", "group": "observability", "documented": True, "present": False, "governed": False, "required": True, "risk": False},
+    {"name": "regression_cases", "group": "eval", "documented": True, "present": False, "governed": False, "required": True, "risk": False},
+    {"name": "safety_metrics", "group": "eval", "documented": True, "present": False, "governed": False, "required": True, "risk": False},
+    {"name": "cost_metrics", "group": "eval", "documented": True, "present": False, "governed": False, "required": True, "risk": False},
+    {"name": "internal_planner_kernel", "group": "core_loop", "documented": False, "present": True, "governed": False, "required": False, "risk": False},
+]
+
+
+def ratio(numerator, denominator):
+    if denominator == 0:
+        return 1.0
+    return round(numerator / denominator, 3)
+
+
+def group_items(group):
+    return [item for item in components if item["group"] == group and item["required"]]
+
+
+def governance(group):
+    items = group_items(group)
+    return ratio(sum(item["governed"] for item in items), len(items))
+
+
+required = [item for item in components if item["required"]]
+risk_items = [item for item in components if item["risk"]]
+
+metrics = {
+    "public_evidence": ratio(sum(item["documented"] for item in components), len(components)),
+    "required_module_coverage": ratio(
+        sum(item["present"] and item["documented"] for item in required),
+        len(required),
+    ),
+    "access_governance": governance("access"),
+    "core_loop_governance": governance("core_loop"),
+    "permission_control": governance("permission"),
+    "state_recovery": ratio(sum(item["present"] for item in group_items("state")), len(group_items("state"))),
+    "extension_governance": governance("extension"),
+    "observability": ratio(
+        sum(item["present"] and item["governed"] for item in group_items("observability")),
+        len(group_items("observability")),
+    ),
+    "eval_readiness": ratio(
+        sum(item["present"] and item["governed"] for item in group_items("eval")),
+        len(group_items("eval")),
+    ),
+    "high_risk_governance": ratio(sum(item["governed"] for item in risk_items), len(risk_items)),
+}
+
+root_causes = defaultdict(list)
+for item in components:
+    name = item["name"]
+    if item["present"] and not item["documented"]:
+        root_causes[name].append("undocumented_architecture_claim")
+    if item["required"] and not item["present"]:
+        root_causes[name].append("required_component_missing")
+    if item["required"] and item["present"] and not item["governed"]:
+        root_causes[name].append("required_component_not_governed")
+    if item["risk"] and not item["governed"]:
+        root_causes[name].append("high_risk_surface_ungoverned")
+
+thresholds = {
+    "public_evidence": 1.0,
+    "required_module_coverage": 0.9,
+    "access_governance": 0.8,
+    "core_loop_governance": 0.8,
+    "permission_control": 0.8,
+    "state_recovery": 0.9,
+    "extension_governance": 0.8,
+    "observability": 0.8,
+    "eval_readiness": 0.8,
+    "high_risk_governance": 1.0,
+}
+failed_gates = [name for name, threshold in thresholds.items() if metrics[name] < threshold]
+
+print(f"metrics={metrics}")
+print(f"root_causes={dict(root_causes)}")
+print(f"failed_gates={failed_gates}")
+print(f"claude_code_architecture_gate_pass={not failed_gates}")
+```
+
+一组典型输出：
+
+```text
+metrics={'public_evidence': 0.97, 'required_module_coverage': 0.75, 'access_governance': 0.4, 'core_loop_governance': 0.625, 'permission_control': 0.4, 'state_recovery': 0.75, 'extension_governance': 0.0, 'observability': 0.5, 'eval_readiness': 0.0, 'high_risk_governance': 0.0}
+root_causes={'terminal': ['required_component_not_governed', 'high_risk_surface_ungoverned'], 'workspace_files': ['required_component_not_governed', 'high_risk_surface_ungoverned'], 'project_memory': ['required_component_not_governed', 'high_risk_surface_ungoverned'], 'context_builder': ['required_component_not_governed', 'high_risk_surface_ungoverned'], 'execution_engine': ['required_component_not_governed', 'high_risk_surface_ungoverned'], 'response_renderer': ['required_component_not_governed'], 'tool_allowlist': ['required_component_not_governed'], 'sandbox': ['required_component_missing', 'high_risk_surface_ungoverned'], 'network_control': ['required_component_not_governed', 'high_risk_surface_ungoverned'], 'auto_memory_scope': ['required_component_missing', 'high_risk_surface_ungoverned'], 'hooks': ['required_component_not_governed', 'high_risk_surface_ungoverned'], 'mcp_allowlist': ['required_component_missing'], 'skills_extensions': ['required_component_not_governed', 'high_risk_surface_ungoverned'], 'trace_logger': ['required_component_missing'], 'trace_export': ['required_component_missing'], 'regression_cases': ['required_component_missing'], 'safety_metrics': ['required_component_missing'], 'cost_metrics': ['required_component_missing'], 'internal_planner_kernel': ['undocumented_architecture_claim']}
+failed_gates=['public_evidence', 'required_module_coverage', 'access_governance', 'core_loop_governance', 'permission_control', 'state_recovery', 'extension_governance', 'observability', 'eval_readiness', 'high_risk_governance']
+claude_code_architecture_gate_pass=False
+```
+
+这里的失败是刻意设计的。它提醒你：如果一份架构分析声称存在未公开内部 planner，或者只写“有 hooks、MCP、memory、terminal、sandbox”但没有治理指标、权限边界、trace/export 和回归评估准备度，就不应该通过架构审计。
+
+## 11.19 面试题
 
 ### 题 1：如何设计 Claude Code 类 coding agent 的高层架构？
 
@@ -486,7 +720,7 @@ Claude Code 类产品几乎覆盖了本书前十章的所有主题。
 终端型 agent 更接近真实工程环境，适合跑测试、构建、git、容器和远程服务器任务，但 UI 展示有限，权限和日志管理要求更高。IDE 型 agent 更适合局部代码编辑、inline diff 和可视化交互，但也需要同样的工具、上下文、权限和 trace 体系。两者产品形态不同，底层 harness 问题类似。
 ```
 
-## 11.19 小练习
+## 11.20 小练习
 
 1. 画出一个 Claude Code 类系统从用户输入到工具执行再到最终回答的链路图。
 2. 为 `run_command` 工具设计一个权限分级策略，至少区分只读命令、测试命令、安装命令、删除命令和 git 高风险命令。
@@ -494,7 +728,7 @@ Claude Code 类产品几乎覆盖了本书前十章的所有主题。
 4. 假设 agent 覆盖了用户刚刚手动修改的文件，分析 harness 应该如何预防和恢复。
 5. 设计一个 evaluation task，用于评估 Claude Code 类 agent 是否能修复一个真实单测失败。
 
-## 11.20 本章总结
+## 11.21 本章总结
 
 本章用 harness 视角分析了 Claude Code 类终端型 coding agent。
 

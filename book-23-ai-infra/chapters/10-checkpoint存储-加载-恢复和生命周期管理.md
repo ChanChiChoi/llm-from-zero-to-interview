@@ -8,6 +8,16 @@ Checkpoint 是大模型训练平台里最关键、也最容易被低估的能力
 
 > Checkpoint 不是一个模型文件，而是训练状态的可恢复快照；它的价值不在于保存成功，而在于能可靠、快速、正确地恢复。
 
+## 10.0 本讲资料边界与第二轮精修口径
+
+本讲第二轮精修时，资料口径按“大模型训练平台 checkpoint 生命周期的稳定抽象”处理，而不是绑定某个框架、某个对象存储厂商或某套内部平台实现。分布式 checkpoint 部分参考 PyTorch Distributed Checkpoint 对分布式 state_dict 保存、加载和异步保存的抽象；工程接口部分参考 DeepSpeed 对训练 checkpoint 保存、加载和 ZeRO checkpoint 的接口边界；对象存储部分参考 Amazon S3 对强一致读取、对象生命周期和保留策略的通用口径；平台治理部分沿用上一章存储体系的 manifest、checksum、commit、权限、审计和成本分层。
+
+需要注意三点：
+
+1. 本章讲训练状态 checkpoint 的保存、加载、恢复、一致性和生命周期，不把下一章容器、镜像、驱动和 CUDA 依赖管理提前展开。
+2. 模型权重 checkpoint、训练状态 checkpoint、发布 artifact 和归档对象不是同一个概念，面试中要先说明用途、状态内容、恢复要求和权限边界。
+3. checkpoint 系统不能只证明“写入成功”，还要证明分片完整、manifest 可解释、commit 语义清楚、恢复演练通过、保留策略可控、成本和权限可审计。
+
 ## 10.1 为什么 checkpoint 这么重要
 
 大模型训练时间长、成本高、故障概率高。
@@ -552,7 +562,485 @@ Checkpoint 成本容易失控。
 
 Checkpoint 能不能用，必须通过恢复测试证明。
 
-## 10.19 面试中如何回答 checkpoint 系统设计
+## 10.19 Checkpoint 生命周期审计指标与最小 demo
+
+可以把 checkpoint 生命周期从“保存文件”写成一组可审计对象。
+
+一个训练状态 checkpoint 样本可以抽象为：
+
+```math
+c_i=(m_i,o_i,p_i,s_i,w_i,d_i,r_i,a_i,v_i,k_i,l_i,g_i,z_i)
+```
+
+其中，`m_i` 是 manifest，`o_i` 是训练状态对象，`p_i` 是并行配置，`s_i` 是 shard 布局，`w_i` 是写入路径，`d_i` 是校验摘要，`r_i` 是恢复测试，`a_i` 是异步保存策略，`v_i` 是版本和血缘，`k_i` 是保留与成本策略，`l_i` 是权限和审计日志，`g_i` 是监控与 SLO，`z_i` 是最终门禁结果。
+
+分片大小可以先用：
+
+```math
+S_{\mathrm{shard}}=\frac{S_{\mathrm{ckpt}}}{N_{\mathrm{shard}}}
+```
+
+其中，`S_ckpt` 是总 checkpoint 大小，`N_shard` 是 shard 数。真实系统还要考虑 tensor 大小、rank 映射、对象存储请求数、metadata 压力和恢复并发度。
+
+保存耗时可以拆成：
+
+```math
+T_{\mathrm{save}}=\frac{S_{\mathrm{ckpt}}}{\eta_w B_{\mathrm{write}}}+T_{\mathrm{sync}}+T_{\mathrm{meta}}+T_{\mathrm{commit}}
+```
+
+其中，`B_write` 是写入带宽，`\eta_w` 是有效带宽系数，`T_sync` 是冻结或拷贝一致快照的时间，`T_meta` 是 manifest / metadata 写入开销，`T_commit` 是 checksum 校验和 committed 标记开销。
+
+如果使用异步 checkpoint，训练可见阻塞不是总写入时间，而更接近：
+
+```math
+T_{\mathrm{visible}}=\max(0,T_{\mathrm{save}}(1-\gamma_{\mathrm{overlap}}))
+```
+
+其中，`\gamma_overlap` 是写入与训练重叠比例。这个比例不能只靠理论估计，必须从 step time 尖刺、I/O 争抢和后台队列积压中实测。
+
+恢复耗时可以写成：
+
+```math
+T_{\mathrm{restore}}=\frac{S_{\mathrm{ckpt}}}{\eta_r B_{\mathrm{read}}}+T_{\mathrm{validate}}+T_{\mathrm{rebuild}}+T_{\mathrm{requeue}}
+```
+
+其中，`B_read` 是读取带宽，`\eta_r` 是有效读取系数，`T_validate` 是 checksum / manifest 校验时间，`T_rebuild` 是重建并行状态或 reshard 的时间，`T_requeue` 是重新排队、拉起容器和恢复训练进程的时间。
+
+保存间隔决定最大丢失进度：
+
+```math
+W_{\mathrm{lost}}\le I_{\mathrm{ckpt}}
+```
+
+其中，`I_ckpt` 是两次成功 checkpoint 之间的时间间隔。抢占式训练、长周期预训练和不稳定集群要把 `I_ckpt` 作为平台 SLO，而不是只看“平均每天保存几次”。
+
+生命周期成本可以写成：
+
+```math
+K_{\mathrm{ckpt}}=\sum_{a=1}^{A} S_a P_a T_a+K_{\mathrm{request}}+K_{\mathrm{egress}}+K_{\mathrm{ops}}
+```
+
+其中，`S_a` 是第 `a` 类 checkpoint 的容量，`P_a` 是对应存储层级单价，`T_a` 是保留时长，`K_request` 是对象请求成本，`K_egress` 是跨区或出站成本，`K_ops` 是校验、复制、扫描、人工审批和运维成本。
+
+最后，可以把 checkpoint 生命周期门禁写成：
+
+```math
+G_{\mathrm{ckpt}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land T_{\mathrm{restore}}\le \tau_{\mathrm{restore}} \land W_{\mathrm{lost}}\le \omega \land P_0=0\right]
+```
+
+其中，`C_j` 是第 `j` 个 checkpoint 审计指标覆盖率，`\tau_j` 是覆盖率阈值，`\tau_restore` 是恢复 SLO，`\omega` 是最大可接受丢失进度，`P_0` 是 P0 级风险数量。
+
+下面这个 0 依赖 demo 演示如何把 checkpoint 生命周期写成审计规则。它故意构造 1 个完整样本和 16 个坏样本，让每个关键维度各失败一次。
+
+```python
+import copy
+
+
+METRICS = [
+    "checkpoint_object_completeness",
+    "shard_layout_fit",
+    "async_save_overlap",
+    "write_bandwidth_fit",
+    "metadata_commit_integrity",
+    "checksum_manifest_validation",
+    "restore_replay_readiness",
+    "dataloader_rng_state_capture",
+    "distributed_rank_state_capture",
+    "retention_policy_fit",
+    "lifecycle_cost_governance",
+    "cross_region_replication_fit",
+    "security_access_control",
+    "resume_slo_tracking",
+    "failure_drill_coverage",
+    "checkpoint_lifecycle_gate",
+]
+
+
+def shard_size_gib(total_gib, shard_count):
+    return total_gib / shard_count
+
+
+def transfer_time_s(gib, bandwidth_gib_s, efficiency):
+    return gib / (bandwidth_gib_s * efficiency)
+
+
+def save_time_s(size_gib, bandwidth_gib_s, efficiency, sync_s, metadata_s, commit_s):
+    return transfer_time_s(size_gib, bandwidth_gib_s, efficiency) + sync_s + metadata_s + commit_s
+
+
+def visible_save_overhead_s(total_save_s, overlap_ratio):
+    return max(0.0, total_save_s * (1.0 - overlap_ratio))
+
+
+def restore_time_s(size_gib, bandwidth_gib_s, efficiency, validate_s, rebuild_s, requeue_s):
+    return transfer_time_s(size_gib, bandwidth_gib_s, efficiency) + validate_s + rebuild_s + requeue_s
+
+
+def monthly_checkpoint_cost_usd(hot_tib, cold_tib, hot_per_tib, cold_per_tib, request_cost):
+    return hot_tib * hot_per_tib + cold_tib * cold_per_tib + request_cost
+
+
+def build_checkpoint_cases():
+    complete = {
+        "name": "complete",
+        "object": {
+            "type": "training_state",
+            "model_state": True,
+            "optimizer_state": True,
+            "scheduler_state": True,
+            "global_step": True,
+            "scaler_state": True,
+            "code_data_version": True,
+        },
+        "shard_layout": {
+            "total_gib": 3200,
+            "expected_shards": 64,
+            "actual_shards": 64,
+            "manifest_shards": 64,
+            "max_shard_gib": 64,
+            "parallelism_match": True,
+        },
+        "async_save": {
+            "mode": "async",
+            "snapshot_frozen": True,
+            "overlap_ratio": 0.82,
+            "io_isolated": True,
+            "pending_limit": 2,
+        },
+        "write_path": {
+            "write_gib_s": 80,
+            "efficiency": 0.75,
+            "sync_s": 5,
+            "metadata_s": 20,
+            "commit_s": 5,
+            "save_slo_s": 120,
+            "measured": True,
+        },
+        "metadata": {
+            "manifest": True,
+            "atomic_commit": True,
+            "status": "committed",
+            "temp_prefix": True,
+        },
+        "checksum": {
+            "all_shards": True,
+            "algorithm": "sha256",
+            "validate_on_load": True,
+        },
+        "restore": {
+            "restore_tested": True,
+            "read_gib_s": 100,
+            "efficiency": 0.75,
+            "validate_s": 20,
+            "rebuild_s": 10,
+            "requeue_s": 20,
+            "restore_slo_s": 120,
+        },
+        "rng_state": {
+            "python": True,
+            "numpy": True,
+            "torch": True,
+            "cuda": True,
+            "sampler": True,
+        },
+        "rank_state": {
+            "tensor_parallel": True,
+            "pipeline_parallel": True,
+            "data_parallel": True,
+            "zero_partition": True,
+            "grad_accum_step": True,
+        },
+        "retention": {
+            "recent_n": 5,
+            "milestone_days": 30,
+            "best_eval_keep": True,
+            "release_keep": True,
+            "temp_failed_days": 7,
+            "keep_all": False,
+        },
+        "cost": {
+            "hot_tib": 120,
+            "cold_tib": 480,
+            "hot_per_tib": 23,
+            "cold_per_tib": 4,
+            "request_cost": 320,
+            "monthly_budget_usd": 6000,
+            "archive_cold": True,
+            "budget_owner": True,
+        },
+        "replication": {
+            "object_store": True,
+            "cross_region_release": True,
+            "restore_copy_tested": True,
+        },
+        "security": {
+            "iam": True,
+            "encryption": True,
+            "audit_log": True,
+            "tenant_isolation": True,
+        },
+        "slo": {
+            "tracked": True,
+            "save_p95_s": 90,
+            "save_slo_s": 120,
+            "restore_p95_s": 100,
+            "restore_slo_s": 120,
+            "time_since_last_ckpt_min": 12,
+            "max_interval_min": 15,
+        },
+        "drill": {
+            "automated": True,
+            "restore_test_age_days": 7,
+            "failure_modes": 4,
+        },
+        "gate": {"enabled": True},
+    }
+
+    def bad_case(name, mutator):
+        case = copy.deepcopy(complete)
+        case["name"] = name
+        mutator(case)
+        return case
+
+    bad_cases = [
+        bad_case("weights_only_checkpoint_bad", lambda c: c["object"].update({"type": "model_weights", "optimizer_state": False})),
+        bad_case("single_huge_file_bad", lambda c: c["shard_layout"].update({"actual_shards": 1, "manifest_shards": 1})),
+        bad_case("blocking_save_bad", lambda c: c["async_save"].update({"mode": "sync", "overlap_ratio": 0.0})),
+        bad_case("write_bandwidth_unknown_bad", lambda c: c["write_path"].update({"measured": False})),
+        bad_case("metadata_marked_before_commit_bad", lambda c: c["metadata"].update({"atomic_commit": False})),
+        bad_case("checksum_missing_bad", lambda c: c["checksum"].update({"all_shards": False})),
+        bad_case("restore_never_tested_bad", lambda c: c["restore"].update({"restore_tested": False})),
+        bad_case("rng_state_missing_bad", lambda c: c["rng_state"].update({"torch": False})),
+        bad_case("rank_state_missing_bad", lambda c: c["rank_state"].update({"zero_partition": False})),
+        bad_case("keep_everything_forever_bad", lambda c: c["retention"].update({"keep_all": True, "temp_failed_days": 365})),
+        bad_case("cold_archive_never_used_bad", lambda c: c["cost"].update({"archive_cold": False})),
+        bad_case("no_replication_bad", lambda c: c["replication"].update({"cross_region_release": False})),
+        bad_case("open_bucket_bad", lambda c: c["security"].update({"iam": False})),
+        bad_case("resume_slo_missing_bad", lambda c: c["slo"].update({"tracked": False})),
+        bad_case("failure_drill_missing_bad", lambda c: c["drill"].update({"automated": False})),
+        bad_case("checkpoint_gate_missing_bad", lambda c: c["gate"].update({"enabled": False})),
+    ]
+    return [complete] + bad_cases
+
+
+def check_object(case):
+    obj = case["object"]
+    required = ["model_state", "optimizer_state", "scheduler_state", "global_step", "scaler_state", "code_data_version"]
+    return obj["type"] == "training_state" and all(obj[k] for k in required)
+
+
+def check_shard_layout(case):
+    layout = case["shard_layout"]
+    expected = layout["expected_shards"]
+    shard_gib = shard_size_gib(layout["total_gib"], max(layout["actual_shards"], 1))
+    return (
+        layout["actual_shards"] == expected
+        and layout["manifest_shards"] == expected
+        and shard_gib <= layout["max_shard_gib"]
+        and layout["parallelism_match"]
+    )
+
+
+def check_async(case):
+    async_save = case["async_save"]
+    return (
+        async_save["mode"] == "async"
+        and async_save["snapshot_frozen"]
+        and async_save["overlap_ratio"] >= 0.7
+        and async_save["io_isolated"]
+        and async_save["pending_limit"] <= 2
+    )
+
+
+def check_write(case):
+    path = case["write_path"]
+    total_s = save_time_s(
+        case["shard_layout"]["total_gib"],
+        path["write_gib_s"],
+        path["efficiency"],
+        path["sync_s"],
+        path["metadata_s"],
+        path["commit_s"],
+    )
+    return path["measured"] and total_s <= path["save_slo_s"]
+
+
+def check_metadata(case):
+    meta = case["metadata"]
+    return meta["manifest"] and meta["atomic_commit"] and meta["status"] == "committed" and meta["temp_prefix"]
+
+
+def check_checksum(case):
+    checksum = case["checksum"]
+    return checksum["all_shards"] and checksum["algorithm"] == "sha256" and checksum["validate_on_load"]
+
+
+def check_restore(case):
+    restore = case["restore"]
+    total_s = restore_time_s(
+        case["shard_layout"]["total_gib"],
+        restore["read_gib_s"],
+        restore["efficiency"],
+        restore["validate_s"],
+        restore["rebuild_s"],
+        restore["requeue_s"],
+    )
+    return restore["restore_tested"] and total_s <= restore["restore_slo_s"]
+
+
+def check_rng(case):
+    return all(case["rng_state"].values())
+
+
+def check_rank_state(case):
+    return all(case["rank_state"].values())
+
+
+def check_retention(case):
+    retention = case["retention"]
+    return (
+        retention["recent_n"] >= 3
+        and retention["milestone_days"] >= 7
+        and retention["best_eval_keep"]
+        and retention["release_keep"]
+        and 0 < retention["temp_failed_days"] <= 14
+        and not retention["keep_all"]
+    )
+
+
+def check_cost(case):
+    cost = case["cost"]
+    monthly = monthly_checkpoint_cost_usd(
+        cost["hot_tib"],
+        cost["cold_tib"],
+        cost["hot_per_tib"],
+        cost["cold_per_tib"],
+        cost["request_cost"],
+    )
+    return cost["archive_cold"] and cost["budget_owner"] and monthly <= cost["monthly_budget_usd"]
+
+
+def check_replication(case):
+    repl = case["replication"]
+    return repl["object_store"] and repl["cross_region_release"] and repl["restore_copy_tested"]
+
+
+def check_security(case):
+    return all(case["security"].values())
+
+
+def check_slo(case):
+    slo = case["slo"]
+    return (
+        slo["tracked"]
+        and slo["save_p95_s"] <= slo["save_slo_s"]
+        and slo["restore_p95_s"] <= slo["restore_slo_s"]
+        and slo["time_since_last_ckpt_min"] <= slo["max_interval_min"]
+    )
+
+
+def check_drill(case):
+    drill = case["drill"]
+    return drill["automated"] and drill["restore_test_age_days"] <= 14 and drill["failure_modes"] >= 3
+
+
+def check_gate(case):
+    return case["gate"]["enabled"]
+
+
+CHECKS = {
+    "checkpoint_object_completeness": check_object,
+    "shard_layout_fit": check_shard_layout,
+    "async_save_overlap": check_async,
+    "write_bandwidth_fit": check_write,
+    "metadata_commit_integrity": check_metadata,
+    "checksum_manifest_validation": check_checksum,
+    "restore_replay_readiness": check_restore,
+    "dataloader_rng_state_capture": check_rng,
+    "distributed_rank_state_capture": check_rank_state,
+    "retention_policy_fit": check_retention,
+    "lifecycle_cost_governance": check_cost,
+    "cross_region_replication_fit": check_replication,
+    "security_access_control": check_security,
+    "resume_slo_tracking": check_slo,
+    "failure_drill_coverage": check_drill,
+    "checkpoint_lifecycle_gate": check_gate,
+}
+
+
+def audit_checkpoint_lifecycle(cases):
+    case_failures = {}
+    for case in cases:
+        failures = [name for name, check in CHECKS.items() if not check(case)]
+        case_failures[case["name"]] = failures
+
+    metrics = {}
+    for name, check in CHECKS.items():
+        metrics[name] = round(sum(int(check(case)) for case in cases) / len(cases), 3)
+
+    failed_cases = [name for name, failures in case_failures.items() if failures]
+    return {
+        "metrics": metrics,
+        "hard_blocker_count": len(failed_cases),
+        "failed_cases": failed_cases,
+        "checkpoint_gate_pass": not failed_cases and min(metrics.values()) >= 0.95,
+    }
+
+
+cases = build_checkpoint_cases()
+case_by_name = {case["name"]: case for case in cases}
+complete = case_by_name["complete"]
+write_path = complete["write_path"]
+restore_path = complete["restore"]
+total_save_s = save_time_s(
+    complete["shard_layout"]["total_gib"],
+    write_path["write_gib_s"],
+    write_path["efficiency"],
+    write_path["sync_s"],
+    write_path["metadata_s"],
+    write_path["commit_s"],
+)
+checkpoint_examples = {
+    "shard_size_gib": round(shard_size_gib(3200, 64), 1),
+    "save_3200gib_s": round(total_save_s, 1),
+    "async_visible_overhead_s": round(visible_save_overhead_s(total_save_s, complete["async_save"]["overlap_ratio"]), 1),
+    "restore_3200gib_s": round(restore_time_s(3200, restore_path["read_gib_s"], restore_path["efficiency"], 20, 10, 20), 1),
+    "max_lost_work_min": complete["slo"]["max_interval_min"],
+    "monthly_retention_cost_usd": monthly_checkpoint_cost_usd(120, 480, 23, 4, 320),
+}
+
+smoke = {
+    "complete_case_passes": all(check(complete) for check in CHECKS.values()),
+    "caught_weights_only": not check_object(case_by_name["weights_only_checkpoint_bad"]),
+    "caught_single_shard": not check_shard_layout(case_by_name["single_huge_file_bad"]),
+    "caught_commit_gap": not check_metadata(case_by_name["metadata_marked_before_commit_bad"]),
+    "caught_restore_gap": not check_restore(case_by_name["restore_never_tested_bad"]),
+    "caught_cost_gap": not check_cost(case_by_name["cold_archive_never_used_bad"]),
+}
+
+audit = audit_checkpoint_lifecycle(cases)
+print(f"checkpoint_examples={checkpoint_examples}")
+print(f"smoke={smoke}")
+print(f"metrics={audit['metrics']}")
+print(f"hard_blocker_count={audit['hard_blocker_count']}")
+print(f"failed_cases={audit['failed_cases']}")
+print(f"checkpoint_gate_pass={audit['checkpoint_gate_pass']}")
+```
+
+一组典型输出是：
+
+```text
+checkpoint_examples={'shard_size_gib': 50.0, 'save_3200gib_s': 83.3, 'async_visible_overhead_s': 15.0, 'restore_3200gib_s': 92.7, 'max_lost_work_min': 15, 'monthly_retention_cost_usd': 5000}
+smoke={'complete_case_passes': True, 'caught_weights_only': True, 'caught_single_shard': True, 'caught_commit_gap': True, 'caught_restore_gap': True, 'caught_cost_gap': True}
+metrics={'checkpoint_object_completeness': 0.941, 'shard_layout_fit': 0.941, 'async_save_overlap': 0.941, 'write_bandwidth_fit': 0.941, 'metadata_commit_integrity': 0.941, 'checksum_manifest_validation': 0.941, 'restore_replay_readiness': 0.941, 'dataloader_rng_state_capture': 0.941, 'distributed_rank_state_capture': 0.941, 'retention_policy_fit': 0.941, 'lifecycle_cost_governance': 0.941, 'cross_region_replication_fit': 0.941, 'security_access_control': 0.941, 'resume_slo_tracking': 0.941, 'failure_drill_coverage': 0.941, 'checkpoint_lifecycle_gate': 0.941}
+hard_blocker_count=16
+failed_cases=['weights_only_checkpoint_bad', 'single_huge_file_bad', 'blocking_save_bad', 'write_bandwidth_unknown_bad', 'metadata_marked_before_commit_bad', 'checksum_missing_bad', 'restore_never_tested_bad', 'rng_state_missing_bad', 'rank_state_missing_bad', 'keep_everything_forever_bad', 'cold_archive_never_used_bad', 'no_replication_bad', 'open_bucket_bad', 'resume_slo_missing_bad', 'failure_drill_missing_bad', 'checkpoint_gate_missing_bad']
+checkpoint_gate_pass=False
+```
+
+这个 demo 的重点是把 checkpoint 生命周期拆成可验证证据链：状态对象不能只存模型权重，分片布局要和 manifest 一致，异步保存要证明快照一致且训练可见阻塞下降，写入带宽和恢复耗时要实测，commit 不能先于 shard 校验，RNG / dataloader / rank state 要能恢复，保留策略不能无限膨胀，冷归档、跨区复制、权限、SLO 和失败演练都要能被审计。
+
+## 10.20 面试中如何回答 checkpoint 系统设计
 
 如果面试官问：
 
@@ -572,7 +1060,7 @@ Checkpoint 能不能用，必须通过恢复测试证明。
 生命周期上保留最近 N 个 checkpoint、关键 milestone、最佳 eval 和发布版本，临时和失败 checkpoint 自动清理，冷版本迁移到低成本存储，并按项目做成本归因。
 ```
 
-## 10.20 常见误区
+## 10.21 常见误区
 
 误区一：checkpoint 就是模型权重。
 
@@ -594,7 +1082,7 @@ Checkpoint 能不能用，必须通过恢复测试证明。
 
 大模型 checkpoint 成本极高，必须做生命周期和成本治理。
 
-## 10.21 面试题
+## 10.22 面试题
 
 ### 题 1：模型权重 checkpoint 和训练状态 checkpoint 有什么区别？
 
@@ -616,7 +1104,7 @@ Checkpoint 能不能用，必须通过恢复测试证明。
 
 答：可能是 optimizer 状态、scheduler、random seed、dataloader 状态、mixed precision scaler 或数据位置没有正确恢复，也可能是代码、配置、tokenizer 或并行策略变化导致不兼容。
 
-## 10.22 小练习
+## 10.23 小练习
 
 练习一：设计一个 checkpoint manifest。
 
@@ -634,7 +1122,7 @@ Checkpoint 能不能用，必须通过恢复测试证明。
 
 要求：模拟训练中断，从 checkpoint 恢复，并验证 step、loss、学习率、数据位置和 optimizer state 是否正确。
 
-## 10.23 本章小结
+## 10.24 本章小结
 
 本章讲了 checkpoint 存储、加载、恢复和生命周期管理。
 

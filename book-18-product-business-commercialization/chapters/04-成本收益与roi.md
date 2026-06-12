@@ -1,5 +1,11 @@
 # 第四章：成本收益与 ROI
 
+## 0. 本讲资料边界与第二轮精修口径
+
+本讲按 `WRITING_PLAN.md` 的第二轮要求做公式和 demo 精修。联网资料主要核对四类口径：OpenAI 官方 pricing / Batch / prompt caching / latency optimization 资料提醒我们，模型调用成本由输入、输出、缓存命中、批处理、工具和延迟策略共同决定，而且价格会变化；OpenAI evals / evaluation best practices 强调 ROI 不能脱离任务成功率和回归评估；Google SRE 的 SLO / error budget 口径提醒我们成本优化不能破坏可靠性和尾延迟；FinOps Foundation 的云成本管理口径强调成本要按单位经济账、责任归属和持续优化来管理。
+
+本章不写任何长期固定的 API 价格，也不替代企业财务模型、采购合同或真实云账单分析。正文中的价格都是 toy 参数，用来说明算法工程师在面试和项目复盘中如何把 token、RAG、工具、人审、固定研发摊销、风险成本和业务收益放进同一张账。
+
 大模型项目不能只问“效果好不好”，还要问“值不值得”。如果一个系统每次回答都很准确，但调用成本太高、人工审核太重、延迟太长、收益无法覆盖投入，就很难成为可持续产品。成本收益与 ROI，是大模型产品化绕不开的问题。
 
 本章系统讲大模型项目的成本和收益：token 成本、GPU 成本、工程成本、数据成本、人工审核成本、运维成本；收益侧包括人工替代、效率提升、质量提升、收入增长和风险降低；最后讲 ROI 估算、单位经济账、成本优化和面试表达。
@@ -267,6 +273,102 @@ ROI = 月收益 / 月成本
 
 如果是收入增长场景，可以把月收益换成增量收入；如果是风险降低场景，可以用预期风险损失下降来估算。
 
+## 4.16.1 关键公式与 ROI 指标速查
+
+为了把 ROI 讲清楚，可以把候选产品化场景记成一个账本样本：
+
+```math
+b_i=(N_i,A_i,Q_i,T_i,W_i,V_i,P_i,C_i,F_i,R_i)
+```
+
+其中，$N_i$ 是月任务量，$A_i$ 是采用率或覆盖率，$Q_i$ 是任务成功率提升，$T_i$ 是单次节省时间，$W_i$ 是小时成本，$V_i$ 是单次业务价值，$P_i$ 是当前单次失败或返工概率，$C_i$ 是单次可变成本，$F_i$ 是月固定成本，$R_i$ 是预期风险成本或风险下降收益。
+
+模型调用成本可以先按输入和输出 token 拆开：
+
+```math
+C_{\mathrm{model},i}=M_i\left(\frac{I_i p_{\mathrm{in}}(1-H_i)}{K}+\frac{O_i p_{\mathrm{out}}}{K}\right)
+```
+
+其中，$M_i$ 是单任务模型调用次数，$I_i$ 是平均输入 token，$O_i$ 是平均输出 token，$p_{\mathrm{in}}$ 和 $p_{\mathrm{out}}$ 是每 $K$ 个 token 的 toy 单价，$H_i$ 是缓存命中带来的输入折扣比例。这里故意写成变量，因为真实价格、缓存折扣和批处理折扣要随官方计费口径更新。
+
+单次任务的全可变成本可以写成：
+
+```math
+C_{\mathrm{var},i}=C_{\mathrm{model},i}+C_{\mathrm{rag},i}+C_{\mathrm{tool},i}+C_{\mathrm{review},i}+C_{\mathrm{retry},i}+C_{\mathrm{risk},i}
+```
+
+其中，$C_{\mathrm{rag}}$ 包含 embedding、检索、rerank、向量库和引用校验，$C_{\mathrm{tool}}$ 是工具调用，$C_{\mathrm{review}}$ 是人工审核，$C_{\mathrm{retry}}$ 是重试，$C_{\mathrm{risk}}$ 是预期失败成本。
+
+月度总成本是：
+
+```math
+C_{\mathrm{month},i}=N_iA_iC_{\mathrm{var},i}+F_i
+```
+
+其中，$F_i$ 包括研发摊销、运维、监控、日志、合规、安全评估、数据更新和固定基础设施。很多 ROI 误判来自只算 $C_{\mathrm{model}}$，不算 $F_i$。
+
+单次收益可以粗略拆成节省时间、质量提升、收入增长和风险下降：
+
+```math
+B_{\mathrm{task},i}=A_i(T_iW_i+Q_iV_i+G_i)+R_i
+```
+
+其中，$G_i$ 是单次增量收入，$R_i$ 是单次任务对应的预期风险损失下降。注意 $A_i$ 是采用率：模型生成了结果但用户不采用，不能直接算成收益。
+
+月度收益是：
+
+```math
+B_{\mathrm{month},i}=N_iB_{\mathrm{task},i}
+```
+
+净收益、收益成本比和净 ROI 分别是：
+
+```math
+P_{\mathrm{net},i}=B_{\mathrm{month},i}-C_{\mathrm{month},i}
+```
+
+```math
+R_{\mathrm{bc},i}=\frac{B_{\mathrm{month},i}}{C_{\mathrm{month},i}}
+```
+
+```math
+R_{\mathrm{roi},i}=\frac{B_{\mathrm{month},i}-C_{\mathrm{month},i}}{C_{\mathrm{month},i}}
+```
+
+面试中要先说明自己采用哪个口径：$R_{\mathrm{bc}}$ 是收益成本比，$R_{\mathrm{roi}}$ 是扣除成本后的净 ROI。两者都可以用，但不能混着讲。
+
+如果有一次性投入 $U_i$，回本周期可以写成：
+
+```math
+P_{\mathrm{back},i}=\frac{U_i}{\max(P_{\mathrm{net},i},\epsilon)}
+```
+
+其中，$\epsilon$ 是避免除零的极小正数。真实表达时如果净收益小于等于 0，就不要报一个看似精确的回本月数，而应该说“当前假设下无法回本”。
+
+盈亏平衡任务量可以写成：
+
+```math
+N_{\mathrm{be},i}=\frac{F_i}{\max(B_{\mathrm{task},i}-A_iC_{\mathrm{var},i},\epsilon)}
+```
+
+如果单次毛利为负，规模越大亏得越多；这时不能靠“用户量增长”解决问题，必须先降成本、提高采用率或重新选场景。
+
+敏感性分析至少要看三个变量：
+
+```math
+\Delta P_{\mathrm{net}}=\frac{\partial P_{\mathrm{net}}}{\partial A}\Delta A+\frac{\partial P_{\mathrm{net}}}{\partial Q}\Delta Q+\frac{\partial P_{\mathrm{net}}}{\partial C_{\mathrm{var}}}\Delta C_{\mathrm{var}}
+```
+
+直觉是：ROI 最容易被采用率、质量提升和可变成本打穿。一个看似盈利的方案，如果采用率下降、重试率上升或人审成本增加，很快就会变成亏损。
+
+上线门禁可以写成：
+
+```math
+G_{\mathrm{roi},i}=\mathbb{1}(P_{\mathrm{net},i}>0,\ R_{\mathrm{bc},i}\ge \tau_b,\ P_{\mathrm{back},i}\le \tau_p,\ C_{\mathrm{var},i}<B_{\mathrm{task},i})
+```
+
+它表达的是：月度净收益要为正，收益成本比要过阈值，回本周期要可接受，且单次任务本身不能越做越亏。
+
 ## 4.17 成本优化手段
 
 常见优化：
@@ -313,7 +415,232 @@ ROI 估算是决策工具，不是包装项目的数字游戏。
 可以从模型、上下文、调用策略和系统架构优化。简单任务用小模型或规则，大模型只处理复杂任务；控制 prompt 和 RAG 上下文长度；缓存高频问题；减少无效重试；对 Agent 设置最大步骤和工具调用预算；离线任务用批处理；自部署场景可以考虑量化和推理加速。但优化要保证质量、安全和用户体验不被明显损害。
 ```
 
-## 4.21 本章小结
+## 4.21 最小可运行 ROI / 单位经济账审计 demo
+
+下面的 0 依赖 demo 演示一个教学版 ROI audit：输入 toy 场景的任务量、采用率、节省时间、质量提升、输入输出 token、RAG / 工具 / 人审 / 固定成本，输出单次可变成本、月收益、月成本、净收益、收益成本比、净 ROI、回本周期、盈亏平衡任务量、敏感性分析和 ROI 门禁。
+
+```python
+def safe_div(num, den, default=None):
+    if den == 0:
+        return default
+    return num / den
+
+
+def round_or_none(value, digits=3):
+    return None if value is None else round(value, digits)
+
+
+SCENARIOS = [
+    {
+        "name": "support_rag",
+        "monthly_tasks": 4200,
+        "adoption_rate": 0.62,
+        "quality_uplift": 0.24,
+        "time_saved_minutes": 4.5,
+        "hourly_cost": 38,
+        "value_per_quality_success": 5.0,
+        "incremental_revenue_per_task": 0.8,
+        "risk_reduction_per_task": 0.4,
+        "model_calls": 1.2,
+        "input_tokens": 1800,
+        "output_tokens": 360,
+        "cache_discount_rate": 0.25,
+        "input_price_per_1k": 0.002,
+        "output_price_per_1k": 0.008,
+        "rag_cost_per_task": 0.035,
+        "tool_cost_per_task": 0.0,
+        "review_minutes": 0.4,
+        "review_hourly_cost": 24,
+        "retry_cost_per_task": 0.012,
+        "risk_cost_per_task": 0.02,
+        "fixed_monthly_cost": 4200,
+        "upfront_cost": 9000,
+        "latency_ok": True,
+        "quality_gate": True,
+    },
+    {
+        "name": "contract_review",
+        "monthly_tasks": 90,
+        "adoption_rate": 0.55,
+        "quality_uplift": 0.18,
+        "time_saved_minutes": 55,
+        "hourly_cost": 130,
+        "value_per_quality_success": 280,
+        "incremental_revenue_per_task": 0.0,
+        "risk_reduction_per_task": 18.0,
+        "model_calls": 2.5,
+        "input_tokens": 6200,
+        "output_tokens": 900,
+        "cache_discount_rate": 0.15,
+        "input_price_per_1k": 0.004,
+        "output_price_per_1k": 0.012,
+        "rag_cost_per_task": 0.18,
+        "tool_cost_per_task": 0.08,
+        "review_minutes": 8.0,
+        "review_hourly_cost": 95,
+        "retry_cost_per_task": 0.10,
+        "risk_cost_per_task": 0.35,
+        "fixed_monthly_cost": 8200,
+        "upfront_cost": 32000,
+        "latency_ok": True,
+        "quality_gate": True,
+    },
+    {
+        "name": "code_agent",
+        "monthly_tasks": 650,
+        "adoption_rate": 0.38,
+        "quality_uplift": 0.20,
+        "time_saved_minutes": 22,
+        "hourly_cost": 90,
+        "value_per_quality_success": 40,
+        "incremental_revenue_per_task": 0.0,
+        "risk_reduction_per_task": 0.0,
+        "model_calls": 5.0,
+        "input_tokens": 4800,
+        "output_tokens": 1200,
+        "cache_discount_rate": 0.10,
+        "input_price_per_1k": 0.004,
+        "output_price_per_1k": 0.012,
+        "rag_cost_per_task": 0.12,
+        "tool_cost_per_task": 0.25,
+        "review_minutes": 5.0,
+        "review_hourly_cost": 80,
+        "retry_cost_per_task": 0.35,
+        "risk_cost_per_task": 0.25,
+        "fixed_monthly_cost": 12000,
+        "upfront_cost": 45000,
+        "latency_ok": False,
+        "quality_gate": False,
+    },
+    {
+        "name": "generic_chatbot",
+        "monthly_tasks": 300,
+        "adoption_rate": 0.25,
+        "quality_uplift": 0.04,
+        "time_saved_minutes": 1.5,
+        "hourly_cost": 35,
+        "value_per_quality_success": 2.0,
+        "incremental_revenue_per_task": 0.0,
+        "risk_reduction_per_task": 0.0,
+        "model_calls": 1.0,
+        "input_tokens": 900,
+        "output_tokens": 260,
+        "cache_discount_rate": 0.05,
+        "input_price_per_1k": 0.002,
+        "output_price_per_1k": 0.008,
+        "rag_cost_per_task": 0.0,
+        "tool_cost_per_task": 0.0,
+        "review_minutes": 0.2,
+        "review_hourly_cost": 24,
+        "retry_cost_per_task": 0.01,
+        "risk_cost_per_task": 0.03,
+        "fixed_monthly_cost": 2500,
+        "upfront_cost": 6000,
+        "latency_ok": True,
+        "quality_gate": False,
+    },
+]
+
+
+def model_cost(s):
+    discounted_input = s["input_tokens"] * (1.0 - s["cache_discount_rate"])
+    input_cost = discounted_input * s["input_price_per_1k"] / 1000.0
+    output_cost = s["output_tokens"] * s["output_price_per_1k"] / 1000.0
+    return s["model_calls"] * (input_cost + output_cost)
+
+
+def variable_cost(s):
+    review_cost = s["review_minutes"] / 60.0 * s["review_hourly_cost"]
+    return (
+        model_cost(s)
+        + s["rag_cost_per_task"]
+        + s["tool_cost_per_task"]
+        + review_cost
+        + s["retry_cost_per_task"]
+        + s["risk_cost_per_task"]
+    )
+
+
+def benefit_per_task(s, adoption=None, quality=None):
+    adoption = s["adoption_rate"] if adoption is None else adoption
+    quality = s["quality_uplift"] if quality is None else quality
+    time_value = s["time_saved_minutes"] / 60.0 * s["hourly_cost"]
+    quality_value = quality * s["value_per_quality_success"]
+    return adoption * (time_value + quality_value + s["incremental_revenue_per_task"]) + s["risk_reduction_per_task"]
+
+
+def audit(s):
+    var_cost = variable_cost(s)
+    benefit_task = benefit_per_task(s)
+    adopted_tasks = s["monthly_tasks"] * s["adoption_rate"]
+    monthly_benefit = s["monthly_tasks"] * benefit_task
+    monthly_cost = adopted_tasks * var_cost + s["fixed_monthly_cost"]
+    net_benefit = monthly_benefit - monthly_cost
+    bcr = safe_div(monthly_benefit, monthly_cost)
+    roi = safe_div(net_benefit, monthly_cost)
+    payback = safe_div(s["upfront_cost"], net_benefit) if net_benefit > 0 else None
+    unit_margin = benefit_task - s["adoption_rate"] * var_cost
+    break_even_tasks = safe_div(s["fixed_monthly_cost"], unit_margin) if unit_margin > 0 else None
+
+    sensitivity = {}
+    for delta in (-0.15, 0.0, 0.15):
+        adjusted_adoption = max(0.0, min(1.0, s["adoption_rate"] + delta))
+        adjusted_benefit = s["monthly_tasks"] * benefit_per_task(s, adoption=adjusted_adoption)
+        adjusted_cost = s["monthly_tasks"] * adjusted_adoption * var_cost + s["fixed_monthly_cost"]
+        sensitivity[f"adoption_{delta:+.2f}"] = round(adjusted_benefit - adjusted_cost, 2)
+    for multiplier in (0.8, 1.0, 1.2):
+        adjusted_cost = adopted_tasks * var_cost * multiplier + s["fixed_monthly_cost"]
+        sensitivity[f"variable_cost_x{multiplier:.1f}"] = round(monthly_benefit - adjusted_cost, 2)
+
+    failed = []
+    if net_benefit <= 0:
+        failed.append("net_benefit")
+    if bcr is None or bcr < 1.25:
+        failed.append("benefit_cost_ratio")
+    if payback is None or payback > 6:
+        failed.append("payback")
+    if unit_margin <= 0:
+        failed.append("unit_margin")
+    if not s["latency_ok"]:
+        failed.append("latency")
+    if not s["quality_gate"]:
+        failed.append("quality")
+
+    return {
+        "model_cost_per_task": round(model_cost(s), 4),
+        "variable_cost_per_task": round(var_cost, 4),
+        "benefit_per_task": round(benefit_task, 3),
+        "unit_margin": round(unit_margin, 3),
+        "monthly_benefit": round(monthly_benefit, 2),
+        "monthly_cost": round(monthly_cost, 2),
+        "net_benefit": round(net_benefit, 2),
+        "benefit_cost_ratio": round_or_none(bcr),
+        "roi": round_or_none(roi),
+        "payback_months": round_or_none(payback),
+        "break_even_tasks": round_or_none(break_even_tasks, 1),
+        "sensitivity": sensitivity,
+        "roi_gate": not failed,
+        "failed_gates": failed,
+    }
+
+
+audits = {scenario["name"]: audit(scenario) for scenario in SCENARIOS}
+ranked = sorted(
+    ((name, result["net_benefit"], result["roi_gate"]) for name, result in audits.items()),
+    key=lambda item: item[1],
+    reverse=True,
+)
+
+print("ranked=", ranked)
+print("roi_pass=", [name for name, result in audits.items() if result["roi_gate"]])
+print("needs_rework=", {name: result["failed_gates"] for name, result in audits.items() if not result["roi_gate"]})
+for name in [item[0] for item in ranked]:
+    print(name, audits[name])
+```
+
+这段 demo 的关键结论是：`support_rag` 在 toy 假设下通过 ROI 门禁；`contract_review` 单次价值高，但固定成本和人审成本太重，回本周期不过线；`code_agent` 质量和延迟没过线，不能只看效率收益；`generic_chatbot` 任务价值太低，规模也不够，单位经济账和净收益都不成立。
+
+## 4.22 本章小结
 
 大模型项目要可持续，必须算成本收益。成本不仅是 token，还包括 GPU、RAG、Agent 工具、人审、数据、工程、运维、安全和失败成本。收益也不只是一句“提升效率”，而要尽量连接到人工节省、质量提升、收入增长或风险降低。
 

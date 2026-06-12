@@ -21,6 +21,18 @@
 
 > Skill 生命周期管理的核心，是让能力从“可用”变成“可控、可审计、可升级、可回滚”。
 
+## 36.0 本讲资料边界与第二轮精修口径
+
+本章第二轮精修时，重点核对了 Agent Skills / OpenAI Skills 公开资料中 Skill 作为版本化文件包、`SKILL.md` manifest、版本指针、默认版本和 eval 的口径，Semantic Versioning 2.0.0 对 `MAJOR.MINOR.PATCH` 的兼容性语义，Kubernetes Deployment 对 rolling update / rollback 的工程范式，OpenFeature 对 feature flag、evaluation context 和 provider 的抽象，以及 MCP authorization / security best practices 中授权、scope、roots、审计和本地沙箱的治理原则。
+
+需要先划清边界：
+
+1. 本章讲 Skill 从发布、安装、配置、启用、使用、升级、灰度、回滚、禁用、卸载到紧急下架的生命周期治理，不绑定某一家平台的 marketplace、安装器、feature flag 系统、IAM 产品或版本字段。
+2. 安装不等于启用，启用不等于每次调用都自动放行；运行时仍要检查权限、配置、版本、上下文策略和风险。
+3. Skill 版本治理不只包括代码，也包括 manifest、prompt、workflow、tool 依赖、resource 依赖、配置 schema、安全策略和 eval 门槛。
+4. 新增权限、扩大数据范围、改变输出契约、改变高风险 workflow 或改变外部共享策略，都应进入人工审批或至少显式策略门禁。
+5. 本章新增的公式和 Python demo 是教学用生命周期审计器，不实现真实安装市场、权限审批系统、灰度发布平台、回滚引擎、任务队列或审计系统。
+
 ## 36.1 Skill 生命周期总览
 
 一个完整 Skill 通常会经历这些阶段：
@@ -500,7 +512,239 @@ Prompt 变化会影响行为，应该纳入版本和 eval。
 
 任何生产 Skill 升级都应该有回滚方案，尤其是高风险 Skill。
 
-## 36.19 面试高频题
+## 36.19 Skill 生命周期审计指标与最小 demo
+
+为了把生命周期治理做成可验证系统，可以把一次 Skill 生命周期记录写成样本：
+
+```math
+\ell_i=(r_i,a_i,n_i,e_i,p_i,c_i,k_i,g_i,b_i,d_i,u_i,o_i,q_i,z_i)
+```
+
+其中，`r_i` 是发布审核，`a_i` 是安装审批，`n_i` 是启用范围，`e_i` 是运行时使用事件，`p_i` 是权限变化，`c_i` 是配置变化，`k_i` 是兼容性检查，`g_i` 是灰度策略，`b_i` 是回滚计划，`d_i` 是依赖版本，`u_i` 是禁用 / 卸载策略，`o_i` 是审计事件，`q_i` 是 eval / monitoring，`z_i` 是评估标签。
+
+对检查项 `j`，定义通过率：
+
+```math
+C_j=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[I_j(\ell_i)=1]
+```
+
+灰度阶段可以同时看质量、安全、成本和延迟门禁：
+
+```math
+G_{\mathrm{canary}}
+=\mathbb{1}[A_{\mathrm{succ}}\ge \tau_s]\,
+\mathbb{1}[E_{\mathrm{err}}\le \tau_e]\,
+\mathbb{1}[B_{\mathrm{safety}}=0]\,
+\mathbb{1}[R_{\mathrm{cost}}\le \tau_c]
+```
+
+这里为了阅读直观，用 `A_{\mathrm{succ}}` 表示成功率，`E_{\mathrm{err}}` 表示错误率，`B_{\mathrm{safety}}` 表示安全拦截或未解决安全回归数量，`R_{\mathrm{cost}}` 表示相对成本。
+
+Skill 生命周期上线门禁可以写成：
+
+```math
+G_{\mathrm{skill\_lifecycle}}
+=\prod_{j\in\mathcal{J}}\mathbb{1}[C_j\ge \tau_j]
+```
+
+综合打分可以写成：
+
+```math
+S_{\mathrm{skill\_lifecycle}}
+=\sum_{j\in\mathcal{J}}w_j C_j,\qquad
+\sum_{j\in\mathcal{J}}w_j=1
+```
+
+这里的关键不是公式复杂，而是把“发布、安装、启用、升级、回滚、禁用、卸载”都变成平台能检查的事实：有没有审批、有没有 scope、有没有兼容性结果、有没有灰度监控、有没有回滚路径、有没有保留审计证据。
+
+下面是一个 0 依赖 demo，用 toy lifecycle case 检查 Skill 生命周期治理问题。
+
+```python
+from collections import OrderedDict
+
+REQUIRED_AUDIT = {"event_id", "event_type", "skill_id", "version", "actor", "tenant_id", "timestamp", "decision"}
+REQUIRED_INSTALL = {"manifest_reviewed", "permission_reviewed", "risk_reviewed", "approver", "install_record"}
+SAFE_RUNNING_POLICIES = {"allow_current_finish", "cancel_running", "pause_for_admin", "switch_to_safe_version"}
+
+
+def make_case(**overrides):
+    case = {
+        "id": "contract_review_lifecycle_ok",
+        "phase": "upgrade",
+        "state_transition": ("1.3.0", "1.4.0"),
+        "published": True,
+        "review": {"manifest": True, "security": True, "eval": True, "owner": "legal-platform-team"},
+        "install": {"manifest_reviewed": True, "permission_reviewed": True, "risk_reviewed": True, "approver": "admin_001", "install_record": True},
+        "installed": True,
+        "enabled": True,
+        "enable_scope": {"tenant": "tenant_a", "teams": ["legal"], "agents": ["agent.legal_assistant.v1"]},
+        "permissions_added": [],
+        "permission_reapproved": True,
+        "configuration": {"versioned": True, "change_history": True, "tenant_override": True},
+        "running_task_policy": "allow_current_finish",
+        "compatibility": {"input": True, "output": True, "config": True, "workflow": True, "prompt": True, "tool": True},
+        "rollout": {"strategy": "canary", "traffic_percent": 10, "target": "internal_test_team", "monitors": ["success", "error", "safety", "latency", "cost"]},
+        "metrics": {"success_rate": 0.97, "error_rate": 0.01, "safety_blocks": 0, "latency_p95_ms": 1800, "cost_ratio": 1.05},
+        "rollback": {"old_version_available": True, "config_compatible": True, "prompt_resource_pinned": True, "migration_reversible": True, "plan": True},
+        "dependencies": {"tools": {"read_document": ">=1.0.0 <2.0.0"}, "prompts": {"prompt.contract_review": "2.1.0"}, "resources": {"kb://legal/policy": "2026-05"}},
+        "audit": {"event_id": "evt_001", "event_type": "skill_upgrade", "skill_id": "skill.contract_review", "version": "1.4.0", "actor": "admin_001", "tenant_id": "tenant_a", "timestamp": "2026-05-29T12:00:00Z", "decision": "approved"},
+        "emergency": {"suspend_supported": True, "block_new_tasks": True, "running_task_control": True, "artifact_marking": True, "notification": True, "evidence_preserved": True},
+        "uninstall": {"config_policy": "retain_30_days", "artifact_policy": "retain", "trace_audit_policy": "retain", "workflow_impact_checked": True},
+        "eval": {"golden_pass": True, "regression_pass": True, "safety_pass": True, "canary_pass": True},
+        "update_policy": "manual_approval",
+        "expected_policy": "manual_approval",
+    }
+    case.update(overrides)
+    return case
+
+
+def review_before_publish(case):
+    r = case["review"]
+    return case["published"] and r.get("manifest") and r.get("security") and r.get("eval") and bool(r.get("owner"))
+
+
+def install_approval(case):
+    return case["installed"] and REQUIRED_INSTALL.issubset({k for k, v in case["install"].items() if v})
+
+
+def enable_scope_control(case):
+    scope = case["enable_scope"]
+    return (not case["enabled"]) or bool(scope.get("tenant")) and bool(scope.get("teams") or scope.get("roles") or scope.get("agents"))
+
+
+def permission_reapproval(case):
+    return (not case["permissions_added"]) or case["permission_reapproved"]
+
+
+def configuration_versioning(case):
+    cfg = case["configuration"]
+    return cfg.get("versioned") and cfg.get("change_history")
+
+
+def running_task_policy(case):
+    return case["running_task_policy"] in SAFE_RUNNING_POLICIES
+
+
+def compatibility_check(case):
+    return all(case["compatibility"].values())
+
+
+def rollout_guard(case):
+    rollout = case["rollout"]
+    metrics = case["metrics"]
+    monitors = set(rollout.get("monitors", []))
+    monitor_ok = {"success", "error", "safety", "latency", "cost"}.issubset(monitors)
+    canary_ok = rollout.get("strategy") in {"canary", "staged"} and 0 < rollout.get("traffic_percent", 0) <= 25
+    metric_ok = metrics["success_rate"] >= 0.95 and metrics["error_rate"] <= 0.02 and metrics["safety_blocks"] == 0 and metrics["cost_ratio"] <= 1.2
+    return canary_ok and monitor_ok and metric_ok
+
+
+def rollback_readiness(case):
+    return all(case["rollback"].values())
+
+
+def dependency_versioning(case):
+    deps = case["dependencies"]
+    return all(deps.get(kind) for kind in ["tools", "prompts", "resources"])
+
+
+def audit_log_completeness(case):
+    return REQUIRED_AUDIT.issubset(case["audit"].keys())
+
+
+def emergency_suspend_readiness(case):
+    return all(case["emergency"].values())
+
+
+def uninstall_retention(case):
+    u = case["uninstall"]
+    return u.get("trace_audit_policy") == "retain" and u.get("artifact_policy") in {"retain", "retain_with_ttl"} and u.get("workflow_impact_checked") is True
+
+
+def eval_monitoring(case):
+    return all(case["eval"].values())
+
+
+def update_policy_accuracy(case):
+    return case["update_policy"] == case["expected_policy"]
+
+
+CHECKS = OrderedDict([
+    ("review_before_publish", review_before_publish),
+    ("install_approval", install_approval),
+    ("enable_scope_control", enable_scope_control),
+    ("permission_reapproval", permission_reapproval),
+    ("configuration_versioning", configuration_versioning),
+    ("running_task_policy", running_task_policy),
+    ("compatibility_check", compatibility_check),
+    ("rollout_guard", rollout_guard),
+    ("rollback_readiness", rollback_readiness),
+    ("dependency_versioning", dependency_versioning),
+    ("audit_log_completeness", audit_log_completeness),
+    ("emergency_suspend_readiness", emergency_suspend_readiness),
+    ("uninstall_retention", uninstall_retention),
+    ("eval_monitoring", eval_monitoring),
+    ("update_policy_accuracy", update_policy_accuracy),
+])
+
+CASES = [
+    make_case(id="contract_review_lifecycle_ok"),
+    make_case(id="published_without_review_bad", review={"manifest": True, "security": False, "eval": True, "owner": "legal-platform-team"}),
+    make_case(id="install_without_permission_review_bad", install={"manifest_reviewed": True, "permission_reviewed": False, "risk_reviewed": True, "approver": "admin_001", "install_record": True}),
+    make_case(id="enabled_for_all_agents_bad", enable_scope={"tenant": "tenant_a", "teams": [], "agents": []}),
+    make_case(id="new_permission_no_reapproval_bad", permissions_added=["privacy_policy.read"], permission_reapproved=False),
+    make_case(id="config_change_unversioned_bad", configuration={"versioned": False, "change_history": False, "tenant_override": True}),
+    make_case(id="disable_no_running_policy_bad", running_task_policy="unknown"),
+    make_case(id="breaking_output_no_compat_bad", compatibility={"input": True, "output": False, "config": True, "workflow": True, "prompt": True, "tool": True}),
+    make_case(id="full_rollout_no_canary_bad", rollout={"strategy": "all_at_once", "traffic_percent": 100, "target": "all", "monitors": ["success"]}),
+    make_case(id="canary_safety_regression_bad", metrics={"success_rate": 0.97, "error_rate": 0.01, "safety_blocks": 3, "latency_p95_ms": 1800, "cost_ratio": 1.05}),
+    make_case(id="rollback_plan_missing_bad", rollback={"old_version_available": True, "config_compatible": False, "prompt_resource_pinned": True, "migration_reversible": False, "plan": False}),
+    make_case(id="dependency_unpinned_bad", dependencies={"tools": {}, "prompts": {"prompt.contract_review": "latest"}, "resources": {}}),
+    make_case(id="audit_missing_bad", audit={"event_id": "evt_012", "event_type": "skill_enabled"}),
+    make_case(id="emergency_suspend_missing_bad", emergency={"suspend_supported": True, "block_new_tasks": False, "running_task_control": False, "artifact_marking": False, "notification": True, "evidence_preserved": False}),
+    make_case(id="uninstall_deletes_audit_bad", uninstall={"config_policy": "delete", "artifact_policy": "delete", "trace_audit_policy": "delete", "workflow_impact_checked": False}),
+    make_case(id="auto_update_major_bad", update_policy="auto", expected_policy="manual_approval"),
+]
+
+metrics = OrderedDict()
+failed_by_case = OrderedDict()
+for name, fn in CHECKS.items():
+    passes = [fn(case) for case in CASES]
+    metrics[name] = round(sum(passes) / len(passes), 3)
+    for case, ok in zip(CASES, passes):
+        if not ok:
+            failed_by_case.setdefault(case["id"], []).append(name)
+
+thresholds = {name: 0.95 for name in CHECKS}
+failed_gates = [name for name, value in metrics.items() if value < thresholds[name]]
+
+smoke = OrderedDict([
+    ("complete_lifecycle_passes", all(fn(CASES[0]) for fn in CHECKS.values())),
+    ("caught_new_permission_no_reapproval", not permission_reapproval(CASES[4])),
+    ("caught_full_rollout_no_canary", not rollout_guard(CASES[8])),
+    ("caught_delete_audit_on_uninstall", not uninstall_retention(CASES[14])),
+])
+
+print("smoke=", dict(smoke))
+print("metrics=", dict(metrics))
+print("failed_cases=", list(failed_by_case.keys()))
+print("failed_gates=", failed_gates)
+print("skill_lifecycle_gate_pass=", not failed_gates)
+```
+
+运行后可以看到：
+
+```text
+smoke= {'complete_lifecycle_passes': True, 'caught_new_permission_no_reapproval': True, 'caught_full_rollout_no_canary': True, 'caught_delete_audit_on_uninstall': True}
+metrics= {'review_before_publish': 0.938, 'install_approval': 0.938, 'enable_scope_control': 0.938, 'permission_reapproval': 0.938, 'configuration_versioning': 0.938, 'running_task_policy': 0.938, 'compatibility_check': 0.938, 'rollout_guard': 0.875, 'rollback_readiness': 0.938, 'dependency_versioning': 0.938, 'audit_log_completeness': 0.938, 'emergency_suspend_readiness': 0.938, 'uninstall_retention': 0.938, 'eval_monitoring': 1.0, 'update_policy_accuracy': 0.938}
+failed_cases= ['published_without_review_bad', 'install_without_permission_review_bad', 'enabled_for_all_agents_bad', 'new_permission_no_reapproval_bad', 'config_change_unversioned_bad', 'disable_no_running_policy_bad', 'breaking_output_no_compat_bad', 'full_rollout_no_canary_bad', 'canary_safety_regression_bad', 'rollback_plan_missing_bad', 'dependency_unpinned_bad', 'audit_missing_bad', 'emergency_suspend_missing_bad', 'uninstall_deletes_audit_bad', 'auto_update_major_bad']
+failed_gates= ['review_before_publish', 'install_approval', 'enable_scope_control', 'permission_reapproval', 'configuration_versioning', 'running_task_policy', 'compatibility_check', 'rollout_guard', 'rollback_readiness', 'dependency_versioning', 'audit_log_completeness', 'emergency_suspend_readiness', 'uninstall_retention', 'update_policy_accuracy']
+skill_lifecycle_gate_pass= False
+```
+
+这段 demo 的价值在于：它让“生命周期管理”不再是管理员后台功能列表，而是可回归的发布治理系统。面试中可以强调，Skill 进入平台以后，就要像软件产品一样管理 review、install、enable scope、permission delta、canary、rollback、emergency suspend 和 audit retention。
+
+## 36.20 面试高频题
 
 ### 题 1：Skill 的发布、安装、启用、使用有什么区别？
 
@@ -532,15 +776,17 @@ Prompt 变化会影响行为，应该纳入版本和 eval。
 
 Prompt 会直接影响模型行为、输出格式、安全边界和质量。即使代码没变，Prompt 变化也可能导致回归。因此 Prompt 应该版本化，并通过 eval 和灰度验证。
 
-## 36.20 小练习
+## 36.21 小练习
 
 1. 设计一个 Skill 安装记录，包含 tenant、version、permissions、installed_by 和 status。
 2. 为“会议总结 Skill”设计启用范围，要求只对产品团队开放。
 3. 写一个 Skill 升级审批规则：哪些变更必须人工审批？
 4. 设计一个紧急下架流程，处理 Skill 泄露敏感信息的问题。
 5. 思考：Skill 卸载后，历史 Artifact 和 Audit 应该如何保留？
+6. 运行本章 demo，把 `new_permission_no_reapproval_bad` 改成重新审批通过，观察 `permission_reapproval` 是否恢复。
+7. 给 demo 增加一个 `security_patch_auto_ok` 样本，要求不改变权限、不改变输入输出、eval 全通过，并说明为什么它可以自动更新。
 
-## 36.21 本章小结
+## 36.22 本章小结
 
 本章我们讲了 Skill 的安装、启用、禁用和版本更新。
 

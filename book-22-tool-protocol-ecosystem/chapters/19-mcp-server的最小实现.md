@@ -1,5 +1,11 @@
 # 第十九章：MCP Server 的最小实现
 
+## 19.0 本讲资料边界与第二轮精修口径
+
+本讲第二轮精修时，参考 MCP 官方介绍、MCP 2025-06-18 specification 中 lifecycle、tools、resources、prompts、stdio / Streamable HTTP transport 的口径，以及 OpenAI Agents SDK 中 MCP server 接入、strict schema、tool filtering、approval 与 tracing 的工程抽象。正文只抽象最小 MCP Server 的稳定实现闭环，不绑定某个 SDK 的类名、装饰器、配置文件格式或某个 Host 产品的私有字段。
+
+本章新增的公式和 demo 只用于面试与教学：公式用来把“最小实现是否完整”拆成可检查指标，代码用一个 0 依赖 toy server 演示 metadata、capabilities、tools/list、tools/call、schema validation、resources、prompts、transport policy、结构化错误和 trace 的最小闭环。真实项目中应优先使用官方 SDK 和当前协议版本，并把远程 server 的认证、授权、TLS、限流、审计和 token audience 校验放入生产治理。
+
 ## 19.1 本章定位
 
 前两章讲了 MCP 的背景和基本概念。本章进入实现层：一个最小 MCP Server 到底需要做什么。
@@ -491,51 +497,415 @@ Host 接入 server 大致需要：
 
 很多事故不是复杂系统才会发生，demo server 也可能读错文件、泄露环境变量或执行危险命令。
 
-## 19.17 常见错误
+## 19.17 MCP Server 最小实现指标与最小 demo
 
-### 19.17.1 只写 handler，不写 schema
+面试中只说“注册一个函数”是不够的。一个最小 MCP Server 至少要证明它能被初始化、能声明能力、能列出工具、能校验参数、能执行 handler、能返回结构化结果或结构化错误，并且可选的 resources / prompts 不越过 Host 的治理边界。
+
+可以把第 `i` 个最小 server 实现样本记为：
+
+```math
+r_i=(m_i,c_i,t_i,s_i,h_i,a_i,o_i,e_i,p_i,z_i)
+```
+
+其中 `m_i` 表示 metadata 和 version，`c_i` 表示 capabilities，`t_i` 表示 tools registry，`s_i` 表示 input schema，`h_i` 表示 handler 执行，`a_i` 表示 arguments validation，`o_i` 表示 output contract，`e_i` 表示 error contract，`p_i` 表示 prompts / resources / transport policy，`z_i` 表示安全、trace 和 Host 接入证据。
+
+对任意检查项 `k`，覆盖率可以写成：
+
+```math
+C_k=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[r_i\ \mathrm{passes}\ k]
+```
+
+最小 server 可以进一步拆成这些门禁：
+
+```math
+C_{\mathrm{meta}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[m_i=1]
+```
+
+```math
+C_{\mathrm{cap}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[c_i=1]
+```
+
+```math
+C_{\mathrm{tool}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[t_i=1]
+```
+
+```math
+C_{\mathrm{schema}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[s_i=1]
+```
+
+```math
+C_{\mathrm{handler}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[h_i=1]
+```
+
+```math
+C_{\mathrm{arg}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[a_i=1]
+```
+
+```math
+C_{\mathrm{result}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[o_i=1]
+```
+
+```math
+C_{\mathrm{error}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[e_i=1]
+```
+
+```math
+C_{\mathrm{resource}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{resource\ scope\ is\ bounded}]
+```
+
+```math
+C_{\mathrm{prompt}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{prompt\ template\ is\ reviewed}]
+```
+
+```math
+C_{\mathrm{transport}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{transport\ policy\ is\ explicit}]
+```
+
+```math
+C_{\mathrm{host}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{host\ connection\ is\ tested}]
+```
+
+```math
+C_{\mathrm{safety}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{safety\ baseline\ is\ enforced}]
+```
+
+```math
+C_{\mathrm{trace}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{trace\ fields\ are\ captured}]
+```
+
+综合门禁可以写成：
+
+```math
+G_{\mathrm{mcp\_server}}=\mathbf{1}\left[
+\min_k C_k \ge \tau
+\right]
+```
+
+这里的 `\tau` 是上线阈值。教学 demo 可以用 `0.95` 作为严格阈值；真实项目要按工具风险、传输方式、是否有写操作、是否接入企业权限系统来设置不同阈值。
+
+下面的 demo 演示一个不依赖 SDK 的 toy MCP Server。它不是 MCP 协议实现，只用于帮助理解最小 server 要有哪些结构，以及为什么 bad case 不能因为“能跑通一个 handler”就算合格。
+
+```python
+from dataclasses import dataclass
+from typing import Any, Callable
+
+
+class ValidationError(Exception):
+    pass
+
+
+def validate_object_schema(arguments: dict[str, Any], schema: dict[str, Any]) -> None:
+    if schema.get("type") != "object":
+        raise ValidationError("schema type must be object")
+
+    properties = schema.get("properties", {})
+    required = schema.get("required", [])
+    for key in required:
+        if key not in arguments:
+            raise ValidationError(f"{key} is required")
+
+    if schema.get("additionalProperties") is False:
+        extra = set(arguments) - set(properties)
+        if extra:
+            raise ValidationError(f"unexpected fields: {sorted(extra)}")
+
+    for key, value in arguments.items():
+        spec = properties.get(key)
+        if spec is None:
+            continue
+        expected_type = spec.get("type")
+        if expected_type == "string" and not isinstance(value, str):
+            raise ValidationError(f"{key} must be string")
+        if expected_type == "integer" and not isinstance(value, int):
+            raise ValidationError(f"{key} must be integer")
+
+
+class MiniMCPServer:
+    def __init__(self, name: str, version: str, transport: str) -> None:
+        self.server_info = {"name": name, "version": version}
+        self.transport = transport
+        self.capabilities = {"tools": True, "resources": False, "prompts": False}
+        self.tools: dict[str, dict[str, Any]] = {}
+        self.resources: dict[str, str] = {}
+        self.prompts: dict[str, dict[str, Any]] = {}
+        self.trace: list[dict[str, Any]] = []
+
+    def register_tool(
+        self,
+        name: str,
+        description: str,
+        input_schema: dict[str, Any],
+        handler: Callable[..., dict[str, Any]],
+    ) -> None:
+        self.tools[name] = {
+            "name": name,
+            "description": description,
+            "input_schema": input_schema,
+            "handler": handler,
+        }
+
+    def add_resource(self, uri: str, text: str) -> None:
+        self.capabilities["resources"] = True
+        self.resources[uri] = text
+
+    def add_prompt(self, name: str, template: str, reviewed: bool) -> None:
+        self.capabilities["prompts"] = True
+        self.prompts[name] = {"name": name, "template": template, "reviewed": reviewed}
+
+    def initialize(self) -> dict[str, Any]:
+        return {"server_info": self.server_info, "capabilities": self.capabilities}
+
+    def list_tools(self) -> dict[str, Any]:
+        return {
+            "tools": [
+                {
+                    "name": tool["name"],
+                    "description": tool["description"],
+                    "input_schema": tool["input_schema"],
+                }
+                for tool in self.tools.values()
+            ]
+        }
+
+    def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        self.trace.append({"event": "tools/call", "name": name, "args": sorted(arguments)})
+        if name not in self.tools:
+            return self.error("UNKNOWN_TOOL", "tool not found", retryable=False)
+
+        tool = self.tools[name]
+        try:
+            validate_object_schema(arguments, tool["input_schema"])
+            result = tool["handler"](**arguments)
+            return {"content": [{"type": "text", "text": str(result)}], "structured": result}
+        except ValidationError as exc:
+            return self.error("INVALID_ARGUMENTS", str(exc), retryable=False)
+        except TimeoutError:
+            return self.error("TOOL_TIMEOUT", "tool timed out", retryable=True)
+        except Exception:
+            return self.error("INTERNAL_ERROR", "tool failed", retryable=False)
+
+    def list_resources(self) -> dict[str, Any]:
+        return {"resources": [{"uri": uri, "name": uri.rsplit("/", 1)[-1]} for uri in self.resources]}
+
+    def read_resource(self, uri: str) -> dict[str, Any]:
+        if not uri.startswith("file:///project/"):
+            return self.error("RESOURCE_OUT_OF_SCOPE", "resource is outside root", retryable=False)
+        if uri not in self.resources:
+            return self.error("RESOURCE_NOT_FOUND", "resource not found", retryable=False)
+        return {"contents": [{"uri": uri, "mimeType": "text/plain", "text": self.resources[uri]}]}
+
+    def list_prompts(self) -> dict[str, Any]:
+        return {"prompts": [{"name": name, "reviewed": spec["reviewed"]} for name, spec in self.prompts.items()]}
+
+    def get_prompt(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        prompt = self.prompts.get(name)
+        if prompt is None:
+            return self.error("PROMPT_NOT_FOUND", "prompt not found", retryable=False)
+        if not prompt["reviewed"]:
+            return self.error("PROMPT_UNREVIEWED", "prompt is not reviewed", retryable=False)
+        text = prompt["template"].format(**arguments)
+        return {"messages": [{"role": "user", "content": text}]}
+
+    @staticmethod
+    def error(code: str, message: str, retryable: bool) -> dict[str, Any]:
+        return {"error": {"code": code, "message": message, "retryable": retryable}}
+
+
+def weather_handler(city: str) -> dict[str, Any]:
+    if city == "timeout":
+        raise TimeoutError()
+    return {"city": city, "condition": "sunny", "temperature_c": 22}
+
+
+def build_demo_server() -> MiniMCPServer:
+    server = MiniMCPServer("weather-mcp-server", "0.1.0", transport="stdio")
+    server.register_tool(
+        "get_weather",
+        "Return toy weather for one city. Use for demo only.",
+        {
+            "type": "object",
+            "properties": {"city": {"type": "string"}},
+            "required": ["city"],
+            "additionalProperties": False,
+        },
+        weather_handler,
+    )
+    server.add_resource("file:///project/README.md", "demo project")
+    server.add_prompt("summarize_resource", "Summarize {uri} in three bullets.", reviewed=True)
+    return server
+
+
+@dataclass
+class ServerCase:
+    name: str
+    metadata: bool = True
+    capabilities: bool = True
+    tool_registry: bool = True
+    strict_schema: bool = True
+    handler: bool = True
+    argument_validation: bool = True
+    structured_result: bool = True
+    structured_error: bool = True
+    resource_scope: bool = True
+    prompt_template: bool = True
+    transport_policy: bool = True
+    host_connection: bool = True
+    safety_baseline: bool = True
+    trace_ready: bool = True
+
+
+CASES = [
+    ServerCase("metadata_capabilities_ok"),
+    ServerCase("list_tools_ok"),
+    ServerCase("call_weather_ok"),
+    ServerCase("invalid_args_block_ok"),
+    ServerCase("unknown_tool_error_ok"),
+    ServerCase("handler_exception_mapped_ok"),
+    ServerCase("resource_scope_ok"),
+    ServerCase("prompt_template_ok"),
+    ServerCase("missing_schema_bad", strict_schema=False, argument_validation=False),
+    ServerCase("additional_props_allowed_bad", strict_schema=False),
+    ServerCase("no_structured_error_bad", structured_error=False),
+    ServerCase("root_escape_resource_bad", resource_scope=False, safety_baseline=False),
+    ServerCase("prompt_auto_trusted_bad", prompt_template=False, safety_baseline=False),
+    ServerCase("remote_no_auth_bad", transport_policy=False, safety_baseline=False),
+    ServerCase("no_trace_bad", trace_ready=False),
+    ServerCase("full_server_ready_ok"),
+]
+
+
+METRIC_FIELDS = {
+    "metadata_readiness": "metadata",
+    "capability_declaration": "capabilities",
+    "tool_registry_readiness": "tool_registry",
+    "strict_schema_coverage": "strict_schema",
+    "handler_execution_coverage": "handler",
+    "argument_validation_coverage": "argument_validation",
+    "structured_result_coverage": "structured_result",
+    "structured_error_coverage": "structured_error",
+    "resource_scope_coverage": "resource_scope",
+    "prompt_template_coverage": "prompt_template",
+    "transport_policy_coverage": "transport_policy",
+    "host_connection_readiness": "host_connection",
+    "safety_baseline_coverage": "safety_baseline",
+    "trace_readiness": "trace_ready",
+}
+
+
+def ratio(values: list[bool]) -> float:
+    return round(sum(values) / len(values), 3)
+
+
+def audit_cases(cases: list[ServerCase], threshold: float = 0.95) -> dict[str, Any]:
+    metrics = {
+        name: ratio([getattr(case, field) for case in cases])
+        for name, field in METRIC_FIELDS.items()
+    }
+    failed_cases = [
+        case.name
+        for case in cases
+        if not all(getattr(case, field) for field in METRIC_FIELDS.values())
+    ]
+    failed_gates = [name for name, value in metrics.items() if value < threshold]
+    return {
+        "metrics": metrics,
+        "failed_cases": failed_cases,
+        "failed_gates": failed_gates,
+        "mcp_server_gate_pass": not failed_gates,
+    }
+
+
+def protocol_smoke_test() -> dict[str, Any]:
+    server = build_demo_server()
+    init = server.initialize()
+    tools = server.list_tools()["tools"]
+    success = server.call_tool("get_weather", {"city": "beijing"})
+    invalid = server.call_tool("get_weather", {})
+    unknown = server.call_tool("unknown", {"city": "beijing"})
+    timeout = server.call_tool("get_weather", {"city": "timeout"})
+    resource_ok = server.read_resource("file:///project/README.md")
+    resource_escape = server.read_resource("file:///etc/passwd")
+    prompt = server.get_prompt("summarize_resource", {"uri": "file:///project/README.md"})
+    return {
+        "server": init["server_info"],
+        "capabilities": init["capabilities"],
+        "tool_names": [tool["name"] for tool in tools],
+        "weather_status": "structured" in success,
+        "invalid_error": invalid["error"]["code"],
+        "unknown_error": unknown["error"]["code"],
+        "timeout_retryable": timeout["error"]["retryable"],
+        "resource_ok": "contents" in resource_ok,
+        "resource_escape_error": resource_escape["error"]["code"],
+        "prompt_messages": len(prompt["messages"]),
+        "trace_events": len(server.trace),
+    }
+
+
+print("protocol_smoke=", protocol_smoke_test())
+report = audit_cases(CASES)
+print("metrics=", report["metrics"])
+print("failed_cases=", report["failed_cases"])
+print("failed_gates=", report["failed_gates"])
+print("mcp_server_gate_pass=", report["mcp_server_gate_pass"])
+```
+
+一组输出示例：
+
+```text
+protocol_smoke= {'server': {'name': 'weather-mcp-server', 'version': '0.1.0'}, 'capabilities': {'tools': True, 'resources': True, 'prompts': True}, 'tool_names': ['get_weather'], 'weather_status': True, 'invalid_error': 'INVALID_ARGUMENTS', 'unknown_error': 'UNKNOWN_TOOL', 'timeout_retryable': True, 'resource_ok': True, 'resource_escape_error': 'RESOURCE_OUT_OF_SCOPE', 'prompt_messages': 1, 'trace_events': 4}
+metrics= {'metadata_readiness': 1.0, 'capability_declaration': 1.0, 'tool_registry_readiness': 1.0, 'strict_schema_coverage': 0.875, 'handler_execution_coverage': 1.0, 'argument_validation_coverage': 0.938, 'structured_result_coverage': 1.0, 'structured_error_coverage': 0.938, 'resource_scope_coverage': 0.938, 'prompt_template_coverage': 0.938, 'transport_policy_coverage': 0.938, 'host_connection_readiness': 1.0, 'safety_baseline_coverage': 0.812, 'trace_readiness': 0.938}
+failed_cases= ['missing_schema_bad', 'additional_props_allowed_bad', 'no_structured_error_bad', 'root_escape_resource_bad', 'prompt_auto_trusted_bad', 'remote_no_auth_bad', 'no_trace_bad']
+failed_gates= ['strict_schema_coverage', 'argument_validation_coverage', 'structured_error_coverage', 'resource_scope_coverage', 'prompt_template_coverage', 'transport_policy_coverage', 'safety_baseline_coverage', 'trace_readiness']
+mcp_server_gate_pass= False
+```
+
+这个 demo 要传达的不是“自己手写 MCP 协议”，而是：哪怕只做一个天气查询 server，也要有可发现能力、严格 schema、结构化错误、resource 范围、prompt 审查、transport 策略、Host 接入和 trace。否则它只是一个本地函数，不是可治理的 MCP Server。
+
+## 19.18 常见错误
+
+### 19.18.1 只写 handler，不写 schema
 
 问题：模型不知道如何生成参数，runtime 也无法校验。
 
 修复：每个 tool 必须有 input schema。
 
-### 19.17.2 description 过短
+### 19.18.2 description 过短
 
 问题：Host 投影给模型后，模型无法正确选择工具。
 
 修复：写清适用场景、不适用场景和参数含义。
 
-### 19.17.3 handler 抛异常导致 server 崩溃
+### 19.18.3 handler 抛异常导致 server 崩溃
 
 问题：一个工具失败影响整个 server。
 
 修复：捕获异常并返回结构化错误。
 
-### 19.17.4 文件 resource 无范围限制
+### 19.18.4 文件 resource 无范围限制
 
 问题：可能读取用户整个磁盘。
 
 修复：使用 roots / workspace 限制。
 
-### 19.17.5 把 MCP Server 当安全边界全部
+### 19.18.5 把 MCP Server 当安全边界全部
 
 问题：Host 仍需要权限、确认、trace 和安全策略。
 
 修复：server 最小权限，Host 统一治理。
 
-### 19.17.6 返回超长结果
+### 19.18.6 返回超长结果
 
 问题：撑爆模型上下文。
 
 修复：限制大小、分页、摘要或返回引用。
 
-### 19.17.7 远程 server 无认证
+### 19.18.7 远程 server 无认证
 
 问题：任何人都能调用工具。
 
 修复：认证、授权、TLS、限流和审计。
 
-## 19.18 面试题：如何实现一个最小 MCP Server
+## 19.19 面试题：如何实现一个最小 MCP Server
 
 面试官可能问：
 
@@ -565,7 +935,7 @@ Host 接入 server 大致需要：
 最小 MCP Server 要能被 Client 发现能力、列出工具、校验并执行工具调用、返回结果或结构化错误；生产 Server 还要补齐权限、安全和观测。
 ```
 
-## 19.19 小练习
+## 19.20 小练习
 
 ### 练习 1：最小 tool 定义
 
@@ -597,7 +967,7 @@ stdio transport 适合本地还是远程共享服务？
 
 参考答案：权限、参数校验、错误规范化、超时、限流、日志 trace、输出限制、脱敏、安全审计和版本管理。
 
-## 19.20 本章小结
+## 19.21 本章小结
 
 本章讲了 MCP Server 的最小实现。
 

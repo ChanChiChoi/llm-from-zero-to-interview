@@ -126,6 +126,26 @@ Long Context：长上下文
 
 Context Window：上下文窗口
 
+In-Context Learning / ICL：上下文学习
+
+Few-Shot Demonstration：少样本示例
+
+Label Space Coverage：标签空间覆盖率
+
+Demonstration Format Consistency：示例格式一致性
+
+Context Evidence Use：上下文证据使用
+
+Token Retrieval Audit：token 检索审计
+
+Retrieval Label Match：检索标签匹配率
+
+ICL Conflict Rate：上下文学习冲突率
+
+Middle Evidence Risk：中间证据风险
+
+ICL Gate：上下文学习门禁
+
 Position Extrapolation：位置外推
 
 Position Interpolation：位置插值
@@ -784,6 +804,40 @@ Loss Landscape：损失曲面
 
 Loss Spike：损失尖峰 / loss 突增
 
+Training Stability：训练稳定性
+
+Training Stability Gate：训练稳定性门禁
+
+Loss Spike Audit：Loss Spike 审计
+
+Non-Finite Loss Rate：非有限 loss 比例
+
+Effective Label Tokens：有效标签 token 数
+
+LR Continuity：学习率连续性
+
+Rank Loss Skew：Rank 间 loss 偏斜
+
+Distributed Incident：分布式训练事故
+
+Distributed Incident Gate：分布式事故门禁
+
+Rank Step Alignment：rank step 对齐
+
+Collective Mismatch：集合通信调用不一致
+
+Token Shard Imbalance：token shard 不均衡
+
+Straggler Ratio：慢 rank 比率
+
+Communication Ratio：通信时间占比
+
+Checkpoint Shard Coverage：checkpoint shard 覆盖率
+
+Resume Continuity：恢复训练连续性
+
+Pipeline Bubble Ratio：流水线空转比例
+
 Vanishing Gradient：梯度消失
 
 Exploding Gradient：梯度爆炸
@@ -860,6 +914,36 @@ Transformer Components：Transformer 组件
 
 Transformer Component Audit：Transformer 组件审计
 
+Transformer Backbone：Transformer 基础主干
+
+Architecture Selection Gate：架构选择门禁
+
+Route Score：信息路由路径得分
+
+Training Parallelism：训练并行性
+
+Content Routing：内容相关路由
+
+Attention Routing Audit：Attention 路由审计
+
+Route Hit Rate：路由命中率
+
+Future Leak Rate：未来信息泄漏率
+
+Softmax Row Sum Check：Softmax 行和检查
+
+Scale Stability：缩放稳定性
+
+Interpretation Boundary：解释边界
+
+Scaling Evidence：规模化证据
+
+Ecosystem Readiness：生态成熟度
+
+Deployment Pressure：部署压力
+
+Attention-SSM Hybrid Readiness：Attention-SSM 混合架构就绪度
+
 Multi-Head Attention / MHA：多头注意力
 
 Multi-Head Self-Attention：多头自注意力
@@ -868,9 +952,29 @@ Attention Head：注意力头
 
 Head Dimension：头维度
 
+QK Circuit：QK 电路 / 读哪里电路
+
+OV Circuit：OV 电路 / 写什么电路
+
+Head Subspace Audit：注意力头子空间审计
+
+Head Redundancy Rate：注意力头冗余率
+
+KV Head：Key/Value 注意力头
+
+KV Head Ratio：KV 头压缩比例 / Query Head 与 KV Head 数量比
+
 Multi-Query Attention / MQA：多查询注意力
 
 Grouped-Query Attention / GQA：分组查询注意力
+
+Multi-head Latent Attention / MLA：多头潜在注意力 / 多头低秩潜在注意力
+
+Latent KV Cache：潜在 KV 缓存 / 低维 KV 缓存
+
+KV Cache Saving Rate：KV Cache 节省率
+
+Attention Architecture Gate：注意力架构门禁
 
 Output Projection：输出投影
 
@@ -884,17 +988,115 @@ Feed-Forward Network / FFN：前馈网络
 
 MLP：多层感知机
 
+Position-wise FFN：逐位置前馈网络
+
+Gated MLP：门控多层感知机
+
+MoE FFN：混合专家前馈网络
+
+Router：路由器 / MoE 路由器
+
+Top-k Routing：Top-k 专家路由
+
+Expert Capacity：专家容量
+
+Active Parameters：激活参数量
+
+Load Balancing：负载均衡
+
+FFN / MoE Gate：FFN / MoE 架构门禁
+
 Residual Connection：残差连接
+
+Residual Stream：残差流 / 主隐藏状态通道
 
 Layer Normalization / LayerNorm：层归一化
 
 RMSNorm：均方根归一化
 
+Norm Placement：归一化位置
+
 Pre-LN：前置归一化
 
 Post-LN：后置归一化
 
-SwiGLU：门控激活结构 SwiGLU
+Residual Scaling：残差缩放
+
+Early Update Pressure：早期更新压力
+
+Normalization Stability Gate：归一化稳定性门禁
+
+Position Encoding / Positional Encoding：位置编码
+
+Sinusoidal Position Encoding：正弦位置编码
+
+Learned Absolute Position Embedding：可学习绝对位置嵌入
+
+Relative Position Representation：相对位置表示
+
+Relative Position Bias：相对位置偏置
+
+Rotary Position Embedding / RoPE：旋转位置编码
+
+ALiBi / Attention with Linear Biases：线性注意力偏置
+
+Position Interpolation：位置插值
+
+RoPE Scaling：RoPE 缩放
+
+Position ID Audit：位置编号审计
+
+Position Encoding Gate：位置编码门禁
+
+Attention Mask：注意力掩码
+
+Loss Mask：损失掩码
+
+Bidirectional Attention：双向注意力
+
+Prefix LM / Prefix Language Model：前缀语言模型
+
+Encoder-Decoder Attention：编码器-解码器注意力
+
+Cross-Attention：交叉注意力
+
+Packed Sequence Mask：拼接样本掩码
+
+Block-Diagonal Causal Mask：块对角因果掩码
+
+Sliding Window Attention：滑动窗口注意力
+
+Mask Visibility Audit：掩码可见性审计
+
+Mask Gate：掩码门禁
+
+Parallel Path Length：并行路径长度 / 信息路径长度
+
+Attention Pair Count：注意力成对计算数量
+
+Quadratic Attention Cost：二次注意力成本
+
+Attention Score Memory：注意力分数矩阵显存
+
+Prefill Attention Cost：预填充注意力成本
+
+Decode Attention Cost：解码阶段注意力成本
+
+Attention Cost Gate：注意力成本门禁
+
+Training FLOPs Estimate：训练 FLOPs 估算
+
+Compute-Optimal Training：计算最优训练
+
+Tokens per Parameter：每参数训练 token 数
+
+Undertrained Model：训练不足模型
+
+Serving Pressure：推理服务压力
+
+Scaling Gate：规模化门禁
+
+SwiGLU：SwiGLU 门控激活 / SwiGLU 门控 MLP
 
 Causal Mask：因果掩码
 
@@ -911,6 +1113,16 @@ Masked Language Model / MLM：掩码语言模型
 Information Leakage：信息泄漏
 
 Key-Value Cache / KV Cache：键值缓存
+
+KV Cache Budget：KV Cache 预算
+
+KV Cache Per Token：单 token KV Cache 增量
+
+Decode Bandwidth Pressure：解码带宽压力
+
+Paged KV Block：分页 KV 缓存块
+
+KV Cache Gate：KV Cache 门禁
 
 Post-Training：后训练
 
@@ -931,6 +1143,34 @@ Chat Template：聊天模板
 Loss Mask：损失掩码
 
 Ignore Index：忽略索引
+
+Tokenizer Format Incident：tokenizer 与格式事故
+
+Chat Template Drift：聊天模板漂移
+
+Assistant-Only Label Mask：仅助手回答参与损失的标签掩码
+
+Prompt Loss Leak：提示词部分参与损失泄漏
+
+PAD Loss Leak：填充 token 参与损失泄漏
+
+EOS Coverage：EOS 覆盖率
+
+Post-Training Incident：后训练事故
+
+Alignment Training Gate：对齐训练门禁
+
+Assistant Mask Coverage：assistant 标签掩码覆盖率
+
+Capability Regression：能力回归
+
+False Refusal Rate：误拒率
+
+Reward Length Bias：奖励模型长度偏差
+
+DPO Reference Mismatch：DPO 参考模型不匹配
+
+Tool Schema Drift：工具 schema 漂移
 
 System Prompt：系统提示词
 
@@ -1156,6 +1396,20 @@ Beta in DPO：DPO 中的 beta 超参数
 
 Evaluation Statistics：评估统计
 
+Evaluation Metric Incident：评估指标事故
+
+Aggregate Score Trap：平均总分陷阱
+
+Slice Regression：切片退化
+
+Clean Eval Lift：干净评估集提升
+
+Judge-Human Agreement：Judge 与人工一致率
+
+Judge Length Bias：Judge 长度偏差
+
+Evaluation Gate：评估上线门禁
+
 Sample Mean：样本均值
 
 Sample Variance：样本方差
@@ -1374,7 +1628,209 @@ Stop Token：停止 token
 
 Best-of-N：N 个候选中选优
 
+Reasoning Model：推理模型
+
+Reasoning Candidate Set：推理候选集合
+
+Chain-of-Thought / CoT：思维链 / 逐步推理
+
+Few-shot CoT：少样本思维链提示
+
+Zero-shot CoT：零样本思维链提示
+
+Scratchpad：推理草稿区
+
+Hidden CoT：隐藏思维链 / 内部推理
+
+Visible Explanation：可见解释
+
+CoT Faithfulness：思维链忠实性
+
+CoT Step Accuracy：思维链步骤准确率
+
+CoT Regression：思维链回归样本
+
+CoT Routing：思维链路由
+
+CoT Audit：思维链审计
+
 Self-Consistency：自一致性
+
+Sampling Temperature：采样温度
+
+Answer Normalization：答案标准化
+
+Majority Vote：多数投票
+
+Weighted Vote：加权投票
+
+Candidate Diversity：候选多样性
+
+Majority Failure：多数投票失败
+
+Self-Consistency Cost：自洽投票成本
+
+Self-Consistency Accuracy：自洽投票准确率
+
+Programmatic Verifier：程序化验证器
+
+Hybrid Verifier：混合验证器
+
+Verifier Reranking：验证器重排序
+
+Verifier Pairwise Accuracy：验证器成对排序准确率
+
+Reasoning Hard Negative：推理困难负样本
+
+Verifier Calibration：验证器校准
+
+Reward Model Bias：奖励模型偏差
+
+Process Reward Model / PRM：过程奖励模型
+
+Outcome Reward Model / ORM：结果奖励模型
+
+Step Label：步骤标签
+
+First-Error Detection：第一处错误检测
+
+Auto Label Coverage：自动标注覆盖率
+
+Human Label Cost：人工标注成本
+
+Process Search Pruning：过程搜索剪枝
+
+Process Supervision Audit：过程监督审计
+
+Process Step Accuracy：过程步骤准确率
+
+Search Reasoning：搜索式推理
+
+Search State：搜索状态
+
+Search Action：搜索动作
+
+Best-First Search：最佳优先搜索
+
+Tree-of-Thought / ToT：思维树
+
+Monte Carlo Tree Search / MCTS：蒙特卡洛树搜索
+
+UCT：上置信树选择
+
+Prune False Negative：剪枝假阴性 / 错剪正确路径
+
+Search Budget：搜索预算
+
+Search Audit：搜索审计
+
+Test-Time Compute Scaling：推理时计算扩展
+
+Compute Budget Vector：计算预算向量
+
+Adaptive Compute：自适应计算
+
+Budget Router：预算路由器
+
+Cost per Correct：单位正确样本成本
+
+Marginal Accuracy per Cost：单位成本边际准确率提升
+
+P95 Latency：P95 延迟
+
+Wasted High Compute：高预算浪费
+
+TTC Audit：推理时计算审计
+
+Math Reasoning Training：数学推理训练
+
+Math Training Sample：数学训练样本
+
+Answer Supervision：最终答案监督
+
+Synthetic Math Data：合成数学数据
+
+Math Curriculum：数学课程学习 / 数学难度课程
+
+Math Contamination Audit：数学数据污染审计
+
+Template Diversity：模板多样性
+
+Math Training Gate：数学推理训练门禁
+
+Code Reasoning：代码推理
+
+Execution Feedback：执行反馈
+
+Unit Test Verifier：单元测试验证器
+
+Public Test：公开测试
+
+Hidden Test：隐藏测试
+
+Public-Hidden Gap：公开测试与隐藏测试差距
+
+Self-Debug：自我调试 / 自我修复
+
+Repair Success Rate：修复成功率
+
+Sandbox Violation Rate：沙箱违规率
+
+Code Execution Audit：代码执行反馈审计
+
+Code Reasoning Gate：代码推理门禁
+
+Reasoning Evaluation：推理评估
+
+Evaluation Sample：评估样本
+
+Variant Evaluation：变体评估 / 扰动评估
+
+Robustness Drop：鲁棒性下降
+
+Paired Lift：成对评估提升
+
+Bootstrap Confidence Interval：自助法置信区间
+
+Reasoning Eval Gate：推理评估门禁
+
+Test-Time Compute Cost：推理时计算成本
+
+Reasoning Audit：推理审计
+
+Reasoning Gate：推理门禁
+
+Reasoning Safety：推理安全
+
+Pseudo Reasoning：伪推理
+
+Overconfident Error：过度自信错误
+
+Unsafe Compliance Rate：高风险不当服从率
+
+Hidden CoT Exposure：隐藏思维链暴露
+
+Tool Misuse：工具误用
+
+Human Review Coverage：人工审核覆盖率
+
+Over-Refusal Rate：过度拒答率
+
+Severity-Weighted Risk：严重度加权风险
+
+Reasoning Safety Gate：推理安全门禁
+
+Reasoning Interview Readiness：推理面试准备度
+
+Reasoning Interview Rubric：推理面试评分规约
+
+Reasoning Formula Coverage：推理公式覆盖度
+
+Reasoning Demo Coverage：推理 demo 覆盖度
+
+Weak Reasoning Question：推理薄弱题
+
+Reasoning Revision Plan：推理复习修正计划
 
 Speculative Decoding：推测解码
 
@@ -1406,6 +1862,10 @@ Candidate Tree：候选树
 
 KV Cache：键值缓存
 
+KV Cache Budget：KV Cache 预算
+
+KV Cache Per Token：单 token KV Cache 增量
+
 KV Cache Quantization：KV Cache 量化
 
 K Cache：Key 缓存
@@ -1419,6 +1879,8 @@ Per-Head Quantization：按注意力头量化
 KV Scale：KV 缩放系数
 
 Mixed-Precision KV Cache：混合精度 KV Cache
+
+Decode Bandwidth Pressure：解码带宽压力
 
 LLM Serving：大模型在线推理服务
 
@@ -1529,6 +1991,20 @@ Dynamic Batching：动态批处理
 Continuous Batching：连续批处理
 
 In-Flight Batching：飞行中批处理 / 运行中批处理
+
+Inference Performance Incident：推理性能事故
+
+TTFT Regression：首 token 延迟回归 / 首响退化
+
+TPOT Regression：每输出 token 延迟回归 / 流式速度退化
+
+KV Pressure：KV Cache 压力
+
+Prompt Cost Drift：Prompt 成本漂移
+
+Cache Effectiveness：缓存有效性
+
+Serving Gate：推理服务上线门禁
 
 Iteration-Level Batching：迭代级批处理
 
@@ -1822,6 +2298,20 @@ Unified Multimodal Audit：统一多模态审计
 
 Multimodal Evaluation：多模态评估
 
+Multimodal Incident：多模态事故
+
+Multimodal Incident Gate：多模态事故门禁
+
+Input Fidelity Rate：输入保真率
+
+Multimodal Evidence Recall：多模态证据召回率
+
+OCR Critical Field Accuracy：OCR 关键字段准确率
+
+ASR Critical Field Accuracy：ASR 关键字段准确率
+
+Temporal Evidence Recall：时间证据召回率
+
 VQA Accuracy：视觉问答准确率
 
 Chart Relaxed Accuracy：图表问答宽松准确率
@@ -1838,6 +2328,18 @@ Content Provenance：内容来源与溯源
 
 Multimodal Safety Audit：多模态安全审计
 
+Multimodal Interview Readiness：多模态面试准备度
+
+Multimodal Interview Rubric：多模态面试评分规约
+
+Multimodal Formula Coverage：多模态公式覆盖度
+
+Multimodal Demo Coverage：多模态 demo 覆盖度
+
+Weak Multimodal Question：多模态薄弱题
+
+Multimodal Revision Plan：多模态复习修正计划
+
 Temporal Alignment：时间对齐 / 时序对齐
 
 Video Caption：视频描述文本
@@ -1845,6 +2347,26 @@ Video Caption：视频描述文本
 Grounded Answer：有证据支撑的回答
 
 Grounded Multimodal QA：有媒体证据支撑的多模态问答
+
+Multimodal Product：多模态产品
+
+Multimodal Product Gate：多模态产品上线门禁
+
+Input Quality Pass Rate：输入质量通过率
+
+Multimodal Evidence Support Rate：多模态证据支持率
+
+OCR Quality Score：OCR 质量分
+
+ASR Quality Score：ASR 质量分
+
+Generation Adoption Rate：生成结果采纳率
+
+Media Safety Pass Rate：媒体安全通过率
+
+Privacy Pass Rate：隐私通过率
+
+Copyright Pass Rate：版权通过率
 
 Visual Privacy：视觉隐私
 
@@ -1874,6 +2396,18 @@ Utility Function：效用函数
 
 Retrieval-Augmented Generation / RAG：检索增强生成
 
+RAG Product：RAG 产品
+
+RAG Product Gate：RAG 产品上线门禁
+
+RAG Incident：RAG 事故
+
+RAG Error Attribution：RAG 错误归因
+
+RAG Incident Gate：RAG 事故门禁
+
+Document Governance：文档治理
+
 Document Parsing：文档解析
 
 Chunking：文档切分
@@ -1890,6 +2424,36 @@ BM25：BM25 关键词检索算法
 
 Query Rewrite：查询改写
 
+Retrieval Miss：检索未命中 / 召回失败
+
+Context Drop：上下文丢证据
+
+Unsupported Claim Rate：无证据支持声明率
+
+Permission Leak Rate：权限泄露率
+
+RAG Freshness Gate：RAG 时效性门禁
+
+Agentic RAG：智能体式检索增强生成
+
+Active Retrieval：主动检索
+
+Retrieval Controller：检索控制器
+
+Multi-Round Retrieval：多轮检索
+
+Evidence State：证据状态
+
+Evidence Gap：证据缺口
+
+Query Drift：查询漂移
+
+New Evidence Gain：新证据增益
+
+Evidence Support Rate：证据支持率
+
+Agentic RAG Gate：Agentic RAG 上线门禁
+
 Reranker：重排序模型
 
 Reranking：重排序
@@ -1902,7 +2466,13 @@ Listwise Ranking：列表级排序
 
 Hit@k：前 k 命中率
 
+Context Recall：上下文召回率
+
 Context Precision：上下文精确性
+
+Stale Evidence Rate：过期证据率
+
+Retrieval Recall：检索召回率
 
 Metadata-Aware Reranking：元数据感知重排序
 
@@ -1923,6 +2493,1720 @@ Mean Reciprocal Rank / MRR：平均倒数排名
 Normalized Discounted Cumulative Gain / nDCG：归一化折损累计增益
 
 Agent：智能体
+
+Agent Harness：智能体运行控制框架
+
+Agent Runtime：智能体运行时
+
+Session Manager：会话管理器
+
+Task Manager：任务管理器
+
+Context Builder：上下文构造器
+
+Model Adapter：模型适配层
+
+State Store：状态存储
+
+Error Handler：错误处理器
+
+Runtime Gate：运行时门禁
+
+Agent Loop：智能体执行循环
+
+Harness Loop Audit：智能体运行闭环审计
+
+Action Parser：动作解析器
+
+Agent State：智能体状态
+
+Agent Action：智能体动作
+
+Observation：观察 / 工具返回
+
+Controller：控制器
+
+Permission Gate：权限门禁
+
+Replay Readiness：回放就绪度
+
+Harness Gate：智能体运行框架门禁
+
+Tool Registry：工具注册表
+
+Tool Registry Completeness：工具注册表完整率
+
+Tool Schema Strictness：工具 Schema 严格率
+
+Tool Permission Binding：工具权限绑定
+
+Side Effect Level：副作用等级
+
+Risk Protection Coverage：风险保护覆盖率
+
+Output Normalization Coverage：输出标准化覆盖率
+
+Tool Version Coverage：工具版本覆盖率
+
+Tool Trace Readiness：工具轨迹就绪度
+
+Untrusted Tool Output Boundary：不可信工具输出边界
+
+Tool Registry Gate：工具注册表门禁
+
+Tool Registry Identity Coverage：工具注册表身份覆盖率
+
+Tool Description Quality：工具描述质量
+
+Schema Contract Coverage：Schema 契约覆盖率
+
+Runtime Metadata Coverage：运行时元数据覆盖率
+
+Tool Permission Binding Coverage：工具权限绑定覆盖率
+
+Risk Annotation Coverage：风险标注覆盖率
+
+Version Trace Coverage：版本 trace 覆盖率
+
+Lifecycle Policy Pass Rate：生命周期策略通过率
+
+Owner SLO Coverage：Owner / SLO 覆盖率
+
+Tool Eval Binding Coverage：工具评估绑定覆盖率
+
+Provider Projection Readiness：Provider 投影就绪度
+
+Registry Audit Completeness：注册表审计完整率
+
+Tool Executor：工具执行器
+
+Execution Request Validity：执行请求有效率
+
+Schema Validation Pass Rate：Schema 校验通过率
+
+Permission Enforcement Pass Rate：权限执行通过率
+
+Execution Mode Accuracy：执行模式准确率
+
+Async Completion Tracking：异步完成跟踪率
+
+Unknown State Escalation Rate：未知状态升级率
+
+Retry Safety Rate：重试安全率
+
+Side Effect Confirmation Coverage：副作用确认覆盖率
+
+Structured Result Coverage：结构化结果覆盖率
+
+Executor Trace Completeness：Executor trace 完整率
+
+Tool Executor Gate：工具执行器门禁
+
+Tool Permission Model：工具权限模型
+
+Authorization Decision Accuracy：授权决策准确率
+
+Trusted Context Injection：可信上下文注入率
+
+Tenant Isolation Pass Rate：租户隔离通过率
+
+Tool Permission Enforcement：工具权限执行率
+
+Object Permission Accuracy：对象权限准确率
+
+Field Projection Safety：字段投影安全率
+
+Action Context Policy Accuracy：动作上下文策略准确率
+
+Prompt Injection Block Rate：Prompt Injection 阻断率
+
+Token Audience Validation：Token audience 校验率
+
+Revocation Cache Safety：撤销缓存安全率
+
+Error Disclosure Safety：错误披露安全率
+
+Permission Audit Completeness：权限审计完整率
+
+Tool Permission Gate：工具权限门禁
+
+Tool Security：工具安全
+
+Prompt Injection Containment：提示注入隔离率
+
+Untrusted Content Isolation：不可信内容隔离率
+
+Unauthorized Access Block Rate：越权访问阻断率
+
+Sensitive Data Protection：敏感数据保护率
+
+Tool External Transfer Gate：工具外部传输门禁
+
+Dangerous Action Confirmation：危险动作确认覆盖率
+
+SSRF Block Rate：SSRF 阻断率
+
+SQL Risk Block Rate：SQL 风险阻断率
+
+Path Traversal Block Rate：路径遍历阻断率
+
+Shell Sandbox Enforcement：Shell 沙箱执行覆盖率
+
+Data Flow Policy Pass Rate：数据流策略通过率
+
+Tool Security Audit Completeness：工具安全审计完整率
+
+Security Alert Completeness：安全告警完整率
+
+Safety Eval Regression Pass Rate：安全评估回归通过率
+
+Tool Security Gate：工具安全门禁
+
+Tool Trace Replay Audit：工具 trace / replay 审计
+
+ID Tree Integrity：ID 链路与 span 树完整率
+
+Argument Lineage Coverage：参数血缘覆盖率
+
+Permission Trace Completeness：权限 trace 完整率
+
+Tool Result Trace Completeness：工具结果 trace 完整率
+
+Audit Event Completeness：审计事件完整率
+
+Replay Side Effect Safety：Replay 副作用安全率
+
+Alert Owner Coverage：告警 owner 覆盖率
+
+Eval Linkage Coverage：评估链路覆盖率
+
+Tool Version Release Audit：工具版本发布审计
+
+Spec Lint Pass Rate：Spec Lint 通过率
+
+Schema Backward Compatibility：Schema 向后兼容率
+
+Description Behavior Guard：描述行为风险门禁
+
+Output Compatibility：输出兼容率
+
+Permission Policy Compatibility：权限策略兼容率
+
+Version Matrix Capture：版本矩阵捕获率
+
+Offline Eval Pass Rate：离线评估通过率
+
+Canary Routing Stability：灰度路由稳定率
+
+Canary Quality Guard：灰度质量门禁
+
+Canary Safety Guard：灰度安全门禁
+
+Cost Latency Guard：成本延迟门禁
+
+Tool Release Rollback Readiness：工具发布回滚就绪率
+
+Lifecycle Coverage：生命周期覆盖率
+
+Tool Release Gate：工具版本发布门禁
+
+Enterprise Tool Platform Audit：企业工具平台审计
+
+Platform Module Coverage：平台模块覆盖率
+
+Platform Interface Contract Coverage：平台接口契约覆盖率
+
+Registry Readiness：Registry 就绪率
+
+Router Governance Coverage：Router 治理覆盖率
+
+Executor Safety Coverage：Executor 安全覆盖率
+
+Platform Permission Integration Coverage：平台权限集成覆盖率
+
+Platform Safety Guard Coverage：平台安全门禁覆盖率
+
+Platform Trace Audit Coverage：平台 trace / audit 覆盖率
+
+Platform Eval Service Coverage：平台评估服务覆盖率
+
+Platform Release Governance Coverage：平台发布治理覆盖率
+
+Platform Tenant Isolation Coverage：平台租户隔离覆盖率
+
+Platform Provider Adapter Coverage：平台 Provider Adapter 覆盖率
+
+High Availability Readiness：高可用就绪率
+
+Admin Ops Governance Coverage：管理后台与运维治理覆盖率
+
+Enterprise Tool Platform Gate：企业工具平台上线门禁
+
+MCP Background Audit：MCP 背景审计
+
+Direct Integration Count：直接集成数量
+
+MCP Integration Count：MCP 集成数量
+
+Integration Reduction：集成减少比例
+
+Capability Model Coverage：能力模型覆盖率
+
+Context Object Coverage：上下文对象覆盖率
+
+Discovery Standardization：发现机制标准化率
+
+MCP Schema Contract Coverage：MCP Schema 契约覆盖率
+
+Host Server Boundary Clarity：Host / Server 边界清晰度
+
+Local Context Control：本地上下文控制率
+
+Cross Client Reuse：跨客户端复用率
+
+Governance Boundary Clarity：治理边界清晰度
+
+MCP Trace Eval Readiness：MCP Trace / Eval 就绪率
+
+MCP A2A Distinction：MCP / A2A 区分度
+
+MCP Background Gate：MCP 背景理解门禁
+
+MCP Concept Audit：MCP 基本概念审计
+
+Host Policy Ownership：Host 策略责任覆盖率
+
+MCP Client Server Boundary：MCP Client / Server 边界清晰度
+
+Server Capability Declaration：Server 能力声明覆盖率
+
+MCP Tool Schema and Result：MCP Tool Schema 与结果契约
+
+MCP Resource URI Metadata：MCP Resource URI 与元数据契约
+
+MCP Prompt Argument Review：MCP Prompt 参数与审查覆盖率
+
+MCP Lifecycle Negotiation：MCP 生命周期协商覆盖率
+
+MCP Transport Policy：MCP 传输策略覆盖率
+
+MCP Roots Boundary：MCP Roots 边界覆盖率
+
+MCP Sampling Control：MCP Sampling 控制率
+
+Host Capability Filtering：Host 能力过滤覆盖率
+
+MCP Context Budget：MCP 上下文预算
+
+MCP Concept Gate：MCP 基本概念门禁
+
+MCP Server Implementation Audit：MCP Server 最小实现审计
+
+MCP Server Metadata Readiness：MCP Server 元数据就绪率
+
+MCP Server Capability Declaration：MCP Server 能力声明覆盖率
+
+MCP Tool Registry Readiness：MCP Tool 注册表就绪率
+
+MCP Strict Schema Coverage：MCP 严格 Schema 覆盖率
+
+MCP Handler Execution Coverage：MCP Handler 执行覆盖率
+
+MCP Argument Validation Coverage：MCP 参数校验覆盖率
+
+MCP Structured Result Coverage：MCP 结构化结果覆盖率
+
+MCP Structured Error Coverage：MCP 结构化错误覆盖率
+
+MCP Resource Scope Coverage：MCP Resource 范围覆盖率
+
+MCP Prompt Template Coverage：MCP Prompt 模板审查覆盖率
+
+MCP Server Transport Policy Coverage：MCP Server 传输策略覆盖率
+
+MCP Host Connection Readiness：MCP Host 接入就绪率
+
+MCP Server Safety Baseline：MCP Server 安全底线覆盖率
+
+MCP Server Trace Readiness：MCP Server Trace 就绪率
+
+MCP Server Gate：MCP Server 实现门禁
+
+MCP Tool Function Calling Comparison Audit：MCP Tool 与 Function Calling 对比审计
+
+Protocol Layer Clarity：协议层次清晰度
+
+Tool Discovery Boundary：工具发现边界
+
+MCP Capability Scope Coverage：MCP 能力范围覆盖率
+
+MCP Execution Boundary Clarity：MCP 执行边界清晰度
+
+MCP Projection Mapping Coverage：MCP Tool 投影映射覆盖率
+
+Adapter Separation Coverage：Adapter 分离覆盖率
+
+MCP Lifecycle Version Awareness：MCP 生命周期与版本意识覆盖率
+
+MCP Governance Registry Import：MCP 治理注册表导入覆盖率
+
+MCP Security Boundary Enforcement：MCP 安全边界执行覆盖率
+
+MCP Use Case Selection Fit：MCP 使用场景选择适配度
+
+MCP Error Surface Separation：MCP 错误面分离覆盖率
+
+MCP Latency Availability Tradeoff：MCP 延迟与可用性权衡覆盖率
+
+MCP Function Calling Gate：MCP 与 Function Calling 对比门禁
+
+MCP Resource Exposure Audit：MCP Resource 暴露审计
+
+Resource URI Validity：Resource URI 有效性
+
+Resource Metadata Completeness：Resource 元数据完整性
+
+Resource List Filtering Boundary：Resource 列表过滤边界
+
+Resource Read Scope Enforcement：Resource 读取范围执行覆盖率
+
+MCP Roots Containment：MCP Roots 范围约束覆盖率
+
+MCP Resource Permission Enforcement：MCP Resource 权限执行覆盖率
+
+MCP Resource Field Projection Safety：MCP Resource 字段投影安全性
+
+Resource Context Budget Control：Resource 上下文预算控制
+
+Resource Citation Traceability：Resource 引用可追踪性
+
+Untrusted Resource Labeling：不可信 Resource 标注
+
+Resource Freshness Version Awareness：Resource 新鲜度与版本意识覆盖率
+
+Resource Template Boundary：Resource 模板参数边界
+
+Resource Subscription Awareness：Resource 订阅与变更意识覆盖率
+
+Resource Trace Eval Readiness：Resource Trace 与评估就绪率
+
+MCP Resource Gate：MCP Resource 上线门禁
+
+MCP Prompt Exposure Audit：MCP Prompt 暴露审计
+
+Prompt Capability Declaration：Prompt 能力声明覆盖率
+
+Prompt Discovery Coverage：Prompt 发现覆盖率
+
+Prompt Argument Schema Coverage：Prompt 参数模式覆盖率
+
+Prompt Required Argument Validation：Prompt 必填参数校验覆盖率
+
+Prompt Rendering Safety：Prompt 渲染安全性
+
+Prompt Role Boundary Enforcement：Prompt 角色边界执行覆盖率
+
+Prompt Dependency Alignment：Prompt 依赖对齐覆盖率
+
+Prompt Version Governance：Prompt 版本治理覆盖率
+
+Prompt Eval Binding：Prompt 评估绑定覆盖率
+
+Prompt Permission Enforcement：Prompt 权限执行覆盖率
+
+Prompt Injection Containment：Prompt 注入隔离覆盖率
+
+Prompt User Control：Prompt 用户可见控制覆盖率
+
+Prompt List Change Awareness：Prompt 列表变更意识覆盖率
+
+Prompt Trace Readiness：Prompt Trace 就绪率
+
+MCP Prompt Gate：MCP Prompt 上线门禁
+
+MCP Security Sandbox Audit：MCP 安全与沙箱审计
+
+Server Connection Governance：Server 连接治理
+
+Authorization Token Binding：授权 Token 绑定
+
+Scope Minimization：权限范围最小化
+
+Roots Sandbox Containment：Roots 沙箱范围约束
+
+File Secret Blocking：敏感文件阻断
+
+Network SSRF Protection：网络 SSRF 防护
+
+MCP Shell Sandbox Enforcement：MCP Shell 沙箱执行覆盖率
+
+Prompt Injection Data Boundary：Prompt Injection 数据边界
+
+High Risk Confirmation：高风险动作确认覆盖率
+
+Sensitive Data Flow Control：敏感数据流控制
+
+Local Credential Isolation：本地凭证隔离
+
+MCP Tenant Isolation：MCP 租户隔离
+
+Server Supply Chain Governance：Server 供应链治理
+
+MCP Security Trace Readiness：MCP 安全 Trace 就绪率
+
+MCP Security Eval Coverage：MCP 安全评估覆盖率
+
+MCP Security Gate：MCP 安全上线门禁
+
+MCP Integration Surface Audit：MCP 集成面审计
+
+MCP Capability Registration Coverage：MCP 能力注册覆盖率
+
+MCP Namespace Isolation Coverage：MCP 命名空间隔离覆盖率
+
+MCP IDE Context Routing：MCP IDE 上下文路由
+
+MCP Knowledge Citation Traceability：MCP 知识库引用可追溯性
+
+MCP Database Query Governance：MCP 数据库查询治理
+
+MCP Browser Action Governance：MCP 浏览器动作治理
+
+MCP Terminal Sandbox Governance：MCP 终端沙箱治理
+
+MCP Integration Context Budget Control：MCP 集成上下文预算控制
+
+MCP Cross Server Data Flow Control：MCP 跨 Server 数据流控制
+
+MCP High Risk Approval Coverage：MCP 高风险动作审批覆盖率
+
+MCP Output Projection Coverage：MCP 输出投影覆盖率
+
+MCP Integration Trace Readiness：MCP 集成 Trace 就绪率
+
+MCP Integration Eval Coverage：MCP 集成评估覆盖率
+
+MCP Integration Gate：MCP 集成上线门禁
+
+A2A Background Audit：A2A 背景审计
+
+Agent Card Completeness：Agent Card 完整率
+
+Agent Discovery Readiness：Agent 发现就绪率
+
+Task Delegation Contract：任务委派契约
+
+A2A Task Lifecycle Coverage：A2A 任务生命周期覆盖率
+
+A2A Message Structure Coverage：A2A 消息结构覆盖率
+
+A2A Artifact Reference Coverage：A2A 产物引用覆盖率
+
+A2A Context Boundary Control：A2A 上下文边界控制
+
+A2A Permission Boundary：A2A 权限边界
+
+A2A MCP Distinction：A2A / MCP 区分度
+
+A2A Failure Handling Coverage：A2A 失败处理覆盖率
+
+A2A Trace Readiness：A2A Trace 就绪率
+
+A2A Eval Coverage：A2A 评估覆盖率
+
+A2A Background Gate：A2A 背景门禁
+
+Agent Card Discovery Audit：Agent Card 服务发现审计
+
+Agent Card Field Completeness：Agent Card 字段完整率
+
+Agent Skill Declaration Quality：Agent 技能声明质量
+
+Supported Interface Readiness：受支持接口就绪率
+
+Agent Card Security Coverage：Agent Card 安全声明覆盖率
+
+Agent Card Version Cache Readiness：Agent Card 版本缓存就绪率
+
+Agent Discovery Match Quality：Agent 发现匹配质量
+
+Agent Routing Decision Quality：Agent 路由决策质量
+
+Extended Agent Card Control：扩展 Agent Card 控制
+
+Agent Card Trace Readiness：Agent Card Trace 就绪率
+
+Agent Card Eval Coverage：Agent Card 评估覆盖率
+
+Agent Card Gate：Agent Card 上线门禁
+
+A2A Task Delegation Audit：A2A 任务委派审计
+
+A2A Task Contract Coverage：A2A 任务契约覆盖率
+
+A2A State Transition Validity：A2A 状态迁移合法率
+
+A2A Input Required Handling：A2A 追问处理覆盖率
+
+A2A Artifact Metadata Coverage：A2A 产物元数据覆盖率
+
+A2A Error Semantics Coverage：A2A 错误语义覆盖率
+
+A2A Retry Idempotency Coverage：A2A 重试幂等覆盖率
+
+A2A Cancellation Coverage：A2A 取消处理覆盖率
+
+A2A Delegation Permission Boundary：A2A 委派权限边界
+
+A2A Parallel Aggregation Readiness：A2A 并行汇总就绪率
+
+A2A Task Trace Readiness：A2A 任务 Trace 就绪率
+
+A2A Task Eval Coverage：A2A 任务评估覆盖率
+
+A2A Task Gate：A2A 任务委派上线门禁
+
+A2A Message Boundary Audit：A2A 消息边界审计
+
+A2A Message Contract Coverage：A2A 消息契约覆盖率
+
+A2A Part Typing Coverage：A2A 内容块类型覆盖率
+
+A2A Source Trust Labeling：A2A 来源可信标注
+
+A2A Instruction Data Separation：A2A 指令与数据分离
+
+A2A Minimal Context Coverage：A2A 最小上下文覆盖率
+
+A2A Reference Over Copy Coverage：A2A 引用优先覆盖率
+
+A2A Context Policy Enforcement：A2A 上下文策略执行率
+
+A2A Sensitive Redaction Coverage：A2A 敏感信息脱敏覆盖率
+
+A2A Claim Grounding Coverage：A2A 断言证据支撑覆盖率
+
+A2A Summary Constraint Retention：A2A 摘要约束保留率
+
+A2A Message Trace Readiness：A2A 消息 Trace 就绪率
+
+A2A Message Eval Coverage：A2A 消息评估覆盖率
+
+A2A Message Gate：A2A 消息边界上线门禁
+
+A2A MCP Boundary Audit：A2A/MCP 分工审计
+
+A2A MCP Protocol Classification：A2A/MCP 协议分类准确率
+
+A2A Tool Agent Boundary：A2A 工具与 Agent 边界清晰率
+
+A2A Autonomy Fit：A2A 自主性匹配率
+
+A2A Lifecycle Placement：A2A 生命周期放置率
+
+A2A MCP Discovery Split：A2A/MCP 能力发现分离率
+
+A2A MCP Context Ownership：A2A/MCP 上下文所有权清晰率
+
+A2A MCP Permission Separation：A2A/MCP 权限分离率
+
+A2A Result Artifact Boundary：A2A 结果与产物边界率
+
+A2A MCP Trace Linkage：A2A/MCP Trace 串联率
+
+A2A MCP Version Eval Coverage：A2A/MCP 版本与评估覆盖率
+
+A2A MCP Boundary Gate：A2A/MCP 分工上线门禁
+
+Cross-Agent Security Audit：跨 Agent 安全审计
+
+Cross-Agent Identity Chain Coverage：跨 Agent 身份链覆盖率
+
+OBO Scope Binding：代表用户执行的 Scope 绑定率
+
+Delegation Allowlist Coverage：委派 Allowlist 覆盖率
+
+Permission Attenuation Coverage：权限衰减覆盖率
+
+Cross-Agent Context Policy Enforcement：跨 Agent 上下文策略执行率
+
+Cross-Agent Redelegation Control：跨 Agent 继续委派控制率
+
+Cross-Agent High Risk Confirmation：跨 Agent 高风险确认覆盖率
+
+Cross-Agent Tool Permission Binding：跨 Agent 工具权限绑定率
+
+Cross-Agent Result Release Control：跨 Agent 结果释放控制率
+
+Cross-Agent Audit Trace Completeness：跨 Agent 审计 Trace 完整率
+
+Cross-Agent Trust Evidence Verification：跨 Agent 信任与证据验证率
+
+Cross-Agent Tenant Isolation：跨 Agent 租户隔离率
+
+Cross-Agent Security Gate：跨 Agent 安全上线门禁
+
+Multi-Agent Failure Audit：多 Agent 失败模式审计
+
+Delegation Loop Control：委派循环控制率
+
+Role Conflict Arbitration：角色冲突仲裁覆盖率
+
+Hallucination Propagation Containment：幻觉传播抑制率
+
+Context Drift Control：上下文漂移控制率
+
+Duplicate Work Budget Control：重复工作与成本预算控制率
+
+Multi-Agent State Consistency：多 Agent 状态一致率
+
+Artifact Conflict Control：产物冲突控制率
+
+Multi-Agent Accountability Trace：多 Agent 责任链 Trace 完整率
+
+Policy Chain Enforcement：策略链执行率
+
+Collaboration Fit：协作适配率
+
+Termination Handoff Readiness：终止与人工接管就绪率
+
+Multi-Agent Failure Eval Coverage：多 Agent 失败评估覆盖率
+
+Multi-Agent Failure Gate：多 Agent 失败治理上线门禁
+
+A2A System Design Audit：A2A 系统设计审计
+
+A2A Requirement Clarification：A2A 需求澄清覆盖率
+
+A2A Architecture Module Coverage：A2A 架构模块覆盖率
+
+A2A Protocol Contract Coverage：A2A 协议契约覆盖率
+
+A2A Discovery Routing Governance：A2A 发现与路由治理覆盖率
+
+A2A Runtime State Readiness：A2A 运行时状态就绪率
+
+A2A Context Boundary Control：A2A 上下文边界控制率
+
+A2A Permission Model Coverage：A2A 权限模型覆盖率
+
+A2A MCP Boundary Clarity：A2A/MCP 边界清晰率
+
+A2A Artifact Governance Coverage：A2A 产物治理覆盖率
+
+A2A Trace Audit Completeness：A2A Trace / 审计完整率
+
+A2A Failure Handling Coverage：A2A 失败处理覆盖率
+
+A2A Eval Observability Coverage：A2A 评估与可观测覆盖率
+
+A2A Scalability Idempotency Readiness：A2A 扩展性与幂等就绪率
+
+A2A System Design Gate：A2A 系统设计上线门禁
+
+Skill Definition Audit：Skill 定义审计
+
+Skill Manifest Metadata：Skill Manifest 元信息覆盖率
+
+Skill Task Goal Clarity：Skill 任务目标清晰率
+
+Skill Bundle Completeness：Skill 能力包完整率
+
+Tool Skill Boundary：Tool / Skill 边界清晰率
+
+Skill Instruction Strategy：Skill 使用说明策略覆盖率
+
+Skill Resource Prompt Grounding：Skill 资源与提示模板支撑率
+
+Skill Workflow Readiness：Skill 工作流就绪率
+
+Skill Permission Safety：Skill 权限安全覆盖率
+
+Skill Configuration Reuse：Skill 配置复用率
+
+Skill Eval Coverage：Skill 评估覆盖率
+
+Skill Lifecycle Governance：Skill 生命周期治理覆盖率
+
+Skill Product Install Governance：Skill 产品安装治理覆盖率
+
+Skill Progressive Disclosure：Skill 渐进式加载覆盖率
+
+Skill Definition Gate：Skill 定义上线门禁
+
+Ecosystem Boundary Audit：工具生态边界审计
+
+Required Field Coverage：必填字段覆盖率
+
+Abstraction Classification：抽象类型分类准确率
+
+Granularity Boundary：粒度边界清晰率
+
+Action Trace：Action 执行 Trace 完整率
+
+Tool Contract：Tool 契约完整率
+
+Workflow Control：Workflow 控制流覆盖率
+
+Skill Bundle：Skill 能力包完整率
+
+Plugin Packaging：Plugin 安装打包治理覆盖率
+
+Permission Layering：权限分层清晰率
+
+Eval Layering：评估分层清晰率
+
+Audit Trace Layering：审计 Trace 分层覆盖率
+
+Naming Alias Documentation：命名别名说明覆盖率
+
+Governance Lifecycle：治理生命周期覆盖率
+
+High Risk Approval：高风险审批覆盖率
+
+Eval Ready：评估就绪率
+
+Ecosystem Boundary Gate：工具生态边界上线门禁
+
+Skill Manifest Audit：Skill Manifest 审计
+
+Identity Metadata：身份元信息覆盖率
+
+Description Quality：能力描述质量
+
+Capability Granularity：能力粒度清晰率
+
+Input Contract：输入契约完整率
+
+Output Contract：输出契约完整率
+
+Tool Dependency Purpose：工具依赖用途说明覆盖率
+
+Resource Prompt Binding：资源与 Prompt 绑定覆盖率
+
+Manifest Workflow Readiness：Manifest 工作流就绪率
+
+Permission Least Privilege：权限最小化覆盖率
+
+Configuration Schema：配置 Schema 完整率
+
+Safety Policy：安全策略覆盖率
+
+Eval Gate：评估门禁覆盖率
+
+Examples Trigger Coverage：触发示例覆盖率
+
+Version Lifecycle：版本生命周期覆盖率
+
+Audit Readiness：审计就绪率
+
+Skill Manifest Gate：Skill Manifest 上线门禁
+
+Skill Lifecycle Audit：Skill 生命周期审计
+
+Review Before Publish：发布前审核覆盖率
+
+Install Approval：安装审批覆盖率
+
+Enable Scope Control：启用范围控制率
+
+Permission Reapproval：权限变更重审率
+
+Configuration Versioning：配置版本化覆盖率
+
+Running Task Policy：运行中任务处理策略覆盖率
+
+Lifecycle Compatibility Check：生命周期兼容性检查覆盖率
+
+Rollout Guard：灰度发布门禁
+
+Skill Rollback Readiness：Skill 回滚就绪率
+
+Dependency Versioning：依赖版本声明覆盖率
+
+Lifecycle Audit Log Completeness：生命周期审计日志完整率
+
+Emergency Suspend Readiness：紧急下架就绪率
+
+Uninstall Retention：卸载保留策略覆盖率
+
+Lifecycle Eval Monitoring：生命周期评估与监控覆盖率
+
+Update Policy Accuracy：更新策略准确率
+
+Skill Lifecycle Gate：Skill 生命周期上线门禁
+
+Skill Marketplace Audit：Skill Marketplace 审计
+
+Catalog Metadata：目录元数据完整率
+
+Search Discovery：搜索与发现覆盖率
+
+Detail Page Completeness：详情页完整率
+
+Review Workflow：上架审核流程覆盖率
+
+Permission Transparency：权限透明度
+
+Install Approval Flow：安装审批流程覆盖率
+
+Rating Quality Balance：评分与质量信号平衡度
+
+Operations Metrics：运营指标覆盖率
+
+Duplicate Capability Governance：重复能力治理覆盖率
+
+Admin Permission View：管理员权限视图覆盖率
+
+Developer Console Readiness：开发者控制台就绪率
+
+Security Center Readiness：安全中心就绪率
+
+Recommendation Policy Safety：推荐策略安全性
+
+Lifecycle Visibility：生命周期可见性
+
+Owner Maintenance：Owner 维护状态覆盖率
+
+Portal Audit Trace：门户审计链完整率
+
+Skill Marketplace Gate：Skill Marketplace 上线门禁
+
+Tool Skill Quality Safety Audit：工具 / Skill 质量安全审计
+
+Tool Schema Clarity：工具 schema 清晰度
+
+Argument Validation：参数校验覆盖率
+
+Execution Reliability：执行可靠性
+
+Output Stability：输出稳定性
+
+Side Effect Control：副作用控制覆盖率
+
+Skill Task Quality：Skill 任务质量
+
+Factual Grounding：事实证据支撑率
+
+Completeness Format：完整性与格式合规率
+
+Offline Eval Coverage：离线评估覆盖率
+
+Online Monitoring：在线监控覆盖率
+
+Permission Least Privilege：最小权限覆盖率
+
+Data Security Review：数据安全审核覆盖率
+
+Prompt Injection Resilience：Prompt Injection 抵抗能力
+
+High Risk Action Control：高风险动作控制覆盖率
+
+Supply Chain Governance：供应链治理覆盖率
+
+Human Review Readiness：人工审核就绪率
+
+Regression Release Gate：回归发布门禁
+
+Audit Trace Readiness：审计追踪就绪率
+
+Quality Safety Gate：质量安全上线门禁
+
+Tool Schema：工具参数模式 / 工具调用契约
+
+JSON Schema：JSON 结构模式 / JSON 数据约束规范
+
+Required Field：必填字段
+
+Additional Properties：额外字段 / 未声明字段
+
+Enum Constraint：枚举约束
+
+Pattern Constraint：字符串模式约束 / 正则约束
+
+Range Constraint：数值范围约束
+
+Business Validation：业务校验
+
+Schema Repair：Schema 修复 / 参数规范化修复
+
+Schema Gate：Schema 上线门禁 / 参数约束门禁
+
+Tool Call：工具调用请求
+
+Tool Choice：工具选择策略 / 工具调用选择
+
+Tool Choice Policy：工具选择策略层
+
+Candidate Tool Set：候选工具集合
+
+Tool Router：工具路由器 / 工具候选决策层
+
+Scenario Filter Pass Rate：场景过滤通过率
+
+Permission Filter Pass Rate：权限过滤通过率
+
+Risk Filter Pass Rate：风险过滤通过率
+
+Candidate Recall：候选召回率
+
+Candidate Precision：候选精确率
+
+Candidate Size Pass Rate：候选数量预算通过率
+
+Clarification Accuracy：澄清决策准确率
+
+Forced Tool Accuracy：强制工具准确率
+
+Router Parallel Safety：Router 并行安全率
+
+Provider Capability Compatibility：Provider 能力兼容率
+
+Router Trace Completeness：Router trace 完整率
+
+Tool Router Gate：工具路由门禁
+
+Auto Tool Choice：自动工具选择
+
+None Tool Choice：禁用工具选择 / 不调用工具模式
+
+Required Tool Choice：强制至少调用一个工具模式
+
+Forced Tool Choice：强制指定工具模式
+
+Allowed Tools：允许工具集合
+
+Tool Choice Gate：工具选择门禁
+
+Function Calling：函数调用 / 结构化工具调用
+
+Structured Function Calling：结构化函数调用 / 结构化工具调用
+
+JSON Mode：JSON 模式
+
+Structured Outputs：结构化输出
+
+Function Calling Protocol：函数调用协议 / 工具调用输入输出协议
+
+Tool Call ID：工具调用标识
+
+Tool Result：工具结果
+
+Finish Reason：生成停止原因
+
+Tool Loop：工具调用循环
+
+Parallel Tool Calls：并行工具调用
+
+Streaming Tool Call Delta：流式工具调用增量
+
+Tool Call Trace：工具调用轨迹
+
+Tool Result Injection：工具结果注入
+
+Tool Calling Gate：工具调用上线门禁
+
+Agent Trace：智能体执行轨迹
+
+Trace Schema Completeness：轨迹模式完整率
+
+Span Schema Completeness：Span 模式完整率
+
+Span Tree Validity：Span 树合法率
+
+Timeline Validity：时间线合法率
+
+Artifact Reference Coverage：产物引用覆盖率
+
+Version Capture Coverage：版本捕获覆盖率
+
+Replay Readiness Rate：回放就绪率
+
+Privacy Masking Coverage：隐私脱敏覆盖率
+
+Error Attribution Coverage：错误归因覆盖率
+
+Final Status Consistency：最终状态一致率
+
+Metric Export Coverage：指标导出覆盖率
+
+Eval Export Coverage：评估导出覆盖率
+
+Trace Replay Gate：轨迹回放门禁
+
+Agent Budget：智能体预算
+
+Agent Incident：智能体事故
+
+Agent Incident Gate：智能体事故门禁
+
+Plan Feasibility Rate：计划可执行率
+
+False Completion Rate：误报完成率
+
+Tool Result Injection Block Rate：工具结果注入阻断率
+
+Agent Gate：智能体上线门禁
+
+Agent Product：Agent 产品 / 智能体产品
+
+Agent Product Gate：Agent 产品上线门禁
+
+Agent Automation Level：Agent 自动化层级
+
+Agent Product Trace：Agent 产品执行轨迹
+
+Workflow-Agent Hybrid：工作流与 Agent 混合架构
+
+Tool Execution Success Rate：工具执行成功率
+
+Human Confirmation Coverage：人工确认覆盖率
+
+Unauthorized Action Rate：未授权动作率
+
+Agent Recovery Rate：Agent 失败恢复率
+
+ReAct：Reasoning and Acting / 推理与行动交替框架
+
+Plan-Act-Observe / PAO：计划-行动-观察循环
+
+ReAct Trace：ReAct 执行轨迹
+
+Plan Update：计划更新
+
+Plan Adherence Rate：计划遵循率
+
+Plan Update Coverage：计划更新覆盖率
+
+Thought-Action Alignment：推理意图与动作一致性
+
+Action Accuracy：动作准确率
+
+Parse Failure Rate：解析失败率
+
+Repeat Action Rate：重复动作率
+
+Premature Final Rate：过早结束率
+
+Blocked Recovery Rate：被拦截动作恢复率
+
+ReAct Gate：ReAct / PAO 循环上线门禁
+
+Planning：规划
+
+Task Decomposition：任务分解
+
+Subgoal：子目标
+
+Acceptance Criteria：验收标准
+
+Dependency Graph：依赖图
+
+Topological Order：拓扑顺序
+
+Dynamic Replanning：动态重规划
+
+Critical Path：关键路径
+
+Planning Gate：规划上线门禁
+
+Goal Coverage：目标覆盖率
+
+Executable Step Rate：可执行步骤比例
+
+Acceptance Coverage：验收标准覆盖率
+
+Dependency Violation Rate：依赖违规率
+
+Replan Coverage：重规划覆盖率
+
+Risk Confirmation Coverage：风险确认覆盖率
+
+Overlong Plan Rate：过长计划比例
+
+Repeat Subgoal Rate：重复子目标比例
+
+Task Success Rate：任务成功率
+
+Memory：记忆系统
+
+Short-Term Memory：短期记忆 / 工作记忆
+
+Long-Term Memory：长期记忆
+
+Episodic Memory：情景记忆
+
+Semantic Memory：语义记忆
+
+Procedural Memory：程序性记忆
+
+Preference Memory：偏好记忆
+
+Memory Store：记忆存储
+
+Memory Retrieval：记忆检索
+
+Memory Write Gate：记忆写入门禁
+
+Memory Retrieval Score：记忆检索得分
+
+Memory Permission Gate：记忆权限门禁
+
+Memory Decay：记忆时间衰减
+
+Memory Conflict：记忆冲突
+
+Memory Pollution：记忆污染
+
+Stale Memory Use Rate：过期记忆误用率
+
+Unauthorized Memory Retrieval Rate：越权记忆检索率
+
+Unsafe Write Block Rate：不安全写入拦截率
+
+Deleted Memory Returned：已删除记忆被返回
+
+Memory Gate：记忆系统上线门禁
+
+Code Agent：代码智能体
+
+Coding Agent Workflow：代码智能体工作流
+
+Task Type Classification：任务类型分类
+
+Repository Exploration Coverage：仓库探索覆盖率
+
+Plan Coverage：计划覆盖率
+
+Workflow Validation Coverage：工作流验证覆盖率
+
+Feedback Use Rate：反馈使用率
+
+Coding Agent Workflow Gate：代码智能体工作流门禁
+
+File System Tool：文件系统工具
+
+Workspace Root：工作区根目录
+
+Path Containment：路径 containment / 路径边界约束
+
+Read File Tool：读文件工具
+
+Search Tool：搜索工具
+
+Apply Patch Tool：应用补丁工具
+
+Patch Context Match：补丁上下文匹配
+
+Secret File Block Rate：敏感文件读取阻断率
+
+Read Truncation Clarity：读取截断清晰率
+
+Concurrent Edit Protection：并发编辑保护
+
+Whole-File Rewrite Rejection：整文件重写拒绝
+
+Unrelated Diff Rate：无关 diff 率
+
+Diff Faithfulness：diff 总结忠实度
+
+Rollback Readiness：回滚就绪度
+
+File Edit Gate：文件编辑门禁
+
+Terminal Execution：终端执行
+
+Bash Tool：Bash / Shell 工具
+
+Test Runner Safety：测试运行器安全
+
+Command Risk Level：命令风险等级
+
+Command Allowlist：命令允许列表
+
+Command Denylist：命令拒绝列表
+
+Command Auto Execution Precision：命令自动执行精确率
+
+Dangerous Command Block Rate：危险命令阻断率
+
+Command Confirmation Coverage：命令确认覆盖率
+
+Network Access Control：网络访问控制
+
+Timeout Cancellation Coverage：超时取消覆盖率
+
+Command Output Truncation：命令输出截断
+
+Secret Masking Coverage：密钥脱敏覆盖率
+
+Command Trace：命令执行轨迹
+
+Command Safety Gate：命令安全门禁
+
+Context Management：上下文管理
+
+Context Candidate：上下文候选项
+
+Context Budget Utilization：上下文预算利用率
+
+Key Context Recall：关键上下文召回率
+
+Constraint Retention：约束保留率
+
+Task State Compression：任务状态压缩
+
+Summary Faithfulness：摘要忠实度
+
+Stale Summary Rate：过期摘要率
+
+Tool Output Compression Fidelity：工具输出压缩保真率
+
+Current Diff Coverage：当前 diff 覆盖率
+
+Trust Boundary Coverage：信任边界覆盖率
+
+Memory Write Safety：记忆写入安全率
+
+Context Builder Gate：上下文构造门禁
+
+Repository Understanding：仓库理解
+
+Patch Generation：补丁生成
+
+Patch Localization：补丁定位
+
+Patch Localization Precision：补丁定位精确率
+
+Patch Localization Recall：补丁定位召回率
+
+Minimal Patch：最小必要补丁
+
+Unrelated Change Rate：无关改动率
+
+User Change Protection：用户改动保护
+
+User Change Violation Rate：用户改动触碰率
+
+Dependency Change Rate：依赖变更率
+
+Test Execution Feedback：测试执行反馈
+
+Validation Coverage：验证覆盖率
+
+Command Success Rate：命令执行成功率
+
+Repeat Command Rate：重复命令率
+
+Code Sandbox：代码沙箱
+
+Code Agent Gate：Code Agent 上线门禁
+
+Claude Code Architecture：Claude Code 架构分析
+
+Terminal Coding Agent：终端型代码智能体
+
+CLI Control Command：CLI 控制命令
+
+Architecture Evidence Coverage：架构证据覆盖率
+
+Required Module Coverage：必需模块覆盖率
+
+Access Governance Coverage：访问治理覆盖率
+
+Core Loop Governance Coverage：核心循环治理覆盖率
+
+Permission Control Coverage：权限控制覆盖率
+
+State Recovery Coverage：状态恢复覆盖率
+
+Extension Governance Coverage：扩展治理覆盖率
+
+Observability Coverage：可观测性覆盖率
+
+Architecture Eval Readiness：架构评估准备度
+
+High-Risk Surface Governance：高风险能力面治理率
+
+Claude Code Architecture Gate：Claude Code 架构门禁
+
+OpenCode Architecture：OpenCode 架构分析
+
+Open Runtime Control Plane：开放运行时控制面
+
+Open Runtime Module Coverage：开放运行时模块覆盖率
+
+Config Governance Coverage：配置治理覆盖率
+
+Agent Permission Isolation：Agent 权限隔离
+
+Tool Permission Binding Coverage：工具权限绑定覆盖率
+
+MCP Tool Namespace Coverage：MCP 工具命名空间覆盖率
+
+Custom Tool Schema Coverage：自定义工具 schema 覆盖率
+
+Server API Governance：Server API 治理
+
+Snapshot Recovery Coverage：Snapshot 恢复覆盖率
+
+Provider Adapter Coverage：模型提供商适配覆盖率
+
+OpenCode Architecture Gate：OpenCode 架构门禁
+
+Coding Agent Comparison：Coding Agent 横向比较
+
+Product Surface Coverage：产品入口覆盖率
+
+Context Source Coverage：上下文来源覆盖率
+
+Tool Execution Coverage：工具执行覆盖率
+
+Permission Governance Coverage：权限治理覆盖率
+
+Edit Recovery Coverage：编辑恢复覆盖率
+
+Agent Eval Readiness：Agent 评估准备度
+
+Enterprise Governance Coverage：企业治理覆盖率
+
+Cross-Agent Risk Governance：跨 Agent 高风险面治理率
+
+Coding Agent Comparison Gate：Coding Agent 横向比较门禁
+
+MCP A2A Harness Integration：MCP/A2A 与 Harness 集成
+
+Protocol Capability Registry：协议能力注册表
+
+MCP Integration：MCP 集成
+
+A2A Integration：A2A 集成
+
+Capability Discovery Coverage：能力发现覆盖率
+
+Namespace Isolation Coverage：命名空间隔离覆盖率
+
+Protocol Schema Validity：协议 schema 有效率
+
+Protocol Permission Binding：协议权限绑定
+
+High-Risk Approval Coverage：高风险动作确认覆盖率
+
+Context Output Budget Coverage：上下文与输出预算覆盖率
+
+External Trust Boundary Coverage：外部内容信任边界覆盖率
+
+A2A Lifecycle Coverage：A2A 生命周期覆盖率
+
+Protocol Trace Coverage：协议 trace 覆盖率
+
+Protocol Replay Readiness：协议回放就绪率
+
+Protocol Version Capture：协议版本捕获率
+
+Protocol Integration Gate：协议集成门禁
+
+Agent Harness System Design：Agent Harness 系统设计
+
+Runtime Module Coverage：运行时模块覆盖率
+
+Interface Contract Coverage：接口契约覆盖率
+
+Agent State Machine Coverage：Agent 状态机覆盖率
+
+Permission Integration Coverage：权限集成覆盖率
+
+Context Control Coverage：上下文控制覆盖率
+
+Execution Isolation Coverage：执行隔离覆盖率
+
+System Trace Coverage：系统 trace 覆盖率
+
+System Replay Readiness：系统回放就绪率
+
+System Eval Readiness：系统评估就绪率
+
+Recovery Coverage：恢复能力覆盖率
+
+Harness Version Capture：Harness 版本捕获率
+
+Enterprise Governance Readiness：企业治理就绪率
+
+Harness System Gate：Harness 系统设计门禁
+
+Harness Pitfall Audit：Harness 实战坑审计
+
+Harness Triage Coverage：Harness 排查覆盖率
+
+Permission Overreach：权限越界
+
+Context Overload Incident：上下文过载事故
+
+User Edit Overwrite：用户改动覆盖
+
+Shell Hang Incident：终端命令卡死事故
+
+Prompt Injection Boundary Miss：提示注入边界失效
+
+Trace Missing Incident：Trace 缺失事故
+
+Eval Flakiness Incident：评估不稳定事故
+
+Doom Loop Guard：重复循环防护
+
+MCP Tool Overload：MCP 工具过载
+
+Environment Parity Check：环境一致性检查
+
+Harness Pitfall Gate：Harness 实战坑门禁
+
+Browser Agent：浏览器智能体
+
+Computer Use Agent：计算机使用智能体
+
+GUI Action：图形界面动作
+
+Screenshot Observation：截图观察
+
+Accessibility Tree：可访问性树
+
+UI State Tracking：UI 状态追踪
+
+Misclick Rate：误点击率
+
+Form Accuracy：表单填写准确率
+
+High-Risk Action Protection：高风险动作保护
+
+Final Verification Rate：最终状态验证率
+
+State Observation Coverage：状态观察覆盖率
+
+Prompt Injection Block Rate：提示注入拦截率
+
+Failure Recovery Rate：失败恢复率
+
+UI Agent Gate：UI Agent 上线门禁
+
+Multi-Agent：多智能体系统
+
+Coordinator：协调器
+
+Role Assignment：角色分配
+
+Communication Protocol：通信协议
+
+Blackboard：共享状态黑板
+
+Agent Debate：智能体辩论
+
+Judge Agent：裁决智能体
+
+Consensus / Voting：共识 / 投票
+
+Conflict Resolution：冲突解决
+
+Duplicate Work Rate：重复劳动率
+
+Single-Agent Lift Rate：相对单智能体提升率
+
+Multi-Agent Gate：Multi-Agent 上线门禁
+
+Agent Benchmark：Agent 基准测试
+
+Eval Sample：评估样本
+
+Trajectory Evaluation：轨迹评估
+
+Partial Success Score：部分成功分
+
+Trace Completeness：轨迹完整率
+
+Summary Faithfulness：总结忠实性
+
+Claim Support Rate：声明支持率
+
+Recovery Success Rate：恢复成功率
+
+Cost-Quality Trade-off：成本质量权衡
+
+Regression Suite：回归测试集
+
+Agent Eval Gate：Agent 评估上线门禁
+
+Agent Safety：Agent 安全
+
+Least Privilege：最小权限
+
+Tool Permission Matrix：工具权限矩阵
+
+Permission Request：权限请求
+
+Least Privilege Coverage：最小权限覆盖率
+
+Permission Matrix Coverage：权限矩阵覆盖率
+
+Unauthorized Action Block Rate：未授权动作阻断率
+
+Secret Access Block Rate：Secret 访问阻断率
+
+Network Egress Control：网络外发控制
+
+Sandbox Enforcement Coverage：沙箱执行覆盖率
+
+Dry Run Coverage：预演覆盖率
+
+Audit Log Completeness：审计日志完整率
+
+Irreversible Action Protection：不可逆动作保护率
+
+Permission Sandbox Gate：权限沙箱门禁
+
+Data Flow Guard：数据流门禁
+
+Sensitive Data Filter：敏感数据过滤器
+
+External Transfer Gate：外部传输门禁
+
+Sandbox Policy：沙箱策略
+
+Human Confirmation：人工确认
+
+Dry Run：试运行 / 预演
+
+Irreversible Action：不可逆动作
+
+Memory Safety：记忆安全
+
+Supply Chain Risk：供应链风险
+
+Safety Alternative：安全替代方案
+
+Agent Safety Gate：Agent 安全上线门禁
+
+Agent Interview Readiness：Agent 面试准备度
+
+Agent Interview Rubric：Agent 面试评分规约
+
+Agent Answer Coverage：Agent 回答覆盖度
+
+Agent Formula Coverage：Agent 公式覆盖度
+
+Agent Demo Coverage：Agent demo 覆盖度
+
+Trace Metric Coverage：执行轨迹指标覆盖度
+
+Evaluation Harness：评估执行框架
+
+Eval Dataset Bucket Coverage：评估数据桶覆盖率
+
+Environment Reproducibility：环境可复现率
+
+Validator Coverage：验收器覆盖率
+
+Weighted Task Success：加权任务成功率
+
+Diff Scope Safety：Diff 范围安全率
+
+Baseline Fairness：基线对比公平率
+
+Regression Pass Rate：回归通过率
+
+Unsafe Execution Rate：不安全执行率
+
+Cost Budget Pass Rate：成本预算通过率
+
+Flaky Task Rate：不稳定任务率
+
+Eval Version Capture：评估版本捕获率
+
+Eval Report Completeness：评估报告完整率
+
+Evaluation Harness Gate：评估执行框架门禁
+
+Project Evidence Score：项目证据得分
+
+Trade-off Depth：取舍深度
+
+Weak Agent Question：Agent 薄弱面试题
+
+Agent Revision Plan：Agent 面试修复计划
+
+Agent Interview Gate：Agent 面试准备度门禁
+
+Tool Selection Accuracy：工具选择准确率
+
+Argument Exact Match：参数完全匹配率
+
+Argument Validity：参数合法率
+
+Schema Valid Rate：Schema 合法率
+
+Required Field Pass Rate：必填字段通过率
+
+Type Valid Rate：类型合法率
+
+Enum Valid Rate：枚举合法率
+
+Pattern Valid Rate：字符串模式合法率
+
+Range Valid Rate：数值范围合法率
+
+Additional Properties Block Rate：额外字段拦截率
+
+Business Rule Pass Rate：业务规则通过率
+
+Schema Repair Success Rate：Schema 修复成功率
+
+Tool Choice Mode Accuracy：工具选择模式准确率
+
+No-Tool Clarification Block Rate：不调用 / 澄清拦截率
+
+Forced Missing Argument Block Rate：强制调用缺参拦截率
+
+Parallel Safety Rate：并行工具调用安全率
+
+Rate Limit Pass Rate：限流通过率
+
+Confirmation Enforcement Rate：确认执行覆盖率
+
+Cost Budget Pass Rate：成本预算通过率
+
+Loop Control Rate：工具循环控制率
+
+Execution Success Rate：执行成功率
+
+Error Recovery Rate：错误恢复率
+
+Unnecessary Tool Rate：不必要工具调用率
+
+Unauthorized Attempt Rate：未授权尝试率
+
+Unauthorized Attempt Block Rate：未授权尝试拦截率
+
+Tool Result Injection Rate：工具结果注入率
+
+Tool Result Injection Violation Rate：工具结果注入违规率
+
+Protocol Chain Validity：协议消息链合法率
+
+Tool Result ID Match Rate：工具结果 ID 匹配率
+
+Finish Reason Consistency：停止原因一致率
+
+Streaming Safety Rate：流式工具调用安全率
+
+Parallel Alignment Rate：并行工具调用对齐率
+
+Idempotency Protection Rate：幂等保护率
+
+Observation Use Rate：观察使用率
+
+State Update Coverage：状态更新覆盖率
+
+Budget Overrun Rate：预算超限率
+
+Stop Correctness：停止条件正确率
 
 Hallucination：幻觉
 
@@ -1991,3 +4275,1497 @@ Trade-off Coverage：取舍覆盖度
 Unsafe Detail Penalty：危险细节扣分
 
 Readiness Gate：准备度门禁
+
+LLM Productization：大模型产品化
+
+Demo to Product：从 demo 到产品
+
+Product Metric：产品指标
+
+Business Metric：业务指标
+
+User Pain：用户痛点
+
+Adoption Rate：采用率
+
+Task Success Uplift：任务成功率提升
+
+Unit Economics：单位经济账
+
+Benefit-Cost Ratio：收益成本比
+
+Return on Investment / ROI：投入产出比
+
+Net Benefit：净收益
+
+Payback Period：回本周期
+
+Productization Gate：产品化上线门禁
+
+Workflow Fit：工作流适配
+
+Feedback Loop：反馈闭环
+
+Online Monitoring：线上监控
+
+Canary Rollout：金丝雀发布 / 小流量灰度
+
+Shadow Traffic：影子流量
+
+Feature Flag：功能开关 / 特性开关
+
+Regression Pass Rate：回归评估通过率
+
+Feedback Action Rate：反馈行动率
+
+Bad Case Triage Coverage：失败样本分诊覆盖率
+
+Trace Coverage：轨迹覆盖率 / trace 覆盖率
+
+Rollback Plan：回滚预案
+
+Ops Gate：上线运营门禁
+
+Project Collaboration Incident：项目协作事故
+
+Objective Clarity Rate：目标清晰率
+
+Metric Tree Coverage：指标树覆盖率
+
+Baseline Coverage：baseline 覆盖率
+
+Experiment Reproducibility Rate：实验可复现率
+
+Version Trace Coverage：版本 trace 覆盖率
+
+RACI Coverage：RACI 责任覆盖率
+
+Change Control Coverage：变更控制覆盖率
+
+Risk Escalation Coverage：风险升级覆盖率
+
+Project Collaboration Gate：项目协作门禁
+
+SLO Burn Rate：服务目标消耗率 / 错误预算消耗率
+
+Product Interview Readiness：技术产品面试准备度
+
+Product Interview Gate：技术产品面试门禁
+
+Formula Coverage：公式覆盖率
+
+Demo Evidence Coverage：demo 证据覆盖率
+
+Trade-off Coverage：取舍覆盖率
+
+Human-in-the-Loop：人在回路
+
+Scenario Selection：场景选择
+
+Real Demand：真实需求
+
+Fake Demand：伪需求
+
+User Persona：用户画像
+
+Stakeholder Map：利益相关方地图
+
+Task Journey：任务链路
+
+Frequency-Value Matrix：频率-价值矩阵
+
+Data Readiness：数据准备度
+
+Verifiability：可验证性
+
+LLM Fit：大模型适配度
+
+Automation Level：自动化层级
+
+Pilot Scenario：试点场景
+
+Scenario Selection Gate：场景选择门禁
+
+Model-to-Experience Mapping：模型能力到产品体验映射
+
+LLM Product Experience：大模型产品体验
+
+Experience Metric：体验指标
+
+Structured Output Stability：结构化输出稳定率
+
+Citation Support Rate：引用支持率
+
+Controllability：可控性
+
+Error Recovery Rate：错误恢复率
+
+Trust Calibration：信任校准
+
+Over-Refusal Rate：过度拒答率
+
+Experience Gate：体验上线门禁
+
+UX Score：用户体验分
+
+Total Cost of Ownership / TCO：总拥有成本
+
+Variable Cost：可变成本
+
+Fixed Cost：固定成本
+
+Model Cost：模型调用成本
+
+Review Cost：人工审核成本
+
+Retry Cost：重试成本
+
+Risk Cost：风险成本
+
+Monthly Benefit：月度收益
+
+Monthly Cost：月度成本
+
+Unit Margin：单次毛利
+
+Break-Even Point：盈亏平衡点
+
+Sensitivity Analysis：敏感性分析
+
+ROI Gate：ROI 门禁
+
+Prompt Caching：提示缓存
+
+Batch Inference：批处理推理
+
+Enterprise LLM Application：企业级大模型应用
+
+Enterprise Knowledge Base：企业知识库
+
+Enterprise Integration：企业系统集成
+
+Single Sign-On / SSO：单点登录
+
+Identity and Access Management / IAM：身份与访问管理
+
+Role-Based Access Control / RBAC：基于角色的访问控制
+
+Tenant Isolation：租户隔离
+
+Permission-Aware RAG：权限感知检索增强生成
+
+RAG Permission Filter：RAG 权限过滤
+
+Tool Permission Gate：工具权限门禁
+
+Audit Log Coverage：审计日志覆盖率
+
+Data Freshness：数据新鲜度
+
+PII Redaction：个人身份信息脱敏
+
+Workflow Integration：工作流集成
+
+Enterprise Gate：企业级上线门禁
+
+Enterprise Readiness Score：企业就绪分
+
+SLO Pass Rate：服务目标通过率
+
+Privacy Governance：隐私治理
+
+Privacy Governance Gate：隐私治理门禁
+
+Data Minimization Rate：数据最小化率
+
+PII Redaction Coverage：个人身份信息脱敏覆盖率
+
+Sensitive Data Block Rate：敏感数据阻断率
+
+Permission Isolation：权限隔离
+
+Unauthorized Access Rate：越权访问率
+
+Log Redaction Coverage：日志脱敏覆盖率
+
+Training Consent Coverage：训练使用授权覆盖率
+
+Retention Compliance Rate：保留合规率
+
+Deletion SLA Pass Rate：删除 SLA 通过率
+
+External Transfer Approval Coverage：外部传输审批覆盖率
+
+Audit Coverage：审计覆盖率
+
+DPA Ready：数据处理协议就绪
+
+Incident Response Ready：事故响应就绪
+
+Minimal Reproduction：最小复现
+
+Evidence Coverage：证据覆盖率
+
+Root Cause Rate：根因定位率
+
+Postmortem Completeness：复盘完备率
+
+Debug Gate：排查完成门禁
+
+Retrospective Gate：复盘门禁
+
+Hypothesis Coverage：假设覆盖率
+
+Slice Analysis Coverage：分桶分析覆盖率
+
+Action Item Closure：行动项关闭率
+
+Regression Verification Rate：回归验证率
+
+Change Failure Rate：变更失败率
+
+Data Incident：数据事故
+
+Data Incident Gate：数据事故门禁
+
+Data Risk Rate：数据风险率
+
+Mixture Shift：数据配比偏移
+
+Lineage Coverage：数据血缘覆盖率
+
+Safety Compliance Incident：安全合规事故
+
+Unsafe Pass Rate：高风险不当放行率
+
+Policy Action Mismatch：策略动作错配
+
+Safety Compliance Gate：安全合规门禁
+
+Practitioner Interview Readiness：实战工程师面试准备度
+
+Practitioner Interview Rubric：实战工程师面试评分规约
+
+STAR Reflection Score：STAR 复盘反思得分
+
+Expert Follow-up Readiness：专家追问防守度
+
+Weak Practitioner Question：实战薄弱面试题
+
+Practitioner Revision Plan：实战面试修订计划
+
+Practitioner Interview Gate：实战工程师面试门禁
+
+Argument Parsing：工具参数解析
+
+Parse Success Rate：参数解析成功率
+
+Validation Error：参数校验错误
+
+Normalization：参数规范化
+
+Argument Evidence Map：参数证据映射
+
+Argument Evidence Coverage：参数证据覆盖率
+
+Safe Normalization Rate：安全规范化率
+
+Repair Attempt：参数修复尝试
+
+Model Self-Repair：模型自修复
+
+Clarification Coverage：澄清覆盖率
+
+Unsafe Argument Block Rate：高风险参数阻断率
+
+Retry Budget Pass Rate：重试预算通过率
+
+Idempotency Key Coverage：幂等键覆盖率
+
+Repair Trace Completeness：参数修复 trace 完整率
+
+Argument Repair Gate：参数修复门禁
+
+Tool Result Context：工具结果上下文
+
+Tool Result Projection：工具结果安全投影
+
+Source Metadata Coverage：来源元数据覆盖率
+
+Redaction Coverage：脱敏覆盖率
+
+Tool Result Context Budget Pass Rate：工具结果上下文预算通过率
+
+Injection Containment Rate：注入隔离率
+
+Error Status Fidelity：错误状态保真率
+
+Compression Fidelity：压缩保真率
+
+Conflict Labeling Rate：冲突标注率
+
+Tool Result Freshness Pass Rate：工具结果新鲜度通过率
+
+Memory Boundary Pass Rate：Memory 边界通过率
+
+Tool Result Context Gate：工具结果上下文门禁
+
+Tool Failure Recovery：工具失败恢复
+
+Structured Tool Error：结构化工具错误
+
+Retryable Error：可重试错误
+
+Non-Retryable Error：不可重试错误
+
+Retry Policy Precision：重试策略精确率
+
+Exponential Backoff with Jitter：带抖动的指数退避
+
+Retry Budget：重试预算
+
+Unknown Execution State：未知执行状态
+
+Fallback Honesty：降级诚实性
+
+Circuit Breaker Containment：熔断隔离控制率
+
+Timeout Cancellation Coverage：超时取消覆盖率
+
+Human Handoff Readiness：人工接管就绪率
+
+User-Visible Error Clarity：用户可见错误清晰度
+
+Failure Trace Completeness：失败 trace 完整率
+
+Tool Failure Recovery Gate：工具失败恢复门禁
+
+Tool Calling Evaluation：工具调用评估
+
+Tool Call Recall：工具调用召回率
+
+Tool Call Precision：工具调用精确率
+
+Tool Set Precision：工具集合精确率
+
+Tool Set Recall：工具集合召回率
+
+Argument Value Accuracy：参数值准确率
+
+Argument Source Coverage：参数来源覆盖率
+
+Execution Success Rate：执行成功率
+
+Observation Use Correctness：观察结果使用正确率
+
+Safe Failure Rate：安全失败率
+
+Unsafe Failure Rate：不安全失败率
+
+Tool Eval Dataset Coverage：工具评估数据集覆盖率
+
+Tool Eval Regression Pass Rate：工具评估回归通过率
+
+Tool Calling Eval Gate：工具调用评估门禁
+
+Tool Skill Developer Experience Audit：工具 / Skill 开发者体验审计
+
+Quickstart Path Clarity：快速开始路径清晰度
+
+Scaffold Completeness：脚手架完整度
+
+Documentation Example Coverage：文档示例覆盖率
+
+Local Debug Readiness：本地调试就绪率
+
+Trace Replay Readiness：Trace / Replay 就绪率
+
+Review Feedback Actionability：审核反馈可操作性
+
+Security Documentation Coverage：安全文档覆盖率
+
+Migration Documentation Coverage：迁移文档覆盖率
+
+CLI SDK Consistency：CLI / SDK 一致性
+
+Documentation Freshness：文档新鲜度
+
+Owner Maintenance：Owner 维护责任
+
+Portal Path Clarity：开发者门户路径清晰度
+
+DX Documentation Gate：开发者体验文档门禁
+
+Composable Workflow Audit：可组合工作流审计
+
+Workflow Graph Validity：工作流图合法性
+
+Dependency Acyclicity：依赖无环性
+
+Workflow IO Contract：工作流输入输出契约
+
+Condition Determinism：条件分支确定性
+
+Workflow State Coverage：工作流状态覆盖率
+
+Workflow Permission Boundary：工作流权限边界
+
+Workflow Data Flow Policy：工作流数据流策略
+
+Workflow Idempotency Coverage：工作流幂等覆盖率
+
+Retry Safety：重试安全性
+
+Compensation Readiness：补偿就绪率
+
+Workflow Human Approval Coverage：工作流人工审批覆盖率
+
+Workflow Trace Replay Readiness：工作流 Trace / Replay 就绪率
+
+Workflow Eval Coverage：工作流评估覆盖率
+
+Workflow Gate：工作流门禁
+
+Prompt Injection Defense Audit：提示注入防御审计
+
+Instruction Data Separation：指令数据分离
+
+Source Trust Labeling：来源可信标记
+
+Taint Propagation：污染标记传播
+
+Policy Pre-Tool Gate：工具调用前策略门禁
+
+Risky Tool Isolation：高风险工具隔离
+
+Untrusted Action Blocking：不可信内容动作阻断
+
+Sensitive Data Control：敏感数据控制
+
+Prompt Injection High Risk Confirmation：提示注入防御中的高风险动作确认
+
+Sandbox Enforcement：沙箱强制执行
+
+Output Redaction Projection：输出脱敏投影
+
+RAG Source Boundary：RAG 来源边界
+
+Multi-Agent Taint Propagation：多智能体污染标记传播
+
+Prompt Injection Trace Readiness：提示注入 Trace 就绪率
+
+Prompt Injection Eval Coverage：提示注入评估覆盖率
+
+Prompt Injection Defense Gate：提示注入防御门禁
+
+Tool Output Trust Audit：工具输出可信度审计
+
+Source Metadata Coverage：来源元数据覆盖率
+
+Trust Level Coverage：可信级别覆盖率
+
+Freshness Version Coverage：新鲜度与版本覆盖率
+
+Access Scope Disclosure：访问范围披露
+
+Citation Binding：引用绑定
+
+Citation Support Accuracy：引用支持准确率
+
+Evidence Chain Completeness：证据链完整度
+
+Claim Type Calibration：结论类型校准
+
+Confidence Limitation Disclosure：置信度与限制说明披露
+
+Conflict Resolution Readiness：冲突处理就绪率
+
+Summary Provenance Retention：摘要来源保留率
+
+RAG Chunk Citation Accuracy：RAG 分块引用准确率
+
+Multi-Agent Evidence Propagation：多智能体证据传播
+
+Provenance Trace Replay：来源 Trace 回放
+
+Citation Forgery Block：伪造引用阻断
+
+Tool Output Trust Eval Coverage：工具输出可信度评估覆盖率
+
+Tool Output Trust Gate：工具输出可信度门禁
+
+RAG Tool Agent Memory Integration Audit：RAG / Tool / Agent / Memory 组合审计
+
+Capability Boundary Clarity：能力边界清晰度
+
+Orchestration Mode Fit：编排模式匹配度
+
+Context Priority Enforcement：上下文优先级执行率
+
+Context Budget Allocation：上下文预算分配
+
+Evidence Preservation：证据保留率
+
+Tool Observation Use：工具观察结果使用率
+
+Agent State Update Discipline：智能体状态更新规范性
+
+Memory Read Relevance：记忆读取相关性
+
+Memory Write Gate：记忆写入门禁
+
+Memory Scope Permission：记忆作用域权限
+
+Conflict Resolution Policy：冲突处理策略
+
+Injection Propagation Control：注入传播控制
+
+Sensitive Data Memory Block：敏感数据记忆写入阻断
+
+Trace Linkage Coverage：Trace 链路覆盖率
+
+Layered Eval Coverage：分层评估覆盖率
+
+RAG Tool Agent Memory Integration Gate：RAG / Tool / Agent / Memory 组合门禁
+
+Tool Cost Latency Concurrency Audit：工具成本延迟并发审计
+
+Cost Attribution Coverage：成本归因覆盖率
+
+Latency Breakdown Coverage：延迟分解覆盖率
+
+Tool Call Budget Enforcement：工具调用预算执行
+
+Timeout Deadline Coverage：超时与截止时间覆盖率
+
+Retry Classification Accuracy：重试分类准确率
+
+Idempotent Retry Safety：幂等重试安全性
+
+Concurrency Limit Enforcement：并发限制执行
+
+Queue Priority Fairness：队列优先级公平性
+
+Rate Limit Quota Handling：限流与配额处理
+
+Cache Safety Correctness：缓存安全正确性
+
+Batching Partial Success Readiness：批处理部分成功就绪率
+
+Result Trimming Budget Control：结果裁剪预算控制
+
+Degradation Transparency：降级透明度
+
+Router Performance Awareness：路由器性能意识
+
+Performance Trace Readiness：性能 Trace 就绪率
+
+Cost Latency Eval Coverage：成本延迟评估覆盖率
+
+Tool Performance Gate：工具性能门禁
+
+Tool Use Eval Benchmark Audit：工具使用评估基准审计
+
+Tool Need Accuracy：工具需求判断准确率
+
+No-Tool Overcall Control：无工具任务过度调用控制
+
+Argument Schema Validity：参数 Schema 合法率
+
+Argument Semantic Accuracy：参数语义准确率
+
+Sequence Order Accuracy：调用顺序准确率
+
+Observation Grounding Accuracy：观察结果忠实使用准确率
+
+Error Recovery Readiness：错误恢复就绪率
+
+Safe Failure Handling：安全失败处理
+
+Safety Policy Compliance：安全策略合规率
+
+Tool Simulator Determinism：工具模拟器确定性
+
+Trace Replay Coverage：Trace 回放覆盖率
+
+Cost Latency Regression Control：成本延迟回归控制
+
+Benchmark Slice Coverage：Benchmark 切片覆盖率
+
+Regression Gate Readiness：回归门禁就绪率
+
+Tool Use Eval Benchmark Gate：工具使用评估基准门禁
+
+Function MCP A2A Comparison Audit：Function Calling / MCP / A2A 横向对比审计
+
+Layer Boundary Clarity：层级边界清晰度
+
+Function Calling Fit：Function Calling 适配度
+
+MCP Integration Fit：MCP 集成适配度
+
+A2A Delegation Fit：A2A 委派适配度
+
+Object Contract Coverage：对象契约覆盖率
+
+Capability Discovery Fit：能力发现适配度
+
+Lifecycle State Alignment：生命周期状态对齐
+
+Context Transfer Boundary：上下文传递边界
+
+Permission Governance Split：权限治理分层
+
+Host Runtime Ownership：Host Runtime 责任归属
+
+Trace Chain Continuity：Trace 链路连续性
+
+Eval Gate Linkage：评估门禁联动
+
+Overengineering Control：过度工程控制
+
+Severe Protocol Misuse Rate：严重协议误用率
+
+Protocol Composition Gate：协议组合门禁
+
+Provider Framework Tool Protocol Audit：Provider / Framework 工具协议审计
+
+Provider Framework Type Clarity：Provider / Framework 类型清晰度
+
+Tool Schema Projection：工具 Schema 投影
+
+Tool Choice Mapping：工具选择策略映射
+
+Tool Result Round Trip：工具结果回传闭环
+
+Streaming Event Assembly：流式事件组装
+
+Parallel Call Alignment：并行调用对齐
+
+Built-In Tool Boundary：内置工具边界
+
+Error Normalization：错误归一化
+
+Provider Adapter Isolation：Provider Adapter 隔离
+
+Framework Escape Hatch：框架逃生口 / 底层访问口
+
+RAG Tool Traceability：RAG 工具链路可追踪性
+
+Permission Safety Consistency：权限安全一致性
+
+Migration Eval Coverage：迁移评估覆盖率
+
+Provider Trace Replay Readiness：Provider Trace 回放就绪率
+
+Vendor Lock-In Control：供应商绑定控制
+
+Provider Runtime Gate：Provider Runtime 门禁
+
+Enterprise MCP Platform Audit：企业 MCP 工具平台审计
+
+MCP Gateway Readiness：MCP Gateway 就绪度
+
+MCP Registry Metadata Completeness：MCP Registry 元数据完整性
+
+MCP Capability Namespace Isolation：MCP 能力命名空间隔离
+
+MCP Tool Resource Prompt Contract：MCP Tool / Resource / Prompt 契约
+
+MCP Host Client Server Boundary Clarity：MCP Host / Client / Server 边界清晰度
+
+MCP OBO Scope Binding：MCP OBO 授权与 Scope 绑定
+
+MCP Tenant Isolation Enforcement：MCP 租户隔离执行
+
+MCP Policy Engine Coverage：MCP Policy Engine 覆盖率
+
+MCP Sandbox Roots Containment：MCP 沙箱 Roots 约束
+
+MCP Context Output Projection：MCP 上下文输出投影
+
+MCP Prompt Injection Taint Propagation：MCP Prompt Injection 污染标记传播
+
+MCP Trace Audit Replay Continuity：MCP Trace / Audit / Replay 连续性
+
+MCP Cost Latency Quota Control：MCP 成本延迟配额控制
+
+MCP Developer Portal Review Readiness：MCP 开发者门户审核就绪度
+
+MCP Release Lifecycle Governance：MCP 发布生命周期治理
+
+MCP Provider Adapter Compatibility：MCP Provider Adapter 兼容性
+
+MCP Eval Regression Coverage：MCP 回归评估覆盖率
+
+MCP High Availability Readiness：MCP 高可用就绪度
+
+Enterprise MCP Platform Gate：企业 MCP 平台门禁
+
+Cross-Agent Collaboration System Audit：跨 Agent 协作系统审计
+
+Cross-Agent Requirement Goal Clarity：跨 Agent 需求与目标清晰度
+
+Cross-Agent Collaboration Module Coverage：跨 Agent 协作模块覆盖率
+
+Cross-Agent Registry Routing Governance：跨 Agent Registry 路由治理
+
+Cross-Agent Task Graph Validity：跨 Agent 任务图有效性
+
+Cross-Agent A2A Lifecycle Alignment：跨 Agent A2A 生命周期对齐
+
+Cross-Agent Context Minimization Enforcement：跨 Agent 上下文最小化执行
+
+Cross-Agent Permission Attenuation Binding：跨 Agent 权限衰减绑定
+
+Cross-Agent MCP Tool Boundary Governance：跨 Agent MCP 工具边界治理
+
+Cross-Agent Artifact Evidence Grounding：跨 Agent 产物证据支撑
+
+Cross-Agent Conflict Arbitration Readiness：跨 Agent 冲突仲裁就绪度
+
+Cross-Agent Hallucination Propagation Control：跨 Agent 幻觉传播控制
+
+Cross-Agent Delegation Loop Containment：跨 Agent 委派循环约束
+
+Cross-Agent Human Handoff Approval Readiness：跨 Agent 人工接管审批就绪度
+
+Cross-Agent Trace Audit Replay Coverage：跨 Agent Trace / Audit / Replay 覆盖率
+
+Cross-Agent Eval Baseline Regression Coverage：跨 Agent 评估基线与回归覆盖率
+
+Cross-Agent Cost Latency Budget Control：跨 Agent 成本延迟预算控制
+
+Cross-Agent Scalability Idempotency Readiness：跨 Agent 扩展性与幂等就绪度
+
+Cross-Agent Collaboration Fit Control：跨 Agent 协作适配控制
+
+Cross-Agent Collaboration System Gate：跨 Agent 协作系统门禁
+
+Tool Protocol Future Audit：工具协议生态未来演进审计
+
+Layered Protocol Boundary Clarity：分层协议边界清晰度
+
+Standardization Extension Balance：标准化与扩展平衡
+
+Long Task Lifecycle Readiness：长任务生命周期就绪度
+
+Capability Package Completeness：能力包完整性
+
+Agent-Centric Autonomy Governance：Agent 中心自主权治理
+
+Tool Safety Metadata Coverage：工具安全元数据覆盖率
+
+Provenance Verifiability：来源和证据可验证性
+
+Marketplace Governance Readiness：Marketplace 治理就绪度
+
+Provider Adapter Migration Control：Provider Adapter 迁移控制
+
+Auto Generated Tool Review Gate：自动生成工具审核门禁
+
+Workflow Runtime Integration：工作流运行时集成
+
+Behavior Eval Coverage：行为评估覆盖率
+
+Human Model Documentation Split：人类文档与模型描述拆分
+
+Autonomy Risk Tiering：自主权风险分级
+
+Responsibility Attribution Trace：责任归因 Trace
+
+Natural Language API Boundary：自然语言与 API 边界
+
+Agent Operating Layer Governance：Agent 操作层治理
+
+Engineer Readiness Coverage：工程师能力就绪覆盖率
+
+Unsupported Speculation Rate：无依据推测率
+
+Tool Protocol Future Gate：工具协议未来演进门禁
+
+AI Infra Overview Audit：AI Infra 总览审计
+
+Compute Accelerator Readiness：计算与加速器就绪度
+
+Network Communication Readiness：网络通信就绪度
+
+Storage Data Checkpoint Readiness：存储、数据供给与 Checkpoint 就绪度
+
+Scheduler Resource Governance：调度与资源治理
+
+Training Platform Reproducibility：训练平台可复现性
+
+Inference Platform SLO Readiness：推理平台 SLO 就绪度
+
+Data Platform Lineage Quality：数据平台血缘质量
+
+Model Artifact Registry Governance：模型与 Artifact 仓库治理
+
+Eval Experiment Tracking Coverage：评估与实验追踪覆盖率
+
+Observability Signal Coverage：可观测性信号覆盖率
+
+Security Governance Coverage：安全治理覆盖率
+
+Cost Capacity Governance：成本与容量治理
+
+Developer Self-Service Readiness：开发者自助就绪度
+
+AI Infra Boundary Clarity：AI Infra 边界清晰度
+
+MLOps LLMOps Platform Boundary Clarity：MLOps、LLMOps 与平台工程边界清晰度
+
+Algorithm Infra Collaboration Readiness：算法与 Infra 协作就绪度
+
+AI Infra Overview Gate：AI Infra 总览门禁
+
+AI Infra MLOps LLMOps Boundary Audit：AI Infra、MLOps、LLMOps 边界审计
+
+AI Infra Scope Accuracy：AI Infra 范围识别准确率
+
+MLOps Lifecycle Accuracy：MLOps 生命周期识别准确率
+
+LLMOps Application Accuracy：LLMOps 应用生命周期识别准确率
+
+Platform Engineering DX Accuracy：平台工程开发者体验识别准确率
+
+DevOps SRE Boundary Accuracy：DevOps / SRE 边界识别准确率
+
+Data Platform Boundary Accuracy：数据平台边界识别准确率
+
+Model Platform Boundary Accuracy：模型平台边界识别准确率
+
+Primary Owner Clarity：主责方清晰度
+
+Interface Contract Coverage：接口契约覆盖率
+
+Artifact Lineage Handoff：产物血缘交接
+
+Observability SLO Handoff：可观测性与 SLO 交接
+
+Security Cost Governance Handoff：安全与成本治理交接
+
+Lifecycle Stage Mapping：生命周期阶段映射
+
+Anti Tool Name Confusion：工具名混淆防护
+
+Incident Routing Accuracy：事故路由准确率
+
+Collaboration Handoff Readiness：协作交接就绪度
+
+Boundary Gate：边界门禁
+
+Accelerator Selection Audit：AI 加速器选型审计
+
+Peak Compute Fit：峰值算力匹配度
+
+Memory Capacity Fit：显存容量匹配度
+
+Memory Bandwidth Fit：显存带宽匹配度
+
+Interconnect Bandwidth Fit：互联带宽匹配度
+
+Low Precision Support：低精度支持
+
+Software Stack Maturity：软件栈成熟度
+
+Kernel Library Readiness：算子库就绪度
+
+Distributed Communication Readiness：分布式通信就绪度
+
+Training Memory Budget：训练显存预算
+
+Inference KV Cache Budget：推理 KV Cache 预算
+
+Workload Hardware Fit：工作负载与硬件匹配度
+
+Cloud Self Build Decision：云上与自建决策
+
+Cost Power Capacity Awareness：成本、电力与容量意识
+
+Profiling Observability Readiness：性能剖析与可观测性就绪度
+
+Fallback Portability Plan：兜底迁移预案
+
+Selection Risk Governance：选型风险治理
+
+Accelerator Selection Gate：AI 加速器选型门禁
+
+Bandwidth Bottleneck Audit：带宽瓶颈审计
+
+VRAM Capacity Accounting：显存容量核算
+
+HBM Bandwidth Model：HBM 带宽模型
+
+PCIe Transfer Awareness：PCIe 传输意识
+
+NVLink Topology Awareness：NVLink 拓扑意识
+
+NVSwitch All-to-All Awareness：NVSwitch 全互联意识
+
+Inter-Node Network Awareness：机间网络意识
+
+KV Cache Growth Accounting：KV Cache 增长核算
+
+Training State Memory Accounting：训练状态显存核算
+
+Communication Volume Accounting：通信量核算
+
+Topology-Aware Parallel Group：拓扑感知并行组
+
+Dataloader Storage IO Awareness：Dataloader 与存储 I/O 意识
+
+Checkpoint IO Awareness：Checkpoint I/O 意识
+
+Offload Penalty Awareness：Offload 代价意识
+
+Overlap Fusion Optimization：通信重叠与算子融合优化
+
+Observability Metric Coverage：可观测性指标覆盖率
+
+Bandwidth Bottleneck Gate：带宽瓶颈门禁
+
+Training Efficiency Audit：训练效率审计
+
+Tokens Throughput Accounting：Token 吞吐核算
+
+Step Time Breakdown Coverage：Step Time 分解覆盖率
+
+GPU Utilization Interpretation：GPU 利用率解释
+
+MFU Estimation：MFU 估算
+
+HFU Estimation：HFU 估算
+
+Model FLOPs Accounting：模型 FLOPs 核算
+
+Hardware Peak Accounting：硬件峰值口径核算
+
+Communication Ratio Tracking：通信占比追踪
+
+IO Dataloader Tracking：I/O 与 Dataloader 追踪
+
+Checkpoint Overhead Tracking：Checkpoint 开销追踪
+
+Rank Skew Detection：Rank 偏斜检测
+
+Scaling Efficiency Tracking：扩展效率追踪
+
+Padding Waste Awareness：Padding 浪费意识
+
+Recompute Overhead Awareness：重计算开销意识
+
+Loss Correctness Coupling：Loss 正确性耦合检查
+
+Training Efficiency Gate：训练效率门禁
+
+Task Profile Audit：任务画像审计
+
+Workload Type Classification：工作负载类型分类
+
+Resource Shape Completeness：资源画像完整性
+
+Pretraining Profile Accuracy：预训练画像准确性
+
+SFT Iteration Profile Accuracy：SFT 迭代画像准确性
+
+RLHF Pipeline Profile Accuracy：RLHF 流水线画像准确性
+
+Evaluation Reproducibility Profile：评估可复现画像
+
+Serving SLO Profile：推理服务 SLO 画像
+
+RAG Freshness Retrieval Profile：RAG 新鲜度与检索画像
+
+Agent Tool Runtime Profile：Agent 工具运行时画像
+
+Multimodal Resource Profile：多模态资源画像
+
+Scheduler Policy Fit：调度策略匹配度
+
+Observability Metric Fit：可观测性指标匹配度
+
+Cost Model Fit：成本模型匹配度
+
+Artifact Lineage Fit：产物血缘匹配度
+
+Safety Governance Fit：安全治理匹配度
+
+Task Profile Gate：任务画像门禁
+
+GPU Cluster Topology Audit：GPU 集群拓扑审计
+
+Scale-Up Domain Fit：Scale-up 高速互联域匹配度
+
+PCIe NUMA Locality：PCIe / NUMA 局部性
+
+NVLink NVSwitch Locality：NVLink / NVSwitch 局部性
+
+GPU NIC Affinity：GPU 与网卡亲和性
+
+Inter-Node Fabric Readiness：节点间网络就绪度
+
+Rack Locality Awareness：机柜局部性感知
+
+Oversubscription Awareness：网络超卖感知
+
+Collective Communication Fit：集合通信匹配度
+
+Parallel Group Placement：并行组放置
+
+Storage Checkpoint Locality：存储与 Checkpoint 局部性
+
+Fault Domain Isolation：故障域隔离
+
+Power Cooling Capacity Fit：电力散热容量匹配度
+
+Resource Pool Isolation：资源池隔离
+
+Topology-Aware Scheduling：拓扑感知调度
+
+Observability Topology Coverage：拓扑可观测性覆盖率
+
+GPU Cluster Gate：GPU 集群门禁
+
+Network Communication Audit：网络通信审计
+
+Bandwidth Unit Accounting：带宽单位核算
+
+Latency Jitter Tracking：延迟抖动追踪
+
+RDMA Capability Fit：RDMA 能力匹配度
+
+GPUDirect RDMA Path：GPUDirect RDMA 路径
+
+InfiniBand Fabric Readiness：InfiniBand Fabric 就绪度
+
+RoCE Congestion Losslessness：RoCE 拥塞与无损配置
+
+Ethernet Fallback Scope：以太网兜底适用范围
+
+Collective Operation Modeling：集合通信建模
+
+NCCL Topology Runtime Fit：NCCL 拓扑运行时匹配度
+
+AllReduce Cost Estimation：AllReduce 成本估算
+
+AllGather ReduceScatter Cost：AllGather / ReduceScatter 成本
+
+Rank Straggler Detection：Rank 慢点检测
+
+Packet Error Retransmit Tracking：错误包与重传追踪
+
+Topology Congestion Awareness：拓扑拥塞感知
+
+Scheduler Network Locality：调度器网络局部性
+
+Network Communication Gate：网络通信门禁
+
+Storage System Audit：存储体系审计
+
+Capacity Tier Fit：容量层级匹配度
+
+Throughput IOPS Fit：吞吐与 IOPS 匹配度
+
+Local NVMe Cache Fit：本地 NVMe 缓存匹配度
+
+Shared FS Metadata Fit：共享文件系统 Metadata 匹配度
+
+Object Store Authority Fit：对象存储权威源匹配度
+
+Data Lake Governance Fit：数据湖治理匹配度
+
+Training Shard Format Fit：训练 Shard 格式匹配度
+
+Small File Amplification Control：小文件放大控制
+
+Dataloader Cache Hit Tracking：Dataloader 缓存命中追踪
+
+Checkpoint Write Recovery Fit：Checkpoint 写入与恢复匹配度
+
+Model Weight Load Cache Fit：模型权重加载缓存匹配度
+
+Artifact Lineage Metadata Fit：Artifact 血缘 Metadata 匹配度
+
+Consistency Commit Integrity：一致性 Commit 完整性
+
+Security Compliance Fit：安全合规匹配度
+
+Lifecycle Cost Governance：生命周期成本治理
+
+Storage System Gate：存储体系门禁
+
+Checkpoint Lifecycle Audit：Checkpoint 生命周期审计
+
+Checkpoint Object Completeness：Checkpoint 对象完整度
+
+Shard Layout Fit：分片布局匹配度
+
+Async Save Overlap：异步保存重叠度
+
+Write Bandwidth Fit：写入带宽匹配度
+
+Metadata Commit Integrity：Metadata Commit 完整性
+
+Checksum Manifest Validation：Checksum 与 Manifest 校验
+
+Restore Replay Readiness：恢复回放就绪度
+
+Dataloader RNG State Capture：Dataloader 与随机状态捕获
+
+Distributed Rank State Capture：分布式 Rank 状态捕获
+
+Retention Policy Fit：保留策略匹配度
+
+Cross-Region Replication Fit：跨区复制匹配度
+
+Security Access Control：安全访问控制
+
+Resume SLO Tracking：恢复 SLO 追踪
+
+Failure Drill Coverage：故障演练覆盖率
+
+Checkpoint Lifecycle Gate：Checkpoint 生命周期门禁
+
+Container Environment Audit：容器环境审计
+
+Image Digest Reproducibility：镜像 Digest 可复现性
+
+Base Layer Cache Fit：基础镜像层缓存匹配度
+
+CUDA Driver Framework Compatibility：CUDA / 驱动 / 框架兼容性
+
+GPU Runtime Visibility：GPU Runtime 可见性
+
+Dependency Lock Coverage：依赖锁定覆盖率
+
+Training Serving Image Separation：训练与推理镜像分离
+
+Image Size Startup Fit：镜像体积与启动匹配度
+
+Build Pipeline Smoke Test：构建流水线 Smoke Test
+
+Security Scan Signing：安全扫描与签名
+
+Secret Data Exclusion：密钥与数据排除
+
+Runtime Hardening Fit：运行时加固匹配度
+
+Registry Access Governance：镜像仓库访问治理
+
+Environment Metadata Capture：环境 Metadata 捕获
+
+Multi-Tenant Mount Isolation：多租户挂载隔离
+
+NCCL RDMA Runtime Fit：NCCL / RDMA 运行时匹配度
+
+Container Environment Gate：容器环境门禁
+
+Kubernetes GPU Resource Management Audit：Kubernetes GPU 资源管理审计
+
+Device Plugin Readiness：Device Plugin 就绪度
+
+GPU Extended Resource Fit：GPU 扩展资源匹配度
+
+GPU Request Limit Integrity：GPU Request / Limit 完整性
+
+Gang Scheduling Readiness：Gang Scheduling 就绪度
+
+Fragmentation Control：碎片化控制
+
+Topology Aware Placement：拓扑感知放置
+
+Node Label Affinity Fit：节点标签与亲和性匹配度
+
+Taint Toleration Fit：污点与容忍匹配度
+
+MIG Sharing Policy Fit：MIG / 共享策略匹配度
+
+Quota Namespace Governance：配额与 Namespace 治理
+
+Training Operator Readiness：训练 Operator 就绪度
+
+Inference Service Readiness：推理服务就绪度
+
+GPU Monitoring Mapping：GPU 监控映射
+
+Multi-Tenant Isolation：多租户隔离
+
+Pending Troubleshooting Coverage：Pending 排障覆盖率
+
+Kubernetes GPU Gate：Kubernetes GPU 门禁
+
+Training Scheduler Governance Audit：训练调度治理审计
+
+Workload Resource Shape：任务资源画像
+
+Queue Policy Coverage：队列策略覆盖率
+
+Priority Governance：优先级治理
+
+Quota Usage Control：配额使用控制
+
+Fair Share Accounting：公平分享核算
+
+Gang Scheduling Fit：Gang Scheduling 匹配度
+
+Backfilling Safety：Backfilling 安全性
+
+Preemption Checkpoint Safety：抢占与 Checkpoint 安全性
+
+Scheduler Fragmentation Control：调度碎片化控制
+
+Scheduler Topology Awareness：调度拓扑感知
+
+Checkpoint Scheduler Coupling：Checkpoint 与调度器耦合
+
+Cost Attribution Control：成本归因控制
+
+Scheduler Observability：调度器可观测性
+
+Failure Requeue Readiness：失败重排就绪度
+
+Anti Starvation Control：防饥饿控制
+
+Training Scheduler Gate：训练调度门禁
+
+Multi-Tenant Isolation Audit：多租户隔离审计
+
+Resource Quota Isolation：资源配额隔离
+
+Identity Namespace Binding：身份与 Namespace 绑定
+
+RBAC ABAC Permission Fit：RBAC / ABAC 权限匹配度
+
+Data Access Boundary：数据访问边界
+
+Data Classification Lineage：数据分类与血缘
+
+Network Policy Isolation：网络策略隔离
+
+Runtime Security Boundary：运行时安全边界
+
+Image Supply Chain Boundary：镜像供应链边界
+
+Secret Scope Rotation：密钥范围与轮换
+
+Logs Trace Redaction：日志与 Trace 脱敏
+
+Cost Attribution Coverage：成本归因覆盖率
+
+Prod Experiment Separation：生产与实验隔离
+
+Cross Tenant Sharing Governance：跨租户共享治理
+
+Audit Evidence Readiness：审计证据就绪度
+
+Blast Radius Control：故障影响范围控制
+
+Multi-Tenant Isolation Gate：多租户隔离门禁
+
+Cluster Capacity Planning Audit：集群容量规划审计
+
+Workload Forecast Coverage：工作负载预测覆盖率
+
+GPU Count Capacity Fit：GPU 数量容量匹配度
+
+GPU Type Mix Fit：GPU 型号组合匹配度
+
+Training Queue SLO Fit：训练队列 SLO 匹配度
+
+Serving Peak SLO Fit：推理峰值 SLO 匹配度
+
+Network Bandwidth Capacity Fit：网络带宽容量匹配度
+
+Storage Throughput Capacity Fit：存储吞吐容量匹配度
+
+Storage Capacity Lifecycle Fit：存储容量生命周期匹配度
+
+Utilization Headroom Fit：利用率余量匹配度
+
+Failure Redundancy Fit：故障冗余匹配度
+
+Growth Forecast Fit：增长预测匹配度
+
+Cost Budget Fit：成本预算匹配度
+
+Pool Separation Fit：资源池隔离匹配度
+
+Quota Burst Governance：配额与突发治理
+
+Observability Forecast Feedback：可观测性与预测回填
+
+Cluster Capacity Planning Gate：集群容量规划门禁
+
+Training Platform Lifecycle Audit：训练平台生命周期审计
+
+TrainingJob Contract：训练任务契约
+
+Config Validation：配置校验
+
+Resource Quota Binding：资源配额绑定
+
+Image Code Reproducibility：镜像与代码可复现性
+
+Dataset Lineage Permission：数据血缘与权限
+
+Launcher Distributed Fit：分布式启动器匹配度
+
+Checkpoint Resume Policy：Checkpoint 恢复策略
+
+Observability Events Metrics：可观测事件与指标
+
+Experiment Tracking Lineage：实验追踪血缘
+
+Artifact Registry Linkage：产物仓库链接
+
+Failure Recovery Classification：失败恢复分类
+
+Security Audit Control：安全审计控制
+
+Cost Attribution Control：成本归因控制
+
+Developer Self Service：开发者自助能力
+
+Lifecycle State Machine：生命周期状态机
+
+Training Platform Gate：训练平台门禁
+
+Training Submission Audit：训练任务提交审计
+
+TrainingJob Schema Completeness：TrainingJob Schema 完整性
+
+Required Field Coverage：必填字段覆盖率
+
+Image Digest Binding：镜像 Digest 绑定
+
+Code Commit Diff Binding：代码 Commit 与 Diff 绑定
+
+Dataset Version Permission：数据集版本与权限
+
+Structured Command Safety：结构化启动命令安全性
+
+Final Config Snapshot：最终配置快照
+
+Distributed Resource Consistency：分布式资源一致性
+
+Checkpoint URI Resume Validation：Checkpoint URI 与恢复校验
+
+Logging Metrics Destination：日志与指标目标
+
+Queue Priority Policy Binding：队列优先级策略绑定
+
+Quota Dry Run Admission：配额 Dry Run 准入
+
+Idempotency Duplicate Control：幂等与重复提交控制
+
+Template Version Governance：模板版本治理
+
+Submit State Machine Validity：提交状态机合法性
+
+Submission Audit Trace：提交审计 Trace
+
+Training Submission Gate：训练任务提交门禁
+
+Distributed Launcher Audit：分布式启动器审计
+
+Resource World Size Consistency：资源与 World Size 一致性
+
+Rank Local Rank Mapping：Rank 与 Local Rank 映射
+
+Rendezvous Endpoint Readiness：Rendezvous 端点就绪度
+
+GPU Binding Visibility：GPU 绑定可见性
+
+Launcher Adapter Fit：启动器适配器匹配度
+
+Torchrun Argument Fit：torchrun 参数匹配度
+
+DeepSpeed Config Fit：DeepSpeed 配置匹配度
+
+Megatron Parallel Consistency：Megatron 并行配置一致性
+
+Ray Runtime Fit：Ray 运行时匹配度
+
+Network NCCL Readiness：网络与 NCCL 就绪度
+
+Log Rank Aggregation：Rank 日志聚合
+
+Failure Stage Classification：失败阶段分类
+
+Elastic Training Safety：弹性训练安全性
+
+Checkpoint Launcher Coupling：Checkpoint 与启动器耦合
+
+Scheduler Launcher Handoff：调度器到启动器交接
+
+Launcher Audit Trace：启动器审计 Trace
+
+Distributed Launcher Gate：分布式启动器门禁
+
+Training Config Management Audit：训练配置管理审计
+
+Config Source Order：配置来源覆盖顺序
+
+Final Config Snapshot Freeze：最终配置快照冻结
+
+Required Config Field Coverage：必填配置字段覆盖率
+
+Config Schema Type Validation：配置 Schema 类型校验
+
+Batch Parallel Consistency：Batch 与并行配置一致性
+
+Immutable Version Binding：不可变版本绑定
+
+Environment Version Capture：环境版本记录
+
+Reproducibility Seed Boundary：可复现随机种子边界
+
+Experiment Tracking Linkage：实验追踪链接
+
+Hyperparameter Sweep Trace：超参搜索 Trace
+
+Checkpoint Resume Compatibility：Checkpoint 恢复兼容性
+
+Release Config Coupling：发布配置耦合
+
+Config Permission Approval：配置权限审批
+
+Config Diff Readiness：配置 Diff 就绪度
+
+Config Audit Trace：配置审计 Trace
+
+Training Config Gate：训练配置门禁
+
+Training Observability Audit：训练可观测性审计
+
+Structured Log Context：结构化日志上下文
+
+Rank Log Coverage：Rank 日志覆盖率
+
+Metric Taxonomy Coverage：指标分类覆盖率
+
+Metric Dimension Scope：指标维度范围
+
+Event Schema Lifecycle：事件 Schema 生命周期
+
+State Machine Validity：状态机合法性
+
+Attempt Retry Traceability：Attempt 与重试可追踪性
+
+Trace Phase Coverage：Trace 阶段覆盖率
+
+Dashboard Diagnostic Readiness：Dashboard 诊断就绪度
+
+Alert Rule Readiness：告警规则就绪度
+
+Anomaly Detection Rules：异常检测规则
+
+Retention Cost Governance：留存成本治理
+
+Privacy Redaction Access：隐私脱敏与访问控制
+
+Cost Attribution Signal：成本归因信号
+
+Training Observability Gate：训练可观测性门禁

@@ -12,6 +12,14 @@
 
 如果说算法决定“模型能不能变聪明”，那么 AI Infra 决定“模型能不能训得动、推得快、跑得稳、成本可控、出了问题能定位”。
 
+## 1.0 本讲资料边界与第二轮精修口径
+
+本讲是第二十三册入口章，目标不是把 Kubernetes、Slurm、DCGM、OpenTelemetry、MLflow 或某一家云厂商平台逐一讲成教程，而是建立 AI Infra 的分层地图和面试表达框架。
+
+第二轮精修时，我按 `WRITING_PLAN.md` 做了资料校准，主要参考公开官方资料中的稳定边界：Kubernetes device plugin 说明了加速器等厂商设备如何暴露给集群调度；Slurm 是 HPC 场景常见的作业调度和资源管理系统；NVIDIA DCGM 代表 GPU 遥测、健康检查和诊断能力；OpenTelemetry 把 metrics、logs、traces 作为可观测性信号；MLflow Tracking 代表实验记录、参数、指标和 artifact 追踪的一类平台能力。
+
+这些资料只用于校准“AI Infra 应覆盖哪些层”，不能反过来推出“AI Infra 等于 Kubernetes”或“AI Infra 等于某个实验平台”。本讲新增的公式和 demo 也只做教学审计：帮助你把模块清单转成可检查的指标，而不是替代真实公司的容量规划、调度器实现、SRE 体系或安全合规系统。
+
 ## 1.1 一个简单 API 背后的复杂系统
 
 用户看到的可能只是：
@@ -397,7 +405,153 @@ AI Infra 和 MLOps / LLMOps 有什么区别？
 AI Infra 更偏底座和平台，覆盖硬件、集群、网络、存储、调度、训练和推理服务。MLOps / LLMOps 更偏模型生命周期管理，包括数据、训练、评估、部署、监控和回滚。LLMOps 还会加入 prompt、RAG、Agent trace、工具调用和 token 成本等大模型特有内容。Platform Engineering 则是把这些能力产品化给内部团队自助使用。
 ```
 
-## 1.8 常见误区
+## 1.8 AI Infra 总览审计指标与最小 demo
+
+总览章节最容易写成“列一堆模块名”。第二轮精修里，更推荐把它转成一组可审计问题：这个平台是否真的覆盖了训练、推理、数据、评估、可观测性、安全、成本和开发者体验？它是否把 AI Infra、MLOps、LLMOps 和 Platform Engineering 的边界讲清楚？算法团队和平台团队是否能用同一张指标表沟通？
+
+先定义一个 AI Infra 总览审计样本：
+
+```math
+x_i=(c_i,n_i,s_i,q_i,t_i,r_i,d_i,a_i,e_i,o_i,g_i,p_i,z_i)
+```
+
+其中，`c_i` 表示计算和加速器准备度，`n_i` 表示网络和通信准备度，`s_i` 表示存储、数据供给和 checkpoint 准备度，`q_i` 表示调度和资源治理，`t_i` 表示训练平台可复现性，`r_i` 表示推理平台 SLO 能力，`d_i` 表示数据平台血缘，`a_i` 表示模型与 artifact 治理，`e_i` 表示评估和实验追踪，`o_i` 表示可观测性，`g_i` 表示安全治理，`p_i` 表示成本和容量治理，`z_i` 表示边界、协作和开发者自助能力等标签。
+
+对第 `j` 个审计维度，统一写成通过率：
+
+```math
+C_j=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[g_j(x_i)=1]
+```
+
+其中，`N` 是审计样本数，`g_j(x_i)=1` 表示样本 `x_i` 通过第 `j` 个检查。
+
+常见资源效率可以用 GPU 忙碌时间占比做直觉起点：
+
+```math
+U_{\mathrm{gpu}}=\frac{T_{\mathrm{busy}}}{T_{\mathrm{wall}}}
+```
+
+但面试中要强调：GPU utilization 只是粗粒度忙碌指标，不能单独证明训练有效率。还要结合 MFU、tokens/sec、step time、通信时间、数据加载时间、checkpoint 阻塞和失败率。
+
+成本治理可以先用单位成功任务成本表达：
+
+```math
+K_{\mathrm{success}}=\frac{K_{\mathrm{gpu}}+K_{\mathrm{storage}}+K_{\mathrm{network}}+K_{\mathrm{ops}}}{N_{\mathrm{success}}}
+```
+
+其中，`K_gpu`、`K_storage`、`K_network` 和 `K_ops` 分别代表 GPU、存储、网络和运维成本，`N_success` 是通过质量门禁的成功训练、评估或推理任务数。这个公式的重点不是精确财务建模，而是提醒你：只算 GPU 小时或 token 单价，会低估 AI Infra 的真实成本。
+
+最后给一个总览门禁：
+
+```math
+G_{\mathrm{ai\_infra}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land R_{\mathrm{p0}}=0\right]
+```
+
+其中，`\tau_j` 是每个维度的最低通过阈值，`R_p0` 表示 P0 级硬阻断数量。只要关键维度覆盖不足，或者存在没有缓解方案的 P0 风险，总览门禁就不应该通过。
+
+下面是一个 0 依赖 Python demo。它不模拟真实集群，只把“AI Infra 总览回答是否完整”变成一张 toy 审计表：
+
+```python
+METRICS = [
+    "compute_accelerator_readiness",
+    "network_communication_readiness",
+    "storage_data_checkpoint_readiness",
+    "scheduler_resource_governance",
+    "training_platform_reproducibility",
+    "inference_platform_slo_readiness",
+    "data_platform_lineage_quality",
+    "model_artifact_registry_governance",
+    "eval_experiment_tracking_coverage",
+    "observability_signal_coverage",
+    "security_governance_coverage",
+    "cost_capacity_governance",
+    "developer_self_service_readiness",
+    "ai_infra_boundary_clarity",
+    "mlops_llmops_platform_boundary_clarity",
+    "algorithm_infra_collaboration_readiness",
+]
+
+
+def make_case(name, failed_metric=None, p0=False):
+    flags = {metric: True for metric in METRICS}
+    if failed_metric is not None:
+        flags[failed_metric] = False
+    return {"name": name, "flags": flags, "p0": p0}
+
+
+def build_cases():
+    bad_cases = [
+        ("gpu_capacity_missing_bad", "compute_accelerator_readiness"),
+        ("network_ignored_bad", "network_communication_readiness"),
+        ("storage_checkpoint_missing_bad", "storage_data_checkpoint_readiness"),
+        ("scheduler_no_quota_bad", "scheduler_resource_governance"),
+        ("training_not_reproducible_bad", "training_platform_reproducibility"),
+        ("inference_no_slo_bad", "inference_platform_slo_readiness"),
+        ("data_lineage_missing_bad", "data_platform_lineage_quality"),
+        ("artifact_registry_missing_bad", "model_artifact_registry_governance"),
+        ("eval_tracking_missing_bad", "eval_experiment_tracking_coverage"),
+        ("observability_missing_bad", "observability_signal_coverage"),
+        ("security_audit_missing_bad", "security_governance_coverage"),
+        ("cost_capacity_missing_bad", "cost_capacity_governance"),
+        ("no_self_service_bad", "developer_self_service_readiness"),
+        ("kubernetes_only_bad", "ai_infra_boundary_clarity"),
+        ("boundary_confused_bad", "mlops_llmops_platform_boundary_clarity"),
+        ("algorithm_infra_silo_bad", "algorithm_infra_collaboration_readiness"),
+    ]
+
+    cases = [make_case("complete_ai_infra_stack")]
+    cases.extend(make_case(name, metric, p0=True) for name, metric in bad_cases)
+    return cases
+
+
+def audit_ai_infra_overview(cases, threshold=0.95):
+    metrics = {}
+    for metric in METRICS:
+        passed = sum(1 for case in cases if case["flags"][metric])
+        metrics[metric] = round(passed / len(cases), 3)
+
+    failed_cases = [
+        case["name"]
+        for case in cases
+        if case["p0"] or any(not case["flags"][metric] for metric in METRICS)
+    ]
+    failed_gates = [
+        metric for metric, score in metrics.items() if score < threshold
+    ]
+    hard_blocker_count = sum(1 for case in cases if case["p0"])
+    gate_pass = not failed_gates and hard_blocker_count == 0
+
+    return {
+        "metrics": metrics,
+        "hard_blocker_count": hard_blocker_count,
+        "failed_cases": failed_cases,
+        "failed_gates": failed_gates,
+        "ai_infra_gate_pass": gate_pass,
+    }
+
+
+cases = build_cases()
+report = audit_ai_infra_overview(cases)
+
+smoke = {
+    "complete_case_passes": "complete_ai_infra_stack" not in report["failed_cases"],
+    "caught_kubernetes_only": "kubernetes_only_bad" in report["failed_cases"],
+    "caught_network_ignored": "network_ignored_bad" in report["failed_cases"],
+    "caught_inference_no_slo": "inference_no_slo_bad" in report["failed_cases"],
+    "caught_boundary_confused": "boundary_confused_bad" in report["failed_cases"],
+}
+
+print("smoke=", smoke)
+print("metrics=", report["metrics"])
+print("hard_blocker_count=", report["hard_blocker_count"])
+print("failed_cases=", report["failed_cases"])
+print("failed_gates=", report["failed_gates"])
+print("ai_infra_gate_pass=", report["ai_infra_gate_pass"])
+```
+
+这段 demo 的设计故意让 16 个 bad case 分别打穿 16 个维度，因此每个覆盖率都是 `16/17=0.941`，低于 `0.95` 阈值。它想表达的不是“真实平台必须有 16 个指标”，而是面试中不能只说“我们用了 Kubernetes”或“我们买了 GPU”。一个可上线的 AI Infra 总览回答，需要同时覆盖计算、网络、存储、调度、训练、推理、数据、artifact、评估、可观测性、安全、成本、开发者体验和跨团队协作。
+
+## 1.9 常见误区
 
 误区一：AI Infra 等于 Kubernetes。
 
@@ -419,7 +573,7 @@ GPU 是基础，但没有调度、网络、存储、平台和运维，GPU 很容
 
 大模型系统如果没有可观测性，出了问题很难定位。监控、日志、trace 和事件应该从平台设计一开始就纳入。
 
-## 1.9 面试题
+## 1.10 面试题
 
 ### 题 1：AI Infra 和普通后端基础设施有什么不同？
 
@@ -441,7 +595,7 @@ GPU 是基础，但没有调度、网络、存储、平台和运维，GPU 很容
 
 答：大模型系统链路长、组件多、故障原因复杂。训练慢可能来自数据、网络、GPU、框架或存储；推理慢可能来自队列、prefill、decode、KV cache 或路由。没有 metrics、logs、traces 和 events，就很难定位问题。
 
-## 1.10 小练习
+## 1.11 小练习
 
 练习一：画出你理解的大模型训练平台架构图。
 
@@ -459,7 +613,7 @@ GPU 是基础，但没有调度、网络、存储、平台和运维，GPU 很容
 
 要求：用自己的话分别解释它们关注什么，并举一个具体例子。
 
-## 1.11 本章小结
+## 1.12 本章小结
 
 本章是第二十三册的入口。
 

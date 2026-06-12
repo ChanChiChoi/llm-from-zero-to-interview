@@ -1,5 +1,17 @@
 # 第十六章：Harness 实战坑与面试题
 
+## 0. 本讲资料边界与第二轮精修口径
+
+本章第二轮精修只基于公开资料和前文已经建立的 Agent Harness 抽象：Claude Code security / troubleshooting 文档、OpenCode troubleshooting / permissions / MCP 文档、SWE-agent trajectory / output files 文档、Aider troubleshooting / repo map 文档、MCP specification 与安全最佳实践、OpenAI Agents SDK 的 agent、tool、session、human-in-the-loop、MCP 和 tracing 公开资料，以及本册前十五章对 runtime、工具、权限、沙箱、trace、replay 和 evaluation harness 的拆解。
+
+本章不把任何闭源 coding agent 的内部 planner、隐藏 prompt、工具排序、沙箱实现、远端 trace 存储或模型路由写成确定事实；如果需要讨论，只作为系统设计推断。本章只讨论防御性工程排查、面试表达和 toy audit demo，不提供绕过权限、规避沙箱、读取密钥、破坏工作区、攻击 MCP/A2A 服务、隐藏 trace、伪造评估通过或自动执行生产高风险动作的方法。
+
+第二轮补强重点有三点：
+
+1. 把“实战坑”从经验清单升级成可审计指标，避免面试回答停留在“要加权限、要加日志”的口号。
+2. 用稳定 MathJax 公式定义排查覆盖率、权限安全、上下文预算、编辑安全、命令安全、注入边界、trace、replay、eval、成本循环和环境一致性。
+3. 补一个 0 依赖 Python demo，输入 toy incident 表，输出 failed gates 和 root causes，帮助读者把事故复盘讲成可复现工程方法。
+
 ## 16.1 本章定位
 
 这是第二十册的收尾章。前面我们已经系统讲过 Agent Harness、Coding Agent Runtime、工具系统、文件编辑、终端执行、上下文压缩、权限沙箱、trace/replay、evaluation harness、Claude Code、OpenCode、Codex、MCP、A2A 和系统设计。本章不再引入大量新概念，而是把这些内容转成实战排查清单和面试回答模板。
@@ -550,7 +562,491 @@ User / Issue / IDE / CLI
 
 只要能围绕这张图展开，绝大多数 agent harness 面试题都能答得有结构。
 
-## 16.19 小练习
+## 16.19 Harness 实战坑审计指标
+
+为了把本章十类坑讲成工程闭环，可以把每个事故样本抽象成：
+
+```math
+h_i=(g_i,c_i,t_i,p_i,e_i,s_i,o_i,r_i,v_i,u_i)
+```
+
+其中 $g_i$ 是用户目标和验收标准，$c_i$ 是上下文与预算，$t_i$ 是工具和协议能力，$p_i$ 是权限决策，$e_i$ 是文件 / 终端 / sandbox 执行，$s_i$ 是 session 状态和 diff，$o_i$ 是 trace / log / artifact，$r_i$ 是 replay 条件，$v_i$ 是 eval / 版本条件，$u_i$ 是用户影响和事故分级。
+
+常用排查指标可以写成：
+
+```math
+C_{\mathrm{triage}}=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[\mathrm{triaged}(h_i)]
+```
+
+```math
+C_{\mathrm{perm}}=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[\mathrm{permission\_ok}(h_i)]
+```
+
+```math
+C_{\mathrm{ctx}}=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[B_i\le L_i\land \mathrm{output\_limited}(h_i)]
+```
+
+```math
+C_{\mathrm{edit}}=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[\neg \mathrm{edit\_risk}(h_i)\lor \mathrm{edit\_checked}(h_i)]
+```
+
+```math
+C_{\mathrm{cmd}}=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[\neg \mathrm{command\_risk}(h_i)\lor \mathrm{command\_guarded}(h_i)]
+```
+
+```math
+C_{\mathrm{inj}}=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[\neg \mathrm{untrusted}(h_i)\lor \mathrm{boundary\_ok}(h_i)]
+```
+
+```math
+C_{\mathrm{trace}}=\frac{1}{N}\sum_{i=1}^{N}\frac{|F_i\cap F_{\mathrm{req}}|}{|F_{\mathrm{req}}|}
+```
+
+```math
+C_{\mathrm{replay}}=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[\mathrm{replay\_ready}(h_i)\land \mathrm{version\_captured}(h_i)]
+```
+
+```math
+C_{\mathrm{eval}}=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[\mathrm{eval\_deterministic}(h_i)\land \mathrm{version\_captured}(h_i)]
+```
+
+```math
+C_{\mathrm{cost}}=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[S_i\le S_{\max}\land M_i\le M_{\max}\land \neg \mathrm{repeat}(h_i)]
+```
+
+```math
+C_{\mathrm{env}}=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[\mathrm{env\_fingerprint}(h_i)\land \mathrm{cwd\_recorded}(h_i)]
+```
+
+最终实战坑门禁可以定义为：
+
+```math
+G_{\mathrm{pitfall}}=\mathbb{1}[
+C_{\mathrm{triage}}\ge\tau_{\mathrm{triage}}
+\land C_{\mathrm{perm}}\ge\tau_{\mathrm{perm}}
+\land C_{\mathrm{ctx}}\ge\tau_{\mathrm{ctx}}
+\land C_{\mathrm{edit}}\ge\tau_{\mathrm{edit}}
+\land C_{\mathrm{cmd}}\ge\tau_{\mathrm{cmd}}
+\land C_{\mathrm{inj}}\ge\tau_{\mathrm{inj}}
+\land C_{\mathrm{trace}}\ge\tau_{\mathrm{trace}}
+\land C_{\mathrm{replay}}\ge\tau_{\mathrm{replay}}
+\land C_{\mathrm{eval}}\ge\tau_{\mathrm{eval}}
+\land C_{\mathrm{cost}}\ge\tau_{\mathrm{cost}}
+\land C_{\mathrm{env}}\ge\tau_{\mathrm{env}}
+]
+```
+
+这些指标的价值不是替代人工复盘，而是让排查顺序更稳定：先确认事故是否被正确归因，再看权限、上下文、编辑、终端、外部内容、trace、replay、eval 和环境是否形成闭环。
+
+### 16.19.1 最小可运行 Harness 实战坑审计 demo
+
+下面的 demo 不调用模型、不执行命令、不访问文件系统或网络，只审计一组 toy incident。它故意构造 permission overreach、context overload、用户改动覆盖、shell hang、外部内容边界缺失、trace 缺失、eval flaky、doom loop、MCP tool overload 和环境漂移等 bad case，让 gate 失败并输出根因。
+
+```python
+incidents = [
+    {
+        "id": "permission_overreach",
+        "root": "permission_overreach",
+        "triaged": True,
+        "expected_permission": "ask",
+        "actual_permission": "allow",
+        "high_risk": True,
+        "approved": False,
+        "context_tokens": 3600,
+        "context_limit": 8000,
+        "output_limited": True,
+        "edit_risk": False,
+        "edit_checked": True,
+        "command_risk": False,
+        "command_safe": True,
+        "timeout": True,
+        "cwd_recorded": True,
+        "env_masked": True,
+        "untrusted": False,
+        "trust_labeled": True,
+        "high_risk_blocked": False,
+        "trace_fields": ["goal", "tool", "permission", "diff"],
+        "replay_ready": False,
+        "eval_deterministic": True,
+        "version_captured": True,
+        "steps": 4,
+        "step_limit": 12,
+        "cost": 0.08,
+        "cost_limit": 0.30,
+        "repeated_call": False,
+        "env_fingerprint": True,
+    },
+    {
+        "id": "context_overload",
+        "root": "context_overload",
+        "triaged": True,
+        "expected_permission": "allow",
+        "actual_permission": "allow",
+        "high_risk": False,
+        "approved": True,
+        "context_tokens": 14500,
+        "context_limit": 8000,
+        "output_limited": False,
+        "edit_risk": False,
+        "edit_checked": True,
+        "command_risk": False,
+        "command_safe": True,
+        "timeout": True,
+        "cwd_recorded": True,
+        "env_masked": True,
+        "untrusted": False,
+        "trust_labeled": True,
+        "high_risk_blocked": True,
+        "trace_fields": ["goal", "context", "tool", "error"],
+        "replay_ready": False,
+        "eval_deterministic": False,
+        "version_captured": False,
+        "steps": 9,
+        "step_limit": 12,
+        "cost": 0.41,
+        "cost_limit": 0.30,
+        "repeated_call": False,
+        "env_fingerprint": True,
+    },
+    {
+        "id": "user_edit_overwrite",
+        "root": "edit_overwrite",
+        "triaged": True,
+        "expected_permission": "ask",
+        "actual_permission": "ask",
+        "high_risk": True,
+        "approved": True,
+        "context_tokens": 5200,
+        "context_limit": 8000,
+        "output_limited": True,
+        "edit_risk": True,
+        "edit_checked": False,
+        "command_risk": False,
+        "command_safe": True,
+        "timeout": True,
+        "cwd_recorded": True,
+        "env_masked": True,
+        "untrusted": False,
+        "trust_labeled": True,
+        "high_risk_blocked": True,
+        "trace_fields": ["goal", "diff", "permission", "error"],
+        "replay_ready": True,
+        "eval_deterministic": True,
+        "version_captured": True,
+        "steps": 5,
+        "step_limit": 12,
+        "cost": 0.11,
+        "cost_limit": 0.30,
+        "repeated_call": False,
+        "env_fingerprint": True,
+    },
+    {
+        "id": "shell_hang",
+        "root": "shell_hang",
+        "triaged": True,
+        "expected_permission": "ask",
+        "actual_permission": "ask",
+        "high_risk": True,
+        "approved": True,
+        "context_tokens": 4200,
+        "context_limit": 8000,
+        "output_limited": True,
+        "edit_risk": False,
+        "edit_checked": True,
+        "command_risk": True,
+        "command_safe": False,
+        "timeout": False,
+        "cwd_recorded": False,
+        "env_masked": False,
+        "untrusted": False,
+        "trust_labeled": True,
+        "high_risk_blocked": True,
+        "trace_fields": ["goal", "tool", "permission"],
+        "replay_ready": False,
+        "eval_deterministic": False,
+        "version_captured": False,
+        "steps": 13,
+        "step_limit": 12,
+        "cost": 0.22,
+        "cost_limit": 0.30,
+        "repeated_call": False,
+        "env_fingerprint": False,
+    },
+    {
+        "id": "prompt_injection_from_issue",
+        "root": "prompt_injection_boundary",
+        "triaged": True,
+        "expected_permission": "deny",
+        "actual_permission": "ask",
+        "high_risk": True,
+        "approved": False,
+        "context_tokens": 3900,
+        "context_limit": 8000,
+        "output_limited": True,
+        "edit_risk": False,
+        "edit_checked": True,
+        "command_risk": True,
+        "command_safe": True,
+        "timeout": True,
+        "cwd_recorded": True,
+        "env_masked": True,
+        "untrusted": True,
+        "trust_labeled": False,
+        "high_risk_blocked": False,
+        "trace_fields": ["goal", "context", "tool", "permission", "error"],
+        "replay_ready": True,
+        "eval_deterministic": True,
+        "version_captured": True,
+        "steps": 6,
+        "step_limit": 12,
+        "cost": 0.16,
+        "cost_limit": 0.30,
+        "repeated_call": False,
+        "env_fingerprint": True,
+    },
+    {
+        "id": "trace_missing",
+        "root": "trace_missing",
+        "triaged": False,
+        "expected_permission": "allow",
+        "actual_permission": "allow",
+        "high_risk": False,
+        "approved": True,
+        "context_tokens": 4700,
+        "context_limit": 8000,
+        "output_limited": True,
+        "edit_risk": False,
+        "edit_checked": True,
+        "command_risk": False,
+        "command_safe": True,
+        "timeout": True,
+        "cwd_recorded": True,
+        "env_masked": True,
+        "untrusted": False,
+        "trust_labeled": True,
+        "high_risk_blocked": True,
+        "trace_fields": ["goal"],
+        "replay_ready": False,
+        "eval_deterministic": False,
+        "version_captured": False,
+        "steps": 3,
+        "step_limit": 12,
+        "cost": 0.05,
+        "cost_limit": 0.30,
+        "repeated_call": False,
+        "env_fingerprint": True,
+    },
+    {
+        "id": "eval_flaky",
+        "root": "eval_flakiness",
+        "triaged": True,
+        "expected_permission": "allow",
+        "actual_permission": "allow",
+        "high_risk": False,
+        "approved": True,
+        "context_tokens": 5100,
+        "context_limit": 8000,
+        "output_limited": True,
+        "edit_risk": False,
+        "edit_checked": True,
+        "command_risk": False,
+        "command_safe": True,
+        "timeout": True,
+        "cwd_recorded": True,
+        "env_masked": True,
+        "untrusted": False,
+        "trust_labeled": True,
+        "high_risk_blocked": True,
+        "trace_fields": ["goal", "tool", "trace", "error"],
+        "replay_ready": False,
+        "eval_deterministic": False,
+        "version_captured": False,
+        "steps": 5,
+        "step_limit": 12,
+        "cost": 0.12,
+        "cost_limit": 0.30,
+        "repeated_call": False,
+        "env_fingerprint": False,
+    },
+    {
+        "id": "doom_loop",
+        "root": "doom_loop",
+        "triaged": True,
+        "expected_permission": "allow",
+        "actual_permission": "allow",
+        "high_risk": False,
+        "approved": True,
+        "context_tokens": 7800,
+        "context_limit": 8000,
+        "output_limited": True,
+        "edit_risk": False,
+        "edit_checked": True,
+        "command_risk": False,
+        "command_safe": True,
+        "timeout": True,
+        "cwd_recorded": True,
+        "env_masked": True,
+        "untrusted": False,
+        "trust_labeled": True,
+        "high_risk_blocked": True,
+        "trace_fields": ["goal", "context", "tool", "trace", "error"],
+        "replay_ready": True,
+        "eval_deterministic": True,
+        "version_captured": True,
+        "steps": 18,
+        "step_limit": 12,
+        "cost": 0.52,
+        "cost_limit": 0.30,
+        "repeated_call": True,
+        "env_fingerprint": True,
+    },
+    {
+        "id": "mcp_tool_overload",
+        "root": "mcp_tool_overload",
+        "triaged": True,
+        "expected_permission": "ask",
+        "actual_permission": "allow",
+        "high_risk": True,
+        "approved": False,
+        "context_tokens": 9800,
+        "context_limit": 8000,
+        "output_limited": False,
+        "edit_risk": False,
+        "edit_checked": True,
+        "command_risk": False,
+        "command_safe": True,
+        "timeout": True,
+        "cwd_recorded": True,
+        "env_masked": True,
+        "untrusted": True,
+        "trust_labeled": True,
+        "high_risk_blocked": False,
+        "trace_fields": ["goal", "context", "tool", "permission", "trace"],
+        "replay_ready": False,
+        "eval_deterministic": True,
+        "version_captured": False,
+        "steps": 10,
+        "step_limit": 12,
+        "cost": 0.36,
+        "cost_limit": 0.30,
+        "repeated_call": False,
+        "env_fingerprint": True,
+    },
+    {
+        "id": "env_drift",
+        "root": "environment_drift",
+        "triaged": True,
+        "expected_permission": "allow",
+        "actual_permission": "allow",
+        "high_risk": False,
+        "approved": True,
+        "context_tokens": 4100,
+        "context_limit": 8000,
+        "output_limited": True,
+        "edit_risk": False,
+        "edit_checked": True,
+        "command_risk": True,
+        "command_safe": True,
+        "timeout": True,
+        "cwd_recorded": False,
+        "env_masked": True,
+        "untrusted": False,
+        "trust_labeled": True,
+        "high_risk_blocked": True,
+        "trace_fields": ["goal", "tool", "permission", "trace", "version"],
+        "replay_ready": False,
+        "eval_deterministic": True,
+        "version_captured": False,
+        "steps": 7,
+        "step_limit": 12,
+        "cost": 0.15,
+        "cost_limit": 0.30,
+        "repeated_call": False,
+        "env_fingerprint": False,
+    },
+]
+
+required_trace = {"goal", "context", "tool", "permission", "diff", "trace", "error", "version"}
+
+
+def avg(values):
+    return round(sum(values) / len(values), 3)
+
+
+def trace_score(case):
+    return len(required_trace & set(case["trace_fields"])) / len(required_trace)
+
+
+metrics = {
+    "triage_coverage": avg([case["triaged"] for case in incidents]),
+    "permission_safety": avg([
+        case["actual_permission"] == case["expected_permission"]
+        or (case["expected_permission"] == "deny" and case["actual_permission"] == "ask" and not case["approved"])
+        for case in incidents
+    ]),
+    "context_budget_pass": avg([
+        case["context_tokens"] <= case["context_limit"] and case["output_limited"]
+        for case in incidents
+    ]),
+    "edit_safety": avg([not case["edit_risk"] or case["edit_checked"] for case in incidents]),
+    "command_safety": avg([
+        not case["command_risk"]
+        or (case["command_safe"] and case["timeout"] and case["cwd_recorded"] and case["env_masked"])
+        for case in incidents
+    ]),
+    "prompt_injection_boundary": avg([
+        not case["untrusted"] or (case["trust_labeled"] and case["high_risk_blocked"])
+        for case in incidents
+    ]),
+    "trace_completeness": avg([trace_score(case) for case in incidents]),
+    "replay_readiness": avg([case["replay_ready"] and case["version_captured"] for case in incidents]),
+    "eval_determinism": avg([case["eval_deterministic"] and case["version_captured"] for case in incidents]),
+    "cost_loop_control": avg([
+        case["steps"] <= case["step_limit"]
+        and case["cost"] <= case["cost_limit"]
+        and not case["repeated_call"]
+        for case in incidents
+    ]),
+    "environment_parity": avg([case["env_fingerprint"] and case["cwd_recorded"] for case in incidents]),
+}
+
+thresholds = {
+    "triage_coverage": 0.95,
+    "permission_safety": 0.95,
+    "context_budget_pass": 0.90,
+    "edit_safety": 0.95,
+    "command_safety": 0.95,
+    "prompt_injection_boundary": 0.95,
+    "trace_completeness": 0.85,
+    "replay_readiness": 0.80,
+    "eval_determinism": 0.80,
+    "cost_loop_control": 0.90,
+    "environment_parity": 0.90,
+}
+
+failed_gates = [name for name, limit in thresholds.items() if metrics[name] < limit]
+root_causes = {}
+for case in incidents:
+    root_causes.setdefault(case["root"], []).append(case["id"])
+
+print(f"metrics={metrics}")
+print(f"failed_gates={failed_gates}")
+print(f"root_causes={root_causes}")
+print(f"harness_pitfall_gate_pass={not failed_gates}")
+```
+
+运行结果应类似：
+
+```text
+metrics={'triage_coverage': 0.9, 'permission_safety': 0.8, 'context_budget_pass': 0.8, 'edit_safety': 0.9, 'command_safety': 0.8, 'prompt_injection_boundary': 0.8, 'trace_completeness': 0.5, 'replay_readiness': 0.3, 'eval_determinism': 0.4, 'cost_loop_control': 0.6, 'environment_parity': 0.7}
+failed_gates=['triage_coverage', 'permission_safety', 'context_budget_pass', 'edit_safety', 'command_safety', 'prompt_injection_boundary', 'trace_completeness', 'replay_readiness', 'eval_determinism', 'cost_loop_control', 'environment_parity']
+root_causes={'permission_overreach': ['permission_overreach'], 'context_overload': ['context_overload'], 'edit_overwrite': ['user_edit_overwrite'], 'shell_hang': ['shell_hang'], 'prompt_injection_boundary': ['prompt_injection_from_issue'], 'trace_missing': ['trace_missing'], 'eval_flakiness': ['eval_flaky'], 'doom_loop': ['doom_loop'], 'mcp_tool_overload': ['mcp_tool_overload'], 'environment_drift': ['env_drift']}
+harness_pitfall_gate_pass=False
+```
+
+面试中可以这样解释这个 demo：它不是为了证明某个真实产品不合格，而是展示 production harness 的事故复盘应该有一张统一表，把权限、上下文、编辑、终端、外部内容、trace、replay、eval、预算和环境问题放在同一个 gate 里。只看最终 diff 或最终回答，无法稳定定位这些根因。
+
+## 16.20 小练习
 
 1. 拿一个你使用过的 coding agent，按本章八层排查框架分析它的一次失败案例。
 2. 设计一个 permission policy，要求 review agent 只读，build agent 可编辑和测试，release agent 可创建 PR 但不能 deploy。
@@ -560,7 +1056,7 @@ User / Issue / IDE / CLI
 6. 对比“本地 CLI agent”和“云端异步 agent”的安全威胁模型。
 7. 用 3 分钟口述“设计一个 coding agent harness”的面试答案，并录音复盘是否覆盖了核心模块。
 
-## 16.20 本章总结
+## 16.21 本章总结
 
 本章整理了 Agent Harness 的实战坑和面试题。
 

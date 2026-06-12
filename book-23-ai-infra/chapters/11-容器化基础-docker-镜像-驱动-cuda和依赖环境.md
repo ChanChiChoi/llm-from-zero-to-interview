@@ -10,6 +10,16 @@
 
 > 容器化的核心价值不是“把程序打包”，而是把训练和推理环境变成可复现、可分发、可调度、可审计的运行单元。
 
+## 11.0 本讲资料边界与第二轮精修口径
+
+本讲第二轮精修时，资料口径按“AI 训练与推理容器环境的稳定抽象”处理，而不是绑定某个 Kubernetes 集群、某个镜像仓库、某个 CUDA 镜像 tag 或某家云厂商实现。镜像构建部分参考 Docker 官方对 Dockerfile best practices、多阶段构建、基础镜像 digest pin 和 CI 测试的建议；GPU 容器部分参考 NVIDIA Container Toolkit 对 runtime / CDI、GPU device 暴露、driver capabilities 和容器内 GPU 可见性的边界；CUDA 兼容性部分参考 NVIDIA CUDA compatibility 对 driver 与 CUDA Toolkit / runtime 的兼容关系；镜像安全部分参考 Docker Scout / 镜像扫描、签名、SBOM 和 registry 权限治理的通用口径。
+
+需要注意三点：
+
+1. 本章讲容器镜像、GPU runtime、驱动 / CUDA / 框架兼容、依赖锁定、安全扫描和环境可复现，不把下一章 Kubernetes device plugin、Pod 调度和 GPU 资源管理提前展开。
+2. 容器不是虚拟机，也不是绝对安全边界。GPU 容器仍依赖宿主机驱动、内核、设备挂载、网络和多租户权限策略。
+3. 训练镜像、推理镜像、基础镜像和项目镜像要分层治理；复现时不能只记录 tag，必须记录 digest、驱动、CUDA、框架、依赖、代码、数据和启动命令。
+
 ## 11.1 为什么 AI Infra 需要容器化
 
 没有容器化时，训练任务可能直接跑在机器环境里。
@@ -425,7 +435,413 @@ AI 镜像经常包含大量第三方包，更需要供应链治理。
 5. 集群驱动和 CUDA 组合不同。
 6. 启动命令或环境变量不同。
 
-## 11.16 面试中如何回答容器化设计
+## 11.16 容器环境审计指标与最小 demo
+
+可以把容器环境从“一个 Dockerfile”写成一组可审计对象。
+
+一个 AI 容器环境样本可以抽象为：
+
+```math
+e_i=(b_i,d_i,g_i,c_i,l_i,p_i,s_i,r_i,m_i,n_i,a_i,z_i)
+```
+
+其中，`b_i` 是基础镜像和 layer 信息，`d_i` 是镜像 digest，`g_i` 是 GPU runtime 和设备可见性，`c_i` 是 CUDA / driver / framework 兼容矩阵，`l_i` 是依赖锁定信息，`p_i` 是构建流水线和 smoke test，`s_i` 是镜像扫描、签名和 SBOM，`r_i` 是 registry 权限，`m_i` 是运行时 metadata，`n_i` 是多租户挂载和网络边界，`a_i` 是审计日志，`z_i` 是最终门禁结果。
+
+镜像拉取和冷启动时间可以粗略拆成：
+
+```math
+T_{\mathrm{pull}}=\frac{S_{\mathrm{img}}}{\eta B_{\mathrm{reg}}}+T_{\mathrm{unpack}}
+```
+
+```math
+T_{\mathrm{start}}=T_{\mathrm{pull}}+T_{\mathrm{init}}+T_{\mathrm{smoke}}
+```
+
+其中，`S_img` 是需要拉取的镜像大小，`B_reg` 是 registry 到节点的有效带宽，`\eta` 是有效传输系数，`T_unpack` 是解压和写入本地镜像层的时间，`T_init` 是进程初始化时间，`T_smoke` 是启动前 smoke test 的时间。
+
+镜像层复用率可以写成：
+
+```math
+R_{\mathrm{layer}}=\frac{S_{\mathrm{cached}}}{S_{\mathrm{layer}}}
+```
+
+其中，`S_cached` 是节点已缓存的 layer 大小，`S_layer` 是镜像总 layer 大小。复用率越高，任务启动和推理扩容时越不容易被镜像拉取拖慢。
+
+依赖锁定覆盖率可以写成：
+
+```math
+C_{\mathrm{lock}}=\frac{N_{\mathrm{pinned}}}{N_{\mathrm{dep}}}
+```
+
+其中，`N_pinned` 是锁定版本或 hash 的关键依赖数量，`N_dep` 是关键依赖总数。对 CUDA、PyTorch、NCCL、Triton、FlashAttention、serving runtime 和私有 wheel，缺少锁定会直接影响可复现性。
+
+GPU 容器兼容性可以写成一个硬门禁：
+
+```math
+G_{\mathrm{cuda}}=\mathbf{1}\left[v_{\mathrm{driver}}\ge v_{\mathrm{min}}(u_{\mathrm{cuda}}) \land C_{\mathrm{fw}}=1 \land C_{\mathrm{gpu}}=1\right]
+```
+
+其中，`v_driver` 是宿主机驱动版本，`v_min(u_cuda)` 是容器内 CUDA 用户态版本所需的最低驱动口径，`C_fw` 表示框架、NCCL、cuDNN、Triton / 自定义 kernel 版本兼容，`C_gpu` 表示 GPU 架构和 device 暴露正确。
+
+最后，可以把容器环境门禁写成：
+
+```math
+G_{\mathrm{container}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land T_{\mathrm{start}}\le \tau_{\mathrm{start}} \land V_{\mathrm{crit}}=0 \land P_0=0\right]
+```
+
+其中，`C_j` 是第 `j` 个容器环境审计指标覆盖率，`\tau_j` 是覆盖率阈值，`\tau_start` 是冷启动 SLO，`V_crit` 是 critical 漏洞数量，`P_0` 是 P0 级风险数量。
+
+下面这个 0 依赖 demo 演示如何把容器环境写成审计规则。它故意构造 1 个完整样本和 16 个坏样本，让每个关键维度各失败一次。
+
+```python
+import copy
+
+
+METRICS = [
+    "image_digest_reproducibility",
+    "base_layer_cache_fit",
+    "cuda_driver_framework_compatibility",
+    "gpu_runtime_visibility",
+    "dependency_lock_coverage",
+    "training_serving_image_separation",
+    "image_size_startup_fit",
+    "build_pipeline_smoke_test",
+    "security_scan_signing",
+    "secret_data_exclusion",
+    "runtime_hardening_fit",
+    "registry_access_governance",
+    "environment_metadata_capture",
+    "multi_tenant_mount_isolation",
+    "nccl_rdma_runtime_fit",
+    "container_environment_gate",
+]
+
+
+def layer_cache_hit(cached_gib, total_layer_gib):
+    return cached_gib / total_layer_gib
+
+
+def pull_time_s(size_gib, bandwidth_gib_s, efficiency, unpack_s):
+    return size_gib / (bandwidth_gib_s * efficiency) + unpack_s
+
+
+def cold_start_time_s(size_gib, bandwidth_gib_s, efficiency, unpack_s, init_s, smoke_s):
+    return pull_time_s(size_gib, bandwidth_gib_s, efficiency, unpack_s) + init_s + smoke_s
+
+
+def lock_coverage(pinned, total):
+    return pinned / total
+
+
+def build_container_cases():
+    complete = {
+        "name": "complete",
+        "image": {
+            "tag": "train:cuda12.4-py310",
+            "digest_pinned": True,
+            "base_digest_pinned": True,
+            "tag_immutable": True,
+            "layers_total_gib": 18,
+            "cached_layers_gib": 14,
+        },
+        "cuda": {
+            "host_driver": 550,
+            "min_driver": 545,
+            "cuda_user": "12.4",
+            "framework_cuda": "12.4",
+            "gpu_arch_supported": True,
+            "library_set_consistent": True,
+        },
+        "gpu_runtime": {
+            "runtime_hook": True,
+            "device_plugin": True,
+            "visible_devices": "GPU-uuid",
+            "driver_capabilities": {"compute", "utility"},
+            "gpu_smoke_test": True,
+        },
+        "dependency": {
+            "lockfile": True,
+            "pinned": 42,
+            "total": 42,
+            "private_wheel_hashes": True,
+        },
+        "image_role": {
+            "role": "training",
+            "serving_from_training": False,
+            "serving_slimmed": True,
+        },
+        "startup": {
+            "image_size_gib": 24,
+            "registry_gib_s": 2.0,
+            "efficiency": 0.8,
+            "unpack_s": 12,
+            "init_s": 8,
+            "smoke_s": 10,
+            "startup_slo_s": 50,
+        },
+        "build": {
+            "ci": True,
+            "smoke_tests": {"python", "cuda", "torch", "nccl", "import"},
+            "digest_recorded": True,
+            "sbom": True,
+        },
+        "security": {
+            "scan": True,
+            "signed": True,
+            "critical_vulns": 0,
+            "high_vulns": 0,
+        },
+        "secret_data": {
+            "secrets_in_image": 0,
+            "sensitive_data_files": 0,
+            "model_weights_in_image": False,
+        },
+        "hardening": {
+            "run_as_root": False,
+            "privileged": False,
+            "readonly_rootfs": True,
+            "dropped_caps": True,
+        },
+        "registry": {
+            "private": True,
+            "rbac": True,
+            "retention": True,
+            "audit_log": True,
+        },
+        "metadata": {
+            "image_digest": True,
+            "python": True,
+            "cuda": True,
+            "driver": True,
+            "torch": True,
+            "nccl": True,
+            "command": True,
+            "env": True,
+            "code_commit": True,
+            "data_version": True,
+        },
+        "mounts": {
+            "host_path_wildcard": False,
+            "tenant_volume_scope": True,
+            "secret_env_masked": True,
+        },
+        "nccl": {
+            "rdma_devices_mounted": True,
+            "ib_visible": True,
+            "network_mode_ok": True,
+            "nccl_smoke_test": True,
+        },
+        "gate": {"enabled": True},
+    }
+
+    def bad_case(name, mutator):
+        case = copy.deepcopy(complete)
+        case["name"] = name
+        mutator(case)
+        return case
+
+    bad_cases = [
+        bad_case("tag_only_latest_bad", lambda c: c["image"].update({"digest_pinned": False})),
+        bad_case("layer_cache_miss_bad", lambda c: c["image"].update({"cached_layers_gib": 2})),
+        bad_case("old_driver_bad", lambda c: c["cuda"].update({"host_driver": 520})),
+        bad_case("gpu_runtime_missing_bad", lambda c: c["gpu_runtime"].update({"runtime_hook": False})),
+        bad_case("dependency_unpinned_bad", lambda c: c["dependency"].update({"lockfile": False, "pinned": 30})),
+        bad_case("training_image_as_serving_bad", lambda c: c["image_role"].update({"serving_from_training": True})),
+        bad_case("huge_image_cold_start_bad", lambda c: c["startup"].update({"image_size_gib": 80})),
+        bad_case("smoke_test_missing_bad", lambda c: c["build"].update({"smoke_tests": {"python", "import"}})),
+        bad_case("unsigned_vulnerable_image_bad", lambda c: c["security"].update({"signed": False, "critical_vulns": 1})),
+        bad_case("secret_baked_in_bad", lambda c: c["secret_data"].update({"secrets_in_image": 1})),
+        bad_case("root_privileged_bad", lambda c: c["hardening"].update({"run_as_root": True, "privileged": True})),
+        bad_case("open_registry_bad", lambda c: c["registry"].update({"private": False})),
+        bad_case("metadata_missing_bad", lambda c: c["metadata"].update({"driver": False})),
+        bad_case("wildcard_host_mount_bad", lambda c: c["mounts"].update({"host_path_wildcard": True})),
+        bad_case("rdma_not_visible_bad", lambda c: c["nccl"].update({"rdma_devices_mounted": False})),
+        bad_case("container_gate_missing_bad", lambda c: c["gate"].update({"enabled": False})),
+    ]
+    return [complete] + bad_cases
+
+
+def check_image_digest(case):
+    image = case["image"]
+    return image["digest_pinned"] and image["base_digest_pinned"] and image["tag_immutable"]
+
+
+def check_layer_cache(case):
+    image = case["image"]
+    return layer_cache_hit(image["cached_layers_gib"], image["layers_total_gib"]) >= 0.6
+
+
+def check_cuda(case):
+    cuda = case["cuda"]
+    return (
+        cuda["host_driver"] >= cuda["min_driver"]
+        and cuda["cuda_user"] == cuda["framework_cuda"]
+        and cuda["gpu_arch_supported"]
+        and cuda["library_set_consistent"]
+    )
+
+
+def check_gpu_runtime(case):
+    runtime = case["gpu_runtime"]
+    return (
+        runtime["runtime_hook"]
+        and runtime["device_plugin"]
+        and bool(runtime["visible_devices"])
+        and {"compute", "utility"}.issubset(runtime["driver_capabilities"])
+        and runtime["gpu_smoke_test"]
+    )
+
+
+def check_dependency(case):
+    dep = case["dependency"]
+    return dep["lockfile"] and lock_coverage(dep["pinned"], dep["total"]) >= 0.95 and dep["private_wheel_hashes"]
+
+
+def check_image_role(case):
+    role = case["image_role"]
+    return not role["serving_from_training"] and role["serving_slimmed"]
+
+
+def check_startup(case):
+    startup = case["startup"]
+    start_s = cold_start_time_s(
+        startup["image_size_gib"],
+        startup["registry_gib_s"],
+        startup["efficiency"],
+        startup["unpack_s"],
+        startup["init_s"],
+        startup["smoke_s"],
+    )
+    return startup["image_size_gib"] <= 30 and start_s <= startup["startup_slo_s"]
+
+
+def check_build(case):
+    build = case["build"]
+    required = {"python", "cuda", "torch", "nccl", "import"}
+    return build["ci"] and required.issubset(build["smoke_tests"]) and build["digest_recorded"] and build["sbom"]
+
+
+def check_security(case):
+    sec = case["security"]
+    return sec["scan"] and sec["signed"] and sec["critical_vulns"] == 0 and sec["high_vulns"] == 0
+
+
+def check_secret_data(case):
+    data = case["secret_data"]
+    return data["secrets_in_image"] == 0 and data["sensitive_data_files"] == 0 and not data["model_weights_in_image"]
+
+
+def check_hardening(case):
+    hard = case["hardening"]
+    return not hard["run_as_root"] and not hard["privileged"] and hard["readonly_rootfs"] and hard["dropped_caps"]
+
+
+def check_registry(case):
+    return all(case["registry"].values())
+
+
+def check_metadata(case):
+    return all(case["metadata"].values())
+
+
+def check_mounts(case):
+    mounts = case["mounts"]
+    return not mounts["host_path_wildcard"] and mounts["tenant_volume_scope"] and mounts["secret_env_masked"]
+
+
+def check_nccl(case):
+    return all(case["nccl"].values())
+
+
+def check_gate(case):
+    return case["gate"]["enabled"]
+
+
+CHECKS = {
+    "image_digest_reproducibility": check_image_digest,
+    "base_layer_cache_fit": check_layer_cache,
+    "cuda_driver_framework_compatibility": check_cuda,
+    "gpu_runtime_visibility": check_gpu_runtime,
+    "dependency_lock_coverage": check_dependency,
+    "training_serving_image_separation": check_image_role,
+    "image_size_startup_fit": check_startup,
+    "build_pipeline_smoke_test": check_build,
+    "security_scan_signing": check_security,
+    "secret_data_exclusion": check_secret_data,
+    "runtime_hardening_fit": check_hardening,
+    "registry_access_governance": check_registry,
+    "environment_metadata_capture": check_metadata,
+    "multi_tenant_mount_isolation": check_mounts,
+    "nccl_rdma_runtime_fit": check_nccl,
+    "container_environment_gate": check_gate,
+}
+
+
+def audit_container_environment(cases):
+    case_failures = {}
+    for case in cases:
+        failures = [name for name, check in CHECKS.items() if not check(case)]
+        case_failures[case["name"]] = failures
+
+    metrics = {}
+    for name, check in CHECKS.items():
+        metrics[name] = round(sum(int(check(case)) for case in cases) / len(cases), 3)
+
+    failed_cases = [name for name, failures in case_failures.items() if failures]
+    return {
+        "metrics": metrics,
+        "hard_blocker_count": len(failed_cases),
+        "failed_cases": failed_cases,
+        "container_gate_pass": not failed_cases and min(metrics.values()) >= 0.95,
+    }
+
+
+cases = build_container_cases()
+case_by_name = {case["name"]: case for case in cases}
+complete = case_by_name["complete"]
+startup = complete["startup"]
+image = complete["image"]
+container_examples = {
+    "layer_cache_hit": round(layer_cache_hit(image["cached_layers_gib"], image["layers_total_gib"]), 3),
+    "pull_24gib_s": round(pull_time_s(24, startup["registry_gib_s"], startup["efficiency"], startup["unpack_s"]), 1),
+    "cold_start_24gib_s": round(cold_start_time_s(24, startup["registry_gib_s"], startup["efficiency"], startup["unpack_s"], startup["init_s"], startup["smoke_s"]), 1),
+    "lock_coverage": round(lock_coverage(complete["dependency"]["pinned"], complete["dependency"]["total"]), 3),
+    "driver_margin": complete["cuda"]["host_driver"] - complete["cuda"]["min_driver"],
+    "critical_vulns": complete["security"]["critical_vulns"],
+}
+
+smoke = {
+    "complete_case_passes": all(check(complete) for check in CHECKS.values()),
+    "caught_tag_only": not check_image_digest(case_by_name["tag_only_latest_bad"]),
+    "caught_old_driver": not check_cuda(case_by_name["old_driver_bad"]),
+    "caught_missing_gpu_runtime": not check_gpu_runtime(case_by_name["gpu_runtime_missing_bad"]),
+    "caught_unpinned_deps": not check_dependency(case_by_name["dependency_unpinned_bad"]),
+    "caught_secret": not check_secret_data(case_by_name["secret_baked_in_bad"]),
+}
+
+audit = audit_container_environment(cases)
+print(f"container_examples={container_examples}")
+print(f"smoke={smoke}")
+print(f"metrics={audit['metrics']}")
+print(f"hard_blocker_count={audit['hard_blocker_count']}")
+print(f"failed_cases={audit['failed_cases']}")
+print(f"container_gate_pass={audit['container_gate_pass']}")
+```
+
+一组典型输出是：
+
+```text
+container_examples={'layer_cache_hit': 0.778, 'pull_24gib_s': 27.0, 'cold_start_24gib_s': 45.0, 'lock_coverage': 1.0, 'driver_margin': 5, 'critical_vulns': 0}
+smoke={'complete_case_passes': True, 'caught_tag_only': True, 'caught_old_driver': True, 'caught_missing_gpu_runtime': True, 'caught_unpinned_deps': True, 'caught_secret': True}
+metrics={'image_digest_reproducibility': 0.941, 'base_layer_cache_fit': 0.941, 'cuda_driver_framework_compatibility': 0.941, 'gpu_runtime_visibility': 0.941, 'dependency_lock_coverage': 0.941, 'training_serving_image_separation': 0.941, 'image_size_startup_fit': 0.941, 'build_pipeline_smoke_test': 0.941, 'security_scan_signing': 0.941, 'secret_data_exclusion': 0.941, 'runtime_hardening_fit': 0.941, 'registry_access_governance': 0.941, 'environment_metadata_capture': 0.941, 'multi_tenant_mount_isolation': 0.941, 'nccl_rdma_runtime_fit': 0.941, 'container_environment_gate': 0.941}
+hard_blocker_count=16
+failed_cases=['tag_only_latest_bad', 'layer_cache_miss_bad', 'old_driver_bad', 'gpu_runtime_missing_bad', 'dependency_unpinned_bad', 'training_image_as_serving_bad', 'huge_image_cold_start_bad', 'smoke_test_missing_bad', 'unsigned_vulnerable_image_bad', 'secret_baked_in_bad', 'root_privileged_bad', 'open_registry_bad', 'metadata_missing_bad', 'wildcard_host_mount_bad', 'rdma_not_visible_bad', 'container_gate_missing_bad']
+container_gate_pass=False
+```
+
+这个 demo 的重点是把容器环境拆成可验证证据链：digest 和基础镜像要可复现，layer cache 和镜像体积影响冷启动，CUDA / driver / framework 要形成兼容矩阵，GPU runtime 必须真的能看到设备，依赖要锁版本，训练和推理镜像要分离，构建流水线要跑 smoke test，镜像要扫描和签名，密钥和模型权重不能打进镜像，多租户挂载、registry 权限、环境 metadata、NCCL / RDMA 和最终门禁都要能审计。
+
+## 11.17 面试中如何回答容器化设计
 
 如果面试官问：
 
@@ -443,7 +859,7 @@ AI 镜像经常包含大量第三方包，更需要供应链治理。
 镜像构建流程要包含依赖锁定、smoke test、GPU 可用性测试、NCCL 测试、安全扫描、签名和 registry 权限控制。训练任务提交时记录镜像 digest、驱动版本、CUDA 版本、代码 commit、数据版本和启动命令，保证后续可复现。
 ```
 
-## 11.17 常见误区
+## 11.18 常见误区
 
 误区一：用了 Docker 就完全可复现。
 
@@ -465,7 +881,7 @@ Tag 可以被覆盖，复现时应该记录 digest。
 
 容器不是绝对安全边界，多租户场景还需要权限、网络策略、密钥管理、审计和宿主机安全。
 
-## 11.18 面试题
+## 11.19 面试题
 
 ### 题 1：Docker 镜像和容器有什么区别？
 
@@ -487,7 +903,7 @@ Tag 可以被覆盖，复现时应该记录 digest。
 
 答：可能是 NCCL 版本不兼容、网卡或 RDMA 设备没有挂载、容器网络策略限制、环境变量配置错误、驱动/CUDA 不匹配、GPU 到网卡亲和性或集群网络问题。
 
-## 11.19 小练习
+## 11.20 小练习
 
 练习一：设计一个训练基础镜像。
 
@@ -505,7 +921,7 @@ Tag 可以被覆盖，复现时应该记录 digest。
 
 要求：包含构建、依赖锁定、GPU smoke test、安全扫描、签名、推送 registry 和记录 digest。
 
-## 11.20 本章小结
+## 11.21 本章小结
 
 本章讲了容器化基础。
 

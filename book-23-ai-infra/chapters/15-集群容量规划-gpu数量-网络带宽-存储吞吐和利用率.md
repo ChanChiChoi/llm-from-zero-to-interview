@@ -8,6 +8,18 @@
 
 > AI 集群容量规划不是按预算买卡，而是按工作负载、性能目标、增长预期、故障冗余和成本约束设计一整套计算、网络、存储和调度容量。
 
+## 15.0 本讲资料边界与第二轮精修口径
+
+第二轮精修时，本章按 `WRITING_PLAN.md` 的要求做了联网资料校准，主要参考 Kubernetes 对 resource request / limit、extended resource、ResourceQuota 和 HorizontalPodAutoscaler 的稳定口径，参考 NVIDIA DCGM 对 GPU profiling metrics、SM activity、显存带宽和 PCIe 传输指标的定义，参考 Google SRE 对 overload、按资源而不是只按 QPS 建模、quota、降级和限流的工程经验。
+
+本章只抽象 AI Infra 集群容量规划的稳定工程问题：如何把 GPU 数量、GPU 型号、训练队列、推理峰值、网络、存储、利用率、故障冗余、增长预测和成本预算放进同一张容量表。它不绑定某个云厂商报价、某一代 GPU 性能参数、某个内部调度器实现或某个固定采购流程。
+
+本章第二轮补强重点有三点：
+
+1. 把原来文字化的 GPU-hours、推理容量、网络和存储估算改成可复用公式。
+2. 明确容量规划不能只看平均 GPU utilization，而要同时看 SLO、峰值、余量、成本和预测偏差。
+3. 新增一个 0 依赖 Python demo，用 toy case 演示如何把完整容量计划和 16 类失败案例做成容量规划门禁。
+
 ## 15.1 为什么容量规划重要
 
 容量规划做不好，会出现两类问题。
@@ -82,6 +94,80 @@ AI 集群容量包括：
 8. 是否需要大量存储读写。
 
 没有任务画像，容量规划就是拍脑袋。
+
+## 15.3.1 关键公式与容量规划速查
+
+先把一段时间窗口内的训练需求折算成 GPU-hours：
+
+```math
+H_{\mathrm{gpu}}=\sum_{k=1}^{K} n_k g_k t_k r_k
+```
+
+其中，`k` 是任务类型，`n_k` 是窗口内任务数，`g_k` 是单任务 GPU 数，`t_k` 是单任务小时数，`r_k` 是重试、失败恢复和实验返工系数。
+
+每张 GPU 在窗口内能提供的有效小时数为：
+
+```math
+C_{\mathrm{one}}=D\cdot 24\cdot u_{\mathrm{eff}}
+```
+
+其中，`D` 是窗口天数，`u_eff` 是目标有效利用率，不是 DCGM 或 `nvidia-smi` 里看到的瞬时 GPU utilization。容量规划中更关心“这张卡是否在完成有价值工作”。
+
+考虑峰值、故障、碎片和增长之后，训练 GPU 需求可以写成：
+
+```math
+G_{\mathrm{need}}=\left\lceil \frac{H_{\mathrm{gpu}}}{D\cdot 24\cdot u_{\mathrm{eff}}}\left(1+h_{\mathrm{peak}}+h_{\mathrm{fail}}+h_{\mathrm{frag}}+h_{\mathrm{growth}}\right) \right\rceil
+```
+
+其中，`h_peak` 是峰值余量，`h_fail` 是故障和维护余量，`h_frag` 是调度碎片余量，`h_growth` 是增长余量。
+
+推理实例数不能只按平均 QPS 算。一个简化估算是：
+
+```math
+I_{\mathrm{serve}}=\left\lceil \frac{\lambda_{\mathrm{peak}}(L_{\mathrm{in}}+L_{\mathrm{out}})}{\mu_{\mathrm{inst}}\eta_{\mathrm{slo}}} \right\rceil
+```
+
+其中，`\lambda_peak` 是峰值 QPS，`L_in` 和 `L_out` 分别是输入和输出 token 数，`\mu_inst` 是单实例在目标延迟下可稳定提供的 token/s，`\eta_slo` 是为了满足 TTFT、TPOT 和 P99 延迟保留的折扣系数。
+
+训练网络容量至少要覆盖关键 collective 的通信量：
+
+```math
+B_{\mathrm{net}}\ge \frac{V_{\mathrm{comm}}}{T_{\mathrm{step}}\eta_{\mathrm{net}}}
+```
+
+其中，`V_comm` 是每步通信量，`T_step` 是目标 step time，`\eta_net` 是网络有效效率。实际规划还要看 RDMA、GPU-NIC 亲和性、机柜内外 oversubscription、重传和 rank skew。
+
+存储吞吐下限可以取多条路径的最大值：
+
+```math
+B_{\mathrm{store}}\ge \max\left(B_{\mathrm{data}},\frac{S_{\mathrm{ckpt}}}{T_{\mathrm{ckpt}}},\frac{S_{\mathrm{model}}}{T_{\mathrm{load}}}\right)
+```
+
+其中，`B_data` 是训练数据读取吞吐，`S_ckpt / T_ckpt` 是 checkpoint 写入吞吐，`S_model / T_load` 是模型权重加载吞吐。
+
+利用率目标必须留下弹性：
+
+```math
+u_{\mathrm{target}}\le 1-h_{\mathrm{burst}}-h_{\mathrm{maint}}-h_{\mathrm{fail}}
+```
+
+如果长期目标利用率高到没有 burst、维护和故障余量，表面上省钱，实际会导致排队、抢占、推理扩容失败和故障恢复困难。
+
+滚动预测要追踪预测偏差：
+
+```math
+E_{\mathrm{forecast}}=\frac{|D_{\mathrm{actual}}-D_{\mathrm{forecast}}|}{D_{\mathrm{forecast}}}
+```
+
+其中，`D_actual` 是实际需求，`D_forecast` 是预测需求。容量评审不是写完一次文档，而是每月或每季度用预测偏差修正下一轮采购、云上弹性和配额策略。
+
+最后可以把容量规划门禁写成：
+
+```math
+G_{\mathrm{capacity}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land G_{\mathrm{actual}}\ge G_{\mathrm{need}} \land I_{\mathrm{actual}}\ge I_{\mathrm{serve}} \land B_{\mathrm{net}}\ge \beta_{\mathrm{net}} \land B_{\mathrm{store}}\ge \beta_{\mathrm{store}} \land K_{\mathrm{est}}\le K_{\mathrm{budget}} \land P_0=0\right]
+```
+
+其中，`C_j` 是第 `j` 个治理检查的覆盖率，`G_actual` 是实际可用 GPU 数，`I_actual` 是实际推理实例数，`K_est` 是估算成本，`K_budget` 是预算，`P_0` 是硬阻断数量。
 
 ## 15.4 GPU 数量估算
 
@@ -445,7 +531,327 @@ AI 资源需求增长通常很快。
 
 不知道谁在用资源，就无法优化。
 
-## 15.17 面试中如何回答容量规划题
+## 15.17 集群容量规划审计指标与最小 demo
+
+下面这个 demo 不模拟真实 GPU 集群，而是演示容量规划评审应该怎么结构化：一个完整样本要同时通过任务画像、GPU 数量、GPU 型号、训练队列、推理峰值、网络、存储、生命周期、利用率余量、故障冗余、增长预测、成本、资源池隔离、quota / burst 和观测回填；16 个 bad case 分别故意打破一个门禁。
+
+```python
+from math import ceil
+
+
+METRICS = [
+    "workload_forecast_coverage",
+    "gpu_count_capacity_fit",
+    "gpu_type_mix_fit",
+    "training_queue_slo_fit",
+    "serving_peak_slo_fit",
+    "network_bandwidth_capacity_fit",
+    "storage_throughput_capacity_fit",
+    "storage_capacity_lifecycle_fit",
+    "utilization_headroom_fit",
+    "failure_redundancy_fit",
+    "growth_forecast_fit",
+    "cost_budget_fit",
+    "pool_separation_fit",
+    "quota_burst_governance",
+    "observability_forecast_feedback",
+    "cluster_capacity_planning_gate",
+]
+
+
+def percentile(values, pct):
+    ordered = sorted(values)
+    if not ordered:
+        return 0.0
+    index = int(round((len(ordered) - 1) * pct / 100.0))
+    return ordered[index]
+
+
+def required_training_gpus(case):
+    base = case["monthly_gpu_hours"] / (
+        case["days"] * 24.0 * case["target_effective_utilization"]
+    )
+    multiplier = (
+        1.0
+        + case["peak_headroom"]
+        + case["failure_headroom"]
+        + case["fragmentation_headroom"]
+        + case["growth_headroom"]
+    )
+    return int(ceil(base * multiplier))
+
+
+def required_serving_instances(case):
+    peak_tokens_per_s = (
+        case["peak_qps"] * (case["input_tokens_p95"] + case["output_tokens_p95"])
+    )
+    stable_tokens_per_s = (
+        case["instance_token_capacity_per_s"] * case["slo_efficiency"]
+    )
+    return int(ceil(peak_tokens_per_s / stable_tokens_per_s))
+
+
+def required_network_gibs(case):
+    return case["comm_gib_per_step"] / (
+        case["target_step_seconds"] * case["network_efficiency"]
+    )
+
+
+def required_storage_gibs(case):
+    checkpoint_write = (
+        case["checkpoint_tib"] * 1024.0 / case["checkpoint_window_seconds"]
+    )
+    model_load = case["model_tib"] * 1024.0 / case["model_load_window_seconds"]
+    return max(case["data_read_gibs"], checkpoint_write, model_load)
+
+
+def checkpoint_capacity_tib(case):
+    return (
+        case["checkpoint_tib"]
+        * case["retained_checkpoints"]
+        * case["concurrent_experiments"]
+    )
+
+
+def complete_case():
+    return {
+        "name": "complete_capacity_plan",
+        "workload_profiles": True,
+        "monthly_gpu_hours": 61440,
+        "days": 30,
+        "target_effective_utilization": 0.60,
+        "peak_headroom": 0.20,
+        "failure_headroom": 0.10,
+        "fragmentation_headroom": 0.08,
+        "growth_headroom": 0.15,
+        "actual_gpus": 220,
+        "gpu_type_mix_ok": True,
+        "queue_wait_minutes": [22, 30, 36, 40, 44],
+        "queue_slo_minutes": 60,
+        "peak_qps": 42,
+        "input_tokens_p95": 900,
+        "output_tokens_p95": 220,
+        "instance_token_capacity_per_s": 9000,
+        "slo_efficiency": 0.72,
+        "actual_serving_instances": 10,
+        "serving_p99_seconds": 1.6,
+        "serving_p99_slo_seconds": 2.0,
+        "comm_gib_per_step": 120,
+        "target_step_seconds": 40,
+        "network_efficiency": 0.75,
+        "provisioned_network_gibs": 5.2,
+        "data_read_gibs": 3.5,
+        "checkpoint_tib": 6.0,
+        "checkpoint_window_seconds": 1500,
+        "model_tib": 1.5,
+        "model_load_window_seconds": 300,
+        "provisioned_storage_gibs": 8.0,
+        "storage_measured": True,
+        "retained_checkpoints": 12,
+        "concurrent_experiments": 8,
+        "total_checkpoint_capacity_tib": 900,
+        "lifecycle_policy": True,
+        "burst_headroom": 0.18,
+        "maintenance_headroom": 0.08,
+        "n_plus_one_ready": True,
+        "forecast_period_months": 12,
+        "forecast_error": 0.09,
+        "estimated_monthly_cost_usd": 470000,
+        "monthly_budget_usd": 550000,
+        "pool_separation": True,
+        "quota_ledger": True,
+        "burst_credits": True,
+        "observability_metrics": {
+            "gpu_allocated",
+            "gpu_effective_utilization",
+            "queue_wait_p95",
+            "serving_p99",
+            "network_throughput",
+            "storage_throughput",
+            "checkpoint_growth",
+            "forecast_error",
+            "cost_by_tenant",
+            "fragmentation_ratio",
+        },
+        "forecast_review_days": 30,
+        "capacity_gate_defined": True,
+    }
+
+
+def build_cases():
+    cases = [complete_case()]
+    mutations = [
+        ("workload_missing_bad", {"workload_profiles": False}),
+        ("gpu_count_underplanned_bad", {"actual_gpus": 180}),
+        ("gpu_type_mismatch_bad", {"gpu_type_mix_ok": False}),
+        ("queue_slo_missing_bad", {"queue_wait_minutes": [70, 80, 95]}),
+        ("serving_peak_ignored_bad", {"actual_serving_instances": 6}),
+        ("network_underprovisioned_bad", {"provisioned_network_gibs": 2.0}),
+        ("storage_throughput_unknown_bad", {"storage_measured": False}),
+        ("lifecycle_capacity_missing_bad", {"total_checkpoint_capacity_tib": 500}),
+        ("target_util_too_high_bad", {"target_effective_utilization": 0.88}),
+        ("no_failure_redundancy_bad", {"n_plus_one_ready": False}),
+        ("growth_forecast_missing_bad", {"forecast_period_months": 1}),
+        ("cost_budget_missing_bad", {"estimated_monthly_cost_usd": 620000}),
+        ("pools_mixed_bad", {"pool_separation": False}),
+        ("burst_quota_uncontrolled_bad", {"burst_credits": False}),
+        ("observability_missing_bad", {"observability_metrics": {"gpu_allocated"}}),
+        ("capacity_gate_missing_bad", {"capacity_gate_defined": False}),
+    ]
+    for name, patch in mutations:
+        item = complete_case()
+        item["name"] = name
+        item.update(patch)
+        cases.append(item)
+    return cases
+
+
+def evaluate_case(case):
+    required_gpus = required_training_gpus(case)
+    required_instances = required_serving_instances(case)
+    network_need = required_network_gibs(case)
+    storage_need = required_storage_gibs(case)
+    checkpoint_need = checkpoint_capacity_tib(case)
+    max_safe_util = 1.0 - (
+        case["burst_headroom"]
+        + case["maintenance_headroom"]
+        + case["failure_headroom"]
+    )
+    required_metrics = complete_case()["observability_metrics"]
+
+    gates = {
+        "workload_forecast_coverage": case["workload_profiles"],
+        "gpu_count_capacity_fit": case["actual_gpus"] >= required_gpus,
+        "gpu_type_mix_fit": case["gpu_type_mix_ok"],
+        "training_queue_slo_fit": percentile(case["queue_wait_minutes"], 95)
+        <= case["queue_slo_minutes"],
+        "serving_peak_slo_fit": (
+            case["actual_serving_instances"] >= required_instances
+            and case["serving_p99_seconds"] <= case["serving_p99_slo_seconds"]
+        ),
+        "network_bandwidth_capacity_fit": (
+            case["provisioned_network_gibs"] >= network_need * 1.1
+        ),
+        "storage_throughput_capacity_fit": (
+            case["storage_measured"]
+            and case["provisioned_storage_gibs"] >= storage_need * 1.1
+        ),
+        "storage_capacity_lifecycle_fit": (
+            case["total_checkpoint_capacity_tib"] >= checkpoint_need
+            and case["lifecycle_policy"]
+        ),
+        "utilization_headroom_fit": (
+            case["target_effective_utilization"] <= max_safe_util
+        ),
+        "failure_redundancy_fit": (
+            case["failure_headroom"] >= 0.08 and case["n_plus_one_ready"]
+        ),
+        "growth_forecast_fit": (
+            case["forecast_period_months"] >= 6 and case["forecast_error"] <= 0.20
+        ),
+        "cost_budget_fit": (
+            case["estimated_monthly_cost_usd"] <= case["monthly_budget_usd"]
+        ),
+        "pool_separation_fit": case["pool_separation"],
+        "quota_burst_governance": case["quota_ledger"] and case["burst_credits"],
+        "observability_forecast_feedback": (
+            required_metrics.issubset(case["observability_metrics"])
+            and case["forecast_review_days"] <= 45
+        ),
+        "cluster_capacity_planning_gate": case["capacity_gate_defined"],
+    }
+    return {
+        "name": case["name"],
+        "required_gpus": required_gpus,
+        "required_instances": required_instances,
+        "network_need_gibs": network_need,
+        "storage_need_gibs": storage_need,
+        "checkpoint_need_tib": checkpoint_need,
+        "gates": gates,
+        "pass": all(gates.values()),
+    }
+
+
+def audit_cluster_capacity_planning(cases):
+    results = [evaluate_case(case) for case in cases]
+    metrics = {}
+    for metric in METRICS:
+        passed = sum(1 for result in results if result["gates"][metric])
+        metrics[metric] = round(passed / len(results), 3)
+
+    failed_cases = [result["name"] for result in results if not result["pass"]]
+    failed_gates = [
+        metric for metric in METRICS if any(not r["gates"][metric] for r in results)
+    ]
+    complete = results[0]
+    examples = {
+        "training_gpu_need": complete["required_gpus"],
+        "serving_instance_need": complete["required_instances"],
+        "network_margin": round(
+            complete_case()["provisioned_network_gibs"]
+            / complete["network_need_gibs"],
+            3,
+        ),
+        "storage_margin": round(
+            complete_case()["provisioned_storage_gibs"]
+            / complete["storage_need_gibs"],
+            3,
+        ),
+        "checkpoint_capacity_tib": complete["checkpoint_need_tib"],
+        "target_effective_utilization": complete_case()[
+            "target_effective_utilization"
+        ],
+    }
+    smoke = {
+        "complete_case_passes": complete["pass"],
+        "caught_underplanned_gpu": "gpu_count_underplanned_bad" in failed_cases,
+        "caught_serving_peak": "serving_peak_ignored_bad" in failed_cases,
+        "caught_network_gap": "network_underprovisioned_bad" in failed_cases,
+        "caught_storage_gap": "storage_throughput_unknown_bad" in failed_cases,
+        "caught_headroom_gap": "target_util_too_high_bad" in failed_cases,
+    }
+    return {
+        "capacity_examples": examples,
+        "smoke": smoke,
+        "metrics": metrics,
+        "hard_blocker_count": len(failed_cases),
+        "failed_cases": failed_cases,
+        "failed_gates": failed_gates,
+        "cluster_capacity_planning_gate_pass": all(
+            result["pass"] for result in results
+        ),
+    }
+
+
+report = audit_cluster_capacity_planning(build_cases())
+print("capacity_examples=", report["capacity_examples"], sep="")
+print("smoke=", report["smoke"], sep="")
+print("metrics=", report["metrics"], sep="")
+print("hard_blocker_count=", report["hard_blocker_count"], sep="")
+print("failed_cases=", report["failed_cases"], sep="")
+print("failed_gates=", report["failed_gates"], sep="")
+print(
+    "cluster_capacity_planning_gate_pass=",
+    report["cluster_capacity_planning_gate_pass"],
+    sep="",
+)
+```
+
+运行后会看到类似输出：
+
+```text
+capacity_examples={'training_gpu_need': 218, 'serving_instance_need': 8, 'network_margin': 1.3, 'storage_margin': 1.562, 'checkpoint_capacity_tib': 576.0, 'target_effective_utilization': 0.6}
+smoke={'complete_case_passes': True, 'caught_underplanned_gpu': True, 'caught_serving_peak': True, 'caught_network_gap': True, 'caught_storage_gap': True, 'caught_headroom_gap': True}
+metrics={'workload_forecast_coverage': 0.941, 'gpu_count_capacity_fit': 0.941, 'gpu_type_mix_fit': 0.941, 'training_queue_slo_fit': 0.941, 'serving_peak_slo_fit': 0.941, 'network_bandwidth_capacity_fit': 0.941, 'storage_throughput_capacity_fit': 0.941, 'storage_capacity_lifecycle_fit': 0.941, 'utilization_headroom_fit': 0.941, 'failure_redundancy_fit': 0.941, 'growth_forecast_fit': 0.941, 'cost_budget_fit': 0.941, 'pool_separation_fit': 0.941, 'quota_burst_governance': 0.941, 'observability_forecast_feedback': 0.941, 'cluster_capacity_planning_gate': 0.941}
+hard_blocker_count=16
+failed_cases=['workload_missing_bad', 'gpu_count_underplanned_bad', 'gpu_type_mismatch_bad', 'queue_slo_missing_bad', 'serving_peak_ignored_bad', 'network_underprovisioned_bad', 'storage_throughput_unknown_bad', 'lifecycle_capacity_missing_bad', 'target_util_too_high_bad', 'no_failure_redundancy_bad', 'growth_forecast_missing_bad', 'cost_budget_missing_bad', 'pools_mixed_bad', 'burst_quota_uncontrolled_bad', 'observability_missing_bad', 'capacity_gate_missing_bad']
+failed_gates=['workload_forecast_coverage', 'gpu_count_capacity_fit', 'gpu_type_mix_fit', 'training_queue_slo_fit', 'serving_peak_slo_fit', 'network_bandwidth_capacity_fit', 'storage_throughput_capacity_fit', 'storage_capacity_lifecycle_fit', 'utilization_headroom_fit', 'failure_redundancy_fit', 'growth_forecast_fit', 'cost_budget_fit', 'pool_separation_fit', 'quota_burst_governance', 'observability_forecast_feedback', 'cluster_capacity_planning_gate']
+cluster_capacity_planning_gate_pass=False
+```
+
+这里 `cluster_capacity_planning_gate_pass=False` 不是 demo 出错，而是因为我们故意放入了 16 个 bad case。面试里你要强调：容量规划不是“GPU 数字算对就行”，而是要证明需求画像、训练容量、推理峰值、网络、存储、余量、成本、隔离和预测回填都能被观测和治理。
+
+## 15.18 面试中如何回答容量规划题
 
 如果面试官问：
 
@@ -465,7 +871,7 @@ AI 资源需求增长通常很快。
 容量上不能只按平均负载，要看 p95 和峰值，保留故障冗余、推理扩容空间和高优任务预留。最后通过 dashboard 持续跟踪 GPU 分配率、有效利用率、队列等待时间、碎片率、抢占次数、存储增长和成本归因，并定期滚动预测 3 到 12 个月需求。
 ```
 
-## 15.18 常见误区
+## 15.19 常见误区
 
 误区一：容量规划就是买多少 GPU。
 
@@ -487,7 +893,7 @@ AI 资源需求增长通常很快。
 
 训练还需要吞吐，checkpoint 还需要恢复速度，模型加载还影响扩容。
 
-## 15.19 面试题
+## 15.20 面试题
 
 ### 题 1：如何用 GPU-hours 估算训练容量？
 
@@ -509,7 +915,7 @@ AI 资源需求增长通常很快。
 
 答：包括 GPU 总量、分配率、有效利用率、队列等待时间、碎片率、抢占次数、各租户 GPU-hours、推理 QPS 和延迟、网络吞吐、存储吞吐、checkpoint 容量、日志增长和成本趋势。
 
-## 15.20 小练习
+## 15.21 小练习
 
 练习一：估算训练 GPU 数量。
 
@@ -527,7 +933,7 @@ AI 资源需求增长通常很快。
 
 要求：包含 GPU、网络、存储、推理、队列、租户和成本指标。
 
-## 15.21 本章小结
+## 15.22 本章小结
 
 本章讲了集群容量规划。
 
@@ -542,5 +948,6 @@ AI 资源需求增长通常很快。
 7. 存储容量和吞吐都重要，checkpoint、模型加载、日志和 trace 都要纳入规划。
 8. 利用率目标要按资源池区分，不能盲目追求 100%。
 9. 容量规划需要 dashboard、成本归因和滚动预测。
+10. 集群容量规划门禁要把任务画像、训练 GPU 数、推理峰值、网络、存储、生命周期、余量、成本、资源池隔离和预测偏差放在一起审计。
 
 第二部分到这里结束。下一章开始进入第三部分：大模型训练平台工程。我们会从第 16 章“训练平台总览：从脚本训练到平台化训练”开始，讲如何把训练从手工脚本变成可提交、可复现、可监控、可恢复的平台能力。

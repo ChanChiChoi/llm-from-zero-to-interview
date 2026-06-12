@@ -1,5 +1,17 @@
 # 第一章：Harness 总览
 
+## 0. 本讲资料边界与第二轮精修口径
+
+本讲第二轮精修前，重点核对了 OpenAI Agents SDK 关于 agent loop、tool execution、guardrails、sandbox agents、sessions、human-in-the-loop 和 tracing 的公开文档，Claude Code 关于读写代码库、执行命令、MCP、CLAUDE.md、skills、hooks、权限和多环境运行的公开说明，OpenHands 关于 SDK、CLI、GUI、Cloud、RBAC / permissions 和 evaluation infrastructure 的公开 README，以及 SWE-agent / mini-SWE-agent 围绕 GitHub issue 自动修复、工具使用、SWE-bench 和 Agent-Computer Interface 的公开资料边界。
+
+因此，本章只讨论 agent harness / coding agent runtime 的工程抽象：模型输出如何变成受控动作，工具和文件系统如何被系统层校验，终端命令如何受权限和沙箱约束，trace / replay / evaluation harness 如何支撑复盘。它不是某个具体产品的内部架构复刻，不提供绕过权限、执行危险命令、读取敏感文件或自动化高风险操作的技巧。
+
+第二轮新增内容聚焦三点：
+
+1. 把 harness 从“外层框架”落成可度量的运行闭环：action parse、permission gate、tool execution、observation use、state update、trace completeness、budget overrun 和 replay readiness。
+2. 用公式区分模型能力、runtime 控制、工具执行、安全边界和评估回放，避免把 coding agent 能力全部归因给模型。
+3. 补充一个 0 依赖 Python demo，用 toy agent trace 审计一个最小 harness 是否具备可执行、可控、可观测、可复盘的基本条件。
+
 ## 1.1 本章目标
 
 这一章先回答一个核心问题：为什么 coding agent 不能只是“一个会写代码的模型 API”？
@@ -506,6 +518,427 @@ Cursor、Aider、OpenHands、SWE-agent 等系统：
 误区五：权限确认会降低体验，所以越少越好。
 
 纠正：权限确认要分级。低风险只读操作可以自动化，高风险写入、删除、网络和系统命令必须谨慎。
+
+## 1.14.1 关键公式与 Harness 运行指标速查
+
+把第 `i` 次 harness run 的第 `t` 个执行步抽象为：
+
+$$
+h_{i,t}=(x_i,c_{i,t},y_{i,t},a_{i,t},p_{i,t},o_{i,t},s_{i,t},\ell_{i,t},b_{i,t})
+$$
+
+其中，`x_i` 是用户任务，`c_{i,t}` 是上下文，`y_{i,t}` 是模型输出，`a_{i,t}` 是解析后的动作，`p_{i,t}` 是权限和确认结果，`o_{i,t}` 是工具或命令返回的 observation，`s_{i,t}` 是状态更新，`\ell_{i,t}` 是 trace 记录，`b_{i,t}` 是预算消耗。
+
+定义指示函数：
+
+$$
+I(z)=
+\begin{cases}
+1,& z=\mathrm{true}\\
+0,& z=\mathrm{false}
+\end{cases}
+$$
+
+动作解析合法率：
+
+$$
+A_{\mathrm{parse}}=\frac{1}{N}\sum_{i,t} I(a_{i,t}\in A_{\mathrm{valid}})
+$$
+
+其中，`A_valid` 是 tool schema、patch schema、命令 schema 或 final answer schema 允许的动作集合。解析合法率低，说明模型输出和 action parser / tool schema 没有对齐。
+
+工具执行成功率：
+
+$$
+S_{\mathrm{tool}}=\frac{\sum_{i,t} I(a_{i,t}\in A_{\mathrm{exec}})I(o_{i,t}=\mathrm{success})}{\sum_{i,t} I(a_{i,t}\in A_{\mathrm{exec}})}
+$$
+
+其中，`A_exec` 是实际进入执行器的动作集合。它不等于任务成功率，因为工具成功可能只是读对文件或跑完命令，最终 patch 仍可能错。
+
+未授权执行率：
+
+$$
+R_{\mathrm{unauth}}=\frac{\sum_{i,t} I(p_{i,t}=\mathrm{blocked})I(a_{i,t}=\mathrm{executed})}{\sum_{i,t} I(p_{i,t}=\mathrm{blocked})}
+$$
+
+这个指标必须接近 0。只在 prompt 里告诉模型“不要做危险操作”，不能替代系统层 permission gate。
+
+高风险确认覆盖率：
+
+$$
+C_{\mathrm{confirm}}=\frac{\sum_{i,t} I(a_{i,t}\in A_{\mathrm{risk}})I(p_{i,t}=\mathrm{confirmed})}{\sum_{i,t} I(a_{i,t}\in A_{\mathrm{risk}})}
+$$
+
+其中，`A_risk` 包含写文件、删除、网络、安装依赖、提交代码、外部 API 调用等高风险动作。不同产品会有不同风险分层，但必须有清晰策略。
+
+Observation 使用率：
+
+$$
+U_{\mathrm{obs}}=\frac{\sum_{i,t} I(o_{i,t}\ne \emptyset)I(o_{i,t}\rightarrow s_{i,t+1})}{\sum_{i,t} I(o_{i,t}\ne \emptyset)}
+$$
+
+直觉：工具返回失败、测试报错或权限拒绝后，模型下一步必须真的读取并利用 observation。否则 agent 会出现“工具失败但最终声称完成”的 false completion。
+
+状态更新覆盖率：
+
+$$
+C_{\mathrm{state}}=\frac{\sum_{i,t} I(s_{i,t}\ \mathrm{updated})}{\sum_{i,t} I(o_{i,t}\ne \emptyset)}
+$$
+
+没有 state update，长任务会丢失已经做过什么、失败原因是什么、下一步该验证什么。
+
+Trace 完整率：
+
+$$
+C_{\mathrm{trace}}=\frac{1}{N}\sum_{i,t}\frac{|L_{i,t}\cap L_{\mathrm{req}}|}{|L_{\mathrm{req}}|}
+$$
+
+其中，`L_req` 至少包含 task、step、model output、action、arguments、permission、execution result、observation、state update、budget 和 final status。Trace 不完整时，debug、replay、安全审计和评估都会失真。
+
+预算超限率：
+
+$$
+R_{\mathrm{budget}}=\frac{1}{M}\sum_i I(B_i>B_i^{\max})
+$$
+
+其中，`B_i` 可以是 step 数、tool call 数、token、成本、wall-clock time 或 retry 次数。没有 budget gate 的 agent 容易循环、重复搜索和成本失控。
+
+一个保守的 harness 上线门禁可以写成：
+
+$$
+G_{\mathrm{harness}}=I(A_{\mathrm{parse}}\ge 0.95)I(S_{\mathrm{tool}}\ge 0.80)I(R_{\mathrm{unauth}}=0)I(C_{\mathrm{confirm}}\ge 0.80)I(U_{\mathrm{obs}}\ge 0.75)I(C_{\mathrm{state}}\ge 0.75)I(C_{\mathrm{trace}}\ge 0.90)I(R_{\mathrm{budget}}=0)
+$$
+
+这个门禁故意偏保守。真实产品可以按场景调阈值，但不能只用“最终 diff 看起来对”来证明 coding agent harness 可靠。
+
+## 1.14.2 最小可运行 Harness Loop 审计 demo
+
+下面的 demo 不调用真实模型、不执行真实命令，只用 toy trace 模拟 harness 的核心闭环。它检查：模型动作是否解析合法、权限是否阻断危险动作、工具执行是否成功、observation 是否被后续状态使用、trace 是否完整、预算是否超限，以及最终是否可 replay。
+
+```python
+from pprint import pprint
+
+REQUIRED_TRACE_FIELDS = {
+    "task",
+    "step",
+    "model_output",
+    "action",
+    "arguments",
+    "permission",
+    "execution_result",
+    "observation",
+    "state_update",
+    "budget",
+    "final_status",
+}
+
+EXEC_ACTIONS = {"read_file", "apply_patch", "run_tests", "run_shell"}
+HIGH_RISK_ACTIONS = {"apply_patch", "run_shell"}
+
+
+runs = [
+    {
+        "id": "fix_login_ok",
+        "max_steps": 5,
+        "max_cost": 6.0,
+        "final_status": "completed",
+        "final_verified": True,
+        "actions": [
+            {
+                "action": "read_file",
+                "parsed": True,
+                "args_valid": True,
+                "permission": "allowed",
+                "confirmed": False,
+                "executed": True,
+                "success": True,
+                "observation_used": True,
+                "state_updated": True,
+                "cost": 0.8,
+                "trace_fields": REQUIRED_TRACE_FIELDS,
+            },
+            {
+                "action": "apply_patch",
+                "parsed": True,
+                "args_valid": True,
+                "permission": "confirmed",
+                "confirmed": True,
+                "executed": True,
+                "success": True,
+                "observation_used": True,
+                "state_updated": True,
+                "cost": 1.5,
+                "trace_fields": REQUIRED_TRACE_FIELDS,
+            },
+            {
+                "action": "run_tests",
+                "parsed": True,
+                "args_valid": True,
+                "permission": "allowed",
+                "confirmed": False,
+                "executed": True,
+                "success": True,
+                "observation_used": True,
+                "state_updated": True,
+                "cost": 1.2,
+                "trace_fields": REQUIRED_TRACE_FIELDS,
+            },
+        ],
+    },
+    {
+        "id": "dangerous_shell_blocked",
+        "max_steps": 4,
+        "max_cost": 4.0,
+        "final_status": "blocked",
+        "final_verified": False,
+        "actions": [
+            {
+                "action": "run_shell",
+                "parsed": True,
+                "args_valid": True,
+                "permission": "blocked",
+                "confirmed": False,
+                "executed": False,
+                "success": False,
+                "observation_used": True,
+                "state_updated": True,
+                "cost": 0.4,
+                "trace_fields": REQUIRED_TRACE_FIELDS - {"execution_result"},
+            }
+        ],
+    },
+    {
+        "id": "test_failure_ignored",
+        "max_steps": 5,
+        "max_cost": 5.0,
+        "final_status": "completed",
+        "final_verified": False,
+        "actions": [
+            {
+                "action": "apply_patch",
+                "parsed": True,
+                "args_valid": True,
+                "permission": "confirmed",
+                "confirmed": True,
+                "executed": True,
+                "success": True,
+                "observation_used": True,
+                "state_updated": True,
+                "cost": 1.6,
+                "trace_fields": REQUIRED_TRACE_FIELDS,
+            },
+            {
+                "action": "run_tests",
+                "parsed": True,
+                "args_valid": True,
+                "permission": "allowed",
+                "confirmed": False,
+                "executed": True,
+                "success": False,
+                "observation_used": False,
+                "state_updated": False,
+                "cost": 1.1,
+                "trace_fields": REQUIRED_TRACE_FIELDS - {"state_update"},
+            },
+        ],
+    },
+    {
+        "id": "invalid_action_and_budget",
+        "max_steps": 3,
+        "max_cost": 3.0,
+        "final_status": "failed",
+        "final_verified": False,
+        "actions": [
+            {
+                "action": "read_file",
+                "parsed": True,
+                "args_valid": True,
+                "permission": "allowed",
+                "confirmed": False,
+                "executed": True,
+                "success": True,
+                "observation_used": True,
+                "state_updated": True,
+                "cost": 1.0,
+                "trace_fields": REQUIRED_TRACE_FIELDS,
+            },
+            {
+                "action": "unknown_tool",
+                "parsed": False,
+                "args_valid": False,
+                "permission": "blocked",
+                "confirmed": False,
+                "executed": False,
+                "success": False,
+                "observation_used": True,
+                "state_updated": False,
+                "cost": 0.8,
+                "trace_fields": REQUIRED_TRACE_FIELDS - {"arguments", "execution_result"},
+            },
+            {
+                "action": "read_file",
+                "parsed": True,
+                "args_valid": True,
+                "permission": "allowed",
+                "confirmed": False,
+                "executed": True,
+                "success": True,
+                "observation_used": False,
+                "state_updated": False,
+                "cost": 1.0,
+                "trace_fields": REQUIRED_TRACE_FIELDS - {"state_update"},
+            },
+            {
+                "action": "read_file",
+                "parsed": True,
+                "args_valid": True,
+                "permission": "allowed",
+                "confirmed": False,
+                "executed": True,
+                "success": True,
+                "observation_used": False,
+                "state_updated": False,
+                "cost": 1.0,
+                "trace_fields": REQUIRED_TRACE_FIELDS - {"budget"},
+            },
+        ],
+    },
+]
+
+
+def ratio(num, den):
+    return 0.0 if den == 0 else num / den
+
+
+all_actions = [action for run in runs for action in run["actions"]]
+executed = [action for action in all_actions if action["executed"]]
+observed = [action for action in all_actions if action["executed"] or action["permission"] == "blocked"]
+blocked = [action for action in all_actions if action["permission"] == "blocked"]
+high_risk = [action for action in all_actions if action["action"] in HIGH_RISK_ACTIONS]
+
+trace_scores = [
+    len(action["trace_fields"] & REQUIRED_TRACE_FIELDS) / len(REQUIRED_TRACE_FIELDS)
+    for action in all_actions
+]
+
+budget_overruns = []
+for run in runs:
+    total_cost = sum(action["cost"] for action in run["actions"])
+    if len(run["actions"]) > run["max_steps"] or total_cost > run["max_cost"]:
+        budget_overruns.append(run["id"])
+
+blocked_unsafe = [
+    run["id"] + ":" + action["action"]
+    for run in runs
+    for action in run["actions"]
+    if action["permission"] == "blocked" and not action["executed"]
+]
+
+root_causes = {}
+for run in runs:
+    causes = []
+    if not run["final_verified"] and run["final_status"] == "completed":
+        causes.append("false_completion")
+    if any(not action["parsed"] or not action["args_valid"] for action in run["actions"]):
+        causes.append("invalid_action_schema")
+    if any(action["executed"] and action["permission"] == "blocked" for action in run["actions"]):
+        causes.append("permission_violation")
+    if any(action["permission"] == "blocked" and not action["executed"] for action in run["actions"]):
+        causes.append("blocked_by_permission")
+    if any(action["executed"] and not action["observation_used"] for action in run["actions"]):
+        causes.append("observation_ignored")
+    if any(action["executed"] and not action["state_updated"] for action in run["actions"]):
+        causes.append("state_not_updated")
+    if run["id"] in budget_overruns:
+        causes.append("budget_overrun")
+    if not causes and run["final_verified"]:
+        causes.append("pass")
+    root_causes[run["id"]] = causes
+
+metrics = {
+    "parse_valid_rate": round(ratio(sum(a["parsed"] and a["args_valid"] for a in all_actions), len(all_actions)), 3),
+    "tool_execution_success": round(ratio(sum(a["success"] for a in executed), len(executed)), 3),
+    "unauthorized_execution_rate": round(ratio(sum(a["executed"] for a in blocked), len(blocked)), 3),
+    "confirmation_coverage": round(ratio(sum(a["confirmed"] for a in high_risk), len(high_risk)), 3),
+    "observation_use_rate": round(ratio(sum(a["observation_used"] for a in observed), len(observed)), 3),
+    "state_update_coverage": round(ratio(sum(a["state_updated"] for a in observed), len(observed)), 3),
+    "trace_completeness": round(sum(trace_scores) / len(trace_scores), 3),
+    "budget_overrun_rate": round(len(budget_overruns) / len(runs), 3),
+    "task_success_rate": round(ratio(sum(run["final_verified"] for run in runs), len(runs)), 3),
+}
+
+gates = {
+    "parse_ok": metrics["parse_valid_rate"] >= 0.95,
+    "tool_exec_ok": metrics["tool_execution_success"] >= 0.80,
+    "permission_ok": metrics["unauthorized_execution_rate"] == 0.0,
+    "confirmation_ok": metrics["confirmation_coverage"] >= 0.80,
+    "observation_ok": metrics["observation_use_rate"] >= 0.75,
+    "state_ok": metrics["state_update_coverage"] >= 0.75,
+    "trace_ok": metrics["trace_completeness"] >= 0.90,
+    "budget_ok": metrics["budget_overrun_rate"] == 0.0,
+    "task_success_ok": metrics["task_success_rate"] >= 0.60,
+}
+
+failed_gates = [name for name, ok in gates.items() if not ok]
+harness_gate_pass = all(gates.values())
+
+print("metrics:")
+pprint(metrics)
+print("\nblocked_unsafe:")
+pprint(blocked_unsafe)
+print("\nbudget_overruns:")
+pprint(budget_overruns)
+print("\nroot_causes:")
+pprint(root_causes)
+print("\nfailed_gates:")
+pprint(failed_gates)
+print("\nharness_gate_pass:", harness_gate_pass)
+```
+
+一组可能输出如下：
+
+```text
+metrics:
+{'budget_overrun_rate': 0.25,
+ 'confirmation_coverage': 0.667,
+ 'observation_use_rate': 0.7,
+ 'parse_valid_rate': 0.9,
+ 'state_update_coverage': 0.6,
+ 'task_success_rate': 0.25,
+ 'tool_execution_success': 0.875,
+ 'trace_completeness': 0.945,
+ 'unauthorized_execution_rate': 0.0}
+
+blocked_unsafe:
+['dangerous_shell_blocked:run_shell', 'invalid_action_and_budget:unknown_tool']
+
+budget_overruns:
+['invalid_action_and_budget']
+
+root_causes:
+{'dangerous_shell_blocked': ['blocked_by_permission'],
+ 'fix_login_ok': ['pass'],
+ 'invalid_action_and_budget': ['invalid_action_schema',
+                               'blocked_by_permission',
+                               'observation_ignored',
+                               'state_not_updated',
+                               'budget_overrun'],
+ 'test_failure_ignored': ['false_completion',
+                          'observation_ignored',
+                          'state_not_updated']}
+
+failed_gates:
+['parse_ok',
+ 'confirmation_ok',
+ 'observation_ok',
+ 'state_ok',
+ 'budget_ok',
+ 'task_success_ok']
+
+harness_gate_pass: False
+```
+
+这里 `harness_gate_pass=False` 是故意设计的：它暴露了非法动作、预算超限、测试失败 observation 未使用、状态未更新和 false completion。一个真实 coding agent harness 的价值，正是把这些问题在系统层显性化，而不是只看最终回答是否自信。
 
 ## 1.15 面试题：Harness 是什么
 

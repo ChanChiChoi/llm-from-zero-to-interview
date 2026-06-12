@@ -1,5 +1,19 @@
 # 第十五章：Agent Harness 系统设计
 
+## 0. 本讲资料边界与第二轮精修口径
+
+本讲第二轮精修时，优先参考 OpenAI Agents SDK 关于 agent loop、tools、sessions、guardrails、human-in-the-loop、MCP、tracing 和 sandbox agents 的公开资料，Claude Code 关于权限、安全、sandbox、prompt injection、MCP 安全、云端隔离和 audit logging 的公开文档，OpenCode server / permissions 文档中 server API、session、message、permission、diff、MCP、LSP 和事件流的公开能力，SWE-agent 关于 environment、container / shell session、agent、parser、tool execution 和 trajectory 的公开设计，Aider repo map 文档，以及 OpenHands SDK / CLI / GUI / Cloud / Enterprise / REST API / RBAC 公开资料。
+
+边界要说清楚：
+
+1. 本章是系统设计抽象，不复刻任何闭源产品的内部 planner、prompt、工具排序、缓存策略、trace 存储或模型路由。
+2. OpenAI Agents SDK、Claude Code、OpenCode、SWE-agent、Aider、OpenHands 等公开资料只作为可迁移设计参考；不同产品版本和部署形态会变化。
+3. 本章聚焦防御性 coding agent harness：session、orchestrator、context builder、model adapter、capability registry、permission engine、execution engine、sandbox、diff/revert、trace、replay、evaluation、MCP/A2A、server/SDK 和企业治理。
+4. 不提供绕过 sandbox、读取密钥、规避权限、破坏工作区、隐藏 trace、伪造评估通过、攻击 MCP/A2A 外部系统或让 agent 自动执行高风险生产动作的方法。
+5. 公式和 demo 的目标是把“系统设计回答”落到可审计模块和上线门禁，而不是替代真实架构评审、威胁建模或企业安全合规流程。
+
+一句话口径：Agent Harness 系统设计不是画一个模型调用框，而是证明模型外层的状态机、权限、执行、上下文、trace、replay、评估和治理都能闭环。
+
 ## 15.1 本章定位
 
 前面十四章分别讲了 harness 总览、agent runtime、coding agent 工作流、工具系统、文件编辑、终端执行、上下文管理、权限沙箱、trace/replay、evaluation harness、Claude Code、OpenCode、Codex 对比、MCP/A2A 集成。本章把这些内容合成一道系统设计题：
@@ -851,7 +865,252 @@ MCP/A2A trust risk：
 2. 云端更适合异步、协作和隔离。
 3. 解决方式是支持两种 workspace backend。
 
-## 15.23 面试题
+## 15.23 Agent Harness 系统设计质量指标
+
+系统设计面试中，可以把第 `i` 个 harness 模块抽象为：
+
+```math
+m_i=(n_i,g_i,p_i,c_i,s_i,a_i,b_i,e_i,t_i,r_i,q_i,u_i,v_i,h_i)
+```
+
+其中 `n_i` 是模块名，`g_i` 是模块组，例如 session、orchestrator、context、model、capability、permission、execution、sandbox、trace、replay、eval、api，`p_i` 表示模块是否存在，`c_i` 表示接口契约是否清楚，`s_i` 表示是否有状态机或生命周期，`a_i` 表示是否绑定权限，`b_i` 表示是否受上下文和输出预算控制，`e_i` 表示执行是否隔离，`t_i` 表示 trace 是否覆盖，`r_i` 表示 replay 是否就绪，`q_i` 表示 evaluation 是否接入，`u_i` 表示恢复能力，`v_i` 表示版本是否捕获，`h_i` 表示企业治理是否覆盖。
+
+必需模块覆盖率：
+
+```math
+C_{\mathrm{mod}}=\frac{|M_{\mathrm{present}}\cap M_{\mathrm{required}}|}{|M_{\mathrm{required}}|}
+```
+
+接口契约覆盖率：
+
+```math
+C_{\mathrm{contract}}=
+\frac{1}{|M_{\mathrm{present}}|}
+\sum_{i\in M_{\mathrm{present}}}\mathbb{1}[c_i=1]
+```
+
+状态机覆盖率：
+
+```math
+C_{\mathrm{state}}=
+\frac{1}{|M_{\mathrm{state}}|}
+\sum_{i\in M_{\mathrm{state}}}\mathbb{1}[s_i=1]
+```
+
+权限集成覆盖率：
+
+```math
+C_{\mathrm{perm}}=
+\frac{1}{|M_{\mathrm{risk}}|}
+\sum_{i\in M_{\mathrm{risk}}}\mathbb{1}[a_i=1]
+```
+
+上下文控制覆盖率：
+
+```math
+C_{\mathrm{ctx}}=
+\frac{1}{|M_{\mathrm{ctx}}|}
+\sum_{i\in M_{\mathrm{ctx}}}\mathbb{1}[b_i=1]
+```
+
+执行隔离覆盖率：
+
+```math
+C_{\mathrm{iso}}=
+\frac{1}{|M_{\mathrm{exec}}|}
+\sum_{i\in M_{\mathrm{exec}}}\mathbb{1}[e_i=1]
+```
+
+Trace 覆盖率：
+
+```math
+C_{\mathrm{trace}}=
+\frac{1}{|M_{\mathrm{present}}|}
+\sum_{i\in M_{\mathrm{present}}}\mathbb{1}[t_i=1]
+```
+
+Replay 就绪率：
+
+```math
+C_{\mathrm{replay}}=
+\frac{1}{|M_{\mathrm{present}}|}
+\sum_{i\in M_{\mathrm{present}}}\mathbb{1}[r_i=1]
+```
+
+Evaluation 接入率：
+
+```math
+C_{\mathrm{eval}}=
+\frac{1}{|M_{\mathrm{present}}|}
+\sum_{i\in M_{\mathrm{present}}}\mathbb{1}[q_i=1]
+```
+
+恢复覆盖率：
+
+```math
+C_{\mathrm{recover}}=
+\frac{1}{|M_{\mathrm{present}}|}
+\sum_{i\in M_{\mathrm{present}}}\mathbb{1}[u_i=1]
+```
+
+版本捕获率：
+
+```math
+C_{\mathrm{ver}}=
+\frac{1}{|M_{\mathrm{present}}|}
+\sum_{i\in M_{\mathrm{present}}}\mathbb{1}[v_i=1]
+```
+
+企业治理就绪率：
+
+```math
+C_{\mathrm{gov}}=
+\frac{1}{|M_{\mathrm{present}}|}
+\sum_{i\in M_{\mathrm{present}}}\mathbb{1}[h_i=1]
+```
+
+最终上线门禁可以写成：
+
+```math
+G_{\mathrm{system}}=
+\prod_{z\in\mathcal{Z}}
+\mathbb{1}[C_z\ge \tau_z]
+```
+
+其中 `\mathcal{Z}` 包含 module、contract、state、permission、context、isolation、trace、replay、eval、recovery、version 和 governance。这个门禁的价值是防止面试回答只画出模块名，却没有说明模块间契约、权限边界、状态恢复和评估复现。
+
+### 15.23.1 最小可运行 Harness 系统设计审计 demo
+
+下面的 0 依赖 demo 不调用模型、不执行命令、不访问文件系统和网络。它只审计一张 toy module table，用来演示如何把 Agent Harness 系统设计从架构图落到上线门禁。
+
+```python
+required_modules = {
+    "api_server",
+    "session_manager",
+    "agent_orchestrator",
+    "context_builder",
+    "model_adapter",
+    "capability_registry",
+    "permission_engine",
+    "execution_engine",
+    "sandbox_manager",
+    "diff_manager",
+    "trace_store",
+    "replay_engine",
+    "eval_runner",
+    "policy_auth",
+}
+stateful_groups = {"session", "orchestrator", "permission", "execution", "replay", "eval"}
+risky_groups = {"api", "capability", "permission", "execution", "sandbox", "external"}
+context_groups = {"context", "model", "capability", "trace", "external"}
+execution_groups = {"execution", "sandbox", "external"}
+
+components = [
+    {"name": "api_server", "group": "api", "present": True, "contract": True, "stateful": True, "permission": True, "context_budget": True, "isolated": True, "trace": True, "replay": True, "eval": False, "recovery": True, "version": True, "governance": True},
+    {"name": "session_manager", "group": "session", "present": True, "contract": True, "stateful": True, "permission": True, "context_budget": True, "isolated": True, "trace": True, "replay": True, "eval": True, "recovery": True, "version": True, "governance": True},
+    {"name": "agent_orchestrator", "group": "orchestrator", "present": True, "contract": True, "stateful": False, "permission": True, "context_budget": True, "isolated": True, "trace": True, "replay": False, "eval": True, "recovery": False, "version": True, "governance": False},
+    {"name": "context_builder", "group": "context", "present": True, "contract": True, "stateful": True, "permission": True, "context_budget": False, "isolated": True, "trace": True, "replay": True, "eval": True, "recovery": True, "version": True, "governance": True},
+    {"name": "model_adapter", "group": "model", "present": True, "contract": True, "stateful": False, "permission": True, "context_budget": True, "isolated": True, "trace": True, "replay": False, "eval": True, "recovery": True, "version": False, "governance": True},
+    {"name": "capability_registry", "group": "capability", "present": True, "contract": False, "stateful": True, "permission": False, "context_budget": False, "isolated": True, "trace": True, "replay": True, "eval": True, "recovery": True, "version": False, "governance": False},
+    {"name": "permission_engine", "group": "permission", "present": True, "contract": True, "stateful": True, "permission": True, "context_budget": True, "isolated": True, "trace": True, "replay": True, "eval": True, "recovery": True, "version": True, "governance": True},
+    {"name": "execution_engine", "group": "execution", "present": True, "contract": True, "stateful": True, "permission": True, "context_budget": True, "isolated": False, "trace": True, "replay": False, "eval": True, "recovery": False, "version": True, "governance": True},
+    {"name": "sandbox_manager", "group": "sandbox", "present": True, "contract": True, "stateful": True, "permission": True, "context_budget": True, "isolated": False, "trace": False, "replay": False, "eval": True, "recovery": False, "version": False, "governance": True},
+    {"name": "diff_manager", "group": "execution", "present": True, "contract": True, "stateful": True, "permission": True, "context_budget": True, "isolated": True, "trace": True, "replay": True, "eval": True, "recovery": True, "version": True, "governance": True},
+    {"name": "trace_store", "group": "trace", "present": True, "contract": True, "stateful": True, "permission": True, "context_budget": True, "isolated": True, "trace": True, "replay": True, "eval": True, "recovery": True, "version": True, "governance": True},
+    {"name": "replay_engine", "group": "replay", "present": True, "contract": True, "stateful": True, "permission": True, "context_budget": True, "isolated": True, "trace": True, "replay": False, "eval": True, "recovery": True, "version": False, "governance": True},
+    {"name": "eval_runner", "group": "eval", "present": True, "contract": False, "stateful": True, "permission": True, "context_budget": True, "isolated": True, "trace": False, "replay": True, "eval": False, "recovery": True, "version": True, "governance": False},
+    {"name": "policy_auth", "group": "api", "present": True, "contract": True, "stateful": True, "permission": True, "context_budget": True, "isolated": True, "trace": True, "replay": True, "eval": True, "recovery": True, "version": True, "governance": False},
+    {"name": "mcp_a2a_gateway", "group": "external", "present": False, "contract": False, "stateful": False, "permission": False, "context_budget": False, "isolated": False, "trace": False, "replay": False, "eval": False, "recovery": False, "version": False, "governance": False},
+]
+
+
+def rate(values):
+    return round(sum(values) / len(values), 3) if values else 1.0
+
+
+present_names = {component["name"] for component in components if component["present"]}
+missing_required = sorted(required_modules - present_names)
+metrics = {
+    "module_coverage": round(len(required_modules & present_names) / len(required_modules), 3),
+    "interface_contract": rate([component["contract"] for component in components if component["present"]]),
+    "state_machine": rate([component["stateful"] for component in components if component["group"] in stateful_groups]),
+    "permission_integration": rate([component["permission"] for component in components if component["group"] in risky_groups]),
+    "context_control": rate([component["context_budget"] for component in components if component["group"] in context_groups]),
+    "execution_isolation": rate([component["isolated"] for component in components if component["group"] in execution_groups]),
+    "trace_coverage": rate([component["trace"] for component in components if component["present"]]),
+    "replay_readiness": rate([component["replay"] for component in components if component["present"]]),
+    "eval_readiness": rate([component["eval"] for component in components if component["present"]]),
+    "recovery_coverage": rate([component["recovery"] for component in components if component["present"]]),
+    "version_capture": rate([component["version"] for component in components if component["present"]]),
+    "enterprise_governance": rate([component["governance"] for component in components if component["present"]]),
+}
+
+thresholds = {
+    "module_coverage": 1.0,
+    "interface_contract": 0.95,
+    "state_machine": 0.95,
+    "permission_integration": 1.0,
+    "context_control": 0.9,
+    "execution_isolation": 0.95,
+    "trace_coverage": 0.95,
+    "replay_readiness": 0.85,
+    "eval_readiness": 0.9,
+    "recovery_coverage": 0.9,
+    "version_capture": 0.9,
+    "enterprise_governance": 0.9,
+}
+failed_gates = [name for name, minimum in thresholds.items() if metrics[name] < minimum]
+
+root_causes = {}
+for component in components:
+    causes = []
+    if not component["present"]:
+        causes.append("module_missing")
+    if component["present"] and not component["contract"]:
+        causes.append("interface_contract_missing")
+    if component["group"] in stateful_groups and not component["stateful"]:
+        causes.append("state_machine_missing")
+    if component["group"] in risky_groups and not component["permission"]:
+        causes.append("permission_not_bound")
+    if component["group"] in context_groups and not component["context_budget"]:
+        causes.append("context_budget_uncontrolled")
+    if component["group"] in execution_groups and not component["isolated"]:
+        causes.append("execution_isolation_missing")
+    if component["present"] and not component["trace"]:
+        causes.append("trace_missing")
+    if component["present"] and not component["replay"]:
+        causes.append("replay_not_ready")
+    if component["present"] and not component["eval"]:
+        causes.append("eval_not_ready")
+    if component["present"] and not component["recovery"]:
+        causes.append("recovery_missing")
+    if component["present"] and not component["version"]:
+        causes.append("version_not_captured")
+    if component["present"] and not component["governance"]:
+        causes.append("governance_missing")
+    if causes:
+        root_causes[component["name"]] = causes
+
+print(f"missing_required={missing_required}")
+print(f"metrics={metrics}")
+print(f"failed_gates={failed_gates}")
+print(f"root_causes={root_causes}")
+print(f"harness_system_gate_pass={not failed_gates}")
+```
+
+一组典型输出：
+
+```text
+missing_required=[]
+metrics={'module_coverage': 1.0, 'interface_contract': 0.857, 'state_machine': 0.857, 'permission_integration': 0.75, 'context_control': 0.4, 'execution_isolation': 0.25, 'trace_coverage': 0.857, 'replay_readiness': 0.643, 'eval_readiness': 0.857, 'recovery_coverage': 0.786, 'version_capture': 0.714, 'enterprise_governance': 0.714}
+failed_gates=['interface_contract', 'state_machine', 'permission_integration', 'context_control', 'execution_isolation', 'trace_coverage', 'replay_readiness', 'eval_readiness', 'recovery_coverage', 'version_capture', 'enterprise_governance']
+root_causes={'api_server': ['eval_not_ready'], 'agent_orchestrator': ['state_machine_missing', 'replay_not_ready', 'recovery_missing', 'governance_missing'], 'context_builder': ['context_budget_uncontrolled'], 'model_adapter': ['replay_not_ready', 'version_not_captured'], 'capability_registry': ['interface_contract_missing', 'permission_not_bound', 'context_budget_uncontrolled', 'version_not_captured', 'governance_missing'], 'execution_engine': ['execution_isolation_missing', 'replay_not_ready', 'recovery_missing'], 'sandbox_manager': ['execution_isolation_missing', 'trace_missing', 'replay_not_ready', 'recovery_missing', 'version_not_captured'], 'replay_engine': ['replay_not_ready', 'version_not_captured'], 'eval_runner': ['interface_contract_missing', 'trace_missing', 'eval_not_ready', 'governance_missing'], 'policy_auth': ['governance_missing'], 'mcp_a2a_gateway': ['module_missing', 'permission_not_bound', 'context_budget_uncontrolled', 'execution_isolation_missing']}
+harness_system_gate_pass=False
+```
+
+这个 demo 的重点不是给出唯一架构答案，而是训练系统设计审计习惯。`module_coverage=1.0` 只能说明核心模块名都出现了；门禁仍然失败，是因为接口契约、状态机、权限、上下文预算、执行隔离、trace、replay、eval、恢复、版本和治理没有全部闭环。面试中能讲出这些缺口，比只画一张大图更接近生产级思维。
+
+## 15.24 面试题
 
 ### 题 1：如何设计一个 coding agent harness？
 
@@ -893,7 +1152,7 @@ MCP/A2A trust risk：
 Trace 要记录用户输入、context 版本、模型调用元信息、模型输出、工具调用输入输出、权限决策、文件 diff、shell 输出、MCP/A2A 调用、错误和最终答案。Replay 分 deterministic replay 和 re-evaluation replay。前者用录制的模型和工具结果复现 bug，后者重新调用模型比较新版本 agent。对外部系统要记录版本、输出 hash，并决定 replay 时 mock 还是真实调用。
 ```
 
-## 15.24 小练习
+## 15.25 小练习
 
 1. 画出一个 coding agent harness 的模块图，要求包含 session、context、model、tool、permission、execution、trace、eval。
 2. 设计 `Session`、`Message`、`ToolCall`、`PermissionRequest`、`FileChange` 五张表。
@@ -902,8 +1161,9 @@ Trace 要记录用户输入、context 版本、模型调用元信息、模型输
 5. 设计一个 replay 方案，说明如何处理 MCP 外部系统结果。
 6. 设计一个 evaluation task schema，用于评估 agent 修复历史 bug 的能力。
 7. 设计一个企业版 harness 的 RBAC 和 audit log 方案。
+8. 写一个 0 依赖 Harness 系统设计审计脚本，输入 toy module table，输出 module、contract、state、permission、context、isolation、trace、replay、eval、recovery、version、governance 和 system gate。
 
-## 15.25 本章总结
+## 15.26 本章总结
 
 本章把第二十册前面的内容整合成一个完整系统设计答案。
 
