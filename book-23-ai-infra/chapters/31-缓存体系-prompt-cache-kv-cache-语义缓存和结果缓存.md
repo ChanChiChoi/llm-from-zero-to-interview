@@ -8,6 +8,14 @@
 
 > 推理缓存不是一个缓存，而是一组位于不同层次、解决不同问题的缓存机制。
 
+## 31.0 本讲资料边界与第二轮精修口径
+
+本讲按 `WRITING_PLAN.md` 的第二轮要求做过资料校准。重点参考的是 OpenAI Prompt Caching 对长 prompt 前缀复用的公开说明，vLLM Automatic Prefix Caching 对 KV block hash、prefix reuse 和 cache hit 的工程口径，TensorRT-LLM 对 paged KV cache、KV cache reuse、retention 和 eviction 的公开说明，以及 RedisVL SemanticCache 对 embedding 相似检索、阈值、TTL 和过滤条件的工程抽象。
+
+这些资料共同指向一个稳定事实：大模型推理缓存不是单个 Redis key-value 缓存，而是跨平台层、runtime 层和业务层的一组缓存策略。prompt / prefix cache 主要减少重复 prefill，KV cache 主要管理生成过程中的 attention 状态，语义缓存用相似检索减少近似重复请求，结果缓存则复用完整响应。四者的 key、生命周期、隔离风险和收益指标都不同。
+
+本章只抽象截至 2026-06 仍稳定的缓存体系设计口径，不把某个云服务的具体折扣、最小 token 门槛、框架默认 block size、向量库参数或缓存字段名写成通用标准。正文公式用于面试表达、容量估算和策略审计；真实上线仍要用目标模型、tokenizer、runtime、请求分布、租户权限、知识库版本、采样参数和安全策略实测校准。
+
 ## 31.1 为什么大模型推理需要缓存
 
 推理平台里的缓存主要解决四类问题：
@@ -387,7 +395,537 @@ KV cache 驱逐尤其复杂，因为它占的是 GPU 显存，资源昂贵且变
 
 缓存策略应该按场景开启，而不是全局一刀切。
 
-## 31.20 常见误区
+## 31.20 缓存体系审计指标与最小 demo
+
+第二轮精修时，需要把缓存体系从“哪些地方可以缓存”升级成“哪些缓存可以安全命中、命中后节省多少、错误命中如何阻断、最终能否过门禁”。
+
+可以把一次缓存查找写成：
+
+```math
+c_i=(r_i,m_i,v_i,t_i,p_i,d_i,u_i,a_i,s_i,\tau_i,z_i)
+```
+
+其中，`r_i` 是请求内容或请求 hash，`m_i` 是模型名，`v_i` 是模型版本，`t_i` 是 tokenizer 版本，`p_i` 是生成参数，`d_i` 是数据或知识库版本，`u_i` 是租户，`a_i` 是权限域，`s_i` 是安全策略版本，`\tau_i` 是 TTL / 时间戳信息，`z_i` 是 trace 和审计字段。
+
+缓存命中率可以写成：
+
+```math
+H_k=\frac{N_{\mathrm{hit},k}}{N_{\mathrm{lookup},k}}
+```
+
+其中，`k` 表示缓存层，例如 result、semantic、prefix 或 KV。只看 `H_k` 不够，因为一个高命中率的短请求缓存可能节省不了多少成本。
+
+更有意义的是 token 节省量：
+
+```math
+S_{\mathrm{tok}}=\sum_{i=1}^{N}\mathbf{1}[h_i=1](n_i^{\mathrm{save}}+o_i^{\mathrm{save}})
+```
+
+其中，`h_i` 表示第 `i` 次查找是否命中，`n_i^{\mathrm{save}}` 是节省的输入 token 或 prefill token，`o_i^{\mathrm{save}}` 是节省的输出 token。prefix cache 主要节省输入 token 的 prefill，结果缓存和安全的语义缓存可能同时节省输入和输出。
+
+成本收益可以写成：
+
+```math
+K_{\mathrm{save}}=\sum_i \frac{n_i^{\mathrm{save}}p_{\mathrm{in}}+o_i^{\mathrm{save}}p_{\mathrm{out}}}{1000}-K_{\mathrm{cache}}
+```
+
+其中，`p_{\mathrm{in}}` 和 `p_{\mathrm{out}}` 是每千 input / output token 成本，`K_{\mathrm{cache}}` 是缓存存储、向量检索、网络、反序列化和运维成本。这个公式强调：缓存收益要扣掉缓存系统自身成本。
+
+prefix cache 的 prefill 时间收益可以粗略写成：
+
+```math
+T_{\mathrm{prefill,save}}=\frac{N_{\mathrm{prefix,hit}}}{Q_{\mathrm{prefill}}}
+```
+
+其中，`N_{\mathrm{prefix,hit}}` 是命中的前缀 token 数，`Q_{\mathrm{prefill}}` 是 prefill tokens/s。真实系统还要考虑 batch、硬件、KV block 布局、cache read latency 和调度等待。
+
+语义缓存需要单独监控误命中率：
+
+```math
+R_{\mathrm{false}}=\frac{N_{\mathrm{false\_semantic\_hit}}}{N_{\mathrm{semantic\_hit}}}
+```
+
+其中，`N_{\mathrm{false\_semantic\_hit}}` 是相似但不等价、权限不一致、上下文不同或知识过期的语义命中数。语义缓存的关键不是“相似度越高越好”，而是相似度、权限、数据版本、任务类型和风险等级共同过线。
+
+过期命中率可以写成：
+
+```math
+R_{\mathrm{stale}}=\frac{N_{\mathrm{stale\_hit}}}{N_{\mathrm{hit}}}
+```
+
+租户或权限隔离违规率可以写成：
+
+```math
+R_{\mathrm{iso}}=\frac{N_{\mathrm{cross\_domain\_hit}}}{N_{\mathrm{hit}}}
+```
+
+这两个指标通常应该接近 0。缓存事故里，过期答案和跨权限命中比低命中率更危险。
+
+最终缓存门禁可以写成：
+
+```math
+G_{\mathrm{cache}}=\mathbf{1}\left[\min_j C_j\ge\tau_j \land R_{\mathrm{false}}\le\rho_{\mathrm{false}} \land R_{\mathrm{stale}}\le\rho_{\mathrm{stale}} \land R_{\mathrm{iso}}=0 \land K_{\mathrm{save}}>0 \land P_0=0\right]
+```
+
+其中，`C_j` 是各审计维度覆盖率，`P_0` 是未关闭的 P0 风险数。缓存门禁强调：缓存必须同时证明收益、正确性、隔离、一致性和可审计。
+
+下面这个 0 依赖 Python demo 演示一个简化缓存审计器：先查 result cache，再查 prefix cache，最后查 semantic cache；同时阻断跨租户语义命中、版本过期结果命中和非确定性生成的结果缓存。
+
+```python
+from math import sqrt
+
+CHECKS = [
+    "request_cache_profile",
+    "cache_layer_boundary",
+    "key_version_fingerprint",
+    "prompt_prefix_reuse",
+    "kv_lifecycle_management",
+    "semantic_similarity_guard",
+    "result_cache_determinism",
+    "tenant_permission_isolation",
+    "ttl_staleness_control",
+    "eviction_quota_policy",
+    "streaming_cache_policy",
+    "cache_observability_metrics",
+    "cost_latency_savings",
+    "cache_governance_gate",
+]
+
+POLICY = {
+    "now_min": 1000,
+    "semantic_threshold": 0.92,
+    "prefill_tokens_per_second": 12000,
+    "input_cost_per_1k": 0.6,
+    "output_cost_per_1k": 1.8,
+    "cache_read_ms": {"result": 12, "prefix": 5, "semantic": 18},
+}
+
+RESULT_CACHE = [
+    {
+        "prompt_hash": "faq_refund_v1",
+        "model": "chat-large",
+        "model_version": "v3",
+        "tokenizer": "tok-a",
+        "params_hash": "temp0_top1_max80",
+        "tenant": "public",
+        "permission_domain": "faq_public",
+        "safety_policy": "safe-2026-06",
+        "data_version": "kb-42",
+        "created_min": 980,
+        "ttl_min": 60,
+        "answer_tokens": 76,
+    },
+    {
+        "prompt_hash": "policy_shipping_v1",
+        "model": "chat-large",
+        "model_version": "v3",
+        "tokenizer": "tok-a",
+        "params_hash": "temp0_top1_max120",
+        "tenant": "public",
+        "permission_domain": "faq_public",
+        "safety_policy": "safe-2026-06",
+        "data_version": "kb-41",
+        "created_min": 950,
+        "ttl_min": 30,
+        "answer_tokens": 90,
+    },
+]
+
+PREFIX_CACHE = [
+    {
+        "prefix_hash": "handbook_v7_prefix",
+        "model": "chat-large",
+        "model_version": "v3",
+        "tokenizer": "tok-a",
+        "tenant": "enterprise-a",
+        "permission_domain": "handbook_reader",
+        "safety_policy": "safe-2026-06",
+        "data_version": "doc-v7",
+        "cached_tokens": 1600,
+        "created_min": 990,
+        "ttl_min": 120,
+    }
+]
+
+SEMANTIC_CACHE = [
+    {
+        "query_id": "refund_process",
+        "embedding": [1.0, 0.0, 0.0],
+        "tenant": "public",
+        "permission_domain": "faq_public",
+        "data_version": "kb-42",
+        "created_min": 970,
+        "ttl_min": 90,
+        "saved_input_tokens": 140,
+        "saved_output_tokens": 70,
+    },
+    {
+        "query_id": "enterprise_salary_policy",
+        "embedding": [0.0, 1.0, 0.0],
+        "tenant": "enterprise-a",
+        "permission_domain": "hr_private",
+        "data_version": "hr-9",
+        "created_min": 990,
+        "ttl_min": 45,
+        "saved_input_tokens": 900,
+        "saved_output_tokens": 120,
+    },
+]
+
+REQUESTS = [
+    {
+        "id": "exact_faq_retry",
+        "prompt_hash": "faq_refund_v1",
+        "prefix_hash": None,
+        "embedding": [0.97, 0.03, 0.0],
+        "model": "chat-large",
+        "model_version": "v3",
+        "tokenizer": "tok-a",
+        "params_hash": "temp0_top1_max80",
+        "temperature": 0.0,
+        "tenant": "public",
+        "permission_domain": "faq_public",
+        "safety_policy": "safe-2026-06",
+        "data_version": "kb-42",
+        "input_tokens": 180,
+        "expected_output_tokens": 80,
+        "stream": False,
+        "sensitive": False,
+    },
+    {
+        "id": "shared_doc_query",
+        "prompt_hash": "handbook_query_a",
+        "prefix_hash": "handbook_v7_prefix",
+        "embedding": [0.20, 0.10, 0.97],
+        "model": "chat-large",
+        "model_version": "v3",
+        "tokenizer": "tok-a",
+        "params_hash": "temp0_top1_max200",
+        "temperature": 0.0,
+        "tenant": "enterprise-a",
+        "permission_domain": "handbook_reader",
+        "safety_policy": "safe-2026-06",
+        "data_version": "doc-v7",
+        "input_tokens": 2100,
+        "expected_output_tokens": 160,
+        "stream": True,
+        "sensitive": False,
+    },
+    {
+        "id": "semantic_faq",
+        "prompt_hash": "refund_wording_new",
+        "prefix_hash": None,
+        "embedding": [0.96, 0.05, 0.0],
+        "model": "chat-large",
+        "model_version": "v3",
+        "tokenizer": "tok-a",
+        "params_hash": "temp0_top1_max80",
+        "temperature": 0.0,
+        "tenant": "public",
+        "permission_domain": "faq_public",
+        "safety_policy": "safe-2026-06",
+        "data_version": "kb-42",
+        "input_tokens": 130,
+        "expected_output_tokens": 70,
+        "stream": False,
+        "sensitive": False,
+    },
+    {
+        "id": "private_cross_tenant",
+        "prompt_hash": "salary_question",
+        "prefix_hash": None,
+        "embedding": [0.01, 0.99, 0.0],
+        "model": "chat-large",
+        "model_version": "v3",
+        "tokenizer": "tok-a",
+        "params_hash": "temp0_top1_max120",
+        "temperature": 0.0,
+        "tenant": "enterprise-b",
+        "permission_domain": "hr_private",
+        "safety_policy": "safe-2026-06",
+        "data_version": "hr-9",
+        "input_tokens": 760,
+        "expected_output_tokens": 110,
+        "stream": False,
+        "sensitive": True,
+    },
+    {
+        "id": "stale_policy",
+        "prompt_hash": "policy_shipping_v1",
+        "prefix_hash": None,
+        "embedding": [0.1, 0.2, 0.9],
+        "model": "chat-large",
+        "model_version": "v3",
+        "tokenizer": "tok-a",
+        "params_hash": "temp0_top1_max120",
+        "temperature": 0.0,
+        "tenant": "public",
+        "permission_domain": "faq_public",
+        "safety_policy": "safe-2026-06",
+        "data_version": "kb-42",
+        "input_tokens": 220,
+        "expected_output_tokens": 95,
+        "stream": False,
+        "sensitive": False,
+    },
+    {
+        "id": "creative_generation",
+        "prompt_hash": "creative_copy_variant",
+        "prefix_hash": None,
+        "embedding": [0.2, 0.2, 0.8],
+        "model": "chat-large",
+        "model_version": "v3",
+        "tokenizer": "tok-a",
+        "params_hash": "temp08_top09_max200",
+        "temperature": 0.8,
+        "tenant": "public",
+        "permission_domain": "marketing_public",
+        "safety_policy": "safe-2026-06",
+        "data_version": "kb-42",
+        "input_tokens": 240,
+        "expected_output_tokens": 160,
+        "stream": False,
+        "sensitive": False,
+    },
+]
+
+
+def cosine(a, b):
+    dot = sum(x * y for x, y in zip(a, b))
+    na = sqrt(sum(x * x for x in a))
+    nb = sqrt(sum(y * y for y in b))
+    return dot / max(na * nb, 1e-9)
+
+
+def is_fresh(entry):
+    return POLICY["now_min"] - entry["created_min"] <= entry["ttl_min"]
+
+
+def result_key_match(req, entry):
+    fields = [
+        "prompt_hash",
+        "model",
+        "model_version",
+        "tokenizer",
+        "params_hash",
+        "tenant",
+        "permission_domain",
+        "safety_policy",
+        "data_version",
+    ]
+    return all(req[field] == entry[field] for field in fields)
+
+
+def stale_result_candidate(req, entry):
+    return (
+        req["prompt_hash"] == entry["prompt_hash"]
+        and req["model"] == entry["model"]
+        and req["model_version"] == entry["model_version"]
+        and req["tenant"] == entry["tenant"]
+        and req["permission_domain"] == entry["permission_domain"]
+        and req["data_version"] != entry["data_version"]
+    )
+
+
+def prefix_match(req, entry):
+    fields = [
+        "prefix_hash",
+        "model",
+        "model_version",
+        "tokenizer",
+        "tenant",
+        "permission_domain",
+        "safety_policy",
+        "data_version",
+    ]
+    return req["prefix_hash"] and all(req[field] == entry[field] for field in fields)
+
+
+def saved_cost(input_tokens, output_tokens):
+    return (
+        input_tokens * POLICY["input_cost_per_1k"]
+        + output_tokens * POLICY["output_cost_per_1k"]
+    ) / 1000.0
+
+
+def evaluate_cache(req):
+    trace = {
+        "request_id": req["id"],
+        "tenant": req["tenant"],
+        "permission_domain": req["permission_domain"],
+        "model_version": req["model_version"],
+        "data_version": req["data_version"],
+        "decision": None,
+        "layer": None,
+        "saved_input_tokens": 0,
+        "saved_output_tokens": 0,
+        "cache_latency_ms": 0,
+        "blocked_reason": None,
+    }
+
+    if req["temperature"] == 0.0:
+        for entry in RESULT_CACHE:
+            if result_key_match(req, entry):
+                if is_fresh(entry):
+                    trace.update({
+                        "decision": "result_cache_hit",
+                        "layer": "result",
+                        "saved_input_tokens": req["input_tokens"],
+                        "saved_output_tokens": min(req["expected_output_tokens"], entry["answer_tokens"]),
+                        "cache_latency_ms": POLICY["cache_read_ms"]["result"],
+                    })
+                    return trace
+                trace.update({"decision": "stale_result_blocked", "layer": "result", "blocked_reason": "ttl_expired"})
+                return trace
+            if stale_result_candidate(req, entry):
+                trace.update({"decision": "stale_result_blocked", "layer": "result", "blocked_reason": "data_version_mismatch"})
+                return trace
+    else:
+        trace.update({"blocked_reason": "non_deterministic_sampling"})
+
+    for entry in PREFIX_CACHE:
+        if prefix_match(req, entry):
+            if is_fresh(entry):
+                trace.update({
+                    "decision": "prefix_cache_hit",
+                    "layer": "prefix",
+                    "saved_input_tokens": min(req["input_tokens"], entry["cached_tokens"]),
+                    "cache_latency_ms": POLICY["cache_read_ms"]["prefix"],
+                })
+                return trace
+            trace.update({"decision": "stale_prefix_blocked", "layer": "prefix", "blocked_reason": "ttl_expired"})
+            return trace
+
+    best = None
+    for entry in SEMANTIC_CACHE:
+        sim = cosine(req["embedding"], entry["embedding"])
+        if sim >= POLICY["semantic_threshold"]:
+            if req["tenant"] != entry["tenant"] or req["permission_domain"] != entry["permission_domain"]:
+                trace.update({
+                    "decision": "semantic_isolation_blocked",
+                    "layer": "semantic",
+                    "blocked_reason": "tenant_or_permission_mismatch",
+                })
+                return trace
+            if req["data_version"] != entry["data_version"] or not is_fresh(entry):
+                trace.update({"decision": "semantic_stale_blocked", "layer": "semantic", "blocked_reason": "stale_semantic_entry"})
+                return trace
+            if best is None or sim > best[0]:
+                best = (sim, entry)
+    if best is not None and not req["sensitive"]:
+        _, entry = best
+        trace.update({
+            "decision": "semantic_cache_hit",
+            "layer": "semantic",
+            "saved_input_tokens": min(req["input_tokens"], entry["saved_input_tokens"]),
+            "saved_output_tokens": min(req["expected_output_tokens"], entry["saved_output_tokens"]),
+            "cache_latency_ms": POLICY["cache_read_ms"]["semantic"],
+        })
+        return trace
+
+    trace["decision"] = "cache_miss"
+    trace["layer"] = "none"
+    return trace
+
+
+def build_profile_cases():
+    complete = {"name": "complete_cache_case"}
+    complete.update({check: True for check in CHECKS})
+    cases = [complete]
+    bad_names = [
+        "request_cache_profile_missing_bad",
+        "cache_layer_blurred_bad",
+        "key_version_missing_bad",
+        "prompt_prefix_disabled_bad",
+        "kv_lifecycle_leak_bad",
+        "semantic_threshold_missing_bad",
+        "result_cache_random_bad",
+        "tenant_isolation_missing_bad",
+        "ttl_staleness_missing_bad",
+        "eviction_quota_missing_bad",
+        "streaming_policy_missing_bad",
+        "cache_metrics_missing_bad",
+        "savings_model_missing_bad",
+        "cache_governance_gate_missing_bad",
+    ]
+    for bad_name, failed_check in zip(bad_names, CHECKS):
+        case = {"name": bad_name}
+        case.update({check: True for check in CHECKS})
+        case[failed_check] = False
+        cases.append(case)
+    return cases
+
+
+def audit_profiles(cases):
+    metrics = {check: round(sum(1 for case in cases if case.get(check)) / len(cases), 3) for check in CHECKS}
+    failed_cases = [case["name"] for case in cases if not all(case.get(check) for check in CHECKS)]
+    failed_gates = [check for check, value in metrics.items() if value < 1.0]
+    hard_blockers = sum(1 for case in cases if case["name"].endswith("_bad"))
+    gate_pass = min(metrics.values()) >= 0.95 and hard_blockers == 0
+    return metrics, failed_cases, failed_gates, hard_blockers, gate_pass
+
+
+traces = [evaluate_cache(req) for req in REQUESTS]
+decisions = {trace["request_id"]: trace["decision"] for trace in traces}
+layer_hits = {
+    "result": sum(1 for trace in traces if trace["layer"] == "result" and trace["decision"].endswith("hit")),
+    "prefix": sum(1 for trace in traces if trace["layer"] == "prefix" and trace["decision"].endswith("hit")),
+    "semantic": sum(1 for trace in traces if trace["layer"] == "semantic" and trace["decision"].endswith("hit")),
+}
+saved_input = sum(trace["saved_input_tokens"] for trace in traces)
+saved_output = sum(trace["saved_output_tokens"] for trace in traces)
+cache_cost_usd = 0.003
+net_saved_cost = round(saved_cost(saved_input, saved_output) - cache_cost_usd, 4)
+saved_prefill_ms = round(saved_input / POLICY["prefill_tokens_per_second"] * 1000, 1)
+required_trace = {
+    "request_id",
+    "tenant",
+    "permission_domain",
+    "model_version",
+    "data_version",
+    "decision",
+    "layer",
+    "saved_input_tokens",
+    "saved_output_tokens",
+    "cache_latency_ms",
+    "blocked_reason",
+}
+trace_coverage = sum(1 for trace in traces if required_trace.issubset(trace)) / len(traces)
+blocked = [trace["request_id"] for trace in traces if "blocked" in trace["decision"]]
+metrics, failed_cases, failed_gates, hard_blockers, gate_pass = audit_profiles(build_profile_cases())
+
+print("cache_decisions=", decisions)
+print("cache_layer_hits=", layer_hits)
+print("blocked_cache_reuses=", blocked)
+print("saved_tokens=", {"input": saved_input, "output": saved_output})
+print("saved_prefill_ms=", saved_prefill_ms)
+print("net_saved_cost=", net_saved_cost)
+print("cache_trace_coverage=", round(trace_coverage, 3))
+print("metrics=", metrics)
+print("hard_blocker_count=", hard_blockers)
+print("failed_cases=", failed_cases)
+print("failed_gates=", failed_gates)
+print("cache_governance_gate_pass=", gate_pass)
+```
+
+输出示例：
+
+```text
+cache_decisions= {'exact_faq_retry': 'result_cache_hit', 'shared_doc_query': 'prefix_cache_hit', 'semantic_faq': 'semantic_cache_hit', 'private_cross_tenant': 'semantic_isolation_blocked', 'stale_policy': 'stale_result_blocked', 'creative_generation': 'cache_miss'}
+cache_layer_hits= {'result': 1, 'prefix': 1, 'semantic': 1}
+blocked_cache_reuses= ['private_cross_tenant', 'stale_policy']
+saved_tokens= {'input': 1910, 'output': 146}
+saved_prefill_ms= 159.2
+net_saved_cost= 1.4058
+cache_trace_coverage= 1.0
+metrics= {'request_cache_profile': 0.933, 'cache_layer_boundary': 0.933, 'key_version_fingerprint': 0.933, 'prompt_prefix_reuse': 0.933, 'kv_lifecycle_management': 0.933, 'semantic_similarity_guard': 0.933, 'result_cache_determinism': 0.933, 'tenant_permission_isolation': 0.933, 'ttl_staleness_control': 0.933, 'eviction_quota_policy': 0.933, 'streaming_cache_policy': 0.933, 'cache_observability_metrics': 0.933, 'cost_latency_savings': 0.933, 'cache_governance_gate': 0.933}
+hard_blocker_count= 14
+cache_governance_gate_pass= False
+```
+
+这个 demo 的重点不是复刻某个生产缓存系统，而是训练一套面试思维：缓存命中前必须检查模型、版本、tokenizer、参数、租户、权限、安全策略、数据版本和 TTL；语义相似不能绕过权限；随机生成不能随便结果缓存；缓存收益要同时看 token、TTFT、成本和误命中风险。
+
+## 31.21 常见误区
 
 误区一：缓存命中率越高越好。
 
@@ -405,7 +943,7 @@ KV cache 是 runtime 内部 attention 缓存，结果缓存是业务层响应缓
 
 缓存同时是安全、权限、一致性和审计问题。
 
-## 31.21 面试常见追问
+## 31.22 面试常见追问
 
 问题一：prompt cache 和 KV cache 有什么区别？
 
@@ -423,7 +961,15 @@ KV cache 是 runtime 内部 attention 缓存，结果缓存是业务层响应缓
 
 可以回答：不能只看命中率，还要看节省的 input/output tokens、GPU 时间、TTFT、端到端延迟、成本，以及误命中和过期命中风险。
 
-## 31.22 小练习
+问题五：语义缓存上线前要设置哪些门禁？
+
+可以回答：至少要设置相似度阈值、任务类型一致、租户和权限域一致、数据版本一致、TTL 未过期、敏感请求禁用或二次校验、误命中率评估、trace 完整和人工复核样本。
+
+问题六：为什么结果缓存通常要求采样参数进入 key？
+
+可以回答：temperature、top_p、max_tokens、stop sequence 等参数会改变输出分布和截断边界。如果 key 不包含这些参数，同一个 prompt 可能错误命中不同生成配置下的结果。
+
+## 31.23 小练习
 
 1. Prompt cache、KV cache、语义缓存和结果缓存分别缓存什么？
 2. 为什么 prompt cache 通常要求模型版本和 tokenizer 一致？
@@ -433,8 +979,12 @@ KV cache 是 runtime 内部 attention 缓存，结果缓存是业务层响应缓
 6. 缓存如何处理模型版本升级？
 7. 为什么只看 cache hit rate 不够？
 8. 如何为企业知识库问答设计缓存策略？
+9. 写出一个缓存 key schema，要求覆盖模型、参数、租户、权限、安全策略和数据版本。
+10. 设计一个语义缓存误命中评估集，至少包含相似但不等价、跨权限、过期知识和个性化上下文四类样本。
+11. 用公式估算 prefix cache 节省的 prefill token、TTFT 和成本。
+12. 为一个多租户推理平台设计缓存 trace 字段。
 
-## 31.23 本章小结
+## 31.24 本章小结
 
 本章讲了大模型推理平台的缓存体系。
 
@@ -446,5 +996,6 @@ KV cache 是 runtime 内部 attention 缓存，结果缓存是业务层响应缓
 4. 结果缓存返回最快，但对版本、参数、权限、一致性和随机性要求最严格。
 5. 缓存 key 必须包含模型、版本、参数、权限、安全和数据版本等信息。
 6. 缓存必须同时考虑性能、成本、安全、隔离、一致性和审计。
+7. 缓存门禁要同时检查请求画像、缓存层边界、key 版本指纹、prefix / KV 生命周期、语义相似阈值、结果缓存确定性、租户隔离、TTL、驱逐、streaming、指标和成本收益。
 
 下一章我们会讲自动扩缩容：QPS、延迟、队列长度和 GPU 利用率。

@@ -8,6 +8,18 @@ Checkpoint 策略不是越频繁越好，也不是越省越好。它是在训练
 
 > Checkpoint 策略的目标，是用可接受的 I/O 和存储成本，把训练失败后的损失控制在可接受范围内，并支持评估、回滚、抢占和发布。
 
+## 21.0 本讲资料边界与第二轮精修口径
+
+本讲第二轮精修时，资料口径主要对齐几类公开工程资料：PyTorch Distributed Checkpoint 对分布式 `state_dict`、planner、storage writer、异步保存和加载的抽象；DeepSpeed checkpointing 对模型、优化器、scheduler、ZeRO 分片状态保存和恢复的接口边界；Kubernetes priority / preemption、Pod 终止宽限期和任务生命周期对可抢占训练的控制面影响；对象存储生命周期策略对 checkpoint 保留、归档和删除的治理口径。
+
+这里不把某个框架 API、某种对象存储、某个调度器或某家云厂商的参数写成通用标准。正文只抽象 checkpoint 策略的稳定问题：RPO/RTO、保存触发、保存内容分层、同步 / 异步保存、一致 snapshot、临时目录、checksum、manifest commit、分片元数据、恢复选择、抢占联动、评估联动、发布联动、监控告警、保留成本和恢复演练。
+
+第二轮精修重点放在三个方面：
+
+1. 把“多久保存一次”从经验参数升级为 RPO、RTO、保存阻塞比例和最大丢失进度的可计算策略。
+2. 把 resume、eval、release checkpoint 分清，避免所有 checkpoint 都保存完整训练状态或只保留 latest。
+3. 增加一个 0 依赖 Python demo，把 checkpoint 策略从口头 checklist 变成能发现坏策略的门禁。
+
 ## 21.1 Checkpoint 策略要解决什么问题
 
 Checkpoint 策略要回答八个问题：
@@ -419,7 +431,389 @@ Checkpoint 没有监控，就不是真正可靠。
 
 保存成功不代表能恢复。
 
-## 21.17 面试中如何回答 checkpoint 策略
+## 21.17 Checkpoint 策略审计指标与最小 demo
+
+Checkpoint 策略不能只写成“每 1000 step 保存一次”。平台至少要能证明：保存频率符合 RPO，恢复耗时符合 RTO，保存阻塞比例可接受，resume / eval / release 三类 checkpoint 分清，异步保存有一致 snapshot 和 commit 语义，保留策略能控制成本，抢占、评估、发布、告警和恢复演练都能和 checkpoint 串起来。
+
+可以把一次 checkpoint 策略审计样本写成：
+
+```math
+p_i=(r_i,f_i,s_i,a_i,m_i,h_i,u_i,q_i,e_i,v_i,l_i,c_i,o_i,d_i,z_i)
+```
+
+其中，`r_i` 是 RPO / RTO 目标，`f_i` 是保存触发策略，`s_i` 是保存内容分层，`a_i` 是异步保存策略，`m_i` 是 manifest / commit 语义，`h_i` 是分片元数据，`u_i` 是恢复选择策略，`q_i` 是抢占联动，`e_i` 是评估联动，`v_i` 是发布联动，`l_i` 是保留生命周期，`c_i` 是存储成本，`o_i` 是监控告警，`d_i` 是恢复演练，`z_i` 是最终策略门禁。
+
+统一覆盖率可以写成：
+
+```math
+C_j=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[g_j(p_i)=1]
+```
+
+按 step 保存的最大丢失时间可以粗略写成：
+
+```math
+A_{\mathrm{step}}=\frac{I_{\mathrm{step}}T_{\mathrm{step}}}{60}
+```
+
+其中，`I_step` 是 step 间隔，`T_step` 是单 step 秒数。按时间保存的最大丢失时间就是 `A_time=I_time`。混合策略下，可以取更保守的触发上界：
+
+```math
+A_{\mathrm{lost}}=\min(A_{\mathrm{step}}, A_{\mathrm{time}})
+```
+
+如果有抢占通知，还要比较通知窗口和 checkpoint 完成时间：
+
+```math
+G_{\mathrm{preempt}}=\mathbf{1}\left[T_{\mathrm{notice}}\ge T_{\mathrm{snapshot}}+T_{\mathrm{commit}}\right]
+```
+
+同步保存的阻塞比例可以写成：
+
+```math
+R_{\mathrm{block}}=\frac{T_{\mathrm{block}}}{I_{\mathrm{step}}T_{\mathrm{step}}+T_{\mathrm{block}}}
+```
+
+`T_block` 是训练主循环真正停住等待 checkpoint 的时间。异步保存不是把 `T_block` 变成 0，而是把主循环阻塞从完整写入时间降低到 snapshot、buffer、metadata 或必要同步边界。
+
+保留成本可以写成：
+
+```math
+K_{\mathrm{retain}}=\sum_{k=1}^{K}N_kS_kD_kP_k+K_{\mathrm{request}}+K_{\mathrm{ops}}
+```
+
+其中，`N_k` 是第 `k` 类 checkpoint 保留个数，`S_k` 是单个大小，`D_k` 是保留天数，`P_k` 是对应存储层的单位成本。
+
+Checkpoint 策略门禁可以写成：
+
+```math
+G_{\mathrm{ckpt\_strategy}}=\mathbf{1}\left[A_{\mathrm{lost}}\le \mathrm{RPO} \land T_{\mathrm{restore}}\le \mathrm{RTO} \land R_{\mathrm{block}}\le \rho_{\mathrm{block}} \land K_{\mathrm{retain}}\le B_{\mathrm{storage}} \land \min_j C_j\ge \tau_j \land P_0=0\right]
+```
+
+下面这个 demo 不依赖第三方库。它用一条完整策略和 16 条坏样本，模拟平台如何审计 checkpoint 频率、保留、异步保存、抢占、评估、发布和恢复演练。
+
+```python
+from collections import OrderedDict
+
+
+GATE_ORDER = [
+    "rpo_rto_budget_defined",
+    "save_trigger_policy",
+    "checkpoint_scope_separation",
+    "async_snapshot_consistency",
+    "manifest_commit_integrity",
+    "shard_metadata_resharding",
+    "restore_selection_policy",
+    "preemption_checkpoint_coupling",
+    "evaluation_best_linkage",
+    "release_checkpoint_readiness",
+    "retention_tier_lifecycle",
+    "storage_cost_budget",
+    "checkpoint_monitoring_alerts",
+    "restore_drill_coverage",
+    "permission_release_protection",
+    "checkpoint_strategy_gate",
+]
+
+REQUIRED_SCOPES = {
+    "resume": {"model", "optimizer", "scheduler", "rng", "dataloader", "distributed", "config"},
+    "eval": {"model", "config", "tokenizer", "metadata"},
+    "release": {"model", "tokenizer", "config", "generation_config", "eval_report", "metadata"},
+}
+REQUIRED_TRIGGERS = {"step", "time", "milestone", "preemption"}
+REQUIRED_ASYNC_CONTROLS = {
+    "snapshot_boundary",
+    "buffer_budget",
+    "temp_path",
+    "checksum",
+    "manifest_commit",
+    "committed_only",
+    "failure_cleanup",
+}
+REQUIRED_MANIFEST_FIELDS = {"checkpoint_id", "global_step", "shards", "checksums", "state_kind", "status"}
+REQUIRED_SHARD_METADATA = {"rank_map", "tensor_shards", "global_step", "format_version", "reshard_policy"}
+REQUIRED_RESTORE_POLICY = {
+    "latest_committed",
+    "health_check",
+    "config_compat",
+    "data_access",
+    "permission_check",
+    "event_record",
+}
+REQUIRED_PREEMPTION_POLICY = {
+    "notice_handler",
+    "on_notice_checkpoint",
+    "freshness_gate",
+    "scheduler_uses_freshness",
+}
+REQUIRED_EVAL_LINKS = {"eval_after_milestone", "eval_config_version", "best_protection", "report_link"}
+REQUIRED_RELEASE_LINKS = {
+    "conversion_test",
+    "tokenizer_config_check",
+    "load_smoke",
+    "eval_report_required",
+    "security_review",
+    "registry_metadata",
+}
+REQUIRED_MONITORING = {
+    "save_duration",
+    "load_duration",
+    "checkpoint_age",
+    "failure_rate",
+    "temporary_count",
+    "storage_usage",
+    "restore_success",
+    "preempt_without_recent",
+}
+REQUIRED_PERMISSIONS = {"release_protected", "rbac", "audit_event", "archive_policy"}
+REQUIRED_RETENTION_KINDS = {"resume", "milestone", "best_eval", "release", "failed_temporary"}
+
+TIER_PRICE_PER_GIB_DAY = {
+    "hot": 0.004,
+    "warm": 0.0015,
+    "archive": 0.0004,
+    "protected": 0.0025,
+}
+
+
+def has_all(values, required):
+    return set(values) >= set(required)
+
+
+def ratio(numerator, denominator):
+    if denominator == 0:
+        return 0.0
+    return numerator / denominator
+
+
+def rounded(value):
+    return round(value, 3)
+
+
+def max_lost_minutes(case):
+    step_minutes = case["step_interval"] * case["step_seconds"] / 60.0
+    return min(step_minutes, case["time_interval_minutes"])
+
+
+def blocking_ratio(case):
+    interval_seconds = case["step_interval"] * case["step_seconds"]
+    return ratio(case["main_loop_block_seconds"], interval_seconds + case["main_loop_block_seconds"])
+
+
+def retention_cost(case):
+    total = case.get("request_ops_cost", 0.0)
+    for item in case["retention_items"]:
+        price = TIER_PRICE_PER_GIB_DAY[item["tier"]]
+        total += item["count"] * item["size_gib"] * item["days"] * price
+    return total
+
+
+def retention_kinds(case):
+    return {item["kind"] for item in case["retention_items"]}
+
+
+def scopes_are_separated(case):
+    scopes = case["checkpoint_scopes"]
+    return all(has_all(scopes.get(kind, set()), fields) for kind, fields in REQUIRED_SCOPES.items())
+
+
+def audit_one(case):
+    lost = max_lost_minutes(case)
+    cost = retention_cost(case)
+    gates = OrderedDict()
+    gates["rpo_rto_budget_defined"] = (
+        case["rpo_minutes"] > 0
+        and case["rto_minutes"] > 0
+        and lost <= case["rpo_minutes"]
+        and case["restore_minutes"] <= case["rto_minutes"]
+    )
+    gates["save_trigger_policy"] = has_all(case["save_triggers"], REQUIRED_TRIGGERS)
+    gates["checkpoint_scope_separation"] = scopes_are_separated(case)
+    gates["async_snapshot_consistency"] = (
+        not case["async_enabled"] or has_all(case["async_controls"], REQUIRED_ASYNC_CONTROLS)
+    )
+    gates["manifest_commit_integrity"] = has_all(case["manifest_fields"], REQUIRED_MANIFEST_FIELDS)
+    gates["shard_metadata_resharding"] = has_all(case["shard_metadata"], REQUIRED_SHARD_METADATA)
+    gates["restore_selection_policy"] = has_all(case["restore_policy"], REQUIRED_RESTORE_POLICY)
+    gates["preemption_checkpoint_coupling"] = (
+        has_all(case["preemption_policy"], REQUIRED_PREEMPTION_POLICY)
+        and case["checkpoint_age_minutes"] <= case["preemption_freshness_minutes"]
+    )
+    gates["evaluation_best_linkage"] = has_all(case["eval_links"], REQUIRED_EVAL_LINKS)
+    gates["release_checkpoint_readiness"] = has_all(case["release_links"], REQUIRED_RELEASE_LINKS)
+    gates["retention_tier_lifecycle"] = has_all(retention_kinds(case), REQUIRED_RETENTION_KINDS)
+    gates["storage_cost_budget"] = cost <= case["storage_budget"]
+    gates["checkpoint_monitoring_alerts"] = has_all(case["monitoring"], REQUIRED_MONITORING)
+    gates["restore_drill_coverage"] = (
+        case["restore_drill"]["scheduled"]
+        and case["restore_drill"]["pass_rate"] >= 0.99
+        and case["restore_drill"]["last_days_ago"] <= 30
+    )
+    gates["permission_release_protection"] = has_all(case["permissions"], REQUIRED_PERMISSIONS)
+    gates["checkpoint_strategy_gate"] = bool(case["strategy_gate"])
+
+    return {
+        "name": case["name"],
+        "gates": gates,
+        "max_lost_minutes": rounded(lost),
+        "blocking_ratio": rounded(blocking_ratio(case)),
+        "retention_cost": round(cost, 1),
+        "restore_minutes": case["restore_minutes"],
+        "retention_kinds": sorted(retention_kinds(case)),
+    }
+
+
+def clone(base, name, **changes):
+    copied = {}
+    for key, value in base.items():
+        if isinstance(value, dict):
+            copied[key] = {
+                inner_key: set(inner_value) if isinstance(inner_value, set) else dict(inner_value)
+                if isinstance(inner_value, dict)
+                else inner_value
+                for inner_key, inner_value in value.items()
+            }
+        elif isinstance(value, list):
+            copied[key] = [dict(item) if isinstance(item, dict) else item for item in value]
+        elif isinstance(value, set):
+            copied[key] = set(value)
+        else:
+            copied[key] = value
+    copied["name"] = name
+    copied.update(changes)
+    return copied
+
+
+complete_case = {
+    "name": "complete_case",
+    "rpo_minutes": 30,
+    "rto_minutes": 20,
+    "step_interval": 1000,
+    "step_seconds": 1.5,
+    "time_interval_minutes": 30,
+    "restore_minutes": 14,
+    "main_loop_block_seconds": 18,
+    "save_triggers": REQUIRED_TRIGGERS,
+    "checkpoint_scopes": REQUIRED_SCOPES,
+    "async_enabled": True,
+    "async_controls": REQUIRED_ASYNC_CONTROLS,
+    "manifest_fields": REQUIRED_MANIFEST_FIELDS,
+    "shard_metadata": REQUIRED_SHARD_METADATA,
+    "restore_policy": REQUIRED_RESTORE_POLICY,
+    "preemption_policy": REQUIRED_PREEMPTION_POLICY,
+    "checkpoint_age_minutes": 18,
+    "preemption_freshness_minutes": 30,
+    "eval_links": REQUIRED_EVAL_LINKS,
+    "release_links": REQUIRED_RELEASE_LINKS,
+    "retention_items": [
+        {"kind": "resume", "count": 5, "size_gib": 3200, "days": 7, "tier": "hot"},
+        {"kind": "milestone", "count": 8, "size_gib": 800, "days": 30, "tier": "warm"},
+        {"kind": "best_eval", "count": 2, "size_gib": 250, "days": 180, "tier": "warm"},
+        {"kind": "release", "count": 1, "size_gib": 240, "days": 365, "tier": "protected"},
+        {"kind": "failed_temporary", "count": 3, "size_gib": 100, "days": 7, "tier": "archive"},
+    ],
+    "request_ops_cost": 25.0,
+    "storage_budget": 1500.0,
+    "monitoring": REQUIRED_MONITORING,
+    "restore_drill": {"scheduled": True, "pass_rate": 1.0, "last_days_ago": 14},
+    "permissions": REQUIRED_PERMISSIONS,
+    "strategy_gate": True,
+}
+
+cases = [
+    complete_case,
+    clone(complete_case, "rpo_rto_missing_bad", rpo_minutes=0, rto_minutes=0),
+    clone(complete_case, "save_trigger_missing_bad", save_triggers={"step"}),
+    clone(
+        complete_case,
+        "scope_mixed_bad",
+        checkpoint_scopes={
+            "resume": {"model"},
+            "eval": {"model"},
+            "release": {"model"},
+        },
+    ),
+    clone(complete_case, "async_snapshot_missing_bad", async_controls={"temp_path", "checksum"}),
+    clone(complete_case, "manifest_commit_missing_bad", manifest_fields={"checkpoint_id", "status"}),
+    clone(complete_case, "shard_metadata_missing_bad", shard_metadata={"rank_map"}),
+    clone(complete_case, "restore_policy_latest_bad", restore_policy={"latest_committed"}),
+    clone(
+        complete_case,
+        "preemption_uncoupled_bad",
+        preemption_policy={"notice_handler"},
+        checkpoint_age_minutes=120,
+    ),
+    clone(complete_case, "eval_unlinked_bad", eval_links={"eval_after_milestone"}),
+    clone(complete_case, "release_unready_bad", release_links={"registry_metadata"}),
+    clone(
+        complete_case,
+        "retention_latest_only_bad",
+        retention_items=[{"kind": "resume", "count": 1, "size_gib": 3200, "days": 7, "tier": "hot"}],
+    ),
+    clone(complete_case, "storage_cost_unbounded_bad", storage_budget=500.0),
+    clone(complete_case, "monitoring_missing_bad", monitoring={"save_duration"}),
+    clone(
+        complete_case,
+        "restore_drill_missing_bad",
+        restore_drill={"scheduled": False, "pass_rate": 0.0, "last_days_ago": 999},
+    ),
+    clone(complete_case, "permission_release_open_bad", permissions={"archive_policy"}),
+    clone(complete_case, "strategy_gate_missing_bad", strategy_gate=False),
+]
+
+audits = [audit_one(case) for case in cases]
+metrics = OrderedDict()
+for gate_name in GATE_ORDER:
+    passed = sum(1 for audit in audits if audit["gates"][gate_name])
+    metrics[gate_name] = rounded(ratio(passed, len(audits)))
+
+failed_cases = [
+    audit["name"]
+    for audit in audits
+    if not all(audit["gates"].values())
+]
+failed_gates = [name for name, value in metrics.items() if value < 1.0]
+complete_audit = audits[0]
+
+examples = {
+    "max_lost_minutes": complete_audit["max_lost_minutes"],
+    "restore_minutes": complete_audit["restore_minutes"],
+    "blocking_ratio": complete_audit["blocking_ratio"],
+    "retention_cost": complete_audit["retention_cost"],
+    "retention_kinds": complete_audit["retention_kinds"],
+}
+smoke = {
+    "complete_case_passes": all(complete_audit["gates"].values()),
+    "caught_rpo_gap": "rpo_rto_missing_bad" in failed_cases,
+    "caught_scope_gap": "scope_mixed_bad" in failed_cases,
+    "caught_async_gap": "async_snapshot_missing_bad" in failed_cases,
+    "caught_preemption_gap": "preemption_uncoupled_bad" in failed_cases,
+    "caught_restore_drill_gap": "restore_drill_missing_bad" in failed_cases,
+}
+
+print("checkpoint_strategy_examples=", examples, sep="")
+print("smoke=", smoke, sep="")
+print("metrics=", dict(metrics), sep="")
+print("hard_blocker_count=", len(failed_cases), sep="")
+print("failed_cases=", failed_cases, sep="")
+print("failed_gates=", failed_gates, sep="")
+print("checkpoint_strategy_gate_pass=", all(value >= 0.99 for value in metrics.values()), sep="")
+```
+
+一组期望输出类似：
+
+```text
+checkpoint_strategy_examples={'max_lost_minutes': 25.0, 'restore_minutes': 14, 'blocking_ratio': 0.012, 'retention_cost': 1115.8, 'retention_kinds': ['best_eval', 'failed_temporary', 'milestone', 'release', 'resume']}
+smoke={'complete_case_passes': True, 'caught_rpo_gap': True, 'caught_scope_gap': True, 'caught_async_gap': True, 'caught_preemption_gap': True, 'caught_restore_drill_gap': True}
+metrics={'rpo_rto_budget_defined': 0.941, 'save_trigger_policy': 0.941, 'checkpoint_scope_separation': 0.941, 'async_snapshot_consistency': 0.941, 'manifest_commit_integrity': 0.941, 'shard_metadata_resharding': 0.941, 'restore_selection_policy': 0.941, 'preemption_checkpoint_coupling': 0.941, 'evaluation_best_linkage': 0.941, 'release_checkpoint_readiness': 0.941, 'retention_tier_lifecycle': 0.941, 'storage_cost_budget': 0.941, 'checkpoint_monitoring_alerts': 0.941, 'restore_drill_coverage': 0.941, 'permission_release_protection': 0.941, 'checkpoint_strategy_gate': 0.941}
+hard_blocker_count=16
+failed_cases=['rpo_rto_missing_bad', 'save_trigger_missing_bad', 'scope_mixed_bad', 'async_snapshot_missing_bad', 'manifest_commit_missing_bad', 'shard_metadata_missing_bad', 'restore_policy_latest_bad', 'preemption_uncoupled_bad', 'eval_unlinked_bad', 'release_unready_bad', 'retention_latest_only_bad', 'storage_cost_unbounded_bad', 'monitoring_missing_bad', 'restore_drill_missing_bad', 'permission_release_open_bad', 'strategy_gate_missing_bad']
+failed_gates=['rpo_rto_budget_defined', 'save_trigger_policy', 'checkpoint_scope_separation', 'async_snapshot_consistency', 'manifest_commit_integrity', 'shard_metadata_resharding', 'restore_selection_policy', 'preemption_checkpoint_coupling', 'evaluation_best_linkage', 'release_checkpoint_readiness', 'retention_tier_lifecycle', 'storage_cost_budget', 'checkpoint_monitoring_alerts', 'restore_drill_coverage', 'permission_release_protection', 'checkpoint_strategy_gate']
+checkpoint_strategy_gate_pass=False
+```
+
+这个 demo 想说明：checkpoint 策略的关键不是“保存成功”四个字，而是把 RPO/RTO、保存阻塞、异步一致性、分片元数据、恢复选择、抢占、评估、发布、留存、成本、权限、监控和恢复演练放进同一个策略门禁。大模型训练平台如果没有这张表，checkpoint 很容易从可靠性能力变成存储成本和恢复风险的来源。
+
+## 21.18 面试中如何回答 checkpoint 策略
 
 如果面试官问：
 
@@ -441,7 +835,7 @@ Checkpoint 没有监控，就不是真正可靠。
 调度层要和 checkpoint 联动：可抢占任务必须有周期 checkpoint，抢占前尽量触发保存，恢复时从最新 committed checkpoint 加载。平台还要监控 save/load duration、time since last checkpoint、失败率、存储用量和恢复成功率，并定期做恢复测试。
 ```
 
-## 21.18 常见误区
+## 21.19 常见误区
 
 误区一：checkpoint 越频繁越好。
 
@@ -463,7 +857,7 @@ latest 可能损坏或对应坏训练状态，需要保留 milestone 和 best ch
 
 必须做恢复测试和配置兼容校验。
 
-## 21.19 面试题
+## 21.20 面试题
 
 ### 题 1：Checkpoint 保存频率如何选择？
 
@@ -485,7 +879,7 @@ latest 可能损坏或对应坏训练状态，需要保留 milestone 和 best ch
 
 答：最新 checkpoint 可能损坏，也可能对应训练发散后的状态。保留 milestone、best eval 和 release checkpoint 可以支持回滚、评估和发布。
 
-## 21.20 小练习
+## 21.21 小练习
 
 练习一：设计一个 checkpoint 策略。
 
@@ -503,7 +897,7 @@ latest 可能损坏或对应坏训练状态，需要保留 milestone 和 best ch
 
 要求：从保存频率、完整训练状态、保留策略、实验数量和冷存储归档角度分析。
 
-## 21.21 本章小结
+## 21.22 本章小结
 
 本章讲了 checkpoint 策略。
 

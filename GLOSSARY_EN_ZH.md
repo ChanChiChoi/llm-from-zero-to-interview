@@ -5769,3 +5769,1059 @@ Privacy Redaction Access：隐私脱敏与访问控制
 Cost Attribution Signal：成本归因信号
 
 Training Observability Gate：训练可观测性门禁
+
+Checkpoint Strategy Audit：Checkpoint 策略审计
+
+RPO RTO Budget：RPO / RTO 预算
+
+Save Trigger Policy：保存触发策略
+
+Checkpoint Scope Separation：Checkpoint 用途分层
+
+Async Snapshot Consistency：异步快照一致性
+
+Manifest Commit Integrity：Manifest 提交完整性
+
+Shard Metadata Resharding：分片元数据与重分片
+
+Restore Selection Policy：恢复选择策略
+
+Preemption Checkpoint Coupling：抢占与 Checkpoint 耦合
+
+Evaluation Best Linkage：评估最优 Checkpoint 链接
+
+Release Checkpoint Readiness：发布 Checkpoint 就绪度
+
+Retention Tier Lifecycle：保留层级生命周期
+
+Storage Cost Budget：存储成本预算
+
+Checkpoint Monitoring Alerts：Checkpoint 监控告警
+
+Restore Drill Coverage：恢复演练覆盖率
+
+Permission Release Protection：权限与发布保护
+
+Checkpoint Strategy Gate：Checkpoint 策略门禁
+
+Training Fault Tolerance Audit：训练容错审计
+
+Fault Taxonomy Coverage：故障分类覆盖率
+
+Retryability Classification：可重试性分类
+
+Retry Budget Bounded：有界重试预算
+
+Retry Backoff Policy：重试退避策略
+
+Checkpoint Resume Readiness：Checkpoint 恢复就绪度
+
+Node Failure Reschedule：节点失败重调度
+
+GPU Health Isolation：GPU 健康隔离
+
+Communication Hang Detection：通信 Hang 检测
+
+OOM Handling Policy：OOM 处理策略
+
+Data Permission Fast Fail：数据权限快速失败
+
+Checkpoint Commit Safety：Checkpoint 提交安全性
+
+Numeric Instability Stop Rollback：数值不稳定停止与回滚
+
+Diagnosis Report Evidence：诊断报告证据
+
+Blacklist Precision：黑名单精准度
+
+User Action Clarity：用户动作清晰度
+
+Training Fault Tolerance Gate：训练容错门禁
+
+Training Data Supply Audit：训练数据供给审计
+
+Dataset Manifest Integrity：数据集 Manifest 完整性
+
+Shard Format Size Fit：Shard 格式与大小匹配度
+
+Small File Amplification Control：小文件放大控制
+
+Streaming Prefetch Retry：流式读取预取与重试
+
+Local Cache Policy：本地缓存策略
+
+Distributed Cache Policy：分布式缓存策略
+
+Shuffle Reproducibility：Shuffle 可复现性
+
+Rank Shard Assignment：Rank 与 Shard 分配
+
+Data Locality Fit：数据局部性匹配度
+
+Dataloader Parallelism Fit：DataLoader 并行度匹配
+
+H2D Copy Readiness：Host-to-Device 拷贝就绪度
+
+Bad Sample Threshold：坏样本阈值
+
+Data Supply Observability：数据供给可观测性
+
+Checkpoint Dataloader State：Checkpoint 中的 DataLoader 状态
+
+Permission Version Governance：权限与版本治理
+
+Training Data Supply Gate：训练数据供给门禁
+
+Data Platform Supply Chain Audit：数据平台供给链路审计
+
+Source Registry Coverage：数据源注册覆盖率
+
+Raw Data Lake Integrity：原始数据湖完整性
+
+Cleaning Policy Versioning：清洗策略版本化
+
+Dedup Contamination Guard：去重与污染隔离门禁
+
+PII Redaction Coverage：PII 脱敏覆盖率
+
+Quality Scoring Calibration：质量评分校准
+
+Dataset Builder Recipe：数据集构建配方
+
+Dataset Manifest Completeness：数据集 Manifest 完整率
+
+Dataset Version Immutability：数据集版本不可变性
+
+Streaming Shard Readiness：流式分片就绪度
+
+Permission Purpose Binding：权限与用途绑定
+
+Data Lineage Coverage：数据血缘覆盖率
+
+Data Platform Supply Observability：数据平台供给可观测性
+
+Read Throughput Fit：读取吞吐匹配度
+
+Data Wait Fit：等数据比例匹配度
+
+Data Platform Supply Gate：数据平台供给门禁
+
+Data Version Lineage Quality Audit：数据版本、血缘与质量审计
+
+Dataset Version Contract：数据集版本契约
+
+Manifest Checksum Integrity：Manifest 与校验和完整性
+
+Immutable Snapshot Policy：不可变快照策略
+
+Delta Version Diff：增量版本差异报告
+
+Lineage Graph Completeness：血缘图完整性
+
+Impact Analysis Readiness：影响分析就绪度
+
+Schema Quality Gate：Schema 质量门禁
+
+Content Quality Gate：内容质量门禁
+
+Data Safety Compliance Gate：数据安全合规门禁
+
+Distribution Drift Monitoring：分布漂移监控
+
+Train Eval Leakage Monitoring：训练 / 评估泄漏监控
+
+Annotation Quality Monitoring：标注质量监控
+
+Synthetic Data Monitoring：合成数据监控
+
+Quality Alert Routing：质量告警路由
+
+Training Model Version Linkage：训练任务与模型版本联动
+
+Data Version Quality Gate：数据版本质量门禁
+
+Training Platform Security Audit：训练平台安全审计
+
+Identity Runtime Binding：身份与运行身份绑定
+
+RBAC ABAC Policy Fit：RBAC / ABAC 策略匹配度
+
+Dataset Permission Purpose：数据集权限与用途授权
+
+Artifact Classification Propagation：产物等级传播
+
+Resource Quota Priority Governance：资源配额与优先级治理
+
+Image Supply Chain Trust：镜像供应链可信度
+
+Runtime Code Isolation：运行时代码隔离
+
+Secret Scope Rotation：密钥范围与轮换
+
+Network Egress Control：网络出站控制
+
+Log Redaction Access：日志脱敏与访问控制
+
+Model Artifact Permission：模型产物权限
+
+High Risk Approval：高风险操作审批
+
+Audit Log Completeness：审计日志完整性
+
+Audit Integrity Retention：审计完整性与留存
+
+Incident Response Readiness：事件响应就绪度
+
+Training Platform Security Gate：训练平台安全门禁
+
+Training Platform System Design Audit：训练平台系统设计审计
+
+Requirement Clarification：需求澄清
+
+TrainingJob Contract：TrainingJob 契约
+
+Lifecycle State Machine：生命周期状态机
+
+Admission Quota Policy：准入与配额策略
+
+Scheduler Resource Fit：调度器与资源匹配度
+
+Distributed Launcher Fit：分布式启动器匹配度
+
+Data Config Lineage：数据与配置血缘
+
+Checkpoint Recovery Coupling：Checkpoint 与恢复耦合
+
+Observability Experiment Linkage：可观测性与实验追踪链接
+
+Fault Recovery Flow：故障恢复流程
+
+Security Audit Governance：安全审计治理
+
+Cost Capacity Governance：成本与容量治理
+
+Developer Self Service：开发者自助
+
+Interface Artifact Contract：接口与产物契约
+
+Tradeoff Boundary Reasoning：取舍与边界推理
+
+Training Platform Design Gate：训练平台设计门禁
+
+Inference Platform Overview Audit：推理平台总览审计
+
+Request Lifecycle Coverage：请求生命周期覆盖率
+
+SLO Metric Contract：SLO 指标契约
+
+Model Registry Readiness：模型注册表就绪度
+
+Model Router Policy Fit：模型路由策略匹配度
+
+Runtime Prefill Decode Fit：运行时 Prefill / Decode 匹配度
+
+Continuous Batching Readiness：Continuous Batching 就绪度
+
+KV Cache Capacity Governance：KV Cache 容量治理
+
+Autoscaling Warm Pool Fit：自动扩缩容与热池匹配度
+
+Release Rollback Control：发布与回滚控制
+
+Rate Limit Degrade Protection：限流与降级保护
+
+Safety Governance Fit：安全治理匹配度
+
+Cost Attribution Optimization：成本归因与优化
+
+Observability Trace Coverage：可观测性 Trace 覆盖率
+
+Multi Model Governance：多模型治理
+
+Developer API Self Service：开发者 API 自助
+
+Inference Platform Gate：推理平台门禁
+
+Model Serving Runtime Selection Audit：模型服务运行时选型审计
+
+Model Hardware Fit：模型与硬件匹配度
+
+Runtime Boundary Clarity：运行时边界清晰度
+
+Model Format Tokenizer Fit：模型格式与 Tokenizer 匹配度
+
+Prefill Decode Scheduler Fit：Prefill / Decode 调度器匹配度
+
+Continuous Batching Fit：Continuous Batching 匹配度
+
+KV Cache Memory Manager Fit：KV Cache 内存管理器匹配度
+
+Streaming API Fit：流式 API 匹配度
+
+Quantization Accuracy Fit：量化精度匹配度
+
+Distributed Inference Fit：分布式推理匹配度
+
+Observability Metrics Fit：可观测指标匹配度
+
+Benchmarking Method Fit：基准测试方法匹配度
+
+Deployment Rollback Fit：部署与回滚匹配度
+
+Ecosystem Maintenance Fit：生态维护状态匹配度
+
+Cost Capacity Fit：成本容量匹配度
+
+Self Development Threshold：自研门槛
+
+Runtime Selection Gate：运行时选型门禁
+
+Prefill Decode KV Resource Profile Audit：Prefill / Decode / KV 资源画像审计
+
+Request Token Profile：请求 Token 画像
+
+Prefill Phase Accounting：Prefill 阶段计量
+
+Decode Phase Accounting：Decode 阶段计量
+
+TTFT TPOT Contract：TTFT / TPOT 指标契约
+
+KV Cache Formula Fit：KV Cache 公式匹配度
+
+KV Capacity Admission：KV 容量准入
+
+Paged Block Management：分页块管理
+
+Prefix Cache Reuse：Prefix Cache 复用
+
+Long Context Policy：长上下文策略
+
+Tenant KV Isolation：租户级 KV 隔离
+
+Continuous Batching Policy：Continuous Batching 策略
+
+PD Disaggregation Fit：Prefill / Decode 分离匹配度
+
+Streaming Backpressure Fit：流式背压匹配度
+
+Observability Phase Metrics：阶段可观测指标
+
+Cost Capacity Model：成本容量模型
+
+Resource Profile Gate：资源画像门禁
+
+Inference Scheduling Audit：推理调度审计
+
+Request Arrival Profile：请求到达画像
+
+Continuous Batching Core：Continuous Batching 核心能力
+
+Token Budget Policy：Token 预算策略
+
+Prefill Decode Balance：Prefill / Decode 平衡
+
+Paged KV Block Management：分页 KV Block 管理
+
+Scheduler KV Admission：调度器 KV 准入
+
+Long Short Isolation：长短请求隔离
+
+Tenant Priority Fairness：租户优先级与公平性
+
+Cancellation Cleanup：取消与超时清理
+
+Scheduler Observability Metrics：调度器可观测指标
+
+Scheduler Gate：调度器门禁
+
+Model Routing Audit：模型路由审计
+
+Request Intent Profile：请求意图画像
+
+Model Capability Profile：模型能力画像
+
+Permission Candidate Filter：权限候选过滤
+
+Cost Budget Policy：成本预算策略
+
+Latency SLO Policy：延迟 SLO 策略
+
+Quality Safety Policy：质量安全策略
+
+Fallback Chain Governance：Fallback 链治理
+
+Canary Routing Stability：灰度路由稳定性
+
+Realtime Health Load：实时健康与负载
+
+Route Trace Coverage：路由 Trace 覆盖率
+
+Degrade Policy Control：降级策略控制
+
+Route Config Versioning：路由配置版本化
+
+Model Routing Gate：模型路由门禁
+
+Inference Cache System Audit：推理缓存体系审计
+
+Request Cache Profile：请求缓存画像
+
+Cache Layer Boundary：缓存层边界
+
+Key Version Fingerprint：Key 版本指纹
+
+Prompt Prefix Reuse：Prompt 前缀复用
+
+KV Lifecycle Management：KV 生命周期管理
+
+Semantic Similarity Guard：语义相似度防护
+
+Result Cache Determinism：结果缓存确定性
+
+Tenant Permission Isolation：租户权限隔离
+
+TTL Staleness Control：TTL 与过期控制
+
+Eviction Quota Policy：驱逐与配额策略
+
+Streaming Cache Policy：流式缓存策略
+
+Cache Observability Metrics：缓存可观测指标
+
+Cost Latency Savings：成本与延迟节省
+
+Cache Governance Gate：缓存治理门禁
+
+Inference Autoscaling Audit：推理自动扩缩容审计
+
+Traffic Token Profile：流量 Token 画像
+
+SLO Latency Contract：SLO 延迟契约
+
+Queue Backlog Signal：队列积压信号
+
+GPU KV Capacity Signal：GPU 与 KV 容量信号
+
+Cold Start Lead Time：冷启动提前量
+
+Warm Pool Readiness：热池就绪度
+
+Multi Metric Recommendation：多指标副本推荐
+
+Scale Up Down Policy：扩缩容策略
+
+Draining Streaming Safety：Draining 与流式安全
+
+Router Admission Coupling：路由与准入联动
+
+Tenant Quota Priority：租户配额与优先级
+
+Cost Budget Guard：成本预算保护
+
+Autoscaling Trace Coverage：扩缩容 Trace 覆盖率
+
+Autoscaling Gate：自动扩缩容门禁
+
+Inference Protection Policy Audit：推理保护策略审计
+
+Request Token Rate Limit：请求与 Token 限流
+
+Concurrency Quota Control：并发配额控制
+
+Admission Capacity Guard：准入容量保护
+
+Circuit Breaker State Machine：熔断器状态机
+
+Retry Error Classification：重试错误分类
+
+Retry Budget Bound：有界重试预算
+
+Idempotency Stage Guard：幂等与执行阶段保护
+
+Timeout Budget Allocation：超时预算分配
+
+Degradation Policy Control：降级策略控制
+
+Priority Tenant Fairness：优先级与租户公平
+
+Streaming Cancellation Cleanup：流式取消清理
+
+Protection Trace Coverage：保护策略 Trace 覆盖率
+
+Protection Gate：保护策略门禁
+
+Inference Release Governance Audit：推理发布治理审计
+
+Release Bundle Trace：发布包 Trace
+
+Model Artifact Integrity：模型产物完整性
+
+Tokenizer Prompt Runtime Binding：Tokenizer / Prompt / Runtime 绑定
+
+Offline Eval Quality Gate：离线评估质量门禁
+
+Safety Eval Gate：安全评估门禁
+
+Contract Test Compatibility：契约测试兼容性
+
+Stable Bucket Assignment：稳定分桶分配
+
+Canary Ramp Control：灰度放量控制
+
+AB Experiment Design：A/B 实验设计
+
+Sample Ratio Health：样本比例健康度
+
+Guardrail Metric Control：护栏指标控制
+
+Rollback Readiness：回滚就绪度
+
+Release Audit Trace：发布审计 Trace
+
+Post Release Monitoring：发布后监控
+
+Release Governance Gate：发布治理门禁
+
+Inference Platform System Design Audit：推理平台系统设计审计
+
+SLO Token Contract：SLO 与 token 契约
+
+Model Registry Release：模型注册与发布设计
+
+Router Policy Fit：路由策略匹配度
+
+Runtime Prefill Decode：运行时 Prefill / Decode 设计
+
+KV Scheduler Capacity：KV 与调度容量
+
+Cache Isolation Strategy：缓存隔离策略
+
+Autoscaling Capacity Plan：自动扩缩容容量规划
+
+Protection Policy Design：保护策略设计
+
+Release Governance Design：发布治理设计
+
+Tenant Security Governance：租户与安全治理
+
+Observability Trace Readiness：可观测性 Trace 就绪度
+
+Inference Platform Design Gate：推理平台系统设计门禁
+
+Model Artifact Registry Audit：模型产物仓库审计
+
+Model Version Contract：模型版本契约
+
+Weight Manifest Integrity：权重 Manifest 完整性
+
+Safe Weight Format：安全权重格式
+
+Tokenizer Config Binding：Tokenizer 与配置绑定
+
+Adapter Base Compatibility：Adapter 与 Base 模型兼容性
+
+Merge Lineage Completeness：Merge 血缘完整性
+
+Quantization Eval Gate：量化评估门禁
+
+Runtime Compatibility Fit：Runtime 兼容性匹配度
+
+Eval Report Linkage：评估报告关联
+
+Safety Permission Gate：安全与权限门禁
+
+Release Status Governance：发布状态治理
+
+Rollback Alias Readiness：回滚别名就绪度
+
+Artifact Lineage Completeness：产物血缘完整性
+
+Load Cache Readiness：加载与缓存就绪度
+
+Lifecycle Retention Policy：生命周期保留策略
+
+Model Registry Gate：模型仓库门禁
+
+Artifact Management Audit：Artifact 管理审计
+
+Artifact Metadata Contract：Artifact 元数据契约
+
+Dataset Artifact Manifest：数据集 Artifact Manifest
+
+Checkpoint Artifact Recoverability：Checkpoint Artifact 可恢复性
+
+Eval Report Reproducibility：评估报告可复现性
+
+Deployment Package Completeness：部署包完整性
+
+Release Manifest Integrity：发布 Manifest 完整性
+
+Checksum Integrity Gate：校验和完整性门禁
+
+Artifact Store Metadata Split：Artifact Store 与 Metadata Store 分层
+
+Permission Access Control：权限访问控制
+
+Promotion Gate Readiness：晋级门禁就绪度
+
+Experiment Tracking Linkage：实验追踪关联
+
+Rollback Artifact Readiness：回滚 Artifact 就绪度
+
+Deletion Dependency Safety：删除依赖安全性
+
+Artifact Management Gate：Artifact 管理门禁
+
+Experiment Tracking Audit：实验追踪审计
+
+Run Metadata Contract：Run 元数据契约
+
+Parameter Config Capture：参数与配置捕获
+
+Metric Curve Step Capture：指标曲线 Step 捕获
+
+Log Run Linkage：日志与 Run 关联
+
+Sample Result Diagnosis：样本级结果诊断
+
+Code Version Reproducibility：代码版本可复现性
+
+Data Version Reproducibility：数据版本可复现性
+
+Model Checkpoint Linkage：模型与 Checkpoint 关联
+
+Environment Capture：环境捕获
+
+Prompt Eval Config Capture：Prompt 与评估配置捕获
+
+Artifact Output Linkage：输出 Artifact 关联
+
+Cost Attribution：成本归因
+
+Run State Transition：Run 状态流转
+
+Search Index Readiness：搜索索引就绪度
+
+Lineage Graph Readiness：血缘图就绪度
+
+Decision Note Capture：实验结论记录
+
+Experiment Tracking Gate：实验追踪门禁
+
+Evaluation Platform Audit：评估平台审计
+
+Eval Dataset Contract：评估数据集契约
+
+Offline Batch Reproducibility：离线批量评测可复现性
+
+Metric Definition Versioning：指标定义版本化
+
+LLM Judge Calibration：LLM Judge 校准
+
+Human Review Quality Control：人工评测质量控制
+
+Pairwise Blinding Randomization：Pairwise 盲评与随机化
+
+Online Eval Guardrail：在线评估护栏
+
+Release Gate Readiness：发布门禁就绪度
+
+Eval Report Completeness：评估报告完整性
+
+Slice Regression Detection：切片退化检测
+
+Regression Suite Coverage：回归评测集覆盖率
+
+Eval Job Scheduler Reliability：评估任务调度可靠性
+
+Eval Cache Key Integrity：评估缓存 Key 完整性
+
+Eval Observability：评估可观测性
+
+Artifact Tracking Linkage：Artifact 追踪关联
+
+Evaluation Platform Gate：评估平台门禁
+
+Feature Embedding Index Infrastructure Audit：特征向量索引基础设施审计
+
+Feature Definition Contract：特征定义契约
+
+Offline Online Consistency：离线在线一致性
+
+Point in Time Correctness：时间点正确性
+
+Embedding Version Contract：Embedding 版本契约
+
+Chunk Embedding Lineage：Chunk 与 Embedding 血缘
+
+Vector Index Build Readiness：向量索引构建就绪度
+
+ANN Quality Latency Gate：ANN 质量延迟门禁
+
+Metadata Permission Filter：元数据权限过滤
+
+Shadow Index Switch Readiness：Shadow Index 切换就绪度
+
+Retrieval Trace Completeness：检索 Trace 完整性
+
+Feature Embedding Lineage Graph：特征与 Embedding 血缘图
+
+Multi Tenant Isolation：多租户隔离
+
+Quality Monitoring Metrics：质量监控指标
+
+Cost Capacity Governance：成本与容量治理
+
+RAG Agent Integration：RAG / Agent 集成
+
+Feature Embedding Index Gate：特征向量索引门禁
+
+RAG Agent Storage Audit：RAG / Agent 平台存储审计
+
+Knowledge Base Contract：知识库契约
+
+Document Chunk Version Contract：文档与 Chunk 版本契约
+
+Sync Delete Propagation：同步删除传播
+
+ACL Permission Enforcement：ACL 权限强制执行
+
+Prompt Assembly Trace：Prompt 组装 Trace
+
+Citation Version Binding：引用版本绑定
+
+Agent Definition Versioning：Agent 定义版本化
+
+Tool Definition Contract：工具定义契约
+
+Tool Call Trace Completeness：工具调用 Trace 完整性
+
+Execution Trace Replay Readiness：执行 Trace 回放就绪度
+
+Memory Privacy Lifecycle：Memory 隐私生命周期
+
+Trace Privacy Retention：Trace 隐私与保留策略
+
+Cost Attribution Governance：成本归因治理
+
+RAG Agent Storage Gate：RAG / Agent 平台存储门禁
+
+AI Infra Observability Audit：AI Infra 可观测性审计
+
+Signal Inventory Coverage：信号清单覆盖率
+
+Metric Contract Completeness：指标契约完整性
+
+SLO Error Budget Readiness：SLO 与错误预算就绪度
+
+Latency Quantile Guard：延迟分位门禁
+
+Trace Span Coverage：Trace Span 覆盖率
+
+Log Event Structure：日志与事件结构化
+
+Correlation ID Coverage：关联 ID 覆盖率
+
+Cardinality Budget Control：基数预算控制
+
+Training Observability：训练可观测性
+
+Inference Observability：推理可观测性
+
+Data Quality Observability：数据质量可观测性
+
+RAG Agent Observability：RAG / Agent 可观测性
+
+Cost Observability：成本可观测性
+
+Privacy Redaction Retention：隐私脱敏与保留策略
+
+Alert Actionability：告警可行动性
+
+Observability Platform Gate：可观测性平台门禁
+
+Training Fault Diagnosis Audit：训练故障定位审计
+
+Training Fault Evidence Coverage：训练故障证据覆盖率
+
+Lifecycle Event Timeline：生命周期事件时间线
+
+Rank Log Completeness：Rank 日志完整性
+
+Loss Anomaly Diagnosis：Loss 异常诊断
+
+NaN Inf Guard：NaN / Inf 防护
+
+Update Health Check：更新健康检查
+
+Hang Straggler Detection：Hang 与慢 Rank 检测
+
+OOM Phase Memory Evidence：OOM 阶段与显存证据
+
+Communication Bottleneck Diagnosis：通信瓶颈诊断
+
+IO Data Bottleneck Diagnosis：I/O 与数据瓶颈诊断
+
+Checkpoint Integrity：Checkpoint 完整性
+
+Training Resume Continuity：训练恢复连续性
+
+Data Fault Isolation：数据故障隔离
+
+Config Code Diff Readiness：配置与代码 Diff 就绪度
+
+Minimal Reproduction Readiness：最小复现就绪度
+
+Training Fault Diagnosis Gate：训练故障定位门禁
+
+Inference Fault Diagnosis Audit：推理故障定位审计
+
+Inference Fault Evidence Coverage：推理故障证据覆盖率
+
+Request Scope Slice：请求影响范围切片
+
+Trace Stage Coverage：Trace 阶段覆盖率
+
+TTFT Decomposition：TTFT 拆分
+
+TPOT Decode Health：TPOT 与 Decode 健康度
+
+Tail Latency Attribution：尾延迟归因
+
+Throughput Token Capacity：Token 吞吐容量
+
+Error Taxonomy Timeout Stage：错误分类与 Timeout 阶段
+
+KV Cache Pressure Guard：KV Cache 压力门禁
+
+Model Artifact Load Readiness：模型 Artifact 加载就绪度
+
+Streaming Reliability：流式输出可靠性
+
+Cache Hit Key Governance：缓存命中与 Key 治理
+
+Route Trace Correctness：路由 Trace 正确性
+
+Tool Dependency Trace：工具依赖 Trace
+
+Quality Release Diff Readiness：质量与发布 Diff 就绪度
+
+Inference Fault Diagnosis Gate：推理故障定位门禁
+
+SLO Oncall Audit：SLO 值班体系审计
+
+SLI Contract Completeness：SLI 契约完整性
+
+SLO Target Measurability：SLO 目标可测量性
+
+SLA Boundary Clarity：SLA 边界清晰度
+
+Inference SLO Coverage：推理 SLO 覆盖率
+
+Training SLO Coverage：训练 SLO 覆盖率
+
+Data Eval SLO Coverage：数据与评估 SLO 覆盖率
+
+Error Budget Accounting：错误预算核算
+
+Burn Rate Alerting：Burn Rate 告警
+
+Oncall Ownership Escalation：值班责任与升级链路
+
+Incident Severity Routing：事故分级路由
+
+Runbook Executability：Runbook 可执行性
+
+Change Event Linkage：变更事件关联
+
+Mitigation Rollback Authority：止损与回滚权限
+
+Postmortem Action Closure：复盘行动项关闭率
+
+SLO Cost Tradeoff Gate：SLO 成本取舍门禁
+
+AI Infra Cost Governance Audit：AI Infra 成本治理审计
+
+Usage Metering Coverage：用量计量覆盖率
+
+Cost Attribution Labels：成本归因标签
+
+GPU Cost Efficiency：GPU 成本效率
+
+Training Waste Control：训练浪费控制
+
+Inference Unit Cost：推理单位成本
+
+Cache Savings Accounting：缓存节省核算
+
+Storage Lifecycle Governance：存储生命周期治理
+
+Network Egress Governance：网络出站成本治理
+
+Artifact Dependency Safety：Artifact 依赖安全
+
+Budget Quota Enforcement：预算与配额执行
+
+Cost Anomaly Alerting：成本异常告警
+
+Tenant Model Chargeback：租户与模型成本分摊
+
+Dashboard Drilldown Readiness：Dashboard 下钻就绪度
+
+Optimization Recommendation Trace：优化建议 Trace
+
+SLO Quality Cost Tradeoff：SLO / 质量 / 成本取舍
+
+Cost Governance Gate：成本治理门禁
+
+Resource Utilization Optimization Audit：资源利用率优化审计
+
+Resource Metric Contract：资源指标契约
+
+Effective Utilization Accounting：有效利用率核算
+
+Fragmentation Control：资源碎片治理
+
+Topology Binpacking Readiness：拓扑感知装箱就绪度
+
+Colocation SLO Guard：混部 SLO 保护门禁
+
+Preemption Checkpoint Safety：抢占 Checkpoint 安全
+
+Low Priority Reclaim Policy：低优先级可回收策略
+
+Elastic Training Safety：弹性训练安全
+
+Inference Capacity Utilization：推理容量利用率
+
+Warm Pool Headroom Policy：Warm Pool 与余量策略
+
+Quota Fairness Borrowing：配额公平借用
+
+Scheduler Observability：调度器可观测性
+
+Reliability Headroom Guard：可靠性余量保护
+
+Cost SLO Tradeoff Control：成本与 SLO 取舍控制
+
+Resource Utilization Gate：资源利用率治理门禁
+
+AI Infra Security Governance Audit：AI Infra 安全治理审计
+
+Identity Workload Binding：身份与工作负载绑定
+
+Secret Lifecycle Management：密钥生命周期管理
+
+Data Compliance Classification：数据合规分级
+
+PII Sensitive Data Control：PII 与敏感数据控制
+
+Tenant Isolation Boundary：租户隔离边界
+
+Model Access Control：模型访问控制
+
+Model Output Safety Gate：模型输出安全门禁
+
+RAG Permission Enforcement：RAG 权限强制执行
+
+Agent Tool Safety Gate：Agent 工具安全门禁
+
+Supply Chain Integrity：供应链完整性
+
+Log Trace Privacy Governance：日志与 Trace 隐私治理
+
+Audit Incident Response Readiness：审计与事件响应就绪度
+
+Security Governance Gate：安全治理门禁
+
+Audit Change Governance Audit：审计与变更治理审计
+
+Audit Event Schema Completeness：审计事件 Schema 完整性
+
+Critical Operation Audit Coverage：关键操作审计覆盖率
+
+Audit Log Integrity Retention：审计日志完整性与留存
+
+Log Retention Policy Fit：日志留存策略匹配度
+
+Log Minimization Redaction：日志最小化与脱敏
+
+Trace Privacy Sampling：Trace 隐私采样
+
+Incident Timeline Completeness：事故时间线完整性
+
+Impact Detection Response Metrics：影响检测与响应指标
+
+Root Cause Systemic Analysis：系统性根因分析
+
+Postmortem Action Item Closure：复盘行动项关闭率
+
+Change Record Completeness：变更记录完整性
+
+High Risk Change Approval：高风险变更审批
+
+Rollout Rollback Readiness：灰度与回滚就绪度
+
+Change Freeze Error Budget Policy：变更冻结与错误预算策略
+
+Audit Postmortem Change Linkage：审计、复盘与变更链路关联
+
+Governance Loop Gate：治理闭环门禁
+
+Enterprise LLMOps Platform Audit：企业级 LLMOps 平台审计
+
+LLMOps Application Resource Model：LLMOps 应用资源模型
+
+LLMOps Release Manifest：LLMOps 发布 Manifest
+
+Prompt Registry Versioning：Prompt Registry 版本治理
+
+RAG KB Permission Governance：RAG 知识库权限治理
+
+Tool Agent Runtime Control：工具与 Agent Runtime 控制
+
+LLMOps Eval Feedback Loop：LLMOps 评估反馈闭环
+
+LLMOps Trace Observability Readiness：LLMOps Trace 可观测性就绪度
+
+LLMOps Cost Budget Governance：LLMOps 成本预算治理
+
+LLMOps Platform Gate：LLMOps 平台门禁
+
+Multi Tenant GPU Scheduler Design Audit：多租户 GPU 调度系统设计审计
+
+Tenant Queue Contract：租户队列契约
+
+Quota Borrowing Policy：配额借用策略
+
+Dominant Fairness Accounting：Dominant Share 公平性核算
+
+Low Priority Reclaim：低优先级资源回收
+
+Inference SLO Isolation：推理 SLO 隔离
+
+Heterogeneous GPU Policy：异构 GPU 策略
+
+Resource Snapshot Health：资源快照健康度
+
+Placement Explainability：放置决策可解释性
+
+Cost Utilization Attribution：成本与利用率归因
+
+Scheduler Observability Audit：调度可观测性审计
+
+Multi Tenant GPU Scheduler Gate：多租户 GPU 调度门禁
+
+AI Infra Interview Readiness：AI Infra 面试准备度
+
+AI Infra Interview Rubric：AI Infra 面试评分规约
+
+AI Infra Formula Coverage：AI Infra 公式覆盖率
+
+AI Infra Demo Evidence Coverage：AI Infra demo 证据覆盖率
+
+Weak AI Infra Question：AI Infra 薄弱题
+
+AI Infra Revision Plan：AI Infra 面试修复计划
+
+AI Infra Interview Gate：AI Infra 面试门禁

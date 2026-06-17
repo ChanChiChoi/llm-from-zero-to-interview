@@ -34,6 +34,8 @@
 
 本轮 Tool Router 新增条目：Tool Router、Scenario Filter Pass Rate、Permission Filter Pass Rate、Risk Filter Pass Rate、Candidate Recall、Candidate Precision、Candidate Size Pass Rate、Clarification Accuracy、Forced Tool Accuracy、Router Parallel Safety、Provider Capability Compatibility、Router Trace Completeness、Tool Router Gate。
 
+本轮企业 LLMOps 平台新增条目：Enterprise LLMOps Platform Audit、LLMOps Application Resource Model、LLMOps Release Manifest、Prompt Registry Versioning、RAG KB Permission Governance、Tool Agent Runtime Control、LLMOps Eval Feedback Loop、LLMOps Trace Observability Readiness、LLMOps Cost Budget Governance、LLMOps Platform Gate。
+
 本轮 Tool Executor 新增条目：Execution Request Validity、Schema Validation Pass Rate、Permission Enforcement Pass Rate、Execution Mode Accuracy、Async Completion Tracking、Timeout Cancellation Coverage、Idempotency Protection Rate、Unknown State Escalation Rate、Retry Safety Rate、Side Effect Confirmation Coverage、Structured Result Coverage、Executor Trace Completeness、Tool Executor Gate。
 
 本轮 Tool Permission Model 新增条目：Tool Permission Model、Authorization Decision Accuracy、Trusted Context Injection、Tenant Isolation Pass Rate、Tool Permission Enforcement、Object Permission Accuracy、Field Projection Safety、Action Context Policy Accuracy、Prompt Injection Block Rate、Token Audience Validation、Revocation Cache Safety、Error Disclosure Safety、Permission Audit Completeness、Tool Permission Gate。
@@ -69,6 +71,8 @@
 本轮 A2A Task Delegation 新增条目：A2A Task Delegation Audit、A2A Task Contract Coverage、A2A State Transition Validity、A2A Input Required Handling、A2A Artifact Metadata Coverage、A2A Error Semantics Coverage、A2A Retry Idempotency Coverage、A2A Cancellation Coverage、A2A Delegation Permission Boundary、A2A Parallel Aggregation Readiness、A2A Task Trace Readiness、A2A Task Eval Coverage、A2A Task Gate。
 
 本轮 A2A Message Boundary 新增条目：A2A Message Boundary Audit、A2A Message Contract Coverage、A2A Part Typing Coverage、A2A Source Trust Labeling、A2A Instruction Data Separation、A2A Minimal Context Coverage、A2A Reference Over Copy Coverage、A2A Context Policy Enforcement、A2A Sensitive Redaction Coverage、A2A Claim Grounding Coverage、A2A Summary Constraint Retention、A2A Message Trace Readiness、A2A Message Eval Coverage、A2A Message Gate。
+
+本轮 RAG / Agent 平台存储新增条目：RAG Agent Storage Audit、Knowledge Base Contract、Document Chunk Version Contract、Sync Delete Propagation、ACL Permission Enforcement、Retrieval Trace Completeness、Prompt Assembly Trace、Citation Version Binding、Agent Definition Versioning、Tool Definition Contract、Tool Call Trace Completeness、Execution Trace Replay Readiness、Memory Privacy Lifecycle、Trace Privacy Retention、Cost Attribution Governance、RAG Agent Storage Gate。
 
 ## Long Context
 
@@ -421,6 +425,8 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 常见索引：HNSW、IVF、PQ 等。它们通过近似搜索在速度、内存和召回率之间做权衡。
 
 工程关注点：索引构建时间、查询延迟、召回率、更新频率、多租户隔离、权限过滤、embedding 版本管理和数据删除一致性。
+
+和 Feature / Embedding 基础设施的关系：RAG 与 Agent 使用向量库时，不能只记录 collection 名称和 top-k。生产链路还要能追溯 feature definition、embedding model / dimension / normalize 版本、chunk offset、checksum、tenant / ACL filter、index version、ANN recall、retrieval trace、shadow index 切换、lineage、成本和质量监控，否则引用、权限和回滚都无法审计。
 
 常见误区：向量库不是 RAG 的全部。即使向量库性能很好，embedding、切块、rerank、prompt 和评估做不好，系统仍然会失败。
 
@@ -6438,6 +6444,104 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：门禁通过才说明 RAG、Tool、Agent、Memory 不是概念堆砌，而是一个可解释、可审计、可恢复的组合系统。
 
+## RAG Agent Storage Audit
+
+一句话定义：RAG agent storage audit 是检查 RAG / Agent 平台是否把知识库、文档、chunk、citation、agent definition、tool definition、memory、run state、retrieval trace、tool call trace、execution trace、audit log 和 cost record 做成可版本化、可回放、可审计、可删除的数据资产。
+
+常见审计维度：Knowledge Base Contract 看租户、owner、来源、权限、embedding、chunking、索引、同步和保留策略；Document Chunk Version Contract 看 document version、content hash、chunk offset、checksum、embedding ID 和 ACL；Sync Delete Propagation 和 ACL Permission Enforcement 检查删除、撤权、权限变化、tenant 和标签过滤是否进入检索、rerank、prompt 和日志；Retrieval Trace Completeness、Prompt Assembly Trace 与 Citation Version Binding 检查 query、embedding version、index version、filter、candidate、rerank、prompt hash、token budget、citation span、document version 和 offset；Agent Definition Versioning、Tool Definition Contract、Tool Permission Gate、Tool Call Trace Completeness、Execution Trace Replay Readiness、Memory Privacy Lifecycle、Trace Privacy Retention、Cost Attribution Governance 和 RAG Agent Storage Gate 则检查 agent / tool 版本、schema、权限、tool trace、span tree、回放、memory 隐私、trace 脱敏保留、成本归因和最终门禁。
+
+面试表达：这类题先强调 RAG / Agent 平台不是向量库加日志表，而是一套应用数据资产控制面；然后按知识库、工具、trace、memory、权限、隐私、成本和回放展开；最后用 RAG Agent Storage Gate 收束，说明线上 bad case 能解释、复现、审计、删除和回滚。
+
+## Knowledge Base Contract
+
+一句话定义：Knowledge Base Contract 是知识库的结构化契约，至少包含 kb id、tenant、owner、source connector、permission policy、embedding version、chunking version、index version、sync state 和 retention policy。
+
+常见问题：把知识库等同于 collection 或索引名，会导致文档版本、权限、删除、同步和 citation 无法统一治理。
+
+## Document Chunk Version Contract
+
+一句话定义：Document Chunk Version Contract 是 document version、source URI、content hash、permission labels、parsing status、chunk offset、chunk checksum、embedding ID 和 ACL 的联合契约。
+
+工程价值：chunk 没有 document version、offset 或 checksum 时，citation 只能展示链接，不能证明生成时引用的是哪一版原文。
+
+## Sync Delete Propagation
+
+一句话定义：Sync Delete Propagation 衡量源系统删除、撤权和权限变化是否传播到 document store、chunk store、vector index、citation store 和 cache。
+
+常见问题：源文档已经删除，但旧 chunk 仍留在向量索引或缓存里，会造成过期引用、越权召回和合规风险。
+
+## ACL Permission Enforcement
+
+一句话定义：ACL Permission Enforcement 是在 retrieval、rerank、prompt assembly、tool execution 和 trace access 阶段强制执行 tenant、role、label、region 和数据等级权限。
+
+面试表达：权限不是让模型判断“能不能答”，而是由平台在候选召回、上下文构造、工具调用和日志访问时持续阻断。
+
+## Retrieval Trace Completeness
+
+一句话定义：Retrieval Trace Completeness 衡量一次检索是否记录 query、rewrite、embedding version、index version、filters、top-k、candidate chunks、scores、rerank、final chunks、过滤原因和 latency。
+
+工程价值：没有 retrieval trace，RAG bad case 很难区分是正确文档未入库、过滤错、召回错、rerank 错还是 prompt 截断。
+
+## Prompt Assembly Trace
+
+一句话定义：Prompt Assembly Trace 是记录 system prompt version、template version、用户 query、chunk 顺序、token budget、截断策略、引用格式和 prompt hash 的结构化记录。
+
+常见问题：检索正确但 prompt assembly 截掉关键 chunk，会被误判成模型幻觉或检索失败。
+
+## Citation Version Binding
+
+一句话定义：Citation Version Binding 是让 answer span 绑定 chunk id、document id、document version、source URI、offset 和 index version。
+
+工程价值：文档更新后，如果 citation 不绑定版本，用户看到的引用可能不是生成时使用的证据。
+
+## Agent Definition Versioning
+
+一句话定义：Agent Definition Versioning 是把 agent id、agent version、system prompt version、tool versions、model config、max steps、timeout、permission policy、memory policy 和 safety policy 固定成可追溯版本。
+
+面试表达：同一个 agent 今天和明天行为不同，通常不是模型玄学，而是 prompt、tool、memory、权限或预算配置漂移。
+
+## Tool Definition Contract
+
+一句话定义：Tool Definition Contract 是 tool name、version、description、input schema、output schema、endpoint、timeout、retry policy、permission requirement 和 side effect level 的结构化契约。
+
+常见问题：工具 schema 或描述改了但没有版本化，会直接改变模型是否调用工具以及如何填参数。
+
+## Tool Call Trace Completeness
+
+一句话定义：Tool Call Trace Completeness 衡量每次工具调用是否记录 run id、step id、tool name、tool version、input args、output ref、status、latency、error、permission decision、retry count 和 redaction status。
+
+工程价值：工具调用 trace 既服务 debug，也服务权限审计、回放、成本归因和安全事故复盘。
+
+## Execution Trace Replay Readiness
+
+一句话定义：Execution Trace Replay Readiness 衡量 execution trace 是否能固定 model version、prompt version、agent definition、tool definitions、tool outputs、knowledge base version、index version 和 sampling params。
+
+常见问题：只保存最终回答和日志，无法复现当时的检索结果、工具返回和安全判断。
+
+## Memory Privacy Lifecycle
+
+一句话定义：Memory Privacy Lifecycle 是 memory 写入、读取、TTL、可见性、删除、训练使用授权和敏感数据阻断的生命周期治理。
+
+工程价值：Memory 是敏感数据资产，不是免费的上下文缓存；错误写入会长期污染后续任务。
+
+## Trace Privacy Retention
+
+一句话定义：Trace Privacy Retention 是对 trace 中用户输入、检索片段、工具参数、工具结果和输出做字段级脱敏、访问控制、TTL、加密、删除请求和采样治理。
+
+常见问题：完整 trace 对排障很有价值，但也可能包含高敏数据，不能默认永久保存。
+
+## Cost Attribution Governance
+
+一句话定义：Cost Attribution Governance 是把 LLM、retrieval、rerank、tool API、embedding、trace storage 和人工确认成本拆到 tenant、application、agent、user、run、model、tool 和 component。
+
+面试表达：Agent 成本失控常来自循环、重试、工具 API、rerank 和 trace 存储，只看模型 token 账单不够。
+
+## RAG Agent Storage Gate
+
+一句话定义：RAG Agent Storage Gate 是判断知识库、文档、chunk、citation、agent definition、tool definition、tool permission、tool trace、execution trace、memory、隐私、成本、审计和回滚证据是否完整且无 P0 风险的综合门禁。
+
+典型硬阻断：知识库缺 owner 或权限策略；chunk 缺 document version / offset / checksum；删除和撤权没有传播到索引；无权限 chunk 进入 prompt；retrieval trace 缺 index version；prompt assembly 缺 hash；citation 不绑定版本；agent definition 未版本化；tool schema 缺版本；高风险工具绕过确认；tool output 未记录；trace 不可回放；敏感 memory 被长期保存；trace 无脱敏或 TTL；成本不可归因；没有最终 storage gate。
+
 ## Tool Cost Latency Concurrency Audit
 
 一句话定义：tool cost latency concurrency audit 是检查工具调用系统是否能把成本、延迟、预算、超时、重试、并发、队列、限流、缓存、批处理、结果裁剪、降级、router 性能信号、trace 和 eval 统一治理的审计方法。
@@ -6959,6 +7063,66 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 一句话定义：enterprise MCP platform gate 是基于 Gateway、Registry、namespace、tool/resource/prompt 契约、Host 边界、OBO 授权、租户隔离、policy、sandbox、上下文投影、prompt injection taint、trace/replay、成本配额、开发者审核、发布治理、adapter、eval 和高可用的综合上线门禁。
 
 面试表达：门禁通过才说明企业 MCP 平台不是普通 API Gateway，而是可授权、可隔离、可审计、可回放、可评估、可运营的工具和上下文接入层。
+
+## Enterprise LLMOps Platform Audit
+
+一句话定义：Enterprise LLMOps Platform Audit 是把大模型应用的模型网关、prompt、知识库、工具、Agent、评估、发布、trace、反馈、安全、成本和审计放进同一套生命周期控制面的系统设计审计方法。
+
+面试表达：企业级 LLMOps 平台不是模型部署平台，也不是 prompt 管理页面，而是让应用从 dev、staging 到 production 的每次变更都有版本、评估、发布、观测、反馈、成本和审计证据。
+
+## LLMOps Application Resource Model
+
+一句话定义：LLMOps application resource model 用 Application、Environment、PromptTemplate、KnowledgeBase、ToolDefinition、AgentDefinition、EvalSuite、ReleaseManifest、Trace、Feedback、Policy 和 CostRecord 描述大模型应用控制面。
+
+工程价值：没有统一资源模型时，prompt、RAG、工具、评估和发布会散落在不同团队脚本里，线上事故无法复现和回滚。
+
+## LLMOps Release Manifest
+
+一句话定义：LLMOps release manifest 是一次应用发布绑定的模型路由、prompt 版本、知识库版本、工具版本、Agent 配置、安全策略、生成参数和 rollback target。
+
+常见问题：只灰度 prompt 或模型名，但没有绑定知识库、工具 schema 和安全策略版本，会导致 bad case 无法定位是哪一层变化造成的。
+
+## Prompt Registry Versioning
+
+一句话定义：Prompt registry versioning 衡量 prompt 模板是否具备变量 schema、测试样例、评估结果、发布状态、灰度、回滚、权限和审计记录。
+
+面试表达：Prompt 是应用行为资产，不应硬编码在业务代码里；改 prompt 应该像改模型和工具一样可评估、可灰度、可回滚。
+
+## RAG KB Permission Governance
+
+一句话定义：RAG KB permission governance 衡量知识库、文档、chunk、metadata filter、citation 和 trace 是否绑定租户、用户、项目、数据等级和删除传播策略。
+
+工程价值：企业 RAG 不能只追求 recall；无权限 chunk 被放进 prompt 是高优先级安全事故。
+
+## Tool Agent Runtime Control
+
+一句话定义：Tool agent runtime control 衡量 Agent 定义、工具 schema、权限、side effect level、step limit、timeout、human confirmation、execution trace 和错误处理是否受平台控制。
+
+常见问题：Agent 应用如果没有 step limit、预算、工具权限和高风险确认，成本、延迟和副作用都会失控。
+
+## LLMOps Eval Feedback Loop
+
+一句话定义：LLMOps eval feedback loop 衡量离线评估、LLM-as-Judge、人评、在线 A/B、用户反馈、bad case triage、回归集更新和发布门禁是否能闭环。
+
+工程价值：只收集点赞点踩不叫反馈闭环；反馈必须进入可复现样本、修复动作和下一轮回归。
+
+## LLMOps Trace Observability Readiness
+
+一句话定义：LLMOps trace observability readiness 衡量 model call、prompt assembly、retrieval、rerank、tool call、agent step、safety event、feedback 和 cost record 是否能串成一条可回放 trace。
+
+面试表达：RAG / Agent 应用没有 trace，就无法解释答案来源、工具行为、权限决策、成本归因和质量回归。
+
+## LLMOps Cost Budget Governance
+
+一句话定义：LLMOps cost budget governance 衡量平台是否能按应用、租户、用户、模型、知识库、工具、Agent run 和环境做 token、检索、rerank、工具、人审和重试成本归因。
+
+常见问题：Agent 多步调用会把模型成本、工具成本和人工审核成本放大，必须配合预算、配额、step limit 和 cost alert。
+
+## LLMOps Platform Gate
+
+一句话定义：LLMOps platform gate 是基于资源模型、模型网关、prompt、RAG、工具、Agent、评估、发布、trace、反馈、安全、成本、多环境和开发者接口的企业级 LLMOps 上线门禁。
+
+面试表达：门禁通过才说明平台不是功能入口集合，而是可开发、可评估、可发布、可观测、可治理、可审计、可持续优化的应用生命周期平台。
 
 ## 长上下文、RAG 与 Agent 的关系
 

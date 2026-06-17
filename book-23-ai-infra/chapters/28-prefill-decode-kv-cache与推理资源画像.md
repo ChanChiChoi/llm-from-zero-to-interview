@@ -8,6 +8,14 @@
 
 > 大模型推理不是一次普通函数调用，而是由 prefill、decode 和 KV cache 管理共同决定的在线计算过程。
 
+## 28.0 本讲资料边界与第二轮精修口径
+
+本讲按 `WRITING_PLAN.md` 的第二轮要求做过资料校准。重点参考的是 vLLM 官方文档中 PagedAttention、KV cache block、prefix caching、TTFT / TPOT / prefill / decode / KV 指标的公开口径；TensorRT-LLM 官方文档中 paged KV cache、in-flight batching、chunked prefill、KV cache reuse、KV cache offload 和 disaggregated serving 的工程边界；SGLang 官方文档中 RadixAttention / cache、continuous batching、PD disaggregation 和 structured serving 的边界；以及 Hugging Face TGI 文档中 streaming、PagedAttention 和 Prometheus 指标的说明。
+
+这些资料共同指向一个稳定事实：LLM 推理不是“一个 batch forward”这么简单。Prefill 处理输入上下文，通常决定首 token 等待；decode 逐 token 生成，通常决定输出流畅度；KV cache 是连接两者的运行时状态，决定显存容量、并发上限、长上下文成本和调度风险。
+
+本章只抽象截至 2026-06 仍稳定的资源画像口径，不把某个框架的具体指标名、默认 block size、benchmark 数值、显卡型号或云实例配置写成通用标准。正文中的公式用于容量估算和面试表达，真实上线仍要用目标模型、tokenizer、runtime、硬件、量化方式和流量分布实测校准。
+
 ## 28.1 一次大模型生成请求发生了什么
 
 用户发起一个请求：
@@ -106,8 +114,18 @@ TPOT 通常受 decode 阶段影响更大。
 
 粗略表达：
 
-```text
-total_latency ~= TTFT + output_tokens * TPOT
+```math
+T_{\mathrm{ttft}}=T_{\mathrm{gateway}}+T_{\mathrm{route}}+T_{\mathrm{queue}}+T_{\mathrm{tokenize}}+T_{\mathrm{prefill}}+T_{\mathrm{first}}
+```
+
+```math
+T_{\mathrm{tpot}}=\frac{T_{\mathrm{decode}}+T_{\mathrm{sample}}+T_{\mathrm{stream}}}{N_{\mathrm{out}}}
+```
+
+端到端延迟可以粗略写成：
+
+```math
+T_{\mathrm{e2e}}\approx T_{\mathrm{ttft}}+N_{\mathrm{out}}T_{\mathrm{tpot}}
 ```
 
 真实系统还要考虑网络、队列、sampling、后处理和 streaming flush。
@@ -141,11 +159,25 @@ KV cache 会保存每一层、每个 token、每个 head 的 Key 和 Value。
 
 粗略理解：
 
-```text
-KV cache memory ∝ batch_size * sequence_length * num_layers * hidden_size * dtype_size
+```math
+M_{\mathrm{kv}}=2LBSH_{\mathrm{kv}}D_hB_{\mathrm{elem}}
 ```
 
-这不是精确公式，但足够帮助你理解瓶颈。
+其中 `L` 是层数，`B` 是活跃 batch 或活跃序列数，`S` 是当前上下文 token 数，`H_kv` 是 KV head 数，`D_h` 是每个 head 的维度，`B_elem` 是每个元素的字节数。前面的 `2` 来自 Key 和 Value 两份缓存。
+
+如果只看单个请求，可以写成：
+
+```math
+M_{\mathrm{kv,req}}=2LSH_{\mathrm{kv}}D_hB_{\mathrm{elem}}
+```
+
+如果可用于 KV cache 的显存预算是 `B_kv`，粗略并发上限是：
+
+```math
+N_{\mathrm{kv}}=\left\lfloor \frac{B_{\mathrm{kv}}}{M_{\mathrm{kv,req}}}\right\rfloor
+```
+
+这仍然是容量估算，不是精确 profiler。真实系统还要考虑 block size、碎片、prefix cache、请求取消、padding、量化、MLA / GQA / MQA 结构差异和 runtime 预留显存。
 
 长上下文和高并发都会快速放大 KV cache 显存占用。
 
@@ -390,7 +422,304 @@ Request -> Prefill Pool -> KV Transfer -> Decode Pool -> Streaming Response
 
 只有定位到阶段，才能做正确优化。
 
-## 28.19 面试常见追问
+## 28.19 Prefill/Decode/KV 资源画像审计指标与最小 demo
+
+如果要把这一章落到平台工程，最核心的动作是建立“推理资源画像”：每个请求不只记录 QPS，还要记录输入 token、输出 token、TTFT、TPOT、prefill、decode、KV cache、prefix cache、长上下文、租户和成本。
+
+可以把一个推理资源画像样本写成：
+
+```math
+p_i=(x_i,y_i,c_i,q_i,f_i,d_i,k_i,b_i,r_i,s_i,t_i,o_i,z_i)
+```
+
+其中 `x_i` 是输入 token 数，`y_i` 是输出 token 数，`c_i` 是上下文长度，`q_i` 是 queue 和 scheduler 状态，`f_i` 是 prefill 阶段，`d_i` 是 decode 阶段，`k_i` 是 KV cache 状态，`b_i` 是 batching 状态，`r_i` 是 prefix / prompt cache 复用，`s_i` 是 streaming 状态，`t_i` 是租户和优先级，`o_i` 是观测指标，`z_i` 是最终门禁。
+
+统一覆盖率可以写成：
+
+```math
+C_j=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[g_j(p_i)=1]
+```
+
+Prefill 阶段的 attention 交互量可以粗略理解为：
+
+```math
+A_{\mathrm{prefill}}\propto LBH_qS_{\mathrm{in}}^2
+```
+
+Decode 阶段对历史上下文的访问可以粗略理解为：
+
+```math
+A_{\mathrm{decode}}\propto LBH_qS_{\mathrm{ctx}}N_{\mathrm{out}}
+```
+
+其中 `H_q` 是 query head 数。这个表达不是 kernel 级 FLOPs 公式，而是帮助理解：长输入会显著推高 prefill，长输出会让 decode 访问 KV cache 的次数变多。
+
+KV pressure 可以写成：
+
+```math
+R_{\mathrm{kv}}=\frac{M_{\mathrm{kv}}}{B_{\mathrm{kv}}}
+```
+
+prefix cache 的收益可以用节省的 prefill token 或 prefill 时间表示：
+
+```math
+R_{\mathrm{prefix}}=\frac{N_{\mathrm{hit\_tokens}}}{N_{\mathrm{input\_tokens}}}
+```
+
+最终资源画像门禁可以写成：
+
+```math
+G_{\mathrm{resource}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land T_{\mathrm{ttft,p95}}\le B_{\mathrm{ttft}} \land T_{\mathrm{tpot,p95}}\le B_{\mathrm{tpot}} \land R_{\mathrm{kv}}\le \rho_{\mathrm{kv}} \land P_0=0\right]
+```
+
+下面是一个 0 依赖 demo。它不会模拟真实 GPU kernel，而是把 Prefill、Decode、KV cache 和资源画像门禁变成可运行的审计表。
+
+```python
+# Prefill / Decode / KV Resource Profile Audit: 0-dependency teaching demo.
+from copy import deepcopy
+
+
+GATES = [
+    "request_token_profile",
+    "prefill_phase_accounting",
+    "decode_phase_accounting",
+    "ttft_tpot_contract",
+    "kv_cache_formula_fit",
+    "kv_capacity_admission",
+    "paged_block_management",
+    "prefix_cache_reuse",
+    "long_context_policy",
+    "tenant_kv_isolation",
+    "continuous_batching_policy",
+    "pd_disaggregation_fit",
+    "streaming_backpressure_fit",
+    "observability_phase_metrics",
+    "cost_capacity_model",
+    "resource_profile_gate",
+]
+
+
+def has_keys(obj, keys):
+    return isinstance(obj, dict) and all(obj.get(k) for k in keys)
+
+
+def percentile(values, p):
+    values = sorted(values)
+    idx = max(0, min(len(values) - 1, int(len(values) * p + 0.999999) - 1))
+    return values[idx]
+
+
+def kv_cache_mib(layers, batch, seq, kv_heads, head_dim, dtype_bytes):
+    total_bytes = 2 * layers * batch * seq * kv_heads * head_dim * dtype_bytes
+    return total_bytes / (1024 * 1024)
+
+
+def per_token_kib(layers, kv_heads, head_dim, dtype_bytes):
+    return 2 * layers * kv_heads * head_dim * dtype_bytes / 1024
+
+
+def gate_results(profile):
+    metrics = set(profile.get("metrics", []))
+    kv = profile.get("kv_cache", {})
+    results = {
+        "request_token_profile": has_keys(profile.get("request_tokens"), ["input_distribution", "output_distribution", "context_length", "token_budget"]),
+        "prefill_phase_accounting": has_keys(profile.get("prefill"), ["measured", "input_tokens", "chunking_policy", "prefill_queue"]),
+        "decode_phase_accounting": has_keys(profile.get("decode"), ["measured", "output_tokens", "step_metrics", "decode_queue"]),
+        "ttft_tpot_contract": has_keys(profile.get("slo"), ["ttft_p95", "tpot_p95", "e2e_p99"]),
+        "kv_cache_formula_fit": has_keys(kv, ["layers", "kv_heads", "head_dim", "dtype_bytes", "active_sequences"]),
+        "kv_capacity_admission": has_keys(kv, ["kv_budget_mib", "admission_control"]),
+        "paged_block_management": has_keys(profile.get("paged"), ["block_size", "block_table", "free_list", "fragmentation_metric"]),
+        "prefix_cache_reuse": has_keys(profile.get("prefix_cache"), ["cache_key", "hit_tokens_metric", "tenant_isolation"]),
+        "long_context_policy": has_keys(profile.get("long_context"), ["max_context", "long_short_queue", "truncation_or_compression", "rag_budget"]),
+        "tenant_kv_isolation": has_keys(profile.get("tenant"), ["tenant_quota", "priority", "cache_isolation", "cost_attribution"]),
+        "continuous_batching_policy": has_keys(profile.get("batching"), ["continuous", "max_batch_tokens", "dynamic_join", "dynamic_exit"]),
+        "pd_disaggregation_fit": has_keys(profile.get("pd"), ["enabled_or_rejected", "kv_transfer_budget", "failure_boundary"]),
+        "streaming_backpressure_fit": has_keys(profile.get("streaming"), ["backpressure", "cancel", "flush_metric"]),
+        "observability_phase_metrics": {"ttft", "tpot", "prefill", "decode", "queue", "kv_mib", "kv_pressure", "prefix_hit", "oom", "stream_flush"}.issubset(metrics),
+        "cost_capacity_model": has_keys(profile.get("cost"), ["gpu_hour_usd", "tokens_in", "tokens_out", "kv_mib", "cache_saved_tokens"]),
+        "resource_profile_gate": bool(profile.get("final_gate")),
+    }
+    return results
+
+
+def audit_resource_profile(profiles):
+    failed_cases = []
+    failed_gates = set()
+    for profile in profiles:
+        bad = [name for name, ok in gate_results(profile).items() if not ok]
+        if bad:
+            failed_cases.append(profile["case"])
+            failed_gates.update(bad)
+
+    n = len(profiles)
+    metrics = {}
+    for gate in GATES:
+        metrics[gate] = round(sum(gate_results(p)[gate] for p in profiles) / n, 3)
+
+    return {
+        "metrics": metrics,
+        "failed_cases": failed_cases,
+        "failed_gates": [g for g in GATES if g in failed_gates],
+        "hard_blocker_count": len(failed_gates),
+        "resource_profile_gate_pass": not failed_cases,
+    }
+
+
+complete = {
+    "case": "complete_resource_profile_ok",
+    "request_tokens": {
+        "input_distribution": "prod_prompt_histogram",
+        "output_distribution": "prod_output_histogram",
+        "context_length": 4096,
+        "token_budget": "tenant_model_budget",
+    },
+    "prefill": {
+        "measured": True,
+        "input_tokens": 8192,
+        "chunking_policy": "chunk_long_prefill",
+        "prefill_queue": "separate_or_weighted",
+    },
+    "decode": {
+        "measured": True,
+        "output_tokens": 512,
+        "step_metrics": "per_token_latency",
+        "decode_queue": "continuous_batching",
+    },
+    "slo": {"ttft_p95": 1800, "tpot_p95": 35, "e2e_p99": 6000},
+    "kv_cache": {
+        "layers": 32,
+        "kv_heads": 8,
+        "head_dim": 128,
+        "dtype_bytes": 2,
+        "active_sequences": 12,
+        "kv_budget_mib": 24576,
+        "admission_control": True,
+    },
+    "paged": {
+        "block_size": 16,
+        "block_table": True,
+        "free_list": True,
+        "fragmentation_metric": True,
+    },
+    "prefix_cache": {
+        "cache_key": "tenant_model_template_prefix",
+        "hit_tokens_metric": True,
+        "tenant_isolation": True,
+    },
+    "long_context": {
+        "max_context": 32768,
+        "long_short_queue": True,
+        "truncation_or_compression": True,
+        "rag_budget": True,
+    },
+    "tenant": {
+        "tenant_quota": True,
+        "priority": True,
+        "cache_isolation": True,
+        "cost_attribution": True,
+    },
+    "batching": {
+        "continuous": True,
+        "max_batch_tokens": 8192,
+        "dynamic_join": True,
+        "dynamic_exit": True,
+    },
+    "pd": {
+        "enabled_or_rejected": "rejected_for_small_scale",
+        "kv_transfer_budget": True,
+        "failure_boundary": True,
+    },
+    "streaming": {"backpressure": True, "cancel": True, "flush_metric": True},
+    "metrics": ["ttft", "tpot", "prefill", "decode", "queue", "kv_mib", "kv_pressure", "prefix_hit", "oom", "stream_flush"],
+    "cost": {
+        "gpu_hour_usd": 1.20,
+        "tokens_in": 55000,
+        "tokens_out": 12000,
+        "kv_mib": 6144,
+        "cache_saved_tokens": 8000,
+    },
+    "final_gate": True,
+}
+
+
+def make_bad(case, mutator):
+    item = deepcopy(complete)
+    item["case"] = case
+    mutator(item)
+    return item
+
+
+profiles = [complete]
+profiles.append(make_bad("token_profile_missing_bad", lambda p: p["request_tokens"].pop("output_distribution")))
+profiles.append(make_bad("prefill_unmeasured_bad", lambda p: p["prefill"].pop("chunking_policy")))
+profiles.append(make_bad("decode_unmeasured_bad", lambda p: p["decode"].pop("step_metrics")))
+profiles.append(make_bad("slo_missing_tpot_bad", lambda p: p["slo"].pop("tpot_p95")))
+profiles.append(make_bad("kv_formula_gap_bad", lambda p: p["kv_cache"].pop("kv_heads")))
+profiles.append(make_bad("kv_admission_missing_bad", lambda p: p["kv_cache"].pop("admission_control")))
+profiles.append(make_bad("paged_block_missing_bad", lambda p: p["paged"].pop("block_table")))
+profiles.append(make_bad("prefix_cache_unsafe_bad", lambda p: p["prefix_cache"].pop("tenant_isolation")))
+profiles.append(make_bad("long_context_unbounded_bad", lambda p: p["long_context"].pop("max_context")))
+profiles.append(make_bad("tenant_quota_missing_bad", lambda p: p["tenant"].pop("tenant_quota")))
+profiles.append(make_bad("continuous_batching_gap_bad", lambda p: p["batching"].pop("dynamic_exit")))
+profiles.append(make_bad("pd_disaggregation_unbounded_bad", lambda p: p["pd"].pop("kv_transfer_budget")))
+profiles.append(make_bad("streaming_backpressure_gap_bad", lambda p: p["streaming"].pop("backpressure")))
+profiles.append(make_bad("observability_phase_gap_bad", lambda p: p["metrics"].remove("prefill")))
+profiles.append(make_bad("cost_capacity_gap_bad", lambda p: p["cost"].pop("kv_mib")))
+profiles.append(make_bad("resource_profile_gate_missing_bad", lambda p: p.update({"final_gate": False})))
+
+latency_samples = [
+    {"queue_ms": 40, "tokenize_ms": 20, "prefill_ms": 260, "first_ms": 30, "decode_ms": 900, "sample_ms": 90, "stream_ms": 60, "input_tokens": 2048, "output_tokens": 60},
+    {"queue_ms": 65, "tokenize_ms": 30, "prefill_ms": 420, "first_ms": 35, "decode_ms": 1250, "sample_ms": 120, "stream_ms": 85, "input_tokens": 4096, "output_tokens": 75},
+    {"queue_ms": 85, "tokenize_ms": 42, "prefill_ms": 610, "first_ms": 40, "decode_ms": 1680, "sample_ms": 150, "stream_ms": 110, "input_tokens": 8192, "output_tokens": 90},
+    {"queue_ms": 115, "tokenize_ms": 55, "prefill_ms": 950, "first_ms": 50, "decode_ms": 2100, "sample_ms": 200, "stream_ms": 150, "input_tokens": 12000, "output_tokens": 100},
+    {"queue_ms": 140, "tokenize_ms": 70, "prefill_ms": 1300, "first_ms": 55, "decode_ms": 2600, "sample_ms": 240, "stream_ms": 200, "input_tokens": 16000, "output_tokens": 120},
+]
+
+ttfts = [x["queue_ms"] + x["tokenize_ms"] + x["prefill_ms"] + x["first_ms"] for x in latency_samples]
+tpots = [(x["decode_ms"] + x["sample_ms"] + x["stream_ms"]) / x["output_tokens"] for x in latency_samples]
+e2e = [ttfts[i] + latency_samples[i]["output_tokens"] * tpots[i] for i in range(len(latency_samples))]
+prefill_tps = 1000 * sum(x["input_tokens"] for x in latency_samples) / sum(x["prefill_ms"] for x in latency_samples)
+decode_tps = 1000 * sum(x["output_tokens"] for x in latency_samples) / sum(x["decode_ms"] for x in latency_samples)
+kv_mib = kv_cache_mib(32, 12, 4096, 8, 128, 2)
+per_request_kv_mib = kv_cache_mib(32, 1, 4096, 8, 128, 2)
+cache_saved_prefill_ms = 1000 * complete["cost"]["cache_saved_tokens"] / prefill_tps
+cost_per_1k = 1000 * (1.20 + 0.05 + 0.03) / (complete["cost"]["tokens_in"] + complete["cost"]["tokens_out"])
+audit = audit_resource_profile(profiles)
+
+resource_profile_examples = {
+    "ttft_p95_ms": percentile(ttfts, 0.95),
+    "tpot_p95_ms": round(percentile(tpots, 0.95), 1),
+    "e2e_p99_ms": round(percentile(e2e, 0.99), 1),
+    "prefill_tokens_per_second": round(prefill_tps, 1),
+    "decode_output_tokens_per_second": round(decode_tps, 1),
+    "kv_cache_mib": round(kv_mib, 1),
+    "kv_pressure": round(kv_mib / complete["kv_cache"]["kv_budget_mib"], 3),
+    "per_token_kv_kib": round(per_token_kib(32, 8, 128, 2), 1),
+    "kv_concurrency_limit": int(complete["kv_cache"]["kv_budget_mib"] // per_request_kv_mib),
+    "prefix_saved_prefill_ms": round(cache_saved_prefill_ms, 1),
+    "cost_per_1k_tokens": round(cost_per_1k, 4),
+}
+smoke = {
+    "complete_case_passes": not any(v is False for v in gate_results(complete).values()),
+    "caught_prefill_gap": "prefill_unmeasured_bad" in audit["failed_cases"],
+    "caught_decode_gap": "decode_unmeasured_bad" in audit["failed_cases"],
+    "caught_kv_gap": "kv_admission_missing_bad" in audit["failed_cases"],
+    "caught_long_context_gap": "long_context_unbounded_bad" in audit["failed_cases"],
+    "caught_gate_gap": "resource_profile_gate_missing_bad" in audit["failed_cases"],
+}
+
+print(f"resource_profile_examples={resource_profile_examples}")
+print(f"smoke={smoke}")
+print(f"metrics={audit['metrics']}")
+print(f"hard_blocker_count={audit['hard_blocker_count']}")
+print(f"failed_cases={audit['failed_cases']}")
+print(f"failed_gates={audit['failed_gates']}")
+print(f"resource_profile_gate_pass={audit['resource_profile_gate_pass']}")
+```
+
+这个 demo 想说明：推理慢不是一个单点指标问题。你必须同时证明输入 / 输出 token 分布、prefill、decode、TTFT、TPOT、KV cache、分页块管理、prefix cache、长上下文、多租户、continuous batching、PD 分离、streaming、observability 和成本容量都可观测、可解释、可门禁。
+
+## 28.20 面试常见追问
 
 问题一：为什么长 prompt 会影响 TTFT？
 
@@ -408,7 +737,7 @@ Request -> Prefill Pool -> KV Transfer -> Decode Pool -> Streaming Response
 
 可以回答：不同请求 token 数差异巨大，同样 QPS 下输入输出 token 数可能相差几十倍。应该结合 input tokens/s、output tokens/s、TTFT、TPOT、KV cache 和成本来评估。
 
-## 28.20 小练习
+## 28.21 小练习
 
 1. Prefill 和 decode 的区别是什么？
 2. TTFT 和 TPOT 分别受哪些因素影响？
@@ -418,8 +747,10 @@ Request -> Prefill Pool -> KV Transfer -> Decode Pool -> Streaming Response
 6. 为什么高 QPS 不一定代表高负载？
 7. Prefill/decode 分离有什么收益和代价？
 8. 用户反馈“模型慢”时，你会按什么顺序排查？
+9. 写一个推理资源画像表，至少包含 input tokens、output tokens、TTFT、TPOT、prefill、decode、KV cache、prefix cache、tenant、streaming 和 cost。
+10. 为什么 prefix cache 命中率不能单独证明成本下降，还要看命中 token 数、节省 prefill 时间、权限隔离和错误复用风险？
 
-## 28.21 本章小结
+## 28.22 本章小结
 
 本章讲了 Prefill、Decode、KV Cache 和推理资源画像。
 
@@ -431,5 +762,6 @@ Request -> Prefill Pool -> KV Transfer -> Decode Pool -> Streaming Response
 4. 长上下文会同时放大 prefill 成本和 KV cache 压力。
 5. 大模型推理不能只看 QPS，要看 token 吞吐、延迟、cache 和成本。
 6. 推理优化必须按阶段定位瓶颈，而不是盲目加机器。
+7. 生产推理平台需要用资源画像门禁同时约束 prefill、decode、KV cache、长上下文、多租户、streaming 和成本。
 
 下一章我们会继续讲 Continuous Batching、PagedAttention 和队列调度，理解 runtime 如何在高并发下提升吞吐并控制延迟。

@@ -8,6 +8,14 @@
 
 > 大模型推理的核心挑战不是单个请求能不能跑，而是大量长短不一的请求如何在有限 GPU 和显存下公平、高效、低延迟地一起跑。
 
+## 29.0 本讲资料边界与第二轮精修口径
+
+本讲按 `WRITING_PLAN.md` 的第二轮要求做过资料校准。重点参考的是 vLLM 的 PagedAttention / KV cache block / scheduler 公开资料和论文口径，TensorRT-LLM 对 in-flight batching、paged KV cache、chunked prefill 和调度策略的工程说明，SGLang 对 continuous batching、RadixAttention / cache 和 serving runtime 的公开说明，以及 Hugging Face TGI 对 streaming、PagedAttention 和 Prometheus 指标的公开说明。
+
+这些资料共同指向一个稳定事实：LLM serving 的 batching 不是传统“凑一批请求然后一起跑完”，而是围绕 decode iteration 动态维护 running set、waiting queue、prefill chunk、KV block、streaming 连接和租户配额。PagedAttention 也不是新的模型结构或新的 attention 数学公式，而是把逻辑连续的 KV cache 映射到物理上可分散管理的 blocks，从而降低碎片、支持动态调度和 prefix / block 级复用。
+
+本章只抽象截至 2026-06 仍稳定的调度和容量画像口径，不把某个 runtime 的默认 block size、调度参数、指标字段名、benchmark 数值或云实例配置写成通用标准。正文中的公式用于面试表达、容量估算和系统设计推导；真实上线仍要用目标模型、tokenizer、runtime、硬件、量化方式、请求 token 分布和 SLO 实测校准。
+
 ## 29.1 为什么需要 batching
 
 GPU 擅长并行计算。如果一次只处理一个请求，GPU 很可能吃不满。
@@ -109,6 +117,28 @@ Continuous Batching 不是免费的。
 PagedAttention 的直觉是：把 KV cache 拆成固定大小的 block，用类似页表的结构管理。
 
 逻辑序列不需要对应一段连续物理显存，而是映射到多个 KV block。
+
+如果 block size 是 $s_{\mathrm{blk}}$，请求 `i` 当前上下文长度是 $L_i$，则它大约需要：
+
+```math
+N_{\mathrm{blk},i}=\left\lceil \frac{L_i}{s_{\mathrm{blk}}}\right\rceil
+```
+
+个 KV blocks。若所有活跃请求集合为 $\mathcal{R}$，则总 block 占用为：
+
+```math
+N_{\mathrm{blk,total}}=\sum_{i\in \mathcal{R}} N_{\mathrm{blk},i}
+```
+
+分页管理仍然会有尾部浪费，粗略浪费率可以写成：
+
+```math
+R_{\mathrm{waste}}=
+\frac{\sum_{i\in \mathcal{R}}\left(N_{\mathrm{blk},i}s_{\mathrm{blk}}-L_i\right)}
+{\sum_{i\in \mathcal{R}}N_{\mathrm{blk},i}s_{\mathrm{blk}}}
+```
+
+这说明 block size 不是越小越好，也不是越大越好。小 block 降低尾部浪费，但 block table、元数据和访存管理更复杂；大 block 管理简单，但短请求和请求尾部会浪费更多 KV 空间。
 
 这样能更好支持：
 
@@ -228,6 +258,22 @@ max_batch_tokens = 8192
 max_active_sequences = 64
 ```
 
+可以把一轮调度写成：
+
+```math
+\sum_{i\in \mathcal{P}_t} n_i^{\mathrm{prefill}}+\sum_{i\in \mathcal{D}_t} n_i^{\mathrm{decode}}\le B_{\mathrm{tok}}
+```
+
+其中 $\mathcal{P}_t$ 是第 `t` 轮被选中做 prefill 的请求集合，$\mathcal{D}_t$ 是第 `t` 轮被选中做 decode 的请求集合，$n_i^{\mathrm{prefill}}$ 是本轮给请求 `i` 处理的 prompt token 数，$n_i^{\mathrm{decode}}$ 通常是 1 或少量输出 token，$B_{\mathrm{tok}}$ 是本轮 token budget。
+
+同时还要限制活跃序列数：
+
+```math
+|\mathcal{R}_t|\le B_{\mathrm{seq}}
+```
+
+其中 $\mathcal{R}_t$ 是 running set，$B_{\mathrm{seq}}$ 是最大活跃 sequence 数。直觉上，`max_batch_tokens` 控制本轮算力和排队压力，`max_active_sequences` 控制 decode 并发和 KV cache 压力。只看 batch size 会低估长 prompt 和长上下文请求的成本。
+
 调度器选择请求时同时考虑：
 
 1. 输入 token 数。
@@ -305,6 +351,14 @@ Prefill 和 decode 会争用 GPU。
 3. 租户级上下文长度上限。
 4. 租户级优先级。
 5. 租户级预算。
+
+如果用 token 作为公平性口径，租户 `u` 在一个时间窗口内的资源占比可以粗略写成：
+
+```math
+S_u=\frac{N_u^{\mathrm{in}}+\alpha N_u^{\mathrm{out}}}{\sum_v\left(N_v^{\mathrm{in}}+\alpha N_v^{\mathrm{out}}\right)}
+```
+
+其中 $N_u^{\mathrm{in}}$ 是租户 `u` 的输入 token 数，$N_u^{\mathrm{out}}$ 是输出 token 数，$\alpha$ 是输出 token 相对输入 token 的成本权重。实际系统还会把 KV cache、GPU seconds、优先级和 SLO 合进来，但这个公式能提醒你：请求数公平通常不等于资源公平。
 
 公平性不是道德问题，而是稳定性问题。
 
@@ -386,7 +440,278 @@ Continuous batching 和队列调度常见故障包括：
 
 这些问题都不是简单加 GPU 就能解决的。
 
-## 29.20 面试常见追问
+## 29.20 Continuous Batching / PagedAttention 调度审计指标与最小 demo
+
+做推理调度系统设计时，可以把一个请求样本抽象成：
+
+```math
+s_i=(a_i,u_i,p_i,x_i,y_i,q_i,r_i,b_i,k_i,c_i,m_i,z_i)
+```
+
+其中 $a_i$ 是到达时间，$u_i$ 是租户，$p_i$ 是优先级，$x_i$ 是输入 token 数，$y_i$ 是最大输出 token 数，$q_i$ 是队列等待策略，$r_i$ 是 running / waiting / finished 状态，$b_i$ 是 KV block 占用，$k_i$ 是是否命中 prefix / KV 复用，$c_i$ 是取消或超时处理，$m_i$ 是指标记录，$z_i$ 是最终门禁结果。
+
+对每个审计维度 `j` 定义一个检查函数 $g_j(s_i)\in\{0,1\}$，覆盖率可以写成：
+
+```math
+C_j=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[g_j(s_i)=1]
+```
+
+最终可以用一个调度门禁收束：
+
+```math
+G_{\mathrm{sched}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land T_{\mathrm{ttft,p95}}\le B_{\mathrm{ttft}} \land T_{\mathrm{tpot,p95}}\le B_{\mathrm{tpot}} \land R_{\mathrm{kv}}\le \rho_{\mathrm{kv}} \land R_{\mathrm{reject}}\le \rho_{\mathrm{reject}} \land P_0=0\right]
+```
+
+下面这个 0 依赖 demo 做两件事：第一，模拟一个小型 continuous batching scheduler，展示请求动态到达、短请求优先、长 prompt 被 chunked prefill、running set 动态退出、KV block 被释放；第二，用审计表检查一个推理调度系统是否覆盖 arrival profile、continuous batching、token budget、prefill/decode 平衡、PagedAttention block、KV admission、长短请求隔离、多租户公平、取消释放、streaming 背压、指标和最终门禁。
+
+```python
+# Continuous batching / PagedAttention scheduler audit: 0-dependency teaching demo.
+from copy import deepcopy
+from math import ceil
+
+
+GATES = [
+    "request_arrival_profile",
+    "continuous_batching_core",
+    "token_budget_policy",
+    "prefill_decode_balance",
+    "paged_kv_block_management",
+    "kv_capacity_admission",
+    "long_short_isolation",
+    "tenant_priority_fairness",
+    "cancellation_cleanup",
+    "streaming_backpressure",
+    "observability_metrics",
+    "scheduler_gate",
+]
+
+
+def has_keys(obj, keys):
+    return isinstance(obj, dict) and all(obj.get(k) for k in keys)
+
+
+def percentile(values, p):
+    values = sorted(values)
+    idx = max(0, min(len(values) - 1, int(len(values) * p + 0.999999) - 1))
+    return values[idx]
+
+
+def gate_results(profile):
+    metrics = set(profile.get("metrics", []))
+    results = {
+        "request_arrival_profile": has_keys(profile.get("arrival"), ["input_tokens", "output_tokens", "arrival_time", "tenant"]),
+        "continuous_batching_core": has_keys(profile.get("batching"), ["dynamic_join", "dynamic_exit", "iteration_level", "max_active_sequences"]),
+        "token_budget_policy": has_keys(profile.get("token_budget"), ["max_batch_tokens", "max_prefill_chunk", "decode_token_budget"]),
+        "prefill_decode_balance": has_keys(profile.get("phase_policy"), ["decode_first", "chunked_prefill", "prefill_queue", "decode_queue"]),
+        "paged_kv_block_management": has_keys(profile.get("paged_kv"), ["block_size", "block_table", "free_list", "fragmentation_metric"]),
+        "kv_capacity_admission": has_keys(profile.get("admission"), ["kv_block_budget", "queue_timeout", "reject_policy", "watermark"]),
+        "long_short_isolation": has_keys(profile.get("long_short"), ["long_prompt_threshold", "separate_queue", "reserved_short_capacity"]),
+        "tenant_priority_fairness": has_keys(profile.get("tenant"), ["quota", "priority", "fairness_metric", "cost_attribution"]),
+        "cancellation_cleanup": has_keys(profile.get("cancel"), ["cancel_signal", "release_blocks", "timeout_release"]),
+        "streaming_backpressure": has_keys(profile.get("streaming"), ["flush_metric", "backpressure", "client_disconnect"]),
+        "observability_metrics": {"queue_wait", "ttft", "tpot", "scheduled_tokens", "active_sequences", "kv_blocks", "kv_waste", "rejects", "cancellations", "tenant_tokens"}.issubset(metrics),
+        "scheduler_gate": bool(profile.get("final_gate")),
+    }
+    return results
+
+
+def audit_scheduler_profiles(profiles):
+    failed_cases = []
+    failed_gates = set()
+    for profile in profiles:
+        bad = [name for name, ok in gate_results(profile).items() if not ok]
+        if bad:
+            failed_cases.append(profile["case"])
+            failed_gates.update(bad)
+
+    n = len(profiles)
+    metrics = {gate: round(sum(gate_results(p)[gate] for p in profiles) / n, 3) for gate in GATES}
+    return {
+        "metrics": metrics,
+        "failed_cases": failed_cases,
+        "failed_gates": [g for g in GATES if g in failed_gates],
+        "hard_blocker_count": len(failed_gates),
+        "scheduler_gate_pass": not failed_cases,
+    }
+
+
+complete = {
+    "case": "complete_scheduler_profile_ok",
+    "arrival": {"input_tokens": "histogram", "output_tokens": "histogram", "arrival_time": "timestamp", "tenant": "tenant_id"},
+    "batching": {"dynamic_join": True, "dynamic_exit": True, "iteration_level": True, "max_active_sequences": 64},
+    "token_budget": {"max_batch_tokens": 4096, "max_prefill_chunk": 1024, "decode_token_budget": 256},
+    "phase_policy": {"decode_first": True, "chunked_prefill": True, "prefill_queue": "weighted", "decode_queue": "running_set"},
+    "paged_kv": {"block_size": 16, "block_table": True, "free_list": True, "fragmentation_metric": True},
+    "admission": {"kv_block_budget": 4096, "queue_timeout": 30, "reject_policy": "fast_fail_or_degrade", "watermark": 0.90},
+    "long_short": {"long_prompt_threshold": 4096, "separate_queue": True, "reserved_short_capacity": True},
+    "tenant": {"quota": True, "priority": True, "fairness_metric": "token_share", "cost_attribution": True},
+    "cancel": {"cancel_signal": True, "release_blocks": True, "timeout_release": True},
+    "streaming": {"flush_metric": True, "backpressure": True, "client_disconnect": True},
+    "metrics": ["queue_wait", "ttft", "tpot", "scheduled_tokens", "active_sequences", "kv_blocks", "kv_waste", "rejects", "cancellations", "tenant_tokens"],
+    "final_gate": True,
+}
+
+
+def make_bad(case, mutator):
+    item = deepcopy(complete)
+    item["case"] = case
+    mutator(item)
+    return item
+
+
+profiles = [complete]
+profiles.append(make_bad("arrival_profile_missing_bad", lambda p: p["arrival"].pop("output_tokens")))
+profiles.append(make_bad("static_batching_bad", lambda p: p["batching"].pop("dynamic_exit")))
+profiles.append(make_bad("token_budget_missing_bad", lambda p: p["token_budget"].pop("max_batch_tokens")))
+profiles.append(make_bad("prefill_decode_unbalanced_bad", lambda p: p["phase_policy"].pop("chunked_prefill")))
+profiles.append(make_bad("paged_kv_no_freelist_bad", lambda p: p["paged_kv"].pop("free_list")))
+profiles.append(make_bad("kv_admission_missing_bad", lambda p: p["admission"].pop("watermark")))
+profiles.append(make_bad("long_short_mixed_bad", lambda p: p["long_short"].pop("separate_queue")))
+profiles.append(make_bad("tenant_fairness_missing_bad", lambda p: p["tenant"].pop("fairness_metric")))
+profiles.append(make_bad("cancel_leaks_blocks_bad", lambda p: p["cancel"].pop("release_blocks")))
+profiles.append(make_bad("streaming_backpressure_missing_bad", lambda p: p["streaming"].pop("backpressure")))
+profiles.append(make_bad("scheduler_metrics_missing_bad", lambda p: p["metrics"].remove("kv_waste")))
+profiles.append(make_bad("scheduler_gate_missing_bad", lambda p: p.update({"final_gate": False})))
+
+
+def blocks_for(tokens, block_size):
+    return int(ceil(tokens / block_size)) if tokens > 0 else 0
+
+
+def simulate_continuous_batching(requests, max_steps=14, max_batch_tokens=1024, max_active=3, block_size=16, kv_block_budget=960, max_prefill_chunk=384):
+    reqs = {r["id"]: dict(r, prompt_done=0, output_done=0, first_scheduled=None, first_decode=None, finish_step=None, blocks=0) for r in requests}
+    waiting = []
+    running = []
+    free_blocks = kv_block_budget
+    trace = []
+    finished_order = []
+
+    def allocate(req, new_tokens):
+        nonlocal free_blocks
+        need = blocks_for(new_tokens, block_size)
+        delta = need - req["blocks"]
+        if delta <= 0:
+            return True
+        if delta > free_blocks:
+            return False
+        req["blocks"] = need
+        free_blocks -= delta
+        return True
+
+    for step in range(max_steps):
+        for req in reqs.values():
+            if req["arrival"] == step:
+                waiting.append(req["id"])
+
+        budget = max_batch_tokens
+        actions = []
+
+        for rid in list(running):
+            if budget <= 0:
+                break
+            req = reqs[rid]
+            if not allocate(req, req["prompt_done"] + req["output_done"] + 1):
+                continue
+            req["output_done"] += 1
+            req["first_decode"] = req["first_decode"] if req["first_decode"] is not None else step
+            budget -= 1
+            actions.append(f"decode:{rid}")
+            if req["output_done"] >= req["max_output"]:
+                running.remove(rid)
+                free_blocks += req["blocks"]
+                req["blocks"] = 0
+                req["finish_step"] = step
+                finished_order.append(rid)
+                actions.append(f"finish:{rid}")
+
+        def waiting_key(rid):
+            req = reqs[rid]
+            is_long = req["input_tokens"] >= 2048
+            return (req["priority"], is_long, req["arrival"], req["input_tokens"])
+
+        for rid in sorted(list(waiting), key=waiting_key):
+            if budget <= 0 or len(running) >= max_active:
+                break
+            req = reqs[rid]
+            remaining = req["input_tokens"] - req["prompt_done"]
+            chunk = min(remaining, max_prefill_chunk, budget)
+            if chunk <= 0:
+                continue
+            if not allocate(req, req["prompt_done"] + chunk):
+                continue
+            req["prompt_done"] += chunk
+            req["first_scheduled"] = req["first_scheduled"] if req["first_scheduled"] is not None else step
+            budget -= chunk
+            actions.append(f"prefill:{rid}:{chunk}")
+            if req["prompt_done"] >= req["input_tokens"]:
+                waiting.remove(rid)
+                running.append(rid)
+                actions.append(f"running:{rid}")
+
+        active_ids = waiting + running
+        used_blocks = kv_block_budget - free_blocks
+        capacity_tokens = sum(reqs[rid]["blocks"] * block_size for rid in active_ids)
+        actual_tokens = sum(reqs[rid]["prompt_done"] + reqs[rid]["output_done"] for rid in active_ids)
+        waste = (capacity_tokens - actual_tokens) / capacity_tokens if capacity_tokens else 0.0
+        trace.append({
+            "step": step,
+            "actions": actions,
+            "running": list(running),
+            "waiting": list(waiting),
+            "used_blocks": used_blocks,
+            "kv_waste": round(waste, 3),
+        })
+        if not waiting and not running and all(r["arrival"] <= step for r in reqs.values()):
+            break
+
+    queue_waits = [r["first_scheduled"] - r["arrival"] for r in reqs.values() if r["first_scheduled"] is not None]
+    ttft_steps = [r["first_decode"] - r["arrival"] for r in reqs.values() if r["first_decode"] is not None]
+    active_counts = [len(x["running"]) + len(x["waiting"]) for x in trace]
+    long_prompt_chunks = sum(1 for x in trace for a in x["actions"] if a.startswith("prefill:B") or a.startswith("prefill:E"))
+    return {
+        "iterations": len(trace),
+        "finished_order": finished_order,
+        "avg_queue_wait_steps": round(sum(queue_waits) / len(queue_waits), 2),
+        "p95_ttft_steps": percentile(ttft_steps, 0.95),
+        "p95_active_sequences": percentile(active_counts, 0.95),
+        "max_kv_blocks_used": max(x["used_blocks"] for x in trace),
+        "max_kv_waste_ratio": max(x["kv_waste"] for x in trace),
+        "long_prompt_chunks": long_prompt_chunks,
+        "trace_tail": trace[-4:],
+    }
+
+
+requests = [
+    {"id": "A", "tenant": "free", "arrival": 0, "input_tokens": 512, "max_output": 3, "priority": 2},
+    {"id": "B", "tenant": "pro", "arrival": 0, "input_tokens": 2304, "max_output": 4, "priority": 2},
+    {"id": "C", "tenant": "free", "arrival": 1, "input_tokens": 384, "max_output": 2, "priority": 2},
+    {"id": "D", "tenant": "enterprise", "arrival": 1, "input_tokens": 768, "max_output": 3, "priority": 0},
+    {"id": "E", "tenant": "pro", "arrival": 2, "input_tokens": 2048, "max_output": 2, "priority": 1},
+]
+
+scheduler_examples = simulate_continuous_batching(requests)
+audit = audit_scheduler_profiles(profiles)
+smoke = {
+    "complete_case_passes": not any(v is False for v in gate_results(complete).values()),
+    "caught_static_batching": "static_batching_bad" in audit["failed_cases"],
+    "caught_paged_kv_gap": "paged_kv_no_freelist_bad" in audit["failed_cases"],
+    "caught_cancel_leak": "cancel_leaks_blocks_bad" in audit["failed_cases"],
+    "caught_metrics_gap": "scheduler_metrics_missing_bad" in audit["failed_cases"],
+    "caught_gate_gap": "scheduler_gate_missing_bad" in audit["failed_cases"],
+}
+
+print(f"scheduler_examples={scheduler_examples}")
+print(f"smoke={smoke}")
+print(f"metrics={audit['metrics']}")
+print(f"hard_blocker_count={audit['hard_blocker_count']}")
+print(f"failed_cases={audit['failed_cases']}")
+print(f"failed_gates={audit['failed_gates']}")
+print(f"scheduler_gate_pass={audit['scheduler_gate_pass']}")
+```
+
+这个 demo 想说明：Continuous Batching、PagedAttention 和队列调度不是三个孤立名词。请求动态加入退出需要 scheduler；scheduler 要靠 token budget 和 phase policy 平衡 TTFT / TPOT；动态请求又要求 KV block 能按需分配、释放和统计碎片；多租户环境还必须把长短请求隔离、公平性、取消释放、streaming 背压和最终上线门禁放进同一个审计表。
+
+## 29.21 面试常见追问
 
 问题一：Continuous Batching 和普通 batching 有什么区别？
 
@@ -404,7 +729,7 @@ Continuous batching 和队列调度常见故障包括：
 
 可以回答：可以做长短请求分队列、长上下文专用实例、token budget 调度、限制最大上下文和输出长度，并为短请求保留容量。
 
-## 29.21 小练习
+## 29.22 小练习
 
 1. 为什么生成式模型不适合简单静态 batching？
 2. Continuous Batching 的核心思想是什么？
@@ -415,7 +740,7 @@ Continuous batching 和队列调度常见故障包括：
 7. Admission control 为什么重要？
 8. 如果 p99 延迟突然升高，你会查看哪些调度指标？
 
-## 29.22 本章小结
+## 29.23 本章小结
 
 本章讲了 Continuous Batching、PagedAttention 和队列调度。
 

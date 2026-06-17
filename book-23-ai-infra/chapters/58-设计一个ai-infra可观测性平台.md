@@ -8,6 +8,19 @@ AI Infra 的问题往往跨越训练、推理、数据、模型、RAG、Agent、
 
 > AI Infra 可观测性平台的核心，是把 metrics、logs、traces、events、cost 和 model quality signals 串起来，让问题能被发现、定位、解释、复盘和治理。
 
+## 58.0 本讲资料边界与第二轮精修口径
+
+第二轮精修时，本章按“AI Infra 可观测性控制面 + 事故排查证据链”校准，不绑定某个 APM、日志系统、Prometheus 后端、Trace 后端或 Dashboard 产品实现。
+
+参考口径包括：
+
+1. OpenTelemetry signals：把 traces、metrics、logs、baggage 和 profiles 看成不同观测信号，用统一上下文传播和语义约定把系统活动串起来。
+2. OpenTelemetry GenAI semantic conventions：生成式 AI 语义约定已经独立维护，并覆盖 GenAI clients、MCP、provider-specific conventions、spans、metrics 和 events；本章只吸收其“模型调用、token、latency、span、event 和 provider 属性要可关联”的稳定方向，不把 development 状态字段写成永久标准。
+3. Prometheus data model：metric name 与 labels 共同唯一确定 time series，任何 label value 变化都会创建新的 series，因此 request ID、user ID、prompt hash 等高基数字段不能随意进入 metrics label。
+4. Google SRE SLO / error budget / burn-rate alerting：告警应围绕 SLI、SLO、错误预算消耗速度和多窗口多 burn-rate 设计，而不是只围绕单点 CPU、GPU 或平均延迟阈值。
+
+本章的目标不是教你搭一套监控页面，而是把“AI Infra 怎么看得见”回答成可验证系统：信号清单完整，metric contract 可治理，SLO 和错误预算可计算，trace 能拆出训练 / 推理 / RAG / Agent 阶段，logs 和 events 能复盘时间线，统一 ID 能把模型、数据、发布、请求、成本和事故串起来，高基数、隐私、留存、告警噪音和成本都有边界。
+
 ## 58.1 题目理解
 
 面试题可能这样问：
@@ -480,7 +493,307 @@ Metrics label 不能无限增加。
 
 排障时第一问题是：最近变了什么？
 
-## 58.24 核心 trade-off
+## 58.24 AI Infra 可观测性平台系统设计指标和最小 demo
+
+把本章落到系统设计验收时，可以先定义一条观测对象记录：
+
+```math
+O_i=(s_i,m_i,l_i,t_i,e_i,k_i,q_i,r_i,c_i,a_i,p_i,z_i)
+```
+
+其中 `s_i` 是信号清单，`m_i` 是 metric contract，`l_i` 是 log 结构，`t_i` 是 trace span，`e_i` 是事件时间线，`k_i` 是统一关联 ID，`q_i` 是 SLO / latency 分位，`r_i` 是训练、推理、RAG / Agent、数据质量等 AI 专属观测项，`c_i` 是成本，`a_i` 是告警动作，`p_i` 是隐私和留存策略，`z_i` 是最终平台门禁状态。
+
+统一覆盖率可以写成：
+
+```math
+C_j=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[g_j(O_i)=1]
+```
+
+可用性 SLI 可以写成：
+
+```math
+A=\frac{N_{\mathrm{good}}}{N_{\mathrm{total}}}
+```
+
+错误预算剩余比例可以写成：
+
+```math
+B_{\mathrm{remain}}=\frac{(1-S_{\mathrm{slo}})-(1-A)}{1-S_{\mathrm{slo}}}
+```
+
+延迟分位可以写成：
+
+```math
+Q_p=\inf\{x:F_L(x)\ge p\}
+```
+
+Trace span 覆盖率可以写成：
+
+```math
+C_{\mathrm{span}}=\frac{|S_{\mathrm{observed}}\cap S_{\mathrm{required}}|}{|S_{\mathrm{required}}|}
+```
+
+统一关联 ID 覆盖率可以写成：
+
+```math
+C_{\mathrm{corr}}=\frac{N_{\mathrm{with\_id}}}{N_{\mathrm{records}}}
+```
+
+Metrics 基数估算可以写成：
+
+```math
+N_{\mathrm{series}}=M\prod_{d=1}^{D}n_d
+```
+
+单位 token 成本可以写成：
+
+```math
+K_{1k}=1000\frac{K_{\mathrm{total}}}{N_{\mathrm{token}}}
+```
+
+脱敏覆盖率可以写成：
+
+```math
+C_{\mathrm{redact}}=\frac{N_{\mathrm{redacted}}}{N_{\mathrm{sensitive}}}
+```
+
+可行动告警率可以写成：
+
+```math
+A_{\mathrm{alert}}=\frac{N_{\mathrm{actionable}}}{N_{\mathrm{alerts}}}
+```
+
+最终可观测性平台门禁可以写成：
+
+```math
+G_{\mathrm{obs}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land A\ge S_{\mathrm{slo}} \land B_{\mathrm{remain}}\ge 0 \land N_{\mathrm{series}}\le B_{\mathrm{series}} \land C_{\mathrm{redact}}\ge \rho_{\mathrm{redact}} \land A_{\mathrm{alert}}\ge \rho_{\mathrm{alert}} \land P_0=0\right]
+```
+
+下面的 0 依赖 demo 把 AI Infra 可观测性平台压缩成一个 toy 审计器。它计算信号覆盖、metric contract、SLO、错误预算、分位延迟、span、日志、事件、关联 ID、高基数、训练 / 推理 / RAG / Agent、成本、脱敏和告警指标，并用 16 个 bad case 模拟系统设计面试中必须主动提到的风险点。
+
+```python
+class MiniAIInfraObservabilityPlatformDesignAudit:
+    def __init__(self):
+        self.signals = ["metrics", "logs", "traces", "events", "costs", "alerts", "dashboards", "versions"]
+        self.metric_contracts = [
+            {
+                "name": "inference_e2e_latency_ms",
+                "unit": "ms",
+                "labels": {"tenant": "acme", "model": "chat", "endpoint": "chat", "status": "ok"},
+                "aggregation": "histogram",
+                "owner": "serving",
+            },
+            {
+                "name": "training_tokens_per_s",
+                "unit": "tokens/s",
+                "labels": {"cluster": "train-a", "job_type": "pretrain", "gpu_type": "h100"},
+                "aggregation": "gauge",
+                "owner": "training",
+            },
+            {
+                "name": "rag_groundedness",
+                "unit": "ratio",
+                "labels": {"tenant": "acme", "app": "support"},
+                "aggregation": "gauge",
+                "owner": "rag-platform",
+            },
+        ]
+        self.slo = {"good_requests": 9970, "requests_total": 10000, "availability_target": 0.99}
+        self.latency_samples_ms = [410, 520, 620, 700, 890]
+        self.traces = {
+            "required": ["gateway", "auth", "router", "queue", "prefill", "decode", "safety", "response"],
+            "observed": ["gateway", "auth", "router", "queue", "prefill", "decode", "safety", "response"],
+        }
+        self.logs = [
+            {"ts": "2026-06-15T10:00:00Z", "level": "INFO", "service": "router", "trace_id": "tr_1", "event": "route_decision", "status": "ok", "redacted": True},
+            {"ts": "2026-06-15T10:00:01Z", "level": "WARN", "service": "runtime", "trace_id": "tr_1", "event": "kv_pressure_high", "status": "warn", "redacted": True},
+        ]
+        self.events = [
+            {"ts": "2026-06-15T09:55:00Z", "event_type": "deployment_promoted", "entity": "chat-serving", "version": "deploy_7", "actor": "release-bot"},
+            {"ts": "2026-06-15T09:58:00Z", "event_type": "autoscaler_scaled_out", "entity": "chat-serving", "version": "hpa_3", "actor": "autoscaler"},
+        ]
+        self.correlation = {"records_with_id": 50, "records_total": 50}
+        self.labels = {
+            "metric_count": 10,
+            "label_value_counts": {"tenant": 12, "model": 20, "endpoint": 10, "status": 4},
+            "series_budget": 100000,
+            "high_cardinality_metric_labels": [],
+        }
+        self.training = {"tokens_per_s": 178000, "data_wait_ratio": 0.08, "checkpoint_failures": 0}
+        self.inference = {"ttft_p95_ms": 620, "tpot_p95_ms": 45, "error_rate": 0.003, "kv_cache_pressure": 0.72}
+        self.rag_agent = {"retrieval_trace_coverage": 1.0, "tool_trace_coverage": 1.0, "execution_trace_coverage": 1.0}
+        self.cost = {"total_cost_usd": 240.0, "total_tokens": 20_000_000}
+        self.privacy = {"redacted_fields": 5, "sensitive_fields_total": 5, "ttl_days": 30}
+        self.alerts = [
+            {"owner": "serving", "runbook": "runbook://serving-latency", "severity": "page", "actionable": True, "duplicate": False},
+            {"owner": "training", "runbook": "runbook://checkpoint", "severity": "ticket", "actionable": True, "duplicate": False},
+            {"owner": "platform-finops", "runbook": "runbook://cost-spike", "severity": "ticket", "actionable": True, "duplicate": False},
+        ]
+        self.gates = [
+            "signal_inventory_coverage",
+            "metric_contract_completeness",
+            "slo_error_budget_readiness",
+            "latency_quantile_guard",
+            "trace_span_coverage",
+            "log_event_structure",
+            "correlation_id_coverage",
+            "cardinality_budget_control",
+            "training_observability",
+            "inference_observability",
+            "data_quality_observability",
+            "rag_agent_observability",
+            "cost_observability",
+            "privacy_redaction_retention",
+            "alert_actionability",
+            "observability_platform_gate",
+        ]
+
+    def quantile(self, values, p):
+        ordered = sorted(values)
+        index = max(0, min(len(ordered) - 1, int(p * len(ordered) + 0.999999) - 1))
+        return ordered[index]
+
+    def field_coverage(self, records, required_fields):
+        total = len(records) * len(required_fields)
+        present = 0
+        for record in records:
+            present += sum(1 for field in required_fields if record.get(field) not in (None, ""))
+        return round(present / total, 3)
+
+    def availability(self):
+        return self.slo["good_requests"] / self.slo["requests_total"]
+
+    def error_budget_remaining(self):
+        budget = 1 - self.slo["availability_target"]
+        used = 1 - self.availability()
+        return (budget - used) / budget
+
+    def trace_span_coverage(self):
+        required = set(self.traces["required"])
+        observed = set(self.traces["observed"])
+        return len(required & observed) / len(required)
+
+    def cardinality_estimate(self):
+        series = self.labels["metric_count"]
+        for count in self.labels["label_value_counts"].values():
+            series *= count
+        return series
+
+    def rag_agent_trace_ready(self):
+        return (
+            self.rag_agent["retrieval_trace_coverage"] >= 0.95
+            and self.rag_agent["tool_trace_coverage"] >= 0.95
+            and self.rag_agent["execution_trace_coverage"] >= 0.95
+        )
+
+    def observability_examples(self):
+        metric_fields = ["name", "unit", "labels", "aggregation", "owner"]
+        log_fields = ["ts", "level", "service", "trace_id", "event", "status", "redacted"]
+        event_fields = ["ts", "event_type", "entity", "version", "actor"]
+        return {
+            "signal_coverage": round(len(self.signals) / 8, 3),
+            "metric_contract_coverage": self.field_coverage(self.metric_contracts, metric_fields),
+            "availability": round(self.availability(), 4),
+            "error_budget_remaining": round(self.error_budget_remaining(), 3),
+            "latency_p99_ms": self.quantile(self.latency_samples_ms, 0.99),
+            "trace_span_coverage": round(self.trace_span_coverage(), 3),
+            "log_structure_coverage": self.field_coverage(self.logs, log_fields),
+            "event_timeline_coverage": self.field_coverage(self.events, event_fields),
+            "correlation_id_coverage": round(self.correlation["records_with_id"] / self.correlation["records_total"], 3),
+            "cardinality_estimate": self.cardinality_estimate(),
+            "training_tokens_per_s": self.training["tokens_per_s"],
+            "inference_ttft_p95_ms": self.inference["ttft_p95_ms"],
+            "rag_agent_trace_ready": self.rag_agent_trace_ready(),
+            "cost_per_1k_tokens_usd": round(1000 * self.cost["total_cost_usd"] / self.cost["total_tokens"], 3),
+            "redaction_coverage": round(self.privacy["redacted_fields"] / self.privacy["sensitive_fields_total"], 3),
+            "actionable_alerts": sum(1 for alert in self.alerts if alert["actionable"]),
+        }
+
+    def design_cases(self):
+        complete = {gate: True for gate in self.gates}
+        bad_specs = [
+            ("signal_inventory_missing_bad", "signal_inventory_coverage"),
+            ("metric_contract_missing_bad", "metric_contract_completeness"),
+            ("slo_error_budget_burn_bad", "slo_error_budget_readiness"),
+            ("latency_quantile_bad", "latency_quantile_guard"),
+            ("trace_span_missing_bad", "trace_span_coverage"),
+            ("log_event_structure_bad", "log_event_structure"),
+            ("correlation_id_missing_bad", "correlation_id_coverage"),
+            ("cardinality_explosion_bad", "cardinality_budget_control"),
+            ("training_observability_gap_bad", "training_observability"),
+            ("inference_observability_gap_bad", "inference_observability"),
+            ("data_quality_observability_bad", "data_quality_observability"),
+            ("rag_agent_trace_gap_bad", "rag_agent_observability"),
+            ("cost_observability_missing_bad", "cost_observability"),
+            ("privacy_redaction_retention_bad", "privacy_redaction_retention"),
+            ("alert_noise_bad", "alert_actionability"),
+            ("observability_gate_missing_bad", "observability_platform_gate"),
+        ]
+        cases = [{"name": "complete_observability_platform_design", "checks": complete}]
+        for name, failed_gate in bad_specs:
+            checks = {gate: True for gate in self.gates}
+            checks[failed_gate] = False
+            cases.append({"name": name, "checks": checks})
+        return cases
+
+    def evaluate_cases(self):
+        cases = self.design_cases()
+        metrics = {}
+        failed_cases = []
+        failed_gates = set()
+        for gate in self.gates:
+            passed = sum(1 for case in cases if case["checks"][gate])
+            metrics[gate] = round(passed / len(cases), 3)
+        for case in cases:
+            missing = [gate for gate, ok in case["checks"].items() if not ok]
+            if missing:
+                failed_cases.append(case["name"])
+                failed_gates.update(missing)
+        return {
+            "metrics": metrics,
+            "failed_cases": failed_cases,
+            "failed_gates": sorted(failed_gates),
+            "hard_blocker_count": len(failed_cases),
+            "gate_pass": len(failed_cases) == 0,
+        }
+
+    def run(self):
+        evaluated = self.evaluate_cases()
+        return {
+            "observability_examples": self.observability_examples(),
+            "metrics": evaluated["metrics"],
+            "hard_blocker_count": evaluated["hard_blocker_count"],
+            "failed_case_count": len(evaluated["failed_cases"]),
+            "failed_gate_count": len(evaluated["failed_gates"]),
+            "observability_platform_gate_pass": evaluated["gate_pass"],
+        }
+
+
+if __name__ == "__main__":
+    audit = MiniAIInfraObservabilityPlatformDesignAudit()
+    result = audit.run()
+    print("observability_examples=" + str(result["observability_examples"]))
+    print("metrics=" + str(result["metrics"]))
+    print("hard_blocker_count=" + str(result["hard_blocker_count"]))
+    print("failed_case_count=" + str(result["failed_case_count"]))
+    print("failed_gate_count=" + str(result["failed_gate_count"]))
+    print("observability_platform_gate_pass=" + str(result["observability_platform_gate_pass"]))
+```
+
+一组典型输出如下：
+
+```text
+observability_examples={'signal_coverage': 1.0, 'metric_contract_coverage': 1.0, 'availability': 0.997, 'error_budget_remaining': 0.7, 'latency_p99_ms': 890, 'trace_span_coverage': 1.0, 'log_structure_coverage': 1.0, 'event_timeline_coverage': 1.0, 'correlation_id_coverage': 1.0, 'cardinality_estimate': 96000, 'training_tokens_per_s': 178000, 'inference_ttft_p95_ms': 620, 'rag_agent_trace_ready': True, 'cost_per_1k_tokens_usd': 0.012, 'redaction_coverage': 1.0, 'actionable_alerts': 3}
+metrics={'signal_inventory_coverage': 0.941, 'metric_contract_completeness': 0.941, 'slo_error_budget_readiness': 0.941, 'latency_quantile_guard': 0.941, 'trace_span_coverage': 0.941, 'log_event_structure': 0.941, 'correlation_id_coverage': 0.941, 'cardinality_budget_control': 0.941, 'training_observability': 0.941, 'inference_observability': 0.941, 'data_quality_observability': 0.941, 'rag_agent_observability': 0.941, 'cost_observability': 0.941, 'privacy_redaction_retention': 0.941, 'alert_actionability': 0.941, 'observability_platform_gate': 0.941}
+hard_blocker_count=16
+failed_case_count=16
+failed_gate_count=16
+observability_platform_gate_pass=False
+```
+
+这个 demo 的重点是把“可观测性平台”从“监控图表集合”提升为“排障和治理控制面”。真实系统里，这些字段应该由 instrumentation SDK、agent、exporter、metrics pipeline、logs pipeline、traces pipeline、events pipeline、cost pipeline、incident system、release system 和权限审计系统共同填充。
+
+## 58.25 核心 trade-off
 
 Trade-off：
 
@@ -493,7 +806,7 @@ Trade-off：
 
 可观测性平台设计必须考虑这些权衡。
 
-## 58.25 面试回答模板
+## 58.26 面试回答模板
 
 可以这样回答：
 
@@ -507,7 +820,7 @@ Trade-off：
 平台提供 dashboard、SLO、burn rate 告警、incident 集成、变更关联和复盘支持，同时通过脱敏、权限、采样、TTL 和高基数控制管理成本和隐私风险。
 ```
 
-## 58.26 常见扣分点
+## 58.27 常见扣分点
 
 扣分点一：只讲 Prometheus 和 Grafana。
 
@@ -529,7 +842,7 @@ Trade-off：
 
 问题：metrics 系统容易被 request ID、user ID 等高基数字段打爆。
 
-## 58.27 小练习
+## 58.28 小练习
 
 1. AI Infra 可观测性平台和普通微服务监控有什么不同？
 2. 为什么需要统一 request ID 和 training job ID？
@@ -540,7 +853,7 @@ Trade-off：
 7. 可观测性数据如何做留存分层？
 8. 如何把变更记录和故障排查关联起来？
 
-## 58.28 本章小结
+## 58.29 本章小结
 
 本章系统设计了一个 AI Infra 可观测性平台。
 

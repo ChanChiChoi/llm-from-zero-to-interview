@@ -8,6 +8,18 @@
 
 > 训练容错的核心不是无限重试，而是故障分类、损失控制、自动恢复和清晰诊断。
 
+## 22.0 本讲资料边界与第二轮精修口径
+
+本讲第二轮精修时，资料口径主要对齐几类公开工程资料：PyTorch Elastic / `torchrun` 对 `max_restarts`、rendezvous、worker failure、agent failure、node failure 和 membership change 的分布式恢复口径；Kubernetes Job 对 `restartPolicy`、`backoffLimit`、`podFailurePolicy`、Pod 失败计数和指数退避的控制面语义；NVIDIA NCCL troubleshooting 对通信环境、网络接口、共享内存、GPU Direct RDMA、debug 日志和异步错误处理的排障口径；PyTorch CUDA memory management 对 caching allocator、`memory_allocated`、`memory_reserved`、`max_memory_allocated`、memory snapshot 和 OOM 调参的口径。
+
+这里不把某个训练平台、某个云厂商、某个 GPU 型号、某个调度器插件或某个 NCCL 环境变量组合写成通用答案。正文只抽象训练容错里的稳定问题：故障分类、retryable / non-retryable 判断、attempt 预算、backoff、checkpoint 恢复、节点替换、GPU 健康隔离、通信 hang 检测、OOM 处理、数据和 checkpoint 故障、数值稳定性、诊断报告、黑名单、用户可见动作和审计 trace。
+
+第二轮精修重点放在三个方面：
+
+1. 把“自动重试”改写为有边界的故障分类和恢复策略，明确哪些错误可以重试，哪些错误应该快速失败。
+2. 补充可计算指标：最大丢失 GPU-hours、重试成功率、无效重试率、OOM 显存余量、rank hang 心跳间隔和恢复连续性。
+3. 增加一个 0 依赖 Python demo，把训练容错从经验 checklist 变成可运行的门禁检查。
+
 ## 22.1 为什么训练容错重要
 
 预训练任务可能使用几百张 GPU 跑几天。
@@ -404,7 +416,432 @@ Job failed
 
 这对用户没有帮助。
 
-## 22.16 面试中如何回答训练容错
+## 22.16 训练容错审计指标与最小 demo
+
+这一节把前面的经验规则收敛成一个可检查的训练容错审计表。真实平台可以接入 Kubernetes Job 事件、PyTorch Elastic attempt、NCCL 日志、GPU 健康事件、PyTorch CUDA OOM 统计、checkpoint manifest 和训练状态机；教学 demo 里先用 toy 字段模拟这些证据。
+
+一个训练容错样本可以抽象成：
+
+```math
+f_i=(c_i,r_i,a_i,b_i,k_i,n_i,g_i,h_i,o_i,d_i,p_i,s_i,u_i,t_i,z_i)
+```
+
+其中，`c_i` 是故障分类，`r_i` 是 retryable / non-retryable 判断，`a_i` 是 attempt 预算，`b_i` 是 backoff，`k_i` 是 checkpoint 恢复证据，`n_i` 是节点替换证据，`g_i` 是 GPU 健康隔离证据，`h_i` 是 rank heartbeat / hang 证据，`o_i` 是 OOM 处理策略，`d_i` 是数据权限和数据读取证据，`p_i` 是 checkpoint committed / manifest / checksum 证据，`s_i` 是数值稳定性证据，`u_i` 是用户可见动作，`t_i` 是诊断 trace，`z_i` 是最终门禁。
+
+统一覆盖率仍然可以写成：
+
+```math
+C_j=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[g_j(f_i)=1]
+```
+
+其中，`N` 是审计样本数，`g_j(f_i)=1` 表示第 `i` 个样本通过第 `j` 个训练容错检查。
+
+失败后的最大丢失 GPU-hours 可以写成：
+
+```math
+L_{\mathrm{gpu}}=G\frac{t_{\mathrm{fail}}-t_{\mathrm{ckpt}}}{60}
+```
+
+其中，`G` 是训练使用的 GPU 数，`t_fail` 和 `t_ckpt` 用分钟表示，`L_gpu` 越大，说明 checkpoint 间隔、失败检测或恢复路径越贵。
+
+重试成功率和无效重试率可以写成：
+
+```math
+R_{\mathrm{success}}=\frac{N_{\mathrm{recovered}}}{N_{\mathrm{retry}}}
+```
+
+```math
+R_{\mathrm{waste}}=\frac{N_{\mathrm{bad\_retry}}}{N_{\mathrm{retry}}}
+```
+
+前者看自动恢复是否真的有效，后者看平台是否在对不可恢复故障浪费 GPU。
+
+OOM 显存余量可以写成：
+
+```math
+H_{\mathrm{mem}}=1-\frac{M_{\mathrm{peak}}}{M_{\mathrm{limit}}}
+```
+
+如果 `H_mem` 接近 0，说明任务已经贴着显存上限运行；原样重试通常没有意义。
+
+rank hang 的心跳年龄可以写成：
+
+```math
+A_{\mathrm{hb}}=t_{\mathrm{now}}-t_{\mathrm{last\_heartbeat}}
+```
+
+如果 `A_hb` 超过阈值，要结合首个失败 rank、NCCL 日志、worker 退出状态、节点健康和 OOM 事件判断根因，不能只把所有 hang 都归因于网络。
+
+从 checkpoint 恢复后的连续性可以写成：
+
+```math
+V_{\mathrm{resume}}=\mathbf{1}\left[|\ell_{\mathrm{after}}-\ell_{\mathrm{before}}|\le \epsilon_{\ell}\land s_{\mathrm{after}}=s_{\mathrm{ckpt}}+\Delta s\right]
+```
+
+其中，`\ell` 是 loss，`s` 是 step。恢复成功不是进程重新启动，而是 loss、step、learning rate、optimizer、scheduler、RNG 和 dataloader cursor 都合理连续。
+
+最终训练容错门禁可以写成：
+
+```math
+G_{\mathrm{fault}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land L_{\mathrm{gpu}}\le B_{\mathrm{loss}} \land R_{\mathrm{waste}}\le \rho_{\mathrm{waste}} \land A_{\mathrm{hb}}\le \tau_{\mathrm{hb}} \land V_{\mathrm{resume}}=1 \land P_0=0\right]
+```
+
+这个门禁背后的含义是：训练容错不是“失败了再拉起来”，而是故障分类、重试预算、checkpoint 恢复、节点和 GPU 隔离、通信 hang 诊断、OOM 快速失败、数值异常回滚、诊断报告和用户动作都可审计。
+
+下面的 0 依赖 Python demo 演示一个最小训练容错审计器。它不是生产平台实现，而是把面试中最容易说散的规则变成可运行检查。
+
+```python
+from copy import deepcopy
+
+
+GATES = [
+    "fault_taxonomy_defined",
+    "retryability_classification",
+    "retry_budget_bounded",
+    "backoff_policy_defined",
+    "checkpoint_resume_readiness",
+    "node_failure_reschedule",
+    "gpu_health_isolation",
+    "communication_hang_detection",
+    "oom_handling_policy",
+    "data_permission_fast_fail",
+    "checkpoint_commit_safety",
+    "numeric_instability_stop_rollback",
+    "diagnosis_report_evidence",
+    "blacklist_precision",
+    "user_action_clarity",
+    "training_fault_tolerance_gate",
+]
+
+
+def base_case():
+    return {
+        "name": "complete_fault_tolerance_case",
+        "fault_type": "node_failure",
+        "stage": "runtime",
+        "taxonomy": {
+            "node_failure": ["runtime", "infrastructure"],
+            "gpu_xid": ["runtime", "hardware"],
+            "transient_network_error": ["distributed_init", "runtime"],
+            "oom": ["runtime", "resource"],
+            "permission_denied": ["preflight", "data"],
+            "checkpoint_uncommitted": ["resume", "checkpoint"],
+            "loss_nan": ["runtime", "numeric"],
+        },
+        "retryable": True,
+        "retryable_errors": ["node_failure", "gpu_xid", "transient_network_error", "image_pull_timeout"],
+        "non_retryable_errors": ["config_error", "permission_denied", "repeated_oom", "checkpoint_uncommitted", "loss_nan"],
+        "attempt": 2,
+        "max_attempts": 3,
+        "backoff_seconds": 300,
+        "min_backoff_seconds": 60,
+        "max_backoff_seconds": 1800,
+        "jitter": True,
+        "checkpoint": {
+            "latest_committed": True,
+            "manifest_valid": True,
+            "checksum_valid": True,
+            "config_compatible": True,
+            "restore_uncommitted": False,
+            "resume_fields": ["model", "optimizer", "scheduler", "random_state", "dataloader_cursor"],
+        },
+        "node": {
+            "failed_node": "node-a",
+            "rescheduled_node": "node-b",
+            "cordoned_nodes": ["node-a"],
+            "worker_group_restarted": True,
+        },
+        "gpu": {
+            "error_codes": ["Xid 79"],
+            "isolation_policy": True,
+            "node_marked_unhealthy": True,
+            "repeated_hardware_failures": 2,
+            "false_positive_guard": True,
+            "blacklist_user_code_oom": False,
+        },
+        "communication": {
+            "heartbeat_age_s": 12,
+            "heartbeat_timeout_s": 60,
+            "first_failed_rank": 3,
+            "nccl_logs_collected": True,
+            "worker_exit_status_collected": True,
+        },
+        "oom": {
+            "kind": "none",
+            "blind_retry": False,
+            "peak_gib": 78.0,
+            "limit_gib": 80.0,
+            "auto_batch_decrease_requires_opt_in": True,
+            "recommendations": ["lower micro_batch_size", "enable activation checkpointing", "use FSDP or ZeRO"],
+        },
+        "data": {
+            "permission_checked": True,
+            "retry_permission_denied": False,
+            "sample_read_test": True,
+        },
+        "numeric": {
+            "non_finite_detected": False,
+            "blind_retry_on_nan": False,
+            "rollback_checkpoint": True,
+            "diagnostics_saved": True,
+        },
+        "diagnosis_report": {
+            "fields": [
+                "failed_at",
+                "stage",
+                "first_failed_rank",
+                "error_type",
+                "checkpoint_id",
+                "attempt_id",
+                "log_links",
+                "metric_links",
+                "recommended_action",
+            ]
+        },
+        "user_action": {
+            "visible_status": "retrying",
+            "attempt_visible": True,
+            "checkpoint_visible": True,
+            "lost_steps_visible": True,
+            "recommendation": "Platform retried on a healthy node from committed checkpoint ckpt-1020.",
+        },
+        "history": {"retry_total": 5, "recovered": 4, "bad_retries": 1},
+        "gpu_count": 64,
+        "fail_time_min": 186,
+        "checkpoint_time_min": 180,
+        "loss_before": 1.920,
+        "loss_after": 1.921,
+        "loss_epsilon": 0.01,
+        "checkpoint_step": 1000,
+        "step_after": 1020,
+        "delta_step": 20,
+        "training_fault_tolerance_gate": True,
+    }
+
+
+def contains_all(values, required):
+    return set(required).issubset(set(values))
+
+
+def evaluate(case):
+    required_resume = ["model", "optimizer", "scheduler", "random_state", "dataloader_cursor"]
+    required_report = [
+        "failed_at",
+        "stage",
+        "first_failed_rank",
+        "error_type",
+        "checkpoint_id",
+        "attempt_id",
+        "log_links",
+        "metric_links",
+        "recommended_action",
+    ]
+
+    retryable_expected = case["fault_type"] in case["retryable_errors"]
+    communication = case["communication"]
+    checkpoint = case["checkpoint"]
+    node = case["node"]
+    gpu = case["gpu"]
+    oom = case["oom"]
+    numeric = case["numeric"]
+
+    checks = {}
+    checks["fault_taxonomy_defined"] = (
+        case["fault_type"] in case["taxonomy"]
+        and case["stage"] in case["taxonomy"][case["fault_type"]]
+    )
+    checks["retryability_classification"] = (
+        case["retryable"] == retryable_expected
+        and not (case["retryable"] and case["fault_type"] in case["non_retryable_errors"])
+    )
+    checks["retry_budget_bounded"] = (
+        isinstance(case["max_attempts"], int)
+        and 1 <= case["max_attempts"] <= 5
+        and 1 <= case["attempt"] <= case["max_attempts"]
+    )
+    checks["backoff_policy_defined"] = (
+        case["min_backoff_seconds"] <= case["backoff_seconds"] <= case["max_backoff_seconds"]
+        and case["jitter"]
+    )
+    checks["checkpoint_resume_readiness"] = (
+        checkpoint["latest_committed"]
+        and checkpoint["manifest_valid"]
+        and checkpoint["checksum_valid"]
+        and checkpoint["config_compatible"]
+        and contains_all(checkpoint["resume_fields"], required_resume)
+    )
+    checks["node_failure_reschedule"] = (
+        case["fault_type"] != "node_failure"
+        or (
+            node["worker_group_restarted"]
+            and node["failed_node"] != node["rescheduled_node"]
+            and node["failed_node"] in node["cordoned_nodes"]
+        )
+    )
+    checks["gpu_health_isolation"] = (
+        not gpu["error_codes"]
+        or (
+            gpu["isolation_policy"]
+            and gpu["node_marked_unhealthy"]
+            and gpu["repeated_hardware_failures"] >= 2
+        )
+    )
+    checks["communication_hang_detection"] = (
+        communication["heartbeat_age_s"] <= communication["heartbeat_timeout_s"]
+        or (
+            communication["first_failed_rank"] is not None
+            and communication["nccl_logs_collected"]
+            and communication["worker_exit_status_collected"]
+        )
+    )
+    checks["oom_handling_policy"] = (
+        oom["kind"] == "none"
+        or (
+            oom["kind"] in ["gpu", "cpu", "container"]
+            and not oom["blind_retry"]
+            and (oom["recommendations"] or oom["auto_batch_decrease_requires_opt_in"])
+        )
+    )
+    checks["data_permission_fast_fail"] = (
+        case["data"]["permission_checked"]
+        and case["data"]["sample_read_test"]
+        and not case["data"]["retry_permission_denied"]
+    )
+    checks["checkpoint_commit_safety"] = (
+        checkpoint["latest_committed"]
+        and checkpoint["manifest_valid"]
+        and checkpoint["checksum_valid"]
+        and not checkpoint["restore_uncommitted"]
+    )
+    checks["numeric_instability_stop_rollback"] = (
+        not numeric["blind_retry_on_nan"]
+        and (not numeric["non_finite_detected"] or (numeric["rollback_checkpoint"] and numeric["diagnostics_saved"]))
+    )
+    checks["diagnosis_report_evidence"] = contains_all(case["diagnosis_report"]["fields"], required_report)
+    checks["blacklist_precision"] = (
+        gpu["false_positive_guard"]
+        and not gpu["blacklist_user_code_oom"]
+        and (not gpu["error_codes"] or gpu["repeated_hardware_failures"] >= 2)
+    )
+    checks["user_action_clarity"] = (
+        bool(case["user_action"]["visible_status"])
+        and case["user_action"]["attempt_visible"]
+        and case["user_action"]["checkpoint_visible"]
+        and case["user_action"]["lost_steps_visible"]
+        and bool(case["user_action"]["recommendation"])
+    )
+    checks["training_fault_tolerance_gate"] = bool(case["training_fault_tolerance_gate"])
+    return checks
+
+
+def summarize_examples(case):
+    history = case["history"]
+    retry_total = max(history["retry_total"], 1)
+    lost_gpu_hours = case["gpu_count"] * (case["fail_time_min"] - case["checkpoint_time_min"]) / 60
+    oom_headroom = 1 - oom_ratio(case)
+    resume_continuity = (
+        abs(case["loss_after"] - case["loss_before"]) <= case["loss_epsilon"]
+        and case["step_after"] == case["checkpoint_step"] + case["delta_step"]
+    )
+    return {
+        "lost_gpu_hours": round(lost_gpu_hours, 3),
+        "retry_success_rate": round(history["recovered"] / retry_total, 3),
+        "waste_retry_rate": round(history["bad_retries"] / retry_total, 3),
+        "oom_headroom": round(oom_headroom, 3),
+        "heartbeat_age_s": case["communication"]["heartbeat_age_s"],
+        "resume_continuity": resume_continuity,
+    }
+
+
+def oom_ratio(case):
+    limit = max(case["oom"]["limit_gib"], 1e-9)
+    return case["oom"]["peak_gib"] / limit
+
+
+def mutate(name, editor):
+    case = deepcopy(base_case())
+    case["name"] = name
+    editor(case)
+    return case
+
+
+def build_cases():
+    cases = [base_case()]
+    cases.append(mutate("fault_taxonomy_missing_bad", lambda c: c.update({"fault_type": "mystery_exit", "retryable": False})))
+    cases.append(mutate("retryability_wrong_bad", lambda c: c.update({"fault_type": "permission_denied", "stage": "preflight", "retryable": True})))
+    cases.append(mutate("retry_budget_missing_bad", lambda c: c.update({"max_attempts": None})))
+    cases.append(mutate("backoff_missing_bad", lambda c: c.update({"backoff_seconds": 0, "jitter": False})))
+    cases.append(mutate("checkpoint_resume_missing_bad", lambda c: c["checkpoint"].update({"resume_fields": ["model"]})))
+    cases.append(mutate("node_failure_not_rescheduled_bad", lambda c: c["node"].update({"rescheduled_node": "node-a", "cordoned_nodes": []})))
+    cases.append(mutate("gpu_health_not_isolated_bad", lambda c: c["gpu"].update({"isolation_policy": False, "node_marked_unhealthy": False})))
+    cases.append(mutate("nccl_hang_unclassified_bad", lambda c: c["communication"].update({"heartbeat_age_s": 180, "first_failed_rank": None, "nccl_logs_collected": False})))
+    cases.append(mutate("oom_blind_retry_bad", lambda c: c["oom"].update({"kind": "gpu", "blind_retry": True, "recommendations": []})))
+    cases.append(mutate("data_permission_retried_bad", lambda c: c["data"].update({"retry_permission_denied": True})))
+    cases.append(mutate("checkpoint_uncommitted_recovered_bad", lambda c: c["checkpoint"].update({"restore_uncommitted": True})))
+    cases.append(mutate("numeric_nan_retried_bad", lambda c: c["numeric"].update({"non_finite_detected": True, "blind_retry_on_nan": True, "diagnostics_saved": False})))
+    cases.append(mutate("diagnosis_report_missing_bad", lambda c: c["diagnosis_report"].update({"fields": ["failed_at", "error_type"]})))
+    cases.append(mutate("blacklist_false_positive_bad", lambda c: c["gpu"].update({"blacklist_user_code_oom": True, "false_positive_guard": False})))
+    cases.append(mutate("user_action_unclear_bad", lambda c: c["user_action"].update({"visible_status": "", "recommendation": ""})))
+    cases.append(mutate("fault_tolerance_gate_missing_bad", lambda c: c.update({"training_fault_tolerance_gate": False})))
+    return cases
+
+
+def main():
+    cases = build_cases()
+    evaluations = {case["name"]: evaluate(case) for case in cases}
+    metrics = {
+        gate: round(sum(1 for case in cases if evaluations[case["name"]][gate]) / len(cases), 3)
+        for gate in GATES
+    }
+    failed_cases = [
+        case["name"]
+        for case in cases
+        if not all(evaluations[case["name"]].values())
+    ]
+    failed_gates = [
+        gate
+        for gate in GATES
+        if any(not evaluations[case["name"]][gate] for case in cases)
+    ]
+    complete = cases[0]
+    smoke = {
+        "complete_case_passes": all(evaluations[complete["name"]].values()),
+        "caught_oom_blind_retry": not evaluations["oom_blind_retry_bad"]["oom_handling_policy"],
+        "caught_uncommitted_checkpoint": not evaluations["checkpoint_uncommitted_recovered_bad"]["checkpoint_commit_safety"],
+        "caught_nan_retry": not evaluations["numeric_nan_retried_bad"]["numeric_instability_stop_rollback"],
+        "caught_blacklist_false_positive": not evaluations["blacklist_false_positive_bad"]["blacklist_precision"],
+        "caught_gate_gap": not evaluations["fault_tolerance_gate_missing_bad"]["training_fault_tolerance_gate"],
+    }
+    training_fault_tolerance_gate_pass = not failed_cases and all(v >= 1.0 for v in metrics.values())
+
+    print("training_fault_tolerance_examples=", summarize_examples(complete))
+    print("smoke=", smoke)
+    print("metrics=", metrics)
+    print("hard_blocker_count=", len(failed_cases))
+    print("failed_cases=", failed_cases)
+    print("failed_gates=", failed_gates)
+    print("training_fault_tolerance_gate_pass=", training_fault_tolerance_gate_pass)
+
+
+if __name__ == "__main__":
+    main()
+```
+
+预期输出类似：
+
+```text
+training_fault_tolerance_examples= {'lost_gpu_hours': 6.4, 'retry_success_rate': 0.8, 'waste_retry_rate': 0.2, 'oom_headroom': 0.025, 'heartbeat_age_s': 12, 'resume_continuity': True}
+smoke= {'complete_case_passes': True, 'caught_oom_blind_retry': True, 'caught_uncommitted_checkpoint': True, 'caught_nan_retry': True, 'caught_blacklist_false_positive': True, 'caught_gate_gap': True}
+metrics= {'fault_taxonomy_defined': 0.941, 'retryability_classification': 0.941, 'retry_budget_bounded': 0.941, 'backoff_policy_defined': 0.941, 'checkpoint_resume_readiness': 0.941, 'node_failure_reschedule': 0.941, 'gpu_health_isolation': 0.941, 'communication_hang_detection': 0.941, 'oom_handling_policy': 0.941, 'data_permission_fast_fail': 0.941, 'checkpoint_commit_safety': 0.941, 'numeric_instability_stop_rollback': 0.941, 'diagnosis_report_evidence': 0.941, 'blacklist_precision': 0.941, 'user_action_clarity': 0.941, 'training_fault_tolerance_gate': 0.941}
+hard_blocker_count= 16
+failed_cases= ['fault_taxonomy_missing_bad', 'retryability_wrong_bad', 'retry_budget_missing_bad', 'backoff_missing_bad', 'checkpoint_resume_missing_bad', 'node_failure_not_rescheduled_bad', 'gpu_health_not_isolated_bad', 'nccl_hang_unclassified_bad', 'oom_blind_retry_bad', 'data_permission_retried_bad', 'checkpoint_uncommitted_recovered_bad', 'numeric_nan_retried_bad', 'diagnosis_report_missing_bad', 'blacklist_false_positive_bad', 'user_action_unclear_bad', 'fault_tolerance_gate_missing_bad']
+failed_gates= ['fault_taxonomy_defined', 'retryability_classification', 'retry_budget_bounded', 'backoff_policy_defined', 'checkpoint_resume_readiness', 'node_failure_reschedule', 'gpu_health_isolation', 'communication_hang_detection', 'oom_handling_policy', 'data_permission_fast_fail', 'checkpoint_commit_safety', 'numeric_instability_stop_rollback', 'diagnosis_report_evidence', 'blacklist_precision', 'user_action_clarity', 'training_fault_tolerance_gate']
+training_fault_tolerance_gate_pass= False
+```
+
+面试里可以把这个 demo 压缩成一句话：训练容错的工程质量，要用“可恢复故障恢复成功、不可恢复故障快速失败、恢复后状态连续、坏节点和坏 GPU 不反复伤害任务、用户能看到明确动作”来证明，而不是用“平台会自动重试”来证明。
+
+## 22.17 面试中如何回答训练容错
 
 如果面试官问：
 
@@ -424,7 +861,7 @@ Job failed
 自动重试要有 max_attempts、backoff、retryable error list 和 node blacklist。任务恢复后要检查 loss、step、learning rate 和数据位置是否连续。最终给用户生成诊断报告，说明失败原因、是否恢复、损失进度和建议动作。
 ```
 
-## 22.17 常见误区
+## 22.18 常见误区
 
 误区一：自动重试越多越可靠。
 
@@ -446,7 +883,7 @@ Checkpoint 可能不完整、不兼容或恢复后状态异常，必须校验和
 
 还需要指标、事件、rank 信息、节点健康和 checkpoint 状态。
 
-## 22.18 面试题
+## 22.19 面试题
 
 ### 题 1：哪些训练故障适合自动重试？
 
@@ -468,7 +905,7 @@ Checkpoint 可能不完整、不兼容或恢复后状态异常，必须校验和
 
 答：包括失败时间、失败阶段、首个失败 rank、错误类型、错误摘要、相关日志和指标、最近 checkpoint、重试次数、恢复状态和建议动作。
 
-## 22.19 小练习
+## 22.20 小练习
 
 练习一：设计一个错误分类表。
 
@@ -486,7 +923,7 @@ Checkpoint 可能不完整、不兼容或恢复后状态异常，必须校验和
 
 要求：包含错误摘要、根因假设、证据、相关日志、相关指标和建议动作。
 
-## 22.20 本章小结
+## 22.21 本章小结
 
 本章讲了训练容错。
 
