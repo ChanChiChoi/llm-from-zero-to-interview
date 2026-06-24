@@ -6,6 +6,12 @@
 
 > Sampling 决定模型在“最确定”和“更多样”之间如何取舍，是生成质量、稳定性、可控性和成本体验的重要开关。
 
+## 8.0 本讲资料边界与第二轮精修口径
+
+本章第二轮精修前，先用公开资料校准口径：Transformers 的 generation 文档把 greedy、sampling、beam search、logits processor / warper、stopping criteria 和 cache 放在同一个生成控制体系中；top-k、top-p 和 temperature 都属于对 logits 或候选概率分布的控制策略；nucleus sampling 的经典论文动机是减少低质量长尾 token 被采样，同时避免固定 top-k 在不同分布形状下过度或不足截断。
+
+因此，本章不讨论 beam search、contrastive search、speculative decoding、structured generation 和安全 logits mask，只聚焦单步 token sampling。正文里的 PyTorch 代码用于贴近工程 API，新增的 0 依赖 demo 用纯 Python 展示 stable softmax、temperature、top-k、top-p、seeded multinomial 和采样审计指标。
+
 ## 8.1 为什么要单独实现 sampling
 
 在 generate loop 中，模型 forward 只负责给出 logits。真正决定下一个 token 的，是 sampling 模块。
@@ -315,7 +321,168 @@ request_3: temperature=1.0, top_k=40
 
 因此真实 engine 的 sampler 往往是批量化且按请求配置执行的，而不是本章这种单请求函数。
 
-## 8.12 常见误区
+## 8.12 采样公式、数值稳定和可运行 demo
+
+temperature softmax 可以写成：
+
+```math
+p_i(\tau)=\frac{\exp((z_i-m)/\tau)}{\sum_j \exp((z_j-m)/\tau)},\qquad m=\max_j z_j
+```
+
+其中 $z_i$ 是第 $i$ 个 token 的 logits，$\tau$ 是 temperature。减去 $m$ 不改变 softmax 结果，但能避免 $\exp(z_i)$ 因 logits 过大而数值溢出。
+
+当 $\tau\to 0$ 时，分布会越来越尖锐，工程上通常直接走 greedy：
+
+```math
+y=\mathrm{argmax}_{i\in\mathcal{V}}z_i
+```
+
+Top-k 的候选集合可以写成：
+
+```math
+\mathcal{S}_k=\{i\mid z_i\ \mathrm{is\ in\ the\ top}\ k\ \mathrm{values}\}
+```
+
+Top-p 的候选集合先按概率从大到小排序，取最小的前缀集合：
+
+```math
+n^*=\min\left\{n:\sum_{r=1}^{n}p_{(r)}\ge \rho\right\},\qquad \mathcal{S}_{p}=\{(1),\ldots,(n^*)\}
+```
+
+其中 $\rho$ 是 `top_p`，$p_{(r)}$ 是排序后的第 $r$ 个概率。过滤后要重新归一化：
+
+```math
+\tilde{p}_i=\frac{p_i\mathbf{1}[i\in\mathcal{S}]}{\sum_j p_j\mathbf{1}[j\in\mathcal{S}]}
+```
+
+采样模块的验收门禁可以写成：
+
+```math
+G_{\mathrm{sampling}}=G_{\mathrm{softmax}}G_{\mathrm{temperature}}G_{\mathrm{topk}}G_{\mathrm{topp}}G_{\mathrm{seed}}
+```
+
+下面是一个 0 依赖 demo。它用固定 logits 展示 greedy、temperature、top-k、top-p 和组合过滤如何改变候选集合、熵和最终采样 token。
+
+```python
+import math
+import random
+
+
+VOCAB = ["safe", "clear", "creative", "risky", "off_topic", "loop"]
+LOGITS = [4.0, 3.0, 2.0, 0.5, -1.0, -2.0]
+
+
+def stable_softmax(logits, temperature=1.0):
+    if temperature <= 0:
+        raise ValueError("temperature must be positive for softmax")
+    max_logit = max(logits)
+    exp_values = [math.exp((value - max_logit) / temperature) for value in logits]
+    total = sum(exp_values)
+    return [value / total for value in exp_values]
+
+
+def normalize(probs):
+    total = sum(probs)
+    if total <= 0:
+        raise ValueError("all probabilities were filtered out")
+    return [value / total for value in probs]
+
+
+def apply_top_k(probs, top_k):
+    if top_k is None or top_k <= 0 or top_k >= len(probs):
+        return probs[:]
+    keep = {idx for idx, _ in sorted(enumerate(probs), key=lambda item: item[1], reverse=True)[:top_k]}
+    return normalize([value if idx in keep else 0.0 for idx, value in enumerate(probs)])
+
+
+def apply_top_p(probs, top_p):
+    if top_p is None or top_p >= 1.0:
+        return probs[:]
+    if top_p <= 0:
+        raise ValueError("top_p must be positive")
+
+    ranked = sorted(enumerate(probs), key=lambda item: item[1], reverse=True)
+    keep = set()
+    cumulative = 0.0
+    for idx, value in ranked:
+        keep.add(idx)
+        cumulative += value
+        if cumulative >= top_p:
+            break
+    return normalize([value if idx in keep else 0.0 for idx, value in enumerate(probs)])
+
+
+def entropy(probs):
+    return -sum(value * math.log(value) for value in probs if value > 0)
+
+
+def sample_from_probs(probs, seed):
+    rng = random.Random(seed)
+    threshold = rng.random()
+    cumulative = 0.0
+    for idx, value in enumerate(probs):
+        cumulative += value
+        if threshold <= cumulative:
+            return idx
+    return len(probs) - 1
+
+
+def sample_once(name, temperature=1.0, top_k=None, top_p=1.0, seed=6):
+    if temperature == 0:
+        selected = max(range(len(LOGITS)), key=lambda idx: LOGITS[idx])
+        probs = [1.0 if idx == selected else 0.0 for idx in range(len(LOGITS))]
+    else:
+        probs = stable_softmax(LOGITS, temperature=temperature)
+        probs = apply_top_k(probs, top_k)
+        probs = apply_top_p(probs, top_p)
+        selected = sample_from_probs(probs, seed)
+
+    candidates = [VOCAB[idx] for idx, value in enumerate(probs) if value > 0]
+    return {
+        "name": name,
+        "selected": VOCAB[selected],
+        "candidates": candidates,
+        "candidate_count": len(candidates),
+        "entropy": round(entropy(probs), 3),
+        "probs": {VOCAB[idx]: round(value, 3) for idx, value in enumerate(probs) if value > 0},
+    }
+
+
+cases = [
+    sample_once("greedy", temperature=0),
+    sample_once("temperature_0_7", temperature=0.7),
+    sample_once("temperature_1_4", temperature=1.4),
+    sample_once("top_k_3", temperature=1.0, top_k=3),
+    sample_once("top_p_0_8", temperature=1.0, top_p=0.8),
+    sample_once("combined", temperature=0.8, top_k=4, top_p=0.85),
+]
+
+repeat_a = sample_once("repeat", temperature=1.0, top_k=3, seed=42)["selected"]
+repeat_b = sample_once("repeat", temperature=1.0, top_k=3, seed=42)["selected"]
+
+audit = {
+    "softmax_normalized": all(abs(sum(item["probs"].values()) - 1.0) <= 0.002 for item in cases),
+    "temperature_changes_entropy": cases[2]["entropy"] > cases[1]["entropy"],
+    "top_k_reduces_candidates": cases[3]["candidate_count"] == 3,
+    "top_p_adapts_candidates": cases[4]["candidate_count"] < len(VOCAB),
+    "seed_reproducible": repeat_a == repeat_b,
+}
+audit["sampling_gate"] = all(audit.values())
+
+print("cases=", cases)
+print("audit=", audit)
+```
+
+一组典型输出如下：
+
+```text
+cases= [{'name': 'greedy', 'selected': 'safe', 'candidates': ['safe'], 'candidate_count': 1, 'entropy': -0.0, 'probs': {'safe': 1.0}}, {'name': 'temperature_0_7', 'selected': 'clear', 'candidates': ['safe', 'clear', 'creative', 'risky', 'off_topic', 'loop'], 'candidate_count': 6, 'entropy': 0.686, 'probs': {'safe': 0.766, 'clear': 0.184, 'creative': 0.044, 'risky': 0.005, 'off_topic': 0.001, 'loop': 0.0}}, {'name': 'temperature_1_4', 'selected': 'clear', 'candidates': ['safe', 'clear', 'creative', 'risky', 'off_topic', 'loop'], 'candidate_count': 6, 'entropy': 1.187, 'probs': {'safe': 0.54, 'clear': 0.264, 'creative': 0.129, 'risky': 0.044, 'off_topic': 0.015, 'loop': 0.007}}, {'name': 'top_k_3', 'selected': 'clear', 'candidates': ['safe', 'clear', 'creative'], 'candidate_count': 3, 'entropy': 0.832, 'probs': {'safe': 0.665, 'clear': 0.245, 'creative': 0.09}}, {'name': 'top_p_0_8', 'selected': 'clear', 'candidates': ['safe', 'clear'], 'candidate_count': 2, 'entropy': 0.582, 'probs': {'safe': 0.731, 'clear': 0.269}}, {'name': 'combined', 'selected': 'clear', 'candidates': ['safe', 'clear'], 'candidate_count': 2, 'entropy': 0.53, 'probs': {'safe': 0.777, 'clear': 0.223}}]
+audit= {'softmax_normalized': True, 'temperature_changes_entropy': True, 'top_k_reduces_candidates': True, 'top_p_adapts_candidates': True, 'seed_reproducible': True, 'sampling_gate': True}
+```
+
+注意最后一个 combined 示例：先做 temperature 和 top-k，再做 top-p，会让候选集和概率发生二次变化。实际框架要清楚记录这些参数，否则线上生成差异很难复盘。
+
+## 8.13 常见误区
 
 误区一：temperature 越高越聪明。
 
@@ -337,7 +504,7 @@ sampling 会影响输出长度、是否重复、是否命中 stop，从而影响
 
 复杂 serving 里还有 batch 顺序、kernel、并行和浮点误差等因素。
 
-## 8.13 面试追问
+## 8.14 面试追问
 
 1. logits 和概率有什么区别？
 2. greedy decoding 怎么实现？
@@ -355,15 +522,16 @@ sampling 会影响输出长度、是否重复、是否命中 stop，从而影响
 3. 然后说明参数影响质量、输出长度和成本。
 4. 最后补 serving 复杂度：batch 内每个请求参数不同，sampler 需要批量化和可配置。
 
-## 8.14 小练习
+## 8.15 小练习
 
 1. 在第 7 章代码中替换 greedy，加入 `sample_next_token`。
 2. 对同一个 prompt 分别设置 `temperature=0`、`0.7`、`1.2`，观察输出差异。
 3. 对比 `top_k=10` 和 `top_p=0.9` 的候选集合变化。
 4. 设置相同 seed 多次运行，观察是否完全一致。
 5. 思考为什么结构化 JSON 输出通常更适合低 temperature。
+6. 扩展本章纯 Python demo，打印每种策略的候选 token 集合和 entropy，解释为什么高 entropy 不等于高质量。
 
-## 8.15 本章小结
+## 8.16 本章小结
 
 本章实现了 greedy、temperature、top-k 和 top-p sampling。
 

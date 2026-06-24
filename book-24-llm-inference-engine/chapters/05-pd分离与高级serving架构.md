@@ -8,6 +8,18 @@
 
 > LLM serving 的优化目标不是单一 QPS，而是在 TTFT、TPOT、吞吐、并发、显存和成本之间做系统权衡。
 
+## 5.0 本讲资料边界与第二轮精修口径
+
+本章讲的是 LLM serving 的指标、容量和成本口径，不是 PD 分离源码章节。第二轮精修时，本章按下面口径处理：
+
+1. TTFT、TPOT、queue、prefill、decode、KV cache、active sequences、tokens/s、metrics 和 tracing 的指标口径参考 vLLM、TGI、Triton 等公开 serving 抽象，以及 SRE 对延迟分位、吞吐、饱和度和容量的通用工程思路。
+2. 本章只给通用公式和 toy demo，不绑定某个 runtime 的 Prometheus 指标名、dashboard 字段名、硬件型号或云厂商价格。
+3. 成本估算只用于解释单位 token 成本、GPU-hour、有效吞吐、SLO 和 headroom 的关系，不把示例数值当作采购建议。
+4. 并发只讨论 active sequence、waiting queue、KV budget 和 streaming connection 的工程含义，不把 HTTP 连接数等同于 serving 容量。
+5. demo 用离线 toy workload 模拟 p95 / p99、tokens/s、KV pressure 和 cost per 1k tokens，帮助读者理解指标之间的约束。
+
+所以，本章的目标不是追一个漂亮 QPS，而是让你能用同一张表解释用户体验、系统容量、显存预算和单位成本。
+
 ## 5.1 为什么传统 QPS 不够用
 
 在传统 Web 服务里，我们经常看 QPS、平均延迟、p95 延迟、错误率。这些指标仍然重要，但不足以描述 LLM serving。
@@ -336,7 +348,184 @@ KV Cache、临时 buffer、并发和上下文长度都会影响显存。
 
 LLM 请求长度分布长尾明显，必须看 p95 和 p99。
 
-## 5.15 面试追问
+## 5.15 指标公式、容量估算和可运行 demo
+
+可以把一次请求的指标记录写成：
+
+```math
+R_i=(x_i,y_i,q_i,p_i,d_i,k_i,c_i,e_i,z_i)
+```
+
+其中 `x_i` 是 input tokens，`y_i` 是 output tokens，`q_i` 是 queue time，`p_i` 是 prefill time，`d_i` 是 decode time，`k_i` 是 KV cache 占用，`c_i` 是成本，`e_i` 是错误或 timeout 标记，`z_i` 是 trace 和版本信息。
+
+TTFT 可以拆成：
+
+```math
+T_{\mathrm{ttft},i}=T_{\mathrm{queue},i}+T_{\mathrm{tokenize},i}+T_{\mathrm{prefill},i}+T_{\mathrm{first},i}
+```
+
+TPOT 可以写成：
+
+```math
+T_{\mathrm{tpot},i}=\frac{T_{\mathrm{decode},i}}{\max(y_i-1,1)}
+```
+
+一个窗口 `W` 内的 input / output token 吞吐可以写成：
+
+```math
+X_{\mathrm{in}}=\frac{\sum_i x_i}{W}
+```
+
+```math
+X_{\mathrm{out}}=\frac{\sum_i y_i}{W}
+```
+
+KV cache 显存仍然要按活跃 token 估算：
+
+```math
+M_{\mathrm{kv}}=2L\left(\sum_i (x_i+y_i)\right)H_{\mathrm{kv}}D_hb
+```
+
+如果平均每个 active sequence 占用 `M_kvavg` 显存，可承载并发上限可以粗略写成：
+
+```math
+N_{\mathrm{active}}\le \left\lfloor \frac{B_{\mathrm{kv}}}{M_{\mathrm{kvavg}}}\right\rfloor
+```
+
+单位 token 成本可以按 GPU-hour 和有效 token 吞吐估算：
+
+```math
+K_{1k}=\frac{1000K_{\mathrm{gpu}}}{3600X_{\mathrm{tok}}}
+```
+
+其中 `K_gpu` 是每 GPU-hour 成本，`X_tok` 是每秒有效 token 吞吐。最终指标门禁可以写成：
+
+```math
+G_{\mathrm{metric}}=G_{\mathrm{ttft}}G_{\mathrm{tpot}}G_{\mathrm{kv}}G_{\mathrm{cost}}G_{\mathrm{tail}}
+```
+
+下面这个 demo 用 0 依赖代码模拟一个压测窗口，输出 p95 / p99、input / output tokens/s、KV pressure、并发容量和每 1k token 成本。它不模拟真实 GPU，只把指标口径写清楚。
+
+```python
+from math import floor
+
+
+def percentile(values, pct):
+    if not values:
+        return None
+    ordered = sorted(values)
+    index = min(len(ordered) - 1, max(0, round((pct / 100) * (len(ordered) - 1))))
+    return ordered[index]
+
+
+class MiniServingMetricCostAudit:
+    def __init__(
+        self,
+        layers=32,
+        kv_heads=8,
+        head_dim=128,
+        dtype_bytes=2,
+        kv_budget_mib=8192,
+        gpu_cost_per_hour=2.4,
+        window_seconds=60,
+    ):
+        self.layers = layers
+        self.kv_heads = kv_heads
+        self.head_dim = head_dim
+        self.dtype_bytes = dtype_bytes
+        self.kv_budget_mib = kv_budget_mib
+        self.gpu_cost_per_hour = gpu_cost_per_hour
+        self.window_seconds = window_seconds
+
+    def kv_mib(self, input_tokens, output_tokens):
+        tokens = input_tokens + output_tokens
+        bytes_used = 2 * self.layers * tokens * self.kv_heads * self.head_dim * self.dtype_bytes
+        return bytes_used / (1024 * 1024)
+
+    def per_request_metrics(self, request):
+        ttft_ms = request["queue_ms"] + request["tokenize_ms"] + request["prefill_ms"] + request["first_flush_ms"]
+        tpot_ms = request["decode_ms"] / max(request["output_tokens"] - 1, 1)
+        e2e_ms = ttft_ms + request["decode_ms"] + request["final_flush_ms"]
+        kv_mib = self.kv_mib(request["input_tokens"], request["output_tokens"])
+        return {
+            "request_id": request["request_id"],
+            "input_tokens": request["input_tokens"],
+            "output_tokens": request["output_tokens"],
+            "ttft_ms": round(ttft_ms, 3),
+            "tpot_ms": round(tpot_ms, 3),
+            "e2e_ms": round(e2e_ms, 3),
+            "kv_mib": round(kv_mib, 3),
+            "timeout": request.get("timeout", False),
+        }
+
+    def run(self, requests):
+        per_request = [self.per_request_metrics(request) for request in requests]
+        total_input = sum(item["input_tokens"] for item in per_request)
+        total_output = sum(item["output_tokens"] for item in per_request)
+        total_tokens = total_input + total_output
+        total_kv_mib = sum(item["kv_mib"] for item in per_request)
+        active_kv_avg = total_kv_mib / max(len(per_request), 1)
+        effective_tokens_per_s = total_tokens / self.window_seconds
+        cost_per_1k_tokens = 1000 * self.gpu_cost_per_hour / (3600 * max(effective_tokens_per_s, 1e-9))
+        return {
+            "per_request": per_request,
+            "summary": {
+                "request_count": len(per_request),
+                "input_tokens": total_input,
+                "output_tokens": total_output,
+                "input_tokens_per_s": round(total_input / self.window_seconds, 3),
+                "output_tokens_per_s": round(total_output / self.window_seconds, 3),
+                "total_tokens_per_s": round(effective_tokens_per_s, 3),
+                "ttft_p95_ms": percentile([item["ttft_ms"] for item in per_request], 95),
+                "ttft_p99_ms": percentile([item["ttft_ms"] for item in per_request], 99),
+                "tpot_p95_ms": percentile([item["tpot_ms"] for item in per_request], 95),
+                "e2e_p99_ms": percentile([item["e2e_ms"] for item in per_request], 99),
+                "kv_mib_total": round(total_kv_mib, 3),
+                "kv_pressure": round(total_kv_mib / self.kv_budget_mib, 3),
+                "active_sequence_capacity": floor(self.kv_budget_mib / max(active_kv_avg, 1e-9)),
+                "cost_per_1k_tokens": round(cost_per_1k_tokens, 6),
+                "timeout_rate": round(sum(item["timeout"] for item in per_request) / max(len(per_request), 1), 3),
+            },
+        }
+
+
+def audit_serving_metrics(report):
+    summary = report["summary"]
+    gates = {
+        "ttft_slo": summary["ttft_p95_ms"] <= 900,
+        "tpot_slo": summary["tpot_p95_ms"] <= 80,
+        "token_throughput": summary["total_tokens_per_s"] > 0,
+        "kv_budget": summary["kv_pressure"] <= 0.8,
+        "cost_budget": summary["cost_per_1k_tokens"] <= 0.02,
+        "tail_latency": summary["e2e_p99_ms"] <= 4000,
+        "timeout_rate": summary["timeout_rate"] <= 0.01,
+    }
+    return {
+        "gates": gates,
+        "metric_cost_gate": all(gates.values()),
+    }
+
+
+workload = [
+    {"request_id": "chat_1", "input_tokens": 180, "output_tokens": 80, "queue_ms": 80, "tokenize_ms": 8, "prefill_ms": 120, "first_flush_ms": 20, "decode_ms": 1600, "final_flush_ms": 30},
+    {"request_id": "rag_1", "input_tokens": 2200, "output_tokens": 160, "queue_ms": 180, "tokenize_ms": 25, "prefill_ms": 520, "first_flush_ms": 25, "decode_ms": 3200, "final_flush_ms": 40},
+    {"request_id": "code_1", "input_tokens": 900, "output_tokens": 420, "queue_ms": 120, "tokenize_ms": 16, "prefill_ms": 260, "first_flush_ms": 22, "decode_ms": 7000, "final_flush_ms": 35},
+    {"request_id": "long_1", "input_tokens": 6000, "output_tokens": 220, "queue_ms": 280, "tokenize_ms": 55, "prefill_ms": 980, "first_flush_ms": 30, "decode_ms": 5200, "final_flush_ms": 50},
+    {"request_id": "chat_2", "input_tokens": 120, "output_tokens": 60, "queue_ms": 60, "tokenize_ms": 7, "prefill_ms": 90, "first_flush_ms": 18, "decode_ms": 900, "final_flush_ms": 25},
+]
+
+audit_runner = MiniServingMetricCostAudit()
+report = audit_runner.run(workload)
+audit = audit_serving_metrics(report)
+
+print("per_request=", report["per_request"])
+print("summary=", report["summary"])
+print("audit=", audit)
+```
+
+这段代码的重点是把压测报告从“QPS + 平均延迟”升级成 token 和阶段视角：同一个窗口里，TTFT、TPOT、tokens/s、KV pressure、tail latency、timeout 和 cost per 1k tokens 要同时过线。
+
+## 5.16 面试追问
 
 1. TTFT 和 TPOT 分别是什么？
 2. 为什么 LLM serving 不能只看 QPS？
@@ -354,7 +543,7 @@ LLM 请求长度分布长尾明显，必须看 p95 和 p99。
 3. 然后解释 trade-off：吞吐、延迟、显存和成本互相制约。
 4. 最后给排查路径：queue、prefill、decode、KV Cache、GPU、streaming、p95/p99。
 
-## 5.16 小练习
+## 5.17 小练习
 
 1. 设计一个压测 workload，包含输入长度、输出长度、QPS、并发和是否 streaming。
 2. 假设某服务 TTFT 高但 TPOT 正常，你会优先排查哪些阶段？
@@ -362,7 +551,7 @@ LLM 请求长度分布长尾明显，必须看 p95 和 p99。
 4. 解释为什么 batch size 增大可能降低每 token 成本但增加首 token 延迟。
 5. 画一张图，把 TTFT、TPOT、tokens/s、KV Cache 使用率和成本联系起来。
 
-## 5.17 本章小结
+## 5.18 本章小结
 
 本章把 LLM serving 的核心机制转成了可量化指标。
 

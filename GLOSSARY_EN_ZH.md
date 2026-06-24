@@ -6814,14 +6814,146 @@ Multi Tenant GPU Scheduler Gate：多租户 GPU 调度门禁
 
 AI Infra Interview Readiness：AI Infra 面试准备度
 
+AI Infra Interview Readiness Audit：AI Infra 面试准备度审计
+
 AI Infra Interview Rubric：AI Infra 面试评分规约
+
+AI Infra Topic Coverage：AI Infra 主题覆盖率
 
 AI Infra Formula Coverage：AI Infra 公式覆盖率
 
 AI Infra Demo Evidence Coverage：AI Infra demo 证据覆盖率
+
+AI Infra Risk Coverage：AI Infra 风险覆盖率
+
+AI Infra Tradeoff Coverage：AI Infra 取舍覆盖率
 
 Weak AI Infra Question：AI Infra 薄弱题
 
 AI Infra Revision Plan：AI Infra 面试修复计划
 
 AI Infra Interview Gate：AI Infra 面试门禁
+
+LLM Serving Engine Overview Audit：LLM Serving Engine 总览审计
+
+Serving Engine Request Lifecycle：推理引擎请求生命周期
+
+Prefill Decode Phase Contract：Prefill / Decode 阶段契约
+
+KV Cache Footprint Estimate：KV Cache 显存占用估算
+
+Scheduler Batching Readiness：调度与批处理就绪度
+
+Streaming State Management：流式输出状态管理
+
+Engine Metrics Observability：推理引擎指标可观测性
+
+Runtime Boundary Clarity：运行时边界清晰度
+
+Serving Engine Gate：推理引擎门禁
+
+From Scratch Mini Serving Engine：从零实现最小推理引擎
+
+Naive Generate Loop：朴素生成循环
+
+Toy Tokenizer：教学版 Tokenizer
+
+Toy Sampler：教学版采样器
+
+Request State Machine：请求状态机
+
+Minimal Scheduler：最小调度器
+
+Token Streaming Trace：Token 流式输出 Trace
+
+KV Cleanup Gate：KV 清理门禁
+
+Minimal Engine Gate：最小推理引擎门禁
+
+Request Lifecycle Audit：请求生命周期审计
+
+Mini Request Lifecycle Engine：最小请求生命周期引擎
+
+Request Lifecycle Object：请求生命周期对象
+
+Finish Reason Coverage：结束原因覆盖率
+
+Abort Timeout Cleanup：取消和超时清理
+
+Lifecycle Metrics Trace：生命周期指标 Trace
+
+Request Lifecycle Gate：请求生命周期门禁
+
+Prefill Decode KV Streaming Audit：Prefill / Decode / KV / Streaming 阶段审计
+
+Mini Prefill Decode KV Streaming Audit：最小 Prefill / Decode / KV / Streaming 审计
+
+Prefill Phase Accounting：Prefill 阶段核算
+
+Decode Phase Accounting：Decode 阶段核算
+
+KV Pressure Estimate：KV 压力估算
+
+Streaming Backpressure Signal：流式背压信号
+
+Phase Gate：阶段门禁
+
+Serving Metric Cost Audit：推理服务指标成本审计
+
+Mini Serving Metric Cost Audit：最小推理服务指标成本审计
+
+TTFT SLO Gate：TTFT SLO 门禁
+
+TPOT SLO Gate：TPOT SLO 门禁
+
+Token Throughput Window：Token 吞吐窗口
+
+Active Sequence Capacity：活跃序列容量
+
+Cost Per 1k Tokens：每 1k token 成本
+
+Metric Cost Gate：指标成本门禁
+
+Serving Boundary Audit：推理服务边界审计
+
+Mini Serving Boundary Audit：最小推理服务边界审计
+
+Engine Platform Infra Boundary：推理框架、推理平台和 AI Infra 边界
+
+Interface Contract Coverage：接口契约覆盖率
+
+Metric Handoff Coverage：指标交接覆盖率
+
+Incident Layer Routing：事故层级归因
+
+Serving Boundary Gate：推理服务边界门禁
+
+Minimal Generate Loop Audit：最小生成循环审计
+
+Toy Generate Loop：教学版生成循环
+
+Tokenizer Contract：Tokenizer 契约
+
+Model Wrapper Contract：模型封装器契约
+
+Last Logits Selection：最后位置 logits 选择
+
+Naive Recompute Work：朴素重复计算量
+
+Minimal Generate Gate：最小生成循环门禁
+
+Sampling Strategy Audit：采样策略审计
+
+Mini Sampling Strategy Audit：最小采样策略审计
+
+Stable Softmax：数值稳定 Softmax
+
+Temperature Softmax：温度 Softmax
+
+Top-k Candidate Filter：Top-k 候选过滤
+
+Top-p Nucleus Filter：Top-p 核采样过滤
+
+Seeded Multinomial Sampling：带随机种子的多项式采样
+
+Sampling Gate：采样门禁

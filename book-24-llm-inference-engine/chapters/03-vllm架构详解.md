@@ -8,6 +8,18 @@
 
 > 推理请求不是一次函数调用，而是一个带状态、带资源、带输出通道、可被调度和取消的生命周期对象。
 
+## 3.0 本讲资料边界与第二轮精修口径
+
+本章讲的是通用 LLM serving request lifecycle，不是某个框架的源码导读。第二轮精修时，本章按下面口径处理：
+
+1. API server、engine core、scheduler、KV cache manager、worker、metrics 和 streaming 的模块边界参考 vLLM、TGI、Triton 等公开 serving 抽象，但不把某个版本的内部类名或字段名写成标准答案。
+2. request object、waiting queue、running set、finish reason、abort、timeout 和 cleanup 只抽象稳定工程问题：状态如何流转、资源如何绑定、异常如何收敛。
+3. TTFT、TPOT、queue wait、prefill、decode、KV token 和 event trace 只作为教学指标，用 step 计数替代真实毫秒。
+4. 本章不展开 PagedAttention、continuous batching、prefix cache、PD 分离和分布式 worker；这些在后续章节单独展开。
+5. demo 只验证生命周期闭环，不追求高性能，也不依赖真实 tokenizer、GPU 或模型权重。
+
+所以，本章的重点不是背模块名，而是能把一次请求从接入、校验、tokenization、排队、调度、prefill、decode、streaming、结束、异常和清理完整走一遍。
+
 ## 3.1 为什么要讲生命周期
 
 很多初学者看 serving engine 时，会先记模块名：API Server、Engine、Scheduler、Worker、Executor、Block Manager。这样容易只记住结构，没理解数据怎么流动。
@@ -392,7 +404,243 @@ WAITING/PREFILLING/DECODING -> TIMEOUT
 
 状态机的价值在于让复杂情况有规则可循。无论正常完成、失败、取消还是超时，都能走到统一清理路径。
 
-## 3.16 面试追问
+## 3.16 请求生命周期指标和可运行 demo
+
+可以把一个请求抽象成：
+
+```math
+R_i=(a_i,p_i,n_i,m_i,s_i,q_i,u_i,d_i,f_i,k_i,z_i)
+```
+
+其中 `a_i` 是到达时间，`p_i` 是 prompt token 数，`n_i` 是最大输出 token 数，`m_i` 是模型或路由信息，`s_i` 是状态，`q_i` 是排队信息，`u_i` 是用户或租户信息，`d_i` 是 decode 进度，`f_i` 是 finish reason，`k_i` 是 KV 资源引用，`z_i` 是 trace 和 metrics。
+
+排队时间可以写成：
+
+```math
+T_{\mathrm{queue},i}=t_{\mathrm{start},i}-t_{\mathrm{arrival},i}
+```
+
+TTFT 可以拆成：
+
+```math
+T_{\mathrm{ttft},i}=t_{\mathrm{first},i}-t_{\mathrm{arrival},i}=T_{\mathrm{queue},i}+T_{\mathrm{prefill},i}+D_{\mathrm{first},i}
+```
+
+其中 `D_first` 表示从 prefill 结束到首个输出 token 形成的 decode / flush 步数。TPOT 只对已经产生过输出 token 的请求计算：
+
+```math
+T_{\mathrm{tpot},i}=\frac{t_{\mathrm{finish},i}-t_{\mathrm{first},i}}{\max(N_{\mathrm{out},i}-1,1)}
+```
+
+活跃 KV token 占用可以先用 toy 口径估算：
+
+```math
+K_{\mathrm{active}}(t)=\sum_{i\in A(t)}(N_{\mathrm{prompt},i}+N_{\mathrm{generated},i})
+```
+
+生命周期门禁可以写成：
+
+```math
+G_{\mathrm{life}}=G_{\mathrm{state}}G_{\mathrm{metrics}}G_{\mathrm{stream}}G_{\mathrm{cleanup}}G_{\mathrm{trace}}
+```
+
+含义是：状态机、指标、流式输出、资源清理和 trace 任意一项缺失，这个 request lifecycle 都不能算闭环。
+
+下面这个 demo 用 0 依赖代码模拟 3 个请求：一个正常结束，一个客户端取消，一个排队超时。重点看异常路径是否也会释放 KV、退出队列并留下 finish reason。
+
+```python
+from dataclasses import dataclass, field
+
+
+TERMINAL_STATES = {"FINISHED", "ABORTED", "TIMEOUT", "FAILED"}
+
+
+@dataclass
+class Request:
+    request_id: str
+    arrival_step: int
+    prompt_tokens: int
+    max_new_tokens: int
+    stream: bool = True
+    queue_timeout_steps: int = 5
+    abort_at_step: int = None
+    state: str = "RECEIVED"
+    generated_tokens: int = 0
+    queue_steps: int = 0
+    prefill_steps: int = 0
+    decode_steps: int = 0
+    start_step: int = None
+    first_token_step: int = None
+    finish_step: int = None
+    finish_reason: str = None
+    stream_chunks: list = field(default_factory=list)
+    trace: list = field(default_factory=list)
+
+
+class MiniRequestLifecycleEngine:
+    def __init__(self, max_active=2, kv_token_budget=16):
+        self.max_active = max_active
+        self.kv_token_budget = kv_token_budget
+        self.waiting = []
+        self.running = []
+        self.terminal = []
+        self.kv_cache = {}
+        self.events = []
+        self.step = 0
+        self.max_kv_tokens = 0
+
+    def submit(self, request):
+        for state in ["RECEIVED", "VALIDATED", "TOKENIZED", "WAITING"]:
+            request.trace.append(state)
+        request.state = "WAITING"
+        self.waiting.append(request)
+        self.events.append((self.step, request.request_id, "submit", request.prompt_tokens))
+
+    def kv_tokens_used(self):
+        return sum(self.kv_cache.values())
+
+    def can_admit(self, request):
+        projected = self.kv_tokens_used() + request.prompt_tokens
+        return len(self.running) < self.max_active and projected <= self.kv_token_budget
+
+    def admit_waiting(self):
+        for request in list(self.waiting):
+            if self.can_admit(request):
+                self.waiting.remove(request)
+                request.state = "PREFILLING"
+                request.start_step = self.step
+                request.queue_steps = self.step - request.arrival_step
+                request.trace.append("PREFILLING")
+                self.running.append(request)
+                self.events.append((self.step, request.request_id, "admit", request.queue_steps))
+        for request in self.waiting:
+            request.queue_steps = self.step - request.arrival_step
+
+    def terminalize(self, request, state, reason):
+        if request in self.waiting:
+            self.waiting.remove(request)
+        if request in self.running:
+            self.running.remove(request)
+        request.state = state
+        request.finish_reason = reason
+        request.finish_step = self.step
+        request.trace.append(state)
+        self.kv_cache.pop(request.request_id, None)
+        if request not in self.terminal:
+            self.terminal.append(request)
+        self.events.append((self.step, request.request_id, "cleanup", reason))
+
+    def expire_waiting(self):
+        for request in list(self.waiting):
+            request.queue_steps = self.step - request.arrival_step
+            if request.queue_steps > request.queue_timeout_steps:
+                self.terminalize(request, "TIMEOUT", "queue_timeout")
+
+    def run_one_step(self):
+        self.expire_waiting()
+        self.admit_waiting()
+        for request in list(self.running):
+            if request.abort_at_step is not None and self.step >= request.abort_at_step:
+                self.terminalize(request, "ABORTED", "client_abort")
+                continue
+            if request.state == "PREFILLING":
+                request.prefill_steps += 1
+                request.state = "DECODING"
+                request.trace.append("DECODING")
+                self.kv_cache[request.request_id] = request.prompt_tokens
+                self.events.append((self.step, request.request_id, "prefill", request.prompt_tokens))
+                continue
+            if request.state == "DECODING":
+                request.decode_steps += 1
+                request.generated_tokens += 1
+                self.kv_cache[request.request_id] += 1
+                if request.first_token_step is None:
+                    request.first_token_step = self.step
+                chunk = f"tok{request.generated_tokens}"
+                if request.stream:
+                    request.stream_chunks.append(chunk)
+                self.events.append((self.step, request.request_id, "decode", chunk))
+                if request.generated_tokens >= request.max_new_tokens:
+                    self.terminalize(request, "FINISHED", "length")
+        self.max_kv_tokens = max(self.max_kv_tokens, self.kv_tokens_used())
+        self.step += 1
+
+    def run_until_done(self, max_steps=20):
+        while (self.waiting or self.running) and self.step < max_steps:
+            self.run_one_step()
+        return self.report()
+
+    def report(self):
+        per_request = {}
+        for request in sorted(self.terminal, key=lambda item: item.request_id):
+            ttft_steps = None
+            tpot_steps = None
+            if request.first_token_step is not None:
+                ttft_steps = request.first_token_step - request.arrival_step
+                tpot_steps = (request.finish_step - request.first_token_step) / max(request.generated_tokens - 1, 1)
+            per_request[request.request_id] = {
+                "state": request.state,
+                "reason": request.finish_reason,
+                "queue_steps": request.queue_steps,
+                "ttft_steps": ttft_steps,
+                "tpot_steps": None if tpot_steps is None else round(tpot_steps, 3),
+                "prefill_steps": request.prefill_steps,
+                "decode_steps": request.decode_steps,
+                "generated_tokens": request.generated_tokens,
+                "stream": request.stream_chunks,
+                "trace": request.trace,
+            }
+        ttft_values = [item["ttft_steps"] for item in per_request.values() if item["ttft_steps"] is not None]
+        tpot_values = [item["tpot_steps"] for item in per_request.values() if item["tpot_steps"] is not None]
+        return {
+            "per_request": per_request,
+            "metrics": {
+                "terminal": len(self.terminal),
+                "finished": sum(req.state == "FINISHED" for req in self.terminal),
+                "aborted": sum(req.state == "ABORTED" for req in self.terminal),
+                "timeout": sum(req.state == "TIMEOUT" for req in self.terminal),
+                "avg_queue_steps": round(sum(req.queue_steps for req in self.terminal) / max(len(self.terminal), 1), 3),
+                "p95_ttft_steps": max(ttft_values) if ttft_values else None,
+                "p95_tpot_steps": max(tpot_values) if tpot_values else None,
+                "max_kv_tokens": self.max_kv_tokens,
+                "kv_tokens_after_cleanup": self.kv_tokens_used(),
+                "event_tail": self.events[-8:],
+            },
+        }
+
+
+def audit_lifecycle(report):
+    states = [item["state"] for item in report["per_request"].values()]
+    gates = {
+        "state_machine_terminal": all(state in TERMINAL_STATES for state in states),
+        "normal_and_exception_path": "FINISHED" in states and ("ABORTED" in states or "TIMEOUT" in states),
+        "ttft_tpot_metrics": report["metrics"]["p95_ttft_steps"] is not None and report["metrics"]["p95_tpot_steps"] is not None,
+        "streaming_or_finish_reason": all(item["stream"] or item["reason"] for item in report["per_request"].values()),
+        "cleanup": report["metrics"]["kv_tokens_after_cleanup"] == 0,
+        "event_trace": len(report["metrics"]["event_tail"]) > 0,
+    }
+    return {
+        "gates": gates,
+        "lifecycle_gate": all(gates.values()),
+    }
+
+
+engine = MiniRequestLifecycleEngine(max_active=2, kv_token_budget=16)
+engine.submit(Request("r1", arrival_step=0, prompt_tokens=3, max_new_tokens=3))
+engine.submit(Request("r2", arrival_step=0, prompt_tokens=5, max_new_tokens=4, abort_at_step=2))
+engine.submit(Request("r3", arrival_step=0, prompt_tokens=6, max_new_tokens=2, queue_timeout_steps=1))
+
+report = engine.run_until_done()
+audit = audit_lifecycle(report)
+
+print("per_request=", report["per_request"])
+print("metrics=", report["metrics"])
+print("audit=", audit)
+```
+
+这段 demo 的工程含义是：生命周期不能只验证 happy path。只要有客户端取消、排队超时、执行失败或策略拦截，都必须把状态、finish reason、stream、KV cleanup 和 trace 放进同一套收敛路径。
+
+## 3.17 面试追问
 
 1. 一个 LLM 请求从进入 API Server 到返回结果，中间有哪些阶段？
 2. 为什么请求进入 engine 后不能直接执行，而要进入 waiting queue？
@@ -410,7 +658,7 @@ WAITING/PREFILLING/DECODING -> TIMEOUT
 3. 然后说明 prefill 影响 TTFT，decode 影响 TPOT。
 4. 最后补充异常路径：abort、timeout、fail 都必须释放 KV Cache 并记录 finish reason。
 
-## 3.17 小练习
+## 3.18 小练习
 
 1. 画一张请求生命周期状态机，至少包含 waiting、prefilling、decoding、finished、aborted、failed。
 2. 设计一个 `Request` 类，写出你认为最重要的 10 个字段。
@@ -418,7 +666,7 @@ WAITING/PREFILLING/DECODING -> TIMEOUT
 4. 如果请求已经进入 decode 阶段后客户端断开，engine 应该如何停止它？
 5. 设计一组指标，用来判断 TTFT 变差到底是排队导致还是 prefill 导致。
 
-## 3.18 本章小结
+## 3.19 本章小结
 
 本章从一个请求出发，完整走了一遍 LLM 推理请求的生命周期。
 
