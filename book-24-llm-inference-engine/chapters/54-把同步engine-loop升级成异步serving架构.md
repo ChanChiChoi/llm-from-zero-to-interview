@@ -40,6 +40,25 @@ while engine_has_work():
 
 本章就把 mini engine 从一个同步 loop 升级成异步 serving 架构。
 
+## 54.0 本讲资料边界与第二轮精修口径
+
+本章按第二轮精修口径，只讲教学版单机 serving engine 如何从同步 loop 升级成有异步边界的 runtime。
+
+公开资料校准主要参考四类口径：
+
+1. vLLM serving / engine / optimization 文档对异步请求处理、scheduler、streaming、KV cache、preemption 和指标的公开描述。
+2. SGLang server / runtime 文档对在线 serving、tokenizer / scheduler / detokenizer、streaming、abort 和 benchmark 的公开口径。
+3. FastAPI / ASGI streaming response 的通用工程口径，用来说明 HTTP handler、连接生命周期和后台任务不要直接占住 GPU loop。
+4. 本书第 13、14、52、53 章对 token streaming、最小 HTTP API、统一调度循环和 benchmark framework 的教学抽象。
+
+本章不实现真实生产 HTTP server、真实多进程 tokenizer pool、epoll / ASGI runtime、跨 GPU worker、Ray / RPC 控制面、OpenAI-compatible 完整协议、真实 tokenizer 增量解码优化或生产级观测系统。我们只验证一个最小闭环：
+
+```text
+API admission -> tokenizer queue -> engine input queue -> engine core loop -> output queue -> per-client stream queue -> cancel / backpressure cleanup
+```
+
+第二轮新增 demo 的验收重点是：API 不直接改 engine 状态；tokenizer 与 engine 解耦；engine 每轮 drain 有上限；OutputProcessor 不直接写网络；慢 client 只取消自己；client disconnect 进入 cancel queue；cancel 和 cleanup 幂等；所有关键队列有上限并可观测。
+
 ## 54.1 本章目标
 
 读完本章，你应该能讲清：
@@ -891,7 +910,369 @@ bug 十：没有请求状态机。
 验证异步化是否有效不能只看吞吐，要看 TTFT、TPOT、E2E、engine step duration、GPU busy time、tokenizer queue wait、output queue wait、cancel cleanup latency 等指标。如果异步化后 GPU loop 更稳定、慢 client 不影响整体 TPOT、队列不长期积压，才说明架构拆分有效。
 ```
 
-## 54.20 小练习
+## 54.20 异步 serving 架构公式、背压门禁和可运行 demo
+
+把同步 loop 拆成异步组件后，可以先把一次请求的端到端时间拆成：
+
+```math
+L_i^{\mathrm{e2e}}=L_i^{\mathrm{api}}+L_i^{\mathrm{tok}}+L_i^{\mathrm{queue}}+L_i^{\mathrm{engine}}+L_i^{\mathrm{stream}}
+```
+
+其中 `L_i^{\mathrm{engine}}` 才是 GPU 主循环真正必须承担的部分。
+
+每个队列都要有容量约束：
+
+```math
+Q_j(t)\le C_j
+```
+
+慢 client 的背压门可以写成：
+
+```math
+G_{\mathrm{slow},i}=\mathbf{1}[Q_i^{\mathrm{stream}}(t)>C_i^{\mathrm{stream}}]
+```
+
+engine 每轮拉取新请求的上限：
+
+```math
+N_t^{\mathrm{drain}}\le D_{\max}
+```
+
+取消清理延迟：
+
+```math
+L_i^{\mathrm{cancel}}=t_i^{\mathrm{cleanup}}-t_i^{\mathrm{signal}}
+```
+
+状态所有权门禁：
+
+```math
+G_{\mathrm{owner}}=G_{\mathrm{api,msg}}G_{\mathrm{tok,msg}}G_{\mathrm{out,msg}}G_{\mathrm{engine,mut}}
+```
+
+最终异步 serving 架构门禁：
+
+```math
+G_{\mathrm{async}}=G_{\mathrm{admit}}G_{\mathrm{tok}}G_{\mathrm{drain}}G_{\mathrm{outq}}G_{\mathrm{stream}}G_{\mathrm{cancel}}G_{\mathrm{owner}}G_{\mathrm{cleanup}}G_{\mathrm{isolate}}G_{\mathrm{queue}}
+```
+
+下面这个 0 依赖 demo 不启动 HTTP server，也不使用 `asyncio`。它用有界队列模拟异步 serving 架构里的关键边界：API 层只做 admission，tokenizer 与 engine 解耦，engine 每轮 drain 有上限，OutputProcessor 不直接写网络，慢 client 只取消自己，client disconnect 通过 cancel queue 回到 engine。
+
+```python
+from collections import deque
+from dataclasses import dataclass, field
+
+
+def ceil_div(a, b):
+    return (a + b - 1) // b
+
+
+class BoundedQueue:
+    def __init__(self, name, capacity):
+        self.name = name
+        self.capacity = capacity
+        self.items = deque()
+        self.put_failures = 0
+        self.max_size = 0
+
+    def put(self, item):
+        if len(self.items) >= self.capacity:
+            self.put_failures += 1
+            return False
+        self.items.append(item)
+        self.max_size = max(self.max_size, len(self.items))
+        return True
+
+    def get_nowait(self):
+        if not self.items:
+            return None
+        return self.items.popleft()
+
+    def __len__(self):
+        return len(self.items)
+
+
+@dataclass
+class RawRequest:
+    request_id: str
+    prompt: str
+    max_tokens: int
+    client_kind: str
+
+
+@dataclass
+class TokenizedRequest:
+    request_id: str
+    prompt_tokens: list
+    max_tokens: int
+    client_kind: str
+
+
+@dataclass
+class EngineOutput:
+    request_id: str
+    token_id: int | None
+    finished: bool
+    error: str | None = None
+
+
+@dataclass
+class RequestState:
+    request_id: str
+    prompt_tokens: list
+    max_tokens: int
+    client_kind: str
+    output_tokens: list = field(default_factory=list)
+    status: str = "RUNNING"
+    kv_blocks: int = 0
+
+
+class ClientStream:
+    def __init__(self, request_id, capacity, drain_per_put):
+        self.request_id = request_id
+        self.capacity = capacity
+        self.drain_per_put = drain_per_put
+        self.buffer = deque()
+        self.emitted = []
+        self.closed = False
+        self.backpressure_events = 0
+
+    def put(self, token_id):
+        if self.closed:
+            return False
+        if len(self.buffer) >= self.capacity:
+            self.backpressure_events += 1
+            return False
+        self.buffer.append(token_id)
+        for _ in range(self.drain_per_put):
+            if self.buffer:
+                self.emitted.append(self.buffer.popleft())
+        return True
+
+    def close(self):
+        while self.buffer:
+            self.emitted.append(self.buffer.popleft())
+        self.closed = True
+
+
+class ToyAsyncServingRuntime:
+    def __init__(self):
+        self.tokenizer_queue = BoundedQueue("tokenizer", 3)
+        self.engine_input_queue = BoundedQueue("engine_input", 3)
+        self.engine_output_queue = BoundedQueue("engine_output", 4)
+        self.cancel_queue = BoundedQueue("cancel", 8)
+        self.streams = {}
+        self.requests = {}
+        self.api_admitted = []
+        self.api_rejected = []
+        self.tokenized = []
+        self.first_drain_added = []
+        self.engine_input_after_first_drain = None
+        self.finished = []
+        self.cancelled = []
+        self.cleanup_events = []
+        self.metrics = {
+            "api_admission_reject_total": 0,
+            "tokenizer_requests_total": 0,
+            "engine_output_queue_blocked_total": 0,
+            "client_stream_backpressure_total": 0,
+            "slow_client_cancel_total": 0,
+            "client_disconnect_total": 0,
+            "request_cancel_total": 0,
+            "duplicate_cancel_total": 0,
+            "kv_released_blocks": 0,
+        }
+
+    def receive_api_request(self, raw):
+        self.streams[raw.request_id] = ClientStream(
+            raw.request_id,
+            capacity=1 if raw.client_kind == "slow" else 4,
+            drain_per_put=0 if raw.client_kind == "slow" else 1,
+        )
+        if not self.tokenizer_queue.put(raw):
+            self.api_rejected.append(raw.request_id)
+            self.metrics["api_admission_reject_total"] += 1
+            self.streams[raw.request_id].close()
+            return False
+        self.api_admitted.append(raw.request_id)
+        return True
+
+    def tokenizer_worker_drain(self):
+        while len(self.tokenizer_queue):
+            raw = self.tokenizer_queue.get_nowait()
+            tokenized = TokenizedRequest(
+                request_id=raw.request_id,
+                prompt_tokens=list(range(len(raw.prompt.split()))),
+                max_tokens=raw.max_tokens,
+                client_kind=raw.client_kind,
+            )
+            self.engine_input_queue.put(tokenized)
+            self.tokenized.append(raw.request_id)
+            self.metrics["tokenizer_requests_total"] += 1
+
+    def drain_new_requests(self, max_drain):
+        added = []
+        for _ in range(max_drain):
+            tokenized = self.engine_input_queue.get_nowait()
+            if tokenized is None:
+                break
+            state = RequestState(
+                request_id=tokenized.request_id,
+                prompt_tokens=tokenized.prompt_tokens,
+                max_tokens=tokenized.max_tokens,
+                client_kind=tokenized.client_kind,
+                kv_blocks=ceil_div(len(tokenized.prompt_tokens), 4),
+            )
+            self.requests[state.request_id] = state
+            added.append(state.request_id)
+        if not self.first_drain_added:
+            self.first_drain_added = list(added)
+            self.engine_input_after_first_drain = len(self.engine_input_queue)
+        return added
+
+    def send_cancel(self, request_id, reason):
+        if reason == "client_disconnect":
+            self.metrics["client_disconnect_total"] += 1
+            if request_id in self.streams:
+                self.streams[request_id].close()
+        self.cancel_queue.put((request_id, reason))
+
+    def drain_cancel_queue(self):
+        while len(self.cancel_queue):
+            request_id, reason = self.cancel_queue.get_nowait()
+            self.cancel_request(request_id, reason)
+
+    def cancel_request(self, request_id, reason):
+        req = self.requests.pop(request_id, None)
+        if req is None:
+            self.metrics["duplicate_cancel_total"] += 1
+            return
+        self.metrics["request_cancel_total"] += 1
+        self.metrics["kv_released_blocks"] += req.kv_blocks
+        req.status = "CANCELLED"
+        self.cancelled.append(request_id)
+        self.cleanup_events.append((request_id, reason, "engine"))
+        if request_id in self.streams:
+            self.streams[request_id].close()
+
+    def engine_step(self):
+        for req in list(self.requests.values()):
+            token_id = 100 + len(req.output_tokens) + 1
+            req.output_tokens.append(token_id)
+            finished = len(req.output_tokens) >= req.max_tokens
+            ok = self.engine_output_queue.put(EngineOutput(req.request_id, token_id, finished))
+            if not ok:
+                self.metrics["engine_output_queue_blocked_total"] += 1
+                self.send_cancel(req.request_id, "output_queue_backpressure")
+            if finished and req.request_id in self.requests:
+                self.metrics["kv_released_blocks"] += req.kv_blocks
+                self.requests.pop(req.request_id)
+                req.status = "FINISHED"
+                self.finished.append(req.request_id)
+                self.cleanup_events.append((req.request_id, "finished", "engine"))
+
+    def stream_worker_flush(self):
+        while len(self.engine_output_queue):
+            out = self.engine_output_queue.get_nowait()
+            stream = self.streams[out.request_id]
+            if out.token_id is not None:
+                ok = stream.put(out.token_id)
+                if not ok:
+                    self.metrics["client_stream_backpressure_total"] += 1
+                    self.metrics["slow_client_cancel_total"] += 1
+                    stream.close()
+                    self.send_cancel(out.request_id, "slow_client")
+                    continue
+            if out.finished:
+                stream.close()
+
+
+runtime = ToyAsyncServingRuntime()
+for raw in [
+    RawRequest("r1", "a b c d", 3, "fast"),
+    RawRequest("r2", "a b c d e f g h", 3, "slow"),
+    RawRequest("r3", "a b c d", 3, "disconnect"),
+    RawRequest("r4", "a b", 1, "fast"),
+]:
+    runtime.receive_api_request(raw)
+
+runtime.tokenizer_worker_drain()
+runtime.drain_new_requests(max_drain=2)
+runtime.engine_step()
+runtime.stream_worker_flush()
+
+runtime.drain_new_requests(max_drain=2)
+runtime.send_cancel("r3", "client_disconnect")
+runtime.drain_cancel_queue()
+runtime.send_cancel("r3", "client_disconnect")
+runtime.engine_step()
+runtime.stream_worker_flush()
+runtime.drain_cancel_queue()
+
+runtime.engine_step()
+runtime.stream_worker_flush()
+runtime.drain_cancel_queue()
+
+stream_summary = {
+    request_id: {"emitted": stream.emitted, "closed": stream.closed}
+    for request_id, stream in sorted(runtime.streams.items())
+}
+queue_summary = {
+    "tokenizer": len(runtime.tokenizer_queue),
+    "engine_input": len(runtime.engine_input_queue),
+    "engine_output": len(runtime.engine_output_queue),
+    "cancel": len(runtime.cancel_queue),
+}
+summary = {
+    "api_admitted": runtime.api_admitted,
+    "api_rejected": runtime.api_rejected,
+    "tokenized": runtime.tokenized,
+    "first_drain_added": runtime.first_drain_added,
+    "engine_input_after_first_drain": runtime.engine_input_after_first_drain,
+    "finished": runtime.finished,
+    "cancelled": runtime.cancelled,
+    "client_streams": stream_summary,
+    "queues_empty": queue_summary,
+    "cleanup_events": runtime.cleanup_events,
+    "metrics": runtime.metrics,
+}
+gates = {
+    "api_admission_ready": runtime.api_rejected == ["r4"],
+    "tokenizer_decoupled_ready": runtime.tokenized == ["r1", "r2", "r3"],
+    "bounded_drain_ready": runtime.first_drain_added == ["r1", "r2"]
+    and runtime.engine_input_after_first_drain == 1,
+    "engine_output_queue_ready": runtime.metrics["engine_output_queue_blocked_total"] == 0,
+    "stream_queue_backpressure_ready": runtime.metrics["client_stream_backpressure_total"] == 1
+    and runtime.metrics["slow_client_cancel_total"] == 1,
+    "cancel_signal_ready": runtime.metrics["client_disconnect_total"] == 2
+    and "r3" in runtime.cancelled,
+    "engine_state_ownership_ready": all(event[2] == "engine" for event in runtime.cleanup_events),
+    "idempotent_cleanup_ready": runtime.metrics["duplicate_cancel_total"] >= 1,
+    "slow_client_isolated_ready": runtime.finished == ["r1"] and "r2" in runtime.cancelled,
+    "queues_drained_ready": all(value == 0 for value in queue_summary.values()),
+}
+gates["async_serving_architecture_gate"] = all(gates.values())
+
+print("async_serving_architecture_summary=", summary)
+print("async_serving_architecture_gates=", gates)
+```
+
+一次运行的核心输出类似：
+
+```text
+async_serving_architecture_summary= {'api_admitted': ['r1', 'r2', 'r3'], 'api_rejected': ['r4'], 'tokenized': ['r1', 'r2', 'r3'], 'first_drain_added': ['r1', 'r2'], 'engine_input_after_first_drain': 1, 'finished': ['r1'], 'cancelled': ['r3', 'r2'], 'client_streams': {'r1': {'emitted': [101, 102, 103], 'closed': True}, 'r2': {'emitted': [101], 'closed': True}, 'r3': {'emitted': [], 'closed': True}, 'r4': {'emitted': [], 'closed': True}}, 'queues_empty': {'tokenizer': 0, 'engine_input': 0, 'engine_output': 0, 'cancel': 0}, 'cleanup_events': [('r3', 'client_disconnect', 'engine'), ('r2', 'slow_client', 'engine'), ('r1', 'finished', 'engine')], 'metrics': {'api_admission_reject_total': 1, 'tokenizer_requests_total': 3, 'engine_output_queue_blocked_total': 0, 'client_stream_backpressure_total': 1, 'slow_client_cancel_total': 1, 'client_disconnect_total': 2, 'request_cancel_total': 2, 'duplicate_cancel_total': 1, 'kv_released_blocks': 4}}
+async_serving_architecture_gates= {'api_admission_ready': True, 'tokenizer_decoupled_ready': True, 'bounded_drain_ready': True, 'engine_output_queue_ready': True, 'stream_queue_backpressure_ready': True, 'cancel_signal_ready': True, 'engine_state_ownership_ready': True, 'idempotent_cleanup_ready': True, 'slow_client_isolated_ready': True, 'queues_drained_ready': True, 'async_serving_architecture_gate': True}
+```
+
+这个 demo 证明了几个关键点：
+
+1. API 层只做 admission 和消息投递，不直接修改 engine 内部状态。
+2. tokenizer 和 engine input queue 解耦，engine 每轮 drain 有上限。
+3. OutputProcessor 只写 output queue，不直接写网络。
+4. 慢 client 触发 per-client stream backpressure，只取消自己的请求。
+5. client disconnect 和重复 cancel 都回到 engine core，cleanup 是幂等的。
+
+## 54.21 小练习
 
 1. 给 mini engine 增加 `engine_input_queue` 和 `engine_output_queue`。
 2. 把 API request 转成 `RawRequest`，不要直接进入 scheduler。
@@ -909,7 +1290,7 @@ bug 十：没有请求状态机。
 14. 构造 tokenizer CPU 瓶颈压测，观察 tokenizer queue。
 15. 对比同步版和异步版的 TTFT、TPOT、engine step duration。
 
-## 54.21 本章总结
+## 54.22 本章总结
 
 同步 engine loop 适合教学，但不适合长期支撑高并发 serving。
 

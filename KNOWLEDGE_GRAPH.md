@@ -187,6 +187,110 @@ Minimal generate loop subchain: Serving Boundary Gate -> Minimal Generate Loop A
 
 Sampling strategy subchain: Minimal Generate Gate -> Sampling Strategy Audit -> Stable Softmax -> Temperature Softmax -> Greedy Argmax -> Top-k Candidate Filter -> Top-p Nucleus Filter -> Renormalization -> Seeded Multinomial Sampling -> Sampling Gate -> KV Cache
 
+Minimal KV cache subchain: Sampling Gate -> Minimal KV Cache Audit -> Past Key Values Contract -> Prefill Cache Build -> Decode Cache Append -> KV Cache Equivalence Check -> KV Cache Memory Formula -> KV Cache Gate -> Batched Prefill
+
+Batched prefill subchain: KV Cache Gate -> Batched Prefill Audit -> Padding Side Policy -> Attention Mask Contract -> Last Real Token Logits -> Padding Waste Ratio -> Prefill Token Budget -> Batched Prefill Gate -> Batched Decode
+
+Batched decode subchain: Batched Prefill Gate -> Batched Decode Audit -> Finished Mask -> Active Batch Compaction -> Batch Cache Alignment -> Decode Position Tracking -> Decode Row Savings -> Batched Decode Gate -> Request Scheduling
+
+Simple scheduler subchain: Batched Decode Gate -> Simple Scheduler Audit -> Waiting Queue -> Running Set -> Scheduler Admission -> Max Active Sequences -> Scheduler Token Budget -> Queue Wait Metric -> TTFT Steps -> Scheduler Trace -> Simple Scheduler Gate -> Token Streaming
+
+Token streaming subchain: Simple Scheduler Gate -> Token Streaming Audit -> Streaming Event Contract -> Incremental Detokenization -> First Token Chunk -> Finish Event Contract -> Stop Sequence Buffer -> Client Cancellation Cleanup -> Streaming Backpressure -> Streaming Gate -> Minimal HTTP API
+
+Minimal HTTP API subchain: Streaming Gate -> Minimal HTTP API Audit -> Generate Request Contract -> Request Validation Gate -> Queue Admission Control -> Sync Generate Response -> SSE Frame Format -> Streaming Generate Response -> HTTP Cancellation Cleanup -> HTTP API Gate -> Serving Benchmark Audit
+
+Serving benchmark subchain: HTTP API Gate -> Serving Benchmark Audit -> TTFT Metric -> TPOT Metric -> E2E Latency Metric -> Token Throughput Report -> Queue Length Percentile -> Active Request Percentile -> KV Memory Peak -> Benchmark Bottleneck Classification -> Benchmark Gate -> vLLM Motivation
+
+vLLM motivation subchain: Benchmark Gate -> vLLM Motivation Audit -> Naive KV Reservation -> Paged KV Block Allocation -> KV Waste Ratio -> Logical Physical Block Mapping -> Block Reuse After Cleanup -> Static Decode Rows -> Continuous Decode Rows -> vLLM Motivation Gate -> PagedAttention
+
+PagedAttention core subchain: vLLM Motivation Gate -> PagedAttention Core Audit -> Block Table Address Translation -> Logical Block -> Physical KV Block -> Block Size Tradeoff -> Internal Block Waste -> Prefix Block Ref Count -> Freed Block Reuse -> PagedAttention Gate -> KV Cache Block Manager
+
+KV block manager subchain: PagedAttention Gate -> KV Block Manager Audit -> Block Free List -> Block Reference Count -> Prefill Block Admission -> Decode Block Extension -> Shared Prefix Cleanup -> Block Allocation Failure -> Block Manager Metrics -> Block Manager Gate -> Continuous Batching
+
+Continuous batching subchain: Block Manager Gate -> Continuous Batching Audit -> Iteration Level Scheduling -> Dynamic Request Join -> Dynamic Request Exit -> Decode First Scheduling -> Continuous Token Budget -> Scheduler KV Budget -> Deferred Scheduling Reason -> Static Batch Hole -> Continuous Batching Gate -> vLLM Scheduler Flow
+
+vLLM scheduler flow subchain: Continuous Batching Gate -> vLLM Scheduler Flow Audit -> Engine Request Contract -> Request State Machine Trace -> Scheduler Output Metadata -> Model Runner Execution Metadata -> Slot Mapping Metadata -> Output Processor Finish Gate -> Abort Cleanup Path -> Request Flow Metrics -> Request Flow Gate -> vLLM Memory Management
+
+vLLM memory management subchain: Request Flow Gate -> vLLM Memory Management Audit -> GPU Memory Breakdown -> KV Page Size -> Prefix Cache Hash -> Cached Free Block -> Prefix Cache Hit Rate -> LRU Cache Eviction -> Preemption Recompute Path -> Hybrid KV Cache Group -> Memory Management Gate -> vLLM Worker Executor
+
+vLLM worker executor subchain: Memory Management Gate -> vLLM Executor Architecture Audit -> Engine Core Dispatch Loop -> Executor Dispatch Layer -> Worker Rank Mapping -> Model Runner Metadata Gate -> Tensor Parallel Merge -> CPU Process Budget -> Worker Failure Recovery -> Executor Architecture Gate -> Prefix Caching Audit
+
+Prefix caching subchain: Executor Architecture Gate -> Prefix Caching Audit -> Full Block Prefix Reuse -> Parent Hash Chain -> Extra Hash Isolation -> Cache Salt Isolation -> Cached Free Touch -> Prefix Saved Prefill Tokens -> Prefix Cache Eviction -> Prefix Cache Gate -> Serving Parallelism Audit
+
+Serving parallelism subchain: Prefix Cache Gate -> Serving Parallelism Audit -> Tensor Parallel Topology -> Pipeline Parallel Bubble -> Data Parallel Replica -> Expert Parallel Placement -> Worker Group Size -> Per Rank Memory Fit -> Cross Node TP Risk -> Prefix Cache Locality -> Parallel Serving Gate -> vLLM Performance Tuning Audit
+
+vLLM performance tuning subchain: Parallel Serving Gate -> vLLM Performance Tuning Audit -> TTFT Bottleneck Diagnosis -> TPOT Bottleneck Diagnosis -> KV Pressure Tuning -> Preemption Rate -> Prefix Cache Effectiveness -> Config Trade-off Plan -> Rollback Guard -> vLLM Tuning Gate -> SGLang Motivation Audit
+
+SGLang motivation subchain: vLLM Tuning Gate -> SGLang Motivation Audit -> Complex LLM Program -> Frontend Language -> RadixAttention Motivation -> Radix Prefix Reuse -> Branch Sharing Visibility -> Structured Decoding Retry Saving -> OpenAI-compatible API Boundary -> SGLang Motivation Gate -> SGLang Runtime Audit
+
+SGLang runtime subchain: SGLang Motivation Gate -> SGLang Runtime Audit -> Runtime Entrypoint Unification -> Request State Contract -> Radix Prefix Lookup -> KV Memory Pool Budget -> Prefill Decode Scheduler -> Model Runner Boundary -> Grammar Mask Step -> Streaming Event Trace -> SGLang Runtime Gate -> RadixAttention Prefix Sharing Audit
+
+RadixAttention prefix sharing subchain: SGLang Runtime Gate -> RadixAttention Prefix Sharing Audit -> Compressed Prefix Tree -> Longest Prefix Match -> Radix Tree Split -> Page Aligned Prefix Hit -> Radix KV Ref Count -> Leaf LRU Eviction -> Cache Aware Scheduling Cost -> RadixAttention Gate -> SGLang Scheduler Audit
+
+SGLang scheduler subchain: RadixAttention Gate -> SGLang Scheduler Audit -> Decode First Scheduling -> Cache Aware Admission -> Suffix Cost Scheduling -> Scheduler Token Budget -> Scheduler Sequence Budget -> Scheduler KV Admission -> Scheduler Aging Fairness -> Chunked Prefill Scheduling -> Scheduler Grammar Cost -> Scheduler Abort Cleanup -> SGLang Scheduler Gate -> Structured Generation Audit
+
+Structured generation subchain: SGLang Scheduler Gate -> Structured Generation Audit -> Grammar State -> Valid Token Mask -> JSON Schema Constraint -> Regex Choice Constraint -> EBNF Grammar Constraint -> Structural Tag Constraint -> Empty Valid Token Set -> Format Not Fact Gate -> Structured Streaming Partial -> Structured Generation Gate -> Speculative Decoding Audit
+
+Speculative decoding subchain: Structured Generation Gate -> Speculative Decoding Audit -> Draft Source -> Target Verify Call -> Accept Length -> Draft Acceptance Rate -> Target Call Reduction -> Speculative Fallback Token -> Speculative KV Cleanup -> Adaptive Speculative Steps -> Speculative Decoding Gate -> Agent Serving Audit
+
+Agent serving subchain: Speculative Decoding Gate -> Agent Serving Audit -> Multi-turn Runtime State -> Session Aware Routing -> Agent Trajectory Prefix Sharing -> Tool Parser Fit -> Tool Schema Validation -> Tool Result Backfill -> Tool Wait GPU Release -> Agent Round Budget -> Agent Serving Gate -> Serving Architecture Comparison Audit
+
+Serving architecture comparison subchain: Agent Serving Gate -> Serving Architecture Comparison Audit -> Common Serving Core -> Paged Prefix Cache Evidence -> Radix Program Reuse Evidence -> Workload Fit Score -> Runtime Workload Router -> vLLM Not Replaced Gate -> SGLang Program Fit Gate -> Architecture Comparison Gate -> mini-sglang Source Path Audit
+
+mini-sglang source path subchain: Architecture Comparison Gate -> mini-sglang Source Path Audit -> Runtime Module Map -> Request Lifecycle Order -> Source Resource Coverage -> Source Experiment Coverage -> Source Observable Signal -> Radix Split Experiment -> Abort Cleanup Experiment -> Source Path Gate -> Prefill Decode Resource Profile Audit
+
+Prefill decode resource profile subchain: Source Path Gate -> Prefill Decode Resource Profile Audit -> Request Token Profile -> Run Prefill Tokens -> Prefill Compute Profile -> Prefill KV Write -> Decode KV Read -> TTFT TPOT Separation -> Long Prefill Stall Risk -> Decode-first Starvation Risk -> PD KV Transfer Cost -> Prefill Decode Profile Gate -> PD Disaggregation Motivation Audit
+
+PD disaggregation motivation subchain: Prefill Decode Profile Gate -> PD Disaggregation Motivation Audit -> Unified Engine Interference -> Prefill Interruption Evidence -> Decode-first Starvation Evidence -> Independent P/D Scaling -> KV Transfer Cost Gate -> Slow Transfer Counterexample -> PD Motivation Gate -> PD Architecture Audit
+
+PD architecture subchain: PD Motivation Gate -> PD Architecture Audit -> PD Router -> Prefill Worker Pool -> Decode Worker Pool -> KV Transfer Backend -> Bootstrap Metadata -> Decode Reservation -> Cross Component State Machine -> Transfer Failure Cleanup -> Client Abort Cleanup -> Model Version Compatibility -> PD Architecture Gate -> KV Transfer Routing Audit
+
+KV transfer routing subchain: PD Architecture Gate -> KV Transfer Routing Audit -> KV Metadata Compatibility -> Decode Capacity Reservation -> KV Routing Cost Score -> Tenant Cache Isolation -> Recompute Fallback Path -> Transfer Failure Plan -> KV Transfer Routing Gate -> Chunked Disaggregated Prefill Audit
+
+Chunked disaggregated prefill subchain: KV Transfer Routing Gate -> Chunked Disaggregated Prefill Audit -> Run Prefill Tokens -> Prefill Chunk Count -> Decode Interleaving -> Prefill Token Budget -> Position Continuity -> Short Request Fairness -> PD Transfer Pipeline -> Backpressure Cleanup -> Chunked Disagg Prefill Gate -> Multi Level KV Cache Audit
+
+Multi level KV cache subchain: Chunked Disagg Prefill Gate -> Multi Level KV Cache Audit -> KV Residency Level -> Active GPU Block Protection -> CPU KV Promote -> Remote KV Fetch -> Recompute Fallback -> KV Tenant Isolation -> KV Demotion Policy -> Residency Metrics -> Multi Level KV Gate -> Cross Node Network Audit
+
+Cross node network subchain: Multi Level KV Gate -> Cross Node Network Audit -> Cross Node Link Profile -> TP Cross Node Risk -> Pipeline Activation Cost -> PD KV Transfer Cost -> Remote Recompute Decision -> Topology Aware Routing -> Transfer Backpressure -> Control Data Plane Separation -> Cross Node Network Gate -> PD Tradeoff Audit
+
+PD tradeoff subchain: Cross Node Network Gate -> PD Tradeoff Audit -> PD Benefit Cost Score -> PD Positive Case -> Short Request Anti Pattern -> Decode Bottleneck Anti Pattern -> Slow Transfer Anti Pattern -> Ops Readiness Gate -> PD Alternative Path -> PD Tradeoff Gate -> Single Engine To PD Migration Audit
+
+Single engine to PD migration subchain: PD Tradeoff Gate -> Single Engine To PD Migration Audit -> Explicit Request Stage -> Model Runner Interface Split -> KV Metadata Contract -> Prefill Decode Scheduler Split -> PD Router State Machine -> Same Node PD Prototype -> Cleanup Cancel Path -> Observability Fallback Readiness -> PD Migration Gate -> nano-vLLM Source Learning Audit
+
+nano-vLLM source learning subchain: PD Migration Gate -> nano-vLLM Source Learning Audit -> Source Module Map -> Generate Trace Path -> Engine Step Trace -> Sequence State Audit -> Scheduler Decision Trace -> KV Block Lifecycle -> Model Runner Batch Contract -> Source Experiment Signal -> nano-vLLM Source Gate -> tiny-LLM Learning Audit
+
+tiny-LLM learning subchain: nano-vLLM Source Gate -> tiny-LLM Learning Audit -> Operator To Model Path -> Attention Shape Trace -> RoPE Position Alignment -> GQA KV Head Audit -> Generate Sampling Loop -> KV Cache Equivalence -> Serving Optimization Ladder -> Chunk Position Continuity -> tiny-LLM Learning Gate -> mini-sglang Learning Audit
+
+mini-sglang learning subchain: tiny-LLM Learning Gate -> mini-sglang Learning Audit -> SGLang Runtime Capability -> Radix Cache Runtime Evidence -> Chunked Prefill Ablation -> Overlap Scheduling Ablation -> Online Serving Trace -> Structured Tool Boundary -> Abort Cleanup Check -> Production Gap Map -> mini-sglang Learning Gate -> Teaching Project Core Module Audit
+
+Teaching project core module subchain: mini-sglang Learning Gate -> Teaching Project Core Module Audit -> Core Module Boundary -> Request State Ownership -> Scheduler ModelRunner Boundary -> KV Manager Ownership -> BatchBuilder Metadata Contract -> Output Processor Cleanup Boundary -> Metrics Observability Contract -> Replaceable Upgrade Path -> Core Module Gate -> Naive Scheduler To Continuous Batching Audit
+
+Naive scheduler to continuous batching subchain: Core Module Gate -> Naive Scheduler To Continuous Batching Audit -> Request Level Batch Lock -> Iteration Boundary Scheduling -> Dynamic Request Admission -> Dynamic Request Exit -> Decode First Upgrade -> Bounded Prefill Budget -> KV Capacity Admission -> Scheduler Upgrade Gate -> Paged KV Cache Upgrade Audit
+
+Paged KV cache upgrade subchain: Scheduler Upgrade Gate -> Paged KV Cache Upgrade Audit -> List KV Private Cache -> Global KV Block Pool -> Request Block Table -> Allocate Until Contract -> Paged Slot Mapping -> Decode Block Extension Gate -> Idempotent KV Free -> Double Free Guard -> Paged KV Upgrade Gate -> Prefix Prompt Cache Upgrade Audit
+
+Prefix prompt cache upgrade subchain: Paged KV Upgrade Gate -> Prefix Prompt Cache Upgrade Audit -> Prompt Prefix Cache Boundary -> Full Block Cache Reuse -> Parent Hash Cache Chain -> Extra Hash Cache Isolation -> Suffix Prefill Start Position -> Cached Ref Count Lifecycle -> Full Prompt Hit Fallback -> Prefix Prompt Cache Upgrade Gate -> Preemption Recompute Swap Upgrade Audit
+
+Preemption recompute swap upgrade subchain: Prefix Prompt Cache Upgrade Gate -> Preemption Recompute Swap Upgrade Audit -> KV Pressure Trigger -> Cached Block Eviction Before Preemption -> Victim Selection Policy -> Recompute Context Preservation -> Recompute Resume Path -> Swap Failure Rollback -> Swap In State Restore -> Preemption Upgrade Gate -> Unified Scheduler Loop Audit
+
+Unified scheduler loop subchain: Preemption Upgrade Gate -> Unified Scheduler Loop Audit -> Engine Step Order -> Prefix Lookup Once -> Decode First Commit -> Suffix Prefill Plan -> KV Budget Commit -> Memory Pressure Order -> Batch Metadata Invariant -> Output State Update -> Unified Scheduler Loop Gate -> Serving Benchmark Framework Audit
+
+Serving benchmark framework subchain: Unified Scheduler Loop Gate -> Serving Benchmark Framework Audit -> Benchmark Workload Coverage -> Benchmark Experiment Fingerprint -> Request Trace Summary -> Engine Step Trace Summary -> SLO Regression Gate -> Throughput Regression Check -> KV Cleanup Check -> Prefix Effect Check -> Preemption Risk Check -> Benchmark Decision Gate -> Serving Benchmark Framework Gate -> Async Serving Architecture Audit
+
+Async serving architecture subchain: Serving Benchmark Framework Gate -> Async Serving Architecture Audit -> Async Boundary Design -> API Admission Boundary -> Tokenizer Worker Queue -> Engine Input Queue -> Bounded Engine Drain -> Engine Output Queue -> Per Client Stream Queue -> Stream Queue Backpressure -> Cancel Signal Queue -> Engine State Ownership -> Idempotent Async Cleanup -> Async Serving Architecture Gate -> Multi Worker Router Audit
+
+Multi worker router subchain: Async Serving Architecture Gate -> Multi Worker Router Audit -> Router Worker Capability Filter -> Request Cost Block Estimate -> Load Aware Worker Score -> Sticky Route Fallback -> Global Router Admission -> Worker Heartbeat Timeout -> Safe Retry Boundary -> Request Worker Map -> Worker Selection Imbalance -> Multi Worker Router Gate -> Distributed Parallel KV Audit
+
+Distributed parallel KV subchain: Multi Worker Router Gate -> Distributed Parallel KV Audit -> Parallel Group Boundary -> TP Head Shard Assignment -> TP Block Table Consistency -> PP Layer Ownership -> Distributed KV Byte Accounting -> Collective Communication Cost -> Pipeline Bubble Ratio -> KV Migration Decision -> Cross Rank Cleanup -> Distributed Parallel KV Gate -> OpenAI Compatible API Audit
+
+OpenAI compatible API subchain: Distributed Parallel KV Gate -> OpenAI Compatible API Audit -> API Compatibility Contract -> Chat Request Schema Validation -> SSE Stream Frame Contract -> OpenAI Style Error Shape -> Bearer Auth Gate -> Model Permission Gate -> Token Rate Limit Gate -> Concurrency Limit Gate -> Usage Accounting Check -> API Privacy Log Check -> OpenAI Compatible API Gate -> Production Deployment Audit
+
+Production deployment subchain: OpenAI Compatible API Gate -> Production Deployment Audit -> Runtime Compatibility Matrix -> Model Artifact Manifest -> Startup Readiness Gate -> Warmup Probe Check -> Worker Registration Gate -> Drain Completion Gate -> Rolling Update Capacity Gate -> Canary Traffic Split -> Canary Regression Gate -> Rollback Readiness Gate -> Production Deployment Gate -> Capacity SLO Fault Drill Audit
+
+Capacity SLO fault drill subchain: Production Deployment Gate -> Capacity SLO Fault Drill Audit -> Workload Token Profile -> Benchmark Stable Capacity -> GPU Count Estimate -> KV Concurrency Limit -> Cost Attribution Model -> SLO Error Budget -> Admission Overload Policy -> Fault Drill Scenario -> Runbook Coverage Check -> Capacity SLO Fault Drill Gate -> Inference Engine Project Portfolio
+
+Inference engine interview readiness subchain: Capacity SLO Fault Drill Gate -> Inference Engine Interview Readiness Audit -> Interview Question Rubric -> Concept Coverage Score -> Request Lifecycle Answer -> KV Cache Answer Evidence -> Scheduler Answer Evidence -> Serving Metrics Coverage -> Ordered Debug Path -> Production Governance Answer -> Project Evidence Portfolio -> Tradeoff Coverage -> Inference Engine Interview Gate
+
 ### 实战排查链
 
 Practitioner Playbook -> Problem Boundary -> Evidence Collection -> Minimal Reproduction -> Baseline Comparison -> Data Check -> Data Incident -> Duplicate Rate -> Contamination Rate -> Mixture Shift -> Lineage Coverage -> Data Incident Gate -> Tokenizer Check -> Tokenizer Format Incident -> Chat Template Drift -> Assistant-Only Label Mask -> Prompt Loss Leak -> PAD Loss Leak -> EOS Coverage -> Format Gate -> Training Stability -> Loss Spike Audit -> Non-Finite Loss Rate -> Effective Label Tokens -> LR Continuity -> Rank Loss Skew -> Training Stability Gate -> Distributed Incident -> Rank Step Alignment -> Collective Mismatch -> Token Shard Imbalance -> Straggler Ratio -> Communication Ratio -> Checkpoint Shard Coverage -> Resume Continuity -> Pipeline Bubble Ratio -> Distributed Incident Gate -> Post-Training Incident -> Evaluation Metric Incident -> Aggregate Score Trap -> Slice Regression -> Clean Eval Lift -> Judge-Human Agreement -> Evaluation Gate -> Inference Performance Incident -> TTFT Regression -> TPOT Regression -> KV Pressure -> Prompt Cost Drift -> Cache Effectiveness -> Serving Gate -> RAG Incident -> Retrieval Miss -> Context Drop -> Unsupported Claim Rate -> Permission Leak Rate -> RAG Freshness Gate -> RAG Incident Gate -> Agent Incident -> Plan Feasibility Rate -> False Completion Rate -> Tool Result Injection Block Rate -> Agent Incident Gate -> Multimodal Incident -> Input Fidelity Rate -> Multimodal Evidence Recall -> Temporal Evidence Recall -> Multimodal Incident Gate -> Safety Compliance Incident -> Unsafe Pass Rate -> Safety Compliance Gate -> Project Collaboration Incident -> Objective Clarity Rate -> Metric Tree Coverage -> Baseline Coverage -> Experiment Reproducibility Rate -> Version Trace Coverage -> RACI Coverage -> Change Control Coverage -> Risk Escalation Coverage -> Project Collaboration Gate -> Experiment Retrospective -> Hypothesis Coverage -> Slice Analysis Coverage -> Badcase Taxonomy Coverage -> Evidence Coverage -> Timeline Coverage -> Impact Quantification Rate -> Root Cause Rate -> Prevention Coverage -> Action Item Closure -> Regression Verification Rate -> Change Failure Rate -> Retrospective Gate -> Log Check -> Trace Check -> Version Diff -> Root Cause Analysis -> Fix Priority -> Rollback Plan -> Regression Test -> Postmortem Completeness -> Debug Gate -> Incident Triage Audit -> Practitioner Interview Readiness -> Practitioner Interview Rubric -> Project Evidence Score -> STAR Reflection Score -> Trade-off Depth -> Expert Follow-up Readiness -> Weak Practitioner Question -> Practitioner Revision Plan -> Practitioner Interview Gate

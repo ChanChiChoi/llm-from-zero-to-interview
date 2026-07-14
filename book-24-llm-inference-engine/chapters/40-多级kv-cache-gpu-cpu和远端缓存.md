@@ -20,6 +20,14 @@ GPU KV Cache
 
 > 多级 KV Cache 是把 KV 从单 worker 的 GPU 显存对象，升级成跨内存层级、跨节点、可迁移、可淘汰、可预取的系统级缓存资源。
 
+## 40.0 本讲资料边界与第二轮精修口径
+
+本讲第二轮精修前，先按 `WRITING_PLAN.md` 对公开资料做校准：参考 LMCache 文档对 KV cache 复用、offload、CPU / local storage / remote storage connector 和 vLLM connector 的公开口径；参考 SGLang HiCache 文档对 L1 GPU KV cache、L2 host cache、L3 distributed storage、cache controller、eviction 和 writing policy 的说明；参考 Mooncake 论文对 KVCache-centric disaggregated architecture、KV cache 管理和远端 KV 传输瓶颈的系统动机说明；并参考 vLLM prefix caching / PagedAttention 资料对 full block、block hash、block table、reference count 和 KV block metadata 的稳定抽象。
+
+本讲只讲多级 KV Cache 的通用系统问题：GPU / CPU / SSD / remote / recompute 的层级画像、residency-aware scheduling、promote / demote / prefetch / eviction、成本模型、正确性 key、多租户隔离、partial block 风险和观测指标。不把某个框架版本的真实 connector API、存储 backend 名称、cache controller 字段、默认阈值、网络拓扑参数或 benchmark 数字写成通用标准。
+
+本讲新增 demo 是教学版多级 KV Cache 审计器：用 0 依赖 Python 模拟 GPU hot block 保护、CPU promote、remote fetch、SSD 不划算时 recompute、GPU 空间不足时 demote、跨租户命中阻断、residency metrics 和最终 gate，帮助把“多级缓存不是只看 hit rate”落到可运行证据。
+
 ## 40.1 本章目标
 
 读完本章，你应该能讲清：
@@ -1201,7 +1209,280 @@ cache hit 是否真的降低了端到端延迟和 GPU compute？
 策略上，先保证活跃 decode 的 TPOT 稳定，再优化 TTFT 和命中率。remote fetch 和 prefetch 都不能无脑做，必须比较 transfer cost 和 recompute cost，并通过指标观察 promote latency、remote hit latency、recompute fallback、TPOT 抖动和 cache hit 是否真的降低端到端延迟。
 ```
 
-## 40.35 小练习
+## 40.35 多级 KV Cache 成本、驻留门禁和可运行 demo
+
+先把一个 KV block 抽象成：
+
+```math
+B_j=(b_j,u_j,m_j,L_j,N_j,M_j,R_j,F_j)
+```
+
+其中 `b_j` 是 block id，`u_j` 是 tenant，`m_j` 是 model revision，`L_j` 是 residency level，`N_j` 是 token 数，`M_j` 是 KV 大小，`R_j` 是 ref count，`F_j` 是 reuse / frequency 信号。
+
+GPU 容量约束可以写成：
+
+```math
+\sum_{j:L_j=\mathrm{GPU}}M_j\le M_{\mathrm{gpu}}
+```
+
+CPU promote 成本：
+
+```math
+C_{\mathrm{cpu},j}=\frac{M_j}{B_{\mathrm{cpu}}}+\delta_{\mathrm{cpu}}
+```
+
+Remote fetch 成本：
+
+```math
+C_{\mathrm{remote},j}=R_{\mathrm{net}}+\frac{M_j}{B_{\mathrm{net}}}+\delta_{\mathrm{remote}}
+```
+
+重算成本：
+
+```math
+C_{\mathrm{recompute},j}=\frac{N_j}{X_{\mathrm{prefill}}}+\delta_{\mathrm{sched}}
+```
+
+一个教学版决策可以写成：
+
+```math
+A_j=\min(C_{\mathrm{cpu},j},C_{\mathrm{remote},j},C_{\mathrm{recompute},j})
+```
+
+但这个 `min` 只能在正确性门通过后使用。tenant、model revision、token ids、position、dtype、parallel config、adapter 和 multimodal hash 任一不兼容，都不能复用。
+
+最终门禁可以写成：
+
+```math
+G_{\mathrm{mlkv}}=G_{\mathrm{hot}}G_{\mathrm{cpu}}G_{\mathrm{remote}}G_{\mathrm{recompute}}G_{\mathrm{tenant}}G_{\mathrm{demote}}G_{\mathrm{metric}}
+```
+
+下面的 demo 覆盖三类请求：
+
+1. `resume_rag`：需要一个 CPU-resident block、一个 remote block 和一个 missing tail。
+2. `cross_tenant_probe`：看到了 remote block，但属于其他 tenant，必须阻断。
+3. `cold_doc`：SSD 上有冷 block，但 fetch 比 recompute 更慢，选择 recompute。
+
+```python
+from dataclasses import dataclass
+
+
+@dataclass
+class KVBlock:
+    block_id: str
+    tenant: str
+    model_revision: str
+    level: str
+    tokens: int
+    ref_count: int
+    reuse_count: int
+
+
+@dataclass
+class KVRequest:
+    request_id: str
+    tenant: str
+    model_revision: str
+    needed_blocks: list
+
+
+class ToyMultiLevelKVCacheAuditor:
+    def __init__(self, gpu_capacity_blocks=4, block_mib=16.0):
+        self.gpu_capacity_blocks = gpu_capacity_blocks
+        self.block_mib = block_mib
+        self.cpu_mib_per_ms = 8.0
+        self.remote_mib_per_ms = 8.0
+        self.ssd_mib_per_ms = 2.0
+        self.prefill_tokens_per_ms = 256.0
+        self.blocks = {
+            "active_a": KVBlock("active_a", "tenant_a", "v1", "GPU", 128, 1, 20),
+            "active_b": KVBlock("active_b", "tenant_a", "v1", "GPU", 128, 1, 18),
+            "prefix_hot": KVBlock("prefix_hot", "tenant_a", "v1", "GPU", 128, 0, 8),
+            "idle_cpu": KVBlock("idle_cpu", "tenant_a", "v1", "CPU", 128, 0, 5),
+            "doc_remote": KVBlock("doc_remote", "tenant_a", "v1", "REMOTE", 128, 0, 12),
+            "shared_doc_b": KVBlock("shared_doc_b", "tenant_b", "v1", "REMOTE", 128, 0, 12),
+            "cold_ssd": KVBlock("cold_ssd", "tenant_a", "v1", "SSD", 512, 0, 1),
+        }
+        self.demotions = []
+        self.evictions = []
+
+    def _gpu_used(self):
+        return sum(block.level == "GPU" for block in self.blocks.values())
+
+    def _ensure_gpu_space(self):
+        if self._gpu_used() < self.gpu_capacity_blocks:
+            return []
+        candidates = [
+            block for block in self.blocks.values()
+            if block.level == "GPU" and block.ref_count == 0
+        ]
+        if not candidates:
+            return []
+        victim = min(candidates, key=lambda block: block.reuse_count)
+        victim.level = "CPU"
+        self.demotions.append(victim.block_id)
+        return [victim.block_id]
+
+    def _compatible(self, request, block):
+        return request.tenant == block.tenant and request.model_revision == block.model_revision
+
+    def _cpu_cost(self):
+        return round(self.block_mib / self.cpu_mib_per_ms + 0.2, 3)
+
+    def _remote_cost(self):
+        return round(1.0 + self.block_mib / self.remote_mib_per_ms + 0.3, 3)
+
+    def _ssd_cost(self):
+        return round(1.0 + self.block_mib / self.ssd_mib_per_ms + 0.5, 3)
+
+    def _recompute_cost(self, tokens):
+        return round(tokens / self.prefill_tokens_per_ms + 0.5, 3)
+
+    def handle_block(self, request, block_id):
+        if block_id not in self.blocks:
+            return {
+                "request_id": request.request_id,
+                "block_id": block_id,
+                "action": "recompute_missing",
+                "cost_ms": self._recompute_cost(512),
+                "transfer_mib": 0.0,
+            }
+        block = self.blocks[block_id]
+        if not self._compatible(request, block):
+            return {
+                "request_id": request.request_id,
+                "block_id": block_id,
+                "action": "blocked_incompatible_or_tenant",
+                "cost_ms": 0.0,
+                "transfer_mib": 0.0,
+            }
+        if block.level == "GPU":
+            block.ref_count += 1
+            return {
+                "request_id": request.request_id,
+                "block_id": block_id,
+                "action": "gpu_hit",
+                "cost_ms": 0.0,
+                "transfer_mib": 0.0,
+            }
+        if block.level == "CPU":
+            demoted = self._ensure_gpu_space()
+            block.level = "GPU"
+            block.ref_count += 1
+            return {
+                "request_id": request.request_id,
+                "block_id": block_id,
+                "action": "promote_cpu_to_gpu",
+                "cost_ms": self._cpu_cost(),
+                "transfer_mib": self.block_mib,
+                "demoted": demoted,
+            }
+        if block.level == "REMOTE":
+            remote_cost = self._remote_cost()
+            recompute_cost = self._recompute_cost(block.tokens * 16)
+            if remote_cost <= recompute_cost:
+                demoted = self._ensure_gpu_space()
+                block.level = "GPU"
+                block.ref_count += 1
+                return {
+                    "request_id": request.request_id,
+                    "block_id": block_id,
+                    "action": "fetch_remote_to_gpu",
+                    "cost_ms": remote_cost,
+                    "transfer_mib": self.block_mib,
+                    "demoted": demoted,
+                }
+            return {
+                "request_id": request.request_id,
+                "block_id": block_id,
+                "action": "recompute_instead_of_remote",
+                "cost_ms": recompute_cost,
+                "transfer_mib": 0.0,
+            }
+        if block.level == "SSD":
+            ssd_cost = self._ssd_cost()
+            recompute_cost = self._recompute_cost(block.tokens)
+            action = "fetch_ssd_to_gpu" if ssd_cost <= recompute_cost else "recompute_instead_of_ssd"
+            return {
+                "request_id": request.request_id,
+                "block_id": block_id,
+                "action": action,
+                "cost_ms": min(ssd_cost, recompute_cost),
+                "transfer_mib": self.block_mib if action == "fetch_ssd_to_gpu" else 0.0,
+            }
+        raise ValueError(block.level)
+
+    def audit(self, requests):
+        rows = []
+        for request in requests:
+            for block_id in request.needed_blocks:
+                rows.append(self.handle_block(request, block_id))
+        summary = {
+            "requests": len(requests),
+            "gpu_hits": sum(row["action"] == "gpu_hit" for row in rows),
+            "cpu_promotes": sum(row["action"] == "promote_cpu_to_gpu" for row in rows),
+            "remote_fetches": sum(row["action"] == "fetch_remote_to_gpu" for row in rows),
+            "ssd_fetches": sum(row["action"] == "fetch_ssd_to_gpu" for row in rows),
+            "recomputes": sum(row["action"].startswith("recompute") for row in rows),
+            "tenant_blocks": sum(row["action"] == "blocked_incompatible_or_tenant" for row in rows),
+            "demotions": len(self.demotions),
+            "evictions": len(self.evictions),
+            "gpu_used_blocks": self._gpu_used(),
+            "cpu_used_blocks": sum(block.level == "CPU" for block in self.blocks.values()),
+            "remote_used_blocks": sum(block.level == "REMOTE" for block in self.blocks.values()),
+            "total_transfer_mib": round(sum(row["transfer_mib"] for row in rows), 1),
+            "estimated_latency_ms": round(sum(row["cost_ms"] for row in rows), 3),
+        }
+        gates = {
+            "active_gpu_blocks_protected": all(
+                self.blocks[block_id].level == "GPU" for block_id in ["active_a", "active_b"]
+            ),
+            "cpu_promote_visible": summary["cpu_promotes"] == 1,
+            "remote_fetch_visible": summary["remote_fetches"] == 1,
+            "recompute_fallback_visible": summary["recomputes"] == 2,
+            "tenant_isolation_enforced": summary["tenant_blocks"] == 1,
+            "demotion_makes_gpu_space": summary["demotions"] == 1,
+            "residency_metrics_ready": (
+                summary["total_transfer_mib"] == 32.0
+                and summary["gpu_used_blocks"] == 4
+            ),
+        }
+        gates["multi_level_kv_gate"] = all(gates.values())
+        return rows, summary, gates
+
+
+requests = [
+    KVRequest("resume_rag", "tenant_a", "v1", ["idle_cpu", "doc_remote", "missing_tail"]),
+    KVRequest("cross_tenant_probe", "tenant_a", "v1", ["shared_doc_b"]),
+    KVRequest("cold_doc", "tenant_a", "v1", ["cold_ssd"]),
+]
+
+rows, summary, gates = ToyMultiLevelKVCacheAuditor().audit(requests)
+print("multi_level_kv_rows=", rows)
+print("multi_level_kv_summary=", summary)
+print("multi_level_kv_gates=", gates)
+```
+
+一次运行的核心输出类似：
+
+```text
+multi_level_kv_summary= {'requests': 3, 'gpu_hits': 0, 'cpu_promotes': 1, 'remote_fetches': 1, 'ssd_fetches': 0, 'recomputes': 2, 'tenant_blocks': 1, 'demotions': 1, 'evictions': 0, 'gpu_used_blocks': 4, 'cpu_used_blocks': 1, 'remote_used_blocks': 1, 'total_transfer_mib': 32.0, 'estimated_latency_ms': 10.5}
+multi_level_kv_gates= {'active_gpu_blocks_protected': True, 'cpu_promote_visible': True, 'remote_fetch_visible': True, 'recompute_fallback_visible': True, 'tenant_isolation_enforced': True, 'demotion_makes_gpu_space': True, 'residency_metrics_ready': True, 'multi_level_kv_gate': True}
+```
+
+这个 demo 展示了几个关键点：
+
+1. `active_gpu_blocks_protected=True`：有 ref count 的 active decode KV 没有被 demote。
+2. `cpu_promote_visible=True`：CPU-resident KV 可以 promote 回 GPU，但要计 transfer 成本。
+3. `remote_fetch_visible=True`：远端 KV 在比重算更便宜时进入 GPU。
+4. `recompute_fallback_visible=True`：missing block 和 SSD 冷 block 都走 recompute，说明 cache hit 不等于一定 fetch。
+5. `tenant_isolation_enforced=True`：其他 tenant 的 remote block 被阻断。
+6. `demotion_makes_gpu_space=True`：GPU 满时只 demote ref count 为 0 的 block，为 remote fetch 腾空间。
+7. `residency_metrics_ready=True`：summary 同时给出 transfer MiB、GPU / CPU / remote residency 和 latency。
+
+所以本章最终门禁是 `multi_level_kv_gate`：只有 hot KV 保护、CPU promote、remote fetch、recompute fallback、tenant isolation、demotion 和 residency metrics 都能闭环，多级 KV Cache 才不是“多加几层存储”，而是可治理的运行时缓存系统。
+
+## 40.36 小练习
 
 1. 画出 GPU、CPU、SSD、Remote、Recompute 五层 KV Cache 的访问路径。
 2. 解释为什么 CPU KV 不适合作为 decode 每步在线读取层。
@@ -1214,7 +1495,7 @@ cache hit 是否真的降低了端到端延迟和 GPU compute？
 9. 列出 10 个观测多级 KV Cache 的指标。
 10. 说明多级 KV Cache 如何服务 PD 分离。
 
-## 40.36 本章总结
+## 40.37 本章总结
 
 多级 KV Cache 的核心是把 KV 从 GPU 显存中的临时对象，升级成跨层级、跨节点、可迁移、可淘汰、可预取的系统级资源。
 

@@ -8,6 +8,24 @@
 
 > Continuous batching 把调度粒度从“整批请求”下沉到“每一轮模型迭代”，让系统可以在每个 decode step 重新选择 running batch，从而提升吞吐、降低排队等待，并更充分利用 KV Cache block。
 
+## 19.0 本讲资料边界与第二轮精修口径
+
+本讲按第二轮精修要求做过资料校准，主要参考三类公开资料：
+
+1. Orca OSDI 2022 论文对 Transformer 生成 workload 的 multi-iteration 特征、request-level scheduling 的局限，以及 iteration-level scheduling 的定义。
+2. vLLM optimization / tuning 文档对 KV cache 不足、preemption、`max_num_seqs`、`max_num_batched_tokens`、chunked prefill、decode 优先和 TTFT / ITL 取舍的公开口径。
+3. vLLM metrics 文档对 running / waiting 请求数、KV cache usage、TTFT、inter-token latency、queue time、prefill time 和 decode time 的观测口径。
+
+本章只讲教学版 continuous batching 和 iteration-level scheduling，不展开 vLLM 真实 scheduler 源码、CUDA graph、worker / executor、multi-step scheduling、prefix cache policy、preemption / swap / recompute 实现、多卡流水、生产级优先级队列或 OpenAI-compatible server 参数全集。
+
+本章给出的公式和 demo 只用于建立可面试、可验证的最小模型：每轮 scheduler 先处理 dynamic arrival 和 cleanup，再在 token budget、active sequence budget 与 KV block budget 下选择 decode 和 prefill。真实系统还会叠加 chunked prefill、prefix caching、LoRA、多模态输入、speculative decoding、抢占、租户公平和可观测性治理。
+
+参考资料：
+
+1. Orca OSDI 2022：<https://www.usenix.org/conference/osdi22/presentation/yu>
+2. vLLM optimization and tuning：<https://docs.vllm.ai/en/latest/configuration/optimization.html>
+3. vLLM metrics：<https://docs.vllm.ai/en/latest/design/metrics.html>
+
 ## 19.1 本章目标
 
 读完本章，你应该能讲清：
@@ -215,6 +233,28 @@ def schedule_with_token_budget(waiting_queue, running_requests, max_tokens):
 
 这个代码还很粗糙，但它说明了关键点：scheduler 真正在调度的是 token workload，而不是单纯的 request count。
 
+把它写成公式，本轮 iteration 记为 `\tau`，本轮 decode 集合记为 `D_{\tau}`，本轮 prefill 集合记为 `P_{\tau}`。
+
+本轮 decode token 数可以近似为：
+
+$$
+N_{\mathrm{dec},\tau}=|D_{\tau}|
+$$
+
+如果请求 `i` 在本轮 prefill 了 `p_{i,\tau}` 个 prompt tokens，则本轮 prefill token 数是：
+
+$$
+N_{\mathrm{pre},\tau}=\sum_{i\in P_{\tau}}p_{i,\tau}
+$$
+
+本轮 token budget 门禁是：
+
+$$
+G_{\mathrm{tok},\tau}=\mathbf{1}[N_{\mathrm{dec},\tau}+N_{\mathrm{pre},\tau}\le C_{\mathrm{tok}}]
+$$
+
+这里的 `C_{\mathrm{tok}}` 可以理解成教学版 `max_num_batched_tokens`。它不是总吞吐目标，而是控制单轮 workload 和延迟尖刺的上限。
+
 ## 19.7 KV block budget：能算不代表能放下
 
 token budget 控制计算量，但还不够。
@@ -256,6 +296,30 @@ def can_schedule_decode(req, block_manager):
 这就是上一章为什么说 scheduler 和 block manager 强耦合。
 
 没有 block budget 的 continuous batching，只是“看起来动态”，实际上很容易把系统推向 OOM。
+
+把 block 约束写成公式，block size 记为 `S`，请求 `i` 当前需要缓存的 token 数记为 `T_i`，则请求所需 block 数是：
+
+$$
+B_i=\left\lceil\frac{T_i}{S}\right\rceil
+$$
+
+如果请求 `i` 当前已经持有 `H_i` 个 block，那么本轮新增 block 需求是：
+
+$$
+\Delta B_{i,\tau}=\max(0,B_i-H_i)
+$$
+
+本轮所有被调度请求的新增 block 数不能超过当前 free blocks：
+
+$$
+G_{\mathrm{kv},\tau}=\mathbf{1}\left[\sum_{i\in D_{\tau}\cup P_{\tau}}\Delta B_{i,\tau}\le F_{\tau}\right]
+$$
+
+因此 continuous batching 的准入条件至少是 token budget 与 KV block budget 同时成立：
+
+$$
+G_{\mathrm{admit},\tau}=G_{\mathrm{tok},\tau}G_{\mathrm{kv},\tau}
+$$
 
 ## 19.8 一轮 continuous batching 的完整流程
 
@@ -342,6 +406,26 @@ Continuous Batching 解决每一轮谁来跑
 ```
 
 三者合起来，才构成 vLLM-like serving engine 的核心。
+
+可以用一个很小的式子量化 fixed batch 的空洞。假设固定 batch 中请求集合为 `S`，请求 `i` 实际输出 `y_i` 个 token，则静态 batch decode 行数近似是：
+
+$$
+W_{\mathrm{static}}=|S|\max_{i\in S}y_i
+$$
+
+真正有效输出行数是：
+
+$$
+W_{\mathrm{valid}}=\sum_{i\in S}y_i
+$$
+
+静态 batch 的空洞行数是：
+
+$$
+W_{\mathrm{hole}}=W_{\mathrm{static}}-W_{\mathrm{valid}}
+$$
+
+continuous batching 的目标不是让 `W_{\mathrm{valid}}` 消失，而是让已经完成的请求尽快退出 execution batch，让后续 iteration 的有效行比例更高。
 
 ## 19.10 它的代价和副作用
 
@@ -435,6 +519,26 @@ TPOT 取决于：
 降低 `max_num_batched_tokens` 可能让流式输出更平滑，但 GPU 利用率下降，总吞吐降低。
 
 面试里不要只说“continuous batching 提升吞吐”，更好的回答是：它通过动态填充 batch 提升吞吐，但需要用 token budget 和 cache budget 控制 TTFT、TPOT 和显存风险。
+
+如果请求 `i` 的到达时间是 `a_i`，客户端看到 first token 的时间是 `f_i`，第 `j` 个输出 token 可见时间是 `s_{i,j}`，输出 token 数是 `y_i`，则：
+
+$$
+T_{\mathrm{ttft},i}=f_i-a_i
+$$
+
+当 `y_i>1` 时，平均 TPOT 可以写成：
+
+$$
+T_{\mathrm{tpot},i}=\frac{s_{i,y_i}-s_{i,1}}{y_i-1}
+$$
+
+单轮 iteration 的吞吐可以看成：
+
+$$
+Q_{\mathrm{tok},\tau}=\frac{N_{\mathrm{dec},\tau}+N_{\mathrm{pre},\tau}}{\Delta t_{\tau}}
+$$
+
+但线上调优不能只最大化 `Q_{\mathrm{tok},\tau}`。如果 `N_{\mathrm{pre},\tau}` 太大，单轮 `\Delta t_{\tau}` 会变长，已有 streaming 请求的 TPOT 可能变差。
 
 ## 19.13 和 dynamic batching 的区别
 
@@ -564,7 +668,288 @@ Continuous batching 把调度粒度降低到每个模型 iteration。每一轮 s
 它的收益是提高吞吐和显存利用率，代价是 scheduler 更复杂，并且需要在 TTFT、TPOT、吞吐、公平性和 OOM 风险之间做 trade-off。
 ```
 
-## 19.18 小练习
+## 19.18 Continuous Batching 公式、调度 trace 和可运行 demo
+
+把前面的约束合在一起，一个教学版 continuous batching gate 可以写成：
+
+$$
+G_{\mathrm{cb}}=G_{\mathrm{iter}}G_{\mathrm{tok}}G_{\mathrm{kv}}G_{\mathrm{decode}}G_{\mathrm{cleanup}}G_{\mathrm{metric}}
+$$
+
+其中：
+
+1. `G_{\mathrm{iter}}`：请求可以在不同 iteration 动态到达、进入、退出。
+2. `G_{\mathrm{tok}}`：每轮 decode + prefill 不超过 token budget。
+3. `G_{\mathrm{kv}}`：prefill 和 decode 追加 KV 时不超过 free block budget。
+4. `G_{\mathrm{decode}}`：已有 running 请求能优先获得 decode 进度，避免 streaming 卡顿。
+5. `G_{\mathrm{cleanup}}`：finished / cancelled 请求会释放 KV blocks。
+6. `G_{\mathrm{metric}}`：trace 能复盘 waiting、running、deferred reason、TTFT 和 block 使用。
+
+下面这个 0 依赖 demo 模拟 5 个请求：A、B 同时到达，C、D、E 后续到达；scheduler 采用 decode-first；prefill 受 token budget 约束；KV block 不足时请求继续等待；E 在等待中取消；最终输出 trace、TTFT、静态 batch 空洞和门禁。
+
+```python
+from dataclasses import dataclass, field
+from math import ceil
+
+
+@dataclass
+class Request:
+    request_id: str
+    arrival: int
+    prompt_tokens: int
+    planned_output: list
+    cancel_at: int = None
+    state: str = "new"
+    prefill_start: int = None
+    first_token_step: int = None
+    finish_step: int = None
+    finish_reason: str = None
+    emitted: list = field(default_factory=list)
+
+
+class ToyBlockManager:
+    def __init__(self, total_blocks, block_size):
+        self.total_blocks = total_blocks
+        self.block_size = block_size
+        self.free_blocks = list(range(total_blocks))
+        self.tables = {}
+        self.lengths = {}
+        self.max_used = 0
+
+    def required_blocks(self, tokens):
+        return ceil(tokens / self.block_size)
+
+    def used_count(self):
+        return self.total_blocks - len(self.free_blocks)
+
+    def _remember_peak(self):
+        self.max_used = max(self.max_used, self.used_count())
+
+    def can_allocate(self, tokens):
+        return self.required_blocks(tokens) <= len(self.free_blocks)
+
+    def allocate(self, request_id, tokens):
+        need = self.required_blocks(tokens)
+        if need > len(self.free_blocks):
+            return False
+        self.tables[request_id] = [self.free_blocks.pop(0) for _ in range(need)]
+        self.lengths[request_id] = tokens
+        self._remember_peak()
+        return True
+
+    def can_append(self, request_id):
+        length = self.lengths[request_id]
+        return length % self.block_size != 0 or bool(self.free_blocks)
+
+    def append_one(self, request_id):
+        length = self.lengths[request_id]
+        if length % self.block_size == 0:
+            if not self.free_blocks:
+                return False
+            self.tables[request_id].append(self.free_blocks.pop(0))
+        self.lengths[request_id] += 1
+        self._remember_peak()
+        return True
+
+    def release(self, request_id):
+        released = self.tables.pop(request_id, [])
+        self.lengths.pop(request_id, None)
+        self.free_blocks.extend(released)
+        return released
+
+
+class ToyContinuousBatcher:
+    def __init__(self, requests, max_tokens, max_running, block_manager):
+        self.requests = sorted(requests, key=lambda req: (req.arrival, req.request_id))
+        self.future = list(self.requests)
+        self.max_tokens = max_tokens
+        self.max_running = max_running
+        self.block_manager = block_manager
+        self.time = 0
+        self.waiting = []
+        self.running = []
+        self.finished = []
+        self.cancelled = []
+        self.trace = []
+        self.deferred = []
+
+    def add_arrivals(self):
+        arrived = []
+        while self.future and self.future[0].arrival <= self.time:
+            req = self.future.pop(0)
+            req.state = "waiting"
+            self.waiting.append(req)
+            arrived.append(req.request_id)
+        return arrived
+
+    def cancel_ready_requests(self):
+        cancelled = []
+        for req in list(self.waiting) + list(self.running):
+            if req.cancel_at is not None and req.cancel_at <= self.time:
+                if req in self.waiting:
+                    self.waiting.remove(req)
+                if req in self.running:
+                    self.running.remove(req)
+                    self.block_manager.release(req.request_id)
+                req.state = "cancelled"
+                req.finish_reason = "client_cancelled"
+                req.finish_step = self.time
+                self.cancelled.append(req)
+                cancelled.append(req.request_id)
+        return cancelled
+
+    def finish(self, req, reason="eos"):
+        if req in self.running:
+            self.running.remove(req)
+        req.state = "finished"
+        req.finish_reason = reason
+        req.finish_step = self.time
+        self.block_manager.release(req.request_id)
+        self.finished.append(req)
+
+    def schedule_step(self):
+        arrived = self.add_arrivals()
+        cancelled = self.cancel_ready_requests()
+        scheduled_decode = []
+        scheduled_prefill = []
+        deferred = []
+        used_tokens = 0
+
+        for req in list(self.running):
+            if used_tokens + 1 > self.max_tokens:
+                deferred.append((req.request_id, "token_budget_decode"))
+                continue
+            if not self.block_manager.can_append(req.request_id):
+                deferred.append((req.request_id, "kv_decode"))
+                continue
+            self.block_manager.append_one(req.request_id)
+            scheduled_decode.append(req)
+            used_tokens += 1
+
+        while self.waiting:
+            req = self.waiting[0]
+            if len(self.running) + len(scheduled_prefill) >= self.max_running:
+                deferred.append((req.request_id, "active_sequence_limit"))
+                break
+            if used_tokens + req.prompt_tokens > self.max_tokens:
+                deferred.append((req.request_id, "token_budget_prefill"))
+                break
+            if not self.block_manager.can_allocate(req.prompt_tokens):
+                deferred.append((req.request_id, "kv_prefill"))
+                break
+            self.waiting.pop(0)
+            self.block_manager.allocate(req.request_id, req.prompt_tokens)
+            scheduled_prefill.append(req)
+            used_tokens += req.prompt_tokens
+
+        for req in scheduled_decode:
+            next_token = req.planned_output[len(req.emitted)]
+            req.emitted.append(next_token)
+            if len(req.emitted) == len(req.planned_output):
+                self.finish(req)
+
+        for req in scheduled_prefill:
+            req.state = "running"
+            req.prefill_start = self.time
+            req.first_token_step = self.time
+            req.emitted.append(req.planned_output[0])
+            if len(req.emitted) == len(req.planned_output):
+                self.finish(req)
+            else:
+                self.running.append(req)
+
+        self.deferred.extend((self.time, req_id, reason) for req_id, reason in deferred)
+        self.trace.append(
+            {
+                "step": self.time,
+                "arrived": arrived,
+                "cancelled": cancelled,
+                "decode": [req.request_id for req in scheduled_decode],
+                "prefill": [req.request_id for req in scheduled_prefill],
+                "used_tokens": used_tokens,
+                "waiting": [req.request_id for req in self.waiting],
+                "running": [req.request_id for req in self.running],
+                "free_blocks": len(self.block_manager.free_blocks),
+                "deferred": deferred,
+            }
+        )
+        self.time += 1
+
+    def run(self):
+        while self.future or self.waiting or self.running:
+            self.schedule_step()
+            if self.time > 20:
+                raise RuntimeError("scheduler did not converge")
+
+    def report(self):
+        output_rows = sum(len(req.emitted) for req in self.requests)
+        static_rows = len(self.requests) * max(len(req.planned_output) for req in self.requests)
+        queue_wait = {
+            req.request_id: req.prefill_start - req.arrival
+            for req in self.requests
+            if req.prefill_start is not None
+        }
+        ttft = {
+            req.request_id: req.first_token_step - req.arrival
+            for req in self.requests
+            if req.first_token_step is not None
+        }
+        reasons = sorted({reason for _, _, reason in self.deferred})
+        terminal = all(req.finish_reason is not None for req in self.requests)
+        gates = {
+            "dynamic_arrivals_seen": any(item["arrived"] for item in self.trace[1:]),
+            "decode_first_with_prefill": any(item["decode"] and item["prefill"] for item in self.trace),
+            "token_budget_respected": all(item["used_tokens"] <= self.max_tokens for item in self.trace),
+            "kv_budget_deferred": "kv_prefill" in reasons or "kv_decode" in reasons,
+            "cleanup_released_blocks": terminal and self.block_manager.used_count() == 0,
+            "metrics_trace_ready": bool(queue_wait) and bool(ttft) and self.block_manager.max_used > 0,
+        }
+        gates["continuous_batching_gate"] = all(gates.values())
+        summary = {
+            "finished_order": [req.request_id for req in sorted(self.finished, key=lambda r: (r.finish_step, r.request_id))],
+            "cancelled": [req.request_id for req in self.cancelled],
+            "queue_wait_steps": queue_wait,
+            "ttft_steps": ttft,
+            "static_decode_rows": static_rows,
+            "continuous_output_rows": output_rows,
+            "saved_rows": static_rows - output_rows,
+            "max_kv_blocks_used": self.block_manager.max_used,
+            "deferred_reasons": reasons,
+            "trace_tail": self.trace[-4:],
+        }
+        return summary, gates
+
+
+requests = [
+    Request("A", arrival=0, prompt_tokens=3, planned_output=["a1", "a2", "a3"]),
+    Request("B", arrival=0, prompt_tokens=6, planned_output=["b1", "b2", "b3", "b4"]),
+    Request("C", arrival=1, prompt_tokens=2, planned_output=["c1"]),
+    Request("D", arrival=2, prompt_tokens=5, planned_output=["d1", "d2"]),
+    Request("E", arrival=3, prompt_tokens=3, planned_output=["e1", "e2"], cancel_at=5),
+]
+
+scheduler = ToyContinuousBatcher(
+    requests=requests,
+    max_tokens=8,
+    max_running=4,
+    block_manager=ToyBlockManager(total_blocks=5, block_size=4),
+)
+scheduler.run()
+summary, gates = scheduler.report()
+
+print("continuous_batching_summary=", summary)
+print("continuous_batching_gates=", gates)
+```
+
+一份合理输出应当能看出这些事实：
+
+1. `finished_order` 不是到达顺序，说明请求在不同 iteration 动态退出。
+2. `deferred_reasons` 同时包含 `token_budget_prefill` 和 `kv_prefill`，说明调度不只看请求数。
+3. `static_decode_rows` 大于 `continuous_output_rows`，能量化固定 batch 的空洞。
+4. `cleanup_released_blocks=True`，说明完成和取消路径没有泄漏 KV blocks。
+5. `continuous_batching_gate=True`，说明动态到达、decode-first、token budget、KV budget、cleanup 和 metrics 都能被 trace 复盘。
+
+## 19.19 小练习
 
 1. 画一个时间线，包含 4 个请求 A、B、C、D，其中 A 短输出，B 长输出，C 和 D 中途到达，分别画出 static batching 和 continuous batching 的执行方式。
 2. 写一个简化 scheduler，输入 waiting queue、running requests、`max_num_batched_tokens` 和 free block 数，输出本轮 prefill 和 decode 请求。
@@ -572,7 +957,7 @@ Continuous batching 把调度粒度降低到每个模型 iteration。每一轮 s
 4. 设计一个实验，观察 `max_num_batched_tokens` 增大后 TTFT、TPOT 和 tokens/s 的变化。
 5. 思考长 prompt prefill 为什么会让 streaming decode 卡顿，并提出一个缓解方案。
 
-## 19.19 本章总结
+## 19.20 本章总结
 
 Continuous batching 是 vLLM-like serving engine 的核心能力之一。
 

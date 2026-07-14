@@ -18,6 +18,14 @@
 
 > 学 nano-vLLM 的重点不是记住每个类名，而是把一个轻量实现和生产级 serving engine 的模块边界对应起来，知道请求如何进入 engine、如何被 scheduler 组织、KV block 如何分配、model runner 如何执行 prefill/decode，以及它距离生产系统还缺什么。
 
+## 44.0 本讲资料边界与第二轮精修口径
+
+本讲第二轮精修前，先按 `WRITING_PLAN.md` 对公开资料做校准：参考 `GeeeekExplorer/nano-vllm` 官方仓库和 README 对 nano-vLLM 作为轻量 vLLM 实现、约 1200 行 Python、包含 Prefix Caching、Tensor Parallelism、Torch compilation 和 CUDA graph 等学习点的说明；参考仓库中 `nanovllm/engine` 目录对 `llm_engine.py`、`scheduler.py`、`sequence.py`、`block_manager.py`、`model_runner.py` 等模块边界的呈现；并结合本书前面关于 generate loop、KV cache、block manager、continuous batching、vLLM scheduler、prefix cache、TP 和 PD 分离的章节。
+
+本讲只讲“如何用 nano-vLLM 建立 vLLM-like serving engine 的源码阅读骨架”：模块地图、阅读顺序、请求生命周期、KV block lifecycle、model runner batch contract、sampler、可观测实验和改造练习。不把某个 GitHub 提交的源码行号、函数签名、内部字段名、benchmark 数字、真实 CUDA graph 行为、生产级 vLLM 的完整 worker/executor 设计或某个版本的默认实现写成通用结论。
+
+本讲新增 demo 是教学版 nano-vLLM source auditor：用 0 依赖 Python 模拟源码阅读笔记和实验 trace，检查 example、LLM、sampling params、sequence、engine、scheduler、block manager、model runner、attention、sampler 和模型结构是否覆盖；同时检查 request state、waiting/running queue、KV block table、free blocks、slot mapping、logits、sampled token 和 finished cleanup 是否能被实验观察到。
+
 ## 44.1 本章目标
 
 读完本章，你应该能讲清：
@@ -701,7 +709,238 @@ nano-vLLM 和生产级 vLLM 的差距主要在生产能力上，比如 API serve
 如果要做项目，我会在 nano-vLLM 上增加 TTFT/TPOT 统计、scheduler 决策日志和 KV block 使用可视化，再实现简单 token budget、decode-first 或 chunked prefill，用压测比较不同策略对首 token 延迟、decode 抖动、吞吐和显存利用率的影响。
 ```
 
-## 44.22 小练习
+## 44.22 nano-vLLM 源码覆盖率、实验门禁和可运行 demo
+
+先把源码学习对象抽象成模块集合：
+
+```math
+\mathcal{M}=\{m_1,m_2,\ldots,m_N\}
+```
+
+阅读覆盖率可以写成：
+
+```math
+C_{\mathrm{module}}=\frac{|M_{\mathrm{seen}}\cap M_{\mathrm{req}}|}{\max(1,|M_{\mathrm{req}}|)}
+```
+
+资源生命周期覆盖率可以写成：
+
+```math
+C_{\mathrm{resource}}=\frac{|R_{\mathrm{seen}}\cap R_{\mathrm{req}}|}{\max(1,|R_{\mathrm{req}}|)}
+```
+
+实验覆盖率可以写成：
+
+```math
+C_{\mathrm{experiment}}=\frac{|E_{\mathrm{done}}\cap E_{\mathrm{req}}|}{\max(1,|E_{\mathrm{req}}|)}
+```
+
+最终门禁：
+
+```math
+G_{\mathrm{nano}}=G_{\mathrm{module}}G_{\mathrm{path}}G_{\mathrm{step}}G_{\mathrm{state}}G_{\mathrm{kv}}G_{\mathrm{runner}}G_{\mathrm{experiment}}G_{\mathrm{signal}}
+```
+
+这组公式的作用，是避免“读过 nano-vLLM”停在文件名层面。你需要证明自己知道：
+
+1. 哪些模块构成 request lifecycle。
+2. 哪些状态和资源在模块之间传递。
+3. 哪些实验能观察到这些状态变化。
+4. 哪些点属于教学项目边界，不应该夸大成生产级能力。
+
+下面的 demo 模拟两类输入：
+
+1. `ModuleNote`：每个源码模块的 layer、涉及资源和可观察信号。
+2. `ExperimentTrace`：每个实验触达哪些模块、观察到哪些信号。
+
+```python
+from dataclasses import dataclass
+
+
+@dataclass
+class ModuleNote:
+    name: str
+    layer: str
+    resources: tuple
+    signals: tuple
+
+
+@dataclass
+class ExperimentTrace:
+    name: str
+    touched_modules: tuple
+    observed_signals: tuple
+
+
+class ToyNanoVLLMSourceAuditor:
+    def __init__(self):
+        self.required_modules = [
+            "example",
+            "llm",
+            "sampling_params",
+            "sequence",
+            "llm_engine",
+            "scheduler",
+            "block_manager",
+            "model_runner",
+            "attention",
+            "sampler",
+            "qwen3_model",
+        ]
+        self.required_resources = [
+            "request_state",
+            "waiting_queue",
+            "running_queue",
+            "kv_block_table",
+            "free_blocks",
+            "input_ids",
+            "positions",
+            "slot_mapping",
+            "logits",
+            "sampled_token",
+            "finished_cleanup",
+        ]
+        self.required_experiments = [
+            "trace_generate",
+            "prefill_decode_step",
+            "scheduler_budget",
+            "kv_block_reuse",
+            "prefix_cache_hit",
+            "decode_finish_cleanup",
+            "sampler_params",
+        ]
+
+    def coverage(self, seen, required):
+        return round(len(set(seen) & set(required)) / max(1, len(required)), 3)
+
+    def audit(self, module_notes, experiments):
+        module_names = [note.name for note in module_notes]
+        resources_seen = sorted({resource for note in module_notes for resource in note.resources})
+        experiment_names = [experiment.name for experiment in experiments]
+        observed_signals = sorted(
+            {signal for note in module_notes for signal in note.signals}
+            | {signal for experiment in experiments for signal in experiment.observed_signals}
+        )
+        module_positions = {name: index for index, name in enumerate(module_names)}
+        lifecycle_order_ok = all(
+            module_positions[self.required_modules[i]] < module_positions[self.required_modules[i + 1]]
+            for i in range(len(self.required_modules) - 1)
+        )
+        touched_runtime_modules = sorted(
+            {module for experiment in experiments for module in experiment.touched_modules}
+        )
+        summary = {
+            "module_coverage": self.coverage(module_names, self.required_modules),
+            "resource_coverage": self.coverage(resources_seen, self.required_resources),
+            "experiment_coverage": self.coverage(experiment_names, self.required_experiments),
+            "lifecycle_order_ok": lifecycle_order_ok,
+            "runtime_module_touch": self.coverage(touched_runtime_modules, self.required_modules),
+            "observed_signal_count": len(observed_signals),
+            "missing_modules": sorted(set(self.required_modules) - set(module_names)),
+            "missing_resources": sorted(set(self.required_resources) - set(resources_seen)),
+            "missing_experiments": sorted(set(self.required_experiments) - set(experiment_names)),
+        }
+        gates = {
+            "module_map_complete": summary["module_coverage"] == 1.0,
+            "generate_path_visible": "trace_generate" in experiment_names,
+            "engine_step_visible": "prefill_decode_step" in experiment_names,
+            "sequence_state_visible": "request_state" in resources_seen,
+            "scheduler_decision_visible": "scheduler_budget" in experiment_names,
+            "kv_lifecycle_visible": (
+                "kv_block_reuse" in experiment_names and "finished_cleanup" in resources_seen
+            ),
+            "runner_batch_contract_visible": all(
+                resource in resources_seen for resource in ["input_ids", "positions", "slot_mapping"]
+            ),
+            "experiments_cover_core_paths": summary["experiment_coverage"] == 1.0,
+            "signals_observable": summary["observed_signal_count"] >= 12,
+        }
+        gates["nano_vllm_source_gate"] = all(gates.values())
+        return summary, gates
+
+
+module_notes = [
+    ModuleNote("example", "entry", ("request_state",), ("prompt_list",)),
+    ModuleNote("llm", "api", ("request_state",), ("generate_call",)),
+    ModuleNote("sampling_params", "api", ("sampled_token",), ("temperature", "max_tokens")),
+    ModuleNote(
+        "sequence",
+        "state",
+        ("request_state", "kv_block_table", "sampled_token"),
+        ("token_append", "finish_reason"),
+    ),
+    ModuleNote(
+        "llm_engine",
+        "engine",
+        ("waiting_queue", "running_queue"),
+        ("engine_step", "prefill_decode_flag"),
+    ),
+    ModuleNote(
+        "scheduler",
+        "scheduler",
+        ("waiting_queue", "running_queue", "free_blocks"),
+        ("scheduled_tokens", "preempted_seq"),
+    ),
+    ModuleNote(
+        "block_manager",
+        "kv",
+        ("kv_block_table", "free_blocks", "finished_cleanup"),
+        ("block_ref_count", "prefix_hash"),
+    ),
+    ModuleNote(
+        "model_runner",
+        "runner",
+        ("input_ids", "positions", "slot_mapping", "logits"),
+        ("prefill_batch", "decode_batch"),
+    ),
+    ModuleNote("attention", "layer", ("kv_block_table", "slot_mapping"), ("kv_read", "kv_write")),
+    ModuleNote("sampler", "layer", ("logits", "sampled_token"), ("next_token",)),
+    ModuleNote("qwen3_model", "model", ("input_ids", "positions", "logits"), ("forward_call",)),
+]
+experiments = [
+    ExperimentTrace("trace_generate", ("example", "llm", "llm_engine"), ("generate_call", "engine_step")),
+    ExperimentTrace(
+        "prefill_decode_step",
+        ("llm_engine", "scheduler", "model_runner"),
+        ("prefill_batch", "decode_batch"),
+    ),
+    ExperimentTrace("scheduler_budget", ("scheduler", "block_manager"), ("scheduled_tokens", "preempted_seq")),
+    ExperimentTrace(
+        "kv_block_reuse",
+        ("sequence", "block_manager", "attention"),
+        ("block_ref_count", "kv_read", "kv_write"),
+    ),
+    ExperimentTrace("prefix_cache_hit", ("block_manager", "scheduler"), ("prefix_hash", "scheduled_tokens")),
+    ExperimentTrace(
+        "decode_finish_cleanup",
+        ("sequence", "scheduler", "block_manager"),
+        ("finish_reason", "block_ref_count"),
+    ),
+    ExperimentTrace("sampler_params", ("sampling_params", "sampler"), ("temperature", "next_token")),
+]
+summary, gates = ToyNanoVLLMSourceAuditor().audit(module_notes, experiments)
+print("nano_vllm_source_summary=", summary)
+print("nano_vllm_source_gates=", gates)
+```
+
+一次运行的核心输出类似：
+
+```text
+nano_vllm_source_summary= {'module_coverage': 1.0, 'resource_coverage': 1.0, 'experiment_coverage': 1.0, 'lifecycle_order_ok': True, 'runtime_module_touch': 0.909, 'observed_signal_count': 18, 'missing_modules': [], 'missing_resources': [], 'missing_experiments': []}
+nano_vllm_source_gates= {'module_map_complete': True, 'generate_path_visible': True, 'engine_step_visible': True, 'sequence_state_visible': True, 'scheduler_decision_visible': True, 'kv_lifecycle_visible': True, 'runner_batch_contract_visible': True, 'experiments_cover_core_paths': True, 'signals_observable': True, 'nano_vllm_source_gate': True}
+```
+
+这个 demo 说明，源码学习不能只写“我读了 `scheduler.py` 和 `block_manager.py`”。更可靠的说法是：
+
+1. 我有模块地图：入口、API、sequence、engine、scheduler、KV、runner、attention、sampler、model。
+2. 我有 request lifecycle：从 `generate()` 到 engine step，再到 sampler 和 sequence append。
+3. 我有资源生命周期：KV block allocate、reuse、read/write、finish cleanup。
+4. 我有实验信号：generate trace、prefill/decode step、scheduler budget、prefix cache hit、sampler params。
+5. 我知道教学项目边界：它适合建立骨架，不代表生产级 vLLM 的完整控制面和故障恢复。
+
+所以本章最终门禁是 `nano_vllm_source_gate`：只有模块、路径、engine step、sequence state、scheduler decision、KV lifecycle、runner batch contract、实验覆盖和信号可观测都成立，才算真正把 nano-vLLM 读成了可复盘的推理框架源码路线。
+
+## 44.23 小练习
 
 1. 画出 nano-vLLM 从 `LLM.generate()` 到返回文本的完整调用路径。
 2. 总结 `Sequence` 中哪些字段属于请求输入，哪些字段属于执行状态，哪些字段属于 KV 状态。
@@ -714,7 +953,7 @@ nano-vLLM 和生产级 vLLM 的差距主要在生产能力上，比如 API serve
 9. 实现一个简单 chunked prefill，并观察 decode TPOT 是否更稳定。
 10. 写一个面试回答：nano-vLLM 和生产级 vLLM 的核心差距是什么？
 
-## 44.23 本章总结
+## 44.24 本章总结
 
 nano-vLLM 是学习 vLLM-like 推理框架的好入口。
 

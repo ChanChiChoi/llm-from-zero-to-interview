@@ -8,6 +8,26 @@
 
 > 最小 HTTP API 服务是 serving engine 的外部入口，它把 JSON 请求转换成 RequestState，并把 engine 的输出事件返回给客户端。
 
+## 14.0 本讲资料边界与第二轮精修口径
+
+本讲只实现教学版最小 HTTP API 服务。它覆盖请求模型、参数校验、同步 `/generate`、SSE 风格流式响应、队列准入、错误返回、客户端取消、engine cleanup 和最小可运行 demo，但不实现鉴权、租户配额、TLS、反向代理、OpenAPI schema 完整治理、WebSocket、gRPC、跨进程 engine、分布式 worker、生产级日志脱敏或完整 OpenAI-compatible server。
+
+资料校准口径：
+
+1. FastAPI 官方文档用 Pydantic model 声明 request body，框架会读取 JSON、做类型转换、校验数据，并把 schema 用于 OpenAPI 文档。
+2. FastAPI / Starlette 的 `StreamingResponse` 可以接收普通 generator 或 async generator，把响应体逐段流式返回；长流式 generator 要能让出控制权，才能被取消。
+3. WHATWG HTML Server-Sent Events 标准定义了 `text/event-stream`、`event:`、`data:`、空行分隔、UTF-8 编码和 `EventSource` 消费方式。
+4. OpenAI API streaming 文档当前推荐 Responses API 的 typed semantic events；Chat Completions streaming 仍使用 data-only SSE，增量内容通过 `delta` 字段返回。本章只借鉴这些接口形态，不复刻完整字段。
+5. 本章 demo 用纯 Python 模拟 HTTP handler、engine queue、SSE frame 和取消清理，不依赖 FastAPI，也不启动本地服务。
+
+参考资料：
+
+1. FastAPI Request Body：<https://fastapi.tiangolo.com/tutorial/body/>
+2. FastAPI `StreamingResponse`：<https://fastapi.tiangolo.com/advanced/custom-response/#streamingresponse>
+3. Starlette `StreamingResponse`：<https://www.starlette.io/responses/#streamingresponse>
+4. WHATWG HTML Server-Sent Events：<https://html.spec.whatwg.org/multipage/server-sent-events.html>
+5. OpenAI API streaming responses：<https://platform.openai.com/docs/guides/streaming-responses>
+
 ## 14.1 HTTP API 在架构中的位置
 
 整体结构可以写成：
@@ -31,7 +51,7 @@ API Server 不应该直接调用模型 forward。它应该把请求交给 engine
 3. streaming 输出可以通过队列异步返回。
 4. 后续可以替换 HTTP 为 gRPC、WebSocket 或内部 RPC。
 
-## 14.2 最小接口设计
+## 14.2 最小接口设计与 API 门禁公式
 
 我们先设计一个简单接口：
 
@@ -64,6 +84,50 @@ POST /generate
 ```
 
 流式响应则逐段返回 delta。
+
+把 API 层写成可验收系统，而不是只写一个 handler，可以先定义几个门禁。
+
+请求合法性门禁：
+
+```math
+G_{\mathrm{valid}}=G_{\mathrm{prompt}}G_{\mathrm{tokens}}G_{\mathrm{sampling}}
+```
+
+其中 `G_{\mathrm{prompt}}` 检查 prompt 是非空字符串，`G_{\mathrm{tokens}}` 检查 `max_new_tokens` 在允许范围内，`G_{\mathrm{sampling}}` 检查 temperature、top-p、top-k 等参数不越界。
+
+队列准入条件：
+
+```math
+Q_t<Q_{\max}
+```
+
+这里 `Q_t` 是当前等待队列长度，`Q_{\max}` 是 API 层允许提交给 engine 的最大等待队列长度。超过时应返回 429，而不是继续把请求塞进 engine。
+
+HTTP 成功率和错误率：
+
+```math
+R_{2xx}=\frac{N_{2xx}}{N},\quad
+R_{4xx}=\frac{N_{4xx}}{N},\quad
+R_{5xx}=\frac{N_{5xx}}{N}
+```
+
+`4xx` 通常表示客户端输入、配额或准入失败，`5xx` 才表示服务端内部失败。把参数错误都变成 `500`，会让线上告警和容量判断失真。
+
+取消清理门禁：
+
+```math
+G_{\mathrm{cancel}}=G_{\mathrm{abort}}G_{\mathrm{kvfree}}G_{\mathrm{finish}}
+```
+
+`G_{\mathrm{abort}}` 表示取消信号能传回 engine，`G_{\mathrm{kvfree}}` 表示 KV cache / running slot 被释放，`G_{\mathrm{finish}}` 表示客户端或日志能看到明确 finish reason。
+
+最小 API 总门禁：
+
+```math
+G_{\mathrm{api}}=G_{\mathrm{valid}}G_{\mathrm{admit}}G_{\mathrm{sync}}G_{\mathrm{stream}}G_{\mathrm{cancel}}
+```
+
+一个最小 HTTP API 通过这个门禁，才算真正把请求接入、同步响应、流式响应、过载拒绝和取消清理连成闭环。
 
 ## 14.3 API 层应该校验什么
 
@@ -196,9 +260,17 @@ from fastapi.responses import StreamingResponse
 import json
 
 
-def sse_format(data):
-    return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+def sse_format(event_name, data):
+    payload = json.dumps(data, ensure_ascii=False)
+    return f"event: {event_name}\ndata: {payload}\n\n"
 ```
+
+SSE 的关键不是“每次写一行字符串”，而是线格式稳定：
+
+1. `Content-Type` 应是 `text/event-stream`。
+2. 一个事件可以包含 `event:` 和一行或多行 `data:`。
+3. 事件之间用空行分隔。
+4. 客户端断开时，服务端 generator 必须退出，并把取消信号传回 engine。
 
 流式生成器：
 
@@ -208,18 +280,18 @@ def stream_events(request_state):
         event = request_state.stream_queue.get()
 
         if event.error:
-            yield sse_format({"error": event.error})
+            yield sse_format("error", {"error": event.error})
             break
 
         if event.finish_reason is not None:
-            yield sse_format({
+            yield sse_format("finish", {
                 "request_id": event.request_id,
                 "delta": "",
                 "finish_reason": event.finish_reason,
             })
             break
 
-        yield sse_format({
+        yield sse_format("delta", {
             "request_id": event.request_id,
             "delta": event.delta,
             "finish_reason": None,
@@ -259,9 +331,9 @@ def stream_events(request_state):
         while True:
             event = request_state.stream_queue.get()
             if event.finish_reason is not None:
-                yield sse_format({"finish_reason": event.finish_reason})
+                yield sse_format("finish", {"finish_reason": event.finish_reason})
                 break
-            yield sse_format({"delta": event.delta})
+            yield sse_format("delta", {"delta": event.delta})
     finally:
         if not request_state.finished:
             request_state.aborted = True
@@ -271,6 +343,15 @@ def stream_events(request_state):
 engine 的 scheduler 或 decode loop 应该检查 `request_state.aborted`，停止继续生成并释放资源。
 
 如果取消只停在 API 层，GPU 会继续做无用工作。
+
+生产实现还要区分几种取消来源：
+
+1. 客户端主动断开连接。
+2. API 层等待超时。
+3. engine 内部错误导致请求终止。
+4. admission 或限流阶段直接拒绝。
+
+这些路径最后都应该进入同一个 cleanup 收敛点：移出 waiting / running 集合，释放 KV cache，写 finish reason，更新 metrics 和 trace。
 
 ## 14.9 API 层和 sampling params
 
@@ -348,6 +429,7 @@ if len(engine.waiting_queue) > MAX_QUEUE_SIZE:
 真实项目常提供 OpenAI-compatible API，例如：
 
 ```text
+POST /v1/responses
 POST /v1/chat/completions
 POST /v1/completions
 ```
@@ -355,12 +437,12 @@ POST /v1/completions
 它比本章接口复杂，因为要处理：
 
 1. `messages` 和 chat template。
-2. `choices` 格式。
-3. `delta` 格式。
-4. `usage` 统计。
-5. `stop`、`logprobs`、`seed` 等参数。
-6. 多模型字段。
-7. 错误码兼容。
+2. Responses API 的 typed semantic events。
+3. Chat Completions 的 `choices` 和 `delta` 格式。
+4. `usage` 统计和流式 usage 汇总。
+5. `stop`、`logprobs`、`seed`、tool call 等参数。
+6. 多模型字段、模型别名和兼容版本。
+7. 错误码、错误 body、finish reason 和取消语义兼容。
 
 本章先用 `/generate` 是为了专注 engine 和 API 的连接。
 
@@ -382,7 +464,299 @@ mini_engine/
 
 不要一开始把所有代码写进一个 `server.py`。拆分不是为了复杂，而是为了让每个模块职责清楚。
 
-## 14.14 常见误区
+## 14.14 HTTP API 公式、接口和可运行 demo
+
+下面的 demo 不依赖外部库，也不启动真实 HTTP server。它模拟一个最小 API 层：
+
+1. 校验 JSON 请求，非法 prompt 返回 400。
+2. 调用 engine 准入，队列满返回 429。
+3. 非流式 `/generate` 一次性返回完整文本。
+4. 流式 `/generate_stream` 返回 SSE frame。
+5. 客户端取消时把 abort 信号传回 engine，并释放 KV。
+
+```python
+from dataclasses import dataclass, field
+import json
+
+
+@dataclass
+class GenerateRequest:
+    prompt: str
+    max_new_tokens: int = 16
+    temperature: float = 0.7
+    top_p: float = 1.0
+    stream: bool = False
+
+
+@dataclass
+class RequestState:
+    request_id: str
+    prompt: str
+    max_new_tokens: int
+    temperature: float
+    top_p: float
+    stream: bool
+    output_tokens: list[str] = field(default_factory=list)
+    status: str = "WAITING"
+    finish_reason: str | None = None
+    kv_allocated: bool = True
+
+
+class ToyEngine:
+    def __init__(self, max_queue_size=2):
+        self.max_queue_size = max_queue_size
+        self.waiting_queue = []
+        self.released_kv = []
+        self.trace = []
+
+    def can_accept(self):
+        return len(self.waiting_queue) < self.max_queue_size
+
+    def add_request(self, state):
+        if not self.can_accept():
+            return False
+        self.waiting_queue.append(state)
+        self.trace.append((state.request_id, "queued"))
+        return True
+
+    def planned_text(self, state):
+        prompt = state.prompt.lower()
+        if "sync" in prompt:
+            return "SYNC"
+        if "stream" in prompt:
+            return "API!"
+        if "cancel" in prompt:
+            return "CANCEL"
+        return "OK"
+
+    def complete(self, state):
+        state.status = "RUNNING"
+        text = self.planned_text(state)[:state.max_new_tokens]
+        state.output_tokens.extend(text)
+        state.finish_reason = "length"
+        state.status = "FINISHED"
+        self.release_kv(state)
+        return text
+
+    def release_kv(self, state):
+        if state.kv_allocated:
+            state.kv_allocated = False
+            self.released_kv.append(state.request_id)
+        if state in self.waiting_queue:
+            self.waiting_queue.remove(state)
+        self.trace.append((state.request_id, "released"))
+
+    def cancel(self, state):
+        state.status = "FINISHED"
+        state.finish_reason = "client_cancelled"
+        self.release_kv(state)
+        self.trace.append((state.request_id, "cancelled"))
+
+
+class MinimalHTTPAPI:
+    def __init__(self, engine):
+        self.engine = engine
+        self.next_id = 1
+
+    def error(self, status_code, message):
+        return {
+            "status_code": status_code,
+            "body": {"error": {"message": message}},
+        }
+
+    def validate(self, payload):
+        prompt = payload.get("prompt")
+        if not isinstance(prompt, str) or not prompt.strip():
+            return None, self.error(400, "prompt must be a non-empty string")
+
+        max_new_tokens = payload.get("max_new_tokens", 16)
+        if not isinstance(max_new_tokens, int) or not 1 <= max_new_tokens <= 64:
+            return None, self.error(400, "max_new_tokens must be an integer in [1, 64]")
+
+        temperature = payload.get("temperature", 0.7)
+        if not isinstance(temperature, (int, float)) or not 0 <= temperature <= 2:
+            return None, self.error(400, "temperature must be in [0, 2]")
+
+        top_p = payload.get("top_p", 1.0)
+        if not isinstance(top_p, (int, float)) or not 0 < top_p <= 1:
+            return None, self.error(400, "top_p must be in (0, 1]")
+
+        stream = payload.get("stream", False)
+        if not isinstance(stream, bool):
+            return None, self.error(400, "stream must be a boolean")
+
+        return GenerateRequest(
+            prompt=prompt.strip(),
+            max_new_tokens=max_new_tokens,
+            temperature=float(temperature),
+            top_p=float(top_p),
+            stream=stream,
+        ), None
+
+    def new_request_state(self, request):
+        request_id = f"req-{self.next_id:04d}"
+        self.next_id += 1
+        return RequestState(
+            request_id=request_id,
+            prompt=request.prompt,
+            max_new_tokens=request.max_new_tokens,
+            temperature=request.temperature,
+            top_p=request.top_p,
+            stream=request.stream,
+        )
+
+    def submit_or_429(self, payload):
+        request, error_response = self.validate(payload)
+        if error_response is not None:
+            return None, error_response
+        if not self.engine.can_accept():
+            return None, self.error(429, "server is busy")
+
+        state = self.new_request_state(request)
+        self.engine.add_request(state)
+        return state, None
+
+    def generate(self, payload):
+        state, error_response = self.submit_or_429(payload)
+        if error_response is not None:
+            return error_response
+
+        text = self.engine.complete(state)
+        return {
+            "status_code": 200,
+            "body": {
+                "request_id": state.request_id,
+                "text": text,
+                "finish_reason": state.finish_reason,
+                "usage": {"output_tokens": len(state.output_tokens)},
+            },
+        }
+
+    def sse_frame(self, event_name, payload):
+        data = json.dumps(payload, ensure_ascii=False)
+        return f"event: {event_name}\ndata: {data}\n\n"
+
+    def generate_stream(self, payload):
+        state, error_response = self.submit_or_429(payload)
+        if error_response is not None:
+            yield self.sse_frame("error", error_response["body"])
+            return
+
+        text = self.engine.planned_text(state)[:state.max_new_tokens]
+        state.status = "RUNNING"
+        for token in text:
+            state.output_tokens.append(token)
+            yield self.sse_frame("delta", {"delta": token, "event": "delta"})
+
+        state.finish_reason = "length"
+        state.status = "FINISHED"
+        yield self.sse_frame(
+            "finish",
+            {
+                "event": "finish",
+                "finish_reason": state.finish_reason,
+                "request_id": state.request_id,
+                "usage": {"output_tokens": len(state.output_tokens)},
+            },
+        )
+        self.engine.release_kv(state)
+
+    def stream_until_cancel(self, payload, cancel_after_frames):
+        state, error_response = self.submit_or_429(payload)
+        if error_response is not None:
+            return {"finish_reason": "not_started", "frames": []}
+
+        frames = []
+        text = self.engine.planned_text(state)[:state.max_new_tokens]
+        state.status = "RUNNING"
+        for token in text:
+            state.output_tokens.append(token)
+            frames.append(self.sse_frame("delta", {"delta": token, "event": "delta"}))
+            if len(frames) >= cancel_after_frames:
+                self.engine.cancel(state)
+                frames.append(
+                    self.sse_frame(
+                        "finish",
+                        {
+                            "event": "finish",
+                            "finish_reason": state.finish_reason,
+                            "request_id": state.request_id,
+                        },
+                    )
+                )
+                break
+        return {"finish_reason": state.finish_reason, "frames": frames}
+
+
+def run_http_api_demo():
+    engine = ToyEngine(max_queue_size=2)
+    api = MinimalHTTPAPI(engine)
+
+    sync_response = api.generate(
+        {"prompt": "sync request", "max_new_tokens": 4, "temperature": 0.0}
+    )
+    stream_frames = list(
+        api.generate_stream({"prompt": "stream request", "max_new_tokens": 4, "stream": True})
+    )
+    invalid_response = api.generate({"prompt": "", "max_new_tokens": 4})
+
+    engine.waiting_queue = [
+        RequestState("busy-a", "queued", 1, 0.7, 1.0, False),
+        RequestState("busy-b", "queued", 1, 0.7, 1.0, False),
+    ]
+    busy_response = api.generate({"prompt": "busy request", "max_new_tokens": 4})
+    engine.waiting_queue = []
+
+    cancel_result = api.stream_until_cancel(
+        {"prompt": "cancel request", "max_new_tokens": 6, "stream": True},
+        cancel_after_frames=1,
+    )
+
+    summary = {
+        "sync_response": sync_response,
+        "stream_frame_count": len(stream_frames),
+        "stream_first_frame": stream_frames[0].strip(),
+        "invalid_response": invalid_response,
+        "busy_response": busy_response,
+        "cancel_finish_reason": cancel_result["finish_reason"],
+        "kv_released": engine.released_kv,
+    }
+    gates = {
+        "sync_200": sync_response["status_code"] == 200
+        and sync_response["body"]["text"] == "SYNC",
+        "stream_sse_frames": len(stream_frames) == 5
+        and stream_frames[0].startswith("event: delta\n")
+        and stream_frames[-1].startswith("event: finish\n"),
+        "invalid_400": invalid_response["status_code"] == 400,
+        "queue_full_429": busy_response["status_code"] == 429,
+        "cancel_cleanup": cancel_result["finish_reason"] == "client_cancelled"
+        and "req-0003" in engine.released_kv,
+    }
+    gates["http_api_gate"] = all(gates.values())
+    return summary, gates
+
+
+summary, gates = run_http_api_demo()
+print("api_summary=", summary)
+print("http_api_gates=", gates)
+```
+
+一组稳定输出：
+
+```text
+api_summary= {'sync_response': {'status_code': 200, 'body': {'request_id': 'req-0001', 'text': 'SYNC', 'finish_reason': 'length', 'usage': {'output_tokens': 4}}}, 'stream_frame_count': 5, 'stream_first_frame': 'event: delta\ndata: {"delta": "A", "event": "delta"}', 'invalid_response': {'status_code': 400, 'body': {'error': {'message': 'prompt must be a non-empty string'}}}, 'busy_response': {'status_code': 429, 'body': {'error': {'message': 'server is busy'}}}, 'cancel_finish_reason': 'client_cancelled', 'kv_released': ['req-0001', 'req-0002', 'req-0003']}
+http_api_gates= {'sync_200': True, 'stream_sse_frames': True, 'invalid_400': True, 'queue_full_429': True, 'cancel_cleanup': True, 'http_api_gate': True}
+```
+
+这个 demo 的关键证据：
+
+1. `sync_response` 返回 200、完整文本、finish reason 和 usage。
+2. `stream_frame_count` 是 5，说明 4 个 delta 加 1 个 finish event 都被写成 SSE frame。
+3. 空 prompt 返回 400，不进入 engine。
+4. 队列满返回 429，不创建新 request id。
+5. 取消请求的 finish reason 是 `client_cancelled`，并且 `kv_released` 包含对应 request id。
+
+## 14.15 常见误区
 
 误区一：HTTP API 直接调用 `model.generate()` 就是 serving engine。
 
@@ -404,7 +778,7 @@ API 层必须做 admission control，否则过载时会拖垮系统。
 
 兼容接口还涉及 messages、stream delta、usage、finish reason、错误码和参数语义。
 
-## 14.15 面试追问
+## 14.16 面试追问
 
 1. HTTP API 层和 serving engine 层应该如何解耦？
 2. 非流式 `/generate` 的执行流程是什么？
@@ -422,7 +796,7 @@ API 层必须做 admission control，否则过载时会拖垮系统。
 3. 然后说明 streaming 通过 stream queue 或事件流返回。
 4. 最后补取消、限流、线程安全和 OpenAI-compatible 兼容细节。
 
-## 14.16 小练习
+## 14.17 小练习
 
 1. 用 FastAPI 写一个 `/generate` endpoint，把 prompt 转成 RequestState。
 2. 写一个后台线程循环调用 `engine.step()`。
@@ -430,7 +804,7 @@ API 层必须做 admission control，否则过载时会拖垮系统。
 4. 实现 SSE streaming，从 `stream_queue` 中读取事件。
 5. 给 API 加上最大队列长度限制，超过后返回 429。
 
-## 14.17 本章小结
+## 14.18 本章小结
 
 本章把 MiniEngine 包成了最小 HTTP API 服务。
 

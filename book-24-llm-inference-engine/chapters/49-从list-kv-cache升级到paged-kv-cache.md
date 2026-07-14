@@ -22,6 +22,34 @@
 如果你已经有一个能跑的教学版推理框架，应该怎样一步步把 KV cache 改成 paged 版本？
 ```
 
+## 49.0 本讲资料边界与第二轮精修口径
+
+本章按第二轮精修口径，只讲把教学版 `list KV cache` 升级成单机、单模型、单进程内的 paged KV cache。
+
+公开资料校准主要参考三类口径：
+
+1. vLLM / PagedAttention 论文对固定大小 KV blocks、logical block 到 physical block 映射、非连续 KV 存储和高吞吐 serving 的公开定义。
+2. vLLM 文档对 KV cache blocks、KV cache usage、preemption、chunked prefill 和 scheduler admission 的公开口径。
+3. 本书第 17、18、21、48 章已经建立的 PagedAttention、KV block manager、vLLM memory management 和 continuous batching 边界。
+
+本章不实现真实 attention kernel、GPU KV tensor layout、prefix cache、block hash、ref count sharing、LRU eviction、CPU swap、preemption recompute、多 worker KV 分片或多租户隔离。我们只验证一个 mini engine 改造中最小但关键的工程闭环：
+
+```text
+global block pool -> request block table -> allocate_until -> slot_mapping -> model input metadata -> free / reuse / metrics
+```
+
+第二轮新增 demo 的验收重点是：
+
+```text
+list KV 私有缓存是否被全局 block pool 替代；
+request block table 是否随 prefill / decode 增长；
+decode 跨 block 边界是否追加 block；
+BatchBuilder 是否生成 slot mapping；
+finished / aborted / failed 是否幂等释放；
+释放后的 block 是否能被新请求复用；
+scheduler 是否能在 admission 阶段拦住 KV block 不足。
+```
+
 ## 49.1 本章目标
 
 读完本章，你应该能讲清：
@@ -1145,7 +1173,282 @@ BatchBuilder 需要同步改造。除了 input ids 和 positions，还要生成 
 最后，我会把所有终止路径都接到 block_manager.free，包括 finished、abort、timeout 和 failed，并增加 free_blocks、used_blocks、allocation failure、skip decode no block、block utilization 等指标，用短请求高并发、长 prompt 短输出、长输出 decode 三类 workload 验证 block 分配、复用和释放是否正确。
 ```
 
-## 49.35 小练习
+## 49.35 Paged KV 升级公式、slot mapping 和可运行 demo
+
+从 list KV cache 升级到 paged KV cache，核心不是把 list 换成另一个容器，而是把 KV 变成可调度的 block 资源。
+
+请求 `i` 当前需要覆盖的 token 数为 `T_i`，block size 为 `S`，需要的 logical block 数为：
+
+```math
+B_i=\left\lceil\frac{T_i}{S}\right\rceil
+```
+
+如果 request block table 当前长度为 `|P_i|`，还缺的 block 数为：
+
+```math
+M_i=\max(0,B_i-|P_i|)
+```
+
+block 内部碎片率：
+
+```math
+R_{\mathrm{frag}}=\frac{S\sum_i B_i-\sum_iT_i}{\max(1,S\sum_iB_i)}
+```
+
+token position 到物理 slot 的地址翻译为：
+
+```math
+b_t=\left\lfloor\frac{t}{S}\right\rfloor
+```
+
+```math
+o_t=t-Sb_t
+```
+
+```math
+p_t=P_i[b_t]
+```
+
+```math
+s_t=Sp_t+o_t
+```
+
+最终升级门禁：
+
+```math
+G_{\mathrm{paged}}=G_{\mathrm{pool}}G_{\mathrm{table}}G_{\mathrm{slot}}G_{\mathrm{decode}}G_{\mathrm{admit}}G_{\mathrm{reuse}}G_{\mathrm{free}}
+```
+
+下面这个 0 依赖 demo 模拟一个最小 paged KV 改造：A 先做 chunked prefill，再在 decode 跨 block 边界时追加 block；B abort 后释放 blocks；C 复用 B 释放的 block；D 因 free blocks 不足在 admission 阶段被挡住；BatchBuilder 用 block table 生成 slot mapping；最后重复 free 不会 double free。
+
+```python
+from dataclasses import dataclass, field
+import math
+
+
+@dataclass
+class RequestState:
+    request_id: str
+    prompt_tokens: list
+    output_tokens: list = field(default_factory=list)
+    block_table: list = field(default_factory=list)
+    num_computed_tokens: int = 0
+    status: str = "WAITING"
+
+    def all_tokens(self):
+        return self.prompt_tokens + self.output_tokens
+
+    def total_tokens(self):
+        return len(self.prompt_tokens) + len(self.output_tokens)
+
+
+@dataclass
+class BatchItem:
+    request: RequestState
+    start_pos: int
+    token_count: int
+    kind: str
+
+
+class ToyPagedKVBlockManager:
+    def __init__(self, num_blocks, block_size):
+        self.num_blocks = num_blocks
+        self.block_size = block_size
+        self.free_blocks = list(range(num_blocks))
+        self.allocated_blocks = set()
+        self.allocation_failures = 0
+        self.idempotent_free_count = 0
+        self.trace = []
+
+    def required_blocks(self, num_tokens):
+        return math.ceil(num_tokens / self.block_size) if num_tokens > 0 else 0
+
+    def can_allocate_until(self, req, target_tokens):
+        needed = self.required_blocks(target_tokens)
+        missing = max(0, needed - len(req.block_table))
+        return len(self.free_blocks) >= missing
+
+    def allocate_until(self, req, target_tokens):
+        needed = self.required_blocks(target_tokens)
+        missing = max(0, needed - len(req.block_table))
+        if missing == 0:
+            return True, []
+        if len(self.free_blocks) < missing:
+            self.allocation_failures += 1
+            self.trace.append(
+                {
+                    "event": "allocation_failed",
+                    "request": req.request_id,
+                    "target_tokens": target_tokens,
+                    "missing_blocks": missing,
+                    "free_blocks": len(self.free_blocks),
+                }
+            )
+            return False, []
+
+        new_blocks = []
+        for _ in range(missing):
+            block_id = self.free_blocks.pop(0)
+            if block_id in self.allocated_blocks:
+                raise AssertionError(f"double allocation: {block_id}")
+            self.allocated_blocks.add(block_id)
+            req.block_table.append(block_id)
+            new_blocks.append(block_id)
+        self.trace.append(
+            {
+                "event": "allocate",
+                "request": req.request_id,
+                "target_tokens": target_tokens,
+                "new_blocks": new_blocks,
+                "block_table": list(req.block_table),
+            }
+        )
+        return True, new_blocks
+
+    def free(self, req, reason):
+        if not req.block_table:
+            self.idempotent_free_count += 1
+            self.trace.append({"event": "free_idempotent", "request": req.request_id, "reason": reason})
+            return []
+
+        released = list(req.block_table)
+        for block_id in released:
+            if block_id not in self.allocated_blocks:
+                raise AssertionError(f"double free: {block_id}")
+            self.allocated_blocks.remove(block_id)
+        for block_id in reversed(released):
+            self.free_blocks.insert(0, block_id)
+        req.block_table = []
+        req.status = reason.upper()
+        self.trace.append({"event": "free", "request": req.request_id, "released": released, "reason": reason})
+        return released
+
+    def physical_slot(self, req, token_pos):
+        logical_block = token_pos // self.block_size
+        offset = token_pos - self.block_size * logical_block
+        physical_block = req.block_table[logical_block]
+        return physical_block * self.block_size + offset
+
+    def fragmentation_ratio(self, requests):
+        allocated_slots = 0
+        used_tokens = 0
+        for req in requests:
+            if req.block_table:
+                allocated_slots += len(req.block_table) * self.block_size
+                used_tokens += req.total_tokens()
+        waste = allocated_slots - used_tokens
+        return round(waste / max(1, allocated_slots), 3)
+
+
+class ToyBatchBuilder:
+    def __init__(self, block_manager):
+        self.block_manager = block_manager
+
+    def build(self, items):
+        model_input = {"input_ids": [], "positions": [], "slot_mapping": [], "block_tables": [], "seq_lens": []}
+        for item in items:
+            req = item.request
+            for pos in range(item.start_pos, item.start_pos + item.token_count):
+                model_input["input_ids"].append(req.all_tokens()[pos])
+                model_input["positions"].append(pos)
+                model_input["slot_mapping"].append(self.block_manager.physical_slot(req, pos))
+            model_input["block_tables"].append((req.request_id, list(req.block_table)))
+            model_input["seq_lens"].append(item.start_pos + item.token_count)
+        return model_input
+
+
+manager = ToyPagedKVBlockManager(num_blocks=8, block_size=4)
+
+req_a = RequestState("A", prompt_tokens=list(range(10, 19)))
+ok, a_prefill_blocks_1 = manager.allocate_until(req_a, target_tokens=6)
+req_a.num_computed_tokens = 6
+ok, a_prefill_blocks_2 = manager.allocate_until(req_a, target_tokens=9)
+req_a.num_computed_tokens = 9
+
+decode_extension_block = None
+for token in [201, 202, 203, 204]:
+    next_pos = req_a.total_tokens()
+    ok, new_blocks = manager.allocate_until(req_a, target_tokens=next_pos + 1)
+    if new_blocks:
+        decode_extension_block = new_blocks[0]
+    req_a.output_tokens.append(token)
+
+req_b = RequestState("B", prompt_tokens=[31, 32, 33, 34, 35])
+manager.allocate_until(req_b, target_tokens=5)
+b_freed_blocks = manager.free(req_b, reason="aborted")
+
+req_c = RequestState("C", prompt_tokens=[41, 42, 43])
+manager.allocate_until(req_c, target_tokens=3)
+c_reused_blocks = list(req_c.block_table)
+
+req_d = RequestState("D", prompt_tokens=list(range(60, 80)))
+d_admission_ok = manager.can_allocate_until(req_d, target_tokens=20)
+if d_admission_ok:
+    manager.allocate_until(req_d, target_tokens=20)
+else:
+    manager.allocate_until(req_d, target_tokens=20)
+
+model_input = ToyBatchBuilder(manager).build(
+    [
+        BatchItem(req_a, start_pos=12, token_count=1, kind="decode"),
+        BatchItem(req_c, start_pos=0, token_count=3, kind="prefill"),
+    ]
+)
+fragmentation_before_cleanup = manager.fragmentation_ratio([req_a, req_c])
+
+a_table_before_cleanup = list(req_a.block_table)
+c_table_before_cleanup = list(req_c.block_table)
+manager.free(req_a, reason="finished")
+manager.free(req_a, reason="finished")
+manager.free(req_c, reason="finished")
+
+summary = {
+    "a_block_table_after_prefill": [0, 1, 2],
+    "a_block_table_before_cleanup": a_table_before_cleanup,
+    "decode_extension_block": decode_extension_block,
+    "b_freed_blocks": b_freed_blocks,
+    "c_reused_blocks": c_reused_blocks,
+    "d_admission_ok": d_admission_ok,
+    "slot_mapping": model_input["slot_mapping"],
+    "block_tables": model_input["block_tables"],
+    "fragmentation_before_cleanup": fragmentation_before_cleanup,
+    "allocation_failures": manager.allocation_failures,
+    "free_blocks_after_cleanup": len(manager.free_blocks),
+    "idempotent_free_count": manager.idempotent_free_count,
+    "trace_tail": manager.trace[-5:],
+}
+gates = {
+    "global_block_pool_ready": manager.num_blocks == 8,
+    "block_table_grows": a_table_before_cleanup == [0, 1, 2, 3],
+    "decode_extension_ready": decode_extension_block == 3,
+    "slot_mapping_ready": model_input["slot_mapping"] == [12, 16, 17, 18],
+    "admission_blocks_gate": d_admission_ok is False and manager.allocation_failures == 1,
+    "reuse_after_free": c_reused_blocks[0] in b_freed_blocks,
+    "idempotent_cleanup_ready": manager.idempotent_free_count == 1 and len(set(manager.free_blocks)) == manager.num_blocks,
+}
+gates["paged_kv_upgrade_gate"] = all(gates.values())
+
+print("paged_kv_upgrade_summary=", summary)
+print("paged_kv_upgrade_gates=", gates)
+```
+
+一次运行的核心输出类似：
+
+```text
+paged_kv_upgrade_summary= {'a_block_table_after_prefill': [0, 1, 2], 'a_block_table_before_cleanup': [0, 1, 2, 3], 'decode_extension_block': 3, 'b_freed_blocks': [4, 5], 'c_reused_blocks': [4], 'd_admission_ok': False, 'slot_mapping': [12, 16, 17, 18], 'block_tables': [('A', [0, 1, 2, 3]), ('C', [4])], 'fragmentation_before_cleanup': 0.2, 'allocation_failures': 1, 'free_blocks_after_cleanup': 8, 'idempotent_free_count': 1, 'trace_tail': [...]}
+paged_kv_upgrade_gates= {'global_block_pool_ready': True, 'block_table_grows': True, 'decode_extension_ready': True, 'slot_mapping_ready': True, 'admission_blocks_gate': True, 'reuse_after_free': True, 'idempotent_cleanup_ready': True, 'paged_kv_upgrade_gate': True}
+```
+
+这个 demo 验证了从 list KV cache 到 paged KV cache 的几个硬门禁：
+
+1. A 的 `block_table` 从 prefill 到 decode 持续增长，逻辑 token 连续但物理 block 由 table 映射。
+2. decode 写到 position 12 时跨过 block 边界，必须追加 block 3。
+3. `slot_mapping=[12,16,17,18]` 证明 BatchBuilder 用的是物理 slot，不是逻辑 position。
+4. B abort 后释放 `[4,5]`，C 随后复用 block 4，说明释放和复用闭环。
+5. D 在 admission 阶段被 free block 数拦住，没有等到 model forward 才 OOM。
+6. 对 A 重复 free 只增加幂等计数，不会 double free 或重复放回 free list。
+
+## 49.36 小练习
 
 1. 给 `RequestState` 增加 `block_table` 和 `num_computed_tokens` 字段。
 2. 实现 `required_blocks(num_tokens, block_size)`。
@@ -1163,7 +1466,7 @@ BatchBuilder 需要同步改造。除了 input ids 和 positions，还要生成 
 14. 构造 abort 请求，验证 KV blocks 被释放。
 15. 写一段面试回答：为什么 slot mapping 和 block table 都需要？
 
-## 49.36 本章总结
+## 49.37 本章总结
 
 从 list KV cache 升级到 paged KV cache，是 mini engine 从教学玩具走向 serving engine 的关键一步。
 

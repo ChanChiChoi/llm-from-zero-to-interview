@@ -29,6 +29,25 @@ router 眼里的 worker 可能是一张 GPU 上的完整模型副本，也可能
 
 重点是理解 serving 里模型并行和 KV cache 的工程含义。
 
+## 56.0 本讲资料边界与第二轮精修口径
+
+本章按第二轮精修口径，只讲教学版 serving engine 在单个 worker 内部如何理解 tensor parallel、pipeline parallel 和分布式 KV cache。
+
+公开资料校准主要参考四类口径：
+
+1. vLLM parallelism / scaling 文档对单卡、多卡 tensor parallel、多节点 tensor + pipeline parallel、Ray / multiprocessing runtime、GPU KV cache size 和跨节点通信的公开说明。
+2. vLLM data parallel deployment 文档对 DP rank、独立 KV cache、running / waiting queue 负载均衡和 KV cache aware routing 方向的公开说明。
+3. NVIDIA NCCL collective 文档对 AllReduce、AllGather、ReduceScatter、Broadcast 和 AlltoAll 的稳定通信语义说明。
+4. Megatron-LM 论文和工程口径对 tensor parallel、pipeline parallel 与 data parallel 组合的经典抽象说明，并结合本书第 24、41、52、55 章对并行方式、跨节点网络、统一调度循环和 request router 的教学边界。
+
+本章不实现真实 GPU kernel、NCCL collective、Ray actor、pipeline schedule、MoE expert parallel、context parallel、生产级 TP/PP placement、跨节点 RDMA 调优、分布式 prefix cache 协议或真实 KV connector。我们只验证一个最小闭环：
+
+```text
+Parallel group plan -> TP rank shard -> PP stage layer ownership -> distributed KV block table -> collective cost -> pipeline bubble -> cross-rank cleanup -> migration vs recompute decision
+```
+
+第二轮新增 demo 的验收重点是：router 看到的是 parallel group，不是单张 GPU；TP rank 的逻辑 block table 必须一致；TP 下 KV 按 head shard 分布；PP 下 KV 按 layer stage 分布；cancel / finish / preemption 必须跨 rank / stage 一致释放；TP size、PP size 和 KV 迁移决策必须用通信、bubble、显存和 workload 共同判断。
+
 ## 56.1 本章目标
 
 读完本章，你应该能讲清：
@@ -842,7 +861,327 @@ PP 的难点是 pipeline bubble 和 stage imbalance。在线 decode 有逐 token
 KV cache 是 serving 的关键状态。TP 下 KV 通常按 heads 分片，每个 rank 保存本地 shard，但逻辑 block table 必须一致；PP 下每个 stage 保存自己层的 KV。由于 KV cache 很大且和 block table、position、layout、rank shard 绑定，正在 decode 的请求很难跨 worker 迁移。实际系统通常依赖 request locality、sticky routing 和 worker-local prefix cache，而不是频繁迁移 KV。
 ```
 
-## 56.24 小练习
+## 56.24 Distributed Parallel KV 公式、通信门禁和可运行 demo
+
+对于一个请求，KV cache 的总字节数可以估算为：
+
+```math
+M_i^{\mathrm{kv}}=2LHN_iD_hb
+```
+
+其中 `2` 来自 K/V，`L` 是层数，`H` 是 KV heads，`N_i` 是已缓存 token 数，`D_h` 是 head dim，`b` 是每个元素字节数。
+
+TP size 为 `T` 时，每个 rank 通常只保存自己的 head shard：
+
+```math
+M_{i,r}^{\mathrm{tp}}=\frac{M_i^{\mathrm{kv}}}{T}
+```
+
+PP size 为 `P` 时，每个 stage 只保存自己负责层的 KV：
+
+```math
+M_{i,s}^{\mathrm{pp}}=2L_sHN_iD_hb
+```
+
+一次 collective 的简化通信代价可以写成：
+
+```math
+T_{\mathrm{comm}}(m)=\alpha+\frac{m}{B_{\mathrm{link}}}\rho
+```
+
+pipeline bubble 的教学版比例：
+
+```math
+R_{\mathrm{bubble}}=\frac{P-1}{M_{\mathrm{micro}}+P-1}
+```
+
+远程拉取 KV 与重算的决策可以写成：
+
+```math
+D_i^{\mathrm{move}}=\mathbf{1}\left[T_{\mathrm{transfer}}(M_i^{\mathrm{kv}})<T_i^{\mathrm{recompute}}\right]
+```
+
+最终用一个组合门禁收束：
+
+```math
+G_{\mathrm{dpkv}}=G_{\mathrm{group}}G_{\mathrm{tp}}G_{\mathrm{pp}}G_{\mathrm{table}}G_{\mathrm{comm}}G_{\mathrm{bubble}}G_{\mathrm{move}}G_{\mathrm{cleanup}}
+```
+
+下面这个 0 依赖 demo 用 toy 数字验证这些边界：
+
+```python
+from dataclasses import dataclass, field
+from math import ceil
+
+
+@dataclass
+class ParallelConfig:
+    num_layers: int
+    num_kv_heads: int
+    head_dim: int
+    dtype_bytes: int
+    tp_size: int
+    pp_size: int
+    block_size: int
+    link_bandwidth_mib_s: float
+    link_latency_ms: float
+
+
+@dataclass
+class RequestProfile:
+    request_id: str
+    prompt_tokens: int
+    generated_tokens: int
+    output_budget: int
+    micro_batches: int
+
+
+@dataclass
+class TPRankKV:
+    rank_id: int
+    head_range: tuple[int, int]
+    block_table: list[int] = field(default_factory=list)
+    local_blocks: dict[int, str] = field(default_factory=dict)
+
+
+@dataclass
+class PPStageKV:
+    stage_id: int
+    layer_range: tuple[int, int]
+    block_table: list[int] = field(default_factory=list)
+    local_layers: dict[int, list[int]] = field(default_factory=dict)
+
+
+class ToyDistributedParallelKVAuditor:
+    def __init__(self, config: ParallelConfig):
+        self.config = config
+        self.tp_ranks = self._build_tp_ranks()
+        self.pp_stages = self._build_pp_stages()
+        self.cleanup_events = []
+
+    def _build_tp_ranks(self) -> list[TPRankKV]:
+        heads_per_rank = self.config.num_kv_heads // self.config.tp_size
+        ranks = []
+        for rank in range(self.config.tp_size):
+            start = rank * heads_per_rank
+            end = start + heads_per_rank
+            ranks.append(TPRankKV(rank_id=rank, head_range=(start, end)))
+        return ranks
+
+    def _build_pp_stages(self) -> list[PPStageKV]:
+        layers_per_stage = self.config.num_layers // self.config.pp_size
+        stages = []
+        for stage in range(self.config.pp_size):
+            start = stage * layers_per_stage
+            end = start + layers_per_stage
+            stages.append(PPStageKV(stage_id=stage, layer_range=(start, end)))
+        return stages
+
+    def token_count(self, req: RequestProfile) -> int:
+        return req.prompt_tokens + req.generated_tokens
+
+    def required_blocks(self, req: RequestProfile) -> int:
+        return ceil(self.token_count(req) / self.config.block_size)
+
+    def kv_bytes_total(self, req: RequestProfile) -> int:
+        return (
+            2
+            * self.config.num_layers
+            * self.config.num_kv_heads
+            * self.token_count(req)
+            * self.config.head_dim
+            * self.config.dtype_bytes
+        )
+
+    def kv_bytes_per_tp_rank(self, req: RequestProfile) -> int:
+        return self.kv_bytes_total(req) // self.config.tp_size
+
+    def kv_bytes_per_pp_stage(self, req: RequestProfile) -> list[int]:
+        result = []
+        for stage in self.pp_stages:
+            layer_count = stage.layer_range[1] - stage.layer_range[0]
+            result.append(
+                2
+                * layer_count
+                * self.config.num_kv_heads
+                * self.token_count(req)
+                * self.config.head_dim
+                * self.config.dtype_bytes
+            )
+        return result
+
+    def allocate_distributed_kv(self, req: RequestProfile) -> list[int]:
+        logical_blocks = list(range(self.required_blocks(req)))
+        for rank in self.tp_ranks:
+            rank.block_table = list(logical_blocks)
+            rank.local_blocks = {
+                block_id: f"rank{rank.rank_id}_block{block_id}" for block_id in logical_blocks
+            }
+        for stage in self.pp_stages:
+            stage.block_table = list(logical_blocks)
+            stage.local_layers = {
+                layer: list(logical_blocks)
+                for layer in range(stage.layer_range[0], stage.layer_range[1])
+            }
+        return logical_blocks
+
+    def tp_head_coverage(self) -> list[int]:
+        heads = []
+        for rank in self.tp_ranks:
+            heads.extend(range(rank.head_range[0], rank.head_range[1]))
+        return heads
+
+    def tp_block_tables_consistent(self) -> bool:
+        tables = [rank.block_table for rank in self.tp_ranks]
+        return all(table == tables[0] for table in tables)
+
+    def pp_layer_coverage(self) -> list[int]:
+        layers = []
+        for stage in self.pp_stages:
+            layers.extend(range(stage.layer_range[0], stage.layer_range[1]))
+        return layers
+
+    def collective_ms(self, message_mib: float, factor: float) -> float:
+        transfer = message_mib / self.config.link_bandwidth_mib_s * 1000.0
+        return round(self.config.link_latency_ms + transfer * factor, 3)
+
+    def communication_report(self, req: RequestProfile) -> dict[str, float]:
+        hidden_mib = req.prompt_tokens * self.config.num_kv_heads * self.config.head_dim
+        hidden_mib *= self.config.dtype_bytes / (1024 * 1024)
+        decode_mib = self.config.num_kv_heads * self.config.head_dim
+        decode_mib *= self.config.dtype_bytes / (1024 * 1024)
+        factor = (self.config.tp_size - 1) / self.config.tp_size
+        prefill_ms = self.collective_ms(hidden_mib, factor)
+        decode_ms = self.collective_ms(decode_mib, factor)
+        return {
+            "prefill_all_reduce_ms": prefill_ms,
+            "decode_all_reduce_ms": decode_ms,
+            "decode_latency_share": round(decode_ms / max(prefill_ms, 0.001), 3),
+        }
+
+    def pipeline_bubble_ratio(self, req: RequestProfile) -> float:
+        return round(
+            (self.config.pp_size - 1) / (req.micro_batches + self.config.pp_size - 1), 3
+        )
+
+    def migration_decision(self, req: RequestProfile) -> dict[str, object]:
+        kv_mib = self.kv_bytes_total(req) / (1024 * 1024)
+        transfer_ms = self.collective_ms(kv_mib, 1.0)
+        recompute_ms = round(req.prompt_tokens * 0.035, 3)
+        decision = "fetch_remote" if transfer_ms < recompute_ms else "recompute"
+        return {
+            "kv_mib": round(kv_mib, 3),
+            "transfer_ms": transfer_ms,
+            "recompute_ms": recompute_ms,
+            "decision": decision,
+        }
+
+    def cleanup_request(self, req: RequestProfile) -> bool:
+        for rank in self.tp_ranks:
+            rank.block_table = []
+            rank.local_blocks = {}
+            self.cleanup_events.append((req.request_id, "tp_rank", rank.rank_id))
+        for stage in self.pp_stages:
+            stage.block_table = []
+            stage.local_layers = {}
+            self.cleanup_events.append((req.request_id, "pp_stage", stage.stage_id))
+        return all(not rank.block_table for rank in self.tp_ranks) and all(
+            not stage.block_table for stage in self.pp_stages
+        )
+
+    def audit(self, req: RequestProfile) -> tuple[dict[str, object], dict[str, bool]]:
+        logical_blocks = self.allocate_distributed_kv(req)
+        kv_total = self.kv_bytes_total(req)
+        kv_tp = self.kv_bytes_per_tp_rank(req)
+        kv_pp = self.kv_bytes_per_pp_stage(req)
+        communication = self.communication_report(req)
+        migration = self.migration_decision(req)
+        table_ok = self.tp_block_tables_consistent()
+        cleanup_ok = self.cleanup_request(req)
+
+        summary = {
+            "worker_unit": "tp_pp_group",
+            "tp_head_ranges": [rank.head_range for rank in self.tp_ranks],
+            "tp_head_coverage": self.tp_head_coverage(),
+            "logical_blocks": logical_blocks,
+            "tp_block_tables_consistent_before_cleanup": table_ok,
+            "pp_layer_ranges": [stage.layer_range for stage in self.pp_stages],
+            "pp_layer_coverage": self.pp_layer_coverage(),
+            "kv_total_mib": round(kv_total / (1024 * 1024), 3),
+            "kv_per_tp_rank_mib": round(kv_tp / (1024 * 1024), 3),
+            "kv_per_pp_stage_mib": [round(value / (1024 * 1024), 3) for value in kv_pp],
+            "communication": communication,
+            "pipeline_bubble_ratio": self.pipeline_bubble_ratio(req),
+            "migration": migration,
+            "cleanup_events": self.cleanup_events,
+            "cleanup_ok": cleanup_ok,
+        }
+        gates = {
+            "parallel_group_boundary_ready": summary["worker_unit"] == "tp_pp_group",
+            "tp_head_shard_ready": summary["tp_head_coverage"]
+            == list(range(self.config.num_kv_heads)),
+            "tp_block_table_ready": summary["tp_block_tables_consistent_before_cleanup"],
+            "pp_layer_ownership_ready": summary["pp_layer_coverage"]
+            == list(range(self.config.num_layers)),
+            "kv_accounting_ready": abs(
+                summary["kv_total_mib"]
+                - summary["kv_per_tp_rank_mib"] * self.config.tp_size
+            )
+            <= 0.004,
+            "collective_cost_ready": communication["prefill_all_reduce_ms"] > 0
+            and communication["decode_all_reduce_ms"] > 0,
+            "pipeline_bubble_ready": summary["pipeline_bubble_ratio"] > 0,
+            "migration_decision_ready": migration["decision"] in {"fetch_remote", "recompute"},
+            "cross_rank_cleanup_ready": cleanup_ok,
+        }
+        gates["distributed_parallel_kv_gate"] = all(gates.values())
+        return summary, gates
+
+
+config = ParallelConfig(
+    num_layers=8,
+    num_kv_heads=8,
+    head_dim=16,
+    dtype_bytes=2,
+    tp_size=4,
+    pp_size=2,
+    block_size=16,
+    link_bandwidth_mib_s=12000.0,
+    link_latency_ms=0.08,
+)
+request = RequestProfile(
+    request_id="req-long",
+    prompt_tokens=80,
+    generated_tokens=16,
+    output_budget=32,
+    micro_batches=2,
+)
+
+auditor = ToyDistributedParallelKVAuditor(config)
+summary, gates = auditor.audit(request)
+
+print("distributed_parallel_kv_summary=", summary)
+print("distributed_parallel_kv_gates=", gates)
+```
+
+一次运行的核心输出类似：
+
+```text
+distributed_parallel_kv_summary= {'worker_unit': 'tp_pp_group', 'tp_head_ranges': [(0, 2), (2, 4), (4, 6), (6, 8)], 'tp_head_coverage': [0, 1, 2, 3, 4, 5, 6, 7], 'logical_blocks': [0, 1, 2, 3, 4, 5], 'tp_block_tables_consistent_before_cleanup': True, 'pp_layer_ranges': [(0, 4), (4, 8)], 'pp_layer_coverage': [0, 1, 2, 3, 4, 5, 6, 7], 'kv_total_mib': 0.375, 'kv_per_tp_rank_mib': 0.094, 'kv_per_pp_stage_mib': [0.188, 0.188], 'communication': {'prefill_all_reduce_ms': 0.081, 'decode_all_reduce_ms': 0.08, 'decode_latency_share': 0.988}, 'pipeline_bubble_ratio': 0.333, 'migration': {'kv_mib': 0.375, 'transfer_ms': 0.111, 'recompute_ms': 2.8, 'decision': 'fetch_remote'}, 'cleanup_events': [('req-long', 'tp_rank', 0), ('req-long', 'tp_rank', 1), ('req-long', 'tp_rank', 2), ('req-long', 'tp_rank', 3), ('req-long', 'pp_stage', 0), ('req-long', 'pp_stage', 1)], 'cleanup_ok': True}
+distributed_parallel_kv_gates= {'parallel_group_boundary_ready': True, 'tp_head_shard_ready': True, 'tp_block_table_ready': True, 'pp_layer_ownership_ready': True, 'kv_accounting_ready': True, 'collective_cost_ready': True, 'pipeline_bubble_ready': True, 'migration_decision_ready': True, 'cross_rank_cleanup_ready': True, 'distributed_parallel_kv_gate': True}
+```
+
+这个 demo 证明了几个关键点：
+
+1. router 的 worker 单元是 `tp_pp_group`，不是单张 GPU。
+2. TP rank 按 KV heads 分片，但逻辑 block table 必须一致。
+3. PP stage 按 layer range 拥有本地 KV。
+4. KV bytes 可以从 total、TP rank shard 和 PP stage shard 三个视角对齐。
+5. collective 成本和 pipeline bubble 都会进入 TPOT / E2E 解释。
+6. 远程 KV 迁移是否值得做，必须比较 transfer 与 recompute，而不是默认搬迁。
+7. finish / cancel / preemption 的清理要覆盖所有 TP ranks 和 PP stages。
+
+## 56.25 小练习
 
 1. 画出 replica parallel、TP=2、PP=2 的 worker 拓扑图。
 2. 给一个 32 heads、TP=4 的模型写出每个 rank 负责哪些 heads。
@@ -860,7 +1199,7 @@ KV cache 是 serving 的关键状态。TP 下 KV 通常按 heads 分片，每个
 14. 设计一个 `prefix_hash -> worker_ids` 的 prefix directory。
 15. 比较重新 prefill 和远程 KV 拉取在不同 prefix 长度下的成本。
 
-## 56.25 本章总结
+## 56.26 本章总结
 
 多 GPU inference 不是简单把 GPU 数量乘上去。
 

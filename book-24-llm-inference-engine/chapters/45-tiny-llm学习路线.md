@@ -16,6 +16,14 @@
 
 > 学 tiny-llm 的重点是从“模型算子和单请求 generate”一路走到“KV cache、batching、chunked prefill、paged attention 这些 serving 优化”，理解推理系统不是凭空出现的，而是在模型 forward 的每个瓶颈上逐步长出来的。
 
+## 45.0 本讲资料边界与第二轮精修口径
+
+本讲第二轮精修前，先按 `WRITING_PLAN.md` 对公开资料做校准：参考 `skyzh/tiny-llm` 官方仓库和课程首页对 tiny-llm 作为面向系统工程师的 LLM serving 课程项目、基于 Apple Silicon / MLX / 矩阵 API 从零实现 Qwen3 推理和 serving 系统的定位说明；参考课程路线对 attention、RoPE、GQA、RMSNorm、MLP、模型加载、generate、sampling、KV cache、quantized matmul、FlashAttention、continuous batching、chunked prefill、paged attention、MoE、speculative decoding、RAG、Agent 和 long context 的分周安排；并结合本书前面关于最小 generate、KV cache、sampling、batched prefill/decode、continuous batching、chunked prefill、PagedAttention 和 serving 性能指标的章节。
+
+本讲只讲“如何用 tiny-llm 从模型实现一路读到 serving 优化”：算子 shape、position 对齐、GQA 与 KV cache、generate loop、sampling、KV cache 等价性、TTFT / TPOT、batching trace、chunk position continuity 和 block table trace。不把 MLX API 细节、某个课程版本的目录顺序、真实性能数字、硬件特性、生产级 vLLM/SGLang worker 架构或完整分布式控制面写成通用结论。
+
+本讲新增 demo 是教学版 tiny-llm learning auditor：用 0 依赖 Python 模拟 13 个 learning unit，从 attention、RoPE、GQA、RMSNorm/MLP、模型加载、generate、sampling，一路到 KV cache、quantized matmul、FlashAttention、continuous batching、chunked prefill 和 paged attention；检查概念覆盖、实验覆盖、依赖顺序、serving 优化覆盖和最终学习门禁。
+
 ## 45.1 本章目标
 
 读完本章，你应该能讲清：
@@ -714,7 +722,230 @@ MLX 是实现环境，真正可迁移的是推理系统思想：KV cache、batch
 如果做项目，我会基于 tiny-llm 增加 TTFT/TPOT 统计、scheduler 日志、KV cache 使用统计，比较 naive generate、KV cache decode、continuous batching 和不同 chunked prefill size 下的延迟、吞吐和显存变化。
 ```
 
-## 45.24 小练习
+## 45.24 tiny-llm 学习路线覆盖率、实验门禁和可运行 demo
+
+先把 tiny-llm 的学习单元抽象成：
+
+```math
+U_j=(p_j,C_j,E_j,D_j)
+```
+
+其中 `p_j` 是阶段，`C_j` 是概念集合，`E_j` 是实验集合，`D_j` 是依赖的前置单元。
+
+概念覆盖率：
+
+```math
+C_{\mathrm{concept}}=\frac{|C_{\mathrm{seen}}\cap C_{\mathrm{req}}|}{\max(1,|C_{\mathrm{req}}|)}
+```
+
+实验覆盖率：
+
+```math
+C_{\mathrm{experiment}}=\frac{|E_{\mathrm{done}}\cap E_{\mathrm{req}}|}{\max(1,|E_{\mathrm{req}}|)}
+```
+
+最终门禁：
+
+```math
+G_{\mathrm{tiny}}=G_{\mathrm{op}}G_{\mathrm{gen}}G_{\mathrm{kv}}G_{\mathrm{serve}}G_{\mathrm{metric}}G_{\mathrm{order}}
+```
+
+这组公式强调：tiny-llm 不是只跑通一个文本生成 demo，而是要按顺序证明：
+
+1. 算子到模型 forward 的 shape 路径正确。
+2. generate 和 sampling 能形成最小自回归闭环。
+3. KV cache 与 naive generate 的等价性可验证。
+4. continuous batching、chunked prefill、paged attention 等 serving 优化能被实验观察。
+5. TTFT、TPOT、batching trace、chunk position 和 block table 都能输出证据。
+
+```python
+from dataclasses import dataclass
+
+
+@dataclass
+class LearningUnit:
+    name: str
+    phase: str
+    concepts: tuple
+    experiments: tuple
+    dependencies: tuple
+
+
+class ToyTinyLLMLearningAuditor:
+    def __init__(self):
+        self.required_concepts = [
+            "attention_shape",
+            "rope_position",
+            "gqa_kv_heads",
+            "rmsnorm_mlp",
+            "model_load",
+            "generate_loop",
+            "sampling_policy",
+            "kv_cache",
+            "quantized_matmul",
+            "flash_attention",
+            "continuous_batching",
+            "chunked_prefill",
+            "paged_attention",
+        ]
+        self.required_experiments = [
+            "shape_trace",
+            "position_alignment",
+            "generate_trace",
+            "sampling_params",
+            "kv_cache_equivalence",
+            "ttft_tpot_metrics",
+            "batching_trace",
+            "chunk_position_continuity",
+            "block_table_trace",
+        ]
+
+    def coverage(self, seen, required):
+        return round(len(set(seen) & set(required)) / max(1, len(required)), 3)
+
+    def audit(self, units):
+        completed = set()
+        rows = []
+        for unit in units:
+            deps_ready = all(dep in completed for dep in unit.dependencies)
+            row = {
+                "unit": unit.name,
+                "phase": unit.phase,
+                "concepts": list(unit.concepts),
+                "experiments": list(unit.experiments),
+                "deps_ready": deps_ready,
+            }
+            rows.append(row)
+            if deps_ready:
+                completed.add(unit.name)
+        concepts_seen = sorted({concept for unit in units for concept in unit.concepts})
+        experiments_done = sorted({experiment for unit in units for experiment in unit.experiments})
+        summary = {
+            "units": len(rows),
+            "ready_units": sum(row["deps_ready"] for row in rows),
+            "concept_coverage": self.coverage(concepts_seen, self.required_concepts),
+            "experiment_coverage": self.coverage(experiments_done, self.required_experiments),
+            "dependency_order_ok": all(row["deps_ready"] for row in rows),
+            "serving_units": sum(unit.phase == "serving_optimization" for unit in units),
+            "missing_concepts": sorted(set(self.required_concepts) - set(concepts_seen)),
+            "missing_experiments": sorted(set(self.required_experiments) - set(experiments_done)),
+        }
+        gates = {
+            "operator_to_model_ready": all(
+                concept in concepts_seen
+                for concept in [
+                    "attention_shape",
+                    "rope_position",
+                    "gqa_kv_heads",
+                    "rmsnorm_mlp",
+                    "model_load",
+                ]
+            ),
+            "generate_and_sampling_ready": all(
+                concept in concepts_seen for concept in ["generate_loop", "sampling_policy"]
+            ),
+            "kv_cache_equivalence_ready": (
+                "kv_cache" in concepts_seen and "kv_cache_equivalence" in experiments_done
+            ),
+            "serving_optimizations_visible": all(
+                concept in concepts_seen
+                for concept in [
+                    "flash_attention",
+                    "continuous_batching",
+                    "chunked_prefill",
+                    "paged_attention",
+                ]
+            ),
+            "metrics_experiments_ready": all(
+                experiment in experiments_done
+                for experiment in ["ttft_tpot_metrics", "batching_trace", "block_table_trace"]
+            ),
+            "dependency_order_ok": summary["dependency_order_ok"],
+        }
+        gates["tiny_llm_learning_gate"] = all(gates.values())
+        return rows, summary, gates
+
+
+units = [
+    LearningUnit("attention", "model_kernel", ("attention_shape",), ("shape_trace",), ()),
+    LearningUnit("rope", "model_kernel", ("rope_position",), ("position_alignment",), ("attention",)),
+    LearningUnit("gqa", "model_kernel", ("gqa_kv_heads",), ("shape_trace",), ("rope",)),
+    LearningUnit("rmsnorm_mlp", "model_kernel", ("rmsnorm_mlp",), ("shape_trace",), ("gqa",)),
+    LearningUnit("load_qwen", "model_forward", ("model_load",), ("shape_trace",), ("rmsnorm_mlp",)),
+    LearningUnit(
+        "generate",
+        "single_request",
+        ("generate_loop",),
+        ("generate_trace", "ttft_tpot_metrics"),
+        ("load_qwen",),
+    ),
+    LearningUnit("sampling", "single_request", ("sampling_policy",), ("sampling_params",), ("generate",)),
+    LearningUnit(
+        "kv_cache",
+        "serving_optimization",
+        ("kv_cache",),
+        ("kv_cache_equivalence", "ttft_tpot_metrics"),
+        ("sampling",),
+    ),
+    LearningUnit(
+        "quantized_matmul",
+        "serving_optimization",
+        ("quantized_matmul",),
+        ("ttft_tpot_metrics",),
+        ("load_qwen",),
+    ),
+    LearningUnit(
+        "flash_attention",
+        "serving_optimization",
+        ("flash_attention",),
+        ("ttft_tpot_metrics",),
+        ("attention",),
+    ),
+    LearningUnit(
+        "continuous_batching",
+        "serving_optimization",
+        ("continuous_batching",),
+        ("batching_trace",),
+        ("kv_cache",),
+    ),
+    LearningUnit(
+        "chunked_prefill",
+        "serving_optimization",
+        ("chunked_prefill",),
+        ("chunk_position_continuity", "ttft_tpot_metrics"),
+        ("continuous_batching",),
+    ),
+    LearningUnit(
+        "paged_attention",
+        "serving_optimization",
+        ("paged_attention",),
+        ("block_table_trace",),
+        ("chunked_prefill",),
+    ),
+]
+rows, summary, gates = ToyTinyLLMLearningAuditor().audit(units)
+print("tiny_llm_learning_summary=", summary)
+print("tiny_llm_learning_gates=", gates)
+```
+
+一次运行的核心输出类似：
+
+```text
+tiny_llm_learning_summary= {'units': 13, 'ready_units': 13, 'concept_coverage': 1.0, 'experiment_coverage': 1.0, 'dependency_order_ok': True, 'serving_units': 6, 'missing_concepts': [], 'missing_experiments': []}
+tiny_llm_learning_gates= {'operator_to_model_ready': True, 'generate_and_sampling_ready': True, 'kv_cache_equivalence_ready': True, 'serving_optimizations_visible': True, 'metrics_experiments_ready': True, 'dependency_order_ok': True, 'tiny_llm_learning_gate': True}
+```
+
+这个 demo 的重点是学习顺序：
+
+1. `attention -> rope -> gqa -> rmsnorm_mlp -> load_qwen` 证明模型 forward 的 shape 和 position 基础。
+2. `generate -> sampling` 证明最小自回归生成闭环。
+3. `kv_cache` 证明 serving 优化从避免重复计算开始。
+4. `quantized_matmul` 和 `flash_attention` 证明算子层优化。
+5. `continuous_batching -> chunked_prefill -> paged_attention` 证明多请求调度和 KV 显存治理。
+
+所以本章最终门禁是 `tiny_llm_learning_gate`：只有算子、模型、generate、sampling、KV cache、serving 优化、指标实验和依赖顺序都能闭环，tiny-llm 才不是“跑了课程 demo”，而是成为理解推理系统演进路线的证据。
+
+## 45.25 小练习
 
 1. 画出 tiny-llm 中 attention、RoPE、GQA 的 tensor shape。
 2. 推导 GQA 对 KV cache 大小的影响。
@@ -729,7 +960,7 @@ MLX 是实现环境，真正可迁移的是推理系统思想：KV cache、batch
 11. 设计一个最小 paged KV block manager。
 12. 写一个面试回答：tiny-llm 和 nano-vLLM 应该如何结合学习？
 
-## 45.25 本章总结
+## 45.26 本章总结
 
 tiny-llm 是一个从底层模型实现走向 LLM serving 的课程型项目。
 

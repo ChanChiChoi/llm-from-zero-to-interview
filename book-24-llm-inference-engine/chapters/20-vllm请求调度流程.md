@@ -8,6 +8,26 @@
 
 > vLLM 的请求调度流程可以理解为：入口层接收和预处理请求，engine core 维护请求状态并执行 scheduler，KV cache manager 分配和释放 blocks，worker/model runner 执行模型 forward，output processor 把模型输出转换成用户可见的 token 或文本。
 
+## 20.0 本讲资料边界与第二轮精修口径
+
+本讲按第二轮精修要求做过资料校准，主要参考四类公开资料：
+
+1. vLLM Architecture Overview 对 API server process、engine core process、GPU worker process、LLMEngine、AsyncLLMEngine、worker 和 model runner 的模块边界说明。
+2. vLLM V1 guide 对 V1 core engine、chunked prefill、统一 token budget 调度和功能支持边界的说明。
+3. vLLM optimization / tuning 文档对 preemption、KV cache capacity、`max_num_seqs`、`max_num_batched_tokens`、chunked prefill 和 decode-first 策略的说明。
+4. vLLM metrics 文档对 TTFT、inter-token latency / TPOT、queue time、prefill time、decode time、running / waiting 请求数、KV cache usage 和 engine core iteration 统计的观测口径。
+
+本章只讲 vLLM-like 请求调度流程的教学抽象，不绑定某个 vLLM 版本的真实类名、进程拓扑、ZMQ 通信细节、CUDA graph、scheduler 源码、model runner 内部张量格式、OpenAI server 参数全集、LoRA、多模态、speculative decoding、structured output 或分布式 data parallel / tensor parallel 实现。
+
+本章给出的公式和 demo 只用于验证一条最小请求链路：API 输入处理、engine request、waiting queue、scheduler output、KV block 分配、model runner metadata、sampler / output processor、streaming / finish reason、abort cleanup 和 metrics trace。真实系统会把这些逻辑拆到更多进程、线程、队列和异步事件里。
+
+参考资料：
+
+1. vLLM Architecture Overview：<https://docs.vllm.ai/en/latest/design/arch_overview/>
+2. vLLM V1 guide：<https://docs.vllm.ai/en/latest/usage/v1_guide/>
+3. vLLM optimization and tuning：<https://docs.vllm.ai/en/latest/configuration/optimization/>
+4. vLLM metrics：<https://docs.vllm.ai/en/latest/design/metrics/>
+
 ## 20.1 本章目标
 
 读完本章，你应该能讲清：
@@ -145,6 +165,22 @@ class RequestState:
 
 真实 vLLM 的数据结构更复杂，但主干字段离不开这些：输入 tokens、采样参数、状态、KV block 映射、输出 tokens 和时间统计。
 
+抽象成公式，一个 engine request 可以写成：
+
+$$
+R_i=(u_i,a_i,x_i,\theta_i,z_i,P_i,Y_i,b_i,t_i,m_i)
+$$
+
+其中 `u_i` 是 request id，`a_i` 是到达时间，`x_i` 是输入 token 序列，`\theta_i` 是采样参数，`z_i` 是状态，`P_i` 是 block table，`Y_i` 是已经输出的 tokens，`b_i` 是 streaming buffer，`t_i` 是时间戳集合，`m_i` 是 metrics / trace 字段。
+
+请求对象完整率可以写成：
+
+$$
+C_{\mathrm{req}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[u_i,a_i,x_i,\theta_i,z_i,P_i,Y_i,t_i,m_i\ \mathrm{ready}]
+$$
+
+如果缺 arrival time、状态或 block table，后面的 scheduler、metrics 和 cleanup 都会失真。
+
 ## 20.4 请求进入 waiting queue
 
 构造好 engine request 后，请求不会马上执行模型。
@@ -232,6 +268,14 @@ class SchedulerInput:
 
 这里的 `max_num_batched_tokens` 控制计算规模，`max_num_seqs` 控制本轮 sequence 数，block manager 控制 KV Cache 安全。
 
+本轮 scheduler 的基础预算可以写成：
+
+$$
+G_{\mathrm{sched},\tau}=\mathbf{1}[N_{\mathrm{tok},\tau}\le C_{\mathrm{tok}}]\mathbf{1}[N_{\mathrm{seq},\tau}\le C_{\mathrm{seq}}]\mathbf{1}[N_{\mathrm{block},\tau}\le F_{\tau}]
+$$
+
+这里 `N_{\mathrm{tok},\tau}` 是本轮 prefill + decode token 数，`N_{\mathrm{seq},\tau}` 是本轮执行序列数，`N_{\mathrm{block},\tau}` 是本轮新增 KV blocks，`F_{\tau}` 是调度前可用 free blocks。
+
 ## 20.7 Scheduler 的输出
 
 Scheduler 输出的不是普通文本，而是“本轮执行计划”。
@@ -261,6 +305,14 @@ class SchedulerOutput:
 但从面试角度，最重要的是说明：scheduler 的输出要同时喂给模型执行和 KV Cache 管理。
 
 如果只输出“请求列表”，model runner 不知道每个 token 对应哪些 block，也不知道哪些请求是 prefill、哪些是 decode。
+
+因此 scheduler output 至少要满足 execution metadata 完整性。设本轮被调度请求集合为 `S_{\tau}`，每个请求要有 input ids、positions、block table、slot mapping 和 phase：
+
+$$
+G_{\mathrm{meta},\tau}=\prod_{i\in S_{\tau}}G_{\mathrm{ids},i}G_{\mathrm{pos},i}G_{\mathrm{block},i}G_{\mathrm{slot},i}G_{\mathrm{phase},i}
+$$
+
+如果 `G_{\mathrm{meta},\tau}=0`，模型 runner 即使拿到请求列表，也无法安全执行 attention 和 KV 写入。
 
 ## 20.8 请求状态机
 
@@ -296,6 +348,14 @@ FAILED：模型执行、KV 分配或内部逻辑出现错误。
 ```
 
 资源包括 KV blocks、streaming buffer、请求状态、统计对象和可能的多模态缓存引用。
+
+对于请求 `i`，如果终止状态集合记为 `Z_{\mathrm{term}}=\{\mathrm{FINISHED},\mathrm{ABORTED},\mathrm{FAILED}\}`，则 cleanup 门禁可以写成：
+
+$$
+G_{\mathrm{cleanup},i}=\mathbf{1}[z_i\in Z_{\mathrm{term}}\Rightarrow |P_i|=0]
+$$
+
+这句话的含义是：只要请求已经进入终态，它的 KV block table 就不应该再持有可用资源。
 
 ## 20.9 从 WAITING 到 PREFILL
 
@@ -490,6 +550,22 @@ Streaming 对调度有两个影响。
 
 否则 GPU 还在为一个没人接收的请求生成 token。
 
+从 metrics 角度，request flow 至少要能还原三类时间：
+
+$$
+W_i=t^{\mathrm{prefill}}_i-a_i
+$$
+
+$$
+T_{\mathrm{ttft},i}=t^{\mathrm{first}}_i-a_i
+$$
+
+$$
+T_{\mathrm{e2e},i}=t^{\mathrm{done}}_i-a_i
+$$
+
+其中 `W_i` 是 queue wait，`T_{\mathrm{ttft},i}` 是首 token 可见时间，`T_{\mathrm{e2e},i}` 是请求结束时间。没有这些时间戳，scheduler 调优就只能凭感觉。
+
 ## 20.15 Abort 和 cleanup 流程
 
 Abort 是线上系统非常重要但容易被忽视的路径。
@@ -648,7 +724,375 @@ Continuous batching 是调度机制，请求生命周期管理是让这个机制
 模型输出再经过 output processor，完成 detokenization、streaming、EOS 和 stop string 检查、finish reason 生成。如果请求结束或被 abort，engine core 必须释放对应 KV blocks 并清理请求状态。这个流程每个 engine step 重复一次，因此 vLLM 可以实现 continuous batching，让请求在不同 iteration 动态加入和退出。
 ```
 
-## 20.21 小练习
+## 20.21 请求调度流程公式、状态 trace 和可运行 demo
+
+把本章的请求链路合成一个教学版总门禁，可以写成：
+
+$$
+G_{\mathrm{flow}}=G_{\mathrm{input}}G_{\mathrm{state}}G_{\mathrm{sched}}G_{\mathrm{meta}}G_{\mathrm{output}}G_{\mathrm{cleanup}}G_{\mathrm{metric}}
+$$
+
+其中：
+
+1. `G_{\mathrm{input}}`：API / input processor 产出 engine request 和 input ids。
+2. `G_{\mathrm{state}}`：请求状态按 WAITING、PREFILL、RUNNING、DECODING、FINISHED / ABORTED 迁移。
+3. `G_{\mathrm{sched}}`：scheduler 每轮不超 token、sequence 和 KV block budget。
+4. `G_{\mathrm{meta}}`：model runner metadata 含 input ids、positions、block table、slot mapping 和 phase。
+5. `G_{\mathrm{output}}`：output processor 能处理 EOS、stop token / string、max tokens 和 streaming 增量。
+6. `G_{\mathrm{cleanup}}`：FINISHED / ABORTED / FAILED 都释放 KV blocks。
+7. `G_{\mathrm{metric}}`：queue wait、TTFT、E2E、trace 和 finish reason 可复盘。
+
+下面这个 0 依赖 demo 模拟一个最小 vLLM-like 请求调度流程：A 正常 EOS，B 被 output processor 的 stop token 结束，C 在 first token 后因 `max_tokens=1` 结束，D 进入 running 后被客户端 abort。demo 同时输出 scheduler metadata 和 cleanup 结果。
+
+```python
+from dataclasses import dataclass, field
+from math import ceil
+
+
+@dataclass
+class RequestSpec:
+    request_id: str
+    arrival: int
+    prompt_tokens: int
+    planned_tokens: list
+    max_tokens: int
+    stop_token: str = None
+    abort_at: int = None
+
+
+@dataclass
+class RequestState:
+    spec: RequestSpec
+    status: str = "NEW"
+    input_ids: list = field(default_factory=list)
+    output_tokens: list = field(default_factory=list)
+    block_table: list = field(default_factory=list)
+    arrival_step: int = None
+    prefill_step: int = None
+    first_token_step: int = None
+    finish_step: int = None
+    finish_reason: str = None
+    transitions: list = field(default_factory=list)
+
+    def transition(self, status, step):
+        self.status = status
+        self.transitions.append(f"{status}@{step}")
+
+
+class ToyKVBlockManager:
+    def __init__(self, total_blocks, block_size):
+        self.total_blocks = total_blocks
+        self.block_size = block_size
+        self.free_blocks = list(range(total_blocks))
+        self.lengths = {}
+        self.max_used = 0
+
+    def used_count(self):
+        return self.total_blocks - len(self.free_blocks)
+
+    def remember_peak(self):
+        self.max_used = max(self.max_used, self.used_count())
+
+    def required_blocks(self, tokens):
+        return ceil(tokens / self.block_size)
+
+    def can_allocate(self, tokens):
+        return self.required_blocks(tokens) <= len(self.free_blocks)
+
+    def allocate_prompt(self, state):
+        need = self.required_blocks(len(state.input_ids))
+        if need > len(self.free_blocks):
+            return False
+        state.block_table = [self.free_blocks.pop(0) for _ in range(need)]
+        self.lengths[state.spec.request_id] = len(state.input_ids)
+        self.remember_peak()
+        return True
+
+    def can_append(self, state):
+        length = self.lengths[state.spec.request_id]
+        return length % self.block_size != 0 or bool(self.free_blocks)
+
+    def append_slot(self, state):
+        request_id = state.spec.request_id
+        length = self.lengths[request_id]
+        if length % self.block_size == 0:
+            if not self.free_blocks:
+                return False
+            state.block_table.append(self.free_blocks.pop(0))
+        self.lengths[request_id] += 1
+        self.remember_peak()
+        return True
+
+    def release(self, state):
+        self.free_blocks.extend(state.block_table)
+        state.block_table = []
+        self.lengths.pop(state.spec.request_id, None)
+
+    def slot_mapping(self, state, positions):
+        mapping = []
+        for position in positions:
+            logical_block = position // self.block_size
+            offset = position % self.block_size
+            physical = state.block_table[logical_block] if logical_block < len(state.block_table) else None
+            mapping.append({"position": position, "block": physical, "offset": offset})
+        return mapping
+
+
+class ToyRequestFlowEngine:
+    def __init__(self, specs, max_tokens, max_seqs, block_manager):
+        self.future_specs = sorted(specs, key=lambda spec: (spec.arrival, spec.request_id))
+        self.states = {}
+        self.max_tokens = max_tokens
+        self.max_seqs = max_seqs
+        self.block_manager = block_manager
+        self.time = 0
+        self.waiting = []
+        self.running = []
+        self.finished = []
+        self.aborted = []
+        self.trace = []
+        self.metadata_rows = []
+
+    def input_processor(self, spec):
+        state = RequestState(spec=spec)
+        state.arrival_step = self.time
+        state.input_ids = [1000 + idx for idx in range(spec.prompt_tokens)]
+        state.transition("WAITING", self.time)
+        return state
+
+    def receive_arrivals(self):
+        arrived = []
+        while self.future_specs and self.future_specs[0].arrival <= self.time:
+            spec = self.future_specs.pop(0)
+            state = self.input_processor(spec)
+            self.states[spec.request_id] = state
+            self.waiting.append(state)
+            arrived.append(spec.request_id)
+        return arrived
+
+    def abort_ready(self):
+        aborted = []
+        for state in list(self.waiting) + list(self.running):
+            spec = state.spec
+            if spec.abort_at is not None and spec.abort_at <= self.time:
+                if state in self.waiting:
+                    self.waiting.remove(state)
+                if state in self.running:
+                    self.running.remove(state)
+                self.block_manager.release(state)
+                state.finish_reason = "client_abort"
+                state.finish_step = self.time
+                state.transition("ABORTED", self.time)
+                self.aborted.append(state)
+                aborted.append(spec.request_id)
+        return aborted
+
+    def build_metadata(self, state, phase):
+        if phase == "prefill":
+            input_ids = list(state.input_ids)
+            positions = list(range(len(input_ids)))
+        else:
+            input_ids = [state.output_tokens[-1]]
+            positions = [len(state.input_ids) + len(state.output_tokens) - 1]
+        row = {
+            "request_id": state.spec.request_id,
+            "phase": phase,
+            "input_ids": input_ids,
+            "positions": positions,
+            "block_table": list(state.block_table),
+            "slot_mapping": self.block_manager.slot_mapping(state, positions),
+        }
+        self.metadata_rows.append(row)
+        return row
+
+    def next_model_token(self, state):
+        index = len(state.output_tokens)
+        return state.spec.planned_tokens[index]
+
+    def finish(self, state, reason):
+        if state in self.running:
+            self.running.remove(state)
+        state.finish_reason = reason
+        state.finish_step = self.time
+        state.transition("FINISHED", self.time)
+        self.block_manager.release(state)
+        self.finished.append(state)
+
+    def output_processor(self, state, token, phase):
+        state.output_tokens.append(token)
+        if state.first_token_step is None:
+            state.first_token_step = self.time
+        if token == "<eos>":
+            self.finish(state, "eos")
+        elif state.spec.stop_token is not None and token == state.spec.stop_token:
+            self.finish(state, "stop")
+        elif len(state.output_tokens) >= state.spec.max_tokens:
+            self.finish(state, "max_tokens")
+        elif len(state.output_tokens) >= len(state.spec.planned_tokens):
+            self.finish(state, "eos")
+        elif phase == "prefill":
+            state.transition("RUNNING", self.time)
+            self.running.append(state)
+
+    def schedule_step(self):
+        arrived = self.receive_arrivals()
+        aborted = self.abort_ready()
+        used_tokens = 0
+        scheduled_decode = []
+        scheduled_prefill = []
+        metadata = []
+        deferred = []
+
+        for state in list(self.running):
+            if used_tokens + 1 > self.max_tokens:
+                deferred.append((state.spec.request_id, "token_budget_decode"))
+                continue
+            if not self.block_manager.can_append(state):
+                deferred.append((state.spec.request_id, "kv_decode"))
+                continue
+            self.block_manager.append_slot(state)
+            state.transition("DECODING", self.time)
+            scheduled_decode.append(state)
+            metadata.append(self.build_metadata(state, "decode"))
+            used_tokens += 1
+
+        while self.waiting:
+            state = self.waiting[0]
+            if len(scheduled_decode) + len(scheduled_prefill) >= self.max_seqs:
+                deferred.append((state.spec.request_id, "sequence_budget"))
+                break
+            if used_tokens + len(state.input_ids) > self.max_tokens:
+                deferred.append((state.spec.request_id, "token_budget_prefill"))
+                break
+            if not self.block_manager.can_allocate(len(state.input_ids)):
+                deferred.append((state.spec.request_id, "kv_prefill"))
+                break
+            self.waiting.pop(0)
+            self.block_manager.allocate_prompt(state)
+            state.prefill_step = self.time
+            state.transition("PREFILL", self.time)
+            scheduled_prefill.append(state)
+            metadata.append(self.build_metadata(state, "prefill"))
+            used_tokens += len(state.input_ids)
+
+        for state in scheduled_decode:
+            self.output_processor(state, self.next_model_token(state), "decode")
+
+        for state in scheduled_prefill:
+            self.output_processor(state, self.next_model_token(state), "prefill")
+
+        self.trace.append(
+            {
+                "step": self.time,
+                "arrived": arrived,
+                "aborted": aborted,
+                "decode": [state.spec.request_id for state in scheduled_decode],
+                "prefill": [state.spec.request_id for state in scheduled_prefill],
+                "metadata_rows": len(metadata),
+                "used_tokens": used_tokens,
+                "waiting": [state.spec.request_id for state in self.waiting],
+                "running": [state.spec.request_id for state in self.running],
+                "free_blocks": len(self.block_manager.free_blocks),
+                "deferred": deferred,
+            }
+        )
+        self.time += 1
+
+    def run(self):
+        while self.future_specs or self.waiting or self.running:
+            self.schedule_step()
+            if self.time > 20:
+                raise RuntimeError("request flow did not converge")
+
+    def report(self):
+        ordered_states = [self.states[key] for key in sorted(self.states)]
+        queue_wait = {
+            state.spec.request_id: state.prefill_step - state.arrival_step
+            for state in ordered_states
+            if state.prefill_step is not None
+        }
+        ttft = {
+            state.spec.request_id: state.first_token_step - state.arrival_step
+            for state in ordered_states
+            if state.first_token_step is not None
+        }
+        e2e = {
+            state.spec.request_id: state.finish_step - state.arrival_step
+            for state in ordered_states
+            if state.finish_step is not None
+        }
+        metadata_complete = all(
+            row["input_ids"]
+            and row["positions"]
+            and row["block_table"]
+            and all(slot["block"] is not None for slot in row["slot_mapping"])
+            and row["phase"] in {"prefill", "decode"}
+            for row in self.metadata_rows
+        )
+        finish_reasons = {state.spec.request_id: state.finish_reason for state in ordered_states}
+        gates = {
+            "input_processed": all(state.input_ids and state.arrival_step is not None for state in ordered_states),
+            "state_machine_terminal": all(state.finish_reason is not None for state in ordered_states),
+            "scheduler_budget_respected": all(
+                item["used_tokens"] <= self.max_tokens and item["metadata_rows"] <= self.max_seqs
+                for item in self.trace
+            ),
+            "execution_metadata_complete": metadata_complete,
+            "output_processor_finished": finish_reasons == {
+                "A": "eos",
+                "B": "stop",
+                "C": "max_tokens",
+                "D": "client_abort",
+            },
+            "abort_cleanup": finish_reasons["D"] == "client_abort" and not self.states["D"].block_table,
+            "metrics_ready": bool(queue_wait) and bool(ttft) and bool(e2e),
+        }
+        gates["request_flow_gate"] = all(gates.values())
+        summary = {
+            "finished_order": [state.spec.request_id for state in sorted(self.finished, key=lambda s: (s.finish_step, s.spec.request_id))],
+            "aborted": [state.spec.request_id for state in self.aborted],
+            "finish_reasons": finish_reasons,
+            "queue_wait_steps": queue_wait,
+            "ttft_steps": ttft,
+            "e2e_steps": e2e,
+            "metadata_rows": len(self.metadata_rows),
+            "max_kv_blocks_used": self.block_manager.max_used,
+            "kv_blocks_after_cleanup": self.block_manager.used_count(),
+            "transitions": {state.spec.request_id: state.transitions for state in ordered_states},
+            "trace_tail": self.trace[-4:],
+        }
+        return summary, gates
+
+
+specs = [
+    RequestSpec("A", arrival=0, prompt_tokens=3, planned_tokens=["a", "b", "<eos>"], max_tokens=3),
+    RequestSpec("B", arrival=0, prompt_tokens=5, planned_tokens=["x", "STOP", "ignored"], max_tokens=3, stop_token="STOP"),
+    RequestSpec("C", arrival=1, prompt_tokens=2, planned_tokens=["c"], max_tokens=1),
+    RequestSpec("D", arrival=2, prompt_tokens=3, planned_tokens=["d", "e"], max_tokens=2, abort_at=3),
+]
+
+engine = ToyRequestFlowEngine(
+    specs=specs,
+    max_tokens=8,
+    max_seqs=3,
+    block_manager=ToyKVBlockManager(total_blocks=5, block_size=4),
+)
+engine.run()
+summary, gates = engine.report()
+
+print("request_flow_summary=", summary)
+print("request_flow_gates=", gates)
+```
+
+这个 demo 的输出应当能看出：
+
+1. A、B、C、D 都经过 `WAITING`，其中 A/B/D 进入 `RUNNING`，C 在 prefill 后立即结束。
+2. B 的终止来自 output processor 的 `stop`，不是 scheduler 直接决定。
+3. D 进入 running 后被 abort，并且 `kv_blocks_after_cleanup=0`。
+4. `metadata_rows` 覆盖 prefill 和 decode，说明 scheduler output 已经转换成 model runner 可执行的 metadata。
+5. `request_flow_gate=True`，说明输入处理、状态机、scheduler、metadata、output、cleanup 和 metrics 都能闭环。
+
+## 20.22 小练习
 
 1. 画出一个 vLLM-like 请求生命周期图，至少包含 API server、input processor、engine core、scheduler、block manager、worker、output processor。
 2. 写一个简化 `RequestState`，包含状态、input ids、output ids、block table、arrival time、first token time 和 finish reason。
@@ -656,7 +1100,7 @@ Continuous batching 是调度机制，请求生命周期管理是让这个机制
 4. 解释为什么 stop string 检查可能不能只看最后一个 token id。
 5. 列出请求 abort 时必须清理的 5 类资源。
 
-## 20.22 本章总结
+## 20.23 本章总结
 
 vLLM 请求调度流程的核心不是某一个类名，而是一条稳定的系统链路：入口层接收和预处理请求，engine core 维护请求状态和调度循环，scheduler 决定每轮执行计划，KV cache manager 保障显存资源，worker/model runner 执行模型，output processor 处理输出和终止条件。
 

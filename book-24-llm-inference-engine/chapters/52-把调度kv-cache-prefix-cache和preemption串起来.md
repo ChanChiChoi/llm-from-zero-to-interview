@@ -20,6 +20,37 @@
 
 本章就把这些机制串成一个完整调度循环。
 
+## 52.0 本讲资料边界与第二轮精修口径
+
+本章按第二轮精修口径，只讲教学版 vLLM-like engine step 如何把 continuous batching、paged KV cache、prefix cache、chunked prefill 和 preemption 串成一个统一调度循环。
+
+公开资料校准主要参考四类口径：
+
+1. vLLM scheduler / optimization 文档对 decode 优先、chunked prefill、`max_num_batched_tokens`、`max_num_seqs`、KV cache usage 和 preemption 的公开说明。
+2. vLLM prefix caching 设计文档对 `KVCacheBlock`、block hash、parent hash、ref count、cached-free block、free queue 和 eviction 的公开说明。
+3. vLLM / PagedAttention 论文对 block-based KV cache、logical block 到 physical block 映射、动态 serving request 和高吞吐调度的基础抽象。
+4. 本书第 48 到 51 章对 continuous batching、paged KV cache、prefix cache、preemption、recompute 和 swap 的教学版实现边界。
+
+本章不复刻某个框架版本的源码字段、线程模型、CUDA kernel、multi-worker 通信、KV connector、真实 swap 后端、分布式 prefix cache 或完整生产优先级策略。我们只验证一个最小闭环：
+
+```text
+waiting/running 队列 -> prefix lookup once -> decode-first -> suffix prefill -> token/KV budget -> eviction/preemption -> commit plan -> BatchBuilder metadata -> OutputProcessor 状态更新 -> invariants
+```
+
+第二轮新增 demo 的验收重点是：
+
+```text
+prefix cache lookup 是否只对 waiting 请求做一次；
+decode 是否先拿到预算，避免 streaming TPOT 抖动；
+prefix hit 后是否只调度 suffix prefill；
+token budget 和 KV block budget 是否同时生效；
+KV 压力下是否先 evict cached-free block，再 preempt active request；
+commit plan 是否先分配 block，再让 BatchBuilder 读 metadata；
+positions、slot mapping、block table 是否按真实上下文位置构造；
+OutputProcessor 是否正确更新 output token 和 num_computed_tokens；
+队列、block、computed token、metadata 和 cleanup 不变量是否能被检查。
+```
+
 ## 52.1 本章目标
 
 读完本章，你应该能讲清：
@@ -907,7 +938,418 @@ BatchBuilder 根据 schedule plan 构造 input ids、positions、slot mapping、
 最后我会用 invariants 和分层指标保证系统可 debug，比如一个 request 只能在一个队列里，ref count 不能为负，free list 不能包含 active block，cached block 不能被误释放。压测会覆盖短请求 baseline、共享 prefix、长短混合和故意打爆 KV 的场景。
 ```
 
-## 52.29 小练习
+## 52.29 统一调度循环公式、状态不变量和可运行 demo
+
+把本章机制合起来后，可以先把每轮调度的 token 用量写成：
+
+```math
+U_t=|D_t|+\sum_{i\in P_t}c_{i,t}
+```
+
+其中 `D_t` 是本轮 decode 请求集合，`P_t` 是本轮 prefill 请求集合，`c_{i,t}` 是请求 `i` 本轮 prefill chunk tokens。
+
+token budget 约束是：
+
+```math
+U_t\le B_{\mathrm{tok}}
+```
+
+新增 KV block 需求是：
+
+```math
+K_t^{\mathrm{need}}=\sum_{i\in D_t\cup P_t}\max(0,\left\lceil\frac{T_{i,t}^{\mathrm{target}}}{S}\right\rceil-|P_i|)
+```
+
+其中 `S` 是 block size，`T_{i,t}^{\mathrm{target}}` 是本轮执行后请求 `i` 至少需要覆盖到的上下文长度，`|P_i|` 是当前 block table 长度。
+
+KV 压力门可以写成：
+
+```math
+G_{\mathrm{pressure}}=\mathbf{1}[K_t^{\mathrm{need}}>F_t]
+```
+
+其中 `F_t` 是调度前可直接分配的 free blocks。
+
+prefix 命中后的剩余 prefill token 数是：
+
+```math
+R_i^{\mathrm{prefill}}=T_i-T_i^{\mathrm{hit}}
+```
+
+每轮不变量门禁可以拆成：
+
+```math
+G_{\mathrm{invariant}}=G_{\mathrm{queue}}G_{\mathrm{block}}G_{\mathrm{computed}}G_{\mathrm{metadata}}G_{\mathrm{cleanup}}
+```
+
+最终统一调度循环门禁：
+
+```math
+G_{\mathrm{loop}}=G_{\mathrm{prefix}}G_{\mathrm{decode}}G_{\mathrm{prefill}}G_{\mathrm{budget}}G_{\mathrm{pressure}}G_{\mathrm{commit}}G_{\mathrm{metadata}}G_{\mathrm{output}}G_{\mathrm{invariant}}
+```
+
+下面这个 0 依赖 demo 模拟一个完整 engine step：
+
+1. `cache_hit` 只做一次 prefix lookup，命中 4 个 tokens。
+2. `stream` 作为 running streaming 请求优先 decode。
+3. `cache_hit` 只 prefill suffix，`cache_miss` 从 0 开始 prefill。
+4. 本轮需要 3 个新 KV blocks，但 free list 只有 1 个。
+5. scheduler 先 evict cached-free block，再 preempt 低优先级 running 请求。
+6. commit plan 统一分配 blocks，BatchBuilder 再构造 positions、slot mapping 和 block tables。
+7. OutputProcessor 追加 decode token，推进 prefill computed tokens，并检查状态不变量。
+
+```python
+from dataclasses import dataclass, field
+
+
+def ceil_div(a, b):
+    return (a + b - 1) // b
+
+
+@dataclass
+class RequestState:
+    request_id: str
+    prompt_tokens: list
+    output_tokens: list = field(default_factory=list)
+    priority: int = 0
+    status: str = "WAITING"
+    block_table: list = field(default_factory=list)
+    num_computed_tokens: int = 0
+    prefix_lookup_done: bool = False
+    prefix_hit_tokens: int = 0
+    want_decode: bool = False
+    preempted_count: int = 0
+
+    def context_tokens(self):
+        return self.prompt_tokens + self.output_tokens
+
+
+@dataclass
+class PrefillItem:
+    request: RequestState
+    start: int
+    num_tokens: int
+
+
+@dataclass
+class DecodeItem:
+    request: RequestState
+
+
+@dataclass
+class SchedulePlan:
+    prefill_items: list = field(default_factory=list)
+    decode_items: list = field(default_factory=list)
+    evicted_blocks: list = field(default_factory=list)
+    preempted: list = field(default_factory=list)
+    commit_allocations: dict = field(default_factory=dict)
+
+
+class ToyUnifiedBlockManager:
+    def __init__(self, block_size):
+        self.block_size = block_size
+        self.free_blocks = [7]
+        self.cached_free_blocks = [6]
+        self.prefix_cache = {"shared": [5]}
+        self.active_ref = {0: 1, 1: 1, 2: 1, 3: 1, 4: 1, 5: 0}
+
+    def required_blocks(self, token_count):
+        return ceil_div(token_count, self.block_size)
+
+    def physical_slot(self, req, position):
+        block_index = position // self.block_size
+        offset = position % self.block_size
+        return req.block_table[block_index] * self.block_size + offset
+
+    def lookup_prefix_once(self, req):
+        if req.prefix_lookup_done:
+            return req.prefix_hit_tokens
+        if req.request_id == "cache_hit":
+            hit_blocks = list(self.prefix_cache["shared"])
+            req.block_table.extend(hit_blocks)
+            req.num_computed_tokens = self.block_size
+            req.prefix_hit_tokens = self.block_size
+            for block_id in hit_blocks:
+                self.active_ref[block_id] = self.active_ref.get(block_id, 0) + 1
+        req.prefix_lookup_done = True
+        return req.prefix_hit_tokens
+
+    def estimate_new_blocks(self, plan):
+        total = 0
+        for item in plan.decode_items:
+            req = item.request
+            target = len(req.context_tokens()) + 1
+            total += max(0, self.required_blocks(target) - len(req.block_table))
+        for item in plan.prefill_items:
+            req = item.request
+            target = item.start + item.num_tokens
+            total += max(0, self.required_blocks(target) - len(req.block_table))
+        return total
+
+    def evict_cached_free_until_visible(self):
+        if not self.cached_free_blocks:
+            return []
+        block_id = self.cached_free_blocks.pop(0)
+        self.free_blocks.append(block_id)
+        return [block_id]
+
+    def free_request_blocks(self, req):
+        released = list(req.block_table)
+        for block_id in released:
+            self.active_ref[block_id] = max(0, self.active_ref.get(block_id, 1) - 1)
+        self.free_blocks.extend(released)
+        req.block_table = []
+        req.num_computed_tokens = 0
+        return released
+
+    def allocate_until(self, req, target_tokens):
+        required = self.required_blocks(target_tokens)
+        allocated = []
+        while len(req.block_table) < required:
+            block_id = self.free_blocks.pop(0)
+            req.block_table.append(block_id)
+            self.active_ref[block_id] = self.active_ref.get(block_id, 0) + 1
+            allocated.append(block_id)
+        return allocated
+
+
+class ToyUnifiedScheduler:
+    def __init__(self, block_mgr, waiting, running, max_tokens):
+        self.block_mgr = block_mgr
+        self.waiting = list(waiting)
+        self.running = list(running)
+        self.preempted = []
+        self.max_tokens = max_tokens
+        self.prefix_hits = {}
+        self.free_before = 0
+        self.required_new_blocks = 0
+
+    def ready_to_decode(self, req):
+        return req.want_decode and req.num_computed_tokens == len(req.context_tokens())
+
+    def next_prefill_chunk(self, req, token_budget):
+        start = req.num_computed_tokens
+        remaining = len(req.context_tokens()) - start
+        return start, min(remaining, token_budget)
+
+    def preempt_low_priority(self):
+        candidates = [req for req in self.running if not req.want_decode]
+        victim = min(candidates, key=lambda req: (req.priority, req.preempted_count))
+        context = victim.context_tokens()
+        released = self.block_mgr.free_request_blocks(victim)
+        victim.status = "PREEMPTED"
+        victim.preempted_count += 1
+        self.running.remove(victim)
+        self.preempted.append(victim)
+        return victim.request_id, released, context
+
+    def schedule(self):
+        for req in self.waiting:
+            self.prefix_hits[req.request_id] = self.block_mgr.lookup_prefix_once(req)
+
+        plan = SchedulePlan()
+        used_tokens = 0
+        for req in self.running:
+            if self.ready_to_decode(req):
+                plan.decode_items.append(DecodeItem(req))
+                used_tokens += 1
+
+        for req in list(self.waiting):
+            if used_tokens >= self.max_tokens:
+                break
+            start, chunk = self.next_prefill_chunk(req, self.max_tokens - used_tokens)
+            if chunk:
+                plan.prefill_items.append(PrefillItem(req, start, chunk))
+                used_tokens += chunk
+
+        self.free_before = len(self.block_mgr.free_blocks)
+        self.required_new_blocks = self.block_mgr.estimate_new_blocks(plan)
+        if self.required_new_blocks > len(self.block_mgr.free_blocks):
+            plan.evicted_blocks = self.block_mgr.evict_cached_free_until_visible()
+        if self.required_new_blocks > len(self.block_mgr.free_blocks):
+            plan.preempted.append(self.preempt_low_priority())
+
+        for item in plan.decode_items:
+            req = item.request
+            target = len(req.context_tokens()) + 1
+            plan.commit_allocations[req.request_id] = self.block_mgr.allocate_until(req, target)
+        for item in plan.prefill_items:
+            req = item.request
+            target = item.start + item.num_tokens
+            plan.commit_allocations[req.request_id] = self.block_mgr.allocate_until(req, target)
+            req.status = "RUNNING"
+            if req in self.waiting:
+                self.waiting.remove(req)
+                self.running.append(req)
+        return plan
+
+
+class ToyBatchBuilder:
+    def __init__(self, block_mgr):
+        self.block_mgr = block_mgr
+
+    def build(self, plan):
+        positions = []
+        slot_mapping = []
+        block_tables = []
+        for item in plan.decode_items:
+            req = item.request
+            position = len(req.context_tokens())
+            positions.append(position)
+            slot_mapping.append(self.block_mgr.physical_slot(req, position))
+            block_tables.append((req.request_id, list(req.block_table)))
+        for item in plan.prefill_items:
+            req = item.request
+            for position in range(item.start, item.start + item.num_tokens):
+                positions.append(position)
+                slot_mapping.append(self.block_mgr.physical_slot(req, position))
+            block_tables.append((req.request_id, list(req.block_table)))
+        return {
+            "positions": positions,
+            "slot_mapping": slot_mapping,
+            "block_tables": block_tables,
+        }
+
+
+class ToyOutputProcessor:
+    def process(self, plan, sampled_tokens):
+        for item in plan.decode_items:
+            req = item.request
+            req.output_tokens.append(sampled_tokens[req.request_id])
+            req.num_computed_tokens += 1
+        for item in plan.prefill_items:
+            req = item.request
+            req.num_computed_tokens = item.start + item.num_tokens
+
+
+def check_invariants(scheduler, metadata, block_mgr):
+    queues = {
+        "waiting": scheduler.waiting,
+        "running": scheduler.running,
+        "preempted": scheduler.preempted,
+    }
+    memberships = []
+    for queue_name, queue in queues.items():
+        memberships.extend((req.request_id, queue_name) for req in queue)
+    request_ids = [item[0] for item in memberships]
+    active_blocks = []
+    for req in scheduler.running:
+        active_blocks.extend(req.block_table)
+    all_requests = scheduler.waiting + scheduler.running + scheduler.preempted
+    return {
+        "queue_ownership": len(request_ids) == len(set(request_ids)),
+        "no_duplicate_active_blocks": len(active_blocks) == len(set(active_blocks)),
+        "computed_not_beyond_context": all(
+            req.num_computed_tokens <= len(req.context_tokens()) for req in all_requests
+        ),
+        "free_blocks_not_active": set(block_mgr.free_blocks).isdisjoint(active_blocks),
+        "prefix_hit_block_aligned": all(
+            req.prefix_hit_tokens % block_mgr.block_size == 0
+            for req in all_requests
+            if req.prefix_hit_tokens
+        ),
+        "metadata_rows_consistent": (
+            len(metadata["positions"]) == len(metadata["slot_mapping"])
+            and len(metadata["block_tables"]) == 3
+        ),
+        "preempted_cleanup_done": all(not req.block_table for req in scheduler.preempted),
+    }
+
+
+stream = RequestState(
+    "stream",
+    prompt_tokens=[1, 2, 3, 4],
+    output_tokens=[11, 12],
+    status="RUNNING",
+    block_table=[0, 1],
+    num_computed_tokens=6,
+    priority=10,
+    want_decode=True,
+)
+low = RequestState(
+    "low",
+    prompt_tokens=[5, 6, 7, 8, 9, 10, 11, 12],
+    output_tokens=[21, 22],
+    status="RUNNING",
+    block_table=[2, 3, 4],
+    num_computed_tokens=10,
+    priority=0,
+)
+cache_hit = RequestState("cache_hit", prompt_tokens=[101, 102, 103, 104, 105, 106])
+cache_miss = RequestState("cache_miss", prompt_tokens=[201, 202, 203, 204, 205, 206, 207, 208])
+
+block_mgr = ToyUnifiedBlockManager(block_size=4)
+scheduler = ToyUnifiedScheduler(
+    block_mgr=block_mgr,
+    waiting=[cache_hit, cache_miss],
+    running=[stream, low],
+    max_tokens=12,
+)
+plan = scheduler.schedule()
+metadata = ToyBatchBuilder(block_mgr).build(plan)
+ToyOutputProcessor().process(plan, {"stream": 99})
+invariants = check_invariants(scheduler, metadata, block_mgr)
+
+summary = {
+    "prefix_hits": scheduler.prefix_hits,
+    "final_decode_items": [item.request.request_id for item in plan.decode_items],
+    "final_prefill_items": [
+        (item.request.request_id, item.start, item.num_tokens) for item in plan.prefill_items
+    ],
+    "free_before": scheduler.free_before,
+    "required_new_blocks": scheduler.required_new_blocks,
+    "evicted_blocks": plan.evicted_blocks,
+    "preempted": plan.preempted,
+    "commit_allocations": plan.commit_allocations,
+    "metadata_positions": metadata["positions"],
+    "metadata_slot_mapping": metadata["slot_mapping"],
+    "metadata_block_tables": metadata["block_tables"],
+    "stream_output_tokens": stream.output_tokens,
+    "cache_hit_computed": cache_hit.num_computed_tokens,
+    "cache_miss_computed": cache_miss.num_computed_tokens,
+    "free_after": len(block_mgr.free_blocks),
+    "invariants": invariants,
+}
+gates = {
+    "prefix_lookup_once_ready": scheduler.prefix_hits == {"cache_hit": 4, "cache_miss": 0},
+    "decode_first_ready": summary["final_decode_items"] == ["stream"],
+    "suffix_prefill_ready": summary["final_prefill_items"][0] == ("cache_hit", 4, 2),
+    "kv_budget_ready": scheduler.required_new_blocks == 3 and scheduler.free_before == 1,
+    "memory_pressure_order_ready": plan.evicted_blocks == [6] and plan.preempted[0][0] == "low",
+    "commit_plan_ready": plan.commit_allocations == {
+        "stream": [],
+        "cache_hit": [7],
+        "cache_miss": [6, 2],
+    },
+    "batch_metadata_ready": metadata["slot_mapping"] == [6, 28, 29, 24, 25, 26, 27, 8, 9, 10, 11],
+    "output_processor_ready": stream.output_tokens == [11, 12, 99]
+    and cache_hit.num_computed_tokens == 6
+    and cache_miss.num_computed_tokens == 8,
+    "invariants_ready": all(invariants.values()),
+}
+gates["unified_scheduler_loop_gate"] = all(gates.values())
+
+print("unified_scheduler_loop_summary=", summary)
+print("unified_scheduler_loop_gates=", gates)
+```
+
+一次运行的核心输出类似：
+
+```text
+unified_scheduler_loop_summary= {'prefix_hits': {'cache_hit': 4, 'cache_miss': 0}, 'final_decode_items': ['stream'], 'final_prefill_items': [('cache_hit', 4, 2), ('cache_miss', 0, 8)], 'free_before': 1, 'required_new_blocks': 3, 'evicted_blocks': [6], 'preempted': [('low', [2, 3, 4], [5, 6, 7, 8, 9, 10, 11, 12, 21, 22])], 'commit_allocations': {'stream': [], 'cache_hit': [7], 'cache_miss': [6, 2]}, 'metadata_positions': [6, 4, 5, 0, 1, 2, 3, 4, 5, 6, 7], 'metadata_slot_mapping': [6, 28, 29, 24, 25, 26, 27, 8, 9, 10, 11], 'metadata_block_tables': [('stream', [0, 1]), ('cache_hit', [5, 7]), ('cache_miss', [6, 2])], 'stream_output_tokens': [11, 12, 99], 'cache_hit_computed': 6, 'cache_miss_computed': 8, 'free_after': 2, 'invariants': {'queue_ownership': True, 'no_duplicate_active_blocks': True, 'computed_not_beyond_context': True, 'free_blocks_not_active': True, 'prefix_hit_block_aligned': True, 'metadata_rows_consistent': True, 'preempted_cleanup_done': True}}
+unified_scheduler_loop_gates= {'prefix_lookup_once_ready': True, 'decode_first_ready': True, 'suffix_prefill_ready': True, 'kv_budget_ready': True, 'memory_pressure_order_ready': True, 'commit_plan_ready': True, 'batch_metadata_ready': True, 'output_processor_ready': True, 'invariants_ready': True, 'unified_scheduler_loop_gate': True}
+```
+
+这个 demo 证明了几个关键点：
+
+1. prefix cache lookup 是 waiting 请求进入调度前的状态推进，不是每轮重复查。
+2. decode-first、suffix prefill、token budget 和 KV block budget 必须在同一个 plan 里收敛。
+3. KV 压力处理顺序影响线上延迟：先动 cached-free block，再动 active request。
+4. BatchBuilder 依赖 commit 后的 block table，不能自己临时分配 block。
+5. OutputProcessor 负责把模型输出写回 request 状态，并让下一轮 scheduler 看到一致状态。
+6. 统一 loop 的验收不是只看输出 token，而是同时看队列、blocks、positions、slot mapping、computed tokens、cleanup 和 metrics。
+
+## 52.30 小练习
 
 1. 定义 `SchedulePlan`、`PrefillItem` 和 `DecodeItem`。
 2. 给 scheduler 增加 waiting、running、swapped 队列。
@@ -930,7 +1372,7 @@ BatchBuilder 根据 schedule plan 构造 input ids、positions、slot mapping、
 19. 构造 KV block pool 打爆压测。
 20. 写一段面试回答：scheduler 如何同时管理 token budget 和 KV budget？
 
-## 52.30 本章总结
+## 52.31 本章总结
 
 到这一章，mini engine 的主干已经成型。
 

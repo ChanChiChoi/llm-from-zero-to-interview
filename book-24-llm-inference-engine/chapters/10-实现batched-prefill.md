@@ -2,11 +2,17 @@
 
 上一章我们实现了单请求 KV Cache：第一次 prefill 输入完整 prompt，后续 decode 只输入最新 token。本章继续升级，把多个请求的 prompt 合成一个 batch，一次性做 prefill。
 
-Batched prefill 是推理框架从“单请求 demo”走向“多请求 serving”的第一步。它能让 GPU 一次处理多个 prompt，提高吞吐，但也引入 padding、attention mask、长度差异、首 token 采样和 cache 拆分等问题。
+Batched prefill 是推理框架从“单请求 demo”走向“多请求 serving”的第一步。它能让 GPU 一次处理多个 prompt，提高吞吐，但也引入 padding、attention mask、长度差异、首 token logits 选择、padding waste 和 cache 拆分等问题。
 
 一句话概括：
 
-> Batched prefill 的目标是把多个请求的 prompt 同时送进模型，得到每个请求的首 token 和初始 KV Cache。
+> Batched prefill 的目标是把多个请求的 prompt 同时送进模型，得到每个请求的首 token logits 和初始 KV Cache。
+
+## 10.0 本讲资料边界与第二轮精修口径
+
+本章第二轮精修前，先用公开资料校准口径：Transformers tokenizer 文档把 padding / truncation 作为把不同长度样本整理成 batch tensor 的基本步骤；decoder-only generation 中，padding side、attention mask 和最后位置 logits 选择会直接影响生成正确性；Transformers generation 路径会处理一批输入的生成参数、mask 和 cache；vLLM 等 serving engine 进一步在生产中引入 continuous batching、chunked prefill、max batch tokens、KV block 管理和调度策略。
+
+因此，本章只实现教学版 batched prefill：多个 prompt padding 成 batch，一次 forward，按最后真实 token 取首 token logits，并得到 batch 维度上的初始 KV Cache。它不实现 continuous batching、chunked prefill、packed sequence、paged KV block 或 prefix cache。新增 0 依赖 demo 专门验证左 padding、右 padding、attention mask、gather last logits 和 padding waste。
 
 ## 10.1 为什么需要 batched prefill
 
@@ -27,7 +33,7 @@ request_3 prefill
 Batched prefill 把它们合起来：
 
 ```text
-[request_1, request_2, request_3] prompts -> model forward -> 每个请求的 KV Cache 和 first token
+[request_1, request_2, request_3] prompts -> model forward -> 每个请求的 KV Cache 和 first token logits
 ```
 
 这样能提高 GPU 利用率，尤其是在多个 prompt 长度接近时。
@@ -48,16 +54,16 @@ tokenize 后长度可能是：
 
 ```text
 request_1: 2 tokens
-request_2: 8 tokens
-request_3: 5 tokens
+request_2: 6 tokens
+request_3: 3 tokens
 ```
 
 模型需要张量输入，不能直接输入三个不同长度的 list。因此要 padding 到同一长度。
 
 ```text
-request_1: [t1, t2, pad, pad, pad, pad, pad, pad]
-request_2: [t1, t2, t3,  t4,  t5,  t6,  t7,  t8]
-request_3: [t1, t2, t3,  t4,  t5,  pad, pad, pad]
+request_1: [t1, t2, pad, pad, pad, pad]
+request_2: [t1, t2, t3,  t4,  t5,  t6 ]
+request_3: [t1, t2, t3,  pad, pad, pad]
 ```
 
 然后用 attention mask 告诉模型哪些位置是真实 token，哪些位置是 padding。
@@ -65,8 +71,6 @@ request_3: [t1, t2, t3,  t4,  t5,  pad, pad, pad]
 ## 10.3 padding_side：左 padding 还是右 padding
 
 在 decoder-only LLM 推理中，padding 方向很重要。
-
-常见有两种：
 
 右 padding：
 
@@ -82,7 +86,7 @@ request_3: [t1, t2, t3,  t4,  t5,  pad, pad, pad]
 [D,   E,   F, G, H]
 ```
 
-很多生成场景更偏向左 padding，因为每个序列的最后一个真实 token 对齐在最右侧，取最后位置 logits 更方便。
+很多生成场景更偏向左 padding，因为每个序列的最后一个真实 token 对齐在最右侧，取 `logits[:, -1, :]` 更方便。
 
 如果使用右 padding，`logits[:, -1, :]` 对短序列取到的可能是 PAD 位置的 logits，而不是最后一个真实 token 的 logits。
 
@@ -145,7 +149,7 @@ attention mask 中 1 表示真实 token，0 表示 padding。
 
 ## 10.6 修改 ModelWrapper 支持 attention_mask
 
-第 9 章的 `ModelWrapper` 只传了 `input_ids` 和 `past_key_values`。现在 prefill 要支持 padding，所以要传 `attention_mask`。
+第 9 章的 `ModelWrapper` 已经支持 `past_key_values`。现在 prefill 要支持 padding，所以要传 `attention_mask`。
 
 ```python
 class ModelWrapper:
@@ -187,17 +191,14 @@ def batched_prefill(tokenizer_wrapper, model_wrapper, sampler, prompts):
         past_key_values=None,
     )
 
-    next_token_ids = sampler.sample(logits)
+    last_logits = gather_last_token_logits(logits, attention_mask)
+    next_token_ids = sampler.sample(last_logits)
     return input_ids, attention_mask, next_token_ids, past_key_values
 ```
 
-如果使用左 padding，`sampler.sample(logits)` 内部取 `logits[:, -1, :]` 通常是可行的，因为最后位置对应每个序列的最后真实 token。
-
-如果使用右 padding，就不能简单取最后位置，要按每个请求真实长度 gather。
+如果确定使用左 padding，也可以让 sampler 内部取 `logits[:, -1, :]`。但教学上更推荐保留 `gather_last_token_logits`，因为它能显式处理右 padding 和长度差异。
 
 ## 10.8 右 padding 下如何取最后真实位置
-
-为了理解问题，我们写一个更通用的函数。
 
 真实长度可以从 attention mask 得到：
 
@@ -224,7 +225,7 @@ def gather_last_token_logits(logits, attention_mask):
 
 然后 sampler 可以对 `[batch_size, vocab_size]` 的 logits 采样。
 
-这就是为什么 padding_side 和 logits 位置不能忽略。
+这就是为什么 padding side 和 logits 位置不能忽略。
 
 ## 10.9 Sampler 兼容 batch
 
@@ -253,7 +254,7 @@ def sample_next_token(logits, temperature=1.0, top_k=None, top_p=1.0):
     return torch.multinomial(probs, num_samples=1)
 ```
 
-这样 batched prefill 和后续 batched decode 都能共用 sampler。
+如果右 padding 输入没有先 gather，sampler 内部取 `logits[:, -1, :]` 就会出错。
 
 ## 10.10 生成每个请求的首 token
 
@@ -295,6 +296,7 @@ class RequestState:
         self.request_id = request_id
         self.prompt = prompt
         self.input_ids = None
+        self.prompt_len = 0
         self.output_ids = []
         self.next_token_id = None
         self.finished = False
@@ -305,6 +307,7 @@ batched prefill 后：
 ```python
 for i, request in enumerate(requests):
     request.input_ids = input_ids[i]
+    request.prompt_len = int(attention_mask[i].sum().item())
     request.next_token_id = next_token_ids[i]
     request.output_ids.append(next_token_ids[i].item())
 ```
@@ -318,11 +321,11 @@ batched prefill 返回的 `past_key_values` 是一个 batch cache。
 直觉形状类似：
 
 ```text
-layer_i.key:   [batch, num_heads, seq_len, head_dim]
-layer_i.value: [batch, num_heads, seq_len, head_dim]
+layer_i.key:   [batch, num_kv_heads, max_prompt_len, head_dim]
+layer_i.value: [batch, num_kv_heads, max_prompt_len, head_dim]
 ```
 
-这意味着 batch 中每个请求的 cache 在 batch 维度上排列。
+如果用了 padding，cache 的 `max_prompt_len` 包含 padded positions；有效 KV 长度仍然要由 attention mask 或 per-request length 来解释。
 
 教学版可以先整体保存它，后续 batched decode 继续用同一个 batch 顺序。
 
@@ -332,6 +335,30 @@ layer_i.value: [batch, num_heads, seq_len, head_dim]
 
 Batched prefill 的问题是 padding 会浪费计算。
 
+设 batch size 为 `B`，每个请求真实 prompt 长度为 `L_i`，batch 最大长度为：
+
+```math
+L_{\max}=\max_i L_i
+```
+
+实际张量 token 数：
+
+```math
+T_{\mathrm{tensor}}=B L_{\max}
+```
+
+真实有效 token 数：
+
+```math
+T_{\mathrm{real}}=\sum_i L_i
+```
+
+padding waste ratio：
+
+```math
+R_{\mathrm{pad}}=\frac{T_{\mathrm{tensor}}-T_{\mathrm{real}}}{T_{\mathrm{tensor}}}
+```
+
 如果一个 batch 长度分布是：
 
 ```text
@@ -339,8 +366,6 @@ Batched prefill 的问题是 padding 会浪费计算。
 ```
 
 padding 到 4000 后，前三个请求会有大量 padding。
-
-浪费非常严重：
 
 ```text
 有效 token = 10 + 20 + 30 + 4000 = 4060
@@ -351,7 +376,7 @@ padding 到 4000 后，前三个请求会有大量 padding。
 
 教学版用 padding 是为了简单，真实系统会进一步优化。
 
-## 10.14 长 prompt 和 chunked prefill
+## 10.14 长 prompt、token budget 和 chunked prefill
 
 如果一个请求 prompt 很长，把它和短请求放在同一个 prefill batch 里，会拖慢整个 batch。
 
@@ -363,9 +388,175 @@ padding 到 4000 后，前三个请求会有大量 padding。
 4. 让 decode 请求穿插执行，避免输出卡顿。
 5. 使用 prefix cache 复用共享前缀。
 
+一个简单 token budget 可以写成：
+
+```math
+\sum_{i\in\mathcal{B}} L_i \le B_{\mathrm{prefill}}
+```
+
+其中 `B_prefill` 是本轮允许处理的真实 prompt tokens 预算。生产系统还会结合 padded tokens、KV budget、queue wait 和 decode TPOT 做更复杂的调度。
+
 本章先实现基础 batched prefill，后续讲 vLLM 和高级 serving 时会继续展开这些策略。
 
-## 10.15 最小完整代码骨架
+## 10.15 batched prefill 公式、padding 风险和可运行 demo
+
+下面这个 demo 不依赖 PyTorch。它实现一个 toy tokenizer、左右 padding、attention mask、toy model logits 和最后真实位置 gather。
+
+它验证三件事：
+
+1. 左 padding 下取最后位置 logits 可以得到每个请求的首 token。
+2. 右 padding 下直接取最后位置会让短请求读到 PAD 位置，结果错误。
+3. 用 attention mask gather 最后真实 token 后，右 padding 也能得到正确首 token。
+
+```python
+VOCAB = {
+    "<pad>": 0,
+    "<eos>": 1,
+    "Hello": 2,
+    "LLM": 3,
+    "Explain": 4,
+    "KV": 5,
+    "Cache": 6,
+    "in": 7,
+    "inference": 8,
+    "Write": 9,
+    "short": 10,
+    "poem": 11,
+    "!": 12,
+    ".": 13,
+}
+ID_TO_TOKEN = {idx: tok for tok, idx in VOCAB.items()}
+NEXT_TOKEN = {
+    VOCAB["LLM"]: VOCAB["!"],
+    VOCAB["inference"]: VOCAB["."],
+    VOCAB["poem"]: VOCAB["."],
+    VOCAB["<pad>"]: VOCAB["<eos>"],
+}
+
+
+def encode(prompt):
+    return [VOCAB[token] for token in prompt.split()]
+
+
+def pad_batch(sequences, side):
+    max_len = max(len(seq) for seq in sequences)
+    input_ids = []
+    attention_mask = []
+    for seq in sequences:
+        pad_count = max_len - len(seq)
+        if side == "left":
+            row = [VOCAB["<pad>"]] * pad_count + seq
+            mask = [0] * pad_count + [1] * len(seq)
+        else:
+            row = seq + [VOCAB["<pad>"]] * pad_count
+            mask = [1] * len(seq) + [0] * pad_count
+        input_ids.append(row)
+        attention_mask.append(mask)
+    return input_ids, attention_mask
+
+
+def toy_logits_for_token(token_id):
+    logits = [-10.0] * len(VOCAB)
+    logits[NEXT_TOKEN.get(token_id, VOCAB["<eos>"])] = 10.0
+    return logits
+
+
+def toy_model_forward(input_ids):
+    return [[toy_logits_for_token(token_id) for token_id in row] for row in input_ids]
+
+
+def argmax(logits):
+    return max(range(len(logits)), key=lambda idx: logits[idx])
+
+
+def sample_from_last_position(logits_batch):
+    return [argmax(row[-1]) for row in logits_batch]
+
+
+def gather_last_token_logits(logits_batch, attention_mask):
+    gathered = []
+    last_indices = []
+    for logits, mask in zip(logits_batch, attention_mask):
+        length = sum(mask)
+        last_index = length - 1
+        last_indices.append(last_index)
+        gathered.append(logits[last_index])
+    return gathered, last_indices
+
+
+def decode_ids(ids):
+    return [ID_TO_TOKEN[idx] for idx in ids]
+
+
+prompts = [
+    "Hello LLM",
+    "Explain KV Cache in LLM inference",
+    "Write short poem",
+]
+encoded = [encode(prompt) for prompt in prompts]
+lengths = [len(seq) for seq in encoded]
+
+left_ids, left_mask = pad_batch(encoded, "left")
+right_ids, right_mask = pad_batch(encoded, "right")
+
+left_logits = toy_model_forward(left_ids)
+right_logits = toy_model_forward(right_ids)
+
+left_next = sample_from_last_position(left_logits)
+right_naive_next = sample_from_last_position(right_logits)
+right_last_logits, right_last_indices = gather_last_token_logits(right_logits, right_mask)
+right_gather_next = [argmax(logits) for logits in right_last_logits]
+
+batch_size = len(prompts)
+max_len = max(lengths)
+real_tokens = sum(lengths)
+tensor_tokens = batch_size * max_len
+padding_waste = round((tensor_tokens - real_tokens) / tensor_tokens, 3)
+layers = 2
+kv_heads = 1
+head_dim = 4
+dtype_bytes = 2
+kv_bytes_real = 2 * layers * real_tokens * kv_heads * head_dim * dtype_bytes
+kv_bytes_padded = 2 * layers * tensor_tokens * kv_heads * head_dim * dtype_bytes
+
+print("lengths=", lengths)
+print("left_input_ids=", left_ids)
+print("left_attention_mask=", left_mask)
+print("left_next=", decode_ids(left_next))
+print("right_naive_next=", decode_ids(right_naive_next))
+print("right_last_indices=", right_last_indices)
+print("right_gather_next=", decode_ids(right_gather_next))
+print("padding_waste=", padding_waste)
+print("kv_bytes_real=", kv_bytes_real)
+print("kv_bytes_padded=", kv_bytes_padded)
+print("batched_prefill_gate=", left_next == right_gather_next and right_naive_next != right_gather_next)
+```
+
+一组稳定输出如下：
+
+```text
+lengths= [2, 6, 3]
+left_input_ids= [[0, 0, 0, 0, 2, 3], [4, 5, 6, 7, 3, 8], [0, 0, 0, 9, 10, 11]]
+left_attention_mask= [[0, 0, 0, 0, 1, 1], [1, 1, 1, 1, 1, 1], [0, 0, 0, 1, 1, 1]]
+left_next= ['!', '.', '.']
+right_naive_next= ['<eos>', '.', '<eos>']
+right_last_indices= [1, 5, 2]
+right_gather_next= ['!', '.', '.']
+padding_waste= 0.389
+kv_bytes_real= 352
+kv_bytes_padded= 576
+batched_prefill_gate= True
+```
+
+输出怎么读：
+
+1. 左 padding 下，所有请求最后位置都是真实 token，所以 `left_next` 正确。
+2. 右 padding 下，短请求最后位置是 PAD，`right_naive_next` 错误地输出 `<eos>`。
+3. 用 attention mask 找最后真实位置后，`right_gather_next` 和左 padding 结果一致。
+4. `padding_waste=0.389` 说明这个 batch 里接近 39% 的张量位置是 padding。
+5. `kv_bytes_padded` 大于 `kv_bytes_real`，说明简单 padding 版 cache / 计算会引入额外浪费。
+
+## 10.16 最小完整代码骨架
 
 把关键部分组合起来：
 
@@ -381,7 +572,8 @@ def batched_prefill(tokenizer_wrapper, model_wrapper, sampler, prompts):
         past_key_values=None,
     )
 
-    next_token_ids = sampler.sample(logits)
+    last_logits = gather_last_token_logits(logits, attention_mask)
+    next_token_ids = sampler.sample(last_logits)
 
     return {
         "input_ids": input_ids,
@@ -391,16 +583,15 @@ def batched_prefill(tokenizer_wrapper, model_wrapper, sampler, prompts):
     }
 ```
 
-如果不用左 padding，可以换成：
+如果明确只使用左 padding，可以简化为：
 
 ```python
-last_logits = gather_last_token_logits(logits, attention_mask)
-next_token_ids = sampler.sample(last_logits)
+next_token_ids = sampler.sample(logits)
 ```
 
-这就是最小 batched prefill。
+但只要后续要兼容右 padding、packed prefill 或复杂 request state，显式 gather 最后真实位置会更稳。
 
-## 10.16 和生产 engine 的差距
+## 10.17 和生产 engine 的差距
 
 这个版本还很简化。
 
@@ -418,7 +609,7 @@ next_token_ids = sampler.sample(last_logits)
 
 但它已经把多个 prompt 合成 batch，完成了从单请求到多请求执行的第一步。
 
-## 10.17 常见误区
+## 10.18 常见误区
 
 误区一：batch 只是把 prompts 放进 list。
 
@@ -430,7 +621,7 @@ padding 必须配合 attention mask，否则模型会把 padding 当成上下文
 
 误区三：总是可以取 `logits[:, -1, :]`。
 
-只有在左 padding或无 padding 等情况下通常成立；右 padding 下短序列最后位置可能是 PAD。
+只有在左 padding 或无 padding 等情况下通常成立；右 padding 下短序列最后位置可能是 PAD。
 
 误区四：batch 越大越好。
 
@@ -440,7 +631,7 @@ batch 大可能提高吞吐，但也可能增加 padding 浪费、TTFT 和显存
 
 不是。batched prefill 只是批量处理 prompt，continuous batching 是每轮动态维护 running batch。
 
-## 10.18 面试追问
+## 10.19 面试追问
 
 1. Batched prefill 的目标是什么？
 2. 为什么不同长度 prompt 需要 padding？
@@ -453,23 +644,24 @@ batch 大可能提高吞吐，但也可能增加 padding 浪费、TTFT 和显存
 
 参考回答思路：
 
-1. 先说 batched prefill 把多个 prompt 合并，一次 forward 得到首 token 和初始 KV Cache。
+1. 先说 batched prefill 把多个 prompt 合并，一次 forward 得到首 token logits 和初始 KV Cache。
 2. 再说不同长度需要 padding，attention mask 屏蔽 padding。
 3. 然后强调 logits 位置选择，左 padding 可以简化最后位置取 logits，右 padding 要按长度 gather。
-4. 最后补充工程 trade-off：batch 提升吞吐，但可能增加 padding、显存和 TTFT。
+4. 最后补充工程 trade-off：batch 提升吞吐，但可能增加 padding、显存、TTFT 和 cache 管理复杂度。
 
-## 10.19 小练习
+## 10.20 小练习
 
 1. 实现 `encode_batch`，打印 `input_ids` 和 `attention_mask`。
 2. 分别用左 padding 和右 padding，观察 `logits[:, -1, :]` 的含义差异。
 3. 写出 `gather_last_token_logits` 并在右 padding 下测试。
-4. 构造长度差异很大的 prompts，计算 padding 浪费比例。
+4. 构造长度差异很大的 prompts，计算 padding waste ratio。
 5. 思考如何按 prompt 长度分桶以减少 padding。
+6. 给一个 token budget，设计一个简单规则，把等待队列中的请求组成 prefill batch。
 
-## 10.20 本章小结
+## 10.21 本章小结
 
 本章实现了最小 batched prefill。
 
-Batched prefill 把多个 prompt 合并成一个 batch，一次模型 forward 得到每个请求的首 token 和初始 KV Cache。关键难点包括 padding、attention mask、最后真实 token logits 的选择、batch 维度上的 cache 理解，以及长短 prompt 混合带来的 padding 浪费。
+Batched prefill 把多个 prompt 合并成一个 batch，一次模型 forward 得到每个请求的首 token logits 和初始 KV Cache。关键难点包括 padding、attention mask、最后真实 token logits 的选择、batch 维度上的 cache 理解，以及长短 prompt 混合带来的 padding 浪费。
 
 下一章我们会继续实现 batched decode，让多个已经完成 prefill 的请求能够一起逐 token 生成。

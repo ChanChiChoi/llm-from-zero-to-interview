@@ -10,6 +10,14 @@ PD 分离真正难的地方，不是把请求分给两个 worker，而是把 Pre
 
 > KV Cache 迁移、共享和路由是 PD 分离能否落地的核心。它决定了 TTFT 是否真的下降，TPOT 是否稳定，以及系统复杂度是否可控。
 
+## 38.0 本讲资料边界与第二轮精修口径
+
+本讲第二轮精修前，先按 `WRITING_PLAN.md` 对公开资料做校准：参考 SGLang PD Disaggregation 文档对 KV transfer backend、Mooncake / NIXL、bootstrap port、heterogeneous TP staging buffer、PD multiplexing 和 routing policy 的公开口径；参考 vLLM disaggregated prefilling 文档对 KV connector、prefill / decode 示例和实验性边界的说明；参考 Mooncake 论文对 KV cache-centric disaggregated architecture、KV cache 管理和传输瓶颈的系统动机说明；并参考 PagedAttention / vLLM 资料对 paged KV blocks、block table 和 KV cache metadata 的稳定抽象。
+
+本讲只讲 KV cache 迁移、共享和路由的通用系统问题：KV 大小估算、paged block metadata、layout / dtype / TP 兼容、push / pull / remote read、decode reservation、KV-aware routing、prefix-aware routing、失败清理和多租户隔离。不把某个框架版本的真实 connector 字段、RDMA/NIXL/Mooncake API、CUDA IPC 细节、网络拓扑参数或远端 KV cache 产品实现写成通用标准。
+
+本讲新增 demo 是教学版 KV transfer router：用 0 依赖 Python 模拟 KV metadata 兼容性检查、decode capacity 预留、路由 cost score、prefix cache 命中、多租户缓存阻断、短 prompt recompute 路径和 transfer 失败清理计划，帮助把“KV-aware routing”从口号落到可运行证据。
+
 ## 38.1 本章目标
 
 读完本章，你应该能讲清：
@@ -1334,7 +1342,268 @@ PD 分离中，Prefill worker 处理 prompt 后会生成每层 KV cache。因为
 故障处理也很重要。如果 transfer 失败，要释放 decode 侧预留 block，并根据 source KV 是否还存在决定重试 transfer 还是重新 prefill。如果 decode 已经开始输出 token，再失败就很难完全无感恢复，因为客户端可能已经收到部分 token。
 ```
 
-## 38.38 小练习
+## 38.38 KV Transfer 路由公式、隔离门禁和可运行 demo
+
+KV transfer 和 routing 的核心不是“选择一个空闲 decode worker”，而是在兼容性、容量、拓扑、缓存命中、多租户隔离和 transfer 成本之间做取舍。
+
+设一次 KV transfer 请求为：
+
+```math
+Q_i=(r_i,u_i,m_i,t_i,P_i,O_i,h_i,L_i,d_i,p_i,z_i)
+```
+
+其中 `r_i` 是 request id，`u_i` 是 tenant，`m_i` 是 model version，`t_i` 是 tokenizer version，`P_i` 是 prompt token 数，`O_i` 是预计输出 token 数，`h_i` 是 prefix hash，`L_i` 是 layout version，`d_i` 是 KV dtype，`p_i` 是 TP size，`z_i` 是 source zone。
+
+目标 decode worker `w` 必须先过兼容门：
+
+```math
+G_{\mathrm{compat}}(i,w)=G_mG_tG_dG_LG_p
+```
+
+分别表示 model、tokenizer、dtype、layout 和 parallel config 兼容。任何一项不兼容，都不应该把 KV 交给这个 worker。
+
+目标容量门可以写成：
+
+```math
+B_{\mathrm{need},i}=\left\lceil\frac{P_i+O_i}{S_{\mathrm{block}}}\right\rceil
+```
+
+```math
+G_{\mathrm{cap}}(i,w)=\mathbf{1}[B_{\mathrm{free},w}\ge B_{\mathrm{need},i}]
+```
+
+KV transfer 成本粗估为：
+
+```math
+T_{\mathrm{transfer}}(i,w)=\frac{P_i m_{\mathrm{kv}}}{B_{\mathrm{net}}(z_i,z_w)}
+```
+
+一个教学版 decode worker score 可以写成：
+
+```math
+S(i,w)=aB_{\mathrm{free},w}-bR_w-cQ_w-dT_{\mathrm{tpot},w}-eT_{\mathrm{transfer}}(i,w)+fC_{\mathrm{prefix}}(i,w)
+```
+
+其中 `R_w` 是 running sequences，`Q_w` 是 pending transfers，`T_{\mathrm{tpot},w}` 是当前 TPOT，`C_{\mathrm{prefix}}` 表示同租户可复用 prefix cache 的奖励。注意“同租户”很重要，跨租户 prefix 命中必须阻断，不能因为 hash 命中就复用。
+
+下面的 demo 覆盖三类路径：
+
+1. `long_rag`：长 prompt 且同租户 prefix cache 命中，选择 cache 更有价值的 decode worker。
+2. `short_chat`：短 prompt，重算比迁移更简单，走 recompute。
+3. `cross_tenant`：看到了他租户 prefix cache，但不能复用，只能按无缓存路径路由。
+
+```python
+from dataclasses import dataclass, field
+
+
+@dataclass
+class KVRequest:
+    request_id: str
+    tenant: str
+    model_version: str
+    tokenizer_version: str
+    prompt_tokens: int
+    output_tokens: int
+    dtype: str
+    layout_version: str
+    tp_size: int
+    source_zone: str
+    prefix_hash: str
+
+
+@dataclass
+class DecodeWorkerCandidate:
+    name: str
+    zone: str
+    model_version: str
+    tokenizer_version: str
+    dtype: str
+    layout_version: str
+    tp_size: int
+    available_blocks: int
+    running_sequences: int
+    pending_transfers: int
+    current_tpot_ms: float
+    prefix_cache: dict = field(default_factory=dict)
+
+
+class ToyKVTransferRouter:
+    def __init__(self, block_size=128, kv_mib_per_token=0.015625):
+        self.block_size = block_size
+        self.kv_mib_per_token = kv_mib_per_token
+        self.skipped = []
+
+    def _required_blocks(self, request):
+        return (
+            request.prompt_tokens + request.output_tokens + self.block_size - 1
+        ) // self.block_size
+
+    def _network_rate(self, source_zone, target_zone):
+        return 1200.0 if source_zone == target_zone else 300.0
+
+    def _compatible(self, request, worker):
+        checks = {
+            "model": request.model_version == worker.model_version,
+            "tokenizer": request.tokenizer_version == worker.tokenizer_version,
+            "dtype": request.dtype == worker.dtype,
+            "layout": request.layout_version == worker.layout_version,
+            "tp": request.tp_size == worker.tp_size,
+        }
+        return all(checks.values()), checks
+
+    def route(self, request, workers):
+        required_blocks = self._required_blocks(request)
+        recompute_ms = round(request.prompt_tokens / 900.0, 3)
+        kv_transfer_mib = request.prompt_tokens * self.kv_mib_per_token
+        if request.prompt_tokens < 512:
+            return {
+                "request_id": request.request_id,
+                "decision": "recompute",
+                "required_blocks": required_blocks,
+                "recompute_ms": recompute_ms,
+                "kv_transfer_mib": round(kv_transfer_mib, 1),
+                "reason": "short_prompt_recompute_cheaper",
+            }
+
+        scored = []
+        tenant_cache_blocked = False
+        for worker in workers:
+            compatible, checks = self._compatible(request, worker)
+            if not compatible:
+                self.skipped.append({
+                    "request_id": request.request_id,
+                    "worker": worker.name,
+                    "checks": checks,
+                })
+                continue
+            if worker.available_blocks < required_blocks:
+                self.skipped.append({
+                    "request_id": request.request_id,
+                    "worker": worker.name,
+                    "checks": {"capacity": False},
+                })
+                continue
+            rate = self._network_rate(request.source_zone, worker.zone)
+            transfer_ms = kv_transfer_mib / rate
+            cache_tenant = worker.prefix_cache.get(request.prefix_hash)
+            prefix_reuse = cache_tenant == request.tenant
+            if cache_tenant is not None and cache_tenant != request.tenant:
+                tenant_cache_blocked = True
+            prefix_bonus = 25.0 if prefix_reuse else 0.0
+            score = (
+                worker.available_blocks * 0.02
+                - worker.running_sequences * 1.0
+                - worker.pending_transfers * 3.0
+                - worker.current_tpot_ms * 0.4
+                - transfer_ms
+                + prefix_bonus
+            )
+            scored.append({
+                "worker": worker,
+                "score": round(score, 3),
+                "transfer_ms": round(transfer_ms, 3),
+                "prefix_reuse": prefix_reuse,
+                "tenant_cache_blocked": tenant_cache_blocked,
+            })
+
+        if not scored:
+            return {
+                "request_id": request.request_id,
+                "decision": "route_failed",
+                "required_blocks": required_blocks,
+            }
+
+        best = max(scored, key=lambda row: row["score"])
+        worker = best["worker"]
+        worker.available_blocks -= required_blocks
+        worker.pending_transfers += 1
+        return {
+            "request_id": request.request_id,
+            "decision": "migrate",
+            "decode_worker": worker.name,
+            "required_blocks": required_blocks,
+            "reserved_blocks": required_blocks,
+            "kv_transfer_mib": round(kv_transfer_mib, 1),
+            "transfer_ms": best["transfer_ms"],
+            "score": best["score"],
+            "prefix_reuse": best["prefix_reuse"],
+            "tenant_cache_blocked": best["tenant_cache_blocked"],
+            "failure_plan": "release_destination_blocks_and_retry_if_source_kv_exists",
+        }
+
+    def audit(self, requests, workers):
+        rows = [self.route(request, workers) for request in requests]
+        summary = {
+            "requests": len(rows),
+            "migrate": sum(row["decision"] == "migrate" for row in rows),
+            "recompute": sum(row["decision"] == "recompute" for row in rows),
+            "route_failed": sum(row["decision"] == "route_failed" for row in rows),
+            "total_transfer_mib": round(
+                sum(row.get("kv_transfer_mib", 0) for row in rows if row["decision"] == "migrate"),
+                1,
+            ),
+            "reserved_blocks": sum(row.get("reserved_blocks", 0) for row in rows),
+            "skipped_incompatible": len([
+                skipped for skipped in self.skipped
+                if skipped.get("checks", {}).get("layout") is False
+                or skipped.get("checks", {}).get("tp") is False
+            ]),
+            "tenant_cache_blocked": any(row.get("tenant_cache_blocked") for row in rows),
+        }
+        gates = {
+            "metadata_compatibility_checked": summary["skipped_incompatible"] > 0,
+            "decode_capacity_reserved": summary["reserved_blocks"] > 0,
+            "routing_uses_cost_score": all(
+                "score" in row for row in rows if row["decision"] == "migrate"
+            ),
+            "tenant_isolation_enforced": summary["tenant_cache_blocked"],
+            "recompute_path_visible": summary["recompute"] == 1,
+            "failure_plan_visible": all(
+                "failure_plan" in row for row in rows if row["decision"] == "migrate"
+            ),
+            "metrics_ready": summary["total_transfer_mib"] > 0
+            and summary["requests"] == 3,
+        }
+        gates["kv_transfer_routing_gate"] = all(gates.values())
+        return rows, summary, gates
+
+
+workers = [
+    DecodeWorkerCandidate("decode_fast", "rack_a", "v1", "tok1", "fp16", "paged_v1", 4, 220, 18, 1, 12.0),
+    DecodeWorkerCandidate("decode_cache", "rack_b", "v1", "tok1", "fp16", "paged_v1", 4, 180, 5, 0, 11.0, {"doc_a": "tenant_a"}),
+    DecodeWorkerCandidate("decode_bad_layout", "rack_a", "v1", "tok1", "fp16", "paged_v2", 4, 500, 1, 0, 9.0, {"doc_a": "tenant_a"}),
+]
+requests = [
+    KVRequest("long_rag", "tenant_a", "v1", "tok1", 8192, 256, "fp16", "paged_v1", 4, "rack_a", "doc_a"),
+    KVRequest("short_chat", "tenant_a", "v1", "tok1", 256, 128, "fp16", "paged_v1", 4, "rack_a", "none"),
+    KVRequest("cross_tenant", "tenant_b", "v1", "tok1", 4096, 256, "fp16", "paged_v1", 4, "rack_a", "doc_a"),
+]
+
+rows, summary, gates = ToyKVTransferRouter().audit(requests, workers)
+print("kv_transfer_rows=", rows)
+print("kv_transfer_summary=", summary)
+print("kv_transfer_gates=", gates)
+```
+
+一次运行的核心输出类似：
+
+```text
+kv_transfer_summary= {'requests': 3, 'migrate': 2, 'recompute': 1, 'route_failed': 0, 'total_transfer_mib': 192.0, 'reserved_blocks': 100, 'skipped_incompatible': 2, 'tenant_cache_blocked': True}
+kv_transfer_gates= {'metadata_compatibility_checked': True, 'decode_capacity_reserved': True, 'routing_uses_cost_score': True, 'tenant_isolation_enforced': True, 'recompute_path_visible': True, 'failure_plan_visible': True, 'metrics_ready': True, 'kv_transfer_routing_gate': True}
+```
+
+这个 demo 展示了几个关键点：
+
+1. `metadata_compatibility_checked=True`：layout / TP 不兼容的 worker 被跳过，避免 silent wrong output。
+2. `decode_capacity_reserved=True`：迁移路径先 reserve blocks，再开始 transfer，不把 KV 传到未知位置。
+3. `routing_uses_cost_score=True`：路由不是只看空闲，而是综合 KV capacity、running sequences、pending transfers、TPOT、网络和 prefix reuse。
+4. `tenant_isolation_enforced=True`：`cross_tenant` 看到了 `doc_a` 的 prefix cache，但因为属于其他 tenant，不能复用。
+5. `recompute_path_visible=True`：短 prompt 直接 recompute，比迁移更简单。
+6. `failure_plan_visible=True`：每个迁移请求都带有 transfer 失败后的清理 / 重试计划。
+
+所以本章最终门禁是 `kv_transfer_routing_gate`：只有 metadata、capacity、route score、tenant isolation、recompute fallback、failure plan 和 metrics 都能闭环，KV transfer 才不是“复制 bytes”，而是可治理的系统能力。
+
+## 38.39 小练习
 
 1. 估算一个 32 层、GQA、FP16 模型在 8000 token prompt 下的 KV cache 大小。
 2. 画出 push KV transfer 的状态机。
@@ -1347,7 +1616,7 @@ PD 分离中，Prefill worker 处理 prompt 后会生成每层 KV cache。因为
 9. 解释 decode 中途失败为什么比 prefill 失败更难恢复。
 10. 设计 8 个观测 KV transfer 的关键指标。
 
-## 38.39 本章总结
+## 38.40 本章总结
 
 PD 分离真正困难的地方，是让 Decode worker 正确、高效地使用 Prefill worker 生成的 KV Cache。
 

@@ -23,6 +23,25 @@
 
 本章讨论 LLM serving 线上容量规划、成本估算、SLO 设计和故障演练。
 
+## 59.0 本讲资料边界与第二轮精修口径
+
+本章按第二轮精修口径，只讲教学版 LLM serving 的容量规划、成本估算、SLO 设计和故障演练框架。
+
+公开资料校准主要参考四类口径：
+
+1. Google SRE Workbook 对 SLO、SLI、error budget、burn rate 和告警策略的公开方法论。
+2. vLLM benchmark、metrics、optimization / tuning 文档对 TTFT、TPOT、E2E latency、KV cache usage、preemption、queue time、running / waiting requests 和压测指标的公开口径。
+3. Kubernetes resource management 和 deployment 文档对 resource request / limit、副本数、滚动发布和可用容量的通用工程语义。
+4. 本书第 53 到 58 章对 benchmark framework、异步 serving、多 worker router、分布式 KV、API 层和生产部署门禁的教学抽象。
+
+本章不提供某个 GPU、某个模型、某个云厂商或某个框架版本的通用容量答案，也不替代真实压测、真实账单、真实 SLO 审批、真实值班制度或真实故障演练平台。我们只保留一个能解释、能复算、能演练的闭环：
+
+```text
+workload token profile -> benchmark stable capacity -> GPU count -> KV concurrency -> cost attribution -> SLO and error budget -> admission policy -> fault drill -> rollback and runbook
+```
+
+第二轮新增 demo 的验收重点是：容量不能只按 QPS 算；要同时用 input token/s、output token/s、request rate 和 KV active tokens 估算 worker 数；规划容量要包含利用率、安全余量、N+1 和发布容量；成本要能按 GPU 小时和 token 粗分摊；SLO 要能计算 error budget；故障演练要证明 worker 丢失、依赖不可用、长上下文突增和新版本退化都有可执行动作。
+
 ## 59.1 本章目标
 
 读完本章，你应该能讲清：
@@ -1253,7 +1272,296 @@ SLO 上我会区分 workload 定义，例如短 chat 的 TTFT P95、TPOT P95、t
 最后我会定期做故障演练，包括 worker 退出、GPU OOM、NCCL hang、模型加载失败、对象存储不可用、长上下文突增和新版本性能退化。每个演练都要验证监控告警、router 摘除、降级、回滚和 runbook 是否可执行。容量、成本、SLO 和故障演练要一起设计，不能分开看。
 ```
 
-## 59.33 小练习
+## 59.33 Capacity SLO Fault Drill 公式、容量门禁和可运行 demo
+
+先把 workload 的峰值 token 压力写成：
+
+```math
+Q_{\mathrm{in}}=\sum_k \lambda_k X_k
+```
+
+```math
+Q_{\mathrm{out}}=\sum_k \lambda_k Y_k
+```
+
+其中 `lambda_k` 是第 `k` 类请求的峰值请求率，`X_k` 和 `Y_k` 分别是规划输入、输出 token 数。
+
+单 worker 稳定容量要乘以规划利用率：
+
+```math
+P_{\mathrm{worker}}^{\mathrm{plan}}=\rho P_{\mathrm{worker}}^{\mathrm{bench}}
+```
+
+worker 数可以从请求率、prefill、decode 和 KV 四个方向取最大值：
+
+```math
+N_{\mathrm{worker}}=\max(N_{\mathrm{req}},N_{\mathrm{prefill}},N_{\mathrm{decode}},N_{\mathrm{kv}})
+```
+
+KV active token 估算：
+
+```math
+A_{\mathrm{tok}}=\sum_k C_k(X_k+Y_k)
+```
+
+GPU 数量：
+
+```math
+N_{\mathrm{gpu}}=N_{\mathrm{worker}}T_{\mathrm{gpu}}
+```
+
+月度 error budget：
+
+```math
+B_{\mathrm{err}}=(1-A_{\mathrm{slo}})T_{\mathrm{month}}
+```
+
+小时成本粗估：
+
+```math
+C_{\mathrm{hour}}=N_{\mathrm{gpu}}C_{\mathrm{gpu}}+C_{\mathrm{store}}+C_{\mathrm{net}}+C_{\mathrm{obs}}
+```
+
+最终容量与演练门禁：
+
+```math
+G_{\mathrm{capslo}}=G_{\mathrm{profile}}G_{\mathrm{bench}}G_{\mathrm{kv}}G_{\mathrm{cost}}G_{\mathrm{slo}}G_{\mathrm{admit}}G_{\mathrm{drill}}G_{\mathrm{runbook}}
+```
+
+下面这个 0 依赖 demo 模拟一次最小容量、成本、SLO 和故障演练审计：
+
+```python
+from dataclasses import dataclass
+from math import ceil
+
+
+@dataclass
+class WorkloadProfile:
+    name: str
+    peak_rps: float
+    input_tokens_p95: int
+    output_tokens_p95: int
+    active_requests_p95: int
+    priority: int
+
+
+@dataclass
+class WorkerBenchmark:
+    stable_request_rps: float
+    prefill_tokens_per_s: int
+    decode_tokens_per_s: int
+    kv_active_tokens: int
+    gpus_per_worker: int
+    utilization_target: float
+
+
+@dataclass
+class CostConfig:
+    gpu_hour_price: float
+    storage_hour: float
+    network_hour: float
+    observability_hour: float
+
+
+@dataclass
+class SLOTarget:
+    availability: float
+    ttft_p95_ms: int
+    tpot_p95_ms: int
+    timeout_rate_max: float
+    window_hours: int
+
+
+@dataclass
+class FaultScenario:
+    name: str
+    lost_workers: int
+    dependency_available: bool
+    long_context_multiplier: float
+    candidate_tpot_p95_ms: int
+    runbook_steps: list[str]
+
+
+class ToyCapacitySLOFaultDrillAuditor:
+    def __init__(self, workloads, benchmark, cost, slo):
+        self.workloads = workloads
+        self.benchmark = benchmark
+        self.cost = cost
+        self.slo = slo
+
+    def traffic_profile(self) -> dict:
+        peak_rps = sum(w.peak_rps for w in self.workloads)
+        input_tps = sum(w.peak_rps * w.input_tokens_p95 for w in self.workloads)
+        output_tps = sum(w.peak_rps * w.output_tokens_p95 for w in self.workloads)
+        active_tokens = sum(w.active_requests_p95 * (w.input_tokens_p95 + w.output_tokens_p95) for w in self.workloads)
+        return {
+            "peak_rps": round(peak_rps, 2),
+            "input_tps": int(input_tps),
+            "output_tps": int(output_tps),
+            "active_tokens": int(active_tokens),
+        }
+
+    def capacity_plan(self) -> dict:
+        traffic = self.traffic_profile()
+        rho = self.benchmark.utilization_target
+        req_workers = ceil(traffic["peak_rps"] / (self.benchmark.stable_request_rps * rho))
+        prefill_workers = ceil(traffic["input_tps"] / (self.benchmark.prefill_tokens_per_s * rho))
+        decode_workers = ceil(traffic["output_tps"] / (self.benchmark.decode_tokens_per_s * rho))
+        kv_workers = ceil(traffic["active_tokens"] / (self.benchmark.kv_active_tokens * rho))
+        base_workers = max(req_workers, prefill_workers, decode_workers, kv_workers)
+        safe_workers = ceil(base_workers * 1.25)
+        n_plus_one_workers = safe_workers + 1
+        release_workers = n_plus_one_workers + 1
+        return {
+            "traffic": traffic,
+            "required_by_axis": {
+                "request": req_workers,
+                "prefill": prefill_workers,
+                "decode": decode_workers,
+                "kv": kv_workers,
+            },
+            "base_workers": base_workers,
+            "safe_workers": safe_workers,
+            "n_plus_one_workers": n_plus_one_workers,
+            "release_workers": release_workers,
+            "planned_gpus": release_workers * self.benchmark.gpus_per_worker,
+        }
+
+    def cost_report(self, plan: dict) -> dict:
+        gpu_hour = plan["planned_gpus"] * self.cost.gpu_hour_price
+        total_hour = gpu_hour + self.cost.storage_hour + self.cost.network_hour + self.cost.observability_hour
+        tokens_per_hour = (plan["traffic"]["input_tps"] + plan["traffic"]["output_tps"]) * 3600
+        cost_per_million_tokens = total_hour / max(1, tokens_per_hour / 1_000_000)
+        return {
+            "gpu_hour_cost": round(gpu_hour, 2),
+            "total_hour_cost": round(total_hour, 2),
+            "cost_per_million_tokens": round(cost_per_million_tokens, 3),
+        }
+
+    def slo_report(self, observed: dict) -> dict:
+        budget_minutes = (1 - self.slo.availability) * self.slo.window_hours * 60
+        burned_minutes = observed["incident_minutes"] + observed["timeout_rate"] * self.slo.window_hours * 60
+        return {
+            "availability_ok": observed["availability"] >= self.slo.availability,
+            "ttft_ok": observed["ttft_p95_ms"] <= self.slo.ttft_p95_ms,
+            "tpot_ok": observed["tpot_p95_ms"] <= self.slo.tpot_p95_ms,
+            "timeout_ok": observed["timeout_rate"] <= self.slo.timeout_rate_max,
+            "error_budget_minutes": round(budget_minutes, 2),
+            "burned_minutes": round(burned_minutes, 2),
+            "burn_ratio": round(burned_minutes / max(1, budget_minutes), 3),
+        }
+
+    def admission_decision(self, plan: dict, incoming: WorkloadProfile) -> dict:
+        projected_tokens = plan["traffic"]["active_tokens"] + incoming.active_requests_p95 * (
+            incoming.input_tokens_p95 + incoming.output_tokens_p95
+        )
+        kv_limit = plan["release_workers"] * self.benchmark.kv_active_tokens * self.benchmark.utilization_target
+        admitted = projected_tokens <= kv_limit or incoming.priority <= 1
+        action = "admit" if admitted else "reject_or_degrade"
+        return {"projected_active_tokens": int(projected_tokens), "kv_limit": int(kv_limit), "action": action}
+
+    def fault_drill(self, plan: dict, scenarios: list[FaultScenario]) -> dict:
+        rows = {}
+        for scenario in scenarios:
+            remaining_workers = plan["release_workers"] - scenario.lost_workers
+            capacity_ok = remaining_workers >= plan["base_workers"]
+            dependency_ok = scenario.dependency_available or "use_cached_model_artifacts" in scenario.runbook_steps
+            long_context_ok = scenario.long_context_multiplier <= 1.5 or "cap_context_length" in scenario.runbook_steps
+            release_ok = scenario.candidate_tpot_p95_ms <= self.slo.tpot_p95_ms or "rollback_revision" in scenario.runbook_steps
+            runbook_ok = {"detect", "mitigate", "verify"}.issubset(set(scenario.runbook_steps))
+            rows[scenario.name] = {
+                "remaining_workers": remaining_workers,
+                "capacity_ok": capacity_ok,
+                "dependency_ok": dependency_ok,
+                "long_context_ok": long_context_ok,
+                "release_ok": release_ok,
+                "runbook_ok": runbook_ok,
+                "pass": capacity_ok and dependency_ok and long_context_ok and release_ok and runbook_ok,
+            }
+        return rows
+
+
+workloads = [
+    WorkloadProfile("short_chat", 80.0, 256, 96, 120, 1),
+    WorkloadProfile("rag_summary", 12.0, 4096, 512, 36, 2),
+    WorkloadProfile("code_gen", 18.0, 1024, 512, 54, 2),
+]
+benchmark = WorkerBenchmark(
+    stable_request_rps=50.0,
+    prefill_tokens_per_s=180000,
+    decode_tokens_per_s=12000,
+    kv_active_tokens=120000,
+    gpus_per_worker=4,
+    utilization_target=0.7,
+)
+cost = CostConfig(gpu_hour_price=2.8, storage_hour=18.0, network_hour=12.0, observability_hour=5.0)
+slo = SLOTarget(availability=0.995, ttft_p95_ms=700, tpot_p95_ms=80, timeout_rate_max=0.01, window_hours=720)
+auditor = ToyCapacitySLOFaultDrillAuditor(workloads, benchmark, cost, slo)
+
+plan = auditor.capacity_plan()
+cost_report = auditor.cost_report(plan)
+slo_report = auditor.slo_report(
+    {"availability": 0.997, "ttft_p95_ms": 640, "tpot_p95_ms": 72, "timeout_rate": 0.00005, "incident_minutes": 18}
+)
+incoming_long_context = WorkloadProfile("tenant_burst", 6.0, 12000, 1024, 48, 3)
+admission = auditor.admission_decision(plan, incoming_long_context)
+fault_rows = auditor.fault_drill(
+    plan,
+    [
+        FaultScenario("worker_lost", 1, True, 1.0, 72, ["detect", "mitigate", "verify"]),
+        FaultScenario("object_store_down", 0, False, 1.0, 72, ["detect", "use_cached_model_artifacts", "mitigate", "verify"]),
+        FaultScenario("long_context_burst", 0, True, 2.0, 74, ["detect", "cap_context_length", "mitigate", "verify"]),
+        FaultScenario("candidate_tpot_regression", 0, True, 1.0, 110, ["detect", "rollback_revision", "mitigate", "verify"]),
+    ],
+)
+
+summary = {
+    "traffic": plan["traffic"],
+    "required_by_axis": plan["required_by_axis"],
+    "base_workers": plan["base_workers"],
+    "safe_workers": plan["safe_workers"],
+    "n_plus_one_workers": plan["n_plus_one_workers"],
+    "release_workers": plan["release_workers"],
+    "planned_gpus": plan["planned_gpus"],
+    "cost_report": cost_report,
+    "slo_report": slo_report,
+    "admission": admission,
+    "fault_rows": fault_rows,
+}
+gates = {
+    "profile_gate": summary["traffic"]["input_tps"] == 88064 and summary["traffic"]["output_tps"] == 23040,
+    "benchmark_capacity_gate": summary["required_by_axis"] == {"request": 4, "prefill": 1, "decode": 3, "kv": 4},
+    "kv_capacity_gate": summary["base_workers"] == 4 and summary["release_workers"] == 7,
+    "cost_gate": summary["cost_report"]["total_hour_cost"] == 113.4,
+    "slo_gate": all(summary["slo_report"][key] for key in ["availability_ok", "ttft_ok", "tpot_ok", "timeout_ok"])
+    and summary["slo_report"]["burn_ratio"] < 0.1,
+    "admission_gate": summary["admission"]["action"] == "reject_or_degrade",
+    "fault_drill_gate": all(row["pass"] for row in summary["fault_rows"].values()),
+    "runbook_gate": all(row["runbook_ok"] for row in summary["fault_rows"].values()),
+}
+gates["capacity_slo_fault_drill_gate"] = all(gates.values())
+
+print("capacity_slo_fault_drill_summary=", summary)
+print("capacity_slo_fault_drill_gates=", gates)
+```
+
+一次运行的核心输出类似：
+
+```text
+capacity_slo_fault_drill_summary= {'traffic': {'peak_rps': 110.0, 'input_tps': 88064, 'output_tps': 23040, 'active_tokens': 291072}, 'required_by_axis': {'request': 4, 'prefill': 1, 'decode': 3, 'kv': 4}, 'base_workers': 4, 'safe_workers': 5, 'n_plus_one_workers': 6, 'release_workers': 7, 'planned_gpus': 28, 'cost_report': {'gpu_hour_cost': 78.4, 'total_hour_cost': 113.4, 'cost_per_million_tokens': 0.284}, 'slo_report': {'availability_ok': True, 'ttft_ok': True, 'tpot_ok': True, 'timeout_ok': True, 'error_budget_minutes': 216.0, 'burned_minutes': 20.16, 'burn_ratio': 0.093}, 'admission': {'projected_active_tokens': 916224, 'kv_limit': 588000, 'action': 'reject_or_degrade'}, 'fault_rows': {'worker_lost': {'remaining_workers': 6, 'capacity_ok': True, 'dependency_ok': True, 'long_context_ok': True, 'release_ok': True, 'runbook_ok': True, 'pass': True}, 'object_store_down': {'remaining_workers': 7, 'capacity_ok': True, 'dependency_ok': True, 'long_context_ok': True, 'release_ok': True, 'runbook_ok': True, 'pass': True}, 'long_context_burst': {'remaining_workers': 7, 'capacity_ok': True, 'dependency_ok': True, 'long_context_ok': True, 'release_ok': True, 'runbook_ok': True, 'pass': True}, 'candidate_tpot_regression': {'remaining_workers': 7, 'capacity_ok': True, 'dependency_ok': True, 'long_context_ok': True, 'release_ok': True, 'runbook_ok': True, 'pass': True}}}
+capacity_slo_fault_drill_gates= {'profile_gate': True, 'benchmark_capacity_gate': True, 'kv_capacity_gate': True, 'cost_gate': True, 'slo_gate': True, 'admission_gate': True, 'fault_drill_gate': True, 'runbook_gate': True, 'capacity_slo_fault_drill_gate': True}
+```
+
+这个 demo 证明了几个关键点：
+
+1. 容量规划要同时看 request、prefill、decode 和 KV active tokens，不能只看 QPS。
+2. benchmark 极限值要乘以规划利用率，再叠加安全余量、N+1 和发布容量。
+3. KV cache 可能和 decode 一样成为主约束，长上下文 burst 要走 admission 或降级。
+4. 成本要从 GPU 小时扩展到存储、网络和观测，并能按 token 粗略归因。
+5. SLO 不是一句口号，必须能计算 error budget 和 burn ratio。
+6. 故障演练要覆盖 worker、依赖系统、长上下文突增和新版本性能退化，并且每个场景都有 detect、mitigate、verify。
+
+## 59.34 小练习
 
 1. 为 benchmark 脚本增加 input token/s 和 output token/s 统计。
 2. 为请求日志增加 input_tokens、output_tokens、tenant_id 和 model_revision。
@@ -1276,7 +1584,7 @@ SLO 上我会区分 workload 定义，例如短 chat 的 TTFT P95、TPOT P95、t
 19. 写一个 worker OOM 的故障演练 runbook。
 20. 写一个新版本 TPOT 退化后的回滚 runbook。
 
-## 59.34 本章总结
+## 59.35 本章总结
 
 LLM serving 的容量规划不能只看 QPS。
 

@@ -25,6 +25,30 @@ outputs = llm.generate(prompts, sampling_params)
 
 > SGLang Runtime 是把 OpenAI-compatible API、native `/generate`、offline engine 和 SGLang frontend 程序统一执行到高性能模型引擎上的系统层；它的核心模块包括入口服务、请求状态、scheduler、RadixAttention、memory pool、model runner、sampler、grammar backend 和 streaming 输出。
 
+## 27.0 本讲资料边界与第二轮精修口径
+
+本讲按第二轮精修要求做过资料校准，主要参考七类公开资料：
+
+1. SGLang 论文《SGLang: Efficient Execution of Structured Language Model Programs》对 frontend language、runtime、RadixAttention、KV cache reuse 和 compressed finite state machines for structured output decoding 的系统分层。
+2. SGLang 官方文档首页对 SGLang 作为高性能 serving framework、RadixAttention、prefix caching、multi-GPU parallelism、OpenAI API 兼容和生产级 serving 的定位说明。
+3. SGLang Server Arguments 文档对 `launch_server`、model / tokenizer、HTTP server、TP / DP、`mem-fraction-static`、chunked prefill、chat template、attention backend 和 metrics / logging 等启动配置的说明。
+4. SGLang Sampling Parameters 文档对 `/generate` endpoint、`text`、`input_ids`、`sampling_params`、`stream`、`max_new_tokens`、temperature、top-p、top-k、stop、penalty、JSON schema、regex、EBNF 和 structural tag 的说明。
+5. SGLang Offline Engine API 文档对不经过 HTTP server 的 batch inference、sync / async、streaming / non-streaming 和 custom server 用法的说明。
+6. SGLang Structured Outputs 文档对 JSON schema、regex、EBNF、structural tag、XGrammar / Outlines / llguidance grammar backend 和 OpenAI-compatible / native / offline engine 三类使用方式的说明。
+7. SGLang Attention Backend 文档对 attention backend 选择、prefill / decode forward、page size、KV cache dtype、CUDA graph 和平台差异的公开口径。
+
+本章只讲 SGLang Runtime 的教学版总览，不绑定某个 SGLang 版本的内部类名、真实源码路径、进程拓扑、CUDA kernel、Ray / Kubernetes 部署、PD 分离、MoE 路由、speculative decoding 或真实 benchmark。下面的 demo 只模拟请求状态、prefix lookup、KV slot、prefill/decode 调度、grammar mask 和 streaming 事件，用来训练架构解释，不等同于真实 SRT。
+
+参考资料：
+
+1. SGLang 论文：<https://arxiv.org/abs/2312.07104>
+2. SGLang 官方文档首页：<https://docs.sglang.io/index.md>
+3. SGLang Server Arguments：<https://docs.sglang.io/docs/advanced_features/server_arguments.md>
+4. SGLang Sampling Parameters：<https://docs.sglang.io/docs/basic_usage/sampling_params.md>
+5. SGLang Offline Engine API：<https://docs.sglang.io/docs/basic_usage/offline_engine_api.md>
+6. SGLang Structured Outputs：<https://docs.sglang.io/docs/advanced_features/structured_outputs.md>
+7. SGLang Attention Backend：<https://docs.sglang.io/docs/advanced_features/attention_backend.md>
+
 ## 27.1 本章目标
 
 读完本章，你应该能讲清：
@@ -930,7 +954,319 @@ SGLang Runtime 可以理解为 SGLang 的高性能执行后端。它对外支持
 生成 token 后，runtime 更新请求状态、KV cache、grammar state，并按需要 stream 给客户端。请求结束后，普通临时 cache 会释放，有复用价值的 prefix cache 可能保留在 RadixAttention 的树结构里，后续请求可以继续命中。
 ```
 
-## 27.28 小练习
+## 27.28 SGLang Runtime 指标、模块门禁和可运行 demo
+
+把进入 runtime 的请求抽象成：
+
+$$
+r_i=(e_i,X_i,Y_i,h_i,g_i,s_i)
+$$
+
+其中 `e_i` 是入口类型，`X_i` 是输入 token 数，`Y_i` 是计划输出 token 数，`h_i` 是 RadixAttention 命中的 prefix token 数，`g_i` 表示是否启用 grammar / structured output，`s_i` 表示是否 streaming。
+
+命中 prefix 后，实际需要执行 prefill 的 token 数为：
+
+$$
+P_i^{\mathrm{run}}=\max(0,X_i-h_i)
+$$
+
+一次窗口内的总 prefill token 工作量为：
+
+$$
+P_{\mathrm{run}}=\sum_i P_i^{\mathrm{run}}
+$$
+
+prefix reuse 节省比例为：
+
+$$
+R_{\mathrm{reuse}}=\frac{\sum_i h_i}{\max(1,\sum_i X_i)}
+$$
+
+如果每个新 token 需要一个 KV slot，教学版 memory pool 的峰值压力可以写成：
+
+$$
+P_{\mathrm{kv}}=\frac{N_{\mathrm{slot,peak}}}{N_{\mathrm{slot,total}}}
+$$
+
+prefill 调度需要满足每轮 token budget：
+
+$$
+\sum_{i\in B_t}P_i^{\mathrm{run}}\le B_{\mathrm{prefill}}
+$$
+
+decode 调度每轮给 active request 追加一个 token，可以用 active 行数近似工作量：
+
+$$
+D_{\mathrm{rows}}=\sum_t A_t
+$$
+
+结构化输出的额外状态更新次数可以写成：
+
+$$
+G_{\mathrm{steps}}=\sum_i g_iY_i
+$$
+
+教学版 SGLang Runtime 门禁可以写成：
+
+$$
+G_{\mathrm{runtime}}=G_{\mathrm{entry}}G_{\mathrm{state}}G_{\mathrm{radix}}G_{\mathrm{memory}}G_{\mathrm{schedule}}G_{\mathrm{grammar}}G_{\mathrm{stream}}G_{\mathrm{metric}}
+$$
+
+其中：
+
+1. `G_{\mathrm{entry}}`：OpenAI-compatible API、native API、offline engine 和 frontend program 都能落到统一 request state。
+2. `G_{\mathrm{state}}`：request state 至少包含 token ids、阶段、sampling params、KV slot、grammar state、streaming 和 finish reason。
+3. `G_{\mathrm{radix}}`：能在 prefill 前计算 prefix hit、run prefill tokens 和 saved prefill tokens。
+4. `G_{\mathrm{memory}}`：memory pool 能解释 KV slot 峰值、释放和压力。
+5. `G_{\mathrm{schedule}}`：prefill / decode 分阶段调度，能看到 waiting、running、finished 的变化。
+6. `G_{\mathrm{grammar}}`：structured output 的 grammar mask 在 sampler 前生效，而不是输出后才 parse。
+7. `G_{\mathrm{stream}}`：streaming 输出、finish event 和取消 / backpressure 边界可观测。
+8. `G_{\mathrm{metric}}`：TTFT、decode rows、KV pressure、reuse ratio 和错误率可以落表。
+
+下面这个 0 依赖 demo 模拟一个极简 SGLang Runtime。它把 OpenAI-compatible API、native `/generate`、frontend program 和 offline engine 四类入口统一成 request state；用 toy radix cache 计算 prefix hit；用 memory pool 分配 KV slots；用 prefill token budget 做两轮 prefill；再用 continuous decode loop 逐轮生成 token，并统计 grammar mask 和 streaming 事件。
+
+```python
+from dataclasses import dataclass, field
+
+
+@dataclass
+class RuntimeRequest:
+    rid: str
+    entrypoint: str
+    prompt_tokens: tuple
+    output_tokens: int
+    structured: bool = False
+    stream: bool = False
+    hit_tokens: int = 0
+    hit_owner: str = ""
+    run_prefill_tokens: int = 0
+    generated: int = 0
+    kv_slots: int = 0
+    phase: str = "waiting"
+    finish_reason: str = ""
+    events: list = field(default_factory=list)
+
+
+class ToyRadixCache:
+    def __init__(self):
+        self.prompts = []
+
+    @staticmethod
+    def common_prefix_len(left, right):
+        count = 0
+        limit = min(len(left), len(right))
+        while count < limit and left[count] == right[count]:
+            count += 1
+        return count
+
+    def lookup(self, tokens):
+        best = 0
+        owner = ""
+        for rid, cached in self.prompts:
+            hit = self.common_prefix_len(tokens, cached)
+            if hit > best:
+                best = hit
+                owner = rid
+        return best, owner
+
+    def insert(self, rid, tokens):
+        self.prompts.append((rid, tokens))
+
+
+class ToyMemoryPool:
+    def __init__(self, total_slots):
+        self.total_slots = total_slots
+        self.used_slots = 0
+        self.peak_slots = 0
+        self.by_request = {}
+
+    def allocate(self, rid, slots):
+        if self.used_slots + slots > self.total_slots:
+            raise RuntimeError(f"KV pool overflow for {rid}")
+        self.used_slots += slots
+        self.peak_slots = max(self.peak_slots, self.used_slots)
+        self.by_request[rid] = self.by_request.get(rid, 0) + slots
+
+    def release(self, rid, keep_prefix_slots):
+        owned = self.by_request.get(rid, 0)
+        released = max(0, owned - keep_prefix_slots)
+        self.used_slots -= released
+        self.by_request[rid] = keep_prefix_slots
+        return released
+
+
+class ToySGLangRuntimeAudit:
+    def __init__(self, requests, kv_slots_total, prefill_budget):
+        self.requests = list(requests)
+        self.radix = ToyRadixCache()
+        self.memory = ToyMemoryPool(kv_slots_total)
+        self.prefill_budget = prefill_budget
+        self.prefill_rounds = []
+        self.decode_trace = []
+        self.grammar_steps = 0
+        self.stream_events = 0
+
+    def ingest(self):
+        for req in self.requests:
+            hit, owner = self.radix.lookup(req.prompt_tokens)
+            req.hit_tokens = hit
+            req.hit_owner = owner
+            req.run_prefill_tokens = len(req.prompt_tokens) - hit
+            self.radix.insert(req.rid, req.prompt_tokens)
+            req.events.append("ingested")
+
+    def run_prefill(self):
+        waiting = list(self.requests)
+        round_id = 0
+        while waiting:
+            budget_left = self.prefill_budget
+            selected = []
+            still_waiting = []
+            for req in waiting:
+                cost = req.run_prefill_tokens
+                if cost <= budget_left and selected:
+                    selected.append(req)
+                    budget_left -= cost
+                elif cost <= budget_left and not selected:
+                    selected.append(req)
+                    budget_left -= cost
+                else:
+                    still_waiting.append(req)
+
+            used = 0
+            for req in selected:
+                req.phase = "prefill"
+                req.kv_slots += req.run_prefill_tokens
+                self.memory.allocate(req.rid, req.run_prefill_tokens)
+                req.events.append(f"prefill_round_{round_id}")
+                used += req.run_prefill_tokens
+                req.phase = "decode"
+
+            self.prefill_rounds.append(
+                {"round": round_id, "request_ids": [req.rid for req in selected], "tokens": used}
+            )
+            waiting = still_waiting
+            round_id += 1
+
+    def run_decode(self):
+        active = [req for req in self.requests if req.phase == "decode"]
+        step = 0
+        while active:
+            row = {"step": step, "active": [req.rid for req in active], "streamed": []}
+            next_active = []
+            for req in active:
+                req.generated += 1
+                req.kv_slots += 1
+                self.memory.allocate(req.rid, 1)
+                if req.structured:
+                    self.grammar_steps += 1
+                    req.events.append("grammar_mask")
+                if req.stream:
+                    self.stream_events += 1
+                    row["streamed"].append(req.rid)
+
+                if req.generated >= req.output_tokens:
+                    req.phase = "finished"
+                    req.finish_reason = "length"
+                    req.events.append("finished")
+                    self.memory.release(req.rid, keep_prefix_slots=req.hit_tokens)
+                else:
+                    next_active.append(req)
+
+            self.decode_trace.append(row)
+            active = next_active
+            step += 1
+
+    def report(self):
+        total_input = sum(len(req.prompt_tokens) for req in self.requests)
+        total_hit = sum(req.hit_tokens for req in self.requests)
+        run_prefill = sum(req.run_prefill_tokens for req in self.requests)
+        decode_rows = sum(len(row["active"]) for row in self.decode_trace)
+        ttft_estimate_ms = [
+            2 + req.run_prefill_tokens * 4 + (2 if req.structured else 0)
+            for req in self.requests
+        ]
+        summary = {
+            "entrypoints": sorted(set(req.entrypoint for req in self.requests)),
+            "total_input_tokens": total_input,
+            "run_prefill_tokens": run_prefill,
+            "saved_prefill_tokens": total_hit,
+            "reuse_ratio": round(total_hit / max(1, total_input), 3),
+            "prefill_rounds": len(self.prefill_rounds),
+            "decode_rounds": len(self.decode_trace),
+            "decode_rows": decode_rows,
+            "kv_peak_slots": self.memory.peak_slots,
+            "kv_pressure": round(self.memory.peak_slots / self.memory.total_slots, 3),
+            "grammar_steps": self.grammar_steps,
+            "stream_events": self.stream_events,
+            "avg_ttft_ms": round(sum(ttft_estimate_ms) / len(ttft_estimate_ms), 2),
+            "finished": sum(1 for req in self.requests if req.phase == "finished"),
+        }
+        request_rows = [
+            {
+                "rid": req.rid,
+                "entrypoint": req.entrypoint,
+                "hit_tokens": req.hit_tokens,
+                "hit_owner": req.hit_owner,
+                "run_prefill_tokens": req.run_prefill_tokens,
+                "generated": req.generated,
+                "finish_reason": req.finish_reason,
+            }
+            for req in self.requests
+        ]
+        gates = {
+            "entrypoints_unified": summary["entrypoints"]
+            == ["frontend", "native", "offline", "openai"],
+            "request_state_complete": all(req.finish_reason for req in self.requests),
+            "radix_hit_visible": summary["saved_prefill_tokens"] > 0,
+            "memory_pool_budget_ok": summary["kv_peak_slots"] <= self.memory.total_slots,
+            "scheduler_phases_visible": summary["prefill_rounds"] == 2
+            and summary["decode_rounds"] == 3,
+            "grammar_in_sampler": summary["grammar_steps"] == 2,
+            "streaming_visible": summary["stream_events"] == 6,
+            "metrics_ready": summary["kv_pressure"] < 0.95,
+        }
+        gates["sglang_runtime_gate"] = all(gates.values())
+        return request_rows, summary, gates
+
+
+ROOT = tuple(f"root_{i}" for i in range(8))
+requests = [
+    RuntimeRequest("openai_chat", "openai", ROOT + ("chat", "user", "kv", "cache"), 3, stream=True),
+    RuntimeRequest("native_json", "native", ROOT + ("json", "extract", "city", "population", "schema", "v1"), 2, structured=True),
+    RuntimeRequest("frontend_branch", "frontend", ROOT + ("json", "extract", "city", "population", "schema", "v1", "branch", "a"), 3, stream=True),
+    RuntimeRequest("offline_eval", "offline", ROOT + ("eval", "batch"), 2),
+]
+
+runtime = ToySGLangRuntimeAudit(requests, kv_slots_total=36, prefill_budget=18)
+runtime.ingest()
+runtime.run_prefill()
+runtime.run_decode()
+request_rows, runtime_summary, runtime_gates = runtime.report()
+
+print("sglang_runtime_requests=", request_rows)
+print("sglang_runtime_prefill_rounds=", runtime.prefill_rounds)
+print("sglang_runtime_decode_trace=", runtime.decode_trace)
+print("sglang_runtime_summary=", runtime_summary)
+print("sglang_runtime_gates=", runtime_gates)
+```
+
+这段 demo 应该输出：
+
+```text
+sglang_runtime_summary= {'entrypoints': ['frontend', 'native', 'offline', 'openai'], 'total_input_tokens': 52, 'run_prefill_tokens': 22, 'saved_prefill_tokens': 30, 'reuse_ratio': 0.577, 'prefill_rounds': 2, 'decode_rounds': 3, 'decode_rows': 10, 'kv_peak_slots': 31, 'kv_pressure': 0.861, 'grammar_steps': 2, 'stream_events': 6, 'avg_ttft_ms': 24.5, 'finished': 4}
+sglang_runtime_gates= {'entrypoints_unified': True, 'request_state_complete': True, 'radix_hit_visible': True, 'memory_pool_budget_ok': True, 'scheduler_phases_visible': True, 'grammar_in_sampler': True, 'streaming_visible': True, 'metrics_ready': True, 'sglang_runtime_gate': True}
+```
+
+读这段代码时要注意：
+
+1. 四种入口最后都变成同一种 `RuntimeRequest`，这对应 runtime 统一执行后端。
+2. `saved_prefill_tokens=30` 来自 radix prefix lookup，说明 RadixAttention 生效点在 prefill 前。
+3. `kv_peak_slots=31` 和 `kv_pressure=0.861` 说明 memory pool 是 scheduler 必须考虑的硬约束。
+4. `grammar_steps=2` 说明结构化输出约束在每个 decode step 的 sampler 前生效。
+5. `stream_events=6` 说明 streaming 不是 HTTP 层打印，而是 decode loop 的输出事件。
+
+## 27.29 小练习
 
 1. 画出一个 SGLang Runtime 请求从 API server 到 streaming output 的完整链路。
 2. 解释为什么 tokenizer 和 chat template 会影响 prefix cache 命中率。
@@ -940,7 +1276,7 @@ SGLang Runtime 可以理解为 SGLang 的高性能执行后端。它对外支持
 6. 解释 offline engine 和 HTTP server 入口有什么不同、底层又有什么相同。
 7. 假设 TTFT 高但 TPOT 正常，按 SGLang Runtime 模块列出排查路径。
 
-## 27.29 本章总结
+## 27.30 本章总结
 
 SGLang Runtime 是 SGLang 的执行核心。它不是简单的 HTTP wrapper，也不是单独一个 RadixAttention 数据结构，而是一套完整的 LLM serving engine。
 

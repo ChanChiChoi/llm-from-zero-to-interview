@@ -14,6 +14,24 @@ SGLang 主线是：frontend/runtime 协同、RadixAttention、SGLang Runtime、s
 
 > vLLM 更像面向通用高并发 LLM serving 的高性能执行引擎，核心是 KV cache 分页管理和 continuous batching；SGLang 更像面向复杂 LLM programs 的高性能 runtime，核心是前后端协同、RadixAttention、structured output 和多步程序执行。
 
+## 33.0 本讲资料边界与第二轮精修口径
+
+本讲第二轮精修时，主要参考五类公开资料：
+
+1. vLLM / PagedAttention 论文，对 KV cache 动态增长、显存碎片、logical block 到 physical block 映射、block sharing 和 high-throughput serving 的问题背景给出基础口径。
+2. vLLM 官方文档和本书第 16 到 25 章，对 OpenAI-compatible serving、PagedAttention、KV block manager、continuous batching、scheduler、worker / executor、prefix caching、并行和性能调优的工程口径做内部对齐。
+3. SGLang 论文，对 frontend language、runtime、RadixAttention、structured output decoding、复杂 language model programs 和多步 / 分支 workload 的系统分层给出基础口径。
+4. SGLang 官方文档和本书第 26 到 32 章，对 OpenAI-compatible API、native / offline engine、RadixAttention、scheduler、structured generation、speculative decoding、tool use 和 agent serving 做内部对齐。
+5. 近年 serving 系统相关论文和文档，对 PagedAttention 后续 trade-off、prefix cache locality、agent serving、多 GPU routing、structured output 和 workload-sensitive routing 的边界做校准。
+
+本章的边界也要说清：
+
+1. 本章不是 benchmark 排名，也不写“谁全面替代谁”。不同版本、硬件、模型、attention backend、并行配置和 workload 会显著改变性能结果。
+2. 本章只讲架构重心和选型方法：vLLM-like runtime 更偏通用高并发 serving 和 KV block 管理，SGLang-like runtime 更偏复杂 LLM program 的表达与执行。
+3. PagedAttention 和 RadixAttention 不在同一抽象层：前者主要回答 KV cache 物理块如何管理，后者主要回答 token prefix / program trajectory 如何匹配和复用。
+4. vLLM 可以作为 agent framework 的模型后端；SGLang 的优势是让部分复杂程序结构对 runtime 更可见。不能把“runtime 能不能服务 agent”误解成二选一。
+5. 本章 demo 是教学版 workload router / architecture comparator，用 toy metrics 说明独立 chat、共享 RAG、结构化抽取和 agent tree 的不同适配性，不代表真实性能数字。
+
 ## 33.1 本章目标
 
 读完本章，你应该能讲清：
@@ -560,7 +578,228 @@ PagedAttention 和 RadixAttention 也不是一回事。PagedAttention 关注 KV 
 所以我不会说 SGLang 简单替代 vLLM。标准高并发 OpenAI-compatible serving 很适合 vLLM；复杂 agent、结构化输出、多分支推理和共享 prefix 明显的 workload 更能体现 SGLang 优势。实际工程也可以平台层路由，让不同 workload 使用不同 runtime。
 ```
 
-## 33.21 小练习
+## 33.21 架构对比公式、workload router 和可运行 demo
+
+做架构对比时，不要只说“功能多”或“benchmark 高”。更好的方式是把 workload 抽象出来：
+
+```math
+w_i=(c_i,P_i,O_i,H_i,B_i,S_i,T_i)
+```
+
+其中 `c_i` 是同类 generation calls 数量，`P_i` 是每次 prompt tokens，`O_i` 是 output tokens，`H_i` 是共享 prefix tokens，`B_i` 是分支因子，`S_i` 表示是否需要 structured output，`T_i` 表示是否包含 tool / agent 轨迹。
+
+如果没有任何 cache，prefill token 数是：
+
+```math
+P_{\mathrm{naive}}=\sum_i c_iP_i
+```
+
+vLLM-like prefix cache 常以完整 KV block 命中为基础。给定 block size `b`，共享 prefix 中能稳定复用的完整 block token 数可以写成：
+
+```math
+H_i^{\mathrm{block}}=b\left\lfloor\frac{H_i}{b}\right\rfloor
+```
+
+对应的简化 prefill 节省是：
+
+```math
+S_{\mathrm{vllm}}=\sum_i (c_i-1)H_i^{\mathrm{block}}
+```
+
+SGLang-like runtime 除了线性共享 prefix，还要看多步程序和分支轨迹。一个简化写法是：
+
+```math
+S_{\mathrm{sglang}}=\sum_i (c_i-1)H_i+\sum_i \max(0,B_i-1)H_i^{\mathrm{branch}}
+```
+
+其中 `H_branch` 表示多分支 program 中额外共享的 root / trajectory token。这个式子只是教学抽象，真实系统还会受 page size、KV layout、eviction、scheduler、routing 和安全隔离影响。
+
+运行时选择不能只看 cache，还要看 workload fit：
+
+```math
+F(r,w_i)=F_{\mathrm{serving}}+F_{\mathrm{cache}}+F_{\mathrm{program}}+F_{\mathrm{grammar}}+F_{\mathrm{agent}}
+```
+
+`r` 是 runtime 类型。独立高并发 chat 通常让 `F_serving` 权重大；structured output、tool use、multi-turn 和分支搜索会提高 `F_program`、`F_grammar` 和 `F_agent` 的权重。
+
+架构对比门禁可以写成：
+
+```math
+G_{\mathrm{arch}}=G_{\mathrm{core}}G_{\mathrm{paged}}G_{\mathrm{radix}}G_{\mathrm{vllm}}G_{\mathrm{sglang}}G_{\mathrm{router}}G_{\mathrm{metric}}
+```
+
+这些因子分别要求共同 serving core、PagedAttention / block cache、RadixAttention / program reuse、vLLM 不被错误替代、SGLang 的复杂程序优势可见、平台层 workload router 可解释、指标可复盘。
+
+下面是一个 0 依赖 toy demo。它把四类 workload 放进同一个对比器：
+
+1. `independent_chat`：大量独立短 chat，更偏通用 serving。
+2. `rag_shared_doc`：共享 RAG 文档，vLLM-like full block prefix cache 和 SGLang-like prefix reuse 都能受益。
+3. `json_extraction`：结构化抽取，多次 generation 和 structured output 更偏 SGLang-like program runtime。
+4. `agent_tree`：agent / branch trajectory，多分支 prefix sharing 更能体现 RadixAttention 的价值。
+
+```python
+from dataclasses import dataclass
+
+
+@dataclass
+class Workload:
+    name: str
+    calls: int
+    prompt_tokens: int
+    output_tokens: int
+    shared_prefix: int
+    branch_factor: int = 1
+    structured: bool = False
+    tool_or_agent: bool = False
+    independent: bool = True
+
+
+class ToyArchitectureComparator:
+    def __init__(self, workloads, block_size=4):
+        self.workloads = workloads
+        self.block_size = block_size
+
+    def _full_block_hit(self, tokens):
+        return self.block_size * (tokens // self.block_size)
+
+    def _vllm_reuse(self, workload):
+        if workload.calls <= 1:
+            return 0
+        return self._full_block_hit(workload.shared_prefix) * (workload.calls - 1)
+
+    def _sglang_reuse(self, workload):
+        if workload.calls <= 1:
+            return 0
+        base = workload.shared_prefix * (workload.calls - 1)
+        branch_bonus = 0
+        if workload.branch_factor > 1:
+            branch_bonus = (workload.branch_factor - 1) * self._full_block_hit(workload.shared_prefix // 2)
+        return base + branch_bonus
+
+    def _fit_scores(self, workload):
+        vllm = 0
+        sglang = 0
+        if workload.independent:
+            vllm += 4
+            sglang += 2
+        if workload.shared_prefix > 0:
+            vllm += 1
+            sglang += 1
+        if workload.calls > 1 and not workload.independent:
+            sglang += 1
+        if workload.branch_factor > 1:
+            sglang += 3
+        if workload.structured:
+            vllm += 1
+            sglang += 2
+        if workload.tool_or_agent:
+            vllm += 1
+            sglang += 3
+        return vllm, sglang
+
+    def run(self):
+        rows = []
+        totals = {
+            "prompt_tokens_if_naive": 0,
+            "vllm_run_prefill": 0,
+            "sglang_run_prefill": 0,
+            "vllm_saved_prefill": 0,
+            "sglang_saved_prefill": 0,
+            "vllm_wins": 0,
+            "sglang_wins": 0,
+            "mixed_route": 0,
+        }
+        for workload in self.workloads:
+            naive = workload.calls * workload.prompt_tokens
+            v_saved = self._vllm_reuse(workload)
+            s_saved = self._sglang_reuse(workload)
+            v_run = max(0, naive - v_saved)
+            s_run = max(0, naive - s_saved)
+            v_fit, s_fit = self._fit_scores(workload)
+            if v_fit > s_fit:
+                route = "vllm"
+                totals["vllm_wins"] += 1
+            elif s_fit > v_fit:
+                route = "sglang"
+                totals["sglang_wins"] += 1
+            else:
+                route = "either"
+                totals["mixed_route"] += 1
+            rows.append(
+                {
+                    "workload": workload.name,
+                    "calls": workload.calls,
+                    "naive_prefill": naive,
+                    "vllm_saved": v_saved,
+                    "sglang_saved": s_saved,
+                    "vllm_run": v_run,
+                    "sglang_run": s_run,
+                    "vllm_fit": v_fit,
+                    "sglang_fit": s_fit,
+                    "recommended": route,
+                }
+            )
+            totals["prompt_tokens_if_naive"] += naive
+            totals["vllm_run_prefill"] += v_run
+            totals["sglang_run_prefill"] += s_run
+            totals["vllm_saved_prefill"] += v_saved
+            totals["sglang_saved_prefill"] += s_saved
+
+        totals["vllm_saved_ratio"] = round(totals["vllm_saved_prefill"] / max(1, totals["prompt_tokens_if_naive"]), 3)
+        totals["sglang_saved_ratio"] = round(totals["sglang_saved_prefill"] / max(1, totals["prompt_tokens_if_naive"]), 3)
+        totals["sglang_extra_saved"] = totals["sglang_saved_prefill"] - totals["vllm_saved_prefill"]
+        gates = {
+            "common_serving_core_visible": all(row["naive_prefill"] > 0 for row in rows),
+            "paged_prefix_cache_visible": totals["vllm_saved_prefill"] > 0,
+            "radix_program_reuse_visible": totals["sglang_saved_prefill"] > totals["vllm_saved_prefill"],
+            "vllm_not_replaced": totals["vllm_wins"] >= 1,
+            "sglang_program_fit_visible": totals["sglang_wins"] >= 2,
+            "workload_router_needed": len({row["recommended"] for row in rows}) >= 2,
+            "metrics_ready": totals["sglang_saved_ratio"] > totals["vllm_saved_ratio"],
+        }
+        gates["architecture_comparison_gate"] = all(gates.values())
+        return rows, totals, gates
+
+
+workloads = [
+    Workload("independent_chat", calls=8, prompt_tokens=20, output_tokens=16, shared_prefix=0, independent=True),
+    Workload("rag_shared_doc", calls=4, prompt_tokens=80, output_tokens=24, shared_prefix=56, independent=True),
+    Workload("json_extraction", calls=6, prompt_tokens=44, output_tokens=12, shared_prefix=32, structured=True, independent=False),
+    Workload(
+        "agent_tree",
+        calls=5,
+        prompt_tokens=72,
+        output_tokens=18,
+        shared_prefix=48,
+        branch_factor=3,
+        structured=True,
+        tool_or_agent=True,
+        independent=False,
+    ),
+]
+
+rows, summary, gates = ToyArchitectureComparator(workloads).run()
+print("architecture_rows=", rows)
+print("architecture_summary=", summary)
+print("architecture_gates=", gates)
+```
+
+运行后可以看到类似输出：
+
+```text
+architecture_summary= {'prompt_tokens_if_naive': 1104, 'vllm_run_prefill': 584, 'sglang_run_prefill': 536, 'vllm_saved_prefill': 520, 'sglang_saved_prefill': 568, 'vllm_wins': 2, 'sglang_wins': 2, 'mixed_route': 0, 'vllm_saved_ratio': 0.471, 'sglang_saved_ratio': 0.514, 'sglang_extra_saved': 48}
+architecture_gates= {'common_serving_core_visible': True, 'paged_prefix_cache_visible': True, 'radix_program_reuse_visible': True, 'vllm_not_replaced': True, 'sglang_program_fit_visible': True, 'workload_router_needed': True, 'metrics_ready': True, 'architecture_comparison_gate': True}
+```
+
+这个 demo 的重点是：
+
+1. 两者都有共同 serving core，不能把一个说成“会 serving”，另一个说成“不会 serving”。
+2. vLLM-like block prefix cache 在共享 RAG 文档上能明显节省 prefill。
+3. SGLang-like program runtime 在 structured extraction 和 agent tree 里能看到更多 program structure。
+4. 架构选型要看 workload，不是把所有请求都塞进一个结论。
+5. 平台层可以用 workload router，把独立 chat / RAG / agent / structured extraction 分流到更合适的 backend。
+
+## 33.22 小练习
 
 1. 用一张表对比 PagedAttention 和 RadixAttention。
 2. 给出 3 个更适合 vLLM 的 workload，说明原因。
@@ -570,7 +809,7 @@ PagedAttention 和 RadixAttention 也不是一回事。PagedAttention 关注 KV 
 6. 画出 vLLM 和 SGLang 都共有的 serving engine 模块图。
 7. 面试中用 2 分钟讲清 SGLang 和 vLLM 的区别。
 
-## 33.22 本章总结
+## 33.23 本章总结
 
 vLLM 和 SGLang 都是现代 LLM 推理系统的重要代表。
 

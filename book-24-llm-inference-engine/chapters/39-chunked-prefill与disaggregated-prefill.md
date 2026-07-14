@@ -12,6 +12,14 @@ Chunked Prefill 和 Disaggregated Prefill 都是在解决这个问题，但它�
 
 > Chunked Prefill 是把长 prompt 的 prefill 切成多个 chunk 调度；Disaggregated Prefill 是把 prefill 作为独立资源池或独立阶段来服务。前者是执行粒度优化，后者是系统架构优化，二者可以结合。
 
+## 39.0 本讲资料边界与第二轮精修口径
+
+本讲第二轮精修前，先按 `WRITING_PLAN.md` 对公开资料做校准：参考 vLLM chunked prefill 相关文档对 decode-first scheduling、`max_num_batched_tokens`、ITL / TTFT 折中和 chunked prefill 默认行为的说明；参考 vLLM disaggregated prefilling 文档对 prefill 实例、decode 实例、KV connector 和 experimental 边界的说明；参考 SGLang PD Disaggregation 文档对 prefill / decode server、Mooncake / NIXL、bootstrap、timeout、heterogeneous TP staging buffer、PD multiplexing 和 routing policy 的公开口径；并参考 SARATHI / SARATHI-Serve 论文对 chunked-prefills、decode-maximal batching、stall-free serving 和 prefill / decode 利用率差异的系统动机说明。
+
+本讲只讲 Chunked Prefill 与 Disaggregated Prefill 的通用关系：长 prompt prefill stall、chunk size、token budget、decode-first interleaving、position / mask / KV block table 连续性、PD prefill pool、按 chunk transfer、backpressure 和失败清理。不把某个框架版本的真实 CLI 参数默认值、connector 字段、Mooncake / NIXL API、scheduler 类名、benchmark 数字或生产配置写成通用标准。
+
+本讲新增 demo 是教学版 Chunked / Disaggregated Prefill 审计器：用 0 依赖 Python 模拟 full prefill stall、chunked scheduling、decode step 插入、token budget、position 连续性、短请求不饥饿、PD transfer 流水化、backpressure 和 abort cleanup，帮助把“chunked prefill 能缓解长 prompt 干扰”落到可运行证据。
+
 ## 39.1 本章目标
 
 读完本章，你应该能讲清：
@@ -1094,7 +1102,330 @@ Disaggregated Prefill 是系统架构优化。它把 prefill 从统一 engine �
 二者可以结合：在 disaggregated prefill pool 中使用 chunked prefill。这样长 prompt 会被切成多个 prefill chunk，KV 可以按 chunk 生成，并可能和 transfer 流水化。但代价是 request state、KV block table、position、partial transfer、失败清理都会更复杂。
 ```
 
-## 39.37 小练习
+## 39.37 Chunked / Disaggregated Prefill 公式、门禁和可运行 demo
+
+先把请求抽象成：
+
+```math
+C_i=(r_i,P_i,O_i,H_i,S_i,D_i,A_i)
+```
+
+其中 `r_i` 是 request id，`P_i` 是 prompt token 数，`O_i` 是预计输出 token 数，`H_i` 是 prefix cache 命中 token 数，`S_i` 是租户或优先级信号，`D_i` 表示是否走 disaggregated prefill，`A_i` 表示 abort / timeout 条件。
+
+真正需要执行的 prefill token 数是：
+
+```math
+P_i^{\mathrm{run}}=\max(0,P_i-H_i)
+```
+
+如果 chunk size 是 `S_{\mathrm{chunk}}`，chunk 数为：
+
+```math
+N_i^{\mathrm{chunk}}=\left\lceil\frac{P_i^{\mathrm{run}}}{S_{\mathrm{chunk}}}\right\rceil
+```
+
+第 `k` 个 chunk 的 token 数可以写成：
+
+```math
+q_{i,k}=\min(S_{\mathrm{chunk}},P_i^{\mathrm{run}}-kS_{\mathrm{chunk}})
+```
+
+在 mixed prefill / decode 调度里，一轮 token budget 不能只看 prefill chunk，还要把 decode rows 算进去：
+
+```math
+B_t^{\mathrm{used}}=D_t+\sum_{(i,k)\in A_t}q_{i,k}\le B_{\mathrm{tok}}
+```
+
+full prefill 的最大 stall 可以粗略写成：
+
+```math
+T_i^{\mathrm{full}}=\frac{P_i^{\mathrm{run}}}{X_{\mathrm{prefill}}}
+```
+
+chunked prefill 的单次最大 stall 变为：
+
+```math
+T_i^{\mathrm{chunk,max}}=\max_k\left(\frac{q_{i,k}}{X_{\mathrm{prefill}}}+\delta_{\mathrm{sched}}\right)
+```
+
+如果结合 PD transfer，全部 prefill 完再 transfer 的时间近似是 prefill 和 transfer 相加；按 chunk 流水化后可以近似看成：
+
+```math
+T_i^{\mathrm{pipe}}\approx \max(T_i^{\mathrm{prefill}},T_i^{\mathrm{transfer}})+T_{\mathrm{sync}}
+```
+
+最终门禁可以写成：
+
+```math
+G_{\mathrm{chunkpd}}=G_{\mathrm{chunk}}G_{\mathrm{decode}}G_{\mathrm{budget}}G_{\mathrm{position}}G_{\mathrm{fair}}G_{\mathrm{transfer}}G_{\mathrm{cleanup}}G_{\mathrm{metric}}
+```
+
+下面的 demo 覆盖三类请求：
+
+1. `long_rag`：长 prompt，命中一段 prefix，走 disaggregated prefill 和按 chunk transfer。
+2. `short_chat`：短 prompt，在 chunked scheduling 下优先完成，证明短请求不被长请求长期挡住。
+3. `agent_long`：长 prompt，但执行到两个 chunk 后 abort，用来验证 partial KV 和 pending transfer cleanup。
+
+```python
+from dataclasses import dataclass
+from math import ceil
+
+
+@dataclass
+class PrefillJob:
+    request_id: str
+    prompt_tokens: int
+    output_tokens: int
+    prefix_hit_tokens: int
+    priority: int
+    disaggregated: bool
+    abort_after_chunks: int = 0
+
+
+class ToyChunkedDisaggPrefillAuditor:
+    def __init__(self, chunk_size=1024, block_size=128, token_budget=1280):
+        self.chunk_size = chunk_size
+        self.block_size = block_size
+        self.token_budget = token_budget
+        self.decode_rows = 192
+        self.prefill_tokens_per_ms = 512.0
+        self.kv_mib_per_token = 0.015625
+        self.transfer_mib_per_ms = 40.0
+        self.transfer_depth = 2
+
+    def _run_prefill_tokens(self, job):
+        return max(0, job.prompt_tokens - job.prefix_hit_tokens)
+
+    def _chunk_tokens(self, remaining):
+        return min(self.chunk_size, remaining)
+
+    def _chunk_latency_ms(self, tokens):
+        return round(tokens / self.prefill_tokens_per_ms + 0.05, 3)
+
+    def _new_blocks(self, start_pos, end_pos):
+        return ceil(end_pos / self.block_size) - (start_pos // self.block_size)
+
+    def full_prefill_summary(self, jobs):
+        rows = []
+        elapsed = 0.0
+        short_wait_ms = 0.0
+        max_stall = 0.0
+        for job in jobs:
+            run_tokens = self._run_prefill_tokens(job)
+            prefill_ms = round(run_tokens / self.prefill_tokens_per_ms, 3)
+            if job.request_id == "short_chat":
+                short_wait_ms = round(elapsed, 3)
+            elapsed += prefill_ms
+            max_stall = max(max_stall, prefill_ms)
+            rows.append({
+                "request_id": job.request_id,
+                "run_prefill_tokens": run_tokens,
+                "full_prefill_ms": prefill_ms,
+            })
+        return rows, {
+            "requests": len(jobs),
+            "total_run_prefill_tokens": sum(row["run_prefill_tokens"] for row in rows),
+            "max_full_prefill_stall_ms": round(max_stall, 3),
+            "short_chat_full_wait_ms": short_wait_ms,
+        }
+
+    def chunked_schedule(self, jobs):
+        state = {
+            job.request_id: {
+                "job": job,
+                "remaining": self._run_prefill_tokens(job),
+                "next_offset": 0,
+                "chunk_index": 0,
+                "done": False,
+                "aborted": False,
+                "completion_round": None,
+            }
+            for job in jobs
+        }
+        rows = []
+        round_id = 0
+        active_decode_steps = 6
+        pending_transfer_chunks = 0
+        max_pending_transfer_chunks = 0
+        backpressure_events = 0
+        cleanup_events = 0
+        order = [
+            "short_chat",
+            "long_rag",
+            "agent_long",
+            "long_rag",
+            "agent_long",
+            "long_rag",
+            "long_rag",
+            "long_rag",
+        ]
+
+        for request_id in order:
+            item = state[request_id]
+            if item["done"] or item["aborted"]:
+                continue
+            round_id += 1
+            decode_first = active_decode_steps > 0
+            if decode_first:
+                active_decode_steps -= 1
+            if round_id % 2 == 0 and pending_transfer_chunks > 0:
+                pending_transfer_chunks -= 1
+
+            job = item["job"]
+            tokens = self._chunk_tokens(item["remaining"])
+            position_start = job.prefix_hit_tokens + item["next_offset"]
+            position_end = position_start + tokens
+            transfer_mib = round(tokens * self.kv_mib_per_token, 1) if job.disaggregated else 0.0
+            if job.disaggregated:
+                pending_transfer_chunks += 1
+                if pending_transfer_chunks > self.transfer_depth:
+                    backpressure_events += 1
+            max_pending_transfer_chunks = max(max_pending_transfer_chunks, pending_transfer_chunks)
+
+            item["remaining"] -= tokens
+            item["next_offset"] += tokens
+            item["chunk_index"] += 1
+            done = item["remaining"] == 0
+            aborted = bool(job.abort_after_chunks and item["chunk_index"] >= job.abort_after_chunks)
+            if aborted:
+                item["aborted"] = True
+                cleanup_events += 1
+                pending_transfer_chunks = max(0, pending_transfer_chunks - 1)
+            elif done:
+                item["done"] = True
+                item["completion_round"] = round_id
+
+            rows.append({
+                "round": round_id,
+                "request_id": request_id,
+                "chunk_index": item["chunk_index"] - 1,
+                "tokens": tokens,
+                "decode_first": decode_first,
+                "budget_used": tokens + (self.decode_rows if decode_first else 0),
+                "position_start": position_start,
+                "position_end": position_end,
+                "new_kv_blocks": self._new_blocks(position_start, position_end),
+                "transfer_mib": transfer_mib,
+                "state": "ABORTED" if aborted else ("PREFILL_DONE" if done else "PREFILL_PAUSED"),
+            })
+
+        chunked_summary = {
+            "chunk_size": self.chunk_size,
+            "scheduled_rounds": round_id,
+            "chunks_run": len(rows),
+            "decode_steps_interleaved": sum(row["decode_first"] for row in rows),
+            "max_chunk_prefill_ms": max(self._chunk_latency_ms(row["tokens"]) for row in rows),
+            "short_chat_completion_round": state["short_chat"]["completion_round"],
+            "long_rag_completion_round": state["long_rag"]["completion_round"],
+            "aborted_requests": sum(item["aborted"] for item in state.values()),
+            "cleanup_events": cleanup_events,
+            "max_pending_transfer_chunks": max_pending_transfer_chunks,
+            "backpressure_events": backpressure_events,
+        }
+        return rows, chunked_summary
+
+    def pd_transfer_summary(self, rows):
+        by_request = {}
+        for row in rows:
+            if row["transfer_mib"] <= 0:
+                continue
+            stats = by_request.setdefault(
+                row["request_id"], {"chunks": 0, "transfer_mib": 0.0, "prefill_ms": 0.0}
+            )
+            stats["chunks"] += 1
+            stats["transfer_mib"] += row["transfer_mib"]
+            stats["prefill_ms"] += self._chunk_latency_ms(row["tokens"])
+        pipeline_saving = 0.0
+        for stats in by_request.values():
+            transfer_ms = stats["transfer_mib"] / self.transfer_mib_per_ms
+            all_after_ms = stats["prefill_ms"] + transfer_ms
+            pipelined_ms = max(stats["prefill_ms"], transfer_ms) + 0.2
+            pipeline_saving += max(0.0, all_after_ms - pipelined_ms)
+        return {
+            "disaggregated_requests": len(by_request),
+            "disaggregated_chunks": sum(stats["chunks"] for stats in by_request.values()),
+            "total_transfer_mib": round(sum(stats["transfer_mib"] for stats in by_request.values()), 1),
+            "pipeline_transfer_saving_ms": round(pipeline_saving, 3),
+        }
+
+    def position_continuity_ok(self, jobs, rows):
+        jobs_by_id = {job.request_id: job for job in jobs}
+        last_end = {}
+        for row in rows:
+            job = jobs_by_id[row["request_id"]]
+            expected_start = last_end.get(row["request_id"], job.prefix_hit_tokens)
+            if row["position_start"] != expected_start:
+                return False
+            last_end[row["request_id"]] = row["position_end"]
+        return True
+
+    def audit(self, jobs):
+        full_rows, full_summary = self.full_prefill_summary(jobs)
+        chunk_rows, chunked_summary = self.chunked_schedule(jobs)
+        pd_summary = self.pd_transfer_summary(chunk_rows)
+        gates = {
+            "long_prefill_chunked": any(
+                self._run_prefill_tokens(job) > self.chunk_size for job in jobs
+            ),
+            "decode_interleaved": chunked_summary["decode_steps_interleaved"] > 0,
+            "token_budget_respected": all(row["budget_used"] <= self.token_budget for row in chunk_rows),
+            "position_continuity_checked": self.position_continuity_ok(jobs, chunk_rows),
+            "short_request_not_starved": (
+                chunked_summary["short_chat_completion_round"]
+                < chunked_summary["long_rag_completion_round"]
+            ),
+            "pd_transfer_pipeline_visible": pd_summary["pipeline_transfer_saving_ms"] > 0,
+            "backpressure_cleanup_visible": (
+                chunked_summary["backpressure_events"] > 0
+                and chunked_summary["cleanup_events"] > 0
+            ),
+            "metrics_ready": (
+                full_summary["total_run_prefill_tokens"] > 0
+                and chunked_summary["chunks_run"] == len(chunk_rows)
+            ),
+        }
+        gates["chunked_disagg_prefill_gate"] = all(gates.values())
+        return full_rows, full_summary, chunk_rows, chunked_summary, pd_summary, gates
+
+
+jobs = [
+    PrefillJob("long_rag", 6144, 256, 1024, 1, True),
+    PrefillJob("short_chat", 384, 128, 0, 3, False),
+    PrefillJob("agent_long", 3584, 512, 512, 1, True, abort_after_chunks=2),
+]
+
+full_rows, full_summary, chunk_rows, chunked_summary, pd_summary, gates = (
+    ToyChunkedDisaggPrefillAuditor().audit(jobs)
+)
+print("chunked_prefill_full_summary=", full_summary)
+print("chunked_prefill_rows=", chunk_rows)
+print("chunked_prefill_chunked_summary=", chunked_summary)
+print("chunked_prefill_pd_summary=", pd_summary)
+print("chunked_prefill_gates=", gates)
+```
+
+一次运行的核心输出类似：
+
+```text
+chunked_prefill_full_summary= {'requests': 3, 'total_run_prefill_tokens': 8576, 'max_full_prefill_stall_ms': 10.0, 'short_chat_full_wait_ms': 10.0}
+chunked_prefill_chunked_summary= {'chunk_size': 1024, 'scheduled_rounds': 8, 'chunks_run': 8, 'decode_steps_interleaved': 6, 'max_chunk_prefill_ms': 2.05, 'short_chat_completion_round': 1, 'long_rag_completion_round': 8, 'aborted_requests': 1, 'cleanup_events': 1, 'max_pending_transfer_chunks': 3, 'backpressure_events': 3}
+chunked_prefill_pd_summary= {'disaggregated_requests': 2, 'disaggregated_chunks': 7, 'total_transfer_mib': 112.0, 'pipeline_transfer_saving_ms': 2.4}
+chunked_prefill_gates= {'long_prefill_chunked': True, 'decode_interleaved': True, 'token_budget_respected': True, 'position_continuity_checked': True, 'short_request_not_starved': True, 'pd_transfer_pipeline_visible': True, 'backpressure_cleanup_visible': True, 'metrics_ready': True, 'chunked_disagg_prefill_gate': True}
+```
+
+这个 demo 展示了几个关键点：
+
+1. `max_full_prefill_stall_ms=10.0` 到 `max_chunk_prefill_ms=2.05`：长 prefill 的单次阻塞被切小。
+2. `decode_steps_interleaved=6`：decode-first interleaving 被显式计数，而不是只说“可以插入 decode”。
+3. `token_budget_respected=True`：每轮把 decode rows 和 prefill chunk 一起算进 token budget。
+4. `position_continuity_checked=True`：chunk 边界没有让 position 从 0 重启。
+5. `short_request_not_starved=True`：短请求第 1 轮完成，长请求第 8 轮完成，说明 chunked scheduling 能让短请求绕过长 prefill。
+6. `pd_transfer_pipeline_visible=True`：disaggregated prefill 下，按 chunk transfer 可以把部分 transfer 和 prefill 重叠。
+7. `backpressure_cleanup_visible=True`：transfer backlog 和 abort cleanup 都进入门禁，避免 partial KV 泄漏。
+
+所以本章最终门禁是 `chunked_disagg_prefill_gate`：只有 chunking、decode interleaving、token budget、position continuity、公平性、PD transfer、backpressure / cleanup 和 metrics 都能闭环，Chunked Prefill 才是可治理的 serving 能力。
+
+## 39.38 小练习
 
 1. 画出 full prefill 和 chunked prefill 的时间线对比。
 2. 解释为什么 chunked prefill 必须保持 position id 连续。
@@ -1107,7 +1438,7 @@ Disaggregated Prefill 是系统架构优化。它把 prefill 从统一 engine �
 9. 对比 Chunked Prefill、Disaggregated Prefill、Pipeline Parallel。
 10. 设计一组指标评估 chunked prefill 是否有效。
 
-## 39.38 本章总结
+## 39.39 本章总结
 
 Chunked Prefill 是把长 prompt prefill 切成多个 token chunk 执行，让 scheduler 可以在 chunk 边界做调度决策。
 

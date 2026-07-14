@@ -1124,6 +1124,1108 @@ Paged KV Block：分页 KV 缓存块
 
 KV Cache Gate：KV Cache 门禁
 
+Batched Prefill Audit：批量 Prefill 审计
+
+Toy Batched Prefill：教学版批量 Prefill
+
+Padding Side Policy：Padding 方向策略
+
+Attention Mask Contract：Attention mask 契约
+
+Last Real Token Logits：最后真实 token logits
+
+Padding Waste Ratio：Padding 浪费率
+
+Prefill Token Budget：Prefill token 预算
+
+Batched Prefill Gate：批量 Prefill 门禁
+
+Batched Decode Audit：批量 Decode 审计
+
+Toy Batched Decode：教学版批量 Decode
+
+Finished Mask：完成请求掩码
+
+Active Batch Compaction：活跃 batch 压缩
+
+Batch Cache Alignment：Batch 与 Cache 对齐
+
+Decode Position Tracking：Decode 位置追踪
+
+Decode Row Savings：Decode 行数节省
+
+Batched Decode Gate：批量 Decode 门禁
+
+Simple Scheduler Audit：简单调度器审计
+
+Toy Request Scheduler：教学版请求调度器
+
+Waiting Queue：等待队列
+
+Running Set：运行中请求集合
+
+Scheduler Admission：调度准入
+
+Max Active Sequences：最大活跃序列数
+
+Scheduler Token Budget：调度 token 预算
+
+Queue Wait Metric：队列等待指标
+
+TTFT Steps：首 token 等待步数
+
+Scheduler Trace：调度 Trace
+
+Simple Scheduler Gate：简单调度器门禁
+
+Token Streaming Audit：Token Streaming 审计
+
+Toy Text Streamer：教学版文本流式输出器
+
+Streaming Event Contract：流式事件契约
+
+Incremental Detokenization：增量 Detokenization
+
+First Token Chunk：首 token 片段
+
+Finish Event Contract：结束事件契约
+
+Stop Sequence Buffer：停止序列缓冲区
+
+Client Cancellation Cleanup：客户端取消清理
+
+Streaming Backpressure：流式背压
+
+Streaming Gate：流式输出门禁
+
+Minimal HTTP API Audit：最小 HTTP API 审计
+
+Toy HTTP API Server：教学版 HTTP API 服务
+
+Generate Request Contract：生成请求契约
+
+Request Validation Gate：请求校验门禁
+
+Queue Admission Control：队列准入控制
+
+SSE Frame Format：SSE 帧格式
+
+Sync Generate Response：同步生成响应
+
+Streaming Generate Response：流式生成响应
+
+HTTP Cancellation Cleanup：HTTP 取消清理
+
+HTTP API Gate：HTTP API 门禁
+
+Serving Benchmark Audit：推理服务压测审计
+
+Toy Serving Benchmark：教学版推理服务压测
+
+TTFT Metric：首 token 延迟指标
+
+TPOT Metric：每输出 token 时间指标
+
+E2E Latency Metric：端到端延迟指标
+
+Token Throughput Report：Token 吞吐报告
+
+Queue Length Percentile：队列长度分位数
+
+Active Request Percentile：活跃请求数分位数
+
+KV Memory Peak：KV 显存峰值
+
+Benchmark Bottleneck Classification：压测瓶颈归因
+
+Benchmark Gate：压测门禁
+
+Serving Benchmark Framework Audit：Serving Benchmark Framework 审计
+
+Toy Serving Benchmark Framework：教学版 Serving Benchmark Framework
+
+Benchmark Workload Coverage：压测 Workload 覆盖
+
+Benchmark Experiment Fingerprint：压测实验指纹
+
+Request Trace Summary：请求 Trace 摘要
+
+Engine Step Trace Summary：Engine Step Trace 摘要
+
+SLO Regression Gate：SLO 回归门禁
+
+Throughput Regression Check：吞吐回归检查
+
+KV Cleanup Check：KV 清理检查
+
+Prefix Effect Check：Prefix 效果检查
+
+Preemption Risk Check：Preemption 风险检查
+
+Benchmark Decision Gate：压测决策门禁
+
+Serving Benchmark Framework Gate：Serving Benchmark Framework 门禁
+
+Async Serving Architecture Audit：异步 Serving 架构审计
+
+Toy Async Serving Runtime：教学版异步 Serving Runtime
+
+Async Boundary Design：异步边界设计
+
+API Admission Boundary：API 准入边界
+
+Tokenizer Worker Queue：Tokenizer Worker 队列
+
+Engine Input Queue：Engine 输入队列
+
+Bounded Engine Drain：有界 Engine 拉取
+
+Engine Output Queue：Engine 输出队列
+
+Per Client Stream Queue：单 Client Stream 队列
+
+Stream Queue Backpressure：Stream 队列背压
+
+Cancel Signal Queue：取消信号队列
+
+Engine State Ownership：Engine 状态所有权
+
+Idempotent Async Cleanup：幂等异步清理
+
+Async Serving Architecture Gate：异步 Serving 架构门禁
+
+Multi Worker Router Audit：多 Worker Router 审计
+
+Toy Multi Worker Router：教学版多 Worker Router
+
+Router Worker Capability Filter：Router Worker 能力过滤
+
+Request Cost Block Estimate：请求成本 Block 估算
+
+Load Aware Worker Score：负载感知 Worker 分数
+
+Sticky Route Fallback：Sticky 路由回退
+
+Global Router Admission：全局 Router 准入
+
+Worker Heartbeat Timeout：Worker 心跳超时
+
+Safe Retry Boundary：安全重试边界
+
+Request Worker Map：请求到 Worker 映射
+
+Worker Selection Imbalance：Worker 选择不均衡
+
+Multi Worker Router Gate：多 Worker Router 门禁
+
+Distributed Parallel KV Audit：分布式并行 KV 审计
+
+Toy Distributed Parallel KV Auditor：教学版分布式并行 KV 审计器
+
+Parallel Group Boundary：并行组边界
+
+TP Head Shard Assignment：TP Head 分片分配
+
+TP Block Table Consistency：TP Block Table 一致性
+
+PP Layer Ownership：PP 层所有权
+
+Distributed KV Byte Accounting：分布式 KV 字节核算
+
+Collective Communication Cost：Collective 通信成本
+
+Pipeline Bubble Ratio：Pipeline Bubble 比例
+
+KV Migration Decision：KV 迁移决策
+
+Cross Rank Cleanup：跨 Rank 清理
+
+Distributed Parallel KV Gate：分布式并行 KV 门禁
+
+OpenAI Compatible API Audit：OpenAI-compatible API 审计
+
+Toy OpenAI Compatible API：教学版 OpenAI-compatible API
+
+API Compatibility Contract：API 兼容契约
+
+Chat Request Schema Validation：Chat 请求 Schema 校验
+
+SSE Stream Frame Contract：SSE Stream 帧契约
+
+OpenAI Style Error Shape：OpenAI 风格错误形状
+
+Bearer Auth Gate：Bearer 鉴权门禁
+
+Model Permission Gate：模型权限门禁
+
+Token Rate Limit Gate：Token 限流门禁
+
+Concurrency Limit Gate：并发限流门禁
+
+Usage Accounting Check：Usage 统计检查
+
+API Privacy Log Check：API 隐私日志检查
+
+OpenAI Compatible API Gate：OpenAI-compatible API 门禁
+
+Production Deployment Audit：生产部署审计
+
+Toy Production Deployment Auditor：教学版生产部署审计器
+
+Runtime Compatibility Matrix：运行时兼容矩阵
+
+Model Artifact Manifest：模型制品清单
+
+Startup Readiness Gate：启动就绪门禁
+
+Warmup Probe Check：预热探针检查
+
+Worker Registration Gate：Worker 注册门禁
+
+Drain Completion Gate：Drain 完成门禁
+
+Rolling Update Capacity Gate：滚动升级容量门禁
+
+Canary Traffic Split：灰度流量分流
+
+Canary Regression Gate：灰度回归门禁
+
+Rollback Readiness Gate：回滚就绪门禁
+
+Production Deployment Gate：生产部署门禁
+
+Capacity SLO Fault Drill Audit：容量 SLO 故障演练审计
+
+Toy Capacity SLO Fault Drill Auditor：教学版容量 SLO 故障演练审计器
+
+Workload Token Profile：工作负载 Token 画像
+
+Benchmark Stable Capacity：压测稳定容量
+
+GPU Count Estimate：GPU 数量估算
+
+KV Concurrency Limit：KV 并发限制
+
+Cost Attribution Model：成本归因模型
+
+SLO Error Budget：SLO 错误预算
+
+Admission Overload Policy：准入过载策略
+
+Fault Drill Scenario：故障演练场景
+
+Runbook Coverage Check：Runbook 覆盖检查
+
+Capacity SLO Fault Drill Gate：容量 SLO 故障演练门禁
+
+Inference Engine Interview Readiness Audit：推理框架面试准备度审计
+
+Toy Inference Engine Interview Auditor：教学版推理框架面试审计器
+
+Interview Question Rubric：面试题评分规约
+
+Concept Coverage Score：概念覆盖得分
+
+Request Lifecycle Answer：请求生命周期回答
+
+KV Cache Answer Evidence：KV Cache 回答证据
+
+Scheduler Answer Evidence：调度器回答证据
+
+Serving Metrics Coverage：Serving 指标覆盖
+
+Ordered Debug Path：有序排查路径
+
+Production Governance Answer：生产治理回答
+
+Project Evidence Portfolio：项目证据组合
+
+Tradeoff Coverage：取舍覆盖
+
+Inference Engine Interview Gate：推理框架面试门禁
+
+vLLM Motivation Audit：vLLM 动机审计
+
+Toy vLLM Motivation：教学版 vLLM 动机示例
+
+Naive KV Reservation：朴素 KV 预留
+
+Paged KV Block Allocation：分页 KV 块分配
+
+KV Waste Ratio：KV 浪费率
+
+Logical Physical Block Mapping：逻辑到物理块映射
+
+Block Reuse After Cleanup：清理后的块复用
+
+Static Decode Rows：静态 Decode 行数
+
+Continuous Decode Rows：连续批处理 Decode 行数
+
+vLLM Motivation Gate：vLLM 动机门禁
+
+PagedAttention Core Audit：PagedAttention 核心审计
+
+Toy Paged KV Cache：教学版分页 KV Cache
+
+Block Table Address Translation：Block Table 地址翻译
+
+Logical Block：逻辑块
+
+Physical KV Block：物理 KV 块
+
+Block Size Tradeoff：块大小权衡
+
+Internal Block Waste：块内浪费
+
+Prefix Block Ref Count：前缀块引用计数
+
+Freed Block Reuse：已释放块复用
+
+PagedAttention Gate：PagedAttention 门禁
+
+KV Block Manager Audit：KV Block Manager 审计
+
+Toy KV Block Manager：教学版 KV Block Manager
+
+Block Free List：Block 空闲列表
+
+Block Reference Count：Block 引用计数
+
+Prefill Block Admission：Prefill Block 准入
+
+Decode Block Extension：Decode Block 扩展
+
+Block Allocation Failure：Block 分配失败
+
+Block Manager Metrics：Block Manager 指标
+
+Shared Prefix Cleanup：共享前缀清理
+
+Block Manager Gate：Block Manager 门禁
+
+Continuous Batching Audit：Continuous Batching 审计
+
+Toy Continuous Batcher：教学版 Continuous Batching 调度器
+
+Iteration Level Scheduling：迭代级调度
+
+Dynamic Request Join：请求动态加入
+
+Dynamic Request Exit：请求动态退出
+
+Decode First Scheduling：Decode 优先调度
+
+Continuous Token Budget：Continuous Batching token 预算
+
+Scheduler KV Budget：调度器 KV 预算
+
+Deferred Scheduling Reason：调度延迟原因
+
+Static Batch Hole：静态 batch 空洞
+
+Continuous Batching Gate：Continuous Batching 门禁
+
+vLLM Scheduler Flow Audit：vLLM 请求调度流程审计
+
+Toy Request Flow Engine：教学版请求流程 engine
+
+Engine Request Contract：Engine Request 契约
+
+Request State Machine Trace：请求状态机 trace
+
+Scheduler Output Metadata：Scheduler 输出元数据
+
+Model Runner Execution Metadata：Model Runner 执行元数据
+
+Slot Mapping Metadata：Slot Mapping 元数据
+
+Output Processor Finish Gate：Output Processor 终止门禁
+
+Abort Cleanup Path：Abort 清理路径
+
+Request Flow Metrics：请求流程指标
+
+Request Flow Gate：请求流程门禁
+
+vLLM Memory Management Audit：vLLM 显存管理审计
+
+Toy KV Memory Manager：教学版 KV 显存管理器
+
+GPU Memory Breakdown：GPU 显存拆分
+
+KV Page Size：KV page 大小
+
+Prefix Cache Hash：Prefix Cache 哈希
+
+Cached Free Block：已缓存空闲块
+
+Prefix Cache Hit Rate：Prefix Cache 命中率
+
+LRU Cache Eviction：LRU 缓存淘汰
+
+Preemption Recompute Path：抢占重算路径
+
+Hybrid KV Cache Group：混合 KV Cache 分组
+
+Memory Management Gate：显存管理门禁
+
+vLLM Executor Architecture Audit：vLLM 执行架构审计
+
+Toy Executor Architecture：教学版 Executor 架构
+
+Engine Core Dispatch Loop：Engine Core 派发循环
+
+Executor Dispatch Layer：Executor 派发层
+
+Worker Rank Mapping：Worker rank 映射
+
+Model Runner Metadata Gate：Model Runner 元数据门禁
+
+Tensor Parallel Merge：Tensor Parallel 输出聚合
+
+CPU Process Budget：CPU 进程预算
+
+Worker Failure Recovery：Worker 故障恢复
+
+Executor Architecture Gate：Executor 架构门禁
+
+Prefix Caching Audit：Prefix Caching 审计
+
+Toy Prefix Cache Manager：教学版 Prefix Cache 管理器
+
+Full Block Prefix Reuse：Full Block 前缀复用
+
+Parent Hash Chain：父哈希链
+
+Extra Hash Isolation：额外哈希隔离
+
+Cache Salt Isolation：缓存 Salt 隔离
+
+Cached Free Touch：Cached-Free Block 命中触碰
+
+Prefix Saved Prefill Tokens：Prefix Cache 节省的 Prefill Token 数
+
+Prefix Cache Eviction：Prefix Cache 淘汰
+
+Prefix Cache Gate：Prefix Cache 门禁
+
+Serving Parallelism Audit：Serving 并行审计
+
+Toy Serving Parallel Auditor：教学版 Serving 并行审计器
+
+Tensor Parallel Topology：Tensor Parallel 拓扑
+
+Pipeline Parallel Bubble：Pipeline Parallel 空泡
+
+Data Parallel Replica：Data Parallel 副本
+
+Expert Parallel Placement：Expert Parallel 放置
+
+Worker Group Size：Worker 组大小
+
+Per Rank Memory Fit：单 Rank 显存适配
+
+Cross Node TP Risk：跨节点 TP 风险
+
+Prefix Cache Locality：Prefix Cache 局部性
+
+Parallel Serving Gate：并行 Serving 门禁
+
+vLLM Performance Tuning Audit：vLLM 性能调优审计
+
+Toy vLLM Tuning Auditor：教学版 vLLM 调优审计器
+
+TTFT Bottleneck Diagnosis：TTFT 瓶颈诊断
+
+TPOT Bottleneck Diagnosis：TPOT 瓶颈诊断
+
+KV Pressure Tuning：KV 压力调优
+
+Preemption Rate：抢占率
+
+Prefix Cache Effectiveness：Prefix Cache 有效性
+
+Config Trade-off Plan：配置取舍方案
+
+Rollback Guard：回滚保护门禁
+
+vLLM Tuning Gate：vLLM 调优门禁
+
+SGLang Motivation Audit：SGLang 动机审计
+
+Toy SGLang Motivation Audit：教学版 SGLang 动机审计器
+
+Complex LLM Program：复杂 LLM 程序
+
+Frontend Language：前端语言 / 程序表达层
+
+RadixAttention Motivation：RadixAttention 动机
+
+Radix Prefix Reuse：Radix 前缀复用
+
+Structured Decoding Retry Saving：结构化解码重试节省
+
+SGLang Motivation Gate：SGLang 动机门禁
+
+SGLang Runtime Audit：SGLang Runtime 审计
+
+Toy SGLang Runtime Audit：教学版 SGLang Runtime 审计器
+
+Runtime Entrypoint Unification：Runtime 入口统一
+
+Request State Contract：请求状态契约
+
+Radix Prefix Lookup：Radix 前缀查找
+
+KV Memory Pool Budget：KV Memory Pool 预算
+
+Prefill Decode Scheduler：Prefill / Decode 调度器
+
+Grammar Mask Step：Grammar Mask 步骤
+
+Streaming Event Trace：流式事件轨迹
+
+SGLang Runtime Gate：SGLang Runtime 门禁
+
+RadixAttention Prefix Sharing Audit：RadixAttention 前缀共享审计
+
+Toy RadixAttention Cache：教学版 RadixAttention Cache
+
+Compressed Prefix Tree：压缩前缀树
+
+Longest Prefix Match：最长前缀匹配
+
+Radix Tree Split：Radix Tree 节点拆分
+
+Page Aligned Prefix Hit：Page 对齐前缀命中
+
+Radix KV Ref Count：Radix KV 引用计数
+
+Leaf LRU Eviction：叶子节点 LRU 淘汰
+
+Cache Aware Scheduling Cost：Cache 感知调度成本
+
+RadixAttention Gate：RadixAttention 门禁
+
+SGLang Scheduler Audit：SGLang Scheduler 审计
+
+Toy SGLang Scheduler：教学版 SGLang Scheduler
+
+Decode First Scheduling：Decode 优先调度
+
+Cache Aware Admission：Cache 感知准入
+
+Scheduler Token Budget：Scheduler Token 预算
+
+Scheduler Sequence Budget：Scheduler Sequence 预算
+
+Scheduler KV Admission：Scheduler KV 准入
+
+Suffix Cost Scheduling：Suffix 成本调度
+
+Scheduler Aging Fairness：Scheduler Aging 公平性
+
+Chunked Prefill Scheduling：Chunked Prefill 调度
+
+Scheduler Grammar Cost：Scheduler Grammar 开销
+
+Scheduler Abort Cleanup：Scheduler Abort 清理
+
+SGLang Scheduler Gate：SGLang Scheduler 门禁
+
+Structured Generation Audit：结构化生成审计
+
+Toy Constrained Decoder：教学版约束解码器
+
+Grammar State：语法状态
+
+Valid Token Mask：合法 Token Mask
+
+JSON Schema Constraint：JSON Schema 约束
+
+Regex Choice Constraint：Regex / Choices 约束
+
+EBNF Grammar Constraint：EBNF Grammar 约束
+
+Structural Tag Constraint：Structural Tag 约束
+
+Empty Valid Token Set：空合法 Token 集合
+
+Format Not Fact Gate：格式不等于事实门禁
+
+Structured Streaming Partial：结构化流式中间片段
+
+Structured Generation Gate：结构化生成门禁
+
+Speculative Decoding Audit：推测解码审计
+
+Toy Speculative Decoder：教学版推测解码器
+
+Draft Source：草稿来源 / 提案来源
+
+Target Verify Call：目标模型验证调用
+
+Accept Length：接受长度
+
+Draft Acceptance Rate：草稿接受率
+
+Target Call Reduction：目标模型调用下降倍数
+
+Speculative Fallback Token：推测解码回退 token
+
+Speculative KV Cleanup：推测解码 KV 清理
+
+Adaptive Speculative Steps：自适应推测步数
+
+Speculative Decoding Gate：推测解码门禁
+
+Agent Serving Audit：Agent Serving 审计
+
+Toy Agent Serving Audit：教学版 Agent Serving 审计
+
+Multi-turn Runtime State：多轮运行时状态
+
+Session Aware Routing：会话感知路由
+
+Agent Trajectory Prefix Sharing：Agent 轨迹前缀共享
+
+Tool Parser Fit：工具解析器匹配度
+
+Tool Schema Validation：工具 Schema 校验
+
+Tool Result Backfill：工具结果回灌
+
+Tool Wait GPU Release：工具等待期间 GPU 释放
+
+Agent Round Budget：Agent 轮数预算
+
+Agent Serving Gate：Agent Serving 门禁
+
+Serving Architecture Comparison Audit：Serving 架构对比审计
+
+Toy Architecture Comparator：教学版架构对比器
+
+Common Serving Core：共同 Serving 核心
+
+Paged Prefix Cache Evidence：分页前缀缓存证据
+
+Radix Program Reuse Evidence：Radix 程序复用证据
+
+Workload Fit Score：Workload 适配分
+
+Runtime Workload Router：Runtime Workload 路由器
+
+vLLM Not Replaced Gate：vLLM 未被替代门禁
+
+SGLang Program Fit Gate：SGLang 程序适配门禁
+
+Architecture Comparison Gate：架构对比门禁
+
+mini-sglang Source Path Audit：mini-sglang 源码路径审计
+
+Toy Source Path Auditor：教学版源码路径审计器
+
+Runtime Module Map：运行时模块地图
+
+Request Lifecycle Order：请求生命周期顺序
+
+Source Resource Coverage：源码资源覆盖率
+
+Source Experiment Coverage：源码实验覆盖率
+
+Source Observable Signal：源码可观测信号
+
+Radix Split Experiment：Radix Split 实验
+
+Abort Cleanup Experiment：Abort 清理实验
+
+Source Path Gate：源码路径门禁
+
+Prefill Decode Resource Profile Audit：Prefill / Decode 资源画像审计
+
+Toy Prefill Decode Profiler：教学版 Prefill / Decode 画像器
+
+Request Token Profile：请求 Token 画像
+
+Run Prefill Tokens：实际执行 Prefill 的 Token 数
+
+Prefill Compute Profile：Prefill 计算画像
+
+Prefill KV Write：Prefill KV 写入
+
+Decode KV Read：Decode KV 读取
+
+TTFT TPOT Separation：TTFT / TPOT 拆分
+
+Long Prefill Stall Risk：长 Prefill 阻塞风险
+
+Decode-first Starvation Risk：Decode-first 饥饿风险
+
+PD KV Transfer Cost：PD KV 传输成本
+
+Prefill Decode Profile Gate：Prefill / Decode 画像门禁
+
+PD Disaggregation Motivation Audit：PD 分离动机审计
+
+Toy PD Disaggregation Auditor：教学版 PD 分离审计器
+
+Unified Engine Interference：统一引擎干扰
+
+Prefill Interruption Evidence：Prefill 打断证据
+
+Decode-first Starvation Evidence：Decode-first 饥饿证据
+
+Independent P/D Scaling：Prefill / Decode 独立扩缩容
+
+KV Transfer Cost Gate：KV 传输成本门禁
+
+Slow Transfer Counterexample：慢传输反例
+
+PD Motivation Gate：PD 分离动机门禁
+
+PD Architecture Audit：PD 系统架构审计
+
+Toy PD Architecture Auditor：教学版 PD 架构审计器
+
+PD Router：PD 路由器
+
+Prefill Worker Pool：Prefill Worker 资源池
+
+Decode Worker Pool：Decode Worker 资源池
+
+KV Transfer Backend：KV 传输后端
+
+Bootstrap Metadata：Bootstrap 元数据
+
+Decode Reservation：Decode 预留
+
+Cross Component State Machine：跨组件状态机
+
+Transfer Failure Cleanup：传输失败清理
+
+Client Abort Cleanup：客户端取消清理
+
+Model Version Compatibility：模型版本兼容性
+
+PD Architecture Gate：PD 架构门禁
+
+KV Transfer Routing Audit：KV 传输路由审计
+
+Toy KV Transfer Router：教学版 KV 传输路由器
+
+KV Metadata Compatibility：KV 元数据兼容性
+
+Decode Capacity Reservation：Decode 容量预留
+
+KV Routing Cost Score：KV 路由成本评分
+
+Tenant Cache Isolation：租户缓存隔离
+
+Recompute Fallback Path：重算兜底路径
+
+Transfer Failure Plan：传输失败计划
+
+KV Transfer Routing Gate：KV 传输路由门禁
+
+Chunked Disaggregated Prefill Audit：Chunked / Disaggregated Prefill 审计
+
+Toy Chunked Disagg Prefill Auditor：教学版 Chunked / Disaggregated Prefill 审计器
+
+Prefill Chunk Count：Prefill Chunk 数
+
+Decode Interleaving：Decode 插入调度
+
+Prefill Token Budget：Prefill Token 预算
+
+Position Continuity：位置连续性
+
+Short Request Fairness：短请求公平性
+
+PD Transfer Pipeline：PD 传输流水线
+
+Backpressure Cleanup：背压清理
+
+Chunked Disagg Prefill Gate：Chunked / Disaggregated Prefill 门禁
+
+Multi Level KV Cache Audit：多级 KV Cache 审计
+
+Toy Multi Level KV Cache Auditor：教学版多级 KV Cache 审计器
+
+KV Residency Level：KV 驻留层级
+
+Active GPU Block Protection：活跃 GPU Block 保护
+
+CPU KV Promote：CPU KV 提升
+
+Remote KV Fetch：远端 KV 拉取
+
+Recompute Fallback：重算兜底
+
+KV Tenant Isolation：KV 租户隔离
+
+KV Demotion Policy：KV 降级策略
+
+Residency Metrics：驻留指标
+
+Multi Level KV Gate：多级 KV 门禁
+
+Cross Node Network Audit：跨节点网络审计
+
+Toy Cross Node Network Auditor：教学版跨节点网络审计器
+
+Cross Node Link Profile：跨节点链路画像
+
+TP Cross Node Risk：TP 跨节点风险
+
+Pipeline Activation Cost：流水并行激活传输成本
+
+PD KV Transfer Cost：PD KV 传输成本
+
+Remote Recompute Decision：远端拉取 / 重算决策
+
+Topology Aware Routing：拓扑感知路由
+
+Transfer Backpressure：传输背压
+
+Control Data Plane Separation：控制面 / 数据面隔离
+
+Cross Node Network Gate：跨节点网络门禁
+
+PD Tradeoff Audit：PD 取舍审计
+
+Toy PD Tradeoff Auditor：教学版 PD 取舍审计器
+
+PD Benefit Cost Score：PD 收益成本评分
+
+PD Positive Case：PD 正例场景
+
+Short Request Anti Pattern：短请求反模式
+
+Decode Bottleneck Anti Pattern：Decode 瓶颈反模式
+
+Slow Transfer Anti Pattern：慢传输反模式
+
+Ops Readiness Gate：运维就绪门禁
+
+PD Alternative Path：PD 替代路径
+
+PD Tradeoff Gate：PD 取舍门禁
+
+Single Engine To PD Migration Audit：单机到 PD 迁移审计
+
+Toy PD Migration Auditor：教学版 PD 迁移审计器
+
+Explicit Request Stage：显式请求阶段
+
+Model Runner Interface Split：模型运行器接口拆分
+
+KV Metadata Contract：KV 元数据契约
+
+Prefill Decode Scheduler Split：Prefill / Decode 调度器拆分
+
+PD Router State Machine：PD Router 状态机
+
+Same Node PD Prototype：同节点 PD 原型
+
+Cleanup Cancel Path：清理与取消路径
+
+Observability Fallback Readiness：观测与回滚就绪
+
+PD Migration Gate：PD 迁移门禁
+
+nano-vLLM Source Learning Audit：nano-vLLM 源码学习审计
+
+Toy nano-vLLM Source Auditor：教学版 nano-vLLM 源码审计器
+
+Source Module Map：源码模块地图
+
+Generate Trace Path：生成调用追踪路径
+
+Engine Step Trace：引擎单步追踪
+
+Sequence State Audit：序列状态审计
+
+Scheduler Decision Trace：调度器决策追踪
+
+KV Block Lifecycle：KV Block 生命周期
+
+Model Runner Batch Contract：模型运行器批次契约
+
+Source Experiment Signal：源码实验信号
+
+nano-vLLM Source Gate：nano-vLLM 源码门禁
+
+tiny-LLM Learning Audit：tiny-LLM 学习路线审计
+
+Toy tiny-LLM Learning Auditor：教学版 tiny-LLM 学习审计器
+
+Operator To Model Path：算子到模型路径
+
+Attention Shape Trace：Attention 形状追踪
+
+RoPE Position Alignment：RoPE 位置对齐
+
+GQA KV Head Audit：GQA KV 头数审计
+
+Generate Sampling Loop：生成与采样循环
+
+KV Cache Equivalence：KV Cache 等价性
+
+Serving Optimization Ladder：Serving 优化阶梯
+
+Chunk Position Continuity：Chunk 位置连续性
+
+tiny-LLM Learning Gate：tiny-LLM 学习门禁
+
+mini-sglang Learning Audit：mini-sglang 学习路线审计
+
+Toy mini-sglang Learning Auditor：教学版 mini-sglang 学习审计器
+
+SGLang Runtime Capability：SGLang Runtime 能力
+
+Radix Cache Runtime Evidence：Radix Cache 运行时证据
+
+Chunked Prefill Ablation：Chunked Prefill 消融
+
+Overlap Scheduling Ablation：Overlap Scheduling 消融
+
+Online Serving Trace：在线 Serving 追踪
+
+Structured Tool Boundary：结构化输出与工具边界
+
+Abort Cleanup Check：中止清理检查
+
+Production Gap Map：生产差距地图
+
+mini-sglang Learning Gate：mini-sglang 学习门禁
+
+Teaching Project Core Module Audit：教学项目核心模块抽象审计
+
+Toy Core Module Auditor：教学版核心模块审计器
+
+Core Module Boundary：核心模块边界
+
+Request State Ownership：请求状态归属
+
+Scheduler ModelRunner Boundary：调度器 / 模型运行器边界
+
+KV Manager Ownership：KV 管理器归属
+
+BatchBuilder Metadata Contract：BatchBuilder 元数据契约
+
+Output Processor Cleanup Boundary：输出处理器清理边界
+
+Metrics Observability Contract：指标观测契约
+
+Replaceable Upgrade Path：可替换升级路径
+
+Core Module Gate：核心模块门禁
+
+Naive Scheduler To Continuous Batching Audit：Naive Scheduler 到 Continuous Batching 升级审计
+
+Toy Scheduler Upgrade Auditor：教学版调度升级审计器
+
+Request Level Batch Lock：请求级 batch 锁定
+
+Iteration Boundary Scheduling：迭代边界调度
+
+Dynamic Request Admission：请求动态准入
+
+Dynamic Request Exit：请求动态退出
+
+Decode First Upgrade：Decode 优先升级
+
+Bounded Prefill Budget：有界 Prefill 预算
+
+KV Capacity Admission：KV 容量准入
+
+Scheduler Upgrade Gate：调度升级门禁
+
+Paged KV Cache Upgrade Audit：Paged KV Cache 升级审计
+
+Toy Paged KV Upgrade Auditor：教学版 Paged KV 升级审计器
+
+List KV Private Cache：List KV 私有缓存
+
+Global KV Block Pool：全局 KV Block 池
+
+Request Block Table：请求 Block Table
+
+Allocate Until Contract：Allocate Until 契约
+
+Paged Slot Mapping：分页 Slot Mapping
+
+Decode Block Extension Gate：Decode Block 扩展门禁
+
+Idempotent KV Free：幂等 KV 释放
+
+Double Free Guard：重复释放防护
+
+Paged KV Upgrade Gate：Paged KV 升级门禁
+
+Prefix Prompt Cache Upgrade Audit：Prefix / Prompt Cache 升级审计
+
+Toy Prefix Prompt Cache Auditor：教学版 Prefix / Prompt Cache 审计器
+
+Prompt Prefix Cache Boundary：Prompt Cache 与 Prefix Cache 边界
+
+Full Block Cache Reuse：Full Block Cache 复用
+
+Parent Hash Cache Chain：父哈希缓存链
+
+Extra Hash Cache Isolation：额外哈希缓存隔离
+
+Suffix Prefill Start Position：Suffix Prefill 起始位置
+
+Cached Ref Count Lifecycle：缓存引用计数生命周期
+
+Full Prompt Hit Fallback：完整 Prompt 命中回退
+
+Prefix Prompt Cache Upgrade Gate：Prefix / Prompt Cache 升级门禁
+
+Preemption Recompute Swap Upgrade Audit：Preemption / Recompute / Swap 升级审计
+
+Toy Preemption Upgrade Auditor：教学版 Preemption 升级审计器
+
+KV Pressure Trigger：KV 压力触发
+
+Cached Block Eviction Before Preemption：抢占前淘汰 Cached Block
+
+Victim Selection Policy：Victim 选择策略
+
+Recompute Context Preservation：Recompute 上下文保留
+
+Recompute Resume Path：Recompute 恢复路径
+
+Swap Failure Rollback：Swap 失败回滚
+
+Swap In State Restore：Swap In 状态恢复
+
+Preemption Upgrade Gate：Preemption 升级门禁
+
+Unified Scheduler Loop Audit：统一调度循环审计
+
+Toy Unified Scheduler Loop Auditor：教学版统一调度循环审计器
+
+Engine Step Order：Engine Step 顺序
+
+Prefix Lookup Once：Prefix 只查一次
+
+Decode First Commit：Decode 优先提交
+
+Suffix Prefill Plan：Suffix Prefill 计划
+
+KV Budget Commit：KV 预算提交
+
+Memory Pressure Order：内存压力处理顺序
+
+Batch Metadata Invariant：Batch Metadata 不变量
+
+Output State Update：输出状态更新
+
+Unified Scheduler Loop Gate：统一调度循环门禁
+
 Post-Training：后训练
 
 Instruction Tuning：指令微调
@@ -6957,3 +8059,19 @@ Top-p Nucleus Filter：Top-p 核采样过滤
 Seeded Multinomial Sampling：带随机种子的多项式采样
 
 Sampling Gate：采样门禁
+
+Minimal KV Cache Audit：最小 KV Cache 审计
+
+Toy KV Cache Decode：教学版 KV Cache 解码
+
+Past Key Values Contract：历史 key/value 契约
+
+Prefill Cache Build：Prefill 缓存构建
+
+Decode Cache Append：Decode 缓存追加
+
+KV Cache Equivalence Check：KV Cache 等价性检查
+
+KV Cache Memory Formula：KV Cache 显存公式
+
+KV Cache Gate：KV Cache 门禁

@@ -25,6 +25,25 @@
 
 本章讨论如何把 inference engine 包装成 OpenAI-compatible serving API。
 
+## 57.0 本讲资料边界与第二轮精修口径
+
+本章按第二轮精修口径，只讲教学版 serving engine 如何暴露 OpenAI-compatible API 的稳定工程边界。
+
+公开资料校准主要参考四类口径：
+
+1. OpenAI Chat Completions API reference 对 `messages`、`choices`、`finish_reason`、stream chunk、`stream_options.include_usage` 等字段的公开说明。
+2. OpenAI streaming guide 对 `stream=true`、HTTP streaming over server-sent events、Chat Completions / legacy Completions 增量 chunk 的公开说明。
+3. OpenAI error codes guide 对 401、403、429、500、503 等错误含义，以及认证、额度、rate limit 和 overload 的公开说明。
+4. OpenAI rate limits guide 对 RPM、RPD、TPM、TPD、IPM、audio minutes 等多维速率限制，以及 synchronous request 的 RPM / TPM 区分的公开说明。
+
+本章不复刻 OpenAI 官方 API 的全部字段、模型行为、SDK 实现、Responses API 完整事件流、tool calls、vision / audio content parts、project / organization 权限体系、真实 billing quota、真实风控策略或官方错误消息。我们只实现一个教学版兼容子集：
+
+```text
+Bearer auth -> JSON validation -> model permission -> chat template -> token budget -> RPM / TPM / concurrency limit -> EngineRequest -> non-stream response or SSE stream -> error response with request_id
+```
+
+第二轮新增 demo 的验收重点是：兼容层要诚实声明支持字段；不支持字段不能静默吞掉；streaming chunk 要可解析且以 `[DONE]` 结束；鉴权、权限和限流要在昂贵 tokenization / engine admission 前完成；rate limit 与系统 admission control 要区分；错误响应必须有稳定的 `type`、`code`、`param`、`message` 和 `request_id`。
+
 ## 57.1 本章目标
 
 读完本章，你应该能讲清：
@@ -1096,7 +1115,392 @@ Unsupported:
 限流上不会只看 QPS，因为 LLM 请求成本差异很大。我会同时做 requests per minute、tokens per minute、concurrent requests、max context length、per-model quota，并区分 rate limit 和系统 admission control。错误响应要有稳定的 type、code、param、message 和 request_id，方便 SDK、自动重试和运维排查。
 ```
 
-## 57.30 小练习
+## 57.30 API Compatibility 公式、错误门禁和可运行 demo
+
+OpenAI-compatible API 层可以先把一次请求抽象成：
+
+```math
+a_i=(k_i,m_i,p_i,o_i,s_i,u_i,c_i,r_i)
+```
+
+其中 `k_i` 是 API key，`m_i` 是 model，`p_i` 是 prompt tokens，`o_i` 是 max output tokens，`s_i` 表示是否 stream，`u_i` 是 user / tenant，`c_i` 是 concurrency slot，`r_i` 是 request id。
+
+上下文长度门禁：
+
+```math
+G_{\mathrm{ctx},i}=\mathbf{1}[p_i+o_i\le L_{m_i}^{\max}]
+```
+
+RPM 和 TPM 限流可以写成：
+
+```math
+R_u^{\mathrm{req}}(t)\le R_u^{\max}
+```
+
+```math
+R_u^{\mathrm{tok}}(t)+p_i+o_i\le T_u^{\max}
+```
+
+并发门禁：
+
+```math
+C_u(t)<C_u^{\max}
+```
+
+Usage 统计：
+
+```math
+U_i=p_i+y_i
+```
+
+其中 `y_i` 是实际输出 token 数。
+
+最终 API 层门禁：
+
+```math
+G_{\mathrm{api}}=G_{\mathrm{auth}}G_{\mathrm{schema}}G_{\mathrm{model}}G_{\mathrm{ctx}}G_{\mathrm{rate}}G_{\mathrm{stream}}G_{\mathrm{error}}G_{\mathrm{privacy}}
+```
+
+下面这个 0 依赖 demo 模拟一个最小 OpenAI-compatible Chat Completions API 子集：
+
+```python
+from dataclasses import dataclass
+import json
+
+
+@dataclass
+class APITenant:
+    tenant_id: str
+    api_key: str
+    allowed_models: set[str]
+    rpm_limit: int
+    tpm_limit: int
+    concurrency_limit: int
+    used_requests: int = 0
+    used_tokens: int = 0
+    active_requests: int = 0
+
+
+@dataclass
+class EngineRequest:
+    request_id: str
+    tenant_id: str
+    model: str
+    prompt: str
+    prompt_tokens: int
+    max_tokens: int
+    temperature: float
+    stream: bool
+
+
+class ToyOpenAICompatibleAPI:
+    def __init__(self):
+        self.models = {"tiny-chat": {"max_context_tokens": 128}}
+        self.tenants = {
+            "sk-ok": APITenant("tenant-a", "sk-ok", {"tiny-chat"}, 10, 220, 2),
+            "sk-rate": APITenant("tenant-rate", "sk-rate", {"tiny-chat"}, 1, 220, 2, 1, 0),
+            "sk-busy": APITenant("tenant-busy", "sk-busy", {"tiny-chat"}, 10, 220, 1, 0, 0, 1),
+            "sk-nomodel": APITenant("tenant-no-model", "sk-nomodel", set(), 10, 220, 2),
+        }
+        self.supported_fields = {
+            "model",
+            "messages",
+            "max_tokens",
+            "temperature",
+            "top_p",
+            "stop",
+            "stream",
+            "stream_options",
+            "user",
+        }
+        self.metrics = {
+            "auth_fail_total": 0,
+            "bad_request_total": 0,
+            "rate_limit_total": 0,
+            "admission_reject_total": 0,
+            "stream_response_total": 0,
+            "non_stream_response_total": 0,
+        }
+        self.next_id = 1
+
+    def new_request_id(self) -> str:
+        request_id = f"req-{self.next_id:04d}"
+        self.next_id += 1
+        return request_id
+
+    def error(self, status: int, request_id: str, message: str, err_type: str, code: str, param=None):
+        if status == 401:
+            self.metrics["auth_fail_total"] += 1
+        elif status == 429:
+            self.metrics["rate_limit_total"] += 1
+        elif status == 503:
+            self.metrics["admission_reject_total"] += 1
+        else:
+            self.metrics["bad_request_total"] += 1
+        return status, {
+            "error": {
+                "message": message,
+                "type": err_type,
+                "param": param,
+                "code": code,
+            },
+            "request_id": request_id,
+        }
+
+    def authenticate(self, headers: dict[str, str], request_id: str):
+        auth = headers.get("Authorization", "")
+        if not auth.startswith("Bearer "):
+            return None, self.error(401, request_id, "missing bearer token", "authentication_error", "missing_api_key")
+        key = auth.removeprefix("Bearer ").strip()
+        tenant = self.tenants.get(key)
+        if tenant is None:
+            return None, self.error(401, request_id, "invalid API key", "authentication_error", "invalid_api_key")
+        return tenant, None
+
+    def validate_schema(self, body: dict, request_id: str):
+        unsupported = sorted(set(body) - self.supported_fields)
+        if unsupported:
+            return self.error(400, request_id, "unsupported request field", "invalid_request_error", "unsupported_field", unsupported[0])
+        if body.get("model") not in self.models:
+            return self.error(400, request_id, "unknown model", "invalid_request_error", "model_not_found", "model")
+        messages = body.get("messages")
+        if not isinstance(messages, list) or not messages:
+            return self.error(400, request_id, "messages must be a non-empty list", "invalid_request_error", "invalid_messages", "messages")
+        for index, message in enumerate(messages):
+            if message.get("role") not in {"system", "user", "assistant"}:
+                return self.error(400, request_id, "unsupported role", "invalid_request_error", "unsupported_role", f"messages.{index}.role")
+            if not isinstance(message.get("content"), str) or not message["content"]:
+                return self.error(400, request_id, "content must be a non-empty string", "invalid_request_error", "invalid_content", f"messages.{index}.content")
+        max_tokens = body.get("max_tokens", 16)
+        if not isinstance(max_tokens, int) or not 1 <= max_tokens <= 64:
+            return self.error(400, request_id, "max_tokens out of supported range", "invalid_request_error", "invalid_max_tokens", "max_tokens")
+        temperature = body.get("temperature", 1.0)
+        if not isinstance(temperature, (int, float)) or not 0 <= temperature <= 2:
+            return self.error(400, request_id, "temperature out of range", "invalid_request_error", "invalid_temperature", "temperature")
+        return None
+
+    def check_model_permission(self, tenant: APITenant, model: str, request_id: str):
+        if model not in tenant.allowed_models:
+            return self.error(403, request_id, "model not allowed for tenant", "permission_error", "model_not_allowed", "model")
+        return None
+
+    def render_chat_prompt(self, messages: list[dict]) -> str:
+        parts = []
+        for message in messages:
+            parts.append(f"<|{message['role']}|>\n{message['content']}\n")
+        parts.append("<|assistant|>\n")
+        return "".join(parts)
+
+    def count_tokens(self, text: str) -> int:
+        return max(1, (len(text) + 3) // 4)
+
+    def check_rate_limits(self, tenant: APITenant, needed_tokens: int, request_id: str):
+        if tenant.used_requests + 1 > tenant.rpm_limit:
+            return self.error(429, request_id, "rate limit exceeded", "rate_limit_error", "requests_per_minute")
+        if tenant.used_tokens + needed_tokens > tenant.tpm_limit:
+            return self.error(429, request_id, "token rate limit exceeded", "rate_limit_error", "tokens_per_minute")
+        if tenant.active_requests >= tenant.concurrency_limit:
+            return self.error(429, request_id, "concurrency limit exceeded", "rate_limit_error", "concurrent_requests")
+        return None
+
+    def build_engine_request(self, tenant: APITenant, body: dict, request_id: str):
+        prompt = self.render_chat_prompt(body["messages"])
+        prompt_tokens = self.count_tokens(prompt)
+        max_tokens = body.get("max_tokens", 16)
+        model_config = self.models[body["model"]]
+        if prompt_tokens + max_tokens > model_config["max_context_tokens"]:
+            return None, self.error(400, request_id, "context length exceeded", "invalid_request_error", "context_length_exceeded", "messages")
+        limit_error = self.check_rate_limits(tenant, prompt_tokens + max_tokens, request_id)
+        if limit_error is not None:
+            return None, limit_error
+        engine_request = EngineRequest(
+            request_id=request_id,
+            tenant_id=tenant.tenant_id,
+            model=body["model"],
+            prompt=prompt,
+            prompt_tokens=prompt_tokens,
+            max_tokens=max_tokens,
+            temperature=float(body.get("temperature", 1.0)),
+            stream=bool(body.get("stream", False)),
+        )
+        return engine_request, None
+
+    def fake_engine_tokens(self, max_tokens: int) -> list[str]:
+        return ["KV", " cache", " stores", " keys"][:max_tokens]
+
+    def usage(self, engine_request: EngineRequest, completion_tokens: int) -> dict:
+        return {
+            "prompt_tokens": engine_request.prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": engine_request.prompt_tokens + completion_tokens,
+        }
+
+    def non_stream_response(self, engine_request: EngineRequest, tokens: list[str]) -> dict:
+        self.metrics["non_stream_response_total"] += 1
+        return {
+            "id": "chatcmpl-" + engine_request.request_id,
+            "object": "chat.completion",
+            "created": 1710000000,
+            "model": engine_request.model,
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "".join(tokens)},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": self.usage(engine_request, len(tokens)),
+            "request_id": engine_request.request_id,
+        }
+
+    def stream_response(self, engine_request: EngineRequest, tokens: list[str], include_usage: bool) -> list[str]:
+        self.metrics["stream_response_total"] += 1
+        chunks = []
+        base = {
+            "id": "chatcmpl-" + engine_request.request_id,
+            "object": "chat.completion.chunk",
+            "created": 1710000000,
+            "model": engine_request.model,
+        }
+        role_chunk = dict(base)
+        role_chunk["choices"] = [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}]
+        chunks.append("data: " + json.dumps(role_chunk, ensure_ascii=False) + "\n\n")
+        for token in tokens:
+            token_chunk = dict(base)
+            token_chunk["choices"] = [{"index": 0, "delta": {"content": token}, "finish_reason": None}]
+            chunks.append("data: " + json.dumps(token_chunk, ensure_ascii=False) + "\n\n")
+        finish_chunk = dict(base)
+        finish_chunk["choices"] = [{"index": 0, "delta": {}, "finish_reason": "stop"}]
+        if include_usage:
+            finish_chunk["usage"] = self.usage(engine_request, len(tokens))
+        chunks.append("data: " + json.dumps(finish_chunk, ensure_ascii=False) + "\n\n")
+        chunks.append("data: [DONE]\n\n")
+        return chunks
+
+    def handle_chat_completions(self, headers: dict[str, str], body: dict):
+        request_id = self.new_request_id()
+        tenant, auth_error = self.authenticate(headers, request_id)
+        if auth_error is not None:
+            return auth_error
+        schema_error = self.validate_schema(body, request_id)
+        if schema_error is not None:
+            return schema_error
+        permission_error = self.check_model_permission(tenant, body["model"], request_id)
+        if permission_error is not None:
+            return permission_error
+        engine_request, build_error = self.build_engine_request(tenant, body, request_id)
+        if build_error is not None:
+            return build_error
+
+        tenant.used_requests += 1
+        tenant.used_tokens += engine_request.prompt_tokens + engine_request.max_tokens
+        tenant.active_requests += 1
+        try:
+            tokens = self.fake_engine_tokens(engine_request.max_tokens)
+            if engine_request.stream:
+                include_usage = bool(body.get("stream_options", {}).get("include_usage", False))
+                return 200, self.stream_response(engine_request, tokens, include_usage)
+            return 200, self.non_stream_response(engine_request, tokens)
+        finally:
+            tenant.active_requests -= 1
+
+
+api = ToyOpenAICompatibleAPI()
+headers_ok = {"Authorization": "Bearer sk-ok"}
+base_body = {
+    "model": "tiny-chat",
+    "messages": [
+        {"role": "system", "content": "Be concise."},
+        {"role": "user", "content": "Explain KV cache."},
+    ],
+    "max_tokens": 4,
+    "temperature": 0.7,
+}
+
+status_ok, non_stream = api.handle_chat_completions(headers_ok, dict(base_body))
+stream_body = dict(base_body)
+stream_body["stream"] = True
+stream_body["stream_options"] = {"include_usage": True}
+status_stream, stream_chunks = api.handle_chat_completions(headers_ok, stream_body)
+status_auth, auth_error = api.handle_chat_completions({}, dict(base_body))
+bad_field = dict(base_body)
+bad_field["logprobs"] = True
+status_bad_field, bad_field_error = api.handle_chat_completions(headers_ok, bad_field)
+status_permission, permission_error = api.handle_chat_completions({"Authorization": "Bearer sk-nomodel"}, dict(base_body))
+long_body = dict(base_body)
+long_body["messages"] = [{"role": "user", "content": "x" * 700}]
+status_context, context_error = api.handle_chat_completions(headers_ok, long_body)
+status_rate, rate_error = api.handle_chat_completions({"Authorization": "Bearer sk-rate"}, dict(base_body))
+status_busy, busy_error = api.handle_chat_completions({"Authorization": "Bearer sk-busy"}, dict(base_body))
+
+parsed_stream_objects = []
+for chunk in stream_chunks:
+    payload = chunk.removeprefix("data: ").strip()
+    if payload != "[DONE]":
+        parsed_stream_objects.append(json.loads(payload))
+
+summary = {
+    "non_stream_status": status_ok,
+    "non_stream_content": non_stream["choices"][0]["message"]["content"],
+    "non_stream_usage": non_stream["usage"],
+    "stream_status": status_stream,
+    "stream_chunk_count": len(stream_chunks),
+    "stream_first_delta": parsed_stream_objects[0]["choices"][0]["delta"],
+    "stream_last_payload": stream_chunks[-1].strip(),
+    "stream_usage": parsed_stream_objects[-1].get("usage"),
+    "auth_error": (status_auth, auth_error["error"]["code"]),
+    "bad_field_error": (status_bad_field, bad_field_error["error"]["code"], bad_field_error["error"]["param"]),
+    "permission_error": (status_permission, permission_error["error"]["code"]),
+    "context_error": (status_context, context_error["error"]["code"]),
+    "rate_error": (status_rate, rate_error["error"]["code"]),
+    "busy_error": (status_busy, busy_error["error"]["code"]),
+    "metrics": api.metrics,
+}
+
+gates = {
+    "auth_ready": summary["auth_error"] == (401, "missing_api_key"),
+    "schema_ready": summary["bad_field_error"] == (400, "unsupported_field", "logprobs"),
+    "model_permission_ready": summary["permission_error"] == (403, "model_not_allowed"),
+    "context_ready": summary["context_error"] == (400, "context_length_exceeded"),
+    "rate_limit_ready": summary["rate_error"] == (429, "requests_per_minute")
+    and summary["busy_error"] == (429, "concurrent_requests"),
+    "non_stream_ready": summary["non_stream_status"] == 200
+    and summary["non_stream_content"] == "KV cache stores keys",
+    "stream_ready": summary["stream_status"] == 200
+    and summary["stream_first_delta"] == {"role": "assistant"}
+    and summary["stream_last_payload"] == "data: [DONE]",
+    "usage_ready": summary["stream_usage"] is not None
+    and summary["non_stream_usage"]["completion_tokens"] == 4,
+    "error_shape_ready": all(
+        key in auth_error["error"] for key in ["message", "type", "param", "code"]
+    )
+    and "request_id" in auth_error,
+    "privacy_ready": "sk-" not in json.dumps(summary, ensure_ascii=False),
+}
+gates["openai_compatible_api_gate"] = all(gates.values())
+
+print("openai_compatible_api_summary=", summary)
+print("openai_compatible_api_gates=", gates)
+```
+
+一次运行的核心输出类似：
+
+```text
+openai_compatible_api_summary= {'non_stream_status': 200, 'non_stream_content': 'KV cache stores keys', 'non_stream_usage': {'prompt_tokens': 16, 'completion_tokens': 4, 'total_tokens': 20}, 'stream_status': 200, 'stream_chunk_count': 7, 'stream_first_delta': {'role': 'assistant'}, 'stream_last_payload': 'data: [DONE]', 'stream_usage': {'prompt_tokens': 16, 'completion_tokens': 4, 'total_tokens': 20}, 'auth_error': (401, 'missing_api_key'), 'bad_field_error': (400, 'unsupported_field', 'logprobs'), 'permission_error': (403, 'model_not_allowed'), 'context_error': (400, 'context_length_exceeded'), 'rate_error': (429, 'requests_per_minute'), 'busy_error': (429, 'concurrent_requests'), 'metrics': {'auth_fail_total': 1, 'bad_request_total': 3, 'rate_limit_total': 2, 'admission_reject_total': 0, 'stream_response_total': 1, 'non_stream_response_total': 1}}
+openai_compatible_api_gates= {'auth_ready': True, 'schema_ready': True, 'model_permission_ready': True, 'context_ready': True, 'rate_limit_ready': True, 'non_stream_ready': True, 'stream_ready': True, 'usage_ready': True, 'error_shape_ready': True, 'privacy_ready': True, 'openai_compatible_api_gate': True}
+```
+
+这个 demo 证明了几个关键点：
+
+1. API key、schema、model permission、context length 和 rate limit 都在进入 engine 前完成。
+2. 不支持字段 `logprobs` 被明确拒绝，不会静默忽略。
+3. 非流式响应包含 `choices`、assistant message、`finish_reason`、usage 和 request id。
+4. 流式响应是可解析的 SSE chunk，第一个 chunk 发送 assistant role，最后发送 `data: [DONE]`。
+5. 错误响应结构稳定，包含 `message`、`type`、`param`、`code` 和 `request_id`。
+6. RPM、并发和 context 约束的错误语义不同，不要混成一个 overload。
+7. 摘要和日志里不能泄露 API key。
+
+## 57.31 小练习
 
 1. 实现 `/v1/models`，返回当前可用模型列表。
 2. 定义 `ChatCompletionRequest` 和 `ChatCompletionResponse`。
@@ -1117,7 +1521,7 @@ Unsupported:
 17. 确保日志不打印 API key 和完整 prompt。
 18. 写一个 stream benchmark，统计 TTFT 和 client disconnect。
 
-## 57.31 本章总结
+## 57.32 本章总结
 
 serving engine 的内部能力最终要通过 API 层交付给用户。
 

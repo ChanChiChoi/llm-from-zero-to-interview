@@ -28,6 +28,35 @@ serving engine 的优化目标通常不是“某一次 forward 更快”，而�
 
 本章就把 mini engine 升级成一个可压测、可观测、可调参、可回归的实验框架。
 
+## 53.0 本讲资料边界与第二轮精修口径
+
+本章按第二轮精修口径，只讲教学版 serving engine 的 benchmark 指标、workload、trace、参数扫描和回归门禁。
+
+公开资料校准主要参考四类口径：
+
+1. vLLM benchmarking / optimization 文档对 serving benchmark、chunked prefill、decode 优先、`max_num_batched_tokens`、`max_num_seqs`、KV cache usage 和 preemption 指标的公开说明。
+2. vLLM prefix caching 设计文档对 prefix cache hit tokens、cached blocks、ref count、free queue 和 eviction 观测点的公开说明。
+3. SGLang benchmark / profiling 文档对在线 serving、吞吐、延迟、profiling 和调参实验的公开口径。
+4. NVIDIA GenAI-Perf / TensorRT-LLM benchmark 资料对 TTFT、inter-token latency、request latency、throughput、concurrency 和 streaming 指标的公开口径。
+
+本章不追求复现任何公开 benchmark 数字，不绑定真实 GPU 型号、模型权重、框架版本、压测工具 CLI、Prometheus / Grafana 部署、CUDA profiling 细节或生产容量结论。我们只验证一个最小闭环：
+
+```text
+workload spec -> benchmark config -> request trace -> engine step trace -> summary metrics -> regression comparison -> tuning decision
+```
+
+第二轮新增 demo 的验收重点是：
+
+```text
+是否覆盖 short / long / shared prefix / KV pressure workload；
+TTFT、TPOT、E2E、throughput 是否从请求 trace 推导；
+queue、active requests、KV peak、cleanup 是否从 step trace 推导；
+baseline 和 candidate 是否使用可复现实验指纹；
+prefix cache 收益是否同时看 hit tokens 和 TTFT；
+preemption 是否作为风险指标而不是收益指标；
+调参结论是否同时检查用户延迟、吞吐、KV 压力和失败请求。
+```
+
 ## 53.1 本章目标
 
 读完本章，你应该能讲清：
@@ -1094,7 +1123,282 @@ workload 不能只测单请求。我会至少设计短请求 baseline、长 prom
 调优时不会只追求 tokens/s。比如增大 max_num_batched_tokens 可能提高吞吐，但也可能恶化 TTFT 和 TPOT；启用 prefix cache 可能降低共享 prompt 的 TTFT，但也可能占用 KV blocks 导致 eviction 或 preemption。最终要根据业务场景选择配置：交互式聊天更重视 TTFT 和 TPOT，离线批处理可以更偏向吞吐。
 ```
 
-## 53.19 小练习
+## 53.19 Benchmark Framework 公式、回归门禁和可运行 demo
+
+一次 benchmark 样本可以抽象成：
+
+```math
+r_i=(a_i,f_i,z_i,e_i,p_i,o_i,q_i,k_i,h_i,s_i)
+```
+
+其中 `a_i` 是到达时间，`f_i` 是首 token 时间，`z_i` 是输出 token 时间序列，`e_i` 是完成时间，`p_i` 是 prompt tokens，`o_i` 是 output tokens，`q_i` 是排队时间，`k_i` 是 KV 峰值，`h_i` 是 prefix hit tokens，`s_i` 是成功标记。
+
+首 token 延迟：
+
+```math
+L_i^{\mathrm{first}}=f_i-a_i
+```
+
+平均 inter-token latency：
+
+```math
+L_i^{\mathrm{tok}}=\frac{e_i-f_i}{\max(1,o_i-1)}
+```
+
+输出吞吐：
+
+```math
+\Theta_{\mathrm{out}}=\frac{\sum_i o_i}{\max_i e_i-\min_i a_i}
+```
+
+prefix token 命中率：
+
+```math
+R_{\mathrm{hit}}=\frac{\sum_i h_i}{\max(1,\sum_i p_i)}
+```
+
+candidate 相对 baseline 的吞吐变化：
+
+```math
+\Delta_{\mathrm{out}}=\frac{\Theta_{\mathrm{out}}^{\mathrm{cand}}-\Theta_{\mathrm{out}}^{\mathrm{base}}}{\max(1,\Theta_{\mathrm{out}}^{\mathrm{base}})}
+```
+
+最终 benchmark framework 门禁：
+
+```math
+G_{\mathrm{benchfw}}=G_{\mathrm{workload}}G_{\mathrm{trace}}G_{\mathrm{slo}}G_{\mathrm{throughput}}G_{\mathrm{kv}}G_{\mathrm{cache}}G_{\mathrm{preempt}}G_{\mathrm{repro}}G_{\mathrm{decision}}
+```
+
+下面这个 0 依赖 demo 不调用真实模型，只审计两组 toy benchmark trace：
+
+1. baseline 没有 prefix cache，长 prompt 和 KV pressure 场景触发多次 preemption。
+2. candidate 开启 prefix cache 和更合理的 chunked prefill 后，TTFT / TPOT / E2E p95 改善，output tokens/s 提升。
+3. 框架同时检查 workload 覆盖、实验指纹、SLO、吞吐、KV peak、cleanup、prefix 收益、preemption 风险和最终调参结论。
+
+```python
+from dataclasses import dataclass
+
+
+def percentile(values, p):
+    values = sorted(values)
+    if not values:
+        return None
+    index = int((len(values) - 1) * p)
+    return values[index]
+
+
+def hist(values):
+    return {
+        "avg": round(sum(values) / len(values), 2),
+        "p50": round(percentile(values, 0.50), 2),
+        "p90": round(percentile(values, 0.90), 2),
+        "p95": round(percentile(values, 0.95), 2),
+        "max": round(max(values), 2),
+    }
+
+
+@dataclass(frozen=True)
+class BenchmarkConfig:
+    name: str
+    max_num_seqs: int
+    max_num_batched_tokens: int
+    chunked_prefill: bool
+    prefix_cache: bool
+    preemption_mode: str
+    seed: int
+
+    def fingerprint(self):
+        return (
+            self.name,
+            self.max_num_seqs,
+            self.max_num_batched_tokens,
+            self.chunked_prefill,
+            self.prefix_cache,
+            self.preemption_mode,
+            self.seed,
+        )
+
+
+@dataclass
+class RequestTrace:
+    request_id: str
+    profile: str
+    arrival_ms: float
+    first_token_ms: float
+    finish_ms: float
+    prompt_tokens: int
+    output_tokens: int
+    queue_wait_ms: float
+    kv_peak_blocks: int
+    prefix_hit_tokens: int = 0
+    preemptions: int = 0
+    success: bool = True
+
+    def ttft_ms(self):
+        return self.first_token_ms - self.arrival_ms
+
+    def tpot_ms(self):
+        return (self.finish_ms - self.first_token_ms) / max(1, self.output_tokens - 1)
+
+    def e2e_ms(self):
+        return self.finish_ms - self.arrival_ms
+
+
+class ToyServingBenchmarkFramework:
+    def __init__(self, config, traces, step_trace):
+        self.config = config
+        self.traces = traces
+        self.step_trace = step_trace
+
+    def classify_bottleneck(self, summary):
+        if summary["failure_count"] > 0:
+            return "failure"
+        if summary["preemption_total"] > 1 or summary["kv_peak_blocks"] > 20:
+            return "kv_capacity"
+        if summary["ttft_ms"]["p95"] > 700:
+            return "queue_prefill"
+        if summary["tpot_ms"]["p95"] > 90:
+            return "decode_streaming"
+        return "balanced"
+
+    def summarize(self):
+        ok = [trace for trace in self.traces if trace.success]
+        duration_s = (max(t.finish_ms for t in ok) - min(t.arrival_ms for t in ok)) / 1000.0
+        prompt_tokens = sum(t.prompt_tokens for t in ok)
+        output_tokens = sum(t.output_tokens for t in ok)
+        summary = {
+            "fingerprint": self.config.fingerprint(),
+            "profiles": sorted({t.profile for t in ok}),
+            "request_count": len(self.traces),
+            "success_rate": round(len(ok) / len(self.traces), 3),
+            "ttft_ms": hist([t.ttft_ms() for t in ok]),
+            "tpot_ms": hist([t.tpot_ms() for t in ok]),
+            "e2e_ms": hist([t.e2e_ms() for t in ok]),
+            "output_tokens_per_s": round(output_tokens / duration_s, 2),
+            "total_tokens_per_s": round((prompt_tokens + output_tokens) / duration_s, 2),
+            "prefix_hit_rate": round(sum(t.prefix_hit_tokens for t in ok) / max(1, prompt_tokens), 3),
+            "preemption_total": sum(t.preemptions for t in ok),
+            "queue_p95_ms": round(percentile([s["waiting"] for s in self.step_trace], 0.95), 2),
+            "active_p95": round(percentile([s["active"] for s in self.step_trace], 0.95), 2),
+            "kv_peak_blocks": max(s["kv_blocks"] for s in self.step_trace),
+            "kv_after_cleanup": self.step_trace[-1]["kv_blocks"],
+            "failure_count": len(self.traces) - len(ok),
+        }
+        summary["bottleneck"] = self.classify_bottleneck(summary)
+        return summary
+
+    def request_rows(self):
+        return [
+            (
+                t.request_id,
+                round(t.ttft_ms(), 2),
+                round(t.tpot_ms(), 2),
+                round(t.e2e_ms(), 2),
+                t.prefix_hit_tokens,
+                t.preemptions,
+            )
+            for t in self.traces
+        ]
+
+
+baseline_config = BenchmarkConfig("baseline", 16, 1024, False, False, "recompute", 42)
+candidate_config = BenchmarkConfig("candidate", 32, 2048, True, True, "recompute", 42)
+
+baseline_traces = [
+    RequestTrace("short_a", "short", 0, 120, 360, 64, 8, 40, 6),
+    RequestTrace("short_b", "short", 50, 210, 470, 96, 8, 70, 8),
+    RequestTrace("long_a", "long", 100, 900, 1500, 2048, 8, 180, 18, preemptions=1),
+    RequestTrace("shared_a", "shared_prefix", 150, 760, 1100, 1024, 8, 100, 12),
+    RequestTrace("shared_b", "shared_prefix", 200, 820, 1160, 1088, 8, 110, 13),
+    RequestTrace("kv_hot", "kv_pressure", 250, 1300, 2100, 1536, 8, 260, 22, preemptions=2),
+]
+candidate_traces = [
+    RequestTrace("short_a", "short", 0, 90, 310, 64, 8, 20, 5),
+    RequestTrace("short_b", "short", 50, 160, 380, 96, 8, 30, 7),
+    RequestTrace("long_a", "long", 100, 620, 1180, 2048, 8, 90, 16),
+    RequestTrace("shared_a", "shared_prefix", 150, 420, 760, 1024, 8, 60, 10, prefix_hit_tokens=768),
+    RequestTrace("shared_b", "shared_prefix", 200, 390, 700, 1088, 8, 40, 10, prefix_hit_tokens=1024),
+    RequestTrace("kv_hot", "kv_pressure", 250, 820, 1500, 1536, 8, 140, 18, preemptions=1),
+]
+baseline_steps = [
+    {"waiting": 3, "active": 2, "kv_blocks": 12},
+    {"waiting": 4, "active": 4, "kv_blocks": 22},
+    {"waiting": 2, "active": 3, "kv_blocks": 20},
+    {"waiting": 0, "active": 1, "kv_blocks": 0},
+]
+candidate_steps = [
+    {"waiting": 2, "active": 2, "kv_blocks": 10},
+    {"waiting": 3, "active": 4, "kv_blocks": 18},
+    {"waiting": 1, "active": 4, "kv_blocks": 17},
+    {"waiting": 0, "active": 0, "kv_blocks": 0},
+]
+
+baseline = ToyServingBenchmarkFramework(baseline_config, baseline_traces, baseline_steps)
+candidate = ToyServingBenchmarkFramework(candidate_config, candidate_traces, candidate_steps)
+base_summary = baseline.summarize()
+cand_summary = candidate.summarize()
+
+comparison = {
+    "ttft_p95_delta_ms": round(cand_summary["ttft_ms"]["p95"] - base_summary["ttft_ms"]["p95"], 2),
+    "tpot_p95_delta_ms": round(cand_summary["tpot_ms"]["p95"] - base_summary["tpot_ms"]["p95"], 2),
+    "e2e_p95_delta_ms": round(cand_summary["e2e_ms"]["p95"] - base_summary["e2e_ms"]["p95"], 2),
+    "output_tps_delta_ratio": round(
+        (cand_summary["output_tokens_per_s"] - base_summary["output_tokens_per_s"])
+        / max(1, base_summary["output_tokens_per_s"]),
+        3,
+    ),
+    "preemption_delta": cand_summary["preemption_total"] - base_summary["preemption_total"],
+    "bottleneck_change": (base_summary["bottleneck"], cand_summary["bottleneck"]),
+}
+
+required_profiles = {"short", "long", "shared_prefix", "kv_pressure"}
+gates = {
+    "workload_coverage_ready": set(cand_summary["profiles"]) == required_profiles,
+    "trace_metrics_ready": cand_summary["ttft_ms"]["p95"] == 520
+    and cand_summary["tpot_ms"]["p95"] == 80,
+    "slo_ready": cand_summary["ttft_ms"]["p95"] <= 700
+    and cand_summary["tpot_ms"]["p95"] <= 90
+    and cand_summary["success_rate"] == 1.0,
+    "throughput_regression_ready": comparison["output_tps_delta_ratio"] >= 0.25,
+    "kv_cleanup_ready": cand_summary["kv_peak_blocks"] <= 20
+    and cand_summary["kv_after_cleanup"] == 0,
+    "prefix_effect_ready": cand_summary["prefix_hit_rate"] > base_summary["prefix_hit_rate"],
+    "preemption_risk_ready": cand_summary["preemption_total"] < base_summary["preemption_total"],
+    "reproducibility_ready": baseline_config.seed == candidate_config.seed
+    and base_summary["fingerprint"][0] == "baseline"
+    and cand_summary["fingerprint"][0] == "candidate",
+    "decision_ready": comparison["bottleneck_change"] == ("kv_capacity", "balanced"),
+}
+gates["serving_benchmark_framework_gate"] = all(gates.values())
+
+summary = {
+    "baseline": base_summary,
+    "candidate": cand_summary,
+    "candidate_request_rows": candidate.request_rows(),
+    "comparison": comparison,
+    "decision": "accept_candidate_for_interactive_serving",
+}
+
+print("serving_benchmark_framework_summary=", summary)
+print("serving_benchmark_framework_gates=", gates)
+```
+
+一次运行的核心输出类似：
+
+```text
+serving_benchmark_framework_summary= {'baseline': {'fingerprint': ('baseline', 16, 1024, False, False, 'recompute', 42), 'profiles': ['kv_pressure', 'long', 'shared_prefix', 'short'], 'request_count': 6, 'success_rate': 1.0, 'ttft_ms': {'avg': 560.0, 'p50': 610, 'p90': 800, 'p95': 800, 'max': 1050}, 'tpot_ms': {'avg': 61.43, 'p50': 48.57, 'p90': 85.71, 'p95': 85.71, 'max': 114.29}, 'e2e_ms': {'avg': 990.0, 'p50': 950, 'p90': 1400, 'p95': 1400, 'max': 1850}, 'output_tokens_per_s': 22.86, 'total_tokens_per_s': 2811.43, 'prefix_hit_rate': 0.0, 'preemption_total': 3, 'queue_p95_ms': 3, 'active_p95': 3, 'kv_peak_blocks': 22, 'kv_after_cleanup': 0, 'failure_count': 0, 'bottleneck': 'kv_capacity'}, 'candidate': {'fingerprint': ('candidate', 32, 2048, True, True, 'recompute', 42), 'profiles': ['kv_pressure', 'long', 'shared_prefix', 'short'], 'request_count': 6, 'success_rate': 1.0, 'ttft_ms': {'avg': 291.67, 'p50': 190, 'p90': 520, 'p95': 520, 'max': 570}, 'tpot_ms': {'avg': 55.48, 'p50': 44.29, 'p90': 80.0, 'p95': 80.0, 'max': 97.14}, 'e2e_ms': {'avg': 680.0, 'p50': 500, 'p90': 1080, 'p95': 1080, 'max': 1250}, 'output_tokens_per_s': 32.0, 'total_tokens_per_s': 3936.0, 'prefix_hit_rate': 0.306, 'preemption_total': 1, 'queue_p95_ms': 2, 'active_p95': 4, 'kv_peak_blocks': 18, 'kv_after_cleanup': 0, 'failure_count': 0, 'bottleneck': 'balanced'}, 'candidate_request_rows': [('short_a', 90, 31.43, 310, 0, 0), ('short_b', 110, 31.43, 330, 0, 0), ('long_a', 520, 80.0, 1080, 0, 0), ('shared_a', 270, 48.57, 610, 768, 0), ('shared_b', 190, 44.29, 500, 1024, 0), ('kv_hot', 570, 97.14, 1250, 0, 1)], 'comparison': {'ttft_p95_delta_ms': -280, 'tpot_p95_delta_ms': -5.71, 'e2e_p95_delta_ms': -320, 'output_tps_delta_ratio': 0.4, 'preemption_delta': -2, 'bottleneck_change': ('kv_capacity', 'balanced')}, 'decision': 'accept_candidate_for_interactive_serving'}
+serving_benchmark_framework_gates= {'workload_coverage_ready': True, 'trace_metrics_ready': True, 'slo_ready': True, 'throughput_regression_ready': True, 'kv_cleanup_ready': True, 'prefix_effect_ready': True, 'preemption_risk_ready': True, 'reproducibility_ready': True, 'decision_ready': True, 'serving_benchmark_framework_gate': True}
+```
+
+这个 demo 证明了几个关键点：
+
+1. benchmark framework 不是只算 QPS，而是把 workload、config、request trace、step trace 和调参结论连起来。
+2. candidate 的吞吐提升只有在 TTFT、TPOT、E2E、KV peak、cleanup、preemption 和失败请求都不过线时才算有效。
+3. prefix cache 的收益不能只看 hit rate，要看 shared-prefix 请求 TTFT 是否改善，以及 KV pressure 是否可控。
+4. preemption_total 下降是风险收敛信号；preemption_total 上升不能被包装成性能收益。
+5. 实验指纹必须包含关键参数和 seed，否则两次 benchmark 没有可比较性。
+
+## 53.20 小练习
 
 1. 给 mini engine 增加 TTFT、TPOT、E2E latency 统计。
 2. 实现一个内存版 `Metrics` collector。
@@ -1112,7 +1416,7 @@ workload 不能只测单请求。我会至少设计短请求 baseline、长 prom
 14. 写一个参数扫描脚本，对比不同 `max_num_batched_tokens`。
 15. 写一个 benchmark report markdown 模板。
 
-## 53.20 本章总结
+## 53.21 本章总结
 
 serving engine 的优化必须靠 benchmark 闭环。
 

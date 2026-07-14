@@ -15,6 +15,14 @@
 
 > 跨节点 serving 的核心不是把 GPU 堆起来，而是在模型并行、数据并行、PD 分离、KV transfer 和网络拓扑之间做取舍，避免网络把吞吐收益吃掉。
 
+## 41.0 本讲资料边界与第二轮精修口径
+
+本讲第二轮精修前，先按 `WRITING_PLAN.md` 对公开资料做校准：参考 vLLM parallelism / scaling 文档对 tensor parallel、pipeline parallel、data parallel、单节点 / 多节点部署和 Ray backend 的公开口径；参考 SGLang server arguments、PD disaggregation 和多节点部署相关文档对 TP / DP、PD worker、KV transfer、routing policy 和多节点运行边界的说明；参考 NCCL collective communication 文档对 all-reduce、all-gather、reduce-scatter 等 collective 通信的稳定抽象；并参考 DistServe、Splitwise、Mooncake 等论文对 P/D 分离、KV transfer、goodput、跨节点资源池和网络代价的系统动机说明。
+
+本讲只讲跨节点 serving 的通用网络瓶颈：DP 请求分流、TP 高频 collective、PP activation 传输、PD KV transfer、remote KV fetch、topology-aware routing、data plane / control plane 隔离、admission control、backpressure 和 p99 观测。不把某个框架版本的 CLI 参数、Ray / Kubernetes 部署命令、NCCL 环境变量、网卡型号、带宽实测值或 benchmark 排名写成通用标准。
+
+本讲新增 demo 是教学版跨节点网络瓶颈审计器：用 0 依赖 Python 模拟 same-node / same-rack / cross-rack 链路，比较跨节点 TP 的 per-token collective 代价、PP activation 代价、PD KV transfer 成本、remote fetch vs recompute、拓扑感知 decode worker 路由、pending transfer backpressure 和 control / data plane 分离，帮助把“网络会吃掉跨节点扩展收益”落到可运行证据。
+
 ## 41.1 本章目标
 
 读完本章，你应该能讲清：
@@ -925,7 +933,232 @@ partial KV、预留 blocks、metadata 和请求状态没有一致清理，会造
 观测上，我会按阶段拆指标：TTFT、TPOT、KV transfer latency、collective time、PP activation transfer、remote cache latency、pending transfer bytes、network p95/p99、router decision latency。这样才能判断瓶颈到底在 compute、KV、network 还是 routing。
 ```
 
-## 41.29 小练习
+## 41.29 跨节点通信成本、路由门禁和可运行 demo
+
+先把一条网络链路抽象成：
+
+```math
+E_l=(B_l,\alpha_l,\rho_l)
+```
+
+其中 `B_l` 是有效带宽，`\alpha_l` 是基础延迟，`\rho_l` 是 p99 拥塞放大系数。
+
+传输 `M` MiB 的 p99 时间可以粗略写成：
+
+```math
+T_{\mathrm{net}}(M,l)=\rho_l\left(\alpha_l+\frac{M}{B_l}\right)
+```
+
+跨节点 TP 的 decode token 通信代价近似为：
+
+```math
+T_{\mathrm{tp},\mathrm{tok}}=L n_{\mathrm{coll}}T_{\mathrm{net}}(M_{\mathrm{coll}},l)
+```
+
+其中 `L` 是层数，`n_{\mathrm{coll}}` 是每层 collective 次数，`M_{\mathrm{coll}}` 是一次 collective 的通信量。它危险的地方在于这个成本进入每个 output token。
+
+PP activation 跨节点代价可以写成：
+
+```math
+T_{\mathrm{pp}}=n_{\mathrm{boundary}}T_{\mathrm{net}}(M_{\mathrm{act}},l)
+```
+
+PD KV transfer 成本：
+
+```math
+M_{\mathrm{kv},i}=P_i m_{\mathrm{kv}}
+```
+
+```math
+T_{\mathrm{pd},i}=T_{\mathrm{net}}(M_{\mathrm{kv},i},l)
+```
+
+Remote KV 是否值得取，要和 recompute 比：
+
+```math
+A_{\mathrm{remote}}=\mathbf{1}[T_{\mathrm{remote}}<T_{\mathrm{recompute}}]
+```
+
+一个拓扑感知 decode worker score 可以写成：
+
+```math
+S(w)=T_{\mathrm{load},w}+T_{\mathrm{kv}}(w)+\lambda Q_{\mathrm{transfer},w}
+```
+
+最终门禁可以写成：
+
+```math
+G_{\mathrm{xnode}}=G_{\mathrm{tp}}G_{\mathrm{pp}}G_{\mathrm{pd}}G_{\mathrm{remote}}G_{\mathrm{router}}G_{\mathrm{backpressure}}G_{\mathrm{plane}}G_{\mathrm{metric}}
+```
+
+下面的 demo 覆盖这些路径：
+
+1. same-node TP vs cross-rack TP：证明高频 collective 进入慢网络会打爆 TPOT。
+2. PP activation：证明跨节点 PP 和跨节点 TP 是不同通信模式。
+3. PD KV transfer：把长 prompt KV transfer MiB 和 p99 transfer time 显式算出来。
+4. remote hot / cold KV：一个选择 remote fetch，一个选择 recompute。
+5. topology-aware router：不只看 decode worker load，还看 P/D 网络距离和 pending transfer。
+6. backpressure：pending transfer 超阈值时产生背压事件。
+
+```python
+from dataclasses import dataclass
+
+
+@dataclass
+class LinkProfile:
+    name: str
+    bandwidth_mib_per_ms: float
+    latency_ms: float
+    p99_multiplier: float
+
+
+@dataclass
+class DecodeWorker:
+    name: str
+    link_name: str
+    load_ms: float
+    pending_transfer_mib: float
+
+
+class ToyCrossNodeNetworkAuditor:
+    def __init__(self):
+        self.links = {
+            "same_node": LinkProfile("same_node", 307.2, 0.02, 1.1),
+            "same_rack_rdma": LinkProfile("same_rack_rdma", 51.2, 0.08, 1.3),
+            "cross_rack": LinkProfile("cross_rack", 12.8, 0.25, 2.0),
+            "tcp_fallback": LinkProfile("tcp_fallback", 3.2, 0.60, 3.0),
+        }
+        self.layers = 40
+        self.collectives_per_layer = 2
+        self.collective_mib = 2.0
+        self.kv_mib_per_token = 0.015625
+        self.prefill_tokens_per_ms = 512.0
+        self.pending_kv_limit_mib = 256.0
+
+    def transfer_ms(self, mib, link_name, p99=True):
+        link = self.links[link_name]
+        base = link.latency_ms + mib / link.bandwidth_mib_per_ms
+        if p99:
+            base *= link.p99_multiplier
+        return round(base, 3)
+
+    def tensor_parallel_decode_ms(self, link_name):
+        one_collective = self.transfer_ms(self.collective_mib, link_name, p99=True)
+        return round(self.layers * self.collectives_per_layer * one_collective, 3)
+
+    def pipeline_activation_ms(self, activation_mib, boundaries, link_name):
+        return round(boundaries * self.transfer_ms(activation_mib, link_name, p99=True), 3)
+
+    def pd_kv_transfer_ms(self, prompt_tokens, link_name):
+        kv_mib = prompt_tokens * self.kv_mib_per_token
+        return kv_mib, self.transfer_ms(kv_mib, link_name, p99=True)
+
+    def remote_or_recompute(self, remote_mib, recompute_tokens, link_name):
+        fetch_ms = self.transfer_ms(remote_mib, link_name, p99=True)
+        recompute_ms = round(recompute_tokens / self.prefill_tokens_per_ms + 0.5, 3)
+        decision = "fetch_remote" if fetch_ms < recompute_ms else "recompute"
+        return {"fetch_ms": fetch_ms, "recompute_ms": recompute_ms, "decision": decision}
+
+    def route_decode_worker(self, prompt_tokens, workers):
+        kv_mib = prompt_tokens * self.kv_mib_per_token
+        scored = []
+        for worker in workers:
+            transfer = self.transfer_ms(kv_mib, worker.link_name, p99=True)
+            queue_penalty = worker.pending_transfer_mib / 128.0
+            score = round(worker.load_ms + transfer + queue_penalty, 3)
+            scored.append({
+                "worker": worker.name,
+                "link": worker.link_name,
+                "score": score,
+                "transfer_ms": transfer,
+                "pending_transfer_mib": worker.pending_transfer_mib,
+            })
+        return min(scored, key=lambda row: row["score"]), scored
+
+    def audit(self):
+        tp_same_node = self.tensor_parallel_decode_ms("same_node")
+        tp_cross_rack = self.tensor_parallel_decode_ms("cross_rack")
+        pp_cross_node = self.pipeline_activation_ms(
+            activation_mib=16.0, boundaries=1, link_name="same_rack_rdma"
+        )
+        kv_mib, pd_transfer = self.pd_kv_transfer_ms(
+            prompt_tokens=8192, link_name="same_rack_rdma"
+        )
+        remote_hot = self.remote_or_recompute(64.0, 8192, "cross_rack")
+        remote_cold = self.remote_or_recompute(64.0, 512, "cross_rack")
+        workers = [
+            DecodeWorker("decode_same_rack", "same_rack_rdma", 6.0, 64.0),
+            DecodeWorker("decode_cross_rack", "cross_rack", 3.0, 320.0),
+        ]
+        best, scored = self.route_decode_worker(prompt_tokens=8192, workers=workers)
+        total_pending = sum(worker.pending_transfer_mib for worker in workers)
+        summary = {
+            "tp_same_node_tpot_overhead_ms": tp_same_node,
+            "tp_cross_rack_tpot_overhead_ms": tp_cross_rack,
+            "pp_cross_node_activation_ms": pp_cross_node,
+            "pd_kv_transfer_mib": round(kv_mib, 1),
+            "pd_kv_transfer_ms": pd_transfer,
+            "remote_hot_decision": remote_hot["decision"],
+            "remote_hot_fetch_ms": remote_hot["fetch_ms"],
+            "remote_hot_recompute_ms": remote_hot["recompute_ms"],
+            "remote_cold_decision": remote_cold["decision"],
+            "router_choice": best["worker"],
+            "pending_transfer_mib": total_pending,
+            "backpressure_events": 1 if total_pending > self.pending_kv_limit_mib else 0,
+            "data_plane_mib": round(kv_mib + 64.0 + 64.0, 1),
+            "control_plane_mib": 0.2,
+        }
+        gates = {
+            "tp_cross_node_risk_visible": (
+                summary["tp_cross_rack_tpot_overhead_ms"]
+                > summary["tp_same_node_tpot_overhead_ms"] * 10
+            ),
+            "pipeline_cost_separate": (
+                summary["pp_cross_node_activation_ms"]
+                < summary["tp_cross_rack_tpot_overhead_ms"]
+            ),
+            "pd_kv_transfer_counted": summary["pd_kv_transfer_mib"] == 128.0,
+            "remote_vs_recompute_checked": (
+                summary["remote_hot_decision"] == "fetch_remote"
+                and summary["remote_cold_decision"] == "recompute"
+            ),
+            "topology_aware_router": summary["router_choice"] == "decode_same_rack",
+            "backpressure_visible": summary["backpressure_events"] == 1,
+            "control_data_plane_separated": (
+                summary["data_plane_mib"] > summary["control_plane_mib"] * 100
+            ),
+            "metrics_ready": len(scored) == 2 and summary["pd_kv_transfer_ms"] > 0,
+        }
+        gates["cross_node_network_gate"] = all(gates.values())
+        return scored, summary, gates
+
+
+scored, summary, gates = ToyCrossNodeNetworkAuditor().audit()
+print("cross_node_worker_scores=", scored)
+print("cross_node_network_summary=", summary)
+print("cross_node_network_gates=", gates)
+```
+
+一次运行的核心输出类似：
+
+```text
+cross_node_network_summary= {'tp_same_node_tpot_overhead_ms': 2.32, 'tp_cross_rack_tpot_overhead_ms': 64.96, 'pp_cross_node_activation_ms': 0.51, 'pd_kv_transfer_mib': 128.0, 'pd_kv_transfer_ms': 3.354, 'remote_hot_decision': 'fetch_remote', 'remote_hot_fetch_ms': 10.5, 'remote_hot_recompute_ms': 16.5, 'remote_cold_decision': 'recompute', 'router_choice': 'decode_same_rack', 'pending_transfer_mib': 384.0, 'backpressure_events': 1, 'data_plane_mib': 256.0, 'control_plane_mib': 0.2}
+cross_node_network_gates= {'tp_cross_node_risk_visible': True, 'pipeline_cost_separate': True, 'pd_kv_transfer_counted': True, 'remote_vs_recompute_checked': True, 'topology_aware_router': True, 'backpressure_visible': True, 'control_data_plane_separated': True, 'metrics_ready': True, 'cross_node_network_gate': True}
+```
+
+这个 demo 展示了几个关键点：
+
+1. `tp_cross_node_tpot_overhead_ms=64.96` 远高于 same-node TP：跨节点 TP 是高频 per-token 风险。
+2. `pp_cross_node_activation_ms=0.51` 单独计量：PP activation 不是 TP all-reduce。
+3. `pd_kv_transfer_mib=128.0`：PD 分离跨节点时，长 prompt KV transfer 必须进入 TTFT 成本。
+4. `remote_hot_decision=fetch_remote` 且 `remote_cold_decision=recompute`：remote hit 不等于一定 fetch。
+5. `router_choice=decode_same_rack`：拓扑感知路由可以选择负载稍高但网络更近、pending transfer 更少的 worker。
+6. `backpressure_events=1`：pending transfer 超阈值时要限流，不能让 prefill 侧无限制造 KV。
+7. `control_data_plane_separated=True`：大 KV transfer 和 control plane metadata 不能混在同一个无保护路径里。
+
+所以本章最终门禁是 `cross_node_network_gate`：只有 TP / PP / PD / remote cache 的通信代价、topology-aware routing、backpressure、control/data plane 隔离和 metrics 都可观测，跨节点 serving 才不是“多堆机器”，而是可治理的网络系统。
+
+## 41.30 小练习
 
 1. 画出 DP、TP、PP、PD 分离四种跨节点 serving 的通信路径。
 2. 解释为什么 TP 跨节点会影响 TPOT。
@@ -938,7 +1171,7 @@ partial KV、预留 blocks、metadata 和请求状态没有一致清理，会造
 9. 列出跨节点 serving 的 15 个关键观测指标。
 10. 设计一个排查 TPOT p99 突然升高的流程。
 
-## 41.30 本章总结
+## 41.31 本章总结
 
 跨节点 serving 的核心问题是通信模式。DP 主要跨节点分流请求，通信最少；TP 是高频 collective，通常应限制在单节点高速互联内；PP 跨节点传 activation，适合模型单节点放不下的场景；PD 分离跨节点的关键瓶颈是 KV transfer；remote KV cache 则要比较 fetch 成本和 recompute 成本。
 

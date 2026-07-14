@@ -14,6 +14,34 @@
 如果你已经有 paged KV cache，怎样加一个能工作的 hash-based prefix cache？
 ```
 
+## 50.0 本讲资料边界与第二轮精修口径
+
+本章按第二轮精修口径，只讲在教学版 paged KV cache 上实现第一版 hash-based prefix cache，并澄清它和平台层 prompt cache、result cache、semantic cache 的边界。
+
+公开资料校准主要参考三类口径：
+
+1. vLLM prefix caching 设计文档对 `KVCacheBlock`、block hash、parent hash、extra hashes、cached free block、free queue、ref count 和 eviction 的公开说明。
+2. vLLM / PagedAttention 论文对 fixed-size KV blocks、block table 和 non-contiguous KV storage 的基础口径。
+3. 本书第 21、23、28、49 章对 vLLM memory management、Prefix Caching Audit、资源画像和 paged KV cache upgrade 的教学边界。
+
+本章不实现 RadixAttention、partial block cache、semantic cache、result cache、跨进程 KV cache、CPU offload、复杂 LRU/KV 连接器、多 worker cache locality 或生产级多租户策略。我们只验证一条最小路径：
+
+```text
+full prompt blocks -> parent hash chain -> cached blocks -> hit attach -> suffix prefill -> active ref release -> cached free / eviction
+```
+
+第二轮新增 demo 的验收重点是：
+
+```text
+prompt cache 和 runtime prefix cache 是否区分清楚；
+只缓存 full blocks 的边界是否明确；
+parent hash 和 extra hashes 是否阻止错误复用；
+cache hit 后 request.block_table 和 num_computed_tokens 是否初始化正确；
+suffix prefill 是否从真实 start position 开始；
+cached block 的 active ref 与 cached ref 是否能释放和淘汰；
+全 prompt 命中但没有 logits 时是否有 fallback 策略。
+```
+
 ## 50.1 本章目标
 
 读完本章，你应该能讲清：
@@ -1084,7 +1112,295 @@ prefill suffix 完成后，OutputProcessor 会把新增完成的 full blocks 注
 验证时我会看 prefix_cache_hit_tokens、token hit ratio、TTFT hit/miss 对比、cached blocks、eviction 次数和 free blocks。固定 system prompt、长文档多问题这类 workload 应该显著降低 TTFT；随机 prompt workload 下 hit ratio 低，cache 不应该明显拖慢系统。
 ```
 
-## 50.35 小练习
+## 50.35 Prefix / Prompt Cache 公式、生命周期和可运行 demo
+
+第一版 prefix cache 的核心是 full block 复用。对请求 `i`，prompt token 数为 `T_i`，block size 为 `S`，最多可查找的 full block 数为：
+
+```math
+B_i^{\mathrm{full}}=\left\lfloor\frac{T_i}{S}\right\rfloor
+```
+
+若连续命中 `H_i` 个 full blocks，则命中 token 数为：
+
+```math
+T_i^{\mathrm{hit}}=SH_i
+```
+
+本轮还需要真实 prefill 的 suffix token 数为：
+
+```math
+T_i^{\mathrm{run}}=T_i-T_i^{\mathrm{hit}}
+```
+
+token 级命中率比 request 级命中率更有意义：
+
+```math
+R_{\mathrm{hit,tok}}=\frac{\sum_iT_i^{\mathrm{hit}}}{\max(1,\sum_iT_i)}
+```
+
+block hash 使用 parent hash 串起上下文：
+
+```math
+h_j=H(h_{j-1},X_j,E)
+```
+
+其中 `X_j` 是第 `j` 个 full block 的 tokens，`E` 是 model、tokenizer、LoRA、tenant salt、多模态 hash 等 extra hashes。
+
+最终升级门禁：
+
+```math
+G_{\mathrm{prefix}}=G_{\mathrm{boundary}}G_{\mathrm{full}}G_{\mathrm{parent}}G_{\mathrm{extra}}G_{\mathrm{suffix}}G_{\mathrm{ref}}G_{\mathrm{evict}}G_{\mathrm{fallback}}
+```
+
+下面这个 0 依赖 demo 模拟第一版 hash-based prefix cache：
+
+1. A 先完成 prefill，把两个 full blocks 注册进 cache。
+2. B 使用相同 system prompt，命中 A 的两个 full blocks，只 prefill suffix。
+3. C 使用不同 tenant salt，同样 tokens 也不能命中。
+4. D 使用不同 LoRA，同样 tokens 也不能命中。
+5. E 完整命中 prompt，但由于没有缓存 logits，走最后 token fallback。
+6. 请求结束后 active ref 释放，cached free block 可以留在 cache，也可以被 eviction 淘汰。
+
+```python
+from dataclasses import dataclass, field
+
+
+@dataclass
+class KVCacheBlock:
+    block_id: int
+    ref_count: int = 0
+    block_hash: tuple = None
+    is_cached: bool = False
+
+
+@dataclass
+class RequestState:
+    request_id: str
+    prompt_tokens: list
+    extra_hashes: tuple
+    block_table: list = field(default_factory=list)
+    block_hashes: list = field(default_factory=list)
+    num_computed_tokens: int = 0
+    prefix_cache_hit_tokens: int = 0
+
+
+class ToyPrefixPromptCacheManager:
+    def __init__(self, num_blocks, block_size):
+        self.block_size = block_size
+        self.blocks = [KVCacheBlock(i) for i in range(num_blocks)]
+        self.free_blocks = list(range(num_blocks))
+        self.cached_blocks = {}
+        self.cache_order = []
+        self.metrics = {
+            "lookups": 0,
+            "hit_blocks": 0,
+            "hit_tokens": 0,
+            "total_prompt_tokens": 0,
+            "evictions": 0,
+        }
+        self.trace = []
+
+    def full_blocks(self, tokens):
+        count = len(tokens) // self.block_size
+        for index in range(count):
+            start = index * self.block_size
+            yield index, tokens[start : start + self.block_size]
+
+    def hash_block(self, parent_hash, block_tokens, extra_hashes):
+        return (parent_hash, tuple(block_tokens), tuple(extra_hashes))
+
+    def allocate_until(self, req, target_tokens):
+        needed = (target_tokens + self.block_size - 1) // self.block_size
+        while len(req.block_table) < needed:
+            if not self.free_blocks:
+                return False
+            block_id = self.free_blocks.pop(0)
+            block = self.blocks[block_id]
+            if block.is_cached and block.ref_count == 1:
+                self.evict_block(block_id)
+            block.ref_count += 1
+            req.block_table.append(block_id)
+        return True
+
+    def register_full_blocks(self, req, computed_tokens):
+        parent_hash = None
+        for logical_id, block_tokens in self.full_blocks(req.prompt_tokens[:computed_tokens]):
+            block_hash = self.hash_block(parent_hash, block_tokens, req.extra_hashes)
+            if logical_id >= len(req.block_hashes):
+                req.block_hashes.append(block_hash)
+            block_id = req.block_table[logical_id]
+            block = self.blocks[block_id]
+            if block_hash not in self.cached_blocks:
+                block.block_hash = block_hash
+                block.is_cached = True
+                block.ref_count += 1
+                self.cached_blocks[block_hash] = block_id
+                self.cache_order.append(block_hash)
+                self.trace.append({"event": "cache_register", "block": block_id})
+            parent_hash = block_hash
+
+    def lookup_and_attach(self, req):
+        self.metrics["lookups"] += 1
+        self.metrics["total_prompt_tokens"] += len(req.prompt_tokens)
+        parent_hash = None
+        hit_blocks = []
+        for _, block_tokens in self.full_blocks(req.prompt_tokens):
+            block_hash = self.hash_block(parent_hash, block_tokens, req.extra_hashes)
+            block_id = self.cached_blocks.get(block_hash)
+            if block_id is None:
+                break
+            if block_id in self.free_blocks:
+                self.free_blocks.remove(block_id)
+            self.blocks[block_id].ref_count += 1
+            req.block_table.append(block_id)
+            req.block_hashes.append(block_hash)
+            hit_blocks.append(block_id)
+            parent_hash = block_hash
+        hit_tokens = len(hit_blocks) * self.block_size
+        req.num_computed_tokens = hit_tokens
+        req.prefix_cache_hit_tokens = hit_tokens
+        self.metrics["hit_blocks"] += len(hit_blocks)
+        self.metrics["hit_tokens"] += hit_tokens
+        self.trace.append({"event": "lookup", "request": req.request_id, "hit_blocks": hit_blocks, "hit_tokens": hit_tokens})
+        return hit_blocks, hit_tokens
+
+    def free_request(self, req):
+        for block_id in req.block_table:
+            block = self.blocks[block_id]
+            block.ref_count -= 1
+            if block.ref_count == 0 or (block.is_cached and block.ref_count == 1):
+                if block_id not in self.free_blocks:
+                    self.free_blocks.append(block_id)
+        req.block_table = []
+
+    def evict_block(self, block_id):
+        block = self.blocks[block_id]
+        if not block.is_cached or block.ref_count != 1:
+            return False
+        self.cached_blocks.pop(block.block_hash, None)
+        if block.block_hash in self.cache_order:
+            self.cache_order.remove(block.block_hash)
+        block.block_hash = None
+        block.is_cached = False
+        block.ref_count -= 1
+        self.metrics["evictions"] += 1
+        self.trace.append({"event": "cache_evict", "block": block_id})
+        return True
+
+    def evict_one_cached_free(self):
+        for block_hash in list(self.cache_order):
+            block_id = self.cached_blocks[block_hash]
+            block = self.blocks[block_id]
+            if block_id in self.free_blocks and block.ref_count == 1:
+                return self.evict_block(block_id), block_id
+        return False, None
+
+    def cached_free_blocks(self):
+        return [block.block_id for block in self.blocks if block.is_cached and block.ref_count == 1 and block.block_id in self.free_blocks]
+
+    def token_hit_ratio(self):
+        return round(self.metrics["hit_tokens"] / max(1, self.metrics["total_prompt_tokens"]), 3)
+
+
+extra_a = ("model-v1", "tok-v1", "lora-none", "tenant-a", "text-only")
+extra_salt_b = ("model-v1", "tok-v1", "lora-none", "tenant-b", "text-only")
+extra_lora = ("model-v1", "tok-v1", "lora-finance", "tenant-a", "text-only")
+shared_prefix = [11, 12, 13, 14, 21, 22, 23, 24]
+
+manager = ToyPrefixPromptCacheManager(num_blocks=6, block_size=4)
+
+req_a = RequestState("A", shared_prefix + [101, 102], extra_a)
+manager.allocate_until(req_a, target_tokens=len(req_a.prompt_tokens))
+req_a.num_computed_tokens = len(req_a.prompt_tokens)
+manager.register_full_blocks(req_a, computed_tokens=req_a.num_computed_tokens)
+a_cached_tables = list(req_a.block_table)
+a_parent_chain_ready = req_a.block_hashes[1][0] == req_a.block_hashes[0]
+manager.free_request(req_a)
+
+req_b = RequestState("B", shared_prefix + [201, 202], extra_a)
+b_hit_blocks, b_hit_tokens = manager.lookup_and_attach(req_b)
+b_free_queue_after_touch = list(manager.free_blocks)
+b_suffix_start = req_b.num_computed_tokens
+manager.allocate_until(req_b, target_tokens=len(req_b.prompt_tokens))
+b_suffix_positions = list(range(b_suffix_start, len(req_b.prompt_tokens)))
+b_suffix_slot_mapping = [
+    req_b.block_table[pos // manager.block_size] * manager.block_size + pos % manager.block_size
+    for pos in b_suffix_positions
+]
+b_ref_counts_after_attach = {block_id: manager.blocks[block_id].ref_count for block_id in b_hit_blocks}
+manager.free_request(req_b)
+b_ref_counts_after_free = {block_id: manager.blocks[block_id].ref_count for block_id in b_hit_blocks}
+
+req_c = RequestState("C", shared_prefix, extra_salt_b)
+c_hit_blocks, _ = manager.lookup_and_attach(req_c)
+req_d = RequestState("D", shared_prefix, extra_lora)
+d_hit_blocks, _ = manager.lookup_and_attach(req_d)
+
+req_e = RequestState("E", shared_prefix, extra_a)
+e_hit_blocks, e_hit_tokens = manager.lookup_and_attach(req_e)
+e_full_prompt_hit = e_hit_tokens == len(req_e.prompt_tokens)
+e_fallback_position = len(req_e.prompt_tokens) - 1 if e_full_prompt_hit else None
+manager.free_request(req_e)
+
+cached_free_before_evict = manager.cached_free_blocks()
+evicted, evicted_block = manager.evict_one_cached_free()
+cached_free_after_evict = manager.cached_free_blocks()
+
+summary = {
+    "a_cached_tables": a_cached_tables,
+    "b_hit_blocks": b_hit_blocks,
+    "b_saved_prefill_tokens": b_hit_tokens,
+    "b_run_prefill_tokens": len(req_b.prompt_tokens) - b_hit_tokens,
+    "b_suffix_start": b_suffix_start,
+    "b_suffix_positions": b_suffix_positions,
+    "b_suffix_slot_mapping": b_suffix_slot_mapping,
+    "b_free_queue_after_touch": b_free_queue_after_touch,
+    "b_ref_counts_after_attach": b_ref_counts_after_attach,
+    "b_ref_counts_after_free": b_ref_counts_after_free,
+    "salt_miss_blocks": c_hit_blocks,
+    "lora_miss_blocks": d_hit_blocks,
+    "e_full_prompt_hit": e_full_prompt_hit,
+    "e_fallback_position": e_fallback_position,
+    "cached_free_before_evict": cached_free_before_evict,
+    "evicted_block": evicted_block,
+    "cached_free_after_evict": cached_free_after_evict,
+    "token_hit_ratio": manager.token_hit_ratio(),
+    "metrics": manager.metrics,
+    "trace_tail": manager.trace[-5:],
+}
+gates = {
+    "prompt_prefix_boundary_ready": True,
+    "full_block_reuse_ready": b_hit_blocks == [0, 1],
+    "parent_hash_chain_ready": a_parent_chain_ready,
+    "extra_hash_isolation_ready": c_hit_blocks == [] and d_hit_blocks == [],
+    "suffix_prefill_ready": b_suffix_start == 8 and b_suffix_positions == [8, 9],
+    "cached_ref_count_ready": b_ref_counts_after_attach == {0: 2, 1: 2} and b_ref_counts_after_free == {0: 1, 1: 1},
+    "eviction_ready": evicted is True and evicted_block == 0,
+    "full_prompt_hit_fallback_ready": e_full_prompt_hit is True and e_fallback_position == 7,
+}
+gates["prefix_prompt_cache_upgrade_gate"] = all(gates.values())
+
+print("prefix_prompt_cache_summary=", summary)
+print("prefix_prompt_cache_gates=", gates)
+```
+
+一次运行的核心输出类似：
+
+```text
+prefix_prompt_cache_summary= {'a_cached_tables': [0, 1, 2], 'b_hit_blocks': [0, 1], 'b_saved_prefill_tokens': 8, 'b_run_prefill_tokens': 2, 'b_suffix_start': 8, 'b_suffix_positions': [8, 9], 'b_suffix_slot_mapping': [12, 13], 'b_free_queue_after_touch': [3, 4, 5, 2], 'b_ref_counts_after_attach': {0: 2, 1: 2}, 'b_ref_counts_after_free': {0: 1, 1: 1}, 'salt_miss_blocks': [], 'lora_miss_blocks': [], 'e_full_prompt_hit': True, 'e_fallback_position': 7, 'cached_free_before_evict': [0, 1], 'evicted_block': 0, 'cached_free_after_evict': [1], 'token_hit_ratio': 0.471, 'metrics': {'lookups': 4, 'hit_blocks': 4, 'hit_tokens': 16, 'total_prompt_tokens': 34, 'evictions': 1}, 'trace_tail': [...]}
+prefix_prompt_cache_gates= {'prompt_prefix_boundary_ready': True, 'full_block_reuse_ready': True, 'parent_hash_chain_ready': True, 'extra_hash_isolation_ready': True, 'suffix_prefill_ready': True, 'cached_ref_count_ready': True, 'eviction_ready': True, 'full_prompt_hit_fallback_ready': True, 'prefix_prompt_cache_upgrade_gate': True}
+```
+
+这个 demo 验证了几个容易出错的边界：
+
+1. B 只复用 full blocks `[0,1]`，最后 2 个 suffix tokens 仍然要从 position 8 开始 prefill。
+2. `b_suffix_slot_mapping=[12,13]` 证明 suffix KV 写到新分配的 physical block，而不是覆盖 cached prefix。
+3. C 和 D tokens 相同但 extra hashes 不同，因此不会错误复用。
+4. 命中 cached-free blocks 后会从 free queue touch 出来，并增加 active ref。
+5. 请求结束后 active ref 释放，cached ref 保留；显存紧张时只淘汰没有 active request 的 cached-free block。
+6. E 完整命中 prompt，但没有缓存 logits，所以必须有最后 token fallback 或等价策略。
+
+## 50.36 小练习
 
 1. 给 `KVCacheBlock` 增加 `ref_count`、`block_hash`、`is_cached` 字段。
 2. 给 `BlockManager` 增加 `cached_blocks` 字典。
@@ -1102,7 +1418,7 @@ prefill suffix 完成后，OutputProcessor 会把新增完成的 full blocks 注
 14. 构造随机 prompt workload，验证 hit ratio 接近 0。
 15. 写一段面试回答：为什么 prefix cache 需要 parent hash 和 extra hashes？
 
-## 50.36 本章总结
+## 50.37 本章总结
 
 prefix cache 是 paged KV cache 之后最自然的升级。
 

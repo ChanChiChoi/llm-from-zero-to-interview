@@ -33,6 +33,25 @@ API Server
 
 本章讨论从单机 engine 走向分布式 serving 的第一步。
 
+## 55.0 本讲资料边界与第二轮精修口径
+
+本章按第二轮精修口径，只讲教学版 serving engine 如何从单 worker 扩展到多个 worker、多张 GPU 和 request router。
+
+公开资料校准主要参考四类口径：
+
+1. vLLM parallelism / scaling 文档对单卡、多卡 tensor parallel、pipeline parallel、多节点 serving、Ray / multiprocessing runtime 和网络通信边界的公开说明。
+2. vLLM data parallel deployment 文档对 data parallel rank、internal / hybrid / external load balancing、每个 DP rank 的队列、API server 瓶颈和 KV cache aware routing 方向的公开口径。
+3. SGLang server / runtime 文档对 TP / DP、router、worker、online serving、abort 和 metrics 的公开工程抽象。
+4. 本书第 24、33、41、52、53、54 章对并行方式、vLLM / SGLang 架构对比、跨节点网络、统一调度循环、benchmark framework 和异步 serving 边界的教学抽象。
+
+本章不实现真实分布式 RPC、真实 GPU 通信、Ray actor、Kubernetes service、NCCL collective、跨 worker KV cache 迁移、真实 DP rank 同步、MoE expert routing、生产级一致性协议或完整外部负载均衡器。我们只验证一个最小闭环：
+
+```text
+Router snapshot -> capability filter -> global admission -> sticky candidate -> load-aware fallback -> request-to-worker map -> heartbeat failure -> retry / fail-stream decision
+```
+
+第二轮新增 demo 的验收重点是：router 只做 worker 级路由，不直接修改 worker 内部 scheduler / KV 状态；round-robin 只能作为 baseline；路由要同时看能力、健康、KV 空间、队列、延迟、preemption 和 prefix locality；sticky 过载时必须 fallback；worker failure 后没有输出的请求可以重试，已经 streaming 的请求必须显式失败。
+
 ## 55.1 本章目标
 
 读完本章，你应该能讲清：
@@ -925,7 +944,418 @@ sticky_route_fallback_total
 故障处理上，worker heartbeat 超时或报错后，router 立即停止给它发新请求。对于已经路由过去的请求，如果还没有输出 token，可以重试到其他 worker；如果已经开始 streaming，通常不能透明重试，只能显式失败或让业务层重新发起。最后要有全局 admission control，在所有候选 worker 都过载时及时 reject，而不是让请求无限排队。
 ```
 
-## 55.24 小练习
+## 55.24 Multi-Worker Router 公式、故障门禁和可运行 demo
+
+多 worker 路由先把请求成本估算成 KV block 数：
+
+```math
+C_i^{\mathrm{block}}=\left\lceil\frac{P_i+O_i^{\max}}{B}\right\rceil
+```
+
+其中 `P_i` 是 prompt tokens，`O_i^{\max}` 是最大输出 token 数，`B` 是 block size。
+
+worker 的可路由条件可以写成：
+
+```math
+H_w M_{w,i} A_{w,i}\mathbf{1}[F_w\ge C_i^{\mathrm{block}}]=1
+```
+
+其中 `H_w` 表示健康，`M_{w,i}` 表示模型匹配，`A_{w,i}` 表示 adapter 可用，`F_w` 表示 free KV blocks。
+
+一个教学版 load score 可以写成：
+
+```math
+S(w,i)=\alpha_q Q_w+\alpha_r R_w+\alpha_e E_w+\alpha_p P_w^{\mathrm{preempt}}+\alpha_f L_w^{\mathrm{first}}+\alpha_t L_w^{\mathrm{tok}}+\alpha_c C_i^{\mathrm{block}}
+```
+
+sticky routing 不是绝对粘住，而是满足阈值才使用首选 worker：
+
+```math
+w_i=\begin{cases}
+w_i^{\mathrm{sticky}}, & S(w_i^{\mathrm{sticky}},i)\le \tau \\
+\arg\min_{w\in \mathcal{C}_i} S(w,i), & S(w_i^{\mathrm{sticky}},i)>\tau
+\end{cases}
+```
+
+全局 admission control 至少要保证候选 worker 总容量足够：
+
+```math
+\sum_{w\in \mathcal{C}_i}F_w\ge C_i^{\mathrm{block}}
+```
+
+worker failure 后的 retry 门禁可以写成：
+
+```math
+G_{\mathrm{retry},i}=\mathbf{1}[B_i^{\mathrm{stream}}=0]
+```
+
+也就是没有向 client 输出过 token 的请求才允许透明重试。
+
+最终用一个组合门禁收束：
+
+```math
+G_{\mathrm{router}}=G_{\mathrm{cap}}G_{\mathrm{admit}}G_{\mathrm{load}}G_{\mathrm{sticky}}G_{\mathrm{health}}G_{\mathrm{retry}}G_{\mathrm{state}}G_{\mathrm{metrics}}
+```
+
+下面这个 0 依赖 demo 把这些约束串起来：
+
+```python
+from dataclasses import dataclass, field
+from math import ceil, inf
+
+
+def stable_hash(text: str) -> int:
+    total = 0
+    for index, char in enumerate(text):
+        total += (index + 1) * ord(char)
+    return total
+
+
+@dataclass
+class WorkerLoad:
+    waiting_queue_size: int
+    running_queue_size: int
+    kv_free_blocks: int
+    kv_used_blocks: int
+    engine_input_queue_size: int
+    recent_ttft_p90_ms: float
+    recent_tpot_p90_ms: float
+    preemption_rate: float
+    healthy: bool
+    last_heartbeat_s: float
+    error: str | None = None
+
+
+@dataclass
+class WorkerHandle:
+    worker_id: str
+    model_name: str
+    gpu_group: tuple[int, ...]
+    loaded_adapters: set[str]
+    hot_prefixes: set[str]
+    load: WorkerLoad
+    selected_total: int = 0
+
+
+@dataclass
+class TokenizedRequest:
+    request_id: str
+    model_name: str
+    prompt_tokens: int
+    max_output_tokens: int
+    prefix_hash: str
+    adapter_id: str | None = None
+
+
+@dataclass
+class RoutedRequestState:
+    request_id: str
+    worker_id: str | None
+    stream_started: bool
+    status: str
+    events: list[str] = field(default_factory=list)
+
+
+@dataclass
+class RouterConfig:
+    block_size: int
+    sticky_score_threshold: float
+    heartbeat_timeout_s: float
+    max_total_waiting: int
+    max_preemption_rate: float
+
+
+class ToyMultiWorkerRouter:
+    def __init__(self, workers: list[WorkerHandle], config: RouterConfig):
+        self.workers = workers
+        self.config = config
+        self.rr_index = 0
+        self.states: dict[str, RoutedRequestState] = {}
+        self.metrics = {
+            "router_reject_total": 0,
+            "sticky_route_hit_total": 0,
+            "sticky_route_fallback_total": 0,
+            "request_retry_total": 0,
+            "stream_fail_total": 0,
+            "worker_failure_total": 0,
+            "capability_filter_total": 0,
+        }
+
+    def estimate_blocks(self, req: TokenizedRequest) -> int:
+        return ceil((req.prompt_tokens + req.max_output_tokens) / self.config.block_size)
+
+    def can_serve(self, worker: WorkerHandle, req: TokenizedRequest) -> bool:
+        if worker.model_name != req.model_name:
+            return False
+        if req.adapter_id is not None and req.adapter_id not in worker.loaded_adapters:
+            return False
+        return True
+
+    def candidates(self, req: TokenizedRequest) -> list[WorkerHandle]:
+        result = [worker for worker in self.workers if self.can_serve(worker, req)]
+        self.metrics["capability_filter_total"] += 1
+        return result
+
+    def score_worker(self, worker: WorkerHandle, req: TokenizedRequest) -> float:
+        load = worker.load
+        needed_blocks = self.estimate_blocks(req)
+        if not load.healthy or load.kv_free_blocks < needed_blocks:
+            return inf
+
+        locality_penalty = 0.0 if req.prefix_hash in worker.hot_prefixes else 10.0
+        score = 0.0
+        score += load.waiting_queue_size * 10.0
+        score += load.running_queue_size * 6.0
+        score += load.engine_input_queue_size * 3.0
+        score += load.preemption_rate * 100.0
+        score += load.recent_ttft_p90_ms * 0.01
+        score += load.recent_tpot_p90_ms * 0.05
+        score += needed_blocks * 0.5
+        score += locality_penalty
+        return round(score, 3)
+
+    def global_admit(self, req: TokenizedRequest) -> bool:
+        candidates = [w for w in self.candidates(req) if w.load.healthy]
+        needed_blocks = self.estimate_blocks(req)
+        if not candidates:
+            return False
+        if sum(w.load.waiting_queue_size for w in candidates) > self.config.max_total_waiting:
+            return False
+        if max(w.load.preemption_rate for w in candidates) > self.config.max_preemption_rate:
+            return False
+        if sum(w.load.kv_free_blocks for w in candidates) < needed_blocks:
+            return False
+        return True
+
+    def round_robin_route(self, req: TokenizedRequest) -> WorkerHandle | None:
+        candidates = self.candidates(req)
+        if not candidates:
+            return None
+        worker = candidates[self.rr_index % len(candidates)]
+        self.rr_index += 1
+        return worker
+
+    def sticky_preferred(self, req: TokenizedRequest, candidates: list[WorkerHandle]) -> WorkerHandle:
+        for worker in candidates:
+            if req.prefix_hash in worker.hot_prefixes:
+                return worker
+        return candidates[stable_hash(req.prefix_hash) % len(candidates)]
+
+    def load_aware_route(
+        self, req: TokenizedRequest, exclude_worker_id: str | None = None
+    ) -> WorkerHandle | None:
+        candidates = [w for w in self.candidates(req) if w.worker_id != exclude_worker_id]
+        scored = [(self.score_worker(worker, req), worker) for worker in candidates]
+        viable = [(score, worker) for score, worker in scored if score < inf]
+        if not viable:
+            self.metrics["router_reject_total"] += 1
+            return None
+        return min(viable, key=lambda item: (item[0], item[1].worker_id))[1]
+
+    def route_with_sticky(self, req: TokenizedRequest) -> WorkerHandle | None:
+        if not self.global_admit(req):
+            self.metrics["router_reject_total"] += 1
+            return None
+
+        candidates = self.candidates(req)
+        preferred = self.sticky_preferred(req, candidates)
+        preferred_score = self.score_worker(preferred, req)
+        if preferred_score <= self.config.sticky_score_threshold:
+            self.metrics["sticky_route_hit_total"] += 1
+            return preferred
+
+        self.metrics["sticky_route_fallback_total"] += 1
+        return self.load_aware_route(req)
+
+    def commit_route(
+        self, req: TokenizedRequest, worker: WorkerHandle, stream_started: bool
+    ) -> RoutedRequestState:
+        worker.selected_total += 1
+        worker.load.waiting_queue_size += 1
+        worker.load.kv_free_blocks -= self.estimate_blocks(req)
+        state = RoutedRequestState(
+            request_id=req.request_id,
+            worker_id=worker.worker_id,
+            stream_started=stream_started,
+            status="routed",
+            events=[f"route:{worker.worker_id}"],
+        )
+        self.states[req.request_id] = state
+        return state
+
+    def update_health(self, now_s: float) -> list[str]:
+        unhealthy = []
+        for worker in self.workers:
+            stale = now_s - worker.load.last_heartbeat_s > self.config.heartbeat_timeout_s
+            if stale and worker.load.healthy:
+                worker.load.healthy = False
+                worker.load.error = "heartbeat_timeout"
+                unhealthy.append(worker.worker_id)
+        return unhealthy
+
+    def handle_worker_failure(self, worker_id: str, retry_requests: dict[str, TokenizedRequest]):
+        self.metrics["worker_failure_total"] += 1
+        for state in list(self.states.values()):
+            if state.worker_id != worker_id or state.status != "routed":
+                continue
+            if state.stream_started:
+                state.status = "failed_stream"
+                state.events.append("fail_stream:worker_failed")
+                self.metrics["stream_fail_total"] += 1
+                continue
+
+            retry_req = retry_requests[state.request_id]
+            retry_worker = self.load_aware_route(retry_req, exclude_worker_id=worker_id)
+            if retry_worker is None:
+                state.status = "failed_before_stream"
+                state.events.append("retry_failed:no_worker")
+                continue
+            state.worker_id = retry_worker.worker_id
+            state.status = "retried"
+            state.events.append(f"retry:{retry_worker.worker_id}")
+            retry_worker.selected_total += 1
+            self.metrics["request_retry_total"] += 1
+
+    def worker_selection_counts(self) -> dict[str, int]:
+        return {worker.worker_id: worker.selected_total for worker in self.workers}
+
+
+workers = [
+    WorkerHandle(
+        worker_id="w0",
+        model_name="chat",
+        gpu_group=(0,),
+        loaded_adapters={"lora-a"},
+        hot_prefixes={"sys-a"},
+        load=WorkerLoad(5, 4, 24, 40, 2, 900.0, 90.0, 0.20, True, 12.0),
+    ),
+    WorkerHandle(
+        worker_id="w1",
+        model_name="chat",
+        gpu_group=(1,),
+        loaded_adapters={"lora-a"},
+        hot_prefixes=set(),
+        load=WorkerLoad(1, 1, 32, 20, 1, 320.0, 35.0, 0.02, True, 0.0),
+    ),
+    WorkerHandle(
+        worker_id="w2",
+        model_name="chat",
+        gpu_group=(2, 3),
+        loaded_adapters={"lora-a"},
+        hot_prefixes={"sys-c"},
+        load=WorkerLoad(0, 0, 64, 0, 0, 0.0, 0.0, 0.00, False, 12.0, "starting"),
+    ),
+    WorkerHandle(
+        worker_id="w3",
+        model_name="code",
+        gpu_group=(4,),
+        loaded_adapters=set(),
+        hot_prefixes=set(),
+        load=WorkerLoad(0, 1, 40, 12, 0, 260.0, 28.0, 0.01, True, 12.0),
+    ),
+]
+
+config = RouterConfig(
+    block_size=128,
+    sticky_score_threshold=80.0,
+    heartbeat_timeout_s=10.0,
+    max_total_waiting=12,
+    max_preemption_rate=0.50,
+)
+router = ToyMultiWorkerRouter(workers, config)
+
+req_a = TokenizedRequest("r1", "chat", 800, 256, "sys-a", "lora-a")
+req_b = TokenizedRequest("r2", "chat", 64, 64, "sys-a", "lora-a")
+req_big = TokenizedRequest("r3", "chat", 9000, 4096, "sys-big", "lora-a")
+req_code = TokenizedRequest("r4", "code", 128, 128, "code-a", None)
+
+round_robin_choice = router.round_robin_route(req_a).worker_id
+load_aware_choice = router.load_aware_route(req_a).worker_id
+
+worker_for_a = router.route_with_sticky(req_a)
+state_a = router.commit_route(req_a, worker_for_a, stream_started=False)
+
+worker_for_b = router.route_with_sticky(req_b)
+state_b = router.commit_route(req_b, worker_for_b, stream_started=True)
+
+big_admitted = router.global_admit(req_big)
+if not big_admitted:
+    router.metrics["router_reject_total"] += 1
+
+code_worker = router.route_with_sticky(req_code)
+if code_worker is not None:
+    router.commit_route(req_code, code_worker, stream_started=False)
+
+unhealthy_after_timeout = router.update_health(now_s=15.0)
+router.handle_worker_failure(
+    "w1", {"r1": req_a, "r2": req_b, "r3": req_big, "r4": req_code}
+)
+
+state_rows = {
+    request_id: {
+        "worker_id": state.worker_id,
+        "stream_started": state.stream_started,
+        "status": state.status,
+        "events": state.events,
+    }
+    for request_id, state in sorted(router.states.items())
+}
+selection_counts = router.worker_selection_counts()
+active_counts = [count for count in selection_counts.values() if count > 0]
+selection_imbalance = max(active_counts) - min(active_counts) if active_counts else 0
+
+summary = {
+    "round_robin_choice_for_long": round_robin_choice,
+    "load_aware_choice_for_long": load_aware_choice,
+    "sticky_preferred_for_sys_a": "w0",
+    "actual_worker_for_r1": worker_for_a.worker_id,
+    "actual_worker_for_r2": worker_for_b.worker_id,
+    "big_request_admitted": big_admitted,
+    "code_worker": code_worker.worker_id if code_worker else None,
+    "unhealthy_after_timeout": unhealthy_after_timeout,
+    "state_rows": state_rows,
+    "selection_counts": selection_counts,
+    "selection_imbalance": selection_imbalance,
+    "metrics": router.metrics,
+}
+
+gates = {
+    "capability_filter_ready": code_worker.worker_id == "w3",
+    "global_admission_ready": big_admitted is False,
+    "load_aware_ready": round_robin_choice == "w0" and load_aware_choice == "w1",
+    "sticky_fallback_ready": worker_for_a.worker_id == "w1"
+    and router.metrics["sticky_route_fallback_total"] >= 1,
+    "health_check_ready": unhealthy_after_timeout == ["w1"],
+    "retry_gate_ready": state_rows["r1"]["status"] == "retried"
+    and state_rows["r2"]["status"] == "failed_stream",
+    "state_boundary_ready": all("route:" in row["events"][0] for row in state_rows.values()),
+    "metrics_ready": router.metrics["request_retry_total"] == 1
+    and router.metrics["stream_fail_total"] == 1,
+}
+gates["multi_worker_router_gate"] = all(gates.values())
+
+print("multi_worker_router_summary=", summary)
+print("multi_worker_router_gates=", gates)
+```
+
+一次运行的核心输出类似：
+
+```text
+multi_worker_router_summary= {'round_robin_choice_for_long': 'w0', 'load_aware_choice_for_long': 'w1', 'sticky_preferred_for_sys_a': 'w0', 'actual_worker_for_r1': 'w1', 'actual_worker_for_r2': 'w1', 'big_request_admitted': False, 'code_worker': 'w3', 'unhealthy_after_timeout': ['w1'], 'state_rows': {'r1': {'worker_id': 'w0', 'stream_started': False, 'status': 'retried', 'events': ['route:w1', 'retry:w0']}, 'r2': {'worker_id': 'w1', 'stream_started': True, 'status': 'failed_stream', 'events': ['route:w1', 'fail_stream:worker_failed']}, 'r4': {'worker_id': 'w3', 'stream_started': False, 'status': 'routed', 'events': ['route:w3']}}, 'selection_counts': {'w0': 1, 'w1': 2, 'w2': 0, 'w3': 1}, 'selection_imbalance': 1, 'metrics': {'router_reject_total': 1, 'sticky_route_hit_total': 1, 'sticky_route_fallback_total': 2, 'request_retry_total': 1, 'stream_fail_total': 1, 'worker_failure_total': 1, 'capability_filter_total': 12}}
+multi_worker_router_gates= {'capability_filter_ready': True, 'global_admission_ready': True, 'load_aware_ready': True, 'sticky_fallback_ready': True, 'health_check_ready': True, 'retry_gate_ready': True, 'state_boundary_ready': True, 'metrics_ready': True, 'multi_worker_router_gate': True}
+```
+
+这个 demo 证明了几个关键点：
+
+1. round-robin 会把长请求打到高负载 sticky worker，load-aware routing 会避开它。
+2. router 先做模型和 adapter 能力过滤，code 请求不会被发给 chat worker。
+3. sticky 只是首选，首选 worker 过载时必须 fallback。
+4. 全局 admission control 会拒绝超出候选 worker 总 KV 容量的大请求。
+5. heartbeat 超时后 worker 停止接收新请求。
+6. worker failure 后，未输出请求可以重试，已经 streaming 的请求显式失败。
+7. router 维护 request-to-worker map，但不直接修改 worker 内部 scheduler、KV block table 或 prefix cache。
+
+## 55.25 小练习
 
 1. 实现 `WorkerHandle` 和 `WorkerLoad`。
 2. 给每个 worker 增加 heartbeat。
@@ -943,7 +1373,7 @@ sticky_route_fallback_total
 14. 给 router 增加 global admission control。
 15. 写一个多 worker benchmark，输出每个 worker 的 TTFT、TPOT、KV free blocks 和 selected_total。
 
-## 55.25 本章总结
+## 55.26 本章总结
 
 从单 worker 到多 worker，核心变化不是多起几个进程这么简单。
 

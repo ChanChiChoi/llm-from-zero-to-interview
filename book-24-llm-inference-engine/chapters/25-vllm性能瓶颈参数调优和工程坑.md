@@ -8,6 +8,27 @@
 
 > vLLM 调优不是盲目把 batch、并发和 GPU 数开大，而是把请求生命周期拆成 queue、tokenize、prefill、decode、KV cache、scheduler、worker、streaming 和 network，再针对瓶颈调整 token budget、KV budget、并行度、缓存和限流策略。
 
+## 25.0 本讲资料边界与第二轮精修口径
+
+本讲按第二轮精修要求做过资料校准，主要参考五类公开资料：
+
+1. vLLM Optimization and Tuning 文档对 KV cache 空间不足、preemption、`gpu_memory_utilization`、`max_num_batched_tokens`、`max_num_seqs`、chunked prefill、decode / prefill 平衡和 attention backend 的说明。
+2. vLLM metrics 文档对 TTFT、TPOT / inter-token latency、E2E latency、queue / prefill / decode 时间、running / waiting / swapped requests、KV cache usage、prefix cache hit rate 和 Prometheus / logging 指标的说明。
+3. vLLM Automatic Prefix Caching 文档对 prefix cache hit、saved prefill、cached-free blocks、cache salt、LoRA、多模态 hash 和 eviction 的说明。
+4. vLLM Parallelism and Scaling / Data Parallel / Expert Parallel 文档对 TP / PP / DP / EP 拓扑、跨节点通信、每个 DP rank 独立 KV cache 和 MoE expert parallel 的说明。
+5. vLLM multimodal / production 相关文档对多模态输入 profile、processor cache、API server、streaming、部署与指标观测的公开口径。
+
+本章只讲 vLLM-like serving 的教学版性能调优方法，不给出某个 GPU、某个模型、某个版本的通用最优参数，不替代真实压测平台、线上 SLO、NCCL / NUMA 排障、云成本模型、Kubernetes 编排、生产安全审计或业务质量评估。本章 demo 用纯 Python trace 表模拟 TTFT、TPOT、KV pressure、preemption、prefix cache locality、CPU / streaming 瓶颈和调参建议，不等同于真实性能预测。
+
+参考资料：
+
+1. vLLM Optimization and Tuning：<https://docs.vllm.ai/en/latest/configuration/optimization/>
+2. vLLM metrics：<https://docs.vllm.ai/en/latest/design/metrics/>
+3. vLLM Automatic Prefix Caching：<https://docs.vllm.ai/en/latest/features/automatic_prefix_caching/>
+4. vLLM Parallelism and Scaling：<https://docs.vllm.ai/en/latest/serving/parallelism_scaling/>
+5. vLLM Data Parallel Deployment：<https://docs.vllm.ai/en/latest/serving/data_parallel_deployment/>
+6. vLLM Expert Parallel Deployment：<https://docs.vllm.ai/en/latest/serving/expert_parallel_deployment/>
+
 ## 25.1 本章目标
 
 读完本章，你应该能讲清：
@@ -739,7 +760,303 @@ sample token -> detokenize -> output processor -> API server -> gateway/proxy ->
 最后所有调参都要基于真实流量 replay 和灰度，比较 p50/p95/p99、tokens/s、错误率和成本，而不是只看平均 QPS。
 ```
 
-## 25.26 小练习
+## 25.26 vLLM 调优公式、事故归因和可运行 demo
+
+把调优需要的观测量先写成稳定公式。对请求 `i`：
+
+$$
+T_{\mathrm{ttft},i}=T_{\mathrm{front},i}+T_{\mathrm{tok},i}+T_{\mathrm{queue},i}+T_{\mathrm{prefill},i}+T_{\mathrm{first},i}
+$$
+
+$$
+T_{\mathrm{tpot},i}=\frac{T_{\mathrm{decode},i}+T_{\mathrm{sample},i}+T_{\mathrm{detok},i}+T_{\mathrm{flush},i}}{\max(1,Y_i)}
+$$
+
+其中 `Y_i` 是输出 token 数。压测窗口内的 token 吞吐可以写成：
+
+$$
+Q_{\mathrm{out}}=\frac{\sum_i Y_i}{T_{\mathrm{window}}}
+$$
+
+KV pressure 可以用 used blocks 和 total blocks 表示：
+
+$$
+P_{\mathrm{kv}}=\frac{B_{\mathrm{used}}}{B_{\mathrm{total}}}
+$$
+
+preemption rate 可以写成：
+
+$$
+R_{\mathrm{preempt}}=\frac{N_{\mathrm{preempt}}}{N_{\mathrm{req}}}
+$$
+
+prefix cache 的 saved prefill ratio 可以写成：
+
+$$
+R_{\mathrm{save}}=\frac{\sum_i S_i}{\sum_i X_i}
+$$
+
+其中 `S_i` 是 prefix cache 省掉的 prefill tokens，`X_i` 是输入 tokens。
+
+教学版 vLLM 调优门禁可以写成：
+
+$$
+G_{\mathrm{tune}}=G_{\mathrm{metric}}G_{\mathrm{ttft}}G_{\mathrm{tpot}}G_{\mathrm{kv}}G_{\mathrm{cache}}G_{\mathrm{config}}G_{\mathrm{rollback}}
+$$
+
+其中：
+
+1. `G_{\mathrm{metric}}`：TTFT、TPOT、queue、prefill、decode、KV、cache、CPU、streaming 指标完整。
+2. `G_{\mathrm{ttft}}`：能区分 queue、tokenize、prefill、prefix cache miss 和前置链路导致的 TTFT。
+3. `G_{\mathrm{tpot}}`：能区分 decode、KV 读取、TP 通信、chunked prefill、sampling 和 streaming 导致的 TPOT。
+4. `G_{\mathrm{kv}}`：能识别 KV pressure、allocation failure、preemption 和 cleanup 问题。
+5. `G_{\mathrm{cache}}`：能解释 prefix cache hit rate、saved tokens、DP route locality 和 eviction。
+6. `G_{\mathrm{config}}`：调参方案说明 `max_num_batched_tokens`、`max_num_seqs`、`gpu_memory_utilization`、`max_model_len`、TP / DP 的 trade-off。
+7. `G_{\mathrm{rollback}}`：灰度、p99、OOM、error rate 和质量回滚阈值明确。
+
+下面这个 0 依赖 demo 构造 5 条 toy request trace 和一个当前配置，模拟一次 vLLM 性能事故审计。它故意让 TTFT、TPOT、KV pressure、prefix cache 和 streaming 都有可见问题，目标不是让服务通过 SLO，而是证明审计能定位瓶颈并给出有 trade-off 的调参建议。
+
+```python
+from dataclasses import dataclass
+
+
+@dataclass
+class RequestTrace:
+    request_id: str
+    input_tokens: int
+    output_tokens: int
+    front_ms: int
+    tokenize_ms: int
+    queue_ms: int
+    prefill_ms: int
+    first_ms: int
+    decode_ms: int
+    sample_ms: int
+    detok_ms: int
+    flush_ms: int
+    kv_blocks: int
+    prefix_lookups: int
+    prefix_hits: int
+    saved_prefill_tokens: int
+    preemptions: int
+    dp_rank: int
+    route_key: str
+    error: bool = False
+
+
+@dataclass
+class ServingConfig:
+    name: str
+    max_num_batched_tokens: int
+    max_num_seqs: int
+    gpu_memory_utilization: float
+    max_model_len: int
+    tensor_parallel_size: int
+    data_parallel_size: int
+    chunked_prefill: bool
+    prefix_cache: bool
+    sticky_routing: bool
+    tp_cross_node: bool
+
+
+class ToyVLLMTuningAuditor:
+    def __init__(self, traces, config, total_kv_blocks, ttft_budget_ms, tpot_budget_ms):
+        self.traces = traces
+        self.config = config
+        self.total_kv_blocks = total_kv_blocks
+        self.ttft_budget_ms = ttft_budget_ms
+        self.tpot_budget_ms = tpot_budget_ms
+
+    def percentile(self, values, ratio):
+        ordered = sorted(values)
+        index = int((len(ordered) - 1) * ratio + 0.999999)
+        return ordered[min(index, len(ordered) - 1)]
+
+    def per_request_metrics(self, trace):
+        ttft = trace.front_ms + trace.tokenize_ms + trace.queue_ms + trace.prefill_ms + trace.first_ms
+        tpot = (
+            trace.decode_ms + trace.sample_ms + trace.detok_ms + trace.flush_ms
+        ) / max(1, trace.output_tokens)
+        e2e = ttft + trace.decode_ms + trace.sample_ms + trace.detok_ms + trace.flush_ms
+        return {
+            "request_id": trace.request_id,
+            "ttft_ms": round(ttft, 1),
+            "tpot_ms": round(tpot, 2),
+            "e2e_ms": round(e2e, 1),
+            "queue_ms": trace.queue_ms,
+            "tokenize_ms": trace.tokenize_ms,
+            "prefill_ms": trace.prefill_ms,
+            "kv_blocks": trace.kv_blocks,
+            "preemptions": trace.preemptions,
+            "prefix_hits": trace.prefix_hits,
+            "prefix_lookups": trace.prefix_lookups,
+            "saved_prefill_tokens": trace.saved_prefill_tokens,
+        }
+
+    def summarize(self):
+        per_request = [self.per_request_metrics(trace) for trace in self.traces]
+        ttfts = [item["ttft_ms"] for item in per_request]
+        tpots = [item["tpot_ms"] for item in per_request]
+        queues = [item["queue_ms"] for item in per_request]
+        e2es = [item["e2e_ms"] for item in per_request]
+        window_s = max(e2es) / 1000.0
+        prefix_lookups = sum(trace.prefix_lookups for trace in self.traces)
+        prefix_hits = sum(trace.prefix_hits for trace in self.traces)
+        saved_tokens = sum(trace.saved_prefill_tokens for trace in self.traces)
+        input_tokens = sum(trace.input_tokens for trace in self.traces)
+        output_tokens = sum(trace.output_tokens for trace in self.traces)
+        preemptions = sum(trace.preemptions for trace in self.traces)
+        kv_used = sum(trace.kv_blocks for trace in self.traces)
+
+        route_to_ranks = {}
+        for trace in self.traces:
+            route_to_ranks.setdefault(trace.route_key, set()).add(trace.dp_rank)
+        scattered_routes = sorted(key for key, ranks in route_to_ranks.items() if len(ranks) > 1)
+
+        return {
+            "per_request": per_request,
+            "summary": {
+                "ttft_p95_ms": self.percentile(ttfts, 0.95),
+                "tpot_p95_ms": self.percentile(tpots, 0.95),
+                "queue_p95_ms": self.percentile(queues, 0.95),
+                "output_tokens_per_s": round(output_tokens / window_s, 2),
+                "kv_pressure": round(kv_used / self.total_kv_blocks, 3),
+                "preemption_rate": round(preemptions / len(self.traces), 3),
+                "prefix_hit_rate": round(prefix_hits / prefix_lookups, 3) if prefix_lookups else 0.0,
+                "saved_prefill_ratio": round(saved_tokens / input_tokens, 3),
+                "scattered_prefix_routes": scattered_routes,
+                "error_rate": round(sum(1 for trace in self.traces if trace.error) / len(self.traces), 3),
+            },
+        }
+
+    def diagnose(self, summary):
+        reasons = []
+        if summary["ttft_p95_ms"] > self.ttft_budget_ms and summary["queue_p95_ms"] > 500:
+            reasons.append("queue_or_prefill_ttft")
+        if summary["tpot_p95_ms"] > self.tpot_budget_ms:
+            reasons.append("decode_or_streaming_tpot")
+        if summary["kv_pressure"] > 0.75 or summary["preemption_rate"] > 0:
+            reasons.append("kv_pressure_preemption")
+        if summary["prefix_hit_rate"] < 0.25 and summary["saved_prefill_ratio"] < 0.05:
+            reasons.append("prefix_cache_ineffective")
+        if summary["scattered_prefix_routes"]:
+            reasons.append("dp_route_breaks_cache_locality")
+        if self.config.tp_cross_node:
+            reasons.append("cross_node_tp_risk")
+        if any(trace.tokenize_ms > 200 or trace.flush_ms > 180 for trace in self.traces):
+            reasons.append("cpu_or_streaming_path")
+        return reasons
+
+    def recommendations(self, reasons):
+        actions = []
+        if "queue_or_prefill_ttft" in reasons:
+            actions.append("raise_or_rebalance_max_num_batched_tokens_with_replay")
+            actions.append("enable_chunked_prefill_for_long_prompts")
+        if "decode_or_streaming_tpot" in reasons:
+            actions.append("cap_prefill_per_step_or_lower_max_num_batched_tokens")
+            actions.append("profile_detokenize_and_sse_flush")
+        if "kv_pressure_preemption" in reasons:
+            actions.append("lower_max_num_seqs_or_max_model_len")
+            actions.append("increase_gpu_memory_utilization_with_oom_guard")
+        if "prefix_cache_ineffective" in reasons:
+            actions.append("stabilize_prompt_prefix_and_measure_saved_tokens")
+        if "dp_route_breaks_cache_locality" in reasons:
+            actions.append("enable_tenant_or_session_sticky_routing")
+        if "cross_node_tp_risk" in reasons:
+            actions.append("keep_tp_inside_node_or_use_tp_plus_pp")
+        if "cpu_or_streaming_path" in reasons:
+            actions.append("scale_api_tokenizer_workers_and_check_gateway_buffering")
+        return actions
+
+    def rollback_policy(self):
+        return {
+            "ttft_p99_ms": 3500,
+            "tpot_p99_ms": 90,
+            "oom_or_allocation_failures": 0,
+            "error_rate": 0.01,
+            "quality_regression": 0,
+        }
+
+    def audit(self):
+        metrics = self.summarize()
+        summary = metrics["summary"]
+        reasons = self.diagnose(summary)
+        actions = self.recommendations(reasons)
+        rollback = self.rollback_policy()
+        gates = {
+            "metrics_complete": all(
+                {"ttft_ms", "tpot_ms", "queue_ms", "kv_blocks"}.issubset(item)
+                for item in metrics["per_request"]
+            ),
+            "ttft_bottleneck_detected": "queue_or_prefill_ttft" in reasons,
+            "tpot_bottleneck_detected": "decode_or_streaming_tpot" in reasons,
+            "kv_preemption_detected": "kv_pressure_preemption" in reasons,
+            "cache_issue_detected": "prefix_cache_ineffective" in reasons and "dp_route_breaks_cache_locality" in reasons,
+            "config_tradeoff_ready": (
+                "enable_chunked_prefill_for_long_prompts" in actions
+                and "lower_max_num_seqs_or_max_model_len" in actions
+                and "keep_tp_inside_node_or_use_tp_plus_pp" in actions
+            ),
+            "rollback_guard_ready": all(value is not None for value in rollback.values()),
+        }
+        gates["vllm_tuning_gate"] = all(gates.values())
+        return {
+            "summary": summary,
+            "root_causes": reasons,
+            "recommendations": actions,
+            "rollback_policy": rollback,
+            "gates": gates,
+        }
+
+
+traces = [
+    RequestTrace("short_chat", 80, 20, 20, 8, 40, 60, 10, 600, 30, 20, 40, 3, 1, 1, 64, 0, 0, "tenantA"),
+    RequestTrace("long_rag_a", 5000, 60, 30, 70, 900, 1700, 20, 2400, 90, 80, 120, 18, 2, 0, 0, 1, 0, "manual_v7"),
+    RequestTrace("long_rag_b", 4800, 32, 30, 60, 850, 1600, 20, 1400, 60, 50, 80, 16, 2, 0, 0, 1, 1, "manual_v7"),
+    RequestTrace("long_decode", 500, 120, 20, 20, 150, 180, 15, 7200, 150, 120, 300, 14, 1, 0, 0, 0, 0, "tenantB"),
+    RequestTrace("cpu_streaming", 300, 30, 25, 260, 80, 120, 15, 900, 60, 80, 220, 5, 1, 0, 0, 0, 1, "tenantC"),
+]
+
+config = ServingConfig(
+    name="baseline_bad_mix",
+    max_num_batched_tokens=4096,
+    max_num_seqs=64,
+    gpu_memory_utilization=0.84,
+    max_model_len=32768,
+    tensor_parallel_size=16,
+    data_parallel_size=2,
+    chunked_prefill=False,
+    prefix_cache=True,
+    sticky_routing=False,
+    tp_cross_node=True,
+)
+
+auditor = ToyVLLMTuningAuditor(
+    traces=traces,
+    config=config,
+    total_kv_blocks=70,
+    ttft_budget_ms=1500,
+    tpot_budget_ms=55,
+)
+result = auditor.audit()
+
+print("vllm_tuning_summary=", result["summary"])
+print("vllm_tuning_root_causes=", result["root_causes"])
+print("vllm_tuning_recommendations=", result["recommendations"])
+print("vllm_tuning_gates=", result["gates"])
+```
+
+这份输出应当体现：
+
+1. `ttft_p95_ms=2720`，`queue_p95_ms=900`，说明 TTFT 问题主要落在 queue / prefill 一侧。
+2. `tpot_p95_ms=64.75`，说明 decode、sampling、detokenize 或 streaming 链路也在拖慢输出。
+3. `kv_pressure=0.8`、`preemption_rate=0.4`，说明 KV budget 和并发参数过激。
+4. `prefix_hit_rate=0.143`、`saved_prefill_ratio=0.006`，且 `manual_v7` 路由到多个 DP rank，说明 prefix cache 没有形成有效收益。
+5. `root_causes` 同时包含 `cross_node_tp_risk` 和 `cpu_or_streaming_path`，说明调优不能只改一个 batch 参数。
+6. `recommendations` 同时覆盖 chunked prefill、`max_num_seqs` / `max_model_len`、`gpu_memory_utilization`、sticky routing、TP 拓扑和 API / tokenizer / gateway 链路。
+7. `vllm_tuning_gate=True`，说明这份审计能把指标、瓶颈、配置 trade-off 和回滚阈值串起来。
+
+## 25.27 小练习
 
 1. 设计一个 vLLM dashboard，包含 TTFT、TPOT、queue、KV blocks、prefix cache、preemption、GPU/CPU 指标。
 2. 给定现象“TTFT p99 飙升但 TPOT 正常”，列出 8 个排查方向。
@@ -748,7 +1065,7 @@ sample token -> detokenize -> output processor -> API server -> gateway/proxy ->
 5. 解释为什么 prefix cache 命中率高但吞吐不一定提升。
 6. 设计一个长上下文流量的限流和降级策略。
 
-## 25.27 本章总结
+## 25.28 本章总结
 
 vLLM 性能调优的核心是指标拆解和 trade-off。
 

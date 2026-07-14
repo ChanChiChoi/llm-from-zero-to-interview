@@ -8,6 +8,24 @@
 
 > Serving 并行的核心不是“GPU 越多越快”，而是根据模型大小、显存压力、通信拓扑和业务目标，选择把模型切开、把层切开、把请求复制分流，还是把 MoE experts 分布出去。
 
+## 24.0 本讲资料边界与第二轮精修口径
+
+本讲按第二轮精修要求做过资料校准，主要参考四类公开资料：
+
+1. vLLM Parallelism and Scaling 文档对 tensor parallel、pipeline parallel、data parallel、expert parallel、多节点拓扑、`tensor_parallel_size`、`pipeline_parallel_size` 和跨节点部署建议的说明。
+2. vLLM Data Parallel Deployment 文档对 internal / hybrid / external load balancing、每个 DP rank / engine 独立运行、负载均衡和部署形态的说明。
+3. vLLM Expert Parallel Deployment 文档对 MoE expert parallel、data parallel attention、expert placement、all2all 后端和 expert 负载均衡相关调优的说明。
+4. vLLM Optimization and Tuning 文档对 KV cache 空间不足、preemption、`tensor_parallel_size`、`max_num_batched_tokens`、`max_num_seqs`、chunked prefill、decode / prefill 平衡和 attention backend 的公开调优口径。
+
+本章只讲 serving 并行策略的教学抽象，不展开真实 NCCL / Ray / multiprocessing / Kubernetes / IB / RDMA 配置，不绑定某个 vLLM 版本的内部类名、真实 kernel、真实 all-reduce / all2all 实现、具体 GPU 型号 benchmark、生产排障脚本或云厂商网络价格。本章 demo 用纯 Python 近似估算 TP / PP / DP / EP 对 worker 数、显存、通信、pipeline bubble、prefix cache locality 和门禁的影响，不等同于真实性能预测。
+
+参考资料：
+
+1. vLLM Parallelism and Scaling：<https://docs.vllm.ai/en/latest/serving/parallelism_scaling/>
+2. vLLM Data Parallel Deployment：<https://docs.vllm.ai/en/latest/serving/data_parallel_deployment/>
+3. vLLM Expert Parallel Deployment：<https://docs.vllm.ai/en/latest/serving/expert_parallel_deployment/>
+4. vLLM Optimization and Tuning：<https://docs.vllm.ai/en/latest/configuration/optimization/>
+
 ## 24.1 本章目标
 
 读完本章，你应该能讲清：
@@ -652,7 +670,366 @@ DP 是复制模型，不会让单个模型副本更容易放下。
 最终选择要结合模型大小、GPU 显存、KV cache 需求、NVLink/IB 拓扑、TTFT/TPOT 目标和业务流量模式。
 ```
 
-## 24.24 小练习
+## 24.24 Serving 并行公式、拓扑门禁和可运行 demo
+
+把 TP / PP / DP 的 worker 拓扑先写成稳定公式。设：
+
+1. `T_{\mathrm{tp}}`：tensor parallel size。
+2. `P_{\mathrm{pp}}`：pipeline parallel size。
+3. `D_{\mathrm{dp}}`：data parallel size。
+
+总 GPU 或 worker 数可以近似写成：
+
+$$
+N_{\mathrm{gpu}}=D_{\mathrm{dp}}T_{\mathrm{tp}}P_{\mathrm{pp}}
+$$
+
+单个 DP replica 内 worker group 大小是：
+
+$$
+N_{\mathrm{group}}=T_{\mathrm{tp}}P_{\mathrm{pp}}
+$$
+
+如果权重总显存为 `M_{\mathrm{w}}`，忽略无法切分的小项后，单卡权重显存粗略为：
+
+$$
+M_{\mathrm{w,rank}}\approx \frac{M_{\mathrm{w}}}{T_{\mathrm{tp}}P_{\mathrm{pp}}}
+$$
+
+如果 KV heads 能随 TP 切分，层能随 PP 切分，单 rank KV cache 粗略估算为：
+
+$$
+M_{\mathrm{kv,rank}}\approx 2\frac{L}{P_{\mathrm{pp}}}\frac{H_{\mathrm{kv}}}{T_{\mathrm{tp}}}D_h b N_{\mathrm{tok}}
+$$
+
+其中 `L` 是层数，`H_{\mathrm{kv}}` 是 KV heads，`D_h` 是 head dim，`b` 是单元素字节数，`N_{\mathrm{tok}}` 是该 replica 当前 active tokens。
+
+PP 的 pipeline bubble 可以用 microbatch 数 `M_{\mathrm{micro}}` 粗略表示：
+
+$$
+R_{\mathrm{bubble}}=\frac{P_{\mathrm{pp}}-1}{M_{\mathrm{micro}}+P_{\mathrm{pp}}-1}
+$$
+
+DP 下总吞吐近似是各 replica 吞吐之和：
+
+$$
+Q_{\mathrm{total}}\approx \sum_{r=1}^{D_{\mathrm{dp}}}Q_r
+$$
+
+但 prefix cache 命中率也是按 DP rank 分开统计后再汇总：
+
+$$
+R_{\mathrm{hit,total}}=\frac{\sum_r N_{\mathrm{hit},r}}{\sum_r N_{\mathrm{lookup},r}}
+$$
+
+教学版 serving 并行门禁可以写成：
+
+$$
+G_{\mathrm{parallel}}=G_{\mathrm{fit}}G_{\mathrm{topo}}G_{\mathrm{tp}}G_{\mathrm{pp}}G_{\mathrm{dp}}G_{\mathrm{ep}}G_{\mathrm{metric}}
+$$
+
+其中：
+
+1. `G_{\mathrm{fit}}`：权重、KV、buffer 在单卡显存预算内。
+2. `G_{\mathrm{topo}}`：TP group 没有不必要地跨慢网络。
+3. `G_{\mathrm{tp}}`：TP 通信没有吞掉 decode 收益。
+4. `G_{\mathrm{pp}}`：PP stage、bubble 和跨节点激活传输可解释。
+5. `G_{\mathrm{dp}}`：DP replica 真的提升吞吐，并考虑 prefix cache locality。
+6. `G_{\mathrm{ep}}`：MoE expert placement 和负载不均可观测。
+7. `G_{\mathrm{metric}}`：worker 数、显存、TPOT、bubble、throughput、cache locality 和 expert imbalance 都有指标。
+
+下面这个 0 依赖 demo 做一个 toy serving parallel audit。它不是性能模型，只是把配置选择的关键证据显式化：7B 单卡优先 DP 扩吞吐，70B 单机 TP=8，跨节点 TP=16 被拒绝，跨两节点用 TP=8/PP=2，QPS 不够用 DP=4，MoE 场景再检查 EP expert imbalance。
+
+```python
+from dataclasses import dataclass
+
+
+GIB = 1024 ** 3
+
+
+@dataclass
+class ParallelCase:
+    name: str
+    model_weight_gib: float
+    layers: int
+    kv_heads: int
+    head_dim: int
+    dtype_bytes: int
+    active_tokens: int
+    gpu_memory_gib: float
+    gpus_per_node: int
+    nodes: int
+    tp: int
+    pp: int
+    dp: int
+    base_decode_ms: float
+    tpot_budget_ms: float
+    target_qps: float
+    microbatches: int
+    sticky_routing: bool = True
+    ep: int = 1
+    expert_loads: tuple = ()
+
+
+class ToyServingParallelAuditor:
+    def kv_gib_per_rank(self, case):
+        layers_per_stage = case.layers / case.pp
+        kv_heads_per_rank = max(1.0, case.kv_heads / case.tp)
+        bytes_total = (
+            2
+            * layers_per_stage
+            * kv_heads_per_rank
+            * case.head_dim
+            * case.dtype_bytes
+            * case.active_tokens
+        )
+        return bytes_total / GIB
+
+    def weight_gib_per_rank(self, case):
+        return case.model_weight_gib / (case.tp * case.pp)
+
+    def buffer_gib(self, case):
+        return 3.0 + 0.2 * case.tp + 0.5 * max(0, case.pp - 1)
+
+    def tp_crosses_nodes(self, case):
+        return case.nodes > 1 and case.tp > case.gpus_per_node
+
+    def topology_ok(self, case):
+        return not self.tp_crosses_nodes(case)
+
+    def tp_comm_ms(self, case):
+        if case.tp == 1:
+            return 0.0
+        per_layer_ms = 0.04 if not self.tp_crosses_nodes(case) else 0.45
+        return (case.layers / case.pp) * per_layer_ms * (case.tp - 1) / case.tp
+
+    def bubble_ratio(self, case):
+        if case.pp == 1:
+            return 0.0
+        return (case.pp - 1) / (case.microbatches + case.pp - 1)
+
+    def tpot_ms(self, case):
+        compute_ms = case.base_decode_ms / case.tp
+        pp_transfer_ms = 0.35 * max(0, case.pp - 1)
+        bubble_penalty_ms = 3.0 * self.bubble_ratio(case)
+        return round(compute_ms + self.tp_comm_ms(case) + pp_transfer_ms + bubble_penalty_ms, 2)
+
+    def throughput_qps(self, case):
+        return round(case.dp * 1000.0 / self.tpot_ms(case), 2)
+
+    def expert_imbalance(self, case):
+        if not case.expert_loads:
+            return 1.0
+        avg_load = sum(case.expert_loads) / len(case.expert_loads)
+        return round(max(case.expert_loads) / avg_load, 3)
+
+    def audit_case(self, case):
+        memory_gib = self.weight_gib_per_rank(case) + self.kv_gib_per_rank(case) + self.buffer_gib(case)
+        return {
+            "name": case.name,
+            "total_gpus": case.tp * case.pp * case.dp,
+            "worker_group": case.tp * case.pp,
+            "replicas": case.dp,
+            "weight_gib_per_rank": round(self.weight_gib_per_rank(case), 3),
+            "kv_gib_per_rank": round(self.kv_gib_per_rank(case), 3),
+            "memory_gib_per_rank": round(memory_gib, 3),
+            "memory_fit": memory_gib <= case.gpu_memory_gib * 0.9,
+            "topology_ok": self.topology_ok(case),
+            "tp_crosses_nodes": self.tp_crosses_nodes(case),
+            "bubble_ratio": round(self.bubble_ratio(case), 3),
+            "tpot_ms": self.tpot_ms(case),
+            "tpot_ok": self.tpot_ms(case) <= case.tpot_budget_ms,
+            "throughput_qps": self.throughput_qps(case),
+            "throughput_ok": self.throughput_qps(case) >= case.target_qps,
+            "prefix_locality_ok": case.dp == 1 or case.sticky_routing,
+            "expert_imbalance": self.expert_imbalance(case),
+            "expert_balance_ok": self.expert_imbalance(case) <= 1.35,
+        }
+
+
+cases = [
+    ParallelCase(
+        name="single_gpu_7b_dp",
+        model_weight_gib=14.0,
+        layers=32,
+        kv_heads=8,
+        head_dim=128,
+        dtype_bytes=2,
+        active_tokens=8192,
+        gpu_memory_gib=80.0,
+        gpus_per_node=8,
+        nodes=1,
+        tp=1,
+        pp=1,
+        dp=8,
+        base_decode_ms=34.0,
+        tpot_budget_ms=40.0,
+        target_qps=180.0,
+        microbatches=8,
+    ),
+    ParallelCase(
+        name="tp8_70b_single_node",
+        model_weight_gib=140.0,
+        layers=80,
+        kv_heads=8,
+        head_dim=128,
+        dtype_bytes=2,
+        active_tokens=32768,
+        gpu_memory_gib=80.0,
+        gpus_per_node=8,
+        nodes=1,
+        tp=8,
+        pp=1,
+        dp=1,
+        base_decode_ms=160.0,
+        tpot_budget_ms=35.0,
+        target_qps=30.0,
+        microbatches=8,
+    ),
+    ParallelCase(
+        name="bad_tp16_cross_node",
+        model_weight_gib=140.0,
+        layers=80,
+        kv_heads=8,
+        head_dim=128,
+        dtype_bytes=2,
+        active_tokens=32768,
+        gpu_memory_gib=80.0,
+        gpus_per_node=8,
+        nodes=2,
+        tp=16,
+        pp=1,
+        dp=1,
+        base_decode_ms=160.0,
+        tpot_budget_ms=35.0,
+        target_qps=30.0,
+        microbatches=8,
+    ),
+    ParallelCase(
+        name="tp8_pp2_two_nodes",
+        model_weight_gib=300.0,
+        layers=96,
+        kv_heads=8,
+        head_dim=128,
+        dtype_bytes=2,
+        active_tokens=32768,
+        gpu_memory_gib=80.0,
+        gpus_per_node=8,
+        nodes=2,
+        tp=8,
+        pp=2,
+        dp=1,
+        base_decode_ms=240.0,
+        tpot_budget_ms=45.0,
+        target_qps=25.0,
+        microbatches=8,
+    ),
+    ParallelCase(
+        name="tp4_dp4_qps",
+        model_weight_gib=140.0,
+        layers=80,
+        kv_heads=8,
+        head_dim=128,
+        dtype_bytes=2,
+        active_tokens=24576,
+        gpu_memory_gib=80.0,
+        gpus_per_node=8,
+        nodes=2,
+        tp=4,
+        pp=1,
+        dp=4,
+        base_decode_ms=160.0,
+        tpot_budget_ms=45.0,
+        target_qps=80.0,
+        microbatches=16,
+        sticky_routing=True,
+    ),
+    ParallelCase(
+        name="moe_ep4_balanced",
+        model_weight_gib=120.0,
+        layers=48,
+        kv_heads=8,
+        head_dim=128,
+        dtype_bytes=2,
+        active_tokens=24576,
+        gpu_memory_gib=80.0,
+        gpus_per_node=8,
+        nodes=1,
+        tp=2,
+        pp=1,
+        dp=2,
+        ep=4,
+        base_decode_ms=90.0,
+        tpot_budget_ms=55.0,
+        target_qps=35.0,
+        microbatches=12,
+        expert_loads=(120, 100, 110, 115),
+    ),
+]
+
+auditor = ToyServingParallelAuditor()
+records = {case.name: auditor.audit_case(case) for case in cases}
+
+summary = {
+    "single_gpu_7b_dp": {
+        "total_gpus": records["single_gpu_7b_dp"]["total_gpus"],
+        "memory_gib_per_rank": records["single_gpu_7b_dp"]["memory_gib_per_rank"],
+        "throughput_qps": records["single_gpu_7b_dp"]["throughput_qps"],
+    },
+    "tp8_70b_single_node": {
+        "worker_group": records["tp8_70b_single_node"]["worker_group"],
+        "memory_gib_per_rank": records["tp8_70b_single_node"]["memory_gib_per_rank"],
+        "tpot_ms": records["tp8_70b_single_node"]["tpot_ms"],
+    },
+    "bad_tp16_cross_node": {
+        "topology_ok": records["bad_tp16_cross_node"]["topology_ok"],
+        "tp_crosses_nodes": records["bad_tp16_cross_node"]["tp_crosses_nodes"],
+        "tpot_ms": records["bad_tp16_cross_node"]["tpot_ms"],
+    },
+    "tp8_pp2_two_nodes": {
+        "total_gpus": records["tp8_pp2_two_nodes"]["total_gpus"],
+        "bubble_ratio": records["tp8_pp2_two_nodes"]["bubble_ratio"],
+        "memory_gib_per_rank": records["tp8_pp2_two_nodes"]["memory_gib_per_rank"],
+    },
+    "tp4_dp4_qps": {
+        "replicas": records["tp4_dp4_qps"]["replicas"],
+        "throughput_qps": records["tp4_dp4_qps"]["throughput_qps"],
+        "prefix_locality_ok": records["tp4_dp4_qps"]["prefix_locality_ok"],
+    },
+    "moe_ep4_balanced": {
+        "ep": 4,
+        "expert_imbalance": records["moe_ep4_balanced"]["expert_imbalance"],
+        "expert_balance_ok": records["moe_ep4_balanced"]["expert_balance_ok"],
+    },
+}
+
+gates = {
+    "gpu_count_formula": records["tp8_pp2_two_nodes"]["total_gpus"] == 16,
+    "tp_fits_weight_and_kv": records["tp8_70b_single_node"]["memory_fit"],
+    "cross_node_tp_rejected": records["bad_tp16_cross_node"]["tp_crosses_nodes"] and not records["bad_tp16_cross_node"]["topology_ok"],
+    "tp_pp_topology_ok": records["tp8_pp2_two_nodes"]["topology_ok"] and records["tp8_pp2_two_nodes"]["tpot_ok"],
+    "dp_scales_throughput": records["tp4_dp4_qps"]["throughput_ok"] and records["tp4_dp4_qps"]["replicas"] == 4,
+    "prefix_locality_checked": records["tp4_dp4_qps"]["prefix_locality_ok"],
+    "ep_imbalance_checked": records["moe_ep4_balanced"]["expert_balance_ok"],
+    "metrics_ready": all("memory_gib_per_rank" in record and "tpot_ms" in record for record in records.values()),
+}
+gates["parallel_serving_gate"] = all(gates.values())
+
+print("parallel_serving_summary=", summary)
+print("parallel_serving_gates=", gates)
+```
+
+这份输出应当体现：
+
+1. `single_gpu_7b_dp` 用 DP=8 扩吞吐，不需要先切模型。
+2. `tp8_70b_single_node` 的 worker group 为 8，单卡显存估算能放下，TPOT 在预算内。
+3. `bad_tp16_cross_node` 被标记为 `tp_crosses_nodes=True` 且 `topology_ok=False`，说明跨节点 TP 是反例。
+4. `tp8_pp2_two_nodes` 用 16 张 GPU，bubble ratio 可见，TP 留在节点内，PP 跨节点。
+5. `tp4_dp4_qps` 通过 4 个 DP replicas 提升总吞吐，并显式检查 prefix cache locality。
+6. `moe_ep4_balanced` 检查 expert imbalance，说明 EP 不是只把 expert 分出去，还要看路由负载。
+7. `parallel_serving_gate=True`，说明显存、拓扑、TP、PP、DP、EP 和 metrics 都能复盘。
+
+## 24.25 小练习
 
 1. 画出 TP=4、PP=1、DP=1 的 worker 拓扑，并说明每个 worker 持有什么。
 2. 画出 TP=8、PP=2、DP=1 的两节点拓扑，说明为什么 TP 放在节点内。
@@ -661,7 +1038,7 @@ DP 是复制模型，不会让单个模型副本更容易放下。
 5. 对比 PCIe-only 8 卡和 NVSwitch 8 卡在 TP 场景下的差异。
 6. 设计一个排查 TPOT 变差的 checklist，至少包含通信、调度、KV cache、CPU 四类指标。
 
-## 24.25 本章总结
+## 24.26 本章总结
 
 Serving 并行的核心是先判断瓶颈。
 
