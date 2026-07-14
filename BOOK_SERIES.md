@@ -6,7 +6,7 @@
 
 ## 二十四本书定位
 
-当前状态：24 本主书正文第一版已完成，`book-llm-engineer/` 补充篇第一版已完成。项目已进入第二轮全系列精修阶段，重点是公式修正、代码 demo 补充、联网校验、广度审计、深度增强和纵向训练文件同步。
+当前状态：24 本主书正文第一版已完成，`book-llm-engineer/` 补充篇第一版已完成。项目已进入第二轮全系列精修阶段，重点是公式修正、代码 demo 补充、联网校验、广度审计、深度增强和纵向训练文件同步；其中第二十四册 `book-24-llm-inference-engine/` 当前落盘第 1-60 章已完成第二轮精修与纵向同步。
 
 1. `book-01-core-30/`：第一册，核心 38 讲，建立面试最小完整闭环。
 2. `book-02-advanced-100/`：第二册，进阶 120 讲，补齐研究深度和前沿视野；其中第二部分显式覆盖现代 Transformer 变体、SSM/S4/Mamba、混合架构等替代路线。
@@ -31,7 +31,7 @@
 21. `book-21-transformer-architecture-evolution/`：第二十一册，Transformer 架构详解、升级变种、替代路线与未来架构演进，重点覆盖 Mamba、SSM、RWKV、RetNet、Hyena、Linear Attention、MoE 和混合架构。
 22. `book-22-tool-protocol-ecosystem/`：第二十二册，Function Calling、MCP、A2A、Skill 与工具协议生态，重点覆盖工具 schema、工具注册、MCP server、跨 Agent 协议、插件/Skill 生态、权限安全和协议层系统设计。
 23. `book-23-ai-infra/`：第二十三册，AI Infra、大模型基础设施与平台工程，重点覆盖 GPU 集群、网络、存储、调度、训练平台、推理平台、数据与实验平台、可观测性、成本治理、安全治理和系统设计面试。
-24. `book-24-llm-inference-engine/`：第二十四册，大模型推理框架与 Serving Engine 实战，重点覆盖从 0 实现推理框架、vLLM、SGLang、PagedAttention、continuous batching、KV Cache 管理、PD 分离和教学项目源码升级。
+24. `book-24-llm-inference-engine/`：第二十四册，大模型推理框架与 Serving Engine 实战，重点覆盖从 0 实现推理框架、vLLM、SGLang、PagedAttention、continuous batching、KV Cache 管理、PD 分离和教学项目源码升级；当前现有 60 章已完成第二轮公式、demo、资料校准和纵向文件同步。
 
 ## 纵向训练系统文件
 

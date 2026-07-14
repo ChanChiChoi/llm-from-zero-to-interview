@@ -19,7 +19,7 @@ https://github.com/sgl-project/mini-sglang
 2. `tiny-llm`：https://github.com/skyzh/tiny-llm
 3. `mini-sglang`：https://github.com/sgl-project/mini-sglang
 
-后续可围绕 vLLM、SGLang、PagedAttention、continuous batching、KV cache manager、PD 分离、prefix/radix cache 和从教学项目升级到生产级 serving engine 展开。
+第二十四册当前已围绕 vLLM、SGLang、PagedAttention、continuous batching、KV cache manager、PD 分离、prefix/radix cache、生产部署、容量 SLO 和面试表达完成现有 60 章第二轮精修。后续如果新增章节，可继续从真实 benchmark、源码版本差异、生产调度器和 KV cache manager 细节展开。
 
 
 苏剑林的博客

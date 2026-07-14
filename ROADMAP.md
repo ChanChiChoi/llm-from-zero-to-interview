@@ -10,7 +10,7 @@
 2. 第二册 `book-02-advanced-100/`：正文第一版已完成，共 120 讲，适合进阶拔高和开放研究题训练。
 3. 第三册 `book-03-practical-handbook/`：正文第一版已完成，共 72 讲，适合把理论转成代码、实验和项目。
 4. 第四册到第十九册：正文第一版已完成，适合系统补齐百科索引、训练、部署、评估、安全、数据、论文、系统设计、求职、数学、PyTorch、多模态、Reasoning、Agent、产品落地和实战坑。
-5. 第二十册到第二十四册：正文第一版已完成，适合补齐 Agent Harness、Transformer 架构演进、工具协议生态、AI Infra 和推理框架专题。
+5. 第二十册到第二十四册：正文第一版已完成，适合补齐 Agent Harness、Transformer 架构演进、工具协议生态、AI Infra 和推理框架专题；其中第二十四册现有 60 章已完成第二轮精修，可优先作为推理框架专题阅读版本。
 6. `book-llm-engineer/`：补充篇第一版已完成，适合作为大模型工程师面试和职业表达的延伸材料。
 
 ## 3 个月冲刺路线
@@ -42,7 +42,7 @@
 
 ## 当前维护路线
 
-1. 第一优先级：第二轮全系列精修，从第一册开始逐章修正公式、变量说明和 Markdown 渲染问题。
+1. 第一优先级：继续推进尚未收口章节的第二轮全系列精修；第二十四册现有第 1-60 章已完成第二轮，可进入总体验收和目录/索引一致性检查。
 2. 第二优先级：补充 demo 级 Python 代码，优先覆盖 cross entropy、attention、sampling、KV Cache、RAG、Agent 工具调用和推理调度等高频知识点。
 3. 第三优先级：联网校验高时效主题，重点包括优化器、后训练算法、推理框架、Agent 协议、多模态、Reasoning、AI Infra 和架构演进。
-4. 第四优先级：同步更新第四册百科、`INTERVIEW_BANK.md`、`EXERCISES.md`、`PROJECTS.md`、`PAPERS.md`、`GLOSSARY_EN_ZH.md` 和 `KNOWLEDGE_GRAPH.md`。
+4. 第四优先级：同步更新第四册百科、`INTERVIEW_BANK.md`、`EXERCISES.md`、`PROJECTS.md`、`PAPERS.md`、`GLOSSARY_EN_ZH.md`、`KNOWLEDGE_GRAPH.md` 和 `PROGRESS.md`。
