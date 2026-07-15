@@ -80,6 +80,7 @@
 | 想准备系统设计面试 | [`book-11-system-design-interview/目录.md`](book-11-system-design-interview/目录.md) |
 | 想深入推理框架、vLLM、SGLang | [`book-24-llm-inference-engine/目录.md`](book-24-llm-inference-engine/目录.md) |
 | 想看完整学习路线 | [`ROADMAP.md`](ROADMAP.md) |
+| 想生成每本书的 PDF | [`docs/build-pdfs.md`](docs/build-pdfs.md) |
 
 推荐基础阅读顺序：
 
@@ -121,6 +122,7 @@
 | [`ENGLISH_INTERVIEW_TEMPLATES.md`](ENGLISH_INTERVIEW_TEMPLATES.md) | 英文面试表达模板。 |
 | [`WRITING_PLAN.md`](WRITING_PLAN.md) | 写作计划与扩写规范。 |
 | [`PROGRESS.md`](PROGRESS.md) | 当前进度追踪。 |
+| [`docs/build-pdfs.md`](docs/build-pdfs.md) | PDF 生成说明，包含依赖安装、批量生成、单本生成、字体设置和常见问题。 |
 
 ## 项目结构
 
@@ -135,6 +137,7 @@
 ├── PAPERS.md
 ├── GLOSSARY_EN_ZH.md
 ├── PROGRESS.md
+├── docs/
 ├── book-01-core-30/
 ├── book-02-advanced-100/
 ├── book-03-practical-handbook/
