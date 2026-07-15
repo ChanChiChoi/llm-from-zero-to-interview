@@ -146,8 +146,47 @@ W_{\mathrm{waste}}\le \omega
 6. MCTS：用树搜索估计路径价值。
 7. Reflection：先回答，再自查并修正。
 8. Tool-use loops：生成、执行工具、观察反馈、继续推理。
+9. Multi-agent parallel search：让多个 Agent 或多个 worker 并行探索不同方案，再用 verifier、测试、人工或主控 Agent 汇总。
+10. Programmatic tool workflow：把确定性工具链、数据处理、批量检索和格式转换交给程序化 workflow，模型只处理策略选择、异常和解释。
 
 这些方法本质上都是用更多推理计算换更高答案质量，只是计算花在不同位置。
+
+### 7.3.1 Radar：multi-agent / ultra 模式也是 test-time compute
+
+近期 frontier model release 里经常出现 `max`、`ultra`、`deep research`、`coding agent`、`multi-agent` 这类产品词。面试中不要只把它们理解成“更贵的档位”或“多个聊天机器人”。从 reasoning 系统角度看，它们通常是在推理阶段投入更多预算：
+
+1. 多个候选计划并行生成。
+2. 多个 Agent 分别查资料、写代码、跑测试或验证假设。
+3. 主控 Agent 汇总结果、去重、解决冲突。
+4. Verifier、测试套件、浏览器、代码执行或人工检查最终产物。
+5. Router 根据任务价值、风险和难度选择 fast、thinking、multi-agent 或人工升级路径。
+
+它和 self-consistency 的关系是：self-consistency 并行的是多条文本推理链，multi-agent 并行的是多条带工具、状态、权限和产物的执行轨迹。因此 multi-agent test-time compute 的评估对象不是“答案是否更长”，而是：
+
+1. 每个 Agent 的任务边界是否清楚。
+2. 工具和权限是否隔离。
+3. 中间产物是否可验证。
+4. 冲突合并是否正确。
+5. 并行带来的质量收益是否超过成本和协调开销。
+
+适用场景：
+
+1. 高价值研究、代码修复、审计、数据分析和复杂规划。
+2. 子任务可拆分，且中间结果可以验证。
+3. 用户能接受更高延迟和成本。
+
+反模式：
+
+1. 简单问答也启动多 Agent，浪费预算。
+2. 多个 Agent 共享过宽上下文和权限，放大泄露风险。
+3. 没有 verifier，只把多个不可靠答案拼接在一起。
+4. 没有 trace，无法复盘每个 Agent 做了什么。
+
+面试表达：
+
+```text
+我会把 multi-agent / ultra 模式看成 test-time compute 的系统化形态。它不是默认更强，而是用更多模型调用、工具调用、搜索路径和验证步骤换质量。上线时要比较 direct、thinking、multi-agent 三档在准确率、P95 延迟、成本、成功率、trace 完整度和安全风险上的曲线，而不是只看最高预算输出。
+```
 
 ## 7.4 Best-of-N
 

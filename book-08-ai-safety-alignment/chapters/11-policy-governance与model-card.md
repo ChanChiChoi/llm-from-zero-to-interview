@@ -187,6 +187,42 @@ Policy 是使用规则和安全边界。
 4. 如何灰度和回滚。
 5. 安全事件如何响应。
 
+### 3.4 Radar：risk-calibrated access 与 fallback routing
+
+Frontier model release 的一个明显趋势是：模型越强，发布治理越不像“一个模型开给所有人”，而更像“按能力、用户、任务和风险分层开放”。
+
+可以把它抽象成 risk-calibrated access：
+
+1. 低风险普通任务走默认模型和默认策略。
+2. 高价值复杂任务可以走 thinking / multi-agent / long-running agent 模式。
+3. 高风险领域任务需要 trusted access、企业审批、专家用户、额外监控或人工复核。
+4. 触发危险能力、隐私、网络攻击、化学/生物、金融或医疗高风险边界时，系统需要降级、拒答、转人工或切到更保守模型。
+
+这会带来 fallback routing：
+
+```text
+request
+  -> risk classifier
+  -> capability router
+  -> policy gate
+  -> model / tool / agent route
+  -> fallback / human review / deny
+```
+
+Fallback 不只是系统故障时切备用模型，也包括安全和治理意义上的 fallback：
+
+1. 高风险请求从强自主 Agent 退回只读回答。
+2. 不确定场景从自动执行退回人工确认。
+3. 危险能力边界从开放模型退回受限模型或拒答。
+4. 企业数据场景从公有工具退回租户内 connector。
+5. 长周期任务从全自动退回阶段性审批。
+
+面试中可以这样表达：
+
+```text
+前沿模型发布越来越强调 risk-calibrated access。能力越强，不代表所有用户都默认拿到全部能力。治理系统要把用户身份、任务类型、数据敏感度、工具风险、模型能力和评估证据放进同一个 routing / fallback / approval 流程。否则强模型、长上下文、记忆和 Agent 工具会把单次错误放大成真实系统风险。
+```
+
 ## 4. Governance 是什么
 
 Governance 是把 policy 落地的组织和流程。

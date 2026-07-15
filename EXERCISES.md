@@ -616,6 +616,8 @@
 5. 给出 5 个不同类型的幻觉例子。
 6. 设计一个事实性评估集，说明数据来源和评分方式。
 6A. 写一个 0 依赖评估指标事故审计 demo，输入 toy baseline / candidate 评估样本、切片、污染标记、人工偏好、judge 偏好、输出长度、成本、延迟、线上反馈和安全状态，输出 paired lift、bootstrap CI、slice regression、clean eval lift、judge-human agreement、judge length bias、cost ratio、latency delta、failed gates 和 gate pass。
+6B. 做一张模型发布 benchmark 审计表，至少覆盖 MMLU / MMLU-Pro、GPQA、AIME、HLE、HumanEval、LiveCodeBench、SWE-bench、SWE-Lancer、DeepSWE、WebArena、OSWorld、GAIA、tau-bench、BrowseComp、LongBench、RULER、FRAMES、SimpleQA、TruthfulQA、MMMU、MathVista、OCRBench 和 Video-MME；每行写清数据规模、主要能力、评分方式、仿写样例、污染风险、适用场景和不能代表什么。
+6C. 做一次 frontier release radar 复盘：任选一个近期模型发布报告，按架构、预训练、后训练、test-time compute、serving、Agent/tool、多模态、评估、安全治理、产品工程和技术生命周期 11 个维度提取新知识；至少写出 3 个已稳定进入主干的知识点、3 个 P1 观察项、3 个可能被模型能力吸收或淘汰的过渡技术，并说明应同步到哪本书、哪道面试题和哪个术语条目。
 7. 解释 benchmark contamination 为什么会误导模型比较。
 7A. 用英文术语 data contamination、benchmark leakage 和 train-test leakage 分别写一个 LLM 评估风险例子，并说明如何用 exact match、near duplicate、canary、时间切分和私有动态集降低风险。
 8. 写 3 个防御性 jailbreak / prompt injection 抽象测试样本，只记录风险类别、期望策略动作和评估指标，不写可复用攻击提示词。

@@ -202,6 +202,14 @@
     考察点：术语边界、训练数据、评估集、开发流程、近重复、动态私有集。
     回答框架：data contamination 是总称，指训练或开发链路接触到评估信息；benchmark leakage 更强调公开基准题目、答案、模板或相似样本泄漏进训练、调参或 prompt 迭代；train-test leakage 更偏数据切分错误，训练/验证/测试之间存在不应有的 exact、near duplicate 或标签泄漏。治理要同时做数据血缘、hash/MinHash、canary、时间切分、私有动态集和最终测试集冻结。
 
+49B. 如何读懂模型发布报告里的主流 benchmark 表？
+    考察点：benchmark taxonomy、数据规模、能力边界、污染风险、采样预算、工具条件。
+    回答框架：不要把 MMLU、GPQA、AIME、SWE-bench、BrowseComp、SimpleQA、MMMU 等分数当成单一排行榜。先按能力面拆分：MMLU/MMLU-Pro/GPQA 看知识和闭集推理；GSM8K/MATH/AIME/HLE 看数学和高难 reasoning；HumanEval/MBPP/LiveCodeBench/SWE-bench/SWE-Lancer/DeepSWE 看代码和软件工程；WebArena/OSWorld/GAIA/tau-bench/BrowseComp 看 Agent 和工具执行；LongBench/RULER/FRAMES/SimpleQA 看长上下文、RAG 和事实性；MMMU/MathVista/OCRBench/Video-MME 看多模态。然后核对每个 benchmark 的样本规模、版本日期、prompt、采样次数、是否用了 CoT/self-consistency/verifier/tool scaffold、污染检测和切片结果。最后强调：分数提升可能来自模型能力，也可能来自 scaffold、采样预算、judge 偏差、污染或统计噪声。
+
+49C. 最近 frontier model release 体现了哪些技术趋势？
+    考察点：release radar、test-time compute、programmatic tool calling、risk-calibrated access、生态位迁移、专业 eval。
+    回答框架：不要只背模型名和榜单分数。可以按十个层面回答：架构和长上下文上看 MoE、RoPE 变体、超长上下文和训练 recipe；后训练上看 RLVR、GRPO/DAPO、verifier 和 distillation；推理阶段看 fast/thinking/router、多候选、multi-agent 和 budget-aware test-time compute；工具层看 function calling、MCP、A2A、Skills、Connectors、programmatic tool workflow 和 trace；治理层看 risk-calibrated access、trusted access、fallback routing、model/system card；评估层看 HLE、BrowseComp、DeepSWE、SimpleQA、专业 cyber/bio/terminal agent eval 和自动化对抗评估。最后要能判断生命周期：有些热点会标准化成基础设施，有些会被更强模型、更长上下文、记忆和内置 agent 能力吸收，有些只是过渡 scaffold。
+
 50. 如何设计一个最小泛化审计 demo？
    考察点：memorizer、rule model、underfit、分布偏移、overlap。
    回答框架：构造 train / validation / test 三份 toy 数据，比较 memorizer、可迁移规则模型和 underfit baseline 的分数；再加入线上新切片、checkpoint val loss 和 exact overlap 检查，输出 gap、worst slice、污染率和 early stopping 结论。
