@@ -198,6 +198,10 @@
    考察点：训练-评估重叠、公开题库、prompt 迭代、泛化虚高。
    回答框架：contamination 是评估信息泄漏导致的特殊过拟合。模型或团队可能见过题目、答案、相似模板或通过反复调参用穿测试集，因此 benchmark 分数不能直接等同真实泛化。
 
+49A. Data contamination、benchmark leakage 和 train-test leakage 怎么区分？
+    考察点：术语边界、训练数据、评估集、开发流程、近重复、动态私有集。
+    回答框架：data contamination 是总称，指训练或开发链路接触到评估信息；benchmark leakage 更强调公开基准题目、答案、模板或相似样本泄漏进训练、调参或 prompt 迭代；train-test leakage 更偏数据切分错误，训练/验证/测试之间存在不应有的 exact、near duplicate 或标签泄漏。治理要同时做数据血缘、hash/MinHash、canary、时间切分、私有动态集和最终测试集冻结。
+
 50. 如何设计一个最小泛化审计 demo？
    考察点：memorizer、rule model、underfit、分布偏移、overlap。
    回答框架：构造 train / validation / test 三份 toy 数据，比较 memorizer、可迁移规则模型和 underfit baseline 的分数；再加入线上新切片、checkpoint val loss 和 exact overlap 检查，输出 gap、worst slice、污染率和 early stopping 结论。
@@ -1029,6 +1033,14 @@
     考察点：assistant mask coverage、prompt loss leak、PAD loss leak、EOS coverage、capability regression、false refusal、unsafe leak、preference margin、reward-human gap、reward length bias、DPO reference、tool schema drift。
     回答框架：先打印 SFT 样本的渲染文本、role span、labels 和 EOS/PAD，确认只对 assistant 回答计算 loss；再比较 base / SFT / aligned model 的数学、代码、安全、工具和真实任务切片；随后统计误拒率和漏拒率，抽查 chosen/rejected 的偏好间隔和标注一致性，检查 reward 分数是否偏好长答案或高 reward 低质量样本；最后确认 DPO reference、beta、tokenizer、chat template 和线上工具 schema 一致。门禁要输出 failed gates，而不是只说 reward 或 DPO loss 下降。
 
+20B. SimPO 和 DPO / KTO / ORPO 的核心区别是什么？
+    考察点：reference-free、平均 log probability、margin、长度偏置、偏好数据质量、KL 锚点缺失。
+    回答框架：先把 DPO 讲成相对 reference 的 chosen/rejected log-ratio 优化，再说明 SimPO 直接用 policy 对回答的平均 log probability 差构造偏好 margin，不需要 reference model，工程链路更轻。优点是训练和部署成本低、避免 reference 同步；风险是少了显式分布锚点，对 beta、margin、长度归一、数据噪声和能力回归更敏感。KTO 更强调从好/坏单样本效用学习，ORPO 把 SFT 与偏好 odds ratio 结合；面试中要落到适用场景和回归评估，而不是只背公式。
+
+20C. RLVR 和 DeepSeek-R1 为什么不能简单等同于 DPO？
+    考察点：verifiable reward、数学/代码/可执行任务、rollout、GRPO/PPO 类更新、冷启动、蒸馏、偏好监督边界。
+    回答框架：DPO 主要利用离线偏好 pair 学“哪个回答更好”；RLVR 面向可自动验证任务，用答案校验、单元测试、规则或环境反馈给 rollout 奖励，更适合数学、代码、工具和可判定推理任务。DeepSeek-R1 的公开案例价值在于展示冷启动、可验证奖励 RL、采样和蒸馏如何组合提升 reasoning。局限是 reward 必须可靠，容易偏向可验证题型，过程质量、安全和不可验证专业任务仍需要 SFT、偏好、人审和评估门禁补上。
+
 21. Reward Model 学的是什么？
    考察点：prompt+response、标量 reward、偏好排序、chosen/rejected。
    回答框架：RM 学偏好数据中的相对排序信号，近似人类偏好，但不是绝对质量或事实判断器。
@@ -1284,6 +1296,10 @@
 22. block size 在 PagedAttention 中如何权衡？
     考察点：内部碎片、block table、访存效率、kernel、管理开销。
     回答框架：小 block 降低碎片但增加映射和管理开销，也可能让访存更碎；大 block 管理更简单、访存更友好，但短请求和尾部浪费更大。
+
+22A. vAttention 和 PagedAttention 的区别是什么？
+    考察点：KV Cache 管理、虚拟内存、按需映射、block table、系统复杂度、attention 数学边界。
+    回答框架：两者都不改变标准 attention 公式，核心都是服务变长请求的 KV Cache 管理。PagedAttention 显式把 KV 切成 blocks，通过 block table 管理逻辑连续和物理不连续；vAttention 更强调利用虚拟内存和按需映射抽象管理动态 KV，目标是降低框架侧手写分页管理复杂度。对比时要看碎片、映射开销、kernel/backend 适配、系统依赖、可观测性和故障边界，不能把它们说成谁在所有 workload 下绝对替代谁。
 
 23. 为什么 LLM serving 需要 Continuous Batching？
     考察点：变长输出、自回归生成、decode iteration、GPU 利用率、排队延迟。
@@ -1543,6 +1559,10 @@
     考察点：完整链路、权限、hybrid retrieval、reranker、context、评估。
     回答框架：向量库只是检索组件，RAG 还包括文档处理、chunking、metadata、权限、重排、上下文构造、引用、评估和错误归因。
 
+16A. GraphRAG 和普通向量 RAG / Agentic RAG 有什么区别？
+    考察点：entity、relation、community summary、global question、multi-hop、成本、更新、权限。
+    回答框架：普通向量 RAG 主要按 query 和 chunk 相似度召回局部证据；GraphRAG 会先抽取实体关系，构建图和社区摘要，使系统能回答跨文档、全局主题、关系链和多跳问题。它不是所有问题的默认最优：抽取和维护成本更高，图谱错误会传播，增量更新和权限过滤更复杂。Agentic RAG 强调多轮查询、工具调用和停止条件，GraphRAG 是结构化检索增强，两者可以组合。
+
 17. RAG 答案错了怎么排查？
     考察点：文档库、解析、chunk、retrieval、rerank、context、generation、citation。
     回答框架：先确认正确文档是否在库里，再看 chunk、召回、重排、context、生成和引用各环节，定位是检索问题还是生成问题。
@@ -1638,6 +1658,10 @@
 40. 为什么 Agent 需要 controller？
     考察点：预算、权限、超时、重试、停止、人工接管、trace。
     回答框架：模型可以提出动作，但不能无条件执行动作。Controller 负责最大步数、工具调用数、成本、超时、权限检查、二次确认、停止条件和审计日志，防止无限循环、越权动作和成本失控。
+
+40A. WebArena 这类 Browser Agent benchmark 主要考什么，和 SWE-bench / OSWorld 有什么区别？
+    考察点：browser agent、functional correctness、long-horizon web task、reproducible environment、UI observation、tool trace、SWE-bench、OSWorld。
+    回答框架：WebArena 关注可复现网站环境中的真实网页任务，例如购物、论坛、协作开发和内容管理，核心指标是任务是否功能性完成，而不是只看最终文本是否像答案。SWE-bench 更偏代码仓库 issue 修复和测试通过；OSWorld 更偏操作系统/GUI 多应用环境；WebArena 更强调网页导航、表单、状态观察、跨页面操作和外部知识使用。评估时要看 task success、action accuracy、observation use、state update、permission、成本延迟、环境 reset 和失败归因，不能只用 LLM judge 看最后一句回答。
 
 41. 如何评估一个 Agent 是否可靠？
     考察点：task success、tool selection、argument validity、observation use、state update、budget、permission、stop。

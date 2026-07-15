@@ -300,6 +300,8 @@
 42. 实现 SFT label mask。
 43. 手写 DPO loss。
 43A. 写一个 0 依赖 Python SFT / 对齐训练事故审计 demo，输入 toy SFT 样本的 role token 数和 label 数、base / after 各能力分数、误拒 / 漏拒案例、chosen/rejected 偏好 pair、reward 样本、DPO policy / reference log probability 和工具 schema，输出 assistant mask coverage、prompt loss leak、PAD loss leak、EOS coverage、capability regression、over-refusal rate、unsafe leak rate、preference margin、reward-human gap、reward length bias、DPO negative margins、tool schema drift、failed gates 和 gate pass 结论。
+43B. 比较 DPO、KTO、ORPO 和 SimPO，要求写出每种方法是否需要 reference model、是否需要成对偏好、最容易出现的偏差和上线前必须看的回归指标。
+43C. 设计一个 RLVR / DeepSeek-R1 风格 reasoning 后训练审计表，字段包含任务是否可验证、reward 来源、rollout 数、采样策略、错误答案处理、过程质量、人审切片、安全回归、蒸馏目标和污染标记。
 44. 分析一次训练异常。
 45. 用自己的话解释 AI Safety 和 Alignment 的区别，要求覆盖目标、风险、训练、评估和部署。
 46. 给 8 条 toy 请求设计 risk taxonomy，至少包含 harmful content、privacy、jailbreak、prompt injection、tool misuse、high risk domain 和 benign help。
@@ -358,6 +360,7 @@
 27. 画出 `logical_block_id -> physical_block_id` 的 block table 示例。
 28. 比较 block size 过大和过小分别会带来什么问题。
 29. 说明 PagedAttention 为什么有助于 Continuous Batching。
+29A. 比较 PagedAttention、vAttention 和普通连续 KV 分配，要求从显存碎片、动态加入退出、系统复杂度、kernel 适配、可观测性和故障边界六个角度回答。
 30. 写一个 0 依赖 Python 推理性能事故审计 demo，输入 toy 请求 trace，输出 P95 TTFT、P95 TPOT、P99 E2E、P95 queue、KV pressure、cache hit rate、prompt cost drift、错误 / 取消率、失败门禁和 gate pass。
 31. 给定一组请求日志，区分 TTFT regression 和 TPOT regression 的根因，并说明哪些证据能排除 GPU kernel 本身是瓶颈。
 32. 设计一个 prompt cost drift 仪表盘，至少拆分 system prompt、RAG chunk、tool schema、多轮历史、输入 token、prefill 时间、KV Cache 和单位成功任务成本。
@@ -463,6 +466,7 @@
 129. 设计一个 RAG 评估集，包含 retrieval、generation 和 system 三类指标。
 129A. 用纯 Python 写一个 RAG 事故审计 demo，输入 toy corpus、expected evidence、retrieved、context、claims、ACL 和 staleness，输出 retrieval recall、MRR、context recall / precision、citation accuracy、unsupported claim rate、permission leak rate、stale evidence rate 和 failed gates。
 129B. 构造 5 个 RAG bad case：retrieval miss、context drop、旧版本引用、越权证据进入上下文、证据不足却未拒答，并为每个样本写出 root cause 和修复优先级。
+129C. 设计一个 GraphRAG 小型案例：给 8 段跨文档材料抽取 entity、relation 和 community summary，并比较 GraphRAG、向量 RAG、Agentic RAG 在全局问题、多跳问题和局部事实问题上的适用边界。
 130. 用 5 分钟回答“如何设计一个企业知识库 RAG 问答系统”。
 131. 画出 embedding retrieval 的离线索引和在线查询流程。
 132. 用自己的话解释双塔检索为什么适合大规模召回。
@@ -562,6 +566,7 @@
 223. 设计一个 code sandbox policy，覆盖文件写入范围、命令超时、依赖变更、敏感文件、生成文件和高风险动作确认。
 224. 用 3 分钟回答“Code Agent 的输出为什么不是一段代码，而是 diff、测试结果和审计 trace”。
 225. 设计一个 Browser Agent trace schema，字段包含 task id、URL、screenshot summary、accessibility nodes、action、target、coordinates、form value、risk level、confirmation、observation 和 final verification。
+225A. 比较 WebArena、OSWorld、SWE-bench、AgentBench 和 GAIA：分别写出任务环境、主要动作空间、成功标准、可复现性风险、常见失败模式和适合检验的 Agent 能力。
 226. 写一个 0 依赖 Computer-Use audit demo，输出 task success rate、final verification rate、action accuracy、misclick rate、form accuracy、state observation coverage、high-risk protection rate、prompt injection block rate、failure recovery rate、repeat action rate 和 gate pass。
 227. 构造一个误点击样本，说明为什么 action accuracy 之外还要单独统计 misclick rate。
 228. 构造一个表单填写错误样本，要求记录字段、期望值、实际值、提交前复核和恢复策略。
@@ -612,6 +617,7 @@
 6. 设计一个事实性评估集，说明数据来源和评分方式。
 6A. 写一个 0 依赖评估指标事故审计 demo，输入 toy baseline / candidate 评估样本、切片、污染标记、人工偏好、judge 偏好、输出长度、成本、延迟、线上反馈和安全状态，输出 paired lift、bootstrap CI、slice regression、clean eval lift、judge-human agreement、judge length bias、cost ratio、latency delta、failed gates 和 gate pass。
 7. 解释 benchmark contamination 为什么会误导模型比较。
+7A. 用英文术语 data contamination、benchmark leakage 和 train-test leakage 分别写一个 LLM 评估风险例子，并说明如何用 exact match、near duplicate、canary、时间切分和私有动态集降低风险。
 8. 写 3 个防御性 jailbreak / prompt injection 抽象测试样本，只记录风险类别、期望策略动作和评估指标，不写可复用攻击提示词。
 9. 设计一个包含 helpfulness、honesty、harmlessness 的评估表。
 10. 用自己的话回答“如何判断模型是否真的具备推理能力”。

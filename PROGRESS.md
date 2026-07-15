@@ -982,10 +982,18 @@
 
 578. 顶层 `README.md` 已针对“已完成重点内容”和“当前进度”做二次同步修正；将原先偏第一版正文完成清单的描述，更新为“24 本主书第一版完成 + 第二轮多专题阶段性收口 + 第二十四册当前落盘 1-60 章完成第二轮精修”的当前口径；补充说明第三册、第五册到第九册、第十三册到第十八册、第十九册到第二十四册的已记录章节均有阶段性第二轮精修成果，并明确第二十二册、第二十三册和第二十四册已完成当前落盘章节的第二轮收口；已用 `git diff --check -- README.md` 检查格式，通过；本次新增 `README.md` diff 的常见公式风险和异常风险扫描均无命中。
 
+579. 内容广度与前沿知识覆盖审计第一轮已完成并开始修补：新增 `plan.md` 记录本轮审计重点从“收尾验证”调整为知识范围、覆盖完整性、前沿影响力、初学者可读性和资深面试点拨深度；已优先修补 A 类缺口：第五册后训练章节补入 SimPO、RLVR、DeepSeek-R1 与 DAPO/GRPO 边界；第十六册 reasoning 总览补入 RLVR 与 DeepSeek-R1 位置；第二十四册 PagedAttention 章节补入 vAttention；第十七册 Agentic RAG 章节补入 GraphRAG；第七册污染检测章节补入 data contamination、benchmark leakage、train-test leakage 英文术语口径。同步第四册百科新增 SimPO、RLVR、DeepSeek-R1、vAttention、FlashInfer、GraphRAG 条目；同步 `GLOSSARY_EN_ZH.md`、`PAPERS.md`、`INTERVIEW_BANK.md`、`EXERCISES.md`，补齐术语、论文路线、面试题和练习入口。已用 `git diff --check` 检查本轮全部 diff，通过；异常注入关键词扫描无命中；常见公式风险扫描无命中；涉及正文补丁的代码围栏计数均为偶数。
+
+580. 知识覆盖矩阵和 P1 小补丁已完成：覆盖审计结论为当前无 P0 主干缺口，SimPO、RLVR、DeepSeek-R1、vAttention、GraphRAG、data contamination 和 benchmark leakage 已形成闭环，FlashInfer、WebArena、DrGRPO 等列为 P1/观察项；随后完成 P1 小补丁，第五册后训练章节补 DrGRPO 观察项和 `GRPO、DAPO、DrGRPO 与 RLVR` 对比，第 24 册 mini-sglang 学习路线补 FlashInfer 层次说明，`INTERVIEW_BANK.md` 与 `EXERCISES.md` 补 WebArena / Browser Agent Eval 显式入口，第十一册 RAG 系统设计补 GraphRAG 交叉引用。已用 `git diff --check` 检查 P1 相关文件，通过；常见公式风险扫描无命中；异常关键词扫描仅命中第十一册既有“删除导航栏和广告模板”正常 RAG 清洗语境；新增正文代码围栏计数均为偶数。
+
+581. P2 抽样深度复核已完成：围绕用户关注的知识范围、前沿覆盖、初学者可读性和资深 trade-off 深度，抽样复核 Mamba / SSM / hybrid architecture、多模态实时 / speech-to-speech / video generation、AI Infra future trends 三组主题。结论为当前无 P0/P1 主干缺口：Mamba / SSM / hybrid architecture 在第二册架构进阶已达到适用场景、优缺点、工程成熟度、硬件 trade-off 和面试表达深度，第二十一册主要是入口/时间线；第十五册多模态章节已覆盖实时语音助手、级联 vs 端到端 speech-to-speech、audio codec、视频生成、Sora 类公开抽象、world model 边界、评估和安全；第二十三册第 60 章已覆盖 Serverless GPU、异构算力、边缘推理、自治运维、成本、安全和标准化，并能落到指标、门禁和失败模式。2026 年 7 月媒体报道的 full-duplex 实时语音能力因缺少稳定官方技术资料，暂列观察项，不写入正文主干。已完成轻量格式、异常关键词、常见公式风险和代码围栏检查。
+
+582. 内容广度与深度审计 P3 普通收尾已完成：同步 `plan.md` 的当前收口状态、已产出材料、执行顺序和优先审计清单状态，明确 A/P1/P2 已完成阶段性收口，剩余仅保留观察项和后续维护建议；清理过期的“仍待下一轮执行”类措辞。三个中间审计文件已按用户要求删除，结论已归并到 `plan.md` 和 `PROGRESS.md`。已用 `rg` 检查不再残留会误导 P1/P2/P3 状态的旧收口口径；后续只建议在官方资料稳定后维护实时语音、DrGRPO、KV cache quantization / offload、视频+音频联合生成等观察项。
+
 ## 下一步计划
 
 24 本主书正文第一版已完成。大模型工程师面试补充章节第 60-82 章已扩写，补充篇第一版完成。第二轮全系列精修已启动，详见 `SECOND_PASS_REVIEW_PLAN.md`。
 
 当前第三册实战手册 `book-03-practical-handbook/` 第 1-72 讲第二轮公式和 demo 精修已阶段性完成；第五册到第九册、第十三册到第十八册的已记录章节均已阶段性完成；第十九册 `book-19-practitioner-playbook/chapters/01-实战心法总览.md` 第一章到 `book-19-practitioner-playbook/chapters/15-资深工程师面试表达.md` 第十五章第二轮精修已完成；第二十册 `book-20-agent-harness-runtime/chapters/01-harness总览.md` 第一章到 `book-20-agent-harness-runtime/chapters/16-harness实战坑与面试题.md` 第十六章第二轮精修已完成；第二十一册 `book-21-transformer-architecture-evolution/chapters/01-transformer为什么能成为大模型基础架构.md` 第一章到 `book-21-transformer-architecture-evolution/chapters/12-in-context-learning与显式token检索能力.md` 第十二章现有落盘章节第二轮精修已完成；第二十二册 `book-22-tool-protocol-ecosystem/chapters/01-从prompt-tool-use到structured-function-calling.md` 第一章到 `book-22-tool-protocol-ecosystem/chapters/50-工具协议生态未来演进与开放题.md` 第五十章第二轮精修已完成；第二十三册 `book-23-ai-infra/chapters/01-ai-infra总览.md` 第一章到 `book-23-ai-infra/chapters/60-ai-infra未来趋势-serverless-gpu-异构算力-边缘推理和自治运维.md` 第六十章第二轮精修已完成；第二十四册 `book-24-llm-inference-engine/chapters/01-推理框架总览.md` 第一章到 `book-24-llm-inference-engine/chapters/60-推理框架面试高频问题与标准回答.md` 第六十章现有落盘章节第二轮精修已完成。
 
-下一步等待第二十四册新增章节落盘，或执行第二十四册第二轮总体验收、目录/索引一致性检查和最终收口。
+内容广度与深度审计已完成 P3 普通收尾；如需保存当前阶段成果，下一步可做一次 git commit。后续正文维护只建议处理稳定官方资料驱动的观察项，或另开目标执行第二十四册第二轮总体验收、目录/索引一致性检查和最终收口。

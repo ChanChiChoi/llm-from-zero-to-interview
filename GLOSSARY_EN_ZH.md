@@ -8075,3 +8075,23 @@ KV Cache Equivalence Check：KV Cache 等价性检查
 KV Cache Memory Formula：KV Cache 显存公式
 
 KV Cache Gate：KV Cache 门禁
+
+## Content Audit Supplement Terms
+
+Simple Preference Optimization / SimPO：简单偏好优化；一种 reference-free 偏好优化方法，用平均 log probability 差和 margin 直接优化 chosen/rejected。
+
+Reinforcement Learning with Verifiable Rewards / RLVR：可验证奖励强化学习；用程序、规则、答案校验器或环境反馈提供可自动验证奖励的后训练路线。
+
+DeepSeek-R1：DeepSeek 公开的 reasoning model 案例，常用于讨论冷启动数据、RLVR、GRPO 类训练、采样和蒸馏的组合。
+
+vAttention：一种 LLM serving 动态 KV Cache 显存管理路线；重点是把 KV 管理交给虚拟内存/按需映射机制，而不是改变 attention 数学。
+
+GraphRAG：图增强检索生成；先抽取实体、关系和社区摘要，再结合局部证据与全局图摘要回答问题。
+
+Data Contamination：数据污染；训练、调参、提示迭代或系统缓存中提前暴露评估信息，导致评估分数虚高。
+
+Benchmark Leakage：基准泄漏；benchmark 题目、答案、模板或近似样本进入训练/开发流程的评估污染形式。
+
+Train-Test Leakage：训练-测试泄漏；训练集、验证集、测试集或线上评估样本之间存在不应出现的信息重叠。
+
+FlashInfer：面向 LLM inference serving 的高性能 kernel / attention engine 生态，常与 FlashAttention、PagedAttention、batching 和 serving backend 一起讨论。

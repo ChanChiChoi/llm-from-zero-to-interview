@@ -7094,6 +7094,18 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 工程价值：企业 RAG 不能只追求 recall；无权限 chunk 被放进 prompt 是高优先级安全事故。
 
+## GraphRAG
+
+一句话定义：GraphRAG 是把文档中的实体、关系、社区结构或图摘要纳入检索增强生成的 RAG 路线，适合多跳关系、组织知识和全局摘要问题。
+
+为什么重要：普通向量检索更擅长找语义相近 chunk，但跨文档实体关系、复杂组织知识和全局归纳问题往往需要显式建模实体和关系。
+
+适用场景：企业知识库、研究报告、法律金融文档、供应链关系、跨项目依赖和需要解释实体关系来源的问答。
+
+主要风险：构图成本高、实体归一化难、关系抽取噪声、图更新延迟、权限过滤复杂、摘要可能不忠实。
+
+面试表达：GraphRAG 不是把向量库换成图数据库，而是把实体、关系和图摘要变成可检索证据。它可以作为 Agentic RAG 的一个工具，但不应所有问题默认走图。
+
 ## Tool Agent Runtime Control
 
 一句话定义：Tool agent runtime control 衡量 Agent 定义、工具 schema、权限、side effect level、step limit、timeout、human confirmation、execution trace 和错误处理是否受平台控制。
