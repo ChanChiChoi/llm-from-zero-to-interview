@@ -1,8 +1,8 @@
 # 第十章：Evaluation Harness
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲按 `WRITING_PLAN.md` 的第二轮要求做公式和 demo 精修，联网核对了 OpenAI Evals API 与 graders 的公开资料，OpenAI `simple-evals` 对轻量基准评估的工程口径，SWE-bench 关于 issue、repo snapshot、patch、test harness 和 verified 子集的公开资料，以及 LangSmith 关于 datasets、experiments、evaluators、trace 和 regression 的公开说明。
+本章参考 OpenAI Evals API 与 graders 的公开资料，OpenAI `simple-evals` 对轻量基准评估的工程口径，SWE-bench 关于 issue、repo snapshot、patch、test harness 和 verified 子集的公开资料，以及 LangSmith 关于 datasets、experiments、evaluators、trace 和 regression 的公开说明。
 
 本章聚焦防御性的 Evaluation Harness 设计：如何用固定数据集、环境快照、sandbox reset、验收器、trajectory scoring、baseline comparator、regression runner、成本 / 安全指标和 trace artifacts 判断 agent runtime 是否真的变好。正文和 demo 不提供 benchmark 污染、规避验收器、伪造测试通过、隐藏失败 trace、绕过权限或攻击评估平台的方法。
 
@@ -576,7 +576,7 @@ C_{\mathrm{val}}=
 \frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[|h_i|>0\wedge \mathrm{valid}(h_i)=1]
 ```
 
-其中，$h_i$ 可以包含单元测试、格式校验、diff scope、rubric judge、安全门禁和业务状态检查。没有验收器的任务只能用于探索，不适合作为上线门禁。
+其中，$h_i$ 可以包含单元测试、格式校验、diff scope、rubric judge、安全验收条件和业务状态检查。没有验收器的任务只能用于探索，不适合作为上线条件。
 
 加权任务成功率：
 
@@ -679,7 +679,7 @@ C_{\mathrm{report}}=
 
 其中，$P^{\ast}$ 包括 overall、by bucket、baseline delta、failures、cost、safety、flaky 和 rollout recommendation。
 
-Evaluation Harness 门禁可以写成：
+Evaluation Harness 准入条件可以形式化为：
 
 ```math
 G_{\mathrm{evalh}}=
@@ -701,11 +701,11 @@ C_{\mathrm{bucket}}=1
 ]
 ```
 
-这个门禁强调的是系统级评估可信度：结果要好，过程要安全，比较要公平，失败要可复盘，报告要能指导是否发布。
+这组条件强调的是系统级评估可信度：结果要好，过程要安全，比较要公平，失败要可复盘，报告要能指导是否发布。
 
-## 10.19.1 最小可运行 Evaluation Harness 审计 demo
+### 10.19.1 最小可运行 Evaluation Harness 审计 demo
 
-下面的 demo 不调用模型、不执行测试、不访问网络，只审计 toy evaluation runs 是否满足 evaluation harness 门禁。它故意构造环境不可复现、验收器缺失、baseline 不公平、无关 diff、flaky task、安全诱导被执行、版本缺失和报告不完整等 bad case。
+下面的 demo 不调用模型、不执行测试、不访问网络，只审计 toy evaluation runs 是否满足 evaluation harness 验收条件。它故意构造环境不可复现、验收器缺失、baseline 不公平、无关 diff、flaky task、安全诱导被执行、版本缺失和报告不完整等 bad case。
 
 ```python
 from dataclasses import dataclass

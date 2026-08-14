@@ -1,10 +1,10 @@
 # 第五章：企业级 LLM 应用
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲按 `WRITING_PLAN.md` 的第二轮要求做公式和 demo 精修。联网资料主要核对五类口径：OpenAI 企业数据隐私和安全资料提醒我们，企业级应用必须关注数据所有权、默认训练使用边界、加密、数据保留、SSO、RBAC、审计日志和用量治理；NIST AI RMF / Generative AI Profile 强调生成式 AI 风险要进入 govern、map、measure、manage 的风险管理闭环；OWASP LLM Top 10 资料提醒我们，企业 LLM 应用要特别警惕提示注入、敏感信息泄露、向量与嵌入弱点、过度代理和无界资源消耗等应用层风险；Microsoft RBAC / Zero Trust 资料用于核对 IAM、最小权限、角色授权和身份控制口径；Google SRE 的 SLI / SLO / error budget 资料用于核对企业服务可靠性和延迟门禁。
+本章重点讨论。联网资料主要核对五类口径：OpenAI 企业数据隐私和安全资料提醒我们，企业级应用必须关注数据所有权、默认训练使用边界、加密、数据保留、SSO、RBAC、审计日志和用量治理；NIST AI RMF / Generative AI Profile 强调生成式 AI 风险要进入 govern、map、measure、manage 的风险管理闭环；OWASP LLM Top 10 资料提醒我们，企业 LLM 应用要特别警惕提示注入、敏感信息泄露、向量与嵌入弱点、过度代理和无界资源消耗等应用层风险；Microsoft RBAC / Zero Trust 资料用于核对 IAM、最小权限、角色授权和身份控制口径；Google SRE 的 SLI / SLO / error budget 资料用于核对企业服务可靠性和延迟验收条件。
 
-本章不替代企业安全架构、法务合规审查、采购合同、真实 IAM 设计或行业监管要求；后续第九章会专门展开隐私合规与治理，第六章会专门展开 RAG 产品落地。本章的重点是让算法工程师在面试和项目复盘中能讲清：企业级应用为什么不能只做聊天入口，为什么权限、租户隔离、数据治理、审计、SLO、人审和业务指标要一起进入上线门禁。
+本章讨论的是企业级应用的系统边界，不替代企业安全架构、法务合规审查、采购合同、真实 IAM 设计或行业监管要求。隐私治理、RAG 产品实现和具体场景会在相应专题中分别展开；这里先建立一个统一判断：企业级应用不能只做聊天入口，权限、租户隔离、数据治理、审计、SLO、人审和业务指标必须共同进入上线条件。
 
 企业级 LLM 应用和个人消费级应用有很大区别。个人用户更关注好不好用、有不有趣；企业更关注能否接入现有系统、是否符合权限和合规要求、是否能节省成本、是否能稳定服务多人协作和复杂流程。企业级应用不是简单加一个聊天框，而是把大模型嵌入真实业务流程。
 
@@ -238,7 +238,7 @@
 
 1. 检索权限：向量检索和关键词检索只能召回用户有权看的文档。
 2. 生成权限：模型不能把无权信息通过总结、引用或多轮对话泄露出来。
-3. 工具权限：Agent 调用工单、数据库、邮件、代码仓库等工具前要做角色和动作门禁。
+3. 工具权限：Agent 调用工单、数据库、邮件、代码仓库等工具前要做角色和动作验收条件。
 4. 日志权限：prompt、检索片段、工具返回和模型输出写入日志前要脱敏并限制查看范围。
 
 企业权限的关键不是“模型知道用户是谁”，而是后端系统在每次检索、工具调用、写日志和展示引用时都重新执行权限判断。只靠 prompt 告诉模型“不要泄露信息”，不是可靠权限控制。
@@ -324,7 +324,7 @@
 
 不同应用要选不同主指标。知识库看解决率和引用准确率；客服看自助解决率和满意度；代码助手看采纳率和测试通过率。
 
-## 5.15.1 关键公式与企业级应用指标速查
+### 5.15.1 关键公式与企业级应用指标速查
 
 可以把一个企业 LLM 应用样本写成：
 
@@ -336,7 +336,7 @@ e_i=(u_i,d_i,p_i,\tau_i,w_i,a_i,r_i,l_i,m_i)
 
 **1. 权限通过率**
 
-企业应用最核心的门禁之一，是检索、工具和日志都没有越权：
+企业应用最核心的验收条件之一，是检索、工具和日志都没有越权：
 
 ```math
 R_{\mathrm{perm}}=\frac{1}{N}\sum_{i=1}^{N}h_i^{\mathrm{rag}}h_i^{\mathrm{tool}}h_i^{\mathrm{log}}
@@ -376,7 +376,7 @@ C_{\mathrm{audit}}=\frac{1}{N}\sum_{i=1}^{N}a_i
 
 **5. 数据新鲜度通过率**
 
-企业知识库常见问题是文档过期。可以用文档年龄门禁粗略检查：
+企业知识库常见问题是文档过期。可以用文档年龄验收条件粗略检查：
 
 ```math
 C_{\mathrm{fresh}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[g_i \leq A_{\max}]
@@ -404,7 +404,7 @@ C_{\mathrm{human}}=\frac{\sum_{i=1}^{N}z_i q_i}{\sum_{i=1}^{N}z_i+\epsilon}
 
 其中 `z_i=1` 表示高风险任务，`q_i=1` 表示有人审、审批或二次确认，`\epsilon` 用于避免分母为 0。高风险任务不是不能用 LLM，而是不能跳过责任人、审批和审计。
 
-**8. 企业就绪分与上线门禁**
+**8. 企业就绪分与上线条件**
 
 一个简化企业就绪分可以写成：
 
@@ -412,13 +412,13 @@ C_{\mathrm{human}}=\frac{\sum_{i=1}^{N}z_i q_i}{\sum_{i=1}^{N}z_i+\epsilon}
 S_{\mathrm{ent}}=0.25R_{\mathrm{perm}}+0.15(1-R_{\mathrm{viol}})+0.15C_{\mathrm{cite}}+0.15C_{\mathrm{audit}}+0.10C_{\mathrm{fresh}}+0.10R_{\mathrm{slo}}+0.10C_{\mathrm{human}}
 ```
 
-这个分数只用于面试和 toy demo 解释，真实项目要按行业和风险重新定权重。上线门禁可以写成：
+这个分数只用于面试和 toy demo 解释，真实项目要按行业和风险重新定权重。上线准入条件可以形式化为：
 
 ```math
 G_{\mathrm{ent}}=\mathbf{1}[R_{\mathrm{perm}}\geq 0.95]\mathbf{1}[R_{\mathrm{viol}}=0]\mathbf{1}[C_{\mathrm{audit}}\geq 0.90]\mathbf{1}[R_{\mathrm{slo}}\geq 0.95]\mathbf{1}[M_{\mathrm{biz}}=1]
 ```
 
-其中 `M_{\mathrm{biz}}=1` 表示已定义业务主指标。直觉是：企业应用不是靠一个综合分上线，而是任何关键门禁不过线都要先修复。
+其中 `M_{\mathrm{biz}}=1` 表示已定义业务主指标。直觉是：企业应用不是靠一个综合分上线，而是任何关键验收条件不过线都要先修复。
 
 ## 5.16 常见失败模式
 
@@ -662,7 +662,7 @@ enterprise_pass= ['support_kb_rag']
 needs_rework= {'contract_copilot': ['rag_permission_filter', 'tool_permission_gate', 'data_freshness', 'workflow_integration', 'feedback_loop', 'human_review_coverage'], 'data_analyst_nl2sql': ['permission_coverage', 'rag_permission_filter', 'tool_permission_gate', 'audit_log_coverage', 'pii_redaction', 'citation_support', 'eval_ready', 'feedback_loop', 'sla_p95_latency_ok', 'human_review_coverage'], 'office_summarizer': ['permission_coverage', 'tenant_isolation', 'rag_permission_filter', 'tool_permission_gate', 'audit_log_coverage', 'pii_redaction', 'citation_support', 'sso_integration', 'eval_ready', 'feedback_loop', 'business_metric_defined'], 'generic_chat_portal': ['permission_coverage', 'tenant_isolation', 'rag_permission_filter', 'tool_permission_gate', 'audit_log_coverage', 'pii_redaction', 'data_freshness', 'citation_support', 'sso_integration', 'workflow_integration', 'eval_ready', 'feedback_loop', 'sla_p95_latency_ok', 'business_metric_defined']}
 ```
 
-这个 demo 的重点不是分数本身，而是审计口径：企业级应用必须把权限、租户隔离、审计、PII、引用、SLO、业务指标和人审放进同一张表。`contract_copilot` 分数不低，但因为法律场景高风险、人审和反馈闭环不足，不能直接全自动上线；`data_analyst_nl2sql` 工作流接入不错，但 SQL 工具权限、引用支持和延迟门禁不过线；`generic_chat_portal` 则说明“通用聊天入口”如果没有身份、权限、指标和工作流，只能算内部 demo。
+这个 demo 的重点不是分数本身，而是审计口径：企业级应用必须把权限、租户隔离、审计、PII、引用、SLO、业务指标和人审放进同一张表。`contract_copilot` 分数不低，但因为法律场景高风险、人审和反馈闭环不足，不能直接全自动上线；`data_analyst_nl2sql` 工作流接入不错，但 SQL 工具权限、引用支持和延迟验收条件不过线；`generic_chat_portal` 则说明“通用聊天入口”如果没有身份、权限、指标和工作流，只能算内部 demo。
 
 ## 5.20 本章小结
 

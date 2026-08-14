@@ -12,18 +12,18 @@
 
 > A2A 消息不只是文本消息，而应该包含角色、意图、上下文引用、数据分类、来源、权限、证据和边界约束。
 
-## 28.0 本讲资料边界与第二轮精修口径
+## 28.0 本讲范围与资料
 
-本讲第二轮精修前，已按 `WRITING_PLAN.md` 核对 A2A 官方协议规范中 Message、Part、Task、Artifact、TaskStatus 和 metadata 的公开口径。正文采用这些资料里的稳定抽象：Message 用 `messageId` 标识，用 `role` 区分 user / agent 等交互角色，用 `parts` 承载文本、结构化数据、文件或引用，用 `taskId` / `contextId` 和 Task 生命周期关联，用 metadata 承载工程侧的 sender、recipient、intent、source、trust、classification、context policy 和 trace 信息。
+本章参考了 A2A 官方协议规范中 Message、Part、Task、Artifact、TaskStatus 和 metadata 的公开口径。正文采用这些资料里的稳定抽象：Message 用 `messageId` 标识，用 `role` 区分 user / agent 等交互角色，用 `parts` 承载文本、结构化数据、文件或引用，用 `taskId` / `contextId` 和 Task 生命周期关联，用 metadata 承载工程侧的 sender、recipient、intent、source、trust、classification、context policy 和 trace 信息。
 
 本讲不是逐字段翻译某个协议版本，也不实现真实 A2A server、SSE、push notification、资源读取、DLP 或权限系统。不同实现可以把上下文策略放在 metadata、envelope 或内部 trace 里；正文只保留面试和工程设计中稳定的边界：消息不能只是纯文本，内容块要有类型、来源、可信级别、权限、证据和可转发规则，外部数据不能升级成指令，敏感内容优先引用而不是复制。
 
-第二轮补充重点是：
+本章的学习重点是：
 
-1. 把原文的 `message_id`、`task_id`、`content` 口径调整为更贴近 A2A 的 `messageId`、`taskId`、`contextId` 和 `parts`。
-2. 明确 A2A Message 的协议字段和工程 metadata 的分工，避免把 sender / recipient / intent / context_policy 写成某个协议版本必备字段。
-3. 增加稳定 MathJax 公式，用覆盖率指标表达消息契约、Part 类型、来源可信标注、指令 / 数据分离、最小上下文、引用优先、策略执行、脱敏、claim grounding、摘要约束、预算、trace 和 eval。
-4. 补一个 0 依赖 Python demo，用 toy multi-agent message trace 审计消息边界和上下文污染风险。
+1. 使用更贴近 A2A 的 `messageId`、`taskId`、`contextId` 和 `parts` 表达消息标识与上下文关联。
+2. 区分 A2A Message 的协议字段和工程 metadata，避免把 sender / recipient / intent / context_policy 误写成某个协议版本的必备字段。
+3. 用稳定的 MathJax 公式表达消息契约、Part 类型、来源可信标注、指令 / 数据分离、最小上下文、引用优先、策略执行、脱敏、claim grounding、摘要约束、预算、trace 和 eval。
+4. 通过一个 0 依赖 Python demo，用 toy multi-agent message trace 检查消息边界和上下文污染风险。
 
 ## 28.1 为什么消息格式很重要
 
@@ -692,7 +692,7 @@ C_{\mathrm{trace}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{message\_trace\_r
 C_{\mathrm{eval}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{message\_eval\_covered}(Z_i)]
 ```
 
-消息边界门禁可以写成：
+消息边界准入条件可以形式化为：
 
 ```math
 G_{\mathrm{a2a\_message}}=

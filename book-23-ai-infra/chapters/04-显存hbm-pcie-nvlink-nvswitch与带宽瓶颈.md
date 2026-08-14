@@ -8,13 +8,13 @@
 
 > 大模型性能不只取决于能算多快，还取决于数据能不能及时送到计算单元，以及多张卡之间能不能高效交换数据。
 
-## 4.0 本讲资料边界与第二轮精修口径
+## 4.0 本讲范围与资料
 
 本章讨论显存、HBM、PCIe、NVLink、NVSwitch 和多机网络的稳定工程概念，不绑定某个 GPU 型号、服务器 SKU、云厂商实例名或某一代互联数字。
 
-第二轮精修时，资料边界按官方公开材料校准：NVIDIA Hopper 架构资料说明高端 GPU 会把 HBM、PCIe、NVLink 和 NVSwitch 放在同一套加速器系统设计里；NCCL 文档把 GPU 间 collective 和 point-to-point 通信抽象成拓扑感知通信库；GPUDirect RDMA 文档强调 GPU 与网卡、存储或其他 PCIe peer 直接交换数据仍依赖硬件、驱动、拓扑和权限配置；PCI-SIG 规格库只作为 PCIe 是标准化互联规范的依据，不把某一代 PCIe 的峰值带宽写成所有机器的实际带宽。
+本章参考资料按官方公开材料校准：NVIDIA Hopper 架构资料说明高端 GPU 会把 HBM、PCIe、NVLink 和 NVSwitch 放在同一套加速器系统设计里；NCCL 文档把 GPU 间 collective 和 point-to-point 通信抽象成拓扑感知通信库；GPUDirect RDMA 文档强调 GPU 与网卡、存储或其他 PCIe peer 直接交换数据仍依赖硬件、驱动、拓扑和权限配置；PCI-SIG 规格库只作为 PCIe 是标准化互联规范的依据，不把某一代 PCIe 的峰值带宽写成所有机器的实际带宽。
 
-因此，本章只抽象四类面试稳定结论：
+因此，本章聚焦四类面试稳定结论：
 
 1. HBM 解决 GPU 计算单元和显存之间的高带宽供给问题。
 2. PCIe 解决 CPU、GPU、网卡和存储设备间的通用连接问题，但通常不是高频 GPU 张量通信的最优路径。
@@ -494,7 +494,7 @@ E_n=\frac{T_1}{nT_n}
 
 其中，`T_1` 是单卡 step time，`T_n` 是 `n` 卡 step time。`E_n` 很低时，要检查并行策略、拓扑、通信、I/O 和 load balance，而不是只说“GPU 不够强”。
 
-最后可以定义一个带宽门禁：
+最后可以定义一个带宽验收条件：
 
 ```math
 G_{\mathrm{bandwidth}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land R_{\mathrm{comm}}\le \rho_{\mathrm{comm}} \land R_{\mathrm{pcie}}\le \rho_{\mathrm{pcie}} \land P_0=0\right]
@@ -502,7 +502,7 @@ G_{\mathrm{bandwidth}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land R_{\mathrm{com
 
 其中，`C_j` 是第 `j` 个带宽审计维度覆盖率，`\rho_comm` 和 `\rho_pcie` 是可接受暴露比例阈值，`P_0` 是 P0 级硬阻断数量。
 
-下面是一个 0 依赖 Python demo。它用 toy 数字估算 KV cache、HBM / PCIe 传输时间、ring all-reduce 通信时间和多卡扩展效率，再用 bad case 检查带宽审计门禁。
+下面是一个 0 依赖 Python demo。它用 toy 数字估算 KV cache、HBM / PCIe 传输时间、ring all-reduce 通信时间和多卡扩展效率，再用 bad case 检查带宽审计验收条件。
 
 ```python
 METRICS = [

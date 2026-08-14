@@ -1,14 +1,14 @@
 # 第二章：Function Calling 的输入输出协议
 
-## 2.0 本讲资料边界与第二轮精修口径
+## 2.0 本讲范围与资料
 
-本章第二轮精修前，先对齐 OpenAI function calling / tools / structured outputs、Anthropic tool use、Google Gemini function calling 和 JSON Schema 官方资料中的稳定边界。不同厂商对 `messages`、`tool_calls`、`tool_call_id`、`tool_use`、`tool_result`、function response、finish reason、streaming delta 和 parallel tool calls 的字段名不完全一样，本章不把某一家 API 的字段写成永久标准，而是抽象出模型、runtime 和工具之间的通用输入输出协议。
+本章参考先对齐 OpenAI function calling / tools / structured outputs、Anthropic tool use、Google Gemini function calling 和 JSON Schema 官方资料中的稳定边界。不同厂商对 `messages`、`tool_calls`、`tool_call_id`、`tool_use`、`tool_result`、function response、finish reason、streaming delta 和 parallel tool calls 的字段名不完全一样，本章不把某一家 API 的字段写成永久标准，而是抽象出模型、runtime 和工具之间的通用输入输出协议。
 
-本章只讨论防御性、教学性和面试表达所需的协议设计，不提供绕过权限、伪造 tool result、重复执行副作用工具或利用 streaming 半截参数触发执行的方法。第二轮重点补三件事：
+本章只讨论防御性、教学性和面试表达所需的协议设计，不提供绕过权限、伪造 tool result、重复执行副作用工具或利用 streaming 半截参数触发执行的方法。本章重点说明三件事：
 
 1. 用公式定义 function calling 输入输出协议的完整性指标。
 2. 用 0 依赖 Python demo 审计消息链、tool call / result 对齐、finish reason、streaming、parallel calls 和幂等键。
-3. 把新增协议指标同步到百科、题库、练习、术语表、项目路线和知识图谱。
+3. 用同一套协议指标贯通概念解释、协议审计和工程验收，让消息链、流式事件、并行调用与幂等性都能被重复检查，而不是停留在某一家 API 的字段记忆。
 
 ## 2.1 本章定位
 
@@ -1054,7 +1054,7 @@ B_{\mathrm{idem}}=
 {\sum_{i=1}^{N}\mathbf{1}[\mathrm{repeat}_i=1]}
 ```
 
-协议层上线门禁可以写成：
+协议层上线准入条件可以形式化为：
 
 ```math
 G_{\mathrm{protocol}}=
@@ -1468,7 +1468,7 @@ user → assistant(tool_call id=call_1) → tool(tool_call_id=call_1)
 10. provider adapter 用来屏蔽不同模型厂商的协议差异。
 11. tool result 是 observation，不是 instruction。
 12. 有副作用工具必须有确认、权限、幂等和审计。
-13. 第二轮新增的协议审计指标说明：可靠 function calling runtime 必须同时证明消息链、id 对齐、参数解析、finish reason、streaming、parallel calls 和幂等保护都过线。
+13. 本章补充的协议审计指标说明：可靠 function calling runtime 必须同时证明消息链、id 对齐、参数解析、finish reason、streaming、parallel calls 和幂等保护都过线。
 
 如果只记一句话：
 

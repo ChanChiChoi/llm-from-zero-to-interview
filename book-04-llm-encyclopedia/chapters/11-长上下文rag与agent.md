@@ -1,78 +1,39 @@
 # K. 长上下文、RAG 与 Agent
 
-条目：Long Context、Context Window、Position Extrapolation、RAG、RAG Product、RAG Incident、RAG Error Attribution、Document Governance、Retrieval Recall、Mean Reciprocal Rank / MRR、Retrieval Miss、Context Drop、Context Recall、Context Precision、Evidence Support Rate、Citation Accuracy、Unsupported Claim Rate、Permission Leak Rate、Abstention Accuracy、Stale Evidence Rate、RAG Freshness Gate、RAG Product Gate、RAG Incident Gate、Dense Retrieval、Reranker、Vector Database、RAG Prompt Injection、Agentic RAG、Active Retrieval、Retrieval Controller、Multi-Round Retrieval、Evidence State、Evidence Gap、Query Drift、New Evidence Gain、Agentic RAG Gate、Agent、Agent Harness、Agent Runtime、Session Manager、Task Manager、Context Builder、Model Adapter、State Store、Error Handler、Runtime Gate、Agent Loop、Harness Loop Audit、Action Parser、Agent State、Agent Action、Observation、Controller、Tool Registry、Tool Registry Completeness、Tool Schema Strictness、Tool Permission Binding、Side Effect Level、Risk Protection Coverage、Output Normalization Coverage、Tool Version Coverage、Tool Trace Readiness、Untrusted Tool Output Boundary、Tool Registry Gate、Tool Executor、Execution Request Validity、Schema Validation Pass Rate、Permission Enforcement Pass Rate、Execution Mode Accuracy、Async Completion Tracking、Timeout Cancellation Coverage、Idempotency Protection Rate、Unknown State Escalation Rate、Retry Safety Rate、Side Effect Confirmation Coverage、Structured Result Coverage、Executor Trace Completeness、Tool Executor Gate、Tool Permission Model、Authorization Decision Accuracy、Trusted Context Injection、Tenant Isolation Pass Rate、Tool Permission Enforcement、Object Permission Accuracy、Field Projection Safety、Action Context Policy Accuracy、Prompt Injection Block Rate、Token Audience Validation、Revocation Cache Safety、Error Disclosure Safety、Permission Audit Completeness、Tool Permission Gate、Tool Security、Prompt Injection Containment、Untrusted Content Isolation、Unauthorized Access Block Rate、Sensitive Data Protection、Tool External Transfer Gate、Dangerous Action Confirmation、SSRF Block Rate、SQL Risk Block Rate、Path Traversal Block Rate、Shell Sandbox Enforcement、Data Flow Policy Pass Rate、Tool Security Audit Completeness、Security Alert Completeness、Safety Eval Regression Pass Rate、Tool Security Gate、Tool Trace Replay Audit、ID Tree Integrity、Argument Lineage Coverage、Permission Trace Completeness、Tool Result Trace Completeness、Audit Event Completeness、Replay Side Effect Safety、Alert Owner Coverage、Eval Linkage Coverage、Tool Version Release Audit、Spec Lint Pass Rate、Schema Backward Compatibility、Description Behavior Guard、Output Compatibility、Permission Policy Compatibility、Version Matrix Capture、Offline Eval Pass Rate、Canary Routing Stability、Canary Quality Guard、Canary Safety Guard、Cost Latency Guard、Tool Release Rollback Readiness、Lifecycle Coverage、Tool Release Gate、Enterprise Tool Platform Audit、Platform Module Coverage、Platform Interface Contract Coverage、Registry Readiness、Router Governance Coverage、Executor Safety Coverage、Platform Permission Integration Coverage、Platform Safety Guard Coverage、Platform Trace Audit Coverage、Platform Eval Service Coverage、Platform Release Governance Coverage、Platform Tenant Isolation Coverage、Platform Provider Adapter Coverage、High Availability Readiness、Admin Ops Governance Coverage、Enterprise Tool Platform Gate、MCP Background Audit、Direct Integration Count、MCP Integration Count、Integration Reduction、Capability Model Coverage、Context Object Coverage、Discovery Standardization、MCP Schema Contract Coverage、Host Server Boundary Clarity、Local Context Control、Cross Client Reuse、Governance Boundary Clarity、MCP Trace Eval Readiness、MCP A2A Distinction、MCP Background Gate、MCP Concept Audit、Host Policy Ownership、MCP Client Server Boundary、Server Capability Declaration、MCP Tool Schema and Result、MCP Resource URI Metadata、MCP Prompt Argument Review、MCP Lifecycle Negotiation、MCP Transport Policy、MCP Roots Boundary、MCP Sampling Control、Host Capability Filtering、MCP Context Budget、MCP Concept Gate、MCP Server Implementation Audit、MCP Server Metadata Readiness、MCP Server Capability Declaration、MCP Tool Registry Readiness、MCP Strict Schema Coverage、MCP Handler Execution Coverage、MCP Argument Validation Coverage、MCP Structured Result Coverage、MCP Structured Error Coverage、MCP Resource Scope Coverage、MCP Prompt Template Coverage、MCP Server Transport Policy Coverage、MCP Host Connection Readiness、MCP Server Safety Baseline、MCP Server Trace Readiness、MCP Server Gate、MCP Tool Function Calling Comparison Audit、Protocol Layer Clarity、Tool Discovery Boundary、MCP Capability Scope Coverage、MCP Execution Boundary Clarity、MCP Projection Mapping Coverage、Adapter Separation Coverage、MCP Lifecycle Version Awareness、MCP Governance Registry Import、MCP Security Boundary Enforcement、MCP Use Case Selection Fit、MCP Error Surface Separation、MCP Latency Availability Tradeoff、MCP Function Calling Gate、MCP Resource Exposure Audit、Resource URI Validity、Resource Metadata Completeness、Resource List Filtering Boundary、Resource Read Scope Enforcement、MCP Roots Containment、MCP Resource Permission Enforcement、MCP Resource Field Projection Safety、Resource Context Budget Control、Resource Citation Traceability、Untrusted Resource Labeling、Resource Freshness Version Awareness、Resource Template Boundary、Resource Subscription Awareness、Resource Trace Eval Readiness、MCP Resource Gate、MCP Prompt Exposure Audit、Prompt Capability Declaration、Prompt Discovery Coverage、Prompt Argument Schema Coverage、Prompt Required Argument Validation、Prompt Rendering Safety、Prompt Role Boundary Enforcement、Prompt Dependency Alignment、Prompt Version Governance、Prompt Eval Binding、Prompt Permission Enforcement、Prompt Injection Containment、Prompt User Control、Prompt List Change Awareness、Prompt Trace Readiness、MCP Prompt Gate、MCP Security Sandbox Audit、Server Connection Governance、Authorization Token Binding、Scope Minimization、Roots Sandbox Containment、File Secret Blocking、Network SSRF Protection、MCP Shell Sandbox Enforcement、Prompt Injection Data Boundary、High Risk Confirmation、Sensitive Data Flow Control、Local Credential Isolation、MCP Tenant Isolation、Server Supply Chain Governance、MCP Security Trace Readiness、MCP Security Eval Coverage、MCP Security Gate、MCP Integration Surface Audit、MCP Capability Registration Coverage、MCP Namespace Isolation Coverage、MCP IDE Context Routing、MCP Knowledge Citation Traceability、MCP Database Query Governance、MCP Browser Action Governance、MCP Terminal Sandbox Governance、MCP Integration Context Budget Control、MCP Cross Server Data Flow Control、MCP High Risk Approval Coverage、MCP Output Projection Coverage、MCP Integration Trace Readiness、MCP Integration Eval Coverage、MCP Integration Gate、Permission Gate、Replay Readiness、Harness Gate、Agent Trace、Trace Schema Completeness、Span Schema Completeness、Span Tree Validity、Timeline Validity、Artifact Reference Coverage、Version Capture Coverage、Replay Readiness Rate、Privacy Masking Coverage、Error Attribution Coverage、Final Status Consistency、Metric Export Coverage、Eval Export Coverage、Trace Replay Gate、Agent Budget、Agent Incident、Plan Feasibility Rate、False Completion Rate、Tool Result Injection Block Rate、Agent Incident Gate、Agent Gate、Agent Product、Workflow-Agent Hybrid、Agent Automation Level、Agent Product Trace、Tool Execution Success Rate、Human Confirmation Coverage、Agent Recovery Rate、Observation Use Rate、State Update Coverage、Unauthorized Action Rate、Budget Overrun Rate、Agent Product Gate、Tool Use、Tool Schema、JSON Schema、Required Field、Additional Properties、Enum Constraint、Pattern Constraint、Range Constraint、Business Validation、Schema Repair、Schema Gate、Tool Call、Tool Choice、Tool Choice Policy、Candidate Tool Set、Auto Tool Choice、None Tool Choice、Required Tool Choice、Forced Tool Choice、Allowed Tools、Tool Choice Mode Accuracy、No-Tool Clarification Block Rate、Forced Missing Argument Block Rate、Parallel Safety Rate、Rate Limit Pass Rate、Confirmation Enforcement Rate、Cost Budget Pass Rate、Loop Control Rate、Tool Choice Gate、Argument Parsing、Parse Success Rate、Validation Error、Normalization、Argument Evidence Map、Argument Evidence Coverage、Safe Normalization Rate、Repair Attempt、Model Self-Repair、Clarification Coverage、Unsafe Argument Block Rate、Retry Budget Pass Rate、Idempotency Key Coverage、Repair Trace Completeness、Argument Repair Gate、Structured Function Calling、JSON Mode、Structured Outputs、Function Calling、Function Calling Protocol、Tool Call ID、Tool Result、Tool Result Context、Tool Result Projection、Source Metadata Coverage、Redaction Coverage、Tool Result Context Budget Pass Rate、Injection Containment Rate、Error Status Fidelity、Compression Fidelity、Conflict Labeling Rate、Citation Support Rate、Tool Result Freshness Pass Rate、Memory Boundary Pass Rate、Tool Result Context Gate、Finish Reason、Tool Loop、Parallel Tool Calls、Streaming Tool Call Delta、Protocol Chain Validity、Tool Result ID Match Rate、Finish Reason Consistency、Streaming Safety Rate、Parallel Alignment Rate、Tool Selection Accuracy、Schema Valid Rate、Required Field Pass Rate、Type Valid Rate、Enum Valid Rate、Pattern Valid Rate、Range Valid Rate、Additional Properties Block Rate、Business Rule Pass Rate、Schema Repair Success Rate、Argument Exact Match、Argument Validity、Unauthorized Attempt Block Rate、Tool Call Trace、Tool Result Injection、Tool Calling Gate、ReAct、Plan-Act-Observe、ReAct Trace、Plan Update、Repeat Action、Premature Final、ReAct Gate、Planning、Task Decomposition、Subgoal、Acceptance Criteria、Dependency Graph、Dynamic Replanning、Critical Path、Planning Gate、Memory、Short-Term Memory、Long-Term Memory、Episodic Memory、Semantic Memory、Procedural Memory、Preference Memory、Memory Write Gate、Memory Retrieval Score、Memory Permission Gate、Memory Decay、Memory Conflict、Memory Pollution、Memory Gate、Code Agent、Coding Agent Workflow、Task Type Classification、Repository Exploration Coverage、Plan Coverage、Workflow Validation Coverage、Feedback Use Rate、Coding Agent Workflow Gate、File System Tool、Workspace Root、Path Containment、Read File Tool、Search Tool、Apply Patch Tool、Patch Context Match、Secret File Block Rate、Read Truncation Clarity、Concurrent Edit Protection、Unrelated Diff Rate、Diff Faithfulness、Rollback Readiness、File Edit Gate、Terminal Execution、Bash Tool、Test Runner Safety、Command Risk Level、Command Allowlist、Command Denylist、Command Auto Execution Precision、Dangerous Command Block Rate、Command Confirmation Coverage、Network Access Control、Command Output Truncation、Secret Masking Coverage、Command Trace、Command Safety Gate、Context Management、Context Candidate、Context Budget Utilization、Key Context Recall、Constraint Retention、Task State Compression、Summary Faithfulness、Stale Summary Rate、Tool Output Compression Fidelity、Current Diff Coverage、Trust Boundary Coverage、Memory Write Safety、Context Builder Gate、Patch Localization、Minimal Patch、Test Execution Feedback、Code Sandbox、User Change Protection、Code Agent Gate、Claude Code Architecture、Terminal Coding Agent、CLI Control Command、Architecture Evidence Coverage、Required Module Coverage、Access Governance Coverage、Core Loop Governance Coverage、Permission Control Coverage、State Recovery Coverage、Extension Governance Coverage、Observability Coverage、Architecture Eval Readiness、High-Risk Surface Governance、Claude Code Architecture Gate、OpenCode Architecture、Open Runtime Control Plane、Open Runtime Module Coverage、Config Governance Coverage、Agent Permission Isolation、Tool Permission Binding、MCP Tool Namespace Coverage、Custom Tool Schema Coverage、Server API Governance、Snapshot Recovery Coverage、Provider Adapter Coverage、OpenCode Architecture Gate、Coding Agent Comparison、Product Surface Coverage、Context Source Coverage、Tool Execution Coverage、Permission Governance Coverage、Edit Recovery Coverage、Agent Eval Readiness、Enterprise Governance Coverage、Cross-Agent Risk Governance、Coding Agent Comparison Gate、Skill Marketplace Audit、Catalog Metadata、Search Discovery、Detail Page Completeness、Review Workflow、Permission Transparency、Install Approval Flow、Rating Quality Balance、Operations Metrics、Duplicate Capability Governance、Admin Permission View、Developer Console Readiness、Security Center Readiness、Recommendation Policy Safety、Lifecycle Visibility、Owner Maintenance、Portal Audit Trace、Skill Marketplace Gate、MCP A2A Harness Integration、Protocol Capability Registry、MCP Integration、A2A Integration、Capability Discovery Coverage、Namespace Isolation Coverage、Protocol Schema Validity、Protocol Permission Binding、High-Risk Approval Coverage、Context Output Budget Coverage、External Trust Boundary Coverage、A2A Lifecycle Coverage、Protocol Trace Coverage、Protocol Replay Readiness、Protocol Version Capture、Protocol Integration Gate、Agent Harness System Design、Runtime Module Coverage、Interface Contract Coverage、Agent State Machine Coverage、Permission Integration Coverage、Context Control Coverage、Execution Isolation Coverage、System Trace Coverage、System Replay Readiness、System Eval Readiness、Recovery Coverage、Harness Version Capture、Enterprise Governance Readiness、Harness System Gate、Browser Agent、Computer Use Agent、GUI Action、Screenshot Observation、Accessibility Tree、UI State Tracking、Misclick Rate、Form Accuracy、High-Risk Action Protection、UI Agent Gate、Multi-Agent、Coordinator、Role Assignment、Communication Protocol、Blackboard、Agent Debate、Judge Agent、Consensus / Voting、Conflict Resolution、Duplicate Work Rate、Single-Agent Lift Rate、Multi-Agent Gate、Agent Evaluation、Evaluation Harness、Eval Dataset Bucket Coverage、Environment Reproducibility、Validator Coverage、Weighted Task Success、Diff Scope Safety、Baseline Fairness、Regression Pass Rate、Unsafe Execution Rate、Cost Budget Pass Rate、Flaky Task Rate、Eval Version Capture、Eval Report Completeness、Evaluation Harness Gate、Agent Benchmark、Eval Sample、Trajectory Evaluation、Partial Success Score、Trace Completeness、Summary Faithfulness、Claim Support Rate、Recovery Success Rate、Cost-Quality Trade-off、Regression Suite、Agent Eval Gate、Agent Safety、Least Privilege、Tool Permission Matrix、Permission Request、Least Privilege Coverage、Permission Matrix Coverage、Unauthorized Action Block Rate、Secret Access Block Rate、Network Egress Control、Sandbox Enforcement Coverage、Dry Run Coverage、Audit Log Completeness、Irreversible Action Protection、Permission Sandbox Gate、Untrusted Content Boundary、Data Flow Guard、Sensitive Data Filter、External Transfer Gate、Sandbox Policy、Human Confirmation、Dry Run、Audit Log、Irreversible Action、Memory Safety、Supply Chain Risk、Safety Alternative、Agent Safety Gate、Agent Interview Readiness、Agent Interview Rubric、Agent Answer Coverage、Agent Formula Coverage、Agent Demo Coverage、Trace Metric Coverage、Project Evidence Score、Trade-off Depth、Weak Agent Question、Agent Revision Plan、Agent Interview Gate。
+## 阅读边界：从速查条目进入闭环正文
 
-本轮工具失败恢复新增条目：Tool Failure Recovery、Structured Tool Error、Retryable Error、Non-Retryable Error、Retry Policy Precision、Exponential Backoff with Jitter、Retry Budget、Unknown Execution State、Fallback Honesty、Circuit Breaker Containment、Timeout Cancellation Coverage、Human Handoff Readiness、User-Visible Error Clarity、Failure Trace Completeness、Tool Failure Recovery Gate。
+本章把长上下文、RAG、Agent runtime、工具权限、MCP、trace、memory 和评估放在一张概念地图上。条目适合确认定义、指标和相邻概念的差别；它不把“能接收长输入”“能检索证据”“能执行工具”和“任务完成”混成一个能力。遇到涉及实现、权限或生产事故的问题，应沿下面的入口进入独立章节。
 
-本轮工具调用评估新增条目：Tool Calling Evaluation、Tool Call Recall、Tool Call Precision、Tool Set Precision、Tool Set Recall、Argument Value Accuracy、Argument Source Coverage、Execution Success Rate、Observation Use Correctness、Safe Failure Rate、Unsafe Failure Rate、Tool Eval Dataset Coverage、Tool Eval Regression Pass Rate、Tool Calling Eval Gate。
+### 长上下文与 RAG
 
-本轮质量安全审核新增条目：Tool Skill Quality Safety Audit、Tool Schema Clarity、Argument Validation、Execution Reliability、Output Stability、Side Effect Control、Skill Task Quality、Factual Grounding、Completeness Format、Offline Eval Coverage、Online Monitoring、Permission Least Privilege、Data Security Review、Prompt Injection Resilience、High Risk Action Control、Supply Chain Governance、Human Review Readiness、Regression Release Gate、Audit Trace Readiness、Quality Safety Gate。
+1. [`第二册长上下文、RAG 与 Agent 进阶`](../../book-02-advanced-100/目录.md)展开位置外推、RAG 架构、embedding、reranker、memory 和 Agentic RAG。
+2. [`第七册评估实验`](../../book-07-evaluation-experiments/目录.md)中的[`1M Context 有效能力评测`](../../book-07-evaluation-experiments/chapters/13-1m-context有效能力评测.md)把接口上限、有效检索、跨段推理、引用和成本分别测量。
 
-本轮可组合工作流新增条目：Composable Workflow Audit、Workflow Graph Validity、Dependency Acyclicity、Workflow IO Contract、Condition Determinism、Workflow State Coverage、Workflow Permission Boundary、Workflow Data Flow Policy、Workflow Idempotency Coverage、Retry Safety、Compensation Readiness、Workflow Human Approval Coverage、Workflow Trace Replay Readiness、Workflow Eval Coverage、Workflow Gate。
+### Agent、Harness 与工具协议
 
-本轮 Prompt Injection 防御新增条目：Prompt Injection Defense Audit、Instruction Data Separation、Source Trust Labeling、Taint Propagation、Policy Pre-Tool Gate、Risky Tool Isolation、Untrusted Action Blocking、Sensitive Data Control、Prompt Injection High Risk Confirmation、Sandbox Enforcement、Output Redaction Projection、RAG Source Boundary、Multi-Agent Taint Propagation、Prompt Injection Trace Readiness、Prompt Injection Eval Coverage、Prompt Injection Defense Gate。
+1. [`第十七册 Agent 与工具调用`](../../book-17-agent-tool-use/目录.md)中的[`AgentWorld 模型与环境闭环`](../../book-17-agent-tool-use/chapters/13-agentworld模型与环境闭环.md)和[`Agent Swarm 并行协作`](../../book-17-agent-tool-use/chapters/14-agent-swarm并行协作.md)分别讨论环境验证和并行任务合并。
+2. [`第二十册 Agent Harness 与运行时`](../../book-20-agent-harness-runtime/目录.md)展开 long-running agent、context folding、Responses API、persistent workspace 和 OpenAI-compatible API 的边界。
+3. [`第二十二册工具协议生态`](../../book-22-tool-protocol-ecosystem/目录.md)中的[`Programmatic Tool Calling`](../../book-22-tool-protocol-ecosystem/chapters/51-programmatic-tool-calling.md)和[`Skills、MCP 与 Connectors 生命周期`](../../book-22-tool-protocol-ecosystem/chapters/52-skills-mcp与connector生命周期.md)是本章工具条目的独立正文入口。
 
-本轮工具输出可信度新增条目：Tool Output Trust Audit、Source Metadata Coverage、Trust Level Coverage、Freshness Version Coverage、Access Scope Disclosure、Citation Binding、Citation Support Accuracy、Evidence Chain Completeness、Claim Type Calibration、Confidence Limitation Disclosure、Conflict Resolution Readiness、Summary Provenance Retention、RAG Chunk Citation Accuracy、Multi-Agent Evidence Propagation、Provenance Trace Replay、Citation Forgery Block、Tool Output Trust Eval Coverage、Tool Output Trust Gate。
+### 读者应如何判断“已经理解”
 
-本轮 RAG / Tool / Agent / Memory 组合新增条目：RAG Tool Agent Memory Integration Audit、Capability Boundary Clarity、Orchestration Mode Fit、Context Priority Enforcement、Context Budget Allocation、Evidence Preservation、Tool Observation Use、Agent State Update Discipline、Memory Read Relevance、Memory Write Gate、Memory Scope Permission、Conflict Resolution Policy、Injection Propagation Control、Sensitive Data Memory Block、Trace Linkage Coverage、Layered Eval Coverage、RAG Tool Agent Memory Integration Gate。
+看到一个条目后，可以继续追问四件事：证据从哪里来，状态如何变化，失败如何恢复，成功由什么可验证条件定义。`面试表达`和指标名只是索引；真正的理解要能把机制、数量关系、反例和评估结果连起来。下面的英文短语用于定位独立正文，不把“能接收输入”“能找到证据”“能执行动作”和“任务完成”混成一个结论。
 
-本轮工具调用成本、延迟和并发控制新增条目：Tool Cost Latency Concurrency Audit、Cost Attribution Coverage、Latency Breakdown Coverage、Tool Call Budget Enforcement、Timeout Deadline Coverage、Retry Classification Accuracy、Idempotent Retry Safety、Concurrency Limit Enforcement、Queue Priority Fairness、Rate Limit Quota Handling、Cache Safety Correctness、Batching Partial Success Readiness、Result Trimming Budget Control、Degradation Transparency、Router Performance Awareness、Performance Trace Readiness、Cost Latency Eval Coverage、Tool Performance Gate。
+## 速查索引：长上下文、RAG、Agent 与工具协议正文入口
 
-本轮 Tool-use Eval Benchmark 新增条目：Tool Use Eval Benchmark Audit、Tool Need Accuracy、No-Tool Overcall Control、Tool Selection Accuracy、Tool Set Precision、Tool Set Recall、Argument Schema Validity、Argument Semantic Accuracy、Argument Source Coverage、Sequence Order Accuracy、Observation Grounding Accuracy、Error Recovery Readiness、Safe Failure Handling、Safety Policy Compliance、Tool Simulator Determinism、Trace Replay Coverage、Cost Latency Regression Control、Benchmark Slice Coverage、Regression Gate Readiness、Tool Use Eval Benchmark Gate。
+从这里开始的标签用于在概念词、实战章节和系统设计章节之间定位内容。涉及权限、工具副作用、长任务恢复或协议兼容时，应结合第十七、二十、二十二册的状态机、权限模型、回放记录和评测指标阅读；本章的定义用于建立概念，不代替完整系统设计。
 
-本轮 Function Calling / MCP / A2A 横向对比新增条目：Function MCP A2A Comparison Audit、Layer Boundary Clarity、Function Calling Fit、MCP Integration Fit、A2A Delegation Fit、Object Contract Coverage、Capability Discovery Fit、Lifecycle State Alignment、Context Transfer Boundary、Permission Governance Split、Host Runtime Ownership、Trace Chain Continuity、Eval Gate Linkage、Overengineering Control、Severe Protocol Misuse Rate、Protocol Composition Gate。
+条目：阅读边界：从速查条目进入闭环正文、Long Context、Context Window、Position Extrapolation、Lost in the Middle、RAG、RAG Product、RAG Incident、RAG Error Attribution、Document Governance、Retrieval Recall、Mean Reciprocal Rank / MRR、Retrieval Miss、Context Drop、Context Recall、Abstention Accuracy、Stale Evidence Rate、Unsupported Claim Rate、Permission Leak Rate、RAG Freshness Evaluation、RAG Product Evaluation、RAG Incident Review、Agentic RAG、Active Retrieval、Retrieval Controller、Multi-Round Retrieval、Evidence State、Evidence Gap、Query Drift、New Evidence Gain、Context Precision、Evidence Support Rate、Citation Accuracy、RAG Evaluation Formulas、Agentic RAG Evaluation、RAG Prompt Injection、Chunking、Dense Retrieval、Sparse Retrieval、Hybrid Retrieval、Reranker、Vector Database、Query Rewrite、Grounding、Agent、Agent Harness、Agent Runtime、Session Manager、Task Manager、Context Builder、Model Adapter、State Store、Error Handler、Runtime Reliability Evaluation、Agent Loop、Harness Loop Audit、Action Parser、Agent State、Agent Action、Observation、Controller、Permission Evaluation、Replay Readiness、Harness Reliability Evaluation、Tool Registry、Tool Registry Completeness、Tool Schema Strictness、Tool Permission Binding、Side Effect Level、Risk Protection Coverage、Output Normalization Coverage、Tool Version Coverage、Tool Trace Readiness、Untrusted Tool Output Boundary、Tool Registry Governance Evaluation、Tool Registry Identity Coverage、Tool Description Quality、Schema Contract Coverage、Runtime Metadata Coverage、Registry Tool Permission Binding Coverage、Risk Annotation Coverage、Version Trace Coverage、Lifecycle Policy Pass Rate、Owner SLO Coverage、Tool Eval Binding Coverage、Provider Projection Readiness、Registry Audit Completeness、Tool Executor、Execution Request Validity、Schema Validation Pass Rate、Permission Enforcement Pass Rate、Execution Mode Accuracy、Async Completion Tracking、Unknown State Escalation Rate、Retry Safety Rate、Side Effect Confirmation Coverage、Structured Result Coverage、Executor Trace Completeness、Tool Executor Reliability Evaluation、Tool Permission Model、Authorization Decision Accuracy、Trusted Context Injection、Tenant Isolation Pass Rate、Tool Permission Enforcement、Object Permission Accuracy、Field Projection Safety、Action Context Policy Accuracy、Prompt Injection Block Rate、Token Audience Validation、Revocation Cache Safety、Error Disclosure Safety、Permission Audit Completeness、Tool Permission Evaluation、Tool Security、Tool Security Prompt Injection Containment、Untrusted Content Isolation、Unauthorized Access Block Rate、Sensitive Data Protection、Tool External Transfer Evaluation、Dangerous Action Confirmation、SSRF Block Rate、SQL Risk Block Rate、Path Traversal Block Rate、Shell Sandbox Enforcement、Data Flow Policy Pass Rate、Tool Security Audit Completeness、Security Alert Completeness、Safety Eval Regression Pass Rate、Tool Security Evaluation、Tool Trace Replay Audit、ID Tree Integrity、Argument Lineage Coverage、Permission Trace Completeness、Tool Result Trace Completeness、Audit Event Completeness、Replay Side Effect Safety、Alert Owner Coverage、Eval Linkage Coverage、Tool Version Release Audit、Spec Lint Pass Rate、Schema Backward Compatibility、Description Behavior Guard、Output Compatibility、Permission Policy Compatibility、Version Matrix Capture、Offline Eval Pass Rate、Canary Routing Stability、Canary Quality Guard、Canary Safety Guard、Cost Latency Guard、Tool Release Rollback Readiness、Lifecycle Coverage、Tool Release Governance Evaluation、Enterprise Tool Platform Audit、Platform Module Coverage、Platform Interface Contract Coverage、Registry Readiness、Router Governance Coverage、Executor Safety Coverage、Platform Permission Integration Coverage、Platform Safety Guard Coverage、Platform Trace Audit Coverage、Platform Eval Service Coverage、Platform Release Governance Coverage、Platform Tenant Isolation Coverage、Platform Provider Adapter Coverage、High Availability Readiness、Admin Ops Governance Coverage、Enterprise Tool Platform Evaluation、Agent Trace、Trace Schema Completeness、Span Schema Completeness、Span Tree Validity、Timeline Validity、Artifact Reference Coverage、Version Capture Coverage、Replay Readiness Rate、Privacy Masking Coverage、Error Attribution Coverage、Final Status Consistency、Metric Export Coverage、Eval Export Coverage、Trace Replay Readiness Evaluation、Agent Budget、Agent Incident、Plan Feasibility Rate、False Completion Rate、Tool Result Injection Block Rate、Agent Incident Review、Agent Reliability Evaluation、Agent Product、Workflow-Agent Hybrid、Agent Automation Level、Agent Product Trace、Tool Execution Success Rate、Human Confirmation Coverage、Agent Recovery Rate、Observation Use Rate、State Update Coverage、Unauthorized Action Rate、Budget Overrun Rate、Agent Product Evaluation、Tool Use、Tool Schema、JSON Schema、Required Field、Additional Properties、Enum Constraint、Pattern Constraint、Range Constraint、Business Validation、Schema Repair、Schema Validation Evaluation、Tool Call、Tool Choice、Tool Choice Policy、Candidate Tool Set、Tool Router、Scenario Filter Pass Rate、Permission Filter Pass Rate、Risk Filter Pass Rate、Candidate Recall、Candidate Precision、Candidate Size Pass Rate、Clarification Accuracy、Forced Tool Accuracy、Router Parallel Safety、Provider Capability Compatibility、Router Trace Completeness、Tool Router Evaluation、Auto Tool Choice、None Tool Choice、Required Tool Choice、Forced Tool Choice、Allowed Tools、Tool Choice Mode Accuracy、No-Tool Clarification Block Rate、Forced Missing Argument Block Rate、Parallel Safety Rate、Rate Limit Pass Rate、Confirmation Enforcement Rate、Tool Choice Cost Budget Pass Rate、Loop Control Rate、Tool Choice Evaluation、Argument Parsing、Parse Success Rate、Validation Error、Normalization、Argument Evidence Map、Argument Evidence Coverage、Safe Normalization Rate、Repair Attempt、Model Self-Repair、Clarification Coverage、Unsafe Argument Block Rate、Retry Budget Pass Rate、Idempotency Key Coverage、Repair Trace Completeness、Argument Repair Evaluation、Structured Function Calling、JSON Mode、Structured Outputs、Tool Selection Accuracy、Schema Valid Rate、Required Field Pass Rate、Type Valid Rate、Enum Valid Rate、Pattern Valid Rate、Range Valid Rate、Additional Properties Block Rate、Business Rule Pass Rate、Schema Repair Success Rate、Argument Exact Match、Argument Validity、Unauthorized Attempt Block Rate、Function Calling Protocol、Tool Call ID、Tool Result、Tool Result Context、Tool Result Projection、Tool Result Source Metadata Coverage、Redaction Coverage、Tool Result Context Budget Pass Rate、Injection Containment Rate、Error Status Fidelity、Compression Fidelity、Conflict Labeling Rate、Tool Result Freshness Pass Rate、Memory Boundary Pass Rate、Tool Result Context Evaluation、Tool Failure Recovery、Structured Tool Error、Retryable Error、Non-Retryable Error、Retry Policy Precision、Exponential Backoff with Jitter、Retry Budget、Unknown Execution State、Fallback Honesty、Circuit Breaker Containment、Tool Failure Timeout Cancellation Coverage、Human Handoff Readiness、User-Visible Error Clarity、Failure Trace Completeness、Tool Failure Recovery Evaluation、Tool Calling Evaluation Overview、Tool Call Recall、Tool Call Precision、Tool Set Precision、Tool Set Recall、Argument Value Accuracy、Argument Source Coverage、Execution Success Rate、Observation Use Correctness、Safe Failure Rate、Unsafe Failure Rate、Tool Eval Dataset Coverage、Tool Eval Regression Pass Rate、Tool Calling Evaluation Metrics、Finish Reason、Tool Loop、Parallel Tool Calls、Streaming Tool Call Delta、Protocol Chain Validity、Tool Result ID Match Rate、Finish Reason Consistency、Streaming Safety Rate、Parallel Alignment Rate、Idempotency Protection Rate、Tool Call Trace、Tool Result Injection、Function Calling、Tool Calling System Evaluation、ReAct、Plan-Act-Observe、ReAct Trace、Plan Update、Repeat Action、Premature Final、ReAct Evaluation、Planning、Task Decomposition、Subgoal、Completion Criteria、Dependency Graph、Dynamic Replanning、Critical Path、Planning Evaluation、Memory、Short-Term Memory、Long-Term Memory、Episodic Memory、Semantic Memory、Procedural Memory、Preference Memory、Memory Write Policy Evaluation、Memory Retrieval Score、Memory Permission Evaluation、Memory Decay、Memory Conflict、Memory Pollution、Memory System Evaluation、Code Agent、Coding Agent Workflow、Task Type Classification、Repository Exploration Coverage、Plan Coverage、Workflow Validation Coverage、Feedback Use Rate、Coding Agent Workflow Evaluation、File System Tool、Workspace Root、Path Containment、Read File Tool、Search Tool、Apply Patch Tool、Patch Context Match、Secret File Block Rate、Read Truncation Clarity、Concurrent Edit Protection、Unrelated Diff Rate、Diff Faithfulness、Rollback Readiness、File Edit Safety Evaluation、Terminal Execution、Bash Tool、Test Runner Safety、Command Risk Level、Command Allowlist、Command Denylist、Command Auto Execution Precision、Dangerous Command Block Rate、Command Confirmation Coverage、Network Access Control、Command Timeout Cancellation Coverage、Command Output Truncation、Secret Masking Coverage、Command Trace、Command Safety Evaluation、Context Management、Context Candidate、Context Budget Utilization、Key Context Recall、Constraint Retention、Task State Compression、Context Summary Faithfulness、Stale Summary Rate、Tool Output Compression Fidelity、Current Diff Coverage、Trust Boundary Coverage、Memory Write Safety、Context Builder Evaluation、Patch Localization、Minimal Patch、Test Execution Feedback、Code Sandbox、User Change Protection、Code Agent Evaluation、Claude Code Architecture、Terminal Coding Agent、CLI Control Command、Architecture Evidence Coverage、Required Module Coverage、Access Governance Coverage、Core Loop Governance Coverage、Permission Control Coverage、State Recovery Coverage、Extension Governance Coverage、Observability Coverage、Architecture Eval Readiness、High-Risk Surface Governance、Claude Code Architecture Evaluation、OpenCode Architecture、Open Runtime Control Plane、Open Runtime Module Coverage、Config Governance Coverage、Agent Permission Isolation、Open Runtime Tool Permission Binding Coverage、MCP Tool Namespace Coverage、Custom Tool Schema Coverage、Server API Governance、Snapshot Recovery Coverage、Provider Adapter Coverage、OpenCode Architecture Evaluation、Coding Agent Comparison、Product Surface Coverage、Context Source Coverage、Tool Execution Coverage、Permission Governance Coverage、Edit Recovery Coverage、Agent Eval Readiness、Enterprise Governance Coverage、Cross-Agent Risk Governance、Coding Agent Comparison Framework、MCP Background Audit、Direct Integration Count、MCP Integration Count、Integration Reduction、Capability Model Coverage、Context Object Coverage、Discovery Standardization、MCP Schema Contract Coverage、Host Server Boundary Clarity、Local Context Control、Cross Client Reuse、Governance Boundary Clarity、MCP Trace Eval Readiness、MCP A2A Distinction、MCP Background Evaluation、MCP Concept Audit、Host Policy Ownership、MCP Client Server Boundary、Server Capability Declaration、MCP Tool Schema and Result、MCP Resource URI Metadata、MCP Prompt Argument Review、MCP Lifecycle Negotiation、MCP Transport Policy、MCP Roots Boundary、MCP Sampling Control、Host Capability Filtering、MCP Context Budget、MCP Concept Evaluation、MCP Server Implementation Audit、MCP Server Metadata Readiness、MCP Server Capability Declaration、MCP Tool Registry Readiness、MCP Strict Schema Coverage、MCP Handler Execution Coverage、MCP Argument Validation Coverage、MCP Structured Result Coverage、MCP Structured Error Coverage、MCP Resource Scope Coverage、MCP Prompt Template Coverage、MCP Server Transport Policy Coverage、MCP Host Connection Readiness、MCP Server Safety Baseline、MCP Server Trace Readiness、MCP Server Implementation Evaluation、MCP Tool Function Calling Comparison Audit、Protocol Layer Clarity、Tool Discovery Boundary、MCP Capability Scope Coverage、MCP Execution Boundary Clarity、MCP Projection Mapping Coverage、Adapter Separation Coverage、MCP Lifecycle Version Awareness、MCP Governance Registry Import、MCP Security Boundary Enforcement、MCP Use Case Selection Fit、MCP Error Surface Separation、MCP Latency Availability Tradeoff、MCP and Function Calling Comparison、MCP Resource Exposure Audit、Resource URI Validity、Resource Metadata Completeness、Resource List Filtering Boundary、Resource Read Scope Enforcement、MCP Roots Containment、MCP Resource Permission Enforcement、MCP Resource Field Projection Safety、Resource Context Budget Control、Resource Citation Traceability、Untrusted Resource Labeling、Resource Freshness Version Awareness、Resource Template Boundary、Resource Subscription Awareness、Resource Trace Eval Readiness、MCP Resource Evaluation、MCP Prompt Exposure Audit、Prompt Capability Declaration、Prompt Discovery Coverage、Prompt Argument Schema Coverage、Prompt Required Argument Validation、Prompt Rendering Safety、Prompt Role Boundary Enforcement、Prompt Dependency Alignment、Prompt Version Governance、Prompt Eval Binding、Prompt Permission Enforcement、Prompt Injection Containment、Prompt User Control、Prompt List Change Awareness、Prompt Trace Readiness、MCP Prompt Evaluation、MCP Security Sandbox Audit、Server Connection Governance、Authorization Token Binding、Scope Minimization、Roots Sandbox Containment、File Secret Blocking、Network SSRF Protection、MCP Shell Sandbox Enforcement、Prompt Injection Data Boundary、High Risk Confirmation、Sensitive Data Flow Control、Local Credential Isolation、MCP Tenant Isolation、Server Supply Chain Governance、MCP Security Trace Readiness、MCP Security Eval Coverage、MCP Security Evaluation、MCP Integration Surface Audit、MCP Capability Registration Coverage、MCP Namespace Isolation Coverage、MCP IDE Context Routing、MCP Knowledge Citation Traceability、MCP Database Query Governance、MCP Browser Action Governance、MCP Terminal Sandbox Governance、MCP Integration Context Budget Control、MCP Cross Server Data Flow Control、MCP High Risk Approval Coverage、MCP Output Projection Coverage、MCP Integration Trace Readiness、MCP Integration Eval Coverage、MCP Integration Evaluation、A2A Background Audit、Agent Card Completeness、Agent Discovery Readiness、Task Delegation Contract、A2A Task Lifecycle Coverage、A2A Message Structure Coverage、A2A Artifact Reference Coverage、A2A Delegation Context Boundary Control、A2A Permission Boundary、A2A MCP Distinction、A2A Task Failure Handling Coverage、A2A Trace Readiness、A2A Eval Coverage、A2A Background Evaluation、Agent Card Discovery Audit、Agent Card Field Completeness、Agent Skill Declaration Quality、Supported Interface Readiness、Agent Card Security Coverage、Agent Card Version Cache Readiness、Agent Discovery Match Quality、Agent Routing Decision Quality、Extended Agent Card Control、Agent Card Trace Readiness、Agent Card Eval Coverage、Agent Card Evaluation、A2A Task Delegation Audit、A2A Task Contract Coverage、A2A State Transition Validity、A2A Input Required Handling、A2A Artifact Metadata Coverage、A2A Error Semantics Coverage、A2A Retry Idempotency Coverage、A2A Cancellation Coverage、A2A Delegation Permission Boundary、A2A Parallel Aggregation Readiness、A2A Task Trace Readiness、A2A Task Eval Coverage、A2A Task Evaluation、A2A Message Boundary Audit、A2A Message Contract Coverage、A2A Part Typing Coverage、A2A Source Trust Labeling、A2A Instruction Data Separation、A2A Minimal Context Coverage、A2A Reference Over Copy Coverage、A2A Context Policy Enforcement、A2A Sensitive Redaction Coverage、A2A Claim Grounding Coverage、A2A Summary Constraint Retention、A2A Message Trace Readiness、A2A Message Eval Coverage、A2A Message Boundary Evaluation、A2A MCP Boundary Audit、A2A MCP Protocol Classification、A2A Tool Agent Boundary、A2A Autonomy Fit、A2A Lifecycle Placement、A2A MCP Discovery Split、A2A MCP Context Ownership、A2A MCP Permission Separation、A2A Result Artifact Boundary、A2A MCP Trace Linkage、A2A MCP Version Eval Coverage、A2A and MCP Boundary Evaluation、Cross-Agent Security Audit、Cross-Agent Identity Chain Coverage、OBO Scope Binding、Delegation Allowlist Coverage、Permission Attenuation Coverage、Cross-Agent Context Policy Enforcement、Cross-Agent Redelegation Control、Cross-Agent High Risk Confirmation、Cross-Agent Tool Permission Binding、Cross-Agent Result Release Control、Cross-Agent Audit Trace Completeness、Cross-Agent Trust Evidence Verification、Cross-Agent Tenant Isolation、Cross-Agent Security Evaluation、Multi-Agent Failure Audit、Delegation Loop Control、Role Conflict Arbitration、Hallucination Propagation Containment、Context Drift Control、Duplicate Work Budget Control、Multi-Agent State Consistency、Artifact Conflict Control、Multi-Agent Accountability Trace、Policy Chain Enforcement、Collaboration Fit、Termination Handoff Readiness、Multi-Agent Failure Eval Coverage、Multi-Agent Failure Evaluation、A2A System Design Audit、A2A Requirement Clarification、A2A Architecture Module Coverage、A2A Protocol Contract Coverage、A2A Discovery Routing Governance、A2A Runtime State Readiness、A2A Platform Context Boundary Control、A2A Permission Model Coverage、A2A MCP Boundary Clarity、A2A Artifact Governance Coverage、A2A Trace Audit Completeness、A2A Platform Failure Handling Coverage、A2A Eval Observability Coverage、A2A Scalability Idempotency Readiness、A2A System Design Evaluation、Cross-Agent Collaboration System Audit、Cross-Agent Requirement Goal Clarity、Cross-Agent Collaboration Module Coverage、Cross-Agent Registry Routing Governance、Cross-Agent Task Graph Validity、Cross-Agent A2A Lifecycle Alignment、Cross-Agent Context Minimization Enforcement、Cross-Agent Permission Attenuation Binding、Cross-Agent MCP Tool Boundary Governance、Cross-Agent Artifact Evidence Grounding、Cross-Agent Conflict Arbitration Readiness、Cross-Agent Hallucination Propagation Control、Cross-Agent Delegation Loop Containment、Cross-Agent Human Handoff Approval Readiness、Cross-Agent Trace Audit Replay Coverage、Cross-Agent Eval Baseline Regression Coverage、Cross-Agent Cost Latency Budget Control、Cross-Agent Scalability Idempotency Readiness、Cross-Agent Collaboration Fit Control、Cross-Agent Collaboration Evaluation、Tool Protocol Future Audit、Layered Protocol Boundary Clarity、Standardization Extension Balance、Long Task Lifecycle Readiness、Capability Package Completeness、Agent-Centric Autonomy Governance、Tool Safety Metadata Coverage、Provenance Verifiability、Marketplace Governance Readiness、Provider Adapter Migration Control、Auto Generated Tool Review、Workflow Runtime Integration、Behavior Eval Coverage、Human Model Documentation Split、Autonomy Risk Tiering、Responsibility Attribution Trace、Natural Language API Boundary、Agent Operating Layer Governance、Engineer Readiness Coverage、Unsupported Speculation Rate、Tool Protocol Future Evaluation、Skill Definition Audit、Skill Manifest Metadata、Skill Task Goal Clarity、Skill Bundle Completeness、Tool Skill Boundary、Skill Instruction Strategy、Skill Resource Prompt Grounding、Skill Workflow Readiness、Skill Permission Safety、Skill Configuration Reuse、Skill Eval Coverage、Skill Lifecycle Governance、Skill Product Install Governance、Skill Progressive Disclosure、Skill Definition Evaluation、Ecosystem Boundary Audit、Required Field Coverage、Abstraction Classification、Granularity Boundary、Action Trace、Tool Contract、Workflow Control、Skill Bundle、Plugin Packaging、Permission Layering、Eval Layering、Audit Trace Layering、Naming Alias Documentation、Governance Lifecycle、High Risk Approval、Eval Ready、Ecosystem Boundary Evaluation、Skill Manifest Audit、Identity Metadata、Description Quality、Capability Granularity、Input Contract、Output Contract、Tool Dependency Purpose、Resource Prompt Binding、Manifest Workflow Readiness、Skill Manifest Permission Least Privilege、Configuration Schema、Safety Policy、Evaluation Criteria、Examples Trigger Coverage、Version Lifecycle、Audit Readiness、Skill Manifest Evaluation、Skill Lifecycle Audit、Review Before Publish、Install Approval、Enable Scope Control、Permission Reapproval、Configuration Versioning、Running Task Policy、Lifecycle Compatibility Check、Rollout Guard、Skill Rollback Readiness、Dependency Versioning、Lifecycle Audit Log Completeness、Emergency Suspend Readiness、Uninstall Retention、Lifecycle Eval Monitoring、Update Policy Accuracy、Skill Lifecycle Evaluation、Skill Marketplace Audit、Catalog Metadata、Search Discovery、Detail Page Completeness、Review Workflow、Permission Transparency、Install Approval Flow、Rating Quality Balance、Operations Metrics、Duplicate Capability Governance、Admin Permission View、Developer Console Readiness、Security Center Readiness、Recommendation Policy Safety、Lifecycle Visibility、Owner Maintenance、Portal Audit Trace、Skill Marketplace Evaluation、Tool Skill Quality Safety Audit、Tool Schema Clarity、Argument Validation、Execution Reliability、Output Stability、Side Effect Control、Skill Task Quality、Factual Grounding、Completeness Format、Offline Eval Coverage、Online Monitoring、Tool Skill Permission Least Privilege、Data Security Review、Prompt Injection Resilience、High Risk Action Control、Supply Chain Governance、Human Review Readiness、Regression Release Evaluation、Audit Trace Readiness、Quality and Safety Evaluation、MCP A2A Harness Integration、Protocol Capability Registry、MCP Integration、A2A Integration、Capability Discovery Coverage、Namespace Isolation Coverage、Protocol Schema Validity、Protocol Permission Binding、High-Risk Approval Coverage、Context Output Budget Coverage、External Trust Boundary Coverage、A2A Lifecycle Coverage、Protocol Trace Coverage、Protocol Replay Readiness、Protocol Version Capture、Protocol Integration Evaluation、Agent Harness System Design、Runtime Module Coverage、Interface Contract Coverage、Agent State Machine Coverage、Permission Integration Coverage、Context Control Coverage、Execution Isolation Coverage、System Trace Coverage、System Replay Readiness、System Eval Readiness、Recovery Coverage、Harness Version Capture、Enterprise Governance Readiness、Harness System Design Evaluation、Harness Pitfall Audit、Harness Triage Coverage、Permission Overreach、Context Overload Incident、User Edit Overwrite、Shell Hang Incident、Prompt Injection Boundary Miss、Trace Missing Incident、Eval Flakiness Incident、Doom Loop Guard、MCP Tool Overload、Environment Parity Check、Harness Pitfall Review、Browser Agent、Computer Use Agent、GUI Action、Screenshot Observation、Accessibility Tree、UI State Tracking、Misclick Rate、Form Accuracy、High-Risk Action Protection、UI Agent Evaluation、Multi-Agent、Coordinator、Role Assignment、Communication Protocol、Blackboard、Agent Debate、Judge Agent、Consensus / Voting、Conflict Resolution、Duplicate Work Rate、Single-Agent Lift Rate、Multi-Agent Evaluation、Agent Evaluation Formulas、Agent Evaluation、Evaluation Harness、Eval Dataset Bucket Coverage、Environment Reproducibility、Validator Coverage、Weighted Task Success、Diff Scope Safety、Baseline Fairness、Regression Pass Rate、Unsafe Execution Rate、Eval Cost Budget Pass Rate、Flaky Task Rate、Eval Version Capture、Eval Report Completeness、Evaluation Harness Review、Agent Benchmark、Eval Sample、Trajectory Evaluation、Partial Success Score、Trace Completeness、Agent Summary Faithfulness、Claim Support Rate、Recovery Success Rate、Cost-Quality Trade-off、Regression Suite、Agent Evaluation Criteria、Agent Safety、Least Privilege、Tool Permission Matrix、Permission Request、Least Privilege Coverage、Permission Matrix Coverage、Unauthorized Action Block Rate、Secret Access Block Rate、Network Egress Control、Sandbox Enforcement Coverage、Dry Run Coverage、Audit Log Completeness、Irreversible Action Protection、Permission and Sandbox Evaluation、Untrusted Content Boundary、Data Flow Guard、Sensitive Data Filter、External Transfer Evaluation、Sandbox Policy、Human Confirmation、Dry Run、Audit Log、Irreversible Action、Memory Safety、Supply Chain Risk、Safety Alternative、Agent Safety Evaluation、Agent Interview Readiness、Agent Interview Rubric、Agent Answer Coverage、Agent Formula Coverage、Agent Demo Coverage、Trace Metric Coverage、Project Evidence Score、Trade-off Depth、Weak Agent Question、Agent Revision Plan、Agent Interview Review、Tool Skill Developer Experience Audit、Quickstart Path Clarity、Scaffold Completeness、Documentation Example Coverage、Local Debug Readiness、Trace Replay Readiness、Review Feedback Actionability、Security Documentation Coverage、Migration Documentation Coverage、Developer Experience Documentation Evaluation、Composable Workflow Audit、Workflow Graph Validity、Dependency Acyclicity、Workflow IO Contract、Condition Determinism、Workflow State Coverage、Workflow Permission Boundary、Workflow Data Flow Policy、Workflow Idempotency Coverage、Retry Safety、Compensation Readiness、Workflow Human Approval Coverage、Workflow Trace Replay Readiness、Workflow Eval Coverage、Workflow Evaluation、Prompt Injection Defense Audit、Instruction Data Separation、Source Trust Labeling、Taint Propagation、Pre-Tool Policy Check、Risky Tool Isolation、Untrusted Action Blocking、Sensitive Data Control、Prompt Injection High Risk Confirmation、Sandbox Enforcement、Output Redaction Projection、RAG Source Boundary、Multi-Agent Taint Propagation、Prompt Injection Trace Readiness、Prompt Injection Eval Coverage、Prompt Injection Defense Evaluation、Tool Output Trust Audit、Trust Audit Source Metadata Coverage、Trust Level Coverage、Freshness Version Coverage、Access Scope Disclosure、Citation Binding、Citation Support Accuracy、Evidence Chain Completeness、Claim Type Calibration、Confidence Limitation Disclosure、Conflict Resolution Readiness、Summary Provenance Retention、RAG Chunk Citation Accuracy、Multi-Agent Evidence Propagation、Provenance Trace Replay、Citation Forgery Block、Tool Output Trust Eval Coverage、Tool Output Trust Evaluation、RAG Tool Agent Memory Integration Audit、Capability Boundary Clarity、Orchestration Mode Fit、Context Priority Enforcement、Context Budget Allocation、Evidence Preservation、Tool Observation Use、Agent State Update Discipline、Memory Read Relevance、Memory Write Review、Memory Scope Permission、Conflict Resolution Policy、Injection Propagation Control、Sensitive Data Memory Block、Trace Linkage Coverage、Layered Eval Coverage、RAG, Tool, Agent and Memory Integration Evaluation、RAG Agent Storage Audit、Knowledge Base Contract、Document Chunk Version Contract、Sync Delete Propagation、ACL Permission Enforcement、Retrieval Trace Completeness、Prompt Assembly Trace、Citation Version Binding、Agent Definition Versioning、Tool Definition Contract、Tool Call Trace Completeness、Execution Trace Replay Readiness、Memory Privacy Lifecycle、Trace Privacy Retention、Cost Attribution Governance、RAG and Agent Storage Evaluation、Tool Cost Latency Concurrency Audit、Cost Attribution Coverage、Latency Breakdown Coverage、Tool Call Budget Enforcement、Timeout Deadline Coverage、Retry Classification Accuracy、Idempotent Retry Safety、Concurrency Limit Enforcement、Queue Priority Fairness、Rate Limit Quota Handling、Cache Safety Correctness、Batching Partial Success Readiness、Result Trimming Budget Control、Degradation Transparency、Router Performance Awareness、Performance Trace Readiness、Cost Latency Eval Coverage、Tool Performance Evaluation、Tool Use Eval Benchmark Audit、Tool Need Accuracy、No-Tool Overcall Control、Argument Schema Validity、Argument Semantic Accuracy、Sequence Order Accuracy、Observation Grounding Accuracy、Error Recovery Readiness、Safe Failure Handling、Safety Policy Compliance、Tool Simulator Determinism、Trace Replay Coverage、Cost Latency Regression Control、Benchmark Slice Coverage、Regression Release Readiness、Tool-use Benchmark Evaluation、Function MCP A2A Comparison Audit、Layer Boundary Clarity、Function Calling Fit、MCP Integration Fit、A2A Delegation Fit、Object Contract Coverage、Capability Discovery Fit、Lifecycle State Alignment、Context Transfer Boundary、Permission Governance Split、Host Runtime Ownership、Trace Chain Continuity、Eval Linkage、Overengineering Control、Severe Protocol Misuse Rate、Protocol Composition Evaluation、Provider Framework Tool Protocol Audit、Provider Framework Type Clarity、Tool Schema Projection、Tool Choice Mapping、Tool Result Round Trip、Streaming Event Assembly、Parallel Call Alignment、Built-In Tool Boundary、Error Normalization、Provider Adapter Isolation、Framework Escape Hatch、RAG Tool Traceability、Permission Safety Consistency、Migration Eval Coverage、Provider Trace Replay Readiness、Vendor Lock-In Control、Provider Runtime Evaluation、Enterprise MCP Platform Audit、MCP Gateway Readiness、MCP Registry Metadata Completeness、MCP Capability Namespace Isolation、MCP Tool Resource Prompt Contract、MCP Host Client Server Boundary Clarity、MCP OBO Scope Binding、MCP Tenant Isolation Enforcement、MCP Policy Engine Coverage、MCP Sandbox Roots Containment、MCP Context Output Projection、MCP Prompt Injection Taint Propagation、MCP Trace Audit Replay Continuity、MCP Cost Latency Quota Control、MCP Developer Portal Review Readiness、MCP Release Lifecycle Governance、MCP Provider Adapter Compatibility、MCP Eval Regression Coverage、MCP High Availability Readiness、Enterprise MCP Platform Evaluation、Enterprise LLMOps Platform Audit、LLMOps Application Resource Model、LLMOps Release Manifest、Prompt Registry Versioning、RAG KB Permission Governance、GraphRAG、Tool Agent Runtime Control、LLMOps Eval Feedback Loop、LLMOps Trace Observability Readiness、LLMOps Cost Budget Governance、LLMOps Platform Evaluation、长上下文、RAG 与 Agent 的关系、本章小结。
 
-本轮主流平台工具协议对比新增条目：Provider Framework Tool Protocol Audit、Provider Framework Type Clarity、Tool Schema Projection、Tool Choice Mapping、Tool Result Round Trip、Streaming Event Assembly、Parallel Call Alignment、Built-In Tool Boundary、Error Normalization、Provider Adapter Isolation、Framework Escape Hatch、RAG Tool Traceability、Permission Safety Consistency、Migration Eval Coverage、Provider Trace Replay Readiness、Vendor Lock-In Control、Provider Runtime Gate。
+主题导航：
 
-本轮企业 MCP 工具平台设计新增条目：Enterprise MCP Platform Audit、MCP Gateway Readiness、MCP Registry Metadata Completeness、MCP Capability Namespace Isolation、MCP Tool Resource Prompt Contract、MCP Host Client Server Boundary Clarity、MCP OBO Scope Binding、MCP Tenant Isolation Enforcement、MCP Policy Engine Coverage、MCP Sandbox Roots Containment、MCP Context Output Projection、MCP Prompt Injection Taint Propagation、MCP Trace Audit Replay Continuity、MCP Cost Latency Quota Control、MCP Developer Portal Review Readiness、MCP Release Lifecycle Governance、MCP Provider Adapter Compatibility、MCP Eval Regression Coverage、MCP High Availability Readiness、Enterprise MCP Platform Gate。
-
-本轮跨 Agent 协作系统设计新增条目：Cross-Agent Collaboration System Audit、Cross-Agent Requirement Goal Clarity、Cross-Agent Collaboration Module Coverage、Cross-Agent Registry Routing Governance、Cross-Agent Task Graph Validity、Cross-Agent A2A Lifecycle Alignment、Cross-Agent Context Minimization Enforcement、Cross-Agent Permission Attenuation Binding、Cross-Agent MCP Tool Boundary Governance、Cross-Agent Artifact Evidence Grounding、Cross-Agent Conflict Arbitration Readiness、Cross-Agent Hallucination Propagation Control、Cross-Agent Delegation Loop Containment、Cross-Agent Human Handoff Approval Readiness、Cross-Agent Trace Audit Replay Coverage、Cross-Agent Eval Baseline Regression Coverage、Cross-Agent Cost Latency Budget Control、Cross-Agent Scalability Idempotency Readiness、Cross-Agent Collaboration Fit Control、Cross-Agent Collaboration System Gate。
-
-本轮工具协议生态未来演进新增条目：Tool Protocol Future Audit、Layered Protocol Boundary Clarity、Standardization Extension Balance、Long Task Lifecycle Readiness、Capability Package Completeness、Agent-Centric Autonomy Governance、Tool Safety Metadata Coverage、Provenance Verifiability、Marketplace Governance Readiness、Provider Adapter Migration Control、Auto Generated Tool Review Gate、Workflow Runtime Integration、Behavior Eval Coverage、Human Model Documentation Split、Autonomy Risk Tiering、Responsibility Attribution Trace、Natural Language API Boundary、Agent Operating Layer Governance、Engineer Readiness Coverage、Unsupported Speculation Rate、Tool Protocol Future Gate。
-
-本轮 Tool Registry 细化新增条目：Tool Registry Identity Coverage、Tool Description Quality、Schema Contract Coverage、Runtime Metadata Coverage、Tool Permission Binding Coverage、Risk Annotation Coverage、Version Trace Coverage、Lifecycle Policy Pass Rate、Owner SLO Coverage、Tool Eval Binding Coverage、Provider Projection Readiness、Registry Audit Completeness。
-
-本轮 Tool Router 新增条目：Tool Router、Scenario Filter Pass Rate、Permission Filter Pass Rate、Risk Filter Pass Rate、Candidate Recall、Candidate Precision、Candidate Size Pass Rate、Clarification Accuracy、Forced Tool Accuracy、Router Parallel Safety、Provider Capability Compatibility、Router Trace Completeness、Tool Router Gate。
-
-本轮企业 LLMOps 平台新增条目：Enterprise LLMOps Platform Audit、LLMOps Application Resource Model、LLMOps Release Manifest、Prompt Registry Versioning、RAG KB Permission Governance、Tool Agent Runtime Control、LLMOps Eval Feedback Loop、LLMOps Trace Observability Readiness、LLMOps Cost Budget Governance、LLMOps Platform Gate。
-
-本轮 Tool Executor 新增条目：Execution Request Validity、Schema Validation Pass Rate、Permission Enforcement Pass Rate、Execution Mode Accuracy、Async Completion Tracking、Timeout Cancellation Coverage、Idempotency Protection Rate、Unknown State Escalation Rate、Retry Safety Rate、Side Effect Confirmation Coverage、Structured Result Coverage、Executor Trace Completeness、Tool Executor Gate。
-
-本轮 Tool Permission Model 新增条目：Tool Permission Model、Authorization Decision Accuracy、Trusted Context Injection、Tenant Isolation Pass Rate、Tool Permission Enforcement、Object Permission Accuracy、Field Projection Safety、Action Context Policy Accuracy、Prompt Injection Block Rate、Token Audience Validation、Revocation Cache Safety、Error Disclosure Safety、Permission Audit Completeness、Tool Permission Gate。
-
-本轮 Tool Security 新增条目：Tool Security、Prompt Injection Containment、Untrusted Content Isolation、Unauthorized Access Block Rate、Sensitive Data Protection、Tool External Transfer Gate、Dangerous Action Confirmation、SSRF Block Rate、SQL Risk Block Rate、Path Traversal Block Rate、Shell Sandbox Enforcement、Data Flow Policy Pass Rate、Tool Security Audit Completeness、Security Alert Completeness、Safety Eval Regression Pass Rate、Tool Security Gate。
-
-本轮 Tool Trace / Replay 新增条目：Tool Trace Replay Audit、ID Tree Integrity、Argument Lineage Coverage、Permission Trace Completeness、Tool Result Trace Completeness、Audit Event Completeness、Replay Side Effect Safety、Alert Owner Coverage、Eval Linkage Coverage。
-
-本轮 Tool Version Release 新增条目：Tool Version Release Audit、Spec Lint Pass Rate、Schema Backward Compatibility、Description Behavior Guard、Output Compatibility、Permission Policy Compatibility、Version Matrix Capture、Offline Eval Pass Rate、Canary Routing Stability、Canary Quality Guard、Canary Safety Guard、Cost Latency Guard、Tool Release Rollback Readiness、Lifecycle Coverage、Tool Release Gate。
-
-本轮 Enterprise Tool Platform 新增条目：Enterprise Tool Platform Audit、Platform Module Coverage、Platform Interface Contract Coverage、Registry Readiness、Router Governance Coverage、Executor Safety Coverage、Platform Permission Integration Coverage、Platform Safety Guard Coverage、Platform Trace Audit Coverage、Platform Eval Service Coverage、Platform Release Governance Coverage、Platform Tenant Isolation Coverage、Platform Provider Adapter Coverage、High Availability Readiness、Admin Ops Governance Coverage、Enterprise Tool Platform Gate。
-
-本轮 MCP Background 新增条目：MCP Background Audit、Direct Integration Count、MCP Integration Count、Integration Reduction、Capability Model Coverage、Context Object Coverage、Discovery Standardization、MCP Schema Contract Coverage、Host Server Boundary Clarity、Local Context Control、Cross Client Reuse、Governance Boundary Clarity、MCP Trace Eval Readiness、MCP A2A Distinction、MCP Background Gate。
-
-本轮 MCP Concept 新增条目：MCP Concept Audit、Host Policy Ownership、MCP Client Server Boundary、Server Capability Declaration、MCP Tool Schema and Result、MCP Resource URI Metadata、MCP Prompt Argument Review、MCP Lifecycle Negotiation、MCP Transport Policy、MCP Roots Boundary、MCP Sampling Control、Host Capability Filtering、MCP Context Budget、MCP Concept Gate。
-
-本轮 MCP Server 最小实现新增条目：MCP Server Implementation Audit、MCP Server Metadata Readiness、MCP Server Capability Declaration、MCP Tool Registry Readiness、MCP Strict Schema Coverage、MCP Handler Execution Coverage、MCP Argument Validation Coverage、MCP Structured Result Coverage、MCP Structured Error Coverage、MCP Resource Scope Coverage、MCP Prompt Template Coverage、MCP Server Transport Policy Coverage、MCP Host Connection Readiness、MCP Server Safety Baseline、MCP Server Trace Readiness、MCP Server Gate。
-
-本轮 MCP Tool / Function Calling 对比新增条目：MCP Tool Function Calling Comparison Audit、Protocol Layer Clarity、Tool Discovery Boundary、MCP Capability Scope Coverage、MCP Execution Boundary Clarity、MCP Projection Mapping Coverage、Adapter Separation Coverage、MCP Lifecycle Version Awareness、MCP Governance Registry Import、MCP Security Boundary Enforcement、MCP Use Case Selection Fit、MCP Error Surface Separation、MCP Latency Availability Tradeoff、MCP Function Calling Gate。
-
-本轮 MCP Resources 新增条目：MCP Resource Exposure Audit、Resource URI Validity、Resource Metadata Completeness、Resource List Filtering Boundary、Resource Read Scope Enforcement、MCP Roots Containment、MCP Resource Permission Enforcement、MCP Resource Field Projection Safety、Resource Context Budget Control、Resource Citation Traceability、Untrusted Resource Labeling、Resource Freshness Version Awareness、Resource Template Boundary、Resource Subscription Awareness、Resource Trace Eval Readiness、MCP Resource Gate。
-
-本轮 MCP Prompts 新增条目：MCP Prompt Exposure Audit、Prompt Capability Declaration、Prompt Discovery Coverage、Prompt Argument Schema Coverage、Prompt Required Argument Validation、Prompt Rendering Safety、Prompt Role Boundary Enforcement、Prompt Dependency Alignment、Prompt Version Governance、Prompt Eval Binding、Prompt Permission Enforcement、Prompt Injection Containment、Prompt User Control、Prompt List Change Awareness、Prompt Trace Readiness、MCP Prompt Gate。
-
-本轮 MCP Security / Sandbox 新增条目：MCP Security Sandbox Audit、Server Connection Governance、Authorization Token Binding、Scope Minimization、Roots Sandbox Containment、File Secret Blocking、Network SSRF Protection、MCP Shell Sandbox Enforcement、Prompt Injection Data Boundary、High Risk Confirmation、Sensitive Data Flow Control、Local Credential Isolation、MCP Tenant Isolation、Server Supply Chain Governance、MCP Security Trace Readiness、MCP Security Eval Coverage、MCP Security Gate。
-
-本轮 MCP Integration 新增条目：MCP Integration Surface Audit、MCP Capability Registration Coverage、MCP Namespace Isolation Coverage、MCP IDE Context Routing、MCP Knowledge Citation Traceability、MCP Database Query Governance、MCP Browser Action Governance、MCP Terminal Sandbox Governance、MCP Integration Context Budget Control、MCP Cross Server Data Flow Control、MCP High Risk Approval Coverage、MCP Output Projection Coverage、MCP Integration Trace Readiness、MCP Integration Eval Coverage、MCP Integration Gate。
-
-本轮 A2A Background 新增条目：A2A Background Audit、Agent Card Completeness、Agent Discovery Readiness、Task Delegation Contract、A2A Task Lifecycle Coverage、A2A Message Structure Coverage、A2A Artifact Reference Coverage、A2A Context Boundary Control、A2A Permission Boundary、A2A MCP Distinction、A2A Failure Handling Coverage、A2A Trace Readiness、A2A Eval Coverage、A2A Background Gate。
-
-本轮 Agent Card 新增条目：Agent Card Discovery Audit、Agent Card Field Completeness、Agent Skill Declaration Quality、Supported Interface Readiness、Agent Card Security Coverage、Agent Card Version Cache Readiness、Agent Discovery Match Quality、Agent Routing Decision Quality、Extended Agent Card Control、Agent Card Trace Readiness、Agent Card Eval Coverage、Agent Card Gate。
-
-本轮 A2A Task Delegation 新增条目：A2A Task Delegation Audit、A2A Task Contract Coverage、A2A State Transition Validity、A2A Input Required Handling、A2A Artifact Metadata Coverage、A2A Error Semantics Coverage、A2A Retry Idempotency Coverage、A2A Cancellation Coverage、A2A Delegation Permission Boundary、A2A Parallel Aggregation Readiness、A2A Task Trace Readiness、A2A Task Eval Coverage、A2A Task Gate。
-
-本轮 A2A Message Boundary 新增条目：A2A Message Boundary Audit、A2A Message Contract Coverage、A2A Part Typing Coverage、A2A Source Trust Labeling、A2A Instruction Data Separation、A2A Minimal Context Coverage、A2A Reference Over Copy Coverage、A2A Context Policy Enforcement、A2A Sensitive Redaction Coverage、A2A Claim Grounding Coverage、A2A Summary Constraint Retention、A2A Message Trace Readiness、A2A Message Eval Coverage、A2A Message Gate。
-
-本轮 RAG / Agent 平台存储新增条目：RAG Agent Storage Audit、Knowledge Base Contract、Document Chunk Version Contract、Sync Delete Propagation、ACL Permission Enforcement、Retrieval Trace Completeness、Prompt Assembly Trace、Citation Version Binding、Agent Definition Versioning、Tool Definition Contract、Tool Call Trace Completeness、Execution Trace Replay Readiness、Memory Privacy Lifecycle、Trace Privacy Retention、Cost Attribution Governance、RAG Agent Storage Gate。
+- 长上下文与 RAG：从 Long Context、Position Extrapolation、RAG、Agentic RAG 到 RAG Evaluation Formulas，依次理解输入容量、证据检索、上下文构造和答案支持。
+- Agent Runtime 与 Harness：从 Agent、Agent Loop、State Store、Error Handler 到 Harness Reliability Evaluation，理解状态、动作、工具观察、恢复和回放。
+- Tool Registry、Executor 与 Permission：沿 Tool Registry、Tool Executor、Tool Permission Model、Tool Security 和 Tool Trace Replay Audit，拆开工具契约、执行副作用、授权与证据链。
+- Function Calling、MCP 与 A2A：先读 Function Calling Protocol，再读 MCP 的工具、资源、Prompt 和安全边界，最后读 A2A 的任务、状态、上下文和跨 Agent 责任。
+- Code Agent 与 UI Agent：分别从文件、补丁、命令、沙箱、浏览器和界面状态进入实际执行问题。
+- Memory 与组合系统：理解短期状态、长期记忆、RAG、Tool、Agent 之间的优先级、写入策略、冲突和注入传播。
+- Evaluation 与 Safety：用 Agent Evaluation Formulas、Evaluation Harness、Agent Benchmark、Agent Safety Evaluation 和 Agent Interview Evaluation 把质量、安全、成本和证据联系起来。
 
 ## Long Context
 
@@ -230,21 +191,21 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 产品意义：权限过滤应前置到 retrieval、rerank、context construction 和日志写入，而不是只在前端隐藏引用链接。
 
-## RAG Freshness Gate
+## RAG Freshness Evaluation
 
-一句话定义：RAG freshness gate 是检查文档版本、更新时间、失效状态、索引同步和缓存命中是否满足当前业务口径的门禁。
+一句话定义：RAG freshness evaluation 用来判断文档版本、更新时间、失效状态、索引同步和缓存命中是否符合当前业务口径。
 
 常见误区：只要模型引用了“相关”文档就算通过。企业 RAG 中，旧版本证据经常比无证据更危险，因为它会让错误答案显得可信。
 
-## RAG Product Gate
+## RAG Product Evaluation
 
-一句话定义：RAG product gate 是 RAG 产品上线前的综合门禁，覆盖 retrieval recall、context precision、evidence support、citation accuracy、abstention accuracy、permission filter、stale evidence、P95 latency、unit cost、eval ready、feedback loop 和 business metric。
+一句话定义：RAG product evaluation 是 RAG 产品的综合评价框架，覆盖 retrieval recall、context precision、evidence support、citation accuracy、abstention accuracy、permission filter、stale evidence、P95 latency、unit cost、eval ready、feedback loop 和 business metric。
 
-面试表达：RAG 产品不能只看最终答案正确率。检索、证据、引用、拒答、权限、时效、成本和运营闭环都要过线，才说明它能进入企业工作流。
+面试表达：RAG 产品不能只看最终答案正确率。检索、证据、引用、拒答、权限、时效、成本和运营闭环都要分别达到任务要求，才能说明它适合进入企业工作流。
 
-## RAG Incident Gate
+## RAG Incident Review
 
-一句话定义：RAG incident gate 是面向事故复盘和回归测试的门禁，要求 retrieval、context、citation、permission、freshness、abstention、latency / cost 和线上反馈都能定位和量化。
+一句话定义：RAG incident review 是面向事故复盘和回归测试的分析框架，要求 retrieval、context、citation、permission、freshness、abstention、latency / cost 和线上反馈都能定位和量化。
 
 面试表达：RAG 事故复盘要输出 root cause，而不是只写“模型幻觉”。每个 bad case 都应能回答正确证据是否存在、是否召回、是否进入 prompt、是否被正确引用、是否有权限和是否过期。
 
@@ -260,7 +221,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 风险：成本和延迟更高，容易 query drift、过度检索、引用错误、检索注入和越权证据返回。
 
-面试表达：Agentic RAG 不是检索越多越好，而是每轮检索都要服务证据缺口，并用 trace、引用和门禁证明答案可追溯。
+面试表达：Agentic RAG 不是检索越多越好，而是每轮检索都要服务证据缺口，并用 trace、引用和可复核指标说明答案能否追溯。
 
 ## Active Retrieval
 
@@ -328,9 +289,99 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 常见错误：引用存在但不相关、引用旧版本文档、引用背景段落却不支持结论、引用用户无权访问的文档。
 
-## Agentic RAG Gate
+## RAG Evaluation Formulas
 
-一句话定义：Agentic RAG gate 是基于 context precision / recall、evidence support、citation accuracy、query drift、conflict count、权限和成本的上线门禁。
+前面的条目分别介绍了 recall、precision、evidence support 和 citation accuracy。把它们用于实验时，必须先固定“什么算一条证据”“什么算被支持”。否则同一个系统只要把 document、chunk 或 sentence 换成不同统计单位，就可能得到看似不同、实际不可比较的分数。
+
+### 小白视角：先把四类对象数清楚
+
+设一条问题为 \(q\)，评估集中的问题集合为 \(Q\)。`gold evidence` 是人工或规则预先标出的、足以回答问题的证据单位，可以是文档、chunk、段落或句子，但一套实验必须始终使用同一种粒度。检索器返回的 top-\(k\) 证据记为 \(R_k(q)\)，最终真正放进 prompt 的证据记为 \(C(q)\)。答案则先拆成若干个可以单独判断的 `atomic claim`，这些 claim 构成集合 \(A(q)\)。
+
+如果问题没有可判定的 gold evidence，就不能把它混进普通 Recall@k 的分母。它应单独进入“是否应该拒答”“是否需要澄清”或开放域覆盖率的切片；否则检索器可能因为没有标准答案而被错误扣分。
+
+### Retrieval Recall@k：衡量证据是否找得到
+
+$$
+\operatorname{Recall}@k
+=
+\frac{1}{|Q'|}
+\sum_{q\in Q'}
+\frac{|G(q)\cap R_k(q)|}{|G(q)|},
+\qquad
+Q'=\{q\in Q\mid |G(q)|>0\}
+$$
+
+这里的 \(G(q)\) 是问题 \(q\) 的 gold evidence 集合，\(R_k(q)\) 是检索器返回的前 \(k\) 个证据，\(Q'\) 是有明确 gold evidence 的问题集合。小白可以把它理解为：“标准答案所需要的证据，有多少至少被找到了。”例如某问题需要两个证据，top-5 找到其中一个，该题的召回率就是 \(1/2\)，不是因为返回了五条结果就算满分。
+
+专家需要注意三点。第一，多个 gold evidence 可能是可替代证据，不能机械要求全部命中；应在标注中声明“任一命中”还是“全部命中”。第二，权限过滤后的可见证据才是用户语境中的候选，不能用用户无权访问的全库结果计算有效召回。第三，Recall@k 只说明证据进入候选集，不说明它排得靠前、进入了上下文或最终支持了答案。
+
+### Context Precision：控制进入上下文的噪声
+
+$$
+\operatorname{ContextPrecision}
+=
+\frac{1}{|Q'|}
+\sum_{q\in Q'}
+\frac{|C(q)\cap G(q)|}{|C(q)|},
+\qquad |C(q)|>0
+$$
+
+该式回答：“最终塞给模型的证据里，有多大比例真正相关？”如果上下文放了 8 个片段，其中只有 3 个和问题有关，context precision 就是 \(3/8\)。它与 Recall@k 是一对互补指标：只追求召回，可能把大量噪声塞进上下文；只追求精度，又可能漏掉回答所需的第二条证据。
+
+当 \(C(q)\) 为空时，不能悄悄把该题 precision 记成 1。应把它标记为“无上下文”，再根据实验目的分别报告检索失败、系统正确拒答或系统错误强答。若证据有排序，还可以报告前 \(m\) 个上下文的 precision，并说明 \(m\) 与模型上下文预算的关系。
+
+### Mean Reciprocal Rank：衡量正确证据是否靠前
+
+$$
+\operatorname{MRR}
+=
+\frac{1}{|Q'|}
+\sum_{q\in Q'}
+\frac{1}{\operatorname{rank}_q},
+\qquad
+\operatorname{rank}_q=\min\{i\mid r_i\text{ 是 }q\text{ 的相关证据}\}
+$$
+
+如果第一个相关证据排在第 1 位，该题贡献 \(1\)；排在第 4 位，贡献 \(1/4\)；top-\(k\) 中没有相关证据，贡献 \(0\)。因此 MRR 比 Recall@k 更关心“正确证据是不是早早出现”。在有限上下文预算下，正确证据越靠前，越有机会被保留并被模型使用。
+
+MRR 只看第一个相关结果，不能衡量需要多条证据的完整任务。多跳问答还应同时报告 evidence coverage 或 Recall@k；不能因为第一条证据排名很高，就宣称所有关键事实都已找到。
+
+### Evidence Support Rate：检查答案主张是否有依据
+
+$$
+\operatorname{EvidenceSupportRate}
+=
+\frac{\sum_{q\in Q'}\sum_{a\in A(q)}
+w_a\,\mathbf{1}[\operatorname{supported}(a)]}
+{\sum_{q\in Q'}\sum_{a\in A(q)}w_a}
+$$
+
+这里的 \(a\) 是答案中的 atomic claim，\(w_a\) 是 claim 的重要性权重，\(\operatorname{supported}(a)\) 表示上下文证据足以支持该 claim。小白可以把一句长答案拆成“价格是多少”“何时生效”“有哪些例外”三个可核对断言，再逐个判断，而不是用整段答案的流畅程度代替证据检查。
+
+专家需要定义支持关系：直接明示、多个片段合并推导、允许的数值计算和合理的限定条件，应该分别标注；“主题相关”不等于“足以支持结论”。如果一个 claim 含有两个互相独立的事实，最好拆成两个 atomic claim，否则一个半真半假的长句会虚高分数。没有 claim 的空答案不应自动得到满分。
+
+### Citation Support Rate：检查引用是否真的支持结论
+
+$$
+\operatorname{CitationSupportRate}
+=
+\frac{\sum_{q\in Q'}\sum_{a\in A(q)}
+w_a\,\mathbf{1}[\operatorname{validCitation}(a)]}
+{\sum_{q\in Q'}\sum_{a\in A(q)}w_a}
+$$
+
+其中 \(\operatorname{validCitation}(a)\) 不仅要求引用存在，还要求引用指向当前用户有权访问的来源、版本和片段，并且确实支持 claim。若所有 claim 都被纳入统计，则
+
+$$
+\operatorname{UnsupportedClaimRate}
+=1-\operatorname{EvidenceSupportRate}
+$$
+
+这两个指标仍然不等同于事实正确率：答案可能碰巧正确却没有证据，也可能引用了真实文档但把它解释错。实际报告应同时列出检索召回、上下文精度、证据支持、引用支持、权限泄露和新鲜度，保留每个失败样本的 claim、证据 ID、版本和权限范围，才能解释分数变化。
+
+## Agentic RAG Evaluation
+
+一句话定义：Agentic RAG evaluation 是基于 context precision / recall、evidence support、citation accuracy、query drift、conflict count、权限和成本的综合评价。
 
 面试表达：Agentic RAG 的评估不能只看最终答案，要同时审计 retrieval trace、证据覆盖、引用正确、冲突处理、注入拦截和成本。
 
@@ -522,11 +573,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：工具失败不能只让模型盲目再试一次。runtime 要先分类错误，再决定是否可恢复以及恢复后状态是否一致。
 
-## Runtime Gate
+## Runtime Reliability Evaluation
 
-一句话定义：runtime gate 是 agent runtime 的工程门禁，检查 session isolation、phase transition、context budget、adapter success、execution standardization、error recovery、checkpoint coverage、cancel / timeout handling 和 trace completeness。
+一句话定义：runtime reliability evaluation 用来检查 agent runtime 的 session isolation、phase transition、context budget、adapter success、execution standardization、error recovery、checkpoint coverage、cancel / timeout handling 和 trace completeness。
 
-面试表达：runtime gate 证明的是执行内核可靠，不是证明模型代码能力强。它回答“这套 agent loop 能不能长期、可恢复、可审计地跑下去”。
+面试表达：runtime reliability evaluation 证明的是执行内核是否可靠，不是模型代码能力是否强。它回答“这套 agent loop 能不能长期、可恢复、可审计地跑下去”。
 
 ## Agent Loop
 
@@ -540,7 +591,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 ## Harness Loop Audit
 
-一句话定义：harness loop audit 是对 agent harness 执行闭环的审计，检查动作解析、权限、工具执行、observation 使用、状态更新、trace、预算和最终验收是否一致。
+一句话定义：harness loop audit 是对 agent harness 执行闭环的审计，检查动作解析、权限、工具执行、observation 使用、状态更新、trace、预算和最终状态验证是否一致。
 
 工程意义：它把“agent 看起来完成了”拆成可检查证据。测试失败却最终声称完成、危险命令被 prompt 禁止但系统仍执行、trace 缺字段，都应该被审计暴露。
 
@@ -578,13 +629,13 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 为什么重要：模型可以提出动作，但系统必须验证动作。越高权限的工具，越要依赖 controller 做 schema、参数、权限和二次确认。
 
-面试表达：可靠 agent 的核心不只是更强模型，还包括 controller、trace、permission gate 和 budget gate。
+面试表达：可靠 agent 的核心不只是更强模型，还包括 controller、trace、权限控制和预算控制。
 
-## Permission Gate
+## Permission Evaluation
 
-一句话定义：permission gate 是在工具执行、文件修改、命令运行、网络访问和外部副作用前进行系统层授权检查的门禁。
+一句话定义：permission evaluation 是在工具执行、文件修改、命令运行、网络访问和外部副作用前进行系统层授权检查的评价框架。
 
-工程意义：权限门禁不能只靠模型自觉。只读、写文件、执行测试、高风险 shell、网络访问和外部 API 应有不同策略，并在 trace 中记录允许、拒绝或人工确认。
+工程意义：权限控制不能只靠模型自觉。只读、写文件、执行测试、高风险 shell、网络访问和外部 API 应有不同策略，并在 trace 中记录允许、拒绝或人工确认。
 
 ## Replay Readiness
 
@@ -592,11 +643,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：没有 replay，就很难判断新模型、新 prompt 或新工具策略是否真的更好，也很难复盘一次失败来自模型、工具、权限、状态还是环境。
 
-## Harness Gate
+## Harness Reliability Evaluation
 
-一句话定义：harness gate 是 coding agent harness 的上线门禁，综合约束动作解析合法率、工具执行成功率、未授权执行率、高风险确认覆盖率、observation 使用率、状态更新覆盖率、trace 完整率和预算超限率。
+一句话定义：harness reliability evaluation 是 coding agent harness 的综合评价，关注动作解析合法率、工具执行成功率、未授权执行率、高风险确认覆盖率、observation 使用率、状态更新覆盖率、trace 完整率和预算超限率。
 
-面试表达：harness gate 不看单个漂亮 demo，而是看系统是否能持续把模型决策变成可执行、可控、可观测、可复盘的动作闭环。
+面试表达：harness reliability evaluation 不看单个漂亮 demo，而是看系统是否能持续把模型决策变成可执行、可控、可观测、可复盘的动作闭环。
 
 ## Tool Registry
 
@@ -632,7 +683,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：risk protection coverage 是高风险工具被默认阻断、人工确认、dry run、沙箱或权限策略保护的比例。
 
-上线要求：写文件、执行命令、网络访问、secret 和 destructive action 的保护覆盖率应接近 1。
+工程要求：写文件、执行命令、网络访问、secret 和 destructive action 的保护覆盖率应接近 1。
 
 ## Output Normalization Coverage
 
@@ -656,13 +707,13 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：untrusted tool output boundary 是把网页、文件、issue、日志、测试输出和第三方 API 返回标记为 observation / evidence，而不是系统指令的边界。
 
-安全要求：不可信工具返回不能覆盖系统策略、开发者指令、权限门禁、高风险确认或外部传输规则。
+安全要求：不可信工具返回不能覆盖系统策略、开发者指令、权限控制、高风险确认或外部传输规则。
 
-## Tool Registry Gate
+## Tool Registry Governance Evaluation
 
-一句话定义：tool registry gate 是工具注册表上线前的综合门禁，覆盖 registry 完整性、schema 严格性、权限绑定、风险保护、输出标准化、版本覆盖、trace 就绪和不可信输出边界。
+一句话定义：tool registry governance evaluation 是工具注册表的综合评价，覆盖 registry 完整性、schema 严格性、权限绑定、风险保护、输出标准化、版本覆盖、trace 就绪和不可信输出边界。
 
-面试表达：Tool Registry gate 评估的是工具治理能力，不是模型是否偶然会用某个工具。只要高风险工具未绑定确认、secret 工具暴露、输出不结构化或版本缺失，就不应直接进入生产级 Agent。
+面试表达：Tool Registry governance evaluation 评估的是工具治理能力，不是模型是否偶然会用某个工具。高风险工具未绑定确认、secret 工具暴露、输出不结构化或版本缺失时，都不适合直接进入生产级 Agent。
 
 ## Tool Registry Identity Coverage
 
@@ -688,7 +739,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：模型不需要知道 endpoint，但 runtime 必须知道如何执行、限流、取消、重试和记录结果。
 
-## Tool Permission Binding Coverage
+## Registry Tool Permission Binding Coverage
 
 一句话定义：tool permission binding coverage 是工具声明工具级权限、对象级数据范围和字段级策略，并能被 router / runtime 使用的比例。
 
@@ -698,7 +749,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：risk annotation coverage 是工具标注 risk level、side effect、confirmation、idempotency 和 auto-execution policy 的比例。
 
-上线门禁：发送邮件、退款、删除、转账、权限修改等副作用工具没有确认和幂等保护时，不应进入自动工具调用路径。
+工程要求：发送邮件、退款、删除、转账、权限修改等副作用工具如果没有确认和幂等保护，不应进入自动工具调用路径。
 
 ## Version Trace Coverage
 
@@ -722,7 +773,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：tool eval binding coverage 是 registry item 绑定 eval dataset、golden trace、安全样例、最近回归结果和上线阈值的比例。
 
-面试表达：工具 description 或 schema 改动后必须跑 eval；如果工具选择、参数准确率或安全用例下降，registry 发布应阻断或要求审批。
+面试表达：工具 description 或 schema 改动后必须跑 eval；如果工具选择、参数准确率或安全用例下降，registry 发布应暂停扩大影响范围，或进入人工复核。
 
 ## Provider Projection Readiness
 
@@ -804,11 +855,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：没有 executor trace，就无法判断失败来自参数、权限、下游超时、取消、幂等命中、未知状态还是结果包装。
 
-## Tool Executor Gate
+## Tool Executor Reliability Evaluation
 
-一句话定义：tool executor gate 是综合请求有效性、schema、权限、执行模式、异步跟踪、超时取消、幂等、未知状态、重试安全、确认、结构化结果和 trace 的上线门禁。
+一句话定义：tool executor reliability evaluation 是对请求有效性、schema、权限、执行模式、异步跟踪、超时取消、幂等、未知状态、重试安全、确认、结构化结果和 trace 的综合评价。
 
-工程价值：Executor gate 的核心不是证明工具“能跑”，而是证明工具动作能被安全执行、失败可恢复、状态可解释、结果可审计。
+工程价值：Executor reliability evaluation 的核心不是证明工具“能跑”，而是说明工具动作能否安全执行、失败能否恢复、状态能否解释、结果能否审计。
 
 ## Tool Permission Model
 
@@ -888,11 +939,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：没有权限审计，越权、误拒、跨租户投诉和安全复盘都无法定位责任边界。
 
-## Tool Permission Gate
+## Tool Permission Evaluation
 
-一句话定义：tool permission gate 是综合授权决策、可信上下文、租户隔离、工具权限、对象权限、字段投影、动作上下文、prompt injection 阻断、最小权限、token audience、缓存撤销、错误脱敏和审计完整性的上线门禁。
+一句话定义：tool permission evaluation 是对授权决策、可信上下文、租户隔离、工具权限、对象权限、字段投影、动作上下文、prompt injection 阻断、最小权限、token audience、缓存撤销、错误脱敏和审计完整性的综合评价。
 
-工程价值：Tool Permission Gate 的目标不是让模型“知道自己不能做什么”，而是让 runtime 在可信身份上下文下强制决定什么能执行、什么数据能返回、什么动作必须确认或拒绝。
+工程价值：Tool Permission evaluation 的目标不是让模型“知道自己不能做什么”，而是让 runtime 在可信身份上下文下强制决定什么能执行、什么数据能返回、什么动作必须确认或拒绝。
 
 ## Tool Security
 
@@ -900,7 +951,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：工具安全不是提示词里写“不要做危险动作”，而是让 Router、Executor、权限服务、DLP、确认、沙箱、trace 和回归 eval 共同限制模型输出能产生的真实副作用。
 
-## Prompt Injection Containment
+## Tool Security Prompt Injection Containment
 
 一句话定义：prompt injection containment 是直接或间接提示注入样本中，不可信内容被隔离为 data、没有驱动高风险工具或覆盖上层指令的比例。
 
@@ -924,9 +975,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 常见事故：内部工具返回 payment token、内部备注或隐私字段后，模型把它写进上下文、日志或外部邮件。
 
-## Tool External Transfer Gate
+## Tool External Transfer Evaluation
 
-一句话定义：tool external transfer gate 是内部数据传给邮件、网页、第三方 API、外部搜索、IM、工单评论或社交发布前的权限、DLP、目的地、确认和审计门禁。
+一句话定义：tool external transfer evaluation 关注内部数据传给邮件、网页、第三方 API、外部搜索、IM、工单评论或社交发布前的权限、DLP、目的地、确认和审计要求。
 
 边界：外部发送工具即使是“只发草稿”，也要区分内部收件人、外部域名、敏感字段、用户确认和可追责 trace。
 
@@ -964,7 +1015,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：data flow policy pass rate 衡量敏感数据从内部工具流向外部工具、长期 memory、跨租户上下文或最终回答时，是否被 allowed sinks / forbidden sinks 策略正确处理。
 
-面试表达：数据流控制回答的是“这份数据可以去哪里”，它和“用户能不能调用工具”是两层不同门禁。
+面试表达：数据流控制回答的是“这份数据可以去哪里”，它和“用户能不能调用工具”是两层不同的控制与评估问题。
 
 ## Tool Security Audit Completeness
 
@@ -984,11 +1035,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：工具安全 eval 要基于完整 trace，不应只让 LLM judge 看最终回答是否“看起来安全”。
 
-## Tool Security Gate
+## Tool Security Evaluation
 
-一句话定义：tool security gate 是综合 prompt injection containment、不可信内容隔离、越权阻断、敏感数据保护、外部传输门禁、危险动作确认、SSRF / SQL / 路径 / shell 防护、数据流、审计、告警和安全回归的上线门禁。
+一句话定义：tool security evaluation 是对 prompt injection containment、不可信内容隔离、越权阻断、敏感数据保护、外部传输控制、危险动作确认、SSRF / SQL / 路径 / shell 防护、数据流、审计、告警和安全回归的综合评价。
 
-工程价值：Tool Security Gate 的目标是证明危险工具没有被不可信内容驱动、敏感数据没有越界流动、外部副作用经过确认和审计，且这些能力能在版本变化后持续回归。
+工程价值：Tool Security evaluation 的目标是证明危险工具没有被不可信内容驱动、敏感数据没有越界流动、外部副作用经过确认和审计，且这些能力能在版本变化后持续回归。
 
 ## Tool Trace Replay Audit
 
@@ -1128,9 +1179,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 工程价值：旧版本下线后仍要解释历史 trace、支持 replay 和处理未完成任务，不能直接删除旧 spec。
 
-## Tool Release Gate
+## Tool Release Governance Evaluation
 
-一句话定义：tool release gate 是基于 spec lint、schema 兼容、description、输出、权限、版本矩阵、eval、灰度、质量、安全、成本、回滚和生命周期的综合发布门禁。
+一句话定义：tool release governance evaluation 是基于 spec lint、schema 兼容、description、输出、权限、版本矩阵、eval、灰度、质量、安全、成本、回滚和生命周期的综合发布评价。
 
 面试表达：工具版本发布要把 spec、模型行为、runtime 执行和安全策略当成一个整体灰度，而不是只部署一段后端代码。
 
@@ -1178,7 +1229,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 ## Platform Safety Guard Coverage
 
-一句话定义：platform safety guard coverage 衡量 prompt injection 隔离、DLP、外部传输、危险动作确认、SSRF / SQL / path / shell 边界和数据流策略是否进入统一安全门禁。
+一句话定义：platform safety guard coverage 衡量 prompt injection 隔离、DLP、外部传输、危险动作确认、SSRF / SQL / path / shell 边界和数据流策略是否进入统一安全控制体系。
 
 面试表达：Safety Guard 应结合规则、策略、上下文标签和 runtime 信息，而不是只让 LLM 做一次分类。
 
@@ -1222,11 +1273,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：admin ops governance coverage 衡量管理后台是否对工具创建、权限放宽、风险等级调整、发布、回滚、审计查询和 provider 配置修改做强权限和审批控制。
 
-常见事故：工具执行层很安全，但后台超级权限过宽，导致任何人都能放宽工具权限或跳过发布门禁。
+常见事故：工具执行层很安全，但后台超级权限过宽，导致任何人都能放宽工具权限或跳过发布条件。
 
-## Enterprise Tool Platform Gate
+## Enterprise Tool Platform Evaluation
 
-一句话定义：enterprise tool platform gate 是基于模块覆盖、接口契约、Registry、Router、Executor、权限、安全、trace、eval、发布、多租户、provider、HA 和后台治理的综合上线门禁。
+一句话定义：enterprise tool platform evaluation 是基于模块覆盖、接口契约、Registry、Router、Executor、权限、安全、trace、eval、发布、多租户、provider、HA 和后台治理的综合评价。
 
 面试表达：企业工具平台的核心不是 function calling，而是把工具能力放进可注册、可路由、可执行、可授权、可审计、可评估、可灰度和可回滚的治理闭环。
 
@@ -1292,7 +1343,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 ## Final Status Consistency
 
-一句话定义：final status consistency 是 Agent 最终状态和测试、验证器、工具状态或业务验收结果一致的比例。
+一句话定义：final status consistency 是 Agent 最终状态和测试、状态验证器、工具状态或业务结果一致的比例。
 
 常见失败：测试失败但最终声称修复完成，权限拒绝但最终声称动作已执行。
 
@@ -1308,9 +1359,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 为什么重要：好的生产 trace 应该能沉淀为下一轮 evaluation harness 的样本。
 
-## Trace Replay Gate
+## Trace Replay Readiness Evaluation
 
-一句话定义：trace replay gate 是基于 trace schema、span schema、span tree、时间线、artifact、版本捕获、replay readiness、隐私脱敏、错误归因、最终状态一致、指标导出和评估导出的可观测性门禁。
+一句话定义：trace replay readiness evaluation 是对 trace schema、span schema、span tree、时间线、artifact、版本捕获、replay readiness、隐私脱敏、错误归因、最终状态一致、指标导出和评估导出的可观测性综合评价。
 
 面试表达：Agent 可观测性的目标不是记录一切，而是在隐私和成本可控的前提下让关键行为可解释、可回放、可评估。
 
@@ -1336,7 +1387,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 ## False Completion Rate
 
-一句话定义：false completion rate 是 Agent 最终声称任务完成，但业务系统状态、工具结果或验收器显示未完成的比例。
+一句话定义：false completion rate 是 Agent 最终声称任务完成，但业务系统状态、工具结果或状态验证器显示未完成的比例。
 
 产品意义：这是 Agent 产品中的高风险失败模式。它会让用户以为任务已经执行，实际后台没有成功、被阻断或仍处于 pending。
 
@@ -1346,15 +1397,15 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 工程要求：工具结果只能作为数据，不能覆盖系统策略、用户授权、工具权限或高风险确认流程。
 
-## Agent Incident Gate
+## Agent Incident Review
 
-一句话定义：agent incident gate 是面向 Agent 事故复盘和回归测试的门禁，覆盖任务成功、计划可执行、工具选择、参数合法、工具执行、observation 使用、状态更新、人审确认、误报完成、越权动作、预算超限、trace 完整和工具结果注入阻断。
+一句话定义：agent incident review 是面向 Agent 事故复盘和回归测试的分析框架，覆盖任务成功、计划可执行、工具选择、参数合法、工具执行、observation 使用、状态更新、人审确认、误报完成、越权动作、预算超限、trace 完整和工具结果注入阻断。
 
-面试表达：Agent 事故复盘要回答“为什么模型错误被系统执行或被系统误报为完成”。如果 trace、权限、人审、预算或业务验收缺失，就不能把失败归因成单纯模型能力问题。
+面试表达：Agent 事故复盘要回答“为什么模型错误被系统执行或被系统误报为完成”。如果 trace、权限、人审、预算或业务结果记录缺失，就不能把失败归因成单纯模型能力问题。
 
-## Agent Gate
+## Agent Reliability Evaluation
 
-一句话定义：agent gate 是 agent 上线前的硬门禁，用任务成功率、工具选择准确率、参数合法率、观察使用率、预算超限率和未授权动作率决定是否放行。
+一句话定义：agent reliability evaluation 是 agent 的综合可靠性评价，使用任务成功率、工具选择准确率、参数合法率、观察使用率、预算超限率和未授权动作率等指标描述系统行为。
 
 常见指标：task success rate、tool selection accuracy、argument validity、observation use rate、state update coverage、budget overrun rate、unauthorized action rate 和 stop correctness。
 
@@ -1366,7 +1417,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 和 Agent demo 区别：demo 通常验证模型能否调用工具；产品要证明任务边界清楚、自动化层级合适、高风险动作有人审、失败可恢复、越权可阻断、成本和延迟可控，并且业务指标有持续反馈。
 
-面试表达：Agent 产品不是“越自主越好”，而是让模型在受控范围内完成可验证任务。产品经理、算法、工程、安全和业务 owner 要共同定义门禁，而不是只看模型生成过程是否像人在思考。
+面试表达：Agent 产品不是“越自主越好”，而是让模型在受控范围内完成可验证任务。产品经理、算法、工程、安全和业务 owner 要共同定义成功标准，而不是只看模型生成过程是否像人在思考。
 
 ## Workflow-Agent Hybrid
 
@@ -1378,7 +1429,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：agent automation level 是 Agent 产品的自动化层级，例如 suggest、draft、semi-auto、approval 和 auto。
 
-产品含义：自动化层级是风险和验证能力的结果，不是模型能力越强就越自动。高风险任务如果缺少权限、人审、验收器、回滚和 trace，应停留在 copilot、review 或 approval 形态。
+产品含义：自动化层级是风险和验证能力的结果，不是模型能力越强就越自动。高风险任务如果缺少权限、人审、状态验证器、回滚和 trace，应停留在 copilot、review 或 approval 形态。
 
 ## Agent Product Trace
 
@@ -1420,7 +1471,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：unauthorized action rate 是 Agent 发起未授权工具调用、越权数据访问、越权外发或越权修改的比例。
 
-上线要求：严重越权不能被平均任务成功率掩盖。很多企业 Agent 门禁会把未授权动作率设为零容忍指标。
+工程要求：严重越权不能被平均任务成功率掩盖。很多企业 Agent 会把未授权动作率设为零容忍指标，并单独按风险等级报告。
 
 ## Budget Overrun Rate
 
@@ -1428,11 +1479,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 产品意义：Agent 往往多轮调用模型和工具，如果没有预算和停止条件，长尾任务会吞掉延迟和成本。
 
-## Agent Product Gate
+## Agent Product Evaluation
 
-一句话定义：agent product gate 是 Agent 产品上线前的综合门禁，覆盖任务成功、工具执行、高风险确认、失败恢复、状态更新、观察使用、trace 覆盖、越权动作、预算超限、P95 延迟、单位成本、评估集、反馈闭环和业务指标。
+一句话定义：agent product evaluation 是 Agent 产品的综合评价，覆盖任务成功、工具执行、高风险确认、失败恢复、状态更新、观察使用、trace 覆盖、越权动作、预算超限、P95 延迟、单位成本、评估集、反馈闭环和业务指标。
 
-面试表达：Agent 产品门禁比普通 LLM 应用更严格，因为 Agent 会改变外部状态。只要高风险确认、越权、trace 或预算不过线，就应该先降级到建议、草稿、review 或 approval 形态。
+面试表达：Agent 产品的评价需要比普通 LLM 应用更严格，因为 Agent 会改变外部状态。高风险确认、越权、trace 或预算无法满足要求时，应先降级到建议、草稿、review 或 approval 形态。
 
 ## Tool Use
 
@@ -1492,7 +1543,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：range constraint 用 `minimum`、`maximum` 等字段限制数值范围。
 
-工程价值：对 `top_k`、`limit`、`timeout`、`amount` 等影响成本、延迟或风险的参数，范围约束应作为硬门禁。
+工程价值：对 `top_k`、`limit`、`timeout`、`amount` 等影响成本、延迟或风险的参数，范围约束应作为硬性条件。
 
 ## Business Validation
 
@@ -1506,11 +1557,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 工程边界：不能为了提高修复率自动改金额、收件人、删除路径、权限范围或其他高风险业务含义。高风险不确定性应转为澄清或确认。
 
-## Schema Gate
+## Schema Validation Evaluation
 
-一句话定义：schema gate 是工具参数上线门禁，综合 schema valid rate、required pass rate、type valid rate、enum valid rate、pattern valid rate、range valid rate、additional properties block rate、business rule pass rate 和 repair success rate。
+一句话定义：schema validation evaluation 是工具参数的综合评价，关注 schema valid rate、required pass rate、type valid rate、enum valid rate、pattern valid rate、range valid rate、additional properties block rate、business rule pass rate 和 repair success rate。
 
-面试表达：好的 schema gate 会把格式错误、业务错误和可修复错误分开报告，而不是只给一个“能不能执行”的布尔值。
+面试表达：好的 schema validation evaluation 会把格式错误、业务错误和可修复错误分开报告，而不是只给一个“能不能执行”的布尔值。
 
 ## Tool Call
 
@@ -1610,11 +1661,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：没有 router trace，就无法解释模型为什么没看到某个工具，或为什么看到了不该看的工具。
 
-## Tool Router Gate
+## Tool Router Evaluation
 
-一句话定义：tool router gate 是综合候选召回、候选精确率、场景过滤、权限过滤、风险过滤、澄清、tool choice、并行安全、provider capability、成本预算和 trace 的上线门禁。
+一句话定义：tool router evaluation 是对候选召回、候选精确率、场景过滤、权限过滤、风险过滤、澄清、tool choice、并行安全、provider capability、成本预算和 trace 的综合评价。
 
-面试表达：Router gate 的核心不是让模型少几个工具，而是证明每次暴露给模型的工具集合都相关、授权、安全、可负担、可解释。
+面试表达：Router evaluation 的核心不是让模型少几个工具，而是说明每次暴露给模型的工具集合都相关、授权、安全、可负担、可解释。
 
 ## Auto Tool Choice
 
@@ -1674,7 +1725,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：rate limit pass rate 是每轮 tool calls 数量、每工具并发数、每用户并发数和全局队列约束都未超限的比例。
 
-工程价值：并行工具调用会增加瞬时压力，限流门禁能防止模型一次生成过多外部请求。
+工程价值：并行工具调用会增加瞬时压力，明确的限流约束能防止模型一次生成过多外部请求。
 
 ## Confirmation Enforcement Rate
 
@@ -1682,7 +1733,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 典型工具：发邮件、下单、退款、转账、删除数据、修改权限和外部数据导出。
 
-## Cost Budget Pass Rate
+## Tool Choice Cost Budget Pass Rate
 
 一句话定义：cost budget pass rate 是工具调用成本、模型 token、外部 API、检索 top-k、并发资源和人工审核成本未超过预算的比例。
 
@@ -1694,11 +1745,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 工程价值：达到上限后通常应切到 `none`，让模型基于已有信息总结或说明不足，而不是继续调用工具。
 
-## Tool Choice Gate
+## Tool Choice Evaluation
 
-一句话定义：tool choice gate 是工具选择策略上线门禁，综合候选集覆盖、模式准确、澄清拦截、缺参阻断、并行安全、id 对齐、限流、确认、成本和 loop 控制。
+一句话定义：tool choice evaluation 是工具选择策略的综合评价，关注候选集覆盖、模式准确、澄清拦截、缺参阻断、并行安全、id 对齐、限流、确认、成本和 loop 控制。
 
-面试表达：tool choice gate 能把“模型选错工具”和“runtime 策略放错工具”分开定位，是工具协议系统从 demo 到生产的关键门禁。
+面试表达：tool choice evaluation 能把“模型选错工具”和“runtime 策略放错工具”分开定位，是工具协议系统从 demo 走向生产时的重要分析框架。
 
 ## Argument Parsing
 
@@ -1714,7 +1765,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 ## Validation Error
 
-一句话定义：validation error 是 parse 后由 schema、业务规则、权限、来源或安全门禁发现的结构化错误。
+一句话定义：validation error 是 parse 后由 schema、业务规则、权限、来源或安全策略发现的结构化错误。
 
 工程价值：错误应包含字段路径、错误码、是否可重试和建议动作，供模型自修复、用户澄清、trace replay 和 eval 使用。
 
@@ -1728,7 +1779,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：argument evidence map 记录关键参数值来自用户消息、历史状态、页面上下文或可信工具结果中的哪一段证据。
 
-上线意义：订单号、客户 ID、金额、邮箱、路径和权限范围等关键参数不能只相信模型生成，必须能追溯来源。
+工程意义：订单号、客户 ID、金额、邮箱、路径和权限范围等关键参数不能只相信模型生成，必须能追溯来源。
 
 ## Argument Evidence Coverage
 
@@ -1764,7 +1815,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：unsafe argument block rate 是高风险参数异常、缺少 evidence、缺少确认或越权时被 runtime 阻断的比例。
 
-上线要求：对付款、删除、发邮件、改权限、导出数据和生产写操作，该指标通常应作为硬门禁。
+工程要求：对付款、删除、发邮件、改权限、导出数据和生产写操作，该指标通常应作为高风险安全指标单独报告，不能被普通调用的平均值稀释。
 
 ## Retry Budget Pass Rate
 
@@ -1784,11 +1835,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 工程价值：没有完整 trace，就无法复盘 runtime 到底修了什么、为什么放行、用户是否确认，以及最终执行参数从哪里来。
 
-## Argument Repair Gate
+## Argument Repair Evaluation
 
-一句话定义：argument repair gate 是工具参数校验与修复上线门禁，综合 parse、schema、business、evidence、normalization、repair、clarification、unsafe block、retry budget、idempotency 和 trace 指标。
+一句话定义：argument repair evaluation 是工具参数校验与修复的综合评价，关注 parse、schema、business、evidence、normalization、repair、clarification、unsafe block、retry budget、idempotency 和 trace 指标。
 
-面试表达：好的 argument repair gate 不追求把所有错误都自动修好，而是确保低风险错误可修、高风险错误可挡、缺信息时可问、所有决策可审计。
+面试表达：好的 argument repair evaluation 不追求把所有错误都自动修好，而是区分低风险可修、高风险应挡、缺信息应问，并让所有决策可审计。
 
 ## Structured Function Calling
 
@@ -1850,7 +1901,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：range valid rate 是带数值上下界的字段落在允许范围内的比例。
 
-上线意义：该指标低时，检索、数据库查询、批量执行和外部 API 调用容易出现成本或延迟失控。
+工程意义：该指标低时，检索、数据库查询、批量执行和外部 API 调用容易出现成本或延迟失控。
 
 ## Additional Properties Block Rate
 
@@ -1886,7 +1937,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：unauthorized attempt block rate 是 runtime 成功拦截未授权或高风险工具调用尝试的比例。
 
-上线要求：对删除、支付、外发、数据库写入、shell 执行等高风险动作，未授权拦截通常应作为硬门禁，而不是被平均成功率稀释。
+工程要求：对删除、支付、外发、数据库写入、shell 执行等高风险动作，未授权拦截应单独作为安全指标，而不是被平均成功率稀释。
 
 ## Function Calling Protocol
 
@@ -1918,7 +1969,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 关键原则：投影目标是最小充分信息，不是最大上下文信息。字段越多，泄露、注入和注意力污染风险越高。
 
-## Source Metadata Coverage
+## Tool Result Source Metadata Coverage
 
 一句话定义：source metadata coverage 是 tool result 中带有 source id、retrieved time、schema version、文档标题或等价 provenance 的比例。
 
@@ -1972,9 +2023,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 风险：把天气、价格、临时搜索结果或一次性工具错误写入长期 memory，会制造陈旧事实、隐私风险和后续上下文污染。
 
-## Tool Result Context Gate
+## Tool Result Context Evaluation
 
-一句话定义：tool result context gate 是工具结果进入模型上下文前的上线门禁，综合 ID 对齐、安全投影、脱敏、上下文预算、来源、注入隔离、错误状态、压缩保真、冲突标注、引用、新鲜度和 memory 边界。
+一句话定义：tool result context evaluation 是工具结果进入模型上下文前的综合评价，关注 ID 对齐、安全投影、脱敏、上下文预算、来源、注入隔离、错误状态、压缩保真、冲突标注、引用、新鲜度和 memory 边界。
 
 面试表达：它把“工具执行成功”与“结果能安全进入上下文”分开评估，是 Agent 从 demo 到生产的关键控制点。
 
@@ -2038,7 +2089,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 工程价值：熔断的目的不是记录失败，而是防止故障服务被 Agent 的自动重试和并发工具调用继续压垮。
 
-## Timeout Cancellation Coverage
+## Tool Failure Timeout Cancellation Coverage
 
 一句话定义：timeout cancellation coverage 衡量工具超时后，仍在运行的后台任务是否被取消、标记未知状态或纳入后续查询和接管流程。
 
@@ -2062,13 +2113,13 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 工程价值：没有 trace，工具失败只能靠用户投诉复盘；有 trace 才能做离线 eval、告警、回放和根因分析。
 
-## Tool Failure Recovery Gate
+## Tool Failure Recovery Evaluation
 
-一句话定义：tool failure recovery gate 是综合失败检测、错误分类、重试安全、幂等、未知状态接管、降级诚实、熔断、超时取消、人工接管、用户说明和 trace 的工具失败恢复门禁。
+一句话定义：tool failure recovery evaluation 是对失败检测、错误分类、重试安全、幂等、未知状态接管、降级诚实、熔断、超时取消、人工接管、用户说明和 trace 的综合评价。
 
 面试表达：生产级 Agent 不是保证工具永远不失败，而是证明失败时不重复危险动作、不编造结果、不泄露内部细节，并能让用户、人工和运维都知道下一步。
 
-## Tool Calling Evaluation
+## Tool Calling Evaluation Overview
 
 一句话定义：tool calling evaluation 是对工具调用系统从“是否该调用”到“最终任务是否完成”的分层评估。
 
@@ -2132,7 +2183,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：unsafe failure rate 是任务失败且伴随编造、越权、未确认副作用、敏感泄露、忽略工具错误或危险自动执行的比例。
 
-上线门禁：高风险工具场景里 unsafe failure 应接近零，不能被总体任务成功率平均掉。
+工程要求：高风险工具场景里 unsafe failure 应接近零，不能被总体任务成功率平均掉。
 
 ## Tool Eval Dataset Coverage
 
@@ -2146,11 +2197,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 工程价值：平均分不变不代表可上线；如果退款、邮件、权限修改等高风险切片回归失败，应阻断发布。
 
-## Tool Calling Eval Gate
+## Tool Calling Evaluation Metrics
 
-一句话定义：tool calling eval gate 是综合调用召回、调用精确率、工具选择、参数值、参数来源、执行、结果使用、安全失败、不安全失败、成本和回归的工具调用评估上线门禁。
+一句话定义：tool calling evaluation 是对调用召回、调用精确率、工具选择、参数值、参数来源、执行、结果使用、安全失败、不安全失败、成本和回归的分层评估。
 
-面试表达：工具调用 eval gate 的核心是让每个失败都能归因到 decision、selection、arguments、execution、observation、safety 或 budget，而不是只得到一个模糊的最终分数。
+面试表达：工具调用 evaluation 的核心是让每个失败都能归因到 decision、selection、arguments、execution、observation、safety 或 budget，而不是只得到一个模糊的最终分数。
 
 ## Finish Reason
 
@@ -2232,9 +2283,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：function calling 解决的是工具调用的结构化接口问题，不等于解决工具使用决策和业务安全问题。
 
-## Tool Calling Gate
+## Tool Calling System Evaluation
 
-一句话定义：tool calling gate 是工具调用系统上线前的硬门禁，用正确性、可执行性、安全性和成本指标决定是否放行。
+一句话定义：tool calling system evaluation 是工具调用系统的综合评价，用正确性、可执行性、安全性和成本指标描述系统是否适合目标场景。
 
 常见指标：工具选择准确率、参数 exact match、schema 合法率、执行成功率、观察使用率、错误恢复率、未授权工具尝试率、不必要工具调用率、tool result injection 违规率、P95 延迟和平均工具调用次数。
 
@@ -2290,15 +2341,15 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 ## Premature Final
 
-一句话定义：premature final 是任务尚未满足验收条件时，Agent 过早给出最终答案。
+一句话定义：premature final 是任务尚未满足完成标准时，Agent 过早给出最终答案。
 
 典型场景：测试失败后直接声称修好了，检索无证据却给结论，权限被拒后编造执行成功。
 
-防护：定义 stop condition 和 success criteria，把 final 前的必要 evidence、test pass、permission result 或用户确认写入 gate。
+防护：定义 stop condition 和 success criteria，把 final 前的必要 evidence、test pass、permission result 或用户确认写入 controller 的状态检查，而不是只依赖 prompt 提醒。
 
-## ReAct Gate
+## ReAct Evaluation
 
-一句话定义：ReAct gate 是 ReAct / PAO 系统上线前的循环质量门禁。
+一句话定义：ReAct evaluation 是对 ReAct / PAO 系统循环质量的评价。
 
 常见指标：task success rate、action accuracy、argument valid rate、plan adherence rate、observation use rate、state update coverage、parse failure rate、repeat action rate、budget overrun rate、premature final rate、stop correctness 和 blocked recovery rate。
 
@@ -2322,23 +2373,23 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 为什么重要：没有分解，Agent 容易盲目调用工具；分解太粗不可执行，分解太细会增加成本和僵化程度。
 
-好分解标准：子任务目标明确、输入输出清楚、粒度适中、有验收标准、依赖关系明确、失败后有恢复路径。
+好分解标准：子任务目标明确、输入输出清楚、粒度适中、有完成标准、依赖关系明确、失败后有恢复路径。
 
 ## Subgoal
 
 一句话定义：subgoal 是大目标中的一个可执行子目标。
 
-工程要求：每个 subgoal 应绑定 action 或工具、输入、输出、验收标准、风险级别和停止条件。
+工程要求：每个 subgoal 应绑定 action 或工具、输入、输出、完成标准、风险级别和停止条件。
 
 常见误区：把“思考一下”“继续分析”这类不可验证动作当成子目标，会让计划看起来完整但无法执行。
 
-## Acceptance Criteria
+## Completion Criteria
 
-一句话定义：acceptance criteria 是判断子任务是否完成的验收标准。
+一句话定义：completion criteria 是判断子任务是否完成的具体标准。
 
-例子：定位测试失败的验收标准不是“看了测试”，而是能指出失败测试、触发条件、相关代码位置和根因假设。
+例子：定位测试失败的完成标准不是“看了测试”，而是能指出失败测试、触发条件、相关代码位置和根因假设。
 
-面试表达：没有验收标准，Agent 很容易完成步骤但没有完成目标。
+面试表达：没有完成标准，Agent 很容易完成步骤但没有完成目标。
 
 ## Dependency Graph
 
@@ -2362,9 +2413,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 为什么重要：即使很多任务可以并行，整体耗时仍受关键路径限制。规划系统不能只数总步骤，还要看依赖结构。
 
-## Planning Gate
+## Planning Evaluation
 
-一句话定义：planning gate 是规划质量上线门禁，用目标覆盖、可执行性、验收标准、依赖合法性、重规划、失败恢复和风险确认决定是否放行。
+一句话定义：planning evaluation 是规划质量的综合评价，关注目标覆盖、可执行性、完成标准、依赖合法性、重规划、失败恢复和风险确认。
 
 常见指标：goal coverage、executable step rate、acceptance coverage、dependency violation rate、replan coverage、failure recovery rate、risk confirmation coverage、overlong plan rate、repeat subgoal rate 和 task success rate。
 
@@ -2438,9 +2489,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 风险：一次性偏好不能写成长期偏好。例如“这次详细一点”不是“以后永远详细”。
 
-## Memory Write Gate
+## Memory Write Policy Evaluation
 
-一句话定义：memory write gate 是决定候选信息能否写入长期 memory 的策略门禁。
+一句话定义：memory write policy evaluation 用来判断候选信息是否适合写入长期 memory。
 
 常见检查：future value、稳定性、来源可信度、置信度、敏感等级、是否一次性指令、是否来自不可信工具输出、是否存在 prompt injection 迹象和是否需要用户确认。
 
@@ -2454,9 +2505,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：相似不等于相关，相关不等于可用；检索排序后仍要做权限、过期、冲突和压缩。
 
-## Memory Permission Gate
+## Memory Permission Evaluation
 
-一句话定义：memory permission gate 是 memory 检索和使用前的用户、项目、范围、敏感等级和删除状态检查。
+一句话定义：memory permission evaluation 是 memory 检索和使用前对用户、项目、范围、敏感等级和删除状态的权限检查。
 
 为什么重要：memory 常包含用户偏好、项目事实、历史任务和可能的敏感信息。跨用户或跨项目泄露比普通检索错误更严重。
 
@@ -2484,11 +2535,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 典型来源：工具返回、网页片段、RAG 文档、模型未验证推断、一次性用户指令和错误摘要。
 
-防护方式：来源可信度分级、写入门禁、高影响记忆确认、敏感信息过滤、定期清理、可删除和审计。
+防护方式：来源可信度分级、写入验证规则、高影响记忆确认、敏感信息过滤、定期清理、可删除和审计。
 
-## Memory Gate
+## Memory System Evaluation
 
-一句话定义：memory gate 是 memory 系统上线或注入上下文前的综合门禁。
+一句话定义：memory system evaluation 是 memory 系统写入、检索和注入上下文前的综合评价。
 
 常见指标：retrieval precision、retrieval recall、stale use rate、unauthorized retrieval rate、conflict count、unsafe write block rate、deleted memory returned 和 task success lift。
 
@@ -2546,9 +2597,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 为什么重要：测试失败是 workflow 的关键信号；忽略失败后直接总结完成，是 Code Agent 中最危险的 false completion 来源之一。
 
-## Coding Agent Workflow Gate
+## Coding Agent Workflow Evaluation
 
-一句话定义：coding agent workflow gate 是基于任务分类、探索覆盖、patch 聚焦、验证覆盖、反馈使用、用户改动保护、高风险动作确认和 trace 完整率的综合门禁。
+一句话定义：coding agent workflow evaluation 是基于任务分类、探索覆盖、patch 聚焦、验证覆盖、反馈使用、用户改动保护、高风险动作确认和 trace 完整率的综合评价。
 
 面试表达：Code Agent workflow 是否可靠，不能只看最终 diff 是否能编译，还要看它有没有按正确流程行动、是否用上了失败反馈、是否保护共享工作区和权限边界。
 
@@ -2630,11 +2681,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 边界：回滚只能回滚 agent 自己的改动，不能覆盖用户在 agent 修改之后的新改动。
 
-## File Edit Gate
+## File Edit Safety Evaluation
 
-一句话定义：file edit gate 是基于路径安全、secret 阻断、截断清晰、上下文唯一、patch 成功、并发保护、无关 diff、回滚就绪和 diff 忠实度的综合门禁。
+一句话定义：file edit safety evaluation 是基于路径安全、secret 阻断、截断清晰、上下文唯一、patch 成功、并发保护、无关 diff、回滚就绪和 diff 忠实度的综合评价。
 
-面试表达：文件编辑门禁不是为了阻止 agent 写代码，而是保证每一次写入都可定位、可审计、可验证、可回滚。
+面试表达：文件编辑评价不是为了阻止 agent 写代码，而是保证每一次写入都可定位、可审计、可验证、可回滚。
 
 ## Terminal Execution
 
@@ -2696,7 +2747,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：下载内容不应自动执行；外部写入和上传要比外部读取更严格，并且网络目标应进入 trace。
 
-## Timeout Cancellation Coverage
+## Command Timeout Cancellation Coverage
 
 一句话定义：timeout cancellation coverage 衡量长时间命令、卡住测试和持续输出进程超时后是否被取消、保留部分输出并记录 error type。
 
@@ -2720,11 +2771,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 用途：用户审计、失败复盘、测试反馈使用、命令超时率统计、工具安全回归和不同 runtime 版本对比。
 
-## Command Safety Gate
+## Command Safety Evaluation
 
-一句话定义：command safety gate 是基于 working directory containment、risk classification、auto execution precision、dangerous command block、confirmation coverage、network control、timeout cancellation、output truncation、secret masking 和 command trace 的综合门禁。
+一句话定义：command safety evaluation 是基于 working directory containment、risk classification、auto execution precision、dangerous command block、confirmation coverage、network control、timeout cancellation、output truncation、secret masking 和 command trace 的综合评价。
 
-面试表达：终端执行门禁不是为了让 Agent 少运行命令，而是让验证命令安全、可控、可取消、可审计。
+面试表达：终端执行评价不是为了让 Agent 少运行命令，而是让验证命令安全、可控、可取消、可审计。
 
 ## Context Management
 
@@ -2762,7 +2813,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 为什么重要：结构化 task state 比自然语言历史更适合恢复、UI 展示、evaluation 和 trace replay。
 
-## Summary Faithfulness
+## Context Summary Faithfulness
 
 一句话定义：summary faithfulness 衡量上下文摘要中的结论是否被原始文件、命令输出、trace 或用户消息支持。
 
@@ -2798,9 +2849,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 边界：不能把密钥、一次性异常、未验证猜测、用户隐私或 prompt injection 写入长期 memory。
 
-## Context Builder Gate
+## Context Builder Evaluation
 
-一句话定义：context builder gate 是基于预算、关键上下文召回、上下文精确率、约束保留、task state、摘要忠实、过期摘要、不可信边界和 memory 写入安全的综合门禁。
+一句话定义：context builder evaluation 是基于预算、关键上下文召回、上下文精确率、约束保留、task state、摘要忠实、过期摘要、不可信边界和 memory 写入安全的综合评价。
 
 面试表达：Context Builder 不是 prompt 拼接器，而是 Agent 下一步决策的证据选择器和压缩器。
 
@@ -2838,9 +2889,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 常见做法：修改前读取文件和 diff 状态，区分用户已有改动与 Agent 新改动，必要时请求确认。
 
-## Code Agent Gate
+## Code Agent Evaluation
 
-一句话定义：Code Agent gate 是基于任务成功率、测试通过率、验证覆盖、patch 聚焦、无关改动、用户改动触碰率和沙箱安全的上线门禁。
+一句话定义：Code Agent evaluation 是基于任务成功率、测试通过率、验证覆盖、patch 聚焦、无关改动、用户改动触碰率和沙箱安全的综合评价。
 
 面试表达：Code Agent 评估不能只看最终答案，要同时看 diff 是否必要、测试是否通过、命令是否受控、用户改动是否被保护。
 
@@ -2850,7 +2901,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 边界：只能把公开文档和可观察行为写成确定结论；闭源内部 planner、prompt、排序策略和隐藏状态不能写成官方实现。
 
-面试表达：分析 Claude Code 类产品时，要先说明资料边界，再用 harness 模块和安全门禁拆解，而不是把社区猜测当成内部架构。
+面试表达：分析 Claude Code 类产品时，要先说明资料边界，再用 harness 模块和安全控制边界拆解，而不是把社区猜测当成内部架构。
 
 ## Terminal Coding Agent
 
@@ -2906,9 +2957,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：high-risk surface governance 衡量终端、文件写入、memory、hooks、MCP、sandbox、网络和外部工具等高风险能力面是否被硬权限、沙箱、人审和审计覆盖。
 
-## Claude Code Architecture Gate
+## Claude Code Architecture Evaluation
 
-一句话定义：Claude Code architecture gate 是基于公开证据、必需模块、访问治理、核心循环、权限控制、状态恢复、扩展治理、可观测性、评估准备度和高风险治理的综合门禁。
+一句话定义：Claude Code architecture evaluation 是基于公开证据、必需模块、访问治理、核心循环、权限控制、状态恢复、扩展治理、可观测性、评估准备度和高风险治理的综合评价。
 
 面试表达：一个成熟的 Claude Code 类架构分析不能只说“会读写文件和运行命令”，还要证明这些能力有公开证据、runtime 边界、权限治理、trace 和 evaluation harness。
 
@@ -2936,7 +2987,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：agent permission isolation 衡量 primary agent、subagent、plan / build mode、自定义 agent 和隐藏系统 agent 是否按任务边界配置不同模型、工具、step budget 和权限。
 
-## Tool Permission Binding Coverage
+## Open Runtime Tool Permission Binding Coverage
 
 一句话定义：tool permission binding coverage 衡量 bash、edit、write、read、grep、glob、LSP、web、question、MCP 和 custom tools 是否绑定 allow / ask / deny、参数 pattern、风险等级和 trace。
 
@@ -2960,9 +3011,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：provider adapter coverage 衡量 OpenCode 类 runtime 是否能显式管理不同模型提供商、模型选择、成本、上下文长度、fallback 和版本。
 
-## OpenCode Architecture Gate
+## OpenCode Architecture Evaluation
 
-一句话定义：OpenCode architecture gate 是基于公开证据、开放 runtime 模块覆盖、配置治理、agent 权限隔离、工具权限绑定、扩展治理、server API 治理、snapshot 恢复、评估准备度和高风险治理的综合门禁。
+一句话定义：OpenCode architecture evaluation 是基于公开证据、开放 runtime 模块覆盖、配置治理、agent 权限隔离、工具权限绑定、扩展治理、server API 治理、snapshot 恢复、评估准备度和高风险治理的综合评价。
 
 面试表达：OpenCode 类系统不能只讲“开放、可扩展、支持 MCP”，还要说明开放能力如何被配置、权限、server 边界、snapshot、trace 和 evaluation harness 治理。
 
@@ -3006,9 +3057,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：cross-agent risk governance 衡量 shell、cloud workspace、MCP、custom tools、server API、browser、hooks 和 enterprise integration 等风险面是否有对应硬权限和审计。
 
-## Coding Agent Comparison Gate
+## Coding Agent Comparison Framework
 
-一句话定义：coding agent comparison gate 是基于权限治理、评估准备度和高风险治理的横向比较门禁，用来防止“总分高但治理不足”的系统被误判为可上线。
+一句话定义：coding agent comparison framework 是基于权限治理、评估准备度和高风险治理的横向比较框架，用来防止“总分高但治理不足”的系统被误判为适合企业场景。
 
 面试表达：企业落地不能只看 coding agent demo 是否顺滑，而要证明权限、评估、审计、风险边界和成本治理能随场景成立。
 
@@ -3082,7 +3133,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：governance boundary clarity 衡量方案是否明确 MCP 只提供连接协议，不替代企业 Tool Registry、权限、安全、trace、eval、灰度和回滚。
 
-常见事故：接入 MCP Server 后绕过企业工具平台，导致权限、审计和发布门禁缺失。
+常见事故：接入 MCP Server 后绕过企业工具平台，导致权限、审计和发布条件缺失。
 
 ## MCP Trace Eval Readiness
 
@@ -3096,9 +3147,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：MCP 和 A2A 可以协同，但解决的问题不同，不能混成一个“Agent 协议”泛称。
 
-## MCP Background Gate
+## MCP Background Evaluation
 
-一句话定义：MCP background gate 是基于集成减少、能力模型、上下文对象、发现、schema、host-server 边界、本地控制、复用、治理、trace/eval 和 A2A 区分的综合理解门禁。
+一句话定义：MCP background evaluation 是基于集成减少、能力模型、上下文对象、发现、schema、host-server 边界、本地控制、复用、治理、trace/eval 和 A2A 区分的综合理解评价。
 
 面试表达：能讲清 MCP 背景，应该先讲为什么需要标准化连接，再讲它不解决什么，而不是只背 tools / resources / prompts 三个名词。
 
@@ -3180,9 +3231,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 工程价值：连接更多 MCP Server 会快速膨胀上下文，Host 必须做候选选择、摘要、压缩和延迟加载。
 
-## MCP Concept Gate
+## MCP Concept Evaluation
 
-一句话定义：MCP concept gate 是基于 Host 策略、Client / Server 边界、Server 能力、Tool schema、Resource URI、Prompt 审查、Lifecycle、Transport、Roots、Sampling、Host 过滤和 trace/eval 映射的综合概念门禁。
+一句话定义：MCP concept evaluation 是基于 Host 策略、Client / Server 边界、Server 能力、Tool schema、Resource URI、Prompt 审查、Lifecycle、Transport、Roots、Sampling、Host 过滤和 trace/eval 映射的综合概念评价。
 
 面试表达：讲 MCP 基本概念时，要能说明每个对象是谁负责、怎样被发现、怎样进入模型上下文，以及哪里需要治理。
 
@@ -3226,7 +3277,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：MCP argument validation coverage 衡量 server 是否在执行 handler 前校验 arguments，而不是相信模型输出。
 
-工程价值：schema validation 是最小 server 的硬门禁，权限、业务规则和高风险确认还需要在生产层继续加强。
+工程价值：schema validation 是最小 server 的硬性条件，权限、业务规则和高风险确认还需要在生产层继续加强。
 
 ## MCP Structured Result Coverage
 
@@ -3276,9 +3327,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 工程价值：没有 trace，就很难评估工具选择、参数错误、资源越界、权限拒绝和 handler 异常来自哪里。
 
-## MCP Server Gate
+## MCP Server Implementation Evaluation
 
-一句话定义：MCP server gate 是基于 metadata、capability declaration、tool registry、schema、handler、argument validation、result、error、resource、prompt、transport、Host 接入、安全和 trace 的综合实现门禁。
+一句话定义：MCP server implementation evaluation 是基于 metadata、capability declaration、tool registry、schema、handler、argument validation、result、error、resource、prompt、transport、Host 接入、安全和 trace 的综合实现评价。
 
 面试表达：最小 MCP Server 的合格标准是“协议闭环可发现、可调用、可校验、可失败、可治理”，不是“函数能返回天气”。
 
@@ -3360,9 +3411,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 边界：MCP 带来复用和解耦，但高频低延迟工具未必适合远程 MCP server。
 
-## MCP Function Calling Gate
+## MCP and Function Calling Comparison
 
-一句话定义：MCP function calling gate 是基于协议层次、工具发现、能力范围、执行边界、投影映射、adapter 分离、生命周期、Registry 治理、安全、选型、错误面和可用性 trade-off 的综合对比门禁。
+一句话定义：MCP and Function Calling comparison 是基于协议层次、工具发现、能力范围、执行边界、投影映射、adapter 分离、生命周期、Registry 治理、安全、选型、错误面和可用性 trade-off 的综合对比。
 
 面试表达：能讲清 MCP 与 Function Calling 的区别，应该能说明“二者常组合使用”，而不是把它们说成互相替代或完全等价。
 
@@ -3456,9 +3507,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 工程价值：没有 resource trace，就无法评估越权读取、引用缺失、过期证据、上下文超预算和 prompt injection 边界失败。
 
-## MCP Resource Gate
+## MCP Resource Evaluation
 
-一句话定义：MCP resource gate 是基于 URI、metadata、list/read、roots、权限、字段投影、上下文预算、引用、可信度、freshness、template、subscription 和 trace 的综合上线门禁。
+一句话定义：MCP resource evaluation 是基于 URI、metadata、list/read、roots、权限、字段投影、上下文预算、引用、可信度、freshness、template、subscription 和 trace 的综合评价。
 
 面试表达：MCP Resources 的合格标准不是“能读文本”，而是“可寻址、可授权、可压缩、可引用、可防注入、可追踪”。
 
@@ -3518,7 +3569,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 ## Prompt Eval Binding
 
-一句话定义：prompt eval binding 衡量 prompt 是否绑定 golden cases、安全回归、输出格式回归和审批门禁。
+一句话定义：prompt eval binding 衡量 prompt 是否绑定 golden cases、安全回归、输出格式回归和发布评审依据。
 
 工程价值：代码审查、客服回复和故障排查 prompt 都会影响最终行为，必须像工具 schema 一样做回归测试。
 
@@ -3552,9 +3603,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 工程价值：没有 prompt trace，就无法复盘某次错误回答到底来自模板变化、参数污染、权限缺口还是模型本身。
 
-## MCP Prompt Gate
+## MCP Prompt Evaluation
 
-一句话定义：MCP prompt gate 是基于 capability、discovery、argument schema、required validation、rendering、role boundary、dependency、version、eval、permission、injection、user control、list change 和 trace 的综合上线门禁。
+一句话定义：MCP prompt evaluation 是基于 capability、discovery、argument schema、required validation、rendering、role boundary、dependency、version、eval、permission、injection、user control、list change 和 trace 的综合评价。
 
 面试表达：MCP Prompts 的合格标准不是“模板能渲染”，而是“可发现、可参数化、可降权、可评估、可授权、可追踪”。
 
@@ -3562,7 +3613,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：MCP security sandbox audit 是检查 MCP Host、Client、Server、tools、resources、prompts、authorization、roots、sandbox、数据流和 trace 是否形成防御闭环的审计过程。
 
-工程价值：它防止把 MCP 安全误解成“提示模型别乱来”，而是把能力连接、权限、沙箱、确认、数据流和审计都放进可验证门禁。
+工程价值：它防止把 MCP 安全误解成“提示模型别乱来”，而是把能力连接、权限、沙箱、确认、数据流和审计都放进可执行、可回放的安全验证体系。
 
 ## Server Connection Governance
 
@@ -3654,9 +3705,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：MCP 安全 eval 不能只看最终回答，要检查 trace 和实际执行动作。
 
-## MCP Security Gate
+## MCP Security Evaluation
 
-一句话定义：MCP security gate 是基于连接治理、授权 token、scope、roots、文件、网络、shell、prompt injection、确认、数据流、凭证、租户、供应链、trace 和 eval 的综合上线门禁。
+一句话定义：MCP security evaluation 是基于连接治理、授权 token、scope、roots、文件、网络、shell、prompt injection、确认、数据流、凭证、租户、供应链、trace 和 eval 的综合评价。
 
 面试表达：MCP 安全来自 Host 侧强策略和运行时边界，不来自模型“知道自己不该做什么”。
 
@@ -3744,9 +3795,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：MCP 集成 eval 不能只测最终回答，还要检查每一步外部能力调用是否符合策略。
 
-## MCP Integration Gate
+## MCP Integration Evaluation
 
-一句话定义：MCP integration gate 是基于能力注册、namespace、IDE 上下文、知识库引用、数据库治理、浏览器动作、终端沙箱、上下文预算、跨 Server 数据流、审批、输出投影、trace 和 eval 的综合上线门禁。
+一句话定义：MCP integration evaluation 是基于能力注册、namespace、IDE 上下文、知识库引用、数据库治理、浏览器动作、终端沙箱、上下文预算、跨 Server 数据流、审批、输出投影、trace 和 eval 的综合评价。
 
 面试表达：能连上 MCP Server 只是第一步，能证明 Host 对多个外部系统的上下文、权限和数据流有强治理，才是可上线集成。
 
@@ -3792,7 +3843,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 工程价值：Artifact 引用可以配合权限、下载、校验、版本和审计，避免结果被复制到不该共享的上下文里。
 
-## A2A Context Boundary Control
+## A2A Delegation Context Boundary Control
 
 一句话定义：A2A context boundary control 衡量传给下游 Agent 的上下文是否遵守最小必要原则、敏感信息脱敏、预算限制和可引用但不可复制的数据边界。
 
@@ -3810,7 +3861,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：MCP 和 A2A 可以组合使用，但不能混为一谈；MCP 管工具资源，A2A 管 Agent 间协作。
 
-## A2A Failure Handling Coverage
+## A2A Task Failure Handling Coverage
 
 一句话定义：A2A failure handling coverage 衡量任务是否支持超时、取消、失败状态、可重试边界、不可重试错误、幂等和人工接管。
 
@@ -3828,11 +3879,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：A2A eval 不能只测最终答案，要测委派链路是否可发现、可执行、可失败、可追踪。
 
-## A2A Background Gate
+## A2A Background Evaluation
 
-一句话定义：A2A background gate 是基于 Agent Card、发现、任务契约、生命周期、消息、Artifact、上下文、权限、MCP 区分、失败处理、trace 和 eval 的背景层上线门禁。
+一句话定义：A2A background evaluation 是基于 Agent Card、发现、任务契约、生命周期、消息、Artifact、上下文、权限、MCP 区分、失败处理、trace 和 eval 的背景层综合评价。
 
-面试表达：如果这些基础项不过线，系统最多是 multi-agent demo，不应该被描述成可治理的 A2A 协作系统。
+面试表达：如果这些基础项没有达到要求，系统最多是 multi-agent demo，不应该被描述成可治理的 A2A 协作系统。
 
 ## Agent Card Discovery Audit
 
@@ -3900,11 +3951,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：Agent Card eval 不能只测 happy path；服务发现和路由失败样本更能暴露治理问题。
 
-## Agent Card Gate
+## Agent Card Evaluation
 
-一句话定义：agent card gate 是基于字段、skill、interface、安全、版本缓存、发现匹配、路由决策、extended card、trace 和 eval 的 Agent Card 上线门禁。
+一句话定义：agent card evaluation 是基于字段、skill、interface、安全、版本缓存、发现匹配、路由决策、extended card、trace 和 eval 的 Agent Card 综合评价。
 
-面试表达：Agent Card gate 过线，才能把远程 Agent 当成可治理系统组件；否则它只是一个能被调用的黑盒服务。
+面试表达：只有完成 Agent Card 的综合评估，才能把远程 Agent 当成可治理系统组件；否则它只是一个能被调用的黑盒服务。
 
 ## A2A Task Delegation Audit
 
@@ -3978,11 +4029,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：A2A eval 不能只测 happy path；坏样本才能证明委派链路真的可治理。
 
-## A2A Task Gate
+## A2A Task Evaluation
 
-一句话定义：A2A task gate 是基于任务契约、状态流、追问、消息、产物、错误、重试、取消、权限、并行、trace 和 eval 的委派生命周期上线门禁。
+一句话定义：A2A task evaluation 是基于任务契约、状态流、追问、消息、产物、错误、重试、取消、权限、并行、trace 和 eval 的委派生命周期综合评价。
 
-面试表达：这个门禁过不了时，系统最多是远程 Agent demo，不应该声称具备生产级 A2A 协作能力。
+面试表达：这组条件过不了时，系统最多是远程 Agent demo，不应该声称具备生产级 A2A 协作能力。
 
 ## A2A Message Boundary Audit
 
@@ -4062,11 +4113,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：消息边界 eval 要测坏样本，而不是只测结构化 JSON 能解析。
 
-## A2A Message Gate
+## A2A Message Boundary Evaluation
 
-一句话定义：A2A message gate 是基于消息契约、Part 类型、来源可信、指令 / 数据分离、最小上下文、引用优先、策略执行、脱敏、claim grounding、摘要约束、trace 和 eval 的消息边界上线门禁。
+一句话定义：A2A message boundary evaluation 是基于消息契约、Part 类型、来源可信、指令 / 数据分离、最小上下文、引用优先、策略执行、脱敏、claim grounding、摘要约束、trace 和 eval 的消息边界综合评价。
 
-面试表达：这个门禁过不了，多 Agent 系统很容易把上下文泄露、污染和错误升级伪装成正常协作。
+面试表达：这组条件过不了，多 Agent 系统很容易把上下文泄露、污染和错误升级伪装成正常协作。
 
 ## A2A MCP Boundary Audit
 
@@ -4134,11 +4185,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：协议升级、Agent Card 变化和工具 schema 变化都可能改变系统行为，必须能回放和回归测试。
 
-## A2A MCP Boundary Gate
+## A2A and MCP Boundary Evaluation
 
-一句话定义：A2A MCP boundary gate 是基于协议分类、边界、自主性、生命周期、发现、上下文、权限、输出、trace、版本和 eval 的 A2A/MCP 分工上线门禁。
+一句话定义：A2A and MCP boundary evaluation 是基于协议分类、边界、自主性、生命周期、发现、上下文、权限、输出、trace、版本和 eval 的 A2A/MCP 分工综合评价。
 
-面试表达：这个门禁过不了时，系统不是“多协议生态”，而是把工具、Agent、权限和上下文混在一起的 demo。
+面试表达：这组条件过不了时，系统不是“多协议生态”，而是把工具、Agent、权限和上下文混在一起的 demo。
 
 ## Cross-Agent Security Audit
 
@@ -4192,7 +4243,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：cross-agent tool permission binding 衡量下游 Agent 调 MCP 工具时是否同时检查用户 scope、任务 scope、租户、工具要求和环境边界。
 
-面试表达：A2A 委派不能绕过 MCP 工具权限；Agent 内部调工具仍要回到 Host / Runtime 的权限门禁。
+面试表达：A2A 委派不能绕过 MCP 工具权限；Agent 内部调工具仍要回到 Host / Runtime 的权限控制边界。
 
 ## Cross-Agent Result Release Control
 
@@ -4218,11 +4269,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：Agent Card 和服务发现也要有 tenant scope；不能因为 Agent 是内部服务就默认跨租户可见。
 
-## Cross-Agent Security Gate
+## Cross-Agent Security Evaluation
 
-一句话定义：cross-agent security gate 是基于身份链、OBO scope、委派 allowlist、权限衰减、上下文策略、继续委派、高风险确认、工具权限、结果释放、audit、信任验证和租户隔离的跨 Agent 安全上线门禁。
+一句话定义：cross-agent security evaluation 是基于身份链、OBO scope、委派 allowlist、权限衰减、上下文策略、继续委派、高风险确认、工具权限、结果释放、audit、信任验证和租户隔离的跨 Agent 安全综合评价。
 
-面试表达：这个门禁过不了时，系统可以演示多 Agent 协作，但不应该接触真实企业权限、敏感数据和生产工具。
+面试表达：这组条件过不了时，系统可以演示多 Agent 协作，但不应该接触真实企业权限、敏感数据和生产工具。
 
 ## Multi-Agent Failure Audit
 
@@ -4302,11 +4353,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：多 Agent eval 不能只看最终答案，要覆盖协作链内部的失败切片。
 
-## Multi-Agent Failure Gate
+## Multi-Agent Failure Evaluation
 
-一句话定义：multi-agent failure gate 是基于循环控制、冲突仲裁、幻觉传播抑制、上下文漂移控制、成本预算、状态一致性、Artifact 冲突、责任 trace、策略链、协作适配、终止接管和 eval 覆盖的多 Agent 失败治理上线门禁。
+一句话定义：multi-agent failure evaluation 是基于循环控制、冲突仲裁、幻觉传播抑制、上下文漂移控制、成本预算、状态一致性、Artifact 冲突、责任 trace、策略链、协作适配、终止接管和 eval 覆盖的多 Agent 失败治理综合评价。
 
-面试表达：这个门禁过不了时，系统可以做演示，但不应该让多个 Agent 自主访问真实数据、生产工具或高风险动作。
+面试表达：这组条件过不了时，系统可以做演示，但不应该让多个 Agent 自主访问真实数据、生产工具或高风险动作。
 
 ## A2A System Design Audit
 
@@ -4334,7 +4385,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 ## A2A Discovery Routing Governance
 
-一句话定义：A2A discovery routing governance 衡量 Agent 发现和路由是否按 capability、domain、version、tenant、auth scope、health / SLO 过滤，并在模型路由前执行策略门禁。
+一句话定义：A2A discovery routing governance 衡量 Agent 发现和路由是否按 capability、domain、version、tenant、auth scope、health / SLO 过滤，并在模型路由前执行策略检查。
 
 面试表达：不能只说“让 LLM 选择 Agent”；LLM 路由必须受 Registry、权限、租户和健康状态约束。
 
@@ -4344,7 +4395,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 工程价值：内部 queued / running / expired 可以存在，但必须映射回可审计的协议状态语义。
 
-## A2A Context Boundary Control
+## A2A Platform Context Boundary Control
 
 一句话定义：A2A context boundary control 衡量 minimal context、context refs、classification、allow forwarding、redaction 和 source labels 是否由 Context Manager 强制执行。
 
@@ -4374,7 +4425,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：Trace 支持排障，Audit 支持合规；系统设计回答中二者可以共享 id，但不能混成一份随便可读的日志。
 
-## A2A Failure Handling Coverage
+## A2A Platform Failure Handling Coverage
 
 一句话定义：A2A failure handling coverage 衡量循环检测、event seq、retryable error、input-required、冲突仲裁、claim verification、budget limit 和 human handoff 是否闭环。
 
@@ -4392,11 +4443,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 工程价值：长任务、多 Agent 和高并发场景下，扩展性、幂等和背压是平台能否上线的基础。
 
-## A2A System Design Gate
+## A2A System Design Evaluation
 
-一句话定义：A2A system design gate 是基于需求、模块、协议、路由、状态、上下文、权限、A2A/MCP 边界、Artifact、trace / audit、失败处理、eval 和扩展性的企业多 Agent 平台设计上线门禁。
+一句话定义：A2A system design evaluation 是基于需求、模块、协议、路由、状态、上下文、权限、A2A/MCP 边界、Artifact、trace / audit、失败处理、eval 和扩展性的企业多 Agent 平台设计综合评价。
 
-面试表达：这个门禁过不了时，答案可能能讲清 demo，但还不是一个企业级 A2A 平台设计。
+面试表达：这组条件过不了时，答案可能能讲清 demo，但还不是一个企业级 A2A 平台设计。
 
 ## Cross-Agent Collaboration System Audit
 
@@ -4512,11 +4563,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：Agent 越多不等于越高级，只有当并行、专业分工、交叉验证或权限隔离带来净收益时才值得多 Agent 化。
 
-## Cross-Agent Collaboration System Gate
+## Cross-Agent Collaboration Evaluation
 
-一句话定义：cross-agent collaboration system gate 是基于目标澄清、平台模块、Registry 路由、任务图、A2A 生命周期、上下文最小化、权限衰减、MCP 边界、证据产物、冲突仲裁、幻觉传播控制、循环终止、人审、trace / audit / replay、baseline eval、预算、幂等扩展和协作适配性的综合门禁。
+一句话定义：cross-agent collaboration evaluation 是基于目标澄清、平台模块、Registry 路由、任务图、A2A 生命周期、上下文最小化、权限衰减、MCP 边界、证据产物、冲突仲裁、幻觉传播控制、循环终止、人审、trace / audit / replay、baseline eval、预算、幂等扩展和协作适配性的综合评价。
 
-面试表达：门禁通过才说明跨 Agent 协作不是热闹的多模型对话，而是可授权、可追踪、可恢复、可评估且确实值得多 Agent 化的系统。
+面试表达：检查通过才说明跨 Agent 协作不是热闹的多模型对话，而是可授权、可追踪、可恢复、可评估且确实值得多 Agent 化的系统。
 
 ## Tool Protocol Future Audit
 
@@ -4578,9 +4629,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 常见问题：直接把某家 provider 的字段散落到业务代码，会让迁移和回归测试变得不可控。
 
-## Auto Generated Tool Review Gate
+## Auto Generated Tool Review
 
-一句话定义：auto generated tool review gate 衡量从 OpenAPI、数据库 schema、代码库或文档自动生成的工具是否经过最小权限裁剪、安全审核、eval、灰度和发布治理。
+一句话定义：auto generated tool review 衡量从 OpenAPI、数据库 schema、代码库或文档自动生成的工具是否经过最小权限裁剪、安全审核、eval、灰度和发布治理。
 
 面试表达：自动生成提高效率，但不能自动获得安全边界和语义正确性。
 
@@ -4638,11 +4689,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 工程价值：开放题允许判断和假设，但必须把事实、趋势、推测和待验证边界分清。
 
-## Tool Protocol Future Gate
+## Tool Protocol Future Evaluation
 
-一句话定义：tool protocol future gate 是基于分层边界、标准化与扩展平衡、长任务、能力包、Agent 自主治理、安全 metadata、provenance、Marketplace、provider adapter、自动生成审核、workflow、behavior eval、文档拆分、风险分级、责任 trace、自然语言边界、运行时治理、工程师能力和反投机约束的综合门禁。
+一句话定义：tool protocol future evaluation 是基于分层边界、标准化与扩展平衡、长任务、能力包、Agent 自主治理、安全 metadata、provenance、Marketplace、provider adapter、自动生成审核、workflow、behavior eval、文档拆分、风险分级、责任 trace、自然语言边界、运行时治理、工程师能力和反投机约束的综合评价。
 
-面试表达：门禁通过才说明未来演进回答不是泛泛预测，而是能落到可治理、可迁移、可验证和可评估的系统判断。
+面试表达：检查通过才说明未来演进回答不是泛泛预测，而是能落到可治理、可迁移、可验证和可评估的系统判断。
 
 ## Skill Definition Audit
 
@@ -4728,11 +4779,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 工程价值：复杂 Skill 应把常用说明放在入口文件，把长参考、脚本和资产延迟加载。
 
-## Skill Definition Gate
+## Skill Definition Evaluation
 
-一句话定义：skill definition gate 是基于 manifest、任务目标、能力包组成、工具边界、说明、资源、workflow、权限、配置、eval、生命周期、安装治理和渐进加载的 Skill 定义上线门禁。
+一句话定义：skill definition evaluation 是基于 manifest、任务目标、能力包组成、工具边界、说明、资源、workflow、权限、配置、eval、生命周期、安装治理和渐进加载的 Skill 定义综合评价。
 
-面试表达：这个门禁过不了时，候选能力可能是工具、prompt、workflow 或 plugin 片段，但还不是可治理的 Skill。
+面试表达：这组条件过不了时，候选能力可能是工具、prompt、workflow 或 plugin 片段，但还不是可治理的 Skill。
 
 ## Ecosystem Boundary Audit
 
@@ -4822,7 +4873,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：high risk approval 衡量删除、支付、外部发送、权限变更和生产修改等高风险动作是否有人工确认或审批点。
 
-面试表达：高风险控制不能藏在 Skill 描述里，必须进入 Workflow / Tool / Action 的实际执行门禁。
+面试表达：高风险控制不能藏在 Skill 描述里，必须进入 Workflow / Tool / Action 的实际执行与验证逻辑。
 
 ## Eval Ready
 
@@ -4830,11 +4881,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 工程价值：没有 eval 的工具生态只能靠主观体验判断，无法做版本治理。
 
-## Ecosystem Boundary Gate
+## Ecosystem Boundary Evaluation
 
-一句话定义：ecosystem boundary gate 是基于字段覆盖、抽象分类、粒度、Action trace、Tool contract、Workflow control、Skill bundle、Plugin packaging、权限分层、评估分层、审计分层、命名别名、生命周期、高风险审批和 eval readiness 的工具生态边界上线门禁。
+一句话定义：ecosystem boundary evaluation 是基于字段覆盖、抽象分类、粒度、Action trace、Tool contract、Workflow control、Skill bundle、Plugin packaging、权限分层、评估分层、审计分层、命名别名、生命周期、高风险审批和 eval readiness 的工具生态边界综合评价。
 
-面试表达：这个门禁过不了时，方案可能能跑 demo，但还没有把执行、接口、流程、任务能力和扩展载体拆成可治理系统。
+面试表达：这组条件过不了时，方案可能能跑 demo，但还没有把执行、接口、流程、任务能力和扩展载体拆成可治理系统。
 
 ## Skill Manifest Audit
 
@@ -4890,7 +4941,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：Workflow 字段让平台知道控制流在哪里插入审批、监控、失败恢复和审计。
 
-## Permission Least Privilege
+## Skill Manifest Permission Least Privilege
 
 一句话定义：permission least privilege 衡量权限声明是否避免 `all`、`*`、admin 等过宽 scope，并为每个 scope 给出 reason。
 
@@ -4908,11 +4959,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 工程价值：安全策略只有进入结构化 Manifest，平台才能强制执行。
 
-## Eval Gate
+## Evaluation Criteria
 
-一句话定义：eval gate 衡量 Skill 是否声明 metrics、golden sets、minimum quality gate 和安全回归门槛。
+一句话定义：evaluation criteria 衡量 Skill 是否声明 metrics、golden sets、最低质量要求和安全回归标准。
 
-面试表达：没有 eval gate 的 Skill 升级只能靠感觉判断，不能稳定发布。
+面试表达：没有 evaluation criteria 的 Skill 升级只能靠感觉判断，不能稳定发布。
 
 ## Examples Trigger Coverage
 
@@ -4932,11 +4983,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 工程价值：没有审计字段时，出了问题很难定位谁发布、改了什么、何时审核。
 
-## Skill Manifest Gate
+## Skill Manifest Evaluation
 
-一句话定义：skill manifest gate 是基于身份、描述、能力粒度、输入输出、工具用途、资源和 prompt 绑定、workflow、权限、配置、安全、eval、examples、生命周期和审计字段的 Skill Manifest 上线门禁。
+一句话定义：skill manifest evaluation 是基于身份、描述、能力粒度、输入输出、工具用途、资源和 prompt 绑定、workflow、权限、配置、安全、eval、examples、生命周期和审计字段的 Skill Manifest 综合评价。
 
-面试表达：这个门禁过不了时，Manifest 可能能让人看懂，但还不能作为平台治理入口。
+面试表达：这组条件过不了时，Manifest 可能能让人看懂，但还不能作为平台治理入口。
 
 ## Skill Lifecycle Audit
 
@@ -4948,7 +4999,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：review before publish 衡量 Skill 发布前是否完成 manifest、security、eval 和 owner 审核。
 
-工程价值：发布审核不过线时，后续安装和启用会把未治理能力暴露给租户。
+工程价值：发布审核没有形成明确结论时，后续安装和启用会把未治理能力暴露给租户。
 
 ## Install Approval
 
@@ -5034,11 +5085,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 工程价值：patch 可以自动，新增权限、破坏输出契约或 major 升级应人工审批。
 
-## Skill Lifecycle Gate
+## Skill Lifecycle Evaluation
 
-一句话定义：skill lifecycle gate 是基于发布审核、安装审批、启用范围、权限重审、配置版本、运行中任务、兼容性、灰度、回滚、依赖、审计、紧急下架、卸载保留、eval 和更新策略的 Skill 生命周期上线门禁。
+一句话定义：skill lifecycle evaluation 是基于发布审核、安装审批、启用范围、权限重审、配置版本、运行中任务、兼容性、灰度、回滚、依赖、审计、紧急下架、卸载保留、eval 和更新策略的 Skill 生命周期综合评价。
 
-面试表达：这个门禁过不了时，Skill 可能能安装和调用，但还不能被企业平台长期治理。
+面试表达：这组条件过不了时，Skill 可能能安装和调用，但还不能被企业平台长期治理。
 
 ## Skill Marketplace Audit
 
@@ -5142,17 +5193,17 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：Marketplace 的审计链要覆盖从发布到卸载的治理事实。
 
-## Skill Marketplace Gate
+## Skill Marketplace Evaluation
 
-一句话定义：skill marketplace gate 是基于目录、搜索、详情页、审核、权限、审批、评分、运营、重复治理、管理员视图、开发者控制台、安全中心、推荐、生命周期、owner 和审计的门户上线门禁。
+一句话定义：skill marketplace evaluation 是基于目录、搜索、详情页、审核、权限、审批、评分、运营、重复治理、管理员视图、开发者控制台、安全中心、推荐、生命周期、owner 和审计的门户综合评价。
 
-面试表达：这个门禁过不了时，Skill 可能能被发布成页面，但还不能进入企业级能力生态。
+面试表达：这组条件过不了时，Skill 可能能被发布成页面，但还不能进入企业级能力生态。
 
 ## Tool Skill Quality Safety Audit
 
 一句话定义：tool skill quality safety audit 是从 Tool schema、参数校验、执行可靠性、输出契约、副作用控制、Skill 任务质量、事实证据、离线评估、在线监控、权限、数据安全、prompt injection、供应链、人工审核、发布回归和审计 trace 审核工具 / Skill 是否可上架。
 
-面试表达：工具生态的质量不是开发者自称可靠，而是通过可复现 eval、可执行安全门禁和持续在线监控证明出来的。
+面试表达：工具生态的质量不是开发者自称可靠，而是通过可复现 eval、可执行安全验证和持续在线监控证明出来的。
 
 ## Tool Schema Clarity
 
@@ -5186,7 +5237,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 ## Skill Task Quality
 
-一句话定义：skill task quality 衡量 Skill 是否达到任务成功率、事实准确性、引用准确性、完整性和格式合规的最低门槛。
+一句话定义：skill task quality 衡量 Skill 的任务成功率、事实准确性、引用准确性、完整性和格式合规性是否达到约定质量目标。
 
 面试表达：Tool 能调用成功不等于 Skill 真的完成任务。
 
@@ -5214,7 +5265,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：离线通过只是上架前证据，线上监控才发现分布漂移和依赖故障。
 
-## Permission Least Privilege
+## Tool Skill Permission Least Privilege
 
 一句话定义：permission least privilege 衡量权限申请是否最小化，并包含 permission reason、data scope、写操作审批和外部传输审核。
 
@@ -5250,9 +5301,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：自动审核适合批量发现问题，但高风险例外需要人工承担决策责任。
 
-## Regression Release Gate
+## Regression Release Evaluation
 
-一句话定义：regression release gate 衡量发布前是否设置 quality threshold、safety threshold、rollback plan 和 blocking release。
+一句话定义：regression release evaluation 衡量发布前是否设置 quality threshold、safety threshold、rollback plan 和必要的发布暂停规则。
 
 工程价值：Prompt、Workflow、Tool schema、资源或模型变化都可能造成质量和安全回退。
 
@@ -5262,11 +5313,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：没有审计 trace，质量安全审核无法复盘，也无法证明当时为什么放行或阻断。
 
-## Quality Safety Gate
+## Quality and Safety Evaluation
 
-一句话定义：quality safety gate 是基于 Tool 调用质量、Skill 任务质量、事实证据、离线 eval、在线监控、权限、数据安全、prompt injection、副作用、供应链、人工审核、回归发布和审计 trace 的上架门禁。
+一句话定义：quality and safety evaluation 是基于 Tool 调用质量、Skill 任务质量、事实证据、离线 eval、在线监控、权限、数据安全、prompt injection、副作用、供应链、人工审核、回归发布和审计 trace 的上架综合评价。
 
-面试表达：这个门禁过不了时，工具或 Skill 可能能跑 demo，但还不能进入企业 Marketplace。
+面试表达：这些证据不足时，工具或 Skill 可能能跑 demo，但还不能进入企业 Marketplace。
 
 ## MCP A2A Harness Integration
 
@@ -5336,9 +5387,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：protocol version capture 衡量 harness 是否记录 MCP spec / SDK / server 版本、A2A protocol / Agent Card / remote agent 版本、工具 schema 版本和权限策略版本。
 
-## Protocol Integration Gate
+## Protocol Integration Evaluation
 
-一句话定义：protocol integration gate 是基于 discovery、namespace、schema、permission、high-risk approval、context budget、trust boundary、A2A lifecycle、trace、replay 和 version 的 MCP/A2A 集成门禁。
+一句话定义：protocol integration evaluation 是基于 discovery、namespace、schema、permission、high-risk approval、context budget、trust boundary、A2A lifecycle、trace、replay 和 version 的 MCP/A2A 集成综合评价。
 
 面试表达：MCP/A2A 上线评估不能只跑通 happy path，而要证明外部能力扩展不会破坏最小权限、上下文稳定性、审计、回放和责任边界。
 
@@ -5382,7 +5433,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 ## System Eval Readiness
 
-一句话定义：system eval readiness 衡量 harness 是否能把任务集、环境、验收器、trace、baseline、公平预算、安全样本、成本和报告接入 evaluation harness。
+一句话定义：system eval readiness 衡量 harness 是否能把任务集、环境、状态验证器、trace、baseline、公平预算、安全样本、成本和报告接入 evaluation harness。
 
 ## Recovery Coverage
 
@@ -5396,9 +5447,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：enterprise governance readiness 衡量 harness 是否具备 RBAC、组织策略、审计日志、secret 管理、数据出境控制、retention、成本治理和管理员配置能力。
 
-## Harness System Gate
+## Harness System Design Evaluation
 
-一句话定义：harness system gate 是基于模块覆盖、接口契约、状态机、权限、上下文控制、执行隔离、trace、replay、eval、恢复、版本和企业治理的系统设计门禁。
+一句话定义：harness system design evaluation 是基于模块覆盖、接口契约、状态机、权限、上下文控制、执行隔离、trace、replay、eval、恢复、版本和企业治理的系统设计综合评价。
 
 面试表达：如果一个设计缺 replay、缺 trace、缺权限或缺恢复，即使模块图很完整，也不能称为生产级 Agent Harness。
 
@@ -5452,11 +5503,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：environment parity check 衡量本地、云端、sandbox、测试镜像和 shell 环境是否有可比较的 fingerprint、cwd、PATH、依赖和系统版本。
 
-## Harness Pitfall Gate
+## Harness Pitfall Review
 
-一句话定义：harness pitfall gate 是基于 triage、permission、context、edit、command、injection boundary、trace、replay、eval、cost loop 和 environment parity 的实战坑门禁。
+一句话定义：harness pitfall review 是基于 triage、permission、context、edit、command、injection boundary、trace、replay、eval、cost loop 和 environment parity 的实战问题复盘框架。
 
-面试表达：生产级 harness 事故复盘要能说明 gate 为什么失败、对应根因是什么、如何通过权限、上下文、trace、replay、eval 和环境治理防止复发。
+面试表达：生产级 harness 事故复盘要能说明哪项控制失效、对应根因是什么，以及如何通过权限、上下文、trace、replay、eval 和环境治理防止复发。
 
 ## Browser Agent
 
@@ -5518,9 +5569,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：高风险动作不能由模型悄悄完成，必须有用户确认、摘要、审计和必要的回滚方案。
 
-## UI Agent Gate
+## UI Agent Evaluation
 
-一句话定义：UI Agent gate 是基于任务成功率、最终验证、动作准确率、误点击率、表单准确率、状态观察、高风险保护、注入拦截和重复动作的上线门禁。
+一句话定义：UI Agent evaluation 是基于任务成功率、最终验证、动作准确率、误点击率、表单准确率、状态观察、高风险保护、注入拦截和重复动作的综合评价。
 
 面试表达：UI Agent 是否可靠不能只看能否完成任务，还要看是否安全、可控、少误点、能恢复、能验证。
 
@@ -5592,11 +5643,94 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：Multi-Agent 的比较对象应该是更简单的单 Agent 或固定 workflow，而不是空系统。
 
-## Multi-Agent Gate
+## Multi-Agent Evaluation
 
-一句话定义：Multi-Agent gate 是基于任务成功率、单 Agent 增益、角色匹配率、消息有效率、证据支持率、冲突解决率、重复劳动率、权限违规率和成本的上线门禁。
+一句话定义：Multi-Agent evaluation 是基于任务成功率、单 Agent 增益、角色匹配率、消息有效率、证据支持率、冲突解决率、重复劳动率、权限违规率和成本的综合评价。
 
 面试表达：Multi-Agent 上线前必须证明“更好、可控、可审计、低重复、低权限风险、成本可接受”，不能只展示一段看起来热闹的协作 trace。
+
+## Agent Evaluation Formulas
+
+Agent 的指标不能只围绕最终答案打分。一次任务可能“答案写得不错，但工具选错了”，也可能“任务没有完成，却安全地说明了限制”。因此评估时要把工具决策、轨迹结果、安全动作和成本拆开，再用任务级指标汇总。
+
+### 小白视角：把一次任务看成可观察的过程
+
+对第 \(i\) 个任务样本，记录用户目标、允许工具、模型动作、工具结果、状态变化、权限决策、最终业务状态和成本。`tool call` 是模型提出的请求，`tool execution` 是 runtime 真正执行的动作，二者不能混为一谈；被 runtime 拦截的危险调用可以是“调用决策错误”，但不能算成“危险动作已执行”。
+
+### Tool Call Precision 与 Recall：区分漏调用和误调用
+
+先为每个样本标注在当前状态下应该调用的工具集合 \(T_i^*\)，把运行轨迹中实际提出并按工具名、参数语义和依赖关系匹配的调用记为 \(T_i\)。在固定匹配规则后，可以使用：
+
+$$
+\operatorname{ToolPrecision}
+=\frac{TP}{TP+FP},
+\qquad
+\operatorname{ToolRecall}
+=\frac{TP}{TP+FN}
+$$
+
+其中 \(TP\) 是应该调用且实际选择正确的调用，\(FP\) 是不该调用或选错工具的调用，\(FN\) 是应该调用却漏掉的调用。若一个任务允许多个等价工具，gold 标注必须列出等价集合；若一个工具调用依赖前一步结果，还应把顺序和参数作为匹配条件，不能只比较工具名称。
+
+小白可以这样理解：该查实时库存却没有查，是漏调用；只问天气却调用了退款工具，是误调用；调用了库存工具但传错租户或商品 ID，则还要在参数语义和权限指标中计为失败。工具选择准确不代表执行成功，执行成功也不代表最终答案使用了观察结果。
+
+### Weighted Task Success：按任务重要性汇总
+
+$$
+\operatorname{WeightedTaskSuccess}
+=\frac{\sum_{i=1}^{n}w_i s_i}{\sum_{i=1}^{n}w_i},
+\qquad 0\le s_i\le 1,
+\quad w_i>0
+$$
+
+\(s_i\) 可以是二值的成功指示量，也可以是按完成子目标、结果正确性和用户可用性得到的部分成功分数；\(w_i\) 表示样本重要性。这样既能报告普通任务平均表现，也能让安全、关键客户和高影响任务在汇总时有明确权重。
+
+专家边界是：权重不能用来掩盖严重安全失败。应同时发布各风险切片的原始分数和样本数量；一个高权重平均分很高，但存在一次真实跨租户泄露，仍然必须按安全事件处理，而不是通过调低该样本权重来“修复”报告。
+
+### Unsafe Execution Rate：单独统计危险副作用
+
+$$
+\operatorname{UnsafeExecutionRate}
+=\frac{N_{\mathrm{unsafe\ executed}}}
+{N_{\mathrm{high\text{-}risk\ attempts}}}
+$$
+
+分子只统计真正造成不安全副作用的次数，例如未经确认完成退款、把敏感数据发到不允许的外部地址或执行越权写操作；被 runtime 正确拒绝的尝试不进入分子，但仍应计入安全测试的分母和失败分类。分母必须包含明确构造的高风险正例、负例、注入样本和状态未知样本，不能只用普通问答请求。
+
+当分母为零时，指标应报告为“无适用样本”，不能显示为 0。0 只有在确实运行过足够的高风险样本且没有不安全执行时才有意义。
+
+### Agent Recovery Rate：只统计可恢复失败
+
+$$
+\operatorname{AgentRecoveryRate}
+=\frac{N_{\mathrm{recoverable\ failures\ recovered}}}
+{N_{\mathrm{recoverable\ failures}}}
+$$
+
+“可恢复失败”必须在数据集里预先定义，例如临时超时、限流、缺少可由用户补充的信息、可重试的网络错误或可以切换只读工具的依赖故障。权限拒绝、已确认的不可逆副作用和下游未知执行状态不能一概当作可重试失败，否则系统会通过重复动作制造更大事故。
+
+恢复成功还要满足状态一致、没有重复副作用、最终结果可解释。只要模型在工具失败后继续编造一个看起来完整的答案，不能算 recovery，即使最终文本被人工认为“有帮助”。
+
+### Observation Grounding Rate：检查工具结果是否被使用
+
+$$
+\operatorname{ObservationGroundingRate}
+=\frac{N_{\mathrm{claims\ supported\ by\ observations}}}
+{N_{\mathrm{claims\ depending\ on\ observations}}}
+$$
+
+该指标检查最终 claim 是否被工具结果、测试结果、环境状态或用户补充信息支持。它能识别“工具已经返回失败，最终回答却声称成功”“查询返回 A，回答却写成 B”这类最终状态失真。分母为零时，应单独归入 no-tool 样本，不要把它当作工具观察使用率的满分。
+
+### Cost per Successful Task：归因单位成功成本
+
+$$
+\operatorname{CostPerSuccessfulTask}
+=\frac{\sum_{i=1}^{n}\operatorname{Cost}(i)}
+{\sum_{i=1}^{n}\mathbf{1}[\operatorname{success}(i)]}
+$$
+
+单个任务成本至少应能拆出模型输入输出 token、检索和 rerank、工具与第三方 API、运行资源、重试、缓存未命中以及人工审核；只统计模型 token 会低估 Agent 的真实成本。若没有一个任务成功，分母为零，结果应报告为未定义并保留失败原因，不能用 0 伪装成低成本。
+
+专家在比较两个 Agent 时，还要固定任务分布、工具权限、环境、模型价格和成功标准。总成本更低但安全失败更多，或成功率更高但 P95 延迟和人工审核成本失控，都不能只凭一个单位成本指标下结论。
 
 ## Agent Evaluation
 
@@ -5614,13 +5748,13 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：evaluation harness 是自动运行评估任务、初始化环境、执行模型或 Agent、收集 trace、计算指标、保存结果并生成回归报告的工程框架。
 
-面试表达：Agent evaluation harness 评估的是模型、runtime、工具、环境、权限策略和验收器组成的整体系统。
+面试表达：Agent evaluation harness 评估的是模型、runtime、工具、环境、权限策略和状态验证器组成的整体系统。
 
 ## Eval Dataset Bucket Coverage
 
 一句话定义：eval dataset bucket coverage 是评估集覆盖 bugfix、feature、refactor、safety、tool use、code review 等关键任务桶的比例。
 
-工程价值：只测 happy path 会高估 Agent；上线门禁必须看分桶指标和长尾 bad case。
+工程价值：只测 happy path 会高估 Agent；判断系统是否适用时必须看分桶指标和长尾 bad case。
 
 ## Environment Reproducibility
 
@@ -5630,9 +5764,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 ## Validator Coverage
 
-一句话定义：validator coverage 是评估样本是否绑定了可执行验收器，例如单元测试、diff scope、格式校验、rubric judge、安全门禁或业务状态检查。
+一句话定义：validator coverage 是评估样本是否绑定了可执行状态验证器，例如单元测试、diff scope、格式校验、rubric judge、安全策略检查或业务状态检查。
 
-边界：没有验收器的样本可以用于探索，但不适合直接作为发布门禁。
+边界：没有状态验证器的样本可以用于探索，但不能单独支撑发布判断。
 
 ## Weighted Task Success
 
@@ -5662,9 +5796,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：unsafe execution rate 是安全诱导或高风险动作尝试中，不安全动作被实际执行的比例。
 
-上线要求：该指标应为 0；安全样本成功率不能被普通任务成功率掩盖。
+工程要求：该指标应为 0；安全样本的结果不能被普通任务成功率掩盖。
 
-## Cost Budget Pass Rate
+## Eval Cost Budget Pass Rate
 
 一句话定义：cost budget pass rate 是评估样本在 token、wall-clock、工具调用、sandbox 和人工审核预算内完成的比例。
 
@@ -5688,21 +5822,21 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 工程价值：好的评估报告要指导发布决策，而不是只展示一个平均分。
 
-## Evaluation Harness Gate
+## Evaluation Harness Review
 
-一句话定义：evaluation harness gate 是基于任务桶覆盖、环境可复现、验收器覆盖、任务成功、部分成功、diff scope、trace、baseline fairness、regression、安全、成本、flaky、版本捕获和报告完整性的评估门禁。
+一句话定义：evaluation harness review 是基于任务桶覆盖、环境可复现、验证器覆盖、任务成功、部分成功、diff scope、trace、baseline fairness、regression、安全、成本、flaky、版本捕获和报告完整性的评估复核框架。
 
 面试表达：Agent 变好必须通过系统级评估证明，而不是展示一个单任务 demo。
 
 ## Agent Benchmark
 
-一句话定义：agent benchmark 是用于评估 Agent 在真实或模拟环境中完成多步任务能力的任务集和验收协议。
+一句话定义：agent benchmark 是用于评估 Agent 在真实或模拟环境中完成多步任务能力的任务集和状态验证协议。
 
 核心要求：固定初始状态、工具版本、权限策略、评估脚本、日志格式和重置机制，否则结果不可复现。
 
 ## Eval Sample
 
-一句话定义：eval sample 是 Agent 评估中的单个任务样本，包含目标、初始状态、工具集合、权限策略、验收器、风险等级和权重。
+一句话定义：eval sample 是 Agent 评估中的单个任务样本，包含目标、初始状态、工具集合、权限策略、状态验证器、风险等级和权重。
 
 为什么重要：如果样本只包含简单 happy path，就会高估 Agent 的真实能力。
 
@@ -5716,7 +5850,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：partial success score 是用分级 rubric 衡量 Agent 部分完成复杂任务的指标。
 
-适用场景：开放任务、多步骤任务和有多个验收点的任务，比单纯成功 / 失败更能解释问题。
+适用场景：开放任务、多步骤任务和有多个完成检查点的任务，比单纯成功 / 失败更能解释问题。
 
 ## Trace Completeness
 
@@ -5724,7 +5858,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 工程价值：trace 不完整会导致无法 replay、无法定位失败原因，也无法证明最终总结是否真实。
 
-## Summary Faithfulness
+## Agent Summary Faithfulness
 
 一句话定义：summary faithfulness 是 Agent 最终总结是否忠实反映实际 trace 的比例。
 
@@ -5754,9 +5888,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 工程价值：prompt、工具 schema、模型版本、controller、memory 或权限策略更新后，都应跑回归集。
 
-## Agent Eval Gate
+## Agent Evaluation Criteria
 
-一句话定义：Agent eval gate 是基于任务成功率、部分成功分、工具准确率、参数合法率、observation 使用、状态更新、summary 忠实性、claim 支持、安全、成本和延迟的上线门禁。
+一句话定义：Agent evaluation criteria 是基于任务成功率、部分成功分、工具准确率、参数合法率、observation 使用、状态更新、summary 忠实性、claim 支持、安全、成本和延迟的综合评价标准。
 
 面试表达：Agent 上线评估不能只看成功率，还要证明过程可信、工具正确、总结忠实、权限安全、成本可控。
 
@@ -5788,7 +5922,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：least privilege coverage 是实际执行动作落在当前任务最小权限范围内的比例。
 
-面试表达：如果 code review 任务执行了网络上传、安装依赖或写入外部系统，即使最终回答正确，也说明最小权限门禁失败。
+面试表达：如果 code review 任务执行了网络上传、安装依赖或写入外部系统，即使最终回答正确，也说明最小权限检查失败。
 
 ## Permission Matrix Coverage
 
@@ -5838,9 +5972,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：不可逆动作不应该和普通测试命令共用一个自动执行策略。
 
-## Permission Sandbox Gate
+## Permission and Sandbox Evaluation
 
-一句话定义：permission sandbox gate 是基于最小权限、矩阵覆盖、越权阻断、人工确认、secret 阻断、网络外发、沙箱执行、dry run 和审计完整性的权限上线门禁。
+一句话定义：permission and sandbox evaluation 是基于最小权限、矩阵覆盖、越权阻断、人工确认、secret 阻断、网络外发、沙箱执行、dry run 和审计完整性的综合评价。
 
 面试表达：Agent 权限设计的目标不是“弹更多确认框”，而是把真实副作用放进可解释、可限制、可复盘的控制面。
 
@@ -5862,9 +5996,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 边界：过滤器不能代替权限系统，只能作为数据流防线之一。
 
-## External Transfer Gate
+## External Transfer Evaluation
 
-一句话定义：external transfer gate 是内部数据传给外部 API、邮件、网页或第三方服务前的权限、脱敏和确认门禁。
+一句话定义：external transfer evaluation 关注内部数据传给外部 API、邮件、网页或第三方服务前的权限、脱敏和确认要求。
 
 面试表达：外部传输要先问“谁的数据、给谁、为什么、是否脱敏、是否可审计”。
 
@@ -5908,7 +6042,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：supply chain risk 是 Agent 安装依赖、运行脚本、下载二进制或调用第三方服务时引入的来源和版本风险。
 
-工程策略：使用白名单、锁定版本、沙箱执行、来源记录和审批门禁。
+工程策略：使用白名单、锁定版本、沙箱执行、来源记录和审批验证记录。
 
 ## Safety Alternative
 
@@ -5916,9 +6050,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 为什么重要：安全不是只拒绝，还要尽量保留有用性。
 
-## Agent Safety Gate
+## Agent Safety Evaluation
 
-一句话定义：Agent safety gate 是基于越权拦截、不可信内容隔离、敏感数据阻断、外部传输门禁、高风险保护、dry-run、沙箱、memory 和审计完整性的上线门禁。
+一句话定义：Agent safety evaluation 是基于越权拦截、不可信内容隔离、敏感数据阻断、外部传输控制、高风险保护、dry-run、沙箱、memory 和审计完整性的综合评价。
 
 面试表达：Agent 安全上线要用系统层指标证明，而不是只说 prompt 已经要求模型遵守规则。
 
@@ -5938,11 +6072,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：Agent answer coverage 是回答覆盖目标概念、机制、指标、边界和项目证据的比例。
 
-常见问题：覆盖率低的回答通常表现为只讲术语，不讲 controller、trace、评估或安全门禁。
+常见问题：覆盖率低的回答通常表现为只讲术语，不讲 controller、trace、评估或安全控制。
 
 ## Agent Formula Coverage
 
-一句话定义：Agent formula coverage 是回答中能否准确写出或解释任务成功率、工具准确率、参数合法率、observation 使用率、trace 完整率和安全门禁等指标公式。
+一句话定义：Agent formula coverage 是回答中能否准确写出或解释任务成功率、工具准确率、参数合法率、observation 使用率、trace 完整率和安全控制指标等公式。
 
 面试表达：公式不必复杂，但要说明每个指标在抓哪类失败。
 
@@ -5982,11 +6116,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 工程价值：它把“继续复习”改成可执行的学习任务。
 
-## Agent Interview Gate
+## Agent Interview Review
 
-一句话定义：Agent interview gate 是基于平均回答分、最低单题分、安全覆盖、红旗数量和项目证据的面试准备度门禁。
+一句话定义：Agent interview review 是基于平均回答分、最低单题分、安全覆盖、红旗数量和项目证据的面试准备度复盘。
 
-面试表达：通过这个门禁，才说明候选人能把 Agent 讲成可落地、可评估、可控制的系统。
+面试表达：通过这组条件，才说明候选人能把 Agent 讲成可落地、可评估、可控制的系统。
 
 ## Tool Skill Developer Experience Audit
 
@@ -6042,9 +6176,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 工程价值：迁移文档缺失会让生态被版本升级拖垮。
 
-## DX Documentation Gate
+## Developer Experience Documentation Evaluation
 
-一句话定义：DX documentation gate 是基于 quickstart、脚手架、schema、示例、本地调试、trace、审核反馈、安全文档、迁移文档、SDK / CLI 一致性、owner 和门户路径的开发者体验门禁。
+一句话定义：developer experience documentation evaluation 是基于 quickstart、脚手架、schema、示例、本地调试、trace、审核反馈、安全文档、迁移文档、SDK / CLI 一致性、owner 和门户路径的开发者体验综合评价。
 
 面试表达：好的工具生态要能证明开发者从 0 到上架的路径可复制、可调试、可审核、可迁移。
 
@@ -6132,15 +6266,15 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 常见问题：只测 happy path 的端到端成功率，会漏掉取消、超时、补偿、审批和数据流泄露风险。
 
-## Workflow Gate
+## Workflow Evaluation
 
-一句话定义：workflow gate 是基于图合法性、依赖无环、IO、条件、状态、权限、数据流、重试、补偿、审批、取消、trace、eval 和版本兼容的上线门禁。
+一句话定义：workflow evaluation 是基于图合法性、依赖无环、IO、条件、状态、权限、数据流、重试、补偿、审批、取消、trace、eval 和版本兼容的综合评价。
 
-面试表达：可组合 workflow 过门禁，才说明它可以被 Skill、MCP、A2A 和 Marketplace 复用，而不是一次性的 prompt 流程图。
+面试表达：可组合 workflow 只有在这些方面都有证据时，才说明它可以被 Skill、MCP、A2A 和 Marketplace 复用，而不是一次性的 prompt 流程图。
 
 ## Prompt Injection Defense Audit
 
-一句话定义：prompt injection defense audit 是检查工具协议是否把不可信网页、文档、邮件、Issue、日志、RAG chunk、tool result 和其他 Agent 输出限制为 data，并用 policy gate、权限、确认、沙箱、脱敏、trace 和 eval 防止其驱动危险动作的审计方法。
+一句话定义：prompt injection defense audit 是检查工具协议是否把不可信网页、文档、邮件、Issue、日志、RAG chunk、tool result 和其他 Agent 输出限制为 data，并用 policy、权限、确认、沙箱、脱敏、trace 和 eval 防止其驱动危险动作的审计方法。
 
 面试表达：prompt injection 防御不是看模型有没有“识破”某段文本，而是看 runtime 是否能证明不可信内容无法升级为指令或越权工具调用。
 
@@ -6162,11 +6296,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：不可信内容不会因为被模型总结一次就变可信，摘要只能改变形式，不能洗掉来源。
 
-## Policy Pre-Tool Gate
+## Pre-Tool Policy Check
 
-一句话定义：policy pre-tool gate 是工具调用前由 runtime 或 policy engine 检查用户授权、工具风险、数据来源、敏感字段、确认状态、沙箱策略和外发目标。
+一句话定义：pre-tool policy check 是工具调用前由 runtime 或 policy engine 检查用户授权、工具风险、数据来源、敏感字段、确认状态、沙箱策略和外发目标。
 
-常见误区：让模型自己回答“这次是否安全”不是硬门禁，只能作为辅助信号。
+常见误区：让模型自己回答“这次是否安全”不能作为强制控制，只能作为辅助信号。
 
 ## Risky Tool Isolation
 
@@ -6228,11 +6362,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 常见问题：只测干净任务成功率会掩盖安全回归，尤其是工具路由、上下文压缩和 Agent 升级后的边界漂移。
 
-## Prompt Injection Defense Gate
+## Prompt Injection Defense Evaluation
 
-一句话定义：prompt injection defense gate 是基于指令数据分离、来源可信标记、taint、pre-tool policy、高风险工具隔离、不可信动作阻断、敏感数据控制、确认、沙箱、输出投影、RAG 边界、跨 Agent 传播、trace 和 eval 的综合上线门禁。
+一句话定义：prompt injection defense evaluation 是基于指令数据分离、来源可信标记、taint、pre-tool policy、高风险工具隔离、不可信动作阻断、敏感数据控制、确认、沙箱、输出投影、RAG 边界、跨 Agent 传播、trace 和 eval 的综合评价。
 
-面试表达：门禁通过意味着系统能用审计证据证明不可信数据不能获得指令权限，也不能直接驱动高风险工具。
+面试表达：检查通过意味着系统能用审计证据证明不可信数据不能获得指令权限，也不能直接驱动高风险工具。
 
 ## Tool Output Trust Audit
 
@@ -6240,7 +6374,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：工具输出不是天然事实，必须能解释每个结论来自哪里、为什么可信、有什么限制，以及哪些引用真正支持它。
 
-## Source Metadata Coverage
+## Trust Audit Source Metadata Coverage
 
 一句话定义：source metadata coverage 衡量工具输出是否记录 source id、URI、标题、owner、retrieved_at、数据版本和来源系统。
 
@@ -6336,11 +6470,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 常见问题：只测 task success 会漏掉错误来源、错误引用和证据链断裂。
 
-## Tool Output Trust Gate
+## Tool Output Trust Evaluation
 
-一句话定义：tool output trust gate 是基于来源元数据、可信级别、新鲜度、访问范围、引用绑定、引用支持、证据链、claim 类型、confidence、冲突处理、摘要保真、RAG chunk、跨 Agent 传播、trace 和 eval 的综合上线门禁。
+一句话定义：tool output trust evaluation 是基于来源元数据、可信级别、新鲜度、访问范围、引用绑定、引用支持、证据链、claim 类型、confidence、冲突处理、摘要保真、RAG chunk、跨 Agent 传播、trace 和 eval 的综合评价。
 
-面试表达：门禁通过意味着系统不只是能调用工具，还能证明关键结论可追溯、可解释、可复查。
+面试表达：检查通过意味着系统不只是能调用工具，还能证明关键结论可追溯、可解释、可复查。
 
 ## RAG Tool Agent Memory Integration Audit
 
@@ -6396,9 +6530,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 常见问题：读取大量无关历史会制造上下文污染和隐私风险。
 
-## Memory Write Gate
+## Memory Write Review
 
-一句话定义：memory write gate 是长期 Memory 写入前检查长期价值、用户确认、敏感数据、可信来源、作用范围、TTL 和删除策略。
+一句话定义：memory write review 是长期 Memory 写入前对长期价值、用户确认、敏感数据、可信来源、作用范围、TTL 和删除策略的审查。
 
 面试表达：Memory 最大风险不是读不到，而是把一次性错误、敏感结果或未验证内容长期保存。
 
@@ -6436,21 +6570,21 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：layered eval coverage 是评估集分别覆盖 RAG、Tool、Agent、Memory、end-to-end 和 safety，而不是只看最终答案。
 
-常见问题：只看端到端成功率，无法知道失败来自召回、参数、规划、状态、记忆污染还是安全门禁。
+常见问题：只看端到端成功率，无法知道失败来自召回、参数、规划、状态、记忆污染还是安全控制。
 
-## RAG Tool Agent Memory Integration Gate
+## RAG, Tool, Agent and Memory Integration Evaluation
 
-一句话定义：RAG tool agent memory integration gate 是基于能力边界、编排模式、上下文优先级、上下文预算、证据保留、工具观察使用、Agent 状态、Memory 读写、冲突处理、注入传播、敏感数据、trace 和分层 eval 的综合上线门禁。
+一句话定义：RAG, Tool, Agent and Memory integration evaluation 是基于能力边界、编排模式、上下文优先级、上下文预算、证据保留、工具观察使用、Agent 状态、Memory 读写、冲突处理、注入传播、敏感数据、trace 和分层 eval 的综合评价。
 
-面试表达：门禁通过才说明 RAG、Tool、Agent、Memory 不是概念堆砌，而是一个可解释、可审计、可恢复的组合系统。
+面试表达：检查通过才说明 RAG、Tool、Agent、Memory 不是概念堆砌，而是一个可解释、可审计、可恢复的组合系统。
 
 ## RAG Agent Storage Audit
 
 一句话定义：RAG agent storage audit 是检查 RAG / Agent 平台是否把知识库、文档、chunk、citation、agent definition、tool definition、memory、run state、retrieval trace、tool call trace、execution trace、audit log 和 cost record 做成可版本化、可回放、可审计、可删除的数据资产。
 
-常见审计维度：Knowledge Base Contract 看租户、owner、来源、权限、embedding、chunking、索引、同步和保留策略；Document Chunk Version Contract 看 document version、content hash、chunk offset、checksum、embedding ID 和 ACL；Sync Delete Propagation 和 ACL Permission Enforcement 检查删除、撤权、权限变化、tenant 和标签过滤是否进入检索、rerank、prompt 和日志；Retrieval Trace Completeness、Prompt Assembly Trace 与 Citation Version Binding 检查 query、embedding version、index version、filter、candidate、rerank、prompt hash、token budget、citation span、document version 和 offset；Agent Definition Versioning、Tool Definition Contract、Tool Permission Gate、Tool Call Trace Completeness、Execution Trace Replay Readiness、Memory Privacy Lifecycle、Trace Privacy Retention、Cost Attribution Governance 和 RAG Agent Storage Gate 则检查 agent / tool 版本、schema、权限、tool trace、span tree、回放、memory 隐私、trace 脱敏保留、成本归因和最终门禁。
+常见审计维度：Knowledge Base Contract 看租户、owner、来源、权限、embedding、chunking、索引、同步和保留策略；Document Chunk Version Contract 看 document version、content hash、chunk offset、checksum、embedding ID 和 ACL；Sync Delete Propagation 和 ACL Permission Enforcement 检查删除、撤权、权限变化、tenant 和标签过滤是否进入检索、rerank、prompt 和日志；Retrieval Trace Completeness、Prompt Assembly Trace 与 Citation Version Binding 检查 query、embedding version、index version、filter、candidate、rerank、prompt hash、token budget、citation span、document version 和 offset；Agent Definition Versioning、Tool Definition Contract、Tool Permission Evaluation、Tool Call Trace Completeness、Execution Trace Replay Readiness、Memory Privacy Lifecycle、Trace Privacy Retention、Cost Attribution Governance 和 RAG and Agent Storage Evaluation 则检查 agent / tool 版本、schema、权限、tool trace、span tree、回放、memory 隐私、trace 脱敏保留和成本归因。
 
-面试表达：这类题先强调 RAG / Agent 平台不是向量库加日志表，而是一套应用数据资产控制面；然后按知识库、工具、trace、memory、权限、隐私、成本和回放展开；最后用 RAG Agent Storage Gate 收束，说明线上 bad case 能解释、复现、审计、删除和回滚。
+面试表达：这类题先强调 RAG / Agent 平台不是向量库加日志表，而是一套应用数据资产控制面；然后按知识库、工具、trace、memory、权限、隐私、成本和回放展开，说明线上 bad case 如何被解释、复现、审计、删除和回滚。
 
 ## Knowledge Base Contract
 
@@ -6536,11 +6670,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：Agent 成本失控常来自循环、重试、工具 API、rerank 和 trace 存储，只看模型 token 账单不够。
 
-## RAG Agent Storage Gate
+## RAG and Agent Storage Evaluation
 
-一句话定义：RAG Agent Storage Gate 是判断知识库、文档、chunk、citation、agent definition、tool definition、tool permission、tool trace、execution trace、memory、隐私、成本、审计和回滚证据是否完整且无 P0 风险的综合门禁。
+一句话定义：RAG and Agent storage evaluation 用来判断知识库、文档、chunk、citation、agent definition、tool definition、tool permission、tool trace、execution trace、memory、隐私、成本、审计和回滚证据是否完整，并识别 P0 风险。
 
-典型硬阻断：知识库缺 owner 或权限策略；chunk 缺 document version / offset / checksum；删除和撤权没有传播到索引；无权限 chunk 进入 prompt；retrieval trace 缺 index version；prompt assembly 缺 hash；citation 不绑定版本；agent definition 未版本化；tool schema 缺版本；高风险工具绕过确认；tool output 未记录；trace 不可回放；敏感 memory 被长期保存；trace 无脱敏或 TTL；成本不可归因；没有最终 storage gate。
+典型严重问题：知识库缺 owner 或权限策略；chunk 缺 document version / offset / checksum；删除和撤权没有传播到索引；无权限 chunk 进入 prompt；retrieval trace 缺 index version；prompt assembly 缺 hash；citation 不绑定版本；agent definition 未版本化；tool schema 缺版本；高风险工具绕过确认；tool output 未记录；trace 不可回放；敏感 memory 被长期保存；trace 无脱敏或 TTL；成本不可归因。这些问题会直接破坏复现、权限、回滚或事故追踪。
 
 ## Tool Cost Latency Concurrency Audit
 
@@ -6644,15 +6778,15 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 面试表达：性能治理也要回归测试，不能只在压测或事故后才发现某个路径会无限调用工具。
 
-## Tool Performance Gate
+## Tool Performance Evaluation
 
-一句话定义：tool performance gate 是基于成本归因、延迟分解、预算执行、timeout、retry、幂等、并发、队列、限流、缓存、批处理、结果预算、降级、router、trace 和 eval 的综合上线门禁。
+一句话定义：tool performance evaluation 是基于成本归因、延迟分解、预算执行、timeout、retry、幂等、并发、队列、限流、缓存、批处理、结果预算、降级、router、trace 和 eval 的综合评价。
 
-面试表达：门禁通过才说明工具调用系统在成本、延迟、并发和失败恢复上可控，而不是只在 demo 环境跑通。
+面试表达：检查通过才说明工具调用系统在成本、延迟、并发和失败恢复上可控，而不是只在 demo 环境跑通。
 
 ## Tool Use Eval Benchmark Audit
 
-一句话定义：tool use eval benchmark audit 是对工具需求判断、工具选择、参数生成、多步调用、观察结果使用、失败恢复、安全策略、模拟器、trace replay 和回归门禁的系统审计。
+一句话定义：tool use eval benchmark audit 是对工具需求判断、工具选择、参数生成、多步调用、观察结果使用、失败恢复、安全策略、模拟器、trace replay 和回归依据的系统审计。
 
 工程价值：它把“模型会不会用工具”拆成可定位指标，而不是只看最终答案是否流畅。
 
@@ -6708,7 +6842,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：safety policy compliance 衡量工具调用是否遵守权限、确认、数据外发、注入防护和高风险动作策略。
 
-常见硬门禁：未确认退款、删除、外发、shell 执行、写生产数据或被不可信内容驱动的高风险动作应直接阻断。
+常见硬性条件：未确认退款、删除、外发、shell 执行、写生产数据或被不可信内容驱动的高风险动作应直接阻断。
 
 ## Tool Simulator Determinism
 
@@ -6734,17 +6868,17 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 常见问题：只覆盖 happy path 的总分会掩盖某个高风险切片的严重回归。
 
-## Regression Gate Readiness
+## Regression Release Readiness
 
-一句话定义：regression gate readiness 衡量 benchmark 指标是否已经变成发布前的硬门禁，而不是一次性离线报告。
+一句话定义：regression release readiness 衡量 benchmark 指标是否已经进入发布前的决策流程，而不是停留在一次性离线报告。
 
-工程价值：只有进入 CI、灰度、release gate 和事故复盘，eval 才能真正防止回归。
+工程价值：只有进入 CI、灰度、发布评审和事故复盘，eval 才能真正帮助发现回归。
 
-## Tool Use Eval Benchmark Gate
+## Tool-use Benchmark Evaluation
 
-一句话定义：tool use eval benchmark gate 是基于工具需求、工具集合、参数、顺序、观察结果、失败恢复、安全、模拟器、trace replay、成本延迟和切片覆盖的综合上线门禁。
+一句话定义：tool-use benchmark evaluation 是基于工具需求、工具集合、参数、顺序、观察结果、失败恢复、安全、模拟器、trace replay、成本延迟和切片覆盖的综合评价。
 
-面试表达：门禁通过才说明系统不是只在 demo 上会调工具，而是在真实任务、异常和安全边界上可评估、可回放、可阻断。
+面试表达：检查通过才说明系统不是只在 demo 上会调工具，而是在真实任务、异常和安全边界上可评估、可回放、可阻断。
 
 ## Function MCP A2A Comparison Audit
 
@@ -6808,7 +6942,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 ## Host Runtime Ownership
 
-一句话定义：host runtime ownership 衡量 Host / runtime 是否承担 provider adapter、MCP 能力投影、上下文预算、权限门禁、工具结果处理和 trace 串联。
+一句话定义：host runtime ownership 衡量 Host / runtime 是否承担 provider adapter、MCP 能力投影、上下文预算、权限控制边界、工具结果处理和 trace 串联。
 
 面试表达：三层协议组合时，Host 是安全和上下文控制中心，不是透明转发器。
 
@@ -6818,9 +6952,9 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 工程价值：链路断开时，无法复盘某个最终回答来自哪个 Agent、哪个工具、哪个资源和哪个权限决策。
 
-## Eval Gate Linkage
+## Eval Linkage
 
-一句话定义：eval gate linkage 衡量 tool eval、MCP integration eval、A2A task eval 和 release gate 是否连接成回归门禁。
+一句话定义：eval linkage 衡量 tool eval、MCP integration eval、A2A task eval 和发布评审是否连接成一套回归依据。
 
 常见问题：只测 Function Calling 参数准确率，不测 MCP 权限、A2A 上下文转发和跨层 trace，会漏掉系统级风险。
 
@@ -6834,13 +6968,13 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：severe protocol misuse rate 是严重协议误用样本占比，例如跨 Agent 无权限转发上下文、A2A 包装普通工具、MCP 当模型输出格式或 trace 断链。
 
-工程价值：这类问题通常应作为上线硬阻断，而不是低权重扣分项。
+工程价值：这类问题通常应作为严重安全问题单独处理，而不是低权重质量扣分项。
 
-## Protocol Composition Gate
+## Protocol Composition Evaluation
 
-一句话定义：protocol composition gate 是基于层级边界、三层适配、对象契约、能力发现、生命周期、上下文、权限、Host 责任、trace、eval 和过度工程控制的综合门禁。
+一句话定义：protocol composition evaluation 是基于层级边界、三层适配、对象契约、能力发现、生命周期、上下文、权限、Host 责任、trace、eval 和过度工程控制的综合评价。
 
-面试表达：门禁通过才说明 Function Calling、MCP 和 A2A 是分层协作，而不是概念混搭。
+面试表达：检查通过才说明 Function Calling、MCP 和 A2A 是分层协作，而不是概念混搭。
 
 ## Provider Framework Tool Protocol Audit
 
@@ -6938,11 +7072,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 工程价值：不是完全避免平台能力，而是把平台能力包在可替换、可评估、可审计的边界里。
 
-## Provider Runtime Gate
+## Provider Runtime Evaluation
 
-一句话定义：provider runtime gate 是基于 provider/framework 边界、schema 投影、tool choice、tool result、streaming、parallel、内置工具、错误归一化、adapter、RAG trace、权限、安全、迁移 eval 和 vendor lock-in 的综合门禁。
+一句话定义：provider runtime evaluation 是基于 provider/framework 边界、schema 投影、tool choice、tool result、streaming、parallel、内置工具、错误归一化、adapter、RAG trace、权限、安全、迁移 eval 和 vendor lock-in 的综合评价。
 
-面试表达：门禁通过才说明多平台工具调用不是字段翻译，而是语义、权限、trace 和 eval 都可迁移。
+面试表达：检查通过才说明多平台工具调用不是字段翻译，而是语义、权限、trace 和 eval 都可迁移。
 
 ## Enterprise MCP Platform Audit
 
@@ -6990,7 +7124,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 一句话定义：MCP tenant isolation enforcement 衡量 Server 可见性、tool 权限、resource、artifact、trace、audit、quota 和配置是否按租户隔离。
 
-上线原则：跨租户泄露应是硬阻断项，不是普通低权重扣分。
+工程原则：跨租户泄露属于严重安全问题，不能当作普通低权重扣分。
 
 ## MCP Policy Engine Coverage
 
@@ -7058,11 +7192,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 工程价值：中心化平台一旦成为所有 Agent 的工具入口，高可用和降级策略就是基础能力。
 
-## Enterprise MCP Platform Gate
+## Enterprise MCP Platform Evaluation
 
-一句话定义：enterprise MCP platform gate 是基于 Gateway、Registry、namespace、tool/resource/prompt 契约、Host 边界、OBO 授权、租户隔离、policy、sandbox、上下文投影、prompt injection taint、trace/replay、成本配额、开发者审核、发布治理、adapter、eval 和高可用的综合上线门禁。
+一句话定义：enterprise MCP platform evaluation 是基于 Gateway、Registry、namespace、tool/resource/prompt 契约、Host 边界、OBO 授权、租户隔离、policy、sandbox、上下文投影、prompt injection taint、trace/replay、成本配额、开发者审核、发布治理、adapter、eval 和高可用的综合评价。
 
-面试表达：门禁通过才说明企业 MCP 平台不是普通 API Gateway，而是可授权、可隔离、可审计、可回放、可评估、可运营的工具和上下文接入层。
+面试表达：检查通过才说明企业 MCP 平台不是普通 API Gateway，而是可授权、可隔离、可审计、可回放、可评估、可运营的工具和上下文接入层。
 
 ## Enterprise LLMOps Platform Audit
 
@@ -7114,7 +7248,7 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 ## LLMOps Eval Feedback Loop
 
-一句话定义：LLMOps eval feedback loop 衡量离线评估、LLM-as-Judge、人评、在线 A/B、用户反馈、bad case triage、回归集更新和发布门禁是否能闭环。
+一句话定义：LLMOps eval feedback loop 衡量离线评估、LLM-as-Judge、人评、在线 A/B、用户反馈、bad case triage、回归集更新和发布决策依据是否能闭环。
 
 工程价值：只收集点赞点踩不叫反馈闭环；反馈必须进入可复现样本、修复动作和下一轮回归。
 
@@ -7130,11 +7264,11 @@ RAG 场景：Recall@K 只说明正确证据是否出现，MRR 更能反映用户
 
 常见问题：Agent 多步调用会把模型成本、工具成本和人工审核成本放大，必须配合预算、配额、step limit 和 cost alert。
 
-## LLMOps Platform Gate
+## LLMOps Platform Evaluation
 
-一句话定义：LLMOps platform gate 是基于资源模型、模型网关、prompt、RAG、工具、Agent、评估、发布、trace、反馈、安全、成本、多环境和开发者接口的企业级 LLMOps 上线门禁。
+一句话定义：LLMOps platform evaluation 是基于资源模型、模型网关、prompt、RAG、工具、Agent、评估、发布、trace、反馈、安全、成本、多环境和开发者接口的企业级 LLMOps 综合评价。
 
-面试表达：门禁通过才说明平台不是功能入口集合，而是可开发、可评估、可发布、可观测、可治理、可审计、可持续优化的应用生命周期平台。
+面试表达：检查通过才说明平台不是功能入口集合，而是可开发、可评估、可发布、可观测、可治理、可审计、可持续优化的应用生命周期平台。
 
 ## 长上下文、RAG 与 Agent 的关系
 

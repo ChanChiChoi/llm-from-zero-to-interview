@@ -21,17 +21,17 @@
 
 > Skill 生命周期管理的核心，是让能力从“可用”变成“可控、可审计、可升级、可回滚”。
 
-## 36.0 本讲资料边界与第二轮精修口径
+## 36.0 本讲范围与资料
 
-本章第二轮精修时，重点核对了 Agent Skills / OpenAI Skills 公开资料中 Skill 作为版本化文件包、`SKILL.md` manifest、版本指针、默认版本和 eval 的口径，Semantic Versioning 2.0.0 对 `MAJOR.MINOR.PATCH` 的兼容性语义，Kubernetes Deployment 对 rolling update / rollback 的工程范式，OpenFeature 对 feature flag、evaluation context 和 provider 的抽象，以及 MCP authorization / security best practices 中授权、scope、roots、审计和本地沙箱的治理原则。
+本章参考 Agent Skills / OpenAI Skills 公开资料中 Skill 作为版本化文件包、`SKILL.md` manifest、版本指针、默认版本和 eval 的口径，Semantic Versioning 2.0.0 对 `MAJOR.MINOR.PATCH` 的兼容性语义，Kubernetes Deployment 对 rolling update / rollback 的工程范式，OpenFeature 对 feature flag、evaluation context 和 provider 的抽象，以及 MCP authorization / security best practices 中授权、scope、roots、审计和本地沙箱的治理原则。
 
 需要先划清边界：
 
 1. 本章讲 Skill 从发布、安装、配置、启用、使用、升级、灰度、回滚、禁用、卸载到紧急下架的生命周期治理，不绑定某一家平台的 marketplace、安装器、feature flag 系统、IAM 产品或版本字段。
 2. 安装不等于启用，启用不等于每次调用都自动放行；运行时仍要检查权限、配置、版本、上下文策略和风险。
 3. Skill 版本治理不只包括代码，也包括 manifest、prompt、workflow、tool 依赖、resource 依赖、配置 schema、安全策略和 eval 门槛。
-4. 新增权限、扩大数据范围、改变输出契约、改变高风险 workflow 或改变外部共享策略，都应进入人工审批或至少显式策略门禁。
-5. 本章新增的公式和 Python demo 是教学用生命周期审计器，不实现真实安装市场、权限审批系统、灰度发布平台、回滚引擎、任务队列或审计系统。
+4. 新增权限、扩大数据范围、改变输出契约、改变高风险 workflow 或改变外部共享策略，都应进入人工审批或至少显式策略验收条件。
+5. 本章补充的公式和 Python demo 是教学用生命周期审计器，不实现真实安装市场、权限审批系统、灰度发布平台、回滚引擎、任务队列或审计系统。
 
 ## 36.1 Skill 生命周期总览
 
@@ -528,7 +528,7 @@ Prompt 变化会影响行为，应该纳入版本和 eval。
 C_j=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[I_j(\ell_i)=1]
 ```
 
-灰度阶段可以同时看质量、安全、成本和延迟门禁：
+灰度阶段可以同时看质量、安全、成本和延迟验收条件：
 
 ```math
 G_{\mathrm{canary}}
@@ -540,7 +540,7 @@ G_{\mathrm{canary}}
 
 这里为了阅读直观，用 `A_{\mathrm{succ}}` 表示成功率，`E_{\mathrm{err}}` 表示错误率，`B_{\mathrm{safety}}` 表示安全拦截或未解决安全回归数量，`R_{\mathrm{cost}}` 表示相对成本。
 
-Skill 生命周期上线门禁可以写成：
+Skill 生命周期上线准入条件可以形式化为：
 
 ```math
 G_{\mathrm{skill\_lifecycle}}

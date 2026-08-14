@@ -4,11 +4,11 @@ Agent 评估比普通模型评估更难。普通问答可以看答案是否正�
 
 一个 Agent 最终给出漂亮总结，不代表它真的完成了任务。它可能没有运行测试却声称测试通过，可能填写了错误表单却说提交成功，可能调用了不该调用的高权限工具，也可能只是在 trace 里绕了很多圈但没有推进目标。
 
-本章系统讲 Agent 评估：任务成功率、部分成功、轨迹评估、工具调用质量、observation 使用、状态更新、错误恢复、真实环境 benchmark、沙箱评估、人工评估、自动评估、LLM judge、安全评估、成本延迟、回归测试和上线门禁。
+本章系统讲 Agent 评估：任务成功率、部分成功、轨迹评估、工具调用质量、observation 使用、状态更新、错误恢复、真实环境 benchmark、沙箱评估、人工评估、自动评估、LLM judge、安全评估、成本延迟、回归测试和上线条件。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲第二轮精修前，已按 `WRITING_PLAN.md` 联网核对 OpenAI Evals、AgentBench、WebArena、OSWorld、SWE-bench、GAIA、tau-bench 和 ToolBench 等 Agent / tool-use / interactive benchmark 资料。正文不做 benchmark 排名，也不把某个 benchmark 写成通用标准，而是抽象出工程上更稳定的评估口径：
+本章参考 OpenAI Evals、AgentBench、WebArena、OSWorld、SWE-bench、GAIA、tau-bench 和 ToolBench 等 Agent / tool-use / interactive benchmark 资料。正文不做 benchmark 排名，也不把某个 benchmark 写成通用标准，而是抽象出工程上更稳定的评估口径：
 
 1. Agent evaluation 的对象是任务、环境、工具、权限、轨迹、最终结果和成本的组合。
 2. 任务成功率必须有可执行验收标准或明确 rubric。
@@ -16,7 +16,7 @@ Agent 评估比普通模型评估更难。普通问答可以看答案是否正�
 4. Agent benchmark 要尽量固定初始状态、工具版本、权限、数据和验证脚本。
 5. 自动评估、人工评估、LLM judge 和安全审计应组合使用，不能互相替代。
 
-本章不提供绕过权限、规避审计、利用工具漏洞或执行高风险动作的方法。涉及安全评估时，只从防御性指标、权限检查、人工确认、trace 审计和上线门禁角度讨论。
+本章不提供绕过权限、规避审计、利用工具漏洞或执行高风险动作的方法。涉及安全评估时，只从防御性指标、权限检查、人工确认、trace 审计和上线条件角度讨论。
 
 ## 10.1 Agent 评估为什么难
 
@@ -169,7 +169,7 @@ R_{\mathrm{confirm}}=\frac{\sum_{j=1}^{M}\mathbf{1}[\mathrm{risk}(a_j) \land \ma
 
 高风险动作包括删除、支付、发送、提交、权限修改和不可逆写操作。评估时要看它是否被确认、阻断或草稿化。
 
-### 10.3.8 成本、延迟和上线门禁
+### 10.3.8 成本、延迟和上线条件
 
 单个任务成本：
 
@@ -177,7 +177,7 @@ R_{\mathrm{confirm}}=\frac{\sum_{j=1}^{M}\mathbf{1}[\mathrm{risk}(a_j) \land \ma
 C_i=\sum_{j=1}^{M_i}C(a_{ij})+C_{\mathrm{model},i}+C_{\mathrm{judge},i}+C_{\mathrm{human},i}
 ```
 
-Agent 上线门禁可以写成：
+Agent 上线准入条件可以形式化为：
 
 ```math
 G_{\mathrm{agent\_eval}}=\mathbf{1}[R_{\mathrm{succ}}\ge \tau_s \land S_{\mathrm{partial}}\ge \tau_q \land A_{\mathrm{tool}}\ge \tau_t \land R_{\mathrm{faith}}\ge \tau_f \land R_{\mathrm{unauth}}\le \tau_u \land C_{\mathrm{avg}}\le B]
@@ -352,7 +352,7 @@ Agent 需要真实环境 benchmark。
 4. 页面是否到达目标状态。
 5. API 调用是否成功。
 6. 输出是否满足格式约束。
-7. 权限门禁是否被触发。
+7. 权限验收条件是否被触发。
 
 自动评估优势是可扩展、客观、便宜。缺点是覆盖有限，容易被过拟合，也可能漏掉安全和过程质量问题。
 
@@ -699,6 +699,26 @@ gate_pass=False
 ```
 
 这个 demo 的 `gate_pass=False` 不是程序错误，而是刻意暴露 Agent 评估中常见的上线阻断点：任务成功率不足、部分成功分偏低、忽略 observation、状态更新不足、最终总结不忠实、claim 缺少 trace 支持、重复动作、越权动作、高风险未确认和 P95 延迟超标。
+
+### 10.19.1 Harness-aware evaluation：评测结果必须带运行条件
+
+同一个模型在不同 harness 下可能得到完全不同的 Agent 结果。评测记录至少要绑定：
+
+1. model id、checkpoint 和 `reasoning_effort`/thinking level。
+2. system prompt、tool schema、MCP/A2A server 版本和权限策略。
+3. context folding、summary、memory、persistent workspace 和 checkpoint 策略。
+4. 子 Agent 数量、并发、最大步骤、工具/搜索/verifier 预算。
+5. 环境镜像、依赖、网络、时间和随机种子。
+
+可以把一次 Agent 评测结果写成：
+
+```math
+R=F(M,H,E,B,D)
+```
+
+其中 `M` 是模型，`H` 是 harness，`E` 是环境，`B` 是预算，`D` 是数据集。只报告 `F(M,...)` 而不报告其他变量，无法判断提升来自模型还是系统配置。
+
+对比实验应至少包含：固定 harness 换模型、固定模型换 harness、固定两者换预算，以及失败 trace 的逐步归因。AgentWorld 这类环境型模型还要把 environment reset、可观测性和任务状态版本写进结果，否则复现不了长周期任务。
 
 ## 10.20 常见评估陷阱
 

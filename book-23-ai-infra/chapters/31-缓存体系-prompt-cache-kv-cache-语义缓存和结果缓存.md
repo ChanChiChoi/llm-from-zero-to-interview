@@ -8,13 +8,13 @@
 
 > 推理缓存不是一个缓存，而是一组位于不同层次、解决不同问题的缓存机制。
 
-## 31.0 本讲资料边界与第二轮精修口径
+## 31.0 本讲范围与资料
 
-本讲按 `WRITING_PLAN.md` 的第二轮要求做过资料校准。重点参考的是 OpenAI Prompt Caching 对长 prompt 前缀复用的公开说明，vLLM Automatic Prefix Caching 对 KV block hash、prefix reuse 和 cache hit 的工程口径，TensorRT-LLM 对 paged KV cache、KV cache reuse、retention 和 eviction 的公开说明，以及 RedisVL SemanticCache 对 embedding 相似检索、阈值、TTL 和过滤条件的工程抽象。
+本章参考 OpenAI Prompt Caching 对长 prompt 前缀复用的公开说明，vLLM Automatic Prefix Caching 对 KV block hash、prefix reuse 和 cache hit 的工程口径，TensorRT-LLM 对 paged KV cache、KV cache reuse、retention 和 eviction 的公开说明，以及 RedisVL SemanticCache 对 embedding 相似检索、阈值、TTL 和过滤条件的工程抽象。
 
 这些资料共同指向一个稳定事实：大模型推理缓存不是单个 Redis key-value 缓存，而是跨平台层、runtime 层和业务层的一组缓存策略。prompt / prefix cache 主要减少重复 prefill，KV cache 主要管理生成过程中的 attention 状态，语义缓存用相似检索减少近似重复请求，结果缓存则复用完整响应。四者的 key、生命周期、隔离风险和收益指标都不同。
 
-本章只抽象截至 2026-06 仍稳定的缓存体系设计口径，不把某个云服务的具体折扣、最小 token 门槛、框架默认 block size、向量库参数或缓存字段名写成通用标准。正文公式用于面试表达、容量估算和策略审计；真实上线仍要用目标模型、tokenizer、runtime、请求分布、租户权限、知识库版本、采样参数和安全策略实测校准。
+本章聚焦截至 2026-06 仍稳定的缓存体系设计口径，不把某个云服务的具体折扣、最小 token 门槛、框架默认 block size、向量库参数或缓存字段名写成通用标准。正文公式用于面试表达、容量估算和策略审计；真实上线仍要用目标模型、tokenizer、runtime、请求分布、租户权限、知识库版本、采样参数和安全策略实测校准。
 
 ## 31.1 为什么大模型推理需要缓存
 
@@ -397,7 +397,7 @@ KV cache 驱逐尤其复杂，因为它占的是 GPU 显存，资源昂贵且变
 
 ## 31.20 缓存体系审计指标与最小 demo
 
-第二轮精修时，需要把缓存体系从“哪些地方可以缓存”升级成“哪些缓存可以安全命中、命中后节省多少、错误命中如何阻断、最终能否过门禁”。
+本章把缓存体系从“哪些地方可以缓存”升级成“哪些缓存可以安全命中、命中后节省多少、错误命中如何阻断、最终能否通过验收”。
 
 可以把一次缓存查找写成：
 
@@ -461,13 +461,13 @@ R_{\mathrm{iso}}=\frac{N_{\mathrm{cross\_domain\_hit}}}{N_{\mathrm{hit}}}
 
 这两个指标通常应该接近 0。缓存事故里，过期答案和跨权限命中比低命中率更危险。
 
-最终缓存门禁可以写成：
+最终缓存准入条件可以形式化为：
 
 ```math
 G_{\mathrm{cache}}=\mathbf{1}\left[\min_j C_j\ge\tau_j \land R_{\mathrm{false}}\le\rho_{\mathrm{false}} \land R_{\mathrm{stale}}\le\rho_{\mathrm{stale}} \land R_{\mathrm{iso}}=0 \land K_{\mathrm{save}}>0 \land P_0=0\right]
 ```
 
-其中，`C_j` 是各审计维度覆盖率，`P_0` 是未关闭的 P0 风险数。缓存门禁强调：缓存必须同时证明收益、正确性、隔离、一致性和可审计。
+其中，`C_j` 是各审计维度覆盖率，`P_0` 是未关闭的 P0 风险数。缓存验收条件强调：缓存必须同时证明收益、正确性、隔离、一致性和可审计。
 
 下面这个 0 依赖 Python demo 演示一个简化缓存审计器：先查 result cache，再查 prefix cache，最后查 semantic cache；同时阻断跨租户语义命中、版本过期结果命中和非确定性生成的结果缓存。
 
@@ -961,7 +961,7 @@ KV cache 是 runtime 内部 attention 缓存，结果缓存是业务层响应缓
 
 可以回答：不能只看命中率，还要看节省的 input/output tokens、GPU 时间、TTFT、端到端延迟、成本，以及误命中和过期命中风险。
 
-问题五：语义缓存上线前要设置哪些门禁？
+问题五：语义缓存上线前要设置哪些验收条件？
 
 可以回答：至少要设置相似度阈值、任务类型一致、租户和权限域一致、数据版本一致、TTL 未过期、敏感请求禁用或二次校验、误命中率评估、trace 完整和人工复核样本。
 
@@ -996,6 +996,6 @@ KV cache 是 runtime 内部 attention 缓存，结果缓存是业务层响应缓
 4. 结果缓存返回最快，但对版本、参数、权限、一致性和随机性要求最严格。
 5. 缓存 key 必须包含模型、版本、参数、权限、安全和数据版本等信息。
 6. 缓存必须同时考虑性能、成本、安全、隔离、一致性和审计。
-7. 缓存门禁要同时检查请求画像、缓存层边界、key 版本指纹、prefix / KV 生命周期、语义相似阈值、结果缓存确定性、租户隔离、TTL、驱逐、streaming、指标和成本收益。
+7. 缓存验收条件要同时检查请求画像、缓存层边界、key 版本指纹、prefix / KV 生命周期、语义相似阈值、结果缓存确定性、租户隔离、TTL、驱逐、streaming、指标和成本收益。
 
 下一章我们会讲自动扩缩容：QPS、延迟、队列长度和 GPU 利用率。

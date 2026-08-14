@@ -8,9 +8,9 @@ KV Cache 是 LLM 推理框架的核心。vLLM 的 PagedAttention、SGLang 的 pr
 
 > KV Cache 让 decode 阶段不再重复计算历史 token 的 key/value，而是复用缓存，只为新 token 计算 query/key/value。
 
-## 9.0 本讲资料边界与第二轮精修口径
+## 9.0 本讲范围与资料
 
-本章第二轮精修前，先用公开资料校准口径：Transformers 文档把 cache 解释为自回归生成中保存历史 key/value states，用来避免每一步重复计算完整上下文；Transformers `generate()` 和模型 forward 路径通常通过 `use_cache`、`past_key_values`、`Cache` 对象、`attention_mask` 和位置相关信息协同工作；vLLM 的 PagedAttention 论文和文档进一步把问题推进到生产 serving 中的 KV cache block 管理、非连续物理存储、按需分配、共享前缀和碎片控制。
+本章参考先用公开资料校准口径：Transformers 文档把 cache 解释为自回归生成中保存历史 key/value states，用来避免每一步重复计算完整上下文；Transformers `generate()` 和模型 forward 路径通常通过 `use_cache`、`past_key_values`、`Cache` 对象、`attention_mask` 和位置相关信息协同工作；vLLM 的 PagedAttention 论文和文档进一步把问题推进到生产 serving 中的 KV cache block 管理、非连续物理存储、按需分配、共享前缀和碎片控制。
 
 因此，本章只讨论最小单请求 KV Cache：prefill 建 cache，decode 追加 cache，验证输出等价和重复计算下降。它不实现 PagedAttention、block manager、prefix cache、多请求调度、KV offload、KV quantization 或 PD 分离。正文里的 Hugging Face / PyTorch 代码用于贴近工程接口，新增 0 依赖 demo 用纯 Python 展示最小 cache 机制和审计指标。
 

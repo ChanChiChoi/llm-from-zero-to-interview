@@ -1,8 +1,8 @@
 # 第四章：Tool Choice、Parallel Tool Calls 与强制工具调用
 
-## 4.0 本讲资料边界与第二轮精修口径
+## 4.0 本讲范围与资料
 
-本讲第二轮精修时，按 `WRITING_PLAN.md` 的要求重新核对了 OpenAI function calling / tools、Anthropic tool use、Google Gemini function calling 和并行工具调用相关公开资料。不同平台对 `auto`、`none`、`required`、指定工具、allowed tools、parallel tool calls、streaming tool call 和 strict schema 的字段名与支持程度并不完全一致，所以正文只抽象稳定控制层：候选工具过滤、tool choice 模式、强制工具、并行执行、结果 id 对齐、权限确认、限流、成本预算、loop 上限和 provider capability 降级。
+本章参考了 OpenAI function calling / tools、Anthropic tool use、Google Gemini function calling 和并行工具调用相关公开资料。不同平台对 `auto`、`none`、`required`、指定工具、allowed tools、parallel tool calls、streaming tool call 和 strict schema 的字段名与支持程度并不完全一致，所以正文只抽象稳定控制层：候选工具过滤、tool choice 模式、强制工具、并行执行、结果 id 对齐、权限确认、限流、成本预算、loop 上限和 provider capability 降级。
 
 本讲不把某一家 provider 的当前 API 字段写成永久标准，也不把 tool choice 当成权限系统。更稳的边界是：
 
@@ -11,7 +11,7 @@
 3. Rate limit、cost budget 和 max step 控制工具调用不会失控。
 4. Provider adapter 负责把内部策略映射到不同平台支持的能力子集。
 
-第二轮重点补强三件事：第一，把 tool choice 从文字策略拆成可审计指标；第二，补一个 0 依赖 Python demo，演示 auto、none、required、forced、parallel、缺参澄清、限流和确认门禁；第三，同步百科、题库、练习、术语表、项目和知识图谱，为后续 Tool Router、Tool Executor 和权限章节复用。
+本章重点包括三件事：第一，把 tool choice 从文字策略拆成可审计指标；第二，补一个 0 依赖 Python demo，演示 auto、none、required、forced、parallel、缺参澄清、限流和确认验收条件；第三，同步百科、题库、练习、术语表、项目和知识图谱，为后续 Tool Router、Tool Executor 和权限章节复用。
 
 ## 4.1 本章定位
 
@@ -1087,7 +1087,7 @@ C_{\mathrm{loop}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{repeat}_i\le M_i \
 
 其中 `M_i` 是重复调用或最大步数上限。
 
-最后定义一个门禁：
+最后定义一个验收条件：
 
 ```math
 G_{\mathrm{choice}}=\mathbf{1}[

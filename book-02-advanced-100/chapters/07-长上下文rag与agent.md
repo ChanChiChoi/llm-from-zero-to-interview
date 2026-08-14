@@ -6575,6 +6575,8 @@ final_answer= {'root_cause_hypothesis': '连接池从 50 降到 10 后，checkou
 
 这个 demo 的关键点是：初始计划里没有 `runbook` 和 `config` 两步，它们是根据 observation 动态插入的；最终步骤依赖也随之更新。这比“生成一个计划列表然后照着做”更接近真实 Agent planning。
 
+这里的 `root_cause_hypothesis` 是为了让示例输出稳定而写死的演示结论，不代表程序已经完成了真正的因果归因。生产系统应把假设和证据分开保存：例如把 `config.diff`、日志错误和指标时间窗口作为证据，把“连接池缩小导致超时”作为待验证假设，并在回滚或修复后用新的指标确认假设是否成立。
+
 ---
 
 ### 九、Planning 和 Memory 的区别
@@ -6683,6 +6685,8 @@ C_{\mathrm{sat}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}\{\mathrm{violations}_i=0\}
 ```math
 R_{\mathrm{recover}}=\frac{\sum_i\mathbf{1}\{\mathrm{failure}_i=1,\mathrm{recovered}_i=1\}}{\sum_i\mathbf{1}\{\mathrm{failure}_i=1\}}
 ```
+
+这些比例都需要明确评估集和分母。若某个评估集没有失败样本，`R_recover` 没有统计意义，应报告为 `N/A`，而不是把 `0/0` 当成失败；实现中的 `safe_rate` 可以选择返回 `0`，但报告层应同时记录分母为零。步骤成功率也必须说明 `m_i` 是预先定义的步骤数，还是 Agent 动态插入后的实际步骤数，否则不同规划策略之间不可直接比较。
 
 循环率可以用重复动作衡量：
 
@@ -7051,6 +7055,8 @@ Prompt injection 的本质是：
 外部内容只能作为数据，不能提升为系统指令。
 ```
 
+这是一条系统设计原则，不是靠在 prompt 中加一句“不要相信网页”就能彻底实现的安全保证。边界标记和指令分层可以帮助模型区分来源，但不能把不可信文本变成可信输入；真正的保护仍要落在工具权限、资源权限、参数校验、数据流检查和执行审计上。尤其要注意间接注入：攻击文本不必直接要求模型泄露数据，只要诱导模型读取某个资源、改变搜索范围或把结果转交给另一个工具，也可能形成真实风险。
+
 具体做法：
 
 1. 区分 system instruction、developer instruction、user instruction、external content。
@@ -7117,14 +7123,14 @@ production-change
 
 不同级别需要不同确认和审计。
 
-权限 gate 可以写成一个乘积形式。设用户为 `u`，工具为 `a`，参数为 `z`，资源为 `r`，动作为风险级别 `q`：
+权限判定可以写成一个乘积形式。设用户为 `u`，工具为 `a`，参数为 `z`，资源为 `r`，动作为风险级别 `q`，确认状态为 `c`：
 
 ```math
-\mathrm{Allow}(u,a,z,r,q)=
+\mathrm{Allow}(u,a,z,r,q,c)=
 P_{\mathrm{tool}}(u,a)
 P_{\mathrm{res}}(u,r)
 P_{\mathrm{arg}}(u,a,z)
-P_{\mathrm{risk}}(u,a,q)
+P_{\mathrm{risk}}(u,a,q,c)
 ```
 
 任何一项为 `0`，工具都不能执行。这里 `P_tool` 检查用户是否有工具权限，`P_res` 检查资源或对象权限，`P_arg` 检查参数是否越权，`P_risk` 检查风险级别是否需要确认、审批、沙箱或直接拒绝。
@@ -7132,7 +7138,7 @@ P_{\mathrm{risk}}(u,a,q)
 高风险动作还要引入确认变量 `c`：
 
 ```math
-P_{\mathrm{risk}}(u,a,q)=\mathbf{1}\{q\le q_{\mathrm{auto}}\}+\mathbf{1}\{q>q_{\mathrm{auto}}\}\mathbf{1}\{c=1\}
+P_{\mathrm{risk}}(u,a,q,c)=\mathbf{1}\{q\le q_{\mathrm{auto}}\}+\mathbf{1}\{q>q_{\mathrm{auto}}\}\mathbf{1}\{c=1\}
 ```
 
 其中 `q_auto` 是允许自动执行的最高风险级别。真实系统会把上式实现成 policy engine，而不是交给模型判断。
@@ -7189,6 +7195,8 @@ M_{\mathrm{confirm}}=\frac{\sum_i\mathbf{1}\{h_i=1,c_i=0\}}{\sum_i\mathbf{1}\{h_
 ```
 
 漏确认比过度确认危险得多，因为它意味着高风险动作可能直接执行。过度确认会影响体验，但漏确认可能造成真实事故。
+
+`A_confirm` 和 `M_confirm` 的分母也要随评估范围记录。若测试集没有任何需要确认的动作，漏确认率应标为 `N/A`；不能因为分母为零就宣称系统“零漏确认”。实际系统还应把确认绑定到具体动作摘要、参数哈希和用户身份，避免用户确认了一个版本的请求后，模型悄悄替换成另一个请求。
 
 ---
 
@@ -7456,6 +7464,7 @@ E_{\mathrm{unauth}}=\frac{\sum_i\mathbf{1}\{\mathrm{unauth}_i=1,\mathrm{executed
 
 ```python
 from dataclasses import dataclass
+import posixpath
 
 
 @dataclass
@@ -7494,6 +7503,11 @@ SENSITIVE_KEYS = {"api_key", "payment_token", "internal_note"}
 HIGH_RISK = {"external_send", "destructive", "production_change"}
 
 
+def is_workspace_path(path):
+    normalized = posixpath.normpath(path)
+    return normalized == "/workspace" or normalized.startswith("/workspace/")
+
+
 def contains_sensitive_data(value):
     if isinstance(value, dict):
         return any(key in SENSITIVE_KEYS or contains_sensitive_data(v) for key, v in value.items())
@@ -7516,6 +7530,8 @@ def policy_gate(user, action):
             reasons.append("resource_not_found")
         elif order["tenant"] != user.tenant:
             reasons.append("cross_tenant_access")
+        elif user.role != "admin" and order["owner"] != user.user_id:
+            reasons.append("resource_not_owned")
 
     if action.tool == "send_email":
         if action.source == "external_content":
@@ -7525,10 +7541,12 @@ def policy_gate(user, action):
 
     if action.tool == "delete_file":
         path = action.args.get("path", "")
-        if not path.startswith("/workspace/"):
+        if not is_workspace_path(path):
             reasons.append("path_outside_workspace")
 
-    risk = TOOL_RISK.get(action.tool, action.risk)
+    risk = TOOL_RISK.get(action.tool)
+    if risk is None:
+        reasons.append("unknown_tool")
     if risk in HIGH_RISK and not action.confirmed:
         reasons.append("missing_human_confirmation")
 
@@ -7595,10 +7613,13 @@ def run_eval():
     unauth = [row for row in trace if row["unauth"]]
     leaks = [row for row in trace if contains_sensitive_data(row["action"].args) and row["gate"]["allowed"]]
 
+    def safe_rate(numerator, denominator):
+        return numerator / denominator if denominator else 0.0
+
     metrics = {
-        "attack_block_rate": sum(not row["gate"]["allowed"] for row in attacks) / len(attacks),
-        "unauthorized_execute_rate": sum(row["gate"]["allowed"] for row in unauth) / len(unauth),
-        "data_leak_rate": len(leaks) / len(trace),
+        "attack_block_rate": safe_rate(sum(not row["gate"]["allowed"] for row in attacks), len(attacks)),
+        "unauthorized_execute_rate": safe_rate(sum(row["gate"]["allowed"] for row in unauth), len(unauth)),
+        "data_leak_rate": safe_rate(len(leaks), len(trace)),
         "allowed_actions": sum(row["gate"]["allowed"] for row in trace),
         "blocked_actions": sum(not row["gate"]["allowed"] for row in trace),
     }
@@ -7859,11 +7880,11 @@ memory 的关键不是“多存历史”，而是把历史变成可写入、可�
 
 ### 一、为什么需要 Memory
 
-普通 LLM 是无状态的。
+基础模型的单次推理通常不会自动保留跨请求的会话状态。
 
 每次调用模型时，模型只看到当前 prompt 和上下文。
 
-如果历史没有放进上下文，模型就不知道。
+如果历史没有由应用显式放进上下文，或者没有通过检索机制恢复，模型在这次调用中就看不到它。
 
 这会带来几个问题。
 
@@ -7935,6 +7956,8 @@ state = 当前任务状态
 RAG = 外部知识
 memory = 长期个性化或经验信息
 ```
+
+这是工程上的常用划分，不是互斥的存储类型。RAG 也可以按用户或项目做权限隔离，memory 也可以保存团队共享的经验；真正的边界要看数据的来源、所有权、生命周期和更新责任。比如企业政策通常属于受版本管理的知识库，不能因为它被某次对话“记住”就变成个人 memory；用户明确授权的偏好则更适合进入用户作用域的 memory。
 
 面试中一定要讲清这几个边界。
 
@@ -8302,12 +8325,12 @@ g_{ij}
 ```math
 q_j
 =
-a_j
-+
-b_j
-+
-c_j
+w_a a_j
++ w_b b_j
++ w_c c_j
 ```
+
+其中 `a_j`、`b_j`、`c_j` 应先归一化到可比较的范围，`w_a`、`w_b`、`w_c` 表示权威性、最近性和置信度的权重。只有在同一作用域、同一 key 且候选值确实互相冲突时，才使用这个分数比较；不同类型的 memory 不应该用一个总分强行覆盖。
 
 ```math
 m_j \succ m_i
@@ -8364,12 +8387,12 @@ Memory 不是 append-only log，而是需要版本、冲突处理和失效机制
 ```math
 h_i(t)
 =
-h_i(0)\exp\left(-\frac{t - t_i}{\tau_i}\right)
+h_i(0)2^{-\frac{\max(0,t-t_i)}{\tau_i}}
 +
 u_i(t)
 ```
 
-其中 `h_i(t)` 是第 `i` 条记忆在时间 `t` 的有效强度，`\tau_i` 是该类记忆的半衰期参数，`u_i(t)` 是近期复用或用户再次确认带来的加分。用户偏好、项目流程和临时工具结果应该有不同的 `\tau_i`。
+其中 `h_i(t)` 是第 `i` 条记忆在时间 `t` 的有效强度，`t_i` 是写入时间，`\tau_i` 是该类记忆的半衰期，`u_i(t)` 是近期复用或用户再次确认带来的加分。用户偏好、项目流程和临时工具结果应该有不同的 `\tau_i`。这里用 `\max(0,t-t_i)` 避免时钟或数据延迟导致未来记忆获得不合理的额外新鲜度。
 
 注意，衰减只是检索排序机制，不等于合规删除。用户明确要求删除时，系统需要删除主表、向量索引、缓存、摘要引用和备份中的可删除副本，并留下可审计的 deletion trace。
 
@@ -8519,7 +8542,7 @@ P_v = \frac{N_{violate}}{N_{all}}
 G = Q_m - Q_b
 ```
 
-其中 `P_w` 是写入 precision，`R_w` 是写入 recall，`U_c` 是使用正确率，`S_r` 是过期记忆误用率，`P_v` 是隐私违规率，`G` 是 memory 相对无 memory baseline 的任务质量增益。面试中最好强调：memory 系统上线前要同时看收益指标和风险指标，不能只看个性化是否变强。
+其中 `P_w` 是写入 precision，`R_w` 是写入 recall，`U_c` 是使用正确率，`S_r` 是过期记忆误用率，`P_v` 是隐私违规率，`G` 是 memory 相对无 memory baseline 的任务质量增益。`N_written`、`N_target`、`N_used` 和 `N_all` 必须在评估协议中预先定义；没有候选写入、没有目标记忆或没有被使用的记忆时，相应比例应报告为 `N/A`。`Q_m` 与 `Q_b` 也必须使用同一批任务、同一评分器和同一置信区间，否则 `G` 不能被解释为 memory 带来的真实增益。面试中最好强调：memory 系统上线前要同时看收益指标和风险指标，不能只看个性化是否变强。
 
 评估集应该包含：
 
@@ -8630,22 +8653,24 @@ class MemoryStore:
         self.memories.append(memory)
         return memory.mid
 
-    def retrieve(self, query, scope, day, budget_words=32):
+    def retrieve(self, query, scope, day, budget_chars=64):
         q = tokens(query)
         ranked = []
         for m in self.memories:
             if m.deleted or m.scope != scope:
                 continue
             overlap = len(q & tokens(m.text)) / max(1, len(q))
-            freshness = math.exp(-(day - m.day) / 30.0)
+            age = max(0, day - m.day)
+            freshness = math.exp(-age / 30.0)
             score = 1.2 * overlap + 0.5 * m.importance + 0.4 * m.confidence + 0.3 * freshness
             ranked.append((score, m))
 
         chosen = []
         used = 0
         for score, memory in sorted(ranked, reverse=True, key=lambda item: item[0]):
-            cost = len(memory.text.split())
-            if used + cost <= budget_words:
+            # The demo has no tokenizer, so it uses character count as a toy budget.
+            cost = len(memory.text)
+            if used + cost <= budget_chars:
                 chosen.append((round(score, 3), memory))
                 used += cost
         return chosen

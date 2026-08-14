@@ -33,9 +33,9 @@ API Server
 
 本章讨论从单机 engine 走向分布式 serving 的第一步。
 
-## 55.0 本讲资料边界与第二轮精修口径
+## 55.0 本讲范围与资料
 
-本章按第二轮精修口径，只讲教学版 serving engine 如何从单 worker 扩展到多个 worker、多张 GPU 和 request router。
+本章聚焦教学版 serving engine 如何从单 worker 扩展到多个 worker、多张 GPU 和 request router。
 
 公开资料校准主要参考四类口径：
 
@@ -50,7 +50,7 @@ API Server
 Router snapshot -> capability filter -> global admission -> sticky candidate -> load-aware fallback -> request-to-worker map -> heartbeat failure -> retry / fail-stream decision
 ```
 
-第二轮新增 demo 的验收重点是：router 只做 worker 级路由，不直接修改 worker 内部 scheduler / KV 状态；round-robin 只能作为 baseline；路由要同时看能力、健康、KV 空间、队列、延迟、preemption 和 prefix locality；sticky 过载时必须 fallback；worker failure 后没有输出的请求可以重试，已经 streaming 的请求必须显式失败。
+本章 demo 的验收重点是：router 只做 worker 级路由，不直接修改 worker 内部 scheduler / KV 状态；round-robin 只能作为 baseline；路由要同时看能力、健康、KV 空间、队列、延迟、preemption 和 prefix locality；sticky 过载时必须 fallback；worker failure 后没有输出的请求可以重试，已经 streaming 的请求必须显式失败。
 
 ## 55.1 本章目标
 
@@ -944,7 +944,7 @@ sticky_route_fallback_total
 故障处理上，worker heartbeat 超时或报错后，router 立即停止给它发新请求。对于已经路由过去的请求，如果还没有输出 token，可以重试到其他 worker；如果已经开始 streaming，通常不能透明重试，只能显式失败或让业务层重新发起。最后要有全局 admission control，在所有候选 worker 都过载时及时 reject，而不是让请求无限排队。
 ```
 
-## 55.24 Multi-Worker Router 公式、故障门禁和可运行 demo
+## 55.24 Multi-Worker Router 公式、故障验收条件和可运行 demo
 
 多 worker 路由先把请求成本估算成 KV block 数：
 
@@ -983,7 +983,7 @@ w_i^{\mathrm{sticky}}, & S(w_i^{\mathrm{sticky}},i)\le \tau \\
 \sum_{w\in \mathcal{C}_i}F_w\ge C_i^{\mathrm{block}}
 ```
 
-worker failure 后的 retry 门禁可以写成：
+worker failure 后的 retry 准入条件可以形式化为：
 
 ```math
 G_{\mathrm{retry},i}=\mathbf{1}[B_i^{\mathrm{stream}}=0]
@@ -991,7 +991,7 @@ G_{\mathrm{retry},i}=\mathbf{1}[B_i^{\mathrm{stream}}=0]
 
 也就是没有向 client 输出过 token 的请求才允许透明重试。
 
-最终用一个组合门禁收束：
+最终用一个组合验收条件收束：
 
 ```math
 G_{\mathrm{router}}=G_{\mathrm{cap}}G_{\mathrm{admit}}G_{\mathrm{load}}G_{\mathrm{sticky}}G_{\mathrm{health}}G_{\mathrm{retry}}G_{\mathrm{state}}G_{\mathrm{metrics}}

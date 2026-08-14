@@ -8,9 +8,9 @@ Batched decode 是 continuous batching 的前置能力。先理解固定 batch �
 
 > Batched decode 的目标是让多个请求共享一次 decode forward，每个请求每轮生成一个新 token，并维护各自的状态、cache 顺序和停止条件。
 
-## 11.0 本讲资料边界与第二轮精修口径
+## 11.0 本讲范围与资料
 
-本章第二轮精修前，先用公开资料校准口径：Transformers cache 文档强调自回归 decode 每步只处理新 token，但 attention mask 需要覆盖 past KV length 加 current tokens；cache 通常按 layer 保存 key/value，形状类似 `[batch_size, num_heads, seq_len, head_dim]`，并且 decode 时会把新 key/value 追加到已有 cache。vLLM 文档把更生产级的问题进一步放到 scheduler、KV cache 空间、decode 优先、chunked prefill 和 `max_num_batched_tokens` 等调度控制上。
+本章参考先用公开资料校准口径：Transformers cache 文档强调自回归 decode 每步只处理新 token，但 attention mask 需要覆盖 past KV length 加 current tokens；cache 通常按 layer 保存 key/value，形状类似 `[batch_size, num_heads, seq_len, head_dim]`，并且 decode 时会把新 key/value 追加到已有 cache。vLLM 文档把更生产级的问题进一步放到 scheduler、KV cache 空间、decode 优先、chunked prefill 和 `max_num_batched_tokens` 等调度控制上。
 
 因此，本章只实现教学版 batched decode：固定 batch、逐请求 finished mask、attention mask 长度增长、batch row 到 request/cache slot 的映射，以及 compact active batch 的直觉。它不实现真正 continuous batching、PagedAttention block table、动态 admission、per-request logits processor 或跨 worker KV 迁移。新增 0 依赖 demo 用 toy requests 验证固定 batch 的浪费、compact batch 的收益、逐请求停止条件和 cache alignment gate。
 

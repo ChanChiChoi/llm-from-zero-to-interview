@@ -6,21 +6,19 @@
 
 但它们也有共同风险：采集难、清洗难、授权难、污染风险高、质量判断成本高、过度上采样容易记忆和过拟合。
 
-本章重点：代码仓库数据、单测、数学推理数据、医学法律金融等领域数据。
+本章围绕代码、数学和专业领域数据的共同工程难题展开：它们对目标能力的边际价值很高，却往往规模有限、结构复杂、授权要求严格，也更容易因为题库、答案、私有信息和重复样本而失去训练或评估价值。讨论始终停留在数据治理、质量控制、授权合规、安全评估和污染检测层面，不把漏洞利用、凭据提取、真实隐私复原或专业决策建议当作训练方法。
 
-合规边界：本章讨论数据治理、质量控制、授权合规、安全评估和污染检测，不提供利用代码漏洞、泄露凭据、绕过系统或获取敏感领域数据的操作方法。
+## 0. 为什么专项数据需要独立治理
 
-## 0. 本讲资料边界与第二轮精修口径
+代码、数学和专业数据不能简单套用普通网页的过滤器。代码需要语法、依赖、测试和许可证信息；数学需要题目、过程、答案和验证关系；专业资料需要来源等级、时效、引用、权限和专家审计。三类数据都要在进入 mixture、继续预训练、SFT 或 RAG 之前保留这些结构。
 
-按照 `WRITING_PLAN.md` 的要求，本讲精修前核对了 Codex / HumanEval、GSM8K / verifier、MATH、The Stack / BigCode / StarCoder、GitHub secret scanning、Med-PaLM、PubMedQA、FinGPT 和 LegalBench 等公开资料。
+可以把它们的共同链路写成：
 
-本讲聚焦 code / math / domain data 的防御性数据治理：专项数据池、许可证和来源审查、secret / PII 过滤、题库和 benchmark 污染隔离、功能测试和 verifier、领域权威性 / 时效性 / 引用审计，以及这些数据如何进入 mixture、继续预训练、SFT 和 RAG。
+~~~text
+专项数据池 -> 授权/来源 -> 结构解析 -> 质量验证 -> 风险扫描 -> 污染隔离 -> 采样配比 -> 评估闭环 -> 版本审计
+~~~
 
-```text
-专项数据池 -> 授权 / 来源 -> 结构解析 -> 质量验证 -> 风险扫描 -> 污染隔离 -> 采样配比 -> 评估闭环 -> 版本审计
-```
-
-本讲不提供漏洞利用、凭据提取、真实隐私复原、医疗法律金融决策建议或绕过数据权限的操作方法。高风险领域数据只讨论训练数据治理和模型边界，不把模型输出替代专家判断。
+本章会分别展开代码仓库和测试、数学推理和 verifier、医学/法律/金融等专业数据，并在最后比较不同训练路径的边界。Codex/HumanEval、GSM8K、MATH、The Stack、StarCoder、Med-PaLM、PubMedQA、FinGPT 和 LegalBench 提供了公开研究入口；它们支持特定任务或数据构造的事实，不构成通用数据比例、生产安全性或专业决策可靠性的证明。
 
 ---
 
@@ -68,83 +66,83 @@ GSM8K 则提醒大家数学推理需要高质量问题和验证机制。`Trainin
 
 设专项数据池由代码、数学和领域数据组成：
 
-```math
-D_{\mathrm{spec}}=D_{\mathrm{code}}\cup D_{\mathrm{math}}\cup D_{\mathrm{domain}}
-```
+~~~math
+D_spec = D_code union D_math union D_domain
+~~~
 
 每个样本可以表示为：
 
-```math
-x_i=(m_i,T_i,q_i,r_i,z_i)
-```
+~~~math
+x_i = (m_i, T_i, q_i, r_i, z_i)
+~~~
 
 其中 `m_i` 是数据类型，取值为 code、math 或 domain；`T_i` 是 token 数；`q_i` 是质量分；`r_i` 是风险分；`z_i` 是来源、许可证、时间戳、去重簇、污染标记等元数据。
 
 代码数据常见的功能测试通过率为：
 
-```math
-R_{\mathrm{test},i}=\frac{n_{\mathrm{pass},i}}{\max(n_{\mathrm{test},i},1)}
-```
+~~~math
+R_test_i = n_pass_i / max(n_test_i, 1)
+~~~
 
 一个可解释的代码样本质量分可以写成：
 
-```math
-q_i^{\mathrm{code}}=w_pI_{\mathrm{parse},i}+w_tR_{\mathrm{test},i}+w_d d_i-\lambda_g g_i-\lambda_u u_i
-```
+~~~math
+q_code_i = w_p * I_parse_i + w_t * R_test_i + w_d * d_i - lambda_g * g_i - lambda_u * u_i
+~~~
 
 其中 `I_parse` 表示语法或解析检查是否通过，`d_i` 是文档 / 注释 / 测试配套分，`g_i` 是生成文件、vendor、bundle 等低价值标记，`u_i` 是重复或 fork 风险。
 
 数学样本可以同时看答案验证和过程质量：
 
-```math
-q_i^{\mathrm{math}}=w_aI_{\mathrm{ans},i}+w_s s_i+w_h h_i-\lambda_c c_i
-```
+~~~math
+q_math_i = w_a * I_ans_i + w_s * s_i + w_h * h_i - lambda_c * c_i
+~~~
 
 其中 `I_ans` 表示答案可验证，`s_i` 是过程完整性分，`h_i` 是难度或覆盖价值，`c_i` 是 benchmark / 题库污染风险。
 
 领域样本更强调权威性、时效性、引用和隐私风险：
 
-```math
-q_i^{\mathrm{domain}}=w_AA_i+w_R\rho_i+w_CI_{\mathrm{cite},i}-\lambda_PP_i-\lambda_SS_i-\lambda_VV_i
-```
+~~~math
+q_domain_i = w_A * A_i + w_R * recency_i + w_C * I_cite_i - lambda_P * P_i - lambda_S * stale_i - lambda_V * V_i
+~~~
 
-其中 `A_i` 是来源权威性，`\rho_i` 是时效性，`I_cite` 表示是否保留出处或引用，`P_i` 是 PII 风险，`S_i` 是过期或 stale 风险，`V_i` 是高风险建议或未经验证观点风险。
+其中 `A_i` 是来源权威性，`recency_i` 是时效性，`I_cite` 表示是否保留出处或引用，`P_i` 是 PII 风险，`stale_i` 是过期风险，`V_i` 是高风险建议或未经验证观点风险。
 
-专项数据的最终门禁可以写成：
+专项数据的状态不应被压缩成一个不可解释的总开关。可以保留一组并列的状态量：
 
-```math
-G_i=I(q_i^{m_i}\ge \tau_{m_i})I_{\mathrm{license},i}I_{\mathrm{secret},i}I_{\mathrm{contam},i}I_{\mathrm{privacy},i}I_{\mathrm{verify},i}
-```
+~~~math
+checks_i = (quality_ok_i, license_ok_i, secret_clear_i, contamination_clear_i, privacy_clear_i, verified_i)
+~~~
 
-这里不同类型的数据使用不同阈值 `\tau_m`。代码要重视 license、secret、测试和 fork；数学要重视答案、过程和题库污染；领域数据要重视来源、时间、PII、引用和专家审计。
+这里不同类型的数据使用不同质量阈值 `tau_m` 和验证字段。代码要重视 license、secret、测试和 fork；数学要重视答案、过程和题库污染；领域数据要重视来源、时间、PII、引用和专家审计。某项检查失败时，动作可能是删除、隔离、脱敏、人工复核或改放到专门数据池，而不必把所有情况混成同一个标签。
 
 按类型计算 token 保留率：
 
-```math
-R_{\mathrm{keep}}(m)=\frac{\sum_{i:m_i=m}G_iT_i}{\sum_{i:m_i=m}T_i}
-```
+~~~math
+R_keep(m) = sum_{i:m_i=m}(keep_i * T_i) / sum_{i:m_i=m}(T_i)
+~~~
 
 按类型计算风险命中率：
 
-```math
-R_{\mathrm{risk}}(m)=\frac{\sum_{i:m_i=m}I(r_i>0)}{\sum_i I(m_i=m)}
-```
+~~~math
+R_risk(m) = sum_{i:m_i=m}(I(r_i > 0)) / sum_i(I(m_i = m))
+~~~
 
 如果专项数据计划采样 token 数为 `b_m`，清洗后可用 token 数为 `N_m`，则 effective epoch 为：
 
-```math
-e_m=\frac{b_m}{N_m}
-```
+~~~math
+e_m = b_m / N_m
+~~~
 
 对于代码、数学、专业文档和合成推理数据，`e_m` 过高通常意味着更高的记忆和污染风险，需要降权、扩充数据、增强去重或重新设计采样策略。
 
-专项数据上线前可以设置门禁：
+专项数据的整体状态也应保留为可解释的向量：
 
-```math
-G_{\mathrm{spec}}=I(R_{\mathrm{keep}}(m)\ge r_m^{\min})I(R_{\mathrm{risk}}(m)\le r_m^{\max})I(e_m\le e_m^{\max})
-```
+~~~math
+C_spec(m) = (R_keep(m), R_risk(m), e_m)
+~~~
 
-面试里要强调：代码、数学和领域数据不是“多多益善”，而是要用类型专属质量指标、风险指标和评估矩阵一起控制。
+它分别反映有效 token 保留、风险命中和重复暴露。代码、数学和领域数据不是“多多益善”，而是要用类型专属质量指标、风险指标和评估矩阵共同判断；这些数值只能说明数据处理状态，不能单独证明模型能力或专业可靠性。
 
 ---
 
@@ -487,9 +485,9 @@ RAG 适合提供动态知识、私有知识和需要引用的内容。它不一�
 
 ---
 
-## 22. 面向专家：专项数据改变模型的能力拓扑
+## 22. 机制与边界：专项数据改变模型的能力拓扑
 
-从专家视角看，代码、数学和领域数据不是简单增加几个能力点，而是改变模型内部能力之间的连接方式。
+从机制上看，代码、数学和领域数据不是简单增加几个能力点，而是改变模型内部能力之间的连接方式。
 
 代码数据把自然语言意图连接到可执行结构；数学数据把语言理解连接到符号约束和验证；专业数据把通用语言连接到领域本体和规范表达。
 
@@ -501,31 +499,23 @@ RAG 适合提供动态知识、私有知识和需要引用的内容。它不一�
 
 ## 23. 一个可落地的专项数据建设方案
 
-如果面试官问：“如何为大模型建设代码、数学和专业领域数据？”可以按下面回答。
+一个同时需要代码、数学和专业知识的模型，首先要把目标能力拆开。代码池可能服务补全、修复、测试生成或工程问答；数学池可能服务文字题、竞赛推理或证明；领域池可能服务术语理解、文档检索、引用回答或流程辅助。目标不同，样本结构、质量阈值和评估分母都会不同。
 
-第一步，明确目标能力。代码是补全、修复、测试生成还是工程问答？数学是小学 word problem、竞赛还是证明？专业领域是知识问答、文档检索还是流程辅助？
+三类数据应建立独立数据池，并在每条记录上保留来源、授权、质量、语言、时间、版本、去重和污染状态。代码池记录 license、secret、fork、vendor、生成文件和解析结果；数学池记录公式、题解对齐、答案验证、难度和评测重叠；领域池记录权威性、时效、PII、出处、权限和专家审计状态。
 
-第二步，分池建设数据。代码、数学、医学、法律、金融等各自建立独立数据池，记录来源、授权、质量、语言、时间、版本、去重和污染状态。
+结构化样本让数据更接近真实任务。代码可以构造 docstring-code、test-code 和 bug-fix 对；数学可以区分 problem-solution、step-by-step 和 verifier 样本；领域数据可以构造 question-answer、document-grounded answer 和 citation-aware answer。每种结构都需要保留原始证据与验证结果，避免把生成模板误当成事实。
 
-第三步，专项清洗。代码处理 license、secrets、fork、vendor、生成文件和语法解析；数学处理公式、题解对齐、答案校验和评测污染；领域数据处理权威性、时效性、PII、出处和专家审计。
+训练路径随后按责任边界组合：base 预训练提供广泛语言和背景，继续预训练强化领域术语与文体，SFT 学习任务格式和安全边界，RAG/工具提供实时、私有、可引用或需要计算的知识。对 HumanEval、GSM8K、MATH、领域 benchmark、题库、标准答案和私有 holdout 的 overlap 检查要独立于内部去重运行。
 
-第四步，构造结构化样本。代码构造 docstring-code、test-code、bug-fix；数学构造 problem-solution、step-by-step、verifier；领域构造 question-answer、document-grounded answer、citation-aware answer。
-
-第五步，设计配比和训练阶段。base 阶段适量混入，继续预训练强化领域，SFT 学习任务格式，RAG/工具解决实时和高风险知识。
-
-第六步，做污染和记忆检测。对 HumanEval、GSM8K、MATH、领域 benchmark、题库、标准答案和私有数据做 overlap 检测。
-
-第七步，建立评估矩阵。代码看功能正确性、编译运行、测试通过率；数学看答案正确率、过程质量、鲁棒变体；领域看事实性、引用、时效、安全边界和专家评分。
-
-第八步，版本化和审计。记录数据版本、过滤规则、采样权重、授权信息、评估结果和专家抽检报告。
+评估矩阵也必须按类型拆开。代码看编译、功能正确性、测试通过率、依赖和安全；数学看答案正确率、过程质量、改写题和难度切片；领域数据看事实性、引用、时效、拒答边界和专家评分。最终版本应同时记录过滤规则、采样权重、授权信息、评估结果、专家抽检和数据变更血缘。
 
 ### 23.1 最小可运行专项数据审计 demo
 
-下面这个 demo 不依赖外部库，也不读写文件。输入是一组 toy code / math / domain 样本；输出包括保留样本、拒绝原因、分类型 token 保留率、最终 mixture、质量分预览和门禁检查。
+下面这个 demo 不依赖外部库，也不读写文件。输入是一组 toy code / math / domain 样本；输出包括保留样本、拒绝原因、分类型 token 保留率、最终 mixture、质量分预览、并列检查信号、后续动作和结论。
 
 它演示的是专项数据治理机制，不是生产级 license scanner、secret scanner、医学 / 法律 / 金融审核器或数学 verifier。真实系统需要接入许可证审查、secret 扫描器、测试执行器、CAS / verifier、专家审计、权限系统和数据版本管理。
 
-```python
+~~~python
 from collections import Counter, defaultdict
 
 
@@ -624,7 +614,7 @@ for item in kept:
     kind_tokens[item["kind"]] += item["tokens"]
 
 reason_counts = dict(sorted(Counter(rejected.values()).items()))
-gates = {
+checks = {
     "code_has_tests": any(item["kind"] == "code" and item["tests_total"] > 0 for item in kept),
     "math_verified": all(item.get("answer_ok", True) for item in kept if item["kind"] == "math"),
     "domain_no_pii": all(not item.get("pii", False) for item in kept if item["kind"] == "domain"),
@@ -632,6 +622,28 @@ gates = {
     "secret_blocked": reason_counts.get("license_or_secret", 0) == 2,
     "coverage": set(kind_tokens) == {"code", "domain", "math"},
 }
+signals = {
+    "missing_code_tests": not checks["code_has_tests"],
+    "unverified_math_kept": not checks["math_verified"],
+    "pii_kept": not checks["domain_no_pii"],
+    "contamination_not_blocked": not checks["contamination_blocked"],
+    "secret_or_license_not_blocked": not checks["secret_blocked"],
+    "kind_coverage_gap": not checks["coverage"],
+}
+actions = []
+if signals["missing_code_tests"]:
+    actions.append("add_executable_code_tests")
+if signals["unverified_math_kept"]:
+    actions.append("quarantine_unverified_math")
+if signals["pii_kept"]:
+    actions.append("remove_or_deidentify_sensitive_domain_data")
+if signals["contamination_not_blocked"]:
+    actions.append("quarantine_eval_overlap_and_retest")
+if signals["secret_or_license_not_blocked"]:
+    actions.append("repair_license_and_secret_scan")
+if signals["kind_coverage_gap"]:
+    actions.append("rebalance_specialized_data_pools")
+decision = "continue_to_mixture_ablation" if not actions else "hold_for_repair"
 
 report = {
     "kept_ids": [item["id"] for item in kept],
@@ -641,8 +653,10 @@ report = {
     "kind_retention": {k: round(kind_tokens[k] / raw_kind_tokens[k], 3) for k in sorted(raw_kind_tokens)},
     "mixture": {k: round(kind_tokens[k] / kept_tokens, 3) for k in sorted(kind_tokens)},
     "score_preview": {row["id"]: row["score"] for row in rows},
-    "gates": gates,
-    "gate_pass": all(gates.values()),
+    "checks": checks,
+    "signals": signals,
+    "actions": actions,
+    "decision": decision,
 }
 
 for key, value in report.items():
@@ -665,12 +679,15 @@ assert report["reason_counts"] == {
 assert report["retention"] == 0.459
 assert report["kind_retention"] == {"code": 0.269, "domain": 0.621, "math": 0.568}
 assert report["mixture"] == {"code": 0.251, "domain": 0.485, "math": 0.264}
-assert report["gate_pass"] is True
-```
+assert all(report["checks"].values())
+assert not any(report["signals"].values())
+assert report["actions"] == []
+assert report["decision"] == "continue_to_mixture_ablation"
+~~~
 
 运行后会看到类似输出：
 
-```text
+~~~text
 kept_ids= ['code_api_doc', 'math_word_verified', 'math_proof_note', 'domain_med_guideline', 'domain_fin_report']
 rejected= {'code_eval_solution': 'eval_contamination', 'code_secret_config': 'license_or_secret', 'code_vendor_bundle': 'license_or_secret', 'domain_forum_advice': 'low_quality', 'domain_private_case': 'privacy_or_sensitive', 'math_benchmark_leak': 'eval_contamination', 'math_wrong_steps': 'unverified_answer'}
 reason_counts= {'eval_contamination': 2, 'license_or_secret': 2, 'low_quality': 1, 'privacy_or_sensitive': 1, 'unverified_answer': 1}
@@ -678,47 +695,49 @@ retention= 0.459
 kind_retention= {'code': 0.269, 'domain': 0.621, 'math': 0.568}
 mixture= {'code': 0.251, 'domain': 0.485, 'math': 0.264}
 score_preview= {'code_api_doc': 0.87, 'code_secret_config': 0.8, 'code_eval_solution': 0.84, 'code_vendor_bundle': -0.06, 'math_word_verified': 0.901, 'math_wrong_steps': 0.2, 'math_benchmark_leak': 0.892, 'math_proof_note': 0.899, 'domain_med_guideline': 0.796, 'domain_forum_advice': 0.133, 'domain_fin_report': 0.762, 'domain_private_case': 0.636}
-gates= {'code_has_tests': True, 'math_verified': True, 'domain_no_pii': True, 'contamination_blocked': True, 'secret_blocked': True, 'coverage': True}
-gate_pass= True
-```
+checks= {'code_has_tests': True, 'math_verified': True, 'domain_no_pii': True, 'contamination_blocked': True, 'secret_blocked': True, 'coverage': True}
+signals= {'missing_code_tests': False, 'unverified_math_kept': False, 'pii_kept': False, 'contamination_not_blocked': False, 'secret_or_license_not_blocked': False, 'kind_coverage_gap': False}
+actions= []
+decision= continue_to_mixture_ablation
+~~~
 
 这个 demo 的重点是把三类专项数据的质量逻辑分开：代码看 license、secret、污染和测试；数学看答案验证、过程质量和题库污染；领域数据看权威性、时效、引用和 PII。
 
 ---
 
-## 24. 常见面试题
+## 24. 决策边界：三类数据如何选择训练路径
 
-### 24.1 代码数据为什么对大模型重要？
+### 24.1 代码数据的价值来自可执行反馈
 
-代码数据提供形式语言、可执行逻辑、API 使用、结构化输出和测试反馈。它不仅提升代码生成，也可能增强工具调用、JSON/SQL 输出和结构化推理能力。
+代码数据提供形式语言、可执行逻辑、API 使用、结构化输出和测试反馈。它可能迁移到工具调用、JSON/SQL 输出和结构化推理，但迁移强弱取决于样本是否同时包含意图、实现、依赖和验证。单纯增加 `.py` 文件数量，不能等价于增加工程能力。
 
-### 24.2 代码数据清洗重点是什么？
+### 24.2 代码清洗必须把 license 与功能质量分开
 
-重点是语言识别、语法解析、license、secrets 过滤、fork 和 vendor 去重、自动生成文件过滤、benchmark 污染检测、测试和文档对齐，以及质量评分。
+一个代码文件可以语法正确却没有可用授权，也可以许可证清楚却包含 secret、漏洞或未维护依赖。解析、测试、文档和维护度回答“它是否有训练价值”，license、secret 和来源策略回答“它是否可以进入这个数据池”；两类判断不能合成一个质量分。
 
-### 24.3 为什么单测对代码模型重要？
+### 24.3 单测把文本相似度连接到功能正确性
 
-单测提供可执行约束，可以判断功能正确性。代码生成不能只看文本相似度，应该看是否通过测试。单测还能帮助模型学习边界条件和需求到实现的映射。
+两个实现的文本可以完全不同，却都满足同一组测试；一个看起来很像参考实现的片段，也可能因为边界条件而失败。因此代码评估和数据选择都应保留测试输入、断言、运行环境和依赖版本。测试通过率是重要信号，但并不证明代码没有安全问题或覆盖了所有行为。
 
-### 24.4 数学数据和普通文本有什么不同？
+### 24.4 数学数据的核心是结果与过程同时可信
 
-数学数据更强调步骤、符号、答案校验和过程正确性。普通文本清洗规则可能误伤公式和短句，数学数据还要防止错误解答、跳步、题库污染和 benchmark 泄漏。
+只有最终答案的数据适合训练结果映射，却不足以说明模型掌握了推导；带过程的数据提供更多监督，但错误步骤会传播错误模式。verifier 数据把候选解和正确性判断分开，使系统可以生成多个候选再进行选择，但 verifier 自身也需要独立验证，不能把自动评分器当作绝对真值。
 
-### 24.5 verifier 数据有什么价值？
+### 24.5 数学污染要区分原题、同源题和一般题型
 
-verifier 数据让模型学习判断候选解是否正确。对于数学题，可以生成多个候选答案，再用 verifier 选择更可靠的解，比只训练单一答案更能利用计算和数据。
+原题、答案和解析进入训练会直接削弱 benchmark 的独立性；改数字、翻译或同一题库的结构相似样本提供的是不同强度的污染证据；所有涉及同一数学方法的题目则不应自动删除。去重、时间信息、字段级匹配和人工复核需要共同决定处置。
 
-### 24.6 专业领域数据应该怎么用？
+### 24.6 专业数据的训练路径取决于知识责任
 
-预训练或继续预训练用于学习术语和领域语言，SFT 用于学习专业问答格式和边界，RAG 用于最新、私有和可引用知识。高风险领域还需要专家审核和安全策略。
+继续预训练适合学习术语、文体和背景，SFT 适合学习问答格式、引用行为和安全边界，RAG 适合最新、私有、可追溯的事实，工具适合计算、检索和流程操作。医学、法律和金融场景还要加入专家审计、适用地域、版本时间和不确定性表达；单一训练阶段不能承担全部责任。
 
-### 24.7 为什么不能把医学法律金融数据直接大量混进预训练？
+### 24.7 为什么专业数据不应无条件大量混入预训练
 
-因为这些数据合规要求高、时效性强、错误成本大，且可能包含隐私和专业误导。大量混入还可能带来风格偏移和过拟合。应分层使用、保留出处、做专家审计，并结合 RAG。
+专业数据可能带来高价值知识，也可能带来隐私、版权、过期规范、错误自信和风格偏移。大量混入还会提高小池重复暴露，令模型把特定机构或单一法域的表达误当成普遍事实。分层使用、保留出处、独立评估和 RAG/工具协同，通常比单纯扩大预训练比例更可控。
 
 ---
 
-## 25. 常见误区
+## 26. 常见误区
 
 误区一：代码数据就是 `.py`、`.java` 文件。
 
@@ -746,17 +765,19 @@ verifier 数据让模型学习判断候选解是否正确。对于数学题，�
 
 ---
 
-## 26. 本章小结
+## 27. 资料与证据边界
 
-Code、Math 与 Domain Data 是大模型能力定向增强的核心数据。它们不是普通 web 文本的附属品，而是需要独立治理的数据资产。
+1. [Evaluating Large Language Models Trained on Code（Codex/HumanEval）](https://arxiv.org/abs/2107.03374)：说明代码模型可以用功能测试评估程序合成；HumanEval 分数不等于生产代码安全性，也不证明训练数据没有题目重叠。
+2. [Training Verifiers to Solve Math Word Problems（GSM8K）](https://arxiv.org/abs/2110.14168)：支持数学题、候选解和 verifier 的数据与评估讨论；论文结果绑定其任务、模型和验证设置。
+3. [Measuring Mathematical Problem Solving With the MATH Dataset](https://arxiv.org/abs/2103.03874)：提供分层数学问题和解答评估入口；公开题目和解析需要纳入污染审计，不能直接作为独立 holdout。
+4. [The Stack: 3 TB of Permissively Licensed Source Code](https://arxiv.org/abs/2211.15533) 与 [StarCoder](https://arxiv.org/abs/2305.06161)：提供开放代码数据构造、许可过滤和代码模型训练的公开案例；具体授权解释仍需回到项目版本和法律审查。
+5. [GitHub secret scanning 官方文档](https://docs.github.com/en/code-security/secret-scanning/introduction/about-secret-scanning)：说明 secrets 检测的治理背景；它不是训练数据中所有凭据、隐私或高风险内容的完整检测证明。
+6. [Large Language Models Encode Clinical Knowledge（Med-PaLM）](https://arxiv.org/abs/2212.13138)、[PubMedQA](https://arxiv.org/abs/1909.06146) 和 [LegalBench](https://arxiv.org/abs/2308.11462)：提供医学、医学问答和法律能力评估入口；这些 benchmark 不能替代临床、法律或金融场景的专家审核、时效检查和责任边界。
 
-本章要记住几句话：
+这些论文和官方文档分别支持代码功能评估、数学验证、代码数据构造、秘密治理和专业 benchmark 的特定事实。本文的质量函数、检查向量和 demo 是教学抽象，不是任何论文公布的统一数据配方；对于 FinGPT、企业知识库和经授权真实业务数据，还必须补充具体 revision、授权文件、脱敏记录、数据血缘和专家审计。
 
-1. 代码数据训练可执行逻辑、结构化输出和工程能力。
-2. 数学数据训练多步推理、符号约束和验证意识。
-3. 专业领域数据训练术语、规范表达和行业语境。
-4. 三类数据都需要专项清洗、授权治理、去重和污染检测。
-5. 单测、verifier、专家审计和 RAG 是这些数据走向可靠应用的重要桥梁。
-6. 专项数据不是越多越好，而要按目标、阶段、配比和评估闭环使用。
+## 28. 结语
 
-如果面试中被问到专项数据建设，最好的回答是：先明确目标能力，再分池治理代码、数学和领域数据，分别处理 license/secrets、题解验证/污染、专业合规/时效，用结构化样本、配比实验、评估矩阵和版本审计形成闭环。
+Code、Math 与 Domain Data 是大模型能力定向增强的核心数据。代码把自然语言意图连接到可执行结构，数学把语言理解连接到符号约束和验证，专业资料把通用表达连接到领域本体、时效和责任边界。
+
+三类数据的共同原则不是追求更大的文件数，而是保留结构、证据和用途：代码要有授权和功能反馈，数学要有结果与过程验证，专业资料要有来源、版本、引用和专家边界。它们进入预训练、SFT、RAG 或工具系统的路径不同，必须由目标能力、风险和评估结果共同决定。

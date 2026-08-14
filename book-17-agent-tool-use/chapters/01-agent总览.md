@@ -4,9 +4,9 @@ Agent 是把大模型从“回答问题”推进到“执行任务”的关键�
 
 本章先建立 Agent 的全局框架：Agent 和普通聊天模型、RAG、workflow 的区别是什么；Agent 的核心组成有哪些；目标、状态、动作、工具、观察、控制器分别负责什么；怎样用公式和 trace 描述 Agent；哪些任务适合 Agent，哪些任务不适合；上线前如何用最小审计脚本检查工具、预算、安全和停止条件。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲写作前按 `WRITING_PLAN.md` 的要求核对了 ReAct、Toolformer、MRKL Systems 等代表性论文，以及 OpenAI Agents SDK 中 tools、handoffs、guardrails、tracing 的公开文档口径。这里不把章节写成某个厂商 API 教程，也不讨论具体闭源模型内部实现。
+本章参考了 ReAct、Toolformer、MRKL Systems 等代表性论文，以及 OpenAI Agents SDK 中 tools、handoffs、guardrails、tracing 的公开文档口径。这里不把章节写成某个厂商 API 教程，也不讨论具体闭源模型内部实现。
 
 本章采用三条边界：
 
@@ -14,7 +14,7 @@ Agent 是把大模型从“回答问题”推进到“执行任务”的关键�
 2. 工具调用、function calling、MCP、multi-agent、computer use、code agent 会在后续章节展开，本章只铺底层框架。
 3. 所有例子只做教学级 trace 审计，不提供高风险真实操作流程；涉及写入、删除、发信、转账等动作时，只讨论权限、二次确认和审计。
 
-第二轮精修重点：
+本章重点：
 
 1. 用稳定的 MathJax 公式描述 agent loop、状态更新、预算和评估指标。
 2. 把 Agent、Chat Model、RAG、Workflow 的边界讲清楚，避免把所有 LLM 应用都叫 Agent。
@@ -45,7 +45,7 @@ Agent 是由 LLM 驱动、围绕目标进行多步决策，并通过工具或环
 Agent 不是单纯让模型回答问题，而是让模型在一个受控循环中围绕目标做多步决策。它会维护状态，选择工具，执行动作，读取观察结果，再决定下一步。相比普通 chat model，Agent 更强调任务执行、外部反馈、状态管理、预算控制、权限边界和失败恢复。
 ```
 
-## 1.1.1 关键公式与 Agent 指标速查
+### 1.1.1 关键公式与 Agent 指标速查
 
 可以把一次 Agent 执行写成一条轨迹：
 
@@ -127,7 +127,7 @@ R_{\mathrm{unauth}}=\frac{1}{M}\sum_{j=1}^{M}\mathbf{1}[a_j\notin\mathcal{A}_{\m
 
 `R_unauth` 是未授权动作率。
 
-一个简化上线门禁可以写成：
+一个简化上线准入条件可以形式化为：
 
 ```math
 G_{\mathrm{agent}}=
@@ -213,7 +213,7 @@ Agent 则允许模型根据状态动态决定下一步：
 
 Workflow 的优点是稳定、可控、容易测试；Agent 的优点是灵活、能处理开放任务。工程上常用混合模式：
 
-1. 外层 workflow 管住关键流程、权限和上线门禁。
+1. 外层 workflow 管住关键流程、权限和上线条件。
 2. 局部开放步骤交给 Agent 做动态决策。
 3. 高风险动作必须回到规则、人工确认或只读审计。
 
@@ -303,7 +303,7 @@ State 是 Agent 当前知道的任务进展。
 4. 外部 memory：适合保存长期偏好、项目知识和历史任务。
 5. trace log：适合审计、复盘和 replay。
 
-面向专家时要注意：memory 不等于 state。state 服务当前任务闭环，memory 服务跨任务或长周期信息复用。把长期记忆无差别塞回 prompt，容易造成隐私、过期信息和上下文污染。
+机制与边界时要注意：memory 不等于 state。state 服务当前任务闭环，memory 服务跨任务或长周期信息复用。把长期记忆无差别塞回 prompt，容易造成隐私、过期信息和上下文污染。
 
 ## 1.8 Action 与 Tool：动作和工具
 
@@ -449,6 +449,31 @@ Agent 不是越复杂越好。如果一个任务用一次模型调用、一个�
 2. 工具层：schema 不清、错误返回不结构化、工具本身不稳定。
 3. 状态层：历史过长、状态未更新、记忆污染。
 4. 控制层：权限、预算、重试、停止和审计不足。
+
+### 1.13.1 从普通 Agent 到长周期 Agent：模型、环境和 Harness 的共同体
+
+新模型发布中经常出现“long-horizon Agent”“Agent world model”“multi-agent swarm”等词。小白先区分三件事：
+
+1. **模型能力**：模型能否理解目标、规划动作、生成工具参数和利用 observation。
+2. **环境能力**：是否有真实或模拟的文件、浏览器、终端、Android、SWE 等可交互环境。
+3. **Harness 能力**：是否保存 session、工作区、权限、checkpoint、memory、trace，并能在失败后恢复。
+
+Qwen-AgentWorld 是一个很好的边界案例。公开资料把它描述为原生 language world model，并配套 MCP、搜索、终端、SWE、Android、Web、OS 等 Agent 环境；它不是“又一个普通聊天模型”，而是模型、环境和训练/评估闭环的组合。其公开训练路线可概括为 `CPT -> SFT -> GSPO`，具体环境实现和完整训练细节仍需以模型资料为准。
+
+Kimi K2.6 的公开资料强调最多约 300 个子 Agent、约 4000 个协同步骤。这类数字只能说明产品/模型卡宣称的编排规模，不能直接说明任务成功率；必须同时问子 Agent 如何隔离上下文、如何共享证据、谁负责最终验证以及失败如何回滚。
+
+长周期任务的成功率可以做一个教学化分解：
+
+```math
+P_{\mathrm{success}}\approx
+P_{\mathrm{plan}}\cdot
+P_{\mathrm{tool}}\cdot
+P_{\mathrm{state}}\cdot
+P_{\mathrm{recovery}}\cdot
+P_{\mathrm{permission}}
+```
+
+任务越长，任何一个环节的小概率失败都会累积。因此 Agent 的评估不能只换一个更强模型，还要固定或单独测量环境、工具、context policy、memory 和 harness 版本。
 
 ## 1.14 Agent 评估应该看什么
 
@@ -713,4 +738,4 @@ gate_pass= False
 
 Agent 的本质是目标驱动的多步任务执行系统。它和普通 chat model 的区别在于是否具备状态、工具、观察和执行循环；它和 RAG 的区别在于 RAG 主要增强知识获取，而 Agent 关注动态决策和任务完成；它和 workflow 的区别在于 Agent 更灵活，但也更难控制。
 
-真正可靠的 Agent 不是“模型加工具”这么简单，而是需要清晰目标、结构化状态、受控工具、观察反馈、预算管理、失败恢复、安全边界、trace 和评估门禁。下一章会进入 tool use 与 function calling，具体讲 Agent 如何安全、稳定、可评估地调用工具。
+真正可靠的 Agent 不是“模型加工具”这么简单，而是需要清晰目标、结构化状态、受控工具、观察反馈、预算管理、失败恢复、安全边界、trace 和评估验收条件。下一章会进入 tool use 与 function calling，具体讲 Agent 如何安全、稳定、可评估地调用工具。

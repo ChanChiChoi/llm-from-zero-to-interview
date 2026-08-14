@@ -30,14 +30,7 @@ Benchmark 的本质不是“搞一个很大的榜单”。
 
 因为公开大榜不一定覆盖你的业务问题。
 
-资料边界说明：
-
-```text
-本讲按 HELM、OpenAI Evals、EleutherAI lm-evaluation-harness 等公开评估框架和常见大模型应用评估实践核对。
-这些框架强调标准化数据集、可复现运行、统一指标、结果记录和多维度报告；公司内部小型 benchmark 也要继承这些原则。
-正文聚焦业务小型 benchmark 的最小闭环：样例 schema、评分函数、切片统计、门禁和失败样例分析。
-大规模公开榜单、LLM-as-a-judge、统计显著性检验、线上 A/B、数据泄漏和 benchmark 污染会在后续评估章节继续展开。
-```
+HELM、OpenAI Evals 和 `lm-evaluation-harness` 虽然服务的模型和任务不同，但都反复强调几件相同的事：数据要有明确版本，运行过程要可复现，评分规则要固定，结果要能够按维度拆开检查。本讲把这些原则落到一个业务团队真正能维护的小型 benchmark 上，先处理样例 schema、评分函数、切片统计、验收条件和失败样例分析；大规模榜单、LLM-as-a-Judge、统计检验、线上 A/B 和数据污染会在后面的讲次中分别展开。
 
 ---
 
@@ -137,9 +130,7 @@ Agent 工具调用成功率
 
 ### 三、小型 benchmark 应该多大
 
-面试中不要说“越大越好”。
-
-更合理的回答是：
+评测集并不是越大越好。早期迭代更重要的是样例质量、覆盖结构和失败可定位性。一个可行的起点是：
 
 ```text
 先做一个 50-200 条的小型高质量评测集，用于快速迭代；稳定后再扩展到更大规模，并分层覆盖不同任务类型和难度。
@@ -182,6 +173,8 @@ Agent 工具调用成功率
   "scoring": "semantic"
 }
 ```
+
+这里的 `semantic` 只是说明 schema 可以容纳语义评分，并不是后文 0 依赖示例已经实现的评分器。真正使用时，需要明确语义相似度模型、参考答案判定规则或人工/模型评审协议；否则同一个分数无法稳定复现。
 
 建议字段：
 
@@ -510,7 +503,7 @@ S_g = \frac{1}{|D_g|}\sum_{i\in D_g}s_i
 S_{\mathrm{macro}} = \frac{1}{|G|}\sum_{g\in G}S_g
 ```
 
-工程上还要设门禁，而不是只看平均分：
+工程上还要设验收条件，而不是只看平均分：
 
 ```math
 P = I(S_{\mathrm{avg}}\ge \tau_{\mathrm{avg}})\prod_{g\in G}I(S_g\ge \tau_g)
@@ -666,20 +659,16 @@ def summarize_by_category(results):
 }
 ```
 
-面试中要强调：
+平均分只能提供总览；真正定位问题，还要结合 `category`、`difficulty` 和失败样例。
 
-```text
-平均分只是总览，真正定位问题要看 category、difficulty 和失败样例。
-```
-
-#### 最小可运行的切片统计与门禁 demo
+#### 最小可运行的切片统计与验收条件 demo
 
 下面这个 demo 不依赖外部文件，也不调用真实模型。它演示四件事：
 
 ```text
 1. 每条样例显式声明 scoring 配置。
 2. 同时统计 overall、category 和 difficulty。
-3. 对关键切片设置上线门禁。
+3. 对关键切片设置上线条件。
 4. 输出失败样例，方便后续 debug。
 ```
 
@@ -806,7 +795,7 @@ print(report)
 {'overall': 0.6667, 'macro_category': 0.6667, 'by_category': {'multiple_choice': 1.0, 'short_qa': 0.6667, 'format_following': 1.0, 'safety': 0.0}, 'by_difficulty': {'easy': 1.0, 'medium': 0.6667, 'hard': 0.0}, 'failures': ['qa_001', 'safe_001'], 'gate_pass': False}
 ```
 
-这个例子对应前面的门禁公式：平均分只是必要条件，安全、格式、引用正确性这类关键切片也必须单独过线。
+这个例子对应前面的验收条件公式：平均分只是必要条件，安全、格式、引用正确性这类关键切片也必须单独过线。
 
 ---
 
@@ -815,7 +804,9 @@ print(report)
 每次评测都应该保存结果，方便比较版本。
 
 ```python
+import json
 from datetime import datetime
+from pathlib import Path
 
 
 def save_results(results, model_name, output_dir="outputs/eval_runs"):
@@ -1005,16 +996,7 @@ Benchmark 的价值不只是给分。
 2. 模型选择结论错误。
 3. 团队把优化方向建立在错误信号上。
 
-所以，顶级大模型算法岗面试中，候选人不能只说“划分 train/val/test”，还要能讲出如何检测、如何定位、如何规避。
-
-资料边界说明：
-
-```text
-本讲按 scikit-learn 数据泄漏常见坑、LLM 训练数据去重与 benchmark contamination 相关论文、以及公开大模型评估实践核对。
-传统机器学习里的核心原则是：测试集不能参与特征处理、模型选择、超参调节或任何 fit 过程。
-大模型场景还要额外检查：预训练语料是否包含公开 benchmark、训练/验证/测试之间是否有 exact overlap、near duplicate、改写污染、答案泄漏和反复调参污染。
-正文聚焦工程上可落地的最小检测流程；大规模 MinHash/SimHash、embedding 近邻索引和数据治理平台会在数据工程与评估专题中继续展开。
-```
+因此，工程排查不能止步于“划分 train/valid/test”。还要检查测试集是否进入过特征处理、模型选择、超参数调节、提示优化或人工修订流程；对大模型，还要额外关注预训练语料中的 benchmark contamination、集合之间的 exact overlap、near duplicate、改写污染和答案泄漏。本讲先从可落地的最小检测流程开始，大规模 MinHash/SimHash、embedding 近邻索引和数据治理平台会在数据工程与评估专题中再展开。
 
 ---
 
@@ -1201,13 +1183,13 @@ R_{\mathrm{label}}=\frac{1}{|D_{\mathrm{te}}|}\sum_{j\in D_{\mathrm{te}}} I(y_j\
 
 这里 `y_j \preceq x_j` 表示参考答案直接或以明显模板形式出现在输入里。真实项目中不要只依赖这个公式，选择题解析、字段名、模板词和 chain-of-thought 解析都可能间接泄漏答案。
 
-最后可以把数据发布门禁写成：
+最后可以把数据发布条件写成：
 
 ```math
 G_{\mathrm{clean}}=I(R_{\mathrm{exact}}=0)I(R_{\mathrm{io}}=0)I(R_{\mathrm{label}}=0)I(R_{\mathrm{near}}\le \tau_{\mathrm{near}})
 ```
 
-这条门禁的意思不是“检测不到就一定干净”，而是“只要明显泄漏率不达标，就不能把评测结果当成可信结论”。
+这条验收条件的意思不是“检测不到就一定干净”，而是“只要明显泄漏率不达标，就不能把评测结果当成可信结论”。
 
 ---
 
@@ -1372,6 +1354,8 @@ print("train-test input-output exact overlap:", len(io_overlaps))
 ```python
 def char_ngrams(text, n=3):
     text = normalize_text(text)
+    if not text:
+        return set()
     if len(text) <= n:
         return {text}
     return {text[i:i + n] for i in range(len(text) - n + 1)}
@@ -1896,6 +1880,8 @@ def exact_io_overlap(left, right):
 
 def char_ngrams(text, n=2):
     text = normalize_text(text)
+    if not text:
+        return set()
     if len(text) <= n:
         return {text}
     return {text[i:i + n] for i in range(len(text) - n + 1)}
@@ -2253,16 +2239,7 @@ hallucination 通常被翻译成“幻觉”。在大模型场景中，它指的
 
 这就是典型 hallucination：模型编造了材料中不存在的信息。
 
-大模型算法工程师不能只说“加 RAG 可以减少幻觉”。真正面试时，面试官更希望听到：你能否把幻觉拆成类型，能否定位原因，能否设计评测，能否给出工程闭环。
-
-资料边界说明：
-
-```text
-本讲按 Survey of Hallucination in Natural Language Generation、SelfCheckGPT、HaluEval 和 RAGAS faithfulness 相关资料核对。
-不同资料对 hallucination 的边界不完全相同，但核心都围绕 factuality 和 faithfulness：回答要么和世界事实不一致，要么不能从输入上下文、检索证据、工具结果或给定约束推出。
-本讲聚焦工程 bad case 分析：人工标注 schema、规则初筛、RAG / 长上下文 / Agent 场景归因、修复后指标回归。
-SelfCheckGPT、LLM-as-a-judge、NLI verifier、RAGAS 等自动评估方法可辅助大规模扫描，但不能完全替代证据可复核的人工抽检。
-```
+“加 RAG 可以减少幻觉”并不是完整的解决方案。不同研究对 hallucination 的边界略有差异，但工程上通常都要追问两件事：回答是否符合外部事实，是否能够由输入上下文、检索证据、工具结果或明确约束支持。本讲沿着这个共同核心，建立人工标注 schema、规则初筛、RAG/长上下文/Agent 场景归因和修复后回归的闭环。SelfCheckGPT、HaluEval、RAGAS、NLI verifier 和 LLM-as-a-Judge 等方法可以帮助扩大扫描范围，但最终仍需要可复核证据和人工抽检。
 
 ---
 
@@ -3448,11 +3425,7 @@ RAG 可能引入新的幻觉，例如引用错配、证据冲突、检索噪声�
 
 它可能来自数据，也可能来自代码、超参、模型结构、精度、并行策略、loss mask、label 构造、优化器状态、随机种子或硬件通信。
 
-很多候选人面试时会直接说“调小学习率”。这不是错，但太单薄。
-
-优秀回答应该是：先定义现象，再缩小范围，再做最小可复现实验，最后逐项排查。
-
-资料边界说明：本讲聚焦 SFT、LoRA 微调和小规模预训练中最常见的训练链路排查方法。写作时参考了 PyTorch `CrossEntropyLoss(ignore_index)`、`clip_grad_norm_` 和 AMP `GradScaler` 的官方说明，用于校准 label mask、梯度范数、梯度裁剪和混合精度溢出排查的表述；不同框架、Trainer、优化器包装和分布式后端会改变接口细节，所以本讲只把“有效监督 token、梯度是否有限、参数是否更新、tiny overfit 是否通过”作为通用诊断信号，不把某个库的默认行为写成所有训练系统的规则。
+遇到训练异常时，最容易想到的是先调小学习率，但这通常不足以定位根因。可靠的排查顺序是：先定义现象，再缩小到最小复现实验，最后逐项检查数据、loss、梯度、参数更新和运行环境。本讲以 SFT、LoRA 和小规模预训练为背景，采用 PyTorch `CrossEntropyLoss(ignore_index)`、`clip_grad_norm_` 和 AMP `GradScaler` 文档中的通用概念来解释 label mask、梯度范数、梯度裁剪和混合精度溢出。不同 Trainer、优化器包装和分布式后端的接口会不同，因此这里关注的是有效监督 token、梯度是否有限、参数是否更新以及 tiny overfit 是否通过这些跨框架诊断信号，而不是某个库的默认配置。
 
 ---
 
@@ -4357,11 +4330,11 @@ SFT 中 chat template 不一致会导致训练 loss 正常下降，但线上效�
 9. 原来多轮对话能接住上下文，现在容易忘。
 10. 中文任务提升了，但英文能力掉了。
 
-面试中如果被问到“微调后模型能力退化怎么办”，不能只回答“降低学习率、加数据”。这只是局部手段。更好的回答方式是：先定义退化现象，再定位退化范围，然后从数据、训练、模型、推理、评估五条链路逐层排查。
+“降低学习率、加数据”只能覆盖部分情况。更完整的分析要先定义退化现象，再定位退化范围，然后从数据、训练、模型、推理和评估五条链路逐层排查。
 
 这一讲给出一套可执行的分析框架。
 
-资料边界说明：本讲聚焦微调后能力退化的工程诊断，不把“目标任务变好、其他能力变差”简单归因为某一个超参。写作时参考了灾难性遗忘与 EWC 论文、LoRA 论文、DPO 论文，以及 SFT 数据构成对数学、代码、通用对齐等能力影响的公开研究，用于校准“参数更新会改变旧能力”“低秩增量仍会改变函数”“偏好数据会引入行为偏置”“数据配比影响能力保持”等表述。不同模型、数据规模、训练框架和评估集会给出不同结论，所以本讲只给出诊断框架和可复用指标，不把某个数据集上的经验阈值写成通用规律。
+本讲把“目标任务变好、其他能力变差”视为需要验证的现象，而不是某一个超参的必然结果。灾难性遗忘与 EWC、LoRA、DPO 以及 SFT 数据构成相关研究分别提示：参数更新会改变旧能力，低秩增量也会改变模型函数，偏好数据可能引入行为偏置，数据配比会影响能力保持。不同模型、数据规模、训练框架和评估集会得到不同结论，因此下面使用诊断框架和可复用指标，不把某个数据集上的经验阈值当成普遍规律。
 
 ### 本讲目标
 
@@ -4478,7 +4451,7 @@ R_{\mathrm{over}}=\frac{1}{|D_{\mathrm{ans}}|}\sum_{z_i\in D_{\mathrm{ans}}}r(M,
 E_{\mathrm{fmt}}=\frac{1}{|D_{\mathrm{fmt}}|}\sum_{z_i\in D_{\mathrm{fmt}}}b_{\mathrm{fmt}}(M,z_i)
 ```
 
-上线门禁不要只看业务收益，可以写成：
+上线条件不要只看业务收益，可以写成：
 
 ```math
 P=
@@ -5193,7 +5166,7 @@ print(json.dumps(report, ensure_ascii=False, sort_keys=True))
 {"base_by_category": {"business": 0.6667, "code": 1.0, "format": 1.0, "general_math": 1.0, "safety": 1.0}, "base_over_refusal_rate": 0.0, "best_checkpoint_by_utility": "middle", "delta_by_category": {"business": 0.3333, "code": -0.5, "format": -1.0, "general_math": -0.5, "safety": -0.3333}, "ft_by_category": {"business": 1.0, "code": 0.5, "format": 0.0, "general_math": 0.5, "safety": 0.6667}, "ft_format_error_rate": 1.0, "ft_over_refusal_rate": 0.1111, "gate": {"business_gain_ok": true, "format_ok": false, "over_refusal_ok": false, "pass": false, "retention_ok": false, "safety_ok": false}, "non_target_drop": 0.5833, "non_target_retention": 0.4167, "target_gain": 0.3333, "train_mix": {"business": 0.9, "format": 0.02, "general_replay": 0.05, "safety": 0.03}}
 ```
 
-这个结果说明：`ft_model` 的业务切片从 `0.6667` 提升到 `1.0`，但数学、代码、格式和安全切片都下降；训练数据中业务样本占比 `0.9`，通用 replay 和格式样本太少；上线门禁 `pass=false`。这正是微调后能力退化分析要捕捉的情况。
+这个结果说明：`ft_model` 的业务切片从 `0.6667` 提升到 `1.0`，但数学、代码、格式和安全切片都下降；训练数据中业务样本占比 `0.9`，通用 replay 和格式样本太少；上线条件 `pass=false`。这正是微调后能力退化分析要捕捉的情况。
 
 ### 14. 退化定位实验设计
 
@@ -5364,11 +5337,11 @@ attention + mlp
 
 对于企业知识库问答，尤其要避免训练集中大量“根据资料无法回答”导致模型上线后过度拒答。
 
-### 19. 缓解方法五：保留基础模型能力的评估门禁
+### 19. 缓解方法五：保留基础模型能力的评估验收条件
 
-微调上线不应该只设置业务指标门禁。
+微调上线不应该只设置业务指标验收条件。
 
-推荐设置如下门禁：
+推荐设置如下验收条件：
 
 ```text
 业务指标必须提升
@@ -5449,7 +5422,7 @@ merge 过程是否正确
 ```text
 我会先确认下降是否真实存在，而不是评估或推理模板问题。具体会用 base model 和 finetuned model 在同一套通用能力集、业务集、安全集上对比，并按任务类型切片。
 
-如果确认是通用能力下降，我会进一步看多 checkpoint 曲线，判断是不是训练过头或灾难性遗忘。缓解上可以降低学习率、减少 epoch、early stopping、降低 LoRA rank 或 target modules 范围，同时混入一定比例的通用 replay 数据和安全数据。最后用业务收益和通用能力保持率共同做上线门禁。
+如果确认是通用能力下降，我会进一步看多 checkpoint 曲线，判断是不是训练过头或灾难性遗忘。缓解上可以降低学习率、减少 epoch、early stopping、降低 LoRA rank 或 target modules 范围，同时混入一定比例的通用 replay 数据和安全数据。最后用业务收益和通用能力保持率共同做上线条件。
 ```
 
 #### 问法 2：怎么区分灾难性遗忘和过拟合？
@@ -5475,7 +5448,7 @@ LoRA 虽然冻结了原始参数，但它在前向中加入了可训练的低秩
 可以这样答：
 
 ```text
-我会先统计拒答率在 base 和 finetuned model 上的变化，并按安全问题、正常业务问题、无答案问题分开看。然后检查训练数据中拒答样本比例和标注是否合理，尤其是“无法回答”的样本是否过多。还要检查 DPO 或偏好数据里 chosen 是否大量是拒答。如果是 RAG 场景，还要区分模型拒答和检索无证据导致的拒答。缓解上可以调整拒答数据比例、补充正常可答样本、明确拒答边界，并设置拒答率门禁。
+我会先统计拒答率在 base 和 finetuned model 上的变化，并按安全问题、正常业务问题、无答案问题分开看。然后检查训练数据中拒答样本比例和标注是否合理，尤其是“无法回答”的样本是否过多。还要检查 DPO 或偏好数据里 chosen 是否大量是拒答。如果是 RAG 场景，还要区分模型拒答和检索无证据导致的拒答。缓解上可以调整拒答数据比例、补充正常可答样本、明确拒答边界，并设置拒答率验收条件。
 ```
 
 ### 22. 一套完整排查清单
@@ -5534,7 +5507,7 @@ LoRA 虽然冻结了原始参数，但它在前向中加入了可训练的低秩
    - 调整 LoRA 范围
    - early stopping
 
-9. 建立上线门禁
+9. 建立上线条件
    - 业务收益
    - 通用能力保持
    - 安全指标
@@ -5556,7 +5529,7 @@ LoRA 虽然冻结了原始参数，但它在前向中加入了可训练的低秩
 6. 训练模板、推理模板、chat template、special token 和 loss mask 是高频工程坑。
 7. DPO 等偏好优化可能导致回答变短、过度拒答或信息量下降。
 8. 排查退化要对比 base、finetuned 和多个 checkpoint，并按能力切片。
-9. 缓解方法包括混入通用 replay 数据、降低更新强度、控制 LoRA 范围、清洗数据和设置上线门禁。
+9. 缓解方法包括混入通用 replay 数据、降低更新强度、控制 LoRA 范围、清洗数据和设置上线条件。
 10. 面试中要体现系统性：先确认现象，再定位来源，最后给出可验证的缓解实验。
 
 下一讲，我们设计生成质量人工评测表。
@@ -5579,7 +5552,7 @@ LoRA 虽然冻结了原始参数，但它在前向中加入了可训练的低秩
 
 这一讲，我们设计一套可以直接用于项目的生成质量人工评测表。
 
-资料边界说明：本讲聚焦开放式生成任务的人工评测设计与统计闭环。写作时参考了 HELM 对多场景、多指标评估的设计思路，InstructGPT/RLHF 中基于人工偏好比较训练模型的范式，MT-Bench / Chatbot Arena 对 LLM-as-Judge、位置偏差、冗长偏差和人类偏好一致性的分析，以及 Cohen's Kappa 对标注一致性的经典定义。这里的评分维度和阈值是工程模板，真实项目需要按任务风险、业务场景和标注指南校准，不能把 1-5 分锚点或某个胜率阈值当成跨项目通用标准。
+开放式生成任务的人工评测，需要同时处理评分维度、标注一致性和统计解释。HELM 的多场景多指标思路、InstructGPT/RLHF 的人工偏好比较、MT-Bench/Chatbot Arena 对位置偏差和冗长偏差的讨论，以及 Cohen's Kappa 的定义，都能帮助我们理解这条评测链路。下面给出的评分维度和阈值只是可执行模板，真实项目仍要根据任务风险、业务场景和标注指南校准；1-5 分锚点或某个胜率阈值不能直接跨项目套用。
 
 ### 本讲目标
 
@@ -5718,13 +5691,13 @@ s_{i,k}\in \{1,2,3,4,5\}
 q_i=\frac{1}{5}\sum_{k\in K}w_k s_{i,k}
 ```
 
-硬门禁维度集合记为 `H`，例如事实、安全、格式、指令遵循。第 `h` 个硬门禁阈值为 `\tau_h`，单样本是否通过门禁为：
+硬性条件维度集合记为 `H`，例如事实、安全、格式、指令遵循。第 `h` 个硬性条件阈值为 `\tau_h`，单样本是否通过验收为：
 
 ```math
 g_i=\prod_{h\in H}\mathbb{1}[s_{i,h}\ge \tau_h]
 ```
 
-模型 `m` 的门禁失败率为：
+模型 `m` 的检查失败率为：
 
 ```math
 R_{\mathrm{fail}}(m)=1-\frac{1}{n_m}\sum_{i:m_i=m}g_i
@@ -5736,7 +5709,7 @@ R_{\mathrm{fail}}(m)=1-\frac{1}{n_m}\sum_{i:m_i=m}g_i
 Q(m)=\frac{1}{n_m}\sum_{i:m_i=m}q_i
 ```
 
-注意：`Q(m)` 不能替代 `R_fail(m)`。一个模型平均分高，但安全或事实门禁失败率高，仍然不能上线。
+注意：`Q(m)` 不能替代 `R_fail(m)`。一个模型平均分高，但安全或事实检查失败率高，仍然不能上线。
 
 成对偏好评测中，设 `N_+` 是新模型胜出次数，`N_-` 是旧模型胜出次数，`N_0` 是持平次数。排除持平后的新模型胜率为：
 
@@ -5977,7 +5950,7 @@ YAML
 1 分：严重违规或可能造成现实伤害。
 ```
 
-安全性通常是上线门禁维度，不应该简单和其他维度平均后抵消。
+安全性通常是上线条件维度，不应该简单和其他维度平均后抵消。
 
 ### 11. 维度八：业务语气与用户体验
 
@@ -6037,7 +6010,7 @@ YAML
 
 这个回答平均分很高，但事实完全错误，不能上线。
 
-更合理的方式是设置硬门禁。
+更合理的方式是设置硬性条件。
 
 例如：
 
@@ -6069,7 +6042,7 @@ YAML
 
 ### 打分维度
 
-| 维度 | 分数 1-5 | 是否硬门禁 | 备注 |
+| 维度 | 分数 1-5 | 是否硬性条件 | 备注 |
 |---|---:|---|---|
 | 事实正确性 |  | 是 | 是否有事实错误 |
 | 证据一致性 |  | RAG 场景是 | 是否基于给定证据 |
@@ -6247,7 +6220,7 @@ Spearman 相关
 ```text
 各维度平均分
 各维度通过率
-硬门禁失败率
+硬检查失败率
 错误标签分布
 按任务类型切片结果
 pairwise 胜率
@@ -6323,9 +6296,9 @@ def summarize_pairwise_eval(path: str) -> None:
 这个脚本体现两个重点：
 
 1. 各维度分开统计。
-2. 硬门禁失败率单独统计。
+2. 硬检查失败率单独统计。
 
-如果不想依赖 `pandas`，可以先用下面这个 0 依赖 demo 理解统计口径。它模拟 3 个样本、2 个模型、2 个标注员的 absolute rating，并额外统计 pairwise 胜率和硬门禁 pass/fail 的 Cohen's Kappa。
+如果不想依赖 `pandas`，可以先用下面这个 0 依赖 demo 理解统计口径。它模拟 3 个样本、2 个模型、2 个标注员的 absolute rating，并额外统计 pairwise 胜率和硬性条件 pass/fail 的 Cohen's Kappa。
 
 ```python
 import json
@@ -6471,7 +6444,7 @@ print(json.dumps(report, ensure_ascii=False, sort_keys=True))
 {"annotated_items": 12, "decision": "B_canary_only", "hard_gate_kappa": 1.0, "model_summary": {"A": {"avg_weighted_score": 0.68, "dimension_means": {"completeness": 3.0, "conciseness": 3.5, "factuality": 3.333, "format": 4.0, "groundedness": 3.667, "instruction": 3.0, "safety": 4.0, "tone": 3.167}, "gate_fail_rate": 0.3333, "top_error_tags": {"format_error": 2, "instruction_violation": 2, "missing_key_point": 2, "unsafe_content": 2}}, "B": {"avg_weighted_score": 0.915, "dimension_means": {"completeness": 4.167, "conciseness": 4.0, "factuality": 4.667, "format": 5.0, "groundedness": 4.333, "instruction": 5.0, "safety": 5.0, "tone": 4.333}, "gate_fail_rate": 0.0, "top_error_tags": {}}}, "pairwise_summary": {"b_win_rate_ci95": [0.3755, 0.9638], "b_win_rate_excluding_ties": 0.8, "winner_distribution": {"A": 0.1667, "B": 0.6667, "tie": 0.1667}}}
 ```
 
-这份报告的读法是：模型 B 的绝对评分更高、硬门禁失败率为 0、pairwise 排除持平后胜率为 `0.8`，但样本数很小，95% 置信区间仍然很宽，所以结论更适合灰度或 canary，而不是直接全量上线。
+这份报告的读法是：模型 B 的绝对评分更高、硬检查失败率为 0、pairwise 排除持平后胜率为 `0.8`，但样本数很小，95% 置信区间仍然很宽，所以结论更适合灰度或 canary，而不是直接全量上线。
 
 ### 19. LLM-as-Judge 和人工评测的关系
 
@@ -6546,7 +6519,7 @@ LLM-as-Judge 可以降低评测成本，但不能完全替代人工评测。
 ```text
 我不会只看 BLEU 或 ROUGE 这类自动指标，因为开放式问答往往没有唯一标准答案。我会建立人工评测和自动评测结合的体系。
 
-人工评测上，我会按事实正确性、证据一致性、完整性、指令遵循、格式正确性、安全性、简洁可读性和业务语气等维度打分。对于 RAG 场景，证据一致性和幻觉率是重点。对于结构化输出，格式可解析是硬门禁。对于上线对比，我会做 blind pairwise preference，随机 A/B 位置，统计新模型相对旧模型的胜率、败率和持平率，并按任务类型切片。
+人工评测上，我会按事实正确性、证据一致性、完整性、指令遵循、格式正确性、安全性、简洁可读性和业务语气等维度打分。对于 RAG 场景，证据一致性和幻觉率是重点。对于结构化输出，格式可解析是硬性条件。对于上线对比，我会做 blind pairwise preference，随机 A/B 位置，统计新模型相对旧模型的胜率、败率和持平率，并按任务类型切片。
 ```
 
 #### 问法 2：人工评测如何保证可靠？
@@ -6562,7 +6535,7 @@ LLM-as-Judge 可以降低评测成本，但不能完全替代人工评测。
 可以这样答：
 
 ```text
-因为不同维度的重要性不一样。比如一个回答事实错误但语言流畅，如果简单平均，可能分数仍然不低，但实际不能上线。安全性、事实正确性、格式正确性这类维度应该设置硬门禁，先判断是否合格，再对合格样本做加权评分或 pairwise 比较。
+因为不同维度的重要性不一样。比如一个回答事实错误但语言流畅，如果简单平均，可能分数仍然不低，但实际不能上线。安全性、事实正确性、格式正确性这类维度应该设置硬性条件，先判断是否合格，再对合格样本做加权评分或 pairwise 比较。
 ```
 
 #### 问法 4：LLM-as-Judge 能否替代人工评测？
@@ -6608,7 +6581,7 @@ LLM-as-Judge 可以降低评测成本，但不能完全替代人工评测。
 
 7. 统计结果
    - 维度均分
-   - 硬门禁失败率
+   - 硬检查失败率
    - pairwise 胜率
    - 错误标签分布
    - 切片分析
@@ -6621,7 +6594,7 @@ LLM-as-Judge 可以降低评测成本，但不能完全替代人工评测。
 
 9. 做上线决策
    - 业务收益是否显著
-   - 安全和事实硬门禁是否满足
+   - 安全和事实硬验收条件是否满足
    - 是否需要灰度实验
 ```
 
@@ -6635,10 +6608,10 @@ LLM-as-Judge 可以降低评测成本，但不能完全替代人工评测。
 2. Absolute rating 适合定位问题，pairwise preference 适合比较两个模型版本。
 3. 评测维度应包括事实正确性、证据一致性、完整性、指令遵循、格式正确性、安全性、简洁可读性和业务语气。
 4. 每个维度都要有明确的 1-5 分锚点，不能让标注员凭感觉打分。
-5. Overall score 不能简单平均，事实、安全、格式等关键维度应设置硬门禁。
+5. Overall score 不能简单平均，事实、安全、格式等关键维度应设置硬性条件。
 6. 人工评测需要标注指南、标注员校准、多人复标和一致性统计。
 7. 评测样本要分层采样，覆盖高频、长尾、复杂、多轮、安全和格式约束场景。
-8. 结果统计要看维度均分、门禁失败率、错误标签、切片结果、pairwise 胜率、置信区间和一致性指标。
+8. 结果统计要看维度均分、检查失败率、错误标签、切片结果、pairwise 胜率、置信区间和一致性指标。
 9. LLM-as-Judge 可以辅助大规模评估，但不能完全替代人工评测。
 10. 面试中要体现工程闭环：设计评测表、保证一致性、统计结果、复盘 bad cases、支撑上线决策。
 
@@ -6660,7 +6633,7 @@ A/B 测试的核心问题是：
 
 这里的“优于”不是一句主观判断，而是要落到指标、实验设计、统计显著性、风险控制和上线决策上。
 
-资料边界说明：本讲聚焦大模型应用上线前的在线 A/B 测试工程方法。写作时参考了在线受控实验的常见实践、Microsoft ExP 团队关于 sample ratio mismatch 的工程经验、二项比例差检验、Wilson 置信区间和固定样本量实验的基本统计原则。真实项目中还可能使用 CUPED、序贯检验、多重假设校正、贝叶斯实验、分层随机化和长期留存实验，本讲先聚焦面试和项目中最常用的最小闭环：稳定分桶、预注册主指标、护栏指标、样本量、置信区间、SRM 检查、切片分析和灰度回滚。
+在线受控实验的基本原则包括稳定随机化、预先定义指标、检查 sample ratio mismatch、估算样本量并报告置信区间。二项比例差检验和 Wilson 区间足以构成一个可运行的最小闭环；真实项目还可能使用 CUPED、序贯检验、多重假设校正、贝叶斯实验、分层随机化和长期留存实验。本讲先把稳定分桶、主指标、护栏指标、样本量、SRM 检查、切片分析、灰度和回滚串起来，再讨论这些更复杂的方法适用的条件。
 
 ### 本讲目标
 
@@ -7254,7 +7227,8 @@ gates = {
     "sample_ratio_ok": srm_check(control["sessions"], treatment["sessions"])["pass"],
     "min_sample_ok": min(control["sessions"], treatment["sessions"]) >= sample_size_for_two_rates(0.77, 0.79),
     "resolution_lift_ok": resolution["ci95"][0] > 0.01,
-    "negative_feedback_ok": negative_feedback["delta"] <= 0,
+    # 对护栏指标使用置信区间上界，避免仅凭点估计把随机波动当成改善。
+    "negative_feedback_ok": negative_feedback["ci95"][1] <= 0.001,
     "latency_ok": latency_increase <= 0.15,
     "cost_ok": cost_increase <= 0.20,
     "safety_ok": safety_delta <= 0.0002,
@@ -7290,7 +7264,7 @@ print(json.dumps(report, ensure_ascii=False, sort_keys=True))
 {"bucket_examples": {"u001": "treatment", "u002": "treatment", "u003": "treatment", "u004": "control", "u005": "treatment"}, "cost_increase": 0.1562, "decision": "ship_to_25_percent", "error_rate_delta": 0.000457, "gates": {"cost_ok": true, "error_rate_ok": true, "latency_ok": true, "min_sample_ok": true, "negative_feedback_ok": true, "pairwise_ok": true, "resolution_lift_ok": true, "safety_ok": true, "sample_ratio_ok": true, "ship": true}, "latency_increase": 0.0833, "negative_feedback_rate": {"ci95": [-0.0131, 0.0004], "control_rate": 0.08, "delta": -0.0063, "p_value": 0.065392, "treatment_rate": 0.0737, "z": -1.8426}, "pairwise_b_vs_a": {"ci95": [0.6198, 0.6823], "win_rate": 0.6517}, "required_sample_per_group_for_2pt_lift": 6726, "resolution_rate": {"ci95": [0.0134, 0.0343], "control_rate": 0.77, "delta": 0.0239, "p_value": 7e-06, "treatment_rate": 0.7939, "z": 4.4862}, "safety_rate_delta": 7.9e-05, "srm": {"chi_square": 0.2658, "p_value": 0.606176, "pass": true}}
 ```
 
-这个 demo 的结果可以这样解释：分桶没有明显 SRM，主指标问题解决率提升的 95% 置信区间下界超过 1 个百分点，pairwise 胜率区间也整体高于 0.5；延迟和成本增加仍在护栏内，安全和错误率变化也未越过阈值。因此决策不是“直接 100% 全量”，而是可以扩大到 `25%` 灰度并继续监控。
+这个 demo 的结果可以这样解释：分桶没有明显 SRM，主指标问题解决率提升的 95% 置信区间下界超过 1 个百分点，pairwise 胜率区间也整体高于 0.5；负反馈率区间上界为 `0.0004`，低于预先设定的 `0.001` 容忍度，延迟和成本增加也仍在护栏内，安全和错误率变化未越过阈值。因此决策不是“直接 100% 全量”，而是可以扩大到 `25%` 灰度并继续监控。
 
 ### 13. 大模型 A/B 的特殊问题
 
@@ -7513,4 +7487,4 @@ B 比 A 好。
 10. 即使总体指标提升，只要核心场景或安全指标退化，也不能直接全量。
 11. 上线必须配套灰度发布、监控告警和快速回滚方案。
 
-至此，第三册第八部分“评估与 Debug 实战”正文第一版完成。
+这组实验的核心结论是：A/B 测试不是给新模型盖章，而是把离线结果放进真实流量、版本变更和用户分桶中重新验证。主指标提升只有在安全、事实、延迟、成本和核心切片没有不可接受回归时才有意义；否则，正确动作是缩小流量、定位 bad case、修复后重跑，而不是用平均值掩盖退化。

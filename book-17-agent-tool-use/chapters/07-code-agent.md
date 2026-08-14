@@ -6,9 +6,9 @@ Code Agent 是 Agent 最重要的落地形态之一。它不只是生成一段�
 
 本章系统讲 Code Agent：仓库理解、代码定位、文件编辑、patch 生成、测试执行、调试闭环、最小修改原则、上下文管理、依赖变更、权限与沙箱、安全风险、评估指标，以及一个 0 依赖 Python demo，用来审计 toy Code Agent 轨迹。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本章第二轮精修时，按 `WRITING_PLAN.md` 联网核对了 SWE-bench、SWE-agent、OpenAI Codex CLI / local shell / apply patch 相关公开文档、Claude Code 概览和代码任务常见评估口径。
+本章参考了 SWE-bench、SWE-agent、OpenAI Codex CLI / local shell / apply patch 相关公开文档、Claude Code 概览和代码任务常见评估口径。
 
 本章采用以下口径：
 
@@ -79,7 +79,7 @@ a_t=(u_t,n_t,\alpha_t,\rho_t)
 
 其中 `u_t` 是动作类型，例如 `search`、`read`、`patch`、`test`、`ask`、`final`；`n_t` 是工具名；`\alpha_t` 是参数；`\rho_t` 是风险级别。
 
-执行动作前需要沙箱和权限门禁：
+执行动作前需要沙箱和权限验收条件：
 
 ```math
 G_{\mathrm{cmd}}(a_t,s_t)=
@@ -181,7 +181,7 @@ R_{\mathrm{task}}\ge\tau_{\mathrm{task}}
 ]
 ```
 
-这个门禁回答：Code Agent 是否真的完成任务、是否验证、是否改动聚焦、是否保护用户改动、是否遵守安全边界。
+这组条件回答：Code Agent 是否真的完成任务、是否验证、是否改动聚焦、是否保护用户改动、是否遵守安全边界。
 
 ## 7.4 仓库理解
 

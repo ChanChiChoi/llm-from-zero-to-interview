@@ -1,8 +1,8 @@
 # 第三章：Self-Consistency 与采样
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本章第二轮精修时，重点参考 Self-Consistency Improves Chain of Thought Reasoning in Language Models、Chain-of-Thought Prompting、nucleus sampling / top-p 采样，以及 HumanEval 中 pass@k 的评估口径。这里把 self-consistency 当作最小可落地的 test-time compute 方法：同一道题生成多个候选推理链，抽取并标准化最终答案，再通过多数投票、加权投票或 verifier 选择答案。
+本章重点参考 Self-Consistency Improves Chain of Thought Reasoning in Language Models、Chain-of-Thought Prompting、nucleus sampling / top-p 采样，以及 HumanEval 中 pass@k 的评估口径。这里把 self-consistency 当作最小可落地的 test-time compute 方法：同一道题生成多个候选推理链，抽取并标准化最终答案，再通过多数投票、加权投票或 verifier 选择答案。
 
 本章聚焦：
 
@@ -165,7 +165,7 @@ C_{\mathrm{sc}}
 \sum_{j=1}^{K_i}T_{ij}
 ```
 
-一个简化上线门禁：
+一个简化上线条件：
 
 ```math
 G_{\mathrm{sc}}

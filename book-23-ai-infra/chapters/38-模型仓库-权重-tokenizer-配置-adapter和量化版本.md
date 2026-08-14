@@ -8,11 +8,11 @@
 
 > 模型仓库不是存权重文件的普通目录，而是模型资产的版本、元数据、权限、血缘、评估和发布状态管理系统。
 
-## 38.0 本讲资料边界与第二轮精修口径
+## 38.0 本讲范围与资料
 
 本讲按截至 2026-06 的稳定公开资料校准：MLflow Model Registry 对 registered model、model version、alias、tag 和 stage 的模型生命周期抽象，Hugging Face Hub 对模型仓库、revision、model card 和文件版本的资产管理口径，Safetensors 对安全权重格式和避免 pickle 反序列化风险的说明，Hugging Face PEFT 对 adapter、base model、merge 的关系管理口径，以及 vLLM 等推理 runtime 对权重格式、tokenizer、量化和加载兼容性的公开工程边界。
 
-本章只抽象大模型平台里的模型产物仓库能力，不绑定某个 registry 产品、对象存储、推理引擎、量化工具、模型卡模板或内部平台实现。
+本章聚焦大模型平台里的模型产物仓库能力，不绑定某个 registry 产品、对象存储、推理引擎、量化工具、模型卡模板或内部平台实现。
 
 和前面章节的分工是：
 
@@ -205,13 +205,13 @@ Tokenizer 是模型不可分割的一部分。
 
 模型仓库必须记录 tokenizer 版本，并和 ModelVersion 绑定。
 
-tokenizer 和 config 的绑定可以用一个二值门禁表示：
+tokenizer 和 config 的绑定可以用一个二值验收条件表示：
 
 ```math
 B_{\mathrm{tok}}=\mathbf{1}[h_{\mathrm{tok}}=h_{\mathrm{tok,expected}} \land h_{\mathrm{cfg}}=h_{\mathrm{cfg,expected}}]
 ```
 
-其中 `h_tok` 是实际 tokenizer artifact 的 hash，`h_tok,expected` 是 ModelVersion 记录的期望 tokenizer hash，`h_cfg` 是实际 config hash，`h_cfg,expected` 是期望 config hash。这个门禁的直觉是：权重、tokenizer、chat template、special token 和 config 是同一个行为契约，不能只靠文件名匹配。
+其中 `h_tok` 是实际 tokenizer artifact 的 hash，`h_tok,expected` 是 ModelVersion 记录的期望 tokenizer hash，`h_cfg` 是实际 config hash，`h_cfg,expected` 是期望 config hash。这组条件的直觉是：权重、tokenizer、chat template、special token 和 config 是同一个行为契约，不能只靠文件名匹配。
 
 Tokenizer artifact 通常包括：
 
@@ -264,7 +264,7 @@ Adapter 不是完整模型，而是依赖 base model 的增量参数。
 
 如果 adapter 和 base model 不匹配，结果可能完全不可用。
 
-adapter 与 base model 的最小兼容门禁可以写成：
+adapter 与 base model 的最小兼容准入条件可以形式化为：
 
 ```math
 G_{\mathrm{adapter}}=\mathbf{1}[v_{\mathrm{base}}=v_{\mathrm{base,expected}} \land d_{\mathrm{rank}}\le d_{\mathrm{hidden}}]
@@ -328,7 +328,7 @@ Merge 后模型：
 \Delta Q=Q_{\mathrm{base}}-Q_{\mathrm{quant}}
 ```
 
-其中 `Q_base` 是原始模型在同一评估集上的质量指标，`Q_quant` 是量化版本质量指标。上线门禁不应该只看吞吐提升，还要约束 `Delta Q` 不超过业务可接受阈值。
+其中 `Q_base` 是原始模型在同一评估集上的质量指标，`Q_quant` 是量化版本质量指标。上线条件不应该只看吞吐提升，还要约束 `Delta Q` 不超过业务可接受阈值。
 
 ## 38.13 Runtime 兼容性
 
@@ -391,7 +391,7 @@ T_{\mathrm{load}}=\frac{S_{\mathrm{artifact}}}{B_{\mathrm{read}}}+T_{\mathrm{ver
 7. 延迟和吞吐 benchmark。
 8. 成本估算。
 
-模型发布前，平台应检查是否有必要评估报告，且指标满足门禁。
+模型发布前，平台应检查是否有必要评估报告，且指标满足验收条件。
 
 ## 38.16 发布状态管理
 
@@ -531,15 +531,15 @@ Artifact Store 存大文件，Metadata DB 存模型元数据，Lineage Graph 存
 
 ## 38.24 模型仓库审计指标和最小 demo
 
-模型仓库的最终门禁可以写成：
+模型仓库的最终验收条件可以形式化为：
 
 ```math
 G_{\mathrm{registry}}=\mathbf{1}[\min_j C_j\ge\tau_j \land C_{\mathrm{weight}}=1 \land B_{\mathrm{tok}}=1 \land \Delta Q\le\rho_Q \land T_{\mathrm{load}}\le\tau_{\mathrm{load}} \land P_0=0]
 ```
 
-其中 `C_j` 是每个审计维度的覆盖率，`tau_j` 是该维度阈值，`rho_Q` 是可接受量化质量退化，`tau_load` 是加载耗时阈值，`P0` 是未解决的 P0 级发布风险数量。这个门禁强调：模型仓库不是“文件可下载”就合格，而是权重、tokenizer、config、adapter、merge、量化、runtime、评估、安全、发布、回滚和生命周期都能被平台验证。
+其中 `C_j` 是每个审计维度的覆盖率，`tau_j` 是该维度阈值，`rho_Q` 是可接受量化质量退化，`tau_load` 是加载耗时阈值，`P0` 是未解决的 P0 级发布风险数量。这组条件强调：模型仓库不是“文件可下载”就合格，而是权重、tokenizer、config、adapter、merge、量化、runtime、评估、安全、发布、回滚和生命周期都能被平台验证。
 
-下面是一个 0 依赖 toy demo。它把本章的模型仓库治理拆成 16 个可审计门禁，并构造 16 个 bad case，覆盖权重 manifest 缺失、unsafe 权重格式、tokenizer / config 绑定错误、adapter base 不匹配、merge lineage 缺失、量化质量退化、runtime 不兼容、评估报告缺失、权限安全不足、发布治理缺失、回滚别名缺失、lineage 断边、加载缓存不达标、生命周期策略缺失和最终 registry gate 缺失。
+下面是一个 0 依赖 toy demo。它把本章的模型仓库治理拆成 16 个可审计验收条件，并构造 16 个 bad case，覆盖权重 manifest 缺失、unsafe 权重格式、tokenizer / config 绑定错误、adapter base 不匹配、merge lineage 缺失、量化质量退化、runtime 不兼容、评估报告缺失、权限安全不足、发布治理缺失、回滚别名缺失、lineage 断边、加载缓存不达标、生命周期策略缺失和最终 registry gate 缺失。
 
 ```python
 from copy import deepcopy

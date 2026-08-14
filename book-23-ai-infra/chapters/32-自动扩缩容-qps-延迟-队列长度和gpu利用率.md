@@ -8,13 +8,13 @@
 
 > 大模型推理扩缩容的核心不是“实例数够不够”，而是“在冷启动、显存、队列、token 负载和 SLO 约束下，容量是否及时、稳定、低成本地匹配需求”。
 
-## 32.0 本讲资料边界与第二轮精修口径
+## 32.0 本讲范围与资料
 
-本讲按 `WRITING_PLAN.md` 的第二轮要求做过资料校准。重点参考的是 Kubernetes Horizontal Pod Autoscaling 对按指标比例计算期望副本数的公开算法，KEDA 对事件驱动和队列型指标扩缩容的工程抽象，Triton Inference Server 对 queue、compute、request、batch、GPU 等推理指标的公开口径，KServe / Knative 对并发、请求量和冷启动相关的 serverless 推理服务口径，以及 Google SRE 关于过载保护、容量、错误预算和控制回路稳定性的系统设计原则。
+本章参考 Kubernetes Horizontal Pod Autoscaling 对按指标比例计算期望副本数的公开算法，KEDA 对事件驱动和队列型指标扩缩容的工程抽象，Triton Inference Server 对 queue、compute、request、batch、GPU 等推理指标的公开口径，KServe / Knative 对并发、请求量和冷启动相关的 serverless 推理服务口径，以及 Google SRE 关于过载保护、容量、错误预算和控制回路稳定性的系统设计原则。
 
 这些资料共同指向一个稳定事实：普通 HPA 的比例缩放思想有价值，但 LLM serving 不能只用 CPU、QPS 或 GPU utilization 做单指标扩缩容。推理 autoscaler 必须同时看 input / output tokens、TTFT、TPOT、queue wait、KV pressure、active sequences、error / timeout、冷启动、warm pool、draining、路由降级、租户配额和成本预算。
 
-本章只抽象截至 2026-06 仍稳定的 LLM-aware autoscaling 设计口径，不把某个云厂商、Kubernetes 插件、serverless 平台、GPU 型号、runtime 指标字段名或内部平台阈值写成通用标准。正文公式用于面试表达、容量估算和策略审计；真实上线仍要用目标模型、runtime、硬件、流量分布、冷启动时间、warm pool 策略和 SLO 实测校准。
+本章聚焦截至 2026-06 仍稳定的 LLM-aware autoscaling 设计口径，不把某个云厂商、Kubernetes 插件、serverless 平台、GPU 型号、runtime 指标字段名或内部平台阈值写成通用标准。正文公式用于面试表达、容量估算和策略审计；真实上线仍要用目标模型、runtime、硬件、流量分布、冷启动时间、warm pool 策略和 SLO 实测校准。
 
 ## 32.1 为什么推理服务需要自动扩缩容
 
@@ -406,7 +406,7 @@ Metrics -> Autoscaler -> Scheduler -> Deployment -> Router -> Runtime -> Metrics
 
 ## 32.20 自动扩缩容审计指标与最小 demo
 
-第二轮精修时，需要把自动扩缩容从“看哪个指标扩副本”升级成可解释的控制闭环。
+本章把自动扩缩容从“看哪个指标扩副本”升级成可解释的控制闭环。
 
 可以把一个观测窗口写成：
 
@@ -478,13 +478,13 @@ L_q=0 \land A_{\mathrm{stream}}=0 \land T_{\mathrm{cool}}\ge B_{\mathrm{cool}} \
 
 其中，`A_{\mathrm{stream}}` 是活跃流式请求数，`T_{\mathrm{cool}}` 是距离上次缩容或扩容的 cooldown 时间，`B_{\mathrm{cool}}` 是 cooldown 阈值，`D` 表示待缩容实例已经进入 draining 并停止接新请求。没有这个条件，缩容很容易中断流式连接或造成振荡。
 
-最终 autoscaling 门禁可以写成：
+最终 autoscaling 准入条件可以形式化为：
 
 ```math
 G_{\mathrm{autoscale}}=\mathbf{1}\left[\min_j C_j\ge\tau_j \land T_{\mathrm{ttft,p95}}\le B_{\mathrm{ttft}} \land T_{\mathrm{tpot,p95}}\le B_{\mathrm{tpot}} \land W_{q,\mathrm{p95}}\le B_q \land R_{\mathrm{kv}}\le \rho_{\mathrm{kv}} \land N_{\mathrm{eff}}\ge N_{\mathrm{need}} \land P_0=0\right]
 ```
 
-其中，`C_j` 是各审计维度覆盖率，`R_{\mathrm{kv}}` 是 KV pressure，`N_{\mathrm{need}}` 是多指标推导出的需求副本数，`P_0` 是未关闭的 P0 风险数。这个门禁强调：autoscaler 不是单独的 K8s 配置，而是推理平台容量控制闭环。
+其中，`C_j` 是各审计维度覆盖率，`R_{\mathrm{kv}}` 是 KV pressure，`N_{\mathrm{need}}` 是多指标推导出的需求副本数，`P_0` 是未关闭的 P0 风险数。这组条件强调：autoscaler 不是单独的 K8s 配置，而是推理平台容量控制闭环。
 
 下面这个 0 依赖 Python demo 演示一个简化 LLM-aware autoscaler：分别按 QPS、input tokens/s、output tokens/s、queue wait、TTFT、TPOT、KV pressure 和 GPU utilization 计算建议副本数，再结合 warm pool、冷启动、预算上限和 draining 安全做动作判断。
 
@@ -781,6 +781,6 @@ K8s 只是执行层，推理平台需要 LLM-aware autoscaler。
 4. 缩容要处理 draining、streaming、active requests 和缓存失效。
 5. 多模型、多租户场景下，扩缩容必须和路由、配额、限流、成本治理联动。
 6. 成熟的推理 autoscaler 是 LLM-aware 的控制闭环，不只是 K8s HPA 配置。
-7. Autoscaling 门禁要同时检查 token 画像、SLO、队列、GPU / KV、冷启动、warm pool、多指标推荐、扩缩容策略、draining、路由准入、租户配额、成本和 trace。
+7. Autoscaling 验收条件要同时检查 token 画像、SLO、队列、GPU / KV、冷启动、warm pool、多指标推荐、扩缩容策略、draining、路由准入、租户配额、成本和 trace。
 
 下一章我们会讲限流、熔断、重试、超时和降级。

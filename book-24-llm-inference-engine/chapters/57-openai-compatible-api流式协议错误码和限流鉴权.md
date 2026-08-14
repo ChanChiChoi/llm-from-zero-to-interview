@@ -25,9 +25,9 @@
 
 本章讨论如何把 inference engine 包装成 OpenAI-compatible serving API。
 
-## 57.0 本讲资料边界与第二轮精修口径
+## 57.0 本讲范围与资料
 
-本章按第二轮精修口径，只讲教学版 serving engine 如何暴露 OpenAI-compatible API 的稳定工程边界。
+本章聚焦教学版 serving engine 如何暴露 OpenAI-compatible API 的稳定工程边界。
 
 公开资料校准主要参考四类口径：
 
@@ -42,7 +42,7 @@
 Bearer auth -> JSON validation -> model permission -> chat template -> token budget -> RPM / TPM / concurrency limit -> EngineRequest -> non-stream response or SSE stream -> error response with request_id
 ```
 
-第二轮新增 demo 的验收重点是：兼容层要诚实声明支持字段；不支持字段不能静默吞掉；streaming chunk 要可解析且以 `[DONE]` 结束；鉴权、权限和限流要在昂贵 tokenization / engine admission 前完成；rate limit 与系统 admission control 要区分；错误响应必须有稳定的 `type`、`code`、`param`、`message` 和 `request_id`。
+本章 demo 的验收重点是：兼容层要诚实声明支持字段；不支持字段不能静默吞掉；streaming chunk 要可解析且以 `[DONE]` 结束；鉴权、权限和限流要在昂贵 tokenization / engine admission 前完成；rate limit 与系统 admission control 要区分；错误响应必须有稳定的 `type`、`code`、`param`、`message` 和 `request_id`。
 
 ## 57.1 本章目标
 
@@ -1115,7 +1115,7 @@ Unsupported:
 限流上不会只看 QPS，因为 LLM 请求成本差异很大。我会同时做 requests per minute、tokens per minute、concurrent requests、max context length、per-model quota，并区分 rate limit 和系统 admission control。错误响应要有稳定的 type、code、param、message 和 request_id，方便 SDK、自动重试和运维排查。
 ```
 
-## 57.30 API Compatibility 公式、错误门禁和可运行 demo
+## 57.30 API Compatibility 公式、错误验收条件和可运行 demo
 
 OpenAI-compatible API 层可以先把一次请求抽象成：
 
@@ -1125,7 +1125,7 @@ a_i=(k_i,m_i,p_i,o_i,s_i,u_i,c_i,r_i)
 
 其中 `k_i` 是 API key，`m_i` 是 model，`p_i` 是 prompt tokens，`o_i` 是 max output tokens，`s_i` 表示是否 stream，`u_i` 是 user / tenant，`c_i` 是 concurrency slot，`r_i` 是 request id。
 
-上下文长度门禁：
+上下文长度验收条件：
 
 ```math
 G_{\mathrm{ctx},i}=\mathbf{1}[p_i+o_i\le L_{m_i}^{\max}]
@@ -1141,7 +1141,7 @@ R_u^{\mathrm{req}}(t)\le R_u^{\max}
 R_u^{\mathrm{tok}}(t)+p_i+o_i\le T_u^{\max}
 ```
 
-并发门禁：
+并发验收条件：
 
 ```math
 C_u(t)<C_u^{\max}
@@ -1155,7 +1155,7 @@ U_i=p_i+y_i
 
 其中 `y_i` 是实际输出 token 数。
 
-最终 API 层门禁：
+最终 API 层验收条件：
 
 ```math
 G_{\mathrm{api}}=G_{\mathrm{auth}}G_{\mathrm{schema}}G_{\mathrm{model}}G_{\mathrm{ctx}}G_{\mathrm{rate}}G_{\mathrm{stream}}G_{\mathrm{error}}G_{\mathrm{privacy}}

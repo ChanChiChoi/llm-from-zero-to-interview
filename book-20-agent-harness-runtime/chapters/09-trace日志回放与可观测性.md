@@ -1,8 +1,8 @@
 # 第九章：Trace、日志、回放与可观测性
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲按 `WRITING_PLAN.md` 的第二轮要求做公式和 demo 精修，联网核对了 OpenAI Agents SDK 中 tracing、spans、processors、guardrails 和 workflow tracing 的公开资料，OpenTelemetry 关于 traces、spans、events、attributes、status、logs / metrics 关系的公开文档，W3C Trace Context 关于 `traceparent`、`tracestate` 和跨服务上下文传播的标准口径，以及 LangSmith 关于 agent trace、调试、评估、监控和从生产 trace 构建数据集的公开说明。
+本章参考 OpenAI Agents SDK 中 tracing、spans、processors、guardrails 和 workflow tracing 的公开资料，OpenTelemetry 关于 traces、spans、events、attributes、status、logs / metrics 关系的公开文档，W3C Trace Context 关于 `traceparent`、`tracestate` 和跨服务上下文传播的标准口径，以及 LangSmith 关于 agent trace、调试、评估、监控和从生产 trace 构建数据集的公开说明。
 
 本章聚焦防御性的 Agent trace、日志、回放和可观测性设计：如何让一次 agent run 可解释、可复盘、可审计、可导出为评估样本，同时控制隐私、secret、artifact、保留周期和访问权限风险。正文和 demo 不提供绕过日志、隐藏高风险行为、规避审计、泄露敏感信息、篡改生产 trace 或攻击可观测性系统的方法。
 
@@ -667,7 +667,7 @@ C_{\mathrm{eval}}=
 
 其中，$Q^{\ast}$ 包含 replay case、failure taxonomy、bad case label、expected behavior 和可用于 regression 的输入输出摘要。
 
-Trace / Replay 门禁可以写成：
+Trace / Replay 准入条件可以形式化为：
 
 ```math
 G_{\mathrm{trace}}=
@@ -687,11 +687,11 @@ C_{\mathrm{trace}}=1
 ]
 ```
 
-这个门禁的目标不是无限制保存所有内容，而是在隐私和成本可控的前提下，让 agent 的关键行为可解释、可回放、可评估。
+这组条件的目标不是无限制保存所有内容，而是在隐私和成本可控的前提下，让 agent 的关键行为可解释、可回放、可评估。
 
-## 9.16.1 最小可运行 Trace / Replay 审计 demo
+### 9.16.1 最小可运行 Trace / Replay 审计 demo
 
-下面的 demo 不调用模型、不执行工具、不访问网络，只审计 toy traces 是否满足 trace / replay 门禁。它故意构造缺 artifact、span parent 错误、时间线越界、敏感 artifact 未脱敏、外部网络不可复现、最终状态虚假成功等 bad case。
+下面的 demo 不调用模型、不执行工具、不访问网络，只审计 toy traces 是否满足 trace / replay 验收条件。它故意构造缺 artifact、span parent 错误、时间线越界、敏感 artifact 未脱敏、外部网络不可复现、最终状态虚假成功等 bad case。
 
 ```python
 from dataclasses import dataclass

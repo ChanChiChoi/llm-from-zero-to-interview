@@ -12,13 +12,13 @@ PD 分离里的 P 是 Prefill，D 是 Decode。
 
 > Prefill 是一次处理大量输入 token、偏大矩阵计算和 KV 写入的阶段，主要影响 TTFT；Decode 是逐 token 生成、频繁读取 KV cache、重复调度的阶段，主要影响 TPOT。二者资源画像不同，是 PD 分离架构成立的根本原因。
 
-## 35.0 本讲资料边界与第二轮精修口径
+## 35.0 本讲范围与资料
 
-本讲第二轮精修前，先按 `WRITING_PLAN.md` 对公开资料做校准：参考 DistServe 论文对 prefill / decode 干扰、TTFT / TPOT 独立治理和不同资源池的动机说明；参考 Splitwise 论文对 prompt computation 更偏 compute-intensive、token generation 更偏 memory-intensive 以及状态传输代价的表述；参考 SARATHI 论文对 chunked prefill、decode-maximal batching 和 prefill / decode 利用率差异的说明；参考 vLLM chunked prefill 与 disaggregated prefilling 文档对 decode-first、`max_num_batched_tokens`、ITL / TTFT 折中和 KV cache 传输边界的工程口径。
+本章参考 DistServe 论文对 prefill / decode 干扰、TTFT / TPOT 独立治理和不同资源池的动机说明；参考 Splitwise 论文对 prompt computation 更偏 compute-intensive、token generation 更偏 memory-intensive 以及状态传输代价的表述；参考 SARATHI 论文对 chunked prefill、decode-maximal batching 和 prefill / decode 利用率差异的说明；参考 vLLM chunked prefill 与 disaggregated prefilling 文档对 decode-first、`max_num_batched_tokens`、ITL / TTFT 折中和 KV cache 传输边界的工程口径。
 
 本讲只回答一个问题：为什么 Prefill 和 Decode 的资源画像不同，以及这种差异如何引出 chunked prefill 和 PD 分离。不把 DistServe、Splitwise、SARATHI 或 vLLM 的具体实现写成唯一标准答案，也不在本章展开跨节点 KV 迁移协议、connector API、调度器源码、并行策略搜索或生产 benchmark 排名。后续章节会继续拆 PD 分离系统架构、KV cache 迁移共享和 chunked prefill 与 disaggregated prefill 的取舍。
 
-本讲新增 demo 是教学版资源画像审计器：用 token 数、prefix hit、简化 compute / KV 读写量、TTFT / TPOT 估算和干扰门禁，帮助面试时把“prefill 偏计算、decode 偏带宽和调度”讲成可验收的指标链，而不是只背结论。
+本章的 demo 是教学版资源画像审计器：用 token 数、prefix hit、简化 compute / KV 读写量、TTFT / TPOT 估算和干扰检查条件，帮助面试时把“prefill 偏计算、decode 偏带宽和调度”讲成可验收的指标链，而不是只背结论。
 
 ## 35.1 本章目标
 
@@ -117,7 +117,7 @@ Decode 常被认为更偏 memory-bound 或 bandwidth-sensitive。
 
 因为它不断读取历史 KV，单轮计算量相对小，GPU 计算单元不一定容易吃满。
 
-## 35.5 一张表总结差异
+## 35.5 Prefill/Decode 的资源差异假设
 
 | 维度 | Prefill | Decode |
 | --- | --- | --- |
@@ -611,7 +611,7 @@ PD 分离的根本原因是 Prefill 和 Decode 的资源画像不同。Prefill �
 PD 分离把 prefill 和 decode 拆到不同资源池，让 prefill pool 专注处理输入和生成 prompt KV，让 decode pool 专注持续生成输出 token。这样 P/D 可以使用不同调度策略、batch 形态和扩缩容比例。但它不是免费午餐，核心代价是 KV cache 要在 P/D worker 之间迁移或共享，网络带宽、延迟、状态同步和故障恢复都会变复杂。
 ```
 
-## 35.24 资源画像公式、干扰门禁和可运行 demo
+## 35.24 资源画像公式、干扰验收条件和可运行 demo
 
 面试里讲 Prefill / Decode 资源画像，最好不要只说“一个 compute-bound、一个 memory-bound”。更稳的讲法是先定义每个请求的 token 画像，再把 compute、KV 读写和延迟指标拆开。
 
@@ -812,7 +812,7 @@ prefill_decode_gates= {'prefill_compute_heavy': True, 'decode_kv_read_heavy': Tr
 2. `code_long_output` 说明短 prompt 长输出可能让 decode KV 读取成为主压力，TPOT 不能只看输入长度。
 3. `max_prefill_tpot_stall_ms`、`chunked_prefill_stall_ms` 和 `decode_first_prefill_wait_ms` 同时为真，说明 chunked prefill 能缓解长 prefill 卡 decode，但 decode-first 又可能让 waiting prefill 饥饿；PD 分离有动机，但 `kv_transfer_mib_for_pd` 说明它有明确传输代价。
 
-所以本讲的最终门禁是 `prefill_decode_profile_gate`：能把 token 分布、prefix hit、prefill compute、decode KV read、TTFT、TPOT、长 prefill 干扰、decode-first 饥饿和 PD KV transfer 都说清，才算真正理解 Prefill 和 Decode 的资源画像。
+所以本讲的最终验收条件是 `prefill_decode_profile_gate`：能把 token 分布、prefix hit、prefill compute、decode KV read、TTFT、TPOT、长 prefill 干扰、decode-first 饥饿和 PD KV transfer 都说清，才算真正理解 Prefill 和 Decode 的资源画像。
 
 ## 35.25 小练习
 

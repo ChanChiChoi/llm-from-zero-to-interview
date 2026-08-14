@@ -4,14 +4,14 @@ Reasoning model 是当前大模型能力竞争的重要方向之一。传统 cha
 
 Reasoning 的核心不只是让模型输出更长的解释。真正的 reasoning 涉及训练数据、Chain-of-Thought、self-consistency、verifier、process supervision、search、tool execution、test-time compute scaling 和评估体系。本章先建立全局地图，后续章节再逐个展开。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本章第二轮精修前，重点参考了 Chain-of-Thought、Zero-shot CoT、Self-Consistency、Training Verifiers to Solve Math Word Problems、Let's Verify Step by Step、Tree of Thoughts、HumanEval / pass@k、MATH / GSM8K，以及 OpenAI 关于 reasoning models 和 test-time compute 的公开资料。本次内容审计补丁进一步补入 DeepSeek-R1 和 RLVR 入口，用于说明 2025 年之后 reasoning 后训练中“可验证 reward + 在线 RL”的影响力。
+本章重点参考了 Chain-of-Thought、Zero-shot CoT、Self-Consistency、Training Verifiers to Solve Math Word Problems、Let's Verify Step by Step、Tree of Thoughts、HumanEval / pass@k、MATH / GSM8K，以及 OpenAI 关于 reasoning models 和 test-time compute 的公开资料。本章补充了 DeepSeek-R1 和 RLVR 入口，用于说明 2025 年之后 reasoning 后训练中“可验证 reward + 在线 RL”的影响力。
 
-本章是第十六册总览章，只建立 reasoning model 的全局地图和面试主线，不展开后续各章的完整技术细节。这里不把“输出很长解释”直接等同于真实推理，也不把闭源 reasoning 模型的内部训练 recipe 写成公开事实。第二轮精修重点是：
+本章是第十六册总览章，只建立 reasoning model 的全局地图和面试主线，不展开后续各章的完整技术细节。这里不把“输出很长解释”直接等同于真实推理，也不把闭源 reasoning 模型的内部训练 recipe 写成公开事实。本章重点是：
 
 1. 区分 chat model、reasoning model、CoT prompt、训练出来的 reasoning 能力和推理时搜索 / 验证系统。
-2. 用公式解释 self-consistency、best-of-n、pass@k、verifier reranking、process supervision、test-time compute 成本和上线门禁。
+2. 用公式解释 self-consistency、best-of-n、pass@k、verifier reranking、process supervision、test-time compute 成本和上线条件。
 3. 用 0 依赖 demo 展示 greedy、self-consistency、verifier、pass@k、过程步骤准确率和 token 成本之间的关系。
 4. 明确 reasoning 的安全边界：更强推理可能提升数学 / 代码 / 规划能力，也可能提升攻击规划、工具滥用和看似严谨的错误解释。
 5. 明确 RLVR 只是 reasoning 训练的一条重要路线，不等于所有 reasoning 能力来源；它特别适合数学、代码、工具执行这类可验证任务。
@@ -223,9 +223,9 @@ T_{ik}
 
 更真实的系统还要加入 verifier、工具执行、搜索节点、队列等待和人工复核成本。
 
-**Reasoning 上线门禁**
+**Reasoning 上线条件**
 
-一个简化 reasoning 门禁可以写成：
+一个简化 reasoning 准入条件可以形式化为：
 
 ```math
 G_{\mathrm{reason}}=
@@ -679,7 +679,57 @@ gate_pass=True
 2. self-consistency 能提升稳定性，但遇到系统性干扰时多数投票仍会错。
 3. verifier 质量足够好时，best-of-n 可以显著提升正确率。
 4. pass@k 衡量的是候选集合潜力，不等于线上一次调用体验。
-5. reasoning 上线必须同时看准确率、步骤质量、token 成本和安全门禁。
+5. reasoning 上线必须同时看准确率、步骤质量、token 成本和安全验收条件。
+
+### 1.16.1 前沿模型把 Reasoning 变成可控制的服务策略
+
+传统教材经常把模型分成“会推理”和“不会推理”两类。现在更准确的看法是：模型是否推理、推理多久、是否调用工具、是否保留 reasoning 状态，常常由训练能力和运行时策略共同决定。
+
+小白可以把一次请求看成预算向量：
+
+```math
+b_i=(e_i,t_i,v_i,u_i,c_i)
+```
+
+其中 `e_i` 是 reasoning effort 或 thinking level，`t_i` 是 reasoning token 预算，`v_i` 是验证器预算，`u_i` 是工具调用预算，`c_i` 是上下文/状态预算。成功率和成本可以粗略写成：
+
+```math
+\max_{\pi}\;A(\pi,b_i)
+\quad\mathrm{s.t.}\quad
+C(\pi,b_i)\le B_i
+```
+
+这说明 `high` 不只是“回答更长”，而是给模型、采样器、工具和验证器更多可用资源；具体实现可能只增加 reasoning token，也可能改变搜索、路由或工具策略。
+
+#### 1.16.1.1 公开模型接口的共同趋势
+
+| 模型/系列 | 公开控制或能力信号 | 读者应该如何理解 | 证据边界 |
+|---|---|---|---|
+| GPT-5.5 | 可调 `reasoning effort`，约 1.05M context、128K max output | 同一模型能力可按请求在质量和成本间调节 | 官方模型目录；上下文/输出是产品披露 |
+| GPT-5.6 Sol / Terra / Luna | Sol 偏旗舰，Terra 偏平衡，Luna 偏高吞吐；支持工具能力和 reasoning 配置 | 档位选择是服务路由问题，不是简单参数大小排名 | 官方模型目录；以当前 alias 和文档为准 |
+| Claude Fable 5 / Mythos 5 / Opus 5 / Sonnet 5 | adaptive thinking、长上下文和 Agent 工作流信号 | 动态 thinking 需要连同 fallback、工具和安全路由评测 | 官方模型页/产品文档；trusted-access 条件需单独核对 |
+| Gemini 3.6 Flash / 3.1 Pro | thinking levels、原生多模态和 Agent/coding 分层 | thinking level 是推理预算控制，不等于公开 CoT | 官方模型卡/开发者文档 |
+| DeepSeek-V4-Pro / Flash | `low/high/max` reasoning effort，高级 reasoning 可建议更大输出预算 | 低/高档位影响成本、延迟和答案策略，不能跨模型直接比较 | 官方模型卡/更新说明 |
+| Qwen3.5 / Qwen3.6、Kimi K2.6/K2.7 | preserve thinking、interleaved thinking、多步工具调用 | reasoning state 可能要在工具轨迹和多轮状态中保留 | 官方模型卡；具体字段语义依接口 |
+
+这些名字不能直接组成一个“谁最强”的排行榜。至少要固定：模型版本、默认 effort、最大输出、工具是否开启、上下文长度、harness、采样和 verifier。否则比较的不是模型能力，而是不同的预算和系统配置。
+
+#### 1.16.1.2 reasoning effort、thinking level 与真实推理能力
+
+工程上应把接口控制与能力本身分开记录：
+
+1. `reasoning_effort`、`thinking_level` 是请求级控制，通常决定预算或策略档位。
+2. `preserve thinking` 是状态/协议能力，不能推断成“把完整隐藏 CoT 返回给用户”。
+3. `interleaved thinking` 是 reasoning、tool call、observation 交替的控制流程。
+4. `adaptive thinking` 是动态预算策略，必须记录它的停止条件和 fallback。
+
+评测时可以记录单位正确成本：
+
+```math
+\mathrm{CostPerCorrect}=\frac{\sum_i C_i}{\sum_i \mathbf{1}[\hat y_i=y_i^\star]}
+```
+
+再按 effort 档位报告准确率、P95 延迟、reasoning token、工具调用、verifier 调用和失败类型。这样才能回答“高 effort 是否值得”，而不是只说“高 effort 更强”。
 
 ## 1.17 面试官会怎么问
 

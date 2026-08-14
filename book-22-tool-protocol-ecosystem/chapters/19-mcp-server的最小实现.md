@@ -1,10 +1,10 @@
 # 第十九章：MCP Server 的最小实现
 
-## 19.0 本讲资料边界与第二轮精修口径
+## 19.0 本讲范围与资料
 
-本讲第二轮精修时，参考 MCP 官方介绍、MCP 2025-06-18 specification 中 lifecycle、tools、resources、prompts、stdio / Streamable HTTP transport 的口径，以及 OpenAI Agents SDK 中 MCP server 接入、strict schema、tool filtering、approval 与 tracing 的工程抽象。正文只抽象最小 MCP Server 的稳定实现闭环，不绑定某个 SDK 的类名、装饰器、配置文件格式或某个 Host 产品的私有字段。
+本章参考 MCP 官方介绍、MCP 2025-06-18 specification 中 lifecycle、tools、resources、prompts、stdio / Streamable HTTP transport 的口径，以及 OpenAI Agents SDK 中 MCP server 接入、strict schema、tool filtering、approval 与 tracing 的工程抽象。正文只抽象最小 MCP Server 的稳定实现闭环，不绑定某个 SDK 的类名、装饰器、配置文件格式或某个 Host 产品的私有字段。
 
-本章新增的公式和 demo 只用于面试与教学：公式用来把“最小实现是否完整”拆成可检查指标，代码用一个 0 依赖 toy server 演示 metadata、capabilities、tools/list、tools/call、schema validation、resources、prompts、transport policy、结构化错误和 trace 的最小闭环。真实项目中应优先使用官方 SDK 和当前协议版本，并把远程 server 的认证、授权、TLS、限流、审计和 token audience 校验放入生产治理。
+本章的公式和 demo 只用于面试与教学：公式用来把“最小实现是否完整”拆成可检查指标，代码用一个 0 依赖 toy server 演示 metadata、capabilities、tools/list、tools/call、schema validation、resources、prompts、transport policy、结构化错误和 trace 的最小闭环。真实项目中应优先使用官方 SDK 和当前协议版本，并把远程 server 的认证、授权、TLS、限流、审计和 token audience 校验放入生产治理。
 
 ## 19.1 本章定位
 
@@ -515,7 +515,7 @@ r_i=(m_i,c_i,t_i,s_i,h_i,a_i,o_i,e_i,p_i,z_i)
 C_k=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[r_i\ \mathrm{passes}\ k]
 ```
 
-最小 server 可以进一步拆成这些门禁：
+最小 server 可以进一步拆成这些验收条件：
 
 ```math
 C_{\mathrm{meta}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[m_i=1]
@@ -573,7 +573,7 @@ C_{\mathrm{safety}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{safety\ baseline
 C_{\mathrm{trace}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{trace\ fields\ are\ captured}]
 ```
 
-综合门禁可以写成：
+综合验收条件可以形式化为：
 
 ```math
 G_{\mathrm{mcp\_server}}=\mathbf{1}\left[

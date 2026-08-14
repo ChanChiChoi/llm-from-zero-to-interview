@@ -1,5 +1,9 @@
 # C. NLP 与 Tokenization
 
+## 阅读边界：词法索引与数据正文
+
+本章的条目用于快速确认 token、BPE、special token、chat template 和上下文长度的含义。真正排查 tokenizer 与 embedding 对齐、中文/代码切分、数据格式和训练成本时，应阅读[`第五册第三章：Tokenizer 与数据格式`](../../book-05-llm-training/chapters/03-tokenizer与数据格式.md)和[`第二册第三章：Tokenization 与预训练进阶`](../../book-02-advanced-100/chapters/03-tokenization数据与预训练进阶.md)。一个条目的定义不能替代对真实字符串、token id 和版本迁移的实验。
+
 条目：Token、Vocabulary、Token ID、Tokenization、Tokenizer、BPE、WordPiece、Unigram LM、SentencePiece、Byte-Level Tokenization、Character-Level Tokenization、Subword Tokenization、OOV、Special Token、BOS、EOS、PAD、UNK、Chat Template、Prompt、Completion、Instruction、System Prompt、Context Window、Detokenization、Tokenizer 训练、中文分词、代码 Tokenization、Tokenizer 与 Embedding 扩展。
 
 ## Token
@@ -148,7 +152,7 @@
 
 支持算法：BPE 和 Unigram LM。
 
-在大模型中：LLaMA 等模型使用 SentencePiece tokenizer。
+在大模型中：LLaMA 1/2 等模型使用过 SentencePiece；后续模型可能改用其他实现或词表格式，不能只根据模型家族名称推断 tokenizer。
 
 常见误区：SentencePiece 不是某一种单独切分算法，它既是工具，也支持不同训练算法。
 
@@ -344,6 +348,8 @@ byte-level 方案：几乎可以消除 OOV，因为任意字符最终可分解�
 
 核心单位：上下文窗口以 token 计，不以字符、汉字或英文单词计。
 
+接口边界：在多数生成服务中，这个预算覆盖输入 token 与允许生成的输出 token；有些产品还会把隐藏思考、工具结果或多模态 token 纳入同一预算。`max_new_tokens` 不是额外于 context window 之外的空间。
+
 影响因素：位置编码、训练长度、attention 实现、KV cache、显存和推理框架限制。
 
 与 tokenizer 的关系：同一段文本在不同 tokenizer 下 token 数可能不同，因此能放入上下文的实际字符量也不同。
@@ -372,7 +378,7 @@ byte-level 方案：几乎可以消除 OOV，因为任意字符最终可分解�
 
 核心输入：代表目标应用分布的文本语料，包括语言比例、代码比例、领域文本、特殊符号和格式化数据。
 
-关键超参数：vocab size、算法类型、normalization、special tokens、character coverage、byte fallback。
+关键超参数：vocab size、算法类型、normalization、special tokens，以及具体实现支持的 character coverage、byte fallback 等选项。
 
 为什么重要：tokenizer 一旦确定，通常会和模型训练绑定，后续随意更换成本很高。
 

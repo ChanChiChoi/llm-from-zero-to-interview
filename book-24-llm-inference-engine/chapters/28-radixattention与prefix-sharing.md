@@ -10,16 +10,16 @@
 
 > RadixAttention 用压缩前缀树维护 token 序列和 KV cache 的关系，在新请求到来时做最长前缀匹配，只计算未命中的 suffix；请求结束或生成新 token 后，把有复用价值的 KV cache 保留在树上，并在显存紧张时按策略淘汰。
 
-## 28.0 本讲资料边界与第二轮精修口径
+## 28.0 本讲范围与资料
 
-本讲按第二轮精修要求做过资料校准，主要参考四类公开资料：
+本章参考四类公开资料：
 
 1. SGLang 论文《SGLang: Efficient Execution of Structured Language Model Programs》对 RadixAttention for KV cache reuse、frontend / runtime 协同和复杂 LLM programs 的说明。
 2. SGLang 官方文档首页对 SGLang 作为 high-performance serving framework，以及 RadixAttention、prefix caching、multi-GPU parallelism 和 OpenAI API 兼容的定位说明。
 3. SGLang Attention Backend 文档对 attention backend、page size、KV cache dtype、prefill / decode forward 和 prefix cache 完整页命中约束的说明。
 4. 前面第 23 章 vLLM prefix caching 校准过的 full block / parent hash / extra hash / cache salt / LoRA / 多模态隔离口径，用来对比 RadixAttention 和普通 block-hash prefix cache 的边界。
 
-本章只讲 RadixAttention 的教学版机制：token prefix、radix tree、longest prefix match、split、insert、ref count、leaf eviction、page size 与 scheduler cost。它不绑定某个 SGLang 版本的真实类名、源码路径、GPU memory layout、真实 page table、CUDA kernel、HiCache、distributed KV cache、PD 分离、MoE 路由或生产级 eviction 策略。本章 demo 用纯 Python 模拟 radix tree 元数据和 KV token 计数，不读写真实 KV tensor。
+本章讨论 RadixAttention 的教学版机制：token prefix、radix tree、longest prefix match、split、insert、ref count、leaf eviction、page size 与 scheduler cost。它不绑定某个 SGLang 版本的真实类名、源码路径、GPU memory layout、真实 page table、CUDA kernel、HiCache、distributed KV cache、PD 分离、MoE 路由或生产级 eviction 策略。本章 demo 用纯 Python 模拟 radix tree 元数据和 KV token 计数，不读写真实 KV tensor。
 
 参考资料：
 
@@ -1092,7 +1092,7 @@ RadixAttention 的做法是：请求 tokenize 后，runtime 在 radix tree 中�
 它的主要收益是减少 prefill 计算、降低 TTFT，并提升复杂 LLM program 的吞吐。它特别适合 few-shot、self-consistency、Tree-of-Thought、多轮对话、agent 和共享长文档 RAG 等场景。但它匹配的是 token prefix 完全一致，不是语义相似；如果 prompt 模板不稳定、共享前缀短或瓶颈在 decode，收益就会有限。
 ```
 
-## 28.33 RadixAttention 公式、split / eviction 门禁和可运行 demo
+## 28.33 RadixAttention 公式、split / eviction 验收条件和可运行 demo
 
 把第 `i` 个请求的 token 序列记为：
 
@@ -1138,7 +1138,7 @@ $$
 E=\{v\mid \mathrm{ref}_v=0,\ v\ \mathrm{is\ leaf}\}
 $$
 
-教学版 RadixAttention 门禁可以写成：
+教学版 RadixAttention 准入条件可以形式化为：
 
 $$
 G_{\mathrm{radix}}=G_{\mathrm{match}}G_{\mathrm{split}}G_{\mathrm{page}}G_{\mathrm{ref}}G_{\mathrm{evict}}G_{\mathrm{schedule}}G_{\mathrm{metric}}

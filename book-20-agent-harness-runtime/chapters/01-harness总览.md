@@ -1,12 +1,12 @@
 # 第一章：Harness 总览
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲第二轮精修前，重点核对了 OpenAI Agents SDK 关于 agent loop、tool execution、guardrails、sandbox agents、sessions、human-in-the-loop 和 tracing 的公开文档，Claude Code 关于读写代码库、执行命令、MCP、CLAUDE.md、skills、hooks、权限和多环境运行的公开说明，OpenHands 关于 SDK、CLI、GUI、Cloud、RBAC / permissions 和 evaluation infrastructure 的公开 README，以及 SWE-agent / mini-SWE-agent 围绕 GitHub issue 自动修复、工具使用、SWE-bench 和 Agent-Computer Interface 的公开资料边界。
+本章参考 OpenAI Agents SDK 关于 agent loop、tool execution、guardrails、sandbox agents、sessions、human-in-the-loop 和 tracing 的公开文档，Claude Code 关于读写代码库、执行命令、MCP、CLAUDE.md、skills、hooks、权限和多环境运行的公开说明，OpenHands 关于 SDK、CLI、GUI、Cloud、RBAC / permissions 和 evaluation infrastructure 的公开 README，以及 SWE-agent / mini-SWE-agent 围绕 GitHub issue 自动修复、工具使用、SWE-bench 和 Agent-Computer Interface 的公开资料边界。
 
 因此，本章只讨论 agent harness / coding agent runtime 的工程抽象：模型输出如何变成受控动作，工具和文件系统如何被系统层校验，终端命令如何受权限和沙箱约束，trace / replay / evaluation harness 如何支撑复盘。它不是某个具体产品的内部架构复刻，不提供绕过权限、执行危险命令、读取敏感文件或自动化高风险操作的技巧。
 
-第二轮新增内容聚焦三点：
+本章聚焦三点：
 
 1. 把 harness 从“外层框架”落成可度量的运行闭环：action parse、permission gate、tool execution、observation use、state update、trace completeness、budget overrun 和 replay readiness。
 2. 用公式区分模型能力、runtime 控制、工具执行、安全边界和评估回放，避免把 coding agent 能力全部归因给模型。
@@ -497,6 +497,18 @@ Cursor、Aider、OpenHands、SWE-agent 等系统：
 
 后续章节会分别分析这些系统背后的共性设计。
 
+### 1.13.1 前沿模型越强，Harness 的职责越不能省略
+
+GPT-5.5、GPT-5.6 Sol/Terra/Luna、Claude、Gemini、DeepSeek-V4、Qwen3.5/3.6、Kimi K2/K3 等模型都在强化 reasoning、工具和长上下文能力，但模型发布页上的能力不等于一个可上线的 Agent 系统。Harness 仍然要负责：
+
+1. 根据任务价值和风险选择模型、effort 或 thinking level。
+2. 注入最小且可信的工具 schema，按需搜索工具而不是无条件加载全部工具。
+3. 保存 persistent workspace、session、checkpoint 和可回放 trace。
+4. 把工具结果标记为 data 或 instruction，隔离 prompt injection。
+5. 对长周期任务执行预算、权限、并发、取消、恢复和人工接管。
+
+Qwen-AgentWorld、Kimi Agent Swarm 这类资料还提醒我们：Agent 的能力边界由模型、环境和 harness 共同决定。模型支持更多子 Agent 或更长任务，不意味着系统已经解决状态隔离、错误恢复和责任归属。
+
 ## 1.14 常见误区
 
 误区一：Harness 就是把工具列表塞进 prompt。
@@ -519,7 +531,7 @@ Cursor、Aider、OpenHands、SWE-agent 等系统：
 
 纠正：权限确认要分级。低风险只读操作可以自动化，高风险写入、删除、网络和系统命令必须谨慎。
 
-## 1.14.1 关键公式与 Harness 运行指标速查
+### 1.14.1 关键公式与 Harness 运行指标速查
 
 把第 `i` 次 harness run 的第 `t` 个执行步抽象为：
 
@@ -603,15 +615,15 @@ $$
 
 其中，`B_i` 可以是 step 数、tool call 数、token、成本、wall-clock time 或 retry 次数。没有 budget gate 的 agent 容易循环、重复搜索和成本失控。
 
-一个保守的 harness 上线门禁可以写成：
+一个保守的 harness 上线准入条件可以形式化为：
 
 $$
 G_{\mathrm{harness}}=I(A_{\mathrm{parse}}\ge 0.95)I(S_{\mathrm{tool}}\ge 0.80)I(R_{\mathrm{unauth}}=0)I(C_{\mathrm{confirm}}\ge 0.80)I(U_{\mathrm{obs}}\ge 0.75)I(C_{\mathrm{state}}\ge 0.75)I(C_{\mathrm{trace}}\ge 0.90)I(R_{\mathrm{budget}}=0)
 $$
 
-这个门禁故意偏保守。真实产品可以按场景调阈值，但不能只用“最终 diff 看起来对”来证明 coding agent harness 可靠。
+这组条件故意偏保守。真实产品可以按场景调阈值，但不能只用“最终 diff 看起来对”来证明 coding agent harness 可靠。
 
-## 1.14.2 最小可运行 Harness Loop 审计 demo
+### 1.14.2 最小可运行 Harness Loop 审计 demo
 
 下面的 demo 不调用真实模型、不执行真实命令，只用 toy trace 模拟 harness 的核心闭环。它检查：模型动作是否解析合法、权限是否阻断危险动作、工具执行是否成功、observation 是否被后续状态使用、trace 是否完整、预算是否超限，以及最终是否可 replay。
 

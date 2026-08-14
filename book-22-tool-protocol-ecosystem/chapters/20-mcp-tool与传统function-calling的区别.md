@@ -1,10 +1,10 @@
 # 第二十章：MCP Tool 与传统 Function Calling 的区别
 
-## 20.0 本讲资料边界与第二轮精修口径
+## 20.0 本讲范围与资料
 
-本讲第二轮精修时，参考 MCP 官方 2025-06-18 specification 中 tools、resources、prompts、lifecycle、transport 的协议口径，OpenAI function calling / tools / structured outputs 的模型 API 口径，以及 OpenAI Agents SDK 中 MCP server 接入、tool filtering、approval、tracing 和 hosted / streamable HTTP / stdio server 的工程抽象。正文只讨论稳定分层：模型 API 层的 function calling、Host / runtime 层的工具执行、MCP Client / Server 层的能力发现与连接，不把某一家 provider 的字段名、某个 SDK 的装饰器、某个 IDE 配置或某个 MCP server 模板写成通用标准。
+本章参考 MCP 官方 2025-06-18 specification 中 tools、resources、prompts、lifecycle、transport 的协议口径，OpenAI function calling / tools / structured outputs 的模型 API 口径，以及 OpenAI Agents SDK 中 MCP server 接入、tool filtering、approval、tracing 和 hosted / streamable HTTP / stdio server 的工程抽象。正文只讨论稳定分层：模型 API 层的 function calling、Host / runtime 层的工具执行、MCP Client / Server 层的能力发现与连接，不把某一家 provider 的字段名、某个 SDK 的装饰器、某个 IDE 配置或某个 MCP server 模板写成通用标准。
 
-本章新增公式和 demo 只用于面试与工程审计：它们帮助判断一个回答是否真正区分了 Function Calling 与 MCP Tool 的层次、发现方式、能力范围、执行边界、adapter、生命周期、安全和选型 trade-off。真实项目中，MCP Tool 常常会被 Host 投影成模型 API 的 function / tool schema；这说明二者可以组合，不说明二者是同一个协议层。
+本章的公式和 demo 只用于面试与工程审计：它们帮助判断一个回答是否真正区分了 Function Calling 与 MCP Tool 的层次、发现方式、能力范围、执行边界、adapter、生命周期、安全和选型 trade-off。真实项目中，MCP Tool 常常会被 Host 投影成模型 API 的 function / tool schema；这说明二者可以组合，不说明二者是同一个协议层。
 
 ## 20.1 本章定位
 
@@ -432,7 +432,7 @@ d_i=(l_i,f_i,u_i,e_i,p_i,a_i,v_i,g_i,s_i,q_i,z_i)
 C_k=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[d_i\ \mathrm{passes}\ k]
 ```
 
-这一章重点看这些门禁：
+这一章重点看这些验收条件：
 
 ```math
 C_{\mathrm{layer}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{model\ API\ layer\ and\ MCP\ layer\ are\ separated}]
@@ -482,7 +482,7 @@ C_{\mathrm{error}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{error\ surface\ i
 C_{\mathrm{avail}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{latency\ and\ availability\ tradeoff\ is\ considered}]
 ```
 
-综合门禁：
+综合验收条件：
 
 ```math
 G_{\mathrm{mcp\_fc}}=\mathbf{1}\left[

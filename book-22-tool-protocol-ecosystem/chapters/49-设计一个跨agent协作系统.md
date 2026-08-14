@@ -10,9 +10,9 @@
 
 > 跨 Agent 协作系统的核心不是“让很多 Agent 聊天”，而是让不同能力边界的 Agent 在可控上下文、可追踪任务和可治理权限下完成协同工作。
 
-## 49.0 本讲资料边界与第二轮精修口径
+## 49.0 本讲范围与资料
 
-本讲按 `WRITING_PLAN.md` 做第二轮精修，资料口径对齐 A2A Protocol 1.0 规范中 Agent Card、Task、Message、Part、Artifact、TaskState、streaming / push notification、认证授权和企业治理相关公开边界，同时复用前文 Agent Card 服务发现、A2A 任务委派、A2A 消息边界、A2A/MCP 分工、跨 Agent 安全、多 Agent 失败治理、A2A 系统设计和企业 MCP 工具平台已经建立的审计口径。
+本章参考 A2A Protocol 1.0 规范中 Agent Card、Task、Message、Part、Artifact、TaskState、streaming / push notification、认证授权和企业治理相关公开边界，同时复用前文 Agent Card 服务发现、A2A 任务委派、A2A 消息边界、A2A/MCP 分工、跨 Agent 安全、多 Agent 失败治理、A2A 系统设计和企业 MCP 工具平台已经建立的审计口径。
 
 需要先划清三条边界。
 
@@ -20,7 +20,7 @@
 2. 协作系统可以有内部状态，例如 `created`、`planned`、`assigned`、`running`、`waiting_for_approval` 和 `timed_out`，但对外协议状态要能映射到 A2A 的 `submitted`、`working`、`input-required`、`auth-required`、`completed`、`failed`、`canceled`、`rejected` 等稳定语义。
 3. 本章只讨论合规的企业跨 Agent 协作系统设计，不提供绕过授权、转交工具凭据、隐藏审计、跨租户访问、诱导下游 Agent 执行危险动作、规避人工审批或伪造 trace / eval 的方法。
 
-第二轮重点不是重复前面每个 A2A 子主题，而是把系统设计题落到可验收门禁：任务图是否有效、Agent 发现和路由是否受治理、上下文是否最小化、委派权限是否衰减、MCP 工具权限是否不被转交、产物和证据是否可追溯、冲突和循环是否可终止、是否证明多 Agent 比单 Agent 或固定 workflow 更适合。
+本章重点不是重复前面每个 A2A 子主题，而是把系统设计题落到可验收验收条件：任务图是否有效、Agent 发现和路由是否受治理、上下文是否最小化、委派权限是否衰减、MCP 工具权限是否不被转交、产物和证据是否可追溯、冲突和循环是否可终止、是否证明多 Agent 比单 Agent 或固定 workflow 更适合。
 
 ## 49.1 面试题描述
 
@@ -790,7 +790,7 @@ Human Review Console 应展示：
 
 ## 49.24 跨 Agent 协作系统审计指标与最小 demo
 
-系统设计题里，跨 Agent 协作最容易被讲成“一个主 Agent 调多个子 Agent”。第二轮精修时建议把它变成可审计对象：每个 root task、subtask、Agent Card、Message、Artifact、Policy decision、MCP tool call、human approval 和 final answer 都要能串起来。
+系统设计题里，跨 Agent 协作最容易被讲成“一个主 Agent 调多个子 Agent”。本章可以把它变成可审计对象：每个 root task、subtask、Agent Card、Message、Artifact、Policy decision、MCP tool call、human approval 和 final answer 都要能串起来。
 
 把第 `i` 个跨 Agent 协作设计样本写成：
 
@@ -832,7 +832,7 @@ $$
 R_{\mathrm{unnecessary}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{unnecessary\_multi\_agent}_i=1]
 $$
 
-系统上线门禁可以写成：
+系统上线准入条件可以形式化为：
 
 $$
 G_{\mathrm{cross\_agent}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land R_{\mathrm{unsafe\_collab}}=0 \land R_{\mathrm{unnecessary}}=0 \land P_0=0\right]
@@ -840,7 +840,7 @@ $$
 
 这里 `P_0` 是硬阻断问题数量，例如任务图有环、上下文整包广播、下游权限放大、MCP 工具凭据被转交、trace 断链、循环委派无终止、人审缺失或 eval 只测最终答案。直觉是：多 Agent 不是越多越高级，必须同时证明“值得多 Agent”“不会越权”“证据可追踪”“失败可终止”。
 
-下面的 0 依赖 demo 用 toy case 演示如何把跨 Agent 协作系统设计变成审计门禁。
+下面的 0 依赖 demo 用 toy case 演示如何把跨 Agent 协作系统设计变成审计验收条件。
 
 ```python
 CHECKS = [

@@ -1,12 +1,12 @@
 # 第一章：Transformer 为什么能成为大模型基础架构
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本章第二轮精修以公开论文、技术报告和前序章节为资料边界：Transformer 原论文、GPT-3、Scaling Laws、Chinchilla、LLaMA、FlashAttention、Mamba / Mamba-2，以及本项目第一册、第二册、第六册、第十三册、第十四册和第二十册中关于 self-attention、decoder-only、next-token prediction、KV Cache、分布式训练、推理部署和 Agent context window 的内容。
+本章以公开论文、技术报告和前序章节为资料边界：Transformer 原论文、GPT-3、Scaling Laws、Chinchilla、LLaMA、FlashAttention、Mamba / Mamba-2，以及本项目第一册、第二册、第六册、第十三册、第十四册和第二十册中关于 self-attention、decoder-only、next-token prediction、KV Cache、分布式训练、推理部署和 Agent context window 的内容。
 
 本章只解释“为什么 Transformer 在当前大模型生态里成为基础架构”，不把某个闭源模型的内部结构、训练数据、隐藏 scaling recipe、routing 策略或系统优化细节写成确定事实；也不把 toy 指标写成真实模型 benchmark。后续章节会专门讨论 MQA/GQA/MLA、FFN、RMSNorm、RoPE、attention 复杂度、KV Cache、SSM/Mamba、RWKV、RetNet、Hyena 和混合架构。
 
-第二轮补强重点有三点：
+本章重点有三点：
 
 1. 把 self-attention、next-token prediction、attention 成本、KV Cache 和架构选择指标改成 GitHub Markdown 更稳定的数学表达。
 2. 用一组可解释指标回答“为什么不是 RNN/CNN/SSM 立刻成为通用 LLM 主干”。
@@ -345,7 +345,7 @@ CNN 的优势是局部性、并行性和硬件友好。
 
 但从通用 LLM 主干看，attention 的全局动态路由更符合语言、代码和上下文学习需求。
 
-## 1.12 Transformer 的核心优势总结
+## 1.12 Transformer 核心优势的证据与取舍
 
 可以把 Transformer 成为基础架构的原因压缩成七点。
 
@@ -471,7 +471,7 @@ D_i=1-\frac{L_i+K_i+Z_i}{3}
 
 这里 $L_i$ 是长上下文效率，$K_i$ 是缓存效率，$Z_i$ 是流式状态能力。Transformer 的 $S_i$ 通常很高，但 $D_i$ 也不低，这正是后续 GQA/MLA、FlashAttention、PagedAttention、sliding window、SSM 和混合架构研究的动机。
 
-上线或主干选择门禁可以写成：
+上线或主干选择准入条件可以形式化为：
 
 ```math
 G_{\mathrm{arch}}=\mathbb{1}[S_i\ge \tau_s\land P_i\ge\tau_p\land C_i\ge\tau_c\land S_i^{\mathrm{scale}}\ge\tau_{\mathrm{scale}}\land E_i\ge\tau_e\land M_i\ge\tau_m]
@@ -481,7 +481,7 @@ G_{\mathrm{arch}}=\mathbb{1}[S_i\ge \tau_s\land P_i\ge\tau_p\land C_i\ge\tau_c\l
 
 ### 1.15.1 最小可运行 Transformer 架构选择审计 demo
 
-下面的 demo 不训练模型，也不调用任何深度学习框架，只用 toy 评分表说明：RNN/LSTM 有流式状态优势但并行性和远距离路由弱；CNN/TCN 并行和硬件友好但内容相关路由弱；SSM/Mamba-like 长上下文效率强但大规模通用 LLM 证据和生态仍需积累；Transformer 综合门禁最高，但部署压力也最高；attention + SSM hybrid 有现实潜力，但仍要补 scaling 和生态证据。
+下面的 demo 不训练模型，也不调用任何深度学习框架，只用 toy 评分表说明：RNN/LSTM 有流式状态优势但并行性和远距离路由弱；CNN/TCN 并行和硬件友好但内容相关路由弱；SSM/Mamba-like 长上下文效率强但大规模通用 LLM 证据和生态仍需积累；Transformer 综合验收条件最高，但部署压力也最高；attention + SSM hybrid 有现实潜力，但仍要补 scaling 和生态证据。
 
 ```python
 architectures = [
@@ -626,7 +626,7 @@ hybrid_tradeoff={'route_score': 0.5, 'foundation_score': 0.764, 'deployment_pres
 weakest=('rnn_lstm', 0.327, False)
 ```
 
-面试表达时要强调：这个 demo 的数字是 toy 评分，不是论文 benchmark。它的价值在于把“Transformer 为什么赢”讲成多维度门禁：不是某个模块神奇，而是同时满足并行训练、内容路由、统一目标、scaling 证据、生态成熟和上下文学习；它的部署压力也解释了为什么后续章节要继续研究高效 attention、KV cache 和混合架构。
+面试表达时要强调：这个 demo 的数字是 toy 评分，不是论文 benchmark。它的价值在于把“Transformer 为什么赢”讲成多维度验收条件：不是某个模块神奇，而是同时满足并行训练、内容路由、统一目标、scaling 证据、生态成熟和上下文学习；它的部署压力也解释了为什么后续章节要继续研究高效 attention、KV cache 和混合架构。
 
 ## 1.16 面试题
 

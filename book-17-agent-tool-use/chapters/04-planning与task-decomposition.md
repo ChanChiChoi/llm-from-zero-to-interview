@@ -4,14 +4,14 @@ Agent 要完成复杂任务，不能只靠一步一步临时反应。它需要�
 
 本章系统讲 Agent 规划与任务分解：为什么要分解任务，如何定义子目标，如何表达依赖图，计划是一次性生成还是动态修正，如何处理并行、长期任务和失败恢复，如何评估规划质量，以及如何用 0 依赖 Python demo 审计规划质量。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本章第二轮精修时，按 `WRITING_PLAN.md` 联网核对了 Plan-and-Solve Prompting、LLM+P、Tree of Thoughts、Reflexion、ReAct 和 OpenAI Agents SDK 中 tools / guardrails / tracing 的公开资料边界。
+本章参考了 Plan-and-Solve Prompting、LLM+P、Tree of Thoughts、Reflexion、ReAct 和 OpenAI Agents SDK 中 tools / guardrails / tracing 的公开资料边界。
 
 本章采用以下口径：
 
 1. Planning 不是让模型生成漂亮清单，而是把目标转成可执行、可验证、可回退的子任务结构。
-2. LLM planner 灵活但不等于可靠规划器；涉及严格约束、资源调度或高风险动作时，应结合规则、搜索、验证器、传统 planner、权限门禁和人工确认。
+2. LLM planner 灵活但不等于可靠规划器；涉及严格约束、资源调度或高风险动作时，应结合规则、搜索、验证器、传统 planner、权限验收条件和人工确认。
 3. Task decomposition 必须保留原始目标、约束和验收标准，不能只把任务机械拆小。
 4. 动态重规划是可靠 Agent 的关键：计划要根据 observation、失败、预算、权限和用户变更修正。
 5. 本章只讨论防御性工程设计、规划质量审计和教学 demo，不提供绕过权限、逃避审批或规避审计的操作方法。

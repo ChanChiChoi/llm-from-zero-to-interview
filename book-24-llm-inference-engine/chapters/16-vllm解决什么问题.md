@@ -8,7 +8,7 @@ vLLM 的价值，就是系统性解决这些 serving engine 的核心问题，�
 
 > vLLM 解决的核心问题是：如何在高并发 LLM serving 中高效管理 KV Cache，并通过 iteration-level scheduling 提高吞吐、降低显存浪费。
 
-## 16.0 本讲资料边界与第二轮精修口径
+## 16.0 本讲范围与资料
 
 本讲只解释 vLLM 为什么出现、主要解决哪些 serving engine 问题。它覆盖 naive MiniEngine 的 KV 预留浪费、连续内存约束、finished 请求释放、固定 batch decode 浪费、continuous batching 动机、PagedAttention 直觉和最小可运行问题归因 demo，但不展开 vLLM 源码细节、真实 block manager API、调度器参数全集、多卡 worker / executor、prefix caching、speculative decoding、生产部署和 OpenAI-compatible server 配置。
 
@@ -149,7 +149,7 @@ continuous batching 只处理仍然 active 的请求，decode 行数近似为：
 W_{\mathrm{cont}}=\sum_{t=1}^{T}A_t
 ```
 
-其中 `A_t` 是第 `t` 轮仍在 decode 的请求数。vLLM 的动机门禁可以写成：
+其中 `A_t` 是第 `t` 轮仍在 decode 的请求数。vLLM 的动机准入条件可以形式化为：
 
 ```math
 G_{\mathrm{vllm}}=G_{\mathrm{kvblock}}G_{\mathrm{sched}}G_{\mathrm{reuse}}G_{\mathrm{cleanup}}G_{\mathrm{metrics}}

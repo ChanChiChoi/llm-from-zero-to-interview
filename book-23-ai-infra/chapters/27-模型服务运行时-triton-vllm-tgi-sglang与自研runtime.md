@@ -10,13 +10,13 @@
 
 如果 runtime 选型错误，平台层做得再漂亮，也很难获得好的延迟、吞吐和成本。
 
-## 27.0 本讲资料边界与第二轮精修口径
+## 27.0 本讲范围与资料
 
-本讲按 `WRITING_PLAN.md` 的第二轮要求做过资料校准。重点参考的是 NVIDIA Triton Inference Server 官方文档中 model repository、dynamic batching、statistics / metrics、backend 与多模型推理服务的边界；vLLM 官方文档中 PagedAttention、automatic prefix caching、production metrics、OpenAI-compatible server、量化和分布式 serving 的边界；Hugging Face Text Generation Inference 官方文档中 streaming、Prometheus 指标、PagedAttention 和当前 maintenance mode 的说明；SGLang 官方文档中 structured output、RadixAttention / cache、multi-GPU serving、PD disaggregation 和 serving API 的边界；以及 TensorRT-LLM 官方文档中 NVIDIA GPU 上的高性能 LLM inference、batching、KV cache 和 TensorRT / Triton 生态集成边界。
+本章参考 NVIDIA Triton Inference Server 官方文档中 model repository、dynamic batching、statistics / metrics、backend 与多模型推理服务的边界；vLLM 官方文档中 PagedAttention、automatic prefix caching、production metrics、OpenAI-compatible server、量化和分布式 serving 的边界；Hugging Face Text Generation Inference 官方文档中 streaming、Prometheus 指标、PagedAttention 和当前 maintenance mode 的说明；SGLang 官方文档中 structured output、RadixAttention / cache、multi-GPU serving、PD disaggregation 和 serving API 的边界；以及 TensorRT-LLM 官方文档中 NVIDIA GPU 上的高性能 LLM inference、batching、KV cache 和 TensorRT / Triton 生态集成边界。
 
 这些资料说明一件事：runtime 选型不是“哪个框架名气最大”，而是要把模型结构、权重格式、tokenizer / chat template、硬件拓扑、prefill / decode、continuous batching、KV cache、streaming、量化、分布式、指标、发布回滚、维护状态和成本放到同一张表里判断。
 
-本章只抽象截至 2026-06 仍稳定的工程口径，不把某个 benchmark 排名、某个版本的默认参数、某个云厂商镜像或某次社区测评写成通用结论。Triton 更偏通用多模型推理服务框架；vLLM、SGLang 更偏现代 LLM serving runtime；TGI 对 Hugging Face 生态仍有学习价值，但当前官方维护状态会影响新项目选型；TensorRT-LLM 更偏 NVIDIA 生态下的深度性能优化；自研 runtime 只有在规模、模型结构、硬件或调度模式足够特殊时才值得投入。
+本章聚焦截至 2026-06 仍稳定的工程口径，不把某个 benchmark 排名、某个版本的默认参数、某个云厂商镜像或某次社区测评写成通用结论。Triton 更偏通用多模型推理服务框架；vLLM、SGLang 更偏现代 LLM serving runtime；TGI 对 Hugging Face 生态仍有学习价值，但当前官方维护状态会影响新项目选型；TensorRT-LLM 更偏 NVIDIA 生态下的深度性能优化；自研 runtime 只有在规模、模型结构、硬件或调度模式足够特殊时才值得投入。
 
 ## 27.1 什么是模型服务运行时
 
@@ -479,7 +479,7 @@ Runtime 常见稳定性问题包括：
 r_i=(m_i,h_i,f_i,t_i,p_i,b_i,k_i,s_i,q_i,d_i,o_i,e_i,c_i,a_i,u_i,z_i)
 ```
 
-其中 `m_i` 表示模型与任务类型，`h_i` 表示硬件和拓扑，`f_i` 表示权重格式和 tokenizer，`t_i` 表示 runtime 与平台边界，`p_i` 表示 prefill / decode 和调度，`b_i` 表示 batching，`k_i` 表示 KV cache 管理，`s_i` 表示 streaming，`q_i` 表示量化，`d_i` 表示分布式推理，`o_i` 表示 observability，`e_i` 表示 benchmark 口径，`c_i` 表示成本容量，`a_i` 表示发布回滚，`u_i` 表示自研门槛，`z_i` 表示最终门禁。
+其中 `m_i` 表示模型与任务类型，`h_i` 表示硬件和拓扑，`f_i` 表示权重格式和 tokenizer，`t_i` 表示 runtime 与平台边界，`p_i` 表示 prefill / decode 和调度，`b_i` 表示 batching，`k_i` 表示 KV cache 管理，`s_i` 表示 streaming，`q_i` 表示量化，`d_i` 表示分布式推理，`o_i` 表示 observability，`e_i` 表示 benchmark 口径，`c_i` 表示成本容量，`a_i` 表示发布回滚，`u_i` 表示自研门槛，`z_i` 表示最终验收条件。
 
 对第 `j` 个审计维度，统一覆盖率可以写成：
 
@@ -515,13 +515,13 @@ M_{\mathrm{kv,req}}=2LSH_{\mathrm{kv}}D_hB_{\mathrm{elem}}
 N_{\mathrm{kv}}=\left\lfloor \frac{B_{\mathrm{kv}}}{M_{\mathrm{kv,req}}}\right\rfloor
 ```
 
-把功能、SLO、成本和风险放在一起，runtime 选型门禁可以写成：
+把功能、SLO、成本和风险放在一起，runtime 选型准入条件可以形式化为：
 
 ```math
 G_{\mathrm{runtime}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land T_{\mathrm{ttft,p95}}\le B_{\mathrm{ttft}} \land T_{\mathrm{tpot,p95}}\le B_{\mathrm{tpot}} \land S_{\mathrm{feature}}\ge \tau_{\mathrm{feature}} \land R_{\mathrm{compat}}=1 \land P_0=0\right]
 ```
 
-下面的 0 依赖 demo 不是为了复现真实 runtime benchmark，而是演示如何把 runtime 选型变成可审计指标。你可以把 Triton、vLLM、TGI、SGLang、TensorRT-LLM 或自研 runtime 都抽象成同样的 profile，再用统一门禁比较。
+下面的 0 依赖 demo 不是为了复现真实 runtime benchmark，而是演示如何把 runtime 选型变成可审计指标。你可以把 Triton、vLLM、TGI、SGLang、TensorRT-LLM 或自研 runtime 都抽象成同样的 profile，再用统一验收条件比较。
 
 ```python
 # Runtime Selection Audit: 0-dependency teaching demo.
@@ -802,7 +802,7 @@ print(f"runtime_selection_gate_pass={audit['runtime_selection_gate_pass']}")
 7. 一个生产 runtime 至少要暴露哪些指标？
 8. 什么时候才值得自研 runtime？
 9. 写一个 runtime profile，至少覆盖模型、硬件、权重格式、tokenizer、prefill / decode、batching、KV cache、streaming、量化、分布式、指标、发布和成本。
-10. 为什么 TGI 的维护状态、TensorRT-LLM 的硬件绑定和自研 runtime 的团队能力都应该进入选型门禁？
+10. 为什么 TGI 的维护状态、TensorRT-LLM 的硬件绑定和自研 runtime 的团队能力都应该进入选型验收条件？
 
 ## 27.20 本章小结
 

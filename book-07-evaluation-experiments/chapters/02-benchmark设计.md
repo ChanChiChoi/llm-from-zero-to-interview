@@ -1,719 +1,776 @@
 # 第二章：Benchmark 设计
 
-重点：任务定义、数据采样、难度分层、指标设计、评测协议、防泄漏、可复现性。
+一个 benchmark 看起来像题目集合，真正决定它是否有用的却是题目之外的部分：
+任务到底测什么，样本从哪里来，哪些答案算正确，失败如何分类，结果是否会被
+训练数据污染，协议能否复跑，以及分数如何转成下一步决策。
 
-面试重点：benchmark 不是简单题库，而是科学测量工具。
+如果这些部分没有定义清楚，模型比较就会变成“谁的分数更高”。分数差异可能
+来自题目难度、prompt、采样预算、judge、工具、数据泄漏或统计噪声，而不是
+模型能力本身。
 
-## 本章目标
+对小白来说，可以把 benchmark 想成一把尺子。尺子的刻度、零点和测量姿势不
+一致，即使测出很多数字，也不能比较物体长短。对专家来说，benchmark 是一个
+测量系统，至少包含 construct validity、coverage、reliability、scoring
+protocol、data lineage 和 decision utility。
 
-学完本章，你要能回答：
+本章围绕下面的链路展开：
 
-1. 什么是好的 benchmark？
-2. 如何从业务目标出发设计评估任务？
-3. 如何采样、分层和标注评估数据？
-4. 如何选择指标和评测协议？
-5. 如何防止数据泄漏和保证可复现？
+~~~text
+业务问题
+  -> 任务契约
+  -> 数据与切片
+  -> 标注与判定器
+  -> 指标与评测协议
+  -> 泄漏/复现/统计检查
+  -> 结果解释与版本维护
+~~~
 
-Benchmark 是大模型评估体系的基础。
+## 1. Benchmark 是测量工具，不是题库
 
-如果 benchmark 设计不好，后面的模型比较、prompt 迭代、RAG 优化、微调验证和上线门禁都会失真。
+### 1.1 题目只是测量系统的一部分
 
-## 本章资料边界
+一个完整 benchmark 至少包括：
 
-本章第二轮精修参考了 HELM / Holistic Evaluation of Language Models、BIG-bench、EleutherAI lm-evaluation-harness task guide、OpenAI Evals 自定义评估接口和前序评估总览章节的资料边界。
+1. 构念定义：想测知识、推理、事实性、工具执行还是安全；
+2. 任务契约：输入、输出、成功和不可接受失败；
+3. 数据来源：真实流量、专家构造、公开数据、合成数据或 bad case；
+4. 采样和分层：线上分布、能力平衡、难度、语言和风险；
+5. 标注和判定：gold、rubric、执行器、证据和 judge；
+6. 指标协议：分母、聚合、tie、无效输出和成本；
+7. 运行协议：模型、prompt、解码、工具、硬件和代码版本；
+8. 泄漏边界：训练、调参、检索库和公开题的相似性；
+9. 版本生命周期：创建、试跑、冻结、刷新和弃用；
+10. 解释方式：切片、错误样本、置信区间和行动建议。
 
-本章聚焦 benchmark 作为“测量工具”的设计方法：任务定义、样本 schema、数据来源、采样策略、难度分层、指标协议、防泄漏、版本管理、切片解释和上线决策。不展开某个公开 benchmark 的完整题库、评测平台所有 API、标注平台工程实现或 A/B 测试统计推导。
+### 1.2 三个质量问题
 
-## 本章核心公式
+一把有用的尺子需要同时满足三个问题：
 
-一个 benchmark 样本可以抽象成：
+- **测得准**：结果确实反映目标能力，而不是表面格式；
+- **测得稳**：重复运行和不同标注员不会产生无法解释的巨大波动；
+- **测得有用**：结果能支持模型选择、调参、风险控制或资源决策。
 
-```math
-e_i=(x_i,y_i,a_i,z_i,w_i)
-```
+这三个条件分别接近效度、信度和决策价值。一个公开题库可能测得很稳，却
+因为严重污染而失去区分度；一组真实 bad case 可能很有决策价值，却因为样本
+过少而不能估计总体平均效果。
 
-其中 `x_i` 是输入，`y_i` 是参考答案或期望行为，`a_i` 是标注或 rubric，`z_i` 是元数据，例如任务、难度、语言、风险类别、来源和时间，`w_i` 是样本权重。
+### 1.3 小白视角：先问四句话
 
-Benchmark 数据集：
+设计第一个 benchmark 时，先把下面四句话写出来：
 
-```math
-\mathcal{B}=\{e_i\}_{i=1}^{N}
-```
+~~~text
+用户要完成什么
+模型必须输出什么
+我凭什么知道它完成了
+失败时谁会受到什么影响
+~~~
 
-对某个切片 `g`，样本集合和覆盖率可以写成：
+例如“生成退款回复”不只是文字流畅。它可能还要引用当前政策、不能承诺超出
+权限的金额、要识别缺少订单号的情况，并在高风险投诉时转人工。
 
-```math
-\mathcal{B}_g=\{e_i:z_i\in g\},
-\qquad
-C_g=\frac{|\mathcal{B}_g|}{N}
-```
+### 1.4 专家视角：显式定义 construct
 
-如果设计目标要求每个关键切片至少有 `m_g` 个样本，则覆盖门禁为：
+如果要测“RAG 事实性”，构念不能只写成一个模糊的 faithfulness。至少拆成：
 
-```math
-G_{\mathrm{cover}}
+1. 检索是否找到了 gold evidence；
+2. 上下文是否保留了关键段落；
+3. 回答的原子声明是否由证据支持；
+4. 引用是否指向实际支持该声明的段落；
+5. 模型在没有证据时是否 abstain；
+6. 最终回答是否完成用户任务。
+
+不同构念需要不同标签和判定器。把它们合并后，低分时无法定位是 retriever、
+context builder、generator 还是引用解析器的问题。
+
+## 2. 任务契约：从业务问题推导样本
+
+### 2.1 六个必填字段
+
+一个可评估任务至少要定义：
+
+1. 输入格式和上下文边界；
+2. 输出格式和允许的等价答案；
+3. 成功判定器或参考证据；
+4. 不可接受的失败；
+5. 资源预算和最大尝试次数；
+6. 风险、用户影响和数据权限。
+
+例如生成只读 SQL 时，任务契约可以写成：
+
+~~~text
+输入：自然语言问题、只读数据库 schema
+输出：一条可解析 SQL
+成功：在只读沙箱中结果与 gold query 等价
+失败：访问未授权表、修改数据、超时或 SQL 无法解析
+资源：最多两次生成，不允许外部网络
+风险：数据泄露、错误查询和资源消耗
+~~~
+
+这个契约自然导出 parser、数据库沙箱、权限检查、超时统计和结果比较。
+只让一个 judge 判断“SQL 看起来合理”，不能验证它是否真的安全和等价。
+
+### 2.2 定义系统边界
+
+同一任务可以测不同对象：
+
+~~~text
+model only
+model + prompt
+model + retrieval
+model + tools
+model + agent scaffold
+end-to-end product
+~~~
+
+报告必须说明被测对象。否则检索器、搜索工具、代码执行器或 Agent planner
+带来的收益可能被错误归因到模型权重。
+
+### 2.3 单轮、多轮和状态任务
+
+单轮题容易复现，但不能表示需要澄清、记忆、取消和工具状态的任务。多轮任务
+要保存完整历史、每轮用户目标、允许的工具、外部状态和最终状态判定。
+
+一个工具 Agent 的样本不应只保存最后一句答案，还要保存：
+
+~~~text
+initial_state
+observations
+proposed_actions
+tool_requests
+tool_results
+side_effects
+final_state
+task_outcome
+~~~
+
+工具调用成功但最终状态错误，仍然是任务失败；语言总结正确但已经提交了未
+授权动作，也不能算成功。
+
+### 2.4 正确答案不总是一句话
+
+事实问答可以有多个同义表述，代码可以有多个实现，系统设计可以有多个合理
+取舍。参考答案应尽可能保存：
+
+- 必须出现的事实或约束；
+- 可以接受的等价表达；
+- 不能出现的危险行为；
+- 需要引用的证据；
+- 允许部分得分的条件。
+
+这样既避免把 wording 当能力，也避免把“看似合理”当成正确。
+
+## 3. 样本 schema 和数据血缘
+
+### 3.1 样本最小结构
+
+一个 benchmark 样本可以抽象为：
+
+~~~math
+e_i
 =
-\bigwedge_g I(|\mathcal{B}_g|\ge m_g)
-```
+(x_i,y_i,a_i,z_i,w_i)
+~~~
 
-当 benchmark 需要代表真实线上分布时，可以比较目标分布 `p_g` 和 benchmark 分布 `q_g`：
+其中 x_i 是输入，y_i 是参考答案或期望行为，a_i 是标注或 rubric，z_i 是
+任务、难度、语言、风险、来源和时间等元数据，w_i 是样本权重。
 
-```math
+整个数据集为：
+
+~~~math
+\mathcal{B}
+=
+\{e_i\}_{i=1}^{N}
+~~~
+
+实际 JSON schema 还应包含：
+
+~~~text
+id
+task
+input
+expected
+evidence
+rubric
+difficulty
+language
+risk
+source
+created_at
+dataset_revision
+split
+privacy_class
+train_similarity
+metric
+weight
+~~~
+
+字段的目的不是增加格式负担，而是让评估结果可以按语言、风险、时间和数据
+来源解释。
+
+### 3.2 evidence 和参考答案
+
+RAG、事实性和文档任务需要保存 gold evidence。证据字段要说明：
+
+1. 文档 ID 和 revision；
+2. 段落或页面范围；
+3. 哪些原子声明由它支持；
+4. 哪些相似段落不能作为证据；
+5. 证据失效或版本过期的时间。
+
+如果只保存一段自然语言参考答案，后续无法区分模型没检索到证据，还是检索
+到了但引用错误。
+
+### 3.3 数据来源的可信度
+
+| 来源 | 优点 | 主要风险 |
+| --- | --- | --- |
+| 脱敏线上请求 | 最接近用户分布 | 隐私、标注成本和选择偏差 |
+| 专家构造 | 可覆盖难题和边界 | 成本高，可能脱离真实表达 |
+| 公开数据集 | 便于社区比较 | 污染、过时和领域不匹配 |
+| 合成数据 | 规模和结构可控 | 模板化、生成器偏差和错误传播 |
+| 历史 bad case | 直接对应真实失败 | 只代表已发生问题，不能估计总体 |
+
+高价值 benchmark 通常组合多种来源，并在样本元数据中保留来源，不把它们
+无差别混合成一个无解释的总分。
+
+## 4. 采样：代表性和风险发现要分开
+
+### 4.1 按线上分布估计平均表现
+
+如果目标是估计线上平均质量，切片比例应接近真实流量。设目标分布为 p_g，
+benchmark 分布为 q_g，可以用 total variation distance 近似分布差异：
+
+~~~math
 D_{\mathrm{mix}}
 =
-\frac{1}{2}
-\sum_g |p_g-q_g|
-```
+\frac{1}{2}\sum_g|p_g-q_g|
+~~~
 
-`D_mix` 越小，说明 benchmark 的切片比例越接近目标分布。但如果目标是发现风险，过采样困难样本是合理的，此时不能机械追求 `D_mix=0`。
+D_mix 越小，说明切片比例越接近目标。但这里的 q_g 应来自当前用户分布，不是
+来自方便收集的样本。
 
-样本污染风险可以用最大相似度表示：
+### 4.2 按能力均衡比较模型
 
-```math
-c_i=\max_j \mathrm{sim}(x_i,t_j)
-```
+如果目标是比较能力，而不是估计线上均值，可以让每类任务、语言和难度有足够
+样本。此时 q_g 不必等于线上 p_g，但必须在报告中明确这是能力均衡设计。
 
-这里 `t_j` 是训练集、调参集、检索库或公开泄漏样本中的文本。如果 `c_i` 超过阈值，就要把样本标为污染风险或从 final holdout 中移除。
+否则低频但关键的安全或长上下文任务会被高频简单问答淹没。
 
-Benchmark 的区分度可以用多个候选模型分数的跨度粗略衡量：
+### 4.3 为发现风险而过采样
 
-```math
+风险评估可以过采样长上下文、越权工具、无答案问题、数字字段和安全边界。
+过采样后得到的分数不能直接解释为线上平均风险，但更适合发现失败。
+
+报告应同时给出：
+
+~~~text
+自然分布结果：估计用户平均表现
+风险过采样结果：发现困难和危险失败
+切片结果：定位哪些任务受影响
+~~~
+
+### 4.4 训练、调参和最终测试隔离
+
+至少分成：
+
+1. train 或 calibration；
+2. development；
+3. prompt/judge tuning；
+4. regression；
+5. final holdout。
+
+最终 holdout 被反复查看和调参后，就不再是干净的最终测试集。可以定期刷新
+动态题，旧题保留为历史可比集，但不再把旧题作为唯一新能力证明。
+
+## 5. 难度、覆盖和区分度
+
+### 5.1 难度分层
+
+常见层次包括：
+
+| 层次 | 样本特征 | 例子 |
+| --- | --- | --- |
+| Easy | 明确、短输入、一步完成 | 文档中直接出现的字段 |
+| Medium | 需要组合信息或格式约束 | 两段证据合并后生成 JSON |
+| Hard | 多跳、长上下文、歧义或工具链 | 判断版本政策并执行安全动作 |
+
+难度标签可以由专家标注、历史人类成功率、基线模型通过率或任务长度辅助
+定义，但不要把某个模型的分数直接当成题目真难度。
+
+### 5.2 覆盖率
+
+对切片 g，样本集合和覆盖率可以写成：
+
+~~~math
+\mathcal{B}_g
+=
+\{e_i:z_i\in g\},
+\qquad
+C_g
+=
+\frac{|\mathcal{B}_g|}{N}
+~~~
+
+覆盖率要结合目标。一个安全切片样本少，不代表风险低；一个中文切片样本少，
+也不代表产品没有中文用户。
+
+如果要求关键切片至少有 m_g 个样本，可以记录：
+
+~~~math
+N_g
+=
+|\mathcal{B}_g|,
+\qquad
+N_g\ge m_g
+~~~
+
+这只是数据规划数字，不应被压缩成无法解释的总开关。
+
+### 5.3 区分度
+
+设 K 个候选模型的分数为 S_k，简单的跨度为：
+
+~~~math
 D_{\mathrm{disc}}
 =
 \max_k S_k-\min_k S_k
-```
+~~~
 
-如果所有模型都接近满分或接近零分，`D_disc` 会很小，benchmark 很难支持模型选择。
+如果所有模型都接近满分或接近零分，D_disc 很小，题库难以支持选择。跨度
+大也不自动意味着题目好：可能有歧义、评分器偏差或某个模型特别不适配。
 
-多次重复评测的稳定性可以用分数标准差表示：
+还要分析题目级通过率。如果所有样本都由所有模型答对，应该提高难度或换
+构念；如果所有模型都答错，先检查题目、参考答案和工具环境。
 
-```math
+### 5.4 试跑和项目分析
+
+正式冻结前，先用高低能力不同的模型试跑：
+
+1. 检查题目是否可理解；
+2. 检查不同模型是否有合理分布；
+3. 找出所有模型都对或都错的题；
+4. 检查参考答案和判定器；
+5. 查看语言、长度和风险切片；
+6. 复核争议样本。
+
+这一步是 benchmark 的 pilot，不是为了挑一个最能拉开分数的题库，而是为了
+确认测量对象和评分器确实协同工作。
+
+## 6. 标注、rubric 和判定器
+
+### 6.1 rubric 的层级
+
+以 RAG 问答为例，可以把评分写成独立维度：
+
+~~~text
+事实正确：结论与证据一致
+任务完整：回答了用户的全部子问题
+引用准确：引用位置真正支持对应声明
+范围正确：没有把知识库外推成已知事实
+表达清楚：用户能够采取下一步行动
+安全合规：没有泄露或越权建议
+~~~
+
+不要把所有维度都揉成一个 0 到 5 的模糊印象分。独立维度更容易分析回归，
+也更容易发现“文风很好但引用错误”的样本。
+
+### 6.2 多个正确答案
+
+对开放任务，标注员要知道如何处理：
+
+- 等价算法；
+- 不同但都安全的系统方案；
+- 允许的拒答；
+- 部分正确；
+- 信息不足时的澄清；
+- 参考答案自身存在错误。
+
+参考答案不是永远正确的真理。领域专家发现 gold 错误时，应保存修订记录，
+而不是为了保持历史分数强行把模型判错。
+
+### 6.3 一致性和仲裁
+
+同一批样本最好由多个标注员交叉标注。简单一致率为：
+
+~~~math
+A_{\mathrm{ann}}
+=
+\frac{N_{\mathrm{agree}}}{N_{\mathrm{double}}}
+~~~
+
+类别不平衡时，一致率可能过于乐观，可进一步使用 Cohen kappa 或 Krippendorff
+alpha。低一致性通常说明 rubric 含糊、样本有歧义或任务本来不存在唯一答案。
+
+仲裁结果也要保存原因和 rubric 版本。否则后续团队只看到一个最终标签，不知道
+争议是如何解决的。
+
+### 6.4 程序判定器和 sandbox
+
+代码、SQL、工具和结构化输出优先使用程序判定器：
+
+- parser 检查语法；
+- sandbox 检查权限和副作用；
+- unit test 检查行为；
+- schema validator 检查结构；
+- evidence matcher 检查引用；
+- timeout 和 resource limit 检查成本。
+
+LLM judge 可以补充开放式解释，但不应替代可执行的安全和正确性检查。
+
+## 7. 指标设计：不同任务使用不同尺子
+
+### 7.1 封闭式任务
+
+对于 N 个样本，预测 y_hat_i 和参考 y_i，准确率为：
+
+~~~math
+\mathrm{Accuracy}
+=
+\frac{1}{N}
+\sum_{i=1}^{N}
+\mathbf{1}[\hat{y}_i=y_i]
+~~~
+
+同时报告 invalid output、拒答和解析失败数量。把解析失败当成错误、跳过或
+单独一列，会得到不同结论，必须预先规定。
+
+### 7.2 开放式任务
+
+开放式答案可以按 correctness、completeness、groundedness、style 和 safety
+分开打分。总分只能作为辅助视图，报告要保留每个维度和错误标签。
+
+### 7.3 代码任务
+
+代码候选 n 个，其中 c 个通过隐藏测试，pass@k 的常见估计为：
+
+~~~math
+\mathrm{pass@}k
+=
+1-
+\frac{\binom{n-c}{k}}{\binom{n}{k}}
+~~~
+
+pass@1 更接近一次请求，pass@k 反映允许多次采样的上限。要同时记录编译、
+测试、超时、沙箱违规、修改文件数和生成成本。
+
+### 7.4 RAG 任务
+
+检索返回集合 R，gold evidence 集合 G：
+
+~~~math
+\mathrm{Recall@k}
+=
+\frac{|R\cap G|}{|G|}
+~~~
+
+回答中的原子声明数为 N_claim，得到证据支持的数量为 N_supported：
+
+~~~math
+\mathrm{EvidenceSupport}
+=
+\frac{N_{\mathrm{supported}}}{N_{\mathrm{claim}}}
+~~~
+
+没有 gold evidence 的样本可以测最终任务，但不能拿来测严格的引用正确率。
+
+### 7.5 Agent 和工具
+
+Agent 任务要记录最终任务成功、工具选择、参数准确、步骤数、重复动作、权限
+违规、恢复率、外部副作用和成本。最终文本正确但工具已经错误扣款，仍是失败。
+
+### 7.6 安全任务
+
+unsafe 样本 N_unsafe 中产生危险输出 N_success，攻击成功率为：
+
+~~~math
+\mathrm{ASR}
+=
+\frac{N_{\mathrm{success}}}{N_{\mathrm{unsafe}}}
+~~~
+
+良性样本 N_benign 中错误拒绝 N_reject，误拒率为：
+
+~~~math
+\mathrm{OverRefusal}
+=
+\frac{N_{\mathrm{reject}}}{N_{\mathrm{benign}}}
+~~~
+
+两者都要按严重度、语言、多轮和工具权限切片。
+
+### 7.7 复合指标的风险
+
+若把 correctness、safety、latency 和 cost 合成：
+
+~~~math
+S
+=
+\sum_j\alpha_j s_j
+~~~
+
+必须保留 alpha、原始 s_j 和空集合处理。安全事故不能靠增加普通聊天权重
+来掩盖。很多生产系统更适合使用“独立信号加行动建议”，而不是一个复合分数。
+
+## 8. 评测协议：让比较公平
+
+### 8.1 Prompt 协议
+
+固定 system prompt、user prompt、few-shot 示例、输出格式、是否允许解释、
+是否允许工具和是否使用检索。prompt 变更要生成新的协议 revision。
+
+### 8.2 解码协议
+
+固定 temperature、top-p、max tokens、stop sequence、候选数、verifier、随机
+种子和重试规则。一次 greedy 与多候选搜索必须分开命名。
+
+### 8.3 运行协议
+
+固定模型 revision、tokenizer、engine、GPU、batch、上下文长度、缓存策略、
+网络和超时。延迟结果要说明 cold start、cache hit、prefill/decode 和流式
+统计口径。
+
+### 8.4 judge 协议
+
+固定 judge model、版本、prompt、参考材料、展示顺序随机化和 tie 处理。judge
+输出要保存理由、维度分数和不确定标记，不能只保存胜负。
+
+### 8.5 样本顺序和随机性
+
+随机化样本顺序，避免 worker 状态、cache 或标注员疲劳造成系统性偏差。随机
+生成任务要重复 R 次，并报告：
+
+~~~math
 \sigma_S
 =
 \sqrt{
 \frac{1}{R-1}
 \sum_{r=1}^{R}(S_r-\bar{S})^2
 }
-```
+~~~
 
-其中 `R` 是重复评测次数，`S_r` 是第 `r` 次分数，`\bar{S}` 是平均分。随机采样、LLM judge、人工标注都会引入波动。
+S_r 是第 r 次分数，S_bar 是多次分数均值。重复次数不是越多越好，应由结果
+方差和任务成本共同决定。
 
-人工标注的一致性可以先用简单一致率：
+## 9. 防泄漏和污染控制
 
-```math
-A_{\mathrm{ann}}
+### 9.1 泄漏路径
+
+常见路径包括：
+
+1. 评估集进入预训练；
+2. 评估集进入 SFT、偏好或 RL 数据；
+3. 评估集被 prompt 调参反复查看；
+4. 参考答案进入检索库或 system prompt；
+5. 标注说明被暴露给模型；
+6. 公开题目被转换脚本或示例代码重复发布。
+
+### 9.2 相似度风险
+
+对评估样本 x_i 和候选训练/调参文本 t_j，可以用最大相似度表示风险：
+
+~~~math
+c_i
 =
-\frac{N_{\mathrm{agree}}}{N_{\mathrm{double}}}
-```
+\max_j\mathrm{sim}(x_i,t_j)
+~~~
 
-严格场景可以进一步使用 Cohen kappa、Krippendorff alpha 等一致性指标。
+sim 可以是 n-gram、编辑距离或 embedding 相似度。阈值不能脱离数据类型设定；
+代码、数字、模板和短问题尤其容易产生误报。
 
-最终 benchmark 设计门禁可以写成：
+高相似度样本应标为风险、移出 final holdout、改写成新题，或单独报告敏感性。
+不能把所有相似度风险简单记成模型作弊。
 
-```math
-G_{\mathrm{bench}}
+### 9.3 时间切分与私有 holdout
+
+时间切分能降低模型见过未来题目的可能性，私有 holdout 能减少公开答案泄漏。
+对于持续变化的产品，动态题和新 bad case 需要进入滚动评估，但历史冻结集
+仍要保留用于版本回归。
+
+### 9.4 canary 样本
+
+可以加入少量独特且不影响业务的 canary 样本，观察模型是否异常记忆固定
+字符串。canary 只是泄漏报警信号，不是完整污染检测。
+
+## 10. 可复现性和版本生命周期
+
+### 10.1 评估 manifest
+
+每次运行最好形成一个 manifest：
+
+~~~text
+benchmark_version
+dataset_hash
+split
+sample_filter_revision
+model_revision
+tokenizer_revision
+template_revision
+prompt_revision
+decoding_revision
+tool_and_retriever_revision
+metric_revision
+judge_revision
+runner_commit
+environment
+hardware
+created_at
+~~~
+
+原始输出、解析结果、错误类型、延迟、token usage 和成本要通过 run id 关联。
+
+### 10.2 版本变化的三种处理
+
+如果只修正标注错误，可以保留旧 revision 并发布新 revision，说明分数变化
+来自 gold 修订；如果加入新样本，应增加 benchmark version 并保留旧集；如果
+改变评分器，旧分数和新分数不能直接当作同一量尺。
+
+### 10.3 生命周期
+
+benchmark 通常经历：
+
+1. 创建：定义构念、任务、数据和指标；
+2. pilot：用多个模型试跑，发现歧义和失效；
+3. 冻结：锁定版本和 final holdout；
+4. 使用：模型比较、调参和回归；
+5. 维护：加入新 bad case、刷新过时样本；
+6. 退役：当污染严重或构念失去区分度时标记弃用。
+
+核心集要保持可比，动态集要保持新鲜。两者不能相互替代。
+
+## 11. 结果分析：从总分走到行动
+
+### 11.1 micro 与 macro
+
+样本量加权的 micro 分数：
+
+~~~math
+Q_{\mathrm{micro}}
 =
-G_{\mathrm{schema}}
-\land G_{\mathrm{cover}}
-\land G_{\mathrm{leak}}
-\land G_{\mathrm{metric}}
-\land G_{\mathrm{protocol}}
-\land G_{\mathrm{repro}}
-```
+\frac{\sum_s n_s q_s}{\sum_s n_s}
+~~~
 
-也就是 schema 完整、关键切片覆盖、防泄漏、指标合理、评测协议固定、结果可复现。
+切片等权的 macro 分数：
 
-## 1. Benchmark 不只是题库
+~~~math
+Q_{\mathrm{macro}}
+=
+\frac{1}{S}\sum_s q_s
+~~~
 
-很多人把 benchmark 理解成一批题。
+micro 更接近自然流量，macro 更容易看到小切片变化。两者都要保留，尤其是
+安全和中文等不能被大切片淹没的任务。
 
-这是不够的。
+### 11.2 配对差和置信区间
 
-一个完整 benchmark 至少包括：
+旧版本 x_i、新版本 y_i 的配对差：
 
-1. 任务定义。
-2. 数据来源。
-3. 样本构造规则。
-4. 难度分层。
-5. 标注规范。
-6. 指标定义。
-7. 评测协议。
-8. 版本管理。
-9. 防泄漏机制。
-10. 结果解释方法。
+~~~math
+\Delta_i=y_i-x_i,
+\qquad
+\bar{\Delta}=\frac{1}{N}\sum_i\Delta_i
+~~~
 
-题目只是其中一部分。
+对 Delta_i 做 bootstrap，使用重采样分位数报告置信区间。若同一用户有多个
+会话，应以用户或会话为 cluster 采样，避免虚假的独立样本量。
 
-Benchmark 的本质是测量工具。
+### 11.3 回归表
 
-测量工具要满足三个要求：
+建议把每个切片的质量、延迟、安全和成本放在一张表：
 
-1. 测得准。
-2. 测得稳。
-3. 测得有决策价值。
+| 切片 | 质量差 | P95 差 | 安全差 | 成本差 | 当前解释 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| 普通问答 | + | 0 | 0 | - | 主要收益 |
+| 中文长问 | - | + | 0 | + | 检查上下文和 tokenizer |
+| RAG 引用 | 0 | + | - | 0 | 先检查证据和注入 |
+| 代码执行 | + | + | 0 | - | 检查候选数和 sandbox |
 
-面试表达：benchmark 不是简单题库，而是带有任务定义、采样规则、指标、协议和版本管理的科学测量工具。
+表中每个符号都要有数值和样本量支撑，不能把符号本身当结论。
 
-## 2. 好 benchmark 的标准
+## 12. 一个企业知识库 benchmark 的完整设计
 
-一个好的 benchmark 通常有七个特征。
+假设要评估企业知识库问答系统。目标是让用户得到正确、可引用、有权限边界
+的答案，并在无证据时明确说明不知道。
 
-### 2.1 代表性
+### 12.1 样本来源
 
-数据要代表目标场景。
+组合以下来源：
 
-如果要评估企业客服模型，benchmark 就不能只放通用百科问答。
+1. 脱敏线上问题；
+2. 客服工单；
+3. 领域专家构造问题；
+4. 文档版本冲突案例；
+5. 无答案和越权案例；
+6. 历史 bad case。
 
-它要覆盖真实客服问题、产品术语、边界政策、拒答场景和用户表达方式。
+每条样本保存文档 revision、用户角色、语言、长度、风险、证据段落和时间。
 
-### 2.2 区分度
+### 12.2 难度
 
-Benchmark 要能区分模型能力。
+| 难度 | 样本 | 主要判定 |
+| --- | --- | --- |
+| Easy | 单文档直接答案 | 事实和引用 |
+| Medium | 两段证据组合 | 多证据和完整性 |
+| Hard | 多跳、版本冲突、无答案或权限边界 | 证据、abstain 和安全 |
 
-如果题目太简单，所有模型都接近满分。
+### 12.3 指标
 
-如果题目太难，所有模型都接近零分。
+至少分别记录：
 
-两种情况都没有决策价值。
+- retrieval recall；
+- context precision；
+- evidence support；
+- citation accuracy；
+- abstention accuracy；
+- unauthorized retrieval；
+- 用户任务成功；
+- P95/P99 和单位成功成本。
 
-### 2.3 稳定性
+### 12.4 解释一个回归
 
-同一个模型在相同协议下多次评估，结果应该接近。
+如果总体正确率提升 3%，但版本政策的 citation support 下降 6%，不能用普通
+FAQ 的收益覆盖它。可能的原因包括 chunk 把旧条款和新条款混在一起、reranker
+偏向过时文档、模型不承认证据不足、引用解析改变，或长上下文中间位置召回
+退化。
 
-如果分数波动很大，就很难判断版本差异是真提升还是噪声。
+下一轮实验应固定模型，只替换检索器或只替换 prompt，做配对 replay，而不是
+同时升级所有组件。benchmark 的价值在于帮助隔离变量。
 
-### 2.4 可解释性
+## 13. 前沿模型发布信息的证据等级
 
-Benchmark 不只要给总分，还要解释模型哪里强、哪里弱。
+模型卡、技术报告、产品页和社区传闻经常同时出现。benchmark 设计要把来源
+等级写进记录，不能把它们混成一张确定事实表。
 
-例如按数学、代码、知识、长上下文、安全、RAG 等维度拆分。
+| 证据等级 | 可以支持的写法 | 不能支持的写法 |
+| --- | --- | --- |
+| 官方技术报告/论文 | 已公开的架构、训练方法和实验口径 | 推断未披露的线上实现或完整 recipe |
+| 官方 model card/开发者文档 | 参数、上下文、接口和限制 | 自动推断真实质量或硬件吞吐 |
+| 一方产品页 | 产品公开声称的能力档位 | 把宣传数字写成独立可复现 benchmark |
+| 厂商自报 benchmark | 给定条件下的对比信号 | 不注明硬件、prompt 和 harness 就跨模型排名 |
+| 传闻或待核验 | 观察项和待补证据 | 写成已发布模型、确定架构或事实 |
 
-### 2.5 可复现性
+例如，一个新模型的产品页可以进入 release radar，等待模型卡、技术报告、
+公开 model ID 或可复现实验；在这些证据出现之前，不应为它补写未披露的
+参数、训练方法、位置编码或上下文实现。
 
-评估过程要能复现。
+一次可复现的模型评测记录可以抽象为：
 
-需要记录模型、prompt、数据、指标、解码参数、judge、代码版本和运行环境。
+~~~math
+E
+=
+(M,V,P,H,B,C,S,R)
+~~~
 
-### 2.6 防泄漏
+M 是模型和 revision，V 是证据来源，P 是 prompt/template，H 是 harness 和
+工具，B 是 reasoning 与 token budget，C 是上下文与数据切片，S 是 sampling
+和 seed，R 是原始结果和误差区间。缺少这些字段的榜单数字只能作为线索。
 
-评估数据不能被训练或调参过程污染。
+## 14. 一个可运行的 Benchmark 设计诊断 demo
 
-尤其是公开 benchmark，很可能已经进入预训练数据。
+下面的 demo 不调用模型，只审计一个候选 benchmark 设计：它检查样本 schema、
+任务/难度/语言/风险覆盖、目标分布偏差、重复样本、污染风险、指标配置和
+可复现 manifest。每个信号独立输出，读者可以看到是哪里需要修改。
 
-### 2.7 可维护性
-
-Benchmark 要能持续更新。
-
-线上 bad case、新业务场景、安全攻击样本和新能力要求都要逐步沉淀进去。
-
-面试表达：好的 benchmark 要有代表性、区分度、稳定性、可解释性、可复现性、防泄漏和可维护性。
-
-## 3. 从任务定义开始
-
-设计 benchmark 的第一步是定义任务。
-
-不能一上来就收集题目。
-
-### 3.1 定义目标能力
-
-先问：你要测什么能力？
-
-常见能力包括：
-
-1. 知识问答。
-2. 数学推理。
-3. 代码生成。
-4. 代码理解。
-5. 指令遵循。
-6. 长上下文理解。
-7. RAG groundedness。
-8. 工具调用。
-9. 多轮对话。
-10. 安全拒答。
-11. 多模态理解。
-
-不同能力需要不同样本和指标。
-
-### 3.2 定义输入输出格式
-
-要明确：
-
-1. 输入是单轮还是多轮？
-2. 是否有 system prompt？
-3. 是否给参考文档？
-4. 是否允许工具调用？
-5. 输出是自由文本、选择题、JSON、代码还是工具调用？
-6. 是否要求引用来源？
-7. 是否允许拒答？
-
-输入输出格式不清楚，模型之间比较就不公平。
-
-### 3.3 定义成功标准
-
-要明确什么叫答对。
-
-例如 RAG 问答中，成功不只是答案看起来对，还要满足：
-
-1. 使用正确证据。
-2. 没有编造。
-3. 引用准确。
-4. 不能回答知识库之外的问题。
-5. 语言符合产品风格。
-
-面试表达：benchmark 设计先定义目标能力、输入输出格式和成功标准，再开始采样数据。
-
-## 4. 数据来源
-
-Benchmark 数据可以来自多种渠道。
-
-### 4.1 真实线上数据
-
-真实线上数据最接近用户需求。
-
-优点：代表性强。
-
-缺点：需要脱敏、清洗和标注。
-
-适合业务 benchmark。
-
-### 4.2 专家构造数据
-
-专家可以构造高质量、困难、边界清晰的样本。
-
-优点：质量高，覆盖目标明确。
-
-缺点：成本高，可能不代表真实分布。
-
-适合高风险场景、专业领域和安全评估。
-
-### 4.3 公开数据集
-
-公开数据集便宜、易比较。
-
-缺点是可能被污染，且不一定符合业务。
-
-适合作为通用能力参考，不适合作为唯一上线门禁。
-
-### 4.4 合成数据
-
-可以用规则或模型生成评估样本。
-
-优点：规模大，覆盖可控。
-
-缺点：分布可能不真实，容易有模板化痕迹。
-
-合成数据最好经过人工抽检或专家校验。
-
-### 4.5 Bad case 沉淀
-
-线上 bad case 是非常重要的数据来源。
-
-每次模型失败都应该归因并进入回归集。
-
-面试表达：benchmark 数据来源可以是线上数据、专家构造、公开数据、合成数据和 bad case，其中线上数据和 bad case 最有业务决策价值。
-
-## 5. 数据采样
-
-采样决定 benchmark 代表什么。
-
-### 5.1 按真实分布采样
-
-如果目标是估计真实线上平均表现，要按真实流量分布采样。
-
-例如客服中，售前咨询、售后问题、退款、投诉和闲聊的比例要接近真实线上比例。
-
-### 5.2 按能力均衡采样
-
-如果目标是比较模型能力，要按能力维度均衡采样。
-
-例如每类任务都放足够样本，避免高频简单任务淹没低频困难任务。
-
-### 5.3 过采样困难样本
-
-如果目标是发现问题，可以过采样困难样本。
-
-例如长上下文、歧义问题、多跳推理、边界政策、安全攻击。
-
-### 5.4 保留独立测试集
-
-调参集和最终测试集要分开。
-
-不能反复在同一个测试集上优化 prompt，否则会过拟合 benchmark。
-
-面试表达：采样策略取决于评估目标；估计线上表现要按真实分布采样，比较能力要按能力均衡采样，发现风险要过采样困难样本。
-
-## 6. 难度分层
-
-Benchmark 要有难度分层。
-
-否则无法知道模型提升来自简单题还是难题。
-
-常见分层维度包括：
-
-1. 简单事实 vs 多跳推理。
-2. 短上下文 vs 长上下文。
-3. 常见问题 vs 长尾问题。
-4. 单语言 vs 多语言。
-5. 明确指令 vs 模糊指令。
-6. 单轮任务 vs 多轮任务。
-7. 无工具任务 vs 工具调用任务。
-8. 低风险任务 vs 高风险任务。
-
-可以设计三档：
-
-```text
-Easy：常见、明确、短输入、单步完成。
-Medium：需要组合信息、一定推理或格式约束。
-Hard：长上下文、多跳推理、歧义、边界政策或工具链路。
-```
-
-难度分层的好处是：
-
-1. 判断模型能力边界。
-2. 发现升级收益集中在哪里。
-3. 避免总体分数掩盖困难样本退化。
-4. 支持上线时按场景灰度。
-
-面试表达：难度分层让 benchmark 从“一个总分”变成“能力剖面”，能解释模型在哪些场景变强或变弱。
-
-## 7. 标注规范
-
-Benchmark 如果需要人工标注，必须有清晰规范。
-
-标注规范至少包括：
-
-1. 任务定义。
-2. 正确答案标准。
-3. 可接受答案范围。
-4. 不可接受错误。
-5. 边界案例处理。
-6. 是否允许部分得分。
-7. 是否需要引用证据。
-8. 是否需要错误类型标签。
-
-### 7.1 Rubric 示例
-
-以 RAG 问答为例，可以定义：
-
-```text
-5 分：答案完全正确，依据来自给定文档，引用准确，无无关信息。
-4 分：答案基本正确，轻微遗漏，不影响用户决策。
-3 分：部分正确，但缺少关键条件或引用不完整。
-2 分：包含明显错误或混入无依据内容。
-1 分：主要错误。
-0 分：拒答错误、严重幻觉或安全违规。
-```
-
-### 7.2 标注一致性
-
-同一批样本最好由多个标注员交叉标注。
-
-要计算一致性。
-
-如果一致性很低，说明 rubric 不清楚或任务本身有歧义。
-
-面试表达：人工标注 benchmark 必须有 rubric、边界案例规则和一致性检查，否则评估分数不可信。
-
-## 8. 指标设计
-
-指标要和任务匹配。
-
-不能所有任务都用一个 accuracy。
-
-### 8.1 选择题和封闭式问答
-
-常用指标：
-
-1. accuracy。
-2. exact match。
-3. macro accuracy。
-4. calibration error。
-
-### 8.2 开放式问答
-
-常用指标：
-
-1. correctness。
-2. completeness。
-3. helpfulness。
-4. factuality。
-5. hallucination rate。
-6. human preference。
-
-### 8.3 代码生成
-
-常用指标：
-
-1. pass@1。
-2. pass@k。
-3. compile rate。
-4. unit test pass rate。
-5. hidden test pass rate。
-
-### 8.4 RAG
-
-常用指标：
-
-1. retrieval recall。
-2. context precision。
-3. answer faithfulness。
-4. citation accuracy。
-5. abstention accuracy。
-
-### 8.5 Agent
-
-常用指标：
-
-1. task success rate。
-2. tool call accuracy。
-3. unsafe action rate。
-4. step count。
-5. cost per success。
-
-### 8.6 安全评估
-
-常用指标：
-
-1. attack success rate。
-2. refusal rate。
-3. false refusal rate。
-4. policy violation rate。
-5. severity-weighted risk score。
-
-面试表达：指标必须贴合任务；代码看测试通过，RAG 看检索和事实一致，Agent 看任务成功和工具调用，安全看攻击成功率和误拒率。
-
-## 9. 评测协议
-
-评测协议决定模型如何被测试。
-
-没有统一协议，结果不可比。
-
-### 9.1 Prompt 协议
-
-要固定：
-
-1. system prompt。
-2. user prompt。
-3. few-shot 示例。
-4. 输出格式要求。
-5. 是否允许 chain-of-thought。
-6. 是否允许工具调用。
-
-### 9.2 解码协议
-
-要固定：
-
-1. temperature。
-2. top-p。
-3. max tokens。
-4. stop sequence。
-5. number of samples。
-6. random seed。
-
-### 9.3 运行协议
-
-要固定：
-
-1. 模型版本。
-2. tokenizer 版本。
-3. 推理框架版本。
-4. batch size。
-5. 上下文长度。
-6. 是否启用 cache。
-7. 超时策略。
-
-### 9.4 打分协议
-
-要固定：
-
-1. 指标实现。
-2. judge prompt。
-3. judge model。
-4. 人工标注 rubric。
-5. tie 处理规则。
-6. 无效输出处理规则。
-
-面试表达：评测协议要固定 prompt、解码参数、运行环境和打分方式，否则模型差异可能只是评测条件差异。
-
-## 10. 防泄漏设计
-
-数据泄漏会让 benchmark 失效。
-
-常见泄漏包括：
-
-1. 评估集进入训练数据。
-2. 评估集进入 SFT 或 RLHF 数据。
-3. 评估集被用于 prompt 调参。
-4. 公开 benchmark 被模型预训练见过。
-5. 答案被写进检索库。
-6. 标注说明泄漏给模型。
-
-### 10.1 防泄漏方法
-
-可以使用：
-
-1. 私有 holdout set。
-2. 时间切分。
-3. 去重和近似去重。
-4. n-gram / embedding 相似度检测。
-5. train / eval 数据血缘追踪。
-6. 访问权限控制。
-7. 不把最终测试集用于日常调参。
-
-### 10.2 Canary 样本
-
-可以加入少量 canary 样本检测泄漏。
-
-这些样本有独特文本或结构。
-
-如果模型异常记住 canary，说明可能发生泄漏。
-
-面试表达：防泄漏要做私有 holdout、去重、相似度检测、数据血缘和访问控制，不能反复用最终测试集调参。
-
-## 11. 可复现性
-
-Benchmark 结果必须可复现。
-
-每次评估要记录：
-
-1. benchmark 名称和版本。
-2. 样本 ID。
-3. 模型版本。
-4. tokenizer 版本。
-5. prompt 版本。
-6. decoding 参数。
-7. judge 版本。
-8. 代码 commit。
-9. 运行时间。
-10. 环境信息。
-11. 原始输出。
-12. 打分结果。
-
-最好把一次评估保存成 artifact。
-
-这样后续可以追查：
-
-1. 分数为什么变化。
-2. 哪些样本回归。
-3. 哪个组件导致差异。
-4. 是否可以复跑验证。
-
-面试表达：没有可复现性，benchmark 分数只是一次实验日志，不能作为模型上线依据。
-
-## 12. 结果解释
-
-Benchmark 结果不能只报一个总分。
-
-应该包括：
-
-1. 总体分数。
-2. 置信区间。
-3. 按任务切片。
-4. 按难度切片。
-5. 按长度切片。
-6. 按语言切片。
-7. 按安全类别切片。
-8. 与旧版本的差异。
-9. 显著提升样本。
-10. 明显回退样本。
-11. 典型 bad case。
-
-例如：
-
-```text
-总体提升：+1.8%
-代码任务：+5.2%
-数学任务：+3.1%
-中文长上下文：-4.7%
-安全误拒：+2.0%
-结论：不能直接全量上线，建议先面向代码场景灰度，同时修复中文长上下文和误拒问题。
-```
-
-面试表达：benchmark 分数要转化成决策建议，不能只报告 leaderboard 式总分。
-
-## 13. Benchmark 生命周期
-
-Benchmark 不是一次性工程。
-
-它有生命周期。
-
-### 13.1 创建
-
-定义任务、采样数据、标注、设计指标和协议。
-
-### 13.2 校验
-
-用多个模型试跑，看是否有区分度、题目是否有歧义、标注是否一致。
-
-### 13.3 使用
-
-用于模型比较、prompt 迭代、RAG 调优、上线门禁和回归测试。
-
-### 13.4 维护
-
-加入新 bad case、删除过时样本、更新业务场景、补充新安全攻击。
-
-### 13.5 冻结
-
-关键测试集要冻结版本，避免频繁变化导致历史结果不可比。
-
-面试表达：benchmark 要持续维护，但核心测试集要版本化和冻结，兼顾演进和可比性。
-
-## 14. 业务 Benchmark 示例
-
-假设要为企业知识库问答系统设计 benchmark。
-
-可以这样设计。
-
-### 14.1 任务定义
-
-输入：用户问题和知识库检索结果。
-
-输出：带引用的答案，必要时拒答。
-
-成功标准：答案正确、基于证据、引用准确、无幻觉。
-
-### 14.2 数据采样
-
-样本来源：
-
-1. 线上用户问题。
-2. 客服工单。
-3. 专家构造边界问题。
-4. 历史 bad case。
-
-### 14.3 难度分层
-
-1. Easy：单文档直接答案。
-2. Medium：需要组合两段证据。
-3. Hard：多跳推理、政策边界、无答案拒答。
-
-### 14.4 指标
-
-1. answer correctness。
-2. citation accuracy。
-3. faithfulness。
-4. abstention accuracy。
-5. hallucination rate。
-6. human preference。
-
-### 14.5 上线门禁
-
-```text
-总体正确率不低于旧版本。
-Hard 样本不能下降超过 1%。
-引用准确率 >= 95%。
-无答案问题误答率 <= 2%。
-P0 bad case 通过率 = 100%。
-```
-
-面试中给出这种具体例子，会比抽象讲 benchmark 更有说服力。
-
-## 15. 最小 Benchmark 设计审计 demo
-
-下面这个 demo 不调用模型，只审计一个候选 benchmark 设计是否合格：它检查样本 schema、任务/难度/语言/风险覆盖、目标分布偏差、重复样本、污染风险、指标配置和可复现 manifest。
-
-```python
+~~~python
 from pprint import pprint
 
 
@@ -908,18 +965,29 @@ manifest_required = {
 }
 manifest_missing = sorted(manifest_required - set(manifest))
 
-gates = {
-    "schema": not schema_errors,
-    "task_coverage": required_tasks <= set(task_counts),
-    "difficulty_coverage": required_difficulties <= set(difficulty_counts),
-    "risk_coverage": risk_counts.get("high", 0) >= 2,
-    "mix": mix_distance <= 0.25,
-    "duplicates": not duplicates,
-    "leakage": not leak_flags,
-    "metrics": not metric_issues,
-    "repro": not manifest_missing,
+signals = {
+    "schema_ok": not schema_errors,
+    "task_coverage_ok": required_tasks <= set(task_counts),
+    "difficulty_coverage_ok": required_difficulties <= set(difficulty_counts),
+    "risk_coverage_ok": risk_counts.get("high", 0) >= 2,
+    "distribution_distance_ok": mix_distance <= 0.25,
+    "duplicates_clear": not duplicates,
+    "leakage_clear": not leak_flags,
+    "metrics_configured": not metric_issues,
+    "repro_manifest_complete": not manifest_missing,
 }
 
+actions = []
+if leak_flags:
+    actions.append("remove_leak_flags_from_final_holdout")
+if duplicates:
+    actions.append("deduplicate_inputs")
+if not signals["task_coverage_ok"]:
+    actions.append("add_missing_task_slices")
+if not signals["metrics_configured"]:
+    actions.append("review_metric_task_mapping")
+
+recommendation = "revise_before_freeze" if actions else "ready_for_pilot"
 summary = {
     "task_counts": task_counts,
     "difficulty_counts": difficulty_counts,
@@ -932,16 +1000,16 @@ summary = {
     "leak_flags": leak_flags,
     "metric_issues": metric_issues,
     "manifest_missing": manifest_missing,
-    "gates": gates,
-    "gate_pass": all(gates.values()),
+    "signals": signals,
+    "actions": actions,
+    "recommendation": recommendation,
 }
-
 pprint(summary, sort_dicts=False)
-```
+~~~
 
-一组可复现输出如下：
+实际输出为：
 
-```text
+~~~text
 {'task_counts': {'qa': 2, 'rag': 1, 'code': 1, 'math': 1, 'safety': 1, 'agent': 1},
  'difficulty_counts': {'easy': 2, 'medium': 3, 'hard': 2},
  'language_counts': {'zh': 5, 'en': 2},
@@ -953,85 +1021,67 @@ pprint(summary, sort_dicts=False)
  'leak_flags': [('leak_001', 0.91)],
  'metric_issues': [],
  'manifest_missing': [],
- 'gates': {'schema': True,
-           'task_coverage': True,
-           'difficulty_coverage': True,
-           'risk_coverage': True,
-           'mix': True,
-           'duplicates': True,
-           'leakage': False,
-           'metrics': True,
-           'repro': True},
- 'gate_pass': False}
-```
+ 'signals': {'schema_ok': True,
+             'task_coverage_ok': True,
+             'difficulty_coverage_ok': True,
+             'risk_coverage_ok': True,
+             'distribution_distance_ok': True,
+             'duplicates_clear': True,
+             'leakage_clear': False,
+             'metrics_configured': True,
+             'repro_manifest_complete': True},
+ 'actions': ['remove_leak_flags_from_final_holdout'],
+ 'recommendation': 'revise_before_freeze'}
+~~~
 
-这个例子故意留下一个污染风险样本：其他设计项都通过，但 `leak_001` 和训练/公开泄漏文本相似度过高，所以 final holdout 不能直接放行。面试中这类结论比“我收集了很多题”更专业。
+这个例子故意留下一个污染风险样本：其他设计项都正常，但 leak_001 与训练/
+公开泄漏文本的相似度过高，所以不能把它放进 final holdout。示例输出保留了
+具体信号和后续动作，读者可以据此定位需要修改的数据，而不是只看到一个无法
+解释的总分。
 
-## 16. 面试回答模板
+## 15. 资料、证据边界与延伸阅读
 
-如果面试官问：
+本章的公式用于说明 benchmark 设计口径，不会自动解决样本质量、标注偏差或
+业务风险。论文说明任务和实验条件，官方 runner 说明实现入口，生产数据和
+bad case 说明目标系统发生了什么。三类证据要分开记录。
 
-```text
-你会如何设计一个大模型 benchmark？
-```
+1. [HELM](https://crfm.stanford.edu/helm/latest/)：整体评估框架和场景结果。
+2. [HELM paper](https://arxiv.org/abs/2211.09110)：多维评估和指标背景。
+3. [OpenAI Evals](https://github.com/openai/evals)：自定义 eval 和运行框架入口。
+4. [Hugging Face Evaluate](https://huggingface.co/docs/evaluate/index)：指标和评估脚本入口。
+5. [lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness)：多模型 benchmark runner。
+6. [BIG-bench](https://github.com/google/BIG-bench)：多任务能力探索。
+7. [MMLU](https://arxiv.org/abs/2009.03300)：多学科知识评估。
+8. [IFEval](https://arxiv.org/abs/2311.07911)：可验证指令遵循。
+9. [HumanEval](https://arxiv.org/abs/2107.03374)：代码执行评估。
+10. [SWE-bench](https://arxiv.org/abs/2310.06770)：真实仓库 issue 修复。
+11. [WebArena](https://arxiv.org/abs/2307.13854)：浏览器 Agent 环境。
+12. [RULER](https://arxiv.org/abs/2404.06654)：长上下文合成任务。
+13. [TruthfulQA](https://arxiv.org/abs/2110.08561)：诚实回答和误解测试。
+14. [Judging LLM-as-a-Judge](https://arxiv.org/abs/2306.05685)：judge 偏差和人类偏好。
 
-可以这样答：
+使用这些资料时，先记录原始任务、评分脚本、版本、prompt、环境和访问日期，
+再解释分数。缺少可复现协议的厂商自报数字只能作为比较线索，不能直接当成
+跨模型排名或线上质量承诺。
 
-```text
-我会先明确 benchmark 的决策目标，是评估通用能力、业务上线，还是回归测试。然后定义任务和成功标准，包括输入输出格式、是否需要引用、是否允许工具调用、什么算正确。数据上，我会结合真实线上样本、专家构造样本、公开数据、合成数据和历史 bad case，并根据目标选择采样策略：如果估计线上表现，就按真实分布采样；如果比较能力，就按能力均衡采样；如果发现风险，就过采样困难和边界样本。
+## 16. 本章小结
 
-接着做难度分层和标注规范，设计清晰 rubric，并检查标注一致性。指标上按任务选择，比如代码用 pass@k，RAG 用 retrieval recall、faithfulness、citation accuracy，Agent 用 task success 和 tool call accuracy，安全用 attack success rate 和 false refusal rate。评测协议要固定 prompt、解码参数、运行环境和 judge。最后要做防泄漏和可复现，使用私有 holdout、去重、数据血缘、版本管理，并保存原始输出、分数和 trace。结果解释时不只看总分，还要看任务、难度、语言、长度和安全切片，以及显著回退样本，最终转化成上线或继续迭代的决策。
-```
+Benchmark 设计的目标不是收集最多题目，而是建立一把有效、稳定、可解释、
+可维护的尺子。
 
-## 17. 常见误区
+1. 先定义构念、任务契约和成功判定，再收集数据。
+2. 样本要记录输入、参考行为、证据、rubric、切片、来源、风险和版本。
+3. 真实分布、能力均衡和风险过采样是三种不同目标，不能混为一个分数。
+4. 难度、覆盖、区分度和 pilot 试跑决定题库是否能支持模型比较。
+5. 多个正确答案、人工分歧和程序判定器都要有明确边界。
+6. 指标要和任务匹配，必须说明分母、tie、候选预算和无效输出处理。
+7. prompt、解码、工具、judge、硬件和代码版本共同组成评测协议。
+8. 防泄漏需要私有 holdout、时间切分、相似度检测、数据血缘和访问控制。
+9. 结果要保留 micro/macro、切片、配对差、置信区间、失败样本和成本。
+10. benchmark 需要生命周期管理，稳定核心集和动态风险集各司其职。
+11. 前沿模型或新 benchmark 的名字要按证据等级记录，产品页和传闻不能替代
+    技术报告、模型卡、评分脚本和可复现实验。
 
-### 17.1 用公开 benchmark 代替业务 benchmark
-
-公开 benchmark 可以参考，但不能代表业务真实用户。
-
-### 17.2 题目越多越好
-
-数量重要，但质量、代表性和标注一致性更重要。
-
-### 17.3 只看总分
-
-总分可能掩盖关键场景退化。
-
-### 17.4 反复调最终测试集
-
-这会导致 benchmark 过拟合。
-
-### 17.5 不记录评测协议
-
-没有固定 prompt、解码参数和 judge，结果不可比。
-
-### 17.6 忽视数据泄漏
-
-泄漏会让分数虚高，尤其是公开 benchmark。
-
-## 18. 练习题
-
-1. 为代码生成模型设计一个 benchmark，说明任务类型、数据来源、指标和评测协议。
-2. 为客服 RAG 系统设计一个包含 Easy、Medium、Hard 的难度分层方案。
-3. 如果一个 benchmark 所有模型都超过 95 分，你会如何改造它？
-4. 如何防止评估集被 prompt 调参过程污染？
-5. 如何解释“总体分数提升，但安全误拒率也提升”的实验结果？
-
-## 19. 本章小结
-
-本章讲了 benchmark 设计方法。
-
-核心结论：
-
-1. Benchmark 不是简单题库，而是科学测量工具。
-2. 好 benchmark 要有代表性、区分度、稳定性、可解释性、可复现性、防泄漏和可维护性。
-3. 设计 benchmark 要先定义任务、输入输出和成功标准。
-4. 数据来源包括线上数据、专家构造、公开数据、合成数据和 bad case。
-5. 采样策略要服务评估目标，不能盲目随机。
-6. 难度分层能展示模型能力边界。
-7. 人工标注需要 rubric、边界规则和一致性检查。
-8. 指标要按任务选择，不能一套 accuracy 用到底。
-9. 评测协议要固定 prompt、解码参数、运行环境和打分方式。
-10. 防泄漏要靠私有 holdout、去重、相似度检测、数据血缘和访问控制。
-11. 可复现性要求记录模型、数据、prompt、judge、参数、代码版本和原始输出。
-12. Benchmark 结果要做切片分析，并转化成上线或迭代决策。
+当团队能够说明“这道题测什么、为什么这样采样、答案如何判定、结果可能被什么
+污染、版本变化如何追溯、分数如何指导下一步”时，benchmark 才真正成为科学
+测量工具，而不是排行榜的装饰。

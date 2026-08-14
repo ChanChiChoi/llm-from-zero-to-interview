@@ -8,9 +8,9 @@
 
 > 推理请求不是一次函数调用，而是一个带状态、带资源、带输出通道、可被调度和取消的生命周期对象。
 
-## 3.0 本讲资料边界与第二轮精修口径
+## 3.0 本讲范围与资料
 
-本章讲的是通用 LLM serving request lifecycle，不是某个框架的源码导读。第二轮精修时，本章按下面口径处理：
+本章讲的是通用 LLM serving request lifecycle，不是某个框架的源码导读。本章按下面口径处理：
 
 1. API server、engine core、scheduler、KV cache manager、worker、metrics 和 streaming 的模块边界参考 vLLM、TGI、Triton 等公开 serving 抽象，但不把某个版本的内部类名或字段名写成标准答案。
 2. request object、waiting queue、running set、finish reason、abort、timeout 和 cleanup 只抽象稳定工程问题：状态如何流转、资源如何绑定、异常如何收敛。
@@ -438,7 +438,7 @@ T_{\mathrm{tpot},i}=\frac{t_{\mathrm{finish},i}-t_{\mathrm{first},i}}{\max(N_{\m
 K_{\mathrm{active}}(t)=\sum_{i\in A(t)}(N_{\mathrm{prompt},i}+N_{\mathrm{generated},i})
 ```
 
-生命周期门禁可以写成：
+生命周期准入条件可以形式化为：
 
 ```math
 G_{\mathrm{life}}=G_{\mathrm{state}}G_{\mathrm{metrics}}G_{\mathrm{stream}}G_{\mathrm{cleanup}}G_{\mathrm{trace}}

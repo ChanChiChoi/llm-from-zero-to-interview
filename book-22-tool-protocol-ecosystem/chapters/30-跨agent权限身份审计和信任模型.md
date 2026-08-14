@@ -19,9 +19,9 @@
 
 > 多 Agent 安全不是“让模型守规矩”，而是用身份、权限、策略、审计和信任边界把每一次委派和上下文流动约束住。
 
-## 30.0 本讲资料边界与第二轮精修口径
+## 30.0 本讲范围与资料
 
-本讲按第二轮精修要求，先核对 A2A 官方 Protocol Specification、A2A enterprise / multi-tenancy / security 主题说明，以及 MCP 官方 Authorization、Security Best Practices 和 Specification，再回到本项目已有章节做通用工程抽象。
+本章先核对 A2A 官方 Protocol Specification、A2A enterprise / multi-tenancy / security 主题说明，以及 MCP 官方 Authorization、Security Best Practices 和 Specification，再回到本项目已有章节做通用工程抽象。
 
 资料边界要说清楚：
 
@@ -525,7 +525,7 @@ C_k=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}\{g_k(s_i)=1\}
 11. 信任与证据验证率 $C_{\mathrm{trust}}$：低信任 Agent 输出是否需要证据、人审或 verifier，可信 Agent 输出是否仍保留证据和限制。
 12. 租户隔离率 $C_{\mathrm{tenant}}$：资源、Artifact、trace、Agent 可见性和缓存是否绑定同一租户边界。
 
-上线门禁可以写成：
+上线准入条件可以形式化为：
 
 ```math
 G_{\mathrm{cross\_agent}}=
@@ -551,7 +551,7 @@ C_{\mathrm{tenant}}\ge \tau_{\mathrm{tenant}}
 S_{\mathrm{cross\_agent}}=\frac{\sum_k \alpha_k C_k}{\sum_k \alpha_k}
 ```
 
-但在安全场景里，分数只能辅助排序，不能替代硬门禁。比如租户隔离或高风险确认不过线时，即使平均分很高，也应该阻断上线或限制场景。
+但在安全场景里，分数只能辅助排序，不能替代硬性条件。比如租户隔离或高风险确认不过线时，即使平均分很高，也应该阻断上线或限制场景。
 
 下面是一个 0 依赖 demo。它用 12 个 toy trace 模拟合同审查、数据分析和多 Agent 委派中的常见风险。
 

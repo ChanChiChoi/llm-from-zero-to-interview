@@ -1,12 +1,12 @@
 # 第二章：Agent Runtime 架构
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲第二轮精修前，重点核对了 OpenAI Agents SDK 关于 run lifecycle、sessions、tracing、guardrails、tool execution 和 handoff 的公开文档，OpenAI Agents SDK tracing 对 LLM generation、tool call、handoff、guardrail 和 custom event 的记录口径，Claude Code hooks / permissions / skills / MCP 等公开说明中对生命周期事件、权限请求、工具前后置处理和会话扩展点的描述，OpenHands runtime / sandbox / evaluation 公开资料，以及 SWE-agent / mini-SWE-agent 围绕 agent-computer interface、工具交互、仓库导航、测试执行和 SWE-bench 评估的公开资料。
+本章参考 OpenAI Agents SDK 关于 run lifecycle、sessions、tracing、guardrails、tool execution 和 handoff 的公开文档，OpenAI Agents SDK tracing 对 LLM generation、tool call、handoff、guardrail 和 custom event 的记录口径，Claude Code hooks / permissions / skills / MCP 等公开说明中对生命周期事件、权限请求、工具前后置处理和会话扩展点的描述，OpenHands runtime / sandbox / evaluation 公开资料，以及 SWE-agent / mini-SWE-agent 围绕 agent-computer interface、工具交互、仓库导航、测试执行和 SWE-bench 评估的公开资料。
 
 因此，本章只讨论 agent runtime 的工程内核：session 和 task 如何隔离，context 如何构造，模型调用如何适配，动作如何解析和修复，工具如何调度，错误如何分类恢复，状态如何 checkpoint，trace 如何支持 replay。它不是某个具体产品的内部实现，不提供绕过权限、规避沙箱、执行危险命令或读取敏感文件的方法。
 
-第二轮新增内容聚焦三点：
+本章聚焦三点：
 
 1. 把 runtime 从“一个 while loop”拆成可审计的 step：session isolation、phase transition、context budget、adapter retry、action parse repair、execution result、error handling、checkpoint、trace 和 cancel / timeout。
 2. 用公式说明 runtime 可靠性不是最终答案分数，而是状态机、错误恢复和 replay 证据共同构成。
@@ -726,6 +726,36 @@ def run_agent(session_id, user_request):
 
 这段伪代码不是为了实现细节，而是为了展示 runtime 的责任分层。
 
+### 2.20.1 Model Adapter 的兼容边界：Responses API 不等于 OpenAI-compatible API
+
+很多服务宣称“OpenAI-compatible”，通常只表示 HTTP 路径、认证方式或基本 chat/completions 字段相似。它不自动意味着以下能力完全兼容：
+
+1. reasoning channel、隐藏/可保留的 thinking item 和 `reasoning_effort`。
+2. Responses API 的 response item、previous response、后台任务和多步 tool state。
+3. parallel tool call、computer use、web/file search、MCP 或 A2A 的生命周期。
+4. tool result 的关联 id、重放语义、流式事件类型和错误分类。
+5. chat template、特殊 token、custom encoding 和模型自己的 reasoning protocol。
+
+因此 Model Adapter 应暴露能力矩阵，而不是只暴露一个 `generate()`：
+
+| 能力 | 基本 chat 兼容 | Responses/原生接口 | Adapter 必须记录 |
+|---|---|---|---|
+| 文本生成 | 常见 | 常见 | model id、token usage、停止原因 |
+| reasoning effort | 可能不支持 | 常见于原生接口 | 档位、实际 reasoning budget |
+| tool call | schema 可能相似 | 可能包含多种 item/event | call id、参数、结果关联 |
+| preserve/interleaved thinking | 通常不保证 | 模型特定 | 状态是否可跨请求保留 |
+| custom encoding/chat template | 可能被错误假设 | 原生接口/模型卡定义 | tokenizer、template、版本 |
+
+适配层的统一形式可以写成：
+
+```math
+\mathrm{RuntimeRequest}
+\xrightarrow{\mathrm{adapter}}
+(\mathrm{provider\ request},\mathrm{capability\ contract})
+```
+
+如果模型使用独立 encoding 目录或非标准 chat template，adapter 必须显式实现，不应因为返回了 HTTP 200 就认为协议兼容。
+
 ## 2.21 常见误区
 
 误区一：Runtime 就是一个 while loop。
@@ -748,7 +778,7 @@ def run_agent(session_id, user_request):
 
 纠正：权限策略应集中管理，工具内部可以二次校验，但不能每个工具各写一套规则。
 
-## 2.21.1 关键公式与 Runtime 运行指标速查
+### 2.21.1 关键公式与 Runtime 运行指标速查
 
 把第 `i` 个 session 中第 `j` 个 task 的第 `t` 个 runtime step 抽象为：
 
@@ -840,15 +870,15 @@ $$
 
 取消不是简单停止输出，runtime 还要处理子进程、部分输出、文件 diff、trace 状态和恢复点。
 
-Runtime 门禁可以写成：
+Runtime 准入条件可以形式化为：
 
 $$
 G_{\mathrm{runtime}}=I(R_{\mathrm{iso}}\ge 0.99)I(A_{\mathrm{phase}}\ge 0.95)I(C_{\mathrm{ctx}}\ge 0.90)I(S_{\mathrm{adapter}}\ge 0.95)I(C_{\mathrm{exec}}\ge 0.95)I(S_{\mathrm{recover}}\ge 0.70)I(C_{\mathrm{ckpt}}\ge 0.90)I(C_{\mathrm{cancel}}\ge 0.80)
 $$
 
-这个门禁强调 runtime 的工程可靠性：能不能隔离 session，能不能按状态机运行，能不能把失败变成可恢复状态，能不能从 checkpoint 和 trace 重放，而不是只看模型某次回答是否正确。
+这组条件强调 runtime 的工程可靠性：能不能隔离 session，能不能按状态机运行，能不能把失败变成可恢复状态，能不能从 checkpoint 和 trace 重放，而不是只看模型某次回答是否正确。
 
-## 2.21.2 最小可运行 Runtime Step 审计 demo
+### 2.21.2 最小可运行 Runtime Step 审计 demo
 
 下面的 demo 用 toy runtime step 日志审计一个 agent runtime。它不调用模型，也不执行真实命令，只检查 runtime 事件是否满足 session 隔离、状态机、context budget、adapter、parser、execution result、error handling、checkpoint、cancel / timeout 和 trace 要求。
 

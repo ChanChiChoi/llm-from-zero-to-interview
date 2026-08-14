@@ -8,17 +8,17 @@
 
 > 训练容错的核心不是无限重试，而是故障分类、损失控制、自动恢复和清晰诊断。
 
-## 22.0 本讲资料边界与第二轮精修口径
+## 22.0 本讲范围与资料
 
-本讲第二轮精修时，资料口径主要对齐几类公开工程资料：PyTorch Elastic / `torchrun` 对 `max_restarts`、rendezvous、worker failure、agent failure、node failure 和 membership change 的分布式恢复口径；Kubernetes Job 对 `restartPolicy`、`backoffLimit`、`podFailurePolicy`、Pod 失败计数和指数退避的控制面语义；NVIDIA NCCL troubleshooting 对通信环境、网络接口、共享内存、GPU Direct RDMA、debug 日志和异步错误处理的排障口径；PyTorch CUDA memory management 对 caching allocator、`memory_allocated`、`memory_reserved`、`max_memory_allocated`、memory snapshot 和 OOM 调参的口径。
+本章参考几类公开工程资料：PyTorch Elastic / `torchrun` 对 `max_restarts`、rendezvous、worker failure、agent failure、node failure 和 membership change 的分布式恢复口径；Kubernetes Job 对 `restartPolicy`、`backoffLimit`、`podFailurePolicy`、Pod 失败计数和指数退避的控制面语义；NVIDIA NCCL troubleshooting 对通信环境、网络接口、共享内存、GPU Direct RDMA、debug 日志和异步错误处理的排障口径；PyTorch CUDA memory management 对 caching allocator、`memory_allocated`、`memory_reserved`、`max_memory_allocated`、memory snapshot 和 OOM 调参的口径。
 
 这里不把某个训练平台、某个云厂商、某个 GPU 型号、某个调度器插件或某个 NCCL 环境变量组合写成通用答案。正文只抽象训练容错里的稳定问题：故障分类、retryable / non-retryable 判断、attempt 预算、backoff、checkpoint 恢复、节点替换、GPU 健康隔离、通信 hang 检测、OOM 处理、数据和 checkpoint 故障、数值稳定性、诊断报告、黑名单、用户可见动作和审计 trace。
 
-第二轮精修重点放在三个方面：
+本章重点放在三个方面：
 
 1. 把“自动重试”改写为有边界的故障分类和恢复策略，明确哪些错误可以重试，哪些错误应该快速失败。
 2. 补充可计算指标：最大丢失 GPU-hours、重试成功率、无效重试率、OOM 显存余量、rank hang 心跳间隔和恢复连续性。
-3. 增加一个 0 依赖 Python demo，把训练容错从经验 checklist 变成可运行的门禁检查。
+3. 增加一个 0 依赖 Python demo，把训练容错从经验 checklist 变成可运行的验收条件检查。
 
 ## 22.1 为什么训练容错重要
 
@@ -426,7 +426,7 @@ Job failed
 f_i=(c_i,r_i,a_i,b_i,k_i,n_i,g_i,h_i,o_i,d_i,p_i,s_i,u_i,t_i,z_i)
 ```
 
-其中，`c_i` 是故障分类，`r_i` 是 retryable / non-retryable 判断，`a_i` 是 attempt 预算，`b_i` 是 backoff，`k_i` 是 checkpoint 恢复证据，`n_i` 是节点替换证据，`g_i` 是 GPU 健康隔离证据，`h_i` 是 rank heartbeat / hang 证据，`o_i` 是 OOM 处理策略，`d_i` 是数据权限和数据读取证据，`p_i` 是 checkpoint committed / manifest / checksum 证据，`s_i` 是数值稳定性证据，`u_i` 是用户可见动作，`t_i` 是诊断 trace，`z_i` 是最终门禁。
+其中，`c_i` 是故障分类，`r_i` 是 retryable / non-retryable 判断，`a_i` 是 attempt 预算，`b_i` 是 backoff，`k_i` 是 checkpoint 恢复证据，`n_i` 是节点替换证据，`g_i` 是 GPU 健康隔离证据，`h_i` 是 rank heartbeat / hang 证据，`o_i` 是 OOM 处理策略，`d_i` 是数据权限和数据读取证据，`p_i` 是 checkpoint committed / manifest / checksum 证据，`s_i` 是数值稳定性证据，`u_i` 是用户可见动作，`t_i` 是诊断 trace，`z_i` 是最终验收条件。
 
 统一覆盖率仍然可以写成：
 
@@ -480,13 +480,13 @@ V_{\mathrm{resume}}=\mathbf{1}\left[|\ell_{\mathrm{after}}-\ell_{\mathrm{before}
 
 其中，`\ell` 是 loss，`s` 是 step。恢复成功不是进程重新启动，而是 loss、step、learning rate、optimizer、scheduler、RNG 和 dataloader cursor 都合理连续。
 
-最终训练容错门禁可以写成：
+最终训练容错准入条件可以形式化为：
 
 ```math
 G_{\mathrm{fault}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land L_{\mathrm{gpu}}\le B_{\mathrm{loss}} \land R_{\mathrm{waste}}\le \rho_{\mathrm{waste}} \land A_{\mathrm{hb}}\le \tau_{\mathrm{hb}} \land V_{\mathrm{resume}}=1 \land P_0=0\right]
 ```
 
-这个门禁背后的含义是：训练容错不是“失败了再拉起来”，而是故障分类、重试预算、checkpoint 恢复、节点和 GPU 隔离、通信 hang 诊断、OOM 快速失败、数值异常回滚、诊断报告和用户动作都可审计。
+这组条件背后的含义是：训练容错不是“失败了再拉起来”，而是故障分类、重试预算、checkpoint 恢复、节点和 GPU 隔离、通信 hang 诊断、OOM 快速失败、数值异常回滚、诊断报告和用户动作都可审计。
 
 下面的 0 依赖 Python demo 演示一个最小训练容错审计器。它不是生产平台实现，而是把面试中最容易说散的规则变成可运行检查。
 

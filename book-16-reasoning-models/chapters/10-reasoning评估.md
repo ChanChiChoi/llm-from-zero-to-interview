@@ -4,11 +4,11 @@ Reasoning model 的评估比普通问答评估更难。因为我们不只关心�
 
 本章系统讲 reasoning 评估：数学和代码 benchmark、最终答案评估、过程评估、污染检测、泛化评估、鲁棒性、推理时计算成本、人工评估和常见陷阱。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲第二轮精修参考公开评估资料，包括 [HELM](https://arxiv.org/abs/2211.09110)、[BIG-bench](https://arxiv.org/abs/2206.04615)、[MMLU](https://arxiv.org/abs/2009.03300)、[GPQA](https://arxiv.org/abs/2311.12022)、GSM8K、MATH、HumanEval、LiveCodeBench、SWE-bench、OpenAI Evals 和 EleutherAI lm-evaluation-harness 等资料。它们共同提示：reasoning 评估不能只看单一 benchmark 平均分，而要同时记录任务版本、prompt、采样参数、候选数、verifier、工具、污染检查、切片表现、统计不确定性和成本。
+本章参考公开评估资料，包括 [HELM](https://arxiv.org/abs/2211.09110)、[BIG-bench](https://arxiv.org/abs/2206.04615)、[MMLU](https://arxiv.org/abs/2009.03300)、[GPQA](https://arxiv.org/abs/2311.12022)、GSM8K、MATH、HumanEval、LiveCodeBench、SWE-bench、OpenAI Evals 和 EleutherAI lm-evaluation-harness 等资料。它们共同提示：reasoning 评估不能只看单一 benchmark 平均分，而要同时记录任务版本、prompt、采样参数、候选数、verifier、工具、污染检查、切片表现、统计不确定性和成本。
 
-本章不把评估写成“刷榜技巧”。第二轮精修重点是建立可复现、可审计的评估报告结构：同一批样本上比较 baseline 和 candidate；明确 original、variant、contaminated、hard slice；同时看最终答案、过程步骤、第一处错误、public / hidden test、test-time compute、预算归一化指标和 paired significance。面试中要能说明：分数提升是否来自模型能力、推理预算、候选选择器、污染、prompt 调参，还是统计噪声。
+本章不把评估写成“刷榜技巧”。本章重点是建立可复现、可审计的评估报告结构：同一批样本上比较 baseline 和 candidate；明确 original、variant、contaminated、hard slice；同时看最终答案、过程步骤、第一处错误、public / hidden test、test-time compute、预算归一化指标和 paired significance。面试中要能说明：分数提升是否来自模型能力、推理预算、候选选择器、污染、prompt 调参，还是统计噪声。
 
 ## 10.1 Reasoning 评估为什么难
 
@@ -138,7 +138,7 @@ E_{\mathrm{cost}}=
 
 同一批样本上比较新旧模型时，优先使用 paired evaluation，因为它能消除样本难度差异。小样本下还要给 bootstrap confidence interval 或 McNemar 类检验，而不是只报一个提升点。
 
-一个简化 reasoning 评估门禁：
+一个简化 reasoning 评估验收条件：
 
 ```math
 G_{\mathrm{eval}}=
@@ -157,7 +157,7 @@ E_{\mathrm{cost}}\ge \eta
 ]
 ```
 
-这个门禁表达的是评估可信度，而不是单纯模型强弱：答案、过程、错误定位、污染、鲁棒性和成本都过线，评估结论才更值得相信。
+这组条件表达的是评估可信度，而不是单纯模型强弱：答案、过程、错误定位、污染、鲁棒性和成本都过线，评估结论才更值得相信。
 
 ## 10.2 数学 Benchmark
 

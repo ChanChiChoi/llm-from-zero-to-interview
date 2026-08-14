@@ -10,9 +10,9 @@
 
 > Function Calling 解决“模型如何表达要调用工具”，MCP 解决“工具和资源如何标准化接入 Host”，A2A 解决“Agent 之间如何协作完成任务”。
 
-## 46.0 本讲资料边界与第二轮精修口径
+## 46.0 本讲范围与资料
 
-本讲第二轮精修时，资料口径主要校准了 OpenAI tools / function calling / structured outputs 对工具定义、JSON Schema 参数约束、工具调用结果回填和 provider adapter 的工程边界；Model Context Protocol 2025-11-25 specification 对 Host、Client、Server、tools、resources、prompts、roots、sampling、elicitation、authorization 和 transports 的边界；A2A Protocol 1.0.0 specification 对 Agent Card、Message、Task、Part、Artifact、streaming、push notification 和任务状态的边界；以及前文工具权限、trace/replay、A2A/MCP 分工和 Tool-use eval benchmark 已经建立的安全评估口径。
+本章参考 OpenAI tools / function calling / structured outputs 对工具定义、JSON Schema 参数约束、工具调用结果回填和 provider adapter 的工程边界；Model Context Protocol 2025-11-25 specification 对 Host、Client、Server、tools、resources、prompts、roots、sampling、elicitation、authorization 和 transports 的边界；A2A Protocol 1.0.0 specification 对 Agent Card、Message、Task、Part、Artifact、streaming、push notification 和任务状态的边界；以及前文工具权限、trace/replay、A2A/MCP 分工和 Tool-use eval benchmark 已经建立的安全评估口径。
 
 本章不把某个 SDK 类名、HTTP endpoint、JSON 字段、dashboard 事件名、vendor-specific tool_call 字段或 server 配置写成通用标准。正文只抽象稳定工程分工：Function Calling 是模型到 Host 的结构化调用意图，MCP 是 Host/Client 到外部工具、资源、提示模板 Server 的连接层，A2A 是 Agent 到 Agent 的任务协作层。
 
@@ -84,7 +84,7 @@ p_i=(x_i,F_i,M_i,A_i,H_i,C_i,P_i,T_i,E_i,z_i)
 C_j=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[g_j(p_i)=1]
 ```
 
-一个系统设计的门禁可以写成：
+一个系统设计的准入条件可以形式化为：
 
 ```math
 G_{\mathrm{protocol\_composition}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land R_{\mathrm{misuse}}=0 \land P_0=0\right]
@@ -300,7 +300,7 @@ Function Calling 是模型和 Host 之间的结构化工具调用机制，解决
 
 这个例子同时使用三者，但分工清楚。
 
-## 46.15 对比表总结
+## 46.15 对比表的阶段性观察
 
 | 维度 | Function Calling | MCP | A2A |
 | --- | --- | --- | --- |

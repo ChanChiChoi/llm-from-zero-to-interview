@@ -6,9 +6,9 @@ Browser agent 和 computer use agent 是 Agent 从“调用 API”走向“操�
 
 本章系统讲浏览器与计算机使用 Agent：浏览器操作、屏幕理解、DOM / accessibility tree / screenshot、GUI action、任务自动化、状态观察、权限控制、安全风险、评估指标，以及一个 0 依赖 Python demo，用来审计 toy UI Agent 轨迹。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本章第二轮精修时，按 `WRITING_PLAN.md` 联网核对了 MiniWoB / MiniWoB++、WebArena、OSWorld、Anthropic computer use 文档、OpenAI computer use / Operator 公开资料和 OWASP GenAI prompt injection 资料边界。
+本章参考了 MiniWoB / MiniWoB++、WebArena、OSWorld、Anthropic computer use 文档、OpenAI computer use / Operator 公开资料和 OWASP GenAI prompt injection 资料边界。
 
 本章采用以下口径：
 
@@ -108,7 +108,7 @@ a_t=(u_t,\ell_t,x_t,y_t,v_t,\rho_t)
 
 其中 `u_t` 是动作类型，例如 `click`、`type`、`scroll`、`select`、`wait`；`\ell_t` 是目标元素语义标签；`(x_t,y_t)` 是坐标；`v_t` 是输入值；`\rho_t` 是风险级别。
 
-动作执行前需要安全门禁：
+动作执行前需要安全验收条件：
 
 ```math
 G_{\mathrm{ui}}(a_t,s_t)=
@@ -183,7 +183,7 @@ R_{\mathrm{task}}\ge\tau_{\mathrm{task}}
 ]
 ```
 
-这个门禁回答：UI Agent 是否能正确操作、少误点、正确填表、保护高风险动作、拦截网页注入，并可验证完成任务。
+这组条件回答：UI Agent 是否能正确操作、少误点、正确填表、保护高风险动作、拦截网页注入，并可验证完成任务。
 
 ## 8.5 页面观察
 

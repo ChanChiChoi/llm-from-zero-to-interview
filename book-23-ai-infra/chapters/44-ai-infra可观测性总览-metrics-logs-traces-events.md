@@ -8,11 +8,11 @@ AI Infra 的系统链路很长：数据、训练、评估、推理、RAG、Agent
 
 > AI Infra 可观测性的目标，不是收集更多指标，而是让训练、推理、数据、模型和平台问题能够被快速发现、定位、解释和复盘。
 
-## 44.0 本讲资料边界与第二轮精修口径
+## 44.0 本讲范围与资料
 
 本章按通用可观测性平台抽象来写，不绑定 Prometheus、Grafana、OpenTelemetry Collector、Datadog、Loki、Jaeger、Tempo、云厂商监控或内部平台实现。资料校准时，主要参考 OpenTelemetry 对 traces、metrics、logs、baggage、events / profiles 的信号划分和 metric instrument / aggregation / attribute 口径，参考 Prometheus 对 time series、metric name、labels 和 label 变化生成新时间序列的模型，参考 Google SRE Book 对 SLI、SLO、SLA、error budget 和可行动监控的定义，也结合 AI Infra 前文中的训练、推理、RAG、Agent、评估、成本和安全治理场景。
 
-第二轮精修只做三件事：
+本章重点包括：
 
 1. 把 metrics、logs、traces、events 和 cost signal 变成可审计对象，而不是概念解释。
 2. 补齐 SLO、error budget、p95 / p99、标签基数、trace 覆盖、日志脱敏、告警噪音和根因定位公式。
@@ -230,7 +230,7 @@ $$
 C_{\mathrm{event}}=\frac{\sum_i I(\mathrm{event\_type}_i,\mathrm{entity}_i,\mathrm{version}_i,\mathrm{actor}_i,\mathrm{ts}_i\ \mathrm{present})}{N_{\mathrm{event}}}
 $$
 
-事件要能和指标突变对齐，比如发布、回滚、扩容、降级、质量门禁失败和数据版本切换。
+事件要能和指标突变对齐，比如发布、回滚、扩容、降级、质量检查失败和数据版本切换。
 
 ## 44.7 四类信号如何协作
 
@@ -398,7 +398,7 @@ $$
 \Delta Q=Q_{\mathrm{online}}-Q_{\mathrm{baseline}}
 $$
 
-当 `\Delta Q` 在关键切片上低于阈值时，即使错误率为 0，也应该触发质量告警或发布门禁。
+当 `\Delta Q` 在关键切片上低于阈值时，即使错误率为 0，也应该触发质量告警或发布条件。
 
 ## 44.12 RAG/Agent 可观测性
 
@@ -433,7 +433,7 @@ Trace：
 
 Agent 是多步系统，不看 trace 基本无法排查问题。
 
-RAG / Agent 可观测性门禁：
+RAG / Agent 可观测性验收条件：
 
 $$
 G_{\mathrm{rag\_agent\_obs}}=I(C_{\mathrm{retr\_trace}}\ge \alpha)\cdot I(C_{\mathrm{tool\_trace}}\ge \beta)\cdot I(C_{\mathrm{exec\_trace}}\ge \gamma)\cdot I(R_{\mathrm{loop}}\le \lambda)
@@ -548,7 +548,7 @@ Metrics label 应选择有限枚举字段，例如 model、tenant、endpoint、s
 
 高基数字段如 request ID、prompt hash、user ID，通常进入 trace 或日志。
 
-标签基数门禁：
+标签基数验收条件：
 
 $$
 G_{\mathrm{card}}=I(N_{\mathrm{series}}\le B_{\mathrm{series}})\cdot I(L_{\mathrm{high\ card}}\cap L_{\mathrm{metric}}=\varnothing)
@@ -648,7 +648,7 @@ AI 系统日志可能包含敏感信息：
 
 不能为了排障，把所有 prompt 和输出无保护地永久保存。
 
-日志与 trace 隐私门禁：
+日志与 trace 隐私验收条件：
 
 $$
 G_{\mathrm{privacy}}=I(C_{\mathrm{redact}}\ge \alpha)\cdot I(\mathrm{ttl}\le \tau_{\max})\cdot I(\mathrm{access\ scoped})\cdot I(\mathrm{audit\ enabled})
@@ -701,7 +701,7 @@ Collectors / SDKs / Agents
 
 ## 44.22 AI Infra 可观测性审计指标和最小 demo
 
-把本章落到平台验收时，可以用 16 个门禁：
+把本章落到平台验收时，可以用 16 个验收条件：
 
 1. Signal Inventory Coverage：metrics、logs、traces、events、costs、alerts、dashboards、versions 是否都有入口。
 2. Metric Contract Completeness：metric name、unit、labels、aggregation、owner、SLO / threshold 是否完整。
@@ -720,7 +720,7 @@ Collectors / SDKs / Agents
 15. Alert Actionability：告警是否有 owner、runbook、severity、影响面、去重和可行动上下文。
 16. Observability Platform Gate：最终是否有 owner、dashboard、incident process、postmortem、回滚和 P0 风险阻断。
 
-综合门禁：
+综合验收条件：
 
 $$
 G_{\mathrm{observability}}=\prod_{j=1}^{16}G_j
@@ -1356,7 +1356,7 @@ AI 在线服务更要看 p95/p99、TTFT、TPOT 和队列。
 
 可以回答：记录 QPS、TTFT、TPOT、p99、input/output tokens/s、queue length、active sequences、KV cache、GPU、cache hit、fallback、degradation、error/timeout，并通过 trace 拆分 gateway、router、queue、prefill、decode 和 streaming。
 
-问题五：如何设计 AI Infra 可观测性平台的上线门禁？
+问题五：如何设计 AI Infra 可观测性平台的上线条件？
 
 可以回答：按 signal inventory、metric contract、SLO / error budget、latency quantile、trace span、structured log / event、correlation ID、label cardinality、training、inference、data quality、RAG / Agent、cost、privacy、alert actionability 和 platform gate 逐项验收。重点不是收集更多指标，而是证明每个关键事故都能被发现、定位、解释、复盘和改进。
 
@@ -1385,6 +1385,6 @@ AI 在线服务更要看 p95/p99、TTFT、TPOT 和队列。
 4. 推理可观测性要关注 TTFT、TPOT、tokens/s、queue、KV cache、runtime 和路由。
 5. RAG/Agent 可观测性离不开 retrieval trace、tool call trace 和 execution trace。
 6. 可观测性还必须考虑成本、隐私、脱敏、高基数和告警噪音。
-7. 第二轮精修后，本章新增的核心抓手是 Observability Platform Gate：让 signals、SLO、trace、日志、事件、成本、隐私、告警和 dashboard 都能被结构化验收。
+7. 本章补充的核心抓手是 Observability Platform Gate：让 signals、SLO、trace、日志、事件、成本、隐私、告警和 dashboard 都能被结构化验收。
 
 下一章我们会讲训练故障定位：loss 异常、hang、OOM、通信慢和 I/O 慢。

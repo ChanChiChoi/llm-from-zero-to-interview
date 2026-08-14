@@ -4,9 +4,9 @@
 
 本章目标不是复现完整模型，而是讲清一个文生图系统由哪些模块组成、prompt 如何影响生成、negative prompt 和 CFG 如何工作、ControlNet 和图像编辑为什么重要，以及自回归图像生成和 diffusion 图像生成的差异。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲第二轮精修前，重点核对了 Latent Diffusion / Stable Diffusion 论文、DALL·E 与 DALL·E 2 论文、classifier-free guidance、ControlNet、DiT / Stable Diffusion 3 相关论文，以及 Hugging Face Diffusers 中 Stable Diffusion pipeline 的常见参数口径。正文只吸收适合面试和工程理解的稳定结论，不追具体闭源产品的未公开训练细节。
+本章参考 Latent Diffusion / Stable Diffusion 论文、DALL·E 与 DALL·E 2 论文、classifier-free guidance、ControlNet、DiT / Stable Diffusion 3 相关论文，以及 Hugging Face Diffusers 中 Stable Diffusion pipeline 的常见参数口径。正文只吸收适合面试和工程理解的稳定结论，不追具体闭源产品的未公开训练细节。
 
 本章聚焦：
 

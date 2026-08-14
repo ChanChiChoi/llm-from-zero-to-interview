@@ -8,11 +8,11 @@
 
 > 训练故障定位不要先猜模型或框架，而要按数据、代码、配置、资源、通信、存储和平台链路逐层排查。
 
-## 45.0 本讲资料边界与第二轮精修口径
+## 45.0 本讲范围与资料
 
 本章按通用大模型训练平台故障定位抽象来写，不绑定 PyTorch DDP、FSDP、DeepSpeed、Megatron、Kubernetes、Slurm、NCCL 具体版本、GPU 型号或云厂商平台实现。资料校准时，主要参考 PyTorch autograd anomaly detection、CUDA memory management、PyTorch profiler 对算子 / CPU / CUDA 耗时定位的口径，参考 NVIDIA NCCL troubleshooting 对通信、环境变量、网络和异步错误排查的工程边界，也结合前文训练可观测性、checkpoint、数据供给和实验追踪章节中的版本、manifest、rank 日志和事件时间线要求。
 
-第二轮精修只做三件事：
+本章重点包括：
 
 1. 把 loss 异常、NaN、hang、OOM、通信慢、I/O 慢、checkpoint 和 resume 问题统一成故障样本。
 2. 补齐 step time、loss spike、NaN / Inf、gradient health、显存预算、通信占比、data wait、checkpoint 完整性和最小复现公式。
@@ -270,7 +270,7 @@ $$
 M_{\mathrm{train}}=M_{\mathrm{param}}+M_{\mathrm{grad}}+M_{\mathrm{optim}}+M_{\mathrm{act}}+M_{\mathrm{temp}}+M_{\mathrm{fragment}}
 $$
 
-OOM 阶段门禁：
+OOM 阶段验收条件：
 
 $$
 G_{\mathrm{oom\_phase}}=I(\mathrm{phase}\in\{\mathrm{forward},\mathrm{backward},\mathrm{optimizer},\mathrm{eval},\mathrm{checkpoint}\})\cdot I(M_{\mathrm{peak}}\ \mathrm{recorded})
@@ -461,7 +461,7 @@ Checkpoint 相关故障包括：
 
 Checkpoint 是训练容错基础，不能只靠“目录里看起来有文件”。
 
-checkpoint 完整性门禁：
+checkpoint 完整性验收条件：
 
 $$
 G_{\mathrm{ckpt}}=I(M_{\mathrm{manifest}}=1)\cdot I(C_{\mathrm{checksum}}=1)\cdot I(S_{\mathrm{model}}=1)\cdot I(S_{\mathrm{optim}}=1)\cdot I(S_{\mathrm{sched}}=1)\cdot I(S_{\mathrm{rng}}=1)
@@ -574,7 +574,7 @@ $$
 
 如果只有多机才复现，更可能是通信、调度或环境问题。
 
-最小复现就绪门禁：
+最小复现就绪验收条件：
 
 $$
 G_{\mathrm{repro}}=I(\mathrm{seed\ fixed})\cdot I(\mathrm{batch\ saved})\cdot I(\mathrm{config\ frozen})\cdot I(\mathrm{data\ version\ frozen})\cdot I(\mathrm{single\ node\ trial\ recorded})
@@ -616,7 +616,7 @@ $$
 
 ## 45.21 训练故障定位审计指标和最小 demo
 
-把本章落到平台验收时，可以用 16 个门禁：
+把本章落到平台验收时，可以用 16 个验收条件：
 
 1. Training Fault Evidence Coverage：事件、rank 日志、loss、梯度、显存、通信、数据 I/O、checkpoint、配置 diff、最小复现和诊断结论是否齐全。
 2. Lifecycle Event Timeline：任务提交、调度、启动、最后推进、异常检测等事件是否按时间线记录。
@@ -633,17 +633,17 @@ $$
 13. Data Fault Isolation：空样本、超长样本、schema、label、tokenizer 错误是否统计，并且触发 batch 可隔离。
 14. Config Code Diff Readiness：配置 diff、代码 commit diff、数据 diff 和环境 diff 是否能一起对比。
 15. Minimal Reproduction Readiness：seed、异常 batch、配置、数据版本、单机试验和复现命令是否固定。
-16. Training Fault Diagnosis Gate：最终是否有 owner、runbook、postmortem、P0 风险阻断和训练故障定位门禁。
+16. Training Fault Diagnosis Gate：最终是否有 owner、runbook、postmortem、P0 风险阻断和训练故障定位验收条件。
 
-综合门禁可以写成：
+综合验收条件可以形式化为：
 
 $$
 G_{\mathrm{training\_fault}}=\prod_{j=1}^{16}G_j
 $$
 
-其中每个 `G_j` 对应上面一个子门禁。训练故障定位题不要只说“看日志”，而要证明证据链能从现象走到根因、修复和复盘。
+其中每个 `G_j` 对应上面一个子验收条件。训练故障定位题不要只说“看日志”，而要证明证据链能从现象走到根因、修复和复盘。
 
-下面是一个 0 依赖 demo。它不模拟真实分布式训练，而是用 toy incident cases 检查一个训练平台是否能把 loss 异常、NaN、hang、OOM、通信慢、I/O 慢、checkpoint、resume、数据问题、配置变更和最小复现放进同一套诊断门禁。
+下面是一个 0 依赖 demo。它不模拟真实分布式训练，而是用 toy incident cases 检查一个训练平台是否能把 loss 异常、NaN、hang、OOM、通信慢、I/O 慢、checkpoint、resume、数据问题、配置变更和最小复现放进同一套诊断验收条件。
 
 ```python
 from copy import deepcopy
@@ -1212,7 +1212,7 @@ failed_gates=['training_fault_evidence_coverage', 'lifecycle_event_timeline', 'r
 training_fault_diagnosis_gate_pass=False
 ```
 
-这个 demo 的核心是把“训练故障排查”从经验性 checklist 变成可验收证据链：现象要有指标，指标要能关联 rank / step / batch / version / checkpoint，修复要能绑定最小复现和复盘，平台门禁要能阻断没有证据的结论。
+这个 demo 的核心是把“训练故障排查”从经验性 checklist 变成可验收证据链：现象要有指标，指标要能关联 rank / step / batch / version / checkpoint，修复要能绑定最小复现和复盘，平台验收条件要能阻断没有证据的结论。
 
 ## 45.22 常见误区
 

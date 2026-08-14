@@ -1,6 +1,697 @@
 # 第二部分：Transformer 组件实战
 
-6. 实现 Token Embedding 与 Positional Embedding
+## 第 6 讲：实现 Token Embedding 与 Positional Embedding
+
+### 本讲目标
+
+学完本讲，你应该能做到六件事：
+
+1. 解释 token id 为什么不能直接作为神经网络输入。
+2. 用 `nn.Embedding` 把 token id 查表变成 hidden vector。
+3. 说清楚 embedding 矩阵的 shape、参数量和梯度更新方式。
+4. 实现 learned positional embedding 和 sinusoidal positional encoding。
+5. 区分 padding index、attention mask 和 loss mask 的职责。
+6. 说明绝对位置编码与后面 RoPE 的接入位置差异。
+
+Transformer 接收的不是字符串，也不是“词的编号”这个整数本身。
+
+它接收的是每个 token 对应的连续向量。Token embedding 负责完成第一步转换：
+
+```text
+token id -> hidden vector
+```
+
+位置编码负责补上第二类信息：
+
+```text
+这个 token 在序列中的位置是什么
+```
+
+这两个步骤看起来只是查表和相加，却决定了后面 attention 的输入 shape、参数量、padding 处理和 KV Cache 中的位置管理。本讲先把最基础的 token embedding 和绝对位置编码讲清楚，再在第 11 讲解释为什么很多现代 LLM 改用 RoPE。
+
+本讲参考了 Transformer 原论文和 PyTorch 官方 `nn.Embedding`、`nn.Parameter`、`Tensor.gather` 文档。资料边界是：embedding 是一个可学习的查表矩阵；`padding_idx` 对应的 embedding 不会在常规反向传播中累积梯度；位置编码可以是可学习的参数，也可以是固定函数，二者的参数量和长度边界不同。
+
+---
+
+### 一、为什么 token id 不能直接输入模型
+
+假设 tokenizer 把文本编码为：
+
+```text
+我 -> 125
+爱 -> 876
+你 -> 42
+```
+
+这些数字只是词表中的索引，不是有大小关系的连续特征。
+
+如果把 `[125, 876, 42]` 直接当作三个浮点数输入，模型会被迫把 `876` 理解成比 `42` 大很多的数值特征。但 token id 的编号是 tokenizer 构造时的离散标签，编号相邻不表示语义相近，编号大小也不表示词义强弱。
+
+因此需要一个可学习矩阵：
+
+```math
+E \in \mathbb{R}^{V \times D}
+```
+
+其中：
+
+| 符号 | 含义 |
+|---|---|
+| `V` | vocabulary size，词表大小 |
+| `D` | `d_model`，模型 hidden size |
+| `E` | token embedding 矩阵 |
+
+第 `i` 个 token 的向量就是矩阵第 `i` 行：
+
+```math
+x_i = E[i]
+```
+
+如果一个 batch 的 token id shape 是：
+
+```text
+input_ids: [B, T]
+```
+
+查表后得到：
+
+```text
+hidden_states: [B, T, D]
+```
+
+这里 `B` 是 batch size，`T` 是 sequence length，`D` 是 hidden size。后面 attention、MLP 和 Transformer Block 都围绕 `[B,T,D]` 这个形状工作。
+
+---
+
+### 二、Embedding 本质上就是一次查表
+
+从数学上看，查表可以写成 one-hot 向量与 embedding 矩阵的乘法。
+
+假设词表有 5 个 token，token id 是 `2`，对应的 one-hot 向量是：
+
+```text
+e_2 = [0, 0, 1, 0, 0]
+```
+
+那么：
+
+```math
+e_2 E = E[2]
+```
+
+也就是说，`nn.Embedding` 做的事情等价于：
+
+```text
+one-hot token -> 与 embedding 矩阵相乘 -> 取出对应行
+```
+
+但工程实现不会真的构造巨大的 one-hot 矩阵，因为词表可能有几十万，序列也可能很长。直接按索引 gather 对应行更省显存、更快。
+
+下面用一个小矩阵验证两种写法的结果一致：
+
+```python
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+torch.manual_seed(7)
+
+vocab_size = 5
+hidden_size = 3
+input_ids = torch.tensor([[0, 2, 4], [1, 2, 3]])
+embedding = nn.Embedding(vocab_size, hidden_size)
+
+lookup_output = embedding(input_ids)
+one_hot = F.one_hot(input_ids, num_classes=vocab_size).to(embedding.weight.dtype)
+matmul_output = one_hot @ embedding.weight
+
+print("lookup_shape=", tuple(lookup_output.shape))
+print("one_hot_shape=", tuple(one_hot.shape))
+print("outputs_close=", torch.allclose(lookup_output, matmul_output))
+```
+
+输出中的 `outputs_close=True` 说明两种数学表达相同；实际模型使用查表实现，而不是为每个 token 分配 `V` 维 one-hot。
+
+---
+
+### 三、用 `nn.Embedding` 实现 Token Embedding
+
+最小写法是：
+
+```python
+embedding = nn.Embedding(
+    num_embeddings=vocab_size,
+    embedding_dim=d_model,
+)
+hidden_states = embedding(input_ids)
+```
+
+其中 `input_ids` 的 dtype 应该是整数类型，通常是 `torch.long`：
+
+```text
+input_ids:     [B, T], long
+embedding:     [V, D]
+hidden_states: [B, T, D], float
+```
+
+`input_ids` 的每个元素必须满足：
+
+```text
+0 <= input_ids < vocab_size
+```
+
+如果 token id 等于 `vocab_size`，就会发生越界，因为最后一个合法索引是 `vocab_size - 1`。
+
+一个完整小例子如下：
+
+```python
+import torch
+import torch.nn as nn
+
+
+torch.manual_seed(42)
+
+vocab_size = 100
+d_model = 16
+input_ids = torch.tensor([
+    [3, 8, 21, 5],
+    [7, 4, 9, 12],
+], dtype=torch.long)
+
+token_embedding = nn.Embedding(vocab_size, d_model)
+hidden_states = token_embedding(input_ids)
+
+print("input_ids_shape=", tuple(input_ids.shape))
+print("weight_shape=", tuple(token_embedding.weight.shape))
+print("hidden_shape=", tuple(hidden_states.shape))
+print("weight_requires_grad=", token_embedding.weight.requires_grad)
+```
+
+典型输出是：
+
+```text
+input_ids_shape= (2, 4)
+weight_shape= (100, 16)
+hidden_shape= (2, 4, 16)
+weight_requires_grad= True
+```
+
+注意 embedding 的输出是浮点 Tensor，而输入 id 仍是整数 Tensor。不要把 id 先转成 float 再传给 `nn.Embedding`，也不要把 embedding 输出误当作离散 token id。
+
+---
+
+### 四、Embedding 的参数量与梯度更新
+
+一个大小为 `[V,D]` 的 embedding 矩阵包含：
+
+```math
+N_{\mathrm{embedding}} = V \times D
+```
+
+例如 `V=100000`、`D=4096` 时，仅 token embedding 就有：
+
+```math
+100000 \times 4096 = 409,600,000
+```
+
+约 4.096 亿个参数。若用 bf16 存储权重，裸权重约需要：
+
+```math
+409{,}600{,}000 \times 2
+\approx 819.2\ \mathrm{MB}
+```
+
+训练时，embedding 不是整张表每一步都收到非零梯度。一个 batch 只访问其中出现过的 token 行，未出现的行通常没有这次 loss 的梯度贡献。这也是 embedding 查表比显式 one-hot 矩阵乘法更自然的原因之一。
+
+下面观察一次反向传播后哪些行有梯度：
+
+```python
+import torch
+import torch.nn as nn
+
+
+torch.manual_seed(3)
+
+embedding = nn.Embedding(10, 4)
+input_ids = torch.tensor([[1, 1, 4], [7, 4, 4]])
+loss = embedding(input_ids).pow(2).mean()
+loss.backward()
+
+row_grad_norms = embedding.weight.grad.norm(dim=-1)
+print("used_rows=", [i for i, value in enumerate(row_grad_norms) if value > 0])
+print("unused_row_0_grad=", embedding.weight.grad[0].tolist())
+```
+
+在这个例子里，只有 id `1`、`4`、`7` 对本次 loss 有梯度；未出现的 id `0` 不会因为“整张 embedding 表参与了模型”而自动得到非零梯度。不同优化器、稀疏梯度设置和正则项可能改变工程上的更新细节，但索引访问这一基本事实不变。
+
+---
+
+### 五、Padding Index 不是三种 Mask 的替代品
+
+变长序列组成 batch 时通常需要 padding：
+
+```text
+样本 A: [12, 35, 98, 77]
+样本 B: [21, 43,  0,  0]
+```
+
+如果 `0` 是 padding token，可以在 embedding 中指定：
+
+```python
+token_embedding = nn.Embedding(
+    num_embeddings=vocab_size,
+    embedding_dim=d_model,
+    padding_idx=0,
+)
+```
+
+`padding_idx=0` 的主要作用是：padding 行在常规反向传播中不累积梯度，避免模型把 padding 当成需要学习的普通 token。它不等于 attention mask，也不等于 loss mask：
+
+| 机制 | 解决的问题 | 作用位置 |
+|---|---|---|
+| `padding_idx` | padding 行的 embedding 是否更新 | embedding 参数 |
+| attention mask | attention 能否关注 padding key | attention score |
+| loss mask | padding 位置是否参与损失 | loss reduction |
+
+三个机制通常需要同时使用。只设置 `padding_idx`，并不能阻止其他 token 在 attention 中读取 padding key；只使用 attention mask，也不能自动让 padding 位置从语言模型 loss 中消失。
+
+还要注意，padding id 不一定是 `0`。不同 tokenizer 可能使用不同的 `pad_token_id`，甚至某些 decoder-only tokenizer 默认没有独立的 padding token。工程代码应从 tokenizer 配置读取，而不是把 `0` 写死。
+
+---
+
+### 六、为什么还需要 Positional Embedding
+
+Token embedding 只知道“是什么 token”，不知道“它位于第几个位置”。如果两个序列只发生 token 顺序变化，单纯的 token embedding 无法为 attention 提供明确的顺序信号。
+
+假设：
+
+```text
+我 喜欢 你
+你 喜欢 我
+```
+
+两句话使用相同的 token 集合，但顺序和语义不同。因此通常要把位置信息加入 hidden state，形成：
+
+```math
+H_{b,t} = E[\mathrm{input\_ids}_{b,t}] + P[t]
+```
+
+其中：
+
+| 符号 | 含义 |
+|---|---|
+| `E` | token embedding 表 |
+| `P[t]` | 第 `t` 个位置的 position vector |
+| `H_{b,t}` | batch 中第 `b` 个样本第 `t` 个位置的 hidden state |
+
+最直接的做法是可学习的 absolute positional embedding：
+
+```math
+P \in \mathbb{R}^{T_{\max} \times D}
+```
+
+`T_max` 是模型支持的最大位置数。输入长度超过 `T_max` 时，不能直接索引到已有的 position table；要么扩大表并重新训练/适配，要么采用其他位置处理方案。
+
+---
+
+### 七、实现 Learned Positional Embedding
+
+可学习位置编码可以直接复用 `nn.Embedding`：
+
+```python
+position_embedding = nn.Embedding(max_seq_len, d_model)
+position_ids = torch.arange(seq_len).unsqueeze(0)
+position_states = position_embedding(position_ids)
+hidden_states = token_states + position_states
+```
+
+shape 变化是：
+
+```text
+input_ids:      [B, T]
+token_states:   [B, T, D]
+position_ids:   [1, T]
+position_states:[1, T, D]
+hidden_states:  [B, T, D]
+```
+
+`position_states` 的 batch 维是 1，依靠 broadcasting 作用到所有样本。
+
+更完整的封装如下：
+
+```python
+import torch
+import torch.nn as nn
+
+
+class TokenAndPositionEmbedding(nn.Module):
+    def __init__(self, vocab_size, d_model, max_seq_len, pad_token_id=None):
+        super().__init__()
+        embedding_kwargs = {}
+        if pad_token_id is not None:
+            embedding_kwargs["padding_idx"] = pad_token_id
+
+        self.token_embedding = nn.Embedding(vocab_size, d_model, **embedding_kwargs)
+        self.position_embedding = nn.Embedding(max_seq_len, d_model)
+        self.max_seq_len = max_seq_len
+
+    def forward(self, input_ids, position_offset=0):
+        batch_size, seq_len = input_ids.shape
+        end = position_offset + seq_len
+        if end > self.max_seq_len:
+            raise ValueError("sequence exceeds the learned position table")
+
+        positions = torch.arange(
+            position_offset,
+            end,
+            device=input_ids.device,
+        )
+        positions = positions.unsqueeze(0).expand(batch_size, seq_len)
+        return self.token_embedding(input_ids) + self.position_embedding(positions)
+
+
+torch.manual_seed(42)
+input_ids = torch.tensor([[4, 8, 2, 0], [9, 3, 0, 0]], dtype=torch.long)
+embedding = TokenAndPositionEmbedding(
+    vocab_size=20,
+    d_model=8,
+    max_seq_len=16,
+    pad_token_id=0,
+)
+hidden_states = embedding(input_ids)
+
+print("hidden_shape=", tuple(hidden_states.shape))
+print("position_table_shape=", tuple(embedding.position_embedding.weight.shape))
+```
+
+`position_offset` 在完整训练中通常是 0；在增量推理中，它可以从已经缓存的 token 数开始。但 learned position embedding 仍然受 `max_seq_len` 限制，offset 不是无限外推能力。
+
+---
+
+### 八、固定的 Sinusoidal Positional Encoding
+
+Transformer 原论文还提出了固定的正弦、余弦位置编码。对位置 `pos` 和维度索引 `i`：
+
+```math
+PE_{pos,2i}
+=
+\sin\left(\frac{pos}{10000^{2i/D}}\right)
+```
+
+```math
+PE_{pos,2i+1}
+=
+\cos\left(\frac{pos}{10000^{2i/D}}\right)
+```
+
+它不是可训练参数，而是根据位置和维度直接计算出的固定矩阵。它的优点是无需为每个位置保存可学习参数；缺点是具体外推性质、频率分布和模型训练行为与 learned table 不同，不能简单断言一种方案永远更好。
+
+一个清晰的实现是：
+
+```python
+import math
+import torch
+
+
+def sinusoidal_position_encoding(seq_len, d_model, device=None, dtype=torch.float32):
+    if d_model % 2 != 0:
+        raise ValueError("this implementation expects an even d_model")
+
+    positions = torch.arange(seq_len, device=device, dtype=torch.float32).unsqueeze(1)
+    frequencies = torch.arange(0, d_model, 2, device=device, dtype=torch.float32)
+    frequencies = torch.exp(-math.log(10000.0) * frequencies / d_model)
+
+    angles = positions * frequencies.unsqueeze(0)
+    encoding = torch.zeros(seq_len, d_model, device=device, dtype=torch.float32)
+    encoding[:, 0::2] = torch.sin(angles)
+    encoding[:, 1::2] = torch.cos(angles)
+    return encoding.to(dtype=dtype)
+
+
+encoding = sinusoidal_position_encoding(seq_len=4, d_model=8)
+print("encoding_shape=", tuple(encoding.shape))
+print("position_0=", encoding[0].tolist())
+```
+
+固定位置编码通常在 forward 时按需切片并与 token embedding 相加：
+
+```python
+hidden_states = token_states + encoding[:seq_len].unsqueeze(0)
+```
+
+它不需要 `position_embedding.weight`，也不会在反向传播中收到梯度。
+
+---
+
+### 九、三种位置处理思路的边界
+
+到这里可以把常见方案放在同一张表中比较：
+
+| 方案 | 位置信息进入的位置 | 是否有位置参数 | 长度边界 |
+|---|---|---|---|
+| learned absolute embedding | 直接加到 token hidden | 有，`[T_max,D]` | 通常不能超过表长度 |
+| sinusoidal absolute encoding | 直接加到 token hidden | 没有可训练参数 | 可计算更长位置，但效果需验证 |
+| RoPE | 旋转 attention 的 q、k | 通常没有位置表参数 | 由频率、缓存和 scaling 决定 |
+
+这三者不是同一个实现的三个名字。
+
+learned/sinusoidal absolute encoding 在进入 attention 前改变 `x`；RoPE 则在 q、k 已经投影并拆头后改变 attention score 的几何关系。第 11 讲会从二维旋转、频率缓存和 KV Cache offset 继续展开 RoPE。
+
+---
+
+### 十、Padding、位置编号和左填充
+
+padding 的存在会让“序列位置”变得比 `arange(T)` 更微妙。
+
+右填充时：
+
+```text
+真实 token: [12, 35, 98, 77, 0, 0]
+```
+
+很多实现仍然给位置编号 `[0,1,2,3,4,5]`，再用 attention mask 和 loss mask 忽略后两个位置。因为 padding 位不会产生有效 loss，它们的位置向量通常不会影响有效 token 的最终训练目标，但具体实现仍应保持 mask 一致。
+
+左填充时：
+
+```text
+padding:    [0, 0, 12, 35, 98, 77]
+```
+
+如果仍然简单使用 `[0,1,2,3,4,5]`，真实 token 的位置会整体向后移动。对于绝对位置编码，这可能改变模型看到的位置分布；对于增量解码，还要确认 position ids、attention mask 和 cache position 的约定一致。
+
+因此不要把 `padding_idx` 当成“位置自动处理器”。实际系统需要明确：
+
+1. padding 是左侧还是右侧。
+2. position ids 是否跳过 padding。
+3. attention mask 如何屏蔽 padding key 和无效 query。
+4. loss mask 是否只保留有效目标 token。
+5. KV Cache 中新 token 的绝对位置如何计算。
+
+---
+
+### 十一、Token Embedding 与输出层权重共享
+
+语言模型最后通常有一个 vocab projection，把 hidden state 映射回词表 logits：
+
+```math
+Z = HW_{\mathrm{out}} + b
+```
+
+如果 `W_out` 的 shape 是 `[D,V]`，它和输入 embedding 矩阵 `E` 的参数规模相同。很多语言模型会让输出投影使用 embedding 矩阵的转置：
+
+```math
+W_{\mathrm{out}} = E^\top
+```
+
+这叫 weight tying。它可以减少参数量，并让输入 token 表示和输出 token 分类空间共享一套词向量几何结构。但它不是 `nn.Embedding` 的默认行为，也不是所有模型都采用。
+
+概念代码如下：
+
+```python
+import torch
+import torch.nn as nn
+
+
+vocab_size = 100
+d_model = 16
+token_embedding = nn.Embedding(vocab_size, d_model)
+output_bias = nn.Parameter(torch.zeros(vocab_size))
+
+hidden_states = torch.randn(2, 4, d_model)
+logits = hidden_states @ token_embedding.weight.t() + output_bias
+print("logits_shape=", tuple(logits.shape))
+```
+
+输出 shape 是 `[B,T,V]`。如果把 token embedding 与输出层绑定，优化器只应看到同一个 Parameter，而不是复制出第二份权重；在实际代码中需要检查参数注册和 checkpoint 保存方式。
+
+---
+
+### 十二、一个完整的 Embedding 输入模块
+
+下面把 token embedding、learned position embedding、padding 行梯度和 offset 检查放到一个可运行例子中。它仍然是教学模块，不包含 tokenizer、attention mask 或 Transformer Block。
+
+```python
+import torch
+import torch.nn as nn
+
+
+class InputEmbedding(nn.Module):
+    def __init__(self, vocab_size, d_model, max_seq_len, pad_token_id=0):
+        super().__init__()
+        self.token = nn.Embedding(vocab_size, d_model, padding_idx=pad_token_id)
+        self.position = nn.Embedding(max_seq_len, d_model)
+        self.max_seq_len = max_seq_len
+
+    def forward(self, input_ids, position_offset=0):
+        batch_size, seq_len = input_ids.shape
+        end = position_offset + seq_len
+        if end > self.max_seq_len:
+            raise ValueError("position offset exceeds max_seq_len")
+
+        position_ids = torch.arange(
+            position_offset,
+            end,
+            device=input_ids.device,
+        ).view(1, seq_len).expand(batch_size, seq_len)
+        return self.token(input_ids) + self.position(position_ids)
+
+
+torch.manual_seed(11)
+input_ids = torch.tensor([
+    [5, 8, 0, 0],
+    [3, 7, 4, 2],
+], dtype=torch.long)
+
+module = InputEmbedding(
+    vocab_size=32,
+    d_model=12,
+    max_seq_len=32,
+    pad_token_id=0,
+)
+hidden = module(input_ids)
+loss = hidden.square().mean()
+loss.backward()
+
+offset_hidden = module(input_ids[:, :2], position_offset=4)
+print("hidden_shape=", tuple(hidden.shape))
+print("offset_hidden_shape=", tuple(offset_hidden.shape))
+print("padding_grad_norm=", round(module.token.weight.grad[0].norm().item(), 6))
+```
+
+这里的 `padding_grad_norm` 应为 `0.0`，但这不代表 padding 位置已经从 attention 或 loss 中自动删除；那两件事仍由后续 mask 负责。
+
+---
+
+### 十三、常见工程坑
+
+#### 坑 1：把 token id 当成连续数值
+
+`id=100` 不表示比 `id=10` 更“强”。Token id 只能做 embedding 的索引。
+
+#### 坑 2：embedding 输入 dtype 错误
+
+`nn.Embedding` 的索引通常要求 `torch.long`。不要把 input ids 变成 float。
+
+#### 坑 3：词表大小和 tokenizer 不一致
+
+模型的 `vocab_size` 必须覆盖 tokenizer 产生的最大合法 id。更换 tokenizer 后，不能只修改配置中的一个数字。
+
+#### 坑 4：位置表越界
+
+learned positional embedding 只能索引 `[0, max_seq_len-1]`。训练和推理都要检查 `position_offset + seq_len`。
+
+#### 坑 5：把 padding_idx 当成 attention mask
+
+`padding_idx` 只影响 embedding 行的梯度更新，不会阻止 attention 访问 padding key，也不会自动修改 labels。
+
+#### 坑 6：左填充时 position ids 仍然机械使用 arange
+
+左填充、批量生成和 KV Cache 组合时，position ids 要和模型以及 serving runtime 的约定保持一致。
+
+#### 坑 7：位置编码重复叠加
+
+如果模型已经使用 RoPE 或其他内部位置机制，就不能未经确认再额外加一套绝对 position embedding。重复注入会改变训练分布。
+
+#### 坑 8：误以为 embedding 输出已经是上下文表示
+
+Token embedding 只完成 token 到向量的映射。真正的上下文交互要等 attention 和后续 Transformer Block。
+
+---
+
+### 十四、面试怎么讲 Embedding
+
+如果面试官问“Token Embedding 是什么”，可以这样回答：
+
+```text
+Token id 是离散索引，编号大小没有连续语义，不能直接当作特征输入。Token Embedding 是一个 [vocab_size, d_model] 的可学习矩阵，输入 [batch, seq_len] 的 token ids 后按行查表，输出 [batch, seq_len, d_model] 的 hidden states。
+```
+
+如果追问“Embedding 和 one-hot 矩阵乘法有什么关系”，可以回答：
+
+```text
+对 token id 做 one-hot 后乘 embedding 矩阵，数学上等于取 embedding 对应行；工程实现直接做索引查表，避免显式构造高维 one-hot，显存和计算都更高效。
+```
+
+如果追问“padding_idx、attention mask 和 loss mask 有什么区别”，可以回答：
+
+```text
+padding_idx 控制 padding 对应的 embedding 行是否累积梯度；attention mask 控制 attention 是否能关注 padding key；loss mask 控制 padding 位置是否参与损失。三者解决的是不同阶段的问题，不能互相替代。
+```
+
+如果追问“learned positional embedding 和 RoPE 的区别”，可以回答：
+
+```text
+Learned positional embedding 是 [max_seq_len, d_model] 的位置表，通常在 token embedding 后直接相加；RoPE 则在 attention 拆头后对 q 和 k 按位置旋转，让位置差进入 qk 内积。二者的参数、长度边界和接入位置都不同。
+```
+
+---
+
+### 十五、小练习
+
+#### 练习 1
+
+构造 `vocab_size=20`、`d_model=8` 的 embedding，打印输入和输出 shape。
+
+#### 练习 2
+
+用 one-hot 矩阵乘法验证 `nn.Embedding` 的查表结果。
+
+#### 练习 3
+
+给 embedding 设置 `padding_idx=0`，让输入中出现多个 0，验证第 0 行梯度为 0。
+
+#### 练习 4
+
+实现 learned positional embedding，故意输入超过 `max_seq_len` 的序列，观察越界行为。
+
+#### 练习 5
+
+实现 sinusoidal positional encoding，比较位置 0、位置 1 和不同维度的数值。
+
+#### 练习 6
+
+实现 weight tying，让输出 logits 使用输入 embedding 的转置，检查参数是否真的共享。
+
+---
+
+### 本讲总结
+
+这一讲完成了从 token id 到 Transformer 输入 hidden state 的第一段工程链路。
+
+核心结论如下：
+
+1. Token id 是离散索引，不能按数值大小直接当作连续特征。
+2. `nn.Embedding` 本质上是对 `[vocab_size, d_model]` 矩阵按行查表。
+3. 输入 shape 通常是 `[B,T]`，输出 shape 是 `[B,T,D]`。
+4. embedding 参数量是 `vocab_size * d_model`，一个 batch 只访问其中部分行。
+5. `padding_idx`、attention mask 和 loss mask 分别作用于参数、注意力和损失，不能混为一谈。
+6. learned positional embedding 直接与 token hidden 相加，受最大位置表长度约束。
+7. sinusoidal encoding 是固定函数，不增加可训练位置参数。
+8. RoPE 不在输入处相加，而是在 attention 的 q、k 上施加旋转，下一讲会详细实现。
+
+下一讲，我们继续实现 Scaled Dot-Product Attention。
+
 ## 第 7 讲：从零实现 Scaled Dot-Product Attention
 
 ### 本讲目标
@@ -41,7 +732,7 @@ Scaled Dot-Product Attention
 
 本讲目标就是把它写成可运行代码，并彻底搞清楚每个 shape。
 
-本讲精修时按 `WRITING_PLAN.md` 核对了 PyTorch 官方 `torch.matmul`、`torch.softmax`、`Tensor.transpose`、`Tensor.masked_fill`、`torch.tril` 和 `torch.nn.functional.scaled_dot_product_attention` 文档。资料边界是：PyTorch `matmul` 会把最后两个维度当矩阵、前面的维度当 batch 维度并支持 broadcast；`scaled_dot_product_attention` 的布尔 `attn_mask` 中 `True` 表示该位置参与 attention；不同后端可能使用更高效 kernel，但数学目标仍是 scaled dot-product attention。
+本章参考了 PyTorch 官方 `torch.matmul`、`torch.softmax`、`Tensor.transpose`、`Tensor.masked_fill`、`torch.tril` 和 `torch.nn.functional.scaled_dot_product_attention` 文档。资料边界是：PyTorch `matmul` 会把最后两个维度当矩阵、前面的维度当 batch 维度并支持 broadcast；`scaled_dot_product_attention` 的布尔 `attn_mask` 中 `True` 表示该位置参与 attention；不同后端可能使用更高效 kernel，但数学目标仍是 scaled dot-product attention。
 
 ---
 
@@ -570,15 +1261,15 @@ mask 要么同形状，要么能 broadcast。
 
 要保证每个 query 至少有一个可见 key。
 
-#### 坑 6：用 `-inf` 在低精度下出问题
+#### 坑 6：不理解 mask sentinel 的边界
 
-bf16/fp16 中有时用很小负数更稳，例如：
+`float("-inf")` 是数学上常见的 additive mask 值，很多官方实现也会使用它。教学代码使用 dtype 对应的最小有限值，是为了让 sentinel 随 `float32`、`float16`、`bfloat16` 的可表示范围变化：
 
 ```python
 torch.finfo(scores.dtype).min
 ```
 
-或框架内置 attention mask 处理。
+也可以直接使用框架内置 attention mask 处理。无论使用 `-inf` 还是有限最小值，都不能解决全 mask 行的问题：
 
 ---
 
@@ -1260,6 +1951,8 @@ shape 是：
 对所有 head、所有 query，都不允许关注 padding key。
 ```
 
+这个 mask 只屏蔽 key 维度。padding query 行仍然可能对有效 key 做计算并产生输出；通常还要依靠 loss mask 忽略这些位置，或者在下游显式清理无效 query 的表示。不要把“不能读取 padding key”和“padding query 不产生任何输出”混为一谈。
+
 代码：
 
 ```python
@@ -1413,9 +2106,9 @@ Hd_h = D
 O(BT^2D)
 ```
 
-这说明 attention 的主要瓶颈是序列长度平方项 `T^2`。
+这说明朴素 attention 的主要瓶颈是序列长度平方项 `T^2`。FlashAttention 等实现可以避免显式保存完整的 attention 矩阵，但不会改变 QK^T 的二次计算关系；它们通过 tiling、融合 kernel 和在线 softmax 降低中间结果的显存占用。
 
-当上下文长度从 4K 增加到 32K，attention score 矩阵会急剧变大。
+在朴素实现中，当上下文长度从 4K 增加到 32K，attention score 矩阵会急剧变大。
 
 这就是 FlashAttention、稀疏 attention、线性 attention、KV Cache、长上下文优化的重要背景。
 
@@ -1511,7 +2204,7 @@ k, v 来自 encoder outputs 或外部模态特征
 如果追问“复杂度瓶颈在哪里”，可以回答：
 
 ```text
-主要瓶颈是 attention score 矩阵，复杂度约为 O(BT^2D)，显存也需要保存 [B, H, T, T] 级别的权重或中间结果，因此长序列时开销很大。
+朴素实现的主要瓶颈是 attention score 矩阵，计算复杂度约为 O(BT^2D)，并且通常要物化 [B, H, T, T] 级别的权重或中间结果，因此长序列时开销很大。FlashAttention 可以避免完整物化权重，但不能把二次计算复杂度自动变成线性。
 ```
 
 ---
@@ -1588,7 +2281,7 @@ k, v 来自 encoder outputs 或外部模态特征
 
 本讲专门把 mask 讲透。
 
-本讲精修时按 `WRITING_PLAN.md` 核对了 PyTorch 官方 `torch.tril`、`Tensor.masked_fill`、`torch.nn.functional.scaled_dot_product_attention` 和 `nn.MultiheadAttention` 文档。资料边界是：`torch.tril` 保留下三角；`F.scaled_dot_product_attention` 的布尔 `attn_mask=True` 表示该位置参与 attention；`nn.MultiheadAttention` 的布尔 `attn_mask=True` 表示该位置不允许关注，`key_padding_mask=True` 表示对应 key 被当作 padding 忽略。正文的手写函数统一使用 `True` 表示允许关注，接入官方 `nn.MultiheadAttention` 时需要反转语义。
+本章参考了 PyTorch 官方 `torch.tril`、`Tensor.masked_fill`、`torch.nn.functional.scaled_dot_product_attention` 和 `nn.MultiheadAttention` 文档。资料边界是：`torch.tril` 保留下三角；`F.scaled_dot_product_attention` 的布尔 `attn_mask=True` 表示该位置参与 attention；`nn.MultiheadAttention` 的布尔 `attn_mask=True` 表示该位置不允许关注，`key_padding_mask=True` 表示对应 key 被当作 padding 忽略。正文的手写函数统一使用 `True` 表示允许关注，接入官方 `nn.MultiheadAttention` 时需要反转语义。
 
 ---
 
@@ -2064,11 +2757,7 @@ scores = scores + additive_mask
 scores = scores.masked_fill(~keep_mask, float("-inf"))
 ```
 
-数学上没问题。
-
-但在 fp16、bf16、不同 kernel 或某些全 mask 场景中，可能更容易出现 NaN。
-
-更稳妥的写法是用 dtype 对应的最小值：
+数学上和工程上都可能是正确选择，具体取决于调用的 attention kernel 和 mask 语义。有限最小值有时便于教学代码统一 dtype，但它也不是自动修复全 mask 的万能值：
 
 ```python
 mask_value = torch.finfo(scores.dtype).min
@@ -2543,7 +3232,7 @@ Causal Mask
 
 本讲我们把这些组件组装成一个完整的 Transformer Block。
 
-本讲精修时按 `WRITING_PLAN.md` 核对了 Transformer 原论文，以及 PyTorch 官方 `nn.LayerNorm`、`nn.GELU`、`nn.Dropout` 和 `nn.Sequential` 文档。资料边界是：原始 Transformer block 使用 residual connection、layer normalization、multi-head attention 和 position-wise feed-forward network；`LayerNorm(d_model)` 会对输入最后一维归一化且输出 shape 不变；`GELU` 是逐元素激活函数；`Dropout` 训练时随机置零、评估时等价于恒等映射；`Sequential` 会按传入顺序串联子模块。
+本章参考了 Transformer 原论文，以及 PyTorch 官方 `nn.LayerNorm`、`nn.GELU`、`nn.Dropout` 和 `nn.Sequential` 文档。资料边界是：原始 Transformer block 使用 residual connection、layer normalization、multi-head attention 和 position-wise feed-forward network；`LayerNorm(d_model)` 会对输入最后一维归一化且输出 shape 不变；`GELU` 是逐元素激活函数；`Dropout` 训练时随机置零、评估时等价于恒等映射；`Sequential` 会按传入顺序串联子模块。
 
 ---
 
@@ -2809,11 +3498,10 @@ class TransformerBlock(nn.Module):
         self.ln2 = nn.LayerNorm(d_model)
         self.ffn = FeedForward(d_model, hidden_dim, dropout=dropout)
 
-    def forward(self, x, mask=None, position_offset=0, return_attn=False):
+    def forward(self, x, mask=None, return_attn=False):
         attn_out, attn_weights = self.attn(
             self.ln1(x),
             mask=mask,
-            position_offset=position_offset,
         )
         x = x + attn_out
 
@@ -2824,6 +3512,8 @@ class TransformerBlock(nn.Module):
             return x, attn_weights
         return x
 ```
+
+这一版 Transformer Block 还没有接入位置编码，因此接口不接受 `position_offset`。等第 11 讲把 RoPE 接入 attention 后，position offset 才由 RoPE attention 负责处理；不要在尚未实现该参数的模块上提前传入它。
 
 这就是一个最小但完整的 Transformer Block。
 
@@ -3419,7 +4109,7 @@ LLaMA、Qwen、ChatGLM 等很多模型都采用了 RoPE 或 RoPE 变体。
 
 本讲我们从零实现 RoPE，并把它接入 Multi-Head Attention。
 
-本讲精修时按 `WRITING_PLAN.md` 核对了 RoFormer / Rotary Position Embedding 原论文和 PyTorch 官方 `nn.Module.register_buffer` 文档。资料边界是：RoPE 用旋转矩阵编码绝对位置，并让 self-attention 公式自然包含相对位置依赖；`register_buffer` 注册的是模块状态但不是可训练参数，`persistent=False` 时不会进入 `state_dict`。
+本章参考了 RoFormer / Rotary Position Embedding 原论文和 PyTorch 官方 `nn.Module.register_buffer` 文档。资料边界是：RoPE 用旋转矩阵编码绝对位置，并让 self-attention 公式自然包含相对位置依赖；`register_buffer` 注册的是模块状态但不是可训练参数，`persistent=False` 时不会进入 `state_dict`。
 
 ---
 
@@ -3674,7 +4364,7 @@ sin: [max_seq_len, d_h / 2]
 把 cos/sin 注册为模块状态，但不作为可训练参数。
 ```
 
-`persistent=False` 表示它们不一定保存进 checkpoint。
+`persistent=False` 表示它们不会进入模块的 `state_dict`，因此不会随普通 checkpoint 一起保存；加载 checkpoint 后需要由模块根据配置重新构造缓存。
 
 实际工程中可以根据需要选择是否持久化。
 
@@ -4436,7 +5126,7 @@ LayerNorm -> RMSNorm
 
 本讲就把这两个组件手写出来。
 
-本讲精修时按 `WRITING_PLAN.md` 核对了 RMSNorm 原论文、GLU Variants / SwiGLU 论文、LLaMA 论文和 PyTorch 官方 `torch.nn.functional.silu` 文档。资料边界是：RMSNorm 去掉 LayerNorm 的 re-centering，只保留基于 root mean square 的 re-scaling；SwiGLU 是 GLU 变体之一，在 Transformer FFN 中用门控分支和上投影分支逐元素相乘；LLaMA 类 decoder-only block 常见组合是 Pre-Norm、RMSNorm、RoPE 和 SwiGLU；PyTorch `F.silu` 实现的是 `x * sigmoid(x)`。
+本章参考了 RMSNorm 原论文、GLU Variants / SwiGLU 论文、LLaMA 论文和 PyTorch 官方 `torch.nn.functional.silu` 文档。资料边界是：RMSNorm 去掉 LayerNorm 的 re-centering，只保留基于 root mean square 的 re-scaling；SwiGLU 是 GLU 变体之一，在 Transformer FFN 中用门控分支和上投影分支逐元素相乘；LLaMA 类 decoder-only block 常见组合是 Pre-Norm、RMSNorm、RoPE 和 SwiGLU；PyTorch `F.silu` 实现的是 `x * sigmoid(x)`。
 
 ---
 
@@ -5292,4 +5982,17 @@ SwiGLU 是一种门控 FFN。它有 gate_proj 和 up_proj 两个上投影分支�
 6. 为了让参数量接近普通 4D FFN，SwiGLU hidden_dim 常设为约 `8D/3`。
 7. `Pre-RMSNorm + RoPE Attention + SwiGLU FFN + Residual` 是现代 LLM block 的常见主干。
 
-至此，第三册第二部分“Transformer 组件实战”正文第一版完成。
+这一讲的实践价值不在于记住几个组件名称，而在于能够沿着 `[B, T, D]` 的 shape 追踪数据，解释归一化、门控 FFN、残差和位置处理如何共同影响训练稳定性与推理成本。把这些组件组合成完整 block 后，还要用参数量、数值范围、梯度和输出等价性做回归，才能确认实现不仅“能跑”，而且仍然符合模型结构的语义。
+
+### 本章资料来源
+
+本章的接口语义以 PyTorch 官方文档为准，架构公式和历史背景以原始论文为准。不同版本、设备和 attention kernel 可能有实现差异，复现实验时应记录 PyTorch 版本、dtype 和运行设备。
+
+- [Attention Is All You Need](https://arxiv.org/abs/1706.03762)：Transformer、scaled dot-product attention、multi-head attention 和 sinusoidal positional encoding。
+- [PyTorch `nn.Embedding`](https://docs.pytorch.org/docs/stable/generated/torch.nn.Embedding.html)：embedding 查表、`padding_idx` 和输入输出 shape。
+- [PyTorch `scaled_dot_product_attention`](https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html)：SDPA、bool/additive mask 和 `is_causal`。
+- [PyTorch `nn.MultiheadAttention`](https://docs.pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html)：官方多头 attention 的输入、输出和 mask 参数。
+- [RoFormer: Enhanced Transformer with Rotary Position Embedding](https://arxiv.org/abs/2104.09864)：RoPE 的旋转位置编码和相对位置性质。
+- [Root Mean Square Layer Normalization](https://arxiv.org/abs/1910.07467)：RMSNorm。
+- [GLU Variants Improve Transformer](https://arxiv.org/abs/2002.05202)：GLU 变体和 SwiGLU。
+- [LLaMA: Open and Efficient Foundation Language Models](https://arxiv.org/abs/2302.13971)：LLaMA 风格的 RMSNorm、RoPE 和 SwiGLU 组合背景。

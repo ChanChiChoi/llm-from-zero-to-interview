@@ -15,13 +15,13 @@
 
 > 跨节点 serving 的核心不是把 GPU 堆起来，而是在模型并行、数据并行、PD 分离、KV transfer 和网络拓扑之间做取舍，避免网络把吞吐收益吃掉。
 
-## 41.0 本讲资料边界与第二轮精修口径
+## 41.0 本讲范围与资料
 
-本讲第二轮精修前，先按 `WRITING_PLAN.md` 对公开资料做校准：参考 vLLM parallelism / scaling 文档对 tensor parallel、pipeline parallel、data parallel、单节点 / 多节点部署和 Ray backend 的公开口径；参考 SGLang server arguments、PD disaggregation 和多节点部署相关文档对 TP / DP、PD worker、KV transfer、routing policy 和多节点运行边界的说明；参考 NCCL collective communication 文档对 all-reduce、all-gather、reduce-scatter 等 collective 通信的稳定抽象；并参考 DistServe、Splitwise、Mooncake 等论文对 P/D 分离、KV transfer、goodput、跨节点资源池和网络代价的系统动机说明。
+本章参考 vLLM parallelism / scaling 文档对 tensor parallel、pipeline parallel、data parallel、单节点 / 多节点部署和 Ray backend 的公开口径；参考 SGLang server arguments、PD disaggregation 和多节点部署相关文档对 TP / DP、PD worker、KV transfer、routing policy 和多节点运行边界的说明；参考 NCCL collective communication 文档对 all-reduce、all-gather、reduce-scatter 等 collective 通信的稳定抽象；并参考 DistServe、Splitwise、Mooncake 等论文对 P/D 分离、KV transfer、goodput、跨节点资源池和网络代价的系统动机说明。
 
 本讲只讲跨节点 serving 的通用网络瓶颈：DP 请求分流、TP 高频 collective、PP activation 传输、PD KV transfer、remote KV fetch、topology-aware routing、data plane / control plane 隔离、admission control、backpressure 和 p99 观测。不把某个框架版本的 CLI 参数、Ray / Kubernetes 部署命令、NCCL 环境变量、网卡型号、带宽实测值或 benchmark 排名写成通用标准。
 
-本讲新增 demo 是教学版跨节点网络瓶颈审计器：用 0 依赖 Python 模拟 same-node / same-rack / cross-rack 链路，比较跨节点 TP 的 per-token collective 代价、PP activation 代价、PD KV transfer 成本、remote fetch vs recompute、拓扑感知 decode worker 路由、pending transfer backpressure 和 control / data plane 分离，帮助把“网络会吃掉跨节点扩展收益”落到可运行证据。
+本章的 demo 是教学版跨节点网络瓶颈审计器：用 0 依赖 Python 模拟 same-node / same-rack / cross-rack 链路，比较跨节点 TP 的 per-token collective 代价、PP activation 代价、PD KV transfer 成本、remote fetch vs recompute、拓扑感知 decode worker 路由、pending transfer backpressure 和 control / data plane 分离，帮助把“网络会吃掉跨节点扩展收益”落到可运行证据。
 
 ## 41.1 本章目标
 
@@ -933,7 +933,7 @@ partial KV、预留 blocks、metadata 和请求状态没有一致清理，会造
 观测上，我会按阶段拆指标：TTFT、TPOT、KV transfer latency、collective time、PP activation transfer、remote cache latency、pending transfer bytes、network p95/p99、router decision latency。这样才能判断瓶颈到底在 compute、KV、network 还是 routing。
 ```
 
-## 41.29 跨节点通信成本、路由门禁和可运行 demo
+## 41.29 跨节点通信成本、路由验收条件和可运行 demo
 
 先把一条网络链路抽象成：
 
@@ -985,7 +985,7 @@ A_{\mathrm{remote}}=\mathbf{1}[T_{\mathrm{remote}}<T_{\mathrm{recompute}}]
 S(w)=T_{\mathrm{load},w}+T_{\mathrm{kv}}(w)+\lambda Q_{\mathrm{transfer},w}
 ```
 
-最终门禁可以写成：
+最终验收条件可以形式化为：
 
 ```math
 G_{\mathrm{xnode}}=G_{\mathrm{tp}}G_{\mathrm{pp}}G_{\mathrm{pd}}G_{\mathrm{remote}}G_{\mathrm{router}}G_{\mathrm{backpressure}}G_{\mathrm{plane}}G_{\mathrm{metric}}
@@ -1156,7 +1156,7 @@ cross_node_network_gates= {'tp_cross_node_risk_visible': True, 'pipeline_cost_se
 6. `backpressure_events=1`：pending transfer 超阈值时要限流，不能让 prefill 侧无限制造 KV。
 7. `control_data_plane_separated=True`：大 KV transfer 和 control plane metadata 不能混在同一个无保护路径里。
 
-所以本章最终门禁是 `cross_node_network_gate`：只有 TP / PP / PD / remote cache 的通信代价、topology-aware routing、backpressure、control/data plane 隔离和 metrics 都可观测，跨节点 serving 才不是“多堆机器”，而是可治理的网络系统。
+所以本章最终验收条件是 `cross_node_network_gate`：只有 TP / PP / PD / remote cache 的通信代价、topology-aware routing、backpressure、control/data plane 隔离和 metrics 都可观测，跨节点 serving 才不是“多堆机器”，而是可治理的网络系统。
 
 ## 41.30 小练习
 

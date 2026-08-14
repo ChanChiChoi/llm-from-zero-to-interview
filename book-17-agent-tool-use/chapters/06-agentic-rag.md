@@ -6,11 +6,11 @@ RAG 让模型能基于外部知识回答问题。Agentic RAG 则让模型主动�
 
 本章系统讲 Agentic RAG：普通 RAG 和 Agentic RAG 的区别，主动检索、多轮检索、查询重写、检索工具选择、证据阅读、证据验证、引用和可追溯性、检索停止条件、失败恢复、成本控制、memory 边界、评估指标，以及一个 0 依赖 Python demo，用来审计 toy Agentic RAG 系统。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本章第二轮精修时，按 `WRITING_PLAN.md` 联网核对了 RAG 原始论文、ReAct、Self-RAG、FLARE、IRCoT、OpenAI Agents / file search 公开文档、LangGraph / LlamaIndex 中 Agentic RAG 相关工程文档，以及 OWASP GenAI prompt injection 资料边界。
+本章参考了 RAG 原始论文、ReAct、Self-RAG、FLARE、IRCoT、OpenAI Agents / file search 公开文档、LangGraph / LlamaIndex 中 Agentic RAG 相关工程文档，以及 OWASP GenAI prompt injection 资料边界。
 
-本次内容审计补丁额外补入 GraphRAG 入口。GraphRAG 不是 Agentic RAG 的同义词，而是把文档、实体、关系、社区摘要和图检索用于增强 RAG 的一类方法，适合多跳实体关系、组织知识和全局摘要类问题。
+本章补充额外补入 GraphRAG 入口。GraphRAG 不是 Agentic RAG 的同义词，而是把文档、实体、关系、社区摘要和图检索用于增强 RAG 的一类方法，适合多跳实体关系、组织知识和全局摘要类问题。
 
 本章采用以下口径：
 
@@ -219,7 +219,7 @@ P_{\mathrm{ctx}}\ge\tau_p
 ]
 ```
 
-这个门禁回答：检索过程是否覆盖关键证据、上下文是否足够干净、答案 claim 是否被证据支持、引用是否准确、冲突是否处理、成本是否可控。
+这组条件回答：检索过程是否覆盖关键证据、上下文是否足够干净、答案 claim 是否被证据支持、引用是否准确、冲突是否处理、成本是否可控。
 
 ## 6.5 主动检索
 

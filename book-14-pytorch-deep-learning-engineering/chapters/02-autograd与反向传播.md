@@ -6,31 +6,31 @@ Autograd 是 PyTorch 把数学公式变成可训练模型的核心机制。你�
 
 本章目标不是重新推导所有神经网络反向传播公式，而是把 PyTorch Autograd 在工程里的工作方式讲清楚：哪些 tensor 会记录梯度，计算图什么时候创建和释放，为什么梯度会累积，为什么推理阶段要关掉梯度，什么时候应该 `detach`，什么时候不该 `detach`，以及如何排查训练脚本里的梯度问题。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本章范围与资料
 
-本讲第二轮精修时，参考了 PyTorch 官方 automatic differentiation tutorial、autograd mechanics、leaf / non-leaf tensor tutorial、`torch.autograd.grad`、`Tensor.backward`、`Tensor.detach`、`torch.no_grad`、`torch.inference_mode`、`detect_anomaly`、`Optimizer.zero_grad` 和 activation checkpointing 相关文档，并结合前序数学基础、张量基础和训练循环章节的公式与工程口径。
+本章以 PyTorch 官方 Autograd 文档和说明为 API 语义依据，参考 automatic differentiation、autograd mechanics、`torch.autograd.grad`、`Tensor.backward`、`Tensor.detach`、`torch.no_grad`、`torch.inference_mode`、anomaly detection、`Optimizer.zero_grad` 和 activation checkpointing 文档，并结合前序数学基础、张量基础和训练循环章节的公式与工程口径。文末列出可直接核验的资料入口。
 
-本章只聚焦 PyTorch Autograd 的工程主线：动态计算图、链式法则、`requires_grad`、叶子张量、`.grad`、`backward`、vector-Jacobian product、梯度累积、`zero_grad`、`detach`、`no_grad` / `inference_mode`、in-place 风险、`autograd.grad`、hook、训练循环顺序和梯度 debug。它不展开完整自动微分理论、CUDA backward kernel、functorch / `torch.func`、分布式 autograd 或编译器级图优化。
+本章只聚焦 PyTorch Autograd 的工程主线：动态计算图、链式法则、`requires_grad`、叶子张量、`.grad`、`backward`、vector-Jacobian product、梯度累积、`zero_grad`、`detach`、`no_grad` / `inference_mode`、in-place 风险、`autograd.grad`、hook、训练循环顺序和梯度 debug。它不展开完整自动微分理论、CUDA backward kernel、`torch.func`、分布式 autograd 或编译器级图优化；这些主题需要单独讨论。文中的数值实验是教学构造，性能和显存结论仍需在目标硬件、版本和 batch 配置上复测。
 
 ## 2.1 为什么需要 Autograd
 
 训练神经网络的目标是最小化 loss。以最简单的线性模型为例：
 
-```math
+~~~math
 \hat{y}=wx+b
-```
+~~~
 
 如果使用均方误差：
 
-```math
+~~~math
 L=(\hat{y}-y)^2
-```
+~~~
 
 训练时需要知道：
 
-```math
+~~~math
 \frac{\partial L}{\partial w},\qquad \frac{\partial L}{\partial b}
-```
+~~~
 
 手写小模型的梯度还可以接受，但真实大模型有 embedding、attention、MLP、layer norm、residual connection、dropout、mask、loss reshape、混合精度和分布式通信。如果每个算子都手写反向传播，几乎不可维护。
 
@@ -48,65 +48,59 @@ optimizer.zero_grad()
 
 前两行是你显式写出的前向计算，`backward()` 会触发反向传播，`optimizer.step()` 使用梯度更新参数。
 
-面试回答：
-
-```text
-Autograd 的作用是自动求导。PyTorch 在前向计算时动态构建计算图，每个可求导操作都会记录反向函数。调用 loss.backward() 时，PyTorch 从标量 loss 出发按链式法则反向遍历计算图，把梯度累积到叶子参数的 .grad 上。这样我们只需要写 forward，不需要手写每个算子的 backward。
-```
-
-### 2.1.1 关键公式与 Autograd 调试速查
+### 2.1.1 计算图、局部导数与参数更新
 
 标量 loss 对参数的梯度：
 
-$$
+~~~math
 g_\theta = \frac{\partial L}{\partial \theta}
-$$
+~~~
 
 链式法则：
 
-$$
+~~~math
 \frac{\partial L}{\partial x}
 = \frac{\partial L}{\partial y}
 \frac{\partial y}{\partial x}
-$$
+~~~
 
 多层计算图中的反向传播：
 
-$$
+~~~math
 x \rightarrow h_1 \rightarrow h_2 \rightarrow L
-$$
+~~~
 
-$$
+~~~math
 \frac{\partial L}{\partial x}
 =
 \frac{\partial L}{\partial h_2}
 \frac{\partial h_2}{\partial h_1}
 \frac{\partial h_1}{\partial x}
-$$
+~~~
 
 向量输出的 `backward(gradient)` 本质是 vector-Jacobian product：
 
-$$
+~~~math
 v^T J,\qquad J=\frac{\partial y}{\partial x}
-$$
+~~~
 
 梯度累积：
 
-$$
+~~~math
 grad_t = grad_{t-1} + \frac{\partial L_t}{\partial \theta}
-$$
+~~~
 
 梯度累积模拟大 batch 时的平均 loss：
 
-$$
+~~~math
 L_{\mathrm{micro}}^{scaled} = \frac{L_{\mathrm{micro}}}{K}
-$$
+~~~
 
 参数更新必须在不建图环境中做：
 
-$$
+~~~math
 \theta \leftarrow \theta - \eta \nabla_\theta L
-$$
+~~~
 
 叶子张量与 `.grad` 的工程口径：
 
@@ -115,6 +109,8 @@ $$
 3. `detach()` 切断某个 tensor 和当前计算图的连接。
 4. `no_grad()` / `inference_mode()` 让一段代码不记录新的 autograd 图。
 5. `retain_graph=True` 不是普通训练的默认解法，通常应该重新 forward 或重构 loss。
+
+这里有一个重要区分：Autograd 计算的是局部导数的链式组合，优化器才负责读取梯度并改变参数。`loss.backward()` 不会自动更新权重；`optimizer.step()` 也不是“再反向一次”，而是在当前 `.grad` 状态上执行更新。把这两个阶段混在一起，是排查“梯度有值但模型不变”时最常见的概念错误。
 
 ## 2.2 动态计算图：前向时构建，反向后释放
 
@@ -265,11 +261,7 @@ z.backward()
 print(y.grad)
 ```
 
-面试中如果被问“为什么我的中间 tensor `.grad` 是 None”，可以这样答：
-
-```text
-PyTorch 默认只把梯度累积到叶子张量的 .grad 上，模型参数就是典型叶子张量。中间 tensor 虽然参与反向传播，但默认不保留 .grad，是为了节省显存。如果需要调试中间梯度，可以对该 tensor 调用 retain_grad()，或者注册 hook。
-```
+因此，看到中间 tensor 的 `.grad is None` 时，不能立即把它诊断为“没有梯度”。先区分三个问题：梯度是否沿图流过、框架是否为该中间结果保留了 `.grad`、以及这个 tensor 是否仍然活在反向所需的图里。只有在需要观察数值时才调用 `retain_grad()`；大模型中不应对大量激活无差别调用它，否则调试本身会显著增加显存。
 
 ## 2.5 backward 做了什么
 
@@ -277,18 +269,18 @@ PyTorch 默认只把梯度累积到叶子张量的 .grad 上，模型参数就�
 
 以标量函数为例：
 
-```math
+~~~math
 y=x^2,
 \qquad z=3y
-```
+~~~
 
 那么：
 
-```math
+~~~math
 \frac{\partial z}{\partial x}
 =\frac{\partial z}{\partial y}\frac{\partial y}{\partial x}
 =3\cdot 2x
-```
+~~~
 
 对应代码：
 
@@ -315,9 +307,9 @@ print(x.grad)  # tensor([2., 4., 6.])
 
 为什么标量 loss 可以不传 gradient？因为默认是：
 
-```math
+~~~math
 \frac{\partial L}{\partial L}=1
-```
+~~~
 
 而向量输出需要告诉 autograd 你想计算哪个向量-雅可比积。PyTorch 的反向传播不是默认显式构造完整 Jacobian，而是高效计算 vector-Jacobian product。这一点在大模型里很重要，因为完整 Jacobian 可能大到不可接受。
 
@@ -369,7 +361,18 @@ for step, batch in enumerate(dataloader):
         optimizer.zero_grad()
 ```
 
-这里把 loss 除以 `accum_steps` 是为了让累积后的梯度尺度接近真实大 batch 的平均梯度。如果不除，等价于把学习率放大了约 `accum_steps` 倍。
+这里把 loss 除以 `accum_steps` 是为了让累积后的梯度尺度接近真实大 batch 的平均梯度。如果每个 micro-batch 的样本数和有效 token 数都相同，这个写法通常成立；如果序列长度不同、padding 被忽略，或者 loss 使用了不同的 reduction，它可能改变样本权重。
+
+以 token-level 交叉熵为例，真正想要的平均梯度通常是：
+
+~~~math
+g=\frac{\sum_{k=1}^{K}\sum_{i\in\mathcal{T}_k} \nabla_\theta \ell_{k,i}}
+{\sum_{k=1}^{K}|\mathcal{T}_k|}
+~~~
+
+其中 `\mathcal{T}_k` 是第 `k` 个 micro-batch 的有效 token 集合。若每个 micro-batch 先做 `mean`，再简单除以 `K`，得到的是“每个 micro-batch 的平均损失等权”，不一定是“所有有效 token 等权”。更精确的实现可以累计 unreduced loss 和有效 token 数，最后按总 token 数归一化；或者保证每个 micro-batch 的有效 token 数相同，并把这个假设写进数据管道。
+
+这一区别在语言模型训练中不是形式主义：长序列和短序列混合时，错误 reduction 会改变梯度方向，随后还会影响学习率、梯度裁剪阈值和不同 run 的可比性。
 
 更推荐的清梯度写法是：
 
@@ -446,6 +449,17 @@ losses.append(loss.item())
 
 `detach` 的风险也很大：如果误用在模型输出、loss 或中间 hidden states 上，梯度会被切断，导致参数不更新或部分模块学不到东西。
 
+共享数据意味着 `detach()` 不是 `clone()`。下面两个对象不再通过 Autograd 传递梯度，但它们仍可能指向同一存储；如果对 detached view 做原地修改，原 tensor 的数值也可能改变：
+
+```python
+x = torch.arange(3.0, requires_grad=True)
+y = x.detach()
+y.add_(10)
+assert torch.equal(x, torch.tensor([10.0, 11.0, 12.0]))
+```
+
+如果既要切断计算图，又要隔离后续写入，应使用 `x.detach().clone()`。在日志和缓存路径中，`detach().cpu()` 只解决梯度连接和设备占用；是否需要 `clone()` 取决于缓存对象之后是否可能被原地修改。
+
 ## 2.8 no_grad 和 inference_mode
 
 `torch.no_grad()` 用于关闭梯度记录，常用于验证和推理：
@@ -473,11 +487,12 @@ with torch.inference_mode():
     logits = model(input_ids)
 ```
 
-一般经验：
+两种上下文的边界可以用“是否允许结果再进入 Autograd”来理解：
 
-1. 验证、推理、离线 embedding 抽取，优先使用 `torch.inference_mode()`。
-2. 如果代码中需要创建后续还可能参与 autograd 的 tensor，或者存在特殊的 view/in-place 交互，使用 `torch.no_grad()` 更保守。
+1. 推理结果只用于解码、评估或写盘时，可以使用 `torch.inference_mode()`。
+2. 如果代码在上下文中创建的 tensor 之后还要回到需要梯度的计算路径，或依赖某些 view/in-place 交互，使用 `torch.no_grad()` 更保守，并在离开上下文后验证 `requires_grad` 和版本行为。
 3. 训练阶段不要用 `no_grad()` 包住 forward，否则 loss 无法反向传播到参数。
+4. 两者都不会替代 `model.eval()`；随机 dropout 等模块行为仍由模型模式决定。
 
 `model.eval()` 和 `torch.no_grad()` 不是一回事：
 
@@ -491,12 +506,6 @@ model.eval()
 with torch.no_grad():
     val_loss = evaluate(model, val_loader)
 model.train()
-```
-
-面试回答：
-
-```text
-model.eval() 只是切换模块行为，比如关闭 dropout、使用 batch norm 的 running statistics；no_grad() 是关闭梯度记录，减少显存和计算图开销。验证或推理时通常两者都需要。只写 eval 不会自动关闭 autograd，只写 no_grad 也不会改变 dropout 的行为。
 ```
 
 ## 2.9 in-place 操作为什么容易破坏反向传播
@@ -551,11 +560,7 @@ scores = scores.masked_fill(causal_mask, float("-inf"))
 scores.masked_fill_(causal_mask, float("-inf"))
 ```
 
-面试中可以这样说：
-
-```text
-in-place 操作会修改 tensor 本身，而 autograd 反向传播可能依赖前向保存的中间值。PyTorch 会用版本计数检查某些 tensor 是否被原地改动，如果发现反向所需变量被修改，就会报 inplace 相关错误。工程上我会优先使用非 inplace 写法，只有在确认不会破坏计算图且确实有显存收益时才使用 inplace。
-```
+因此，是否使用 in-place 不能由方法名末尾的下划线单独决定，而要看三个条件：这个 tensor 是否还会被其他分支读取，反向函数是否需要它的旧值，以及原地修改是否真的带来可测量的收益。最稳妥的开发顺序是先用非原地写法验证数值和梯度，再用小规模梯度回归与显存测量评估是否值得改成 in-place。
 
 ## 2.10 常见 Autograd 报错与定位方法
 
@@ -1010,55 +1015,63 @@ with torch.autograd.detect_anomaly():
 
 它会让 PyTorch 尝试报告导致 backward 出错的前向位置，但会明显降低速度，只适合 debug，不适合长期训练开启。
 
-## 2.17 面试官会怎么问
+## 2.17 从现象到根因：一份梯度审计路径
 
-### 问题一：PyTorch 的 autograd 是怎么工作的？
+Autograd 的知识只有在遇到异常时才真正变成工程能力。下面不把问题压缩成固定答法，而是沿着“现象—假设—实验—结论”的顺序组织排查。
 
-回答模板：
+### 2.17.1 参数的梯度为 `None`
 
-```text
-PyTorch 使用动态计算图。每次 forward 时，如果输入 tensor 需要梯度，相关操作会被记录成计算图节点，并保存 backward 所需的中间信息。调用 loss.backward() 后，autograd 从 loss 开始按链式法则反向遍历图，把梯度累积到叶子 tensor，尤其是模型参数的 .grad 上。默认 backward 后图会释放，所以普通训练每一步都会重新 forward 构建新图。
+先问这个参数是否应该参与当前 loss。被冻结的参数、条件分支没有执行的模块、只在另一个任务头中使用的参数，都可能合法地没有梯度；它们和“计算图被意外切断”不是同一个问题。然后依次检查 `requires_grad`、`loss.grad_fn`、forward 中是否出现 `detach` / `item` / `no_grad`，最后确认优化器持有的参数对象就是模型当前使用的对象。
+
+可以把参数分成三类记录：
+
+```python
+for name, param in model.named_parameters():
+    if not param.requires_grad:
+        status = "frozen"
+    elif param.grad is None:
+        status = "trainable_without_grad"
+    elif not torch.isfinite(param.grad).all():
+        status = "non_finite_grad"
+    else:
+        status = "gradient_ready"
+    print(name, status)
 ```
 
-### 问题二：为什么每次训练都要 zero_grad？
+如果某个参数只在少数 batch 参与计算，不能用单个 batch 的 `None` 就下结论；应该在固定窗口内统计它参与 forward 的次数、非零梯度次数和更新次数。
 
-回答模板：
+### 2.17.2 梯度有值但 loss 不下降
 
-```text
-因为 PyTorch 的 .grad 默认是累积的，不会在 backward 前自动清零。这样设计可以支持梯度累积、多 loss 反传等场景。普通训练中如果不 zero_grad，当前 batch 的梯度会和历史 batch 的梯度叠加，导致更新方向和尺度错误。所以每个 optimizer step 前通常要先 optimizer.zero_grad(set_to_none=True)。
+这时不能继续只盯着 Autograd。需要检查梯度的方向和尺度、学习率、标签与 mask、参数是否真的被 `step` 更新、数据是否重复，以及模型是否处于 `train()` 模式。一个很有效的隔离实验是让模型在很小的数据集上过拟合：如果连几十个样本都无法稳定降低训练 loss，优先检查 forward、loss、参数更新和数据对齐；只有这个实验通过后，才有意义讨论泛化或数据规模。
+
+还要区分“梯度存在”和“参数发生变化”。在 `optimizer.step()` 前后记录一份参数快照，可以识别学习率为零、参数不在优化器、误用了新的参数对象或梯度被清空在错误位置等问题：
+
+```python
+before = {
+    name: param.detach().clone()
+    for name, param in model.named_parameters()
+    if param.requires_grad
+}
+optimizer.step()
+changed = {
+    name: not torch.equal(before[name], param.detach())
+    for name, param in model.named_parameters()
+    if name in before
+}
+print(changed)
 ```
 
-### 问题三：detach 和 no_grad 有什么区别？
+### 2.17.3 第二次 backward 报错
 
-回答模板：
+先确认是不是在同一张图上重复反传。多个 loss 如果共享同一份 forward 结果，可以把它们按目标权重合成为一个标量后一次 backward；跨 step 保存的 hidden state 要按算法意图 `detach()`；只有确实需要从同一张图求多个导数时才考虑 `retain_graph=True`，并评估它带来的激活保存成本。`retain_graph=True` 让图继续可用，不会自动解决 loss 定义错误，也不会替你清理跨 step 的引用。
 
-```text
-detach 是对某个 tensor 切断它和当前计算图的连接，返回一个不再追踪梯度的新 tensor，常用于日志、缓存或 stop-gradient。no_grad 是一个上下文管理器，在作用域内关闭新操作的梯度记录，常用于验证和推理。detach 更像是切断某条边，no_grad 更像是让一段代码不建图。
-```
+### 2.17.4 loss 不需要梯度
 
-### 问题四：为什么中间 tensor 的 .grad 是 None？
+`loss.item()` 之后重新包装一个 `torch.tensor(..., requires_grad=True)` 不会恢复原图。正确修复是沿着 loss 的来源回溯，找到最早切断图的操作，并让原始计算结果直接进入 backward。若只是要记录数值，把 `.item()` 放在日志边界，而不是放在 loss 计算链路中。
 
-回答模板：
+### 2.17.5 梯度出现 NaN 或 Inf
 
-```text
-默认只有叶子 tensor 的 .grad 会被保留，模型参数就是叶子 tensor。中间 tensor 虽然有梯度流过，但为了节省显存，PyTorch 不会默认保存它的 .grad。如果需要调试中间梯度，可以调用 retain_grad() 或注册 hook。
-```
-
-### 问题五：为什么验证时要同时写 model.eval() 和 no_grad()？
-
-回答模板：
-
-```text
-model.eval() 改变模块行为，比如关闭 dropout、让 batch norm 使用 running statistics；no_grad() 关闭 autograd 记录，减少显存和计算开销。它们解决的是不同问题。验证或推理时通常两者都需要，并且验证后要切回 model.train()。
-```
-
-### 问题六：in-place 操作为什么可能导致 backward 报错？
-
-回答模板：
-
-```text
-反向传播可能需要前向时保存的中间值。in-place 操作会直接改写 tensor，如果改掉了 backward 需要的值，梯度就可能不正确。PyTorch 会用版本计数检测这类修改，发现问题时会报变量被 inplace 修改的错误。工程上我会优先使用非 inplace 操作，除非明确知道它安全且确实能节省显存。
-```
+先定位第一个出现非有限值的模块，再检查输入范围、softmax / log / 除法、学习率、混合精度缩放和 mask。anomaly detection 能帮助报告反向异常的前向来源，但它增加开销，不能代替对数值范围和边界样本的长期监控。对 attention 来说，要专门测试空 key 集合、极长序列和全 padding 行；对 loss 来说，要统计有效 token 数，防止分母为零。
 
 ## 2.18 常见误区
 
@@ -1081,7 +1094,25 @@ model.eval() 改变模块行为，比如关闭 dropout、让 batch norm 使用 r
 6. 把验证循环分别写成只用 `model.eval()`、只用 `no_grad()`、两者都用，解释差异。
 7. 构造一个误用 `detach()` 导致某层参数没有梯度的例子，并用 `named_parameters()` 排查。
 
-## 2.20 本章总结
+## 2.20 资料与证据边界
+
+本章关于 Autograd 行为、上下文管理器和 API 参数的描述，优先依据 PyTorch 官方资料：
+
+1. Autograd 用户指南：https://pytorch.org/docs/stable/autograd.html
+2. Autograd mechanics：https://pytorch.org/docs/stable/notes/autograd.html
+3. `torch.autograd.grad`：https://pytorch.org/docs/stable/generated/torch.autograd.grad.html
+4. `Tensor.backward`：https://pytorch.org/docs/stable/generated/torch.Tensor.backward.html
+5. `Tensor.detach`：https://pytorch.org/docs/stable/generated/torch.Tensor.detach.html
+6. `torch.no_grad`：https://pytorch.org/docs/stable/generated/torch.no_grad.html
+7. `torch.inference_mode`：https://pytorch.org/docs/stable/generated/torch.autograd.grad_mode.inference_mode.html
+8. Optimizer 清梯度：https://pytorch.org/docs/stable/generated/torch.optim.Optimizer.zero_grad.html
+9. Activation checkpointing：https://pytorch.org/docs/stable/checkpoint.html
+10. Automatic Mixed Precision：https://pytorch.org/docs/stable/amp.html
+11. DistributedDataParallel：https://pytorch.org/docs/stable/generated/torch.nn.parallel.DistributedDataParallel.html
+
+官方文档可以说明 API 的语义和限制，但不能替代目标模型上的梯度回归、显存测试和分布式复测。尤其是 checkpoint、AMP、DDP、in-place 和 inference mode 的成本与边界，会随 PyTorch 版本、后端、硬件和具体模型路径变化。书中的 demo 证明的是一组教学断言在当前环境可运行，不是对所有配置的性能保证。
+
+## 2.21 本章总结
 
 Autograd 的核心是动态计算图和链式法则。PyTorch 在 forward 时记录可求导操作，在 `loss.backward()` 时沿图反向传播，把梯度累积到叶子参数的 `.grad` 上。默认情况下，计算图在 backward 后释放，梯度不会自动清零，中间 tensor 的 `.grad` 不会被保留。
 

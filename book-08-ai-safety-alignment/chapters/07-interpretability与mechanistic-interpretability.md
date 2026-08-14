@@ -1,32 +1,24 @@
 # 第七章：Interpretability 与 Mechanistic Interpretability
 
-重点：特征可解释性、activation patching、circuits、SAE、模型内部机制分析。
+一个模型给出正确答案，并不意味着我们知道它为什么正确；一个模型在某类输入上拒答，
+也不意味着拒答是由稳定的安全机制产生。可解释性研究的价值，正在于把“输出发生了
+什么”进一步追问为“哪些内部状态参与了计算”“改变哪个状态会改变结果”，以及“这个
+解释在新输入和新模型版本上是否仍然成立”。
 
-面试重点：Interpretability 不是“画几张 attention heatmap”，Mechanistic Interpretability 的目标是像逆向工程程序一样理解模型内部实际实现了什么算法。
-
-## 0. 本讲资料边界与第二轮精修口径
-
-按照 `WRITING_PLAN.md` 的要求，本讲精修前核对了 Distill Circuits、Anthropic Transformer Circuits / A Mathematical Framework for Transformer Circuits、Toy Models of Superposition、Towards Monosemanticity、Scaling Monosemanticity、Locating and Editing Factual Associations in GPT、Progress Measures for Grokking via Mechanistic Interpretability，以及前序 Red Teaming、Jailbreak / Prompt Injection、Reward Hacking 和 Scalable Oversight 章节资料边界。
-
-本讲聚焦 mechanistic interpretability 的面试与安全工程口径：从输入归因、表示分析、因果干预到 circuits 和 sparse autoencoder，把“看起来相关”升级为“能被干预验证的机制假设”。
+本章从四种证据逐层展开：输入归因提供线索，表示分析检查信息是否可被读出，因果干预
+检验某个组件是否真正影响行为，机制逆向则尝试把多个组件组织成可检验的 feature、
+circuit 和算法假设。这个顺序很重要：一张 attention 图可以帮助提出假设，却不能直接
+承担因果结论；一个漂亮的 SAE feature 可以帮助定位方向，却不能自动证明模型已经被
+理解。
 
 ```text
 行为现象 -> 激活 / 表示 -> 因果干预 -> feature / circuit -> 安全调试或监控
 ```
 
-本讲不把当前机制可解释性写成已经能证明大模型安全的成熟方法。所有公式和 demo 都是 toy-level，用于解释 activation patching、ablation、SAE、feature purity 和 interpretability gate 的基本审计口径。
-
-## 本章目标
-
-学完本章，你要能回答：
-
-1. Interpretability 和 Mechanistic Interpretability 有什么区别？
-2. 为什么普通可解释性方法不足以支撑模型安全？
-3. Circuits、features、neurons、superposition、polysemanticity 分别是什么意思？
-4. Activation patching、ablation、causal tracing 解决什么问题？
-5. Sparse Autoencoder 为什么成为 LLM 可解释性的重要方向？
-6. Mechanistic interpretability 对 alignment 和 safety 有什么价值？
-7. 这个方向当前有哪些局限和未来可能演化？
+后文的数学和代码都是教学级 toy example。它们用于说明实验对象、指标和因果解释的
+边界，不代表某个真实模型的测量结果，也不把局部机制证据写成整体安全保证。读者可以
+先用“小白视角”理解每种方法回答的问题，再用“专家视角”检查对照组、干预位置、分母、
+分布外状态和证据可迁移性。
 
 ## 1. 来龙去脉：为什么需要可解释性
 
@@ -105,6 +97,24 @@ Mechanistic Interpretability 试图更进一步。
 Distill 的 Circuits 系列在视觉模型上展示了一个重要思路：认真分析单个神经元、特征和它们之间的连接，可能可以逆向出模型学到的局部算法。
 
 后来 Transformer Circuits、activation patching、causal tracing、SAE 等方法进一步把这种思路推向语言模型。
+
+### 1.5 从“解释结果”到“解释计算”
+
+可以把解释证据分成四个强度不同的层次。第一层只描述模型看起来关注了什么；第二层
+说明某类信息能否从内部状态读出来；第三层通过干预观察行为是否随之改变；第四层还要
+说明多个组件如何按特定顺序协作，并在新任务上通过预测性检验。
+
+| 层次 | 主要问题 | 典型证据 | 仍然没有证明什么 |
+| --- | --- | --- | --- |
+| 描述 | 哪些输入或组件与输出同时出现 | saliency、attention pattern | 输入是因果原因 |
+| 可读出 | 激活中是否包含某类信息 | probing、线性解码 | 模型决策使用了该信息 |
+| 干预 | 改变该状态是否改变结果 | ablation、activation patching | 已经找到完整计算链 |
+| 机制 | 哪些组件通过什么路径共同完成任务 | circuit 假设、路径干预、跨样本预测 | 模型没有其他等价或隐藏路径 |
+
+专家在报告中应把这四类证据分栏，而不是把它们平均成一个“可解释性分数”。例如一个
+probe 准确率很高，只能支持“信息可被某个线性读出器提取”；如果 patch 后目标 logit
+没有变化，就不能把该信息写成模型实际使用的机制。反过来，单次 patch 成功也可能来自
+非自然激活组合或捷径，仍需负对照、重复样本和组件组合实验。
 
 ## 2. 小白例子：看答案、看草稿、看脑回路
 
@@ -259,6 +269,39 @@ Superposition 是解释 polysemanticity 的一个重要假设。
 
 Circuit 是由多个 feature、neurons、attention heads、MLP 和连接组成的子网络，用来实现某个功能。
 
+### 4.6 Feature 是方向假设，不是现成的语义标签
+
+在机制分析中，“feature”经常被口语化为“某个概念”，但更准确的说法是：它是一个可被
+描述、定位并通过实验检验的表示方向或激活模式。若 \(h\) 是某层残差流，\(d_k\) 是第
+\(k\) 个候选方向，一个简化的 superposition 表示可以写成：
+
+$$
+h\approx \sum_{k\in S}a_k d_k+\epsilon
+$$
+
+其中 \(S\) 是当前输入激活的 feature 子集，\(a_k\) 是各方向的幅度，\(\epsilon\) 是无法
+由当前字典解释的残差。这个式子不是说真实模型一定使用线性稀疏字典，而是说明为什么
+“一个 neuron 对应一个概念”的假设可能过于简单：多个方向可以共同投影到同一组 neuron，
+同一概念也可能被多个方向分裂表示。
+
+小白可以把 \(d_k\) 想成混合录音中的一条乐器轨道；专家则要继续问：方向是否在不同
+上下文中稳定，激活是否只是词形或位置的代理，字典是否遗漏了重要残差，feature 之间
+是否存在互相抑制或组合关系。给 feature 起名只是研究记录，只有跨样本预测和干预结果
+才能提高这个名字的可信度。
+
+### 4.7 Circuit 假设怎样变成可检验命题
+
+一个可用的 circuit 描述至少包含四部分：输入条件、候选组件、信息传递路径和预测的
+行为变化。比如“某个 name mover head 把实体信息写入输出位置”不是结论，而是一个假设，
+它应当预测：移除该 head 后目标 logit 下降，替换其 value 路径后下降更明显，保留无关
+路径的负对照不会产生同样变化，并且这个效应在未参与建模的同类句式中复现。
+
+机制分析还要面对两种常见现象。其一是冗余：多个组件可以完成相似功能，单独 ablation
+不一定使行为消失；其二是退化或补偿：模型可能在干预后调用另一条路径。因此“组件被
+移除后性能下降”支持必要性，“注入该组件状态后行为恢复”支持一定的充分性，但两者
+都不能单独证明整个 circuit 是唯一实现。报告应把必要性、充分性、路径特异性和跨样本
+泛化分别记录。
+
 例如一个模型完成代词消解，可能需要：
 
 1. 识别候选实体。
@@ -300,7 +343,7 @@ Attention 权重不一定等于因果解释。
 
 这些名字帮助我们建立直觉，但不能把每个 head 都简单贴标签。
 
-### 5.3 面向专家
+### 5.3 机制与边界
 
 Attention head 的解释要看它对残差流写入了什么信息，以及后续层如何读取这些信息。
 
@@ -314,6 +357,39 @@ Attention head 的解释要看它对残差流写入了什么信息，以及后�
 4. 残差流中的信息流。
 5. 下游 head 或 MLP 的读取。
 6. 因果干预验证。
+
+### 5.4 QK 电路与 OV 电路
+
+对一个 attention head，可以把计算先写成：
+
+$$
+A=\operatorname{softmax}\left(\frac{QK^{\mathsf T}}{\sqrt{d_k}}+M\right),
+\qquad
+o=A V W_O
+$$
+
+这里 \(QK^{\mathsf T}\) 决定“哪些位置互相匹配”，通常被称为 QK 侧的路由或匹配
+计算；\(V W_O\) 决定“从被读取位置写回什么内容”，通常被称为 OV 侧的写入计算。
+因此，即使一张 heatmap 显示某个 head 关注了实体 token，也还要检查 value 向量是否
+真的携带了目标实体、输出投影是否把它写到正确的残差方向，以及后续 unembedding 是否
+把该方向转成目标 token 的 logit。
+
+小白可以把它比作邮局：QK 像分拣规则，决定包裹从哪个地址取件；OV 像包裹内容和投递
+方向，决定取回的东西如何写入当前位置。只看分拣记录，不能证明包裹内容就是最终答案。
+专家还要控制位置、词形、频率和上下文长度等混杂因素，因为一个 head 可能同时利用
+多个线索。
+
+### 5.5 从“命名 head”到验证 head
+
+Induction head、name mover head 和 previous-token head 是有用的研究命名，但命名不是
+实验结论。一个 head 是否承担某功能，至少要通过三种检查：在目标任务上的行为效应，
+对输入结构变化的选择性，以及对无关任务的副作用。只在一个 prompt 上看到 pattern
+相似，最多得到一个候选标签。
+
+例如，要研究一个可能的复制头，可以改变前缀中重复片段的位置、间隔和词汇，同时保留
+目标结构；如果它仍然把信息写向预测位置，且对打乱重复关系的负对照不再产生同样效应，
+这个功能假设才更有说服力。不同随机种子、不同样本模板和不同模型 checkpoint 的复现
+也很重要，因为 head 的编号和功能可能随训练阶段或模型规模改变。
 
 ## 6. Activation Patching
 
@@ -360,6 +436,38 @@ Activation patching 更进一步问：
 4. 大模型中搜索空间很大。
 5. 多组件共同作用时，单点 patch 可能误导。
 
+### 6.5 一个合格的 patching 实验
+
+首先要定义什么叫“恢复”。对于分类任务，可以使用正确类别的 logit margin；对于生成
+任务，可以使用目标序列的对数概率、答案 token 的 rank 或任务级成功率。只观察最终文本
+是否改变会丢失细微效应，也容易受采样噪声影响。设 clean、corrupted 和 patched 的
+目标差值分别为 \(\Delta^+\)、\(\Delta^-\) 和 \(\Delta^{patch}\)，常见的归一化恢复分数是：
+
+$$
+S_{patch}=\frac{\Delta^{patch}-\Delta^-}{\Delta^+-\Delta^-}
+$$
+
+分母接近零时，这个分数没有稳定含义；恢复分数大于 1 也不自动表示实验更好，可能是
+干预带来了 clean run 中没有的额外效应。报告应同时给出原始 logit、绝对变化、样本数、
+置信区间或重复运行范围，并保留未 patch 的 corrupted 对照。
+
+其次要设计负对照。可以把激活 patch 到无关位置、使用同层不同样本的激活、打乱对应关系，
+或用均值激活作为替代。若所有替代都提高目标分数，说明实验可能利用了通用偏置，而不是
+定位了特定信息。对 layer、position、head 和 feature 大量搜索时，还要记录搜索网格和
+未参与挑选的 holdout；只报告最好的一个 patch 会产生选择偏差。
+
+### 6.6 Patching 能证明到哪一步
+
+如果把 clean 激活放入 corrupted 输入后行为恢复，可以支持“该状态足以在这个上下文中
+补回某部分信息”。它不一定支持“模型在正常运行时就是通过这条路径完成计算”，因为
+干预可能绕过了上游编码，也可能把多个本来不相容的状态拼在一起。要接近机制结论，需
+继续做 path patching、上游/下游联合干预和结构化负对照。
+
+对专家而言，最有价值的报告不是一张 patch score 热图，而是一组可复核命题：哪个输入
+差异被隔离，哪个组件被替换，预期哪些输出会变，哪些无关输出不应变，干预后的激活是否
+落在训练分布附近，以及该效应能否迁移到新模板。这样才可能把相关性线索逐步提升为
+有限作用域内的因果证据。
+
 ## 7. Ablation 和 Causal Tracing
 
 ### 7.1 Ablation
@@ -396,6 +504,23 @@ Causal tracing 是用这些干预工具追踪信息流的一类分析。
 Ablation 则更像移除组件看影响。
 
 三者常一起使用。
+
+### 7.4 必要性、充分性与替代路径
+
+这三个词经常被混在一起。若移除组件 \(c\) 后目标行为明显下降，得到的是“在当前
+上下文和干预强度下，\(c\) 对行为具有必要性证据”。若把某状态注入到 corrupted run
+后行为恢复，得到的是“该状态在当前背景下具有一定充分性证据”。二者都不是逻辑上的
+绝对必要或绝对充分，因为模型可能存在冗余电路、条件触发器和可替代路径。
+
+可以用一个简单的二维实验理解：一组实验只移除 \(c\)，另一组只补入候选状态 \(s_c\)，
+再加上移除 \(c\) 后补入 \(s_c\) 的组合实验。若单独移除有效、单独补入有效、组合后仍
+能恢复，机制解释更完整；若组合实验失败，说明上游编码、下游读取或状态兼容性仍有
+遗漏。所有结论都要带着任务、层、位置、模型版本和干预实现方式。
+
+在大模型上，ablation 还可能触发补偿。模型原本依赖两个冗余 head，移除一个后另一个
+head 加强作用，最终输出变化很小；这不说明被移除的 head 不重要，只说明行为级指标被
+补偿掩盖。实践中可以同时记录组件激活、路径贡献、目标 logit 和任务成功率，避免只
+依据一个最终指标下结论。
 
 ## 8. Sparse Autoencoder
 
@@ -469,7 +594,7 @@ Gated SAE 的思路是把“是否使用某个方向”和“这个方向的幅�
 4. 更少训练偏差。
 5. 更适合大模型规模。
 
-### 8.6 面向专家
+### 8.6 机制与边界
 
 SAE 的核心假设是 activation 中存在稀疏、可线性组合的 feature basis。
 
@@ -485,7 +610,33 @@ SAE 给了 mechanistic interpretability 可扩展工具，但不自动等于完�
 
 找到 feature 之后，还需要验证它是否因果影响模型行为。
 
-### 8.7 关键公式与机制可解释性指标速查
+### 8.7 SAE 训练中的字典问题
+
+SAE 的训练并不是把神经元逐一翻译成自然语言。它是在一批激活样本上学习一个字典，
+因此数据分布会直接影响最终 feature。只用代码数据训练，得到的 feature 可能对代码结构
+很清晰，却无法解释聊天、工具返回或多模态 token；只取模型已经成功的样本，又会漏掉
+失败轨迹中的安全相关状态。训练 manifest 至少应记录模型 checkpoint、层和位置、激活
+采样策略、上下文长度、词元分布、字典宽度、归一化方式、稀疏惩罚和评估集版本。
+
+字典宽度增加时，模型可能把一个混合 feature 拆成多个更细方向，这叫 feature splitting；
+如果某些字典项几乎从不激活，则形成 dead feature；若很多输入都触发一个 feature，它
+可能只是常量、位置或频率的代理。于是“feature 数越多”“平均激活越少”都不是独立的
+质量结论。需要同时观察重构、激活分布、死特征比例、跨切片稳定性、人工解释一致性和
+干预副作用。
+
+### 8.8 自动命名与因果验证的分工
+
+自动解释器可以根据 feature 的 top activating examples 生成标签，帮助研究者浏览大规模
+字典。但标签是压缩后的假设，可能只描述表面词形，或者把多个触发条件误合并。更稳妥
+的流程是：先用自动方法提出候选描述，再用反例搜索检查边界，最后用 feature ablation
+或 steering 验证它是否改变预期行为。
+
+例如一个 feature 被命名为“拒答”，不能只因为 top examples 中出现拒答句式。还要检查
+它对安全请求、正常否定句、引用他人拒答和工具错误消息的激活差异；若增加该 feature
+只让文本更像拒答，却没有降低高风险任务的 unsafe compliance，标签就不能直接用于安全
+监控。feature 的语义解释、行为相关性和安全因果性应当是三个独立字段。
+
+### 8.9 关键公式与机制可解释性指标
 
 设某层某位置的残差流激活为：
 
@@ -609,20 +760,28 @@ $$
 
 这可以用于 feature-level steering 或 safety monitor 的候选验证，但必须评估副作用。
 
-**10. 机制可解释性门禁**
+**10. 把局部结果记录成机制证据向量**
+
+这些指标回答的问题不同，不宜合并成一个总布尔量。可以把一项局部机制研究记录为：
 
 $$
-G_{interp}=
-\mathbb{1}[
-F_{rec}\ge \tau_{rec}
-\land K_{active}\le \tau_{sparse}
-\land P_k\ge \tau_{purity}
-\land S_{patch}\ge \tau_{patch}
-\land E_{abl}\ge \tau_{abl}
-]
+\mathcal{E}_{mech}=
+(F_{rec},K_{active},P_k,S_{patch},E_{abl})
 $$
 
-真实项目中，\(G_{interp}=1\) 只能说明某个局部机制假设获得了较强证据，不代表模型整体安全。
+其中：
+
+1. \(F_{rec}\) 说明 SAE 是否保留了足够的激活信息。
+2. \(K_{active}\) 说明平均每个样本有多少 feature 被激活。
+3. \(P_k\) 说明某个 feature 的 top 样本是否集中于一个标签。
+4. \(S_{patch}\) 说明指定位置的干预能恢复多少目标行为。
+5. \(E_{abl}\) 说明移除组件后目标行为下降多少。
+
+团队可以为每个信号设定研究用途，例如低 \(F_{rec}\) 触发 SAE 重训，低 \(P_k\) 触发
+反例分析，低 \(S_{patch}\) 触发路径重画，高 \(E_{abl}\) 触发跨切片复验。它们是证据
+和后续动作的记录，不是“解释通过”或“模型安全”的总开关。即使五项都达到研究者
+预先设定的范围，也只能支持某个局部机制假设，仍需检查替代路径、分布外输入和系统
+层面的红队结果。
 
 ## 9. Mechanistic Interpretability 和 Safety
 
@@ -661,13 +820,36 @@ Mechanistic interpretability 试图让我们不只看外部行为，还能理解
 4. 替代红队和评估。
 5. 自动解决 alignment。
 
-面试中要避免夸张。
-
-更稳妥的表述是：
+在安全工程记录中应避免夸张，把方法能支持的结论和暂时不能支持的结论分开：
 
 ```text
 Mechanistic interpretability 是理解和治理模型的重要工具，但目前更适合作为安全评估、调试和研究的一部分，而不是单独的安全保证。
 ```
+
+### 9.4 机制信号怎样进入安全系统
+
+机制分析进入安全工程时，通常有三种用途。第一种是离线调查：在红队失败和正常样本
+上比较激活，提出可能的危险 feature 或绕过路径。第二种是训练诊断：观察安全微调前后
+某类表示是否改变，并检查这种改变是否伴随帮助性退化。第三种是线上辅助监控：把稳定、
+低成本的内部信号作为升级线索，与输出分类器、工具权限和人工复核结合。
+
+第三种用途尤其容易被误解。假设一个 feature monitor 把“是否需要人工复核”标为正类，
+它的漏报率和误报率可以分别写成：
+
+$$
+FNR=\frac{N(\text{危险且未触发})}{N(\text{危险})},\qquad
+FPR=\frac{N(\text{正常但触发})}{N(\text{正常})}
+$$
+
+监控信号的阈值改变会同时影响两者，不能只展示 feature 激活与某个标签的相关系数。高
+风险动作还需要服务端授权和可回滚执行，即使内部 monitor 漏报，系统也不应因此直接执行
+不可逆操作；即使误报增加，也应通过分层升级和抽样复核评估帮助性成本。
+
+此外，机制信号可能被模型版本变化、量化、batching、KV cache、提示模板和多模态编码
+改变。上线前在一种 checkpoint 上找到的方向，不能未经复验直接绑定到另一种 artifact。
+安全工程应把模型版本、层位、tokenizer、精度、推理引擎和 hook 位置写进 manifest，并
+把机制信号与行为结果配对保存。这样当内部信号失效时，仍可由外部策略和权限层承担
+最后一道控制责任。
 
 ## 10. Grokking 和机制分析
 
@@ -685,6 +867,27 @@ Progress measures for grokking 这类工作通过分析小型 Transformer 在 mo
 2. 内部机制可能逐步形成。
 3. 如果能找到 progress measure，就能更早预测能力变化。
 4. 对安全来说，这可能帮助提前发现危险能力或行为倾向。
+
+### 10.1 一个可操作的 progress measure
+
+在 modular addition toy task 中，输入可以表示为两个整数 \(a,b\)，目标是预测：
+
+$$
+y=(a+b)\bmod p
+$$
+
+研究者可以跟踪某个候选 Fourier 方向、特定 attention pattern 或输出读出方向在训练
+过程中的变化。如果训练集准确率还没有明显提升，但候选方向的能量、相位一致性或目标
+logit margin 已经连续变化，这些内部量就可能成为比最终准确率更早的 progress measure。
+
+小白需要注意：它不是“提前看到了未来答案”，而是测量模型内部是否正在形成一种可泛化
+的表示。专家则要检查该 measure 是否真的预测后续泛化，还是只追踪训练集记忆；应使用
+不同随机种子、不同训练/测试划分和未参与选择的 checkpoint 验证，并报告 measure 与
+最终能力之间的时间关系，而不是只展示一条漂亮曲线。
+
+从 toy task 推向 frontier model 时，最大风险是把可观察的内部变量误当成通用预警器。
+模型规模、数据、优化器和架构变化可能产生完全不同的表示坐标；因此 progress measure
+更适合作为研究假设和早期诊断信号，不能替代目标能力评估与安全测试。
 
 ## 11. 真实项目中的使用方式
 
@@ -720,6 +923,31 @@ Progress measures for grokking 这类工作通过分析小型 Transformer 在 mo
 
 但必须验证副作用。
 
+### 11.4 从发现到复验的实验记录
+
+真实项目可以把机制研究分成发现集、验证集和回归集。发现集允许研究者浏览激活、调整
+层位和提出 feature 名称；验证集冻结分析选择，只检验候选机制是否预测新的样本；回归集
+则在模型、提示模板或推理引擎变化后重复测试。三者混用会让研究者不知不觉在同一批
+样本上反复调参，最后把记住样本误认为解释泛化。
+
+每条机制结论至少应附带以下字段：模型 checkpoint、tokenizer 和精度，hook 的层/位置/张量
+语义，clean/corrupted 构造规则，目标指标，干预方式，负对照，样本切片，随机种子，
+搜索范围，失败样本和结论作用域。对 SAE 还要记录字典版本、训练激活来源、稀疏系数、
+死 feature 处理和自动命名器版本。
+
+一个安全调试任务可以这样组织：先从一次可复现的拒答或越权边界失败开始；再比较正常
+请求、风险请求、语义改写和无关主题四个切片；随后对候选 feature 做 patch、ablation
+和反向干预；最后回到行为评估，检查拒答质量、正常帮助性、引用忠实度和工具权限是否
+一起变化。内部激活图只是中间证据，最终修复仍要在产品 harness 中复测。
+
+### 11.5 机制研究的成本边界
+
+Hook 全部层和位置会产生巨大的存储与带宽成本，SAE 训练也会消耗独立计算资源。工程上
+可以先用行为切片缩小范围，再用低频采样、激活缓存、候选层筛选和分层 hook 降低成本；
+但任何筛选都要记录，因为“没有观察到 feature”可能只是没有采到相应位置。若机制研究
+的成本高于一次安全事故的预防收益，团队可以把它定位为离线调查工具，而不是每个请求
+都运行的在线组件。
+
 ## 12. 方法局限
 
 ### 12.1 扩展性问题
@@ -728,13 +956,33 @@ Progress measures for grokking 这类工作通过分析小型 Transformer 在 mo
 
 逐个 circuit 分析成本高。
 
+成本不仅来自参数数量，还来自需要保存的激活数量、候选层与位置组合、干预重复次数和
+人工解释时间。若模型有 \(L\) 层、序列长度为 \(T\)，对每层每个位置做一次候选 patch，
+最朴素的搜索规模就是 \(O(LT)\)；若再乘上 head、feature、样本和负对照，实验量会快速
+增长。实际系统通常先用行为切片、梯度或粗粒度激活统计缩小候选范围，再进行精细干预，
+但这种筛选会改变发现分布，必须保留筛选规则和未筛选的抽样复核。
+
+小模型中的完整 circuit case study 因为组件少、任务简单，容易得到清晰图景；frontier
+模型则可能有并行、冗余和条件化路径。把小模型的“一个 head 负责一个功能”直接外推到
+大模型，会把研究示范误写成架构定律。
+
 ### 12.2 解释不完整
 
 解释一个 circuit 不等于解释整个模型。
 
+机制解释通常选择一个任务、一个层段和一组输入。即使这个局部解释在目标样本上能够
+重建行为，模型仍可能在其他语言、长度、模态、工具上下文或采样温度下使用不同路径。
+研究者应报告解释覆盖的输入分布、输出指标和失败样本，并明确哪些行为没有被解释。对
+安全用途尤其不能把“已解释拒答路径”写成“不存在未解释的危险路径”。
+
 ### 12.3 人类解释偏差
 
 研究者可能给 feature 起一个看似合理但不完整的名字。
+
+标签会反过来影响实验选择：一旦把 feature 命名为“欺骗”，研究者可能只寻找支持该名字
+的样本，忽略它在普通规划、引用或格式控制中的作用。更好的做法是同时保存正例、反例、
+边界例和自动命名的原始证据，使用盲测或多名标注者比较解释一致性，并让行为预测先于
+故事化描述。自然语言名称是索引，不是机制本体。
 
 ### 12.4 因果性困难
 
@@ -742,13 +990,35 @@ Progress measures for grokking 这类工作通过分析小型 Transformer 在 mo
 
 需要 patching、ablation 等验证。
 
+即便做了干预，也要问干预是否只改变了目标变量。置零一个 head 可能破坏归一化统计、
+残差尺度或后续层输入分布；把一个样本的激活复制到另一个样本，可能同时携带位置、
+词频和上下文信息。因果分析需要尽可能小的干预、匹配的对照和干预后状态检查，并把
+“组件必要”“状态充分”“路径特异”分开陈述。
+
 ### 12.5 分布外干预
 
 修改激活可能产生模型训练中没见过的状态。
 
+一个 feature 方向在正常激活范围内有效，不代表把它放大十倍仍然有可解释意义。steering
+强度、层位置和多个方向叠加都可能把状态推到训练分布之外，产生语法退化、过度拒答或
+隐藏副作用。实验应扫描有限强度，记录激活范数、与自然样本的距离和多个帮助性/安全
+指标，而不是只挑一个最漂亮的强度展示。
+
 ### 12.6 安全保证不足
 
 即使理解了一部分机制，也不能证明没有其他危险机制。
+
+机制分析还可能制造新的攻击面：公开 feature 方向、内部 hook 或干预接口可能让有权限
+的使用者更容易改变模型行为。因此安全资料要区分公开方法、内部 artifact 和高风险
+细节；对外只披露足以复核结论的聚合信息。机制解释应与 red teaming、行为评估、权限
+隔离、日志审计和事故响应并行，不能替代其中任何一层。
+
+### 12.7 工具与版本的混杂
+
+解释结果不仅依赖模型，也依赖 tokenizer、框架、权重精度、hook 实现和推理引擎。一个
+在原始 PyTorch forward 上得到的激活位置，迁移到量化 kernel、张量并行或融合算子后，
+可能已经没有相同的张量语义。复制实验时应先验证“抓到的张量确实对应同一计算点”，再
+比较 feature 或 patch 分数；否则看似模型机制变化，实际上可能是工具链变化。
 
 ## 13. 未来可能演化
 
@@ -756,11 +1026,21 @@ Progress measures for grokking 这类工作通过分析小型 Transformer 在 mo
 
 未来需要更多自动化工具帮助发现 feature、命名 feature、验证 circuit。
 
+自动化最先适合做候选生成和重复劳动：批量提取 top activating examples、聚类激活、
+搜索反例、执行固定 patch 网格和生成实验报告。它不应直接把自动标签当作机制结论，
+因为自动解释器同样可能受数据偏差、语言模式和研究者预设影响。更可靠的流水线会把
+候选假设、反例、干预结果和人工审阅分开保存，使人可以回到原始激活检查推断是否越界。
+
 ### 13.2 从小模型到 frontier model
 
 很多机制研究先在小模型上做。
 
 挑战是迁移到大模型。
+
+迁移至少有三种含义：相同功能是否在相同层位出现，相同功能是否由同一种电路实现，
+以及在不同模型上发现的指标是否仍然能预测行为。前两种属于机制相似性，后一种属于
+测量可迁移性，不能用一张相似热图代替。模型规模、训练数据、指令微调、工具使用和
+多模态适配都可能改变内部坐标，因而需要跨 checkpoint、跨任务和跨实现做验证。
 
 ### 13.3 从解释到控制
 
@@ -770,81 +1050,135 @@ Progress measures for grokking 这类工作通过分析小型 Transformer 在 mo
 2. Model editing。
 3. Safety monitor。
 4. Training-time diagnostics。
-5. Release gate。
+5. 反事实实验与安全调试。
+
+控制比解释要求更高。若通过 feature steering 改变了拒答率，必须同时观察正常帮助性、
+事实准确率、工具调用、不同语言和不同用户群体的变化；若通过 model editing 改变了某
+个事实关联，还要检查相邻事实、时间版本和多跳推理是否被意外破坏。内部方向可以成为
+控制输入，但不能绕过服务端授权、输出策略和回滚机制。
+
+一个适合工程决策的记录方式是把“发现了什么”“改变了什么”“副作用是什么”“哪些条件
+仍未测”分开。这样可解释性成果既能进入训练诊断，也能在风险较高时停留在离线研究，
+不会因为研究结果看起来漂亮就被自动接入线上。
 
 ### 13.4 从局部解释到系统保证
 
 长期目标可能是把局部机制解释、行为评估、红队和形式化约束结合，形成更强的安全证据。
 
-但这仍是开放研究方向。
+这条路径可以理解为证据组合，而不是某种单一的“完全解释”：行为评估告诉我们哪里
+失败，机制分析帮助定位可能原因，红队寻找未覆盖变体，权限与策略层限制现实副作用，
+回归测试检查修复是否保持。任一层的证据都带有作用域和盲区，组合后仍要保留这些边界。
 
-## 14. 面试官会怎么问
+对安全团队而言，最实际的长期目标不是给每个参数贴上人类标签，而是让高影响行为有
+更短的定位路径、更清楚的反事实证据和更可复核的修复。完整的形式化保证仍是开放研究
+问题。
 
-### 问题 1：Interpretability 和 Mechanistic Interpretability 有什么区别？
+## 14. 案例：从拒答异常到可验证的机制假设
 
-回答要点：
+一家企业把语言模型接入内部知识助手。系统需要拒绝高风险请求，但也要回答普通的
+合规说明、故障排查和数据字典问题。上线后，团队发现同一类正常问题在不同表达方式下
+表现不一致：直接提问时经常过度拒答，换成包含相同业务含义的表格或引用片段后，回答
+又变得过于宽松。仅看最终文本，团队无法判断是策略分类器、提示模板、模型内部表示，
+还是工具上下文造成了差异。
 
-1. Interpretability 泛指理解模型行为和表示。
-2. Mechanistic interpretability 更强调逆向工程内部机制。
-3. 它希望找到 features、circuits 和因果路径。
-4. 目标是解释模型如何实际计算，而不只是哪些输入相关。
+这个案例不研究任何真实危险内容，而是用抽象的 `safe_request`、`high_risk_request`、
+`quoted_untrusted_text` 和 `normal_boundary` 标签表示四类任务。目标是示范机制研究如何
+形成证据链，而不是展示一套可以绕过安全策略的输入。
 
-标准回答：
+### 14.1 先把行为现象固定下来
 
-```text
-Interpretability 是广义可解释性，包括输入归因、attention 可视化、probing 等。Mechanistic interpretability 更进一步，把模型当作一个被训练出来的程序，试图逆向工程它内部的 features、circuits 和信息流，并通过 ablation、activation patching 等因果干预验证这些机制是否真的影响输出。
-```
+团队先冻结模型版本、system prompt、tokenizer、解码参数、策略服务版本和工具权限，
+再为四类任务各准备训练外的模板。每个任务至少记录：模型是否给出安全替代、是否错误
+拒绝正常任务、是否泄露上下文、是否调用工具以及是否需要人工升级。
 
-### 问题 2：为什么 attention heatmap 不等于解释？
+单次回答不够作为现象定义。团队对每个模板重复解码，并把结果聚合到任务级；同时保留
+原始轨迹，以便区分模型文本、策略服务和工具服务的责任。若只选一个最显眼的拒答案例，
+后续机制解释很容易变成对个别 prompt 的故事。
 
-回答要点：
+### 14.2 提出竞争性假设
 
-1. Attention 权重只说明信息读取模式。
-2. 不说明 value 写入了什么。
-3. 不说明后续层如何使用。
-4. 不一定有因果性。
-5. 需要结合 patching、ablation 和路径分析。
+观察到“正常问题被拒答”后，团队提出三个互相竞争的假设：
 
-### 问题 3：什么是 superposition？
+1. 输入中某些词形触发了过宽的拒答表示，但模型仍然知道如何完成正常任务。
+2. 模型内部的拒答方向没有过宽，真正的问题在外部策略分类器或 system prompt。
+3. 引用片段改变了上下文结构，模型在不同位置使用了不同的工具/证据路径。
 
-回答要点：
+这三种假设都能解释部分现象，所以不能先选中一个 feature 再寻找支持它的例子。机制
+研究的第一步是为每个假设写出可观察预测：哪些 layer/position 应该变化，patch 哪一侧
+应该恢复行为，哪些无关任务不应受到影响，以及外部策略服务在关闭或替换后会发生什么。
 
-1. 模型要表示的 feature 数可能多于维度。
-2. 多个 feature 可能叠加在激活空间中。
-3. 这会导致 neuron polysemantic。
-4. SAE 试图从激活中分解出更可解释的 feature 方向。
+### 14.3 干预设计
 
-### 问题 4：Activation patching 解决什么问题？
+研究者在 white-box 的离线副本上抓取残差流、attention 输出和 SAE feature。对同一任务
+构造 clean/corrupted 对：clean 使用正常说明，corrupted 只改变表达格式或无害上下文
+位置，不改变任务语义。然后依次做：
 
-回答要点：
+1. 在 layer/position 网格上进行 activation patching，寻找行为恢复位置。
+2. 对候选 head、MLP 或 feature 做局部 ablation，测试必要性。
+3. 对候选路径做 path patching，检查恢复是否依赖预期的信息流。
+4. 使用无关位置、均值激活和打乱配对作为负对照。
+5. 在未参与候选选择的模板和语言切片上重复。
 
-1. 判断某个激活是否因果影响输出。
-2. 用 clean/corrupted 输入对。
-3. 把 clean 激活 patch 到 corrupted run。
-4. 看输出是否恢复。
-5. 它比普通 probing 更接近因果验证。
+如果外部策略服务可以独立运行，团队还要做一个服务层消融：保留模型输入和模型版本，
+只替换策略判断。这样可以避免把系统层面的拒答误归因于模型内部。所有干预都在隔离副本
+中执行，不能把内部 hook 或写入接口暴露给生产请求。
 
-### 问题 5：SAE 为什么重要？
+### 14.4 一组 toy 结果应该怎样读
 
-回答要点：
+假设实验观察到：某个候选拒答 feature 在 top 样本中的标签纯度很高；把它从风险请求
+patch 到正常请求后，正常回答概率下降；但把它从正常请求 patch 到风险请求时，风险
+边界并没有完全恢复；对无关位置做同样 patch 也有小幅变化。
 
-1. 单个 neuron 常常 polysemantic。
-2. Superposition 说明 feature 可能是空间方向。
-3. SAE 用稀疏重构学习可解释 feature。
-4. 可用于 feature-level analysis、ablation 和 steering。
-5. 但仍需因果验证，不能自动等于完整机制解释。
+初学者可能会说“找到了拒答 feature”。更准确的说法是：该 feature 与拒答行为有关，
+在一个方向上有局部干预证据，但仍可能携带位置或上下文信息，且不是拒答机制的充分
+解释。无关位置也产生变化，说明需要继续检查残差尺度、层归一化和 patch 的分布外效应。
 
-## 15. 标准回答模板
+专家报告还会给出不同切片的结果：正常问题的误拒率是否下降，真正高风险任务的漏拒率
+是否上升，安全替代质量是否变化，工具调用是否被错误抑制，以及 feature monitor 的
+FNR/FPR 是否在语言和长度切片上稳定。机制解释只有回到这些行为指标，才具有工程价值。
 
-面试中可以这样回答：
+### 14.5 修复和回归
 
-```text
-我会把 interpretability 分成几个层次。最浅层是输入归因和 attention 可视化，它们能提示哪些输入相关，但因果性有限。再往上是 probing 和表示分析，能说明模型激活中是否编码某类信息，但不代表模型实际使用这些信息。更强的是 activation patching、ablation 和 causal tracing，它们通过干预中间激活判断因果作用。
+假设根因最终被定位为外部策略阈值过宽，而模型内部 feature 只是对输入风险的正常响应。
+团队应修策略服务和任务切片，不应直接把 feature 从模型里抹掉。相反，如果模型在策略
+服务关闭时仍出现同样的错误拒答，且 patch/ablation 在 holdout 上复现，才可以把模型训练
+或表示层作为修复候选。
 
-Mechanistic interpretability 的目标是逆向工程模型内部机制，找到 features、circuits 和信息流。这里的难点包括 polysemanticity 和 superposition，即单个 neuron 可能混合多个概念，feature 可能不是 neuron 而是激活空间里的方向。SAE 是当前重要方向之一，它试图从激活中学习稀疏、可解释的 feature。
+修复后至少复测五类任务：原始失败、语义改写、正常边界、真正高风险抽象任务和无关任务。
+还要比较机制信号变化与外部行为变化是否一致。若正常帮助性改善但高风险漏拒增加，
+发布范围应保持受限并继续调查；若行为恢复而机制信号不再稳定，则不能把旧 feature
+monitor 当作线上依据。
 
-对 safety 来说，这些方法可能帮助我们理解幻觉、拒答、jailbreak、危险能力和 steering。但当前它还不能单独证明模型安全，更适合作为 red teaming、safety eval、模型调试和治理的一部分。
-```
+这个案例体现了一个重要原则：可解释性不是给模型贴上“安全”或“不安全”的标签，而是
+帮助团队在多个可能根因之间做可复核的区分，并把修复送回行为、权限和回归系统。
+
+## 15. 资料与证据边界
+
+机制可解释性资料的证据层次差异很大。原始论文和研究机构的技术文章可以支持某种
+方法、toy model 或特定 checkpoint 上的实验结果；教程和开源工具可以支持复现实验路径；
+它们都不能直接证明任意 frontier model 的内部机制，更不能替代生产安全评估。
+
+### 15.1 机制与 circuits
+
+- [Circuits](https://distill.pub/2020/circuits/)：Distill 的视觉模型 circuits 系列，说明从神经元、特征到局部算法的逆向工程思路；结论作用域是所分析的模型和任务。
+- [A Mathematical Framework for Transformer Circuits](https://transformer-circuits.pub/2021/framework/index.html)：给出 Transformer 电路的数学分析框架和 QK/OV 视角；它是分析工具，不是对所有 Transformer 实现的完整证明。
+- [Interpretability in the Wild: A Circuit for Indirect Object Identification in GPT-2 Small](https://arxiv.org/abs/2211.00593)：展示在 GPT-2 Small 上分析 IOI circuit 的案例；规模、任务和组件结论不能直接移植到其他模型。
+
+### 15.2 Superposition 与 SAE
+
+- [Toy Models of Superposition](https://transformer-circuits.pub/2022/toy_model/index.html)：研究 feature 数量超过表示维度时的 superposition toy model；它支持机制假设和可视化直觉，不是大模型 feature 的直接测量。
+- [Towards Monosemanticity: Decomposing Language Models With Dictionary Learning](https://transformer-circuits.pub/2023/monosemantic-features/index.html)：讨论用 dictionary learning 分解语言模型激活的研究结果；应同时关注训练层、激活数据和解释指标。
+- [Scaling Monosemanticity](https://transformer-circuits.pub/2024/scaling-monosemanticity/index.html)：展示更大规模 feature 提取和解释工作；“可提取 feature”仍不等于完整 circuit 或因果安全证明。
+
+### 15.3 因果干预、事实关联与工具
+
+- [Locating and Editing Factual Associations in GPT](https://arxiv.org/abs/2202.05262)：提出 ROME 并使用 causal tracing 分析事实关联；编辑效果、泛化和副作用必须在具体模型上重新测量。
+- [Progress Measures for Grokking via Mechanistic Interpretability](https://arxiv.org/abs/2301.05217)：在 modular addition 等 toy setting 中研究内部进展指标；不能直接当作 frontier 能力预警器。
+- [TransformerLens](https://transformerlensorg.github.io/TransformerLens/)：提供 Transformer 内部激活分析和干预的开源工具文档；工具接口和模型支持范围需要按当前版本核对。
+
+引用这些资料时，应记录论文版本或网页访问时间、模型 checkpoint、层/位置、激活采样、
+干预强度、负对照、指标分母和 holdout 结果。机构博客或产品页面可以说明研究方向和
+公开声明，但涉及“发现了某个机制”“提高了安全性”的句子，仍需回到可复现实验和作用域。
 
 ## 16. 常见误区
 
@@ -985,7 +1319,7 @@ feature_names = ["code_feature", "refusal_feature", "name_feature"]
 mean_residual = mean_vector(residuals)
 sse = sum(squared_error(row, rec) for row, rec in zip(residuals, reconstructions))
 sst = sum(squared_error(row, mean_residual) for row in residuals)
-reconstruction_fidelity = round(1 - sse / sst, 3)
+reconstruction_fidelity = ratio(sst - sse, sst)
 
 active_threshold = 0.5
 active_counts = [
@@ -1026,14 +1360,55 @@ metrics = {
     "refusal_intervention_effect": intervention_effects["boost_refusal_feature"],
 }
 
-gates = {
-    "patch_causal": metrics["best_patch_score"] >= 0.75,
-    "ablation_effect": metrics["max_ablation_effect"] >= 1.0,
-    "path_patch": metrics["best_path_score"] >= 0.7,
-    "reconstruction": metrics["reconstruction_fidelity"] >= 0.95,
-    "sparsity": metrics["avg_active_features"] <= 1.5,
-    "purity": metrics["min_feature_purity"] >= 0.9,
-    "feature_intervention": metrics["refusal_intervention_effect"] >= 0.5,
+thresholds = {
+    "patch_causal": {"operator": ">=", "value": 0.75},
+    "ablation_effect": {"operator": ">=", "value": 1.0},
+    "path_patch": {"operator": ">=", "value": 0.7},
+    "reconstruction": {"operator": ">=", "value": 0.95},
+    "sparsity": {"operator": "<=", "value": 1.5},
+    "purity": {"operator": ">=", "value": 0.9},
+    "feature_intervention": {"operator": ">=", "value": 0.5},
+}
+
+signals = {
+    "patch_causal": metrics["best_patch_score"],
+    "ablation_effect": metrics["max_ablation_effect"],
+    "path_patch": metrics["best_path_score"],
+    "reconstruction": metrics["reconstruction_fidelity"],
+    "sparsity": metrics["avg_active_features"],
+    "purity": metrics["min_feature_purity"],
+    "feature_intervention": metrics["refusal_intervention_effect"],
+}
+
+
+def meets_threshold(signal, threshold):
+    if threshold["operator"] == ">=":
+        return signal >= threshold["value"]
+    if threshold["operator"] == "<=":
+        return signal <= threshold["value"]
+    raise ValueError(f"unsupported operator: {threshold['operator']}")
+
+
+evidence_status = {
+    name: meets_threshold(signals[name], threshold)
+    for name, threshold in thresholds.items()
+}
+
+actions = {
+    "patch_causal": "replicate_patch_on_holdout",
+    "ablation_effect": "test_component_redundancy",
+    "path_patch": "check_upstream_and_downstream_paths",
+    "reconstruction": "review_sae_dictionary_fidelity",
+    "sparsity": "inspect_feature_activation_distribution",
+    "purity": "search_feature_counterexamples",
+    "feature_intervention": "run_behavioral_side_effect_regression",
+}
+
+decision = {
+    "scope": "local_mechanism_hypothesis",
+    "status": "collect_holdout_and_behavioral_evidence",
+    "evidence_status": evidence_status,
+    "next_actions": list(actions.values()),
 }
 
 print("patch_scores=", patch_scores)
@@ -1041,8 +1416,11 @@ print("ablation_effects=", ablation_effects)
 print("path_scores=", path_scores)
 print("purity=", purity)
 print("metrics=", metrics)
-print("gates=", gates)
-print("local_mechanism_evidence=", all(gates.values()))
+print("thresholds=", thresholds)
+print("signals=", signals)
+print("evidence_status=", evidence_status)
+print("actions=", actions)
+print("decision=", decision)
 ```
 
 预期输出：
@@ -1053,8 +1431,11 @@ ablation_effects= {'previous_token_head': 0.5, 'name_mover_head': 0.8, 'refusal_
 path_scores= {'refusal_feature_to_output': 0.75, 'name_head_to_output': 0.583}
 purity= {'code_feature': 1.0, 'refusal_feature': 1.0, 'name_feature': 1.0}
 metrics= {'best_patch': 'layer2_pos3', 'best_patch_score': 0.8, 'max_ablation_effect': 1.6, 'best_path_score': 0.75, 'reconstruction_fidelity': 0.993, 'avg_active_features': 1.0, 'min_feature_purity': 1.0, 'refusal_intervention_effect': 0.8}
-gates= {'patch_causal': True, 'ablation_effect': True, 'path_patch': True, 'reconstruction': True, 'sparsity': True, 'purity': True, 'feature_intervention': True}
-local_mechanism_evidence= True
+thresholds= {'patch_causal': {'operator': '>=', 'value': 0.75}, 'ablation_effect': {'operator': '>=', 'value': 1.0}, 'path_patch': {'operator': '>=', 'value': 0.7}, 'reconstruction': {'operator': '>=', 'value': 0.95}, 'sparsity': {'operator': '<=', 'value': 1.5}, 'purity': {'operator': '>=', 'value': 0.9}, 'feature_intervention': {'operator': '>=', 'value': 0.5}}
+signals= {'patch_causal': 0.8, 'ablation_effect': 1.6, 'path_patch': 0.75, 'reconstruction': 0.993, 'sparsity': 1.0, 'purity': 1.0, 'feature_intervention': 0.8}
+evidence_status= {'patch_causal': True, 'ablation_effect': True, 'path_patch': True, 'reconstruction': True, 'sparsity': True, 'purity': True, 'feature_intervention': True}
+actions= {'patch_causal': 'replicate_patch_on_holdout', 'ablation_effect': 'test_component_redundancy', 'path_patch': 'check_upstream_and_downstream_paths', 'reconstruction': 'review_sae_dictionary_fidelity', 'sparsity': 'inspect_feature_activation_distribution', 'purity': 'search_feature_counterexamples', 'feature_intervention': 'run_behavioral_side_effect_regression'}
+decision= {'scope': 'local_mechanism_hypothesis', 'status': 'collect_holdout_and_behavioral_evidence', 'evidence_status': {'patch_causal': True, 'ablation_effect': True, 'path_patch': True, 'reconstruction': True, 'sparsity': True, 'purity': True, 'feature_intervention': True}, 'next_actions': ['replicate_patch_on_holdout', 'test_component_redundancy', 'check_upstream_and_downstream_paths', 'review_sae_dictionary_fidelity', 'inspect_feature_activation_distribution', 'search_feature_counterexamples', 'run_behavioral_side_effect_regression']}
 ```
 
 这个 demo 的重点不是数值本身，而是机制可解释性报告应该同时包含：
@@ -1064,6 +1445,7 @@ local_mechanism_evidence= True
 3. 表示分解质量：SAE reconstruction fidelity 和 sparsity。
 4. 可解释性质量：feature purity。
 5. 安全使用边界：feature intervention 有效果，但仍然只说明局部机制有证据，不能证明模型整体安全。
+6. 决策范围：当前结果只支持在 holdout 和行为回归中继续验证，不能直接改变生产策略或工具权限。
 
 ## 19. 本章总结
 
@@ -1081,4 +1463,4 @@ Sparse Autoencoder 试图从激活空间中分解出更稀疏、更可解释的 
 
 Mechanistic interpretability 对 safety 有潜在价值，可以帮助理解幻觉、拒答、jailbreak、steering 和危险能力，但目前仍不能单独提供安全保证。
 
-面试中要把它讲成一个方法谱系：从输入归因，到表示分析，到因果干预，再到机制逆向和安全治理。
+理解这章可以抓住一条方法谱系：从输入归因，到表示分析，到因果干预，再到机制逆向和安全治理。

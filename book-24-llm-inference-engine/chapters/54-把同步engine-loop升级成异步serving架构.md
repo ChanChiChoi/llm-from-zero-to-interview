@@ -40,9 +40,9 @@ while engine_has_work():
 
 本章就把 mini engine 从一个同步 loop 升级成异步 serving 架构。
 
-## 54.0 本讲资料边界与第二轮精修口径
+## 54.0 本讲范围与资料
 
-本章按第二轮精修口径，只讲教学版单机 serving engine 如何从同步 loop 升级成有异步边界的 runtime。
+本章聚焦教学版单机 serving engine 如何从同步 loop 升级成有异步边界的 runtime。
 
 公开资料校准主要参考四类口径：
 
@@ -57,7 +57,7 @@ while engine_has_work():
 API admission -> tokenizer queue -> engine input queue -> engine core loop -> output queue -> per-client stream queue -> cancel / backpressure cleanup
 ```
 
-第二轮新增 demo 的验收重点是：API 不直接改 engine 状态；tokenizer 与 engine 解耦；engine 每轮 drain 有上限；OutputProcessor 不直接写网络；慢 client 只取消自己；client disconnect 进入 cancel queue；cancel 和 cleanup 幂等；所有关键队列有上限并可观测。
+本章 demo 的验收重点是：API 不直接改 engine 状态；tokenizer 与 engine 解耦；engine 每轮 drain 有上限；OutputProcessor 不直接写网络；慢 client 只取消自己；client disconnect 进入 cancel queue；cancel 和 cleanup 幂等；所有关键队列有上限并可观测。
 
 ## 54.1 本章目标
 
@@ -910,7 +910,7 @@ bug 十：没有请求状态机。
 验证异步化是否有效不能只看吞吐，要看 TTFT、TPOT、E2E、engine step duration、GPU busy time、tokenizer queue wait、output queue wait、cancel cleanup latency 等指标。如果异步化后 GPU loop 更稳定、慢 client 不影响整体 TPOT、队列不长期积压，才说明架构拆分有效。
 ```
 
-## 54.20 异步 serving 架构公式、背压门禁和可运行 demo
+## 54.20 异步 serving 架构公式、背压验收条件和可运行 demo
 
 把同步 loop 拆成异步组件后，可以先把一次请求的端到端时间拆成：
 
@@ -944,13 +944,13 @@ N_t^{\mathrm{drain}}\le D_{\max}
 L_i^{\mathrm{cancel}}=t_i^{\mathrm{cleanup}}-t_i^{\mathrm{signal}}
 ```
 
-状态所有权门禁：
+状态所有权验收条件：
 
 ```math
 G_{\mathrm{owner}}=G_{\mathrm{api,msg}}G_{\mathrm{tok,msg}}G_{\mathrm{out,msg}}G_{\mathrm{engine,mut}}
 ```
 
-最终异步 serving 架构门禁：
+最终异步 serving 架构验收条件：
 
 ```math
 G_{\mathrm{async}}=G_{\mathrm{admit}}G_{\mathrm{tok}}G_{\mathrm{drain}}G_{\mathrm{outq}}G_{\mathrm{stream}}G_{\mathrm{cancel}}G_{\mathrm{owner}}G_{\mathrm{cleanup}}G_{\mathrm{isolate}}G_{\mathrm{queue}}

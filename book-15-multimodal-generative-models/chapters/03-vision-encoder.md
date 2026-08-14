@@ -4,9 +4,9 @@ Vision encoder 是多模态模型感知图像的入口。无论是 CLIP 图文�
 
 本章目标是讲清 vision encoder 的作用、CNN 和 ViT 的区别、patch embedding 的直觉、CLIP/SigLIP 这类对齐型视觉编码器、视觉特征层选择、分辨率与 token 数、OCR 和细粒度场景的挑战，以及在 VLM 中如何选择和使用 vision encoder。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-第二轮精修前，本讲按 `WRITING_PLAN.md` 核对了 ResNet、ViT、CLIP 官方代码和 SigLIP 论文资料。这里不做完整视觉模型史，而是围绕大模型算法岗最常追问的 vision encoder 入口来写：
+本章参考 ResNet、ViT、CLIP 官方代码和 SigLIP 论文资料。这里不做完整视觉模型史，而是围绕大模型算法岗最常追问的 vision encoder 入口来写：
 
 1. ResNet 代表 CNN 残差学习路线，重点是 residual connection 让更深网络更容易优化，适合解释 CNN 的局部归纳偏置和分层视觉特征。
 2. ViT 论文的关键口径是：把图片切成 patch 序列，直接送入 Transformer；当有大规模预训练数据时，纯 Transformer 视觉模型可以取得很强效果。
@@ -14,7 +14,7 @@ Vision encoder 是多模态模型感知图像的入口。无论是 CLIP 图文�
 4. SigLIP 仍属于图文对齐视觉编码器路线，但用 pairwise sigmoid loss 替代全局 softmax 归一化，工程上常作为现代 VLM 的视觉塔选择之一。
 5. 本章聚焦 CNN / ViT / patch embedding / CLS 与 patch tokens / 分辨率 token 成本 / CLIP vision tower / projector 前的视觉特征选择，不展开检测分割网络、DETR、SAM、OCR 专用模型、视频 encoder 或 VLM 全架构细节。
 
-本章第二轮重点是把 vision encoder 相关 shape、token 数、参数量、attention 成本和分辨率取舍写成可检查公式，并补一个无依赖 demo，帮助读者在面试中手算视觉 token 和成本。
+本章重点是把 vision encoder 相关 shape、token 数、参数量、attention 成本和分辨率取舍写成可检查公式，并补一个无依赖 demo，帮助读者在面试中手算视觉 token 和成本。
 
 ## 3.1 Vision Encoder 解决什么问题
 

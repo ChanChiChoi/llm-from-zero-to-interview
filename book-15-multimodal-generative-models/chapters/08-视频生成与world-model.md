@@ -4,9 +4,9 @@
 
 本章目标是建立视频生成的主线：视频数据表示、时空 token、video diffusion、时序一致性、文生视频、图生视频、Sora 类路线、world model 直觉、物理一致性、评估和安全风险。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲第二轮精修前，重点核对了 Video Diffusion Models、Imagen Video、Make-A-Video、Phenaki、Lumiere、VideoPoet、Sora 公开技术说明、World Models 和 Dreamer / latent dynamics 相关资料，以及 FVD 等视频生成评估指标。正文只吸收公开、稳定、适合面试表达的共识，不把任何闭源视频模型的未公开训练配方、数据来源、模型规模或安全策略写成确定事实。
+本章参考 Video Diffusion Models、Imagen Video、Make-A-Video、Phenaki、Lumiere、VideoPoet、Sora 公开技术说明、World Models 和 Dreamer / latent dynamics 相关资料，以及 FVD 等视频生成评估指标。正文只吸收公开、稳定、适合面试表达的共识，不把任何闭源视频模型的未公开训练配方、数据来源、模型规模或安全策略写成确定事实。
 
 本章聚焦：
 

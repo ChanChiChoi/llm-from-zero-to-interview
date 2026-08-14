@@ -1,14 +1,14 @@
 # 第四章：MHA、MQA、GQA、MLA 的演进与 Trade-off
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本章第二轮精修以公开论文、技术报告和前序章节为资料边界：Transformer 原论文对 MHA 的定义，Shazeer 的 MQA 论文对增量解码内存带宽瓶颈的说明，Ainslie 等人的 GQA 论文对 MHA / MQA 折中和 uptraining 的讨论，Mistral 7B 技术报告中 GQA 与 Sliding Window Attention 的公开用法，DeepSeek-V2 / V3 技术报告中 MLA 对 KV cache 的低秩联合压缩设计，vLLM / PagedAttention 论文对 serving 侧 KV cache 分页管理的说明，以及 FlashAttention-2 对 attention kernel IO 和并行划分的优化边界。
+本章以公开论文、技术报告和前序章节为资料边界：Transformer 原论文对 MHA 的定义，Shazeer 的 MQA 论文对增量解码内存带宽瓶颈的说明，Ainslie 等人的 GQA 论文对 MHA / MQA 折中和 uptraining 的讨论，Mistral 7B 技术报告中 GQA 与 Sliding Window Attention 的公开用法，DeepSeek-V2 / V3 技术报告中 MLA 对 KV cache 的低秩联合压缩设计，vLLM / PagedAttention 论文对 serving 侧 KV cache 分页管理的说明，以及 FlashAttention-2 对 attention kernel IO 和并行划分的优化边界。
 
 本章只讨论公开可验证的 attention 架构与 serving 成本关系；不推断闭源模型的未公开实现，不把 DeepSeek-V2 报告中的具体节省比例机械推广到所有模型，也不把 toy demo 的选型分数当成真实 benchmark。
 
-第二轮补强重点有三点：
+本章重点有三点：
 
-1. 将 KV cache 显存、KV head 比例、GQA 特例、MLA latent cache 和架构门禁改成稳定 MathJax 表达。
+1. 将 KV cache 显存、KV head 比例、GQA 特例、MLA latent cache 和架构验收条件改成稳定 MathJax 表达。
 2. 明确 FlashAttention、PagedAttention、MQA / GQA / MLA 分别位于 kernel、serving memory manager 和 model architecture 三个层面。
 3. 补一个 0 依赖 Python demo，审计 MHA / GQA / MQA / MLA 的 cache MiB、相对节省率、quality gate、maturity gate 和 serving 选型。
 
@@ -458,7 +458,7 @@ Query head 到 KV head 的共享比例：
 \rho_{\mathrm{qkv}}=\frac{H_q}{H_{\mathrm{kv}}}
 ```
 
-一个简化上线门禁可以写成：
+一个简化上线准入条件可以形式化为：
 
 ```math
 G_{\mathrm{attn}}=\mathbb{1}[q_i\ge\tau_q\land S_{\mathrm{save}}(a_i)\ge\tau_s\land m_i\ge\tau_m]
@@ -543,7 +543,91 @@ ready=['gqa_8kv']
 best_ready=gqa_8kv
 ```
 
-这段 demo 的重点是：MHA 质量最稳但 cache 太大，MQA cache 最小但可能有质量门禁，MLA cache 很省但实现成熟度和复现成本要单独评估，GQA 常成为通用 serving 的稳健折中。
+这段 demo 的重点是：MHA 质量最稳但 cache 太大，MQA cache 最小但可能有质量验收条件，MLA cache 很省但实现成熟度和复现成本要单独评估，GQA 常成为通用 serving 的稳健折中。
+
+### 4.14.2 前沿模型把注意力从“选多少 KV head”推进到“如何表示历史状态”
+
+前面的 MHA、MQA、GQA、MLA 是一条清晰的演进轴，但 2026 年的新模型已经出现另一条轴：模型不一定把每个历史 token 都保存成显式 K/V，也可以用递归状态、门控线性注意力或局部/全局混合注意力来表示历史。
+
+小白可以先记住一句话：
+
+```text
+GQA/MLA 主要是在“少存一些 K/V”上做文章；KDA、Gated DeltaNet 等混合架构则是在“历史信息应该以什么状态存在”上重新设计。
+```
+
+#### 4.14.2.1 从 KV head 到状态类型
+
+设一个模型包含 `L_a` 个显式 attention 层和 `L_r` 个递归或线性注意力层。显式 attention 层通常按 token 保存 K/V；递归层则把历史压缩进状态 `S_t`。教学上可以写成：
+
+```math
+S_t=\alpha_t\odot S_{t-1}+u_t v_t^{\top}
+```
+
+```math
+y_t=\frac{q_t^{\top}S_t}{z_t+\epsilon}
+```
+
+这里 `alpha_t` 是由输入和门控产生的遗忘/衰减项，`u_t`、`v_t` 是当前 token 写入状态的向量，`z_t` 是可选归一化状态。真实模型可能使用不同的参数化、分块状态和 kernel；上式只用于说明“历史由固定大小状态递归更新”，不是某个模型的完整实现。
+
+对比而言，标准 attention 的历史成本近似是：
+
+```math
+M_{\mathrm{attn}}\approx 2BLT H_{\mathrm{kv}}d_h b
+```
+
+递归状态的成本更接近：
+
+```math
+M_{\mathrm{state}}\approx BL_r d_k d_v b
+```
+
+因此，线性/递归层在超长上下文下有机会把随 `T` 增长的 cache 变成近似固定大小的状态；代价是状态压缩可能丢失精确的任意 token 检索能力，且 GPU 上的矩阵更新不一定比成熟的 FlashAttention kernel 更快。
+
+#### 4.14.2.2 用公开模型校准这条演进线
+
+下表只记录已经能从模型卡、官方文档或一方产品页核对到的结构信号。参数和上下文长度不是本章重点，列出它们是为了帮助读者理解 total parameters、active parameters 和 attention 结构之间的关系。
+
+| 模型或系列 | 公开结构信号 | 对本章的启发 | 证据边界 |
+|---|---|---|---|
+| Kimi K3 | `3 KDA + 1 Gated MLA`，约 `2.8T total / 104B active` | 递归状态与 latent attention 可以组合，不能再用“KV head 数”解释全部 cache | 官方模型卡；实现细节以模型卡为准 |
+| DeepSeek-V4-Pro / Flash | CSA 与 HCA 混合注意力，约 `1.6T / 49B` 和 `284B / 13B` | 长上下文优化同时涉及注意力模式和 active compute | 官方模型卡；参数为模型卡披露 |
+| Qwen3.5 / Qwen3.6 | Gated DeltaNet 与 Gated Attention 组合 | 线性/递归层和显式 attention 可以按层混合 | 官方模型卡；不要把它简化成纯 linear attention |
+| Gemma 4 | local sliding-window attention + global attention，并使用 p-RoPE 等位置机制 | 局部层降低 pair 数，全局层保留远距离路由，属于 pattern 级折中 | 官方 model card |
+| North Mini Code | `3:1` sliding-window RoPE 与 global NoPE 的组合 | NoPE 是某些层的显式位置处理选择，不等于模型完全没有顺序信息 | 官方模型卡 |
+
+其中，“total / active”必须谨慎阅读。对于有 `E` 个专家、每个 token 选择 `k` 个专家的 MoE，可以用一个简化公式表示：
+
+```math
+P_{\mathrm{total}}=P_{\mathrm{shared}}+E P_{\mathrm{expert}}+P_{\mathrm{router}}
+```
+
+```math
+P_{\mathrm{active}}=P_{\mathrm{shared}}+k P_{\mathrm{expert}}+P_{\mathrm{router}}
+```
+
+`P_active` 不是“每一步真实 FLOPs”的严格等价物。通信、shared layer、router、padding、expert capacity、量化格式和 kernel 利用率都会改变实际成本。面试中更准确的说法是：
+
+```text
+active parameters 描述每个 token 参与计算的参数子集；它不能单独推出延迟、吞吐或显存。
+```
+
+#### 4.14.2.3 如何把模型宣传语翻译成工程问题
+
+看到“1M context”“linear attention”“hybrid attention”时，至少要追问以下问题：
+
+1. 1M 是 API 的最大输入限制、模型训练上下文，还是在特定模板和推理设置下通过的评测长度？
+2. 全部层都是线性/递归层，还是只有部分层使用状态压缩，其他层仍保存完整 KV？
+3. 全局层的数量、位置模式和 KV cache 是否公开？
+4. 状态是否支持 prefix sharing、beam search、batch 合并和 checkpoint 恢复？
+5. 长上下文的质量是否有 needle retrieval 之外的多文档、代码和跨段推理评测？
+
+因此，架构选型不能只看“cache 减少百分比”。应同时测量：
+
+```math
+\mathrm{Cost}=f(\mathrm{prefill\ time},\mathrm{decode\ time},\mathrm{state\ memory},\mathrm{quality},\mathrm{kernel\ maturity})
+```
+
+对专家而言，这一节的核心变化是：attention 架构的 trade-off 已经从单一的 `H_kv / H_q` 比例，扩展为“显式 token cache、压缩 latent cache、递归状态、局部窗口和全局层”之间的组合优化。
 
 ## 4.15 常见误区
 

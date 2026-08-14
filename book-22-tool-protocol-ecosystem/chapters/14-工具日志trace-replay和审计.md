@@ -1,10 +1,10 @@
 # 第十四章：工具日志、Trace、Replay 和审计
 
-## 14.0 本讲资料边界与第二轮精修口径
+## 14.0 本讲范围与资料
 
-本讲按第二轮精修要求，重点补齐工具日志、trace、replay 和审计的指标公式、变量解释和最小可运行 demo。资料边界对齐 OpenAI Agents SDK tracing 对 trace、span、processor 和 workflow 可观测性的抽象，OpenTelemetry 对 trace / span / context propagation 的通用语义，W3C Trace Context 对跨服务 traceparent / tracestate 传播的标准化要求，以及 MCP logging 对工具协议内日志消息、级别和进度通知的边界。
+本章重点补齐工具日志、trace、replay 和审计的指标公式、变量解释和最小可运行 demo。资料边界对齐 OpenAI Agents SDK tracing 对 trace、span、processor 和 workflow 可观测性的抽象，OpenTelemetry 对 trace / span / context propagation 的通用语义，W3C Trace Context 对跨服务 traceparent / tracestate 传播的标准化要求，以及 MCP logging 对工具协议内日志消息、级别和进度通知的边界。
 
-本章只抽象生产工具调用系统的稳定可观测层，不绑定某一家 provider 的 trace 字段、SDK 回调、日志平台、存储后端或审计产品。重点不是“多打日志”，而是证明每一次模型意图、工具选择、参数变化、权限判定、执行结果、脱敏动作、审计事件和 replay 证据都有结构化记录，并且能在隐私和权限边界内用于调试、评估、追责和回归。
+本章聚焦生产工具调用系统的稳定可观测层，不绑定某一家 provider 的 trace 字段、SDK 回调、日志平台、存储后端或审计产品。重点不是“多打日志”，而是证明每一次模型意图、工具选择、参数变化、权限判定、执行结果、脱敏动作、审计事件和 replay 证据都有结构化记录，并且能在隐私和权限边界内用于调试、评估、追责和回归。
 
 ## 14.1 本章定位
 
@@ -691,7 +691,7 @@ C_{\mathrm{eval}}=
 
 指标导出要覆盖 tool success、latency、error rate、permission denied 和 trace missing 等核心监控；告警要有 owner；eval 链接表示 trace 能进入失败样本库、离线回归集或 golden trace 对比。
 
-综合门禁可以写成：
+综合验收条件可以形式化为：
 
 ```math
 G_{\mathrm{trace}}=
@@ -712,7 +712,7 @@ C_{\mathrm{trace}}\ge \tau_{\mathrm{trace}}
 ]
 ```
 
-下面的 demo 用 0 依赖 Python 模拟一批工具 trace。输入是 list-of-dict，每个 dict 代表一条工具调用链路；输出是 trace / replay / audit 指标、失败样本、失败门禁和最终是否通过上线门禁。
+下面的 demo 用 0 依赖 Python 模拟一批工具 trace。输入是 list-of-dict，每个 dict 代表一条工具调用链路；输出是 trace / replay / audit 指标、失败样本、失败验收条件和最终是否通过上线条件。
 
 ```python
 REQUIRED_TRACE = {"run_id", "turn_id", "tool_call_id", "execution_id", "tool_name", "status", "latency_ms"}
@@ -1175,7 +1175,7 @@ failed_gates= ['id_tree_integrity', 'version_capture_coverage', 'argument_lineag
 trace_replay_gate_pass= False
 ```
 
-这个结果故意不通过门禁，因为 toy 数据里存在 span tree 断链、trace id 不一致、版本缺失、参数 lineage 缺失、权限缺 reason、结果未投影、PII 未脱敏、审计事件缺 actor、有副作用工具 live replay、指标导出缺失、告警无 owner 和 eval 链接缺失。面试中要强调：Trace / Replay 不是排障时临时补日志，而是工具调用系统的事实层。
+这个结果故意不通过验收，因为 toy 数据里存在 span tree 断链、trace id 不一致、版本缺失、参数 lineage 缺失、权限缺 reason、结果未投影、PII 未脱敏、审计事件缺 actor、有副作用工具 live replay、指标导出缺失、告警无 owner 和 eval 链接缺失。面试中要强调：Trace / Replay 不是排障时临时补日志，而是工具调用系统的事实层。
 
 ## 14.22 常见错误
 

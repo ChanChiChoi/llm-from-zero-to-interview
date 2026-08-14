@@ -8,9 +8,9 @@
 
 > AI Infra 面试的核心，是证明你既懂大模型任务特性，又懂分布式系统、GPU 集群、平台工程和生产治理。
 
-## 59.0 本讲资料边界与第二轮精修口径
+## 59.0 本讲范围与资料
 
-本章是第二十三册前 58 章的面试压缩版，不重新展开每个系统的完整设计。第二轮精修时按下面口径校准：
+本章是第二十三册前 58 章的面试压缩版，不重新展开每个系统的完整设计。本章时按下面口径校准：
 
 1. Kubernetes Job 只作为通用批任务控制器边界，用来解释 TrainingJob 为什么还需要训练语义、分布式 launcher、checkpoint、实验追踪、artifact 和权限成本治理。
 2. vLLM / TGI / Triton / SGLang 只作为推理 runtime 例子，不把任何单个 runtime 写成唯一标准答案。回答推理题时要落到 prefill、decode、TTFT、TPOT、KV cache、continuous batching、queue 和 token throughput。
@@ -51,7 +51,7 @@ C_{\mathrm{trade}}=\frac{|U_{\mathrm{covered}}|}{|U_{\mathrm{required}}|}
 S_{\mathrm{avg}}=\frac{1}{N}\sum_{i=1}^{N}s_i,\qquad R_{\mathrm{red}}=\frac{N_{\mathrm{red}}}{N}
 ```
 
-最后用一个门禁判断是否可以进入正式面试：
+最后用一个验收条件判断是否可以进入正式面试：
 
 ```math
 G_{\mathrm{interview}}=\mathbf{1}\left[
@@ -310,7 +310,7 @@ Agent Runtime 执行多步任务，控制最大 step、超时、工具调用、�
 ```text
 评估平台包括 Eval Dataset Registry、Eval Suite Registry、Eval Job Scheduler、Inference Runner、Metric Engine、LLM Judge、Human Review、Sample Result Store、Report Generator 和 Quality Gate。
 
-Eval dataset、prompt、metric definition、judge model、inference config 都要版本化。平台要支持离线批量评测、LLM-as-Judge、人工评测、slice evaluation、sample-level failure analysis、在线 A/B 和发布门禁。
+Eval dataset、prompt、metric definition、judge model、inference config 都要版本化。平台要支持离线批量评测、LLM-as-Judge、人工评测、slice evaluation、sample-level failure analysis、在线 A/B 和发布条件。
 ```
 
 重点：评估平台不是 benchmark 脚本。
@@ -486,7 +486,7 @@ D_q=\max_r \frac{u_{q,r}}{c_{q,r}},\qquad
 
 ## 59.28 AI Infra 面试准备度指标和最小 demo
 
-下面这个 0 依赖 demo 把一轮 mock interview 的回答抽象成结构化记录。它故意构造 1 个完整回答和 16 个只缺一个关键门禁的坏回答，用来验证哪些题目会因为缺公式、缺 demo、缺风险边界、缺生产证据而被阻断。
+下面这个 0 依赖 demo 把一轮 mock interview 的回答抽象成结构化记录。它故意构造 1 个完整回答和 16 个只缺一个关键验收条件的坏回答，用来验证哪些题目会因为缺公式、缺 demo、缺风险边界、缺生产证据而被阻断。
 
 ```python
 from copy import deepcopy
@@ -577,7 +577,7 @@ class MiniAIInfraInterviewReadinessAudit:
             "ttft_tpot_kv_formula": "手写 TTFT 拆分、TPOT 和 KV cache 显存公式，并说明变量含义。",
             "rag_agent_permission_trace": "补 RAG ACL filter、tool permission、trace / replay 和 human confirmation。",
             "model_registry_release_gate": "补 ModelVersion、ReleaseManifest、eval / safety gate、canary 和 rollback。",
-            "eval_platform_reproducibility": "补 eval dataset、metric、judge、sample result、artifact lineage 和回归门禁。",
+            "eval_platform_reproducibility": "补 eval dataset、metric、judge、sample result、artifact lineage 和回归验收条件。",
             "observability_correlation": "补 request id / job id / model version 关联 metrics、logs、traces 和 events。",
             "slo_error_budget_readiness": "补 SLI、SLO、错误预算、burn rate alert 和发布冻结规则。",
             "cost_governance": "补 GPU hours、tokens、cache、storage、网络和 cost per 1k tokens 归因。",
@@ -734,7 +734,7 @@ print("ai_infra_interview_gate_pass=", result["ai_infra_interview_gate_pass"], s
 
 输出里的 `0.941` 来自 16/17：1 个完整样本通过，16 个坏样本各自暴露一个缺口。真实复盘时不要追求把脚本写复杂，而是把每道弱题绑定到“一个缺失主题、一个缺失公式、一个缺失 demo、一个风险边界和一个下一步修复动作”。
 
-## 59.29 高频扣分点总结
+## 59.29 高频扣分点与修复线索
 
 常见扣分点：
 

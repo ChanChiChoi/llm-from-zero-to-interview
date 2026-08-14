@@ -12,9 +12,9 @@
 
 > Skill Manifest 的目标不是“描述得好看”，而是让平台、Agent、管理员和用户都能可靠理解这个 Skill 能做什么、需要什么、会影响什么、如何评估。
 
-## 35.0 本讲资料边界与第二轮精修口径
+## 35.0 本讲范围与资料
 
-本章第二轮精修时，重点核对了 Agent Skills 开放规范中 `SKILL.md`、frontmatter、description、scripts / references / assets、progressive disclosure 和 eval 的口径，MCP Specification 中 tools / resources / prompts 的结构化对象边界，OpenAI Apps SDK / Actions 公开资料中 tool descriptor、component / resource 和 action 接入的工程抽象，以及 Microsoft Copilot Studio 等平台对 actions、plugins、connectors、workflows 和 agents 的常见产品命名。
+本章参考 Agent Skills 开放规范中 `SKILL.md`、frontmatter、description、scripts / references / assets、progressive disclosure 和 eval 的口径，MCP Specification 中 tools / resources / prompts 的结构化对象边界，OpenAI Apps SDK / Actions 公开资料中 tool descriptor、component / resource 和 action 接入的工程抽象，以及 Microsoft Copilot Studio 等平台对 actions、plugins、connectors、workflows 和 agents 的常见产品命名。
 
 需要先划清边界：
 
@@ -22,7 +22,7 @@
 2. Manifest 不是宣传文案，而是服务发现、路由、权限审核、安全治理、版本管理、eval 和安装治理共同使用的结构化入口。
 3. 能力描述要服务于触发和不触发的边界，不能只写“强大助手”“万能办公”这类无法路由、无法评估的描述。
 4. 权限、资源、工具、prompt、workflow、配置、安全策略和 eval 应该能被平台读取和强制执行，而不是只写在人类说明里。
-5. 本章新增的公式和 Python demo 是教学用 manifest 审计器，不实现真实 marketplace、安装器、权限系统、tool runtime、prompt registry 或 eval 平台。
+5. 本章补充的公式和 Python demo 是教学用 manifest 审计器，不实现真实 marketplace、安装器、权限系统、tool runtime、prompt registry 或 eval 平台。
 
 ## 35.1 为什么 Manifest 很重要
 
@@ -652,7 +652,7 @@ B_{\mathrm{reject}}
 
 其中，`b_i=1` 表示这个请求应该触发该 Skill，`\hat{b}_i` 是路由器基于 manifest 的判断。
 
-Skill Manifest 上线门禁可以写成：
+Skill Manifest 上线准入条件可以形式化为：
 
 ```math
 G_{\mathrm{skill\_manifest}}

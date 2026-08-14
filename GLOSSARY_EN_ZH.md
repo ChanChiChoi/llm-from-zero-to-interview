@@ -8141,3 +8141,67 @@ iRoPE：Meta 在 Llama 4 发布中提到的 RoPE 相关位置编码信号；在�
 GOAT：Meta 在 Llama 4 发布中提到的自动化对抗评估信号；在本项目中作为自动 red teaming / safety eval 观察项处理。
 
 Specialized Frontier Eval Cluster：前沿专业评估簇；面向 cyber、bio、terminal agent、automation agent、long-running coding agent 等高价值或高风险切片的新 benchmark 集合。
+
+KDA / Kimi Delta Attention：Kimi 系列公开的递归/门控注意力路线；通过状态、衰减和门控表示历史，不能简单等同于“没有位置”。
+
+Gated DeltaNet：门控 DeltaNet；把递归或线性状态更新与显式门控结合，常与 Gated Attention 组成 hybrid architecture。
+
+Gated MLA：门控 Multi-head Latent Attention；把 latent cache 与门控/注意力结构组合，具体实现以模型卡为准。
+
+NoPE / No Position Embedding：无显式位置嵌入/位置变换；不等于没有顺序信息，causal mask、递归状态和 attention pattern 仍可编码顺序。
+
+p-RoPE：一种模型特定的 RoPE 位置处理信号；阅读时需结合模型卡和实现，不能把名字泛化成统一标准。
+
+CSA / HCA：DeepSeek-V4 资料中的混合注意力缩写；用于描述不同注意力/历史表示路径，具体全称和实现以官方模型卡为准。
+
+Total Parameters：总参数量；MoE 中包含所有专家和共享参数，主要反映模型容量和权重存储规模。
+
+Active Parameters：激活参数量；每个 token 通过路由实际参与专家计算的参数子集，不能直接等同于 FLOPs、延迟或显存。
+
+Reasoning Effort：推理强度/推理预算档位；请求级控制，可能影响 reasoning token、工具、验证器或路由，跨厂商不一定同语义。
+
+Thinking Level：思考等级；模型或 API 特定的推理预算控制字段，不等于公开完整 CoT。
+
+Adaptive Thinking：自适应思考；根据任务难度、置信度、价值或风险动态分配推理预算的策略。
+
+Preserve Thinking：保留推理状态；模型特定的状态/协议能力，可能影响多轮或工具调用，不应默认理解为暴露隐藏 CoT。
+
+Interleaved Thinking：交错式思考；reasoning 与 tool call、observation、状态更新交替进行。
+
+On-Policy Distillation：在线策略蒸馏；学生按自己的 policy 采样，再由教师/verifier/规则提供蒸馏或强化信号。
+
+AgentWorld：Agent 世界模型/环境体系；把模型、工具、环境和任务 verifier 结合起来，不是普通聊天模型名称的同义词。
+
+Context Folding：上下文折叠；把长轨迹折叠成结构化状态、摘要和 artifact 引用，同时保留可回放原始 trace。
+
+Persistent Workspace：持久工作区；跨多轮/多日任务保存文件、diff、artifact 和 checkpoint 的状态边界。
+
+Model-Attached Speculative Decoding：模型附加式推测解码；draft 能力由 target checkpoint 的 head/模块提供，不等于加载独立 draft model。
+
+DSpark：DeepSeek 资料中的附加 speculative decoding 模块；应视为同一基础模型的解码组件，而不是新基础 checkpoint。
+
+MTP / Multi-Token Prediction：多 token 预测；由模型 head 产生多个未来 token 候选，供 target verify 或 speculative decoding 使用。
+
+NEXTN：多 token 候选/推测解码路线的模型或引擎术语；具体接口和含义依模型卡/推理框架文档。
+
+FP4 / MXFP4 / NVFP4：4-bit 浮点及相关 block/hardware-aware 格式；收益依赖 scale、累积精度、硬件和 kernel，不能只按位数比较。
+
+FP8 KV Cache：用 FP8 保存 K/V cache；理论上可降低元素存储，但需要评测 scale、长上下文误差和 kernel 支持。
+
+Native INT4：模型或推理栈原生支持的 INT4 权重/cache 路线；需要连同 tokenizer、kernel、校准和质量回归验证。
+
+Harness-Aware Evaluation：带 Harness 条件的 Agent 评测；同时记录模型、harness、环境、预算、工具、上下文和 trace。
+
+Evidence Tier：证据等级；区分官方论文/model card、产品页、厂商自报和待核验传闻。
+
+Policy-Adaptive Safety Classifier：策略自适应安全分类器；把自然语言安全策略映射为安全分，不能替代权限、沙箱和治理。
+
+Gated Attention：门控显式注意力；用 token、通道或层级 gate 控制显式 attention 路径与递归/局部路径的组合，具体参数化依模型而定。
+
+CSA / Compressed Sparse Attention：压缩稀疏注意力；DeepSeek-V4 资料中的压缩注意力路径名称，用于降低长上下文历史访问成本。
+
+HCA / Heavily Compressed Attention：高度压缩注意力；DeepSeek-V4 资料中的高压缩注意力路径名称，具体 cache 和压缩实现以官方资料为准。
+
+Native Multimodal Token Budget：原生多模态 token 预算；把图像、音频、视频输入的处理 token 与文本、工具和输出共同纳入上下文、显存和成本预算。
+
+Reasoning/Agent Unit Cost：推理/Agent 单位成本；以成功任务而不是单个输出 token 为分母，合并模型、工具、验证、重试、GPU 和人工审核成本。

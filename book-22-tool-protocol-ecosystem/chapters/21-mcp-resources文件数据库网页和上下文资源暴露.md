@@ -1,10 +1,10 @@
 # 第二十一章：MCP Resources：文件、数据库、网页和上下文资源暴露
 
-## 21.0 本讲资料边界与第二轮精修口径
+## 21.0 本讲范围与资料
 
-本讲按 MCP 2025-06-18 specification 中 Resources 和 Roots 的稳定口径做第二轮精修：Resources 用 URI 唯一标识，可带 name、title、description、mimeType、annotations、size 等 metadata；Server 可以提供 `resources/list`、`resources/read`、`resources/templates/list`，资源内容可以是 text 或 binary blob；资源列表可能变更，Server 可以通过 list changed notification 提示 Host 重新发现；Client Roots 用于让 Server 理解被授权的文件系统边界。
+本章参考Resources 用 URI 唯一标识，可带 name、title、description、mimeType、annotations、size 等 metadata；Server 可以提供 `resources/list`、`resources/read`、`resources/templates/list`，资源内容可以是 text 或 binary blob；资源列表可能变更，Server 可以通过 list changed notification 提示 Host 重新发现；Client Roots 用于让 Server 理解被授权的文件系统边界。
 
-本讲只讨论资源暴露的协议抽象和工程边界，不实现真实数据库驱动、浏览器抓取、企业权限系统或完整 MCP Server。为了避免把玩具代码误认为生产实现，后面的 demo 使用固定内存数据模拟文件、数据库、网页和日志资源，重点演示 URI、metadata、roots、租户、字段投影、上下文预算、引用、可信度、freshness、template 和 subscription 的审计口径。
+本章讨论资源暴露的协议抽象和工程边界，不实现真实数据库驱动、浏览器抓取、企业权限系统或完整 MCP Server。为了避免把玩具代码误认为生产实现，后面的 demo 使用固定内存数据模拟文件、数据库、网页和日志资源，重点演示 URI、metadata、roots、租户、字段投影、上下文预算、引用、可信度、freshness、template 和 subscription 的审计口径。
 
 本讲不要记成：
 
@@ -624,7 +624,7 @@ C_{\mathrm{sub}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{resource\ change\ and\ sub
 C_{\mathrm{trace}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{resource\ read\ trace\ can\ support\ eval,\ replay,\ and\ audit}]
 ```
 
-综合门禁可以写成：
+综合验收条件可以形式化为：
 
 ```math
 G_{\mathrm{mcp\_resource}}=\mathbf{1}\left[
@@ -927,7 +927,7 @@ print("failed_gates=", failed_gates)
 print("mcp_resource_gate_pass=", gate_pass)
 ```
 
-这段代码故意让门禁不通过：它提醒你，MCP Resources 的风险不在“能不能把文本读出来”，而在 URI 是否稳定、metadata 是否完整、list 是否泄露资源存在性、read 是否越界、roots 是否收紧、字段是否脱敏、上下文是否超预算、引用是否保留、外部内容是否被标注为不可信、版本是否可判断、template 是否可约束、订阅是否可处理、trace 是否能支撑复盘。
+这段代码故意让未通过硬性检查：它提醒你，MCP Resources 的风险不在“能不能把文本读出来”，而在 URI 是否稳定、metadata 是否完整、list 是否泄露资源存在性、read 是否越界、roots 是否收紧、字段是否脱敏、上下文是否超预算、引用是否保留、外部内容是否被标注为不可信、版本是否可判断、template 是否可约束、订阅是否可处理、trace 是否能支撑复盘。
 
 ## 21.21 常见错误
 

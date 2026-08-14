@@ -8,9 +8,9 @@
 
 > GPU 集群不是把很多卡堆在一起，而是计算、显存、互联、网络、存储、电力、散热和调度共同组成的系统。
 
-## 7.0 本讲资料边界与第二轮精修口径
+## 7.0 本讲范围与资料
 
-本讲第二轮精修时，资料口径按“稳定集群架构抽象”处理，而不是按某一代 GPU 服务器、某个云实例、某个交换机型号或某个调度器实现写死。单机多卡部分参考 NVIDIA HGX / DGX 资料中对 NVLink、NVSwitch、PCIe、CPU、NIC 和本地 NVMe 的系统边界；多机多卡部分参考 NCCL 对 collective communication、PCIe、NVLink / NVSwitch、InfiniBand / RoCE 和多节点通信的工程边界；GPU 到网卡亲和性部分参考 GPUDirect RDMA 文档对 PCIe 拓扑、驱动、权限和 peer-to-peer 访问条件的说明；机柜级 / 集群级部分只抽象 scale-out fabric、oversubscription、故障域、电力散热和调度感知，不把任何单一厂商的数值写成通用标准。
+本章参考资料口径按“稳定集群架构抽象”处理，而不是按某一代 GPU 服务器、某个云实例、某个交换机型号或某个调度器实现写死。单机多卡部分参考 NVIDIA HGX / DGX 资料中对 NVLink、NVSwitch、PCIe、CPU、NIC 和本地 NVMe 的系统边界；多机多卡部分参考 NCCL 对 collective communication、PCIe、NVLink / NVSwitch、InfiniBand / RoCE 和多节点通信的工程边界；GPU 到网卡亲和性部分参考 GPUDirect RDMA 文档对 PCIe 拓扑、驱动、权限和 peer-to-peer 访问条件的说明；机柜级 / 集群级部分只抽象 scale-out fabric、oversubscription、故障域、电力散热和调度感知，不把任何单一厂商的数值写成通用标准。
 
 需要注意三点：
 
@@ -567,7 +567,7 @@ F_{\mathrm{rack}}=\frac{G_{\mathrm{rack}}}{G_{\mathrm{total}}}
 
 其中，`G_rack` 是单机柜 GPU 数。这个比例越大，单个机柜故障的影响越大；但把任务跨太多故障域铺开，又可能增加通信成本。
 
-最后，可以把 GPU 集群门禁写成：
+最后，可以把 GPU 集群验收条件写成：
 
 ```math
 G_{\mathrm{cluster}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land R_{\mathrm{slow}}\le \rho_{\mathrm{slow}} \land O_{\mathrm{net}}\le \rho_{\mathrm{over}} \land P_0=0\right]

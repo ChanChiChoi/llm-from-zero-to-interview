@@ -8,9 +8,9 @@
 
 > vLLM 调优不是盲目把 batch、并发和 GPU 数开大，而是把请求生命周期拆成 queue、tokenize、prefill、decode、KV cache、scheduler、worker、streaming 和 network，再针对瓶颈调整 token budget、KV budget、并行度、缓存和限流策略。
 
-## 25.0 本讲资料边界与第二轮精修口径
+## 25.0 本讲范围与资料
 
-本讲按第二轮精修要求做过资料校准，主要参考五类公开资料：
+本章参考五类公开资料：
 
 1. vLLM Optimization and Tuning 文档对 KV cache 空间不足、preemption、`gpu_memory_utilization`、`max_num_batched_tokens`、`max_num_seqs`、chunked prefill、decode / prefill 平衡和 attention backend 的说明。
 2. vLLM metrics 文档对 TTFT、TPOT / inter-token latency、E2E latency、queue / prefill / decode 时间、running / waiting / swapped requests、KV cache usage、prefix cache hit rate 和 Prometheus / logging 指标的说明。
@@ -18,7 +18,7 @@
 4. vLLM Parallelism and Scaling / Data Parallel / Expert Parallel 文档对 TP / PP / DP / EP 拓扑、跨节点通信、每个 DP rank 独立 KV cache 和 MoE expert parallel 的说明。
 5. vLLM multimodal / production 相关文档对多模态输入 profile、processor cache、API server、streaming、部署与指标观测的公开口径。
 
-本章只讲 vLLM-like serving 的教学版性能调优方法，不给出某个 GPU、某个模型、某个版本的通用最优参数，不替代真实压测平台、线上 SLO、NCCL / NUMA 排障、云成本模型、Kubernetes 编排、生产安全审计或业务质量评估。本章 demo 用纯 Python trace 表模拟 TTFT、TPOT、KV pressure、preemption、prefix cache locality、CPU / streaming 瓶颈和调参建议，不等同于真实性能预测。
+本章讨论 vLLM-like serving 的教学版性能调优方法，不给出某个 GPU、某个模型、某个版本的通用最优参数，不替代真实压测平台、线上 SLO、NCCL / NUMA 排障、云成本模型、Kubernetes 编排、生产安全审计或业务质量评估。本章 demo 用纯 Python trace 表模拟 TTFT、TPOT、KV pressure、preemption、prefix cache locality、CPU / streaming 瓶颈和调参建议，不等同于真实性能预测。
 
 参考资料：
 
@@ -798,7 +798,7 @@ $$
 
 其中 `S_i` 是 prefix cache 省掉的 prefill tokens，`X_i` 是输入 tokens。
 
-教学版 vLLM 调优门禁可以写成：
+教学版 vLLM 调优准入条件可以形式化为：
 
 $$
 G_{\mathrm{tune}}=G_{\mathrm{metric}}G_{\mathrm{ttft}}G_{\mathrm{tpot}}G_{\mathrm{kv}}G_{\mathrm{cache}}G_{\mathrm{config}}G_{\mathrm{rollback}}

@@ -8,11 +8,11 @@ AI Infra 的成本非常高，尤其是 GPU、存储、网络和推理服务。�
 
 > AI Infra 成本治理的核心，是把不可见的资源消耗变成可观测、可归因、可预算、可优化的工程指标。
 
-## 48.0 本讲资料边界与第二轮精修口径
+## 48.0 本讲范围与资料
 
 本章按通用 AI Infra 成本治理抽象来写，不绑定某个云厂商账单、GPU 型号、Kubernetes 成本插件、FinOps 组织形态或内部计费系统。资料校准时，主要参考 FinOps 对 allocation、tagging、预算、showback / chargeback 和单位经济账的通用口径，参考 OpenCost / Kubernetes 成本分摊对 workload、namespace、label 和资源用量计量的抽象，并结合前文集群容量规划、训练调度、推理平台、缓存、可观测性、SLO 值班体系和 artifact 生命周期章节。
 
-第二轮精修只做三件事：
+本章重点包括：
 
 1. 把 GPU、训练、推理、存储、网络、评估、RAG / Agent、日志 trace 和平台运维成本统一成可计量、可归因、可下钻的成本样本。
 2. 补齐 GPU-hours、tokens per GPU hour、失败任务浪费、推理 cost per 1k tokens、缓存节省、存储生命周期、网络出站、标签归因、预算使用率、异常成本、单位经济账和 SLO / 成本权衡公式。
@@ -55,7 +55,7 @@ $$
 
 没有成本归因，就只能粗暴砍资源，容易伤害核心业务。
 
-成本治理的总门禁可以写成：
+成本治理的总准入条件可以形式化为：
 
 $$
 G_{\mathrm{cost}}=\mathbf{1}\left[C_{\mathrm{usage}}\ge \tau_u \land C_{\mathrm{attr}}\ge \tau_a \land U_{\mathrm{budget}}\le 1 \land R_{\mathrm{waste}}\le \rho_w \land P_0=0\right]
@@ -312,7 +312,7 @@ $$
 
 不能因为省存储，把可回滚的生产 artifact 删除。
 
-删除安全门禁可以写成：
+删除安全准入条件可以形式化为：
 
 $$
 G_{\mathrm{delete}}=\mathbf{1}\left[D_{\mathrm{deploy}}=0 \land D_{\mathrm{rollback}}=0 \land D_{\mathrm{lineage}}=0 \land A_{\mathrm{owner}}=1\right]
@@ -501,7 +501,7 @@ $$
 
 因此成本治理必须和 SLO、质量、安全一起决策。
 
-成本优化门禁可以写成：
+成本优化准入条件可以形式化为：
 
 $$
 G_{\mathrm{opt}}=\mathbf{1}\left[\Delta K<0 \land \Delta Q\ge -q_0 \land \Delta S_{\mathrm{slo}}\ge -s_0 \land R_{\mathrm{risk}}\le r_0\right]
@@ -588,9 +588,51 @@ Usage 来源包括：
 
 成本治理依赖统一标签和资源用量采集。
 
+### 48.21.1 新模型 workload 下的单位成本
+
+小白容易把“每 1k 可见输出 token 的价格”当成一次任务的全部成本。对于 reasoning、Agent 和长上下文请求，输入 token、隐藏 reasoning token、工具调用、验证器、KV/state 常驻时间和失败重试都可能占主要成本。
+
+可以把一次请求的成本粗略拆成：
+
+```math
+K_{\mathrm{request}}=
+c_{\mathrm{gpu}}t_{\mathrm{gpu}}
++c_{\mathrm{in}}L_{\mathrm{in}}
++c_{\mathrm{out}}L_{\mathrm{out}}
++c_{\mathrm{reason}}L_{\mathrm{reason}}
++c_{\mathrm{tool}}N_{\mathrm{tool}}
++c_{\mathrm{verify}}N_{\mathrm{verify}}
++K_{\mathrm{storage}}
++K_{\mathrm{network}}
++K_{\mathrm{retry}}
+```
+
+这里的系数可以来自 GPU 小时、token 计量、第三方 API、工具后端、日志/trace 留存和失败重试的归因表。若平台无法观测隐藏 reasoning token，可以用 endpoint、effort/level、模型版本和 GPU runtime 的时间作为代理，但必须标注估算误差。
+
+更有意义的指标不是只有 `cost per token`，还包括成功任务单位成本：
+
+```math
+K_{\mathrm{success}}=\frac{K_{\mathrm{total}}}{\max(1,N_{\mathrm{success}})}
+```
+
+降价或压缩 token 如果同时降低任务成功率，`K_success` 可能反而上升。多 agent 并行、verifier rerank 和 fallback routing 也要按整条 trace 归因，不能把每个子调用分别计费后就宣称主任务便宜。
+
+### 48.21.2 量化、active parameters 和长上下文的成本边界
+
+专家做模型路由或采购决策时，至少把四个字段分开：
+
+1. `P_total`：权重容量、分片、加载时间和存储成本的主要代理。
+2. `P_active`：每 token 专家计算量的粗略代理，不能直接代替真实 FLOPs。
+3. `M_{\mathrm{kv/state}}`：并发、长上下文和请求驻留的显存约束。
+4. `b_q`：FP8、FP4/MXFP4/NVFP4 或 native INT4 等低精度表示的元素字节数及其 scale/metadata 代价。
+
+低精度通常会降低权重加载带宽或 KV 显存，但 kernel、硬件、量化校准、质量回归和 fallback 都可能增加工程成本。MoE 的 active 参数较小，也不意味着所有专家权重都不需要加载，更不意味着 all-to-all 通信消失。
+
+因此模型路由应按真实 workload 做总成本比较：短问答、长 RAG、代码、Agent、高 reasoning effort 和结构化工具调用分别压测，记录 `TTFT`、`TPOT`、质量、失败率、GPU hours、KV pressure、tool latency 和 `K_success`。只有满足 SLO 和质量验收条件后，低精度或 speculative decoding 的成本收益才可推广。
+
 ## 48.22 成本治理审计指标和最小 demo
 
-把本章落到平台验收时，可以用 16 个门禁：
+把本章落到平台验收时，可以用 16 个验收条件：
 
 1. Usage Metering Coverage：GPU、CPU、memory、storage、network、request、token、artifact、logs 和 traces 是否都有用量记录。
 2. Cost Attribution Labels：tenant、project、team、owner、model、job type、environment 和 cost center 是否强制存在。
@@ -609,7 +651,7 @@ Usage 来源包括：
 15. SLO Quality Cost Tradeoff：降本动作是否同时检查质量、SLO、安全、回滚和用户体验。
 16. Cost Governance Gate：最终是否有 owner、预算策略、优化 backlog、审批记录、审计和 P0 风险阻断。
 
-综合门禁：
+综合验收条件：
 
 $$
 G_{\mathrm{cost\_governance}}=\prod_{j=1}^{16}G_j
@@ -1162,7 +1204,7 @@ failed_gates=['usage_metering_coverage', 'cost_attribution_labels', 'gpu_cost_ef
 cost_governance_gate_pass=False
 ```
 
-这个 demo 的面试价值是把成本治理从“月底账单分析”升级为工程控制闭环：先采集 usage，再强制 attribution，然后按 GPU、训练、推理、缓存、存储、网络和 artifact 拆成本，接着用预算、配额、异常告警和 dashboard 下钻定位责任方，最后用质量 / SLO / 风险门禁决定优化建议能不能落地。
+这个 demo 的面试价值是把成本治理从“月底账单分析”升级为工程控制闭环：先采集 usage，再强制 attribution，然后按 GPU、训练、推理、缓存、存储、网络和 artifact 拆成本，接着用预算、配额、异常告警和 dashboard 下钻定位责任方，最后用质量 / SLO / 风险验收条件决定优化建议能不能落地。
 
 ## 48.23 常见误区
 

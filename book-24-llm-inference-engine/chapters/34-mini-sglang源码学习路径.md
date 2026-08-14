@@ -16,9 +16,9 @@ https://github.com/sgl-project/mini-sglang
 
 > 读 mini-sglang 不要从文件名开始，而要带着 runtime 主链路去读：入口 API、请求状态、scheduler、KV cache、RadixAttention、model runner、sampler、structured output 和 streaming，每读一个模块都问它在请求生命周期中解决什么问题。
 
-## 34.0 本讲资料边界与第二轮精修口径
+## 34.0 本讲范围与资料
 
-本讲第二轮精修时，主要参考三类资料：
+本章参考三类资料：
 
 1. `sgl-project/mini-sglang` 官方仓库和 README。README 将 mini-sglang 定位为约 5000 行 Python 的紧凑 SGLang 实现，并列出 Radix Cache、Chunked Prefill、Overlap Scheduling、Tensor Parallelism、FlashAttention / FlashInfer backend 等核心学习点。
 2. mini-sglang 仓库中的 system architecture / structure 文档。它把教学实现拆成 API server、request / tokenizer、scheduler、engine、KV cache、Radix cache、attention backend、message / protocol 等模块，适合映射到本书前面讲过的 runtime 生命周期。
@@ -28,7 +28,7 @@ https://github.com/sgl-project/mini-sglang
 
 1. 本章是源码学习方法，不是完整源码逐行讲解；文件名、类名和实现细节可能随 mini-sglang 版本变化。
 2. 本章不把 mini-sglang 当生产级 SGLang。教学实现的价值是帮助建立 runtime 骨架，真实 SGLang 还包含更多模型、硬件后端、分布式、grammar backend、tool parser、speculative decoding 和生产监控细节。
-3. 本章新增 demo 是源码路径审计器，用来检查阅读笔记是否覆盖模块、生命周期、资源和实验，而不是执行真实 mini-sglang。
+3. 本章的 demo 是源码路径审计器，用来检查阅读笔记是否覆盖模块、生命周期、资源和实验，而不是执行真实 mini-sglang。
 4. 读源码的验收标准不是“看过多少文件”，而是能把模块输入输出、状态变化、KV 生命周期、scheduler 输出和实验观察映射到 TTFT、TPOT、prefix hit、KV pressure、grammar mask 和 streaming 指标。
 
 ## 34.1 本章目标
@@ -683,7 +683,7 @@ mini-sglang 是学习路线，不是完整生产系统。要知道它省略了�
 我会用几个实验验证理解，比如构造三个共享前缀请求观察 radix tree split，构造长短 prompt 混合观察 scheduler，构造 abort 请求观察 KV 是否释放。读 mini-sglang 的目标不是背类名，而是建立 SGLang Runtime 的骨架，再用这个骨架去读完整 SGLang 源码。
 ```
 
-## 34.25 源码阅读覆盖率、实验门禁和可运行 demo
+## 34.25 源码阅读覆盖率、实验验收条件和可运行 demo
 
 为了避免“我看过源码”变成空话，可以把源码阅读笔记当成一个审计对象。设模块集合为：
 
@@ -709,7 +709,7 @@ C_{\mathrm{resource}}=\frac{|R_{\mathrm{seen}}\cap R_{\mathrm{req}}|}{\max(1,|R_
 C_{\mathrm{experiment}}=\frac{|E_{\mathrm{done}}\cap E_{\mathrm{req}}|}{\max(1,|E_{\mathrm{req}}|)}
 ```
 
-源码学习门禁可以写成：
+源码学习准入条件可以形式化为：
 
 ```math
 G_{\mathrm{source}}=G_{\mathrm{module}}G_{\mathrm{order}}G_{\mathrm{resource}}G_{\mathrm{experiment}}G_{\mathrm{signal}}G_{\mathrm{note}}

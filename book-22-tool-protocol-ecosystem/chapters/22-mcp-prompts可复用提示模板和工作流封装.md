@@ -1,10 +1,10 @@
 # 第二十二章：MCP Prompts：可复用提示模板和工作流封装
 
-## 22.0 本讲资料边界与第二轮精修口径
+## 22.0 本讲范围与资料
 
-本讲按 MCP 2025-06-18 specification 中 Prompts 的稳定口径做第二轮精修：Server 需要在 initialize 阶段声明 `prompts` capability；Client 通过 `prompts/list` 发现 prompt，并按分页处理大列表；Client 通过 `prompts/get` 传入 prompt name 和字符串参数，得到一组 `PromptMessage`；Prompt definition 主要包含 name、title、description 和 arguments；PromptMessage 的 role 是 `user` 或 `assistant`，content 可以是文本、多模态内容或嵌入资源；如果 Server 声明 listChanged，可以用 `notifications/prompts/list_changed` 提示 Host 重新发现。
+本章参考Server 需要在 initialize 阶段声明 `prompts` capability；Client 通过 `prompts/list` 发现 prompt，并按分页处理大列表；Client 通过 `prompts/get` 传入 prompt name 和字符串参数，得到一组 `PromptMessage`；Prompt definition 主要包含 name、title、description 和 arguments；PromptMessage 的 role 是 `user` 或 `assistant`，content 可以是文本、多模态内容或嵌入资源；如果 Server 声明 listChanged，可以用 `notifications/prompts/list_changed` 提示 Host 重新发现。
 
-本讲只讨论 MCP Prompt 作为协议能力的设计、治理和审计，不实现真实 UI、完整 JSON-RPC Server、模型调用、权限服务或 prompt marketplace。后面的 demo 使用固定内存模板模拟 `prompts/list`、`prompts/get`、参数校验、角色边界、依赖声明、版本、eval、权限、注入防护和 trace 字段，重点说明生产系统需要验证的是“prompt 是否可治理”，而不是“字符串模板能不能拼出来”。
+本章讨论 MCP Prompt 作为协议能力的设计、治理和审计，不实现真实 UI、完整 JSON-RPC Server、模型调用、权限服务或 prompt marketplace。后面的 demo 使用固定内存模板模拟 `prompts/list`、`prompts/get`、参数校验、角色边界、依赖声明、版本、eval、权限、注入防护和 trace 字段，重点说明生产系统需要验证的是“prompt 是否可治理”，而不是“字符串模板能不能拼出来”。
 
 本讲不要记成：
 
@@ -577,7 +577,7 @@ C_{\mathrm{change}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{prompt\ list\ change\ a
 C_{\mathrm{trace}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{prompt\ use\ trace\ supports\ eval,\ replay,\ and\ audit}]
 ```
 
-综合门禁可以写成：
+综合验收条件可以形式化为：
 
 ```math
 G_{\mathrm{mcp\_prompt}}=\mathbf{1}\left[
@@ -872,7 +872,7 @@ print("failed_gates=", failed_gates)
 print("mcp_prompt_gate_pass=", gate_pass)
 ```
 
-这段代码故意让门禁不通过：它提醒你，Prompts 的风险不在“模板能不能渲染”，而在 Server 是否声明 capability、Host 是否正确发现和展示、参数是否校验和转义、message role 是否被降权、依赖的 tools/resources 是否存在且授权、版本和 eval 是否绑定、用户是否知道来源和风险、list changed 是否让缓存失效、trace 是否足以复盘。
+这段代码故意让未通过硬性检查：它提醒你，Prompts 的风险不在“模板能不能渲染”，而在 Server 是否声明 capability、Host 是否正确发现和展示、参数是否校验和转义、message role 是否被降权、依赖的 tools/resources 是否存在且授权、版本和 eval 是否绑定、用户是否知道来源和风险、list changed 是否让缓存失效、trace 是否足以复盘。
 
 ## 22.21 常见错误
 

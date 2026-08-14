@@ -4,11 +4,11 @@ Agent 安全比普通聊天模型安全更复杂。聊天模型主要输出文�
 
 本章系统讲 Agent 安全：工具权限、不可信内容隔离、工具输出注入、数据泄漏、沙箱、审计日志、人工确认、高风险操作、权限隔离、供应链风险、memory 污染、多 Agent 安全、安全评估和面试表达。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲第二轮精修前，已按 `WRITING_PLAN.md` 联网核对 OpenAI Model Spec 的 instruction hierarchy / chain of command、OpenAI Agents SDK guardrails / tracing / tools 公开文档、OWASP Top 10 for LLM Applications、NIST AI RMF Generative AI Profile，以及前序 prompt injection、Agent 评估、tool use、browser / computer use 和 multi-agent 章节资料边界。
+本章参考 OpenAI Model Spec 的 instruction hierarchy / chain of command、OpenAI Agents SDK guardrails / tracing / tools 公开文档、OWASP Top 10 for LLM Applications、NIST AI RMF Generative AI Profile，以及前序 prompt injection、Agent 评估、tool use、browser / computer use 和 multi-agent 章节资料边界。
 
-本章只讲防御性设计：如何做最小权限、工具执行门禁、不可信内容隔离、敏感数据过滤、沙箱、人工确认、审计日志和安全评估。正文不提供可复用注入提示、绕过权限、规避审计、破坏系统、执行高风险操作或泄露敏感数据的方法。
+本章讨论防御性设计：如何做最小权限、工具执行验收条件、不可信内容隔离、敏感数据过滤、沙箱、人工确认、审计日志和安全评估。正文不提供可复用注入提示、绕过权限、规避审计、破坏系统、执行高风险操作或泄露敏感数据的方法。
 
 ## 11.1 Agent 为什么更危险
 
@@ -56,7 +56,7 @@ A(a_t)=\mathbf{1}[\mathrm{role}(u_t)\in P_{\tau_t} \land \mathrm{scope}(a_t)\sub
 
 其中 `P_{\tau_t}` 是工具权限集合，`S_u` 是用户允许的作用域，`\rho_u` 是用户或任务允许的最大风险等级。
 
-直觉：Agent 安全的第一原则是“动作能不能做”由系统门禁判断，而不是由生成模型判断。
+直觉：Agent 安全的第一原则是“动作能不能做”由系统验收条件判断，而不是由生成模型判断。
 
 ## 11.3 关键公式与 Agent 安全指标速查
 
@@ -76,7 +76,7 @@ A(a_t)=\mathbf{1}[\mathrm{role}(u_t)\in P_{\tau_t} \land \mathrm{scope}(a_t)\sub
 R_{\mathrm{untrusted}}=\frac{\sum_i \mathbf{1}[\mathrm{untrusted}_i \land \mathrm{blocked}_i]}{\sum_i \mathbf{1}[\mathrm{untrusted}_i]}
 ```
 
-### 11.3.2 越权和权限门禁
+### 11.3.2 越权和权限验收条件
 
 越权动作率：
 
@@ -124,7 +124,7 @@ R_{\mathrm{dry}}=\frac{\sum_t \mathbf{1}[\mathrm{risk}(a_t) \land \mathrm{execut
 
 高风险动作要么被确认后执行，要么被阻断或降级；实际执行前尽量先 dry-run、预览或草稿化。
 
-### 11.3.5 审计完整性与安全门禁
+### 11.3.5 审计完整性与安全验收条件
 
 审计完整率：
 
@@ -134,7 +134,7 @@ R_{\mathrm{audit}}=\frac{1}{M}\sum_{t=1}^{M}\mathbf{1}[\mathrm{logged}(a_t,o_t,A
 
 其中 `o_t` 是工具返回，`c_t` 是确认或阻断记录。
 
-Agent 安全上线门禁可以写成：
+Agent 安全上线准入条件可以形式化为：
 
 ```math
 G_{\mathrm{safe\_agent}}=\mathbf{1}[R_{\mathrm{unauth}}=0 \land R_{\mathrm{block}}\ge \tau_b \land R_{\mathrm{untrusted}}\ge \tau_u \land R_{\mathrm{sens}}\ge \tau_s \land R_{\mathrm{risk}}\ge \tau_r \land R_{\mathrm{audit}}\ge \tau_a]

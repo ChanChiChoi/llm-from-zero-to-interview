@@ -1,14 +1,14 @@
 # 第六章：Residual、LayerNorm、RMSNorm、Pre-Norm 与训练稳定性
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本章第二轮精修以公开论文和技术报告为资料边界：ResNet 对 residual learning 的优化动机，Layer Normalization 对单样本 hidden 维统计的定义，Transformer 原论文中的 residual connection + LayerNorm，RMSNorm 对 re-centering / re-scaling 的拆分，Xiong 等人对 Post-LN / Pre-LN 和 warmup 关系的分析，Admin 对 residual branch 依赖和扰动放大的讨论，DeepNet / DeepNorm 对极深 Transformer 残差缩放与初始化的设计，以及 LLaMA 等公开模型对 RMSNorm / Pre-Norm 风格结构的采用。
+本章以公开论文和技术报告为资料边界：ResNet 对 residual learning 的优化动机，Layer Normalization 对单样本 hidden 维统计的定义，Transformer 原论文中的 residual connection + LayerNorm，RMSNorm 对 re-centering / re-scaling 的拆分，Xiong 等人对 Post-LN / Pre-LN 和 warmup 关系的分析，Admin 对 residual branch 依赖和扰动放大的讨论，DeepNet / DeepNorm 对极深 Transformer 残差缩放与初始化的设计，以及 LLaMA 等公开模型对 RMSNorm / Pre-Norm 风格结构的采用。
 
-本章只讨论公开可验证的 residual、normalization placement、warmup 和训练稳定性机制；不把某个模型的私有初始化、学习率 schedule、loss spike 处理或混合精度 recipe 写成通用标准，也不把 toy demo 的门禁结果当成真实训练 benchmark。
+本章只讨论公开可验证的 residual、normalization placement、warmup 和训练稳定性机制；不把某个模型的私有初始化、学习率 schedule、loss spike 处理或混合精度 recipe 写成通用标准，也不把 toy demo 的验收结果当成真实训练 benchmark。
 
-第二轮补强重点有三点：
+本章重点有三点：
 
-1. 将 Residual、LayerNorm、RMSNorm、Pre-LN、Post-LN、warmup、residual scaling 和稳定性门禁改成稳定 MathJax 表达。
+1. 将 Residual、LayerNorm、RMSNorm、Pre-LN、Post-LN、warmup、residual scaling 和稳定性验收条件改成稳定 MathJax 表达。
 2. 明确 norm placement 不是孤立技巧，而是和残差主路径、初始化、学习率、optimizer、precision、数据 outlier 共同决定训练稳定性。
 3. 补一个 0 依赖 Python demo，审计 residual stream 尺度、update ratio、mean drift 和 warmup 下的 early update pressure。
 
@@ -486,7 +486,7 @@ P_{\mathrm{early}}=\eta_1\max_\ell u_\ell
 
 其中 `eta_1` 是 warmup 第一步学习率。这个指标不是论文中的标准训练指标，只是面试和教学中用来解释“同样的梯度/更新比例，warmup 会降低早期参数扰动”的直觉。
 
-一个简化门禁可以写成：
+一个简化验收条件可以形式化为：
 
 ```math
 G_{\mathrm{norm}}=\mathbb{1}\{a_{\max}\le\tau_a,\ u_{\max}\le\tau_u,\ P_{\mathrm{early}}\le\tau_p,\ \mathrm{NaN}=0\}
@@ -494,7 +494,7 @@ G_{\mathrm{norm}}=\mathbb{1}\{a_{\max}\le\tau_a,\ u_{\max}\le\tau_u,\ P_{\mathrm
 
 真实训练中还要补充 loss spike、grad norm、activation outlier、optimizer state、mixed precision overflow、data outlier、分布式 all-reduce 异常和 MoE router collapse。
 
-## 6.16.1 最小可运行 Residual / Norm 稳定性审计 demo
+### 6.16.1 最小可运行 Residual / Norm 稳定性审计 demo
 
 下面的 demo 不依赖 PyTorch，只用标准库构造一个 toy residual stack，比较四种结构：
 
@@ -625,7 +625,7 @@ post_ln_with_warmup= {'final_norm': 2.0, 'max_norm': 2.0, 'max_update_ratio': 0.
 
 1. `plain_no_residual` 的 `max_update_ratio` 超过 1，说明每层都可能大幅重写表示，缺少稳定主路径。
 2. `residual_no_norm` 虽然有残差，但 `max_norm` 增长到 `19.7276`，说明残差写入没有尺度控制会漂移。
-3. `post_layernorm` 的输出尺度被 LayerNorm 固定住，但如果不 warmup，`early_update_pressure` 会升到 `0.001874`，门禁失败。
+3. `post_layernorm` 的输出尺度被 LayerNorm 固定住，但如果不 warmup，`early_update_pressure` 会升到 `0.001874`，检查失败。
 4. `pre_rmsnorm_scaled` 保留残差主路径，并用 RMSNorm + residual scaling 控制更新比例；它没有 re-centering，所以 `final_mean_abs` 不为 0，这也是为什么还需要 final norm、初始化和监控。
 
 ## 6.17 常见误区
@@ -709,7 +709,7 @@ DeepNorm 想解决极深 Transformer 的训练稳定性问题。它通过修改 
 5. 阅读 *On Layer Normalization in the Transformer Architecture* 摘要，解释 warmup 和 norm placement 的关系。
 6. 阅读 RMSNorm 摘要，解释 re-centering 和 re-scaling 的区别。
 7. 设计一个训练稳定性监控面板，至少包含 loss、grad norm、activation norm、learning rate、NaN 统计。
-8. 运行本章 Residual / Norm 稳定性审计 demo，解释 `residual_no_norm` 和 `post_ln_no_warmup` 分别为什么门禁失败。
+8. 运行本章 Residual / Norm 稳定性审计 demo，解释 `residual_no_norm` 和 `post_ln_no_warmup` 分别为什么检查失败。
 
 ## 6.20 本章总结
 

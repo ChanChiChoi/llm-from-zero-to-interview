@@ -1,14 +1,14 @@
 # 第十四章：MCP、A2A 与 Harness 集成
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲第二轮精修时，优先参考 Model Context Protocol 官方文档和当前 specification、`modelcontextprotocol` 官方 GitHub 组织、A2A Protocol 官方文档和 `a2aproject/A2A` 官方仓库、OpenAI Agents SDK MCP 资料、Claude Code MCP 文档、OpenCode MCP server 文档，以及前面章节中 tool registry、权限沙箱、trace、replay 和 evaluation harness 的设计口径。
+本章参考 Model Context Protocol 官方文档和当前 specification、`modelcontextprotocol` 官方 GitHub 组织、A2A Protocol 官方文档和 `a2aproject/A2A` 官方仓库、OpenAI Agents SDK MCP 资料、Claude Code MCP 文档、OpenCode MCP server 文档，以及前面章节中 tool registry、权限沙箱、trace、replay 和 evaluation harness 的设计口径。
 
 需要先把边界说清楚：
 
 1. MCP 当前以官方 latest specification 为准。章内不再把 `2025-06-18` 当作唯一当前版本，而是按最新正式规范和 changelog 理解 Host、Client、Server、resources、prompts、tools、sampling、roots、elicitation、authorization、progress、cancellation 和 logging。
 2. A2A 以官方 specification 和官方仓库发布为准。官方仓库已有 `v1.0.x` 发布，协议能力要按 Agent Card、task lifecycle、message、artifact、streaming、push notification、认证和版本协商来讲，不把早期草案细节写成永远稳定。
-3. 本章聚焦防御性的 harness 集成：能力注册、namespace、schema、权限、上下文预算、信任边界、trace、replay、版本捕获和评估门禁。
+3. 本章聚焦防御性的 harness 集成：能力注册、namespace、schema、权限、上下文预算、信任边界、trace、replay、版本捕获和评估验收条件。
 4. 本章不提供绕过 MCP 权限、滥用 OAuth scope、攻击 MCP server、伪造 Agent Card、跨 agent 外发敏感数据、规避审计或让远程 agent 执行未授权高风险动作的方法。
 5. 不同客户端对 MCP transport、tool search、OAuth、动态 tool updates、resources / prompts 暴露方式和 A2A task 体验可能不同。正文只抽取可迁移的 runtime 设计，不把单一产品实现当成协议本身。
 
@@ -289,6 +289,21 @@ OpenCode 文档明确提醒：MCP server 会增加上下文，GitHub 这类 MCP 
 7. 对工具结果分页、摘要或落盘引用。
 
 这说明工具生态扩展不是“越多越好”。工具越多，选择成本、上下文成本和误调用风险都会上升。
+
+### 14.11.1 MCP 工具数量、Tool Search 与 API 兼容边界
+
+工具生态扩大后，成本不只来自工具调用本身，还来自工具描述进入上下文、模型选择工具和处理工具结果的成本。可以把一次请求的工具成本粗略写成：
+
+```math
+C_{\mathrm{tool}}=C_{\mathrm{schema}}(N_{\mathrm{loaded}})
++C_{\mathrm{select}}(N_{\mathrm{available}})
++C_{\mathrm{call}}(N_{\mathrm{calls}})
++C_{\mathrm{result}}(L_{\mathrm{result}})
+```
+
+`N_loaded` 是真正注入上下文的工具数，`N_available` 是注册表中的工具数，`L_result` 是结果长度。Tool Search 的作用是把“所有工具 schema 都常驻上下文”改成“先搜索，再按需加载相关工具”，但搜索本身也需要预算和正确率评估。
+
+还要区分 MCP、原生 Responses API 和所谓 OpenAI-compatible API：它们可能都能完成一次 tool call，但不一定共享 session item、call id、流式事件、权限确认、结果引用和 replay 语义。harness 应为每个 provider/协议保存 capability matrix，并在 trace 中记录 tool schema hash、server version、auth scope 和结果来源。
 
 ## 14.12 MCP 输出治理：大结果、敏感数据和 Prompt Injection
 
@@ -618,7 +633,7 @@ Replay 就绪率：
 C_{\mathrm{replay}}=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[y_i\in\{\mathrm{mock},\mathrm{snapshot},\mathrm{dry\_run}\}\ \mathrm{and}\ v_i=1]
 ```
 
-协议集成门禁可以写成：
+协议集成准入条件可以形式化为：
 
 ```math
 G_{\mathrm{proto}}=

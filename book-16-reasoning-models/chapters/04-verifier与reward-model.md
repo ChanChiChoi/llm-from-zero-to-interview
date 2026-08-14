@@ -1,14 +1,14 @@
 # 第四章：Verifier 与 Reward Model
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本章第二轮精修时，重点参考 Training Verifiers to Solve Math Word Problems、Let's Verify Step by Step、InstructGPT / RLHF reward model、Learning to Summarize from Human Feedback、RewardBench 以及 HumanEval / pass@k 的评估口径。这里把 verifier / reward model 放在 reasoning 系统里讨论：generator 负责提出候选，verifier / reward model 负责打分、重排、过滤或辅助搜索。
+本章重点参考 Training Verifiers to Solve Math Word Problems、Let's Verify Step by Step、InstructGPT / RLHF reward model、Learning to Summarize from Human Feedback、RewardBench 以及 HumanEval / pass@k 的评估口径。这里把 verifier / reward model 放在 reasoning 系统里讨论：generator 负责提出候选，verifier / reward model 负责打分、重排、过滤或辅助搜索。
 
 本章聚焦：
 
 1. outcome verifier、process verifier、reward model、programmatic verifier 的职责边界。
 2. pointwise、pairwise、listwise 训练目标和 rerank 公式。
-3. verifier reranking、best-of-N、process score、pairwise accuracy、hard negative accuracy、calibration 和成本门禁。
+3. verifier reranking、best-of-N、process score、pairwise accuracy、hard negative accuracy、calibration 和成本约束。
 4. 为什么 verifier 本身也会被 reward hacking、长度偏差、格式偏差和 hard negative 误导。
 5. 如何用最小 Python demo 审计 verifier 是否真的提升下游 reasoning accuracy。
 
@@ -147,7 +147,7 @@ Verifier calibration 可以用 ECE 粗略审计：
 \right|
 ```
 
-一个简化 verifier 上线门禁：
+一个简化 verifier 上线条件：
 
 ```math
 G_{\mathrm{ver}}

@@ -1,6 +1,10 @@
 # D. Transformer 架构
 
-条目：Transformer、Token Embedding、Embedding Matrix、Position Embedding、Positional Encoding、Sinusoidal Positional Encoding、RoPE、RoPE Scaling、ALiBi、Long Context、Position Extrapolation、Lost in the Middle、Weight Tying、Contextual Representation、Self-Attention、Query、Key、Value、Attention Weight、Causal Self-Attention、Causal Mask、Padding Mask、Causal LM、Masked LM、Scaled Dot-Product Attention、Full Attention、Local Attention、Sparse Attention、Linear Attention、FlashAttention、Attention Complexity、Multi-Head Attention、Attention Head、MQA、GQA、KV Cache、Transformer Block、MLP / FFN、Residual Connection、Pre-LN、Post-LN、Decoder-Only Transformer、Encoder-Only Transformer、Encoder-Decoder Transformer、Cross-Attention。
+## 阅读边界：架构索引与推导正文
+
+本章用条目建立 Transformer 组件的地图，但不会用几个定义冒充完整的架构推导。需要从 Q/K/V shape、mask、位置编码、KV cache、MoE 和混合架构一路理解机制的读者，应从[`第一册第二章：Transformer 核心`](../../book-01-core-30/chapters/02-transformer核心.md)开始，再阅读[`第二十一册：Transformer 架构演进`](../../book-21-transformer-architecture-evolution/目录.md)。
+
+条目：Transformer、Token Embedding、Embedding Matrix、Position Embedding、Positional Encoding、Sinusoidal Positional Encoding、RoPE、RoPE Scaling、ALiBi、Long Context、Position Extrapolation、Lost in the Middle、Weight Tying、Contextual Representation、Self-Attention、Query、Key、Value、Attention Weight、Causal Self-Attention、Causal Mask、Padding Mask、Causal LM、Masked LM、Scaled Dot-Product Attention、Full Attention、Local Attention、Sparse Attention、Linear Attention、FlashAttention、Attention Complexity、Multi-Head Attention、Attention Head、MQA、GQA、KV Cache、Transformer Block、MLP / FFN、Residual Connection、Pre-LN、Post-LN、Decoder-Only Transformer、Encoder-Only Transformer、Encoder-Decoder Transformer、Cross-Attention、Hybrid Attention、KDA、Gated DeltaNet、Gated MLA、NoPE、Total Parameters、Active Parameters。
 
 ## Transformer
 
@@ -170,7 +174,7 @@
 
 评估意义：它说明支持长窗口不等于能可靠利用所有位置的信息。
 
-工程缓解：把关键约束放在开头和结尾，使用结构化提示，分段摘要，检索重排，显式引用证据位置，对长文任务做专项微调。
+工程缓解：把关键约束放在开头和结尾可以作为一个待验证的提示变量，但不能替代位置轮换实验。更稳妥的做法还包括结构化提示、分段摘要、检索重排、显式引用证据位置，以及针对长文任务的专项训练和评估。
 
 面试表达：长上下文评估不能只测是否能塞进去，还要测不同位置的信息是否都能被稳定使用。
 
@@ -623,6 +627,30 @@ Decoder-only 常见形式：`x = x + Attention(Norm(x))`，然后 `x = x + MLP(N
 工程注意：cross-attention 的 mask、缓存和 batch 对齐比普通 self-attention 更复杂，尤其在多模态和变长输入中。
 
 面试表达：cross-attention 是条件生成的桥梁，让生成端在每一步读取编码端或外部信息。
+
+## Hybrid Attention、KDA 与 NoPE
+
+前沿模型不再只在 MHA、MQA、GQA、MLA 之间选 KV head 数，还可能组合 local/global attention、Gated DeltaNet、KDA、Gated MLA 和 NoPE。
+
+KDA/DeltaNet 类结构用递归状态表示历史，教学上可写成：
+
+```math
+S_t=\alpha_t\odot S_{t-1}+u_t v_t^{\top}
+```
+
+这可能把一部分随序列长度增长的显式 KV cache 变成固定大小 state，但会引入状态压缩、精确检索、kernel 和 reset 隔离的 trade-off。NoPE 只表示某个分支不显式施加 RoPE/ALiBi，不表示模型没有顺序信息；causal mask 至少建立了从左到右的可见性约束，但单独不能可靠表示距离，递归更新、局部窗口、内容模式和训练分布还会共同影响顺序建模。
+
+## Total Parameters、Active Parameters 与 Serving 成本
+
+MoE 模型常用：
+
+```math
+P_{\mathrm{total}}=P_{\mathrm{shared}}+E P_e+P_r,
+\qquad
+P_{\mathrm{active}}=P_{\mathrm{shared}}+kP_e+P_r
+```
+
+`active` 描述每个 token 选择的参数子集，不能直接推出延迟、显存或吞吐。真实成本还包括 expert dispatch、通信、KV/state cache、量化格式和推理 kernel。
 
 ## 本章小结
 

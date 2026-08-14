@@ -18,13 +18,13 @@ tiny-llm 更适合从 attention、RoPE、GQA、generate、KV cache、continuous 
 
 > mini-sglang 的学习价值在于把你从“通用 vLLM-like serving engine”带到“SGLang-style runtime”：重点理解 Radix Cache、prefix sharing、overlap scheduling、online serving、structured generation、tool/agent serving，以及这些能力如何围绕复杂 LLM program 的执行效率展开。
 
-## 46.0 本讲资料边界与第二轮精修口径
+## 46.0 本讲范围与资料
 
-本讲第二轮精修前，先按 `WRITING_PLAN.md` 对公开资料做校准：参考 `sgl-project/mini-sglang` 官方仓库和 README 对 mini-sglang 作为约 5000 行 Python 紧凑 SGLang 实现、支持 Radix Cache、Chunked Prefill、Overlap Scheduling、Tensor Parallelism、FlashAttention / FlashInfer backend、OpenAI-compatible API、interactive shell、offline / online benchmark 的说明；参考仓库文档对 API server、request / tokenizer、scheduler、engine、KV cache、Radix cache、attention backend、message / protocol 等模块结构的说明；并结合第 26 到 34 章对 SGLang runtime、RadixAttention、scheduler、structured generation、speculative decoding、agent serving、SGLang vs vLLM 和 mini-sglang 源码路径的口径。
+本章参考 `sgl-project/mini-sglang` 官方仓库和 README 对 mini-sglang 作为约 5000 行 Python 紧凑 SGLang 实现、支持 Radix Cache、Chunked Prefill、Overlap Scheduling、Tensor Parallelism、FlashAttention / FlashInfer backend、OpenAI-compatible API、interactive shell、offline / online benchmark 的说明；参考仓库文档对 API server、request / tokenizer、scheduler、engine、KV cache、Radix cache、attention backend、message / protocol 等模块结构的说明；并结合第 26 到 34 章对 SGLang runtime、RadixAttention、scheduler、structured generation、speculative decoding、agent serving、SGLang vs vLLM 和 mini-sglang 源码路径的口径。
 
 本讲只讲“为什么在 tiny-llm 和 nano-vLLM 之后继续读 mini-sglang，以及读出哪些 SGLang runtime 特色”：Radix Cache、prefix sharing、chunked prefill、overlap scheduling、online serving、interactive shell、TP、kernel backend、structured generation 边界、tool / agent serving 边界和完整 SGLang 差距。不把某个 mini-sglang commit 的源码行号、真实启动参数、benchmark 数字、FlashInfer / FlashAttention 具体 kernel 行为、完整 SGLang 的 grammar / speculative / distributed 实现或生产部署能力写成通用结论。
 
-本讲新增 demo 是教学版 mini-sglang learning auditor：用 0 依赖 Python 模拟 11 个 runtime capability，从 request state、Radix Cache、chunked prefill、overlap scheduling、online serving、interactive shell、TP、kernel backend，一路到 structured generation / tool-agent 边界和 production gap map；检查 capability coverage、experiment coverage、dependency order、runtime-specific evidence 和最终学习门禁。
+本章的 demo 是教学版 mini-sglang learning auditor：用 0 依赖 Python 模拟 11 个 runtime capability，从 request state、Radix Cache、chunked prefill、overlap scheduling、online serving、interactive shell、TP、kernel backend，一路到 structured generation / tool-agent 边界和 production gap map；检查 capability coverage、experiment coverage、dependency order、runtime-specific evidence 和最终学习验收条件。
 
 ## 46.1 本章目标
 
@@ -699,7 +699,7 @@ mini-sglang 是学习桥梁，不是终点。
 mini-sglang 不是完整生产 SGLang，它会简化更多模型、后端、分布式、grammar、speculative decoding、metrics 和故障恢复能力。但它能建立 SGLang Runtime 的骨架，读完后再去看完整 SGLang，就可以把复杂模块挂回 request state、scheduler、Radix Cache、model runner、sampler 和 online serving 这条主线。
 ```
 
-## 46.23 mini-sglang runtime 学习覆盖率、实验门禁和可运行 demo
+## 46.23 mini-sglang runtime 学习覆盖率、实验验收条件和可运行 demo
 
 先把 mini-sglang 的 runtime capability 抽象成：
 
@@ -721,7 +721,7 @@ C_{\mathrm{cap}}=\frac{|R_{\mathrm{seen}}\cap R_{\mathrm{req}}|}{\max(1,|R_{\mat
 C_{\mathrm{exp}}=\frac{|X_{\mathrm{done}}\cap X_{\mathrm{req}}|}{\max(1,|X_{\mathrm{req}}|)}
 ```
 
-最终门禁：
+最终验收条件：
 
 ```math
 G_{\mathrm{minisg}}=G_{\mathrm{radix}}G_{\mathrm{chunk}}G_{\mathrm{overlap}}G_{\mathrm{online}}G_{\mathrm{struct}}G_{\mathrm{cleanup}}G_{\mathrm{gap}}G_{\mathrm{order}}
@@ -930,7 +930,7 @@ mini_sglang_learning_gates= {'radix_cache_visible': True, 'chunked_prefill_visib
 5. `structured_tool_boundaries_visible=True`：要知道 grammar mask、tool parser 和真实工具执行的边界。
 6. `production_gap_visible=True`：要能说清 mini-sglang 与完整 SGLang 的差距。
 
-所以本章最终门禁是 `mini_sglang_learning_gate`：只有 Radix Cache、chunked prefill、overlap scheduling、online serving、structured/tool 边界、abort cleanup、生产差距和依赖顺序都可验证，mini-sglang 才真正承担起“SGLang runtime 过渡项目”的学习价值。
+所以本章最终验收条件是 `mini_sglang_learning_gate`：只有 Radix Cache、chunked prefill、overlap scheduling、online serving、structured/tool 边界、abort cleanup、生产差距和依赖顺序都可验证，mini-sglang 才真正承担起“SGLang runtime 过渡项目”的学习价值。
 
 ## 46.24 小练习
 

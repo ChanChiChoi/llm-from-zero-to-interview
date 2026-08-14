@@ -8,9 +8,9 @@ AI Infra 的问题往往跨越训练、推理、数据、模型、RAG、Agent、
 
 > AI Infra 可观测性平台的核心，是把 metrics、logs、traces、events、cost 和 model quality signals 串起来，让问题能被发现、定位、解释、复盘和治理。
 
-## 58.0 本讲资料边界与第二轮精修口径
+## 58.0 本讲范围与资料
 
-第二轮精修时，本章按“AI Infra 可观测性控制面 + 事故排查证据链”校准，不绑定某个 APM、日志系统、Prometheus 后端、Trace 后端或 Dashboard 产品实现。
+本章按“AI Infra 可观测性控制面 + 事故排查证据链”校准，不绑定某个 APM、日志系统、Prometheus 后端、Trace 后端或 Dashboard 产品实现。
 
 参考口径包括：
 
@@ -501,7 +501,7 @@ Metrics label 不能无限增加。
 O_i=(s_i,m_i,l_i,t_i,e_i,k_i,q_i,r_i,c_i,a_i,p_i,z_i)
 ```
 
-其中 `s_i` 是信号清单，`m_i` 是 metric contract，`l_i` 是 log 结构，`t_i` 是 trace span，`e_i` 是事件时间线，`k_i` 是统一关联 ID，`q_i` 是 SLO / latency 分位，`r_i` 是训练、推理、RAG / Agent、数据质量等 AI 专属观测项，`c_i` 是成本，`a_i` 是告警动作，`p_i` 是隐私和留存策略，`z_i` 是最终平台门禁状态。
+其中 `s_i` 是信号清单，`m_i` 是 metric contract，`l_i` 是 log 结构，`t_i` 是 trace span，`e_i` 是事件时间线，`k_i` 是统一关联 ID，`q_i` 是 SLO / latency 分位，`r_i` 是训练、推理、RAG / Agent、数据质量等 AI 专属观测项，`c_i` 是成本，`a_i` 是告警动作，`p_i` 是隐私和留存策略，`z_i` 是最终平台验收状态。
 
 统一覆盖率可以写成：
 
@@ -563,7 +563,7 @@ C_{\mathrm{redact}}=\frac{N_{\mathrm{redacted}}}{N_{\mathrm{sensitive}}}
 A_{\mathrm{alert}}=\frac{N_{\mathrm{actionable}}}{N_{\mathrm{alerts}}}
 ```
 
-最终可观测性平台门禁可以写成：
+最终可观测性平台准入条件可以形式化为：
 
 ```math
 G_{\mathrm{obs}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land A\ge S_{\mathrm{slo}} \land B_{\mathrm{remain}}\ge 0 \land N_{\mathrm{series}}\le B_{\mathrm{series}} \land C_{\mathrm{redact}}\ge \rho_{\mathrm{redact}} \land A_{\mathrm{alert}}\ge \rho_{\mathrm{alert}} \land P_0=0\right]

@@ -10,11 +10,11 @@
 
 > Tool-use eval 不只是评估最终答案，而是要评估“是否该调用、调用哪个、参数是否正确、调用顺序是否合理、失败后是否恢复、结果是否被正确使用”。
 
-## 45.0 本讲资料边界与第二轮精修口径
+## 45.0 本讲范围与资料
 
-本讲第二轮精修时，资料口径主要校准了 OpenAI Evals / agent evals 对数据集、grader、run、trace 分析和回归测试的抽象，OpenAI function calling / tools 对结构化工具调用和 schema 约束的工程边界，OpenAI Agents SDK tracing 对 span、tool call、guardrail 和回放排查的口径，Berkeley Function-Calling Leaderboard 对 AST / executable function call evaluation 和 relevance detection 的设计，StableToolBench / ToolBench 对工具模拟器稳定性的讨论，以及 tau-bench 对多轮交互式 tool-agent 任务的评估思路。
+本章参考 OpenAI Evals / agent evals 对数据集、grader、run、trace 分析和回归测试的抽象，OpenAI function calling / tools 对结构化工具调用和 schema 约束的工程边界，OpenAI Agents SDK tracing 对 span、tool call、guardrail 和回放排查的口径，Berkeley Function-Calling Leaderboard 对 AST / executable function call evaluation 和 relevance detection 的设计，StableToolBench / ToolBench 对工具模拟器稳定性的讨论，以及 tau-bench 对多轮交互式 tool-agent 任务的评估思路。
 
-本章不绑定某个 provider 的 eval API、grader JSON 语法、SDK trace 字段、leaderboard 数据集、工具模拟器实现或 dashboard 指标名称。正文只抽象稳定工程问题：是否需要工具、工具集合选择、参数 schema 和语义、调用顺序、工具观察结果使用、失败恢复、安全策略、模拟器确定性、trace replay、成本延迟回归和上线门禁。
+本章不绑定某个 provider 的 eval API、grader JSON 语法、SDK trace 字段、leaderboard 数据集、工具模拟器实现或 dashboard 指标名称。正文只抽象稳定工程问题：是否需要工具、工具集合选择、参数 schema 和语义、调用顺序、工具观察结果使用、失败恢复、安全策略、模拟器确定性、trace replay、成本延迟回归和上线条件。
 
 本章也不讨论如何通过 benchmark、隐藏 trace、绕过安全策略或伪造工具结果来刷分。评估的目标是发现真实系统风险，而不是让模型在固定样例上投机。
 
@@ -303,7 +303,7 @@ A_{\mathrm{sem}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\hat{a}_i\equiv a_i]
 R_{\mathrm{safety}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{safety\_violation}_i=1]
 ```
 
-安全违规率通常不是“越低越好”的软指标，而是上线门禁中的硬条件。尤其是外发、删除、支付、退款、shell、写生产数据等高风险工具。
+安全违规率通常不是“越低越好”的软指标，而是上线验收条件中的硬条件。尤其是外发、删除、支付、退款、shell、写生产数据等高风险工具。
 
 ### 45.5.9 Cost and Latency
 
@@ -311,7 +311,7 @@ R_{\mathrm{safety}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{safety\_violatio
 
 一个系统可能准确率高，但调用成本太高，也不适合生产。
 
-上线门禁可以写成：
+上线准入条件可以形式化为：
 
 ```math
 G_{\mathrm{tool\_eval}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land R_{\mathrm{safety}}=0 \land P_0=0\right]
@@ -457,9 +457,9 @@ Eval 时不应该总调用真实工具。
 
 如果总分下降，要能定位是工具选择差了、参数差了，还是结果解释差了。
 
-## 45.13 回归门禁
+## 45.13 回归验收条件
 
-上线前可以设置门禁。
+上线前可以设置验收条件。
 
 例如：
 
@@ -475,7 +475,7 @@ Eval 时不应该总调用真实工具。
 }
 ```
 
-如果新版本违反门禁，就不能直接全量发布。
+如果新版本违反验收条件，就不能直接全量发布。
 
 ## 45.14 一个完整例子：客服工具 benchmark
 
@@ -508,7 +508,7 @@ Eval 时不应该总调用真实工具。
 
 ## 45.15 Tool-use Eval Benchmark 审计指标与最小 demo
 
-下面这个 demo 不调用真实模型，也不调用真实工具。它演示的是一个 tool-use benchmark 最小应具备的审计结构：样本里同时保存用户输入、可用工具、gold 调用、预测调用、参数、工具结果、安全策略、trace 字段、成本延迟和切片标签；评估时分别计算工具需求判断、工具选择、参数语义、调用顺序、观察结果使用、失败恢复、安全、模拟器、trace replay 和回归门禁。
+下面这个 demo 不调用真实模型，也不调用真实工具。它演示的是一个 tool-use benchmark 最小应具备的审计结构：样本里同时保存用户输入、可用工具、gold 调用、预测调用、参数、工具结果、安全策略、trace 字段、成本延迟和切片标签；评估时分别计算工具需求判断、工具选择、参数语义、调用顺序、观察结果使用、失败恢复、安全、模拟器、trace replay 和回归验收条件。
 
 ```python
 METRICS = [
@@ -739,7 +739,7 @@ assert report["smoke"]["caught_injection"] is True
 assert report["tool_use_eval_benchmark_gate_pass"] is False
 ```
 
-运行后可以看到，完整样本通过，no-tool 过度调用、参数语义错误、prompt injection 未拦截、trace replay 字段缺失都会被抓出来。这个 demo 的重点不是让所有 toy case 逼真，而是强调 benchmark 结构：每个 bad case 都要对应一个可解释的评估维度，并进入回归门禁。
+运行后可以看到，完整样本通过，no-tool 过度调用、参数语义错误、prompt injection 未拦截、trace replay 字段缺失都会被抓出来。这个 demo 的重点不是让所有 toy case 逼真，而是强调 benchmark 结构：每个 bad case 都要对应一个可解释的评估维度，并进入回归验收条件。
 
 ## 45.16 常见误区
 
@@ -807,7 +807,7 @@ schema 合法不代表语义正确。日期、ID、单位、区域都可能错�
 
 本章我们讲了 Tool-use eval benchmark 设计。
 
-工具使用评估不能只看最终答案，而要分解为工具需求判断、工具选择、参数生成、多步规划、工具结果 grounding、错误恢复、安全合规、成本和延迟。Benchmark 应覆盖单工具、多工具、不应调用工具、参数陷阱、错误恢复和安全对抗。工具模拟器、trace replay、分层指标和回归门禁是生产系统中非常重要的评估基础设施。
+工具使用评估不能只看最终答案，而要分解为工具需求判断、工具选择、参数生成、多步规划、工具结果 grounding、错误恢复、安全合规、成本和延迟。Benchmark 应覆盖单工具、多工具、不应调用工具、参数陷阱、错误恢复和安全对抗。工具模拟器、trace replay、分层指标和回归验收条件是生产系统中非常重要的评估基础设施。
 
 你可以把本章重点记成一句话：
 

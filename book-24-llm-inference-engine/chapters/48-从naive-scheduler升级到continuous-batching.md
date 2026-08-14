@@ -18,9 +18,9 @@ LLM serving 的吞吐和延迟，很大程度取决于 scheduler 如何把不同
 
 如果 scheduler 设计不好，即使模型 kernel 很快，系统也会出现 GPU 空转、decode 抖动、长 prompt 阻塞、batch 利用率低、TTFT 和 TPOT p99 很差等问题。
 
-## 48.0 本讲资料边界与第二轮精修口径
+## 48.0 本讲范围与资料
 
-本章按第二轮精修口径，只讲把教学版 `naive scheduler` 升级成单机、单模型、同步 engine loop 内的 continuous batching scheduler。
+本章聚焦把教学版 `naive scheduler` 升级成单机、单模型、同步 engine loop 内的 continuous batching scheduler。
 
 公开资料校准主要参考三类口径：
 
@@ -34,7 +34,7 @@ LLM serving 的吞吐和延迟，很大程度取决于 scheduler 如何把不同
 waiting queue -> running set -> BatchPlan -> BatchBuilder -> OutputProcessor -> cleanup / metrics
 ```
 
-本章新增公式和 demo 只用于验证升级门禁：
+本章的公式和 demo 只用于验证升级验收条件：
 
 ```text
 naive request-level batch lock 是否可见；
@@ -1075,7 +1075,7 @@ naive scheduler 的问题是 request-level batch 生命周期被最长请求绑�
 验证时我会对比 naive scheduler 和 continuous batching 在不同 workload 下的 TTFT、TPOT、output tokens/s、QPS、KV usage 和 waiting queue length，尤其看 p99 TTFT/TPOT。还会加 scheduler decision log，记录每轮 prefill/decode 请求数、token 数、budget 使用和 KV 剩余量，用于定位长 prompt 阻塞、running 过多或 KV 不足问题。
 ```
 
-## 48.26 Naive Scheduler 到 Continuous Batching 升级门禁和可运行 demo
+## 48.26 Naive Scheduler 到 Continuous Batching 升级验收条件和可运行 demo
 
 把 naive scheduler 升级成 continuous batching，不能只写一句“每轮动态组 batch”。最小验收要能同时量化静态 batch 空洞、每轮 token budget、prefill chunk、running 上限、KV 准入和 cleanup。
 
@@ -1115,7 +1115,7 @@ R_t\le R_{\max}
 K_t+K_i^{\mathrm{reserve}}\le K_{\max}
 ```
 
-最终升级门禁可以写成：
+最终升级准入条件可以形式化为：
 
 ```math
 G_{\mathrm{upgrade}}=G_{\mathrm{lock}}G_{\mathrm{iter}}G_{\mathrm{join}}G_{\mathrm{exit}}G_{\mathrm{decode}}G_{\mathrm{prefill}}G_{\mathrm{kv}}G_{\mathrm{cleanup}}

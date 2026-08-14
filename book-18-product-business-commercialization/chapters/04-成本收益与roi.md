@@ -1,8 +1,8 @@
 # 第四章：成本收益与 ROI
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲按 `WRITING_PLAN.md` 的第二轮要求做公式和 demo 精修。联网资料主要核对四类口径：OpenAI 官方 pricing / Batch / prompt caching / latency optimization 资料提醒我们，模型调用成本由输入、输出、缓存命中、批处理、工具和延迟策略共同决定，而且价格会变化；OpenAI evals / evaluation best practices 强调 ROI 不能脱离任务成功率和回归评估；Google SRE 的 SLO / error budget 口径提醒我们成本优化不能破坏可靠性和尾延迟；FinOps Foundation 的云成本管理口径强调成本要按单位经济账、责任归属和持续优化来管理。
+本章重点讨论。联网资料主要核对四类口径：OpenAI 官方 pricing / Batch / prompt caching / latency optimization 资料提醒我们，模型调用成本由输入、输出、缓存命中、批处理、工具和延迟策略共同决定，而且价格会变化；OpenAI evals / evaluation best practices 强调 ROI 不能脱离任务成功率和回归评估；Google SRE 的 SLO / error budget 口径提醒我们成本优化不能破坏可靠性和尾延迟；FinOps Foundation 的云成本管理口径强调成本要按单位经济账、责任归属和持续优化来管理。
 
 本章不写任何长期固定的 API 价格，也不替代企业财务模型、采购合同或真实云账单分析。正文中的价格都是 toy 参数，用来说明算法工程师在面试和项目复盘中如何把 token、RAG、工具、人审、固定研发摊销、风险成本和业务收益放进同一张账。
 
@@ -273,7 +273,7 @@ ROI = 月收益 / 月成本
 
 如果是收入增长场景，可以把月收益换成增量收入；如果是风险降低场景，可以用预期风险损失下降来估算。
 
-## 4.16.1 关键公式与 ROI 指标速查
+### 4.16.1 关键公式与 ROI 指标速查
 
 为了把 ROI 讲清楚，可以把候选产品化场景记成一个账本样本：
 
@@ -361,7 +361,7 @@ N_{\mathrm{be},i}=\frac{F_i}{\max(B_{\mathrm{task},i}-A_iC_{\mathrm{var},i},\eps
 
 直觉是：ROI 最容易被采用率、质量提升和可变成本打穿。一个看似盈利的方案，如果采用率下降、重试率上升或人审成本增加，很快就会变成亏损。
 
-上线门禁可以写成：
+上线准入条件可以形式化为：
 
 ```math
 G_{\mathrm{roi},i}=\mathbb{1}(P_{\mathrm{net},i}>0,\ R_{\mathrm{bc},i}\ge \tau_b,\ P_{\mathrm{back},i}\le \tau_p,\ C_{\mathrm{var},i}<B_{\mathrm{task},i})
@@ -417,7 +417,7 @@ ROI 估算是决策工具，不是包装项目的数字游戏。
 
 ## 4.21 最小可运行 ROI / 单位经济账审计 demo
 
-下面的 0 依赖 demo 演示一个教学版 ROI audit：输入 toy 场景的任务量、采用率、节省时间、质量提升、输入输出 token、RAG / 工具 / 人审 / 固定成本，输出单次可变成本、月收益、月成本、净收益、收益成本比、净 ROI、回本周期、盈亏平衡任务量、敏感性分析和 ROI 门禁。
+下面的 0 依赖 demo 演示一个教学版 ROI audit：输入 toy 场景的任务量、采用率、节省时间、质量提升、输入输出 token、RAG / 工具 / 人审 / 固定成本，输出单次可变成本、月收益、月成本、净收益、收益成本比、净 ROI、回本周期、盈亏平衡任务量、敏感性分析和 ROI 验收条件。
 
 ```python
 def safe_div(num, den, default=None):
@@ -638,7 +638,7 @@ for name in [item[0] for item in ranked]:
     print(name, audits[name])
 ```
 
-这段 demo 的关键结论是：`support_rag` 在 toy 假设下通过 ROI 门禁；`contract_review` 单次价值高，但固定成本和人审成本太重，回本周期不过线；`code_agent` 质量和延迟没过线，不能只看效率收益；`generic_chatbot` 任务价值太低，规模也不够，单位经济账和净收益都不成立。
+这段 demo 的关键结论是：`support_rag` 在 toy 假设下通过 ROI 验收条件；`contract_review` 单次价值高，但固定成本和人审成本太重，回本周期不过线；`code_agent` 质量和延迟没过线，不能只看效率收益；`generic_chatbot` 任务价值太低，规模也不够，单位经济账和净收益都不成立。
 
 ## 4.22 本章小结
 

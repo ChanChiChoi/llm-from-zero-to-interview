@@ -12,16 +12,16 @@
 
 > 多 Agent 系统的难点不在“让多个 Agent 都能说话”，而在防止它们互相放大错误、争抢控制权、传错上下文和陷入无限协作。
 
-## 31.0 本讲资料边界与第二轮精修口径
+## 31.0 本讲范围与资料
 
-本章第二轮精修时，重点核对了 A2A Protocol Specification、Microsoft AutoGen 的多 Agent team / handoff / termination / state / tracing 文档、Anthropic 关于 building effective agents 的工程建议、OWASP LLM Top 10 和 NIST AI RMF Generative AI Profile 等公开资料。
+本章参考 A2A Protocol Specification、Microsoft AutoGen 的多 Agent team / handoff / termination / state / tracing 文档、Anthropic 关于 building effective agents 的工程建议、OWASP LLM Top 10 和 NIST AI RMF Generative AI Profile 等公开资料。
 
 需要先划清边界：
 
 1. A2A 给出的是跨 Agent Task、Message、Artifact、状态、上下文和安全语义的协议基础；本章讨论的是这些结构在真实多 Agent 协作中可能出现的失控模式。
 2. AutoGen、LangGraph、Anthropic 等工程资料都强调多 Agent / agentic system 要有明确终止条件、状态管理、观察性、人工接管和复杂度控制；本章抽象这些共性，不把某个框架的 API、team 类型或配置项写成永久标准。
 3. OWASP 和 NIST 关注 prompt injection、过度权限、错误信息、资源消耗、隐私和治理风险；本章把这些风险映射到多 Agent 链路中的上下文转发、权限继承、幻觉传播和成本失控。
-4. 本章新增的审计指标和 Python demo 是教学用 toy runtime，不实现真实 A2A server、MCP server、调度器、锁服务、数据库事务、IAM、DLP 或生产审计系统。
+4. 本章补充的审计指标和 Python demo 是教学用 toy runtime，不实现真实 A2A server、MCP server、调度器、锁服务、数据库事务、IAM、DLP 或生产审计系统。
 5. 生产系统中，失败治理必须落在 runtime、协议适配层、权限系统、trace / audit、eval harness 和人工流程里，不能只写在 prompt 或某个 Agent 的自我约束里。
 
 ## 31.1 为什么多 Agent 更容易出现系统性错误
@@ -493,7 +493,7 @@ UI：任务 failed。
 
 ## 31.15 多 Agent 失败审计指标与最小 demo
 
-上一节列出的是监控项。本节把它们进一步变成可计算的上线门禁，方便面试时说明“我不是靠感觉判断多 Agent 是否可靠，而是能把失败模式落到 trace 字段和指标上”。
+上一节列出的是监控项。本节把它们进一步变成可计算的上线条件，方便面试时说明“我不是靠感觉判断多 Agent 是否可靠，而是能把失败模式落到 trace 字段和指标上”。
 
 先定义一个 root task 级别的审计样本：
 
@@ -511,7 +511,7 @@ C_k=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[I_k(r_i)=1]
 
 其中，`I_k(r_i)=1` 表示第 `i` 个 root task 在第 `k` 个检查项上通过，`N` 是审计样本数。
 
-多 Agent 失败治理门禁可以写成：
+多 Agent 失败治理准入条件可以形式化为：
 
 ```math
 G_{\mathrm{multi\_agent\_failure}}

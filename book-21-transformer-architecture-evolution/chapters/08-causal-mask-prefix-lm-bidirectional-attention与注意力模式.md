@@ -1,14 +1,14 @@
 # 第八章：Causal Mask、Prefix LM、Bidirectional Attention 与注意力模式
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲第二轮精修主要对齐 Transformer 原论文中的 encoder self-attention、masked decoder self-attention 和 encoder-decoder attention，BERT 的 deep bidirectional encoder，UniLM 用不同 self-attention mask 统一理解、生成和 seq2seq 目标的思路，UL2 对不同语言建模范式的混合，Sparse Transformer / Mistral 等长序列 attention pattern，以及 PyTorch `scaled_dot_product_attention` 对 `attn_mask`、`is_causal` 和高效 kernel 的公开语义。
+本章参考 Transformer 原论文中的 encoder self-attention、masked decoder self-attention 和 encoder-decoder attention，BERT 的 deep bidirectional encoder，UniLM 用不同 self-attention mask 统一理解、生成和 seq2seq 目标的思路，UL2 对不同语言建模范式的混合，Sparse Transformer / Mistral 等长序列 attention pattern，以及 PyTorch `scaled_dot_product_attention` 对 `attn_mask`、`is_causal` 和高效 kernel 的公开语义。
 
-写作边界如下：
+本章的证据边界如下：
 
 1. 本讲重点是 mask 语义、可见性边界、信息泄漏和工程审计，不展开所有高效 attention kernel 的实现细节。
 2. FlashAttention、block sparse、sliding window、varlen packing 等工程实现会因框架、GPU、版本和 kernel 选择而变化；正文只写稳定的概念边界，不把某个版本的支持矩阵泛化成永久结论。
-3. 第二轮精修会把关键公式改成 GitHub Markdown 更稳的 fenced math block，并补一个 0 依赖 Python demo，专门审计 causal、prefix、packed、sliding window 和错误 mask 的可见性。
+3. 本章把关键公式改成 GitHub Markdown 更稳的 fenced math block，并补一个 0 依赖 Python demo，专门审计 causal、prefix、packed、sliding window 和错误 mask 的可见性。
 
 ## 8.1 本章定位
 
@@ -724,7 +724,7 @@ softmax([-inf, -inf, -inf]) -> NaN
 
 ## 8.21 Mask 可见性审计指标与最小 demo
 
-本章最容易落地出错的不是“知道 causal mask 是下三角”，而是多个 mask、样本边界、目标函数和高效 kernel 同时存在时，可见性是否仍然正确。可以定义一个简化的 mask 审计门禁：
+本章最容易落地出错的不是“知道 causal mask 是下三角”，而是多个 mask、样本边界、目标函数和高效 kernel 同时存在时，可见性是否仍然正确。可以定义一个简化的 mask 审计验收条件：
 
 ```math
 G_{\mathrm{mask}}=
@@ -886,9 +886,9 @@ mask_gate_pass= False
 3. sliding window 在窗口填满后每行只看 3 个 token，用局部可见性换取更低成本。
 4. `masked_probs_q2` 的未来位置概率为 0；如果错误地让第 2 行看全序列，未来 token 概率质量会达到 `0.8683`。
 5. 普通 causal mask 用在 packed sequence `[2,3]` 上会产生 6 个跨样本可见关系，block-diagonal causal mask 则把泄漏降为 0。
-6. 门禁失败是刻意构造的：它暴露了 packed sequence 边界、全 mask 行和 kernel fast path 三类常见工程风险。
+6. 检查失败是刻意构造的：它暴露了 packed sequence 边界、全 mask 行和 kernel fast path 三类常见工程风险。
 
-## 8.22 面向专家：Mask、目标函数和数据格式的耦合
+## 8.22 机制与边界：Mask、目标函数和数据格式的耦合
 
 mask 不是单独的工程细节，它和目标函数、数据格式强耦合。
 
@@ -918,7 +918,7 @@ causal mask：assistant token 不能看未来 assistant token。
 
 很多“模型不听话”“loss 很低但生成很差”“SFT 后复读用户问题”的问题，本质都是 mask 或格式错。
 
-## 8.23 面向专家：Bidirectional 不是不能生成，Causal 也不是不能理解
+## 8.23 机制与边界：Bidirectional 不是不能生成，Causal 也不是不能理解
 
 一个常见误解是：
 

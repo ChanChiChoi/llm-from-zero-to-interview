@@ -8,7 +8,7 @@
 
 > KV Cache Block Manager 把 GPU 显存中的 KV Cache blocks 当成可分配资源，负责为请求分配 block、维护 block table、在请求结束后回收 block，并支撑 prefix sharing 和 continuous batching。
 
-## 18.0 本讲资料边界与第二轮精修口径
+## 18.0 本讲范围与资料
 
 本讲只讲教学版 KV Cache Block Manager。它覆盖 free list、block table、ref count、prefill block 准入、decode 动态扩展、请求结束释放、prefix sharing、copy-on-write 直觉、allocation failure、指标和最小可运行 demo，但不展开 vLLM 真实源码类名、GPU / CPU KV swap、preemption 策略、prefix cache hash 细节、多卡 KV 分布、CUDA kernel、真实调度器参数或生产容量规划。
 
@@ -16,7 +16,7 @@
 
 1. vLLM / PagedAttention 论文强调 block-based KV cache 管理是降低 serving 内存浪费和提升吞吐的核心。
 2. vLLM optimization 文档把 KV cache 容量、preemption、`max_num_batched_tokens`、`max_num_seqs`、chunked prefill 和 decode / prefill 平衡作为调优重点，说明 scheduler 必须和 KV block 资源联动。
-3. vLLM prefix caching 文档说明 prefix cache 依赖 block 粒度的匹配与复用；本章只讲引用计数和共享块生命周期直觉，不展开 hash 设计。
+3. vLLM prefix caching 文档说明 prefix cache 依赖 block 粒度的匹配与复用；本章讨论引用计数和共享块生命周期直觉，不展开 hash 设计。
 4. 本章 demo 用纯 Python list 和 dict 模拟 block pool、ref count、free list、allocation failure 和 metrics，不等同于真实 vLLM Block Manager 实现。
 
 参考资料：
@@ -166,7 +166,7 @@ U_{\mathrm{block}}=\frac{N_{\mathrm{used}}}{N_{\mathrm{total}}}
 N_{\mathrm{shared}}=\sum_p \mathbf{1}[c_p>1]
 ```
 
-其中 `c_p` 是 physical block `p` 的引用计数。Block Manager 门禁可以写成：
+其中 `c_p` 是 physical block `p` 的引用计数。Block Manager 准入条件可以形式化为：
 
 ```math
 G_{\mathrm{bm}}=G_{\mathrm{prefill}}G_{\mathrm{decode}}G_{\mathrm{ref}}G_{\mathrm{free}}G_{\mathrm{admit}}G_{\mathrm{metric}}
@@ -338,7 +338,7 @@ Prefix caching 的实现细节会在后续章节展开。
 4. 把部分 cache 移到 CPU。
 5. 丢弃 cache，后续重算。
 
-本章只讲最小 GPU block manager，但你要知道生产系统会把 cache 当成多级资源来管理。
+本章讨论最小 GPU block manager，但你要知道生产系统会把 cache 当成多级资源来管理。
 
 ## 18.13 常见 block manager 指标
 

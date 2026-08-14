@@ -20,9 +20,9 @@
 
 本章就把这些机制串成一个完整调度循环。
 
-## 52.0 本讲资料边界与第二轮精修口径
+## 52.0 本讲范围与资料
 
-本章按第二轮精修口径，只讲教学版 vLLM-like engine step 如何把 continuous batching、paged KV cache、prefix cache、chunked prefill 和 preemption 串成一个统一调度循环。
+本章聚焦教学版 vLLM-like engine step 如何把 continuous batching、paged KV cache、prefix cache、chunked prefill 和 preemption 串成一个统一调度循环。
 
 公开资料校准主要参考四类口径：
 
@@ -37,7 +37,7 @@
 waiting/running 队列 -> prefix lookup once -> decode-first -> suffix prefill -> token/KV budget -> eviction/preemption -> commit plan -> BatchBuilder metadata -> OutputProcessor 状态更新 -> invariants
 ```
 
-第二轮新增 demo 的验收重点是：
+本章 demo 的验收重点是：
 
 ```text
 prefix cache lookup 是否只对 waiting 请求做一次；
@@ -976,13 +976,13 @@ prefix 命中后的剩余 prefill token 数是：
 R_i^{\mathrm{prefill}}=T_i-T_i^{\mathrm{hit}}
 ```
 
-每轮不变量门禁可以拆成：
+每轮不变量准入条件可以拆成：
 
 ```math
 G_{\mathrm{invariant}}=G_{\mathrm{queue}}G_{\mathrm{block}}G_{\mathrm{computed}}G_{\mathrm{metadata}}G_{\mathrm{cleanup}}
 ```
 
-最终统一调度循环门禁：
+最终统一调度循环验收条件：
 
 ```math
 G_{\mathrm{loop}}=G_{\mathrm{prefix}}G_{\mathrm{decode}}G_{\mathrm{prefill}}G_{\mathrm{budget}}G_{\mathrm{pressure}}G_{\mathrm{commit}}G_{\mathrm{metadata}}G_{\mathrm{output}}G_{\mathrm{invariant}}

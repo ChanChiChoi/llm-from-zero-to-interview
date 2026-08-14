@@ -1,8 +1,8 @@
 # 第 24 章 MCP 与 IDE、知识库、数据库、浏览器和终端集成
 
-## 24.0 本讲资料边界与第二轮精修口径
+## 24.0 本讲范围与资料
 
-本讲第二轮精修时，主要对齐 MCP 官方 2025-06-18 specification 中 tools、resources、prompts、roots、authorization 和安全最佳实践口径，同时参考 VS Code MCP Server 文档以及 OpenAI 对 MCP connectors / tools 的工程抽象。这里的重点不是某个 IDE、数据库、浏览器或终端产品的私有配置，而是 MCP 集成到 Host / Agent Runtime 后，如何把能力发现、上下文暴露、权限、数据流、审批、trace 和 eval 放进统一治理面。
+本章参考主要对齐 MCP 官方 2025-06-18 specification 中 tools、resources、prompts、roots、authorization 和安全最佳实践口径，同时参考 VS Code MCP Server 文档以及 OpenAI 对 MCP connectors / tools 的工程抽象。这里的重点不是某个 IDE、数据库、浏览器或终端产品的私有配置，而是 MCP 集成到 Host / Agent Runtime 后，如何把能力发现、上下文暴露、权限、数据流、审批、trace 和 eval 放进统一治理面。
 
 需要先划清几个边界：
 
@@ -590,7 +590,7 @@ Host 至少要负责：
 
 ## 24.9 MCP 集成审计指标与最小 demo
 
-为了把“IDE、知识库、数据库、浏览器和终端都能接入”升级成可上线的集成门禁，可以把一次 MCP 集成决策样本抽象成：
+为了把“IDE、知识库、数据库、浏览器和终端都能接入”升级成可上线的集成验收条件，可以把一次 MCP 集成决策样本抽象成：
 
 ```math
 g_i=(u_i,a_i,n_i,c_i,r_i,t_i,b_i,d_i,o_i,z_i)
@@ -658,7 +658,7 @@ C_{\mathrm{trace}}=\frac{1}{N}\sum_i\mathbf{1}[\mathrm{trace}_i\ \mathrm{capture
 C_{\mathrm{eval}}=\frac{1}{N}\sum_i\mathbf{1}[\mathrm{eval}_i\ \mathrm{covers\ IDE,\ knowledge,\ database,\ browser,\ terminal,\ and\ cross\ server\ flows}]
 ```
 
-综合门禁可以写成：
+综合验收条件可以形式化为：
 
 ```math
 G_{\mathrm{mcp\_integration}}=\mathbf{1}\left[
@@ -680,7 +680,7 @@ C_{\mathrm{eval}}
 \right]
 ```
 
-下面的 demo 用一个 `MiniMCPIntegrationHub` 模拟 Host 侧集成门禁。它只检查静态 toy case，不访问真实 IDE、知识库、数据库、浏览器或终端。
+下面的 demo 用一个 `MiniMCPIntegrationHub` 模拟 Host 侧集成验收条件。它只检查静态 toy case，不访问真实 IDE、知识库、数据库、浏览器或终端。
 
 ```python
 from dataclasses import dataclass, field

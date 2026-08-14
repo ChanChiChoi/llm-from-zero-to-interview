@@ -8,9 +8,9 @@
 
 > 分布式训练启动器的核心作用，是把平台分配的资源转换成训练框架能理解的进程拓扑和通信环境。
 
-## 18.0 本讲资料边界与第二轮精修口径
+## 18.0 本讲范围与资料
 
-本讲第二轮精修时，按官方资料校准以下边界：
+本章依据官方资料校准以下边界：
 
 1. PyTorch `torchrun` 的稳定口径是启动分布式 PyTorch 训练进程，并通过 `--nnodes`、`--nproc-per-node`、rank、world size 和 rendezvous 信息组织 worker。
 2. DeepSpeed launcher 的稳定口径是结合 hostfile、节点数、每节点 GPU 数和 DeepSpeed 配置启动分布式训练，同时训练优化能力主要来自 ZeRO、offload、混合精度等配置。
@@ -18,7 +18,7 @@
 4. Ray Train 的稳定口径是把训练函数运行在一组 worker 上，并通过 scaling config、资源声明和运行时编排管理分布式任务。
 5. NCCL 相关环境变量只作为通信 runtime 配置入口，例如 `NCCL_SOCKET_IFNAME`、`NCCL_IB_DISABLE` 等；是否真正走到期望网卡、RDMA 或拓扑路径，还要靠运行时日志、网络指标和连通性检查验证。
 
-因此，本章不把某个云平台、某个训练 operator、某个内部 launcher 或某个版本的私有参数写成通用标准。这里讨论的是训练平台最稳定的抽象：资源分配、rank 拓扑、rendezvous、GPU 绑定、launcher adapter、网络、日志、失败分类、弹性恢复和审计门禁。
+因此，本章不把某个云平台、某个训练 operator、某个内部 launcher 或某个版本的私有参数写成通用标准。这里讨论的是训练平台最稳定的抽象：资源分配、rank 拓扑、rendezvous、GPU 绑定、launcher adapter、网络、日志、失败分类、弹性恢复和审计验收条件。
 
 ## 18.1 为什么需要启动器
 
@@ -462,7 +462,7 @@ l_i=(r_i,n_i,p_i,w_i,m_i,b_i,e_i,g_i,c_i,o_i,f_i,z_i)
 C_j=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[g_j(l_i)=1]
 ```
 
-训练平台的启动器门禁可以写成：
+训练平台的启动器准入条件可以形式化为：
 
 ```math
 G_{\mathrm{launcher}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land W_{\mathrm{cfg}}=W_{\mathrm{env}} \land P_0=0\right]

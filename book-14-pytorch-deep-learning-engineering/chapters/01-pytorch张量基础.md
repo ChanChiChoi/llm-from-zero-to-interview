@@ -2,15 +2,15 @@
 
 PyTorch 的核心对象是 tensor。大模型工程里的输入 token、embedding、hidden states、attention scores、logits、loss mask、梯度和参数，本质上都是不同 shape、dtype、device 和 stride 的 tensor。
 
-很多人学 PyTorch 时只记住了几个 API，但一到面试或调试训练脚本，就会卡在更底层的问题上：为什么 `view` 报错、为什么广播后 shape 不对、为什么 `matmul` 得到的维度和预期不同、为什么 `transpose` 后要 `contiguous`、为什么同一段代码在 CPU 上能跑到 GPU 上就报 device mismatch。
+很多人学 PyTorch 时只记住了几个 API，但一到真实训练或调试脚本，就会卡在更底层的问题上：为什么 `view` 报错、为什么广播后 shape 不对、为什么 `matmul` 得到的维度和预期不同、为什么 `transpose` 后要 `contiguous`、为什么同一段代码在 CPU 上能跑到 GPU 上就报 device mismatch。
 
 本章目标不是罗列 PyTorch API，而是建立大模型工程中最常用的 tensor 基础：shape、dtype、device、broadcast、矩阵乘法、einsum、索引、reshape、view、transpose、contiguous，以及常见调试方法。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本章范围与资料
 
-本讲第二轮精修时，参考了 PyTorch 官方 tensor tutorial、tensor attributes、broadcasting semantics、`torch.matmul`、`torch.bmm`、`torch.einsum`、`Tensor.view`、`torch.reshape`、`Tensor.contiguous`、`Tensor.stride`、`torch.nn.functional.cross_entropy` 和 CUDA device 相关文档，并结合前序 Transformer、attention、LM loss、mask 和数学基础章节的 shape 推导口径。
+本章以 PyTorch 官方文档为 API 语义的主要依据，参考张量属性、广播、`torch.matmul`、`torch.bmm`、`torch.einsum`、`Tensor.view`、`torch.reshape`、`Tensor.contiguous`、`Tensor.stride` 和 `torch.nn.functional.cross_entropy` 文档，并结合前序 Transformer、attention、LM loss、mask 和数学基础章节的 shape 推导口径。文末列出可直接核验的链接。
 
-本章只聚焦大模型工程最常见的 tensor 基础：shape、dtype、device、broadcasting、matmul / bmm / einsum、索引切片、view / reshape / flatten、transpose / permute / contiguous、stride、mask、loss reshape 和 tensor debug。它不展开 CUDA kernel、autograd graph、distributed tensor、Tensor Core、编译优化或 profiler 细节；这些会在后续章节中处理。
+本章只聚焦大模型工程最常见的 tensor 基础：shape、dtype、device、broadcasting、matmul / bmm / einsum、索引切片、view / reshape / flatten、transpose / permute / contiguous、stride、mask、loss reshape 和 tensor debug。它不展开 CUDA kernel、autograd graph、distributed tensor、Tensor Core、编译优化或 profiler 细节；这些会在后续章节中处理。文中的小例子是可复现的教学构造，不等于对任意 PyTorch 版本、GPU 型号或混合精度配置的性能承诺；涉及性能的判断必须在目标环境中复测。
 
 ## 1.1 Tensor 是什么
 
@@ -50,85 +50,87 @@ X: [B, T, d]
 
 如果你能稳定地推导每一步 tensor 的 shape，大部分模型实现和 debug 都会变简单。
 
-### 1.1.1 关键 shape 公式与张量调试速查
+### 1.1.1 语言模型的 shape contract
 
 语言模型中最常见的张量主线：
 
-$$
+~~~math
 input\_ids \in \mathbb{Z}^{B \times T}
-$$
+~~~
 
-$$
+~~~math
 X = Emb(input\_ids),\qquad X \in \mathbb{R}^{B \times T \times d}
-$$
+~~~
 
 LM head 输出：
 
-$$
+~~~math
 logits \in \mathbb{R}^{B \times T \times V}
-$$
+~~~
 
 next-token prediction 的 shift：
 
-$$
+~~~math
 shift\_logits = logits[:,0:T-1,:]
-$$
+~~~
 
-$$
+~~~math
 shift\_labels = labels[:,1:T]
-$$
+~~~
 
 交叉熵前展平：
 
-$$
+~~~math
 shift\_logits \rightarrow \mathbb{R}^{B(T-1) \times V},\qquad shift\_labels \rightarrow \mathbb{Z}^{B(T-1)}
-$$
+~~~
 
 多头注意力拆头：
 
-$$
+~~~math
 d = H d_h
-$$
+~~~
 
-$$
+~~~math
 Q,K,V \in \mathbb{R}^{B \times H \times T \times d_h}
-$$
+~~~
 
 attention score：
 
-$$
+~~~math
 S = \frac{QK^T}{\sqrt{d_h}},\qquad S \in \mathbb{R}^{B \times H \times T \times T}
-$$
+~~~
 
 attention mask 常见广播：
 
-$$
+~~~math
 mask_{pad}: [B,T] \rightarrow [B,1,1,T]
-$$
+~~~
 
-$$
+~~~math
 mask_{causal}: [T,T] \rightarrow [1,1,T,T]
-$$
+~~~
 
 broadcasting 从右往左对齐维度：
 
-$$
+~~~math
 [B,T,d] + [d] \rightarrow [B,T,d]
-$$
+~~~
 
 LoRA 或线性层常见矩阵乘法：
 
-$$
+~~~math
 X [B,T,d_{in}] \times W [d_{in},d_{out}] \rightarrow Y [B,T,d_{out}]
-$$
+~~~
 
-view / reshape / contiguous 的面试口径：
+这些 shape 还不是完整的正确性证明。每一个符号都对应一个约束：`V` 必须和词表索引范围一致，`d` 必须能被 `H` 整除，`labels` 的整数值必须落在 `[0, V)` 或等于明确约定的 `ignore_index`，而 mask 的最后一维必须确实对应 key position。工程上应把这些约束写成断言或单元测试，而不是只把 shape 打印出来。
+
+`view`、`reshape` 和 `contiguous` 的关系可以这样理解：
 
 1. `view`：只在当前 stride 能兼容目标 shape 时直接改视图。
 2. `reshape`：能返回 view 就返回 view，不行时可能创建拷贝。
 3. `transpose` / `permute`：通常只改 stride，不重排底层数据，因此结果常常不是 contiguous。
 
-这些公式不是为了背维度，而是为了形成一个调试顺序：先看 shape，再看 dtype，再看 device，再看 stride / contiguous，最后检查 mask 方向和数值稳定性。
+这些公式不是为了背维度，而是为了形成一个调试顺序：先看 shape，再看 dtype，再看 device，再看 stride / contiguous，最后检查 mask 方向和数值稳定性。若只证明“代码能运行”，仍可能留下广播方向错、padding 被当成真实 token 或无效位置参与 loss 等语义错误。
 
 ## 1.2 Shape 是第一优先级
 
@@ -172,7 +174,7 @@ shift_logits: [B, T - 1, vocab_size]
 shift_labels: [B, T - 1]
 ```
 
-很多 loss 报错都来自 shape 没有对齐。比如 `cross_entropy` 通常希望输入是 `[N, C]`，标签是 `[N]`，因此语言模型训练里常写成：
+很多 loss 报错都来自 shape 没有对齐。`cross_entropy` 的分类输入把类别放在最后一维之外的“类别维”上；最容易理解的二维形式是 logits 为 `[N, C]`、标签为 `[N]`。因此语言模型训练里常把时间和 batch 合并成样本维：
 
 ```python
 loss = torch.nn.functional.cross_entropy(
@@ -181,13 +183,25 @@ loss = torch.nn.functional.cross_entropy(
 )
 ```
 
-这里的含义是把 `[B, T - 1, vocab_size]` 展平为 `[B * (T - 1), vocab_size]`，把 `[B, T - 1]` 展平为 `[B * (T - 1)]`。
+这里的含义是把 `[B, T - 1, vocab_size]` 展平为 `[B * (T - 1), vocab_size]`，把 `[B, T - 1]` 展平为 `[B * (T - 1)]`。如果 batch 中有 padding，还要同时把无效位置标记成 `ignore_index`，否则模型会被要求预测人为补上的 token。也就是说，shape 对齐只解决“张量能否传入 loss”，并不自动保证监督信号的语义正确。
 
-面试回答：
+建议在模型边界写出显式检查。下面的断言把维度约定转成了可执行的 contract：
 
-```text
-我写 PyTorch 模型时会优先跟踪 shape。语言模型里 input_ids 是 [B, T]，embedding 后是 [B, T, d]，LM head 后是 [B, T, vocab]。算 cross entropy 前通常要把 logits reshape 成 [B*T, vocab]，labels reshape 成 [B*T]。很多训练 bug 本质上是 shape 没有按 loss 或 matmul 的要求对齐。
+```python
+def check_lm_contract(input_ids, logits, labels, vocab_size, pad_id):
+    assert input_ids.ndim == 2
+    assert labels.shape == input_ids.shape
+    assert logits.shape[:2] == input_ids.shape
+    assert logits.size(-1) == vocab_size
+    assert input_ids.dtype == torch.long
+    assert labels.dtype == torch.long
+    valid = labels.ne(pad_id)
+    if valid.any():
+        assert int(labels[valid].min()) >= 0
+        assert int(labels[valid].max()) < vocab_size
 ```
+
+这类检查不应只在调试时临时打印。数据格式、词表版本或 padding 策略一旦变化，contract 就是最早暴露错误的地方；当模型进入大规模训练后，尽早失败通常比训练数小时后才发现 loss 语义错更便宜。
 
 ## 1.3 Dtype：精度、性能和数值稳定性
 
@@ -200,6 +214,8 @@ Tensor 的 dtype 决定数值精度和计算性能。
 3. `torch.bfloat16`：常用于大模型训练，动态范围接近 fp32，精度低于 fp32。
 4. `torch.int64`：常用于 token id、labels、索引。
 5. `torch.bool`：常用于 mask。
+
+dtype 还决定算子是否能够执行，以及不同 dtype 混合时结果会被提升到什么类型。整数 token id 不能直接拿来做浮点矩阵乘法；`bool` mask 适合做逻辑筛选，但如果把它转换成加性 mask，就必须使用和 score 兼容的浮点类型。不同版本、设备和算子可能采用不同的 promotion 或内部累积策略，因此不要仅凭“输入是 bf16”就断言整个算子都以 bf16 完成。
 
 示例：
 
@@ -217,6 +233,8 @@ y = x.to(torch.bfloat16)
 3. 模型参数和激活可能是 fp32、fp16 或 bf16。
 4. Loss 计算、softmax、归一化等操作可能需要更稳定的 dtype。
 
+一个典型的数值边界是 attention 的缩放和 softmax。半精度 score 如果绝对值过大，可能在指数运算前后出现溢出；如果所有 key 都被 mask，整行 logits 都可能是负无穷，softmax 便会产生 NaN。选择 `-1e9` 还是负无穷，不是脱离算子和 dtype 的固定教条：要确认后续 kernel、dtype、是否存在全屏蔽行，以及框架版本对 mask 的处理方式。工程实现应在单元测试中覆盖“至少一个有效 key”和“全是 padding”的边界，而不是只测正常句子。
+
 常见错误：
 
 ```text
@@ -224,6 +242,8 @@ RuntimeError: expected scalar type Long but found Float
 ```
 
 这类错误通常说明你把浮点 tensor 传给了需要整数索引的模块，例如 `nn.Embedding`。
+
+另一个常见误区是把 `.to(dtype)` 当成数值校验。它只执行转换，不会检查浮点值是否适合作为索引，也不会保证转换后的数值仍然是合法 token。数据进入 embedding 或 loss 前，应分别检查 dtype、取值范围和特殊 token 约定。
 
 ## 1.4 Device：CPU 和 GPU 必须一致
 
@@ -268,6 +288,21 @@ batch = {
     for k, v in batch.items()
 }
 ```
+
+模型中的常量也有 device 问题。直接在 `forward` 中写 `torch.arange(T)`、`torch.ones(...)` 或一个 Python 数字，可能产生 CPU tensor 或与输入 dtype 不一致的 tensor。更稳妥的做法是使用输入的 device 和 dtype，或者把长期复用的 mask 注册为 buffer：
+
+```python
+class CausalMask(torch.nn.Module):
+    def __init__(self, max_length):
+        super().__init__()
+        mask = torch.tril(torch.ones(max_length, max_length, dtype=torch.bool))
+        self.register_buffer("mask", mask, persistent=False)
+
+    def forward(self, length, like):
+        return self.mask[:length, :length].to(device=like.device)
+```
+
+`register_buffer` 的要点不是“把 mask 变成参数”，而是让它跟随模块迁移到目标 device，并参与模块状态管理；它不应出现在优化器的可训练参数列表中。若 mask 的 dtype 需要与某个运算严格匹配，应在使用点明确转换，而不是依赖隐式 promotion。
 
 ## 1.5 创建 Tensor 的常用方式
 
@@ -513,7 +548,7 @@ context = torch.einsum("bhts,bhsd->bhtd", attn, V)
 print(context.shape)  # [2, 4, 8, 64]
 ```
 
-`einsum` 的优点是表达清晰，尤其适合面试手写和解释维度。缺点是字符串写错时不如普通矩阵乘法直观，而且在某些场景下性能需要实际 profiling。
+`einsum` 的优点是把“哪些维度保留、哪些维度求和”写在表达式里，适合教学、原型和复杂的多路收缩。它不是性能保证：字符串写错时可能得到形状正确但语义错误的结果，某些路径也可能比专门的矩阵乘法慢。使用它时至少应做两件事：用一个小尺寸输入和 `matmul` 对照数值，用 profiler 在目标设备和真实尺寸上比较耗时、显存和 kernel 行为。
 
 ## 1.12 reshape、view 和 flatten
 
@@ -539,7 +574,7 @@ y = x.transpose(1, 2)
 z = y.view(2, 12)  # 可能报错
 ```
 
-原因是 `transpose` 后 tensor 通常不再 contiguous，`view` 无法按目标 shape 解释底层存储。
+原因不是“所有非 contiguous tensor 都不能 view”，而是目标 shape 必须满足当前 stride 的可合并条件。`transpose` 后通常不满足这个条件，所以该例可能报错；也存在某些切片或维度变换仍可 `view` 的情况。把规则简单记成“非 contiguous 一定不能 view”会在更复杂的 layout 中误导排查。
 
 更稳妥的写法：
 
@@ -553,11 +588,12 @@ z = y.reshape(2, 12)
 z = y.contiguous().view(2, 12)
 ```
 
-工程建议：
+工程上要同时考虑语义和拷贝成本：
 
-1. 如果只是想安全改变 shape，优先用 `reshape`。
-2. 如果明确知道 tensor 是 contiguous，并且想避免潜在拷贝，可以用 `view`。
+1. 如果只是想安全改变 shape，优先用 `reshape`，但要意识到它在必要时可能复制数据。
+2. 如果明确知道 tensor 是 contiguous，并且想表达“不得复制”的视图语义，可以用 `view` 并配合 `is_contiguous()` 或 stride 测试。
 3. 如果要合并连续维度，用 `flatten(start_dim, end_dim)` 可读性更好。
+4. 在性能敏感路径中，对疑似复制的操作记录内存峰值和耗时；不能把 `reshape` 视为永远零拷贝。
 
 ## 1.13 transpose、permute 和 contiguous
 
@@ -602,12 +638,6 @@ print(out.shape)  # [B, T, d_model]
 
 这里的 `contiguous()` 很关键。`transpose` 只是改变 stride 视图，不一定重新排列底层内存。后续使用 `view` 前，常常需要先调用 `contiguous()`。
 
-面试回答：
-
-```text
-transpose 和 permute 通常不会真的复制数据，而是改变 tensor 的 stride，因此结果可能不是 contiguous。view 要求内存布局兼容目标 shape，所以在 transpose 后经常需要 contiguous().view(...)，或者直接使用 reshape，让 PyTorch 在必要时处理拷贝。
-```
-
 ## 1.14 Stride：理解 contiguous 的关键
 
 Stride 表示沿某个维度移动一步，在底层存储中要跳过多少个元素。
@@ -638,7 +668,23 @@ print(y.is_contiguous())
 z = y.contiguous()
 ```
 
-注意，`contiguous()` 可能触发真实内存拷贝。在性能敏感代码中，不要无脑到处加；但在模型原型、面试手写和调试阶段，它是解决 layout 问题的常见手段。
+注意，`contiguous()` 可能触发真实内存拷贝。在性能敏感代码中，不要无脑到处加；但在模型原型和调试阶段，它是解决 layout 问题的常见手段。更重要的是区分两个事实：stride 描述访问方式，contiguous 描述是否符合某个约定的连续布局；它们都不说明 tensor 的数值是否正确，也不说明某个 kernel 一定更快。某些算子可以直接处理非连续输入，另一些算子会在内部复制；最终成本要通过目标路径测量。
+
+可以用一个小实验观察“同一数值、不同 layout”与“显式复制”的区别：
+
+```python
+x = torch.arange(24).reshape(2, 3, 4)
+y = x.transpose(1, 2)
+z = y.contiguous()
+
+assert torch.equal(y, z)
+assert y.shape == z.shape
+assert not y.is_contiguous()
+assert z.is_contiguous()
+assert y.stride() != z.stride()
+```
+
+这里 `z` 与 `y` 的值相同，但访问路径不同。排查 view 错误时，应先确认是否只需要一个 view，还是确实需要一份连续存储；排查数值错误时，则应比较值和索引语义，不能用 `is_contiguous()` 代替数值验证。
 
 ## 1.15 cat 和 stack
 
@@ -672,7 +718,7 @@ batch = torch.stack(samples, dim=0)
 print(batch.shape)  # [4, 10]
 ```
 
-如果每个样本长度不同，不能直接 stack，需要先 padding 或自定义 collate function。
+如果每个样本长度不同，不能直接 stack，需要先 padding 或自定义 collate function。padding 后必须同时产出有效 token mask 或 labels mask；否则“为了得到矩形 batch”这一步会悄悄改变 loss 和 attention 的监督对象。
 
 ## 1.16 mask 的常见写法
 
@@ -714,7 +760,9 @@ print(causal_mask.shape)  # [T, T]
 scores = scores.masked_fill(~causal_mask[None, None, :, :], float("-inf"))
 ```
 
-真实工程里通常会把 padding mask 和 causal mask 结合起来。关键是始终确认 mask 的维度语义：哪个维度是 batch，哪个维度是 query position，哪个维度是 key position。
+真实工程里通常会把 padding mask 和 causal mask 结合起来。关键是始终确认 mask 的维度语义：哪个维度是 batch，哪个维度是 query position，哪个维度是 key position。上面的组合 mask 形状是 `[B, 1, T, T]`：padding mask 限制 key 位置，causal mask 同时限制 query-key 的相对位置。如果还要屏蔽 query 侧的 padding，需要另加 query mask；只屏蔽 key 侧并不会阻止 padding query 产生输出。
+
+一个容易被忽略的边界是全屏蔽行。对右 padding 的 batch，若把 padding query 也送进 attention，某些行可能没有任何合法 key。实现可以在进入 softmax 前保证每个 query 至少有一个合法 key，也可以在 softmax 后把无效 query 的输出清零；选择哪种策略取决于模型的 padding 约定和 kernel。测试时应专门构造全 padding、长度为 1 和 batch 内长度不一致的样本，并检查输出与 loss 都是有限值。
 
 ## 1.17 in-place 操作的风险
 
@@ -737,11 +785,7 @@ y = x * 2
 
 在训练代码中，除非你明确知道某个 in-place 操作不会破坏计算图，否则优先使用非 in-place 写法。
 
-常见建议：
-
-1. 面试手写时，少用 in-place，避免引入额外解释成本。
-2. 写模型 forward 时，谨慎修改会参与梯度计算的中间激活。
-3. 优化显存时，可以有意识地使用 in-place，但需要配合测试和 anomaly detection。
+更稳妥的原则是先说明别名关系，再决定是否原地修改。`y = x` 只增加一个 Python 引用；`y = x.clone()` 才创建独立存储；`detach()` 切断梯度关系但仍可能与原 tensor 共享存储。若一个 tensor 还会被计算图、残差分支或日志线程使用，对它做 in-place 修改就可能导致反向结果错误或直接报错。优化显存时可以使用原地操作，但必须用梯度检查、有限值检查和目标 batch 的回归测试证明它没有改变语义。
 
 ## 1.18 调试 Tensor 的实用清单
 
@@ -926,49 +970,81 @@ print(report)
 
 真正写 Transformer 时会使用 `nn.Linear`、更完整的 mask、dropout、输出投影和更严谨的初始化，但 tensor shape 主线是不变的。
 
-## 1.20 常见面试题
+## 1.20 一个完整的张量审计过程
 
-问题一：`view` 和 `reshape` 有什么区别？
+前面的概念在真实项目中通常同时出现。假设训练突然出现 `loss=nan`，或者一个 attention 模块的输出形状正确但效果明显下降，可以按以下顺序审计，而不是只在报错行前面加 `print`。
 
-答：
+第一步是确认输入和标签的语义：`input_ids` 是否为整数，padding id 是否和 mask 使用同一个约定，labels 是否发生了正确的 next-token shift，词表范围是否覆盖所有非忽略标签。第二步是沿着模块边界记录 shape，特别是 `[B, T, d]`、`[B, H, T, d_h]` 和 `[B, H, T, T]` 的转换。第三步是检查参与同一计算的 dtype 与 device，避免 CPU 常量、浮点索引和隐式 promotion 混在一起。第四步才是检查 stride、contiguous、mask 数值和有限值。
 
-```text
-view 要求 tensor 的内存布局和目标 shape 兼容，通常要求 contiguous 或 stride 可以直接解释；reshape 更灵活，如果不能返回 view，可能会创建拷贝。工程里如果只是想安全改 shape，常用 reshape；如果追求明确的 view 语义，就要确认 tensor 是否 contiguous。
+可以把这个顺序写成一个小型审计函数：
+
+```python
+def audit_tensor(name, value):
+    if not torch.is_tensor(value):
+        return {"name": name, "type": type(value).__name__}
+    report = {
+        "name": name,
+        "shape": tuple(value.shape),
+        "dtype": str(value.dtype),
+        "device": str(value.device),
+        "requires_grad": bool(value.requires_grad),
+        "contiguous": bool(value.is_contiguous()),
+        "stride": tuple(value.stride()),
+    }
+    if value.is_floating_point() or value.is_complex():
+        report["finite"] = bool(torch.isfinite(value).all().item())
+    return report
 ```
 
-问题二：为什么 `transpose` 后经常要 `contiguous`？
+审计结果应和输入样本、模型版本、PyTorch 版本一起保存。这样才能回答“哪个边界第一次出现异常”，而不是只知道最后的 loss 已经变成 NaN。对大型训练任务，建议在小 batch、单卡和固定随机种子下先执行同一套 contract；只有基础语义通过后，才增加序列长度、GPU 数量和混合精度。
 
-答：
+## 1.21 章末练习
 
-```text
-transpose 通常不会重排底层数据，而是改变 stride，所以结果可能不是 contiguous。后续如果用 view 合并维度，可能因为内存布局不兼容报错。因此常见写法是 transpose 后先 contiguous 再 view，或者直接使用 reshape。
-```
+### 练习一：shape contract
 
-问题三：PyTorch broadcasting 规则是什么？
+给定 `B=3`、`T=17`、`d_model=768`、`H=12`、`V=32000`，写出 embedding、Q/K/V、attention score、合并多头和 LM loss flatten 后的 shape。说明为什么 `d_model` 必须能被 `H` 整除。
 
-答：
+### 练习二：广播方向
 
-```text
-Broadcasting 会从右往左对齐维度，每一维要么相等，要么其中一个是 1，要么其中一个维度不存在。它常用于 bias、LayerNorm 参数、attention mask 等场景。调试时不仅要看能不能广播，还要确认广播方向是否符合语义。
-```
+构造 `scores: [2, 4, 5, 5]` 和 `padding_mask: [2, 5]`，分别写出 key mask 与 query mask 的广播形状。解释为什么 `[B, T, 1]` 不是这个问题的等价写法。
 
-问题四：Attention score 的 shape 为什么是 `[B, H, T, T]`？
+### 练习三：layout 与复制
 
-答：
+创建一个 `[2, 3, 4]` tensor，交换两个维度后比较 `view`、`reshape` 和 `contiguous().view` 的行为。记录 shape、stride、是否 contiguous，并说明哪一步可能产生数据拷贝。
 
-```text
-多头注意力中 Q 和 K 的 shape 通常是 [B, H, T, d_h]。计算 Q @ K.transpose(-2, -1) 时，最后两维是 [T, d_h] 乘 [d_h, T]，得到 [T, T]，前面的 B 和 H 作为 batch 维保留，所以 score 是 [B, H, T, T]。
-```
+### 练习四：dtype 和取值
 
-问题五：`cat` 和 `stack` 有什么区别？
+让一个浮点 tensor 经过 `.long()` 后作为 embedding 索引。分别构造合法整数、负数和超出词表的值，记录错误类型，并说明为什么 dtype 正确仍然不代表索引合法。
 
-答：
+### 练习五：mask 的有限值
 
-```text
-cat 是在已有维度上拼接，不增加新维度；stack 会先新增一个维度，再把多个 tensor 沿这个新维度堆起来。把多个样本组成 batch 时常用 stack；把多个片段沿序列维或特征维拼起来时常用 cat。
-```
+构造一个 query 没有任何合法 key 的 attention 行，比较使用 `-inf` 和有限大负数时 softmax 的结果。解释为什么“没有 NaN”也不一定表示 mask 语义正确。
 
-## 1.21 本章小结
+### 练习六：cat、stack 与 padding
+
+给出三个不同长度的 token 序列，设计一个 collate 函数返回 padded ids、attention mask 和 labels mask。说明 `stack` 为什么不能直接处理变长序列。
+
+### 练习七：端到端审计
+
+运行本章 demo，把 `num_heads`、padding 位置和 dtype 至少各改一次。为每次改动写出一个预期 contract，并记录实际错误或输出变化。不要只修到代码能跑，要说明修复后哪个语义约束重新成立。
+
+## 1.22 资料与证据边界
+
+本章优先依据 PyTorch 官方 API 和说明文档：
+
+1. 张量属性与基础操作：https://pytorch.org/docs/stable/tensors.html
+2. 广播语义：https://pytorch.org/docs/stable/notes/broadcasting.html
+3. `torch.matmul` 的维度规则：https://pytorch.org/docs/stable/generated/torch.matmul.html
+4. `torch.bmm` 的批量矩阵乘法：https://pytorch.org/docs/stable/generated/torch.bmm.html
+5. `torch.einsum` 的下标表达式：https://pytorch.org/docs/stable/generated/torch.einsum.html
+6. Tensor view、stride 与存储关系：https://pytorch.org/docs/stable/tensor_view.html
+7. `Tensor.view` 的限制：https://pytorch.org/docs/stable/generated/torch.Tensor.view.html
+8. `torch.reshape` 的 view/copy 语义：https://pytorch.org/docs/stable/generated/torch.reshape.html
+9. `torch.nn.functional.cross_entropy` 的输入和 target 约定：https://pytorch.org/docs/stable/generated/torch.nn.functional.cross_entropy.html
+
+这些页面适合核对 API 的形状、dtype、device 和返回值语义，不等于对某个模型实现的正确性证明。性能、显存、非连续输入是否触发内部复制、混合精度下的数值稳定性，都依赖 PyTorch 版本、后端、硬件和具体输入；书中的 demo 只能证明教学构造在当前环境可运行，不能替代目标部署的 benchmark。
+
+## 1.23 本章小结
 
 PyTorch 张量基础的重点不是背 API，而是形成稳定的工程判断：
 
@@ -978,6 +1054,7 @@ PyTorch 张量基础的重点不是背 API，而是形成稳定的工程判断�
 4. Broadcasting 很强大，但要确认语义方向正确。
 5. `matmul` 和 `einsum` 是理解 attention 的核心工具。
 6. `reshape`、`view`、`transpose`、`permute`、`contiguous` 背后是内存布局和 stride。
-7. Mask、loss reshape、多头拆分和合并，是大模型工程最常见的 tensor 基础考点。
+7. Mask、loss reshape、多头拆分和合并，是大模型工程最常见的 tensor 基础。
+8. 能运行不等于语义正确；contract、边界样本和有限值检查要一起验证。
 
 下一章会在 tensor 基础上进入 autograd，理解 PyTorch 如何构建计算图、保存中间结果、执行 backward，以及为什么 `detach`、`no_grad`、梯度累积和 in-place 操作会影响训练行为。

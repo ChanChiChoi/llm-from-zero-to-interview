@@ -8,9 +8,9 @@
 
 > vLLM memory management 的核心是把 GPU memory 中最动态、最容易浪费的 KV Cache 管理成可分配、可复用、可淘汰、可观测的 block pool，并让 scheduler 基于 memory budget 做 admission control、preemption 和调度取舍。
 
-## 21.0 本讲资料边界与第二轮精修口径
+## 21.0 本讲范围与资料
 
-本讲按第二轮精修要求做过资料校准，主要参考五类公开资料：
+本章参考五类公开资料：
 
 1. vLLM PagedAttention 论文和项目文档对 block-based KV cache、非连续 physical blocks、block table 和高吞吐 serving 的公开口径。
 2. vLLM prefix caching 设计文档对 `KVCacheBlock`、block hash、parent hash、extra hashes、free queue、cached-but-free block、LRU eviction 和引用计数的说明。
@@ -18,7 +18,7 @@
 4. vLLM metrics 文档对 GPU / CPU KV cache usage、prefix cache hit rate、preemption 和 request queue / running / waiting 指标的观测口径。
 5. vLLM Hybrid KV Cache Manager 文档对 full attention、sliding window attention、state space layer 等混合 cache 类型、KV cache group、page size 和统一管理接口的说明。
 
-本章只讲 vLLM-like memory management 的教学抽象，不绑定某个 vLLM 版本的真实源码类名、CUDA kernel、真实内存分配器、swap 实现、KV connector、分布式 KV transfer、生产参数全集或具体 GPU 型号。本章 demo 用纯 Python list / dict 模拟 block pool、free queue、prefix cache、ref count、eviction、preemption 和 metrics，不等同于真实 vLLM runtime。
+本章讨论 vLLM-like memory management 的教学抽象，不绑定某个 vLLM 版本的真实源码类名、CUDA kernel、真实内存分配器、swap 实现、KV connector、分布式 KV transfer、生产参数全集或具体 GPU 型号。本章 demo 用纯 Python list / dict 模拟 block pool、free queue、prefix cache、ref count、eviction、preemption 和 metrics，不等同于真实 vLLM runtime。
 
 参考资料：
 
@@ -645,7 +645,7 @@ vLLM 用 PagedAttention 的思想把 KV Cache 切成固定大小的 physical blo
 
 ## 21.19 Memory management 公式、prefix cache 和可运行 demo
 
-把本章的 memory management 验收合成一个教学版门禁：
+把本章的 memory management 验收合成一个教学版验收条件：
 
 $$
 G_{\mathrm{mem}}=G_{\mathrm{pool}}G_{\mathrm{prefix}}G_{\mathrm{ref}}G_{\mathrm{free}}G_{\mathrm{evict}}G_{\mathrm{preempt}}G_{\mathrm{cleanup}}G_{\mathrm{metric}}

@@ -10,13 +10,13 @@ PD 分离真正难的地方，不是把请求分给两个 worker，而是把 Pre
 
 > KV Cache 迁移、共享和路由是 PD 分离能否落地的核心。它决定了 TTFT 是否真的下降，TPOT 是否稳定，以及系统复杂度是否可控。
 
-## 38.0 本讲资料边界与第二轮精修口径
+## 38.0 本讲范围与资料
 
-本讲第二轮精修前，先按 `WRITING_PLAN.md` 对公开资料做校准：参考 SGLang PD Disaggregation 文档对 KV transfer backend、Mooncake / NIXL、bootstrap port、heterogeneous TP staging buffer、PD multiplexing 和 routing policy 的公开口径；参考 vLLM disaggregated prefilling 文档对 KV connector、prefill / decode 示例和实验性边界的说明；参考 Mooncake 论文对 KV cache-centric disaggregated architecture、KV cache 管理和传输瓶颈的系统动机说明；并参考 PagedAttention / vLLM 资料对 paged KV blocks、block table 和 KV cache metadata 的稳定抽象。
+本章参考 SGLang PD Disaggregation 文档对 KV transfer backend、Mooncake / NIXL、bootstrap port、heterogeneous TP staging buffer、PD multiplexing 和 routing policy 的公开口径；参考 vLLM disaggregated prefilling 文档对 KV connector、prefill / decode 示例和实验性边界的说明；参考 Mooncake 论文对 KV cache-centric disaggregated architecture、KV cache 管理和传输瓶颈的系统动机说明；并参考 PagedAttention / vLLM 资料对 paged KV blocks、block table 和 KV cache metadata 的稳定抽象。
 
 本讲只讲 KV cache 迁移、共享和路由的通用系统问题：KV 大小估算、paged block metadata、layout / dtype / TP 兼容、push / pull / remote read、decode reservation、KV-aware routing、prefix-aware routing、失败清理和多租户隔离。不把某个框架版本的真实 connector 字段、RDMA/NIXL/Mooncake API、CUDA IPC 细节、网络拓扑参数或远端 KV cache 产品实现写成通用标准。
 
-本讲新增 demo 是教学版 KV transfer router：用 0 依赖 Python 模拟 KV metadata 兼容性检查、decode capacity 预留、路由 cost score、prefix cache 命中、多租户缓存阻断、短 prompt recompute 路径和 transfer 失败清理计划，帮助把“KV-aware routing”从口号落到可运行证据。
+本章的 demo 是教学版 KV transfer router：用 0 依赖 Python 模拟 KV metadata 兼容性检查、decode capacity 预留、路由 cost score、prefix cache 命中、多租户缓存阻断、短 prompt recompute 路径和 transfer 失败清理计划，帮助把“KV-aware routing”从口号落到可运行证据。
 
 ## 38.1 本章目标
 
@@ -1342,7 +1342,7 @@ PD 分离中，Prefill worker 处理 prompt 后会生成每层 KV cache。因为
 故障处理也很重要。如果 transfer 失败，要释放 decode 侧预留 block，并根据 source KV 是否还存在决定重试 transfer 还是重新 prefill。如果 decode 已经开始输出 token，再失败就很难完全无感恢复，因为客户端可能已经收到部分 token。
 ```
 
-## 38.38 KV Transfer 路由公式、隔离门禁和可运行 demo
+## 38.38 KV Transfer 路由公式、隔离验收条件和可运行 demo
 
 KV transfer 和 routing 的核心不是“选择一个空闲 decode worker”，而是在兼容性、容量、拓扑、缓存命中、多租户隔离和 transfer 成本之间做取舍。
 
@@ -1601,7 +1601,7 @@ kv_transfer_gates= {'metadata_compatibility_checked': True, 'decode_capacity_res
 5. `recompute_path_visible=True`：短 prompt 直接 recompute，比迁移更简单。
 6. `failure_plan_visible=True`：每个迁移请求都带有 transfer 失败后的清理 / 重试计划。
 
-所以本章最终门禁是 `kv_transfer_routing_gate`：只有 metadata、capacity、route score、tenant isolation、recompute fallback、failure plan 和 metrics 都能闭环，KV transfer 才不是“复制 bytes”，而是可治理的系统能力。
+所以本章最终验收条件是 `kv_transfer_routing_gate`：只有 metadata、capacity、route score、tenant isolation、recompute fallback、failure plan 和 metrics 都能闭环，KV transfer 才不是“复制 bytes”，而是可治理的系统能力。
 
 ## 38.39 小练习
 

@@ -8,9 +8,9 @@
 
 > AI Infra 不是为“模型”服务，而是为不同 AI 工作负载服务；不同工作负载的计算、显存、网络、存储、延迟和可靠性要求完全不同。
 
-## 6.0 本讲资料边界与第二轮精修口径
+## 6.0 本讲范围与资料
 
-本讲第二轮精修时，资料口径按“稳定工作负载画像”处理，而不是按某个厂商平台、某个云产品 SKU 或某个调度器字段来写死。预训练部分参考 Megatron-LM 等大规模语言模型训练公开资料中对数据并行、张量并行、流水并行、GPU 集群和通信瓶颈的描述；SFT / RLHF 部分参考 InstructGPT 一类对齐流程中 SFT、reward model、policy 优化和 rollout 的多阶段结构；评估部分参考 OpenAI Evals 这类把模型或系统行为做成可复现实验的开源评估框架；推理部分参考 vLLM / PagedAttention 一类推理系统中 KV cache、continuous batching 和请求级延迟的稳定工程抽象。
+本章参考资料口径按“稳定工作负载画像”处理，而不是按某个厂商平台、某个云产品 SKU 或某个调度器字段来写死。预训练部分参考 Megatron-LM 等大规模语言模型训练公开资料中对数据并行、张量并行、流水并行、GPU 集群和通信瓶颈的描述；SFT / RLHF 部分参考 InstructGPT 一类对齐流程中 SFT、reward model、policy 优化和 rollout 的多阶段结构；评估部分参考 OpenAI Evals 这类把模型或系统行为做成可复现实验的开源评估框架；推理部分参考 vLLM / PagedAttention 一类推理系统中 KV cache、continuous batching 和请求级延迟的稳定工程抽象。
 
 需要注意三点：
 
@@ -647,13 +647,13 @@ K_i=K_{\mathrm{gpu},i}+K_{\mathrm{storage},i}+K_{\mathrm{network},i}+K_{\mathrm{
 
 预训练的 `K_gpu` 可能最大；评估和 RLHF 可能有 `K_human` 或 judge / reward 调用；Agent 和 RAG 可能因为工具调用、检索、长上下文和重试让 `K_api` 上升。
 
-最后，可以把任务画像门禁写成：
+最后，可以把任务画像验收条件写成：
 
 ```math
 G_{\mathrm{task}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land R_{\mathrm{slo}}\ge \tau_{\mathrm{slo}} \land P_0=0\right]
 ```
 
-其中，`C_j` 是第 `j` 个审计指标覆盖率，`tau_j` 是最低覆盖率阈值，`P_0` 是 P0 级风险数量。这个门禁不是让所有任务都满足同一套资源指标，而是要求每类任务必须有匹配自己的资源、调度、监控、成本和风险说明。
+其中，`C_j` 是第 `j` 个审计指标覆盖率，`tau_j` 是最低覆盖率阈值，`P_0` 是 P0 级风险数量。这组条件不是让所有任务都满足同一套资源指标，而是要求每类任务必须有匹配自己的资源、调度、监控、成本和风险说明。
 
 下面这个 0 依赖 demo 演示如何把任务画像写成可审计规则。它故意构造 1 个完整样本和 16 个坏样本，让每个审计维度各失败一次。
 
@@ -1016,7 +1016,7 @@ failed_cases=['generic_ai_job_bad', 'resource_vector_incomplete_bad', 'pretraini
 task_profile_gate_pass=False
 ```
 
-这个 demo 的重点不在规则本身，而在思维方式：平台团队要把“任务不同”落到数据结构和门禁上。预训练缺 checkpoint 不能过；RLHF 不统计 rollout 不能过；评估不可复现不能过；推理没有 TTFT / TPOT 不能过；Agent 没 trace 不能过；成本只按 token 估算也不能过。面试中如果能把这些差异说成审计指标，而不是只背概念表，会更接近真实平台设计。
+这个 demo 的重点不在规则本身，而在思维方式：平台团队要把“任务不同”落到数据结构和验收条件上。预训练缺 checkpoint 不能过；RLHF 不统计 rollout 不能过；评估不可复现不能过；推理没有 TTFT / TPOT 不能过；Agent 没 trace 不能过；成本只按 token 估算也不能过。面试中如果能把这些差异说成审计指标，而不是只背概念表，会更接近真实平台设计。
 
 ## 6.16 常见误区
 

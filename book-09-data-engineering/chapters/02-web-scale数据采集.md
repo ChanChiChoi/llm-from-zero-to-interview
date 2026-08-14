@@ -1,751 +1,567 @@
-# 第二章：Web-Scale 数据采集
+# 第二章 Web-Scale 数据采集：从可访问页面到可治理语料
 
-重点：网页、书籍、论文、代码、论坛、对话、多语言数据来源和法律合规问题。
+大模型的数据采集常被简化成“写一个爬虫，把网页下载下来”。这个比喻只描述了最早的一步，甚至容易把真正困难的部分遮住：下载成功不代表获得了训练许可，解析出文本不代表保留了原文结构，页面数量增加不代表有效知识增加，公开可见也不代表没有隐私、版权或评估污染风险。
 
-面试重点：Web-scale 数据采集不是“写爬虫把网页都扒下来”，而是一个涉及数据来源、解析、质量、版权、隐私、反滥用、可追溯和后续训练目标的系统工程。
+更准确的对象是一个带有来源、权限、时间、结构、风险和处理历史的数据资产。它要能回答：这段文本从哪里来，按照什么规则取得，原始页面是什么版本，解析时丢失了什么，为什么被保留或删除，进入了哪些数据集和模型，以及收到删除或纠错请求后如何定位下游副本。
 
-合规边界：本章讨论合法合规的数据采集、公开数据集、数据治理和工程流程，不提供绕过访问控制、规避反爬、抓取未授权内容或违反网站条款的操作方法。
+本章从 Web-scale 数据采集的历史动机开始，逐步讲清来源类型、访问和使用边界、Common Crawl 的数据形态、采集与解析 pipeline、质量与安全检查、去重和污染、代码与多语言数据、血缘与删除、线上观测以及一个合成审计案例。所有工程例子都使用公开、授权或合成场景；涉及具体法域的法律结论必须交由组织的法务和隐私团队确认。
 
-## 本章目标
+## 2.1 采集的对象不是网页，而是带证据的数据对象
 
-学完本章，你要能回答：
+### 2.1.1 小白视角：建一座有借阅记录的图书馆
 
-1. Web-scale 数据采集为什么是大模型训练的基础？
-2. 大模型常见数据来源有哪些？
-3. 网页、书籍、论文、代码、论坛、对话、多语言数据各有什么特点？
-4. Common Crawl、The Pile 这类公开语料给了我们什么启发？
-5. Web 数据采集 pipeline 应该如何设计？
-6. 如何处理版权、隐私、robots、Terms of Service、数据许可和合规？
-7. 如何做数据来源记录和版本治理？
-8. 面试中如何回答“如何从零构建 web-scale 训练数据集”？
+可以把 Web-scale 采集想象成建设一座城市图书馆。把纸箱运到仓库只是搬运，真正的图书馆还要知道每本书的来源、版本、许可、分类、保存期限和借阅记录。某本书被发现有错误时，管理员要能找到它存在哪些书架；版权方要求撤下某一版时，管理员要知道哪些复制品和索引需要处理。
 
-## 0. 本讲资料边界与第二轮精修口径
+网页数据也有同样的层次：
 
-按照 `WRITING_PLAN.md` 的要求，本讲精修前核对了 Common Crawl 的 WARC / WAT / WET 数据形态、IETF RFC 9309 的 Robots Exclusion Protocol、T5 / C4、The Pile、RefinedWeb、FineWeb、Dolma 和 DataComp-LM / DCLM 等公开资料。
+1. URL 或文件地址只是定位线索，不是内容身份。
+2. HTML 响应只是原始载体，不是适合训练的文本。
+3. 清洗后的文本不是“无来源的字符串”，仍然需要保留内容 hash、来源、时间和处理版本。
+4. 进入训练的 token 不是唯一副本，数据还可能存在于 raw lake、解析缓存、去重索引、token shard、评估副本和日志中。
+5. 一条“可以访问”的记录，不能自动推出“可以用于训练、可以商业发布或可以再分发”。
 
-本讲聚焦大模型训练数据采集的工程闭环：
+因此，采集项目的第一个交付物不应是 URL 数量，而应是一个可以追溯的 source registry 和一套明确的数据对象 schema。
 
-```text
-数据源规划 -> 合规审查 -> 公开或授权采集 -> 原始存储 -> 解析 -> 过滤 -> 去重 -> 配比 -> 版本审计
-```
+### 2.1.2 专家视角：采集是受约束的分布构造
 
-本讲不提供绕过登录、破解访问控制、规避反爬、批量抓取未授权内容或违反网站条款的做法。法律、版权和隐私问题在真实项目中需要法务、安全、隐私和业务团队共同确认；面试中也不应把技术可访问性说成“天然可用于训练”。
+设原始记录为：
 
-## 1. 来龙去脉：为什么 Web 成了大模型的数据源
+~~~math
+r_i=(c_i,s_i,t_i,a_i,h_i,m_i),
+~~~
 
-### 1.1 早期 NLP 的数据规模很小
+其中 `c_i` 是原始内容，`s_i` 是来源标识，`t_i` 是取得时间，`a_i` 是访问和使用状态，`h_i` 是内容哈希，`m_i` 是 MIME、语言、响应头和其他元数据。后续数据集不是原始记录的简单子集，而是多个处理函数共同作用的结果：
 
-早期 NLP 任务常用人工标注数据集。
+~~~math
+D_train
+= F(D_raw; policy, parse, quality, privacy, dedup, contamination, version).
+~~~
 
-例如：
+`pi_policy` 决定用途和权限，`phi_parse` 决定如何从载体提取结构，`q_quality` 描述内容和任务质量，`p_privacy` 描述个人信息或秘密风险，`d_dedup` 处理重复，`x_contam` 处理评估污染，`v_version` 把整条链路绑定到一个可回放版本。这个表达式的意义是：数据工程改变了模型最终看到的经验分布，采集阶段的决策会在很久以后表现为能力、风格、幻觉、安全和评估结果。
 
-1. 情感分类数据集。
-2. 机器翻译平行语料。
-3. 问答数据集。
-4. 命名实体识别数据集。
-5. 文本分类 benchmark。
+## 2.2 为什么大模型需要 Web-scale 数据
 
-这些数据集质量高，但规模有限。
+### 2.2.1 从专项标注到通用预训练
 
-它们适合训练专项模型，不适合训练通用语言模型。
+早期 NLP 系统通常围绕一个任务收集标注样本，例如情感分类、命名实体识别、机器翻译或问答。这样的数据集可以有很高的标签质量，却很难覆盖一个通用助手需要的全部内容：多种文体、多个领域、不同语言、代码、表格、长文结构和真实用户表达。
 
-### 1.2 预训练改变了数据需求
+预训练把学习目标改成从大规模文本中预测下一个 token 或重建被遮挡的内容。模型因此有机会接触语言结构、事实陈述、程序语法、文档布局和任务模式。Web 的优势是规模大、更新快、领域广、语言多；它的代价是噪声、重复、权利状态和偏见也一起被放大。
 
-预训练语言模型不再只学一个任务。
+### 2.2.2 GPT-3 的规模启发不能被误读
 
-它要从海量文本中学习：
+GPT-3 研究展示了大规模自回归模型在海量文本上预训练后，通过上下文示例完成多种任务的能力。它支持一个重要判断：训练数据规模和多样性是通用能力的重要条件。
 
-1. 语言结构。
-2. 世界知识。
-3. 常识。
-4. 代码模式。
-5. 多语言表达。
-6. 文档格式。
-7. 推理模式。
+它并不支持以下更强的结论：
 
-这需要非常大的语料。
+1. 所有网页都同样有价值。
+2. 只增加抓取页面就能线性增加能力。
+3. 公开网页可以不经许可、隐私和安全审查直接使用。
+4. 一个公开 benchmark 的高分就能证明数据分布没有污染。
 
-互联网自然成为主要来源。
+Web-scale 的真正难点从“找到更多页面”转向“找到能够解释、筛选、复现和治理的有效信号”。
 
-### 1.3 GPT-3 之后：Web-scale 变成标配
+### 2.2.3 The Pile、C4 与开放语料的启发
 
-GPT-3 展示了大规模语言模型在海量语料上训练后可以获得强 few-shot 能力。
+The Pile 把多种来源组织为一个公开语料，说明来源多样性、子集文档化和领域覆盖可以共同设计。C4 则展示了从 Common Crawl 快照经过过滤得到大规模语料的过程，同时也暴露了来源意外、评估样本混入和过滤规则可能产生群体差异等问题。
 
-这让业界意识到：
+这些工作的共同启发不是“复制某个公开数据集”，而是把数据集当作研究对象：要记录来源组成、过滤规则、重复处理、语言分布、风险和评估边界。一个数据集名称本身不能替代这些信息。
 
-```text
-通用模型能力来自大规模、多样化、跨领域文本。
-```
+## 2.3 不同来源承担不同责任
 
-但互联网数据不是天然干净。
+来源类型不能只按“质量高/质量低”排序。每类来源都提供特定能力信号，也带来特定的结构、许可、隐私和偏差问题。
 
-它包含：
+### 2.3.1 网页：覆盖广，但来源和结构复杂
 
-1. 高质量文章。
-2. 论坛讨论。
-3. 广告。
-4. SEO 垃圾。
-5. 重复页面。
-6. 错误事实。
-7. 有害内容。
-8. 个人信息。
-9. 版权内容。
+网页可以提供新闻、教程、讨论、产品文档、百科、博客、代码和多语言内容。它的优势是覆盖广、更新快、真实用户表达丰富；弱点是模板、广告、SEO 页面、镜像、自动生成内容和过时信息数量巨大。
 
-所以 Web-scale 采集之后，真正难的是筛选和治理。
+网页采集至少要区分：
 
-### 1.4 The Pile 的启发
+1. 页面本身的内容和导航、广告、推荐等 boilerplate。
+2. 页面当前版本与历史版本。
+3. 页面发布者、托管平台和内容作者的不同身份。
+4. 页面可见性、抓取偏好和训练使用权的不同含义。
+5. 正文中的事实、引用、代码、图片和外部链接。
 
-The Pile 是一个由多种高质量子集构成的大规模英文文本语料，强调多样性和高质量来源。
+“抓到了一个 HTML 文件”只说明传输完成，不说明正文抽取、事实可靠性或用途授权已经完成。
 
-它的重要启发不是“照搬某个数据集”，而是：
+### 2.3.2 书籍：长结构和完整解释，但权利边界更敏感
 
-1. 数据来源需要分类型组织。
-2. 不同子集代表不同能力和领域。
-3. 数据集构建过程需要文档化。
-4. 数据本身也需要分析潜在风险。
-5. 单一 web crawl 不足以代表全部高质量知识。
+书籍对长文结构、系统知识、叙事和专业表达很有价值。它们通常比碎片网页更连贯，也更适合学习章节层次、定义和推导。
 
-### 1.5 今天的观点
+但书籍常有明确版权和发行渠道限制。扫描书还会引入 OCR 错误、页眉页脚重复、公式丢失和图表断裂。采集时要把许可来源、版本、页码和 OCR/解析版本记录下来，不能因为文件已经在某个下载目录中就把它视为可训练资产。
 
-今天更成熟的观点是：
+### 2.3.3 论文和技术文档：信息密度高，但解析误差会改变含义
 
-```text
-Web-scale 数据采集只是起点，真正的壁垒是合法来源、质量筛选、覆盖设计、合规治理、版本复现和持续评估。
-```
+论文和 API 文档包含定义、实验条件、代码接口和引用关系，适合科学、工程和专业领域能力。PDF 解析却可能把双栏顺序打乱，把上下标丢失，把表格变成无序文本，把代码和正文粘在一起。
 
-## 2. 小白例子：做一座城市图书馆
+对于论文数据，应尽量保留标题、作者、章节、公式、图表说明、引用和版本；对技术文档，还要保留版本号、发布日期、接口路径和示例代码的边界。解析出的文本应与原始页面或 PDF 建立坐标关系，便于抽样复核。
 
-构建大模型数据集像建一座城市图书馆。
+### 2.3.4 代码：需要文件级和许可证级上下文
 
-你不能只把所有纸都搬进来。
+代码来源可能包括开源仓库、官方文档、教程、问答和测试。代码模型不仅要学习局部语法，还要学习依赖、目录结构、构建命令、测试和错误修复。
 
-你需要决定：
+代码采集的特殊问题包括：
 
-1. 哪些书可以收。
-2. 哪些书版权允许。
-3. 哪些书质量高。
-4. 哪些书重复。
-5. 哪些书有隐私信息。
-6. 哪些书适合儿童区。
-7. 哪些书需要标注来源。
-8. 哪些书过时。
-9. 哪些书属于专业馆藏。
+1. 仓库 fork 和复制造成的重复权重。
+2. 不同文件的许可证和仓库级声明可能不一致。
+3. 示例中的邮箱、内部 URL、凭证和测试秘密。
+4. 代码能够运行不等于安全，漏洞模式可能被重复学习。
+5. 函数片段脱离依赖和测试后，无法代表真实工程任务。
 
-Web-scale 数据也是这样。
+如果目标是 coding agent，最好保留 commit、目录、依赖、测试结果和文件关系；如果目标只是代码补全，可能选择更细的片段，但要明确能力边界。
 
-采集只是“搬书”。
+### 2.3.5 论坛和问答：真实问题多，但答案质量分布宽
 
-数据工程是“建馆、分类、审查、维护和更新”。
+论坛和问答包含长尾问题、调试过程、用户语言和失败经验，这是正式文档不容易覆盖的信号。它们也更容易出现未经验证的答案、过时版本、攻击性内容、个人故事和平台条款限制。
 
-## 3. 常见数据来源
+处理论坛数据时，问题、回答、评论、投票和编辑时间不能全部拼成一段文本。应保存角色、时间、上下文、采纳状态和版本；“得票高”可以作为质量先验，但不是事实正确性的证明。
 
-### 3.1 网页数据
+### 2.3.6 对话和用户日志：最贴近产品，也最需要治理
 
-网页是最大的数据来源之一。
+人工标注对话、客服记录、用户反馈和线上日志可以揭示真实任务、失败模式和语言分布。但它们可能包含个人信息、商业秘密、健康信息、身份关系和未授权的第三方内容。
 
-优点：
+用户日志进入训练前至少要明确用途、同意或其他适用依据、脱敏方式、保留期限、人工访问权限、删除流程和数据版本。日志中的“用户没有投诉”不能当作质量标签，“用户说得很像某人”也不能直接保留为训练文本。
 
-1. 规模大。
-2. 领域广。
-3. 更新快。
-4. 多语言丰富。
-5. 包含真实用户表达。
+### 2.3.7 多语言数据：自然比例通常不是目标比例
 
-缺点：
+高资源语言在互联网上更容易获得大量文本，低资源语言可能只有少量、翻译生成或质量不均的样本。若直接按抓取量训练，模型会把互联网的资源不平等当作目标分布。
 
-1. 噪声大。
-2. 重复多。
-3. 广告和导航多。
-4. SEO 内容多。
-5. 版权和许可复杂。
-6. PII 风险高。
+语言识别在短文本、混合语言、方言、代码和低资源语言上可能出错。翻译扩充可以增加覆盖，却可能传播翻译腔、事实错误和文化语境损失。最终配比应同时考虑用户分布、任务重要性、资源稀缺度、样本质量和模型容量。
 
-### 3.2 书籍
+## 2.4 访问、许可、robots 和用途不是同一件事
 
-书籍通常质量高、结构完整。
+### 2.4.1 四个问题必须分开
 
-适合学习：
+采集项目经常把下面四个问题混在一起：
 
-1. 长文结构。
-2. 系统知识。
-3. 叙事能力。
-4. 专业表达。
+| 问题 | 它回答什么 | 它不能推出什么 |
+| --- | --- | --- |
+| 能否建立连接 | 网络和服务是否允许这次请求到达 | 不能推出训练许可 |
+| robots 规则怎么写 | 站点向自动抓取程序表达的访问偏好 | 不能单独替代版权或合同审查 |
+| Terms of Service 怎么写 | 平台与使用者之间的合同和使用条件 | 具体法律效力需结合适用法域解释 |
+| 内容许可是什么 | 内容作者或权利人授予的使用范围 | 不能自动覆盖页面中的第三方内容或个人信息 |
 
-风险：
+RFC 9309 标准化了 Robots Exclusion Protocol 的语法和处理方式，但 robots 文件不是万能的授权文件，也不是绕过访问控制的技术指南。工程上应尊重站点声明和访问控制；对于是否可以训练、商业使用、再分发或永久保存，应另行完成许可、隐私和法务审查。
 
-1. 版权复杂。
-2. 获取渠道限制。
-3. 数据格式多样。
-4. OCR 错误。
+### 2.4.2 代码许可证和数据集许可证也要分层
 
-### 3.3 论文和技术文档
+开源代码不等于“没有条件”。仓库可能使用 MIT、Apache-2.0、GPL 或其他许可证，文件还可能包含第三方代码、生成文件和不同声明。训练使用、模型发布、生成代码分发和许可证义务之间的关系不能用一个 `license = open` 字段表示。
 
-优点：
+数据集也可能只允许研究使用、禁止再分发、要求署名或限制商业用途。source registry 应保存原始许可证文本或稳定引用、审查结论、审查人/团队、用途范围和失效时间；不确定时应把不确定性作为状态，而不是默认为允许。
 
-1. 专业性强。
-2. 信息密度高。
-3. 适合科学和技术能力。
-4. 结构规范。
+### 2.4.3 个人信息和秘密是另一条风险轴
 
-风险：
+即使一段文本可以公开访问，也可能包含邮箱、电话号码、地址、健康信息、账户标识、访问令牌、内部 URL 或商业秘密。许可证审查不能替代 PII、秘密和安全扫描；把邮箱替换成占位符也不一定能解决可重识别问题。
 
-1. 公式、图表、引用解析困难。
-2. PDF 解析噪声。
-3. 许可证差异。
-4. 学术文本和普通用户语言风格不同。
+对于高风险字段，处理动作可能是删除、泛化、脱敏、隔离、人工复核或不进入训练。动作要保留理由和版本，避免“扫描通过”被误读成“绝对没有个人信息”。
 
-### 3.4 代码数据
+## 2.5 Common Crawl 及其数据形态
 
-代码数据是模型编程能力的基础。
+### 2.5.1 为什么需要区分原始归档和提取文本
 
-来源包括：
+Common Crawl 等公开 Web 归档让研究者可以使用已经完成的抓取结果，但使用归档并不等于跳过治理。数据中仍有来源、时间、重复、版权、隐私、恶意文件和评估污染问题。
 
-1. 开源仓库。
-2. 文档示例。
-3. 教程。
-4. 问答网站。
-5. 单元测试。
+Web 归档通常至少有三类互补信息：
 
-关键问题：
+1. WARC 保存抓取记录和响应载荷，适合追溯原始响应、响应头和时间。
+2. WAT 保存面向元数据和链接等结构的提取结果，适合筛选和来源分析。
+3. WET 保存从网页响应中提取的纯文本，便于批量文本处理，但可能已经丢失布局、图片、脚本关系和部分结构。
 
-1. 许可证。
-2. 重复和 fork。
-3. 生成代码质量。
-4. 安全漏洞。
-5. 密钥泄露。
-6. 多文件上下文。
+不同产品或快照的字段和处理细节要以对应版本文档为准。WET 不是 WARC 的无损替代：当正文抽取出现疑问时，需要回到原始归档或可核验的页面版本。
 
-### 3.5 论坛和问答
+### 2.5.2 快照选择会改变时间分布
 
-优点：
+选择单个 crawl 快照会引入时间偏差。选择多个快照可以增加更新覆盖，却可能重复采集同一页面、放大某些站点的更新频率或把已删除内容再次带入数据集。
 
-1. 问题真实。
-2. 对话自然。
-3. 包含 debug 和经验。
-4. 覆盖长尾问题。
+设某个来源在时间窗口 `T` 内被采集 `n_s(T)` 次，训练中真正使用的 token 数为 `d_s(T)`，则来源权重不仅由页面数量决定，还由更新频率、页面长度、过滤结果和采样策略共同决定：
 
-风险：
+~~~math
+w_s
+=\frac{d_s(T)}{\sum_j d_j(T)}.
+~~~
 
-1. 答案质量不稳定。
-2. 可能过时。
-3. 可能包含攻击性语言。
-4. 隐私风险。
-5. 平台条款复杂。
+报告来源比例时要注明是原始记录比例、过滤后文档比例、token 比例还是训练实际采样比例。否则同一个数据集可以产生几个看似矛盾的“来源占比”。
 
-### 3.6 对话数据
+## 2.6 从来源规划到可回放数据集
 
-对话数据对助手能力很重要。
+### 2.6.1 先定义能力目标和排除范围
 
-来源可能包括：
+采集前要回答模型要服务什么任务：通用文本、多语言、代码、科学、企业知识、实时资料还是多模态理解。目标会影响来源优先级、时间窗口、保留结构、质量标准和评估集合。
 
-1. 人工标注对话。
-2. 用户日志。
-3. 合成对话。
-4. 客服记录。
-5. 多轮任务数据。
+还要明确排除范围：未授权登录内容、无法解释许可证的来源、未经处理的用户私密日志、带秘密的代码、评估 holdout、不能安全解析的文件和超出组织处理区域的数据。排除范围写清楚，后续才能解释为什么“采集总量”比“最终 token”大很多。
 
-风险：
+### 2.6.2 source registry：把来源当作一等对象
 
-1. 隐私敏感。
-2. 用户同意问题。
-3. 标注成本高。
-4. 场景偏差。
-5. 安全边界复杂。
+一个来源记录至少应包括：
 
-### 3.7 多语言数据
+~~~text
+source_id
+owner_or_publisher
+source_type
+access_method
+license_reference
+allowed_use
+terms_reference
+robots_snapshot
+region_constraint
+privacy_class
+collection_window
+retention_policy
+deletion_contact
+processor_revision
+status
+~~~
 
-多语言数据决定模型国际化能力。
+`robots_snapshot` 记录当时看到的规则，不能假设今天的 robots 文件能解释半年前的采集行为。`processor_revision` 用来区分同一来源经过不同解析和过滤代码后的结果。`status` 可以是待审查、授权使用、限制使用、暂停、撤回或不使用，不能只有一个布尔字段。
 
-难点：
+### 2.6.3 采集请求的工程行为
 
-1. 高质量低资源语言数据少。
-2. 语言识别难。
-3. 不同语言数据质量差异大。
-4. 翻译数据可能带来翻译腔。
-5. 文化和地区偏差。
+在获得适用授权并确认请求范围后，采集器仍需要像一个可靠的分布式客户端：
 
-## 4. Web-scale 采集 Pipeline
+1. 遵守服务端明确的速率和并发限制。
+2. 设置清晰的 User-Agent 和联系信息。
+3. 使用超时、指数退避和有限重试。
+4. 区分 4xx、5xx、连接失败、内容截断和解析失败。
+5. 使用 ETag、Last-Modified 或来源提供的快照机制减少重复传输。
+6. 保存请求时间、响应状态、内容长度和 hash，而不是只保存成功 URL。
+7. 对压缩包、PDF、脚本和图片使用隔离解析环境，限制资源和文件大小。
+8. 绝不把绕过登录、绕过访问控制或规避站点限制当成采集策略。
 
-一个合规 pipeline 可以分成十步。
+采集器的成功率不能只看 HTTP 200。一个返回 200 的登录页、验证码页或错误模板可能会污染整个数据集，因此还要检查内容类型、正文长度、模板指纹和解析状态。
 
-### 4.1 Source Planning
+### 2.6.4 raw layer：可重放但不过度复制敏感内容
 
-先定义目标。
+原始层的目标是支持审计和重跑。常见字段包括原始字节的 hash、来源 ID、URL 的规范化和原始形式、响应头、状态码、取得时间、快照 ID、内容长度、压缩方式和存储位置。
 
-问题：
+原始层并不意味着无限期保存所有个人信息。对高敏感数据，可以保留受控的加密原文、内容摘要、哈希和访问记录，并将保留期限和删除流程写入数据资产管理。原始副本越多，删除和访问审计的范围越大。
 
-1. 训练什么模型？
-2. 目标语言是什么？
-3. 目标领域是什么？
-4. 是否需要代码、数学、科学、多模态？
-5. 是否允许商业使用？
-6. 是否需要可公开发布？
+## 2.7 解析：把载体变成结构，同时保留可复核性
 
-没有目标，采集会变成无差别堆数据。
+### 2.7.1 HTML 解析不能只用正则删除标签
 
-### 4.2 Legal and Policy Review
+HTML 页面可能包含主标题、章节、代码、表格、引用、图片 alt、导航、评论、广告和脚本。简单删除所有标签会丢失标题层级和代码边界；只保留 `article` 标签又可能漏掉正文或把用户评论当成正式内容。
 
-采集前先审查：
+解析器应输出结构化 artifact，例如：
 
-1. 数据许可。
-2. robots 协议。
-3. Terms of Service。
-4. 版权风险。
-5. 隐私风险。
-6. 数据使用目的。
-7. 地区合规要求。
+~~~text
+document_id
+source_id
+title
+sections[]
+paragraphs[]
+code_blocks[]
+tables[]
+links[]
+published_at
+updated_at
+parser_revision
+source_coordinates
+parse_warnings[]
+~~~
 
-### 4.3 Collection
+`source_coordinates` 可以是 DOM 路径、页码、字符区间或快照记录。它让人工审计能够从清洗文本回到原始载体；`parse_warnings` 则避免把“解析失败后得到的空文本”误当成页面没有内容。
 
-合法合规地获取数据。
+### 2.7.2 PDF、扫描件和技术文档
 
-方式包括：
+PDF 可能是可搜索文本、双栏排版、扫描图像或混合文档。不同类型需要不同路径：
 
-1. 使用公开许可数据集。
-2. 使用数据提供方 API。
-3. 使用授权数据。
-4. 使用组织内部有权使用的数据。
-5. 使用公开 crawl dump。
+1. 可搜索 PDF 要检查阅读顺序、字符编码和公式上下标。
+2. 扫描 PDF 需要 OCR，并记录 OCR 引擎、语言和置信度。
+3. 双栏和表格需要版面分析，不能只按字符流拼接。
+4. 公式、代码和引用要单独识别，避免把变量名变成普通词。
+5. 图像中的文字要保留图像坐标和 OCR 版本，不能只存一段不可定位的文本。
 
-本书不讨论绕过限制或规避反爬的方法。
+解析质量可以用人工抽样、字段召回、标题顺序准确率、表格单元格准确率和公式可读性评估。对于高影响领域，解析失败样本应进入隔离队列而不是静默丢弃。
 
-### 4.4 Raw Storage
+### 2.7.3 代码仓库的解析
 
-原始数据要保存元信息。
+代码解析要同时保留语言、路径、仓库、commit、依赖、许可证和测试信息。删除注释和字符串可能损伤上下文；保留全部文件又可能包含构建产物、二进制、锁文件和秘密。
 
-包括：
+一个仓库级样本可以表示为：
 
-1. URL 或来源。
-2. 抓取时间。
-3. 许可信息。
-4. 内容哈希。
-5. MIME type。
-6. 语言。
-7. 数据版本。
+~~~math
+\mathcal{R}=(F,G,T,E,L,V),
+~~~
 
-### 4.5 Parsing
+其中 `F` 是文件集合，`G` 是目录和依赖关系，`T` 是测试或执行结果，`E` 是运行环境，`L` 是许可证信息，`V` 是 commit 或版本。不同训练目标可以从同一仓库对象构造函数级、文件级或任务级样本，但不能在构造时忘记它们的共同来源。
 
-把 HTML、PDF、代码仓库、Markdown、论坛页面解析成结构化文本。
+### 2.7.4 Boilerplate removal 的反事实检查
 
-要保留：
+去导航、页脚和 cookie banner 可以提高信息密度，但规则可能误删正文。一个可靠的检查不是只看删除比例，而是抽取删除前后的成对样本：
 
-1. 正文。
-2. 标题。
-3. 层级结构。
-4. 代码块。
-5. 表格。
-6. 元数据。
+1. 删除的文本是否在不同页面重复出现。
+2. 被保留的标题是否仍能解释段落。
+3. 代码、表格和警告框是否被错误删除。
+4. 不同语言页面是否受到不同影响。
+5. 低资源领域是否比普通网页有更高的误删率。
 
-### 4.6 Boilerplate Removal
+过滤器的 precision 和 recall 只能相对于一个标注协议解释。若没有人工样本和负对照，“删除了 70% 模板”并不能证明剩下的 30% 都是正文。
 
-去掉：
+## 2.8 质量、隐私、安全和污染检查
 
-1. 导航栏。
-2. 页脚。
-3. Cookie banner。
-4. 广告。
-5. 推荐链接。
-6. 社交按钮。
-7. 重复模板。
+### 2.8.1 质量检查的层次
 
-### 4.7 Language and Domain Classification
+质量可以拆成几个不同层次，而不是用一个总分替代：
 
-识别：
+1. 载体质量：状态码、编码、MIME、正文长度和解析完整性。
+2. 语言质量：语言识别、混合语言、乱码和字符分布。
+3. 内容质量：重复、模板、广告、事实来源和时效。
+4. 任务质量：输入输出是否清楚、答案是否可验证、难度是否匹配。
+5. 结构质量：标题、代码、表格、引用和多轮关系是否保留。
 
-1. 语言。
-2. 领域。
-3. 文档类型。
-4. 代码语言。
-5. 安全风险类别。
+网页质量分类器可以作为排序信号，不能取代来源审查和抽样。一个“写得很流畅”的自动生成页面，可能比一段不规范但有价值的调试记录更容易拿到高分，因此需要按任务和领域校准。
 
-这些标签后续用于配比和过滤。
+### 2.8.2 PII、秘密和恶意内容
 
-### 4.8 Quality Filtering
+扫描可以使用规则、命名实体识别、秘密检测器、分类模型和人工复核的组合。规则对邮箱、电话和常见令牌格式有用，语义模型对间接身份和上下文有帮助，但任何单一检测器都会漏报和误报。
 
-过滤：
+工程动作应与风险类型对应：
 
-1. 乱码。
-2. 低信息密度。
-3. 重复。
-4. 垃圾内容。
-5. 自动生成 SEO 内容。
-6. 恶意或有害内容。
-7. 隐私信息。
+| 风险 | 可能动作 | 仍需验证的事项 |
+| --- | --- | --- |
+| 明文邮箱或电话 | 删除、掩码、隔离 | 是否可由上下文重新识别 |
+| API key 或 token | 删除并轮换相关凭证 | 是否已进入缓存、日志或版本库 |
+| 医疗或财务信息 | 高敏感隔离、人工复核或不使用 | 法域、用途和保留期限 |
+| 恶意代码或危险指令 | 内容隔离、沙箱分析或不使用 | 是否在训练和评估链路留下副本 |
+| 外部指令注入 | 保留来源标签，避免当作系统指令 | 下游训练格式是否会放大其优先级 |
 
-### 4.9 Deduplication
+扫描通过只能说明当前检测器没有命中，不等于证明不存在隐私或安全问题。
 
-去重包括：
+### 2.8.3 评估污染
 
-1. Exact dedup。
-2. Near dedup。
-3. Document-level dedup。
-4. Paragraph-level dedup。
-5. Code clone dedup。
+benchmark 题目、答案、模板和近义改写可能出现在网页、代码仓库、教程和论坛。污染检测可以使用 exact match、n-gram、MinHash、embedding 或结构化代码相似度，但相似不自动等于泄漏。
 
-### 4.10 Versioning and Audit
+设评估集有 `M` 个样本，`e_j` 与训练集合中最相似样本的相似度为 `sim_max(e_j)`，给定阈值 `tau`，一个污染候选率可以写成：
 
-每次处理都要记录版本。
+~~~math
+R_contam
+= (1 / M) * sum(j = 1..M) I[sim_max(e_j) >= tau].
+~~~
 
-包括：
+这个指标必须附带阈值、相似度方法、人工复核协议、评估版本和训练数据时间范围。命中后可以删除、隔离、改换评估集、降低结论等级或公开污染说明；不能只把数字从报告里删掉。
 
-1. 原始数据版本。
-2. 过滤规则版本。
-3. 去重版本。
-4. 质量模型版本。
-5. 最终训练集版本。
-6. 样本级 provenance。
+## 2.9 去重：减少冗余，也减少错误权重
 
-### 4.11 关键公式与采集审计指标
+### 2.9.1 URL 去重不是内容去重
 
-把 web-scale 采集看成一个数据流，而不是一个爬虫脚本。
+不同 URL 可能返回相同内容，同一个 URL 也可能随着时间变化。URL 规范化可以处理大小写、默认端口、追踪参数和尾部斜杠，但过度规范化会把有意义的查询参数或语言版本合并掉。
 
-设候选数据源集合为：
+因此至少要同时记录原始 URL、规范化 URL、响应时间和内容 hash。URL hash 保护日志和 catalog 中的敏感路径，内容 hash 用于判断实际载荷是否相同。
 
-```math
-\mathcal{S}=\{s_1,s_2,\ldots,s_M\}
-```
+### 2.9.2 exact、near 和结构化去重
 
-每个数据源可以记录成：
+Exact dedup 对规范化后的文本计算 hash，便宜而精确；near dedup 使用 MinHash、SimHash、n-gram 或 embedding 发现改写、模板和复制；代码还需要 AST、token 序列或仓库关系等结构化信号。
 
-```math
-s_k=(a_k,l_k,r_k,p_k,w_k)
-```
+设解析后 token 数为 `D_before`，完全去重后 token 数为 `D_after`，token 口径的减少率为：
 
-其中 `a_k` 是访问方式，`l_k` 是 license / ToS 状态，`r_k` 是 robots 或访问策略，`p_k` 是隐私风险，`w_k` 是目标配比权重。
+~~~math
+R_removed = 1 - D_after / D_before.
+~~~
 
-对第 `i` 个原始样本，采集准入门禁可以抽象为：
+减少率越高不一定越好。教程中的重复定义、安全边界和代码模式有时是有意的教学信号；若 near-dedup 把这些独立样本合并，可能损失覆盖。应保留 cluster ID、代表样本选择规则、阈值和分领域统计。
 
-```math
-A_i=g_{\mathrm{license}}(i)\,g_{\mathrm{tos}}(i)\,g_{\mathrm{robots}}(i)\,g_{\mathrm{privacy}}(i)\,g_{\mathrm{access}}(i)
-```
+### 2.9.3 去重与记忆风险的关系
 
-这里每个 `g` 都是 0/1 检查项。任意一项为 0，样本就不应进入训练数据候选集。它不是法律结论，而是工程系统中必须显式记录的审计状态。
+重复会提高某些文本的有效采样权重，可能增加训练记忆和评估重叠；但记忆还受模型容量、训练步数、样本稀有度和后训练影响。去重是降低风险的手段，不是“模型不会记住数据”的证明。
 
-设原始样本集合为 `D_raw`，解析后的集合为 `D_parse`，通过质量、隐私、安全、污染和去重后的集合为 `D_keep`。按 token 数计算的保留率为：
+## 2.10 配比、时间和语言覆盖
 
-```math
-R_{\mathrm{keep}}=\frac{\sum_{x_i \in D_{\mathrm{keep}}} T_i}{\sum_{x_i \in D_{\mathrm{raw}}} T_i}
-```
+### 2.10.1 原始比例不等于训练比例
 
-其中 `T_i` 是样本 `x_i` 的 token 数。这个指标帮助你判断过滤是否过松或过严。
+来源的原始 token 数会经过过滤、去重、截断、packing 和 sampler 改变。若来源 `i` 经过处理后有 `d_i` 个有效 token，训练配比为：
 
-对某个语言、领域或来源分组 `c`，最终配比为：
+~~~math
+p_i=\frac{d_i}{\sum_jd_j}.
+~~~
 
-```math
-m_c=\frac{\sum_{x_i \in D_{\mathrm{keep}},\,c_i=c} T_i}{\sum_{x_i \in D_{\mathrm{keep}}} T_i}
-```
+但真正的曝光量还要考虑重复采样和不同阶段的 mixture。报告时要同时给出 raw、processed、sampled 和 consumed 四种口径。
 
-如果目标覆盖集合是 `C_target`，可以定义覆盖率：
+### 2.10.2 温度采样与低资源语言
 
-```math
-C_{\mathrm{cover}}=\frac{1}{|C_{\mathrm{target}}|}\sum_{c \in C_{\mathrm{target}}} I[T_c \ge \tau_c]
-```
+若语言或来源的有效大小为 `n_i`，可以用温度指数 `alpha` 作为一种采样抽象：
 
-其中 `T_c` 是分组 `c` 的保留 token 数，`\tau_c` 是最低覆盖阈值。这个公式适合说明低资源语言、代码、数学、科学和安全数据不能只靠自然网页比例决定。
+~~~math
+p_i=\frac{n_i^{\alpha}}{\sum_j n_j^{\alpha}}.
+~~~
 
-去重率可以写成：
+`alpha = 1` 接近按数据量采样，`alpha < 1` 提高小数据源的相对权重，`alpha = 0` 接近来源级均匀。这个公式只描述采样倾向，不解决低资源数据的事实质量、翻译腔、重复暴露和文化覆盖问题。
 
-```math
-R_{\mathrm{dup}}=\frac{|D_{\mathrm{parse}}|-|D_{\mathrm{dedup}}|}{|D_{\mathrm{parse}}|}
-```
+### 2.10.3 时间切分和事实新鲜度
 
-PII 或密钥风险率可以写成：
+网页知识会变化，训练数据的时间窗口也会改变模型对事实的记忆。可以按发布日期、抓取时间和最后更新时间做切片；对更新频繁的资料，应同时保留版本，而不是用最新页面覆盖历史记录。
 
-```math
-R_{\mathrm{risk}}=\frac{1}{|D_{\mathrm{parse}}|}\sum_i I_i
-```
+时间切分还能帮助污染排查：训练数据早于评估集不代表没有泄漏，但训练数据晚于评估集会增加评估被直接看到的可能性。时间是证据的一部分，不是独立性证明。
 
-其中 `I_i=1` 表示样本命中隐私、密钥、评估污染或高风险安全规则。
+## 2.11 数据血缘、删除和回放
 
-样本级 provenance 至少应包含：
+### 2.11.1 从页面到模型的血缘图
 
-```math
-p_i=(\mathrm{source}_i,\mathrm{crawl}_i,\mathrm{urlhash}_i,\mathrm{hash}_i,\mathrm{license}_i,t_i,v_i)
-```
+一条网页记录的下游路径可能是：
 
-也就是来源、crawl 批次、URL hash、内容 hash、许可状态、采集时间和数据版本。没有 provenance，后续删除请求、污染排查、风险回溯和模型版本追责都会很困难。
+~~~text
+source page / archive record
+  -> raw object
+  -> parsed artifact
+  -> normalized document
+  -> dedup cluster
+  -> filtered dataset version
+  -> token shard
+  -> training manifest
+  -> checkpoint / model release
+  -> evaluation and logs
+~~~
 
-一个最小 web 数据采集门禁可以写成：
+每条边都应有处理版本和 hash。只保存最终 shard 会导致“模型中是否使用过某来源”无法回答，也会让删除请求只能停留在 catalog 标记层面。
 
-```math
-G_{\mathrm{web}}=
-g_{\mathrm{source}}\,
-g_{\mathrm{policy}}\,
-g_{\mathrm{parse}}\,
-g_{\mathrm{quality}}\,
-g_{\mathrm{pii}}\,
-g_{\mathrm{contam}}\,
-g_{\mathrm{dedup}}\,
-g_{\mathrm{version}}
-```
+### 2.11.2 删除请求不是一个文件操作
 
-这些检查项任意一个缺失，都说明项目还只是“拿到一些文本”，不能算完成了可审计的训练数据采集 pipeline。
+收到删除、许可撤回或隐私请求后，工程流程通常要：
 
-## 5. 数据采集中的合规问题
+1. 暂停新训练和新索引继续使用相关来源。
+2. 根据 source ID、content hash、dedup cluster 和处理版本定位副本。
+3. 检查 raw、解析、缓存、token shard、评估集和日志。
+4. 重新生成受影响的数据版本，或记录无法直接重建的范围。
+5. 判断已训练模型需要重训、编辑、unlearning、风险披露还是法律团队给出其他处置。
+6. 用回归评估验证删除或替代数据没有引入新的能力和安全回归。
 
-### 5.1 版权
+从索引和 catalog 删除只能证明检索路径发生变化，不能直接证明模型权重、缓存和历史输出已经忘记。
 
-训练数据可能涉及版权。
+### 2.11.3 可回放版本的最小字段
 
-需要关注：
+~~~text
+dataset_id
+source_snapshot
+processor_revision
+filter_revision
+dedup_revision
+contamination_revision
+mixture_revision
+tokenizer_revision
+manifest_digest
+created_at
+retention_policy
+deletion_status
+~~~
 
-1. 数据是否有明确许可。
-2. 许可是否允许训练。
-3. 是否允许商业使用。
-4. 是否允许再分发。
-5. 是否需要署名。
-6. 是否支持删除请求。
+版本对象还应保留变更摘要：增加和删除了哪些来源，哪些过滤器改变，语言和领域比例如何变化，风险命中和评估污染如何变化。文件名变化不等于版本可解释，文件名不变也不代表内容没有改变。
 
-不同地区法律和判例可能不同。
-面试中不要给法律结论，而要说明需要法务和合规审查。
+## 2.12 真实项目架构：从采集器到数据产品
 
-### 5.2 隐私
+### 2.12.1 组件边界
 
-数据中可能包含 PII。
+一个持续运行的采集系统可以分成：
 
-需要处理：
+1. Source registry：来源、许可证、用途、区域和联系人。
+2. Policy review：权限、隐私、保留和使用范围的审查记录。
+3. Collector：限速、重试、快照、响应和失败事件。
+4. Raw store：原始对象、hash、时间和访问控制。
+5. Parser：HTML、PDF、代码、表格和多模态解析。
+6. Metadata service：语言、领域、版本、结构和 provenance。
+7. Quality and risk services：质量、PII、秘密、安全和污染检查。
+8. Dedup service：exact、near、代码和跨快照去重。
+9. Dataset builder：切片、配比、抽样和 manifest。
+10. Evaluation registry：训练/评估隔离、污染状态和 holdout 访问。
+11. Version registry：不可变 digest、变更摘要和下游引用。
+12. Audit and deletion service：查询、删除、申诉和证据导出。
 
-1. 邮箱。
-2. 电话。
-3. 地址。
-4. 证件号。
-5. 医疗信息。
-6. 私密聊天。
-7. 密钥和 token。
+这些组件之间传递的不只是文本，还要传递状态和原因。比如 parser 发现表格丢失时，dataset builder 不能只看到一个空字符串；删除服务需要知道这个字符串来源于哪个 raw object 和 processor revision。
 
-### 5.3 Terms of Service
+### 2.12.2 观测指标
 
-网站条款可能限制抓取和训练使用。
+采集系统可以记录：
 
-工程团队不能只从技术可行性判断。
+~~~math
+R_fetch = N_successful_responses / N_attempts,
+R_parse = N_usable_artifacts / N_successful_responses.
+~~~
 
-### 5.4 Robots 和访问控制
+还应按来源、语言、MIME、时间和错误类型分桶观察：状态码、内容类型、正文长度、解析警告、质量分布、PII 命中、重复率、污染候选、处理延迟、存储成本和删除传播时长。平均 fetch rate 可能掩盖某个低资源来源几乎全部解析失败，因此切片分母比总体数字更重要。
 
-Robots 和访问控制体现网站对爬虫行为的限制。
+### 2.12.3 失败重试和幂等
 
-合规数据采集要尊重这些边界。
+采集任务会被调度器重试、快照重放或人工重新运行。每个任务需要稳定的 `source_id`、请求或记录 ID、内容 hash 和处理版本，写入应具有幂等性。否则同一页面的重复事件可能被误当作新数据，重复下载也会增加服务压力和成本。
 
-### 5.5 数据可追溯
+重试还要区分传输失败和内容失败：网络超时可以有限重试，解析器对同一损坏 PDF 连续失败则应进入隔离队列；被策略暂停的来源不应通过调度重试自动恢复。
 
-如果未来需要删除某类数据，必须知道它进入了哪个数据版本和哪个模型版本。
+## 2.13 工程案例：企业研究助手的公开资料和授权资料混合
 
-## 6. 采集不是越多越好
+### 2.13.1 目标和边界
 
-### 6.1 噪声成本
+一家企业要构建研究助手，资料来自公开技术文档、已授权的行业报告和内部知识库。助手需要给出带页码或段落位置的引用，不能把内部资料泄露给其他租户，也不能把许可已撤回的报告继续检索出来。
 
-低质量数据会消耗训练 compute。
+采集团队把三个来源分开注册：
 
-### 6.2 记忆风险
+1. 公共技术文档：记录快照、版本和页面更新时间。
+2. 授权行业报告：记录合同范围、地区、到期日和禁止再分发字段。
+3. 内部知识库：记录租户、部门 ACL、保留期限和删除联系人。
 
-重复数据和稀有敏感数据增加 memorization 风险。
+它们可以共享解析器和索引服务，但不能共用一个无差别的 `public = true` 字段。
 
-### 6.3 偏见放大
+### 2.13.2 一次解析事故
 
-互联网分布不等于真实世界分布。
+某批 PDF 的双栏阅读顺序被解析器颠倒，研究助手把“不得用于生产”的限制条件和上一段的“可以用于生产”拼在了一起。问题不是模型突然变笨，而是 parser artifact 丢失了版面关系。
 
-某些群体、语言和观点可能被过度或不足表示。
+修复步骤是：
 
-### 6.4 评估污染
+1. 用原始 PDF 和页码坐标复核错误样本。
+2. 把该 parser revision 产生的所有 artifact 标为受影响集合。
+3. 对标题、表格、警告框和双栏顺序增加抽样指标。
+4. 重新解析并生成新的 dataset/index version。
+5. 用包含限制条件的回归问题测试引用范围和答案方向。
+6. 检查旧 artifact、缓存和日志的访问与删除状态。
 
-网页中可能包含 benchmark 题目和答案。
+这个案例说明数据采集的质量问题可能在产品层表现为事实错误、引用缺失或权限事故；如果没有 source、page、processor revision 和 index version，团队只能重新猜测问题发生在哪里。
 
-如果进入训练集，会让评估失真。
+## 2.14 可运行的合成采集审计示例
 
-### 6.5 安全风险
+下面的 demo 不联网、不读取真实网页，也不处理真实凭证。它用合成 HTML 模拟九条记录，展示 policy、解析、PII/秘密、评估污染、质量和 exact dedup 如何分别产生信号。代码没有把所有条件压成一个布尔总开关，而是返回保留样本、拒绝原因、阶段计数、风险信号和后续动作。
 
-未过滤的网络数据可能包含有害内容、恶意代码、危险指导和注入文本。
+~~~python
+from __future__ import annotations
 
-## 7. 数据源元数据设计
-
-每个样本最好带元数据。
-
-常见字段：
-
-1. source_id。
-2. source_type。
-3. license。
-4. url_hash。
-5. crawl_time。
-6. language。
-7. domain。
-8. quality_score。
-9. safety_score。
-10. pii_flag。
-11. dedup_cluster_id。
-12. dataset_version。
-
-元数据的价值：
-
-1. 配比。
-2. 过滤。
-3. 回溯。
-4. 删除。
-5. 审计。
-6. 数据 attribution。
-
-## 8. Web 数据和专门数据的平衡
-
-Web 数据覆盖广，但质量参差不齐。
-
-专门数据质量高，但覆盖有限。
-
-常见组合：
-
-1. Web crawl 提供广覆盖。
-2. 书籍和论文提供长结构和专业知识。
-3. 代码数据提供编程能力。
-4. 数学数据提供推理能力。
-5. 对话数据提供助手风格。
-6. 安全数据提供边界。
-7. 合成数据补足稀缺任务。
-
-关键不是二选一，而是配比和治理。
-
-## 9. 多语言采集
-
-### 9.1 低资源语言问题
-
-低资源语言数据少，且质量更不稳定。
-
-如果只按互联网自然比例采样，模型会偏向高资源语言。
-
-### 9.2 语言识别
-
-语言识别在短文本、混合语言、代码混杂和低资源语言上容易出错。
-
-### 9.3 翻译数据
-
-机器翻译可以扩展数据，但会带来：
-
-1. 翻译腔。
-2. 文化信息丢失。
-3. 错误传播。
-4. 风格单一。
-
-### 9.4 多语言配比
-
-需要考虑：
-
-1. 用户分布。
-2. 目标市场。
-3. 语言资源稀缺度。
-4. 任务重要性。
-5. 模型容量。
-
-## 10. 代码数据采集的特殊问题
-
-### 10.1 许可证
-
-开源不等于无限制使用。
-
-不同 license 对训练、分发和商业使用的解释需要法务判断。
-
-### 10.2 Fork 和重复
-
-代码仓库大量 fork 和复制。
-
-不去重会让热门代码过度影响模型。
-
-### 10.3 密钥和凭证
-
-代码中可能包含泄露密钥、token、密码和内部 URL。
-
-必须扫描和过滤。
-
-### 10.4 安全漏洞
-
-训练不安全代码可能让模型生成漏洞模式。
-
-需要结合静态分析、安全标签和高质量代码筛选。
-
-### 10.5 Repo-level 上下文
-
-函数片段不等于真实工程代码。
-
-如果要训练 coding agent，需要保留目录结构、依赖、测试和 commit 信息。
-
-## 11. 对话和用户数据采集
-
-用户数据最敏感。
-
-必须考虑：
-
-1. 用户同意。
-2. 用途说明。
-3. 脱敏。
-4. 数据保留期限。
-5. 删除请求。
-6. 人工审核权限。
-7. 是否允许用于训练。
-
-真实产品中，用户日志可以帮助发现问题，但不能默认无限制进入训练。
-
-## 12. 真实项目架构
-
-一个采集系统可以分成：
-
-1. Source registry。
-2. Legal review workflow。
-3. Collector。
-4. Raw data lake。
-5. Parser。
-6. Metadata extractor。
-7. Quality filter。
-8. PII and safety scanner。
-9. Dedup service。
-10. Dataset builder。
-11. Version registry。
-12. Audit dashboard。
-
-### 12.1 Source registry
-
-记录每个数据源的合法性、用途、联系人、许可和风险等级。
-
-### 12.2 Raw data lake
-
-保存原始数据和 hash，方便复现和审计。
-
-### 12.3 Dataset builder
-
-根据训练目标和配比规则构建最终数据集。
-
-### 12.4 Audit dashboard
-
-展示：
-
-1. 数据来源占比。
-2. 语言占比。
-3. 领域占比。
-4. PII 命中率。
-5. 去重率。
-6. 质量分布。
-7. 许可证分布。
-
-### 12.5 最小可运行 Web 采集审计 demo
-
-下面这个 demo 不联网、不读取真实网页，也不需要第三方库。它用内存里的 toy HTML 模拟一个合规采集 pipeline，覆盖 source policy、HTML 解析、质量过滤、PII / 密钥扫描、评估污染扫描、exact dedup、元数据和配比统计。
-
-它演示的不是“怎么爬网站”，而是“采集系统上线前应该检查什么”。
-
-```python
 import hashlib
 import re
-from collections import Counter, defaultdict
+from collections import Counter
 
 
 sources = {
-    "tech_blog": {"license": "cc-by", "tos_train": True, "robots_allowed": True, "access": "public"},
-    "oss_docs": {"license": "apache-2.0", "tos_train": True, "robots_allowed": True, "access": "public"},
-    "science_preprint": {"license": "cc-by", "tos_train": True, "robots_allowed": True, "access": "public"},
-    "zh_news": {"license": "authorized", "tos_train": True, "robots_allowed": True, "access": "public"},
-    "private_forum": {"license": "unknown", "tos_train": False, "robots_allowed": False, "access": "login_required"},
+    "tech_blog": {
+        "license": "cc-by",
+        "training_use": True,
+        "robots": "allowed",
+        "access": "public",
+    },
+    "oss_docs": {
+        "license": "apache-2.0",
+        "training_use": True,
+        "robots": "allowed",
+        "access": "public",
+    },
+    "science_preprint": {
+        "license": "cc-by",
+        "training_use": True,
+        "robots": "allowed",
+        "access": "public",
+    },
+    "zh_news": {
+        "license": "authorized",
+        "training_use": True,
+        "robots": "allowed",
+        "access": "public",
+    },
+    "private_forum": {
+        "license": "unknown",
+        "training_use": False,
+        "robots": "disallowed",
+        "access": "login_required",
+    },
 }
 
 documents = [
     {
         "id": "blog_attention",
         "source_id": "tech_blog",
-        "url": "https://example.org/blog/attention",
+        "url": "https://example.invalid/blog/attention",
         "crawl_time": "2026-06-01T00:00:00Z",
         "mime": "text/html",
         "language": "en",
@@ -760,7 +576,7 @@ documents = [
     {
         "id": "oss_vector_db",
         "source_id": "oss_docs",
-        "url": "https://docs.example.org/vector-db",
+        "url": "https://docs.example.invalid/vector-db",
         "crawl_time": "2026-06-01T00:05:00Z",
         "mime": "text/html",
         "language": "en",
@@ -771,9 +587,9 @@ documents = [
         """,
     },
     {
-        "id": "blog_attention_dup",
+        "id": "blog_attention_copy",
         "source_id": "tech_blog",
-        "url": "https://mirror.example.org/blog/attention-copy",
+        "url": "https://mirror.example.invalid/blog/attention-copy",
         "crawl_time": "2026-06-01T00:10:00Z",
         "mime": "text/html",
         "language": "en",
@@ -786,39 +602,39 @@ documents = [
         """,
     },
     {
-        "id": "forum_private",
+        "id": "private_forum",
         "source_id": "private_forum",
-        "url": "https://forum.example.org/private/thread/7",
+        "url": "https://forum.example.invalid/private/thread/7",
         "crawl_time": "2026-06-01T00:15:00Z",
         "mime": "text/html",
         "language": "en",
         "domain": "forum",
-        "html": "<article>Private member discussion with personal project details.</article>",
+        "html": "<article>Private member discussion with project details.</article>",
     },
     {
         "id": "spam_seo",
         "source_id": "tech_blog",
-        "url": "https://example.org/seo/spam",
+        "url": "https://example.invalid/seo/spam",
         "crawl_time": "2026-06-01T00:20:00Z",
         "mime": "text/html",
         "language": "en",
         "domain": "spam",
-        "html": "<body>Buy now!!! promo promo promo $$$ click click click</body>",
+        "html": "<body>Buy now promo promo promo click click click</body>",
     },
     {
         "id": "pii_secret",
         "source_id": "tech_blog",
-        "url": "https://example.org/leak",
+        "url": "https://example.invalid/leak",
         "crawl_time": "2026-06-01T00:25:00Z",
         "mime": "text/html",
         "language": "en",
         "domain": "security",
-        "html": "<article>Contact jane@example.com and use api key sk-live-abcdef for tests.</article>",
+        "html": "<article>Contact reader@example.invalid and use DEMO_SECRET_12345678.</article>",
     },
     {
         "id": "eval_leak",
         "source_id": "tech_blog",
-        "url": "https://example.org/benchmark/answer",
+        "url": "https://example.invalid/benchmark/answer",
         "crawl_time": "2026-06-01T00:30:00Z",
         "mime": "text/html",
         "language": "en",
@@ -828,7 +644,7 @@ documents = [
     {
         "id": "paper_scaling",
         "source_id": "science_preprint",
-        "url": "https://papers.example.org/scaling",
+        "url": "https://papers.example.invalid/scaling",
         "crawl_time": "2026-06-01T00:35:00Z",
         "mime": "text/html",
         "language": "en",
@@ -841,7 +657,7 @@ documents = [
     {
         "id": "zh_data_quality",
         "source_id": "zh_news",
-        "url": "https://news.example.cn/data-quality",
+        "url": "https://news.example.invalid/data-quality",
         "crawl_time": "2026-06-01T00:40:00Z",
         "mime": "text/html",
         "language": "zh",
@@ -853,70 +669,78 @@ documents = [
     },
 ]
 
-REQUIRED_META = ["id", "source_id", "url", "crawl_time", "mime", "language", "domain"]
-PII_OR_SECRET = [re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+"), re.compile(r"sk-[A-Za-z0-9-]{8,}")]
-CONTAMINATION = ["benchmark answer", "gsm8k solution", "hidden test answer"]
+required_meta = ["id", "source_id", "url", "crawl_time", "mime", "language", "domain"]
+pii_or_secret = [
+    re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+"),
+    re.compile(r"DEMO_SECRET_[A-Z0-9]{8,}"),
+]
+contamination_terms = ["benchmark answer", "gsm8k solution", "hidden test answer"]
 
 
-def strip_html(html):
+def strip_html(html: str) -> str:
     html = re.sub(r"<script.*?</script>|<style.*?</style>", " ", html, flags=re.I | re.S)
     text = re.sub(r"<[^>]+>", " ", html)
     return re.sub(r"\s+", " ", text).strip()
 
 
-def tokenize(text):
+def tokenize(text: str) -> list[str]:
     return re.findall(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]", text.lower())
 
 
-def content_hash(text):
+def content_hash(text: str) -> str:
     normalized = " ".join(tokenize(text))
     return hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:12]
 
 
-def quality_score(text):
-    toks = tokenize(text)
-    if not toks:
+def quality_score(text: str) -> float:
+    tokens = tokenize(text)
+    if not tokens:
         return 0.0
-    unique_ratio = len(set(toks)) / len(toks)
-    alpha_ratio = sum(ch.isalpha() for ch in text) / max(len(text), 1)
-    length_score = min(len(toks) / 24, 1.0)
-    return round(0.45 * length_score + 0.35 * unique_ratio + 0.20 * min(alpha_ratio / 0.65, 1.0), 3)
+    unique_ratio = len(set(tokens)) / len(tokens)
+    alpha_ratio = sum(char.isalpha() for char in text) / max(len(text), 1)
+    length_score = min(len(tokens) / 24, 1.0)
+    return round(
+        0.45 * length_score
+        + 0.35 * unique_ratio
+        + 0.20 * min(alpha_ratio / 0.65, 1.0),
+        3,
+    )
 
 
-def policy_allowed(doc):
+def policy_allowed(doc: dict) -> bool:
     source = sources[doc["source_id"]]
     return (
         source["license"] not in {"unknown", "restricted"}
-        and source["tos_train"]
-        and source["robots_allowed"]
+        and source["training_use"]
+        and source["robots"] == "allowed"
         and source["access"] == "public"
     )
 
 
-def has_pii_or_secret(text):
-    return any(pattern.search(text) for pattern in PII_OR_SECRET)
+def has_pii_or_secret(text: str) -> bool:
+    return any(pattern.search(text) for pattern in pii_or_secret)
 
 
-def has_eval_contamination(text):
+def has_eval_contamination(text: str) -> bool:
     lower = text.lower()
-    return any(term in lower for term in CONTAMINATION)
+    return any(term in lower for term in contamination_terms)
 
 
-def sum_tokens(items, field):
-    sums = defaultdict(int)
+def sum_tokens(items: list[dict], field: str) -> dict[str, int]:
+    totals = Counter()
     for item in items:
-        sums[item[field]] += item["tokens"]
-    return sums
+        totals[item[field]] += item["tokens"]
+    return dict(totals)
 
 
-def audit_web_collection(items):
+def audit_collection(items: list[dict]) -> dict:
     seen_hashes = set()
     kept = []
     rejected = {}
     stage_counts = Counter(raw=len(items))
 
     for doc in items:
-        missing = [field for field in REQUIRED_META if not doc.get(field)]
+        missing = [field for field in required_meta if not doc.get(field)]
         if missing:
             rejected[doc["id"]] = "missing_metadata"
             continue
@@ -949,241 +773,225 @@ def audit_web_collection(items):
             rejected[doc["id"]] = "exact_duplicate"
             continue
         seen_hashes.add(doc_hash)
-        kept.append({**doc, "text": text, "hash": doc_hash, "tokens": len(tokenize(text)), "quality": score})
+        kept.append(
+            {
+                **doc,
+                "text": text,
+                "hash": doc_hash,
+                "tokens": len(tokenize(text)),
+                "quality": score,
+            }
+        )
         stage_counts["dedup_pass"] += 1
 
     raw_tokens = sum(len(tokenize(strip_html(doc["html"]))) for doc in items)
     kept_tokens = sum(doc["tokens"] for doc in kept)
-    language_mix = {lang: round(count / kept_tokens, 3) for lang, count in sorted(sum_tokens(kept, "language").items())}
-    domain_mix = {dom: round(count / kept_tokens, 3) for dom, count in sorted(sum_tokens(kept, "domain").items())}
-    gates = {
-        "policy": rejected.get("forum_private") == "policy_block",
-        "pii": rejected.get("pii_secret") == "pii_or_secret",
-        "contamination": rejected.get("eval_leak") == "eval_contamination",
-        "quality": rejected.get("spam_seo") == "low_quality",
-        "dedup": rejected.get("blog_attention_dup") == "exact_duplicate",
-        "provenance": all(doc.get("hash") and doc.get("url") and doc.get("crawl_time") for doc in kept),
+    language_tokens = sum_tokens(kept, "language")
+    domain_tokens = sum_tokens(kept, "domain")
+    language_mix = {
+        key: round(value / max(kept_tokens, 1), 3)
+        for key, value in sorted(language_tokens.items())
     }
-
-    return {
+    domain_mix = {
+        key: round(value / max(kept_tokens, 1), 3)
+        for key, value in sorted(domain_tokens.items())
+    }
+    risk_rates = {
+        "policy_block": sum(reason == "policy_block" for reason in rejected.values())
+        / len(items),
+        "pii_or_secret": sum(reason == "pii_or_secret" for reason in rejected.values())
+        / len(items),
+        "eval_contamination": sum(reason == "eval_contamination" for reason in rejected.values())
+        / len(items),
+        "low_quality": sum(reason == "low_quality" for reason in rejected.values())
+        / len(items),
+        "exact_duplicate": sum(reason == "exact_duplicate" for reason in rejected.values())
+        / len(items),
+    }
+    signals = {
         "kept_ids": [doc["id"] for doc in kept],
         "rejected": dict(sorted(rejected.items())),
         "stage_counts": dict(stage_counts),
         "retention": round(kept_tokens / max(raw_tokens, 1), 3),
         "language_mix": language_mix,
         "domain_mix": domain_mix,
-        "avg_quality": round(sum(doc["quality"] for doc in kept) / max(len(kept), 1), 3),
-        "gates": gates,
-        "gate_pass": all(gates.values()),
+        "average_quality": round(
+            sum(doc["quality"] for doc in kept) / max(len(kept), 1), 3
+        ),
+        "risk_rates": {key: round(value, 3) for key, value in risk_rates.items()},
     }
+    actions = []
+    if risk_rates["policy_block"] > 0:
+        actions.append("review_or_exclude_restricted_sources")
+    if risk_rates["pii_or_secret"] > 0:
+        actions.append("scrub_or_isolate_sensitive_records")
+    if risk_rates["eval_contamination"] > 0:
+        actions.append("remove_or_isolate_eval_overlap")
+    if risk_rates["low_quality"] > 0:
+        actions.append("tune_quality_filter_and_sample_review")
+    if risk_rates["exact_duplicate"] > 0:
+        actions.append("run_near_dedup_and_keep_cluster_provenance")
+    decision = "hold_for_repair" if actions else "continue_to_manifest"
+    return {"signals": signals, "actions": actions, "decision": decision}
 
 
-report = audit_web_collection(documents)
-print("kept_ids=", report["kept_ids"])
-print("rejected=", report["rejected"])
-print("stage_counts=", report["stage_counts"])
-print("retention=", report["retention"])
-print("language_mix=", report["language_mix"])
-print("domain_mix=", report["domain_mix"])
-print("avg_quality=", report["avg_quality"])
-print("gates=", report["gates"])
-print("gate_pass=", report["gate_pass"])
+report = audit_collection(documents)
+print("signals=", report["signals"])
+print("actions=", report["actions"])
+print("decision=", report["decision"])
 
-assert report["kept_ids"] == ["blog_attention", "oss_vector_db", "paper_scaling", "zh_data_quality"]
-assert report["rejected"] == {
-    "blog_attention_dup": "exact_duplicate",
+assert report["signals"]["kept_ids"] == [
+    "blog_attention",
+    "oss_vector_db",
+    "paper_scaling",
+    "zh_data_quality",
+]
+assert report["signals"]["rejected"] == {
+    "blog_attention_copy": "exact_duplicate",
     "eval_leak": "eval_contamination",
-    "forum_private": "policy_block",
+    "private_forum": "policy_block",
     "pii_secret": "pii_or_secret",
     "spam_seo": "low_quality",
 }
-assert report["stage_counts"] == {
-    "raw": 9,
-    "policy_pass": 8,
-    "pii_pass": 7,
-    "contamination_pass": 6,
-    "quality_pass": 5,
-    "dedup_pass": 4,
-}
-assert report["retention"] == 0.639
-assert report["language_mix"] == {"en": 0.537, "zh": 0.463}
-assert report["domain_mix"] == {"code_docs": 0.148, "science": 0.167, "web_ml": 0.222, "zh_web": 0.463}
-assert report["gate_pass"] is True
-```
+assert report["decision"] == "hold_for_repair"
+~~~
 
-预期输出类似：
+示例输出中的数值会由这组合成文本决定，真实项目不应照搬 `0.62` 这样的阈值。这个 demo 重要的地方有三点：策略拒绝、隐私/秘密、评估污染、低质量和重复是不同原因；每个原因都有后续动作；即使最终保留样本的平均质量不错，只要仍有需要处理的风险，数据版本就不能被描述为“已经没有问题”。
 
-```text
-kept_ids= ['blog_attention', 'oss_vector_db', 'paper_scaling', 'zh_data_quality']
-rejected= {'blog_attention_dup': 'exact_duplicate', 'eval_leak': 'eval_contamination', 'forum_private': 'policy_block', 'pii_secret': 'pii_or_secret', 'spam_seo': 'low_quality'}
-stage_counts= {'raw': 9, 'policy_pass': 8, 'pii_pass': 7, 'contamination_pass': 6, 'quality_pass': 5, 'dedup_pass': 4}
-retention= 0.639
-language_mix= {'en': 0.537, 'zh': 0.463}
-domain_mix= {'code_docs': 0.148, 'science': 0.167, 'web_ml': 0.222, 'zh_web': 0.463}
-avg_quality= 0.922
-gates= {'policy': True, 'pii': True, 'contamination': True, 'quality': True, 'dedup': True, 'provenance': True}
-gate_pass= True
-```
+## 2.15 如何评估一个采集 pipeline
 
-这个 demo 的关键不是分数阈值本身，而是工程习惯：每个样本都要有来源、许可、时间、内容 hash、拒绝原因和最终版本。真正的 web-scale pipeline 只是把这里的 toy 规则替换成更强的解析器、质量模型、PII 检测器、污染检测器、near-dedup 和数据版本系统。
+### 2.15.1 采集质量评估
 
-## 13. 面向专家：采集策略会改变模型行为
+采集评估需要对每个阶段设置可解释指标：
 
-采集策略不是中性的。
+| 阶段 | 指标例子 | 关键分母 |
+| --- | --- | --- |
+| 获取 | 成功响应率、截断率、重复请求率 | 请求总数或合法请求总数 |
+| 解析 | 可用 artifact 率、字段召回率、警告率 | 成功响应或各 MIME 分组 |
+| 质量 | 高质量 precision、误删率、信息密度 | 人工标注样本或领域切片 |
+| 隐私安全 | 命中率、漏检率、人工复核一致性 | 带标注风险样本和负对照 |
+| 去重 | exact/near 减少率、误合并率 | 文档、token 或 cluster |
+| 污染 | 候选命中率、人工确认率 | 评估样本数 |
+| 血缘 | 可追溯率、删除传播时长 | 数据对象和下游 artifact |
 
-它会影响模型：
+一个总体平均值不能替代语言、领域、来源、时间和文件类型切片。例如 HTML 解析率 98% 可能掩盖 PDF 解析率只有 40%，英文过滤误删率很低也可能掩盖低资源语言几乎全部被删。
 
-1. 语言风格。
-2. 世界知识。
-3. 价值观分布。
-4. 安全边界。
-5. 代码习惯。
-6. 多语言能力。
-7. 长文本能力。
+### 2.15.2 采集策略的消融
 
-例如：
+如果过滤版本 B 比版本 A 的下游 benchmark 高，不能立即把收益归因于某个规则。两个版本可能同时改变了总 token、语言比例、重复率、时间窗口和污染程度。
 
-1. 论坛数据多，模型更口语化。
-2. 论文数据多，模型更学术化。
-3. 代码数据多，模型更擅长编程。
-4. 低质量网页多，模型更容易胡说。
+一个基本消融应固定：
 
-因此，数据采集和模型行为是强耦合的。
+1. 模型架构、训练步数和随机种子范围。
+2. 总 token 预算和 tokenizer 版本。
+3. 评估集合和评分程序。
+4. 来源与语言切片的统计口径。
+5. 训练和评估之间的污染检查。
 
-## 14. 面试官会怎么问
+然后比较能力、事实性、拒答、代码、长文、语言覆盖、隐私风险和成本。采集策略的价值是任务条件下的结果，不是过滤规则本身的漂亮数字。
 
-### 问题 1：如何构建 web-scale 预训练数据集？
+### 2.15.3 数据价值不是单一质量分
 
-回答要点：
+可以把某个来源对任务 `t` 的增量价值写成教学用指标：
 
-1. 先定义模型目标和数据需求。
-2. 建立合法数据源 registry。
-3. 采集公开许可、授权或合规来源。
-4. 做解析、语言识别、boilerplate removal。
-5. 做质量过滤、PII、安全扫描、去重。
-6. 做领域分类和数据配比。
-7. 做版本管理和审计。
+~~~math
+DeltaV(s, t) = Score(D + s, t) - Score(D, t).
+~~~
 
-标准回答：
+`Score` 可以是代码执行成功率、事实支持率、语言任务准确率或安全边界指标。`Delta V` 受模型规模、训练预算、混合比例和随机种子影响，不能直接解释为来源的普适价值。来源贡献还可能存在互补：单独加入某个小数据源没有收益，与高质量通用数据一起训练才有收益。
 
-```text
-我会先定义模型目标，例如通用、多语言、代码还是领域模型。然后建立 source registry，记录每个数据源的许可、用途、风险和版本。采集后进入 raw data lake，保留来源和 hash。处理阶段包括解析、正文抽取、语言识别、去 boilerplate、质量过滤、PII 和密钥扫描、安全过滤、去重、领域分类。最后根据目标能力设计 mixture，构建可复现的数据版本，并记录元数据用于审计、删除和 attribution。
-```
+## 2.16 常见失败模式
 
-### 问题 2：网页数据有哪些风险？
+### 2.16.1 把 HTTP 200 当作可用内容
 
-回答要点：
+错误页、登录页、验证码和站点模板都可能返回 200。修复方法是记录内容类型、模板指纹、正文长度、解析警告和样本抽样，并按来源观察。
 
-1. 噪声。
-2. 重复。
-3. 广告和 SEO。
-4. 版权。
-5. PII。
-6. 有害内容。
-7. 评估污染。
-8. 分布偏差。
+### 2.16.2 把 robots 当成完整授权
 
-### 问题 3：为什么要保留数据元数据？
+robots 是抓取规则的一部分，不等于版权、合同、隐私和训练用途的完整结论。修复方法是把 robots snapshot、ToS、许可证和用途审查分别登记。
 
-回答要点：
+### 2.16.3 只保存清洗后的文本
 
-1. 配比。
-2. 过滤。
-3. 版本复现。
-4. 删除请求。
-5. 合规审计。
-6. 数据 attribution。
-7. 问题回溯。
+没有 raw 坐标、解析版本和 hash，就无法复核误删、删除、污染和模型血缘。修复方法是保留受控原始 artifact 或足以定位原文的证据对象。
 
-### 问题 4：如何处理版权和合规？
+### 2.16.4 只做 exact dedup
 
-回答要点：
+页面复制、模板改写、代码 fork 和跨快照重复会绕过 exact hash。修复方法是加入 near-dedup、结构化代码相似度和人工误合并检查。
 
-1. 数据源许可审查。
-2. Terms of Service。
-3. robots 和访问控制。
-4. 商业使用限制。
-5. 数据删除机制。
-6. 法务和合规参与。
-7. 样本级 provenance。
+### 2.16.5 用全局阈值处理所有语言和领域
 
-### 问题 5：The Pile 对数据工程有什么启发？
+字符分布、文档长度、标点和链接模式在语言与领域间不同。全局阈值会误删低资源语言、短问题和代码。修复方法是按切片校准并报告误删率。
 
-回答要点：
+### 2.16.6 过滤器越多越安全
 
-1. 多来源高质量数据比单一 web crawl 更有价值。
-2. 数据子集要按来源和领域组织。
-3. 数据集需要文档化和风险分析。
-4. 数据多样性影响跨领域泛化。
+每增加一个过滤器，都会增加误删、分布变化和难以解释的组合效应。过滤器应有目的、版本、正负对照和下游回归；高风险类别可以隔离并人工复核，不要把所有内容都交给一个黑盒分类器。
 
-## 15. 标准回答模板
+### 2.16.7 将线上日志直接回灌
 
-面试中可以这样回答：
+线上日志包含最真实的失败，也包含最敏感的个人和业务信息。应先建立用途、同意/授权、脱敏、抽样、保留、删除和访问控制，再把复核后的样本进入版本化数据集。
 
-```text
-Web-scale 数据采集不是简单写爬虫，而是一个从 source planning 到 governance 的完整 pipeline。首先要明确模型目标和数据需求，然后建立合规的数据源登记，包括许可、用途、robots、ToS 和风险等级。采集后保留 raw data、hash、URL、时间和 license 等元数据。处理阶段包括解析、正文抽取、语言识别、去 boilerplate、质量评分、PII 和密钥扫描、安全过滤、去重和领域分类。最后根据模型目标设计 mixture，并做 dataset versioning、provenance、审计和删除请求支持。
+### 2.16.8 把“数据集发布”当作终点
 
-我会特别关注四类风险：版权合规、隐私泄露、低质量噪声和评估污染。因为这些问题最后都会变成模型幻觉、安全问题、评估失真或上线风险。
-```
+数据发布后仍会有许可证撤回、网页更新、删除请求、评估污染发现和模型事故。数据集需要生命周期、版本 diff、回滚、下游模型清单和变更通知。
 
-## 16. 常见误区
+## 2.17 资料与证据边界
 
-### 16.1 误区：能访问就能训练
+### 2.17.1 规模与训练数据研究
 
-纠正：技术可访问不等于法律、许可和政策允许。
+1. [Language Models are Few-Shot Learners（GPT-3）](https://arxiv.org/abs/2005.14165)：支持大规模自回归模型、预训练语料与 few-shot 能力之间的研究背景。
+2. [Training Compute-Optimal Large Language Models（Chinchilla）](https://arxiv.org/abs/2203.15556)：支持模型参数、训练 token 和计算预算共同设计的结论。
+3. [Textbooks Are All You Need（phi-1）](https://arxiv.org/abs/2306.11644)：支持教材式和合成增强数据在代码模型案例中的效率启发。
+4. [The Pile](https://arxiv.org/abs/2101.00027)：支持多来源、子集组织和大规模公开语料的研究案例。
 
-### 16.2 误区：网页数据天然代表真实世界
+这些论文支持各自实验条件下的观察，不提供任意闭源模型的完整配方，也不证明某个来源在所有模型和任务上都有相同边际价值。
 
-纠正：互联网分布有强偏差。
+### 2.17.2 Web 语料和数据处理
 
-### 16.3 误区：只要数据够多，质量无所谓
+1. [Common Crawl Overview](https://commoncrawl.org/overview)：支持公开 Web 归档的来源和使用入口；具体快照字段要以对应版本文档为准。
+2. [Documenting Large Webtext Corpora: A Case Study on the Colossal Clean Crawled Corpus（C4）](https://arxiv.org/abs/2104.08758)：支持 C4 来源追踪、过滤效果、评估样本混入和数据集文档化讨论。
+3. [The RefinedWeb Dataset for Falcon LLM](https://arxiv.org/abs/2306.01116)：支持网页过滤、去重和开放 Web 数据构造的研究案例。
+4. [The FineWeb Datasets](https://arxiv.org/abs/2406.17557)：支持大规模网页数据处理、质量分析和训练数据研究的较新案例。
+5. [Dolma: an Open Corpus of Three Trillion Tokens](https://arxiv.org/abs/2402.00159)：支持多来源开放语料、构造流程记录和数据处理工具的案例。
+6. [DataComp-LM](https://arxiv.org/abs/2406.11794)：支持通过受控数据选择实验比较训练数据价值的研究方向。
+7. [Deduplicating Training Data Makes Language Models Better](https://arxiv.org/abs/2107.06499)：支持近重复、记忆、训练效率和 train-test overlap 的讨论。
 
-纠正：低质量数据会浪费 compute，并引入错误和风险。
+这些论文和数据集文档说明作者如何构造、过滤和评估数据，不自动授予读者相同的版权、隐私或商业使用权。真实项目必须根据实际来源、合同和适用法域单独审查。
 
-### 16.4 误区：去重是清洗阶段的小问题
+### 2.17.3 访问、文档与治理
 
-纠正：去重影响训练效率、记忆风险和评估污染。
+1. [RFC 9309: Robots Exclusion Protocol](https://www.rfc-editor.org/rfc/rfc9309.html)：支持 robots 语法和协议行为，不能替代许可证或法务结论。
+2. [Datasheets for Datasets](https://arxiv.org/abs/1803.09010)：支持记录数据集动机、组成、收集过程、推荐用途和限制。
+3. [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：支持从生命周期、风险识别和治理角度组织数据管理。
+4. [NIST Generative AI Profile](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf)：支持生成式 AI 的数据来源、隐私、评估和治理风险讨论。
 
-### 16.5 误区：用户日志可以直接拿来训练
+这些资料提供协议、研究方法和治理框架；它们不能替代组织自己的许可证审查、隐私影响评估、秘密扫描、删除流程和安全测试。
 
-纠正：需要同意、脱敏、保留策略、删除机制和访问控制。
+## 2.18 思考与实践
 
-## 17. 小练习
+### 题目一：设计来源登记表
 
-### 练习 1
+为一个包含公共文档、授权报告和内部知识库的研究助手设计 source registry。说明每个字段如何影响采集、索引、训练、删除和再分发。
 
-设计一个 web-scale 数据采集系统架构。
+### 题目二：分析 WARC、WAT 和 WET
 
-要求包含：source registry、legal review、collector、raw data lake、parser、quality filter、PII scanner、dedup、dataset builder、version registry。
+解释三种数据形态分别适合什么任务。设计一个解析错误案例，说明为什么只保留 WET 会让问题难以定位。
 
-### 练习 2
+### 题目三：设计污染实验
 
-列出网页、书籍、论文、代码、论坛、对话数据各自的优缺点。
+构造一个包含 benchmark 原题、模板改写和独立相似问题的测试集。选择两种相似度方法，给出人工复核协议，并说明如何报告阈值和误报。
 
-### 练习 3
+### 题目四：设计代码数据流程
 
-为代码数据采集设计合规和安全 checklist。
+为 coding agent 设计从仓库、commit、依赖、测试到样本的血缘。说明如何处理 fork、许可证、秘密、生成文件和不能运行的项目。
 
-### 练习 4
+### 题目五：处理删除请求
 
-解释为什么 robots、ToS、license 和 provenance 都和大模型训练相关。
+假设某个授权来源撤回训练许可。画出 raw、parsed、dedup、token shard、checkpoint、RAG index、cache 和日志之间的路径，说明哪些动作可以直接执行，哪些结论需要重训或额外研究才能得出。
 
-### 练习 5
+## 2.19 结语：采集是分布设计的第一步
 
-设计一个数据源元数据 schema。
+Web-scale 数据采集的难点不在于把请求发出去，而在于把“可访问的载体”转化为“来源明确、结构可复核、风险可处理、版本可回放的数据对象”。网页提供广覆盖，书籍和论文提供长结构与专业知识，代码提供程序模式，论坛和对话提供真实任务，多语言数据决定服务范围；每种来源都需要自己的许可、解析、质量和隐私判断。
 
-要求至少包含 10 个字段。
+一个成熟系统会把 source registry、访问边界、raw artifact、解析版本、质量切片、PII/秘密处理、去重、污染、mixture、评估和删除连接起来。它不会用一个平均质量分或一个总布尔值掩盖不同风险，也不会把公开网页、robots 规则和训练授权混成同一个概念。
 
-## 18. 本章总结
-
-Web-scale 数据采集是大模型训练的基础，但采集本身只是起点。
-
-大模型数据来源包括网页、书籍、论文、代码、论坛、对话、多语言和多模态数据。
-
-不同来源有不同质量、覆盖、许可、隐私和安全风险。
-
-一个成熟 pipeline 应覆盖 source planning、legal review、collection、raw storage、parsing、boilerplate removal、language/domain classification、quality filtering、deduplication、versioning 和 audit。
-
-采集策略会直接影响模型行为、能力、偏见、安全和合规风险。
-
-面试中要把 Web-scale 数据采集讲成合法、可追溯、可治理、可评估的数据系统，而不是简单爬虫工程。
+当数据团队能够回答一段内容从哪里来、为什么保留、进入了哪个版本、改变了哪种分布、发生事故时如何定位以及删除后哪些结论仍未知，Web-scale 采集才真正从“抓取工程”变成了模型能力和系统责任的基础设施。

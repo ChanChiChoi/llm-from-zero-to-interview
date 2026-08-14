@@ -4,11 +4,11 @@
 
 本章系统讲 search reasoning：为什么需要搜索、如何定义状态和动作、Tree-of-Thought 如何工作、beam search 和 MCTS 有什么区别、verifier 如何参与剪枝、工程上如何控制成本，以及面试中如何把这类方法讲清楚。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲第二轮精修参考公开资料中的搜索推理路线，重点包括 [Tree of Thoughts](https://arxiv.org/abs/2305.10601)、[Language Agent Tree Search](https://arxiv.org/abs/2310.04406)、UCT / bandit-based Monte Carlo planning 和 MCTS survey。它们共同说明：LLM 不只能线性生成一条推理链，也可以作为 proposal model 生成候选状态，再由 value / verifier / tool feedback 选择、扩展、模拟和回传。
+本章参考公开资料中的搜索推理路线，重点包括 [Tree of Thoughts](https://arxiv.org/abs/2305.10601)、[Language Agent Tree Search](https://arxiv.org/abs/2310.04406)、UCT / bandit-based Monte Carlo planning 和 MCTS survey。它们共同说明：LLM 不只能线性生成一条推理链，也可以作为 proposal model 生成候选状态，再由 value / verifier / tool feedback 选择、扩展、模拟和回传。
 
-本章不把 ToT、beam search 或 MCTS 写成无条件更强的方法。搜索能提高复杂任务可靠性，前提是状态表示、动作粒度、评分器、停止条件和预算设计都合理。若 verifier 偏好“看起来更漂亮”的错误分支，搜索会更快放大错误；若搜索预算不受控，正确率提升也可能被延迟和成本吞掉。本章 demo 只做 toy 级审计，目标是帮助面试时讲清公式、指标、失败模式和工程门禁。
+本章不把 ToT、beam search 或 MCTS 写成无条件更强的方法。搜索能提高复杂任务可靠性，前提是状态表示、动作粒度、评分器、停止条件和预算设计都合理。若 verifier 偏好“看起来更漂亮”的错误分支，搜索会更快放大错误；若搜索预算不受控，正确率提升也可能被延迟和成本吞掉。本章 demo 只做 toy 级审计，目标是帮助面试时讲清公式、指标、失败模式和工程验收条件。
 
 ## 6.1 为什么需要 Search
 
@@ -64,7 +64,7 @@ N_{\mathrm{full}}=
 \frac{B^{D+1}-1}{B-1}
 ```
 
-这就是 search reasoning 成本容易爆炸的根源。工程上通常使用 beam、阈值、去重、缓存和预算门禁限制实际节点数。
+这就是 search reasoning 成本容易爆炸的根源。工程上通常使用 beam、阈值、去重、缓存和预算约束限制实际节点数。
 
 一个通用节点分数可以写成：
 
@@ -137,7 +137,7 @@ R_{\mathrm{prune}}=
 }{N}
 ```
 
-一个简化上线门禁可以写成：
+一个简化上线准入条件可以形式化为：
 
 ```math
 G_{\mathrm{search}}=

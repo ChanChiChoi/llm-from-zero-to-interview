@@ -1,12 +1,12 @@
 # 第五章：FFN、SwiGLU、Gated MLP 与 MoE FFN
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本章第二轮精修以公开论文和技术报告为资料边界：Transformer 原论文对 position-wise FFN 的定义，Shazeer 的 *GLU Variants Improve Transformer* 对 ReGLU / GEGLU / SwiGLU 的对比，PaLM 和 LLaMA 公开资料中对 SwiGLU / gated MLP 的采用，GShard、Switch Transformer、Mixtral of Experts、DeepSeekMoE 和 DeepSeek-V2 对 sparse MoE、top-k routing、专家负载、active parameters 与系统复杂度的公开描述。
+本章以公开论文和技术报告为资料边界：Transformer 原论文对 position-wise FFN 的定义，Shazeer 的 *GLU Variants Improve Transformer* 对 ReGLU / GEGLU / SwiGLU 的对比，PaLM 和 LLaMA 公开资料中对 SwiGLU / gated MLP 的采用，GShard、Switch Transformer、Mixtral of Experts、DeepSeekMoE 和 DeepSeek-V2 对 sparse MoE、top-k routing、专家负载、active parameters 与系统复杂度的公开描述。
 
-本章只讨论公开可验证的 FFN / gated MLP / MoE FFN 通用机制；不把某个闭源模型的 expert 数、hidden size、routing recipe 或负载均衡技巧写成行业标准，也不把 toy demo 的门禁结果当成真实 benchmark。
+本章只讨论公开可验证的 FFN / gated MLP / MoE FFN 通用机制；不把某个闭源模型的 expert 数、hidden size、routing recipe 或负载均衡技巧写成行业标准，也不把 toy demo 的验收结果当成真实 benchmark。
 
-第二轮补强重点有三点：
+本章重点有三点：
 
 1. 将 FFN、SwiGLU、MoE routing、参数量、active parameters、expert capacity 和 load balance 写成 GitHub Markdown 更稳定的 MathJax 公式。
 2. 明确 dense FFN、SwiGLU/Gated MLP 和 MoE FFN 分别解决“非线性通道变换”“通道门控表达”和“稀疏激活扩容”三个层面的问题。
@@ -507,15 +507,15 @@ O=\sum_{e=1}^{E}\max(0,n_e-C_e)
 R_{\mathrm{load}}=\frac{\max_e n_e}{\bar n}
 ```
 
-一个面试级 FFN / MoE 架构门禁可以写成：
+一个面试级 FFN / MoE 架构准入条件可以形式化为：
 
 ```math
 G_{\mathrm{ffn}}=\mathbb{1}\{O=0,\ R_{\mathrm{load}}\le \tau_r,\ U_{\mathrm{expert}}\ge \tau_u\}
 ```
 
-其中 `U_expert` 是至少收到一个 token 的 expert 占比。这个门禁强调：MoE 不是只要 active parameters 小就好，还要看 router 是否均衡、capacity 是否溢出、通信是否可控、质量是否过线。
+其中 `U_expert` 是至少收到一个 token 的 expert 占比。这组条件强调：MoE 不是只要 active parameters 小就好，还要看 router 是否均衡、capacity 是否溢出、通信是否可控、质量是否过线。
 
-## 5.16.1 最小可运行 FFN / MoE 成本审计 demo
+### 5.16.1 最小可运行 FFN / MoE 成本审计 demo
 
 下面的 demo 不依赖 PyTorch，只用标准库估算 dense 4D FFN、SwiGLU 近似等参配置和 top-2 MoE 的参数量，并模拟 balanced routing 与 collapsed routing 的差异。
 
@@ -644,6 +644,63 @@ Norm: 稳定数值分布
 2. MoE 提升参数容量。
 3. 更好的 routing 提升专家利用率。
 4. 更好的并行系统降低 MoE 通信代价。
+
+### 5.17.1 读懂新模型的 total parameters 与 active parameters
+
+近年的模型卡越来越常写成“`total parameters / active parameters`”。小白可以把它理解为：模型仓库里有很多专家，但每个 token 只调用其中一部分。`total` 更像模型的总容量，`active` 更像一次 token 路由时实际进入专家计算的参数规模。
+
+设模型有 `E` 个专家，每个 token 选 `k` 个专家，忽略共享层和 router 的细节，最简单的估算是：
+
+```math
+P_{\mathrm{total}}\approx E P_e
+```
+
+```math
+P_{\mathrm{active}}\approx k P_e
+```
+
+更接近工程现实的写法是：
+
+```math
+P_{\mathrm{total}}=P_{\mathrm{shared}}+E P_e+P_r
+```
+
+```math
+P_{\mathrm{active}}=P_{\mathrm{shared}}+k P_e+P_r
+```
+
+其中 `P_shared` 是所有 token 都会经过的共享参数，`P_e` 是单个 expert 的参数，`P_r` 是 router 参数。active 参数不是严格的 FLOPs 计数，因为 token padding、capacity overflow、all-to-all 通信、量化格式和 kernel 利用率都会改变真实延迟。
+
+#### 5.17.1.1 用前沿模型校准概念
+
+下表只用于建立阅读模型卡的参照系，不把不同模型的参数口径当成同一 benchmark：
+
+| 模型或系列 | 公开的参数/结构信号 | 阅读重点 | 证据边界 |
+|---|---|---|---|
+| Kimi K3 | 约 `2.8T total / 104B active`，`3 KDA + 1 Gated MLA` | MoE 容量和混合 attention 是两件事，要分别评估 | 官方模型卡 |
+| DeepSeek-V4-Pro / Flash | 约 `1.6T / 49B`、`284B / 13B` | active 参数与 CSA/HCA、1M context 的 serving 成本共同决定 | 官方模型卡 |
+| Qwen3.5 / Qwen3.6 | 约 `397B / 17B`、`35B / 3B`；采用 Gated DeltaNet + Gated Attention | active 参数不意味着全部层都是稀疏专家，结构需单独看 | 官方模型卡 |
+| Qwen3-Coder-Next | 约 `80B / 3B`，面向 coding agent | 任务专用训练和工具环境可能比总参数更影响 Agent 表现 | 官方模型卡 |
+| Mistral Small 4 | 约 `119B / 6.5B`，128 experts、top-4 | expert 数、top-k、共享层和量化共同影响实际吞吐 | 官方模型卡 |
+| Step 3.7 Flash | 约 `198B / 11B`，另有视觉 encoder | vision encoder、MoE active 参数和 speculative decoding 不应混为一个数字 | 官方模型卡 |
+| Qwen3.8-Max | 一方产品页宣称约 `2.4T MoE`、1M context | 产品页信息可作为线索，但公开技术报告/权重不足时不能补写未披露细节 | 一方产品页，部分表述待核验 |
+
+#### 5.17.1.2 active 参数、FLOPs 与显存不是同一个指标
+
+面试时最容易犯的错误是把 `P_active` 直接等同于“推理成本”。至少要区分：
+
+1. **参数存储**：通常需要加载或分片管理全部专家权重，因此更接近 `P_total`。
+2. **每 token 的矩阵计算**：只涉及选中的专家，近似受 `k` 影响。
+3. **通信与调度**：token dispatch、all-to-all、expert batching 可能让小 active 参数模型仍然很慢。
+4. **KV/state cache**：由 attention 或递归状态决定，不会因为 FFN 是 MoE 就自动消失。
+
+可以用一个简化的延迟模型提醒自己：
+
+```math
+T_{\mathrm{step}}\approx T_{\mathrm{shared}}+T_{\mathrm{expert}}(k)+T_{\mathrm{dispatch}}+T_{\mathrm{collect}}+T_{\mathrm{memory}}
+```
+
+因此，“总参数大、active 参数小”通常意味着容量与每 token 计算之间存在折中，而不是免费获得大模型质量。
 
 ## 5.18 常见误区
 

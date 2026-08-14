@@ -20,17 +20,17 @@
 
 > A2A 不是为了让 Agent “互相聊天”而设计的，而是为了让 Agent 之间的能力、任务、状态、上下文和信任关系可描述、可执行、可追踪。
 
-## 25.0 本讲资料边界与第二轮精修口径
+## 25.0 本讲范围与资料
 
-本讲第二轮精修前，已按 `WRITING_PLAN.md` 核对 A2A 官方站点、最新文档、协议规范、任务生命周期说明和 Google Developers 发布介绍。正文采用这些公开资料中的稳定抽象：Agent Card / discovery、Task、Message、Artifact、TaskState / lifecycle、流式或异步更新、认证授权、企业治理，以及 A2A 和 MCP 的边界。
+本章参考了 A2A 官方站点、最新文档、协议规范、任务生命周期说明和 Google Developers 发布介绍。正文采用这些公开资料中的稳定抽象：Agent Card / discovery、Task、Message、Artifact、TaskState / lifecycle、流式或异步更新、认证授权、企业治理，以及 A2A 和 MCP 的边界。
 
 本讲只回答一个背景问题：为什么 Agent 之间需要协议。后续章节会继续拆 Agent Card、服务发现、Task、Message、Artifact、安全授权和协议实现细节。本讲不实现真实 A2A server，不联网调用远程 Agent，不讨论闭源产品内部编排策略，也不把 toy demo 的字段名、阈值或状态枚举写成完整标准。
 
-第二轮补充重点是：
+本章的学习重点是：
 
-1. 把“自然语言聊天不够”“普通 HTTP API 不够”的原因落到协议抽象：能力发现、任务状态、消息结构、产物引用、上下文最小化、权限边界和 trace。
-2. 给出稳定 MathJax 公式，帮助面试时把背景问题转成可审计指标。
-3. 补一个 0 依赖 Python demo，用静态 toy Agent Card / Task / Message / Artifact 表审计 A2A 背景能力，不启动服务、不访问网络、不执行真实任务。
+1. 理解“自然语言聊天不够”“普通 HTTP API 不够”的原因，并把它们落到能力发现、任务状态、消息结构、产物引用、上下文最小化、权限边界和 trace。
+2. 用稳定的 MathJax 公式把 A2A 背景问题表达成可审计指标。
+3. 通过一个 0 依赖 Python demo，用静态 toy Agent Card / Task / Message / Artifact 表检查 A2A 背景能力；该 demo 不启动服务、不访问网络，也不执行真实任务。
 
 ## 25.1 从单 Agent 到多 Agent
 
@@ -593,7 +593,7 @@ C_{agent}, C_{discover}, C_{task}, C_{state}, C_{msg}, C_{art}, C_{context}, C_{
 
 含义分别是 Agent Card 完整度、服务发现就绪率、任务委派契约覆盖率、状态生命周期覆盖率、消息结构覆盖率、Artifact 引用覆盖率、上下文边界控制率、权限边界覆盖率、MCP / A2A 区分率、失败和取消处理覆盖率、trace 就绪率、eval 覆盖率。
 
-可以把背景层上线门禁写成：
+可以把背景层上线条件写成：
 
 ```math
 G_{a2a}=I(C_{agent}\ge \tau_{agent})\cdot I(C_{discover}\ge \tau_{discover})\cdot I(C_{task}\ge \tau_{task})\cdot I(C_{state}\ge \tau_{state})\cdot I(C_{perm}\ge \tau_{perm})\cdot I(C_{trace}\ge \tau_{trace})

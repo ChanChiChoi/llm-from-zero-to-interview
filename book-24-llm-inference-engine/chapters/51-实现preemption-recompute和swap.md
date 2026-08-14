@@ -26,9 +26,9 @@ KV blocks 更容易不够用。
 
 这就是本章要实现的 preemption。
 
-## 51.0 本讲资料边界与第二轮精修口径
+## 51.0 本讲范围与资料
 
-本章按第二轮精修口径，只讲教学版 paged KV cache 在 KV block 压力下的 preemption、recompute 和 swap 状态机。
+本章聚焦教学版 paged KV cache 在 KV block 压力下的 preemption、recompute 和 swap 状态机。
 
 公开资料校准主要参考三类口径：
 
@@ -42,7 +42,7 @@ KV blocks 更容易不够用。
 KV budget 不足 -> 先 cache eviction -> 再 preempt running request -> recompute 或 swap 恢复 -> 记录指标
 ```
 
-第二轮新增 demo 的验收重点是：
+本章 demo 的验收重点是：
 
 ```text
 preemption 和 cache eviction、abort、backpressure 是否区分清楚；
@@ -949,7 +949,7 @@ M_{\mathrm{swap}}=B_{\mathrm{swap}}P_{\mathrm{page}}
 R_{\mathrm{preempt}}=\frac{N_{\mathrm{preempt}}}{\max(1,\Delta t)}
 ```
 
-最终门禁：
+最终验收条件：
 
 ```math
 G_{\mathrm{preempt}}=G_{\mathrm{pressure}}G_{\mathrm{evict}}G_{\mathrm{victim}}G_{\mathrm{recompute}}G_{\mathrm{swap}}G_{\mathrm{metric}}

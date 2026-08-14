@@ -1,10 +1,10 @@
 # 第二十三章：MCP 权限、安全和本地沙箱
 
-## 23.0 本讲资料边界与第二轮精修口径
+## 23.0 本讲范围与资料
 
-本讲按 MCP 2025-06-18 specification 和官方安全建议做第二轮精修：Authorization 章节明确 MCP 可使用 OAuth 2.1 风格的授权模型，远程 Server 需要校验 token、audience、scope 和资源边界；Security Best Practices 强调 confused deputy、token passthrough、session hijacking、local server consent、scope 最小化、明确用户同意和审计；Roots 章节说明 Host / Client 可以向 Server 暴露文件系统边界；Tools、Resources 和 Prompts 章节共同决定能力发现、资源读取、提示模板和结果回填的安全面。
+本章参考Authorization 章节明确 MCP 可使用 OAuth 2.1 风格的授权模型，远程 Server 需要校验 token、audience、scope 和资源边界；Security Best Practices 强调 confused deputy、token passthrough、session hijacking、local server consent、scope 最小化、明确用户同意和审计；Roots 章节说明 Host / Client 可以向 Server 暴露文件系统边界；Tools、Resources 和 Prompts 章节共同决定能力发现、资源读取、提示模板和结果回填的安全面。
 
-本讲只讨论 MCP 权限、安全、本地沙箱和数据流控制的防御性设计，不提供绕过 OAuth、伪造 token、扫描内网、利用 SSRF、读取密钥、逃逸沙箱、注入 DLL、hook API、修改第三方软件、规避审计或攻击真实系统的操作步骤。后面的 demo 使用固定 toy request 和静态策略模拟安全门禁，重点演示 Host 如何做连接治理、token audience、roots containment、敏感文件阻断、网络 allowlist、shell 沙箱、prompt injection 隔离、数据流控制、确认、trace 和安全 eval。
+本章讨论 MCP 权限、安全、本地沙箱和数据流控制的防御性设计，不提供绕过 OAuth、伪造 token、扫描内网、利用 SSRF、读取密钥、逃逸沙箱、注入 DLL、hook API、修改第三方软件、规避审计或攻击真实系统的操作步骤。后面的 demo 使用固定 toy request 和静态策略模拟安全验收条件，重点演示 Host 如何做连接治理、token audience、roots containment、敏感文件阻断、网络 allowlist、shell 沙箱、prompt injection 隔离、数据流控制、确认、trace 和安全 eval。
 
 本讲不要记成：
 
@@ -394,7 +394,7 @@ eval 不能只看最终回答，要看 trace 和实际工具执行。
 
 ## 23.18 MCP 安全审计指标与最小 demo
 
-为了把 MCP 安全从“提醒用户小心”升级为“可上线门禁”，可以把一次 MCP 安全决策样本抽象成：
+为了把 MCP 安全从“提醒用户小心”升级为“可执行的上线条件”，可以把一次 MCP 安全决策样本抽象成：
 
 ```math
 s_i=(h_i,c_i,v_i,r_i,t_i,p_i,d_i,o_i,e_i,z_i)
@@ -470,7 +470,7 @@ C_{\mathrm{trace}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{trace\ and\ audit\ inclu
 C_{\mathrm{eval}}=\frac{1}{N}\sum_i \mathbf{1}[\mathrm{security\ eval}_i\ \mathrm{covers\ path,\ SSRF,\ shell,\ injection,\ exfiltration,\ tenant,\ and\ confirmation}]
 ```
 
-综合门禁可以写成：
+综合验收条件可以形式化为：
 
 ```math
 G_{\mathrm{mcp\_security}}=\mathbf{1}\left[
@@ -494,7 +494,7 @@ C_{\mathrm{eval}}
 \right]
 ```
 
-下面的 demo 用静态策略模拟 Host 侧 MCP 安全门禁。它不访问真实文件、网络或 shell，只检查 toy 请求是否满足连接治理、token audience、scope、roots、敏感文件、SSRF、shell sandbox、数据流、确认、租户、供应链和 trace 要求。
+下面的 demo 用静态策略模拟 Host 侧 MCP 安全验收条件。它不访问真实文件、网络或 shell，只检查 toy 请求是否满足连接治理、token audience、scope、roots、敏感文件、SSRF、shell sandbox、数据流、确认、租户、供应链和 trace 要求。
 
 ```python
 from dataclasses import dataclass
@@ -695,7 +695,7 @@ print("failed_gates=", failed_gates)
 print("mcp_security_gate_pass=", gate_pass)
 ```
 
-这段代码故意让门禁不通过：它提醒你，MCP 安全不是在 prompt 里写“不要泄露”，而是 Host 在连接、授权、scope、roots、文件、网络、shell、prompt injection、确认、数据流、凭证、租户、供应链、trace 和安全 eval 上逐层收口。
+这段代码故意让未通过硬性检查：它提醒你，MCP 安全不是在 prompt 里写“不要泄露”，而是 Host 在连接、授权、scope、roots、文件、网络、shell、prompt injection、确认、数据流、凭证、租户、供应链、trace 和安全 eval 上逐层收口。
 
 ## 23.19 常见错误
 

@@ -10,9 +10,9 @@
 
 > 企业 MCP 工具平台不是“把一堆 MCP Server 连起来”，而是建设一个可注册、可发现、可授权、可审计、可评估、可运营的工具和上下文接入层。
 
-## 48.0 本讲资料边界与第二轮精修口径
+## 48.0 本讲范围与资料
 
-本讲按 `WRITING_PLAN.md` 做第二轮精修，资料口径对齐 MCP 2025-11-25 规范中 Host / Client / Server、Tools、Resources、Prompts、Roots、Authorization、Registry 和安全最佳实践的公开边界，同时结合前文 Tool Registry、Tool Router、Tool Executor、Tool Permission、Tool Security、Trace / Replay、MCP Integration、Function Calling / MCP / A2A 横向对比和 Provider Runtime 迁移审计已经建立的工程抽象。
+本章参考 MCP 2025-11-25 规范中 Host / Client / Server、Tools、Resources、Prompts、Roots、Authorization、Registry 和安全最佳实践的公开边界，同时结合前文 Tool Registry、Tool Router、Tool Executor、Tool Permission、Tool Security、Trace / Replay、MCP Integration、Function Calling / MCP / A2A 横向对比和 Provider Runtime 迁移审计已经建立的工程抽象。
 
 需要特别注意三点。
 
@@ -20,7 +20,7 @@
 2. 企业内部的 MCP Registry / Gateway / Policy Engine 是组织治理层，不等同于官方公共 Registry，也不能绕开 MCP 的授权、安全和能力声明机制。
 3. 本章只讨论合规的企业平台设计，不提供绕过授权、隐藏审计、跨租户访问、工具投毒、prompt injection 利用、沙箱逃逸或伪造 trace / eval 结果的方法。
 
-第二轮重点是把“怎么设计”落到可检查的指标：Registry metadata 是否完整、tool / resource / prompt 是否有契约、Host / Client / Server 边界是否清楚、OBO 授权和 scope 是否绑定、roots / sandbox 是否落地、工具结果是否经过投影、trace / audit / replay / eval 是否能闭环。
+本章重点是把“怎么设计”落到可检查的指标：Registry metadata 是否完整、tool / resource / prompt 是否有契约、Host / Client / Server 边界是否清楚、OBO 授权和 scope 是否绑定、roots / sandbox 是否落地、工具结果是否经过投影、trace / audit / replay / eval 是否能闭环。
 
 ## 48.1 面试题描述
 
@@ -450,7 +450,7 @@ $$
 R_{\mathrm{tenant\_leak}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{tenant\_leak}_i=1]
 $$
 
-平台上线门禁可以写成：
+平台上线准入条件可以形式化为：
 
 $$
 G_{\mathrm{mcp\_platform}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land R_{\mathrm{tenant\_leak}}=0 \land P_0=0\right]
@@ -458,7 +458,7 @@ $$
 
 这里 `P_0` 表示硬阻断问题数量，例如跨租户可见、OBO scope 丢失、roots 沙箱缺失、trace 断链、prompt injection taint 丢失、高风险工具无确认或 release gate 缺失。直觉是：企业 MCP 平台不是平均分够高就能上线，跨租户泄露和硬阻断项必须为 0。
 
-下面的 0 依赖 demo 用 toy case 模拟平台设计审计。它不是生产评估器，而是帮助你在面试中说明“怎么把架构图变成可验收门禁”。
+下面的 0 依赖 demo 用 toy case 模拟平台设计审计。它不是生产评估器，而是帮助你在面试中说明“怎么把架构图变成可验收验收条件”。
 
 ```python
 CHECKS = [
@@ -582,7 +582,7 @@ failed_gates= ['mcp_gateway_readiness', 'registry_metadata_completeness', 'capab
 enterprise_mcp_platform_gate_pass= False
 ```
 
-这个输出刻意让每个指标只差一个坏样本，方便看出门禁的作用。真实平台可以把这些检查接到 manifest lint、权限策略测试、tool simulator、trace replay、canary release 和上线审批里。
+这个输出刻意让每个指标只差一个坏样本，方便看出验收条件的作用。真实平台可以把这些检查接到 manifest lint、权限策略测试、tool simulator、trace replay、canary release 和上线审批里。
 
 面试表达时可以这样总结：企业 MCP 平台的验收不是“有 Registry 和 Gateway”，而是能证明每个能力都被命名、授权、隔离、投影、审计、回放和回归测试；只要出现跨租户泄露、OBO scope 丢失、roots 沙箱缺失、taint 丢失或 trace 断链，就应该硬阻断。
 

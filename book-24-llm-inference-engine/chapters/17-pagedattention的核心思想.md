@@ -8,14 +8,14 @@
 
 > PagedAttention 借鉴操作系统分页思想，把请求的逻辑 KV Cache 切成固定大小的块，并映射到 GPU 上的物理 KV block，从而避免连续分配和显存碎片问题。
 
-## 17.0 本讲资料边界与第二轮精修口径
+## 17.0 本讲范围与资料
 
 本讲只解释 PagedAttention 的核心思想。它覆盖 logical block、physical block、block table、token position 到 KV block 的地址翻译、block size trade-off、block 内部浪费、请求释放后的 block 复用、prefix sharing / copy-on-write 直觉和最小可运行分页 KV demo，但不展开 vLLM 真实 CUDA kernel、真实 block manager 源码、attention kernel 性能调优、多卡 KV 分布、prefix cache 策略、swap / preemption 或生产参数配置。
 
 资料校准口径：
 
 1. vLLM / PagedAttention 论文把 KV cache 分成固定大小 blocks，并用 PagedAttention 让 attention kernel 能读取非连续物理 KV blocks，从而降低内存浪费并支持高吞吐 serving。
-2. vLLM 文档和源码术语通常围绕 block table、KV cache block、scheduler、block manager、prefix caching 和 KV cache usage 展开；本章只抽象这些机制的稳定概念，不绑定具体类名或参数名。
+2. vLLM 文档和源码术语通常围绕 block table、KV cache block、scheduler、block manager、prefix caching 和 KV cache usage 展开；本章聚焦这些机制的稳定概念，不绑定具体类名或参数名。
 3. 操作系统分页类比只用于帮助理解逻辑地址到物理地址的映射，不表示 GPU KV cache 完全等价于 CPU 虚拟内存。
 4. 本章 demo 用纯 Python list 模拟 KV block storage、block table、ref count 和 free list，不实现真实 attention score 计算。
 

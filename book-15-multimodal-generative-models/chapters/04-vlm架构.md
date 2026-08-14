@@ -4,13 +4,13 @@ VLM，也就是 Vision-Language Model，是把视觉能力接入语言模型的�
 
 本章重点讲 VLM 的主流架构：vision encoder + connector + LLM、LLaVA 风格的 visual token 拼接、Flamingo 的 cross-attention、BLIP-2 的 Q-Former、Perceiver Resampler、image token 的处理、多图和多轮对话结构，以及工程上的分辨率、token 数、冻结策略和训练阶段设计。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲第二轮精修前，重点校准了 LLaVA / Visual Instruction Tuning、Flamingo、BLIP-2 / Q-Former 和 Perceiver IO / latent resampling 的公开论文资料。它们分别代表了几条常见路线：用 projector 把视觉 token 接入 LLM、在语言模型层内插入视觉 cross-attention、用 query token 桥接冻结的 vision encoder 和冻结 LLM，以及用固定数量 latent 压缩大量视觉特征。
+本章参考重点校准了 LLaVA / Visual Instruction Tuning、Flamingo、BLIP-2 / Q-Former 和 Perceiver IO / latent resampling 的公开论文资料。它们分别代表了几条常见路线：用 projector 把视觉 token 接入 LLM、在语言模型层内插入视觉 cross-attention、用 query token 桥接冻结的 vision encoder 和冻结 LLM，以及用固定数量 latent 压缩大量视觉特征。
 
 本讲只回答“VLM 架构怎么把视觉信息接入 LLM”这个问题，重点放在 shape、token budget、connector 选择、image placeholder、assistant-only loss mask 和多图上下文成本。多模态 instruction tuning 的数据构造、chat template 细节、拒答样本和训练配比留到下一章展开；这里不会把后训练、安全数据和评估体系全部提前讲完。
 
-第二轮新增内容按三个目标补齐：
+本章围绕三个目标展开：
 
 1. 把 `vision encoder -> connector -> LLM` 的关键张量 shape、上下文长度、attention 成本和 loss mask 写成可手算公式。
 2. 给出一个 0 依赖 Python demo，帮助读者检查 projector shape、图片占位符、多图 token budget、resampler 压缩和 assistant-only labels。
@@ -134,7 +134,7 @@ m_t\log p_\theta(y_t\mid y_{1:t-1},H_v,x)
 
 其中 `m_t=1` 表示第 `t` 个 token 属于 assistant answer，需要计算 loss；用户 prompt、system prompt、`<image>` 占位符和视觉 token 通常被 mask 掉。
 
-上线前可以把 VLM 架构审计写成一个门禁：
+上线前可以把 VLM 架构审计写成一个验收条件：
 
 ```math
 G_{\mathrm{vlm}}=
@@ -506,6 +506,27 @@ Assistant: 有两只狗。
 优点：固定视觉 token 数，控制成本。
 
 缺点：压缩可能损失细节。
+
+### 4.15.1 从 Connector VLM 到 Encoder-Free Unified Multimodal
+
+传统 VLM 多数是 `vision encoder -> connector/projector -> LLM`。新一代统一模型开始尝试减少固定的外部 encoder 边界，或者让视觉、文本、音频 token 在更统一的主干中处理。
+
+Gemma 4 的公开模型卡给出了多种规模和 dense/MoE 配置，并把 `12B Unified` 描述为 encoder-free multimodal 架构。这里的 encoder-free 不应被初学者理解成“图像不需要 patch/token 化”，而是视觉输入的表示和语言主干之间不再简单依赖一个传统独立 vision encoder + projector 组合；具体 token 化、位置处理和训练细节仍要以模型卡和实现为准。
+
+两条路线的工程差异可以这样看：
+
+| 路线 | 直觉 | 优点 | 风险 |
+|---|---|---|---|
+| Connector VLM | 先把视觉特征翻译成 LLM hidden token | 模块边界清楚，复用 LLM 生态方便 | connector/视觉 token 可能成为信息瓶颈 |
+| Encoder-free/Unified | 在更统一的 token/主干中处理多模态输入 | 跨模态交互更直接，减少固定接口假设 | 训练、token budget、位置和部署 kernel 更复杂 |
+
+无论采用哪条路线，都要审计：
+
+```math
+T_{\mathrm{input}}=T_{\mathrm{text}}+T_{\mathrm{image}}+T_{\mathrm{audio}}+T_{\mathrm{video}}+T_{\mathrm{special}}
+```
+
+视觉模型“原生支持图片”不等于视觉 token 不占上下文，也不等于 OCR、视频帧采样和高分辨率细节已经被证明可靠。评估时要把感知错误、connector/tokenization 错误和语言推理错误分开。
 
 ## 4.16 VLM 常见失败模式
 

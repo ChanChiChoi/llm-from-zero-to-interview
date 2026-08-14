@@ -4,13 +4,13 @@ Tokenizer 和格式问题，是大模型训练、SFT、对齐、RAG 和 Agent �
 
 本章系统讲 tokenizer 与格式坑：special token、chat template、BOS/EOS/PAD、label mask、训练推理格式一致性、中文/代码/数学 tokenization、多模态特殊 token，以及排查 checklist。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-第二轮精修时，本章按 tokenizer、聊天模板和 SFT 数据格式审计的口径重新校准。资料边界主要来自 BPE 子词论文、SentencePiece 论文、Hugging Face tokenizers / Transformers 的 special token、generation 和 chat template 文档、TRL SFT assistant-only loss 相关文档，以及多模态 instruction tuning 中 image placeholder 与 label mask 对齐的公开工程实践。
+本章按 tokenizer、聊天模板和 SFT 数据格式审计的口径重新校准。资料边界主要来自 BPE 子词论文、SentencePiece 论文、Hugging Face tokenizers / Transformers 的 special token、generation 和 chat template 文档、TRL SFT assistant-only loss 相关文档，以及多模态 instruction tuning 中 image placeholder 与 label mask 对齐的公开工程实践。
 
 本章聚焦防御性排查：如何发现 tokenizer 兼容、special token、EOS / PAD、chat template、assistant-only label mask、截断和多模态占位符事故；不讨论训练数据投毒、绕过系统提示、利用格式漏洞攻击模型或破坏线上工具调用。
 
-本章第二轮新增重点：
+本章重点：
 
 1. 把格式问题量化成可检查指标：special token 一致性、模板匹配率、assistant label 覆盖率、prompt loss 泄漏率、PAD loss 泄漏率、EOS 覆盖率、token 压缩率和多模态 placeholder 一致性。
 2. 补一个最小可运行 Python demo，用 toy tokenizer 同时暴露训练 / 推理 template mismatch、错误 label mask、PAD 参与 loss、截断丢边界和 image placeholder 数量不匹配。
@@ -338,7 +338,7 @@ Tool calling 对格式更敏感。
 9. 检查多模态 placeholder 和特征数量是否匹配。
 10. 检查新旧 tokenizer 是否兼容。
 
-## 3.16.1 关键公式与格式事故指标速查
+### 3.16.1 关键公式与格式事故指标速查
 
 把一条聊天训练样本写成：
 
@@ -400,7 +400,7 @@ Token 压缩率：
 C_{\mathrm{media}}=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[n_{\mathrm{placeholder},i}=n_{\mathrm{feature},i}]
 ```
 
-格式事故门禁：
+格式事故验收条件：
 
 ```math
 G_{\mathrm{fmt}}=
@@ -421,9 +421,9 @@ G_{\mathrm{fmt}}=
 5. `rho_b` 异常：上下文预算和成本估算不可信。
 6. `C_media` 低：多模态模型可能“看不到图”或图文错位。
 
-## 3.16.2 最小可运行 tokenizer / 格式事故审计 demo
+### 3.16.2 最小可运行 tokenizer / 格式事故审计 demo
 
-这个 demo 故意让最终门禁失败：训练模板和推理模板不一致，截断丢失 EOS，多模态 `<image>` 占位符数量和视觉特征数量不一致；同时也展示正确 assistant-only labels 如何避免 prompt 和 PAD 参与 loss。
+这个 demo 故意让最终验收条件失败：训练模板和推理模板不一致，截断丢失 EOS，多模态 `<image>` 占位符数量和视觉特征数量不一致；同时也展示正确 assistant-only labels 如何避免 prompt 和 PAD 参与 loss。
 
 ```python
 import re

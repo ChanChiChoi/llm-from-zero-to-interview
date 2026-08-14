@@ -6,9 +6,9 @@ Multi-Agent 真正解决的问题是：复杂任务中，单个 Agent 的上下�
 
 本章系统讲 Multi-Agent：为什么需要多 Agent，角色分工、通信协议、协调器、共享状态、辩论与评审、任务分配、冲突解决、共识与投票、成本控制、安全边界、评估指标和面试表达。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲第二轮精修前，已按 `WRITING_PLAN.md` 联网核对 AutoGen、CAMEL、MetaGPT、ChatDev、AI safety via debate 和近年 LLM multi-agent survey 相关资料。这里不把任何框架写成唯一标准，也不展开特定框架 API，而是抽象出面试和工程设计中更稳定的共性问题：
+本章参考 AutoGen、CAMEL、MetaGPT、ChatDev、AI safety via debate 和近年 LLM multi-agent survey 相关资料。这里不把任何框架写成唯一标准，也不展开特定框架 API，而是抽象出面试和工程设计中更稳定的共性问题：
 
 1. 角色如何定义，什么时候值得拆成多个 Agent。
 2. Agent 之间应该传什么，不应该传什么。
@@ -16,7 +16,7 @@ Multi-Agent 真正解决的问题是：复杂任务中，单个 Agent 的上下�
 4. 多 Agent 是否真的比单 Agent 更好，如何用指标证明。
 5. 如何限制权限、成本、错误传播和不可审计的自由聊天。
 
-本章不提供绕过权限、规避审批、利用 Agent 间通信传播恶意指令或自动执行高风险动作的方法。涉及安全问题时，只从防御性设计、权限隔离、审计和评估门禁角度讨论。
+本章不提供绕过权限、规避审批、利用 Agent 间通信传播恶意指令或自动执行高风险动作的方法。涉及安全问题时，只从防御性设计、权限隔离、审计和评估验收条件角度讨论。
 
 ## 9.1 为什么需要 Multi-Agent
 
@@ -74,7 +74,7 @@ a_i=(r_i,T_i,P_i,C_i,B_i)
 
 ## 9.4 关键公式与 Multi-Agent 指标速查
 
-Multi-Agent 的核心对象包括 Agent、消息、任务分配、通信图、冲突和门禁。
+Multi-Agent 的核心对象包括 Agent、消息、任务分配、通信图、冲突和验收条件。
 
 ### 9.4.1 消息协议
 
@@ -180,9 +180,9 @@ C_{\mathrm{multi}}=\sum_{i=1}^{n}C(a_i)+\sum_{t=1}^{T}C(m_t)+C_{\mathrm{coord}}+
 
 其中 `C_{\mathrm{coord}}` 是协调器成本，`C_{\mathrm{verify}}` 是验证和人工升级成本。
 
-### 9.4.6 Multi-Agent 上线门禁
+### 9.4.6 Multi-Agent 上线条件
 
-一个简化的上线门禁可以写成：
+一个简化的上线准入条件可以形式化为：
 
 ```math
 G_{\mathrm{multi}}=\mathbf{1}[S_{\mathrm{multi}}\ge \tau_s \land L_{\mathrm{multi}}\ge \tau_l \land R_{\mathrm{conf}}\ge \tau_c \land R_{\mathrm{dup}}\le \tau_d \land R_{\mathrm{perm}}\le \tau_p \land C_{\mathrm{multi}}\le B]
@@ -307,7 +307,7 @@ Judge 汇总并选择最终结论
 4. 成本明显上升。
 5. 对可执行任务，工具验证通常比纯文本辩论更可靠。
 
-面试中要避免把 debate 说成万能验证器。更稳的表达是：辩论适合暴露候选假设和不确定性，最终最好结合证据、工具验证、测试、规则门禁或人工复核。
+面试中要避免把 debate 说成万能验证器。更稳的表达是：辩论适合暴露候选假设和不确定性，最终最好结合证据、工具验证、测试、规则验收条件或人工复核。
 
 ## 9.10 并行执行
 
@@ -716,6 +716,38 @@ gate_pass=False
 ```
 
 这个 demo 的 `gate_pass=False` 不是程序错误，而是刻意暴露 multi-agent 系统的常见问题：成功率不足、消息证据不够、冲突未解决、重复劳动、权限违规和小任务过度编排。真实系统上线前，必须把这些 trace 级问题纳入评估。
+
+### 9.18.1 Agent Swarm 的收益、成本与责任边界
+
+Kimi K2.6 等模型资料把多子 Agent 协作作为长周期任务能力的一部分。它可以让搜索、代码、测试、审查等子任务并行，但“子 Agent 越多越强”是错误的工程直觉。
+
+一个简化的总成本模型是：
+
+```math
+C_{\mathrm{swarm}}=\sum_{i=1}^{N}C_{\mathrm{agent},i}
++C_{\mathrm{coord}}
++C_{\mathrm{sync}}
++C_{\mathrm{verify}}
+```
+
+`C_sync` 包括消息、共享状态和上下文重建成本，`C_verify` 包括最终汇总、冲突解决和工具验证。并发只可能降低 wall-clock 的一部分，不能消除 token、工具和通信成本。
+
+设计 Agent Swarm 时应明确：
+
+1. 每个子 Agent 有独立 session、权限和上下文边界。
+2. 共享内容优先是结构化 artifact 和证据引用，不是无限复制完整对话。
+3. Coordinator 负责分配和停止，但不能替代最终 verifier。
+4. 高风险动作必须绑定到统一 permission engine，不能因为来自“内部 Agent”就默认信任。
+5. 每个子任务有 owner、deadline、checkpoint 和失败状态，避免 swarm 只产出一堆无人负责的意见。
+
+因此，多 Agent 的增益应相对单 Agent baseline 报告：
+
+```math
+\mathrm{NetLift}=\Delta\mathrm{Success}
+-\lambda_c\Delta\mathrm{Cost}
+-\lambda_l\Delta\mathrm{Latency}
+-\lambda_r\Delta\mathrm{Risk}
+```
 
 ## 9.19 常见失败模式
 

@@ -1,6 +1,6 @@
 # 第十一章：KV Cache、长上下文推理和显存增长问题
 
-## 11.0 本讲资料边界与第二轮精修口径
+## 11.0 本讲范围与资料
 
 截至 2026-06-10，本讲用公开论文、官方文档和主流框架资料校准 KV cache 的通用概念。这里讨论 decoder-only LLM 推理中的 K/V 缓存、显存估算、decode 带宽、PagedAttention 和 MQA / GQA / MLA 的结构差异，不把某个 serving 框架的 block size、scheduler 策略、cache layout、量化配置或某个模型报告中的压缩比例写成通用标准。
 
@@ -595,7 +595,7 @@ Serving 系统经常要在三者之间折中：
 4. 代码仓库分析：长上下文和检索结合更重要。
 5. Agent 场景：多轮上下文、prefix sharing、工具调用格式很重要。
 
-## 11.20 面向专家：KV Cache 和 Tensor Parallel
+## 11.20 机制与边界：KV Cache 和 Tensor Parallel
 
 大模型常用 tensor parallel 把 attention heads 分到多张 GPU 上。
 
@@ -613,7 +613,7 @@ Serving 系统经常要在三者之间折中：
 
 所以 KV cache 优化不能只看单卡公式，还要考虑分布式并行布局。
 
-## 11.21 面向专家：为什么 KV Cache 影响架构设计
+## 11.21 机制与边界：为什么 KV Cache 影响架构设计
 
 过去很多架构设计更关注训练效果。
 
@@ -646,14 +646,14 @@ Serving 系统经常要在三者之间折中：
 
 ## 11.22 KV Cache 成本审计指标与最小 demo
 
-第二轮精修时，本章建议把 KV cache 问题落到一组可审计指标：
+本章把 KV cache 问题落到一组可审计指标：
 
 1. `kv_cache_gib`：不同 KV head 数、上下文长度和 batch 下的 KV cache 显存。
 2. `kv_cache_per_token`：每个新 token 会给每个请求追加多少 cache。
 3. `decode_read_per_step`：decode 单步需要读取的历史 K/V 量级，用来估算带宽压力。
 4. `gqa_vs_mha_saving`：GQA / MQA 相比 MHA 的 cache 节省比例。
 5. `paged_block_waste`：按 fixed-size blocks 管理 KV cache 时尾部浪费多少 token。
-6. `kv_cache_gate`：把显存容量、decode 带宽、分页浪费和上下文预算组合成上线门禁。
+6. `kv_cache_gate`：把显存容量、decode 带宽、分页浪费和上下文预算组合成上线条件。
 
 下面是一个 0 依赖 demo。它不模拟真实 kernel，也不代表某个 serving 框架的默认配置，只演示 KV cache 的线性增长、KV head 压缩收益和分页块尾部浪费。
 
@@ -745,6 +745,54 @@ kv_cache_gate_pass= True
 3. GQA 下上下文从 8K 扩到 32K，cache 仍然线性变成 4 倍，约 64 GiB。
 4. 每个新 token 给单请求追加约 128 KiB cache；长输出和多并发会持续吃掉显存。
 5. block/page 管理可以把不同长度请求映射到固定块，尾部浪费由 block size 和请求长度分布共同决定。
+
+### 11.22.1 1M Context 下的显式 KV、latent cache 与递归 state
+
+“支持 1M context”首先是一个接口或模型能力上限，不等于单卡可以无条件把 1M token 的完整 KV 留在显存里。要先区分三类历史表示：
+
+1. **显式 KV cache**：每个历史 token 保存 K/V，长度 `T` 增长时 cache 近似线性增长。
+2. **latent cache**：MLA 等结构保存压缩后的 latent 表示，仍然与 token 数有关，但每个 token 的表示更小。
+3. **递归 state**：KDA、Gated DeltaNet 等层把历史写入固定大小或分块状态，理论上不必按 token 保存完整 K/V。
+
+如果模型中有 `L_g` 个显式全局 attention 层和 `L_r` 个递归/线性状态层，教学上的总历史存储可以写成：
+
+```math
+M_{\mathrm{history}}\approx
+2BL_gT H_{\mathrm{kv}}d_hb
++BL_r d_kd_vb
++M_{\mathrm{overhead}}
+```
+
+`M_overhead` 包括 block metadata、padding、prefix sharing、状态对齐和并行通信缓冲区。这个公式说明：混合架构可以减少一部分随 `T` 线性增长的存储，但只要仍有全局 attention 层，最坏情况仍然受显式 KV cache 约束。
+
+#### 11.22.1.1 新模型案例与证据边界
+
+| 模型或系列 | 与 KV/state 相关的公开信号 | 工程上应该追问什么 |
+|---|---|---|
+| Kimi K3 | `3 KDA + 1 Gated MLA`、1M context、无显式 position embedding | KDA state 如何 batch/reset，Gated MLA 的 latent/位置相关部分如何缓存 |
+| DeepSeek-V4-Pro / Flash | CSA + HCA、1M context | 哪些层使用哪种 attention，prefill/decode 是否使用不同 cache layout |
+| Qwen3.5 / Qwen3.6 | Gated DeltaNet + Gated Attention，原生长上下文并支持扩展 | state cache 与 attention KV 是否分别量化、分页和共享 |
+| Gemma 4 | local sliding-window + global attention，128K/256K 档位 | local 层的窗口、global 层的比例、跨层状态是否公开 |
+| MiniMax M3 | MSA 先筛 query 再聚合命中的 KV block，1M context | block 筛选的召回率、最坏情况退化、厂商自报吞吐的硬件条件 |
+
+这里的“1M”都必须回到对应模型卡或产品文档核对。它可能表示 context window、API 上限、推荐长度或在特定推理配置下的测试长度；不能自动推导出训练数据长度、有效检索能力和显存需求。
+
+#### 11.22.1.2 显存预算的三步法
+
+面对一个新模型，建议按下面顺序审计：
+
+1. 先列出每类层：MHA/GQA/MQA/MLA、sliding window、global attention、KDA/DeltaNet 或其他状态层。
+2. 对每类层分别计算 token cache 或 state cache，不把 `P_active` 当成 KV cache 大小。
+3. 再加入 batch、并发请求、prefix sharing、量化、分页碎片和 TP/PP 通信缓冲区。
+
+最终的可服务并发数更接近一个约束问题：
+
+```math
+N_{\mathrm{req}}\cdot M_{\mathrm{history}}(T_i)
+\le M_{\mathrm{gpu}}-M_{\mathrm{weights}}-M_{\mathrm{workspace}}-M_{\mathrm{reserve}}
+```
+
+这也解释了为什么“模型支持 1M”与“服务可以同时承载多少个 1M 请求”是两个完全不同的问题。
 
 ## 11.23 常见误区
 
@@ -865,6 +913,6 @@ GQA 通过减少 KV head 数降低 KV cache。MLA 更进一步，把 K/V 信息�
 6. MQA/GQA 通过减少 KV head 数降低 cache；MLA 通过压缩 KV 表示进一步降低 cache。
 7. PagedAttention/vLLM 通过分页式 cache 管理减少碎片和重复，提高吞吐。
 8. 长上下文推理需要在延迟、吞吐、显存、质量和实现复杂度之间做系统 trade-off。
-9. KV cache 审计要同时看 cache GiB、per-token cache 增长、decode 读取带宽、GQA/MQA 节省、block/page 浪费和上线门禁。
+9. KV cache 审计要同时看 cache GiB、per-token cache 增长、decode 读取带宽、GQA/MQA 节省、block/page 浪费和上线条件。
 
 下一章会进入 In-Context Learning 与显式 token 检索能力，解释模型如何在上下文中利用示例、指令和证据 token 完成临时任务。

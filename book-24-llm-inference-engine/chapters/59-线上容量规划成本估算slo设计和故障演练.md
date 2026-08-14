@@ -23,16 +23,16 @@
 
 本章讨论 LLM serving 线上容量规划、成本估算、SLO 设计和故障演练。
 
-## 59.0 本讲资料边界与第二轮精修口径
+## 59.0 本讲范围与资料
 
-本章按第二轮精修口径，只讲教学版 LLM serving 的容量规划、成本估算、SLO 设计和故障演练框架。
+本章聚焦教学版 LLM serving 的容量规划、成本估算、SLO 设计和故障演练框架。
 
 公开资料校准主要参考四类口径：
 
 1. Google SRE Workbook 对 SLO、SLI、error budget、burn rate 和告警策略的公开方法论。
 2. vLLM benchmark、metrics、optimization / tuning 文档对 TTFT、TPOT、E2E latency、KV cache usage、preemption、queue time、running / waiting requests 和压测指标的公开口径。
 3. Kubernetes resource management 和 deployment 文档对 resource request / limit、副本数、滚动发布和可用容量的通用工程语义。
-4. 本书第 53 到 58 章对 benchmark framework、异步 serving、多 worker router、分布式 KV、API 层和生产部署门禁的教学抽象。
+4. 本书第 53 到 58 章对 benchmark framework、异步 serving、多 worker router、分布式 KV、API 层和生产部署验收条件的教学抽象。
 
 本章不提供某个 GPU、某个模型、某个云厂商或某个框架版本的通用容量答案，也不替代真实压测、真实账单、真实 SLO 审批、真实值班制度或真实故障演练平台。我们只保留一个能解释、能复算、能演练的闭环：
 
@@ -40,7 +40,7 @@
 workload token profile -> benchmark stable capacity -> GPU count -> KV concurrency -> cost attribution -> SLO and error budget -> admission policy -> fault drill -> rollback and runbook
 ```
 
-第二轮新增 demo 的验收重点是：容量不能只按 QPS 算；要同时用 input token/s、output token/s、request rate 和 KV active tokens 估算 worker 数；规划容量要包含利用率、安全余量、N+1 和发布容量；成本要能按 GPU 小时和 token 粗分摊；SLO 要能计算 error budget；故障演练要证明 worker 丢失、依赖不可用、长上下文突增和新版本退化都有可执行动作。
+本章 demo 的验收重点是：容量不能只按 QPS 算；要同时用 input token/s、output token/s、request rate 和 KV active tokens 估算 worker 数；规划容量要包含利用率、安全余量、N+1 和发布容量；成本要能按 GPU 小时和 token 粗分摊；SLO 要能计算 error budget；故障演练要证明 worker 丢失、依赖不可用、长上下文突增和新版本退化都有可执行动作。
 
 ## 59.1 本章目标
 
@@ -1272,7 +1272,7 @@ SLO 上我会区分 workload 定义，例如短 chat 的 TTFT P95、TPOT P95、t
 最后我会定期做故障演练，包括 worker 退出、GPU OOM、NCCL hang、模型加载失败、对象存储不可用、长上下文突增和新版本性能退化。每个演练都要验证监控告警、router 摘除、降级、回滚和 runbook 是否可执行。容量、成本、SLO 和故障演练要一起设计，不能分开看。
 ```
 
-## 59.33 Capacity SLO Fault Drill 公式、容量门禁和可运行 demo
+## 59.33 Capacity SLO Fault Drill 公式、容量验收条件和可运行 demo
 
 先把 workload 的峰值 token 压力写成：
 
@@ -1322,7 +1322,7 @@ B_{\mathrm{err}}=(1-A_{\mathrm{slo}})T_{\mathrm{month}}
 C_{\mathrm{hour}}=N_{\mathrm{gpu}}C_{\mathrm{gpu}}+C_{\mathrm{store}}+C_{\mathrm{net}}+C_{\mathrm{obs}}
 ```
 
-最终容量与演练门禁：
+最终容量与演练验收条件：
 
 ```math
 G_{\mathrm{capslo}}=G_{\mathrm{profile}}G_{\mathrm{bench}}G_{\mathrm{kv}}G_{\mathrm{cost}}G_{\mathrm{slo}}G_{\mathrm{admit}}G_{\mathrm{drill}}G_{\mathrm{runbook}}

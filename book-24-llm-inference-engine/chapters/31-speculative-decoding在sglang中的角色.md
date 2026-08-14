@@ -10,16 +10,16 @@
 
 > Speculative decoding 用较便宜的 draft 来源先猜多个候选 token，再用 target model 并行验证这些候选；如果接受率足够高，就能用较少的 target model decode 轮数生成更多 token，从而改善 TPOT 和输出吞吐。
 
-## 31.0 本讲资料边界与第二轮精修口径
+## 31.0 本讲范围与资料
 
-本讲第二轮精修时，主要参考四类公开资料：
+本章参考四类公开资料：
 
 1. SGLang 官方 Speculative Decoding 文档，对 EAGLE、EAGLE3、MTP、DFLASH、Standalone draft model、NGRAM、Speculative Decoding V2 / overlap scheduler 等入口和参数给出了公开说明。
 2. SGLang 官方 Adaptive Speculative Decoding 文档，对用近期 accept length 动态调整 speculative steps 的口径给出了说明。
 3. SGLang server arguments / sampling / structured output 相关文档，对 speculative 参数、grammar 约束、streaming、metrics 和 runtime 组合边界提供工程背景。
 4. Speculative Decoding / Speculative Sampling 论文，对 draft propose、target verify、接受-拒绝采样、修正分布和“保持 target 分布”的理论目标提供基础口径；EAGLE、EAGLE3、MTP 等论文用于理解不同 draft 来源的差异。
 
-本章的写作边界也要说清：
+本章的证据边界是：
 
 1. 本章讲 SGLang-like serving runtime 中 speculative decoding 的角色，不绑定某个 SGLang 版本的内部类名、源码文件、CUDA kernel、attention backend 细节或 benchmark 数值。
 2. 本章把 EAGLE / EAGLE3 / MTP / Standalone / NGRAM 作为 draft 来源和工程路径来解释，不展开它们完整训练算法。
@@ -774,6 +774,36 @@ Speculative decoding 通常更适合放在 decode pool 的优化路径中。
 
 所以它不是单机小优化，而会影响 serving 架构容量规划。
 
+### 31.27.1 MTP、EAGLE、NEXTN 与 DSpark：draft 来源要分层
+
+“启用 speculative decoding”不是一个单一实现。工程上应先判断 draft 来自哪里：
+
+1. **Standalone draft model**：另一个小模型先生成候选，target 再验证；显存和 tokenizer/template 对齐成本较高。
+2. **EAGLE/EAGLE3**：使用与 target hidden state 相关的 draft head/模块，通常需要对应 checkpoint 和 runtime 支持。
+3. **MTP**：Multi-Token Prediction head 让 target 侧产生多个未来 token 的候选，再由 target 验证。
+4. **NEXTN**：模型或推理栈提供的多 token 候选路径，具体接口和命名以模型卡/引擎文档为准。
+5. **DSpark**：DeepSeek V4 资料中的附加 speculative decoding 模块。它不是一个新的基础 checkpoint，而是和模型解码配套的 draft/verify 能力。
+
+不同路线的核心指标仍然是接受长度 `A`、draft 成本 `C_d` 和 target 验证成本 `C_t`。一个教学化速度比可以写成：
+
+```math
+S\approx\frac{1+\mathbb{E}[A]}{1+C_d/C_t}
+```
+
+这个公式只用于解释趋势：接受长度越长越有利，draft 越贵越会抵消收益。真实系统还要加入 batch、KV cache、scheduler、streaming、grammar mask 和通信开销。
+
+模型附加模块还带来新的兼容验收条件：
+
+```math
+G_{\mathrm{spec}}=
+\mathbf{1}[\mathrm{tokenizer\ aligned}]
+\mathbf{1}[\mathrm{template\ aligned}]
+\mathbf{1}[\mathrm{cache\ aligned}]
+\mathbf{1}[\mathrm{acceptance\ above\ threshold}]
+```
+
+如果 DeepSeek V4 使用独立 encoding 目录，或某个模型没有普通 Jinja chat template，不能把 OpenAI-compatible endpoint 当作 chat template、reasoning channel 和 speculative protocol 都兼容。压测必须记录模型 revision、encoding/template、draft 来源、accept length 分布、回退率和质量回归。
+
 ## 31.28 常见误解
 
 误解一：Speculative decoding 是用小模型替代大模型。
@@ -830,7 +860,7 @@ SGLang 支持多种 draft 来源和算法，比如 EAGLE/EAGLE3、MTP、DFLASH�
 这个优化是否有效取决于接受率和额外开销。接受率高、draft 便宜、输出较长、decode 是瓶颈时收益明显；如果接受率低、draft 太慢、显存紧张或输出很短，可能没有收益。工程上还要处理 scheduler、KV cache、streaming 和 structured output 的交互，尤其是只把 accepted tokens 提交到正式 KV 和 prefix cache，rejected speculative tokens 必须丢弃或回滚。
 ```
 
-## 31.31 Speculative Decoding 公式、runtime 门禁和可运行 demo
+## 31.31 Speculative Decoding 公式、runtime 验收条件和可运行 demo
 
 为了把上面的概念落到可验证链路，可以把一个请求抽象成：
 
@@ -894,7 +924,7 @@ S_{\mathrm{latency}}=\frac{C_{\mathrm{baseline}}L_{\mathrm{target}}}{C_{\mathrm{
 
 如果 `S_latency` 大于 1，说明简化模型里端到端延迟下降；如果小于或接近 1，draft 开销、低接受率或调度开销可能抵消收益。
 
-Speculative decoding 的上线门禁可以写成：
+Speculative decoding 的上线准入条件可以形式化为：
 
 ```math
 G_{\mathrm{spec}}=G_{\mathrm{draft}}G_{\mathrm{verify}}G_{\mathrm{accept}}G_{\mathrm{fallback}}G_{\mathrm{kv}}G_{\mathrm{grammar}}G_{\mathrm{metric}}

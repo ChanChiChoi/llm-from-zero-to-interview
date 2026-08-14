@@ -14,9 +14,9 @@ SGLang 主线是：frontend/runtime 协同、RadixAttention、SGLang Runtime、s
 
 > vLLM 更像面向通用高并发 LLM serving 的高性能执行引擎，核心是 KV cache 分页管理和 continuous batching；SGLang 更像面向复杂 LLM programs 的高性能 runtime，核心是前后端协同、RadixAttention、structured output 和多步程序执行。
 
-## 33.0 本讲资料边界与第二轮精修口径
+## 33.0 本讲范围与资料
 
-本讲第二轮精修时，主要参考五类公开资料：
+本章参考五类公开资料：
 
 1. vLLM / PagedAttention 论文，对 KV cache 动态增长、显存碎片、logical block 到 physical block 映射、block sharing 和 high-throughput serving 的问题背景给出基础口径。
 2. vLLM 官方文档和本书第 16 到 25 章，对 OpenAI-compatible serving、PagedAttention、KV block manager、continuous batching、scheduler、worker / executor、prefix caching、并行和性能调优的工程口径做内部对齐。
@@ -27,7 +27,7 @@ SGLang 主线是：frontend/runtime 协同、RadixAttention、SGLang Runtime、s
 本章的边界也要说清：
 
 1. 本章不是 benchmark 排名，也不写“谁全面替代谁”。不同版本、硬件、模型、attention backend、并行配置和 workload 会显著改变性能结果。
-2. 本章只讲架构重心和选型方法：vLLM-like runtime 更偏通用高并发 serving 和 KV block 管理，SGLang-like runtime 更偏复杂 LLM program 的表达与执行。
+2. 本章讨论架构重心和选型方法：vLLM-like runtime 更偏通用高并发 serving 和 KV block 管理，SGLang-like runtime 更偏复杂 LLM program 的表达与执行。
 3. PagedAttention 和 RadixAttention 不在同一抽象层：前者主要回答 KV cache 物理块如何管理，后者主要回答 token prefix / program trajectory 如何匹配和复用。
 4. vLLM 可以作为 agent framework 的模型后端；SGLang 的优势是让部分复杂程序结构对 runtime 更可见。不能把“runtime 能不能服务 agent”误解成二选一。
 5. 本章 demo 是教学版 workload router / architecture comparator，用 toy metrics 说明独立 chat、共享 RAG、结构化抽取和 agent tree 的不同适配性，不代表真实性能数字。
@@ -622,7 +622,7 @@ F(r,w_i)=F_{\mathrm{serving}}+F_{\mathrm{cache}}+F_{\mathrm{program}}+F_{\mathrm
 
 `r` 是 runtime 类型。独立高并发 chat 通常让 `F_serving` 权重大；structured output、tool use、multi-turn 和分支搜索会提高 `F_program`、`F_grammar` 和 `F_agent` 的权重。
 
-架构对比门禁可以写成：
+架构对比准入条件可以形式化为：
 
 ```math
 G_{\mathrm{arch}}=G_{\mathrm{core}}G_{\mathrm{paged}}G_{\mathrm{radix}}G_{\mathrm{vllm}}G_{\mathrm{sglang}}G_{\mathrm{router}}G_{\mathrm{metric}}

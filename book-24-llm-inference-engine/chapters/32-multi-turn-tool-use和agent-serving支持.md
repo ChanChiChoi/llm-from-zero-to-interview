@@ -10,9 +10,9 @@
 
 > Multi-turn、tool use 和 agent serving 的核心不是“模型会调用工具”这么简单，而是 runtime 能否高效、可靠地执行多步有状态 LLM 程序，并在每一轮复用上下文、约束工具格式、管理请求状态和控制尾延迟。
 
-## 32.0 本讲资料边界与第二轮精修口径
+## 32.0 本讲范围与资料
 
-本讲第二轮精修时，主要参考六类公开资料：
+本章参考六类公开资料：
 
 1. SGLang 论文对 structured language model programs、frontend language、fork / branch、RadixAttention 和 runtime 协同的系统说明。
 2. SGLang Frontend Language 文档对 `gen`、multi-turn、Python control flow、fork、choices / regex constrained decoding、batching、streaming 和 multi-modal prompt 的公开口径。
@@ -25,7 +25,7 @@
 
 1. 本章讲 SGLang-like runtime 如何支持 multi-turn、tool use 和 agent serving，不绑定某个 SGLang 版本的真实 tool parser 类名、OpenAI-compatible 字段全集、server 参数全集或内部源码路径。
 2. 本章把真实工具执行放在应用层或 agent framework，不把数据库、HTTP、代码解释器、浏览器、MCP server 等外部系统塞进模型 runtime。
-3. 本章 demo 是教学版 agent serving audit，只模拟 session routing、prefix cache、tool parser、validator、工具结果回灌、GPU slot 释放和指标门禁；不实现真实网络工具、真实权限系统或生产 trace 后端。
+3. 本章 demo 是教学版 agent serving audit，只模拟 session routing、prefix cache、tool parser、validator、工具结果回灌、GPU slot 释放和指标验收条件；不实现真实网络工具、真实权限系统或生产 trace 后端。
 4. Tool parser、structured output 和 validator 不是同一个东西：parser 负责把模型文本转成对象，structured output 负责约束生成格式，validator 负责业务参数和权限检查。
 5. Agent serving 的性能结论必须看 task-level E2E latency、工具耗时、model calls、prefix reuse、KV pressure、scheduler queue 和失败恢复，不能只看单次 chat completion 的 QPS。
 
@@ -821,7 +821,7 @@ Tool use 中，请求会携带 tools schema，模型生成 tool call，SGLang �
 Agent serving 则会把这个过程循环起来：模型生成 action，外部工具返回 observation，再继续生成下一步。这个轨迹会不断增长，也可能出现多分支搜索。SGLang 的价值在于用 RadixAttention 复用共享 trajectory，用 scheduler 管理多次 generation，用 structured output 保证工具参数可解析，并通过 runtime 指标拆解模型、cache、工具和 agent 逻辑的瓶颈。
 ```
 
-## 32.29 Agent Serving 公式、状态门禁和可运行 demo
+## 32.29 Agent Serving 公式、状态验收条件和可运行 demo
 
 从 serving 视角看，一个 agent task 可以抽象为：
 
@@ -863,7 +863,7 @@ C_{\mathrm{block}}=\frac{N_{\mathrm{blocked}}}{\max(1,N_{\mathrm{tool\_request}}
 
 `C_parse` 低说明模型格式、chat template 或 parser 不匹配；`C_block` 不是越低越好，高风险工具被权限系统正确阻断时，block 是安全证据。
 
-Agent serving 的 runtime 门禁可以写成：
+Agent serving 的 runtime 准入条件可以形式化为：
 
 ```math
 G_{\mathrm{agent}}=G_{\mathrm{session}}G_{\mathrm{cache}}G_{\mathrm{parser}}G_{\mathrm{tool}}G_{\mathrm{slot}}G_{\mathrm{round}}G_{\mathrm{metric}}
@@ -1125,7 +1125,7 @@ agent_serving_gates= {'session_affinity_kept': True, 'prefix_reuse_visible': Tru
 2. 同一个 session 的后续 generation 应尽量命中同一个 runtime replica，提升 prefix cache 复用。
 3. Tool parser 只负责解析格式，权限和确认仍要靠 validator / application。
 4. 工具等待期间不应该占用 GPU decode slot。
-5. 高风险工具被阻断不是失败，而是安全门禁生效。
+5. 高风险工具被阻断不是失败，而是安全条件生效。
 6. Agent serving 的 dashboard 必须同时看 model calls、tool latency、prefix saved tokens、stream events、blocked tool rate 和 task-level latency。
 
 ## 32.30 小练习

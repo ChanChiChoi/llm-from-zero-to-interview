@@ -8,21 +8,17 @@
 
 但合成数据不是免费午餐。它可以快速扩充能力，也可能制造同质化、错误放大、评估污染、teacher 偏差继承和数据退化。
 
-本章重点：合成指令数据、推理轨迹、self-instruct、teacher model distillation、数据退化风险。
+本章讨论合成数据和蒸馏数据的训练、评估、治理和风险控制。合成数据不是绕过模型服务条款、复制专有模型能力、生成有害内容或规避安全策略的方法；任何 teacher 输出都必须有明确授权、可追踪来源和适用范围。
 
-合规边界：本章讨论合成数据的训练、评估、治理和风险控制，不提供绕过模型服务条款、复制专有模型能力、生成有害内容或规避安全策略的方法。
+## 0. 合成数据是可审计的分布编辑
 
-## 0. 本讲资料边界与第二轮精修口径
+合成数据工程的核心不是一次生成多少文本，而是把目标能力、seed、生成器、验证器、配比和训练结果连成一条可回放的链路。可以把这条链路写成：
 
-按照 `WRITING_PLAN.md` 的要求，本讲精修前核对了 Self-Instruct、WizardLM / Evol-Instruct、phi-1 / Textbooks Are All You Need、Orca、经典 knowledge distillation、Distilling Step-by-Step 和 model collapse / generated data recursion 等公开论文资料。
+~~~text
+目标能力 -> seed 数据 -> teacher/规则生成 -> 验证 -> 去重 -> 安全与污染扫描 -> 配比 -> 小规模训练实验 -> 版本审计
+~~~
 
-本讲聚焦 synthetic data 与 distillation data 的防御性数据工程闭环：目标能力定义、seed 设计、teacher 授权、prompt / sampling 记录、生成后过滤、正确性验证、去重和污染隔离、合成比例控制、自然数据锚点、训练 ablation 与版本审计。
-
-```text
-目标能力 -> seed 数据 -> teacher / 规则生成 -> 验证 -> 去重 -> 安全与污染扫描 -> 配比 -> 小规模训练实验 -> 版本审计
-```
-
-本讲不讨论绕过模型服务条款、无授权复制专有模型输出、生成有害样本、规避安全策略或用合成数据替代真实合规审计。合成数据只能作为可验证、可追踪、可配比的训练信号。
+Self-Instruct、WizardLM/Evol-Instruct、phi-1、Orca、经典 knowledge distillation、Distilling Step-by-Step 以及 model collapse 相关研究提供了不同证据层面的入口。本章会区分这些论文真正展示的实验结果与工程上的教学抽象，并进一步讨论 teacher 授权、prompt/sampling 记录、正确性验证、自然数据锚点和数据退化。
 
 ---
 
@@ -70,83 +66,83 @@ Distillation data 强调 teacher-student 关系。强模型生成回答、解释
 4. 用强代码模型为问题生成参考实现和解释：distillation data。
 5. 用 teacher 模型给多个回答排序：偏好蒸馏数据。
 
-面试中可以这样说：合成数据关注“数据来源是否生成”，蒸馏数据关注“是否把 teacher 能力迁移给 student”。
+合成数据关注“数据来源是否生成”，蒸馏数据关注“是否存在 teacher 到 student 的能力迁移”；两者可以重叠，但不应混作同一个数据标签。
 
 ### 3.1 关键公式与审计指标
 
 训练数据可以分成自然数据、合成数据和蒸馏数据：
 
-```math
-D=D_{\mathrm{nat}}\cup D_{\mathrm{syn}}\cup D_{\mathrm{distill}}
-```
+~~~math
+D = D_nat union D_syn union D_distill
+~~~
 
 一条合成或蒸馏样本可以表示为：
 
-```math
-s_i=(x_i,y_i,a_i,t_i,p_i,q_i,r_i,z_i)
-```
+~~~math
+s_i = (x_i, y_i, a_i, t_i, p_i, q_i, r_i, z_i)
+~~~
 
 其中 `x_i` 是指令或上下文，`y_i` 是生成答案或轨迹，`a_i` 是目标能力标签，`t_i` 是 teacher / generator 标识，`p_i` 是 prompt 和采样参数版本，`q_i` 是质量分，`r_i` 是风险分，`z_i` 是授权、验证、去重、污染和版本元数据。
 
 如果是普通 SFT 合成样本，目标仍是条件语言建模：
 
-```math
-L_{\mathrm{sft}}=-\frac{1}{N_{\mathrm{tok}}}\sum_i w_i\sum_j \log p_{\theta}(y_{i,j}\mid x_i,y_{i,<j})
-```
+~~~math
+L_sft = -(1 / N_tok) * sum_i(w_i * sum_j(log p_theta(y_i_j | x_i, y_i_<j)))
+~~~
 
 其中 `w_i` 是样本权重，`N_tok` 是有效训练 token 数。`w_i` 不应该只由 teacher 分数决定，还要叠加验证、风险、重复和多样性审计。
 
 如果 teacher 提供 soft distribution，蒸馏损失常写成 KL 形式：
 
-```math
-L_{\mathrm{kd}}=\tau^2\sum_i \mathrm{KL}(p_T^{\tau}(\cdot\mid c_i)\|p_S^{\tau}(\cdot\mid c_i))
-```
+~~~math
+L_kd = tau^2 * sum_i(KL(p_T_tau(. | c_i) || p_S_tau(. | c_i)))
+~~~
 
-其中 `p_T` 是 teacher 分布，`p_S` 是 student 分布，`\tau` 是 distillation temperature，`c_i` 是上下文。如果只有 teacher 的 hard answer，则退化为对 teacher output 做 supervised learning。
+其中 `p_T` 是 teacher 分布，`p_S` 是 student 分布，`tau` 是 distillation temperature，`c_i` 是上下文。如果只有 teacher 的 hard answer，则退化为对 teacher output 做 supervised learning。
 
 合成样本质量分可以写成可审计的加权形式：
 
-```math
-q_i=w_vV_i+w_eE_i+w_dD_i+w_sS_i-\lambda_hH_i-\lambda_uU_i-\lambda_cC_i
-```
+~~~math
+q_i = w_v*V_i + w_e*E_i + w_d*D_i + w_s*S_i - lambda_h*H_i - lambda_u*U_i - lambda_c*C_i
+~~~
 
 其中 `V_i` 是正确性验证，`E_i` 是证据或测试支持，`D_i` 是多样性贡献，`S_i` 是安全边界通过情况，`H_i` 是 hallucination 风险，`U_i` 是近重复或模板化风险，`C_i` 是评测污染风险。
 
-合成数据样本门禁可以写成：
+合成数据样本的状态不宜压缩成一个准入开关，可以保留并列的检查量：
 
-```math
-G_i=I(q_i\ge \tau_q)I_{\mathrm{auth},i}I_{\mathrm{verify},i}I_{\mathrm{dedup},i}I_{\mathrm{safe},i}I_{\mathrm{contam},i}I_{\mathrm{privacy},i}
-```
+~~~math
+checks_i = (quality_ok_i, authorized_i, verified_i, dedup_ok_i, safe_i, contamination_clear_i, privacy_clear_i)
+~~~
 
-这里 `I_auth` 表示 teacher 输出或生成规则的使用授权成立；`I_verify` 表示答案、代码、引用、安全边界或工具参数通过验证；`I_contam` 表示没有命中评测污染。
+这里 `authorized_i` 表示 teacher 输出或生成规则的使用授权成立；`verified_i` 表示答案、代码、引用、安全边界或工具参数通过验证；`contamination_clear_i` 表示没有命中评测污染。不同失败原因对应隔离、重生成、人工复核、脱敏或删除等不同动作。
 
 合成和蒸馏数据在训练集合中的 token 占比为：
 
-```math
-R_{\mathrm{syn}}=\frac{\sum_{i:o_i\in\{\mathrm{syn},\mathrm{distill}\}}G_iT_i}{\sum_iG_iT_i}
-```
+~~~math
+R_syn = sum_{i:o_i in {syn, distill}}(keep_i * T_i) / sum_i(keep_i * T_i)
+~~~
 
 其中 `o_i` 是样本来源类型，`T_i` 是 token 数。`R_syn` 过高时，要警惕同质化、teacher 偏差和 model collapse 风险。
 
 能力覆盖可以按标签集合计算：
 
-```math
-C_{\mathrm{cover}}=\frac{|A_{\mathrm{target}}\cap A_{\mathrm{kept}}|}{|A_{\mathrm{target}}|}
-```
+~~~math
+C_cover = |A_target intersect A_kept| / |A_target|
+~~~
 
 同质化或近重复率可以写成：
 
-```math
-R_{\mathrm{dup}}=\frac{\sum_i I(\max_{j<i}\mathrm{sim}(s_i,s_j)>\tau_{\mathrm{sim}})}{n}
-```
+~~~math
+R_dup = sum_i(I(max_{j<i}(sim(s_i, s_j)) > tau_sim)) / n
+~~~
 
-最终训练前门禁可以写成：
+最终训练前可以保留一个配比和风险向量：
 
-```math
-G_{\mathrm{syn}}=I(R_{\mathrm{syn}}\le r_{\max})I(C_{\mathrm{cover}}\ge c_{\min})I(R_{\mathrm{dup}}\le d_{\max})I(R_{\mathrm{risk}}\le \rho_{\max})
-```
+~~~math
+C_syn = (R_syn, C_cover, R_dup, R_risk)
+~~~
 
-面试里要强调：合成数据不是“便宜 token”，而是对训练分布的主动编辑。必须同时记录 teacher、prompt、sampling、验证、过滤、配比和训练效果。
+它分别描述合成/蒸馏 token 占比、目标标签覆盖、重复率和风险率。合成数据不是“便宜 token”，而是对训练分布的主动编辑；因此必须同时记录 teacher、prompt、sampling、验证、过滤、配比和训练效果。
 
 ---
 
@@ -280,7 +276,7 @@ student 通过监督微调或偏好训练学习这些数据。
 
 ## 9. Distillation data 不等于复制能力
 
-面试中需要注意一个边界：蒸馏不是简单“复制某个闭源模型”。合规项目要关注授权、数据使用条款、输出归属和安全限制。
+蒸馏不是简单“复制某个闭源模型”。合规项目要关注授权、数据使用条款、输出归属和安全限制；技术上 student 学到的是经过筛选的行为信号，而不是 teacher 的参数或全部能力。
 
 从技术角度看，蒸馏也不是直接复制参数。student 学到的是训练数据中的行为模式，受 student 容量、训练策略、数据覆盖、优化目标和评估体系限制。
 
@@ -434,9 +430,9 @@ SFT 是合成指令数据最常用的阶段。instruction-response、multi-turn 
 
 ---
 
-## 17. 面向专家：合成数据是分布编辑
+## 17. 机制与边界：合成数据是分布编辑
 
-从专家视角看，合成数据不是单纯增加样本，而是在编辑训练分布。
+从机制上看，合成数据不是单纯增加样本，而是在编辑训练分布。
 
 自然数据来自世界分布，合成数据来自生成器分布。生成器分布由 teacher 能力、prompt、采样参数、过滤器、任务模板和审计标准共同决定。
 
@@ -455,35 +451,21 @@ SFT 是合成指令数据最常用的阶段。instruction-response、multi-turn 
 
 ## 18. 一个可落地的合成与蒸馏数据方案
 
-如果面试官问：“如何建设 synthetic data 和 distillation data？”可以按下面回答。
+一个合成与蒸馏数据系统首先要回答“补什么能力”。指令跟随、数学、代码、工具调用、多语言、安全和领域问答需要不同的 seed、生成方式和验证器；如果目标没有拆开，后面的质量分数只能把互不相同的样本混在一起。
 
-第一步，定义目标能力。明确要补指令跟随、数学、代码、工具调用、多语言、安全还是领域问答。
+seed 可以来自真实任务、公开高质量数据、专家模板、领域文档或人工设计任务。规则和程序适合生成可计算、可执行、可验证的样本；LLM 适合生成开放式指令、解释和对话；teacher-student 蒸馏适合迁移回答格式、候选排序和任务分解。每条记录都要绑定 teacher 或 generator、prompt、采样参数和授权版本。
 
-第二步，准备种子数据。来自真实任务、公开高质量数据、专家模板、领域文档或人工设计任务。
+生成之后先控制多样性和结构，再做格式、长度、重复、污染和明显错误过滤。数学用答案和步骤校验，代码用编译与测试，事实用检索和引用，领域样本用专家抽检，安全样本用策略和误拒/漏拒评估。一个 LLM judge 可以作为候选信号，但不能单独充当真值。
 
-第三步，选择生成方式。规则生成适合可验证任务，LLM 生成适合开放任务，teacher-student 适合蒸馏行为和格式。
-
-第四步，生成多样样本。控制任务类型、难度、语言、领域、输出格式和边界场景。
-
-第五步，过滤和去重。去掉无效、重复、低质量、过短、过长、格式错、相似度过高的样本。
-
-第六步，验证正确性。数学用答案校验，代码用测试，事实用检索和引用，领域用专家审计，安全用策略检查。
-
-第七步，质量评分和分桶。按任务、难度、风险、语言、领域、teacher、prompt 版本打标签。
-
-第八步，做小规模训练实验。比较不同合成比例、不同 teacher、不同过滤阈值的收益和副作用。
-
-第九步，和自然数据混合。控制合成数据比例，避免同质化和分布退化。
-
-第十步，版本化和合规审计。记录 teacher、prompt、采样参数、过滤规则、授权信息、质量评估和训练效果。
+保留样本按任务、难度、风险、语言、领域、teacher 和 prompt 版本分桶。小规模训练需要比较不同合成比例、teacher、过滤阈值和自然数据锚点，观察目标收益是否伴随同质化、幻觉、污染、风格偏移或通用能力下降。最终版本必须保存生成日志、拒绝原因、授权记录、评估结果和训练效果，让数据问题能够回放。
 
 ### 18.1 最小可运行合成与蒸馏数据审计 demo
 
-下面这个 demo 不依赖外部库，也不读写文件。输入是一组 toy natural / synthetic / distillation 样本；输出包括保留样本、拒绝原因、来源配比、任务配比、teacher 配比、多样性覆盖和门禁结果。
+下面这个 demo 不依赖外部库，也不读写文件。输入是一组 toy natural / synthetic / distillation 样本；输出包括保留样本、拒绝原因、来源配比、任务配比、teacher 配比、多样性覆盖和验收结果。
 
 它演示的是合成数据治理机制，不是生产级合规审查、LLM judge、数学 verifier、代码沙箱、安全分类器或版权系统。真实系统要接入授权审查、teacher 版本管理、prompt registry、测试执行、检索证据、人工抽样、污染检测和训练 ablation。
 
-```python
+~~~python
 from collections import Counter, defaultdict
 
 
@@ -559,18 +541,48 @@ report = {
     "diversity_coverage": round(len(covered_tags & TARGET_TAGS) / len(TARGET_TAGS), 3),
 }
 
-gates = {
-    "authorization": "unauthorized_teacher" in report["reason_counts"],
-    "validation": "unverified_output" in report["reason_counts"],
-    "contamination": "eval_contamination" in report["reason_counts"],
-    "safety": "unsafe_or_policy_fail" in report["reason_counts"],
-    "privacy": "privacy_or_pii" in report["reason_counts"],
-    "diversity": report["diversity_coverage"] >= 0.85,
-    "synthetic_ratio": report["synthetic_like_ratio"] <= MAX_SYN_RATIO,
-    "natural_anchor": origin_tokens["natural"] > 0,
+checks = {
+    "unauthorized_teacher_blocked": "unauthorized_teacher" in report["reason_counts"],
+    "unverified_output_blocked": "unverified_output" in report["reason_counts"],
+    "contamination_blocked": "eval_contamination" in report["reason_counts"],
+    "unsafe_output_blocked": "unsafe_or_policy_fail" in report["reason_counts"],
+    "privacy_blocked": "privacy_or_pii" in report["reason_counts"],
+    "diversity_ok": report["diversity_coverage"] >= 0.85,
+    "synthetic_ratio_ok": report["synthetic_like_ratio"] <= MAX_SYN_RATIO,
+    "natural_anchor_present": origin_tokens["natural"] > 0,
 }
-report["gates"] = gates
-report["gate_pass"] = all(gates.values())
+signals = {
+    "unauthorized_teacher_not_blocked": not checks["unauthorized_teacher_blocked"],
+    "unverified_output_not_blocked": not checks["unverified_output_blocked"],
+    "contamination_not_blocked": not checks["contamination_blocked"],
+    "unsafe_output_not_blocked": not checks["unsafe_output_blocked"],
+    "privacy_not_blocked": not checks["privacy_blocked"],
+    "diversity_gap": not checks["diversity_ok"],
+    "synthetic_ratio_too_high": not checks["synthetic_ratio_ok"],
+    "natural_anchor_missing": not checks["natural_anchor_present"],
+}
+actions = []
+if signals["unauthorized_teacher_not_blocked"]:
+    actions.append("stop_and_review_teacher_authorization")
+if signals["unverified_output_not_blocked"]:
+    actions.append("quarantine_unverified_generation")
+if signals["contamination_not_blocked"]:
+    actions.append("quarantine_eval_overlap_and_retest")
+if signals["unsafe_output_not_blocked"]:
+    actions.append("remove_policy_violating_samples")
+if signals["privacy_not_blocked"]:
+    actions.append("deidentify_or_remove_sensitive_samples")
+if signals["diversity_gap"]:
+    actions.append("add_task_and_style_diversity")
+if signals["synthetic_ratio_too_high"]:
+    actions.append("reduce_generated_ratio_and_add_natural_anchors")
+if signals["natural_anchor_missing"]:
+    actions.append("restore_natural_data_anchor")
+decision = "continue_to_ablation" if not actions else "hold_for_repair"
+report["checks"] = checks
+report["signals"] = signals
+report["actions"] = actions
+report["decision"] = decision
 
 for key, value in report.items():
     print(f"{key}=", value)
@@ -595,12 +607,15 @@ assert report["retention"] == 0.546
 assert report["origin_mix"] == {"distill": 0.171, "natural": 0.355, "synthetic": 0.474}
 assert report["synthetic_like_ratio"] == 0.645
 assert report["diversity_coverage"] == 1.0
-assert report["gate_pass"] is True
-```
+assert all(report["checks"].values())
+assert not any(report["signals"].values())
+assert report["actions"] == []
+assert report["decision"] == "continue_to_ablation"
+~~~
 
 运行后会看到类似输出：
 
-```text
+~~~text
 kept_ids= ['seed_user_math', 'seed_user_domain', 'syn_math_verified', 'distill_tool_trace', 'syn_code_tests', 'syn_safety_refusal']
 rejected= {'distill_unauthorized': 'unauthorized_teacher', 'real_user_private': 'privacy_or_pii', 'syn_benchmark_leak': 'eval_contamination', 'syn_code_duplicate': 'near_duplicate', 'syn_math_wrong': 'unverified_output', 'syn_unsafe_answer': 'unsafe_or_policy_fail'}
 reason_counts= {'eval_contamination': 1, 'near_duplicate': 1, 'privacy_or_pii': 1, 'unauthorized_teacher': 1, 'unsafe_or_policy_fail': 1, 'unverified_output': 1}
@@ -610,43 +625,45 @@ task_mix= {'code': 0.197, 'domain': 0.263, 'math': 0.228, 'safety': 0.14, 'tool'
 teacher_mix= {'human_or_seed': 0.355, 'owned_teacher': 0.368, 'policy_template': 0.14, 'rule_solver': 0.136}
 synthetic_like_ratio= 0.645
 diversity_coverage= 1.0
-gates= {'authorization': True, 'validation': True, 'contamination': True, 'safety': True, 'privacy': True, 'diversity': True, 'synthetic_ratio': True, 'natural_anchor': True}
-gate_pass= True
-```
+checks= {'unauthorized_teacher_blocked': True, 'unverified_output_blocked': True, 'contamination_blocked': True, 'unsafe_output_blocked': True, 'privacy_blocked': True, 'diversity_ok': True, 'synthetic_ratio_ok': True, 'natural_anchor_present': True}
+signals= {'unauthorized_teacher_not_blocked': False, 'unverified_output_not_blocked': False, 'contamination_not_blocked': False, 'unsafe_output_not_blocked': False, 'privacy_not_blocked': False, 'diversity_gap': False, 'synthetic_ratio_too_high': False, 'natural_anchor_missing': False}
+actions= []
+decision= continue_to_ablation
+~~~
 
 这个 demo 的重点是：合成数据进入训练前必须被当成可审计数据产品，而不是 teacher 随手生成的文本。它要能证明授权成立、错误被验证拦截、污染被隔离、PII 被过滤、近重复被降掉，并且合成 / 蒸馏 token 没有压过自然数据锚点。
 
 ---
 
-## 19. 常见面试题
+## 19. 决策边界：合成和蒸馏数据的几个判断
 
-### 19.1 什么是 synthetic data？
+### 19.1 “生成”与“蒸馏”描述的是不同维度
 
-synthetic data 是由规则、程序、模拟器或模型生成的数据，不是直接从自然环境采集的数据。在大模型中常用于指令数据、数学题、代码任务、安全样本、工具调用和领域问答。
+synthetic data 描述来源：数据由规则、程序、模拟器或模型生成；distillation data 描述关系：teacher 产生行为信号，student 学习这些信号。一份 teacher 生成的答案可以同时属于两者，但规则生成的算术题只属于前者。数据 schema 应分别保存 origin、teacher 和 generator，而不是用一个标签覆盖两个维度。
 
-### 19.2 什么是 distillation data？
+### 19.2 Self-Instruct 的关键不在于生成数量
 
-distillation data 是 teacher model 生成或标注的数据，用于训练 student model 学习 teacher 的回答、推理、偏好、评分或格式。它关注能力迁移，而不仅是数据是否人工生成。
+Self-Instruct 的工程价值在于从 seed 指令扩展任务，再过滤无效、重复和相似样本，最后用训练实验验证 instruction-following 是否改善。若只有生成步骤而没有过滤、验证和自然数据对照，得到的只是大量未经审计的文本。
 
-### 19.3 Self-Instruct 的核心思想是什么？
+### 19.3 生成器越强，验证越不能省略
 
-用模型自举生成 instruction、input 和 output 样本，过滤无效或相似样本，再用于 instruction tuning。核心不是无脑生成，而是生成后过滤和评估。
+强 teacher 可以提高平均质量，也会把错误、偏见、风格和不确定性以更有说服力的形式传播。数学、代码、事实、领域和安全样本应分别接入验证器；LLM judge 只能作为一个带误差的信号，不能替代独立证据。
 
-### 19.4 合成数据有什么风险？
+### 19.4 合成比例如何判断
 
-主要风险包括错误放大、teacher 偏差继承、同质化、数据退化、评估污染、过拟合、合规问题和模型学会模板而不是真能力。
+没有跨任务固定比例。需要同时观察合成/蒸馏 token 占比、自然数据锚点、目标能力覆盖、重复率、事实性、安全、改写题和人工样例。若某项 benchmark 提升伴随模板化或污染命中，比例增加并不代表真实能力增加。
 
-### 19.5 如何验证合成数据质量？
+### 19.5 蒸馏的能力边界
 
-按任务选择验证方法：数学校验答案，代码运行测试，事实问答检索证据，领域问答专家审计，安全数据检查边界，工具调用验证参数和结果使用。还要做去重、人工抽样和训练 ablation。
+student 通常受 teacher 数据覆盖、student 容量和训练目标限制，很难在 teacher 的全部能力范围内全面超过 teacher。但在明确任务分布、严格筛选数据、加入额外自然数据或更合适的验证目标后，student 可能在局部指标上超过 teacher。这个结论必须绑定任务、评估集和训练条件。
 
-### 19.6 合成数据比例应该是多少？
+### 19.6 为什么必须保留自然数据锚点
 
-没有固定比例。应从目标能力、数据质量、验证可靠性、自然数据覆盖、训练阶段和副作用出发，通过小规模 ablation 逐步确定。
+自然数据提供真实用户表达、长尾现象和生成器没有见过的分布。合成数据可以补齐短板，却不能独立代表现实；没有自然锚点时，模型可能越来越像生成器，而不是更像用户和世界。
 
-### 19.7 蒸馏能不能让小模型超过 teacher？
+### 19.7 授权、隐私和安全是数据字段而不是附注
 
-通常 student 受 teacher 数据、模型容量和训练目标限制，很难在 teacher 全能力范围内全面超过 teacher。但在特定任务、特定分布、经过高质量筛选和额外数据增强后，student 可以在局部指标上接近甚至超过 teacher。
+teacher 版本、输出使用条款、隐私处理、风险类别和安全策略需要进入每条记录的血缘。把这些信息只写在项目说明里，无法在过滤、抽样、删除请求和版本回放时定位具体样本。
 
 ---
 
@@ -678,17 +695,20 @@ teacher 也会 hallucinate，也有偏差。生成数据必须验证。
 
 ---
 
-## 21. 本章小结
+## 21. 资料与证据边界
 
-Synthetic Data 与 Distillation Data 是大模型数据工程从“收集世界”走向“主动构造训练分布”的关键工具。
+1. [Self-Instruct](https://arxiv.org/abs/2212.10560)：展示用模型生成 instruction/input/output 并过滤后进行指令微调的路线；论文结果绑定其 seed、生成器和过滤策略。
+2. [WizardLM: Empowering Large Language Models to Follow Complex Instructions](https://arxiv.org/abs/2304.12244)：支持复杂指令演化的公开案例，不证明指令越复杂就越有训练价值。
+3. [Textbooks Are All You Need（phi-1）](https://arxiv.org/abs/2306.11644)：支持 textbook-quality 与合成练习对小型代码模型的研究案例；不构成跨模型的合成数据比例结论。
+4. [Orca: Progressive Learning from Complex Explanation Traces of GPT-4](https://arxiv.org/abs/2306.02707)：支持解释轨迹蒸馏的公开案例；生成解释仍需要正确性、偏差和授权审计。
+5. [Distilling Step-by-Step](https://arxiv.org/abs/2305.02301)：讨论用推理过程进行知识蒸馏；过程文本不是自动可验证的因果推理证明。
+6. [On the Out-of-Distribution Robustness of Large Language Models](https://arxiv.org/abs/2308.04190) 与 [The Curse of Recursion](https://arxiv.org/abs/2305.17493)：支持合成数据递归、分布收窄和模型退化风险的讨论；不同研究的设置不能直接外推成所有合成数据都会 collapse。
+7. [Knowledge Distillation: A Good Teacher is All You Need?](https://arxiv.org/abs/2006.05950)：提供经典 teacher-student 蒸馏背景，说明温度、软标签和 student 目标之间的关系。
 
-本章要记住几句话：
+这些论文支持合成指令、复杂解释、教材数据和 teacher-student 蒸馏的特定实验事实；它们不能替代授权文件、隐私审计、领域专家验证、污染检查或生产评估。本文的质量函数、检查向量和 demo 是教学抽象，不能被误读为某个模型的公开训练配方。
 
-1. 合成数据用于补齐自然数据覆盖不到或难以标注的能力。
-2. 蒸馏数据用于把 teacher 的回答、推理、偏好和格式迁移给 student。
-3. Self-Instruct 和 Evol-Instruct 的核心启发是生成后必须过滤、去重和评估。
-4. phi-1 说明高质量合成教材和练习可以显著提升特定能力。
-5. 合成数据最大的风险是错误放大、同质化、teacher 偏差和数据退化。
-6. 合成数据不是越多越好，而要有目标、验证、配比、审计和版本化。
+## 22. 结语
 
-如果面试中被问到合成数据，最好的回答不是“用强模型生成一批数据”，而是讲完整闭环：目标定义、种子设计、生成、多样性控制、过滤、正确性验证、安全审计、配比实验、自然数据混合和版本治理。
+Synthetic Data 与 Distillation Data 让数据工程从“收集世界”走向“主动构造训练分布”。它们可以补齐自然数据稀缺的任务，迁移 teacher 的回答和验证模式，也可以构造安全边界、工具轨迹和可验证难例。
+
+但生成器同时也是偏置来源。只有当目标明确、授权清楚、生成参数可追踪、样本经过任务专属验证、合成比例受到自然数据锚定并且训练收益经过改写题和真实样例复核时，合成数据才是能力增强，而不是把错误和模板放大。

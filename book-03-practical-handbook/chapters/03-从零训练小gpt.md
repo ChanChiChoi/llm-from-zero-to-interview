@@ -25,7 +25,7 @@
 
 所以本讲先把字符级语言模型的数据管线讲清楚。
 
-本讲精修时按 `WRITING_PLAN.md` 核对了 PyTorch 官方 `nn.Embedding`、`torch.randint`、`torch.stack`、`torch.utils.data.Dataset` 和 `DataLoader` 文档资料边界，确认 embedding 输入应是整数 id，`torch.randint` 的上界是右开区间，`Dataset.__len__` 应返回可采样样本数，`DataLoader` 会按 batch 维堆叠样本。
+本章参考了 PyTorch 官方 `nn.Embedding`、`torch.randint`、`torch.stack`、`torch.utils.data.Dataset` 和 `DataLoader` 文档资料边界，确认 embedding 输入应是整数 id，`torch.randint` 的上界是右开区间，`Dataset.__len__` 应返回可采样样本数，`DataLoader` 会按 batch 维堆叠样本。
 
 ---
 
@@ -748,7 +748,7 @@ autoregressive generation
 
 因为你会亲手跑通一次从文本到生成的完整闭环。
 
-本讲精修时按 `WRITING_PLAN.md` 核对了 PyTorch 官方 `nn.Embedding`、`nn.Linear`、`nn.ModuleList`、`nn.Sequential`、`F.cross_entropy`、`torch.optim.AdamW` 和 `Module.train/eval` 文档资料边界，确认 embedding 输入是整数 id，`F.cross_entropy` 可接收 class index target，常见训练写法需要把 `[B,T,V]` logits 展平成 `[B*T,V]`、把 `[B,T]` labels 展平成 `[B*T]`，`AdamW` 是解耦 weight decay 优化器，`model.eval()` / `model.train()` 会切换 dropout 等模块行为。
+本讲的实现遵循 PyTorch 官方模块的接口约定：embedding 接收整数 token id，`F.cross_entropy` 接收未归一化 logits 和类别索引标签，训练时通常把 `[B,T,V]` 展平成 `[B*T,V]`、把 `[B,T]` 展平成 `[B*T]`，`AdamW` 使用解耦的 weight decay，`model.eval()` 与 `model.train()` 则负责切换 dropout 等模块的行为。下面的代码是教学实现，重点是把数据、模型、损失和生成串成一条可运行的链路，不代表生产训练脚本的全部工程能力。
 
 ---
 
@@ -1045,6 +1045,8 @@ class GPTLanguageModel(nn.Module):
 
     def forward(self, idx, targets=None):
         batch_size, seq_len = idx.shape
+        if seq_len > block_size:
+            raise ValueError("sequence length exceeds block_size")
 
         token_emb = self.token_embedding_table(idx)
         pos = torch.arange(seq_len, device=idx.device)
@@ -1114,11 +1116,12 @@ target: [N]
 代码：
 
 ```python
+class GPTLanguageModel(nn.Module):
     @torch.no_grad()
     def generate(self, idx, max_new_tokens):
         for _ in range(max_new_tokens):
             idx_cond = idx[:, -block_size:]
-            logits, loss = self(idx_cond)
+            logits, _ = self(idx_cond)
             logits = logits[:, -1, :]
             probs = F.softmax(logits, dim=-1)
             idx_next = torch.multinomial(probs, num_samples=1)
@@ -1135,6 +1138,8 @@ idx_cond = idx[:, -block_size:]
 这是因为 position embedding 只支持最大长度 `block_size`。
 
 生成长文本时，每次只取最近 `block_size` 个 token 作为上下文。
+
+上面的片段只展示采样循环，默认调用前已经执行了 `model.eval()`。如果生成函数可能从训练模式被调用，应像下面的完整模型类一样，在 `try/finally` 中保存并恢复模式；否则生成过程中发生异常时，模型可能一直停留在评估模式。
 
 ---
 
@@ -1154,6 +1159,8 @@ class GPTLanguageModel(nn.Module):
 
     def forward(self, idx, targets=None):
         batch_size, seq_len = idx.shape
+        if seq_len > block_size:
+            raise ValueError("sequence length exceeds block_size")
 
         token_emb = self.token_embedding_table(idx)
         pos = torch.arange(seq_len, device=idx.device)
@@ -1176,14 +1183,20 @@ class GPTLanguageModel(nn.Module):
 
     @torch.no_grad()
     def generate(self, idx, max_new_tokens):
-        for _ in range(max_new_tokens):
-            idx_cond = idx[:, -block_size:]
-            logits, loss = self(idx_cond)
-            logits = logits[:, -1, :]
-            probs = F.softmax(logits, dim=-1)
-            idx_next = torch.multinomial(probs, num_samples=1)
-            idx = torch.cat((idx, idx_next), dim=1)
-        return idx
+        was_training = self.training
+        self.eval()
+        try:
+            for _ in range(max_new_tokens):
+                idx_cond = idx[:, -block_size:]
+                logits, _ = self(idx_cond)
+                logits = logits[:, -1, :]
+                probs = F.softmax(logits, dim=-1)
+                idx_next = torch.multinomial(probs, num_samples=1)
+                idx = torch.cat((idx, idx_next), dim=1)
+            return idx
+        finally:
+            if was_training:
+                self.train()
 ```
 
 ---
@@ -1198,15 +1211,19 @@ class GPTLanguageModel(nn.Module):
 @torch.no_grad()
 def estimate_loss(model, eval_iters=20):
     out = {}
+    was_training = model.training
     model.eval()
-    for split in ["train", "val"]:
-        losses = torch.zeros(eval_iters)
-        for k in range(eval_iters):
-            xb, yb = get_batch(split)
-            logits, loss = model(xb, yb)
-            losses[k] = loss.item()
-        out[split] = losses.mean().item()
-    model.train()
+    try:
+        for split in ["train", "val"]:
+            losses = torch.zeros(eval_iters)
+            for k in range(eval_iters):
+                xb, yb = get_batch(split)
+                _, loss = model(xb, yb)
+                losses[k] = loss.item()
+            out[split] = losses.mean().item()
+    finally:
+        if was_training:
+            model.train()
     return out
 ```
 
@@ -1454,16 +1471,18 @@ class GPTLanguageModel(nn.Module):
     def generate(self, idx, max_new_tokens):
         was_training = self.training
         self.eval()
-        for _ in range(max_new_tokens):
-            idx_cond = idx[:, -block_size:]
-            logits, _ = self(idx_cond)
-            logits = logits[:, -1, :]
-            probs = F.softmax(logits, dim=-1)
-            idx_next = torch.multinomial(probs, num_samples=1)
-            idx = torch.cat((idx, idx_next), dim=1)
-        if was_training:
-            self.train()
-        return idx
+        try:
+            for _ in range(max_new_tokens):
+                idx_cond = idx[:, -block_size:]
+                logits, _ = self(idx_cond)
+                logits = logits[:, -1, :]
+                probs = F.softmax(logits, dim=-1)
+                idx_next = torch.multinomial(probs, num_samples=1)
+                idx = torch.cat((idx, idx_next), dim=1)
+            return idx
+        finally:
+            if was_training:
+                self.train()
 
 
 @torch.no_grad()
@@ -1471,15 +1490,17 @@ def estimate_loss(model):
     was_training = model.training
     model.eval()
     out = {}
-    for split in ["train", "val"]:
-        losses = []
-        for _ in range(eval_iters):
-            xb, yb = get_batch(split)
-            _, loss = model(xb, yb)
-            losses.append(loss.item())
-        out[split] = sum(losses) / len(losses)
-    if was_training:
-        model.train()
+    try:
+        for split in ["train", "val"]:
+            losses = []
+            for _ in range(eval_iters):
+                xb, yb = get_batch(split)
+                _, loss = model(xb, yb)
+                losses.append(loss.item())
+            out[split] = sum(losses) / len(losses)
+    finally:
+        if was_training:
+            model.train()
     return out
 
 
@@ -1512,7 +1533,7 @@ print("param_count=", sum(p.numel() for p in model.parameters()))
 print("generated=", repr(decode(generated[0].tolist())))
 ```
 
-参考输出：
+参考输出（随机数、PyTorch 版本和设备不同会导致 loss 的末位及生成文本不同）：
 
 ```text
 vocab_size= 22
@@ -1715,7 +1736,7 @@ top_p
 
 本讲专门实现这些采样策略。
 
-资料边界说明：本讲第二轮精修时按 `WRITING_PLAN.md` 核对 PyTorch 官方 `F.softmax`、`torch.multinomial`、`torch.topk`、`torch.sort`、`torch.cumsum` 文档，以及 Holtzman 等人的 nucleus sampling 论文。这里重点讲教学版实现：数学目标与常见框架接口一致，但不会覆盖 beam search、repetition penalty、presence penalty、grammar constrained decoding 等更完整的生产解码系统。
+本讲使用 PyTorch 的 `F.softmax`、`torch.multinomial`、`torch.topk`、`torch.sort` 和 `torch.cumsum` 来实现采样，并沿用 Holtzman 等人的 nucleus sampling 定义。这里先聚焦教学版实现：数学目标与常见框架接口一致，但生产解码还会涉及 beam search、repetition penalty、presence penalty 和 grammar-constrained decoding 等机制，不能把下面的三个参数当成完整的质量保证器。
 
 ---
 
@@ -1828,13 +1849,15 @@ probs = F.softmax(logits, dim=-1)
 idx_next = torch.multinomial(probs, num_samples=1)
 ```
 
-常见经验：
+下面的数值只能作为起点，不能当作跨模型、跨任务都成立的固定答案。实际应用仍应使用固定提示集和任务指标比较不同配置：
 
 ```text
-temperature = 0.7 或 0.8：更稳，更适合问答。
-temperature = 1.0：原始随机性。
-temperature > 1.0：更发散，更适合创意生成，但更容易胡说。
+temperature = 0.7 或 0.8：分布通常更尖锐。
+temperature = 1.0：不改变原始 logits 的相对尺度。
+temperature > 1.0：分布通常更平坦，随机性更强。
 ```
+
+“更稳”或“更多样”描述的是分布形状，不等于事实性、帮助性或整体质量一定提高。temperature 只是改变采样分布，不能修复模型本身没有学会的知识。
 
 ---
 
@@ -2004,7 +2027,7 @@ top_p = 0.8
 
 它应该保留。
 
-超过边界之后的 token 才应该 mask。
+超过边界之后的 token 才应该 mask。若先执行了 top-k，再执行 top-p，那么 top-p 计算的是已经截断后的候选分布；候选 token 的概率会在剩余集合上重新归一化，因此组合顺序会影响结果。
 
 ---
 
@@ -2310,7 +2333,7 @@ out = generate(
 print(decode(out[0].tolist()))
 ```
 
-实际 LLM 应用中，经常组合使用这些参数。
+实际 LLM 应用中经常组合使用这些参数，但具体顺序和边界处理取决于解码器实现；这里采用“temperature、top-k、top-p、softmax、采样”的常见教学顺序。
 
 ---
 
@@ -2446,13 +2469,13 @@ temperature 是生成时调节 softmax 分布尖锐程度的参数。它通过 l
 如果问“top-k 是什么”，可以回答：
 
 ```text
-top-k sampling 每一步只保留概率最高的 k 个 token，把其他 token 的 logits 设为负无穷，然后在剩余 token 上重新 softmax 并采样。它可以过滤低概率长尾 token，提高生成质量。
+top-k sampling 每一步只保留概率最高的 k 个 token，把其他 token 的 logits 设为负无穷，然后在剩余 token 上重新 softmax 并采样。它可以缩小候选空间、减少极低概率 token 被采到的机会，但是否提高最终质量仍要用具体任务评估。
 ```
 
 如果问“top-p 是什么”，可以回答：
 
 ```text
-top-p 又叫 nucleus sampling，它不是固定保留 k 个 token，而是按概率从高到低排序，保留累计概率达到 p 的最小 token 集合。相比 top-k，top-p 会根据模型当前的不确定性自适应调整候选集合大小。
+top-p 又叫 nucleus sampling，它不是固定保留 k 个 token，而是按概率从高到低排序，保留累计概率达到 p 的最小 token 集合。相比 top-k，top-p 会根据模型当前的不确定性自适应调整候选集合大小；这种自适应不代表它在所有任务上都优于 top-k。
 ```
 
 如果追问“这些参数怎么组合”，可以回答：
@@ -2548,7 +2571,7 @@ temperature=1.2, top_p=0.95
 
 本讲把训练脚本升级为可恢复、可观察、可对比的版本。
 
-资料边界说明：本讲第二轮精修时按 `WRITING_PLAN.md` 核对 PyTorch 官方 saving/loading tutorial、`torch.save`、`torch.load`、`state_dict` / `load_state_dict`、`torch.no_grad` 和 `Module.train/eval` 资料边界。这里采用教学项目最常见的字典式 checkpoint：保存模型参数、优化器状态、训练步数、验证集最优指标、配置和词表元信息；生产训练还会额外保存随机数状态、分布式 rank 状态、学习率调度器状态、混合精度 scaler、数据迭代器进度和实验追踪信息。
+本讲采用 PyTorch 官方保存/加载接口提供的字典式 checkpoint：保存模型参数、优化器状态、训练步数、验证集最优指标、配置和词表元信息。这个集合足以支撑单机教学项目的恢复；生产训练还需要根据实际并行方式保存随机数状态、分布式 rank 状态、学习率调度器状态、混合精度 scaler、数据迭代器进度和实验追踪信息。
 
 ---
 
@@ -2736,6 +2759,8 @@ def save_checkpoint(
     torch.save(checkpoint, path)
 ```
 
+教学项目直接写目标文件已经足够。长时间训练时还应考虑“临时文件写完后再替换目标文件”的原子保存方式，否则进程在写文件中途退出，可能留下无法加载的 `last.pt`。
+
 为什么要保存 `stoi` 和 `itos`？
 
 因为字符 id 映射必须和训练时一致。
@@ -2784,6 +2809,8 @@ def load_checkpoint(path, model, optimizer=None, map_location="cpu"):
         "itos": itos,
     }
 ```
+
+`weights_only=True` 适合这个 checkpoint，因为其中只有张量、数字、字符串和普通字典。不同 PyTorch 版本对该参数的支持和默认行为可能不同；如果要兼容较旧版本，应先查对应版本文档，并且只加载自己生成或已经验证过来源的文件。安全参数不能把不可信 checkpoint 变成绝对安全的输入。
 
 如果只是推理，可以不传 optimizer。
 
@@ -2961,18 +2988,11 @@ init_log_file(log_path)
 best_val_loss = float("inf")
 start_step = 0
 
-for step in range(start_step, config["max_iters"]):
+for step in range(start_step, config["max_iters"] + 1):
     if step % config["eval_interval"] == 0:
         losses = estimate_loss(model, get_batch, config["eval_iters"])
         train_loss = losses["train"]
         val_loss = losses["val"]
-
-        print(
-            f"step {step}: "
-            f"train loss {train_loss:.4f}, "
-            f"val loss {val_loss:.4f}, "
-            f"best val {best_val_loss:.4f}"
-        )
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
@@ -2986,6 +3006,13 @@ for step in range(start_step, config["max_iters"]):
                 stoi,
                 itos,
             )
+
+        print(
+            f"step {step}: "
+            f"train loss {train_loss:.4f}, "
+            f"val loss {val_loss:.4f}, "
+            f"best val {best_val_loss:.4f}"
+        )
 
         save_checkpoint(
             ckpt_dir / "last.pt",
@@ -3009,6 +3036,9 @@ for step in range(start_step, config["max_iters"]):
             path=sample_path,
         )
 
+    if step == config["max_iters"]:
+        break
+
     xb, yb = get_batch("train")
     logits, loss = model(xb, yb)
 
@@ -3016,6 +3046,8 @@ for step in range(start_step, config["max_iters"]):
     loss.backward()
     optimizer.step()
 ```
+
+这里把 `max_iters` 定义为目标更新次数，`step` 表示当前模型已经完成的 optimizer update 数量。因此 step `0` 先评估初始模型，随后执行第一次更新；step `max_iters` 再对已经完成全部更新的模型做一次最终评估后退出。这样即使 `max_iters` 不是 `eval_interval` 的整数倍，也会留下最终的 `last.pt`。checkpoint 中的 step 也必须沿用这个定义，恢复时应从记录的 step 继续，而不是无条件加一，否则可能少执行一次更新。
 
 这个循环已经具备真实训练脚本的基本能力。
 
@@ -3193,7 +3225,7 @@ with tempfile.TemporaryDirectory() as tmpdir:
 
     print("log_steps=", [int(row["step"]) for row in log_rows])
     print("last_step=", meta["step"])
-    print("resume_start_step=", meta["step"] + 1)
+    print("resume_start_step=", meta["step"])
     print("best_step=", best_meta["step"])
     print("best_val_loss=", round(best_meta["best_val_loss"], 6))
     print("vocab_roundtrip=", meta["itos"][meta["stoi"]["x"]] == "x")
@@ -3206,7 +3238,7 @@ with tempfile.TemporaryDirectory() as tmpdir:
 ```text
 log_steps= [0, 5, 10]
 last_step= 10
-resume_start_step= 11
+resume_start_step= 10
 best_step= 10
 best_val_loss= 0.128653
 vocab_roundtrip= True
@@ -3214,7 +3246,7 @@ optimizer_state_nonempty= True
 files= ['best.pt', 'last.pt']
 ```
 
-这段输出说明：日志按评估步写入，`last.pt` 能恢复到最近 step，恢复训练应从 `step+1` 开始，`best.pt` 由验证集 loss 选择，词表映射和优化器状态都确实被保存并加载回来。
+这段输出说明：日志按评估步写入，`last.pt` 能恢复到最近 step；本例把 step 定义为已经完成的更新数量，所以恢复时从 checkpoint 的 step 继续。`best.pt` 由验证集 loss 选择，词表映射和优化器状态也都确实被保存并加载回来。
 
 ---
 
@@ -3238,25 +3270,25 @@ if resume_path.exists():
         optimizer=optimizer,
         map_location=device,
     )
-    start_step = meta["step"] + 1
+    start_step = meta["step"]
     best_val_loss = meta["best_val_loss"]
     print(f"resumed from step {start_step}, best val loss {best_val_loss:.4f}")
 ```
 
-然后训练循环写成：
+然后沿用上一节的训练循环（包括最终 step 的评估）：
 
 ```python
-for step in range(start_step, config["max_iters"]):
+for step in range(start_step, config["max_iters"] + 1):
     ...
 ```
 
 注意：
 
 ```text
-恢复训练时要从 step + 1 开始。
+本例中 checkpoint 的 step 表示已经完成的更新数量，因此恢复时从这个 step 开始；循环会先重新评估该状态，再执行下一次更新。
 ```
 
-否则可能重复训练同一个 step 的日志和 checkpoint。
+如果另一个训练框架把 step 定义为“下一次要执行的更新编号”，也可以使用 `step + 1`，但保存端和加载端必须使用同一套定义。恢复时重复写入同一个评估 step 的日志，还应通过覆盖、去重或新建 run 目录处理。
 
 ---
 
@@ -3486,15 +3518,15 @@ CSV 日志
 
 本讲就围绕这些问题展开。
 
-资料边界说明：本讲第二轮精修时按 `WRITING_PLAN.md` 核对 PyTorch 官方 `CrossEntropyLoss`、`Module.train/eval`、`torch.no_grad`、`clip_grad_norm_` 文档，以及 pandas `read_csv` 和 Matplotlib `savefig` 文档。这里的分析脚本仍定位为教学项目：重点是读懂 loss 曲线、best checkpoint 和生成样例，不引入 TensorBoard、W&B 或复杂实验追踪系统。
+本讲使用 PyTorch 的 `CrossEntropyLoss`、`Module.train/eval`、`torch.no_grad` 和 `clip_grad_norm_`，并用 pandas `read_csv` 与 Matplotlib `savefig` 读取和保存教学实验结果。分析脚本的目标是读懂 loss 曲线、best checkpoint 和生成样例；它不替代 TensorBoard、W&B 或生产环境的实验追踪系统。
 
 ---
 
 ### 一、为什么要分析训练曲线
 
-训练 loss 是模型在训练集上的平均预测错误。
+训练 loss 是模型在训练集预测下一个 token 时的平均负对数似然，通常由交叉熵实现；它不是“预测错了多少个 token”的直接计数。
 
-验证 loss 是模型在未参与训练的数据上的平均预测错误。
+验证 loss 是模型在未参与训练的数据上的同类平均负对数似然。
 
 设第 `t` 次评估时模型参数为 `theta_t`，单个样本的 next-token 负对数似然为 `ell_i(theta_t)`，则可以把训练集和验证集 loss 写成：
 
@@ -3506,7 +3538,9 @@ L_{\mathrm{train}}(t)=\frac{1}{N_{\mathrm{train}}}\sum_{i=1}^{N_{\mathrm{train}}
 L_{\mathrm{val}}(t)=\frac{1}{N_{\mathrm{val}}}\sum_{i=1}^{N_{\mathrm{val}}}\ell_i(\theta_t)
 ```
 
-这里 `N_train` 和 `N_val` 分别是训练集和验证集用于评估的 token 或样本数量。直觉上，train loss 看模型能否拟合训练分布，val loss 看这种拟合是否能迁移到未参与训练的数据。
+这里 `N_train` 和 `N_val` 分别是评估集合中参与平均的预测位置数量；如果先按样本平均再对样本求平均，`ell_i` 也可以表示样本级损失，但必须在两条曲线中保持同一种归一化方式。直觉上，train loss 看模型能否拟合训练分布，val loss 看这种拟合是否能迁移到未参与训练的数据。
+
+需要把“定义的集合平均”与“代码中的估计值”分开。前面 `estimate_loss` 为了省时间，只从 train/val 中随机抽取若干个固定长度 batch，再平均每个 batch 的 loss；它是对集合平均的抽样估计，不是遍历整个数据集得到的精确值。当两个 split 的 batch 长度相同、每个位置权重一致时，这个估计通常足以画趋势；如果要比较很小的差异，应该固定抽样位置或完整遍历评估集，并报告评估 token 数。
 
 二者一起看，才能判断训练状态。
 
@@ -4084,7 +4118,7 @@ for step, text in SAMPLES.items():
     print(f"sample_{step}_repeat_ratio={ratio:.2f}")
 ```
 
-运行后会看到类似输出：
+运行后会看到类似输出（这是固定 toy 输入下的一次示例；若修改阈值、Python 版本或数据，结果会变化）：
 
 ```text
 expected_uniform_loss=3.4657
@@ -4230,6 +4264,25 @@ train loss 低不代表泛化好。
 
 ---
 
+## 与第一册第 15 讲的关系
+
+第一册第 15 讲提供 miniGPT 的最小教学实现；本讲则把其中的 tokenizer 和训练约束放进可复现实验。一个完整项目至少要能追踪：
+
+1. 独立项目目录结构。
+2. 数据下载和预处理脚本。
+3. 训练脚本。
+4. 验证集评估。
+5. checkpoint 保存和恢复。
+6. 采样策略。
+7. loss 曲线分析。
+8. 可写入简历的项目总结。
+
+这层关系的意义不只是“两个章节互相引用”。字符级小 GPT 适合先观察前向、反向和采样流程；BPE 版本则把 tokenizer、词表、序列长度和 checkpoint 兼容性带进同一条实验链。读者如果只替换 `encode` 函数而不记录 tokenizer 版本、词表大小和数据切分，就无法判断性能变化来自分词效率、模型参数量还是训练数据差异。
+
+因此，比较两个版本时应固定训练 token 预算和验证样本，并至少记录平均 token 长度、每秒处理 token 数、词表参数量、验证 loss、生成样例和恢复后的输出一致性。这样才能把“第一册的最小实现”升级成“本讲的可复现实验”，而不是只在代码层面完成一次替换。
+
+---
+
 ### 十九、小练习
 
 #### 练习 1
@@ -4293,7 +4346,7 @@ train loss 低不代表泛化好。
 
 本讲把前面的项目扩展到 BPE tokenizer，让小 GPT 项目更接近真实训练流程。
 
-资料边界说明：本讲第二轮精修时按 `WRITING_PLAN.md` 核对 Hugging Face Transformers tokenizer、GPT-2 tokenizer、`add_special_tokens` / `resize_token_embeddings` 文档，Hugging Face tokenizers 训练接口，以及 PyTorch `nn.Embedding`、`nn.Linear`、`torch.randint` 文档。这里的代码仍定位为教学项目：重点是讲清 tokenizer 切换、id 序列、vocab size、embedding/lm head shape 和 checkpoint 元信息，不把 tokenizer 训练扩展成完整工程。
+本讲沿用 Hugging Face Transformers tokenizer、GPT-2 tokenizer、`add_special_tokens` / `resize_token_embeddings` 和 tokenizers 训练接口的约定，并结合 PyTorch `nn.Embedding`、`nn.Linear` 与 `torch.randint` 说明模型侧的变化。代码仍定位为教学项目：重点是讲清 tokenizer 切换、id 序列、vocab size、embedding/lm head shape 和 checkpoint 元信息，不把 tokenizer 训练扩展成完整工程。
 
 ---
 
@@ -4340,7 +4393,7 @@ l, a, n, g, u, a, g, e,  , m, o, d, e, l
 
 ### 二、BPE 的核心思想
 
-BPE 全称 Byte Pair Encoding。
+BPE 全称 Byte Pair Encoding。它首先是一种子词合并算法；GPT-2 使用的是 byte-level BPE 变体，把任意输入先映射到可逆的字节表示，再在字节片段上学习合并规则。SentencePiece 是训练和封装 tokenizer 的工具，也可以承载 BPE 或 Unigram 等不同模型，因此“用了 SentencePiece”并不自动等于“用了 BPE”。
 
 它的核心思想是：
 
@@ -4367,7 +4420,7 @@ lo + w -> low
 
 最后 `low` 可能成为一个 token。
 
-这样：
+这样（这里只是示意，真实 tokenizer 的合并结果由训练语料和规则决定）：
 
 ```text
 low
@@ -4499,10 +4552,10 @@ print(ids)
 print(recovered)
 ```
 
-输出可能类似：
+输出中的整数由本地 tokenizer 的词表文件决定，下面只展示输出形状，不把某组 id 当成跨版本的固定答案：
 
 ```text
-[31373, 28247, 11, 23748, 3303, 2746]
+[token_id_1, token_id_2, token_id_3, ...]
 hello transformer, hello language model
 ```
 
@@ -4559,7 +4612,7 @@ vocab_size = len(tokenizer)
 为了避免符号混乱，后面统一记：
 
 ```math
-V=\operatorname{len}(\mathrm{tokenizer})
+V=\mathrm{len}(\mathrm{tokenizer})
 ```
 
 其中 `V` 是模型可见的 token id 总数。训练数据里的所有 token id 都必须满足：
@@ -4624,6 +4677,8 @@ val_data = data[n:]
 
 vocab_size = len(tokenizer)
 ```
+
+这里为了让代码短，仍按连续位置切分 train/val；重复语料可能让两边共享高度相似的片段。真正比较 tokenizer 或模型时，更合适的做法是先按文档、时间或其他独立单元切分，再分别编码，避免把同一文档的近邻内容同时放进训练和验证集合。
 
 后续 `get_batch` 不需要大改。
 
@@ -4704,6 +4759,8 @@ if tokenizer.pad_token is None:
 
 这表示用 EOS token 兼作 padding token。
 
+这一步只解决了“批处理需要一个 pad id”的接口问题，并不会自动告诉模型哪些位置是真实内容。使用 padding 训练时仍要传递 `attention_mask`，并在 loss 中把 padding 位置设为 `ignore_index` 或显式排除；如果把 EOS 当作 PAD，还要确认数据整理和生成终止逻辑不会把两种语义混在一起。当前连续 block 的教学代码没有 padding，所以不需要添加这段配置。
+
 注意：
 
 ```text
@@ -4767,7 +4824,7 @@ N_{\mathrm{embed}}=V D
 N_{\mathrm{head}}=D V + V
 ```
 
-其中最后的 `+V` 是 bias。如果使用 tied embedding，lm head 可以复用 token embedding 权重，参数量会少一块 `D V`，但输出 softmax 的类别数仍然是 `V`。
+其中最后的 `+V` 是 bias。如果使用 tied embedding，lm head 可以复用 token embedding 权重，参数量通常少一块 `D V`；如果输出层仍保留 bias，还要继续计算这 `V` 个 bias 参数。无论是否绑权重，输出 softmax 的类别数仍然是 `V`。
 
 如果 GPT-2 tokenizer 的词表约 50257，而字符级词表只有几十个，那么 lm head 会大很多。
 
@@ -4946,7 +5003,7 @@ def decode(ids, id_to_token):
 def vocab_dependent_params(vocab_size, d_model, tied_embedding=False, bias=True):
     embedding_params = vocab_size * d_model
     head_params = 0 if tied_embedding else d_model * vocab_size
-    if bias and not tied_embedding:
+    if bias:
         head_params += vocab_size
     return embedding_params + head_params
 
@@ -5013,7 +5070,7 @@ BPE 合并后 token 数可以明显少于字符数。
 
 字符级时我们保存 `stoi/itos`。
 
-BPE 时应该保存 tokenizer 名称或本地路径。
+BPE 时不能只保存一个可能失效的本地路径。应保存 tokenizer 的完整文件或可复现的仓库版本、special-token 配置、词表大小以及必要的版本信息；路径可以作为便利元数据，但不应是唯一凭据。
 
 例如：
 
@@ -5132,7 +5189,7 @@ from transformers import GPT2TokenizerFast
 tokenizer = GPT2TokenizerFast.from_pretrained("my_bpe_tokenizer")
 ```
 
-对于小 GPT 项目，自训练一个 8000 或 16000 vocab 的 tokenizer，通常比直接用 GPT-2 的 50257 vocab 更合适。
+对于小 GPT 项目，自训练一个 8000 或 16000 vocab 的 tokenizer 可能比直接用 GPT-2 的 50257 vocab 更合适，因为词表相关参数更小；但词表过小也会让序列变长、稀有片段切得更碎，最终仍要用固定数据和指标比较。
 
 但这需要更多语料。
 
@@ -5149,7 +5206,7 @@ tokenizer = GPT2TokenizerFast.from_pretrained("my_bpe_tokenizer")
 4. 设置 vocab_size = len(tokenizer)。
 5. decode 改成 tokenizer.decode。
 6. prompt 编码改成 tokenizer(prompt, return_tensors="pt") 或 tokenizer.encode。
-7. checkpoint 保存 tokenizer_name 或 tokenizer 文件路径。
+7. checkpoint 保存完整 tokenizer artifact、版本和 special-token 配置，路径只作为辅助信息。
 8. 确认 train/val 数据长度大于 block_size + 1。
 ```
 
@@ -5168,7 +5225,7 @@ GPT 模型本质上不关心 token 是字符、子词还是字节，它只关心
 如果面试官问“字符级 tokenizer 和 BPE 有什么区别”，可以这样回答：
 
 ```text
-字符级 tokenizer 把文本拆成单个字符，实现简单但序列长、语义粒度细；BPE 从小单位出发，通过合并高频相邻片段形成子词 token，可以显著缩短序列长度，提高训练和推理效率，更接近真实 LLM 的 tokenizer 方案。
+字符级 tokenizer 把文本拆成单个字符，实现简单但序列长、语义粒度细；BPE 从小单位出发，通过合并高频相邻片段形成子词 token，通常可以缩短序列长度。只有当序列长度节省超过更大词表带来的开销时，训练和推理效率才会得到净收益；它的设计也更接近许多真实 LLM 的 tokenizer 方案。
 ```
 
 如果问“从字符级小 GPT 切到 BPE 要改模型吗”，可以回答：
@@ -5186,7 +5243,7 @@ GPT 模型本质上不关心 token 是字符、子词还是字节，它只关心
 如果问“直接用 GPT-2 tokenizer 训练小模型有什么问题”，可以回答：
 
 ```text
-GPT-2 tokenizer 词表大约 5 万，对小语料和小模型来说词表过大，embedding 和 lm_head 参数量明显增加，而且很多 token 训练中很少出现。教学上可以用它演示流程，真正小模型训练更适合使用较小 vocab 的自训练 tokenizer。
+GPT-2 tokenizer 词表大约 5 万，对小语料和小模型来说词表可能过大，embedding 和 lm_head 参数量会明显增加，而且很多 token 训练中很少出现。教学上可以用它演示流程；真正训练小模型时，可以把较小 vocab 的自训练 tokenizer 作为候选，并用 token 数、参数量和验证 loss 比较，而不是预先假定它一定更好。
 ```
 
 ---
@@ -5259,19 +5316,19 @@ BPE token 是子词片段，不一定是完整词。
 4. 从字符级切到 BPE，主要改 tokenizer、encode/decode、vocab_size 和 checkpoint 元信息。
 5. BPE 词表更大，会增加 embedding 和 lm head 参数量。
 6. 训练和推理必须使用同一个 tokenizer。
-7. 小模型训练时，使用较小 vocab 的自训练 tokenizer 往往比直接用大词表更合适。
+7. 小模型训练时，较小 vocab 的自训练 tokenizer 可能降低词表相关开销，但是否合适要结合序列长度、覆盖率和验证结果判断。
 
-至此，第三册第三部分“从零训练小 GPT”正文第一版完成。
+这一讲把 tokenizer 的变化连接到了模型训练和 checkpoint 兼容性：tokenizer 一旦改变，输入序列、词表大小、embedding、输出头和已有权重的语义都会一起变化。因此，字符级与 BPE 版本的比较不能只看 loss，还要同时记录 token 数、训练速度、参数量、验证样本和恢复行为。
 
-## 与第一册第 15 讲的关系
+### 本章资料来源
 
-第一册第 15 讲提供 miniGPT 的最小教学实现。本实战部分后续应在此基础上扩展为完整项目，包括：
+本章的接口行为以 PyTorch、Hugging Face 官方文档为准，采样算法和 tokenizer 方法的定义以原始论文或算法资料为准。不同版本、设备、dtype 和 tokenizer 文件可能改变数值结果或 token id；复现实验时应记录这些版本信息。
 
-1. 独立项目目录结构。
-2. 数据下载和预处理脚本。
-3. 训练脚本。
-4. 验证集评估。
-5. checkpoint 保存和恢复。
-6. 采样策略。
-7. loss 曲线分析。
-8. 可写入简历的项目总结。
+- [PyTorch `CrossEntropyLoss`](https://docs.pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html)：类别索引标签、logits shape 和交叉熵计算。
+- [PyTorch `torch.save` / `torch.load`](https://docs.pytorch.org/docs/stable/generated/torch.save.html)：checkpoint 序列化与加载接口。
+- [PyTorch `Module.train` / `Module.eval`](https://docs.pytorch.org/docs/stable/generated/torch.nn.Module.html)：训练和评估模式切换。
+- [PyTorch sampling functions](https://pytorch.org/docs/stable/generated/torch.multinomial.html)：`multinomial`、`topk`、`sort` 和 `cumsum` 的张量接口。
+- [Hugging Face Transformers tokenizers](https://huggingface.co/docs/transformers/main/en/fast_tokenizers)：预训练 tokenizer、编码解码和 special token 配置。
+- [Hugging Face Tokenizers quicktour](https://huggingface.co/docs/tokenizers/quicktour)：BPE tokenizer 的训练、保存和加载流程。
+- [The Curious Case of Neural Text Degeneration](https://arxiv.org/abs/1904.10509)：nucleus sampling（top-p）及开放式生成中的退化问题。
+- [Neural Machine Translation of Rare Words with Subword Units](https://arxiv.org/abs/1508.07909)：将 BPE 合并用于子词切分的经典工作；现代 byte-level BPE 实现还包含额外的字节预处理和 special-token 约定。

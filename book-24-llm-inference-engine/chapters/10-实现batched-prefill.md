@@ -8,9 +8,9 @@ Batched prefill 是推理框架从“单请求 demo”走向“多请求 serving
 
 > Batched prefill 的目标是把多个请求的 prompt 同时送进模型，得到每个请求的首 token logits 和初始 KV Cache。
 
-## 10.0 本讲资料边界与第二轮精修口径
+## 10.0 本讲范围与资料
 
-本章第二轮精修前，先用公开资料校准口径：Transformers tokenizer 文档把 padding / truncation 作为把不同长度样本整理成 batch tensor 的基本步骤；decoder-only generation 中，padding side、attention mask 和最后位置 logits 选择会直接影响生成正确性；Transformers generation 路径会处理一批输入的生成参数、mask 和 cache；vLLM 等 serving engine 进一步在生产中引入 continuous batching、chunked prefill、max batch tokens、KV block 管理和调度策略。
+本章参考先用公开资料校准口径：Transformers tokenizer 文档把 padding / truncation 作为把不同长度样本整理成 batch tensor 的基本步骤；decoder-only generation 中，padding side、attention mask 和最后位置 logits 选择会直接影响生成正确性；Transformers generation 路径会处理一批输入的生成参数、mask 和 cache；vLLM 等 serving engine 进一步在生产中引入 continuous batching、chunked prefill、max batch tokens、KV block 管理和调度策略。
 
 因此，本章只实现教学版 batched prefill：多个 prompt padding 成 batch，一次 forward，按最后真实 token 取首 token logits，并得到 batch 维度上的初始 KV Cache。它不实现 continuous batching、chunked prefill、packed sequence、paged KV block 或 prefix cache。新增 0 依赖 demo 专门验证左 padding、右 padding、attention mask、gather last logits 和 padding waste。
 

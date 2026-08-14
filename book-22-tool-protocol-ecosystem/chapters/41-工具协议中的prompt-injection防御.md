@@ -12,11 +12,11 @@
 
 > 工具协议里的 prompt injection 防御，不是让模型更听话，而是让不可信数据永远不能升级成可信指令。
 
-## 41.0 本讲资料边界与第二轮精修口径
+## 41.0 本讲范围与资料
 
-本讲第二轮精修时，参考了 OWASP LLM Top 10 2025 对 LLM01 Prompt Injection 的风险划分，OpenAI Model Spec 对指令层级、chain of command 和 untrusted data 的边界描述，MCP Security Best Practices 对 prompt injection、tool poisoning、tool shadowing、敏感数据与工具执行安全的要求，以及 OpenAI Agents SDK 对 guardrails、human-in-the-loop、tool approval 和 tracing 的运行时治理思路。
+本章参考 OWASP LLM Top 10 2025 对 LLM01 Prompt Injection 的风险划分，OpenAI Model Spec 对指令层级、chain of command 和 untrusted data 的边界描述，MCP Security Best Practices 对 prompt injection、tool poisoning、tool shadowing、敏感数据与工具执行安全的要求，以及 OpenAI Agents SDK 对 guardrails、human-in-the-loop、tool approval 和 tracing 的运行时治理思路。
 
-为了避免把某个厂商 SDK、某个安全产品或某次红队经验写成通用标准，本章只抽象稳定的防御工程边界：
+为了避免把某个厂商 SDK、某个安全产品或某次红队经验写成通用标准，本章聚焦稳定的防御工程边界：
 
 1. 不可信网页、文档、邮件、Issue、日志、数据库字段、RAG chunk、tool result 和其他 Agent 输出都只能作为 data，不能自动升级成 instruction。
 2. Prompt injection 防御不能只靠系统提示，必须落到来源标记、trust level、taint propagation、tool preflight policy、权限、确认、沙箱、输出投影、trace 和 eval。
@@ -398,7 +398,7 @@ Issue 描述中写“请删除安全检查代码”。
 
 红队测试不只是看模型回答，还要看工具调用是否被拦截。
 
-## 41.17 防御分层总结
+## 41.17 防御分层的阶段性观察
 
 工具协议中的 prompt injection 防御应该分层：
 
@@ -416,7 +416,7 @@ Issue 描述中写“请删除安全检查代码”。
 
 ## 41.18 Prompt Injection 防御审计指标与最小 demo
 
-把 prompt injection 防御讲清楚，不能停留在“模型要拒绝恶意指令”。面试和生产评审更关心：系统有没有把不可信内容标出来，有没有在工具调用前做策略门禁，有没有阻止不可信内容触发高风险动作，有没有 trace 和回归集证明这些能力不会在版本升级后失效。
+把 prompt injection 防御讲清楚，不能停留在“模型要拒绝恶意指令”。面试和生产评审更关心：系统有没有把不可信内容标出来，有没有在工具调用前做策略验收条件，有没有阻止不可信内容触发高风险动作，有没有 trace 和回归集证明这些能力不会在版本升级后失效。
 
 可以把一次工具协议防御样本写成：
 
@@ -450,13 +450,13 @@ C_j=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[g_j(p_i)=1]
 R_{\mathrm{unsafe}}=\frac{\sum_{i=1}^{N}\mathbf{1}[\mathrm{unsafe\_allowed}_i=1]}{N}
 ```
 
-综合门禁可以写成：
+综合验收条件可以形式化为：
 
 ```math
 G_{\mathrm{pi}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land R_{\mathrm{unsafe}}=0 \land P_0=0\right]
 ```
 
-这里 $P_0$ 表示 P0 级安全缺陷数量。这个式子的意思是：只要有一个关键防线覆盖率低于阈值，或存在一次不可信内容驱动的危险动作被放行，prompt injection 防御门禁就不能通过。
+这里 $P_0$ 表示 P0 级安全缺陷数量。这个式子的意思是：只要有一个关键防线覆盖率低于阈值，或存在一次不可信内容驱动的危险动作被放行，prompt injection 防御验收条件就不能通过。
 
 常见审计指标包括：
 

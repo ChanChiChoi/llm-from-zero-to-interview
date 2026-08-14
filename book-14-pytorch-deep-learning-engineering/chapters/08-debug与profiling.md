@@ -4,9 +4,9 @@
 
 本章不追求列出所有 PyTorch 调试工具，而是建立一套优先级清楚的排查方法：先确认数据和 shape，再确认 loss 和梯度，再确认数值稳定，再看显存，再看性能瓶颈。很多时候，系统化排查比背 API 更重要。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲第二轮精修前，已核对 PyTorch 官方 `torch.autograd.detect_anomaly` / `set_detect_anomaly`、CUDA semantics、CUDA memory management、`torch.cuda.memory_allocated` / `memory_reserved`、`torch.cuda.synchronize`、`torch.profiler`、PyTorch profiler recipe、Performance Tuning Guide 和 DataLoader 相关文档口径。
+本章参考已核对 PyTorch 官方 `torch.autograd.detect_anomaly` / `set_detect_anomaly`、CUDA semantics、CUDA memory management、`torch.cuda.memory_allocated` / `memory_reserved`、`torch.cuda.synchronize`、`torch.profiler`、PyTorch profiler recipe、Performance Tuning Guide 和 DataLoader 相关文档口径。
 
 本章聚焦 PyTorch 训练调试和性能定位中最常见的问题：shape / dtype / device、loss 与 label 对齐、NaN / Inf、梯度为 None 或异常、forward hook、OOM、DataLoader 瓶颈、CPU-GPU 拷贝、CUDA 异步计时、`torch.profiler` 基础用法、分布式日志和最小可复现 bug。
 
@@ -26,76 +26,83 @@
 
 一个好的 debug 习惯是：每次只改一个变量，并记录修改前后的现象。否则你可能让问题暂时消失，但不知道真正原因。
 
-面试回答：
+可以把一次排查写成四列记录：
 
-```text
-我 debug 训练问题时会先缩小范围：确认数据样本和 label 是否正确，再检查 tensor 的 shape、dtype、device，然后看 loss 是否依赖参数、梯度是否为 None 或 NaN，最后再看优化器、学习率、混合精度、显存和分布式通信。不要一开始就盲目改模型或调参。
-```
+| 假设 | 最小实验 | 观测 | 下一步 |
+| --- | --- | --- | --- |
+| 标签错位 | 固定一个 batch，打印 shift 前后的一对 token | 目标 token 与输入不对应 | 修正 collate 或 shift |
+| 梯度断开 | 只跑 forward/backward，检查参数 grad | 某层 grad 为 `None` | 查 `detach`、分支和 optimizer |
+| 数据管线慢 | 不跑模型，只遍历 100 个 batch | batch 等待时间占比高 | 查 worker、IO、collate |
+| CUDA kernel 慢 | 固定输入，分别测 forward/backward，并同步设备 | 某阶段占据墙钟时间 | 用 profiler 细分算子 |
 
-## 8.1.1 关键公式与 debug/profiling 速查
+这张表的价值在于让“怀疑”变成一次有对照组的实验。没有对照组时，改变 batch、学习率、精度和模型结构后看到 loss 变化，无法判断哪一个改变产生了效果。
+
+排查不是“把所有检查都打开”，而是为一个可证伪的假设收集最小证据。例如“loss 不下降”至少可能来自标签错位、loss 没连到参数、学习率不合适或验证口径错误；每一次实验都应只改变一个因素，并记录样本、随机种子、配置和结果。修复后还要用原始最小复现和一个回归 batch 重跑，确认问题消失且没有引入新问题。
+
+### 8.1.1 关键公式与 debug/profiling 速查
 
 第一，调试一个 tensor 时不要只看数值，还要看元信息：
 
-```math
+~~~math
 m(X)=(\mathrm{shape}(X),\mathrm{dtype}(X),\mathrm{device}(X),\mathrm{requires\_grad}(X),\mathrm{stride}(X))
-```
+~~~
 
 shape / dtype / device 错误往往比模型结构错误更常见。
 
 第二，causal LM loss 展平前后必须满足：
 
-```math
+~~~math
 N_{\mathrm{logit}} = B(T-1),\qquad N_{\mathrm{label}} = B(T-1)
-```
+~~~
 
 也就是 `shift_logits.reshape(-1, V)` 的第 0 维必须和 `shift_labels.reshape(-1)` 的长度一致。
 
 第三，非有限值检查可以抽象为：
 
-```math
+~~~math
 I_{\mathrm{finite}}(X)=\prod_i I(|x_i|<\infty)
-```
+~~~
 
 如果 logits、loss、grad 或参数中任一关键张量 `I_finite=0`，应先定位非有限值第一次出现的位置，再调学习率或改模型。
 
 第四，梯度检查常看每个参数的梯度范数：
 
-```math
+~~~math
 G_l=\|\nabla_{\theta_l} L\|_2
-```
+~~~
 
 `G_l=None`、`G_l=0`、`G_l` 非有限或异常大，分别对应断图、无信号、数值错误或梯度爆炸等不同问题。
 
 第五，OOM 要区分峰值过高和持续增长：
 
-```math
+~~~math
 \Delta M_t=M_t-M_{t-1}
-```
+~~~
 
 如果每步结束后 `M_t` 持续上升，常见原因是保存了带计算图的 tensor、验证没关梯度或评估缓存过多输出；如果只有峰值超限，常见方向是 batch、sequence length、activation、optimizer state 和临时 workspace。
 
 第六，吞吐可以粗略写成：
 
-```math
+~~~math
 R_{\mathrm{tok/s}}=\frac{B T}{t_{\mathrm{step}}}
-```
+~~~
 
 其中 `B` 是 batch size，`T` 是序列长度，`t_step` 是 step 耗时。优化前要先区分数据加载、拷贝、forward、backward、optimizer 和通信分别占多少。
 
 第七，CUDA 计时需要同步：
 
-```math
+~~~math
 t_{\mathrm{cuda}}=t_{\mathrm{end\ after\ sync}}-t_{\mathrm{start\ after\ sync}}
-```
+~~~
 
 因为 CUDA kernel 默认异步执行，不同步时 Python 侧计时可能只测到 launch 开销。
 
 第八，profiler 的核心输出是按算子聚合的时间和内存：
 
-```math
+~~~math
 T_{\mathrm{op}}=\sum_k t_{\mathrm{op},k},\qquad
 M_{\mathrm{op}}=\sum_k m_{\mathrm{op},k}
-```
+~~~
 
 真正要看的是瓶颈归因：DataLoader、CPU-GPU copy、forward、backward、optimizer、通信，还是少数高频小算子。
 
@@ -137,6 +144,8 @@ debug_tensor("loss", loss)
 3. device 是否一致。
 4. loss 是否是标量。
 5. logits 和 labels 是否能对齐。
+
+元信息检查应尽量在错误第一次出现的边界完成，而不是等到 loss 抛异常才检查。例如 embedding 前检查 token dtype，attention 前检查 `Q/K/V` shape 和 mask broadcast 形状，loss 前检查 shift 后有效 label 数。越晚检查，越多中间结果可能已经掩盖根因。
 
 ## 8.3 Shape debug
 
@@ -180,6 +189,17 @@ loss = torch.nn.functional.cross_entropy(
 
 调试建议：把每个模块的输入输出 shape 都打印一次，直到发现第一个不符合预期的位置。
 
+不要长期在生产 forward 中打印全部张量。更可维护的做法是把 shape contract 写成断言，并在最小复现中打开：
+
+```python
+assert input_ids.ndim == 2, input_ids.shape
+assert logits.ndim == 3, logits.shape
+assert logits.shape[:2] == input_ids.shape, (logits.shape, input_ids.shape)
+assert shift_logits.reshape(-1, logits.size(-1)).shape[0] == shift_labels.numel()
+```
+
+断言失败时保留 batch id、序列长度和 tokenizer 版本，避免只得到一条没有上下文的 shape 错误。
+
 ## 8.4 Dtype debug
 
 Dtype 错误常见于 embedding、loss、mask 和混合精度。
@@ -213,6 +233,13 @@ for key, value in batch.items():
 2. 输入 dtype。
 3. autocast 作用域是否正确。
 4. loss 是否在合理 dtype 下计算。
+
+dtype 正确也不意味着数值正确。`torch.long` 的 label 可以合法地包含越界类别 id，bool mask 也可能在广播后覆盖了错误的维度；所以 dtype 检查应和取值范围、shape contract 一起做。对类别 label，可以加上：
+
+```python
+valid = labels.ne(-100)
+assert bool(((labels[valid] >= 0) & (labels[valid] < vocab_size)).all())
+```
 
 ## 8.5 Device debug
 
@@ -300,6 +327,10 @@ for name, param in model.named_parameters():
 6. 数据中有异常值。
 7. 梯度爆炸。
 
+排查 NaN 时要找“第一次出现”，而不是只在最终 loss 处打印。可以把 forward 拆成 embedding、norm、attention、MLP、logits 五个边界；对每个边界记录 `isfinite`、最小值、最大值和均值。若 logits 已经非有限，loss 函数不是根因；若 logits 有限但 loss 非有限，检查 mask、label 范围和 reduction；若 loss 有限但 backward 后 grad 非有限，检查低精度、scale、异常梯度和裁剪顺序。
+
+全屏蔽 attention 是一个特殊反例：如果一整行 logits 都被填成 `-inf`，softmax 可能产生 NaN；如果一个样本的所有 label 都是 `-100`，mean reduction 可能出现无有效分母。debug 代码应明确区分“没有有效监督”与“loss 恰好为 0”，前者通常应跳过或报错，不应静默参与更新。
+
 ## 8.7 anomaly detection
 
 PyTorch 提供 anomaly detection，能帮助定位 backward 报错来源。
@@ -322,6 +353,8 @@ with torch.autograd.detect_anomaly():
 1. 它会明显降低速度。
 2. 只适合 debug，不适合长期训练。
 3. 它不一定能定位所有 NaN 根因，但对 in-place 和 backward 异常很有帮助。
+
+`detect_anomaly` 更适合定位“哪个前向操作为 backward 保存了坏值”或“哪个 backward Function 抛了异常”，不是性能 profiler，也不是所有非有限值的自动修复器。一个实用流程是先用 `check_finite` 缩小到某个 batch/阶段，再只在该最小复现上打开 anomaly detection；否则全量训练会被它的额外检查拖慢，日志也会淹没真正的错误。
 
 ## 8.8 梯度 debug
 
@@ -359,6 +392,8 @@ for name, param in model.named_parameters():
 4. loss scale 或混合精度异常。
 5. 需要梯度裁剪。
 
+还应把“梯度为 `None`”和“梯度为全 0”分开记录。前者通常说明参数没有参与当前计算图，后者可能是有效的零梯度，也可能是 mask、饱和或数值下溢。检查完梯度后再比较 optimizer step 前后的参数差异：有梯度不代表参数一定会变，参数组、冻结状态、学习率和 GradScaler 是否跳过 step 都会影响更新。
+
 ## 8.9 hook 调试中间激活
 
 如果怀疑某一层输出异常，可以用 forward hook。
@@ -391,6 +426,8 @@ handle.remove()
 3. 不要长期保存大激活。
 4. 分布式和 compile 场景下 hook 可能增加复杂度。
 
+hook 是观察工具，不是模型逻辑。它可能改变内存峰值和执行时序，因此用 hook 定位到异常后，应移除 hook 再重跑最小复现；如果问题消失，先检查 hook 是否保存了未 detach 的输出或改变了引用生命周期。对大模型，优先记录摘要统计和少量样本，不要把每一层完整激活搬到 CPU。
+
 ## 8.10 OOM debug
 
 OOM 需要区分是“瞬间峰值太高”还是“显存持续增长”。
@@ -420,6 +457,8 @@ if torch.cuda.is_available():
 3. 关掉额外输出，例如 hidden states 和 attentions。
 4. 检查是否保存了 loss、logits、activation tensor。
 5. 开启 AMP 和 checkpointing。
+
+把 OOM 报告中的三个时刻分开：当前分配量 `allocated`、allocator 保留量 `reserved` 和历史峰值 `peak`。若 `allocated` 在每个 iteration 结束后上升，优先查计算图引用；若 `allocated` 稳定但 `reserved` 较高，可能只是缓存；若只在某个长序列 batch 突然峰值超限，优先查样本长度、padding、attention 中间量和临时 workspace。每次实验都应固定数据顺序，否则不同长度 batch 可能让结论失真。
 
 ## 8.11 DataLoader 性能 debug
 
@@ -454,6 +493,14 @@ print("data time", time.time() - start)
 
 如果纯 DataLoader 迭代都很慢，瓶颈不在模型。
 
+端到端 step 时间可以拆成：
+
+~~~math
+t_{\mathrm{step}}=t_{\mathrm{wait}}+t_{\mathrm{copy}}+t_{\mathrm{compute}}+t_{\mathrm{sync}}+t_{\mathrm{log}}.
+~~~
+
+其中各项可能重叠，所以这是诊断账本而不是严格可加的物理定律。CPU 计时测到的是提交和等待行为；GPU 计时必须在正确边界同步。要比较 DataLoader 配置，至少固定 batch 数、预处理逻辑、存储位置和 worker 生命周期，避免把第一次启动 worker 的开销误认为稳定吞吐。
+
 ## 8.12 性能 profiling 的基本思路
 
 性能优化前要先 profiling。不要凭感觉优化。
@@ -483,6 +530,8 @@ elapsed = time.time() - start
 ```
 
 为什么要 `torch.cuda.synchronize()`？因为 CUDA 操作默认异步，如果不同步，Python 计时可能不准确。
+
+一个常见误区是把 `synchronize()` 加在每个小算子周围，然后用得到的时间判断真实训练性能。同步会破坏原本可能存在的 kernel overlap，只适合做局部测量；端到端吞吐应使用稳定的 warmup 后窗口，并只在窗口边界同步。CPU-only 环境不能用 CPU 时间推断 CUDA kernel 性能，必须在目标 GPU 上复测。
 
 ## 8.13 torch.profiler 入门
 
@@ -518,6 +567,21 @@ print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=20))
 4. 显存分配情况。
 
 profiler 本身有开销，不要在完整训练中一直开。
+
+一个 profiler trace 只能说明被记录窗口里的行为。应先 warmup，再用 `schedule(wait=..., warmup=..., active=...)` 采集少量稳定 step，并在每个 step 调用 `prof.step()`；如果没有 step 标记，调度器可能一直停留在错误阶段。`record_shapes=True` 和 `profile_memory=True` 会增加开销，只有需要对应证据时才打开。Profiler 还可能显示算子耗时，却无法单独证明“应该换哪个模型结构”；优化结论仍需在关闭 profiler 后用独立 benchmark 验证。
+
+```python
+with torch.profiler.profile(
+    activities=[torch.profiler.ProfilerActivity.CPU],
+    schedule=torch.profiler.schedule(wait=1, warmup=1, active=2),
+    on_trace_ready=torch.profiler.tensorboard_trace_handler("./profiler_logs"),
+) as prof:
+    for step, batch in enumerate(loader):
+        train_step(batch)
+        prof.step()
+        if step >= 3:
+            break
+```
 
 ## 8.14 常见性能瓶颈
 
@@ -570,6 +634,8 @@ profiler 本身有开销，不要在完整训练中一直开。
 6. mask 是否把有效 token 忽略。
 7. 模型是否处于 train 模式。
 
+先做小数据过拟合实验：固定 1--8 个样本，关闭随机增强和复杂调度，观察模型能否把训练 loss 明显压低。若不能，优先怀疑数据、loss、梯度或 optimizer；若能而验证集不升，才进入泛化、切分和正则化分析。每一步保存固定 batch 的 logits 摘要和参数差异，防止把评估代码的旧输出误认为训练结果。
+
 ### 8.15.2 train loss 降，val loss 不降
 
 可能原因：
@@ -579,6 +645,8 @@ profiler 本身有开销，不要在完整训练中一直开。
 3. 验证代码有 bug。
 4. train/eval 模式切换错误。
 5. 数据泄漏或评估指标错误。
+
+验证不升还可能是 reduction 口径不同：训练按有效 token 平均，验证却按 batch 平均；或分布式验证只打印 rank 0 的本地结果。先统一分母和切片，再讨论过拟合。对生成任务，固定 prompt、检索结果、temperature、top-p 和随机种子；否则每次验证的生成差异会被误判成模型回退。
 
 ### 8.15.3 训练很快但效果很差
 
@@ -619,6 +687,8 @@ print(
 3. 用小数据、小 batch 先复现。
 4. 必要时用 `dist.barrier()` 定位卡点。
 
+更可靠的日志事件至少包含 `rank`、`epoch`、`global_step`、`micro_step`、batch id、collective 名称和设备。遇到 hang 时先确认哪个 rank 最后打印了什么事件，再判断是数据读取、Python 异常、CUDA kernel 还是 collective 等待。不要在每个路径随意加 barrier：它可能把一个原本暴露的顺序 bug 隐藏起来，也会改变通信与计算重叠。
+
 ## 8.17 一个实用 debug checklist
 
 遇到训练异常，可以按这个顺序查：
@@ -637,6 +707,14 @@ print(
 12. 如果慢，再做 profiler。
 
 这个顺序的核心是从数据到模型、从正确性到性能，不要先优化性能再修正确性。
+
+完成修复后再做三类回归：
+
+1. 同一个最小复现应不再失败。
+2. 正常 batch 的 loss、梯度和参数更新仍满足原 contract。
+3. 关闭 debug hook、anomaly detection 和 profiler 后，吞吐与显存回到可接受范围。
+
+否则“debug 通过”可能只是因为打开了某个工具改变了执行路径。
 
 ## 8.18 一个最小可复现 bug 的写法
 
@@ -667,6 +745,8 @@ loss.backward()
 ```
 
 如果最小例子不复现，说明问题可能来自数据、分布式、混合精度、DataLoader 或训练循环外围逻辑。
+
+最小复现还应把“预期”和“实际”写成断言，而不是只贴一段日志。例如固定 `loss.shape == []`、有效 label 数大于 0、某个参数梯度非空、参数更新量非零；这样环境升级后，示例会在行为变化的位置失败，而不是继续输出看似正常的数字。
 
 ## 8.19 最小可运行 debug/profiling 审计 demo
 
@@ -843,49 +923,7 @@ checks= {'loss_is_scalar': True, 'shift_flat_match': True, 'valid_labels_exist':
 6. `elapsed_ms_positive=True` 说明至少可以做基础 step timing；真实 GPU timing 还需要 CUDA synchronize。
 7. `profiler_summary.enabled=False` 是默认稳定运行模式；需要真实 profiler 时打开环境变量再看 CPU 算子事件。
 
-## 8.20 面试官会怎么问
-
-### 问题一：loss 不下降你怎么排查？
-
-回答模板：
-
-```text
-我会先看数据和 label 是否正确，再看 logits 和 labels 的 shape 是否对齐，loss 是否有限且依赖参数。然后检查梯度是否为 None、0、NaN，参数是否进入 optimizer，学习率是否合理，mask 是否把有效 token 忽略。最后再看模型容量、初始化和数据分布问题。
-```
-
-### 问题二：训练出现 NaN 怎么排查？
-
-回答模板：
-
-```text
-先定位 NaN 出现在输入、logits、loss、梯度还是参数。常见原因包括学习率过大、fp16 溢出、softmax 或 mask 产生异常、loss 分母为 0、数据异常和梯度爆炸。我会记录 loss、grad norm、lr，并用 check_finite 或 anomaly detection 缩小范围。
-```
-
-### 问题三：GPU 利用率低怎么排查？
-
-回答模板：
-
-```text
-先区分是 DataLoader 慢、CPU-GPU 拷贝慢、模型计算小、频繁同步还是分布式通信慢。可以单独测试 DataLoader 迭代速度，用 cuda synchronize 做分段计时，再用 torch.profiler 看 CPU/CUDA 时间分布。
-```
-
-### 问题四：OOM 怎么排查？
-
-回答模板：
-
-```text
-先确认是训练还是验证 OOM，再看 batch size、sequence length、是否开启 AMP、是否保存了带图 tensor、验证是否关闭梯度、是否输出 hidden states 或 attentions。然后考虑 activation checkpointing、梯度累积和减少缓存。
-```
-
-### 问题五：torch.profiler 能看什么？
-
-回答模板：
-
-```text
-torch.profiler 可以统计 CPU 和 CUDA 算子的耗时、调用次数、shape 和显存信息，帮助定位耗时最多的算子、CPU/GPU 时间分布、DataLoader 或拷贝瓶颈。但 profiler 有额外开销，通常只在少量 step 上开启。
-```
-
-## 8.21 常见误区
+## 8.20 常见误区
 
 1. 一看到 loss 不下降就改模型结构，不先查数据和 loss。
 2. 只打印 loss，不打印 shape、dtype、device。
@@ -896,7 +934,7 @@ torch.profiler 可以统计 CPU 和 CUDA 算子的耗时、调用次数、shape 
 7. 分布式日志不带 rank，导致错误信息无法定位。
 8. 用 `find_unused_parameters=True` 掩盖模型分支 bug。
 
-## 8.22 小练习
+## 8.21 小练习
 
 1. 写一个 `debug_tensor` 函数，打印 shape、dtype、device 和 contiguous 状态。
 2. 构造一个 shape mismatch 的 loss 例子，并修复它。
@@ -907,6 +945,24 @@ torch.profiler 可以统计 CPU 和 CUDA 算子的耗时、调用次数、shape 
 7. 用 `torch.profiler` 跑 5 个 step，打印耗时最多的算子。
 8. 写一份 OOM 排查 checklist。
 9. 写一份 loss 不下降排查 checklist。
+10. 用一个故意错位的 shift loss 构造最小复现，并让 shape/label 断言在错误位置失败。
+11. 构造全 `-100` labels，区分“没有有效监督”与“有限的零损失”。
+12. 用 hook 找到第一个非有限激活，再移除 hook 验证问题仍可复现。
+13. 对 DataLoader、forward、backward 和 optimizer 分段计时，比较 warmup 前后结果。
+14. 用 profiler schedule 采集 2 个 active step，并说明 trace 不能代表完整训练。
+
+## 8.22 资料与证据边界
+
+本章关于调试、异常检测、CUDA 计时、Profiler 和性能调优的 API 语义，优先依据 PyTorch 官方资料：
+
+1. Autograd anomaly detection：https://docs.pytorch.org/docs/stable/autograd.html#anomaly-detection
+2. Profiler：https://docs.pytorch.org/docs/stable/profiler.html
+3. Profiler recipe：https://docs.pytorch.org/tutorials/recipes/recipes/profiler_recipe.html
+4. Performance tuning guide：https://docs.pytorch.org/tutorials/recipes/recipes/tuning_guide.html
+5. CUDA semantics：https://docs.pytorch.org/docs/stable/notes/cuda.html
+6. CUDA memory management：https://docs.pytorch.org/docs/stable/notes/cuda.html#memory-management
+
+这些资料可以确认工具调用约定；计时、吞吐、GPU 利用率、DataLoader 瓶颈和显存峰值仍必须在目标硬件、模型、数据和编译配置上实测。章节中的 CPU demo 验证的是 shape/loss/finite/hook/梯度和 profiler 接口逻辑，不代表 CUDA kernel 性能。教程构造的 NaN、OOM 和 rank hang 只是用于理解因果链，不能代替目标系统的故障复盘。
 
 ## 8.23 本章总结
 

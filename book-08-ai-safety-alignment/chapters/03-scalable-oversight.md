@@ -1,32 +1,31 @@
 # 第三章：Scalable Oversight
 
-重点：人类监督瓶颈、AI feedback、Constitutional AI、Debate、Iterated Amplification、Recursive Reward Modeling。
+一个人可以检查简单的答案，却很难在有限时间内检查一段包含几十个工具调用的
+Agent 轨迹、一份长合同的每个风险点，或一个复杂证明的每一步。若仍然要求专家
+逐条直接判定，监督会同时受到成本、知识、注意力和覆盖范围的限制；若把判断全部
+交给另一个模型，错误又可能被批量放大。
 
-面试重点：Scalable Oversight 的核心问题是：当模型能力超过单个人类直接判断能力时，我们如何仍然给出可靠监督信号？
+Scalable Oversight 研究的就是这个中间地带：如何把人类的目标和价值判断保留下来，
+再借助分解、AI critique、debate、verifier、原则和人工升级，让监督信号覆盖更
+复杂的任务。本章不仅介绍方法名称，也说明每种方法依赖什么假设、会在哪些地方
+失效，以及如何在真实系统中留下可审计证据。
 
-## 0. 本讲资料边界与第二轮精修口径
-
-按照 `WRITING_PLAN.md` 的要求，本讲精修前核对了 AI Safety via Debate、Iterated Amplification、Scalable agent alignment via reward modeling、Constitutional AI、Learning to Summarize from Human Feedback、Let's Verify Step by Step、weak-to-strong generalization、OpenAI Evals / Model Spec、NIST AI RMF / Generative AI Profile 等公开资料。
-
-本讲定位为 scalable oversight 的方法谱系和工程落地章，重点是回答一个面试高频问题：当任务复杂到单个人类难以直接判断时，怎样仍然构造可校准、可审计、可扩展的监督信号。
+资料依据包括 AI Safety via Debate、Iterated Amplification、Scalable agent alignment
+via reward modeling、Constitutional AI、Learning to Summarize from Human Feedback、
+Let's Verify Step by Step、weak-to-strong generalization、OpenAI Evals / Model Spec、
+NIST AI RMF / Generative AI Profile 等公开论文、规范和框架。论文支持特定方法与
+实验条件，治理框架支持风险组织；它们都不能单独证明某个监督系统在生产环境中
+可靠。
 
 ```text
-复杂任务 -> 监督瓶颈 -> 分解 / AI critique / debate / verifier / 人工审计 -> 监督门禁
+复杂任务 -> 监督瓶颈 -> 分解 / AI critique / debate / verifier / 人工审计 -> 监督证据与治理动作
 ```
 
-本讲不把 Debate、Iterated Amplification、Recursive Reward Modeling、Constitutional AI 或 AI feedback 写成已经解决 alignment 的银弹。它们都是监督增强方案，需要人工 gold set、工具验证、高风险人工复核、分布外评估和上线回归共同约束。
-
-## 本章目标
-
-学完本章，你要能回答：
-
-1. 什么是 Scalable Oversight？
-2. 为什么 RLHF 和人工标注会遇到监督瓶颈？
-3. Debate、Iterated Amplification、Recursive Reward Modeling、Constitutional AI 分别想解决什么问题？
-4. AI feedback 和 human feedback 有什么区别？
-5. Scalable oversight 和 reward hacking、deceptive alignment、hallucination 有什么关系？
-6. 面试中如何评价这些方法的优缺点和适用边界？
-7. 如何在真实 LLM 系统中落地“可扩展监督”的思想？
+本章不把 Debate、Iterated Amplification、Recursive Reward Modeling、Constitutional
+AI 或 AI feedback 写成已经解决 alignment 的银弹。它们都是监督增强方案，需要
+人工 gold set、工具验证、高风险人工复核、分布外评估和回归测试共同约束。初学者
+可以把 scalable oversight 理解为“让有限的专家注意力用在最需要的地方”；工程
+读者还要继续追问监督信号的来源、相关错误、升级分母和单位成功成本。
 
 ## 1. 来龙去脉：为什么需要 Scalable Oversight
 
@@ -235,9 +234,11 @@ Scalable oversight 研究的就是这些路线在 AI 监督中的对应形式。
 
 例如 “Language Models (Mostly) Know What They Know” 探索了模型评估自己答案正确概率和是否知道答案的能力。
 
-### 4.6 关键公式与监督覆盖指标速查
+### 4.6 把监督可靠性写成可测指标
 
-Scalable oversight 可以抽象成“复杂任务监督信号是否可靠”的度量问题。
+Scalable oversight 可以抽象成“复杂任务的监督信号是否可靠”的度量问题。指标
+必须同时记录覆盖、错误、人工升级、证据支持和成本；单独提高覆盖率，可能只是
+把未经校准的错误扩散得更快。
 
 设第 `i` 个监督样本为：
 
@@ -250,10 +251,12 @@ o_i=(x_i,y_i,g_i,h_i,a_i,v_i,c_i,w_i)
 人类直接监督覆盖率：
 
 ```math
-C_{\mathrm{direct}}=\frac{\sum_i w_i 1[q_i^{\mathrm{human}}\ge \tau_{\mathrm{human}}]}{\sum_i w_i}
+C_{\mathrm{direct}}=\frac{\sum_i w_i 1[h_i\ge \tau_{\mathrm{human}}]}{\sum_i w_i}
 ```
 
-其中 `q_i_human` 是人类直接判断的置信度或可审查性分数。复杂代码、长文档、专业领域和长工具 trace 会让这个覆盖率下降。
+其中 `h_i` 是人类直接判断的置信度或可审查性分数。复杂代码、长文档、专业领域
+和长工具 trace 会让这个覆盖率下降。若没有任何达到阈值的样本，应报告未覆盖，
+不能把空集合当成完美监督。
 
 人类直接监督错误率：
 
@@ -311,13 +314,22 @@ R_{\mathrm{cost}}=1-\frac{\sum_i k_i^{\mathrm{mixed}}}{\sum_i k_i^{\mathrm{human
 
 其中 `k_i_human` 是全人工专家审查成本，`k_i_mixed` 是 AI 辅助 + 工具验证 + 必要人审的混合成本。成本节省必须和监督错误率一起看，不能只追求便宜。
 
-一个简化的 scalable oversight 门禁可以写成：
+一次监督方案比较可以把关键结果写成一组独立约束：
 
 ```math
-G_{\mathrm{over}}=G_{\mathrm{direct}}\land G_{\mathrm{ai}}\land G_{\mathrm{ver}}\land G_{\mathrm{proc}}\land G_{\mathrm{audit}}\land G_{\mathrm{cost}}
+\mathcal{C}_{\mathrm{over}}=\{
+E_{\mathrm{ai}}\leq t_a,
+A_{\mathrm{proc}}\geq t_p,
+S_{\mathrm{evidence}}\geq t_e,
+C_{\mathrm{audit}}\geq t_c,
+R_{\mathrm{cost}}\geq t_k
+\}
 ```
 
-面试中可以强调：scalable oversight 的目标不是让 AI 自己给自己打分，而是把人类原则、AI 辅助、工具验证和人工复核组织成一个可量化的监督闭环。
+其中阈值 `t_a`、`t_p`、`t_e`、`t_c` 和 `t_k` 应按风险和业务约束设定。这个集合
+不是不可诊断的总开关：每个条件都必须能回指到 gold set、工具 trace 或人工复核
+记录。Scalable oversight 的目标也不是让 AI 自己给自己打分，而是把人类原则、
+AI 辅助、工具验证和人工复核组织成可量化、可追溯的监督闭环。
 
 ## 5. Iterated Amplification
 
@@ -343,7 +355,7 @@ Amp(H) 生成训练信号
 循环迭代
 ```
 
-### 5.3 它解决前人什么问题
+### 5.3 它解决哪一类监督瓶颈
 
 前人路线：人类直接标注或直接判断模型输出。
 
@@ -366,7 +378,7 @@ Iterated Amplification 试图通过“分解 + 递归辅助”提升人类监督
 4. 真实 LLM 任务中的落地成本高。
 5. 如果模型助手有系统性偏差，可能放大偏差。
 
-### 5.6 面向专家
+### 5.6 机制与边界
 
 Iterated Amplification 可以看成一种构造 stronger overseer 的方法。
 
@@ -410,7 +422,7 @@ Human judge chooses winner
 Train agents to win by being truthful and exposing flaws
 ```
 
-### 6.3 它解决什么问题
+### 6.3 它解决哪一类监督瓶颈
 
 直接监督时，人类可能看不出复杂错误。
 
@@ -431,7 +443,7 @@ Debate 希望把“找错误”的工作交给另一个模型，让人类只判�
 4. 多轮辩论规则难设计。
 5. 两个模型可能共享同样盲点。
 
-### 6.6 面向专家
+### 6.6 机制与边界
 
 Debate 的关键假设是：对复杂问题，错误答案存在某种短而可理解的反驳，人类在看到反驳后能判断。
 
@@ -469,7 +481,8 @@ Recursive Reward Modeling 的思路是：复杂任务的 reward 很难直接建�
 1. Iterated Amplification 更强调人类加模型助手形成更强 overseer。
 2. Recursive Reward Modeling 更强调递归构造 reward model 或评估器。
 
-面试中不必死记形式定义，重点讲清：它们都试图让监督信号随任务复杂度扩展。
+概念边界上不必死记形式定义，重点是理解：它们都试图让监督信号随任务复杂度扩展，
+但依赖的分解、评估器和人工校准方式不同。
 
 ### 7.3 风险
 
@@ -517,7 +530,7 @@ Constitutional AI 的思路是：用一组人类写下的原则或规则，让�
 
 这也常被称为 RLAIF：Reinforcement Learning from AI Feedback。
 
-### 8.3 它解决前人什么问题
+### 8.3 它解决哪一类监督瓶颈
 
 相比 RLHF，Constitutional AI 试图减少对大量人工有害样本标注的依赖。
 
@@ -539,7 +552,7 @@ Constitutional AI 的思路是：用一组人类写下的原则或规则，让�
 4. 难处理复杂价值冲突。
 5. 对原则解释能力和 judge 能力依赖很强。
 
-### 8.6 面向专家
+### 8.6 机制与边界
 
 Constitutional AI 的关键不是“AI 自己管自己”这么简单。
 
@@ -758,15 +771,37 @@ metrics = {
     "severity_weighted_error": round(severity_error / total_severity, 3),
 }
 
-gates = {
-    "ai_feedback": metrics["ai_feedback_accuracy"] >= 0.75,
-    "oversight_accuracy": metrics["oversight_accuracy"] >= 0.90,
-    "process": metrics["process_step_accuracy"] >= 0.80,
-    "evidence": metrics["evidence_support"] >= 0.75,
-    "high_risk_audit": metrics["high_risk_audit_coverage"] >= 1.00,
-    "severity_error": metrics["severity_weighted_error"] <= 0.10,
-    "cost": metrics["cost_saving"] >= 0.50,
+thresholds = {
+    "ai_feedback_accuracy": 0.75,
+    "process_step_accuracy": 0.80,
+    "evidence_support": 0.75,
+    "high_risk_audit_coverage": 1.00,
+    "severity_weighted_error": 0.10,
+    "cost_saving": 0.50,
 }
+
+actions = []
+if metrics["ai_feedback_accuracy"] < thresholds["ai_feedback_accuracy"]:
+    actions.append("扩大人工 gold set，校准 AI feedback 的错误切片")
+if metrics["process_step_accuracy"] < thresholds["process_step_accuracy"]:
+    actions.append("补充中间步骤标注和可执行 verifier")
+if metrics["evidence_support"] < thresholds["evidence_support"]:
+    actions.append("复核 claim 与证据的支持关系，禁止只看流畅度")
+if metrics["high_risk_audit_coverage"] < thresholds["high_risk_audit_coverage"]:
+    actions.append("把未审计的高风险样本转人工或专家复核")
+if metrics["severity_weighted_error"] > thresholds["severity_weighted_error"]:
+    actions.append("按严重度重排监督预算，优先修复高影响错误")
+if metrics["cost_saving"] < thresholds["cost_saving"]:
+    actions.append("比较全人工、混合监督和单位成功成本")
+
+if high_risk_missing_audit or metrics["severity_weighted_error"] > thresholds["severity_weighted_error"]:
+    decision = "hold_for_high_risk_audit"
+elif metrics["ai_feedback_accuracy"] < thresholds["ai_feedback_accuracy"]:
+    decision = "calibrate_feedback_before_expansion"
+elif metrics["process_step_accuracy"] < thresholds["process_step_accuracy"]:
+    decision = "improve_process_supervision_before_expansion"
+else:
+    decision = "continue_bounded_oversight_trial"
 
 report = {
     "slice_counts": dict(sorted(Counter(case["slice"] for case in cases).items())),
@@ -774,8 +809,9 @@ report = {
     "oversight_errors": oversight_errors,
     "high_risk_missing_audit": high_risk_missing_audit,
     "slice_errors": dict(sorted(slice_errors.items())),
-    "gates": gates,
-    "oversight_ready": all(gates.values()),
+    "thresholds": thresholds,
+    "actions": actions,
+    "decision": decision,
 }
 
 for key, value in report.items():
@@ -796,7 +832,7 @@ assert report["metrics"] == {
 }
 assert report["oversight_errors"] == ["medical_summary"]
 assert report["high_risk_missing_audit"] == ["medical_summary"]
-assert report["oversight_ready"] is False
+assert report["decision"] == "hold_for_high_risk_audit"
 ```
 
 运行后会看到类似输出：
@@ -807,11 +843,15 @@ metrics= {'direct_coverage': 0.2, 'direct_accuracy_on_covered': 1.0, 'human_dire
 oversight_errors= ['medical_summary']
 high_risk_missing_audit= ['medical_summary']
 slice_errors= {'high_risk_domain': ['medical_summary']}
-gates= {'ai_feedback': False, 'oversight_accuracy': True, 'process': False, 'evidence': False, 'high_risk_audit': False, 'severity_error': False, 'cost': True}
-oversight_ready= False
+thresholds= {'ai_feedback_accuracy': 0.75, 'process_step_accuracy': 0.8, 'evidence_support': 0.75, 'high_risk_audit_coverage': 1.0, 'severity_weighted_error': 0.1, 'cost_saving': 0.5}
+actions= ['扩大人工 gold set，校准 AI feedback 的错误切片', '补充中间步骤标注和可执行 verifier', '复核 claim 与证据的支持关系，禁止只看流畅度', '把未审计的高风险样本转人工或专家复核', '按严重度重排监督预算，优先修复高影响错误']
+decision= hold_for_high_risk_audit
 ```
 
-这个 demo 的重点是：混合监督可以显著省成本，`oversight_accuracy` 也可能看起来不错，但只要高风险样本没有人审、证据支持不足或 AI feedback 未校准，就不能说 scalable oversight 已经可靠上线。
+这个 demo 的重点是：混合监督可以显著省成本，`oversight_accuracy` 也可能看起来不错，
+但只要高风险样本没有人审、证据支持不足或 AI feedback 未校准，就不能把监督结果
+写成普遍可靠。程序保留每个信号、动作和决定，读者可以进一步追查 `medical_summary`
+为什么既造成监督错误，又没有进入人工审计。
 
 ## 12. Scalable Oversight 的优缺点
 
@@ -882,92 +922,115 @@ Red teaming 可以发现失败样本。
 
 Scalable oversight 可以帮助生成、筛选、归因和复核这些失败样本。
 
-## 14. 面试官会怎么问
+## 14. 案例：长文档研究助手的混合监督
 
-### 问题 1：什么是 Scalable Oversight？
+设想一个研究助手需要阅读几十篇论文，回答“某种方法在什么条件下有效”，并给出
+逐条引用。最终答案很长，且判断依赖实验设置、样本范围和统计方法。让普通标注员
+直接比较两份答案，会遇到四个问题：他们可能看不完所有论文，可能无法复核实验，
+可能被流畅表达影响，也可能没有足够时间判断每条引用是否支持结论。
 
-回答要点：
+### 14.1 把任务分成不同难度的监督单元
 
-1. 当任务复杂到人类难以直接判断时，仍然构造可靠监督信号。
-2. 方法包括任务分解、AI 辅助评估、debate、amplification、Constitutional AI。
-3. 目标是让监督能力随模型能力增长。
+可以把最终任务拆成：
 
-标准回答：
+1. 文档是否与问题相关。
+2. 每条 claim 是否能在指定段落中找到证据。
+3. 引用是否真的支持 claim，而不是只与主题相关。
+4. 计算或实验条件是否被正确转述。
+5. 多条证据合并后的结论是否超出了资料支持范围。
 
-```text
-Scalable Oversight 关注的是如何监督越来越强、越来越复杂的 AI 系统。当模型输出的代码、推理、长文档分析或工具调用计划超出单个人类直接判断能力时，我们需要通过任务分解、AI 辅助、辩论、递归监督、原则驱动反馈和人工审计来构造更可靠的训练和评估信号。
-```
+前四项可以分别交给检索器、规则、verifier 或 AI critique 辅助处理，第五项通常
+需要专家抽样复核。分解降低了单次审查负担，但不能假设子任务完全独立；最终结论
+仍要保留全局约束和原始引用。
 
-### 问题 2：为什么 RLHF 不够？
+### 14.2 让 AI 做扩展，让人类校准
 
-回答要点：
+第一步用少量专家 gold set 校准 AI judge：专家不仅标答案对错，还标证据覆盖、
+因果过度推断和引用错配。第二步让 AI 对大批样本提取 claims、标记可疑段落并
+生成反例。第三步使用程序检查链接、页码和数值，最后把高风险、低置信度和多评估
+器分歧的样本送回专家。
 
-1. RLHF 依赖人类偏好判断。
-2. 人类可能看不懂复杂任务。
-3. 偏好标注有成本、偏差和一致性问题。
-4. 模型可能学会迎合标注员而不是真实解决问题。
-5. 需要 AI-assisted oversight 和更强评估。
+关键不是把人类从流程中删除，而是把专家时间集中到 AI 最不可靠、后果最严重的
+切片。人工升级覆盖率、AI 与 gold set 的错误率、证据支持率和单位成功任务成本
+要一起记录。
 
-### 问题 3：Constitutional AI 解决什么问题？
+### 14.3 观察监督系统是否在自我强化错误
 
-回答要点：
+如果 AI judge 主要依据写作流畅度打分，它可能把同一套表面偏差扩展到数万样本。
+因此 holdout gold set 不能参与提示词调优，且应定期加入新的领域和时间切片。若
+AI judge 与专家在同一类 claim 上持续分歧，就应暂停自动扩展，检查 rubric、引用
+解析器和任务分解，而不是继续增加样本量。
 
-1. 用人类写下的原则指导模型自我批评、修正和偏好判断。
-2. 减少对逐样本人类有害内容标注的依赖。
-3. 可以训练 harmless but non-evasive assistant。
-4. 风险是原则不完整、AI feedback 继承偏差、需要人工校准。
+类似地，debate 只有在辩手能提出可验证证据、人类能理解关键反驳时才有帮助；如果
+双方共享同一错误，或评委只偏好更自信的表达，辩论轮数越多不一定越可靠。
 
-### 问题 4：Debate 有什么优缺点？
+### 14.4 从结果映射到动作
 
-回答要点：
+一个可审计的监督报告可以保存：
 
-1. 优点是让模型互相指出复杂错误，降低人类直接判断难度。
-2. 缺点是模型可能优化说服力而不是真实性。
-3. 人类 judge 仍可能被误导。
-4. 辩论规则和评估成本很关键。
+~~~text
+signals: AI 与 gold set 的一致性、过程准确率、证据支持率、人工升级覆盖、成本
+actions: 校准 judge、增加 verifier、补充专家样本、限制自动扩展、复核高风险轨迹
+decision: 继续受限扩展、保持混合监督、暂停自动标注或回退旧流程
+~~~
 
-### 问题 5：AI feedback 能否替代 human feedback？
+这种结构把 scalable oversight 从一句口号变成了可以观察的系统。它也保留了一个
+重要事实：监督扩展的成功不是“AI 标了多少数据”，而是单位成本下增加了多少可信
+监督，并且没有把高严重度错误藏在平均数里。
 
-回答要点：
+## 15. 常见误区
 
-1. 不能完全替代。
-2. AI feedback 可扩规模、降成本、做 critique 和初筛。
-3. Human feedback 提供价值锚点和校准。
-4. 高风险场景需要人工或专家复核。
+### 15.1 误区：Scalable oversight 只是降低标注成本
 
-## 15. 标准回答模板
+成本只是表层问题，核心是复杂任务中人类监督能力不足。若只看每条标注的价格，
+可能忽略错误监督带来的训练和部署损失。
 
-面试中可以这样回答：
+### 15.2 误区：AI feedback 可以完全替代人类
 
-```text
-Scalable oversight 的核心是监督瓶颈。RLHF 假设人类可以判断模型输出好坏，但当任务变成长代码审查、复杂法律分析、多步数学证明、RAG 长文档综合或 Agent 工具调用时，单个人类很难直接判断。
+AI feedback 需要人类原则、人工 gold set 和高风险审核校准，且要定期检查新任务
+和新模型上的误差变化。
 
-解决思路包括几类：第一，把复杂任务拆成子任务，例如 iterated amplification 和 recursive reward modeling；第二，让 AI 辅助人类找证据、做 critique、生成反例；第三，让模型之间辩论，让人类判断谁指出了关键问题；第四，用 constitution 这类人类原则生成 AI feedback，减少逐样本人类标注成本。
+### 15.3 误区：Debate 一定能得到真相
 
-这些方法的共同目标是让监督能力随模型能力扩展。但它们不是银弹，因为 AI feedback 可能放大模型偏差，任务分解可能丢失整体目标，debate 可能优化说服力而不是真实性。因此真实系统中应该采用 human gold labels、AI-assisted eval、工具验证、红队、人工审核和 regression suite 的混合监督闭环。
-```
+Debate 依赖人类 judge 能判断论点，也可能变成说服力竞赛。辩论轮数增加并不自动
+增加事实性。
 
-## 16. 常见误区
+### 15.4 误区：任务总能无损分解
 
-### 16.1 误区：Scalable oversight 只是降低标注成本
+很多任务有全局约束，拆分后可能丢失整体目标，因此需要保留最终状态和全局约束的
+独立验证。
 
-纠正：成本只是表层问题，核心是复杂任务中人类监督能力不足。
+### 15.5 误区：模型会自我评估就可信
 
-### 16.2 误区：AI feedback 可以完全替代人类
+自我评估也需要校准、验证和分布外测试，不能因为模型说“我有把握”就把它当成事实。
 
-纠正：AI feedback 需要人类原则、人工 gold set 和高风险审核校准。
+## 16. 资料与证据边界
 
-### 16.3 误区：Debate 一定能得到真相
+本章的资料可以分为监督方法论文、训练与评估论文、官方规范和治理框架。方法论文
+支持某种监督路线的设计与实验条件，不能直接证明方法在其他模型、任务或风险等级
+上有效；规范和框架支持原则、审计和责任组织，也不能替代具体任务中的 gold set、
+工具验证和人工复核。
 
-纠正：Debate 依赖人类 judge 能判断论点，也可能变成说服力竞赛。
+### 16.1 监督方法
 
-### 16.4 误区：任务总能无损分解
+- [AI Safety via Debate](https://arxiv.org/abs/1805.00899)：讨论通过竞争性论证帮助人类监督复杂答案的研究方向；它依赖评委能理解关键反驳。
+- [Iterated Amplification](https://arxiv.org/abs/1810.08575)：支持通过人类与模型助手的递归分解构造更强监督者的研究入口。
+- [Scalable agent alignment via reward modeling](https://arxiv.org/abs/2210.06794)：讨论用递归或分层 reward modeling 监督更复杂 Agent 行为的研究方向；具体实现仍要校准子评估器。
+- [Constitutional AI](https://arxiv.org/abs/2212.08073)：支持原则驱动的 critique、revision 和 AI feedback 流程，不等于 AI feedback 无偏。
+- [Learning to summarize from human feedback](https://arxiv.org/abs/2009.01325)：说明复杂文本质量可以用人类反馈训练代理评估器，但代理奖励需要独立验证。
 
-纠正：很多任务有全局约束，拆分后可能丢失整体目标。
+### 16.2 过程监督、评估与治理
 
-### 16.5 误区：模型会自我评估就可信
+- [Let's Verify Step by Step](https://arxiv.org/abs/2305.20050)：支持过程监督和逐步验证在数学推理中的研究入口，不能自动外推到所有 Agent 轨迹。
+- [Weak-to-strong generalization](https://arxiv.org/abs/2312.09390)：讨论弱监督者如何监督更强模型的实验框架；结果依赖任务、监督者和强模型的具体设置。
+- [OpenAI Model Spec](https://model-spec.openai.com/)：官方行为规范入口，支持分析监督目标和行为边界；规范文本不是独立实测结果。
+- [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：支持 Govern、Map、Measure、Manage 的治理结构。
+- [NIST Generative AI Profile](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf)：支持生成式系统的风险、测量和人工监督活动组织。
 
-纠正：自我评估也需要校准、验证和分布外测试。
+引用这些资料时，应区分论文实验、厂商规范、治理建议和本项目实际测量。尤其是
+“监督更强”“AI feedback 可靠”或“人类成本下降”等结论，必须同时报告任务切片、
+gold set、判定器、人工升级、错误严重度和成本分母；没有这些条件时，只能写成
+方法假设或待验证结果。
 
 ## 17. 小练习
 
@@ -975,31 +1038,31 @@ Scalable oversight 的核心是监督瓶颈。RLHF 假设人类可以判断模�
 
 用自己的话解释为什么 RLHF 会遇到 scalable oversight 问题。
 
-要求包含：成本、专业能力、长上下文、多步任务和标注偏差。
+说明成本、专业能力、长上下文、多步任务和标注偏差如何造成监督瓶颈。
 
 ### 练习 2
 
 比较 Iterated Amplification、Debate 和 Constitutional AI。
 
-要求说明：它们分别解决什么问题、核心假设、优点和风险。
+分别说明它们解决什么问题、依赖的核心假设、优点、风险和可验证证据。
 
 ### 练习 3
 
 为一个 RAG 系统设计 AI-assisted evaluation 流程。
 
-要求覆盖：claim extraction、evidence checking、citation verification、human audit。
+覆盖 claim extraction、evidence checking、citation verification、human audit、gold set 和升级规则。
 
 ### 练习 4
 
 为一个 coding agent 设计 scalable oversight 流程。
 
-要求覆盖：单元测试、静态分析、LLM review、多模型辩论和人工审核。
+覆盖单元测试、静态分析、LLM review、多模型辩论、权限审计和人工审核。
 
 ### 练习 5
 
 讨论 AI feedback 的一个优势和一个危险。
 
-要求给出具体例子。
+给出一个具体例子，并说明如何用独立 gold set 检查这个风险。
 
 ## 18. 本章总结
 
@@ -1015,4 +1078,5 @@ Constitutional AI 和 RLAIF 用人类原则驱动 AI feedback，减少逐样本�
 
 AI feedback 可以扩展监督规模，但不能完全替代 human feedback；更可靠的路线是人类原则、人工 gold set、AI critique、工具验证、人审和 regression suite 的混合监督闭环。
 
-面试中要强调：Scalable oversight 不是一个单一算法，而是一组让监督能力跟上模型能力增长的方法谱系。
+Scalable oversight 不是一个单一算法，而是一组让监督能力跟上模型能力增长的方法
+谱系；判断它是否有效，必须回到覆盖、错误、升级和成本证据。

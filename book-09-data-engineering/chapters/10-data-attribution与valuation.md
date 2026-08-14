@@ -12,17 +12,19 @@ Data Attribution 关注归因：模型某个行为、某个错误、某个能力
 
 合规边界：本章讨论数据价值评估、错误分析、训练数据治理和审计，不提供训练数据反推、隐私抽取或绕过数据保护的方法。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本章范围与资料
 
-按照 `WRITING_PLAN.md` 的要求，本讲精修前核对了 influence functions、Data Shapley、高效 Shapley 近似、TracIn、Dataset Cartography、DSIR、LESS 和 DataInf 等公开论文资料。
+数据归因和估值面对的是同一个困难对象：模型能力来自大量数据、训练步骤和数据交互，但工程决策必须回答“下一笔预算应该投在哪里”。因此，本章不把 attribution 当成单条样本的侦探式证明，也不把 valuation 当成脱离上下文的价格标签，而是把它们放进可回放的证据链中。
 
-本讲聚焦大模型数据工程中可落地的数据归因和估值：源级 / 簇级 / 样本级近似、目标依赖效用函数、influence 近似、Shapley 近似、小模型 proxy、消融实验、数据选择、主动标注优先级、负价值数据识别和版本化审计。
+本章分别讨论源级、簇级和样本级近似，目标依赖的效用函数，influence 和 Shapley 的思想，小模型 proxy，消融实验，数据选择，主动标注优先级，负价值数据识别，以及版本化审计。重点是理解每个信号能说明什么、不能说明什么，以及何时必须回到真实训练或人工复核。
 
-```text
+数据决策可以沿着下面的链路组织：
+
+~~~text
 目标指标 -> 数据单元 -> 弱信号估值 -> 小规模验证 -> 风险成本修正 -> 数据选择 -> 版本审计
-```
+~~~
 
-本讲不把任何估值方法写成“大模型训练数据价值的精确答案”。大模型数据价值通常只能通过多种弱证据近似：小模型实验、源级 ablation、梯度相似、相似检索、人工审计、下游评测和成本风险分析共同支撑。
+本章不提供训练数据反推、隐私抽取或绕过数据保护的方法。任何估值结果都只是相对于模型、阶段、目标、评估集、预算和风险策略的局部证据；小模型、梯度相似或检索近邻都不能自动升级为严格因果结论。
 
 ---
 
@@ -106,75 +108,81 @@ Data Valuation 问的是“某个数据有多值钱”。
 
 把训练数据写成样本集合：
 
-```math
-D=\{z_i\}_{i=1}^{n}
-```
+~~~math
+D = {z_i for i = 1..n}
+~~~
 
-其中 `z_i` 可以是一条预训练文档、一条 SFT 样本、一对 chosen / rejected 偏好样本，也可以是一个数据源 `C_k` 中的样本。大模型数据工程里更常见的估值单元不是单条样本，而是数据源、数据簇、任务池或数据版本：
+z_i 可以是一条预训练文档、一条 SFT 样本、一对 chosen/rejected 偏好样本，也可以是一个数据源中的样本。大模型数据工程里更常见的估值单元是数据源、数据簇、任务池或数据版本：
 
-```math
-C_k=\{z_i: c_i=k\}
-```
+~~~math
+C_k = {z_i where c_i = k}
+~~~
 
-其中 `c_i` 表示样本所属来源、领域、任务或标注批次。
+c_i 表示样本所属来源、领域、任务或标注批次。估值单元越大，计算越便宜，但结论也越粗；估值单元越小，越容易受到噪声和交互影响。
 
-估值必须先定义目标效用函数。一个常见写法是：
+估值必须先定义目标效用函数：
 
-```math
-U(S)=\sum_{m=1}^{M} w_m M_m(S)-\lambda_R R(S)-\lambda_C C(S)
-```
+~~~math
+U(S) = sum_m(w_m * M_m(S)) - lambda_R * R(S) - lambda_C * C(S)
+~~~
 
-其中 `S` 是被选中的数据集合，`M_m(S)` 是第 `m` 个目标指标，例如数学、代码、安全、通用能力或人工质量，`w_m` 是业务权重，`R(S)` 是隐私、版权、安全和污染风险，`C(S)` 是采购、清洗、标注、训练和维护成本。
+S 是被选中的数据集合，M_m(S) 是第 m 个目标指标，w_m 是业务权重，R(S) 是隐私、版权、安全和污染风险，C(S) 是采购、清洗、标注、训练和维护成本。这个式子不是要求把所有目标强行加成一个分数，而是明确价值判断依赖哪些目标和惩罚项。
 
-数据源级 ablation 的加入价值可以写成：
+数据源级加入变化可以写成：
 
-```math
-\Delta_k^{\mathrm{add}}=U(S_{\mathrm{base}}\cup C_k)-U(S_{\mathrm{base}})
-```
+~~~math
+Delta_add_k = U(S_base union C_k) - U(S_base)
+~~~
 
-删除价值可以写成：
+删除变化可以写成：
 
-```math
-\Delta_k^{\mathrm{drop}}=U(S_{\mathrm{base}})-U(S_{\mathrm{base}}\setminus C_k)
-```
+~~~math
+Delta_drop_k = U(S_base) - U(S_base without C_k)
+~~~
 
-如果 `Delta_add` 为正，说明加入数据源有收益；如果 `Delta_drop` 为正，说明删掉它会损失收益。两者都要结合风险和成本解释。
+Delta_add_k 为正表示在当前基线中加入数据源有净收益，Delta_drop_k 为正表示删除它会损失净效用。两者都依赖基线和配比，不能被解释成数据源永久不变的“价格”。
 
-Influence functions 关心训练点 `z_i` 对测试点 `z_*` 的 loss 影响。经典近似形式是：
+Influence functions 关心训练点 z_i 对测试点 z_star 的 loss 变化。为避免把不可计算的 Hessian 逆写成生产承诺，可以用教学化记号表示：
 
-```math
-I_{\mathrm{up}}(z_i,z_*)=-\nabla_\theta \ell(z_*,\hat{\theta})^\top H_{\hat{\theta}}^{-1}\nabla_\theta \ell(z_i,\hat{\theta})
-```
+~~~math
+I_up(z_i, z_star) = -dot(g_star, H_inv(g_i))
+~~~
 
-其中 `ell` 是 loss，`theta_hat` 是训练后的参数，`H_theta_hat` 是经验风险 Hessian。这个公式表达的是“如果稍微上调训练点 `z_i` 的权重，测试点 `z_*` 的 loss 如何变化”。在大模型中直接求 `H^{-1}` 通常不可行，因此常用梯度相似、TracIn 式训练轨迹或小模型 proxy 做近似。
+g_i 是训练点梯度，g_star 是测试点梯度，H_inv 表示经验风险曲率的逆算子。这个式子表达“如果稍微上调训练点权重，测试点 loss 可能如何变化”，不是说真实训练一定满足线性近似。深度非凸模型、优化路径和分布漂移都会削弱它的可靠性。
 
 梯度相似 proxy 可以写成：
 
-```math
-A_i=\frac{g_i^\top g_T}{\|g_i\|_2\|g_T\|_2}
-```
+~~~math
+A_i = dot(g_i, g_T) / (norm(g_i) * norm(g_T))
+~~~
 
-其中 `g_i` 是训练样本或数据源的梯度特征，`g_T` 是目标任务、目标验证集或错误样本的梯度特征。`A_i` 越高，说明方向越接近，但它仍然不是严格因果证明。
+g_T 是目标任务、验证集或错误切片的梯度特征。A_i 高说明方向相近，不能单独证明训练样本导致了目标能力，也不能代替隐私、版权和污染检查。
 
-Data Shapley 把每条数据看成参与者，价值为平均边际贡献：
+Data Shapley 把数据看成参与者，价值是不同子集中的平均边际贡献：
 
-```math
-\phi_i=\sum_{S\subseteq D\setminus \{z_i\}}\frac{|S|!(n-|S|-1)!}{n!}\left[U(S\cup \{z_i\})-U(S)\right]
-```
+~~~math
+phi_i = sum_S(weight(S) * (U(S union {z_i}) - U(S)))
+~~~
 
-这个公式理论性质好，但精确计算需要枚举大量子集。大模型里通常只在小数据池上做近似，或者把 Shapley 思想用于源级、簇级和任务级估值。
+其中 S 遍历不包含 z_i 的子集，weight(S) 是按子集大小分配的 Shapley 权重。精确遍历代价随样本数指数增长，大模型通常只在小数据池上近似，或把思想迁移到源级、簇级和任务级。
 
-最终数据选择可以写成一个带约束的预算问题：
+为了比较不同大小的数据源，可以看单位有效 token 的净价值：
 
-```math
-\max_{s_i\in\{0,1\}}\sum_i s_i v_i
-```
+~~~math
+V_k = (Delta_add_k - lambda_R * Delta_R_k - lambda_C * Delta_C_k) / effective_tokens_k
+~~~
 
-```math
-\sum_i s_i b_i\le B,\quad R(\{z_i:s_i=1\})\le \tau_R
-```
+effective_tokens_k 不是原始 token 数，而是经过质量、重复、污染和可用性处理后的有效 token。这个归一化能帮助比较大小不同的数据源，但不能消除数据之间的互补关系。
 
-其中 `v_i` 是估计数据价值，`b_i` 是 token、标注或训练成本，`B` 是预算，`tau_R` 是风险上限。工程上还会加语言、领域、任务、来源和多样性约束。
+最终选择可以写成带预算和覆盖约束的问题：
+
+~~~math
+maximize sum_i(s_i * v_i)
+subject to sum_i(s_i * b_i) <= B
+and Risk(selected) <= tau_R
+~~~
+
+s_i 表示是否选择，v_i 是估计价值，b_i 是 token、标注或训练成本，B 是预算，tau_R 是风险上限。工程上还应加入语言、领域、任务、来源、多样性和最小覆盖约束，否则优化器可能把全部预算集中到单一高分数据。
 
 ---
 
@@ -468,9 +476,9 @@ Data valuation 直接服务 data mixture。
 
 ---
 
-## 18. 面向专家：数据价值是目标依赖的边际贡献
+## 18. 机制与边界：数据价值是目标依赖的边际贡献
 
-从专家视角看，数据价值不是数据本身的固定属性，而是目标依赖的边际贡献。
+从机制上看，数据价值不是数据本身的固定属性，而是目标依赖的边际贡献。
 
 同一条数据在不同情况下价值不同：
 
@@ -486,33 +494,19 @@ Data valuation 直接服务 data mixture。
 
 ## 19. 一个可落地的数据归因和估值方案
 
-如果面试官问：“如何评估一个数据源对大模型是否有价值？”可以按下面回答。
+一个可落地的数据归因与估值流程，先要把“价值”改写成可观察的目标。目标可以是提升数学、代码、多语言、安全或事实性，也可以是降低幻觉、误拒和单位成功成本。若目标没有写清，任何 source ranking 都只是把隐含偏好伪装成数字。
 
-第一步，明确目标。是提升代码、数学、多语言、安全、事实性，还是降低幻觉和误拒。
+随后建立数据元信息：来源、语言、领域、质量分、去重簇、license、token 数、时间、隐私状态、污染状态和版本。离线检查完成后，再用加入、删除、上采样和下采样实验测量源级变化；用 embedding、关键词、领域分类、validation loss 和人工样例解释它覆盖的能力；用通用能力、安全、误拒、幻觉、多语言和风格指标观察副作用。
 
-第二步，建立数据元信息。记录来源、语言、领域、质量分、去重簇、license、token 数、时间和版本。
-
-第三步，做离线质量评估。看噪声、重复、污染、隐私、版权和人工抽样质量。
-
-第四步，做小规模训练实验。比较加入、删除、上采样、下采样该数据源后的多维指标变化。
-
-第五步，做目标任务相关性分析。用 embedding、关键词、领域分类、validation loss 和人工样例分析它覆盖哪些能力。
-
-第六步，做副作用评估。看通用能力、安全、误拒、幻觉、多语言和风格是否变差。
-
-第七步，估算成本和风险。包括采购、清洗、标注、授权、隐私和维护成本。
-
-第八步，形成决策。保留、扩充、上采样、降权、隔离、重洗或删除。
-
-第九步，版本化记录。保存实验配置、数据版本、评估结果和决策理由。
+最后把采购、清洗、标注、授权、隐私、训练和维护成本放进同一份决策记录，形成保留、扩充、上采样、降权、隔离、重洗或删除等动作。每次动作都要绑定数据版本、实验配置、评估矩阵和理由，下一次回放时才能区分真实收益与随机波动。
 
 ### 19.1 最小可运行数据归因与估值 demo
 
 下面这个 demo 不依赖外部库，也不读写文件。输入是一组 toy 数据源，输出包括源级价值排名、目标任务 attribution proxy、token budget 下的数据选择、小规模 Shapley 估值、负价值 / 阻断数据和污染阻断清单。
 
-它演示的是数据估值工程闭环，不是真实 influence function、生产级 Shapley、完整小模型训练或大规模数据选择系统。真实系统需要接入训练日志、数据版本、评估矩阵、embedding / gradient 特征、消融实验、人工审计和合规风险系统。
+它演示的是数据估值工程闭环，不是真实 influence function、生产级 Shapley、完整小模型训练或大规模数据选择系统。真实系统需要接入训练日志、数据版本、评估矩阵、embedding / gradient 特征、消融实验、人工审计和合规风险系统。demo 的 decision 只表示可以继续做小规模数据实验，不等于已经证明某个数据源对最终大模型有严格因果贡献。
 
-```python
+~~~python
 from itertools import permutations
 from math import sqrt
 
@@ -617,6 +611,28 @@ report = {
     "total_selected_value": round(sum(row["value"] for row in rows if row["id"] in selected), 4),
     "blocked_contamination": [src["id"] for src in sources if src["contam"]],
 }
+checks = {
+    "contamination_isolated": bool(report["blocked_contamination"]),
+    "negative_sources_exposed": bool(report["negative_or_blocked"]),
+    "budget_respected": report["used_tokens"] <= budget,
+    "interaction_visible": shapley["math_verified"] > 0.30 and shapley["code_tests"] > 0.20,
+}
+signals = {
+    "top_source": ranked[0]["id"],
+    "top_attribution_source": report["top_attribution"][0][0],
+    "selected_value": report["total_selected_value"],
+    "negative_or_blocked": report["negative_or_blocked"],
+}
+actions = [
+    "exclude_contaminated_sources",
+    "review_negative_value_sources",
+    "run_source_level_ablation",
+]
+decision = "continue_to_source_ablation" if all(checks.values()) else "hold_for_valuation_review"
+report["checks"] = checks
+report["signals"] = signals
+report["actions"] = actions
+report["decision"] = decision
 
 for key, value in report.items():
     print(f"{key}=", value)
@@ -625,11 +641,13 @@ assert report["selected_under_budget"] == ["code_tests", "math_verified", "safet
 assert report["used_tokens"] == 2300
 assert report["negative_or_blocked"] == ["old_legal_forum", "benchmark_leak"]
 assert report["shapley_demo"] == {"math_verified": 0.365, "code_tests": 0.26, "synthetic_template": -0.085}
-```
+assert all(checks.values())
+assert report["decision"] == "continue_to_source_ablation"
+~~~
 
 运行后会看到类似输出：
 
-```text
+~~~text
 ranked_sources= [('math_verified', 0.1808), ('code_tests', 0.1599), ('zh_domain', 0.1288), ('safety_boundary', 0.1202), ('synthetic_template', 0.0782), ('old_legal_forum', -0.0184), ('benchmark_leak', -1.0)]
 top_attribution= [('math_verified', 0.942), ('benchmark_leak', 0.93), ('synthetic_template', 0.922)]
 selected_under_budget= ['code_tests', 'math_verified', 'safety_boundary']
@@ -638,83 +656,142 @@ negative_or_blocked= ['old_legal_forum', 'benchmark_leak']
 shapley_demo= {'math_verified': 0.365, 'code_tests': 0.26, 'synthetic_template': -0.085}
 total_selected_value= 0.4609
 blocked_contamination= ['benchmark_leak']
-```
+checks= {'contamination_isolated': True, 'negative_sources_exposed': True, 'budget_respected': True, 'interaction_visible': True}
+signals= {'top_source': 'math_verified', 'top_attribution_source': 'math_verified', 'selected_value': 0.4609, 'negative_or_blocked': ['old_legal_forum', 'benchmark_leak']}
+actions= ['exclude_contaminated_sources', 'review_negative_value_sources', 'run_source_level_ablation']
+decision= continue_to_source_ablation
+~~~
 
 这个 demo 的重点是：高 attribution 相似度不等于可训练价值。`benchmark_leak` 和目标梯度很相似，但因为评测污染必须被阻断；`old_legal_forum` 虽然有一点覆盖度，但质量低、风险高且带来负向指标，应进入重洗或降权候选。
 
 ---
 
-## 20. 常见面试题
+## 20. 决策边界：归因证据如何支持数据决策
 
-### 20.1 什么是 data attribution？
+归因和估值都在回答“数据与结果之间有什么关系”，但它们的证据责任不同。attribution 更接近解释一个错误或能力变化的来源，valuation 更接近比较候选数据对资源分配的净效用。前者找到相关训练点，不等于证明它们造成了结果；后者得到高分，也不等于数据可以购买、训练或再分发。
 
-data attribution 是追溯模型行为、预测、错误或能力变化可能来自哪些训练数据、数据源或数据分布的过程。它主要用于解释、诊断和审计。
+### 20.1 相关性、归因和因果性要分层
 
-### 20.2 什么是 data valuation？
+相似检索、关键词命中和梯度相似只能说明候选数据与目标任务接近。它们适合生成待审列表，不能单独说明“这条数据导致了模型回答”。更强的证据来自源级消融、配比对照、不同随机种子复现和独立任务评估；最强的工程证据通常仍然是受控重训或可回放的训练实验。
 
-data valuation 是估计数据对目标模型性能、能力、风险或产品价值的贡献，用于数据选择、采购、标注优先级和配比决策。
+可以把证据强度分成三层：候选线索、干预关联和重复干预。候选线索用于缩小范围，干预关联用于比较加入/删除后的行为变化，重复干预用于判断结果是否稳定。报告时应明确当前结论停在哪一层，而不是把三个层级写成同一个 attribution score。
 
-### 20.3 Influence functions 的核心思想是什么？
+### 20.2 Influence functions：局部解释，不是大模型真相
 
-它估计某个训练样本权重发生微小变化时，对某个测试点预测或 loss 的影响，从而追溯哪些训练点最影响该预测。大模型中直接使用成本高，通常作为思想或局部诊断工具。
+Influence functions 的价值在于提供一个局部敏感性问题：训练点权重略微变化时，某个测试点 loss 可能如何变化。它能帮助发现错误标注、相似训练样本和异常数据簇，尤其适合小模型、SFT 和局部错误诊断。
 
-### 20.4 Data Shapley 的核心思想是什么？
+它的边界同样重要。Hessian 逆的近似、训练路径、参数非凸性、优化器状态和分布变化都会影响结果。若模型已经经过多个阶段训练，某个预训练样本的局部 influence 不能直接解释后训练行为。使用时应保存模型 checkpoint、目标样本、梯度层、近似方法和随机种子，并用实际 downweight 或小规模删除实验复核高排名候选。
 
-把每条数据看作参与者，用它在不同数据子集中的平均边际贡献衡量价值。它理论性质好，但精确计算昂贵，大模型中通常只能做近似或用于小数据池。
+### 20.3 Shapley：处理交互，但代价和目标依赖仍在
 
-### 20.5 大模型中如何实际评估数据源价值？
+Shapley 思想把数据看作参与者，观察它在不同子集中的平均边际贡献，因此比一次 ablation 更能表达互补和替代关系。数学数据和代码数据一起出现时可能产生协同，重复网页和相似模板则可能相互稀释；单独看每个源的平均收益会漏掉这些关系。
 
-更常用源级 ablation、小模型 proxy、上采样/下采样实验、validation loss、目标任务评估、人工审计和成本风险分析，而不是逐条精确估值。
+但 Shapley 的价值依赖 utility 定义。如果 utility 只看 benchmark，污染数据可能得到很高的价值；如果 utility 还包含安全、成本、版权和多样性，排序就会改变。近似算法还会引入采样误差，因此应报告子集数量、估计方差、目标评估集和是否使用污染隔离。
 
-### 20.6 数据价值是不是一个固定分数？
+### 20.4 小模型 proxy 和真实训练如何衔接
 
-不是。数据价值依赖目标模型、训练阶段、已有数据分布、评估指标和风险约束。同一数据在不同任务和配比下价值不同。
+小模型 proxy 的作用是便宜地筛选候选，而不是提前宣判最终结果。它适合比较明显低质源、语言覆盖和粗粒度配比，不能保证同一排序会在更大模型、更多训练步或不同 tokenizer 上保持不变。
 
-### 20.7 如何发现负价值数据？
+一个稳妥的流程是：先用小模型和离线特征筛出少量候选，再在匹配训练阶段的中型模型上做源级 ablation，最后把关键决策放入目标模型的有限预算实验。每一层都要保留未选的对照组，否则只能看到被优化过的路径，看不到筛选偏差。
 
-可以结合低质量分、异常 loss、人工审计、错误归因、数据消融、安全回归和污染检测，找出错误标注、过时知识、低质合成、隐私风险或导致误拒的数据。
+### 20.5 负价值数据与风险阻断不是同一件事
 
----
+低 utility 可能表示数据没帮助，负 utility 可能表示它损害了目标指标；污染、未授权和敏感数据则可能即使 utility 很高也必须阻断。demo 中 benchmark_leak 与目标梯度相似，却不能进入训练；这说明价值排序必须在合规和评测完整性约束之后解释。
 
-## 21. 常见误区
+还要区分负价值和暂时低边际价值。一个数学源在数学数据稀缺时可能很有用，过量后边际收益下降；一个低资源语言源在总体 loss 上不显眼，却可能对该语言的用户任务不可替代。删除动作必须查看分桶结果、长尾覆盖和替代来源，而不是只看平均分。
 
-误区一：数据价值可以精确算出来。
+### 20.6 主动学习：标注预算应该购买信息
 
-在大模型场景下，价值通常只能近似估计，并且依赖目标和评估集。
+主动学习的目标不是把最难样本全部交给标注者，而是在价值、代表性、风险和标注成本之间选择下一批信息。高不确定性样本可能是边界案例，也可能只是噪声；高模型分歧样本可能暴露 rubric 缺陷，也可能来自输入本身不可判定。
 
-误区二：单条数据估值最重要。
+标注优先级可以写成一个待排序对象：
 
-预训练中源级、簇级和任务级估值往往更实用；样本级估值更适合 SFT、偏好和安全数据。
+~~~math
+P_i = (uncertainty_i, disagreement_i, coverage_gap_i, risk_i, cost_i)
+~~~
 
-误区三：某数据源提升一个 benchmark 就一定有价值。
+实际决策应对这个向量做分桶和人工审阅，而不是简单排序一个 P_i。安全、医学、法律和隐私样本需要更高的专家门槛；普通风格样本则可以使用更便宜的标注策略。
 
-还要看污染、泛化、副作用、安全、成本和授权。
+### 20.7 什么时候可以把估值用于资源分配
 
-误区四：低质量分数据一定没用。
+当目标指标和分母固定、数据版本可回放、污染和授权状态明确、候选排序在独立切片上相对稳定，并且至少有一轮小规模干预实验时，估值才适合支持采购、扩充或降权。若只有一个 benchmark、一个随机种子和一个相似度分数，应把结论限定为“待验证候选”。
 
-某些真实口语、低资源语言或边界样本可能质量分低但对目标能力重要。
-
-误区五：数据归因能证明严格因果。
-
-多数工程归因是近似证据链，不是严格因果证明。
-
-误区六：数据选择只选高价值样本。
-
-还要保留多样性、长尾覆盖和真实分布，否则模型容易过拟合窄目标。
+资源动作还要有反事实对照。例如决定采购某源时，至少比较同等 token 预算下的替代源；决定删掉某源时，观察数据量减少、配比变化和训练步数不变分别造成什么影响。否则“这个源有效”可能只是“这次训练总 token 增多了”。
 
 ---
 
-## 22. 本章小结
+## 21. 失败模式与修复顺序
 
-Data Attribution 与 Valuation 是大模型数据工程从“经验驱动”走向“证据驱动”的关键。
+### 21.1 把 valuation 分数当成数据价格
 
-本章要记住几句话：
+估值分数是相对于目标和成本的净效用近似，不是市场价格，也不是创作者补偿或法律权利的自动依据。采购决策还需要许可、可持续供给、质量稳定性、删除能力和合同条款。
 
-1. attribution 关注模型行为来自哪些数据，valuation 关注数据有多少决策价值。
-2. influence functions 和 Data Shapley 提供了重要思想，但大模型中通常需要近似。
-3. 数据价值不是固定属性，而是目标依赖的边际贡献。
-4. 大模型更常做数据源级、数据簇级和任务级估值。
-5. 好的数据估值要同时看收益、成本、风险、副作用和可治理性。
-6. 最实用的方案是质量评估、小模型实验、消融、相似检索、人工审计和版本记录组成的证据链。
+### 21.2 只用一个 benchmark 训练估值器
 
-如果面试中被问到数据价值评估，最好的回答不是直接说“用 Shapley 算”，而是说明：先定义目标和评估矩阵，再建立数据元信息，做源级和小规模实验，结合 attribution 诊断、副作用评估、成本风险分析，最后形成可版本化的数据决策。
+单一 benchmark 很容易让数据选择器围绕题型、模板或污染线索优化。至少要加入目标任务、邻近任务、通用能力、安全、长尾语言和人工样例，并把训练数据与评估数据隔离。
+
+### 21.3 用小模型排序直接外推大模型
+
+模型尺寸、tokenizer、训练步数和优化阶段不同，会改变数据的边际价值。小模型 proxy 只能降低搜索成本，关键排序必须在更接近生产条件的实验中复核。
+
+### 21.4 删除源的同时改变了所有变量
+
+删除一个数据源通常会同时改变总 token、训练步数、其他数据比例、去重率和 batch 分布。对照实验应固定能固定的变量，并报告无法固定的变量；否则 Delta_drop 不能归因于源本身。
+
+### 21.5 只选正向数据，破坏分布和多样性
+
+高分数据可能集中于头部语言、短任务和评测风格。过度筛选会删除真实口语、长尾领域和困难但有代表性的样本。数据选择必须保留覆盖约束、来源多样性和自然分布锚点。
+
+### 21.6 梯度相似度高就允许训练
+
+梯度相似度没有回答是否有授权、是否含 PII、是否污染评测、是否重复或是否会产生副作用。它最多决定“优先审查哪些样本”，不能绕过数据治理。
+
+### 21.7 把异常 loss 直接当成负价值
+
+高 loss 可能是错误样本，也可能是新知识、低资源语言、难例或有价值的边界任务。先按语言、领域、长度和来源分桶，再做人工抽样和消融，不能用一个 loss 阈值批量删除。
+
+### 21.8 忽略版本和派生数据
+
+同一数据源经过清洗、翻译、合成、去重和配比后，已经不是同一个数据对象。归因报告必须绑定快照和派生血缘，否则后续无法解释排名变化，更无法响应删除或污染事件。
+
+---
+
+## 22. 从估值信号到可回放的数据决策
+
+数据估值的终点不是输出一个排行榜，而是形成一条可以被复查的决策记录：
+
+~~~text
+目标定义 -> 候选构造 -> 线索估值 -> 干预实验 -> 多维评估 -> 风险成本修正 -> 数据动作 -> 版本回放
+~~~
+
+目标定义要写清任务、模型阶段、评估集和权重；候选构造要写清数据源、簇和样本边界；线索估值要保存相似检索、梯度、loss 或 Shapley 近似的配置；干预实验要保存基线、随机种子、训练 token 和替代源；多维评估要覆盖收益、副作用、风险和长尾；数据动作要写明保留、扩充、降权、隔离、重洗或删除。
+
+一个最小的归因包应包含：目标样本和评估集 hash、数据快照、候选排名、近似算法、源级消融、人工复核、风险与许可状态、训练配置、结果区间和决策人。之后如果模型在法律、代码或安全切片上发生变化，团队可以回放当时的证据，而不是重新凭记忆解释一遍。
+
+---
+
+## 23. 资料与证据边界
+
+本章把资料分成经典方法论文、数据选择研究和治理框架。经典论文支持 influence 与 Shapley 的概念和近似方法；数据选择论文支持在特定模型、任务和预算下筛选数据的实验观察；治理框架支持风险、责任和审计的组织方式。它们都不能单独证明当前项目的数据许可、隐私合规或最终模型因果归因。
+
+主要原始资料如下：
+
+1. Koh 和 Liang，《Understanding Black-box Predictions via Influence Functions》，<https://arxiv.org/abs/1703.04730>。它是 influence functions 用于训练数据解释的经典公开入口，支持局部影响近似的理论背景，不代表大模型中可以无成本精确求解。
+2. Ghorbani 和 Zou，《Data Shapley: Equitable Valuation of Data for Machine Learning》，<https://arxiv.org/abs/1904.02868>。它给出数据 Shapley 的数据估值框架，支持边际贡献和交互的叙述；实际大模型应用仍需要近似和目标限定。
+3. Pruthi 等，《Estimating Training Data Influence by Tracing Gradient Descent》，<https://arxiv.org/abs/2002.08484>。它提出通过训练轨迹估计数据影响的路线，支持 TracIn 类信号的研究背景。
+4. 《Dataset Cartography: Mapping and Diagnosing Datasets with Training Dynamics》，<https://arxiv.org/abs/2009.10795>。它支持使用训练动态分析数据集区域和疑难样本的思路，不等于异常样本都应删除。
+5. Xie 等，《DoReMi: Optimizing Data Mixtures Speeds Up Language Model Pretraining》，<https://arxiv.org/abs/2305.10429>。它说明数据混合可以通过目标验证损失进行优化，支持数据配比与估值相互影响的叙述。
+6. Xia 等，《LESS: Selecting Influential Data for Targeted Instruction Tuning》，<https://arxiv.org/abs/2402.04333>。它提供目标指令调优中影响数据选择的研究案例，结论仍受目标任务和实验条件约束。
+7. NIST AI Risk Management Framework，<https://www.nist.gov/itl/ai-risk-management-framework>。它提供风险识别、治理、测量和管理的官方框架入口，本章只借用治理结构，不把它改写成数据价值的法律或财务意见。
+
+读者在迁移这些方法时，应明确论文的模型规模、数据分布、目标指标、采样方式和版本；同时重新检查授权、隐私、污染、长尾覆盖和独立评估。一个可复现的近似结果，仍然只是限定条件下的证据，不是跨任务、跨模型的永久结论。
+
+---
+
+## 24. 结语
+
+Data Attribution 让我们追问模型行为的来源，Data Valuation 让我们在有限预算下比较数据动作。它们真正有用的地方，不是制造一个看似精确的分数，而是把数据选择从直觉判断变成可解释、可干预和可回放的过程。
+
+当一个数据源排名靠前时，要继续问它提升了哪个目标、是否只是评测污染、是否挤占了其他能力、成本和风险是多少；当一个数据源排名靠后时，也要问它是不是长尾覆盖、关键安全边界或稀缺专业知识，而不是简单删除。
+
+成熟的数据价值系统保留不确定性和冲突：相似度是线索，消融是干预，人工审计是证据，风险与成本是约束，版本记录是复查入口。只有把这些部分连在一起，估值才真正服务于数据工程，而不会变成另一种脱离目标的排行榜。

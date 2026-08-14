@@ -10,17 +10,17 @@
 
 > RAG 提供知识，Tool 执行动作，Agent 组织过程，Memory 保留长期状态。
 
-## 43.0 本讲资料边界与第二轮精修口径
+## 43.0 本讲范围与资料
 
-本讲第二轮精修时，参考了 RAG 原论文对 retrieval augmented generation 的知识检索与生成边界，OpenAI Agents SDK 对 tools、handoffs、guardrails、sessions 和 tracing 的运行时抽象，LangGraph / LangChain 官方文档对 short-term memory、long-term memory、context engineering 和 graph state 的工程划分，以及前面章节已经建立的工具权限、工具输出可信度、prompt injection 防御和 trace / replay 口径。
+本章参考 RAG 原论文对 retrieval augmented generation 的知识检索与生成边界，OpenAI Agents SDK 对 tools、handoffs、guardrails、sessions 和 tracing 的运行时抽象，LangGraph / LangChain 官方文档对 short-term memory、long-term memory、context engineering 和 graph state 的工程划分，以及前面章节已经建立的工具权限、工具输出可信度、prompt injection 防御和 trace / replay 口径。
 
-为了避免把某个框架 API 写成通用标准，本章只抽象稳定的组合边界：
+为了避免把某个框架 API 写成通用标准，本章聚焦稳定的组合边界：
 
 1. RAG 是知识检索和证据构造模式，不等于所有 search tool。
 2. Tool 是外部可调用能力，不等于 Agent 的整体规划过程。
 3. Agent 是围绕目标组织 RAG、Tool、Memory、状态、失败恢复和完成判定的 runtime。
 4. Memory 是长期状态或个性化数据资产，不是无边界的上下文缓存。
-5. 组合系统的质量要用上下文优先级、预算、证据链、状态更新、Memory 写入门禁、安全边界、trace 和分层 eval 共同证明。
+5. 组合系统的质量要用上下文优先级、预算、证据链、状态更新、Memory 写入验收条件、安全边界、trace 和分层 eval 共同证明。
 
 ## 43.1 四个概念的一句话区分
 
@@ -457,7 +457,7 @@ C_j=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[g_j(h_i)=1]
 R_{\mathrm{unsafe}}=\frac{\sum_{i=1}^{N}\mathbf{1}[\mathrm{unsafe\_integration}_i=1]}{N}
 ```
 
-综合门禁可以写成：
+综合验收条件可以形式化为：
 
 ```math
 G_{\mathrm{integration}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land R_{\mathrm{unsafe}}=0 \land P_0=0\right]

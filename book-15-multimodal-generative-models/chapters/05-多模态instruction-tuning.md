@@ -4,13 +4,13 @@
 
 本章重点讲多模态 SFT 的数据格式、image token、chat template、assistant-only loss mask、OCR、图表理解、grounding、多轮图文对话、数据质量和评估思路。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲第二轮精修前，重点校准了 LLaVA / Visual Instruction Tuning、InstructBLIP、LLaVA-1.5 和 MiniGPT-4 等公开论文资料。它们共同说明了一点：把视觉特征接入 LLM 之后，还需要多模态指令数据教模型如何按人类问题使用图片、如何组织回答、如何处理 OCR / 图表 / grounding / 多轮对话，以及如何在证据不足或高风险场景中拒答。
+本章参考重点校准了 LLaVA / Visual Instruction Tuning、InstructBLIP、LLaVA-1.5 和 MiniGPT-4 等公开论文资料。它们共同说明了一点：把视觉特征接入 LLM 之后，还需要多模态指令数据教模型如何按人类问题使用图片、如何组织回答、如何处理 OCR / 图表 / grounding / 多轮对话，以及如何在证据不足或高风险场景中拒答。
 
-本讲只讨论多模态 instruction tuning 的数据与训练审计，不展开第 4 章已经讲过的 VLM connector 结构，也不提前进入第 6 章 diffusion 的图像生成训练。重点放在：样本 schema、chat template、image placeholder、assistant-only loss mask、任务覆盖、证据支持、拒答边界、mixture 和数据质量门禁。
+本章讨论多模态 instruction tuning 的数据与训练审计，不展开第 4 章已经讲过的 VLM connector 结构，也不提前进入第 6 章 diffusion 的图像生成训练。重点放在：样本 schema、chat template、image placeholder、assistant-only loss mask、任务覆盖、证据支持、拒答边界、mixture 和数据质量验收条件。
 
-第二轮新增内容按三个目标补齐：
+本章围绕三个目标展开：
 
 1. 把多模态 SFT 的样本、label mask、token budget、任务覆盖、证据支持和拒答准确率写成可检查公式。
 2. 给出一个 0 依赖 Python demo，帮助读者审计图文对话样本能否进入训练。
@@ -231,7 +231,7 @@ A_{\mathrm{refuse}}=
 
 其中 `r_i=1` 表示样本确实需要拒答或表达不确定，`\hat r_i=1` 表示目标回答采用了正确拒答。
 
-一个多模态 SFT 数据门禁可以写成：
+一个多模态 SFT 数据准入条件可以形式化为：
 
 ```math
 G_{\mathrm{mm\_sft}}=
@@ -648,7 +648,7 @@ batch 里可能包含：
 
 ## 5.19 最小可运行多模态 SFT 数据审计 demo
 
-下面这个 demo 不依赖深度学习框架，用 toy 样本检查多模态 SFT 数据是否满足训练前的基本门禁：图片占位符一致、上下文不超预算、assistant-only label 数正确、任务覆盖完整、回答被视觉证据支持、资料不足样本能正确拒答。
+下面这个 demo 不依赖深度学习框架，用 toy 样本检查多模态 SFT 数据是否满足训练前的基本验收条件：图片占位符一致、上下文不超预算、assistant-only label 数正确、任务覆盖完整、回答被视觉证据支持、资料不足样本能正确拒答。
 
 ```python
 import re
@@ -888,6 +888,6 @@ gate_pass= True
 5. 拒答数据能减少视觉证据不足时的幻觉。
 6. 数据质量和 mixture 决定模型能力分布。
 7. 评估要覆盖视觉理解、OCR、图表、幻觉、安全和文本能力回归。
-8. 训练前要用数据审计门禁检查 placeholder、label mask、证据支持、拒答边界和任务覆盖。
+8. 训练前要用数据审计验收条件检查 placeholder、label mask、证据支持、拒答边界和任务覆盖。
 
 下一章会进入 diffusion 基础，讲清加噪、去噪、噪声预测、采样过程和为什么 diffusion 能生成图像。

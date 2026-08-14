@@ -4,9 +4,9 @@
 
 本章的重点不是“让模型输出一段 JSON”，而是如何设计一个可靠的工具调用系统：schema 怎么写，模型怎么选工具，参数怎么校验，权限怎么拦截，工具结果如何回填，失败如何恢复，怎么防 tool result injection，以及如何用指标评估整个调用链。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本章第二轮精修时，按 `WRITING_PLAN.md` 要求联网核对了 OpenAI function calling / tools / Structured Outputs / Agents SDK 相关官方文档，ReAct 与 Toolformer 论文，以及 OWASP LLM Top 10 中 Prompt Injection 与 Excessive Agency 的安全边界。
+本章参考了 OpenAI function calling / tools / Structured Outputs / Agents SDK 相关官方文档，ReAct 与 Toolformer 论文，以及 OWASP LLM Top 10 中 Prompt Injection 与 Excessive Agency 的安全边界。
 
 本章采用以下口径：
 
@@ -142,7 +142,7 @@ R_{\mathrm{inj}}=\frac{1}{N_{\mathrm{case}}}\sum_{i=1}^{N_{\mathrm{case}}}\mathb
 
 其中 `R_inj` 是工具结果注入违规率，关注不可信 observation 是否诱导了高权限动作、参数污染或规则覆盖。
 
-一个简化上线门禁可以写成：
+一个简化上线准入条件可以形式化为：
 
 ```math
 G_{\mathrm{tool}}=
@@ -156,7 +156,7 @@ A_{\mathrm{tool}}\ge \tau_t
 ]
 ```
 
-这个公式的直觉是：工具调用系统必须同时满足正确性、可执行性和安全性。最终答案正确但越权调用了高风险工具，仍然不能通过上线门禁。
+这个公式的直觉是：工具调用系统必须同时满足正确性、可执行性和安全性。最终答案正确但越权调用了高风险工具，仍然不能通过上线条件。
 
 ## 2.4 Schema 是工具调用的契约
 
@@ -739,6 +739,6 @@ Function calling 解决的是模型调用工具时的结构化和可控性问题
 
 ## 2.18 本章小结
 
-Tool use 让 Agent 能获取外部信息和执行动作，function calling 让工具调用变得结构化、可解析和可审计。可靠工具调用系统的关键不是“模型会不会输出 JSON”，而是 schema、tool registry、executor、permission gate、error recovery、tool result injection 防护、trace 和评估门禁。
+Tool use 让 Agent 能获取外部信息和执行动作，function calling 让工具调用变得结构化、可解析和可审计。可靠工具调用系统的关键不是“模型会不会输出 JSON”，而是 schema、tool registry、executor、permission gate、error recovery、tool result injection 防护、trace 和评估验收条件。
 
 下一章会进入 ReAct 与 Plan-Act-Observe，讨论 Agent 如何把推理、动作和观察组织成连续的任务执行循环。

@@ -1,6 +1,6 @@
 # 第十章：O(n^2) Attention 的计算与显存瓶颈
 
-## 10.0 本讲资料边界与第二轮精修口径
+## 10.0 本讲范围与资料
 
 截至 2026-06-10，本讲只使用公开论文、官方文档和主流框架资料来校准概念边界。这里讨论的是标准 scaled dot-product attention 的计算、显存和 IO 瓶颈，不把某个框架版本的 kernel 选择、某个模型的长上下文 recipe、或某个 toy demo 的阈值写成通用标准。
 
@@ -623,7 +623,7 @@ PagedAttention：serving memory manager 层。
 GQA/MQA：模型架构层。
 ```
 
-## 10.20 面向专家：为什么 IO-aware 很关键
+## 10.20 机制与边界：为什么 IO-aware 很关键
 
 理论 FLOPs 不是全部。
 
@@ -649,7 +649,7 @@ FlashAttention 用 tiling 让计算尽量在片上 SRAM 中完成，并用 onlin
 
 这也是为什么一些理论上低复杂度的近似 attention，不一定在真实硬件上更快。稀疏、不规则、小矩阵操作可能无法充分利用 GPU。
 
-## 10.21 面向专家：为什么近似 Attention 难替代 Full Attention
+## 10.21 机制与边界：为什么近似 Attention 难替代 Full Attention
 
 近似 attention 的目标很明确：降低复杂度。
 
@@ -682,7 +682,7 @@ FlashAttention 用 tiling 让计算尽量在片上 SRAM 中完成，并用 onlin
 
 ## 10.22 Attention 成本审计指标与最小 demo
 
-第二轮精修时，本章建议把 attention 瓶颈落到一组可审计指标，而不是只背 “O(n^2)”：
+本章把 attention 瓶颈落到一组可审计指标，而不是只背 “O(n^2)”：
 
 1. `attention_pair_count`：full、causal、sliding window 下分别有多少 query-key pair。
 2. `score_tensor_memory`：如果 materialize score matrix，单个 `S` 张量要多少显存。
@@ -690,7 +690,7 @@ FlashAttention 用 tiling 让计算尽量在片上 SRAM 中完成，并用 onlin
 4. `prefill_tflops_per_layer`：长 prompt prefill 每层 attention 的粗略 FLOPs。
 5. `decode_step_tflops_per_layer`：单步 decode 在同样历史长度下的 attention FLOPs。
 6. `window_pair_ratio`：sliding window 相对 full attention 保留了多少 pair。
-7. `attention_cost_gate`：把显存、FLOPs、上下文长度和部署预算组合成门禁。
+7. `attention_cost_gate`：把显存、FLOPs、上下文长度和部署预算组合成验收条件。
 
 下面是一个 0 依赖 demo。它不模拟真实 GPU kernel，只演示 “从 4K 到 32K 为什么是平方级放大”，以及 prefill 和 decode 的成本口径为什么不能混用。
 
@@ -768,6 +768,62 @@ attention_cost_gate_pass= False
 3. causal mask 的可见 pair 约少一半，但阶数仍然是平方级。
 4. prefill 的每层 attention FLOPs 和 decode 单步不是一个量级，因此长 prompt 的 TTFT 和长输出 decode 的瓶颈要分开分析。
 5. sliding window 能把 pair ratio 降到 0.125，但它改变了可见模式，需要再评估长距离证据召回和任务质量。
+
+### 10.22.1 混合注意力：并不是所有层都要承担 O(n^2)
+
+前文的 `O(n^2)` 结论针对的是 full attention 的 token-pair 连接。新模型的一条路线是把不同层分工：部分层保留 full 或 global attention，部分层使用 sliding window、linear attention 或递归状态。
+
+小白可以把它理解成两种记忆：
+
+```text
+显式 attention：像保留一张可检索的历史索引，精确但随长度增长。
+递归/线性状态：像把历史持续写入摘要状态，便宜但可能丢失细节。
+```
+
+对单个 head 做教学化估算时，full attention 的 pair 规模是：
+
+```math
+C_{\mathrm{full}}=O(T^2d_h)
+```
+
+而常见的 kernelized linear attention 或递归状态更新更接近：
+
+```math
+C_{\mathrm{linear}}=O(Td_kd_v)
+```
+
+对应状态大小近似为：
+
+```math
+M_{\mathrm{state}}=O(d_kd_vb)
+```
+
+这里 `d_k`、`d_v` 是状态的 key/value 维度。这个复杂度是结构级近似，不等于所有 Gated DeltaNet 或 KDA 实现都拥有相同常数、相同归一化方式或相同 GPU 吞吐。
+
+#### 10.22.1.1 新模型中的三种组合
+
+1. **局部 + 全局 attention**：Gemma 4 的公开资料给出 local sliding-window attention 与 global attention。局部层减少 pair 数，全局层保留跨窗口信息通路；最坏情况仍由 global 层的长度和数量决定。
+2. **递归/线性状态 + 显式 attention**：Qwen3.5/Qwen3.6 公开使用 Gated DeltaNet 与 Gated Attention 的组合，Kimi K3 公开给出 KDA 与 Gated MLA 的组合。它们把精确检索和压缩状态分配给不同模块。
+3. **局部 RoPE + 全局 NoPE**：North Mini Code 的公开模型卡给出 `3:1` sliding-window RoPE 与 global NoPE。这里 NoPE 只描述对应分支的显式位置处理，不表示 global 分支不受因果顺序或状态结构影响。
+
+DeepSeek-V4-Pro/Flash 的公开模型卡还给出 CSA 与 HCA 混合注意力信号。对读者而言，重要的不是记住缩写，而是先问：哪些层做全局 token-pair 交互，哪些层使用压缩/分块/层级状态，decode 时分别保留什么 cache。
+
+#### 10.22.1.2 复杂度不能直接替代质量评测
+
+如果只有一部分层使用 full attention，可以把总成本粗略写成：
+
+```math
+C_{\mathrm{total}}\approx L_g C_{\mathrm{full}}+(L-L_g)C_{\mathrm{state}}
+```
+
+其中 `L_g` 是 global/full attention 层数。这个公式可以帮助做容量预算，但不能直接推出模型准确率。状态压缩可能影响：
+
+1. 任意历史 token 的精确复制和检索。
+2. 多跳跨段推理。
+3. 代码括号、变量和长距离引用的一致性。
+4. prefix sharing、batch 合并和状态 reset 的工程复杂度。
+
+因此，长上下文模型的评估至少要把 `TTFT`、单 token decode 延迟、state/KV 显存、长距离检索、跨文档归纳和代码任务分开记录。看到“线性复杂度”时，不能只用 Big-O 宣布它一定更快。
 
 ## 10.23 常见误区
 

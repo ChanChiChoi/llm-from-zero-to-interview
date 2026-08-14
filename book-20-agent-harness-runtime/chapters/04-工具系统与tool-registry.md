@@ -1,12 +1,12 @@
 # 第四章：工具系统与 Tool Registry
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲第二轮精修时，联网核对了 OpenAI Agents SDK 关于 function tools、hosted tools、agents as tools、MCP tools、guardrails 和 tracing 的公开文档，Anthropic Claude Code 关于 tools、permissions、hooks、MCP 和 slash commands 的公开说明，Model Context Protocol 关于 tools list / call、input schema 和 tool result 的公开规范，以及 OpenHands / SWE-agent / mini-SWE-agent 中围绕 sandbox、工具执行、测试命令、轨迹和评估的公开资料。
+本章参考 OpenAI Agents SDK 关于 function tools、hosted tools、agents as tools、MCP tools、guardrails 和 tracing 的公开文档，Anthropic Claude Code 关于 tools、permissions、hooks、MCP 和 slash commands 的公开说明，Model Context Protocol 关于 tools list / call、input schema 和 tool result 的公开规范，以及 OpenHands / SWE-agent / mini-SWE-agent 中围绕 sandbox、工具执行、测试命令、轨迹和评估的公开资料。
 
-本讲只讨论防御性的 Tool Registry 与工具执行系统设计：如何定义工具 schema、权限、副作用、执行入口、错误类型、输出压缩、trace 和评估指标。它不提供绕过权限、规避 sandbox、读取密钥、构造危险 shell、批量删除文件、外发敏感数据或自动化高风险操作的方法。
+本章讨论防御性的 Tool Registry 与工具执行系统设计：如何定义工具 schema、权限、副作用、执行入口、错误类型、输出压缩、trace 和评估指标。它不提供绕过权限、规避 sandbox、读取密钥、构造危险 shell、批量删除文件、外发敏感数据或自动化高风险操作的方法。
 
-第二轮精修重点放在三件事：
+本章重点放在三件事：
 
 1. 把 Tool Registry 从“工具列表”补成可校验、可治理、可观测的系统组件。
 2. 用 GitHub 兼容公式描述 registry 完整性、schema 严格性、权限绑定、风险确认、输出标准化、版本覆盖和 trace 覆盖。
@@ -606,7 +606,7 @@ C_{\mathrm{trace}}=
 
 其中 $T_{\mathrm{need}}$ 至少包含 tool name、tool version、arguments、permission decision、status、error type 和 duration。高风险工具还应该记录 confirmation、diff summary、output truncation 和安全拦截原因。
 
-Tool Registry 门禁：
+Tool Registry 验收条件：
 
 ```math
 G_{\mathrm{toolreg}}=

@@ -12,13 +12,13 @@
 
 > AI Infra 更像底座，MLOps / LLMOps 更像模型生命周期管理，Platform Engineering 更像把底座能力产品化给内部团队使用的方法。
 
-## 2.0 本讲资料边界与第二轮精修口径
+## 2.0 本讲范围与资料
 
 本讲讨论的是概念边界和职责切分，不是给某个组织画固定组织架构，也不是定义行业统一岗位名称。真实公司里，AI Infra、ML Platform、LLMOps、Data Platform、Model Platform、SRE 和 Platform Engineering 经常会重叠，重要的是交付物、接口和责任边界可审计。
 
-第二轮精修时，我按 `WRITING_PLAN.md` 做了资料校准，主要参考公开官方资料中的稳定边界：Google Cloud 的 MLOps 资料强调 ML 系统开发与运维、自动化、监控、CI/CD/CT、数据和模型验证；MLflow 的 LLM / Agent 文档把 tracing、evaluation、prompt management、AI gateway、agent serving 和 monitoring 放在 LLM 应用工程能力里；CNCF Platforms White Paper 把平台定义成面向内部用户的一组能力、接口、模板、自助 API 和一致体验；OpenTelemetry 用 traces、metrics、logs、baggage 等 signals 描述可观测性基础；Google SRE 的 SLI / SLO 框架强调可靠性目标要由用户关心的指标驱动。
+本章参考公开官方资料中的稳定边界：Google Cloud 的 MLOps 资料强调 ML 系统开发与运维、自动化、监控、CI/CD/CT、数据和模型验证；MLflow 的 LLM / Agent 文档把 tracing、evaluation、prompt management、AI gateway、agent serving 和 monitoring 放在 LLM 应用工程能力里；CNCF Platforms White Paper 把平台定义成面向内部用户的一组能力、接口、模板、自助 API 和一致体验；OpenTelemetry 用 traces、metrics、logs、baggage 等 signals 描述可观测性基础；Google SRE 的 SLI / SLO 框架强调可靠性目标要由用户关心的指标驱动。
 
-因此，本章新增内容采用“职责边界审计”口径：不说某个工具天然属于某个团队，而是看它解决的是资源运行、模型生命周期、大模型应用生命周期、内部开发者体验、数据底座、模型资产管理还是可靠性治理问题。
+因此，本章内容采用“职责边界审计”口径：不说某个工具天然属于某个团队，而是看它解决的是资源运行、模型生命周期、大模型应用生命周期、内部开发者体验、数据底座、模型资产管理还是可靠性治理问题。
 
 ## 2.1 为什么边界容易混乱
 
@@ -120,7 +120,7 @@ MLOps 关注的问题通常是：
 1. 这次训练用了哪个数据版本？
 2. 超参和代码版本是什么？
 3. 实验指标有没有提升？
-4. 模型是否通过上线门禁？
+4. 模型是否通过上线条件？
 5. 线上数据分布是否变化？
 6. 模型效果下降后如何触发再训练？
 7. 如何回滚到上一个稳定模型？
@@ -422,7 +422,7 @@ Platform Engineering 是一种产品化内部平台的方式，把上述能力�
 
 ## 2.15 边界审计指标与最小 demo
 
-边界题最容易答成“背名词”。更可靠的方式是把每个需求映射到主责层、协作层、交付物和门禁。
+边界题最容易答成“背名词”。更可靠的方式是把每个需求映射到主责层、协作层、交付物和验收条件。
 
 先定义一个需求或事故样本：
 
@@ -450,15 +450,15 @@ C_j=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[g_j(b_i)=1]
 A_{k,m}\in\{0,1\}
 ```
 
-其中，`A_{k,m}=1` 表示第 `k` 个平台层对第 `m` 个能力有主责或硬门禁责任。注意：主责不代表独占。比如模型 registry 可以属于 MLOps / Model Platform，但它要和 AI Infra 的存储、推理平台的模型加载、评估平台的报告和权限系统打通。
+其中，`A_{k,m}=1` 表示第 `k` 个平台层对第 `m` 个能力有主责或硬性条件责任。注意：主责不代表独占。比如模型 registry 可以属于 MLOps / Model Platform，但它要和 AI Infra 的存储、推理平台的模型加载、评估平台的报告和权限系统打通。
 
-边界门禁可以写成：
+边界准入条件可以形式化为：
 
 ```math
 G_{\mathrm{boundary}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land R_{\mathrm{route}}=0 \land P_0=0\right]
 ```
 
-其中，`\tau_j` 是各维度最低通过率，`P_0` 是 P0 级边界风险数量。边界风险的典型形式是：出了事故没人主责、上线前缺硬门禁、平台接口没有 owner、模型版本和数据版本断链、安全策略只写在文档里、成本和 SLO 无法归因。
+其中，`\tau_j` 是各维度最低通过率，`P_0` 是 P0 级边界风险数量。边界风险的典型形式是：出了事故没人主责、上线前缺硬性条件、平台接口没有 owner、模型版本和数据版本断链、安全策略只写在文档里、成本和 SLO 无法归因。
 
 下面是一个 0 依赖 Python demo。它把本章概念做成 toy 边界审计表：
 
@@ -579,7 +579,7 @@ print("failed_gates=", report["failed_gates"])
 print("boundary_gate_pass=", report["boundary_gate_pass"])
 ```
 
-这段 demo 里有 1 个完整样本和 16 个边界错误样本，所以每个维度的覆盖率是 `16/17=0.941`，低于 `0.95` 阈值。它想训练的不是固定答案，而是边界判断方法：先识别主责层，再列协作层，再说明交付物和门禁。面试时只要能把事故路由、artifact 血缘、trace / SLO、安全成本和开发者自助讲清楚，就不会停留在名词解释。
+这段 demo 里有 1 个完整样本和 16 个边界错误样本，所以每个维度的覆盖率是 `16/17=0.941`，低于 `0.95` 阈值。它想训练的不是固定答案，而是边界判断方法：先识别主责层，再列协作层，再说明交付物和验收条件。面试时只要能把事故路由、artifact 血缘、trace / SLO、安全成本和开发者自助讲清楚，就不会停留在名词解释。
 
 ## 2.16 常见误区
 

@@ -1,8 +1,8 @@
 # 第十五章：Agent Harness 系统设计
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲第二轮精修时，优先参考 OpenAI Agents SDK 关于 agent loop、tools、sessions、guardrails、human-in-the-loop、MCP、tracing 和 sandbox agents 的公开资料，Claude Code 关于权限、安全、sandbox、prompt injection、MCP 安全、云端隔离和 audit logging 的公开文档，OpenCode server / permissions 文档中 server API、session、message、permission、diff、MCP、LSP 和事件流的公开能力，SWE-agent 关于 environment、container / shell session、agent、parser、tool execution 和 trajectory 的公开设计，Aider repo map 文档，以及 OpenHands SDK / CLI / GUI / Cloud / Enterprise / REST API / RBAC 公开资料。
+本章参考 OpenAI Agents SDK 关于 agent loop、tools、sessions、guardrails、human-in-the-loop、MCP、tracing 和 sandbox agents 的公开资料，Claude Code 关于权限、安全、sandbox、prompt injection、MCP 安全、云端隔离和 audit logging 的公开文档，OpenCode server / permissions 文档中 server API、session、message、permission、diff、MCP、LSP 和事件流的公开能力，SWE-agent 关于 environment、container / shell session、agent、parser、tool execution 和 trajectory 的公开设计，Aider repo map 文档，以及 OpenHands SDK / CLI / GUI / Cloud / Enterprise / REST API / RBAC 公开资料。
 
 边界要说清楚：
 
@@ -10,7 +10,7 @@
 2. OpenAI Agents SDK、Claude Code、OpenCode、SWE-agent、Aider、OpenHands 等公开资料只作为可迁移设计参考；不同产品版本和部署形态会变化。
 3. 本章聚焦防御性 coding agent harness：session、orchestrator、context builder、model adapter、capability registry、permission engine、execution engine、sandbox、diff/revert、trace、replay、evaluation、MCP/A2A、server/SDK 和企业治理。
 4. 不提供绕过 sandbox、读取密钥、规避权限、破坏工作区、隐藏 trace、伪造评估通过、攻击 MCP/A2A 外部系统或让 agent 自动执行高风险生产动作的方法。
-5. 公式和 demo 的目标是把“系统设计回答”落到可审计模块和上线门禁，而不是替代真实架构评审、威胁建模或企业安全合规流程。
+5. 公式和 demo 的目标是把“系统设计回答”落到可审计模块和上线条件，而不是替代真实架构评审、威胁建模或企业安全合规流程。
 
 一句话口径：Agent Harness 系统设计不是画一个模型调用框，而是证明模型外层的状态机、权限、执行、上下文、trace、replay、评估和治理都能闭环。
 
@@ -969,7 +969,7 @@ C_{\mathrm{gov}}=
 \sum_{i\in M_{\mathrm{present}}}\mathbb{1}[h_i=1]
 ```
 
-最终上线门禁可以写成：
+最终上线准入条件可以形式化为：
 
 ```math
 G_{\mathrm{system}}=
@@ -977,11 +977,11 @@ G_{\mathrm{system}}=
 \mathbb{1}[C_z\ge \tau_z]
 ```
 
-其中 `\mathcal{Z}` 包含 module、contract、state、permission、context、isolation、trace、replay、eval、recovery、version 和 governance。这个门禁的价值是防止面试回答只画出模块名，却没有说明模块间契约、权限边界、状态恢复和评估复现。
+其中 `\mathcal{Z}` 包含 module、contract、state、permission、context、isolation、trace、replay、eval、recovery、version 和 governance。这组条件的价值是防止面试回答只画出模块名，却没有说明模块间契约、权限边界、状态恢复和评估复现。
 
 ### 15.23.1 最小可运行 Harness 系统设计审计 demo
 
-下面的 0 依赖 demo 不调用模型、不执行命令、不访问文件系统和网络。它只审计一张 toy module table，用来演示如何把 Agent Harness 系统设计从架构图落到上线门禁。
+下面的 0 依赖 demo 不调用模型、不执行命令、不访问文件系统和网络。它只审计一张 toy module table，用来演示如何把 Agent Harness 系统设计从架构图落到上线条件。
 
 ```python
 required_modules = {
@@ -1108,7 +1108,7 @@ root_causes={'api_server': ['eval_not_ready'], 'agent_orchestrator': ['state_mac
 harness_system_gate_pass=False
 ```
 
-这个 demo 的重点不是给出唯一架构答案，而是训练系统设计审计习惯。`module_coverage=1.0` 只能说明核心模块名都出现了；门禁仍然失败，是因为接口契约、状态机、权限、上下文预算、执行隔离、trace、replay、eval、恢复、版本和治理没有全部闭环。面试中能讲出这些缺口，比只画一张大图更接近生产级思维。
+这个 demo 的重点不是给出唯一架构答案，而是训练系统设计审计习惯。`module_coverage=1.0` 只能说明核心模块名都出现了；验收条件仍然失败，是因为接口契约、状态机、权限、上下文预算、执行隔离、trace、replay、eval、恢复、版本和治理没有全部闭环。面试中能讲出这些缺口，比只画一张大图更接近生产级思维。
 
 ## 15.24 面试题
 

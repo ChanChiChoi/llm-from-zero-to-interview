@@ -8,15 +8,15 @@
 
 > Feature Store 管结构化特征，Embedding Store 管向量资产，向量索引负责高效相似度检索；三者共同支撑在线智能系统的数据访问层。
 
-## 42.0 本讲资料边界与第二轮精修口径
+## 42.0 本讲范围与资料
 
 本讲按通用 AI Infra 数据访问层来写，不绑定某个 Feature Store、向量数据库、RAG 框架、搜索引擎、对象存储或内部平台实现。
 
-资料校准时参考的公开口径包括：Feast 对 entity、feature view、offline store、online store、historical feature retrieval 和 point-in-time join 的抽象；Faiss 对相似度搜索、IVF、PQ、HNSW 等索引类型的公开说明；Milvus / Qdrant / Weaviate / Pinecone 等向量数据库文档对 ANN、metadata filter、payload、collection、多租户和索引参数的工程口径；以及前文数据版本、artifact、实验追踪和评估平台章节对版本、血缘、门禁和可观测性的要求。
+资料校准时参考的公开口径包括：Feast 对 entity、feature view、offline store、online store、historical feature retrieval 和 point-in-time join 的抽象；Faiss 对相似度搜索、IVF、PQ、HNSW 等索引类型的公开说明；Milvus / Qdrant / Weaviate / Pinecone 等向量数据库文档对 ANN、metadata filter、payload、collection、多租户和索引参数的工程口径；以及前文数据版本、artifact、实验追踪和评估平台章节对版本、血缘、验收条件和可观测性的要求。
 
-本轮精修重点不是介绍某个产品 API，而是把 Feature Store、Embedding Store 和 Vector Index 抽象成可审计基础设施：
+本章重点不是介绍某个产品 API，而是把 Feature Store、Embedding Store 和 Vector Index 抽象成可审计基础设施：
 
-1. 用稳定数学符号描述特征定义、训练线上一致性、point-in-time correctness、embedding 版本、chunk 血缘、ANN 召回、过滤、索引切换、成本和最终门禁。
+1. 用稳定数学符号描述特征定义、训练线上一致性、point-in-time correctness、embedding 版本、chunk 血缘、ANN 召回、过滤、索引切换、成本和最终验收条件。
 2. 增加一个 0 依赖 `MiniFeatureEmbeddingIndexAudit` demo，用 toy case 检查 16 个关键治理维度。
 3. 同步第四册百科、题库、练习、术语表、项目任务和知识图谱，让本章和 RAG / Agent 平台章节自然衔接。
 
@@ -164,7 +164,7 @@ Feature Store 的核心价值之一就是减少 training-serving skew。
 
 它通过统一特征定义、版本和计算逻辑来保证一致性。
 
-训练线上一致门禁可以写成：
+训练线上一致准入条件可以形式化为：
 
 ```math
 G_{\mathrm{skew}}=\mathbf{1}[R_{\mathrm{skew}}\le\rho \land C_{\mathrm{transform}}=1 \land C_{\mathrm{default}}=1]
@@ -257,7 +257,7 @@ Embedding 是由模型生成的。
 
 否则检索结果会不可控。
 
-embedding 版本门禁可以写成：
+embedding 版本准入条件可以形式化为：
 
 ```math
 G_{\mathrm{emb}}=\mathbf{1}[C_{\mathrm{model}}=1 \land C_{\mathrm{dim}}=1 \land C_{\mathrm{chunk}}=1 \land C_{\mathrm{norm}}=1]
@@ -520,7 +520,7 @@ keep v1 for rollback
 
 向量索引也需要灰度和回滚。
 
-双索引切换门禁可以写成：
+双索引切换准入条件可以形式化为：
 
 ```math
 G_{\mathrm{switch}}=\mathbf{1}[C_{\mathrm{shadow}}=1 \land R@k\ge\tau_R \land L_{\mathrm{p95}}\le\tau_L \land C_{\mathrm{filter}}=1 \land C_{\mathrm{rollback}}=1]
@@ -634,7 +634,7 @@ RAG 场景还要看：
 \mathrm{NDCG@k}=\frac{\mathrm{DCG@k}}{\mathrm{IDCG@k}}
 ```
 
-上线门禁通常要同时看召回、排序、权限、延迟、空结果、引用支持和最终回答质量。
+上线条件通常要同时看召回、排序、权限、延迟、空结果、引用支持和最终回答质量。
 
 ## 42.20 Feature / Embedding 血缘
 
@@ -686,7 +686,7 @@ G_{\mathrm{fe}}=(V,E)
 
 不要把向量看成“不可还原所以不敏感”。embedding 仍然可能泄露信息。
 
-多租户隔离门禁可以写成：
+多租户隔离准入条件可以形式化为：
 
 ```math
 G_{\mathrm{tenant}}=\mathbf{1}[C_{\mathrm{tenant}}=1 \land C_{\mathrm{acl}}=1 \land R_{\mathrm{leak}}=0 \land C_{\mathrm{audit}}=1]
@@ -715,7 +715,7 @@ Feature Store 也可能参与 RAG：
 
 RAG 不只是一个向量数据库，而是一条完整检索和治理链路。
 
-RAG 检索门禁可以写成：
+RAG 检索准入条件可以形式化为：
 
 ```math
 G_{\mathrm{rag\_retrieval}}=\mathbf{1}[R@k\ge\tau_R \land C_{\mathrm{citation}}\ge\tau_C \land R_{\mathrm{leak}}=0 \land L_{\mathrm{p95}}\le\tau_L]
@@ -758,7 +758,7 @@ Data Sources
 13. quality monitoring metrics：recall、precision、latency、stale feature、skew、permission leak 和 empty result 是否监控。
 14. cost capacity governance：向量内存、索引构建成本、embedding 成本、查询成本、预算和 owner 是否可治理。
 15. RAG Agent integration：retrieval trace、rerank、citation、Agent memory scope 和 permission context 是否打通。
-16. feature embedding index gate：最终门禁是否能证明覆盖率达标、无 P0 风险、可回滚、可观测、可审计。
+16. feature embedding index gate：最终验收条件是否能证明覆盖率达标、无 P0 风险、可回滚、可观测、可审计。
 
 下面的 demo 不依赖外部库。它用一个完整样本和 16 个单点坏样本说明：这类基础设施不能只看“能查向量”，而要同时证明特征、embedding、chunk、索引、过滤、trace、血缘、租户和 RAG / Agent 集成都可信。
 
@@ -1256,7 +1256,7 @@ failed_gates=['feature_definition_contract', 'offline_online_consistency', 'poin
 feature_embedding_index_gate_pass=False
 ```
 
-这段 demo 的重点不是模拟真实 HNSW 或 IVF，而是把平台可审计字段讲清楚。真实生产中可以把 `brute_force_search` 换成 Faiss、Milvus、Qdrant、OpenSearch、pgvector 或自研服务，但版本、权限、trace、lineage、质量和回滚门禁不能省。
+这段 demo 的重点不是模拟真实 HNSW 或 IVF，而是把平台可审计字段讲清楚。真实生产中可以把 `brute_force_search` 换成 Faiss、Milvus、Qdrant、OpenSearch、pgvector 或自研服务，但版本、权限、trace、lineage、质量和回滚验收条件不能省。
 
 ## 42.25 常见误区
 
@@ -1326,6 +1326,6 @@ embedding 可能泄露语义和私有信息，必须做权限和审计。
 3. 向量索引负责高效 ANN 检索，需要在召回、延迟、成本和更新复杂度之间权衡。
 4. RAG 不是向量数据库本身，而是文档处理、embedding、索引、过滤、rerank、prompt 和 trace 的完整链路。
 5. 特征和向量基础设施必须支持多租户、权限控制、版本化、血缘和质量监控。
-6. 生产级特征和向量平台必须有 point-in-time、training-serving skew、embedding 版本、shadow index、permission filter、retrieval trace、lineage、成本和回滚门禁。
+6. 生产级特征和向量平台必须有 point-in-time、training-serving skew、embedding 版本、shadow index、permission filter、retrieval trace、lineage、成本和回滚验收条件。
 
 下一章我们会讲 RAG/Agent 平台中的知识库、工具和 trace 存储。

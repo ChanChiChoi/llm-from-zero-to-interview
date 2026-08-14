@@ -1,12 +1,12 @@
 # 第三章：Q、K、V、Attention Head 与表示子空间
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本章第二轮精修以公开论文、公开技术报告和前序章节为资料边界：Transformer 原论文对 multi-head attention 的定义，BERT 及后续 attention head 分析对 head pattern 的观察，Michel 等人关于 head pruning 和冗余的实验结论，Abnar 和 Zuidema 对跨层 attention flow 的解释边界提醒，Transformer Circuits 对 QK / OV circuit 与 residual stream 的机制化拆解，Shazeer 的 MQA 论文和 Ainslie 等人的 GQA 论文对 K/V head 压缩和推理带宽瓶颈的解释，以及近期公开研究对 attention head 角色跨随机重训稳定性的谨慎讨论。
+本章以公开论文、公开技术报告和前序章节为资料边界：Transformer 原论文对 multi-head attention 的定义，BERT 及后续 attention head 分析对 head pattern 的观察，Michel 等人关于 head pruning 和冗余的实验结论，Abnar 和 Zuidema 对跨层 attention flow 的解释边界提醒，Transformer Circuits 对 QK / OV circuit 与 residual stream 的机制化拆解，Shazeer 的 MQA 论文和 Ainslie 等人的 GQA 论文对 K/V head 压缩和推理带宽瓶颈的解释，以及近期公开研究对 attention head 角色跨随机重训稳定性的谨慎讨论。
 
 本章只解释 Q/K/V、attention head、表示子空间、QK / OV 拆解、head 冗余、MHA / MQA / GQA 的形状和成本直觉；不把某个可视化 attention map 写成完整因果解释，不把 toy demo 的数值当成真实模型 benchmark，也不推断闭源模型的内部 head 分工。
 
-第二轮补强重点有三点：
+本章重点有三点：
 
 1. 将 Q/K/V、multi-head attention、QK circuit、OV circuit、head dim 和 KV cache 成本改成稳定 MathJax 表达。
 2. 明确 head 可解释性的边界：head pattern 是线索，必须结合 ablation、activation patching、QK / OV 分解和任务行为变化。
@@ -518,7 +518,7 @@ head 数影响表达能力、KV cache、内存带宽和推理吞吐。MHA、MQA�
 
 ## 3.17 QKV 与多头子空间审计指标
 
-把一个 head 只解释成“看哪里”容易过度简化。第二轮精修后，本章建议用下面这组指标把 QK 路由、OV 写入、head 冗余和 KV cache 成本一起讲清楚。
+把一个 head 只解释成“看哪里”容易过度简化。本章建议用下面这组指标把 QK 路由、OV 写入、head 冗余和 KV cache 成本一起讲清楚。
 
 一个 head 审计样本可以写成：
 
@@ -560,7 +560,7 @@ KV cache 节省率：
 S_{\mathrm{kv}}=1-\frac{H_{\mathrm{kv}}}{H_q}
 ```
 
-一个简化审计门禁可以写成：
+一个简化审计准入条件可以形式化为：
 
 ```math
 G_{\mathrm{head}}=\mathbb{1}[C_{\mathrm{qk}}\ge\tau_q\land C_{\mathrm{ov}}\ge\tau_o\land R_{\mathrm{red}}\le\tau_r\land S_{\mathrm{kv}}\ge\tau_s]

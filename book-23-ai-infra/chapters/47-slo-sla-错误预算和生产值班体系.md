@@ -8,11 +8,11 @@ AI Infra 不只是把训练和推理跑起来，还要稳定地服务研发和�
 
 > 可靠性治理的核心，不是追求永不失败，而是明确什么程度的失败可接受，并围绕这个目标组织工程、发布和值班。
 
-## 47.0 本讲资料边界与第二轮精修口径
+## 47.0 本讲范围与资料
 
 本章按通用 AI Infra 生产可靠性治理来写，不绑定某个云厂商、监控系统、告警平台、工单系统、Kubernetes 发行版或内部 SRE 组织形态。资料校准时，主要参考 Google SRE Book 对 SLI、SLO、SLA、用户体验指标、错误预算和“不追求 100% SLO”的定义，参考 Google SRE Workbook 对 burn rate、多窗口多 burn rate 告警、on-call、incident response 和 postmortem action item 的实践口径，并结合前文可观测性、训练故障定位、推理故障定位、发布治理、回滚降级、成本治理和事故复盘章节。
 
-第二轮精修只做三件事：
+本章重点包括：
 
 1. 把 SLI / SLO / SLA、错误预算、burn rate、告警、值班、runbook、事故分级、变更、复盘和成本取舍统一成可审计的可靠性治理样本。
 2. 补齐 availability、latency pass rate、平台失败率、数据构建 SLO、错误预算、预算消耗、burn rate、告警可行动率、MTTA / MTTR、事故影响、runbook 覆盖、变更关联、行动项关闭率和 SLO 成本收益公式。
@@ -81,7 +81,7 @@ $$
 G_{\mathrm{slo}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land B_{\mathrm{remain}}>0 \land P_0=0\right]
 $$
 
-其中 `C_j` 是第 `j` 个关键 SLO 或治理门禁覆盖率，`\tau_j` 是最低阈值，`B_{\mathrm{remain}}` 是剩余错误预算比例，`P_0` 是未关闭的最高优先级可靠性阻断项数量。这个式子表达的是：SLO 不是单个 dashboard 数字，而是目标、预算和阻断项共同组成的上线控制条件。
+其中 `C_j` 是第 `j` 个关键 SLO 或治理验收覆盖率，`\tau_j` 是最低阈值，`B_{\mathrm{remain}}` 是剩余错误预算比例，`P_0` 是未关闭的最高优先级可靠性阻断项数量。这个式子表达的是：SLO 不是单个 dashboard 数字，而是目标、预算和阻断项共同组成的上线控制条件。
 
 ## 47.3 AI Infra 常见 SLI
 
@@ -108,7 +108,7 @@ $$
 数据和评估平台 SLI：
 
 1. dataset 构建成功率。
-2. 数据质量门禁通过率。
+2. 数据质量检查通过率。
 3. eval job 成功率。
 4. eval report 生成时延。
 
@@ -164,13 +164,13 @@ $$
 C_{\mathrm{lat}}(\tau)=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[T_i\le \tau]
 $$
 
-其中 `T_i` 可以是 TTFT、TPOT 或 end-to-end latency，`\tau` 是目标阈值。推理平台的上线门禁可以写成：
+其中 `T_i` 可以是 TTFT、TPOT 或 end-to-end latency，`\tau` 是目标阈值。推理平台的上线准入条件可以形式化为：
 
 $$
 G_{\mathrm{infer\_slo}}=\mathbf{1}\left[A\ge a_0 \land C_{\mathrm{ttft}}(\tau_f)\ge c_f \land C_{\mathrm{tpot}}(\tau_p)\ge c_p \land R_{\mathrm{err}}\le r_0 \land Q_{\mathrm{guard}}\ge q_0\right]
 $$
 
-其中 `a_0` 是可用性目标，`c_f` 是 TTFT 通过率目标，`c_p` 是 TPOT 通过率目标，`R_{\mathrm{err}}` 是错误率，`Q_{\mathrm{guard}}` 是质量 / 安全 guardrail 得分。这个门禁能防止“请求都返回了，但慢、错或不安全”的假可用。
+其中 `a_0` 是可用性目标，`c_f` 是 TTFT 通过率目标，`c_p` 是 TPOT 通过率目标，`R_{\mathrm{err}}` 是错误率，`Q_{\mathrm{guard}}` 是质量 / 安全 guardrail 得分。这组条件能防止“请求都返回了，但慢、错或不安全”的假可用。
 
 ## 47.5 训练 SLO 示例
 
@@ -204,7 +204,7 @@ $$
 
 其中 `N_{\mathrm{platform\_fail}}` 只统计调度、节点、镜像、存储、网络、权限、checkpoint、平台 launcher 等平台责任导致的失败，用户代码、用户数据格式错误和显式超配资源不应直接算进平台失败率。
 
-训练平台的可靠性门禁可以写成：
+训练平台的可靠性准入条件可以形式化为：
 
 $$
 G_{\mathrm{train\_slo}}=\mathbf{1}\left[R_{\mathrm{platform\_fail}}\le r_t \land C_{\mathrm{submit}}\ge c_s \land C_{\mathrm{schedule}}\ge c_q \land C_{\mathrm{ckpt}}\ge c_k\right]
@@ -221,7 +221,7 @@ Dataset Build SLO:
 95% dataset build 在预期时间内完成
 
 Data Quality SLO:
-生产 dataset 必须通过质量门禁
+生产 dataset 必须通过质量验收条件
 
 Access SLO:
 99.9% dataset manifest 查询成功
@@ -238,7 +238,7 @@ $$
 C_{\mathrm{build}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[T_{\mathrm{build},i}\le \tau_i \land Q_i\ge q_i \land M_i=1]
 $$
 
-其中 `T_{\mathrm{build},i}` 是第 `i` 个 dataset build 的耗时，`\tau_i` 是预期完成时间，`Q_i` 是数据质量门禁得分，`M_i` 表示 manifest、checksum、lineage 和权限记录是否完整。这个定义提醒面试时不要把数据平台 SLO 讲成“API 还能访问”，而要包含数据是否可训练、可追溯、可治理。
+其中 `T_{\mathrm{build},i}` 是第 `i` 个 dataset build 的耗时，`\tau_i` 是预期完成时间，`Q_i` 是数据质量验收条件得分，`M_i` 表示 manifest、checksum、lineage 和权限记录是否完整。这个定义提醒面试时不要把数据平台 SLO 讲成“API 还能访问”，而要包含数据是否可训练、可追溯、可治理。
 
 ## 47.7 错误预算是什么
 
@@ -357,7 +357,7 @@ $$
 G_{\mathrm{slo\_set}}=\mathbf{1}\left[N_{\mathrm{slo}}\le n_0 \land C_{\mathrm{user}}\ge c_u \land C_{\mathrm{action}}\ge c_a \land C_{\mathrm{owner}}\ge c_o\right]
 $$
 
-其中 `N_{\mathrm{slo}}` 是某个服务的正式 SLO 数量，`C_{\mathrm{user}}` 是用户体验相关覆盖率，`C_{\mathrm{action}}` 是 SLO 触发后有明确动作的比例，`C_{\mathrm{owner}}` 是有 owner 的比例。这个门禁的直觉是：SLO 太多会稀释注意力，SLO 太虚会无法驱动工程动作。
+其中 `N_{\mathrm{slo}}` 是某个服务的正式 SLO 数量，`C_{\mathrm{user}}` 是用户体验相关覆盖率，`C_{\mathrm{action}}` 是 SLO 触发后有明确动作的比例，`C_{\mathrm{owner}}` 是有 owner 的比例。这组条件的直觉是：SLO 太多会稀释注意力，SLO 太虚会无法驱动工程动作。
 
 ## 47.11 告警和 SLO 的关系
 
@@ -468,7 +468,7 @@ $$
 C_{\mathrm{runbook}}=\frac{N_{\mathrm{alert\_with\_runbook}}}{N_{\mathrm{critical\_alert}}}
 $$
 
-执行就绪门禁可以写成：
+执行就绪准入条件可以形式化为：
 
 $$
 G_{\mathrm{runbook}}=\mathbf{1}\left[C_{\mathrm{runbook}}\ge c_r \land C_{\mathrm{step}}\ge c_s \land C_{\mathrm{rollback}}\ge c_b \land C_{\mathrm{owner}}\ge c_o\right]
@@ -492,7 +492,7 @@ $$
 
 线上事故中，先恢复服务，再做完整根因分析。
 
-推理事故的止损门禁可以写成：
+推理事故的止损准入条件可以形式化为：
 
 $$
 G_{\mathrm{mitigation}}=\mathbf{1}\left[M_{\mathrm{rate}}\lor M_{\mathrm{degrade}}\lor M_{\mathrm{rollback}}\lor M_{\mathrm{scale}}\lor M_{\mathrm{isolate}}\right]
@@ -539,7 +539,7 @@ $$
 
 高风险操作要有审计，必要时需要双人确认。
 
-值班权限门禁可以写成：
+值班权限准入条件可以形式化为：
 
 $$
 G_{\mathrm{oncall\_perm}}=\mathbf{1}\left[C_{\mathrm{least}}\ge c_l \land C_{\mathrm{audit}}\ge c_a \land C_{\mathrm{breakglass}}\ge c_b \land H_{\mathrm{confirm}}=1\right]
@@ -599,13 +599,13 @@ $$
 C_{\mathrm{action}}=\frac{N_{\mathrm{action\_closed}}}{N_{\mathrm{action\_total}}}
 $$
 
-复盘质量门禁可以写成：
+复盘质量准入条件可以形式化为：
 
 $$
 G_{\mathrm{postmortem}}=\mathbf{1}\left[C_{\mathrm{timeline}}\ge c_t \land C_{\mathrm{impact}}\ge c_i \land C_{\mathrm{root}}\ge c_r \land C_{\mathrm{action}}\ge c_a \land C_{\mathrm{regression}}\ge c_g\right]
 $$
 
-其中 `C_{\mathrm{timeline}}` 是时间线完整率，`C_{\mathrm{impact}}` 是影响量化覆盖率，`C_{\mathrm{root}}` 是根因分类覆盖率，`C_{\mathrm{regression}}` 是修复后回归验证覆盖率。复盘的价值不在于文档写完，而在于行动项真正关闭并转成监控、回归、runbook 或上线门禁。
+其中 `C_{\mathrm{timeline}}` 是时间线完整率，`C_{\mathrm{impact}}` 是影响量化覆盖率，`C_{\mathrm{root}}` 是根因分类覆盖率，`C_{\mathrm{regression}}` 是修复后回归验证覆盖率。复盘的价值不在于文档写完，而在于行动项真正关闭并转成监控、回归、runbook 或上线条件。
 
 ## 47.20 错误预算和发布策略
 
@@ -620,13 +620,13 @@ $$
 
 对 AI 平台来说，模型发布、runtime 升级和路由策略变更都应该受错误预算约束。
 
-基于错误预算的发布门禁可以写成：
+基于错误预算的发布准入条件可以形式化为：
 
 $$
 G_{\mathrm{release\_by\_budget}}=\mathbf{1}\left[B_{\mathrm{remain}}\ge b_0 \land \beta_{\mathrm{fast}}<\beta_f \land \beta_{\mathrm{slow}}<\beta_s \land R_{\mathrm{rollback}}=1\right]
 $$
 
-其中 `b_0` 是发布所需的最低剩余预算，`\beta_{\mathrm{fast}}` 和 `\beta_{\mathrm{slow}}` 是快慢窗口 burn rate，`R_{\mathrm{rollback}}` 表示是否有可执行回滚。这个门禁能把“最近稳定吗”转成可执行发布条件。
+其中 `b_0` 是发布所需的最低剩余预算，`\beta_{\mathrm{fast}}` 和 `\beta_{\mathrm{slow}}` 是快慢窗口 burn rate，`R_{\mathrm{rollback}}` 表示是否有可执行回滚。这组条件能把“最近稳定吗”转成可执行发布条件。
 
 ## 47.21 SLO 和成本的关系
 
@@ -655,7 +655,7 @@ $$
 
 ## 47.22 SLO 值班体系审计指标和最小 demo
 
-把本章落到平台验收时，可以用 16 个门禁：
+把本章落到平台验收时，可以用 16 个验收条件：
 
 1. SLI Contract Completeness：关键服务的 SLI 是否有定义、采集、窗口、owner 和坏事件口径。
 2. SLO Target Measurability：SLO 是否可测量、可回放、可解释，并能对应具体用户体验。
@@ -674,7 +674,7 @@ $$
 15. Postmortem Action Closure：复盘是否包含时间线、影响、根因、防线失效、行动项 owner、截止时间和回归验证。
 16. SLO Cost Tradeoff Gate：SLO 目标是否经过用户价值、风险降低、基础设施成本和值班成本取舍。
 
-综合门禁：
+综合验收条件：
 
 $$
 G_{\mathrm{slo\_oncall}}=\prod_{j=1}^{16}G_j
@@ -1262,7 +1262,7 @@ failed_gates=['sli_contract_completeness', 'slo_target_measurability', 'sla_boun
 slo_oncall_gate_pass=False
 ```
 
-这个 demo 的面试价值是把 SLO 和值班体系从“定义几个百分比指标”升级为生产可靠性治理闭环：SLI 必须有契约，SLO 必须可测量，SLA 边界必须清楚，推理、训练、数据和评估要各自有用户体验指标，错误预算要能影响发布，burn rate 告警要可行动，值班要能升级和止损，事故复盘要把失败转成行动项、回归样本、runbook 和下一次发布门禁。
+这个 demo 的面试价值是把 SLO 和值班体系从“定义几个百分比指标”升级为生产可靠性治理闭环：SLI 必须有契约，SLO 必须可测量，SLA 边界必须清楚，推理、训练、数据和评估要各自有用户体验指标，错误预算要能影响发布，burn rate 告警要可行动，值班要能升级和止损，事故复盘要把失败转成行动项、回归样本、runbook 和下一次发布条件。
 
 ## 47.23 常见误区
 

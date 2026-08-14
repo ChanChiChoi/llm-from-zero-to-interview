@@ -8,17 +8,17 @@ Checkpoint 策略不是越频繁越好，也不是越省越好。它是在训练
 
 > Checkpoint 策略的目标，是用可接受的 I/O 和存储成本，把训练失败后的损失控制在可接受范围内，并支持评估、回滚、抢占和发布。
 
-## 21.0 本讲资料边界与第二轮精修口径
+## 21.0 本讲范围与资料
 
-本讲第二轮精修时，资料口径主要对齐几类公开工程资料：PyTorch Distributed Checkpoint 对分布式 `state_dict`、planner、storage writer、异步保存和加载的抽象；DeepSpeed checkpointing 对模型、优化器、scheduler、ZeRO 分片状态保存和恢复的接口边界；Kubernetes priority / preemption、Pod 终止宽限期和任务生命周期对可抢占训练的控制面影响；对象存储生命周期策略对 checkpoint 保留、归档和删除的治理口径。
+本章参考几类公开工程资料：PyTorch Distributed Checkpoint 对分布式 `state_dict`、planner、storage writer、异步保存和加载的抽象；DeepSpeed checkpointing 对模型、优化器、scheduler、ZeRO 分片状态保存和恢复的接口边界；Kubernetes priority / preemption、Pod 终止宽限期和任务生命周期对可抢占训练的控制面影响；对象存储生命周期策略对 checkpoint 保留、归档和删除的治理口径。
 
 这里不把某个框架 API、某种对象存储、某个调度器或某家云厂商的参数写成通用标准。正文只抽象 checkpoint 策略的稳定问题：RPO/RTO、保存触发、保存内容分层、同步 / 异步保存、一致 snapshot、临时目录、checksum、manifest commit、分片元数据、恢复选择、抢占联动、评估联动、发布联动、监控告警、保留成本和恢复演练。
 
-第二轮精修重点放在三个方面：
+本章重点放在三个方面：
 
 1. 把“多久保存一次”从经验参数升级为 RPO、RTO、保存阻塞比例和最大丢失进度的可计算策略。
 2. 把 resume、eval、release checkpoint 分清，避免所有 checkpoint 都保存完整训练状态或只保留 latest。
-3. 增加一个 0 依赖 Python demo，把 checkpoint 策略从口头 checklist 变成能发现坏策略的门禁。
+3. 增加一个 0 依赖 Python demo，把 checkpoint 策略从口头 checklist 变成能发现坏策略的验收条件。
 
 ## 21.1 Checkpoint 策略要解决什么问题
 
@@ -441,7 +441,7 @@ Checkpoint 策略不能只写成“每 1000 step 保存一次”。平台至少�
 p_i=(r_i,f_i,s_i,a_i,m_i,h_i,u_i,q_i,e_i,v_i,l_i,c_i,o_i,d_i,z_i)
 ```
 
-其中，`r_i` 是 RPO / RTO 目标，`f_i` 是保存触发策略，`s_i` 是保存内容分层，`a_i` 是异步保存策略，`m_i` 是 manifest / commit 语义，`h_i` 是分片元数据，`u_i` 是恢复选择策略，`q_i` 是抢占联动，`e_i` 是评估联动，`v_i` 是发布联动，`l_i` 是保留生命周期，`c_i` 是存储成本，`o_i` 是监控告警，`d_i` 是恢复演练，`z_i` 是最终策略门禁。
+其中，`r_i` 是 RPO / RTO 目标，`f_i` 是保存触发策略，`s_i` 是保存内容分层，`a_i` 是异步保存策略，`m_i` 是 manifest / commit 语义，`h_i` 是分片元数据，`u_i` 是恢复选择策略，`q_i` 是抢占联动，`e_i` 是评估联动，`v_i` 是发布联动，`l_i` 是保留生命周期，`c_i` 是存储成本，`o_i` 是监控告警，`d_i` 是恢复演练，`z_i` 是最终策略验收条件。
 
 统一覆盖率可以写成：
 
@@ -483,7 +483,7 @@ K_{\mathrm{retain}}=\sum_{k=1}^{K}N_kS_kD_kP_k+K_{\mathrm{request}}+K_{\mathrm{o
 
 其中，`N_k` 是第 `k` 类 checkpoint 保留个数，`S_k` 是单个大小，`D_k` 是保留天数，`P_k` 是对应存储层的单位成本。
 
-Checkpoint 策略门禁可以写成：
+Checkpoint 策略准入条件可以形式化为：
 
 ```math
 G_{\mathrm{ckpt\_strategy}}=\mathbf{1}\left[A_{\mathrm{lost}}\le \mathrm{RPO} \land T_{\mathrm{restore}}\le \mathrm{RTO} \land R_{\mathrm{block}}\le \rho_{\mathrm{block}} \land K_{\mathrm{retain}}\le B_{\mathrm{storage}} \land \min_j C_j\ge \tau_j \land P_0=0\right]
@@ -811,7 +811,7 @@ failed_gates=['rpo_rto_budget_defined', 'save_trigger_policy', 'checkpoint_scope
 checkpoint_strategy_gate_pass=False
 ```
 
-这个 demo 想说明：checkpoint 策略的关键不是“保存成功”四个字，而是把 RPO/RTO、保存阻塞、异步一致性、分片元数据、恢复选择、抢占、评估、发布、留存、成本、权限、监控和恢复演练放进同一个策略门禁。大模型训练平台如果没有这张表，checkpoint 很容易从可靠性能力变成存储成本和恢复风险的来源。
+这个 demo 想说明：checkpoint 策略的关键不是“保存成功”四个字，而是把 RPO/RTO、保存阻塞、异步一致性、分片元数据、恢复选择、抢占、评估、发布、留存、成本、权限、监控和恢复演练放进同一个策略验收条件。大模型训练平台如果没有这张表，checkpoint 很容易从可靠性能力变成存储成本和恢复风险的来源。
 
 ## 21.18 面试中如何回答 checkpoint 策略
 

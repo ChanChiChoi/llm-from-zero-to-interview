@@ -7187,20 +7187,20 @@ ckpt_1.2T_tokens
 
 所以 checkpoint selection 应该是多指标决策。
 
-可以设置 gate：
+可以先设置不可妥协的筛选条件：
 
 1. validation loss 不能明显退化。
 2. safety eval 必须达标。
 3. 目标 benchmark 必须超过阈值。
 4. 不允许明显训练异常。
 
-在 gate 之后，再按目标指标排序。
+先排除不满足硬性条件的 checkpoint，再按目标指标排序。
 
 下面是一个最小可运行示例，把三件事连起来：
 
 1. 用 `min_delta` 和 `patience` 判断传统 early stopping。
-2. 用多指标 gate 过滤不合格 checkpoint。
-3. 在通过 gate 的候选中按目标场景选择 checkpoint。
+2. 用多指标硬性条件过滤不合格 checkpoint。
+3. 在通过硬性条件的候选中按目标场景选择 checkpoint。
 
 ```python
 checkpoints = [
@@ -7226,7 +7226,7 @@ def early_stop_by_loss(history, min_delta=0.01, patience=2):
     return False, None
 
 
-def passes_gate(ckpt, best_val_loss):
+def passes_constraints(ckpt, best_val_loss):
     return (
         ckpt["val_loss"] <= best_val_loss + 0.03
         and ckpt["code_loss"] <= 1.50
@@ -7238,9 +7238,12 @@ def passes_gate(ckpt, best_val_loss):
 val_history = [ckpt["val_loss"] for ckpt in checkpoints]
 should_stop, stop_index = early_stop_by_loss(val_history)
 best_val_loss = min(val_history)
-eligible = [ckpt for ckpt in checkpoints if passes_gate(ckpt, best_val_loss)]
+eligible = [
+    ckpt for ckpt in checkpoints
+    if passes_constraints(ckpt, best_val_loss)
+]
 
-# code/reasoning 场景更重视 GSM8K 和 MMLU，但 gate 会先排除代码退化、安全退化和训练异常。
+# code/reasoning 场景更重视 GSM8K 和 MMLU；先排除代码退化、安全退化和训练异常。
 selected = max(eligible, key=lambda ckpt: 0.6 * ckpt["gsm8k"] + 0.4 * ckpt["mmlu"])
 
 print("traditional early stop:", should_stop, "at index:", stop_index)
@@ -7256,7 +7259,7 @@ eligible checkpoints: ['ckpt_1T']
 selected checkpoint: ckpt_1T
 ```
 
-这个例子刻意让 `ckpt_1.3T` 的 validation loss 最低，但它没有被选中，因为安全指标、代码 loss 和训练稳定性不达标。也让 `ckpt_1.1T` 的 benchmark 更高，但 code loss 退化超过 gate，因此不适合作为 code/reasoning 目标的候选。
+这个例子刻意让 `ckpt_1.3T` 的 validation loss 最低，但它没有被选中，因为安全指标、代码 loss 和训练稳定性不达标。`ckpt_1.1T` 的 benchmark 更高，但 code loss 退化超过硬性条件，因此也不适合作为 code/reasoning 目标的候选。
 
 ### 十一、评估频率如何设计
 
@@ -7440,7 +7443,7 @@ SE \approx \sqrt{\frac{\hat{p}(1-\hat{p})}{n}}
 
 early stopping 在大模型预训练里不能机械照搬小模型。小模型常根据 validation loss 不再下降来停止，但大模型通常根据 Scaling Law 和预算预先规划训练 token，validation loss 可能长期下降。实际决策更像 budget-aware stopping 和 checkpoint selection：看 validation loss、domain loss、下游 benchmark、边际收益、训练成本和稳定性。如果 overall loss 下降但目标能力退化，应调整数据配比；如果关键指标边际收益很低且成本高，可以停止；如果出现污染或严重不稳定，应该回滚或重训。
 
-最终 checkpoint 选择也不一定选最后一个或 loss 最低的，而要根据目标场景建立多指标 gate，例如 loss 不退化、安全达标、目标 benchmark 超阈值，再选择最适合产品或后训练的 checkpoint。
+最终 checkpoint 选择也不一定选最后一个或 loss 最低的，而要根据目标场景建立多指标筛选规则，例如 loss 不明显退化、安全达标、目标 benchmark 超过预设阈值，再选择最适合产品或后训练的 checkpoint。
 
 ### 十六、常见追问与回答
 
@@ -7466,7 +7469,7 @@ early stopping 在大模型预训练里不能机械照搬小模型。小模型�
 
 问题 6：checkpoint selection 应该看哪个指标？
 
-回答：取决于目标。base model 更看 validation loss 和基础能力，code model 更看代码评估，chat model 更看指令遵循和偏好，reasoning model 更看数学代码推理。最好建立多指标 gate，而不是单指标选择。
+回答：取决于目标。base model 更看 validation loss 和基础能力，code model 更看代码评估，chat model 更看指令遵循和偏好，reasoning model 更看数学代码推理。最好先用多指标筛选规则排除明显退化的候选，再进行单目标排序，而不是直接按一个指标选择。
 
 ### 十七、常见误区
 
@@ -7494,7 +7497,7 @@ early stopping 在大模型预训练里不能机械照搬小模型。小模型�
 2. 为什么 validation loss 不能替代 HumanEval 或 GSM8K？
 3. 举三个 benchmark contamination 的例子。
 4. 解释 traditional early stopping 和大模型 budget-aware stopping 的区别。
-5. 为 code model 设计 checkpoint selection 的多指标 gate。
+5. 为 code model 设计 checkpoint selection 的多指标筛选规则。
 6. 用 2 分钟回答：“validation loss 还在下降，但下游能力不涨，你怎么决策？”
 
 ### 本讲总结

@@ -8,7 +8,7 @@
 
 > 压测的目的不是得到一个漂亮 QPS，而是把请求生命周期拆成可观测指标，定位 serving engine 的真实性能瓶颈。
 
-## 15.0 本讲资料边界与第二轮精修口径
+## 15.0 本讲范围与资料
 
 本讲只做教学版 LLM serving 压测审计。它覆盖 TTFT、TPOT / inter-token latency、E2E latency、input / output tokens/s、queue length、active requests、KV cache 显存、allocated / reserved memory、workload 描述、瓶颈归因和最小可运行 demo，但不实现真实 GPU benchmark、压测平台、分布式压测、Prometheus / OpenTelemetry 接入、真实模型加载、生产级 autoscaling、租户限流或完整容量规划。
 
@@ -104,7 +104,7 @@ M_{\mathrm{total}}=M_{\mathrm{weight}}+M_{\mathrm{kv}}+M_{\mathrm{work}}+M_{\mat
 
 其中 `M_{\mathrm{work}}` 是激活、临时 buffer、CUDA graph 或 kernel workspace 等工作区，`M_{\mathrm{runtime}}` 是 runtime 和 allocator 额外开销。
 
-压测门禁可以写成：
+压测准入条件可以形式化为：
 
 ```math
 G_{\mathrm{bench}}=G_{\mathrm{trace}}G_{\mathrm{latency}}G_{\mathrm{throughput}}G_{\mathrm{kv}}G_{\mathrm{cleanup}}G_{\mathrm{bottleneck}}

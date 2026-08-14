@@ -1,15 +1,15 @@
 # 第三章：Coding Agent 工作流
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲第二轮精修时，联网核对了 OpenAI Agents SDK 关于 tools、guardrails、sessions、human-in-the-loop 和 tracing 的公开文档，Anthropic Claude Code 关于权限、hooks、MCP、skills 和常见工作流的公开说明，OpenHands 关于 runtime、sandbox、evaluation 和安全边界的公开资料，以及 SWE-agent / mini-SWE-agent 围绕 SWE-bench、仓库导航、工具交互和 Agent-Computer Interface 的公开资料。
+本章参考 OpenAI Agents SDK 关于 tools、guardrails、sessions、human-in-the-loop 和 tracing 的公开文档，Anthropic Claude Code 关于权限、hooks、MCP、skills 和常见工作流的公开说明，OpenHands 关于 runtime、sandbox、evaluation 和安全边界的公开资料，以及 SWE-agent / mini-SWE-agent 围绕 SWE-bench、仓库导航、工具交互和 Agent-Computer Interface 的公开资料。
 
-本讲只讨论防御性的 coding agent 工作流设计：如何理解任务、探索仓库、制定计划、小步修改、运行验证、使用失败反馈、保护用户改动和记录 trace。它不提供绕过权限、规避 sandbox、自动执行危险命令、读取敏感文件、批量删除仓库内容或对真实生产系统做高风险操作的技巧。
+本章讨论防御性的 coding agent 工作流设计：如何理解任务、探索仓库、制定计划、小步修改、运行验证、使用失败反馈、保护用户改动和记录 trace。它不提供绕过权限、规避 sandbox、自动执行危险命令、读取敏感文件、批量删除仓库内容或对真实生产系统做高风险操作的技巧。
 
-第二轮精修重点放在三件事：
+本章重点放在三件事：
 
 1. 把“探索 / 计划 / 编辑 / 验证”从经验流程补成可度量的工作流指标。
-2. 用 GitHub 兼容的数学公式描述任务分类、仓库探索、patch 聚焦、测试反馈和权限门禁。
+2. 用 GitHub 兼容的数学公式描述任务分类、仓库探索、patch 聚焦、测试反馈和权限验收条件。
 3. 增加一个 0 依赖 Python demo，演示如何用 toy trace 审计 coding agent workflow，而不是只看最终代码 diff。
 
 ## 3.1 本章目标
@@ -647,9 +647,9 @@ C_{\mathrm{risk}}=
 {\sum_i |H_i|}
 ```
 
-高风险动作包括删除、迁移、安装依赖、网络访问、访问敏感文件、写生产资源和大范围格式化。工作流不应该把这些动作只交给 prompt 自觉，而要由 runtime / harness 做权限门禁。
+高风险动作包括删除、迁移、安装依赖、网络访问、访问敏感文件、写生产资源和大范围格式化。工作流不应该把这些动作只交给 prompt 自觉，而要由 runtime / harness 做权限验收条件。
 
-综合工作流门禁：
+综合工作流验收条件：
 
 ```math
 G_{\mathrm{workflow}}=

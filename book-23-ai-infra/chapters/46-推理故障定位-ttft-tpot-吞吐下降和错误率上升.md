@@ -8,11 +8,11 @@
 
 > 推理故障定位不要只看 QPS 和 GPU 利用率，而要按 gateway、router、queue、prefill、decode、streaming、cache、runtime 和下游依赖逐段拆解。
 
-## 46.0 本讲资料边界与第二轮精修口径
+## 46.0 本讲范围与资料
 
-本章按通用大模型推理平台故障定位抽象来写，不绑定 vLLM、SGLang、TensorRT-LLM、TGI、Triton Inference Server、Kubernetes、某个云厂商网关或具体 GPU 型号。资料校准时，主要参考 vLLM production metrics 对 TTFT、TPOT、queue、prefill、decode、KV cache、prefix cache 和调度状态的指标口径，参考 Triton Inference Server metrics 对 request、failure、pending、queue、compute 和 first response 的服务端指标拆分，参考 OpenTelemetry trace / span 对跨服务阶段拆解的通用模型，并结合前文推理平台、runtime 选型、Prefill / Decode / KV 资源画像、可观测性和发布治理章节中的 trace、版本、SLO、回滚和成本门禁。
+本章按通用大模型推理平台故障定位抽象来写，不绑定 vLLM、SGLang、TensorRT-LLM、TGI、Triton Inference Server、Kubernetes、某个云厂商网关或具体 GPU 型号。资料校准时，主要参考 vLLM production metrics 对 TTFT、TPOT、queue、prefill、decode、KV cache、prefix cache 和调度状态的指标口径，参考 Triton Inference Server metrics 对 request、failure、pending、queue、compute 和 first response 的服务端指标拆分，参考 OpenTelemetry trace / span 对跨服务阶段拆解的通用模型，并结合前文推理平台、runtime 选型、Prefill / Decode / KV 资源画像、可观测性和发布治理章节中的 trace、版本、SLO、回滚和成本约束。
 
-第二轮精修只做三件事：
+本章重点包括：
 
 1. 把 TTFT、TPOT、p99、吞吐下降、错误率、timeout、KV cache、模型加载、streaming、cache、route、tool 和质量异常统一成推理故障样本。
 2. 补齐端到端延迟拆分、TTFT、TPOT、尾延迟、token 吞吐、错误分类、timeout stage、KV 压力、stream abort、cache hit、tool failure 和质量漂移公式。
@@ -398,7 +398,7 @@ $$
 
 不要只看 Pod restart。
 
-模型加载门禁：
+模型加载验收条件：
 
 $$
 G_{\mathrm{load}}=I(M_{\mathrm{manifest}}=1)\cdot I(C_{\mathrm{weight}}=1)\cdot I(C_{\mathrm{tokenizer}}=1)\cdot I(C_{\mathrm{runtime}}=1)\cdot I(C_{\mathrm{permission}}=1)
@@ -503,7 +503,7 @@ Route trace 应记录：
 
 没有 route trace，路由问题很难复盘。
 
-路由正确性门禁：
+路由正确性验收条件：
 
 $$
 G_{\mathrm{route}}=I(m_{\mathrm{selected}}\in M_{\mathrm{candidate}})\cdot I(P_{\mathrm{tenant}}=1)\cdot I(H_{\mathrm{endpoint}}=1)\cdot I(C_{\mathrm{trace}}=1)
@@ -648,7 +648,7 @@ Runbook 的价值是减少线上故障时的临场猜测。
 
 ## 46.20 推理故障定位审计指标和最小 demo
 
-把本章落到平台验收时，可以用 16 个门禁：
+把本章落到平台验收时，可以用 16 个验收条件：
 
 1. Inference Fault Evidence Coverage：请求画像、影响范围、阶段 trace、KV、模型、路由、cache、错误、工具、发布 diff、应急动作和诊断是否齐全。
 2. Request Scope Slice：是否按 model、tenant、region、endpoint、runtime、streaming、输入长度、输出长度和版本切片。
@@ -667,7 +667,7 @@ Runbook 的价值是减少线上故障时的临场猜测。
 15. Quality Release Diff Readiness：模型、prompt、runtime、route、cache、safety、sampling diff 与质量指标是否关联。
 16. Inference Fault Diagnosis Gate：最终是否有 owner、runbook、应急动作、回滚、postmortem 和 P0 风险阻断。
 
-综合门禁：
+综合验收条件：
 
 $$
 G_{\mathrm{inference\_fault}}=\prod_{j=1}^{16}G_j

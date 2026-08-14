@@ -1,8 +1,8 @@
 # 第二章：Chain-of-Thought
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本章第二轮精修时，重点参考 Chain-of-Thought Prompting、Zero-shot CoT、scratchpad intermediate computation、CoT faithfulness / unfaithfulness，以及公开 reasoning model 对隐藏推理、可见解释和 test-time compute 的讨论。这里把 CoT 当作 reasoning 系统中的一种推理时计算和中间状态表达方法，而不是把“输出更长解释”直接等同于“模型真实推理能力更强”。
+本章重点参考 Chain-of-Thought Prompting、Zero-shot CoT、scratchpad intermediate computation、CoT faithfulness / unfaithfulness，以及公开 reasoning model 对隐藏推理、可见解释和 test-time compute 的讨论。这里把 CoT 当作 reasoning 系统中的一种推理时计算和中间状态表达方法，而不是把“输出更长解释”直接等同于“模型真实推理能力更强”。
 
 本章聚焦：
 
@@ -138,7 +138,7 @@ C_{\mathrm{cot}}
 \sum_{i=1}^{N}(T_i^{\mathrm{prompt}}+T_i^{\mathrm{cot}}+T_i^{\mathrm{answer}})
 ```
 
-一个简化 CoT 路由门禁：
+一个简化 CoT 路由验收条件：
 
 ```math
 G_{\mathrm{cot}}

@@ -1,5 +1,11 @@
 # 第二部分：Transformer 核心
 
+## 本部分路线
+
+这一部分沿着“离散输入如何变成上下文表示，再如何组成可训练的生成模型”展开。第 6 讲讲 tokenizer，第 7 讲讲 embedding 和位置编码，第 8、9 讲分别建立 attention 直觉和公式，第 10 讲进入多头与 KV Cache，第 11 讲落实自回归约束，第 12、13 讲把 attention、MLP、归一化和残差组合成 Transformer block，最后第 14、15 讲分别处理长上下文与一个可运行的 miniGPT。
+
+这里的代码大多是教学实现。它们用于验证 token、shape、mask、残差和 loss 的关系，不代表某个厂商的生产 kernel 或完整训练系统。阅读代码时，应同时问两个问题：它在数学上想表达什么，和真实系统相比还缺少什么。
+
 ## 第 6 讲：Tokenization
 
 ### 本讲目标
@@ -293,6 +299,8 @@ for step in range(5):
 ```
 
 这个例子展示：BPE 会不断把高频相邻片段合并成更大的 token。
+
+为了保持代码短小，这个 demo 把每个词只当作出现一次，也没有实现真实 tokenizer 的词频、边界标记、Unicode 规范化和编码解码接口。生产 tokenizer 还必须保存 merge table 或等价规则，保证训练、推理和离线计费使用同一套编码结果。
 
 ### Tokenizer 如何影响上下文长度
 
@@ -1694,7 +1702,7 @@ $$
 
 linear attention 通常通过 kernel trick 或特征映射，把计算顺序改写，避免显式构造 `[T, T]` attention matrix。
 
-非常粗略地说，它尝试把：
+非常粗略地说，它可能把某类 attention 写成：
 
 $$
 \mathrm{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V
@@ -1706,7 +1714,7 @@ $$
 \phi(Q)\left(\phi(K)^T V\right)
 $$
 
-这样可以先聚合 $K$ 和 $V$，再和 $Q$ 结合。
+这样可以先聚合 $K$ 和 $V$，再和 $Q$ 结合。这个式子只是说明“改变计算顺序”的示意，不是所有 linear attention 的统一定义；实际方法通常还需要归一化项，causal 版本还要维护随位置递推的状态。因此，不能只凭这一个式子断言它与 softmax attention 完全等价。
 
 优点：
 
@@ -1735,7 +1743,7 @@ FlashAttention 不是改变 attention 数学结果，而是改变计算方式。
 
 优点：
 
-1. 结果和标准 attention 等价或非常接近。
+1. 在相同数值精度和实现假设下，它计算的是与标准 attention 相同的数学结果，差异主要来自浮点舍入，而不是主动近似 attention。
 2. 显存更省。
 3. 速度更快。
 4. 已广泛用于现代 LLM 训练和推理。
@@ -2247,6 +2255,14 @@ KV Cache 大小和以下因素相关：
 4. K/V head 数。
 5. head_dim。
 6. 数据类型。
+
+用一个简化的字节数估算，可以写成：
+
+```math
+M_{\mathrm{KV}}\approx 2\cdot L\cdot B\cdot T\cdot n_{\mathrm{kv}}\cdot d_h\cdot b
+```
+
+其中 `2` 表示 K 和 V 两份缓存，`L` 是层数，`B` 是并发序列数，`T` 是每条序列当前缓存长度，`n_{\mathrm{kv}}` 是 K/V head 数，`d_h` 是 head dimension，`b` 是每个标量占用的字节数。MHA 取 `n_{\mathrm{kv}}=n_q`，MQA 取 `n_{\mathrm{kv}}=1`，GQA 则位于两者之间。这个估算忽略了 block 对齐、分页元数据和临时 workspace，但足以说明为什么减少 K/V head 会直接影响 serving 容量。
 
 MHA 中 K/V head 多，KV Cache 大。
 
@@ -3047,16 +3063,24 @@ class SimpleMLP(nn.Module):
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, d_model, num_heads, d_ff):
+    def __init__(self, d_model, num_heads, d_ff, block_size):
         super().__init__()
         self.norm1 = nn.LayerNorm(d_model)
         self.attn = nn.MultiheadAttention(d_model, num_heads, batch_first=True)
         self.norm2 = nn.LayerNorm(d_model)
         self.mlp = SimpleMLP(d_model, d_ff)
+        # Bool True means that the position is not allowed to attend.
+        causal_mask = torch.triu(
+            torch.ones(block_size, block_size, dtype=torch.bool), diagonal=1
+        )
+        self.register_buffer("causal_mask", causal_mask)
 
     def forward(self, x, attn_mask=None):
         # Pre-LN attention block.
         h = self.norm1(x)
+        if attn_mask is None:
+            seq_len = x.size(1)
+            attn_mask = self.causal_mask[:seq_len, :seq_len]
         attn_out, _ = self.attn(h, h, h, attn_mask=attn_mask)
         x = x + attn_out
 
@@ -3067,7 +3091,7 @@ class TransformerBlock(nn.Module):
 
 
 x = torch.randn(2, 4, 32)
-block = TransformerBlock(d_model=32, num_heads=4, d_ff=128)
+block = TransformerBlock(d_model=32, num_heads=4, d_ff=128, block_size=4)
 y = block(x)
 print(y.shape)  # [2, 4, 32]
 ```
@@ -3084,7 +3108,7 @@ import torch.nn as nn
 
 
 class TinyPreLNBlock(nn.Module):
-    def __init__(self, d_model, num_heads, d_ff):
+    def __init__(self, d_model, num_heads, d_ff, block_size):
         super().__init__()
         self.norm1 = nn.LayerNorm(d_model)
         self.attn = nn.MultiheadAttention(d_model, num_heads, batch_first=True)
@@ -3094,10 +3118,18 @@ class TinyPreLNBlock(nn.Module):
             nn.GELU(),
             nn.Linear(d_ff, d_model),
         )
+        causal_mask = torch.triu(
+            torch.ones(block_size, block_size, dtype=torch.bool), diagonal=1
+        )
+        self.register_buffer("causal_mask", causal_mask)
 
     def forward(self, x):
         # x: [B, T, d_model]
-        attn_out, _ = self.attn(self.norm1(x), self.norm1(x), self.norm1(x))
+        seq_len = x.size(1)
+        mask = self.causal_mask[:seq_len, :seq_len]
+        attn_out, _ = self.attn(
+            self.norm1(x), self.norm1(x), self.norm1(x), attn_mask=mask
+        )
         assert attn_out.shape == x.shape
         x = x + attn_out
 
@@ -3108,7 +3140,7 @@ class TinyPreLNBlock(nn.Module):
 
 
 x = torch.randn(2, 4, 32)
-block = TinyPreLNBlock(d_model=32, num_heads=4, d_ff=128)
+block = TinyPreLNBlock(d_model=32, num_heads=4, d_ff=128, block_size=4)
 y = block(x)
 
 assert y.shape == x.shape
@@ -4359,8 +4391,8 @@ class MiniGPT(nn.Module):
         loss = None
         if targets is not None:
             loss = F.cross_entropy(
-                logits.view(-1, logits.size(-1)),
-                targets.view(-1),
+                logits.reshape(-1, logits.size(-1)),
+                targets.reshape(-1),
             )
         return logits, loss
 

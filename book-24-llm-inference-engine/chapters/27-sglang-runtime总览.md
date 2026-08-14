@@ -25,9 +25,9 @@ outputs = llm.generate(prompts, sampling_params)
 
 > SGLang Runtime 是把 OpenAI-compatible API、native `/generate`、offline engine 和 SGLang frontend 程序统一执行到高性能模型引擎上的系统层；它的核心模块包括入口服务、请求状态、scheduler、RadixAttention、memory pool、model runner、sampler、grammar backend 和 streaming 输出。
 
-## 27.0 本讲资料边界与第二轮精修口径
+## 27.0 本讲范围与资料
 
-本讲按第二轮精修要求做过资料校准，主要参考七类公开资料：
+本章参考七类公开资料：
 
 1. SGLang 论文《SGLang: Efficient Execution of Structured Language Model Programs》对 frontend language、runtime、RadixAttention、KV cache reuse 和 compressed finite state machines for structured output decoding 的系统分层。
 2. SGLang 官方文档首页对 SGLang 作为高性能 serving framework、RadixAttention、prefix caching、multi-GPU parallelism、OpenAI API 兼容和生产级 serving 的定位说明。
@@ -37,7 +37,7 @@ outputs = llm.generate(prompts, sampling_params)
 6. SGLang Structured Outputs 文档对 JSON schema、regex、EBNF、structural tag、XGrammar / Outlines / llguidance grammar backend 和 OpenAI-compatible / native / offline engine 三类使用方式的说明。
 7. SGLang Attention Backend 文档对 attention backend 选择、prefill / decode forward、page size、KV cache dtype、CUDA graph 和平台差异的公开口径。
 
-本章只讲 SGLang Runtime 的教学版总览，不绑定某个 SGLang 版本的内部类名、真实源码路径、进程拓扑、CUDA kernel、Ray / Kubernetes 部署、PD 分离、MoE 路由、speculative decoding 或真实 benchmark。下面的 demo 只模拟请求状态、prefix lookup、KV slot、prefill/decode 调度、grammar mask 和 streaming 事件，用来训练架构解释，不等同于真实 SRT。
+本章讨论 SGLang Runtime 的教学版总览，不绑定某个 SGLang 版本的内部类名、真实源码路径、进程拓扑、CUDA kernel、Ray / Kubernetes 部署、PD 分离、MoE 路由、speculative decoding 或真实 benchmark。下面的 demo 只模拟请求状态、prefix lookup、KV slot、prefill/decode 调度、grammar mask 和 streaming 事件，用来训练架构解释，不等同于真实 SRT。
 
 参考资料：
 
@@ -954,7 +954,7 @@ SGLang Runtime 可以理解为 SGLang 的高性能执行后端。它对外支持
 生成 token 后，runtime 更新请求状态、KV cache、grammar state，并按需要 stream 给客户端。请求结束后，普通临时 cache 会释放，有复用价值的 prefix cache 可能保留在 RadixAttention 的树结构里，后续请求可以继续命中。
 ```
 
-## 27.28 SGLang Runtime 指标、模块门禁和可运行 demo
+## 27.28 SGLang Runtime 指标、模块验收条件和可运行 demo
 
 把进入 runtime 的请求抽象成：
 
@@ -1006,7 +1006,7 @@ $$
 G_{\mathrm{steps}}=\sum_i g_iY_i
 $$
 
-教学版 SGLang Runtime 门禁可以写成：
+教学版 SGLang Runtime 准入条件可以形式化为：
 
 $$
 G_{\mathrm{runtime}}=G_{\mathrm{entry}}G_{\mathrm{state}}G_{\mathrm{radix}}G_{\mathrm{memory}}G_{\mathrm{schedule}}G_{\mathrm{grammar}}G_{\mathrm{stream}}G_{\mathrm{metric}}

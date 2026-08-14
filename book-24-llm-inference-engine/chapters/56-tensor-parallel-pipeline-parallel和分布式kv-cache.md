@@ -29,9 +29,9 @@ router 眼里的 worker 可能是一张 GPU 上的完整模型副本，也可能
 
 重点是理解 serving 里模型并行和 KV cache 的工程含义。
 
-## 56.0 本讲资料边界与第二轮精修口径
+## 56.0 本讲范围与资料
 
-本章按第二轮精修口径，只讲教学版 serving engine 在单个 worker 内部如何理解 tensor parallel、pipeline parallel 和分布式 KV cache。
+本章聚焦教学版 serving engine 在单个 worker 内部如何理解 tensor parallel、pipeline parallel 和分布式 KV cache。
 
 公开资料校准主要参考四类口径：
 
@@ -46,7 +46,7 @@ router 眼里的 worker 可能是一张 GPU 上的完整模型副本，也可能
 Parallel group plan -> TP rank shard -> PP stage layer ownership -> distributed KV block table -> collective cost -> pipeline bubble -> cross-rank cleanup -> migration vs recompute decision
 ```
 
-第二轮新增 demo 的验收重点是：router 看到的是 parallel group，不是单张 GPU；TP rank 的逻辑 block table 必须一致；TP 下 KV 按 head shard 分布；PP 下 KV 按 layer stage 分布；cancel / finish / preemption 必须跨 rank / stage 一致释放；TP size、PP size 和 KV 迁移决策必须用通信、bubble、显存和 workload 共同判断。
+本章 demo 的验收重点是：router 看到的是 parallel group，不是单张 GPU；TP rank 的逻辑 block table 必须一致；TP 下 KV 按 head shard 分布；PP 下 KV 按 layer stage 分布；cancel / finish / preemption 必须跨 rank / stage 一致释放；TP size、PP size 和 KV 迁移决策必须用通信、bubble、显存和 workload 共同判断。
 
 ## 56.1 本章目标
 
@@ -861,7 +861,7 @@ PP 的难点是 pipeline bubble 和 stage imbalance。在线 decode 有逐 token
 KV cache 是 serving 的关键状态。TP 下 KV 通常按 heads 分片，每个 rank 保存本地 shard，但逻辑 block table 必须一致；PP 下每个 stage 保存自己层的 KV。由于 KV cache 很大且和 block table、position、layout、rank shard 绑定，正在 decode 的请求很难跨 worker 迁移。实际系统通常依赖 request locality、sticky routing 和 worker-local prefix cache，而不是频繁迁移 KV。
 ```
 
-## 56.24 Distributed Parallel KV 公式、通信门禁和可运行 demo
+## 56.24 Distributed Parallel KV 公式、通信验收条件和可运行 demo
 
 对于一个请求，KV cache 的总字节数可以估算为：
 
@@ -901,7 +901,7 @@ R_{\mathrm{bubble}}=\frac{P-1}{M_{\mathrm{micro}}+P-1}
 D_i^{\mathrm{move}}=\mathbf{1}\left[T_{\mathrm{transfer}}(M_i^{\mathrm{kv}})<T_i^{\mathrm{recompute}}\right]
 ```
 
-最终用一个组合门禁收束：
+最终用一个组合验收条件收束：
 
 ```math
 G_{\mathrm{dpkv}}=G_{\mathrm{group}}G_{\mathrm{tp}}G_{\mathrm{pp}}G_{\mathrm{table}}G_{\mathrm{comm}}G_{\mathrm{bubble}}G_{\mathrm{move}}G_{\mathrm{cleanup}}

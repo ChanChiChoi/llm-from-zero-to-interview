@@ -8,7 +8,7 @@
 
 > Scheduler 的核心职责是每一轮决定哪些请求进入 prefill，哪些请求继续 decode，并在吞吐、延迟、显存和公平性之间做取舍。
 
-## 12.0 本讲资料边界与第二轮精修口径
+## 12.0 本讲范围与资料
 
 本讲只实现教学版请求队列和简单 scheduler。它要把 waiting queue、running set、finished set、prefill admission、decode continuation、token budget 和队列指标讲清楚，但不实现真正的 PagedAttention block manager、prefix cache、KV offload、抢占恢复、多 worker 调度、租户配额、streaming backpressure 或分布式执行。
 

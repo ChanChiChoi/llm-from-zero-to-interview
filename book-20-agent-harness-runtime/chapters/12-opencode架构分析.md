@@ -1,8 +1,8 @@
 # 第十二章：OpenCode 架构分析
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲第二轮精修时，优先参考 OpenCode 官方文档和官方 GitHub 仓库公开说明，重点核对 config、agents、tools、permissions、MCP servers、custom tools、server、SDK、sessions、snapshots、diff、compaction、plugins、commands、providers 和 LSP 等公开能力。
+本章参考 OpenCode 官方文档和官方 GitHub 仓库公开说明，重点核对 config、agents、tools、permissions、MCP servers、custom tools、server、SDK、sessions、snapshots、diff、compaction、plugins、commands、providers 和 LSP 等公开能力。
 
 边界要说清楚：
 
@@ -10,7 +10,7 @@
 2. 本章分析的是公开能力如何体现 agent harness / runtime 设计，不等于逐行复刻 OpenCode 内部源码。
 3. 对不同版本可能变化的默认权限、工具名、配置字段和 API endpoint，应以官方文档和当前项目版本为准，不写成永久不变的唯一标准。
 4. 对安全、权限、MCP、custom tools、server 暴露和远程配置这类高风险能力，正文只做防御性设计和审计，不提供绕过权限、规避审计、攻击 server 或滥用工具的步骤。
-5. 本章新增的公式和 demo 用于教学：把 OpenCode 的开放 runtime 能力转成可审计指标，帮助面试中从“开源 coding agent 有哪些模块”升级到“这些模块如何被治理、观察、恢复和评估”。
+5. 本章的公式和 demo 用于教学：把 OpenCode 的开放 runtime 能力转成可审计指标，帮助面试中从“开源 coding agent 有哪些模块”升级到“这些模块如何被治理、观察、恢复和评估”。
 
 一句话口径：OpenCode 的学习价值不只是“开源”，而是它把 coding agent 的模型、配置、工具、权限、扩展、server、SDK、snapshot 和 session 状态显式暴露成可分析的 runtime 控制面。
 
@@ -617,7 +617,7 @@ OpenCode 这类开放 coding agent 在工程落地中常见坑包括：
 
 ## 12.25 OpenCode 架构审计指标
 
-OpenCode 的公开性让我们能比闭源产品做更具体的架构审计。这里的目标不是给 OpenCode 打分，而是训练一种面试表达：开放 runtime 的能力越强，越需要把配置、权限、扩展、状态恢复和评估门禁讲清楚。
+OpenCode 的公开性让我们能比闭源产品做更具体的架构审计。这里的目标不是给 OpenCode 打分，而是训练一种面试表达：开放 runtime 的能力越强，越需要把配置、权限、扩展、状态恢复和评估验收条件讲清楚。
 
 令第 `i` 个 OpenCode runtime 能力项为：
 
@@ -699,7 +699,7 @@ C_{\mathrm{risk}}=\frac{\sum_{i:r_i=1} c_i}{\sum_{i=1}^{N} r_i}
 C_{\mathrm{eval}}=\frac{\sum_{i\in \mathcal{V}} p_i c_i}{|\mathcal{V}|}
 ```
 
-最后可以形成 OpenCode 架构门禁：
+最后可以形成 OpenCode 架构验收条件：
 
 ```math
 G_{\mathrm{opencode}}=
@@ -714,7 +714,7 @@ G_{\mathrm{opencode}}=
 
 ### 12.25.1 最小可运行 OpenCode 架构审计 demo
 
-下面的 0 依赖 demo 不启动 OpenCode，不访问网络，也不执行任何工具。它只审计 toy runtime capabilities，展示如何把 OpenCode 的公开能力转成配置、agent、工具、扩展、server、恢复和评估门禁。
+下面的 0 依赖 demo 不启动 OpenCode，不访问网络，也不执行任何工具。它只审计 toy runtime capabilities，展示如何把 OpenCode 的公开能力转成配置、agent、工具、扩展、server、恢复和评估验收条件。
 
 ```python
 from collections import defaultdict

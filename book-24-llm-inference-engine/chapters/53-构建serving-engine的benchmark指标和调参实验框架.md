@@ -28,9 +28,9 @@ serving engine 的优化目标通常不是“某一次 forward 更快”，而�
 
 本章就把 mini engine 升级成一个可压测、可观测、可调参、可回归的实验框架。
 
-## 53.0 本讲资料边界与第二轮精修口径
+## 53.0 本讲范围与资料
 
-本章按第二轮精修口径，只讲教学版 serving engine 的 benchmark 指标、workload、trace、参数扫描和回归门禁。
+本章聚焦教学版 serving engine 的 benchmark 指标、workload、trace、参数扫描和回归验收条件。
 
 公开资料校准主要参考四类口径：
 
@@ -45,7 +45,7 @@ serving engine 的优化目标通常不是“某一次 forward 更快”，而�
 workload spec -> benchmark config -> request trace -> engine step trace -> summary metrics -> regression comparison -> tuning decision
 ```
 
-第二轮新增 demo 的验收重点是：
+本章 demo 的验收重点是：
 
 ```text
 是否覆盖 short / long / shared prefix / KV pressure workload；
@@ -1123,7 +1123,7 @@ workload 不能只测单请求。我会至少设计短请求 baseline、长 prom
 调优时不会只追求 tokens/s。比如增大 max_num_batched_tokens 可能提高吞吐，但也可能恶化 TTFT 和 TPOT；启用 prefix cache 可能降低共享 prompt 的 TTFT，但也可能占用 KV blocks 导致 eviction 或 preemption。最终要根据业务场景选择配置：交互式聊天更重视 TTFT 和 TPOT，离线批处理可以更偏向吞吐。
 ```
 
-## 53.19 Benchmark Framework 公式、回归门禁和可运行 demo
+## 53.19 Benchmark Framework 公式、回归验收条件和可运行 demo
 
 一次 benchmark 样本可以抽象成：
 
@@ -1163,7 +1163,7 @@ candidate 相对 baseline 的吞吐变化：
 \Delta_{\mathrm{out}}=\frac{\Theta_{\mathrm{out}}^{\mathrm{cand}}-\Theta_{\mathrm{out}}^{\mathrm{base}}}{\max(1,\Theta_{\mathrm{out}}^{\mathrm{base}})}
 ```
 
-最终 benchmark framework 门禁：
+最终 benchmark framework 验收条件：
 
 ```math
 G_{\mathrm{benchfw}}=G_{\mathrm{workload}}G_{\mathrm{trace}}G_{\mathrm{slo}}G_{\mathrm{throughput}}G_{\mathrm{kv}}G_{\mathrm{cache}}G_{\mathrm{preempt}}G_{\mathrm{repro}}G_{\mathrm{decision}}

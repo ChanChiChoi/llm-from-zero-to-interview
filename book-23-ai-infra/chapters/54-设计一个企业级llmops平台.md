@@ -8,13 +8,13 @@ LLMOps 平台关注的是大模型应用从开发、评估、发布、观测、�
 
 > 企业级 LLMOps 平台的核心，是让大模型应用可开发、可评估、可发布、可观测、可治理、可审计、可持续优化。
 
-## 54.0 本讲资料边界与第二轮精修口径
+## 54.0 本讲范围与资料
 
-本讲按 `WRITING_PLAN.md` 的第二轮要求做过资料校准。重点参考的是 OpenTelemetry 对生成式 AI trace / metric 语义、span 属性和系统观测信号的公开口径，MLflow 对 GenAI 评估、trace、run、metric、artifact 和 prompt / eval 配置管理的公开口径，OpenAI Evals 对可复用评估样例、评估逻辑和回归验证的工程边界，以及前文模型网关、推理平台、RAG / Agent 存储、评估平台、可观测性、安全治理、成本治理和审计变更治理章节已经校准过的口径。
+本章参考 OpenTelemetry 对生成式 AI trace / metric 语义、span 属性和系统观测信号的公开口径，MLflow 对 GenAI 评估、trace、run、metric、artifact 和 prompt / eval 配置管理的公开口径，OpenAI Evals 对可复用评估样例、评估逻辑和回归验证的工程边界，以及前文模型网关、推理平台、RAG / Agent 存储、评估平台、可观测性、安全治理、成本治理和审计变更治理章节已经校准过的口径。
 
 这些资料共同指向一个稳定结论：企业级 LLMOps 平台不是“把模型 API 包一层控制台”，而是把大模型应用的模型路由、prompt、知识库、工具、Agent、评估、发布、trace、反馈、安全、成本和审计放进同一套应用生命周期控制面。
 
-本章只抽象截至 2026-06 仍稳定的企业级 LLMOps 系统设计方法，不把某个 SaaS、SDK、模型供应商、评估框架、向量数据库或内部平台实现写成通用标准。正文公式用于面试表达、系统设计自查和 toy demo 审计；真实落地仍要结合企业身份体系、数据分级、模型供应商协议、业务流程、合规要求、可用性 SLO 和历史事故复盘校准。
+本章聚焦截至 2026-06 仍稳定的企业级 LLMOps 系统设计方法，不把某个 SaaS、SDK、模型供应商、评估框架、向量数据库或内部平台实现写成通用标准。正文公式用于面试表达、系统设计自查和 toy demo 审计；真实落地仍要结合企业身份体系、数据分级、模型供应商协议、业务流程、合规要求、可用性 SLO 和历史事故复盘校准。
 
 ## 54.1 题目理解
 
@@ -465,7 +465,7 @@ API、SDK、CLI 和 Console 应基于同一套资源模型。
 
 ## 54.23 LLMOps 平台系统设计指标和最小 demo
 
-企业级 LLMOps 平台的系统设计，最好从“资源对象 + 生命周期门禁”讲起。一个应用样本可以抽象为：
+企业级 LLMOps 平台的系统设计，最好从“资源对象 + 生命周期验收条件”讲起。一个应用样本可以抽象为：
 
 ```math
 A_i=(m_i,p_i,k_i,t_i,g_i,e_i,r_i,o_i,f_i,c_i,s_i,u_i,z_i)
@@ -543,15 +543,15 @@ K_{\mathrm{run}}=K_{\mathrm{model}}+K_{\mathrm{retrieval}}+K_{\mathrm{rerank}}+K
 
 企业平台最终要能按应用、租户、用户、模型、知识库和工具做成本归因，而不是只看统一账单。
 
-评估发布门禁可以写成：
+评估发布准入条件可以形式化为：
 
 ```math
 G_{\mathrm{eval}}=\mathbf{1}\left[Q_{\mathrm{offline}}\ge\tau_q \land S_{\mathrm{safety}}\ge\tau_s \land R_{\mathrm{reg}}\ge\tau_r\right]
 ```
 
-其中，`Q_{\mathrm{offline}}` 是离线质量指标，`S_{\mathrm{safety}}` 是安全评估通过率，`R_{\mathrm{reg}}` 是回归集通过率。Prompt、RAG 配置和工具 schema 的变更都应该走类似门禁。
+其中，`Q_{\mathrm{offline}}` 是离线质量指标，`S_{\mathrm{safety}}` 是安全评估通过率，`R_{\mathrm{reg}}` 是回归集通过率。Prompt、RAG 配置和工具 schema 的变更都应该走类似验收条件。
 
-最终 LLMOps 平台门禁可以写成：
+最终 LLMOps 平台准入条件可以形式化为：
 
 ```math
 G_{\mathrm{llmops}}=\mathbf{1}\left[
@@ -565,9 +565,9 @@ P_0=0
 \right]
 ```
 
-其中，`P_0` 是未关闭 P0 风险。这个门禁强调：企业级 LLMOps 的答案不能只讲“有 prompt 管理和知识库管理”，还要证明版本、权限、评估、发布、trace、反馈、成本和安全能闭环。
+其中，`P_0` 是未关闭 P0 风险。这组条件强调：企业级 LLMOps 的答案不能只讲“有 prompt 管理和知识库管理”，还要证明版本、权限、评估、发布、trace、反馈、成本和安全能闭环。
 
-下面这个 0 依赖 Python demo 演示一个“企业级 LLMOps 平台系统设计审计器”：输入 toy applications、release manifest、RAG 候选、工具调用、trace、反馈和成本记录，输出生命周期、成本和设计门禁结果。
+下面这个 0 依赖 Python demo 演示一个“企业级 LLMOps 平台系统设计审计器”：输入 toy applications、release manifest、RAG 候选、工具调用、trace、反馈和成本记录，输出生命周期、成本和设计验收结果。
 
 ```python
 class MiniEnterpriseLLMOpsPlatformAudit:

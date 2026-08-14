@@ -1,8 +1,8 @@
 # 第七章：Agent 产品落地
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲按 `WRITING_PLAN.md` 的第二轮要求做公式和 demo 精修。联网资料主要核对五类口径：OpenAI Agents SDK 的 tools、handoffs、guardrails 和 tracing 资料提醒我们，Agent 产品要把工具、轨迹、护栏和交接显式工程化；OpenAI Evals 资料提醒我们，Agent 不能只看最终回答，要用可复现评估和 trace 评估任务成功、工具选择、参数、恢复和安全；OpenAI Model Spec 的指令层级口径提醒我们，工具输出、网页、RAG 文档和用户输入不能越过系统 / 开发者指令；OWASP LLM Top 10 中 excessive agency、prompt injection、sensitive information disclosure 和 unbounded consumption 风险提醒我们，能执行动作的 Agent 必须有权限、预算、确认和审计；Anthropic 关于 workflows 与 agents 的公开工程经验提醒我们，生产落地不应迷信“越自主越好”，稳定 workflow 和受控 Agent 往往需要组合。
+本章重点讨论。联网资料主要核对五类口径：OpenAI Agents SDK 的 tools、handoffs、guardrails 和 tracing 资料提醒我们，Agent 产品要把工具、轨迹、护栏和交接显式工程化；OpenAI Evals 资料提醒我们，Agent 不能只看最终回答，要用可复现评估和 trace 评估任务成功、工具选择、参数、恢复和安全；OpenAI Model Spec 的指令层级口径提醒我们，工具输出、网页、RAG 文档和用户输入不能越过系统 / 开发者指令；OWASP LLM Top 10 中 excessive agency、prompt injection、sensitive information disclosure 和 unbounded consumption 风险提醒我们，能执行动作的 Agent 必须有权限、预算、确认和审计；Anthropic 关于 workflows 与 agents 的公开工程经验提醒我们，生产落地不应迷信“越自主越好”，稳定 workflow 和受控 Agent 往往需要组合。
 
 本章不替代第十七册 Agent 原理、工具协议、安全评估和多 Agent 章节，也不展开具体框架 API。这里聚焦产品落地：怎么把 Agent 从“会调用工具的 demo”升级为可控、可验证、可审计、可预算、可人审、可进入企业工作流的任务执行产品。
 
@@ -262,7 +262,7 @@ Workflow 负责稳定流程，Agent 负责复杂判断和生成。这样比让 A
 
 不要只看最终回答。Agent 的价值和风险都在执行轨迹里。
 
-## 7.12.1 关键公式与 Agent 产品指标速查
+### 7.12.1 关键公式与 Agent 产品指标速查
 
 可以把一次 Agent 产品任务样本写成：
 
@@ -343,9 +343,9 @@ R_{\mathrm{budget}}=\frac{N_{\mathrm{over}}}{N+\epsilon}
 
 其中 `N_{\mathrm{over}}` 是超过步数、工具调用、token、时间或费用预算的任务数。复杂 Agent 如果没有停止条件，少数长尾任务会吞掉大量资源。
 
-**8. Agent 产品上线门禁**
+**8. Agent 产品上线条件**
 
-一个简化上线门禁可以写成：
+一个简化上线准入条件可以形式化为：
 
 ```math
 G_{\mathrm{agentprod}}=\mathbf{1}[R_{\mathrm{task}}\geq r_0]\mathbf{1}[R_{\mathrm{tool}}\geq t_0]\mathbf{1}[C_{\mathrm{conf}}\geq c_0]\mathbf{1}[R_{\mathrm{unauth}}=0]\mathbf{1}[R_{\mathrm{budget}}\leq b_0]\mathbf{1}[L_{95}\leq L_{\mathrm{slo}}]
@@ -606,7 +606,7 @@ sample_metrics= {'task_success': 0.842, 'tool_success': 0.915, 'confirmation_cov
 needs_rework= {'code_fix_agent': ['task_success', 'recovery', 'observation_use', 'budget_overrun', 'eval_ready', 'feedback_loop'], 'data_ops_agent': ['task_success', 'tool_success', 'high_risk_confirmation', 'recovery', 'state_update', 'observation_use', 'trace_coverage', 'unauthorized_action', 'budget_overrun', 'p95_latency', 'unit_cost', 'eval_ready', 'feedback_loop'], 'generic_browser_agent': ['task_success', 'tool_success', 'high_risk_confirmation', 'recovery', 'state_update', 'observation_use', 'trace_coverage', 'unauthorized_action', 'budget_overrun', 'p95_latency', 'unit_cost', 'eval_ready', 'feedback_loop', 'business_metric']}
 ```
 
-这个 demo 的重点是：Agent 产品不是越自动越好。`support_ticket_agent` 通过门禁，是因为它是半自动、任务边界清楚、确认覆盖和 trace 稳定；`code_fix_agent` 适合继续做 copilot，因为任务成功、恢复、预算和反馈还没过线；`data_ops_agent` 虽然有审批形态，但高风险确认、越权、成本和延迟不过线；`generic_browser_agent` 说明通用全自动浏览器 Agent 如果没有强权限、预算、确认和评估，很难进入生产。
+这个 demo 的重点是：Agent 产品不是越自动越好。`support_ticket_agent` 通过验收，是因为它是半自动、任务边界清楚、确认覆盖和 trace 稳定；`code_fix_agent` 适合继续做 copilot，因为任务成功、恢复、预算和反馈还没过线；`data_ops_agent` 虽然有审批形态，但高风险确认、越权、成本和延迟不过线；`generic_browser_agent` 说明通用全自动浏览器 Agent 如果没有强权限、预算、确认和评估，很难进入生产。
 
 ## 7.18 本章小结
 

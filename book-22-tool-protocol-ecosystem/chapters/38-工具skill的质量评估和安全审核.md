@@ -10,9 +10,9 @@
 
 > Tool 评估关注“能不能正确执行一个操作”，Skill 评估关注“能不能安全稳定地完成一类任务”。
 
-## 38.0 本讲资料边界与第二轮精修口径
+## 38.0 本讲范围与资料
 
-第二轮精修时，本讲对齐的是公开资料中相对稳定的评估和安全治理抽象：OpenAI Evals 对可复现评估、样本集、打分器和回归测试的工程思路，OpenAI Agents SDK 中 guardrails、tool guardrails、tracing 等运行时治理口径，OWASP LLM Top 10 2025 对 prompt injection、sensitive information disclosure、excessive agency、supply chain 等风险分类，以及 NIST AI RMF 对治理、映射、度量和管理风险的通用框架。
+本章参考的是公开资料中相对稳定的评估和安全治理抽象：OpenAI Evals 对可复现评估、样本集、打分器和回归测试的工程思路，OpenAI Agents SDK 中 guardrails、tool guardrails、tracing 等运行时治理口径，OWASP LLM Top 10 2025 对 prompt injection、sensitive information disclosure、excessive agency、supply chain 等风险分类，以及 NIST AI RMF 对治理、映射、度量和管理风险的通用框架。
 
 本章不把某个 eval 框架、某个云平台安全产品、某个红队流程、某个漏洞扫描器或某家 provider 的字段写成通用标准。这里抽象的是企业工具 / Skill 上架前后都需要回答的稳定问题：它是否能正确调用、是否能稳定完成任务、是否有足够证据、是否能抵抗不可信上下文、是否遵守最小权限、是否控制副作用、是否可监控、是否可回滚、是否能被人工 reviewer 和审计系统复查。
 
@@ -376,9 +376,9 @@ Marketplace 可以设置上架门槛。
 
 低风险 Skill 可以快速上架；高风险 Skill 必须严格审核。
 
-## 38.10 质量门禁示例
+## 38.10 质量验收条件示例
 
-例如合同审查 Skill 的质量门禁：
+例如合同审查 Skill 的质量验收条件：
 
 ```json
 {
@@ -479,7 +479,7 @@ Prompt、Workflow、Tool schema、模型版本变化都可能造成回归。
 q_i=(t_i,a_i,e_i,o_i,s_i,k_i,m_i,p_i,d_i,j_i,h_i,r_i,z_i)
 ```
 
-其中 $t_i$ 是 Tool schema，$a_i$ 是参数校验，$e_i$ 是执行可靠性，$o_i$ 是输出契约，$s_i$ 是副作用控制，$k_i$ 是 Skill 任务质量，$m_i$ 是离线和在线监控，$p_i$ 是权限，$d_i$ 是数据安全，$j_i$ 是 prompt injection 防护，$h_i$ 是人工审核，$r_i$ 是回归发布门禁，$z_i$ 是审计 trace。
+其中 $t_i$ 是 Tool schema，$a_i$ 是参数校验，$e_i$ 是执行可靠性，$o_i$ 是输出契约，$s_i$ 是副作用控制，$k_i$ 是 Skill 任务质量，$m_i$ 是离线和在线监控，$p_i$ 是权限，$d_i$ 是数据安全，$j_i$ 是 prompt injection 防护，$h_i$ 是人工审核，$r_i$ 是回归发布条件，$z_i$ 是审计 trace。
 
 对每个检查项 $g_j$，统一通过率可以写成：
 
@@ -495,7 +495,7 @@ S_i=w_tT_i+w_kK_i+w_fF_i+w_sS_i^{\prime}+w_pP_i+w_mM_i
 
 这里 $T_i$ 是 Tool 调用质量，$K_i$ 是 Skill 任务成功质量，$F_i$ 是事实与证据质量，$S_i^{\prime}$ 是安全控制分，$P_i$ 是权限和数据治理分，$M_i$ 是监控和维护分。写成 $S_i^{\prime}$ 是为了避免和总分 $S_i$ 混淆。
 
-最终上架门禁可以写成：
+最终上架准入条件可以形式化为：
 
 ```math
 G_{\mathrm{quality\_safety}}=
@@ -504,7 +504,7 @@ G_{\mathrm{quality\_safety}}=
 \right]
 ```
 
-高风险 Tool / Skill 不应该只靠平均分通过。比如数据泄露率、未授权写操作、敏感信息外发、绕过确认这类安全指标，常常需要硬门禁：只要失败就阻断发布。
+高风险 Tool / Skill 不应该只靠平均分通过。比如数据泄露率、未授权写操作、敏感信息外发、绕过确认这类安全指标，常常需要硬性条件：只要失败就阻断发布。
 
 下面是一个 0 依赖 toy demo。它把一个完整合同审查 Skill 和 18 个典型坏样本放进审计器，覆盖 Tool schema、参数校验、执行可靠性、输出稳定性、副作用控制、Skill 任务质量、事实证据、安全审核、在线监控、人工 review、回归发布和审计 trace。
 
@@ -678,7 +678,7 @@ failed_gates= ['tool_schema_clarity', 'argument_validation', 'execution_reliabil
 quality_safety_gate_pass= False
 ```
 
-这个 demo 的重点是把“评估”和“审核”连成一个门禁：Tool 侧看 schema、参数、执行、输出、副作用；Skill 侧看任务、事实、完整性、格式、用户价值；安全侧看权限、数据、prompt injection、副作用、供应链、人工审核；发布侧看回归门禁、在线监控和 audit trace。
+这个 demo 的重点是把“评估”和“审核”连成一个验收条件：Tool 侧看 schema、参数、执行、输出、副作用；Skill 侧看任务、事实、完整性、格式、用户价值；安全侧看权限、数据、prompt injection、副作用、供应链、人工审核；发布侧看回归验收条件、在线监控和 audit trace。
 
 ## 38.16 面试高频题
 
@@ -692,7 +692,7 @@ Tool 评估关注单个操作是否可被正确调用，包括 schema 清晰度�
 
 参考回答：
 
-应审核 Manifest 完整性、权限合理性、数据安全、Prompt injection 防护、副作用动作、供应链依赖、离线 eval 结果、质量门禁、owner 和维护文档。高风险 Skill 还需要红队测试和人工审批。
+应审核 Manifest 完整性、权限合理性、数据安全、Prompt injection 防护、副作用动作、供应链依赖、离线 eval 结果、质量验收条件、owner 和维护文档。高风险 Skill 还需要红队测试和人工审批。
 
 ### 题 3：如何评估一个合同审查 Skill？
 
@@ -719,7 +719,7 @@ Tool 评估关注单个操作是否可被正确调用，包括 schema 清晰度�
 3. 为一个发送邮件 Tool 设计安全审核清单。
 4. 写一个合同审查 Skill 的 quality gate。
 5. 思考：如果一个 Skill 用户满意度很高，但引用准确率很低，是否应该允许上架？为什么？
-6. 修改 38.15 的 demo，让 `prompt_injection_bad` 同时触发 prompt injection、防数据泄露和高风险动作控制三个失败门禁，并解释这类 case 为什么不能只靠离线质量分通过。
+6. 修改 38.15 的 demo，让 `prompt_injection_bad` 同时触发 prompt injection、防数据泄露和高风险动作控制三个失败验收条件，并解释这类 case 为什么不能只靠离线质量分通过。
 7. 给 demo 新增一个 `online_drift_bad` 样本：离线 eval 全部通过，但线上 parse failure、人工接管率和安全拦截率异常升高。说明它应该阻断自动发布还是触发灰度回滚。
 
 ## 38.18 本章小结
@@ -730,6 +730,6 @@ Tool 评估关注单步操作的可调用性、参数正确率、调用成功率
 
 你可以把本章重点记成一句话：
 
-> 工具生态的质量不是靠开发者自称可靠，而是靠可复现的 eval、可执行的安全门禁和持续在线监控建立起来的。
+> 工具生态的质量不是靠开发者自称可靠，而是靠可复现的 eval、可执行的安全验收条件和持续在线监控建立起来的。
 
 下一章我们会继续讲工具生态中的开发者体验和文档规范，也就是如何让开发者更容易写出好工具、好 Skill 和好 Manifest。

@@ -8,16 +8,16 @@
 
 > vLLM 的 worker、executor 和 engine 架构，本质是在入口层、调度层和 GPU 执行层之间建立清晰边界：engine core 做调度和状态管理，executor 负责派发执行，worker 控制具体设备，model runner 把调度结果转换成模型 forward。
 
-## 22.0 本讲资料边界与第二轮精修口径
+## 22.0 本讲范围与资料
 
-本讲按第二轮精修要求做过资料校准，主要参考四类公开资料：
+本章参考四类公开资料：
 
 1. vLLM Architecture Overview 对 API server process、engine core process、GPU worker processes、DP coordinator process、LLMEngine、AsyncLLMEngine、executor、worker 和 model runner 的架构边界说明。
 2. vLLM optimization / tuning 文档对 CPU 资源需求、最小进程数量、`--api-server-count`、tensor parallel、pipeline parallel、data parallel 和 expert parallel 的调优边界说明。
 3. vLLM V1 guide 对 core engine、chunked prefill、统一 scheduler budget、功能默认值和 V0 / V1 行为差异的说明。
 4. vLLM metrics 文档对 engine core iteration、scheduler、request state、KV cache usage、queue / prefill / decode 以及 worker 执行相关观测指标的公开口径。
 
-本章只讲 vLLM-like worker / executor / engine 架构的教学抽象，不绑定某个 vLLM 版本的真实源码类名、RPC / ZMQ / Ray / multiprocessing 实现、CUDA graph 内部格式、真实 attention backend、分布式通信库细节、NCCL 参数、OpenAI server 参数全集或具体 GPU 型号。
+本章讨论 vLLM-like worker / executor / engine 架构的教学抽象，不绑定某个 vLLM 版本的真实源码类名、RPC / ZMQ / Ray / multiprocessing 实现、CUDA graph 内部格式、真实 attention backend、分布式通信库细节、NCCL 参数、OpenAI server 参数全集或具体 GPU 型号。
 
 本章 demo 用纯 Python 模拟 engine core、executor、workers、model runner metadata、tensor-parallel shard 聚合、worker failure、CPU process budget 和 trace，不等同于真实 vLLM runtime。
 
@@ -401,7 +401,7 @@ class WorkerInput:
 
 这一步如果错了，模型可能不会立刻报错，但会生成错误内容或读写错误 KV 位置。
 
-本轮 executor 派发门禁可以写成：
+本轮 executor 派发准入条件可以形式化为：
 
 $$
 G_{\mathrm{dispatch},\tau}=G_{\mathrm{runner},\tau}G_{\mathrm{rank},\tau}G_{\mathrm{merge},\tau}
@@ -523,7 +523,7 @@ GPU 利用率低不一定是 GPU 算不满，也可能是 CPU 调度、输入处
 
 尤其 engine core 是调度忙循环，如果 CPU 被抢占，会直接影响每轮请求派发速度，表现为 GPU 有空洞、TPOT 抖动或吞吐下降。
 
-CPU 资源可以用一个最小门禁表达：
+CPU 资源可以用一个最小验收条件表达：
 
 $$
 G_{\mathrm{cpu}}=\mathbf{1}[C_{\mathrm{cpu}}\ge N_{\mathrm{proc}}]
@@ -580,7 +580,7 @@ worker 启动时通常要做很多初始化：
 
 多 worker 并行时，一个 worker 挂掉通常会影响整个 parallel group。比如 TP=4 的一个 rank 挂了，这个模型 replica 基本不能继续正常执行。
 
-如果某个 parallel group 中任意 worker 失败，本轮执行门禁可以写成：
+如果某个 parallel group 中任意 worker 失败，本轮执行准入条件可以形式化为：
 
 $$
 G_{\mathrm{worker}}=\prod_{r\in \mathcal{R}}\mathbf{1}[\mathrm{healthy}_r=1]
@@ -678,7 +678,7 @@ Worker 通常是一进程控制一张 GPU，负责设置 device、加载模型�
 
 ## 22.21 Worker / Executor 架构公式、派发 trace 和可运行 demo
 
-把本章的执行架构验收合成一个教学版门禁：
+把本章的执行架构验收合成一个教学版验收条件：
 
 $$
 G_{\mathrm{execarch}}=G_{\mathrm{layer}}G_{\mathrm{dispatch}}G_{\mathrm{runner}}G_{\mathrm{rank}}G_{\mathrm{merge}}G_{\mathrm{cpu}}G_{\mathrm{failure}}G_{\mathrm{metric}}

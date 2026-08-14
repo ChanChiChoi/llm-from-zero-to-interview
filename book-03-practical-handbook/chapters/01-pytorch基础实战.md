@@ -18,6 +18,12 @@
 
 如果你连一个线性回归训练循环都不能手写清楚，面试官很难相信你真正理解大模型训练。
 
+### 本章实验的边界
+
+本章的代码首先服务于理解机制，而不是制造一个可以和工业训练系统直接比较的 benchmark。示例中的数据大多是人工生成的，很多训练循环为了让计算图清楚而采用全量 batch，也没有加入分布式通信、数据清洗、断点恢复和生产级监控。因此，示例输出是由随机种子、PyTorch 版本和运行设备共同决定的典型结果，不应被理解为某个模型的性能承诺。
+
+读者可以把每一讲分成两层来读：先确认公式、张量 shape 和梯度方向是否正确，再把同一机制放回真实工程的 batch、设备、精度和吞吐约束中。这样既不会把教学代码误当成生产模板，也不会因为工程细节复杂而跳过最基本的训练闭环。
+
 ---
 
 ### 一、问题设定
@@ -270,7 +276,7 @@ with torch.no_grad():
 
 参数更新本身不是模型前向计算的一部分。
 
-如果不放在 `no_grad` 里，PyTorch 会把更新操作也记录进计算图，导致图越来越复杂，甚至报错。
+如果直接对 `requires_grad=True` 的叶子张量做原地更新，PyTorch 通常会报错；即使某种写法没有立即报错，也不应该让优化器的更新操作进入下一轮前向计算图。`torch.no_grad()` 明确告诉 autograd：下面是参数状态更新，不需要为它建立反向路径。
 
 面试中可以这样说：
 
@@ -854,13 +860,13 @@ probs = torch.softmax(logits, dim=-1)
 pred = logits.argmax(dim=-1)
 ```
 
-标签 `y` 不是 one-hot，而是类别 id：
+本讲采用的是 hard label，也就是每个样本一个类别 id：
 
 ```text
 0, 1, 2
 ```
 
-对于 `nn.CrossEntropyLoss()`，输入要求是：
+对于 `nn.CrossEntropyLoss()` 的 hard-label 用法，输入要求是：
 
 | 张量 | shape | dtype | 含义 |
 |---|---:|---|---|
@@ -874,7 +880,7 @@ logits: [300, 3]
 y:      [300]
 ```
 
-如果把 `y` 写成 `[300, 1]`，或者写成 float，都会导致错误或训练含义不对。
+如果把 hard label 写成 `[300, 1]`，shape 就不符合这个用法；如果写成 float，也会触发 dtype 错误。较新的 PyTorch 还支持把每个类别的概率分布作为 float target 传入，但那是另一种 target 语义，target shape 必须与 logits 一致，并且每行应是合法的概率分布。本讲为了突出最常用的分类路径，统一使用类别 id。
 
 ---
 
@@ -933,7 +939,8 @@ logits = torch.tensor([
 labels = torch.tensor([0, 1, 2], dtype=torch.long)
 
 torch_loss = F.cross_entropy(logits, labels)
-correct_logits = logits[torch.arange(labels.numel()), labels]
+row_ids = torch.arange(labels.numel(), device=logits.device)
+correct_logits = logits[row_ids, labels]
 manual_loss = (-correct_logits + torch.logsumexp(logits, dim=-1)).mean()
 
 probs = torch.softmax(logits, dim=-1)
@@ -990,7 +997,7 @@ preds == y
 得到布尔向量。
 
 ```python
-.float().mean()
+accuracy = (preds == y).float().mean()
 ```
 
 把 `True/False` 转成 `1/0`，再求平均。
@@ -1270,7 +1277,7 @@ nn.CrossEntropyLoss()
 
 交叉熵就是这个目标的标准实现。
 
-本讲精修时按 `WRITING_PLAN.md` 核对了 PyTorch 官方 `CrossEntropyLoss`、`F.cross_entropy` 和 `torch.logsumexp` 文档。PyTorch 文档明确把 `cross_entropy` 的输入称为 unnormalized logits，`torch.logsumexp` 则是数值稳定的 `log(sum(exp(x)))` 归约；所以下面的手写实现重点放在 `logsumexp(logits) - correct_logit`，而不是先显式得到概率再取 `log`。
+本章参考了 PyTorch 官方 `CrossEntropyLoss`、`F.cross_entropy` 和 `torch.logsumexp` 文档。PyTorch 文档明确把 `cross_entropy` 的输入称为 unnormalized logits，`torch.logsumexp` 则是数值稳定的 `log(sum(exp(x)))` 归约；所以下面的手写实现重点放在 `logsumexp(logits) - correct_logit`，而不是先显式得到概率再取 `log`。
 
 ---
 
@@ -1319,7 +1326,7 @@ $$
 也就是：
 
 $$
-\ell = \operatorname{logsumexp}(z) - z_y
+\ell = \mathrm{logsumexp}(z) - z_y
 $$
 
 直觉是：`logsumexp(z)` 看所有类别的总竞争强度，`z_y` 看正确类别自己的分数；正确类别越压过其他类别，loss 越小。
@@ -1358,7 +1365,7 @@ $$
 第 `i` 个样本的 loss 是：
 
 $$
-\ell_i = \operatorname{logsumexp}(z_i) - z_{i,y_i}
+\ell_i = \mathrm{logsumexp}(z_i) - z_{i,y_i}
 $$
 
 如果 reduction 是 mean，batch loss 是：
@@ -1381,7 +1388,8 @@ import torch
 
 def cross_entropy_naive(logits, labels):
     probs = torch.softmax(logits, dim=-1)
-    correct_probs = probs[torch.arange(labels.shape[0]), labels]
+    row_ids = torch.arange(labels.shape[0], device=logits.device)
+    correct_probs = probs[row_ids, labels]
     loss = -torch.log(correct_probs)
     return loss.mean()
 
@@ -1412,7 +1420,8 @@ labels: [batch]
 这一行最关键：
 
 ```python
-correct_probs = probs[torch.arange(labels.shape[0]), labels]
+row_ids = torch.arange(labels.shape[0], device=logits.device)
+correct_probs = probs[row_ids, labels]
 ```
 
 它的意思是：
@@ -1446,7 +1455,8 @@ from torch import nn
 
 def cross_entropy_naive(logits, labels):
     probs = torch.softmax(logits, dim=-1)
-    correct_probs = probs[torch.arange(labels.shape[0]), labels]
+    row_ids = torch.arange(labels.shape[0], device=logits.device)
+    correct_probs = probs[row_ids, labels]
     loss = -torch.log(correct_probs)
     return loss.mean()
 
@@ -1497,8 +1507,8 @@ $$
 但数学上 softmax 有一个重要性质：
 
 $$
-\operatorname{softmax}(z)
-= \operatorname{softmax}(z - m)
+\mathrm{softmax}(z)
+= \mathrm{softmax}(z - m)
 $$
 
 其中：
@@ -1550,7 +1560,8 @@ $$
 ```python
 def cross_entropy_stable_softmax(logits, labels):
     probs = stable_softmax(logits)
-    correct_probs = probs[torch.arange(labels.shape[0]), labels]
+    row_ids = torch.arange(labels.shape[0], device=logits.device)
+    correct_probs = probs[row_ids, labels]
     loss = -torch.log(correct_probs)
     return loss.mean()
 ```
@@ -1566,13 +1577,13 @@ def cross_entropy_stable_softmax(logits, labels):
 交叉熵可以直接写成：
 
 $$
-\ell_i = -\log \operatorname{softmax}(z_i)_{y_i}
+\ell_i = -\log \mathrm{softmax}(z_i)_{y_i}
 $$
 
 而：
 
 $$
-\log \operatorname{softmax}(z_i)_c
+\log \mathrm{softmax}(z_i)_c
 = z_{i,c} - \log \sum_{j=0}^{C-1}\exp(z_{i,j})
 $$
 
@@ -1588,7 +1599,7 @@ $$
 
 $$
 s_i
-= \operatorname{logsumexp}(z_i)
+= \mathrm{logsumexp}(z_i)
 = m_i + \log \sum_{j=0}^{C-1}\exp(z_{i,j} - m_i)
 $$
 
@@ -1601,7 +1612,8 @@ def cross_entropy_logsumexp(logits, labels):
     max_logits = logits.max(dim=-1, keepdim=True).values
     shifted = logits - max_logits
     log_sum_exp = max_logits.squeeze(-1) + torch.log(torch.exp(shifted).sum(dim=-1))
-    correct_logits = logits[torch.arange(labels.shape[0]), labels]
+    row_ids = torch.arange(labels.shape[0], device=logits.device)
+    correct_logits = logits[row_ids, labels]
     loss = log_sum_exp - correct_logits
     return loss.mean()
 ```
@@ -1615,7 +1627,7 @@ $$
 因为：
 
 $$
--\log \operatorname{softmax}(z_i)_{y_i}
+-\log \mathrm{softmax}(z_i)_{y_i}
 = -(z_{i,y_i} - s_i)
 = s_i - z_{i,y_i}
 $$
@@ -1633,7 +1645,8 @@ PyTorch 已经提供了稳定的 `torch.logsumexp`。
 ```python
 def cross_entropy_with_logsumexp(logits, labels):
     log_sum_exp = torch.logsumexp(logits, dim=-1)
-    correct_logits = logits[torch.arange(labels.shape[0]), labels]
+    row_ids = torch.arange(labels.shape[0], device=logits.device)
+    correct_logits = logits[row_ids, labels]
     loss = log_sum_exp - correct_logits
     return loss.mean()
 ```
@@ -1684,7 +1697,8 @@ def cross_entropy_logsumexp(logits, labels, ignore_index=None):
         labels = labels[mask]
 
     log_sum_exp = torch.logsumexp(logits, dim=-1)
-    correct_logits = logits[torch.arange(labels.numel()), labels]
+    row_ids = torch.arange(labels.numel(), device=logits.device)
+    correct_logits = logits[row_ids, labels]
     return (log_sum_exp - correct_logits).mean()
 
 
@@ -1831,12 +1845,12 @@ $$
 
 ```python
 loss = F.cross_entropy(
-    logits.view(-1, vocab_size),
-    labels.view(-1),
+    logits.reshape(-1, vocab_size),
+    labels.reshape(-1),
 )
 ```
 
-这和本讲的分类器完全一样。
+这和本讲的分类器完全一样。这里使用 `reshape` 而不是无条件使用 `view`，是因为经过转置、切片或某些布局变换后的 Tensor 可能不是 contiguous；`reshape` 会在必要时创建连续副本。若确认张量连续，也可以使用 `contiguous().view(...)`。
 
 只不过：
 
@@ -1878,7 +1892,7 @@ $$
 L
 = \frac{1}{|\mathcal{M}|}
 \sum_{i \in \mathcal{M}}
-\left(\operatorname{logsumexp}(z_i) - z_{i,y_i}\right)
+\left(\mathrm{logsumexp}(z_i) - z_{i,y_i}\right)
 $$
 
 在 LLM SFT 中，常用做法是：
@@ -1902,9 +1916,9 @@ $$
 
 #### 坑 2：label 是 one-hot
 
-`CrossEntropyLoss` 默认需要类别 id，不是 one-hot。
+`CrossEntropyLoss` 最常见的 hard-label 路径需要类别 id，而不是 one-hot。
 
-如果 label 是 one-hot，要么转成类别 id，要么用其他合适 loss。
+如果 label 是 one-hot 或概率分布，不能直接当作本讲的 hard label 使用；可以转成类别 id，也可以按 PyTorch 支持的 probability-target 形式检查 shape、dtype 和分布约束后再传入。
 
 #### 坑 3：label dtype 不是 long
 
@@ -2047,7 +2061,7 @@ loss.backward()
 
 它就是链式法则在计算图上的系统应用。
 
-本讲精修时按 `WRITING_PLAN.md` 核对了 PyTorch 官方 autograd tutorial 和 `torch.Tensor.backward` 文档。官方资料强调：autograd 会在前向中构建动态 DAG，反向时用链式法则计算梯度，并把梯度累积到叶子张量的 `.grad`；如果输出不是标量，`backward()` 还需要显式传入同 shape 的上游梯度。
+本章参考了 PyTorch 官方 autograd tutorial 和 `torch.Tensor.backward` 文档。官方资料强调：autograd 会在前向中构建动态 DAG，反向时用链式法则计算梯度，并把梯度累积到叶子张量的 `.grad`；如果输出不是标量，`backward()` 还需要显式传入同 shape 的上游梯度。
 
 ---
 
@@ -2820,7 +2834,8 @@ $$
 深度学习训练的核心循环可以写成：
 
 ```python
-loss = model(x)
+pred = model(x)
+loss = criterion(pred, y)
 loss.backward()
 optimizer.step()
 optimizer.zero_grad()
@@ -2834,7 +2849,7 @@ optimizer.zero_grad()
 
 优化器决定了训练能不能稳定、能不能快速收敛、最终性能能不能充分发挥。
 
-本讲精修时按 `WRITING_PLAN.md` 核对了 PyTorch 官方 `SGD`、`Adam`、`AdamW` 文档、Adam 原论文 `Adam: A Method for Stochastic Optimization` 和 AdamW 原论文 `Decoupled Weight Decay Regularization`。资料边界是：PyTorch `AdamW` 文档明确把 weight decay 放在一阶矩、二阶矩更新之前的独立参数衰减步骤中，`Adam` 文档也提供 `decoupled_weight_decay` 选项；AdamW 论文指出 L2 regularization 和 weight decay 在普通 SGD 下等价，但在 Adam 这类自适应优化器下不等价。
+本章参考了 PyTorch 官方 `SGD`、`Adam`、`AdamW` 文档、Adam 原论文 `Adam: A Method for Stochastic Optimization` 和 AdamW 原论文 `Decoupled Weight Decay Regularization`。资料边界是：PyTorch `AdamW` 文档明确把 weight decay 放在一阶矩、二阶矩更新之前的独立参数衰减步骤中，`Adam` 文档也提供 `decoupled_weight_decay` 选项；AdamW 论文指出 L2 regularization 和 weight decay 在普通 SGD 下等价，但在 Adam 这类自适应优化器下不等价。
 
 ---
 
@@ -3283,11 +3298,7 @@ AdamW 的思路是：
 \frac{\hat m_t}{\sqrt{\hat v_t}+\epsilon}
 ```
 
-或者合并理解为：
-
-```text
-先按 Adam 的自适应方向更新，再直接对参数做衰减。
-```
+这两个项属于同一次参数更新。不同实现可能先写衰减项、再写 Adam 项，但关键不在代码行的先后，而在于衰减项不进入 `m_t` 和 `v_t` 的统计通道。
 
 这样 weight decay 不会被二阶矩 `v_t` 缩放。
 
@@ -3421,7 +3432,7 @@ M_{\mathrm{per\ param}}
 \,\mathrm{bytes}
 ```
 
-7B 参数仅这些训练状态就约 `78.23 GiB`，还没算 activation、通信 buffer、fragmentation 和 checkpoint。
+7B 参数仅这些参数、梯度和 Adam 状态就约 `78.23 GiB`，还没算 activation、通信 buffer、fragmentation 和 checkpoint。如果实现还保留 fp32 master weights，还要再增加约 `26.08 GiB`；参数分片后，这个数字才会按分片策略分摊到各设备。因此这是帮助建立数量级直觉的下界估算，不是单卡显存承诺。
 
 ---
 
@@ -3614,7 +3625,159 @@ AdamW + warmup + cosine decay
 
 ---
 
-### 十七、常见工程坑
+### 十七、梯度累积与有效 batch size
+
+当单个 micro-batch 放不进显存时，常见做法不是立刻把模型改小，而是让多个 micro-batch 先分别计算梯度，暂时不更新参数，等累积到一定数量后再进行一次 optimizer step。这就是 gradient accumulation。
+
+先区分三个概念：
+
+1. `micro-batch size`：一次前向和反向实际放进一张卡的样本数。
+2. `gradient accumulation steps`：多少个 micro-batch 合并成一次参数更新。
+3. `global batch size`：所有设备在一次参数更新中共同处理的样本数。
+
+如果每张卡的 micro-batch size 是 `B_mu`，累积步数是 `G`，数据并行设备数是 `W`，且每个 micro-batch 都有相同大小，那么有效 global batch size 是：
+
+$$
+B_{\mathrm{global}}
+=
+B_{\mu} \times G \times W
+$$
+
+这里的“有效”指一次 optimizer step 覆盖的数据量，不是某一次前向实际看到的数据量。
+
+#### 1. 为什么 loss 要除以累积步数
+
+设第 `j` 个 micro-batch 的平均 loss 是 `L_j`，一共累积 `G` 个 batch。若希望一次更新等价于把它们拼成一个大 batch 后计算平均 loss，那么目标是：
+
+$$
+L_{\mathrm{large}}
+=
+\frac{1}{G}\sum_{j=1}^{G}L_j
+$$
+
+因此每个 micro-batch 反向时应该使用：
+
+$$
+\tilde L_j = \frac{L_j}{G}
+$$
+
+由于梯度是线性的：
+
+$$
+\nabla_\theta L_{\mathrm{large}}
+=
+\frac{1}{G}\sum_{j=1}^{G}\nabla_\theta L_j
+$$
+
+如果忘了除以 `G`，累积后的梯度大约会变成目标梯度的 `G` 倍。此时即使 loss 曲线看起来正常，实际有效学习率也被放大了，训练可能震荡甚至发散。
+
+#### 2. 一个可验证的等价性实验
+
+下面用两个大小相同的 micro-batch 对比两种计算：
+
+1. 分两次前向，每次用 `loss / 2` 反向后累积梯度。
+2. 把两个 batch 拼起来，一次前向并计算平均 loss。
+
+在没有随机层、且使用相同初始参数的前提下，两者的梯度应当一致。
+
+```python
+import torch
+from torch import nn
+
+
+torch.manual_seed(7)
+
+x = torch.tensor([[1.0], [2.0], [3.0], [4.0]])
+y = 2.0 * x + 1.0
+x_parts = x.chunk(2)
+y_parts = y.chunk(2)
+
+model_accum = nn.Linear(1, 1)
+model_large = nn.Linear(1, 1)
+model_large.load_state_dict(model_accum.state_dict())
+criterion = nn.MSELoss()
+
+model_accum.zero_grad(set_to_none=True)
+for x_micro, y_micro in zip(x_parts, y_parts):
+    micro_loss = criterion(model_accum(x_micro), y_micro)
+    (micro_loss / len(x_parts)).backward()
+
+large_loss = criterion(model_large(x), y)
+large_loss.backward()
+
+weight_grad_close = torch.allclose(
+    model_accum.weight.grad,
+    model_large.weight.grad,
+)
+bias_grad_close = torch.allclose(
+    model_accum.bias.grad,
+    model_large.bias.grad,
+)
+
+print("large_loss=", round(large_loss.item(), 6))
+print("weight_grad_close=", weight_grad_close)
+print("bias_grad_close=", bias_grad_close)
+print("accum_weight_grad=", model_accum.weight.grad.flatten().tolist())
+print("large_weight_grad=", model_large.weight.grad.flatten().tolist())
+```
+
+典型输出中，两个 `*_grad_close` 都是 `True`。这不是说梯度累积在所有训练中都能完美替代大 batch：如果模型含有 BatchNorm、随机层、动态 padding 或依赖 batch 统计的操作，前向行为本身就可能不同。对 Transformer 常见的 LayerNorm 来说，没有 BatchNorm 的 batch 统计差异，但 dropout、随机数据增强和样本顺序仍然会影响逐步结果。
+
+#### 3. 一个真正的累积训练循环
+
+参数只应在累积完成后更新一次：
+
+```python
+grad_accum_steps = 4
+optimizer.zero_grad(set_to_none=True)
+
+for micro_step, batch in enumerate(dataloader):
+    pred = model(batch["x"])
+    loss = criterion(pred, batch["y"])
+    (loss / grad_accum_steps).backward()
+
+    reached_boundary = (micro_step + 1) % grad_accum_steps == 0
+    is_last_batch = (micro_step + 1) == len(dataloader)
+    if reached_boundary or is_last_batch:
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        optimizer.step()
+        optimizer.zero_grad(set_to_none=True)
+```
+
+这个示例假设最后一个累积组也恰好包含 `grad_accum_steps` 个 micro-batch，或者接受最后一组梯度被固定除以 `grad_accum_steps` 的约定。若最后一组只有 `r < G` 个 batch，却希望它仍然代表这 `r` 个 batch 的平均梯度，就必须按实际的 `r` 做归一化，或者在数据加载阶段使用 `drop_last`，不能无条件沿用 `G`。
+
+#### 4. token loss 不能只平均“每个 batch 的平均值”
+
+语言模型训练通常按有效 token 计算交叉熵。若第 `j` 个 micro-batch 有 `N_j` 个未被 mask 的 token，且它的 token loss 总和为 `S_j`，整个累积组的正确平均应该是：
+
+$$
+L_{\mathrm{tokens}}
+=
+\frac{\sum_{j=1}^{G}S_j}
+{\sum_{j=1}^{G}N_j}
+$$
+
+直接计算每个 micro-batch 的 `mean`，再做 `G` 次等权平均，实际得到的是：
+
+$$
+\frac{1}{G}\sum_{j=1}^{G}\frac{S_j}{N_j}
+$$
+
+只有当每个 micro-batch 的有效 token 数相同，这两个式子才相等。对有 padding、packing 或不同回答长度的 SFT 数据，二者可能产生可测差异。更严谨的实现应按有效 token 数加权，或者用 `reduction="sum"` 记录全组的 loss numerator 和 token denominator，再按全局有效 token 数归一化；分布式训练还要对 denominator 做跨设备归约。
+
+#### 5. 梯度裁剪、优化器和 scheduler 的边界
+
+梯度累积时有三个调用频率必须区分：
+
+1. `forward` 和 `backward`：每个 micro-batch 一次。
+2. `clip_grad_norm_`、`optimizer.step`：每个累积组一次，作用于已经合并的梯度。
+3. `scheduler.step`：通常和 `optimizer.step` 同频，而不是每个 micro-batch 一次。
+
+如果在每个 micro-batch 后都裁剪梯度，得到的不是“先累积再裁剪”的结果；如果在每个 micro-batch 后都更新 scheduler，warmup 和 decay 会比计划快 `G` 倍。断点恢复时还要保存累积组内已经完成了多少个 micro-batch，否则恢复后可能重复或丢失一部分梯度。
+
+---
+
+### 十八、常见工程坑
 
 #### 坑 1：忘记 `zero_grad`
 
@@ -3680,7 +3843,7 @@ optimizer.step()
 
 ---
 
-### 十八、面试怎么回答
+### 十九、面试怎么回答
 
 #### 问题 1：SGD 和 Adam 有什么区别？
 
@@ -3716,7 +3879,7 @@ AdamW 需要为每个参数保存一阶矩和二阶矩，显存和通信开销�
 
 ---
 
-### 十九、小练习
+### 二十、小练习
 
 #### 练习 1
 
@@ -3810,7 +3973,7 @@ lr = 0.1
 
 学习率调度器决定“不同训练阶段走多远”。
 
-本讲精修时按 `WRITING_PLAN.md` 核对了 PyTorch 官方 `lr_scheduler` 文档、`LambdaLR`、`StepLR`、`ExponentialLR`、`CosineAnnealingLR` 文档，以及 Hugging Face Transformers scheduler 文档。资料边界是：PyTorch scheduler 只负责按调用次数调整 optimizer 的 `lr`，调用频率要由训练循环保证；PyTorch 官方也强调通常应先 `optimizer.step()` 再 `scheduler.step()`；Transformers 提供的 `get_*_schedule_with_warmup` 常用于按 optimizer step 计算 warmup 和 decay。
+本章参考了 PyTorch 官方 `lr_scheduler` 文档、`LambdaLR`、`StepLR`、`ExponentialLR`、`CosineAnnealingLR` 文档，以及 Hugging Face Transformers scheduler 文档。资料边界是：PyTorch scheduler 只负责按调用次数调整 optimizer 的 `lr`，调用频率要由训练循环保证；PyTorch 官方也强调通常应先 `optimizer.step()` 再 `scheduler.step()`；Transformers 提供的 `get_*_schedule_with_warmup` 常用于按 optimizer step 计算 warmup 和 decay。
 
 ---
 
@@ -4197,29 +4360,36 @@ scheduler = build_warmup_cosine_scheduler(
 print("initial_lr=", round(scheduler.get_last_lr()[0], 6))
 
 for step in range(6):
+    lr_used = optimizer.param_groups[0]["lr"]
     param.grad = torch.tensor([0.0])
     optimizer.step()
     scheduler.step()
     optimizer.zero_grad(set_to_none=True)
-    print("after_optimizer_step", step + 1, "lr=", round(scheduler.get_last_lr()[0], 6))
+    next_lr = scheduler.get_last_lr()[0]
+    print(
+        "optimizer_step", step + 1,
+        "lr_used=", round(lr_used, 6),
+        "next_lr=", round(next_lr, 6),
+    )
 ```
 
 典型输出：
 
 ```text
 initial_lr= 0.0
-after_optimizer_step 1 lr= 0.0005
-after_optimizer_step 2 lr= 0.001
-after_optimizer_step 3 lr= 0.000868
-after_optimizer_step 4 lr= 0.00055
-after_optimizer_step 5 lr= 0.000232
-after_optimizer_step 6 lr= 0.0001
+optimizer_step 1 lr_used= 0.0 next_lr= 0.0005
+optimizer_step 2 lr_used= 0.0005 next_lr= 0.001
+optimizer_step 3 lr_used= 0.001 next_lr= 0.000868
+optimizer_step 4 lr_used= 0.000868 next_lr= 0.00055
+optimizer_step 5 lr_used= 0.00055 next_lr= 0.000232
+optimizer_step 6 lr_used= 0.000232 next_lr= 0.0001
 ```
 
 这里有两个容易忽略的细节：
 
 1. `LambdaLR` 返回的是相对 `base_lr` 的倍率，不是绝对学习率。
-2. 示例里先 `optimizer.step()` 再 `scheduler.step()`，所以打印的是下一次参数更新将使用的学习率。
+2. 示例里先 `optimizer.step()` 再 `scheduler.step()`，所以同时打印了本次更新实际使用的 `lr_used` 和调度器刚计算出的 `next_lr`。
+3. 这个写法展示了一个容易被忽略的边界：调度器初始化在 step 0，因此本例的第一次参数更新使用的是 0。不同训练框架可能采用不同的 step 计数约定；工程中必须明确“第几个 optimizer step 使用哪个学习率”，并直接记录实际使用的 lr，而不能只看 scheduler 的下一个值。
 
 这和 `StepLR` 常见的每个 epoch 调一次不同。
 
@@ -4579,3 +4749,14 @@ Scheduler 应该和 optimizer.step 对齐，而不是和每个 micro-batch 对�
 下一讲，我们进入 Transformer 组件实战。
 
 也就是从 PyTorch 基础训练闭环，进入 Attention、LayerNorm、MLP 等模块的手写实现。
+
+### 本章资料来源
+
+本章关于接口行为和边界条件的说明，以官方文档为准；不同 PyTorch 版本的默认参数和实现细节可能变化，复现实验时应同时记录版本号。
+
+- [PyTorch `CrossEntropyLoss`](https://docs.pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html)：logits、hard label、probability target 和 `ignore_index`。
+- [PyTorch Autograd mechanics](https://docs.pytorch.org/docs/stable/notes/autograd.html)：计算图、叶子张量、梯度累积和 `no_grad`。
+- [PyTorch `torch.logsumexp`](https://docs.pytorch.org/docs/stable/generated/torch.logsumexp.html)：稳定计算 `log(sum(exp(x)))`。
+- [PyTorch `AdamW`](https://docs.pytorch.org/docs/stable/generated/torch.optim.AdamW.html)：解耦 weight decay 的更新形式。
+- [PyTorch learning-rate schedulers](https://docs.pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate)：`LambdaLR`、`StepLR`、`ExponentialLR` 和 scheduler 调用约定。
+- [Transformers optimizer schedules](https://huggingface.co/docs/transformers/main/en/main_classes/optimizer_schedules)：带 warmup 的线性、余弦和常数调度器。

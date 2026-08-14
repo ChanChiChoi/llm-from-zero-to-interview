@@ -14,9 +14,9 @@ Constrained decoding 的思路是：不要等生成完再检查格式，而是�
 
 > Structured generation 把输出格式约束变成 runtime decoding 的一部分；constrained decoding 在每个 decode step 根据 JSON schema、regex、EBNF 或 structural tag 维护 grammar state，并用 token mask 限制 sampler 只能选择合法 token。
 
-## 30.0 本讲资料边界与第二轮精修口径
+## 30.0 本讲范围与资料
 
-本讲按第二轮精修要求做过资料校准，主要参考五类公开资料：
+本章参考五类公开资料：
 
 1. SGLang 论文《SGLang: Efficient Execution of Structured Language Model Programs》对 structured language model programs、frontend / runtime 协同、RadixAttention 和 structured output decoding 的系统说明。
 2. SGLang Structured Outputs 文档对 JSON schema、regular expression、EBNF、structural tag、OpenAI-compatible API、native API、offline engine，以及 XGrammar、Outlines、llguidance 三类 grammar backend 的说明。
@@ -24,7 +24,7 @@ Constrained decoding 的思路是：不要等生成完再检查格式，而是�
 4. SGLang Server Arguments 文档对 `--grammar-backend`、metrics / logging 和 structured output 相关 server 侧配置的说明。
 5. SGLang Observability / Production Metrics 文档对 prompt tokens、generation tokens、TTFT、TPOT、E2E latency、running / queue requests 和 metrics endpoint 的说明，用来校准 structured output 对 scheduler 与性能观测的影响。
 
-本章只讲 constrained decoding 的教学版机制：constraint spec、grammar backend、grammar state、valid token mask、sampler 顺序、JSON schema、regex、EBNF、structural tag、choices、空合法集合、streaming partial output、性能开销和事实正确性边界。它不实现真实 XGrammar / Outlines / llguidance，不绑定某个 SGLang 版本的 backend 细节、tokenizer trie、GPU kernel、真实 OpenAI API 参数全集或生产级 tool safety 策略。本章 demo 用纯 Python 的 toy grammar state 和 toy logits 解释机制，不调用真实模型。
+本章讨论 constrained decoding 的教学版机制：constraint spec、grammar backend、grammar state、valid token mask、sampler 顺序、JSON schema、regex、EBNF、structural tag、choices、空合法集合、streaming partial output、性能开销和事实正确性边界。它不实现真实 XGrammar / Outlines / llguidance，不绑定某个 SGLang 版本的 backend 细节、tokenizer trie、GPU kernel、真实 OpenAI API 参数全集或生产级 tool safety 策略。本章 demo 用纯 Python 的 toy grammar state 和 toy logits 解释机制，不调用真实模型。
 
 参考资料：
 
@@ -890,7 +890,7 @@ SGLang 的 structured generation 不是简单靠 prompt 要求模型输出 JSON�
 这样做可以减少 JSON parse 失败、格式错误和重试，把输出合法性从生成后检查前移到生成过程中。但它只保证格式和部分类型约束，不保证事实正确。它还会带来 grammar compile、valid token mask、per-request grammar state 等开销，所以 scheduler 和性能监控也要把 structured output 请求单独看。
 ```
 
-## 30.29 Structured Generation 公式、mask 门禁和可运行 demo
+## 30.29 Structured Generation 公式、mask 验收条件和可运行 demo
 
 设词表为 `\mathcal{V}`，第 `t` 步模型输出 logits 为：
 
@@ -928,7 +928,7 @@ $$
 s_{t+1}=u(s_t,y_t)
 $$
 
-教学版 structured generation 门禁可以写成：
+教学版 structured generation 准入条件可以形式化为：
 
 $$
 G_{\mathrm{struct}}=G_{\mathrm{schema}}G_{\mathrm{mask}}G_{\mathrm{regex}}G_{\mathrm{ebnf}}G_{\mathrm{tag}}G_{\mathrm{empty}}G_{\mathrm{fact}}G_{\mathrm{stream}}G_{\mathrm{metric}}

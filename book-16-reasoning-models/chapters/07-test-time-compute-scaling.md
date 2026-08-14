@@ -4,9 +4,9 @@
 
 本章重点讲推理时计算扩展的动机、常见方式、预算分配、自适应计算、延迟和成本权衡、工程系统设计，以及面试中如何回答这类问题。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲第二轮精修参考公开资料中的 inference-time / test-time compute scaling 线索，重点包括 [Scaling LLM Test-Time Compute Optimally](https://arxiv.org/abs/2408.03314)、[Large Language Monkeys](https://arxiv.org/abs/2407.21787)、Tree of Thoughts、self-consistency、verifier reranking 和 OpenAI o1 system card 中关于推理时计算、reasoning 与安全评估的公开表述。这些资料共同说明：模型参数固定后，推理阶段的采样数、候选数、搜索深度、verifier 调用和工具反馈仍然可以显著改变任务表现。
+本章参考公开资料中的 inference-time / test-time compute scaling 线索，重点包括 [Scaling LLM Test-Time Compute Optimally](https://arxiv.org/abs/2408.03314)、[Large Language Monkeys](https://arxiv.org/abs/2407.21787)、Tree of Thoughts、self-consistency、verifier reranking 和 OpenAI o1 system card 中关于推理时计算、reasoning 与安全评估的公开表述。这些资料共同说明：模型参数固定后，推理阶段的采样数、候选数、搜索深度、verifier 调用和工具反馈仍然可以显著改变任务表现。
 
 本章不把“更多 test-time compute”写成无条件更强。推理时计算扩展必须同时看准确率、边际收益、延迟、成本、候选相关性、verifier 偏差、安全风险和任务价值。尤其要避免两种误区：第一，把长 CoT 或更多采样等同于真实推理能力；第二，只汇报高预算准确率，而不汇报单位正确样本成本、P95 延迟和低价值请求的预算浪费。
 
@@ -104,7 +104,7 @@ m_i=\pi(x_i,d_i,v_i,u_i)
 
 其中 `d_i` 是难度估计，`v_i` 是任务价值，`u_i` 是可验证性或工具可用性。路由函数决定该请求走 direct、self-consistency、verifier、search 还是 tool loop。
 
-一个简化上线门禁：
+一个简化上线条件：
 
 ```math
 G_{\mathrm{ttc}}=
@@ -359,6 +359,43 @@ Adaptive compute 的难点是如何判断“这题难不难”和“现在是否
 8. 日志不完整，无法分析预算浪费在哪里。
 
 推理时计算扩展不是“多生成几次”这么简单，而是要把额外计算用在能提升正确率的位置。
+
+### 7.14.1 Reasoning Effort、Thinking Level 与 Adaptive Thinking
+
+近年的模型 API 常把推理预算暴露成 `reasoning_effort`、`thinking level` 或相近字段。它们解决的是服务策略问题：同一个用户请求是否值得让模型多生成 reasoning token、调用更多 verifier、执行更多工具步骤，或者升级到更贵的模型。
+
+#### 7.14.1.1 一个统一的预算模型
+
+把请求 `i` 的策略写成：
+
+```math
+r_i=\pi_{\mathrm{route}}(x_i,\hat p_i,\mathrm{value}_i,\mathrm{risk}_i)
+```
+
+其中 `r_i` 可以是 `low/medium/high/max` 等离散档位，`x_i` 是任务特征，`hat p_i` 是置信度估计，`value_i` 是业务价值，`risk_i` 是安全/错误代价。档位再映射到预算向量：
+
+```math
+b_i(r_i)=(T_i,V_i,U_i,D_i)
+```
+
+分别表示 reasoning token、verifier、tool call 和 search depth 的上限。自适应系统的目标不是最大化平均 token，而是：
+
+```math
+\max\;\sum_i w_i A_i(b_i)
+\quad\mathrm{s.t.}\quad
+\sum_i C_i(b_i)\le C_{\mathrm{budget}}
+```
+
+`adaptive thinking` 可以实现成动态停止：当 verifier 置信度、答案稳定性或工具状态满足阈值就提前结束；也可以实现成升级路由。文档必须说明使用的是哪一种，否则“adaptive”无法复现。
+
+#### 7.14.1.2 跨模型字段不能直接互换
+
+1. OpenAI 的 `reasoning effort`、DeepSeek 的 `low/high/max`、Gemini 的 thinking levels 都是各自产品的控制面，不代表相同 token 数或相同搜索策略。
+2. Anthropic 的 adaptive thinking 可能涉及动态思考预算和工作流路由；不能仅凭字段名推断内部实现。
+3. Qwen/Kimi 文档中的 preserve thinking 更接近状态/协议语义；它可能影响多轮和工具调用时如何传递 reasoning 状态，不等于增加一次采样数。
+4. interleaved thinking 表示 reasoning 与 tool call/observation 交替，预算应按每个阶段记录，而不是只记录最终输出长度。
+
+一个可复现的实验记录至少要包含：模型版本、effort/level、最大输出、工具和 verifier 配置、harness 版本、上下文管理策略、随机种子、总 token、P50/P95 延迟和单位正确成本。
 
 ## 7.15 最小可运行 TTC scaling / 动态预算审计 demo
 

@@ -8,16 +8,16 @@
 
 > vLLM 的请求调度流程可以理解为：入口层接收和预处理请求，engine core 维护请求状态并执行 scheduler，KV cache manager 分配和释放 blocks，worker/model runner 执行模型 forward，output processor 把模型输出转换成用户可见的 token 或文本。
 
-## 20.0 本讲资料边界与第二轮精修口径
+## 20.0 本讲范围与资料
 
-本讲按第二轮精修要求做过资料校准，主要参考四类公开资料：
+本章参考四类公开资料：
 
 1. vLLM Architecture Overview 对 API server process、engine core process、GPU worker process、LLMEngine、AsyncLLMEngine、worker 和 model runner 的模块边界说明。
 2. vLLM V1 guide 对 V1 core engine、chunked prefill、统一 token budget 调度和功能支持边界的说明。
 3. vLLM optimization / tuning 文档对 preemption、KV cache capacity、`max_num_seqs`、`max_num_batched_tokens`、chunked prefill 和 decode-first 策略的说明。
 4. vLLM metrics 文档对 TTFT、inter-token latency / TPOT、queue time、prefill time、decode time、running / waiting 请求数、KV cache usage 和 engine core iteration 统计的观测口径。
 
-本章只讲 vLLM-like 请求调度流程的教学抽象，不绑定某个 vLLM 版本的真实类名、进程拓扑、ZMQ 通信细节、CUDA graph、scheduler 源码、model runner 内部张量格式、OpenAI server 参数全集、LoRA、多模态、speculative decoding、structured output 或分布式 data parallel / tensor parallel 实现。
+本章讨论 vLLM-like 请求调度流程的教学抽象，不绑定某个 vLLM 版本的真实类名、进程拓扑、ZMQ 通信细节、CUDA graph、scheduler 源码、model runner 内部张量格式、OpenAI server 参数全集、LoRA、多模态、speculative decoding、structured output 或分布式 data parallel / tensor parallel 实现。
 
 本章给出的公式和 demo 只用于验证一条最小请求链路：API 输入处理、engine request、waiting queue、scheduler output、KV block 分配、model runner metadata、sampler / output processor、streaming / finish reason、abort cleanup 和 metrics trace。真实系统会把这些逻辑拆到更多进程、线程、队列和异步事件里。
 
@@ -349,7 +349,7 @@ FAILED：模型执行、KV 分配或内部逻辑出现错误。
 
 资源包括 KV blocks、streaming buffer、请求状态、统计对象和可能的多模态缓存引用。
 
-对于请求 `i`，如果终止状态集合记为 `Z_{\mathrm{term}}=\{\mathrm{FINISHED},\mathrm{ABORTED},\mathrm{FAILED}\}`，则 cleanup 门禁可以写成：
+对于请求 `i`，如果终止状态集合记为 `Z_{\mathrm{term}}=\{\mathrm{FINISHED},\mathrm{ABORTED},\mathrm{FAILED}\}`，则 cleanup 准入条件可以形式化为：
 
 $$
 G_{\mathrm{cleanup},i}=\mathbf{1}[z_i\in Z_{\mathrm{term}}\Rightarrow |P_i|=0]
@@ -726,7 +726,7 @@ Continuous batching 是调度机制，请求生命周期管理是让这个机制
 
 ## 20.21 请求调度流程公式、状态 trace 和可运行 demo
 
-把本章的请求链路合成一个教学版总门禁，可以写成：
+把本章的请求链路合成一个教学版总验收条件，可以写成：
 
 $$
 G_{\mathrm{flow}}=G_{\mathrm{input}}G_{\mathrm{state}}G_{\mathrm{sched}}G_{\mathrm{meta}}G_{\mathrm{output}}G_{\mathrm{cleanup}}G_{\mathrm{metric}}

@@ -238,6 +238,8 @@ Hidden reasoning 是模型内部或系统内部的推理过程，不直接展示
 
 它可以用于提升答案质量，同时避免暴露冗长、不稳定或不安全的中间文本。
 
+这里的“hidden”首先是产品和接口层面的描述，不等于我们已经证明了模型存在一条可以被完整读取的、忠实的内部推理链。不同系统可能保存完整草稿、只保存摘要，或者只在服务端使用不可见的中间计算；用户看到的 rationale 也不应被自动当作内部决策的逐步记录。
+
 可以粗略理解为：
 
 ```text
@@ -527,6 +529,8 @@ V_{\mathrm{step}} =
 
 其中 `M_i` 是第 `i` 个样本的步骤数，`z_{ij}=1` 表示第 `j` 步经规则、工具、人工或 process verifier 判断为有效。
 
+这里默认评估集至少包含一个可标注步骤；若所有样本都没有步骤，步骤有效率应报告为 `N/A`，不能把空集合的比例当成 0。
+
 最终答案和过程不一致的比例：
 
 ```math
@@ -618,8 +622,12 @@ def extract_answer(text):
 def verify_steps(text):
     checks = []
     for left, op, right, stated in STEP_RE.findall(text):
-        lhs = OPS[op](int(left), int(right))
-        checks.append(abs(lhs - int(stated)) < 1e-9)
+        try:
+            lhs = OPS[op](int(left), int(right))
+        except ZeroDivisionError:
+            checks.append(False)
+        else:
+            checks.append(abs(lhs - int(stated)) < 1e-9)
     return checks
 
 
@@ -655,11 +663,15 @@ records = [
 ]
 
 
+def rate(numerator, denominator):
+    return numerator / denominator if denominator else 0.0
+
+
 def accuracy(records, field):
     correct = 0
     for row in records:
         correct += extract_answer(row[field]) == normalize(row["gold"])
-    return correct / len(records)
+    return rate(correct, len(records))
 
 
 def cot_audit(records):
@@ -677,14 +689,15 @@ def cot_audit(records):
 
     avg_direct_tokens = sum(token_count(row["direct"]) for row in records) / len(records)
     avg_cot_tokens = sum(token_count(row["cot"]) for row in records) / len(records)
-    invalid_rate = 1 - (sum(step_checks) / len(step_checks))
+    step_validity = rate(sum(step_checks), len(step_checks))
+    invalid_rate = 1 - step_validity if step_checks else 0.0
     utility = accuracy(records, "cot") - 0.02 * avg_cot_tokens - 0.20 * invalid_rate
     return {
         "direct_accuracy": accuracy(records, "direct"),
         "cot_accuracy": accuracy(records, "cot"),
-        "step_validity": sum(step_checks) / len(step_checks),
+        "step_validity": step_validity,
         "invalid_but_correct": invalid_but_correct,
-        "intervention_sensitivity": changed_by_intervention / len(records),
+        "intervention_sensitivity": rate(changed_by_intervention, len(records)),
         "avg_direct_tokens": avg_direct_tokens,
         "avg_cot_tokens": avg_cot_tokens,
         "toy_cot_utility": utility,
@@ -1117,6 +1130,8 @@ p^j(1-p)^{N-j}
 
 当 `p>0.5` 且错误比较分散时，`P_maj` 会随 `N` 增加而上升。但这个公式依赖很强的独立同分布假设。真实 LLM 的多条路径往往共享同一个 prompt、同一个模型和相似训练偏差，错误可能高度相关。
 
+上式还假设 `N` 为奇数，从而不会出现平票；若 `N` 为偶数，系统必须提前定义平票处理规则。这里的 `p` 是单条路径得到正确答案的概率，不是模型输出的自报置信度。
+
 可以用一个粗略有效样本数提醒这种相关性：
 
 ```math
@@ -1520,6 +1535,8 @@ def extract_answer(text):
 
 def majority_vote(candidates):
     answers = [extract_answer(item["text"]) for item in candidates]
+    if not answers:
+        return ""
     return Counter(answers).most_common(1)[0][0]
 
 
@@ -1538,6 +1555,8 @@ def verifier_selection(candidates):
 def answer_entropy(candidates):
     answers = [extract_answer(item["text"]) for item in candidates]
     total = len(answers)
+    if not total:
+        return 0.0
     probs = [count / total for count in Counter(answers).values()]
     return -sum(p * math.log(p) for p in probs)
 
@@ -1964,7 +1983,7 @@ $$
 其中 $z_i=1$ 表示第 $i$ 个候选最终答案正确或满足任务目标。数学题里不要直接比较原始字符串，而要先做答案抽取和归一化：
 
 $$
-z_i = \mathbf{1}\left[\operatorname{norm}(a_i)=\operatorname{norm}(a^\star)\right]
+z_i = \mathbf{1}\left[\mathrm{norm}(a_i)=\mathrm{norm}(a^\star)\right]
 $$
 
 代码题里 $z_i$ 通常来自编译、单元测试、隐藏测试或执行约束，而不是 LLM judge 的主观判断。用 ORM 做重排时：
@@ -2079,8 +2098,10 @@ $$
 
 $$
 S_i^{\mathrm{logavg}} =
-\frac{1}{T_i}\sum_{t=1}^{T_i}\log p_{i,t}
+\frac{1}{T_i}\sum_{t=1}^{T_i}\log\left(\max(p_{i,t},\epsilon_p)\right)
 $$
+
+其中 `\epsilon_p>0` 是数值下限，避免某一步概率为 0 时出现负无穷；它是数值保护，不代表把一个明显错误步骤重新变成正确。`M` 应表示候选样本数，PRM 的步骤总数应单独记为 `K=\sum_j T_j`，两者不能混用。
 
 面试里可以这样解释这三个聚合方式：
 
@@ -2756,6 +2777,8 @@ code_verifier= {'buggy_public': 1.0, 'buggy_hidden': 0.0, 'fixed_public': 1.0, '
 
 这组结果有三个面试价值：第一，`oracle@N=1.0` 不代表系统能选中正确候选，`model_select_acc=0.333` 就是反例；第二，`lucky_answer` 里 ORM 会认可最终答案正确的候选，但 PRM 能指出第 2 步错误；第三，代码候选通过 public tests 不等于可靠，hidden tests 才暴露了正数偶数计数这种边界条件 bug。
 
+需要明确这个 toy demo 的证据边界：`orm_score` 直接使用了标准答案得到的 `answer_correct`，只是模拟一个已经知道结果的 outcome verifier，并不是训练后真正预测的 ORM。因此 `orm_select_acc=1.0` 只能说明示例逻辑可运行，不能当作真实模型的性能结论；真实评估必须在独立候选集上测 verifier 的选择准确率、校准和下游收益。
+
 ---
 
 ### 十四、失败模式
@@ -3149,7 +3172,7 @@ $$
 
 $$
 \mathcal{F}_{d+1} =
-\operatorname{TopB}_{s \in \mathcal{C}_{d+1}} V_\phi(s)
+\mathrm{TopB}_{s \in \mathcal{C}_{d+1}} V_\phi(s)
 $$
 
 这个公式说明 ToT 至少包含三件事：展开候选、评价候选、选择保留。只生成多条完整 CoT 而没有中间选择，不是严格意义上的 tree search。
@@ -3210,7 +3233,7 @@ Beam search 的递推可以写成：
 
 $$
 \mathcal{B}_{d+1} =
-\operatorname{TopB}_{s' \in \mathrm{Expand}(\mathcal{B}_d)}
+\mathrm{TopB}_{s' \in \mathrm{Expand}(\mathcal{B}_d)}
 \left[V_\phi(s') - \lambda_c C(s')\right]
 $$
 
@@ -3370,13 +3393,13 @@ Verifier 可以用于：
 
 这就是 trade-off。
 
-可以把剪枝写成一个 gate：
+可以把剪枝写成一个条件：
 
 $$
 g(s) = \mathbf{1}[V_\phi(s) \ge \tau_v]\cdot \mathbf{1}[C(s) \le B_{\mathrm{remain}}]
 $$
 
-只有 $g(s)=1$ 的状态才继续展开。这个 gate 看起来简单，但它决定了 search 的成败：阈值太低会成本爆炸，阈值太高会提前剪掉正确路径。
+只有 $g(s)=1$ 的状态才继续展开。这个条件看起来简单，但它决定了 search 的成败：阈值太低会成本爆炸，阈值太高会提前剪掉正确路径。
 
 ---
 
@@ -3475,6 +3498,8 @@ N_{\mathrm{full}}(K,D) =
 \sum_{d=0}^{D}K^d =
 \frac{K^{D+1}-1}{K-1}
 $$
+
+上式假设 `K\ne 1`；当 `K=1` 时，节点数就是 `D+1`。实际搜索还会受到终止节点、去重和不同分支深度的影响，所以这里是无剪枝树的上界，而不是线上调用次数的精确预测。
 
 如果使用 beam size $B$，每层最多保留 $B$ 个状态，展开节点数可粗略估算为：
 
@@ -3742,6 +3767,8 @@ mcts= {'best_action': 'factor', 'mean_reward': 1.0, 'visits': {'shortcut': 1, 'f
 ```
 
 这个 toy 例子故意让 `shortcut` 初始分数最高。它说明 search 的关键不是“展开越多越好”，而是用足够宽度、足够多样性和足够可靠的终局反馈，避免早期 verifier 分数把正确路径剪掉。
+
+代码中的 `mcts_root` 是为了便于入门而写的简化版本：它只在根节点使用 UCB 分配 rollout，rollout 内部采用贪心动作，并没有实现完整 MCTS 所需的多层树节点统计、逐层扩展和回传。阅读真实实现时，不能把这个根节点 bandit 示例直接当作通用 MCTS 引擎。
 
 ---
 
@@ -4105,7 +4132,7 @@ $$
 
 $$
 m^\star(x) =
-\operatorname*{argmax}_{m \in \mathcal{M}} U(m,x),
+\mathrm{argmax}_{m \in \mathcal{M}} U(m,x),
 \quad
 C(m,x) \le B_C,
 \quad
@@ -4939,6 +4966,8 @@ A: 4
 
 把第 $i$ 道数学题记为 $x_i$，标准答案记为 $a_i^\star$，候选解法记为 $r_{i,j}$，候选最终答案记为 $a_{i,j}$。第 $j$ 条解法的第 $k$ 个步骤标签记为 $s_{i,j,k} \in \{0,1\}$。
 
+记 `K_{i,j}` 为候选解法 `r_{i,j}` 的步骤数，`M` 为候选解法样本总数，`K=\sum_{i,j}K_{i,j}` 为所有步骤标签总数。后面的 ORM 与 PRM 损失分别按候选数和步骤数归一化；如果某个集合为空，应报告为 `N/A`，不能默认为一个有效的 0 分。
+
 CoT SFT 的 token-level 目标可以写成：
 
 $$
@@ -4956,12 +4985,12 @@ $$
 $$
 z_{i,j} =
 \mathbf{1}[
-\operatorname{norm}(a_{i,j}) =
-\operatorname{norm}(a_i^\star)
+\mathrm{norm}(a_{i,j}) =
+\mathrm{norm}(a_i^\star)
 ]
 $$
 
-这里 $\operatorname{norm}$ 表示答案标准化，例如去掉单位文本、化简分数、统一小数精度或抽取最终 boxed answer。没有答案标准化，数学训练和评估会被格式噪声严重污染。
+这里 $\mathrm{norm}$ 表示答案标准化，例如去掉单位文本、化简分数、统一小数精度或抽取最终 boxed answer。没有答案标准化，数学训练和评估会被格式噪声严重污染。
 
 ORM 的二分类目标可以写成：
 
@@ -5027,7 +5056,7 @@ $$
 \frac{1}{N}
 \sum_i
 \mathbf{1}\left[
-\max_j \operatorname{sim}(x_i^{\mathrm{eval}}, x_j^{\mathrm{train}})
+\max_j \mathrm{sim}(x_i^{\mathrm{eval}}, x_j^{\mathrm{train}})
 \ge \tau_{\mathrm{sim}}
 \right]
 $$
@@ -5474,7 +5503,7 @@ def normalize_answer(text):
 
 
 def process_score(steps):
-    return sum(steps) / len(steps)
+    return sum(steps) / len(steps) if steps else 0.0
 
 
 def first_error(steps):
@@ -5860,7 +5889,7 @@ pass@10 是生成 10 个候选时至少一个通过的概率。
 如果一次为同一道题采样 `n` 个候选，其中 `c` 个通过测试，HumanEval/Codex 类评估常用的 pass@k 估计可以写成：
 
 ```math
-\operatorname{pass@k}
+\mathrm{pass@k}
 =
 1
 -
@@ -5868,6 +5897,8 @@ pass@10 是生成 10 个候选时至少一个通过的概率。
 ```
 
 这个公式的直觉是：从 `n` 个候选里抽 `k` 个，先计算抽到的 `k` 个全都不是正确候选的概率，再用 1 减掉它。若 `c=0`，pass@k 为 0；若错误候选数 `n-c` 小于 `k`，则 pass@k 为 1。
+
+该估计要求 `0 \le c \le n` 且 `1 \le k \le n`。它描述的是随机抽取候选时“至少有一个正确”的覆盖概率，不是固定的最终选择器一定会选对；后者还要单独报告 selection accuracy。
 
 Pass@k 很适合代码任务，因为：
 
@@ -5932,6 +5963,8 @@ q_y^{\mathrm{hid}}
 \frac{p_y^{\mathrm{hid}}}{m_y^{\mathrm{hid}}}
 ```
 
+这里要求公开和隐藏测试集的规模 `m_y^{pub}`、`m_y^{hid}` 都大于 0；若某一侧没有测试，应报告为 `N/A`。通过率是候选程序在给定测试集上的行为指标，不等于对所有输入都正确。
+
 公开测试和隐藏测试之间的泛化差距可以写成：
 
 ```math
@@ -5943,6 +5976,8 @@ q_y^{\mathrm{hid}}
 ```
 
 如果 `g_hid` 很大，说明候选可能 hardcode 了公开样例，或者公开测试没有覆盖关键边界。
+
+这里的差距还隐含一个前提：公开测试和隐藏测试对同一功能契约有可比的覆盖。如果隐藏测试系统性地更难，`g_hid` 也会混入测试难度差异，因此应同时报告两组测试规模、类别和置信区间，不能把差距全部归因于模型泛化。
 
 执行反馈还可以变成一个筛选或训练用 reward。设 `b_y` 表示编译通过，`o_y` 表示超时，`v_y` 表示 sandbox 违规，`d_y` 表示 diff 或复杂度惩罚，可以定义：
 
@@ -6315,6 +6350,8 @@ r_{\mathrm{sec}}
 4. sandbox 违规候选必须先被安全过滤，而不是参与执行竞争。
 5. repair success 和 attempts to first success 更接近代码 agent 的真实体验。
 
+代码执行是高风险操作。本示例中的 `static_violations` 只是教学用的字符串过滤器，`exec` 仍然运行在当前 Python 解释器内，不能把它当作安全沙箱；真实系统必须在隔离进程、容器或虚拟机中执行，并实施文件系统、网络、CPU、内存、超时和 secret 隔离。静态规则漏报或被绕过时，当前进程仍可能受影响。
+
 ```python
 from math import comb
 
@@ -6390,6 +6427,8 @@ def static_violations(code):
 
 
 def pass_at_k(n, c, k):
+    if not (0 <= c <= n and 1 <= k <= n):
+        raise ValueError("require 0 <= c <= n and 1 <= k <= n")
     if c == 0:
         return 0.0
     if n - c < k:
@@ -6862,7 +6901,7 @@ q_i =
 
 这里 `z_i` 表示最终答案或执行结果是否正确，`v_i` 是步骤有效率或 verifier 分数，`f_i` 是格式合法性，`d_i` 是多样性/覆盖收益，`n_i` 是新颖性，`c_i` 是污染风险，`s_i` 是安全风险。
 
-但真实 pipeline 不能只靠软分相加。安全、污染、重复、最终正确性和关键格式通常要做 hard gate：
+但真实 pipeline 不能只靠软分相加。安全、污染、重复、最终正确性和关键格式通常要做硬性过滤条件：
 
 ```math
 g_i =
@@ -6892,6 +6931,8 @@ r_{\mathrm{keep}}
 ```
 
 保留率太低，说明生成器或 prompt 质量差；保留率太高，也可能说明过滤器太松。
+
+`r_keep` 只有在本轮确实生成了候选时才有定义；`|\mathcal{D}_{t}^{gen}|=0` 时应报告为 `N/A`。此外，硬性过滤条件和软质量分承担不同职责：前者用于排除不可接受样本，后者用于在可接受样本中排序或控制混合比例。
 
 ---
 
@@ -7053,11 +7094,11 @@ F_t(G_t(M_t,S_t))
 ```math
 M_{t+1}
 =
-\operatorname{Train}
+\mathrm{Train}
 (M_t,\mathcal{D}_{\mathrm{base}},\mathcal{D}_{t}^{\mathrm{new}})
 ```
 
-其中 `G_t` 是生成过程，`F_t` 是过滤、去重、安全和评估 gate，`\mathcal{D}_base` 是人工数据、真实任务数据或高质量自然数据。关键是不要让 `\mathcal{D}_t^{new}` 完全替代外部锚点。
+其中 `G_t` 是生成过程，`F_t` 是过滤、去重、安全和评估条件，`\mathcal{D}_base` 是人工数据、真实任务数据或高质量自然数据。关键是不要让 `\mathcal{D}_t^{new}` 完全替代外部锚点。
 
 训练混合目标可以写成：
 
@@ -7099,7 +7140,7 @@ A_m(M_{t+1})
 A_m(M_t)
 ```
 
-其中 `m` 可以是数学、代码、逻辑、安全、通用问答、拒答误伤等不同能力。发布 gate 可以写成：
+其中 `m` 可以是数学、代码、逻辑、安全、通用问答、拒答误伤等不同能力。发布条件可以写成：
 
 ```math
 R_{\mathrm{degrade}}
@@ -7233,7 +7274,7 @@ Lineage 很重要。
 \mathbf{1}
 \left[
 \max_j
-\operatorname{sim}(x_i^{\mathrm{syn}},x_j^{\mathrm{eval}})
+\mathrm{sim}(x_i^{\mathrm{syn}},x_j^{\mathrm{eval}})
 \ge
 \tau_{\mathrm{sim}}
 \right]
@@ -7506,6 +7547,8 @@ lineage_example= {'algebra_clean': ('seed_math', 'prompt_v2', 'teacher_A'), 'cod
 3. `synthetic_weight=0.2` 表示这轮合成数据只占混合训练集 20%，避免一轮合成分布压过人工或真实数据锚点。
 4. `unfiltered_delta` 里安全指标下降 0.08，说明不过滤直接训练会引入明显副作用。
 5. `lineage_example` 让后续错误回溯到 seed、prompt 和 teacher，而不是只知道“这条数据来自合成”。
+
+`filtered_delta` 和 `unfiltered_delta` 在这个 demo 中是预先写入的示意性评估结果，用来展示“过滤后与不过滤的下游差异”这一分析方法，并不是这几条样本实际训练得到的实验结论。真实报告必须给出训练配置、独立评估集、重复实验和不确定性范围。
 
 ---
 
@@ -7942,6 +7985,8 @@ A_{\mathrm{evi}}
 
 最终答案对但 `A_evi` 低，说明模型可能没有真正沿证据链推理；这类问题在开放 QA 和 RAG 场景里很常见。
 
+这些过程比例都依赖非空分母：若评估样本没有可标注步骤、证据点或动作，应报告 `N/A`，并保留样本数量；不能用人为填入的 0 让“没有可评估对象”和“对象全部失败”混为一谈。
+
 ---
 
 ### 七、规划和 Agent 推理评估
@@ -7996,6 +8041,8 @@ A_{\mathrm{safe}}
 ```
 
 Agent 评估里 `A_safe` 往往比单纯 task success 更重要：一个越权拿到答案的轨迹不能算可靠成功。
+
+上式默认每条轨迹至少有一个动作，并且 `p_{i,t}` 已经由权限系统或审计规则判定；如果某些任务是纯文本回答、没有工具动作，应另定义其安全条件，不能直接套用空集合上的 `min`。
 
 ---
 
@@ -8158,7 +8205,7 @@ Reasoning benchmark 常被污染。
 \mathbf{1}
 \left[
 \max_j
-\operatorname{sim}(x_i,u_j)
+\mathrm{sim}(x_i,u_j)
 \ge
 \tau
 \right]
@@ -8302,7 +8349,7 @@ w_s r_{\mathrm{safe}}
 w_m \rho_{\mathrm{contam}}
 ```
 
-但生产发布不能只用 `S_eval` 排序。安全违规、污染率、关键任务回退和隐藏测试差距应该是 hard gate：只要超过阈值，即使综合分更高，也不能发布。
+但生产发布不能只用 `S_eval` 排序。安全违规、污染率、关键任务回退和隐藏测试差距应该是硬性发布条件：只要超过阈值，即使综合分更高，也不能发布。
 
 ---
 
@@ -9312,7 +9359,7 @@ Reasoning model 常有内部 reasoning。
 
 这条路径比“一次训练一个 reasoning model”更工程化。
 
-发布时可以用 hard gate 避免“分数高但不可用”的 checkpoint：
+发布时可以用硬性发布条件避免“分数高但不可用”的 checkpoint：
 
 ```math
 G_{\mathrm{release}}
@@ -9324,7 +9371,7 @@ I[C_{\mathrm{p95}}\le c_{\max}]
 I[\Delta_{\mathrm{base}}\ge -\epsilon]
 ```
 
-这个 gate 的含义是：reasoning 分数要达标，普通指令能力不能明显退化，安全风险和 p95 成本不能越线，基础能力回退不能超过阈值。
+这个条件的含义是：reasoning 分数要达标，普通指令能力不能明显退化，安全风险和 p95 成本不能越线，基础能力回退不能超过阈值。
 
 ---
 

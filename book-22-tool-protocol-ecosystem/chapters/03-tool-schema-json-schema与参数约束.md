@@ -1,8 +1,8 @@
 # 第三章：Tool Schema、JSON Schema 与参数约束
 
-## 3.0 本讲资料边界与第二轮精修口径
+## 3.0 本讲范围与资料
 
-本讲第二轮精修时，按 `WRITING_PLAN.md` 的要求重新核对了 OpenAI function calling / structured outputs、Anthropic tool use、Google Gemini function calling 和 JSON Schema 官方资料。各家 API 字段名、strict 模式、schema 支持子集和工具执行流程会随平台演进而变化，所以正文只抽象稳定层：工具名称、工具描述、参数 schema、必填字段、类型、枚举、范围、字符串模式、额外字段限制、runtime 校验、业务校验、权限检查和 trace 审计。
+本章参考了 OpenAI function calling / structured outputs、Anthropic tool use、Google Gemini function calling 和 JSON Schema 官方资料。各家 API 字段名、strict 模式、schema 支持子集和工具执行流程会随平台演进而变化，所以正文只抽象稳定层：工具名称、工具描述、参数 schema、必填字段、类型、枚举、范围、字符串模式、额外字段限制、runtime 校验、业务校验、权限检查和 trace 审计。
 
 本讲不把某一家 provider 的当前字段名写成永久标准，也不把 JSON Schema 当作完整安全系统。更准确的边界是：
 
@@ -11,7 +11,7 @@
 3. runtime 负责解析、校验、修复、拒绝、追问和执行。
 4. 业务规则、权限、确认和审计负责判断“是否应该执行”。
 
-第二轮重点补强三件事：第一，把 required、type、enum、pattern、range、additionalProperties 和 business validation 拆成可量化指标；第二，补一个 0 依赖 Python demo，直接演示 schema-valid、schema-invalid、可安全修复和业务规则失败的差别；第三，同步百科、题库、练习、术语表、项目和知识图谱，方便后续章节继续复用这些指标。
+本章重点包括三件事：第一，把 required、type、enum、pattern、range、additionalProperties 和 business validation 拆成可量化指标；第二，补一个 0 依赖 Python demo，直接演示 schema-valid、schema-invalid、可安全修复和业务规则失败的差别；第三，同步百科、题库、练习、术语表、项目和知识图谱，方便后续章节继续复用这些指标。
 
 ## 3.1 本章定位
 
@@ -1349,7 +1349,7 @@ R_{\mathrm{repair}}=\frac{1}{N_{\mathrm{repair}}}\sum_{i=1}^{N_{\mathrm{repair}}
 
 其中 `R_repair` 只统计允许安全修复的样本，例如大小写归一化、`P1` 到 `high` 的低风险映射、明确上下文中的“明天”到标准日期。高风险金额、收件人、删除范围不能为了提高 repair rate 而自动改。
 
-最后可以定义一个门禁：
+最后可以定义一个验收条件：
 
 ```math
 G_{\mathrm{schema}}=\mathbf{1}[

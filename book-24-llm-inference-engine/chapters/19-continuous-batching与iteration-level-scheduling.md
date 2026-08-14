@@ -8,15 +8,15 @@
 
 > Continuous batching 把调度粒度从“整批请求”下沉到“每一轮模型迭代”，让系统可以在每个 decode step 重新选择 running batch，从而提升吞吐、降低排队等待，并更充分利用 KV Cache block。
 
-## 19.0 本讲资料边界与第二轮精修口径
+## 19.0 本讲范围与资料
 
-本讲按第二轮精修要求做过资料校准，主要参考三类公开资料：
+本章参考三类公开资料：
 
 1. Orca OSDI 2022 论文对 Transformer 生成 workload 的 multi-iteration 特征、request-level scheduling 的局限，以及 iteration-level scheduling 的定义。
 2. vLLM optimization / tuning 文档对 KV cache 不足、preemption、`max_num_seqs`、`max_num_batched_tokens`、chunked prefill、decode 优先和 TTFT / ITL 取舍的公开口径。
 3. vLLM metrics 文档对 running / waiting 请求数、KV cache usage、TTFT、inter-token latency、queue time、prefill time 和 decode time 的观测口径。
 
-本章只讲教学版 continuous batching 和 iteration-level scheduling，不展开 vLLM 真实 scheduler 源码、CUDA graph、worker / executor、multi-step scheduling、prefix cache policy、preemption / swap / recompute 实现、多卡流水、生产级优先级队列或 OpenAI-compatible server 参数全集。
+本章讨论教学版 continuous batching 和 iteration-level scheduling，不展开 vLLM 真实 scheduler 源码、CUDA graph、worker / executor、multi-step scheduling、prefix cache policy、preemption / swap / recompute 实现、多卡流水、生产级优先级队列或 OpenAI-compatible server 参数全集。
 
 本章给出的公式和 demo 只用于建立可面试、可验证的最小模型：每轮 scheduler 先处理 dynamic arrival 和 cleanup，再在 token budget、active sequence budget 与 KV block budget 下选择 decode 和 prefill。真实系统还会叠加 chunked prefill、prefix caching、LoRA、多模态输入、speculative decoding、抢占、租户公平和可观测性治理。
 
@@ -247,7 +247,7 @@ $$
 N_{\mathrm{pre},\tau}=\sum_{i\in P_{\tau}}p_{i,\tau}
 $$
 
-本轮 token budget 门禁是：
+本轮 token budget 验收条件是：
 
 $$
 G_{\mathrm{tok},\tau}=\mathbf{1}[N_{\mathrm{dec},\tau}+N_{\mathrm{pre},\tau}\le C_{\mathrm{tok}}]
@@ -570,7 +570,7 @@ Continuous batching 面向自回归生成：
 
 所以 continuous batching 可以看作是为 LLM 自回归 workload 定制的动态调度机制。
 
-## 19.14 面向专家：iteration-level scheduling 的本质
+## 19.14 机制与边界：iteration-level scheduling 的本质
 
 从系统角度看，iteration-level scheduling 做了一个重要拆分：
 
@@ -685,7 +685,7 @@ $$
 5. `G_{\mathrm{cleanup}}`：finished / cancelled 请求会释放 KV blocks。
 6. `G_{\mathrm{metric}}`：trace 能复盘 waiting、running、deferred reason、TTFT 和 block 使用。
 
-下面这个 0 依赖 demo 模拟 5 个请求：A、B 同时到达，C、D、E 后续到达；scheduler 采用 decode-first；prefill 受 token budget 约束；KV block 不足时请求继续等待；E 在等待中取消；最终输出 trace、TTFT、静态 batch 空洞和门禁。
+下面这个 0 依赖 demo 模拟 5 个请求：A、B 同时到达，C、D、E 后续到达；scheduler 采用 decode-first；prefill 受 token budget 约束；KV block 不足时请求继续等待；E 在等待中取消；最终输出 trace、TTFT、静态 batch 空洞和验收条件。
 
 ```python
 from dataclasses import dataclass, field

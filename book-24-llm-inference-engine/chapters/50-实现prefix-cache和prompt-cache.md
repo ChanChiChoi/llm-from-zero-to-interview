@@ -2,7 +2,7 @@
 
 上一章我们把 mini engine 的 KV cache 从 request 私有 list 升级成了 paged KV cache。
 
-有了 block pool、block table、slot mapping 和 BlockManager 之后，下一步自然就是复用已经算过的 prefix。
+有了 block pool、block table、slot mapping 和 BlockManager，系统已经具备复用已计算 prefix 所需的资源管理基础。
 
 这就是本章要做的事情：在 mini engine 中实现第一版 prefix cache，并讲清它和 prompt cache 的关系。
 
@@ -14,9 +14,9 @@
 如果你已经有 paged KV cache，怎样加一个能工作的 hash-based prefix cache？
 ```
 
-## 50.0 本讲资料边界与第二轮精修口径
+## 50.0 本讲范围与资料
 
-本章按第二轮精修口径，只讲在教学版 paged KV cache 上实现第一版 hash-based prefix cache，并澄清它和平台层 prompt cache、result cache、semantic cache 的边界。
+本章聚焦在教学版 paged KV cache 上实现第一版 hash-based prefix cache，并澄清它和平台层 prompt cache、result cache、semantic cache 的边界。
 
 公开资料校准主要参考三类口径：
 
@@ -30,7 +30,7 @@
 full prompt blocks -> parent hash chain -> cached blocks -> hit attach -> suffix prefill -> active ref release -> cached free / eviction
 ```
 
-第二轮新增 demo 的验收重点是：
+本章 demo 的验收重点是：
 
 ```text
 prompt cache 和 runtime prefix cache 是否区分清楚；
@@ -623,7 +623,7 @@ def maybe_evict_cache(self, min_free_blocks):
 
 这不是高性能策略，但教学足够。
 
-后续可以升级成 LRU、按 prefix 长度、按命中次数、按租户 quota 淘汰。
+生产实现通常会在这个策略上增加 LRU、prefix 长度、命中次数和租户 quota 等维度，并把淘汰原因、命中率和租户隔离纳入监控。
 
 ## 50.18 prefix cache 对 scheduler 的影响
 
@@ -1146,7 +1146,7 @@ h_j=H(h_{j-1},X_j,E)
 
 其中 `X_j` 是第 `j` 个 full block 的 tokens，`E` 是 model、tokenizer、LoRA、tenant salt、多模态 hash 等 extra hashes。
 
-最终升级门禁：
+最终升级验收条件：
 
 ```math
 G_{\mathrm{prefix}}=G_{\mathrm{boundary}}G_{\mathrm{full}}G_{\mathrm{parent}}G_{\mathrm{extra}}G_{\mathrm{suffix}}G_{\mathrm{ref}}G_{\mathrm{evict}}G_{\mathrm{fallback}}
@@ -1434,4 +1434,4 @@ prefix cache 的收益主要体现在 TTFT 和 prefill tokens/s，但代价是�
 
 先把 full-block hash cache、ref count、suffix prefill 和指标做正确，再继续升级。
 
-下一章会进入第 51 章：实现 preemption、recompute 和 swap 的最小版本。
+prefix cache 解决的是已经计算过的前缀如何安全复用；当显存压力、请求长度或优先级发生变化时，还必须继续处理 preemption、recompute 和 swap。前缀命中因此不是独立的性能开关，而是 scheduler、KV block 生命周期和恢复路径共同维护的状态：复用带来的 TTFT 收益，必须和占用、失效、租户隔离以及抢占后的正确性一起验收。

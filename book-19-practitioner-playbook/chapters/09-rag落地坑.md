@@ -4,13 +4,13 @@ RAG 是大模型项目里最常见的落地形态之一，也是最容易被低�
 
 本章关注 RAG 落地中的真实坑：文档解析、chunk、embedding、混合检索、rerank、上下文构造、答案生成、引用归因、权限控制、索引更新、评估体系和线上事故排查。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本章第二轮精修时对照了 Retrieval-Augmented Generation 原论文、OpenAI File Search / vector store 资料、RAGAS 评估论文与实现口径、LlamaIndex RAG 评估文档，以及前序第六册部署、第七册评估、第十八册 RAG 产品落地相关内容。这里聚焦防御性的企业 RAG 落地排查和面试表达，不展开特定向量数据库配置、私有知识库真实数据治理制度、生产级检索平台架构或可复用的攻击提示词。
+本章参考 Retrieval-Augmented Generation 原论文、OpenAI File Search / vector store 资料、RAGAS 评估论文与实现口径、LlamaIndex RAG 评估文档，以及前序第六册部署、第七册评估、第十八册 RAG 产品落地相关内容。这里聚焦防御性的企业 RAG 落地排查和面试表达，不展开特定向量数据库配置、私有知识库真实数据治理制度、生产级检索平台架构或可复用的攻击提示词。
 
-本章第二轮补强重点有三类：
+本章重点有三类：
 
-1. 把 retrieval recall、MRR、context recall / precision、citation accuracy、unsupported claim rate、permission leak rate、stale evidence rate、abstention accuracy 和 RAG 上线门禁写成稳定公式。
+1. 把 retrieval recall、MRR、context recall / precision、citation accuracy、unsupported claim rate、permission leak rate、stale evidence rate、abstention accuracy 和 RAG 上线条件写成稳定公式。
 2. 用一个 0 依赖 Python demo 复盘 RAG 事故：正确文档被 context 丢掉、错误码检索失败、越权证据进入上下文、旧版本文档被引用、多跳问题超预算、线上反馈为负。
 3. 把本章和第四册百科、题库、练习、项目与知识图谱同步，确保 RAG 不再只被描述成“向量检索 + 生成”，而是可审计的证据系统。
 
@@ -540,12 +540,12 @@ freshness：文档是否最新、索引是否同步
 排查：正确证据是否入库、召回、重排、进入 prompt、被使用、被正确引用
 根因：文档处理、检索、排序、prompt、权限、索引同步或评估缺失
 修复：补索引、改 chunk、调召回、训练 reranker、改 prompt、加权限过滤、更新评估集
-预防：RAG bad case 回归集、权限测试、freshness 监控、citation 检查和上线门禁
+预防：RAG bad case 回归集、权限测试、freshness 监控、citation 检查和上线条件
 ```
 
 复盘时不要只写“模型幻觉”。如果答案没有被证据支持，要说明是证据没到、证据没用、证据冲突，还是引用校验缺失。
 
-## 9.18.1 关键公式与 RAG 事故指标速查
+### 9.18.1 关键公式与 RAG 事故指标速查
 
 **1. RAG 样本抽象**
 
@@ -627,7 +627,7 @@ A_{\mathrm{abs}}=\frac{1}{N_{\mathrm{abs}}}\sum_i \mathbf{1}[\hat a_i=\mathrm{ab
 
 这个指标只在资料不足、权限不足、证据冲突或文档过期样本上计算。RAG 产品不是所有问题都要回答，正确拒答是能力的一部分。
 
-**10. RAG 事故门禁**
+**10. RAG 事故验收条件**
 
 ```math
 G_{\mathrm{rag}}=\mathbf{1}\left[
@@ -643,9 +643,9 @@ G_{\mathrm{rag}}=\mathbf{1}\left[
 \right]
 ```
 
-这个门禁把检索、上下文、引用、权限、freshness、拒答、延迟和线上反馈放到同一张表里。只要其中一项失败，就不能只凭一个“答案看起来不错”的样例上线。
+这组条件把检索、上下文、引用、权限、freshness、拒答、延迟和线上反馈放到同一张表里。只要其中一项失败，就不能只凭一个“答案看起来不错”的样例上线。
 
-## 9.18.2 最小可运行 RAG 事故审计 demo
+### 9.18.2 最小可运行 RAG 事故审计 demo
 
 下面的 demo 不依赖外部库。它故意构造 5 个 RAG bad case：旧版本退货政策被引用、SSO + 计费多证据样本正常、错误码检索失败、普通员工越权看到薪酬文档、多跳升级问题缺少当前退货政策且上下文超预算。
 

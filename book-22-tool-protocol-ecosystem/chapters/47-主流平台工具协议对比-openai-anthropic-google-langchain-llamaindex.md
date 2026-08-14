@@ -8,9 +8,9 @@
 
 > 不同平台字段名会变，但工具协议的核心问题稳定不变：工具如何声明、模型如何选择、参数如何校验、结果如何回流、错误如何恢复、安全如何治理。
 
-## 47.0 本讲资料边界与第二轮精修口径
+## 47.0 本讲范围与资料
 
-本讲第二轮精修时，资料口径主要校准了 OpenAI tools / function calling / structured outputs 对工具声明、结构化参数、工具调用、工具结果和最终输出约束的边界；Anthropic Claude tool use 文档对 `tool_use` / `tool_result` 消息块、客户端执行工具和工具结果回传的边界；Google Gemini function calling 文档对 function declarations、function call、function response 和自动函数调用的边界；LangChain 工具文档对 `Tool` / `StructuredTool` / tool calling / agent 编排的框架抽象；以及 LlamaIndex tools / query engine / agent 文档对数据连接、检索、Query Engine 作为工具和 RAG-heavy 应用的边界。
+本章参考 OpenAI tools / function calling / structured outputs 对工具声明、结构化参数、工具调用、工具结果和最终输出约束的边界；Anthropic Claude tool use 文档对 `tool_use` / `tool_result` 消息块、客户端执行工具和工具结果回传的边界；Google Gemini function calling 文档对 function declarations、function call、function response 和自动函数调用的边界；LangChain 工具文档对 `Tool` / `StructuredTool` / tool calling / agent 编排的框架抽象；以及 LlamaIndex tools / query engine / agent 文档对数据连接、检索、Query Engine 作为工具和 RAG-heavy 应用的边界。
 
 本章不绑定某个 provider 的字段名、SDK 类、streaming event 名称、内置工具开关、trace dashboard 字段或框架版本。正文只抽象稳定迁移问题：provider 与 framework 的职责边界、工具 schema 投影、tool choice 策略映射、tool result 回传、streaming 增量拼接、parallel tool call 对齐、内置工具边界、错误归一化、Provider Adapter 隔离、RAG 引用和 trace/eval。
 
@@ -333,7 +333,7 @@ Provider 原生 API 的错误格式不同，框架也可能封装错误。
 
 这样应用层不用直接依赖某个 provider 的所有细节。
 
-## 47.17 对比总结表
+## 47.17 对比表的阶段性观察
 
 | 维度 | OpenAI | Anthropic | Google | LangChain | LlamaIndex |
 | --- | --- | --- | --- | --- | --- |
@@ -363,7 +363,7 @@ v_i=(p_i,f_i,S_i,\pi_i,q_i,c_i,r_i,\delta_i,e_i,z_i)
 C_j=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[g_j(v_i)=1]
 ```
 
-多 provider 系统的上线门禁可以写成：
+多 provider 系统的上线准入条件可以形式化为：
 
 ```math
 G_{\mathrm{provider\_runtime}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land R_{\mathrm{migration}}=0 \land P_0=0\right]
@@ -571,6 +571,28 @@ assert report["provider_runtime_gate_pass"] is False
 ```
 
 这个 demo 的重点是：多平台迁移不是“字段改名”。如果 required 字段在 schema 投影时丢失、force tool 退化成 auto、tool result id 丢失、streaming JSON 拼接不完整、parallel 结果错配、RAG citation 丢失或 trace 无法回放，最终答案看起来正常也不能算迁移成功。
+
+### 47.18.1 新模型 API 的 reasoning 与工具协议兼容边界
+
+GPT-5.5/5.6、Claude、Gemini、DeepSeek-V4、Qwen3.5/3.6、Kimi K2/K3 等模型把 reasoning effort、thinking level、preserve/interleaved thinking、web/file/computer use 或 MCP 接入放进产品接口后，平台对比不能只看 `tools` 字段是否相似。
+
+至少要比较：
+
+1. reasoning item/channel 是否存在、是否可以跨多轮或工具步骤保留。
+2. tool call 的 id、参数、结果关联、并行调用和 streaming event 是否一致。
+3. Responses API、chat/completions 风格接口和 OpenAI-compatible endpoint 是否支持相同生命周期。
+4. chat template、custom encoding、特殊 token、模型输出协议和 tool parser 是否一致。
+5. 内置 web/file/computer tool、MCP/A2A 和外部 function calling 的权限责任由谁承担。
+
+可以把迁移风险写成：
+
+```math
+R_{\mathrm{migration}}=R_{\mathrm{schema}}+R_{\mathrm{state}}
++R_{\mathrm{reasoning}}+R_{\mathrm{tool}}
++R_{\mathrm{template}}+R_{\mathrm{eval}}
+```
+
+“OpenAI-compatible”通常只是基础请求形状相似，不代表 reasoning channel、工具生命周期、chat template 和安全策略兼容。Adapter 应保存 provider capability matrix，并用真实 trace replay 验证，而不是仅检查 HTTP 200。
 
 ## 47.19 常见误区
 

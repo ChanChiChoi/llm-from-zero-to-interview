@@ -8,7 +8,7 @@ Streaming 是 LLM 产品体验的核心能力。它不一定缩短总生成时�
 
 > Token streaming 把 decode loop 的每一步输出变成增量事件，而不是等完整答案生成完再一次性返回。
 
-## 13.0 本讲资料边界与第二轮精修口径
+## 13.0 本讲范围与资料
 
 本讲只实现 engine 内部的教学版 token streaming。它会覆盖增量 detokenize、streaming event、finish event、stop sequence 缓冲、客户端取消、慢客户端 backpressure 和最小可运行 demo，但不实现完整 HTTP server、鉴权、SSE 长连接、WebSocket、OpenAI-compatible API、异步 worker、跨进程队列或生产级 Unicode / BPE 增量解码器。
 
@@ -79,7 +79,7 @@ stream queue backlog：
 Q_{i,t}=E_{i,t}^{\mathrm{produced}}-E_{i,t}^{\mathrm{consumed}}
 ```
 
-backpressure 门禁：
+backpressure 验收条件：
 
 ```math
 G_{\mathrm{bp}}=\mathbf{1}[Q_{i,t}\le Q_{\max}]

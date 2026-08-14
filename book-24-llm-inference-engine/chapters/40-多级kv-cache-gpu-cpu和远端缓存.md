@@ -20,13 +20,13 @@ GPU KV Cache
 
 > 多级 KV Cache 是把 KV 从单 worker 的 GPU 显存对象，升级成跨内存层级、跨节点、可迁移、可淘汰、可预取的系统级缓存资源。
 
-## 40.0 本讲资料边界与第二轮精修口径
+## 40.0 本讲范围与资料
 
-本讲第二轮精修前，先按 `WRITING_PLAN.md` 对公开资料做校准：参考 LMCache 文档对 KV cache 复用、offload、CPU / local storage / remote storage connector 和 vLLM connector 的公开口径；参考 SGLang HiCache 文档对 L1 GPU KV cache、L2 host cache、L3 distributed storage、cache controller、eviction 和 writing policy 的说明；参考 Mooncake 论文对 KVCache-centric disaggregated architecture、KV cache 管理和远端 KV 传输瓶颈的系统动机说明；并参考 vLLM prefix caching / PagedAttention 资料对 full block、block hash、block table、reference count 和 KV block metadata 的稳定抽象。
+本章参考 LMCache 文档对 KV cache 复用、offload、CPU / local storage / remote storage connector 和 vLLM connector 的公开口径；参考 SGLang HiCache 文档对 L1 GPU KV cache、L2 host cache、L3 distributed storage、cache controller、eviction 和 writing policy 的说明；参考 Mooncake 论文对 KVCache-centric disaggregated architecture、KV cache 管理和远端 KV 传输瓶颈的系统动机说明；并参考 vLLM prefix caching / PagedAttention 资料对 full block、block hash、block table、reference count 和 KV block metadata 的稳定抽象。
 
 本讲只讲多级 KV Cache 的通用系统问题：GPU / CPU / SSD / remote / recompute 的层级画像、residency-aware scheduling、promote / demote / prefetch / eviction、成本模型、正确性 key、多租户隔离、partial block 风险和观测指标。不把某个框架版本的真实 connector API、存储 backend 名称、cache controller 字段、默认阈值、网络拓扑参数或 benchmark 数字写成通用标准。
 
-本讲新增 demo 是教学版多级 KV Cache 审计器：用 0 依赖 Python 模拟 GPU hot block 保护、CPU promote、remote fetch、SSD 不划算时 recompute、GPU 空间不足时 demote、跨租户命中阻断、residency metrics 和最终 gate，帮助把“多级缓存不是只看 hit rate”落到可运行证据。
+本章的 demo 是教学版多级 KV Cache 审计器：用 0 依赖 Python 模拟 GPU hot block 保护、CPU promote、remote fetch、SSD 不划算时 recompute、GPU 空间不足时 demote、跨租户命中阻断、residency metrics 和最终 gate，帮助把“多级缓存不是只看 hit rate”落到可运行证据。
 
 ## 40.1 本章目标
 
@@ -1209,7 +1209,7 @@ cache hit 是否真的降低了端到端延迟和 GPU compute？
 策略上，先保证活跃 decode 的 TPOT 稳定，再优化 TTFT 和命中率。remote fetch 和 prefetch 都不能无脑做，必须比较 transfer cost 和 recompute cost，并通过指标观察 promote latency、remote hit latency、recompute fallback、TPOT 抖动和 cache hit 是否真的降低端到端延迟。
 ```
 
-## 40.35 多级 KV Cache 成本、驻留门禁和可运行 demo
+## 40.35 多级 KV Cache 成本、驻留验收条件和可运行 demo
 
 先把一个 KV block 抽象成：
 
@@ -1251,7 +1251,7 @@ A_j=\min(C_{\mathrm{cpu},j},C_{\mathrm{remote},j},C_{\mathrm{recompute},j})
 
 但这个 `min` 只能在正确性门通过后使用。tenant、model revision、token ids、position、dtype、parallel config、adapter 和 multimodal hash 任一不兼容，都不能复用。
 
-最终门禁可以写成：
+最终验收条件可以形式化为：
 
 ```math
 G_{\mathrm{mlkv}}=G_{\mathrm{hot}}G_{\mathrm{cpu}}G_{\mathrm{remote}}G_{\mathrm{recompute}}G_{\mathrm{tenant}}G_{\mathrm{demote}}G_{\mathrm{metric}}
@@ -1480,7 +1480,7 @@ multi_level_kv_gates= {'active_gpu_blocks_protected': True, 'cpu_promote_visible
 6. `demotion_makes_gpu_space=True`：GPU 满时只 demote ref count 为 0 的 block，为 remote fetch 腾空间。
 7. `residency_metrics_ready=True`：summary 同时给出 transfer MiB、GPU / CPU / remote residency 和 latency。
 
-所以本章最终门禁是 `multi_level_kv_gate`：只有 hot KV 保护、CPU promote、remote fetch、recompute fallback、tenant isolation、demotion 和 residency metrics 都能闭环，多级 KV Cache 才不是“多加几层存储”，而是可治理的运行时缓存系统。
+所以本章最终验收条件是 `multi_level_kv_gate`：只有 hot KV 保护、CPU promote、remote fetch、recompute fallback、tenant isolation、demotion 和 residency metrics 都能闭环，多级 KV Cache 才不是“多加几层存储”，而是可治理的运行时缓存系统。
 
 ## 40.36 小练习
 

@@ -12,13 +12,13 @@ Chunked Prefill 和 Disaggregated Prefill 都是在解决这个问题，但它�
 
 > Chunked Prefill 是把长 prompt 的 prefill 切成多个 chunk 调度；Disaggregated Prefill 是把 prefill 作为独立资源池或独立阶段来服务。前者是执行粒度优化，后者是系统架构优化，二者可以结合。
 
-## 39.0 本讲资料边界与第二轮精修口径
+## 39.0 本讲范围与资料
 
-本讲第二轮精修前，先按 `WRITING_PLAN.md` 对公开资料做校准：参考 vLLM chunked prefill 相关文档对 decode-first scheduling、`max_num_batched_tokens`、ITL / TTFT 折中和 chunked prefill 默认行为的说明；参考 vLLM disaggregated prefilling 文档对 prefill 实例、decode 实例、KV connector 和 experimental 边界的说明；参考 SGLang PD Disaggregation 文档对 prefill / decode server、Mooncake / NIXL、bootstrap、timeout、heterogeneous TP staging buffer、PD multiplexing 和 routing policy 的公开口径；并参考 SARATHI / SARATHI-Serve 论文对 chunked-prefills、decode-maximal batching、stall-free serving 和 prefill / decode 利用率差异的系统动机说明。
+本章参考 vLLM chunked prefill 相关文档对 decode-first scheduling、`max_num_batched_tokens`、ITL / TTFT 折中和 chunked prefill 默认行为的说明；参考 vLLM disaggregated prefilling 文档对 prefill 实例、decode 实例、KV connector 和 experimental 边界的说明；参考 SGLang PD Disaggregation 文档对 prefill / decode server、Mooncake / NIXL、bootstrap、timeout、heterogeneous TP staging buffer、PD multiplexing 和 routing policy 的公开口径；并参考 SARATHI / SARATHI-Serve 论文对 chunked-prefills、decode-maximal batching、stall-free serving 和 prefill / decode 利用率差异的系统动机说明。
 
 本讲只讲 Chunked Prefill 与 Disaggregated Prefill 的通用关系：长 prompt prefill stall、chunk size、token budget、decode-first interleaving、position / mask / KV block table 连续性、PD prefill pool、按 chunk transfer、backpressure 和失败清理。不把某个框架版本的真实 CLI 参数默认值、connector 字段、Mooncake / NIXL API、scheduler 类名、benchmark 数字或生产配置写成通用标准。
 
-本讲新增 demo 是教学版 Chunked / Disaggregated Prefill 审计器：用 0 依赖 Python 模拟 full prefill stall、chunked scheduling、decode step 插入、token budget、position 连续性、短请求不饥饿、PD transfer 流水化、backpressure 和 abort cleanup，帮助把“chunked prefill 能缓解长 prompt 干扰”落到可运行证据。
+本章的 demo 是教学版 Chunked / Disaggregated Prefill 审计器：用 0 依赖 Python 模拟 full prefill stall、chunked scheduling、decode step 插入、token budget、position 连续性、短请求不饥饿、PD transfer 流水化、backpressure 和 abort cleanup，帮助把“chunked prefill 能缓解长 prompt 干扰”落到可运行证据。
 
 ## 39.1 本章目标
 
@@ -1102,7 +1102,7 @@ Disaggregated Prefill 是系统架构优化。它把 prefill 从统一 engine �
 二者可以结合：在 disaggregated prefill pool 中使用 chunked prefill。这样长 prompt 会被切成多个 prefill chunk，KV 可以按 chunk 生成，并可能和 transfer 流水化。但代价是 request state、KV block table、position、partial transfer、失败清理都会更复杂。
 ```
 
-## 39.37 Chunked / Disaggregated Prefill 公式、门禁和可运行 demo
+## 39.37 Chunked / Disaggregated Prefill 公式、验收条件和可运行 demo
 
 先把请求抽象成：
 
@@ -1154,7 +1154,7 @@ T_i^{\mathrm{chunk,max}}=\max_k\left(\frac{q_{i,k}}{X_{\mathrm{prefill}}}+\delta
 T_i^{\mathrm{pipe}}\approx \max(T_i^{\mathrm{prefill}},T_i^{\mathrm{transfer}})+T_{\mathrm{sync}}
 ```
 
-最终门禁可以写成：
+最终验收条件可以形式化为：
 
 ```math
 G_{\mathrm{chunkpd}}=G_{\mathrm{chunk}}G_{\mathrm{decode}}G_{\mathrm{budget}}G_{\mathrm{position}}G_{\mathrm{fair}}G_{\mathrm{transfer}}G_{\mathrm{cleanup}}G_{\mathrm{metric}}
@@ -1421,9 +1421,9 @@ chunked_prefill_gates= {'long_prefill_chunked': True, 'decode_interleaved': True
 4. `position_continuity_checked=True`：chunk 边界没有让 position 从 0 重启。
 5. `short_request_not_starved=True`：短请求第 1 轮完成，长请求第 8 轮完成，说明 chunked scheduling 能让短请求绕过长 prefill。
 6. `pd_transfer_pipeline_visible=True`：disaggregated prefill 下，按 chunk transfer 可以把部分 transfer 和 prefill 重叠。
-7. `backpressure_cleanup_visible=True`：transfer backlog 和 abort cleanup 都进入门禁，避免 partial KV 泄漏。
+7. `backpressure_cleanup_visible=True`：transfer backlog 和 abort cleanup 都进入验收条件，避免 partial KV 泄漏。
 
-所以本章最终门禁是 `chunked_disagg_prefill_gate`：只有 chunking、decode interleaving、token budget、position continuity、公平性、PD transfer、backpressure / cleanup 和 metrics 都能闭环，Chunked Prefill 才是可治理的 serving 能力。
+所以本章最终验收条件是 `chunked_disagg_prefill_gate`：只有 chunking、decode interleaving、token budget、position continuity、公平性、PD transfer、backpressure / cleanup 和 metrics 都能闭环，Chunked Prefill 才是可治理的 serving 能力。
 
 ## 39.38 小练习
 

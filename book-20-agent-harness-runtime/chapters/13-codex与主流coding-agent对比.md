@@ -1,8 +1,8 @@
 # 第十三章：Codex 与主流 Coding Agent 对比
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲第二轮精修时，优先参考各项目官方公开资料：OpenAI Codex / Codex CLI / Codex surfaces 的官方资料、Anthropic Claude Code 官方文档、OpenCode 官方文档和官方仓库、Cursor 官方文档、Aider 官方文档、SWE-agent 官方文档和仓库、OpenHands 官方仓库和文档、GitHub Copilot coding agent 公开文档。Codex manual helper 在当前环境中因官方站点返回 403 未能直接抓取，因此本章只采用可访问的 OpenAI 官方公开页面和仓库说明，不写未核实的 Codex 内部实现。
+本章参考各项目官方公开资料：OpenAI Codex / Codex CLI / Codex surfaces 的官方资料、Anthropic Claude Code 官方文档、OpenCode 官方文档和官方仓库、Cursor 官方文档、Aider 官方文档、SWE-agent 官方文档和仓库、OpenHands 官方仓库和文档、GitHub Copilot coding agent 公开文档。Codex manual helper 在当前环境中因官方站点返回 403 未能直接抓取，因此本章只采用可访问的 OpenAI 官方公开页面和仓库说明，不写未核实的 Codex 内部实现。
 
 边界要说清楚：
 
@@ -10,7 +10,7 @@
 2. 闭源产品的内部 prompt、planner、工具排序、trace 存储、沙箱实现和模型路由不能从外部资料反推成确定结论。
 3. 开源项目虽然能读源码，但本章仍以架构学习和面试表达为目标，不逐行复刻实现。
 4. 各系统版本更新很快，正文只写稳定架构维度，例如产品入口、上下文工程、工具执行、权限边界、编辑机制、trace、评估和企业治理。
-5. 本章新增的公式和 demo 用于建立横向比较方法：把“好用不好用”的主观体验拆成可审计指标，而不是替代真实 benchmark 或企业 PoC。
+5. 本章的公式和 demo 用于建立横向比较方法：把“好用不好用”的主观体验拆成可审计指标，而不是替代真实 benchmark 或企业 PoC。
 
 一句话口径：比较 coding agent 时，先比较 harness，再比较模型；先说公开资料边界，再说系统取向；先拆上下文、工具、权限、编辑、验证和评估，再谈个人体验。
 
@@ -643,7 +643,7 @@ w_r C_{\mathrm{risk}}(i)
 
 其中权重由场景决定。日常 IDE 开发可以提高 `w_c` 和 `w_e`，企业平台可以提高 `w_p`、`w_g` 和 `w_r`，研究 benchmark 可以提高 `w_v`。
 
-最后的门禁不应该只看总分：
+最后的验收条件不应该只看总分：
 
 ```math
 G_{\mathrm{compare}}(i)=

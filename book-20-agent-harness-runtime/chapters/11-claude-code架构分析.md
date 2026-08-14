@@ -1,8 +1,8 @@
 # 第十一章：Claude Code 架构分析
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲第二轮精修时，优先参考 Claude Code 官方公开文档中关于终端 coding agent、权限、设置、记忆、hooks、MCP、sandbox 和安全建议的资料，并结合前十章的 agent harness、runtime、工具、文件编辑、终端执行、权限、trace 和 evaluation harness 框架来分析。
+本章参考 Claude Code 官方公开文档中关于终端 coding agent、权限、设置、记忆、hooks、MCP、sandbox 和安全建议的资料，并结合前十章的 agent harness、runtime、工具、文件编辑、终端执行、权限、trace 和 evaluation harness 框架来分析。
 
 边界要说清楚：
 
@@ -10,7 +10,7 @@
 2. 对官方文档明确描述的能力，可以写成公开能力或产品约束。
 3. 对没有公开确认的内部实现，例如隐藏 planner、具体 prompt、模型侧策略、内部 trace 存储格式和排序算法，不能写成确定结论。
 4. 面试中应把 Claude Code 当作“成熟 coding agent 产品案例”来分析，而不是把外部源码阅读笔记或社区猜测当作官方架构。
-5. 本章新增的公式和 demo 不是为了复刻 Claude Code 内部实现，而是给出一种审计公开资料边界、架构组件、权限治理、扩展治理、可观测性和评估准备度的教学方法。
+5. 本章的公式和 demo 不是为了复刻 Claude Code 内部实现，而是给出一种审计公开资料边界、架构组件、权限治理、扩展治理、可观测性和评估准备度的教学方法。
 
 可以把本章的分析口径压缩成一句话：用公开证据约束架构推断，用 harness 指标审计系统边界，不把闭源内部猜测写成事实。
 
@@ -468,7 +468,7 @@ Claude Code 类产品几乎覆盖了本书前十章的所有主题。
 
 ## 11.18 Claude Code 类架构审计指标
 
-分析 Claude Code 类闭源或半闭源产品时，最容易犯的错误是把“公开可见能力”“系统设计合理推断”和“未经确认的内部实现”混在一起。第二轮精修建议把架构分析写成可审计对象。
+分析 Claude Code 类闭源或半闭源产品时，最容易犯的错误是把“公开可见能力”“系统设计合理推断”和“未经确认的内部实现”混在一起。本章可以把架构分析写成可审计对象。
 
 令第 `i` 个架构项为：
 
@@ -546,7 +546,7 @@ C_{\mathrm{eval}}=\frac{\sum_{i\in \mathcal{V}} p_i c_i}{|\mathcal{V}|}
 C_{\mathrm{risk}}=\frac{\sum_{i:r_i=1} c_i}{\sum_{i=1}^{N} r_i}
 ```
 
-最后可以把这些指标组成 Claude Code 类架构分析门禁：
+最后可以把这些指标组成 Claude Code 类架构分析验收条件：
 
 ```math
 G_{\mathrm{claude}}=

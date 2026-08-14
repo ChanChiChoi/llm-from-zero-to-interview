@@ -1,6 +1,14 @@
 # L. Reasoning 与评估
 
-条目：Reasoning、Reasoning Model、Reasoning Candidate Set、Chain-of-Thought、Few-shot CoT、Zero-shot CoT、Scratchpad、Hidden CoT、Visible Explanation、CoT Faithfulness、CoT Regression、CoT Routing、CoT Audit、Self-Consistency、Sampling Temperature、Top-p Sampling、Answer Normalization、Majority Vote、Weighted Vote、Candidate Diversity、Majority Failure、Self-Consistency Cost、Self-Consistency Accuracy、Verifier、Programmatic Verifier、Hybrid Verifier、Verifier Reranking、Pairwise Accuracy、Hard Negative、Verifier Calibration、Reward Model Bias、Process Supervision、Step Label、First-Error Detection、Process Reward Model、Outcome Reward Model、Process Step Accuracy、Auto Label Coverage、Human Label Cost、Process Search Pruning、Process Supervision Audit、Search Reasoning、Search State、Search Action、Beam Search、Best-First Search、UCT、Prune False Negative、Search Budget、Search Audit、Test-Time Compute、Test-Time Compute Scaling、Compute Budget Vector、Adaptive Compute、Budget Router、Cost per Correct、Marginal Accuracy per Cost、P95 Latency、Wasted High Compute、TTC Audit、Math Reasoning Training、Math Training Sample、Answer Supervision、Synthetic Math Data、Math Curriculum、Math Contamination Audit、Template Diversity、Math Training Gate、Code Reasoning、Execution Feedback、Unit Test Verifier、Public Test、Hidden Test、Public-Hidden Gap、Self-Debug、Repair Success Rate、Sandbox Violation Rate、Code Execution Audit、Code Reasoning Gate、Reasoning Evaluation、Evaluation Sample、Variant Evaluation、Robustness Drop、Paired Lift、Bootstrap Confidence Interval、Reasoning Eval Gate、Test-Time Compute Cost、Pass@k、Reasoning Audit、Reasoning Safety、Pseudo Reasoning、Overconfident Error、Hidden CoT Exposure、Tool Misuse、Human Review Coverage、Severity-Weighted Risk、Reasoning Safety Gate、Reasoning Interview Readiness、Reasoning Interview Rubric、Reasoning Formula Coverage、Reasoning Demo Coverage、Weak Reasoning Question、Reasoning Revision Plan、Tree-of-Thought、MCTS、Benchmark、Human Evaluation、Elo Rating、Hallucination、Factuality、Robustness、Evaluation Metric Incident、Aggregate Score Trap、Slice Regression、Clean Eval Lift、Judge-Human Agreement、Judge Length Bias、Evaluation Gate。
+## 先建立一张图：从生成到评估
+
+对初学者来说，reasoning 可以先理解为“模型为了解决一个难题，愿意保留中间状态、尝试多个路径，并利用反馈修正答案”。但推理过程写得更长，并不自动意味着答案更可靠：模型可能把错误的猜测包装成流畅的解释，也可能在简单问题上因为过度推理而退化。
+
+对有工程经验的读者，更有用的拆分是：模型负责生成候选，搜索策略负责分配测试时计算，verifier 负责判断候选，评估集负责测量泛化，统计方法负责判断提升是否可信，安全控制负责限制错误的外部影响。下面的每个条目都围绕“它是什么、解决什么问题、怎样量化、边界在哪里”展开；公式中的变量也会在公式附近说明。
+
+推理预算、过程奖励、数据污染、人工/模型评审和线上评估与发布判据的完整论证，分别见[`第十六册：Reasoning Models`](../../book-16-reasoning-models/目录.md)和[`第七册：评测与实验`](../../book-07-evaluation-experiments/目录.md)。本章提供概念之间的连接，不能替代针对具体模型、数据集和业务场景的实测。
+
+条目：Reasoning、Reasoning Model、Reasoning Candidate Set、Chain-of-Thought、Few-shot CoT、Zero-shot CoT、Scratchpad、Hidden CoT、Visible Explanation、CoT Faithfulness、CoT Regression、CoT Routing、CoT Audit、Self-Consistency、Sampling Temperature、Top-p Sampling、Answer Normalization、Majority Vote、Weighted Vote、Candidate Diversity、Majority Failure、Self-Consistency Cost、Self-Consistency Accuracy、Verifier、Programmatic Verifier、Hybrid Verifier、Verifier Reranking、Pairwise Accuracy、Hard Negative、Verifier Calibration、Reward Model Bias、Process Supervision、Step Label、First-Error Detection、Process Reward Model、Outcome Reward Model、Process Step Accuracy、Auto Label Coverage、Human Label Cost、Process Search Pruning、Process Supervision Audit、Search Reasoning、Search State、Search Action、Beam Search、Best-First Search、UCT、Prune False Negative、Search Budget、Search Audit、Test-Time Compute、Test-Time Compute Scaling、Compute Budget Vector、Adaptive Compute、Budget Router、Cost per Correct、Marginal Accuracy per Cost、P95 Latency、Wasted High Compute、TTC Audit、Math Reasoning Training、Math Training Sample、Answer Supervision、Synthetic Math Data、Math Curriculum、Math Contamination Audit、Template Diversity、Math Training Quality Criteria、Code Reasoning、Execution Feedback、Unit Test Verifier、Public Test、Hidden Test、Public-Hidden Gap、Self-Debug、Repair Success Rate、Sandbox Violation Rate、Code Execution Audit、Code Reasoning Quality Criteria、Reasoning Evaluation、Evaluation Sample、Variant Evaluation、Robustness Drop、Paired Lift、Bootstrap Confidence Interval、Reasoning Evaluation Quality Criteria、Test-Time Compute Cost、Pass@k 估计、Reasoning Audit、Reasoning Safety、Pseudo Reasoning、Overconfident Error、Hidden CoT Exposure、Tool Misuse、Human Review Coverage、Severity-Weighted Risk、Reasoning Safety Criteria、Reasoning Interview Readiness、Reasoning Interview Rubric、Reasoning Formula Coverage、Reasoning Demo Coverage、Weak Reasoning Question、Reasoning Revision Plan、Tree-of-Thought、MCTS、Benchmark、Human Evaluation、Elo Rating、Hallucination、Factuality、Robustness、Evaluation Metric Incident、Aggregate Score Trap、Slice Regression、Clean Eval Lift、Judge-Human Agreement、Judge Length Bias、Evaluation Decision Criteria、Pass@k 指标解读。
 
 ## Reasoning
 
@@ -122,7 +130,9 @@ R_{\mathrm{reg}}=
 }{N}
 ```
 
-面试表达：如果只汇报 CoT 平均准确率，可能掩盖简单题回归。上线前要单独看回归样本和任务切片。
+其中 `N` 是样本数，`\hat y_i^{direct}` 和 `\hat y_i^{cot}` 分别是直答与 CoT 配置的输出，`y_i^star` 是参考答案。若直答正确而 CoT 错误，该样本计入回归。发布前要单独看回归样本和任务切片，不能用总体平均准确率抵消简单题退化。
+
+面试表达：如果只汇报 CoT 平均准确率，可能掩盖简单题回归；应同时报告回归率和复杂题的增益。
 
 ## CoT Routing
 
@@ -229,7 +239,7 @@ A_{\mathrm{sc}}=
 \mathbb{1}[\hat y_i^{\mathrm{sc}}=y_i^\star]
 ```
 
-其中 `hat y_i^sc` 是多数投票答案。
+其中 `N` 是评估题数，`\hat y_i^sc` 是第 `i` 道题经过多路径采样和答案聚合后的结果，`y_i^star` 是参考答案。
 
 面试表达：self-consistency accuracy 通常高于单次 greedy accuracy，但它仍可能被系统性误解、答案抽取错误和投票等价类问题限制。
 
@@ -314,9 +324,31 @@ A_{\mathrm{pair}}
 
 一句话定义：Verifier Calibration 衡量 verifier 分数是否能当作可靠概率或阈值使用。
 
-常见指标：ECE、Brier score、分桶准确率、阈值下 precision / recall 和高风险切片校准。
+对初学者来说，校准回答的是“verifier 说这条候选有 80% 的概率正确时，它在大量相似样本上是否真的约有 80% 正确”，而不是“它能不能把好答案排在坏答案前面”。后者是排序能力；前者关系到拒答、转人工和自动执行的阈值。
 
-面试表达：verifier 分数高不代表概率校准。上线门禁和人工复核阈值必须单独校准。
+常见指标包括 ECE、Brier score、分桶准确率、阈值下 precision / recall 和高风险切片校准。把预测概率分成 `B` 个区间，ECE 可以写成：
+
+```math
+\operatorname{ECE}
+=
+\sum_{b=1}^{B}
+\frac{|S_b|}{N}
+\left|
+\operatorname{Acc}(S_b)-\operatorname{Conf}(S_b)
+\right|
+```
+
+其中 `S_b` 是第 `b` 个置信度分桶，`N` 是样本总数，`Acc(S_b)` 是桶内实际正确率，`Conf(S_b)` 是桶内平均预测置信度。ECE 越小通常表示整体校准越好，但分桶方式会影响数值；高风险样本还应单独报告。Brier score 则直接惩罚概率误差：
+
+```math
+\operatorname{BS}
+=
+\frac{1}{N}\sum_{i=1}^{N}(p_i-y_i)^2
+```
+
+这里 `p_i` 是 verifier 对第 `i` 条候选给出的正确概率，`y_i\in\{0,1\}` 是真实标签，Brier score 越小越好。
+
+面试表达：verifier 分数高不代表概率校准。选择自动通过、拒答或人工复核阈值前，要用独立校准集检查分数的概率含义，并按任务类型和风险等级分层。
 
 ## Reward Model Bias
 
@@ -407,7 +439,9 @@ A_{\mathrm{step}}=
 {\sum_i M_i}
 ```
 
-其中 `z_ij=1` 表示第 `i` 个样本的第 `j` 个推理步骤正确。
+其中 `M_i` 是第 `i` 个样本被切分出的步骤数，`z_ij=1` 表示该样本的第 `j` 个推理步骤正确，否则为 `0`。如果不同步骤有不同重要性，也可以使用加权版本；因此报告该指标时必须说明步骤切分规则和标注协议。
+
+对初学者来说，步骤准确率像检查解题过程中的每个台阶；它能告诉我们“哪一步坏了”，但不能单独证明最后一定到达正确终点。专家还要注意标签噪声、步骤粒度和不同解法之间的不可比性：把一个复杂步骤拆成五步，会改变分母和指标数值。
 
 面试表达：步骤准确率能定位推理链中哪里出错，但高步骤准确率不必然保证最终答案正确，低步骤准确率也可能偶然得到正确答案。
 
@@ -441,7 +475,7 @@ C_{\mathrm{label}}=
 \sum_i\sum_j(1-a_{ij})c_{ij}
 ```
 
-面试表达：PRM 的效果不能脱离标注成本讨论。若每个步骤都要专家复核，真实上线要考虑只标 hard cases、半自动初标和抽样审计。
+其中 `a_ij` 表示第 `i` 个样本的第 `j` 步是否可以自动标注，`c_ij` 是该步骤需要人工处理的单位成本；`a_ij=0` 时才产生人工成本。PRM 的效果不能脱离标注成本讨论。若每个步骤都要专家复核，生产系统可以优先标注 hard cases，采用半自动初标，并通过随机抽样审计自动标签。
 
 ## Process Search Pruning
 
@@ -458,7 +492,7 @@ S_{\mathrm{avg}}
 )
 ```
 
-面试表达：PRM 搜索剪枝能节省 test-time compute，但如果 PRM 低估正确路径或高估 polished hard negative，就会把好解提前剪掉。
+其中 `B_t` 是第 `t` 步保留的候选集合，`A(b)` 是从候选 `b` 可扩展的动作集合，`S_avg` 是用于排序的累计或平均过程分数，`TopK` 表示只保留前 `K` 条路径。PRM 搜索剪枝能节省 test-time compute，但如果 PRM 低估正确路径或高估 polished hard negative，就会把好解提前剪掉，因此需要统计“被剪掉但后来可证明正确”的路径。
 
 ## Process Supervision Audit
 
@@ -505,7 +539,9 @@ T_{ik}
 
 核心问题：哪些请求值得更多计算，预算应该投到采样、搜索、验证还是工具，什么时候停止，以及准确率提升是否抵得过成本和延迟。
 
-面试表达：TTC scaling 不是“所有请求都更慢”，而是把额外计算投给低置信度、高价值、可验证的请求，并用成本和延迟门禁约束。
+一个更准确的理解是，TTC scaling 把额外计算投给低置信度、高价值、可验证的请求。例如简单分类可以一次生成直接返回，数学证明或代码修复则可以先生成多个候选，再调用 verifier 或测试。真正比较策略时，要同时记录准确率增益、P95 延迟、token 与工具费用，以及高预算仍然失败的样本。
+
+面试表达：TTC scaling 不是“所有请求都更慢”，而是让预算随任务难度和价值变化；它是否值得采用，要看边际正确率提升能否抵消新增成本和延迟。
 
 ## Compute Budget Vector
 
@@ -553,6 +589,8 @@ C_{\mathrm{correct}}=
 {\sum_i\mathbb{1}[\hat y_i=y_i^\star]}
 ```
 
+分母是评估集上被判定为正确的样本数；如果分母为零，应报告“没有得到正确样本”，而不是把它静默处理成一个很大的有限数。这里的成本可以是 token 费用，也可以把 GPU 时间、工具调用和人工审核折算到同一成本单位，但比较不同策略时必须使用同一口径。
+
 面试表达：如果高预算策略准确率略高但 cost per correct 翻数倍，生产系统未必应该默认开启。
 
 ## Marginal Accuracy per Cost
@@ -573,7 +611,9 @@ g(B_1,B_2)=
 
 一句话定义：P95 Latency 是 95% 请求能完成的延迟阈值，是用户体验和 SLO 里的关键指标。
 
-面试表达：多候选并行、串行搜索和工具 loop 对 P95 的影响不同。线上不能只看平均延迟。
+把一批请求的端到端延迟从小到大排序，P95 大致是其中第 95 个百分位的位置，而不是“最慢的 5% 被删除后的平均值”。多候选并行、串行搜索和工具 loop 对 P95 的影响不同；线上不能只看平均延迟，还要报告超时率、P99 和不同路由策略的尾部请求。
+
+面试表达：TTC 系统的平均延迟可能变化不大，但少量搜索爆炸或工具重试会显著抬高 P95，因此尾延迟必须和准确率、成本一起观察。
 
 ## Wasted High Compute
 
@@ -607,7 +647,7 @@ g(B_1,B_2)=
 m_i=(x_i,y_i^\star,z_i,q_i,d_i,t_i,s_i,r_i)
 ```
 
-面试表达：高质量数学样本不只看答案是否对，还要看步骤是否可复核、难度是否明确、来源是否干净、是否与评测集重叠。
+其中 `x_i` 是题目，`y_i^star` 是标准答案，`z_i` 是推理步骤，`q_i` 是步骤质量或正确性标签，`d_i` 是难度，`t_i` 是题型，`s_i` 是来源或模板指纹，`r_i` 是污染、争议或其他风险标记。高质量数学样本不只看答案是否对，还要看步骤是否可复核、难度是否明确、来源是否干净、是否与评测集重叠。
 
 ## Answer Supervision
 
@@ -656,16 +696,20 @@ D_{\mathrm{temp}}=
 \frac{|\{s_i\}_{i=1}^{N}|}{N}
 ```
 
-面试表达：模板多样性低时，模型可能记住题型外壳；必须结合真实题迁移、hard slice 和错误类型分析判断数据是否有价值。
+这里的 `s_i` 应是题面、参数结构和解题路径的结构指纹，而不只是字符串。公式只表示不同指纹数量占样本数的粗略比例；它不能替代分布覆盖、聚类大小和跨模板迁移测试。模板多样性低时，模型可能记住题型外壳；必须结合真实题迁移、困难切片和错误类型分析判断数据是否有价值。
 
-## Math Training Gate
+## Math Training Quality Criteria
 
-一句话定义：Math Training Gate 是在数学推理训练数据或模型上线前，对答案准确率、步骤准确率、第一处错误定位、污染率、模板多样性和难题切片设置的质量门禁。
+一句话定义：Math Training Quality Criteria 是评价数学推理训练数据和模型结果是否值得信任的一组质量标准，覆盖答案、过程、数据来源、题型多样性和困难切片。
 
-简化口径：
+对初学者来说，数学训练数据不能只问“最后答案对不对”。一道题可能答案碰巧猜对，解析却在中途使用了错误定理；也可能训练集包含了公开评测题，模型的高分只是记忆。质量标准的作用，是把这些不同问题分开记录。
+
+专家视角下，这是一组互补指标，而不是一个神奇的总分。答案准确率反映任务结果，步骤准确率和第一处错误定位反映过程质量，污染率反映评估可信度，模板多样性反映合成数据的覆盖，困难切片则反映能力是否只集中在简单题。
+
+可以用一个示意性的综合判据表示“所有关键条件是否同时满足”，但它不是通用行业阈值：
 
 ```math
-G_{\mathrm{math}}=
+Q_{\mathrm{math}}=
 \mathbb{1}[
 A_{\mathrm{ans}}\ge \alpha
 \land
@@ -681,7 +725,9 @@ A_{\mathrm{hard}}\ge \eta
 ]
 ```
 
-面试表达：数学训练 gate 的价值是防止平均准确率掩盖步骤错误、评测污染、模板化和 hard proof / geometry 切片失败。
+其中 `A_ans`、`A_step` 和 `A_first` 分别是最终答案、步骤和第一处错误定位的准确率，`R_contam` 是污染率，`D_temp` 是模板多样性，`A_hard` 是困难切片准确率；`alpha`、`beta`、`gamma`、`rho`、`delta` 和 `eta` 是由任务风险、数据规模和评估误差决定的阈值。实际报告还应附上样本量、置信区间和失败案例，避免用一个 `0/1` 结果掩盖指标之间的取舍。
+
+面试表达：数学训练质量标准的价值，是防止平均准确率掩盖步骤错误、评测污染、模板化和困难证明/几何切片失败。
 
 ## Code Reasoning
 
@@ -767,7 +813,7 @@ S(p_i^{(R_i)},T_i^{hid})=1
 ]
 ```
 
-面试表达：它比 pass@k 更关注模型能否利用反馈修错，而不是候选池里是否碰巧已有正确解。
+其中 `F` 是初始评估失败样本集合，`N_fail=|F|`，`p_i^{(R_i)}` 是第 `i` 个任务经过 `R_i` 轮修复后的程序，`S(p,T_hid)=1` 表示程序通过隐藏测试。它比 pass@k 更关注模型能否利用反馈修错，而不是候选池里是否碰巧已有正确解。
 
 ## Sandbox Violation Rate
 
@@ -777,12 +823,12 @@ S(p_i^{(R_i)},T_i^{hid})=1
 
 ```math
 R_{\mathrm{sandbox}}=
-\frac{1}{M}
-\sum_{i,j}
-\mathbb{1}[u_{ij}=1]
+\frac{1}{N_{\mathrm{cand}}}
+\sum_{i=1}^{N_{\mathrm{cand}}}
+\mathbb{1}[\exists j:u_{ij}=1]
 ```
 
-面试表达：执行模型生成代码必须默认不可信。沙箱指标不是攻击指南，而是证明权限隔离和拦截策略有效的审计信号。
+其中 `N_cand` 是被执行的候选数，`u_{ij}=1` 表示第 `i` 个候选在第 `j` 类安全检查中触发违规，否则为 `0`；实际报告还应明确一次候选触发多个规则时如何去重。执行模型生成代码必须默认不可信。沙箱指标不是攻击指南，而是证明权限隔离和拦截策略有效的审计信号。
 
 ## Code Execution Audit
 
@@ -790,14 +836,18 @@ R_{\mathrm{sandbox}}=
 
 面试表达：它能回答“执行反馈是否真的提升代码可靠性”，并揭示公开测试过拟合、隐藏边界失败和不安全候选。
 
-## Code Reasoning Gate
+## Code Reasoning Quality Criteria
 
-一句话定义：Code Reasoning Gate 是代码 reasoning 系统上线前对隐藏测试准确率、公开 / 隐藏差距、修复成功率、沙箱违规率和执行成本设置的门禁。
+一句话定义：Code Reasoning Quality Criteria 是评价代码推理系统是否可靠的一组标准，重点检查隐藏测试泛化、利用反馈修复错误的能力、执行安全和资源成本。
 
-简化口径：
+对初学者来说，代码“能运行”只说明它通过了某一组输入。真正的代码推理还要回答：换一组没有见过的输入是否仍然正确，失败后能否根据报错修复，代码是否越过沙箱边界，以及这种验证循环是否花费过多时间。
+
+专家视角下，公开测试用于提供反馈，隐藏测试用于估计泛化，沙箱指标用于约束执行风险，修复成功率用于衡量反馈利用能力。它们不可互相替代；尤其不能把 `pass@k` 的潜在正确解存在性，误读成单次调用的生产可靠性。
+
+一个用于组织这些指标的示意性判据是：
 
 ```math
-G_{\mathrm{code}}=
+Q_{\mathrm{code}}=
 \mathbb{1}[
 A_{\mathrm{hid}}\ge \alpha
 \land
@@ -811,7 +861,9 @@ C_{\mathrm{exec}}\le C_{\max}
 ]
 ```
 
-面试表达：代码 reasoning gate 防止系统只靠公开测试或 pass@k 看起来很强，却在隐藏用例、沙箱安全或执行成本上不达标。
+其中 `A_hid` 是隐藏测试通过率，`Delta_pub-hid` 是公开测试与隐藏测试的差距，`A_repair` 是修复成功率，`R_sandbox` 是沙箱违规率，`C_exec` 是单个任务的执行和验证成本。阈值不应脱离测试覆盖率解释：隐藏测试很弱时，较高的 `A_hid` 也不能证明功能完全正确。
+
+面试表达：代码推理质量标准防止系统只靠公开测试或 `pass@k` 看起来很强，却在隐藏用例、沙箱安全或执行成本上失控。
 
 ## Reasoning Evaluation
 
@@ -831,7 +883,7 @@ C_{\mathrm{exec}}\le C_{\max}
 e_i=(x_i,y_i^\star,V_i,P_i,z_i,q_i,g_i,r_i,b_i)
 ```
 
-面试表达：评估样本 schema 越完整，越容易追踪分数提升来自模型能力、提示词、预算、污染还是评估器偏差。
+其中 `x_i` 是原题，`y_i^star` 是参考答案，`V_i` 是候选输出或候选集合，`P_i` 是题目或输出的变体，`z_i` 和 `q_i` 是过程步骤及其标签，`g_i` 是能力切片，`r_i` 是风险标记，`b_i` 是推理预算。评估样本 schema 越完整，越容易追踪分数提升来自模型能力、提示词、预算、污染还是评估器偏差。
 
 ## Variant Evaluation
 
@@ -873,18 +925,34 @@ A_{\mathrm{orig}}-A_{\mathrm{var}}
 
 一句话定义：Bootstrap Confidence Interval 是通过对评估样本重复重采样，估计指标不确定性的置信区间。
 
-用途：小样本或提升很小时，单个平均分可能误导；需要看区间是否跨过 0、是否足以支撑上线判断。
+设每个配对样本的新旧模型正确性差异为 `d_i`，从 `d_1,\ldots,d_N` 中有放回抽取第 `b` 个 bootstrap 样本，则：
+
+```math
+\Delta^{(b)}=
+\frac{1}{N}\sum_{i=1}^{N}d_{i_b},
+\qquad
+\operatorname{CI}_{95\%}=
+\left[q_{0.025}(\Delta^{(b)}),q_{0.975}(\Delta^{(b)})\right]
+```
+
+其中 `i_b` 是第 `b` 次重采样得到的索引，`q_p` 表示经验分布的 `p` 分位数。配对评估应重采样“样本对”或差值，而不是把新旧模型的样本独立打散，否则会丢失同一道题上的相关性。
+
+用途：小样本或提升很小时，单个平均分可能误导；需要看区间是否跨过 0、样本量是否足够，以及评估集是否覆盖真正关心的任务。
 
 面试表达：如果 paired lift 的 bootstrap interval 跨过 0，应该说“证据不足”，而不是宣称模型显著更强。
 
-## Reasoning Eval Gate
+## Reasoning Evaluation Quality Criteria
 
-一句话定义：Reasoning Eval Gate 是 reasoning 评估上线前对最终答案、过程质量、第一处错误、污染率、鲁棒性和成本设置的可信度门禁。
+一句话定义：Reasoning Evaluation Quality Criteria 是判断 reasoning 评估结论是否足够可信的一组标准，覆盖最终答案、过程质量、污染率、变体鲁棒性、统计不确定性和资源成本。
 
-简化口径：
+对初学者来说，评估不是把一个 benchmark 分数填进表格，而是要确认“测到的确实是想测的能力”。如果题目被训练数据污染，或者新模型用了三倍推理预算，那么一个更高的分数都不能直接说明模型本身更强。
+
+专家视角下，至少要保留模型与 harness 版本、预算、随机种子、样本切片、paired lift、置信区间和失败样本。下面的公式只是一个组织报告的例子；不同业务可以增加引用支持率、工具成功率或安全风险指标。
+
+一个简化的综合判据可以写成：
 
 ```math
-G_{\mathrm{eval}}=
+Q_{\mathrm{eval}}=
 \mathbb{1}[
 A_{\mathrm{ans}}\ge \alpha
 \land
@@ -896,11 +964,15 @@ R_{\mathrm{contam}}\le \rho
 \land
 D_{\mathrm{robust}}\le \delta
 \land
-E_{\mathrm{cost}}\ge \eta
+ C_{\mathrm{ttc}}\le C_{\max}
+\land
+L_{95}\le L_{\max}
 ]
 ```
 
-面试表达：reasoning eval gate 的目标不是制造漂亮分数，而是证明评估结论没有被污染、统计噪声、过程错误、变体失败或成本失控掩盖。
+其中 `A_ans`、`A_step` 和 `A_first` 分别表示最终答案、步骤和第一处错误定位的指标，`R_contam` 是污染率，`D_robust` 是原题到变体的性能下降，`C_ttc` 是测试时计算成本，`L_95` 是 P95 延迟；其余希腊字母是预先定义的阈值。若提升的置信区间仍跨过零，或关键切片出现明显退化，即使 `Q_eval=1` 的形式条件看似满足，也应降低结论强度并继续抽查。
+
+面试表达：reasoning 评估标准的目标不是制造漂亮分数，而是证明评估结论没有被污染、统计噪声、过程错误、变体失败或成本失控掩盖。
 
 ## Best-of-N
 
@@ -914,7 +986,7 @@ E_{\mathrm{cost}}\ge \eta
 
 面试表达：best-of-n 的核心是候选生成加选择器，关键在于候选多样性和选择器可靠性。
 
-## Pass@k
+## Pass@k 估计
 
 一句话定义：Pass@k 是可执行验证任务中常用指标，表示生成 `k` 个候选时至少有一个正确候选的概率。
 
@@ -927,16 +999,20 @@ E_{\mathrm{cost}}\ge \eta
 {\binom{n}{k}}
 ```
 
-面试表达：pass@k 衡量候选集合里是否存在正确解，不等于线上一次调用的可靠性。k 越大成本越高，也越依赖测试覆盖率。
+这里 `n` 是实际生成并检查的候选总数，`c` 是其中通过测试的候选数，`k` 是允许抽取的候选数，通常要求 `0\le k\le n`。例如 `n=10,c=3,k=2` 时，估计值为 `1-C(7,2)/C(10,2)=14/30`，表示从这类候选中抽两次至少得到一个通过测试候选的估计概率。
+
+它衡量的是候选空间中“存在正确解”的潜力，而不是系统在一次调用中的默认可靠性。测试用例不完整时，`pass@k` 还可能把投机代码判为通过；`k` 越大，token、执行和延迟成本通常越高。
+
+面试表达：pass@k 适合回答“多给模型几次机会，它能否找到可验证的正确解”，不能替代 pass@1、隐藏测试和生产成本评估。
 
 ## Reasoning Audit
 
 一句话定义：Reasoning Audit 是对 reasoning 系统的准确率、候选质量、verifier、过程步骤、test-time compute 成本、安全风险和污染风险进行统一审计。
 
-一个简化上线门禁：
+一个简化的综合约束可以写成：
 
 ```math
-G_{\mathrm{reason}}=
+Q_{\mathrm{reason}}=
 \mathbb{1}[
 A_{\mathrm{ver}}\ge \alpha
 \land
@@ -948,6 +1024,8 @@ R_{\mathrm{unsafe}}\le \rho
 ]
 ```
 
+其中 `A_ver` 是候选经 verifier 选择后得到的最终正确率，`A_step` 是过程步骤指标，`C_ttc` 是测试时计算成本，`R_unsafe` 是不安全行为比例。它是审计报告的骨架，不是所有任务都必须采用的固定阈值；高风险任务还应增加拒答、人工审核、工具越权和不可逆动作等指标。
+
 面试表达：reasoning audit 能把“模型会思考”拆成可验证的候选、选择器、步骤质量、成本和安全边界，而不是只看回答是否很长。
 
 ## Reasoning Safety
@@ -956,7 +1034,7 @@ R_{\mathrm{unsafe}}\le \rho
 
 核心问题：reasoning 能力越强，模型越可能完成复杂规划和外部动作；如果没有权限、验证、审核和日志，错误或误用的影响会被放大。
 
-面试表达：reasoning safety 不是单个拒答分类器，而是模型行为、CoT 展示策略、verifier、工具权限、人工审核、红队回归和治理门禁组成的系统工程。
+面试表达：reasoning safety 不是单个拒答分类器，而是模型行为、CoT 展示策略、verifier、工具权限、人工审核、红队回归和治理要求组成的系统工程。
 
 ## Pseudo Reasoning
 
@@ -972,7 +1050,7 @@ R_{\mathrm{unsafe}}\le \rho
 
 为什么重要：医疗、法律、金融、安全和招聘等场景中，错而自信会误导用户做高影响决策。
 
-面试表达：过度自信要用 calibration、abstention、verifier、人审和高风险门禁约束，而不是只要求模型输出更长解释。
+面试表达：过度自信要用 calibration、abstention、verifier、人审和高风险指标约束，而不是只要求模型输出更长解释。
 
 ## Hidden CoT Exposure
 
@@ -1006,14 +1084,18 @@ R_{\mathrm{unsafe}}\le \rho
 
 面试表达：安全评估要按严重度、风险域和可逆性加权，否则平均分会掩盖少数高影响事故。
 
-## Reasoning Safety Gate
+## Reasoning Safety Criteria
 
-一句话定义：Reasoning Safety Gate 是 reasoning 系统上线前对伪推理、过度自信、高风险不当服从、工具误用、隐藏 CoT 暴露、人审覆盖和过度拒答设置的综合门禁。
+一句话定义：Reasoning Safety Criteria 是评价 reasoning 系统安全边界的一组指标和控制要求，覆盖伪推理、过度自信、高风险不当服从、工具误用、隐藏 CoT 暴露、人审覆盖和过度拒答。
 
-简化口径：
+对初学者来说，安全不只是“危险问题拒答”。推理模型可能在看似正常的任务中调用超出权限的工具、把恶意工具输出当作指令，或者在错误答案上表现得过于确定。安全评估需要同时看模型说了什么、系统允许它做什么，以及出了问题能否发现和回滚。
+
+专家视角下，安全指标既有“越低越好”的风险率，也有“越高越好”的审核覆盖率；不能把它们未经归一化地相加。更稳妥的做法是先按风险等级定义不可违反的约束，再在剩余样本上比较效用和成本。
+
+一个示意性的组合约束是：
 
 ```math
-G_{\mathrm{safe}}=
+Q_{\mathrm{safe}}=
 \mathbb{1}[
 R_{\mathrm{pseudo}}\le \alpha
 \land
@@ -1029,13 +1111,17 @@ C_{\mathrm{review}}\ge \eta
 ]
 ```
 
-面试表达：如果工具越权、隐藏 CoT 暴露或高风险人工审核不过线，即使 reasoning benchmark 提升，也不能直接上线。
+其中 `R_pseudo`、`R_conf`、`R_unsafe`、`R_tool` 和 `R_cot` 分别表示伪推理、过度自信、不安全服从、工具误用和不当暴露的比例，`C_review` 是高风险样本的人审或确认覆盖率。每个风险率的样本定义、严重度和置信区间都要写清楚；否则“风险率”会因为分母变化而失去可比性。
+
+面试表达：如果工具越权、隐藏 CoT 暴露或高风险人工审核不满足要求，即使 reasoning benchmark 提升，也不能直接发布。
 
 ## Reasoning Interview Readiness
 
 一句话定义：Reasoning Interview Readiness 是判断候选人是否能把 reasoning 概念、公式、demo、评估、安全和工程 trade-off 讲成完整面试答案的准备度。
 
-核心维度：topic coverage、formula coverage、demo coverage、risk coverage、trade-off coverage 和 weak question revision。
+对初学者来说，准备度不是把 CoT、PRM、MCTS 的英文释义背下来，而是能从一个具体问题讲清楚“模型生成了什么、系统怎样验证、指标如何证明有效、失败时怎么办”。专家则需要进一步说明数据、预算、评估 harness 和安全边界之间的依赖。
+
+核心维度：topic coverage、formula coverage、demo coverage、risk coverage、trade-off coverage 和 weak question revision。一个完整回答通常沿着“定义 -> 机制 -> 公式或指标 -> 工程实现 -> 失败模式 -> 取舍”展开。
 
 面试表达：准备 reasoning 面试不能只背 CoT、PRM、MCTS 等术语，而要能用公式、项目审计表和失败案例证明自己理解机制和边界。
 
@@ -1051,7 +1137,7 @@ C_{\mathrm{review}}\ge \eta
 
 一句话定义：Reasoning Formula Coverage 是 reasoning 面试回答中覆盖关键公式或指标的比例。
 
-典型公式：最终答案准确率、步骤准确率、self-consistency 投票、pass@k、pairwise verifier loss、test-time compute cost 和 safety gate。
+典型公式：最终答案准确率、步骤准确率、self-consistency 投票、pass@k、pairwise verifier loss、test-time compute cost 和安全约束指标。
 
 面试表达：公式覆盖不是为了炫技，而是证明你知道方法在优化什么、评估什么、约束什么。
 
@@ -1059,7 +1145,7 @@ C_{\mathrm{review}}\ge \eta
 
 一句话定义：Reasoning Demo Coverage 是 reasoning 面试准备中能用最小代码或项目审计 demo 支撑的主题比例。
 
-典型 demo：CoT 质量审计、self-consistency 投票、verifier rerank、process supervision、search / MCTS、TTC routing、reasoning eval report 和 safety gate。
+典型 demo：CoT 质量审计、self-consistency 投票、verifier rerank、process supervision、search / MCTS、TTC routing、reasoning eval report 和安全评估。
 
 面试表达：如果一个知识点能配一个 toy demo，面试回答会从“概念复述”升级成“我知道怎么落地和验证”。
 
@@ -1075,7 +1161,7 @@ C_{\mathrm{review}}\ge \eta
 
 一句话定义：Reasoning Revision Plan 是针对 reasoning 面试薄弱项制定的下一轮修正计划。
 
-常见内容：补数学训练题、补代码执行反馈题、补 process supervision 公式、补 safety gate demo、补系统设计模块图。
+常见内容：补数学训练题、补代码执行反馈题、补 process supervision 公式、补安全评估 demo、补系统设计模块图。
 
 面试表达：revision plan 的目标是让下一轮 mock interview 有可验证改善，而不是只增加阅读时间。
 
@@ -1085,7 +1171,7 @@ C_{\mathrm{review}}\ge \eta
 
 为什么提出：单条 CoT 一旦早期走错，后续通常会沿着错误路径继续。搜索保留多个候选路径，可以用 verifier、PRM、工具反馈或规则提前剪掉低质量分支。
 
-核心边界：搜索不是无成本增强。它依赖状态表示、动作粒度、评分器质量和预算门禁；评分器偏差会把错误路径放大。
+核心边界：搜索不是无成本增强。它依赖状态表示、动作粒度、评分器质量和预算约束；评分器偏差会把错误路径放大。
 
 面试表达：search reasoning 的核心不是“多生成几条答案”，而是把生成、评估、剪枝、回溯和预算控制组成一个闭环。
 
@@ -1101,7 +1187,7 @@ C_{\mathrm{review}}\ge \eta
 s_t=(x,z_{1:t},m_t,b_t)
 ```
 
-面试表达：状态表示不完整时，verifier 看到的信息不足，搜索评分会失真。
+其中 `x` 是原始问题，`z_{1:t}` 是截至第 `t` 步的中间状态序列，`m_t` 是工具、测试或记忆结果，`b_t` 是剩余预算。状态表示不完整时，verifier 看到的信息不足，搜索评分会失真；状态保存过多又会增加上下文和序列化成本。
 
 ## Search Action
 
@@ -1117,7 +1203,7 @@ a_t\in\mathcal{A}(s_t),
 s_{t+1}=T(s_t,a_t)
 ```
 
-面试表达：动作粒度太细会让树爆炸，动作粒度太粗又会失去纠错和剪枝能力。
+其中 `\mathcal{A}(s_t)` 是状态 `s_t` 可采取的动作集合，`T` 是状态转移函数。动作可以是一个推理步骤、一个代码补丁或一次工具调用。动作粒度太细会让树爆炸，动作粒度太粗又会失去纠错和剪枝能力。
 
 ## Beam Search
 
@@ -1135,7 +1221,7 @@ K
 )
 ```
 
-面试表达：beam search 简单、成本可控，适合接 verifier；风险是 early pruning，正确路径可能因为早期分数低被剪掉。
+其中 `F_t` 是第 `t` 层的 frontier，`T(s,a)` 是执行动作后的新状态，`S` 是排序函数，`K` 是 beam 宽度。beam search 简单、成本可控，适合接 verifier；风险是 early pruning，正确路径可能因为早期分数低被剪掉。
 
 ## Best-First Search
 
@@ -1160,7 +1246,7 @@ Q(v)
 }
 ```
 
-面试表达：UCT 避免只盯着当前高分节点，也避免完全随机探索；但在语言任务里 `Q(v)` 的可靠性仍取决于 verifier、工具或最终反馈。
+其中 `Q(v)` 是节点 `v` 的当前平均价值，`N_p` 是父节点访问次数，`N_v` 是节点访问次数，`c` 是探索系数。UCT 避免只盯着当前高分节点，也避免完全随机探索；但在语言任务里 `Q(v)` 的可靠性仍取决于 verifier、工具或最终反馈。
 
 ## Prune False Negative
 
@@ -1168,7 +1254,7 @@ Q(v)
 
 典型来源：PRM 低估朴素但正确的分支，偏好格式漂亮的 hard negative，或者早期步骤证据不足。
 
-面试表达：搜索系统上线前要统计被剪掉的正确路径和 hard negative 切片，不能只看最终平均准确率。
+面试表达：评估搜索系统时要统计被剪掉的正确路径和 hard negative 切片，不能只看最终平均准确率。
 
 ## Search Budget
 
@@ -1364,15 +1450,15 @@ Q(v)
 
 面试表达：评估指标不是越多越好，而是要覆盖核心业务目标、失败风险和用户体验。
 
-## Pass@k
+## Pass@k 指标解读
 
 一句话定义：pass@k 是代码生成和可验证任务中常用指标，表示生成 k 个候选中至少一个通过测试的概率。
 
-为什么重要：代码任务常允许多次生成和筛选。pass@1 衡量一次生成能力，pass@k 衡量采样多个候选后的潜在解题能力。
+为什么重要：代码任务常允许多次生成和筛选。`pass@1` 衡量一次生成能力，`pass@k` 衡量在允许生成多个候选时的潜在解题能力；二者回答的是不同问题，不能用较高的 `pass@k` 替代一次调用的可靠性。
 
 优点：适合有单元测试或自动判题器的任务。
 
-局限：测试用例不完备时，pass 不代表代码完全正确；k 增大带来计算成本；可能鼓励生成大量候选而非单次可靠输出。
+局限：测试用例不完备时，pass 不代表代码完全正确；`k` 增大带来生成、执行和筛选成本；候选之间如果高度相似，名义上的 `k` 也没有带来同等的探索空间。报告该指标时还要给出测试覆盖率、候选生成预算、隐藏测试结果和 `cost per correct`。
 
 面试表达：pass@k 衡量的是候选搜索空间中是否存在正确解，和生产中的延迟、成本、测试覆盖率要一起看。
 
@@ -1412,7 +1498,7 @@ Q(v)
 
 ## Evaluation Metric Incident
 
-一句话定义：evaluation metric incident 是指标看起来提升，但干净集、关键切片、人工评估、线上反馈、成本延迟或安全门禁反而变差的评估事故。
+一句话定义：evaluation metric incident 是指标看起来提升，但干净集、关键切片、人工评估、线上反馈、成本延迟或安全指标反而变差的评估事故。
 
 典型表现：公开 benchmark 分数提升但真实用户任务下降，LLM judge 分数升高但人工偏好下降，平均分上升但中文、代码、安全或长上下文切片退化。
 
@@ -1424,7 +1510,7 @@ Q(v)
 
 为什么重要：总分常被简单样本或大切片主导。高风险业务里，一个安全边界或核心任务切片下降，比总体提升更重要。
 
-面试表达：报告总分时必须配切片分、失败样本和上线门禁，否则平均分容易误导决策。
+面试表达：报告总分时必须配切片分、失败样本和发布判据，否则平均分容易误导决策。
 
 ## Slice Regression
 
@@ -1432,7 +1518,15 @@ Q(v)
 
 常见切片：数学、代码、中文、长上下文、RAG 引用、工具调用、安全边界、高价值用户任务和线上高频请求。
 
-面试表达：模型发布前要设置 hard-slice gate。只要关键切片显著退化，就不能只用总体分提升掩盖。
+可以把切片 `s` 的退化写成：
+
+```math
+\Delta_s=A_s^{new}-A_s^{base}
+```
+
+其中 `A_s^{new}` 和 `A_s^{base}` 是新旧系统在同一切片上的指标。`Delta_s<0` 只说明方向上退化；是否值得阻止发布，还要结合样本量、置信区间、业务严重度和该切片的流量占比判断。关键切片发布约束的意义，是防止总体分数掩盖少数但高影响的退化。
+
+面试表达：模型发布前要单独检查关键切片；只要高风险切片有可信的显著退化，就不能只用总体分提升掩盖。
 
 ## Clean Eval Lift
 
@@ -1446,9 +1540,19 @@ Q(v)
 
 一句话定义：judge-human agreement 是 LLM judge 的偏好或评分与人工标注、专家复核或程序验证器结论一致的比例。
 
-用途：校准 judge 是否能作为大规模辅助评估器，尤其要按任务、长度、位置、模型来源和风险等级切片看。
+对二分类或明确偏好标签，可以用简单一致率表示：
 
-面试表达：LLM-as-a-judge 必须先被评估。judge 自身没有校准，就不能当作上线真值。
+```math
+A_{\mathrm{jh}}=
+\frac{1}{N}\sum_{i=1}^{N}
+\mathbb{1}[J_i=H_i]
+```
+
+其中 `J_i` 是 judge 对第 `i` 个样本的判断，`H_i` 是人工或程序验证器的参考标签。类别极不平衡时，简单一致率可能因为“总选同一个类别”而虚高，还应报告 confusion matrix、precision / recall、Cohen's kappa 或按偏好任务报告 pairwise win agreement。
+
+用途：校准 judge 是否能作为大规模辅助评估器，尤其要按任务、长度、位置、模型来源和风险等级切片看。协议一致不等于真值一致；人工标注本身也要有指南、仲裁和一致性抽查。
+
+面试表达：LLM-as-a-judge 必须先被评估。judge 自身没有校准，就不能当作发布决策的唯一真值。
 
 ## Judge Length Bias
 
@@ -1458,13 +1562,61 @@ Q(v)
 
 面试表达：排查 judge 偏差时要控制答案长度、随机化顺序、隐藏模型名，并用人工样本校准。
 
-## Evaluation Gate
+## Evaluation Decision Criteria
 
-一句话定义：evaluation gate 是把成对提升、bootstrap 置信区间、切片退化、污染率、judge-human 一致率、成本、延迟、安全和线上反馈合并成的评估上线门禁。
+一句话定义：Evaluation Decision Criteria 是把成对提升、bootstrap 置信区间、切片退化、污染率、judge-human 一致率、成本、延迟、安全和线上反馈放在一起解释的评估决策标准。
 
-用途：防止团队只看一个 benchmark、一个 judge 分数或一个平均分就发布模型。
+可以把一次候选版本的证据写成向量，而不是压缩成一个不透明的总分：
 
-面试表达：evaluation gate 的价值是把“分数好看”转成“证据足够、风险可控、能上线”的决策标准。
+```math
+\mathcal{D}=
+\left(
+\Delta_{\mathrm{pair}},
+\operatorname{CI}_{\mathrm{pair}},
+\min_{s\in\mathcal{S}}\Delta_s,
+R_{\mathrm{contam}},
+A_{\mathrm{jh}},
+C_{\mathrm{ttc}},
+L_{95},
+R_{\mathrm{safe}}
+\right)
+```
+
+其中 `S` 是关键切片集合。这个向量的价值在于保留证据结构：总体提升可能为正，但某个切片退化、污染率过高或安全风险增加时，结论就不能简单写成“模型变强”。
+
+用途：防止团队只看一个 benchmark、一个 judge 分数或一个平均分就发布模型。决策标准必须提前写出，避免看到结果后临时挑选有利指标；阈值也应根据任务风险、样本量和成本约束解释。
+
+面试表达：评估决策标准的价值，是把“分数好看”转成“证据足够、风险可控、成本可接受”的发布判断。
+
+## Reasoning Effort 与 Harness-Aware Evaluation
+
+推理模型的能力不应被简化为“会/不会思考”。一次请求的效果取决于模型、reasoning effort/thinking level、工具、verifier、上下文策略和 harness：
+
+```math
+R=F(M,H,E,B,D)
+```
+
+其中 `M` 是模型，`H` 是 harness，`E` 是环境，`B` 是推理/工具预算，`D` 是评测数据。比较 GPT、Claude、Gemini、DeepSeek、Qwen 或 Kimi 时，必须固定这些条件，报告准确率、P95、reasoning token、工具调用和单位正确成本。
+
+长周期 Agent 和 AgentWorld 类环境还要评估 workspace、memory、checkpoint、状态恢复、工具协议和权限，而不只是最终答案。厂商自报 benchmark、一方产品页和官方 model card 的证据等级也要单独记录。
+
+## 证据边界与延伸阅读
+
+本章中的概念可以按证据来源分成三层。经典论文适合说明方法最初解决了什么问题，以及在什么实验条件下有效；benchmark 论文适合说明数据集和指标的定义，但不能自动代表真实业务；厂商 model card、产品页和排行榜适合记录某个版本的公开声明，却通常属于自报材料，必须和独立复现实验、干净集、任务切片及成本数据分开标注。
+
+以下资料是本章几个核心概念的原始或高影响来源：
+
+- [Chain-of-Thought Prompting Elicits Reasoning in Large Language Models](https://arxiv.org/abs/2201.11903)：说明少量示例的思维链提示在多步算术、常识和符号推理任务上的实验现象。它支持“某些任务上 CoT 有帮助”，不等于证明可见推理就是忠实的内部过程。
+- [Self-Consistency Improves Chain of Thought Reasoning in Language Models](https://arxiv.org/abs/2203.11171)：提出通过多条采样路径进行答案聚合的自洽性方法，是 self-consistency 和测试时采样讨论的主要来源之一。
+- [Training Verifiers to Solve Math Word Problems](https://arxiv.org/abs/2110.14168)：展示生成候选解与训练 verifier 的组合，并说明验证器质量会限制候选筛选效果。
+- [Let's Verify Step by Step](https://arxiv.org/abs/2305.20050)：系统讨论 outcome supervision 与 process supervision 的差异，为 PRM、步骤标签和过程评估提供重要依据。
+- [Tree of Thoughts](https://arxiv.org/abs/2305.10601)：将语言模型中间想法组织成可搜索的树，适合对照理解 beam、best-first 和更一般的搜索推理。
+- [Evaluating Large Language Models Trained on Code](https://arxiv.org/abs/2107.03374)：介绍 HumanEval 与 `pass@k` 评估口径，是代码生成指标解释的经典来源。
+- [Holistic Evaluation of Language Models](https://arxiv.org/abs/2211.09110)：强调从准确性、鲁棒性、偏差、毒性、效率等多维度评估模型，而不是依赖单一分数。
+- [Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena](https://arxiv.org/abs/2306.05685)：讨论 LLM judge 与人工偏好之间的关系及其偏差，支持本章对 judge 校准和长度偏差的限定。
+- [On Calibration of Modern Neural Networks](https://arxiv.org/abs/1706.04599)：给出温度缩放等校准讨论的基础背景，可用于理解 ECE、Brier score 与置信度的区别。
+
+这些研究结论都带有任务、模型、提示词、采样预算和评估集等条件。阅读模型宣传材料时，应把“模型能够生成更长推理”与“在独立、干净、成对且成本受控的评估上更可靠”分开；后者需要额外证据，不能由前者推出。
 
 ## 本章小结
 

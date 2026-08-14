@@ -1,8 +1,8 @@
 # 第九章：Tool Registry 的设计：名称、描述、Schema、权限和版本
 
-## 9.0 本讲资料边界与第二轮精修口径
+## 9.0 本讲范围与资料
 
-本章按第二轮精修要求，对齐 OpenAI tools / function calling 和 Apps SDK tool descriptor 的公开资料、Anthropic tool use 的工具定义方式、Google Gemini function calling 的 function declaration 设计、MCP specification 中 tools / resources / prompts 的能力边界，以及 JSON Schema 对 JSON 数据结构描述和校验的标准词汇。这里抽象的是企业 Tool Registry 的稳定工程层：工具身份、描述、schema、权限、风险、运行时、版本、生命周期、provider 投影、eval 和审计。
+本章参考 OpenAI tools / function calling 和 Apps SDK tool descriptor 的公开资料、Anthropic tool use 的工具定义方式、Google Gemini function calling 的 function declaration 设计、MCP specification 中 tools / resources / prompts 的能力边界，以及 JSON Schema 对 JSON 数据结构描述和校验的标准词汇。这里抽象的是企业 Tool Registry 的稳定工程层：工具身份、描述、schema、权限、风险、运行时、版本、生命周期、provider 投影、eval 和审计。
 
 需要注意三点：
 
@@ -902,7 +902,7 @@ C_{\mathrm{audit}}=
 {N}
 ```
 
-Tool Registry 上线门禁可以写成：
+Tool Registry 上线准入条件可以形式化为：
 
 ```math
 G_{\mathrm{registry}}=

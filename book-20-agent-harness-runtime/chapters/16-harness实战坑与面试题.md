@@ -1,12 +1,12 @@
 # 第十六章：Harness 实战坑与面试题
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本章第二轮精修只基于公开资料和前文已经建立的 Agent Harness 抽象：Claude Code security / troubleshooting 文档、OpenCode troubleshooting / permissions / MCP 文档、SWE-agent trajectory / output files 文档、Aider troubleshooting / repo map 文档、MCP specification 与安全最佳实践、OpenAI Agents SDK 的 agent、tool、session、human-in-the-loop、MCP 和 tracing 公开资料，以及本册前十五章对 runtime、工具、权限、沙箱、trace、replay 和 evaluation harness 的拆解。
+本章只基于公开资料和前文已经建立的 Agent Harness 抽象：Claude Code security / troubleshooting 文档、OpenCode troubleshooting / permissions / MCP 文档、SWE-agent trajectory / output files 文档、Aider troubleshooting / repo map 文档、MCP specification 与安全最佳实践、OpenAI Agents SDK 的 agent、tool、session、human-in-the-loop、MCP 和 tracing 公开资料，以及本册前十五章对 runtime、工具、权限、沙箱、trace、replay 和 evaluation harness 的拆解。
 
 本章不把任何闭源 coding agent 的内部 planner、隐藏 prompt、工具排序、沙箱实现、远端 trace 存储或模型路由写成确定事实；如果需要讨论，只作为系统设计推断。本章只讨论防御性工程排查、面试表达和 toy audit demo，不提供绕过权限、规避沙箱、读取密钥、破坏工作区、攻击 MCP/A2A 服务、隐藏 trace、伪造评估通过或自动执行生产高风险动作的方法。
 
-第二轮补强重点有三点：
+本章重点有三点：
 
 1. 把“实战坑”从经验清单升级成可审计指标，避免面试回答停留在“要加权限、要加日志”的口号。
 2. 用稳定 MathJax 公式定义排查覆盖率、权限安全、上下文预算、编辑安全、命令安全、注入边界、trace、replay、eval、成本循环和环境一致性。
@@ -618,7 +618,7 @@ C_{\mathrm{cost}}=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[S_i\le S_{\max}\land M_i\l
 C_{\mathrm{env}}=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[\mathrm{env\_fingerprint}(h_i)\land \mathrm{cwd\_recorded}(h_i)]
 ```
 
-最终实战坑门禁可以定义为：
+最终实战坑准入条件可以定义为：
 
 ```math
 G_{\mathrm{pitfall}}=\mathbb{1}[
@@ -1068,4 +1068,4 @@ harness_pitfall_gate_pass=False
 4. 面试回答要有结构：定义边界、拆模块、讲链路、讲风险、讲验证、讲 trade-off。
 5. 一个优秀的 harness 不是让模型“想做什么就做什么”，而是让模型在可控、可审计、可恢复、可评估的工程系统里完成任务。
 
-到这里，第二十册《Agent Harness、Coding Agent Runtime 与智能体工程框架》正文第一版完成。后续可以进入第二十一册，继续学习大模型系统架构演进与前沿工程方向。
+Agent Harness 的判断标准可以带到任何 coding agent 或研究型 Agent 中：模型只负责提出候选计划，harness 负责提供上下文、工具、权限、状态、验证和审计。系统是否可靠，不取决于某个 demo 是否偶尔完成任务，而取决于失败时能否阻止副作用、保存证据、恢复状态并把问题沉淀为下一次回归测试。

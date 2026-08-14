@@ -1,14 +1,14 @@
 # 第十章：Tool Router：什么时候调用哪个工具
 
-## 10.0 本讲资料边界与第二轮精修口径
+## 10.0 本讲范围与资料
 
-本章按第二轮精修要求，对齐 OpenAI tools / function calling 中工具列表、tool choice 和 parallel tool calls 的公开能力，Anthropic tool use 中工具定义和 tool choice 的公开能力，Google Gemini function calling 中 function declaration、mode 和 allowed function names 的公开能力，以及 MCP specification 中 tools/list、tools/call 和 server capability discovery 的边界。这里抽象的是 Tool Router 的稳定工程层：候选工具过滤、权限过滤、风险过滤、意图召回、tool choice 决策、并行策略、provider capability 降级、trace 和 eval。
+本章参考 OpenAI tools / function calling 中工具列表、tool choice 和 parallel tool calls 的公开能力，Anthropic tool use 中工具定义和 tool choice 的公开能力，Google Gemini function calling 中 function declaration、mode 和 allowed function names 的公开能力，以及 MCP specification 中 tools/list、tools/call 和 server capability discovery 的边界。这里抽象的是 Tool Router 的稳定工程层：候选工具过滤、权限过滤、风险过滤、意图召回、tool choice 决策、并行策略、provider capability 降级、trace 和 eval。
 
 需要注意三点：
 
 1. 本章不把某一家 provider 的 `tool_choice`、allowed tools、function calling mode、parallel calls 或 MCP 消息字段写成通用标准。
 2. Router 的职责是缩小模型可见工具集合和生成 tool choice policy，不替代 Executor 的最终权限检查。
-3. 本章只讨论防御性的候选工具收敛、成本控制和安全门禁，不提供绕过权限、诱导高风险工具暴露或隐藏 router trace 的做法。
+3. 本章只讨论防御性的候选工具收敛、成本控制和安全验收条件，不提供绕过权限、诱导高风险工具暴露或隐藏 router trace 的做法。
 
 ## 10.1 本章定位
 
@@ -879,7 +879,7 @@ C_{\mathrm{trace}}=
 {N}
 ```
 
-Router 上线门禁可以写成：
+Router 上线准入条件可以形式化为：
 
 ```math
 G_{\mathrm{router}}=

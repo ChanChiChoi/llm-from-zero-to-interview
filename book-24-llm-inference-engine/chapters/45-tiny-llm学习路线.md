@@ -16,13 +16,13 @@
 
 > 学 tiny-llm 的重点是从“模型算子和单请求 generate”一路走到“KV cache、batching、chunked prefill、paged attention 这些 serving 优化”，理解推理系统不是凭空出现的，而是在模型 forward 的每个瓶颈上逐步长出来的。
 
-## 45.0 本讲资料边界与第二轮精修口径
+## 45.0 本讲范围与资料
 
-本讲第二轮精修前，先按 `WRITING_PLAN.md` 对公开资料做校准：参考 `skyzh/tiny-llm` 官方仓库和课程首页对 tiny-llm 作为面向系统工程师的 LLM serving 课程项目、基于 Apple Silicon / MLX / 矩阵 API 从零实现 Qwen3 推理和 serving 系统的定位说明；参考课程路线对 attention、RoPE、GQA、RMSNorm、MLP、模型加载、generate、sampling、KV cache、quantized matmul、FlashAttention、continuous batching、chunked prefill、paged attention、MoE、speculative decoding、RAG、Agent 和 long context 的分周安排；并结合本书前面关于最小 generate、KV cache、sampling、batched prefill/decode、continuous batching、chunked prefill、PagedAttention 和 serving 性能指标的章节。
+本章参考 `skyzh/tiny-llm` 官方仓库和课程首页对 tiny-llm 作为面向系统工程师的 LLM serving 课程项目、基于 Apple Silicon / MLX / 矩阵 API 从零实现 Qwen3 推理和 serving 系统的定位说明；参考课程路线对 attention、RoPE、GQA、RMSNorm、MLP、模型加载、generate、sampling、KV cache、quantized matmul、FlashAttention、continuous batching、chunked prefill、paged attention、MoE、speculative decoding、RAG、Agent 和 long context 的分周安排；并结合本书前面关于最小 generate、KV cache、sampling、batched prefill/decode、continuous batching、chunked prefill、PagedAttention 和 serving 性能指标的章节。
 
 本讲只讲“如何用 tiny-llm 从模型实现一路读到 serving 优化”：算子 shape、position 对齐、GQA 与 KV cache、generate loop、sampling、KV cache 等价性、TTFT / TPOT、batching trace、chunk position continuity 和 block table trace。不把 MLX API 细节、某个课程版本的目录顺序、真实性能数字、硬件特性、生产级 vLLM/SGLang worker 架构或完整分布式控制面写成通用结论。
 
-本讲新增 demo 是教学版 tiny-llm learning auditor：用 0 依赖 Python 模拟 13 个 learning unit，从 attention、RoPE、GQA、RMSNorm/MLP、模型加载、generate、sampling，一路到 KV cache、quantized matmul、FlashAttention、continuous batching、chunked prefill 和 paged attention；检查概念覆盖、实验覆盖、依赖顺序、serving 优化覆盖和最终学习门禁。
+本章的 demo 是教学版 tiny-llm learning auditor：用 0 依赖 Python 模拟 13 个 learning unit，从 attention、RoPE、GQA、RMSNorm/MLP、模型加载、generate、sampling，一路到 KV cache、quantized matmul、FlashAttention、continuous batching、chunked prefill 和 paged attention；检查概念覆盖、实验覆盖、依赖顺序、serving 优化覆盖和最终学习验收条件。
 
 ## 45.1 本章目标
 
@@ -722,7 +722,7 @@ MLX 是实现环境，真正可迁移的是推理系统思想：KV cache、batch
 如果做项目，我会基于 tiny-llm 增加 TTFT/TPOT 统计、scheduler 日志、KV cache 使用统计，比较 naive generate、KV cache decode、continuous batching 和不同 chunked prefill size 下的延迟、吞吐和显存变化。
 ```
 
-## 45.24 tiny-llm 学习路线覆盖率、实验门禁和可运行 demo
+## 45.24 tiny-llm 学习路线覆盖率、实验验收条件和可运行 demo
 
 先把 tiny-llm 的学习单元抽象成：
 
@@ -744,7 +744,7 @@ C_{\mathrm{concept}}=\frac{|C_{\mathrm{seen}}\cap C_{\mathrm{req}}|}{\max(1,|C_{
 C_{\mathrm{experiment}}=\frac{|E_{\mathrm{done}}\cap E_{\mathrm{req}}|}{\max(1,|E_{\mathrm{req}}|)}
 ```
 
-最终门禁：
+最终验收条件：
 
 ```math
 G_{\mathrm{tiny}}=G_{\mathrm{op}}G_{\mathrm{gen}}G_{\mathrm{kv}}G_{\mathrm{serve}}G_{\mathrm{metric}}G_{\mathrm{order}}
@@ -943,7 +943,7 @@ tiny_llm_learning_gates= {'operator_to_model_ready': True, 'generate_and_samplin
 4. `quantized_matmul` 和 `flash_attention` 证明算子层优化。
 5. `continuous_batching -> chunked_prefill -> paged_attention` 证明多请求调度和 KV 显存治理。
 
-所以本章最终门禁是 `tiny_llm_learning_gate`：只有算子、模型、generate、sampling、KV cache、serving 优化、指标实验和依赖顺序都能闭环，tiny-llm 才不是“跑了课程 demo”，而是成为理解推理系统演进路线的证据。
+所以本章最终验收条件是 `tiny_llm_learning_gate`：只有算子、模型、generate、sampling、KV cache、serving 优化、指标实验和依赖顺序都能闭环，tiny-llm 才不是“跑了课程 demo”，而是成为理解推理系统演进路线的证据。
 
 ## 45.25 小练习
 

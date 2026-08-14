@@ -8,15 +8,15 @@
 
 > Prompt cache 是更宽泛的平台层缓存概念，关注复用 prompt 前缀处理结果；vLLM 的 prefix caching 是 runtime 内部基于 KV cache blocks 的前缀复用机制，核心是用 hash 找到已经计算过的 full blocks，并在保证隔离和正确性的前提下复用它们。
 
-## 23.0 本讲资料边界与第二轮精修口径
+## 23.0 本讲范围与资料
 
-本讲按第二轮精修要求做过资料校准，主要参考三类公开资料：
+本章参考三类公开资料：
 
 1. vLLM Automatic Prefix Caching 设计文档对 hash-based KV cache block reuse、parent hash、block tokens、extra hashes、full block caching、`KVCacheBlock`、free queue、touch、free、LRU eviction 和示例流程的说明。
 2. vLLM prefix caching feature 文档对 cache salt、多租户隔离、LoRA、多模态输入 hash 和 hash algorithm 配置的说明。
 3. vLLM metrics 文档对 prefix cache queries / hits、prefix cache hit rate 计算、KV cache usage、running / waiting requests 和 Prometheus / logging 观测口径的说明。
 
-本章只讲教学版 prompt cache 与 runtime prefix caching 的边界，不实现真实 vLLM KV cache manager、真实 block table kernel、跨实例分布式 prefix cache、远端 KV store、语义缓存、结果缓存一致性、生产级哈希算法选择或安全审计系统。本章 demo 用纯 Python list / dict 模拟 full-block prefix cache、extra hashes、cache salt、touch、LRU eviction 和 metrics，不等同于真实 vLLM runtime。
+本章讨论教学版 prompt cache 与 runtime prefix caching 的边界，不实现真实 vLLM KV cache manager、真实 block table kernel、跨实例分布式 prefix cache、远端 KV store、语义缓存、结果缓存一致性、生产级哈希算法选择或安全审计系统。本章 demo 用纯 Python list / dict 模拟 full-block prefix cache、extra hashes、cache salt、touch、LRU eviction 和 metrics，不等同于真实 vLLM runtime。
 
 参考资料：
 
@@ -644,7 +644,7 @@ Prefix caching 是 vLLM 用来复用相同 prompt 前缀 KV cache 的机制，�
 它的收益是减少重复长前缀的 prefill，改善 TTFT；代价是占用 KV memory，并引入 hash、ref count、LRU eviction、多租户隔离和错误复用风险。
 ```
 
-## 23.24 Prefix cache 公式、隔离门禁和可运行 demo
+## 23.24 Prefix cache 公式、隔离验收条件和可运行 demo
 
 把本章的 prefix caching 先压成几个稳定公式。
 
@@ -692,7 +692,7 @@ $$
 N_{\mathrm{cachedfree}}=|\mathcal{C}\cap\mathcal{F}|
 $$
 
-教学版 prefix cache 门禁可以写成：
+教学版 prefix cache 准入条件可以形式化为：
 
 $$
 G_{\mathrm{prefix}}=G_{\mathrm{hash}}G_{\mathrm{full}}G_{\mathrm{touch}}G_{\mathrm{ref}}G_{\mathrm{salt}}G_{\mathrm{evict}}G_{\mathrm{metric}}

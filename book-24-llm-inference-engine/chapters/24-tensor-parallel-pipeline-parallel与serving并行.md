@@ -8,16 +8,16 @@
 
 > Serving 并行的核心不是“GPU 越多越快”，而是根据模型大小、显存压力、通信拓扑和业务目标，选择把模型切开、把层切开、把请求复制分流，还是把 MoE experts 分布出去。
 
-## 24.0 本讲资料边界与第二轮精修口径
+## 24.0 本讲范围与资料
 
-本讲按第二轮精修要求做过资料校准，主要参考四类公开资料：
+本章参考四类公开资料：
 
 1. vLLM Parallelism and Scaling 文档对 tensor parallel、pipeline parallel、data parallel、expert parallel、多节点拓扑、`tensor_parallel_size`、`pipeline_parallel_size` 和跨节点部署建议的说明。
 2. vLLM Data Parallel Deployment 文档对 internal / hybrid / external load balancing、每个 DP rank / engine 独立运行、负载均衡和部署形态的说明。
 3. vLLM Expert Parallel Deployment 文档对 MoE expert parallel、data parallel attention、expert placement、all2all 后端和 expert 负载均衡相关调优的说明。
 4. vLLM Optimization and Tuning 文档对 KV cache 空间不足、preemption、`tensor_parallel_size`、`max_num_batched_tokens`、`max_num_seqs`、chunked prefill、decode / prefill 平衡和 attention backend 的公开调优口径。
 
-本章只讲 serving 并行策略的教学抽象，不展开真实 NCCL / Ray / multiprocessing / Kubernetes / IB / RDMA 配置，不绑定某个 vLLM 版本的内部类名、真实 kernel、真实 all-reduce / all2all 实现、具体 GPU 型号 benchmark、生产排障脚本或云厂商网络价格。本章 demo 用纯 Python 近似估算 TP / PP / DP / EP 对 worker 数、显存、通信、pipeline bubble、prefix cache locality 和门禁的影响，不等同于真实性能预测。
+本章讨论 serving 并行策略的教学抽象，不展开真实 NCCL / Ray / multiprocessing / Kubernetes / IB / RDMA 配置，不绑定某个 vLLM 版本的内部类名、真实 kernel、真实 all-reduce / all2all 实现、具体 GPU 型号 benchmark、生产排障脚本或云厂商网络价格。本章 demo 用纯 Python 近似估算 TP / PP / DP / EP 对 worker 数、显存、通信、pipeline bubble、prefix cache locality 和验收条件的影响，不等同于真实性能预测。
 
 参考资料：
 
@@ -670,7 +670,7 @@ DP 是复制模型，不会让单个模型副本更容易放下。
 最终选择要结合模型大小、GPU 显存、KV cache 需求、NVLink/IB 拓扑、TTFT/TPOT 目标和业务流量模式。
 ```
 
-## 24.24 Serving 并行公式、拓扑门禁和可运行 demo
+## 24.24 Serving 并行公式、拓扑验收条件和可运行 demo
 
 把 TP / PP / DP 的 worker 拓扑先写成稳定公式。设：
 
@@ -722,7 +722,7 @@ $$
 R_{\mathrm{hit,total}}=\frac{\sum_r N_{\mathrm{hit},r}}{\sum_r N_{\mathrm{lookup},r}}
 $$
 
-教学版 serving 并行门禁可以写成：
+教学版 serving 并行准入条件可以形式化为：
 
 $$
 G_{\mathrm{parallel}}=G_{\mathrm{fit}}G_{\mathrm{topo}}G_{\mathrm{tp}}G_{\mathrm{pp}}G_{\mathrm{dp}}G_{\mathrm{ep}}G_{\mathrm{metric}}

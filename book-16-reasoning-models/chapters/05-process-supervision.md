@@ -4,9 +4,9 @@ Process supervision，过程监督，是 reasoning model 中非常关键的一�
 
 本章系统讲过程监督的动机、步骤标注、PRM、推理轨迹、错误步骤定位、标注成本、和 search/verifier 的结合，以及常见风险。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲第二轮精修参考公开资料中的 process supervision 和 PRM 线索，重点包括 OpenAI 的 [Let's Verify Step by Step](https://arxiv.org/abs/2305.20050)、OpenAI 对过程监督的公开介绍、PRM800K 数据集说明，以及更早的 [Training Verifiers to Solve Math Word Problems](https://arxiv.org/abs/2110.14168)。这些资料共同说明了一点：在数学等可拆步骤任务上，只监督最终答案会丢失大量中间错误信息；如果能标注或评估每一步，模型和搜索过程就能更早发现坏路径。
+本章参考公开资料中的 process supervision 和 PRM 线索，重点包括 OpenAI 的 [Let's Verify Step by Step](https://arxiv.org/abs/2305.20050)、OpenAI 对过程监督的公开介绍、PRM800K 数据集说明，以及更早的 [Training Verifiers to Solve Math Word Problems](https://arxiv.org/abs/2110.14168)。这些资料共同说明了一点：在数学等可拆步骤任务上，只监督最终答案会丢失大量中间错误信息；如果能标注或评估每一步，模型和搜索过程就能更早发现坏路径。
 
 但本章不把 process supervision 写成所有 reasoning 任务的通用最优解。真实系统还要同时看最终答案、搜索效果、标注成本、标注一致性、PRM 偏差、hidden reasoning 边界和安全展示策略。本章 demo 也只模拟 toy 级审计闭环，用于训练面试表达和工程指标意识，不代表真实 PRM 训练配方。
 
@@ -149,7 +149,7 @@ C_{\mathrm{label}}=
 
 其中 `a_ij=1` 表示第 `i` 个样本第 `j` 步可由程序、规则、测试或工具自动标注，`c_ij` 是需要人工复核时的成本。
 
-一个上线前过程监督门禁可以写成：
+一个上线前过程监督准入条件可以形式化为：
 
 ```math
 G_{\mathrm{proc}}=

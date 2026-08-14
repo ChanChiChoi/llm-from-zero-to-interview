@@ -4,9 +4,9 @@
 
 面试回答要避免两个问题：一是只背术语，比如 CoT、PRM、MCTS、verifier；二是只说现象，不讲机制和边界。一个好的 reasoning 回答通常包含五层：问题是什么，为什么有效，公式或指标是什么，工程上怎么做，有什么局限和风险。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲第二轮精修参考公开资料，包括 [Chain-of-Thought Prompting](https://arxiv.org/abs/2201.11903)、[Self-Consistency](https://arxiv.org/abs/2203.11171)、[Training Verifiers to Solve Math Word Problems](https://arxiv.org/abs/2110.14168)、[Let's Verify Step by Step](https://arxiv.org/abs/2305.20050)、[Tree of Thoughts](https://arxiv.org/abs/2305.10601)、[HumanEval / pass@k](https://arxiv.org/abs/2107.03374)、[OpenAI o1 System Card](https://openai.com/index/openai-o1-system-card/) 和 test-time compute scaling 相关公开论文。它们共同提示：reasoning 面试不是背模型名，而是要能把“生成候选、过程质量、验证器、搜索、推理预算、评估统计、安全门禁”连成一套可落地系统。
+本章参考公开资料，包括 [Chain-of-Thought Prompting](https://arxiv.org/abs/2201.11903)、[Self-Consistency](https://arxiv.org/abs/2203.11171)、[Training Verifiers to Solve Math Word Problems](https://arxiv.org/abs/2110.14168)、[Let's Verify Step by Step](https://arxiv.org/abs/2305.20050)、[Tree of Thoughts](https://arxiv.org/abs/2305.10601)、[HumanEval / pass@k](https://arxiv.org/abs/2107.03374)、[OpenAI o1 System Card](https://openai.com/index/openai-o1-system-card/) 和 test-time compute scaling 相关公开论文。它们共同提示：reasoning 面试不是背模型名，而是要能把“生成候选、过程质量、验证器、搜索、推理预算、评估统计、安全验收条件”连成一套可落地系统。
 
 本章定位是面试复盘和表达训练，不展开每篇论文的完整证明，也不预测闭源 reasoning 模型的内部实现。面试中遇到未公开细节时，应明确区分官方披露、论文结论、工程常识和个人推断。高风险安全问题保持审计与防御口径，不提供可复用的攻击流程或绕过技巧。
 
@@ -18,7 +18,7 @@
 
 1. 目标：这个方法解决什么问题。
 2. 机制：它为什么可能有效。
-3. 公式：核心概率、loss、指标或门禁怎么写。
+3. 公式：核心概率、loss、指标或验收条件怎么写。
 4. 工程：数据、推理流程、工具、日志和预算如何实现。
 5. 评估：看哪些指标、哪些切片、哪些失败样本。
 6. 边界：成本、延迟、偏差、安全、污染和过度自信。
@@ -65,7 +65,7 @@ C_{\mathrm{demo}}=
 }
 ```
 
-一个简化 reasoning 面试准备门禁：
+一个简化 reasoning 面试准备验收条件：
 
 ```math
 G_{\mathrm{interview}}=
@@ -82,7 +82,7 @@ C_{\mathrm{trade}}\ge \eta
 ]
 ```
 
-这个门禁的直觉是：会讲概念只是最低要求；能写公式、能讲 demo、能说评估和风险，才更接近真实面试要求。
+这组条件的直觉是：会讲概念只是最低要求；能写公式、能讲 demo、能说评估和风险，才更接近真实面试要求。
 
 ## 12.2 关键公式速查
 
@@ -165,7 +165,7 @@ c_{\mathrm{tok}}T_i
 +c_{\mathrm{lat}}R_i
 ```
 
-reasoning 安全门禁：
+reasoning 安全验收条件：
 
 ```math
 G_{\mathrm{safe}}=
@@ -387,7 +387,7 @@ c_{\mathrm{tok}}T_i
 回答要点：
 
 ```text
-我会先用路由器判断任务类型、难度、价值、风险和可验证性。简单问题直接回答；中等问题使用多样本采样或 self-consistency；困难且可验证的问题启动 verifier、search 或工具调用；高风险问题进入人工审核或更严格门禁。系统需要限制 token、采样数、搜索深度、工具调用次数和总延迟。
+我会先用路由器判断任务类型、难度、价值、风险和可验证性。简单问题直接回答；中等问题使用多样本采样或 self-consistency；困难且可验证的问题启动 verifier、search 或工具调用；高风险问题进入人工审核或更严格验收条件。系统需要限制 token、采样数、搜索深度、工具调用次数和总延迟。
 ```
 
 简化路由：
@@ -469,7 +469,7 @@ self-debug 的风险是过拟合公开测试或在反馈噪声下反复改坏代
 3. final answer、process、variant 和 slice。
 4. paired lift 和 confidence interval。
 5. token、latency、verifier、tool 和 cost per correct。
-6. failure cases 和安全门禁。
+6. failure cases 和安全验收条件。
 
 ## 12.19 为什么不能只看 Benchmark 分数
 
@@ -745,4 +745,4 @@ interview_ready=False
 
 Reasoning 面试的核心不是背术语，而是能把方法、机制、公式、工程实现、评估和局限连起来。CoT 解决分步推理，self-consistency 解决单次采样不稳定，verifier 解决候选选择和错误识别，process supervision 解决中间步骤监督，search 和 test-time compute 解决复杂问题探索，数学和代码提供可验证训练场景，评估和安全决定这些能力能否可靠落地。
 
-到这里，第十六册《Reasoning Model、长思维链与可验证推理》完成第二轮阶段性精修。本册主线是：从“模型如何一步步思考”到“如何训练、验证、搜索、评估、安全使用 reasoning 能力”，再到“如何在面试中把这些能力讲成可落地系统”。后续进入 Agent 与工具调用专题时，要把本册的 verifier、search、tool、safety gate 和 audit 思路继续迁移到 Agent 系统中。
+这套 reasoning 面试框架也适用于 Agent：verifier 可以检查工具结果和中间状态，search 可以展开候选计划，budget 可以限制思考与工具成本，safety gate 可以阻止越权动作，audit 可以让恢复和复盘有据可查。迁移时不能只把术语替换掉，还要重新定义环境状态、外部副作用、成功谓词和失败恢复条件。

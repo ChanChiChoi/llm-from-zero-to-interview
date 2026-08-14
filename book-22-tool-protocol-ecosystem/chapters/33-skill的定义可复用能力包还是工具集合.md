@@ -16,9 +16,9 @@ Skill 这个词在不同产品、不同平台里含义并不完全一样。有�
 
 > Skill 不是单个工具，而是围绕某个任务目标封装的一组可复用能力、说明、约束、资源和运行方式。
 
-## 33.0 本讲资料边界与第二轮精修口径
+## 33.0 本讲范围与资料
 
-本章第二轮精修时，重点核对了 Agent Skills 开放规范中关于 `SKILL.md`、frontmatter、scripts / references / assets、progressive disclosure 和 eval 的口径，MCP Specification 中 tools / resources / prompts 的边界，以及 OpenAI Apps SDK / Actions、Microsoft Copilot Studio、Anthropic building effective agents 等公开资料里对 tool、extension、workflow、agent 和可安装能力的常见划分。
+本章参考 Agent Skills 开放规范中关于 `SKILL.md`、frontmatter、scripts / references / assets、progressive disclosure 和 eval 的口径，MCP Specification 中 tools / resources / prompts 的边界，以及 OpenAI Apps SDK / Actions、Microsoft Copilot Studio、Anthropic building effective agents 等公开资料里对 tool、extension、workflow、agent 和可安装能力的常见划分。
 
 需要先划清边界：
 
@@ -26,7 +26,7 @@ Skill 这个词在不同产品、不同平台里含义并不完全一样。有�
 2. Agent Skills 规范强调 Skill 可以由说明文件、脚本、参考资料和资产组成，并通过按需加载降低上下文成本；本章采用这个工程思想，但不把 toy manifest 写成唯一标准。
 3. MCP 的 tools、resources、prompts 是底层能力和上下文暴露方式；Skill 可以引用它们，但 Skill 不等于 MCP server 或 tool list。
 4. Plugin / App / Action 更偏安装、扩展入口和平台集成，Workflow 更偏步骤控制流，Agent 更偏执行主体；Skill 位于“能力语义和可复用任务包”这一层。
-5. 本章新增的公式和 Python demo 是教学用审计器，用来判断一个能力定义是否像 Skill，而不是生产级 marketplace、sandbox、安装器或权限系统。
+5. 本章补充的公式和 Python demo 是教学用审计器，用来判断一个能力定义是否像 Skill，而不是生产级 marketplace、sandbox、安装器或权限系统。
 
 ## 33.1 为什么有了 Tool 还需要 Skill
 
@@ -502,7 +502,7 @@ C_j=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[I_j(k_i)=1]
 
 其中，`I_j(k_i)=1` 表示第 `i` 个候选 Skill 在第 `j` 个维度通过。
 
-Skill 定义门禁可以写成：
+Skill 定义准入条件可以形式化为：
 
 ```math
 G_{\mathrm{skill}}

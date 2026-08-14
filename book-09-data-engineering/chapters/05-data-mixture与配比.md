@@ -6,19 +6,19 @@
 
 很多人第一次接触大模型训练时，会以为数据配比只是工程配置：网页多少、书籍多少、代码多少、中文多少、英文多少，随便设一个比例就可以。实际上，data mixture 是训练目标的一部分。模型最终学到什么能力、偏向什么语言、擅长什么领域、输出什么风格，都会受到配比影响。
 
-本章重点：通用文本、代码、数学、多语言、专业领域数据的混合策略和实验方法。
+本章围绕一个贯穿数据工程和模型训练的问题展开：在有限 token budget 下，哪些数据应该进入训练分布，它们应当以多大概率出现，又如何用实验判断这种安排是否真的带来目标能力。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. Data mixture 是训练分布的设计
 
-按照 `WRITING_PLAN.md` 的要求，本讲精修前核对了 Chinchilla、T5 / mT5、Gopher / MassiveText、RefinedWeb、FineWeb、Dolma、DataComp-LM / DCLM、Llama 系列公开报告和 phi-1 / textbook-quality data 相关资料。
+data mixture 不是若干文件的简单拼接，而是把数据池、采样概率、训练顺序和重复次数连成一个分布。数据先经过清洗、去重和污染隔离，再根据来源、语言、领域、质量、风险和能力标签进入采样器。采样器最终决定优化器在不同数据上的更新频率。
 
-本讲聚焦 data mixture 作为训练目标设计的一部分：数据池标签、token 配比、温度采样、质量加权、目标能力权重、风险约束、effective epoch、配比 ablation 和版本审计。
+可以把这条链路写成：
 
-```text
-数据池 -> 清洗去重后 token 数 -> 质量 / 风险 / 能力标签 -> 采样权重 -> 训练预算分配 -> 评估矩阵 -> ablation -> 版本化
-```
+~~~text
+数据池 -> 清洗去重后的 token -> 质量/风险/能力标签 -> 采样概率 -> 训练预算 -> 评估矩阵 -> ablation -> 版本记录
+~~~
 
-本讲不把任何公开模型的数据比例写成通用最佳答案。真实项目的 mixture 要由模型目标、token budget、数据质量、tokenizer、许可证、安全约束和评估结果共同决定。
+本章会分别讨论通用文本、代码、数学、多语言、专业领域和合成数据的角色，也会解释静态与动态配比、温度采样、effective epoch、能力覆盖、风险约束和配比实验。Chinchilla、T5/mT5、Gopher、RefinedWeb、FineWeb、Dolma、DataComp-LM、Llama 系列公开报告以及 phi-1 提供了不同层面的证据，但这些资料不能被拼成一个适用于所有模型的固定比例。真实配比还受模型目标、tokenizer、许可证、安全约束、训练预算和评估方法共同限制。
 
 ---
 
@@ -87,91 +87,91 @@ data mixture 不只是“网页占多少”。它至少包含以下维度：
 
 设清洗、去重和污染隔离后的数据池集合为：
 
-```math
-\mathcal{P}=\{P_1,P_2,\ldots,P_K\}
-```
+~~~math
+P = {P_1, P_2, ..., P_K}
+~~~
 
 每个数据池 `P_k` 有 token 数 `n_k`、质量分 `q_k`、风险分 `r_k` 和能力标签向量：
 
-```math
-a_k=(a_{k,\mathrm{general}},a_{k,\mathrm{code}},a_{k,\mathrm{math}},a_{k,\mathrm{multi}},a_{k,\mathrm{safety}})
-```
+~~~math
+a_k = (a_k_general, a_k_code, a_k_math, a_k_multi, a_k_safety)
+~~~
 
 最简单的自然配比是按清洗后 token 数采样：
 
-```math
-p_k^{\mathrm{nat}}=\frac{n_k}{\sum_j n_j}
-```
+~~~math
+p_k_nat = n_k / sum_j(n_j)
+~~~
 
-多语言和多领域常用平滑采样。用 `0\le \alpha\le 1` 表示平滑强度，可以写成：
+多语言和多领域常用平滑采样。用 `0 <= alpha <= 1` 表示平滑强度，可以写成：
 
-```math
-p_k(\alpha)=\frac{n_k^\alpha}{\sum_j n_j^\alpha}
-```
+~~~math
+p_k(alpha) = n_k^alpha / sum_j(n_j^alpha)
+~~~
 
-其中 `\alpha=1` 接近自然规模采样，`\alpha=0` 接近均匀采样。实际工程里也可以把 `\alpha` 写成温度的倒数，面试时重点讲清“平滑大池、抬高小池”的作用。
+其中 `alpha=1` 接近自然规模采样，`alpha=0` 接近均匀采样。不同系统也会把 `alpha` 表示成温度的倒数；无论记号如何变化，核心都是降低大池的支配程度、提高小池被看见的机会。
 
 如果还要考虑质量、目标能力和风险，可以定义目标能力权重 `v_m`，数据池效用为：
 
-```math
-u_k=\sum_m v_m a_{km}
-```
+~~~math
+u_k = sum_m(v_m * a_km)
+~~~
 
 一个可解释的采样分数可以写成：
 
-```math
-s_k=n_k^\alpha \exp(\beta q_k+\gamma u_k-\lambda r_k)
-```
+~~~math
+s_k = n_k^alpha * exp(beta*q_k + gamma*u_k - lambda*r_k)
+~~~
 
 最终采样配比为：
 
-```math
-p_k=\frac{s_k}{\sum_j s_j}
-```
+~~~math
+p_k = s_k / sum_j(s_j)
+~~~
 
 如果总训练预算是 `B` 个 token，则第 `k` 个数据池计划采样 token 数为：
 
-```math
-b_k=Bp_k
-```
+~~~math
+b_k = B * p_k
+~~~
 
 effective epoch 用于衡量小数据池被重复使用的程度：
 
-```math
-e_k=\frac{b_k}{n_k}
-```
+~~~math
+e_k = b_k / n_k
+~~~
 
 如果 `e_k` 过高，说明该数据池被重复上采样，可能带来记忆、过拟合或污染风险。
 
 对于某个能力维度 `m`，mixture 的能力覆盖估计可以写成：
 
-```math
-A_m(p)=\sum_k p_k a_{km}
-```
+~~~math
+A_m(p) = sum_k(p_k * a_km)
+~~~
 
 配比方案的多目标效用可以粗略写成：
 
-```math
-U(p)=\sum_m v_m A_m(p)-\lambda_r\sum_k p_kr_k-\lambda_e\sum_k \max(0,e_k-e_{\max})
-```
+~~~math
+U(p) = sum_m(v_m * A_m(p)) - lambda_r * sum_k(p_k * r_k) - lambda_e * sum_k(max(0, e_k - e_max))
+~~~
 
 这里第一项鼓励目标能力覆盖，第二项惩罚风险，第三项惩罚过度重复小数据池。
 
 配比相对 baseline 的漂移可以用 KL divergence 监控：
 
-```math
-D_{\mathrm{KL}}(p\Vert p^0)=\sum_k p_k\log\frac{p_k}{p_k^0}
-```
+~~~math
+D_KL(p || p0) = sum_k(p_k * log(p_k / p0_k))
+~~~
 
 它不是越小越好，而是帮助审计“这次 mixture 改动到底有多大”。
 
-上线训练前可以把门禁写成：
+这些量不宜被压缩成一个神秘的总分，更适合保留为并列的配比检查向量：
 
-```math
-G_{\mathrm{mix}}=I(\min_m A_m(p)\ge a_m^{\min})I(\max_k e_k\le e_{\max})I(\sum_k p_kr_k\le r_{\max})I(D_{\mathrm{KL}}\le d_{\max})
-```
+~~~math
+C_mix(p) = (min_m(A_m(p)), max_k(e_k), sum_k(p_k * r_k), D_KL(p || p0))
+~~~
 
-面试里要强调：这些公式只是把配比思路显式化。真实训练仍要靠 ablation、小模型预实验、多维评估和大规模复验来校准。
+向量的四个分量分别描述最低能力覆盖、最大重复暴露、加权风险和相对 baseline 的分布漂移。它们可以对应不同的行动：某个能力覆盖不足时增加相关数据或重新定义目标；effective epoch 过高时扩充数据或降低采样权重；风险超限时回到清洗、授权和隔离环节；分布漂移过大时增加对照实验。公式的作用是让讨论可审计，真实结论仍要依靠 ablation、小模型预实验、多维评估和更大规模复验。
 
 ---
 
@@ -391,7 +391,7 @@ SFT 的数据更偏指令、问答、对话、工具调用和格式规范。这�
 
 动态配比更像 curriculum learning，但也更难评估。因为最终效果来自配比、顺序、学习率、数据质量和训练阶段共同作用。
 
-面试中可以说：静态配比适合第一版稳定训练，动态配比适合有充分实验体系的成熟团队。
+静态配比通常适合建立可复现的第一版基线，动态配比则适合已经有稳定评估和训练监控的系统。动态策略增加了实验变量：最终效果同时受到数据种类、出现顺序、学习率、训练阶段和调度规则影响，因此必须保存每个阶段的采样日志。
 
 ---
 
@@ -403,7 +403,7 @@ SFT 的数据更偏指令、问答、对话、工具调用和格式规范。这�
 
 直观做法是：对每种语言的 token 占比做平滑，降低大语言的优势，提高小语言的采样概率。
 
-温度越高，分布越接近均匀；温度越低，越接近原始分布。不同团队记号可能不同，面试中不必纠结公式，关键是讲清目的：在高资源语言和低资源语言之间做折中。
+温度越高，分布通常越接近均匀；温度越低，越接近原始分布。不同系统的温度定义可能互为倒数，所以比较实验时必须同时记录公式、参数和最终概率，而不能只记录一个叫作 temperature 的数字。真正需要观察的是高资源语言与低资源语言之间的覆盖、重复暴露和验证损失折中。
 
 这种思想也可以用于领域配比：对小而高价值的数据源上采样，对大而低价值的数据源下采样。
 
@@ -495,9 +495,9 @@ data mixture 不能只靠直觉，必须通过实验闭环。
 
 ---
 
-## 20. 面向专家：Data mixture 是隐式目标函数设计
+## 20. 机制与边界：Data mixture 是隐式目标函数设计
 
-从专家视角看，data mixture 实际上是在设计隐式目标函数。
+从机制上看，data mixture 实际上是在设计隐式目标函数。
 
 预训练通常形式上只有一个 next-token prediction loss，但这个 loss 是在 mixture 分布上求期望。改变 mixture，就改变了优化目标。
 
@@ -519,37 +519,23 @@ data mixture 不能只靠直觉，必须通过实验闭环。
 
 ## 21. 一个可落地的 data mixture 方案
 
-如果面试官问：“你要训练一个通用中文/英文大模型，如何设计数据配比？”可以按以下框架回答。
+以一个同时服务中文和英文用户的通用助手为例，配比设计首先从能力目标和约束开始，而不是从一个看似精确的百分比开始。目标可以包括通用知识、双语对话、代码、数学、安全拒答和事实性；约束则包括总 token budget、可用许可证、最大重复暴露、隐私风险和可接受的评估成本。
 
-第一步，定义模型目标。明确是通用助手、代码助手、数学模型、多语言模型还是行业模型，以及核心评估指标。
+数据池随后被组织成带有来源、语言、领域、质量、安全、许可证、去重簇和 token 数的记录。通用文本提供广度，书籍和技术文档提高结构化知识，代码和数学覆盖专项能力，多语言池补充目标语言，合成数据只承担已知短板或难例构造。每个池的采样权重都应能追溯到这些字段，而不是隐藏在一个不可解释的配置数字里。
 
-第二步，建立数据池。把数据按来源、语言、领域、质量、安全、许可证和去重状态打标签。
+第一版 mixture 可以从自然分布开始，再用平滑、质量和目标能力效用做有限幅度的调整。调整时需要同时生成对照方案：自然分布、提高代码、提高数学、提高低资源语言、提高高质量书籍，以及加入或移除合成数据。这样才能把某一类数据的收益与训练总量、学习率和随机种子区分开。
 
-第三步，设计初始配比。通用文本作为主体，适量加入高质量书籍、百科、论文、技术文档、代码、数学、多语言和合成数据。
+小模型实验的评估矩阵应同时包含通用验证损失、各数据池验证损失、代码、数学、多语言、安全、事实性、记忆风险和人工样例。若代码分数提高但普通对话退化，结论不是“代码数据无效”，而是“代码池的边际收益与通用能力成本需要重新定价”。若数学分数提高但改写题失效，则要检查题库重复、解析模板和合成数据同质化。
 
-第四步，设置采样权重。不要只按原始 token 数采样，对高质量、小规模、目标能力相关数据上采样，对低质量、大规模、重复来源下采样。
-
-第五步，做小规模实验。训练多个小模型，对比不同代码比例、数学比例、多语言比例和高质量数据比例。
-
-第六步，建立评估矩阵。覆盖通用问答、事实性、代码、数学、多语言、安全、长文本和人工样例。
-
-第七步，分析 trade-off。看专项能力提升是否损害通用能力，是否增加幻觉、污染、记忆或安全风险。
-
-第八步，放大验证。在更大模型和更多 token 上复验趋势，避免小规模结论误导。
-
-第九步，版本化记录。保存 mixture 配置、数据版本、采样权重、过滤规则、训练曲线和评估结果。
-
-第十步，迭代优化。根据训练结果、产品反馈和安全评估继续调整。
-
-这套回答比直接报一个比例更好，因为真实项目中没有放之四海皆准的比例，只有目标驱动的实验闭环。
+趋势只有在多个模型规模、训练 token 数和随机种子下大体稳定，才值得放大到正式训练。最终记录应包含数据版本、tokenizer 版本、采样函数、每阶段权重、实际采样计数、验证结果和异常处理；产品反馈可以推动下一轮实验，但不能直接替代受控评估。
 
 ### 21.1 最小可运行 data mixture 审计 demo
 
-下面这个 demo 不依赖外部库，也不读写文件。输入是一组 toy 数据池，每个池有清洗后 token 数、质量分、风险分和能力标签；输出包括自然配比、目标采样配比、计划采样 token、effective epoch、上采样倍数、能力覆盖、平均质量、风险和门禁结果。
+下面这个 demo 不依赖外部库，也不读写文件。输入是一组 toy 数据池，每个池有清洗后 token 数、质量分、风险分和能力标签；输出包括自然配比、目标采样配比、计划采样 token、effective epoch、上采样倍数、能力覆盖、平均质量、风险、并列检查信号、后续动作和结论。
 
 它演示的是配比审计机制，不是生产级 sampler。真实训练还需要和 tokenizer 统计、数据版本、分布式采样器、训练曲线、验证 loss、下游评估和安全审计联动。
 
-```python
+~~~python
 import math
 
 
@@ -626,7 +612,7 @@ watchlist = sorted(
     name for name, row in plan.items()
     if row["effective_epoch"] > MAX_EPOCH
 )
-gates = {
+checks = {
     "code_floor": ability["code"] >= 0.21,
     "math_floor": ability["math"] >= 0.28,
     "multilingual_floor": ability["multilingual"] >= 0.25,
@@ -634,6 +620,26 @@ gates = {
     "risk_ok": risk <= 0.055,
     "epoch_ok": not watchlist,
 }
+signals = {
+    "code_floor_shortfall": not checks["code_floor"],
+    "math_floor_shortfall": not checks["math_floor"],
+    "multilingual_floor_shortfall": not checks["multilingual_floor"],
+    "safety_floor_shortfall": not checks["safety_floor"],
+    "risk_exceeds_budget": not checks["risk_ok"],
+    "effective_epoch_watchlist": not checks["epoch_ok"],
+}
+actions = []
+if signals["code_floor_shortfall"] or signals["math_floor_shortfall"]:
+    actions.append("increase_target_capability_data")
+if signals["multilingual_floor_shortfall"]:
+    actions.append("review_language_sampling_and_tokenizer_cost")
+if signals["safety_floor_shortfall"]:
+    actions.append("add_safety_coverage_and_retest")
+if signals["risk_exceeds_budget"]:
+    actions.append("remove_or_isolate_high_risk_sources")
+if signals["effective_epoch_watchlist"]:
+    actions.append("expand_small_pools_or_reduce_resampling")
+decision = "continue_to_ablation" if not actions else "hold_for_repair"
 
 print("raw_mix=", {k: round(raw_mix[k], 3) for k in sorted(raw_mix)})
 print("target_mix=", {k: plan[k]["mix"] for k in sorted(plan)})
@@ -644,20 +650,25 @@ print("raw_ability=", raw_ability)
 print("target_ability=", ability)
 print("avg_quality=", avg_quality, "risk=", risk)
 print("watchlist=", watchlist)
-print("gates=", gates)
-print("gate_pass=", all(gates.values()))
+print("checks=", checks)
+print("signals=", signals)
+print("actions=", actions)
+print("decision=", decision)
 
 assert round(sum(mixture.values()), 6) == 1.0
 assert watchlist == []
 assert ability == {"general": 0.591, "code": 0.218, "math": 0.285, "multilingual": 0.256, "safety": 0.212}
 assert avg_quality == 0.823
 assert risk == 0.045
-assert all(gates.values())
-```
+assert all(checks.values())
+assert not any(signals.values())
+assert actions == []
+assert decision == "continue_to_ablation"
+~~~
 
 运行后会看到类似输出：
 
-```text
+~~~text
 raw_mix= {'books_reference': 0.138, 'code_docs': 0.092, 'domain_science': 0.046, 'general_web': 0.575, 'math_reasoning': 0.034, 'safety_data': 0.011, 'synthetic_reasoning': 0.023, 'zh_multilingual': 0.08}
 target_mix= {'books_reference': 0.174, 'code_docs': 0.133, 'domain_science': 0.078, 'general_web': 0.351, 'math_reasoning': 0.072, 'safety_data': 0.032, 'synthetic_reasoning': 0.049, 'zh_multilingual': 0.11}
 planned_tokens= {'books_reference': 34896, 'code_docs': 26671, 'domain_science': 15534, 'general_web': 70245, 'math_reasoning': 14412, 'safety_data': 6421, 'synthetic_reasoning': 9755, 'zh_multilingual': 22066}
@@ -667,43 +678,45 @@ raw_ability= {'general': 0.693, 'code': 0.176, 'math': 0.206, 'multilingual': 0.
 target_ability= {'general': 0.591, 'code': 0.218, 'math': 0.285, 'multilingual': 0.256, 'safety': 0.212}
 avg_quality= 0.823 risk= 0.045
 watchlist= []
-gates= {'code_floor': True, 'math_floor': True, 'multilingual_floor': True, 'safety_floor': True, 'risk_ok': True, 'epoch_ok': True}
-gate_pass= True
-```
+checks= {'code_floor': True, 'math_floor': True, 'multilingual_floor': True, 'safety_floor': True, 'risk_ok': True, 'epoch_ok': True}
+signals= {'code_floor_shortfall': False, 'math_floor_shortfall': False, 'multilingual_floor_shortfall': False, 'safety_floor_shortfall': False, 'risk_exceeds_budget': False, 'effective_epoch_watchlist': False}
+actions= []
+decision= continue_to_ablation
+~~~
 
 这个 demo 刻意把 `general_web` 从自然分布的 `0.575` 下调到 `0.351`，同时上采样代码、数学、安全和合成推理数据。结果是通用能力覆盖下降，但代码和数学覆盖上升；这正是 data mixture 的 trade-off，不能只看单项指标。
 
 ---
 
-## 22. 常见面试题
+## 22. 决策边界：几个配比选择为什么没有固定答案
 
-### 22.1 什么是 data mixture？
+### 22.1 自然分布什么时候有意义
 
-data mixture 是训练集中不同来源、语言、领域、能力类型和质量层级数据的混合比例与采样策略。它决定模型在哪些数据分布上优化 next-token prediction，因此会影响模型能力、风格和安全表现。
+自然分布是一个有用的 baseline，因为它保留了真实来源的规模关系，也减少了人为假设。但它不是“互联网真实世界”的无偏样本：网页抓取策略、语言可访问性、重复镜像、商业内容和公开程度都会改变观察到的分布。自然分布适合用来测量偏差从哪里来，不适合未经实验就作为最终目标。
 
-### 22.2 为什么不能按数据自然规模混合？
+### 22.2 代码数据增加后要观察什么
 
-因为互联网自然分布不等于理想训练分布。按自然规模混合会让高资源语言、大规模网页和低质来源占据过高比例，稀释代码、数学、专业领域和低资源语言等高价值数据。
+代码池增加可能改善补全、API 使用、测试生成和结构化推理，同时消耗原本可用于自然语言和多语言数据的预算。评估不能只看代码 benchmark，还要看普通对话、许可证风险、秘密残留、仓库 fork 重复和题库污染。若收益主要出现在已见过的函数模板，说明增加的是记忆或格式熟悉度，而不一定是可迁移的编程能力。
 
-### 22.3 代码数据比例提高一定好吗？
+### 22.3 多语言平滑的真正对象
 
-不一定。提高代码比例通常提升代码和结构化推理能力，但会占用 token budget，可能影响自然语言、多语言和对话能力，还会增加 license、secrets、重复和题库污染风险。
+平滑采样不是把每种语言强行设成相同比例，而是在语言覆盖、tokenizer 成本、数据质量和重复暴露之间做选择。低资源语言的采样权重提高后，要检查有效 epoch、验证损失和真实任务覆盖；如果一小批重复文本被反复看到，表面上的语言比例改善可能只是记忆风险上升。
 
-### 22.4 多语言配比怎么做？
+### 22.4 合成数据如何进入分布
 
-不能完全按原始 token 数采样，也不能简单均匀采样。通常对低资源语言上采样、对高资源语言适当下采样，用平滑采样在覆盖和质量之间折中，并分语言评估 loss、下游任务和人工样例。
+合成数据最适合补充自然数据难以提供的结构，例如可验证数学步骤、程序执行轨迹或特定安全边界。它需要保留教师版本、生成模板、验证器结果和去重信息，并与自然数据分桶评估。合成比例没有跨任务通用上限，关键是观察教师偏差、风格坍缩、错误循环和改写题泛化。
 
-### 22.5 合成数据应该占多少？
+### 22.5 专业数据为什么不总是放进预训练
 
-没有固定答案。合成数据要看目标任务、质量、覆盖、多样性和教师模型偏差。通常应明确标注来源，单独评估，逐步增加比例，通过 ablation 判断收益和副作用，而不是无追踪地混入训练集。
+医学、法律和金融数据可能带来术语与背景知识，但也携带更高的授权、时效和事实风险。继续预训练可以改善领域语言，却不能保证实时正确或具有合规解释；检索、工具、引用和人工审核往往更适合承担最新事实和高风险决策。配比决策因此应与产品责任边界一起做，而不是只看领域 benchmark。
 
-### 22.6 如何优化 data mixture？
+### 22.6 配比与 Chinchilla 的关系
 
-先定义目标能力和评估矩阵，再构建带标签的数据池，设计 baseline mixture，做小规模 ablation，观察各领域 loss、benchmark、安全和人工评测，分析 trade-off，最后在更大规模上验证并版本化记录。
+Chinchilla 讨论的是给定计算预算下参数量与训练 token 总量的平衡，data mixture 讨论的是这些 token 的来源和权重。总量相同的两个训练方案，如果一个包含更多高质量代码和数学、另一个主要由重复网页构成，优化目标和最终能力仍会不同。前者提供总预算约束，后者决定预算如何分配。
 
-### 22.7 配比和 Chinchilla scaling 有什么关系？
+### 22.7 为什么小模型实验不能直接决定大模型比例
 
-Chinchilla 说明在固定 compute budget 下，模型参数和训练 token 数都很重要。但 token 数只是总量问题，data mixture 解决的是这些 token 来自哪里、质量如何、各能力如何分布。两者是互补关系。
+小模型适合快速发现明显趋势，但其容量、优化噪声、训练时长、上下文长度和数据重复次数都可能与正式训练不同。一个数据池在小模型上产生的收益，放大后可能出现边际收益递减、能力竞争或过拟合。可靠做法是保留多个尺度、随机种子和训练长度的对照，并把结论写成适用条件，而不是一个脱离条件的比例。
 
 ---
 
@@ -735,17 +748,19 @@ SFT 能调整行为和格式，但很难补齐预训练阶段缺失的大规模�
 
 ---
 
-## 24. 本章小结
+## 24. 资料与证据边界
 
-Data mixture 与配比是大模型数据工程中最接近“模型能力设计”的环节。它不是把数据随便混在一起，而是在有限 token budget 下决定模型读什么、读多少、什么时候读、以多大权重读。
+1. [Training Compute-Optimal Large Language Models（Chinchilla）](https://arxiv.org/abs/2203.15556)：说明模型参数量与训练 token 总量应在计算预算下共同考虑；论文不提供适用于所有数据类型的领域配比。
+2. [Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer（T5）](https://arxiv.org/abs/1910.10683) 与 [mT5](https://arxiv.org/abs/2010.11934)：提供统一文本到文本训练和多语言训练的公开背景，不能直接推出特定项目的语言比例。
+3. [Scaling Language Models: Methods, Analysis & Insights from Training Gopher](https://arxiv.org/abs/2112.11446)：记录大规模语言模型训练中的数据、模型和评估经验，具体数据构造仍绑定其研究条件。
+4. [The RefinedWeb Dataset for Falcon LLM](https://arxiv.org/abs/2306.01116)、[The FineWeb Datasets](https://arxiv.org/abs/2406.17557) 和 [Dolma](https://arxiv.org/abs/2402.00159)：展示开放网页和多来源语料的过滤、去重、质量处理与训练实验，支持“数据构造会改变训练结果”的论点。
+5. [DataComp-LM](https://arxiv.org/abs/2406.11794)：提供受控数据选择实验框架，支持比较数据过滤、去重和 mixture 的影响，但实验结果不能脱离模型规模和预算外推。
+6. [Textbooks Are All You Need（phi-1）](https://arxiv.org/abs/2306.11644)：展示 textbook-quality 与合成练习数据对小型代码模型的影响；它支持质量和目标配比的重要性，不证明合成数据在任何任务中都应占高比例。
 
-本章要记住几句话：
+这些论文属于公开研究证据，能够支持机制、实验设置和条件化结论；模型卡、产品页和内部数据配方则需要单独标注版本与证据等级。本文给出的效用函数、能力标签和 demo 是教学抽象，不是上述论文公布的统一训练配方。实际项目还必须补充 tokenizer 统计、许可证审计、数据版本、污染检查、训练曲线和独立评估。
 
-1. data mixture 决定训练分布，也就改变隐式优化目标。
-2. 通用文本提供覆盖，代码和数学提供结构化能力，多语言和专业数据提供目标能力扩展。
-3. 配比不是自然规模决定的，而是目标、质量、风险和实验共同决定的。
-4. 合成数据有价值，但必须可追踪、可评估、可控比例使用。
-5. 配比优化是多目标问题，要看通用、代码、数学、多语言、安全、事实性和风格的 trade-off。
-6. 最成熟的做法不是报固定比例，而是建立数据池、采样权重、评估矩阵、ablation 和版本化闭环。
+## 25. 结语
 
-如果面试中被问到 data mixture，最好的回答是：先定义模型目标，再建立带标签数据池，设计 baseline mixture，通过小规模实验和多维评估找 trade-off，最后在大规模训练中验证并版本化记录。
+Data mixture 是数据工程与模型能力之间的接口。它在有限预算下决定哪些分布被反复看到，因而改变 next-token prediction 的期望，也改变模型在语言、代码、数学、专业知识和安全行为上的相对能力。
+
+自然分布可以作为基线，质量加权和温度采样可以用于修正资源不平衡，专项数据和合成数据可以补充能力短板，但每一次调整都要同时记录收益、机会成本、重复暴露、风险和评估条件。真正可复现的配比不是一个漂亮的百分比，而是一组带版本的数据池、一套采样函数、一份实际计数和一张多维评估矩阵。

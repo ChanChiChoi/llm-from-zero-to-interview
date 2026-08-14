@@ -1,14 +1,14 @@
 # 第九章：Transformer 的并行性、表达力和 scaling 优势
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲第二轮精修主要对齐 Transformer 原论文中关于摆脱 recurrence / convolution、提高序列并行度和缩短最大路径长度的论述，Kaplan scaling laws 对 cross-entropy loss、参数量、数据量和计算量的经验幂律拟合，GPT-3 对 few-shot / in-context learning 的展示，Chinchilla 对固定 compute 下参数和训练 token 配比的修正，PaLM 对大规模系统训练的案例，以及 emergent abilities 相关论文对“涌现”现象的边界讨论。
+本章参考 Transformer 原论文中关于摆脱 recurrence / convolution、提高序列并行度和缩短最大路径长度的论述，Kaplan scaling laws 对 cross-entropy loss、参数量、数据量和计算量的经验幂律拟合，GPT-3 对 few-shot / in-context learning 的展示，Chinchilla 对固定 compute 下参数和训练 token 配比的修正，PaLM 对大规模系统训练的案例，以及 emergent abilities 相关论文对“涌现”现象的边界讨论。
 
-写作边界如下：
+本章的证据边界如下：
 
 1. scaling law 是经验规律，不是跨模型族、跨数据分布、跨训练 recipe 都固定成立的物理定律。
 2. 本讲不把 Kaplan、Chinchilla 或 PaLM 中的具体指数、token/parameter 比例、硬件规模写成通用标准，只讲它们带来的方法论。
-3. 第二轮精修会把并行性、路径长度、attention 成本、训练 FLOPs 和 scaling gate 写成稳定 MathJax 公式，并补一个 0 依赖 demo，用 toy 数字解释“最低 toy loss”不等于“最适合上线或最 compute-balanced”。
+3. 本章把并行性、路径长度、attention 成本、训练 FLOPs 和 scaling gate 写成稳定 MathJax 公式，并补一个 0 依赖 demo，用 toy 数字解释“最低 toy loss”不等于“最适合上线或最 compute-balanced”。
 
 ## 9.1 本章定位
 
@@ -601,7 +601,7 @@ Transformer 的 O(n^2) attention、长上下文检索失败、状态记忆不足
 
 ## 9.21 并行与 Scaling 审计指标与最小 demo
 
-工程里判断一个 Transformer scaling 方案，不能只看“参数更大”或“toy loss 更低”。至少要同时看四类门禁：
+工程里判断一个 Transformer scaling 方案，不能只看“参数更大”或“toy loss 更低”。至少要同时看四类验收条件：
 
 ```math
 G_{\mathrm{scale}}=
@@ -739,7 +739,7 @@ scaling_gate_pass= True
 4. `loss_best` 是 13B，但它没有通过 balance gate；`ready_best` 是 7B，因为它同时满足 toy loss、tokens-per-parameter 和 serving pressure。
 5. demo 数字只用于教学，不是任何真实模型的 benchmark。真实训练要结合数据质量、优化稳定性、硬件效率、评估和上线成本。
 
-## 9.22 面向专家：Scaling Law 的正确用法
+## 9.22 机制与边界：Scaling Law 的正确用法
 
 在真实项目中，scaling law 更像一个资源规划工具，而不是最终真理。
 
@@ -763,7 +763,7 @@ scaling_gate_pass= True
 
 面试中能说清这些边界，会比只背“loss 幂律下降”更有深度。
 
-## 9.23 面向专家：表达力、优化和归纳偏置的张力
+## 9.23 机制与边界：表达力、优化和归纳偏置的张力
 
 Transformer 表达力强，但归纳偏置相对弱。
 

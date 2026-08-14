@@ -16,9 +16,9 @@ MCP 解决的是 Agent 或 Host 如何连接外部工具、资源和提示模板
 
 > MCP 连接能力，A2A 连接协作者；MCP 面向工具和资源调用，A2A 面向任务委派和协作生命周期。
 
-## 29.0 本讲资料边界与第二轮精修口径
+## 29.0 本讲范围与资料
 
-本讲按第二轮精修要求，先核对 A2A 官方 Protocol Specification、A2A and MCP 主题说明，以及 MCP 官方 Specification 和 Concepts 文档，再回到本项目已有章节做通用工程抽象。
+本章先核对 A2A 官方 Protocol Specification、A2A and MCP 主题说明，以及 MCP 官方 Specification 和 Concepts 文档，再回到本项目已有章节做通用工程抽象。
 
 资料边界要说清楚：
 
@@ -26,7 +26,7 @@ MCP 解决的是 Agent 或 Host 如何连接外部工具、资源和提示模板
 2. MCP 官方资料强调的是模型应用连接外部上下文和能力：Host、Client、Server、tools、resources、prompts、lifecycle、transport、authorization、roots 和安全最佳实践等。
 3. A2A 官方主题说明也明确把 MCP 视为工具和资源侧协议，把 A2A 视为 Agent 协作侧协议。二者不是替代关系，而是经常组合使用。
 4. 本章不实现真实 A2A server、MCP server、OAuth、SSE、Webhook、Registry 或远程调用，也不把 toy demo 的字段和阈值写成协议标准。
-5. 本章只抽象稳定的系统设计边界：什么能力应该作为 MCP tool / resource / prompt 暴露，什么能力应该作为 A2A remote agent 委派，二者组合时如何治理权限、上下文、产物、trace、版本和 eval。
+5. 本章聚焦稳定的系统设计边界：什么能力应该作为 MCP tool / resource / prompt 暴露，什么能力应该作为 A2A remote agent 委派，二者组合时如何治理权限、上下文、产物、trace、版本和 eval。
 
 所以读本章时不要把结论理解成“哪个协议更高级”。更准确的理解是：MCP 负责把外部能力接入 Host，A2A 负责把远程 Agent 纳入协作生命周期；它们的边界越清楚，系统越容易做最小权限、上下文控制和审计。
 
@@ -531,7 +531,7 @@ C_k=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}\{g_k(b_i)=1\}
 9. Trace 串联率 $C_{\mathrm{trace}}$：A2A task span 和 MCP tool span 能在同一 trace 中串起来。
 10. 版本与 eval 覆盖率 $C_{\mathrm{version}}$：记录 MCP spec / tool schema / A2A spec / Agent Card / policy / eval label。
 
-上线门禁可以写成：
+上线准入条件可以形式化为：
 
 ```math
 G_{\mathrm{a2a\_mcp}}=
@@ -555,7 +555,7 @@ C_{\mathrm{version}}\ge \tau_{\mathrm{version}}
 S_{\mathrm{a2a\_mcp}}=\frac{\sum_k \alpha_k C_k}{\sum_k \alpha_k}
 ```
 
-注意：分数只是排序和回归对比用，不能替代硬门禁。比如权限分离不过线时，即使其他指标很高，也不能把系统描述成可治理。
+注意：分数只是排序和回归对比用，不能替代硬性条件。比如权限分离不过线时，即使其他指标很高，也不能把系统描述成可治理。
 
 下面是一个 0 依赖 demo。它模拟 12 个能力接入样本，故意放入把工具伪装成 Agent、把 Agent 塞成 Tool、共享工具权限、缺 Agent Card、缺 MCP registry、上下文泄露、结果和 Artifact 混淆、trace 缺失、版本和 eval 缺失等 bad case。
 

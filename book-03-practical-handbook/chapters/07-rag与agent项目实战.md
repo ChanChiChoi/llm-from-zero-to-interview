@@ -927,12 +927,13 @@ query -> embedding 检索 top-k chunks -> LLM 生成答案
 
 Reranker 的作用就是在初检索结果上做更精细的排序。
 
-资料边界说明：
+本讲范围：
 
 ```text
-本讲按 Sentence Transformers CrossEncoder / retrieve-rerank 文档、常见 bi-encoder / cross-encoder RAG 架构和前一讲本地 RAG 流程核对。
-这里重点讲 retrieve-then-rerank 的候选集、排序分数、top_k 选择、耗时拆分和 debug 方法。
-真实线上 RAG 还要结合 reranker 截断长度、批量推理、缓存、降级策略和评估集调参。
+本讲把问题限定在 retrieve-then-rerank：先用 bi-encoder 召回候选，再用
+Sentence Transformers CrossEncoder 对候选排序。重点是候选集、排序分数、top_k、耗时
+和 debug，而不是把 reranker 当作一个可以独立解决所有检索问题的模型。真实线上系统还
+需要处理输入截断、批量推理、缓存、降级策略，并用评估集决定参数。
 ```
 
 ---
@@ -1645,12 +1646,12 @@ reranker 更慢，因为每个 query-chunk pair 都要跑 cross-encoder forward�
 
 本讲实现带引用的答案生成。
 
-资料边界说明：
+本讲范围：
 
 ```text
-本讲按前两讲本地 RAG / reranker 流程、常见 citation RAG 工程实践和 RAG faithfulness 评估思路核对。
-这里重点讲 ref_id 分配、prompt 约束、引用编号合法性、缺失引用检查和最小可运行审计脚本。
-引用只能提供可追溯入口，不自动证明答案被证据支持；faithfulness 会在下一讲评估系统里继续展开。
+本讲沿用前两讲的 RAG 和 reranker 流程，专门处理 ref_id 分配、prompt 约束、引用编号
+合法性、缺失引用检查和最小审计脚本。引用是可追溯入口，不是证据成立的自动证明；答案
+是否真的被引用支持，还要在下一讲的 faithfulness 评估中单独判断。
 ```
 
 ---
@@ -1833,6 +1834,8 @@ def answer_with_citations(query, embed_model, chunks, embeddings, reranker=None)
     return {
         "query": query,
         "answer": answer,
+        "retrieved": retrieved,
+        "selected": selected,
         "references": referenced_chunks,
         "prompt": prompt,
     }
@@ -1842,6 +1845,8 @@ def answer_with_citations(query, embed_model, chunks, embeddings, reranker=None)
 
 ```text
 answer
+retrieved
+selected
 references
 prompt
 ```
@@ -1933,7 +1938,58 @@ JSON 输出更适合系统集成。
 可以写检查函数：
 
 ```python
+import ast
+import json
+import operator
 import re
+
+
+_COMPARE_OPS = {
+    ast.Eq: operator.eq,
+    ast.NotEq: operator.ne,
+    ast.Lt: operator.lt,
+    ast.LtE: operator.le,
+    ast.Gt: operator.gt,
+    ast.GtE: operator.ge,
+}
+
+
+def safe_eval_condition(expression):
+    if len(expression) > 64:
+        raise ValueError("expression too long")
+
+    allowed_chars = set("0123456789<>=!+-*/(). ")
+    if any(ch not in allowed_chars for ch in expression):
+        raise ValueError("expression has invalid chars")
+
+    def evaluate(node):
+        if isinstance(node, ast.Expression):
+            return evaluate(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            if isinstance(node.value, bool):
+                raise ValueError("boolean literal is not allowed")
+            return node.value
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+            value = evaluate(node.operand)
+            return value if isinstance(node.op, ast.UAdd) else -value
+        if isinstance(node, ast.BinOp):
+            operations = {
+                ast.Add: operator.add,
+                ast.Sub: operator.sub,
+                ast.Mult: operator.mul,
+                ast.Div: operator.truediv,
+            }
+            if type(node.op) not in operations:
+                raise ValueError("unsupported arithmetic operator")
+            return operations[type(node.op)](evaluate(node.left), evaluate(node.right))
+        if isinstance(node, ast.Compare) and len(node.ops) == 1:
+            op = _COMPARE_OPS.get(type(node.ops[0]))
+            if op is None:
+                raise ValueError("unsupported comparison operator")
+            return op(evaluate(node.left), evaluate(node.comparators[0]))
+        raise ValueError("unsupported expression")
+
+    return evaluate(ast.parse(expression, mode="eval"))
 
 
 def extract_citation_ids(answer):
@@ -2114,7 +2170,20 @@ Prompt 示例：
 下面脚本不依赖模型，专门检查引用编号是否合法、是否缺失引用，以及一个很粗的 unsupported claim 规则。
 
 ```python
+import ast
+import json
+import operator
 import re
+
+
+_COMPARISON_OPS = {
+    ast.Eq: operator.eq,
+    ast.NotEq: operator.ne,
+    ast.Lt: operator.lt,
+    ast.LtE: operator.le,
+    ast.Gt: operator.gt,
+    ast.GtE: operator.ge,
+}
 
 
 REFERENCES = [
@@ -2309,12 +2378,13 @@ RAG 评估不能只看最终答案。
 引用是否真实支持答案？
 ```
 
-资料边界说明：
+本讲范围：
 
 ```text
-本讲按前面 RAG / reranker / citation 流程、信息检索常见 Hit@k / Recall@k / MRR 指标和 RAG faithfulness 评估实践核对。
-这里重点讲离线评估集、检索指标、答案关键词指标、引用合法性、人工评分和错误归因。
-LLM-as-judge、统计显著性、线上 A/B 和数据污染会在评估专题章节继续展开。
+本讲采用分层评估思路：先判断证据有没有被召回，再判断答案是否正确、忠实，最后检查
+引用是否支持结论。Hit@k、Recall@k、MRR 适合描述检索排序；关键词指标和人工评分只能
+分别回答有限问题。LLM-as-judge、统计显著性、线上 A/B 和数据污染需要更完整的评估专题
+另行讨论。
 ```
 
 ---
@@ -2406,11 +2476,18 @@ for item in eval_set:
         "gold_chunk_ids": item["gold_chunk_ids"],
         "answer_keywords": item["answer_keywords"],
         "answer": rag_result["answer"],
+        # 检索指标使用初始召回结果，引用展示使用最终候选结果。
+        "retrieved": rag_result["retrieved"],
+        "selected": rag_result["selected"],
         "references": rag_result["references"],
     })
 ```
 
 后续所有指标都基于 `results` 计算。
+
+这里要把三种结果分开保存：`retrieved` 是向量检索返回的初始候选，`selected` 是
+reranker 选出的最终候选，`references` 是给答案展示的编号化引用。检索指标只能使用
+`retrieved`；如果拿最终 `references` 计算，便无法区分“没有召回”与“召回后被重排丢掉”。
 
 ---
 
@@ -2445,9 +2522,11 @@ def hit_at_k(retrieved_chunks, gold_chunk_ids, k):
 
 ```python
 def mean_hit_at_k(results, k):
+    if not results:
+        return 0.0
     scores = []
     for r in results:
-        scores.append(hit_at_k(r["references"], r["gold_chunk_ids"], k))
+        scores.append(hit_at_k(r["retrieved"], r["gold_chunk_ids"], k))
     return sum(scores) / len(scores)
 ```
 
@@ -2515,7 +2594,9 @@ def reciprocal_rank(retrieved_chunks, gold_chunk_ids):
 
 
 def mean_reciprocal_rank(results):
-    scores = [reciprocal_rank(r["references"], r["gold_chunk_ids"]) for r in results]
+    if not results:
+        return 0.0
+    scores = [reciprocal_rank(r["retrieved"], r["gold_chunk_ids"]) for r in results]
     return sum(scores) / len(scores)
 ```
 
@@ -2779,9 +2860,14 @@ RESULTS = [
     },
 ]
 
+# 这个固定 demo 同时展示检索和引用，所以先明确复制一份初始候选。
+# 真实系统应在运行时分别保存 retrieved、selected 和 references。
+for row in RESULTS:
+    row["retrieved"] = [dict(ref) for ref in row["references"]]
+
 
 def hit_at_k(row, k):
-    retrieved = {ref["chunk_id"] for ref in row["references"][:k]}
+    retrieved = {ref["chunk_id"] for ref in row["retrieved"][:k]}
     return int(bool(retrieved & set(row["gold_chunk_ids"])))
 
 
@@ -2789,13 +2875,13 @@ def recall_at_k(row, k):
     gold = set(row["gold_chunk_ids"])
     if not gold:
         return 0.0
-    retrieved = {ref["chunk_id"] for ref in row["references"][:k]}
+    retrieved = {ref["chunk_id"] for ref in row["retrieved"][:k]}
     return len(retrieved & gold) / len(gold)
 
 
 def reciprocal_rank(row):
     gold = set(row["gold_chunk_ids"])
-    for rank, ref in enumerate(row["references"], start=1):
+    for rank, ref in enumerate(row["retrieved"], start=1):
         if ref["chunk_id"] in gold:
             return 1.0 / rank
     return 0.0
@@ -3034,14 +3120,14 @@ RAG 检索器
 
 本讲先实现最基础的 Tool Calling Agent。
 
-资料边界说明：
+本讲范围：
 
 ```text
-本讲按 OpenAI 官方 function calling / tools 文档核对：模型可以根据工具 schema 产生 tool call，请求由应用程序执行，工具结果再返回给模型生成最终答案。
-官方流程允许模型返回零个、一个或多个 tool calls；应用端要逐个执行，并用 tool_call_id / call_id 将工具输出和对应调用请求关联起来。
-严格 schema 模式下，object 参数通常需要 additionalProperties=false，并且 properties 中的字段需要出现在 required 中；可选字段应显式允许 null。
-正文先实现不依赖外部 API 的教学版，OpenAI 风格 tools 示例只说明接口形状。
-生产系统还要加入权限、审计、重试、超时、幂等、敏感操作确认和 prompt injection 防护，后面安全章节继续展开。
+Tool calling 的接口边界很明确：模型根据工具 schema 提出调用请求，应用程序负责执行，
+再把带有原调用标识的结果交回模型。一个响应可能包含零个、一个或多个 tool calls，因而
+程序不能只读取第一个结果。严格 schema 通常还要求 object 禁止额外属性，并把可选字段
+显式表示为允许 `null`。本讲先用不依赖外部 API 的教学实现说明数据流，权限、审计、重试、
+超时、幂等、敏感操作确认和 prompt injection 会在后面的安全部分展开。
 ```
 
 ---
@@ -3170,24 +3256,55 @@ f_{\mathrm{name}_j}(a_j),
 #### 计算器工具
 
 ```python
-def calculator(expression: str) -> str:
-    allowed_chars = set("0123456789+-*/(). ")
-    if any(ch not in allowed_chars for ch in expression):
-        return "错误：表达式包含非法字符。"
+import ast
+import operator
 
+
+_ARITHMETIC_OPS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+}
+
+
+def _evaluate_arithmetic(node):
+    if isinstance(node, ast.Expression):
+        return _evaluate_arithmetic(node.body)
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+        if isinstance(node.value, bool):
+            raise ValueError("布尔值不是数字")
+        return node.value
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+        value = _evaluate_arithmetic(node.operand)
+        return value if isinstance(node.op, ast.UAdd) else -value
+    if isinstance(node, ast.BinOp) and type(node.op) in _ARITHMETIC_OPS:
+        left = _evaluate_arithmetic(node.left)
+        right = _evaluate_arithmetic(node.right)
+        return _ARITHMETIC_OPS[type(node.op)](left, right)
+    raise ValueError("不支持的表达式")
+
+
+def calculator(expression: str) -> str:
     try:
-        result = eval(expression, {"__builtins__": {}})
+        if len(expression) > 64:
+            raise ValueError("表达式过长")
+        allowed_chars = set("0123456789+-*/(). ")
+        if any(ch not in allowed_chars for ch in expression):
+            raise ValueError("表达式包含非法字符")
+        tree = ast.parse(expression, mode="eval")
+        result = _evaluate_arithmetic(tree)
         return str(result)
-    except Exception as e:
-        return f"错误：计算失败，原因是 {e}"
+    except (SyntaxError, TypeError, ValueError, ZeroDivisionError) as exc:
+        return f"错误：计算失败，原因是 {exc}"
 ```
 
 注意：
 
 ```text
-eval 有安全风险。
-教学中只允许数字和基础运算符。
-真实系统应使用安全表达式解析器。
+这里使用 AST 白名单，只接受数字、括号和四种基础运算符。
+不要把模型生成的字符串直接交给 Python 的 eval。
+真实系统还应设置超时、结果范围和资源限制。
 ```
 
 #### 本地知识库检索工具
@@ -3277,6 +3394,8 @@ def execute_tool(tool_name, arguments):
         return tool_fn(**arguments)
     except TypeError as e:
         return f"错误：工具参数不匹配，原因是 {e}"
+    except Exception as e:
+        return f"错误：工具执行失败，原因是 {e}"
 ```
 
 ---
@@ -3916,12 +4035,14 @@ Reasoning + Acting
 
 本讲实现一个最小 ReAct Agent。
 
-资料边界说明：
+本讲范围：
 
 ```text
-本讲按 ReAct 原论文和 Google Research 对 ReAct 的公开介绍核对：ReAct 的核心是让模型交替生成 reasoning trace 和 task-specific action，action 从外部环境获得 observation，再影响后续推理。
-正文只实现教学版文本 ReAct 格式，用于理解 Thought / Action / Observation 循环。
-生产系统不一定暴露完整 Thought，可以把 ReAct 的多步决策思想和上一讲结构化 tool calling 结合起来，只记录必要 trace、工具请求、observation 和最终答案。
+ReAct 原论文把 reasoning trace 与 task-specific action 交替组织起来：action 从外部环境
+取得 observation，observation 再影响下一步决策。本讲用文本格式展示 Thought、Action、
+Observation 循环，目的是理解状态如何推进。生产系统不必暴露完整 Thought，可以保留多步
+决策思想，同时用结构化 tool calling 执行工具，并只记录必要的 trace、请求、observation
+和最终答案。
 ```
 
 ---
@@ -4018,14 +4139,7 @@ E(a_k)
 复用上一讲工具：
 
 ```python
-def calculator(expression: str) -> str:
-    allowed_chars = set("0123456789+-*/(). ")
-    if any(ch not in allowed_chars for ch in expression):
-        return "错误：表达式包含非法字符。"
-    try:
-        return str(eval(expression, {"__builtins__": {}}))
-    except Exception as e:
-        return f"错误：计算失败，原因是 {e}"
+# 沿用上一讲已经定义的安全 calculator，不在这里重新实现表达式执行。
 
 
 def search_docs(query: str) -> str:
@@ -4321,10 +4435,17 @@ max_steps=5
 例如：
 
 ```python
+def should_stop_for_duplicate(tool_name, tool_input, seen_actions):
+    action_key = (tool_name, tool_input)
+    if action_key in seen_actions:
+        return True, "检测到重复工具调用，停止。"
+    seen_actions.add(action_key)
+    return False, "可以继续执行。"
+
+
 seen_actions = set()
-action_key = (tool_name, tool_input)
-if action_key in seen_actions:
-    return "检测到重复工具调用，停止。"
+stop, message = should_stop_for_duplicate("search_docs", "年假", seen_actions)
+stop_again, message_again = should_stop_for_duplicate("search_docs", "年假", seen_actions)
 ```
 
 ---
@@ -4373,7 +4494,19 @@ Trace 包含：
 5. trace 中保存 model output、action、observation 和 final answer。
 
 ```python
+import ast
+import operator
 import re
+
+
+_COMPARISON_OPS = {
+    ast.Eq: operator.eq,
+    ast.NotEq: operator.ne,
+    ast.Lt: operator.lt,
+    ast.LtE: operator.le,
+    ast.Gt: operator.gt,
+    ast.GtE: operator.ge,
+}
 
 
 DOCS = {
@@ -4389,10 +4522,42 @@ def search_docs(query):
 
 
 def calculator(expression):
+    if len(expression) > 64:
+        return "错误：表达式过长。"
     allowed = set("0123456789<>=!+-*/(). ")
     if any(ch not in allowed for ch in expression):
         return "错误：表达式包含非法字符。"
-    return str(bool(eval(expression, {"__builtins__": {}})))
+
+    arithmetic_ops = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+    }
+
+    def evaluate(node):
+        if isinstance(node, ast.Expression):
+            return evaluate(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            if isinstance(node.value, bool):
+                raise ValueError("boolean literal is not allowed")
+            return node.value
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+            value = evaluate(node.operand)
+            return value if isinstance(node.op, ast.UAdd) else -value
+        if isinstance(node, ast.BinOp) and type(node.op) in arithmetic_ops:
+            return arithmetic_ops[type(node.op)](evaluate(node.left), evaluate(node.right))
+        if isinstance(node, ast.Compare) and len(node.ops) == 1:
+            compare = _COMPARISON_OPS.get(type(node.ops[0]))
+            if compare is None:
+                raise ValueError("unsupported comparison operator")
+            return compare(evaluate(node.left), evaluate(node.comparators[0]))
+        raise ValueError("unsupported expression")
+
+    try:
+        return str(bool(evaluate(ast.parse(expression, mode="eval"))))
+    except (SyntaxError, TypeError, ValueError, ZeroDivisionError) as exc:
+        return f"错误：计算失败，原因是 {exc}"
 
 
 TOOL_REGISTRY = {"search_docs": search_docs, "calculator": calculator}
@@ -4642,12 +4807,13 @@ Agent 的能力更强，因为它能调用外部工具。
 
 所以 Agent 必须有安全边界。
 
-资料边界说明：
+本讲范围：
 
 ```text
-本讲按 OWASP LLM Top 10 2025 的 Prompt Injection、Excessive Agency、Sensitive Information Disclosure，以及 NIST AI RMF / Generative AI Profile 的风险治理思路核对。
-这里重点讲教学版 Agent 的程序侧安全边界：工具白名单、最小权限、参数校验、风险分级、人工确认、预算限制、重复调用检测、结果验证和审计日志。
-Prompt 只能作为软约束，不能替代程序侧权限、沙箱、策略校验和审计。
+本讲借鉴 OWASP LLM Top 10 中的 Prompt Injection、Excessive Agency、Sensitive Information
+Disclosure，以及 NIST AI RMF / Generative AI Profile 的风险治理思路，聚焦教学版 Agent
+的程序侧控制：工具白名单、最小权限、参数校验、风险分级、人工确认、预算限制、重复调用
+检测、结果验证和审计日志。Prompt 只能提供软约束，不能替代权限系统、沙箱、策略校验和审计。
 ```
 
 ---
@@ -4882,9 +5048,9 @@ def validate_type(value, expected_type):
     if expected_type == "string":
         return isinstance(value, str)
     if expected_type == "number":
-        return isinstance(value, (int, float))
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
     if expected_type == "integer":
-        return isinstance(value, int)
+        return isinstance(value, int) and not isinstance(value, bool)
     if expected_type == "boolean":
         return isinstance(value, bool)
     return True
@@ -4942,7 +5108,8 @@ def validate_calculator_args(arguments):
 ```python
 def validate_email_args(arguments):
     to = arguments.get("to", "")
-    if not to.endswith("@company.com"):
+    local, separator, domain = to.rpartition("@")
+    if not local or separator != "@" or domain != "company.com":
         return False, "只能发送到公司邮箱。"
     return True, "ok"
 ```
@@ -4985,6 +5152,11 @@ def safe_tool_dispatch(tool_name, arguments, user_role="user"):
 ```
 
 真实系统中，人工确认可以是 UI 按钮、审批流或二次确认 API。
+
+确认不是把原始参数重新交给工具执行。系统应为待确认请求生成短期、不可伪造的
+`approval_token`，并在用户确认时重新校验用户身份、参数摘要、权限、风险和有效期；任何
+字段发生变化都要重新确认。否则，攻击者可能先让系统展示一条安全请求，随后替换成另一条
+危险参数。
 
 ---
 
@@ -5042,11 +5214,9 @@ def build_safe_final_prompt(user_query, tool_result):
 
 ```python
 def verify_calculator_result(expression, result):
-    try:
-        expected = eval(expression, {"__builtins__": {}})
-        return str(expected) == str(result)
-    except Exception:
-        return False
+    # 复用白名单计算器，验证逻辑不能重新引入 eval。
+    expected = calculator(expression)
+    return expected == str(result)
 ```
 
 搜索工具：
@@ -5077,7 +5247,14 @@ class AgentBudget:
     def __init__(self, max_steps=5, max_tool_calls=3):
         self.max_steps = max_steps
         self.max_tool_calls = max_tool_calls
+        self.steps = 0
         self.tool_calls = 0
+
+    def can_step(self):
+        return self.steps < self.max_steps
+
+    def record_step(self):
+        self.steps += 1
 
     def can_call_tool(self):
         return self.tool_calls < self.max_tool_calls
@@ -5091,10 +5268,23 @@ class AgentBudget:
 ```python
 budget = AgentBudget(max_steps=5, max_tool_calls=3)
 
-if not budget.can_call_tool():
-    return {"ok": False, "error": "工具调用次数已达上限。"}
 
-budget.record_tool_call()
+def try_start_step(budget):
+    if not budget.can_step():
+        return {"ok": False, "error": "已达到最大步数。"}
+    budget.record_step()
+    return {"ok": True, "steps": budget.steps}
+
+
+def try_record_tool_call(budget):
+    if not budget.can_call_tool():
+        return {"ok": False, "error": "工具调用次数已达上限。"}
+    budget.record_tool_call()
+    return {"ok": True, "tool_calls": budget.tool_calls}
+
+
+first_step = try_start_step(budget)
+first_call = try_record_tool_call(budget)
 ```
 
 成本控制非常重要。
@@ -5106,17 +5296,28 @@ budget.record_tool_call()
 ### 十二、重复调用检测
 
 ```python
+import json
+
+
 def action_key(tool_name, arguments):
-    return (tool_name, tuple(sorted(arguments.items())))
+    # JSON 参数可能包含嵌套对象或数组，不能直接对 items 做 hash。
+    return (
+        tool_name,
+        json.dumps(arguments, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+    )
+
+
+def register_action(tool_name, arguments, seen_actions):
+    key = action_key(tool_name, arguments)
+    if key in seen_actions:
+        return {"ok": False, "error": "检测到重复工具调用，已停止。"}
+    seen_actions.add(key)
+    return {"ok": True, "key": key}
 
 
 seen_actions = set()
-
-key = action_key(tool_name, arguments)
-if key in seen_actions:
-    return {"ok": False, "error": "检测到重复工具调用，已停止。"}
-
-seen_actions.add(key)
+first_action = register_action("search_docs", {"query": "年假"}, seen_actions)
+duplicate_action = register_action("search_docs", {"query": "年假"}, seen_actions)
 ```
 
 重复调用通常说明：
@@ -5140,10 +5341,9 @@ def secure_execute(tool_name, arguments, user_role="user", seen_actions=None):
     if schema is None:
         return {"ok": False, "error": f"未知工具：{tool_name}"}
 
-    key = action_key(tool_name, arguments)
-    if key in seen_actions:
-        return {"ok": False, "error": "重复工具调用。"}
-    seen_actions.add(key)
+    allowed_roles = schema.get("roles", ["user", "admin"])
+    if user_role not in allowed_roles:
+        return {"ok": False, "error": "当前用户无权调用该工具。"}
 
     ok, msg = validate_arguments_by_schema(schema, arguments)
     if not ok:
@@ -5151,6 +5351,11 @@ def secure_execute(tool_name, arguments, user_role="user", seen_actions=None):
 
     if schema.get("risk_level") == "high":
         return require_human_confirmation(tool_name, arguments)
+
+    key = action_key(tool_name, arguments)
+    if key in seen_actions:
+        return {"ok": False, "error": "重复工具调用。"}
+    seen_actions.add(key)
 
     result = execute_tool_safely(tool_name, arguments)
     return result
@@ -5173,7 +5378,7 @@ def secure_execute(tool_name, arguments, user_role="user", seen_actions=None):
 ```python
 import json
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 def append_audit_log(event, path="outputs/agent_audit.jsonl"):
@@ -5181,7 +5386,7 @@ def append_audit_log(event, path="outputs/agent_audit.jsonl"):
     path.parent.mkdir(parents=True, exist_ok=True)
 
     event = {
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         **event,
     }
 
@@ -5209,6 +5414,9 @@ append_audit_log({
 成本统计
 合规审计
 ```
+
+审计本身也是敏感数据存储。写入日志前应对参数和工具结果做字段级脱敏，并限制日志读取
+权限；不能因为“为了复盘”就把密码、令牌、身份证号或完整个人资料原样写入日志。
 
 ---
 
@@ -5253,7 +5461,56 @@ Agent 上线前必须做安全测试。
 7. 每次决策都会进入 audit trace。
 
 ```python
-import re
+import ast
+import json
+import operator
+
+
+_COMPARE_OPS = {
+    ast.Eq: operator.eq,
+    ast.NotEq: operator.ne,
+    ast.Lt: operator.lt,
+    ast.LtE: operator.le,
+    ast.Gt: operator.gt,
+    ast.GtE: operator.ge,
+}
+
+
+def safe_eval_condition(expression):
+    if len(expression) > 64:
+        raise ValueError("expression too long")
+
+    allowed_chars = set("0123456789<>=!+-*/(). ")
+    if any(ch not in allowed_chars for ch in expression):
+        raise ValueError("expression has invalid chars")
+
+    arithmetic_ops = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+    }
+
+    def evaluate(node):
+        if isinstance(node, ast.Expression):
+            return evaluate(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            if isinstance(node.value, bool):
+                raise ValueError("boolean literal is not allowed")
+            return node.value
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+            value = evaluate(node.operand)
+            return value if isinstance(node.op, ast.UAdd) else -value
+        if isinstance(node, ast.BinOp) and type(node.op) in arithmetic_ops:
+            return arithmetic_ops[type(node.op)](evaluate(node.left), evaluate(node.right))
+        if isinstance(node, ast.Compare) and len(node.ops) == 1:
+            compare = _COMPARE_OPS.get(type(node.ops[0]))
+            if compare is None:
+                raise ValueError("unsupported comparison operator")
+            return compare(evaluate(node.left), evaluate(node.comparators[0]))
+        raise ValueError("unsupported expression")
+
+    return evaluate(ast.parse(expression, mode="eval"))
 
 
 TOOLS = [
@@ -5296,15 +5553,11 @@ TOOLS = [
     },
 ]
 SCHEMAS = {tool["name"]: tool for tool in TOOLS}
-SENSITIVE_KEYS = {"ssn", "salary"}
+SENSITIVE_KEYS = {"ssn", "salary", "password", "token", "api_key", "secret"}
 
 
 def calculator(expression):
-    if len(expression) > 64:
-        raise ValueError("expression too long")
-    if not re.fullmatch(r"[0-9+\-*/(). <>=!]+", expression):
-        raise ValueError("expression has invalid chars")
-    return str(bool(eval(expression, {"__builtins__": {}})))
+    return str(bool(safe_eval_condition(expression)))
 
 
 def lookup_employee(employee_id):
@@ -5343,7 +5596,14 @@ def validate_arguments(schema, arguments):
 
 def redact_result(result):
     if isinstance(result, dict):
-        return {key: ("<redacted>" if key in SENSITIVE_KEYS else value) for key, value in result.items()}
+        return {
+            key: ("<redacted>" if key in SENSITIVE_KEYS else redact_result(value))
+            for key, value in result.items()
+        }
+    if isinstance(result, list):
+        return [redact_result(item) for item in result]
+    if isinstance(result, tuple):
+        return tuple(redact_result(item) for item in result)
     return result
 
 
@@ -5356,7 +5616,11 @@ class AgentGuard:
         self.audit = []
 
     def dispatch(self, tool_name, arguments):
-        event = {"tool_name": tool_name, "arguments": arguments, "decision": None}
+        event = {
+            "tool_name": tool_name,
+            "arguments": redact_result(arguments),
+            "decision": None,
+        }
         schema = SCHEMAS.get(tool_name)
         if schema is None:
             event["decision"] = "reject_unknown_tool"
@@ -5375,13 +5639,6 @@ class AgentGuard:
             self.audit.append(event)
             return {"ok": False, "error": "role_not_allowed"}
 
-        action_key = (tool_name, tuple(sorted(arguments.items())))
-        if action_key in self.seen_actions:
-            event["decision"] = "reject_repeat"
-            self.audit.append(event)
-            return {"ok": False, "error": "repeat_action"}
-        self.seen_actions.add(action_key)
-
         if self.tool_calls >= self.max_tool_calls:
             event["decision"] = "reject_budget"
             self.audit.append(event)
@@ -5396,6 +5653,16 @@ class AgentGuard:
             event["decision"] = "reject_not_executable"
             self.audit.append(event)
             return {"ok": False, "error": "not_executable"}
+
+        action_key = (
+            tool_name,
+            json.dumps(arguments, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        )
+        if action_key in self.seen_actions:
+            event["decision"] = "reject_repeat"
+            self.audit.append(event)
+            return {"ok": False, "error": "repeat_action"}
+        self.seen_actions.add(action_key)
 
         self.tool_calls += 1
         raw = REGISTRY[tool_name](**arguments)
@@ -5544,4 +5811,4 @@ Prompt 只能辅助，真正安全边界必须在代码和权限系统里。
 7. Trace 和 audit log 是 Agent debug、安全复盘和合规审计的基础。
 8. Agent 安全测试必须覆盖未知工具、越权访问、高风险动作、重复调用、预算上限和敏感字段泄露。
 
-至此，第三册第七部分“RAG 与 Agent 项目实战”正文第一版完成。
+这组项目把 RAG 和 Agent 的边界落到了执行系统：检索结果必须经过权限和证据检查，模型提出的工具调用必须经过 schema、参数、风险和预算约束，工具结果还要进入 trace 并参与最终验证。这样做的结果可能是更慢、更多拒答和更多人工确认，但它把“回答看起来合理”提升成了可以复现、审计和回滚的任务闭环。

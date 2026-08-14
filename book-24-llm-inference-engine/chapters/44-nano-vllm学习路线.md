@@ -18,13 +18,13 @@
 
 > 学 nano-vLLM 的重点不是记住每个类名，而是把一个轻量实现和生产级 serving engine 的模块边界对应起来，知道请求如何进入 engine、如何被 scheduler 组织、KV block 如何分配、model runner 如何执行 prefill/decode，以及它距离生产系统还缺什么。
 
-## 44.0 本讲资料边界与第二轮精修口径
+## 44.0 本讲范围与资料
 
-本讲第二轮精修前，先按 `WRITING_PLAN.md` 对公开资料做校准：参考 `GeeeekExplorer/nano-vllm` 官方仓库和 README 对 nano-vLLM 作为轻量 vLLM 实现、约 1200 行 Python、包含 Prefix Caching、Tensor Parallelism、Torch compilation 和 CUDA graph 等学习点的说明；参考仓库中 `nanovllm/engine` 目录对 `llm_engine.py`、`scheduler.py`、`sequence.py`、`block_manager.py`、`model_runner.py` 等模块边界的呈现；并结合本书前面关于 generate loop、KV cache、block manager、continuous batching、vLLM scheduler、prefix cache、TP 和 PD 分离的章节。
+本章参考 `GeeeekExplorer/nano-vllm` 官方仓库和 README 对 nano-vLLM 作为轻量 vLLM 实现、约 1200 行 Python、包含 Prefix Caching、Tensor Parallelism、Torch compilation 和 CUDA graph 等学习点的说明；参考仓库中 `nanovllm/engine` 目录对 `llm_engine.py`、`scheduler.py`、`sequence.py`、`block_manager.py`、`model_runner.py` 等模块边界的呈现；并结合本书前面关于 generate loop、KV cache、block manager、continuous batching、vLLM scheduler、prefix cache、TP 和 PD 分离的章节。
 
 本讲只讲“如何用 nano-vLLM 建立 vLLM-like serving engine 的源码阅读骨架”：模块地图、阅读顺序、请求生命周期、KV block lifecycle、model runner batch contract、sampler、可观测实验和改造练习。不把某个 GitHub 提交的源码行号、函数签名、内部字段名、benchmark 数字、真实 CUDA graph 行为、生产级 vLLM 的完整 worker/executor 设计或某个版本的默认实现写成通用结论。
 
-本讲新增 demo 是教学版 nano-vLLM source auditor：用 0 依赖 Python 模拟源码阅读笔记和实验 trace，检查 example、LLM、sampling params、sequence、engine、scheduler、block manager、model runner、attention、sampler 和模型结构是否覆盖；同时检查 request state、waiting/running queue、KV block table、free blocks、slot mapping、logits、sampled token 和 finished cleanup 是否能被实验观察到。
+本章的 demo 是教学版 nano-vLLM source auditor：用 0 依赖 Python 模拟源码阅读笔记和实验 trace，检查 example、LLM、sampling params、sequence、engine、scheduler、block manager、model runner、attention、sampler 和模型结构是否覆盖；同时检查 request state、waiting/running queue、KV block table、free blocks、slot mapping、logits、sampled token 和 finished cleanup 是否能被实验观察到。
 
 ## 44.1 本章目标
 
@@ -433,7 +433,7 @@ Sampler 代码通常很短，但不要忽略它。
 
 nano-vLLM 的 sampler 可以作为最小入口。
 
-后续如果你要扩展功能，可以从这里开始。
+扩展功能时，sampler 接口就是一个合适的切入点：它把模型 logits 与具体采样策略隔开，也为后续的请求级参数、结构化输出和推测解码保留了替换空间。
 
 ## 44.12 第八遍：读模型结构
 
@@ -709,7 +709,7 @@ nano-vLLM 和生产级 vLLM 的差距主要在生产能力上，比如 API serve
 如果要做项目，我会在 nano-vLLM 上增加 TTFT/TPOT 统计、scheduler 决策日志和 KV block 使用可视化，再实现简单 token budget、decode-first 或 chunked prefill，用压测比较不同策略对首 token 延迟、decode 抖动、吞吐和显存利用率的影响。
 ```
 
-## 44.22 nano-vLLM 源码覆盖率、实验门禁和可运行 demo
+## 44.22 nano-vLLM 源码覆盖率、实验验收条件和可运行 demo
 
 先把源码学习对象抽象成模块集合：
 
@@ -735,7 +735,7 @@ C_{\mathrm{resource}}=\frac{|R_{\mathrm{seen}}\cap R_{\mathrm{req}}|}{\max(1,|R_
 C_{\mathrm{experiment}}=\frac{|E_{\mathrm{done}}\cap E_{\mathrm{req}}|}{\max(1,|E_{\mathrm{req}}|)}
 ```
 
-最终门禁：
+最终验收条件：
 
 ```math
 G_{\mathrm{nano}}=G_{\mathrm{module}}G_{\mathrm{path}}G_{\mathrm{step}}G_{\mathrm{state}}G_{\mathrm{kv}}G_{\mathrm{runner}}G_{\mathrm{experiment}}G_{\mathrm{signal}}
@@ -938,7 +938,7 @@ nano_vllm_source_gates= {'module_map_complete': True, 'generate_path_visible': T
 4. 我有实验信号：generate trace、prefill/decode step、scheduler budget、prefix cache hit、sampler params。
 5. 我知道教学项目边界：它适合建立骨架，不代表生产级 vLLM 的完整控制面和故障恢复。
 
-所以本章最终门禁是 `nano_vllm_source_gate`：只有模块、路径、engine step、sequence state、scheduler decision、KV lifecycle、runner batch contract、实验覆盖和信号可观测都成立，才算真正把 nano-vLLM 读成了可复盘的推理框架源码路线。
+所以本章最终验收条件是 `nano_vllm_source_gate`：只有模块、路径、engine step、sequence state、scheduler decision、KV lifecycle、runner batch contract、实验覆盖和信号可观测都成立，才算真正把 nano-vLLM 读成了可复盘的推理框架源码路线。
 
 ## 44.23 小练习
 

@@ -4,13 +4,13 @@ Reasoning model 能解决更复杂的问题，也会带来更复杂的风险。�
 
 本章系统讲 reasoning model 的安全与局限：伪推理、过度自信、CoT 隐私、CoT 忠实性、长链条错误传播、reward hacking、工具误用、滥用风险、高风险场景边界、安全评估和工程缓解策略。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲第二轮精修参考公开安全资料，包括 [OpenAI o1 System Card](https://openai.com/index/openai-o1-system-card/)、[OpenAI updated Preparedness Framework](https://openai.com/index/updating-our-preparedness-framework/)、[OpenAI Frontier Governance Framework](https://openai.com/index/openai-frontier-governance-framework/)、[OpenAI chain-of-thought monitoring](https://openai.com/index/chain-of-thought-monitoring/)、[NIST AI 600-1 Generative AI Profile](https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence)、[OWASP Top 10 for LLM Applications 2025](https://genai.owasp.org/llm-top-10/)、[Anthropic Responsible Scaling Policy](https://www.anthropic.com/responsible-scaling-policy) 以及 CoT 忠实性相关论文，例如 [Language Models Don't Always Say What They Think](https://arxiv.org/abs/2305.04388)。
+本章参考公开安全资料，包括 [OpenAI o1 System Card](https://openai.com/index/openai-o1-system-card/)、[OpenAI updated Preparedness Framework](https://openai.com/index/updating-our-preparedness-framework/)、[OpenAI Frontier Governance Framework](https://openai.com/index/openai-frontier-governance-framework/)、[OpenAI chain-of-thought monitoring](https://openai.com/index/chain-of-thought-monitoring/)、[NIST AI 600-1 Generative AI Profile](https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence)、[OWASP Top 10 for LLM Applications 2025](https://genai.owasp.org/llm-top-10/)、[Anthropic Responsible Scaling Policy](https://www.anthropic.com/responsible-scaling-policy) 以及 CoT 忠实性相关论文，例如 [Language Models Don't Always Say What They Think](https://arxiv.org/abs/2305.04388)。
 
 这些资料共同提示：reasoning 能力一方面能增强安全策略遵循、错误检查和复杂任务求解，另一方面也会扩大模型的规划、工具使用、长期任务执行和 reward hacking 能力。安全评估不能只问“模型会不会拒答”，还要看是否过度拒答、是否暴露隐藏 CoT、是否伪造可信解释、是否在工具环境中越权、是否在高风险任务中缺少人工审核，以及是否在多轮上下文里逐步偏离安全边界。
 
-本章保持防御性、审计性和治理性口径：只讨论风险分类、评估指标、上线门禁和缓解策略，不提供可复用的攻击流程、绕过技巧或危险操作步骤。面试中要能说明：reasoning safety 不是一个分类器分数，而是模型行为、CoT 展示策略、verifier、工具权限、审计日志、人工复核、红队回归和治理流程组成的系统工程。
+本章保持防御性、审计性和治理性口径：只讨论风险分类、评估指标、上线验收条件和缓解策略，不提供可复用的攻击流程、绕过技巧或危险操作步骤。面试中要能说明：reasoning safety 不是一个分类器分数，而是模型行为、CoT 展示策略、verifier、工具权限、审计日志、人工复核、红队回归和治理流程组成的系统工程。
 
 ## 11.1 推理能力为什么会带来风险
 
@@ -149,7 +149,7 @@ S_{\mathrm{risk}}=
 
 其中 `v_i=1` 表示样本命中任一关键风险。这个指标避免低风险小错和高风险事故被平均值混在一起。
 
-一个简化 reasoning 安全门禁：
+一个简化 reasoning 安全验收条件：
 
 ```math
 G_{\mathrm{safe}}=
@@ -172,7 +172,7 @@ S_{\mathrm{risk}}\le \kappa
 ]
 ```
 
-这个门禁表达的是 reasoning 系统是否适合上线，而不是模型是否“聪明”。如果工具权限、CoT 暴露或高风险审核不过线，即使数学和代码分数高，也不能认为系统安全。
+这组条件表达的是 reasoning 系统是否适合上线，而不是模型是否“聪明”。如果工具权限、CoT 暴露或高风险审核不过线，即使数学和代码分数高，也不能认为系统安全。
 
 ## 11.2 Reasoning 安全风险的分层
 
@@ -208,7 +208,7 @@ Reasoning 安全可以按四层理解。
 2. 长程任务可能产生目标漂移。
 3. 自动评估和 reward 可能被模型利用。
 4. 模型能力变化快，旧评测集可能很快失效。
-5. 高风险能力需要分级评估、外部审查、红队和发布门禁。
+5. 高风险能力需要分级评估、外部审查、红队和发布条件。
 
 ## 11.3 伪推理
 
@@ -234,7 +234,7 @@ Reasoning 安全可以按四层理解。
 4. 是否存在“过程错但答案对”的 lucky answer。
 5. 是否存在“过程看起来对但格式或约束错”的 failure。
 
-面向专家的回答：
+机制与边界的回答：
 
 ```text
 伪推理的核心不是模型写错了某一步，而是自然语言解释和模型实际决策之间可能脱钩。CoT 可以作为可观察信号，但不能直接等同于内部计算。工程上要用过程标注、反事实扰动、证据支持、程序化 verifier 和错误归因共同评估解释是否真的支持结论。
@@ -345,7 +345,7 @@ Reward hacking 的根源是奖励信号不等于真实目标。越依赖自动�
 
 1. 评测防作弊：hidden tests、扰动集、反事实样本、人工抽检。
 2. 行为监控：同时看 CoT 摘要、工具动作、代码 diff、日志和最终输出。
-3. 目标对齐：把真实任务成功、权限边界、安全门禁和用户价值放在同一张评分表中。
+3. 目标对齐：把真实任务成功、权限边界、安全验收条件和用户价值放在同一张评分表中。
 
 ## 11.9 工具误用与 Excessive Agency
 
@@ -370,7 +370,7 @@ Reasoning model 经常和工具结合，例如搜索、代码执行、数据库�
 5. 参数 schema 校验。
 6. 审计日志和 trace replay。
 7. 明确回滚策略。
-8. 对工具调用做独立安全门禁，而不是只相信模型解释。
+8. 对工具调用做独立安全验收条件，而不是只相信模型解释。
 
 面试中可以这样表达：
 
@@ -391,7 +391,7 @@ Agent 工具安全的核心是把模型从“全能执行者”降级为“受�
 5. 任务级和动作级审计。
 6. 红队回归和事故复盘。
 
-这里的重点不是把所有复杂推理都视为危险，而是建立“能力越强，门禁越严”的工程逻辑。对低风险任务，可以充分利用 reasoning；对高风险任务，要限制输出细节、要求证据、建议专业人士、人工审核或拒绝协助。
+这里的重点不是把所有复杂推理都视为危险，而是建立“能力越强，验收条件越严”的工程逻辑。对低风险任务，可以充分利用 reasoning；对高风险任务，要限制输出细节、要求证据、建议专业人士、人工审核或拒绝协助。
 
 ## 11.11 高风险场景边界
 
@@ -443,7 +443,7 @@ Reasoning 安全评估应覆盖：
 3. 切片：低风险、高风险、多轮、工具、隐私、专业建议、长任务。
 4. Trace：模型最终回答、可审计推理摘要、工具动作、权限判定、审核记录。
 5. 失败归因：模型误判、策略边界不清、工具权限过宽、verifier 失效、用户输入缺失。
-6. 门禁：哪些指标不过线就不能上线，哪些需要灰度和人工监控。
+6. 验收条件：哪些指标不过线就不能上线，哪些需要灰度和人工监控。
 
 ## 11.13 缓解策略
 
@@ -466,7 +466,7 @@ Reasoning 安全评估应覆盖：
 
 ## 11.14 最小可运行 reasoning 安全审计 demo
 
-下面的 0 依赖 demo 用 toy 样本模拟 reasoning 安全审计。它不调用外部模型，也不包含真实高风险操作；重点是展示如何把伪推理、过度自信、工具误用、隐藏 CoT 暴露、高风险人工审核和过度拒答放进同一张门禁表。
+下面的 0 依赖 demo 用 toy 样本模拟 reasoning 安全审计。它不调用外部模型，也不包含真实高风险操作；重点是展示如何把伪推理、过度自信、工具误用、隐藏 CoT 暴露、高风险人工审核和过度拒答放进同一张验收条件表。
 
 ```python
 from collections import defaultdict
@@ -736,7 +736,7 @@ CoT 有助于模型内部推理和系统监控，但直接展示完整 CoT 可�
 回答要点：
 
 ```text
-主要风险包括伪推理、过度自信、长链条错误传播、reward hacking、工具误用、隐藏 CoT 暴露、高风险场景误导、过度拒答，以及更强规划能力带来的滥用风险。缓解上需要 verifier、工具权限控制、沙箱、人工审核、日志审计、安全评估、不确定性表达、红队回归和治理门禁，而不能只依赖模型自己解释。
+主要风险包括伪推理、过度自信、长链条错误传播、reward hacking、工具误用、隐藏 CoT 暴露、高风险场景误导、过度拒答，以及更强规划能力带来的滥用风险。缓解上需要 verifier、工具权限控制、沙箱、人工审核、日志审计、安全评估、不确定性表达、红队回归和治理验收条件，而不能只依赖模型自己解释。
 ```
 
 追问：如何设计上线前 reasoning safety gate？
@@ -748,7 +748,7 @@ CoT 有助于模型内部推理和系统监控，但直接展示完整 CoT 可�
 ## 11.17 小练习
 
 1. 给 8 条 toy reasoning 安全样本设计 schema，字段至少包含风险域、期望动作、置信度、工具动作、权限判定、人工审核、CoT 暴露和严重度。
-2. 用 0 依赖 Python 写一个 reasoning safety audit demo，输出伪推理率、过度自信错误率、高风险不当服从率、工具误用率、隐藏 CoT 暴露率、人工审核覆盖率、过度拒答率和门禁结果。
+2. 用 0 依赖 Python 写一个 reasoning safety audit demo，输出伪推理率、过度自信错误率、高风险不当服从率、工具误用率、隐藏 CoT 暴露率、人工审核覆盖率、过度拒答率和验收结果。
 3. 设计一个“高质量安全不是拒答率最高”的评估表，同时覆盖 unsafe compliance 和 over-refusal。
 4. 给一个工具调用 Agent 设计权限矩阵，说明哪些动作可自动执行，哪些必须确认，哪些必须拒绝。
 5. 用 3 分钟回答：“为什么完整 CoT 不等于可信解释？”

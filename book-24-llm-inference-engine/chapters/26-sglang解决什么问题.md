@@ -10,9 +10,9 @@ SGLang 也做高性能 serving，但它的出发点不完全一样。它不仅�
 
 > SGLang 解决的是复杂 LLM 程序的表达和执行效率问题：前端让开发者更容易描述多步 LLM 控制流，后端 runtime 用 RadixAttention、prefix sharing、batching 和 constrained decoding 等机制减少重复计算并提高吞吐。
 
-## 26.0 本讲资料边界与第二轮精修口径
+## 26.0 本讲范围与资料
 
-本讲按第二轮精修要求做过资料校准，主要参考四类公开资料：
+本章参考四类公开资料：
 
 1. SGLang 论文《SGLang: Efficient Execution of Structured Language Model Programs》对 complex language model programs、frontend language、runtime、RadixAttention、KV cache reuse 和 compressed finite state machines for structured output decoding 的定义。
 2. SGLang 官方文档首页对 SGLang 作为 high-performance serving framework、RadixAttention、prefix caching、multi-GPU parallelism、OpenAI API 兼容和生产 serving 定位的说明。
@@ -621,7 +621,7 @@ $$
 R_{\mathrm{work}}=\frac{W_{\mathrm{naive}}-W_{\mathrm{sglang}}}{\max(1,W_{\mathrm{naive}})}
 $$
 
-教学版 SGLang 动机门禁可以写成：
+教学版 SGLang 动机准入条件可以形式化为：
 
 $$
 G_{\mathrm{sglang}}=G_{\mathrm{program}}G_{\mathrm{radix}}G_{\mathrm{branch}}G_{\mathrm{structured}}G_{\mathrm{api}}G_{\mathrm{metric}}
@@ -634,7 +634,7 @@ $$
 3. `G_{\mathrm{branch}}`：能看见 self-consistency、Tree-of-Thought、agent 或 RAG 分支里的共享 root 和中间节点。
 4. `G_{\mathrm{structured}}`：能解释 JSON / regex / EBNF constrained decoding 为什么减少后处理重试。
 5. `G_{\mathrm{api}}`：能同时说明 OpenAI-compatible API 与 SGLang frontend language 的关系。
-6. `G_{\mathrm{metric}}`：能输出 reuse ratio、retry saving、work reduction 和最终动机门禁。
+6. `G_{\mathrm{metric}}`：能输出 reuse ratio、retry saving、work reduction 和最终动机验收条件。
 
 下面这个 0 依赖 demo 模拟一个法律合同分析 program。它有 6 次 generation：先抽取字段，再对 A / B 两个条款分支分别做风险判断和法规检查，最后输出严格 JSON 报告。普通 API 会把 6 个完整 prompt 都重新 prefill；SGLang-like runtime 能让后端看见共享文档 root、A 分支和 B 分支，从而减少重复 prefill，并用结构化输出约束避免 JSON 失败重试。
 

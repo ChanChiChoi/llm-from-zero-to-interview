@@ -8,9 +8,9 @@
 
 > LLM serving 的优化目标不是单一 QPS，而是在 TTFT、TPOT、吞吐、并发、显存和成本之间做系统权衡。
 
-## 5.0 本讲资料边界与第二轮精修口径
+## 5.0 本讲范围与资料
 
-本章讲的是 LLM serving 的指标、容量和成本口径，不是 PD 分离源码章节。第二轮精修时，本章按下面口径处理：
+本章讲的是 LLM serving 的指标、容量和成本口径，不是 PD 分离源码章节。本章按下面口径处理：
 
 1. TTFT、TPOT、queue、prefill、decode、KV cache、active sequences、tokens/s、metrics 和 tracing 的指标口径参考 vLLM、TGI、Triton 等公开 serving 抽象，以及 SRE 对延迟分位、吞吐、饱和度和容量的通用工程思路。
 2. 本章只给通用公式和 toy demo，不绑定某个 runtime 的 Prometheus 指标名、dashboard 字段名、硬件型号或云厂商价格。
@@ -398,7 +398,7 @@ N_{\mathrm{active}}\le \left\lfloor \frac{B_{\mathrm{kv}}}{M_{\mathrm{kvavg}}}\r
 K_{1k}=\frac{1000K_{\mathrm{gpu}}}{3600X_{\mathrm{tok}}}
 ```
 
-其中 `K_gpu` 是每 GPU-hour 成本，`X_tok` 是每秒有效 token 吞吐。最终指标门禁可以写成：
+其中 `K_gpu` 是每 GPU-hour 成本，`X_tok` 是每秒有效 token 吞吐。最终指标准入条件可以形式化为：
 
 ```math
 G_{\mathrm{metric}}=G_{\mathrm{ttft}}G_{\mathrm{tpot}}G_{\mathrm{kv}}G_{\mathrm{cost}}G_{\mathrm{tail}}

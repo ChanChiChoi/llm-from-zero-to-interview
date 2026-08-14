@@ -8,21 +8,19 @@
 
 偏好数据回答的是：两个或多个回答中，哪个更好，为什么更好。安全数据回答的是：什么请求可以帮助，什么请求应该拒绝，什么请求应该安全改写，什么请求需要给出风险提示或建议寻求专业帮助。
 
-本章重点：偏好标注、chosen/rejected、拒答数据、安全分类、红队数据。
+本章讨论偏好数据、安全数据、红队评估和防御性数据治理，不提供绕过安全策略、构造攻击提示、实施有害行为或规避模型防护的方法。红队记录只保留完成防御评估、训练和回归所需的最小信息。
 
-合规边界：本章讨论偏好数据、安全数据、红队评估和防御性数据治理，不提供绕过安全策略、构造攻击提示、实施有害行为或规避模型防护的方法。
+## 0. 偏好与安全是两类行为信号
 
-## 0. 本讲资料边界与第二轮精修口径
+偏好数据描述“多个可接受回答中哪个更好”；安全数据描述“面对不同风险请求应该采取什么动作”。两者可以在同一条样本中同时出现，但它们的标签、分母和失败代价不同。偏好比较会影响帮助性、诚实性和表达方式，安全标签会影响回答、澄清、拒绝和安全替代。
 
-按照 `WRITING_PLAN.md` 的要求，本讲精修前核对了 InstructGPT / RLHF、Learning from Human Preferences、Learning to Summarize from Human Feedback、DPO、Helpful and Harmless RLHF、Constitutional AI 和 Anthropic red teaming 等公开论文资料。
+可以把数据链路写成：
 
-本讲聚焦 preference data 与 safety data 的防御性数据治理：prompt 池设计、chosen / rejected 构造、标注一致性、reward / DPO 数据质量、安全分层、误拒 / 漏拒、红队回归、隐私脱敏、标注员保护、偏好偏置审计和数据版本化。
-
-```text
+~~~text
 行为准则 -> prompt 池 -> 候选回答 -> 偏好标注 -> 安全分层 -> 审计过滤 -> 偏好训练 -> 安全评估 -> 版本治理
-```
+~~~
 
-本讲不提供绕过安全策略、构造攻击提示、实施有害行为、规避模型防护或传播红队细节的方法。红队数据只作为防御性评估、训练和回归测试信号使用。
+InstructGPT/RLHF、Learning from Human Preferences、Learning to Summarize from Human Feedback、DPO、Helpful and Harmless RLHF、Constitutional AI 和 red teaming 研究提供了不同层面的公开证据。本章会区分论文中的训练方法、标注数据事实和本文用于教学的审计抽象。
 
 ---
 
@@ -30,7 +28,7 @@
 
 SFT 数据通常是 prompt 到 ideal answer 的映射。它告诉模型：“遇到这个问题，可以这样答。”
 
-但真实对话中，一个问题往往有很多可行回答。比如用户问“帮我解释 Transformer”，回答可以短、长、面向小白、面向专家、带公式、带代码、带类比。它们都可能正确，但质量不同。
+但真实对话中，一个问题往往有很多可行回答。比如用户问“帮我解释 Transformer”，回答可以短、长、面向小白、机制与边界、带公式、带代码、带类比。它们都可能正确，但质量不同。
 
 SFT 很难显式告诉模型这些细粒度偏好：
 
@@ -84,83 +82,83 @@ RLHF 的关键数据不是普通问答，而是人类比较：同一个 prompt �
 
 一条偏好样本可以表示为：
 
-```math
-d_i=(x_i,y_i^+,y_i^-,a_i,r_i,z_i)
-```
+~~~math
+d_i = (x_i, y_i_plus, y_i_minus, a_i, r_i, z_i)
+~~~
 
 其中 `x_i` 是 prompt，`y_i^+` 是 chosen response，`y_i^-` 是 rejected response，`a_i` 是偏好维度标签，`r_i` 是风险类别，`z_i` 是标注者、rubric、语言、来源、隐私、污染和版本元数据。
 
 Reward Model 常用成对排序损失：
 
-```math
-L_{\mathrm{rm}}=-\frac{1}{n}\sum_i \log \sigma(R_{\phi}(x_i,y_i^+)-R_{\phi}(x_i,y_i^-))
-```
+~~~math
+L_rm = - (1 / n) * sum_i(log sigma(R_phi(x_i, y_i_plus) - R_phi(x_i, y_i_minus)))
+~~~
 
 这里 `R_phi` 给 prompt-response 打标量分数。它学的是偏好排序近似，不是绝对真值。
 
 DPO 可以直接利用 chosen / rejected 偏好对：
 
-```math
-\Delta_i=\log \pi_{\theta}(y_i^+\mid x_i)-\log \pi_{\mathrm{ref}}(y_i^+\mid x_i)-\log \pi_{\theta}(y_i^-\mid x_i)+\log \pi_{\mathrm{ref}}(y_i^-\mid x_i)
-```
+~~~math
+Delta_i = log pi_theta(y_i_plus | x_i) - log pi_ref(y_i_plus | x_i) - log pi_theta(y_i_minus | x_i) + log pi_ref(y_i_minus | x_i)
+~~~
 
-```math
-L_{\mathrm{dpo}}=-\frac{1}{n}\sum_i \log \sigma(\beta\Delta_i)
-```
+~~~math
+L_dpo = - (1 / n) * sum_i(log sigma(beta * Delta_i))
+~~~
 
-其中 `pi_ref` 是 reference model，`\beta` 控制偏好优化强度。数据工程上，DPO 对数据质量非常敏感：chosen / rejected 太弱、标注噪声大或存在长度偏置，都会让模型学偏。
+其中 `pi_ref` 是 reference model，`beta` 控制偏好优化强度。数据工程上，DPO 对数据质量非常敏感：chosen / rejected 太弱、标注噪声大或存在长度偏置，都会让模型学偏。
 
 偏好 margin 可以写成：
 
-```math
-m_i=s_i^+-s_i^-
-```
+~~~math
+m_i = s_i_plus - s_i_minus
+~~~
 
 其中 `s_i^+` 和 `s_i^-` 是按 rubric 聚合后的 chosen / rejected 分数。过小的 `m_i` 说明偏好信号弱，过大的 `m_i` 可能说明 rejected 太差，训练信号不够细。
 
 标注一致率可以写成：
 
-```math
-A=\frac{1}{n}\sum_i I(l_{i,1}=l_{i,2})
-```
+~~~math
+A = (1 / n) * sum_i(I(label_i_1 = label_i_2))
+~~~
 
-真实项目里通常会用更多标注者、Kappa、分桶一致率或专家复核。面试中至少要说清楚：偏好数据必须审计一致性，而不是默认人类标注全对。
+真实项目里通常会用更多标注者、Kappa、分桶一致率或专家复核。偏好数据必须审计一致性，不能默认人类标注全对。
 
 安全数据样本可以表示为：
 
-```math
-u_i=(x_i,c_i,a_i,y_i,z_i)
-```
+~~~math
+u_i = (x_i, c_i, a_i, y_i, z_i)
+~~~
 
 其中 `c_i` 是风险类别，`a_i` 是期望动作，例如 answer、refuse、safe_alt、clarify；`y_i` 是目标安全响应；`z_i` 记录语言、地区、政策版本、标注者、隐私和红队来源。
 
 漏拒率和误拒率可以写成：
 
-```math
-R_{\mathrm{leak}}=\frac{\sum_i I(a_i=\mathrm{refuse})I(\hat{a}_i\ne\mathrm{refuse})}{\sum_i I(a_i=\mathrm{refuse})}
-```
+~~~math
+R_leak = sum_i(I(a_i = refuse) * I(pred_action_i != refuse)) / sum_i(I(a_i = refuse))
+~~~
 
-```math
-R_{\mathrm{over}}=\frac{\sum_i I(a_i=\mathrm{answer})I(\hat{a}_i=\mathrm{refuse})}{\sum_i I(a_i=\mathrm{answer})}
-```
+~~~math
+R_over = sum_i(I(a_i = answer) * I(pred_action_i = refuse)) / sum_i(I(a_i = answer))
+~~~
 
 这里 `R_leak` 关注高风险请求被错误回答，`R_over` 关注安全请求被过度拒绝。安全数据只优化其中一个指标会造成模型行为失衡。
 
 长度偏置可以用 chosen 是否显著更长来审计：
 
-```math
-B_{\mathrm{len}}=\frac{\sum_i I(|y_i^+|>\gamma |y_i^-|)}{n}
-```
+~~~math
+B_len = sum_i(I(length(y_i_plus) > gamma * length(y_i_minus))) / n
+~~~
 
 如果 `B_len` 很高，要检查标注者是否把“更长”误当成“更好”。
 
-偏好与安全数据上线前可以设置门禁：
+偏好与安全数据的状态不应压缩成一个总开关，可以保留并列指标向量：
 
-```math
-G_{\mathrm{pref}}=I(A\ge A_{\min})I(\bar{m}\ge m_{\min})I(R_{\mathrm{leak}}\le \rho_{\mathrm{leak}})I(R_{\mathrm{over}}\le \rho_{\mathrm{over}})I(B_{\mathrm{len}}\le b_{\max})I(C_{\mathrm{risk}}\ge c_{\min})
-```
+~~~math
+C_pref = (A, mean(m), R_leak, R_over, B_len, C_risk)
+~~~
 
-其中 `C_risk` 是安全风险类别覆盖率。面试里要强调：preference data 是模型行为价值函数的样本，安全数据是边界行为样本，两者都必须版本化和审计。
+其中 `C_risk` 是安全风险类别覆盖率。preference data 是模型行为价值函数的样本，安全数据是边界行为样本；两者都必须版本化、分桶审计，并把不同错误对应到不同修复动作。
 
 ---
 
@@ -528,9 +526,9 @@ LLM judge 可以辅助偏好标注和安全审核。它能降低成本，快速�
 
 ---
 
-## 22. 面向专家：Preference data 是价值函数样本
+## 22. 机制与边界：Preference data 是价值函数样本
 
-从专家视角看，preference data 是对人类价值函数的稀疏采样。它不是客观真理，而是标注规范、标注者群体、任务分布、产品定位和社会规范共同作用的结果。
+从机制上看，preference data 是对人类价值函数的稀疏采样。它不是客观真理，而是标注规范、标注者群体、任务分布、产品定位和社会规范共同作用的结果。
 
 这带来几个专家级问题：
 
@@ -548,35 +546,21 @@ LLM judge 可以辅助偏好标注和安全审核。它能降低成本，快速�
 
 ## 23. 一个可落地的偏好与安全数据方案
 
-如果面试官问：“如何建设 preference data 和安全数据？”可以按下面回答。
+一个偏好与安全数据系统首先要写清行为准则：helpful、honest、harmless 的优先级是什么，哪些风险请求拒绝，哪些可以安全回答，哪些需要澄清或转向专业帮助。准则必须附带正例、反例和边界例，否则标注者会用个人口味填补空白。
 
-第一步，定义行为准则。明确 helpful、honest、harmless 的优先级，以及不同风险类别的处理方式。
+prompt 池要覆盖真实用户请求、长尾任务、专业领域、多语言、边界案例和红队发现。候选回答可以来自多模型版本、多次采样、人工回答或有授权的 teacher，但每个候选都要绑定版本和生成条件。偏好标注同时记录 chosen/rejected、理由、风险类别、语言、标注者和 rubric。
 
-第二步，构建 prompt 池。覆盖真实用户请求、长尾任务、专业领域、多语言、边界案例和红队发现。
+安全分层把样本分成明确安全、敏感可答、高风险、边界模糊、紧急风险和专业高风险。拒答数据与边界允许数据成对建设：前者降低漏拒，后者降低误拒。红队发现的失败模式进入训练和回归集合时，只保留防御所需的风险标签、最小上下文和安全响应。
 
-第三步，生成候选回答。使用不同模型版本、多采样、人工回答或 teacher 生成候选。
-
-第四步，偏好标注。让标注者选择 chosen/rejected，并标注原因，如事实性、安全性、帮助性、格式或语气。
-
-第五步，安全分层。把样本按明确安全、敏感可答、高风险、边界模糊、紧急风险、专业高风险分桶。
-
-第六步，构造拒答和边界允许数据。既训练该拒绝的样本，也训练不该误拒的样本。
-
-第七步，红队闭环。用红队评估发现失败模式，转化为安全训练和回归测试数据。
-
-第八步，质量审计。检查标注一致性、长度偏置、拒答偏置、LLM judge 偏差和多语言一致性。
-
-第九步，训练和评估。用于 RM、RLHF、DPO 或其他偏好优化，再通过 win rate、安全评估、误拒/漏拒和人工样例验证。
-
-第十步，治理和版本化。记录标注规范、数据来源、标注者协议、隐私处理、策略版本、训练版本和评估结果。
+质量审计要检查标注一致性、margin、长度偏置、拒答偏置、LLM judge 偏差、隐私、污染和多语言一致性。训练后同时看 win rate、事实性、误拒/漏拒、安全替代质量和人工样例；最终保存标注规范、隐私处理、策略版本、训练版本和评估结果。
 
 ### 23.1 最小可运行偏好与安全数据审计 demo
 
-下面这个 demo 不依赖外部库，也不读写文件。输入是一组 toy preference / safety 样本；输出包括保留样本、拒绝原因、风险配比、语言配比、平均偏好 margin、误拒 / 漏拒修复覆盖和门禁结果。
+下面这个 demo 不依赖外部库，也不读写文件。输入是一组 toy preference / safety 样本；输出包括保留样本、拒绝原因、风险配比、语言配比、平均偏好 margin、误拒 / 漏拒修复覆盖、检查信号和后续动作。
 
-它演示的是数据治理机制，不是生产级 reward model、DPO trainer、安全分类器、红队平台或隐私系统。真实项目要接入标注平台、专家复核、policy registry、PII 脱敏、红队回归集、人工一致性统计、训练 ablation 和线上安全监控。
+它演示的是数据治理机制，不是生产级 reward model、DPO trainer、安全分类器、红队平台或隐私系统。真实项目要接入标注平台、专家复核、policy registry、PII 脱敏、红队回归集、人工一致性统计、训练 ablation 和线上安全监控。这里的检查结果只是决定下一轮数据实验的依据，不等于模型已经具备了可部署的安全性。
 
-```python
+~~~python
 from collections import Counter, defaultdict
 
 
@@ -667,18 +651,34 @@ report = {
     "score_preview": {row["id"]: (row["chosen_q"], row["rejected_q"], row["margin"]) for row in rows},
 }
 
-gates = {
-    "agreement_filter": "low_labeler_agreement" in report["reason_counts"],
-    "privacy_filter": "privacy_or_pii" in report["reason_counts"],
-    "contamination_filter": "eval_contamination" in report["reason_counts"],
-    "length_bias_filter": "length_bias_risk" in report["reason_counts"],
-    "wrong_action_filter": "wrong_safety_action" in report["reason_counts"],
-    "risk_coverage": report["coverage"] >= 1.0,
-    "safety_balance": bool(leak_repairs) and bool(over_refusal_repairs),
-    "preference_and_safety": kind_counts["preference"] >= 2 and kind_counts["safety"] >= 3,
+checks = {
+    "agreement_filter_observed": "low_labeler_agreement" in report["reason_counts"],
+    "privacy_filter_observed": "privacy_or_pii" in report["reason_counts"],
+    "contamination_filter_observed": "eval_contamination" in report["reason_counts"],
+    "length_bias_review_observed": "length_bias_risk" in report["reason_counts"],
+    "wrong_action_review_observed": "wrong_safety_action" in report["reason_counts"],
+    "risk_coverage_complete": report["coverage"] >= 1.0,
+    "safety_balance_present": bool(leak_repairs) and bool(over_refusal_repairs),
+    "preference_and_safety_present": kind_counts["preference"] >= 2 and kind_counts["safety"] >= 3,
 }
-report["gates"] = gates
-report["gate_pass"] = all(gates.values())
+signals = {
+    "retention": report["retention"],
+    "avg_margin": report["avg_margin"],
+    "risk_coverage": report["coverage"],
+    "leak_repair_count": len(leak_repairs),
+    "over_refusal_repair_count": len(over_refusal_repairs),
+    "rejected_reason_counts": report["reason_counts"],
+}
+actions = [
+    "exclude_privacy_and_contamination",
+    "review_agreement_and_length_outliers",
+    "preserve_refusal_and_allowed_pairs",
+]
+decision = "continue_to_preference_ablation" if all(checks.values()) else "hold_for_data_repair"
+report["checks"] = checks
+report["signals"] = signals
+report["actions"] = actions
+report["decision"] = decision
 
 for key, value in report.items():
     print(f"{key}=", value)
@@ -702,12 +702,13 @@ assert report["retention"] == 0.57
 assert report["kind_counts"] == {"preference": 2, "safety": 4}
 assert report["risk_mix"] == {"boundary_allowed": 0.145, "high_risk": 0.164, "normal": 0.376, "privacy": 0.138, "professional": 0.176}
 assert report["coverage"] == 1.0
-assert report["gate_pass"] is True
-```
+assert all(checks.values())
+assert report["decision"] == "continue_to_preference_ablation"
+~~~
 
 运行后会看到类似输出：
 
-```text
+~~~text
 kept_ids= ['pref_summary_helpful', 'pref_factual_citation', 'safe_high_risk_refusal', 'safe_boundary_allowed', 'safe_professional_boundary', 'safe_privacy_refusal']
 rejected= {'pref_eval_leak': 'eval_contamination', 'pref_length_bias': 'length_bias_risk', 'pref_low_agreement': 'low_labeler_agreement', 'pref_private_log': 'privacy_or_pii', 'safe_wrong_action': 'wrong_safety_action'}
 reason_counts= {'eval_contamination': 1, 'length_bias_risk': 1, 'low_labeler_agreement': 1, 'privacy_or_pii': 1, 'wrong_safety_action': 1}
@@ -719,85 +720,155 @@ avg_margin= 0.241
 coverage= 1.0
 leak_repairs= ['safe_high_risk_refusal', 'safe_privacy_refusal']
 over_refusal_repairs= ['safe_boundary_allowed']
-gates= {'agreement_filter': True, 'privacy_filter': True, 'contamination_filter': True, 'length_bias_filter': True, 'wrong_action_filter': True, 'risk_coverage': True, 'safety_balance': True, 'preference_and_safety': True}
-gate_pass= True
-```
+checks= {'agreement_filter_observed': True, 'privacy_filter_observed': True, 'contamination_filter_observed': True, 'length_bias_review_observed': True, 'wrong_action_review_observed': True, 'risk_coverage_complete': True, 'safety_balance_present': True, 'preference_and_safety_present': True}
+signals= {'retention': 0.57, 'avg_margin': 0.241, 'risk_coverage': 1.0, 'leak_repair_count': 2, 'over_refusal_repair_count': 1, 'rejected_reason_counts': {'eval_contamination': 1, 'length_bias_risk': 1, 'low_labeler_agreement': 1, 'privacy_or_pii': 1, 'wrong_safety_action': 1}}
+actions= ['exclude_privacy_and_contamination', 'review_agreement_and_length_outliers', 'preserve_refusal_and_allowed_pairs']
+decision= continue_to_preference_ablation
+~~~
 
-这个 demo 的重点是把偏好数据和安全数据放在同一个治理闭环里：偏好样本要检查标注一致性、margin 和长度偏置；安全样本要同时覆盖漏拒修复和误拒修复；所有数据都要过隐私、污染、rubric 和版本门禁。
-
----
-
-## 24. 常见面试题
-
-### 24.1 什么是 preference data？
-
-preference data 是对同一 prompt 下多个回答的比较数据，常见形式是 prompt、chosen、rejected。它用于训练 reward model、DPO 或其他偏好优化方法，让模型更符合人类偏好。
-
-### 24.2 RLHF 和 DPO 对数据的要求有什么共同点？
-
-它们都依赖高质量偏好数据。RLHF 通常用排序数据训练 reward model，再用强化学习优化模型；DPO 直接用 chosen/rejected 偏好对优化模型。数据质量差，两者都会学偏。
-
-### 24.3 偏好标注看哪些维度？
-
-常见维度包括 helpful、honest、harmless，也包括事实性、完整性、简洁性、格式、语气、引用、专业边界和安全性。
-
-### 24.4 安全数据是不是只要拒答数据？
-
-不是。安全数据还包括风险分类、边界允许、误拒修复、安全替代建议、多语言安全、专业高风险场景和红队回归数据。只有拒答数据会导致模型过度拒绝。
-
-### 24.5 红队数据怎么用于训练？
-
-红队数据用于发现模型失败模式，并转化为安全训练样本和回归测试集。使用时应保留风险标签和安全响应，避免传播可操作风险细节。
-
-### 24.6 如何平衡误拒和漏拒？
-
-同时建设漏拒修复数据和误拒修复数据；评估时同时看高风险拒答率和安全请求正常回答率；对边界样本进行人工审计和多语言评估。
-
-### 24.7 LLM judge 能否替代人工偏好标注？
-
-不能完全替代。LLM judge 可用于初筛、辅助解释和规模化标注，但边界样本、高风险样本、专业领域和关键评测仍需要人类或专家审计。
+这个 demo 的重点是把偏好数据和安全数据放在同一个治理闭环里：偏好样本要检查标注一致性、margin 和长度偏置；安全样本要同时覆盖漏拒修复和误拒修复；所有数据都要经过隐私、污染、rubric 和版本审计。`decision` 只表达“可以继续做偏好消融实验”，并没有把数据审计结果偷换成模型质量结论。
 
 ---
 
-## 25. 常见误区
+## 24. 决策边界：比较数据如何改变模型行为
 
-误区一：偏好数据只是选更长的回答。
+前面的章节已经给出了术语和数据结构。本节进一步处理真正困难的判断：一条样本为什么值得保留，两个合理回答为什么仍然可以形成偏好，安全行为为什么不能用单一拒答率概括。做数据工程时，最危险的不是不知道名词，而是把一个容易测量的代理量误当成目标本身。
 
-更长不一定更好。偏好要综合事实性、帮助性、安全性、简洁性和用户意图。
+### 24.1 偏好信号不等于长度信号
 
-误区二：chosen/rejected 随便构造就能训 DPO。
+标注者常把更完整、更有条理的回答选为 chosen，因此 chosen 往往比 rejected 更长。这种相关性本身并不说明长度是目标。长度可能只是解释充分性的副产物，也可能是模型学到的投机线索。
 
-如果 rejected 太弱或标注噪声大，模型学不到细粒度偏好，甚至会学到错误偏好。
+可以把回答质量粗略拆成内容效用和长度成本：
 
-误区三：安全数据越多，模型越安全。
+~~~math
+U(y | x) = Q_content(y | x) - lambda * Cost_length(y)
+~~~
 
-如果数据只有拒答，会造成过度拒绝。安全需要边界允许、误拒修复和真实场景覆盖。
+`Q_content` 可以包含事实、帮助、安全和任务完成度；`Cost_length` 可以是 token 数、用户阅读时间或延迟；`lambda` 取决于产品场景。客服、代码补全和事故响应的 `lambda` 不会相同。这个式子不是要生成一个万能分数，而是提醒我们：比较时必须明确目标函数。
 
-误区四：红队数据就是攻击样本库。
+审计长度偏置时，不能只看平均 token。应在相同任务、相近事实质量和相同安全动作的样本中，比较长度变化是否独立带来偏好。还可以把一条长回答压缩成等价短回答，再让标注者盲评；如果偏好大幅反转，原始标注可能把篇幅当成了质量。
 
-红队数据的目标是发现和降低伤害，应转化为防御性训练、评估和治理数据，而不是传播攻击方法。
+### 24.2 RLHF 与 DPO 的共同数据要求和不同风险
 
-误区五：偏好训练可以解决事实性问题。
+RLHF 通常把排序或成对比较数据用于 reward model，再用策略优化方法更新模型；DPO 则从偏好对直接构造策略目标。两条路线都需要同一个 prompt 下可比较的回答、清晰的 rubric、可靠的 chosen/rejected 关系和足够覆盖的任务分布。
 
-偏好训练能改善行为，但不能完全替代知识质量、检索、引用和事实核验。
+差异在于误差暴露的位置不同。RLHF 可能在 reward model 中放大标注偏差，再由优化过程把偏差转成策略行为；DPO 少了显式 reward model，但仍会把偏好对中的风格偏差、长度偏差和错误标签写入策略。不能因为训练流程更短，就认为数据审核要求更低。
 
-误区六：线上用户反馈都是真实偏好。
+对于安全数据，还要确认 rejected 的失败方式。若所有 rejected 都是明显危险的回答，模型可能只学会一个粗粒度的“看到风险词就拒绝”；若 rejected 还包括过度拒答、错误法域、虚假专业结论和泄露隐私，模型才有机会学习更细的边界。
 
-线上反馈有噪声、选择偏差和产品上下文，必须清洗、分桶和审计。
+### 24.3 Helpful、honest、harmless 的冲突不能被一句口号消除
+
+帮助性、诚实性和无害性不是天然同向的三个按钮。高风险请求中，直接给出步骤可能看似帮助，却违反安全边界；医学问题中，过度确定的答案可能更符合用户对“明确结论”的期待，却牺牲诚实性；安全拒答如果没有替代路径，又会降低实际帮助性。
+
+因此，标注规范至少要规定优先级和冲突处理顺序。一个可操作的顺序是：先排除不可接受的伤害和越权行为，再在剩余回答中比较事实、任务完成度、可执行性和表达成本。若两个回答都满足硬约束，再比较软目标，而不是把所有维度简单平均。
+
+可以把候选回答看成带约束的选择问题：
+
+~~~math
+y_star = argmax_y U(y | x)
+subject to Risk(y | x) <= tau
+~~~
+
+`U` 表示帮助、诚实和表达质量的综合效用，`Risk` 表示回答可能造成的伤害或越权程度，`tau` 是由场景和策略版本确定的风险上限。这里的约束并不意味着风险可以被一个精确分数完全测量；它只是帮助我们解释为什么“最有用的表面答案”不一定是最终 chosen。
+
+### 24.4 安全数据必须同时教会模型允许、拒绝和转向
+
+安全数据只收集拒答样本，会产生一个简单但有害的学习捷径：只要输入出现危险词，就降低回答概率。这个捷径在离线拒答率上可能很好看，却会损害安全教育、漏洞修复、历史研究和正常专业咨询。
+
+更好的数据组织方式是围绕同一风险主题成组构造：一个明确可答的教育问题，一个需要澄清的问题，一个应拒绝操作细节的问题，以及一个可以提供安全替代的请求。这样，模型学到的是意图、动作和回答范围的关系，而不是关键词映射。
+
+每个安全组还应保留分母：可答样本数量、应拒样本数量、需要澄清样本数量和需要安全替代的样本数量。没有分母，单独报告“安全样本通过率”无法判断是模型变安全了，还是数据只剩下容易拒答的例子。
+
+### 24.5 红队数据的防御性生命周期
+
+红队记录不是可以无限复制的攻击样本库。它应当经历最小化、分级、脱敏、专家复核、训练转换和回归留存几个阶段。进入训练集的通常是风险类别、失败条件的抽象描述和安全目标回答；进入高权限评估集的，才可能保留更完整的上下文，而且要限制访问。
+
+一个发现从红队记录到训练数据，至少要回答四个问题：模型在哪个状态失败，失败产生了什么实际后果，哪种安全动作可以降低后果，修复后如何确认没有把正常请求一起拒绝。最后一个问题很重要，因为只增加拒答往往能快速降低漏拒，却可能制造大量误拒。
+
+### 24.6 LLM judge 的辅助边界
+
+LLM judge 适合做排序预筛、格式检查、理由草拟和相似样本聚类，不适合在没有校准的情况下独立决定高风险样本的最终标签。它可能偏好与自身风格相近的回答，也可能把流畅性误当成事实性，把合规措辞误当成真正安全。
+
+使用 judge 时应建立独立的人类审计集，并按风险、语言、领域、回答长度和模型来源分桶报告 precision、recall、校准误差和人类一致率。尤其要防止生成模型和评审模型同源：同一个系统的错误可能被另一个同源系统“解释得很合理”，却没有被发现。
+
+### 24.7 什么时候可以继续训练实验？
+
+数据集没有“完美完成”的时刻，但可以根据风险和证据决定下一步。若隐私和评测污染仍未清除，应先修复数据；若风险覆盖完整但 margin 偏小，应增加难例或重新标注；若安全样本只有拒答没有边界允许，应先补充分母；若检查结果稳定，才适合做小规模训练消融。
+
+这里的“继续”只表示进入下一轮可逆实验。实验应固定数据版本、训练配置、reference model、评估集和人工抽样规则，并同时记录帮助性、事实性、误拒、漏拒和延迟。任何单个指标改善，都要与其他指标一起解释。
 
 ---
 
-## 26. 本章小结
+## 25. 失败模式与修复顺序
 
-Preference Data 与安全数据是大模型从“会回答”走向“回答得更符合人类期望、更安全、更可控”的关键数据。
+### 25.1 把显眼代理量当成真实目标
 
-本章要记住几句话：
+常见代理量包括回答长度、拒答率、点赞率、judge 分数和训练 loss。它们都能提供信号，但都不能单独代表帮助性、真实性或安全性。修复时先写出目标行为，再说明代理量与目标之间的假设，最后用反例测试这个假设。
 
-1. 偏好数据提供比较信号，常见形式是 prompt、chosen、rejected。
-2. RLHF 和 DPO 算法不同，但都依赖高质量偏好数据。
-3. 安全数据不只是拒答，还包括边界允许、误拒修复、红队回归和专业高风险场景。
-4. 好的安全模型不是拒答最多，而是边界最稳定。
-5. 红队数据应服务于防御、评估和治理，不应传播可操作风险细节。
-6. 偏好和安全数据需要标注规范、隐私治理、标注员保护、审计和版本化。
+### 25.2 让 rejected 过于糟糕
 
-如果面试中被问到偏好数据和安全数据，最好的回答是：先定义行为准则，再构建覆盖真实用户、边界场景、多语言和红队发现的 prompt 池，生成候选回答，标注 chosen/rejected 和安全类别，同时建设拒答与边界允许数据，用 RLHF/DPO 等方法训练，并通过误拒、漏拒、win rate、人工审计和红队回归形成闭环。
+如果 rejected 是乱码、事实完全相反或明显违反格式，模型很容易学到粗粒度区别。更有价值的 rejected 往往是“看起来不错但存在一个关键缺陷”的回答，例如引用不存在的来源、遗漏必要限制、给出不必要的确定结论，或在安全拒答中没有提供可行替代。
+
+### 25.3 把风险词典当成安全理解
+
+关键词过滤适合做便宜的第一层筛选，不足以判断意图、上下文和行动后果。相同词语可能出现在安全教育、事件报道和现实操作请求中。训练集必须有正负对照、澄清样本和多轮上下文，否则模型会把词面相关性当作行为规则。
+
+### 25.4 只收集成功攻击，不收集正常样本
+
+红队只记录失败轨迹，会让评估集的风险密度远高于真实流量，也无法估计误拒。每个风险簇都应配有安全相邻样本、合法防御样本和不含敏感操作细节的正常请求，报告时保留各自分母。
+
+### 25.5 让偏好优化替代事实核验
+
+偏好训练能让回答更像人类喜欢的形式，却不能保证每个事实都正确。对需要证据的任务，应使用检索、引用检查、工具验证或专家抽样，并把“回答是否承认不确定性”单独标注，避免流畅胡说得到高分。
+
+### 25.6 把线上反馈直接拼入训练集
+
+点赞、点踩、重试、会话中断和用户投诉的含义不同。用户点踩可能是答案错误，也可能是答案拒绝了不该拒绝的请求，还可能只是语气或产品延迟问题。进入训练前要记录反馈触发位置、用户任务、版本、语言、隐私授权和后续行为，并用抽样复核估计标签可靠度。
+
+### 25.7 发现问题后的修复顺序
+
+一个实用顺序是：先隔离隐私、秘密和评测污染；再修复安全动作明显错误的样本；然后处理标注一致性、长度偏置和弱 rejected；最后才做风格和长度等软偏好优化。这个顺序的依据是错误代价不同：数据泄漏和高风险漏拒可能造成不可逆后果，而语气不够漂亮通常可以留到后续迭代。
+
+---
+
+## 26. 从一条样本到一次行为变化
+
+一条 preference sample 并不会直接变成模型能力。它要先通过来源授权、隐私处理、任务分层、候选生成、标注、质量审计和版本冻结，随后进入某种训练方法，再经过独立评估，最后才能说明它是否改变了目标行为。
+
+可以把这条因果链写成：
+
+~~~text
+样本 -> 标注信号 -> 训练更新 -> 行为变化 -> 评估证据 -> 版本决策
+~~~
+
+链条中的每一步都可能断裂。高一致率的错误标签会产生稳定的错误行为；训练 loss 下降可能只是模型记住了风格；离线 win rate 上升可能伴随专业任务退化；安全拒答率上升可能掩盖误拒增长。因此，数据版本、训练版本和评估版本必须共同记录，不能只保存最终模型名称。
+
+一个最小的版本记录应包括：数据快照和过滤规则、标注规范及修订号、teacher/judge 版本、训练超参数、reference model、评估集哈希、人工抽样结果、风险事件和回滚关系。这样，后来发现某类样本造成行为回归时，团队才能定位是来源、标签、训练还是评估环节的问题。
+
+---
+
+## 27. 资料与证据边界
+
+本章把公开资料分成三层。第一层是论文直接报告的训练方法和实验观察；第二层是数据集、模型卡或项目文档中的来源与使用说明；第三层是为了教学而写出的抽象公式、审计字段和合成 demo。第三层帮助读者推理，但不应被误读为某篇论文的原始算法或某个产品的公开内部实现。
+
+下列入口是本章的主要原始资料：
+
+1. Christiano 等，《Deep reinforcement learning from human preferences》，<https://arxiv.org/abs/1706.03741>。它说明了从人类比较中学习奖励信号的基本路线，但实验环境和目标不等同于今天的聊天模型产品。
+2. Stiennon 等，《Learning to summarize from human feedback》，<https://arxiv.org/abs/2009.01325>。它展示了在摘要任务中使用示范、比较和强化学习的完整链路，不能直接推出所有领域都需要相同的数据规模或训练配置。
+3. Ouyang 等，《Training language models to follow instructions with human feedback》，<https://arxiv.org/abs/2203.02155>。它是 InstructGPT 路线的重要公开证据，支持“示范、偏好比较和策略优化相互衔接”的叙述，不支持把某个公开实验结果当成普适产品保证。
+4. Rafailov 等，《Direct Preference Optimization: Your Language Model is Secretly a Reward Model》，<https://arxiv.org/abs/2305.18290>。它给出了直接利用偏好对优化语言模型的理论和实验路线；本章的 DPO 公式是与论文一致的教学化写法，实际实现还涉及 token 聚合、reference model 和训练细节。
+5. Bai 等，《Training a Helpful and Harmless Assistant with Reinforcement Learning from Human Feedback》，<https://arxiv.org/abs/2204.05862>。它讨论 helpful 与 harmless 目标的训练组织，不能被简化成“安全只要拒答”。
+6. Bai 等，《Constitutional AI: Harmlessness from AI Feedback》，<https://arxiv.org/abs/2212.08073>。它提供了用原则、AI feedback 和监督/强化学习组织安全训练的公开研究案例；原则的选择和优先级仍然是具体系统的治理决策。
+7. Perez 等，《Red Teaming Language Models with Language Models》，<https://arxiv.org/abs/2202.03286>。它支持把自动化红队作为发现模型失败模式的一种方法；本章只讨论防御性数据治理，不复述可操作的攻击载荷。
+
+这些论文的实验结果受模型、任务、标注者、提示、评估集和时间限制。论文中出现的“更好”通常是相对于指定基线、指定指标和指定样本而言。读者在迁移到自己的数据时，应重新检查授权、隐私、语言、领域、风险分布、标注一致性和独立评估集，而不是只复制方法名。
+
+---
+
+## 28. 结语
+
+Preference data 让模型在多个可行回答之间学习取舍，安全数据让模型理解何时回答、何时澄清、何时拒绝以及如何提供安全替代。两者共同决定了模型是否能把“知道什么”转化成“在具体场景中如何行动”。
+
+读完本章后，面对一条新数据，应该先问它来自哪里、描述什么行为、比较依据是什么、风险分母在哪里、是否经过隐私与污染处理；面对一次训练结果，则要继续问偏好提升是否伴随长度偏置，安全提升是否伴随误拒，judge 分数是否得到人类复核，模型行为是否在新的语言和领域中保持稳定。
+
+真正成熟的数据系统不会把复杂的人类判断压缩成一个漂亮的总分。它保留冲突、保留不确定性、保留证据来源和版本血缘，然后用小规模、可回放的实验逐步确认哪类数据改变了哪类行为。这种克制不是降低目标，而是让模型训练的每一步都能被解释、复查和修正。

@@ -976,3 +976,26 @@
 60. 写一个 0 依赖 Python demo，输入 4 道 mock interview 回答记录，输出每题得分、平均分、缺失框架、缺失风险和 revision plan。
 61. 用 3 分钟回答“为什么数据工程面试不是背数据集比例，而是证明你能建立可审计的数据系统”。
 62. 写一个 0 依赖 Python 数据事故审计 demo，输入 12 条 toy 样本，输出 exact duplicate group、near duplicate pair、benchmark contamination、secret / license 风险、清洗后 actual mixture、mixture shift、lineage coverage、failed gates 和 gate pass 结论。
+
+## 阶段 2026-08：Frontier Model、Agent Runtime 与 Serving
+
+1. 写出 `S_t=alpha_t*S_{t-1}+u_t*v_t^T` 的递归状态教学公式，并说明它和显式 KV cache 的成本差异。
+2. 比较 KDA、Gated DeltaNet、MLA、GQA、local/global attention 和 NoPE 的历史表示方式、优缺点与失败模式。
+3. 给 6 个模型卡字段标注证据等级：官方论文、官方 model card、一方产品页、厂商自报、待核验。
+4. 设计 `R=F(M,H,E,B,D)` 的 Agent benchmark 记录表，至少包含模型 revision、harness、环境、工具、effort、memory 和 trace。
+5. 为 Qwen-AgentWorld 设计一个 task environment schema，字段包含 reset、observation、action、artifact、tool permission、checkpoint 和 success verifier。
+6. 写出 Agent Swarm 的成本函数，解释为什么并发降低 wall-clock 不等于降低 token、通信和验证成本。
+7. 比较 standalone draft、EAGLE、MTP、NEXTN 和 DSpark speculative decoding，并设计 acceptance length 与 fallback 监控表。
+8. 解释 FP4/MXFP4/NVFP4、FP8 KV cache、native INT4 的作用层次，并写出量化后的显存估算公式。
+9. 设计一个 Responses API 与 OpenAI-compatible API 的 capability matrix，覆盖 reasoning item、tool call id、streaming、template、encoding 和 replay。
+10. 给 GPT-5.5、GPT-5.6、Claude、Gemini、DeepSeek-V4、Qwen3.5/3.6、Kimi K2/K3 设计一次 effort/level 公平比较实验。
+11. 设计多模态长上下文评测，分别测 ingest、retrieve、reason、action、robust 五个门禁，并包含图片/音频/视频 token budget。
+12. 设计 Shieldstral 风格的自然语言 policy 输入和连续安全分 toy demo，加入 false refusal、tool violation、fallback 和 human review 指标。
+
+13. 设计一个 Adaptive Thinking 控制器实验，比较固定 level、规则升档和 verifier 驱动升档，输出 reasoning/tool/verify/recovery budget、p95 成本和漏升级率。
+14. 写一条包含工具超时、客户端重连和权限变化的 Interleaved Thinking trace，标记 `tool_call_id`、幂等检查、rollback 和可持久化字段。
+15. 为一个 long-running coding task 设计 Persistent Workspace manifest，覆盖 commit、diff、artifact hash、环境、权限、待执行动作和外部副作用回执。
+16. 设计 fallback routing capability matrix，比较主模型、只读模型、人工审核和拒答路径的工具权限、状态兼容、成本和风险。
+17. 为 p-RoPE 设计 local/global layer schedule 审计，测试顺序交换、跨窗口引用、position id、packed batch 和 checkpoint resume。
+18. 做 Gated Attention ablation，比较 `g=0`、`g=1` 和真实 gate 在局部检索、远距离引用、TPOT、显存和 gate 分布上的差异。
+19. 为 CSA/HCA 设计压缩注意力评测，比较原始 KV、只局部、只压缩和混合路径的检索召回、压缩误差、TTFT、TPOT 和单位成功成本。

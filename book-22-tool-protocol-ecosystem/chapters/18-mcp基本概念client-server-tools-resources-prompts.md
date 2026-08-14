@@ -1,12 +1,12 @@
 # 第十八章：MCP 基本概念：Client、Server、Tools、Resources、Prompts
 
-## 18.0 本讲资料边界与第二轮精修口径
+## 18.0 本讲范围与资料
 
-本讲按 `WRITING_PLAN.md` 的第二轮要求，先对齐 MCP 官方介绍、MCP 2025-06-18 specification 中 lifecycle、tools、resources、prompts、roots、sampling、authorization、logging 和 transport 相关口径，以及 OpenAI Agents SDK 对 MCP server 接入的工程抽象。
+本章参考 MCP 官方介绍、MCP 2025-06-18 specification 中 lifecycle、tools、resources、prompts、roots、sampling、authorization、logging 和 transport 相关口径，以及 OpenAI Agents SDK 对 MCP server 接入的工程抽象。
 
 本章只建立 MCP 的基本对象模型，不写完整 MCP Server 实现，不展开权限安全和本地沙箱，不讨论企业 MCP 平台系统设计，也不把某个 SDK、某个 server 模板、某家模型 provider 或某个 IDE 插件的字段写成通用标准。后续第 19 章会讲最小 server，第 23 章会讲权限安全，第 48 章会讲企业 MCP 工具平台。
 
-第二轮精修重点放在三件事：
+本章重点放在三件事：
 
 1. 用公式把 Host、Client、Server、Tools、Resources、Prompts、Transport、Roots、Sampling 和治理映射串成可检查的概念模型。
 2. 区分 MCP 协议对象与模型 API、企业工具平台、插件系统、HTTP API 的职责边界。
@@ -556,7 +556,7 @@ B_{\mathrm{ctx}}=B_{\mathrm{sys}}+B_{\mathrm{user}}+B_{\mathrm{tools}}+B_{\mathr
 
 这里的重点是：连接 server 不等于把所有资源、工具描述和 prompt 全塞给模型。Host 必须按任务、权限、风险和上下文预算过滤。
 
-综合门禁可以写成：
+综合验收条件可以形式化为：
 
 ```math
 G_{\mathrm{mcp\_concept}}=\mathbf{1}[C_{\mathrm{host}}\ge \tau_{\mathrm{host}}]\cdot

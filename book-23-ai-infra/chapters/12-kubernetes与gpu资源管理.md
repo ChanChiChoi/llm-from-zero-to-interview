@@ -8,9 +8,9 @@
 
 > Kubernetes 能管理容器和基础资源，但大模型 GPU 资源管理还需要在它之上补齐 AI 工作负载特有的调度、拓扑、队列和治理能力。
 
-## 12.0 本讲资料边界与第二轮精修口径
+## 12.0 本讲范围与资料
 
-本讲第二轮精修时，资料口径按“Kubernetes 上的 GPU 资源管理稳定抽象”处理，而不是绑定某个云厂商、某个集群发行版、某个训练平台或某个调度器插件版本。Kubernetes 侧重点参考官方 device plugin、extended resource、ResourceQuota、node affinity、taint / toleration 和 topology spread 等文档口径；NVIDIA 侧重点参考 NVIDIA Kubernetes device plugin 对 GPU、MIG、time-slicing / MPS 共享模式的说明，以及 GPU Operator 对 driver、container toolkit、device plugin、DCGM exporter、MIG manager 和 GPU feature discovery 的管理边界。
+本章参考资料口径按“Kubernetes 上的 GPU 资源管理稳定抽象”处理，而不是绑定某个云厂商、某个集群发行版、某个训练平台或某个调度器插件版本。Kubernetes 侧重点参考官方 device plugin、extended resource、ResourceQuota、node affinity、taint / toleration 和 topology spread 等文档口径；NVIDIA 侧重点参考 NVIDIA Kubernetes device plugin 对 GPU、MIG、time-slicing / MPS 共享模式的说明，以及 GPU Operator 对 driver、container toolkit、device plugin、DCGM exporter、MIG manager 和 GPU feature discovery 的管理边界。
 
 需要注意三点：
 
@@ -188,7 +188,7 @@ Gang scheduling 是指一组相关 Pod 要么一起调度成功，要么都不�
 
 分布式训练非常需要它。
 
-截至当前主流 Kubernetes 口径，gang scheduling 不是所有生产集群默认开启的基础能力。即使上游有 alpha 能力，训练平台也要把“是否支持 gang、是否有最小可用 worker 数、失败后是否释放已占资源、是否和队列 / quota / priority 联动”写进调度门禁，而不是只假设 scheduler 会自动理解分布式训练的整体性。
+截至当前主流 Kubernetes 口径，gang scheduling 不是所有生产集群默认开启的基础能力。即使上游有 alpha 能力，训练平台也要把“是否支持 gang、是否有最小可用 worker 数、失败后是否释放已占资源、是否和队列 / quota / priority 联动”写进调度验收条件，而不是只假设 scheduler 会自动理解分布式训练的整体性。
 
 原因：
 
@@ -507,7 +507,7 @@ team_a / job_123 / pod_worker_0 / gpu_3 / utilization=92%
 k_i=(p_i,n_i,d_i,g_i,m_i,q_i,a_i,t_i,r_i,o_i,s_i,z_i)
 ```
 
-其中，`p_i` 是 Pod / Job / CRD 画像，`n_i` 是节点与 GPU 拓扑，`d_i` 是 device plugin 状态，`g_i` 是 GPU request / limit，`m_i` 是 MIG / 共享策略，`q_i` 是 namespace / quota，`a_i` 是 affinity / taint / toleration，`t_i` 是 topology 证据，`r_i` 是训练或推理运行时，`o_i` 是监控观测，`s_i` 是排障事件，`z_i` 是最终门禁。
+其中，`p_i` 是 Pod / Job / CRD 画像，`n_i` 是节点与 GPU 拓扑，`d_i` 是 device plugin 状态，`g_i` 是 GPU request / limit，`m_i` 是 MIG / 共享策略，`q_i` 是 namespace / quota，`a_i` 是 affinity / taint / toleration，`t_i` 是 topology 证据，`r_i` 是训练或推理运行时，`o_i` 是监控观测，`s_i` 是排障事件，`z_i` 是最终验收条件。
 
 统一覆盖率可以写成：
 
@@ -557,7 +557,7 @@ S_{\mathrm{topo}}=w_1 C_{\mathrm{node}}+w_2 C_{\mathrm{nic}}+w_3 C_{\mathrm{rack
 
 其中，`C_node`、`C_nic`、`C_rack`、`C_storage` 分别表示节点内 GPU 互联、GPU-NIC 亲和性、机柜 locality 和存储 locality 是否满足任务画像，`w_i` 是权重。
 
-最后，可以把 Kubernetes GPU 资源管理门禁写成：
+最后，可以把 Kubernetes GPU 资源管理验收条件写成：
 
 ```math
 G_{\mathrm{k8s\_gpu}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land R_{\mathrm{frag}}\le \rho \land Q_{\mathrm{tenant}}\le 1 \land P_0=0\right]
@@ -947,7 +947,7 @@ failed_cases=['device_plugin_missing_bad', 'gpu_resource_not_declared_bad', 'req
 kubernetes_gpu_gate_pass=False
 ```
 
-这个 demo 的重点是把 Kubernetes GPU 管理拆成可验证证据链：device plugin 要就绪，GPU extended resource 要正确声明，request / limit 不能含糊，分布式训练要有 gang 语义，碎片化和拓扑要进入调度决策，node label / affinity / taint / toleration 要可解释，MIG / time slicing 要匹配工作负载，namespace / quota / 成本归因要约束租户，训练和推理运行时要有各自的 CRD / SLO / health 证据，GPU 监控必须能映射到 Pod，最后还要有 Pending 原因排障和统一门禁。
+这个 demo 的重点是把 Kubernetes GPU 管理拆成可验证证据链：device plugin 要就绪，GPU extended resource 要正确声明，request / limit 不能含糊，分布式训练要有 gang 语义，碎片化和拓扑要进入调度决策，node label / affinity / taint / toleration 要可解释，MIG / time slicing 要匹配工作负载，namespace / quota / 成本归因要约束租户，训练和推理运行时要有各自的 CRD / SLO / health 证据，GPU 监控必须能映射到 Pod，最后还要有 Pending 原因排障和统一验收条件。
 
 ## 12.20 面试中如何回答 K8s 与 GPU 管理
 

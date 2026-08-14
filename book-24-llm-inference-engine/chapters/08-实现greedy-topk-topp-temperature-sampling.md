@@ -6,9 +6,9 @@
 
 > Sampling 决定模型在“最确定”和“更多样”之间如何取舍，是生成质量、稳定性、可控性和成本体验的重要开关。
 
-## 8.0 本讲资料边界与第二轮精修口径
+## 8.0 本讲范围与资料
 
-本章第二轮精修前，先用公开资料校准口径：Transformers 的 generation 文档把 greedy、sampling、beam search、logits processor / warper、stopping criteria 和 cache 放在同一个生成控制体系中；top-k、top-p 和 temperature 都属于对 logits 或候选概率分布的控制策略；nucleus sampling 的经典论文动机是减少低质量长尾 token 被采样，同时避免固定 top-k 在不同分布形状下过度或不足截断。
+本章参考先用公开资料校准口径：Transformers 的 generation 文档把 greedy、sampling、beam search、logits processor / warper、stopping criteria 和 cache 放在同一个生成控制体系中；top-k、top-p 和 temperature 都属于对 logits 或候选概率分布的控制策略；nucleus sampling 的经典论文动机是减少低质量长尾 token 被采样，同时避免固定 top-k 在不同分布形状下过度或不足截断。
 
 因此，本章不讨论 beam search、contrastive search、speculative decoding、structured generation 和安全 logits mask，只聚焦单步 token sampling。正文里的 PyTorch 代码用于贴近工程 API，新增的 0 依赖 demo 用纯 Python 展示 stable softmax、temperature、top-k、top-p、seeded multinomial 和采样审计指标。
 
@@ -33,7 +33,7 @@ next_token_id = sampler.sample(logits)
 这样做的好处是：
 
 1. generate loop 不关心具体采样策略。
-2. 后续可以轻松加入 temperature、top-k、top-p。
+2. 可以在不改 generate loop 的情况下加入 temperature、top-k、top-p。
 3. serving engine 可以为每个请求设置不同 sampling params。
 4. debug 时可以固定 greedy，线上可以启用随机采样。
 
@@ -355,7 +355,7 @@ n^*=\min\left\{n:\sum_{r=1}^{n}p_{(r)}\ge \rho\right\},\qquad \mathcal{S}_{p}=\{
 \tilde{p}_i=\frac{p_i\mathbf{1}[i\in\mathcal{S}]}{\sum_j p_j\mathbf{1}[j\in\mathcal{S}]}
 ```
 
-采样模块的验收门禁可以写成：
+采样模块的验收准入条件可以形式化为：
 
 ```math
 G_{\mathrm{sampling}}=G_{\mathrm{softmax}}G_{\mathrm{temperature}}G_{\mathrm{topk}}G_{\mathrm{topp}}G_{\mathrm{seed}}

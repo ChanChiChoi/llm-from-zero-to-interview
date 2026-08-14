@@ -22,9 +22,9 @@
 如果你已经有一个能跑的教学版推理框架，应该怎样一步步把 KV cache 改成 paged 版本？
 ```
 
-## 49.0 本讲资料边界与第二轮精修口径
+## 49.0 本讲范围与资料
 
-本章按第二轮精修口径，只讲把教学版 `list KV cache` 升级成单机、单模型、单进程内的 paged KV cache。
+本章聚焦把教学版 `list KV cache` 升级成单机、单模型、单进程内的 paged KV cache。
 
 公开资料校准主要参考三类口径：
 
@@ -38,7 +38,7 @@
 global block pool -> request block table -> allocate_until -> slot_mapping -> model input metadata -> free / reuse / metrics
 ```
 
-第二轮新增 demo 的验收重点是：
+本章 demo 的验收重点是：
 
 ```text
 list KV 私有缓存是否被全局 block pool 替代；
@@ -1213,7 +1213,7 @@ p_t=P_i[b_t]
 s_t=Sp_t+o_t
 ```
 
-最终升级门禁：
+最终升级验收条件：
 
 ```math
 G_{\mathrm{paged}}=G_{\mathrm{pool}}G_{\mathrm{table}}G_{\mathrm{slot}}G_{\mathrm{decode}}G_{\mathrm{admit}}G_{\mathrm{reuse}}G_{\mathrm{free}}
@@ -1439,7 +1439,7 @@ paged_kv_upgrade_summary= {'a_block_table_after_prefill': [0, 1, 2], 'a_block_ta
 paged_kv_upgrade_gates= {'global_block_pool_ready': True, 'block_table_grows': True, 'decode_extension_ready': True, 'slot_mapping_ready': True, 'admission_blocks_gate': True, 'reuse_after_free': True, 'idempotent_cleanup_ready': True, 'paged_kv_upgrade_gate': True}
 ```
 
-这个 demo 验证了从 list KV cache 到 paged KV cache 的几个硬门禁：
+这个 demo 验证了从 list KV cache 到 paged KV cache 的几个硬性条件：
 
 1. A 的 `block_table` 从 prefill 到 decode 持续增长，逻辑 token 连续但物理 block 由 table 映射。
 2. decode 写到 position 12 时跨过 block 边界，必须追加 block 3。

@@ -1,20 +1,12 @@
 # 第三章：Tokenizer 与数据格式
 
-## 本章目标
+## 一段文本如何变成训练协议
 
-理解 tokenizer 如何影响训练效率、上下文长度、多语言能力、代码能力和特殊任务格式。
+模型看到的不是“中文句子”“一段代码”或一组 JSON 字段，而是一串整数。Tokenizer 决定这串整数如何产生，数据格式决定这些整数在训练时分别扮演什么角色；两者共同构成模型的输入输出协议。
 
-## 核心议题
+初学者可以先记住一个因果链：切分方式改变 token 数，token 数改变上下文长度和计算量，special token 与 chat template 决定角色边界，label mask 决定哪些位置真正产生监督。工程上还要继续追问同一个协议能否在预训练、SFT、偏好优化、工具调用、多模态训练和线上推理之间保持一致。
 
-1. BPE、SentencePiece、byte-level tokenizer。
-2. 词表大小和压缩率。
-3. 特殊 token：BOS、EOS、PAD、UNK、system、user、assistant、tool。
-4. Chat template 和 label mask。
-5. 多模态 token、图像 patch token、语音 token。
-
-## 面试重点
-
-Tokenizer 不是简单预处理，而是模型输入空间的定义。它会影响训练 token 数、推理成本、上下文利用率和跨语言表现。
+本章从 BPE、SentencePiece 和 byte-level tokenizer 讲到词表大小、压缩率、special token、chat template、label mask、packing、偏好数据、工具调用和多模态 token，最后用一个小型实现把这些关系串起来。这里的代码是帮助读者看见协议的教学模型，不把它冒充成某个具体模型的生产 tokenizer。
 
 ## 为什么 tokenizer 是训练协议
 
@@ -37,7 +29,7 @@ Tokenizer 不是简单预处理，而是模型输入空间的定义。它会影�
 
 ### Tokenizer 与数据格式的资料边界
 
-按照 `WRITING_PLAN.md` 的要求，本章第二轮精修前核对了 BPE 原论文、SentencePiece 论文、OpenAI `tiktoken`、Hugging Face Tokenizers / Transformers tokenizer 文档、Transformers chat template 文档、TRL `SFTTrainer` 的 assistant-only / completion-only loss 说明，以及 PyTorch `CrossEntropyLoss(ignore_index)` 文档。
+本章参考了 BPE 原论文、SentencePiece 论文、OpenAI `tiktoken`、Hugging Face Tokenizers / Transformers tokenizer 文档、Transformers chat template 文档、TRL `SFTTrainer` 的 assistant-only / completion-only loss 说明，以及 PyTorch `CrossEntropyLoss(ignore_index)` 文档。
 
 本章聚焦 tokenizer 和训练数据格式的工程协议：分词映射、词表大小、压缩率、special token、chat template、label mask、packing、SFT / 偏好 / tool calling / 多模态格式和扩词表风险。它不展开生产级 tokenizer 训练作业、完整 BPE / Unigram LM 训练器源码、所有模型家族模板差异，也不替代框架官方接口说明。
 
@@ -147,6 +139,20 @@ SentencePiece 常用于多语言模型，因为它可以直接从原始文本训
 
 面试中要注意：SentencePiece 不是单一切分算法，而是一个 tokenizer 训练和处理工具体系。
 
+其中的 Unigram LM 路线与 BPE 的“逐轮合并”不同。它先准备一个较大的候选片段集合，为每个片段估计概率，再逐步删除对语料似然影响较小的片段。对字符串 `x` 的一种切分 `s`，可以用片段概率的乘积表示其概率：
+
+```math
+p(s)=\prod_{u\in s}p(u)
+```
+
+由于同一个字符串可能有多种切分，Unigram LM 更完整的目标会对所有可行切分求和：
+
+```math
+p(x)=\sum_{s\in\mathcal{S}(x)}p(s)
+```
+
+编码时再从候选切分中选择概率最高的路径，或按照实现支持的采样策略产生不同切分。这里的 `\mathcal{S}(x)` 是能拼回原字符串 `x` 的所有切分，`p(u)` 是片段 `u` 的概率。这个机制解释了为什么 Unigram LM 不是“SentencePiece 的另一种名字”：SentencePiece 是工具体系，BPE 和 Unigram LM 是其中可以采用的不同训练算法。
+
 ### 2.3 Byte-level tokenizer
 
 Byte-level tokenizer 从字节层面保证覆盖率。任意 Unicode 字符最终都能被表示，因此几乎没有 OOV。
@@ -154,10 +160,10 @@ Byte-level tokenizer 从字节层面保证覆盖率。任意 Unicode 字符最�
 覆盖率可以写成：
 
 ```math
-\forall x,\quad T_{\mathrm{byte}}(x)\ne \varnothing
+x\ne\epsilon\ \Longrightarrow\ |T_{\mathrm{byte}}(x)|\ge 1
 ```
 
-意思是任何输入字符串都至少能退化成字节序列再编码。这个性质对代码、脏数据、混合语言和特殊符号很重要。
+意思是任意非空输入都能退化成至少一个字节级 token；在可逆实现中，还应满足解码后能够还原原字符串。这个性质消除了词表层面的 OOV，但不保证序列短、切分符合语义，或模型已经学会该字符的用法。它对代码、脏数据、混合语言和特殊符号很重要。
 
 优点：
 
@@ -267,22 +273,15 @@ C_{\mathrm{char}}\approx \frac{C_{\mathrm{tok}}}{\rho_{\mathrm{char}}}
 
 Special token 是具有控制语义的 token，不是普通字符串。
 
-常见 special token：
+常见控制符号可以分成三类：
 
-| token | 作用 |
-| --- | --- |
-| BOS | 序列开始 |
-| EOS | 序列结束 |
-| PAD | batch padding |
-| UNK | 未知 token |
-| system | 系统指令边界 |
-| user | 用户消息边界 |
-| assistant | 助手消息边界 |
-| tool | 工具调用或工具结果边界 |
-| image | 图像占位符 |
-| audio | 音频占位符 |
+| 类别 | 例子 | 作用 |
+| --- | --- | --- |
+| tokenizer special id | BOS、EOS、PAD、UNK | 由 tokenizer 直接管理的序列控制符号 |
+| chat/template marker | system、user、assistant、tool | 消息角色和工具事件的边界；有的模型是单独 token，有的只是模板展开出的字符串序列 |
+| multimodal placeholder | image、audio、video | 视觉或音频信息接入语言序列的位置；一个占位符也可能在模型内部扩展成很多连续表示 |
 
-这些 token 的处理必须在训练、微调、评估和推理中一致。
+因此，表里的名字不是跨模型通用的固定词表。真正的协议由 tokenizer 配置、模板代码、模型实现和训练数据共同决定。查看一个模型时，应同时检查 token 字符串、token id、是否为 `special`、模板如何插入，以及推理端使用哪一个结束条件。这些定义必须在预训练、微调、评估和推理中一致。
 
 如果训练时使用一种格式，推理时使用另一种格式，模型可能无法正确理解角色、边界和停止条件。
 
@@ -310,7 +309,7 @@ attention mask 可以写成：
 a_t=\mathbf{1}[z_t\ne z_{\mathrm{pad}}]
 ```
 
-计算 loss 时也要忽略 PAD 对应位置：
+这里的 `a_t` 只表示 padding 维度上的可见性；causal LM 还需要另一个下三角的因果 mask，不能把“不是 PAD”误当成完整的 attention mask。计算 loss 时也要忽略 PAD 对应位置：
 
 ```math
 y_t=
@@ -423,6 +422,8 @@ L_{\mathrm{sft}}=
 
 其中 `m_t=1` 表示第 `t` 个 token 属于 assistant 监督区域，`m_t=0` 表示 system、user、tool result 或 padding 等只作为条件。分母用有效监督 token 数归一化，避免不同样本回答长度差异过大时 loss 口径混乱。
 
+这里的“只作为条件”是一个任务选择，不是所有数据集的硬规则。若训练目标是让模型学习生成工具调用，tool call 的参数可能属于监督区域；若目标是让模型根据真实工具结果作答，tool result 通常只作为输入上下文。mask 必须由任务目标和模板边界共同生成，不能只按字符串角色名称机械套用。
+
 面试表达：SFT 的关键不是只把对话拼起来，还要确保 label mask 和 chat template 对齐。
 
 ## 8. 预训练数据格式
@@ -472,6 +473,8 @@ b_j=S_{jC:(j+1)C-1}
 ```
 
 如果最后一个 block 不足 `C`，再用 PAD 补齐并设置 attention mask。关键是保留 EOS 或显式边界，否则模型会把两个无关文档误当作自然连续文本。
+
+还要区分“有 EOS”与“禁止跨文档注意力”。在普通 causal mask 下，第二个文档的 token 仍然可以看到同一 block 中更早的第一个文档；EOS 只是告诉模型这里出现了边界，并不会自动切断 attention。如果任务要求每个样本完全独立，就要使用 document-level attention mask，或按样本分别计算 loss。若训练目标允许模型利用前文，跨文档可见性也可能是有意设计，关键是让数据格式、mask 和评估假设一致。
 
 ## 9. SFT 数据格式
 
@@ -534,6 +537,8 @@ DPO、RLHF、GRPO 等偏好或强化学习阶段的数据格式和 SFT 不同。
 
 如果数据格式处理错，偏好优化可能会学到错误偏好，例如偏向长回答、模板化回答或过度拒答。
 
+也不能把所有后训练数据都压缩成 `chosen/rejected` 两列。DPO 和传统 pairwise reward model 常使用同一 prompt 下的两个回答；而 GRPO、RLVR 等方法可能保存同一 prompt 的多个候选、组内奖励、可验证结果或工具轨迹。数据 schema 应该随着训练目标变化，并明确每个奖励来自答案质量、格式约束、代码执行还是外部环境反馈。
+
 偏好样本可以写成：
 
 ```math
@@ -578,18 +583,20 @@ z_i^-=T(T_{\mathrm{chat}}(x_i,y_i^-))
 
 如果格式不稳定，模型可能生成非法 JSON，或者把工具结果当成用户输入。
 
-工具调用数据至少要保证函数名和参数 schema 可校验。简化门禁可以写成：
+工具调用数据至少要保证函数名和参数 schema 可校验。可以把一条工具轨迹的完整性记录成一个检查向量：
 
 ```math
-G_{\mathrm{tool}}=
-g_{\mathrm{name}}\,
-g_{\mathrm{json}}\,
-g_{\mathrm{schema}}\,
-g_{\mathrm{result}}\,
-g_{\mathrm{boundary}}
+\mathbf{c}_{\mathrm{tool}}=
+\bigl(
+c_{\mathrm{name}},
+c_{\mathrm{json}},
+c_{\mathrm{schema}},
+c_{\mathrm{result}},
+c_{\mathrm{boundary}}
+\bigr)
 ```
 
-这些检查分别表示工具名合法、JSON 可解析、参数符合 schema、工具结果和最终回答一致、tool call / tool result / assistant 边界清楚。
+这些检查分别表示工具名合法、JSON 可解析、参数符合 schema、工具结果和最终回答一致、tool call / tool result / assistant 边界清楚。它们描述一条样本留下了哪些可检查证据，不意味着只要五项为真，工具就一定安全；权限、幂等性、超时、重试和真实工具副作用仍需在运行时单独处理。
 
 ## 12. 多模态 token
 
@@ -615,7 +622,21 @@ g_{\mathrm{boundary}}
 
 语音模型也可能使用 audio token、codec token 或音频 encoder 输出。
 
-面试表达：多模态 token 的关键是对齐。文本 token、图像 patch、音频片段和位置关系必须在模型输入中有一致协议。
+若图像高度、宽度为 `H,W`，视觉 patch 边长为 `P`，并且每个 patch 保留一个视觉位置，则图像位置数的粗略估计为：
+
+```math
+N_{\mathrm{image}}=
+\left\lceil\frac{H}{P}\right\rceil
+\left\lceil\frac{W}{P}\right\rceil
+```
+
+如果文本序列有 `N_text` 个 token，模型直接把视觉位置展开到语言序列，那么序列长度大致是：
+
+```math
+N_{\mathrm{seq}}=N_{\mathrm{text}}+N_{\mathrm{image}}+N_{\mathrm{audio}}+N_{\mathrm{special}}
+```
+
+真实模型可能先用 vision encoder、resampler 或 projector 压缩视觉表示，也可能让 `<image>` 只作为一个占位符而不直接等于 `N_image` 个词表 token。因此，看到产品文档写“支持图像输入”时，不能只数 `<image>` 字符，还要确认视觉 encoder 的输出长度、插入位置、位置编码和训练时的对齐方式。文本 token、图像 patch、音频片段和时间关系如果没有同一套协议，模型可能看到了模态内容，却不知道它们之间如何对应。
 
 ## 13. Tokenizer 扩展
 
@@ -655,6 +676,8 @@ E'\in \mathbb{R}^{V'\times d}
 ```
 
 新增 token embedding 可以随机初始化，也可以用相关 token embedding 的均值初始化，但无论哪种方式，都需要后续训练让模型真正学会这些 token 的语义。
+
+如果输入 embedding 和输出 softmax 权重不共享，新增 `K` 个 token 至少会分别增加两组参数；若使用 tied embedding，输入和输出可能共享同一组新增行，但 checkpoint、分片文件和 tokenizer 配置仍必须同步更新。更隐蔽的问题是：数据集里保存的 token id、模板里的字符串、服务端加载的词表和量化后的 embedding 行数必须来自同一版本，否则模型可能不报错，却把某个 id 解释成完全不同的符号。
 
 面试表达：新增 special token 是模型协议变更，不是只改配置文件。
 
@@ -823,7 +846,7 @@ new_vocab_size = len(vocab)
 embedding_rows = new_vocab_size
 
 packed_eos_count = sum(block.count(vocab["<eos>"]) for block in blocks)
-gates = {
+checks = {
     "specials": all(token in vocab for token in SPECIAL_TOKENS),
     "assistant_only_labels": prompt_label_count == 0 and assistant_label_count > 0,
     "pad_mask": all(
@@ -846,8 +869,9 @@ print("packed_pad_count=", [mask.count(0) for mask in attention_masks])
 print("packed_eos_count=", packed_eos_count)
 print("old_vocab_size=", old_vocab_size)
 print("new_vocab_size=", new_vocab_size)
-print("gates=", gates)
-print("gate_pass=", all(gates.values()))
+print("checks=", checks)
+data_format_ready = all(checks.values())
+print("data_format_ready=", data_format_ready)
 ```
 
 运行后应看到：
@@ -863,8 +887,8 @@ packed_pad_count= [5, 2]
 packed_eos_count= 3
 old_vocab_size= 36
 new_vocab_size= 38
-gates= {'specials': True, 'assistant_only_labels': True, 'pad_mask': True, 'packing_shape': True, 'eos_boundary': True, 'vocab_resize': True}
-gate_pass= True
+checks= {'specials': True, 'assistant_only_labels': True, 'pad_mask': True, 'packing_shape': True, 'eos_boundary': True, 'vocab_resize': True}
+data_format_ready= True
 ```
 
 这个 demo 里有几个检查点：
@@ -945,7 +969,23 @@ loss 可能正常下降，但模型学到复述 prompt 或生成格式异常。
 image token 通常不是图片像素本身，而是图像输入在语言模型序列中的占位或桥接位置。真实视觉信息可能来自 vision encoder 的 patch embedding，再通过 projector 接入 LLM。关键是文本 token 和视觉 embedding 在输入序列中要有一致的对齐协议。
 ```
 
-## 17. 本章小结
+## 17. 资料边界与延伸阅读
+
+本章的公式用于解释 tokenizer 和数据格式之间的关系，不代表所有模型都采用同一套 token 字符串、模板或 loss mask。尤其是 `system`、`user`、`assistant`、`tool` 和 `<image>` 这些名字，必须以具体模型的 tokenizer 配置、模板实现和模型卡为准；“看起来像一个特殊 token”不等于它在词表中拥有独立 id。
+
+可以优先阅读以下资料：
+
+- [Neural Machine Translation of Rare Words with Subword Units](https://arxiv.org/abs/1508.07909)：BPE 子词切分用于神经机器翻译的原始论文。
+- [SentencePiece: A simple and language independent subword tokenizer and detokenizer for Neural Text Processing](https://arxiv.org/abs/1808.06226)：SentencePiece、BPE 和 Unigram LM 的方法说明。
+- [OpenAI tiktoken](https://github.com/openai/tiktoken)：一个具体 byte-level BPE 实现的源码和词表接口。
+- [Hugging Face Tokenizers 文档](https://huggingface.co/docs/tokenizers/index)：tokenizer 训练、编码、special token 和对齐信息的工程接口。
+- [Transformers Chat Templates 文档](https://huggingface.co/docs/transformers/main/en/chat_templating)：消息序列化、`apply_chat_template` 和生成提示的模板边界。
+- [TRL SFTTrainer 文档](https://huggingface.co/docs/trl/main/en/sft_trainer)：SFT 数据格式、completion-only / assistant-only loss 的实现说明。
+- [PyTorch CrossEntropyLoss 文档](https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html)：`ignore_index` 和逐位置分类损失的官方定义。
+
+这些资料能支撑算法和框架接口的基本事实，但不能替代当前项目对 tokenizer 版本、chat template、token id、截断策略、label mask 和线上推理协议的逐项核对。真正的工程结论必须绑定模型版本和可复现的配置文件。
+
+## 18. 本章小结
 
 本章核心结论：
 

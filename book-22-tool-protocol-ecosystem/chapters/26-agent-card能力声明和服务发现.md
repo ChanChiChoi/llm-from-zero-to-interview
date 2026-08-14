@@ -19,18 +19,18 @@
 
 > Agent Card 是 A2A 里的能力契约，它让 Agent 从“一个神秘聊天对象”变成“一个可发现、可匹配、可调用、可治理的服务化智能体”。
 
-## 26.0 本讲资料边界与第二轮精修口径
+## 26.0 本讲范围与资料
 
-本讲第二轮精修前，已按 `WRITING_PLAN.md` 核对 A2A 官方协议规范和 Agent Discovery 主题文档。正文采用这些公开资料中的稳定抽象：Agent Card 是远程 Agent 的自描述 manifest，服务发现可以通过 well-known URI、注册中心 / catalog、直接配置或定制发现机制完成；Agent Card 中与本章最相关的字段包括身份、描述、版本、supported interfaces、capabilities、default input / output modes、skills、security schemes、security requirements、provider、documentation、signatures 和扩展 Agent Card。
+本章参考了 A2A 官方协议规范和 Agent Discovery 主题文档。正文采用这些公开资料中的稳定抽象：Agent Card 是远程 Agent 的自描述 manifest，服务发现可以通过 well-known URI、注册中心 / catalog、直接配置或定制发现机制完成；Agent Card 中与本章最相关的字段包括身份、描述、版本、supported interfaces、capabilities、default input / output modes、skills、security schemes、security requirements、provider、documentation、signatures 和扩展 Agent Card。
 
 本讲不是逐字段翻译某个版本的协议定义，也不实现真实 A2A server、registry、OAuth 流程、签名校验或远程调用。不同实现可以对字段命名、扩展字段、缓存策略和发现方式做工程取舍；正文只保留面试和工程设计中稳定的结构：能力声明、技能粒度、接口声明、权限要求、服务发现、版本缓存、路由选择、trace 和 eval。
 
-第二轮补充重点是：
+本章的学习重点是：
 
-1. 把“Agent Card 是能力契约”落到可审计字段，而不是泛泛说服务说明书。
-2. 区分公开 Agent Card 和需要认证后获取的 extended Agent Card，避免把敏感能力、内部 URL 或租户策略无条件公开。
-3. 增加稳定 MathJax 公式，用覆盖率指标表达 Agent Card 质量、发现质量、路由质量和上线门禁。
-4. 补一个 0 依赖 Python demo，用 toy Agent Card 和委派请求审计字段完整度、skill 声明、supported interface、权限、版本缓存、发现匹配、路由决策、trace 和 eval。
+1. 把“Agent Card 是能力契约”落到可审计字段，而不是停留在“服务说明书”的类比。
+2. 区分公开 Agent Card 和需要认证后获取的 extended Agent Card，理解为什么敏感能力、内部 URL 或租户策略不能无条件公开。
+3. 用稳定的 MathJax 公式表达 Agent Card 质量、发现质量、路由质量和上线条件。
+4. 通过一个 0 依赖 Python demo，用 toy Agent Card 和委派请求检查字段完整度、skill 声明、supported interface、权限、版本缓存、发现匹配、路由决策、trace 和 eval。
 
 ## 26.1 为什么需要 Agent Card
 
@@ -744,7 +744,7 @@ C_{\mathrm{eval}} &= \mathrm{coverage}(\mathrm{eval\ labels})
 \end{aligned}
 ```
 
-最后可以定义一个 Agent Card 门禁：
+最后可以定义一个 Agent Card 验收条件：
 
 ```math
 G_{\mathrm{agent\_card}}=
@@ -1146,7 +1146,7 @@ pprint(audit(), sort_dicts=False)
 
 这段 demo 的输出会显示：`refund_analysis_ok` 和 `legal_review_ok` 能正确路由；`missing_scope_bad` 因权限不足被拦截；`unsupported_output_bad` 因输出模式不匹配被拦截；`unknown_skill_bad` 因没有匹配 skill 被拦截；`bad_card_quality` 因 Card / skill 信息不完整被拦截。
 
-关键指标中，`agent_card_field_completeness`、`supported_interface_readiness`、`agent_card_version_cache_readiness` 和 `agent_card_trace_readiness` 没过门禁。这个结果说明：即使发现和路由决策看起来正确，低质量 Agent Card、非 HTTPS interface、缺版本缓存和 trace 字段不足仍然会让系统不适合上线。
+关键指标中，`agent_card_field_completeness`、`supported_interface_readiness`、`agent_card_version_cache_readiness` 和 `agent_card_trace_readiness` 没通过验收。这个结果说明：即使发现和路由决策看起来正确，低质量 Agent Card、非 HTTPS interface、缺版本缓存和 trace 字段不足仍然会让系统不适合上线。
 
 ## 26.11 一个服务发现流程示例
 

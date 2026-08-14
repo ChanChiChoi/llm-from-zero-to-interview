@@ -4,11 +4,11 @@ Agent 是大模型应用里最容易让人高估短期效果、低估工程复�
 
 本章关注 Agent 落地中的真实坑：任务规划、工具 schema、参数校验、工具结果使用、状态管理、循环预算、可观测性、权限安全、高风险操作确认、prompt injection、防重试雪崩和事故复盘。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本章第二轮精修时对照了 OpenAI Agents SDK 的 tools、handoffs、guardrails、tracing / trace grading 资料，OpenAI Model Spec 对指令层级与不可信工具输出的边界描述，Anthropic 关于 workflows and agents / effective agents 的工程建议，以及第十七册 Agent、工具调用、ReAct、planning、memory、Agent 评估、Agent 安全和第十八册 Agent 产品落地相关内容。这里聚焦防御性的 Agent 落地排查和面试表达，不展开真实业务系统权限模型、生产级工作流平台、具体云厂商实现或可复用的提示注入文本。
+本章参考 OpenAI Agents SDK 的 tools、handoffs、guardrails、tracing / trace grading 资料，OpenAI Model Spec 对指令层级与不可信工具输出的边界描述，Anthropic 关于 workflows and agents / effective agents 的工程建议，以及第十七册 Agent、工具调用、ReAct、planning、memory、Agent 评估、Agent 安全和第十八册 Agent 产品落地相关内容。这里聚焦防御性的 Agent 落地排查和面试表达，不展开真实业务系统权限模型、生产级工作流平台、具体云厂商实现或可复用的提示注入文本。
 
-本章第二轮补强重点有三类：
+本章重点有三类：
 
 1. 把 task success、plan feasibility、tool selection accuracy、argument validity、tool execution success、observation use、state update、confirmation coverage、false completion、unauthorized action、budget overrun、trace completeness 和 tool result injection block 写成稳定公式。
 2. 用一个 0 依赖 Python demo 复盘 Agent 事故：工具失败但最终声称完成、跨用户订单修改被权限阻断、工具结果携带不可信指令、循环检索导致预算超限、trace 不完整。
@@ -545,7 +545,7 @@ Trace：每一步 action、arguments、permission、tool result、state update�
 
 复盘时不要只写“模型判断错误”。要说明为什么系统允许这个错误变成真实执行结果。
 
-## 10.18.1 关键公式与 Agent 事故指标速查
+### 10.18.1 关键公式与 Agent 事故指标速查
 
 **1. Agent 任务 trace 抽象**
 
@@ -615,7 +615,7 @@ C_{\mathrm{state}}=\frac{1}{M_s}\sum_{m=1}^{M_s}\mathbf{1}[\Delta s_m\ \mathrm{r
 C_{\mathrm{confirm}}=\frac{\sum_m \mathbf{1}[r_m=\mathrm{high}\land h_m=1]}{\sum_m \mathbf{1}[r_m=\mathrm{high}]}
 ```
 
-其中 `r_m` 是动作风险等级，`h_m` 表示是否有明确人工确认。高风险动作的确认覆盖率通常应作为硬门禁。
+其中 `r_m` 是动作风险等级，`h_m` 表示是否有明确人工确认。高风险动作的确认覆盖率通常应作为硬性条件。
 
 **9. False Completion Rate**
 
@@ -649,7 +649,7 @@ R_{\mathrm{inj}}=\frac{\sum_i \mathbf{1}[\mathrm{untrusted}_i=1\land \mathrm{blo
 
 工具、网页、邮件和文档返回内容只能作为不可信数据，不能成为更高优先级指令。
 
-**13. Agent 事故门禁**
+**13. Agent 事故验收条件**
 
 ```math
 G_{\mathrm{agent}}=\mathbf{1}\left[
@@ -668,9 +668,9 @@ R_{\mathrm{succ}}\ge\tau_{\mathrm{succ}}
 \right]
 ```
 
-这个门禁把任务成功、计划可执行、工具契约、observation / state、权限人审、真实性、预算和不可信工具输出放到同一张表里。任一硬门禁失败，都应该先降级到 suggest、draft、review 或 approval 形态。
+这组条件把任务成功、计划可执行、工具契约、observation / state、权限人审、真实性、预算和不可信工具输出放到同一张表里。任一硬检查失败，都应该先降级到 suggest、draft、review 或 approval 形态。
 
-## 10.18.2 最小可运行 Agent 事故审计 demo
+### 10.18.2 最小可运行 Agent 事故审计 demo
 
 下面的 demo 不依赖外部库。它故意构造 5 个 Agent trace：正常销售报告、报销提交工具失败但最终声称完成、跨用户订单修改被权限阻断、网页工具结果携带不可信指令边界失败、循环检索导致预算和 trace 失败。
 
@@ -894,7 +894,7 @@ failed_gates= ['task_plan', 'tool_contract', 'observation_state', 'permission_co
 gate_pass= False
 ```
 
-这段输出说明：Agent 事故不能只看最终回复是否像完成任务。`expense_false_done` 的工具执行失败但最终状态声称完成；`address_wrong_owner` 说明参数结构合法不等于业务合法；`web_lookup_injection` 说明不可信工具结果边界失败会触发高风险工具；`looping_search_budget` 说明没有停止条件和 trace 覆盖时，成本和延迟会快速失控。修复顺序应先补工具执行 truthfulness、业务校验和权限门禁，再补 observation / state 更新、预算停止条件、trace 完整性和注入边界测试。
+这段输出说明：Agent 事故不能只看最终回复是否像完成任务。`expense_false_done` 的工具执行失败但最终状态声称完成；`address_wrong_owner` 说明参数结构合法不等于业务合法；`web_lookup_injection` 说明不可信工具结果边界失败会触发高风险工具；`looping_search_budget` 说明没有停止条件和 trace 覆盖时，成本和延迟会快速失控。修复顺序应先补工具执行 truthfulness、业务校验和权限验收条件，再补 observation / state 更新、预算停止条件、trace 完整性和注入边界测试。
 
 ## 10.19 面试题：Agent 工具调用失败怎么排查
 

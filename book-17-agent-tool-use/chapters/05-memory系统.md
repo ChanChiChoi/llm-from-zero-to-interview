@@ -6,9 +6,9 @@ Memory 是 Agent 从“单次任务执行器”变成“持续协作伙伴”的
 
 本章系统讲 Agent memory：短期记忆、长期记忆、向量记忆、情景记忆、语义记忆、用户偏好、写入与更新、检索与过滤、遗忘机制、隐私安全、memory 与 RAG 的关系、评估指标，以及一个 0 依赖 Python demo，用来审计 toy memory 系统。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本章第二轮精修时，按 `WRITING_PLAN.md` 联网核对了 Generative Agents、MemGPT、Reflexion、OpenAI Agents SDK sessions、LangGraph memory 文档、OWASP GenAI prompt injection / sensitive information disclosure 和 NIST AI RMF 的公开资料边界。
+本章参考了 Generative Agents、MemGPT、Reflexion、OpenAI Agents SDK sessions、LangGraph memory 文档、OWASP GenAI prompt injection / sensitive information disclosure 和 NIST AI RMF 的公开资料边界。
 
 本章采用以下口径：
 
@@ -131,7 +131,7 @@ w_\rho \rho_i
 
 其中 `d_i` 是过期或陈旧惩罚，`\rho_i` 是风险惩罚。这个公式表达的是：相关性重要，但不是唯一信号；过期、高风险、低置信的记忆不能因为“看起来相似”就进入上下文。
 
-权限门禁可以写成：
+权限准入条件可以形式化为：
 
 ```math
 A_i(q)=
@@ -148,7 +148,7 @@ I_{\mathrm{user}}(q,m_i)
 S_i^\star=A_i(q)\cdot S_i
 ```
 
-写入门禁可以写成：
+写入准入条件可以形式化为：
 
 ```math
 G_{\mathrm{write}}(m_i)=
@@ -225,7 +225,7 @@ P_{\mathrm{ret}}\ge\tau_p
 ]
 ```
 
-这个门禁回答：memory 系统是否能在有用、准确、安全、可控之间达到最低上线要求。
+这组条件回答：memory 系统是否能在有用、准确、安全、可控之间达到最低上线要求。
 
 ## 5.5 短期记忆
 
@@ -590,7 +590,7 @@ task_success_lift
 
 ## 5.19 最小可运行 memory audit demo
 
-下面这个 demo 不依赖任何第三方库。它用词集合相似度近似 embedding retrieval，模拟 memory 检索、权限过滤、过期惩罚、冲突检测和写入门禁。
+下面这个 demo 不依赖任何第三方库。它用词集合相似度近似 embedding retrieval，模拟 memory 检索、权限过滤、过期惩罚、冲突检测和写入验收条件。
 
 它故意保留一条过期 Python 版本记忆，并构造一条与新记忆冲突的旧记忆，所以最终 `gate_pass=False`。这不是 demo 出错，而是为了展示 memory gate 如何暴露风险。
 

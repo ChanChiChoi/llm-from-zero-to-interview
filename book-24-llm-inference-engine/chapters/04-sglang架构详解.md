@@ -8,9 +8,9 @@
 
 > Prefill 决定首 token 等多久，Decode 决定后续 token 多快，KV Cache 决定显存和并发，Token Streaming 决定用户如何感知生成过程。
 
-## 4.0 本讲资料边界与第二轮精修口径
+## 4.0 本讲范围与资料
 
-本章讲的是 Prefill、Decode、KV Cache 和 Token Streaming 的稳定机制，不是 SGLang 源码导读。第二轮精修时，本章按下面口径处理：
+本章讲的是 Prefill、Decode、KV Cache 和 Token Streaming 的稳定机制，不是 SGLang 源码导读。本章按下面口径处理：
 
 1. KV Cache 的基础定义参考 Hugging Face Transformers cache 文档：cache 用来复用自回归生成中的历史 key / value，避免每轮重复计算历史 token。
 2. request lifecycle、scheduler、KV cache manager 和 worker 的模块边界参考 vLLM、TGI 和 Triton 等公开 serving 抽象，但本章不绑定具体 runtime 的内部字段名。
@@ -411,7 +411,7 @@ streaming backlog 可以用增量事件描述：
 Q_{\mathrm{stream}}(t)=Q_{\mathrm{stream}}(t-1)+C_{\mathrm{emit}}(t)-C_{\mathrm{flush}}(t)
 ```
 
-其中 `C_emit` 是 decode 生成的 chunk 数，`C_flush` 是客户端已经消费的 chunk 数。最终阶段门禁可以写成：
+其中 `C_emit` 是 decode 生成的 chunk 数，`C_flush` 是客户端已经消费的 chunk 数。最终阶段准入条件可以形式化为：
 
 ```math
 G_{\mathrm{phase}}=G_{\mathrm{prefill}}G_{\mathrm{decode}}G_{\mathrm{kv}}G_{\mathrm{stream}}G_{\mathrm{cleanup}}

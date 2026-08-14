@@ -8,13 +8,13 @@
 
 > 大模型推理不是一次普通函数调用，而是由 prefill、decode 和 KV cache 管理共同决定的在线计算过程。
 
-## 28.0 本讲资料边界与第二轮精修口径
+## 28.0 本讲范围与资料
 
-本讲按 `WRITING_PLAN.md` 的第二轮要求做过资料校准。重点参考的是 vLLM 官方文档中 PagedAttention、KV cache block、prefix caching、TTFT / TPOT / prefill / decode / KV 指标的公开口径；TensorRT-LLM 官方文档中 paged KV cache、in-flight batching、chunked prefill、KV cache reuse、KV cache offload 和 disaggregated serving 的工程边界；SGLang 官方文档中 RadixAttention / cache、continuous batching、PD disaggregation 和 structured serving 的边界；以及 Hugging Face TGI 文档中 streaming、PagedAttention 和 Prometheus 指标的说明。
+本章参考 vLLM 官方文档中 PagedAttention、KV cache block、prefix caching、TTFT / TPOT / prefill / decode / KV 指标的公开口径；TensorRT-LLM 官方文档中 paged KV cache、in-flight batching、chunked prefill、KV cache reuse、KV cache offload 和 disaggregated serving 的工程边界；SGLang 官方文档中 RadixAttention / cache、continuous batching、PD disaggregation 和 structured serving 的边界；以及 Hugging Face TGI 文档中 streaming、PagedAttention 和 Prometheus 指标的说明。
 
 这些资料共同指向一个稳定事实：LLM 推理不是“一个 batch forward”这么简单。Prefill 处理输入上下文，通常决定首 token 等待；decode 逐 token 生成，通常决定输出流畅度；KV cache 是连接两者的运行时状态，决定显存容量、并发上限、长上下文成本和调度风险。
 
-本章只抽象截至 2026-06 仍稳定的资源画像口径，不把某个框架的具体指标名、默认 block size、benchmark 数值、显卡型号或云实例配置写成通用标准。正文中的公式用于容量估算和面试表达，真实上线仍要用目标模型、tokenizer、runtime、硬件、量化方式和流量分布实测校准。
+本章聚焦截至 2026-06 仍稳定的资源画像口径，不把某个框架的具体指标名、默认 block size、benchmark 数值、显卡型号或云实例配置写成通用标准。正文中的公式用于容量估算和面试表达，真实上线仍要用目标模型、tokenizer、runtime、硬件、量化方式和流量分布实测校准。
 
 ## 28.1 一次大模型生成请求发生了什么
 
@@ -422,6 +422,62 @@ Request -> Prefill Pool -> KV Transfer -> Decode Pool -> Streaming Response
 
 只有定位到阶段，才能做正确优化。
 
+### 28.18.1 显式 KV、latent cache 和递归 state 的容量模型
+
+小白可以把历史状态分成三类：显式 KV 是“每个历史 token 留下 K/V”；latent cache 是“每个 token 留下压缩后的中间表示”；递归 state 是“不断更新固定大小或分块状态”。它们都服务于 decode，但显存增长方式不同。
+
+设模型有 `L_g` 个显式 attention 层、`L_r` 个递归/线性 attention 层，第 `i` 个请求当前上下文长度为 `T_i`，KV head 数为 `H_{\mathrm{kv}}`，head dimension 为 `d_h`，KV 元素每项占 `b_{\mathrm{kv}}` 字节，递归状态每层规模近似为 `d_k d_v`，每项占 `b_{\mathrm{state}}` 字节，则可以先用下面的教学估算：
+
+```math
+M_{\mathrm{history}}\approx
+\sum_{i=1}^{B}
+\left(
+2L_gT_iH_{\mathrm{kv}}d_hb_{\mathrm{kv}}
++L_rd_kd_vb_{\mathrm{state}}
+\right)
++\sum_{i=1}^{B}M_{\mathrm{latent},i}
++M_{\mathrm{metadata}}
+```
+
+其中 `B` 是活跃请求数，`M_latent,i` 是第 `i` 个请求的模型特定压缩表示，`M_metadata` 包括 block table、position/state step、padding、通信缓冲区和临时 workspace。真实模型的 latent/state layout 可能分块、量化或跨设备分片，上式只用于建立容量边界。
+
+如果只有部分层是 local sliding-window attention，窗口为 `w`，可把该层的 `T_i` 换成 `min(T_i,w)`；global attention 层仍按完整上下文估算：
+
+```math
+M_{\mathrm{kv}}\approx
+\sum_{i=1}^{B}
+2\left(
+L_{\mathrm{local}}\min(T_i,w)
++L_{\mathrm{global}}T_i
+\right)H_{\mathrm{kv}}d_hb_{\mathrm{kv}}
+```
+
+这解释了为什么“1M context”不能直接换算成“单卡支持很多个 1M 请求”：只要仍有 global layer、latent cache、state、权重和运行时 workspace，并发上限就会被显存和带宽共同限制。KDA、Gated DeltaNet、Gated MLA 以及 local/global attention 组合还要求 runtime 在 reset、prefix sharing、packed sequence 和 request migration 时同时维护 token offset 与 recurrent step。
+
+专家评估这类模型时，不要只问“KV 减少了多少”，还要问：
+
+1. 精确 needle 检索、多文档定位和跨段推理是否保持。
+2. state 是否支持请求取消、重试、复制和跨 worker 迁移。
+3. prefix cache 命中时，显式 KV、latent 表示和递归 state 能否安全共享。
+4. kernel 是否能把理论节省转化为 TTFT、TPOT 和 tokens/s 改善。
+
+### 28.18.2 低精度和 speculative decoding 要计入资源画像
+
+FP8 KV、FP4/MXFP4/NVFP4 和 native INT4 的收益作用层次不同。权重低精度主要降低模型加载和矩阵乘的存储/带宽压力，KV 低精度主要提高历史状态并发；它们都需要记录 scale、padding、临时 buffer 和质量回归，不能用“4 bit 等于四分之一成本”作结论。
+
+对显式 KV，可以先写成：
+
+```math
+M_{\mathrm{kv}}(b_q)\approx
+2\sum_{i=1}^{B}L T_iH_{\mathrm{kv}}d_hb_q
++M_{\mathrm{scale}}
++M_{\mathrm{padding}}
+```
+
+Speculative decoding 还会同时出现 draft 临时状态和 target 验证状态。资源画像至少要记录 draft window、accepted prefix、rejected token、temporary KV peak、fallback 次数和 target calls；低接受率或 grammar 约束较强时，额外 draft 计算可能抵消收益。
+
+因此上线条件应同时看 `acceptance rate`、target call reduction、TTFT/TPOT、质量、临时 KV 峰值和 fallback，而不是只看某次 happy-path 的 tokens/s。
+
 ## 28.19 Prefill/Decode/KV 资源画像审计指标与最小 demo
 
 如果要把这一章落到平台工程，最核心的动作是建立“推理资源画像”：每个请求不只记录 QPS，还要记录输入 token、输出 token、TTFT、TPOT、prefill、decode、KV cache、prefix cache、长上下文、租户和成本。
@@ -432,7 +488,7 @@ Request -> Prefill Pool -> KV Transfer -> Decode Pool -> Streaming Response
 p_i=(x_i,y_i,c_i,q_i,f_i,d_i,k_i,b_i,r_i,s_i,t_i,o_i,z_i)
 ```
 
-其中 `x_i` 是输入 token 数，`y_i` 是输出 token 数，`c_i` 是上下文长度，`q_i` 是 queue 和 scheduler 状态，`f_i` 是 prefill 阶段，`d_i` 是 decode 阶段，`k_i` 是 KV cache 状态，`b_i` 是 batching 状态，`r_i` 是 prefix / prompt cache 复用，`s_i` 是 streaming 状态，`t_i` 是租户和优先级，`o_i` 是观测指标，`z_i` 是最终门禁。
+其中 `x_i` 是输入 token 数，`y_i` 是输出 token 数，`c_i` 是上下文长度，`q_i` 是 queue 和 scheduler 状态，`f_i` 是 prefill 阶段，`d_i` 是 decode 阶段，`k_i` 是 KV cache 状态，`b_i` 是 batching 状态，`r_i` 是 prefix / prompt cache 复用，`s_i` 是 streaming 状态，`t_i` 是租户和优先级，`o_i` 是观测指标，`z_i` 是最终验收条件。
 
 统一覆盖率可以写成：
 
@@ -466,13 +522,13 @@ prefix cache 的收益可以用节省的 prefill token 或 prefill 时间表示�
 R_{\mathrm{prefix}}=\frac{N_{\mathrm{hit\_tokens}}}{N_{\mathrm{input\_tokens}}}
 ```
 
-最终资源画像门禁可以写成：
+最终资源画像准入条件可以形式化为：
 
 ```math
 G_{\mathrm{resource}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land T_{\mathrm{ttft,p95}}\le B_{\mathrm{ttft}} \land T_{\mathrm{tpot,p95}}\le B_{\mathrm{tpot}} \land R_{\mathrm{kv}}\le \rho_{\mathrm{kv}} \land P_0=0\right]
 ```
 
-下面是一个 0 依赖 demo。它不会模拟真实 GPU kernel，而是把 Prefill、Decode、KV cache 和资源画像门禁变成可运行的审计表。
+下面是一个 0 依赖 demo。它不会模拟真实 GPU kernel，而是把 Prefill、Decode、KV cache 和资源画像验收条件变成可运行的审计表。
 
 ```python
 # Prefill / Decode / KV Resource Profile Audit: 0-dependency teaching demo.
@@ -717,7 +773,7 @@ print(f"failed_gates={audit['failed_gates']}")
 print(f"resource_profile_gate_pass={audit['resource_profile_gate_pass']}")
 ```
 
-这个 demo 想说明：推理慢不是一个单点指标问题。你必须同时证明输入 / 输出 token 分布、prefill、decode、TTFT、TPOT、KV cache、分页块管理、prefix cache、长上下文、多租户、continuous batching、PD 分离、streaming、observability 和成本容量都可观测、可解释、可门禁。
+这个 demo 想说明：推理慢不是一个单点指标问题。你必须同时证明输入 / 输出 token 分布、prefill、decode、TTFT、TPOT、KV cache、分页块管理、prefix cache、长上下文、多租户、continuous batching、PD 分离、streaming、observability 和成本容量都可观测、可解释、可验收条件。
 
 ## 28.20 面试常见追问
 
@@ -762,6 +818,6 @@ print(f"resource_profile_gate_pass={audit['resource_profile_gate_pass']}")
 4. 长上下文会同时放大 prefill 成本和 KV cache 压力。
 5. 大模型推理不能只看 QPS，要看 token 吞吐、延迟、cache 和成本。
 6. 推理优化必须按阶段定位瓶颈，而不是盲目加机器。
-7. 生产推理平台需要用资源画像门禁同时约束 prefill、decode、KV cache、长上下文、多租户、streaming 和成本。
+7. 生产推理平台需要用资源画像验收条件同时约束 prefill、decode、KV cache、长上下文、多租户、streaming 和成本。
 
 下一章我们会继续讲 Continuous Batching、PagedAttention 和队列调度，理解 runtime 如何在高并发下提升吞吐并控制延迟。

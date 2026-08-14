@@ -8,13 +8,13 @@
 
 > 大模型推理的核心挑战不是单个请求能不能跑，而是大量长短不一的请求如何在有限 GPU 和显存下公平、高效、低延迟地一起跑。
 
-## 29.0 本讲资料边界与第二轮精修口径
+## 29.0 本讲范围与资料
 
-本讲按 `WRITING_PLAN.md` 的第二轮要求做过资料校准。重点参考的是 vLLM 的 PagedAttention / KV cache block / scheduler 公开资料和论文口径，TensorRT-LLM 对 in-flight batching、paged KV cache、chunked prefill 和调度策略的工程说明，SGLang 对 continuous batching、RadixAttention / cache 和 serving runtime 的公开说明，以及 Hugging Face TGI 对 streaming、PagedAttention 和 Prometheus 指标的公开说明。
+本章参考 vLLM 的 PagedAttention / KV cache block / scheduler 公开资料和论文口径，TensorRT-LLM 对 in-flight batching、paged KV cache、chunked prefill 和调度策略的工程说明，SGLang 对 continuous batching、RadixAttention / cache 和 serving runtime 的公开说明，以及 Hugging Face TGI 对 streaming、PagedAttention 和 Prometheus 指标的公开说明。
 
 这些资料共同指向一个稳定事实：LLM serving 的 batching 不是传统“凑一批请求然后一起跑完”，而是围绕 decode iteration 动态维护 running set、waiting queue、prefill chunk、KV block、streaming 连接和租户配额。PagedAttention 也不是新的模型结构或新的 attention 数学公式，而是把逻辑连续的 KV cache 映射到物理上可分散管理的 blocks，从而降低碎片、支持动态调度和 prefix / block 级复用。
 
-本章只抽象截至 2026-06 仍稳定的调度和容量画像口径，不把某个 runtime 的默认 block size、调度参数、指标字段名、benchmark 数值或云实例配置写成通用标准。正文中的公式用于面试表达、容量估算和系统设计推导；真实上线仍要用目标模型、tokenizer、runtime、硬件、量化方式、请求 token 分布和 SLO 实测校准。
+本章聚焦截至 2026-06 仍稳定的调度和容量画像口径，不把某个 runtime 的默认 block size、调度参数、指标字段名、benchmark 数值或云实例配置写成通用标准。正文中的公式用于面试表达、容量估算和系统设计推导；真实上线仍要用目标模型、tokenizer、runtime、硬件、量化方式、请求 token 分布和 SLO 实测校准。
 
 ## 29.1 为什么需要 batching
 
@@ -448,7 +448,7 @@ Continuous batching 和队列调度常见故障包括：
 s_i=(a_i,u_i,p_i,x_i,y_i,q_i,r_i,b_i,k_i,c_i,m_i,z_i)
 ```
 
-其中 $a_i$ 是到达时间，$u_i$ 是租户，$p_i$ 是优先级，$x_i$ 是输入 token 数，$y_i$ 是最大输出 token 数，$q_i$ 是队列等待策略，$r_i$ 是 running / waiting / finished 状态，$b_i$ 是 KV block 占用，$k_i$ 是是否命中 prefix / KV 复用，$c_i$ 是取消或超时处理，$m_i$ 是指标记录，$z_i$ 是最终门禁结果。
+其中 $a_i$ 是到达时间，$u_i$ 是租户，$p_i$ 是优先级，$x_i$ 是输入 token 数，$y_i$ 是最大输出 token 数，$q_i$ 是队列等待策略，$r_i$ 是 running / waiting / finished 状态，$b_i$ 是 KV block 占用，$k_i$ 是是否命中 prefix / KV 复用，$c_i$ 是取消或超时处理，$m_i$ 是指标记录，$z_i$ 是最终验收结果。
 
 对每个审计维度 `j` 定义一个检查函数 $g_j(s_i)\in\{0,1\}$，覆盖率可以写成：
 
@@ -456,13 +456,13 @@ s_i=(a_i,u_i,p_i,x_i,y_i,q_i,r_i,b_i,k_i,c_i,m_i,z_i)
 C_j=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[g_j(s_i)=1]
 ```
 
-最终可以用一个调度门禁收束：
+最终可以用一个调度验收条件收束：
 
 ```math
 G_{\mathrm{sched}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land T_{\mathrm{ttft,p95}}\le B_{\mathrm{ttft}} \land T_{\mathrm{tpot,p95}}\le B_{\mathrm{tpot}} \land R_{\mathrm{kv}}\le \rho_{\mathrm{kv}} \land R_{\mathrm{reject}}\le \rho_{\mathrm{reject}} \land P_0=0\right]
 ```
 
-下面这个 0 依赖 demo 做两件事：第一，模拟一个小型 continuous batching scheduler，展示请求动态到达、短请求优先、长 prompt 被 chunked prefill、running set 动态退出、KV block 被释放；第二，用审计表检查一个推理调度系统是否覆盖 arrival profile、continuous batching、token budget、prefill/decode 平衡、PagedAttention block、KV admission、长短请求隔离、多租户公平、取消释放、streaming 背压、指标和最终门禁。
+下面这个 0 依赖 demo 做两件事：第一，模拟一个小型 continuous batching scheduler，展示请求动态到达、短请求优先、长 prompt 被 chunked prefill、running set 动态退出、KV block 被释放；第二，用审计表检查一个推理调度系统是否覆盖 arrival profile、continuous batching、token budget、prefill/decode 平衡、PagedAttention block、KV admission、长短请求隔离、多租户公平、取消释放、streaming 背压、指标和最终验收条件。
 
 ```python
 # Continuous batching / PagedAttention scheduler audit: 0-dependency teaching demo.
@@ -709,7 +709,7 @@ print(f"failed_gates={audit['failed_gates']}")
 print(f"scheduler_gate_pass={audit['scheduler_gate_pass']}")
 ```
 
-这个 demo 想说明：Continuous Batching、PagedAttention 和队列调度不是三个孤立名词。请求动态加入退出需要 scheduler；scheduler 要靠 token budget 和 phase policy 平衡 TTFT / TPOT；动态请求又要求 KV block 能按需分配、释放和统计碎片；多租户环境还必须把长短请求隔离、公平性、取消释放、streaming 背压和最终上线门禁放进同一个审计表。
+这个 demo 想说明：Continuous Batching、PagedAttention 和队列调度不是三个孤立名词。请求动态加入退出需要 scheduler；scheduler 要靠 token budget 和 phase policy 平衡 TTFT / TPOT；动态请求又要求 KV block 能按需分配、释放和统计碎片；多租户环境还必须把长短请求隔离、公平性、取消释放、streaming 背压和最终上线条件放进同一个审计表。
 
 ## 29.21 面试常见追问
 

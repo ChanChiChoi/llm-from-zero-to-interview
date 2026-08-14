@@ -1,32 +1,31 @@
 # 第四章：Reward Hacking 与目标错配
 
-重点：reward model 漏洞、proxy objective、Goodhart 定律、KL 约束、偏好数据偏差、过度优化风险。
+当一个指标只是目标的近似，却被当成唯一目标强力优化时，系统可能越来越擅长取得
+高分，却越来越偏离真实质量。模型写出更长的回答、添加并不支持结论的引用、对
+所有敏感词一律拒答，甚至只针对公开测试编写代码，都是这种现象在大模型系统中的
+不同表现。
 
-面试重点：Reward hacking 不是“模型故意作恶”，而是模型在优化代理目标时找到了目标函数、奖励模型或评估指标的漏洞。
+本章把 Reward Hacking 放在代理目标（proxy objective）过度优化的链路中讨论：先
+区分 reward hacking、specification gaming、Goodhart 定律和更广义的目标错配，再
+分析 RLHF、DPO、RLAIF、best-of-n 和 LLM judge 为什么会暴露漏洞，最后用实验、
+多源评估、人工抽检和 RAG 案例说明怎样发现并缓解它。
 
-## 0. 本讲资料边界与第二轮精修口径
-
-按照 `WRITING_PLAN.md` 的要求，本讲精修前核对了 Concrete Problems in AI Safety、Training Language Models to Follow Instructions with Human Feedback、Learning to Summarize from Human Feedback、Scaling Laws for Reward Model Overoptimization、Direct Preference Optimization、RewardBench、OpenAI Evals / Model Spec 和前序 Alignment Problem / Scalable Oversight 章节资料边界。
-
-本讲聚焦 reward hacking 作为目标错配和 proxy objective 过度优化的工程表现：reward model、LLM judge、benchmark、用户满意度、安全分类器、代码测试和 RAG citation 指标都可能成为被优化的代理目标。
+资料依据包括 Concrete Problems in AI Safety、Training Language Models to Follow
+Instructions with Human Feedback、Learning to Summarize from Human Feedback、Scaling
+Laws for Reward Model Overoptimization、Direct Preference Optimization、RewardBench、
+OpenAI Evals / Model Spec，以及前序 Alignment Problem / Scalable Oversight 章节的
+资料边界。论文支持特定方法和实验条件，模型或治理规范支持风险组织；任何“真实
+质量提高”结论都需要独立的 gold eval 或线上结果。
 
 ```text
 真实目标 -> proxy reward -> 优化压力 -> proxy 漏洞暴露 -> reward hacking / over-optimization
 ```
 
-本讲只讨论防御性评估、训练治理和上线门禁，不提供构造可复用攻击提示、绕过安全策略、利用 reward model 漏洞刷分或规避评估系统的方法。涉及漏洞时只保留抽象指标和 toy case。
-
-## 本章目标
-
-学完本章，你要能回答：
-
-1. 什么是 reward hacking？
-2. Reward hacking、specification gaming、Goodhart 定律、目标错配有什么关系？
-3. 为什么 reward model 是 human preference 的 proxy？
-4. RLHF、DPO、best-of-n、LLM-as-a-Judge 中分别可能出现什么过度优化问题？
-5. KL 约束为什么能缓解但不能根治 reward hacking？
-6. 如何在真实项目中发现、评估和缓解 reward hacking？
-7. 面试中如何用小白友好例子和专家层机制讲清这个问题？
+本章讨论防御性评估、训练治理和部署控制，不提供构造可复用攻击提示、绕过安全
+策略、利用 reward model 漏洞刷分或规避评估系统的方法。涉及漏洞时只保留抽象
+指标和 toy case。初学者可以把它理解成“考试分数和真实能力分离”；工程读者则
+应能设计不同优化强度、独立 gold set 和高风险切片，判断分数提升究竟来自能力
+还是来自代理漏洞。
 
 ## 1. 来龙去脉：从奖励函数到奖励漏洞
 
@@ -200,6 +199,18 @@ Reward hacking 是目标错配在优化过程中的一种表现。
   -> reward hacking / specification gaming
 ```
 
+这里还有一个容易被忽略的前提：真实目标通常不是一个已经写在数据库里的数值。对“回答是否
+解决问题”“建议是否安全”“证据是否真的支持结论”这类属性，团队往往只能通过人工标注、
+专家复核或外部验证器得到近似测量。因此，审计时看到的 `u_i` 也不是上帝视角的真值，而是
+在明确标注协议、判定范围和不确定性之后得到的 gold 近似。把它称为 `true quality`，是为了
+和训练时的 proxy 区分，并不是宣称它没有测量误差。
+
+这一区分决定了 reward hacking 的诊断方式。若只在训练集上比较 `r` 和 `u`，模型可能已经
+适应了 gold set；若只比较两个连续分数，又可能把量纲、标注噪声和任务难度差异误当作目标
+错配。更稳妥的做法是保留成对样本、任务切片和独立 holdout，并同时报告平均质量、排序
+一致性、严重度加权失败率以及人工与自动判定的分歧。对于高风险任务，无法可靠测量的
+`u_i` 不应被悄悄当成低风险样本，而应进入专家复核或限制动作权限。
+
 ### 3.5 关键公式与 reward hacking 指标速查
 
 Reward hacking 可以先写成“真实效用”和“代理奖励”之间的背离。
@@ -274,13 +285,31 @@ B_{\mathrm{len}}=\mathrm{corr}(r_i,\ell_i)
 
 如果 `B_len` 很高，说明 reward model 或 judge 可能把“更长”误当成“更好”。
 
-一个简化 reward hacking 门禁可以写成：
+一次 reward hacking 审计可以把关键结果写成独立约束：
 
 ```math
-G_{\mathrm{rh}}=G_{\mathrm{gap}}\land G_{\mathrm{hack}}\land G_{\mathrm{human}}\land G_{\mathrm{len}}\land G_{\mathrm{dist}}\land G_{\mathrm{risk}}
+\mathcal{C}_{\mathrm{rh}}=\{
+H_{\mathrm{gap}}\leq t_h,
+R_{\mathrm{hack}}\leq t_r,
+Q_{\mathrm{human}}\geq t_q,
+|B_{\mathrm{len}}|\leq t_l
+\}
 ```
 
-面试中可以强调：reward hacking 不是只看 reward 曲线，而是看 proxy reward、human / gold eval、输出分布、长度偏置、风险切片和高 reward 样本抽检是否同时健康。
+其中阈值 `t_h`、`t_r`、`t_q` 和 `t_l` 应按风险、成本和任务分布设定。Reward
+hacking 不能只看 reward 曲线，还要同时观察 proxy reward、human/gold eval、输出
+分布、长度偏置、风险切片和高 reward 样本抽检；每项结果都应能回到样本和判定器。
+
+这些公式是审计的语言，不是自动生成“真实质量”的机器。`y_i^{\star}` 在开放式写作中
+通常不能用字符串相等判断，而要由 rubric、专家标签、执行结果或声明级证据判定；候选
+之间存在并列时，`argmax` 还需要一个明确的 tie 规则。若不同切片的任务难度差异很大，
+全局均值也会掩盖少数高严重度失败，所以应同时报告分片结果。实践中可以把质量记录成
+区间或带置信度的判断，而不是把一个未经校准的 judge 分数伪装成精确真值。
+
+另一个重要边界是相关性不等于因果性。长度和 reward 的相关性只能说明两者一起变化，
+不能单独证明 judge 因为长度而加分。要验证长度捷径，需要长度匹配、删去套话的风格消融、
+顺序交换或独立人工比较；同理，reward-human gap 扩大提示风险，但要通过 checkpoint、
+不同 `N` 或不同优化强度的重复测量，才能判断背离是否由优化造成。
 
 ## 4. LLM 中常见的 Reward Hacking
 
@@ -299,6 +328,11 @@ G_{\mathrm{rh}}=G_{\mathrm{gap}}\land G_{\mathrm{hack}}\land G_{\mathrm{human}}\
 3. 关键信息被淹没。
 4. 幻觉机会增加。
 
+长度偏差并不意味着所有长回答都不好。复杂任务本来就可能需要更多解释，真正的问题是
+在控制任务难度和信息量之后，额外的模板、重复和免责声明仍能稳定提高 proxy reward。
+因此检测时应构造长度相近但信息密度不同的回答，也应比较同一回答删去礼貌套话前后的
+评分变化。只有当质量没有提高而分数仍随长度上升时，才能把它归因于可利用的长度捷径。
+
 ### 4.2 自信语气偏差
 
 标注员可能更相信语气确定、结构清晰的回答。
@@ -306,6 +340,12 @@ G_{\mathrm{rh}}=G_{\mathrm{gap}}\land G_{\mathrm{hack}}\land G_{\mathrm{human}}\
 模型就学会自信表达。
 
 问题是：自信不等于真实。
+
+在事实问答和专业建议中，这个偏差尤其危险，因为用户通常无法即时验证答案。一个更稳健
+的训练目标要把事实正确性、证据支持和不确定性表达分开标注，而不是让“语气像专家”
+成为正确性的替代信号。评估时可以将同一组事实内容改写成确定、保守和明确承认未知的
+不同风格，检查 judge 是否在事实不变时偏爱某种语气；如果答案内容也改变，则不能把
+分数差解释为语气偏差。
 
 ### 4.3 安全模板过拟合
 
@@ -318,6 +358,12 @@ G_{\mathrm{rh}}=G_{\mathrm{gap}}\land G_{\mathrm{hack}}\land G_{\mathrm{human}}\
 3. 拒答理由机械。
 4. 安全替代质量差。
 
+这类失败的本质不是“拒答太多”这一单一计数，而是策略没有区分请求的意图、可执行
+风险和安全的替代路径。例如，同一关键词可能出现在风险分析、历史解释和实际操作请求
+中；按关键词触发的拒答会损失正常帮助，按模板训练的模型又可能在没有该关键词的表达
+中漏掉风险。评估必须同时包含需要拒答、可以安全回答、需要澄清和需要人工升级的样本，
+并分别统计 unsafe compliance、over-refusal 和 safe completion 质量。
+
 ### 4.4 引用和 RAG gaming
 
 如果评估只看是否有引用，模型可能在回答后加引用。
@@ -328,17 +374,34 @@ G_{\mathrm{rh}}=G_{\mathrm{gap}}\land G_{\mathrm{hack}}\land G_{\mathrm{human}}\
 
 代理目标变成 citation presence。
 
+因此“有引用”最多是结构性检查，不是支持关系的证明。一个回答可能包含正确存在的
+文档编号，却把文档中的条件、例外或时间版本读错；也可能把多个 claim 压在一个引用后面，
+使读者无法知道哪一段证据支持哪一个结论。可靠评估应先拆出关键 claim，再判断证据的
+相关性、蕴含关系、版本和权限范围，并把无法确认的 claim 标成不确定，而不是用引用数量
+抵消它。
+
 ### 4.5 Benchmark gaming
 
 模型或团队反复用同一 benchmark 调参。
 
 最终提升的可能是 benchmark 分数，而不是真实泛化能力。
 
+这里要区分“针对任务格式做合理适配”和“利用评测泄漏”。模型需要知道输出格式，属于
+正常的任务学习；但如果测试样本、答案、固定模板或评测器行为进入训练和调参闭环，分数
+就不再是独立证据。可信比较至少要保留未参与迭代的时间后样本、不同来源的数据和任务
+变体，并记录谁看过哪些测试信息。只报告一个公开榜单分数，无法回答模型是否在真实用户
+问题上泛化。
+
 ### 4.6 Code eval gaming
 
 如果只看公开测试通过率，模型可能生成针对测试样例的代码。
 
 如果测试覆盖不足，代码可能在隐藏边界条件上失败。
+
+代码任务还会出现另一层错配：测试通过说明某些输入输出关系成立，不等于代码具备正确的
+资源管理、权限约束、异常处理和可维护性。对 Agent 生成的补丁，除了公开和隐藏测试，
+还要检查是否修改了不应修改的文件、是否绕过验证、是否引入危险依赖，以及在失败时是否
+留下不可逆副作用。因而“通过率”应和测试覆盖、静态检查、沙箱行为及人工审查一起解释。
 
 ### 4.7 LLM-as-a-Judge gaming
 
@@ -350,6 +413,12 @@ G_{\mathrm{rh}}=G_{\mathrm{gap}}\land G_{\mathrm{hack}}\land G_{\mathrm{human}}\
 2. 过度解释。
 3. 使用 judge 喜欢的关键词。
 4. 避免承认不确定。
+
+Judge gaming 往往不是模型“知道评委是谁”才会发生，而是训练数据和筛选流程反复奖励了
+某些可观察风格。只要 judge 的评分规则稳定、可预测，模型就可能在不提高任务完成度的
+情况下复制这些风格。缓解办法包括隐藏 rubric 的部分细节、交换候选顺序、使用多个
+模型家族和人工 gold set，并对 judge 自身做反事实和风格消融测试；这些措施降低单一
+评委的可利用性，却不会自动消除所有评估偏差。
 
 ## 5. Reward Model 为什么容易被 Hack
 
@@ -407,6 +476,33 @@ RL 或 best-of-n 优化后，policy 输出分布会变化。
 
 Reward model 学到这些偏差后，优化过程会放大它们。
 
+### 5.5 从偏好标签到 reward model 的训练机制
+
+典型 reward model 并不是直接学习“什么是人类价值”，而是学习在同一输入下哪个候选更
+受偏好。给定输入 `x`、较优回答 `y^+` 和较差回答 `y^-`，一个常见的偏好模型写作：
+
+```math
+P_\phi(y^+ \succ y^-\mid x)=\sigma\left(r_\phi(x,y^+)-r_\phi(x,y^-)\right)
+```
+
+其中 `r_\phi` 是 reward model 输出的标量，`\sigma` 是 sigmoid 函数，`\phi` 是模型参数。
+训练通常最小化负对数似然：
+
+```math
+\mathcal{L}_{\mathrm{RM}}(\phi)=-\mathbb{E}\left[\log P_\phi(y^+\succ y^-\mid x)\right]
+```
+
+这个目标只要求模型在已见比较上把 `y^+` 排在 `y^-` 前面。它没有强迫 reward 的绝对值
+具有跨任务可比性，也没有保证模型遇到更长、更专业或分布外回答时仍保持同样的排序语义。
+因此，训练集上的 pairwise accuracy 很高，仍可能存在两种问题：模型在新分布上把表面
+风格排在事实正确性之前，或者它给某些异常输出极高分而训练比较集没有覆盖。
+
+工程上应把 reward model 当作测量器来校准。除了 held-out pairwise accuracy，还要检查
+不同任务切片的校准曲线、分数分布、候选长度和风格的相关性，并专门收集“流畅但错误”、
+“引用存在但不支持”和“安全模板正确但决策错误”的 hard negative。若 reward model
+输出会被用于高风险动作，最好记录不确定性和版本，并在低置信度区域转人工或使用可执行
+验证器，而不是让优化器继续放大一个未知的分数。
+
 ## 6. Reward Model Overoptimization
 
 ### 6.1 核心现象
@@ -449,7 +545,7 @@ Best-of-n sampling 也会。
 
 当 `n` 很大时，选出来的答案可能更会迎合 reward model，而不一定更符合真实偏好。
 
-### 6.4 面向专家：KL 约束
+### 6.4 机制与边界：KL 约束
 
 RLHF 中常用 KL penalty 限制新 policy 偏离 reference model 太远。
 
@@ -475,6 +571,11 @@ KL 约束能缓解过度优化，但不能根治。
 2. 小的分布偏移也可能产生关键风险。
 3. KL 是整体分布约束，不一定约束具体危险行为。
 4. beta 太大，模型学不到偏好；beta 太小，容易 reward hacking。
+
+KL 约束还有一个经常被忽略的解释：它约束的是新旧策略在整体输出分布上的距离，而不是
+“每条回答都安全”的逐样本约束。一个小概率但高影响的行为可以在总体 KL 很小的情况下
+出现；反过来，很多无害风格变化也可能消耗 KL 预算。部署时应把 KL 作为优化稳定性信号，
+把高风险行为单独作为硬性策略检查、工具权限约束和人工升级条件。
 
 ## 7. RLHF、DPO 和 Reward Hacking
 
@@ -508,6 +609,19 @@ DPO 不显式训练 reward model 和 RL policy loop，但它仍然优化偏好�
 
 DPO 简化了优化流程，但不消除目标错配。
 
+DPO 的常见形式可以写成：
+
+```math
+\mathcal{L}_{\mathrm{DPO}}(\theta)=-\mathbb{E}\left[\log\sigma\left(\beta\left(\log\frac{\pi_\theta(y^+\mid x)}{\pi_0(y^+\mid x)}-\log\frac{\pi_\theta(y^-\mid x)}{\pi_0(y^-\mid x)}\right)\right)\right]
+```
+
+这里 `\pi_\theta` 是待训练策略，`\pi_0` 是 reference policy，`y^+` 和 `y^-` 来自
+偏好对，`beta` 控制相对 reference 的尺度。这个公式说明，DPO 虽然省去了显式的
+reward-model 训练和在线 RL 循环，却仍然把偏好数据转成一个优化方向。若 chosen 回答
+因为更长、更自信或更符合标注格式而被选中，模型就会稳定地学习这些特征；若偏好对含有
+事实错误或安全边界错误，DPO 也会把它们写入策略。因此“没有单独的 reward model”
+不应被理解为“没有 proxy”。
+
 ### 7.3 RLAIF 中的风险
 
 RLAIF 使用 AI feedback。
@@ -519,13 +633,20 @@ RLAIF 使用 AI feedback。
 3. 原则解释不稳定。
 4. 缺少人类价值锚点。
 
-### 7.4 面试表达
+### 7.4 统一看待不同训练路线
 
 可以这样说：
 
 ```text
 RLHF、DPO、RLAIF 都是在优化某种偏好信号。只要偏好信号是 proxy，就存在过度优化和目标错配风险。区别在于 proxy 的来源和优化方式不同。
 ```
+
+比较训练路线时，不要只问哪一种算法分数更高，还要问它把哪一部分判断交给了谁：RLHF
+通常显式训练 reward model 并通过策略优化追随它，DPO 直接利用偏好对改变相对概率，
+RLAIF 则把一部分标注工作交给 AI judge 或原则驱动的反馈器。三者的失败证据也不同：
+RLHF 需要特别关注 reward overoptimization 和 KL 漂移，DPO 需要审查 chosen/rejected
+的构造和风格捷径，RLAIF 需要验证 AI feedback 与人类 gold set 的一致性。共同的审计
+对象始终是“优化前后行为是否更接近独立定义的真实目标”。
 
 ## 8. 如何发现 Reward Hacking
 
@@ -577,6 +698,15 @@ RLHF、DPO、RLAIF 都是在优化某种偏好信号。只要偏好信号是 pro
 
 分歧样本往往最有价值。
 
+一个实用的审计顺序是先固定同一批输入和解码预算，再保存每个候选的 proxy 分数、人工
+或专家判断、自动验证结果、长度、版本和风险切片。随后按“高 proxy/低质量”“低 proxy/
+高质量”“不同评估源分歧”三类抽样，而不是只抽取总体随机样本。这样既能发现 reward
+model 的系统偏差，也能发现人工 rubric 或自动判定器本身的问题。
+
+如果多个评估源都依赖同一份训练数据、同一个 judge 家族或同一套检索结果，它们的“一致”
+并不代表独立确认。审计报告应记录评估源之间的共同依赖，并保留原始样本和判定理由；
+否则所谓多源评估可能只是同一错误被重复计算。
+
 ## 9. 如何缓解 Reward Hacking
 
 ### 9.1 改进偏好数据
@@ -590,6 +720,12 @@ RLHF、DPO、RLAIF 都是在优化某种偏好信号。只要偏好信号是 pro
 5. 覆盖边界和高风险场景。
 6. 引入专家标注。
 
+偏好指南应先把“有帮助”“正确”“安全”“简洁”和“证据充分”拆成可以观察的判定维度，
+再规定冲突时的优先级。例如，短而正确的回答不应因为没有礼貌套话就输给长而错误的回答；
+高风险请求也不能用一般帮助性分数抵消不安全行为。hard negative 要覆盖这种反直觉对比，
+否则 reward model 只会继续学习容易的风格信号。标注过程中还要记录不确定、无法判断和
+专家升级，而不是把所有分歧强行压成二元 chosen/rejected。
+
 ### 9.2 改进 reward model
 
 包括：
@@ -600,6 +736,11 @@ RLHF、DPO、RLAIF 都是在优化某种偏好信号。只要偏好信号是 pro
 4. 训练多个 reward model 做 ensemble。
 5. 对 reward model 做 adversarial eval。
 
+扩大模型规模可能降低一部分拟合误差，却不会自动修复错误标签和遗漏的目标。held-out
+偏好集用于检查分布内泛化，跨领域和新 policy 输出用于检查分布偏移，校准曲线则用于判断
+“高分”是否真的意味着更可能被偏好。ensemble 可以把模型分歧暴露出来，但多个模型共享
+同一数据和架构时仍可能共享盲点，因此分歧降低也不能直接当成可靠性证明。
+
 ### 9.3 控制优化强度
 
 包括：
@@ -609,6 +750,12 @@ RLHF、DPO、RLAIF 都是在优化某种偏好信号。只要偏好信号是 pro
 3. 限制 best-of-n 的 n。
 4. 监控 reward-human gap。
 5. 限制输出长度和风格漂移。
+
+优化强度不是一个只在训练结束时记录的数字。它可以由 RL checkpoint、训练步数、KL
+漂移、best-of-n 的 `n` 或候选采样温度共同定义。每个强度点都应在同一 holdout 上测量
+proxy、人工质量、风险切片、长度和成本；一旦外部质量达到平台期而 proxy 继续上升，
+就应停止继续追分，并保留更保守的 checkpoint 作为回滚基线。early stopping 的依据
+必须来自独立指标，不能用被优化的 reward 自己决定何时停止。
 
 ### 9.4 多目标评估
 
@@ -625,6 +772,12 @@ RLHF、DPO、RLAIF 都是在优化某种偏好信号。只要偏好信号是 pro
 7. Over-refusal。
 8. Latency 和 cost。
 
+多目标评估的价值不只是把更多数字放在仪表盘上，而是防止一个指标替其他指标发言。可以
+报告一个便于比较的加权分数，但安全违规、权限越界和高严重度事实错误通常应作为单独
+约束或分层发布条件；否则平均 helpfulness 可能掩盖少量不可接受的失败。延迟和成本也
+要与质量绑定，例如“每个成功且有证据支持的任务成本”，而不是单独追求更长上下文或
+更多候选。
+
 ### 9.5 人工抽检和红队
 
 高 reward 样本也要抽检。
@@ -637,7 +790,26 @@ RLHF、DPO、RLAIF 都是在优化某种偏好信号。只要偏好信号是 pro
 4. Judge 和人工分歧。
 5. 上线前 regression suite。
 
-### 9.6 最小可运行 reward hacking 审计 demo
+人工抽检不应只挑最高分样本展示“模型表现很好”，而应采用分层抽样：按风险、任务类型、
+分数分位、长度、模型版本和评估分歧分层，并给高风险层设置最低样本量。红队样本的价值也
+不在于制造一个漂亮的攻击成功率，而在于暴露具体失败路径：哪一个输入条件、哪一个
+工具权限、哪一个判定器或哪一个回滚点失效。每个可复现失败都应有负责人、修复版本、
+回归用例和重新评估记录。
+
+### 9.6 从指标到上线决策
+
+缓解措施必须绑定到可观察的后果。降低 `best-of-n` 只会改变候选选择压力，增加专家
+标注只会改善部分 gold set；它们都不能替代对实际工具副作用的检查。一个可复现的决策
+记录至少应包含：评估数据版本、优化强度、主要指标、切片指标、失败样本、风险严重度、
+采取的动作和复测条件。
+
+例如，若总体 helpfulness 上升，但高风险领域的 `severity_weighted_hack` 超过阈值，
+合理动作不是用总体均值抵消它，而是暂停高风险动作、保留低风险范围的受限实验，并为
+高风险切片增加专家复核。只有复测表明真实质量改善且未引入新的高严重度失败，才有理由
+扩大优化范围。这个过程把“奖励更高”转换成可追溯的工程决策，而不是一个未经解释的
+发布标签。
+
+### 9.7 最小可运行 reward hacking 审计 demo
 
 下面这个 demo 不依赖外部库，也不读写文件。输入是一组抽象 toy case，每个 case 有多个候选回答，每个候选只有真实质量 `true_quality`、代理奖励 `proxy_reward`、长度和动作标签，不包含任何真实攻击提示或危险操作内容。
 
@@ -787,14 +959,37 @@ metrics = {
     "severity_weighted_hack": round(hack_severity / total_severity, 3),
 }
 
-gates = {
-    "proxy_mismatch": metrics["proxy_mismatch"] <= 0.20,
-    "reward_hacking": metrics["reward_hacking_rate"] <= 0.10,
-    "reward_human_gap": metrics["reward_human_gap"] <= 0.10,
-    "length_bias": abs(metrics["length_bias_corr"]) <= 0.35,
-    "high_reward_low_quality": metrics["high_reward_low_quality"] <= 0.10,
-    "severity_weighted_hack": metrics["severity_weighted_hack"] <= 0.10,
+thresholds = {
+    "proxy_mismatch": 0.20,
+    "reward_hacking_rate": 0.10,
+    "reward_human_gap": 0.10,
+    "length_bias_corr": 0.35,
+    "high_reward_low_quality": 0.10,
+    "severity_weighted_hack": 0.10,
 }
+
+actions = []
+if metrics["proxy_mismatch"] > thresholds["proxy_mismatch"]:
+    actions.append("重新检查 proxy 与真实质量的定义和独立 gold set")
+if metrics["reward_hacking_rate"] > thresholds["reward_hacking_rate"]:
+    actions.append("抽取追随 proxy 但真实质量低的样本做 error analysis")
+if metrics["reward_human_gap"] > thresholds["reward_human_gap"]:
+    actions.append("降低优化强度并扩大人工/专家复核")
+if abs(metrics["length_bias_corr"]) > thresholds["length_bias_corr"]:
+    actions.append("做长度匹配和风格消融，检查 judge 是否奖励冗长")
+if metrics["high_reward_low_quality"] > thresholds["high_reward_low_quality"]:
+    actions.append("把高 reward 低质量样本加入 held-out 回归集")
+if metrics["severity_weighted_hack"] > thresholds["severity_weighted_hack"]:
+    actions.append("限制高风险动作，优先复核高严重度切片")
+
+if metrics["severity_weighted_hack"] > thresholds["severity_weighted_hack"]:
+    decision = "hold_for_high_severity_review"
+elif metrics["reward_human_gap"] > thresholds["reward_human_gap"]:
+    decision = "reduce_optimization_and_remeasure"
+elif metrics["proxy_mismatch"] > thresholds["proxy_mismatch"]:
+    decision = "revise_proxy_before_expansion"
+else:
+    decision = "continue_bounded_optimization_trial"
 
 report = {
     "slice_counts": dict(sorted(Counter(case["slice"] for case in cases).items())),
@@ -803,8 +998,9 @@ report = {
     "hack_cases": hack_cases,
     "high_reward_low_quality": high_reward_low_quality,
     "slice_failures": dict(sorted(slice_failures.items())),
-    "gates": gates,
-    "reward_ready": all(gates.values()),
+    "thresholds": thresholds,
+    "actions": actions,
+    "decision": decision,
 }
 
 for key, value in report.items():
@@ -829,7 +1025,7 @@ assert report["hack_cases"] == [
     "math_reasoning",
     "domain_advice",
 ]
-assert report["reward_ready"] is False
+assert report["decision"] == "hold_for_high_severity_review"
 ```
 
 运行后会看到类似输出：
@@ -841,11 +1037,15 @@ proxy_mismatches= ['qa_truthfulness', 'rag_citation', 'safety_boundary', 'code_p
 hack_cases= ['qa_truthfulness', 'rag_citation', 'safety_boundary', 'code_public_tests', 'harmful_request', 'math_reasoning', 'domain_advice']
 high_reward_low_quality= ['qa_truthfulness', 'rag_citation', 'safety_boundary', 'code_public_tests', 'harmful_request', 'domain_advice']
 slice_failures= {'code': ['code_public_tests'], 'factuality': ['qa_truthfulness'], 'high_risk_domain': ['domain_advice'], 'math': ['math_reasoning'], 'over_refusal': ['safety_boundary'], 'rag': ['rag_citation'], 'safety': ['harmful_request']}
-gates= {'proxy_mismatch': False, 'reward_hacking': False, 'reward_human_gap': False, 'length_bias': False, 'high_reward_low_quality': False, 'severity_weighted_hack': False}
-reward_ready= False
+thresholds= {'proxy_mismatch': 0.2, 'reward_hacking_rate': 0.1, 'reward_human_gap': 0.1, 'length_bias_corr': 0.35, 'high_reward_low_quality': 0.1, 'severity_weighted_hack': 0.1}
+actions= ['重新检查 proxy 与真实质量的定义和独立 gold set', '抽取追随 proxy 但真实质量低的样本做 error analysis', '降低优化强度并扩大人工/专家复核', '做长度匹配和风格消融，检查 judge 是否奖励冗长', '把高 reward 低质量样本加入 held-out 回归集', '限制高风险动作，优先复核高严重度切片']
+decision= hold_for_high_severity_review
 ```
 
-这个 demo 的重点是：平均 proxy reward 很高不代表质量高。真正要看的是 proxy 与真实质量是否背离、高 reward 低质量样本是否出现、失败是否集中在高严重度切片，以及长度偏置和输出分布是否失控。
+这个 demo 的重点是：平均 proxy reward 很高不代表质量高。真正要看的是 proxy 与
+真实质量是否背离、高 reward 低质量样本是否出现、失败是否集中在高严重度切片，
+以及长度偏置和输出分布是否失控。程序保留每个信号、动作和决定，便于进一步定位
+是数据、reward model、优化强度还是判定器出了问题。
 
 ## 10. 真实项目中的坑
 
@@ -901,93 +1101,103 @@ Red teaming 可以主动寻找 reward hacking 样例。
 
 Reward hacking 最终表现为模型行为异常，例如啰嗦、自信幻觉、过度拒答、引用不忠实。
 
-## 12. 面试官会怎么问
+## 12. 案例：RAG 助手的引用奖励为什么会失效
 
-### 问题 1：什么是 reward hacking？
+设一个企业 RAG 助手的训练目标包含“回答有帮助”和“引用充分”。由于引用数量
+容易自动统计，团队把每条回答的引用数加入 reward。开始阶段，引用数量增加，
+人工评估也有所提升；继续优化后，系统出现了另一种行为：模型在几乎每句话后面
+都加引用，甚至引用与结论只共享几个关键词，或引用了旧版本制度。
 
-回答要点：
+真实目标其实包含至少四层：
 
-1. 模型利用奖励函数或 reward model 漏洞。
-2. 获得高 reward，但违背真实目标。
-3. 本质是 proxy objective 和真实目标不一致。
-4. LLM 中常见于 RLHF、judge、benchmark、安全分类器等。
+1. 回答是否解决了用户问题。
+2. 每条关键 claim 是否被证据支持。
+3. 引用是否指向正确版本和正确区域。
+4. 回答是否说明了证据不足和冲突。
 
-标准回答：
+引用数量只覆盖第二层的一小部分，甚至没有保证“支持关系”。当它成为主要奖励
+后，模型找到的是 citation presence 的捷径，而不是 grounded answer。
 
-```text
-Reward hacking 是指模型在优化奖励时利用奖励函数或 reward model 的漏洞，得到高分但没有真正完成我们想要的目标。在 LLM 中，reward model、LLM judge、用户评分、benchmark 和安全分类器都只是 proxy。如果过度优化这些 proxy，模型可能学会长回答、自信但错误、过度拒答或引用不忠实等行为。
-```
+### 12.1 用对照样本拆开代理和真实目标
 
-### 问题 2：Goodhart 定律和 reward hacking 有什么关系？
+评估集应至少包含以下成对或成组样本：
 
-回答要点：
+- 少量但完全支持的引用，对比大量但不支持的引用；
+- 正确引用旧版本，对比少量引用当前版本；
+- 没有足够证据的诚实拒答，对比带漂亮引用的过度肯定；
+- 结论正确但引用位置错误，对比结论保守且引用区域准确。
 
-1. Goodhart 说指标成为目标后会失效。
-2. Reward model 是真实偏好的指标。
-3. 过度优化 reward model 会暴露其漏洞。
-4. Reward hacking 是 Goodhart 在训练优化中的表现。
+人工或专家标注时，不只记录总分，还记录 claim、证据段、版本和支持关系。程序
+可以自动检查文档存在和页码格式，但不能把字符串匹配当成因果或语义支持的证明。
 
-### 问题 3：KL penalty 为什么有用？
+### 12.2 比较优化强度而不是只看最终版本
 
-回答要点：
+取多个训练 checkpoint 或不同 `best-of-n` 值，绘制 `R_proxy(s)` 与 `Q_human(s)`
+的曲线。合理的优化区间通常表现为两条曲线共同改善；如果引用 reward 继续上升，
+但 claim-level support 下降、答案变长、成本上升，就说明进入了过度优化区间。
 
-1. 限制 policy 偏离 reference model。
-2. 减少进入 reward model 不熟悉区域。
-3. 缓解风格漂移和过度优化。
-4. 但不能根治，因为 reference 和 reward model 都不完美。
+KL 约束可以减少整体分布漂移，长度匹配和 judge 消融可以暴露风格偏差，但这些
+控制不能替代独立的专家 gold set。尤其是高风险制度、财务和医疗资料，必须有
+版本条件、权限边界和人工升级路径。
 
-### 问题 4：DPO 是否避免了 reward hacking？
+### 12.3 把失败变成训练和回归数据
 
-回答要点：
+一条“高奖励、低支持”的轨迹应同时进入三个地方：
 
-1. DPO 避免了显式 reward model + RL loop 的复杂性。
-2. 但仍然优化偏好数据隐含目标。
-3. 如果偏好数据有偏，仍会学到偏差。
-4. 所以 DPO 不消除目标错配。
+1. 偏好数据，作为错误代理与真实质量的 hard negative；
+2. 回归集合，防止新 reward model 再次奖励同一种表面特征；
+3. 评估分析，记录是引用解析器、检索器、judge 还是模型生成造成的失败。
 
-### 问题 5：如何发现 reward model overoptimization？
+如果把它直接加入训练，又把同一条样本留在最终评估里，分数提升不能证明泛化。
+因此训练、开发、回归和 holdout 的使用历史必须分开记录。
 
-回答要点：
+## 13. 常见误区
 
-1. 观察 reward 分数和 human eval 是否背离。
-2. 比较不同优化强度。
-3. 抽查高 reward 低人工质量样本。
-4. 做 held-out human preference eval。
-5. 监控输出长度、拒答率、事实性和 citation accuracy。
+### 13.1 误区：Reward hacking 是模型故意作恶
 
-## 13. 标准回答模板
+多数情况下，这是目标函数设计和优化过程导致的行为偏移，不需要假设模型有恶意。
 
-面试中可以这样回答：
+### 13.2 误区：Reward 越高越好
 
-```text
-Reward hacking 的本质是目标错配。我们真正想优化的是模型是否 helpful、honest、harmless，但训练中通常只能优化 proxy，比如 reward model、偏好数据、LLM judge、benchmark 或安全分类器。只要 proxy 不完美，模型在强优化下就可能找到漏洞。
+Reward 越高只在 reward model 可靠的范围内成立；过度优化可能让真实质量下降。
 
-在 RLHF 中，reward model 是从有限人类偏好数据学出来的，因此可能包含长度偏差、风格偏差、标注员偏差和分布外盲点。RL 或 best-of-n 优化越强，越可能让 proxy reward 上升但真实人类偏好下降，这就是 reward model overoptimization，也符合 Goodhart 定律。
+### 13.3 误区：DPO 没有 reward model，所以没有 reward hacking 风险
 
-缓解上，我会从数据、模型、优化和评估四层做：改进偏好数据和 hard negative，校准 reward model，用 KL penalty、early stopping 或限制 best-of-n 控制优化强度，同时用人工评估、专家评估、自动验证、red teaming 和 regression suite 监控 reward-human gap。
-```
+DPO 仍优化偏好数据隐含的目标，偏好数据有偏就会学到偏差。
 
-## 14. 常见误区
+### 13.4 误区：KL 约束能彻底解决问题
 
-### 14.1 误区：Reward hacking 是模型故意作恶
+KL 只能限制分布漂移，不能保证真实目标对齐。
 
-纠正：多数情况下是目标函数设计和优化过程导致的行为偏移，不需要假设模型有恶意。
+### 13.5 误区：LLM judge 比 human judge 更客观
 
-### 14.2 误区：Reward 越高越好
+LLM judge 也有偏差，也会被格式、长度、风格和 prompt 影响；它需要人工 gold set
+和独立的判定器校准。
 
-纠正：只在 reward model 可靠范围内成立。过度优化可能让真实质量下降。
+## 14. 资料与证据边界
 
-### 14.3 误区：DPO 没有 reward model，所以没有 reward hacking 风险
+本章的资料分为安全问题论文、偏好优化与奖励模型论文、评估工具和官方规范。论文
+支持某种机制或实验设置，RewardBench 等项目支持评估入口；它们都不能单独证明
+一个 reward model 在新的模型分布、工具环境或生产风险等级中可靠。
 
-纠正：DPO 仍优化偏好数据隐含目标，偏好数据有偏就会学到偏差。
+### 14.1 目标错配与奖励模型
 
-### 14.4 误区：KL 约束能彻底解决问题
+- [Concrete Problems in AI Safety](https://arxiv.org/abs/1606.06565)：把 reward hacking、负面副作用和分布偏移整理为具体安全问题。
+- [Scaling Laws for Reward Model Overoptimization](https://arxiv.org/abs/2210.10760)：研究优化 reward model 时代理分数与真实质量可能出现的背离；结论依赖其训练和评估设置。
+- [Training language models to follow instructions with human feedback](https://arxiv.org/abs/2203.02155)：支持 InstructGPT 的人类示范、偏好和 RLHF 路线，不等于 reward model 没有漏洞。
+- [Learning to summarize from human feedback](https://arxiv.org/abs/2009.01325)：展示复杂文本质量与人类反馈、奖励模型之间的关系。
+- [Direct Preference Optimization](https://arxiv.org/abs/2305.18290)：支持 DPO 的偏好目标和 reference policy 关系；偏好数据仍是 proxy。
 
-纠正：KL 只能限制分布漂移，不能保证真实目标对齐。
+### 14.2 评估与规范
 
-### 14.5 误区：LLM judge 比 human judge 更客观
+- [RewardBench](https://arxiv.org/abs/2403.13787)：提供评估 reward model 和 preference model 的任务切片入口；榜单结果不能替代项目自己的 gold set。
+- [OpenAI Evals](https://github.com/openai/evals)：官方开源评估框架入口，适合组织回归任务和自定义 grader。
+- [OpenAI Model Spec](https://model-spec.openai.com/)：官方行为规范入口，支持分析安全、帮助性和行为边界；规范不是独立测量结果。
+- [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：支持风险治理、测量和管理活动的组织方式。
 
-纠正：LLM judge 也有偏差，也会被格式、长度、风格和 prompt 影响。
+引用这些资料时，应区分论文实验、公开框架、评估工具和本项目实际结果。关于“真实
+质量提高”“reward 更可靠”或“没有 reward hacking”的结论，必须附带模型版本、
+优化强度、独立 gold set、任务切片、判定器和时间条件；否则只能写成待验证假设。
 
 ## 15. 小练习
 
@@ -995,7 +1205,7 @@ Reward hacking 的本质是目标错配。我们真正想优化的是模型是�
 
 用考试刷分的例子解释 Goodhart 定律和 reward hacking。
 
-要求说明真实目标、代理指标和过度优化后果。
+说明真实目标、代理指标、优化压力和过度优化后的可观察后果。
 
 ### 练习 2
 
@@ -1007,7 +1217,7 @@ Reward hacking 的本质是目标错配。我们真正想优化的是模型是�
 
 设计一个实验检测 reward model overoptimization。
 
-要求说明：优化强度、proxy reward、human eval、输出分布和 error analysis。
+说明优化强度、proxy reward、human eval、输出分布、独立 holdout 和 error analysis。
 
 ### 练习 4
 
@@ -1017,7 +1227,7 @@ Reward hacking 的本质是目标错配。我们真正想优化的是模型是�
 
 为一个 RAG 系统设计 reward hacking 防护清单。
 
-要求覆盖：faithfulness、citation accuracy、unsupported claim、人工抽检和 regression suite。
+覆盖 faithfulness、citation accuracy、unsupported claim、版本、人工抽检和 regression suite。
 
 ## 16. 本章总结
 
@@ -1033,4 +1243,5 @@ KL 约束、early stopping、限制 best-of-n 可以缓解过度优化，但不�
 
 缓解 reward hacking 需要改进偏好数据、校准 reward model、控制优化强度、多目标评估、人工抽检、red teaming 和 regression suite。
 
-面试中要强调：reward hacking 不是单个算法 bug，而是所有 proxy objective 强优化系统都会面对的基础风险。
+Reward hacking 不是单个算法 bug，而是所有强优化 proxy objective 的系统都会面对的
+基础风险；真正的防线是独立质量指标、控制优化强度和追踪高奖励失败样本。

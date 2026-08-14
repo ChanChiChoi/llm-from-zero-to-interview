@@ -1,5 +1,9 @@
 # 第二部分：Transformer 架构进阶
 
+这一部分不按“组件名词表”平铺，而是沿着一个模型从信息路由到系统落地的顺序展开：第 11--12 讲先看 attention 如何传递信息、为什么出现平方瓶颈；第 13--15 讲讨论 norm、残差和 MLP 如何决定深层训练与表示容量；第 16--18 讲处理位置、长度泛化和 KV Cache；第 19--20 讲把 MoE 的稀疏容量扩展连到负载均衡与通信；第 21--23 讲比较架构范式、SSM 和混合路线；第 24--25 讲再回到尺寸设计和真实模型拆解。
+
+贯穿全章的判断原则是：理论复杂度、实际 kernel 速度、模型质量和产品成本是四个不同问题。一个方法可能降低 `O(T^2)` 的表达式，却因为访存不规则而没有端到端加速；一个模型可能声明更长窗口，却没有学会可靠使用远处证据。阅读每一讲时，应把这四个层次分开。
+
 ## 第 11 讲：Self-Attention 的矩阵视角与信息路由
 
 ### 本讲目标
@@ -389,7 +393,10 @@ class TinyCausalSelfAttention(nn.Module):
         v = self.v_proj(x)
 
         scores = q @ k.transpose(-2, -1) / math.sqrt(k.size(-1))
-        mask = torch.triu(torch.ones(seq_len, seq_len, dtype=torch.bool), diagonal=1)
+        mask = torch.triu(
+            torch.ones(seq_len, seq_len, device=x.device, dtype=torch.bool),
+            diagonal=1,
+        )
         scores = scores.masked_fill(mask.view(1, seq_len, seq_len), float("-inf"))
 
         attn = F.softmax(scores, dim=-1)

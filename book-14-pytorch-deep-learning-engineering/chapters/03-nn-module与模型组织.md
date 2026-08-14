@@ -8,13 +8,13 @@
 
 本章目标是把 `nn.Module` 在工程中的规则讲清楚：如何写 `forward`，什么是 `Parameter`，子模块如何注册，`state_dict` 保存什么，`train()` 和 `eval()` 到底影响什么，模型保存加载应该怎么做，以及如何组织一个可维护的大模型代码结构。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本章范围与资料
 
-本讲第二轮精修前，已核对 PyTorch 官方 `nn.Module`、`nn.Parameter`、`register_buffer`、`state_dict`、`load_state_dict`、`ModuleList`、`ModuleDict`、`ParameterList`、`ParameterDict`、`train()` / `eval()`、模型保存加载教程和 `torch.compile` 文档口径。
+本章以 PyTorch 官方 `nn.Module`、`nn.Parameter`、`register_buffer`、`state_dict`、`load_state_dict`、`ModuleList`、`ModuleDict`、`ParameterList`、`ParameterDict`、`train()` / `eval()`、模型保存加载和 `torch.compile` 文档为 API 语义依据。文末列出可直接核验的资料入口，并区分 API 事实、工程惯例和目标系统复测。
 
 本章聚焦大模型工程最常用的 Module 组织问题：参数注册、子模块注册、buffer、`state_dict`、保存加载、训练/推理模式、device / dtype 迁移、参数冻结、参数分组、hook、DDP / FSDP 依赖的模块边界，以及最小可运行的 Module 审计 demo。
 
-本章不展开 C++ dispatcher、底层 autograd engine、完整分布式训练实现、FSDP wrap policy 细节、`torch.export` / AOTAutograd 编译器内部机制或生产级 checkpoint shard 格式。这些内容会分别放到分布式训练、profiling、推理部署和 AI Infra 相关章节中讲。
+本章不展开 C++ dispatcher、底层 autograd engine、完整分布式训练实现、FSDP wrap policy 细节、`torch.export` / AOTAutograd 编译器内部机制或生产级 checkpoint shard 格式。这些内容会分别放到分布式训练、profiling、推理部署和 AI Infra 相关章节中讲。文中的小模型实验用于验证注册、保存和模式切换等机制，不代表大型模型在特定硬件上的吞吐或显存结果。
 
 ## 3.1 nn.Module 解决什么问题
 
@@ -68,65 +68,59 @@ optimizer.step()
 
 这里 `self.linear = nn.Linear(10, 1)` 不只是普通赋值。因为 `LinearModel` 继承了 `nn.Module`，PyTorch 会把 `linear` 识别为子模块并注册起来。后续 `model.parameters()`、`model.state_dict()`、`model.to(device)`、`model.train()` 都会递归作用到它。
 
-面试回答：
+### 3.1.1 注册树、状态和参数更新
 
-```text
-nn.Module 是 PyTorch 中组织模型的核心抽象。它不仅封装 forward，还会自动注册 Parameter、子模块和 buffer，并支持递归遍历参数、移动 device、切换 train/eval、保存和加载 state_dict。optimizer、DDP、AMP、checkpoint 基本都依赖 Module 提供的统一结构。
-```
-
-## 3.1.1 关键机制公式与 Module 调试速查
-
-`nn.Module` 本身不是一个数学层，而是一套工程组织规则。面试和 debug 时，可以把它拆成几条稳定口径。
+`nn.Module` 本身不是一个数学层，而是一套工程组织规则。理解它的关键不是记住很多类名，而是能回答三个问题：这个对象是否在模块树上、它是否会出现在保存状态中、优化器是否拿到了它。
 
 第一，参数量来自注册参数，而不是来自 Python 变量名。线性层参数量为：
 
-$$
+~~~math
 N = d_{in} d_{out} + d_{out}
-$$
+~~~
 
 如果 `bias=False`，则只有：
 
-$$
+~~~math
 N = d_{in} d_{out}
-$$
+~~~
 
 Embedding 表的参数量为：
 
-$$
+~~~math
 N_{emb} = V d
-$$
+~~~
 
 其中 `V` 是词表大小，`d` 是 hidden size。一个两层 MLP 的参数量常写成：
 
-$$
+~~~math
 N_{mlp} = d_{in} d_h + d_h + d_h d_{out} + d_{out}
-$$
+~~~
 
 第二，optimizer 更新的是它拿到的 `Parameter`。单个参数的 SGD 更新可以写成：
 
-$$
+~~~math
 \theta_{t+1} = \theta_t - \eta g_t
-$$
+~~~
 
-$$
+~~~math
 g_t = \frac{\partial L}{\partial \theta_t}
-$$
+~~~
 
 如果某个 tensor 没有注册成 `Parameter`，或者某个子模块藏在普通 list / dict 中，它即使参与 forward，也不会自动出现在 `model.parameters()` 里，optimizer 通常不会更新它。
 
 第三，`state_dict` 不是保存整个 Python 对象，而是保存注册权重和持久化 buffer：
 
-$$
+~~~math
 S(M) = P(M) \cup B_p(M)
-$$
+~~~
 
 其中 `P(M)` 表示 module 树上的注册参数，`B_p(M)` 表示 `persistent=True` 的 buffer。普通属性、临时 tensor、`persistent=False` 的 buffer、`forward` 代码和 Python 类定义都不在模型 `state_dict` 里。
 
 第四，参数高效微调或冻结模型时，先看可训练参数比例：
 
-$$
+~~~math
 r = \frac{\sum_{p \in P_{train}} |p|}{\sum_{p \in P_{all}} |p|}
-$$
+~~~
 
 其中 `|p|` 是一个参数 tensor 的元素个数。LoRA、adapter、prompt tuning 的核心工程检查就是：应该训练的参数是否都被注册、`requires_grad=True`、进入 optimizer，并且保存时能从 `state_dict` 或 `named_parameters()` 中筛出来。
 
@@ -149,6 +143,8 @@ with torch.no_grad():
 5. `model.train()` / `model.eval()` 是否递归影响所有子模块。
 6. 保存、加载后同一输入在 eval 模式下输出是否一致。
 7. `strict=False` 加载时的 missing / unexpected keys 是否符合预期，而不是被忽略。
+
+这套检查把“定义了一个对象”和“框架会管理这个对象”区分开来。普通 Python 属性可以被 forward 读取，但只有注册为参数、子模块或 buffer 后，才会自动参与相应的遍历、迁移、保存和分布式处理。
 
 ## 3.2 最小 Module 写法
 
@@ -247,12 +243,6 @@ class ToyModel(nn.Module):
 
 model = ToyModel()
 out = model(torch.randn(3, 4))
-```
-
-面试回答：
-
-```text
-PyTorch 里应该调用 model(x)，而不是 model.forward(x)。model(x) 会走 Module 的 __call__ 逻辑，里面会处理 hook、状态和框架扩展，然后调用 forward。直接调用 forward 可能绕过这些机制，工程上不推荐。
 ```
 
 ## 3.4 Parameter：什么会被 optimizer 更新
@@ -549,12 +539,6 @@ for name, buf in model.named_buffers():
     print(name, buf.shape, buf.device)
 ```
 
-面试回答：
-
-```text
-Parameter 是需要被优化器更新的模型权重；buffer 是不训练但属于模型状态的 tensor，比如 BatchNorm running mean 或固定 mask。buffer 不会出现在 parameters() 里，但会随 model.to(device) 移动，并且默认保存在 state_dict 中。
-```
-
 ## 3.9 parameters、named_parameters 和参数分组
 
 `model.parameters()` 返回模型中所有注册参数，通常直接传给 optimizer：
@@ -590,7 +574,7 @@ optimizer = torch.optim.AdamW([
 ], lr=1e-4)
 ```
 
-为什么 LayerNorm 和 bias 常常不做 weight decay？直觉上，weight decay 更适合约束大矩阵权重，而归一化层的 scale、bias 和偏置参数承担的是平移缩放作用，强行衰减可能影响训练稳定性。不同项目会有不同策略，但面试中要能说明这是参数分组问题。
+为什么 LayerNorm 和 bias 常常不做 weight decay？直觉上，weight decay 更适合约束大矩阵权重，而归一化层的 scale、bias 和偏置参数承担的是平移缩放作用，强行衰减可能影响训练稳定性。这个是常见工程惯例，不是 PyTorch 的硬性规则；是否采用它取决于优化器、模型结构和实验结果。参数分组后还应检查每个参数只进入一个 group，避免重复引用或遗漏。
 
 冻结参数：
 
@@ -666,6 +650,17 @@ lm_head.weight
 
 理解 key 的层级非常重要，因为加载权重、排查 missing key、做 LoRA merge、切分 checkpoint 都依赖这些名称。
 
+还要注意 `state_dict()` 的对象生命周期。它返回的是一个保存 key 的映射，里面的 tensor 通常仍与当前模块参数共享底层内容；把它赋给 `best_state` 后继续训练，并不等于自动冻结了“最佳时刻”的数值。需要保留独立快照时，应显式复制到 CPU 或 clone：
+
+```python
+best_state = {
+    name: value.detach().cpu().clone()
+    for name, value in model.state_dict().items()
+}
+```
+
+否则常见的“验证集最好时保存了权重，训练结束后加载却变成最后一步”的问题，可能不是 `load_state_dict` 失效，而是保存的映射一直指向正在变化的存储。
+
 ## 3.11 保存和加载模型
 
 推荐保存方式是保存 `state_dict`，而不是直接保存整个模型对象。
@@ -718,6 +713,22 @@ step = checkpoint["step"]
 ```
 
 推理只需要模型权重时，通常不需要 optimizer 和 scheduler。
+
+恢复训练与恢复推理是两个不同的目标。若要尽量复现中断前的训练轨迹，至少还要考虑混合精度 scaler、随机数状态、数据采样器位置、梯度累积边界、当前学习率和配置版本：
+
+```python
+checkpoint = {
+    "model": model.state_dict(),
+    "optimizer": optimizer.state_dict(),
+    "scheduler": scheduler.state_dict(),
+    "scaler": scaler.state_dict() if scaler is not None else None,
+    "rng_torch": torch.get_rng_state(),
+    "step": step,
+    "config": config,
+}
+```
+
+这仍然不是绝对的 bitwise reproducibility 保证。数据 worker、CUDA kernel、分布式通信和外部数据版本也可能影响后续结果。好的 checkpoint 设计应明确写出“用于推理”“用于继续训练”还是“用于审计复现”，三者需要保存的状态不同。
 
 ## 3.12 strict=True 和 strict=False
 
@@ -828,12 +839,6 @@ with torch.no_grad():
 
 1. `model.eval()`：改变 dropout、batch norm 等模块行为。
 2. `torch.no_grad()` 或 `torch.inference_mode()`：关闭 autograd，节省显存和计算开销。
-
-面试回答：
-
-```text
-model.train() 和 model.eval() 改的是 Module 的 training 状态，会递归影响 Dropout、BatchNorm 这类依赖训练模式的层。它们不会自动关闭 autograd，所以推理时还要配合 torch.no_grad() 或 inference_mode()。
-```
 
 ## 3.14 Module.to、device 和 dtype 管理
 
@@ -1000,7 +1005,7 @@ class TinyTransformer(nn.Module):
 self.lm_head.weight = self.embed_tokens.weight
 ```
 
-这表示两个模块引用同一个 `Parameter`。保存、加载、优化器更新时要理解它们是共享权重，而不是两份独立参数。
+这表示两个模块引用同一个 `Parameter`。保存、加载、优化器更新时要理解它们是共享权重，而不是两份独立参数。共享权重会让参数统计、checkpoint key 和优化器状态出现别名关系：逻辑上可能有两个使用位置，实际只应有一份可训练存储。验证绑定是否保留时，不能只比较 key 数量，还要检查两个属性是否指向同一个参数对象或加载后是否重新建立了绑定。
 
 ## 3.17 大模型中的 Module 组织方式
 
@@ -1184,12 +1189,6 @@ hook 使用注意：
 3. hook 会增加调试复杂度，不适合作为核心业务逻辑长期依赖。
 4. 分布式和编译场景下 hook 行为可能更复杂。
 
-面试回答：
-
-```text
-Module hook 可以在 forward 或 backward 过程中插入回调，常用于抓中间激活、排查 NaN 或统计层输出。使用时要注意 remove handle，并且保存激活时最好 detach，避免无意保留计算图造成显存泄漏。
-```
-
 ## 3.20 register_module、setattr 和动态添加层
 
 有时模型结构需要根据配置动态构建。只要用 `setattr` 把 module 赋给 `nn.Module` 属性，也会注册。
@@ -1355,7 +1354,7 @@ for name, param in model.named_parameters():
         print(name, param.numel())
 ```
 
-面试中常见追问是：LoRA 参数为什么能被 optimizer 看到？答案仍然回到 `nn.Module` 注册机制：LoRA 层里的 A、B 矩阵必须是注册的 `nn.Parameter`，LoRA 子模块必须挂在模型模块树上，否则 optimizer、state_dict、DDP 都不会自动处理它们。
+LoRA 参数能否被 optimizer 看到，仍然取决于注册机制：LoRA 层里的 A、B 矩阵必须是注册的 `nn.Parameter`，LoRA 子模块必须挂在模型模块树上，否则 optimizer、state_dict、DDP 都不会自动处理它们。只按 `requires_grad=True` 筛选还不够；还要核对参数命名、target module、adapter 配置和保存/加载后的结构。
 
 保存 LoRA 时也常常只保存可训练参数：
 
@@ -1423,7 +1422,7 @@ model = torch.compile(model)
 
 不是所有模型都适合直接 compile。遇到 graph break、编译时间过长、显存变化或数值不一致时，需要逐步缩小范围，例如只 compile 某个 block 或推理路径。
 
-对面试来说，关键不是背 compile 参数，而是知道：`nn.Module` 仍然是模型结构入口，`forward` 的 Python 写法会影响编译器是否能稳定捕获计算图。
+这里的关键不是背 compile 参数，而是知道：`nn.Module` 仍然是模型结构入口，`forward` 的 Python 写法会影响编译器是否能稳定捕获计算图。compile 前后都应比较数值、输出结构和状态切换行为，不应把一次成功编译当作所有动态输入都已兼容。
 
 ## 3.27 最小可运行 Module 审计 demo
 
@@ -1634,65 +1633,7 @@ assert all(checks.values())
 
 这个例子的重点不是分类任务本身，而是建立 Module 工程审计习惯：每次遇到“参数没更新、checkpoint 加载不对、eval 行为异常、LoRA 参数没保存”这类问题，先从注册树、`state_dict`、`requires_grad` 和 optimizer 参数组查起。
 
-## 3.28 面试高频问题
-
-问题 1：`nn.Module` 和 `nn.Parameter` 的关系是什么？
-
-参考回答：
-
-```text
-nn.Module 是模型容器，负责注册参数、子模块和 buffer。nn.Parameter 是特殊 Tensor，被赋值为 Module 属性时会自动注册为参数，出现在 model.parameters() 和 state_dict() 中。optimizer 通常通过 model.parameters() 拿到这些 Parameter 并更新。
-```
-
-问题 2：为什么子模块不能放普通 list？
-
-参考回答：
-
-```text
-普通 Python list 里的 Module 不会被 nn.Module 自动注册，因此 parameters()、state_dict()、to(device)、train/eval、DDP 都无法递归处理它们。应该使用 ModuleList 或 ModuleDict 来保存子模块。
-```
-
-问题 3：`model.eval()` 会关闭梯度吗？
-
-参考回答：
-
-```text
-不会。model.eval() 只切换模块的 training 标志，影响 Dropout、BatchNorm 等层的行为。关闭梯度需要使用 torch.no_grad() 或 torch.inference_mode()。推理时通常两者都要用。
-```
-
-问题 4：`state_dict` 里保存哪些内容？
-
-参考回答：
-
-```text
-state_dict 保存模型注册的 Parameter 和持久化 buffer，不保存 Python 类定义、forward 代码和 optimizer 状态。optimizer 状态需要单独保存 optimizer.state_dict()。
-```
-
-问题 5：加载 checkpoint 时 missing key 和 unexpected key 怎么处理？
-
-参考回答：
-
-```text
-missing key 表示当前模型需要的参数 checkpoint 没有，unexpected key 表示 checkpoint 有但当前模型不用。要先比较模型和 checkpoint 的 key，检查是否结构变化、名称变化、DDP 的 module. 前缀或只加载部分模块。strict=False 可以用于有意部分加载，但必须确认缺失和多余的 key 符合预期。
-```
-
-问题 6：Parameter 和 buffer 的区别是什么？
-
-参考回答：
-
-```text
-Parameter 是可训练权重，通常会被 optimizer 更新；buffer 是不训练但属于模型状态的 Tensor，比如 BatchNorm running statistics 或固定 mask。buffer 会随 model.to(device) 移动，并默认保存在 state_dict 中，但不会出现在 parameters() 里。
-```
-
-问题 7：为什么创建 optimizer 后再添加新层可能有问题？
-
-参考回答：
-
-```text
-optimizer 在创建时拿到的是当时的参数列表。之后如果给 model 新增一层，新层参数虽然可能注册到 Module 上，但 optimizer 的 param_groups 不会自动包含它们。需要重新创建 optimizer 或手动 add_param_group。
-```
-
-## 3.29 本章小练习
+## 3.28 章末练习
 
 练习 1：写一个 `ResidualMLP`，包含两层 Linear、GELU、Dropout 和 residual connection，要求所有层都在 `__init__` 中定义。
 
@@ -1703,6 +1644,31 @@ optimizer 在创建时拿到的是当时的参数列表。之后如果给 model 
 练习 4：保存模型 `state_dict`，重新构造同结构模型并加载，检查同一输入下输出是否一致。注意推理时使用 `eval()` 和 `inference_mode()`。
 
 练习 5：故意把子模块放进普通 list，观察 `named_parameters()` 和 `state_dict()` 的变化，再改成 `ModuleList`。
+
+练习 6：在训练过程中保存 `best_state = model.state_dict()`，继续修改参数，再比较它与 `model.state_dict()` 的值。随后用 `detach().cpu().clone()` 建立独立快照，解释两种结果为什么不同。
+
+练习 7：设计一个“继续训练” checkpoint，列出模型、优化器、调度器、AMP scaler、随机数、数据进度和配置版本分别解决什么问题，并说明哪些字段只对审计复现有帮助。
+
+练习 8：构造一个 embedding 与 lm_head 共享权重的微型模型，检查参数数量、state_dict key 和加载后绑定关系。再把它改成两份独立权重，比较参数量和更新行为。
+
+练习 9：给一个自定义模块加 forward hook，记录一次激活后移除 hook；再故意不移除并运行两次，观察回调次数和状态污染。说明为什么 hook 不应承担核心业务逻辑。
+
+## 3.29 资料与证据边界
+
+本章关于模块注册、参数、buffer、模式切换、状态字典和编译包装的 API 语义，优先依据 PyTorch 官方资料：
+
+1. `nn.Module`：https://pytorch.org/docs/stable/generated/torch.nn.Module.html
+2. `nn.Parameter`：https://pytorch.org/docs/stable/generated/torch.nn.parameter.Parameter.html
+3. `register_buffer`：https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer
+4. `ModuleList`：https://pytorch.org/docs/stable/generated/torch.nn.ModuleList.html
+5. `ModuleDict`：https://pytorch.org/docs/stable/generated/torch.nn.ModuleDict.html
+6. `ParameterList`：https://pytorch.org/docs/stable/generated/torch.nn.ParameterList.html
+7. `state_dict` 与加载：https://pytorch.org/tutorials/beginner/saving_loading_models.html
+8. `load_state_dict`：https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.load_state_dict
+9. `torch.compile`：https://pytorch.org/docs/stable/torch.compiler.html
+10. DistributedDataParallel：https://pytorch.org/docs/stable/generated/torch.nn.parallel.DistributedDataParallel.html
+
+官方资料能确认接口语义，但不能替代目标 checkpoint、硬件和分布式拓扑上的验证。共享权重、FSDP state dict、量化状态、LoRA adapter 合并和 `torch.compile` 的性能及兼容性，应以对应版本的实现和项目实测为准。加载来自外部的 pickle 或 checkpoint 时，还要遵守项目的安全策略，不要在未验证来源的情况下直接反序列化不可信文件。
 
 ## 3.30 本章总结
 

@@ -20,13 +20,13 @@
 
 > 从单机 serving engine 升级到 PD 分离，本质是把“一个进程内部的 generate 状态机”逐步拆成“router、prefill worker、decode worker、KV transfer 和分布式请求状态”共同维护的系统。
 
-## 43.0 本讲资料边界与第二轮精修口径
+## 43.0 本讲范围与资料
 
-本讲第二轮精修前，先按 `WRITING_PLAN.md` 对公开资料做校准：参考 DistServe 论文对 disaggregated prefill / decoding、TTFT / TPOT SLO、P/D placement 和 goodput 的说明；参考 Splitwise 论文对 prompt computation 与 token generation 资源画像差异、phase split 和状态传输代价的说明；参考 SGLang PD Disaggregation 文档对 prefill / decode worker、transfer backend、routing policy、bootstrap server、PD multiplexing、prefill interruption 和 DP attention imbalance 的公开口径；参考 vLLM disaggregated prefilling 文档对 prefill / decode 实例、KV connector 和 experimental 边界的说明；并结合前面章节对 KV transfer、chunked prefill、多级 KV cache、跨节点网络瓶颈和 PD 取舍门禁的结论。
+本章参考 DistServe 论文对 disaggregated prefill / decoding、TTFT / TPOT SLO、P/D placement 和 goodput 的说明；参考 Splitwise 论文对 prompt computation 与 token generation 资源画像差异、phase split 和状态传输代价的说明；参考 SGLang PD Disaggregation 文档对 prefill / decode worker、transfer backend、routing policy、bootstrap server、PD multiplexing、prefill interruption 和 DP attention imbalance 的公开口径；参考 vLLM disaggregated prefilling 文档对 prefill / decode 实例、KV connector 和 experimental 边界的说明；并结合前面章节对 KV transfer、chunked prefill、多级 KV cache、跨节点网络瓶颈和 PD 取舍验收条件的结论。
 
-本讲只讲“如何从已有单机 serving engine 迁移到 PD 分离”的工程路线：模块边界、接口契约、状态拆分、迁移阶段、same-node 原型、cross-node 前置门禁、观测、backpressure、灰度、回滚和失败清理。不把任何论文 benchmark、框架默认 CLI 参数、connector 字段、worker 启动命令、真实网络带宽、某个版本的默认策略或某个团队的生产路径写成通用结论。
+本讲只讲“如何从已有单机 serving engine 迁移到 PD 分离”的工程路线：模块边界、接口契约、状态拆分、迁移阶段、same-node 原型、cross-node 前置验收条件、观测、backpressure、灰度、回滚和失败清理。不把任何论文 benchmark、框架默认 CLI 参数、connector 字段、worker 启动命令、真实网络带宽、某个版本的默认策略或某个团队的生产路径写成通用结论。
 
-本讲新增 demo 是教学版 PD migration auditor：用 0 依赖 Python 模拟单机重构、逻辑 PD、same-node PD 和 cross-node readiness 四个阶段，检查 request stage、model runner 接口、KV metadata、双 scheduler、router 状态机、same-node 原型、cleanup / cancel、metrics / backpressure / fallback 是否按顺序就绪，输出 migration rows、summary 和最终迁移门禁。
+本章的 demo 是教学版 PD migration auditor：用 0 依赖 Python 模拟单机重构、逻辑 PD、same-node PD 和 cross-node readiness 四个阶段，检查 request stage、model runner 接口、KV metadata、双 scheduler、router 状态机、same-node 原型、cleanup / cancel、metrics / backpressure / fallback 是否按顺序就绪，输出 migration rows、summary 和最终迁移验收条件。
 
 ## 43.1 本章目标
 
@@ -1212,7 +1212,7 @@ PD 分离主要看尾延迟、队列等待、transfer p99 和 TPOT jitter。平�
 上线时我会按长 prompt、租户或流量比例灰度，保留 unified engine fallback，并重点观察 prefill latency、transfer p95/p99、decode wait、TPOT p99、KV free blocks、cancel cleanup 和 fallback rate。如果 transfer p99 或 KV 泄漏不可控，就不会扩大流量。
 ```
 
-## 43.29 单机到 PD 升级路线、接口门禁和可运行 demo
+## 43.29 单机到 PD 升级路线、接口验收条件和可运行 demo
 
 先把一次迁移拆成有依赖关系的 step：
 
@@ -1236,13 +1236,13 @@ PD path 的队列压力不能只看一个 waiting queue，而要看多段 backlo
 Q_{\mathrm{pd}}=Q_{\mathrm{router}}+Q_{\mathrm{prefill}}+Q_{\mathrm{transfer}}+Q_{\mathrm{decode}}
 ```
 
-迁移门禁可以写成：
+迁移准入条件可以形式化为：
 
 ```math
 G_{\mathrm{pdmig}}=G_{\mathrm{stage}}G_{\mathrm{runner}}G_{\mathrm{kv}}G_{\mathrm{sched}}G_{\mathrm{router}}G_{\mathrm{same}}G_{\mathrm{cleanup}}G_{\mathrm{obs}}
 ```
 
-这个门禁的含义是：如果 request stage、runner split、KV contract、双 scheduler、router 状态机、same-node 原型、cleanup / cancel、observability / fallback 任何一项不成立，就不要扩大到 cross-node PD。
+这组条件的含义是：如果 request stage、runner split、KV contract、双 scheduler、router 状态机、same-node 原型、cleanup / cancel、observability / fallback 任何一项不成立，就不要扩大到 cross-node PD。
 
 下面的 demo 覆盖 9 个迁移 step：
 
@@ -1254,7 +1254,7 @@ G_{\mathrm{pdmig}}=G_{\mathrm{stage}}G_{\mathrm{runner}}G_{\mathrm{kv}}G_{\mathr
 6. `same_node_pd_prototype`：先做 same-node PD，验证 KV transfer 和 decode reservation。
 7. `cleanup_cancel_paths`：补 transfer failure cleanup 和 client cancel。
 8. `metrics_backpressure_fallback`：补 metrics、backpressure 和 unified fallback。
-9. `cross_node_pd_readiness`：最后才进入跨节点门禁。
+9. `cross_node_pd_readiness`：最后才进入跨节点验收条件。
 
 ```python
 from dataclasses import dataclass
@@ -1432,7 +1432,7 @@ pd_migration_gates= {'request_stage_explicit': True, 'runner_interface_split': T
 3. 再用 same-node PD 验证 transfer、reservation、cleanup、cancel、metrics 和 fallback。
 4. 最后才进入 cross-node PD readiness。
 
-所以本章最终门禁是 `pd_migration_gate`：只有接口、状态机、scheduler、KV contract、same-node 原型、失败清理、观测、backpressure 和 fallback 全部可验证，单机 engine 升级成 PD 分离才是可控迁移，而不是一次高风险重写。
+所以本章最终验收条件是 `pd_migration_gate`：只有接口、状态机、scheduler、KV contract、same-node 原型、失败清理、观测、backpressure 和 fallback 全部可验证，单机 engine 升级成 PD 分离才是可控迁移，而不是一次高风险重写。
 
 ## 43.30 小练习
 

@@ -8,7 +8,7 @@
 
 > 最小 HTTP API 服务是 serving engine 的外部入口，它把 JSON 请求转换成 RequestState，并把 engine 的输出事件返回给客户端。
 
-## 14.0 本讲资料边界与第二轮精修口径
+## 14.0 本讲范围与资料
 
 本讲只实现教学版最小 HTTP API 服务。它覆盖请求模型、参数校验、同步 `/generate`、SSE 风格流式响应、队列准入、错误返回、客户端取消、engine cleanup 和最小可运行 demo，但不实现鉴权、租户配额、TLS、反向代理、OpenAPI schema 完整治理、WebSocket、gRPC、跨进程 engine、分布式 worker、生产级日志脱敏或完整 OpenAI-compatible server。
 
@@ -49,9 +49,9 @@ API Server 不应该直接调用模型 forward。它应该把请求交给 engine
 1. API 层和模型执行层解耦。
 2. engine 可以独立调度多个请求。
 3. streaming 输出可以通过队列异步返回。
-4. 后续可以替换 HTTP 为 gRPC、WebSocket 或内部 RPC。
+4. API 层与 engine 解耦后，同一套 engine 可以由 HTTP、gRPC、WebSocket 或内部 RPC 适配器接入。
 
-## 14.2 最小接口设计与 API 门禁公式
+## 14.2 最小接口设计与 API 验收条件公式
 
 我们先设计一个简单接口：
 
@@ -85,9 +85,9 @@ POST /generate
 
 流式响应则逐段返回 delta。
 
-把 API 层写成可验收系统，而不是只写一个 handler，可以先定义几个门禁。
+把 API 层写成可验收系统，而不是只写一个 handler，可以先定义几个验收条件。
 
-请求合法性门禁：
+请求合法性验收条件：
 
 ```math
 G_{\mathrm{valid}}=G_{\mathrm{prompt}}G_{\mathrm{tokens}}G_{\mathrm{sampling}}
@@ -113,7 +113,7 @@ R_{5xx}=\frac{N_{5xx}}{N}
 
 `4xx` 通常表示客户端输入、配额或准入失败，`5xx` 才表示服务端内部失败。把参数错误都变成 `500`，会让线上告警和容量判断失真。
 
-取消清理门禁：
+取消清理验收条件：
 
 ```math
 G_{\mathrm{cancel}}=G_{\mathrm{abort}}G_{\mathrm{kvfree}}G_{\mathrm{finish}}
@@ -121,13 +121,13 @@ G_{\mathrm{cancel}}=G_{\mathrm{abort}}G_{\mathrm{kvfree}}G_{\mathrm{finish}}
 
 `G_{\mathrm{abort}}` 表示取消信号能传回 engine，`G_{\mathrm{kvfree}}` 表示 KV cache / running slot 被释放，`G_{\mathrm{finish}}` 表示客户端或日志能看到明确 finish reason。
 
-最小 API 总门禁：
+最小 API 总验收条件：
 
 ```math
 G_{\mathrm{api}}=G_{\mathrm{valid}}G_{\mathrm{admit}}G_{\mathrm{sync}}G_{\mathrm{stream}}G_{\mathrm{cancel}}
 ```
 
-一个最小 HTTP API 通过这个门禁，才算真正把请求接入、同步响应、流式响应、过载拒绝和取消清理连成闭环。
+一个最小 HTTP API 通过这组条件，才算真正把请求接入、同步响应、流式响应、过载拒绝和取消清理连成闭环。
 
 ## 14.3 API 层应该校验什么
 

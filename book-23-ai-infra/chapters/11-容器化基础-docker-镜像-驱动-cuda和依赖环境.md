@@ -10,9 +10,9 @@
 
 > 容器化的核心价值不是“把程序打包”，而是把训练和推理环境变成可复现、可分发、可调度、可审计的运行单元。
 
-## 11.0 本讲资料边界与第二轮精修口径
+## 11.0 本讲范围与资料
 
-本讲第二轮精修时，资料口径按“AI 训练与推理容器环境的稳定抽象”处理，而不是绑定某个 Kubernetes 集群、某个镜像仓库、某个 CUDA 镜像 tag 或某家云厂商实现。镜像构建部分参考 Docker 官方对 Dockerfile best practices、多阶段构建、基础镜像 digest pin 和 CI 测试的建议；GPU 容器部分参考 NVIDIA Container Toolkit 对 runtime / CDI、GPU device 暴露、driver capabilities 和容器内 GPU 可见性的边界；CUDA 兼容性部分参考 NVIDIA CUDA compatibility 对 driver 与 CUDA Toolkit / runtime 的兼容关系；镜像安全部分参考 Docker Scout / 镜像扫描、签名、SBOM 和 registry 权限治理的通用口径。
+本章参考资料口径按“AI 训练与推理容器环境的稳定抽象”处理，而不是绑定某个 Kubernetes 集群、某个镜像仓库、某个 CUDA 镜像 tag 或某家云厂商实现。镜像构建部分参考 Docker 官方对 Dockerfile best practices、多阶段构建、基础镜像 digest pin 和 CI 测试的建议；GPU 容器部分参考 NVIDIA Container Toolkit 对 runtime / CDI、GPU device 暴露、driver capabilities 和容器内 GPU 可见性的边界；CUDA 兼容性部分参考 NVIDIA CUDA compatibility 对 driver 与 CUDA Toolkit / runtime 的兼容关系；镜像安全部分参考 Docker Scout / 镜像扫描、签名、SBOM 和 registry 权限治理的通用口径。
 
 需要注意三点：
 
@@ -445,7 +445,7 @@ AI 镜像经常包含大量第三方包，更需要供应链治理。
 e_i=(b_i,d_i,g_i,c_i,l_i,p_i,s_i,r_i,m_i,n_i,a_i,z_i)
 ```
 
-其中，`b_i` 是基础镜像和 layer 信息，`d_i` 是镜像 digest，`g_i` 是 GPU runtime 和设备可见性，`c_i` 是 CUDA / driver / framework 兼容矩阵，`l_i` 是依赖锁定信息，`p_i` 是构建流水线和 smoke test，`s_i` 是镜像扫描、签名和 SBOM，`r_i` 是 registry 权限，`m_i` 是运行时 metadata，`n_i` 是多租户挂载和网络边界，`a_i` 是审计日志，`z_i` 是最终门禁结果。
+其中，`b_i` 是基础镜像和 layer 信息，`d_i` 是镜像 digest，`g_i` 是 GPU runtime 和设备可见性，`c_i` 是 CUDA / driver / framework 兼容矩阵，`l_i` 是依赖锁定信息，`p_i` 是构建流水线和 smoke test，`s_i` 是镜像扫描、签名和 SBOM，`r_i` 是 registry 权限，`m_i` 是运行时 metadata，`n_i` 是多租户挂载和网络边界，`a_i` 是审计日志，`z_i` 是最终验收结果。
 
 镜像拉取和冷启动时间可以粗略拆成：
 
@@ -475,7 +475,7 @@ C_{\mathrm{lock}}=\frac{N_{\mathrm{pinned}}}{N_{\mathrm{dep}}}
 
 其中，`N_pinned` 是锁定版本或 hash 的关键依赖数量，`N_dep` 是关键依赖总数。对 CUDA、PyTorch、NCCL、Triton、FlashAttention、serving runtime 和私有 wheel，缺少锁定会直接影响可复现性。
 
-GPU 容器兼容性可以写成一个硬门禁：
+GPU 容器兼容性可以写成一个硬性条件：
 
 ```math
 G_{\mathrm{cuda}}=\mathbf{1}\left[v_{\mathrm{driver}}\ge v_{\mathrm{min}}(u_{\mathrm{cuda}}) \land C_{\mathrm{fw}}=1 \land C_{\mathrm{gpu}}=1\right]
@@ -483,7 +483,7 @@ G_{\mathrm{cuda}}=\mathbf{1}\left[v_{\mathrm{driver}}\ge v_{\mathrm{min}}(u_{\ma
 
 其中，`v_driver` 是宿主机驱动版本，`v_min(u_cuda)` 是容器内 CUDA 用户态版本所需的最低驱动口径，`C_fw` 表示框架、NCCL、cuDNN、Triton / 自定义 kernel 版本兼容，`C_gpu` 表示 GPU 架构和 device 暴露正确。
 
-最后，可以把容器环境门禁写成：
+最后，可以把容器环境验收条件写成：
 
 ```math
 G_{\mathrm{container}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land T_{\mathrm{start}}\le \tau_{\mathrm{start}} \land V_{\mathrm{crit}}=0 \land P_0=0\right]
@@ -839,7 +839,7 @@ failed_cases=['tag_only_latest_bad', 'layer_cache_miss_bad', 'old_driver_bad', '
 container_gate_pass=False
 ```
 
-这个 demo 的重点是把容器环境拆成可验证证据链：digest 和基础镜像要可复现，layer cache 和镜像体积影响冷启动，CUDA / driver / framework 要形成兼容矩阵，GPU runtime 必须真的能看到设备，依赖要锁版本，训练和推理镜像要分离，构建流水线要跑 smoke test，镜像要扫描和签名，密钥和模型权重不能打进镜像，多租户挂载、registry 权限、环境 metadata、NCCL / RDMA 和最终门禁都要能审计。
+这个 demo 的重点是把容器环境拆成可验证证据链：digest 和基础镜像要可复现，layer cache 和镜像体积影响冷启动，CUDA / driver / framework 要形成兼容矩阵，GPU runtime 必须真的能看到设备，依赖要锁版本，训练和推理镜像要分离，构建流水线要跑 smoke test，镜像要扫描和签名，密钥和模型权重不能打进镜像，多租户挂载、registry 权限、环境 metadata、NCCL / RDMA 和最终验收条件都要能审计。
 
 ## 11.17 面试中如何回答容器化设计
 

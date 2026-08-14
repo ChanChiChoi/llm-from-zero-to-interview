@@ -4,16 +4,16 @@
 
 本章系统讲 SFT 与对齐训练坑：能力退化、格式错误、过度拒答、偏好数据不一致、reward model 偏差、RLHF reward hacking、DPO 数据质量、多轮对话角色混乱、评估方法和事故复盘。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲第二轮精修前，按 `WRITING_PLAN.md` 的要求核对了 InstructGPT / RLHF 论文、Direct Preference Optimization 论文、Hugging Face Transformers chat template 文档、TRL SFTTrainer / DPOTrainer 文档，以及 reward model、preference data、assistant-only loss、KL / reference model 和安全拒答边界相关公开资料。
+本章参考了 InstructGPT / RLHF 论文、Direct Preference Optimization 论文、Hugging Face Transformers chat template 文档、TRL SFTTrainer / DPOTrainer 文档，以及 reward model、preference data、assistant-only loss、KL / reference model 和安全拒答边界相关公开资料。
 
-本章只讨论防御性的后训练事故排查：如何发现 SFT mask 错、能力回归、误拒 / 漏拒、偏好 pair 噪声、reward model 偏差、DPO reference 不匹配、工具 schema 漂移和多维评估缺口。这里不提供绕过安全策略、构造攻击性对齐数据、诱导模型输出高风险内容或规避评估门禁的方法。
+本章只讨论防御性的后训练事故排查：如何发现 SFT mask 错、能力回归、误拒 / 漏拒、偏好 pair 噪声、reward model 偏差、DPO reference 不匹配、工具 schema 漂移和多维评估缺口。这里不提供绕过安全策略、构造攻击性对齐数据、诱导模型输出高风险内容或规避评估验收条件的方法。
 
-第二轮补强重点有三点：
+本章重点有三点：
 
 1. 把 SFT / RLHF / DPO 的事故从“效果怪”拆成可观测指标：assistant-only label 覆盖率、prompt loss 泄漏率、能力回归、误拒率、漏拒率、偏好间隔、reward-human gap、DPO margin 和工具 schema 一致性。
-2. 用公式说明后训练门禁，而不是只说“多做评估”：对齐训练要同时证明模型会回答、不会乱拒、不会漏拒、不会为了 reward 变长变空，也没有把通用能力训坏。
+2. 用公式说明后训练验收条件，而不是只说“多做评估”：对齐训练要同时证明模型会回答、不会乱拒、不会漏拒、不会为了 reward 变长变空，也没有把通用能力训坏。
 3. 增加一个 0 依赖 Python demo，把 toy SFT 样本、偏好 pair、reward 样本、DPO log probability 和工具 schema 统一审计，帮助读者把排查思路迁移到真实 TRL / LoRA / RLHF / DPO 项目。
 
 ## 6.1 核心观点
@@ -438,7 +438,7 @@ reward hacking：
 3. 增加多维 reward。
 4. 监控长度和模板化。
 
-## 6.19.1 关键公式与后训练事故指标速查
+### 6.19.1 关键公式与后训练事故指标速查
 
 后训练事故排查的第一步，是把样本、标签、偏好、reward 和评估切片放进同一张表。把第 `i` 条后训练样本抽象成：
 
@@ -514,7 +514,7 @@ R_{\mathrm{unsafe\_leak}}=
 \frac{N_{\mathrm{unsafe,answered}}}{\max(1,N_{\mathrm{unsafe}})}
 $$
 
-好的安全对齐不是拒答越多越好。误拒高会损害帮助性，漏拒高会损害安全性，两者都要进门禁。
+好的安全对齐不是拒答越多越好。误拒高会损害帮助性，漏拒高会损害安全性，两者都要进验收条件。
 
 **7. 偏好间隔**
 
@@ -551,7 +551,7 @@ $$
 
 DPO 不是简单提高 chosen 概率，而是提高 policy 相对 reference 对 chosen 的偏好优势。reference model 选错、beta 不合适、pair 质量差，都会让 DPO 学到错误风格或长度偏差。
 
-**10. 后训练事故门禁**
+**10. 后训练事故验收条件**
 
 $$
 G_{\mathrm{align}}=\mathbf{1}\left[
@@ -568,9 +568,9 @@ C_{\mathrm{asst}}\ge\tau_{\mathrm{asst}}
 \right]
 $$
 
-这个门禁的意义不是用一个数替代人工评估，而是防止团队只看 SFT loss、reward curve 或 DPO loss。只要任一门禁失败，就应该先定位数据、mask、偏好、reward 或评估切片，而不是继续扩大训练。
+这组条件的意义不是用一个数替代人工评估，而是防止团队只看 SFT loss、reward curve 或 DPO loss。只要任一检查失败，就应该先定位数据、mask、偏好、reward 或评估切片，而不是继续扩大训练。
 
-## 6.19.2 最小可运行 SFT / 对齐训练事故审计 demo
+### 6.19.2 最小可运行 SFT / 对齐训练事故审计 demo
 
 下面的 demo 不依赖外部库。它故意构造多个事故：prompt 和 padding 参与 loss、assistant token 被误 mask、训练 / 推理 chat template 不一致、math / code / tool 能力回归、误拒和漏拒同时存在、偏好 pair 间隔过小、reward model 偏好长回答、DPO reference 不匹配以及工具 schema 漂移。
 
@@ -752,7 +752,7 @@ gates= {'sft_mask_ok': False, 'template_ok': False, 'capability_regression_ok': 
 gate_pass= False
 ```
 
-这段输出故意让所有门禁失败。它说明后训练事故不能只盯着一个 loss：SFT mask、模板、能力回归、安全拒答、偏好数据、reward model、DPO reference 和工具 schema 都可能单独造成线上行为异常。
+这段输出故意让所有检查失败。它说明后训练事故不能只盯着一个 loss：SFT mask、模板、能力回归、安全拒答、偏好数据、reward model、DPO reference 和工具 schema 都可能单独造成线上行为异常。
 
 ## 6.20 事故复盘模板
 

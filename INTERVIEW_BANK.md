@@ -3595,3 +3595,65 @@
 6. 如何复盘一轮 reasoning 专题 mock interview？
    考察点：topic coverage、formula coverage、demo coverage、risk coverage、trade-off coverage、revision plan。
    回答框架：先把题目按 CoT、self-consistency、verifier、process supervision、search、test-time compute、math / code training、eval、safety 和 system design 分类；再检查每题是否覆盖目标、机制、公式、demo、评估和风险；最后把弱题绑定到一个公式、一个 toy demo、一个失败案例和下一轮回答模板，而不是只说“继续复习”。
+
+## 2026-08 Frontier Model 与系统面试补充
+
+1. Kimi K3 的“无显式 position embedding”是否等于没有位置信息？
+   考察点：NoPE、causal mask、KDA 递归状态、隐式顺序。
+   回答框架：NoPE 只表示某个分支不显式施加 RoPE/ALiBi；顺序仍可由因果可见性、递归更新、衰减和局部/全局 pattern 提供。不要把教学抽象公式当成完整实现。
+
+2. 为什么 total parameters 不能直接代表 MoE 推理成本？
+   考察点：total/active 参数、shared layer、router、通信、KV cache。
+   回答框架：`P_total=P_shared+E*P_expert+P_router`，`P_active=P_shared+k*P_expert+P_router`；active 只描述每 token 选中的专家参数，真实延迟还受 dispatch、all-to-all、kernel、量化和 KV/state cache 影响。
+
+3. Gated DeltaNet、KDA 和 MLA 分别在优化什么？
+   考察点：递归 state、latent cache、混合 attention。
+   回答框架：KDA/DeltaNet 通过状态递归表示历史，MLA 压缩 K/V 表示；它们可以组合，但都需要评估精确检索、状态 reset、kernel 和长上下文质量。
+
+4. `reasoning_effort`、thinking level 和 temperature 有什么区别？
+   考察点：推理预算 vs 采样随机性。
+   回答框架：temperature/top-p 改变候选分布，effort/level 通常改变 reasoning token、verifier、工具或路由预算；跨厂商字段不能假定同语义。
+
+5. 什么是 harness-aware evaluation？
+   考察点：模型、harness、环境、预算、数据的可复现绑定。
+   回答框架：Agent 结果可写成 `R=F(M,H,E,B,D)`，评测必须记录模型 revision、工具/MCP、context folding、memory、effort、环境和 trace，否则无法归因提升来自模型还是系统。
+
+6. Qwen-AgentWorld 为什么不应当只当作一个普通 LLM benchmark？
+   考察点：world model、环境模拟器、CPT/SFT/GSPO、Agent 环境。
+   回答框架：它把模型、MCP/搜索/终端/SWE/Android/Web/OS 环境和任务闭环放在一起，评估的是交互式 Agent 能力；要单独记录环境 reset、工具和状态恢复。
+
+7. DSpark、MTP、EAGLE、NEXTN 的 draft 来源有什么差异？
+   考察点：standalone draft、attached head、model protocol fit。
+   回答框架：它们都属于 speculative decoding 生态，但 draft 可能来自独立模型、EAGLE head、MTP/NEXTN head 或模型附加模块。接受长度和 draft 成本决定收益，tokenizer/template/cache 必须对齐。
+
+8. “OpenAI-compatible”为什么不等于 Responses API 兼容？
+   考察点：response item、reasoning channel、tool lifecycle、custom encoding。
+   回答框架：兼容层通常只保证基础请求形状；reasoning item、工具 call id、流式事件、chat template、custom encoding、MCP/A2A 生命周期仍可能不同，需要 capability matrix 和 trace replay。
+
+9. 1M context 为什么不能直接换算成并发能力？
+   考察点：KV/state cache、prefill/decode、并发预算。
+   回答框架：1M 是能力或接口上限；显式 KV 仍随 token 增长，混合架构还要加 state、metadata 和 global layer，实际并发受 GPU memory、权重、workspace 和调度约束。
+
+10. 如何评估 Shieldstral 或 risk-calibrated access？
+    考察点：安全分类器、effort/tool 分层、fallback/trusted access。
+    回答框架：按风险、effort、工具权限、多模态输入和 harness 切片测攻击成功率、误拒、越权、fallback 和人工接管；分类器不是权限系统的替代品。
+
+11. Adaptive Thinking 和固定 thinking level 有什么不同？
+    考察点：预算控制器、verifier、无进展检测、p99 成本。
+    回答框架：level 是 provider-specific 档位，adaptive 是根据任务难度、验证结果、风险和 deadline 动态调整预算；必须同时分配 reasoning、tool、verify 和 recovery 预算，并设置硬上限。
+
+12. Interleaved Thinking 为什么需要事务化工具状态？
+    考察点：reason/tool/observation 状态机、tool call id、timeout、rollback。
+    回答框架：工具超时不等于没有执行；要查询幂等状态，区分 authorized、executing、observed 和 committed，防止断线重连造成重复副作用。
+
+13. Persistent Workspace 和 Context Folding 的边界是什么？
+    考察点：workspace、task、trace、external state，摘要与事实来源。
+    回答框架：folding 压缩轨迹，workspace 保存文件、diff 和 artifact；摘要必须引用 source/hash，外部副作用要有回执，不能用更长 prompt 替代可验证状态。
+
+14. 安全 fallback 为什么不能只换一个小模型？
+    考察点：权限收缩、状态兼容、幂等、用户告知和审计。
+    回答框架：fallback 是风险控制面，可能切换只读工具、人工审核或拒答；要记录触发原因、权限变化、状态检查、重复副作用和最终结果。
+
+15. p-RoPE、Gated Attention 和 CSA/HCA 分别改变了什么？
+    考察点：位置策略、路径门控、压缩注意力、模型卡证据边界。
+    回答框架：p-RoPE 关注位置处理策略，Gated Attention 控制显式 attention 路径贡献，CSA/HCA 压缩长历史访问；具体参数化不能从名字推断，要测长上下文、精确检索和 serving cache。

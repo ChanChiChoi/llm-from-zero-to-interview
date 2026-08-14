@@ -12,13 +12,13 @@
 
 如果说算法决定“模型能不能变聪明”，那么 AI Infra 决定“模型能不能训得动、推得快、跑得稳、成本可控、出了问题能定位”。
 
-## 1.0 本讲资料边界与第二轮精修口径
+## 1.0 本讲范围与资料
 
 本讲是第二十三册入口章，目标不是把 Kubernetes、Slurm、DCGM、OpenTelemetry、MLflow 或某一家云厂商平台逐一讲成教程，而是建立 AI Infra 的分层地图和面试表达框架。
 
-第二轮精修时，我按 `WRITING_PLAN.md` 做了资料校准，主要参考公开官方资料中的稳定边界：Kubernetes device plugin 说明了加速器等厂商设备如何暴露给集群调度；Slurm 是 HPC 场景常见的作业调度和资源管理系统；NVIDIA DCGM 代表 GPU 遥测、健康检查和诊断能力；OpenTelemetry 把 metrics、logs、traces 作为可观测性信号；MLflow Tracking 代表实验记录、参数、指标和 artifact 追踪的一类平台能力。
+本章参考公开官方资料中的稳定边界：Kubernetes device plugin 说明了加速器等厂商设备如何暴露给集群调度；Slurm 是 HPC 场景常见的作业调度和资源管理系统；NVIDIA DCGM 代表 GPU 遥测、健康检查和诊断能力；OpenTelemetry 把 metrics、logs、traces 作为可观测性信号；MLflow Tracking 代表实验记录、参数、指标和 artifact 追踪的一类平台能力。
 
-这些资料只用于校准“AI Infra 应覆盖哪些层”，不能反过来推出“AI Infra 等于 Kubernetes”或“AI Infra 等于某个实验平台”。本讲新增的公式和 demo 也只做教学审计：帮助你把模块清单转成可检查的指标，而不是替代真实公司的容量规划、调度器实现、SRE 体系或安全合规系统。
+这些资料只用于校准“AI Infra 应覆盖哪些层”，不能反过来推出“AI Infra 等于 Kubernetes”或“AI Infra 等于某个实验平台”。本章的公式和 demo 也只做教学审计：帮助你把模块清单转成可检查的指标，而不是替代真实公司的容量规划、调度器实现、SRE 体系或安全合规系统。
 
 ## 1.1 一个简单 API 背后的复杂系统
 
@@ -407,7 +407,7 @@ AI Infra 更偏底座和平台，覆盖硬件、集群、网络、存储、调�
 
 ## 1.8 AI Infra 总览审计指标与最小 demo
 
-总览章节最容易写成“列一堆模块名”。第二轮精修里，更推荐把它转成一组可审计问题：这个平台是否真的覆盖了训练、推理、数据、评估、可观测性、安全、成本和开发者体验？它是否把 AI Infra、MLOps、LLMOps 和 Platform Engineering 的边界讲清楚？算法团队和平台团队是否能用同一张指标表沟通？
+总览章节最容易写成“列一堆模块名”。本章里，更推荐把它转成一组可审计问题：这个平台是否真的覆盖了训练、推理、数据、评估、可观测性、安全、成本和开发者体验？它是否把 AI Infra、MLOps、LLMOps 和 Platform Engineering 的边界讲清楚？算法团队和平台团队是否能用同一张指标表沟通？
 
 先定义一个 AI Infra 总览审计样本：
 
@@ -439,15 +439,15 @@ U_{\mathrm{gpu}}=\frac{T_{\mathrm{busy}}}{T_{\mathrm{wall}}}
 K_{\mathrm{success}}=\frac{K_{\mathrm{gpu}}+K_{\mathrm{storage}}+K_{\mathrm{network}}+K_{\mathrm{ops}}}{N_{\mathrm{success}}}
 ```
 
-其中，`K_gpu`、`K_storage`、`K_network` 和 `K_ops` 分别代表 GPU、存储、网络和运维成本，`N_success` 是通过质量门禁的成功训练、评估或推理任务数。这个公式的重点不是精确财务建模，而是提醒你：只算 GPU 小时或 token 单价，会低估 AI Infra 的真实成本。
+其中，`K_gpu`、`K_storage`、`K_network` 和 `K_ops` 分别代表 GPU、存储、网络和运维成本，`N_success` 是通过质量验收条件的成功训练、评估或推理任务数。这个公式的重点不是精确财务建模，而是提醒你：只算 GPU 小时或 token 单价，会低估 AI Infra 的真实成本。
 
-最后给一个总览门禁：
+最后给一个总览验收条件：
 
 ```math
 G_{\mathrm{ai\_infra}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land R_{\mathrm{p0}}=0\right]
 ```
 
-其中，`\tau_j` 是每个维度的最低通过阈值，`R_p0` 表示 P0 级硬阻断数量。只要关键维度覆盖不足，或者存在没有缓解方案的 P0 风险，总览门禁就不应该通过。
+其中，`\tau_j` 是每个维度的最低通过阈值，`R_p0` 表示 P0 级硬阻断数量。只要关键维度覆盖不足，或者存在没有缓解方案的 P0 风险，总览验收条件就不应该通过。
 
 下面是一个 0 依赖 Python demo。它不模拟真实集群，只把“AI Infra 总览回答是否完整”变成一张 toy 审计表：
 

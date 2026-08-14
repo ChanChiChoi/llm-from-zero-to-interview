@@ -4,13 +4,13 @@ Diffusion 是现代图像生成模型的核心路线之一。Stable Diffusion、
 
 本章目标是建立 diffusion 的基础图景：forward diffusion、reverse denoising、噪声预测、noise scheduler、U-Net、条件生成、classifier-free guidance、采样步数和常见面试表达。为了照顾小白，本章尽量用直觉和最少公式讲清楚，不追求完整数学推导。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲第二轮精修前，重点校准了 DDPM、DDIM、score-based generative modeling、classifier guidance / classifier-free guidance 和 latent diffusion 的代表论文资料。它们共同构成现代 diffusion 图像生成的基础路线：先人为定义加噪过程，再学习反向去噪过程；采样时用 scheduler 控制去噪路径；条件生成时用文本、类别或图像条件影响每一步去噪。
+本章参考重点校准了 DDPM、DDIM、score-based generative modeling、classifier guidance / classifier-free guidance 和 latent diffusion 的代表论文资料。它们共同构成现代 diffusion 图像生成的基础路线：先人为定义加噪过程，再学习反向去噪过程；采样时用 scheduler 控制去噪路径；条件生成时用文本、类别或图像条件影响每一步去噪。
 
 本讲只讲 diffusion 基础，不提前展开下一章 Stable Diffusion 与 DALL·E 的系统结构、prompt 工程、negative prompt、ControlNet、图像编辑和产品化参数。本讲重点放在 DDPM 的 forward / reverse 公式、噪声预测目标、timestep、scheduler、CFG、latent diffusion 成本直觉和最小可运行加噪 / 去噪审计 demo。
 
-第二轮新增内容按三个目标补齐：
+本章围绕三个目标展开：
 
 1. 把 forward diffusion、闭式加噪、噪声预测 loss、从噪声还原 `x0`、DDPM 采样均值、score 关系和 CFG 写成可复习公式。
 2. 给出一个 0 依赖 Python demo，帮助读者手算 alpha schedule、`x_t`、noise MSE、`x0_hat`、DDPM reverse mean、CFG 和 latent cost ratio。

@@ -8,17 +8,17 @@
 
 > 训练数据供给的目标，是在保证数据版本、权限、shuffle 和可复现性的前提下，把数据以足够高、足够稳定的吞吐送到训练进程。
 
-## 23.0 本讲资料边界与第二轮精修口径
+## 23.0 本讲范围与资料
 
-本讲第二轮精修时，资料口径主要对齐几类公开工程资料：PyTorch `torch.utils.data` 对 `Dataset`、`IterableDataset`、`DataLoader`、`DistributedSampler`、`num_workers`、`pin_memory`、`prefetch_factor` 和 worker 初始化的稳定抽象；Hugging Face Datasets streaming 对超大数据集流式读取、`IterableDataset`、shuffle buffer、`set_epoch`、sharding 和 Parquet 列裁剪 / 过滤的公开口径；NVIDIA DALI 对高吞吐数据加载、CPU / GPU preprocessing、pipeline、reader、sharding 和预取的工程边界；前文存储、checkpoint 和可观测性章节对对象存储、缓存、manifest、checksum、恢复状态和指标采集的稳定抽象。
+本章参考几类公开工程资料：PyTorch `torch.utils.data` 对 `Dataset`、`IterableDataset`、`DataLoader`、`DistributedSampler`、`num_workers`、`pin_memory`、`prefetch_factor` 和 worker 初始化的稳定抽象；Hugging Face Datasets streaming 对超大数据集流式读取、`IterableDataset`、shuffle buffer、`set_epoch`、sharding 和 Parquet 列裁剪 / 过滤的公开口径；NVIDIA DALI 对高吞吐数据加载、CPU / GPU preprocessing、pipeline、reader、sharding 和预取的工程边界；前文存储、checkpoint 和可观测性章节对对象存储、缓存、manifest、checksum、恢复状态和指标采集的稳定抽象。
 
 这里不把某个数据湖、对象存储、分布式缓存产品、训练框架、文件格式、内部平台或具体吞吐数值写成通用标准。正文只抽象训练数据供给里的稳定问题：manifest、shard、格式、小文件、离线 / 在线预处理、流式读取、预取、本地缓存、分布式缓存、shuffle、rank 切分、数据局部性、DataLoader、H2D copy、坏样本、监控、checkpoint 恢复和权限版本治理。
 
-第二轮精修重点放在三个方面：
+本章重点放在三个方面：
 
 1. 把“数据读得快”拆成可计算的吞吐、等待比例、缓存命中、rank lag、坏样本率和恢复连续性。
 2. 补充 GitHub MathJax 兼容公式，解释 shard、shuffle、缓存、DataLoader 和 checkpoint 数据状态之间的关系。
-3. 增加一个 0 依赖 Python demo，把训练数据供给从经验 checklist 变成可运行门禁检查。
+3. 增加一个 0 依赖 Python demo，把训练数据供给从经验 checklist 变成可运行验收条件检查。
 
 ## 23.1 为什么数据供给重要
 
@@ -447,7 +447,7 @@ Checkpoint 应记录：
 d_i=(m_i,s_i,a_i,u_i,c_i,q_i,r_i,\ell_i,p_i,h_i,b_i,o_i,k_i,v_i,z_i)
 ```
 
-其中，`m_i` 是 manifest 证据，`s_i` 是 shard 和格式，`a_i` 是小文件和 metadata 压力，`u_i` 是流式读取和预取，`c_i` 是缓存，`q_i` 是 shuffle，`r_i` 是 rank 切分，`\ell_i` 是数据局部性，`p_i` 是 DataLoader 并行与预处理，`h_i` 是 H2D copy，`b_i` 是坏样本，`o_i` 是观测指标，`k_i` 是 checkpoint 数据状态，`v_i` 是权限和版本治理，`z_i` 是最终门禁。
+其中，`m_i` 是 manifest 证据，`s_i` 是 shard 和格式，`a_i` 是小文件和 metadata 压力，`u_i` 是流式读取和预取，`c_i` 是缓存，`q_i` 是 shuffle，`r_i` 是 rank 切分，`\ell_i` 是数据局部性，`p_i` 是 DataLoader 并行与预处理，`h_i` 是 H2D copy，`b_i` 是坏样本，`o_i` 是观测指标，`k_i` 是 checkpoint 数据状态，`v_i` 是权限和版本治理，`z_i` 是最终验收条件。
 
 统一覆盖率可以写成：
 
@@ -503,13 +503,13 @@ H_{\mathrm{shuffle}}=-\frac{1}{\log K}\sum_{k=1}^{K}p_k\log p_k
 
 其中，`K` 是桶数，`p_k` 是第 `k` 个来源桶在一个窗口中的比例。这个指标不能证明全局完全随机，但能发现明显的 shard 顺序偏置或单来源连续读取。
 
-最终训练数据供给门禁可以写成：
+最终训练数据供给准入条件可以形式化为：
 
 ```math
 G_{\mathrm{data}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land Q_{\mathrm{data}}\ge \gamma Q_{\mathrm{train}} \land R_{\mathrm{wait}}\le \rho_{\mathrm{wait}} \land R_{\mathrm{cache}}\ge \rho_{\mathrm{cache}} \land R_{\mathrm{bad}}\le \rho_{\mathrm{bad}} \land P_0=0\right]
 ```
 
-这个门禁背后的含义是：数据供给不是“能读到文件”，而是 manifest、shard、缓存、shuffle、rank 切分、DataLoader、H2D、坏样本、观测指标和 checkpoint 数据状态都要可审计。
+这组条件背后的含义是：数据供给不是“能读到文件”，而是 manifest、shard、缓存、shuffle、rank 切分、DataLoader、H2D、坏样本、观测指标和 checkpoint 数据状态都要可审计。
 
 下面的 0 依赖 Python demo 演示一个最小训练数据供给审计器。
 

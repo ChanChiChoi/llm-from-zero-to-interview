@@ -12,9 +12,9 @@
 
 > Action 是一次动作，Tool 是可调用能力，Workflow 是步骤编排，Skill 是任务能力包，Plugin 是扩展交付载体。
 
-## 34.0 本讲资料边界与第二轮精修口径
+## 34.0 本讲范围与资料
 
-本章第二轮精修时，重点核对了 MCP Specification 中 tools / resources / prompts 的边界，Agent Skills 开放规范中 Skill 作为包含说明、脚本、参考资料和资产的可复用能力包的口径，OpenAI Apps SDK / Actions 中 tool descriptor、component / resource 和 action 接入的公开资料，以及 Microsoft Copilot Studio 等平台对 actions、plugins、connectors、workflows 和 agents 的常见命名方式。
+本章参考 MCP Specification 中 tools / resources / prompts 的边界，Agent Skills 开放规范中 Skill 作为包含说明、脚本、参考资料和资产的可复用能力包的口径，OpenAI Apps SDK / Actions 中 tool descriptor、component / resource 和 action 接入的公开资料，以及 Microsoft Copilot Studio 等平台对 actions、plugins、connectors、workflows 和 agents 的常见命名方式。
 
 需要先划清边界：
 
@@ -22,7 +22,7 @@
 2. Tool 在 MCP 和 Apps SDK 等资料中通常强调可调用能力、schema、权限和结果返回；Action 在很多产品里既可能指工具定义，也可能指一次具体执行。本章为了工程审计清晰，把 Action 固定为“执行实例”。
 3. Skill 采用“面向任务的能力包”口径，可以包含 tools、prompts、resources、workflow、permissions、configuration 和 eval；它不等于单个 Tool，也不等于纯 Workflow。
 4. Plugin / App 更偏安装、认证、分发、加载和版本治理；一个 Plugin 可以包含多个 Tool、Skill 或 Workflow。
-5. 本章新增的公式和 Python demo 是教学用边界审计器，不实现真实插件系统、工作流引擎、权限系统、marketplace 或工具运行时。
+5. 本章补充的公式和 Python demo 是教学用边界审计器，不实现真实插件系统、工作流引擎、权限系统、marketplace 或工具运行时。
 
 ## 34.1 为什么这些概念容易混淆
 
@@ -502,7 +502,7 @@ C_j=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[I_j(e_i)=1]
 
 其中，`I_j(e_i)=1` 表示第 `i` 个条目在第 `j` 个边界检查上通过。
 
-五层边界门禁可以写成：
+五层边界准入条件可以形式化为：
 
 ```math
 G_{\mathrm{ecosystem\_boundary}}

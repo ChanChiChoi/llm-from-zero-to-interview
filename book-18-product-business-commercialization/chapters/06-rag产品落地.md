@@ -1,8 +1,8 @@
 # 第六章：RAG 产品落地
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲按 `WRITING_PLAN.md` 的第二轮要求做公式和 demo 精修。联网资料主要核对四类口径：OpenAI retrieval / file search / evals 相关资料提醒我们，RAG 产品不是单一向量检索，而是查询改写、向量库、元数据过滤、重排、上下文构造、引用和评估组成的系统；RAGAS 等 RAG 评估论文提醒我们，RAG 要同时看 context precision、context recall、faithfulness / groundedness、answer relevance 和人工标注边界；OWASP LLM Top 10 中与向量和嵌入、提示注入、敏感信息泄露相关的风险提醒我们，企业 RAG 必须把不可信文档、权限过滤和敏感信息控制纳入产品门禁；Google SRE 的 SLI / SLO / error budget 口径提醒我们，RAG 的检索、重排和生成链路必须有延迟、错误率和成本目标。
+本章重点讨论。联网资料主要核对四类口径：OpenAI retrieval / file search / evals 相关资料提醒我们，RAG 产品不是单一向量检索，而是查询改写、向量库、元数据过滤、重排、上下文构造、引用和评估组成的系统；RAGAS 等 RAG 评估论文提醒我们，RAG 要同时看 context precision、context recall、faithfulness / groundedness、answer relevance 和人工标注边界；OWASP LLM Top 10 中与向量和嵌入、提示注入、敏感信息泄露相关的风险提醒我们，企业 RAG 必须把不可信文档、权限过滤和敏感信息控制纳入产品验收条件；Google SRE 的 SLI / SLO / error budget 口径提醒我们，RAG 的检索、重排和生成链路必须有延迟、错误率和成本目标。
 
 本章不替代后续专门的 RAG 算法实现、向量数据库选型、安全合规审查或第十七册 Agentic RAG 深入章节。这里聚焦产品落地：怎么把企业知识库从“几个 PDF 的 demo”升级成可评估、可引用、可治理、可运营、可控成本的 RAG 产品。
 
@@ -242,7 +242,7 @@ RAG 产品评估包括：
 
 不同阶段关注不同指标。早期先看检索和答案正确，产品化后还要看使用率、满意度和业务收益。
 
-## 6.12.1 关键公式与 RAG 产品指标速查
+### 6.12.1 关键公式与 RAG 产品指标速查
 
 可以把一次 RAG 查询样本写成：
 
@@ -320,11 +320,11 @@ R_{\mathrm{perm}}=1-\frac{N_{\mathrm{unauth}}}{N_{\mathrm{req}}+\epsilon}
 R_{\mathrm{stale}}=\frac{N_{\mathrm{stale}}}{N_{\mathrm{evidence}}+\epsilon}
 ```
 
-其中 `N_{\mathrm{stale}}` 是过期、被替换或版本不一致的证据数。时效性强的业务要把过期证据率纳入上线门禁。
+其中 `N_{\mathrm{stale}}` 是过期、被替换或版本不一致的证据数。时效性强的业务要把过期证据率纳入上线条件。
 
-**8. RAG 产品上线门禁**
+**8. RAG 产品上线条件**
 
-一个简化门禁可以写成：
+一个简化验收条件可以形式化为：
 
 ```math
 G_{\mathrm{rag}}=\mathbf{1}[R_{\mathrm{ret}}\geq r_0]\mathbf{1}[P_{\mathrm{ctx}}\geq p_0]\mathbf{1}[S_{\mathrm{ev}}\geq s_0]\mathbf{1}[A_{\mathrm{cite}}\geq c_0]\mathbf{1}[R_{\mathrm{perm}}\geq h_0]\mathbf{1}[L_{95}\leq L_{\mathrm{slo}}]

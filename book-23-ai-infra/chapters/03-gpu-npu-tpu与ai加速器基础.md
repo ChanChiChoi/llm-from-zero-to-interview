@@ -8,13 +8,13 @@
 
 > AI 加速器的核心价值，是用高度并行的计算单元和高带宽内存，加速大模型中海量矩阵乘法、attention、MLP 和数据搬运。
 
-## 3.0 本讲资料边界与第二轮精修口径
+## 3.0 本讲范围与资料
 
 本讲是硬件基础入口，不追逐某一代 GPU、TPU、NPU 或云实例的最新参数，也不把某个厂商的峰值算力写成通用结论。硬件规格变化很快，面试中更重要的是建立稳定判断框架：计算峰值、显存容量、显存带宽、互联、低精度格式、软件栈、通信库、调试工具、成本和迁移风险。
 
-第二轮精修时，我按 `WRITING_PLAN.md` 做了资料校准，主要参考公开官方资料中的稳定边界：NVIDIA CUDA 文档把 CUDA 定义为 GPU 上的并行计算平台和编程模型；NVIDIA NCCL 文档强调 NCCL 是面向 GPU 间通信的 collective / point-to-point 通信库，并支持 PCIe、NVLink、InfiniBand 等互联；Google Cloud TPU 文档把 TPU 定义为面向机器学习工作负载的 ASIC，核心是快速矩阵运算、MXU、HBM、slice、topology 和 Pod；AMD ROCm 文档说明 ROCm 是面向 AMD GPU 的开源软件栈，覆盖 HIP、OpenCL、OpenMP 和深度学习框架兼容。
+本章参考公开官方资料中的稳定边界：NVIDIA CUDA 文档把 CUDA 定义为 GPU 上的并行计算平台和编程模型；NVIDIA NCCL 文档强调 NCCL 是面向 GPU 间通信的 collective / point-to-point 通信库，并支持 PCIe、NVLink、InfiniBand 等互联；Google Cloud TPU 文档把 TPU 定义为面向机器学习工作负载的 ASIC，核心是快速矩阵运算、MXU、HBM、slice、topology 和 Pod；AMD ROCm 文档说明 ROCm 是面向 AMD GPU 的开源软件栈，覆盖 HIP、OpenCL、OpenMP 和深度学习框架兼容。
 
-因此，本章新增内容只写稳定抽象：GPU、NPU、TPU 和 AI ASIC 都是加速器选择的一部分，差异不只在“谁的 TFLOPS 更高”，而在真实工作负载能否落到硬件、内存、互联和软件生态上。
+因此，本章内容只写稳定抽象：GPU、NPU、TPU 和 AI ASIC 都是加速器选择的一部分，差异不只在“谁的 TFLOPS 更高”，而在真实工作负载能否落到硬件、内存、互联和软件生态上。
 
 ## 3.1 为什么大模型需要 AI 加速器
 
@@ -422,7 +422,7 @@ R_{\mathrm{comm}}=\frac{T_{\mathrm{comm}}}{T_{\mathrm{compute}}+T_{\mathrm{comm}
 
 如果 `R_comm` 很高，问题通常不在单卡 TFLOPS，而在并行策略、互联、通信库、拓扑或 batch / bucket 配置。
 
-下面是一个 0 依赖 Python demo。它用 toy 数字估算训练显存、KV cache、roofline 上限，并做加速器选型门禁：
+下面是一个 0 依赖 Python demo。它用 toy 数字估算训练显存、KV cache、roofline 上限，并做加速器选型验收条件：
 
 ```python
 METRICS = [

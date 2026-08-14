@@ -1,14 +1,14 @@
 # 第七章：Position Encoding 总览：Sinusoidal、Learned、Relative、RoPE、ALiBi
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲第二轮精修主要对齐 Transformer 原论文、Shaw et al. relative position representation、T5 relative position bias、RoFormer / RoPE、ALiBi、Position Interpolation 和 YaRN 等公开论文。写作时只把这些资料中已经公开且可复核的机制写成确定结论；不同模型里的 RoPE base、scaling 配置、position id 细节、长上下文微调配方和评测结论不能互相泛化。
+本章参考 Transformer 原论文、Shaw et al. relative position representation、T5 relative position bias、RoFormer / RoPE、ALiBi、Position Interpolation 和 YaRN 等公开论文。正文只把这些资料中已经公开且可复核的机制写成确定结论；不同模型里的 RoPE base、scaling 配置、position id 细节、长上下文微调配方和评测结论不能互相泛化。
 
-本讲的精修重点有三点：
+本讲从三个实践角度展开：
 
-1. 把位置编码的核心公式改成 GitHub Markdown 更稳定的 fenced math block，避免把代码变量名塞进 LaTeX 的 text 宏。
-2. 补一个 0 依赖 Python demo，用同一段代码检查 sinusoidal、RoPE、ALiBi、Position Interpolation 和 position id 风险。
-3. 把本讲新增的 Position Encoding Gate、Position ID Audit、RoPE Scaling 等概念同步到百科、题库、练习、术语表、项目清单和知识图谱。
+1. 用 GitHub Markdown 更稳定的 fenced math block 表达位置编码核心公式，避免把代码变量名混入 LaTeX 的 text 宏。
+2. 通过一个 0 依赖 Python demo，用同一段代码检查 sinusoidal、RoPE、ALiBi、Position Interpolation 和 position id 风险。
+3. 将 Position Encoding Gate、Position ID Audit、RoPE Scaling 等概念放入百科、题库、练习、术语表、项目清单和知识图谱，形成可交叉复习的知识链。
 
 ## 7.1 本章定位
 
@@ -720,7 +720,7 @@ YaRN 是 RoPE 长上下文扩展的一类高效方法。它的目标是用更少
 
 ## 7.20 位置编码审计指标与最小 demo
 
-工程里位置编码最容易出错的地方不是公式本身，而是 position id、KV cache、packed sequence 和长上下文配置是否一致。可以把位置编码审计抽象成一个门禁：
+工程里位置编码最容易出错的地方不是公式本身，而是 position id、KV cache、packed sequence 和长上下文配置是否一致。可以把位置编码审计抽象成一个验收条件：
 
 ```math
 G_{\mathrm{pos}}=
@@ -859,9 +859,9 @@ position_gate_pass= False
 2. `score_2_5` 和 `score_10_13` 相等，因为两组位置差都是 3；`score_2_6` 不同，因为位置差变成 4。
 3. ALiBi 中 `key_2` 比 `key_6` 离 query 更远，所以 bias 更负；未来位置 `key_8` 在 causal attention 中不可见。
 4. Position Interpolation 把 8191 映射到 2047.75，避免直接落到训练长度外很远的位置。
-5. 审计门禁失败不是因为某个位置编码算法错误，而是因为工程配置中同时出现了 cache position id 重置、packed sequence 位置泄漏和长上下文无 scaling。
+5. 审计检查失败不是因为某个位置编码算法错误，而是因为工程配置中同时出现了 cache position id 重置、packed sequence 位置泄漏和长上下文无 scaling。
 
-## 7.21 面向专家：RoPE 的频率、相位和外推问题
+## 7.21 机制与边界：RoPE 的频率、相位和外推问题
 
 RoPE 的每一对维度对应一个旋转频率。常见形式是：
 
@@ -890,7 +890,7 @@ RoPE 的每一对维度对应一个旋转频率。常见形式是：
 
 这就是为什么简单线性缩放、NTK-aware scaling、YaRN 等方法会在不同频率维度上做更细致处理。
 
-## 7.22 面向专家：位置编码和 attention pattern 的耦合
+## 7.22 机制与边界：位置编码和 attention pattern 的耦合
 
 位置编码不是孤立模块。它和 attention pattern 强耦合。
 
@@ -907,6 +907,54 @@ RoPE 的每一对维度对应一个旋转频率。常见形式是：
 对于 packed sequence training，如果多个样本拼在同一个 sequence 里，position id 和 attention mask 必须配套设计。否则模型可能把不同样本之间的位置关系当成真实上下文。
 
 对于多模态模型，位置编码更复杂。图像 patch、视频 frame、音频 token、文本 token 可能有不同位置结构。二维 RoPE、三维 RoPE、modality-specific position embedding 都是在解决这个问题。
+
+### 7.22.1 NoPE、递归状态与混合位置机制：没有显式位置编码不等于没有顺序
+
+“NoPE”很容易被初学者误读成“模型不知道顺序”。更准确的定义是：某个 attention 分支不对 Q/K 显式施加 RoPE、ALiBi 或额外的位置 bias。顺序仍可能从因果 mask、token 的递归更新顺序、状态衰减、局部窗口边界和训练数据中进入模型。
+
+#### 7.22.1.1 Kimi K3：无显式 position embedding 的正确读法
+
+Kimi K3 的公开模型卡给出 `3 KDA + 1 Gated MLA` 的结构信号，并说明模型不使用显式 position embedding。这里不要把它改写成“完全没有位置信息”。更适合教学的抽象是：
+
+```math
+s_t=F(s_{t-1},x_t;\alpha_t)
+```
+
+其中 `s_t` 是按 token 顺序更新的递归状态，`alpha_t` 等门控/衰减变量控制旧信息保留多少。由于 `s_t` 依赖 `s_{t-1}`，交换输入顺序通常会改变状态轨迹，即使没有显式的 `p_t` 加到 embedding 或 Q/K 上。
+
+这和 RoPE 的机制不同：
+
+| 机制 | 顺序如何进入模型 | 长上下文优势 | 主要风险 |
+|---|---|---|---|
+| RoPE | 对 Q/K 做与位置相关的旋转 | 相对位置信息直观，生态成熟 | 超出训练长度时有相位外推问题 |
+| NoPE + causal mask | 由可见性和其他模块间接提供顺序 | 减少显式位置变换的耦合 | 需要确认状态、层间结构和任务是否足够表达顺序 |
+| KDA/DeltaNet 类状态 | 按序更新固定大小或分块状态 | cache 有机会不随 token 线性增长 | 压缩状态可能损失精确检索，kernel/训练更复杂 |
+| Hybrid | 局部/递归层与全局 attention 分工 | 在精确路由和成本之间折中 | 全局层仍可能决定最坏情况成本 |
+
+这里的递归公式是解释用的最小模型，不是 Kimi K3 的源代码或完整数学定义。阅读模型卡时，要把“无显式 position embedding”“KDA 的状态更新”和“Gated MLA 的 latent 表示”分别核对，不能用一个词替代三个机制。
+
+#### 7.22.1.2 Gemma 4、Qwen3.5/3.6 与 North Mini Code
+
+新模型常把位置机制和 attention pattern 一起设计：
+
+1. Gemma 4 的公开资料给出 local sliding-window attention 与 global attention 的混合结构，并使用 p-RoPE 等位置处理。局部层限制可见窗口，全局层提供跨窗口通路；因此它既不是纯 RoPE full attention，也不是纯 sliding window。
+2. Qwen3.5 和 Qwen3.6 的公开模型卡给出 Gated DeltaNet 与 Gated Attention 的组合。这里的重点是“递归/线性状态和显式 attention 共存”，不能把它粗略归类为“取消 RoPE 后的普通 Transformer”。
+3. Cohere North Mini Code 的公开模型卡给出 `3:1` sliding-window RoPE 与 global NoPE。它说明 NoPE 往往是某些全局层的局部设计选择；局部层仍可能使用 RoPE，整个模型也仍然通过因果顺序建模。
+
+对专家来说，评估这类模型要把 position audit 从“检查是否有 RoPE”升级为：
+
+```math
+G_{\mathrm{order}}=G_{\mathrm{causal}}\cdot G_{\mathrm{state}}\cdot G_{\mathrm{pattern}}\cdot G_{\mathrm{cache}}
+```
+
+其中：
+
+1. `G_causal` 检查每个 token 是否只看到允许的历史。
+2. `G_state` 检查递归状态的读写顺序、reset 和 batch 隔离。
+3. `G_pattern` 检查 local/global 层的 mask、窗口和跨层连接是否一致。
+4. `G_cache` 检查显式 KV cache、latent cache 或状态 cache 在 decode、prefix sharing、packed sequence 中的 position/state 对齐。
+
+这组条件表达的是工程正确性，不代表模型质量已经被证明。NoPE、p-RoPE、KDA 等新术语都必须结合训练上下文、长文本评测和实现细节阅读。
 
 ## 7.23 常见误区
 

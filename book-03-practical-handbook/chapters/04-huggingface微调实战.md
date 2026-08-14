@@ -30,7 +30,7 @@
 
 本讲先完成第一步：加载并运行一个开源 causal language model。
 
-资料边界说明：本讲第二轮精修时按 `WRITING_PLAN.md` 核对 Hugging Face Transformers 的 `PreTrainedModel.from_pretrained`、tokenizer、text generation / `generate`、`dtype` / `device_map` 文档，以及 PyTorch `Module.eval()` 和 `torch.no_grad()` 文档。这里以教学推理脚本为主，重点讲清 tokenizer、model、config、forward logits shape、生成长度和常见工程边界，不展开服务化推理、流式输出或量化加载细节。Hugging Face 当前主线文档中模型加载示例更常写 `dtype=...`，不少稳定版本和历史示例仍写 `torch_dtype=...`；二者表达的是加载权重时使用的目标 dtype，实际代码应以本机安装的 `transformers` 版本文档为准。
+本讲使用 Hugging Face Transformers 的 `from_pretrained`、tokenizer、`generate`、`dtype` 和 `device_map` 接口，以及 PyTorch 的 `Module.eval()` 和 `torch.no_grad()`。重点是建立可复现的教学推理闭环：看清 tokenizer、model、config、logits shape 和生成长度之间的关系。模型下载缓存、服务化推理、流式输出和量化加载会在后续内容展开。Transformers 新版文档更常写 `dtype=...`，许多稳定版本和历史示例仍写 `torch_dtype=...`；两者都表示加载权重时的目标 dtype，实际代码应以本机安装版本的文档和签名为准。
 
 ---
 
@@ -151,6 +151,10 @@ model_name = "sshleifer/tiny-gpt2"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModelForCausalLM.from_pretrained(model_name)
 
+if tokenizer.pad_token is None:
+    tokenizer.pad_token = tokenizer.eos_token
+model.config.pad_token_id = tokenizer.pad_token_id
+
 model.eval()
 
 prompt = "Hello, my name is"
@@ -252,6 +256,7 @@ Hugging Face 模型自带 `generate`。
 generated_ids = model.generate(
     **inputs,
     max_new_tokens=50,
+    pad_token_id=tokenizer.eos_token_id,
 )
 
 generated_text = tokenizer.decode(generated_ids[0], skip_special_tokens=True)
@@ -922,7 +927,7 @@ SFT 是 supervised fine-tuning，也就是监督微调。
 
 所以这一讲非常关键。
 
-资料边界说明：本讲第二轮精修时按 `WRITING_PLAN.md` 核对 Hugging Face Transformers chat template / `apply_chat_template` 文档、TRL `SFTTrainer` 关于 `assistant_only_loss` 和 `completion_only_loss` 的说明，以及 PyTorch `CrossEntropyLoss(ignore_index=-100)` 文档。这里重点讲数据构造和 loss mask 机制，不展开下一讲的 Trainer 参数、LoRA 配置或分布式训练。
+本讲围绕 Hugging Face 的 chat template / `apply_chat_template`、TRL 的 `assistant_only_loss` 与 `completion_only_loss`，以及 PyTorch `CrossEntropyLoss(ignore_index=-100)` 来说明 SFT 数据和 loss mask。重点是让读者能从原始样本追踪到每一个监督 token；Trainer 参数、LoRA 配置和分布式训练留到后续讲解。
 
 ---
 
@@ -1211,24 +1216,22 @@ def preprocess_example(example, tokenizer, max_length=512):
     prompt, response = format_alpaca(example)
     full_text = prompt + response + tokenizer.eos_token
 
-    prompt_ids = tokenizer(
-        prompt,
-        add_special_tokens=False,
-    )["input_ids"]
-
     full = tokenizer(
         full_text,
         max_length=max_length,
         truncation=True,
         add_special_tokens=False,
+        return_offsets_mapping=True,
     )
 
     input_ids = full["input_ids"]
     attention_mask = full["attention_mask"]
-
-    labels = input_ids.copy()
-    prompt_len = min(len(prompt_ids), len(labels))
-    labels[:prompt_len] = [-100] * prompt_len
+    offsets = full["offset_mapping"]
+    prompt_end = len(prompt)
+    labels = [
+        token_id if end > prompt_end else -100
+        for token_id, (start, end) in zip(input_ids, offsets)
+    ]
 
     return {
         "input_ids": input_ids,
@@ -1240,10 +1243,13 @@ def preprocess_example(example, tokenizer, max_length=512):
 这里的核心是：
 
 ```python
-labels[:prompt_len] = [-100] * min(prompt_len, len(labels))
+labels = [
+    token_id if end > len(prompt) else -100
+    for token_id, (start, end) in zip(input_ids, full["offset_mapping"])
+]
 ```
 
-它把 prompt 部分从 loss 中排除。
+它根据完整文本的字符偏移把 prompt 部分从 loss 中排除。对于 BPE 或 byte-level tokenizer，分别 tokenize `prompt` 和 `prompt + response` 后再用两个 token 数相减并不总是可靠，因为边界处可能发生合并；offset mapping 或 tokenizer 提供的 assistant mask 更稳妥。`return_offsets_mapping` 通常要求 fast tokenizer，使用慢 tokenizer 时应改用模型模板支持的 assistant mask 或先验证边界行为。
 
 ---
 
@@ -1531,7 +1537,7 @@ eval_dataset = split_dataset["test"]
 相似或重复样本不要同时出现在 train 和 eval。
 ```
 
-否则验证 loss 会虚高可信度。
+否则验证 loss 会看起来过于乐观，不能代表对新任务或新来源样本的泛化能力。
 
 更严谨的做法是按任务、来源或文档分组划分。
 
@@ -1790,38 +1796,37 @@ def build_messages(example):
     ]
 ```
 
-训练文本：
+训练文本和 assistant mask 可以直接由 tokenizer 一起产生：
 
 ```python
 messages = build_messages(example)
-full_text = tokenizer.apply_chat_template(
+encoded = tokenizer.apply_chat_template(
     messages,
-    tokenize=False,
+    tokenize=True,
+    return_dict=True,
     add_generation_prompt=False,
+    return_assistant_tokens_mask=True,
 )
+
+input_ids = encoded["input_ids"]
+attention_mask = encoded["attention_mask"]
+assistant_mask = encoded["assistant_masks"]
+labels = [
+    token_id if is_assistant else -100
+    for token_id, is_assistant in zip(input_ids, assistant_mask)
+]
 ```
 
-为了 mask prompt，需要构造不含 assistant 内容的 prompt messages：
+这种写法要求 chat template 使用了 Transformers 支持的 generation 标记（通常是模板中的 `{% generation %}` / `{% endgeneration %}`），并且本地 Transformers 版本支持 `return_assistant_tokens_mask`。训练前应打印 mask 覆盖的 token，确认回答正文以及你希望训练的 EOS token 被包含。
 
-```python
-prompt_messages = messages[:-1]
-prompt_text = tokenizer.apply_chat_template(
-    prompt_messages,
-    tokenize=False,
-    add_generation_prompt=True,
-)
-```
-
-然后按前面的方式计算 `prompt_len` 并 mask。
-
-这是 chat 模型 SFT 中非常常见的处理方式。
+如果模板不支持 assistant mask，可以把完整渲染文本和字符区间交给 fast tokenizer 的 `return_offsets_mapping=True`，按字符范围构造 labels；不要默认用“prompt token 数”切片，因为模板控制 token、特殊 token 和 BPE 边界都可能让两个独立 tokenize 的长度不同。
 
 有两个边界要注意：
 
 1. `apply_chat_template(..., add_generation_prompt=False)` 适合已经包含 assistant 答案的训练样本。
 2. `apply_chat_template(..., add_generation_prompt=True)` 更适合推理或构造“只到 assistant 开始标记为止”的 prompt，用来计算 prompt token 长度。
 
-如果 tokenizer 的 chat template 不支持标记 assistant token mask，就需要像上面这样分别构造 prompt text 和 full text，再用两者 token 长度差来得到回答区间。若模板本身支持 assistant mask，训练框架也可能直接用 assistant mask 做 `assistant_only_loss`。
+如果 tokenizer 的 chat template 不支持 assistant token mask，训练框架可能只能使用 completion-only loss 或基于偏移量的自定义 mask。TRL 的 `assistant_only_loss` 依赖模板能够标出 assistant 生成区间；不要把 `assistant_only_loss` 和“把整条序列都参与 loss”混为一谈。
 
 ---
 
@@ -1954,7 +1959,7 @@ labels 的 padding 应该用 `-100`，不是 pad token id。
 
 本讲把数据喂给模型，做一次全参数 SFT。
 
-资料边界说明：本讲第二轮精修时按 `WRITING_PLAN.md` 核对 Hugging Face Transformers 的 `Trainer`、`TrainingArguments`、模型保存加载和 gradient checkpointing 文档，以及 PyTorch optimizer / 训练循环相关接口。这里以小模型教学 SFT 为主，强调训练目标、batch / gradient accumulation、保存加载和排错边界；大模型 LoRA、QLoRA 和高性能分布式训练放到后续章节。
+本讲沿用 Hugging Face Transformers 的 `Trainer`、`TrainingArguments`、模型保存加载和 gradient checkpointing 接口，并把它们和 PyTorch 的 optimizer / 训练循环对应起来。示例以小模型教学 SFT 为主，重点是训练目标、batch、gradient accumulation、保存加载和排错；大模型 LoRA、QLoRA 和高性能分布式训练放到后续讲解。
 
 所谓全参数 SFT，就是：
 
@@ -2188,24 +2193,22 @@ def preprocess_example(example):
     prompt, response = format_alpaca(example)
     full_text = prompt + response + tokenizer.eos_token
 
-    prompt_ids = tokenizer(
-        prompt,
-        add_special_tokens=False,
-    )["input_ids"]
-
     full = tokenizer(
         full_text,
         max_length=max_length,
         truncation=True,
         add_special_tokens=False,
+        return_offsets_mapping=True,
     )
 
     input_ids = full["input_ids"]
     attention_mask = full["attention_mask"]
-    labels = input_ids.copy()
-
-    prompt_len = min(len(prompt_ids), len(labels))
-    labels[:prompt_len] = [-100] * prompt_len
+    offsets = full["offset_mapping"]
+    prompt_end = len(prompt)
+    labels = [
+        token_id if end > prompt_end else -100
+        for token_id, (start, end) in zip(input_ids, offsets)
+    ]
 
     return {
         "input_ids": input_ids,
@@ -2229,6 +2232,8 @@ eval_dataset = eval_raw.map(
 train_dataset = train_dataset.filter(lambda x: any(label != -100 for label in x["labels"]))
 eval_dataset = eval_dataset.filter(lambda x: any(label != -100 for label in x["labels"]))
 ```
+
+这份骨架沿用前一讲基于 `offset_mapping` 的 mask，因此应使用 fast tokenizer；如果目标 tokenizer 不支持 offsets，就改用它的 assistant mask 或实现经过验证的模板级 mask，不要静默退回到不可靠的 token 长度相减。
 
 ---
 
@@ -2353,6 +2358,8 @@ eval_strategy="steps"
 ```
 
 根据本地版本调整即可。
+
+如果同时开启 gradient checkpointing，decoder-only 模型通常还应设置 `model.config.use_cache = False`。KV cache 为逐 token 推理设计，而训练反向传播需要保留另一套激活信息；两者同时开启往往会产生 warning 或额外开销。
 
 ---
 
@@ -2601,6 +2608,7 @@ P\cdot(s_w+s_g+2s_o)
 开启 gradient checkpointing：
 
 ```python
+model.config.use_cache = False
 model.gradient_checkpointing_enable()
 ```
 
@@ -2963,7 +2971,7 @@ LoRA 是最常用的参数高效微调方法之一。
 
 本讲在上一讲 SFT 流程基础上，把全参数微调改造成 LoRA 微调。
 
-资料边界说明：本讲第二轮精修时按 `WRITING_PLAN.md` 核对 LoRA 原论文、Hugging Face PEFT `LoraConfig` / adapter 保存加载 / merge 文档，以及 Transformers `Trainer` 版本边界。这里重点讲低秩增量、参数量估算、`target_modules` 选择和 adapter 生命周期；QLoRA 的 4bit 量化基座训练放到下一讲。
+本讲以 LoRA 原论文和 Hugging Face PEFT 的 `LoraConfig`、adapter 保存/加载/merge 接口为依据，并特别关注 Transformers 版本边界。重点是理解低秩增量、参数量估算、`target_modules` 选择和 adapter 生命周期；QLoRA 的 4bit 量化基座训练放到下一讲。
 
 ---
 
@@ -2991,12 +2999,13 @@ LoRA 的目标是：
 这样带来几个好处：
 
 ```text
-显存更低。
-训练更快。
-保存文件更小。
+可训练参数和优化器状态更少，通常显存更低。
+保存的 adapter 文件更小。
 多个任务可以保存多个 adapter。
-更不容易破坏原始模型能力。
+可以保留同一个基座，便于比较和切换任务。
 ```
+
+LoRA 不保证每个任务都训练得更快，也不保证一定保留原始能力；冻结基座仍然要参与前向和反向中的部分计算，最终吞吐取决于实现、序列长度和硬件。
 
 代价是：
 
@@ -3071,7 +3080,7 @@ LoRA 常见初始化方式会让增量分支一开始接近 0，这样刚注入 
 4, 8, 16, 32, 64
 ```
 
-`r` 越大，可训练参数越多，表达能力越强，但显存和过拟合风险也更高。
+`r` 越大，可训练参数越多，表示增量的容量通常更大，但显存、计算和过拟合风险也更高；表达能力是否真的改善要用验证集确认。
 
 #### 2. `lora_alpha`
 
@@ -3212,11 +3221,14 @@ lora_config = LoraConfig(
     lora_dropout=0.05,
     target_modules=["c_attn", "c_proj"],
     bias="none",
+    fan_in_fan_out=True,
 )
 
 model = get_peft_model(model, lora_config)
 model.print_trainable_parameters()
 ```
+
+GPT-2 的 `c_attn` 和 `c_proj` 通常基于 Transformers 的 `Conv1D` 兼容层，权重存储方向与普通 `nn.Linear` 不同；这里显式设置 `fan_in_fan_out=True`。LLaMA、Qwen、Mistral 的 `q_proj` 等通常是线性层，不应机械沿用这个选项。
 
 `print_trainable_parameters()` 会输出类似：
 
@@ -3302,7 +3314,7 @@ response labels = token ids
 
 ### 十、TrainingArguments
 
-LoRA 通常可以使用比全参数 SFT 稍大的学习率。
+LoRA 在一些任务上可以使用比全参数 SFT 更大的学习率，但这不是固定规则；应从小范围候选值开始，并用同一验证集比较。
 
 例如：
 
@@ -3395,6 +3407,7 @@ lora_config = LoraConfig(
     lora_alpha=16,
     lora_dropout=0.05,
     target_modules=["c_attn", "c_proj"],
+    fan_in_fan_out=True,  # GPT-2 使用 Conv1D 权重布局
     bias="none",
 )
 
@@ -3674,7 +3687,7 @@ LoRA：
 只训练低秩 adapter。
 成本低，文件小。
 适合多任务和大模型。
-适配能力可能略弱于全参数。
+在某些任务上适配能力可能弱于全参数，但也可能凭更强的正则化获得更好的泛化。
 ```
 
 实际工作中：
@@ -3718,7 +3731,7 @@ adapter 必须和训练时的 base model 匹配。
 
 #### 坑 4：学习率照搬全参数 SFT
 
-LoRA 通常可以用更高学习率，比如 `1e-4` 到 `3e-4`。
+LoRA 有时可以用更高学习率，比如从 `1e-4` 到 `3e-4` 的范围开始试验。
 
 但仍要根据数据和 loss 调整。
 
@@ -3835,7 +3848,7 @@ QLoRA 的核心思路是：
 
 这样能进一步降低显存，让单卡微调更大的模型成为可能。
 
-资料边界说明：本讲第二轮精修时按 `WRITING_PLAN.md` 核对 QLoRA 论文、Hugging Face bitsandbytes 4bit 量化文档、PEFT `prepare_model_for_kbit_training` 文档和 Transformers 量化加载接口。这里重点讲 QLoRA 的工程机制、显存来源和配置边界，不展开 bitsandbytes kernel 细节或生产部署量化策略。
+本讲以 QLoRA 论文、Hugging Face bitsandbytes 4bit 量化文档、PEFT 的 `prepare_model_for_kbit_training` 和 Transformers 量化加载接口为依据。重点是理解 QLoRA 的工程机制、显存来源和配置边界；bitsandbytes kernel 细节和生产部署量化策略不在本讲展开。
 
 ---
 
@@ -3938,10 +3951,16 @@ from transformers import BitsAndBytesConfig
 import torch
 
 
+if not torch.cuda.is_available():
+    raise RuntimeError("4bit bitsandbytes training requires a supported CUDA setup")
+
+supports_bf16 = torch.cuda.is_bf16_supported()
+compute_dtype = torch.bfloat16 if supports_bf16 else torch.float16
+
 bnb_config = BitsAndBytesConfig(
     load_in_4bit=True,
     bnb_4bit_quant_type="nf4",
-    bnb_4bit_compute_dtype=torch.bfloat16,
+    bnb_4bit_compute_dtype=compute_dtype,
     bnb_4bit_use_double_quant=True,
 )
 ```
@@ -3957,7 +3976,7 @@ bnb_4bit_use_double_quant=True：使用双重量化，进一步节省显存。
 
 NF4 可以理解为更适合近似正态分布权重的 4bit 数据类型；double quant 的直觉是连量化常数也继续量化，从而进一步压缩量化元数据。它们都是为了降低冻结基座模型的存储成本，但不会改变“只训练 LoRA adapter”的核心训练目标。
 
-如果 GPU 不支持 bf16，可以改成：
+如果 GPU 不支持 bf16，上面的代码会自动使用：
 
 ```python
 bnb_4bit_compute_dtype=torch.float16
@@ -3987,6 +4006,8 @@ model = AutoModelForCausalLM.from_pretrained(
 model.config.pad_token_id = tokenizer.pad_token_id
 ```
 
+这里的 `trust_remote_code=True` 只应在确实需要自定义模型代码且仓库来源可信时使用；它允许加载远端 Python 实现。生产环境应固定仓库 revision、审查代码或使用已经审核过的本地副本。`device_map="auto"` 也更适合单进程自动放置，分布式训练时应按训练框架的并行方案显式配置。
+
 这里用 `device_map="auto"`。
 
 原因是量化模型加载通常依赖 accelerate 自动放置。
@@ -4012,6 +4033,7 @@ from peft import prepare_model_for_kbit_training
 
 
 model = prepare_model_for_kbit_training(model)
+model.config.use_cache = False
 ```
 
 它会做一些适合 k-bit 训练的准备，例如：
@@ -4104,8 +4126,11 @@ QLoRA 改变的是模型加载和训练参数方式，不改变 SFT 数据目标
 ### 九、TrainingArguments
 
 ```python
+import torch
 from transformers import TrainingArguments
 
+
+supports_bf16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
 
 training_args = TrainingArguments(
     output_dir="outputs/qlora_qwen_0_5b",
@@ -4120,13 +4145,14 @@ training_args = TrainingArguments(
     eval_steps=50,
     save_steps=50,
     save_total_limit=2,
-    bf16=torch.cuda.is_available(),
+    bf16=supports_bf16,
+    fp16=torch.cuda.is_available() and not supports_bf16,
     gradient_checkpointing=True,
     report_to="none",
 )
 ```
 
-如果 GPU 不支持 bf16，可以用：
+如果不使用上面的自动选择，也可以在确认硬件支持 fp16 后显式使用：
 
 ```python
 fp16=True
@@ -4193,10 +4219,16 @@ from peft import (
 model_name = "Qwen/Qwen2.5-0.5B"
 output_dir = "outputs/qlora_qwen_0_5b"
 
+if not torch.cuda.is_available():
+    raise RuntimeError("4bit bitsandbytes training requires a supported CUDA setup")
+
+supports_bf16 = torch.cuda.is_bf16_supported()
+compute_dtype = torch.bfloat16 if supports_bf16 else torch.float16
+
 bnb_config = BitsAndBytesConfig(
     load_in_4bit=True,
     bnb_4bit_quant_type="nf4",
-    bnb_4bit_compute_dtype=torch.bfloat16,
+    bnb_4bit_compute_dtype=compute_dtype,
     bnb_4bit_use_double_quant=True,
 )
 
@@ -4213,6 +4245,7 @@ model = AutoModelForCausalLM.from_pretrained(
 model.config.pad_token_id = tokenizer.pad_token_id
 
 model = prepare_model_for_kbit_training(model)
+model.config.use_cache = False
 
 lora_config = LoraConfig(
     task_type=TaskType.CAUSAL_LM,
@@ -4240,7 +4273,8 @@ training_args = TrainingArguments(
     eval_steps=50,
     save_steps=50,
     save_total_limit=2,
-    bf16=torch.cuda.is_available(),
+    bf16=supports_bf16,
+    fp16=torch.cuda.is_available() and not supports_bf16,
     gradient_checkpointing=True,
     report_to="none",
 )
@@ -4666,7 +4700,7 @@ QLoRA 微调
 
 本讲专门讲 SFT 前后模型行为评估。
 
-资料边界说明：本讲第二轮精修时按 `WRITING_PLAN.md` 核对 Hugging Face Transformers 的 text generation / `generate`、`Trainer.evaluate` / `predict` 和 Hugging Face Evaluate 指标库文档。这里重点讲离线 SFT 行为评估的基本闭环：固定评测集、固定 prompt 模板、固定生成参数、任务级指标、人工复核和坏例归因；不展开大规模 leaderboard、LLM-as-a-judge 生产评测、在线 A/B 实验或安全红队评估。
+本讲使用 Hugging Face Transformers 的 text generation / `generate`、`Trainer.evaluate` / `predict` 和 Evaluate 指标接口，建立离线 SFT 行为评估闭环：固定评测集、固定 prompt 模板、固定生成参数、任务级指标、人工复核和坏例归因。大规模 leaderboard、生产级 LLM-as-a-judge、在线 A/B 实验和安全红队评估需要独立的评测设计。
 
 ---
 
@@ -4888,7 +4922,8 @@ import torch
 
 @torch.no_grad()
 def generate_text(model, tokenizer, prompt, device="cpu"):
-    model.to(device)
+    if not hasattr(model, "hf_device_map"):
+        model.to(device)
     model.eval()
 
     inputs = tokenizer(prompt, return_tensors="pt").to(device)
@@ -4906,6 +4941,8 @@ def generate_text(model, tokenizer, prompt, device="cpu"):
     new_tokens = outputs[0][prompt_len:]
     return tokenizer.decode(new_tokens, skip_special_tokens=True)
 ```
+
+小模型可以在函数内移动到 `device`；如果模型通过 `device_map="auto"` 分片或 offload，函数不会再移动它，调用方还要把输入放到模型的输入设备上，不能简单假定所有输入都应该送到同一张卡。
 
 这里先用 `do_sample=False`。
 
@@ -5257,6 +5294,8 @@ def build_prompt(example):
 
 @torch.no_grad()
 def generate_text(model, tokenizer, prompt, device):
+    if not hasattr(model, "hf_device_map"):
+        model.to(device)
     inputs = tokenizer(prompt, return_tensors="pt").to(device)
     prompt_len = inputs["input_ids"].shape[-1]
     pad_token_id = tokenizer.pad_token_id
@@ -5549,4 +5588,18 @@ sft_bad_cases={'format_fail': 0, 'low_keyword': 0, 'unsupported_claim': 0}
 7. 微调后变差通常和数据质量、模板不一致、labels mask、学习率和过拟合有关。
 8. 好的 SFT 项目应该包含评估集、样例对比、指标结果和失败案例分析。
 
-至此，第三册第四部分“Hugging Face 微调实战”正文第一版完成。
+这组实验说明，SFT 的验收对象是模型行为而不是单一训练曲线。只有把同一评估集上的输出、格式、事实性、坏例和回归样本保存下来，才能判断一次微调究竟带来了能力提升，还是只让训练集上的 loss 变得更好看。
+
+### 本章资料来源
+
+本章的 API 行为以 Hugging Face、PyTorch 和 PEFT 官方文档为准，LoRA 与 QLoRA 的机制以原始论文为准。Transformers、PEFT、TRL、bitsandbytes 的参数名和默认值会随版本变化；复现实验时应记录包版本、模型 revision、tokenizer 文件、dtype、设备和随机种子。
+
+- [Transformers model loading](https://huggingface.co/docs/transformers/main/en/main_classes/model)：`from_pretrained`、dtype、device map 和模型保存加载。
+- [Transformers text generation](https://huggingface.co/docs/transformers/main/en/main_classes/text_generation)：`generate`、采样参数和 generation config。
+- [Transformers chat templates](https://huggingface.co/docs/transformers/main/en/chat_templating)：`apply_chat_template`、generation prompt 和 assistant mask。
+- [Transformers Trainer](https://huggingface.co/docs/transformers/main/en/main_classes/trainer)：`Trainer`、评估、保存和处理类接口。
+- [PEFT LoRA reference](https://huggingface.co/docs/peft/main/en/package_reference/lora)：`LoraConfig`、target modules 和 adapter 生命周期。
+- [Bitsandbytes quantization](https://huggingface.co/docs/transformers/main/en/quantization/bitsandbytes)：4bit/8bit 加载、compute dtype 和量化边界。
+- [TRL SFTTrainer](https://huggingface.co/docs/trl/main/en/sft_trainer)：completion-only loss、assistant-only loss 和 SFT 数据接口。
+- [LoRA: Low-Rank Adaptation of Large Language Models](https://arxiv.org/abs/2106.09685)：低秩增量参数化。
+- [QLoRA: Efficient Finetuning of Quantized LLMs](https://arxiv.org/abs/2305.14314)：NF4、double quantization 和量化基座上的 LoRA 训练。

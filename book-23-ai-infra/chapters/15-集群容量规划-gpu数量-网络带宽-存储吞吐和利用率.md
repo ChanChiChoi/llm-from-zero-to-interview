@@ -8,17 +8,17 @@
 
 > AI 集群容量规划不是按预算买卡，而是按工作负载、性能目标、增长预期、故障冗余和成本约束设计一整套计算、网络、存储和调度容量。
 
-## 15.0 本讲资料边界与第二轮精修口径
+## 15.0 本讲范围与资料
 
-第二轮精修时，本章按 `WRITING_PLAN.md` 的要求做了联网资料校准，主要参考 Kubernetes 对 resource request / limit、extended resource、ResourceQuota 和 HorizontalPodAutoscaler 的稳定口径，参考 NVIDIA DCGM 对 GPU profiling metrics、SM activity、显存带宽和 PCIe 传输指标的定义，参考 Google SRE 对 overload、按资源而不是只按 QPS 建模、quota、降级和限流的工程经验。
+本章参考 Kubernetes 对 resource request / limit、extended resource、ResourceQuota 和 HorizontalPodAutoscaler 的稳定口径，参考 NVIDIA DCGM 对 GPU profiling metrics、SM activity、显存带宽和 PCIe 传输指标的定义，参考 Google SRE 对 overload、按资源而不是只按 QPS 建模、quota、降级和限流的工程经验。
 
-本章只抽象 AI Infra 集群容量规划的稳定工程问题：如何把 GPU 数量、GPU 型号、训练队列、推理峰值、网络、存储、利用率、故障冗余、增长预测和成本预算放进同一张容量表。它不绑定某个云厂商报价、某一代 GPU 性能参数、某个内部调度器实现或某个固定采购流程。
+本章聚焦 AI Infra 集群容量规划的稳定工程问题：如何把 GPU 数量、GPU 型号、训练队列、推理峰值、网络、存储、利用率、故障冗余、增长预测和成本预算放进同一张容量表。它不绑定某个云厂商报价、某一代 GPU 性能参数、某个内部调度器实现或某个固定采购流程。
 
-本章第二轮补强重点有三点：
+本章重点有三点：
 
 1. 把原来文字化的 GPU-hours、推理容量、网络和存储估算改成可复用公式。
 2. 明确容量规划不能只看平均 GPU utilization，而要同时看 SLO、峰值、余量、成本和预测偏差。
-3. 新增一个 0 依赖 Python demo，用 toy case 演示如何把完整容量计划和 16 类失败案例做成容量规划门禁。
+3. 新增一个 0 依赖 Python demo，用 toy case 演示如何把完整容量计划和 16 类失败案例做成容量规划验收条件。
 
 ## 15.1 为什么容量规划重要
 
@@ -95,7 +95,7 @@ AI 集群容量包括：
 
 没有任务画像，容量规划就是拍脑袋。
 
-## 15.3.1 关键公式与容量规划速查
+### 15.3.1 关键公式与容量规划速查
 
 先把一段时间窗口内的训练需求折算成 GPU-hours：
 
@@ -161,7 +161,7 @@ E_{\mathrm{forecast}}=\frac{|D_{\mathrm{actual}}-D_{\mathrm{forecast}}|}{D_{\mat
 
 其中，`D_actual` 是实际需求，`D_forecast` 是预测需求。容量评审不是写完一次文档，而是每月或每季度用预测偏差修正下一轮采购、云上弹性和配额策略。
 
-最后可以把容量规划门禁写成：
+最后可以把容量规划验收条件写成：
 
 ```math
 G_{\mathrm{capacity}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land G_{\mathrm{actual}}\ge G_{\mathrm{need}} \land I_{\mathrm{actual}}\ge I_{\mathrm{serve}} \land B_{\mathrm{net}}\ge \beta_{\mathrm{net}} \land B_{\mathrm{store}}\ge \beta_{\mathrm{store}} \land K_{\mathrm{est}}\le K_{\mathrm{budget}} \land P_0=0\right]
@@ -531,9 +531,65 @@ AI 资源需求增长通常很快。
 
 不知道谁在用资源，就无法优化。
 
+### 15.16.1 total parameters、active parameters 和真实容量
+
+近年的 MoE 模型卡经常同时给出 `total parameters` 和 `active parameters`。小白可以先这样理解：模型仓库里可能保存了很多专家，但一个 token 只路由到其中少数专家；前者描述模型总容量，后者描述一次 token 路由时参与专家计算的子集。
+
+若模型有 `E` 个专家、每个 token 选择 `k` 个专家，一个教学版估算是：
+
+```math
+P_{\mathrm{total}}=P_{\mathrm{shared}}+E P_{\mathrm{expert}}+P_{\mathrm{router}}
+```
+
+```math
+P_{\mathrm{active}}=P_{\mathrm{shared}}+k P_{\mathrm{expert}}+P_{\mathrm{router}}
+```
+
+但容量规划不能把 `P_active` 直接当成显存或延迟：
+
+1. 权重存储和分片通常仍要管理全部专家，除非系统做了专家按需加载或 offload。
+2. 每 token 的矩阵计算大致受 `k` 影响，但 token dispatch、all-to-all、padding 和 expert imbalance 会增加通信与空算。
+3. KV cache 或递归 state 由 attention 结构决定，MoE FFN 不会自动消除历史状态。
+4. 量化格式、kernel、并行布局和 batch 形状会改变真实吞吐。
+
+专家做容量评估时，至少要分别记录 `P_total`、`P_active`、权重显存、KV/state 显存、每 token 通信量和单 worker 的稳定 input/output token/s。Kimi K3、DeepSeek-V4、Qwen3.5/3.6 等模型的公开结构信号说明，参数稀疏、attention 状态和上下文长度是不同的容量轴，不能用一个“参数量”字段代替。
+
+### 15.16.2 长上下文、reasoning 和工具调用会改变 workload profile
+
+普通问答的请求数不高，并不代表资源压力低。长上下文会提高 prefill 和历史状态占用；reasoning effort 或 thinking level 可能增加隐藏 reasoning token；Agent 还会追加工具、验证器和多轮上下文。于是容量表不能只保存 QPS，还要保存每个 workload 的 token 和调用分布。
+
+设峰值请求率为 `\lambda`，每个请求的输入、可见输出、隐藏 reasoning token、工具调用和验证器调用的期望值分别为 `E[L_{\mathrm{in}}]`、`E[L_{\mathrm{out}}]`、`E[L_{\mathrm{reason}}]`、`E[N_{\mathrm{tool}}]` 和 `E[N_{\mathrm{verify}}]`，则粗略的 token/调用压力是：
+
+```math
+R_{\mathrm{in}}=\lambda E[L_{\mathrm{in}}],\qquad
+R_{\mathrm{out}}=\lambda E[L_{\mathrm{out}}],\qquad
+R_{\mathrm{reason}}=\lambda E[L_{\mathrm{reason}}]
+```
+
+```math
+R_{\mathrm{call}}=\lambda\left(E[N_{\mathrm{tool}}]+E[N_{\mathrm{verify}}]\right)
+```
+
+如果单 worker 在目标 SLO 下的稳定能力分别是 `C_in`、`C_out`、`C_reason` 和 `C_call`，可以用多个约束取最大值。这里的 `C_call` 只有在工具/验证器由该 serving worker 同步驱动，或已经被折算成 worker-equivalent capacity 时才适用；独立工具后端应单独做容量规划：
+
+```math
+N_{\mathrm{worker}}\ge
+\left\lceil
+\frac{1}{\eta_{\mathrm{slo}}}
+\max\left(
+\frac{R_{\mathrm{in}}}{C_{\mathrm{in}}},
+\frac{R_{\mathrm{out}}}{C_{\mathrm{out}}},
+\frac{R_{\mathrm{reason}}}{C_{\mathrm{reason}}},
+\frac{R_{\mathrm{call}}}{C_{\mathrm{call}}}
+\right)(1+h_{\mathrm{reserve}})
+\right\rceil
+```
+
+这不是通用 benchmark 公式，而是提醒容量评审：如果只用平均 QPS，可能漏掉 reasoning token、工具 round trip 或长上下文造成的长驻请求。实际压测还应按 workload 分桶，例如短问答、RAG、代码、长文档、Agent 和高 effort reasoning，分别测 TTFT、TPOT、active tokens、KV pressure、tool latency 和成功任务成本。
+
 ## 15.17 集群容量规划审计指标与最小 demo
 
-下面这个 demo 不模拟真实 GPU 集群，而是演示容量规划评审应该怎么结构化：一个完整样本要同时通过任务画像、GPU 数量、GPU 型号、训练队列、推理峰值、网络、存储、生命周期、利用率余量、故障冗余、增长预测、成本、资源池隔离、quota / burst 和观测回填；16 个 bad case 分别故意打破一个门禁。
+下面这个 demo 不模拟真实 GPU 集群，而是演示容量规划评审应该怎么结构化：一个完整样本要同时通过任务画像、GPU 数量、GPU 型号、训练队列、推理峰值、网络、存储、生命周期、利用率余量、故障冗余、增长预测、成本、资源池隔离、quota / burst 和观测回填；16 个 bad case 分别故意打破一个验收条件。
 
 ```python
 from math import ceil
@@ -948,6 +1004,6 @@ cluster_capacity_planning_gate_pass=False
 7. 存储容量和吞吐都重要，checkpoint、模型加载、日志和 trace 都要纳入规划。
 8. 利用率目标要按资源池区分，不能盲目追求 100%。
 9. 容量规划需要 dashboard、成本归因和滚动预测。
-10. 集群容量规划门禁要把任务画像、训练 GPU 数、推理峰值、网络、存储、生命周期、余量、成本、资源池隔离和预测偏差放在一起审计。
+10. 集群容量规划验收条件要把任务画像、训练 GPU 数、推理峰值、网络、存储、生命周期、余量、成本、资源池隔离和预测偏差放在一起审计。
 
 第二部分到这里结束。下一章开始进入第三部分：大模型训练平台工程。我们会从第 16 章“训练平台总览：从脚本训练到平台化训练”开始，讲如何把训练从手工脚本变成可提交、可复现、可监控、可恢复的平台能力。

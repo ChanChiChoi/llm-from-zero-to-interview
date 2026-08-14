@@ -8,9 +8,9 @@
 
 > 最小推理框架的第一步，是把“输入文本到输出文本”拆成 tokenizer、model wrapper、sampling 和 generate loop 四个可控环节。
 
-## 7.0 本讲资料边界与第二轮精修口径
+## 7.0 本讲范围与资料
 
-本章第二轮精修前，先用公开资料校准口径：Hugging Face Transformers 的生成接口把 `generate()`、logits 处理、stopping criteria、cache 和不同 decoding 策略封装成高层 API；Hugging Face tokenizer 文档强调 encode / decode、special tokens、padding / truncation 和 chat template 等输入输出契约；PyTorch 的 `eval()` 与 `inference_mode()` 分别对应模块推理状态和关闭 autograd 开销。
+本章参考先用公开资料校准口径：Hugging Face Transformers 的生成接口把 `generate()`、logits 处理、stopping criteria、cache 和不同 decoding 策略封装成高层 API；Hugging Face tokenizer 文档强调 encode / decode、special tokens、padding / truncation 和 chat template 等输入输出契约；PyTorch 的 `eval()` 与 `inference_mode()` 分别对应模块推理状态和关闭 autograd 开销。
 
 因此，本章不复刻 Transformers 源码，也不要求读者安装大模型权重才能理解机制。正文里的 PyTorch / Transformers 代码是工程对照，新增的 0 依赖 demo 用 toy tokenizer 和 toy model wrapper 展示最小生成链路。读者需要先掌握：文本如何变成 token id，模型如何把当前 token 序列变成最后位置 logits，generate loop 如何选择 token、追加 token、检查停止条件并留下 trace。
 
@@ -364,7 +364,7 @@ print(generate(tokenizer_wrapper, model_wrapper, "LLM inference is", max_new_tok
 
 ## 7.13 这个骨架如何升级
 
-后续章节会逐步升级它。
+这个骨架随后会分别引入采样、KV Cache、batched prefill 和 batched decode；每次升级都保持 Request、ModelWrapper 和输出协议的边界不变。
 
 第 8 章会替换 `greedy_select`，加入 sampling。
 

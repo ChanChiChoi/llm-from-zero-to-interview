@@ -8,9 +8,9 @@ Checkpoint 是大模型训练平台里最关键、也最容易被低估的能力
 
 > Checkpoint 不是一个模型文件，而是训练状态的可恢复快照；它的价值不在于保存成功，而在于能可靠、快速、正确地恢复。
 
-## 10.0 本讲资料边界与第二轮精修口径
+## 10.0 本讲范围与资料
 
-本讲第二轮精修时，资料口径按“大模型训练平台 checkpoint 生命周期的稳定抽象”处理，而不是绑定某个框架、某个对象存储厂商或某套内部平台实现。分布式 checkpoint 部分参考 PyTorch Distributed Checkpoint 对分布式 state_dict 保存、加载和异步保存的抽象；工程接口部分参考 DeepSpeed 对训练 checkpoint 保存、加载和 ZeRO checkpoint 的接口边界；对象存储部分参考 Amazon S3 对强一致读取、对象生命周期和保留策略的通用口径；平台治理部分沿用上一章存储体系的 manifest、checksum、commit、权限、审计和成本分层。
+本章参考资料口径按“大模型训练平台 checkpoint 生命周期的稳定抽象”处理，而不是绑定某个框架、某个对象存储厂商或某套内部平台实现。分布式 checkpoint 部分参考 PyTorch Distributed Checkpoint 对分布式 state_dict 保存、加载和异步保存的抽象；工程接口部分参考 DeepSpeed 对训练 checkpoint 保存、加载和 ZeRO checkpoint 的接口边界；对象存储部分参考 Amazon S3 对强一致读取、对象生命周期和保留策略的通用口径；平台治理部分沿用上一章存储体系的 manifest、checksum、commit、权限、审计和成本分层。
 
 需要注意三点：
 
@@ -572,7 +572,7 @@ Checkpoint 能不能用，必须通过恢复测试证明。
 c_i=(m_i,o_i,p_i,s_i,w_i,d_i,r_i,a_i,v_i,k_i,l_i,g_i,z_i)
 ```
 
-其中，`m_i` 是 manifest，`o_i` 是训练状态对象，`p_i` 是并行配置，`s_i` 是 shard 布局，`w_i` 是写入路径，`d_i` 是校验摘要，`r_i` 是恢复测试，`a_i` 是异步保存策略，`v_i` 是版本和血缘，`k_i` 是保留与成本策略，`l_i` 是权限和审计日志，`g_i` 是监控与 SLO，`z_i` 是最终门禁结果。
+其中，`m_i` 是 manifest，`o_i` 是训练状态对象，`p_i` 是并行配置，`s_i` 是 shard 布局，`w_i` 是写入路径，`d_i` 是校验摘要，`r_i` 是恢复测试，`a_i` 是异步保存策略，`v_i` 是版本和血缘，`k_i` 是保留与成本策略，`l_i` 是权限和审计日志，`g_i` 是监控与 SLO，`z_i` 是最终验收结果。
 
 分片大小可以先用：
 
@@ -622,7 +622,7 @@ K_{\mathrm{ckpt}}=\sum_{a=1}^{A} S_a P_a T_a+K_{\mathrm{request}}+K_{\mathrm{egr
 
 其中，`S_a` 是第 `a` 类 checkpoint 的容量，`P_a` 是对应存储层级单价，`T_a` 是保留时长，`K_request` 是对象请求成本，`K_egress` 是跨区或出站成本，`K_ops` 是校验、复制、扫描、人工审批和运维成本。
 
-最后，可以把 checkpoint 生命周期门禁写成：
+最后，可以把 checkpoint 生命周期验收条件写成：
 
 ```math
 G_{\mathrm{ckpt}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land T_{\mathrm{restore}}\le \tau_{\mathrm{restore}} \land W_{\mathrm{lost}}\le \omega \land P_0=0\right]

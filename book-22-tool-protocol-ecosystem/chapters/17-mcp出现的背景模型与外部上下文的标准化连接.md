@@ -1,12 +1,12 @@
 # 第十七章：MCP 出现的背景：模型与外部上下文的标准化连接
 
-## 17.0 本讲资料边界与第二轮精修口径
+## 17.0 本讲范围与资料
 
-本讲按 `WRITING_PLAN.md` 的第二轮要求，先对齐 MCP 官方介绍、MCP 2025-06-18 specification 中 lifecycle、tools、resources、prompts、authorization、logging 等口径，以及 OpenAI Agents SDK 对 MCP server 接入的工程抽象。MCP 官方定位是让应用以标准方式向 LLM 提供上下文；本章只讲它为什么出现、解决什么集成问题、和 Function Calling / HTTP API / 插件 / 企业工具平台 / A2A 的边界，不展开后续章节会细讲的 MCP Client、Server、Tool、Resource、Prompt、权限、本地沙箱和企业 MCP 平台实现。
+本章参考 MCP 官方介绍、MCP 2025-06-18 specification 中 lifecycle、tools、resources、prompts、authorization、logging 等口径，以及 OpenAI Agents SDK 对 MCP server 接入的工程抽象。MCP 官方定位是让应用以标准方式向 LLM 提供上下文；本章讨论它为什么出现、解决什么集成问题、和 Function Calling / HTTP API / 插件 / 企业工具平台 / A2A 的边界，不展开后续章节会细讲的 MCP Client、Server、Tool、Resource、Prompt、权限、本地沙箱和企业 MCP 平台实现。
 
 本章不是协议字段手册，也不把某个 MCP server、某个 SDK、某家模型 provider、某个 IDE 插件或某个云服务的实现细节写成通用标准。对面试来说，你要掌握的是：MCP 的历史动机来自模型应用与外部上下文之间的集成爆炸；它提供的是 Host / Client / Server 之间的连接协议；它统一暴露 tools、resources 和 prompts；它降低重复适配，但不替代权限、安全、trace、eval 和企业治理。
 
-第二轮精修重点放在三件事：
+本章重点放在三件事：
 
 1. 用简单公式解释没有协议时的集成爆炸，以及 MCP 这种 client-server 协议带来的适配成本下降。
 2. 用指标区分“只是接了几个工具 demo”和“真的具备 MCP 背景所要求的标准化连接能力”。
@@ -493,7 +493,7 @@ C_{\mathrm{trace}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{trace\ eval\ read
 C_{\mathrm{a2a}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{MCP\ A2A\ distinction}_i]
 ```
 
-综合门禁可以写成：
+综合验收条件可以形式化为：
 
 ```math
 G_{\mathrm{mcp\_bg}}=\mathbf{1}[R_{\mathrm{int}}\ge \tau_{\mathrm{int}}]\cdot

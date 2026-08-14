@@ -8,11 +8,11 @@
 
 > Artifact 管理的目标，是让 AI 研发过程中的每个关键产物都可定位、可校验、可复现、可追溯、可治理。
 
-## 39.0 本讲资料边界与第二轮精修口径
+## 39.0 本讲范围与资料
 
 本讲按截至 2026-06 的稳定公开资料校准：MLflow Tracking 对 run、artifact store、backend store、参数、指标和 artifact 的实验追踪抽象，Weights & Biases Artifacts 对数据集、模型、文件集合、版本和 lineage 的产物管理口径，OpenLineage 对 Job、Run、Dataset 和事件血缘的抽象，Amazon S3 object integrity 对 checksum 的对象完整性口径，PyTorch Distributed Checkpoint 对分布式 checkpoint 保存 / 加载的状态管理边界，以及 OCI image / manifest 对 deployment package 中容器镜像与内容寻址的工程边界。
 
-本章只抽象大模型平台里的通用 artifact 管理能力，不绑定某个实验追踪产品、对象存储、镜像仓库、模型仓库、评估平台或内部发布系统。
+本章聚焦大模型平台里的通用 artifact 管理能力，不绑定某个实验追踪产品、对象存储、镜像仓库、模型仓库、评估平台或内部发布系统。
 
 和上一章的分工是：
 
@@ -236,13 +236,13 @@ Eval report artifact 是模型评估结果。
 
 同一个模型用不同 prompt、不同 temperature、不同 eval 集，分数可能完全不同。
 
-Eval report 可复现门禁可以写成：
+Eval report 可复现准入条件可以形式化为：
 
 ```math
 G_{\mathrm{eval}}=\mathbf{1}[h_{\mathrm{model}}=h_{\mathrm{model,expected}} \land h_{\mathrm{data}}=h_{\mathrm{data,expected}} \land h_{\mathrm{code}}=h_{\mathrm{code,expected}} \land h_{\mathrm{prompt}}=h_{\mathrm{prompt,expected}}]
 ```
 
-其中四个 hash 分别对应模型、评估数据、评估代码和 prompt / template。这个门禁强调：eval report 不是一个孤立分数，而是一组可复现实验条件和样本级证据。
+其中四个 hash 分别对应模型、评估数据、评估代码和 prompt / template。这组条件强调：eval report 不是一个孤立分数，而是一组可复现实验条件和样本级证据。
 
 ## 39.9 Deployment Package Artifact
 
@@ -439,7 +439,7 @@ K_{\mathrm{store}}=\sum_{a=1}^{A} S_a P_a T_a+K_{\mathrm{request}}+K_{\mathrm{eg
 
 其中 `S_a` 是第 `a` 类 artifact 的存储大小，`P_a` 是单位存储价格，`T_a` 是保留时长，后面三项分别是请求、跨区传输和运维成本。这个公式说明 retention policy 是工程和成本问题，不是“全部保留”或“按时间删除”二选一。
 
-删除安全门禁可以写成：
+删除安全准入条件可以形式化为：
 
 ```math
 G_{\mathrm{delete}}=\mathbf{1}[N_{\mathrm{dependents}}=0 \land T_{\mathrm{age}}\ge T_{\mathrm{retention}} \land H_{\mathrm{legal}}=0 \land A_{\mathrm{audit}}=1]
@@ -457,7 +457,7 @@ Artifact promotion 是把产物从低级状态提升到高级状态。
 checkpoint -> candidate model -> evaluated model -> release candidate -> production package
 ```
 
-每次 promotion 都应有门禁：
+每次 promotion 都应有验收条件：
 
 1. checkpoint 完整性校验。
 2. eval 通过。
@@ -468,13 +468,13 @@ checkpoint -> candidate model -> evaluated model -> release candidate -> product
 
 Promotion 让产物流转有流程，而不是谁都能拿一个 checkpoint 去部署。
 
-Artifact 晋级门禁可以写成：
+Artifact 晋级准入条件可以形式化为：
 
 ```math
 G_{\mathrm{promo}}=\mathbf{1}[\min_j C_j\ge\tau_j \land C_{\mathrm{checksum}}=1 \land C_{\mathrm{lineage}}\ge\rho \land R_{\mathrm{permission}}=0 \land P_0=0]
 ```
 
-其中 `C_j` 是每个 artifact 检查维度的覆盖率，`tau_j` 是阈值，`R_permission` 是权限违规率，`P0` 是未解决的 P0 风险数量。这个门禁适用于 checkpoint 晋级为候选模型、eval report 晋级为发布证据、deployment package 晋级为生产发布包。
+其中 `C_j` 是每个 artifact 检查维度的覆盖率，`tau_j` 是阈值，`R_permission` 是权限违规率，`P0` 是未解决的 P0 风险数量。这组条件适用于 checkpoint 晋级为候选模型、eval report 晋级为发布证据、deployment package 晋级为生产发布包。
 
 ## 39.18 Artifact 和实验追踪的关系
 
@@ -551,15 +551,15 @@ Lifecycle Manager 负责 retention 和依赖检查。
 
 ## 39.22 Artifact 管理审计指标和最小 demo
 
-Artifact 管理的最终门禁可以写成：
+Artifact 管理的最终验收条件可以形式化为：
 
 ```math
 G_{\mathrm{artifact}}=\mathbf{1}[\min_j C_j\ge\tau_j \land C_{\mathrm{checksum}}=1 \land C_{\mathrm{lineage}}\ge\rho \land C_{\mathrm{release}}=1 \land G_{\mathrm{delete}}=1 \land P_0=0]
 ```
 
-其中 `C_j` 是各类 artifact 的审计覆盖率，`C_checksum` 是文件级完整性校验，`C_lineage` 是血缘覆盖率，`C_release` 是 deployment package / release manifest 完整率，`G_delete` 是删除安全门禁，`P0` 是未解决的高风险问题。这个门禁强调：artifact 管理不是文件系统整理，而是训练、评估、发布、回滚、审计和成本治理的共同基础。
+其中 `C_j` 是各类 artifact 的审计覆盖率，`C_checksum` 是文件级完整性校验，`C_lineage` 是血缘覆盖率，`C_release` 是 deployment package / release manifest 完整率，`G_delete` 是删除安全验收条件，`P0` 是未解决的高风险问题。这组条件强调：artifact 管理不是文件系统整理，而是训练、评估、发布、回滚、审计和成本治理的共同基础。
 
-下面是一个 0 依赖 toy demo。它把 dataset、checkpoint、eval report、deployment package 和 release manifest 放进同一张审计表，并构造 16 个 bad case，覆盖元数据缺失、dataset manifest 错误、checkpoint 不可恢复、eval report 不可复现、部署包缺文件、release manifest 可变、checksum 未验证、血缘断边、metadata / blob 分层错误、权限放开、retention 缺失、promotion 缺门禁、实验追踪未绑定、回滚 artifact 缺失、删除依赖不安全和最终 artifact gate 缺失。
+下面是一个 0 依赖 toy demo。它把 dataset、checkpoint、eval report、deployment package 和 release manifest 放进同一张审计表，并构造 16 个 bad case，覆盖元数据缺失、dataset manifest 错误、checkpoint 不可恢复、eval report 不可复现、部署包缺文件、release manifest 可变、checksum 未验证、血缘断边、metadata / blob 分层错误、权限放开、retention 缺失、promotion 缺验收条件、实验追踪未绑定、回滚 artifact 缺失、删除依赖不安全和最终 artifact gate 缺失。
 
 ```python
 from copy import deepcopy

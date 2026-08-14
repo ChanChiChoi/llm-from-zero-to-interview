@@ -1,12 +1,12 @@
 # 第二章：Self-Attention 的信息路由本质
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本章第二轮精修以公开论文、文档和前序章节为资料边界：Transformer 原论文对 scaled dot-product attention 和 multi-head attention 的定义，BERT 对双向 encoder self-attention 的使用，Michel 等人关于 attention head 冗余和可解释性边界的分析，Efficient Transformers survey 对 attention 效率路线的梳理，Lost in the Middle 对长上下文位置鲁棒性的实验结论，Mistral 7B 关于 GQA 和 sliding window attention 的公开技术报告，FlashAttention-2 对长序列 attention kernel 瓶颈的说明，以及 PyTorch `scaled_dot_product_attention` 的公开 API 语义。
+本章以公开论文、文档和前序章节为资料边界：Transformer 原论文对 scaled dot-product attention 和 multi-head attention 的定义，BERT 对双向 encoder self-attention 的使用，Michel 等人关于 attention head 冗余和可解释性边界的分析，Efficient Transformers survey 对 attention 效率路线的梳理，Lost in the Middle 对长上下文位置鲁棒性的实验结论，Mistral 7B 关于 GQA 和 sliding window attention 的公开技术报告，FlashAttention-2 对长序列 attention kernel 瓶颈的说明，以及 PyTorch `scaled_dot_product_attention` 的公开 API 语义。
 
 本章只解释 Self-Attention 的信息路由机制、数学形状、mask、解释边界和工程瓶颈；不把 attention weight 写成完整因果解释，不展开具体闭源模型的 head 功能归因，也不把 toy demo 的数值当成真实模型行为。后续章节会继续拆 Q/K/V 子空间、多头、MHA/MQA/GQA/MLA、长上下文、KV Cache 和高效 attention。
 
-第二轮补强重点有三点：
+本章重点有三点：
 
 1. 将 Q/K/V、scaled dot-product attention、softmax 权重、输出聚合、形状和复杂度改成稳定 MathJax 表达。
 2. 明确 attention weight 的解释边界：它是局部信息混合权重，不是完整因果归因。
@@ -553,7 +553,7 @@ C_{\mathrm{row}}=\mathbb{1}\left[\forall i,\left|\sum_{j=1}^{N}a_{ij}-1\right|\l
 R_{\mathrm{interp}}=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[\neg \mathrm{supported\_explanation}(r_i)]
 ```
 
-一个简化门禁可以写成：
+一个简化验收条件可以形式化为：
 
 ```math
 G_{\mathrm{routing}}=\mathbb{1}[C_{\mathrm{route}}\ge\tau_r\land R_{\mathrm{future}}=0\land C_{\mathrm{row}}=1\land \Delta H>0\land R_{\mathrm{interp}}\le\tau_e]

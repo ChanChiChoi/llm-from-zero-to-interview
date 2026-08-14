@@ -8,13 +8,13 @@
 
 > GPU 利用率告诉你 GPU 忙不忙，MFU/HFU 更接近告诉你模型训练到底用了多少理论算力，训练效率要结合吞吐、通信、I/O、显存和稳定性一起看。
 
-## 5.0 本讲资料边界与第二轮精修口径
+## 5.0 本讲范围与资料
 
 本章讨论训练效率指标的稳定工程口径，不把某个监控面板字段、某个 GPU 型号、某个 profiler 的事件名或某篇论文里的具体数值写成通用标准。
 
-第二轮精修时，资料边界按官方和论文公开材料校准：NVIDIA DCGM / Nsight Systems 代表了 GPU 利用率、显存、SM、带宽、kernel timeline 和系统级 trace 的常见观测入口；PyTorch profiler 代表了框架层 CPU / CUDA activity、算子耗时、shape、memory 和 trace 的观测入口；Megatron-LM 和 PaLM 等大模型训练论文常用 MFU / FLOPs utilization 说明大规模训练有效算力利用情况；前文带宽瓶颈章节已经说明 GPU utilization 需要和 HBM、PCIe、NVLink / NVSwitch、网络、存储和 checkpoint 一起解释。
+本章参考资料按官方和论文公开材料校准：NVIDIA DCGM / Nsight Systems 代表了 GPU 利用率、显存、SM、带宽、kernel timeline 和系统级 trace 的常见观测入口；PyTorch profiler 代表了框架层 CPU / CUDA activity、算子耗时、shape、memory 和 trace 的观测入口；Megatron-LM 和 PaLM 等大模型训练论文常用 MFU / FLOPs utilization 说明大规模训练有效算力利用情况；前文带宽瓶颈章节已经说明 GPU utilization 需要和 HBM、PCIe、NVLink / NVSwitch、网络、存储和 checkpoint 一起解释。
 
-因此，本章只抽象四类稳定结论：
+因此，本章聚焦四类稳定结论：
 
 1. GPU utilization 是入口指标，不能单独证明训练效率高。
 2. tokens/s、step time 和 loss 曲线是端到端训练是否快且正确的基础证据。
@@ -513,13 +513,13 @@ E_n=\frac{Q_n}{nQ_1}
 
 其中，`Q_n` 是 `n` 卡吞吐，`Q_1` 是单卡吞吐。`E_n` 低时，要优先看通信、I/O、拓扑、batch 粒度和 rank skew。
 
-最后可以定义训练效率门禁：
+最后可以定义训练效率验收条件：
 
 ```math
 G_{\mathrm{eff}}=\mathbf{1}\left[U_{\mathrm{mfu}}\ge \tau_{\mathrm{mfu}} \land E_n\ge \tau_{\mathrm{scale}} \land R_{\mathrm{comm}}\le \rho_{\mathrm{comm}} \land R_{\mathrm{io}}\le \rho_{\mathrm{io}} \land P_0=0\right]
 ```
 
-下面是一个 0 依赖 Python demo。它用 toy step profile 计算 tokens/s、MFU、HFU、通信占比、I/O 占比、rank skew 和扩展效率，并用 bad case 检查训练效率门禁。
+下面是一个 0 依赖 Python demo。它用 toy step profile 计算 tokens/s、MFU、HFU、通信占比、I/O 占比、rank skew 和扩展效率，并用 bad case 检查训练效率验收条件。
 
 ```python
 METRICS = [

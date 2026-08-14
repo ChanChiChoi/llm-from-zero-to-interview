@@ -4,9 +4,9 @@
 
 Agent 面试回答要避免两个极端：一是只说“Agent 就是能调用工具的大模型”，过于浅；二是堆砌 ReAct、planner、memory、multi-agent 等术语，但不讲工程边界。高质量回答要能说明：Agent 解决什么问题，系统怎么设计，如何评估，如何控制风险。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本讲第二轮精修前，已按 `WRITING_PLAN.md` 联网核对 OpenAI Agents SDK 的 tools / guardrails / tracing 公开文档、OpenAI Evals、OpenAI Model Spec 的指令层级口径，以及 SWE-bench、WebArena、OSWorld、AgentBench、GAIA 和 tau-bench 等公开 Agent 评估资料。
+本章参考 OpenAI Agents SDK 的 tools / guardrails / tracing 公开文档、OpenAI Evals、OpenAI Model Spec 的指令层级口径，以及 SWE-bench、WebArena、OSWorld、AgentBench、GAIA 和 tau-bench 等公开 Agent 评估资料。
 
 本章定位是第十七册的面试总复盘，不重新展开第 1-11 章的全部细节。正文重点是把 Agent 架构、工具调用、planning、memory、RAG、Code Agent、Browser / Computer Use、Multi-Agent、评估和安全，组织成可在面试中稳定表达、可自查、可迭代的回答框架。
 
@@ -17,7 +17,7 @@ Agent 面试回答要避免两个极端：一是只说“Agent 就是能调用�
 Agent 面试的标准答案不要从“模型很聪明”开始，而要从系统闭环开始：
 
 ```text
-我会把 Agent 看成目标驱动的多步任务执行系统。它有 goal、state、action、tool、observation、memory、controller、evaluator 和 logger。模型可以提出下一步动作，但动作是否执行要经过 schema 校验、权限门禁、预算控制和高风险确认。评估时不能只看最终答案，要看 trace 中工具选择、参数、observation 使用、状态更新、错误恢复、成本和安全。
+我会把 Agent 看成目标驱动的多步任务执行系统。它有 goal、state、action、tool、observation、memory、controller、evaluator 和 logger。模型可以提出下一步动作，但动作是否执行要经过 schema 校验、权限验收条件、预算控制和高风险确认。评估时不能只看最终答案，要看 trace 中工具选择、参数、observation 使用、状态更新、错误恢复、成本和安全。
 ```
 
 这段话可以拆成 8 个必须覆盖的维度：
@@ -31,7 +31,7 @@ Agent 面试的标准答案不要从“模型很聪明”开始，而要从系�
 7. 安全控制：最小权限、沙箱、不可信内容、人工确认、数据流和审计。
 8. 项目表达：baseline、指标、bad case、个人贡献、取舍和下一步改进。
 
-## 12.0.1 关键公式与 Agent 面试自评指标
+### 12.0.1 关键公式与 Agent 面试自评指标
 
 面试准备可以抽象成一组回答样本。第 `i` 个回答记为：
 
@@ -88,7 +88,7 @@ S_{\mathrm{project}}=\frac{|P_i\cap P_i^\star|}{|P_i^\star|}
 S_i=w_cR_{\mathrm{concept}}+w_fR_{\mathrm{formula}}+w_dR_{\mathrm{demo}}+w_mR_{\mathrm{metric}}+w_sR_{\mathrm{safety}}+w_eR_{\mathrm{eval}}+w_pS_{\mathrm{project}}+w_tR_{\mathrm{trade}}
 ```
 
-其中各权重相加为 1。准备度门禁可以写成：
+其中各权重相加为 1。准备度准入条件可以形式化为：
 
 ```math
 G_{\mathrm{agentint}}=\mathbf{1}[\bar S\ge \tau_s \land \min_i S_i\ge \tau_m \land N_{\mathrm{red}}=0 \land R_{\mathrm{safety}}\ge \tau_{\mathrm{safe}}]
@@ -350,7 +350,7 @@ RAG 通常检索外部知识库，解决知识获取问题；memory 检索用户
 
 红旗 6：安全只说“加 prompt 防护”。
 
-修正：强调系统层最小权限、工具权限矩阵、不可信内容边界、数据流门禁、沙箱、人工确认、dry-run 和 audit log。
+修正：强调系统层最小权限、工具权限矩阵、不可信内容边界、数据流验收条件、沙箱、人工确认、dry-run 和 audit log。
 
 ## 12.27 最小可运行 Agent interview readiness demo
 
@@ -594,7 +594,7 @@ readiness_gate=False
 revision_plan={'q2': {'missing': {'formulas': ['argument_validity'], 'trace_metrics': ['error_recovery_rate'], 'safety': ['human_confirmation']}, 'red_flags': ['missing_confirmation'], 'next_action': '补一个公式、一个 demo、一个 bad case 和一个 3 分钟回答模板'}, 'q4': {'missing': {'project_evidence': ['bad_cases']}, 'red_flags': ['weak_project_evidence'], 'next_action': '补一个公式、一个 demo、一个 bad case 和一个 3 分钟回答模板'}, 'q5': {'missing': {'concepts': ['ui_agent'], 'formulas': ['agent_safety_gate'], 'demos': ['agent_safety_audit'], 'trace_metrics': ['cost_per_success'], 'safety': ['data_flow_guard'], 'evaluation': ['human_rubric'], 'project_evidence': ['bad_cases'], 'tradeoffs': ['single_vs_multi']}, 'red_flags': [], 'next_action': '补一个公式、一个 demo、一个 bad case 和一个 3 分钟回答模板'}}
 ```
 
-这个 demo 的 `readiness_gate=False` 不是程序错误，而是在提醒面试准备还存在三个阻断点：工具调用题缺少高风险确认口径，Code Agent 项目证据缺少 bad case，评估与安全题缺少 safety gate、成本指标、数据流门禁、人评口径和 single-vs-multi 取舍。
+这个 demo 的 `readiness_gate=False` 不是程序错误，而是在提醒面试准备还存在三个阻断点：工具调用题缺少高风险确认口径，Code Agent 项目证据缺少 bad case，评估与安全题缺少 safety gate、成本指标、数据流验收条件、人评口径和 single-vs-multi 取舍。
 
 ## 12.28 第十七册总复盘清单
 
@@ -617,4 +617,4 @@ revision_plan={'q2': {'missing': {'formulas': ['argument_validity'], 'trace_metr
 
 Agent 面试的核心是把“大模型 + 工具”讲成一个可落地、可评估、可控制的系统。一个完整答案应该覆盖目标、状态、工具、观察、规划、memory、执行、评估和安全。
 
-到这里，第十七册《Agent 与工具调用专题》的第二轮阶段性精修完成。本册的主线是：Agent 如何从回答问题走向执行任务，如何通过工具调用、ReAct、规划、memory、RAG、代码和浏览器操作完成复杂目标，以及如何用 trace、评估指标和系统层安全控制这些能力。
+本章回顾的主线是：Agent 如何从回答问题走向执行任务，如何通过工具调用、ReAct、规划、memory、RAG、代码和浏览器操作完成复杂目标，以及如何用 trace、评估指标和系统层安全控制这些能力。

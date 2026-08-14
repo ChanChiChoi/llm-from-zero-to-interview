@@ -8,14 +8,14 @@ RAG 和 Agent 是大模型应用平台中的常见形态。它们不只依赖模
 
 > RAG/Agent 平台的核心数据资产，不只是 prompt 和向量库，还包括知识库、工具定义、权限、检索记录、工具调用记录和完整执行 trace。
 
-## 43.0 本讲资料边界与第二轮精修口径
+## 43.0 本讲范围与资料
 
 本章按通用 RAG / Agent 平台基础设施抽象来写，不绑定某个向量数据库、Agent 框架、工具协议、可观测性产品、trace SaaS 或内部平台实现。资料校准时，主要参考 OpenTelemetry 对 trace / span / event / attribute 的通用可观测性模型、W3C Trace Context 对跨服务 trace 上下文传播的标准化口径、LangSmith / LlamaIndex 对 RAG / Agent 应用中的 run、document、node、metadata、retrieval 和 eval 记录方式、OpenAI Agents SDK 对 agent workflow tracing 的工程边界，以及 MCP 对 tool 定义、schema 和 server 能力声明的协议化表达。
 
-第二轮精修只做三件事：
+本章重点包括：
 
 1. 把知识库、文档、chunk、citation、tool、memory、run state 和 trace 统一成可审计对象。
-2. 补齐权限、版本、回放、隐私、采样、成本和删除传播的公式化门禁。
+2. 补齐权限、版本、回放、隐私、采样、成本和删除传播的公式化验收条件。
 3. 增加一个 0 依赖 Python demo，用 toy cases 证明 RAG / Agent 平台存储不能只靠向量库或日志表。
 
 ## 43.1 为什么需要 RAG/Agent 平台存储
@@ -265,7 +265,7 @@ ACL 是 access control list，访问控制列表。
 
 权限过滤必须在检索阶段强制执行。
 
-检索权限门禁可以写成：
+检索权限准入条件可以形式化为：
 
 $$
 G_{\mathrm{acl}}(u,c)=I(\mathrm{tenant}(u)=\mathrm{tenant}(c))\cdot I(\ell_c\subseteq L_u)\cdot I(r_c\le r_u)
@@ -448,13 +448,13 @@ $$
 
 高风险工具调用必须记录审计，必要时需要 human-in-the-loop。
 
-工具权限门禁：
+工具权限验收条件：
 
 $$
 G_{\mathrm{tool}}=I(p_{\mathrm{user}}\supseteq p_{\mathrm{tool}})\cdot I(p_{\mathrm{agent}}\supseteq p_{\mathrm{tool}})\cdot I(\mathrm{tenant\ ok})\cdot I(\mathrm{confirm\ ok}\lor \eta\le \eta_{\mathrm{safe}})
 $$
 
-`p_user` 是用户权限，`p_agent` 是 agent 被授权权限，`p_tool` 是工具要求权限，`\eta` 是工具副作用等级。查询类工具和删除、转账、发信这类高风险工具必须有不同门禁。
+`p_user` 是用户权限，`p_agent` 是 agent 被授权权限，`p_tool` 是工具要求权限，`\eta` 是工具副作用等级。查询类工具和删除、转账、发信这类高风险工具必须有不同验收条件。
 
 ## 43.16 Tool Call Trace
 
@@ -534,7 +534,7 @@ Trace 回放用于复现一次 RAG/Agent 行为。
 
 如果外部工具结果已经变化，回放需要使用当时记录的 tool output，或者标记为不可完全复现。
 
-回放就绪门禁：
+回放就绪验收条件：
 
 $$
 G_{\mathrm{replay}}=I(m,p,a,T,o,k,v,\theta\ \mathrm{fixed})
@@ -566,7 +566,7 @@ Memory 存储要考虑：
 
 记忆不是随便保存聊天记录。它是敏感数据资产。
 
-Memory 写入门禁：
+Memory 写入验收条件：
 
 $$
 G_{\mathrm{mem}}=I(\mathrm{purpose\ ok})\cdot I(\mathrm{scope\ ok})\cdot I(\mathrm{sensitive}=0\lor \mathrm{explicit\ approval})\cdot I(\mathrm{ttl\ set})\cdot I(\mathrm{delete\ supported})
@@ -682,7 +682,7 @@ $$
 C_{\mathrm{redact}}=\frac{N_{\mathrm{redacted\ fields}}}{N_{\mathrm{sensitive\ fields}}}
 $$
 
-Trace 保留门禁：
+Trace 保留验收条件：
 
 $$
 G_{\mathrm{retention}}=I(C_{\mathrm{redact}}\ge \alpha)\cdot I(\mathrm{ttl}\le \tau_{\max})\cdot I(\mathrm{access\ scoped})\cdot I(\mathrm{delete\ supported})
@@ -747,7 +747,7 @@ Trace Platform
 
 ## 43.26 RAG/Agent 平台存储审计指标和最小 demo
 
-把本章落到平台审计时，可以用 16 个门禁：
+把本章落到平台审计时，可以用 16 个验收条件：
 
 1. Knowledge Base Contract：知识库是否有租户、owner、来源、权限、embedding、chunking、索引、同步和保留策略。
 2. Document Chunk Version Contract：document、chunk、offset、checksum、document version 和 embedding ID 是否完整。
@@ -764,15 +764,15 @@ Trace Platform
 13. Memory Privacy Lifecycle：memory 写入是否有 purpose、scope、TTL、可见性、删除机制和敏感信息阻断。
 14. Trace Privacy Retention：trace 是否支持字段级脱敏、TTL、加密、访问控制、删除请求和采样。
 15. Cost Attribution Governance：LLM、retrieval、rerank、tool、embedding 和 trace 成本是否能按 tenant / app / agent / run / component 归因。
-16. RAG Agent Storage Gate：以上证据是否有 owner、门禁、回滚和 P0 风险阻断。
+16. RAG Agent Storage Gate：以上证据是否有 owner、验收条件、回滚和 P0 风险阻断。
 
-综合门禁可以写成：
+综合验收条件可以形式化为：
 
 $$
 G_{\mathrm{rag\_agent\_storage}}=\prod_{j=1}^{16}G_j
 $$
 
-其中每个 `G_j` 是上面一个子门禁。面试里不要只说“我们把 trace 存起来”，而要说明 trace 是否能解释、回放、评估、审计、脱敏、删除和归因。
+其中每个 `G_j` 是上面一个子验收条件。面试里不要只说“我们把 trace 存起来”，而要说明 trace 是否能解释、回放、评估、审计、脱敏、删除和归因。
 
 下面是一个 0 依赖 demo。它不是生产实现，而是展示如何把 RAG/Agent 平台存储设计变成可检查的结构化审计。
 
@@ -1620,7 +1620,7 @@ failed_gates=['knowledge_base_contract', 'document_chunk_version_contract', 'syn
 rag_agent_storage_gate_pass=False
 ```
 
-这个 demo 的核心不是把所有存储组件写成一个类，而是展示平台验收方式：每个 bad case 都应该触发一个明确门禁，最后能回答“为什么这次回答、工具调用或 Agent run 能被解释、复现、审计和删除”。
+这个 demo 的核心不是把所有存储组件写成一个类，而是展示平台验收方式：每个 bad case 都应该触发一个明确验收条件，最后能回答“为什么这次回答、工具调用或 Agent run 能被解释、复现、审计和删除”。
 
 ## 43.27 常见误区
 
@@ -1664,7 +1664,7 @@ Memory 会带来隐私、污染、成本和错误引用风险，必须有生命�
 
 问题五：如何设计 RAG / Agent 平台存储审计？
 
-可以回答：先把对象拆成 knowledge base、document、chunk、citation、agent definition、tool definition、memory、run state、retrieval trace、tool call trace、execution trace、audit log 和 cost record；再按版本、权限、回放、隐私、删除、采样、成本和 owner 做门禁；最后用 trace span tree 串起检索、prompt、工具、memory、安全事件和最终回答，证明线上 bad case 可解释、可复现、可回滚。
+可以回答：先把对象拆成 knowledge base、document、chunk、citation、agent definition、tool definition、memory、run state、retrieval trace、tool call trace、execution trace、audit log 和 cost record；再按版本、权限、回放、隐私、删除、采样、成本和 owner 做验收条件；最后用 trace span tree 串起检索、prompt、工具、memory、安全事件和最终回答，证明线上 bad case 可解释、可复现、可回滚。
 
 ## 43.29 小练习
 
@@ -1677,7 +1677,7 @@ Memory 会带来隐私、污染、成本和错误引用风险，必须有生命�
 7. Trace 采样策略如何设计？
 8. 如何设计一个支持回放的 Agent trace 系统？
 9. 用纯 Python 实现一个最小 RAG / Agent 平台存储审计 demo，覆盖知识库契约、ACL、retrieval trace、tool permission、execution replay、memory 隐私和成本归因。
-10. 构造 5 个线上事故样本：越权 chunk 进入 prompt、tool schema 变更未版本化、trace 缺 tool output、memory 写入敏感字段、源文档删除未传播，并说明各自应触发的门禁。
+10. 构造 5 个线上事故样本：越权 chunk 进入 prompt、tool schema 变更未版本化、trace 缺 tool output、memory 写入敏感字段、源文档删除未传播，并说明各自应触发的验收条件。
 
 ## 43.30 本章小结
 
@@ -1690,6 +1690,6 @@ Memory 会带来隐私、污染、成本和错误引用风险，必须有生命�
 3. 权限必须在检索和工具调用阶段由平台强制执行，不能依赖模型判断。
 4. Trace 是调试、回放、评估、审计和成本治理的核心数据。
 5. RAG/Agent 存储系统必须同时考虑版本、权限、隐私、成本、生命周期和可观测性。
-6. 第二轮精修后，本章新增的核心抓手是 RAG / Agent Storage Gate：让每次回答、检索、工具调用、memory 读写和成本记录都有版本、权限、trace、回放、隐私和审计证据。
+6. 本章补充的核心抓手是 RAG / Agent Storage Gate：让每次回答、检索、工具调用、memory 读写和成本记录都有版本、权限、trace、回放、隐私和审计证据。
 
 下一章我们会进入第六部分：可观测性、可靠性与成本治理，先讲 AI Infra 可观测性总览。

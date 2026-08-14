@@ -12,18 +12,18 @@
 
 > A2A 的运行核心不是一句“请你帮我做”，而是一个可追踪的任务生命周期。
 
-## 27.0 本讲资料边界与第二轮精修口径
+## 27.0 本讲范围与资料
 
-本讲第二轮精修前，已按 `WRITING_PLAN.md` 核对 A2A 官方协议规范中 Task、Message、Part、Artifact、TaskState、streaming update 和 push update 的公开口径。正文采用这些资料里的稳定抽象：`Task` 是远程 Agent 执行动作的核心单元，常见稳定字段包括 `id`、`contextId`、`status`、`message`、`artifacts`、`history` 和 `metadata`；任务状态以 `submitted`、`working`、`input-required`、`auth-required`、`completed`、`failed`、`canceled`、`rejected` 等语义为主；`Message` 承载多轮协商，`Artifact` 承载任务产物引用。
+本章参考了 A2A 官方协议规范中 Task、Message、Part、Artifact、TaskState、streaming update 和 push update 的公开口径。正文采用这些资料里的稳定抽象：`Task` 是远程 Agent 执行动作的核心单元，常见稳定字段包括 `id`、`contextId`、`status`、`message`、`artifacts`、`history` 和 `metadata`；任务状态以 `submitted`、`working`、`input-required`、`auth-required`、`completed`、`failed`、`canceled`、`rejected` 等语义为主；`Message` 承载多轮协商，`Artifact` 承载任务产物引用。
 
 本讲不是逐字段翻译某个协议版本，也不实现真实 A2A server、远程调用、OAuth、SSE、Webhook 或消息队列。生产系统可能把内部状态命名成 `accepted`、`running`、`timeout`、`expired` 等，但对外协议层要能映射回稳定 TaskState，否则上游编排、trace、eval 和跨团队协作都会变脆。
 
-第二轮补充重点是：
+本章的学习重点是：
 
-1. 把旧文中偏内部工程习惯的 `accepted`、`running`、`cancelled`、`expired` 统一映射到 A2A 稳定状态语义。
-2. 补充 Task / Message / Artifact 的结构化边界，避免把任务委派写成普通聊天消息。
-3. 增加稳定 MathJax 公式，用覆盖率指标表达任务契约、状态流、追问、产物、失败、重试、取消、权限、并行汇总、trace 和 eval。
-4. 补一个 0 依赖 Python demo，用 toy task trace 审计 A2A 委派链路是否可治理。
+1. 将 `accepted`、`running`、`cancelled`、`expired` 等内部工程状态映射到 A2A 的稳定状态语义。
+2. 理解 Task / Message / Artifact 的结构化边界，避免把任务委派简化成普通聊天消息。
+3. 用稳定的 MathJax 公式表达任务契约、状态流、追问、产物、失败、重试、取消、权限、并行汇总、trace 和 eval。
+4. 通过一个 0 依赖 Python demo，用 toy task trace 检查 A2A 委派链路是否可治理。
 
 ## 27.1 为什么任务委派需要结构化
 
@@ -713,7 +713,7 @@ C_{\mathrm{trace}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{trace\_ready}(L_i
 C_{\mathrm{eval}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\mathrm{eval\_covered}(Z_i)]
 ```
 
-上线门禁可以写成：
+上线准入条件可以形式化为：
 
 ```math
 G_{\mathrm{a2a\_task}}=
@@ -932,7 +932,7 @@ print("failed_gates=", failed_gates)
 print("a2a_task_gate_pass=", not failed_gates)
 ```
 
-这段脚本刻意让一些样本失败。面试里可以这样解释：`happy_path` 能跑通只说明 demo 可用；真正需要上线门禁拦住的是状态跳跃、追问缺失、Artifact 元数据缺失、失败错误不结构化、越权委派、写操作重试不幂等、取消未生效、并行汇总不完整、结果冲突没有仲裁、trace / eval 缺失等坏样本。
+这段脚本刻意让一些样本失败。面试里可以这样解释：`happy_path` 能跑通只说明 demo 可用；真正需要上线条件拦住的是状态跳跃、追问缺失、Artifact 元数据缺失、失败错误不结构化、越权委派、写操作重试不幂等、取消未生效、并行汇总不完整、结果冲突没有仲裁、trace / eval 缺失等坏样本。
 
 ## 27.14 一个完整流程示例
 

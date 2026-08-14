@@ -1,14 +1,14 @@
 # 第一章：从 Prompt Tool Use 到 Structured Function Calling
 
-## 1.0 本讲资料边界与第二轮精修口径
+## 1.0 本讲范围与资料
 
-本章第二轮精修前，先对齐 OpenAI function calling / structured outputs、Anthropic tool use、Google Gemini function calling 和 JSON Schema 官方资料的共同边界。不同厂商的字段名、消息结构、tool choice、parallel call 和 strict mode 细节会变化，本章不把某一家 API 的字段写成永久标准，而是抽象出工具调用协议的稳定层：工具 schema、模型生成的调用意图、runtime 校验与授权、工具执行、tool result 回填、trace 和评估门禁。
+本章参考先对齐 OpenAI function calling / structured outputs、Anthropic tool use、Google Gemini function calling 和 JSON Schema 官方资料的共同边界。不同厂商的字段名、消息结构、tool choice、parallel call 和 strict mode 细节会变化，本章不把某一家 API 的字段写成永久标准，而是抽象出工具调用协议的稳定层：工具 schema、模型生成的调用意图、runtime 校验与授权、工具执行、tool result 回填、trace 和评估验收条件。
 
-本章只讨论防御性、教学性和面试表达所需的系统设计，不提供绕过权限、诱导越权调用或利用工具结果污染系统的操作步骤。第二轮重点补三件事：
+本章只讨论防御性、教学性和面试表达所需的系统设计，不提供绕过权限、诱导越权调用或利用工具结果污染系统的操作步骤。本章重点说明三件事：
 
 1. 用公式明确 function calling 从 demo 到生产系统时必须审计的指标。
 2. 用 0 依赖 Python demo 展示 schema validation、tool selection、argument exact match、权限拦截和 tool result injection 检测。
-3. 把本章新增概念同步到第四册百科、题库、练习、术语表、项目路线和知识图谱。
+3. 把这些指标放回工具协议的完整生命周期：概念定义、协议审计、工程练习和系统设计必须共享同一套术语与成功标准，否则同一个工具调用在不同阶段会被不同方式判定为“成功”。
 
 ## 1.1 本章定位
 
@@ -632,7 +632,7 @@ Agent runtime 是围绕它构建的完整执行系统。
 Function calling 把模型输出动作结构化；Agent runtime 把结构化动作变成受控、可观测、可恢复的真实执行。
 ```
 
-## 1.19 面向专家：协议边界的重要性
+## 1.19 机制与边界：协议边界的重要性
 
 工具调用系统的核心是协议边界。
 
@@ -656,7 +656,7 @@ runtime 做 validation、authorization、execution、observation。
 
 这也是 MCP、A2A、Skill manifest 等协议继续出现的原因：当工具生态变大，单个 function calling API 已经不够，需要更标准的发现、连接、授权和治理机制。
 
-## 1.20 面向专家：为什么纯文本解析不适合生产
+## 1.20 机制与边界：为什么纯文本解析不适合生产
 
 纯文本解析有几个根本问题。
 
@@ -724,7 +724,7 @@ B_{\mathrm{unauth}}=
 R_{\mathrm{inj}}=\frac{1}{M}\sum_{j=1}^{M}\mathbf{1}[z_j=1]
 ```
 
-上线门禁可以写成：
+上线准入条件可以形式化为：
 
 ```math
 G_{\mathrm{tool}}=
@@ -922,7 +922,7 @@ failed_gates= ['schema_valid_rate', 'tool_selection_accuracy', 'argument_exact_m
 tool_calling_gate_pass= False
 ```
 
-这个 demo 的关键结论是：`delete_without_confirmation` 被拒绝说明权限门禁有效，但整个系统仍然不能上线，因为 schema、工具选择、参数和工具结果注入都有失败样本。
+这个 demo 的关键结论是：`delete_without_confirmation` 被拒绝说明权限验收条件有效，但整个系统仍然不能上线，因为 schema、工具选择、参数和工具结果注入都有失败样本。
 
 ## 1.22 常见误区
 
@@ -1042,6 +1042,6 @@ Structured output 是让模型输出结构化答案；JSON mode 主要保证输�
 6. 参数生成后仍必须做 schema validation、业务校验、权限判断和风险控制。
 7. 工具结果回填上下文时要处理长度、敏感信息、可信度和 prompt injection。
 8. 生产级工具调用必须接入 registry、permission、executor、trace、eval、retry 和 fallback。
-9. 第二轮新增的审计指标说明：只要 schema、工具选择、参数、安全拦截或工具结果注入任一关键门禁失败，function calling demo 就还不能被当作生产级工具调用系统。
+9. 本章补充的审计指标说明：只要 schema、工具选择、参数、安全拦截或工具结果注入任一关键检查失败，function calling demo 就还不能被当作生产级工具调用系统。
 
 下一章会进入 Function Calling 的输入输出协议，细化 messages、tools、tool call、tool result、finish reason 和多轮 tool loop 的协议细节。

@@ -4,13 +4,13 @@ Dataset 和 DataLoader 是 PyTorch 里把“原始数据”变成“可训练 ba
 
 本章目标不是背 API，而是把一个可维护的数据管线讲清楚：Dataset 负责描述“单个样本怎么取”，DataLoader 负责描述“样本怎么组成 batch 并高效送到训练循环”，collate_fn 负责处理变长样本和复杂样本结构，sampler 负责控制采样顺序，padding 和 packing 负责把不同长度样本整理成模型可吃的张量。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本章范围与资料
 
-本讲第二轮精修前，已核对 PyTorch 官方 `torch.utils.data`、`Dataset`、`IterableDataset`、`DataLoader`、default collate、sampler、`DistributedSampler`、worker seed、`worker_init_fn`、`pin_memory`、`persistent_workers` 和 `prefetch_factor` 文档口径。
+本章以 PyTorch 官方 `torch.utils.data`、`Dataset`、`IterableDataset`、`DataLoader`、default collate、sampler、`DistributedSampler`、worker seed、`worker_init_fn`、`pin_memory`、`persistent_workers` 和 `prefetch_factor` 文档为 API 语义依据。文末列出可直接核验的资料入口，并区分框架行为、教学估算和目标数据管线实测。
 
 本章聚焦大模型训练最常见的数据管线问题：map-style dataset、iterable-style dataset、`__len__` / `__getitem__`、`collate_fn`、padding、labels ignore index、packing、shuffle、sampler、batch sampler、length bucket、DataLoader worker、pinned memory、分布式数据切分，以及最小可运行的数据管线审计 demo。
 
-本章不展开生产级数据湖、远程对象存储流式读取、WebDataset / Datasets / DataPipes、复杂多模态数据解码、GPU 数据预取、分布式 checkpoint 数据状态恢复或大规模训练数据治理。这些内容分别放在数据工程、训练系统、AI Infra 和多模态章节中展开。
+本章不展开生产级数据湖、远程对象存储流式读取、WebDataset / Datasets / DataPipes、复杂多模态数据解码、GPU 数据预取、分布式 checkpoint 数据状态恢复或大规模训练数据治理。这些内容分别放在数据工程、训练系统、AI Infra 和多模态章节中展开。文中的吞吐、padding 比例和样本顺序示例只说明机制，不对真实存储、CPU、GPU 或网络环境作性能承诺。
 
 ## 4.1 为什么数据管线很重要
 
@@ -33,69 +33,65 @@ Dataset 和 DataLoader 是 PyTorch 里把“原始数据”变成“可训练 ba
 5. 分布式场景不重复、不漏样。
 6. 尽量减少 CPU 成为瓶颈。
 
-面试回答：
-
-```text
-Dataset 和 DataLoader 负责把原始数据组织成训练可用的 batch。Dataset 定义单个样本如何读取，DataLoader 负责并行取样、打乱顺序、组 batch 和调用 collate_fn。对于大模型训练，数据管线的重要性不亚于模型本身，因为很多训练 bug 都来自样本格式、padding、shuffle、sampler 或分布式取样设置错误。
-```
-
-## 4.1.1 关键 shape 公式与数据管线调试速查
+### 4.1.1 样本、batch 和有效监督的约束
 
 第一，map-style Dataset 可以理解成从索引到样本的映射：
 
-```math
+~~~math
 \mathcal{D}:\{0,\ldots,N-1\}\rightarrow \mathcal{S},\qquad s_i=\mathcal{D}(i)
-```
+~~~
 
 其中 `N` 是样本数，`s_i` 是第 `i` 个样本。`__len__()` 给出 `N`，`__getitem__(i)` 给出 `s_i`。
 
 第二，`collate_fn` 是从样本列表到 batch 的函数：
 
-```math
+~~~math
 C(\{s_1,\ldots,s_B\})=(X,Y,M)
-```
+~~~
 
 在 causal LM 训练中，常见 batch shape 是：
 
-```math
+~~~math
 X\in\mathbb{Z}^{B\times T_b},\qquad
 Y\in\mathbb{Z}^{B\times T_b},\qquad
 M\in\{0,1\}^{B\times T_b}
-```
+~~~
 
 其中 `B` 是 batch size，`T_b` 是当前 batch 内 padding 后长度，`X` 是 `input_ids`，`Y` 是 `labels`，`M` 是 `attention_mask`。
 
 第三，变长序列 padding 后的长度通常是当前 batch 内最长样本：
 
-```math
+~~~math
 T_b=\max_{1\le i\le B} l_i
-```
+~~~
 
 其中 `l_i` 是第 `i` 个样本的真实 token 长度。padding token 利用率可以粗略写成：
 
-```math
+~~~math
 R_{\mathrm{valid}}=\frac{\sum_{i=1}^{B} l_i}{B T_b},\qquad
 R_{\mathrm{pad}}=1-R_{\mathrm{valid}}
-```
+~~~
 
 `R_valid` 越低，说明 batch 里浪费在 padding 上的计算越多。length bucket 的目标就是让同一个 batch 内的 `l_i` 更接近，从而降低 `R_pad`。
 
 第四，causal LM 的 loss 通常使用右移后的 logits 和 labels：
 
-```math
+~~~math
 \mathrm{logits}_{\mathrm{shift}}\in\mathbb{R}^{B\times (T_b-1)\times V},\qquad
 Y_{\mathrm{shift}}\in\mathbb{Z}^{B\times (T_b-1)}
-```
+~~~
 
 其中 `V` 是词表大小。padding 位置的 label 通常设为 `-100`，让 `CrossEntropyLoss(ignore_index=-100)` 忽略它们。
 
 第五，分布式采样器要把样本索引分给不同 rank。理想情况下：
 
-```math
+~~~math
 S_r\cap S_q=\varnothing,\qquad r\ne q
-```
+~~~
 
 其中 `S_r` 是第 `r` 个 rank 在一个 epoch 中看到的索引集合。实际 PyTorch `DistributedSampler` 为了让每个 rank 样本数一致，可能在数据量不能整除时补样本；所以要理解 `drop_last`、样本数和重复样本之间的取舍。
+
+这里的“batch 正确”至少有三层含义：shape 能进入模型，mask 与 padding 语义一致，loss 的分母和样本权重符合训练目标。前两层通过而第三层错误时，训练仍然可以正常运行，却在优化一个不同的目标。
 
 ## 4.2 Dataset 的两种基本范式
 
@@ -168,6 +164,26 @@ class StreamDataset(IterableDataset):
 1. map-style 更适合有索引的数据。
 2. iterable-style 更适合流式和超大规模数据。
 3. iterable-style 通常不能直接依赖 `shuffle=True`，而要自己设计打乱逻辑。
+
+IterableDataset 还有一个多 worker 陷阱：每个 worker 都会执行自己的 `__iter__()`。如果 `__iter__()` 无条件从头读取同一个数据源，worker 之间就会重复产出样本。应使用 `torch.utils.data.get_worker_info()` 按 worker id 分片，分布式场景还要同时结合 rank：
+
+```python
+from torch.utils.data import IterableDataset, get_worker_info
+
+
+class ShardedRange(IterableDataset):
+    def __init__(self, total):
+        self.total = total
+
+    def __iter__(self):
+        info = get_worker_info()
+        worker_id = info.id if info is not None else 0
+        worker_count = info.num_workers if info is not None else 1
+        for value in range(worker_id, self.total, worker_count):
+            yield value
+```
+
+这段代码只解决单进程内的 worker 分片；多 rank 流式读取还需要把 rank/world size 加入分片函数。对于远程流，必须进一步考虑连接重试、样本边界、断点和 epoch 长度，不能把 `IterableDataset` 当成自动去重的分布式 sampler。
 
 ## 4.3 一个最小可训练文本 Dataset
 
@@ -377,7 +393,17 @@ def collate_fn(samples):
     }
 ```
 
-这就是很多语言模型训练脚本里最核心的数据拼 batch 逻辑。
+这就是很多语言模型训练脚本里最核心的数据拼 batch 逻辑。但 `-100` 只是标签层面的 ignore index；它不会自动让 attention 屏蔽同一个位置，也不会修复已经错位的 shift。input mask、label mask 和 loss reduction 必须分别验证。
+
+在 causal LM 中，还要注意 padding 出现在 shift 前还是 shift 后。若 `labels` 的有效 token 数为 `N_valid`，loss 的有效分母应与 `N_valid` 的定义一致：
+
+~~~math
+L_{\mathrm{token}}=
+\frac{\sum_{b,t} M^{label}_{b,t}\,\ell_{b,t}}
+{\max\left(1,\sum_{b,t}M^{label}_{b,t}\right)}
+~~~
+
+其中 `M^{label}` 表示真正参与监督的 label mask。用普通 `mean` 时，框架会按照它的 `ignore_index` 语义处理；如果手动做 token 加权或跨 micro-batch 累积，就要自己维护分子和分母，避免全 padding batch 产生除零或把短样本权重放大。
 
 ## 4.7 padding 的方向和坑
 
@@ -415,7 +441,7 @@ padding 不只是“补零”，还要注意方向。
 4. 左 padding 与位置编码或模板不一致。
 5. 只 pad 了 input 没 pad labels。
 
-一个简单检查方法是：打印一个 batch 的 `input_ids`、`labels`、`attention_mask`，确认 padding 的位置完全符合预期。
+一个简单检查方法是：打印一个 batch 的 `input_ids`、`labels`、`attention_mask`，确认 padding 的位置完全符合预期；再随机选一个有效位置，手工核对它的 label 是否是目标 token，而不是同位置或前一位置的 token。对左 padding，还要同时检查 position ids 和 generation 时的最后一个有效位置。
 
 ## 4.8 packing：把多个短样本拼进一个长序列
 
@@ -456,7 +482,7 @@ def pack_sequences(seqs, max_length, eos_id=2):
     return packed
 ```
 
-这里每个样本之间加 `eos_id`，表示样本边界。
+这里每个样本之间加 `eos_id`，表示样本边界。这个简化函数还需要补一个边界保护：如果单个 `seq` 本身比 `max_length` 长，不能把空 chunk 先 append，也不能静默截断；应该在数据预处理阶段明确截断、拒绝或拆分策略。
 
 ### 4.8.3 packing 的风险
 
@@ -465,7 +491,7 @@ def pack_sequences(seqs, max_length, eos_id=2):
 3. 不适合所有任务。
 4. 对对话数据或有严格轮次结构的数据，packing 要更谨慎。
 
-简单说：padding 更稳，packing 更省，但实现复杂度更高。
+简单说：padding 更稳，packing 更省，但实现复杂度更高。对 decoder-only LM，直接把两个样本拼接后使用普通 causal mask，后一个样本可能看到前一个样本的 token；如果训练目标要求样本彼此独立，就必须使用 document boundary mask、reset position ids 或等价的隔离机制。只插入 `eos_id` 并不能阻止跨样本 attention。
 
 ## 4.9 shuffle、sampler 和 batch_sampler
 
@@ -543,6 +569,8 @@ def bucket_by_length(samples, bucket_size=4):
 2. 可能引入轻微分布偏差。
 3. 实现更复杂。
 
+长度分桶还会改变随机性结构。一个常见折中是先在较大的窗口内随机打乱，再在窗口内按长度组成 batch，而不是对全数据做完全排序。评估吞吐时，应同时报告有效 token/s、padding ratio 和样本顺序策略；只报告 wall-clock batch/s 可能把更小的有效工作量误认为更快。
+
 ## 4.11 DataLoader 的性能参数
 
 几个最常见的参数：
@@ -602,6 +630,8 @@ for batch in loader:
 
 如果数据集读取慢，可以通过预取隐藏一部分 IO 延迟；但太大也会增加内存占用。
 
+数据加载性能应通过时间线测量，而不是凭参数名称猜测。至少分别记录：取 batch 的等待时间、CPU collate 时间、CPU 到 device 的拷贝时间和 GPU 计算时间。`pin_memory=True` 只有在实际存在 CPU 到 CUDA 的拷贝且目标后端支持时才可能带来收益；在 CPU 训练、极小 batch 或 collate 已经成为瓶颈的场景，开启它可能只是增加内存压力。`persistent_workers=True` 还要求 `num_workers>0`，否则没有可持久化的 worker。
+
 ## 4.12 分布式训练中的数据切分
 
 多卡训练时，不能让每张卡都看到完全一样的数据顺序，否则等于重复训练。
@@ -623,6 +653,8 @@ loader = DataLoader(dataset, batch_size=8, sampler=sampler)
 2. 每个 epoch 需要调用 `sampler.set_epoch(epoch)`，否则 shuffle 可能不变。
 3. sampler 和 `shuffle=True` 通常不能同时乱配。
 
+`DistributedSampler` 的“不同 rank 不重复”不是无条件保证。设数据集大小为 `N`、world size 为 `R`；当 `N` 不能被 `R` 整除时，为了让每个 rank 拿到相同数量，sampler 可能补齐索引。补齐的样本会在同一 epoch 的全局索引集合中重复。若更关心不重复，可以设置合适的 `drop_last`，但代价是丢掉尾部样本；若更关心每个 rank 的 step 数一致，则需要接受 padding/补样本，并在有效样本数和 loss 统计中记录它。
+
 示例：
 
 ```python
@@ -633,6 +665,8 @@ for epoch in range(num_epochs):
 ```
 
 如果忘记 `set_epoch`，每个 epoch 的样本顺序可能完全一样，削弱随机性。
+
+一个可复现的分布式数据实验至少固定三件事：sampler 的 `seed`、当前 `epoch` 和数据集版本。只固定 DataLoader 的 `generator`，不能替代 `DistributedSampler.set_epoch()`；只固定 sampler，也不能让 Dataset 内部使用的 Python `random` 或 NumPy 随机操作自动复现。数据管线的随机性应当在 worker、sampler 和数据增强三个层级分别说明。
 
 ## 4.13 一个完整的数据管线例子
 
@@ -745,6 +779,8 @@ for batch in loader:
 1. 没有使用 DistributedSampler。
 2. sampler 配置不对。
 3. 每个 rank 都读了完整数据集。
+
+排查时不要只看 rank 0 的第一个 batch。收集一个完整 epoch 的样本 id，检查跨 rank 交集、每个 rank 的数量、补样本计数和 `drop_last` 行为；对 IterableDataset 则需要在数据源层记录 shard/record id，因为它可能没有可直接比较的整数索引。
 
 ## 4.15 最小可运行 DataLoader 审计 demo
 
@@ -879,63 +915,32 @@ distributed_overlap= []
 4. length bucket 把 padding waste 从 `0.303` 降到 `0.148`，说明长度相近的样本放在一起能减少浪费。
 5. 两个 rank 的索引无交集，说明这个 toy 场景下没有重复样本。
 
-## 4.16 面试官会怎么问
+## 4.16 从数据异常反推管线问题
 
-### 问题一：Dataset 和 DataLoader 有什么区别？
+数据管线的排查应从“单样本、单 batch、单 epoch、全分布式”逐层扩大。
 
-回答模板：
+### 4.16.1 单样本 contract
 
-```text
-Dataset 负责定义单个样本如何读取和返回，DataLoader 负责把样本按 batch 组织起来，并支持 shuffle、并行加载、collate_fn 和 sampler。Dataset 更偏“样本级”，DataLoader 更偏“batch 级”。
-```
+先固定几个样本，检查字段是否齐全、token 是否为整数、长度是否在允许范围内、空样本如何处理、label 是否与输入共享同一 tokenizer 和版本。单样本不稳定时，不要直接调 `num_workers` 或模型 batch size。
 
-### 问题二：为什么变长序列不能直接用默认 DataLoader？
+### 4.16.2 单 batch contract
 
-回答模板：
+检查每个字段的 shape、dtype、device、有效 token 数和 padding 位置。对 causal LM，随机抽取一行有效位置，确认 `input_ids[:, :-1]` 的预测目标确实是 `labels[:, 1:]`；确认 `labels == -100` 的位置不会进入 loss；确认 attention mask 的 key/query 方向符合模型实现。
 
-```text
-默认 DataLoader 会尝试把样本 stack 成规则张量，但变长序列长度不一致，无法直接 stack。需要自定义 collate_fn，在 batch 级做 padding、mask 和 labels 对齐。
-```
+### 4.16.3 单 epoch contract
 
-### 问题三：collate_fn 的作用是什么？
+记录样本 id、有效 token 数、padding ratio、空/异常样本数和 batch 等待时间。若使用 sampler，检查每个 rank 的数量、交集和补样本；若使用流式 dataset，记录 shard、worker 和 record id。这样才能区分“数据真的缺了”与“统计只看到了一个 rank”。
 
-回答模板：
+### 4.16.4 全训练 contract
 
-```text
-collate_fn 接收一个样本列表，负责把它们组装成 batch。对于大模型训练，它通常要做 padding、构造 attention_mask、处理 labels 的 ignore index，有时还会做 packing 或把复杂字段整理成统一结构。
-```
+再观察吞吐、GPU 利用率、CPU 利用率、内存峰值、异常样本重试和 epoch 边界。数据管线优化不能只看 batch/s，应至少同时看：
 
-### 问题四：num_workers、pin_memory、persistent_workers 分别有什么作用？
+~~~math
+\mathrm{effective\ tokens/s}
+=\frac{\text{有效 token 数}}{\text{wall-clock seconds}}
+~~~
 
-回答模板：
-
-```text
-num_workers 控制并行加载数据的 worker 数量；pin_memory 可以提升 CPU 到 GPU 的拷贝效率；persistent_workers 可以让 worker 跨 epoch 保持存活，减少重复启动开销。它们主要影响数据吞吐，不直接改变模型逻辑。
-```
-
-### 问题五：为什么分布式训练要用 DistributedSampler？
-
-回答模板：
-
-```text
-因为多卡训练时每张卡应该看到不同的数据子集，否则会重复训练。DistributedSampler 会按 rank 切分数据，保证各卡数据不重复，并且通常需要每个 epoch 调用 set_epoch 来刷新 shuffle。
-```
-
-### 问题六：为什么 `collate_fn` 通常比在 Dataset 里 padding 更合适？
-
-回答模板：
-
-```text
-Dataset 更适合处理单样本逻辑，而 padding 是 batch 级决策，因为 pad 到多长取决于当前 batch 的最长样本。如果在 Dataset 里提前 pad 到全局 max length，容易浪费大量计算；放到 collate_fn 里可以按 batch 动态 padding，也更方便同时构造 attention_mask 和 labels ignore index。
-```
-
-### 问题七：DataLoader 里如何保证随机性可复现？
-
-回答模板：
-
-```text
-单进程场景可以给 DataLoader 传入固定 seed 的 torch.Generator；多 worker 场景还要理解 worker seed，并在需要时使用 worker_init_fn 给 Python random、NumPy 或自定义随机逻辑设种子。分布式场景中 DistributedSampler 通常每个 epoch 调用 set_epoch(epoch)，否则不同 epoch 的 shuffle 顺序可能不变。
-```
+如果通过增加 padding 把 batch/s 提高，却让有效 token/s 下降，模型并没有真正变快。
 
 ## 4.17 常见误区
 
@@ -947,7 +952,7 @@ Dataset 更适合处理单样本逻辑，而 padding 是 batch 级决策，因�
 6. 以为 num_workers 越大越好。它需要和 CPU、IO 和预处理成本一起权衡。
 7. 以为 packing 只是把序列拼起来。其实还要处理样本边界、labels 和 mask。
 
-## 4.18 小练习
+## 4.18 章末练习
 
 1. 写一个 `Dataset`，返回文本和长度两个字段。
 2. 写一个 `collate_fn`，把变长 token 序列 pad 成 batch。
@@ -956,7 +961,27 @@ Dataset 更适合处理单样本逻辑，而 padding 是 batch 级决策，因�
 5. 把 `shuffle=True` 改成 `DistributedSampler` 形式，并在伪代码里写出 `set_epoch`。
 6. 写一个简单的 length bucket 函数，比较 bucket 前后 batch 的平均 padding 比例。
 
-## 4.19 本章总结
+7. 实现一个 `IterableDataset`，用 `get_worker_info()` 把整数范围分给多个 worker，验证同一 epoch 内没有重复值；再说明多 rank 时还缺少什么信息。
+8. 令 `N=10`、`world_size=3`，分别推导 `DistributedSampler` 在补齐和 `drop_last` 下每个 rank 可能看到的样本数与重复/丢弃行为。
+9. 构造两个有效 token 数差异很大的 micro-batch，比较“每个 batch 的 mean loss 再平均”和“按有效 token 总数归一化”的梯度权重。
+10. 对一个 DataLoader 记录 batch 等待时间、有效 token/s、padding ratio 和 GPU 计算时间，判断瓶颈在读取、collate、搬运还是模型。
+11. 把多个样本 packing 到固定长度，设计 document boundary mask，使后一个样本不能看到前一个样本；说明只加入 `eos_id` 为什么不够。
+
+## 4.19 资料与证据边界
+
+本章关于 Dataset、DataLoader、collate、worker、sampler 和 pinned memory 的接口语义，优先依据 PyTorch 官方资料：
+
+1. Dataset 类型：https://pytorch.org/docs/stable/data.html#dataset-types
+2. `DataLoader`：https://pytorch.org/docs/stable/data.html#torch.utils.data.DataLoader
+3. `default_collate`：https://pytorch.org/docs/stable/data.html#torch.utils.data.default_collate
+4. DataLoader 多进程：https://pytorch.org/docs/stable/data.html#single-and-multi-process-data-loading
+5. `DistributedSampler`：https://pytorch.org/docs/stable/data.html#torch.utils.data.distributed.DistributedSampler
+6. `get_worker_info`：https://pytorch.org/docs/stable/data.html#torch.utils.data.get_worker_info
+7. `worker_init_fn`：https://pytorch.org/docs/stable/data.html#torch.utils.data.DataLoader
+
+这些文档可以确认框架的调用约定和 sampler 行为，但不能替代目标数据源上的重复率、吞吐、内存和随机性验证。padding ratio 是教学指标，effective tokens/s 也必须明确有效 token 的定义；packing 的跨样本注意力隔离则取决于模型和 mask 实现，不会由 DataLoader 自动完成。
+
+## 4.20 本章总结
 
 Dataset 负责单样本逻辑，DataLoader 负责 batch 组装和并行加载，collate_fn 负责把变长或复杂样本整理成训练可用的张量结构。对于大模型训练来说，最常见的数据处理任务是 padding、attention mask、labels 对齐和分布式采样。
 

@@ -1,6 +1,6 @@
 # 第十二章：In-Context Learning 与显式 token 检索能力
 
-## 12.0 本讲资料边界与第二轮精修口径
+## 12.0 本讲范围与资料
 
 截至 2026-06-10，本讲用公开论文、综述和 mechanistic interpretability 资料校准 In-Context Learning，简称 ICL，以及上下文内显式 token 检索能力。这里讨论的是 decoder-only / Transformer LLM 在固定参数前向推理中利用 prompt 示例、任务说明、文档证据和工具返回结果的能力，不把某个 benchmark、某个 prompt 排列技巧、某个 induction head 观察或某个长上下文模型报告泛化成通用结论。
 
@@ -75,7 +75,7 @@ ICL 是 Transformer 把上下文窗口变成运行时工作空间的能力；att
 4. Dong et al., 2023, *A Survey on In-context Learning*。系统综述 ICL 的定义、技术、应用和挑战。
 5. Liu et al., 2023, *Lost in the Middle*。说明长上下文模型虽然能接收长输入，但对中间位置相关信息利用不稳定。
 6. Guu et al., 2020, *REALM: Retrieval-Augmented Language Model Pre-Training*。代表把外部检索与语言模型结合的早期路线，用来区分上下文内部检索和外部 RAG。
-7. mechanistic interpretability 中关于 induction heads 的研究。它说明某些 attention head 会实现类似“看到 A 后跟 B，当前再看到 A 时预测 B”的复制/归纳模式。本章只讲直觉，不把 mechanistic 结论绝对化。
+7. mechanistic interpretability 中关于 induction heads 的研究。它说明某些 attention head 会实现类似“看到 A 后跟 B，当前再看到 A 时预测 B”的复制/归纳模式。本章讨论直觉，不把 mechanistic 结论绝对化。
 
 需要说明的是，ICL 的机制仍是开放研究问题。不同论文从不同角度解释：模式匹配、贝叶斯推断、隐式梯度下降、检索、归纳头、数据分布记忆等都能解释一部分现象。本章重点建立工程和面试中实用的理解框架。
 
@@ -605,7 +605,7 @@ Transformer 的 full attention 有天然优势：
 
 这就是为什么 ICL 和显式 token 检索能力是下一代架构能否取代 Transformer 的关键评估项。
 
-## 12.19 面向专家：ICL 的多机制解释
+## 12.19 机制与边界：ICL 的多机制解释
 
 ICL 不是单一机制。
 
@@ -633,7 +633,7 @@ RAG 问答：证据检索、引用和抗干扰很重要。
 
 所以讨论 ICL 时要避免单因解释。
 
-## 12.20 面向专家：显式检索和隐式知识的分工
+## 12.20 机制与边界：显式检索和隐式知识的分工
 
 模型回答问题可能有两类来源。
 
@@ -677,7 +677,7 @@ prompt、文档、示例、工具返回、用户约束。
 
 ## 12.21 ICL / Token Retrieval 审计指标与最小 demo
 
-第二轮精修时，本章建议把 ICL 质量落到一组可审计指标：
+本章把 ICL 质量落到一组可审计指标：
 
 1. `label_space_coverage`：prompt 中是否覆盖任务需要的候选标签或输出类型。
 2. `format_consistency`：示例是否使用一致的输入字段、输出字段和分隔符。
@@ -685,7 +685,7 @@ prompt、文档、示例、工具返回、用户约束。
 4. `retrieval_label_match`：最相关示例或证据对应的标签是否支持最终答案。
 5. `middle_evidence_risk`：关键示例或证据是否落在长上下文中更容易被忽略的位置。
 6. `conflict_rate`：上下文中是否存在相似输入但标签或结论冲突的 bad case。
-7. `icl_gate`：把标签空间、格式、检索命中、位置风险和冲突证据组合成上线门禁。
+7. `icl_gate`：把标签空间、格式、检索命中、位置风险和冲突证据组合成上线条件。
 
 标签空间覆盖可以写成：
 
@@ -702,7 +702,7 @@ C_{\mathrm{fmt}}=
 \frac{1}{m}\sum_{i=1}^{m}\mathbf{1}[f_i=1]
 ```
 
-其中 `f_i=1` 表示第 `i` 个示例具备完整字段和一致格式。一个简化门禁可以写成：
+其中 `f_i=1` 表示第 `i` 个示例具备完整字段和一致格式。一个简化验收条件可以形式化为：
 
 ```math
 G_{\mathrm{icl}}=

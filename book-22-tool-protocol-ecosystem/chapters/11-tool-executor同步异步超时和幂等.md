@@ -1,8 +1,8 @@
 # 第十一章：Tool Executor：同步、异步、超时和幂等
 
-## 11.0 本讲资料边界与第二轮精修口径
+## 11.0 本讲范围与资料
 
-本章按第二轮精修要求，对齐 OpenAI tools / function calling 中“模型生成结构化 tool call、应用侧执行真实函数、再把 tool result 回填”的公开边界，OpenAI Agents SDK 中 tool、result、trace 和 guardrail 的公开抽象，Anthropic tool use 中工具定义、工具选择、tool use / tool result 轮转的公开能力，Google Gemini function calling 中 function declaration、mode 和 allowed function names 的公开能力，以及 MCP specification 中 `tools/list`、`tools/call` 和 server capability discovery 的协议边界。幂等部分参考公开 API 工程中的 idempotency key 设计惯例：同一用户意图的重复请求应复用稳定 key，并返回已有执行结果或进入一致恢复流程，而不是重复执行副作用。
+本章参考 OpenAI tools / function calling 中“模型生成结构化 tool call、应用侧执行真实函数、再把 tool result 回填”的公开边界，OpenAI Agents SDK 中 tool、result、trace 和 guardrail 的公开抽象，Anthropic tool use 中工具定义、工具选择、tool use / tool result 轮转的公开能力，Google Gemini function calling 中 function declaration、mode 和 allowed function names 的公开能力，以及 MCP specification 中 `tools/list`、`tools/call` 和 server capability discovery 的协议边界。幂等部分参考公开 API 工程中的 idempotency key 设计惯例：同一用户意图的重复请求应复用稳定 key，并返回已有执行结果或进入一致恢复流程，而不是重复执行副作用。
 
 这里抽象的是 Tool Executor 的稳定工程层：结构化 tool call 解析、schema 和业务校验、权限和确认、同步 / 异步执行、并发、超时、取消、幂等、副作用状态、结果包装、错误规范化、trace、replay 和 eval。
 
@@ -252,7 +252,7 @@ response = model.generate(messages)
 }
 ```
 
-后续可以：
+客户端拿到 job id 后，需要能够：
 
 1. 轮询 job 状态。
 2. 等 webhook 回调。
@@ -799,7 +799,7 @@ C_{\mathrm{trace}}=
 {N}
 ```
 
-Executor 上线门禁可以写成：
+Executor 上线准入条件可以形式化为：
 
 ```math
 G_{\mathrm{executor}}=
@@ -1306,7 +1306,7 @@ print("failed_gates=", failed_gates)
 print("tool_executor_gate_pass=", not failed_gates)
 ```
 
-运行后会看到：普通只读同步、异步 job、schema 阻断和权限阻断都能通过；但超时未取消、有副作用缺幂等、未知状态盲目重试、异步任务缺状态查询、结果未结构化和 trace 缺字段会拉低门禁。这个 demo 想表达的是，Executor 的质量不是单一 success rate，而是由“能否执行”和“执行是否安全可恢复”共同决定。
+运行后会看到：普通只读同步、异步 job、schema 阻断和权限阻断都能通过；但超时未取消、有副作用缺幂等、未知状态盲目重试、异步任务缺状态查询、结果未结构化和 trace 缺字段会拉低验收条件。这个 demo 想表达的是，Executor 的质量不是单一 success rate，而是由“能否执行”和“执行是否安全可恢复”共同决定。
 
 ## 11.24 常见错误
 

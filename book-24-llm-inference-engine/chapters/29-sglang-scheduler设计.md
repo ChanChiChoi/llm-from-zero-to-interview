@@ -12,9 +12,9 @@ Runtime 每一轮都要决定：哪些请求继续 decode，哪些新请求可�
 
 > SGLang scheduler 是 runtime 的资源分配中枢，它在每个 engine step 结合 waiting queue、running requests、RadixAttention 命中、KV cache 容量、token budget、structured output 状态和公平性策略，决定本轮执行哪些 prefill 和 decode 工作。
 
-## 29.0 本讲资料边界与第二轮精修口径
+## 29.0 本讲范围与资料
 
-本讲按第二轮精修要求做过资料校准，主要参考五类公开资料：
+本章参考五类公开资料：
 
 1. SGLang 论文《SGLang: Efficient Execution of Structured Language Model Programs》对 frontend language、runtime、RadixAttention、KV cache reuse 和 structured decoding 的系统分层说明。
 2. SGLang Server Arguments 文档对 `--mem-fraction-static`、`--max-running-requests`、`--max-total-tokens`、`--chunked-prefill-size`、`--max-prefill-tokens`、`--schedule-policy`、`--schedule-conservativeness`、`--disable-radix-cache` 和 `--enable-metrics` 等 serving / scheduler 参数的公开口径。
@@ -22,7 +22,7 @@ Runtime 每一轮都要决定：哪些请求继续 decode，哪些新请求可�
 4. SGLang Structured Outputs 文档对 JSON schema、regex、EBNF、structural tag、grammar backend 和约束输出接口的说明。
 5. SGLang Production Metrics / Attention Backend 文档对 prompt tokens、generation tokens、token usage、cache hit rate、TTFT、E2E latency、TPOT、running requests、queue requests，以及 page size / prefix cache 完整页命中的说明。
 
-本章只讲 SGLang-like scheduler 的教学版机制：waiting / running 状态、decode-first、cache-aware admission、prefill / decode token budget、sequence budget、KV budget、chunked prefill、structured output 开销、abort cleanup、eviction 与公平性。它不绑定某个 SGLang 版本的真实源码类名、真实 schedule policy 实现、CUDA graph、overlap scheduler、DP attention、PD disaggregation、LoRA adapter 调度、MoE 路由或生产参数全集。本章 demo 用纯 Python 模拟调度决策和 KV slot 账本，不执行真实模型 forward。
+本章讨论 SGLang-like scheduler 的教学版机制：waiting / running 状态、decode-first、cache-aware admission、prefill / decode token budget、sequence budget、KV budget、chunked prefill、structured output 开销、abort cleanup、eviction 与公平性。它不绑定某个 SGLang 版本的真实源码类名、真实 schedule policy 实现、CUDA graph、overlap scheduler、DP attention、PD disaggregation、LoRA adapter 调度、MoE 路由或生产参数全集。本章 demo 用纯 Python 模拟调度决策和 KV slot 账本，不执行真实模型 forward。
 
 参考资料：
 
@@ -873,7 +873,7 @@ SGLang scheduler 是 runtime 的资源分配中枢。它在每个 engine step �
 所以 SGLang scheduler 不只是凑 batch，而是在 TTFT、TPOT、吞吐、KV 显存、cache hit、公平性和复杂程序执行之间做权衡。
 ```
 
-## 29.27 SGLang Scheduler 公式、门禁和可运行 demo
+## 29.27 SGLang Scheduler 公式、验收条件和可运行 demo
 
 把第 `i` 个 waiting 请求的 prompt token 数记为 `L_i`，RadixAttention 命中长度记为 `H_i`。如果底层 page size 为 `S`，则 page 对齐后的可复用 prefix token 数为：
 
@@ -915,7 +915,7 @@ $$
 
 其中 `a_i` 是到达 step，`\lambda` 是 cache hit bonus。`A_i(t)` 的第一项会随等待时间增长，保证长期等待的 cache miss 请求最终也能被调度。
 
-教学版 SGLang scheduler 门禁可以写成：
+教学版 SGLang scheduler 准入条件可以形式化为：
 
 $$
 G_{\mathrm{scheduler}}=G_{\mathrm{decode}}G_{\mathrm{tok}}G_{\mathrm{seq}}G_{\mathrm{suffix}}G_{\mathrm{kv}}G_{\mathrm{fair}}G_{\mathrm{chunk}}G_{\mathrm{grammar}}G_{\mathrm{cleanup}}G_{\mathrm{metric}}

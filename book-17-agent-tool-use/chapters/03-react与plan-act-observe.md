@@ -4,9 +4,9 @@ Agent 的核心不是一次性生成完整答案，而是在任务执行过程�
 
 本章系统讲 ReAct 与 Plan-Act-Observe：为什么要把推理、动作和观察拆开，什么时候先规划，什么时候边做边改，如何控制循环，如何处理失败，如何记录 trace，以及如何用最小可运行 demo 审计 ReAct / PAO 系统。
 
-## 0. 本讲资料边界与第二轮精修口径
+## 0. 本讲范围与资料
 
-本章第二轮精修时，按 `WRITING_PLAN.md` 联网核对了 ReAct 论文、MRKL Systems 论文、Plan-and-Solve Prompting 论文、Reflexion 论文和 OpenAI Agents SDK 中 tools、guardrails、tracing 的公开资料边界。
+本章参考了 ReAct 论文、MRKL Systems 论文、Plan-and-Solve Prompting 论文、Reflexion 论文和 OpenAI Agents SDK 中 tools、guardrails、tracing 的公开资料边界。
 
 本章采用以下口径：
 
@@ -184,7 +184,7 @@ R_{\mathrm{early}}=\frac{1}{N_{\mathrm{task}}}\sum_{i=1}^{N_{\mathrm{task}}}\mat
 
 其中 `R_early` 是过早结束率。
 
-一个简化上线门禁：
+一个简化上线条件：
 
 ```math
 G_{\mathrm{react}}=
@@ -268,7 +268,7 @@ Observation 的质量直接影响下一步决策。如果 observation 太长，�
 
 例如浏览器任务、调试任务、数据探索任务都适合边做边观察。
 
-边做边改的风险是容易迷路。因此需要 step limit、状态摘要、重复动作拦截、预算门禁和明确停止条件。
+边做边改的风险是容易迷路。因此需要 step limit、状态摘要、重复动作拦截、预算验收条件和明确停止条件。
 
 ## 3.10 循环控制
 
@@ -352,7 +352,7 @@ def run_agent_loop(user_goal, model, controller, tool_executor, max_steps):
     return summarize_incomplete_state(state)
 ```
 
-真实系统还需要 action schema、参数校验、权限检查、异常捕获、工具超时、重试策略、状态压缩、trace 记录、敏感信息处理和人审门禁。
+真实系统还需要 action schema、参数校验、权限检查、异常捕获、工具超时、重试策略、状态压缩、trace 记录、敏感信息处理和人审验收条件。
 
 ## 3.13 日志和 Trace
 

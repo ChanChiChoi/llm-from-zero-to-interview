@@ -8,13 +8,13 @@
 
 > 多机大模型训练的网络不是只负责传文件，而是在每个 step 中参与参数、梯度、activation 和 optimizer state 的同步。
 
-## 8.0 本讲资料边界与第二轮精修口径
+## 8.0 本讲范围与资料
 
-本讲第二轮精修时，资料口径按“AI 集群网络稳定概念”处理，而不是按某个交换机型号、云产品网络规格、网卡 SKU 或 NCCL 环境变量写死。InfiniBand 部分参考 IBTA 对高带宽、低延迟、RDMA fabric 的公开定义；RoCE 部分参考 RDMA over Converged Ethernet 的基本边界，以及 NVIDIA / 以太网数据中心文档中对 lossless fabric、PFC、ECN、拥塞控制和丢包敏感性的工程说明；集合通信部分参考 NVIDIA NCCL 对 AllReduce、AllGather、ReduceScatter、Broadcast、InfiniBand / RoCE / GPUDirect RDMA 和拓扑选择的边界；GPUDirect RDMA 部分延续上一章的 GPU-NIC PCIe 拓扑和直接访问 GPU 显存的边界。
+本章参考资料口径按“AI 集群网络稳定概念”处理，而不是按某个交换机型号、云产品网络规格、网卡 SKU 或 NCCL 环境变量写死。InfiniBand 部分参考 IBTA 对高带宽、低延迟、RDMA fabric 的公开定义；RoCE 部分参考 RDMA over Converged Ethernet 的基本边界，以及 NVIDIA / 以太网数据中心文档中对 lossless fabric、PFC、ECN、拥塞控制和丢包敏感性的工程说明；集合通信部分参考 NVIDIA NCCL 对 AllReduce、AllGather、ReduceScatter、Broadcast、InfiniBand / RoCE / GPUDirect RDMA 和拓扑选择的边界；GPUDirect RDMA 部分延续上一章的 GPU-NIC PCIe 拓扑和直接访问 GPU 显存的边界。
 
 需要注意三点：
 
-1. 本章只讲网络基础和集合通信，不把某个厂商的峰值带宽、交换机端口数、NCCL 参数或云实例网络指标写成通用结论。
+1. 本章讨论网络基础和集合通信，不把某个厂商的峰值带宽、交换机端口数、NCCL 参数或云实例网络指标写成通用结论。
 2. InfiniBand、RoCE 和普通以太网不是简单“谁更高级”的关系，而是性能、成本、运维复杂度、拥塞控制、团队能力和任务通信强度的取舍。
 3. 集合通信瓶颈要和并行策略一起分析。数据并行、FSDP / ZeRO、张量并行和 pipeline 并行对应不同通信频率、通信量和 tail latency 敏感度。
 
@@ -527,7 +527,7 @@ R_{\mathrm{comm}}=\frac{T_{\mathrm{comm}}}{T_{\mathrm{step}}}
 R_{\mathrm{retx}}=\frac{N_{\mathrm{retx}}}{N_{\mathrm{packet}}}
 ```
 
-最后，可以把网络通信门禁写成：
+最后，可以把网络通信检查条件写成：
 
 ```math
 G_{\mathrm{net}}=\mathbf{1}\left[\min_j C_j\ge \tau_j \land R_{\mathrm{comm}}\le \rho_{\mathrm{comm}} \land J_{\mathrm{lat}}\le \rho_{\mathrm{jitter}} \land R_{\mathrm{retx}}\le \rho_{\mathrm{retx}} \land P_0=0\right]
