@@ -233,6 +233,20 @@ E\sum_{e=1}^{E}f_ep_e.
 
 不同论文的辅助损失、系数和容量策略并不相同。公式的重点是提醒我们同时关注离散路由分配 $f_e$ 和连续 router 概率 $p_e$，而不是只看总 loss。
 
+工程审计中还常用负载变异系数描述专家之间的不均衡。设第 $e$ 个专家实际接收的 token 数为 $q_e$，则可以写成：
+
+~~~math
+
+CV_{load}
+=\frac{\operatorname{std}(q_1,\ldots,q_E)}
+       {\operatorname{mean}(q_1,\ldots,q_E)},
+\qquad
+\operatorname{mean}(q_1,\ldots,q_E)>0.
+
+~~~
+
+$CV_{load}$ 越大，通常表示热点专家和空闲专家之间的差距越大；如果一个 batch 没有任何有效 token，均值为零，CV 没有定义，不能把它记成一个正常的低负载结果。
+
 ### 3.5 Capacity factor 与 dropped tokens
 
 每个 expert 的处理容量通常有限。若一个 batch 有 $T$ 个 token、$E$ 个专家、每个 token 选 $k$ 个专家，可以用一个教学化容量近似：
@@ -325,7 +339,7 @@ Recall@k
 
 ~~~
 
-如果答案需要多个片段，还要定义 multi-hop recall 或 evidence set recall，不能只用“至少召回一段”掩盖缺失的第二个证据。
+分母是已经标注过相关证据的查询数；如果评估集没有任何相关性标注，Recall@k 是未定义，而不是 0。若某些查询确实不需要外部证据，也应在评估协议中单独标注，不能把它们混入相关性分母。若答案需要多个片段，还要定义 multi-hop recall 或 evidence set recall，不能只用“至少召回一段”掩盖缺失的第二个证据。
 
 ### 4.4 Chunking 是证据边界设计
 
@@ -351,7 +365,7 @@ SupportRatio
 
 ~~~
 
-这个指标需要 claim 抽取和证据标注，不能由答案是否包含引用链接代替。引用存在但与具体句子不匹配，仍然属于 citation misalignment。
+分母是被识别为可核查的 claim 数；如果回答没有可核查 claim，SupportRatio 应报告为未定义，并同时说明回答类型，而不是把空回答或纯寒暄误记为满分或零分。这个指标需要 claim 抽取和证据标注，不能由答案是否包含引用链接代替。引用存在但与具体句子不匹配，仍然属于 citation misalignment。
 
 还要区分“证据支持”与“答案正确”。文档本身可能过期或错误；模型忠实引用错误文档，仍然会产生错误答案。因此需要同时检查文档质量、时间、权限和冲突处理。
 
@@ -655,12 +669,25 @@ from math import sqrt
 
 
 def mean(values):
-    return sum(values) / len(values) if values else 0.0
+    return sum(values) / len(values) if values else None
+
+
+def safe_ratio(numerator, denominator):
+    return None if denominator == 0 else numerator / denominator
 
 
 def population_std(values):
+    if not values:
+        return None
     center = mean(values)
     return sqrt(mean([(value - center) ** 2 for value in values]))
+
+
+def load_cv(values):
+    center = mean(values)
+    if center in (None, 0):
+        return None
+    return population_std(values) / center
 
 
 long_context = [
@@ -686,33 +713,50 @@ long_recall = mean([row["success"] for row in long_context])
 middle_recall = mean(
     [row["success"] for row in long_context if row["position"] == "middle"]
 )
-load_cv = population_std(expert_load) / mean(expert_load)
-rag_recall = mean([row["relevant_retrieved"] for row in rag_queries])
-support_ratio = sum(row["supported"] for row in rag_queries) / sum(
-    row["claims"] for row in rag_queries
+expert_load_cv = load_cv(expert_load)
+rag_recall = safe_ratio(
+    sum(row["relevant_retrieved"] for row in rag_queries), len(rag_queries)
+)
+support_ratio = safe_ratio(
+    sum(row["supported"] for row in rag_queries),
+    sum(row["claims"] for row in rag_queries),
 )
 tool_success = mean([row["tool_ok"] for row in agent_trace])
 agent_success = mean([row["final_ok"] for row in agent_trace])
 
+
+def rounded(value):
+    return None if value is None else round(value, 4)
+
+
 signals = {
-    "long_recall": round(long_recall, 4),
-    "middle_position_recall": round(middle_recall, 4),
-    "moe_load_cv": round(load_cv, 4),
-    "rag_recall_at_k": round(rag_recall, 4),
-    "citation_support_ratio": round(support_ratio, 4),
-    "agent_tool_success": round(tool_success, 4),
-    "agent_task_success": round(agent_success, 4),
+    "long_recall": rounded(long_recall),
+    "middle_position_recall": rounded(middle_recall),
+    "moe_load_cv": rounded(expert_load_cv),
+    "rag_recall_at_k": rounded(rag_recall),
+    "citation_support_ratio": rounded(support_ratio),
+    "agent_tool_success": rounded(tool_success),
+    "agent_task_success": rounded(agent_success),
 }
 actions = []
-if signals["middle_position_recall"] < 0.75:
+if signals["middle_position_recall"] is None or signals["middle_position_recall"] < 0.75:
     actions.append("add_position_and_multi_evidence_tests")
-if signals["moe_load_cv"] > 0.30:
+if signals["moe_load_cv"] is None or signals["moe_load_cv"] > 0.30:
     actions.append("repair_router_load_balance")
-if signals["rag_recall_at_k"] < 0.80 or signals["citation_support_ratio"] < 0.80:
+if (
+    signals["rag_recall_at_k"] is None
+    or signals["citation_support_ratio"] is None
+    or signals["rag_recall_at_k"] < 0.80
+    or signals["citation_support_ratio"] < 0.80
+):
     actions.append("repair_retrieval_and_claim_citations")
-if signals["agent_task_success"] < 0.80:
+if signals["agent_task_success"] is None or signals["agent_task_success"] < 0.80:
     actions.append("add_trace_recovery_and_budget_tests")
 decision = "continue_after_system_repairs" if actions else "continue_to_shadow_eval"
+
+assert mean([]) is None
+assert safe_ratio(0, 0) is None
+assert load_cv([0, 0]) is None
 
 for name, value in signals.items():
     print(f"{name}={value}")

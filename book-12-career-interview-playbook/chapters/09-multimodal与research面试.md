@@ -65,7 +65,7 @@ CLIP 主要解决图文表示对齐，不能因此推出它能生成长答案；
 
 ### 9.2.1 从像素矩阵到 patch
 
-一张 RGB 图像可以表示为高度 H、宽度 W、通道数 C=3 的张量。Vision Transformer 一类模型把图像切成边长为 P 的不重叠 patch。假设 H、W 能被 P 整除，patch 数量为：
+一张 RGB 图像可以表示为高度 H、宽度 W、通道数 C=3 的张量。Vision Transformer 一类模型把图像切成边长为 P 的不重叠 patch。假设 H、W、P 是正整数，且 H、W 能被 P 整除，patch 数量为：
 
 ~~~math
 N_{\mathrm{patch}}
@@ -101,7 +101,7 @@ N_{\mathrm{patch}}
 196
 ~~~
 
-如果分辨率变成 448×448，patch 大小不变，token 数变为 784，是原来的四倍。全注意力的理论两两交互数量近似随 token 数平方增长，因此提高分辨率通常同时增加显存、计算和上下文占用。
+如果分辨率变成 448×448，patch 大小不变，token 数变为 784，是原来的四倍。全注意力的理论两两交互数量近似随 token 数平方增长，因此提高分辨率通常同时增加显存、计算和上下文占用。实际输入若需要 padding 或非正方形裁剪，应把补齐后的尺寸写进账本，不能继续套用整除公式而掩盖额外 token。
 
 ### 9.2.2 CNN 和 ViT 的差异
 
@@ -143,7 +143,7 @@ v_i
 \frac{g(y_i)}{\lVert g(y_i)\rVert_2}
 ~~~
 
-归一化后，点积就是余弦相似度。一个 batch 有 N 对样本，图像 i 和文本 j 的 logit 可以写成：
+归一化后，点积就是余弦相似度；这要求 `f(x_i)` 和 `g(y_i)` 都是非零、有限向量。一个 batch 有 `N > 0` 对样本，图像 i 和文本 j 的 logit 可以写成：
 
 ~~~math
 \ell_{ij}
@@ -151,7 +151,7 @@ v_i
 \frac{u_i^\top v_j}{\tau}
 ~~~
 
-其中 τ 是温度参数。匹配对位于对角线，其他位置通常作为 batch 内负样本。图像到文本的交叉熵为：
+其中 τ 是有限的正温度参数。匹配对位于对角线，其他位置通常作为 batch 内负样本。图像到文本的交叉熵为：
 
 ~~~math
 \mathcal{L}_{\mathrm{i2t}}
@@ -175,7 +175,7 @@ v_i
 {\sum_{j=1}^{N}\exp(\ell_{ji})}
 ~~~
 
-最终常见目标是两者的平均：
+最终常见目标是两者的平均；如果 batch 为空，两个平均损失都没有定义，不能把它当作 0：
 
 ~~~math
 \mathcal{L}_{\mathrm{clip}}
@@ -338,7 +338,7 @@ L_{\mathrm{total}}^2 d
 
 ### 9.5.3 压缩视觉 token 的收益和损失
 
-设原始视觉 token 数为 N，压缩后为 K，压缩比例可以写成：
+设原始视觉 token 数为 `N > 0`，压缩后为 K，并假设 `0 <= K <= N`，压缩比例可以写成：
 
 ~~~math
 r_{\mathrm{compress}}
@@ -429,7 +429,7 @@ N_{\mathrm{spatial}}
 
 如果模型回答“图片里有一只猫”，需要知道它是否真的读取了猫所在区域；如果回答“右边的数字是 128”，则还要确认数字、位置和读取顺序都得到支持。grounding 关注答案和输入证据之间的对应关系，而不仅是最终字符串是否与参考答案相同。
 
-可以把回答拆成若干可验证 claim。设被评估的视觉 claim 总数为 N_claim，其中能由图像区域、OCR 结果或结构化证据支持的数量为 N_supported，则教学性的 grounding rate 为：
+可以把回答拆成若干可验证 claim。设被评估的视觉 claim 总数为 `N_claim > 0`，其中能由图像区域、OCR 结果或结构化证据支持的数量为 N_supported，则教学性的 grounding rate 为：
 
 ~~~math
 \mathrm{GroundingRate}
@@ -487,7 +487,7 @@ q(x_t\mid x_0)
 \right)
 ~~~
 
-其中，β_t 是第 t 步噪声率，α_t=1-β_t，`bar_alpha_t` 是从第一步到第 t 步的 α 的乘积。等价地，可以直接采样：
+其中，`0 <= beta_t < 1` 是第 t 步噪声率，`alpha_t = 1 - beta_t`，`bar_alpha_t` 是从第一步到第 t 步的 alpha 的乘积。为了让这个高斯参数化保持有效，通常要求 `bar_alpha_t` 落在 `(0, 1]`。等价地，可以直接采样：
 
 ~~~math
 x_t
@@ -539,7 +539,7 @@ s
 \right)
 ~~~
 
-其中 s 是 guidance scale。s 较大通常增强文本条件，但也可能造成过饱和、构图僵硬、细节重复或多样性下降。条件越强不等于语义越准确，仍要评估文字、数量、空间关系和安全边界。
+其中 s 是有限的 guidance scale。s 较大通常增强文本条件，但也可能造成过饱和、构图僵硬、细节重复或多样性下降；它不存在跨模型通用的固定取值范围，具体可行区间取决于参数化和采样器。条件越强不等于语义越准确，仍要评估文字、数量、空间关系和安全边界。
 
 ### 9.8.4 生成质量不能只看漂亮样例
 
@@ -669,7 +669,7 @@ Whisper 代表一种大规模弱监督语音到文本路线：将音频特征输
 
 ### 9.11.3 WER 的定义与误读
 
-给定参考文本长度 N，识别结果相对于参考文本的替换数 S、删除数 D、插入数 I，可以定义词错误率：
+给定参考文本长度 `N > 0`，识别结果相对于参考文本的替换数 S、删除数 D、插入数 I，可以定义词错误率：
 
 ~~~math
 \mathrm{WER}
@@ -765,7 +765,7 @@ chart_id
 
 ### 9.13.2 组合指标不能掩盖短板
 
-如果各维度得分为 q_1 到 q_K，权重为 w_k，一个汇总分可以写成：
+如果各维度得分为 q_1 到 q_K，且 K > 0，权重 w_k 为有限非负数并满足权重和为 1，一个汇总分可以写成：
 
 ~~~math
 Q_{\mathrm{overall}}
@@ -779,7 +779,7 @@ Q_{\mathrm{overall}}
 
 ### 9.13.3 证据支持率和任务成功率
 
-设任务完成且答案正确的样本数为 N_success，全部任务数为 N，任务级成功率为：
+设全部任务数为 N > 0，任务完成且答案正确的样本数为 N_success，任务级成功率为：
 
 ~~~math
 \mathrm{TaskSuccess}
@@ -951,7 +951,7 @@ OCR 结果 -/-> 获得工具权限
 M_i^v-M_i^b
 ~~~
 
-平均配对差异为：
+在配对样本数 n > 0 时，平均配对差异为：
 
 ~~~math
 \bar{\Delta}
@@ -964,7 +964,7 @@ M_i^v-M_i^b
 
 ### 9.16.3 质量提升是否值得成本
 
-设一个评估窗口内模型、工具、人工复核和存储的累计成本分别为 C_model、C_tool、C_review、C_storage，按预先定义的成功标准完成的任务数为 N_success，则单位成功任务成本可以写为：
+设一个评估窗口内模型、工具、人工复核和存储的累计成本分别为 C_model、C_tool、C_review、C_storage，且按预先定义的成功标准完成的任务数为 N_success > 0，则单位成功任务成本可以写为：
 
 ~~~math
 C_{\mathrm{success}}
@@ -1159,7 +1159,7 @@ P_i
 }
 ~~~
 
-Impact 表示失败对任务的影响，Confidence 表示现有证据对假设的支持，Coverage 表示可能覆盖多少请求，Cost 表示实验和上线代价。它不是客观真理，但能迫使研究者把“有趣”与“值得先做”区分开。
+Impact 表示失败对任务的影响，Confidence 表示现有证据对假设的支持，Coverage 表示可能覆盖多少请求，Cost 表示实验和上线代价。这里要求 Cost > 0，并且各项已经映射到可比较的尺度；否则优先级没有定义或不能跨项目比较。它不是客观真理，但能迫使研究者把“有趣”与“值得先做”区分开。
 
 ## 9.21 综合案例：衡川合同助手的多模态证据链
 
@@ -1218,11 +1218,11 @@ Impact 表示失败对任务的影响，Confidence 表示现有证据对假设�
 
 ## 9.22 一个可运行的多模态评估小实验
 
-下面的代码不读取真实图片，也不判断图片内容。它演示三个可复用的研究动作：计算对比学习损失、按任务统计正确性和 grounding、比较同一批样本的版本差异。样本标签已经由人工或独立评审产生。
+下面的代码不读取真实图片，也不判断图片内容。它演示三个可复用的研究动作：计算对比学习损失、按任务统计正确性和 grounding、比较同一批样本的版本差异。样本标签已经由人工或独立评审产生；统计函数把空输入和“没有成功任务”分别保留为异常或未定义值，避免把缺少观测误报成零成本或零质量。
 
 ~~~python
 from dataclasses import dataclass
-from math import exp, log
+from math import exp, isfinite, log
 from typing import Sequence
 
 
@@ -1241,8 +1241,10 @@ def symmetric_clip_loss(
     size = len(rows)
     if size == 0 or any(len(row) != size for row in rows):
         raise ValueError("similarity must be a non-empty square matrix")
-    if temperature <= 0:
-        raise ValueError("temperature must be positive")
+    if not isfinite(temperature) or temperature <= 0:
+        raise ValueError("temperature must be finite and positive")
+    if any(not isfinite(value) for row in rows for value in row):
+        raise ValueError("similarity values must be finite")
 
     logits = [[value / temperature for value in row] for row in rows]
     image_to_text = []
@@ -1271,11 +1273,17 @@ class EvalRow:
     cost: float
 
 
-def summarize(rows: Sequence[EvalRow]) -> dict[str, float]:
+def summarize(rows: Sequence[EvalRow]) -> dict[str, float | None]:
     if not rows:
         raise ValueError("rows must not be empty")
-    if any(row.latency_ms < 0 or row.cost < 0 for row in rows):
-        raise ValueError("latency and cost must be non-negative")
+    if any(
+        not isfinite(row.latency_ms)
+        or not isfinite(row.cost)
+        or row.latency_ms < 0
+        or row.cost < 0
+        for row in rows
+    ):
+        raise ValueError("latency and cost must be finite and non-negative")
 
     count = len(rows)
     correct = sum(row.correct for row in rows)
@@ -1290,10 +1298,10 @@ def summarize(rows: Sequence[EvalRow]) -> dict[str, float]:
         ],
         "total_cost": total_cost,
         "cost_per_task_success": (
-            total_cost / correct if correct else float("inf")
+            total_cost / correct if correct else None
         ),
         "cost_per_supported_success": (
-            total_cost / supported if supported else float("inf")
+            total_cost / supported if supported else None
         ),
     }
 

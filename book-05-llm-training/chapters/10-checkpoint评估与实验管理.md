@@ -6,7 +6,7 @@
 
 评估也不是训练结束后的装饰。validation loss 只反映某种 token 预测目标，下游 benchmark 只覆盖有限能力，安全和回归评估还可能揭示平均分掩盖的退化。实验管理把代码、数据、配置、环境、artifact 和评估结果绑在一起，才能知道一次提升究竟来自什么。
 
-本章沿着一条具体链路展开：先定义训练状态，再讨论保存频率和成本；接着验证恢复连续性，拆开 validation、per-domain、benchmark、regression 和 safety 证据；最后说明如何管理实验版本、公平比较和选择 checkpoint。面试场景放在章节后部，用来检验前面的工程理解，而不是替代前面的解释。
+本章沿着一条具体链路展开：先定义训练状态，再讨论保存频率和成本；接着验证恢复连续性，拆开 validation、per-domain、benchmark、regression 和 safety 证据；最后说明如何管理实验版本、公平比较和选择 checkpoint。章节后部把这些概念放进几个故障和决策场景，帮助读者把抽象字段还原成真实训练系统中的判断。
 
 ## 为什么 checkpoint 和实验管理很重要
 
@@ -148,6 +148,8 @@ R_{\mathrm{save}}=
 
 这里把每 step 的 token 数近似成常数；变长 batch 或动态 packing 时，更准确的做法是对故障窗口内实际消费的 token 求和。`f` 越小，容错越好，但 `R_save` 和存储压力越高。
 
+这些量的有效域是 S>=0、f 为正整数、B_tok>=0、C_save>=0、T_step>0。训练尚未执行任何 step 时不应报告平均保存开销；若异步保存还未提交 manifest，已发起的写入也不能被计入可恢复版本数。
+
 这里 `C_save` 是一次保存占用的墙钟时间，`T_step` 是一个训练 step 的平均时间；若保存与计算完全串行，`R_save` 近似表示保存带来的时间占比。异步写盘可以降低前台阻塞，但会增加显存/主机内存中的待写队列和“最新 checkpoint 尚未真正落盘”的窗口，因此还要记录发布状态，而不能只看保存函数返回。
 
 `latest`、`milestone` 和 `best` 是三种不同语义：latest 追求故障恢复距离短，milestone 追求按 consumed tokens 做公平纵向比较，best 追求某组评估目标下的候选选择。一个 checkpoint 可以同时属于多个集合，但保留策略不能把它们当成同一个对象。
@@ -236,12 +238,12 @@ global step 和 token count 正确
 
 ```math
 \delta_L=
-\frac{|L^+-L^-|}{L^-+\epsilon}
+\frac{|L^+-L^-|}{L^-}
 ```
 
 ```math
 \delta_{\eta}=
-\frac{|\eta^+-\eta^-|}{\eta^-+\epsilon}
+\frac{|\eta^+-\eta^-|}{\eta^-}
 ```
 
 ```math
@@ -254,7 +256,7 @@ global step 和 token count 正确
 ```math
 \delta_{\mathrm{tok}}=
 \frac{\left|(T^+-T^-)-B_{\mathrm{tok}}^+\right|}
-{B_{\mathrm{tok}}^++\epsilon}
+{B_{\mathrm{tok}}^+}
 ```
 
 因此，恢复探针更适合记录为偏差向量：
@@ -266,11 +268,13 @@ R_{\mathrm{resume}}=
 
 这个向量比一个真假值更有信息。`\delta_L` 较大，可能指向数据 batch、loss mask 或 optimizer state；`\delta_{\eta}` 异常，优先检查 scheduler 的 step 口径；`\delta_{\mathrm{step}}` 或 `\delta_{\mathrm{tok}}` 异常，则要检查 global step、gradient accumulation 和 data cursor。阈值 `\tau_L`、`\tau_{\eta}` 只能作为当前实验的比较尺度，不能被当成所有模型都适用的固定常数。
 
+相对偏差要求用于分母的 L^-、eta^- 和 B_tok^+ 都严格大于 0，且比较值有限。loss 恰为 0、初始学习率为 0 或恢复后没有有效 token 的情形，应分别报告绝对差、调度阶段或 `not_applicable`，而不是在分母加 epsilon 把“没有可比基线”伪装成一个稳定的小偏差。
+
 还要注意，token count 连续并不能证明样本顺序连续。一个数据管道可能正好消费了相同数量的 token，却从另一个 shard 开始；因此 checkpoint 中的 data state 至少应包含数据版本、epoch 或 shard 顺序、当前 shard、样本/packed sequence 游标，以及必要时的 sampler 状态。恢复探针应把这些字段和日志里的 token 数放在同一张记录中。
 
 分布式训练还多一层风险：某个 rank 的 shard 写完，不代表整个 checkpoint 已经可读。发布一个 checkpoint 前，应确认各 rank 的文件、索引和元数据都已落盘，并让读取端能够发现“未完成写入”的状态，而不是把半套 shard 当成最新版本。对象存储上的临时前缀、完成标记或 manifest 都是实现手段；关键是读取者能区分正在写入和完整发布的 artifact。
 
-因此，面试中回答 checkpoint 恢复时，不能只说“调用 `load_state_dict`”。完整回答应说明：先验证 artifact 和版本，再恢复所有训练状态，最后用 loss、学习率、step、token 增量和数据游标做一个短探针；如果某一项偏离，就根据偏差类型定位，而不是盲目继续训练。
+因此，说明 checkpoint 恢复时，不能只停留在“调用 `load_state_dict`”。完整流程应先验证 artifact 和版本，再恢复所有训练状态，最后用 loss、学习率、step、token 增量和数据游标做一个短探针；如果某一项偏离，就根据偏差类型定位，而不是盲目继续训练。
 
 ## 5. 为什么不能只看最后一个 checkpoint
 
@@ -328,6 +332,8 @@ PPL=
 ```
 
 loss 越低，perplexity 越低，说明模型对验证集 token 的预测越好。这里的“更好”只针对给定 tokenizer、给定数据分布和给定预测目标；它不是对模型全部能力的排序。
+
+这里的有效 token 分母必须大于 0，L_val 必须是有限实数。PPL 是指数变换：很大的 loss 可能使有限精度实现溢出为 Inf，因此日志应保存原始 loss，并把 Inf PPL 标记为数值范围问题而非一个可排序的有限分数。
 
 还要留意统计分母。若一个 batch 中有 padding、prompt-only token 或被排除的标签，不能把总序列长度当作有效 token 数。对比不同 checkpoint 时，最好同时保存有效 token 数、每个 domain 的 token 数和聚合方式；否则同一个 loss 数字可能来自不同的样本覆盖。
 
@@ -391,6 +397,8 @@ L_k^{new}-L_k^{old}>\tau_k
 
 这类 domain regression。
 
+每个 domain 的有效 token 分母都必须大于 0，权重满足 w_k>=0 且 sum_k w_k=1。空 domain 应从本次聚合中排除并记录为未评估，而不是以零 loss 参与平均；否则只改变切分或过滤规则就能人为降低总 loss。
+
 per-domain loss 的价值在于把“平均变好”拆成多个可解释的变化。它还会提醒我们检查 domain 的采样比例和有效 token 数：如果某个 domain 很小，均值波动可能很大；如果 domain 定义或 tokenizer 发生变化，跨版本的数值也不能直接排成一条曲线。
 
 ## 8. 下游 benchmark
@@ -423,6 +431,8 @@ Base model 训练阶段也需要下游 benchmark。
 
 它不是所有评测的完整置信区间，尤其不适用于有相关样本、生成式评分或复杂 judge 的场景，但足以提醒我们：几十道题上的几个百分点变化，未必比评测噪声大。更可靠的比较通常保留逐样本结果，使用配对样本分析，并固定 prompt、解码参数、评判模型和随机种子。
 
+这个近似要求 n>0、0<=p<=1，并把样本近似视作独立同分布的伯努利观测；p=0 或 p=1 时标准误公式给出 0，却不代表没有不确定性，尤其当样本量很小或评测集经过筛选时。
+
 所以 benchmark 要和 validation loss、人工评测、回归测试一起看。
 
 ## 9. Regression eval
@@ -444,7 +454,7 @@ R_{\mathrm{reg}}=
 \frac{
 \sum_i \mathbf{1}[z_i^{old}=1]\mathbf{1}[z_i^{new}=0]
 }{
-\sum_i \mathbf{1}[z_i^{old}=1]+\epsilon
+\sum_i \mathbf{1}[z_i^{old}=1]
 }
 ```
 
@@ -455,7 +465,7 @@ R_{\mathrm{reg,w}}=
 \frac{
 \sum_i w_i\mathbf{1}[z_i^{old}=1]\mathbf{1}[z_i^{new}=0]
 }{
-\sum_i w_i\mathbf{1}[z_i^{old}=1]+\epsilon
+\sum_i w_i\mathbf{1}[z_i^{old}=1]
 }
 ```
 
@@ -469,6 +479,8 @@ R_{\mathrm{reg,w}}=
 6. 长上下文引用。
 
 回归率的分母也决定了它回答什么问题。上式回答的是“旧模型答对的样本中，有多少被新模型弄错”；它没有衡量新模型在旧模型答错样本上的新增正确，也没有区分评判器噪声。对开放式生成任务，应保存旧模型和新模型的原始输出、评分依据及评判器版本，必要时进行人工复核，否则一个 judge 的偶然变化可能被误报成模型回归。
+
+R_reg 的分母要求至少存在一个旧模型答对的样本；加权版本还要求这些样本的总正权重大于 0，且 w_i 非负。若旧模型没有任何正确样本，回归率应为 `not_applicable`，不能因分母加 epsilon 而显示为 0；同时应另报新模型的新增正确和总体表现。
 
 模型评估不能只看平均分提升。对实际系统而言，一次高风险场景的退化可能比多个低风险题目的小幅提升更重要，所以回归样本、业务规则和安全样本应当保留原始输出、评判依据和模型版本，而不是只保存一个汇总比例。
 
@@ -519,6 +531,8 @@ C_{\mathrm{repro}}=
 ```
 
 对于 loss、吞吐、benchmark 分数等指标，允许的偏差应分别定义，并说明数据顺序、硬件、随机性和评估脚本是否一致。这样，“可复现”才同时包含可取得的材料和重新运行后的证据，而不是一个没有定义的完整标记。
+
+该覆盖率要求 U_repro 非空，且 M_repro 是它的子集；空需求集合不应自动得到 100% 复现率。Delta_j 也只有在同一指标定义、同一单位和两个有限数值下才可比较，缺失 artifact 或不可比评估脚本应作为限制单列，而不是赋予零偏差。
 
 实验管理的核心也由此变得清楚：让别人能够取得同一组输入和 artifact，知道每次变化来自哪一个版本，并能判断复现实验与原实验的差异是否在合理范围内。
 
@@ -730,18 +744,109 @@ step_seconds = 8
 checkpoint_write_seconds = 60
 expected_step_tokens_b = 0.05
 
+
+def finite_number(name, value, *, positive=False, nonnegative=False):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a finite number")
+    value = float(value)
+    if not math.isfinite(value):
+        raise ValueError(f"{name} must be finite")
+    if positive and value <= 0.0:
+        raise ValueError(f"{name} must be positive")
+    if nonnegative and value < 0.0:
+        raise ValueError(f"{name} must be nonnegative")
+    return value
+
+
+def positive_int(name, value):
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
+    return value
+
+
+def probability(name, value):
+    value = finite_number(name, value)
+    if not 0.0 <= value <= 1.0:
+        raise ValueError(f"{name} must be in [0, 1]")
+    return value
+
+
+def validate_checkpoint(ckpt):
+    if not isinstance(ckpt, dict):
+        raise ValueError("checkpoint must be a mapping")
+    if not isinstance(ckpt.get("id"), str) or not ckpt["id"]:
+        raise ValueError("checkpoint id must be a nonempty string")
+    positive_int("step", ckpt.get("step"))
+    for name in ("tokens_b", "train_loss", "val_loss", "size_gib"):
+        finite_number(name, ckpt.get(name), nonnegative=True)
+    if not isinstance(ckpt.get("stable"), bool):
+        raise ValueError("stable must be a boolean")
+    failures = ckpt.get("regression_failures")
+    if isinstance(failures, bool) or not isinstance(failures, int) or failures < 0:
+        raise ValueError("regression_failures must be a nonnegative integer")
+    probability("safety", ckpt.get("safety"))
+    for name in ("domain_loss", "bench", "resume_fields"):
+        if not isinstance(ckpt.get(name), dict) or not ckpt[name]:
+            raise ValueError(f"{name} must be a nonempty mapping")
+    for domain, loss in ckpt["domain_loss"].items():
+        if not isinstance(domain, str) or not domain:
+            raise ValueError("domain names must be nonempty strings")
+        finite_number("domain loss", loss, nonnegative=True)
+    for name, score in ckpt["bench"].items():
+        if not isinstance(name, str) or not name:
+            raise ValueError("benchmark names must be nonempty strings")
+        probability("benchmark score", score)
+    for name in required_resume_fields:
+        if not isinstance(ckpt["resume_fields"].get(name), bool):
+            raise ValueError(f"resume field {name} must be a boolean")
+
+
+def validate_resume_probe(probe):
+    if not isinstance(probe, dict) or not isinstance(probe.get("checkpoint_id"), str):
+        raise ValueError("resume probe must identify a checkpoint")
+    for name in ("loss_before", "loss_after", "lr_before", "lr_after"):
+        finite_number(name, probe.get(name), positive=True)
+    for name in ("step_before", "step_after"):
+        positive_int(name, probe.get(name))
+    for name in ("tokens_before_b", "tokens_after_b"):
+        finite_number(name, probe.get(name), nonnegative=True)
+
+
+for checkpoint in checkpoints:
+    validate_checkpoint(checkpoint)
+if len({checkpoint["id"] for checkpoint in checkpoints}) != len(checkpoints):
+    raise ValueError("checkpoint ids must be unique")
+validate_resume_probe(resume_probe)
+positive_int("latest_k", latest_k)
+positive_int("save_interval_steps", save_interval_steps)
+finite_number("storage_budget_gib", storage_budget_gib, positive=True)
+finite_number("step_seconds", step_seconds, positive=True)
+finite_number("checkpoint_write_seconds", checkpoint_write_seconds, nonnegative=True)
+finite_number("expected_step_tokens_b", expected_step_tokens_b, positive=True)
+
+
 def missing_fields(ckpt):
     return [name for name in required_resume_fields if not ckpt["resume_fields"].get(name, False)]
 
+
 def perplexity(loss):
-    return round(math.exp(loss), 2)
+    loss = finite_number("loss", loss, nonnegative=True)
+    try:
+        return round(math.exp(loss), 2)
+    except OverflowError as exc:
+        raise ValueError("loss is too large for finite perplexity") from exc
+
 
 def domain_regressions(ckpt, threshold=0.05):
+    threshold = finite_number("threshold", threshold, nonnegative=True)
+    if set(ckpt["domain_loss"]) != set(base["domain_loss"]):
+        raise ValueError("domain keys must match the baseline")
     return [
         domain
         for domain, loss in ckpt["domain_loss"].items()
         if loss - base["domain_loss"][domain] > threshold
     ]
+
 
 def score_checkpoint(ckpt):
     bench_avg = mean(ckpt["bench"].values())
@@ -753,6 +858,8 @@ def score_checkpoint(ckpt):
     return round(score, 4)
 
 def changed_keys(a, b, ignore=("lr",)):
+    if not isinstance(a, dict) or not isinstance(b, dict):
+        raise ValueError("run configs must be mappings")
     return [key for key in a if key in b and a[key] != b[key] and key not in ignore]
 
 completeness = {ckpt["id"]: missing_fields(ckpt) for ckpt in checkpoints}
@@ -848,43 +955,43 @@ diagnostics= {'best_complete': True, 'best_stable': True, 'resume_continuous': T
 
 这个 demo 的关键是把“选哪个 checkpoint”拆成可解释的观察：先列出恢复字段缺失，再把不稳定版本排除在候选之外；随后比较 validation / PPL / domain / benchmark / safety / regression，最后查看实验记录、对照差异和保留存储。输出的每一项都对应正文中的一个问题，读者可以把 toy 数据替换成真实训练日志，而不必依赖一个隐藏的总判断。
 
-## 16. 面试官会怎么问
+## 16. 常见误判与检查路径
 
-这一节不是把前面的内容再压缩成背诵答案，而是展示如何把工程判断讲出因果关系。面试官真正想知道的，通常不是你能否背出字段名称，而是你能否说明“缺少这个字段会破坏什么证据”。
+前面的章节给出了字段、公式和协议，实际排障时还需要把它们串成检查路径。下面的场景来自训练系统中最容易被误解的几类现象：文件可以加载但轨迹不能接上，平均指标变好但关键领域退化，实验名称看似清楚但无法找到真实输入。每个场景都先说明现象，再给出应该验证的证据和不能直接推出的结论。
 
-### 问法 1：checkpoint 里应该保存什么？
+### 16.1 把“能加载”误当成“可恢复”
 
-回答时先区分用途。如果只做推理，model weights、model config 和 tokenizer 通常已经足够；如果要从中断处继续训练，还必须保存 optimizer state、scheduler state、必要的 mixed-precision scaler、global step、consumed tokens、random state、data state 和分布式分片信息。少了 optimizer 动量，参数虽然能加载，下一次更新却不再是原来的更新；少了 data state，训练可能重复或跳过样本；少了 tokenizer 版本，输入和标签的 token 边界也可能改变。
+推理加载成功只证明当前代码能够读取一组参数。训练恢复还要证明 optimizer 的动量、scheduler 的位置、精度状态、随机状态、数据 cursor 和分片元数据都被正确解释。少了 optimizer 动量，下一次更新就不是原轨迹上的更新；少了 data state，训练可能重复或跳过样本；少了 tokenizer 版本，输入和标签的 token 边界也可能改变。
 
-更完整的回答还会补一句：字段齐全只是文件层面的条件，恢复后仍要用 loss、学习率、step、token 增量和数据游标做短程连续性检查，并核对 shard、manifest 和版本。
+检查时先读 manifest，再检查文件哈希、参数形状、dtype、分片索引和版本引用，最后用 loss、学习率、step、token 增量和数据游标做短程恢复探针。字段齐全只是文件层面的条件；探针偏离时，应该根据偏差类型回到 scheduler、数据管道或 optimizer 状态，而不是把异常归咎于“随机性”。
 
-### 问法 2：怎么选择最好的 checkpoint？
+### 16.2 把最后一个 checkpoint 误当成最佳版本
 
-不能只选最后一步。我会先排除缺失关键状态或出现明显数值异常的版本，然后按相同的训练 token 数和相同评估口径比较 validation loss、per-domain loss、目标 benchmark、regression 和 safety。对部署候选，还要加入推理延迟、显存占用和成本；对开放式生成，则保留人工抽样和原始输出，避免总分掩盖关键退化。
+时间顺序只说明哪个版本保存得更晚，不说明它在目标任务上更合适。应先排除缺失关键状态、出现非有限值或违反硬约束的版本，再按相同训练 token 数和相同评估口径比较 validation loss、per-domain loss、目标 benchmark、regression 和 safety。部署候选还要加入推理延迟、显存占用和成本；开放式生成则必须保留原始输出，避免总分掩盖关键退化。
 
-如果多个目标互相冲突，我不会把一个未经归一化的总分当成客观真理，而会说明项目优先级，或者给出 Pareto 候选。这样“最好”才有明确的使用场景。
+多个目标互相冲突时，不能把未经归一化的总分当成客观真理。先应用安全、格式、稳定性和资源等硬约束，再在可用候选中说明权重，或者保留 Pareto 候选。这样“最好”才有明确的使用场景，选择过程也能在数据或目标变化后重新复盘。
 
-### 问法 3：为什么 train loss 降低不代表模型更好？
+### 16.3 把训练 loss 下降误当成能力全面提升
 
-train loss 降低只说明模型更好地拟合了当前训练目标。数据重复、训练集泄漏、过拟合，或者数据配比变得更容易，都可能让它下降，却不带来泛化能力、安全性或目标任务的提升。因此我会同时看干净的 validation、per-domain 分布、下游任务、回归样本和安全评测，并核对评估集是否被训练数据污染。
+train loss 降低只说明模型更好地拟合了当前训练目标。数据重复、训练集泄漏、过拟合或数据配比变得更容易，都可能让它下降，却不带来泛化能力、安全性或目标任务的提升。应该同时查看干净的 validation、per-domain 分布、下游任务、回归样本和安全评测，并核对评估集是否被训练数据污染。
 
-如果只报告一个总 loss，面试官无法判断模型究竟变好了，还是只在高频、低难度的数据上变好了。
+如果只报告一个总 loss，读者无法判断模型究竟变好了，还是只在高频、低难度的数据上变好了。有效 token 数、领域配比和逐样本结果是解释这条曲线的必要上下文。
 
-### 问法 4：如何保证实验可复现？
+### 16.4 把随机种子误当成完整复现方案
 
-我会把代码 commit 和未提交 diff、数据版本与过滤规则、tokenizer、模型和训练配置、依赖及硬件环境、随机种子、checkpoint manifest、评估脚本、prompt、解码参数和逐样本结果放进同一份实验记录。大规模分布式训练不一定能 bit-level 复现，所以还要先定义目标：是复现轨迹，还是复现最终结论，并为 loss 和评估分数分别设置合理容差。
+随机种子只能固定随机数生成器的一部分状态，不能固定数据对象、通信规约顺序、GPU kernel、依赖版本或 checkpoint 内容。完整记录应包含代码 commit 和未提交 diff、数据版本与过滤规则、tokenizer、模型和训练配置、依赖及硬件环境、随机状态、checkpoint manifest、评估脚本、prompt、解码参数和逐样本结果。
 
-另一个关键点是记录“拿不到什么”。如果数据对象过期、artifact 哈希无法解析或评估脚本没有版本，应该把它作为复现限制写在结论旁边，而不是用一个看起来完整的 run name 掩盖缺口。
+还要先定义复现目标：是字节级、轨迹级，还是结论级，并为 loss、吞吐和评估分数分别设置容差。如果数据对象过期、artifact 哈希无法解析或评估脚本没有版本，应把它作为复现限制写在结论旁边，而不是用一个看起来完整的 run name 掩盖缺口。
 
-### 问法 5：两个实验怎么公平比较？
+### 16.5 把“配置名相似”误当成公平对照
 
-先写清楚要验证的变量，例如只验证 learning rate，然后保持模型、数据版本、tokenizer、训练 token、有效 batch、精度、并行策略、seed、评估集和评估脚本尽量一致。之后对配置做差异清单；如果 data version 或训练 token 也变了，就应把它们作为混杂因素报告，不能继续把结果称为单变量学习率实验。
+先写清楚要验证的变量，例如只验证 learning rate，然后保持模型、数据版本、tokenizer、训练 token、有效 batch、精度、并行策略、seed、评估集和评估脚本尽量一致。随后对最终解析配置做差异清单；如果 data version 或训练 token 也变了，就应把它们作为混杂因素报告，不能继续把结果称为单变量学习率实验。
 
-最后不要只看一个平均分。逐 domain 结果、回归样本、安全指标和统计波动，往往能解释两个看似相近的总分为什么会导向不同的工程选择。
+最后不要只看一个平均分。逐 domain 结果、回归样本、安全指标、有效 token 分母和统计波动，往往能解释两个看似相近的总分为什么会导向不同的工程选择。比较结果应保留原始输出和评估脚本版本，以便区分模型变化与评估器变化。
 
-### 问法 6：恢复成功后为什么还要跑探针？
+### 16.6 把 `load_state_dict` 成功误当成恢复验证完成
 
-因为 `load_state_dict` 成功只验证了当前代码能读出张量，并没有验证 scheduler 的计数、optimizer 的内部状态、数据游标或 rank 间的 shard 是否处在正确位置。我会保存中断前后的 loss、学习率、step、consumed tokens 和数据 cursor，先运行一小段固定长度的恢复探针，再与未中断或参考轨迹比较。探针发现的是偏差，偏差的类型才是定位问题的入口。
+`load_state_dict` 成功只验证了当前代码能读出张量，并没有验证 scheduler 的计数、optimizer 的内部状态、数据游标或 rank 间的 shard 是否处在正确位置。恢复验证应保存中断前后的 loss、学习率、step、consumed tokens 和数据 cursor，先运行一小段固定长度的探针，再与未中断或参考轨迹比较。探针发现的是偏差，偏差的类型才是定位问题的入口；在探针完成前，不应把恢复后的训练日志与原轨迹直接拼接成一条连续曲线。
 
 ## 17. 本章小结
 
@@ -899,7 +1006,7 @@ train loss 降低只说明模型更好地拟合了当前训练目标。数据重
 7. Benchmark 要结合污染检测、回归测试和人工评测使用。
 8. 实验追踪要记录代码、数据、模型、训练配置、环境和结论。
 9. 可复现性要求结论可复现，不一定要求 bit-level 完全一致。
-10. 面试中要把 checkpoint、评估和实验管理讲成一个长期训练系统。
+10. checkpoint、评估和实验管理共同决定训练结论能否被解释、恢复和复核。
 
 真正成熟的训练记录，应该让一个没有参与原实验的人回答三个问题：这份参数从哪里来，为什么选择它，以及如果恢复或复现失败，缺少哪一段证据。checkpoint、评估和实验管理并不是三个互不相干的后台任务，而是同一个训练结论的三个观察面。
 

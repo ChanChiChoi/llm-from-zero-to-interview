@@ -132,6 +132,33 @@ kernel。不同 GPU、驱动、TensorRT-LLM 或 Model Optimizer 版本的支持�
 
 这张表的目的不是给三种格式排一个永久名次，而是提醒读者比较同一层次的对象。
 
+### 2.5 从支持矩阵读出真实边界
+
+支持矩阵是部署决策中很有价值、但也很容易被误读的一类资料。以 NVIDIA Model
+Optimizer 当前公开的 Linux 支持矩阵为例，FP4 被描述为 per-block 的 FP4 权重与
+激活，并标注为 Blackwell 及以后 GPU 的路径；TensorRT-LLM 的精度文档又把 NVFP4
+单独列在 Blackwell 小节中，并给出少数模型示例。这些信息可以证明“该软件版本
+公开声明存在一条支持路径”，不能证明任意模型、任意矩阵形状或任意 KV 配置都能
+走同一条原生 kernel。
+
+读矩阵时应把三种问题分开：
+
+1. **格式是否存在**：文档是否定义了 payload、scale、block 和累加语义。
+2. **软件是否接入**：当前 Model Optimizer、TensorRT-LLM 或 Transformers 版本是否
+   能导出、加载和构建目标 artifact。
+3. **硬件路径是否可用**：目标 GPU、驱动、engine、模型 shape 和 batch 是否命中
+   原生 kernel，还是在某些层回退到 FP8/BF16。
+
+例如，支持矩阵中的“FP4”与模型文件名中的“NVFP4”不能简单互换：前者可能是
+量化能力类别，后者还隐含厂商 profile、校准格式和 engine 约束。相反，一个模型
+仓库提供了 NVFP4 checkpoint，也不能单凭文件存在推导出当前服务的 KV、视觉编码器、
+MoE router 或输出头都使用 FP4。发布前应把矩阵中的声明转换成可执行的探针：加载
+artifact，打印实际 dtype 和 kernel，运行覆盖目标 shape 的 warm-up，再测量 fallback
+比例和任务切片。
+
+本节的结论有时间边界。官方矩阵会随驱动、runtime 和模型支持更新；书中记录的
+硬件范围应当带版本和访问日期，不能写成永远有效的兼容性承诺。
+
 ## 3. Block scale 如何改变有效精度
 
 ### 3.1 从一个共享 scale 开始
@@ -439,7 +466,7 @@ def quantize_blocks(values, block_size, codebook=TEACHING_CODEBOOK):
         scales.append(scale)
         for value in block:
             normalized = value / scale
-            code = min(codebook, key=lambda candidate: abs(candidate - normalized))
+            code = min(codebook, key=lambda code_value: abs(code_value - normalized))
             reconstructed.append(scale * code)
     return reconstructed, scales
 
@@ -609,10 +636,11 @@ layout、累加和吞吐。软件模拟应明确标注“教学/离线近似”�
 1. NVIDIA TensorRT-LLM precision/quantization 文档和 TensorRT Model Optimizer
    仓库用于确认 NVIDIA 软件栈公开的精度、校准和量化入口；不能直接证明目标模型
    在任意 GPU 上都走同一 kernel。
-2. Hugging Face FP4/fine-grained FP4 文档用于确认 Transformers 生态中的配置和
-   加载接口；接口存在不等于所有 serving engine 都支持。
-3. OCP microscaling 规范用于理解 MX 类格式的标准化背景；具体 runtime profile
-   仍需核对 block、scale 和布局。
+2. Hugging Face Transformers 量化总览和量化选择文档用于确认 Transformers 生态中
+   的配置与加载边界；页面是否列出某格式不等于所有 serving engine 都支持。
+3. OCP microscaling 规范用于理解 MX 类格式的标准化背景；本轮访问该 PDF 时受到
+   站点验证限制，因此正文不把无法直接核验的 block 细节写成厂商 profile 的事实，
+   具体 runtime 仍需核对 block、scale 和布局。
 4. GPTQ、AWQ、SmoothQuant 和 FP8 论文用于理解 PTQ、activation outlier、权重重构
    和低精度训练/推理的研究谱系；论文 benchmark 不能替代生产回放。
 5. 本章的 Python 示例使用教学 codebook，不实现 MXFP4 或 NVFP4 的真实硬件路径，
@@ -622,14 +650,16 @@ layout、累加和吞吐。软件模拟应明确标注“教学/离线近似”�
 
 1. [TensorRT-LLM Precision](https://nvidia.github.io/TensorRT-LLM/reference/precision.html)：NVIDIA TensorRT-LLM 当前精度类型入口。
 2. [TensorRT-LLM Quantization](https://nvidia.github.io/TensorRT-LLM/features/quantization.html)：量化、校准和 engine 相关官方资料。
-3. [Hugging Face FP4 Quantization](https://huggingface.co/docs/transformers/en/quantization/fp4)：Transformers FP4 配置和使用边界。
-4. [Hugging Face Fine-Grained FP4](https://huggingface.co/docs/transformers/en/quantization/finegrained_fp4)：细粒度 FP4 和 scale 组织入口。
-5. [TensorRT Model Optimizer](https://github.com/NVIDIA/TensorRT-Model-Optimizer)：NVIDIA 官方模型优化工具仓库；版本和硬件支持需随 release 核对。
-6. [OCP Microscaling Formats](https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf)：MX 类 microscaling 格式的规范入口；访问策略和版本以 OCP 当前页面为准。
-7. [GPTQ](https://arxiv.org/abs/2210.17323)：基于近似二阶信息的后训练权重量化研究。
-8. [AWQ](https://arxiv.org/abs/2306.00978)：activation-aware weight quantization 研究入口。
-9. [SmoothQuant](https://arxiv.org/abs/2211.10438)：通过平滑激活异常值进行 W8A8 量化的研究入口。
-10. [FP8-LM](https://arxiv.org/abs/2310.18313)：低精度浮点训练和推理的研究背景；不等同于 FP4 部署证明。
+3. [Hugging Face Transformers Quantization Overview](https://huggingface.co/docs/transformers/en/quantization/overview)：Transformers 量化配置与后端边界。
+4. [Hugging Face Selecting a Quantization Method](https://huggingface.co/docs/transformers/en/quantization/selecting)：按模型、硬件和任务选择量化方法的入口。
+5. [NVIDIA Model Optimizer Support Matrix](https://nvidia.github.io/Model-Optimizer/guides/0_support_matrix.html)：当前公开格式、模型格式、部署后端和 GPU 范围；矩阵需随版本复核。
+6. [NVIDIA Model Optimizer Quantization Guide](https://nvidia.github.io/Model-Optimizer/guides/1_quantization.html)：PTQ/QAT 和导出流程入口。
+7. [TensorRT Model Optimizer](https://github.com/NVIDIA/TensorRT-Model-Optimizer)：NVIDIA 官方模型优化工具仓库；版本和硬件支持需随 release 核对。
+8. [OCP Microscaling Formats](https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf)：MX 类 microscaling 格式的规范入口；访问策略和版本以 OCP 当前页面为准。
+9. [GPTQ](https://arxiv.org/abs/2210.17323)：基于近似二阶信息的后训练权重量化研究。
+10. [AWQ](https://arxiv.org/abs/2306.00978)：activation-aware weight quantization 研究入口。
+11. [SmoothQuant](https://arxiv.org/abs/2211.10438)：通过平滑激活异常值进行 W8A8 量化的研究入口。
+12. [FP8-LM](https://arxiv.org/abs/2310.18313)：低精度浮点训练和推理的研究背景；不等同于 FP4 部署证明。
 
 ## 14. 本章小结
 

@@ -1,656 +1,529 @@
-# 第九章：RAG 落地坑
+# 第九章：RAG 落地坑：把检索结果变成可审计证据
 
-RAG 是大模型项目里最常见的落地形态之一，也是最容易被低估复杂度的系统。很多团队一开始以为 RAG 就是“向量数据库 + LLM”，上线后才发现答案错、引用假、权限漏、文档过期、检索召回不稳定、评估无法解释。RAG 的难点不在于 demo 能不能跑通，而在于能否稳定地把真实用户问题映射到正确、最新、可访问、可引用的证据上。
+RAG 经常被介绍成“向量数据库加一个大模型”，但生产系统真正承担的是一条证据责任链：把用户问题映射到正确、最新、可访问、可引用的资料，再让模型在证据范围内回答，最后让用户能够核查答案的来源。
 
-本章关注 RAG 落地中的真实坑：文档解析、chunk、embedding、混合检索、rerank、上下文构造、答案生成、引用归因、权限控制、索引更新、评估体系和线上事故排查。
+链路中的任何一环出错，最终都可能表现成一句“模型幻觉”。原文档可能没有入库，PDF 表格可能解析错，chunk 可能切断条件，embedding 可能漏掉错误码，reranker 可能把旧版本排在前面，权限过滤可能晚于生成，引用可能只和主题相关却不支持具体声明。若只修 prompt，就会把不同根因混成一个问题。
 
-## 0. 本讲范围与资料
+本章用一次企业知识库事故贯穿全文：客服问的是最新退货政策，系统召回了旧版本；管理员的多跳问题缺少一个关键证据；错误码查询被通用登录说明抢走；普通员工看到了薪酬文档。读者会沿着文档解析、chunk、embedding、混合检索、rerank、上下文构造、生成、claim 归因、引用、权限、freshness、多跳查询、拒答和评估逐段排查。
 
-本章参考 Retrieval-Augmented Generation 原论文、OpenAI File Search / vector store 资料、RAGAS 评估论文与实现口径、LlamaIndex RAG 评估文档，以及前序第六册部署、第七册评估、第十八册 RAG 产品落地相关内容。这里聚焦防御性的企业 RAG 落地排查和面试表达，不展开特定向量数据库配置、私有知识库真实数据治理制度、生产级检索平台架构或可复用的攻击提示词。
+## 9.0 先看一场“回答很流畅”的事故
 
-本章重点有三类：
+某企业把内部文档接入了 RAG。上线初期，答案很像产品宣传页：语气自然，引用链接齐全，用户感觉比直接问基础模型可靠。
 
-1. 把 retrieval recall、MRR、context recall / precision、citation accuracy、unsupported claim rate、permission leak rate、stale evidence rate、abstention accuracy 和 RAG 上线条件写成稳定公式。
-2. 用一个 0 依赖 Python demo 复盘 RAG 事故：正确文档被 context 丢掉、错误码检索失败、越权证据进入上下文、旧版本文档被引用、多跳问题超预算、线上反馈为负。
-3. 把本章和第四册百科、题库、练习、项目与知识图谱同步，确保 RAG 不再只被描述成“向量检索 + 生成”，而是可审计的证据系统。
+一周后，客服发现三个问题。第一，系统把已经废止的退货政策作为最新政策引用；第二，普通员工询问薪酬计划时，答案泄露了只有高管可见的文档片段；第三，用户输入错误码 `E1427` 时，系统返回了泛化的“登录失败排查”而没有解释错误码。
 
-## 9.1 核心观点
-
-RAG 的失败大多不是单纯生成失败，而是检索、上下文构造、权限、引用和评估失败。
-
-一个可靠 RAG 系统应该回答：
-
-1. 正确文档是否入库。
-2. 正确段落是否能被召回。
-3. reranker 是否把正确证据排到前面。
-4. 上下文是否包含足够且不冲突的证据。
-5. 模型是否真正使用证据回答。
-6. 引用是否支持答案中的每个关键声明。
-7. 用户是否有权限看到这些证据。
-8. 文档更新、删除和权限变化后索引是否同步。
-9. 评估是否能定位错误发生在哪一环。
-
-面试回答：
+团队最初只调大 top-k 和上下文长度，结果把更多旧文档、无关文档和越权文档塞进了 prompt，成本上升，问题反而更难定位。真正的修复需要把一次 RAG 请求拆成证据状态：
 
 ```text
-我不会把 RAG 简化成向量库加 LLM。一个生产级 RAG 要拆成文档解析、chunk、embedding、召回、rerank、上下文构造、生成、引用、权限和评估。答案错时要做 error attribution，判断是文档没入库、chunk 不合理、retriever 没召回、reranker 排错、context 拼接问题、模型没用证据、引用不支持答案，还是权限和 freshness 问题。
+原文档是否存在 -> 是否正确解析 -> 是否形成正确 chunk
+-> 是否被召回 -> 是否被重排 -> 是否进入最终 context
+-> 用户是否有权限 -> 证据是否最新 -> claim 是否被支持
+-> 是否应该回答、拒答或转人工
 ```
 
-## 9.2 常见问题
+对初学者来说，RAG 像一个带索引和引用的资料助理：先找资料，再根据资料回答。对专家来说，RAG 是一个带数据平面、权限平面、版本平面和生成平面的证据系统；“检索到了”只是中间事件，不是用户可采纳答案。
 
-RAG 落地中常见问题包括：
+## 9.1 RAG 的对象边界和任务合同
 
-1. 检索召回不到正确文档。
-2. 检索到了正确文档，但模型不用证据。
-3. chunk 太短丢上下文，太长浪费 token 并引入噪声。
-4. embedding 模型和业务语义不匹配。
-5. reranker 把语义相近但不回答问题的文档排到前面。
-6. 文档权限控制缺失，导致越权泄露。
-7. 引用看似可信，但实际不支持答案。
-8. 知识更新后索引不同步，模型引用旧文档。
-9. 表格、PDF、图片、代码块解析错误。
-10. 用户问题需要多跳证据，但系统只取单段上下文。
-11. 检索结果包含冲突证据，模型没有处理冲突。
-12. 只评估最终答案，不评估检索、引用和权限。
+RAG 至少包含两个记忆来源：模型参数中的参数记忆，以及外部文档、数据库或检索索引中的非参数记忆。外部资料可以提供更新能力和 provenance，但不自动保证正确性、权限和可用性。
 
-RAG 系统链路长，每一环都可能失败。真实项目中，排查顺序比单点优化更重要。
-
-## 9.3 先画清楚 RAG 链路
-
-典型 RAG 包含离线链路和在线链路。
-
-离线链路：
-
-1. 文档采集。
-2. 文档解析。
-3. 清洗和结构化。
-4. chunk 切分。
-5. metadata 提取。
-6. embedding 计算。
-7. 索引构建。
-8. 权限、版本和更新时间写入。
-
-在线链路：
-
-1. 用户 query 接入。
-2. query rewrite 或 intent routing。
-3. 权限过滤。
-4. sparse retrieval、dense retrieval 或 hybrid retrieval。
-5. reranker 精排。
-6. context construction。
-7. LLM 基于证据生成。
-8. citation 和 attribution。
-9. 日志、评估、反馈和回归样本沉淀。
-
-排查 RAG 时，不要直接问“模型为什么答错”。更好的问题是：
+在设计系统前，先写清楚任务合同：
 
 ```text
-正确证据是否存在？是否入库？是否被召回？是否被排到前面？是否进入 prompt？是否被模型使用？引用是否真的支持答案？用户是否有权限看到？
+问题类型：事实查询、流程查询、比较、多跳、总结还是开放分析
+证据要求：必须引用、允许概括，还是只返回可验证字段
+时效要求：实时、按生效日期、按文档版本还是历史回溯
+权限要求：租户、组织、角色、文档、段落和字段级边界
+不足处理：资料不足时拒答、追问、转人工还是返回候选资料
+成功定义：答案正确、引用支持、用户采纳和任务完成分别如何判断
 ```
 
-这条问题链能把模糊的“RAG 不准”拆成可定位、可修复的问题。
+如果产品没有定义“资料不足时应该怎样做”，模型就会倾向于继续生成一段完整文字。很多幻觉不是模型突然变坏，而是系统从未给它一个合法的“不知道”状态。
 
-## 9.4 文档没入库或解析错
+### 9.1.1 RAG 有四个不同的质量层
 
-RAG 的第一类事故是正确知识根本没有进入可检索系统。
+第一层是**资料层**：原文档、版本、解析文本、表格结构和 ACL 是否正确。
 
-常见现象：
+第二层是**检索层**：正确证据是否被召回、排序和过滤。
 
-1. 用户问的问题在原始文档里有答案，但检索永远找不到。
-2. PDF 表格内容被解析成乱码或错位文本。
-3. 标题、章节层级、列表、脚注丢失。
-4. 图片中的 OCR 信息没有进入索引。
-5. 代码块、配置项、公式被清洗掉。
-6. 文档版本混乱，新旧内容同时存在。
+第三层是**生成层**：模型是否使用证据、是否完成任务、是否在证据不足时克制。
 
-可能原因：
+第四层是**产品层**：引用能否打开、信息是否最新、用户是否有权访问、延迟和成本是否可接受。
 
-1. 文档采集范围不完整。
-2. parser 对 PDF、HTML、Word、表格、扫描件支持差。
-3. 清洗规则过度删除。
-4. metadata 丢失，导致后续过滤错误。
-5. 入库任务失败但没有告警。
-6. 文档更新后增量索引没有执行。
+四层不能互相替代。检索 Recall@10 很高，不等于 final context 有正确证据；context 有正确证据，不等于 claim 被引用支持；答案碰巧正确，也不等于用户有权看到证据。
 
-排查顺序：
+## 9.2 用证据账本记录每次请求
 
-1. 在原始文档中确认答案是否存在。
-2. 检查解析后的文本是否保留该答案。
-3. 检查 chunk 中是否包含该答案。
-4. 检查 embedding 和索引是否成功生成。
-5. 检查 metadata、权限、版本、时间字段是否正确。
-6. 检查入库任务日志和失败重试。
+把第 `i` 个 RAG 请求抽象为：
 
-经验法则：先确认知识是否真的进入系统，再讨论 embedding 和大模型。
+$$
+q_i=(x_i,u_i,e_i,r_i,z_i,a_i,c_i,p_i,f_i,o_i)
+$$
 
-## 9.5 Chunk 策略坑
+其中：
 
-chunk 是 RAG 中最容易被低估的工程决策。
+- `x_i` 是用户问题和会话上下文；
+- `u_i` 是用户、租户、角色和权限版本；
+- `e_i` 是人工标注或程序验证得到的标准证据集合；
+- `r_i` 是初始召回结果；
+- `z_i` 是进入最终 context 的证据；
+- `a_i` 是模型答案或完整生成 trace；
+- `c_i` 是答案中的原子声明及其引用映射；
+- `p_i` 是权限检查、过滤和拒绝记录；
+- `f_i` 是文档版本、更新时间和索引同步状态；
+- `o_i` 是延迟、成本、用户反馈和任务结果。
 
-chunk 太小：
+这张账本的目的不是保存更多日志，而是让“证据在哪里丢了”可以被回答。没有 `r_i`，无法区分召回失败和生成失败；没有 `z_i`，无法知道 reranker 或预算截断是否丢掉了证据；没有 `u_i`，无法复核权限；没有 `f_i`，无法判断旧文档是否应被淘汰。
 
-1. 语义不完整。
-2. 丢失标题和上文条件。
-3. 表格、列表、步骤被切断。
-4. 模型拿到片段但不知道适用范围。
-
-chunk 太大：
-
-1. 检索粒度粗。
-2. 噪声多。
-3. prompt 成本高。
-4. reranker 难以判断相关性。
-5. 多个无关主题混在一起。
-
-常见事故：
+### 9.2.1 最少要保留的版本字段
 
 ```text
-用户问“企业版 SSO 配置步骤”，系统召回了整篇管理员手册。手册里确实有答案，但 chunk 太大，里面同时包含计费、权限、API key、审计日志等内容。模型读到上下文后生成了混合答案，引用也不精确。
+dataset/document_id、document_version、effective_at、expires_at
+parser_version、chunker_version、embedding_model/version
+sparse_index、dense_index、reranker_version、filter_policy_version
+query_rewrite_version、prompt_template、model_id、decoding
+retrieved_ids、reranked_ids、context_ids、raw_output、claims
+permission_snapshot、cache_key_version、latency、cost、feedback
 ```
 
-改进方式：
+如果只存最终答案和一个“引用链接”，后续不能判断问题来自文档、索引、过滤、上下文、模型还是引用映射。证据账本应与第七章的评估记录、第八章的推理 trace 关联起来。
 
-1. 按标题和语义结构切分，而不是只按固定 token 数切分。
-2. 保留标题路径，例如 `产品文档 > 管理员设置 > SSO`。
-3. 对表格、代码块、步骤列表使用特殊切分策略。
-4. 适当 overlap，但不要让重复 chunk 占满 top-k。
-5. 在 metadata 中保存文档、章节、版本和更新时间。
-6. 用真实 query 做 chunk ablation，而不是凭感觉调大小。
+## 9.3 文档采集和解析：正确知识可能一开始就消失
 
-面试表达：
+RAG 的第一类失败发生在模型之前。用户问题的答案可能存在于原始 PDF、网页、表格、图片或代码仓库中，但解析器没有把它转换成可检索对象。
+
+### 9.3.1 不同文档类型有不同的损坏方式
+
+PDF 可能丢失阅读顺序、页眉页脚和表格列关系；扫描件依赖 OCR，数字和符号容易错；HTML 可能把导航、广告和正文混在一起；Word 文档的标题层级和批注可能丢失；表格转成纯文本后，行列条件可能无法恢复；代码和配置被清洗时，缩进、版本号和参数名可能消失。
+
+因此“解析成功”不能只看文件没有报错。需要抽样比较原文和结构化结果：
 
 ```text
-chunk 的目标不是越短越好，也不是越长越好，而是让每个 chunk 语义完整、可检索、可引用、成本可控。我会按文档结构切分，保留标题路径和 metadata，并通过 retrieval recall、rerank 后 context precision 和最终答案质量做 ablation。
+标题路径是否保留
+表格行列和单位是否保留
+脚注、条件、例外和生效日期是否保留
+图片 OCR、公式、代码块和错误码是否保留
+文档 ID、版本、来源、ACL 和时间字段是否保留
 ```
 
-## 9.6 Embedding 模型不匹配
+### 9.3.2 文档入库的验证顺序
 
-embedding 决定第一阶段召回能力。如果 embedding 模型和业务语义不匹配，后续 rerank 和 LLM 很难补救。
+遇到“检索不到答案”，先按以下顺序验证：
 
-常见现象：
+1. 原始来源中是否确实有答案；
+2. 采集任务是否拿到了正确版本；
+3. 解析文本是否包含答案及其上下文；
+4. chunk 是否保留了答案、标题和条件；
+5. embedding、倒排索引和 metadata 是否生成；
+6. 索引是否已发布到在线版本；
+7. 权限过滤是否把它排除了；
+8. cache 是否仍返回旧的检索结果。
 
-1. 用户用业务黑话提问，检索不到正式文档。
-2. 中文 query 检索英文文档效果差。
-3. 代码、配置、错误日志检索效果差。
-4. 数字、版本号、产品名、缩写被忽略。
-5. 语义相似但答案不相关的文档排前面。
+只有确认知识进入在线索引后，才值得调 embedding 或 reranker。把一个没有入库的文档交给更强的模型，不能解决问题。
 
-可能原因：
+### 9.3.3 失败的入库任务必须可见
 
-1. 通用 embedding 没覆盖领域术语。
-2. query 和文档语言不一致。
-3. 业务问题需要关键词匹配，但只用了向量检索。
-4. embedding 对数字、符号、代码敏感性不够。
-5. 文档 chunk 中缺少标题和上下文。
+增量索引常见的危险状态是“部分成功”：一批文档中 99% 成功，1% 失败，但任务被标记为完成。产品看板若只显示任务状态，就会把缺失知识解释成模型能力不足。
 
-排查方法：
+每个文档应有明确状态：`discovered`、`parsed`、`chunked`、`embedded`、`published`、`failed`、`deleted`。状态转换应带版本和时间；失败要有重试、告警和人工查看入口。删除请求也必须传播到 chunk、dense index、sparse index、缓存和评估快照，而不是只删除原文件。
 
-1. 构造 query-positive-doc 标注集。
-2. 看 Recall@K、MRR、nDCG。
-3. 分业务术语、代码、中文、英文、数字版本号评估。
-4. 对比不同 embedding 模型。
-5. 加 BM25 做 hybrid retrieval。
-6. 必要时用领域数据微调 embedding 或训练 reranker。
+## 9.4 Chunk 不是切固定长度就结束
 
-不要只凭“向量相似度看起来合理”判断检索质量。RAG 检索评估必须有标注 query 和正负文档。
+chunk 同时决定召回粒度、上下文噪声、引用精度和 token 成本。它不是一个单纯的 tokenizer 参数。
 
-## 9.7 只用向量检索的坑
+### 9.4.1 小 chunk 和大 chunk 的代价
 
-很多 RAG demo 只用 dense vector retrieval，但生产系统通常需要 hybrid retrieval。
+小 chunk 的问题是语义不完整：标题、适用条件、例外条款可能在相邻块，模型只看到一个孤立步骤。大 chunk 的问题是相关性变粗：正确答案和计费、权限、历史版本等无关内容混在一起，reranker 难以判断，context 成本也上升。
 
-向量检索擅长：
+例如用户问“企业版 SSO 的配置步骤”，整篇管理员手册虽然包含答案，却同时包含 API key、计费、审计和账户删除。模型可能把不同章节的条件拼成一套不存在的流程，引用也只能指向整篇手册。
 
-1. 语义相近表达。
-2. 同义词和改写。
-3. 问答式自然语言 query。
-
-关键词检索擅长：
-
-1. 产品名。
-2. API 名称。
-3. 错误码。
-4. 版本号。
-5. 配置项。
-6. 人名、地名、缩写。
-
-典型事故：
+### 9.4.2 结构化 chunk 的基本字段
 
 ```text
-用户搜索错误码 E1427。向量检索认为“登录失败排查”语义相关，排在前面；真正包含 E1427 的故障说明文档没有被召回。最后模型给出通用登录建议，但没有解决问题。
+chunk_id、document_id、document_version
+title_path、section、page/paragraph/table/line span
+text、content_type、language、effective_at、expires_at
+tenant、ACL、parent/neighbor chunk、source_uri
 ```
 
-改进方式：
+标题路径比一段孤立文本更能告诉模型“这句话适用于谁”。页码、行号、表格坐标和代码行范围让引用可以落到具体证据，而不是只给一个文档首页。
 
-1. dense retrieval + BM25 混合召回。
-2. 对错误码、API、产品名做精确匹配 boost。
-3. 对 query 做实体识别和关键词抽取。
-4. 合并多路召回后去重。
-5. 用 reranker 做统一排序。
-6. 分 query 类型选择检索策略。
+### 9.4.3 特殊结构要特殊切分
 
-真实企业知识库里，纯向量检索通常不够稳。
+步骤列表应尽量保留顺序和前置条件；表格应保存列名、单位和行上下文；代码块应保持语言、缩进和版本；FAQ 可以把问题和答案作为一个语义单元；法律和政策条款需要把定义、例外、生效时间与主体绑定。
 
-## 9.8 Reranker 排错
+overlap 可以保留边界语义，但 overlap 太大时会让 top-k 被同一段重复内容占满。应通过真实 query 的证据召回、上下文精确率、引用粒度和 token 成本做 chunk ablation，而不是凭感觉选择 256 或 512 token。
 
-reranker 常用于从 top-50 或 top-100 召回结果中选出最适合放入 prompt 的 top-k。
+## 9.5 Embedding、关键词和混合检索
 
-常见现象：
+embedding 召回擅长同义表达和语义改写，但企业问题常包含产品名、错误码、版本号、API、缩写和数字，这些内容不一定适合只用向量相似度判断。
 
-1. retriever 已召回正确文档，但 reranker 没排到前面。
-2. reranker 偏好包含相似关键词但不回答问题的 chunk。
-3. 长 chunk 因为包含更多 query 词被误判相关。
-4. reranker 延迟高，拖慢 TTFT。
-5. reranker 训练数据和业务 query 分布不一致。
-
-排查方式：
-
-1. 单独评估 retrieval recall。
-2. 单独评估 reranker top-k accuracy、MRR、nDCG。
-3. 对比 rerank 前后正确证据的位置变化。
-4. 抽样看 reranker 排错的 hard negative。
-5. 按 query 类型分桶，例如事实问答、错误码、流程类、多跳类。
-6. 评估 reranker 延迟和收益是否值得。
-
-面试回答：
+### 9.5.1 业务语义不匹配的信号
 
 ```text
-如果 RAG 答错，我会先确认正确 chunk 是否在 retriever top-k 里。如果在，但没有进入最终 context，问题可能在 reranker 或 context selection。如果不在，问题在文档入库、chunk、embedding 或召回策略。这样可以避免把所有问题都归因给 LLM。
+业务黑话 query 找不到正式术语文档
+中文问题召回英文或机器翻译内容不稳定
+错误码和版本号被泛化成“相似主题”
+代码、配置键和 API 名称召回不准
+同义但不回答问题的说明排在真正规范之前
 ```
 
-## 9.9 Context Construction 坑
+排查要建立 query-positive-negative 数据集，按事实、流程、错误码、代码、多语言、数字和版本切片计算结果。只观察向量距离不能证明检索正确，因为相似度是模型空间中的距离，不是业务相关性。
 
-检索和 rerank 之后，还要把证据拼成 prompt。很多 RAG 失败发生在 context construction。
+### 9.5.2 Dense、sparse 和 hybrid 的职责
 
-常见问题：
+Dense retrieval 通常对自然语言改写、同义词和语义近似有帮助；BM25 或其他 sparse 方法对精确词、数字、产品名、错误码和配置项更稳。混合检索不是“两个结果简单拼接”，还要解决分数不可比、重复、权限过滤和合并排序。
 
-1. top-k 直接拼接，重复 chunk 太多。
-2. 证据顺序不合理，关键证据被放在中间或最后。
-3. chunk 缺少标题、来源、时间和权限信息。
-4. 多个版本文档混在一起。
-5. 冲突证据没有显式标注。
-6. 上下文超过 token budget，被截断掉关键证据。
-7. prompt 指令没有要求基于证据回答和资料不足时拒答。
+一个常见路线是：多路召回扩大候选集，按文档和 chunk 去重，再使用 reranker 统一排序。不同 query 类型也可以路由到不同的召回组合，而不是对所有问题使用同一套 top-k。
 
-改进方式：
+### 9.5.3 Recall@K 的定义域
 
-1. 按文档和主题去重。
-2. 保留标题路径、来源 URL、版本和更新时间。
-3. 对同一主题的多个 chunk 做合并或压缩。
-4. 把高置信证据放在更显眼位置。
-5. 明确标注冲突证据和新旧版本。
-6. 控制 context precision，不要塞入太多弱相关内容。
-7. 对资料不足问题要求模型拒答或请求更多信息。
+对第 `i` 个可评估问题，标准证据集合 `E_i` 非空，初始 top-k 集合为 `R_i^K`：
 
-RAG 的上下文不是检索结果的简单拼接，而是面向生成模型的证据组织。
+$$
+Recall@K_i=\frac{\lvert R_i^K\cap E_i\rvert}{\lvert E_i\rvert}
+$$
 
-## 9.10 检索到了但模型不用证据
+如果人工没有标注标准证据，结果是 `unknown`；如果该问题不需要外部证据，指标是 `not_applicable`；`E_i` 为空不能被当成 Recall 1。评估集应区分“无需检索的闲聊”和“必须找到规范的知识问题”。
 
-这是 RAG 中很常见的现象：正确证据已经进入 prompt，但模型仍然根据参数记忆或常识回答。
+## 9.6 Reranker：把候选变成可用证据
 
-常见原因：
+初始召回的目标通常是不要漏掉正确证据，reranker 的目标是把真正回答问题的内容排到有限上下文预算之内。两者不能用同一个指标替代。
 
-1. prompt 没明确要求基于证据回答。
-2. 证据太长或噪声太多，关键句不突出。
-3. 模型已有参数知识和证据冲突。
-4. 解码温度太高。
-5. 问题需要多步推理，模型没有整合证据。
-6. 证据格式不适合模型读取，例如表格被解析乱。
+### 9.6.1 先判断错误发生在哪一层
 
-排查方法：
-
-1. 把正确证据单独放入 prompt，看模型是否能答对。
-2. 缩短上下文，只保留关键证据。
-3. 要求模型逐条引用证据。
-4. 对回答拆 atomic claims，检查每个 claim 是否有依据。
-5. 比较不同 prompt 和解码参数。
-6. 如果证据本身难读，回到解析和结构化环节。
-
-常用 prompt 约束：
+对每个 bad case 保存三个列表：
 
 ```text
-请只根据给定资料回答。若资料不足以支持答案，请明确说“资料不足”。每个关键结论后必须标注引用编号。不要使用资料之外的常识补全。
+retriever_top_k
+reranker_order
+final_context
 ```
 
-但 prompt 不是万能的。如果上下文质量差，只靠提示词无法稳定解决幻觉。
+如果正确证据不在第一列表，优先检查解析、chunk、embedding、sparse/hybrid 和过滤；如果在第一列表却不在第二列表，检查 reranker 和 hard negative；如果在第二列表却不在最终 context，检查预算、去重、版本、权限和 context selection。
 
-## 9.11 引用看似可信但不支持答案
+这样做的价值是避免用更大的模型掩盖检索问题，也避免把 reranker 延迟误归因给 LLM。
 
-RAG 输出引用很容易让用户产生信任感，但引用本身也可能是错的。
+### 9.6.2 Reranker 的常见捷径
 
-常见引用错误：
+长 chunk 因为包含更多 query 词而得到更高分；主题相关但结论不适用的文档排在前面；旧版本与新版本都很相似，reranker 没有理解生效日期；标题匹配很好但正文没有答案；安全或权限字段没有进入排序特征。
 
-1. 引用文档相关，但不支持具体结论。
-2. 引用只支持部分结论，模型扩展出了无依据内容。
-3. 引用旧版本文档。
-4. 引用权限不该展示的文档。
-5. 引用位置错了，链接到整篇文档而不是具体段落。
+要构造 hard negative：它们应在表面上相似，但在版本、主体、地区、产品套餐或条件上不适用。只用随机负例训练和评估，会让排序器显得很好，却无法处理真实混淆项。
+
+### 9.6.3 排序指标也有边界
+
+若第一个标准证据在排名 `rank_i`，则单样本 reciprocal rank 为 `1/rank_i`；没有标准证据时记为 0，但只有当该样本确实应该有证据时才成立。平均倒数排名：
+
+$$
+MRR=\frac{1}{N}\sum_{i=1}^{N}\frac{1}{rank_i},\qquad N>0
+$$
+
+如果 `N=0` 或样本标签缺失，MRR 没有定义。MRR 关注第一个正确证据，不能替代多证据覆盖、权限和版本正确性。
+
+## 9.7 Context construction：把候选组织成证据
+
+最终 prompt 不是把 top-k 文本用换行符拼起来。它要解决重复、顺序、版本冲突、权限、预算、来源和引用映射。
+
+### 9.7.1 一个 context 单元至少告诉模型五件事
+
+```text
+它来自哪个文档、哪个版本和哪个位置
+它适用于哪个产品、角色、地区或时间
+它的 ACL 和过滤状态是什么
+它与问题的关系是什么，是否是直接证据
+答案中应如何引用它
+```
+
+把标题路径、来源、更新时间和 chunk ID放进结构化字段，通常比单纯加一段“请认真回答”更有帮助。模型需要看到证据的边界，而不是只有一串没有出处的文字。
+
+### 9.7.2 预算是证据选择问题
+
+上下文预算不足时，不能随机截断。应按任务和证据优先级选择：直接支持关键 claim 的 chunk、高置信且最新的版本、必要的定义和例外、完成多跳所需的互补证据。重复 chunk、低置信候选和过时版本应该被压缩或排除。
+
+设标准证据集合为 `E_i`，进入 context 的集合为 `Z_i`。在 `E_i` 非空时，证据覆盖率为：
+
+$$
+ContextRecall_i=\frac{\lvert Z_i\cap E_i\rvert}{\lvert E_i\rvert}
+$$
+
+如果标准证据存在但 `Z_i` 为空，覆盖率应记为 0；如果样本本来不需要外部证据，则是 `not_applicable`。上下文精确率要求 `Z_i` 非空：
+
+$$
+ContextPrecision_i=\frac{\lvert Z_i\cap E_i\rvert}{\lvert Z_i\rvert}
+$$
+
+`Z_i` 为空时，这个数学比例没有定义，但“答案需要证据而没有选入任何证据”仍可作为单独失败事件记录，不能用非零分母伪造精确率。
+
+### 9.7.3 冲突证据必须显式建模
+
+新旧政策、不同地区、不同套餐或不同角色的文档可能同时召回。模型如果没有看到版本和适用条件，可能把两条规则拼成一条不存在的规则。
+
+context 构造应保留冲突关系：
+
+```text
+冲突文档 ID、版本、生效时间和适用范围
+冲突字段或相互矛盾的 claim
+选择当前版本的规则和无法判断时的处理
+```
+
+当冲突无法由系统确定时，正确行为可能是说明冲突并请求人工，而不是强行选一条答案。
+
+## 9.8 证据进入 prompt 以后，模型仍然可能不用它
+
+检索正确并不等于生成正确。模型可能使用参数记忆、忽略上下文中的条件、把表格读错，或把多个证据组合成未经支持的结论。
+
+排查可以做最小对照：
+
+```text
+无 context，只给问题
+只给标准证据，不给噪声
+给完整 final context
+交换证据顺序、版本和答案选项
+要求逐 claim 引用，再检查引用支持关系
+```
+
+如果只给标准证据就能答对，加入噪声后答错，问题更可能在 context precision、排序或冲突组织；如果标准证据单独给出仍答错，可能是解析、格式、模型能力或任务定义问题。
+
+Prompt 可以明确要求“只依据给定资料，资料不足时说明不足”，但 prompt 不能替代证据质量、权限和版本控制。把无法支持的答案改成拒答，需要评估器和产品状态共同配合。
+
+## 9.9 Claim-level grounding：答案不是一个原子标签
+
+“答案正确”太粗。一个答案可能有五个声明，其中四个有证据，一个是模型补全；如果只给答案级正确标签，就无法定位这一个未支持声明。
+
+把答案拆成原子 claim：
+
+```text
+claim_id、文本、类型、重要性和风险
+支持证据 ID、引用 span、是否完整支持
+是否包含条件、数字、时间、主体和例外
+若没有支持，是否应拒答或降级为不确定表述
+```
+
+设有 `M>0` 个已完成标注的 claim，`s_m=1` 表示引用证据确实支持第 `m` 个声明，则 citation/grounding 准确率为：
+
+$$
+A_{cite}=\frac{\sum_{m=1}^{M}s_m}{M}
+$$
+
+当没有 claim、claim 标注未完成或引用关系无法复核时，指标分别是 `not_applicable` 或 `unknown`。unsupported claim rate 只有在同一批 claim 的支持标签完整时才能写成 `1-A_cite`。
+
+### 9.9.1 引用存在不等于引用支持
+
+常见的伪引用包括：
+
+1. 引用文档主题相关，但段落没有该结论；
+2. 引用只支持声明的前半句，后半句是模型扩展；
+3. 引用旧版本，当前规则已经改变；
+4. 引用链接对用户不可访问；
+5. 多个 claim 共用一个宽泛链接，无法定位证据；
 6. 引用编号和正文 claim 对不上。
 
-治理方法：
+高风险场景应把引用定位到段落、表格单元、代码行或政策条款，而不是只返回整篇文档首页。引用校验可以使用规则、字符串/数值比对、NLI 或 LLM judge，但关键结果应有人审或程序验证。
 
-1. 把答案拆成 atomic claims。
-2. 检查每个 claim 是否有至少一个证据支持。
-3. 评估 citation accuracy 和 unsupported claim rate。
-4. 引用尽量指向段落、表格或章节，而不是整篇文档。
-5. 对资料不足场景训练模型拒答。
-6. 对高风险场景加人工审核或更严格的 grounding 检查。
+## 9.10 权限必须在检索前生效
 
-面试表达：
+企业 RAG 最严重的错误不是答得不够好，而是把用户不该知道的资料送进了模型或返回给了用户。
 
-```text
-RAG 有引用不等于答案可信。我会做 claim-level attribution，把回答拆成原子声明，再检查每个声明是否被引用证据支持。指标上不仅看 answer correctness，还要看 citation accuracy、groundedness 和 unsupported claim rate。
-```
+### 9.10.1 权限过滤的正确位置
 
-## 9.12 权限控制坑
-
-企业 RAG 最严重的事故之一是权限泄露。
-
-常见现象：
-
-1. 普通员工问到了管理层文档内容。
-2. 离职员工仍能检索旧权限文档。
-3. 跨租户检索返回了其他客户资料。
-4. response cache 把高权限用户答案复用给低权限用户。
-5. LLM 引用中暴露了用户没有权限打开的链接。
-
-权限过滤应该尽量前置。
-
-常见层级：
-
-1. 文档入库时写入 ACL metadata。
-2. 检索前根据用户身份过滤可见文档集合。
-3. rerank 和 context construction 只处理有权限文档。
-4. 引用链接返回前再次校验权限。
-5. cache key 包含用户、租户、权限版本等信息。
-6. 权限变更时触发索引和缓存失效。
-
-危险做法：
+一个基本的安全顺序是：
 
 ```text
-先全库检索和生成答案，最后再过滤引用。
+解析用户身份和租户 -> 读取权限快照和版本
+-> 过滤可检索文档/chunk -> dense/sparse retrieval
+-> rerank 和 context construction
+-> 生成、引用返回和缓存复核
 ```
 
-这种做法可能已经把无权限信息泄露到模型上下文和输出中。权限控制必须在检索和上下文构造前就生效。
+“先全库检索和生成，最后过滤引用”是不够的。无权限文档已经进入模型上下文，模型可能在没有显式引用的情况下泄露其中内容；日志、缓存和 trace 也可能保存敏感信息。
 
-## 9.13 文档更新和索引同步
+### 9.10.2 权限数据和缓存数据要一致
 
-RAG 系统里的知识不是静态的。
+权限至少需要考虑租户、组织、角色、用户组、文档 ACL、段落 ACL、字段级脱敏和权限版本。缓存 key 要包含影响可见性的字段；权限变更应使相关索引和缓存失效。
 
-常见事故：
+如果 context 集合为 `Z_i`，其中用户 `u_i` 无权访问的证据数为 `L_i`，在总 context 证据数大于零时，权限泄露率为：
 
-1. 用户问最新政策，系统回答旧政策。
-2. 文档删除后仍然能被检索。
-3. 权限变更后旧权限仍生效。
-4. 文档更新了，但 embedding 还是旧内容。
-5. 同一文档多个版本同时出现，模型混合回答。
+$$
+R_{perm}=\frac{\sum_iL_i}{\sum_i\lvert Z_i\rvert}
+$$
 
-需要设计：
+没有 context 时比率 `0/0` 是 `not_applicable`；权限审计未执行时是 `unknown`；存在一条越权证据时，即使最终答案没有引用它，也应记录为安全事件。
 
-1. 文档版本号。
-2. 更新时间。
-3. 索引构建状态。
-4. 删除和失效标记。
-5. 增量索引任务。
-6. 失败重试和告警。
-7. 缓存失效策略。
-8. 新旧版本冲突处理。
+## 9.11 Freshness：文档更新是在线行为
 
-排查时要问：
+RAG 的外部记忆只有在更新链路可靠时才有价值。文档版本、索引版本和缓存版本必须能关联起来。
 
-1. 原文档什么时候更新。
-2. parser 什么时候重新解析。
-3. chunk 和 embedding 什么时候更新。
-4. vector index 什么时候可见。
-5. cache 是否仍命中旧结果。
-6. 用户权限版本是否同步。
+### 9.11.1 更新传播链
 
-RAG 的 freshness 是产品能力，不是后勤细节。
-
-## 9.14 多跳和综合问题
-
-很多企业问题不是单段文档能回答的。
-
-例如：
+一次文档更新至少经过：
 
 ```text
-如果我从专业版升级到企业版，并开启 SSO，账单周期和管理员权限会怎么变化？
+源文档更新 -> 采集发现 -> 解析 -> chunk -> embedding/倒排
+-> 索引发布 -> cache 失效 -> 在线可见 -> 评估和监控更新
 ```
 
-这个问题可能需要：
+任何一步失败，都可能产生旧知识。更新延迟可以按 `online_visible_at - source_updated_at` 记录，并按文档重要性、租户和索引分片观察。
 
-1. 版本升级文档。
-2. 计费文档。
-3. SSO 配置文档。
-4. 管理员权限文档。
+### 9.11.2 旧证据率的定义域
 
-常见失败：
+若最终 context 中有 `S` 个证据被判定为过期，所有已知 freshness 的 context 证据数为 `Z_known`，且 `|Z_known|>0`：
 
-1. 只召回其中一类证据。
-2. 模型只回答最显眼的部分。
-3. 多个证据之间存在条件依赖，模型没处理。
-4. prompt token budget 不够，部分证据被截断。
-5. 引用只覆盖局部结论。
+$$
+R_{stale}=\frac{S}{\lvert Z_{known}\rvert}
+$$
 
-改进方式：
+如果文档时间字段缺失，不能把它当作新鲜；状态应为 `unknown`。旧证据率为零也不能证明系统正确，可能只是没有配置过期规则或没有覆盖更新场景。
 
-1. query decomposition，把复杂问题拆成子问题。
-2. 多路检索，分别找不同子问题证据。
-3. context 中按子问题组织证据。
-4. 让模型先列出依据，再综合回答。
-5. 对多跳任务单独评估。
+### 9.11.3 新旧版本冲突要有选择规则
 
-多跳 RAG 比单跳 FAQ 难很多，不能用简单 QA 测试集代表真实能力。
+可以按生效时间、文档状态、适用地区和产品版本选择当前证据；如果多个文档仍然冲突，系统应把冲突传给模型或人工流程。最危险的做法是让向量相似度决定政策版本，因为旧文档可能和 query 更相似。
 
-## 9.15 RAG 评估不能只看答案
+## 9.12 多跳、查询改写和 Agentic RAG
 
-RAG 评估至少要分三层。
+很多企业问题需要组合多个文档，例如“升级企业版并开启 SSO 后，账单什么时候变化、谁能配置、退货政策按哪个版本执行”。单次 top-k 检索很可能只覆盖其中一部分。
 
-第一层：检索评估。
+### 9.12.1 多跳查询的状态
 
-1. Recall@K。
-2. Precision@K。
-3. MRR。
-4. nDCG。
-5. 正确证据是否进入 final context。
-
-第二层：生成评估。
-
-1. answer correctness。
-2. faithfulness。
-3. groundedness。
-4. citation accuracy。
-5. unsupported claim rate。
-6. abstention accuracy。
-
-第三层：系统评估。
-
-1. TTFT。
-2. TPOT。
-3. 成本。
-4. 索引更新延迟。
-5. 权限泄露率。
-6. cache 命中率。
-7. 用户满意度。
-
-只看最终回答准确率，会掩盖检索和引用的问题。一个答案可能碰巧对，但引用是错的；也可能检索对了，但模型没有使用证据。
-
-## 9.16 RAG Error Attribution 表
-
-建议为每个 bad case 标注错误归因。
+多跳流程需要保存：
 
 ```text
-问题：用户原始 query
-正确答案：人工标注答案
-正确证据：文档 ID、chunk ID、段落位置
-入库状态：原文是否存在、解析是否正确、chunk 是否存在
-召回状态：retriever top-k 是否包含正确证据
-重排状态：reranker 是否把正确证据排入 final context
-上下文状态：final prompt 是否包含正确证据、是否有冲突证据
-生成状态：模型是否使用证据、是否有 unsupported claim
-引用状态：引用是否支持答案、是否指向正确位置
-权限状态：用户是否有权访问引用证据
-freshness：文档是否最新、索引是否同步
-根因：解析 / chunk / embedding / retrieval / rerank / context / generation / citation / permission / freshness
-修复：对应修复动作
+原始问题、子问题、每跳查询、候选证据、已确认 claim
+未解决的实体、版本和条件、停止原因、总 token/延迟/成本
 ```
 
-有了这张表，团队才能知道下一步该改数据、检索、reranker、prompt、权限系统还是评估集。
+如果系统在每一跳都无限扩大搜索，成本和 prompt 会失控；如果过早停止，最终答案会缺一块。停止条件可以是所有必需 claim 都有支持、预算耗尽、证据冲突、权限不足或需要人工确认。
 
-## 9.17 典型事故：正确文档被召回但答案仍然错
+### 9.12.2 查询改写可能产生 query drift
 
-现象：
+改写器把用户问题变成更“标准”的问题，可能提升召回，也可能丢掉产品名、否定词、时间条件、权限范围和数字。原始 query 必须保留，改写结果要和原始意图做对照评估。
+
+### 9.12.3 Agentic RAG 的额外风险
+
+主动检索、工具调用和多轮搜索增加了动作和状态。除了证据指标，还要评估工具选择、查询预算、重复检索、权限传递、外部数据写入和失败恢复。Agentic RAG 不是自动更准确，而是把检索策略从固定 pipeline 变成了一个需要治理的控制循环。
+
+## 9.13 资料不足时，拒答是一个可评估结果
+
+RAG 系统不应把每个 query 都映射成一段肯定回答。没有证据、证据冲突、权限不足、文档过期或问题超出范围时，拒答、追问或转人工可能是正确行为。
+
+### 9.13.1 两类样本要分开
+
+设 `A` 是应该回答的样本，`U` 是证据不足、无权限或应该受限处理的样本。对 `U`，正确拒答率为：
+
+$$
+R_{correct\_abstain}=\frac{N_{U,abstain}}{\lvert U\rvert},\qquad \lvert U\rvert>0
+$$
+
+对 `A`，误拒率为：
+
+$$
+R_{false\_abstain}=\frac{N_{A,abstain}}{\lvert A\rvert},\qquad \lvert A\rvert>0
+$$
+
+没有 `U` 或 `A` 时对应指标是 `not_applicable`，标签不确定时是 `unknown`。只报“拒答率”无法判断系统是更安全还是更无用。
+
+### 9.13.2 高质量拒答要说明下一步
+
+拒答不应泄露被保护文档的存在，也不应输出大段空泛免责声明。可以说明资料不足、请求用户补充版本或权限、提供公开帮助路径、转人工或返回可访问的替代资料。拒答本身也需要延迟、成本、用户采纳和误拒回归。
+
+## 9.14 RAG 评估必须分层
+
+### 9.14.1 检索层
+
+关注正确证据是否进入候选，以及是否在有限 top-k 内排在前面：Recall@K、MRR、nDCG、实体/版本/错误码切片、权限过滤后的召回和多跳覆盖。
+
+### 9.14.2 上下文层
+
+关注最终 prompt 是否包含足够证据、噪声比例、重复、冲突、预算和引用映射。Context Recall 和 Context Precision 只在标准证据与集合定义清楚时有意义；它们不是最终答案质量。
+
+### 9.14.3 生成层
+
+关注答案正确性、完整性、claim 支持、引用位置、拒答、事实一致性和条件保留。开放式质量可以用人工或校准后的 judge 辅助，但关键数字和协议优先使用程序验证。
+
+### 9.14.4 系统层
+
+关注权限泄露、旧证据、索引更新延迟、TTFT、成本、缓存、失败恢复和线上反馈。RAG 的离线回答分数上升，如果权限事件或旧版本率上升，产品结论仍然可能是负面的。
+
+## 9.15 Error Attribution：把 bad case 归因到第一处分歧
+
+一个 bad case 可以有多个表面症状，但修复通常要找第一处分歧。例如正确文档没入库，就不应先修改生成 prompt；权限过滤发生在生成后，就不应只修引用链接。
+
+建议把每个案例记录为：
 
 ```text
-排查发现正确文档在 retriever top-5 里，但最终答案仍然错误。
+问题和用户权限
+标准答案、标准证据和适用版本
+解析文本、chunk、retriever top-k、reranker 排序
+最终 context、预算截断和冲突关系
+模型答案、原子 claim、引用和支持判断
+权限、freshness、延迟、成本、反馈和风险
+第一处分歧、根因、修复、回归样本和负责人
 ```
 
-可能原因：
+根因可以分为 `ingestion`、`parsing`、`chunking`、`embedding`、`retrieval`、`rerank`、`context`、`generation`、`citation`、`permission`、`freshness`、`abstention` 和 `product`。一个案例可以有多个标签，但报告要区分主因和伴随问题。
 
-1. 正确 chunk 被 reranker 排到后面，没有进入 final context。
-2. final context 中有冲突旧文档，模型选错。
-3. chunk 太大，关键句被噪声淹没。
-4. prompt 没要求基于证据回答。
-5. 模型使用参数知识覆盖了检索证据。
-6. 引用正确但 answer claim 扩展过度。
+## 9.16 最小可运行的 RAG 事故审计
 
-排查：
+下面的代码只使用标准库，构造六个案例：旧版本进入 context、一个正常的多证据问题、错误码召回失败、越权薪酬文档、超预算多跳问题，以及正确拒答的无资料问题。
 
-1. 看 retriever top-k。
-2. 看 reranker 后排序。
-3. 看 final prompt 实际内容。
-4. 把正确证据单独喂给模型。
-5. 对答案做 claim-level attribution。
-6. 检查文档版本和冲突证据。
-
-修复方向：
-
-1. 调整 reranker。
-2. 改 context selection。
-3. 压缩或突出关键证据。
-4. 强化 grounding prompt。
-5. 增加引用和拒答评估。
-
-## 9.18 RAG 事故复盘模板
-
-```text
-现象：RAG 答案错误、引用错误、权限泄露、文档过期或召回失败
-影响：影响哪些用户、文档集合、业务线和时间窗口
-样本：问题、模型答案、正确答案、引用、正确证据
-链路：解析、chunk、embedding、retrieval、rerank、context、generation、citation、permission、freshness
-排查：正确证据是否入库、召回、重排、进入 prompt、被使用、被正确引用
-根因：文档处理、检索、排序、prompt、权限、索引同步或评估缺失
-修复：补索引、改 chunk、调召回、训练 reranker、改 prompt、加权限过滤、更新评估集
-预防：RAG bad case 回归集、权限测试、freshness 监控、citation 检查和上线条件
-```
-
-复盘时不要只写“模型幻觉”。如果答案没有被证据支持，要说明是证据没到、证据没用、证据冲突，还是引用校验缺失。
-
-### 9.18.1 关键公式与 RAG 事故指标速查
-
-**1. RAG 样本抽象**
-
-把第 `i` 个 RAG 样本写成：
-
-```math
-q_i=(x_i,U_i,E_i,R_i,Z_i,A_i,C_i,F_i)
-```
-
-其中 `x_i` 是用户问题，`U_i` 是用户身份和权限，`E_i` 是标准证据集合，`R_i` 是第一阶段召回结果，`Z_i` 是 rerank 后进入最终上下文的证据，`A_i` 是生成答案，`C_i` 是答案中的 claim / citation 对齐表，`F_i` 是 freshness、latency、cost、线上反馈等系统字段。
-
-这个抽象能把“RAG 答错”拆成四类证据问题：证据不存在、证据没召回、证据没进上下文、证据进了但没被正确使用。
-
-**2. Retrieval Recall@K**
-
-```math
-\mathrm{Recall@K}_i=\frac{|R_i^{K}\cap E_i|}{|E_i|}
-```
-
-其中 `R_i^K` 是 retriever top-k 候选集合，`E_i` 是人工标注的标准证据集合。这个指标回答：正确证据有没有被第一阶段召回。
-
-**3. MRR**
-
-```math
-\mathrm{MRR}=\frac{1}{N}\sum_{i=1}^{N}\frac{1}{\mathrm{rank}_i}
-```
-
-其中 `rank_i` 是第一个正确证据在召回列表中的排名；如果没有正确证据，记为 0。MRR 比 Recall@K 更关注正确证据是否靠前。
-
-**4. Context Recall 与 Context Precision**
-
-```math
-\mathrm{CR}_i=\frac{|Z_i\cap E_i|}{|E_i|}
-```
-
-```math
-\mathrm{CP}_i=\frac{|Z_i\cap E_i|}{|Z_i|}
-```
-
-`CR_i` 回答“标准证据是否进入最终 prompt”，`CP_i` 回答“最终 prompt 里有多少是真相关证据”。RAG 不只要召回多，还要避免把大量噪声塞进上下文。
-
-**5. Citation Accuracy**
-
-```math
-A_{\mathrm{cite}}=\frac{1}{M}\sum_{m=1}^{M}\mathbf{1}[c_m\Rightarrow z_m]
-```
-
-其中 `c_m` 是答案里的第 `m` 个 claim，`z_m` 是它引用的证据。这个指标要求引用真正支持 claim，而不是只和主题相关。
-
-**6. Unsupported Claim Rate**
-
-```math
-R_{\mathrm{unsup}}=1-A_{\mathrm{cite}}
-```
-
-如果 unsupported claim rate 高，说明模型仍在用参数记忆或语言补全生成证据外内容。有引用不等于 grounded。
-
-**7. Permission Leak Rate**
-
-```math
-R_{\mathrm{perm}}=\frac{\sum_i |\{z\in Z_i:z\notin \mathcal{A}(U_i)\}|}{\sum_i |Z_i|}
-```
-
-其中 `\mathcal{A}(U_i)` 是用户 `U_i` 可访问的证据集合。权限过滤必须发生在 retrieval / rerank / context construction 之前，不能生成后再过滤引用。
-
-**8. Stale Evidence Rate**
-
-```math
-R_{\mathrm{stale}}=\frac{\sum_i |\{z\in Z_i:\mathrm{stale}(z)=1\}|}{\sum_i |Z_i|}
-```
-
-企业知识会更新。旧版本文档进入上下文时，模型可能给出非常自信但已经失效的答案。
-
-**9. Abstention Accuracy**
-
-```math
-A_{\mathrm{abs}}=\frac{1}{N_{\mathrm{abs}}}\sum_i \mathbf{1}[\hat a_i=\mathrm{abstain}]
-```
-
-这个指标只在资料不足、权限不足、证据冲突或文档过期样本上计算。RAG 产品不是所有问题都要回答，正确拒答是能力的一部分。
-
-**10. RAG 事故验收条件**
-
-```math
-G_{\mathrm{rag}}=\mathbf{1}\left[
-\bar R_{\mathrm{ret}}\ge\tau_{\mathrm{ret}}
-\land \bar C_{\mathrm{rec}}\ge\tau_{\mathrm{crec}}
-\land \bar C_{\mathrm{prec}}\ge\tau_{\mathrm{cprec}}
-\land A_{\mathrm{cite}}\ge\tau_{\mathrm{cite}}
-\land R_{\mathrm{perm}}=0
-\land R_{\mathrm{stale}}\le\tau_{\mathrm{stale}}
-\land A_{\mathrm{abs}}\ge\tau_{\mathrm{abs}}
-\land P95(L)\le\tau_{\mathrm{lat}}
-\land \bar F_{\mathrm{online}}>0
-\right]
-```
-
-这组条件把检索、上下文、引用、权限、freshness、拒答、延迟和线上反馈放到同一张表里。只要其中一项失败，就不能只凭一个“答案看起来不错”的样例上线。
-
-### 9.18.2 最小可运行 RAG 事故审计 demo
-
-下面的 demo 不依赖外部库。它故意构造 5 个 RAG bad case：旧版本退货政策被引用、SSO + 计费多证据样本正常、错误码检索失败、普通员工越权看到薪酬文档、多跳升级问题缺少当前退货政策且上下文超预算。
+### 9.16.1 数据结构和定义域工具
 
 ```python
-from math import ceil
+from dataclasses import dataclass
+from math import ceil, isfinite
+from typing import Iterable, Optional
+
+
+@dataclass(frozen=True)
+class Metric:
+    value: Optional[float]
+    status: str
+    reason: str = ""
+
+
+def finite_number(value, name):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a finite number")
+    value = float(value)
+    if not isfinite(value):
+        raise ValueError(f"{name} must be finite")
+    return value
+
+
+def safe_mean(values: Iterable[float], *, empty_status="not_applicable"):
+    values = list(values)
+    if not values:
+        return Metric(None, empty_status, "empty sample set")
+    checked = [finite_number(value, "mean.value") for value in values]
+    return Metric(sum(checked) / len(checked), "valid")
+
+
+def safe_ratio(numerator, denominator, *, name="ratio", empty_status="not_applicable"):
+    numerator = finite_number(numerator, f"{name}.numerator")
+    denominator = finite_number(denominator, f"{name}.denominator")
+    if numerator < 0 or denominator < 0:
+        raise ValueError(f"{name} cannot be negative")
+    if denominator == 0:
+        if numerator == 0:
+            return Metric(None, empty_status, f"{name} has no denominator")
+        raise ValueError(f"{name} has positive numerator and zero denominator")
+    return Metric(numerator / denominator, "valid")
+
+
+def percentile(values, percentage):
+    values = [finite_number(value, "percentile.value") for value in values]
+    percentage = finite_number(percentage, "percentile.percentage")
+    if not values:
+        return Metric(None, "not_applicable", "empty sample set")
+    if not 0 <= percentage <= 100:
+        raise ValueError("percentage must be between 0 and 100")
+    ordered = sorted(values)
+    position = (len(ordered) - 1) * percentage / 100
+    lower = int(position)
+    upper = min(lower + 1, len(ordered) - 1)
+    fraction = position - lower
+    value = ordered[lower] + (ordered[upper] - ordered[lower]) * fraction
+    return Metric(value, "valid")
+
 
 docs = {
     "return_v1": {"acl": {"employee", "admin"}, "tokens": 120, "stale": True},
@@ -662,301 +535,371 @@ docs = {
     "login_generic": {"acl": {"employee", "admin"}, "tokens": 100, "stale": False},
 }
 
+
 cases = [
     {
-        "id": "return_policy_current",
-        "role": "employee",
+        "id": "return_policy_current", "role": "employee",
         "expected": ["return_v2"],
         "retrieved": ["return_v1", "return_v2", "login_generic"],
         "reranked": ["return_v1", "return_v2", "login_generic"],
-        "context": ["return_v1", "login_generic"],
-        "budget": 320,
-        "claims": [
-            {"claim": "Return window is 14 days", "citation": "return_v1", "support": "return_v2"},
-        ],
-        "should_abstain": False,
-        "latency_ms": 980,
-        "cost": 0.018,
-        "online_delta": -0.20,
+        "context": ["return_v1", "login_generic"], "budget": 320,
+        "claims": [{"citation": "return_v1", "support": "return_v2"}],
+        "answerable": True, "model_abstains": False,
+        "latency_ms": 980, "cost": 0.018, "online_delta": -0.20,
     },
     {
-        "id": "sso_billing_admin",
-        "role": "admin",
+        "id": "sso_billing_admin", "role": "admin",
         "expected": ["sso_admin", "billing_enterprise"],
         "retrieved": ["sso_admin", "login_generic", "billing_enterprise"],
         "reranked": ["sso_admin", "billing_enterprise", "login_generic"],
-        "context": ["sso_admin", "billing_enterprise"],
-        "budget": 420,
+        "context": ["sso_admin", "billing_enterprise"], "budget": 420,
         "claims": [
-            {"claim": "SSO requires enterprise admin", "citation": "sso_admin", "support": "sso_admin"},
-            {"claim": "Billing changes at next cycle", "citation": "billing_enterprise", "support": "billing_enterprise"},
+            {"citation": "sso_admin", "support": "sso_admin"},
+            {"citation": "billing_enterprise", "support": "billing_enterprise"},
         ],
-        "should_abstain": False,
-        "latency_ms": 1180,
-        "cost": 0.023,
-        "online_delta": 0.08,
+        "answerable": True, "model_abstains": False,
+        "latency_ms": 1180, "cost": 0.023, "online_delta": 0.08,
     },
     {
-        "id": "error_code_e1427",
-        "role": "employee",
+        "id": "error_code_e1427", "role": "employee",
         "expected": ["error_e1427"],
         "retrieved": ["login_generic", "return_v1"],
         "reranked": ["login_generic", "return_v1"],
-        "context": ["login_generic"],
-        "budget": 250,
-        "claims": [
-            {"claim": "E1427 means generic login failure", "citation": "login_generic", "support": "error_e1427"},
-        ],
-        "should_abstain": False,
-        "latency_ms": 920,
-        "cost": 0.015,
-        "online_delta": -0.15,
+        "context": ["login_generic"], "budget": 250,
+        "claims": [{"citation": "login_generic", "support": "error_e1427"}],
+        "answerable": True, "model_abstains": False,
+        "latency_ms": 920, "cost": 0.015, "online_delta": -0.15,
     },
     {
-        "id": "private_comp_plan",
-        "role": "employee",
-        "expected": [],
-        "retrieved": ["comp_private", "login_generic"],
-        "reranked": ["comp_private", "login_generic"],
-        "context": ["comp_private"],
-        "budget": 220,
-        "claims": [
-            {"claim": "Compensation plan is visible", "citation": "comp_private", "support": "comp_private"},
-        ],
-        "should_abstain": True,
-        "latency_ms": 1200,
-        "cost": 0.019,
-        "online_delta": -0.45,
+        "id": "private_comp_plan", "role": "employee", "expected": [],
+        "retrieved": ["comp_private"], "reranked": ["comp_private"],
+        "context": ["comp_private"], "budget": 220,
+        "claims": [{"citation": "comp_private", "support": "comp_private"}],
+        "answerable": False, "model_abstains": False,
+        "latency_ms": 1200, "cost": 0.019, "online_delta": -0.45,
     },
     {
-        "id": "upgrade_multi_hop",
-        "role": "admin",
+        "id": "upgrade_multi_hop", "role": "admin",
         "expected": ["sso_admin", "billing_enterprise", "return_v2"],
         "retrieved": ["sso_admin", "billing_enterprise", "return_v1"],
         "reranked": ["sso_admin", "billing_enterprise", "return_v1"],
-        "context": ["sso_admin", "billing_enterprise", "return_v1"],
-        "budget": 400,
+        "context": ["sso_admin", "billing_enterprise", "return_v1"], "budget": 400,
         "claims": [
-            {"claim": "SSO setup needs admin", "citation": "sso_admin", "support": "sso_admin"},
-            {"claim": "Billing changes next cycle", "citation": "billing_enterprise", "support": "billing_enterprise"},
-            {"claim": "Return policy remains old", "citation": "return_v1", "support": "return_v2"},
+            {"citation": "sso_admin", "support": "sso_admin"},
+            {"citation": "billing_enterprise", "support": "billing_enterprise"},
+            {"citation": "return_v1", "support": "return_v2"},
         ],
-        "should_abstain": False,
-        "latency_ms": 1850,
-        "cost": 0.041,
-        "online_delta": -0.10,
+        "answerable": True, "model_abstains": False,
+        "latency_ms": 1850, "cost": 0.041, "online_delta": -0.10,
+    },
+    {
+        "id": "no_policy_found", "role": "employee", "expected": [],
+        "retrieved": [], "reranked": [], "context": [], "budget": 220,
+        "claims": [], "answerable": False, "model_abstains": True,
+        "latency_ms": 460, "cost": 0.009, "online_delta": 0.02,
     },
 ]
 
 
-def mean(values):
-    return sum(values) / max(1, len(values))
-
-
-def percentile(values, pct):
-    ordered = sorted(values)
-    idx = max(0, min(len(ordered) - 1, ceil(len(ordered) * pct / 100) - 1))
-    return ordered[idx]
-
-
-def recall(items, expected):
-    if not expected:
-        return 1.0
-    return len(set(items) & set(expected)) / len(expected)
-
-
-def first_relevant_rank(items, expected):
-    for idx, item in enumerate(items, start=1):
-        if item in expected:
-            return idx
-    return None
-
-
-retrieval_recalls = []
-context_recalls = []
-context_precisions = []
-rr_scores = []
-permission_leaks = []
-stale_context = []
-budget_overflows = []
-claim_results = []
-abstention_results = []
-root_causes = {}
-
-for case in cases:
-    expected = case["expected"]
-    if expected:
-        retrieval_recalls.append(recall(case["retrieved"], expected))
-        context_recalls.append(recall(case["context"], expected))
-        rank = first_relevant_rank(case["retrieved"], expected)
-        rr_scores.append(0.0 if rank is None else 1 / rank)
-
-    relevant_context = [doc for doc in case["context"] if doc in expected]
-    context_precisions.append(len(relevant_context) / max(1, len(case["context"])))
-
-    context_tokens = sum(docs[doc]["tokens"] for doc in case["context"])
-    if context_tokens > case["budget"]:
-        budget_overflows.append(case["id"])
-
-    for doc in case["context"]:
-        if case["role"] not in docs[doc]["acl"]:
-            permission_leaks.append((case["id"], doc))
-        if docs[doc]["stale"]:
-            stale_context.append((case["id"], doc))
-
-    if case["should_abstain"]:
-        abstention_results.append(len(case["claims"]) == 0)
-
+def validate_case(case):
+    required = ("id", "role", "expected", "retrieved", "reranked", "context",
+                "budget", "claims", "answerable", "model_abstains", "latency_ms",
+                "cost", "online_delta")
+    if any(key not in case for key in required):
+        raise ValueError("case is missing a required field")
+    if not case["id"] or not case["role"] or not isinstance(case["id"], str):
+        raise ValueError("case id and role must be non-empty strings")
+    if type(case["answerable"]) is not bool or type(case["model_abstains"]) is not bool:
+        raise ValueError("answerable and model_abstains must be real bools")
+    if case["answerable"] != bool(case["expected"]):
+        raise ValueError("answerable must agree with the expected evidence set")
+    if not isinstance(case["budget"], int) or isinstance(case["budget"], bool) or case["budget"] <= 0:
+        raise ValueError("budget must be a positive integer")
+    finite_number(case["latency_ms"], "latency_ms")
+    finite_number(case["cost"], "cost")
+    finite_number(case["online_delta"], "online_delta")
+    for key in ("expected", "retrieved", "reranked", "context"):
+        if len(set(case[key])) != len(case[key]):
+            raise ValueError(f"{key} contains duplicate document ids")
+        for doc_id in case[key]:
+            if doc_id not in docs:
+                raise ValueError(f"unknown document id: {doc_id}")
     for claim in case["claims"]:
-        ok = claim["citation"] == claim["support"] and not docs[claim["citation"]]["stale"]
-        claim_results.append(ok)
+        if claim["citation"] not in docs or claim["support"] not in docs:
+            raise ValueError("claim references an unknown document")
 
-    if expected and recall(case["retrieved"], expected) < 1:
-        root_causes[case["id"]] = "retrieval_miss"
-    elif expected and recall(case["context"], expected) < 1:
-        root_causes[case["id"]] = "rerank_or_context_drop"
-    elif any((case["id"], doc) in stale_context for doc in case["context"]):
-        root_causes[case["id"]] = "stale_evidence"
-    elif any((case["id"], doc) in permission_leaks for doc in case["context"]):
-        root_causes[case["id"]] = "permission_leak"
-    elif not all(claim_results[-len(case["claims"]):]):
-        root_causes[case["id"]] = "citation_or_grounding"
-    else:
-        root_causes[case["id"]] = "pass"
 
-citation_accuracy = mean([1 if ok else 0 for ok in claim_results])
-unsupported_claim_rate = 1 - citation_accuracy
-permission_leak_rate = len(permission_leaks) / sum(len(case["context"]) for case in cases)
-stale_evidence_rate = len(stale_context) / sum(len(case["context"]) for case in cases)
-abstention_accuracy = mean([1 if ok else 0 for ok in abstention_results])
-budget_overflow_rate = len(budget_overflows) / len(cases)
-avg_online_delta = mean([case["online_delta"] for case in cases])
-p95_latency = percentile([case["latency_ms"] for case in cases], 95)
-avg_cost = mean([case["cost"] for case in cases])
+if len({case["id"] for case in cases}) != len(cases):
+    raise ValueError("case ids must be unique")
+for case in cases:
+    validate_case(case)
+```
+
+这里显式检查 `answerable` 与标准证据集合是否一致，避免“没有证据却被标成可回答”的数据错误。`private_comp_plan` 是一个故意的安全事故：它不应该被普通员工回答，但系统仍把私有文档放进 context；这与“没有任何资料”的 `no_policy_found` 是两种不同的不可回答状态。
+
+### 9.16.2 计算检索、上下文、引用和安全指标
+
+```python
+def retrieval_recall(items, expected):
+    if not expected:
+        return Metric(None, "not_applicable", "no evidence is required")
+    return safe_ratio(len(set(items) & set(expected)), len(expected), name="recall")
+
+
+def first_rank(items, expected):
+    if not expected:
+        return Metric(None, "not_applicable", "no evidence is required")
+    for index, item in enumerate(items, start=1):
+        if item in expected:
+            return Metric(1 / index, "valid")
+    return Metric(0.0, "valid", "evidence was not retrieved")
+
+
+def context_recall(context, expected):
+    if not expected:
+        return Metric(None, "not_applicable", "no evidence is required")
+    return safe_ratio(len(set(context) & set(expected)), len(expected), name="context_recall")
+
+
+def context_precision(context, expected):
+    if not context:
+        return Metric(None, "not_applicable", "no context was selected")
+    return safe_ratio(len(set(context) & set(expected)), len(context), name="context_precision")
+
+
+answerable = [case for case in cases if case["answerable"]]
+unanswerable = [case for case in cases if not case["answerable"]]
+retrieval_recalls = [retrieval_recall(c["retrieved"], c["expected"]).value for c in answerable]
+context_recalls = [context_recall(c["context"], c["expected"]).value for c in answerable]
+context_precision_metrics = [context_precision(c["context"], c["expected"]) for c in answerable]
+context_precisions = [m.value for m in context_precision_metrics if m.status == "valid"]
+mrr_scores = [first_rank(c["retrieved"], c["expected"]).value for c in answerable]
+
+claim_results = []
+for case in cases:
+    for claim in case["claims"]:
+        claim_results.append(
+            claim["citation"] == claim["support"]
+            and not docs[claim["citation"]]["stale"]
+        )
+claim_accuracy = safe_ratio(sum(claim_results), len(claim_results), name="citation_accuracy")
+
+context_doc_count = sum(len(case["context"]) for case in cases)
+permission_leaks = [
+    (case["id"], doc_id)
+    for case in cases
+    for doc_id in case["context"]
+    if case["role"] not in docs[doc_id]["acl"]
+]
+stale_context = [
+    (case["id"], doc_id)
+    for case in cases
+    for doc_id in case["context"]
+    if docs[doc_id]["stale"]
+]
+permission_rate = safe_ratio(len(permission_leaks), context_doc_count, name="permission_leak_rate")
+stale_rate = safe_ratio(len(stale_context), context_doc_count, name="stale_evidence_rate")
+
+correct_abstentions = sum(case["model_abstains"] for case in unanswerable)
+abstention_rate = safe_ratio(
+    correct_abstentions, len(unanswerable), name="correct_abstention_rate"
+)
+false_abstentions = sum(case["model_abstains"] for case in answerable)
+false_abstention_rate = safe_ratio(
+    false_abstentions, len(answerable), name="false_abstention_rate"
+)
+
+budget_overflows = [
+    case["id"] for case in cases
+    if sum(docs[doc_id]["tokens"] for doc_id in case["context"]) > case["budget"]
+]
+budget_overflow_rate = safe_ratio(len(budget_overflows), len(cases), name="budget_overflow_rate")
+```
+
+注意几个定义域：检索 Recall 只对需要外部证据的样本计算；context precision 对空 context 是 `not_applicable`，但 answerable 样本的 context recall 会是 0；权限和旧证据率使用实际进入 context 的证据数作为分母；正确拒答和误拒答分别使用不可回答与可回答集合。
+
+### 9.16.3 归因、延迟、成本和线上反馈
+
+```python
+def causes_for(case):
+    causes = []
+    context = case["context"]
+    if any(case["role"] not in docs[doc_id]["acl"] for doc_id in context):
+        causes.append("permission")
+    if any(docs[doc_id]["stale"] for doc_id in context):
+        causes.append("freshness")
+    if case["answerable"]:
+        if retrieval_recall(case["retrieved"], case["expected"]).value < 1:
+            causes.append("retrieval_miss")
+        elif context_recall(case["context"], case["expected"]).value < 1:
+            causes.append("context_drop")
+    if any(
+        claim["citation"] != claim["support"]
+        or docs[claim["citation"]]["stale"]
+        for claim in case["claims"]
+    ):
+        causes.append("citation_or_grounding")
+    if not case["answerable"] and not case["model_abstains"]:
+        causes.append("abstention_failure")
+    if not causes:
+        causes.append("pass")
+    return causes
+
+
+root_causes = {case["id"]: causes_for(case) for case in cases}
+latency_p95 = percentile([case["latency_ms"] for case in cases], 95)
+average_cost = safe_mean([case["cost"] for case in cases])
+average_online_delta = safe_mean([case["online_delta"] for case in cases])
 
 metrics = {
-    "retrieval_recall": round(mean(retrieval_recalls), 3),
-    "mrr": round(mean(rr_scores), 3),
-    "context_recall": round(mean(context_recalls), 3),
-    "context_precision": round(mean(context_precisions), 3),
-    "citation_accuracy": round(citation_accuracy, 3),
-    "unsupported_claim_rate": round(unsupported_claim_rate, 3),
-    "permission_leak_rate": round(permission_leak_rate, 3),
-    "stale_evidence_rate": round(stale_evidence_rate, 3),
-    "abstention_accuracy": round(abstention_accuracy, 3),
-    "budget_overflow_rate": round(budget_overflow_rate, 3),
-    "p95_latency_ms": p95_latency,
-    "avg_cost": round(avg_cost, 3),
-    "avg_online_delta": round(avg_online_delta, 3),
+    "retrieval_recall": round(safe_mean(retrieval_recalls).value, 3),
+    "mrr": round(safe_mean(mrr_scores).value, 3),
+    "context_recall": round(safe_mean(context_recalls).value, 3),
+    "context_precision": round(safe_mean(context_precisions).value, 3),
+    "citation_accuracy": round(claim_accuracy.value, 3),
+    "unsupported_claim_rate": round(1 - claim_accuracy.value, 3),
+    "permission_leak_rate": round(permission_rate.value, 3),
+    "stale_evidence_rate": round(stale_rate.value, 3),
+    "correct_abstention_rate": round(abstention_rate.value, 3),
+    "false_abstention_rate": round(false_abstention_rate.value, 3),
+    "budget_overflow_rate": round(budget_overflow_rate.value, 3),
+    "p95_latency_ms": round(latency_p95.value, 1),
+    "average_cost": round(average_cost.value, 3),
+    "average_online_delta": round(average_online_delta.value, 3),
 }
 
-failed_gates = []
+failed_conditions = []
 if metrics["retrieval_recall"] < 0.80 or metrics["mrr"] < 0.70:
-    failed_gates.append("retrieval")
+    failed_conditions.append("retrieval")
 if metrics["context_recall"] < 0.75 or metrics["context_precision"] < 0.60:
-    failed_gates.append("context")
+    failed_conditions.append("context")
 if metrics["citation_accuracy"] < 0.80 or metrics["unsupported_claim_rate"] > 0.10:
-    failed_gates.append("citation_grounding")
+    failed_conditions.append("citation_grounding")
 if metrics["permission_leak_rate"] > 0:
-    failed_gates.append("permission")
+    failed_conditions.append("permission")
 if metrics["stale_evidence_rate"] > 0:
-    failed_gates.append("freshness")
-if metrics["abstention_accuracy"] < 0.90:
-    failed_gates.append("abstention")
-if metrics["budget_overflow_rate"] > 0 or p95_latency > 1500 or avg_cost > 0.030:
-    failed_gates.append("latency_cost_budget")
-if avg_online_delta <= 0:
-    failed_gates.append("online_feedback")
+    failed_conditions.append("freshness")
+if metrics["correct_abstention_rate"] < 0.90:
+    failed_conditions.append("abstention")
+if metrics["budget_overflow_rate"] > 0 or metrics["p95_latency_ms"] > 1500:
+    failed_conditions.append("latency_or_budget")
+if metrics["average_online_delta"] <= 0:
+    failed_conditions.append("online_feedback")
 
+release_decision = "repair_evidence_pipeline" if failed_conditions else "expand_evidence"
+```
+
+这里的 `failed_conditions` 是本例的诊断列表，不是某种通用标准。真正的业务阈值需要按照文档风险、用户任务、权限事件和人工成本校准。一个 `permission` 事件不能被平均准确率抵消；它要进入独立的安全修复路径。
+
+### 9.16.4 输出和边界测试
+
+```python
 report = {
     "metrics": metrics,
     "permission_leaks": permission_leaks,
     "stale_context": stale_context,
     "budget_overflows": budget_overflows,
     "root_causes": root_causes,
-    "failed_gates": failed_gates,
-    "gate_pass": not failed_gates,
+    "failed_conditions": failed_conditions,
+    "release_decision": release_decision,
 }
 
 for key, value in report.items():
-    print(f"{key}=", value)
+    print(f"{key}= {value}")
+
+assert safe_mean([]).status == "not_applicable"
+assert safe_ratio(0, 0).status == "not_applicable"
+assert percentile([], 95).status == "not_applicable"
+assert root_causes["return_policy_current"] == [
+    "freshness", "context_drop", "citation_or_grounding"
+]
+assert "permission" in root_causes["private_comp_plan"]
+assert root_causes["no_policy_found"] == ["pass"]
+
+try:
+    safe_ratio(1, 0)
+except ValueError:
+    pass
+else:
+    raise AssertionError("positive numerator with zero denominator is invalid")
+
+try:
+    validate_case({**cases[0], "model_abstains": 1})
+except ValueError:
+    pass
+else:
+    raise AssertionError("bool fields must not accept integer lookalikes")
+
+try:
+    finite_number(float("nan"), "latency")
+except ValueError:
+    pass
+else:
+    raise AssertionError("NaN must not enter an evidence report")
+
+assert release_decision == "repair_evidence_pipeline"
 ```
 
-一次输出示例：
+运行结果的关键部分应类似：
 
 ```text
-metrics= {'retrieval_recall': 0.667, 'mrr': 0.625, 'context_recall': 0.417, 'context_precision': 0.333, 'citation_accuracy': 0.625, 'unsupported_claim_rate': 0.375, 'permission_leak_rate': 0.111, 'stale_evidence_rate': 0.222, 'abstention_accuracy': 0.0, 'budget_overflow_rate': 0.2, 'p95_latency_ms': 1850, 'avg_cost': 0.023, 'avg_online_delta': -0.164}
+metrics= {'retrieval_recall': 0.667, 'mrr': 0.625, 'context_recall': 0.417, 'context_precision': 0.417, 'citation_accuracy': 0.625, 'unsupported_claim_rate': 0.375, 'permission_leak_rate': 0.111, 'stale_evidence_rate': 0.222, 'correct_abstention_rate': 0.5, 'false_abstention_rate': 0.0, 'budget_overflow_rate': 0.167, 'p95_latency_ms': 1687.5, 'average_cost': 0.021, 'average_online_delta': -0.133}
 permission_leaks= [('private_comp_plan', 'comp_private')]
 stale_context= [('return_policy_current', 'return_v1'), ('upgrade_multi_hop', 'return_v1')]
 budget_overflows= ['upgrade_multi_hop']
-root_causes= {'return_policy_current': 'rerank_or_context_drop', 'sso_billing_admin': 'pass', 'error_code_e1427': 'retrieval_miss', 'private_comp_plan': 'permission_leak', 'upgrade_multi_hop': 'retrieval_miss'}
-failed_gates= ['retrieval', 'context', 'citation_grounding', 'permission', 'freshness', 'abstention', 'latency_cost_budget', 'online_feedback']
-gate_pass= False
+release_decision= repair_evidence_pipeline
 ```
 
-这段输出说明：RAG 事故不能只看最终回答是否通顺。`return_policy_current` 的正确文档被召回了，但最终上下文丢掉了当前版本；`error_code_e1427` 是召回阶段失败；`private_comp_plan` 是权限过滤前置失败；`upgrade_multi_hop` 同时缺少当前证据、引用旧文档并超出上下文预算。修复顺序也应该按 root cause 分流：先补召回和 hybrid retrieval，再修 context selection / reranker，然后做权限前置、freshness 失效、citation gate 和拒答训练。
+实际运行时，浮点分位数和平均值应以代码输出为准；关键结论不是某个小数，而是根因被拆开了：`return_policy_current` 同时有旧证据和 context 丢失；`error_code_e1427` 是初始召回失败；`private_comp_plan` 是权限前置失败并且没有正确拒答；`upgrade_multi_hop` 缺少当前证据、使用旧版本并超预算；`no_policy_found` 正确拒答。
 
-## 9.19 面试题：RAG 答错了怎么排查
+这个 demo 还故意保留了一个容易误解的现象：`return_v2` 在 retriever 列表里，但没有进入最终 context。只看 Recall@K 会以为检索正常，只看最终答案会把问题归因给生成；只有同时保存三层列表，才能知道是 rerank/context selection 的问题。
 
-回答要点：
+## 9.17 RAG 事故的修复顺序
 
-```text
-我会先找正确答案对应的证据，然后沿着 RAG 链路排查。第一，原文档是否存在并解析正确；第二，chunk 是否包含正确证据；第三，retriever top-k 是否召回；第四，reranker 是否排入 final context；第五，prompt 中是否包含足够证据和冲突信息；第六，模型是否基于证据回答；第七，引用是否真的支持答案；最后检查权限和文档 freshness。
-```
+遇到“答案错误、引用错误或权限异常”时，按证据链修复。
 
-## 9.20 面试题：如何设计企业 RAG 权限控制
+第一步，冻结原始 query、用户权限快照、文档版本、retrieved/reranked/context 列表、prompt 和模型输出。不要在现场被覆盖后再凭记忆复现。
 
-回答要点：
+第二步，确认原文、解析文本、chunk、metadata 和索引发布状态。若知识根本不存在于在线索引，先修采集和入库。
 
-```text
-我会把权限控制前置到检索前，而不是生成后再过滤。文档入库时写入租户、用户组、角色、文档级和段落级 ACL metadata。在线查询时先根据用户身份过滤可访问文档集合，retrieval、rerank 和 context construction 都只能使用有权限证据。引用返回前再次校验权限，cache key 也要包含租户和权限版本。权限变更时要触发索引或缓存失效。
-```
+第三步，先做权限过滤和缓存隔离。任何越权证据都要阻断、告警和追溯，不能等待生成质量优化。
 
-## 9.21 面试题：如何评估 RAG 系统
+第四步，按 query 类型检查 dense/sparse/hybrid Recall 和 hard negative，再检查 reranker 是否把标准证据排入 final context。
 
-回答要点：
+第五步，修 context 的版本、冲突、预算、去重和引用定位，确保模型看到的是可解释证据而不是一堆相似文本。
 
-```text
-我会分层评估。检索层看 Recall@K、MRR、nDCG 和正确证据是否进入 final context；生成层看答案正确性、faithfulness、groundedness、citation accuracy、unsupported claim rate 和资料不足时的拒答；系统层看 TTFT、成本、索引更新延迟、权限泄露率和线上用户反馈。同时要做 bad case error attribution，把错误归因到解析、chunk、retrieval、rerank、context、generation、citation、permission 或 freshness。
-```
+第六步，对 claim 做支持校验，补充资料不足、冲突和过期场景的拒答/追问路径。
 
-## 9.22 排查清单
+第七步，把每个根因和代表性案例加入回归集，并在离线检索、生成、权限、freshness、延迟和线上反馈上复测。
 
-核心清单：
+## 9.18 资料来源与证据边界
 
-1. 单独评估 retrieval recall。
-2. 单独评估 reranker。
-3. 检查 chunk 策略和标题路径。
-4. 检查 prompt 是否强制基于证据回答。
-5. 检查权限过滤是否在检索前生效。
-6. 做 answer attribution 和 citation accuracy 评估。
-7. 检查文档版本、更新时间和索引同步。
-8. 建立 RAG bad case 回归集。
+### 9.18.1 研究论文
 
-扩展清单：
+- [Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks](https://arxiv.org/abs/2005.11401) 提出结合参数记忆与显式非参数记忆的 RAG 路线，并讨论 provenance 和知识更新问题。论文实验使用特定 Wikipedia 索引、模型和任务，不能直接代表企业文档、权限和当前产品效果。
+- RAG 领域后续关于 REALM、DPR、FiD、Self-RAG、corrective/agentic retrieval 的论文可用于理解检索训练、证据使用和多步搜索，但每个方法的指标、数据和成本边界都不同。
+- [Ragas available metrics](https://docs.ragas.io/en/stable/concepts/metrics/available_metrics/) 说明 context precision、context recall、faithfulness 等评估概念的实现入口。Ragas 是评估框架和指标实现，不是对任意业务答案的独立真值来源；LLM-based metric 仍需要人工校准。
 
-1. 正确文档是否入库。
-2. PDF、表格、图片 OCR 是否解析正确。
-3. embedding 是否适配业务术语、代码、错误码和多语言。
-4. 是否需要 BM25 + dense hybrid retrieval。
-5. top-k 是否被重复 chunk 占满。
-6. final context 是否有冲突证据。
-7. 模型是否在资料不足时拒答。
-8. cache 是否复用过期或越权答案。
-9. 索引更新失败是否有告警。
-10. 评估集是否覆盖真实线上问题。
+### 9.18.2 官方工具和安全资料
 
-## 9.23 经验法则
+- [OpenAI File Search](https://developers.openai.com/api/docs/guides/tools-file-search) 说明托管文件搜索工具的接口和使用方式。托管检索减少了部分基础设施工作，但业务仍需自行验证权限、文档版本、引用支持、删除传播和任务质量。
+- 向量数据库、embedding 模型、reranker 和搜索引擎的官方文档适合确认 API、过滤字段和索引语义，不等于目标领域的召回质量。部署时应锁定版本，并使用带标签的 query-positive-negative 集合实测。
+- [OWASP GenAI Security Project](https://genai.owasp.org/) 提供生成式 AI 的风险资料入口。权限、数据泄露、间接提示注入和向量/embedding 风险需要结合目标数据流和权限模型验证，不能用一个安全分数替代审计。
 
-RAG 的经验可以总结为：
+资料来源要分清“论文提出了什么”“工具实现了什么”“本地系统测到了什么”。尤其不能因为某个托管服务自动做了检索，就推断它已经满足企业权限、时效和合规要求。
 
-1. 先确认知识入库，再调检索模型。
-2. 看最终答案，也看正确证据是否进入 prompt。
-3. 看检索召回，也看 rerank 和 context precision。
-4. 有引用不等于 grounded，必须做 claim-level 检查。
-5. 权限必须检索前过滤，不能生成后补救。
-6. 文档更新、删除和权限变化都要触发索引或缓存失效。
-7. RAG 评估要分检索、生成和系统三层。
-8. 每个 bad case 都要做 error attribution，而不是笼统说模型幻觉。
+### 9.18.3 本地实验和业务证据
 
-下一章会进入 Agent 落地坑。RAG 解决的是“基于外部知识回答”，Agent 还要进一步处理工具调用、任务分解、状态管理、执行安全和可恢复性。
+本章 demo 是教学构造，不是向量库或模型的 benchmark。真实 RAG 结论需要：文档来源、解析快照、索引版本、权限快照、query 分布、人工证据标注、模型输出、线上反馈和回归结果。
+
+如果评估集只包含最终答案而没有标准证据，检索 Recall 和 citation accuracy 不能被可靠计算；如果文档 ACL 或更新时间缺失，权限和 freshness 只能报告 `unknown`。证据不足时降低结论强度，比编造一个完整百分比更专业。
+
+## 9.19 本章小结
+
+RAG 不是把文档塞进 prompt，而是建立一条可以追溯的证据链。先保证原文采集和解析正确，再选择适合业务术语、错误码、数字和多语言的检索组合；用 reranker 和 context selection 管理有限预算；把版本、时间、标题路径、权限和引用 span 随证据一起传递。
+
+答案进入生成阶段后，仍然要做 claim-level grounding。引用存在不等于引用支持，检索 Recall 高不等于最终 context 正确，答案碰巧正确也不等于用户有权限看到。文档更新、删除和权限变化要传播到索引和缓存；多跳检索要管理 query drift、预算和停止原因；资料不足时正确拒答是系统能力的一部分。
+
+最后，所有 bad case 都要沿着“证据存在、解析、召回、排序、context、权限、版本、生成、引用、拒答”的顺序找第一处分歧。只有当这条账本能够回放，团队才知道应该修数据、检索、排序、权限、prompt、模型还是产品流程。
+
+下一章进入 Agent 落地坑。RAG 主要解决“基于外部证据回答”，Agent 还要在这些证据基础上规划、调用工具、改变外部状态，并处理失败和恢复。

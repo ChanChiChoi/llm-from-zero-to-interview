@@ -159,7 +159,7 @@ t_{\mathrm{prefill\_start}}-t_{\mathrm{arrive}}
 
 ### 7.3.4 TPOT 与流式稳定性
 
-对第 j 个输出 token，定义相邻 token 事件的时间差 `delta_j`。平均 TPOT 可以写成：
+当一次响应至少产生 `n>1` 个有效输出 token 时，对第 j 个输出 token 定义相邻 token 事件的时间差 `delta_j`。平均 TPOT 可以写成：
 
 ~~~math
 \mathrm{TPOT}_{\mathrm{mean}}
@@ -169,7 +169,7 @@ t_{\mathrm{prefill\_start}}-t_{\mathrm{arrive}}
 \left(t_j-t_{j-1}\right)
 ~~~
 
-但平均值会掩盖长时间停顿。交互服务还应报告 token 间隔的 P95/P99、首 token 后的最大间隔、客户端重连和流式事件丢失。一个平均 20 ms/token 的服务，如果每隔 30 个 token 停顿 2 秒，用户仍会觉得卡顿。
+如果响应没有产生有效输出，或者只有一个有效输出 token，TPOT 没有相邻间隔，应报告“无可计算的 token 间隔”，不能填成 0。平均值会掩盖长时间停顿。交互服务还应报告 token 间隔的 P95/P99、首 token 后的最大间隔、客户端重连和流式事件丢失。一个平均 20 ms/token 的服务，如果每隔 30 个 token 停顿 2 秒，用户仍会觉得卡顿。
 
 ## 7.4 KV Cache：每个请求都在占用的运行时内存
 
@@ -181,7 +181,7 @@ KV Cache 是请求级状态，不是模型参数。它有生命周期：prefill 
 
 ### 7.4.2 KV Cache 容量公式
 
-设模型层数为 `L`，并发请求数为 `B`，每个请求平均缓存长度为 `T`，K/V 头数为 `H_kv`，每个 head 维度为 `d`，每个元素占 `b` 字节。若不考虑分页元数据和对齐，KV Cache 字节数近似为：
+设 `L>0`，并发请求数 `B\geq0`，每个请求平均缓存长度 `T\geq0`，K/V 头数 `H_kv>0`，head 维度 `d>0`，每个元素占 `b>0` 字节。若不考虑分页元数据和对齐，KV Cache 字节数近似为：
 
 ~~~math
 M_{\mathrm{KV}}
@@ -264,7 +264,7 @@ Continuous batching 在每个 decode iteration 更新活跃集合：完成的请
 
 ### 7.6.2 Token budget 比 request count 更接近资源
 
-两个请求的成本可能相差几十倍。设请求 i 的输入 token 数为 `T_in,i`，计划输出上限为 `T_out,i`，调度权重为 `w_i`，一个粗略的工作量预算可以写成：
+两个请求的成本可能相差几十倍。设请求 i 的输入 token 数为 `T_in,i\geq0`，计划输出上限为 `T_out,i\geq0`，调度权重为 `w_i\geq0`，并令 `\alpha\geq0` 表示输出 token 的相对资源权重，一个粗略的工作量预算可以写成：
 
 ~~~math
 W_i
@@ -397,7 +397,7 @@ s q
 
 前两层适合快速筛选，第三层才接近产品风险。一个量化版本可能只让少数 token 的 logit 改变，却恰好改变了 `}`、函数名或日期数字，使整个任务失败。因此不能用一个全局平均误差替代格式和动作级测试。
 
-如果测试集被划分为若干业务桶 `b`，每个桶的样本数为 `n_b`，该桶的任务失败率为 `e_b`，权重为 `w_b`，可以用加权摘要描述已知流量：
+如果测试集被划分为若干有样本的业务桶 `b`，每个桶的样本数为 `n_b>0`，该桶的任务失败率为 `0\leq e_b\leq1`，权重为 `w_b\geq0`，且权重总和为正，可以用加权摘要描述已知流量：
 
 ~~~math
 E_{\mathrm{task}}
@@ -440,7 +440,7 @@ Medusa 使用额外预测头提出未来 token 候选；EAGLE 类方法更多利
 
 ### 7.8.3 接受率如何影响吞吐
 
-可以把一次 speculative round 看成“draft 提案、target 批量验证、提交一段最终 token”。设每轮 draft 提出 `k` 个候选，最终被提交到输出的 token 数为随机变量 `A`，其中已经包含被接受的候选和拒绝后的替代 token。设 draft 和验证一轮的平均耗时分别为 `t_draft(k)` 与 `t_verify(k)`，则一个简化的输出速率估计为：
+可以把一次 speculative round 看成“draft 提案、target 批量验证、提交一段最终 token”。设每轮 draft 提出 `k>0` 个候选，最终被提交到输出的 token 数为随机变量 `A\geq0`，其中已经包含被接受的候选和拒绝后的替代 token。若 draft 和验证一轮的平均耗时分别为 `t_draft(k)\geq0` 与 `t_verify(k)\geq0`，且两者之和为正，则一个简化的输出速率估计为：
 
 ~~~math
 R_{\mathrm{spec}}
@@ -515,7 +515,7 @@ R_{\mathrm{base}}
 
 ### 7.9.4 RAG 的分层指标
 
-设测试问题数为 `N`，其中能在索引中找到标注证据的问题数为 `N_evidence`；Top-k 召回命中的问题数为 `N_hit`。最终回答中的可验证 claim 总数为 `N_claims`，其中被证据支持的 claim 数为 `N_supported`，可分别报告：
+设 `N_evidence>0` 个测试问题能在索引中找到标注证据，Top-k 召回命中的问题数为 `0\leq N_hit\leq N_evidence`。最终回答中的可验证 claim 总数为 `N_claims\geq0`，其中被证据支持的 claim 数为 `N_supported`；当 `N_claims>0` 时，可分别报告：
 
 ~~~math
 \mathrm{Recall@k}
@@ -529,7 +529,7 @@ R_{\mathrm{base}}
 \frac{N_{\mathrm{supported}}}{N_{\mathrm{claims}}}
 ~~~
 
-这些分母必须按项目定义处理：一个问题有多个证据、一个 claim 需要多个来源、无证据问题是否计入拒答评估，都会改变数值。还要报告 rerank 延迟、权限过滤召回损失、新鲜度、上下文 token 和 unsupported claim，而不是只看最终答案分数。
+如果没有可检索证据，即 `N_evidence=0`，Recall@k 未定义，应报告“无证据样本”；如果没有可验证 claim，即 `N_claims=0`，CitationSupport 也未定义，不能把它记为 1。分母必须按项目定义处理：一个问题有多个证据、一个 claim 需要多个来源、无证据问题是否计入拒答评估，都会改变数值。还要报告 rerank 延迟、权限过滤召回损失、新鲜度、上下文 token 和 unsupported claim，而不是只看最终答案分数。
 
 ### 7.9.5 引用不等于证据支持
 
@@ -657,7 +657,7 @@ t_{\mathrm{queue}}
 
 ### 7.11.3 单位成功任务成本
 
-设一段时间内总服务成本为 `C_total`，任务数为 `N_task`，其中成功任务数为 `N_success`。单位成功任务成本为：
+设一段时间内总服务成本为 `C_total\geq0`，任务数为 `N_task\geq0`，其中成功任务数为 `N_success`。当 `N_success>0` 时，单位成功任务成本为：
 
 ~~~math
 C_{\mathrm{per\ success}}
@@ -665,7 +665,7 @@ C_{\mathrm{per\ success}}
 \frac{C_{\mathrm{total}}}{N_{\mathrm{success}}}
 ~~~
 
-`C_total` 应包含 GPU、存储、网络、检索、工具、重试、冗余和人工处理。成功定义必须提前约定：格式正确、事实正确、工具状态改变和用户满意可能是不同层级。一个小模型单次便宜，但如果重试多、任务失败和人工介入多，单位成功任务成本可能更高。
+如果 `N_success=0`，单位成功任务成本未定义，应报告“没有成功任务”，不能填成零。`C_total` 应包含 GPU、存储、网络、检索、工具、重试、冗余和人工处理。成功定义必须提前约定：格式正确、事实正确、工具状态改变和用户满意可能是不同层级。一个小模型单次便宜，但如果重试多、任务失败和人工介入多，单位成功任务成本可能更高。
 
 ## 7.12 线上排障：从症状到最小对照
 

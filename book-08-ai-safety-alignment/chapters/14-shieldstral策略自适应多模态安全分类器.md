@@ -415,7 +415,7 @@ L(\tau)
  +C_{\mathrm{review}}P(d=\mathrm{review}\mid\tau).
 ~~~
 
-`C_FN` 是漏放代价，`C_FP` 是误拦代价，`C_review` 是人工和延迟代价。外发秘密、删除数据和支付动作的漏放代价往往很高；普通图片摘要的误拦代价可能更高。阈值应该由动作场景和真实代价决定，而不是追求一个全局 accuracy。
+`C_FN` 是漏放代价，`C_FP` 是误拦代价，`C_review` 是人工和延迟代价。外发秘密、删除数据和支付动作的漏放代价往往很高；普通图片摘要的误拦代价可能更高。阈值应该由动作场景和真实代价决定，而不是追求一个全局 accuracy。每个条件概率都要绑定有效样本集合；如果某个动作、语言或模态切片没有可审计样本，对应损失项应记录为 `N/A`，不能把“没有测到漏报”解释成漏报为零。阈值选择还要保留校准集、版本和人工复核规则，否则同一个阈值无法跨策略或跨模型比较。
 
 ### 14.8.2 高风险类别要看严重度加权漏报
 
@@ -426,7 +426,7 @@ R_{\mathrm{sev}}
 =\frac{\sum_{i=1}^{N}w_i\mathbf{1}[\mathrm{failure}_i]}{\sum_{i=1}^{N}w_i},
 ~~~
 
-其中 `w_i` 是样本或动作严重度权重。这个指标也不是现实损失的精确估计，因为权重包含主观判断；它的价值在于让评估报告显式讨论高影响尾部，而不是被平均数隐藏。
+其中 `w_i` 是样本或动作严重度权重。若有效样本权重总和为 0，指标应记录为 `N/A`，而不是把空集合当成零失败。这个指标也不是现实损失的精确估计，因为权重包含主观判断；它的价值在于让评估报告显式讨论高影响尾部，而不是被平均数隐藏。
 
 ### 14.8.3 级联与人工复核
 
@@ -542,7 +542,7 @@ F_1=\frac{2\cdot\mathrm{precision}\cdot\mathrm{recall}}
 {\mathrm{precision}+\mathrm{recall}}.
 ~~~
 
-还要报告校准、阈值曲线、拒答或未知率、按模态和语言的切片，以及证据完整性。F1 只描述标签判断，不描述用户是否能完成正常任务，也不描述工具是否产生副作用。
+当 `TP+FP=0`、`TP+FN=0` 或 precision 与 recall 的和为 0 时，相应指标没有定义，应报告为 `N/A`。还要报告校准、阈值曲线、拒答或未知率、按模态和语言的切片，以及证据完整性。F1 只描述标签判断，不描述用户是否能完成正常任务，也不描述工具是否产生副作用。
 
 ### 14.11.2 策略层
 
@@ -675,7 +675,7 @@ T_{\mathrm{e2e}}
 s_{\mathrm{doc}}=\max_{j\in\mathrm{chunks}}s_j,
 ~~~
 
-但 `max` 会放大单个误报。也可以按区域严重度、证据完整性和人工规则做组合。无论采用哪种方法，都要在任务级数据上校准，而不是把 chunk 分数直接当成整篇文档概率。
+但 `max` 会放大单个误报；如果 `chunks` 为空，整篇文档分数没有定义，应进入重新处理或人工路径，而不是按低风险处理。也可以按区域严重度、证据完整性和人工规则做组合。无论采用哪种方法，都要在任务级数据上校准，而不是把 chunk 分数直接当成整篇文档概率。
 
 ### 14.13.3 显存、并发和多策略调用
 
@@ -847,7 +847,7 @@ def decide(evidence: Evidence, action: ActionRequest) -> Tuple[str, Dict[str, ob
     elif evidence.score >= evidence.threshold and action.action_risk >= 0.5:
         actions.append("review_high_risk_content_and_action")
         decision = "review"
-    elif action.action_risk >= 0.8 and not action.reversible:
+    elif not action.reversible:
         actions.append("require_explicit_confirmation")
         decision = "review"
     else:

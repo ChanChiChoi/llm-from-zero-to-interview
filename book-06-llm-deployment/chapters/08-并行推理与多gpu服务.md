@@ -585,7 +585,7 @@ TP、PP 或 EP group 中任何一个 rank 失效，都可能使整个执行组�
 
 ## 13. 最小 Python demo：多 GPU 推理选型的 toy 账本
 
-下面的 0 依赖 demo 用 toy 数字比较单卡、多副本、TP 和 TP+PP 的显存、通信和容量。它不代表真实 benchmark，只演示面试中如何把权重、KV Cache、通信和副本数放到同一张表里。
+下面的 0 依赖 demo 用 toy 数字比较单卡、多副本、TP 和 TP+PP 的显存、通信和容量。它不代表真实 benchmark，只演示如何把权重、KV Cache、通信和副本数放到同一张部署账本里。
 
 ```python
 from math import ceil
@@ -707,63 +707,38 @@ route_to= replica_1
 3. `latency_proxy` 是人为构造的通信惩罚示意，不是目标 GPU 的实测延迟。
 4. `route_to` 不按 round-robin，而是按 queued tokens、active sequence、可用槽位和新请求成本做简化路由。
 
-## 14. 面试官会怎么问
+## 14. 一个 8 卡集群的并行部署决策
 
-### 问法 1：推理中的 Tensor Parallel 解决什么问题？
+考虑一台有 8 张 80 GiB GPU 的机器，准备部署一个 70B 模型。服务有两类 workload：短交互请求要求低 TTFT 和高可用性，长上下文请求需要 24 个活跃 sequence；峰值期间不能因为一张卡或一个进程失效就让所有请求同时中断。团队提出三个方案：4 卡 TP 放一个副本并部署两个副本；8 卡 TP 放一个副本；4 卡 TP 与 2 stage PP 组成一个副本。
 
-可以这样答：
+先算容量，再谈速度。假设权重使用 FP16，70B 权重约为 130.4 GiB；在 demo 的 toy workload 下，每个完整执行组还需要约 30 GiB 的状态、workspace 和余量。单卡方案的权重本身就超过 80 GiB，不能通过增加副本解决；副本复制的是完整权重，不会把一份 130 GiB 的模型拆小。
 
-```text
-Tensor Parallel 把模型层内的大矩阵计算切到多张 GPU 上，解决单卡放不下或单卡算力不足的问题。它常用于大模型推理，但每层可能需要通信，所以更适合同机 NVLink/NVSwitch 这类高速互联环境。
-```
+TP4 双副本把权重和部分状态分摊到 4 张卡上，每张卡的 toy 总账约为 48.1 GiB，容量上可行，并且 8 张卡形成两个独立故障单元。一个 TP group 内的 all-reduce 或 all-gather 仍然可能进入每层关键路径，但如果 4 张卡在同一节点并由高速互联连接，通信代价可能可接受。两个副本各有独立队列，路由器可以把长请求和短请求分开，也能在一个 group draining 时保留另一个 group 服务部分流量。
 
-### 问法 2：为什么推理中多副本很常见？
+TP8 单副本的每卡 toy 总账约为 28.05 GiB，容量余量更大，但所有请求共享一个 TP group。它可能让单个请求获得更高的层内并行度，却把 collective、队列和故障域集中到 8 张卡；一个 rank 失效通常会使整个副本不可用。若服务主要问题是单请求计算而不是容量，TP8 可能有价值；若问题是 QPS 和可用性，额外的 TP 并不等于额外副本。
 
-可以这样答：
+TP4×PP2 也能在 toy 账本上放下模型，但请求要依次经过两个 pipeline stage，并在 stage 边界传递 activation。低并发时，stage 等待和 activation 传输可能直接增加 TTFT；高并发和合适的请求流量可以填充部分 stage 空洞。它只有在按层切分能显著改善容量或某些 stage 有独立扩展价值时才值得承担额外复杂度。必须测 stage 负载是否均衡，不能只用“每张卡 10 层”判断均衡，因为 embedding、lm_head、MoE 和不同 attention state 可能使各 stage 账本不同。
 
-```text
-如果单个副本已经能放下模型，多副本是提高 QPS、吞吐和可用性的简单方式。每个副本独立服务请求，负载均衡器分发流量，某个副本故障时可以摘除。但多副本会重复保存权重，成本更高。
-```
+三个方案的比较应至少记录：
 
-### 问法 3：TP 和 PP 在推理中怎么选？
+| 维度 | TP4 双副本 | TP8 单副本 | TP4×PP2 单副本 |
+| --- | --- | --- | --- |
+| 单副本 GPU | 4 | 8 | 8 |
+| 独立队列 | 2 | 1 | 1 |
+| 故障域 | 每个 4 卡 group | 整机 8 卡 group | 整机 8 卡 group |
+| 主要通信 | TP collective | 更频繁/更大 TP collective | TP collective + stage activation |
+| 适合的第一目标 | QPS、隔离、可用性 | 单请求计算和容量余量 | 层切分容量或特定拓扑 |
+| 必测风险 | group 内通信、负载倾斜 | 单 group 故障、队列集中 | bubble、stage 不均衡、传输 |
 
-可以这样答：
+若目标 workload 下 TP4 双副本已经满足 TTFT、TPOT、P99 和 goodput，它通常比把所有卡塞进一个 group 更容易运营；但不能从拓扑偏好直接下结论。如果单请求延迟仍不达标，才应比较 TP8 的 kernel 和 collective 收益；如果单卡层堆叠或 expert 权重无法合理放置，再测 PP 或 EP。
 
-```text
-TP 切层内矩阵，适合单层计算或权重太大，通信频繁但在同机高速互联下效果好。PP 切模型层，能把深模型分到多卡，但单请求要经过多个 stage，增加延迟并可能有 pipeline bubble。低延迟在线服务通常要谨慎使用 PP。
-```
+MoE 模型还要加一笔 expert 账。若每个 token 激活 top-k 个 expert，EP 会在 dispatch 和 combine 阶段产生 all-to-all；请求数均匀不代表 expert token 均匀。必须观察热 expert 的 `max_e / mean_e`、跨节点字节数、丢 token/重路由率和 P99。把 expert 权重放到不同 GPU 只能解决常驻容量，不能自动解决 router 偏斜。
 
-### 问法 4：MoE 推理为什么难？
+然后处理路由和状态。路由器不应按请求数 round-robin，而应同时看 pending prompt tokens、active sequence、KV watermark、预计输出、prefix locality 和租户配额。已有 prefix 的请求可以获得有限的 locality bonus，但如果目标副本已经拥堵，重新 prefill 可能比排队更快。正在生成的 KV state 不能因为路由器看到更轻的副本就直接搬运；需要比较序列化、传输、校验和目标 layout 的成本，或者在新副本重算。
 
-可以这样答：
+最后进行故障演练：关闭一个 TP rank，确认整个 group 被标记为 draining；在流式输出中断时，确认客户端不会收到重复 token；对已经发起工具写操作的请求，先用幂等键查询提交状态；对长上下文请求，比较 cache 迁移和重新 prefill 的恢复时间。只验证“进程重启成功”不够，还要报告恢复后的 goodput、重算 token、P99 和重复副作用次数。
 
-```text
-MoE 推理中 token 会被 router 动态分配到不同 expert，不同 expert 可能在不同 GPU 上。这会带来 all-to-all 通信和负载不均衡问题。某些 expert 热点会影响整体延迟，所以要处理 expert parallel、路由和负载均衡。
-```
-
-### 问法 5：为什么 LLM 负载均衡不能只按请求数？
-
-可以这样答：
-
-```text
-因为不同请求的 token 数、输出长度和 KV Cache 占用差异很大。一个长上下文请求可能比很多短请求更贵。所以负载均衡最好考虑 queue length、active tokens、KV Cache 使用和预计生成长度，而不是只看请求数。
-```
-
-### 问法 6：跨节点 TP 和多副本怎么比较？
-
-可以这样答：
-
-```text
-跨节点 TP 让一个请求共享更多 GPU 的计算和显存，但 collective 可能反复经过节点间网络，单请求 TPOT 和故障域都会扩大。多副本重复权重，却能把通信限制在副本内部并提供独立队列。模型放得下时通常优先测多副本；必须跨节点解决容量时，再根据真实拓扑比较 TP、PP、EP 的关键路径。
-```
-
-### 问法 7：为什么 KV Cache 不能随便跟着请求迁移？
-
-可以这样答：
-
-```text
-KV Cache 绑定 token 位置、层和 head 的布局，还绑定模型、tokenizer、dtype、adapter、采样和 speculative 状态。目标副本若 layout 或版本不一致，直接复用可能产生静默错误。工程上要在重算和状态搬运之间比较时间、带宽、校验和隐私成本；涉及工具副作用时还要用幂等键避免重复提交。
-```
+这个案例的结论不是 TP4、TP8 或 PP2 中某一个永远正确，而是：容量问题决定能否放置模型，通信和 kernel 决定单请求性能，副本数量决定水平容量和故障隔离，状态所有权决定能否安全迁移。并行部署方案只有在真实拓扑、请求分布、协议、质量和故障语义都被测量后，才具有可运营的含义。
 
 ## 15. 资料与证据边界
 

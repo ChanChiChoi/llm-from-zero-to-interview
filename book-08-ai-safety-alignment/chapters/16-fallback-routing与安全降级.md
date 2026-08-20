@@ -41,17 +41,19 @@ p=\rho(q),
 一个包含外部动作的请求可以使用以下状态：
 
 ~~~text
-created
-  -> running
-  -> waiting_tool
-  -> awaiting_confirmation
-  -> committed
-  -> failed
-  -> cancelled
-  -> unknown
+created -> not_started -> running -> waiting_tool -> awaiting_confirmation -> committed
+   |         |              |                 |
+   |         |              |                 +--> failed / cancelled
+   |         |              +--> unknown
+   |         +--> failed / cancelled / unknown
+   +--> cancelled
+
+unknown -> query_external_state -> committed / failed / human_review
 ~~~
 
-`unknown` 不是 `failed`。它表示客户端不知道外部系统是否完成，必须先查询、对账或交给人工。只有当外部契约明确说明没有提交，或者状态查询返回确定失败，系统才可以进入安全重试路径。
+`unknown` 不是 `failed`。它表示客户端不知道外部系统是否完成，必须先查询、对账或交给人工。只有当外部契约明确说明没有提交，或者状态查询返回确定失败，系统才可以进入安全重试路径。`committed` 也不等于“模型输出了工具参数”：它表示执行器或外部系统已经确认提交；如果只有模型生成了一个 tool call，而执行器没有接收或提交，该动作仍不能标成 `committed`。
+
+这几个状态对应不同的恢复动作：`not_started` 可以在授权仍有效且预算允许时开始一次执行；`running` 需要判断执行器是否仍持有租约；`unknown` 先查询，查询接口不可用时保持未知；`failed` 只有在失败语义明确且没有外部副作用时才可重试；`committed` 只能读取回执、查询结果或等待后续处理，不能再次提交。状态名称不是装饰性的日志字段，而是决定系统能否产生新副作用的事实依据。图中的 `failed` 只表示外部契约已经给出确定失败；连接中断而无法判断提交结果的情况仍应落到 `unknown`。
 
 ## 16.2 安全不变量：降级可以少做，不能越界
 
@@ -399,7 +401,7 @@ adapter 需要验证：
 {|S_p|}.
 ~~~
 
-它不是“主模型和备用模型输出相似率”。主路径拒绝的请求在 fallback 仍然拒绝或进一步收窄，才算保持安全约束。
+它不是“主模型和备用模型输出相似率”。主路径拒绝的请求在 fallback 仍然拒绝或进一步收窄，才算保持安全约束。当 `|S_p|=0` 时，这个指标应报告为 `N/A`，表示本轮没有可评价的主路径限制样本，而不是报告 0 或 1。
 
 ### 16.12.3 重复副作用率
 
@@ -409,7 +411,7 @@ adapter 需要验证：
 {\#\text{可能产生外部副作用的 fallback 任务}}.
 ~~~
 
-分子要通过外部状态或 action ledger 确认，而不是只数模型调用次数。一个模型可能调用两次但 executor 用幂等键只提交一次；也可能只调用一次却因重试中间件提交两次。
+分子要通过外部状态或 action ledger 确认，而不是只数模型调用次数。一个模型可能调用两次但 executor 用幂等键只提交一次；也可能只调用一次却因重试中间件提交两次。当没有任何可能产生副作用的 fallback 任务时，重复副作用率也应报告为 `N/A`，不能把“没有样本”误读为“风险为零”。
 
 ### 16.12.4 任务帮助性和误解率
 
@@ -491,20 +493,37 @@ class Event:
     side_effect_possible: bool
     retries: int
     backend_supports_tool: bool
+    original_scope: str = "read_only"
+    status_query_available: bool = True
+    status_query_authorized: bool = True
 
 
 def route(event: Event) -> Dict[str, object]:
     actions: List[str] = []
+    scope_rank = {"none": 0, "read_only": 1, "write": 2}
+    if event.original_scope not in scope_rank:
+        raise ValueError(f"unsupported original scope: {event.original_scope}")
 
-    if not event.authorized:
-        actions.append("stop_and_preserve_denial")
-        decision = "deny"
-    elif event.state == "committed":
+    # First preserve the external fact.  Authorization controls new actions;
+    # it must not rewrite an action that may already have happened.
+    if event.state == "committed":
         actions.append("report_committed_without_replay")
         decision = "finish"
     elif event.state == "unknown" or event.side_effect_possible:
-        actions.append("query_external_action_status")
-        decision = "recover_state"
+        # Querying an existing action is separate from replaying the original
+        # business action.
+        if event.status_query_available and event.status_query_authorized:
+            actions.append("query_external_action_status")
+            decision = "recover_state"
+        else:
+            actions.append("preserve_unknown_and_handoff")
+            decision = "unknown"
+    elif not event.authorized:
+        actions.append("stop_and_preserve_denial")
+        decision = "deny"
+    elif event.state == "failed" and event.error == "policy_denied":
+        actions.append("stop_and_preserve_denial")
+        decision = "deny"
     elif event.error == "timeout" and event.retries < 1:
         actions.append("retry_once_without_privilege_change")
         decision = "retry"
@@ -515,19 +534,38 @@ def route(event: Event) -> Dict[str, object]:
         actions.append("handoff_to_human")
         decision = "human"
 
+    target_scope = (
+        "none"
+        if decision in {"deny", "unknown", "finish"}
+        else "read_only"
+        if decision in {"informational", "recover_state", "human"}
+        else event.original_scope
+    )
+    allowed_scope = min(
+        (event.original_scope, target_scope),
+        key=lambda scope: scope_rank[scope],
+    )
     return {
         "action_id": event.action_id,
         "decision": decision,
         "actions": actions,
-        "scope_preserved": decision != "deny" or not event.authorized,
+        "original_scope": event.original_scope,
+        "allowed_scope": allowed_scope,
+        "scope_preserved": (
+            scope_rank[allowed_scope] <= scope_rank[event.original_scope]
+        ),
     }
 
 
 events = [
     Event("plain_timeout", "a-1", "running", "timeout", True, False, 0, True),
-    Event("payment_unknown", "a-2", "unknown", "timeout", True, True, 0, True),
-    Event("policy_denial", "a-3", "failed", "policy_denied", False, False, 0, True),
-    Event("no_tool_backend", "a-4", "running", "unsupported_tool", True, False, 0, False),
+    Event("payment_unknown", "a-2", "unknown", "timeout", True, True, 0, True, "write"),
+    Event("policy_denial", "a-3", "failed", "policy_denied", False, False, 0, True, "write"),
+    Event("no_tool_backend", "a-4", "running", "unsupported_tool", True, False, 0, False, "write"),
+    Event("unknown_without_query", "a-5", "unknown", "timeout", True, True, 0, True, "write", False),
+    Event("committed_after_revoke", "a-6", "committed", "timeout", False, True, 0, True, "write"),
+    Event("unknown_after_revoke_query_allowed", "a-7", "unknown", "timeout", False, True, 0, True, "write", True, True),
+    Event("unknown_after_revoke_query_blocked", "a-8", "unknown", "timeout", False, True, 0, True, "write", True, False),
 ]
 
 
@@ -542,9 +580,15 @@ plain_timeout retry retry_once_without_privilege_change
 payment_unknown recover_state query_external_action_status
 policy_denial deny stop_and_preserve_denial
 no_tool_backend informational switch_to_informational_path
+unknown_without_query unknown preserve_unknown_and_handoff
+committed_after_revoke finish report_committed_without_replay
+unknown_after_revoke_query_allowed recover_state query_external_action_status
+unknown_after_revoke_query_blocked unknown preserve_unknown_and_handoff
 ~~~
 
-实际打印还会包含 `action_id` 和 `scope_preserved`。这个字段只展示策略范围没有被扩大，并不代表真实工具已经安全；生产系统还要把查询结果、幂等键、版本、参数 digest 和 executor 状态接入同一条 trace。
+实际打印还会包含 `action_id`、`original_scope`、`allowed_scope` 和 `scope_preserved`。这里的 `scope_preserved=True` 只表示允许范围没有超过事件记录的原始范围，并不代表真实工具已经安全；生产系统还要把查询结果、幂等键、版本、参数 digest 和 executor 状态接入同一条 trace。特别要注意：`committed_after_revoke` 仍然报告已经提交的事实，但不允许因为当前授权失效而把历史动作改写成“未执行”；后续查询、退款或补偿动作要重新做权限检查。
+
+这里把两种权限明确分开：`authorized` 表示原业务动作当前是否仍被允许，`status_query_authorized` 表示系统是否有权进行只读状态查询。前者撤销后，系统不能重试付款或执行补偿；后者若仍有效，系统可以查询已有 action 的最终状态，但不能因此恢复原来的写权限。若连状态查询也不被允许，路由器只能保留 `unknown` 并转人工或等待具有权限的内部流程。对于 `committed_after_revoke`，`allowed_scope=none` 表示没有新的外部动作；它不否认历史上已经发生的提交，也不等于用户一定可以看到全部业务细节。
 
 ## 16.16 常见失败模式
 

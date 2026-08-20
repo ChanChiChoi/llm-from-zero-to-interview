@@ -6,7 +6,7 @@ Autograd 是 PyTorch 把数学公式变成可训练模型的核心机制。你�
 
 本章目标不是重新推导所有神经网络反向传播公式，而是把 PyTorch Autograd 在工程里的工作方式讲清楚：哪些 tensor 会记录梯度，计算图什么时候创建和释放，为什么梯度会累积，为什么推理阶段要关掉梯度，什么时候应该 `detach`，什么时候不该 `detach`，以及如何排查训练脚本里的梯度问题。
 
-## 0. 本章范围与资料
+## 2.0 本章范围与资料
 
 本章以 PyTorch 官方 Autograd 文档和说明为 API 语义依据，参考 automatic differentiation、autograd mechanics、`torch.autograd.grad`、`Tensor.backward`、`Tensor.detach`、`torch.no_grad`、`torch.inference_mode`、anomaly detection、`Optimizer.zero_grad` 和 activation checkpointing 文档，并结合前序数学基础、张量基础和训练循环章节的公式与工程口径。文末列出可直接核验的资料入口。
 
@@ -90,7 +90,7 @@ v^T J,\qquad J=\frac{\partial y}{\partial x}
 grad_t = grad_{t-1} + \frac{\partial L_t}{\partial \theta}
 ~~~
 
-梯度累积模拟大 batch 时的平均 loss：
+梯度累积模拟大 batch 时的平均 loss（假设每个 micro-batch 的有效样本或 token 权重相同）：
 
 ~~~math
 L_{\mathrm{micro}}^{scaled} = \frac{L_{\mathrm{micro}}}{K}
@@ -494,6 +494,8 @@ with torch.inference_mode():
 3. 训练阶段不要用 `no_grad()` 包住 forward，否则 loss 无法反向传播到参数。
 4. 两者都不会替代 `model.eval()`；随机 dropout 等模块行为仍由模型模式决定。
 
+`inference_mode()` 中产生的 inference tensor 不能无条件带回需要梯度的训练路径。如果推理结果要作为后续训练输入，应在离开上下文后明确 `clone()`，或重新执行带梯度的 forward；不要把“推理时算过一次”误认为训练图仍然存在。
+
 `model.eval()` 和 `torch.no_grad()` 不是一回事：
 
 1. `model.eval()` 影响 dropout、batch norm 等模块行为。
@@ -598,7 +600,7 @@ for param in model.parameters():
 print("grad_norm", total_norm)
 ```
 
-如果梯度全是 0 或 `None`，可能是图断了、loss 写错、mask 把所有 token 都忽略了、学习率过小、激活饱和或初始化有问题。
+如果梯度全是 0 或 `None`，可能是图断了、loss 写错、mask 把所有 token 都忽略了、学习率过小、激活饱和或初始化有问题。对 `reduction="mean"` 的分类 loss，还要先统计有效目标数量；全量 `ignore_index` 时没有可平均的监督，不能把得到的 `NaN` 解释成梯度消失。
 
 如果梯度是 `nan` 或 `inf`，要检查学习率、混合精度、loss scale、softmax 前是否出现极端值、mask 是否产生全 `-inf` 行。
 
@@ -802,12 +804,12 @@ Gradient checkpointing 会在 forward 时不保存部分中间激活，backward 
 典型 AMP 训练结构：
 
 ```python
-scaler = torch.cuda.amp.GradScaler()
+scaler = torch.amp.GradScaler("cuda")
 
 for batch in train_loader:
     optimizer.zero_grad(set_to_none=True)
 
-    with torch.cuda.amp.autocast():
+    with torch.autocast(device_type="cuda", dtype=torch.float16):
         logits = model(batch["input_ids"])
         loss = criterion(logits, batch["labels"])
 
@@ -896,10 +898,10 @@ loss_trace = []
 grad_norm_trace = []
 
 for _ in range(8):
+    optimizer.zero_grad(set_to_none=True)
     pred = model(inputs)
     loss = F.mse_loss(pred, targets)
 
-    optimizer.zero_grad(set_to_none=True)
     loss.backward()
     grad_norm = sum(
         p.grad.detach().norm().item()

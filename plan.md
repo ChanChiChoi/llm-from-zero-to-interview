@@ -693,6 +693,26 @@
 
 第六册第 8 章《并行推理与多 GPU 服务》、第 9 章《RAG 与 Agent 部署》、第 10 章《多模态部署》、第 11 章《监控评估与安全》、第 12 章《成本优化》、第 13 章《生产系统设计》、第 14 章《部署面试题》、第 15 章《FP4、MXFP4 与 NVFP4》、第 16 章《FP8 KV Cache》和第 17 章《Native INT4 与原生量化部署》已完成本轮逐章复读、扩展、资料核验和 demo 验证；第六册实际到第 17 章结束，下一章是第七册第 1 章《评估总览》。第 12 章额外修正了小样本最大值冒充 P95 的统计口径，第 13 章重写为围绕请求生命周期、容量、组件边界、故障恢复、版本回滚和单位成功成本的连续正文，第 14 章将每个部署问题拆为独立知识单元并修正 headroom 副本算术，第 15 章合并重复碎片并补齐 FP4 格式、scale、硬件、kernel、评估和回退证据，第 16 章修正了包含 K/V 两份状态的 BF16 KV 显存示例并将容量、质量和生命周期组织成独立知识单元，第 17 章删除重复摘要并补齐原生 INT4 的 artifact、kernel、校准、质量、容量和回滚主线；第七册第 1 章则重写为评估证据、任务契约、benchmark 边界、指标公式、统计、线上实验和 RAG 案例的连续正文。此段是当前状态，优先于上面的历史累计段落阅读。
 
+## 2026-08-14 会话恢复后续：第六册第 14 章
+
+第六册第 14 章已从第一行到末尾重新复读并整体改写为《部署方案的推导与故障复盘》。原文件以“部署面试题”为主线，包含示范回答、追问、自评和候选回答语义；本轮保留 70B 资源账本、TTFT、prefill/decode、continuous batching、KV Cache、PagedAttention、INT8/INT4、对话服务、RAG、prompt injection、成本和故障排查等知识，但改为连续教材叙事。70B 副本示例明确推导输入 token、输出 token、active sequence、headroom 和 N+1；第 12 节改成跨组件生产故障复盘；第 13 节改成 `design_requirements` / `observed_design` 的部署设计审计示例。文件重命名为 `book-06-llm-deployment/chapters/14-部署方案推导与故障复盘.md`，目录链接已同步。当前文件 903 行、43,064 字节；Python 示例通过 AST 和实际运行，输出 `base_replicas=6`、`nplus1_replicas=7`、`cost_saving_rate=0.173` 和 `decision='revise_design'`；32 个围栏成对，控制字符为 0，禁用内部写作话术检查和 `git diff --check` 通过。下一步从第六册第 15 章第一行开始继续逐章复读。
+
+## 2026-08-14 会话恢复后续：第六册第 15 章
+
+第六册第 15 章《FP4、MXFP4 与 NVFP4：四位浮点不是一个统一开关》已从第一行到末尾完整复读，并补充“支持矩阵的三层含义”小节。正文分别展开 FP4 payload、MXFP4 microscaling/block 组织、NVFP4 硬件与 engine 路径，以及权重、激活、KV、累加和 logits 的不同风险；补充 block scale 异常值、PTQ/QAT、四层性能证据、artifact manifest、fallback、验证矩阵和教学 codebook。联网核验了 TensorRT-LLM precision/quantization 页面、NVIDIA Model Optimizer 当前支持矩阵与量化指南、Hugging Face Transformers 量化总览/选择入口；Model Optimizer 支持矩阵明确记录 per-block FP4 权重与激活、Blackwell 及以后 GPU，TensorRT-LLM 文档单列 Blackwell NVFP4 示例。OCP microscaling PDF 本轮受站点验证限制，正文未把无法直接核验的规范细节写成厂商 profile 事实。当前文件 680 行、33,129 字节；Python 教学示例通过 AST 和实际运行，22 个围栏成对，控制字符为 0，禁用内部写作话术和 `git diff --check` 通过。下一步从第六册第 16 章第一行开始逐章复读。
+
+## 2026-08-14 会话恢复后续：第六册第 16 章
+
+第六册第 16 章《FP8 KV Cache：用低精度换长上下文并发》已从第一行到末尾完整复读。正文保留并细化 KV 显存公式、1M 上下文数量级、FP8 格式与 scale、K/V 不对称、静态/动态校准、page 生命周期、prefix sharing、抢占/swap/recompute、speculative 临时 KV、分页 allocator、按任务路由、长上下文评估、manifest、灰度和回滚。修正单成功任务成本公式，明确 `C_serve` / `C_verify` 是一次尝试成本，`p` 是带停止条件的成功概率，fallback/人工费用应作为独立期望项，避免重复计算重试成本；将中间诊断中的英文 candidate 改为“候选路径”。当前文件 616 行、26,932 字节；Python 容量与质量诊断示例通过 AST 和实际运行，输出 `bf16_gib=32.0`、`fp8_gib_with_overhead=17.28`、`memory_saving_rate=0.46`、`decision='selective_enablement'`；26 个围栏成对，控制字符为 0，禁用内部写作话术和 `git diff --check` 通过。网络核验因本轮 DNS 临时失败未取得新增 HTTP 响应，但正文保留 vLLM、TensorRT-LLM、Transformer Engine、Hugging Face、KIVI、KVQuant 和 PagedAttention 的资料边界，后续可再复核。下一步从第六册第 17 章第一行开始逐章复读。
+
+## 2026-08-14 会话恢复后续：第六册第 17 章
+
+第六册第 17 章《Native INT4：原生量化权重为什么不等于部署时再量化》已从第一行到末尾完整复读。正文分别展开 INT4 payload、PTQ/QAT、scale/zero point、group size、pack layout、artifact manifest、GPTQ/AWQ、W4A16/W4A8、native/dequant/fallback kernel、tensor/pipeline parallel、校准数据、层敏感性、perplexity 与任务切片、KV/speculative/multimodal/LoRA 组合、启动检查、trace、灰度回滚和企业代码助手取舍；保留“加载成功、字节兼容、数值兼容、任务兼容”三层边界。容量与质量 demo 通过 AST 和实际运行，输出 `bf16_total_gib=450.0`、`int4_total_gib=165.0`、`bf16_min_cards=7`、`int4_min_cards=3`、`quality_failures=['code_json']`、`recommendation='selective_int4_rollout'`；当前文件 1,156 行、46,392 字节，66 个围栏成对，控制字符为 0，禁用内部写作话术和 `git diff --check` 通过。第六册已完成从第 1 章到第 17 章的当前轮逐章复读，下一步进入第七册第 1 章。
+
+## 2026-08-14 会话恢复后续：第七册第 1 章
+
+第七册第 1 章《评估总览》已从第一行到末尾完整复读并完成教材化补充。正文围绕任务契约、能力/可靠性/安全/效率证据、离线与线上评估、人工与自动评估、回归集、benchmark 能力边界、指标分母、pass@k、RAG citation support、ASR/over-refusal、校准、配对差异、bootstrap、线上比例近似、judge 人工锚点、版本/污染/可复现性和客服 RAG 案例展开。新增第 5.9 节“如何为一张 benchmark 表建立证据索引”，将论文、官方 runner、leaderboard 和目标系统 replay 区分开；延伸阅读补充 MMLU-Pro、LiveCodeBench、KernelBench 入口。修正单位成功任务成本中 `C_retry` / `C_review` 的期望费用口径，并将 demo 的 `z_score >= 1.64` 标注为单侧独立比例近似信号，不作为自动发布结论。当前文件 1,163 行、47,658 字节；Python 多层评估诊断示例通过 AST 和实际运行，输出 `old_score=0.8027`、`new_score=0.8378`、`z_score=1.772`、`recommendation='conditional_rollout'`；60 个围栏成对，控制字符为 0，禁用内部写作话术和 `git diff --check` 通过。下一步从第七册第 2 章第一行开始逐章复读。
+
 ## 判断标准
 
 最终目标不是让书变成“所有热词合集”，而是让读者获得稳定、可迁移、可面试、可落地的知识体系。
@@ -1028,3 +1048,480 @@
 ## 2026-08-14 第十五册第 1 章连续复读记录
 
 第十五册第 1 章《多模态总览——从信号到证据》已完成从头到尾连续人工复读、教材化修订、算术核对、示例运行和资料边界检查。正文以原始信号—表示—对齐—融合—输出—证据链为主线，分别展开文本、图像、文档、音频、视频、传感器和动作表示，理解/检索/生成/控制四类任务，共同 embedding、encoder+connector、统一 token、扩散/流四类架构，patch/音频帧/视频 token 预算，延迟分解，多模态 label mask，反事实与 grounded 评估，媒体注入、隐私和合同会议证据助手；原稿的总览摘要、公式速查和 `gate_pass` 式流程已改为连续书稿叙事。当前文件 731 行、51 个唯一标题，9 组 math、1 组 Python、8 组 text 围栏成对；标准库 demo 实际输出图像 token 196/576/1024、connector shape `(2, 576, 4096)`、会议场景 9944 token、全部 checks=True，decision=`continue_with_budgeted_pipeline`。7 个代表性论文入口本轮均返回 HTTP 200，Python AST、围栏配对、重复标题和 `git diff --check` 均通过；正文明确区分论文机制、教学构造、产品声明和目标系统实测。下一步从头到尾连续阅读第十五册第 2 章，继续按完整书稿标准推进。
+
+## 2026-08-14 第十五册第 2 章连续复读记录
+
+第十五册第 2 章《CLIP 与图文对齐》已完成从头到尾连续人工复读、整章教材化重写、公式核对、代码运行和资料边界检查。原稿中的面试回答、项目表达、模板答案和 `gate_pass` demo 被删除，正文改为从固定标签到自然语言监督的连续教材，分别展开双塔表示契约、L2 normalization、cosine similarity、N×N 相似度矩阵、双向 InfoNCE、temperature、全局负样本、梯度累积、false negative、多正样本、zero-shot prompt ensemble、检索分母与 ANN、数据噪声/去重/语言迁移/许可隐私、CLIP 与 VLM 的责任边界、反事实评估和合同页面召回案例。当前文件 1,313 行、80 个标题无重复，34 组 math、2 组 Python、20 组 text 围栏成对；标准库 demo 实际输出 symmetric loss=0.000012、image/text 两方向排名全为 1、Recall@1=1.0、MRR=1.0、zero-shot 预测 chart、全部 checks=True，decision=`continue_to_real_data_evaluation`；PyTorch loss 骨架在项目虚拟环境中返回有限标量 loss。CLIP、OpenAI CLIP、CPC、ALIGN、LiT、SigLIP 和 FAISS 7 个资料入口均返回 HTTP 200，Python AST、围栏配对、重复标题和 `git diff --check` 均通过。正文明确区分共享空间相似度、检索排名、细粒度证据和真实系统复测。下一步从头到尾连续阅读第十五册第 3 章《Vision Encoder》，继续按完整书稿标准推进。
+
+## 2026-08-14 第十五册第 3 章连续复读记录
+
+第十五册第 3 章《Vision Encoder》已完成从头到尾连续人工复读、整章教材化重写、公式与算术核对、标准库 demo 运行和资料边界检查。原稿中的面试回答、模板答案和摘要式 token 速查被删除，正文改为从像素到视觉表示的连续教材，分别展开 CNN 局部归纳偏置/感受野/残差/多尺度特征，ViT patch embedding、padding 与无 padding 的 ceil/floor 口径、token 空间顺序、CLS/池化/patch tokens/多层特征，位置编码分辨率迁移，attention 与 MLP 成本，CLIP/SigLIP/MAE 预训练目标，processor 契约，OCR/图表/空间关系，多级合同页面视觉流水线以及 VLM projector 接口。当前文件 1,149 行、72 个标题无重复，36 组 math、1 组 Python、10 组 text 围栏成对；demo 实际验证 225×225、patch=14 时补齐网格 `(17,17)`、无 padding 网格 `(16,16)`，336 网格 `(24,24)`、CLS 位置表 `(577,1024)`、projector tokens `(2,576,4096)`、attention 成本比例 5.04/15.91，全部 checks=True，decision=`continue_to_encoder_benchmark`。ResNet、ViT、CLIP、SigLIP、MAE、Swin 和 OpenAI CLIP 7 个资料入口均返回 HTTP 200，Python AST、围栏配对、重复标题和 `git diff --check` 均通过；正文明确区分补齐网格与有效卷积、全局相似度与局部证据、教学算术与真实视觉能力。下一步从头到尾连续阅读第十五册第 4 章《VLM 架构》，继续按完整书稿标准推进。
+
+## 本轮执行记录：第十五册第 4 章
+
+第十五册第 4 章《VLM 架构》已完成从头到尾连续人工复读、整章教材化重写、符号统一、示例运行、资料核验和最终格式检查。正文以“视觉证据如何进入生成路径”为主线，分别展开 CLIP 与生成式 VLM 的任务边界、vision encoder/projector/LLM 的 shape contract、prefix 拼接、cross-attention、Q-Former、Perceiver Resampler、多图与多轮 placeholder、动态分辨率、上下文和延迟预算、训练冻结策略、assistant-only label mask、媒体注入与权限边界，以及带页码和区域引用的合同问答案例；删除原稿的摘要式架构速查和内部流程话术。当前文件 1,048 行、69 个唯一标题，31 组 math、20 组 text、1 组 Python 围栏成对；demo 实际输出 projector_params=4,198,400、projected_shape=(2,576,4096)、single_direct_total=708、multi_direct_total=2,120、multi_resampled_total=584、cross_attention_cells=524,288、assistant_label_count=32，全部 checks=True，decision=continue_to_grounded_vlm_evaluation。复读中修正了 `Q` 矩阵/数量混用、Resampler latent 符号、label loss 表述、Flamingo 作者拼写和一处未闭合 Markdown 围栏；LLaVA、Flamingo、BLIP-2、Perceiver IO、CLIP 论文及 OpenAI CLIP 实现入口均返回 HTTP 200，Python AST、围栏配对、重复标题和 `git diff --check` 均通过。正文区分原始论文机制、教学算术、官方实现行为和目标系统实测边界。下一步从头到尾连续阅读第十五册第 5 章《多模态 instruction tuning》，继续按完整书稿标准推进。
+
+## 本轮执行记录：第十五册第 5 章
+
+第十五册第 5 章《多模态 Instruction Tuning》已完成从头到尾连续人工复读、整章教材化重写、公式与数据契约核对、示例运行、资料核验和最终格式检查。原稿的“面试回答”、公式速查、`G_mm_sft`、`gate_pass` 和任务清单被删除，正文重建为从行为目标到可审计训练系统的连续教材，分别独立展开结构化样本 schema、媒体 id 与证据 annotation、视频/音频对象边界、chat template 编译、image reference 与视觉 token、assistant-only loss mask、多轮 shift、caption、VQA/计数、OCR、图表、grounding、文档问答、多图、多轮、视频、音频、拒答与安全、claim-level 支持率、近重复与切分污染、标注分歧、隐私许可、任务混合、有效 token、过采样、batch/collator、梯度累积、冻结策略、分层评估、反事实和单位成功任务成本，并贯穿合同页面案例。当前文件 1,504 行、78 个唯一标题，19 组 math、8 组 text、13 组 JSON、1 组 Python 围栏成对；标准库 demo 实际输出 8 类任务覆盖、label_tokens=117、assistant_tokens=117、max_total_tokens=1204、support_rate=1.0、refusal_accuracy=1.0，并识别坏 OCR 样本的 placeholder_mismatch、unsupported_answer、missing_refusal 和 safety_risk，全部 checks=True；Python AST、围栏配对、重复标题和 `git diff --check` 均通过。LLaVA、InstructBLIP、LLaVA-1.5、MiniGPT-4、TextVQA、ChartQA、MM-SafetyBench、Transformers 多模态模板、PyTorch CrossEntropyLoss 和 LLaVA 仓库入口本轮均返回 HTTP 200。正文明确区分原始论文、任务 benchmark、官方 API、版本绑定仓库和教学 demo 的证据边界。下一步从头到尾连续阅读第十五册第 6 章《Diffusion 基础》，继续按完整书稿标准推进。
+
+## 本轮执行记录：第十五册第 6 章
+
+第十五册第 6 章《Diffusion 基础》已完成从头到尾连续人工复读、整章教材化重写、公式推导、采样边界核对、示例运行、资料核验和最终格式检查。原稿的概念清单、面试模板和公式速查被重建为从生成分布到可控采样的连续教材，分别展开 DDPM forward 高斯链与闭式加噪、SNR、epsilon/x0/v/score 四种参数化、DDPM 后验与反向均值、随机采样、连续 score/SDE/概率流 ODE、DDPM/DDIM/Euler/Heun/DPM-Solver、U-Net、DiT token 与注意力成本、文本 cross-attention、classifier-free guidance、条件 dropout、latent diffusion 与 VAE scaling、progressive distillation、consistency、flow matching、完整训练/推理契约和七类失败诊断。原 CFG 公式中缺失的加号已修正，并补充了多样性下降与模式重复的独立失败模式。当前文件 1,297 行、78 个唯一标题，50 组 math、10 组 text、1 组 Python 围栏成对；标准库 demo 实际输出 alpha_bar、x_t、noise_mse=0.00437、reconstruction_mae=0.01096、ddpm_mean、score、v/epsilon round-trip 误差、CFG 结果和 latent_ratio=0.0208，全部 checks=True；Python AST、围栏配对、重复标题和 `git diff --check` 均通过。DDPM、DDIM、Score SDE、classifier guidance、CFG、LDM、DiT、DPM-Solver、progressive distillation、Consistency Models、Flow Matching 论文及 Diffusers scheduler 文档入口本轮均返回 HTTP 200。正文明确区分论文方法、教学算术、scheduler API 和目标硬件实测边界。下一步从头到尾连续阅读第十五册第 7 章《Stable Diffusion 与 DALL·E》，继续按完整书稿标准推进。
+
+## 本轮执行记录：第十五册第 7 章
+
+第十五册第 7 章《Stable Diffusion 与 DALL·E》已完成从头到尾连续人工复读、整章教材化重写、公式与算术核对、示例运行、资料核验和最终格式检查。原稿中多个生成模块、DALL·E 路线、控制方法和评估指标被压缩成速记，本轮按系统契约、模块责任、条件控制、个性化、离散 token、评估、安全和可运行审计分别展开；删除模板化回答和内部流程字段。当前文件 1,263 行、75 个标题，33 组 math、11 组 text、1 组 Python 围栏成对；demo 输出 latent_shape=(1,4,64,64)、element_ratio=0.020833、denoiser_calls=60、cross_attention_cells=1966080、img2img_noise_step=16、dalle_total_tokens=1040、dalle_image_token_ratio=64.0、all_checks_passed=True；相关原始论文、官方文档、开源实现和 benchmark 入口已核验，`git diff --check` 通过。下一步从头到尾连续阅读第十五册第 8 章《视频生成与 world model》。
+
+## 本轮执行记录：第十五册第 8 章
+
+第十五册第 8 章《视频生成与 World Model》已完成从头到尾连续人工复读、整章教材化重写、公式核对、资料核验、代码运行和最终格式检查。原稿把视频表示、video diffusion、时序一致性、Sora 类路线和 world model 写成清单或模板问答，本轮独立展开帧率与时间戳、张量布局与裁剪、时空 patch、token/attention 成本、视频 VAE、video diffusion 目标、CFG、级联/全时空/离散 token 路线、文生视频、图生视频、结构条件、闪烁/身份/运动/遮挡、长视频、状态转移、belief state、latent dynamics、JEPA/V-JEPA 2、Dreamer、rollout、MPC、物理与反事实、FVD/VBench、机器人控制边界、安全和失败诊断。当前文件 1,271 行、106 个标题，49 组 math、4 组 text、1 组 Python 围栏成对；demo 输出 framewise_tokens=4096、spatiotemporal_tokens=2048、latent_element_ratio=0.005208、denoiser_calls=48、minimum_identity_cosine=0.9987、linear_rollout_mae=0.002、audit_consistent=True；Python AST、重复标题、围栏配对和 `git diff --check` 均通过。上述视频生成、world model 与评估论文入口均返回 HTTP 200；Sora 官方页面本轮未返回 HTTP 状态，正文保留了这一证据边界。下一步从头到尾连续阅读第十五册第 9 章《语音与音频生成》。
+
+## 本轮执行记录：第十五册第 9 章
+
+第十五册第 9 章《语音与音频生成》已完成从头到尾连续人工复读、整章教材化重写、公式核对、资料核验、代码运行和最终格式检查。原稿把波形、ASR、TTS、codec、实时语音和安全写成清单或模板回答，本轮按信号表示、声学特征、识别、合成、codec token、实时对话、评估、安全和失败诊断独立展开。当前文件 1,164 行、94 个标题，33 组 math、11 组 text、1 组 Python 围栏成对；demo 输出 samples=51200、centered_mel_frames=320、valid_mel_frames=318、codec_tokens=640、codec_ratio=0.007812、wer=0.2、cer=0.045、first_audio_latency_ms=620、codec_lm_context=618、audit_consistent=True；Python AST、重复标题、围栏配对和 `git diff --check` 均通过。Whisper、wav2vec 2.0、WavLM、SoundStream、EnCodec、AudioLM、VALL-E、SpeechT5、NaturalSpeech 2、AudioPaLM、SeamlessM4T、SoundStorm、AudioGen、Moshi、CosyVoice 和 FAD 论文入口均返回 HTTP 200。下一步从头到尾连续阅读第十五册第 10 章《统一多模态模型》。
+
+## 本轮执行记录：第十五册第 10 章
+
+第十五册第 10 章《统一多模态模型》已完成从头到尾连续人工复读、整章教材化重写、资料核验、公式核对、Python demo 运行和最终格式检查。原稿把统一接口、共享表示、中心 LLM、Any-to-Any、跨模态 reasoning、memory、routing、loss mixture、安全和“最新模型”表压缩成定义清单、面试回答或未经证实的产品架构推断，本轮重建为贯穿合同审阅助手的连续教材，分别独立展开接口/表示/架构三层统一、文本/图像/音频/视频/文档 token 化、rate-distortion 与时间空间位置、token budget 与 attention 数量级、模块化 encoder-decoder、中心 LLM projector、early fusion、Unified-IO 2、Chameleon、Emu3、Show-o、Transfusion、Any-to-Any 输出契约、loss 归一化和任务冲突、跨模态证据与错误归因、模态冲突、上下文和长期记忆、路由与工具权限、延迟和单位成功成本、统一助手架构、公开资料证据等级、评估、安全和媒体 prompt injection。删除了模型猜测表、模板化问答、`gate_pass` 和内部流程话术。当前文件 1,305 行、103 个标题无重复，42 组 math、14 组 text、2 组 JSON、1 组 Python 围栏成对；标准库 demo 实际输出 total_input=1948、total_output=400、attention_cells_proxy=3794704、decoder_cells_proxy=779200、audit_consistent=True，Python AST、围栏配对、旧数学格式、内部话术和 `git diff --check` 均通过。Gemini 技术报告、ImageBind、Chameleon、Unified-IO 2、Emu3、Show-o、Transfusion、Flamingo、BLIP-2 和 LLaVA 入口本轮核验；正文明确区分论文机制、产品公开能力、教学构造和目标系统实测边界。下一步从头到尾连续阅读第十五册第 11 章，继续按教材标准审阅。
+
+## 本轮执行记录：第十五册第 11 章
+
+第十五册第 11 章《多模态评估与安全》已完成从头到尾连续人工复读、整章教材化重写、资料核验、公式核对、Python demo 运行和最终格式检查。原稿把 VQA、OCR、图表、grounding、幻觉、图像/视频/语音生成指标、prompt injection、deepfake、隐私、red teaming 和上线监控压缩成定义清单、面试回答或 `gate_pass` 式流程，本轮重建为从合同金额误读事故出发的连续教材，分别独立展开任务对象与参考答案、数据切片和污染、VQA 软匹配与反事实、OCR/CER/关键字段、图表读数/公式/单位、空间和时间 grounding、claim-level 忠实性、校准与选择性回答、FID/CLIPScore/FVD/VBench 的适用边界、视频时序、ASR/TTS/实时语音、媒体 prompt injection、deepfake 与 C2PA provenance、隐私、红队矩阵、线上漂移与事故复盘。删除模板化问答、`gates`、`gate_pass` 和内部流程话术。当前文件 1,049 行、87 个标题无重复，26 组 math、5 组 text、1 组 Python 围栏成对；标准库 demo 实际输出 vqa_accuracy=1.0、ocr_wer=0.25、asr_wer=0.2、chart_relaxed_accuracy=0.667、grounding precision_at_0_5=0.667、hallucination_rate=0.125、handled_high_risk=5、latency_ms=1180、audit_consistent=True；Python AST、围栏配对、旧数学格式、内部话术和 `git diff --check` 均通过。VQA、TextVQA、DocVQA、ChartQA 项目、POPE、FVD、CLIPScore、VBench、NIST GenAI Profile、OWASP LLM01 和 C2PA 规格入口本轮核验，并修正了原稿中 ChartQA/MME 的错误 arXiv 资料错配。下一步从头到尾连续阅读第十五册第 12 章，继续按教材标准审阅。
+
+## 本轮执行记录：第十五册第 12 章
+
+第十五册第 12 章《多模态综合问题》已完成从头到尾连续人工复读、整章教材化重写、公式核对、资料边界检查、Python demo 运行和最终格式检查。原稿是 38 道“问题—参考回答”题库，包含公式总表、标准答案、`readiness_gates` 和 `interview_ready`，本轮重建为从公开产品声明、VLM shape、CLIP 检索、SFT label mask、diffusion、视频与 world model、语音工具调用、统一 Any-to-Any、评估归因、安全注入、身份/provenance 到合同证据助手的连续综合教材；每个案例均独立展开假设、公式、shape、工程取舍、失败模式和控制实验。删除了题库式参考回答、准备度字段和内部流程话术。当前文件 850 行、88 个标题无重复，30 组 math、5 组 text、2 组 JSON、1 组 Python 围栏成对；标准库 demo 实际输出 coverage 的 topic/formula/demo/risk/tradeoff 均为 1.0、weak_evidence=['audio_generation', 'multimodal_safety', 'project_story']、missing 各项为空、audit_consistent=True；Python AST、围栏配对、旧数学格式、重复标题和 `git diff --check` 均通过。正文沿用前十一章已核验的 CLIP、ViT、LLaVA、BLIP-2、Flamingo、DDPM、LDM、ControlNet、Whisper、Gemini、Chameleon、Unified-IO 2、评估和安全资料，明确区分论文结论、产品公开行为、教学构造和目标系统实测边界。下一步从头到尾连续阅读第十五册第 13 章，继续按教材标准审阅。
+
+## 本轮执行记录：第十五册第 13 章
+
+第十五册第 13 章《Encoder-Free Unified Multimodal》已完成从头到尾连续人工复读、整章教材化重写、资料核验、公式核对、Python demo 运行和最终格式检查。原稿把 encoder-free、统一 token 流、位置/mask、训练目标、部署接口和评估写成重复摘要，并混入“面试回答”和旧 ` ```math ` 围栏；本轮重建为术语边界和架构证据教材，独立展开 encoder、tokenizer、patchifier、接口/表示/目标三层统一、序列布局、二维/三维位置、attention mask、连续/离散/混合 token、rate-distortion、训练冲突、模态干扰、公开路线、processor 回放契约、反事实评估、外部媒体安全、失败归因和表格截图案例。当前文件 557 行、52 个标题无重复，13 组 math、8 组 text、1 组 JSON、1 组 Python 围栏成对；标准库 demo 实际输出 total_tokens=1948、attention_cells_proxy=3794704、positions 包含 1d/2d/time+codebook/3d、四类反事实均声明、audit_consistent=True；Python AST、围栏配对、旧数学格式、内部话术和 `git diff --check` 均通过。Chameleon、Unified-IO 2、Emu3、Show-o、Transfusion 和 ImageBind 入口本轮核验；正文明确区分公开架构事实、教学抽象、受控实验和未公开内部细节。下一步从头到尾连续阅读第十五册第 14 章，继续按教材标准审阅。
+
+## 本轮执行记录：第十五册第 14 章
+
+第十五册第 14 章《Native Multimodal 的有效上下文账本》已完成从头到尾连续人工复读、整章教材化重写、公式核对、资料边界检查、Python demo 运行和最终格式检查。原稿把 native multimodal、图像/音频/视频 token、动态分辨率、KV/cache、RAG、超预算回退和质量曲线压缩成重复速记，并混入旧 ` ```math ` 和“面试回答”；本轮重建为从发票与长视频预算事故出发的完整教材，分别展开输入/输出/协议/工具预算、processor 契约、上下文上限与有效能力、分辨率/帧率/codec 取舍、动态预算、长文档/长视频两阶段处理、attention/KV、cache key、覆盖报告、质量—成本曲线、Native multimodal 证据边界、发票 OCR、视频时间覆盖和多模态 RAG。当前文件 634 行、50 个标题无重复，21 组 math、2 组 text、1 组 JSON、1 组 Python 围栏成对；标准库 demo 实际输出 full_total=40664、fallback_total=20976、context_limit=32768、coverage_report_required=True、audit_consistent=True；Python AST、围栏配对、旧数学格式、内部话术和 `git diff --check` 均通过。Gemini、Chameleon、Unified-IO 2、Emu3、Show-o、Transfusion、ViT 和 Transformers 多模态模板文档入口本轮核验；正文明确区分 API 上限、processor 实际序列、有效任务能力、教学账本和目标硬件实测。下一步从头到尾连续阅读下一册，继续按教材标准审阅。
+
+## 本轮执行记录：第十六册第 1 章
+
+第十六册第 1 章《Reasoning 总览》已完成从头到尾连续人工复读、整章教材化重写、联网资料核验、公式核对、Python demo 运行和最终格式检查。原稿把 reasoning、CoT、self-consistency、verifier、process supervision、search、test-time compute、RLVR 和安全压缩成摘要、列表、面试回答与内部验收字段，并包含未经充分核验的最新模型表；本轮重建为从答案/过程/能力区分开始的完整教材，独立展开推理轨迹、chat/reasoning 系统边界、CoT 的计算空间与可见解释、采样相关错误、outcome/process/programmatic verifier、reward model 与 reward hacking、搜索树与工具环境、质量—预算曲线、单位成功成本、RLVR 与 DeepSeek-R1 的公开证据边界、数学/代码/规划/开放任务、污染与反事实评估、安全和合同助手综合案例。当前文件 1,047 行，24 组 math、4 组 text、1 组 Python，共 29 组 fenced blocks 且全部成对；demo 实际输出 greedy_accuracy=0.25、self_consistency_accuracy=0.75、verifier_accuracy=1.0、pass_at_2_est=0.917、process_step_accuracy=0.759、total_tokens=1042，Python AST、旧数学格式、内部话术和 diff check 均通过。联网核验了 CoT、Self-Consistency、数学验证器、过程监督、Tree of Thoughts、GSM8K、HumanEval、DeepSeek-R1 论文，以及 OpenAI、Anthropic、Gemini 官方 reasoning 文档；正文明确区分论文结论、官方接口、教学构造和目标系统实测边界。下一步从头到尾连续阅读第十六册第 2 章《Chain-of-Thought》。
+
+## 本轮执行记录：第十六册第 2 章
+
+第十六册第 2 章《Chain-of-Thought》已完成从头到尾连续人工复读、整章教材化重写、联网资料核验、公式核对、Python demo 运行和最终格式检查。原稿把 CoT、few-shot、zero-shot、scratchpad、hidden CoT、faithfulness、数据构造、工具使用和路由压缩成摘要、提示词清单、面试回答与内部验收字段；本轮重建为从直接回答到中间状态的完整教材，独立展开 CoT 与自回归生成、few-shot 示例选择、zero-shot 的有效边界、scratchpad/可见解释/隐藏过程区分、反事实干预和忠实性指标、CoT 训练损失掩码、蒸馏、答案 parser、工具轨迹、动态路由、长 CoT 成本与安全、合同付款综合案例。当前文件 945 行，21 组 math、3 组 text、1 组 JSON、1 组 Python，共 25 组 fenced blocks 且全部成对；demo 实际输出 direct_accuracy=0.5、cot_accuracy=0.667、routed_accuracy=0.833、step_accuracy=0.692、cost_per_routed_correct=35.2，Python AST、旧数学格式、内部话术和 diff check 均通过。联网核验了 CoT、Zero-shot CoT、Scratchpads、Faithful CoT、Unfaithful Explanations、CoT code reasoning、Let's Verify Step by Step 论文，以及 OpenAI、Anthropic、Gemini 官方 reasoning 文档；正文明确区分论文实验、官方接口、教学构造和目标系统实测边界。下一步从头到尾连续阅读第十六册第 3 章《Self-Consistency 与采样》。
+
+## 本轮执行记录：第十六册第 3 章
+
+第十六册第 3 章《Self-Consistency 与采样》已完成从头到尾连续人工复读、整章教材化重写、联网资料核验、公式核对、Python demo 运行和最终格式检查。原稿把 self-consistency、temperature、top-k/top-p、答案抽取、majority、weighted vote、pass@k 和 verifier 组合压缩成采样速记、面试回答与内部验收字段；本轮重建为从候选集合和随机分布开始的完整教材，独立展开 greedy/temperature/top-k/top-p、答案与轨迹多样性、相关错误、等价类归一化、平票与聚合、pass@k 与最终选择的边界、token/延迟/单位成功成本、自适应采样与早停、verifier 校准、失败归因、代码候选案例和安全工具动作。当前文件 950 行，22 组 math、3 组 text、1 组 Python，共 26 组 fenced blocks 且全部成对；demo 实际输出 greedy_accuracy=0.2、majority_accuracy=0.8、weighted_accuracy=1.0、pass_at_2_est=0.907、avg_unique_answer_ratio=0.53、total_candidates=21、total_tokens=1003，Python AST、旧数学格式、内部话术和 diff check 均通过。联网核验了 Self-Consistency、HumanEval、nucleus sampling、temperature sampling 和 Transformers 生成文档；正文明确区分论文评估口径、框架参数语义、教学构造和目标系统实测边界。下一步从头到尾连续阅读第十六册第 4 章《Verifier 与 Reward Model》。
+
+## 2026-08-14 第十六册第 5 章连续复读记录
+
+第十六册第 5 章《过程监督：把“哪里错了”变成可学习信号》已完成从头到尾连续人工复读、整章教材化重写、联网资料核验、公式核对、Python demo 运行和最终格式检查。原稿把过程监督、步骤标注、PRM、第一处错误、自动监督、搜索、强化学习和风险压缩成摘要、面试模板和 `gate_pass` 字段；本轮重建为从结果监督与过程监督的差别开始的完整教材，独立展开答案/步骤/状态三个监督对象、步骤粒度、正确性与相关性、数据 schema、错误类型、标注分歧、PRM 与 ORM、平均/最小/加权聚合、pointwise/pairwise 训练、hard negative、第一处错误与错误传播、代码/数学/引用的自动监督、搜索剪枝、过程奖励、步骤/排序/校准/下游指标、合同金额案例、成本、安全和权限。当前文件 1,114 行，32 组 math、9 组 text、2 组 JSON、1 组 Python 围栏成对；demo 实际输出 outcome_accuracy=0.667、step_accuracy=0.833、first_error_accuracy=1.0、relevant_step_ratio=0.944、auto_label_coverage=0.556、human_label_cost=16、search_top1_accuracy=0.667，并识别 `lucky_answer`、`format_error`、`hard_negative_state` 等盲区；Python AST、旧数学格式、内部话术、重复标题和 `git diff --check` 均通过。联网核验了 Training Verifiers、Let's Verify Step by Step 和 OpenAI PRM800K 公开仓库；OpenAI 介绍页本轮返回 403，正文没有把它当作已读取证据，并明确区分论文结论、公开仓库、教学构造和目标系统复测。下一步从头到尾连续阅读第十六册第 6 章《Search 与 Tree-of-Thought》。
+
+## 2026-08-14 第十六册第 6 章连续复读记录
+
+第十六册第 6 章《搜索推理：从状态空间到可控探索》已完成从头到尾连续人工复读、整章教材化重写、联网资料核验、公式核对、Python demo 运行和最终格式检查。原稿把 search、Tree-of-Thought、beam、best-first、MCTS、verifier、剪枝、工具反馈和成本压缩成摘要、面试回答和 `gate_pass` 字段；本轮重建为从水壶和合同证据路径案例开始的完整教材，独立展开状态/动作/转移/终止、轨迹与搜索树、分支复杂度和有效分支、节点/token/工具账本、ToT thought 粒度、beam 长度偏差、best-first/A*/回溯、状态合并、MCTS 四阶段与 UCT、Language Agent Tree Search 的环境边界、评分组合、硬约束与软评分、正确路径误剪、多样性、self-consistency 对照、工具隔离、并行/缓存、搜索增益和生成失败/选择失败归因。当前文件 983 行，27 组 math、7 组 text、1 组 Python 围栏成对；demo 实际输出 greedy_accuracy=0.25、beam_accuracy=0.75、mcts_accuracy=1.0、avg_unique_answer_ratio=0.75、total_nodes_expanded=16、total_tokens=980、cost_per_beam_correct=326.667，并识别 `pruned_correct_paths=['hard_negative']` 和 MCTS rescue；Python AST、旧数学格式、内部话术、重复标题和 `git diff --check` 均通过。联网核验了 Tree of Thoughts、Language Agent Tree Search、AlphaZero、MCTS review、Self-Consistency 和过程监督论文入口；正文明确区分经典搜索定义、论文实验、工具环境抽象、教学构造和目标系统复测。下一步从头到尾连续阅读第十六册第 7 章《Test-Time Compute Scaling》。
+
+## 2026-08-14 第十六册第 7 章连续复读记录
+
+第十六册第 7 章《推理时计算扩展：质量曲线、预算分配与自适应路由》已完成从头到尾连续人工复读、整章教材化重写、联网资料核验、公式核对、Python demo 运行和最终格式检查。原稿把 test-time compute、Best-of-N、self-consistency、verifier、adaptive compute、multi-agent、reasoning effort 和成本压缩成摘要、面试模板和 `gate_pass` 字段；本轮重建为从四类请求的预算差异开始的完整教材，独立展开预算向量、候选覆盖与选择、pass@K 边界、相关错误、质量—成本曲线、边际收益、动态停止、难度/价值/风险路由、并行与串行延迟、P50/P95、multi-agent 与产品控制面的证据边界、合同付款助手和单位成功成本。当前文件 852 行，19 组 math、3 组 text、1 组 JSON、1 组 Python 围栏成对；demo 实际输出 fixed search accuracy=0.833、adaptive accuracy=0.833、adaptive total_cost=3223.0、search total_cost=6460.0、adaptive p95=1420，并识别 `wasted_high_compute=['adversarial_math']`；Python AST、旧数学格式、内部话术、重复标题和 `git diff --check` 均通过。联网核验了 Scaling LLM Test-Time Compute Optimally、Large Language Monkeys、Tree of Thoughts、Self-Consistency、DeepSeek-R1 和 Training Verifiers 论文入口；正文明确区分论文实验、产品公开控制面、教学曲线和目标系统复测。下一步从头到尾连续阅读第十六册第 8 章《数学推理训练》。
+
+## 2026-08-14 第十六册第 4 章连续复读记录
+
+第十六册第 4 章《Verifier 与 Reward Model》已完成从头到尾连续人工复读、整章教材化重写、联网资料核验、公式核对、Python demo 运行和最终格式检查。原稿中 verifier、reward model、ORM/PRM、训练目标、hard negative、reranking、校准和 reward hacking 容易被压缩成定义清单或面试回答，本轮重建为从候选集合和任务契约开始的完整教材，分别展开 outcome/process/programmatic verifier、reward model 与任务真值的边界、pointwise/pairwise/listwise 目标、生成器与验证器分布偏移、best-of-N/search、pairwise/top-1/hard-negative/ECE、长度/格式/自信语气偏差、不确定状态、成本账本、合同金额与代码候选、安全权限和失败归因。当前文件 1,072 行，19 组 math、1 组 text、1 组 Python 围栏成对；demo 实际输出 greedy_accuracy=0.2、rm_rerank_accuracy=0.8、hybrid_verifier_accuracy=1.0、pairwise_accuracy=0.9、hard_negative_accuracy=0.75、process_step_accuracy=0.679、rm_ece=0.165、rm_failures=['distractor_math']、hybrid_rescues=['distractor_math']、total_tokens=693、cost_per_hybrid_correct=138.6，Python AST、旧数学格式、内部话术和 diff check 均通过。联网核验了 Training Verifiers、Let's Verify Step by Step、InstructGPT、Learning to Summarize from Human Feedback、RewardBench、HumanEval、Self-Consistency 论文及 Transformers 生成文档；正文明确区分论文实验、官方接口、教学构造和目标系统实测边界。下一步从头到尾连续阅读第十六册第 5 章《Process Supervision》。
+## 2026-08-14 会话恢复校正：第十六册第 8—9 章
+
+以本次会话恢复后的实际文件复读和运行结果为准：第 8 章已完整复读，当前 941 行，17 组 math、6 组 text、1 组 JSON、1 组 Python 围栏成对，数学审计 demo 与预期输出一致；第 9 章已从旧的摘要/模板稿整章重写为 1,013 行教材正文，覆盖规格、执行反馈、测试 verifier、pass@k、候选选择、self-debug、搜索、训练数据、环境、成本、安全沙箱和统计评估，代码审计 demo 与预期输出一致。两章正文均未保留门禁、面试回答模板或旧 ` ```math ` 格式。第 9 章使用的论文和官方文档入口已复核，下一目标是从头到尾阅读第十六册第 10 章 `book-16-reasoning-models/chapters/10-reasoning评估.md`。
+## 2026-08-14 会话恢复校正：第十六册第 10 章
+
+第十六册第 10 章已完成从旧的指标速查/面试模板稿到 786 行教材正文的重写，覆盖评估对象、oracle、最终答案、过程质量、变体与鲁棒性、污染、推理时计算预算、配对统计、bootstrap、judge、人评、成本和合同证据助手案例；评估 demo 与预期输出一致，正文不含门禁、面试回答模板或旧 ` ```math ` 格式。下一目标：从头到尾阅读第十六册第 11 章 `book-16-reasoning-models/chapters/11-reasoning安全与局限.md`。
+## 2026-08-14 会话恢复校正：第十六册第 11 章
+
+第十六册第 11 章已从旧的风险清单、面试题和内部验收字段重写为 830 行防御性教材，覆盖伪推理、过度自信、CoT 隐私与忠实性、长链错误、reward hacking、工具权限、提示注入、高风险边界、红队评估、严重度和事故响应；安全 demo 与预期输出一致，正文不含门禁、面试回答模板或旧 ` ```math ` 格式。下一目标：从头到尾阅读第十六册第 12 章 `book-16-reasoning-models/chapters/12-reasoning面试题.md`。
+
+## 2026-08-14 会话恢复后续：第十六册第 12 章与第十七册第 1 章
+
+第十六册第 12 章已完成整章复读、教材化重写和验证；实际文件为 `book-16-reasoning-models/chapters/12-reasoning面试题.md`，不再使用历史记录中的 `12-reasoning综合复习.md`。第十七册第 1 章 `book-17-agent-tool-use/chapters/01-agent总览.md` 随后完成整章复读和重写，当前 804 行，已移除正文中的面试回答、内部检查字段和旧数学围栏，补入 Agent 形式化状态、长周期任务、成本安全分析和可运行 trace 审计实验。下一步从头到尾阅读第十七册第 2 章 `book-17-agent-tool-use/chapters/02-tool-use与function-calling.md`。
+
+第十七册第 2 章 `book-17-agent-tool-use/chapters/02-tool-use与function-calling.md` 已完成整章复读和重写，当前 976 行；已将工具选择、schema、参数语义、权限、执行器、结构化结果、错误恢复和不可信 observation 独立展开，并完成 Python 审计实验验证。下一步从头到尾阅读第十七册第 3 章 `book-17-agent-tool-use/chapters/03-react与plan-act-observe.md`。
+
+第十七册第 3 章 `book-17-agent-tool-use/chapters/03-react与plan-act-observe.md` 已完成整章复读和重写，当前 975 行；已将 ReAct 与 Plan-Act-Observe 放入统一状态转移框架，补入计划粒度、计划漂移、无进展检测、停止与恢复、部分可观察环境和分层评估。下一步从头到尾阅读第十七册第 4 章 `book-17-agent-tool-use/chapters/04-planning与task-decomposition.md`。
+
+第十七册第 4 章 `book-17-agent-tool-use/chapters/04-planning与task-decomposition.md` 已完成整章复读和重写，当前 780 行；已将子任务契约、依赖 DAG、关键路径、并行合并、计划版本、长期 checkpoint、失败恢复和规划成本收益独立展开，并完成 Python 审计实验验证。下一步从头到尾阅读第十七册第 5 章 `book-17-agent-tool-use/chapters/05-memory系统.md`。
+
+第十七册第 5 章 `book-17-agent-tool-use/chapters/05-memory系统.md` 已完成整章复读和教材化扩写，当前 1,127 行；章末原有的面试题、回答要点和内部检查字段已改为记忆命名空间与权限边界、记忆提升、主存储/索引/缓存/摘要/备份的删除传播、墓碑与版本一致性、长期任务 checkpoint 恢复、记忆影响追踪，以及 Python 3.11 与旧 Python 3.9 的 CI/production 冲突 worked example。新增集合、生命周期、可用性、恢复质量和版本选择公式、最小伪代码、练习与证据边界；memory demo 实际运行输出与正文预期一致，Python AST、34 对围栏、重复标题、旧数学格式、正文内部流程话术和 `git diff --check` 均通过。下一步从头到尾阅读第十七册第 6 章 `book-17-agent-tool-use/chapters/06-agentic-rag.md`，继续检查查询规划、证据检索、阅读循环、引用和 Memory/RAG 边界。
+
+第十七册第 6 章 `book-17-agent-tool-use/chapters/06-agentic-rag.md` 已完成整章复读和教材化重写，当前 1,030 行；删除了章内面试回答、回答要点和 gate 字段，新增证据账本、查询控制循环、GraphRAG 与 Agentic RAG 的边界、claim/证据/引用三层关系、检索内容与控制平面的安全分离、完整调研循环、练习和资料证据边界。保留并修正了 0 依赖 Python audit demo，实际输出与正文预期一致，展示低 context precision、过期 runtime 证据、claim 引用错误、同 key 冲突、提示注入拦截和越权文档拦截。当前章 30 对围栏、1 个 Python block、重复标题和重复段落检查均通过，旧数学围栏、`gate_pass`、`门禁`、`准入`、面试模板、`$$`、`\text` 和 `git diff --check` 均无命中；本轮联网核验 RAG、ReAct、Self-RAG、FLARE、IRCoT、Microsoft GraphRAG、OpenAI file search 和 OWASP 入口，8 个链接均返回 HTTP 200。下一步从头到尾阅读第十七册第 7 章 `book-17-agent-tool-use/chapters/07-code-agent.md`，继续检查代码检索、工作区读写、执行反馈、测试、沙箱和副作用控制。
+
+第十七册第 7 章 `book-17-agent-tool-use/chapters/07-code-agent.md` 已完成整章复读和教材化重写，当前文件 761 行；删除了章内面试回答、回答要点和 gate 字段，新增任务契约、仓库观察、validated patch 交付链、工作区快照与用户已有改动保护、依赖变更审计、沙箱/命令策略、未知副作用、可验证轨迹练习和资料证据边界。保留并修正 0 依赖 Python audit demo，实际输出与正文预期一致，展示任务失败、测试缺口、无关改动、依赖变化、用户改动触碰、重复命令和高风险命令拦截；当前章 21 对围栏、1 个 Python block、重复标题和重复段落检查均通过，旧数学围栏、`gate_pass`、`门禁`、`准入`、面试模板、`$$`、`\text` 和 `git diff --check` 均无命中。本轮核验 SWE-bench、SWE-agent、OpenAI Codex CLI 和 Claude Code 资料入口，4 个链接均返回 HTTP 200。下一步从头到尾阅读第十七册第 8 章 `book-17-agent-tool-use/chapters/08-browser与computer-use-agent.md`，继续检查网页观察、视觉定位、点击/输入动作、登录权限、提示注入和不可逆外部副作用。
+
+第十七册第 8 章 `book-17-agent-tool-use/chapters/08-browser与computer-use-agent.md` 已完成整章复读和教材化重写，当前文件 732 行；删除了章内面试回答、回答要点和 gate 字段，新增观察—目标定位—动作—状态确认闭环、API/DOM/accessibility tree/视觉通道选择、身份隔离、两阶段确认、未知提交状态、网页注入防御、结果/过程/风险三层评估、练习和资料证据边界。保留并修正 0 依赖 Python audit demo，实际输出与正文预期一致，展示错误填表、误点击、弹窗恢复、未确认高风险动作、重复动作和注入拦截；当前章 18 对围栏、1 个 Python block、重复标题和重复段落检查均通过，旧数学围栏、gate_pass、门禁、准入、面试模板、旧数学格式和 git diff check 均无命中。本轮核验 MiniWoB++、WebArena、OSWorld、Anthropic computer use、OpenAI computer use 和 OWASP 入口，6 个资料链接均返回 HTTP 200。下一步从头到尾阅读第十七册第 9 章 `book-17-agent-tool-use/chapters/09-multi-agent.md`，继续检查角色分工、消息协议、共享状态、并行协作、冲突合并和责任归因。
+
+第十七册第 9 章 `book-17-agent-tool-use/chapters/09-multi-agent.md` 已完成整章复读和教材化重写，当前 824 行；删除了导言和章末的面试表达/回答要点，新增角色契约、结构化消息、blackboard 权限过滤、coordinator 状态机、Debate/Verifier/投票的机制边界、单 Agent baseline、Agent Swarm 成本与责任边界、可审计协作设计、练习和资料证据边界。保留并修正 0 依赖 Python audit demo，实际输出与正文预期一致，展示任务成功率、单 Agent lift、角色匹配、消息 schema、证据支持、冲突解决、重复劳动、权限违规、不必要多 Agent 和平均成本；当前章 22 对围栏、1 个 Python block、重复标题和重复段落检查均通过，旧数学围栏、gate_pass、门禁、准入、面试模板、旧数学格式和 git diff check 均无命中。本轮核验 AutoGen、CAMEL、MetaGPT、ChatDev、AI Safety via Debate 和多 Agent survey 入口，6 个资料链接均返回 HTTP 200。下一步从头到尾阅读第十七册第 10 章 `book-17-agent-tool-use/chapters/10-agent评估.md`，继续检查任务成功、轨迹质量、成本、可靠性、安全和多 Agent 对照评估。
+
+## 2026-08-14 会话恢复后续：第十七册第 10 章
+
+第十七册第 10 章 `book-17-agent-tool-use/chapters/10-agent评估.md` 已完成从头到尾顺序复读、整章教材化重写、联网资料核验、公式格式修正、Python demo 运行和最终格式检查。原稿把任务成功、工具调用、trace、benchmark、LLM judge、成本和安全压成指标清单，并含有“面试回答”、`gates`/`gate_pass` 和“上线准入”式内部话术；本轮重建为从任务契约到外部状态验收的完整教材，独立展开评估样本与事件账本、任务/过程/陈述三类验收、部分成功 rubric、工具与参数语义合法性、observation 与状态更新、trace 忠实性、错误恢复、长期 checkpoint、真实 benchmark、数据切分与污染、sandbox 复现、自动/人工/LLM judge 边界、安全测试、单位成功任务成本、回归切片、baseline 与 harness-aware evaluation、失败第一分歧点、多 Agent 公平比较，以及电商订单和企业政策 Agent 两个综合案例。当前文件 1,024 行；demo 实际输出 `task_success_rate=0.4`、`avg_partial_score=0.65`、`summary_faithfulness=0.4`、`claim_support_rate=0.6`、`unauthorized_action_rate=0.056`、`p95_latency_ms=5000`、`all_checks_pass=False`，输出与正文分析一致；Python AST、围栏配对、重复标题、旧 ` ```math `、`门禁`、`准入`、面试模板、`gate_pass` 和 `gates=` 均无命中，`git diff --check` 通过。本轮联网核验 OpenAI Evals、AgentBench、WebArena、OSWorld、SWE-bench、GAIA、τ-bench 和 ToolBench 入口；正文区分论文任务定义、官方仓库/文档、产品页信号、教学构造和目标系统实测边界。下一步进入第十七册第 11 章 `book-17-agent-tool-use/chapters/11-agent安全.md`，继续逐章复读权限、提示注入、不可信工具输出、数据泄露、审批和高风险动作控制。
+
+## 2026-08-14 会话恢复后续：第十七册第 11 章
+
+第十七册第 11 章 `book-17-agent-tool-use/chapters/11-agent安全.md` 已完成整章复读和整章防御性教材化重写，当前 763 行；删除了章内面试模板、`G_safe_agent`、`gates`/`gate_pass` 和上线准入式内部话术，重建为“身份—数据—执行—恢复”四条信任边界，新增能力令牌、权限策略状态机、三时刻权限检查、Evidence/Authorization schema 分离、数据出域账本与暴露量估计、沙箱契约和负向测试、未知状态与幂等处理、审计事件最小结构、不可逆动作补救、memory 删除传播、工具生态变更、跨 Agent 消息契约、反事实安全评估、严重度加权风险和合同助手综合案例。安全 demo 实际输出与正文分析一致；Python AST、围栏配对、重复标题、旧数学格式、内部话术和 `git diff --check` 均通过。本轮联网核验 OpenAI Model Spec、OpenAI Agents SDK Guardrails/Tools、OWASP GenAI Prompt Injection、NIST AI RMF Generative AI Profile 和 MITRE ATLAS 入口，正文区分规范、风险分类、SDK 接口、教学构造和目标系统实测边界。下一步从头到尾阅读第十七册第 12 章 `book-17-agent-tool-use/chapters/12-agent面试题.md`，继续检查综合章是否仍是题库或模板，并改为围绕全册案例的教材化综合复习。
+
+## 2026-08-14 会话恢复后续：第十七册第 12 章
+
+第十七册第 12 章 `book-17-agent-tool-use/chapters/12-agent面试题.md` 已完成从头到尾顺序复读和教材化重写。原稿是题库式综合章，正文曾把 Agent、工具、ReAct、规划、Memory、RAG、Code Agent、Browser/Computer Use、Multi-Agent、评估和安全压缩成固定回答；本轮改为围绕合同助手的连续系统教材，独立展开 Agent 边界、最小轨迹、工具 registry/schema/policy/executor、ReAct、Plan-Act-Observe、任务分解与规划成本、Memory/RAG、Agentic RAG 证据状态机、Code Agent 的 `ValidatedPatch`、API/DOM/accessibility tree/视觉通道、Computer Use 的观察—动作—验证、Multi-Agent 净收益与 blackboard、危险动作三类评估、综合系统、失败诊断、合同案例和综合练习。新增内容均进入对应主题正文，不以一句摘要代替章节论证；补入公式、表格、案例、失败状态、评估口径和证据边界。当前文件 712 行、标题无重复，7 组 math、2 组 text、3 组 backtick 围栏均成对；嵌入 Python demo 实际运行并输出 `all_checks_pass=False`，该结果有意暴露工具调用确认、Code Agent 失败证据和综合安全评估的教学缺口；Python AST、围栏配对、禁止内部话术和 `git diff --check` 均通过。本章资料入口覆盖 OpenAI Agents SDK、Model Spec、OpenAI Evals、AgentBench、WebArena、OSWorld、SWE-bench、GAIA 和 τ-bench，正文区分官方接口、论文任务定义、教学构造和目标系统实测。下一步从头到尾阅读第十七册第 13 章 `book-17-agent-tool-use/chapters/13-agentworld模型与环境闭环.md`，继续检查模型—环境接口、状态转移、观测、奖励/验收、模拟器和真实环境差异。
+
+## 2026-08-14 会话恢复后续：第十七册第 13 章
+
+第十七册第 13 章 `book-17-agent-tool-use/chapters/13-agentworld模型与环境闭环.md` 已完成从头到尾顺序复读和整章教材化重写。原稿把 AgentWorld、状态/观测/动作、代码和浏览器环境、reset、沙箱、反馈、轨迹和 benchmark 写成短段落提纲，并保留旧 ` ```math ` 围栏和“面试回答”标题；本轮重建为从“会回答”到“会完成”的环境闭环教材，独立展开 Agent/环境/harness 三对象、MDP/POMDP、任务契约、成功/风险/部分完成、observation 投影与新鲜度、action 三层校验、事件账本与 unknown、代码 patch、浏览器业务状态、数据库一致性、reset 契约、沙箱公平性、反馈分类、外部 verifier、第一分歧点、模型/工具/环境对照、长任务 checkpoint、环境版本治理、常见漏洞、数字例子和环境审计 demo。当前文件 736 行、45 个标题无重复，14 组 math、6 组 JSON/text/Python 围栏共 20 组且全部成对；Python demo 实际输出 `good_success=True`、`bad_success=False`、`bad_last_event=action_rejected`、`good_hash_recorded=True`、`reset_clean=True`；Python AST、围栏配对、旧数学格式、内部流程话术和 `git diff --check` 均通过。本轮联网核验 Gymnasium Environment API、AgentBench、WebArena、OSWorld、SWE-bench 和 BrowserGym 入口，返回 HTTP 200；正文区分经典教材、官方接口、论文 benchmark、教学构造和目标系统实测边界。下一步从头到尾阅读第十七册第 14 章 `book-17-agent-tool-use/chapters/14-agent-swarm并行协作.md`，继续检查并行任务、共享状态、调度、冲突、成本和安全边界。
+
+## 2026-08-14 会话恢复后续：第十七册第 14 章
+
+第十七册第 14 章 `book-17-agent-tool-use/chapters/14-agent-swarm并行协作.md` 已完成从头到尾顺序复读和整章教材化重写。原稿把 Swarm、角色、共享记忆、通信、关键路径、冲突、权限、取消和评估压成重复提纲，并含旧 ` ```math ` 围栏、“面试回答”标题和提交闸门式内部话术；本轮重建为从拆分理由到外部提交的完整并行协作教材，独立展开单 Agent/Workflow/Swarm 边界、任务 DAG、角色契约和所有权、结构化消息与 artifact、blackboard/隔离 workspace、Map—Reduce、代码 swarm、证据独立性、coordinator 状态机、租约/取消/部分完成、exactly-once 业务幂等、通信与关键路径成本、预算容量、安全边界、失败恢复、baseline/消融、净收益、降级和协作 trace。当前文件 536 行、31 个标题无重复，7 组 math、6 组 JSON/text/Python 围栏共 13 组且全部成对；Python demo 实际输出 `artifact_count=3`、`independent_support=3`、`merged_status=agree_independent`、`commit_allowed=False`；Python AST、围栏配对、旧数学格式、内部流程话术和 `git diff --check` 均通过。本轮联网核验 Anthropic Building effective agents、OpenAI Agents SDK Handoffs、Microsoft AutoGen Selector Group Chat/Swarm、MapReduce 论文入口和 AI Safety via Debate，公开入口返回 200 或可追踪重定向；正文区分官方框架接口、经典并行模型、论文实验、教学构造和目标系统实测边界。第十七册正文已完成，下一步回到第一册，继续从第一本书逐章节顺序复读和润色，检查早期章节是否仍有提纲、短摘要、内部流程话术、旧公式围栏或资料边界不清的问题。
+
+## 2026-08-14 会话恢复后续：第一册第 1 章
+
+第一册第 1 章 `book-01-core-30/chapters/01-基础与语言模型.md` 已完成从头到尾顺序复读和教材化重构。原稿技术覆盖较完整，但五讲都混入“面试官会怎么问、标准回答、回答框架、面试能力”，并反复使用优点/缺点/适用场景清单和旧 `$$`/` ```math ` 公式围栏；本轮保留 token、条件概率、记忆/泛化、next-token、训练/推理、teacher forcing、交叉熵、最大似然、KL、PPL、反向传播、梯度稳定性、SGD/Momentum/Adam/AdamW、warmup/decay 和训练排查内容，将模板段改为机制解释、边界分析、实验设计和故障诊断，统一重复标题并新增“五讲综合”训练诊断、反事实实验和资料证据边界。当前文件 2,401 行、151 个标题无重复，54 组 math、64 组代码/文本围栏成对；10 个 Python 片段中 9 个实际运行通过，PyTorch 片段因当前环境缺少 torch 跳过，全部 Python 片段 AST 通过；旧数学格式、题库式内部话术和 `git diff --check` 均通过。本轮联网核验 GPT-3、Adam、AdamW、Chinchilla 论文以及 PyTorch Autograd、Transformers causal language modeling 官方文档，公开入口均返回 HTTP 200。下一步从头到尾阅读第一册第 2 章 `book-01-core-30/chapters/02-transformer核心.md`，继续检查 Transformer 结构、attention、位置编码、训练实现和资料边界。
+
+## 2026-08-14 会话恢复后续：第一册第 3 章
+
+第一册第 3 章 `book-01-core-30/chapters/03-训练对齐推理.md` 已完成从头到尾的顺序复读、教材化重构、联网资料核验和结构验证。正文保留第 16--30 讲的训练、Scaling Law、分布式训练、Instruction Tuning、SFT、RLHF、DPO、Reward Model、采样、KV Cache、FlashAttention、量化、幻觉评估、安全与研究方法主线；删除正文中的题库式“面试官/标准回答/回答框架”结构，把相应位置改为预训练账本、预算消融、通信剖析、模板差分、label mask 手算、RLHF rollout、DPO 对照、代理奖励审计、采样实验、KV 容量曲线、IO 账本、量化回归、证据支持率、研究卡片和综合实验。
+
+## 2026-08-14 会话恢复后续：第一册第 4 章
+
+第一册第 4 章 `book-01-core-30/chapters/04-多模态基础.md` 已完成从头到尾顺序复读和整体教材化重构。原稿把多模态总览、CLIP、VLM、Diffusion、Whisper、TTS、视频生成和 Sora 类模型写成定义清单、题库式回答和短总结；本轮改为六讲连续教材，分别展开表示与任务边界、级联/共享/统一架构、视觉和音频 token 成本、CLIP/SigLIP 对齐目标、VLM 连接器与 assistant-only loss、OCR/grounding/视觉幻觉、DDPM/LDM/DiT/CFG、WER/CER/RTF 与流式状态机、视频时空压缩、world model 判据、Sora 公开证据边界、评估与来源安全。当前文件 1,076 行、64,849 字节，39 组 math、7 个 Python 片段；公式、围栏和 `git diff --check` 通过，4 个无 torch demo 实际运行，3 个 torch 片段因环境缺少依赖跳过。已通过 arXiv API 核验 ViT、CLIP、SigLIP、Flamingo、BLIP-2、LLaVA、DDPM、LDM、DiT、Whisper、Video Diffusion 等论文摘要，并核对 OpenAI GPT-4o/Sora 官方页面；正文区分论文、官方产品说明、二手综述、教学构造和实测结论。下一目标为第一册第 5 章 `book-01-core-30/chapters/05-面试与复习.md`，继续按文件顺序完整阅读并改写。
+
+本章当前 5,953 行、38 组 `~~~math` 围栏、13 个 Python 片段；所有 Python 片段 AST 通过，8 个不依赖 torch 的 demo 实际运行通过，5 个含 torch 的片段因当前环境缺少 torch 跳过；Markdown 围栏成对、无旧 `$$`/` ```math `、正文禁用元话语检查和 `git diff --check` 均通过。新增并核验 GPT-3、Chinchilla、InstructGPT、FLAN、LoRA、QLoRA、PPO、DPO、PagedAttention、FlashAttention、GPTQ、AWQ、TruthfulQA、HELM，以及 PyTorch、Transformers、TRL、vLLM 官方资料入口；正文对论文结果、框架实现、玩具示例和生产结论分别标注证据边界。下一步从头到尾阅读第一册第 4 章 `book-01-core-30/chapters/04-多模态基础.md`，继续按章节整体检查叙事、篇幅、公式、代码、资料和章节衔接。
+
+## 2026-08-14 会话恢复后续：第一册第 2 章
+
+第一册第 2 章 `book-01-core-30/chapters/02-transformer核心.md` 已完成从头到尾顺序复读和教材化重构。原稿技术内容覆盖 tokenizer、embedding、位置编码、self-attention、scaled dot-product、MHA/MQA/GQA、causal mask、Transformer block、LayerNorm/RMSNorm、RoPE、长上下文和 miniGPT，但每讲重复混入“面试官会怎么问、标准回答、回答框架”，并使用旧 `$$`/` ```math ` 围栏；本轮保留并深化所有机制、shape、代码和复杂度内容，将模板改为 tokenizer/shape 账本、attention 信息路由、mask 反事实测试、KV Cache 容量、block 数值路径、长上下文三层能力、miniGPT 端到端审计和性能/质量取舍，补入本部分综合诊断、反事实实验和资料证据边界。当前文件 4,629 行、291 个标题无重复，97 组 math/代码/文本围栏成对，其中 22 个 Python 片段全部 AST 通过；5 个不依赖 torch 的片段实际运行通过，17 个含 torch 或 torch 引用的片段因当前环境缺少 torch 跳过；旧数学格式、题库式内部话术和 `git diff --check` 均通过。本轮联网核验 Transformer、BPE、SentencePiece、RoPE、FlashAttention、GQA 论文和 PyTorch MultiheadAttention 官方文档，公开入口均返回 HTTP 200。下一步从头到尾阅读第一册第 3 章 `book-01-core-30/chapters/03-训练对齐推理.md`，继续检查训练、对齐、推理、SFT/RLHF/DPO 和资料边界。
+
+## 2026-08-14 会话恢复后续：第一册第 5 章
+
+第一册第 5 章 `book-01-core-30/chapters/05-面试与复习.md` 已完成从头到尾顺序复读和整体教材化重构。原稿以目标、回答模板、题目清单、打卡表和短总结为主；本轮改为开放问题诊断与学习迁移两条正文线，覆盖任务契约、因果假设、信息价值、数学退化与幻觉案例、证据等级、质量/延迟/成本/风险取舍、检索练习、间隔学习、知识依赖图、项目证据链、未知变体和可运行调度实验。当前文件 540 行、34,376 字节，22 组 math、2 个 Python 片段，公式、围栏、禁用表达和 `git diff --check` 均通过；两段纯 Python demo 均实际运行。联网核验了 Roediger & Karpicke 的测试增强学习研究和 Cepeda 等人的分散练习综述；正文区分研究结论、教学构造和个人学习安排，不把 12 周写成硬规则。第一册 5 个正文文件已全部完成本轮逐章复读，下一步回看第一册目录与链接一致性，再进入第二册第一章。
+
+## 2026-08-14 会话恢复后续：第二册第 1 章
+
+第二册第 1 章 `book-02-advanced-100/chapters/01-深度学习与概率基础进阶.md` 已完成从头到尾顺序复读和整章教材化重写。原稿虽然覆盖概率建模、交叉熵、优化、泛化、贝叶斯、不确定性、目标错配、稳定性、SwiGLU 和优化器，但十个主题反复使用“本讲目标—面试问法—回答框架—常见误区—本讲总结”的模板，章节更像训练提纲而不是教材。本轮改为十个可独立阅读的主题，分别展开联合概率与自回归分解、teacher forcing、困惑度、熵/交叉熵/KL、双下降与数据污染、MLE/MAP/校准/选择性预测、预训练/SFT/RLHF/DPO 目标错配、初始化/LayerNorm/RMSNorm/Pre-LN/混合精度、ReLU/GELU/SiLU/SwiGLU 参数账本、AdamW/Adafactor/Lion 状态显存，以及贯穿训练前—训练中—训练后的诊断系统。
+
+当前文件 1,825 行、82,038 字节，87 组 math、10 个 Python 片段和 1 个 text 围栏；全部 Python 片段 AST 通过并实际运行，修正了双下降玩具实验的插值区间峰值逻辑；旧数学格式、章节模板、内部元话语、禁用表达和 `git diff --check` 均通过。参考资料以 Shannon、Deep Learning 教材、Transformer、AdamW、LayerNorm/RMSNorm、GLU、双下降、Scaling Laws、校准、RLHF、DPO、Adafactor 和 Lion 的原始论文为主；已联网验证 20 个资料链接均返回 HTTP 200。正文明确区分数学定义、论文经验、教学构造和目标系统实测，未把单个实验或 softmax 概率写成能力保证。下一步继续从头到尾阅读第二册第 2 章。
+
+## 2026-08-14 会话恢复后续：第二册第 3 章
+
+第二册第 3 章 `book-02-advanced-100/chapters/03-tokenization数据与预训练进阶.md` 已完成从头到尾连续复读和整体教材化重写。原稿的 40 个讲次虽然覆盖 tokenizer、数据、去重、污染、配比、合成数据、Scaling Law、loss、稳定性、混合精度、checkpoint、评估、多语言和代码模型，但大量内容以“本讲目标—面试回答模板—常见追问—本讲总结”的提纲形式结束。本轮将第 26–40 节重建为 15 个独立正文主题：BPE/Unigram/SentencePiece，tokenizer 工程与协议兼容，数据来源与清洗，去重与污染，数据配比与课程，合成数据，Scaling Law，loss 与下游能力，训练稳定性，FP16/BF16/FP8，checkpoint，评估与停止，多语言预训练，代码模型，以及端到端预训练方案。
+
+正文补足 token fertility、词表参数账、Jaccard/near dedup、exposure、温度采样、合成数据验证闭环、Kaplan/Chinchilla 数量关系、PPL 与分桶 loss、NaN 定位、loss scaling、sharded checkpoint、置信区间、语言迁移/干扰、FIM、pass@k 和代码执行反馈；新增公式、表格、14 个 Python 示例、失败诊断和证据等级说明。正文不再使用题库式模板或内部流程话术，明确区分论文结论、官方 PyTorch 接口、教学构造和目标系统实测。
+
+当前文件 1,561 行、96,047 字节，15 个独立二级主题；14 个 Python 片段全部 AST 通过，10 个不依赖 torch 的片段实际运行通过，4 个 PyTorch 片段因当前环境缺少 torch 跳过；旧数学围栏、禁用表达、旧模板和 `git diff --check` 均通过。BPE、SentencePiece、subword regularization、去重、Scaling Law、合成数据、model collapse、混合精度、BF16、FP8、PyTorch AMP/checkpoint、多语言、HumanEval、FIM、CodeXGLUE、SWE-bench 和代码治理资料入口均已联网返回 HTTP 200。下一步继续从头到尾阅读第二册第 4 章，并保持逐章重写与联网核验流程。
+
+## 2026-08-14 会话恢复后续：第二册第 4 章
+
+第二册第 4 章 `book-02-advanced-100/chapters/04-大规模训练系统进阶.md` 已完成从头到尾顺序复读和整章教材化重写。原稿把分布式训练、ZeRO、张量/流水线/序列并行、激活重计算、通信优化、性能指标和故障排查压缩成提纲式讲次，混有固定问答和短总结；本轮重建为 10 个独立正文主题，分别展开 DDP/all-reduce 与有效 token 统计、ZeRO/FSDP 状态分片、Tensor Parallel、Pipeline Parallel、Sequence/Context Parallel、并行拓扑、Activation Checkpointing、通信计算重叠、吞吐与成本测量，以及分布式训练故障诊断。
+
+正文补足通信量与显存账本、global batch、`no_sync`、bucket、all-gather/reduce-scatter、offload、wrap 粒度、MLP/Attention 切分、micro-batch bubble、GPipe/1F1B、ring/blockwise attention、online softmax、rank mapping、RNG 一致性、prefetch、MFU/HFU、扩展效率和 checkpoint/硬件事故复盘；新增公式、shape/拓扑说明、10 个 Python 示例、失败诊断和资料证据边界。当前文件 1,139 行、56,356 字节；10 个 Python 片段全部 AST 通过，8 个不依赖 torch 的片段实际运行通过，2 个含 torch 的片段因当前环境缺少 torch 跳过；旧数学格式、禁用表达、旧模板、围栏配对和 `git diff --check` 均通过。DDP、FSDP、distributed checkpoint、ZeRO、Megatron-LM、GPipe、FlashAttention、Ring Attention、NCCL 及 PyTorch profiler 官方资料入口共 21 个已联网核验并返回 HTTP 200。下一步从头到尾阅读第二册第 5 章 `book-02-advanced-100/chapters/05-后训练与对齐进阶.md`。
+
+## 2026-08-14 会话恢复后续：第二册第 5 章
+
+第二册第 5 章 `book-02-advanced-100/chapters/05-后训练与对齐进阶.md` 已完成从头到尾连续复读、整章教材化重写、联网资料核验、公式核对、Python demo 运行和最终格式检查。原稿的第 51–65 讲虽然覆盖 base/assistant、SFT、遗忘、preference data、Reward Model、PPO、RLHF 稳定性、DPO、IPO/KTO/ORPO、RLAIF、Constitutional AI、安全、truthfulness、jailbreak、Prompt Injection、Model Spec 与评估，但每讲都被固定的目标、问答、追问、误区、练习和总结切碎，阅读体验更像训练提纲。本轮保留 15 个知识主题，并分别重建为可独立阅读的正文：先解释任务和概率分布，再展开数据结构、公式、机制、代码实验、失败诊断、评估方法和证据边界。
+
+当前文件 2,430 行、129,919 字节，15 个独立二级主题、76 个 `~~~math` 围栏、17 个 Python 片段；17 个 Python 片段全部通过 AST 检查并实际运行，公式/代码围栏成对，无旧 `$$`/` ```math `、禁用表达、旧模板、尾随空格和 `git diff --check` 问题。正文新增并深化 SFT assistant-only mask、数据契约与 token 配比、能力回归与置信区间、preference hard negative/标注偏差、Bradley–Terry RM、reward scale/length bias/reward hacking、PPO 的 KL/GAE/clipped objective、RLHF 诊断回路、DPO 的 KL 正则化推导、IPO/KTO/ORPO 的数据取舍、RLAIF judge 校准、Constitutional AI critique/revision、安全拒答的 unsafe compliance/false refusal、Truthfulness/Honesty/Calibration、RAG 证据边界、Jailbreak/Prompt Injection/工具权限、Model Spec 的规范落地和多维 checkpoint/线上评估。
+
+本章正文引用的 21 个资料入口已联网核验并返回 HTTP 200，来源包括 InstructGPT、偏好学习、PPO、DPO、IPO、KTO、ORPO、Constitutional AI、RLAIF、TruthfulQA、Calibration、HELM、IFEval、Instruction Hierarchy、TRL 官方文档、OpenAI Model Spec、OWASP LLM Top 10、NIST AI RMF 和 LoRA。正文区分论文理论、官方接口、公开规范、教学构造和目标系统实测，未把 toy loss、公开 benchmark 或规范文本写成生产保证。下一步从头到尾阅读第二册第 6 章。
+
+## 2026-08-14 会话恢复后续：第二册第 6 章
+
+第二册第 6 章 book-02-advanced-100/chapters/06-推理部署与服务进阶.md 已完成从头到尾顺序复读、整章教材化重写、联网资料核验、公式核对、Python demo 运行和最终格式检查。原稿把 Prefill/Decode、TTFT/TPOT、KV Cache、PagedAttention、prefix cache、continuous batching、chunked prefill、speculative decoding、Medusa/EAGLE、量化、服务架构、容量规划、可靠性和端侧部署切成固定讲义，并在章末退化为问答式收束；本轮重建为第 66–75 节十个独立正文主题，分别展开请求时间线与瓶颈判断、KV 维度/显存/生命周期、物理 block 与前缀共享、动态调度与 token budget、推测解码接受率与收益边界、PTQ/QAT/GPTQ/AWQ/SmoothQuant/KV 量化、流式协议与服务状态机、容量/P95/goodput/单位成功成本、版本/回滚/故障归因，以及端侧压缩/runtime/功耗/端云路由。
+
+当前文件 1,459 行、73,012 字节，10 个独立二级主题、40 组 ~~~math、10 个 Python、30 个 text 和 1 个 JSON 围栏，标题无重复且全部围栏成对；10 个纯 Python 片段全部通过 AST 并实际运行，已修正调度器、量化误差、状态机、回归矩阵和端云路由的示例输出。正文未保留旧的题库/内部流程表达或旧数学围栏；git diff --check 及禁止表达检查通过。联网核验 FlashAttention、FlashAttention-2、Orca、GQA、KIVI、PagedAttention、SGLang、Sarathi-Serve、speculative decoding、Medusa、EAGLE、GPTQ、AWQ、SmoothQuant、bitsandbytes、vLLM、TensorRT-LLM、TGI、MLPerf、OpenAI latency guide、NIST、OWASP、OpenTelemetry、llama.cpp、ONNX Runtime GenAI、Core ML 等 31 个论文/官方文档/基准入口，均返回 HTTP 200；正文明确区分论文机制、官方 runtime 接口、教学数字和目标硬件实测。下一步继续从头到尾阅读第二册第 7 章。
+
+## 2026-08-14 会话恢复后续：第二册第 7 章
+
+第二册第 7 章 book-02-advanced-100/chapters/07-长上下文rag与agent.md 已完成从第 76 节到第 86 节的连续教材化审阅和扩写。原稿在第 76–80 节完成长上下文、RAG、Embedding 和 Reranker 的重建后，本轮继续把原本可能被压缩成几句话的内容分别写成独立正文：第 81 节展开 RAG correctness、faithfulness、groundedness、claim/evidence 图、citation existence/support、资料不足时的选择性回答、LLM judge 校准和端到端归因；第 82 节展开 schema、语义校验、工具选择、权限、幂等、observation、错误和确认协议；第 83 节展开 ReAct、Plan-and-Execute、任务 DAG、计划粒度、动态重规划、停止条件、预算和部分完成；第 84 节展开直接/间接提示注入、信任边界、权限对象、两阶段确认、沙箱、trace、未知状态、补偿和策略网关；第 85 节展开 context/state/RAG/memory 边界、五类记忆、写入筛选、检索排序、冲突版本、过期、删除传播、隐私和评估；第 86 节用退款政策助手贯通长上下文、RAG、Attribution、Tool Use、Planning、Safety 和 Memory。
+
+当前文件 2,221 行、97,337 字节，11 个独立二级主题；62 组 math、10 组 Python、54 组 text、10 组 JSON 围栏全部成对。10 个纯 Python 片段全部通过 AST 检查并实际运行，已修正长上下文分桶统计、toy embedding 排序、工具角色校验和动态规划示例的正文输出。正文没有门禁、准入、面试回答模板、旧数学围栏、重复标题或旧内部验收话术，禁用表达检查和 git diff --check 均通过。本章引用的 40 个论文、官方文档、规范和评估入口均联网复核并返回 HTTP 200；正文明确区分论文结论、规范/官方接口、教学构造和目标系统实测。下一步从头到尾阅读第二册第 8 章。
+
+## 2026-08-14 会话恢复后续：第二册第 8 章
+
+第二册第 8 章 `book-02-advanced-100/chapters/08-reasoning与test-time-compute.md` 已完成从第 87 节到第 96 节的连续教材化重写。原稿是“目标—问答—误区—练习—总结”的讲义/题库结构，本轮将 Chain-of-Thought、Self-Consistency、Verifier/ORM/PRM、Search/Tree-of-Thought/MCTS、Test-Time Compute、数学推理训练、代码执行反馈、自我改进与合成推理数据、Reasoning Model 评估、Chat Model 到 Reasoning Model 的系统改造分别写成十个独立正文主题，补足机制、公式、变量解释、失败边界、数据契约、可验证执行、成本账本、分桶评估、校准、反事实和贯通案例。
+
+正文当前 2,560 行、60,981 字节，89 组 `~~~math`、10 个 Python、54 个 text 围栏全部成对；10 个 Python 片段全部通过 AST 检查并实际运行，已修正第 92 节空 preference pair、第 87 节空步骤计数、第 89 节模型选择准确率和第 95 节 Brier/单位成本示例输出。正文无门禁、准入、面试式话术、旧 `$$`/` ```math `、重复标题和尾随空格，`git diff --check` 通过。联网核验 CoT、Zero-shot CoT、CoT 忠实性、Self-Consistency、结果/过程监督、PRM800K、Tree of Thoughts、LATS、AlphaZero、test-time scaling、Large Language Monkeys、DeepSeek-R1、STaR、Self-Instruct、WizardLM、phi-1、Orca、GSM8K、MATH、Minerva、HumanEval、CodeRL、Self-Debugging 和 InstructGPT 等资料入口；本轮新增核验入口均返回 HTTP 200。正文明确区分论文结论、评估定义、教学构造、执行器反馈和目标系统实测，不把 `pass@k`、oracle 候选、模型自评或一组 toy 数字写成部署保证。下一步从头到尾阅读第二册第 9 章《论文精读与开放研究题》。
+
+## 2026-08-14 会话恢复后续：第二册第 9 章
+
+第二册第 9 章 `book-02-advanced-100/chapters/09-论文精读与开放研究题.md` 已完成从头到尾顺序阅读、整体教材化重写和资料核验。原稿的五个讲次均采用“目标—论文摘要—面试问答—常见误区—小练习—总结”结构，其中第 99 讲还把 DPO、LoRA、FlashAttention、MoE 四个不同知识点压成一组；本轮改为第 97–104 节八个独立正文，分别展开 Transformer、GPT/InstructGPT/ChatGPT、Scaling Laws/Chinchilla、DPO、LoRA、FlashAttention、MoE 和开放研究设计。
+
+当前文件 1,541 行、约 37,700 字节，77 组 `~~~math`、8 个 Python、19 个 text 围栏全部成对；8 个 Python 片段全部通过 AST 检查并实际运行，新增了每个 demo 的实际输出，并核对了 attention mask、DPO beta、LoRA merge、online softmax、MoE overflow 和开放研究方案排序。正文删除题库式固定话术，不含门禁、准入、面试回答、标准答案、旧数学围栏或 `gate_pass`，`git diff --check` 通过。为保持新增知识点独立成节，第十章多模态内容的编号由第 101–120 讲顺延为第 105–124 讲，并同步更新第二册目录、简介和书稿标题为 124 讲。Transformer、GPT-2、GPT-3、InstructGPT、Kaplan、Chinchilla、DPO、LoRA、FlashAttention、Switch Transformers、OpenAI Model Spec、GPT-4 System Card 等 arXiv/PDF/官方入口本轮均已联网核验；GPT 早期官方页面返回 403，正文明确保留这一访问边界。下一步从头到尾阅读第二册第 10 章《多模态大模型进阶》，同时复核编号顺延后的章节衔接。
+
+## 2026-08-14 会话恢复后续：第二册第 10 章编号顺延复核
+
+第二册第 10 章此前已完成整章教材化审阅，本轮因第 9 章将四篇论文拆成四个独立主题，复核并更新其讲次编号为第 105–124 讲，同时更新第二册目录、简介、背景标题和章内两个交叉引用。编号检查确认第 51–124 讲没有重复或断号；本轮没有重复改写第 10 章已完成的多模态正文。下一步进入第三册 `book-03-practical-handbook/chapters/01-pytorch基础实战.md`，继续从头到尾顺序审阅。
+
+## 2026-08-14 会话恢复后续：第三册第 1 章
+
+第三册第 1 章 `book-03-practical-handbook/chapters/01-pytorch基础实战.md` 已完成从头到尾顺序复读后的整章教材化重建。由于原章存在旧数学围栏、提纲式表达和代码/公式解释断裂，本轮重新组织为六个连续但可独立阅读的主题：线性回归与梯度下降、MLP 分类器、交叉熵与语言模型 token loss、反向传播与计算图、SGD/Adam/AdamW 与训练状态、学习率 warmup/衰减与 checkpoint 恢复。
+
+正文当前约 1,000 行、43 组 `~~~math` 围栏、23 个 Python 片段；补足了张量 shape、MSE 和交叉熵推导、logits 梯度、log-sum-exp 数值稳定性、`ignore_index`、`[B,T,V]` 展平、非标量 `backward`、`detach`/`no_grad`/原地操作、有限差分、优化器矩状态、L2 与 AdamW 的差异、参数分组、梯度累积、混合精度、warmup、Step/Exponential/Cosine/LambdaLR、scheduler 调用顺序和恢复状态。正文明确区分数学推导、PyTorch 官方接口、教学构造和目标系统实测；已清理行内公式转义问题，并补充不完整梯度累积组的归一化边界。
+
+23 个 Python 片段全部通过 AST 检查；3 个不依赖 torch 且可独立执行的 demo 实际运行并与正文输出一致，含 torch 片段因当前环境未安装 torch 仅做语法检查。公式/代码围栏成对，控制字符、重复旧数学格式、门禁/准入、题库式内部话术和 `git diff --check` 检查均通过。相关 PyTorch Autograd、CrossEntropyLoss、logsumexp、SGD、Adam、AdamW、scheduler 与 Hugging Face schedule 官方资料已核验。下一步进入第三册第 2 章，继续按文件顺序逐章节人工复读、扩展和验证。
+
+## 2026-08-14 会话恢复后续：第三册第 2 章
+
+第三册第 2 章 `book-03-practical-handbook/chapters/02-transformer组件实战.md` 已完成从头到尾顺序复读、教材化重构、代码依赖复核和资料入口联网核验。原稿的 7 个组件主题重复使用课程提纲模板；本轮改为 Token Embedding 与位置表示、Scaled Dot-Product Attention、Multi-Head Attention、Attention Mask、Transformer Block、RoPE、RMSNorm 与 SwiGLU 七个独立正文主题，分别补足 shape 账本、参数量、数学推导、最小实现、反例、复杂度、KV Cache/offset、低精度和组件级评估边界。
+
+当前文件 1,684 行、61,579 字节，68 组 `~~~math`、22 个 Python、10 个 text 围栏全部成对；22 个 Python 片段全部通过 AST。当前环境未安装 torch，因此含 torch 代码未做运行验证；本轮补齐了缺失导入和示例变量，明确了跨代码块的函数/类依赖，并修正 `apply_keep_mask` 对 `[B,1,1,T_k]` padding mask 的过严 shape 检查，使其先广播到 scores 再检查空 query 行。此前发现的重复段落、旧数学围栏、`\\text` 公式写法和正文禁用元话语均已清理，`git diff --check` 通过。
+
+本章引用的 Transformer、PyTorch Embedding、PyTorch SDPA、PyTorch MultiheadAttention、RoPE、RMSNorm、SwiGLU 和 LLaMA 入口本轮均通过 HTTP 200 核验。正文区分原始论文公式、PyTorch 官方接口、教学实现和目标系统实测，未把 shape 断言或 toy forward 写成语言能力结论。下一步进入第三册第 3 章 `book-03-practical-handbook/chapters/03-从零训练小gpt.md`，继续逐章节阅读和教材化审阅。
+## 2026-08-14 会话恢复后续：第三册第 3 章
+
+第三册第 3 章 book-03-practical-handbook/chapters/03-从零训练小gpt.md 已完成从头到尾顺序复读、整章教材化重构、代码依赖复核和资料入口联网核验。原稿虽然覆盖字符级数据、GPT 训练、采样、checkpoint、曲线分析和 BPE，但每一讲都重复使用“目标—工程坑—面试表达—小练习—总结”模板，并大量使用旧数学围栏；本轮改为七个独立正文主题：Token 数据契约、最小 GPT、Temperature/Top-k/Top-p、Checkpoint 与可恢复评估、训练曲线与生成行为、字符级到 BPE 的迁移、以及公平比较与复现实验。
+
+当前文件 1,602 行、65,703 字节，41 组 math、17 个 Python、12 组 text 围栏全部成对；17 个 Python 片段全部通过 AST，5 个不依赖 torch 的 demo 实际运行通过。当前环境未安装 torch，含 torch 代码只做 AST；本轮修正了曲线诊断 demo 将全局最优验证 loss 误当第一处反弹的问题，实际输出 first_overfit_signal=600，并修正 checkpoint 日志片段遗漏 tokens_seen 参数的问题。旧数学围栏、正文课程模板、内部元话语、控制字符和 git diff check 均通过。
+
+本章引用的 Transformer、PyTorch Embedding/CrossEntropyLoss/AdamW/Module/save/data/multinomial、Hugging Face tokenizer、BPE 和 nucleus sampling 入口共 12 个，本轮均通过 HTTP 200 核验。正文区分接口事实、局部实现事实、教学 toy 数字和目标模型能力结论；未把小语料 loss、生成样例或 shape 断言写成通用语言能力证明。下一步进入第三册第 4 章 book-03-practical-handbook/chapters/04-huggingface微调实战.md，继续逐章顺序复读和教材化审阅。
+
+## 2026-08-14 会话恢复后续：第三册第 4 章
+
+第三册第 4 章 book-03-practical-handbook/chapters/04-huggingface微调实战.md 已完成从头到尾顺序复读后的整章教材化重写。原稿把加载 Causal LM、SFT 数据、全参数 SFT、LoRA、QLoRA 和 SFT 评估拆成“目标—常见工程坑—面试回答—小练习—总结”的讲义模板；本轮重建为 4.1–4.6 六个独立正文主题，分别展开 checkpoint/tokenizer 契约与生成、对话模板与 assistant-only labels、全参数 SFT 的目标/显存/恢复、LoRA 低秩增量与 adapter 生命周期、QLoRA 量化基座/NF4/double quant/compute dtype，以及 base/SFT 的公平行为评估。
+
+当前文件 2,306 行、68,371 字节，40 组 math、48 个 Python、26 组 text 围栏全部成对；48 个 Python 片段全部通过 AST。6 个不依赖 torch/Transformers 的 toy demo 实际运行通过，输出覆盖 shape/padding、labels mask、masked loss、LoRA 冻结、量化误差和行为评估。正文统一使用 ~~~math、~~~python、~~~text，无旧数学围栏、$$、门禁/准入、面试模板、内部验收字段或 git diff --check 问题。资料部分加入并核验 Transformers 模型加载/生成/chat template/Trainer、PEFT LoRA、bitsandbytes、TRL、PyTorch CrossEntropyLoss，以及 LoRA/QLoRA 原论文入口；正文区分官方 API、论文机制、教学 toy 数字和目标系统实测边界。下一步进入第三册第 5 章 book-03-practical-handbook/chapters/05-偏好优化实战.md，继续按文件顺序逐章节复读和教材化扩展。
+
+## 2026-08-14 会话恢复后续：第三册第 5 章
+
+第三册第 5 章 book-03-practical-handbook/chapters/05-偏好优化实战.md 已完成从头到尾顺序复读后的整章教材化重写。原稿把 Preference Pair、Reward Model、DPO、TRL 训练和 SFT/DPO 对比拆成“目标—常见工程坑—面试回答—小练习—总结”的讲义模板；本轮重建为 5.1–5.6 六个独立正文主题，分别展开偏好数据契约/来源/标签噪声/长度偏置/按 prompt 划分、Bradley–Terry 排序损失与 reward shape、backbone/value head/双路 collator/Reward Model 训练、DPO 的 policy/reference/logprob/causal shift/mask、TRL 的 DPOConfig/DPOTrainer/LoRA/QLoRA/版本边界，以及 SFT/DPO/Reward Model 的分桶行为评估。
+
+当前文件 2,304 行、66,767 字节，46 组 math、44 个 Python、34 组 text 围栏全部成对；44 个 Python 片段全部通过 AST。3 个不依赖 torch/Transformers 的审计 demo 实际运行通过，覆盖偏好数据清洗与泄漏、DPO 配置/LoRA/QLoRA 检查、SFT/DPO 离线评估产物。正文无旧数学围栏、$$、门禁/准入、面试模板、内部验收字段或 git diff --check 问题。资料部分加入 Transformers 生成/模板/Trainer、TRL DPOTrainer/RewardTrainer/dataset formats、PEFT、bitsandbytes、PyTorch log-sigmoid，以及 InstructGPT、Learning to Summarize、DPO、PPO、IPO 等论文入口；本轮再次请求资料链接时工作区网络 DNS 暂不可用，因此没有把本轮请求失败写成来源失效，正文继续区分官方 API、论文机制、教学 toy 数字和目标系统实测边界。下一步进入第三册第 6 章 book-03-practical-handbook/chapters/06-推理优化实战.md，继续逐章节顺序复读和教材化扩展。
+
+## 2026-08-14 会话恢复后续：第三册第 6 章
+
+第三册第 6 章 book-03-practical-handbook/chapters/06-推理优化实战.md 已从原稿删除状态重建为完整教材正文。原稿覆盖 KV Cache、Prefill/Decode、vLLM、量化、Speculative Decoding 和长上下文压测，但采用固定讲义式收束；本轮分别写成 6.1–6.6 六个独立主题，并增加 6.7 推理实验报告，把每个主题的初学者直觉、专家变量、公式、最小代码、失败边界、评估方法和资料证据放在对应位置。
+
+当前文件 1,763 行、65,542 字节，60 组 ~~~math、11 个 Python、32 组 ~~~text 围栏全部成对；11 个 Python 片段全部通过 AST，7 个无外部依赖 demo 实际运行通过，torch/Transformers/vLLM 片段明确标注外部依赖。正文覆盖 MHA/GQA/MQA 的 KV 形状与显存公式、RoPE absolute offset、prefix cache 生命周期、TTFT/TPOT/ITL 与 CUDA 同步计时、PagedAttention block 容量、continuous batching、OpenAI 兼容协议边界、per-group 量化/NF4/KV 量化、speculative sampling residual、接受长度与收益近似、长上下文显存账本、needle/lost-in-the-middle/多跳评测和单位成功任务成本。正文未使用旧数学围栏、$$、门禁/准入、面试模板、gate_pass 或 gates；git diff --check 通过。
+
+本章资料入口覆盖 Transformer、GQA、Transformers Cache/Generation、PyTorch CUDA timing/memory、vLLM/PagedAttention、SGLang、TensorRT-LLM、TGI、QLoRA、GPTQ、AWQ、SmoothQuant、KIVI、Speculative Decoding、Medusa、EAGLE、RULER、Lost in the Middle、LongBench 和 Needle-in-a-Haystack。资料按原论文、官方文档、教学 demo 和目标系统实测分层；本轮会话网络 DNS 仍不稳定，因此未把未能即时访问写成来源失效。下一步进入第三册第 7 章 book-03-practical-handbook/chapters/07-rag与agent项目实战.md，先完整顺序阅读再决定是否重写。
+
+## 2026-08-14 会话恢复后续：第三册第 7 章
+
+第三册第 7 章 book-03-practical-handbook/chapters/07-rag与agent项目实战.md 已完成从头到尾顺序阅读后的整章教材化重建。原稿把本地 RAG、reranker、引用、评估、Tool Calling、ReAct 和 Agent 安全分别写成固定讲义，包含大量“本讲目标”、题库式收束和旧代码围栏；本轮改为 7.1–7.7 七个独立主题，并增加 7.8 可审计政策助手贯通案例。
+
+当前文件 2,457 行、76,456 字节，8 个独立二级主题、50 组 ~~~math、28 个 Python 和 46 组 ~~~text 围栏全部成对；28 个 Python 片段全部通过 AST。无外部依赖 demo 和按上下文串联的 Tool Calling demo 已实际运行；sentence-transformers、numpy、FAISS、真实 API 片段明确标注外部依赖。正文补足文档解析与 chunk token 预算、embedding/FAISS、bi-encoder/cross-encoder 候选账本、claim/evidence/citation 图、Hit@k/Recall@k/MRR、faithfulness/abstention/失败归因、工具 schema/call id/多调用状态、ReAct 状态转移和停止预算、权限/风险/确认/idempotency/sandbox/audit 以及综合政策助手事件链。
+
+本章正文没有旧数学围栏、$$、门禁/准入、面试模板、gate_pass 或 gates。实跑时发现并修正 ReAct demo 中不存在的 ast.Ge，改为 ast.GtE；修正后所有可独立运行 demo 和 Tool Calling 顺序 demo 均通过。资料入口覆盖 RAG、Sentence-BERT、FAISS、MTEB、BEIR、Cross-Encoder、ColBERT、Self-RAG、FActScore、RAGAS、ARES、OpenAI/Anthropic tools、JSON Schema、ReAct、Toolformer、OWASP、NIST、AgentDojo 和 ToolSandbox；本轮可访问入口均已核验，OWASP Agentic AI 和 NIST GenAI Profile 更新为当前有效页面/PDF。下一步从头到尾阅读第三册第 8 章 book-03-practical-handbook/chapters/08-评估与debug实战.md。
+## 2026-08-14 会话恢复后续：第三册第 8 章
+
+第三册第 8 章 book-03-practical-handbook/chapters/08-评估与debug实战.md 已完成从原稿结尾到文件末尾的连续阅读和整体教材化重写。原稿把 benchmark、数据污染、幻觉、训练调试、微调退化、人工评测和线上 A/B 混在“目标—工程坑—面试表达—小练习—总结”的重复模板中；本轮将七条主线分别重建为 8.1--8.7 独立正文，补入初学者与深入视角、变量解释、公式、可手算例子、零依赖实验、失败归因、评测统计、资料证据和适用边界。
+
+当前文件实测为 1,961 行、90,331 字节，含 7 个独立二级主题、46 组 math、7 个 Python 和 37 组 text 围栏；围栏成对，Python AST 全部通过，7 个零依赖示例全部实际运行。正文已删除旧的课程提纲、面试式话术、总结式收束和内部验收表达；正文禁用表达、旧数学格式和 git diff --check 均通过。新增资料按 HELM/OpenAI Evals/lm-evaluation-harness、TruthfulQA/FActScore/SelfCheckGPT、Adam/EWC/LoRA、PyTorch Autograd、Cohen's Kappa、在线受控实验与 CUPED 的论文、官方文档和 DOI 分层，正文明确区分论文方法、官方接口、教学构造和目标系统实测。下一步继续第三册第 9 章的全文顺序审阅。
+
+## 2026-08-14 会话恢复后续：第三册第 9 章
+
+第三册第 9 章 book-03-practical-handbook/chapters/09-简历项目实战.md 已完成从原稿结尾到全文的顺序阅读，并整体重写为六个独立教材主题：9.1 字符级 miniGPT、9.2 监督微调与 LoRA、9.3 DPO、9.4 高性能推理服务、9.5 企业知识库 RAG、9.6 数学推理增强；另以 9.7 统一说明实验记录、baseline、ablation、失败样例和证据边界。原稿中的项目介绍、简历写法、固定问答、常见工程坑和讲次小结已删除，知识点改为连续正文，分别补入初学者直觉、专家变量、公式、代码、评估、失败归因、资源成本和资料可信度说明。
+
+当前文件 2,308 行、101,894 字节，83 组 math、7 个 Python、33 组 text 围栏全部成对；7 个 Python 片段全部通过 AST 并实际运行。运行覆盖字符 tokenizer/next-token 窗口、SFT assistant-only mask 与 LoRA 参数量、DPO loss/beta/偏好统计、TTFT/TPOT/P95/QPS/KV Cache 容量、ACL/hybrid retrieval/rerank/citation/Recall/MRR，以及数学答案抽取、安全表达式求值/self-consistency/pass@k。已修正 Python 正则转义、推理 P50 toy 断言、LoRA 参数量断言和正文残留的模板术语；禁用表达、旧数学格式、控制字符和 git diff --check 均通过。
+
+本章补入并核验的资料入口包括 Transformer、GPT-2、nanoGPT、Hugging Face chat template/PEFT/TRL、LoRA、DPO、vLLM prefix caching、FastAPI StreamingResponse、RAG、FAISS、Sentence Transformers、CoT、Self-Consistency 和 GSM8K。正文明确区分原始论文、官方文档、开源实现、无依赖教学构造和目标系统实测，不把 toy 数字或单个公开 benchmark 写成生产保证。下一步从头到尾阅读第三册第 10 章。
+
+## 2026-08-14 会话恢复后续：第三册第 10 章
+
+第三册第 10 章 `book-03-practical-handbook/chapters/10-面试实战训练.md` 已完成从头到尾顺序复读，并确认其已从题库式讲义重建为七个连续教材主题：Scaled Dot-Product Attention、GPT 架构、项目证据链、开放问题与方案比较、大模型系统设计、论文评议，以及统一的复现与表达纪律。正文保留文件名以避免破坏既有目录链接，但正文不再使用“面试官—回答模板—标准答案”的组织方式。
+
+当前文件 1,395 行、57,108 字节，含 59 组 `~~~math`、6 个 Python 和 17 组 `~~~text` 围栏，均成对；6 个 Python 片段全部通过 AST 检查并实际运行。收尾时修正了 `hybrid+rerrank` 拼写，检查了控制字符、旧数学围栏、题库式内部措辞和 `git diff --check`；正文没有门禁、准入、标准答案、回答框架、`gate_pass` 或 `gates`。本章资料按 Transformer/GPT、LoRA、DPO、FlashAttention、RAG、Mamba、PyTorch、Hugging Face、vLLM、NIST 和 OpenAI Evals 等原始论文、官方文档、开源实现与教学实验分层使用，明确区分 toy 结果、论文证据和目标系统实测。下一步从头到尾阅读第三册第 11 章 `book-03-practical-handbook/chapters/11-多模态实战.md`。
+
+## 2026-08-14 会话恢复后续：第四册第 1、2 章
+
+第四册第 1 章 book-04-llm-encyclopedia/chapters/01-数学与机器学习.md 已完成收尾核对，保留其数学术语索引定位，并清理正文中的题库式面试措辞为应用提示、延伸问题和关键辨析。第四册第 2 章 book-04-llm-encyclopedia/chapters/02-深度学习组件.md 已从头到尾顺序阅读后整体重写。原章把 MLP、激活函数、归一化、残差、优化器、AMP、Autograd、Module、DataLoader、DDP 和 Transformer 组件压缩成大量“一句话定义 + 面试表达”，不具备连续教材的论证深度；本轮保留术语覆盖，重建为十七个独立主题，分别展开线性层与 MLP、激活和 SwiGLU、LayerNorm/RMSNorm 与残差、SGD/AdamW 与 schedule、初始化和混合精度、tensor 语义、Autograd、Module/checkpoint、数据管线、training loop、分布式训练、profiling、Transformer 组件、组件验证、故障诊断和证据边界。
+
+第二章当前 1,050 行、50,369 字节，112 组围栏全部成对，8 个 Python 片段全部通过 AST 并实际运行；论文和 PyTorch 官方资料入口共 18 个，本轮请求均返回 HTTP 200；git diff --check 通过，正文没有门禁、准入、面试、简历、标准答案、回答框架、gate_pass 或 gates。正文明确区分原始论文、官方 API、教学构造和目标硬件实测，未把 toy 数字外推为模型能力或部署指标。下一步从第四册第 3 章 book-04-llm-encyclopedia/chapters/03-nlp与tokenization.md 第一行开始顺序阅读。
+
+## 2026-08-14 会话恢复后续：第四册第 3 章
+
+第四册第 3 章 book-04-llm-encyclopedia/chapters/03-nlp与tokenization.md 已从第一行连续阅读到末尾并整体重写。原章把 Token、Vocabulary、BPE、WordPiece、Unigram LM、SentencePiece、special token、chat template、context window 和 tokenizer 扩展压缩成“一句话定义 + 面试表达”；本轮重建为十二个独立教材主题，沿着字符串、规范化、token、token id、embedding、Transformer、生成 id 和 detokenization 的完整链路展开，补入 token 数量与 padding waste、vocabulary 参数账本、BPE merge、Unigram 概率视角、中文/代码/多语言公平、BOS/EOS/PAD、chat template 与 SFT label mask、上下文预算、流式解码、tokenizer 训练、词表扩展、mismatch 审计和 tokenizer 相关评估。
+
+当前文件 786 行、34,420 字节，76 组围栏全部成对；3 个标准库 Python 片段通过 AST 并实际运行。已清理旧数学围栏、公式写法和正文内部流程措辞，git diff --check 通过。本章新增的 BPE、Subword Regularization、SentencePiece、BERT/WordPiece、GPT-2、Transformers Tokenizers/Chat Templates、Unicode 文本边界等 10 个资料入口均已核验；Google Research 的 WordPiece 页面连接超时，已改用可访问的 BERT 原论文，不将不可访问页面列为证据。下一步从第四册第 4 章 book-04-llm-encyclopedia/chapters/04-transformer架构.md 第一行开始顺序阅读。
+
+## 2026-08-14 会话恢复后续：第四册第 4 章
+
+第四册第 4 章 book-04-llm-encyclopedia/chapters/04-transformer架构.md 已完成从第一行到末尾的连续阅读和整体教材化重写。原章虽然覆盖 Transformer、位置编码、RoPE、ALiBi、长上下文、attention、MHA/MQA/GQA、KV Cache、FlashAttention、模型形态、KDA、Gated DeltaNet、Gated MLA、NoPE 和 MoE，但大部分仍是“一句话定义 + 面试表达”，末尾还残留旧数学围栏。本轮改为十三个独立主题，按数据流展开 token embedding、位置表示、Q/K/V、scaled dot-product attention、causal/padding mask、MHA/MQA/GQA/MLA、prefill/decode 与 KV cache、full/local/sparse/linear/FlashAttention、Transformer block、三种模型形态与 cross-attention、长上下文、递归 state/Delta/NoPE、MoE 参数账本和组件验证。
+
+当前文件 784 行、34,962 字节，84 组 ~~~ 围栏全部成对；3 个标准库 Python 片段全部通过 AST 并实际运行。清理了旧数学围栏、尾随空格、面试式话术和内部流程措辞，git diff --check 通过。Transformer、RoPE、ALiBi、MQA、GQA、FlashAttention、Longformer、Performer、Lost in the Middle、RetNet、Gated DeltaNet、Kimi Linear 以及 PyTorch attention 官方资料入口本轮均返回 HTTP 200。正文明确区分论文机制、教学复杂度、框架接口和目标硬件实测；对 KDA、Gated DeltaNet、Gated MLA、NoPE 只说明局部机制与证据边界，不把架构名称或单项 cache 数字外推为通用能力。下一步从第四册第 5 章 book-04-llm-encyclopedia/chapters/05-大语言模型基础.md 第一行开始顺序阅读。
+
+## 2026-08-14 会话恢复后续：第四册第 5 章
+
+第四册第 5 章 book-04-llm-encyclopedia/chapters/05-大语言模型基础.md 已从第一行连续阅读到末尾并整体教材化重写。原章把语言模型、LLM、next-token、teacher forcing、base/instruct/chat、ICL、CoT、幻觉、Transformer 架构、Scaling、企业产品化、ROI、线上运营、协作事故和面试回答结构全部压成词条，后半部分已经偏离书籍正文。本轮删除题库和内部汇报式话术，重建为十五个独立主题：语言模型概率、next-token/teacher forcing/label shift、logits/softmax/cross-entropy/PPL、base/instruct/chat、prompt 与 instruction following、ICL、generation、CoT 与可验证计算、记忆/泛化/污染、scaling、幻觉、场景选择、企业权限/成本/运营、评估反馈/回滚和证据边界。
+
+当前文件 830 行、31,839 字节，80 组 ~~~ 围栏全部成对；2 个标准库 Python 片段通过 AST 并实际运行。已清理面试/简历/标准答案等正文模板、旧数学围栏和尾随空格，git diff --check 通过。本章引用的 Transformer、GPT-3、Chinchilla、InstructGPT、CoT、TruthfulQA、FActScore、SelfCheckGPT、HELM、Transformers Chat Templates、NIST AI RMF 和 OWASP LLM Top 10 共 12 个入口均已联网核验并返回 HTTP 200。正文明确区分论文结论、官方接口、教学构造、业务假设和目标系统实测，不把 PPL、ICL demo 或单一 benchmark 外推为产品能力。下一步从第四册第 6 章 book-04-llm-encyclopedia/chapters/06-预训练与数据.md 第一行开始顺序阅读。
+
+## 2026-08-14 会话恢复后续：第四册第 6 章
+
+第四册第 6 章 book-04-llm-encyclopedia/chapters/06-预训练与数据.md 已从第一行连续阅读到末尾并整体教材化重写。原章把预训练、网页/代码/数学/多语言/领域数据、质量、去重、合成数据、治理、packing、checkpoint、Scaling 和数据工程完整表达压成大量“一句话定义 + 面试表达”；本轮重建为十四个独立主题，沿着来源与许可、解析清洗、质量与权威性、精确/近重复去重、benchmark 污染、PII/secrets/安全过滤、data mixture、sequence packing、合成/蒸馏/Model Collapse、代码/数学/偏好/多模态数据、manifest/lineage/删除、Scaling/Chinchilla、checkpoint/数据事故和数据评估展开。
+
+当前文件 877 行、32,620 字节，86 组 ~~~ 围栏全部成对；4 个标准库 Python 片段通过 AST 并实际运行。已清理面试/简历/标准答案等正文模板、旧数学格式和尾随空格，git diff --check 通过。本章引用的 GPT-2、Chinchilla、Self-Instruct、Model Collapse、Datasheets、Model Cards、Influence Functions、Data Shapley、TensorFlow C4、NIST Privacy/AI RMF 和 Hugging Face Datasets 共 12 个入口均已核验并返回 HTTP 200。正文明确区分论文结论、数据集/官方文档、教学构造和目标训练实测，不把保留率、quality score 或 scaling 趋势外推为模型能力。下一步从第四册第 7 章 book-04-llm-encyclopedia/chapters/07-后训练与对齐.md 第一行开始顺序阅读。
+
+## 2026-08-14 会话恢复后续：第四册第 7 章
+
+第四册第 7 章 `book-04-llm-encyclopedia/chapters/07-后训练与对齐.md` 已完成从第一行到末尾的连续阅读、教材化重写、资料核验和代码验证。原章把 SFT、LoRA/QLoRA、能力回归、偏好数据、Reward Model、RLHF/PPO、Reward Hacking、DPO、IPO/KTO/ORPO/SimPO、RLAIF、Constitutional AI、安全对齐、RLVR/GRPO/DAPO/GSPO、reasoning effort、on-policy distillation 和 tool trajectory 压缩在词条与短总结中；本轮重建为十五个独立主题，分别补足机制、公式、变量含义、适用条件、失败边界、评估方法和证据层级。
+
+当前文件 917 行、30,557 字节，48 组围栏成对，含 1 个标准库 Python 示例；示例同时计算 assistant mask coverage、DPO 相对 margin、false refusal rate 和 unsafe leak rate，已通过 AST 并实际运行。正文明确解释这些分母不同的指标不能合并成一个总分，并保留样本切片、人工复核和目标系统实测边界。修正 RLAIF 资料入口为 `2309.00267`，新增 GSPO 原论文 `2507.18071`；RLAIF、GSPO 和 TRL 入口本轮均返回 HTTP 200，`git diff --check` 和围栏检查通过。下一步从第四册第 8 章 `book-04-llm-encyclopedia/chapters/08-推理与解码.md` 第一行开始顺序审阅。
+
+## 2026-08-14 会话恢复后续：第四册第 8 章
+
+第四册第 8 章 `book-04-llm-encyclopedia/chapters/08-推理与解码.md` 已完成从第一行到末尾的连续阅读和整体教材化重写。原章把 Inference、autoregressive generation、greedy、sampling、temperature、top-k/top-p、beam、重复惩罚、EOS、Best-of-N、Self-Consistency、log probability、KV Cache、prefill/decode、TTFT/TPOT 和 speculative decoding 压缩为“一句话定义 + 面试表达”；本轮重建为十五个独立主题，分别展开推理请求契约、自回归概率、采样温度、top-k/top-p/min-p/typical sampling、logits processor、停止与预算、beam search、Best-of-N/Self-Consistency、logprob/entropy、KV Cache、prefill/decode 延迟、speculative decoding、结构化约束解码和解码实验设计。
+
+当前文件 820 行、37,348 字节，88 组围栏成对，含 13 个标准库 Python 示例；全部示例通过 AST 并实际运行，覆盖 stable softmax、temperature/top-p、重复惩罚、输出预算、beam 长度修正、答案聚合、entropy、MHA/GQA cache 账本、TTFT/TPOT、speculative 接受率、logit mask 和配置比较。修正了重复惩罚示例的数值断言，并将失效的 vLLM metrics 深链接改为当前官方文档入口。Transformer、nucleus、typical sampling、Self-Consistency、speculative decoding、PagedAttention、Hugging Face generation 和 vLLM 官方入口均返回 HTTP 200；`git diff --check` 与围栏检查通过。下一步从第四册第 9 章 `book-04-llm-encyclopedia/chapters/09-推理优化与部署.md` 第一行开始顺序审阅。
+
+## 2026-08-14 会话恢复后续：第四册第 9 章
+
+第四册第 9 章 `book-04-llm-encyclopedia/chapters/09-推理优化与部署.md` 已完成从第一行到末尾的连续阅读和整体教材化重写。原章前部是大段第二十四册内部索引，正文又把 serving、KV cache、batching、PagedAttention、SGLang、PD 分离、量化、平台治理、路由、扩缩容、保护策略和故障定位写成“短定义 + 评估重点 + 面试表达”，并暴露了内部验收字段；本轮删除索引仓库和内部流程话术，重建为十九个独立教材主题，贯通请求生命周期、token 工作负载、调度、KV Cache、PagedAttention/prefix cache、FlashAttention/IO、vAttention、量化、runtime 选型、模型并行、PD 分离、多级 KV、模型路由、扩缩容、保护策略、异步 API、发布治理、benchmark/故障诊断和 agent serving。
+
+当前文件 1,161 行、52,542 字节，112 组围栏成对，含 12 个标准库 Python 示例；全部通过 AST 并实际运行，覆盖请求状态清理、token 负载、token budget scheduler、MHA/GQA KV 账本、block table/ref count、online softmax、虚拟页映射、对称量化、runtime 选择、PD 取舍、多指标副本估算和分位数回归。修正了调度预算与 block table 两处教学断言；正文不含“一句话定义”、面试表达、评估重点、门禁或准入等模板/内部措辞，`git diff --check` 和围栏检查通过。PagedAttention、FlashAttention、vAttention、SGLang、GPTQ、AWQ、SmoothQuant、FP8、Megatron、vLLM/SGLang/TensorRT-LLM/Triton/TGI/FlashInfer/NCCL/OpenTelemetry 等 18 个资料入口均返回 HTTP 200。下一步从第四册第 10 章 `book-04-llm-encyclopedia/chapters/10-分布式训练系统.md` 第一行开始顺序审阅。
+
+## 2026-08-14 会话恢复后续：第四册第 11 章
+
+第四册第 11 章 `book-04-llm-encyclopedia/chapters/11-长上下文rag与agent.md` 已从第一行顺序阅读到末尾，并整体重写为连续教材。原章是超大型百科索引，反复使用“一句话定义—工程价值—面试表达”，把长上下文、RAG、Agent、工具、MCP、A2A、Memory、Code Agent、Multi-Agent、trace 和评估拆成大量短条目；本轮删除索引和指令式内容，重建为 25 个独立主题，沿着上下文容量、位置利用、上下文预算、RAG 数据治理、召回/重排、证据状态、grounding、Agent runtime、规划、工具契约、幂等恢复、MCP、A2A、Memory、代码/浏览器 Agent、多 Agent、可观测性、安全、成本和端到端设计展开。
+
+当前文件 829 行、62,975 字节，含 23 组 `~~~math`、5 个 Python 和 4 组 `~~~text` 围栏，全部成对；5 个 Python 片段全部通过 AST 并实际运行。修正了首段公式转义和 KV cache 公式中的制表符残留，重试代码明确为无抖动基线；正文无门禁、准入、面试表达、标准答案、回答框架、简历表达、书稿应或“一句话定义”等内部话术，`git diff --check` 通过。联网核验的 12 个论文、官方协议和治理入口全部返回 HTTP 200，包括 Lost in the Middle、RAG、DPR、ReAct、Toolformer、MCP 2025-06-18、A2A、Anthropic Agent 工程资料、HELM、SWE-bench、OpenTelemetry 和 NIST AI RMF。正文明确区分论文机制、协议语义、教学示例和目标系统实测。下一步从第四册第 12 章 `book-04-llm-encyclopedia/chapters/12-reasoning与评估.md` 第一行开始顺序审阅。
+
+## 2026-08-14 会话恢复后续：第四册第 12 章
+
+第四册第 12 章 `book-04-llm-encyclopedia/chapters/12-reasoning与评估.md` 已从第一行顺序阅读到末尾，并整体重写为推理与评估教材。原章把 CoT、self-consistency、verifier、PRM/ORM、搜索、TTC、数学/代码推理、benchmark、污染、人工评审、LLM judge、幻觉、鲁棒性、校准和面试准备拆成大量短条目；本轮重建为 17 个连续主题，沿着候选生成、步骤与状态、采样聚合、验证器与校准、过程监督、Beam/ToT/MCTS、测试时计算、数学数据、代码执行、统计比较、多维评估、人评/judge、事实性/鲁棒性/校准、安全、评估流水线和发布证据展开。
+
+当前文件 665 行、34,606 字节，含 35 组 `~~~math`、2 个 Python 和 2 组 `~~~text` 围栏，全部成对；2 个 Python 片段全部通过 AST 并实际运行。修正了温度 softmax 分母、严重度加权分母和参考答案措辞；正文无门禁、准入、面试表达、标准答案、回答框架、简历表达、书稿应或“一句话定义”等内部话术，`git diff --check` 通过。联网核验 11 个资料入口，包含 CoT、Self-Consistency、Training Verifiers、Let's Verify Step by Step、Tree of Thoughts、HumanEval、HELM、MT-Bench/Chatbot Arena、Calibration 和 lm-evaluation-harness，均返回 HTTP 200。正文明确区分论文机制、benchmark 定义、教学代码和目标系统实测。下一步从第四册第 13 章 `book-04-llm-encyclopedia/chapters/13-安全与治理.md` 第一行开始顺序审阅。
+
+## 2026-08-14 会话恢复后续：第三册第 11 章
+
+第三册第 11 章 `book-03-practical-handbook/chapters/11-多模态实战.md` 已完成从原稿开头到文件末尾的顺序复读和整体教材化重建。原稿实际包含十条技术主线，但每条都重复使用“本讲目标—面试问法—简历写法—小练习—本讲小结”，末尾还把系统知识退化成固定项目讲稿；本轮保留并重新组织为十个独立正文主题：CLIP 图文检索、mini CLIP 对比损失、VLM 图像问答、多模态 Instruction Tuning 数据、图像与文本 RAG、Diffusion、Whisper ASR、语音转文本问答、多模态分层评估，以及从实验到可复核系统。
+
+当前文件 1,696 行、66,332 字节，含 56 组 `~~~math`、12 个 Python 和 28 组 `~~~text` 围栏，均成对；12 个 Python 片段全部通过 AST，9 个无外部依赖片段实际运行通过，2 个依赖 PyTorch/Transformers 的接口示例因当前环境未安装 torch 仅作语法检查。修正了 ASR CER/WER 教学断言，清理了旧 `$$`/` ```math `、`\\text{}` 公式写法、固定问答、简历话术和内部验收字段；正文没有门禁、准入、面试、简历、标准答案、回答框架、`gate_pass` 或 `gates`。本章引用的 CLIP、FAISS、LLaVA、BLIP-2、Transformers 多模态模板、RAG、DDPM、DDIM、LDM、DiT、Whisper、HELM、Evaluate、NIST 和 OpenTelemetry 论文/官方资料入口已联网核验，返回 HTTP 200；正文明确区分论文、官方接口、教学 toy、离线评估和目标系统实测。下一步进入第三册后续章节，继续从文件开头顺序审阅。
+## 2026-08-14 会话恢复后续：第四册第 10 章
+
+第四册第 10 章 `book-04-llm-encyclopedia/chapters/10-分布式训练系统.md` 已从原稿第 3601 行继续顺序阅读到末尾，确认后半段与前半段一样把训练系统、平台治理和系统设计拆成大量内部评估条目、短定义和流程话术，因此进行了整章教材化重写。新章改为 24 个连续主题，沿着训练账本、数据并行与 collective、张量并行、流水并行、ZeRO/FSDP、激活重计算与混合精度、训练效率、故障定位、集群拓扑、网络、存储与 checkpoint、容器/Kubernetes、多租户调度、TrainingJob、数据/实验/产物、可观测性、SLO、成本、安全、审计和系统设计展开。
+
+当前文件 1,149 行、63,349 字节，含 32 组 `~~~math`、11 个 Python 和 16 组 `~~~text` 围栏，围栏全部成对；11 个 Python 片段全部通过 AST 并实际运行。示例覆盖全局 batch、并行维度一致性、ring all-reduce 通信量、pipeline bubble、分片显存、梯度累积、step time 分解、故障分类、checkpoint manifest、dominant share 和 SLO burn rate。修正了 ring communication 示例的带宽单位，`git diff --check` 通过；正文没有“一句话定义”、面试表达、评估重点、门禁、准入、标准答案或回答框架。联网核验了 ZeRO、ZeRO-Infinity、Megatron-LM、GPipe、PyTorch Distributed/DDP/FSDP/checkpoint/AMP、NCCL、Kubernetes device plugins/Jobs/Kueue、MLflow、OpenTelemetry、NIST AI RMF 和 Data Cards 共 18 个入口，均返回 HTTP 200。下一步进入第四册第 11 章 `book-04-llm-encyclopedia/chapters/11-长上下文rag与agent.md`，从第一行继续顺序阅读。
+
+## 2026-08-14 会话恢复后续：第四册第 13–16 章
+
+第四册第 13、14、15 章已完成连续教材化重写与收尾核对。第 13 章扩展为 27 个独立安全与治理主题，第 14 章扩展为 45 个论文谱系主题，第 15 章扩展为 43 个方法比较主题；三章均补足机制、公式、变量解释、例子、成本、失败边界、评估和证据等级，删除摘要式索引和内部写作话术。
+
+本轮修正第 15 章 AdamW 教学实现，使解耦衰减先作用于更新前参数，再减去 Adam 自适应更新；同时将残留的“标准答案”改为“固定标签”。第 15 章 Python 片段已通过 AST 并实际运行，围栏成对，`git diff --check` 通过。
+
+第四册第 16 章 `book-04-llm-encyclopedia/chapters/16-多模态学习.md` 已从第一行到末尾整体重写。当前文件 1,356 行、69,930 字节，包含 31 个连续主题，覆盖模态表示、视觉/音频/视频采样、上下文和成本账本、Input Fidelity/Evidence Recall、CLIP/SigLIP、ViT/视觉塔、VLM connector、Q-Former/Perceiver/Flamingo/BLIP-2/LLaVA、多模态 SFT、扩散、视频时序、ASR/TTS/codec、统一多模态、评估、安全、事故复盘和工作流取舍。原有题库式段落改为机制推导、实验检查和章节练习，并补入 1 个无依赖 Python 审计示例。
+
+第 16 章 144 组围栏全部成对，Python 示例通过 AST 并实际运行，正文无门禁、准入、面试、简历、标准答案、回答框架、题库等内部话术；CLIP、ViT、SigLIP、Flamingo、BLIP-2、LLaVA、DDPM、Latent Diffusion、ControlNet、DALL-E、Video Diffusion、FVD、Whisper 和 NIST AI RMF 共 14 个资料入口均返回 HTTP 200。正文区分原始论文、官方治理框架、benchmark、教学 toy 和目标系统实测。下一步从第四册第 17 章开始顺序阅读。
+
+## 2026-08-14 会话恢复后续：第四册第 17、18 章
+
+第四册第 17 章 `book-04-llm-encyclopedia/chapters/17-图像生成与视频生成.md` 与第 18 章 `book-04-llm-encyclopedia/chapters/18-语音大模型.md` 已从第一行顺序复读到末尾并完成收尾核验。第 17 章完整展开扩散、自回归视觉 token、U-Net/DiT、VAE、CFG、图像编辑、视频时空建模、world model 边界、图像/视频评估和生成安全；第 18 章完整展开 waveform、Mel、speech encoder、ASR/Whisper、neural codec、TTS、韵律、声音克隆、streaming ASR、VAD、turn-taking、barge-in、端到端语音和 Voice Agent。两章均以独立主题、公式、变量解释、工程账本、失败边界、证据等级和章节练习组织正文。
+
+第 17 章当前 677 行、35,569 字节，48 组围栏和 1 个 Python 示例全部成对并通过 AST/实际运行；第 18 章当前 550 行、30,065 字节，40 组围栏和 1 个 Python 示例全部成对并通过 AST/实际运行。合法公式 `\\prod` 曾触发验证脚本误报，已确认不是正文错误；两章 `git diff --check` 通过，正文没有门禁、准入、面试表达、简历表达、标准答案、回答框架或内部验收话术。相关论文、官方资料和治理入口已联网核验，正文区分论文证据、官方接口、benchmark、教学示例和目标系统实测。下一步进入第五册第 1 章，从文件第一行继续顺序审阅。
+
+## 2026-08-14 会话恢复后续：第五册第 1–4 章
+
+第五册第 1 章 `book-05-llm-training/chapters/01-训练总览.md`、第 2 章 `book-05-llm-training/chapters/02-数据工程.md`、第 3 章 `book-05-llm-training/chapters/03-tokenizer与数据格式.md` 和第 4 章 `book-05-llm-training/chapters/04-模型架构与初始化.md` 已按文件顺序从第一行复读到末尾并完成教材化重写。四章分别贯通训练证据链、数据生命周期、tokenizer/数据协议和架构/初始化账本，删除正文中的面试问答、标准答案、内部验收话术和摘要式结尾，补充历史脉络、公式变量、失败边界、工程例子、证据等级和章节练习。
+
+当前四章分别为 873、859、878、743 行；第 1–4 章的 Python 教学示例均通过 AST 并实际运行，输出分别为 `training ledger: ok`、`data audit toy: ok`、`data format toy: ok` 和 `architecture ledger: ok`；围栏全部成对，`git diff --check` 通过，未发现广告注入或无关推广文本。第 1 章联网核验 Scaling Laws、Chinchilla、GPT-3、InstructGPT、DPO 和 DeepSeek-R1；第 2 章核验 C4/T5、The Pile、Deduplicating Training Data、Datasheets、Common Crawl 和 Hugging Face Dataset Cards；第 3 章核验 BPE、SentencePiece、tiktoken、Tokenizers、Chat Templates、TRL SFT 和 PyTorch CrossEntropyLoss；第 4 章核验 Transformer、RoPE、RMSNorm、SwiGLU、MQA、GQA、Switch Transformer 和 LLaMA，相关入口均返回 HTTP 200。下一步进入第五册第 5 章。
+
+## 2026-08-14 会话恢复后续：第五册第 5 章
+
+第五册第 5 章 `book-05-llm-training/chapters/05-预训练目标与训练循环.md` 已按文件顺序从第一行复读到末尾并完成教材化重写。新章把自回归概率分解、teacher forcing、label shift、Cross Entropy、PPL、causal/padding/label mask、packing 与文档边界、optimizer update、梯度裁剪、gradient accumulation、FP16/BF16、validation、日志、checkpoint 状态与 checkpoint 选择拆成独立主题，补充公式、变量、分母口径、恢复一致性、常见故障和章节练习。
+
+当前文件 731 行、28,463 字节，32 组 `~~~` 围栏全部成对，只有 1 个 Python 教学示例；示例通过 AST 并实际运行，输出 `training step toy: ok`，且验证了 label shift、PAD 忽略、causal mask、梯度累积一致性、梯度尺度和 loss 下降。此前被误标为 Python 的梯度累积与 validation 伪代码已改为 `text` 围栏；`git diff --check` 通过，正文未发现门禁、准入、面试表达、标准答案、回答框架、简历表达或“一句话定义”等内部话术。相关资料已核验 Hugging Face causal LM、Accelerate gradient accumulation、PyTorch CrossEntropyLoss/AMP、Transformer 和 GPT-3 原论文，均返回 HTTP 200。下一步从第五册第 6 章 `book-05-llm-training/chapters/06-优化器与学习率策略.md` 第一行开始顺序阅读。
+
+## 2026-08-14 会话恢复后续：第五册第 6 章
+
+第五册第 6 章 `book-05-llm-training/chapters/06-优化器与学习率策略.md` 已按文件顺序从第一行复读到末尾，并整体改写为连续教材。原章把 SGD、Momentum、Adam、AdamW、Adafactor、Lion、Sophia、Muon、参数分组、warmup、cosine、梯度裁剪和 batch scaling 写成短定义，末尾还保留“面试高频问法”；本轮重建为 25 个独立主题，沿着梯度与状态账本、更新方程、AdamW 解耦衰减、状态精度与分布、分解/符号/曲率/矩阵/低秩路线、参数分组、cosine 与 WSD、token batch、公平实验、checkpoint 恢复和故障诊断展开。
+
+当前文件 1,417 行、49,578 字节，61 组围栏全部成对，只有 1 个 Python 教学示例；示例通过 AST 并实际运行，输出 `optimizer policy toy: ok`，且验证了 warmup/cosine 边界、global clipping、AdamW 与耦合 L2 的差异、Adafactor 状态量级、Lion 符号更新、Sophia 裁剪示意、Muon 矩阵归一化和有效 token batch。新增 GaLore 低秩梯度投影与 WSD 调度，明确区分优化器、状态压缩和学习率策略。正文未发现门禁、准入、面试表达、标准答案、回答框架、简历表达或题库话术；`git diff --check` 通过。联网核验 Adam、AdamW、Adafactor、Lion、Sophia、Muon、GaLore、MiniCPM/WSD，以及 PyTorch AdamW/clip_grad_norm_ 和 Transformers scheduler 资料，相关入口均返回 HTTP 200。下一步从第五册第 7 章 `book-05-llm-training/chapters/07-分布式训练.md` 第一行开始顺序阅读。
+
+## 2026-08-14 会话恢复后续：第五册第 7 章
+
+第五册第 7 章 `book-05-llm-training/chapters/07-分布式训练.md` 已按文件顺序从第一行复读到末尾，并整体改写为连续教材。原章把 DDP、ZeRO/FSDP、Tensor/Pipeline/Sequence/Context/Expert Parallel、通信重叠和激活重计算写成定义、选型口诀和“面试官会怎么问”；本轮重建为 22 个独立主题，沿着 world/rank/process group、全局有效 token 分母、collective 语义、DDP、ZeRO/FSDP 状态生命周期、TP 矩阵布局、PP bubble、SP/CP、混合并行与拓扑、MoE 路由容量、checkpoint/故障恢复、可观测性和系统选择展开。
+
+当前文件 1,434 行、47,069 字节，58 组围栏全部成对，只有 1 个 Python 教学示例；示例通过 AST 并实际运行，输出 `distributed ledger toy: ok`，且验证了 64 GPU rank 乘积、DDP/ZeRO 显存阶梯、ring all-reduce 流量、global token batch、pipeline bubble、MoE capacity/偏斜溢出和 activation checkpointing。正文未发现门禁、准入、面试表达、标准答案、回答框架、简历表达或题库话术；`git diff --check` 通过。联网核验 PyTorch DDP/FSDP/Distributed Checkpoint、ZeRO、Megatron-LM、GPipe、Switch Transformer 和 NCCL 资料，相关入口均返回 HTTP 200。下一步从第五册第 8 章 `book-05-llm-training/chapters/08-显存优化与数值精度.md` 第一行开始顺序阅读。
+
+## 2026-08-14 会话恢复后续：第五册第 8 章
+
+第五册第 8 章 `book-05-llm-training/chapters/08-显存优化与数值精度.md` 已按文件顺序从第一行复读到末尾，并整体改写为连续教材。原章把参数/梯度/state/激活、FP16/BF16/FP8、mixed precision、checkpointing、gradient accumulation、ZeRO/FSDP、LoRA/QLoRA、FlashAttention、OOM 和 NaN 混成配置清单，末尾还保留“面试官会怎么问”；本轮重建为 20 个独立主题，沿着显存五类账本、稳态与瞬时峰值、长上下文激活、attention IO、dtype 表示边界、scale/unscale、重计算、状态分片、量化底座、OOM/NaN 证据链和实验报告展开。
+
+当前文件 1,180 行、35,665 字节，47 组围栏全部成对，只有 1 个 Python 教学示例；示例通过 AST 并实际运行，输出 `memory precision toy: ok`，且验证了 7B 状态账本、ZeRO-3 理想份额、checkpoint 激活下降、显式 attention score 与 FlashAttention workspace、FP16/BF16 动态范围、loss scaling 和 LoRA 状态。正文明确区分稳态显存与 transient peak、存储精度与计算精度、量化底座与激活成本，未发现门禁、准入、面试表达、标准答案、回答框架、简历表达或题库话术；`git diff --check` 通过。联网核验 PyTorch AMP/checkpoint/CUDA memory、FlashAttention、FP8、Transformer Engine、QLoRA 和 bitsandbytes 资料，相关入口均返回 HTTP 200。下一步从第五册第 9 章 `book-05-llm-training/chapters/09-训练稳定性与debug.md` 第一行开始顺序阅读。
+
+## 2026-08-14 会话恢复后续：第五册第 9 章
+
+第五册第 9 章 `book-05-llm-training/chapters/09-训练稳定性与debug.md` 已按文件顺序从第一行复读到末尾，并整体改写为连续教材。原章虽然覆盖 loss spike、NaN/Inf、梯度、数据/mask、学习率、混合精度、分布式和 checkpoint，但开头与结尾仍把排查链写成面试回答框架，代码与清单混杂；本轮重建为 17 个独立主题，沿着健康基线、第一次异常时间轴、反事实实验、spike、非有限值、梯度爆炸/过小、数据 decode、loss mask、optimizer/scheduler、AMP、rank 差异、恢复连续性和复盘记录展开。
+
+当前文件 862 行、29,693 字节，30 组围栏全部成对，只有 1 个 Python 教学示例；示例通过 AST 并实际运行，输出 `training debug toy: ok`，且识别了候选 spike、非有限值、梯度异常、坏 batch、rank mismatch、checkpoint 缺项和回滚 step。正文未发现门禁、准入、面试表达、标准答案、回答框架、简历表达或题库话术；`git diff --check` 通过。联网核验 PyTorch autograd anomaly detection、clip_grad_norm_、AMP、DDP、Distributed Checkpoint，以及梯度爆炸和混合精度论文，相关入口均返回 HTTP 200。下一步从第五册第 10 章 `book-05-llm-training/chapters/10-checkpoint评估与实验管理.md` 第一行开始顺序阅读。
+
+## 2026-08-14 会话恢复后续：第五册第 10 章
+
+第五册第 10 章 `book-05-llm-training/chapters/10-checkpoint评估与实验管理.md` 已从第一行顺序复读到末尾，并完成教材化修订。原章虽已覆盖 checkpoint 状态、保存频率、恢复连续性、validation/PPL、领域损失、benchmark、回归、实验追踪、版本管理、复现、公平比较和 checkpoint 选择，但末尾仍保留“面试官会怎么问”等内部话术；本轮将其改成“常见误判与检查路径”，把加载成功、最后版本、loss 下降、随机种子、配置名和 `load_state_dict` 等容易混淆的判断改写为正文中的工程推理。
+
+当前文件 920 行、47,337 字节，Python 示例通过 AST 并实际运行，输出中选择 `ckpt_2000`、识别 `ckpt_3000` 的字段缺失和领域回归，恢复探针、manifest、存储预算和公平对照检查均通过；围栏成对、控制字符检查和 `git diff --check` 通过。联网核验 PyTorch 通用 checkpoint、Distributed Checkpoint、Reproducibility、FSDP，Hugging Face Trainer 与 fixed-length perplexity，以及 MLflow Tracking；正文区分官方接口、评估统计口径、工具实践和目标系统实测。下一步从第五册第 11 章 `book-05-llm-training/chapters/11-后训练与对齐训练.md` 第一行开始顺序阅读。
+
+## 2026-08-14 会话恢复后续：第五册第 11 章
+
+第五册第 11 章 `book-05-llm-training/chapters/11-后训练与对齐训练.md` 已从第一行顺序复读到末尾，并完成教材化修订。原章覆盖 SFT、Reward Model、PPO、DPO、SimPO、GRPO、GSPO、DAPO、DCPO、RLVR、DeepSeek-R1、领域专家和 on-policy distillation，但仍有临时编号（4A/8A/8B/8C）、“面试”语境和方法清单式收束；本轮改成连续编号，把公开模型案例改写为“公开声明与证据边界”，并将末尾问答改成常见误判与诊断路径。
+
+当前文件 1,266 行、68,684 字节，Python 教学示例通过 AST 并实际运行，输出 SFT mask、偏好覆盖、RM/DPO loss、长度偏置、GRPO group advantage、ratio、安全召回、过度拒答和能力回归检查；围栏成对、编号检查、控制字符检查和 `git diff --check` 通过。联网核验 InstructGPT、PPO、DPO、DeepSeekMath/GRPO、SimPO、DeepSeek-R1、DAPO、DrGRPO、GSPO、DCPO、TRL DPO/GRPO 文档，以及 DeepSeek-V4、Qwen3.5、Kimi K2.5/K3 模型卡和 OpenAI GPT-5.6 官方模型指南。正文明确区分论文方法、框架 API、模型卡公开声明和运行时字段，不能由 API 字段反推内部训练配方。下一步从第五册第 12 章 `book-05-llm-training/chapters/12-多模态训练.md` 第一行开始顺序阅读。
+
+## 2026-08-14 会话恢复后续：第五册第 12 章
+
+第五册第 12 章 `book-05-llm-training/chapters/12-多模态训练.md` 已从第一行顺序复读到末尾，并完成教材化修订。原章已经覆盖 CLIP、VLM、视觉 token、指令微调、caption/VQA、OCR、语音、视频、diffusion、多模态数据协议、模态对齐、资源预算和评估，但末尾仍保留“面试官会怎么问”；本轮将其改成“常见误判与诊断路径”，把模块名、模板渲染、prompt、训练 loss 和 attention 可视化等容易混淆的判断改成数据流、监督位置、反事实证据和分层评估的连续推理。
+
+当前文件 1,151 行、59,717 字节，0 依赖 Python demo 通过 AST 并实际运行，验证 CLIP 双向损失、VLM 拼接 shape、多模态 SFT mask、diffusion 加噪、ASR 帧数、视频 token 成本和坏样本审计；围栏成对、控制字符检查和 `git diff --check` 通过。联网核验 CLIP、BLIP-2、Flamingo、LLaVA、Whisper、wav2vec 2.0、Conformer、DDPM、Latent Diffusion、DiT、Video Diffusion、LayoutLMv3、Transformers 多模态模板、PyTorch CrossEntropyLoss 和 NIST AI RMF，相关入口均返回 HTTP 200。下一步从第五册第 13 章 `book-05-llm-training/chapters/13-训练成本与资源规划.md` 第一行开始顺序阅读。
+## 2026-08-14 会话恢复后续：第五册第 13 章
+
+第五册第 13 章 `book-05-llm-training/chapters/13-训练成本与资源规划.md` 已从第一行完整复读到末尾并完成教材化修订。原章已经覆盖成本账本、`6ND`、tokens/s、GPU 数量、MFU/HFU、Chinchilla、checkpoint、失败重跑和资源流程，但末尾仍保留题库式问答，且 FLOPs、MFU/HFU、MoE、长上下文和实际墙钟时间的边界不够充分。本轮扩展为 14 个连续主题，补充 `c_tok` 与 `6ND` 的关系、attention 序列项、MoE 激活参数与总状态、MFU/HFU/GPU busy 的分层、长期有效吞吐、容量与保存语义、概率化故障成本和单位有效能力成本；将题库段落改为“常见误判与诊断路径”。
+
+当前文件 767 行、42,510 字节。Python 成本审计 demo 已通过 AST 并实际运行，输出 `train_flops=4.20e+22`、`tokens_per_s=1219048`、`planned_wall_days=10.36`、`resume_ckpt_gib=104.31`、`retained_storage_gib=339.00`，并通过可用率、计划时长和恢复损失断言；76 个围栏标记成对，控制字符、禁用内部话术和 `git diff --check` 检查通过。
+
+联网核验了 Chinchilla、Kaplan scaling laws、PaLM 的 MFU/HFU、Megatron-LM、ZeRO、MLPerf Training 和 PyTorch FSDP 官方资料，入口均返回 HTTP 200。正文明确区分原始论文、框架文档、benchmark、教学 toy 和目标系统实测，不把公开利用率或模型宣传口径写成普遍定律。下一步从第五册第 14 章 `book-05-llm-training/chapters/14-训练面试题.md` 第一行开始顺序阅读。
+
+## 2026-08-14 会话恢复后续：第七册第 12 至 15 章再次逐章复读
+
+本轮按文件顺序重新阅读第七册第 12 至 15 章，没有用关键词扫描替代正文审阅。第 12 章原文件虽然历史记录曾标记为完成，但实际正文仍残留“评估面试题”、面试官/候选回答、标准回答和回答审计 demo 语境；本轮将其改名为 `book-07-evaluation-experiments/chapters/12-评估体系综合设计与工程落地.md`，并同步目录。章首改为真实模型发布和企业知识助手场景，保留评估目标、任务契约、切片、Human Eval、pairwise、LLM judge、污染、reasoning/code/math/RAG/Agent、多模态、长上下文、安全、A/B test、统计、Error Analysis 和 Eval Platform 的完整教材内容；系统设计部分改为直接讲数据/执行/评分/分析/报告/治理边界；demo 改为评估体系完整性诊断，变量改为 `plan_rubric`/`plan_tags`，输出和代码实际一致，`decision=revise_plan_and_review_cost`。原历史记录未覆盖，保留作为审阅轨迹。
+
+第 13 章《1M Context 的有效能力验证》从第一行到末尾复读并补充 1M 的 tokenizer token 计数口径、输入/输出预算差异、单位成功成本在零成功时的边界、分层诊断实验标题和 `L_eff` 的单调性/长度桶假设；明确 32K/256K/1M demo 中的阈值只是教学参数。第 14 章《Frontier Model 证据等级》从第一行到末尾复读，删除残留“参加面试”语境，去掉 Claim Ledger 后段重复的覆盖率与条件完整率定义，保留状态转移和证据作用域。第 15 章《Specialized Frontier Eval Cluster》从第一行到末尾复读，补充隐藏测试分母、重复解码/环境错误口径、自适应采样优先级公式的非最优近似边界，明确代码修复案例中的危险任务与 hidden pass 交集不能仅凭汇总数推断，并将重复的“第一个不可逆错误”段落整理为责任记录和修复 owner/回归实验闭环。
+
+四章均完成 Python AST、示例实际运行、Markdown 围栏和 `git diff --check` 验证；第 13 至 15 章标题无重复、控制字符为 0。核验第 13 章的 RoPE、Position Interpolation、LongRoPE、LongBench、Lost in the Middle、PagedAttention、vLLM 和 Qwen2.5-7B-Instruct-1M 入口，均返回 HTTP 200。第七册第 1 至 15 章当前轮复读完成，下一步从第八册 `book-08-ai-safety-alignment/chapters/01-safety与alignment总览.md` 第一行开始继续逐章阅读。
+
+## 2026-08-14 会话恢复后续：第八册第 16 章、第二册边界和第九册第 1 章
+
+会话恢复后先复读并修正第八册第 16 章 `book-08-ai-safety-alignment/chapters/16-fallback-routing与安全降级.md` 的状态恢复 demo。将原业务动作授权 `authorized` 与只读状态查询授权 `status_query_authorized` 分开；`committed` 只保留历史事实，不允许新动作，`allowed_scope` 明确为 `none`；增加“原业务授权撤销但状态查询仍可用”和“连状态查询也不可用”两个对照场景。demo 八个场景均实际运行并与正文预期一致，`git diff --check` 通过。
+
+第二册第 3、5、6 章的遗留示例已分别按代码块验证。第 3 章 14 个示例、第 5 章 17 个示例、第 6 章 10 个示例均通过 AST 并用仓库 `.venv/bin/python` 实际运行；系统 Python 缺少 `torch`，但 `.venv` 可用 `torch 2.12.0+cu130`。本轮没有运行 `transformers`、`datasets`、`trl` 等真实外部接口脚本，因此相关结论仍标为接口说明，不写成目标框架实测。
+
+第九册第 1 章 `book-09-data-engineering/chapters/01-数据总览.md` 已从第一行逐段复读。正文已具备数据分布、规模/质量/覆盖/配比/治理、数据类型边界、完整 pipeline、元数据公式、RAG/后训练/安全/评估衔接、企业知识助手案例和可运行审计 demo；本轮修正 Chinchilla 公式变量的正文写法，给 demo 增加空集合/全量过滤/空评估提示的安全分母处理，`retention` 与 `weighted_quality` 在无分母时返回 `None`，并补充对应解释。demo 通过 AST 和实际运行，围栏、禁用内部写作话术及 `git diff --check` 均通过。联网核验 GPT-3、Chinchilla、NIST AI RMF 和 Model Cards 入口，均返回 HTTP 200；其余本章列出的资料保持来源等级和适用边界。下一步从第九册第 2 章第一行继续逐章节复读。
+
+## 2026-08-14 会话恢复后续：第九册第 2 章
+
+第九册第 2 章 `book-09-data-engineering/chapters/02-web-scale数据采集.md` 已从第一行完整复读。正文围绕 Web-scale 采集对象、来源类型、Common Crawl 的 WARC/WAT/WET、robots/ToS/许可证/隐私边界、HTML/PDF/代码解析、质量与污染、exact/near/结构化去重、多语言配比、血缘/删除/回放、采集架构、幂等和企业研究助手解析事故展开；每个主题保持独立解释，并区分数据集文档、论文、协议、治理框架和目标系统实测的证据范围。
+
+本轮修复合成审计 demo 的边界路径：原始 token 统计不再直接访问缺失 `html` 的记录；新增 `missing_metadata` 风险率和 `repair_missing_metadata` 动作；缺少 `id` 时使用稳定的 `row_{index}`；未知来源不再触发 `KeyError`；空集合、未知来源、缺少 `id/html`、全量被过滤四类场景均加入断言。示例通过 AST 并实际运行，正常九条记录的保留集合、拒绝原因、阶段计数和决策与正文一致；控制字符检查、Markdown 围栏检查和 `git diff --check` 通过。联网核验 GPT-3、Chinchilla、phi-1、The Pile、Common Crawl、C4、RefinedWeb、FineWeb、Dolma、DataComp-LM、去重论文、RFC 9309、Datasheets for Datasets、NIST AI RMF 和 NIST Generative AI Profile 入口，均返回 HTTP 200。下一步从第九册第 3 章第一行继续逐章节复读。
+
+## 2026-08-14 会话恢复后续：第九册第 3 章
+
+第九册第 3 章 `book-09-data-engineering/chapters/03-清洗过滤与质量评分.md` 已从第一行完整复读。正文把清洗写成面向目标任务的分布塑形，分别展开结构有效性、正文与模板、规则过滤、质量分类器、困惑度、PII/秘密、安全语义、评估污染、合成数据、代码/数学/对话/多语言专用处理、阈值代价、分层抽样、过滤消融和低资源语言误删案例；没有把质量分或删除比例写成普适结论。
+
+本轮修复合成清洗审计 demo：新增 `safe_ratio()`；空集合的 `retention` 返回 `None` 并触发 `restore_or_collect_source_records`，全量过滤的 `retention` 返回 `0.0` 并触发 `restore_nonempty_training_set`；无效/乱码样本新增 `repair_or_isolate_invalid_records` 动作；语言/领域配比在无保留 token 时保持空映射。正常样本、空集合和全量过滤场景均通过 AST 与实际运行，`git diff --check` 通过。联网核验 C4、RefinedWeb、FineWeb、Dolma、DataComp-LM、去重论文、Presidio、Datasheets for Datasets、NIST AI RMF 和 NIST Generative AI Profile，入口均返回 HTTP 200；Presidio 入口重定向至当前文档域名。下一步从第九册第 4 章第一行继续逐章节复读。
+
+## 2026-08-14 会话恢复后续：第九册第 4 章
+
+第九册第 4 章 `book-09-data-engineering/chapters/04-去重与污染检测.md` 已从第一行完整复读。正文把训练集内部重复、训练-评估污染、canary 记忆探针分开处理，分别展开 exact hash、文档/段落/子串粒度、Jaccard/shingle、MinHash/LSH、SimHash、embedding 候选、代码 fork、答案字段污染、时间切分、私有 holdout、证据等级、误合并/漏合并和公开题解污染案例；明确相似候选不等于删除结论，内部去重也不等于污染检测。
+
+本轮补充合成去重审计 demo 的工程边界：说明确定性 hash 和简化 MinHash 仅用于教学，不能替代生产实现的 hash/LSH 参数验证、候选召回率和精确复核；新增 `safe_ratio()`，无候选分母返回 `None`，候选存在但最终全部隔离时返回 `0.0`；增加空训练候选和最终空集合的修复动作，并保留训练内部簇、污染命中和 canary 命中分离输出。示例通过 AST 和实际运行，输出 attention/代码重复簇、`gsm_toy` 污染候选、canary 命中和最终保留集合；`git diff --check` 通过。联网核验去重论文、RefinedWeb、FineWeb、Dolma、DataComp-LM、GPT-3、Datasheets 和 NIST AI RMF 入口；IEEE 经典论文 DOI 跳转返回 202，ACM 经典论文 DOI 页面返回 403，因此只保留方法出处和证据边界，不宣称全文已核验。下一步从第九册第 5 章第一行继续逐章节复读。
+
+## 2026-08-14 会话恢复后续：第九册第 5 章
+
+第九册第 5 章 `book-09-data-engineering/chapters/05-data-mixture与配比.md` 已从第一行完整复读。正文将 data mixture 作为训练分布和隐式目标函数来讲，分别展开自然配比、平滑/温度采样、质量/能力/风险加权、effective epoch、KL 漂移、通用文本、代码、数学、多语言、专业数据、合成数据、训练阶段、静态/动态配比、评估矩阵、tokenizer 影响、上采样过拟合和多尺度 ablation；明确示例比例不是所有模型的固定答案。
+
+本轮补充配比公式的定义域说明：参与采样的数据池必须有 `n_k > 0`，分数总和必须为正；空池、零 token 池、重复名称和零和权重不能静默进入归一化，`0^0` 和 `e_k=b_k/n_k` 的零分母不被伪装成正常数值。demo 新增 `validate_pools()` 和 `normalize()` 输入校验，正常配比数值、空池和零 token 边界均通过 AST 与实际运行，`git diff --check` 通过。联网核验 Chinchilla、T5、mT5、Gopher、RefinedWeb、FineWeb、Dolma、DataComp-LM 和 phi-1 入口，均返回 HTTP 200。下一步从第九册第 6 章第一行继续逐章节复读。
+
+## 2026-08-14 会话恢复后续：第九册第 6 章
+
+第九册第 6 章 `book-09-data-engineering/chapters/06-code-math-domain-data.md` 已从第一行完整复读。正文分别展开代码仓库/文档/测试与 license、secret、fork 和功能验证；数学题目/过程/答案/verifier 与题库污染；医学、法律、金融等专业资料的来源等级、时效、版本、PII、引用、专家抽检和 RAG/工具边界；并比较继续预训练、SFT、RAG 和工具的责任分工。代码、数学和领域数据均有独立的结构、质量、风险和评估逻辑，没有被压缩成同一个比例或总分。
+
+本轮修复专项数据审计 demo 的分母语义：代码测试通过率在 `n_test=0` 时为 `undefined`，表示没有测试证据，不再伪装成通过率 `0`；分类型保留率、mixture 和总保留率通过 `safe_ratio()` 区分无分母的 `None` 与实际零保留；无测试样本会触发 `missing_test_evidence`，全量没有保留 token 会触发恢复专项数据动作。主示例保留集合和原有数值不变，新增边界断言通过 AST、实际运行和 `git diff --check`；另清理重复小标题/重复输出残留。联网核验 Codex/HumanEval、GSM8K、MATH、The Stack、StarCoder、GitHub Secret Scanning、Med-PaLM、PubMedQA 和 LegalBench 入口，均返回 HTTP 200。下一步从第九册第 7 章第一行继续逐章节复读。
+
+## 2026-08-14 会话恢复后续：第九册第 7 章
+
+第九册第 7 章 `book-09-data-engineering/chapters/07-synthetic-data与distillation-data.md` 已从第一行完整复读。正文将 synthetic data 与 distillation data 分成“生成来源”和“teacher-student 关系”两个维度，分别展开 Self-Instruct、Evol-Instruct、推理轨迹、teacher 授权、验证器、去重与多样性、数据退化、自然数据锚点、训练阶段和合成比例实验；明确 teacher 强不等于输出必然正确，合成数据也不能替代真实分布。
+
+本轮补充合成/蒸馏审计公式的定义域：`R_syn` 需要非零保留 token 分母，`C_cover` 需要非空目标标签集，`R_dup` 需要存在样本；无保留数据返回 `None` 而不是伪装成零比例，原始数据存在但全量过滤时保留率才为 `0.0` 并触发恢复动作。demo 新增 `safe_ratio()`，自然锚点检查改为要求实际保留的自然样本，空分母断言通过；正常保留集合、配比和风险检查与正文输出一致，AST、实际运行和 `git diff --check` 通过。联网核验 Self-Instruct、WizardLM、phi-1、Orca、Distilling Step-by-Step、OOD robustness、Curse of Recursion 和经典 Knowledge Distillation 入口，均返回 HTTP 200。下一步从第九册第 8 章第一行继续逐章节复读。

@@ -343,7 +343,7 @@ def iter_jsonl(path: str) -> Iterator[dict[str, Any]]:
 \log p_\theta(x_t \mid x_{<t})
 ~~~
 
-其中 M 是有效目标位置集合，theta 是模型参数。代码实现中，logits[:, 0:T-1] 对应 labels[:, 1:T]。最后一个 logits 没有被使用，是因为输入序列没有给出它之后的真实 token。
+其中 M 是有效目标位置集合，theta 是模型参数；这个公式要求 \(|M|>0\)。代码实现中，logits[:, 0:T-1] 对应 labels[:, 1:T]。最后一个 logits 没有被使用，是因为输入序列没有给出它之后的真实 token。若一个 batch 没有任何有效目标，工程实现可以返回带梯度的零作为显式的“无训练信号”约定，但不能把它解释成真正的平均损失。
 
 用表格看更清楚：
 
@@ -710,6 +710,8 @@ def build_rope_cache(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     if max_seq_len < 0 or head_dim <= 0 or head_dim % 2:
         raise ValueError("max_seq_len must be non-negative and head_dim even")
+    if base <= 0 or not torch.isfinite(torch.tensor(base)):
+        raise ValueError("base must be a finite positive number")
 
     indices = torch.arange(
         0,
@@ -864,8 +866,8 @@ def sample_next_token(
 ) -> torch.Tensor:
     if logits.ndim != 2:
         raise ValueError("logits must have shape [B, V]")
-    if temperature < 0:
-        raise ValueError("temperature cannot be negative")
+    if not torch.isfinite(torch.tensor(temperature)) or temperature < 0:
+        raise ValueError("temperature must be finite and non-negative")
     if temperature == 0:
         if bool(torch.isnan(logits).any()) or bool(torch.isposinf(logits).any()):
             raise ValueError("greedy sampling cannot use NaN or positive infinity")
@@ -1135,6 +1137,12 @@ def mask_prompt_tokens(
         raise ValueError("labels must be [B, T], prompt_lengths must be [B]")
     if labels.size(0) != prompt_lengths.size(0):
         raise ValueError("batch dimensions disagree")
+    if prompt_lengths.dtype != torch.long or prompt_lengths.device != labels.device:
+        raise TypeError("prompt_lengths must be long and on labels.device")
+    if bool((prompt_lengths < 0).any()) or bool(
+        (prompt_lengths > labels.size(1)).any()
+    ):
+        raise ValueError("prompt_lengths must lie in [0, sequence_length]")
     positions = torch.arange(
         labels.size(1),
         device=labels.device,
@@ -1536,7 +1544,7 @@ def accumulated_step(
             optimizer.zero_grad(set_to_none=True)
 ~~~
 
-除以 accumulation_steps 是为了让累积梯度近似目标 batch 的平均梯度。若每个 micro-batch 的有效 token 数差异很大，按 batch 平均和按 token 平均并不等价；严格训练还要根据有效 token 数做全局归一化。这是一个容易被“代码能运行”掩盖的目标定义问题。
+除以 accumulation_steps 是为了让累积梯度近似目标 batch 的平均梯度。这个教学循环还假定 `micro_batches` 的数量正好是 `accumulation_steps` 的整数倍；如果最后一组不足一个完整累积周期，调用方必须显式执行一次尾批次 `optimizer.step()`，或者丢弃并记录这组样本，不能静默留下未更新的梯度。若每个 micro-batch 的有效 token 数差异很大，按 batch 平均和按 token 平均并不等价；严格训练还要根据有效 token 数做全局归一化。这是一个容易被“代码能运行”掩盖的目标定义问题。
 
 ## 4.15 评估小模块：正确性要有参考答案
 

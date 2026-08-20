@@ -63,6 +63,8 @@ result_hash, error, committed, trace_id
 s_{t+1}=F(s_t,o_t,a_t;\theta)
 ```
 
+`s_t`、`o_t` 和 `a_t` 应分别通过版本化 schema 表示；`F` 是由 runtime、工具执行器、权限服务和日志系统共同实现的状态转移，不是模型可以随意改写的函数。`\theta` 可以包含模型 revision、工具 schema、策略版本和上下文折叠规则；如果这些依赖发生变化，恢复时必须先做兼容性检查。外部动作的状态转移还应具有幂等键或可查询的执行 ID，避免网络重试产生重复副作用。
+
 恢复时读取 checkpoint：
 
 ```math
@@ -102,8 +104,10 @@ s_{t+1}=F(s_t,o_t,a_t;\theta)
 ```math
 R_{\mathrm{resume}}
 =\frac{N_{\mathrm{tasks\ resumed\ correctly}}}
-{\max(1,N_{\mathrm{interrupted\ tasks}})}
+{N_{\mathrm{interrupted\ tasks}}}
 ```
+
+这个比例要求 `N_interrupted_tasks>0`，且 `0\le N_resumed_correctly\le N_interrupted_tasks`。如果评估期间没有中断任务，恢复率未定义，应记录为 `None`，不能用 `0` 或 `1` 伪造结果。一个“正确恢复”任务至少要满足：状态校验通过、外部执行状态得到确认或被明确标为未知、权限重新检查、没有重复副作用，并且最终 artifact 或用户可见状态符合任务契约。
 
 同时报告重复副作用率、状态泄露率、恢复延迟、摘要事实支持率和跨版本拒绝率。一个系统即使恢复率高，只要它在网络不确定时重复支付或重复发送外部请求，仍然不适合生产。
 
@@ -113,6 +117,7 @@ R_{\mathrm{resume}}
 
 ```json
 {
+  "schema_version": 1,
   "task_id": "...",
   "model_revision": "...",
   "workspace_revision": "...",
@@ -126,6 +131,8 @@ R_{\mathrm{resume}}
 }
 ```
 
+`schema_version`、`task_id`、模型和 workspace revision、policy version、checksum 都是恢复契约的一部分，不能省略后靠字段猜测。`budget` 中的数值应带单位并为有限非负数；`tool_calls` 中每个动作至少要有唯一 `call_id`、幂等键、状态和授权结果；`pending_effects` 只能表示尚未提交的动作，不能把“模型打算做”写成“系统已经做”。
+
 这里的 `pending_effects` 故意和 `artifacts` 分开。artifact 是已经生成的产物，pending effect 是尚未提交的动作。恢复系统在提交前必须再次显示或确认高风险动作，并检查 workspace revision 没有被其他任务覆盖。
 
 ## 15.11 常见误区
@@ -138,9 +145,9 @@ R_{\mathrm{resume}}
 
 第四个误区是摘要越短越好。摘要丢掉约束和来源后，恢复任务会变得更危险。
 
-## 15.12 面试回答、练习与边界
+## 15.12 综合判断、练习与边界
 
-回答“多轮工具 Agent 如何保留推理状态”时，应先区分可见历史、结构化执行状态和 provider 管理的内部状态；保存 call ID、观察、权限、预算、checkpoint、artifact 和来源；恢复前校验模型与工具版本，处理外部副作用的幂等性，不能把隐藏思维或未授权计划直接暴露或执行。
+设计多轮工具 Agent 的状态保存时，应先区分可见历史、结构化执行状态和 provider 管理的内部状态；保存 call ID、观察、权限、预算、checkpoint、artifact 和来源；恢复前校验模型与工具版本，处理外部副作用的幂等性，不能把隐藏思维或未授权计划直接暴露或执行。
 
 练习一：为一个代码 Agent 设计 checkpoint schema，覆盖当前分支、测试结果、待确认修改和工具状态。
 
@@ -181,6 +188,84 @@ state = {
 
 同样的规则适用于支付、发邮件和发布。外部副作用的“未知”是一个真实状态，不是普通异常。把未知状态直接当失败并重试，是重复副作用的主要来源之一。
 
+### 15.12.4 一个最小可运行的恢复状态机
+
+下面的 demo 用内存字典模拟一个测试工具。第一次发送后客户端超时，恢复流程查询 `run_id`；如果工具状态仍为 `running`，系统不会重复发送，而是返回等待状态。随后用户撤销写权限，恢复流程会拒绝新的写动作。示例不连接网络，也不代表任何 provider 的具体 API。
+
+```python
+from dataclasses import dataclass, field
+
+
+ALLOWED = {"planned", "authorized", "sent", "running", "succeeded", "failed", "unknown"}
+
+
+@dataclass
+class Action:
+    call_id: str
+    idempotency_key: str
+    kind: str
+    status: str = "planned"
+    committed: bool = False
+    history: list = field(default_factory=list)
+
+    def transition(self, status):
+        if status not in ALLOWED:
+            raise ValueError("unknown action status")
+        if self.status in {"succeeded", "failed"}:
+            raise ValueError("terminal action cannot transition")
+        self.status = status
+        self.history.append(status)
+
+
+class FakeTool:
+    def __init__(self):
+        self.runs = {}
+
+    def send_once(self, action):
+        if action.idempotency_key in self.runs:
+            return self.runs[action.idempotency_key]
+        action.transition("sent")
+        action.transition("running")
+        self.runs[action.idempotency_key] = {"status": "running", "call_id": action.call_id}
+        return self.runs[action.idempotency_key]
+
+    def query(self, idempotency_key):
+        return self.runs.get(idempotency_key)
+
+
+def authorize(action, write_allowed):
+    if action.kind == "write" and not write_allowed:
+        raise PermissionError("write permission revoked")
+    if action.status not in {"planned", "unknown"}:
+        raise ValueError("action is not awaiting authorization")
+    action.transition("authorized")
+
+
+tool = FakeTool()
+action = Action("call-1", "idem-1", "write")
+authorize(action, write_allowed=True)
+first = tool.send_once(action)
+action.status = "unknown"  # client timed out after the request was sent
+observed = tool.query(action.idempotency_key)
+assert observed["status"] == "running"
+assert tool.send_once(action)["call_id"] == "call-1"  # no duplicate send
+
+try:
+    authorize(action, write_allowed=False)
+except PermissionError as exc:
+    print("duplicate_send_prevented", "permission_rechecked", str(exc))
+else:
+    raise AssertionError("revoked permission must stop the write")
+```
+
+预期输出：
+
+```text
+duplicate_send_prevented permission_rechecked write permission revoked
+```
+
+这个 demo 只演示幂等键、状态查询和权限重新检查。生产系统还要把状态写入持久化事件日志，处理并发恢复、租户隔离、凭证撤销、工具自身的幂等保证和最终提交确认。
+
 ## 15.13 用状态机和幂等键恢复任务
 
 恢复任务的核心不是把上一轮文字重新发给模型，而是确定每个动作处于什么状态。一个工具调用至少要区分 `planned`、`authorized`、`sent`、`running`、`succeeded`、`failed` 和 `unknown`。网络断开时，`sent` 和 `running` 不能直接改成 `failed`，因为外部服务可能已经执行成功。
@@ -207,7 +292,7 @@ P_{\mathrm{recover}}
  P_{\mathrm{no\_duplicate\_effect}}
 ```
 
-任一项为零，恢复后的“继续执行”都不应被视为成功。这个乘积是教学上的分解，不意味着各项真正独立，但它能提醒工程师不要只用“模型上下文恢复成功”来定义可靠性。
+这里每一项都表示一个在 `[0,1]` 内的事件概率或分层通过率；若把它们当作概率相乘，需要明确这是一个近似分解，并且各事件之间通常并不独立。工程报告更推荐同时列出四个分量，而不是只发布乘积。任一关键条件确定失败时，恢复后的“继续执行”都不应被视为成功；某一项状态未知时，应进入人工或安全暂停，而不是把未知当作 0 或 1。这个乘积是教学上的分解，不能当作真实系统可靠性的证明。
 
 ## 15.14 Checkpoint 的快照、日志与版本
 

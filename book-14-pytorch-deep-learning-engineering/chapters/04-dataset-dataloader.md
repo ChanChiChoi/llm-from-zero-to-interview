@@ -41,7 +41,7 @@ Dataset 和 DataLoader 是 PyTorch 里把“原始数据”变成“可训练 ba
 \mathcal{D}:\{0,\ldots,N-1\}\rightarrow \mathcal{S},\qquad s_i=\mathcal{D}(i)
 ~~~
 
-其中 `N` 是样本数，`s_i` 是第 `i` 个样本。`__len__()` 给出 `N`，`__getitem__(i)` 给出 `s_i`。
+其中 `N` 是样本数，`s_i` 是第 `i` 个样本。`__len__()` 给出 `N`，`__getitem__(i)` 给出 `s_i`。索引式 Dataset 通常要求 `N` 是非负整数；当 `N=0` 时可以构造空数据集，但不能从中取出 batch，训练循环也要明确处理这个情况。
 
 第二，`collate_fn` 是从样本列表到 batch 的函数：
 
@@ -65,14 +65,14 @@ M\in\{0,1\}^{B\times T_b}
 T_b=\max_{1\le i\le B} l_i
 ~~~
 
-其中 `l_i` 是第 `i` 个样本的真实 token 长度。padding token 利用率可以粗略写成：
+其中 `l_i` 是第 `i` 个样本的真实 token 长度，且本式假定 `B>0`、每个样本长度为正。padding token 利用率可以粗略写成：
 
 ~~~math
 R_{\mathrm{valid}}=\frac{\sum_{i=1}^{B} l_i}{B T_b},\qquad
 R_{\mathrm{pad}}=1-R_{\mathrm{valid}}
 ~~~
 
-`R_valid` 越低，说明 batch 里浪费在 padding 上的计算越多。length bucket 的目标就是让同一个 batch 内的 `l_i` 更接近，从而降低 `R_pad`。
+`R_valid` 越低，说明 batch 里浪费在 padding 上的计算越多。length bucket 的目标就是让同一个 batch 内的 `l_i` 更接近，从而降低 `R_pad`。如果 batch 为空，或所有样本都是空序列，分母为零，不能把利用率当成 0；应在 collate 或数据预处理阶段拒绝这类输入，或者单独定义跳过策略。
 
 第四，causal LM 的 loss 通常使用右移后的 logits 和 labels：
 
@@ -183,7 +183,7 @@ class ShardedRange(IterableDataset):
             yield value
 ```
 
-这段代码只解决单进程内的 worker 分片；多 rank 流式读取还需要把 rank/world size 加入分片函数。对于远程流，必须进一步考虑连接重试、样本边界、断点和 epoch 长度，不能把 `IterableDataset` 当成自动去重的分布式 sampler。
+这段代码只解决单进程内的 worker 分片；多 rank 流式读取还需要把 rank/world size 加入分片函数，例如把全局槽位按 `global_worker_id = rank * worker_count + worker_id` 重新计算。对于远程流，必须进一步考虑连接重试、样本边界、断点和 epoch 长度，不能把 `IterableDataset` 当成自动去重的分布式 sampler。
 
 ## 4.3 一个最小可训练文本 Dataset
 
@@ -317,6 +317,10 @@ import torch
 
 
 def pad_sequences(seqs, pad_value=0):
+    if not seqs:
+        raise ValueError("cannot collate an empty sample list")
+    if any(len(seq) == 0 for seq in seqs):
+        raise ValueError("empty sequence needs an explicit filtering policy")
     max_len = max(len(seq) for seq in seqs)
     batch = []
     mask = []
@@ -371,6 +375,8 @@ def pad_labels(seqs, pad_value=-100):
 
 ```python
 def collate_fn(samples):
+    if not samples:
+        raise ValueError("cannot collate an empty sample list")
     max_len = max(len(s["input_ids"]) for s in samples)
 
     input_ids = []
@@ -380,6 +386,10 @@ def collate_fn(samples):
     for s in samples:
         ids = s["input_ids"]
         lab = s.get("labels", ids)
+        if len(ids) == 0:
+            raise ValueError("empty input_ids needs an explicit filtering policy")
+        if len(lab) != len(ids):
+            raise ValueError("labels and input_ids must have the same length")
         pad_len = max_len - len(ids)
 
         input_ids.append(ids + [0] * pad_len)
@@ -467,12 +477,20 @@ packing 的思路是把多个短样本拼接到同一个固定长度序列里，
 
 ```python
 def pack_sequences(seqs, max_length, eos_id=2):
+    if max_length <= 0:
+        raise ValueError("max_length must be positive")
     packed = []
     cur = []
 
     for seq in seqs:
+        if len(seq) + 1 > max_length:
+            raise ValueError(
+                "a sequence including eos_id is longer than max_length; "
+                "choose truncate, reject, or split explicitly"
+            )
         if len(cur) + len(seq) + 1 > max_length:
-            packed.append(cur)
+            if cur:
+                packed.append(cur)
             cur = []
         cur.extend(seq + [eos_id])
 
@@ -653,7 +671,21 @@ loader = DataLoader(dataset, batch_size=8, sampler=sampler)
 2. 每个 epoch 需要调用 `sampler.set_epoch(epoch)`，否则 shuffle 可能不变。
 3. sampler 和 `shuffle=True` 通常不能同时乱配。
 
-`DistributedSampler` 的“不同 rank 不重复”不是无条件保证。设数据集大小为 `N`、world size 为 `R`；当 `N` 不能被 `R` 整除时，为了让每个 rank 拿到相同数量，sampler 可能补齐索引。补齐的样本会在同一 epoch 的全局索引集合中重复。若更关心不重复，可以设置合适的 `drop_last`，但代价是丢掉尾部样本；若更关心每个 rank 的 step 数一致，则需要接受 padding/补样本，并在有效样本数和 loss 统计中记录它。
+`DistributedSampler` 的“不同 rank 不重复”不是无条件保证。设数据集大小为 `N`、world size 为 `R`。默认 `drop_last=False` 时，每个 rank 通常需要相同的样本数
+
+~~~math
+N_{\mathrm{sampled}}=\left\lceil\frac{N}{R}\right\rceil R,
+\qquad
+N_{\mathrm{pad}}=N_{\mathrm{sampled}}-N
+~~~
+
+多出来的 `N_pad` 个位置由已有索引补齐，所以全局索引列表可能包含重复样本。设置 `drop_last=True` 时，通常只保留
+
+~~~math
+N_{\mathrm{sampled}}=\left\lfloor\frac{N}{R}\right\rfloor R
+~~~
+
+个位置，尾部最多丢弃 `N mod R` 个样本。若更关心不重复，可以设置合适的 `drop_last`，但代价是丢掉尾部样本；若更关心每个 rank 的 step 数一致，则需要接受 padding/补样本，并在有效样本数和 loss 统计中记录它。具体 sampler 版本和配置还应以实际返回的索引列表核验。
 
 示例：
 

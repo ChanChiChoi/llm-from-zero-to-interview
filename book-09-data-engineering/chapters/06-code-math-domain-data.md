@@ -81,8 +81,14 @@ x_i = (m_i, T_i, q_i, r_i, z_i)
 代码数据常见的功能测试通过率为：
 
 ~~~math
-R_test_i = n_pass_i / max(n_test_i, 1)
+R_test_i =
+\begin{cases}
+n_pass_i / n_test_i, & n_test_i > 0 \\
+undefined, & n_test_i = 0
+\end{cases}
 ~~~
+
+这里的 `undefined` 不是“测试全部失败”，而是“没有可执行测试证据”。如果把没有测试的样本直接记成 `0`，数据表会无法区分未测试、测试失败和测试通过率为零的情况。质量分可以对缺少测试的样本采取保守分数，但必须同时保留 `test_evidence = false`，再由策略决定补测、隔离还是允许进入特定数据池。
 
 一个可解释的代码样本质量分可以写成：
 
@@ -128,11 +134,15 @@ R_keep(m) = sum_{i:m_i=m}(keep_i * T_i) / sum_{i:m_i=m}(T_i)
 R_risk(m) = sum_{i:m_i=m}(I(r_i > 0)) / sum_i(I(m_i = m))
 ~~~
 
+`R_keep(m)` 的分母是该类型的原始 token 数，`R_risk(m)` 的分母是该类型的样本数，两者不能互换。如果某类型没有样本，或者该类型没有可计量的 token，结果应记为 `undefined`，而不是写成 `0`；`0` 表示确实存在分母但没有保留或没有命中，`undefined` 表示当前没有可解释的测量对象。
+
 如果专项数据计划采样 token 数为 `b_m`，清洗后可用 token 数为 `N_m`，则 effective epoch 为：
 
 ~~~math
 e_m = b_m / N_m
 ~~~
+
+只有 `N_m > 0` 时，`e_m` 才有定义。空数据池不能因为采样器给了一个名义权重就被当成可训练数据。
 
 对于代码、数学、专业文档和合成推理数据，`e_m` 过高通常意味着更高的记忆和污染风险，需要降权、扩充数据、增强去重或重新设计采样策略。
 
@@ -511,7 +521,7 @@ RAG 适合提供动态知识、私有知识和需要引用的内容。它不一�
 
 ### 23.1 最小可运行专项数据审计 demo
 
-下面这个 demo 不依赖外部库，也不读写文件。输入是一组 toy code / math / domain 样本；输出包括保留样本、拒绝原因、分类型 token 保留率、最终 mixture、质量分预览、并列检查信号、后续动作和结论。
+下面这个 demo 不依赖外部库，也不读写文件。输入是一组 toy code / math / domain 样本；输出包括保留样本、拒绝原因、分类型 token 保留率、最终 mixture、质量分预览、并列检查信号、后续动作和结论。示例会把“没有测试证据”与“测试失败”分开；它的质量分和阈值仍然只是教学抽象。
 
 它演示的是专项数据治理机制，不是生产级 license scanner、secret scanner、医学 / 法律 / 金融审核器或数学 verifier。真实系统需要接入许可证审查、secret 扫描器、测试执行器、CAS / verifier、专家审计、权限系统和数据版本管理。
 
@@ -538,16 +548,21 @@ THRESHOLDS = {"code": 0.72, "math": 0.70, "domain": 0.74}
 
 
 def safe_div(a, b):
-    return a / b if b else 0.0
+    return a / b if b else None
+
+
+def safe_ratio(a, b):
+    return round(a / b, 3) if b else None
 
 
 def score(item):
     if item["kind"] == "code":
         test_rate = safe_div(item["tests_pass"], item["tests_total"])
+        test_component = test_rate if test_rate is not None else 0.0
         penalty = 0.25 * item["generated"] + 0.20 * item["duplicate"]
         return round(
             0.35 * item["syntax_ok"]
-            + 0.35 * test_rate
+            + 0.35 * test_component
             + 0.20 * item["doc_score"]
             - penalty,
             3,
@@ -576,6 +591,8 @@ def reject_reason(item, q):
             return "license_or_secret"
         if item["contam"]:
             return "eval_contamination"
+        if item["tests_total"] <= 0:
+            return "missing_test_evidence"
         if item["generated"] or item["duplicate"]:
             return "generated_or_duplicate"
     elif item["kind"] == "math":
@@ -615,7 +632,9 @@ for item in kept:
 
 reason_counts = dict(sorted(Counter(rejected.values()).items()))
 checks = {
-    "code_has_tests": any(item["kind"] == "code" and item["tests_total"] > 0 for item in kept),
+    "code_has_tests": all(
+        item["tests_total"] > 0 for item in kept if item["kind"] == "code"
+    ) and any(item["kind"] == "code" for item in kept),
     "math_verified": all(item.get("answer_ok", True) for item in kept if item["kind"] == "math"),
     "domain_no_pii": all(not item.get("pii", False) for item in kept if item["kind"] == "domain"),
     "contamination_blocked": reason_counts.get("eval_contamination", 0) == 2,
@@ -629,6 +648,7 @@ signals = {
     "contamination_not_blocked": not checks["contamination_blocked"],
     "secret_or_license_not_blocked": not checks["secret_blocked"],
     "kind_coverage_gap": not checks["coverage"],
+    "no_retained_tokens": kept_tokens == 0,
 }
 actions = []
 if signals["missing_code_tests"]:
@@ -643,15 +663,23 @@ if signals["secret_or_license_not_blocked"]:
     actions.append("repair_license_and_secret_scan")
 if signals["kind_coverage_gap"]:
     actions.append("rebalance_specialized_data_pools")
+if signals["no_retained_tokens"]:
+    actions.append("restore_or_collect_specialized_records")
 decision = "continue_to_mixture_ablation" if not actions else "hold_for_repair"
 
 report = {
     "kept_ids": [item["id"] for item in kept],
     "rejected": dict(sorted(rejected.items())),
     "reason_counts": reason_counts,
-    "retention": round(kept_tokens / raw_tokens, 3),
-    "kind_retention": {k: round(kind_tokens[k] / raw_kind_tokens[k], 3) for k in sorted(raw_kind_tokens)},
-    "mixture": {k: round(kind_tokens[k] / kept_tokens, 3) for k in sorted(kind_tokens)},
+    "retention": safe_ratio(kept_tokens, raw_tokens),
+    "kind_retention": {
+        k: safe_ratio(kind_tokens[k], raw_kind_tokens[k])
+        for k in sorted(raw_kind_tokens)
+    },
+    "mixture": {
+        k: safe_ratio(kind_tokens[k], kept_tokens)
+        for k in sorted(kind_tokens)
+    },
     "score_preview": {row["id"]: row["score"] for row in rows},
     "checks": checks,
     "signals": signals,
@@ -683,6 +711,16 @@ assert all(report["checks"].values())
 assert not any(report["signals"].values())
 assert report["actions"] == []
 assert report["decision"] == "continue_to_mixture_ablation"
+assert safe_div(0, 0) is None
+assert safe_ratio(0, 0) is None
+assert safe_ratio(0, 100) == 0.0
+untested_code = {
+    **samples[0],
+    "id": "code_missing_tests",
+    "tests_pass": 0,
+    "tests_total": 0,
+}
+assert reject_reason(untested_code, score(untested_code)) == "missing_test_evidence"
 ~~~
 
 运行后会看到类似输出：
@@ -701,7 +739,7 @@ actions= []
 decision= continue_to_mixture_ablation
 ~~~
 
-这个 demo 的重点是把三类专项数据的质量逻辑分开：代码看 license、secret、污染和测试；数学看答案验证、过程质量和题库污染；领域数据看权威性、时效、引用和 PII。
+这个 demo 的重点是把三类专项数据的质量逻辑分开：代码看 license、secret、污染和测试；数学看答案验证、过程质量和题库污染；领域数据看权威性、时效、引用和 PII。`safe_div(0, 0)` 返回 `None`，表示没有测试证据；如果样本存在但所有 token 都被过滤，`retention` 才是 `0.0`，并且会触发恢复或补充专项数据的动作。主示例中的每类都有保留样本，所以 `mixture` 可计算；空类型或空保留集合不能被伪装成正常的零比例。
 
 ---
 

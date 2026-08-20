@@ -105,6 +105,8 @@ class TransformerConfig:
             raise ValueError("model dimensions must be positive")
         if self.max_position_embeddings <= 0:
             raise ValueError("max_position_embeddings must be positive")
+        if self.norm_eps <= 0 or self.rope_theta <= 0:
+            raise ValueError("norm_eps and rope_theta must be positive")
 ```
 
 本章后面的代码都遵循下面的形状约定：
@@ -120,6 +122,8 @@ class TransformerConfig:
 | 每层 K/V cache | `[B,H,T_cache,D_h]` | 已经计算过的历史状态 |
 
 这里的 `T_q` 和 `T_k` 故意分开写。训练时通常 `T_q=T_k=T`；decode 时通常 `T_q=1`、`T_k=T_cache+1`。把这两个符号混写，是缓存实现中最容易隐藏 bug 的原因之一。
+
+这份契约还包含几个不能从形状表中省略的条件。`input_ids` 必须是整数张量，取值范围为 `[0,V)`，并且本教学实现不接受空 batch 或空序列；`labels` 必须与 `input_ids` 形状相同，除了 `-100` 之外也必须落在同一词表范围内。cache 则必须按层成对提供 key 和 value，所有层的 batch、head、head dimension、设备、dtype 与当前模型一致，历史长度也必须一致。把这些约束写在入口处，错误会停在“数据契约”这一层，而不是等到 embedding、矩阵乘法或 `torch.cat` 深处才出现一个难以定位的异常。
 
 ### 9.2.1 用一个具体尺寸检查数量级
 
@@ -552,6 +556,10 @@ loss = F.cross_entropy(
 
 `-100` 是 PyTorch 交叉熵常用的忽略标签值。padding、只作为上下文而不应计入监督的 prompt 部分，都可以设为 `-100`，但必须确认数据处理阶段没有把真正的 token 错误地屏蔽掉。
 
+还要区分“有被忽略的位置”和“没有任何有效目标”。交叉熵的 mean reduction 本质上是对有效目标的损失求和，再除以有效目标数；如果 shift 之后所有标签都是 `-100`，分母为零，PyTorch 可能返回 `NaN`。这不是“这一批样本 loss 恰好为零”，而是这批数据没有定义训练信号。数据管线可以选择丢弃这批、重新组成 batch，或在统计时跳过它；本章的最小实现直接拒绝这种输入。
+
+同理，长度为 `T=1` 的序列在右移后没有任何 next-token 目标，即使 embedding 和 Transformer 主干能够完成前向，也不能计算本章定义的 causal-LM loss。形状合法不等于监督目标存在，这个区别在对话数据含有空答案、截断样本或全是 prompt 的 batch 中尤其重要。
+
 如果 loss 使用自然对数，理想化条件下困惑度为：
 
 ~~~math
@@ -633,6 +641,12 @@ class TransformerConfig:
             raise ValueError("hidden_size must be divisible by num_heads")
         if (self.hidden_size // self.num_heads) % 2 != 0:
             raise ValueError("head_dim must be even")
+        if min(self.vocab_size, self.hidden_size, self.num_layers,
+               self.num_heads, self.intermediate_size,
+               self.max_position_embeddings) <= 0:
+            raise ValueError("model dimensions and position limit must be positive")
+        if self.norm_eps <= 0 or self.rope_theta <= 0:
+            raise ValueError("norm_eps and rope_theta must be positive")
 
 
 class RMSNorm(nn.Module):
@@ -650,8 +664,8 @@ class RMSNorm(nn.Module):
 
 
 def make_causal_mask(query_len, key_len, device, past_key_values_length=0):
-    if past_key_values_length < 0:
-        raise ValueError("past_key_values_length must be non-negative")
+    if min(query_len, key_len, past_key_values_length) < 0:
+        raise ValueError("mask lengths must be non-negative")
     if key_len != past_key_values_length + query_len:
         raise ValueError("key_len must equal past_len + query_len")
     query_positions = torch.arange(query_len, device=device)[:, None]
@@ -677,8 +691,12 @@ def scaled_dot_product_attention(
 
 
 def build_rope_cache(seq_len, head_dim, device, base=10_000.0, start_pos=0):
-    if head_dim % 2 != 0:
-        raise ValueError("head_dim must be even")
+    if seq_len < 0 or start_pos < 0:
+        raise ValueError("seq_len and start_pos must be non-negative")
+    if head_dim <= 0 or head_dim % 2 != 0:
+        raise ValueError("head_dim must be a positive even number")
+    if base <= 0:
+        raise ValueError("RoPE base must be positive")
     inv_freq = 1.0 / (
         base ** (torch.arange(0, head_dim, 2, device=device).float() / head_dim)
     )
@@ -723,6 +741,8 @@ class CachedRoPEAttention(nn.Module):
         position_offset=None,
         return_attn=False,
     ):
+        if x.ndim != 3 or x.size(-1) != self.hidden_size:
+            raise ValueError("x must have shape [B, T, hidden_size]")
         batch_size, seq_len, _ = x.shape
         q = self._shape(self.q_proj(x))
         k_new = self._shape(self.k_proj(x))
@@ -734,8 +754,14 @@ class CachedRoPEAttention(nn.Module):
             past_k, past_v = past_key_value
             if past_k.shape != past_v.shape:
                 raise ValueError("cached key and value must have the same shape")
-            if past_k.size(0) != batch_size or past_k.size(1) != self.num_heads:
-                raise ValueError("cache batch/head shape does not match input")
+            if past_k.ndim != 4 or past_k.size(0) != batch_size:
+                raise ValueError("cache must have shape [B, H, T_cache, D_h]")
+            if past_k.size(1) != self.num_heads or past_k.size(3) != self.head_dim:
+                raise ValueError("cache head dimensions do not match the model")
+            if past_k.device != x.device or past_v.device != x.device:
+                raise ValueError("cache and input must be on the same device")
+            if past_k.dtype != x.dtype or past_v.dtype != x.dtype:
+                raise ValueError("cache and input must use the same dtype")
             past_len = past_k.size(2)
 
         if position_offset is None:
@@ -833,24 +859,71 @@ class MiniDecoderLM(nn.Module):
     ):
         if input_ids.ndim != 2:
             raise ValueError("input_ids must have shape [B, T]")
+        if input_ids.dtype not in (torch.int32, torch.int64):
+            raise ValueError("input_ids must use int32 or int64 dtype")
+        if input_ids.device != self.embed_tokens.weight.device:
+            raise ValueError("input_ids and model parameters must be on the same device")
         batch_size, seq_len = input_ids.shape
+        if batch_size == 0 or seq_len == 0:
+            raise ValueError("input_ids must contain at least one batch item and token")
+        if input_ids.min().item() < 0 or input_ids.max().item() >= self.config.vocab_size:
+            raise ValueError("input_ids contain a token outside [0, vocab_size)")
         if past_key_values is None:
             past_key_values = [None] * len(self.layers)
             past_len = 0
         else:
             if len(past_key_values) != len(self.layers):
                 raise ValueError("one cache entry is required for every layer")
-            first_cache = past_key_values[0]
-            past_len = 0 if first_cache is None else first_cache[0].size(2)
+            has_cache = [item is not None for item in past_key_values]
+            if any(has_cache) and not all(has_cache):
+                raise ValueError("cache must be present for every layer or none")
+            model_device = self.embed_tokens.weight.device
+            cache_lengths = []
+            for layer_index, item in enumerate(past_key_values):
+                if item is None:
+                    continue
+                if not isinstance(item, (tuple, list)) or len(item) != 2:
+                    raise ValueError(f"cache entry {layer_index} must be a (key, value) pair")
+                key, value = item
+                if key.ndim != 4 or key.shape != value.shape:
+                    raise ValueError(
+                        f"cache entry {layer_index} must have matching 4-D key/value tensors"
+                    )
+                if key.size(0) != batch_size or key.size(1) != self.config.num_heads:
+                    raise ValueError(f"cache entry {layer_index} batch/head shape is invalid")
+                if key.size(3) != self.config.hidden_size // self.config.num_heads:
+                    raise ValueError(f"cache entry {layer_index} head dimension is invalid")
+                if key.device != model_device or value.device != model_device:
+                    raise ValueError("cache and model parameters must be on the same device")
+                cache_lengths.append(key.size(2))
+            if cache_lengths and len(set(cache_lengths)) != 1:
+                raise ValueError("all cache layers must have the same sequence length")
+            past_len = cache_lengths[0] if cache_lengths else 0
 
         if position_offset is None:
             position_offset = past_len
+        if not isinstance(position_offset, int) or position_offset < 0:
+            raise ValueError("position_offset must be a non-negative Python int")
         if position_offset != past_len:
             raise ValueError("position_offset must match cache length")
         if position_offset + seq_len > self.config.max_position_embeddings:
             raise ValueError("sequence exceeds max_position_embeddings")
-        if labels is not None and any(item is not None for item in past_key_values):
-            raise ValueError("this demo computes labels only for a fresh sequence")
+        if labels is not None:
+            if labels.shape != input_ids.shape:
+                raise ValueError("labels must have the same shape as input_ids")
+            if labels.dtype != torch.int64:
+                raise ValueError("labels must use int64 dtype")
+            if labels.device != input_ids.device:
+                raise ValueError("labels and input_ids must be on the same device")
+            invalid_labels = (labels != -100) & (
+                (labels < 0) | (labels >= self.config.vocab_size)
+            )
+            if invalid_labels.any().item():
+                raise ValueError("labels must be -100 or lie in [0, vocab_size)")
+            if not (labels[:, 1:] != -100).any().item():
+                raise ValueError("labels contain no valid next-token targets")
+            if any(item is not None for item in past_key_values):
+                raise ValueError("this demo computes labels only for a fresh sequence")
 
         x = self.embed_tokens(input_ids)
         presents = []

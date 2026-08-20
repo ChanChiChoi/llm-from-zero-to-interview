@@ -240,6 +240,8 @@ C_gov = (M_manifest, L_lineage, L_license, A_access, D_delete, D_doc)
 
 公式中的分母尤其重要。假设一个版本有 100 万条样本，其中 99 万条来自低风险公开来源，1 万条来自需要逐条核验的高风险来源。总体 `C_license=0.99` 看起来很高，但如果那 1 万条全部没有授权记录，发布判断仍然不能只看总体比例。实践中应同时报告总体值、按来源/语言/风险桶分层的值，以及高风险桶的最差值。
 
+这些指标还要区分“没有对象”和“对象存在但没有通过”。如果版本没有样本，`C_lineage`、`C_license` 和按样本计算的风险率都应记为 `undefined`，而不是 0 或 1；如果版本有样本但所有对象都缺少记录，覆盖率才是 `0.0`。同样，没有删除请求时不能说“删除全部完成”，只能说当前没有待处理请求；有请求但目标无法解析，则应单独记录为未解析。
+
 这些指标也不能只在训练结束后计算。训练入口需要在读取 manifest 时核验快照 hash、schema 版本和删除状态；数据流水线在生成 shard 时记录 lineage 和 license；发布流程再把训练实际引用与已批准版本进行比对。指标一旦脱离这些状态转换，就会变成事后填表，无法阻止错误数据继续流入。
 
 ---
@@ -582,7 +584,7 @@ schema 演进至少有三种变化。加一个有明确默认值的可选字段�
 
 ### 18.1 最小可运行数据版本治理 demo
 
-下面这个 demo 不依赖外部库，也不读写文件。输入是一组 toy 样本、访问请求、删除请求和文档完成状态；输出包括 manifest、可训练样本、license 分布、lineage 覆盖率、访问阻断、删除请求命中、datasheet 完成度、model card 输入是否完整、检查信号和后续动作。
+下面这个 demo 不依赖外部库，也不读写文件。输入是一组 toy 样本、访问请求、删除请求和文档完成状态；输出包括 manifest、可训练样本、license 分布、lineage 覆盖率、访问阻断、删除请求命中、datasheet 完成度、model card 输入是否完整、检查信号和后续动作。覆盖率和完成度在分母为零时返回 `None`，表示没有证据；有对象但全部不合格时才返回 `0.0`。
 
 它演示的是治理机制，不是真实 DVC、对象存储、权限系统、合规系统或生产数据平台。真实系统需要接入对象存储版本、数据目录、权限服务、审计日志、删除工单、dataset card / datasheet 文档和训练日志。demo 的 decision 只表示当前版本下一步应做什么，不把一组检查压成“治理完成”的绝对结论。
 
@@ -618,6 +620,10 @@ def digest(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
 
 
+def safe_ratio(numerator, denominator):
+    return round(numerator / denominator, 3) if denominator else None
+
+
 def sample_hash(item):
     payload = f"{item['id']}|{item['source']}|{item['tokens']}|{item['license']}|{item['access']}"
     return digest(payload)
@@ -635,7 +641,7 @@ for shard, rows in sorted(shards.items()):
 eligible = [item for item in samples if item["license"] == "permissive" and not item["pii"] and not item["contam"] and not item["deleted"]]
 license_counts = Counter(item["license"] for item in samples)
 lineage_ok = [item["id"] for item in samples if required_lineage.issubset(set(item["lineage"]))]
-lineage_coverage = round(len(lineage_ok) / len(samples), 3)
+lineage_coverage = safe_ratio(len(lineage_ok), len(samples))
 
 blocked_access = []
 for req in access_requests:
@@ -647,8 +653,8 @@ deletion_hits = {}
 for req in deletion_requests:
     deletion_hits[req["request_id"]] = [item["id"] for item in samples if item["source"] == req["source"]]
 
-datasheet_completion = round(sum(datasheet.values()) / len(required_docs), 3)
-model_card_ready = all(model_card_inputs.values())
+datasheet_completion = safe_ratio(sum(datasheet.values()), len(required_docs))
+model_card_ready = bool(model_card_inputs) and all(model_card_inputs.values())
 
 report = {
     "dataset_version": "data-v2026-06-06.1",
@@ -676,12 +682,12 @@ for req in deletion_requests:
 
 checks = {
     "manifest_checksums": all(row["checksum"] for row in manifest),
-    "lineage_minimum": report["lineage_coverage"] >= 0.65,
+    "lineage_minimum": report["lineage_coverage"] is not None and report["lineage_coverage"] >= 0.65,
     "training_eligibility": set(report["eligible_ids"]) == {"s1", "s2", "s5"},
     "access_controls": len(blocked_access) == 2,
-    "deletion_targets_resolved": all(bool(hits) for hits in deletion_hits.values()),
-    "deletion_completed": all(status == "completed" for status in deletion_status.values()),
-    "datasheet_documented": datasheet_completion >= 0.80,
+    "deletion_targets_resolved": bool(deletion_hits) and all(bool(hits) for hits in deletion_hits.values()),
+    "deletion_completed": bool(deletion_status) and all(status == "completed" for status in deletion_status.values()),
+    "datasheet_documented": datasheet_completion is not None and datasheet_completion >= 0.80,
     "model_card_inputs": model_card_ready,
 }
 
@@ -727,6 +733,8 @@ assert report["deletion_status"] == {"del-001": "completed", "del-002": "unresol
 assert report["checks"]["deletion_targets_resolved"] is False
 assert report["checks"]["model_card_inputs"] is False
 assert report["decision"] == "hold_for_governance_repair"
+assert safe_ratio(0, 0) is None
+assert safe_ratio(0, 10) == 0.0
 ~~~
 
 运行后会看到类似输出：

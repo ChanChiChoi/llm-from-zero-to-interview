@@ -1,468 +1,815 @@
-# C. NLP 与 Tokenization
+# C. NLP 与 Tokenization：从字符串到模型输入协议
 
-## 阅读边界：词法索引与数据正文
+## 阅读边界
 
-本章的条目用于快速确认 token、BPE、special token、chat template 和上下文长度的含义。真正排查 tokenizer 与 embedding 对齐、中文/代码切分、数据格式和训练成本时，应阅读[`第五册第三章：Tokenizer 与数据格式`](../../book-05-llm-training/chapters/03-tokenizer与数据格式.md)和[`第二册第三章：Tokenization 与预训练进阶`](../../book-02-advanced-100/chapters/03-tokenization数据与预训练进阶.md)。一个条目的定义不能替代对真实字符串、token id 和版本迁移的实验。
+语言模型不会直接读取“字”或“词”。它先把字符串变成一个离散符号序列，再把每个符号映射成整数 id，最后通过 embedding 变成向量。这个过程通常被叫作 tokenization，但它不是一个无关紧要的预处理步骤。词表大小、切分规则、特殊 token、对话模板和解码方式共同定义了模型的输入输出协议，也决定了同一段文本要消耗多少上下文、训练多少步和多少显存。
 
-条目：Token、Vocabulary、Token ID、Tokenization、Tokenizer、BPE、WordPiece、Unigram LM、SentencePiece、Byte-Level Tokenization、Character-Level Tokenization、Subword Tokenization、OOV、Special Token、BOS、EOS、PAD、UNK、Chat Template、Prompt、Completion、Instruction、System Prompt、Context Window、Detokenization、Tokenizer 训练、中文分词、代码 Tokenization、Tokenizer 与 Embedding 扩展。
+本章不把 tokenizer 当作词典速查表，而是沿着一条完整链路展开：
 
-## Token
+~~~text
+原始字符串
+ -> 规范化与边界处理
+ -> token 序列
+ -> token id
+ -> embedding
+ -> Transformer
+ -> 生成 token id
+ -> detokenization
+ -> 可读字符串
+~~~
 
-一句话定义：token 是模型处理文本的基本离散单位。
+全章分为十二个独立主题。每个主题都同时说明初学者容易混淆的直觉、工程上需要记录的变量、算法或公式、最小实验、失败边界和资料来源。关于 tokenizer 数据工程的完整实践，可以继续阅读[第五册第三章：Tokenizer 与数据格式](../../book-05-llm-training/chapters/03-tokenizer与数据格式.md)；关于 tokenization 在预训练和长上下文中的影响，可以阅读[第二册第三章：Tokenization 与预训练进阶](../../book-02-advanced-100/chapters/03-tokenization数据与预训练进阶.md)。
 
-核心直觉：token 不一定是自然语言中的“词”，也可能是子词、字符、字节片段、标点、空格片段或特殊控制符号。
+本章中的 token 文本是教学示例，不代表某个具体模型的真实词表。不同 tokenizer 即使使用同一个算法名称，也可能因为规范化、字节映射、merge 顺序和特殊 token 配置不同而产生完全不同的结果。
 
-在语言模型中：原始字符串会先被 tokenizer 转成 token 序列，再映射为 token id，最后进入 embedding 层。
+## 3.1 Token 是模型与字符串之间的接口
 
-为什么重要：token 决定模型看到文本的方式，也影响上下文长度、训练成本、推理成本、多语言能力和代码能力。
+### token 不等于词
 
-例子：英文单词 `unbelievable` 可能被切成 `un`、`believ`、`able`；中文句子可能按字、词或子词切分。
+token 是模型处理的离散单位，但它不必对应自然语言学意义上的词。一个 token 可以是：
 
-常见误区：token 不是字符数，也不是单词数。面试中讨论上下文长度时，要明确是 token 维度而不是字数维度。
+- 一个完整的常见词。
+- 一个词的一部分。
+- 一个汉字或多个汉字。
+- 一个标点、空格片段或换行。
+- 一段 UTF-8 字节映射。
+- 一个表示角色、边界或工具调用的控制符号。
 
-面试表达：LLM 不是直接处理字符串，而是处理 token id 序列；tokenization 是自然语言进入神经网络之前的离散化接口。
+例如，英文中的 uncommon 词可能被切成多个子词，中文短句可能按字、词或子词切分，代码中的缩进和括号也可能分别成为 token。token 的边界由 tokenizer 学到的词表和规则决定，不由模型看到字符串后临时猜测。
 
-## Vocabulary
+### 从 token 到 id
 
-一句话定义：vocabulary 是 tokenizer 支持的 token 集合及其到整数 id 的映射表。
+tokenization 至少包含两个概念：
 
-核心内容：每个 token 对应一个唯一 token id，模型的输入 embedding 和输出 logits 通常都以 vocabulary size 为维度。
+1. 把字符串切成 token 文本。
+2. 把 token 文本查表得到 token id。
 
-在大模型中：如果词表大小为 `V`，hidden size 为 `d`，输入 embedding 参数量约为 `V * d`。
+token id 只是离散索引。id 为 100 的 token 不比 id 为 99 的 token 更“大”、更接近或更有意义。真正的语义表示来自 embedding 矩阵中对应的行：
 
-词表大小影响：词表越大，单个文本可能被切得更短，但 embedding 和输出层参数更多；词表越小，参数更少，但序列可能更长。
+~~~math
+e_i=E[i],\qquad E\in\mathbb{R}^{V\times d}.
+~~~
 
-常见误区：大词表不一定更好。过大词表会增加参数和 softmax 成本，也可能让低频 token 学得不好。
+V 是词表大小，d 是 hidden size，i 是 token id。模型接收的是 id 序列，embedding 查表后才得到连续向量。
 
-面试追问：为什么 tokenizer 会影响训练和推理成本？因为相同文本被切成的 token 数不同，直接影响 attention 计算、KV cache 长度和生成步数。
+### token 是协议的一部分
 
-## Token ID
+在训练和推理中，以下信息都属于输入协议：
 
-一句话定义：token id 是 token 在 vocabulary 中对应的整数编号。
+~~~text
+tokenizer 文件和版本
+词表到 id 的映射
+规范化规则
+special token 的 id
+是否自动添加 BOS / EOS
+padding 方向和 pad id
+chat template
+截断和拼接规则
+~~~
 
-在模型中：模型不能直接输入字符串或 token 文本，而是输入 token id 序列。
+只保存原始字符串而不保存这些配置，无法保证以后得到相同的模型输入。对一个已训练模型来说，tokenizer 不是可以随手替换的 UI 组件，而是模型参数语义的一部分。
 
-常见流程：`text -> tokens -> token ids -> embeddings -> transformer`。
+### token 数量与计算账本
 
-工程注意：不同模型即使 token 文本看起来相同，token id 也可能不同，不能混用 tokenizer。
+一段文本 x 被编码后得到长度 T(x)。一个 batch 的有效 token 数可以写成：
 
-常见误区：token id 本身没有数值大小语义。id 为 100 的 token 不比 id 为 99 的 token “更大”或“更接近”。
+~~~math
+N_{\mathrm{tokens}}
+=\sum_{i=1}^{B}T(x_i).
+~~~
 
-面试表达：token id 是离散索引，真正的语义表示来自 embedding 矩阵中对应的向量。
+若使用定长 padding，实际送入矩阵的 token 数还包括 padding：
 
-## Tokenization
+~~~math
+N_{\mathrm{padded}}
+=B\cdot T_{\max}.
+~~~
 
-一句话定义：tokenization 是把原始文本切分成 token 并映射成 token id 的过程。
+padding waste 可以用下面的比例表示：
 
-为什么需要它：神经网络处理的是张量，不能直接处理可变长度字符串；tokenization 把文本转成离散序列。
+~~~math
+\operatorname{waste}
+=1-\frac{\sum_i T(x_i)}{B T_{\max}}.
+~~~
 
-影响范围：上下文窗口利用率、训练 token 数、推理延迟、多语言公平性、代码表示、特殊符号处理和安全边界都受 tokenization 影响。
+这个比例只描述 batch 内的填充浪费，不是模型质量指标。它会影响显存、吞吐和每个有效 token 的成本。按长度分桶、动态 padding 或 packing 可以减少浪费，但会增加数据管线复杂度。
 
-典型步骤：文本规范化、预分词、子词切分、special token 拼接、id 映射。
+### token fertility
 
-常见误区：tokenization 是模型能力的一部分。它不是无关紧要的预处理，尤其在中文、代码、数学公式和多语言任务中影响明显。
+在中文、代码或多语言比较中，经常需要定义 token fertility。一个简单版本是：
 
-面试表达：同样的模型架构，如果 tokenizer 不同，实际输入长度、词表覆盖和生成行为都可能显著不同。
+~~~math
+\operatorname{fertility}
+=\frac{N_{\mathrm{tokens}}}{N_{\mathrm{reference}}}.
+~~~
 
-## Tokenizer
+参考单位可以是 Unicode 字符、字节、词或代码字符，但必须明确写出来。不同论文使用的分母可能不同，因此“某 tokenizer 更省 token”只有在相同文本集和相同计数口径下才有意义。
 
-一句话定义：tokenizer 是执行文本和 token id 序列互相转换的组件。
+### 一个不依赖 tokenizer 的成本估算
 
-核心能力：encode 把文本转成 token ids，decode 把 token ids 转回文本。
+下面的标准库代码演示如何把不同样本的 token 长度转成 padding waste 和平均长度。它不模拟切分算法，只验证成本账本。
 
-在训练中：tokenizer 决定语料如何统计为训练 token，也决定模型学习的最小文本单位。
+~~~python
+def padding_report(lengths):
+    if not isinstance(lengths, (list, tuple)) or not lengths:
+        raise ValueError("lengths must be a non-empty list or tuple")
+    if any(isinstance(length, bool) or not isinstance(length, int)
+           or length <= 0 for length in lengths):
+        raise ValueError("lengths must contain positive integers")
+    batch = len(lengths)
+    max_length = max(lengths)
+    valid = sum(lengths)
+    padded = batch * max_length
+    return {
+        "samples": batch,
+        "valid_tokens": valid,
+        "padded_tokens": padded,
+        "waste_ratio": 1.0 - valid / padded,
+        "mean_length": valid / batch,
+    }
 
-在推理中：tokenizer 决定 prompt 如何进入模型，也决定生成 token 如何还原为可读文本。
 
-工程注意：训练、微调、评估和线上推理必须使用一致 tokenizer，否则输入格式和 embedding 对齐会出错。
+print(padding_report([4, 5, 9]))
+~~~
 
-常见误区：换 tokenizer 通常不是轻量改动。除非重新训练或正确扩展 embedding，否则模型无法理解新 token id 的含义。
+输出中的 waste_ratio 约为 0.333333。这个数字只反映三个长度的 batch 组织方式，不代表某个 tokenizer 的效率；要比较 tokenizer，必须先在同一语料和同一 normalization 规则下得到 lengths。
 
-面试表达：tokenizer 是模型输入输出协议的一部分，不能只把它看成字符串切分工具。
+### 初学者最容易犯的错
 
-## Subword Tokenization
+把 token 数当成字符数，会错误估算上下文和费用；把 token id 当成连续数值，会错误理解 embedding；只记录模型名称而不记录 tokenizer 版本，会让评估和线上推理不可复现。遇到 token 相关问题，先问“切分规则是什么、id 映射是什么、特殊符号如何处理”，再讨论模型能力。
 
-一句话定义：subword tokenization 使用子词作为基本单位，在词级和字符级之间折中。
+## 3.2 Vocabulary、Embedding 与词表大小
 
-为什么需要它：纯词级词表容易遇到 OOV，纯字符级序列太长；子词方法兼顾覆盖率和序列长度。
+### 词表是什么
 
-常见方法：BPE、WordPiece、Unigram LM、SentencePiece。
+Vocabulary 是 tokenizer 支持的 token 集合以及 token 到整数 id 的映射。模型通常有一个输入 embedding 表，输出端有一个投影到词表的 LM head：
 
-优点：能表示未见词、多语言词形变化、专有名词和拼写变化。
+~~~math
+E\in\mathbb{R}^{V\times d},
+\qquad
+W_{\mathrm{lm}}\in\mathbb{R}^{V\times d}.
+~~~
 
-局限：切分结果不一定符合语言学边界，可能把语义相关部分切散。
+如果输入和输出权重共享，W_lm 可以直接使用 E；如果不共享，则两者分别占用参数。一个词表扩展可能同时影响输入 embedding、输出 logits、权重绑定、checkpoint 和 tokenizer 配置。
 
-面试表达：子词切分的核心价值是用有限词表覆盖开放词汇，同时控制序列长度。
+### 词表大小的两面
 
-## BPE Byte Pair Encoding
+增大 V 通常会让常见片段拥有更完整的 token，从而减少序列长度；代价是 embedding 参数和输出投影增大。若 hidden size 为 d，输入 embedding 的参数量为：
 
-一句话定义：BPE 通过不断合并高频相邻片段来构建子词词表。
+~~~math
+P_{\mathrm{embed}}=Vd.
+~~~
 
-核心过程：从字符或字节等基础单位开始，统计相邻 pair 频率，每次合并最高频 pair，直到达到目标词表大小。
+输出 logits 的一次矩阵乘法大致涉及 [B,T,d] 与 [V,d] 的投影，V 变大也会增加输出计算和 softmax 成本。词表太小会让字符串切得很碎，词表太大则可能让长尾 token 统计稀疏、参数成本变高。
 
-优点：简单、有效、工程成熟，能缓解 OOV 问题。
+因此不存在脱离语料、语言、硬件和目标任务的“最佳词表大小”。比较词表时至少要同时看：
 
-局限：合并依据主要是统计频率，不保证符合语义边界或词法规则。
+~~~text
+平均 token 数
+长尾文本的 token 数
+每语言或每领域的 fertility
+embedding / lm head 参数
+训练和推理吞吐
+special token 预算
+下游任务的错误类型
+~~~
 
-在 LLM 中：GPT 系列使用过 BPE 或 byte-level BPE 变体。
+### token id 的稳定性
 
-常见误区：BPE 的 merge 规则来自训练语料分布，因此 tokenizer 会继承语料偏向；低资源语言可能切得更碎。
+一个 tokenizer 的 id 映射只在自己的词表文件和版本中有意义。不能把 A 模型 tokenizer 输出的 id 序列直接交给 B 模型，即使两个模型都说自己使用 BPE。更不能把“同名 token”当成“同 id token”；真正需要比较的是 token 文本、id、字节映射和 special token 配置。
 
-面试追问：BPE 为什么能处理未见词？因为未见词可以退化为更小的子词、字符或字节片段组合。
+### Weight tying 的影响
 
-## WordPiece
+输入输出权重共享时，参数量大致少掉一份 Vd，但这不意味着输入和输出功能完全相同。共享矩阵通过两条路径接收梯度，训练数据和损失仍然决定它如何变化。词表 resize 时要确认：
 
-一句话定义：WordPiece 是一种子词 tokenization 方法，常见于 BERT 系列模型。
+1. embedding 行数是否变为新的 V。
+2. LM head 行数是否同步。
+3. 两者是否仍然引用同一组参数。
+4. 新增行的初始化方式是什么。
+5. checkpoint 加载后是否保持绑定。
 
-核心直觉：它学习一组能较好表示语料的子词单元，并倾向于选择能提升语言模型似然的合并。
+### 词表边界测试
 
-常见标记：BERT 中常用 `##` 表示某个子词不是词首，例如 `play ##ing`。
+一个最小 tokenizer 评估集不应只有普通英文句子。至少要包含：
 
-与 BPE 的区别：BPE 更强调高频 pair 合并，WordPiece 更接近基于似然或得分选择子词。
+~~~text
+空字符串和只含空格的输入
+中英混排
+emoji 和组合字符
+罕见 Unicode 符号
+换行、制表符和多余空格
+代码括号、缩进和长标识符
+数字、小数、日期和单位
+special token 的字面字符串
+超长连续字符
+~~~
 
-优点：能在词表大小和未登录词处理之间取得平衡。
+对每条样本记录 token 文本、id、decode 结果和是否保留边界。词表大小的统计平均值无法替代这些边界样例。
 
-常见误区：WordPiece 不是简单按词典最大匹配，它背后有子词词表学习和切分策略。
+## 3.3 BPE：从基础符号逐步合并
 
-面试表达：WordPiece 是 BERT 时代很典型的子词方案，适合解释为什么预训练模型不需要传统意义上的完整词表。
+### BPE 的基本思想
 
-## Unigram Language Model Tokenization
+Byte Pair Encoding 最初是一种压缩思想，在语言模型 tokenizer 中通常从字符或字节基础单元开始，通过统计相邻 pair 的频率，反复合并最常出现的 pair。合并过程产生词表和 merge 顺序。
 
-一句话定义：Unigram LM tokenizer 假设文本由子词片段概率生成，并通过概率模型选择切分。
+如果初始符号序列是：
 
-核心思想：先准备较大的候选子词集合，再逐步删减对语料似然贡献较低的子词。
+~~~text
+l o w
+l o w e r
+~~~
 
-切分方式：同一句文本可能有多种切分，算法选择概率更高的切分。
+某个 pair 如 l、o 出现频率较高，就可以合并为 lo；之后 lo、w 可能继续合并为 low。真正的实现还要处理词边界、字节映射、空格和跨样本统计，不能把这个玩具例子当成完整 GPT tokenizer。
 
-在实践中：SentencePiece 支持 Unigram LM，是很多多语言模型 tokenizer 的选择之一。
+### 一个抽象算法
 
-优点：概率建模更明确，也支持 subword regularization 等训练增强方式。
+设语料被表示成基础符号序列，当前词表为 V，pair 计数为 C(a,b)。一次合并可以写成：
 
-面试追问：Unigram 和 BPE 的差异是什么？BPE 是从小到大合并，Unigram 通常从大候选集合中做概率筛选。
+~~~math
+(a^\*,b^\*)
+=\underset{(a,b)}{\operatorname{argmax}}\;C(a,b),
+~~~
 
-## SentencePiece
+然后把所有相邻的 a*、b* 替换成新符号 ab，并把新符号加入词表。重复到达到目标词表大小或没有值得合并的 pair。
 
-一句话定义：SentencePiece 是一个可直接从原始文本训练 tokenizer 的工具和方法集合。
+解码时，tokenizer 依据学习到的 merge 规则把输入拆成基础符号和合并片段。训练阶段的 merge 顺序必须被保存；只保存最终词表而丢失规则，无法保证 encode 一致。
 
-核心特点：把空格也视为普通符号的一部分，不强依赖预先分词。
+### BPE 为什么能处理未见词
 
-为什么适合多语言：中文、日文等语言没有天然空格分词，SentencePiece 可以直接处理原始文本。
+词级词表遇到新词时容易把整个词映射成 UNK。BPE 则允许新词退化为更小的已知片段，最差可以退化到字节级。因此开放词汇不再依赖“训练时见过完整词”，但这不代表新词一定被高质量理解。一个专有名词被拆成十几个碎片时，序列成本和学习难度都可能上升。
 
-常见符号：SentencePiece 常用 `▁` 表示空格或词边界。
+### Byte-level BPE
 
-支持算法：BPE 和 Unigram LM。
+Byte-level BPE 先把文本转换到字节层面，再对字节片段进行合并。它的覆盖优势来自任意文本最终都能由字节表示，适合混合语言、代码和脏输入。它不表示每个 token 永远只有一个字节：高频字节片段仍会被 merge 成更长 token。
 
-在大模型中：LLaMA 1/2 等模型使用过 SentencePiece；后续模型可能改用其他实现或词表格式，不能只根据模型家族名称推断 tokenizer。
+字节层方案的代价包括：
 
-常见误区：SentencePiece 不是某一种单独切分算法，它既是工具，也支持不同训练算法。
+- 某些语言的常见字符可能对应多个字节。
+- byte fallback 或不可见映射会让 token 文本不直观。
+- 空格和换行边界需要特殊处理。
+- 用户看到的 decode 文本与内部字节片段不一定一一对应。
 
-面试表达：SentencePiece 的优势是端到端处理原始文本，减少对语言特定预分词器的依赖，因此很适合多语言大模型。
+### BPE 的统计偏差
 
-## Byte-Level Tokenization
+BPE 依据训练语料的共现频率，频繁出现的语言、格式和领域会获得更高效的片段。低资源语言、少见代码库、医学缩写或新产品名可能被切得更碎。一个整体平均 token 数很低的词表，仍可能对少数语言极不公平。
 
-一句话定义：byte-level tokenization 从字节层面表示文本，保证几乎所有输入都可以被编码。
+### 一个教学版 BPE merge
 
-核心优势：任意 Unicode 字符最终都能转成字节序列，因此几乎没有 OOV。
+下面的代码只实现“统计 pair 并合并”的核心，不包含 Unicode 规范化、byte mapping、边界标记或高效增量计数。它的价值是让合并规则可手算。
 
-适用场景：特殊字符、emoji、代码、混合语言、脏数据和用户输入鲁棒性要求高的场景。
+~~~python
+from collections import Counter
 
-局限：部分语言或特殊文本会被切成更多 token，降低上下文利用率并增加计算成本。
 
-在 LLM 中：byte-level BPE 是常见方案，先保证字节级覆盖，再通过 BPE merge 缩短常见片段。
+def pair_counts(sequences):
+    if not isinstance(sequences, (list, tuple)) or not sequences:
+        raise ValueError("sequences must be non-empty")
+    counts = Counter()
+    for seq in sequences:
+        if not isinstance(seq, (list, tuple)) or not seq:
+            raise ValueError("each sequence must be non-empty")
+        counts.update(zip(seq, seq[1:]))
+    return counts
 
-常见误区：byte-level 不代表每个 token 都是一个字节。很多 byte-level BPE tokenizer 会把高频字节片段合并成更长 token。
 
-面试表达：byte-level tokenization 的核心价值是鲁棒覆盖，代价是某些文本上的 token 效率可能下降。
+def merge_pair(sequence, pair, merged):
+    result = []
+    i = 0
+    while i < len(sequence):
+        if i + 1 < len(sequence) and (sequence[i], sequence[i + 1]) == pair:
+            result.append(merged)
+            i += 2
+        else:
+            result.append(sequence[i])
+            i += 1
+    return result
 
-## Character-Level Tokenization
 
-一句话定义：character-level tokenization 以字符为基本单位切分文本。
+data = [list("low"), list("lower"), list("low")]
+counts = pair_counts(data)
+if not counts:
+    raise ValueError("at least one adjacent pair is required")
+pair, frequency = counts.most_common(1)[0]
+data = [merge_pair(seq, pair, "".join(pair)) for seq in data]
+print(pair, frequency)
+print(data)
+~~~
 
-优点：词表小，OOV 少，直观简单。
+输出会显示最高频 pair 及合并后的序列。真实 tokenizer 还要定义同频 pair 的 tie-break、跨词边界规则和重复合并的高效实现；教学代码没有这些保证。
 
-局限：序列长度长，模型需要自己学习从字符到词、短语和语义单位的组合，训练和推理成本更高。
+## 3.4 WordPiece、Unigram LM 与 SentencePiece
 
-与 byte-level 区别：字符是 Unicode 层面的符号，字节是编码后的底层表示；一个字符可能对应多个字节。
+### WordPiece 的选择目标
 
-在大模型中：纯字符级方案不是主流 LLM 默认选择，但其思想常用于讨论鲁棒性和开放词汇问题。
+WordPiece 也使用子词词表，但它的候选选择通常与语言模型似然或特定 score 相关，而不是简单按 pair 原始频率逐次合并。BERT 体系中常见的 ## 标记用于表示某个片段处在词内部，但这只是具体实现的可见标记，不是所有 WordPiece 系统都必须使用同一表示。
 
-面试表达：字符级方案牺牲序列长度换取覆盖率，子词方案则是在覆盖率和效率之间折中。
+在推理时，WordPiece 往往在候选词表中寻找能够覆盖输入的片段组合。词表学习目标、最长匹配细节和未知词处理必须以具体 tokenizer 实现为准。把 WordPiece 简化成“最长词典匹配”会漏掉其训练过程和 score 定义。
 
-## OOV Out-of-Vocabulary
+### Unigram LM 的概率视角
 
-一句话定义：OOV 指输入中出现 tokenizer 词表无法直接表示的词或符号。
+Unigram LM 把一个字符串的切分看成若干子词片段的组合，并给每个片段一个概率。若一种切分为 z=(z_1,\ldots,z_m)，可用：
 
-传统词级问题：如果词表只包含完整词，未见词可能只能映射为 `UNK`。
+~~~math
+P(x,z)=\prod_{j=1}^{m}P(z_j).
+~~~
 
-子词方案缓解：BPE、WordPiece、SentencePiece 可以把未见词拆成更小片段，减少 OOV。
+给定字符串 x，tokenizer 可能选择概率较高的切分：
 
-byte-level 方案：几乎可以消除 OOV，因为任意字符最终可分解为字节。
+~~~math
+z^\*=\underset{z\in\mathcal{Z}(x)}{\operatorname{argmax}}\;P(x,z).
+~~~
 
-常见误区：没有 OOV 不代表表示质量好。一个罕见词如果被切成很多碎片，模型理解和生成仍可能变差。
+实际算法会处理候选集合、似然、删词和动态规划，以上公式只是核心直觉。Unigram 的一个重要特点是可以保留多种候选切分，从而支持 subword regularization 或采样式数据增强。
 
-面试表达：现代 LLM tokenizer 的目标不是只消除 OOV，还要让常见文本被高效、稳定、语义相对合理地表示。
+### SentencePiece 是工具与方法集合
 
-## Special Token
+SentencePiece 可以直接从原始文本训练子词模型，不要求先调用语言相关的空格分词器。它支持 BPE 和 Unigram 等不同算法，常用可见符号表示词边界。因为它不依赖英语式空格，中文、日文和多语言语料可以直接进入同一训练管线。
 
-一句话定义：special token 是具有特殊语义或控制作用的 token。
+“SentencePiece tokenizer”本身并没有唯一的切分行为。必须同时记录：
 
-常见例子：`BOS`、`EOS`、`PAD`、`UNK`、`system`、`user`、`assistant`、`tool`、`image`、`audio`。
+~~~text
+model_type：BPE 或 Unigram
+normalizer 配置
+词表文件
+special token
+unk / byte fallback 行为
+是否采样切分
+decode 规则
+~~~
 
-在大模型中：special token 用于标记序列边界、角色边界、填充位置、多模态占位符和工具调用结构。
+### 算法名称不是复现条件
 
-工程注意：新增 special token 后通常需要 resize embedding，并确保训练、微调、评估和推理模板一致。
+两个模型都写着 BPE，仍可能拥有不同结果；两个模型都使用 SentencePiece，仍可能在空格、规范化和 unknown 行为上不同。复现实验需要保存实际 tokenizer 文件和配置，而不是只在 README 写一个算法名。
 
-风险：如果 special token 处理不一致，模型可能无法正确区分用户、助手、系统指令或工具结果。
+### 训练时的随机切分
 
-常见误区：special token 不是普通文本字符串。它们通常在 tokenizer 中有独立 id，并可能被模型学到特殊行为。
+subword regularization 让同一文本在训练时有机会采用不同合法切分，从而给模型输入增加扰动。这可能提高鲁棒性，但也会改变 token 数、padding、loss 对齐和可复现性。评估和线上推理通常要关闭随机切分，否则同一请求可能得到不同输入长度。
 
-面试表达：chat model 的行为很大程度依赖 special token 和 chat template，它们定义了对话数据的结构协议。
+## 3.5 字节、字符、子词与多语言公平性
 
-## BOS Beginning of Sequence
+### 三个层次
 
-一句话定义：BOS 是表示序列开始的特殊 token。
+字符是 Unicode 层面的抽象符号，字节是编码后的存储单位，子词是从语料统计中学习出的片段。一个 Unicode 字符可能由多个 UTF-8 字节表示；一个子词又可能包含多个字符或多个字节。因此“字符数”“字节数”和“token 数”不能互换。
 
-作用：告诉模型一个新序列或新样本开始，有助于统一训练样本格式。
+### Character-level
 
-在推理中：部分模型需要显式 BOS，部分 tokenizer 会自动添加。
+字符级 tokenizer 的词表较小，规则直观，几乎不需要完整词级词表。代价是序列变长，模型需要自己学习字符组合成词、短语、代码标识符和语义单位。对于上下文长度和 attention 计算，长序列会带来直接成本。
 
-工程注意：是否添加 BOS 必须与模型训练时的格式一致。
+### Byte-level
 
-常见误区：所有模型都必须手动加 BOS。不同模型约定不同，应以 tokenizer 和 chat template 为准。
+字节级表示覆盖更鲁棒，能够处理罕见符号、emoji、混合文本和任意文件内容。代价是某些字符需要多个字节，若没有足够有效的 merge，token fertility 会升高。byte-level 解决的是覆盖问题，不自动解决语言公平和语义效率问题。
 
-## EOS End of Sequence
+### Subword-level
 
-一句话定义：EOS 是表示序列结束的特殊 token。
+子词在词级覆盖和字符级长度之间折中。常见短语可以压缩成一个 token，新词可以退化为多个已知片段。它仍然会继承训练语料偏差：高频语言和领域更容易获得短片段，低资源语言或特殊格式可能被切碎。
 
-作用：训练时告诉模型何时结束生成，推理时常作为停止条件。
+### 中文
 
-在对话模型中：EOS 可能表示 assistant 回答结束，也可能与 turn 边界 token 共同使用。
+中文没有类似英语空格的天然词边界，但“按字”也不是唯一或始终最佳方案。按字具有鲁棒性，却可能造成更长序列；按词依赖分词器，遇到新词、专有名词和中英混排可能出错；子词模型可以从原始语料学习折中。
 
-工程注意：如果训练数据缺少 EOS，模型可能学不会正常停止；如果停止符配置错误，可能截断或无限生成。
+中文评估至少应按以下分桶报告：
 
-常见误区：max_new_tokens 不是正常停止机制。好的模型应能在合适位置生成 EOS 或停止标记。
+~~~text
+现代汉语连续文本
+人名、地名和产品名
+数字、日期、单位和金额
+中英混排与缩写
+古文、方言或低资源变体
+带标点和换行的长文档
+~~~
 
-面试表达：EOS 影响生成终止行为，是训练格式和推理 stop condition 的连接点。
+只报告整个语料的平均 token 数，会掩盖某些分桶的严重退化。
 
-## PAD Padding Token
+### 代码
 
-一句话定义：PAD 是用于把不同长度序列补齐到同一长度的特殊 token。
+代码的符号和空白可能具有语义。括号、逗号、点号、下划线、驼峰标识符、缩进、换行、字符串和注释都可能影响语法。对 Python 来说，删除或合并换行并不等同于普通文本规范化。代码 tokenizer 需要在 token 效率、语法边界和长尾标识符覆盖之间做平衡。
 
-为什么需要它：batch 训练时张量通常需要统一形状，短序列需要 padding。
+代码评估不应只看平均 token 数，还要看：
 
-配套机制：attention mask 用于告诉模型哪些位置是有效 token，哪些位置是 padding。
+~~~text
+标识符是否被过度切碎
+缩进和换行是否可逆
+括号与运算符是否稳定
+长路径和 URL 如何处理
+非 ASCII 标识符是否保留
+生成代码的 stop token 是否正确
+~~~
 
-在 decoder-only LLM 中：很多模型原始预训练不需要 PAD，但微调或批量推理时可能需要设置 pad token。
+### 多语言公平的测量方式
 
-工程注意：不要让 loss 计算在 PAD 位置生效，否则模型会学习无意义目标。
+对语言集合 L，可以按语言统计平均 token 数：
 
-常见误区：把 PAD 简单设成 EOS 虽然常见，但要确认 attention mask、loss mask 和生成停止逻辑不会冲突。
+~~~math
+\bar T_\ell
+=\frac{1}{N_\ell}\sum_{i=1}^{N_\ell}T(x_i^\ell).
+~~~
 
-## UNK Unknown Token
+但平均长度不等于能力公平。还要在相同语义任务上比较质量、上下文截断率、每个有效字符成本和错误类型。tokenizer 的效率差异会通过训练 token 分配和上下文窗口放大，但它只是影响因素之一，不应把所有多语言差异都归因于切分。
 
-一句话定义：UNK 用于表示词表中无法识别的未知 token。
+## 3.6 Special token：边界、角色和控制信号
 
-在现代 tokenizer 中：由于子词和 byte-level 方法普及，UNK 的使用频率通常显著降低。
+### special token 的作用
 
-风险：大量 UNK 会导致信息丢失，因为不同未知文本都被压成同一个 id。
+Special token 是词表中承担控制语义的 token。常见用途包括：
 
-工程注意：如果数据中 UNK 比例异常高，通常说明 tokenizer 与数据语言或文本格式不匹配。
+~~~text
+BOS：序列开始
+EOS：序列结束
+PAD：批处理填充
+UNK：未知片段
+角色标记：system / user / assistant / tool
+多模态占位符：image / audio / video
+结构边界：turn start / turn end
+~~~
 
-面试表达：现代 LLM 尽量避免把未知词直接映射为 UNK，而是拆成更小单位保留信息。
+它们不是普通文本字符串的别名。通常有独立 id，并且模型训练时会学习它们与生成行为之间的关系。
 
-## Chat Template
+### BOS、EOS 和 PAD 不是可以随意互换的名字
 
-一句话定义：chat template 是把多轮对话消息转换为模型输入 token 序列的格式规则。
+BOS 是否自动添加、EOS 是否参与 loss、PAD 是否参与 attention，都由训练格式和模型实现决定。对于 decoder-only 模型，padding token 可能在原始预训练中不存在，但批量微调和生成服务仍需要一个 pad id。把 EOS 复用为 PAD 有时可行，但必须重新检查：
 
-核心内容：角色标记、消息边界、system prompt 位置、assistant 起始标记、工具调用格式、结束标记。
+1. padding 位置是否被 attention mask 屏蔽。
+2. padding 位置是否被 loss mask 忽略。
+3. 生成器是否把 pad 当作停止条件。
+4. 左右 padding 的 position id 是否正确。
 
-例子：同样的 messages 列表，不同模型可能格式化为完全不同的字符串和 special token 序列。
+### EOS 是训练和生成之间的连接点
 
-为什么重要：chat model 训练时学习的是某种模板格式，推理时模板不一致会导致角色混乱、拒答异常或输出格式错误。
+训练数据若没有一致的结束标记，模型可能不知道回答什么时候结束；推理侧若配置了错误的 eos_token_id，模型可能过早停止或持续生成。max_new_tokens 只是上限，不是语义上的正常结束。
 
-工程注意：不要手写猜测模板，优先使用 tokenizer 自带的 `apply_chat_template` 或官方格式。
+### 新增 special token 的结构变化
 
-常见误区：prompt 内容相同不代表模型输入相同。chat template 不同，实际 token 序列可能完全不同。
+新增 token 通常需要：
 
-面试表达：chat template 是 instruct/chat 模型的输入协议，决定 system/user/assistant 等角色如何被模型识别。
+~~~text
+更新 tokenizer 词表
+扩展 embedding 行数
+扩展 lm head 行数
+设置 special token 属性
+更新 chat template 或数据格式
+用训练数据让模型学习新 token
+保存并验证 checkpoint
+~~~
 
-## Prompt
+只更新 tokenizer 而不 resize embedding，会造成 id 越界；只 resize 而没有训练，新增向量通常没有目标语义。若输入输出权重绑定，还要确认扩展后绑定关系仍然存在。
 
-一句话定义：prompt 是提供给模型的输入上下文，用来约束或引导模型生成。
+### special token 的字面冲突
 
-组成：任务说明、背景信息、示例、约束条件、输出格式、用户问题和必要的系统指令。
+若一个特殊字符串既可作为普通用户文本出现，又被 tokenizer 当作控制 token，系统必须定义转义或禁止规则。否则用户输入可能意外改变角色边界或工具调用结构。安全系统尤其要把“可见文本”和“不可由用户伪造的控制 token”分开处理。
 
-在 base model 中：prompt 通常就是一段普通文本上下文。
+### 特殊符号的最小测试
 
-在 chat model 中：prompt 常由 system、user、assistant 历史消息经过 chat template 组装而成。
+测试每个 special token 时，至少比较三条路径：
 
-常见误区：prompt 不是越长越好。冗余、冲突或低质量上下文会增加成本并干扰模型。
+~~~text
+encode(token 的字面形式)
+encode 已注册的 special token
+decode 后是否保留、跳过或变换该 token
+~~~
 
-面试表达：prompt engineering 的核心不是堆关键词，而是清晰定义任务、约束、上下文和输出协议。
+很多线上 bug 并不发生在模型，而发生在 decode 时把控制 token 过滤掉、流式输出时把部分字节提前返回，或数据清洗时把角色标记当普通文本拼接。
 
-## Completion
+## 3.7 Chat template：把消息变成训练和推理格式
 
-一句话定义：completion 是模型在给定 prompt 后继续生成的文本。
+### 消息对象不是模型输入
 
-在预训练中：语言模型学习根据前文预测后续 token，本质上就是 completion 式目标。
+应用层常用结构化消息：
 
-在指令模型中：completion 通常对应 assistant 的回答。
+~~~text
+[
+  {"role": "system", "content": "..."},
+  {"role": "user", "content": "..."}
+]
+~~~
 
-与 prompt 的关系：prompt 是条件，completion 是模型生成的结果；训练数据中二者边界必须清楚。
+模型本身通常不直接接收这个列表。chat template 把它序列化成带角色标记、边界标记和 assistant 起始位置的 token 序列。不同模型对相同 messages 可能产生不同字符串和不同 token ids。
 
-工程注意：SFT 数据要正确 mask prompt 部分，通常只对 assistant completion 计算 loss。
+### 模板定义的内容
 
-常见误区：把 prompt 和 completion 边界处理错，会让模型学习复读用户问题或错误角色文本。
+一个模板通常决定：
 
-## Instruction
+- system 消息是否存在及其位置。
+- user、assistant、tool 的边界。
+- 每轮消息是否添加换行或特殊标记。
+- 是否在最后追加 assistant generation prompt。
+- 工具调用的 JSON 或文本结构。
+- 哪些边界 token 参与 loss。
 
-一句话定义：instruction 是用户或系统给模型的任务指令。
+所以“prompt 文本一样”不能证明输入一样。评估时应保存模板渲染后的字符串、token ids、special token 位置和 generation prompt。
 
-例子：翻译、总结、分类、改写、写代码、按 JSON 输出、扮演某种角色。
+### SFT 中的 prompt/completion 边界
 
-在 SFT 中：instruction-response 数据用于让模型学会遵循任务说明生成回答。
+对于只训练 assistant 回答的 SFT，通常把 prompt 部分的 label 设为 ignore_index，只对 completion token 计算损失：
 
-与 prompt 的区别：prompt 是完整输入上下文，instruction 是其中表达任务要求的部分。
+~~~math
+L
+=-\frac{1}{|\mathcal{I}|}
+\sum_{t\in\mathcal{I}}
+\log p_\theta(y_t\mid y_{<t},x),
+~~~
 
-常见误区：instruction 越复杂不一定越好。冲突指令、多目标指令和含糊约束会降低生成稳定性。
+其中 I 是 assistant completion 的有效位置集合。若把 system、user 或 padding 误加入 I，模型会学到复述指令、生成角色标记或预测 padding 的行为。
 
-面试表达：指令微调的关键是让模型从纯续写转向理解并执行显式任务要求。
+### Tool calling 和多模态占位符
 
-## System Prompt
+工具调用和图像/音频输入会引入结构化占位符。占位符是否对应真实视觉 token、一个压缩后的 embedding，还是只是一段文本标记，要以模型架构为准。模板负责序列化协议，但不能凭空提供模态编码器或工具执行能力。
 
-一句话定义：system prompt 是对模型行为、身份、边界和全局规则的高优先级指令。
+### 模板版本迁移
 
-常见作用：设定助手角色、安全边界、回答风格、工具使用规则和输出格式约束。
+模板改变可能让同一个 checkpoint 的输入分布发生变化。迁移时应保留旧模板和新模板的对照样本，比较：
 
-在 chat template 中：system prompt 通常位于对话最前面，并通过特殊角色标记与用户消息区分。
+~~~text
+渲染字符串
+token ids
+角色边界
+assistant 起始位置
+label mask
+生成停止位置
+工具调用解析结果
+~~~
 
-工程风险：如果训练和推理中 system prompt 格式不一致，模型可能忽视规则或把系统指令当普通文本。
+不能只看最终回答是否“看起来差不多”，因为少量模板变化可能在长对话、拒答和工具调用场景中积累成明显差异。
 
-常见误区：system prompt 不是绝对安全机制。模型仍可能受越狱提示、上下文冲突或能力限制影响。
+## 3.8 Prompt、Instruction、Completion 与上下文窗口
 
-面试表达：system prompt 是控制模型行为的重要接口，但真正可靠的系统还需要数据、对齐、安全策略和推理侧防护共同支撑。
+### 四个概念的边界
 
-## Context Window
+Prompt 是模型接收的完整条件上下文；instruction 是其中要求模型完成的任务；completion 是模型在条件下生成的结果；system prompt 是具有特定角色和优先级的全局指令。四者可能重叠，但不应当作同义词。
 
-一句话定义：context window 是模型一次前向可接收的最大 token 长度。
+一个训练样本可以抽象为：
 
-核心单位：上下文窗口以 token 计，不以字符、汉字或英文单词计。
+~~~text
+context = system + history + user instruction + optional evidence
+target  = assistant completion
+~~~
 
-接口边界：在多数生成服务中，这个预算覆盖输入 token 与允许生成的输出 token；有些产品还会把隐藏思考、工具结果或多模态 token 纳入同一预算。`max_new_tokens` 不是额外于 context window 之外的空间。
+训练时需要明确 context 哪些 token进入模型输入，target 哪些 token参与 loss，工具结果和引用证据放在哪个边界内。
 
-影响因素：位置编码、训练长度、attention 实现、KV cache、显存和推理框架限制。
+### 上下文预算
 
-与 tokenizer 的关系：同一段文本在不同 tokenizer 下 token 数可能不同，因此能放入上下文的实际字符量也不同。
+若模型最大上下文长度为 C，输入 token 数为 T_in，最大生成预算为 T_out，隐藏思考、工具结果或多模态 token 也占用同一预算时，总约束可以写成：
 
-常见误区：标称 128K context 不代表所有 128K token 信息都能被同等有效利用。长上下文还涉及注意力稀释、位置外推和检索能力问题。
+~~~math
+T_{\mathrm{in}}+T_{\mathrm{out}}+T_{\mathrm{hidden}}
+\le C.
+~~~
 
-面试表达：上下文窗口是 token 级限制，长上下文能力还要看训练数据、位置编码、注意力机制和评估结果。
+有些服务把 T_hidden 或工具 token 单独计费，有些把它们统一计入窗口；不能只依据产品界面上的一个数字推断具体 API 语义。
 
-## Detokenization
+### 截断策略
 
-一句话定义：detokenization 是把 token id 序列还原为文本的过程。
+超出窗口时，系统可能从左侧截断历史、压缩摘要、裁剪检索证据、减少生成预算或直接拒绝请求。每种策略都会改变任务语义：
 
-核心流程：`token ids -> tokens -> text`。
+~~~text
+左侧截断：丢失早期指令或对话约束
+右侧截断：丢失用户问题或证据末尾
+证据裁剪：丢失支持结论的关键段落
+生成预算减少：答案可能不完整
+摘要替换：引入摘要错误或信息丢失
+~~~
 
-工程难点：空格、换行、Unicode、byte fallback、特殊 token 跳过和流式输出都会影响还原结果。
+工程上要记录实际送入模型的 token 数，而不是只记录原始字符数。
 
-在生成中：模型每生成一个 token，推理系统通常会逐步 decode 并返回可读文本。
+### 长上下文不等于有效使用
 
-常见误区：decode 单个 token 再拼接，不一定等价于 decode 完整 token 序列，尤其在 byte-level 或特殊空格编码中要小心。
+标称上下文窗口只表示接口或 runtime 在某种条件下能接受的最大 token 数。有效利用还受训练长度、位置表示、注意力稀释、KV cache、显存、检索排序和任务结构影响。评估长上下文时，应使用已知位置检索、多跳证据、冲突信息和不同位置分桶，而不是只发送一段很长的文本看请求是否成功。
 
-面试表达：tokenization 和 detokenization 共同定义模型的文本 I/O 协议，线上问题经常出在边界符、空格和特殊 token 处理上。
+## 3.9 Detokenization：从 id 回到可读文本
 
-## Tokenizer Training
+### decode 不是简单字符串拼接
 
-一句话定义：tokenizer training 是从语料中学习词表、merge 规则或子词概率模型的过程。
+Detokenization 把 token ids 按 tokenizer 的映射、空格规则、字节恢复和 special token 过滤策略还原为文本。对于 byte-level tokenizer，单个 token 的可见表示可能只是内部字节片段；对流式生成，前一个 token 和当前 token 合并后才可能形成合法 Unicode 或完整词片段。
 
-核心输入：代表目标应用分布的文本语料，包括语言比例、代码比例、领域文本、特殊符号和格式化数据。
+因此：
 
-关键超参数：vocab size、算法类型、normalization、special tokens，以及具体实现支持的 character coverage、byte fallback 等选项。
+~~~text
+decode([id_1, id_2])
+不一定等于
+decode([id_1]) + decode([id_2])
+~~~
 
-为什么重要：tokenizer 一旦确定，通常会和模型训练绑定，后续随意更换成本很高。
+尤其在空格、组合字符、byte fallback 和特殊 token 边界处，逐 token decode 再拼接可能出现多余空格、乱码或控制符泄漏。
 
-数据影响：如果训练 tokenizer 的语料中中文、代码或数学公式不足，相关文本可能被切得很碎。
+### 流式输出的边界
 
-常见误区：只用通用语料训练 tokenizer 就能覆盖所有场景。面向代码、金融、医疗、多语言的模型需要考虑目标数据分布。
+流式服务通常每次收到一个或多个新 id，但可以等到安全边界再向用户发送文本。需要定义：
 
-面试表达：tokenizer 训练是模型数据工程的一部分，它决定哪些文本模式被压缩为高效 token，哪些模式会被拆碎。
+1. 不完整 UTF-8 字节是否暂存。
+2. special token 是否过滤。
+3. EOS 是否在客户端可见。
+4. 工具调用 JSON 是否先缓存到完整结构再解析。
+5. markdown 或代码块是否允许分片发送。
 
-## 中文 Tokenization
+把“模型生成 token”与“用户看到文本”当成同一事件，会让流式协议、审计和工具调用出现边界错误。
 
-一句话定义：中文 tokenization 需要处理没有天然空格分词边界的问题。
+### encode/decode 的回环测试
 
-常见方式：按字、按词、按子词或使用 SentencePiece 直接从原始文本学习。
+一个 tokenizer 的基本回环不是无条件要求原文逐字相等，因为规范化和 special token 可能改变文本。应先写清回环预期：
 
-难点：中文词边界不显式，专有名词、新词、数字单位和中英混排很常见。
+~~~text
+规范化后文本是否应相同
+空格和换行是否保留
+special token 是否跳过
+未知字符是否可逆
+非法 Unicode 如何处理
+~~~
 
-对 LLM 的影响：如果中文被切得过碎，相同语义会占用更多 token，降低上下文利用率并增加推理成本。
+然后分别测试普通文本、代码、emoji、控制字符和混合语言。
 
-工程观察：中文模型或多语言模型通常需要关注中文 token fertility，即每个汉字或每句话平均被切成多少 token。
+## 3.10 Tokenizer 训练、领域扩展与迁移验证
 
-常见误区：中文按字切就一定好。按字鲁棒但序列长，按词可能语义好但 OOV 和分词错误更多，子词方法是常见折中。
+### tokenizer 训练用什么数据
 
-面试表达：中文 tokenizer 的重点是覆盖率、切分效率和语义边界之间的平衡。
+Tokenizer training 学习词表、merge 规则或子词概率模型。训练语料应代表模型的目标分布，至少考虑：
 
-## Code Tokenization
+~~~text
+语言比例
+代码比例
+领域术语
+数字和单位
+标点与格式
+特殊符号
+长尾 Unicode
+文档和对话结构
+~~~
 
-一句话定义：code tokenization 是面向代码文本的切分方式，需要处理缩进、符号、标识符和多语言语法。
+若 tokenizer 训练语料几乎没有代码，真实代码中的标识符和符号可能被切得很碎；若中文和其他语言比例失衡，平均 token 效率会出现系统性差异。tokenizer 不是独立于数据的压缩器，它会把语料分布编码到词表中。
 
-代码特点：大量括号、点号、下划线、驼峰命名、缩进、换行、字符串和特殊运算符。
+### 规范化规则
 
-关键影响：tokenizer 如果不适合代码，常见标识符和语法符号会被切得很碎，影响代码生成效率。
+大小写、Unicode normalization、空格、换行、全角半角、控制字符和 byte fallback 都会改变 token 序列。规范化可能提高统计一致性，也可能丢失代码或用户输入中的重要信息。必须把 normalizer 配置视为模型协议的一部分，不能只保存 merges 文件。
 
-重要细节：空格和换行在 Python 等语言中有语义，不能随意 normalize 掉。
+### tokenizer 与 embedding 扩展
 
-byte-level 优势：对特殊符号和罕见字符更鲁棒，适合处理真实代码仓库中的混杂文本。
+如果新增 ΔV 个 token，embedding 至少要从 [V,d] 变成 [V+ΔV,d]。新增行的初始化可以来自随机分布、已有 token 平均值或专门的初始化策略，但初始化不等于模型已经理解新 token。需要通过包含新 token 的训练数据建立它与上下文之间的关系。
 
-常见误区：代码只是英文文本。代码有强格式和符号结构，tokenizer 需要保留足够结构信息。
+若使用 weight tying，扩展后的 LM head 也必须有对应行。若使用分片、量化或 adapter，扩展还会涉及 checkpoint 格式和量化参数的兼容。
 
-面试表达：代码模型的 tokenizer 要重视标识符、缩进、符号和长尾字符，否则会直接影响上下文长度和生成质量。
+### 何时不应扩展词表
 
-## Tokenizer 与 Embedding 扩展
+新增领域术语不必然需要新增 token。子词或字节片段已经能够表示它时，扩展词表可能只增加参数和迁移风险。是否扩展应比较：
 
-一句话定义：扩展 tokenizer 通常意味着新增 token，并同步扩展模型 embedding 和输出层。
+~~~text
+术语出现频率
+现有 token 长度
+上下文和推理成本
+是否需要不可拆分的控制符号
+新 token 的训练数据量
+旧 checkpoint 兼容性
+~~~
 
-典型场景：新增 special token、领域术语、多模态占位符、工具调用标记或结构化输出标记。
+对低频词随意加 token，通常无法凭一次离线样例证明收益。
 
-工程步骤：更新 tokenizer，resize token embeddings，初始化新增 token 向量，并通过训练让模型学会使用这些 token。
+### Tokenizer mismatch
 
-风险：只改 tokenizer 不改模型会导致 token id 越界；只 resize 不训练，新 token 语义也不会自动学会。
+Tokenizer mismatch 指训练、微调、评估、服务或数据预处理使用了不一致的 tokenizer、词表、special token 或 chat template。它可能导致：
 
-在 tied embedding 中：输入 embedding 和输出 lm head 可能共享权重，扩展时要确认两者同步。
+- id 与 embedding 行不对应。
+- 角色边界被错误解释。
+- padding 和 loss mask 错位。
+- EOS 不再触发停止。
+- 评估 token 数无法比较。
+- 训练和线上分布发生隐性漂移。
 
-常见误区：新增 token 后模型马上理解它。新 token 的 embedding 初始通常是随机或均值初始化，需要微调学习。
+排查时应打印原始文本、规范化文本、token 文本、token ids、special token 位置、attention mask、label mask 和 decode 结果，而不是只看最终回答。
 
-面试表达：tokenizer 扩展是模型结构和数据协议变更，必须配合 embedding resize、初始化和训练数据设计。
+### 一个可执行的 tokenizer 审计结构
 
-## Tokenizer Mismatch
+~~~python
+def audit_record(
+    raw_text,
+    normalized_text,
+    tokens,
+    token_ids,
+    special_ids,
+    attention_mask,
+    labels,
+):
+    if not isinstance(raw_text, str) or not isinstance(normalized_text, str):
+        raise TypeError("raw_text and normalized_text must be strings")
+    if not all(isinstance(value, (list, tuple)) for value in (
+            tokens, token_ids, special_ids, attention_mask, labels)):
+        raise TypeError("token fields must be lists or tuples")
+    if len(tokens) != len(token_ids):
+        raise ValueError("token and id length mismatch")
+    if len(token_ids) != len(attention_mask):
+        raise ValueError("attention mask length mismatch")
+    if len(token_ids) != len(labels):
+        raise ValueError("label length mismatch")
+    if any(not isinstance(token, str) for token in tokens):
+        raise TypeError("tokens must contain strings")
+    if any(isinstance(token_id, bool) or not isinstance(token_id, int)
+           or token_id < 0 for token_id in token_ids):
+        raise ValueError("token_ids must contain non-negative integers")
+    if any(mask not in (0, 1) for mask in attention_mask):
+        raise ValueError("attention_mask must contain only 0 or 1")
+    if any(isinstance(label, bool) or not isinstance(label, int)
+           or label < -100 for label in labels):
+        raise ValueError("labels must contain integers >= -100")
+    if any(isinstance(token_id, bool) or not isinstance(token_id, int)
+           or token_id < 0 for token_id in special_ids):
+        raise ValueError("special_ids must contain non-negative integers")
+    special_set = set(special_ids)
+    return {
+        "raw_chars": len(raw_text),
+        "normalized_chars": len(normalized_text),
+        "tokens": list(tokens),
+        "token_ids": list(token_ids),
+        "special_positions": [
+            i for i, token_id in enumerate(token_ids)
+            if token_id in special_set
+        ],
+        "valid_labels": sum(label != -100 for label in labels),
+    }
 
-一句话定义：tokenizer mismatch 指训练、微调、评估或推理阶段使用了不一致的 tokenizer 或模板。
 
-常见后果：输入 id 错误、special token 错位、角色边界混乱、生成异常、评估结果不可比。
+print(
+    audit_record(
+        "hi",
+        "hi",
+        ["h", "i"],
+        [4, 5],
+        [0, 1],
+        [1, 1],
+        [-100, 5],
+    )
+)
+~~~
 
-典型场景：用 A 模型 tokenizer 编码 B 模型 prompt，或者 SFT 使用一种 chat template，线上推理使用另一种模板。
+这个审计结构不判断模型回答质量，只确保编码、mask 和 label 的长度契约一致。真实项目还应保存 tokenizer 文件哈希、版本、模板版本和 decode 回环结果。
 
-工程排查：打印 token ids、decode 后文本、special token 位置和 attention mask，确认与训练格式一致。
+## 3.11 Tokenization 对训练目标和评估的影响
 
-常见误区：只要文本看起来一样，模型输入就一样。实际 token id 序列可能完全不同。
+### next-token loss 的单位
 
-面试表达：tokenizer mismatch 是大模型工程中非常常见且隐蔽的问题，排查时必须看 token 级输入，而不只是看原始字符串。
+语言模型通常以 token 为单位计算交叉熵：
 
-## 本章小结
+~~~math
+L_{\mathrm{token}}
+=-\frac{1}{N}
+\sum_{i=1}^{N}
+\log p_\theta(y_i\mid y_{<i}),
+~~~
 
-本章覆盖 NLP 与 tokenization 中最常见的面试概念和工程问题。
+N 是有效 label token 数。相同的字符数据，如果 tokenizer 切成更多 token，就会产生更多预测位置和更长的依赖链。训练 token 数不是“文本量”的唯一表达，比较训练预算时必须说明 tokenizer。
 
-核心结论如下：
+### Perplexity 的 tokenizer 依赖
 
-1. LLM 处理的是 token id，不是原始字符串。
-2. token 不等于词、字符或字节，它由 tokenizer 的训练方式和词表决定。
-3. BPE、WordPiece、Unigram LM 和 SentencePiece 都是在词表大小、覆盖率和序列长度之间做权衡。
-4. byte-level tokenization 几乎消除 OOV，但可能牺牲部分语言的 token 效率。
-5. special token 和 chat template 定义了对话模型的输入输出协议。
-6. prompt、completion、instruction、system prompt 的边界处理会直接影响 SFT 和推理行为。
-7. tokenizer mismatch、PAD/EOS 配置错误、模板不一致是大模型工程中的高频坑。
-8. 面试中要能从 tokenization 连接到上下文长度、KV cache、训练成本、多语言能力和线上稳定性。
+若平均 token loss 为 L，perplexity 可以写为：
 
-下一章，我们进入 Transformer 架构。
+~~~math
+\operatorname{PPL}=\exp(L)
+~~~
+
+但不同 tokenizer 的 token 单位不同，因此不能直接比较两个 tokenizer 下的 PPL，除非明确接受这种差异或换算到共同的字符、字节或词级单位。对跨语言比较尤其要谨慎。
+
+### 评估样本的污染
+
+tokenizer 训练本身通常不需要标签，但它仍可能从目标评估文本中学习到切分统计。更严重的污染发生在模型预训练语料包含评估答案或原文。评估时应记录 tokenizer 版本和模型训练数据边界，避免把“词表看过某种字符串”与“模型学会任务答案”混为一谈。
+
+### 以 token 为单位的公平预算
+
+若给不同语言相同字符预算，它们可能获得不同 token 数和不同有效计算量；若给相同 token 预算，它们又可能覆盖不同字符长度。实验应明确采用哪一种预算，并报告另一种单位的结果。对于生成任务，还要报告输出 token 数、截断率、EOS 命中率和单位成功成本。
+
+## 3.12 资料与证据边界
+
+本章关于 tokenizer 算法的机制，优先依据原始论文；关于 Hugging Face 或 PyTorch 接口的行为，优先依据官方文档；代码中的 merge、长度和 mask 数字是教学构造。资料不能互相替代：论文不保证某个库的当前参数名，官方文档也不证明某种 tokenizer 在所有语言上都更好。
+
+建议优先阅读：
+
+- [Neural Machine Translation of Rare Words with Subword Units](https://arxiv.org/abs/1508.07909)：BPE 子词分割。
+- [Subword Regularization](https://arxiv.org/abs/1804.10959)：Unigram 与子词采样。
+- [SentencePiece](https://arxiv.org/abs/1808.06226)：从原始文本训练子词模型。
+- [BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding](https://arxiv.org/abs/1810.04805)：WordPiece 在 BERT 中的应用背景。
+- [Language Models are Unsupervised Multitask Learners](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf)：GPT-2 byte-level BPE 背景。
+- [Attention Is All You Need](https://arxiv.org/abs/1706.03762)：token 序列进入 Transformer 的基础架构。
+- [Hugging Face Tokenizers 文档](https://huggingface.co/docs/tokenizers/index)：训练、编码、解码和 tokenizer 组件。
+- [Transformers Chat Templates](https://huggingface.co/docs/transformers/main/en/chat_templating)：消息到模型输入的模板接口。
+- [Transformers tokenizer 基础](https://huggingface.co/docs/transformers/main/en/tokenizer_summary)：不同 tokenizer 家族的说明。
+- [Unicode Standard Annex #29](https://unicode.org/reports/tr29/)：Unicode 文本边界和组合字符。
+
+阅读这些资料时要区分三种结论：
+
+1. 算法论文说明原始方法和特定数据上的实验。
+2. 官方文档说明当前实现的接口、默认值和版本边界。
+3. 目标语料和目标模型上的实测才说明 token 效率、质量、延迟和成本。
+
+## 本章回顾
+
+tokenization 的核心不是记住 BPE、WordPiece 和 SentencePiece 的名词差异，而是能把一段原始字符串的完整生命周期说清楚：
+
+~~~text
+字符与字节
+ -> normalization
+ -> token 边界
+ -> token id
+ -> embedding 行
+ -> chat template / label mask
+ -> context budget
+ -> Transformer loss
+ -> 生成 id
+ -> 流式 detokenization
+ -> 用户可见文本
+~~~
+
+当模型输出异常时，问题可能不在 Transformer 参数，而在 tokenizer 版本、special token、模板、padding、label mask 或 decode 边界。只有把这些中间产物保存下来，才能区分模型能力问题、数据协议问题和服务实现问题。下一章将进入 Transformer 架构，继续追踪 token embedding 之后的张量如何在 attention 和 MLP 中流动。

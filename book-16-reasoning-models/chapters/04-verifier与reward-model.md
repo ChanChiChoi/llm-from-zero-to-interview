@@ -1,498 +1,636 @@
 # 第四章：Verifier 与 Reward Model
 
-## 0. 本讲范围与资料
+生成模型擅长提出候选，但“能提出一个看起来合理的答案”与“能判断哪个候选真的满足任务”是两种能力。Verifier 和 reward model 试图把这两件事分开。
 
-本章重点参考 Training Verifiers to Solve Math Word Problems、Let's Verify Step by Step、InstructGPT / RLHF reward model、Learning to Summarize from Human Feedback、RewardBench 以及 HumanEval / pass@k 的评估口径。这里把 verifier / reward model 放在 reasoning 系统里讨论：generator 负责提出候选，verifier / reward model 负责打分、重排、过滤或辅助搜索。
+在数学题中，生成器可以写出多条解法，程序或模型检查器判断最终答案；在代码题中，生成器提出程序，编译器和测试集提供反馈；在开放式任务中，reward model 学习人类或规则的偏好，再对候选排序。
 
-本章聚焦：
+这种生成—验证分工很有用，却也很危险。验证器并不是天然正确的裁判，它可能偏好长答案、整齐格式、自信语气或训练数据中的表面模式。只要生成模型针对评分器优化，就可能出现 reward hacking：分数提高了，真实任务质量却没有提高。
 
-1. outcome verifier、process verifier、reward model、programmatic verifier 的职责边界。
-2. pointwise、pairwise、listwise 训练目标和 rerank 公式。
-3. verifier reranking、best-of-N、process score、pairwise accuracy、hard negative accuracy、calibration 和成本约束。
-4. 为什么 verifier 本身也会被 reward hacking、长度偏差、格式偏差和 hard negative 误导。
-5. 如何用最小 Python demo 审计 verifier 是否真的提升下游 reasoning accuracy。
+本章要建立的不是“有一个分数就能选最优答案”的直觉，而是完整的判断链：
 
-本章不展开第五章 process supervision 的完整数据构造和 PRM 搜索算法，也不展开 RLHF / DPO 的完整训练 pipeline。这里的 reward model 只作为 reasoning 候选选择器来讲；对齐和偏好优化里的 reward model 会在后训练和安全章节中更系统展开。
+1. 先定义验证对象和成功事件。
+2. 再选择 outcome、process、programmatic 或 learned verifier。
+3. 根据数据形式选择 pointwise、pairwise 或 listwise 训练。
+4. 在真实候选分布和 hard negative 上评估。
+5. 检查排序、校准、下游选择、成本和安全。
+6. 当证据不足时允许 abstain，而不是强行输出高分候选。
 
-Reasoning model 的一个核心趋势是“生成”和“验证”分工。生成模型负责提出候选答案、推理链或代码；verifier 或 reward model 负责判断哪个候选更可能正确。这个范式非常重要，因为复杂推理中，模型一次生成就答对很难，但生成多个候选再筛选，常常能显著提升准确率。
+## 0.1 本章的资料与证据边界
 
-本章系统讲 verifier、reward model、outcome verifier、process verifier、reranking、pairwise/listwise 训练、生成-验证范式、工程使用方式和常见风险。
+Training Verifiers to Solve Math Word Problems 说明了训练验证器来筛选数学候选的基本思路；Let's Verify Step by Step 进一步讨论过程级验证和步骤反馈。InstructGPT、Learning to Summarize from Human Feedback 等工作提供 reward model 在人类偏好优化中的背景；RewardBench 提供了对 reward model 和偏好模型进行多维评估的公开路线。
 
-## 4.1 为什么需要 Verifier
+这些资料的任务目标不同。数学答案验证器、偏好 reward model、代码测试器和安全分类器不能简单互换。论文中的 pairwise accuracy 也不能自动推导出真实候选集合上的 top-1 选择准确率。
 
-单个生成模型容易出现：
+本章会区分：
 
-1. 中间步骤错误。
-2. 最终答案错误。
-3. 多条候选质量不一。
-4. 推理链看似合理但不可靠。
-5. 自信输出错误答案。
+1. 论文定义与论文实验；
+2. 官方代码或框架接口；
+3. 教学构造的分数和数据；
+4. 目标系统在真实任务分布上的复测。
 
-如果能额外训练或使用一个 verifier，就可以让系统从多个候选中选择更好的答案。
+闭源模型内部的 reward model 结构、训练数据和路由策略，除非官方公开，否则不写成确定事实。
 
-直觉：
+## 0.2 一个最小例子
 
-```text
-Generator: 给出多个可能答案
-Verifier: 判断哪个答案更可信
-```
+水箱题的三个候选是：
 
-面试回答：
+~~~text
+候选 A：净流入速度是 3 + 1 = 4，答案是 5 分钟。
+候选 B：净流入速度是 3 - 1 = 2，答案是 10 分钟。
+候选 C：答案是 10 分钟，但没有写过程。
+~~~
 
-```text
-Verifier 的作用是评估候选答案或推理过程的质量。Reasoning 中生成模型负责提出多个候选，verifier 负责打分、筛选或重排。这样可以把“会生成正确答案”和“能选出正确答案”拆开，提升复杂推理任务的可靠性。
-```
+如果任务只要求最终数值，A 错，B 和 C 对；如果任务要求可审计过程，B 比 C 更容易检查；如果系统有一个只偏好长解释的 reward model，A 可能因为写得很完整而获得高分。
 
-### 4.1.1 关键公式与 Verifier 指标速查
+一个好的验证系统应先明确任务契约：
 
-把第 `i` 道题的候选集合写成：
+- 最终答案是否正确；
+- 过程中的关键算术是否正确；
+- 是否必须给出证据；
+- 是否允许省略中间步骤；
+- 缺少条件时是否应该拒答。
 
-```math
+没有任务契约，验证器分数没有明确含义。
+
+## 1. Verifier 的对象与职责
+
+### 1.1 小白视角：生成器和检查器分工
+
+生成器负责提出候选，verifier 负责判断候选是否满足约束。检查器可以是：
+
+- 算术程序；
+- 单元测试；
+- JSON schema；
+- 引用和原文比对；
+- 符号证明系统；
+- 人工标注；
+- 学习出来的 reward model。
+
+生成器不必一次找到唯一答案，但候选必须接受独立检查。检查器也不必写出答案，它只需要提供足以做出选择或拒答的信号。
+
+### 1.2 专家视角：验证函数
+
+设输入为 x，候选轨迹为 z，最终答案为 y，任务真实成功事件为 S。一个理想验证器可以写成：
+
+~~~math
+V^*(x,z,y)=\mathbb{P}(S=1\mid x,z,y)
+~~~
+
+现实中的 verifier 只能学习或近似 V^*：
+
+~~~math
+s=f_{\phi}(x,z,y)
+~~~
+
+phi 是验证器参数，s 是分数。分数可能是二值、连续值、排序分数或拒答信号。只有当 s 在目标候选分布上与真实成功事件有足够关系时，它才适合用于选择。
+
+### 1.3 候选集合
+
+对第 i 道题，候选集合可以写成：
+
+~~~math
 \mathcal{C}_i=
-\{(z_{ij},\hat y_{ij},s_{ij},p_{ij},T_{ij})\}_{j=1}^{K_i}
-```
+\left\{(z_{ij},\hat y_{ij},s_{ij},p_{ij},T_{ij})\right\}_{j=1}^{K_i}
+~~~
 
-其中 `z_ij` 是候选推理过程，`hat y_ij` 是候选答案，`s_ij` 是 verifier / reward model 分数，`p_ij` 是程序验证或工具验证结果，`T_ij` 是候选 token 成本。
+其中：
 
-Verifier 打分函数：
+- z_ij 是候选过程；
+- y_hat_ij 是候选答案；
+- s_ij 是 learned verifier 或 reward model 分数；
+- p_ij 是程序或工具验证结果；
+- T_ij 是生成候选消耗的 token 或时间。
 
-```math
-s_{ij}=f_\phi(x_i,z_{ij},\hat y_{ij})
-```
+最终系统不是单纯求 max(s)。它还要处理程序验证、权限、成本、不确定性和候选之间的依赖。
 
-Rerank 选择：
+## 2. Outcome Verifier：检查最后结果
 
-```math
-j_i^\star=
-\arg\max_{j\in\{1,\ldots,K_i\}} s_{ij},
-\qquad
-\hat y_i^{\mathrm{ver}}=\hat y_{ij_i^\star}
-```
+### 2.1 定义
 
-Pointwise 二分类 verifier loss：
+Outcome verifier 只检查最终结果是否满足任务目标。例如：
 
-```math
-L_{\mathrm{point}}
+- 数学答案是否等于参考数值；
+- 程序是否通过隐藏测试；
+- JSON 是否符合 schema；
+- SQL 返回结果是否满足断言；
+- 工具动作是否改变了正确资源。
+
+它不一定需要读取完整推理链。
+
+### 2.2 优点
+
+Outcome verifier 的优势是目标清晰、容易自动化、通常成本较低。对于可执行任务，它可以直接调用外部环境，而不是让语言模型判断自己的答案。
+
+### 2.3 局限
+
+它也有明显边界：
+
+1. 不能定位中间错误；
+2. 可能把碰巧正确的答案计为成功；
+3. 依赖测试集或规则覆盖；
+4. 对开放答案和多种正确表达不够灵活；
+5. 测试器本身可能存在 bug。
+
+因此 outcome 成功不等于过程可靠，更不等于模型掌握了可迁移的方法。
+
+### 2.4 代码测试的形式化
+
+对候选程序 f，给定 M 个测试样例，可以定义：
+
+~~~math
+V_{\mathrm{code}}(f)=
+\frac{1}{M}\sum_{m=1}^{M}
+\mathbb{1}\left[f(x_m)=y_m\right]
+~~~
+
+x_m 和 y_m 是测试输入与期望输出。这里要求测试集大小 \(M>0\)，每个测试的期望输出和比较规则已定义；编译异常、超时和资源耗尽也应有明确状态，不能在统计时悄悄当成普通的错误输出。这个分数是测试集通过率，不是所有可能输入上的正确率。
+
+隐藏测试、边界样例、资源限制和随机测试可以提高覆盖，但也会增加执行成本。
+
+## 3. Process Verifier：检查中间步骤
+
+### 3.1 为什么需要过程检查
+
+最终答案监督是一个稀疏信号。长推理链可能在读题、变量抽取、计算、引用或格式化中的某一步出错；只看末尾答案无法知道错误位置。
+
+Process verifier 为步骤提供局部分数或标签，使系统可以：
+
+1. 提前发现错误；
+2. 对搜索节点剪枝；
+3. 给训练过程提供更细粒度反馈；
+4. 生成可定位的失败报告。
+
+### 3.2 步骤分数
+
+设第 i 条轨迹有 M_i 个步骤，第 m 步的正确性分数为 q_im，整条过程的平均分可以写成：
+
+~~~math
+S_{\mathrm{proc}}(z_i)=
+\frac{1}{M_i}\sum_{m=1}^{M_i}q_{im}
+~~~
+
+这个平均值要求 \(M_i>0\)。如果 q_im 被解释为概率或正确性分数，应规定它是有限数并位于约定范围（通常是 \([0,1]\)）；空轨迹的过程分数未定义，不能用 0 代替。q_im 可以是 0/1 标签，也可以是连续分数。平均值只是一个聚合方式，不能替代对关键步骤的检查。
+
+### 3.3 局部正确不等于全局正确
+
+一个证明中的每个局部变换看起来都像合法公式，但初始条件可能被读错；一个计划中的每个动作都单独合法，但组合后可能访问了错误资源。
+
+过程检查还要关注：
+
+- 前提是否来自输入；
+- 变量依赖是否连贯；
+- 关键条件是否被覆盖；
+- 步骤是否顺序正确；
+- 最终结论是否满足全局约束。
+
+### 3.4 步骤粒度
+
+“一步”没有天然定义。下面三种切分会得到不同指标：
+
+1. 按句子切分；
+2. 按数学操作切分；
+3. 按可验证状态切分。
+
+句子切分便于标注，但可能把两个操作混在一起；数学操作切分更细，但标注成本高；状态切分适合工具和搜索，却需要明确状态 schema。
+
+### 3.5 多种正确过程
+
+同一道题可能有代数法、枚举法和几何法。若过程监督只模仿一条参考轨迹，验证器可能把其他正确方法错判为低分。
+
+因此过程数据应尽量使用多条正确轨迹、规则验证和任务结果检查，避免把表达风格误当成真值。
+
+## 4. Programmatic Verifier：把约束交给程序
+
+### 4.1 适用任务
+
+程序化 verifier 适合：
+
+- 精确算术；
+- 代码编译和测试；
+- SQL 执行；
+- JSON schema；
+- 日期和单位规则；
+- 形式化证明；
+- 工具权限与参数检查。
+
+它们通常比语言模型更适合判断明确约束，因为规则可以重复执行，结果也容易复现。
+
+### 4.2 程序验证不是绝对真理
+
+程序只能检查被写入的约束。测试不覆盖的 bug、错误的 schema、过宽的数值容差和不完整的引用规则都会造成假成功。
+
+因此需要测试 verifier 本身：
+
+1. 用已知正确和已知错误样例测试；
+2. 加入边界和反例；
+3. 做实现独立性检查；
+4. 记录超时、异常和资源耗尽；
+5. 定期更新隐藏测试。
+
+### 4.3 沙箱与权限
+
+让模型生成代码并执行，必须考虑：
+
+- 文件系统访问；
+- 网络访问；
+- CPU、内存和时间限制；
+- 子进程和系统调用；
+- 随机性；
+- 输出大小；
+- 依赖版本。
+
+一个程序化 verifier 可能在结果判断上很可靠，却在执行环境上带来新的安全风险。
+
+### 4.4 结构化输出验证
+
+对 JSON 或工具参数，验证器可以分层：
+
+1. 语法是否可解析；
+2. schema 是否匹配；
+3. 字段是否满足业务约束；
+4. 资源和权限是否允许；
+5. 动作结果是否与预期一致。
+
+只检查第一层不能证明工具动作安全。
+
+## 5. Reward Model 与 Verifier 的关系
+
+### 5.1 Reward model 学习代理目标
+
+reward model 通常从人工偏好、规则标签、程序结果或历史选择中学习一个评分函数。它的分数不是任务真值，而是对任务真值或偏好目标的近似。
+
+可以把 reward model 写成：
+
+~~~math
+r_{\phi}(x,y,z)=f_{\phi}(x,y,z)
+~~~
+
+它可能学习正确性、帮助性、格式、安全、风格或多种目标的组合。
+
+### 5.2 Verifier 更窄，reward model 更宽
+
+Verifier 通常围绕一个明确约束：答案是否正确、步骤是否成立、程序是否通过测试。Reward model 可以处理开放式偏好，但也更容易受到标注风格、长度和语气的影响。
+
+二者可以重叠，但不能简单等同：
+
+- 程序测试器是 verifier，不是学习到的人类偏好模型；
+- 一个偏好长答案的 reward model 不一定能验证数学；
+- 数学验证器的高分不代表回答更有帮助或更安全。
+
+### 5.3 Outcome Reward Model 与 Process Reward Model
+
+可以用 ORM 表示 outcome reward model，用 PRM 表示 process reward model：
+
+- ORM 关注最终答案或整条输出；
+- PRM 关注中间步骤或状态转移。
+
+ORM 适合最终结果明确的任务；PRM 更适合搜索、过程监督和早停，但标注与校准更复杂。
+
+### 5.4 一个分数不应承担所有目标
+
+把正确性、简洁、风格、安全和帮助性压成一个标量，便于排序，却会掩盖目标冲突。一个候选可能数学上正确但泄露隐私，或者格式完美但引用不支持结论。
+
+工程上可以使用多个分数：
+
+~~~math
+S_{\mathrm{total}}
 =
--q\log \sigma(s)
+\alpha S_{\mathrm{correct}}
+\;+\;
+\beta S_{\mathrm{evidence}}
+\;+\;
+\gamma S_{\mathrm{format}}
+\;-\;
+\delta S_{\mathrm{risk}}
+~~~
+
+alpha、beta、gamma、delta 不是通用常数，需要在业务验证集和风险切片上校准。若把它们用于数值计算，应明确它们为有限权重，并确认各分数已经在可比较的尺度上；线性组合本身不会自动解决量纲、阈值或安全硬约束问题。
+
+## 6. Verifier 的训练目标
+
+### 6.1 Pointwise：每个候选单独判断
+
+给每个候选一个标签 q，q=1 表示满足任务，q=0 表示不满足，二分类损失可写成：
+
+~~~math
+\mathcal{L}_{\mathrm{point}}
+=
+-q\log\sigma(s)
 -(1-q)\log(1-\sigma(s))
-```
+~~~
 
-其中 `q=1` 表示候选正确，`q=0` 表示候选错误。
+s 是 verifier 的 logit，q 必须是 0 或 1，且每个 logit 和损失项都应为有限数。实际实现通常使用数值稳定的 binary-cross-entropy-with-logits，而不是先计算极端 sigmoid 再取对数。Pointwise 训练简单，适合有明确正负标签的任务，但分数跨问题是否可比较，需要额外校准。
 
-Pairwise reward model / verifier loss：
+### 6.2 Pairwise：比较两个候选
 
-```math
-L_{\mathrm{pair}}
-=
--\log \sigma(r_w-r_l)
-```
+给出 winner w 和 loser l，让评分器满足 r_w 大于 r_l：
 
-其中 `r_w` 是 chosen / winner 候选分数，`r_l` 是 rejected / loser 候选分数。
+~~~math
+\mathcal{L}_{\mathrm{pair}}
+=-\log\sigma(r_w-r_l)
+~~~
 
-Listwise softmax loss：
+这里要求 winner 与 loser 的标签关系已经定义，且两个分数为有限数；如果两者在任务上等价，应单独标为 tie，不能随意制造 winner/loser。Pairwise 标注常比绝对打分容易，适合偏好数据和候选排序。但它只提供相对关系，不能直接得到跨任务的成功概率。
 
-```math
-L_{\mathrm{list}}
+### 6.3 Listwise：直接学习候选列表
+
+对一个候选列表，假设 j+ 是标注的较优候选：
+
+~~~math
+\mathcal{L}_{\mathrm{list}}
 =
 -\log
 \frac{\exp(s_{i,j^+})}
 {\sum_{j=1}^{K_i}\exp(s_{ij})}
-```
+~~~
 
-其中 `j^+` 是正确候选或标注最优候选。
+这个式子要求 \(K_i>0\)，并且标注位置 \(j^+\) 满足 \(1\le j^+\le K_i\)；空列表或没有可接受候选时，listwise loss 未定义。实现时还应使用 log-sum-exp 形式避免指数溢出。Listwise 目标更贴近 reranking，但需要列表级数据和稳定的候选顺序协议。它也可能把候选数量和位置偏差带入训练。
 
-Process verifier 可以把步骤分数聚合为整条链分数：
+### 6.4 Ranking loss 不等于校准损失
 
-```math
-S_{\mathrm{proc}}(z_i)
-=
-\frac{1}{M_i}
-\sum_{m=1}^{M_i}q_{im}
-```
+一个模型可以非常擅长把好候选排在坏候选前面，却输出没有概率意义的分数。若分数要用于阈值拒答、动态预算或成本决策，还要单独做 calibration。
 
-其中 `q_im` 是第 `m` 个步骤的正确性分数。
+## 7. Verifier 数据与 hard negative
 
-Rerank top-1 accuracy：
+### 7.1 数据来源
 
-```math
-A_{\mathrm{rerank}}
-=
-\frac{1}{N}
-\sum_{i=1}^{N}
-\mathbb{1}[\hat y_i^{\mathrm{ver}}=y_i^\star]
-```
+Verifier 训练数据可以来自：
 
-Pairwise accuracy：
+1. 人工判断；
+2. 数学规则和答案检查；
+3. 代码测试；
+4. 工具执行；
+5. 已知错误模式；
+6. 生成模型产生的候选；
+7. LLM 预标注后的人类复核。
 
-```math
+来源不同，标签可信度和偏差不同。程序生成的标签可规模化，但只能覆盖程序表达的约束；人工标签能处理开放内容，却存在分歧。
+
+### 7.2 正例和负例
+
+高质量数据不只是收集正确答案和明显错误答案，还要包含：
+
+- 格式不同但语义正确；
+- 过程错误但最终碰巧正确；
+- 过程合理但最后计算错误；
+- 少一个关键条件；
+- 引用了不存在的证据；
+- 语气自信但事实错误；
+- 长度和风格与正例相反的 hard negative。
+
+### 7.3 Hard negative 为什么重要
+
+如果负例太简单，verifier 可能只学会识别乱码、短答案或明显格式错误。真实生成候选通常更难：错误答案会有完整步骤、合理术语和正确的局部计算。
+
+训练和评估都应使用接近生成器当前能力的候选分布。静态人工负例可能很快过时。
+
+### 7.4 生成器和验证器的分布偏移
+
+训练时的负例来自旧生成器，部署时的候选来自新模型、不同温度或不同工具。候选分布变化会使 verifier 失效。
+
+可以按时间和生成器版本拆分验证集，报告：
+
+- 旧候选上的分数；
+- 新候选上的分数；
+- 高温度候选上的分数；
+- 对抗或 hard negative 上的分数；
+- 下游 top-1 选择准确率。
+
+## 8. Reranking、Best-of-N 与 Search
+
+### 8.1 Reranking
+
+最常见的用法是先生成 K 个候选，再按 verifier 分数排序：
+
+~~~math
+j^*=\arg\max_{j\in\{1,\ldots,K\}}s_{ij},
+\qquad
+\hat y_i=\hat y_{ij^*}
+~~~
+
+这使系统有机会从少数正确候选中恢复答案，但前提是 verifier 能识别它。
+
+### 8.2 Best-of-N 的真正含义
+
+Best-of-N 不是“生成 N 个就一定更强”，而是：
+
+1. 候选集合中存在好答案；
+2. 评分器能够把好答案排到前面；
+3. 选择和执行成本可接受。
+
+缺少任何一项，N 增加都可能只增加成本。
+
+### 8.3 过程评分用于搜索
+
+在搜索中，验证器可以给中间节点分数：
+
+~~~math
+s_{t+1}=f_{\phi}(x,z_{1:t+1})
+~~~
+
+系统保留高分节点，剪掉低分节点。过程评分比最终评分更早提供反馈，但错误的早期评分可能把正确分支剪掉。
+
+### 8.4 缓存与重复计算
+
+多个候选可能共享同一前缀。系统可以缓存前缀状态，减少重复计算；但验证器若看到的上下文和候选边界不同，缓存键必须包含模型版本、prompt、工具状态和验证协议。
+
+### 8.5 选择与执行分离
+
+对于代码和工具任务，选择一个高分候选后还应执行它并再次检查。高分候选不是执行成功的替代品。
+
+## 9. Verifier 的评估
+
+### 9.1 Pairwise accuracy
+
+给定正确候选 a 和错误候选 b，pairwise accuracy 为：
+
+~~~math
 A_{\mathrm{pair}}
 =
 \frac{1}{|\mathcal{P}|}
 \sum_{(a,b)\in\mathcal{P}}
 \mathbb{1}[s_a>s_b]
-```
+~~~
 
-其中 `a` 是正确或更优候选，`b` 是错误或更差候选。
+这里要求比较对集合 \(\mathcal{P}\) 非空，且每个 pair 的正确候选和错误候选都可判定。公式中的严格大于意味着分数相同时记为失败；也可以另报 tie rate，但不能把平票悄悄算作胜利。它适合检查排序倾向，但不能直接代表 top-1 选择。
 
-Verifier calibration 可以用 ECE 粗略审计：
+### 9.2 Rerank top-1 accuracy
 
-```math
+对每道题从真实候选集合选择最高分候选：
+
+~~~math
+A_{\mathrm{rerank}}
+=
+\frac{1}{N}\sum_{i=1}^{N}
+\mathbb{1}\left[\hat y_{ij_i^*}=y_i^*\right]
+~~~
+
+这里要求评估题数 \(N>0\)，每道题都有非空候选集合，并且最高分并列时有固定的可复现处理。若某题没有可交付候选，应单独统计 abstain，而不是把它自动算成错误或正确。这是更贴近下游的指标。候选集合必须来自实际 generator，否则会出现评估分布偏移。
+
+### 9.3 Hard negative accuracy
+
+对每个 hard negative，检查它的分数是否低于至少一个正确候选：
+
+~~~math
+A_{\mathrm{hard}}
+=
+\frac{1}{H}\sum_{h=1}^{H}
+\mathbb{1}[s_{\mathrm{good}(h)}>s_{\mathrm{hard}(h)}]
+~~~
+
+这里要求 hard negative 数量 \(H>0\)，并且每个 hard negative 都有至少一个明确的 good 对照；若没有 hard negative，这个指标未定义。它能发现 verifier 是否被“完整但错误”的候选欺骗。
+
+### 9.4 Calibration 与 ECE
+
+若分数被解释为成功概率，可按分桶计算 ECE：
+
+~~~math
 \mathrm{ECE}
 =
 \sum_{b=1}^{B}
 \frac{|S_b|}{n}
-\left|
-\mathrm{acc}(S_b)-\mathrm{conf}(S_b)
-\right|
-```
+\left|\mathrm{acc}(S_b)-\mathrm{conf}(S_b)\right|
+~~~
 
-一个简化 verifier 上线条件：
+S_b 是第 b 个分数桶，acc 是真实成功比例，conf 是平均预测置信度。计算 ECE 要求总样本数 \(n>0\)，并且被解释为概率的分数位于 \([0,1]\)。空桶不应贡献误差，但必须记录桶覆盖；如果所有样本都被过滤，ECE 未定义。ECE 依赖分桶方式，不能单独作为完整校准证明。
 
-```math
-G_{\mathrm{ver}}
+### 9.5 下游指标优先
+
+最终要问：
+
+1. 使用 verifier 后 top-1 是否提高；
+2. 是否救回了少数正确候选；
+3. 是否引入新的回归；
+4. 每个正确结果的成本是多少；
+5. 高风险切片是否更安全；
+6. 是否需要允许不确定或人工复核。
+
+验证集分类准确率高，但下游选择没有提升，说明训练目标和实际使用方式不匹配。
+
+## 10. Reward hacking 与评分器偏差
+
+### 10.1 长度偏差
+
+若评分器把更多解释误当成更高质量，生成器会学习输出冗长文本。需要控制长度、比较等长度候选，并报告质量随 token 的曲线。
+
+### 10.2 格式偏差
+
+评分器可能偏好标题、列表、特定标记或英文术语。格式稳定有利于解析，但不能代替任务正确性。
+
+### 10.3 自信语气偏差
+
+“显然”“一定”“经过验证”等措辞可能提高语言评分，却没有增加证据。hard negative 应故意使用自信语气测试评分器。
+
+### 10.4 训练集模式偏差
+
+如果正例都使用同一种模板，verifier 可能把模板当成正确性；如果负例都很短，它会把长度当成质量。训练数据需要交叉风格和反事实控制。
+
+### 10.5 目标错配
+
+把 reward model 的分数直接优化，可能提升代理目标而损害真实任务：
+
+~~~math
+\Delta R_{\mathrm{proxy}}>0
+\quad\not\Rightarrow\quad
+\Delta Q_{\mathrm{task}}>0
+~~~
+
+R_proxy 是代理分数，Q_task 是真实任务质量。两者是否同步，需要独立验证集和业务指标确认。
+
+### 10.6 防护方法
+
+可组合使用：
+
+1. hard negative；
+2. 程序和工具验证；
+3. 盲测与隐藏切片；
+4. 长度和格式消融；
+5. 多个独立评分器；
+6. 人工分歧抽样；
+7. 允许 abstain；
+8. 定期刷新候选分布。
+
+## 11. 不确定性、拒绝与成本
+
+### 11.1 Verifier 不一定要强行选一个
+
+当最高分候选只略高于第二名，或所有候选分数都低时，系统可以请求更多证据、增加候选、调用工具或返回不确定。
+
+可以定义分数间隔：
+
+~~~math
+\Delta_{\mathrm{score}}=s_{(1)}-s_{(2)}
+~~~
+
+s_(1) 和 s_(2) 是最高与次高分数，因此至少需要两个可比较候选；少于两个候选时分数间隔未定义。间隔小不一定表示错误，但表示选择依据弱，需要结合校准和风险等级。
+
+### 11.2 风险感知的阈值
+
+低风险问答可以接受较小间隔；付款、删除、权限和医疗建议需要更高证据阈值。阈值应按任务风险切片校准，而不是全局使用一个分数。
+
+### 11.3 成本账本
+
+验证系统的成本可以拆成：
+
+~~~math
+C_{\mathrm{total}}
 =
-\mathbb{1}[
-A_{\mathrm{rerank}}\ge \alpha
-\land
-A_{\mathrm{pair}}\ge \beta
-\land
-A_{\mathrm{hard}}\ge \gamma
-\land
-\mathrm{ECE}\le \epsilon
-\land
-C_{\mathrm{ver}}\le C_{\max}
-]
-```
+C_{\mathrm{generate}}
++C_{\mathrm{verify}}
++C_{\mathrm{tool}}
++C_{\mathrm{retry}}
++C_{\mathrm{review}}
+~~~
 
-面试中要强调：verifier 本身不是可信性的终点。它必须在真实候选分布、hard negatives、校准、下游准确率和成本上一起评估。
+只看 generator token 会低估 verifier、工具和人工复核成本。
 
-## 4.2 Outcome Verifier
+## 12. 一个综合案例：合同金额与代码候选
 
-Outcome verifier 只看最终答案是否正确或更好。
+### 12.1 合同金额
 
-输入可能是：
+系统从合同中抽取基础金额、折扣和税率，生成两个计算候选：
 
-```text
-question + final answer
-```
+~~~text
+候选 A：100000 × 0.95 × 1.06 = 100700 元，引用正文第 3、4、7 页。
+候选 B：100000 × 0.95 × 1.60 = 152000 元，税率来自 OCR 结果，没有引用原文。
+~~~
 
-或者：
+一个只看解释长度的 reward model 可能给 B 高分，因为它写了更多步骤；程序计算和原文检查应把 B 判为不可信。
 
-```text
-question + reasoning + final answer
-```
+### 12.2 代码候选
 
-输出：
+代码任务中，RM 可以初步排序，程序测试决定最终可执行性。若 RM 选出的候选测试失败，系统应让其他候选继续接受测试，而不是直接交付。
 
-```text
-score
-```
+### 12.3 失败归因
 
-它不一定逐步检查过程，只判断最后结果质量。
+案例中至少有：
 
-优点：
+1. 检索错误；
+2. OCR 错误；
+3. 条件判断错误；
+4. 计算错误；
+5. 引用错配；
+6. verifier 偏差；
+7. 权限或执行环境错误。
 
-1. 标注相对容易。
-2. 适合答案可验证任务。
-3. 可以用于候选重排。
+每一种失败都需要对应的数据和指标。把所有问题归因给 reward model 没有帮助。
 
-缺点：
+## 13. 最小可运行实验：RM 重排与程序验证
 
-1. 无法指出哪一步错。
-2. 对答案格式敏感。
-3. 如果最终答案碰巧对，过程错误也可能高分。
+下面的 demo 用五道 toy case 比较：
 
-## 4.3 Process Verifier
+1. greedy：直接取每道题的第一个候选；
+2. rm_rerank：只按 reward model 分数选择；
+3. hybrid_verifier：优先程序验证，再看步骤分数和 RM 分数；
+4. pairwise accuracy、hard negative accuracy、ECE 和下游选择；
+5. 一个 hard negative 被 RM 选错、但混合验证器救回的案例。
 
-Process verifier 检查中间步骤。
+代码中的分数是人为构造的代理分数，不代表真实 reward model 的概率。为避免把 demo 的正常路径误读成通用保证，下面先校验 case、候选、步骤、分数和 token 的契约；没有比较对、hard negative 或成功候选的指标返回 None，而不是伪造一个 0。
 
-输入：
+~~~python
+import math
 
-```text
-question + step_1 + step_2 + ...
-```
 
-输出可以是：
-
-1. 每一步正确/错误。
-2. 每一步分数。
-3. 整条推理链分数。
-
-优点：
-
-1. 能更早发现错误。
-2. 给搜索提供中间节点评分。
-3. 适合 process supervision。
-
-缺点：
-
-1. 标注成本高。
-2. 正确步骤可能有多种表达。
-3. 步骤粒度难定义。
-4. 评分器本身也可能错。
-
-面试中可以说：outcome verifier 看结果，process verifier 看过程。
-
-## 4.4 Reward Model 和 Verifier 的关系
-
-Reward model 通常给模型输出打一个偏好分数。
-
-在 RLHF 中，reward model 学的是人类偏好；在 reasoning 中，reward model 可以学候选答案是否正确、推理过程是否可靠、是否更符合题目要求。
-
-关系：
-
-1. Verifier 更强调正确性验证。
-2. Reward model 更泛化，可能评分 helpfulness、format、safety、reasoning quality。
-3. 在很多系统中，两者都可以作为候选重排器。
-
-可以把 reasoning reward model 看成一种 learned verifier。
-
-## 4.5 生成-验证范式
-
-生成-验证范式流程：
-
-1. Generator 生成多个候选。
-2. Verifier 给每个候选打分。
-3. 选择最高分候选。
-4. 必要时继续搜索或修正。
-
-伪代码：
-
-```python
-candidates = []
-
-for _ in range(k):
-    answer = generator.generate(question)
-    score = verifier.score(question, answer)
-    candidates.append((score, answer))
-
-best = max(candidates, key=lambda x: x[0])
-```
-
-这种方法适合：
-
-1. 数学题。
-2. 代码题。
-3. 规划任务。
-4. 工具使用。
-5. 多候选问答。
-
-## 4.6 Reranking
-
-Reranking 是 verifier 最常见的用法之一。
-
-流程：
-
-1. 生成 `N` 个候选答案。
-2. verifier 对每个候选打分。
-3. 按分数排序。
-4. 返回 top-1 或 top-k。
-
-和 self-consistency 的区别：
-
-1. Self-consistency 通常按答案投票。
-2. Reranking 按候选质量打分。
-3. Reranking 可以选中少数但高质量的答案。
-
-如果多数候选错但有一个正确，majority vote 可能失败；好的 verifier rerank 可能成功。
-
-## 4.7 Pairwise Ranking
-
-Pairwise 训练让模型判断两个候选哪个更好。
-
-样本：
-
-```json
-{
-  "question": "...",
-  "chosen": "正确解法",
-  "rejected": "错误解法"
-}
-```
-
-训练目标：让 chosen 分数高于 rejected。
-
-优点：
-
-1. 偏好标注比绝对打分容易。
-2. 和 RLHF/DPO 数据形式类似。
-3. 适合训练 reward model。
-
-缺点：
-
-1. 只知道相对偏好。
-2. 数据覆盖不足时泛化差。
-3. 可能学到长度、格式等偏差。
-
-## 4.8 Pointwise 和 Listwise
-
-除了 pairwise，还有 pointwise 和 listwise。
-
-Pointwise：每个候选单独打分。
-
-```text
-candidate -> score
-```
-
-Listwise：一次输入多个候选，直接学习排序。
-
-```text
-[candidate_1, candidate_2, candidate_3] -> ranking
-```
-
-比较：
-
-1. Pointwise 简单，但分数校准难。
-2. Pairwise 标注容易，常用。
-3. Listwise 更贴近排序目标，但训练复杂。
-
-## 4.9 Verifier 训练数据
-
-Verifier 数据来源：
-
-1. 人工标注。
-2. 规则自动标注。
-3. 数学答案校验。
-4. 代码单元测试。
-5. LLM-as-Judge 初筛。
-6. 生成模型产生错误候选。
-
-高质量 verifier 数据需要包含：
-
-1. 正确候选。
-2. 常见错误候选。
-3. 迷惑性错误。
-4. 格式不同但正确的答案。
-5. 中间步骤错误但最终碰巧对的样本。
-6. 中间步骤合理但最终算错的样本。
-
-如果 negative 太简单，verifier 只会学会区分明显错误，无法处理真实候选。
-
-## 4.10 Verifier 的偏差
-
-Verifier 可能学到错误偏差。
-
-常见偏差：
-
-1. 偏好更长答案。
-2. 偏好格式更整齐的答案。
-3. 偏好更自信的语气。
-4. 偏好训练集中常见模式。
-5. 不能识别隐蔽计算错误。
-
-这会导致 reward hacking：生成模型学会骗过 verifier，而不是真的提高正确性。
-
-解决方向：
-
-1. 增加 hard negatives。
-2. 做 calibration。
-3. 用工具验证补充。
-4. 定期更新 verifier 数据。
-5. 分开评估 verifier 和 generator。
-
-## 4.11 Programmatic Verifier
-
-程序化 verifier 是最可靠的一类验证器之一。
-
-例子：
-
-1. 数学表达式用 Python 计算。
-2. 代码题运行单元测试。
-3. SQL 查询执行结果。
-4. JSON schema 校验。
-5. 形式化证明检查器。
-
-优点：
-
-1. 客观。
-2. 可复现。
-3. 不容易被语言风格欺骗。
-
-缺点：
-
-1. 只适用于可执行或可规则验证任务。
-2. 测试用例可能不完整。
-3. 执行环境有安全风险。
-4. 需要处理超时和沙箱。
-
-## 4.12 Verifier 与 Search
-
-Search 需要中间状态评分。Process verifier 可以给每一步打分，帮助剪枝。
-
-流程：
-
-1. 当前推理状态生成多个下一步。
-2. verifier 给每个下一步评分。
-3. 保留高分分支。
-4. 继续展开。
-
-这比只在最后评分更高效，因为错误路径可以早停。
-
-但如果 verifier 过早误杀正确分支，搜索也会失败。
-
-## 4.13 ORM 和 PRM
-
-Reasoning 中常见两个缩写：
-
-1. ORM：Outcome Reward Model。
-2. PRM：Process Reward Model。
-
-ORM 评价最终答案或整条输出。
-
-PRM 评价每一步过程。
-
-对比：
-
-```text
-ORM: 这道题最终答对了吗？
-PRM: 这一步推理对吗？下一步是否合理？
-```
-
-PRM 更适合搜索和过程监督，但标注成本更高。
-
-## 4.14 评估 Verifier
-
-Verifier 本身也要评估。
-
-指标：
-
-1. Pairwise accuracy。
-2. Ranking accuracy。
-3. Calibration。
-4. Top-1 selection accuracy。
-5. Hard negative accuracy。
-6. 下游任务提升。
-
-最关键的是下游提升：使用 verifier 后，最终 reasoning accuracy 是否提高，成本是否可接受。
-
-不要只看 verifier 在验证集上的分类准确率，因为它可能在真实生成候选分布上失效。
-
-## 4.15 工程使用建议
-
-使用 verifier 时建议：
-
-1. 先建立 greedy baseline。
-2. 再做 self-consistency baseline。
-3. 加 verifier rerank。
-4. 对比 accuracy、tokens、latency、cost。
-5. 分析 verifier 选错的样本。
-6. 检查是否偏好长答案或格式。
-7. 对代码和数学尽量加入程序验证。
-
-如果 verifier 带来的收益小于成本，就不一定值得上线。
-
-## 4.16 最小可运行 verifier rerank 审计 demo
-
-下面这个 demo 不调用模型，而是用 toy candidate set 模拟三种选择方式：
-
-1. `greedy`：直接取第一个候选。
-2. `rm_rerank`：只按 learned reward model / verifier 分数选择。
-3. `hybrid_verifier`：优先使用 programmatic verifier，再看过程步骤分数和 RM 分数。
-
-它刻意构造了一个 hard negative：`distractor_math` 的错误候选 `111` 有更高 RM 分数，但程序验证失败。这个例子说明：reward model 能显著优于 greedy，但如果没有 hard negative、程序验证和校准审计，仍可能被“看起来更像正确推理”的错误候选骗过。
-
-```python
 cases = [
     {
         "id": "water_tank",
@@ -647,26 +785,102 @@ cases = [
 ]
 
 
-def is_correct(case, cand):
-    return cand["answer"] == case["gold"]
+def validate_cases(items):
+    if not isinstance(items, list) or not items:
+        raise ValueError("cases must be a non-empty list")
+    seen_ids = set()
+    for case in items:
+        required_case = {"id", "gold", "candidates"}
+        if not isinstance(case, dict) or set(case) != required_case:
+            raise ValueError("case schema is invalid")
+        if (
+            not isinstance(case["id"], str)
+            or not case["id"]
+            or case["id"] in seen_ids
+        ):
+            raise ValueError("case ids must be unique non-empty strings")
+        seen_ids.add(case["id"])
+        if not isinstance(case["gold"], str) or not case["gold"]:
+            raise ValueError("gold must be a non-empty string")
+        candidates = case["candidates"]
+        if not isinstance(candidates, list) or not candidates:
+            raise ValueError("each case needs non-empty candidates")
+        for candidate in candidates:
+            required_candidate = {
+                "answer",
+                "rm_score",
+                "steps",
+                "program_pass",
+                "hard_negative",
+                "tokens",
+            }
+            if (
+                not isinstance(candidate, dict)
+                or set(candidate) != required_candidate
+            ):
+                raise ValueError("candidate schema is invalid")
+            if (
+                not isinstance(candidate["answer"], str)
+                or not candidate["answer"]
+            ):
+                raise ValueError("candidate answer must be non-empty")
+            score = candidate["rm_score"]
+            if (
+                isinstance(score, bool)
+                or not isinstance(score, (int, float))
+                or not math.isfinite(score)
+                or not 0 <= score <= 1
+            ):
+                raise ValueError("rm_score must be finite and in [0, 1]")
+            steps = candidate["steps"]
+            if (
+                not isinstance(steps, list)
+                or not steps
+                or any(not isinstance(step, bool) for step in steps)
+            ):
+                raise ValueError("steps must be a non-empty boolean list")
+            if not isinstance(candidate["program_pass"], bool):
+                raise TypeError("program_pass must be boolean")
+            if not isinstance(candidate["hard_negative"], bool):
+                raise TypeError("hard_negative must be boolean")
+            tokens = candidate["tokens"]
+            if (
+                isinstance(tokens, bool)
+                or not isinstance(tokens, int)
+                or tokens < 0
+            ):
+                raise ValueError("tokens must be a non-negative integer")
+
+
+def is_correct(case, candidate):
+    return candidate["answer"] == case["gold"]
 
 
 def rm_select(case):
-    return max(case["candidates"], key=lambda cand: cand["rm_score"])
+    if not case["candidates"]:
+        raise ValueError("cannot select from empty candidates")
+    return max(
+        enumerate(case["candidates"]),
+        key=lambda item: (item[1]["rm_score"], -item[0]),
+    )[1]
 
 
 def hybrid_select(case):
+    if not case["candidates"]:
+        raise ValueError("cannot select from empty candidates")
     return max(
         case["candidates"],
-        key=lambda cand: (
-            cand["program_pass"],
-            sum(cand["steps"]) / len(cand["steps"]),
-            cand["rm_score"],
+        key=lambda candidate: (
+            candidate["program_pass"],
+            sum(candidate["steps"]) / len(candidate["steps"]),
+            candidate["rm_score"],
         ),
     )
 
 
 def accuracy(selector):
+    if not cases:
+        raise ValueError("cases must be non-empty")
     return sum(is_correct(case, selector(case)) for case in cases) / len(cases)
 
 
@@ -675,61 +889,79 @@ def pairwise_accuracy():
     total = 0
     for case in cases:
         correct = [
-            cand for cand in case["candidates"]
-            if is_correct(case, cand)
+            candidate
+            for candidate in case["candidates"]
+            if is_correct(case, candidate)
         ]
         wrong = [
-            cand for cand in case["candidates"]
-            if not is_correct(case, cand)
+            candidate
+            for candidate in case["candidates"]
+            if not is_correct(case, candidate)
         ]
         for good in correct:
             for bad in wrong:
                 total += 1
                 wins += good["rm_score"] > bad["rm_score"]
-    return wins / total
+    return wins / total if total else None
 
 
 def hard_negative_accuracy():
     outcomes = []
     for case in cases:
+        correct_candidates = [
+            candidate
+            for candidate in case["candidates"]
+            if is_correct(case, candidate)
+        ]
+        hard_negatives = [
+            candidate
+            for candidate in case["candidates"]
+            if candidate["hard_negative"]
+        ]
+        if hard_negatives and not correct_candidates:
+            raise ValueError(
+                "a hard negative requires at least one correct candidate"
+            )
         best_correct = max(
-            cand["rm_score"]
-            for cand in case["candidates"]
-            if is_correct(case, cand)
+            candidate["rm_score"] for candidate in correct_candidates
         )
-        for cand in case["candidates"]:
-            if cand["hard_negative"]:
-                outcomes.append(cand["rm_score"] < best_correct)
-    return sum(outcomes) / len(outcomes)
+        for candidate in hard_negatives:
+            outcomes.append(candidate["rm_score"] < best_correct)
+    return sum(outcomes) / len(outcomes) if outcomes else None
 
 
 def calibration_ece():
     bins = [(0.0, 0.5), (0.5, 0.75), (0.75, 1.01)]
     total = sum(len(case["candidates"]) for case in cases)
+    if total == 0:
+        return None, []
     ece = 0.0
     details = []
     for lo, hi in bins:
         bucket = [
-            (cand["rm_score"], is_correct(case, cand))
+            (candidate["rm_score"], is_correct(case, candidate))
             for case in cases
-            for cand in case["candidates"]
-            if lo <= cand["rm_score"] < hi
+            for candidate in case["candidates"]
+            if lo <= candidate["rm_score"] < hi
         ]
         if not bucket:
             continue
-        conf = sum(score for score, _ in bucket) / len(bucket)
-        acc = sum(ok for _, ok in bucket) / len(bucket)
-        gap = abs(conf - acc)
+        confidence = sum(score for score, _ in bucket) / len(bucket)
+        accuracy_value = sum(ok for _, ok in bucket) / len(bucket)
+        gap = abs(confidence - accuracy_value)
         ece += len(bucket) / total * gap
-        details.append((f"[{lo},{hi})", round(conf, 3), round(acc, 3), len(bucket)))
+        details.append(
+            (f"[{lo},{hi})", round(confidence, 3), round(accuracy_value, 3), len(bucket))
+        )
     return round(ece, 3), details
 
 
+validate_cases(cases)
 all_steps = [
     ok
     for case in cases
-    for cand in case["candidates"]
-    for ok in cand["steps"]
+    for candidate in case["candidates"]
+    for ok in candidate["steps"]
 ]
 rm_failures = [
     case["id"]
@@ -744,9 +976,13 @@ hybrid_rescues = [
 ]
 ece, ece_bins = calibration_ece()
 total_tokens = sum(
-    cand["tokens"]
+    candidate["tokens"]
     for case in cases
-    for cand in case["candidates"]
+    for candidate in case["candidates"]
+)
+hybrid_correct_count = sum(
+    is_correct(case, hybrid_select(case))
+    for case in cases
 )
 
 report = {
@@ -765,33 +1001,28 @@ report = {
     "rm_failures": rm_failures,
     "hybrid_rescues": hybrid_rescues,
     "total_tokens": total_tokens,
-    "cost_per_hybrid_correct": round(
-        total_tokens / (accuracy(hybrid_select) * len(cases)),
-        3,
+    "cost_per_hybrid_correct": (
+        round(total_tokens / hybrid_correct_count, 3)
+        if hybrid_correct_count
+        else None
     ),
 }
-gates = {
-    "rm_beats_greedy": (
-        report["rm_rerank_accuracy"] > report["greedy_accuracy"]
-    ),
-    "hybrid_beats_rm": (
-        report["hybrid_verifier_accuracy"] > report["rm_rerank_accuracy"]
-    ),
-    "pairwise_ok": report["pairwise_accuracy"] >= 0.85,
-    "hard_negative_ok": report["hard_negative_accuracy"] >= 0.75,
-    "calibration_ok": report["rm_ece"] <= 0.25,
-    "budget_ok": report["cost_per_hybrid_correct"] <= 150,
-}
-report["gates"] = gates
-report["gate_pass"] = all(gates.values())
+
+assert report["greedy_accuracy"] == 0.2
+assert report["rm_rerank_accuracy"] == 0.8
+assert report["hybrid_verifier_accuracy"] == 1.0
+assert report["pairwise_accuracy"] == 0.9
+assert report["hard_negative_accuracy"] == 0.75
+assert report["rm_ece"] == 0.165
+assert report["total_tokens"] == 693
 
 for key, value in report.items():
     print(f"{key}={value}")
-```
+~~~
 
-期望输出：
+预期输出：
 
-```text
+~~~text
 greedy_accuracy=0.2
 rm_rerank_accuracy=0.8
 hybrid_verifier_accuracy=1.0
@@ -804,83 +1035,136 @@ rm_failures=['distractor_math']
 hybrid_rescues=['distractor_math']
 total_tokens=693
 cost_per_hybrid_correct=138.6
-gates={'rm_beats_greedy': True, 'hybrid_beats_rm': True, 'pairwise_ok': True, 'hard_negative_ok': True, 'calibration_ok': True, 'budget_ok': True}
-gate_pass=True
-```
+~~~
 
-这段 demo 的面试表达是：
+这个实验应这样解读：
 
-1. `rm_rerank_accuracy` 明显高于 `greedy_accuracy`，说明 learned verifier 有下游收益。
-2. `rm_failures=['distractor_math']` 说明 verifier 会被 hard negative 骗过，不能只看平均分。
-3. `hybrid_verifier_accuracy` 高于 `rm_rerank_accuracy`，说明能程序验证时，程序信号通常应优先于语言风格分数。
-4. `pairwise_accuracy` 和 `hard_negative_accuracy` 是 verifier 自身质量指标，不等于最终生成系统准确率。
-5. `rm_ece` 提醒我们 verifier 分数不是天然校准概率，上线要做阈值和分桶校准。
+1. RM 重排在这组构造样本上高于 greedy，但它被 distractor_math 的 hard negative 误导。
+2. 混合验证器使用程序通过结果和过程分数，救回了 RM 选错的样本。
+3. pairwise accuracy 和 hard negative accuracy 描述 verifier 的局部能力，不等于下游选择准确率。
+4. ECE 为 0.165，说明教学构造中的分数并非完美概率；真实系统需要更多校准数据。
+5. 总 token 693 是候选生成账本，不包含实际 GPU、程序执行、缓存和人工复核成本。
 
-## 4.17 面试官会怎么问
+## 14. 怎样设计 verifier 实验
 
-### 问题一：Verifier 和 generator 的关系是什么？
+### 14.1 先固定候选生成器
 
-回答模板：
+验证器比较必须使用同一候选集合，或明确比较候选分布。否则 generator 变强会被误归因给 verifier。
 
-```text
-Generator 负责生成候选答案或推理路径，verifier 负责评估候选质量并选择更可靠的输出。这个生成-验证范式能把“提出可能解”和“判断哪个解更好”分开，常用于数学、代码和复杂推理任务。
-```
+### 14.2 同时看局部和下游
 
-### 问题二：Outcome verifier 和 process verifier 有什么区别？
+局部指标包括 pairwise、hard negative、ECE 和步骤准确率；下游指标包括 top-1 选择、最终任务成功率、单位成功成本和拒答质量。
 
-回答模板：
+### 14.3 让 hard negative 接近真实错误
 
-```text
-Outcome verifier 主要看最终答案或整条输出是否正确，标注相对容易但无法定位中间错误。Process verifier 会检查每一步推理是否合理，可以用于搜索和过程监督，但标注成本高、步骤粒度也更难定义。
-```
+从真实 generator 采样错误候选，按错误类型分层：单位、否定、引用、边界、格式、工具参数和安全约束。静态容易负例只能作为起点。
 
-### 问题三：Reward model 和 verifier 有什么区别？
+### 14.4 做长度和格式消融
 
-回答模板：
+将正确与错误候选改写成相近长度和相同格式，再测 verifier。若分数差异显著下降，说明原模型依赖了表面线索。
 
-```text
-Verifier 更强调正确性验证，reward model 更泛化，可以学习人类偏好、helpfulness、format、safety 和 reasoning quality。在 reasoning 场景中，reward model 可以作为 learned verifier 给候选答案打分和重排。
-```
+### 14.5 观察 verifier 版本漂移
 
-### 问题四：Verifier 为什么可能被 reward hacking？
+生成器升级、提示变化、温度变化和工具接入都会改变候选分布。验证器需要在新候选上回归，不应只依赖旧验证集。
 
-回答模板：
+## 15. 安全与权限
 
-```text
-如果 verifier 学到的是长度、格式、自信语气等表面特征，generator 可能优化这些特征来骗过 verifier，而不是真的提高正确性。解决方法包括 hard negatives、工具验证、calibration、定期更新数据和独立评估下游正确率。
-```
+### 15.1 高分不是执行许可
 
-### 问题五：代码任务中最好的 verifier 是什么？
+模型或 verifier 认为某个工具动作合理，不代表它拥有执行权限。权限系统应独立于语言评分器。
 
-回答模板：
+### 15.2 程序 verifier 的沙箱
 
-```text
-通常是执行测试用例。代码是否正确可以通过编译、运行单元测试、检查输出和性能约束来验证。相比语言 reward model，程序执行更客观，但需要沙箱、超时控制和足够覆盖的测试集。
-```
+运行候选代码需要隔离文件、网络、进程和资源。测试器应有超时、输出上限和可撤销环境。
 
-## 4.18 小练习
+### 15.3 高风险候选的多重证据
 
-1. 构造一个 question/chosen/rejected 的 verifier 训练样本。
-2. 比较 outcome verifier 和 process verifier 的适用场景。
-3. 写一个简单 rerank 伪代码。
-4. 设计一个代码题 programmatic verifier。
-5. 列出 5 种 verifier 偏差。
-6. 设计一个 verifier 评估表。
-7. 构造一个 majority vote 失败但 verifier 成功的例子。
-8. 修改上面的 demo，让 `distractor_math` 的 hard negative 分数更高，观察 pairwise accuracy、hard negative accuracy 和 gate 是否变化。
+付款、删除、权限变更和外部消息应要求结构化参数、独立规则、权限检查和必要人工确认。不能用一个 reward 分数代替多重证据。
 
-## 4.19 本章总结
+### 15.4 不确定状态
 
-Verifier 和 reward model 是 reasoning 系统中非常重要的组件。它们让系统不再只依赖一次生成，而是可以生成多个候选、打分、重排、搜索和验证。
+当 verifier 分数低、候选冲突或工具结果异常时，返回不确定或请求复核比强行选一个答案更可靠。拒绝交付也是系统行为的一部分，应单独评估拒答是否恰当。
 
-需要记住：
+## 16. 常见误区
 
-1. Outcome verifier 看最终结果。
-2. Process verifier 看中间步骤。
-3. Reward model 可以作为 learned verifier。
-4. Reranking 能从多个候选中选择更好答案。
-5. Programmatic verifier 在代码和可执行任务中非常强。
-6. Verifier 也会有偏差和 reward hacking 风险。
-7. 最终要看 verifier 是否提升下游 accuracy，并且成本可接受。
+### 误区一：Verifier 分数就是事实概率
 
-下一章会进入 process supervision，进一步讲如何监督中间步骤、如何构造过程标注，以及 PRM 在 search 和 reasoning 中的作用。
+除非经过校准和任务验证，否则分数只是排序信号或代理目标。
+
+### 误区二：Pairwise accuracy 高就一定能选对
+
+pairwise 只测成对比较，真实列表中的最高分选择可能受到候选数量、相关性和分数尺度影响。
+
+### 误区三：Process verifier 能保证整条链正确
+
+局部步骤正确不保证全局约束满足，步骤切分和标签也可能有偏差。
+
+### 误区四：程序验证总是可靠
+
+测试集覆盖、执行环境、断言和资源限制都可能有问题。程序验证需要测试和安全审计。
+
+### 误区五：Reward model 越通用越好
+
+更宽的目标会混合正确性、风格、帮助性和安全，可能导致目标冲突。应拆分分数并明确使用场景。
+
+### 误区六：只要加入 hard negative 就不会 reward hacking
+
+hard negative 只能覆盖已知攻击面。生成器和评分器持续博弈，数据、规则和独立评估需要持续更新。
+
+## 17. 小练习
+
+### 练习一：定义三种 verifier
+
+为数学答案、代码函数和合同引用分别写出 outcome verifier 的输入、输出、边界和失败状态。
+
+### 练习二：比较 pointwise 与 pairwise
+
+构造一个包含两个正确表达和三个错误表达的候选集合，说明 pointwise 标签和 pairwise 偏好各自如何组织。
+
+### 练习三：设计 hard negative
+
+为一个算术题写出格式整齐但算错、过程正确但结论格式错、引用存在但不支持结论的三个 hard negative。
+
+### 练习四：校准分析
+
+将 verifier 分数分成三个区间，计算每个区间的真实准确率和 ECE。说明为什么排序正确不代表概率校准。
+
+### 练习五：候选分布偏移
+
+用两个不同 temperature 生成候选，比较旧 verifier 在低温和高温候选上的 top-1 选择准确率。
+
+### 练习六：程序验证安全
+
+列出运行模型生成代码时需要限制的五类资源，并设计超时、异常和人工复核策略。
+
+## 18. 本章总结
+
+Verifier 和 reward model 把“提出候选”和“判断候选”分开，是 reasoning 系统的重要组成部分，但它们本身也需要被验证。
+
+本章的关键关系是：
+
+1. outcome verifier 检查最终结果，process verifier 检查中间步骤，programmatic verifier 执行明确约束。
+2. reward model 学习代理目标，可以作为 learned verifier，但不等于任务真值。
+3. pointwise、pairwise 和 listwise 分别对应单候选判断、两候选比较和列表排序。
+4. hard negative 和真实 generator 候选分布决定了验证器评估是否有意义。
+5. pairwise、top-1、校准和下游成功率是不同指标，不能互相替代。
+6. 长度、格式、自信语气和训练集模式都可能造成 verifier 偏差。
+7. 程序验证更适合可执行约束，但仍受测试覆盖和沙箱安全限制。
+8. 高分候选不是执行许可；高风险动作需要权限、规则、工具和必要人工确认。
+9. verifier 应允许不确定状态，而不是在证据不足时强行选择。
+
+下一章进入 process supervision，继续讨论如何给中间步骤标注、如何处理多种正确过程，以及 PRM 如何参与训练和搜索。
+
+## 19. 资料索引
+
+以下链接优先保留原始论文和评估资料。复现实验时记录候选生成器、候选数量、负例来源、评分器版本、阈值和下游任务。
+
+1. Training Verifiers to Solve Math Word Problems：<https://arxiv.org/abs/2110.14168>
+2. Let's Verify Step by Step：<https://arxiv.org/abs/2305.20050>
+3. InstructGPT：<https://arxiv.org/abs/2203.02155>
+4. Learning to Summarize from Human Feedback：<https://arxiv.org/abs/2009.01325>
+5. RewardBench：<https://arxiv.org/abs/2403.13787>
+6. HumanEval：<https://arxiv.org/abs/2107.03374>
+7. Self-Consistency：<https://arxiv.org/abs/2203.11171>
+
+本章写作时已联网访问上述论文入口。正文区分数学验证器、偏好 reward model、代码测试器和教学构造；没有把某个评分器的公开结果外推为所有 reasoning 系统的内部事实。

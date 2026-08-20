@@ -243,36 +243,51 @@ Scalable oversight 可以抽象成“复杂任务的监督信号是否可靠”�
 设第 `i` 个监督样本为：
 
 ```math
-o_i=(x_i,y_i,g_i,h_i,a_i,v_i,c_i,w_i)
+o_i=(x_i,y_i,g_i,h_i,q_i,a_i,v_i,c_i,w_i)
 ```
 
-其中 `x_i` 是任务输入，`y_i` 是模型输出，`g_i` 是高质量 gold label 或专家复核结果，`h_i` 是单个人类直接判断，`a_i` 是 AI feedback 或 judge 判断，`v_i` 是工具 / verifier 判断，`c_i` 是复杂度或风险类别，`w_i` 是样本权重。
+其中 `x_i` 是任务输入，`y_i` 是模型输出，`g_i` 是高质量 gold label 或专家复核结果，
+`h_i` 是人类对该样本的标签，`q_i` 是人类对自己判断的置信度或“是否适合直接审查”的
+分数，`a_i` 是 AI feedback 或 judge 判断，`v_i` 是工具 / verifier 判断，`c_i` 是复杂度
+或风险类别，`w_i` 是样本权重。`h_i` 和 `q_i` 必须分开：一个人可以给出“错误”这个
+标签，同时把自己的把握标为 0.45；如果把标签当成置信度，覆盖率和错误率就会混为一谈。
+
+下面的公式默认 `w_i>0`。令 `\mathcal{G}` 表示有独立 gold label 或专家复核结果的校准集，
+`1[condition]` 表示条件成立时取 1，否则取 0；若分母为 0，指标应记为“未定义”或
+`N/A`，不能用 0 或 `max(1, denominator)` 把“没有被测量”伪装成“没有错误”。gold set
+也不能只挑容易样本：它应按任务类型、风险等级、长度和模型版本分层抽取，并尽量保留
+不参与提示词调优的 holdout 部分。
 
 人类直接监督覆盖率：
 
 ```math
-C_{\mathrm{direct}}=\frac{\sum_i w_i 1[h_i\ge \tau_{\mathrm{human}}]}{\sum_i w_i}
+C_{\mathrm{direct}}=\frac{\sum_i w_i 1[q_i\ge \tau_{\mathrm{human}}]}{\sum_i w_i}
 ```
 
-其中 `h_i` 是人类直接判断的置信度或可审查性分数。复杂代码、长文档、专业领域
-和长工具 trace 会让这个覆盖率下降。若没有任何达到阈值的样本，应报告未覆盖，
-不能把空集合当成完美监督。
+这里的 `q_i` 可以来自标注员的置信度，也可以来自预先定义的“信息是否足够、时间是否
+足够、是否需要专家”的审查资格量表；`\tau_{human}` 是项目设定的最低分数。复杂代码、
+长文档、专业领域和长工具 trace 会让覆盖率下降。这个指标只回答“多少样本被认为可以
+直接审查”，不回答这些判断是否正确；如果没有任何达到阈值的样本，应报告未覆盖。
 
-人类直接监督错误率：
+在人类直接覆盖的样本中，人类标签相对于 gold set 的错误率为：
 
 ```math
-E_{\mathrm{direct}}=\frac{\sum_i w_i 1[h_i\ne g_i]}{\sum_i w_i}
+E_{\mathrm{direct|covered}}=\frac{\sum_{i\in\mathcal{G}} w_i 1[q_i\ge\tau_{\mathrm{human}}]1[h_i\ne g_i]}{\sum_{i\in\mathcal{G}} w_i 1[q_i\ge\tau_{\mathrm{human}}]}
 ```
 
-这个指标衡量“普通标注是否能跟上任务复杂度”。如果人类直接错误率很高，单纯扩大人工标注规模会把错误监督信号也一起放大。
+它衡量的是“在声称自己能够直接审查的样本上，人类判断是否跟得上任务复杂度”。如果
+要诊断低置信度标签本身的风险，还可以另报全量已产出人工标签错误率；但不能把未标注、
+弃答或未进入 gold set 的样本当作正确。
 
 AI feedback 校准错误率：
 
 ```math
-E_{\mathrm{ai}}=\frac{\sum_i w_i 1[a_i\ne g_i]}{\sum_i w_i}
+E_{\mathrm{ai}}=\frac{\sum_{i\in\mathcal{G}} w_i 1[a_i\ne g_i]}{\sum_{i\in\mathcal{G}} w_i}
 ```
 
-AI feedback 成本低、覆盖广，但必须用人工 gold set 或专家复核校准。否则模型可能把自身偏差扩展成更大规模的伪监督。
+如果 `a_i` 是概率分数而不是离散标签，还要先声明分类阈值，并另外检查校准误差；不能
+把“判断错误率”直接称为概率校准。AI feedback 成本低、覆盖广，但必须用独立人工 gold
+set 或专家复核校准，否则模型可能把自身偏差扩展成更大规模的伪监督。
 
 工具 / verifier 覆盖率：
 
@@ -280,15 +295,21 @@ AI feedback 成本低、覆盖广，但必须用人工 gold set 或专家复核�
 C_{\mathrm{ver}}=\frac{\sum_i w_i 1[v_i\ne \varnothing]}{\sum_i w_i}
 ```
 
-代码单元测试、数学答案检查、检索证据核验、policy checker 和工具权限校验都可以看作 verifier。它们通常比纯自然语言 judge 更可审计，但覆盖范围有限。
+代码单元测试、数学答案检查、检索证据核验、policy checker 和工具权限校验都可以看作
+verifier。`v_i\ne\varnothing` 只表示 verifier 产出了结果，不表示结果正确；因此还应在
+`\mathcal{G}` 上报告 verifier 的错误率或漏检率。verifier 通常比纯自然语言 judge 更可
+审计，但覆盖范围有限，无法验证它没有定义的性质。
 
 过程监督准确率：
 
 ```math
-A_{\mathrm{proc}}=\frac{\sum_i \sum_j 1[s_{ij}=g_{ij}]}{\sum_i n_i}
+A_{\mathrm{proc}}=\frac{\sum_{i\in\mathcal{G}}w_i\sum_{j=1}^{n_i}1[s_{ij}=g_{ij}]}{\sum_{i\in\mathcal{G}}w_i n_i}
 ```
 
-其中 `s_ij` 是第 `i` 个样本第 `j` 个中间步骤的监督判断，`g_ij` 是该步骤的 gold label，`n_i` 是步骤数。过程监督适合数学、代码、规划和 Agent trace，但标注成本更高。
+其中 `s_ij` 是第 `i` 个样本第 `j` 个中间步骤的监督判断，`g_ij` 是该步骤的 gold label，
+`n_i` 是步骤数。上式采用“按步骤计数”的 micro 平均，长 trace 会贡献更多步骤；如果
+希望每个样本权重相同，应另报 macro 平均并明确公式。过程监督适合数学、代码、规划和
+Agent trace，但标注成本更高；若 `\sum_{i\in\mathcal{G}}w_i n_i=0`，该指标为 `N/A`。
 
 证据支持率：
 
@@ -296,7 +317,10 @@ A_{\mathrm{proc}}=\frac{\sum_i \sum_j 1[s_{ij}=g_{ij}]}{\sum_i n_i}
 S_{\mathrm{evidence}}=\frac{\sum_i m_i^{\mathrm{supported}}}{\sum_i m_i^{\mathrm{claim}}}
 ```
 
-这个指标适合 RAG、长文档 QA 和专业建议场景。它要求监督系统检查回答中的 claim 是否真的被证据支持，而不是只看回答是否流畅。
+其中 `m_i^{claim}` 是被纳入评估的 claim 数量，`m_i^{supported}` 是被证据充分支持的
+数量；只有在 claim 抽取规则已经固定、且 `\sum_i m_i^{claim}>0` 时才解释这个比率。
+它适合 RAG、长文档 QA 和专业建议场景，但“证据支持”不等于“结论完整、因果关系成立”
+或“建议适合用户”。监督系统仍需检查引用范围、时间条件、反例和 unsupported claim。
 
 人工升级覆盖率：
 
@@ -304,7 +328,10 @@ S_{\mathrm{evidence}}=\frac{\sum_i m_i^{\mathrm{supported}}}{\sum_i m_i^{\mathrm
 C_{\mathrm{audit}}=\frac{\sum_i w_i 1[r_i^{\mathrm{high}}=1]1[b_i^{\mathrm{audit}}=1]}{\sum_i w_i 1[r_i^{\mathrm{high}}=1]}
 ```
 
-其中 `r_i_high=1` 表示高风险样本，`b_i_audit=1` 表示进入人工或专家复核。AI feedback 可以扩展规模，但高风险样本不能完全无人审计。
+其中 `r_i^{high}=1` 表示在审查前按规则识别为高风险样本，`b_i^{audit}=1` 表示已经
+进入人工或专家复核。分母为 0 时应报告“本批没有高风险样本”或检查风险分类是否失效，
+不能报告 100%。AI feedback 可以扩展规模，但高风险样本不能完全无人审计；还要防止把
+人工升级集中在容易识别的高风险样本上，而漏掉低显著度但高后果的样本。
 
 监督成本节省率：
 
@@ -312,7 +339,21 @@ C_{\mathrm{audit}}=\frac{\sum_i w_i 1[r_i^{\mathrm{high}}=1]1[b_i^{\mathrm{audit
 R_{\mathrm{cost}}=1-\frac{\sum_i k_i^{\mathrm{mixed}}}{\sum_i k_i^{\mathrm{human}}}
 ```
 
-其中 `k_i_human` 是全人工专家审查成本，`k_i_mixed` 是 AI 辅助 + 工具验证 + 必要人审的混合成本。成本节省必须和监督错误率一起看，不能只追求便宜。
+其中 `k_i^{human}` 是在同一批样本、同一质量要求下全人工专家审查的基线成本，
+`k_i^{mixed}` 是 AI 辅助、工具验证、必要人审、返工和基础设施共同构成的混合成本。
+两者都必须大于 0，并且覆盖相同任务范围；否则比率没有可比性。成本节省可能为负，
+这意味着混合流程更贵，但如果它显著降低高严重度错误，仍可能是合理选择。成本节省
+必须和错误率、漏检率及事故预期损失一起看，不能只追求便宜。
+
+对于需要“通过后才算有效”的流程，还可以报告单位成功任务成本：
+
+```math
+K_{\mathrm{success}}=\frac{K_{\mathrm{total}}}{N_{\mathrm{accepted}}}
+```
+
+其中 `N_{accepted}` 是通过人工、verifier 和风险规则后真正被接受的样本数。若没有
+任何成功样本，`K_success` 为 `N/A`，而不是把分母替换成 1；否则一个“零成功”的方案
+会看起来拥有一个虚假的有限成本。
 
 一次监督方案比较可以把关键结果写成一组独立约束：
 
@@ -326,10 +367,10 @@ R_{\mathrm{cost}}\geq t_k
 \}
 ```
 
-其中阈值 `t_a`、`t_p`、`t_e`、`t_c` 和 `t_k` 应按风险和业务约束设定。这个集合
-不是不可诊断的总开关：每个条件都必须能回指到 gold set、工具 trace 或人工复核
-记录。Scalable oversight 的目标也不是让 AI 自己给自己打分，而是把人类原则、
-AI 辅助、工具验证和人工复核组织成可量化、可追溯的监督闭环。
+其中阈值 `t_a`、`t_p`、`t_e`、`t_c` 和 `t_k` 应按风险和业务约束设定，且只有在相应
+分母有效时才比较。这个集合不是不可诊断的总开关：每个条件都必须能回指到 gold set、
+工具 trace 或人工复核记录。Scalable oversight 的目标也不是让 AI 自己给自己打分，
+而是把人类原则、AI 辅助、工具验证和人工复核组织成可量化、可追溯的监督闭环。
 
 ## 5. Iterated Amplification
 
@@ -758,8 +799,10 @@ metrics = {
     "direct_accuracy_on_covered": round(
         sum(case["human_label"] == case["gold"] for case in direct_covered) / max(1, len(direct_covered)), 3
     ),
-    "human_direct_error": round(sum(case["human_label"] != case["gold"] for case in cases) / len(cases), 3),
-    "ai_feedback_accuracy": round(sum(case["ai_label"] == case["gold"] for case in cases) / len(cases), 3),
+    "human_direct_error_on_covered": round(
+        sum(case["human_label"] != case["gold"] for case in direct_covered) / max(1, len(direct_covered)), 3
+    ),
+    "ai_feedback_error": round(sum(case["ai_label"] != case["gold"] for case in cases) / len(cases), 3),
     "verifier_coverage": round(len(verifier_cases) / len(cases), 3),
     "oversight_accuracy": round(sum(oversight_labels[case["id"]] == case["gold"] for case in cases) / len(cases), 3),
     "process_step_accuracy": round(sum(case["process_ok"] for case in cases) / total_process, 3),
@@ -772,7 +815,7 @@ metrics = {
 }
 
 thresholds = {
-    "ai_feedback_accuracy": 0.75,
+    "ai_feedback_error": 0.25,
     "process_step_accuracy": 0.80,
     "evidence_support": 0.75,
     "high_risk_audit_coverage": 1.00,
@@ -781,7 +824,7 @@ thresholds = {
 }
 
 actions = []
-if metrics["ai_feedback_accuracy"] < thresholds["ai_feedback_accuracy"]:
+if metrics["ai_feedback_error"] > thresholds["ai_feedback_error"]:
     actions.append("扩大人工 gold set，校准 AI feedback 的错误切片")
 if metrics["process_step_accuracy"] < thresholds["process_step_accuracy"]:
     actions.append("补充中间步骤标注和可执行 verifier")
@@ -796,7 +839,7 @@ if metrics["cost_saving"] < thresholds["cost_saving"]:
 
 if high_risk_missing_audit or metrics["severity_weighted_error"] > thresholds["severity_weighted_error"]:
     decision = "hold_for_high_risk_audit"
-elif metrics["ai_feedback_accuracy"] < thresholds["ai_feedback_accuracy"]:
+elif metrics["ai_feedback_error"] > thresholds["ai_feedback_error"]:
     decision = "calibrate_feedback_before_expansion"
 elif metrics["process_step_accuracy"] < thresholds["process_step_accuracy"]:
     decision = "improve_process_supervision_before_expansion"
@@ -820,8 +863,8 @@ for key, value in report.items():
 assert report["metrics"] == {
     "direct_coverage": 0.2,
     "direct_accuracy_on_covered": 1.0,
-    "human_direct_error": 0.6,
-    "ai_feedback_accuracy": 0.7,
+    "human_direct_error_on_covered": 0.0,
+    "ai_feedback_error": 0.3,
     "verifier_coverage": 0.7,
     "oversight_accuracy": 0.9,
     "process_step_accuracy": 0.718,
@@ -839,11 +882,11 @@ assert report["decision"] == "hold_for_high_risk_audit"
 
 ```text
 slice_counts= {'agent': 1, 'code': 1, 'high_risk_domain': 2, 'math': 1, 'normal_help': 1, 'rag': 1, 'research': 1, 'safety_boundary': 1, 'summarization': 1}
-metrics= {'direct_coverage': 0.2, 'direct_accuracy_on_covered': 1.0, 'human_direct_error': 0.6, 'ai_feedback_accuracy': 0.7, 'verifier_coverage': 0.7, 'oversight_accuracy': 0.9, 'process_step_accuracy': 0.718, 'evidence_support': 0.708, 'high_risk_audit_coverage': 0.8, 'cost_saving': 0.738, 'severity_weighted_error': 0.152}
+metrics= {'direct_coverage': 0.2, 'direct_accuracy_on_covered': 1.0, 'human_direct_error_on_covered': 0.0, 'ai_feedback_error': 0.3, 'verifier_coverage': 0.7, 'oversight_accuracy': 0.9, 'process_step_accuracy': 0.718, 'evidence_support': 0.708, 'high_risk_audit_coverage': 0.8, 'cost_saving': 0.738, 'severity_weighted_error': 0.152}
 oversight_errors= ['medical_summary']
 high_risk_missing_audit= ['medical_summary']
 slice_errors= {'high_risk_domain': ['medical_summary']}
-thresholds= {'ai_feedback_accuracy': 0.75, 'process_step_accuracy': 0.8, 'evidence_support': 0.75, 'high_risk_audit_coverage': 1.0, 'severity_weighted_error': 0.1, 'cost_saving': 0.5}
+thresholds= {'ai_feedback_error': 0.25, 'process_step_accuracy': 0.8, 'evidence_support': 0.75, 'high_risk_audit_coverage': 1.0, 'severity_weighted_error': 0.1, 'cost_saving': 0.5}
 actions= ['扩大人工 gold set，校准 AI feedback 的错误切片', '补充中间步骤标注和可执行 verifier', '复核 claim 与证据的支持关系，禁止只看流畅度', '把未审计的高风险样本转人工或专家复核', '按严重度重排监督预算，优先修复高影响错误']
 decision= hold_for_high_risk_audit
 ```

@@ -270,6 +270,12 @@ Representation engineering 常使用高层标签，所以数据构造尤其关�
 5. 推理时把这个向量加到某些层或位置。
 6. 观察行为是否朝目标方向变化。
 
+这里的“正例”和“负例”必须先定义清楚。它们最好在主题、长度、语言、角色和上下文
+结构上尽量匹配，只在目标行为或其可接受表达上有计划地不同；否则差分向量可能学到
+数据集或模板的标记。若一侧没有样本、某个层位的激活缺失，均值和方向就没有定义，
+实验记录应写成 \(N/A\)，不能用零向量假装“没有行为差异”。同一向量还要明确聚合了
+哪个 token 位置、哪种 pooling 和哪些样本切片，因为这些选择会改变它的语义。
+
 ### 5.3 小白例子
 
 想象你有很多人的照片。
@@ -543,6 +549,11 @@ $$
 \mu_-^\ell=\frac{1}{|N|}\sum_{i\in N} h_i^\ell
 $$
 
+这里要求 \(|P|>0\)、\(|N|>0\)，并且两组激活的维度、层位和聚合规则一致。若正负样本
+数量差异很大，还应报告分层后的结果或置信区间；只给出一个总体均值，可能让多数类
+主导方向。对配对任务，\(P\) 和 \(N\) 还应说明是否由同一语义样本的两个版本构成，
+因为独立抽样和配对抽样支持的因果解释不同。
+
 **2. Steering vector**
 
 最常见的差分方向：
@@ -557,7 +568,10 @@ $$
 \bar v^\ell=\frac{v^\ell}{\|v^\ell\|_2+\epsilon}
 $$
 
-这个方向只是一种行为相关表示，不应直接解释为完整机制。
+这个方向只是一种行为相关表示，不应直接解释为完整机制。这里的 \(\epsilon\) 只能
+防止浮点除零；如果 \(\|v^\ell\|_2\) 本身接近零，说明当前数据没有稳定的差分方向，
+应报告为 \(N/A\) 并回到样本构造或层位选择，而不是把数值噪声放大成控制方向。不同
+层的激活尺度也可能不同，所以 \(\alpha\) 只在固定层位、模型精度和归一化约定下可比。
 
 **3. Activation intervention**
 
@@ -583,6 +597,10 @@ $$
 \Delta s_i=s_i(\tilde h)-s_i(h)
 $$
 
+当 \(\|h_i^\ell\|_2\) 接近 0 时，投影分数的分母会放大噪声，应记为 \(N/A\)。此外，
+投影增大只说明样本更靠近选定方向，不说明目标行为一定改善；必须把它和独立的行为
+指标配对，否则可能出现“方向信号变强、答案质量变差”的情况。
+
 **5. 目标行为提升**
 
 设 \(q_i^{base}\) 是未干预时目标行为得分，\(q_i(\alpha)\) 是强度为 \(\alpha\) 时的得分：
@@ -590,6 +608,10 @@ $$
 $$
 U_{target}(\alpha)=\frac{1}{M}\sum_i [q_i(\alpha)-q_i^{base}]
 $$
+
+其中 \(q_i\) 必须有固定的评分规则和相同量纲，\(M\) 是实际完成配对评估的样本数，要求
+\(M>0\)。如果某类任务没有有效样本，目标收益应记录为 \(N/A\)，不能因为没有测量就写成
+零提升。若使用自动评估器，还要在资料中说明其版本、阈值和人工抽检规则。
 
 **6. 副作用下降**
 
@@ -599,7 +621,9 @@ $$
 D_{side}(\alpha)=\frac{1}{M}\sum_i \max(0,g_i^{base}-g_i(\alpha))
 $$
 
-Steering 不能只看目标行为增强，还要看有没有损伤正常能力。
+这里假设 \(g_i\) 的方向是“越高越好”，并且基线与干预结果在同一任务切片上配对。若
+\(M=0\)，或某个切片的质量分数不可比较，\(D_{side}\) 应为 \(N/A\)。Steering 不能只
+看目标行为增强，还要看有没有损伤正常能力。
 
 **7. 误拒增量**
 
@@ -610,6 +634,8 @@ $$
 $$
 
 安全 steering 很容易把模型推向过度保守，因此这个指标很重要。
+其中每个误拒率都必须给出正常请求的分母；正常请求为空时，增量没有定义。还要把
+“模型拒答”与“策略服务拦截”分开统计，否则不同控制层的变化会被混在一个比例里。
 
 **8. 安全收益**
 
@@ -618,6 +644,10 @@ $$
 $$
 U_{safe}(\alpha)=R_{unsafe}^{base}-R_{unsafe}(\alpha)
 $$
+
+这里 \(R_{unsafe}\) 表示高风险样本中的漏拒或不安全完成比例，分母应固定为同一批
+预先定义的高风险样本。安全收益为正并不等于风险为零，也不代表安全样本的帮助性没有
+下降；样本为空、标签未完成或评估口径变化时应标为 \(N/A\)。
 
 **9. 强度选择**
 
@@ -628,7 +658,9 @@ $$
 [U_{target}(\alpha)+\lambda_s U_{safe}(\alpha)-\lambda_d D_{side}(\alpha)-\lambda_o \Delta R_{over}(\alpha)]
 $$
 
-这里的权重应由产品、安全和评估目标决定，不能只按离线分数临时拍。
+这里的权重应由产品、安全和评估目标事先确定，且各项最好先归一化到可比较的量纲；
+不能只按离线分数临时拍。这个目标函数只是选择候选强度的记录工具，不是普遍适用的
+安全定律。若某个高风险信号未定义，不能让优化器把它当作零损失继续选择强度。
 
 **10. 把 steering 结果记录成证据向量**
 
@@ -1012,19 +1044,27 @@ from math import sqrt
 
 
 def mean_vector(rows):
+    if not rows:
+        return None
     dims = len(rows[0])
     return [sum(row[j] for row in rows) / len(rows) for j in range(dims)]
 
 
 def subtract(a, b):
+    if a is None or b is None:
+        return None
     return [x - y for x, y in zip(a, b)]
 
 
 def add(a, b):
+    if a is None or b is None:
+        return None
     return [x + y for x, y in zip(a, b)]
 
 
 def scale(alpha, v):
+    if v is None:
+        return None
     return [alpha * x for x in v]
 
 
@@ -1037,15 +1077,26 @@ def norm(v):
 
 
 def normalize(v, eps=1e-12):
-    length = norm(v) + eps
+    if v is None:
+        return None
+    length = norm(v)
+    if length <= eps:
+        return None
     return [x / length for x in v]
 
 
 def projection_score(h, v):
-    return dot(h, v) / (norm(h) + 1e-12)
+    if h is None or v is None:
+        return None
+    length = norm(h)
+    if length <= 1e-12:
+        return None
+    return dot(h, v) / length
 
 
 def round_vector(v):
+    if v is None:
+        return None
     return [round(x, 3) for x in v]
 
 
@@ -1110,6 +1161,17 @@ cases = [
 
 
 def evaluate_alpha(alpha):
+    if unit_vector is None:
+        return {
+            "alpha": alpha,
+            "avg_projection_shift": None,
+            "target_uplift": None,
+            "safe_gain": None,
+            "side_drop": None,
+            "over_refusal_delta": None,
+            "objective": None,
+        }
+
     projection_shift = []
     target_uplift = []
     safe_gain = []
@@ -1126,27 +1188,43 @@ def evaluate_alpha(alpha):
         side_drop.append(alpha * case["side_loss"])
         over_delta.append(alpha * case["over_refusal"])
 
+    def mean_or_none(values):
+        if not values or any(value is None for value in values):
+            return None
+        return round(sum(values) / len(values), 3)
+
     metrics = {
         "alpha": alpha,
-        "avg_projection_shift": round(sum(projection_shift) / len(cases), 3),
-        "target_uplift": round(sum(target_uplift) / len(cases), 3),
-        "safe_gain": round(sum(safe_gain) / len(cases), 3),
-        "side_drop": round(sum(side_drop) / len(cases), 3),
-        "over_refusal_delta": round(sum(over_delta) / len(cases), 3),
+        "avg_projection_shift": mean_or_none(projection_shift),
+        "target_uplift": mean_or_none(target_uplift),
+        "safe_gain": mean_or_none(safe_gain),
+        "side_drop": mean_or_none(side_drop),
+        "over_refusal_delta": mean_or_none(over_delta),
     }
-    metrics["objective"] = round(
-        metrics["target_uplift"]
-        + metrics["safe_gain"]
-        - 0.8 * metrics["side_drop"]
-        - 1.2 * metrics["over_refusal_delta"],
-        3,
+    values = [
+        metrics["target_uplift"],
+        metrics["safe_gain"],
+        metrics["side_drop"],
+        metrics["over_refusal_delta"],
+    ]
+    metrics["objective"] = (
+        round(
+            metrics["target_uplift"]
+            + metrics["safe_gain"]
+            - 0.8 * metrics["side_drop"]
+            - 1.2 * metrics["over_refusal_delta"],
+            3,
+        )
+        if all(value is not None for value in values)
+        else None
     )
     return metrics
 
 
 alpha_grid = [0.0, 0.4, 0.8, 1.2]
 scan = [evaluate_alpha(alpha) for alpha in alpha_grid]
-best = max(scan, key=lambda item: item["objective"])
+valid_scan = [item for item in scan if item["objective"] is not None]
+best = max(valid_scan, key=lambda item: item["objective"]) if valid_scan else None
 
 thresholds = {
     "target": {"operator": ">=", "value": 0.10},
@@ -1157,15 +1235,17 @@ thresholds = {
 }
 
 signals = {
-    "target": best["target_uplift"],
-    "safe": best["safe_gain"],
-    "side_effect": best["side_drop"],
-    "over_refusal": best["over_refusal_delta"],
-    "projection": best["avg_projection_shift"],
+    "target": best["target_uplift"] if best else None,
+    "safe": best["safe_gain"] if best else None,
+    "side_effect": best["side_drop"] if best else None,
+    "over_refusal": best["over_refusal_delta"] if best else None,
+    "projection": best["avg_projection_shift"] if best else None,
 }
 
 
 def meets_threshold(signal, threshold):
+    if signal is None:
+        return False
     if threshold["operator"] == ">=":
         return signal >= threshold["value"]
     if threshold["operator"] == "<=":
@@ -1177,6 +1257,8 @@ evidence_status = {
     name: meets_threshold(signals[name], threshold)
     for name, threshold in thresholds.items()
 }
+
+undefined_metrics = [name for name, value in signals.items() if value is None]
 
 actions = {
     "target": "replicate_target_gain_on_holdout",
@@ -1190,6 +1272,7 @@ decision = {
     "scope": "offline_profile_only",
     "status": "hold_for_holdout_and_read_only_shadow",
     "evidence_status": evidence_status,
+    "undefined_metrics": undefined_metrics,
     "next_actions": list(actions.values()),
 }
 
@@ -1202,6 +1285,7 @@ print("best=", best)
 print("thresholds=", thresholds)
 print("signals=", signals)
 print("evidence_status=", evidence_status)
+print("undefined_metrics=", undefined_metrics)
 print("actions=", actions)
 print("decision=", decision)
 ```
@@ -1218,8 +1302,9 @@ best= {'alpha': 1.2, 'avg_projection_shift': 0.752, 'target_uplift': 0.233, 'saf
 thresholds= {'target': {'operator': '>=', 'value': 0.1}, 'safe': {'operator': '>=', 'value': 0.08}, 'side_effect': {'operator': '<=', 'value': 0.06}, 'over_refusal': {'operator': '<=', 'value': 0.05}, 'projection': {'operator': '>=', 'value': 0.2}}
 signals= {'target': 0.233, 'safe': 0.144, 'side_effect': 0.053, 'over_refusal': 0.038, 'projection': 0.752}
 evidence_status= {'target': True, 'safe': True, 'side_effect': True, 'over_refusal': True, 'projection': True}
+undefined_metrics= []
 actions= {'target': 'replicate_target_gain_on_holdout', 'safe': 'keep_high_risk_scope_restricted_until_red_team_retest', 'side_effect': 'reduce_alpha_or_rebuild_direction', 'over_refusal': 'expand_normal_boundary_and_safe_completion_eval', 'projection': 'inspect_layer_and_position_specificity'}
-decision= {'scope': 'offline_profile_only', 'status': 'hold_for_holdout_and_read_only_shadow', 'evidence_status': {'target': True, 'safe': True, 'side_effect': True, 'over_refusal': True, 'projection': True}, 'next_actions': ['replicate_target_gain_on_holdout', 'keep_high_risk_scope_restricted_until_red_team_retest', 'reduce_alpha_or_rebuild_direction', 'expand_normal_boundary_and_safe_completion_eval', 'inspect_layer_and_position_specificity']}
+decision= {'scope': 'offline_profile_only', 'status': 'hold_for_holdout_and_read_only_shadow', 'evidence_status': {'target': True, 'safe': True, 'side_effect': True, 'over_refusal': True, 'projection': True}, 'undefined_metrics': [], 'next_actions': ['replicate_target_gain_on_holdout', 'keep_high_risk_scope_restricted_until_red_team_retest', 'reduce_alpha_or_rebuild_direction', 'expand_normal_boundary_and_safe_completion_eval', 'inspect_layer_and_position_specificity']}
 ```
 
 这个 demo 对应真实项目中的关键点：

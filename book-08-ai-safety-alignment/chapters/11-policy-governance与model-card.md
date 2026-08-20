@@ -523,7 +523,7 @@ C_{\mathrm{model}}=
 {\sum_{j\in M}w_j}
 $$
 
-其中 \(w_j\) 让身份、限制、部署条件等关键项目比普通描述拥有更高权重。文档有文字但没有证据时，\(c_j\) 不应自动算作 1。
+其中 \(w_j\) 让身份、限制、部署条件等关键项目比普通描述拥有更高权重。文档有文字但没有证据时，\(c_j\) 不应自动算作 1。如果必填声明集合为空，或某条声明尚未完成证据核验，覆盖率应记录为 \(N/A\)，而不是把“没有需要核验的项目”写成满覆盖。覆盖率还应和声明版本、适用范围及最近复核时间绑定；旧版本的完整文档不能自动覆盖新版本的行为。
 
 系统证据覆盖可以写成：
 
@@ -533,7 +533,7 @@ C_{\mathrm{evidence}}=
 {\sum_{k\in E}v_k}
 $$
 
-其中 \(E\) 是当前发布范围所需的评估和控制集合，\(e_k\) 表示证据是否覆盖对应条件。高风险切片不应被总体样本量掩盖，所以 \(v_k\) 可以按风险和影响加权。
+其中 \(E\) 是当前发布范围所需的评估和控制集合，\(e_k\) 表示证据是否覆盖对应条件。高风险切片不应被总体样本量掩盖，所以 \(v_k\) 可以按风险和影响加权。当 \(E\) 为空、权重总和为 0，或某个关键条件只有“计划评估”而没有实际结果时，\(C_{\mathrm{evidence}}\) 应标为 \(N/A\) 或 partial，不能把计划当成已覆盖。
 
 ### 8.3 残余风险
 
@@ -545,7 +545,7 @@ R_{\mathrm{open}}=
 {\sum_i w_i}
 $$
 
-这不是法律意义的风险定量，也不能由一个测试集精确估计生产概率。它的作用是提醒团队不要只平均所有问题：一次高影响、低频的凭证泄露，可能比很多低影响的格式错误更值得优先处理。
+这不是法律意义的风险定量，也不能由一个测试集精确估计生产概率。它的作用是提醒团队不要只平均所有问题：一次高影响、低频的凭证泄露，可能比很多低影响的格式错误更值得优先处理。如果没有开放风险条目或风险权重总和为 0，\(R_{\mathrm{open}}\) 没有定义；这表示尚未建立可计算的风险清单，不表示风险为零。
 
 ### 8.4 缓解覆盖不等于风险消失
 
@@ -557,7 +557,7 @@ C_{\mathrm{mit}}=
 {\sum_{i\in H}w_i}
 $$
 
-有效缓解不仅是“写了规则”，还要能在当前系统中执行并被测试。例如，工具写操作的人工确认如果只是前端按钮而不是服务端强制字段，就不能算完整缓解。
+有效缓解不仅是“写了规则”，还要能在当前系统中执行并被测试。例如，工具写操作的人工确认如果只是前端按钮而不是服务端强制字段，就不能算完整缓解。如果高风险集合为空，或高风险条目的权重总和为 0，\(C_{\mathrm{mit}}\) 应记录为 \(N/A\)；空集合只说明当前没有可审计的高风险条目，不能被解释成缓解覆盖率 100%。
 
 ### 8.5 证据状态和后续动作
 
@@ -810,7 +810,31 @@ from dataclasses import dataclass
 
 def ratio(values):
     values = list(values)
-    return round(sum(bool(value) for value in values) / len(values), 3) if values else None
+    if not values or any(value is None for value in values):
+        return None
+    return round(sum(bool(value) for value in values) / len(values), 3)
+
+
+def weighted_ratio(numerator, denominator):
+    if denominator <= 0:
+        return None
+    return round(numerator / denominator, 3)
+
+
+def set_coverage(required, covered):
+    if not required:
+        return None
+    return round(len(required & covered) / len(required), 3)
+
+
+def meets(signal, threshold):
+    if signal is None:
+        return False
+    if threshold["operator"] == ">=":
+        return signal >= threshold["value"]
+    if threshold["operator"] == "<=":
+        return signal <= threshold["value"]
+    raise ValueError(f"unsupported operator: {threshold['operator']}")
 
 
 @dataclass
@@ -893,7 +917,7 @@ thresholds = {
 signals = {
     "model_card": ratio(model_card.values()),
     "system_card": ratio(system_card.values()),
-    "policy": round(len(policy_covered) / len(policy_required), 3),
+    "policy": set_coverage(policy_required, policy_covered),
     "evaluation": ratio(evaluation_slices.values()),
 }
 
@@ -901,16 +925,19 @@ total_weight = sum(issue.weight for issue in risk_issues)
 open_weight = sum(
     issue.weight for issue in risk_issues if not issue.resolved
 )
-signals["open_risk"] = round(open_weight / total_weight, 3)
+signals["open_risk"] = weighted_ratio(open_weight, total_weight)
 
 high_risk = [
     issue for issue in risk_issues
     if issue.severity in {"P0", "P1"}
 ]
-signals["high_risk_mitigation"] = round(
-    sum(issue.weight for issue in high_risk if issue.mitigated)
-    / sum(issue.weight for issue in high_risk),
-    3,
+high_risk_weight = sum(issue.weight for issue in high_risk)
+mitigated_high_risk_weight = sum(
+    issue.weight for issue in high_risk if issue.mitigated
+)
+signals["high_risk_mitigation"] = weighted_ratio(
+    mitigated_high_risk_weight,
+    high_risk_weight,
 )
 
 approvals = {
@@ -933,16 +960,34 @@ hard_constraints = {
 }
 
 threshold_status = {
-    "model_card": signals["model_card"] >= thresholds["model_card_min"],
-    "system_card": signals["system_card"] >= thresholds["system_card_min"],
-    "policy": signals["policy"] >= thresholds["policy_min"],
-    "evaluation": signals["evaluation"] >= thresholds["evaluation_min"],
-    "open_risk": signals["open_risk"] <= thresholds["open_risk_max"],
-    "high_risk_mitigation": (
-        signals["high_risk_mitigation"]
-        >= thresholds["high_risk_mitigation_min"]
+    "model_card": meets(
+        signals["model_card"],
+        {"operator": ">=", "value": thresholds["model_card_min"]},
     ),
-    "approval": signals["approval"] >= thresholds["approval_min"],
+    "system_card": meets(
+        signals["system_card"],
+        {"operator": ">=", "value": thresholds["system_card_min"]},
+    ),
+    "policy": meets(
+        signals["policy"],
+        {"operator": ">=", "value": thresholds["policy_min"]},
+    ),
+    "evaluation": meets(
+        signals["evaluation"],
+        {"operator": ">=", "value": thresholds["evaluation_min"]},
+    ),
+    "open_risk": meets(
+        signals["open_risk"],
+        {"operator": "<=", "value": thresholds["open_risk_max"]},
+    ),
+    "high_risk_mitigation": meets(
+        signals["high_risk_mitigation"],
+        {"operator": ">=", "value": thresholds["high_risk_mitigation_min"]},
+    ),
+    "approval": meets(
+        signals["approval"],
+        {"operator": ">=", "value": thresholds["approval_min"]},
+    ),
 }
 
 evidence_status = {
@@ -980,6 +1025,9 @@ report = {
     "evidence_status": evidence_status,
     "failed_thresholds": failed_thresholds,
     "failed_constraints": failed_constraints,
+    "undefined_metrics": [
+        name for name, value in signals.items() if value is None
+    ],
     "actions": actions,
     "decision": decision,
 }
@@ -988,6 +1036,7 @@ print("signals=", signals)
 print("evidence_status=", evidence_status)
 print("failed_thresholds=", failed_thresholds)
 print("failed_constraints=", failed_constraints)
+print("undefined_metrics=", report["undefined_metrics"])
 print("decision=", decision)
 ~~~
 

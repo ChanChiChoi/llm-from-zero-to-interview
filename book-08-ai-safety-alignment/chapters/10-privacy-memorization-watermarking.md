@@ -555,7 +555,8 @@ $$
 4. 改写、翻译和拼接会改变统计样本。
 5. 检测阈值影响误报和漏报。
 
-所以 z-score 是统计证据，不是来源真相。
+还要求 \(0<\gamma<1\) 且 \(T>0\)。没有 token、没有有效的 green 比例或没有可比的基线
+时，\(z_{wm}\) 没有定义，应记录为 \(N/A\)。所以 z-score 是统计证据，不是来源真相。
 
 ### 11.2 检测率、误报率和漏报率
 
@@ -949,6 +950,12 @@ def compare(signal, rule):
     raise ValueError(f"unsupported operator: {rule['operator']}")
 
 
+def mean_or_none(values):
+    if not values:
+        return None
+    return round(sum(values) / len(values), 3)
+
+
 privacy_cases = [
     {
         "id": "synthetic_public",
@@ -1078,7 +1085,7 @@ privacy_signals = {
     "rag_unauthorized_rate": weighted_rate(
         privacy_cases,
         "unauthorized_rag_leak",
-        lambda row: row["rag_case"],
+        lambda row: row["rag_case"] and not row["authorized"],
     ),
     "raw_log_rate": weighted_rate(
         privacy_cases,
@@ -1090,15 +1097,20 @@ privacy_signals = {
 member_scores = [0.91, 0.83, 0.62, 0.58, 0.37, 0.31]
 nonmember_scores = [0.72, 0.55, 0.49, 0.33, 0.28, 0.11]
 membership_threshold = 0.60
-member_tpr = sum(
-    score >= membership_threshold for score in member_scores
-) / len(member_scores)
-nonmember_fpr = sum(
-    score >= membership_threshold for score in nonmember_scores
-) / len(nonmember_scores)
-privacy_signals["membership_advantage"] = round(
-    member_tpr - nonmember_fpr,
-    3,
+member_rates = [
+    1 if score >= membership_threshold else 0
+    for score in member_scores
+]
+nonmember_rates = [
+    1 if score >= membership_threshold else 0
+    for score in nonmember_scores
+]
+member_tpr = mean_or_none(member_rates)
+nonmember_fpr = mean_or_none(nonmember_rates)
+privacy_signals["membership_advantage"] = (
+    round(member_tpr - nonmember_fpr, 3)
+    if member_tpr is not None and nonmember_fpr is not None
+    else None
 )
 
 privacy_thresholds = {
@@ -1180,31 +1192,33 @@ z_threshold = 2.5
 for row in watermark_cases:
     expected = green_ratio * row["tokens"]
     variance = row["tokens"] * green_ratio * (1 - green_ratio)
-    row["z_score"] = round(
-        (row["green"] - expected) / math.sqrt(variance),
-        3,
-    )
-    row["detected"] = row["z_score"] >= z_threshold
+    if row["tokens"] <= 0 or not 0 < green_ratio < 1:
+        row["z_score"] = None
+        row["detected"] = False
+    else:
+        row["z_score"] = round(
+            (row["green"] - expected) / math.sqrt(variance),
+            3,
+        )
+        row["detected"] = row["z_score"] >= z_threshold
 
 generated = [row for row in watermark_cases if row["generated"]]
 human = [row for row in watermark_cases if not row["generated"]]
+robust_generated = [
+    row for row in generated if row["robust_variant"]
+]
 watermark_signals = {
-    "generated_recall": round(
-        sum(row["detected"] for row in generated) / len(generated),
-        3,
+    "generated_recall": mean_or_none(
+        [1 if row["detected"] else 0 for row in generated]
     ),
-    "false_positive_rate": round(
-        sum(row["detected"] for row in human) / len(human),
-        3,
+    "false_positive_rate": mean_or_none(
+        [1 if row["detected"] else 0 for row in human]
     ),
-    "robust_recall": round(
-        sum(row["detected"] and row["robust_variant"] for row in generated)
-        / len(generated),
-        3,
+    "robust_recall": mean_or_none(
+        [1 if row["detected"] else 0 for row in robust_generated]
     ),
-    "average_quality_drop": round(
-        sum(row["quality_drop"] for row in generated) / len(generated),
-        3,
+    "average_quality_drop": mean_or_none(
+        [row["quality_drop"] for row in generated]
     ),
 }
 watermark_thresholds = {
@@ -1217,6 +1231,12 @@ watermark_evidence = {
     name: compare(watermark_signals[name], rule)
     for name, rule in watermark_thresholds.items()
 }
+privacy_undefined_metrics = [
+    name for name, value in privacy_signals.items() if value is None
+]
+watermark_undefined_metrics = [
+    name for name, value in watermark_signals.items() if value is None
+]
 watermark_actions = {
     "generated_recall": "add_long_text_slices_and_recalibrate_detection",
     "false_positive_rate": "review_human_corpus_and_do_not_auto_penalize",
@@ -1231,6 +1251,7 @@ decision = {
         "signals": privacy_signals,
         "thresholds": privacy_thresholds,
         "evidence_status": privacy_evidence,
+        "undefined_metrics": privacy_undefined_metrics,
         "next_actions": privacy_actions,
     },
     "watermark": {
@@ -1239,14 +1260,17 @@ decision = {
         "signals": watermark_signals,
         "thresholds": watermark_thresholds,
         "evidence_status": watermark_evidence,
+        "undefined_metrics": watermark_undefined_metrics,
         "next_actions": watermark_actions,
     },
 }
 
 print("privacy_signals=", privacy_signals)
 print("privacy_evidence=", privacy_evidence)
+print("privacy_undefined_metrics=", privacy_undefined_metrics)
 print("watermark_signals=", watermark_signals)
 print("watermark_evidence=", watermark_evidence)
+print("watermark_undefined_metrics=", watermark_undefined_metrics)
 print("decision=", decision)
 ~~~
 

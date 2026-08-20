@@ -143,6 +143,8 @@ e_k = b_k / n_k
 
 如果 `e_k` 过高，说明该数据池被重复上采样，可能带来记忆、过拟合或污染风险。
 
+这些式子有一个容易被忽略的定义域：参与采样的池必须有正的有效 token 数，即 `n_k > 0`，并且所有池的分数之和必须大于零。空池应标记为“待补充”或从当前版本排除，不能用 `0` 参与 `n_k^alpha` 后再把结果当成正常概率；尤其当 `alpha = 0` 时，`0^0` 本身就没有可直接采用的工程含义。类似地，`e_k = b_k / n_k` 在 `n_k = 0` 时不可计算。数据表应分别记录“未登记”“已登记但为空”和“有 token 但未被采样”，这三种状态不能混在一个零值里。
+
 对于某个能力维度 `m`，mixture 的能力覆盖估计可以写成：
 
 ~~~math
@@ -559,8 +561,20 @@ RISK_LAMBDA = 1.8
 MAX_EPOCH = 2.5
 
 
+def validate_pools(items):
+    if not items:
+        raise ValueError("at least one non-empty data pool is required")
+    names = [item["name"] for item in items]
+    if len(names) != len(set(names)):
+        raise ValueError("data pool names must be unique")
+    if any(item["tokens"] <= 0 for item in items):
+        raise ValueError("data pools must have positive token counts")
+
+
 def normalize(weights):
     total = sum(weights.values())
+    if not weights or total <= 0:
+        raise ValueError("cannot normalize an empty or zero-sum mixture")
     return {k: v / total for k, v in weights.items()}
 
 
@@ -568,6 +582,7 @@ def utility(pool):
     return sum(target[k] * pool["cap"][k] for k in target)
 
 
+validate_pools(pools)
 raw_mix = normalize({p["name"]: p["tokens"] for p in pools})
 raw_ability = {
     cap: round(sum(raw_mix[p["name"]] * p["cap"][cap] for p in pools), 3)
@@ -664,6 +679,18 @@ assert all(checks.values())
 assert not any(signals.values())
 assert actions == []
 assert decision == "continue_to_ablation"
+try:
+    validate_pools([])
+except ValueError as error:
+    assert "non-empty" in str(error)
+else:
+    raise AssertionError("empty pool input must be rejected")
+try:
+    validate_pools([{**pools[0], "tokens": 0}])
+except ValueError as error:
+    assert "positive" in str(error)
+else:
+    raise AssertionError("zero-token pool must be rejected")
 ~~~
 
 运行后会看到类似输出：

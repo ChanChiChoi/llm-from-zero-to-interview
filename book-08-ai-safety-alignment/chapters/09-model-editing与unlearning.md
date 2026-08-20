@@ -1057,10 +1057,12 @@ owner: team-name
 ~~~python
 def weighted_mean(rows, key):
     if not rows:
-        raise ValueError("rows must not be empty")
+        return None
     total_weight = sum(row["weight"] for row in rows)
     if total_weight <= 0:
         raise ValueError("total weight must be positive")
+    if any(row[key] is None for row in rows):
+        return None
     return round(
         sum(row[key] * row["weight"] for row in rows) / total_weight,
         3,
@@ -1085,7 +1087,7 @@ def weighted_nested_mean(rows, key):
     for row in rows:
         nested = row[key]
         if not nested:
-            raise ValueError(f"{key} must not be empty")
+            return None
         values.append(
             {
                 "weight": row["weight"],
@@ -1096,6 +1098,8 @@ def weighted_nested_mean(rows, key):
 
 
 def compare(signal, rule):
+    if signal is None:
+        return False
     operator = rule["operator"]
     target = rule["value"]
     if operator == ">=":
@@ -1154,10 +1158,15 @@ editing_signals = {
     "retain_before": weighted_mean(edit_cases, "retain_before"),
     "retain_after": weighted_mean(edit_cases, "retain_after"),
 }
-editing_signals["retain_delta"] = round(
-    editing_signals["retain_after"]
-    - editing_signals["retain_before"],
-    3,
+editing_signals["retain_delta"] = (
+    round(
+        editing_signals["retain_after"]
+        - editing_signals["retain_before"],
+        3,
+    )
+    if editing_signals["retain_after"] is not None
+    and editing_signals["retain_before"] is not None
+    else None
 )
 editing_signals["conflict_cases"] = [
     row["id"]
@@ -1256,29 +1265,42 @@ unlearning_signals = {
     "retain_before": weighted_mean(retain_tasks, "before"),
     "retain_after": weighted_mean(retain_tasks, "after"),
 }
-unlearning_signals["robust_leakage"] = weighted_flag_rate(
+unlearning_signals["robust_leakage"] = weighted_nested_mean(
     [
         {
             "weight": row["weight"],
-            "robust_leak": (
-                row["exact_leak"]
-                or row["paraphrase_leak"]
-                or row["multi_turn_leak"]
-            ),
+            "variants": [
+                1.0 if row[key] else 0.0
+                for key in (
+                    "exact_leak",
+                    "paraphrase_leak",
+                    "multi_turn_leak",
+                )
+            ],
         }
         for row in forget_cases
     ],
-    "robust_leak",
+    "variants",
 )
-unlearning_signals["mia_delta"] = round(
-    unlearning_signals["mia_after"]
-    - unlearning_signals["mia_before"],
-    3,
+unlearning_signals["mia_delta"] = (
+    round(
+        unlearning_signals["mia_after"]
+        - unlearning_signals["mia_before"],
+        3,
+    )
+    if unlearning_signals["mia_after"] is not None
+    and unlearning_signals["mia_before"] is not None
+    else None
 )
-unlearning_signals["retain_delta"] = round(
-    unlearning_signals["retain_after"]
-    - unlearning_signals["retain_before"],
-    3,
+unlearning_signals["retain_delta"] = (
+    round(
+        unlearning_signals["retain_after"]
+        - unlearning_signals["retain_before"],
+        3,
+    )
+    if unlearning_signals["retain_after"] is not None
+    and unlearning_signals["retain_before"] is not None
+    else None
 )
 
 unlearning_thresholds = {
@@ -1293,6 +1315,15 @@ unlearning_evidence = {
     for name, rule in unlearning_thresholds.items()
 }
 
+editing_undefined_metrics = [
+    name
+    for name, value in editing_signals.items()
+    if name != "conflict_cases" and value is None
+]
+unlearning_undefined_metrics = [
+    name for name, value in unlearning_signals.items() if value is None
+]
+
 unlearning_actions = {
     "exact_leakage": "expand_forget_set_and_check_output_variants",
     "robust_leakage": "keep_external_exposure_restricted_and_add_attack_families",
@@ -1305,20 +1336,24 @@ decision = {
         "scope": "offline_checkpoint",
         "status": "hold_for_conflict_review",
         "evidence": editing_evidence,
+        "undefined_metrics": editing_undefined_metrics,
         "next_actions": editing_actions,
     },
     "unlearning": {
         "scope": "synthetic_audit_only",
         "status": "hold_for_robust_leakage",
         "evidence": unlearning_evidence,
+        "undefined_metrics": unlearning_undefined_metrics,
         "next_actions": unlearning_actions,
     },
 }
 
 print("editing_signals=", editing_signals)
 print("editing_evidence=", editing_evidence)
+print("editing_undefined_metrics=", editing_undefined_metrics)
 print("unlearning_signals=", unlearning_signals)
 print("unlearning_evidence=", unlearning_evidence)
+print("unlearning_undefined_metrics=", unlearning_undefined_metrics)
 print("decision=", decision)
 ~~~
 

@@ -370,7 +370,7 @@ WER
 
 ~~~
 
-其中 $S$ 是 substitution，$D$ 是 deletion，$I$ 是 insertion，$N$ 是参考文本词数。中文、日文和无空格语言需要明确分词或字符级口径，否则不同报告无法直接比较。
+其中 $S$ 是 substitution，$D$ 是 deletion，$I$ 是 insertion，$N$ 是参考文本词数。当评估切片没有参考词（$N=0$）时，WER 未定义，不能把它当作 0；中文、日文和无空格语言还需要明确分词或字符级口径，否则不同报告无法直接比较。
 
 WER 还会被分段策略影响。长音频切得过短可能丢失上下文，切得过长可能增加延迟和显存；时间戳错位可能让转写内容看似正确却无法用于字幕、检索或多模态对齐。
 
@@ -531,11 +531,17 @@ m_{align},m_{ground},m_{quality},m_{temporal},m_{safety},m_{cost}
 
 ~~~python
 def mean(values):
-    return sum(values) / len(values) if values else 0.0
+    return sum(values) / len(values) if values else None
 
 
 def wer(substitutions, deletions, insertions, reference_words):
+    if reference_words == 0:
+        return None
     return (substitutions + deletions + insertions) / reference_words
+
+
+def rounded(value):
+    return None if value is None else round(value, 4)
 
 
 records = {
@@ -545,23 +551,32 @@ records = {
     "video_temporal": [1, 1, 0, 0],
 }
 signals = {
-    "image_text_recall_at_k": round(mean(records["retrieval"]), 4),
-    "grounding_accuracy": round(mean(records["grounding"]), 4),
-    "prompt_attribute_accuracy": round(mean(records["prompt_attributes"]), 4),
-    "video_temporal_consistency": round(mean(records["video_temporal"]), 4),
-    "speech_wer": round(wer(2, 1, 1, 20), 4),
+    "image_text_recall_at_k": rounded(mean(records["retrieval"])),
+    "grounding_accuracy": rounded(mean(records["grounding"])),
+    "prompt_attribute_accuracy": rounded(mean(records["prompt_attributes"])),
+    "video_temporal_consistency": rounded(mean(records["video_temporal"])),
+    "speech_wer": rounded(wer(2, 1, 1, 20)),
 }
 
 actions = []
-if signals["grounding_accuracy"] < 0.75:
+if signals["grounding_accuracy"] is None or signals["grounding_accuracy"] < 0.75:
     actions.append("add_region_and_counterfactual_vision_tests")
-if signals["prompt_attribute_accuracy"] < 0.75:
+if (
+    signals["prompt_attribute_accuracy"] is None
+    or signals["prompt_attribute_accuracy"] < 0.75
+):
     actions.append("add_compositional_prompt_eval")
-if signals["video_temporal_consistency"] < 0.75:
+if (
+    signals["video_temporal_consistency"] is None
+    or signals["video_temporal_consistency"] < 0.75
+):
     actions.append("add_track_and_motion_review")
-if signals["speech_wer"] > 0.15:
+if signals["speech_wer"] is None or signals["speech_wer"] > 0.15:
     actions.append("review_audio_slices_and_segmentation")
 decision = "continue_after_modality_repairs" if actions else "continue_to_holdout_eval"
+
+assert mean([]) is None
+assert wer(0, 0, 0, 0) is None
 
 for name, value in signals.items():
     print(f"{name}={value}")

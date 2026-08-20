@@ -37,7 +37,7 @@ D_train
 = F(D_raw; policy, parse, quality, privacy, dedup, contamination, version).
 ~~~
 
-`pi_policy` 决定用途和权限，`phi_parse` 决定如何从载体提取结构，`q_quality` 描述内容和任务质量，`p_privacy` 描述个人信息或秘密风险，`d_dedup` 处理重复，`x_contam` 处理评估污染，`v_version` 把整条链路绑定到一个可回放版本。这个表达式的意义是：数据工程改变了模型最终看到的经验分布，采集阶段的决策会在很久以后表现为能力、风格、幻觉、安全和评估结果。
+`policy` 决定用途和权限，`parse` 决定如何从载体提取结构，`quality` 描述内容和任务质量，`privacy` 描述个人信息或秘密风险，`dedup` 处理重复，`contamination` 处理评估污染，`version` 把整条链路绑定到一个可回放版本。这个表达式的意义是：数据工程改变了模型最终看到的经验分布，采集阶段的决策会在很久以后表现为能力、风格、幻觉、安全和评估结果。
 
 ## 2.2 为什么大模型需要 Web-scale 数据
 
@@ -669,7 +669,16 @@ documents = [
     },
 ]
 
-required_meta = ["id", "source_id", "url", "crawl_time", "mime", "language", "domain"]
+required_meta = [
+    "id",
+    "source_id",
+    "url",
+    "crawl_time",
+    "mime",
+    "language",
+    "domain",
+    "html",
+]
 pii_or_secret = [
     re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+"),
     re.compile(r"DEMO_SECRET_[A-Z0-9]{8,}"),
@@ -708,7 +717,9 @@ def quality_score(text: str) -> float:
 
 
 def policy_allowed(doc: dict) -> bool:
-    source = sources[doc["source_id"]]
+    source = sources.get(doc.get("source_id"))
+    if source is None:
+        return False
     return (
         source["license"] not in {"unknown", "restricted"}
         and source["training_use"]
@@ -733,44 +744,53 @@ def sum_tokens(items: list[dict], field: str) -> dict[str, int]:
     return dict(totals)
 
 
+def safe_ratio(numerator: float, denominator: int):
+    return round(numerator / denominator, 3) if denominator else None
+
+
 def audit_collection(items: list[dict]) -> dict:
     seen_hashes = set()
     kept = []
     rejected = {}
     stage_counts = Counter(raw=len(items))
 
-    for doc in items:
+    for index, doc in enumerate(items):
+        row_id = doc.get("id", f"row_{index}")
         missing = [field for field in required_meta if not doc.get(field)]
         if missing:
-            rejected[doc["id"]] = "missing_metadata"
+            rejected[row_id] = "missing_metadata"
             continue
 
         text = strip_html(doc["html"])
         doc_hash = content_hash(text)
         score = quality_score(text)
 
+        if doc["source_id"] not in sources:
+            rejected[row_id] = "unknown_source"
+            continue
+
         if not policy_allowed(doc):
-            rejected[doc["id"]] = "policy_block"
+            rejected[row_id] = "policy_block"
             continue
         stage_counts["policy_pass"] += 1
 
         if has_pii_or_secret(text):
-            rejected[doc["id"]] = "pii_or_secret"
+            rejected[row_id] = "pii_or_secret"
             continue
         stage_counts["pii_pass"] += 1
 
         if has_eval_contamination(text):
-            rejected[doc["id"]] = "eval_contamination"
+            rejected[row_id] = "eval_contamination"
             continue
         stage_counts["contamination_pass"] += 1
 
         if score < 0.62:
-            rejected[doc["id"]] = "low_quality"
+            rejected[row_id] = "low_quality"
             continue
         stage_counts["quality_pass"] += 1
 
         if doc_hash in seen_hashes:
-            rejected[doc["id"]] = "exact_duplicate"
+            rejected[row_id] = "exact_duplicate"
             continue
         seen_hashes.add(doc_hash)
         kept.append(
@@ -784,52 +804,80 @@ def audit_collection(items: list[dict]) -> dict:
         )
         stage_counts["dedup_pass"] += 1
 
-    raw_tokens = sum(len(tokenize(strip_html(doc["html"]))) for doc in items)
+    # Records without HTML are excluded from the raw-token denominator because
+    # their payload cannot be measured; the missing-metadata rate remains visible.
+    raw_tokens = sum(
+        len(tokenize(strip_html(doc["html"])))
+        for doc in items
+        if doc.get("html")
+    )
     kept_tokens = sum(doc["tokens"] for doc in kept)
     language_tokens = sum_tokens(kept, "language")
     domain_tokens = sum_tokens(kept, "domain")
     language_mix = {
-        key: round(value / max(kept_tokens, 1), 3)
+        key: safe_ratio(value, kept_tokens)
         for key, value in sorted(language_tokens.items())
     }
     domain_mix = {
-        key: round(value / max(kept_tokens, 1), 3)
+        key: safe_ratio(value, kept_tokens)
         for key, value in sorted(domain_tokens.items())
     }
+    denominator = len(items)
     risk_rates = {
-        "policy_block": sum(reason == "policy_block" for reason in rejected.values())
-        / len(items),
-        "pii_or_secret": sum(reason == "pii_or_secret" for reason in rejected.values())
-        / len(items),
-        "eval_contamination": sum(reason == "eval_contamination" for reason in rejected.values())
-        / len(items),
-        "low_quality": sum(reason == "low_quality" for reason in rejected.values())
-        / len(items),
-        "exact_duplicate": sum(reason == "exact_duplicate" for reason in rejected.values())
-        / len(items),
+        "missing_metadata": safe_ratio(
+            sum(reason == "missing_metadata" for reason in rejected.values()),
+            denominator,
+        ),
+        "policy_block": safe_ratio(
+            sum(reason == "policy_block" for reason in rejected.values()), denominator
+        ),
+        "pii_or_secret": safe_ratio(
+            sum(reason == "pii_or_secret" for reason in rejected.values()), denominator
+        ),
+        "eval_contamination": safe_ratio(
+            sum(reason == "eval_contamination" for reason in rejected.values()),
+            denominator,
+        ),
+        "low_quality": safe_ratio(
+            sum(reason == "low_quality" for reason in rejected.values()), denominator
+        ),
+        "exact_duplicate": safe_ratio(
+            sum(reason == "exact_duplicate" for reason in rejected.values()), denominator
+        ),
+        "unknown_source": safe_ratio(
+            sum(reason == "unknown_source" for reason in rejected.values()), denominator
+        ),
     }
     signals = {
         "kept_ids": [doc["id"] for doc in kept],
         "rejected": dict(sorted(rejected.items())),
         "stage_counts": dict(stage_counts),
-        "retention": round(kept_tokens / max(raw_tokens, 1), 3),
+        "retention": safe_ratio(kept_tokens, raw_tokens),
         "language_mix": language_mix,
         "domain_mix": domain_mix,
-        "average_quality": round(
-            sum(doc["quality"] for doc in kept) / max(len(kept), 1), 3
+        "average_quality": safe_ratio(
+            sum(doc["quality"] for doc in kept), len(kept)
         ),
-        "risk_rates": {key: round(value, 3) for key, value in risk_rates.items()},
+        "risk_rates": risk_rates,
     }
     actions = []
-    if risk_rates["policy_block"] > 0:
+    if not items:
+        actions.append("restore_or_collect_source_records")
+    if not kept:
+        actions.append("restore_nonempty_training_set")
+    if risk_rates["missing_metadata"] is not None and risk_rates["missing_metadata"] > 0:
+        actions.append("repair_missing_metadata")
+    if risk_rates["policy_block"] is not None and risk_rates["policy_block"] > 0:
         actions.append("review_or_exclude_restricted_sources")
-    if risk_rates["pii_or_secret"] > 0:
+    if risk_rates["unknown_source"] is not None and risk_rates["unknown_source"] > 0:
+        actions.append("register_or_exclude_unknown_sources")
+    if risk_rates["pii_or_secret"] is not None and risk_rates["pii_or_secret"] > 0:
         actions.append("scrub_or_isolate_sensitive_records")
-    if risk_rates["eval_contamination"] > 0:
+    if risk_rates["eval_contamination"] is not None and risk_rates["eval_contamination"] > 0:
         actions.append("remove_or_isolate_eval_overlap")
-    if risk_rates["low_quality"] > 0:
+    if risk_rates["low_quality"] is not None and risk_rates["low_quality"] > 0:
         actions.append("tune_quality_filter_and_sample_review")
-    if risk_rates["exact_duplicate"] > 0:
+    if risk_rates["exact_duplicate"] is not None and risk_rates["exact_duplicate"] > 0:
         actions.append("run_near_dedup_and_keep_cluster_provenance")
     decision = "hold_for_repair" if actions else "continue_to_manifest"
     return {"signals": signals, "actions": actions, "decision": decision}
@@ -854,9 +902,40 @@ assert report["signals"]["rejected"] == {
     "spam_seo": "low_quality",
 }
 assert report["decision"] == "hold_for_repair"
+
+empty_report = audit_collection([])
+assert empty_report["signals"]["retention"] is None
+assert empty_report["signals"]["risk_rates"]["missing_metadata"] is None
+
+unknown_source = {**documents[0], "id": "unknown_source", "source_id": "not_registered"}
+unknown_report = audit_collection([unknown_source])
+assert unknown_report["signals"]["rejected"] == {
+    "unknown_source": "unknown_source",
+}
+assert "register_or_exclude_unknown_sources" in unknown_report["actions"]
+
+missing_metadata = {
+    "source_id": "tech_blog",
+    "url": "https://example.invalid/missing-metadata",
+    "crawl_time": "2026-06-01T00:45:00Z",
+    "mime": "text/html",
+    "language": "en",
+    "domain": "web_ml",
+}
+missing_report = audit_collection([missing_metadata])
+assert missing_report["signals"]["rejected"] == {
+    "row_0": "missing_metadata",
+}
+assert missing_report["signals"]["retention"] is None
+assert "repair_missing_metadata" in missing_report["actions"]
+
+filtered_report = audit_collection([documents[3]])
+assert filtered_report["signals"]["retention"] == 0.0
+assert filtered_report["signals"]["risk_rates"]["policy_block"] == 1.0
+assert filtered_report["decision"] == "hold_for_repair"
 ~~~
 
-示例输出中的数值会由这组合成文本决定，真实项目不应照搬 `0.62` 这样的阈值。这个 demo 重要的地方有三点：策略拒绝、隐私/秘密、评估污染、低质量和重复是不同原因；每个原因都有后续动作；即使最终保留样本的平均质量不错，只要仍有需要处理的风险，数据版本就不能被描述为“已经没有问题”。
+示例输出中的数值会由这组合成文本决定，真实项目不应照搬 `0.62` 这样的阈值。这个 demo 重要的地方有四点：策略拒绝、隐私/秘密、评估污染、低质量和重复是不同原因；缺失元数据不是“没有内容”，而是需要单独修复的数据质量问题；空集合和全量过滤时，比例分母会明确返回 `None` 或 `0.0`，避免把不可计算和确实没有保留样本混为一谈；即使最终保留样本的平均质量不错，只要仍有需要处理的风险，数据版本就不能被描述为“已经没有问题”。
 
 ## 2.15 如何评估一个采集 pipeline
 

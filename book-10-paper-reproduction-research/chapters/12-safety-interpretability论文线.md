@@ -677,6 +677,8 @@ v_\ast.
 \mathbf{1}[\mathrm{unrelated\ output\ changed}],
 ~~~
 
+这些比例要求 $|E|>0$、$|E'|>0$ 和 $|P|>0$；对应集合为空时应报告未定义，而不是把没有测试样本记成 0 或 1。
+
 并单独测量多轮持久性和编辑成本。若只有 reliability 上升，不能说明编辑是可部署的。
 
 ### 12.10.5 Editing 与 RAG 的选择
@@ -777,7 +779,7 @@ M_{\mathrm{after}}(R),
 M_{\mathrm{after}}(G).
 ~~~
 
-其中 $M$ 可以是 recall、extraction success 或任务准确率。ForgetDrop 高、Residual 低、Retain 稳定，才构成更有意义的结果。任何一个指标单独变化都可能产生误判。
+其中 $M$ 可以是 recall、extraction success 或任务准确率，且每个集合都必须有明确的非空分母。ForgetDrop 高、Residual 低、Retain 稳定，才构成更有意义的结果。任何一个指标单独变化都可能产生误判。
 
 ## 12.12 Privacy 与 Memorization：模型记住了什么
 
@@ -804,7 +806,7 @@ Overfitting 关注训练误差与泛化误差的差异；memorization 关注模�
 \log_2 N-\log_2 r.
 ~~~
 
-排名越靠前，exposure 越高。这个指标是研究记忆倾向的工具，不应直接当成真实隐私泄漏概率。canary 的分布、候选生成、提示形式和搜索预算都会影响结果。
+其中要求 $N>0$ 且 $1\leq r\leq N$。排名越靠前，exposure 越高。这个指标是研究记忆倾向的工具，不应直接当成真实隐私泄漏概率。canary 的分布、候选生成、提示形式和搜索预算都会影响结果。
 
 ### 12.12.3 哪些因素会增加记忆
 
@@ -884,6 +886,8 @@ z
 \frac{K-\gamma T}
 {\sqrt{T\gamma(1-\gamma)}}.
 ~~~
+
+这里要求 $T>0$ 且 $0<\gamma<1$；否则分母为零或没有可解释的二项基线。
 
 当 $z$ 很高时，检测器会认为观察到的绿色 token 数量不太像自然生成。实际算法可能使用上下文相关哈希、不同采样分布和更复杂的统计检验，这个式子只用于解释检测信号的来源。
 
@@ -978,6 +982,8 @@ Interpretability 可能在以下方面帮助安全：
 \frac{\mathrm{benign\ requests\ refused\ incorrectly}}
 {\mathrm{benign\ requests}}.
 ~~~
+
+两个分母都必须大于零；某一风险类别没有样本时，应标记为未评估。不能把没有危险请求或没有良性请求的切片记成风险为零或误拒为零。
 
 还要按风险类别、语言、用户权限、工具状态和严重度切片。对高严重度事件，即使样本很少，也应该报告零事件的不确定性，而不是写成风险为零。
 
@@ -1109,7 +1115,7 @@ from math import sqrt
 
 
 def mean(values):
-    return sum(values) / len(values) if values else 0.0
+    return sum(values) / len(values) if values else None
 
 
 def rate(values):
@@ -1117,8 +1123,18 @@ def rate(values):
 
 
 def z_score(green_count, total, expected_green_rate):
+    if total == 0 or not 0 < expected_green_rate < 1:
+        return None
     variance = total * expected_green_rate * (1 - expected_green_rate)
     return (green_count - total * expected_green_rate) / sqrt(variance)
+
+
+def safe_ratio(numerator, denominator):
+    return None if denominator == 0 else numerator / denominator
+
+
+def rounded(value):
+    return None if value is None else round(value, 4)
 
 
 red_team = [
@@ -1130,9 +1146,9 @@ red_team = [
 
 red_team_unsafe = rate([row["unsafe_compliance"] for row in red_team])
 tool_breach = rate([row["unauthorized_tool"] for row in red_team])
-weighted_failure = (
-    sum(row["severity"] * row["unsafe_compliance"] for row in red_team)
-    / sum(row["severity"] for row in red_team)
+weighted_failure = safe_ratio(
+    sum(row["severity"] * row["unsafe_compliance"] for row in red_team),
+    sum(row["severity"] for row in red_team),
 )
 
 clean_behavior = [1, 1, 0, 1, 1]
@@ -1151,30 +1167,40 @@ retain_utility = rate(retain_after)
 watermark_z = z_score(green_count=29, total=40, expected_green_rate=0.5)
 
 signals = {
-    "unsafe_compliance": round(red_team_unsafe, 4),
-    "unauthorized_tool": round(tool_breach, 4),
-    "severity_weighted_failure": round(weighted_failure, 4),
-    "target_intervention_drop": round(causal_drop, 4),
-    "random_control_drop": round(control_drop, 4),
-    "forget_drop": round(forget_drop, 4),
-    "residual_recall": round(residual_recall, 4),
-    "retain_utility": round(retain_utility, 4),
-    "watermark_z": round(watermark_z, 4),
+    "unsafe_compliance": rounded(red_team_unsafe),
+    "unauthorized_tool": rounded(tool_breach),
+    "severity_weighted_failure": rounded(weighted_failure),
+    "target_intervention_drop": rounded(causal_drop),
+    "random_control_drop": rounded(control_drop),
+    "forget_drop": rounded(forget_drop),
+    "residual_recall": rounded(residual_recall),
+    "retain_utility": rounded(retain_utility),
+    "watermark_z": rounded(watermark_z),
 }
 
 actions = []
-if signals["unauthorized_tool"] > 0:
+if signals["unauthorized_tool"] is None or signals["unauthorized_tool"] > 0:
     actions.append("separate_model_text_from_server_authorization")
-if signals["target_intervention_drop"] <= signals["random_control_drop"]:
+if (
+    signals["target_intervention_drop"] is None
+    or signals["random_control_drop"] is None
+    or signals["target_intervention_drop"] <= signals["random_control_drop"]
+):
     actions.append("repeat_causal_intervention_with_matched_controls")
-if signals["residual_recall"] > 0:
+if signals["residual_recall"] is None or signals["residual_recall"] > 0:
     actions.append("expand_unlearning_paraphrase_and_indirect_tests")
-if signals["retain_utility"] < 0.8:
+if signals["retain_utility"] is None or signals["retain_utility"] < 0.8:
     actions.append("repair_retain_set_before_more_forgetting")
-if signals["watermark_z"] < 3.0:
+if signals["watermark_z"] is None or signals["watermark_z"] < 3.0:
     actions.append("report_watermark_as_low_confidence")
 
 decision = "continue_after_scope_repairs" if actions else "continue_to_holdout"
+
+assert mean([]) is None
+assert rate([]) is None
+assert safe_ratio(0, 0) is None
+assert z_score(0, 0, 0.5) is None
+assert z_score(1, 10, 0.0) is None
 
 for name, value in signals.items():
     print(f"{name}={value}")

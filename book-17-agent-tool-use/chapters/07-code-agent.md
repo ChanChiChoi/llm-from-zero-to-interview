@@ -33,25 +33,30 @@ Code Agent 是围绕代码任务执行的 Agent。
 7. 迭代修复。
 8. 总结改动。
 
-面试回答：
+Code Agent 的核心不是“会写代码”，而是能把自然语言任务转成一组可验证的仓库状态变化。它要先确定任务边界，再建立对仓库结构、入口、约定和当前工作区的认识；随后提出一个小补丁，运行与任务相关的验证，并根据真实 observation 判断是否需要继续。最后交付的对象不是一段孤立代码，而是 diff、测试结果、未解决风险和环境限制组成的结果包。
 
-```text
-Code Agent 是能在代码仓库中执行开发任务的 Agent。它会先理解需求和项目结构，再定位相关文件，做最小必要修改，运行测试或检查，根据反馈继续修复，最后总结变更。它和普通代码生成的区别在于它有仓库上下文、工具执行、测试反馈和迭代调试闭环。
-```
+可以把一次代码任务看成一个状态转移：
+
+~~~text
+task -> repository_observation -> hypothesis -> patch -> execution_feedback
+     -> revised_hypothesis -> validated_diff -> handoff
+~~~
+
+这里的 `repository_observation` 不只是目录列表，还包括目标文件当前内容、版本控制状态、测试入口、依赖约束和用户已经留下的改动；`execution_feedback` 包括测试失败、类型错误、运行时输出、退出码和副作用。没有这些中间状态，模型即使生成了语法正确的代码，也无法知道它是否真正满足用户目标。
 
 ## 7.2 Code Agent 和代码补全的区别
 
 代码补全通常是局部生成：
 
-```text
+~~~text
 当前文件上下文 -> 补全下一段代码
-```
+~~~
 
 Code Agent 是任务执行：
 
-```text
+~~~text
 用户目标 -> 理解仓库 -> 定位问题 -> 修改文件 -> 运行测试 -> 修复反馈 -> 总结
-```
+~~~
 
 核心区别：
 
@@ -65,111 +70,120 @@ Code Agent 是任务执行：
 
 设用户任务为 `g`，仓库初始状态为 `R_0`，Code Agent 的执行轨迹可以写成：
 
-```math
+~~~math
 \tau=(g,R_0,s_0,a_1,o_1,s_1,\ldots,a_T,o_T,s_T,\Delta,\hat y)
-```
+~~~
 
 其中 `s_t` 是任务状态，`a_t` 是第 `t` 步动作，`o_t` 是工具 observation，`\Delta` 是最终代码 diff，`\hat y` 是最终总结。
 
 一次代码动作可以抽象为：
 
-```math
+~~~math
 a_t=(u_t,n_t,\alpha_t,\rho_t)
-```
+~~~
 
 其中 `u_t` 是动作类型，例如 `search`、`read`、`patch`、`test`、`ask`、`final`；`n_t` 是工具名；`\alpha_t` 是参数；`\rho_t` 是风险级别。
 
-执行动作前需要沙箱和权限验收条件：
+执行动作前需要沙箱和权限检查：
 
-```math
-G_{\mathrm{cmd}}(a_t,s_t)=
-I_{\mathrm{schema}}(a_t)
-\cdot I_{\mathrm{scope}}(a_t,s_t)
-\cdot I_{\mathrm{perm}}(a_t,s_t)
-\cdot I_{\mathrm{budget}}(a_t,s_t)
-\cdot I_{\mathrm{risk}}(a_t,s_t)
-```
+~~~math
+I_{\mathrm{cmd}}(a_t,s_t)=
+I_{\mathrm{schema}}(a_t)\cdot
+I_{\mathrm{scope}}(a_t,s_t)\cdot
+I_{\mathrm{perm}}(a_t,s_t)\cdot
+I_{\mathrm{budget}}(a_t,s_t)\cdot
+I_{\mathrm{risk}}(a_t,s_t)
+~~~
 
-只有 `G_cmd=1` 的动作才允许执行。高风险动作应被拦截、降级或请求用户确认。
+每个检查结果都可能是 `1`、`0` 或 `unknown`。只有所有检查已经完成
+且为 `1` 时，`I_cmd=1`，动作才进入执行器；任何已测量的 `0` 都应
+拒绝执行；存在 `unknown` 时保持未知，不能默认放行。高风险动作应被
+拦截、降级为只读操作或请求用户确认；模型生成了一个合法的 shell
+字符串，并不意味着它已经获得执行授权。
 
 目标需求集合：
 
-```math
+~~~math
 \mathcal{R}_g=\{r_1,\ldots,r_m\}
-```
+~~~
 
 Code Agent 最终修改的文件集合：
 
-```math
+~~~math
 \mathcal{F}_{\Delta}=\{f_1,\ldots,f_k\}
-```
+~~~
 
 任务相关文件集合：
 
-```math
+~~~math
 \mathcal{F}_{\mathrm{rel}}=\{f:f\ \mathrm{is\ relevant\ to}\ g\}
-```
+~~~
 
 Patch 定位 precision：
 
-```math
+~~~math
 P_{\mathrm{loc}}=
 \frac{|\mathcal{F}_{\Delta}\cap\mathcal{F}_{\mathrm{rel}}|}
 {|\mathcal{F}_{\Delta}|}
-```
+~~~
 
 Patch 定位 recall：
 
-```math
+~~~math
 R_{\mathrm{loc}}=
 \frac{|\mathcal{F}_{\Delta}\cap\mathcal{F}_{\mathrm{rel}}|}
 {|\mathcal{F}_{\mathrm{rel}}|}
-```
+~~~
 
 无关改动率：
 
-```math
+~~~math
 R_{\mathrm{unrel}}=
 \frac{|\mathcal{F}_{\Delta}\setminus\mathcal{F}_{\mathrm{rel}}|}
 {|\mathcal{F}_{\Delta}|}
-```
+~~~
 
-测试通过率：
+测试通过率（要求至少运行一条测试）：
 
-```math
+~~~math
 R_{\mathrm{test}}=
 \frac{\sum_i \mathbf{1}[\mathrm{test}_i\ \mathrm{passed}]}
 {\sum_i \mathbf{1}[\mathrm{test}_i\ \mathrm{run}]}
-```
+~~~
 
-验证覆盖率：
+验证覆盖率（要求任务集合非空）：
 
-```math
+~~~math
 R_{\mathrm{val}}=
 \frac{\sum_j \mathbf{1}[\mathrm{task}_j\ \mathrm{has\ relevant\ validation}]}
 {N}
-```
+~~~
 
 用户改动触碰率：
 
-```math
+~~~math
 R_{\mathrm{user}}=
 \frac{\sum_i \mathbf{1}[f_i\in\mathcal{F}_{\Delta}\land f_i\ \mathrm{has\ user\ changes}]}
 {|\mathcal{F}_{\Delta}|}
-```
+~~~
 
 重复命令率：
 
-```math
+~~~math
 R_{\mathrm{repeat}}=
 \frac{\sum_t \mathbf{1}[a_t\ \mathrm{repeats\ prior\ failed\ command}]}
 {T}
-```
+~~~
 
-一个简化 Code Agent gate：
+其中 `T>0`；没有命令步骤时，重复命令率为 `None`。同理，`P_loc` 和
+`R_unrel` 要求修改文件集合非空，`R_user` 要求修改集合非空，
+`R_test` 要求确实运行了测试，`R_val` 要求任务集合 `N>0`。没有
+测量到的指标必须保持 `None`，不能用 0 或 1 伪造安全或质量结论。
 
-```math
-G_{\mathrm{code}}=
+一个简化的交付检查指标：
+
+~~~math
+I_{\mathrm{code}}=
 \mathbf{1}[
 R_{\mathrm{task}}\ge\tau_{\mathrm{task}}
 \land R_{\mathrm{test}}\ge\tau_{\mathrm{test}}
@@ -179,9 +193,12 @@ R_{\mathrm{task}}\ge\tau_{\mathrm{task}}
 \land R_{\mathrm{user}}=0
 \land R_{\mathrm{unsafe}}=0
 ]
-```
+~~~
 
-这组条件回答：Code Agent 是否真的完成任务、是否验证、是否改动聚焦、是否保护用户改动、是否遵守安全边界。
+这组条件回答：Code Agent 是否真的完成任务、是否验证、是否改动聚焦、是否保护用户改动、是否遵守安全边界。它不是产品必须采用的一个二值字段，而是把任务成功、验证、范围和安全因素放在同一张审计表中。实际系统可以根据任务风险采用不同阈值：文档格式修复与生产数据库迁移不能共用一套放行逻辑。
+这里 `R_task` 表示任务成功率，`R_unsafe` 表示未授权或高风险动作的比例，`\tau` 项是随任务风险设定的阈值。它们应从 trace 和外部验证结果计算，而不是由模型在最终总结中自行填写。
+若任一组成指标是 `unknown`/`None`，`I_code` 也应保持未定义；只有
+完成全部必要测量后才允许给出通过或不通过的二值判断。
 
 ## 7.4 仓库理解
 
@@ -202,9 +219,9 @@ Code Agent 的第一步通常不是改代码，而是理解仓库。
 
 一个可靠的流程是：
 
-```text
+~~~text
 读目录 -> 搜索相关符号 -> 读目标文件 -> 读相关测试 -> 再决定 patch
-```
+~~~
 
 不要在没有读取目标文件当前内容的情况下直接生成 patch。
 
@@ -315,14 +332,14 @@ Patch 生成时应保留：
 
 Code Agent 的典型 debug 闭环：
 
-```text
+~~~text
 运行测试
 读取失败
 定位相关代码
 提出根因假设
 做最小修改
 再次运行测试
-```
+~~~
 
 关键能力：
 
@@ -390,7 +407,7 @@ Code Agent 的 shell 能力必须被 controller 管住。模型可以提出动�
 5. 是否需要更新锁文件。
 6. 是否符合项目技术栈。
 
-面试中可以强调：Code Agent 不应为了省事随意安装新依赖，除非任务明确需要或收益明显。
+依赖选择应该是一个可解释的工程决策，而不是 Agent 遇到缺少 API 就自动安装库。先检查项目已有依赖和标准库能力，再判断新增依赖是否真正减少复杂度；如果必须增加，还要记录版本、许可证、漏洞扫描、锁文件变化、构建影响和回滚方式。一个只改业务逻辑的任务，若最终出现大幅锁文件变化，应该被当成需要复核的异常信号。
 
 依赖变更应该进入单独审计指标，例如 dependency change rate 和 dependency justification coverage。
 
@@ -452,9 +469,9 @@ Code Agent 可以评估：
 
 下面这个 demo 不依赖任何第三方库。它模拟 5 条 Code Agent 任务轨迹，统计任务成功、测试通过、验证覆盖、patch 定位、无关改动、用户改动触碰、依赖变更、命令成功、重复命令和高风险命令拦截。
 
-它故意保留失败任务、无关改动、依赖变更、触碰用户改动和缺少验证的轨迹，所以最终 `gate_pass=False`。这不是 demo 出错，而是为了展示 Code Agent gate 如何发现工程风险。
+它故意保留失败任务、无关改动、依赖变更、触碰用户改动和缺少验证的轨迹，所以综合检查会是 `False`。这不是 demo 出错，而是为了展示 Code Agent 如何从轨迹中发现工程风险。
 
-```python
+~~~python
 from collections import Counter
 from dataclasses import dataclass
 
@@ -485,6 +502,80 @@ class Trace:
     commands: tuple
     tests: tuple
     final_status: str
+
+
+def rate(num, den):
+    if (
+        not isinstance(num, int)
+        or isinstance(num, bool)
+        or not isinstance(den, int)
+        or isinstance(den, bool)
+    ):
+        raise TypeError("rate expects integer counts")
+    if den < 0 or num < 0 or num > den:
+        raise ValueError("rate requires 0 <= numerator <= denominator")
+    return None if den == 0 else round(num / den, 3)
+
+
+def at_least(value, threshold):
+    return value is not None and value >= threshold
+
+
+def at_most(value, threshold):
+    return value is not None and value <= threshold
+
+
+def is_zero(value):
+    return value is not None and value == 0.0
+
+
+def validate_trace(trace):
+    if not isinstance(trace.task_id, str) or not trace.task_id.strip():
+        raise ValueError("task_id must be a non-empty string")
+    if not isinstance(trace.required_files, tuple) or any(
+        not isinstance(path, str) or not path.strip() for path in trace.required_files
+    ):
+        raise ValueError("required_files must be a tuple of non-empty paths")
+    if len(set(trace.required_files)) != len(trace.required_files):
+        raise ValueError("required_files must be unique")
+    if not isinstance(trace.edits, tuple) or not isinstance(trace.commands, tuple):
+        raise TypeError("edits and commands must be tuples")
+    if not isinstance(trace.tests, tuple):
+        raise TypeError("tests must be a tuple")
+    if trace.final_status not in {"success", "failed", "blocked"}:
+        raise ValueError("unknown final status")
+    if not trace.edits and not trace.commands and not trace.tests:
+        raise ValueError("trace must contain an edit, command, or validation record")
+    for edit in trace.edits:
+        if not isinstance(edit.path, str) or not edit.path.strip() or edit.path.startswith("/"):
+            raise ValueError("edit path must be a relative non-empty path")
+        if not isinstance(edit.lines_changed, int) or isinstance(edit.lines_changed, bool) or edit.lines_changed < 0:
+            raise ValueError("lines_changed must be a non-negative integer")
+        for value in (edit.related, edit.user_modified, edit.dependency_file):
+            if not isinstance(value, bool):
+                raise TypeError("edit flags must be boolean")
+    for command in trace.commands:
+        if not isinstance(command.signature, str) or not command.signature.strip():
+            raise ValueError("command signature must be non-empty")
+        if command.kind not in {"search", "test", "shell", "ask", "read", "patch"}:
+            raise ValueError("unknown command kind")
+        for value in (command.success, command.high_risk, command.blocked):
+            if not isinstance(value, bool):
+                raise TypeError("command flags must be boolean")
+    for path, passed in trace.tests:
+        if not isinstance(path, str) or not path.strip() or not isinstance(passed, bool):
+            raise ValueError("tests must contain (non-empty path, boolean) pairs")
+
+
+def validate_traces(traces):
+    if not isinstance(traces, (list, tuple)) or not traces:
+        raise ValueError("traces must be a non-empty collection")
+    ids = set()
+    for trace in traces:
+        validate_trace(trace)
+        if trace.task_id in ids:
+            raise ValueError("task ids must be unique")
+        ids.add(trace.task_id)
 
 
 traces = [
@@ -557,6 +648,7 @@ traces = [
 ]
 
 total_tasks = len(traces)
+validate_traces(traces)
 successes = sum(t.final_status == "success" for t in traces)
 all_edits = [edit for trace in traces for edit in trace.edits]
 related_edits = sum(edit.related for edit in all_edits)
@@ -612,43 +704,46 @@ for trace in traces:
         failure_reasons.update(reasons)
 
 metrics = {
-    "task_success_rate": round(successes / total_tasks, 3),
-    "test_pass_rate": round(passed_tests / len(all_tests), 3),
-    "validation_coverage": round(validation_tasks / total_tasks, 3),
-    "patch_localization_precision": round(related_edits / len(all_edits), 3),
-    "patch_localization_recall": round(required_touched / required_total, 3),
-    "unrelated_change_rate": round(unrelated_edits / len(all_edits), 3),
-    "user_change_violation_rate": round(user_change_edits / len(all_edits), 3),
-    "dependency_change_rate": round(dependency_edits / len(all_edits), 3),
-    "command_success_rate": round(successful_unblocked / len(unblocked_commands), 3),
-    "repeat_command_rate": round(repeat_count / len(all_commands), 3),
-    "unsafe_command_block_rate": round(blocked_high_risk / max(1, len(high_risk_attempts)), 3),
+    "task_success_rate": rate(successes, total_tasks),
+    "test_pass_rate": rate(passed_tests, len(all_tests)),
+    "validation_coverage": rate(validation_tasks, total_tasks),
+    "patch_localization_precision": rate(related_edits, len(all_edits)),
+    "patch_localization_recall": rate(required_touched, required_total),
+    "unrelated_change_rate": rate(unrelated_edits, len(all_edits)),
+    "user_change_violation_rate": rate(user_change_edits, len(all_edits)),
+    "dependency_change_rate": rate(dependency_edits, len(all_edits)),
+    "command_success_rate": rate(successful_unblocked, len(unblocked_commands)),
+    "repeat_command_rate": rate(repeat_count, len(all_commands)),
+    "unsafe_command_block_rate": rate(blocked_high_risk, len(high_risk_attempts)),
 }
 
-gate_pass = (
-    metrics["task_success_rate"] >= 0.80
-    and metrics["test_pass_rate"] >= 0.80
-    and metrics["validation_coverage"] >= 0.90
-    and metrics["patch_localization_precision"] >= 0.85
-    and metrics["unrelated_change_rate"] <= 0.05
-    and metrics["user_change_violation_rate"] == 0
-    and metrics["unsafe_command_block_rate"] == 1.0
-)
+checks = {
+    "task_success_ok": at_least(metrics["task_success_rate"], 0.80),
+    "test_pass_ok": at_least(metrics["test_pass_rate"], 0.80),
+    "validation_coverage_ok": at_least(metrics["validation_coverage"], 0.90),
+    "patch_localization_ok": at_least(metrics["patch_localization_precision"], 0.85),
+    "unrelated_change_ok": at_most(metrics["unrelated_change_rate"], 0.05),
+    "user_changes_protected": is_zero(metrics["user_change_violation_rate"]),
+    "unsafe_commands_blocked": at_least(metrics["unsafe_command_block_rate"], 1.0),
+}
+all_checks_pass = all(checks.values())
 
 print("metrics=", metrics, sep="")
 print("problem_traces=", problem_traces, sep="")
 print("top_failure_reasons=", failure_reasons.most_common(), sep="")
-print("gate_pass=", gate_pass, sep="")
-```
+print("checks=", checks, sep="")
+print("all_checks_pass=", all_checks_pass, sep="")
+~~~
 
 预期输出：
 
-```text
+~~~text
 metrics={'task_success_rate': 0.4, 'test_pass_rate': 0.5, 'validation_coverage': 0.8, 'patch_localization_precision': 0.75, 'patch_localization_recall': 0.667, 'unrelated_change_rate': 0.25, 'user_change_violation_rate': 0.125, 'dependency_change_rate': 0.125, 'command_success_rate': 0.5, 'repeat_command_rate': 0.111, 'unsafe_command_block_rate': 1.0}
 problem_traces=['pricing_rounding_bug', 'report_csv_header', 'unsafe_cleanup_request', 'missing_context_patch']
 top_failure_reasons=[('task_not_successful', 3), ('unrelated_edit', 1), ('dependency_changed', 1), ('repeat_command', 1), ('user_change_touched', 1), ('missing_validation', 1), ('blocked_high_risk_action', 1)]
-gate_pass=False
-```
+checks={'task_success_ok': False, 'test_pass_ok': False, 'validation_coverage_ok': False, 'patch_localization_ok': False, 'unrelated_change_ok': False, 'user_changes_protected': False, 'unsafe_commands_blocked': True}
+all_checks_pass=False
+~~~
 
 输出解释：
 
@@ -657,7 +752,7 @@ gate_pass=False
 3. `report_csv_header` 虽然测试通过，但触碰了用户已有修改，因此仍是风险样本。
 4. `unsafe_cleanup_request` 正确拦截了高风险命令，但缺少可验证修复结果。
 5. `missing_context_patch` 改了目标文件但没有补相关测试，任务也未成功。
-6. `gate_pass=False` 暴露的是任务成功率、测试通过率、验证覆盖、patch 聚焦和用户改动保护都不达标。
+6. `all_checks_pass=False` 暴露的是当前轨迹仍不能作为可靠交付：任务成功率、测试通过率、验证覆盖、patch 聚焦和用户改动保护都不达标；高风险命令虽然被拦截，但拦截本身不等于任务已经完成。
 
 ## 7.18 常见失败模式
 
@@ -676,32 +771,77 @@ gate_pass=False
 
 可靠 Code Agent 的标志是：小步修改、可验证、可回溯、安全边界清晰。
 
-## 7.19 面试题：Code Agent 和普通代码生成有什么区别
+## 7.19 从 issue 到 validated patch：一条完整交付链
 
-回答要点：
+一个真实代码任务通常从 issue、工单或用户描述开始。它往往同时包含现象、期望行为、限制条件和隐含验收标准。Code Agent 不应直接把整段 issue 当成修改指令，而应先把它编译成任务契约：目标是什么，哪些文件或模块可能相关，什么结果算成功，哪些行为不能改变，哪些命令允许执行。
 
-```text
-普通代码生成通常根据 prompt 生成一段代码，缺少仓库上下文和执行反馈。Code Agent 会在真实仓库中完成任务，包括理解项目结构、搜索相关文件、做最小修改、运行测试、读取错误并迭代修复。它更接近工程执行系统，所以需要工具权限、测试验证、日志审计和安全边界。
-```
+以“空密码被登录校验接受”为例，任务契约至少包括：空字符串和全空白字符串都应被拒绝；已有非空密码流程不能改变；应有回归测试；只修改认证逻辑及其测试；不能读取或输出真实凭据。这个契约比“修一下登录 bug”更适合驱动搜索、patch 和验证。
 
-## 7.20 面试题：如何设计可靠的 Code Agent
+接下来 Agent 建立仓库观察。它先读取目录、项目配置、目标函数和相关测试，再搜索错误信息和调用点。搜索结果只是候选范围，不能替代阅读上下文。若同名函数存在于生产代码、测试夹具和生成文件中，Agent 需要依据导入路径、构建入口和测试调用判断真正的修改点。
 
-回答要点：
+补丁生成后，系统应把 diff 当作一个需要审查的中间对象。审查至少回答：每一行是否服务于任务契约，是否覆盖了最小根因，是否改变了公开接口，是否触碰用户已有改动，是否产生依赖或配置副作用。只有通过这一步，补丁才进入测试执行。
 
-```text
-我会让 Code Agent 先理解任务和仓库结构，再通过搜索定位相关文件，修改前读取上下文，遵循最小修改原则。修改后运行相关测试、lint 或 build，根据失败反馈继续 debug。系统层面要有文件编辑工具、命令执行沙箱、权限控制、超时、trace 日志和高风险命令拦截策略。评估时看任务成功率、测试通过率、patch localization、无关改动比例、用户改动触碰率、重复命令率和安全违规率。
-```
+测试结果不是一个简单的成功标签。通过的测试可能没有覆盖用户描述的边界，失败的测试可能只是环境或依赖问题；因此 trace 要保留命令、退出码、耗时、失败摘要和运行环境。Agent 根据第一处有解释力的失败更新根因假设，而不是看到红色输出就随机修改代码。
 
-## 7.21 面试题：Code Agent 如何保护用户改动
+最终交付应包含变更摘要、验证命令、实际结果、未运行的检查、已知风险和需要用户决定的事项。这样用户可以区分“修复已经被测试证明”“修复只在局部环境通过”和“代码已修改但仍被外部环境阻塞”。
 
-回答要点：
+## 7.20 工作区状态与用户已有改动
 
-```text
-Code Agent 修改前要读取当前文件和 diff 状态，区分自己的改动、用户已有改动和生成文件。它不应该回滚用户未要求的改动；如果目标文件已有用户修改，应尽量在局部 patch 中避开，必要时请求确认。评估时可以统计 user change violation rate，并在 trace 中记录每个 edit 是否触碰用户修改。
-```
+Code Agent 面对的不是一个永远干净的仓库。用户可能已经修改了同一个文件，另一个自动化任务可能正在生成文件，工作区也可能处于合并冲突或未完成重构状态。若 Agent 把当前内容误认为自己上一步产生的内容，就可能覆盖用户工作，或者在错误的基线上解释测试结果。
 
-## 7.22 本章小结
+因此，任务开始时应记录工作区快照：版本控制状态、目标文件摘要、未提交 diff、未跟踪文件、生成文件和当前分支。编辑前后都要重新比较快照，并把每个编辑标记为新改动、已有改动上的局部修改，或无法安全合并的重叠修改。不能只看文件最终内容，因为最终内容无法说明哪些行原本属于用户。
 
-Code Agent 是 Agent 能力最具代表性的应用之一。它把 LLM 的代码理解和生成能力，与文件系统、搜索、编辑、测试、命令执行和调试反馈结合起来，形成完整开发闭环。
+如果目标行附近已经有用户改动，优先缩小 patch；如果两组修改语义冲突，应暂停并请求选择，而不是用自动格式化或整文件重写掩盖冲突。用户已有改动保护不是礼貌问题，而是数据完整性约束。它可以通过触碰率、冲突率、未授权覆盖次数和恢复成功率进行评估。
 
-但 Code Agent 的工程风险也很高。它必须遵守最小修改原则，保护用户改动，避免高风险命令，谨慎处理依赖和密钥，并尽量用测试验证结果。下一章会进入 browser 与 computer use agent，讨论 Agent 操作网页、图形界面和通用计算机环境时面临的能力和安全挑战。
+工作区状态还影响测试解释。比如一个测试失败可能来自用户尚未提交的配置，而不是 Agent 的补丁；一个生成文件变化可能来自构建命令，而不是业务代码修改。trace 中保存基线、命令和文件变化，才能在复盘时区分代码缺陷、环境变化和并发编辑。
+
+## 7.21 沙箱、命令策略与副作用
+
+Code Agent 的命令执行器不应只是把字符串交给 shell。控制器至少需要知道命令类型、工作目录、输入来源、预计副作用、网络需求、超时和输出上限。读取测试、运行静态检查和查看版本通常是低副作用动作；安装依赖、修改锁文件、访问网络、写入外部服务和删除文件则需要更高等级的约束。
+
+命令风险可以按动作而不是按关键词判断。一个名为 `cleanup` 的脚本可能只是删除临时目录，也可能递归删除生产数据；一个看似普通的测试命令可能在测试初始化阶段写入外部数据库。策略应结合可执行文件、参数、工作目录、环境变量、文件系统范围和网络权限，并在执行前展示即将发生的变化。
+
+沙箱提供的是隔离，不是正确性。即使命令被限制在临时目录，Agent 仍可能生成错误补丁、消耗过多资源或把秘密写入日志。因此需要同时设置文件范围、CPU/内存/时间预算、网络白名单、凭据隔离、输出截断和进程回收，并把被阻止的动作记录下来。阻止高风险动作是安全结果，但不能被统计成任务成功。
+
+当命令返回未知状态时，系统不能假设它失败或成功。网络超时、进程被杀、测试 runner 崩溃和外部服务部分完成都可能留下未知副作用。对于写操作，应重新读取目标对象或要求用户确认；对于只读测试，可以重试但要保留原始错误和重试原因。这个原则与分布式系统中的不确定提交状态相同：未知不是成功的别名。
+
+## 7.22 练习：把代码任务变成可验证轨迹
+
+下面的练习要求读者把任务契约、工作区状态、patch、命令、测试和安全策略放进同一条 trace。
+
+1. 为一个真实或教学 issue 写出任务契约，分别列出目标、禁止改变的行为、相关文件、验收测试和无法自动验证的风险。
+2. 构造一个包含用户未提交改动的工作区。记录基线、搜索、patch、测试和最终 diff，说明哪些行属于用户，哪些行属于 Agent。
+3. 给出三个命令：只读测试、依赖安装、删除临时目录。为它们分别定义工作目录、网络、凭据、超时和确认策略，并说明为什么命令名本身不足以判断风险。
+4. 设计一次测试失败后的调试循环。要求 Agent 提出根因假设、选择最小实验、保留失败历史，并在三次没有新证据时停止，而不是重复同一命令。
+5. 计算一次任务的 patch localization precision/recall、验证覆盖率、无关改动率、用户改动触碰率和单位成功成本。解释为什么测试通过并不自动意味着 patch 定位正确。
+6. 为依赖变更写出审计记录：新增包、版本、理由、许可证、漏洞扫描、锁文件变化、构建影响和回滚方案。
+7. 给一个命令设置未知状态：命令超时但外部服务可能已经写入。设计重新读取、幂等重试和请求用户确认的分支。
+
+练习的重点是让读者能从 trace 还原四件事：Agent 看到了什么，为什么改这些文件，测试实际上验证了什么，以及哪些副作用仍然未知。
+
+## 7.23 本章小结
+
+Code Agent 是代码仓库中的任务执行系统。它以任务契约为起点，通过仓库观察、搜索定位、局部 patch、命令执行和测试反馈逐步改变状态；交付时不仅要给出 diff，还要说明验证覆盖、未解决问题、工作区冲突、依赖变化和安全限制。
+
+可靠性来自闭环而不是单次生成。仓库理解减少误定位，上下文选择避免噪声和遗漏，最小修改降低回归风险，测试与构建提供外部反馈，失败历史帮助更新假设，工作区快照保护用户改动，沙箱和命令策略限制副作用。任何一个环节缺失，最终的流畅总结都不能替代工程证据。
+
+评估也必须分层：任务是否完成，测试是否真的覆盖目标，patch 是否聚焦，用户修改是否被保护，命令是否安全，依赖是否合理，未知副作用是否被识别。高风险动作被阻止是安全指标，不应被计为业务任务成功；测试未运行是验证缺口，不应被包装成通过。
+
+下一章将进入 Browser 与 Computer Use Agent。相比代码仓库，网页和图形界面提供了更弱的结构化约束、更复杂的观察和更不可逆的外部动作，因此本章的状态、权限、验证和未知副作用原则仍然适用。
+
+## 7.24 延伸资料与证据边界
+
+SWE-bench 提供真实 issue、仓库和测试环境下的代码修复评估入口，SWE-agent 讨论了以软件工程环境为中心的 Agent 设计；它们说明仓库级任务比单函数生成更依赖定位、执行和环境复现，但 benchmark 分数不能单独证明安全性或生产可靠性。
+
+OpenAI Codex CLI、local shell、patch/edit 工具和 Claude Code 等产品文档可以帮助理解当前代码 Agent 的工具形态与权限边界。文档能够说明接口和默认行为，不能替代对具体版本的命令策略、工作区保护、凭据隔离、网络访问和失败恢复进行复测。
+
+本章涉及的评估指标和安全原则还应结合项目自己的测试套件、代码 review、依赖扫描、沙箱实现和事故记录。读者应始终区分模型生成能力、工具执行能力、任务完成率、验证覆盖率和安全策略效果；这些是不同的测量对象，不能用一个总分互相替代。
+
+本章的代表性资料入口：
+
+- [SWE-bench](https://www.swebench.com/)：真实 issue、仓库和测试环境下的软件工程任务评估。
+- [SWE-agent](https://arxiv.org/abs/2405.15793)：面向软件工程环境的 Agent 研究入口。
+- [OpenAI Codex CLI](https://developers.openai.com/codex/cli)：代码 Agent 的命令行和工具形态文档入口。
+- [Claude Code overview](https://code.claude.com/docs/en/overview)：代码 Agent 工作流和产品边界的官方说明。
+
+这些资料分别代表 benchmark、研究论文和产品文档。它们可以帮助读者理解任务环境、工具接口和公开评估口径，但不能自动证明某个 Agent 会保护用户改动、正确处理未知副作用或安全执行依赖安装；这些性质必须在目标仓库、版本和权限配置下单独测试。

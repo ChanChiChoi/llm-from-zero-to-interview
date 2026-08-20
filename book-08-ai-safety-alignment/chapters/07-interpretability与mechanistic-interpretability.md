@@ -672,7 +672,10 @@ S_{patch}(\ell,p)=
 {\Delta(x^+)-\Delta(x^-)}
 $$
 
-如果 \(S_{patch}\) 接近 1，说明该位置激活能显著恢复目标行为。
+如果 \(S_{patch}\) 接近 1，说明该位置激活能显著恢复目标行为。当
+\(\Delta(x^+)=\Delta(x^-)\) 时，clean 与 corrupted 本来就没有可测的目标差异，分母
+为 0；这时恢复分没有定义，应记录为 \(N/A\)，而不是把它当成 0 分。实际评估还应为
+“分母非常小”设置数值容差，因为极小分母会把测量噪声放大成看似巨大的恢复分。
 
 **3. Ablation 影响分**
 
@@ -722,7 +725,10 @@ $$
 F_{rec}=1-\frac{\sum_i \|r_i-\hat r_i\|_2^2}{\sum_i \|r_i-\bar r\|_2^2}
 $$
 
-它类似解释方差比例。保真度太低时，feature 解释可能只是漂亮标签，不能可靠代表原模型激活。
+它类似解释方差比例。分母是原始激活相对于均值基线的总平方误差；如果所有激活几乎相同，
+分母为 0，\(F_{rec}\) 没有定义，应记录为 \(N/A\)。保真度太低时，feature 解释可能只是
+漂亮标签，不能可靠代表原模型激活；保真度很高也只说明重构接近，不自动证明每个 feature
+都有清晰语义。
 
 **7. 稀疏度**
 
@@ -743,6 +749,9 @@ P_k=\max_c \frac{1}{m}\sum_{i\in Top_m(k)} \mathbb{1}[label_i=c]
 $$
 
 这个指标衡量 feature 是否接近 monosemantic。它仍然依赖标签质量，不能替代因果验证。
+如果 top-m 样本不足、标签不完整或标签之间无法可靠比较，\(P_k\) 不应被写成 0，而应
+记录为未定义（\(N/A\)），再补充样本或进行人工复核。即使 \(P_k\) 很高，也只能说明被
+选中的样本集中在一个标签附近，不能证明该 feature 在所有上下文中都只表示这个概念。
 
 **9. Feature-level intervention**
 
@@ -1239,7 +1248,8 @@ from collections import Counter
 
 
 def ratio(num, den):
-    return round(num / den, 3) if den else 0.0
+    """返回比例；没有有效分母时保留 N/A，而不是伪造零证据。"""
+    return round(num / den, 3) if den else None
 
 
 def squared_error(a, b):
@@ -1382,6 +1392,8 @@ signals = {
 
 
 def meets_threshold(signal, threshold):
+    if signal is None:
+        return False
     if threshold["operator"] == ">=":
         return signal >= threshold["value"]
     if threshold["operator"] == "<=":
@@ -1393,6 +1405,8 @@ evidence_status = {
     name: meets_threshold(signals[name], threshold)
     for name, threshold in thresholds.items()
 }
+
+undefined_metrics = [name for name, value in signals.items() if value is None]
 
 actions = {
     "patch_causal": "replicate_patch_on_holdout",
@@ -1408,6 +1422,7 @@ decision = {
     "scope": "local_mechanism_hypothesis",
     "status": "collect_holdout_and_behavioral_evidence",
     "evidence_status": evidence_status,
+    "undefined_metrics": undefined_metrics,
     "next_actions": list(actions.values()),
 }
 
@@ -1419,6 +1434,7 @@ print("metrics=", metrics)
 print("thresholds=", thresholds)
 print("signals=", signals)
 print("evidence_status=", evidence_status)
+print("undefined_metrics=", undefined_metrics)
 print("actions=", actions)
 print("decision=", decision)
 ```
@@ -1434,8 +1450,9 @@ metrics= {'best_patch': 'layer2_pos3', 'best_patch_score': 0.8, 'max_ablation_ef
 thresholds= {'patch_causal': {'operator': '>=', 'value': 0.75}, 'ablation_effect': {'operator': '>=', 'value': 1.0}, 'path_patch': {'operator': '>=', 'value': 0.7}, 'reconstruction': {'operator': '>=', 'value': 0.95}, 'sparsity': {'operator': '<=', 'value': 1.5}, 'purity': {'operator': '>=', 'value': 0.9}, 'feature_intervention': {'operator': '>=', 'value': 0.5}}
 signals= {'patch_causal': 0.8, 'ablation_effect': 1.6, 'path_patch': 0.75, 'reconstruction': 0.993, 'sparsity': 1.0, 'purity': 1.0, 'feature_intervention': 0.8}
 evidence_status= {'patch_causal': True, 'ablation_effect': True, 'path_patch': True, 'reconstruction': True, 'sparsity': True, 'purity': True, 'feature_intervention': True}
+undefined_metrics= []
 actions= {'patch_causal': 'replicate_patch_on_holdout', 'ablation_effect': 'test_component_redundancy', 'path_patch': 'check_upstream_and_downstream_paths', 'reconstruction': 'review_sae_dictionary_fidelity', 'sparsity': 'inspect_feature_activation_distribution', 'purity': 'search_feature_counterexamples', 'feature_intervention': 'run_behavioral_side_effect_regression'}
-decision= {'scope': 'local_mechanism_hypothesis', 'status': 'collect_holdout_and_behavioral_evidence', 'evidence_status': {'patch_causal': True, 'ablation_effect': True, 'path_patch': True, 'reconstruction': True, 'sparsity': True, 'purity': True, 'feature_intervention': True}, 'next_actions': ['replicate_patch_on_holdout', 'test_component_redundancy', 'check_upstream_and_downstream_paths', 'review_sae_dictionary_fidelity', 'inspect_feature_activation_distribution', 'search_feature_counterexamples', 'run_behavioral_side_effect_regression']}
+decision= {'scope': 'local_mechanism_hypothesis', 'status': 'collect_holdout_and_behavioral_evidence', 'evidence_status': {'patch_causal': True, 'ablation_effect': True, 'path_patch': True, 'reconstruction': True, 'sparsity': True, 'purity': True, 'feature_intervention': True}, 'undefined_metrics': [], 'next_actions': ['replicate_patch_on_holdout', 'test_component_redundancy', 'check_upstream_and_downstream_paths', 'review_sae_dictionary_fidelity', 'inspect_feature_activation_distribution', 'search_feature_counterexamples', 'run_behavioral_side_effect_regression']}
 ```
 
 这个 demo 的重点不是数值本身，而是机制可解释性报告应该同时包含：

@@ -160,6 +160,10 @@ C_pref = (A, mean(m), R_leak, R_over, B_len, C_risk)
 
 其中 `C_risk` 是安全风险类别覆盖率。preference data 是模型行为价值函数的样本，安全数据是边界行为样本；两者都必须版本化、分桶审计，并把不同错误对应到不同修复动作。
 
+这些比率都有明确的定义域。`R_leak` 的分母是“应当拒绝”的样本数，`R_over` 的分母是“应当正常回答”的样本数；它们不能把所有安全样本混在一起。若某一类样本数量为零，指标应记为 `undefined` 或 `None`，而不是擅自记成 0。0 表示分母存在且没有发生该错误，`undefined` 表示这次数据中没有足够证据。长度偏置同样需要非空样本集，且应说明统计的是偏好对、回答还是某个风险分桶。
+
+本章后面的审计示例只处理数据集覆盖和标签质量，并没有运行模型、得到 `pred_action`，因此不会把数据覆盖率冒充成 `R_leak` 或 `R_over`。示例会分别报告应拒答与应答样本的保留情况；真正的漏拒率和误拒率，要在独立模型评估集上用模型预测计算。
+
 ---
 
 ## 4. 偏好维度：helpful、honest、harmless
@@ -556,7 +560,7 @@ prompt 池要覆盖真实用户请求、长尾任务、专业领域、多语言�
 
 ### 23.1 最小可运行偏好与安全数据审计 demo
 
-下面这个 demo 不依赖外部库，也不读写文件。输入是一组 toy preference / safety 样本；输出包括保留样本、拒绝原因、风险配比、语言配比、平均偏好 margin、误拒 / 漏拒修复覆盖、检查信号和后续动作。
+下面这个 demo 不依赖外部库，也不读写文件。输入是一组 toy preference / safety 样本；输出包括保留样本、拒绝原因、按数据类型拆分的保留率与配比、平均偏好 margin、安全动作覆盖、检查信号和后续动作。
 
 它演示的是数据治理机制，不是生产级 reward model、DPO trainer、安全分类器、红队平台或隐私系统。真实项目要接入标注平台、专家复核、policy registry、PII 脱敏、红队回归集、人工一致性统计、训练 ablation 和线上安全监控。这里的检查结果只是决定下一轮数据实验的依据，不等于模型已经具备了可部署的安全性。
 
@@ -582,6 +586,14 @@ WEIGHTS = {"helpful": 0.38, "honest": 0.32, "harmless": 0.30}
 MIN_MARGIN = 0.08
 MIN_AGREEMENT = 0.67
 TARGET_RISKS = {"normal", "high_risk", "boundary_allowed", "professional", "privacy"}
+
+
+def safe_ratio(numerator, denominator):
+    return round(numerator / denominator, 3) if denominator else None
+
+
+def safe_mean(values):
+    return round(sum(values) / len(values), 3) if values else None
 
 
 def quality(answer):
@@ -616,38 +628,79 @@ for item in samples:
     c_q = round(quality(item["chosen"]), 3)
     r_q = round(quality(item["rejected"]), 3)
     reason = reject_reason(item)
-    rows.append({"id": item["id"], "risk": item["risk"], "chosen_q": c_q, "rejected_q": r_q, "margin": round(c_q - r_q, 3), "reason": reason or "kept"})
+    rows.append({"id": item["id"], "kind": item["kind"], "risk": item["risk"], "chosen_q": c_q, "rejected_q": r_q, "margin": round(c_q - r_q, 3), "reason": reason or "kept"})
     if reason:
         rejected[item["id"]] = reason
     else:
         kept.append(item)
 
-risk_tokens, lang_tokens = defaultdict(int), defaultdict(int)
+raw_kind_tokens, kept_kind_tokens = defaultdict(int), defaultdict(int)
+risk_tokens_by_kind = defaultdict(lambda: defaultdict(int))
+lang_tokens_by_kind = defaultdict(lambda: defaultdict(int))
+raw_action_counts, kept_action_counts = Counter(), Counter()
+margin_by_kind = defaultdict(list)
 kind_counts = Counter()
+for item in samples:
+    raw_kind_tokens[item["kind"]] += item["tokens"]
+    if item["kind"] == "safety":
+        raw_action_counts[item["expected"]] += 1
 for item in kept:
-    risk_tokens[item["risk"]] += item["tokens"]
-    lang_tokens[item["lang"]] += item["tokens"]
+    kept_kind_tokens[item["kind"]] += item["tokens"]
+    risk_tokens_by_kind[item["kind"]][item["risk"]] += item["tokens"]
+    lang_tokens_by_kind[item["kind"]][item["lang"]] += item["tokens"]
+    row = next(row for row in rows if row["id"] == item["id"])
+    margin_by_kind[item["kind"]].append(row["margin"])
     kind_counts[item["kind"]] += 1
+    if item["kind"] == "safety":
+        kept_action_counts[item["expected"]] += 1
 
 kept_tokens = sum(item["tokens"] for item in kept)
 raw_tokens = sum(item["tokens"] for item in samples)
 safety_kept = [item for item in kept if item["kind"] == "safety"]
-leak_repairs = [item["id"] for item in safety_kept if item["expected"] == "refuse"]
-over_refusal_repairs = [item["id"] for item in safety_kept if item["expected"] == "answer"]
-coverage = len(set(risk_tokens) & TARGET_RISKS) / len(TARGET_RISKS)
+retained_refusal_targets = [item["id"] for item in safety_kept if item["expected"] == "refuse"]
+retained_answer_targets = [item["id"] for item in safety_kept if item["expected"] == "answer"]
+coverage = safe_ratio(len(set(item["risk"] for item in kept) & TARGET_RISKS), len(TARGET_RISKS))
+retention_by_kind = {
+    kind: safe_ratio(kept_kind_tokens[kind], raw_kind_tokens[kind])
+    for kind in sorted(raw_kind_tokens)
+}
+risk_mix_by_kind = {
+    kind: {
+        risk: safe_ratio(tokens, kept_kind_tokens[kind])
+        for risk, tokens in sorted(buckets.items())
+    }
+    for kind, buckets in sorted(risk_tokens_by_kind.items())
+}
+lang_mix_by_kind = {
+    kind: {
+        lang: safe_ratio(tokens, kept_kind_tokens[kind])
+        for lang, tokens in sorted(buckets.items())
+    }
+    for kind, buckets in sorted(lang_tokens_by_kind.items())
+}
+safety_action_coverage = {
+    action: safe_ratio(kept_action_counts[action], raw_action_counts[action])
+    for action in sorted({"answer", "refuse", "safe_alt", "clarify"} | set(raw_action_counts))
+}
 
 report = {
     "kept_ids": [item["id"] for item in kept],
     "rejected": dict(sorted(rejected.items())),
     "reason_counts": dict(sorted(Counter(rejected.values()).items())),
-    "retention": round(kept_tokens / raw_tokens, 3),
+    "retention": safe_ratio(kept_tokens, raw_tokens),
     "kind_counts": dict(sorted(kind_counts.items())),
-    "risk_mix": {k: round(risk_tokens[k] / kept_tokens, 3) for k in sorted(risk_tokens)},
-    "lang_mix": {k: round(lang_tokens[k] / kept_tokens, 3) for k in sorted(lang_tokens)},
-    "avg_margin": round(sum(row["margin"] for row in rows if row["reason"] == "kept") / len(kept), 3),
-    "coverage": round(coverage, 3),
-    "leak_repairs": leak_repairs,
-    "over_refusal_repairs": over_refusal_repairs,
+    "retention_by_kind": retention_by_kind,
+    "risk_mix_by_kind": risk_mix_by_kind,
+    "lang_mix_by_kind": lang_mix_by_kind,
+    "avg_margin_by_kind": {
+        kind: safe_mean(values) for kind, values in sorted(margin_by_kind.items())
+    },
+    "coverage": coverage,
+    "raw_safety_action_counts": dict(sorted(raw_action_counts.items())),
+    "kept_safety_action_counts": dict(sorted(kept_action_counts.items())),
+    "safety_action_coverage": safety_action_coverage,
+    "retained_refusal_targets": retained_refusal_targets,
+    "retained_answer_targets": retained_answer_targets,
     "score_preview": {row["id"]: (row["chosen_q"], row["rejected_q"], row["margin"]) for row in rows},
 }
 
@@ -657,16 +710,23 @@ checks = {
     "contamination_filter_observed": "eval_contamination" in report["reason_counts"],
     "length_bias_review_observed": "length_bias_risk" in report["reason_counts"],
     "wrong_action_review_observed": "wrong_safety_action" in report["reason_counts"],
-    "risk_coverage_complete": report["coverage"] >= 1.0,
-    "safety_balance_present": bool(leak_repairs) and bool(over_refusal_repairs),
+    "risk_coverage_complete": report["coverage"] is not None and report["coverage"] >= 1.0,
+    "safety_balance_present": (
+        raw_action_counts["refuse"] > 0
+        and raw_action_counts["answer"] > 0
+        and kept_action_counts["refuse"] > 0
+        and kept_action_counts["answer"] > 0
+    ),
     "preference_and_safety_present": kind_counts["preference"] >= 2 and kind_counts["safety"] >= 3,
+    "retained_samples_present": bool(kept),
 }
 signals = {
     "retention": report["retention"],
-    "avg_margin": report["avg_margin"],
+    "avg_margin_by_kind": report["avg_margin_by_kind"],
     "risk_coverage": report["coverage"],
-    "leak_repair_count": len(leak_repairs),
-    "over_refusal_repair_count": len(over_refusal_repairs),
+    "refusal_target_count": len(retained_refusal_targets),
+    "answer_target_count": len(retained_answer_targets),
+    "safety_action_coverage": report["safety_action_coverage"],
     "rejected_reason_counts": report["reason_counts"],
 }
 actions = [
@@ -674,6 +734,18 @@ actions = [
     "review_agreement_and_length_outliers",
     "preserve_refusal_and_allowed_pairs",
 ]
+if not samples:
+    actions.append("restore_or_collect_preference_and_safety_records")
+if samples and not kept:
+    actions.append("restore_nonempty_auditable_dataset")
+if raw_action_counts["refuse"] == 0:
+    actions.append("add_expected_refusal_samples")
+if raw_action_counts["answer"] == 0:
+    actions.append("add_boundary_allowed_samples")
+if raw_action_counts["refuse"] > 0 and kept_action_counts["refuse"] == 0:
+    actions.append("repair_or_retain_refusal_samples")
+if raw_action_counts["answer"] > 0 and kept_action_counts["answer"] == 0:
+    actions.append("repair_or_retain_boundary_allowed_samples")
 decision = "continue_to_preference_ablation" if all(checks.values()) else "hold_for_data_repair"
 report["checks"] = checks
 report["signals"] = signals
@@ -700,7 +772,17 @@ assert report["reason_counts"] == {
 }
 assert report["retention"] == 0.57
 assert report["kind_counts"] == {"preference": 2, "safety": 4}
-assert report["risk_mix"] == {"boundary_allowed": 0.145, "high_risk": 0.164, "normal": 0.376, "privacy": 0.138, "professional": 0.176}
+assert report["retention_by_kind"] == {"preference": 0.377, "safety": 0.824}
+assert report["risk_mix_by_kind"] == {
+    "preference": {"normal": 1.0},
+    "safety": {"boundary_allowed": 0.233, "high_risk": 0.263, "privacy": 0.221, "professional": 0.282},
+}
+assert report["lang_mix_by_kind"] == {
+    "preference": {"en": 0.481, "zh": 0.519},
+    "safety": {"en": 0.718, "zh": 0.282},
+}
+assert report["avg_margin_by_kind"] == {"preference": 0.157, "safety": 0.282}
+assert report["safety_action_coverage"] == {"answer": 0.5, "clarify": None, "refuse": 1.0, "safe_alt": 1.0}
 assert report["coverage"] == 1.0
 assert all(checks.values())
 assert report["decision"] == "continue_to_preference_ablation"
@@ -713,20 +795,21 @@ kept_ids= ['pref_summary_helpful', 'pref_factual_citation', 'safe_high_risk_refu
 rejected= {'pref_eval_leak': 'eval_contamination', 'pref_length_bias': 'length_bias_risk', 'pref_low_agreement': 'low_labeler_agreement', 'pref_private_log': 'privacy_or_pii', 'safe_wrong_action': 'wrong_safety_action'}
 reason_counts= {'eval_contamination': 1, 'length_bias_risk': 1, 'low_labeler_agreement': 1, 'privacy_or_pii': 1, 'wrong_safety_action': 1}
 retention= 0.57
-kind_counts= {'preference': 2, 'safety': 4}
-risk_mix= {'boundary_allowed': 0.145, 'high_risk': 0.164, 'normal': 0.376, 'privacy': 0.138, 'professional': 0.176}
-lang_mix= {'en': 0.629, 'zh': 0.371}
-avg_margin= 0.241
+retention_by_kind= {'preference': 0.377, 'safety': 0.824}
+risk_mix_by_kind= {'preference': {'normal': 1.0}, 'safety': {'boundary_allowed': 0.233, 'high_risk': 0.263, 'privacy': 0.221, 'professional': 0.282}}
+lang_mix_by_kind= {'preference': {'en': 0.481, 'zh': 0.519}, 'safety': {'en': 0.718, 'zh': 0.282}}
+avg_margin_by_kind= {'preference': 0.157, 'safety': 0.282}
+safety_action_coverage= {'answer': 0.5, 'clarify': None, 'refuse': 1.0, 'safe_alt': 1.0}
 coverage= 1.0
-leak_repairs= ['safe_high_risk_refusal', 'safe_privacy_refusal']
-over_refusal_repairs= ['safe_boundary_allowed']
-checks= {'agreement_filter_observed': True, 'privacy_filter_observed': True, 'contamination_filter_observed': True, 'length_bias_review_observed': True, 'wrong_action_review_observed': True, 'risk_coverage_complete': True, 'safety_balance_present': True, 'preference_and_safety_present': True}
-signals= {'retention': 0.57, 'avg_margin': 0.241, 'risk_coverage': 1.0, 'leak_repair_count': 2, 'over_refusal_repair_count': 1, 'rejected_reason_counts': {'eval_contamination': 1, 'length_bias_risk': 1, 'low_labeler_agreement': 1, 'privacy_or_pii': 1, 'wrong_safety_action': 1}}
+retained_refusal_targets= ['safe_high_risk_refusal', 'safe_privacy_refusal']
+retained_answer_targets= ['safe_boundary_allowed']
+checks= {'agreement_filter_observed': True, 'privacy_filter_observed': True, 'contamination_filter_observed': True, 'length_bias_review_observed': True, 'wrong_action_review_observed': True, 'risk_coverage_complete': True, 'safety_balance_present': True, 'preference_and_safety_present': True, 'retained_samples_present': True}
+signals= {'retention': 0.57, 'avg_margin_by_kind': {'preference': 0.31, 'safety': 0.207}, 'risk_coverage': 1.0, 'refusal_target_count': 2, 'answer_target_count': 1, 'safety_action_coverage': {'answer': 0.5, 'clarify': None, 'refuse': 1.0, 'safe_alt': 1.0}, 'rejected_reason_counts': {'eval_contamination': 1, 'length_bias_risk': 1, 'low_labeler_agreement': 1, 'privacy_or_pii': 1, 'wrong_safety_action': 1}}
 actions= ['exclude_privacy_and_contamination', 'review_agreement_and_length_outliers', 'preserve_refusal_and_allowed_pairs']
 decision= continue_to_preference_ablation
 ~~~
 
-这个 demo 的重点是把偏好数据和安全数据放在同一个治理闭环里：偏好样本要检查标注一致性、margin 和长度偏置；安全样本要同时覆盖漏拒修复和误拒修复；所有数据都要经过隐私、污染、rubric 和版本审计。`decision` 只表达“可以继续做偏好消融实验”，并没有把数据审计结果偷换成模型质量结论。
+这个 demo 的重点是把偏好数据和安全数据放在同一个治理闭环里：偏好样本要检查标注一致性、margin 和长度偏置；安全样本要同时覆盖漏拒修复和误拒修复；所有数据都要经过隐私、污染、rubric 和版本审计。`risk_mix_by_kind`、`lang_mix_by_kind` 和 `avg_margin_by_kind` 按 `preference` 与 `safety` 分开计算，避免把不同目标的样本压成一个总指标。`decision` 只表达“可以继续做偏好消融实验”，并没有把数据审计结果偷换成模型质量结论。
 
 ---
 

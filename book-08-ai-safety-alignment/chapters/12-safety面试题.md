@@ -1,4 +1,4 @@
-# 第十二章：Safety 的系统化表达与综合复习
+# 第十二章：安全的系统化判断与综合复习
 
 前面十一章分别讨论了 alignment、监督、奖励错配、越狱、红队、解释性、steering、model editing、隐私和治理。真正困难的地方，是把这些知识放回同一个系统问题里：
 
@@ -630,7 +630,7 @@ request
 
 ### 11.1 六步表达法
 
-面对一个新问题，可以按六步组织推理：
+面对一个新的安全问题，可以按六步组织推理：
 
 1. **定义**：对象是什么，边界在哪里。
 2. **机制**：风险为什么会发生，经过哪条数据或行为路径。
@@ -671,6 +671,12 @@ request
 ~~~python
 def ratio(numerator, denominator):
     return round(numerator / denominator, 3) if denominator else None
+
+
+def coverage(required, covered):
+    if not required:
+        return None
+    return ratio(len(required & covered), len(required))
 
 
 answers = [
@@ -752,32 +758,34 @@ thresholds = {
     "answer_coverage": 0.85,
     "risk_coverage": 0.85,
     "metric_coverage": 0.85,
-    "safe_boundary": 1.0,
+    "safe_boundary": 0.0,
 }
 
 weighted_answer = 0.0
-total_weight = 0
+measured_weight = 0
 topic_scores = {}
 missing_topics = {}
+undefined_topics = []
 for answer in answers:
     required = answer["required"]
     covered = answer["covered"]
-    score = ratio(len(required & covered), len(required))
+    score = coverage(required, covered)
     topic_scores[answer["topic"]] = score
     missing_topics[answer["topic"]] = sorted(required - covered)
-    weighted_answer += score * answer["weight"]
-    total_weight += answer["weight"]
+    if score is not None:
+        weighted_answer += score * answer["weight"]
+        measured_weight += answer["weight"]
+    else:
+        undefined_topics.append(answer["topic"])
 
 signals = {
-    "answer_coverage": round(weighted_answer / total_weight, 3),
-    "risk_coverage": ratio(
-        len(required_risks & covered_risks),
-        len(required_risks),
+    "answer_coverage": (
+        round(weighted_answer / measured_weight, 3)
+        if measured_weight > 0
+        else None
     ),
-    "metric_coverage": ratio(
-        len(required_metrics & covered_metrics),
-        len(required_metrics),
-    ),
+    "risk_coverage": coverage(required_risks, covered_risks),
+    "metric_coverage": coverage(required_metrics, covered_metrics),
     "unsafe_detail_count": sum(
         answer["unsafe_detail"] for answer in answers
     ),
@@ -785,18 +793,25 @@ signals = {
 
 evidence_status = {
     "answer": "supported"
-    if signals["answer_coverage"] >= thresholds["answer_coverage"]
+    if signals["answer_coverage"] is not None
+    and signals["answer_coverage"] >= thresholds["answer_coverage"]
     else "partial",
     "risk": "supported"
-    if signals["risk_coverage"] >= thresholds["risk_coverage"]
+    if signals["risk_coverage"] is not None
+    and signals["risk_coverage"] >= thresholds["risk_coverage"]
     else "partial",
     "metrics": "supported"
-    if signals["metric_coverage"] >= thresholds["metric_coverage"]
+    if signals["metric_coverage"] is not None
+    and signals["metric_coverage"] >= thresholds["metric_coverage"]
     else "partial",
     "safe_boundary": "supported"
-    if signals["unsafe_detail_count"] == 0
+    if signals["unsafe_detail_count"] <= thresholds["safe_boundary"]
     else "failed",
 }
+
+undefined_metrics = [
+    name for name, value in signals.items() if value is None
+]
 
 actions = {
     "answer": "add_missing_mechanism_or_governance_links",
@@ -818,6 +833,8 @@ report = {
     "thresholds": thresholds,
     "signals": signals,
     "evidence_status": evidence_status,
+    "undefined_metrics": undefined_metrics,
+    "undefined_topics": undefined_topics,
     "actions": actions,
     "missing_topics": missing_topics,
     "decision": decision,
@@ -830,7 +847,7 @@ print("missing_topics=", missing_topics)
 print("decision=", decision)
 ~~~
 
-这组数据会显示 prompt injection 缺少正常任务指标，Safety Platform 缺少事故响应，整体指标覆盖也不足，因此 decision 为 revise_answer_and_retest。代码没有计算一个叫“准备好了”的总开关；它保留每个缺口和动作，方便读者进行下一轮复习。
+这组数据会显示 prompt injection 缺少正常任务指标，Safety Platform 缺少事故响应，整体指标覆盖也不足，因此 decision 为 revise_answer_and_retest。若某个主题的 `required` 为空，代码会把它记录到 `undefined_topics`，并从加权覆盖率的已测分母中排除；这表示“没有可计算的题目”，不是该主题得分为零。代码没有计算一个叫“准备好了”的总开关；它保留每个缺口和动作，方便读者进行下一轮复习。
 
 ## 13. 综合练习
 

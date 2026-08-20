@@ -528,12 +528,27 @@ u(z)\,\rho_{\theta}(x,y)
 
 ### 10.2 SFT 项与 odds-ratio 项
 
-用 $P_{\theta}(y\mid x)$ 表示一个回答的序列概率，可以定义概念上的 odds：
+自回归模型给出的是一串 token 概率，直接把整段序列概率当作二分类概率会受到回答长度的强烈影响。教学上可以先定义长度归一化的平均 token 对数概率：
+
+~~~math
+
+\bar{\ell}_{\theta}(y\mid x)
+=\frac{1}{T_y}
+\sum_{t=1}^{T_y}
+\log \pi_{\theta}(y_t\mid x,y_{<t}),
+\qquad
+p^{\mathrm{geom}}_{\theta}(y\mid x)
+=\exp\bigl(\bar{\ell}_{\theta}(y\mid x)\bigr).
+
+~~~
+
+再用 $p^{\mathrm{geom}}_{\theta}(y\mid x)$ 表示平均 token 概率的几何均值，定义概念上的 odds：
 
 ~~~math
 
 o_{\theta}(y\mid x)
-=\frac{P_{\theta}(y\mid x)}{1-P_{\theta}(y\mid x)}.
+=\frac{p^{\mathrm{geom}}_{\theta}(y\mid x)}
+       {1-p^{\mathrm{geom}}_{\theta}(y\mid x)}.
 
 ~~~
 
@@ -557,7 +572,7 @@ L_{OR}(\theta)
 
 ~~~
 
-实际实现会对语言模型序列概率做长度归一化，并有具体的 odds-ratio 定义和权重。这里的关键思想是保留正例模仿，同时惩罚 rejected 方向，而不是把公式中的每个概率当成可以直接观测的独立类别概率。
+这里的几何均值和 odds 只是帮助理解 ORPO 的长度处理与偏好方向的教学写法；实际实现有具体的序列概率、mask、数值稳定和权重定义，应以论文和代码版本为准。关键思想是保留正例模仿，同时惩罚 rejected 方向，而不是把整段回答误读成一个可以直接观测的独立二分类事件。
 
 ### 10.3 没有 reference 不等于没有约束
 

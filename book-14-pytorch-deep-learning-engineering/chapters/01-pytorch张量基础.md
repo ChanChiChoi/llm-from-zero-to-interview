@@ -6,7 +6,7 @@ PyTorch 的核心对象是 tensor。大模型工程里的输入 token、embeddin
 
 本章目标不是罗列 PyTorch API，而是建立大模型工程中最常用的 tensor 基础：shape、dtype、device、broadcast、矩阵乘法、einsum、索引、reshape、view、transpose、contiguous，以及常见调试方法。
 
-## 0. 本章范围与资料
+## 1.0 本章范围与资料
 
 本章以 PyTorch 官方文档为 API 语义的主要依据，参考张量属性、广播、`torch.matmul`、`torch.bmm`、`torch.einsum`、`Tensor.view`、`torch.reshape`、`Tensor.contiguous`、`Tensor.stride` 和 `torch.nn.functional.cross_entropy` 文档，并结合前序 Transformer、attention、LM loss、mask 和数学基础章节的 shape 推导口径。文末列出可直接核验的链接。
 
@@ -122,7 +122,7 @@ LoRA 或线性层常见矩阵乘法：
 X [B,T,d_{in}] \times W [d_{in},d_{out}] \rightarrow Y [B,T,d_{out}]
 ~~~
 
-这些 shape 还不是完整的正确性证明。每一个符号都对应一个约束：`V` 必须和词表索引范围一致，`d` 必须能被 `H` 整除，`labels` 的整数值必须落在 `[0, V)` 或等于明确约定的 `ignore_index`，而 mask 的最后一维必须确实对应 key position。工程上应把这些约束写成断言或单元测试，而不是只把 shape 打印出来。
+这些 shape 还不是完整的正确性证明。通常要求 `B>0`、`T>0`、`d>0`、`V>0`、`H>0`，并且 `d=H*d_h`；next-token loss 若要产生至少一个位置，还需要 `T>=2`。每一个符号都对应一个约束：`V` 必须和词表索引范围一致，`labels` 的整数值必须落在 `[0, V)` 或等于明确约定的 `ignore_index`，而 mask 的最后一维必须确实对应 key position。工程上应把这些约束写成断言或单元测试，而不是只把 shape 打印出来。特别是 `T=1` 或一个 batch 的所有 label 都被忽略时，`mean` reduction 没有有效监督位置，不能把产生的 `NaN` 当成模型质量信号。
 
 `view`、`reshape` 和 `contiguous` 的关系可以这样理解：
 
@@ -188,17 +188,21 @@ loss = torch.nn.functional.cross_entropy(
 建议在模型边界写出显式检查。下面的断言把维度约定转成了可执行的 contract：
 
 ```python
-def check_lm_contract(input_ids, logits, labels, vocab_size, pad_id):
+def check_lm_contract(input_ids, logits, labels, vocab_size, ignore_index):
     assert input_ids.ndim == 2
     assert labels.shape == input_ids.shape
     assert logits.shape[:2] == input_ids.shape
     assert logits.size(-1) == vocab_size
     assert input_ids.dtype == torch.long
     assert labels.dtype == torch.long
-    valid = labels.ne(pad_id)
-    if valid.any():
-        assert int(labels[valid].min()) >= 0
-        assert int(labels[valid].max()) < vocab_size
+    assert input_ids.numel() > 0
+    assert vocab_size > 0
+    assert int(input_ids.min()) >= 0
+    assert int(input_ids.max()) < vocab_size
+    valid = labels.ne(ignore_index)
+    assert valid.any()
+    assert int(labels[valid].min()) >= 0
+    assert int(labels[valid].max()) < vocab_size
 ```
 
 这类检查不应只在调试时临时打印。数据格式、词表版本或 padding 策略一旦变化，contract 就是最早暴露错误的地方；当模型进入大规模训练后，尽早失败通常比训练数小时后才发现 loss 语义错更便宜。
@@ -299,6 +303,8 @@ class CausalMask(torch.nn.Module):
         self.register_buffer("mask", mask, persistent=False)
 
     def forward(self, length, like):
+        if not 0 <= length <= self.mask.size(0):
+            raise ValueError("length exceeds the preallocated mask")
         return self.mask[:length, :length].to(device=like.device)
 ```
 
@@ -445,6 +451,8 @@ print(y.shape)  # [4, 3]
 ```
 
 `expand` 不会真正复制数据，而是通过 stride 让多个位置指向同一份底层存储。因此不能把它理解成物理拷贝。如果需要真实拷贝，可以使用 `repeat`，但会占更多内存。
+
+由于多个逻辑位置可能指向同一存储，不能对 `expand` 返回的视图做依赖独立元素的原地写入；这类写入可能报错，也可能产生难以察觉的别名语义。需要修改每个展开位置时，应先 `clone()`，或改用 `repeat()`，并在实际路径中衡量额外内存。
 
 ## 1.9 matmul：大模型里最常见的计算
 
@@ -881,13 +889,18 @@ v = v.reshape(B, T, num_heads, head_dim).transpose(1, 2)  # [B, H, T, d_h]
 
 scores = q @ k.transpose(-2, -1) / math.sqrt(head_dim)     # [B, H, T, T]
 scores_einsum = torch.einsum("bhtd,bhsd->bhts", q, k) / math.sqrt(head_dim)
+raw_scores = scores
 
 padding_mask = input_ids.ne(0)                             # [B, T]
 causal_mask = torch.tril(torch.ones(T, T, dtype=torch.bool, device=device))
 combined_mask = padding_mask[:, None, None, :] & causal_mask[None, None, :, :]
+query_mask = padding_mask[:, None, :, None]
+valid_query = query_mask.any(dim=-1, keepdim=True)
 scores = scores.masked_fill(~combined_mask, -1e9)
+scores = torch.where(valid_query, scores, torch.zeros_like(scores))
 
 attn = torch.softmax(scores, dim=-1)                       # [B, H, T, T]
+attn = torch.where(query_mask, attn, torch.zeros_like(attn))
 context = attn @ v                                         # [B, H, T, d_h]
 
 transposed = context.transpose(1, 2)                        # [B, T, H, d_h]
@@ -925,7 +938,12 @@ report = {
     "attention": {
         "q_shape": tuple(q.shape),
         "scores_shape": tuple(scores.shape),
-        "einsum_matches_matmul": torch.allclose(scores_einsum.masked_fill(~combined_mask, -1e9), scores),
+        "einsum_matches_matmul": torch.allclose(
+            scores_einsum,
+            raw_scores,
+            rtol=1e-5,
+            atol=1e-5,
+        ),
         "mask_shape": tuple(combined_mask.shape),
         "attn_row_sum": round(float(attn[0, 0, 2].sum().item()), 6),
         "out_shape": tuple(out.shape),

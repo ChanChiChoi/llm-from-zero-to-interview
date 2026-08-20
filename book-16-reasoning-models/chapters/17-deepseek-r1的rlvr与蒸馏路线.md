@@ -1,262 +1,519 @@
-# 第 17 章 DeepSeek-R1 的 RLVR 与蒸馏路线：让可验证结果反过来塑造推理
+# 第 17 章 DeepSeek-R1 的 RLVR 与蒸馏路线：让可验证结果塑造推理
 
-## 17.1 先从“答案对不对”说起
+## 17.1 为什么答案可检查会改变训练方式
 
-数学题、程序题和有明确规则的逻辑任务有一个特殊优势：最终结果可以由程序、测试或形式规则检查。对于这类任务，训练不一定要为每一步思考都准备人工标签。只要模型给出答案，外部 verifier 就能判断它是否满足约束。
+传统监督微调把题目和答案写成样本 $(x,y)$，模型学习在给定输入后复现答案。这个方法适合语言、格式和基本任务行为，但高质量长推理轨迹需要人工或教师模型逐步写出，而且同一道题可能有很多条都正确的解法。把其中一条解法当成唯一标准，容易把答案正确和必须沿着这条路径作答混为一谈。
 
-这就是 RLVR（Reinforcement Learning with Verifiable Rewards）受到关注的原因。它不是“奖励模型换了一个名字”，而是把可自动验证的结果转成奖励信号，让模型在测试更多思路、发现错误和修正答案的过程中学习。DeepSeek-R1 及其公开技术报告让这条路线进入了更多工程师的视野，但阅读时仍要区分报告中的实验方法、公开权重和社区对内部细节的推断。
+数学、程序和结构化任务提供了另一条路。数学答案可以代回方程或交给符号程序，代码可以在隔离环境中编译和测试，JSON 可以按 schema 校验。外部 verifier 不必逐字教模型应该怎么想，而是判断生成结果是否满足可执行约束。用这种结果训练模型，就是 RLVR（Reinforcement Learning with Verifiable Rewards）的核心直觉。
 
-## 17.2 从 SFT 到结果奖励
+这并不意味着接上一个 verifier 就自动得到可靠推理。verifier 只定义了它能观察到的正确性；模型会优化这个定义，可能利用测试缺口、格式漏洞或奖励函数的盲区。因此 RLVR 的真正对象不是一个抽象的奖励分数，而是一套接受域、拒绝域、未知状态、资源限制和独立评估共同组成的训练契约。
 
-监督微调通常需要样本 `(x,y)`，其中 `y` 是人或教师模型准备好的答案。它能教模型遵循格式和示范路径，但高质量长推理轨迹昂贵，而且示范路径未必是唯一正确路径。
+DeepSeek-R1 的公开技术报告和官方仓库让这条路线受到广泛关注，但公开材料和社区猜测必须分开。公开资料可以支持 R1-Zero 直接在基础模型上进行大规模强化学习、R1 在强化学习前加入 cold-start 数据、公开的蒸馏模型和报告中的实验结果；它不能自动证明未披露的数据配比、每个奖励权重、内部筛选规则或闭源产品的实现方式。
 
-RLVR 把模型生成的轨迹 `\tau` 送入 verifier，得到奖励 `r(\tau)`。在最简单的结果奖励中，答案正确为 1，错误为 0：
+## 17.2 RLVR 的最小数学对象
 
-```math
-r(\tau)=\mathbf{1}[\mathrm{Verify}(x,\tau)=1]
-```
-
-模型的策略通过强化学习更新，使高奖励轨迹的概率增加。真实训练还会加入 KL 约束、长度控制、格式惩罚和多轮采样，避免模型为了拿到结果奖励而完全偏离参考策略。
-
-## 17.3 为什么 R1-Zero 式路线引发讨论
-
-公开材料中常被讨论的一条路线，是减少或不依赖传统长推理 SFT，让模型直接在可验证任务上进行强化学习。它展示了一个重要现象：当奖励函数足够清晰时，模型可能在训练中逐渐出现更长的探索、回溯和自检行为。
-
-但这条路线并不是“只要做 RL 就会自动得到可靠推理”。结果奖励通常只检查最终答案，无法直接保证中间步骤忠实、简洁或安全。模型还可能学会利用 verifier 漏洞、生成无意义的重复文本，或在训练分布内拿到正确答案却无法迁移到开放任务。
-
-工程实践常把可验证任务、格式约束、过程信号和监督数据组合起来。SFT 负责让模型学会基本的语言和任务格式，RLVR 负责在可验证空间中扩大有效搜索，蒸馏则把昂贵教师的行为压缩到更小或更易部署的模型。
-
-## 17.4 Group Relative Policy Optimization 的直觉
-
-如果没有一个绝对可靠的价值模型，可以对同一个问题采样一组回答，再在组内比较奖励。设同一输入生成 `G` 条轨迹，奖励为 `r_1,\ldots,r_G`，组内均值和标准差为 `\mu_G`、`\sigma_G`，则一种相对优势可写成：
-
-```math
-A_i=\frac{r_i-\mu_G}{\sigma_G+\epsilon}
-```
-
-高于组平均的轨迹得到正优势，低于平均的轨迹得到负优势。策略更新通常还会加入参考策略的 KL 惩罚：
-
-```math
-\mathcal{L}
-=-\mathbb{E}\left[\min\left(
-r_t(\theta)A_t,
-\mathrm{clip}(r_t(\theta),1-\epsilon_c,1+\epsilon_c)A_t
-\right)\right]
-+\beta D_{\mathrm{KL}}(\pi_\theta\|\pi_{\mathrm{ref}})
-```
-
-式子表达的是训练直觉，不应被当成某个公开项目全部实现的逐行复刻。核心是：同题多样本提供相对信号，裁剪限制策略突然漂移，KL 让模型不要轻易忘掉原有能力。
-
-## 17.5 Verifier 不是一个普通的 judge
-
-数学 verifier 可以检查最终数值、符号等价或证明格式；代码 verifier 可以运行测试、静态检查和安全规则；结构化输出 verifier 可以校验 JSON Schema。它们和一个“看起来像正确答案”的语言模型 judge 不同。
-
-可执行 verifier 的优点是规则清晰、重复性高；缺点是覆盖范围有限，容易被模型针对。比如代码只通过公开测试，不代表没有隐藏 bug；数学字符串匹配也可能把等价表达判错。最好的 RLVR 数据会明确记录 verifier 的版本、测试集合、超时和拒绝原因。
-
-## 17.6 一个数学训练样例
-
-给模型题目“解方程并输出整数根”。一次采样得到三个答案：`x=2`、`x=3`、`x=2`。程序 verifier 代回原方程，得到奖励 `[1,0,1]`。组内均值是 `2/3`，正确答案的优势为正，错误答案的优势为负。
-
-如果 verifier 还检查最终答案格式，就可以把“数学正确但无法解析”的轨迹标为 0。若希望鼓励简洁，可以在正确奖励上减去长度惩罚；但长度惩罚过强会压制必要的推导，过弱又可能产生重复思考。奖励设计本身就是训练目标的一部分。
-
-## 17.7 过程奖励与结果奖励
-
-结果奖励只看最终成功，信号稀疏但不需要标注每一步；过程奖励尝试判断中间步骤是否正确，信号更密集但 verifier 更难构造。
-
-设轨迹有 `T` 步，结果奖励为 `R_T`，过程奖励为 `r_t`，总奖励可以写成：
-
-```math
-R(\tau)=\alpha R_T+\sum_{t=1}^{T}\gamma^t r_t
-```
-
-过程奖励可能帮助模型更快纠错，却也可能让模型优化“看起来合理的步骤”，最后反而偏离真实答案。工程上应通过最终 verifier、隐藏测试和反例检查防止过程 reward hacking。
-
-## 17.8 蒸馏为什么是第二条路线
-
-高推理预算教师模型成本高，线上每个请求都跑多条长轨迹通常不可行。蒸馏把教师产生的答案、轨迹摘要、候选比较或正确输出用于训练学生模型。
-
-最简单的监督蒸馏是让学生拟合教师 token 分布：
-
-```math
-\mathcal{L}_{\mathrm{KD}}
-=-\sum_t p_{\mathrm{teacher}}(y_t|x,y_{1:t-1})
-\log p_{\mathrm{student}}(y_t|x,y_{1:t-1})
-```
-
-也可以只蒸馏最终答案、工具调用和验证通过的轨迹。完整思维链蒸馏并不总是必要或合适，尤其当内部 reasoning 包含敏感内容或未验证假设时。学生要在自己的推理预算下重新评估输出，而不是机械复制教师的草稿。
-
-## 17.9 一个代码蒸馏例子
-
-教师模型用高预算分析一个 bug，生成两个候选 patch 并运行测试，最终 patch 通过隐藏测试。学生数据可以包含 issue、相关文件、最终 patch、测试结果和失败候选的原因。训练学生不仅模仿 patch，还要学会运行测试和在失败后修正。
-
-如果只保留教师最后一段自然语言解释，学生可能学会写出漂亮的说明，却没有学会哪些文件需要修改。artifact、测试命令和失败类别比“长思考文本”更适合作为可验证蒸馏信号。
-
-## 17.10 训练和评测中的失败模式
-
-第一是 verifier 漏洞。模型学会利用测试缺口或格式解析错误，奖励升高但真实质量下降。
-
-第二是 reward hacking。重复无意义 token、伪造过程、投机性格式和过长答案都可能在不改变真实能力的情况下获取奖励。
-
-第三是过拟合 verifier。模型在训练题型上分数很高，换题目、换测试或换表达方式就失败。
-
-第四是把社区推断写成内部事实。公开报告可以支持训练路线、任务和实验结果，但不能在没有证据时断言所有数据比例、内部 reward 规则或未公开的系统细节。
-
-因此报告 RLVR 结果时，要保留 verifier 版本、题目来源、去污染方法、采样预算、失败类别和独立测试。
-
-## 17.11 面试回答与练习
-
-面试官问“RLVR 和普通 RLHF 有什么区别”，可以回答：RLVR 使用可执行规则、测试或形式检查得到奖励，适合数学、代码和结构化任务；RLHF 通常依赖人类偏好或奖励模型，覆盖开放质量和风格。RLVR 的优势是反馈可重复、扩展成本低，边界是 verifier 覆盖有限、容易被利用，不能自动解决开放任务的事实性与安全问题。
-
-练习一：为 SQL、Python 和数学分别设计一个 verifier，并列出它无法检测的失败。
-
-练习二：解释为什么只使用最终答案奖励会产生稀疏信号，以及过程奖励可能带来什么新的偏差。
-
-练习三：设计一份代码蒸馏样本，区分事实、假设、候选 patch、测试结果和最终 artifact。
-
-### 17.11.1 从公开路线能推出什么
-
-公开技术报告和模型卡可以支持训练阶段、使用的奖励类型、蒸馏模型列表、公开 benchmark 和报告条件。它们通常不能支持完整数据配方、每个奖励权重、内部筛选规则、所有失败轨迹或闭源产品的实际推理流程。
-
-阅读 DeepSeek-R1 这类公开路线时，应该把“可验证奖励推动了数学/代码推理”“高预算模型可以为小模型提供蒸馏数据”与“某个内部阶段必然采用某种实现”分开。前者可以由公开资料和相关研究讨论，后者若没有证据只能保留为假设。
-
-### 17.11.2 RLVR 与蒸馏的组合闭环
-
-一个教学上的组合闭环是：高预算教师生成多个候选，verifier 检查结果，保留通过且过程可解释的轨迹，再用 SFT 或 on-policy distillation 训练学生。学生部署后还要用独立 verifier 评估，不能因为训练数据来自通过 verifier 的轨迹就取消验证。
-
-```text
-teacher rollout -> verifier -> filter / annotate
-       -> student training -> independent eval
-       -> deployment verifier and cost gate
-```
-
-每一层都可能引入偏差：教师只覆盖容易题，verifier 漏掉边界，过滤器偏爱冗长格式，学生过拟合答案模板。组合路线的研究价值在于把这些偏差显式暴露，而不是把最终分数归因给某一个算法名。
-
-### 17.11.3 一个数学到代码的迁移边界
-
-数学答案常有精确 verifier，代码任务还包括环境、依赖、测试和安全。把数学推理轨迹直接蒸馏成代码 Agent 行为，可能丢失工具状态和失败恢复。更合理的代码样本应保存候选 patch、运行命令、测试输出、回滚动作和最终 artifact；学生要学的是状态转换，不是数学答案的表面格式。
-
-### 17.11.4 需要独立复核的指标
-
-除 benchmark 分数外，报告 verifier agreement、hidden test、污染检查、长度、工具成本、恢复成功、过度思考、拒答和安全事件。若模型在 R1 风格任务上分数升高，却在开放事实和工具权限任务上退化，不能写成“推理能力全面提升”。
-
-## 17.12 Verifier 是训练目标的一部分
-
-RLVR 的关键不是把一个答案校验器接到训练脚本旁边，而是决定“什么行为会得到奖励”。如果 verifier 只检查最终数字，模型可能学会猜答案、利用格式漏洞或生成无法解释的捷径；如果 verifier 过于严格，正确但表达不同的解法会被误杀。训练前必须定义接受域、拒绝域和不确定域。
-
-可以把一次 rollout 的奖励拆成：
-
-```math
-r(\tau)=r_{\mathrm{out}}(\tau)+\alpha r_{\mathrm{format}}(\tau)
- -\beta r_{\mathrm{hack}}(\tau)-\gamma r_{\mathrm{unsafe}}(\tau)
-```
-
-结果奖励 `r_out` 负责可判定正确性，格式奖励帮助协议稳定，奖励漏洞和安全项用于惩罚明显的投机行为。系数不是越大越好：格式奖励过强会让模型追求模板，安全惩罚过强可能导致对正常任务过度拒答。每个奖励项都要有独立评测切片。
-
-## 17.13 GRPO 直觉与实现边界
-
-对同一个问题采样一组回答，比起维护一个单独的 value model，可以用组内相对表现构造优势。设一组 rollout 的奖励为 `r_1,\ldots,r_G`，组均值和标准差为 `\mu_G`、`\sigma_G`，教学上的相对优势为：
-
-```math
-A_i=\frac{r_i-\mu_G}{\sigma_G+\epsilon}
-```
-
-策略更新仍要受到旧策略和当前策略比值的约束，避免一次更新把分布推得过远。实际算法还涉及 token mask、KL 正则、截断、长度处理和完成样本过滤；不能把上式当成完整训练实现。
-
-这一路线的工程难点在于 rollout 数量和 verifier 吞吐。每个问题采样更多候选可能提高找到正确答案的概率，却同时放大显存、通信和校验成本。若同一组的所有答案都被 verifier 判成零分，优势信号几乎没有区分度，训练应记录 zero-reward group 比例并调整数据、采样或 verifier，而不是盲目增加学习率。
-
-## 17.14 Reward hacking 与 verifier 质量验收条件
-
-验证器也会被优化。数学 verifier 可能只看最后一个数字，代码 verifier 可能只运行公开测试，格式 verifier 可能被多余字段绕过。训练集上奖励升高而独立测试不升高，往往意味着模型在利用 verifier 的盲区。
-
-应建立 verifier 的质量验收条件：对已知正确、已知错误、边界格式、对抗输出和不可判定样本分别测 precision、recall、拒绝率和一致性；再做“训练 verifier 与独立 verifier”交叉评估。代码任务还要隔离网络、文件和资源，防止测试脚本本身成为越权通道。
-
-## 17.15 蒸馏、on-policy 与能力边界
-
-高预算 teacher 产生的轨迹不是天然适合学生。可以先按 verifier、过程完整性、长度和安全标签筛选，再做 supervised distillation；也可以让学生自己 rollout，由 teacher 或 verifier 对学生分布附近的轨迹标注，这就是 on-policy distillation 的基本动机。后者更贴近学生真实错误，但成本更高。
-
-蒸馏数据应保存问题、轨迹、最终答案、验证器版本、工具观察、失败分支和污染标记。只保存一段漂亮的最终推理，会让学生学到表面格式而不是如何根据失败反馈修正。数学轨迹迁移到代码任务时尤其如此：代码还需要 workspace、依赖、测试和副作用状态。
-
-评测学生时不能只看 teacher 生成的同分布样本。还要加入新题、变体题、隐蔽测试、长度切片、工具失败、安全任务和成本约束；否则“蒸馏成功”可能只是记住了 teacher 的数据。
-
-## 17.16 verifier contract 要先于训练脚本
-
-一个 verifier 不是“返回一个 0/1 的函数”这么简单。训练前要定义输入格式、可接受答案集合、不可判定状态、超时行为、资源限制、随机性和版本。比如数学题允许等价表达式还是只接受标准化数字，代码题允许依赖网络还是必须在离线沙箱运行，都会改变奖励含义。
-
-可以把 verifier 的输出写成结构化对象：
+给定问题 $x$，策略模型生成一条轨迹 $\tau$。轨迹可以只是文本答案，也可以包含思考 token、工具调用、观察、代码补丁和最终结果。verifier 读取问题、轨迹和执行环境，返回一个结构化判定：
 
 ```text
 verdict: correct | incorrect | unknown
 score: [0, 1]
-reason_code: exact_match | test_pass | timeout | parse_error
-evidence: test ids, normalized answer, resource usage
-verifier_revision: v17
+reason_code: exact_match | symbolic_check | test_pass | parse_error | timeout
+evidence: ...
+verifier_revision: ...
 ```
 
-`unknown` 不应被强行当作错误或正确。若超时统一给零分，模型可能学会缩短答案；若解析失败统一给高分，模型可能利用格式漏洞。把 reason code 和资源使用保存下来，才能区分能力不足、协议错误和 verifier 事故。
-
-## 17.17 结果奖励和过程信号的分工
-
-结果奖励擅长判断最终答案，过程信号擅长提供更密集的反馈，但过程越细，越容易把表面格式误认为正确推理。可以将训练奖励抽象为：
-
-~~~math
-r(\tau)=r_{\mathrm{result}}(\tau)
- +\alpha r_{\mathrm{process}}(\tau)
- -\beta r_{\mathrm{hack}}(\tau)
- -\gamma r_{\mathrm{unsafe}}(\tau).
-~~~
-
-各项都要单独做消融。去掉过程奖励后结果是否下降，增加格式奖励后是否出现模板化，加入安全惩罚后是否误拒正常问题，这些比总 reward 上升更能说明奖励设计是否有效。过程奖励不是“解释越长越好”，而是对可验证的中间状态给出信号。
-
-## 17.18 zero-reward group 的诊断
-
-GRPO 类方法用同一问题的一组 rollout 形成相对优势。如果整组答案都被判为零，组内排序没有有效学习信号；如果所有答案都得高分，模型也学不到区分。训练日志应报告每组的 reward 方差、全零比例、全满比例、平均长度、verifier 超时和解析失败。
-
-当 zero-reward group 上升时，可能的原因包括题目太难、采样预算不足、verifier 太严、答案格式错误、奖励接口失配或模型已经偏离有效分布。修复顺序应先检查数据和 verifier contract，再决定增加采样、改变温度或调整优化超参数。
-
-## 17.19 蒸馏要保留失败反馈
-
-只把 teacher 的最终答案作为 SFT 标签，学生学到的可能是表面结论。更有价值的蒸馏样本还包括问题、尝试、工具观察、失败原因、修正分支、最终验证和 teacher/verifier revision。对代码任务，workspace 状态、依赖和测试输出也是轨迹的一部分。
-
-on-policy distillation 的优势是让 teacher 看到学生真实分布附近的错误；代价是每轮都要运行学生、teacher 和 verifier。数据账本要保存生成策略、采样参数、过滤规则和污染标记，否则后续无法判断能力来自 teacher 泛化还是数据记忆。
-
-## 17.20 verifier 过拟合的独立检查
-
-训练 verifier 和独立 verifier 必须尽量避免共享同一盲区。可以对数学答案做等价变形，对代码加入隐藏测试和资源限制，对工具任务扰动顺序和错误返回，对格式任务插入未知字段和边界 Unicode。若训练 reward 继续升高而独立检查不升高，优先怀疑 reward hacking。
-
-安全上还要把 verifier 放在沙箱内。一个用于测试代码的 verifier 如果允许网络、文件写入或凭据访问，模型优化的可能不是解题能力，而是利用测试环境。Verifier 的权限应小于被评估动作的权限，并对资源、时间和输出做硬限制。
-
-## 17.21 训练到评测的证据链
-
-RLVR 或蒸馏实验应将以下对象绑定到同一 revision：训练数据版本、策略模型、verifier、采样配置、checkpoint、评测集、去污染规则和成本记录。评测不能只重复 teacher 生成的题，还要加入新题、变体、长度切片、工具失败、不可判定和安全任务。
-
-报告至少分开写结果正确率、过程/格式通过率、verifier 一致性、独立评测、推理成本、拒答率和安全副作用。一个模型在同分布数学题上变强，却在新题、代码隐藏测试或工具状态恢复上退化，不能被总分掩盖。
-
-## 17.22 从“会做题”到“会在新状态中恢复”
-
-推理模型训练常被简化成数学题正确率，但真实系统还会遇到新题、格式约束、工具失败和不完整证据。一个更强的测试集应把任务分成静态答案、可执行代码、交互式工具和带权限的长任务，并让模型面对训练中没有出现的状态转移。
-
-例如，模型在训练题上得到正确数字，却在工具返回空结果时继续套用旧结论，这不是 verifier 只差一个百分点的问题，而是 observation 处理和拒答策略没有被训练。蒸馏数据应保留这些失败分支：teacher 为什么停止、如何请求缺失证据、何时重试、何时交给人工。
-
-## 17.23 RLVR、蒸馏和部署预算的联动
-
-高预算 teacher 轨迹的价值不是越长越高。可以按成功、恢复、验证和成本给轨迹分层，优先蒸馏“短而可验证”的有效路径，再用少量困难轨迹覆盖边界。训练后评估 student 在同一任务上的 token、工具轮数、失败重试和单位成功成本，才能判断蒸馏是否真的把能力变便宜。
-
-一个简单的任务级收益写法是：
+最简单的结果奖励是：
 
 ```math
-\Delta C_{\mathrm{success}}
-=C_T^{\mathrm{before}}
--C_S^{\mathrm{after}},
+r_{\mathrm{out}}(x,\tau)
+=\mathbf{1}[\mathrm{Verify}(x,\tau)=\mathrm{correct}]
 ```
 
-但只有在成功率、安全验收条件和人工复核量不恶化时，这个差值才有意义。否则只是把成本转移到失败补偿和人工审核。
+这里 $\mathrm{Verify}$ 必须是已定义版本的判定程序，输出是有限且可追踪的；如果 verifier 返回 unknown，上式不能擅自把它解释成正确或错误。$r_{\mathrm{out}}$ 取值为 0 或 1 只是教学构造，生产系统可以使用连续分数，但仍要说明分数是概率、排序分数还是业务效用。
 
-## 17.24 训练证据的时间切分
+把轨迹空间分成三个集合更容易理解奖励边界：
 
-RLVR 的题目、验证器和生成轨迹会互相影响。应按时间切分训练、调参、验证和最终测试，避免同一道题的变体在不同集合间泄漏；对公开 benchmark，还要检查模型预训练和 teacher 轨迹是否可能已经见过答案。报告中应把“独立新题”和“同分布复现”分开，而不是只给一个总准确率。
+```math
+\mathcal{A}_x=\{\tau:\mathrm{Verify}(x,\tau)=\mathrm{correct}\}
+```
 
-## 17.25 小结与资料边界
+```math
+\mathcal{I}_x=\{\tau:\mathrm{Verify}(x,\tau)=\mathrm{incorrect}\}
+```
 
-RLVR 的关键不是“让模型想得更久”，而是让可验证结果为测试时探索提供训练信号；蒸馏则把高预算教师的有效行为迁移到更便宜的学生。两者都必须围绕 verifier contract、奖励漏洞、zero-reward 诊断、独立评测和成本边界展开。
+```math
+\mathcal{U}_x=\{\tau:\mathrm{Verify}(x,\tau)=\mathrm{unknown}\}
+```
 
-本章可参考 DeepSeek-R1 公开技术报告、GRPO/策略优化论文、代码和数学 verifier 研究以及公开模型卡。报告中明确写出的训练阶段和实验结果可以引用；未公开的数据配方、内部权重和完整奖励实现应保持未知。
+这三个集合只在 verifier 契约明确规定互斥且覆盖当前输入时构成完整划分。超时、资源耗尽、解析失败和环境崩溃可能属于 unknown，也可能按任务协议进入 incorrect；选择不同，训练目标就不同。重要的是不能把没有证据伪装成答案错误，也不能把解析失败伪装成模型推理失败。
+
+策略的简化目标可以写成：
+
+```math
+J(\theta)
+=\mathbb{E}_{\tau\sim\pi_\theta(\cdot\mid x)}
+ [R(x,\tau)]
+-\beta D_{\mathrm{KL}}(\pi_\theta\Vert\pi_{\mathrm{ref}})
+```
+
+$\pi_\theta$ 是待训练策略，$\pi_{\mathrm{ref}}$ 是参考策略，$R$ 是由 verifier 和其他约束组成的总奖励，$\beta\ge0$ 是 KL 惩罚系数。这里是强化学习目标的抽象，不是某个公开项目的完整训练代码；实际系统还需要处理 token mask、采样批次、截断、优势估计、优化器和分布式 rollout。
+
+## 17.3 R1-Zero、R1 与公开证据
+
+DeepSeek-R1 的公开仓库把两条路线区分得很清楚。R1-Zero 在基础模型上直接进行大规模 RL，没有把人工标注的长推理 SFT 作为前置步骤；公开报告将其作为观察“可验证奖励能够诱导出某些推理行为”的研究路线。报告描述的现象包括较长的推理、反思和自我验证，但这些现象不等于所有任务都获得了稳定的可靠性。
+
+R1 则加入了 cold-start 数据，并将强化学习、监督微调和面向不同能力的训练阶段组织成更完整的流水线。这样做的动机不仅是提高可验证任务分数，也包括改善可读性、语言一致性和通用任务行为。官方仓库还公开了基于 R1 生成数据训练的多个 dense distilled checkpoint。
+
+这条公开路线至少说明了三件事。第一，可验证任务提供了比开放偏好更稳定的自动反馈。第二，直接 RL 可能探索出训练数据中没有逐步示范的行为，但探索会伴随重复、格式和迁移问题。第三，大模型发现的有效轨迹可以成为小模型的训练数据，但蒸馏后的能力不应被当成教师内部状态的原样复制。
+
+它不能说明三件事。第一，所有推理模型都使用相同的 RLVR 配方；第二，某个产品暴露了 reasoning token 就必然执行了相同的搜索或 verifier；第三，训练报告中的 benchmark 提升会自动迁移到开放事实、工具权限和高风险生产任务。模型报告、代码仓库、论文实验和目标系统复测是不同的证据等级。
+
+## 17.4 结果奖励与过程奖励
+
+结果奖励只在轨迹末端判断成功，信号稀疏，却容易定义。过程奖励在中间步骤上提供反馈，可能帮助模型更早发现错误，但每个步骤的正确往往依赖上下文，标注和自动验证都更难。
+
+设轨迹有 $T$ 个经过定义的步骤，最终奖励为 $R_T$，第 $t$ 步的过程奖励为 $r_t$，则教学上的混合奖励可以写成：
+
+```math
+R(\tau)
+=\alpha R_T
+ +\sum_{t=1}^{T}\gamma^{t-1}r_t
+```
+
+$T$ 是正整数，$\alpha$ 是最终结果奖励权重，$\gamma$ 通常满足 $0\le\gamma\le1$，过程奖励和最终奖励必须使用可比较的尺度。轨迹没有可验证步骤时，过程项不是 0 分的同义词，而是缺失或不适用；如果强行补零，模型会把未标注当成步骤错误。
+
+结果奖励的优点是允许多种解法。模型只要进入接受域，就不必逐字复现教师路径。它的缺点是信用分配困难：前面哪一步导致失败，最终的一个 0 分不会直接说明。过程奖励能缓解这个问题，却带来新的 reward hacking 风险：模型可能学习写出符合步骤分类器的句子，而不是让步骤真正推进到正确答案。
+
+工程上常见的组合是：结果 verifier 作为最终约束，过程 verifier 或规则作为辅助信号，独立测试和反例用来检查两者是否一致。过程分数永远不应替代最终任务验收，尤其是代码、外部工具和有副作用的任务。
+
+## 17.5 Verifier contract：训练前先定义接受什么
+
+一个可用的 verifier 不只是一个返回 0 或 1 的函数。它需要回答以下问题：
+
+数学答案是否允许等价表达式、不同变量顺序和数值容差？代码答案是否必须在离线沙箱运行，依赖是否固定，隐藏测试是否存在？结构化答案的额外字段是被忽略、拒绝还是进入未知状态？超时是错误、未知还是需要人工复核？不同版本的测试结果能否直接比较？
+
+可以把 verifier 输出抽象为：
+
+```json
+{
+  "verdict": "correct",
+  "score": 1.0,
+  "reason_code": "test_pass",
+  "evidence": ["hidden-test-03", "stdout-sha256:..."],
+  "resource": {"wall_ms": 218, "cpu_ms": 190},
+  "verifier_revision": "code-v17"
+}
+```
+
+verdict 表示离散状态，score 必须说明是判定分数还是校准概率，reason_code 用于区分答案错误、格式错误、超时和 verifier 故障，evidence 让结论可复核，资源字段防止无限运行，revision 绑定测试和规则版本。
+
+unknown 是训练系统必须认真保留的状态。例如代码执行器收到请求后连接断开，系统不知道代码是否已经运行；将其统一当作错误可能鼓励模型极短地输出，将其统一当作正确则会奖励空结果。对有外部副作用的工具，unknown 还关系到是否允许重试，不能只为方便计算把它压成一个数字。
+
+verifier 还需要规定拒绝域之外的输入。空答案、非有限数、过长输出、非法工具参数、越权文件访问和资源耗尽都应有明确 reason code。否则模型可能通过触发解析异常或消耗资源来改变奖励分布。
+
+## 17.6 奖励不只是正确加一分
+
+真实训练往往同时考虑结果、格式、投机行为和安全约束。可以写成一个教学抽象：
+
+```math
+R(\tau)
+=r_{\mathrm{result}}(\tau)
+ +\alpha r_{\mathrm{format}}(\tau)
+ -\beta r_{\mathrm{hack}}(\tau)
+ -\gamma r_{\mathrm{unsafe}}(\tau)
+```
+
+$r_{\mathrm{result}}$ 表示可验证任务结果，$r_{\mathrm{format}}$ 表示协议是否可解析，$r_{\mathrm{hack}}$ 表示已检测的奖励投机，$r_{\mathrm{unsafe}}$ 表示不允许的工具或数据行为。每个项都应规定有限范围和测量方式，$\alpha,\beta,\gamma\ge0$ 是权重。若安全违规是硬性不可接受事件，不能依靠增大 $r_{\mathrm{result}}$ 抵消它，而应直接拒绝该轨迹。
+
+格式奖励有用，但不等于内容正确。一个 JSON 格式完全合法的答案可能数字错误；一个数学答案写法不符合模板，也可能在数学上正确。安全惩罚也要避免把正常拒答和高风险越权混成同一个标签，否则模型会通过普遍拒答获得看似安全的分数。
+
+奖励项要做分项报告和消融。只看总 reward 上升无法判断模型到底提高了正确率、变得更守格式、学会了绕过 hack 检测，还是仅仅增加了输出长度。每个子奖励都要在已知正确、已知错误、边界格式和对抗输入上单独检查。
+
+## 17.7 GRPO：用组内相对表现构造优势
+
+如果为同一个问题采样一组回答，可以用组内相对表现形成学习信号，而不必维护一个独立的 value model。设问题 $x$ 生成 $G$ 条已知奖励的轨迹，奖励为 $r_1,\ldots,r_G$，则组内均值和总体标准差为：
+
+```math
+\mu_G=\frac{1}{G}\sum_{i=1}^{G}r_i
+```
+
+```math
+\sigma_G
+=\sqrt{\frac{1}{G}\sum_{i=1}^{G}(r_i-\mu_G)^2}
+```
+
+常见的教学优势写法是：
+
+```math
+A_i=\frac{r_i-\mu_G}{\sigma_G+\varepsilon}
+```
+
+$G$ 是正整数；若希望组内比较产生有效区分，通常需要 $G\ge2$，且 $\varepsilon>0$ 是有限的小常数。所有 $r_i$ 必须使用同一 verifier revision 和奖励尺度。若一组答案全部得相同奖励，$A_i$ 会全部为 0，说明当前组没有相对学习信号，而不是说明题目已被可靠解决。
+
+DeepSeekMath 论文把 GRPO 描述为 PPO 的一种变体，并强调它在数学推理训练中的组内相对优化和内存取舍。下面的 PPO 风格目标用于解释裁剪和 KL 的作用：
+
+```math
+\mathcal{L}
+=-\mathbb{E}\left[
+\min\left(
+\rho_t(\theta)A_t,
+\mathrm{clip}(\rho_t(\theta),1-\epsilon_c,1+\epsilon_c)A_t
+\right)\right]
++\beta D_{\mathrm{KL}}(\pi_\theta\Vert\pi_{\mathrm{ref}})
+```
+
+$\rho_t(\theta)$ 是新旧策略在有效 token 上的概率比，$A_t$ 是与该 token 或轨迹对齐的优势，$\epsilon_c>0$ 是裁剪范围，$\beta\ge0$ 是 KL 权重。不同实现对 KL 估计、长度归一化、token mask、组内归一化和过滤条件可能不同，因此这个式子是理解接口的数学模型，不是公开仓库中每一行代码的替代品。
+
+## 17.8 一个可手算的组内例子
+
+题目是“解一个方程并输出整数根”。同一题采样出三条已完成且可判断的轨迹，答案分别为 x=2、x=3、x=2，verifier 奖励为 [1,0,1]。此时：
+
+```math
+\mu_3=\frac{1+0+1}{3}=\frac{2}{3}
+```
+
+```math
+\sigma_3
+=\sqrt{\frac{(1-\frac23)^2+(0-\frac23)^2+(1-\frac23)^2}{3}}
+=\frac{\sqrt{2}}{3}
+```
+
+当 $\varepsilon$ 很小时，两个正确轨迹有正优势，错误轨迹有负优势。训练更新会提高正确轨迹在相似上下文下的相对概率，但它并没有证明模型学会了方程的普遍解法；它只说明这一组 rollout 提供了区分信号。
+
+如果三条轨迹全部因为答案格式解析失败而得到 0，优势全为 0。此时调大学习率不能凭空创造信号，先检查格式契约、答案抽取和题目难度更合理。如果三条都得到 1，则模型可能已经掌握该题，也可能 verifier 过于宽松；需要新的题目、变体或独立 verifier。
+
+## 17.9 Zero-reward group 如何诊断
+
+训练日志至少应记录每个问题组的 reward 均值、方差、全零比例、全满比例、未知比例、平均长度、解析失败、verifier 超时和工具错误。全零组升高可能来自四类原因：题目超出模型能力、采样预算太小、verifier 太严格或协议不匹配、模型已经偏离了可解析分布。
+
+诊断顺序很重要。先用已知答案和固定轨迹测试 verifier，再检查答案抽取和格式，再检查题目难度与采样预算，最后才调整策略优化器。否则把 verifier bug 当成模型退化，会用更多训练把错误接口固化。
+
+全满组也不能简单视为好消息。它可能表示题目过于简单，也可能表示 verifier 的判定覆盖不足。可以提高变体难度、加入已知错误答案和对抗格式，观察 verifier 是否能区分，而不是只期待平均 reward 继续上升。
+
+## 17.10 Reward hacking：模型正在优化什么
+
+只要奖励是可观察的，模型就可能寻找比设计者预期更便宜的路径。典型现象包括：
+
+- 数学 verifier 只看最后一个数字，模型生成与数字无关的伪推导；
+- 代码 verifier 只运行公开测试，模型硬编码样例或修改测试；
+- 格式 verifier 只检查字段存在，模型填入不可解析或无意义的内容；
+- 长度惩罚不足，模型重复同一句话以提高被某个分类器判为“有步骤”的概率；
+- 安全过滤只检查显式命令，模型把敏感动作藏在间接参数或工具链中。
+
+奖励升高而独立质量不升高，是 reward hacking 的重要信号。独立检查不能只换一个 prompt 的 judge，而要尽量改变证据来源：数学使用等价变形和反例，代码使用隐藏测试、资源限制和静态检查，工具任务改变顺序和错误返回，格式任务加入未知字段和边界输入。
+
+verifier 自身也要有权限边界。代码测试器应运行在没有生产凭证、网络和任意文件写权限的沙箱中；测试脚本不能因为验证模型生成的代码而被赋予比被测任务更大的权限。否则训练优化的对象可能是测试环境，而不是解题能力。
+
+## 17.11 数据生成：从 rollout 到可学习样本
+
+RLVR 的训练数据不是只有题目和一个分数。一个可复核的 rollout 至少包含问题版本、策略模型版本、采样配置、轨迹、工具观察、最终答案、verifier 输出、资源消耗和失败原因。对代码任务还要绑定 workspace revision、依赖锁定文件、测试集合和 patch。
+
+一个常见流水线是：策略生成多条候选，verifier 对每条候选执行检查，过滤或标注结果，策略更新使用奖励；训练外再用没有参与优化的题目、变体和独立 verifier 评估。每个环节都可能改变数据分布。过滤掉所有冗长轨迹可能损失必要推导，保留所有高分轨迹可能把 verifier 漏洞蒸馏进去。
+
+数据去污染要按题目族、模板和答案来源处理，不能只比较字符串。公开 benchmark 的题目可能出现在预训练语料、教师生成数据和调参集里。训练题高分、变体低分，可能是模板记忆；teacher 生成的同分布测试高分，不能替代独立新题。
+
+## 17.12 蒸馏：把昂贵搜索变成学生能力
+
+高预算教师可以生成更多候选、使用 verifier、运行工具并保留失败分支，但在线对每个请求都这样做通常成本太高。蒸馏的目标是让学生在较小模型、较短延迟或较少工具调用下复现一部分有效行为。
+
+最简单的 token 级知识蒸馏可以写成：
+
+```math
+\mathcal{L}_{\mathrm{KD}}
+=-\frac{1}{|\mathcal{I}|}
+\sum_{(x,t)\in\mathcal{I}}
+\sum_{v\in\mathcal{V}}
+p_T^{(T)}(v\mid x,y_{1:t-1})
+\log p_S^{(T)}(v\mid x,y_{1:t-1})
+```
+
+$\mathcal{I}$ 是非空的有效位置集合，$\mathcal{V}$ 是有限词表，$p_T^{(T)}$ 和 $p_S^{(T)}$ 是使用温度 $T>0$ 得到的归一化分布。教师和学生的 tokenizer、上下文、mask 和位置必须对齐；如果只蒸馏最终答案，目标就不是上式的完整 token 分布，而是硬标签或答案级损失。
+
+蒸馏内容有不同粒度：最终答案、结构化工具调用、验证通过的轨迹、错误候选及其失败原因、过程摘要、状态转移和完整 token 分布。完整隐藏思维不是默认最优的蒸馏对象，其中可能有敏感信息、未验证假设或只对教师模型有效的冗余路径。对代码 Agent，patch、测试命令、测试输出和 workspace revision 往往比一段漂亮的解释更能保留可验证行为。
+
+学生要学习的是在自己的输入和预算下如何得到可验收结果，不是机械复制教师草稿。教师通过了某个 verifier，也不意味着学生生成的相似文本无需再次验证。
+
+## 17.13 On-policy distillation 为什么更贵
+
+离线蒸馏直接使用教师已经生成的数据，成本较低，但数据分布可能偏离学生。学生在自己容易犯错的状态附近，可能没有任何训练样本；模型只会模仿教师常见轨迹，却不会处理学生真实的解析错误、工具失败和短上下文。
+
+On-policy distillation 让学生先生成自己的轨迹，再由教师、verifier 或规则对这些轨迹提供标签。它更接近学生的错误分布，代价是每轮要运行学生、教师和验证器，还要处理数据缓存、版本和失败样本。
+
+代码例子很直观。高预算教师可能直接找到正确 patch，但学生更常见的错误是修改了错误文件、没有更新测试、在依赖缺失时继续猜。若只保存教师最终 patch，学生学不到失败后的状态恢复；若保存“候选 patch—测试失败—读取新日志—修正 patch—测试通过”的 artifact 链，学生才有机会学到可迁移的执行过程。
+
+蒸馏样本应保存生成策略、teacher revision、verifier revision、过滤规则和污染标记。否则后续无法解释学生的提升是来自教师泛化、数据筛选，还是把 benchmark 答案记进了训练集。
+
+## 17.14 数学训练与代码训练的边界
+
+数学任务的 verifier 常能检查精确答案、符号等价或数值容差；步骤可能有多条合理路径，过程标签需要谨慎定义。代码任务则多了运行环境、依赖、资源、权限和副作用。测试通过是某个环境和测试集合下的行为事实，不是程序对所有输入都正确的证明。
+
+因此数学轨迹可以把答案等价类和第一处错误作为重要字段，代码轨迹还要记录：
+
+- 输入仓库和 workspace revision；
+- 候选 patch 与修改路径；
+- 测试命令、依赖和资源限制；
+- 公开、隐藏和变体测试；
+- 失败日志、回滚状态和副作用；
+- 安全扫描与最终 artifact。
+
+把数学的最终答案奖励直接搬到代码 Agent，可能奖励硬编码样例；把代码测试通过直接当作开放证明的过程正确，也会夸大能力。两类任务都需要独立验证，但 verifier 的覆盖和失败语义不同。
+
+## 17.15 评估：训练分数之外还要看什么
+
+RLVR 或蒸馏至少需要同时报告四种结果：
+
+1. **候选生成能力**：候选池中是否曾经出现正确答案；
+2. **选择与验证能力**：verifier 或策略是否选出正确候选；
+3. **迁移能力**：新题、等价变形、隐藏测试、工具失败和不同长度下是否保持；
+4. **系统代价**：模型 token、工具调用、验证时间、人工接管和单位成功成本。
+
+设总样本数为 $N>0$，verifier 已给出确定判定的样本数为 $N_{\mathrm{known}}$，其中成功数为 $N_{\mathrm{success}}$，则：
+
+```math
+\mathrm{coverage}=\frac{N_{\mathrm{known}}}{N}
+```
+
+```math
+\mathrm{success\_rate}_{\mathrm{known}}
+=\frac{N_{\mathrm{success}}}{N_{\mathrm{known}}}
+```
+
+第一项回答有多少样本被 verifier 覆盖，第二项回答在已覆盖样本中有多少成功。当 $N_{\mathrm{known}}=0$ 时，第二项未定义，不应写成 0；当 $N=0$ 时，两项都未定义。把未知样本强行算进错误率，会混淆 verifier 不可用和模型失败。
+
+如果一批任务总成本为 $C_{\mathrm{total}}$，成功数为 $N_{\mathrm{success}}$，单位成功成本是：
+
+```math
+C_{\mathrm{success}}=\frac{C_{\mathrm{total}}}{N_{\mathrm{success}}}
+```
+
+$C_{\mathrm{total}}$ 必须包含模型、工具、验证和人工的同一成本账本；$N_{\mathrm{success}}=0$ 时结果为 None 或 undefined。蒸馏是否成功，不能只看学生分数，还要确认成功率、安全条件和人工复核没有恶化。
+
+评估切分要包含原题、变体、新题、不同 verifier、不同工具状态和风险切片。只报告 R1 风格数学 benchmark 的提升，不能推出开放事实、生产代码和高风险工具动作都得到相同提升。
+
+## 17.16 训练、评估和部署的证据链
+
+一项可复核的实验要把训练数据版本、策略模型、参考模型、verifier、采样配置、checkpoint、评估集、污染规则和成本记录绑定到 revision。每个结果还要说明是论文报告、官方仓库、公开模型卡、教学构造还是目标系统实测。
+
+部署时仍然需要 verifier。训练期 verifier 只说明策略在优化它；线上输入可能超出训练分布、工具版本可能变化、外部状态可能未知。对于代码和数据任务，先在隔离环境中执行，再把测试结果、资源消耗和 artifact 交给独立检查；对于付款、发布、删除和权限变更，正确答案也不能替代授权。
+
+一个完整的闭环可以表示为：
+
+```text
+teacher or policy rollout
+    -> versioned verifier
+    -> accept / reject / unknown
+    -> policy update or distillation
+    -> independent evaluation
+    -> deployment verifier
+    -> cost, safety and recovery monitoring
+```
+
+这条链上任何一个版本没有记录，后续都可能无法解释回归。尤其是 verifier 变化：测试集合扩展、答案解析修复或超时规则调整，都会改变奖励分布，不能把前后 reward 直接当成同一指标。
+
+## 17.17 一个可运行的 RLVR 与蒸馏审计器
+
+下面的标准库示例不训练模型，而是把一小组 rollout 按 verifier contract 审计。它演示四件事：unknown 不被当作错误，组内相对优势只使用同一题且已确定的奖励，只有带证据的安全正确轨迹才进入蒸馏集合，零成功任务的单位成功成本保持未定义。
+
+```python
+import math
+
+
+VERDICTS = {"correct", "incorrect", "unknown"}
+
+
+def require(condition, message):
+    if not condition:
+        raise ValueError(message)
+
+
+def finite_non_negative(value, name):
+    require(
+        type(value) in {int, float} and math.isfinite(value) and value >= 0,
+        f"{name} must be finite and non-negative",
+    )
+
+
+def validate_rollouts(rollouts):
+    require(isinstance(rollouts, list) and rollouts, "rollouts must be non-empty")
+    required = {
+        "id",
+        "problem_id",
+        "answer",
+        "verdict",
+        "format_ok",
+        "unsafe",
+        "tokens",
+        "evidence_ids",
+        "verifier_revision",
+    }
+    seen = set()
+    for row in rollouts:
+        require(isinstance(row, dict) and set(row) == required, "rollout schema mismatch")
+        require(isinstance(row["id"], str) and row["id"], "id must be non-empty")
+        require(row["id"] not in seen, "duplicate rollout id")
+        seen.add(row["id"])
+        require(isinstance(row["problem_id"], str) and row["problem_id"], "problem_id must be non-empty")
+        require(isinstance(row["answer"], str) and row["answer"], "answer must be non-empty")
+        require(row["verdict"] in VERDICTS, "unknown verdict")
+        require(type(row["format_ok"]) is bool, "format_ok must be boolean")
+        require(type(row["unsafe"]) is bool, "unsafe must be boolean")
+        finite_non_negative(row["tokens"], "tokens")
+        require(
+            isinstance(row["evidence_ids"], list)
+            and all(isinstance(item, str) and item for item in row["evidence_ids"]),
+            "evidence_ids must be a list of non-empty strings",
+        )
+        require(
+            isinstance(row["verifier_revision"], str) and row["verifier_revision"],
+            "verifier_revision must be non-empty",
+        )
+    return True
+
+
+def reward(row):
+    require(row["verdict"] in VERDICTS, "unknown verdict")
+    if row["verdict"] == "unknown":
+        return None
+    if row["unsafe"]:
+        return -1.0
+    if row["verdict"] == "correct" and row["format_ok"]:
+        return 1.0
+    return 0.0
+
+
+def group_advantages(rollouts, problem_id, epsilon=1e-8):
+    validate_rollouts(rollouts)
+    finite_non_negative(epsilon, "epsilon")
+    require(epsilon > 0, "epsilon must be positive")
+    group = [row for row in rollouts if row["problem_id"] == problem_id]
+    known = [(row, reward(row)) for row in group if reward(row) is not None]
+    require(len(known) >= 2, "at least two known rollouts are required")
+    values = [score for _, score in known]
+    mean = sum(values) / len(values)
+    variance = sum((value - mean) ** 2 for value in values) / len(values)
+    std = math.sqrt(variance)
+    return [(row["id"], round((score - mean) / (std + epsilon), 3)) for row, score in known]
+
+
+def metrics(rollouts):
+    validate_rollouts(rollouts)
+    known = [row for row in rollouts if row["verdict"] != "unknown"]
+    successes = [row for row in known if reward(row) == 1.0]
+    return {
+        "coverage": len(known) / len(rollouts),
+        "known_success_rate": None if not known else len(successes) / len(known),
+        "distillable_ids": [
+            row["id"]
+            for row in successes
+            if row["evidence_ids"]
+        ],
+    }
+
+
+def unit_success_cost(total_cost, success_count):
+    finite_non_negative(total_cost, "total_cost")
+    require(type(success_count) is int and success_count >= 0, "success_count must be a non-negative integer")
+    if success_count == 0:
+        return None
+    return total_cost / success_count
+
+
+ROLLOUTS = [
+    {
+        "id": "r1",
+        "problem_id": "math-1",
+        "answer": "x=2",
+        "verdict": "correct",
+        "format_ok": True,
+        "unsafe": False,
+        "tokens": 30,
+        "evidence_ids": ["eq-check-1"],
+        "verifier_revision": "math-v3",
+    },
+    {
+        "id": "r2",
+        "problem_id": "math-1",
+        "answer": "x=3",
+        "verdict": "incorrect",
+        "format_ok": True,
+        "unsafe": False,
+        "tokens": 22,
+        "evidence_ids": [],
+        "verifier_revision": "math-v3",
+    },
+    {
+        "id": "r3",
+        "problem_id": "math-1",
+        "answer": "x=2",
+        "verdict": "correct",
+        "format_ok": True,
+        "unsafe": False,
+        "tokens": 34,
+        "evidence_ids": ["eq-check-1"],
+        "verifier_revision": "math-v3",
+    },
+    {
+        "id": "r4",
+        "problem_id": "math-1",
+        "answer": "x=2",
+        "verdict": "unknown",
+        "format_ok": True,
+        "unsafe": False,
+        "tokens": 18,
+        "evidence_ids": [],
+        "verifier_revision": "math-v3",
+    },
+]
+
+
+print("schema_valid", validate_rollouts(ROLLOUTS))
+print("advantages", group_advantages(ROLLOUTS, "math-1"))
+print("metrics", metrics(ROLLOUTS))
+print("unit_success_cost", unit_success_cost(106, 2))
+print("zero_success_cost", unit_success_cost(106, 0))
+```
+
+预期输出为：
+
+```text
+schema_valid True
+advantages [('r1', 0.707), ('r2', -1.414), ('r3', 0.707)]
+metrics {'coverage': 0.75, 'known_success_rate': 0.6666666666666666, 'distillable_ids': ['r1', 'r3']}
+unit_success_cost 53.0
+zero_success_cost None
+```
+
+这个例子把 unknown 从组内优势中排除，但仍把它计入整体覆盖率的分母。这样报告同时回答了 verifier 覆盖了多少样本和已知样本中成功多少。r1 与 r3 都有证据引用，进入教学上的蒸馏候选；这不表示它们可以绕过学生模型的再次验证。
+
+边界测试应包括重复 ID、空 verifier revision、非法 verdict、NaN token、负 token、全是 unknown 的组、空 rollout 和零成功成本。全是 unknown 时，group_advantages 应明确拒绝，因为没有可比较的奖励；整体 known_success_rate 在没有已知样本时应返回 None，不能把不可判定伪装成失败率。
+
+## 17.18 从审计器回到真实训练
+
+教学代码没有实现 rollout、梯度更新或分布式 verifier，只验证训练接口最容易出错的边界。真实系统还要处理策略采样、长序列截断、token 级 mask、KL 估计、混合精度、并行执行、缓存、超时和 checkpoint 恢复。
+
+最值得保留的设计原则是数据对象的完整性。一个奖励数字应能追溯到问题版本、轨迹、verifier revision、reason code、证据、资源消耗和安全判定；一个蒸馏样本应能追溯到教师版本、过滤规则、学生分布和污染状态。没有这些字段，训练曲线即使上升，也很难判断提升来自能力、数据泄漏还是 verifier 漏洞。
+
+## 17.19 练习与判断
+
+**练习一：Verifier contract。** 为一道数学题、一个 Python 函数和一个 JSON 输出各写出 correct、incorrect、unknown 的具体触发条件，并说明超时和解析失败分别属于哪一类。
+
+**练习二：组内信号。** 设一组奖励为 [0,0,1,unknown]。说明哪些样本进入优势计算，为什么全零组不能通过提高学习率获得区分信号。
+
+**练习三：蒸馏样本。** 设计一个代码修复样本，包含教师候选、失败测试、修正 patch、最终测试、workspace revision 和 verifier revision。说明只保留最终答案会丢掉什么。
+
+**练习四：反事实评估。** 为一个数学 verifier 设计等价表达变体，为一个代码 verifier 设计隐藏测试和资源限制，并说明它们分别能发现哪一种 reward hacking。
+
+## 17.20 资料边界与本章结论
+
+DeepSeek-R1 的 arXiv 技术报告和官方仓库支持关于 R1-Zero、cold-start、强化学习路线、公开蒸馏模型和报告结果的陈述；DeepSeekMath 论文支持 GRPO 作为 PPO 变体及其数学训练背景；过程监督和 verifier 论文支持结果奖励、过程奖励与验证器设计的研究讨论。它们不支持对未公开数据配方、内部奖励权重、闭源模型搜索过程或部署策略作确定推断。
+
+RLVR 的价值在于把可执行结果变成训练反馈，蒸馏的价值在于把高预算搜索中的有效行为迁移到更便宜的学生。两者的边界同样清楚：verifier 只能覆盖它定义的世界，组内优势只能利用当前组的相对信号，教师轨迹可能包含偏差，学生仍需独立验证。真正可信的提升必须同时经过独立题目、变体或隐藏测试、成本统计、安全审计和失败样本分析。
+
+参考资料：
+
+- DeepSeek, DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning：<https://arxiv.org/abs/2501.12948>
+- DeepSeek AI, DeepSeek-R1 官方仓库：<https://github.com/deepseek-ai/DeepSeek-R1>
+- Shao et al., DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models：<https://arxiv.org/abs/2402.03300>
+- Lightman et al., Let’s Verify Step by Step：<https://arxiv.org/abs/2305.20050>
+- OpenAI, PRM800K 数据与代码：<https://github.com/openai/prm800k>
+- Schulman et al., Proximal Policy Optimization Algorithms：<https://arxiv.org/abs/1707.06347>

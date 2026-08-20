@@ -27,6 +27,8 @@ P(\text{at least one error by }T)
 
 真实语言生成中的错误并不独立，早期错误还会改变后续状态，所以这个公式不是能力定律。它的作用是说明：即便每个 token 的错误概率不大，轨迹足够长时，训练分布与部署分布之间的差异也不能忽略。
 
+这个教学近似要求 `T` 为正整数，且每个 `q_t` 是同一条件定义下的概率，满足 `0\leq q_t\leq1`。若某一步来自工具超时、权限拒绝或不可判定任务，就不应把它硬塞进“模型出错”的 `q_t`；这些事件需要在状态分布与环境失败率中单独记录。
+
 学生自生成的错误状态可能包括：选错文件、误解接口、重复调用工具、把空结果当成事实、在测试失败后继续重复同一 patch，或者在数学推导中使用了不成立的假设。教师只提供一条从干净输入开始的最终答案，不能直接教会学生处理这些状态。
 
 ## 17.1 OPD 解决什么，不能解决什么
@@ -91,6 +93,8 @@ p_T^{(T)}(v\mid s_t)\log p_S^{(T)}(v\mid s_t)
 
 m_t 是有效监督 mask，Z=\sum_t m_t 是归一化分母，V 是词表，T 是蒸馏温度，p^(T) 表示使用温度后的 softmax 分布。T^2 是常见的梯度尺度补偿项；是否保留、如何与 hard label 混合，取决于具体实现。
 
+这个 token-level 写法要求教师和学生在同一状态上使用可对应的词表与特殊 token 协议，温度 `T>0`，并且有效监督数 `Z=\sum_t m_t>0`。若样本经截断或 chat template 后没有剩余的 assistant token，它不是“零蒸馏损失的成功样本”，而是数据协议异常；应跳过并统计空监督率。完整 softmax 的每一项还必须是有限概率，和为一，不能把缺失的教师 logits 用零填充后继续训练。
+
 温度较高时，教师低概率 token 的相对关系更容易被学生看到；温度较低时，监督更接近硬标签，教师的最高概率动作更突出。温度不是“越大越有知识”的开关，过高会把不确定性和错误一同扩散给学生。
 
 ### 17.3.2 Reverse-KL 与 sampled token 信号
@@ -111,6 +115,8 @@ r_t^{\mathrm{KD}}
 ~~~
 
 对 a_t 按学生分布取期望时，这个信号与最小化 D_KL(p_S\|p_T) 的方向相关。它和“教师在教师分布上给学生做交叉熵”不是同一个估计器，不能把两种方向的 KL 混写。
+
+reverse KL 要求在学生赋予正概率的动作上教师也有正概率；否则 `\log p_T(a_t\mid s_t)` 和 KL 都没有有限值。有限精度实现通常使用稳定的 `log_softmax`、记录截断 top-k 的剩余质量，并对教师拒答、服务失败或版本不匹配标为 `unknown`，而不是把缺失 log-prob 当成一个很大的负 reward。只有两端概率来自同一状态快照、同一动作定义时，差值才具有蒸馏语义。
 
 reverse KL 往往倾向于追逐教师的高概率 mode；当教师分布本身有多个合理答案或高熵时，学生可能过早收缩到单一表达。forward KL 更关心覆盖教师支持的多种可能性，但可能让学生保留更多低质量模式。选择哪一种，应该结合任务、教师熵、verifier 和独立多样性评估。
 
@@ -166,6 +172,8 @@ w_t=m_t\cdot q_T(s_t)\cdot q_V(y_t)
 
 m_t 表示基本有效 mask，q_T 是教师置信或校准质量，q_V 是 verifier 对当前目标的支持，D_j 是前面位置的分布差异，lambda 控制偏离累积的衰减。这个公式是教学性的组合，不是所有 OPD 方法的标准定义；它表达的工程直觉是：无效 token、低可信教师输出和远离教师支持区域的后段 token 不应拥有同样权重。
 
+使用这类权重前，需要声明 `m_t\in\{0,1\}`、`q_T,q_V\in[0,1]`、`D_j\geq0`、`\lambda\geq0`，并保证参与求和的量有限。教师无法回答、verifier 超时或状态已被撤销时，`q_T` 或 `q_V` 应为未知而不是主观补成 `0` 或 `1`；这类轨迹应从当前更新中隔离，同时作为数据或系统健康信号保留。
+
 对安全动作，权重不能替代执行器拒绝。教师说“可以写文件”不等于 student 获得写权限，教师生成的 SQL 不等于事务可以提交，教师建议访问某个 URL 也不等于网络策略允许访问。权限必须在 environment executor 层判定。
 
 如果教师的隐藏 reasoning 含敏感信息或未验证假设，不应无条件蒸馏完整思维链。更可审计的目标是最终可验证 artifact、工具 schema、证据引用、错误类别、安全拒答和结构化修复动作。需要展示推理时，也应区分用于训练的内部信号和可对外输出的解释。
@@ -220,10 +228,11 @@ N_S 和 N_T 分别是学生和教师 token/调用的计数，C_T 往往远大于
 
 ~~~math
 C_{\mathrm{success}}
-=\frac{C_{\mathrm{task}}}{\max(\epsilon,P_{\mathrm{success}})}
+=\frac{C_{\mathrm{task}}}{P_{\mathrm{success}}},
+\qquad P_{\mathrm{success}}>0
 ~~~
 
-P_success 是独立任务上的真正成功率，epsilon 只是避免评估样本太少时出现除零。若 OPD 让学生成功率从 0.45 提高到 0.55，但教师调用量增加三倍，单位成功成本可能上升；若训练后线上可以少调用教师、少重试且延迟下降，收益才更可信。
+`P_success` 是独立任务上的真正成功率，要求 `0<P_success\leq1`；`C_task` 要在相同货币、时间窗口和分摊口径下计量。若独立评估没有任何成功任务，单位成功成本没有定义，不能用 `epsilon` 伪造一个极大但看似可比较的数字。应报告零成功、样本数和置信区间，再先解决成功定义或能力问题。若 OPD 让学生成功率从 0.45 提高到 0.55，但教师调用量增加三倍，单位成功成本可能上升；若训练后线上可以少调用教师、少重试且延迟下降，收益才更可信。
 
 触发策略可以比较四个条件：所有状态调用教师、只在困难状态调用、复用离线缓存、完全不用教师。每个条件都按任务难度、错误类型、学生长度和工具状态分桶，否则平均值会掩盖教师只在简单题上有效的事实。
 
@@ -279,6 +288,8 @@ r_t=\log p_T(a_t\mid s_t)-\log p_S(a_t\mid s_t)
 
 m_t 是有效 token mask，w_t 是可信度、位置或 verifier 条件权重，Z 是归一化分母。r_t 的符号、KL 方向、是否 stop-gradient 以及是否与 hard label 混合，都必须根据实现明确记录。
 
+这里同样要求 `Z=\sum_tm_t>0`，有效位置的 `w_t` 与 `r_t` 都有限，并且 `w_t` 的方向已在 schema 中固定。例如“verifier 支持度越高权重越大”和“风险越高权重越小”不能共用一个未说明方向的字段。若仅部分 token 有教师分数，mask、截断策略和未标注位置是否参与 hard-label loss 都要与 checkpoint 一起保存。
+
 当 teacher/student tokenizer 不同，p_T(v) 与 p_S(v) 没有同一个词表索引，不能直接做 token-level KL。可选办法是使用共享 tokenizer、把教师输出转换为文本序列、在字符/词片段边界上对齐，或退回到动作、artifact 和 verifier 级别的目标。把不同 tokenizer 的 logits 按数组下标相乘，是数值上能运行但语义上错误的实现。
 
 ## 17.10 为什么长轨迹后段的教师信号更危险
@@ -300,6 +311,8 @@ w_t=\mathbf{1}[D_t^{\mathrm{cum}}\leq\delta]
 ~~~
 
 delta 是允许的偏离范围，q_T 是教师置信或校准分数，q_V 是 verifier 对状态/结果的支持。这里的乘法表示只有可信区域才参与高权重学习；实际工作也可以使用连续衰减，而不是直接截断。
+
+该示意要求 `\delta\geq0`，累计 KL 有限，且 `q_T,q_V` 来自同版本的、范围明确的检查。没有 verifier 结论不等于 verifier 不支持，也不等于可以安全纳入可信区域；应报告未判定状态比例，避免过滤器仅在容易样本上显得可靠。
 
 2026 年的公开预印本中，位置偏差研究报告了前段 token 与后段 token 的监督质量差异，并提出用累计差异给 token 加权的 IW-OPD 思路。这个方向与工程直觉一致，但具体提升幅度依赖模型、任务、长度和教师配置，不能把一个预印本的 benchmark 增益当作普遍定律。
 
@@ -404,6 +417,8 @@ C_{\mathrm{total}}
 
 N_S 和 N_T 可以按 token、调用次数或 GPU 时间统计，C_T 往往远高于学生单 token 成本。缓存可以降低 N_T，但会引入一致性和隐私成本。
 
+不论采用哪种计数单位，`N_S,N_T` 和各成本项都应非负，且所有项必须换算到相同的时间窗口、货币和资源口径。token、调用次数与 GPU 小时不能直接相加；前式只是将每一项已经换算成成本后的账本，而不是把不同单位的原始计数相加。
+
 若独立评估真正成功的任务数为 N_success，单位成功任务成本为：
 
 ~~~math
@@ -412,7 +427,7 @@ C_{\mathrm{unit\ success}}
        {N_{\mathrm{success}}}
 ~~~
 
-教师调用降低一次错误恢复的步数，可能提高一次任务的教师成本却降低总成本；反过来，学生在训练中依赖大量教师建议，线上没有教师时可能退化。成本分析必须在和部署相同的教师可用性、工具版本和重试预算下进行。
+该量要求 `N_success>0`，成功要由独立任务结果、权限、预算和必要人工复核共同定义。零成功时应报告“单位成功成本未定义”和失败类别，而不是零成本或任意平滑值。教师调用降低一次错误恢复的步数，可能提高一次任务的教师成本却降低总成本；反过来，学生在训练中依赖大量教师建议，线上没有教师时可能退化。成本分析必须在和部署相同的教师可用性、工具版本和重试预算下进行。
 
 ## 17.16 一个轻量的教师调用选择 demo
 
@@ -435,7 +450,60 @@ class AgentState:
     risk_level: str
 
 
+class ContractError(ValueError):
+    """A state or cache-input contract is not satisfied."""
+
+
+def require_text(value: object, name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ContractError(f"{name} must be non-empty text")
+    return value
+
+
+def require_probability(value: object, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ContractError(f"{name} must be a finite probability")
+    value = float(value)
+    if not 0.0 <= value <= 1.0:
+        raise ContractError(f"{name} must be between zero and one")
+    return value
+
+
+def require_nonnegative_int(value: object, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ContractError(f"{name} must be a non-negative integer")
+    return value
+
+
+def validate_state(state: AgentState) -> None:
+    if not isinstance(state, AgentState):
+        raise ContractError("state must be an AgentState")
+    require_text(state.task_id, "task_id")
+    require_text(state.workspace_revision, "workspace_revision")
+    require_text(state.text, "state text")
+    require_probability(state.confidence, "confidence")
+    require_nonnegative_int(state.failed_tests, "failed_tests")
+    if state.proposed_action not in {"read", "write", "execute", "delete"}:
+        raise ContractError("proposed_action is not in the action schema")
+    if state.risk_level not in {"low", "medium", "high", "critical"}:
+        raise ContractError("risk_level is not in the risk schema")
+
+
+def canonical_json(value: object, name: str) -> bytes:
+    try:
+        return json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as error:
+        raise ContractError(f"{name} must be finite JSON data") from error
+
+
 def should_query_teacher(state: AgentState) -> tuple[bool, str]:
+    validate_state(state)
     risky_actions = {"write", "execute", "delete"}
     if state.proposed_action in risky_actions and state.risk_level in {"high", "critical"}:
         return True, "high_risk_action"
@@ -450,17 +518,37 @@ def state_cache_key(
     state: AgentState,
     student_revision: str,
     teacher_revision: str,
+    tokenizer_and_template_revision: str,
     environment_revision: str,
+    verifier_revision: str,
+    permission_domain: str,
+    sampling_configuration: dict[str, object],
 ) -> str:
+    validate_state(state)
+    if not isinstance(sampling_configuration, dict) or not sampling_configuration:
+        raise ContractError("sampling_configuration must be a non-empty mapping")
     payload = {
         "task_id": state.task_id,
         "workspace_revision": state.workspace_revision,
         "text": state.text,
         "student_revision": student_revision,
         "teacher_revision": teacher_revision,
+        "tokenizer_and_template_revision": tokenizer_and_template_revision,
         "environment_revision": environment_revision,
+        "verifier_revision": verifier_revision,
+        "permission_domain": permission_domain,
+        "sampling_configuration": sampling_configuration,
     }
-    encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
+    for name in (
+        "student_revision",
+        "teacher_revision",
+        "tokenizer_and_template_revision",
+        "environment_revision",
+        "verifier_revision",
+        "permission_domain",
+    ):
+        require_text(payload[name], name)
+    encoded = canonical_json(payload, "cache payload")
     return hashlib.sha256(encoded).hexdigest()
 
 
@@ -472,11 +560,50 @@ states = [
 
 for state in states:
     query, reason = should_query_teacher(state)
-    key = state_cache_key(state, "student-3", "teacher-9", "sandbox-4")
+    key = state_cache_key(
+        state,
+        "student-3",
+        "teacher-9",
+        "tokenizer-2/template-4",
+        "sandbox-4",
+        "verifier-5",
+        "tenant-a-readonly",
+        {"temperature": 0.7, "top_p": 0.95, "max_tokens": 2048},
+    )
     print(state.task_id, query, reason, key[:12])
+
+
+def expect_contract_error(label: str, action) -> None:
+    try:
+        action()
+    except ContractError as error:
+        print(f"{label}: {error}")
+    else:
+        raise AssertionError(f"{label} should have failed")
+
+
+expect_contract_error(
+    "confidence out of range",
+    lambda: should_query_teacher(
+        AgentState("bad", "ws-1", "state", 1.5, 0, "read", "low")
+    ),
+)
+expect_contract_error(
+    "negative failed tests",
+    lambda: should_query_teacher(
+        AgentState("bad", "ws-1", "state", 0.5, -1, "read", "low")
+    ),
+)
+expect_contract_error(
+    "non-finite sampling",
+    lambda: state_cache_key(
+        states[0], "student-3", "teacher-9", "tokenizer-2/template-4",
+        "sandbox-4", "verifier-5", "tenant-a-readonly", {"temperature": float("nan")}
+    ),
+)
 ~~~
 
-这个 demo 有两个边界。第一，confidence 只是触发特征，不是权限判断；真正的 write 动作仍要由执行器拒绝或要求独立授权。第二，cache key 绑定了 workspace 和环境版本，但生产系统还应绑定 tokenizer、chat template、verifier、权限域和采样配置。缓存命中不能绕过最新的安全检查。
+这个 demo 有三个边界。第一，`confidence` 已被限制在 `[0,1]`，但它只是触发特征，不是权限判断；真正的 write 动作仍要由执行器拒绝或要求独立授权。第二，cache key 同时绑定 workspace、学生/教师、tokenizer/template、环境、verifier、权限域和采样版本，任何字段缺失都可能把旧建议错用于新状态。第三，缓存 payload 必须是有限 JSON；`NaN`、缺失版本和非法状态会在进入教师调用前失败。缓存命中仍不能绕过最新的安全检查、数据删除请求或人工审批。
 
 ## 17.17 常见失败与排查
 
@@ -539,17 +666,100 @@ g(\tau)=
 
 新方法应先做小规模复现和消融：固定学生、教师、任务、采样和 verifier，只改变一个稳定化组件；报告 teacher calls、过滤率、位置权重、KL、独立成功和单位成本。否则多个改动一起上线，无法知道收益来自目标、数据还是采样器。
 
-## 17.21 面试问题：如何解释 OPD
+## 17.21 常见误区与诊断路径
 
-回答“on-policy distillation 和普通蒸馏有什么区别”时，应先说状态分布：普通蒸馏主要在教师示范分布 d_T 上训练，OPD 让学生在自己的分布 d_S 上生成状态，再请求教师指导。这样更能覆盖学生实际会遇到的错误，但教师成本、噪声和隐私风险更高。
+OPD 的损失下降很容易被误读成“学生已经学会了教师的能力”。真正需要追踪的是状态分布、教师信号、任务结果和线上约束之间是否形成了因果链。下面几个误区经常同时出现，诊断时应逐一拆开，而不是用一个平均蒸馏 loss 作结论。
 
-回答“OPD 是否等于 RL”时，可以说二者存在联系但不等同。student-generated token 上的 teacher/student log-probability 比可以被解释为 token reward，OPD 也会遇到 on-policy 采样、credit assignment、方差和策略偏移问题；但具体优化器、KL 方向、是否有 verifier 和是否使用 value baseline，取决于实现。
+### 17.21.1 学生生成状态不等于训练始终是 on-policy
 
-回答“为什么教师越强不一定越好”时，应补充教师在学生错误状态上的支持覆盖、置信校准、任务正确性、调用成本和数据安全。教师如果对错误状态高置信地给出错误建议，蒸馏会把错误变成密集监督。
+“on-policy”描述的是状态或动作由当前行为策略产生，而不是数据集只要包含学生文本就永远是 on-policy。学生 checkpoint 更新后，旧 rollout 仍然来自旧策略；如果把它们长期重复训练，状态分布就会逐渐变成 replay 分布。于是，一个名义上的 OPD 管线实际上可能混合了当前策略、旧学生策略和教师示范三种来源。
 
-回答“如何证明 OPD 有效”时，应比较 SFT、offline KD、OPD 和教师，并在学生自生成错误、长轨迹、工具异常、新环境和安全边界上报告首次成功、恢复率、教师调用、长度、延迟和单位成功成本。教师 replay 上的 loss 下降不能替代独立任务结果。
+设第 k 轮采样时的学生策略为 pi_{S,k}，第 k+1 轮更新使用的数据来自多个历史版本，则训练分布更接近：
 
-回答“tokenizer 不一致怎么办”时，应指出 token logits 不能按下标直接对齐；应使用共享 tokenizer、文本级序列蒸馏、片段对齐、动作级目标或 verifier 结果。忽略 tokenizer 边界可能让训练数值正常、语义目标完全错误。
+~~~math
+d_{\mathrm{train}}(s)
+=\sum_{k=0}^{K}\alpha_k d_{\pi_{S,k}}(s),
+\qquad
+\sum_{k=0}^{K}\alpha_k=1.
+~~~
+
+alpha_k 是各版本 rollout 的混合权重。若当前策略与旧策略差距很大，教师信号和学生 log-probability 可能已经不再对应同一个行为分布。工程上要为每条轨迹记录 behavior policy revision、生成时间、采样配置和环境 revision，并决定旧数据是丢弃、降权、重新生成，还是用明确的 importance ratio 进行校正。不要因为样本中的前缀由学生写出，就跳过这一步。
+
+这个混合写法要求轨迹集合非空，`\alpha_k\geq0`，并且每个正权重分量都能追溯到实际 policy revision。某个旧 rollout 因权限撤销、环境失效或日志不完整而无法重放时，不能继续带着权重进入当前梯度；它应标为不可用数据，而不是静默归入当前策略分布。
+
+一个实用的诊断顺序是：先按 policy revision 绘制状态访问比例，再比较当前学生在这些状态上的 log-probability，最后观察旧样本和新样本对梯度范数、成功率及恢复率的贡献。如果旧 rollout 占比不断增加而独立恢复率下降，问题可能是 replay 过期，而不是教师能力不足。
+
+### 17.21.2 OPD 与 RL 有联系，但优化对象不同
+
+在学生采样到 a_t 后，教师与学生的 log-probability 差可以作为 token-level shaped signal。它的期望与负的 reverse KL 相关，因此可以放进策略梯度或其他在线更新中。但这个信号只说明“教师认为该动作相对可能”，不等于外部环境确认了任务成功。
+
+若训练目标只包含教师信号，可以抽象为：
+
+~~~math
+\mathcal{L}_{\mathrm{teacher}}
+=-\mathbb{E}_{\tau\sim\pi_S}
+\left[\sum_t m_t w_t
+\bigl(\log p_T(a_t\mid s_t)-\log p_S(a_t\mid s_t)\bigr)\right].
+~~~
+
+若同时存在任务结果 reward，则还需要明确它与教师项如何组合，以及哪个分量负责最终正确性：
+
+~~~math
+\mathcal{L}
+=\mathcal{L}_{\mathrm{teacher}}
+-\beta\,\mathbb{E}_{\tau\sim\pi_S}[R_{\mathrm{task}}(\tau)]
++\lambda\,\mathcal{L}_{\mathrm{constraint}}.
+~~~
+
+这里的 beta 和 lambda 不是越大越好。教师项过强，学生会追逐教师的表达 mode；任务项没有独立 verifier 时，结果可能被错误奖励放大；约束项如果只是可被抵消的软惩罚，就不能承担权限控制。是否称为“蒸馏”“策略优化”或“两者混合”，应由实际梯度、采样和奖励定义决定，而不是由训练器的名称决定。
+
+### 17.21.3 更强的教师不一定在学生状态上更有用
+
+教师在标准 benchmark 上更强，只说明它在那个任务分布、提示格式和资源预算下取得了更好的结果。学生可能把状态带到教师很少见的区域，例如损坏的代码工作区、缺少字段的工具响应、版本不匹配的依赖或已经执行过一次危险动作的环境。此时教师的总体能力排名不能替代对该状态分布的覆盖测试。
+
+应把教师建议分成至少三类：被 verifier 或人工复核支持的建议、暂时无法判定的建议、明确错误或越权的建议。对前两类分别记录教师置信度和 abstain 行为；对第三类必须阻止其直接进入高权重训练集。一个教师在普通样本上准确率很高，但在学生失败状态上高置信度地产生错误建议，仍然可能使 OPD 退化。
+
+教师信号的选择也要考虑学生的学习能力。完整 logits、长篇批注和复杂工具计划并不一定比一个明确的错误类别或下一步动作更好。可以做分层目标：先蒸馏结构化动作和安全协议，再加入局部 token 分布；对高不确定状态允许教师拒答或请求额外证据。这样做的依据是可验证性和可执行性，而不是教师回答的长度。
+
+### 17.21.4 教师调用减少不等于蒸馏成功
+
+训练后教师触发率下降可能有三种完全不同的解释：学生学会了在困难状态中恢复；触发器变得过窄，困难状态没有再被识别；学生通过早早拒答、缩短轨迹或避免工具动作来逃避风险。三者的教师调用曲线可能相同，但任务结果和安全后果相反。
+
+因此要把调用次数和行为结果配对分析。对每个任务至少记录是否触发教师、触发原因、触发前的状态、教师建议、后续动作、最终结果和总成本。按“低置信度”“重复失败”“高风险动作”“工具异常”等原因分桶，比较触发与不触发的条件成功率。一个更有解释力的量是条件恢复率：
+
+~~~math
+P(\mathrm{recover}\mid \mathrm{failure\ state},\mathrm{teacher\ available}).
+~~~
+
+同时报告没有教师时的对应结果，才能判断学生是学会了恢复，还是只是在部署时继续依赖教师。若触发率下降伴随首次成功率、恢复率和探索熵一起下降，应优先检查逃避行为，而不是继续压低教师调用预算。
+
+这个条件概率只在评测中存在至少一个被定义的 failure state，且“教师可用/不可用”的分组、预算、权限和任务版本可比时才有意义。若失败状态样本为零，或教师因系统故障而非策略实验不可用，应报告分母和未知状态，而不是把条件恢复率解释成学生能力差异。
+
+### 17.21.5 如何证明 OPD 带来了能力，而不是风格相似度
+
+教师 replay 上的 token loss、KL 和输出相似度只能证明学生更像教师。能力主张至少要比较四组对象：固定教师轨迹上的 offline KD、学生自生成状态上的 OPD、没有蒸馏的学生基线，以及教师本身。所有条件应尽量固定任务、提示、工具、模型预算和评估环境，只改变数据分布或蒸馏方法。
+
+测试不能只使用训练中出现过的错误。应分别加入新的题面、从未见过的错误类别、工具失败、长轨迹后段、权限撤销、依赖版本变化和不允许的动作。对代码任务，尤其要构造“第一次 patch 失败、第二次可以恢复”的成对场景；对 RAG 任务，要更换文档版本并检查引用是否仍然支持结论；对数学任务，要检查不同等价表达而不是只比较字符串。
+
+结果报告应同时包含首次成功率、错误后的恢复率、恢复步数、隐藏测试通过率、unsafe-action rate、教师调用数、学生 token、延迟和单位成功成本。可以用配对任务估计 OPD 与 offline KD 的成功率差异：
+
+~~~math
+\Delta_{\mathrm{success}}
+=\hat P_{\mathrm{OPD}}(\mathrm{success})
+-\hat P_{\mathrm{offline}}(\mathrm{success}).
+~~~
+
+这个差异还应按错误类型和轨迹位置给出置信区间或重采样范围。只报告一个总体均值，会把 OPD 真正改善的恢复样本和它造成负迁移的长尾样本混在一起。
+
+### 17.21.6 tokenizer 不一致时，数值对齐可能掩盖语义错误
+
+token-level KL 的前提是教师和学生在同一状态上使用可对应的动作空间。若两者 tokenizer 不同，教师词表中的第 1234 个 token 与学生词表中的第 1234 个 token 没有语义上的对应关系；按数组下标相乘虽然不会触发 shape error，却是在优化错误目标。
+
+可行的替代方案有四类。第一，共享 tokenizer 和 chat template，使词表、特殊 token、停止条件与位置边界一致。第二，把教师输出还原成文本，在学生 tokenizer 下重新编码，进行序列级或片段级监督，但要接受重新编码带来的边界和概率损失。第三，把监督转到动作级，例如工具名、参数 schema、文件操作和结构化字段。第四，只使用 verifier、最终 artifact 或错误类别作为更粗粒度目标。
+
+片段级对齐也需要记录边界。教师生成一个文本片段的概率，通常是该教师 tokenizer 下多个条件 token 概率的乘积；学生对同一片段的分解可能完全不同，不能把不同长度的 token loss 直接平均后比较。工程记录中应保存 tokenizer revision、normalization、special-token policy、chat template 和 stop rule。若这些协议不一致，先修复协议，再讨论蒸馏 loss 的变化。
+
+最后，任何 tokenizer 迁移都要用语义任务验证：格式是否可解析、工具动作是否有效、引用是否落在正确 span、数学表达是否等价。数值训练正常只说明张量计算完成，不能证明教师和学生学习的是同一个行为。
 
 ## 17.22 小结
 

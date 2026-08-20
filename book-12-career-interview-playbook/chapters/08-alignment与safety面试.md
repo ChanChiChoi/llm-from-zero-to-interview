@@ -91,7 +91,7 @@ w_S S
 w_R R
 ~~~
 
-这些变量不是天然可比的物理量，权重也不应被误解为普适常数。公式的作用是提醒我们：优化一个汇总指标会隐藏分布。一个系统可能提高平均 helpfulness，却在少数高严重度样本上变差；也可能把拒答率提高后降低了某类风险，却让大量合法用户得不到帮助。
+这些变量不是天然可比的物理量，权重也不应被误解为普适常数。若把它用于有限评估集，还要明确各分量已经归一化到同一量纲，权重是有限的非负数，并说明 `R` 表示成本、损害还是失败概率的组合；否则不同实验之间的 `U` 没有可比性。公式的作用是提醒我们：优化一个汇总指标会隐藏分布。一个系统可能提高平均 helpfulness，却在少数高严重度样本上变差；也可能把拒答率提高后降低了某类风险，却让大量合法用户得不到帮助。
 
 更可靠的报告方式是按风险和场景分桶，分别给出均值、尾部和严重度加权结果，再说明哪些指标是硬约束、哪些指标是优化目标。高影响小概率事件不能因为样本少就被平均掉。
 
@@ -139,7 +139,7 @@ R_{\mathrm{expected}}
 \sum_i p_i I_i a_i
 ~~~
 
-p_i、I_i 和 a_i 的估计都带有不确定性。这个式子不是精确预测，而是避免把“高概率小影响”和“低概率大影响”混为一谈。工具权限扩大、自动重试、批量发送和缺少人工确认都可能提高放大因子，即使模型行为本身没有变化。
+这里假设事件集合是有限的，`0 <= p_i <= 1`，`I_i >= 0`，`a_i >= 0`，并且各项使用同一时间窗口和同一影响量纲。若风险事件相互依赖，简单相加只是近似；若影响不能直接相加，应改用分桶、场景树或尾部风险报告。`p_i`、`I_i` 和 `a_i` 的估计都带有不确定性。这个式子不是精确预测，而是避免把“高概率小影响”和“低概率大影响”混为一谈。工具权限扩大、自动重试、批量发送和缺少人工确认都可能提高放大因子，即使模型行为本身没有变化。
 
 除了期望风险，还要单独报告最坏已知后果、严重度最高样本和证据缺口。不能用低平均风险为一个没有任何高严重度约束的系统背书。
 
@@ -220,7 +220,7 @@ r_{\phi}(x,y_l)
 \right)
 ~~~
 
-r_phi 是奖励模型输出，sigma 是 logistic sigmoid，y_w 和 y_l 是偏好对。这个公式只说明偏好排序，不保证奖励具有绝对意义，也不保证人类对一个复杂回答的判断稳定。
+r_phi 是奖励模型输出，sigma 是 logistic sigmoid，y_w 和 y_l 是偏好对。这个公式只说明偏好排序，不保证奖励具有绝对意义，也不保证人类对一个复杂回答的判断稳定。经验训练还要求偏好集合非空，且奖励值为有限数；空集合没有可计算的平均损失，不能把它报告成训练成功。如果同一个输入有多个标注者，还应说明冲突如何处理，以及是否保留了“无法判定”的样本。
 
 带 KL 约束的策略目标可以抽象为：
 
@@ -238,7 +238,7 @@ r_{\phi}(x,y)
 \right]
 ~~~
 
-pi 是待优化策略，pi_ref 是 reference policy，beta 控制偏离代价。序列概率通常由 token 对数概率相加得到，因此回答长度、截断和归一化方式会影响奖励和 KL 的解释。
+pi 是待优化策略，pi_ref 是 reference policy，beta 控制偏离代价。对数比值要求 reference 在被评估序列上有正概率；实现中的零概率、下溢和截断必须显式处理，不能把数值异常静默当成正常奖励。通常取有限的 `beta > 0`，并使策略与 reference 使用可比的 tokenizer、回答边界和停止规则。序列概率通常由 token 对数概率相加得到，因此回答长度、截断和归一化方式会影响奖励和 KL 的解释；实际 PPO 还会使用近似 KL、优势估计和裁剪目标，本式是帮助理解目标构成的抽象形式。
 
 ### 8.5.2 KL 约束能解决什么
 
@@ -286,7 +286,7 @@ DPO 使用 chosen/rejected 偏好对直接优化策略相对 reference 的对数
 \right]
 ~~~
 
-pi_theta 是待训练策略，pi_ref 是 reference，y_w 是 chosen，y_l 是 rejected，beta 控制偏好差异的强度。这里的序列对数概率通常需要明确是否按 token 长度归一化，否则长回答可能获得不同的梯度权重。
+pi_theta 是待训练策略，pi_ref 是 reference，y_w 是 chosen，y_l 是 rejected，beta 控制偏好差异的强度。偏好对集合必须非空，`beta` 应为有限正数，两个策略对相关序列的概率也不能为零到使对数比值失去定义。这里的序列对数概率通常需要明确是否按 token 长度归一化，否则长回答可能获得不同的梯度权重；实现还要说明回答 token 的起止位置、padding 是否忽略，以及 reference 是否冻结。
 
 ### 8.6.2 DPO 的工程优势
 
@@ -427,7 +427,7 @@ r
 \frac{N_{\mathrm{overrefuse}}}{N_{\mathrm{benign\_sensitive}}}
 ~~~
 
-分母必须明确样本定义、风险等级、语言、轮次和判断标准。把“任何拒答”当作 over-refusal，或者把“只要没有完整危险细节”当作安全，都会产生误导。
+只有 `N_harmful > 0` 且 `N_benign_sensitive > 0` 时，上述比率才有定义；对应分母为空时应报告“未定义/无样本”，不能填成 0。分母必须明确样本定义、风险等级、语言、轮次和判断标准。把“任何拒答”当作 over-refusal，或者把“只要没有完整危险细节”当作安全，都会产生误导。
 
 还可以报告安全替代率：
 
@@ -438,7 +438,7 @@ r
 {N_{\mathrm{alternative\_eligible}}}
 ~~~
 
-这里的分母是被标注为“应当能够转化为安全帮助”的样本数。如果评估集中的每个 benign-sensitive 样本都要求安全替代，`N_alternative_eligible` 才等于 `N_benign_sensitive`；如果有些样本只要求澄清、转人工或保持中立，就不能把它们混入分母。`helpful alternative` 也需要有任务级标准，不是出现“我可以帮助你了解安全知识”就算成功。
+只有 `N_alternative_eligible > 0` 时这个比率才有定义。这里的分母是被标注为“应当能够转化为安全帮助”的样本数。如果评估集中的每个 benign-sensitive 样本都要求安全替代，`N_alternative_eligible` 才等于 `N_benign_sensitive`；如果有些样本只要求澄清、转人工或保持中立，就不能把它们混入分母。`helpful alternative` 也需要有任务级标准，不是出现“我可以帮助你了解安全知识”就算成功。
 
 ### 8.9.3 分级响应
 
@@ -491,7 +491,7 @@ next-token prediction 直接优化的是继续生成高概率 token，并不等�
 \right|
 ~~~
 
-n 是样本总数。ECE 依赖分桶方式，不能概括所有风险；生成式模型的 token 概率也不等于完整回答正确概率。
+这里要求 `n > 0`，并且只对非空桶求和；若评估集为空，ECE 应报告为未定义。`conf(B_m)` 和 `acc(B_m)` 应落在 `[0, 1]`，且置信度的含义、标签定义和分桶边界要在实验前固定。ECE 依赖分桶方式，不能概括所有风险；生成式模型的 token 概率也不等于完整回答正确概率。
 
 选择性回答更接近实际产品：模型在低置信或证据不足时 abstain，系统接受覆盖率下降，换取已回答样本的更低错误。应同时报告 coverage、selective risk、澄清成功率和高风险场景表现。一个“更诚实”的系统可能回答更少，但不应把拒绝未知误写成能力退化。
 
@@ -788,7 +788,7 @@ Q_{\mathrm{before}}
 
 ### 8.17.3 四类处理的证据边界
 
-三种方法的证据不同：
+四类处理的证据不同：
 
 - 输出护栏改变可见行为，不一定改变内部知识；
 - 局部编辑改变部分参数或表示，可能产生邻域副作用；
@@ -846,7 +846,7 @@ C_{\mathrm{model}}
 C_{\mathrm{review}}
 ~~~
 
-循环预算不是只为省钱，也是为了限制错误扩散。任务达到目标、遇到不可恢复错误、权限拒绝或预算耗尽时，都应进入明确终态，不能让模型继续“尝试看看”。
+这里假设 `n_tool` 是非负整数，各项成本使用同一资源量纲并且为非负值；如果没有发生人工审核，`C_review` 应明确记为 0，而不是遗漏字段。循环预算不是只为省钱，也是为了限制错误扩散。任务达到目标、遇到不可恢复错误、权限拒绝或预算耗尽时，都应进入明确终态，不能让模型继续“尝试看看”。
 
 ## 8.19 Model Card、System Card 与发布治理
 
@@ -954,7 +954,7 @@ class Case:
     severity: int = 1
 
 
-def summarize(cases: Iterable[Case]) -> dict[str, float]:
+def summarize(cases: Iterable[Case]) -> dict[str, float | None]:
     rows = list(cases)
     harmful = [row for row in rows if row.kind == 'harmful']
     benign_sensitive = [
@@ -964,19 +964,19 @@ def summarize(cases: Iterable[Case]) -> dict[str, float]:
     harmful_compliance = (
         sum(row.action == 'harmful_answer' for row in harmful) / len(harmful)
         if harmful
-        else 0.0
+        else None
     )
     over_refusal = (
         sum(row.action == 'refuse' for row in benign_sensitive)
         / len(benign_sensitive)
         if benign_sensitive
-        else 0.0
+        else None
     )
     safe_helpfulness = (
         sum(row.action == 'safe_answer' and row.helpful for row in benign_sensitive)
         / len(benign_sensitive)
         if benign_sensitive
-        else 0.0
+        else None
     )
     weighted_failures = sum(
         row.severity
@@ -1011,7 +1011,7 @@ assert round(summary['severity_weighted_failure'], 3) == 0.4
 print(summary)
 ~~~
 
-这段代码没有判断样本是否真的有害，也没有判断回答是否安全。它只把已经经过标注的结果按分母汇总。真实评估还需要保存标注指南、评审者、分歧、置信度、版本和严重度来源，并对指标做置信区间和分桶分析。
+这段代码没有判断样本是否真的有害，也没有判断回答是否安全。它只把已经经过标注的结果按分母汇总；当某一类没有样本时，前三个指标返回 `None`，表示未定义，而不是把“没有观测”伪装成零。严重度加权指标仍需确认总权重为正，且示例中的 `severity` 已经是经过标注的非负权重。真实评估还需要保存标注指南、评审者、分歧、置信度、版本和严重度来源，并对指标做置信区间和分桶分析。
 
 ## 8.22 如何设计可复现的安全实验
 

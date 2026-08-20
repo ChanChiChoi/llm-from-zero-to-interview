@@ -124,13 +124,13 @@ R_{\mathrm{risk}}
 )
 ~~~
 
-其中，T_in 是输入 token，T_out 是输出 token，N_retrieval 是检索次数，N_tool 是工具调用次数，N_image 和 N_audio 是多模态对象数量，R_risk 表示审核、人工复核或隔离带来的额外工作量。
+其中，T_in 和 T_out 是非负整数形式的输入、输出 token 数，N_retrieval、N_tool、N_image 和 N_audio 是非负整数形式的调用或媒体对象数量，R_risk 表示审核、人工复核或隔离带来的额外工作量。不同分量的单位不一定相同，因此这个向量适合描述负载，不适合直接做加法或比较大小；若要计算容量，还要先给每一维指定资源映射。
 
 两个请求都算一个 request，但一个只生成 30 个 token，另一个包含 100,000 个输入 token、四次检索和三次工具调用，它们对 GPU、数据库、网络和人工队列的影响完全不同。
 
 ### 10.2.3 token 需求和内部调用放大
 
-设每秒外部请求数为 lambda_req，第 i 类请求占比为 p_i，平均输入和输出 token 分别为 T_in,i 和 T_out,i，则模型 token 速率的教学估算为：
+设每秒外部请求数为非负的 `lambda_req`，第 i 类请求占比为非负的 `p_i`，且所有类别占比之和为 1；平均输入和输出 token `T_in,i`、`T_out,i` 也为非负数，则模型 token 速率的教学估算为：
 
 ~~~math
 D_{\mathrm{token}}
@@ -145,7 +145,7 @@ T_{\mathrm{out},i}
 \right)
 ~~~
 
-如果一次外部请求平均触发 a 次模型调用，工具和重试又带来 b 倍内部放大，则内部调用率近似为：
+如果一次外部请求平均触发非负的 `a` 次模型调用，工具和重试又带来非负的 `b` 倍内部放大，则内部调用率近似为：
 
 ~~~math
 \lambda_{\mathrm{internal}}
@@ -183,13 +183,13 @@ L_{\mathrm{guard}}
 L_{\mathrm{network}}
 ~~~
 
-L_gateway 是接入和鉴权，L_queue 是排队，L_preprocess 是 tokenizer、OCR 或模板处理，L_retrieve 是检索和重排，L_prefill 是建立上下文，L_decode 是逐 token 生成，L_guard 是输入/输出审核，L_network 是流式传输和客户端可见的网络时间。
+L_gateway 是接入和鉴权，L_queue 是排队，L_preprocess 是 tokenizer、OCR 或模板处理，L_retrieve 是检索和重排，L_prefill 是建立上下文，L_decode 是逐 token 生成，L_guard 是输入/输出审核，L_network 是流式传输和客户端可见的网络时间。将这些项相加的前提是它们使用同一时间单位并且都为非负时长；如果某些阶段并行执行，就不能把它们机械地全部相加，应按关键路径测量。
 
 TTFT 通常关注首个有效输出事件前的时间，TPOT 关注首 token 后的平均 token 间隔。它们不能替代完整 E2E。一个服务 TTFT 很低，但在输出审核或工具确认阶段停顿很久，用户仍然会认为响应慢。
 
 ### 10.2.5 Little 定律和排队直觉
 
-在稳定系统中，平均在途请求数 L、到达率 lambda 和平均等待时间 W 可以用 Little 定律描述：
+在稳定系统中，平均在途请求数 L、非负到达率 lambda 和平均在系统时间 W 可以用 Little 定律描述：
 
 ~~~math
 L
@@ -368,7 +368,7 @@ VERIFYING -> NEEDS_REVIEW
 
 ### 10.5.2 上下文预算
 
-设模型上下文上限为 L_max，system/developer 消息占用 L_sys，当前用户请求占用 L_user，工具和检索结果占用 L_tool，预留输出为 L_out，历史上下文预算为 L_hist，则：
+设模型上下文上限为 `L_max > 0`，system/developer 消息、当前用户请求、工具和检索结果、预留输出分别占用非负 token 数 `L_sys`、`L_user`、`L_tool`、`L_out`，历史上下文预算为 `L_hist`，则：
 
 ~~~math
 L_{\mathrm{hist}}
@@ -444,7 +444,7 @@ Prefill 读取完整输入并建立 KV Cache，通常更适合批量矩阵计算
 
 ### 10.6.2 KV Cache 账本
 
-设 transformer 层数为 L，并发序列数为 B，每个序列平均缓存长度为 T，KV 头数为 H_kv，每个 head 维度为 d，每个元素占 b 字节，则理想化 KV Cache 大小为：
+设 transformer 层数为 `L > 0`，并发序列数为 `B >= 0`，每个序列平均缓存长度为 `T >= 0`，KV 头数为 `H_kv > 0`，每个 head 维度为 `d > 0`，每个元素占 `b > 0` 字节，则理想化 KV Cache 大小为：
 
 ~~~math
 M_{\mathrm{KV}}
@@ -652,7 +652,7 @@ N_{\mathrm{queries}}
 }
 ~~~
 
-它只衡量相关证据是否出现，不衡量模型是否使用了证据。重排提高上下文精度可能增加延迟，也可能把相似但版本错误的文档排得很高，因此必须把版本和权限作为硬过滤条件，而不是交给相似度。
+这里要求 `N_queries > 0`；若评估集没有查询，Recall@k 应报告为未定义，而不是 0。它只衡量相关证据是否出现，不衡量模型是否使用了证据。重排提高上下文精度可能增加延迟，也可能把相似但版本错误的文档排得很高，因此必须把版本和权限作为硬过滤条件，而不是交给相似度。
 
 ### 10.8.4 权限必须后于身份、早于生成
 
@@ -684,7 +684,7 @@ u 是用户，d 是文档，t 是请求时间或策略版本。这个判断必�
 \frac{N_{\mathrm{supported}}}{N_{\mathrm{claim}}}
 ~~~
 
-支持不只是“附了一个链接”。需要检查：
+只有 `N_claim > 0` 时引用支持率才有定义；没有可验证 claim 的回答应单独报告为“无适用 claim”，不能把它当作 100% 支持。支持不只是“附了一个链接”。需要检查：
 
 - 引用文档版本正确；
 - 证据包含 claim 所需事实；
@@ -983,7 +983,7 @@ M_i^v-M_i^b
 
 ### 10.12.3 安全指标的分母
 
-设禁止请求数为 N_harmful，其中给出实质危险帮助的数量为 N_compliant；合法敏感请求数为 N_benign，其中不必要拒绝数为 N_overrefuse：
+设 `N_harmful > 0` 的禁止请求中，给出实质危险帮助的数量为 N_compliant；设 `N_benign > 0` 的合法敏感请求中，不必要拒绝数为 N_overrefuse：
 
 ~~~math
 \mathrm{HarmfulCompliance}
@@ -997,7 +997,7 @@ M_i^v-M_i^b
 \frac{N_{\mathrm{overrefuse}}}{N_{\mathrm{benign}}}
 ~~~
 
-分母必须按语言、轮次、风险等级、是否带工具和是否多模态分层。一个总体值不能证明所有租户和场景都安全。
+分母必须按语言、轮次、风险等级、是否带工具和是否多模态分层。若某个分层没有样本，应报告未定义；不能用 0 代替缺少观测。一个总体值不能证明所有租户和场景都安全。
 
 ### 10.12.4 灰度和发布条件
 
@@ -1018,7 +1018,7 @@ M_i^v-M_i^b
 
 ### 10.13.1 GPU 容量的第一版估算
 
-假设平均每秒请求数为 lambda，每个请求平均输入 token 为 T_in、输出 token 为 T_out，目标 worker 的输入吞吐和输出吞吐分别为 C_in 和 C_out，可以分别估算：
+假设平均每秒请求数为非负的 lambda，每个请求平均输入 token 为非负的 T_in、输出 token 为非负的 T_out，目标 worker 的实测输入吞吐和输出吞吐分别为正的 C_in 和 C_out，可以分别估算：
 
 ~~~math
 G_{\mathrm{in}}
@@ -1082,7 +1082,7 @@ C_{\mathrm{review}}
 C_{\mathrm{retry}}
 ~~~
 
-如果成功任务数为 N_success，单位成功任务成本为：
+如果成功任务数为 `N_success > 0`，单位成功任务成本为：
 
 ~~~math
 C_{\mathrm{success}}
@@ -1110,7 +1110,7 @@ D_{\mathrm{token}}
 
 ### 10.13.5 质量和成本的联合选择
 
-如果版本 A 任务成功率为 q_A、成本为 c_A，版本 B 成功率为 q_B、成本为 c_B，可以比较：
+如果版本 A、B 的任务成功率分别为 q_A、q_B，且对应成本 `c_A > 0`、`c_B > 0`，可以比较：
 
 ~~~math
 \mathrm{QualityPerCost}
@@ -1160,7 +1160,7 @@ D_{\mathrm{token}}
 
 ### 10.14.3 重试预算和放大
 
-如果每层服务都独立重试，内部调用会形成乘法放大。假设网关、检索和模型层各自最多重试 2 次，最坏情况下内部尝试数可能接近：
+如果每层服务都独立重试，内部调用会形成乘法放大。假设网关、检索和模型层各自的最大尝试次数 `r_gateway`、`r_retrieve`、`r_model` 都是包含首次尝试在内的正整数，最坏情况下内部尝试数可能接近：
 
 ~~~math
 A_{\mathrm{retry}}
@@ -1310,6 +1310,7 @@ trace 不等于把所有原文都保存下来。敏感内容应采用脱敏、�
 ~~~python
 from dataclasses import dataclass
 from enum import Enum
+from math import isfinite
 
 
 class ToolState(Enum):
@@ -1330,6 +1331,14 @@ def can_retry(result: ToolResult) -> bool:
     return result.state is ToolState.FAILED and result.idempotent
 
 
+def cost_per_success(total_cost: float, successful_tasks: int) -> float | None:
+    if not isfinite(total_cost) or total_cost < 0:
+        raise ValueError("total_cost must be finite and non-negative")
+    if successful_tasks < 0:
+        raise ValueError("successful_tasks must be non-negative")
+    return total_cost / successful_tasks if successful_tasks else None
+
+
 tool = ToolResult(state=ToolState.UNKNOWN, idempotent=False)
 request_rate = 10
 input_tokens = 2_000
@@ -1337,14 +1346,19 @@ output_tokens = 400
 total_cost = 8.0
 successful_tasks = 10
 
+if any(
+    not isfinite(value) or value < 0
+    for value in (request_rate, input_tokens, output_tokens)
+):
+    raise ValueError("workload values must be finite and non-negative")
 token_rate = request_rate * (input_tokens + output_tokens)
-cost_per_success = total_cost / successful_tasks
+unit_cost = cost_per_success(total_cost, successful_tasks)
 
 print({
     "final_status": tool.state.value,
     "retry_allowed_after_unknown": can_retry(tool),
     "token_rate": float(token_rate),
-    "cost_per_success": round(cost_per_success, 3),
+    "cost_per_success": round(unit_cost, 3) if unit_cost is not None else None,
 })
 ~~~
 
@@ -1354,7 +1368,7 @@ print({
 {'final_status': 'unknown', 'retry_allowed_after_unknown': False, 'token_rate': 24000.0, 'cost_per_success': 0.8}
 ~~~
 
-这里的重点不是 Python 语法，而是三个字段之间的关系。状态字段描述事实，idempotent 描述动作属性，can_retry 才是一个经过约束的决策。不能因为用户看到了超时，就把状态字段直接改成“失败”；也不能因为某个工具标记为幂等，就跳过当前权限检查。
+这里的重点不是 Python 语法，而是三个字段之间的关系。状态字段描述事实，idempotent 描述动作属性，can_retry 才是一个经过约束的决策。不能因为用户看到了超时，就把状态字段直接改成“失败”；也不能因为某个工具标记为幂等，就跳过当前权限检查。若 `successful_tasks` 为零，`unit_cost` 返回 `None`，表示单位成功任务成本未定义；系统不能把没有完成任务伪装成零成本。
 
 ### 10.17.2 从 token 速率到 worker 数量
 

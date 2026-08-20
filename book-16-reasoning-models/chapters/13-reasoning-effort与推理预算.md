@@ -36,7 +36,9 @@
 B=B_{\mathrm{reason}}+B_{\mathrm{tool}}+B_{\mathrm{verify}}+B_{\mathrm{recover}}
 ```
 
-这里的 `B` 不是只能用 token 表示的单一数字。`B_reason` 可以是内部 token，`B_tool` 可以是工具调用次数或工具时间，`B_verify` 可以是测试、规则检查或第二模型的次数，`B_recover` 可以是失败后的重试额度。
+只有在各分量已经换算到同一资源单位时，才可以把它们写成一个标量 `B`。更常见的记录方式是预算向量 `\mathbf B=(B_reason,B_tool,B_verify,B_recover)`，其中每一项都应是有限的非负数，并记录单位和硬上限。`B_reason` 可以是内部 token，`B_tool` 可以是工具调用次数或工具时间，`B_verify` 可以是测试、规则检查或第二模型的次数，`B_recover` 可以是失败后的重试额度；调用次数、毫秒和 token 不能未经换算直接相加。
+
+若某项预算没有启用，应记录为明确的 0；若尚未测量，应记录为缺失值而不是 0。否则报告会把“没有工具调用”和“工具调用成本没有被记录”混成同一种情况。
 
 如果任务价值用 `V` 表示，成本用 `C(B)` 表示，时间和风险分别用 `T(B)`、`R(B)` 表示，一个简化的效用可以写为：
 
@@ -45,7 +47,9 @@ U(B)=V\,P_{\mathrm{success}}(B)
 -\lambda C(B)-\mu T(B)-\nu R(B)
 ```
 
-公式的作用不是精确预测内部模型，而是提醒我们：预算策略不能只追求成功率。医疗、支付和生产变更任务还必须考虑错误副作用和人工复核成本。
+这里 `0\le P_success(B)\le1` 是在固定任务分布、成功定义和预算策略下的成功概率；`V` 是一次成功的业务价值；`C(B)`、`T(B)` 和 `R(B)` 分别是成本、时间和风险暴露或期望损失；`\lambda、\mu、\nu` 是把它们换算到同一效用单位的非负权重。所有量都应是有限数，且成本、时间和风险通常不应为负。若风险是不可接受的硬约束，就不能只把它乘一个较大的 `\nu`，还要在路由前直接拒绝不满足约束的策略。
+
+公式的作用不是精确预测内部模型，而是提醒我们：预算策略不能只追求成功率。医疗、支付和生产变更任务还必须考虑错误副作用和人工复核成本。若某个量没有观测到，`U(B)` 应报告为未计算，而不是用 0 假装没有成本或风险。
 
 ## 13.4 effort 如何进入一次请求
 
@@ -96,6 +100,8 @@ G_{\mathrm{continue}}
 
 其中 `P_gain` 表示下一轮获得有效进展的估计概率，`\delta` 是最低收益阈值。真正的系统可能用启发式、学习到的控制器或 bandit 策略估计它，但三个约束不能消失：预算要有硬上限、继续要有理由、deadline 要能被满足。
 
+该式要求 `B_used` 和 `B_max` 使用同一资源口径，`P_gain\in[0,1]`，`\delta\in[0,1]`，并且 `T_remaining` 是有限的非负时间。若进展概率未知、预算上限缺失或时间已超时，系统应返回“不继续”或进入人工处理，而不是把缺失值当作满足条件。三个指示函数相乘的结果只表示是否允许继续，不表示继续一定成功。
+
 高风险工具还要有独立的动作上限。即便 reasoning 预算未用完，删除文件、发送邮件、修改生产配置等动作也不能因为模型选择了 high effort 就自动放行。计算预算是资源控制，权限是安全控制，二者必须分离。
 
 ## 13.7 如何证明 effort 真的带来了能力
@@ -108,9 +114,9 @@ G_{\mathrm{continue}}
 
 ## 13.8 一个最小控制器的伪代码
 
-下面的伪代码表达的是策略边界，不是某个供应商的内部实现：
+下面的伪代码表达的是策略边界，不是某个供应商的内部实现。它使用 `python` 风格语法帮助读者阅读，但依赖未定义的业务对象，不能直接运行；后面会给出一个不依赖外部服务的最小可运行控制器。
 
-```python
+```text
 budget = policy.choose(task_type, risk, deadline, capacity)
 state = start(task)
 
@@ -135,6 +141,96 @@ return timeout_or_partial_result(state)
 ```
 
 这里最重要的不是循环本身，而是 `verifier`、`auth`、`budget.charge_tool` 和 `fallback_or_escalate` 都是显式模块。没有它们，所谓 effort 很容易退化成一个没有可解释性的输出长度开关。
+
+伪代码还有一个重要前提：`decision.accepted` 不能直接等同于“可以改变外部状态”。即使 verifier 判断候选内容正确，最终提交仍要经过独立的 policy、权限和确认检查；`budget.charge_tool()` 也必须在调用前预留资源、在调用后按实际消耗结算，不能让失败重试绕过硬上限。
+
+### 13.8.1 最小可运行的预算控制器
+
+下面的例子把一个任务简化为三个阶段：直接回答、验证和升级。它不调用模型或工具，只用确定性的教学事件模拟控制器如何根据“有新证据”和“无进展”消耗预算。代码中的 `effort` 是本地策略标签，不代表任何供应商字段的内部语义。
+
+```python
+from dataclasses import dataclass
+
+
+@dataclass
+class Budget:
+    reason: int
+    verify: int
+    tool: int
+
+    def __post_init__(self):
+        for name in ("reason", "verify", "tool"):
+            value = getattr(self, name)
+            if type(value) is not int or value < 0:
+                raise ValueError(f"{name} must be a non-negative integer")
+
+    def charge(self, kind, amount=1):
+        if kind not in {"reason", "verify", "tool"}:
+            raise ValueError("unknown budget kind")
+        if type(amount) is not int or amount < 0:
+            raise ValueError("amount must be a non-negative integer")
+        remaining = getattr(self, kind)
+        if amount > remaining:
+            raise ValueError(f"{kind} budget exhausted")
+        setattr(self, kind, remaining - amount)
+
+
+def choose_effort(task_kind, risk):
+    if risk not in {"low", "high"}:
+        raise ValueError("risk must be low or high")
+    if task_kind not in {"lookup", "code"}:
+        raise ValueError("unknown task kind")
+    if risk == "high":
+        return "verify"
+    return "direct" if task_kind == "lookup" else "verify"
+
+
+def run_controller(task_kind, risk, events):
+    if not isinstance(events, list) or not all(isinstance(event, str) for event in events):
+        raise ValueError("events must be a list of strings")
+    effort = choose_effort(task_kind, risk)
+    budget = Budget(reason=2 if effort == "verify" else 1, verify=1 if effort == "verify" else 0, tool=0)
+    trace = [f"start:{effort}"]
+
+    if effort == "direct":
+        budget.charge("reason")
+        trace.append("answer:direct")
+        return {"status": "answered", "trace": trace, "remaining": budget}
+
+    budget.charge("reason")
+    trace.append("answer:proposal")
+    for event in events:
+        if event == "new_evidence":
+            budget.charge("verify")
+            trace.append("verify:passed")
+            return {"status": "answered", "trace": trace, "remaining": budget}
+        if event == "no_progress":
+            trace.append("escalate:human")
+            return {"status": "escalated", "trace": trace, "remaining": budget}
+        raise ValueError("unknown event")
+    trace.append("timeout:partial")
+    return {"status": "partial", "trace": trace, "remaining": budget}
+
+
+lookup = run_controller("lookup", "low", [])
+code = run_controller("code", "low", ["new_evidence"])
+high_risk = run_controller("lookup", "high", ["no_progress"])
+print(lookup["status"], code["status"], high_risk["status"])
+print(lookup["trace"])
+print(code["trace"])
+print(high_risk["trace"])
+```
+
+预期输出：
+
+```text
+answered answered escalated
+['start:direct', 'answer:direct']
+['start:verify', 'answer:proposal', 'verify:passed']
+['start:verify', 'answer:proposal', 'escalate:human']
+```
+
+这个例子只验证控制流和预算扣减，不验证答案正确性，也没有真正的权限服务。生产实现还必须为候选、工具参数、外部状态、确认和日志定义独立 schema，并把超时、重试和部分成功纳入账本。
 
 ## 13.9 常见失败
 
@@ -184,7 +280,7 @@ return timeout_or_partial_result(state)
 \mathbf{B}=(B_{\mathrm{reason}},B_{\mathrm{tool}},B_{\mathrm{verify}},B_{\mathrm{time}},B_{\mathrm{side}})
 ```
 
-其中 `B_reason` 是内部或显式推理 token 上限，`B_tool` 是工具调用次数或工具时间，`B_verify` 是测试、规则检查和独立 verifier 的额度，`B_time` 是 wall-clock deadline，`B_side` 是允许的外部副作用次数。最后一项尤其重要：读取日志和发送邮件都可能只占一次工具调用，但它们对系统的影响完全不同。
+其中 `B_reason` 是内部或显式推理 token 上限，`B_tool` 是工具调用次数或工具时间，`B_verify` 是测试、规则检查和独立 verifier 的额度，`B_time` 是 wall-clock deadline，`B_side` 是允许的外部副作用次数。每一项都必须与实际消耗使用同一单位，且是有限的非负数；`B_side=0` 应明确表示不允许副作用。最后一项尤其重要：读取日志和发送邮件都可能只占一次工具调用，但它们对系统的影响完全不同。
 
 单位成本也应按资源拆开：
 
@@ -192,7 +288,7 @@ return timeout_or_partial_result(state)
 C= c_r N_r+c_t T_{\mathrm{tool}}+c_v N_v+c_g T_{\mathrm{gpu}}+c_h T_{\mathrm{human}}
 ```
 
-`N_r`、`N_v` 分别表示 reasoning 和 verifier 的消耗，`T_tool`、`T_gpu`、`T_human` 表示工具、GPU 和人工时间；系数由账单、容量成本或业务估值给出。这个式子不是要求把每个 token 都精确计价，而是防止系统只盯着模型 API 的 token 账单，忽略工具服务、排队、存储和人工审核。
+`N_r`、`N_v` 分别表示 reasoning 和 verifier 的消耗，`T_tool`、`T_gpu`、`T_human` 表示工具、GPU 和人工时间；系数由账单、容量成本或业务估值给出。这里要求各资源量和系数都是有限的非负数，并且每一项的单位已经换算到同一成本单位；没有发生的资源取 0，未记录的资源保留缺失状态。若要计算单位成功成本，还需要定义同一批任务中的成功事件数；成功数为 0 时，单位成功成本未定义，而不是把总成本除以 1。这个式子不是要求把每个 token 都精确计价，而是防止系统只盯着模型 API 的 token 账单，忽略工具服务、排队、存储和人工审核。
 
 对初学者来说，可以把预算理解成旅行预算：车票只是总花费的一部分，换乘、等待和行李也会消耗资源。对工程师来说，更关键的是定义每种资源的硬上限和软上限。软上限用于动态控制，硬上限用于防止异常循环；高风险副作用还要由独立权限系统控制，不能因为剩余 token 很多就自动放行。
 
@@ -221,7 +317,7 @@ L_t,&\mathrm{otherwise}
 \end{cases}
 ```
 
-这里的 `g_t` 可以由 verifier 分数改善、新证据数量、测试状态变化和候选分歧组成。它不是模型自报的信心分数。工程上还应把每次升级原因写入 trace，例如 `reason=evidence_missing`、`reason=test_new_signal` 或 `reason=deadline_near`，否则线上成本突然升高时无法区分任务变难和控制器失灵。
+这里的 `g_t` 可以由 verifier 分数改善、新证据数量、测试状态变化和候选分歧组成。它应是有限的可比较量，不是模型自报的信心分数。`L_t` 应是有界整数级别，`m、n` 是正整数，`\delta_down<\delta_up` 且两个阈值使用同一收益单位；更新时还要将 `L_t+1` 和 `L_t-1` 截断到合法档位范围。工程上还应把每次升级原因写入 trace，例如 `reason=evidence_missing`、`reason=test_new_signal` 或 `reason=deadline_near`，否则线上成本突然升高时无法区分任务变难和控制器失灵。
 
 ## 13.13 用实验证明 high effort 的收益来源
 
@@ -235,6 +331,8 @@ L_t,&\mathrm{otherwise}
 \hat p=\frac{k}{n},\qquad
 \mathrm{SE}(\hat p)=\sqrt{\frac{\hat p(1-\hat p)}{n}}
 ```
+
+这里要求 `n` 是正整数，`k` 是 `0` 到 `n` 之间的整数，因而 `\hat p\in[0,1]`。`n=0` 时成功率和标准误都未定义；小样本或 `k=0/n` 时，Wald 标准误只是近似，正式报告更适合使用 Wilson 区间或精确方法。
 
 实际报告可使用 Wilson 区间或 bootstrap，而不是只比较两个小样本的百分点。还要做 paired replay：让同一个任务在不同预算下运行，并记录每一次从错误变正确、从无验证变有验证的转折。这样才能回答“收益来自更多计算、额外工具、验证器，还是只是随机采样差异”。
 
@@ -253,7 +351,7 @@ L_t,&\mathrm{otherwise}
 -\mu\frac{\Delta R_k}{R_{\max}}.
 ```
 
-其中 `Q` 是独立评测质量，`C` 是单位成本，`L` 是延迟，`R` 是风险。只有 `value_k` 为正且不违反硬性条件时，才升级到下一档。这个公式不是要求在线服务精确知道真实概率，而是强迫设计者把“多想一会儿”说成一个可测的资源决策。
+其中 `Q` 是独立评测质量，`C` 是单位成本，`L` 是延迟，`R` 是风险；要求 `\Delta C_k\ne0`、`L_max>0`、`R_max>0`，并说明各增量是在同一配对任务上测得。只有 `value_k` 为正且不违反硬性条件时，才升级到下一档。若成本没有增加，第一项未定义；若风险或延迟基线未知，不能用 0 代替。这个公式不是要求在线服务精确知道真实概率，而是强迫设计者把“多想一会儿”说成一个可测的资源决策。
 
 ## 13.15 预算和权限不能共用一个开关
 

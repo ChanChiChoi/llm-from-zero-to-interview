@@ -28,11 +28,15 @@
 
 ```math
 \mathcal{L}_{\mathrm{SFT}}
-=-\frac{1}{\max(1,\sum_t m_t)}
+=-\frac{1}{M}
 \sum_t m_t\log p_\theta(y_t\mid x,y_{<t})
+\qquad
+M=\sum_t m_t>0
 ```
 
-`m_t` 表示第 `t` 个位置是否是预期的目标答案 token。用户问题、检索上下文、工具 observation 和 padding 通常不应在 assistant-only SFT 中被误算成目标；结构化字段、引用和拒答理由是否参与 loss，要由任务定义决定。分母使用有效 token 数，是为了避免长答案仅凭长度获得更大权重；按样本平均时则要明确采用了另一种加权策略。
+`m_t` 表示第 `t` 个位置是否是预期的目标答案 token，`M` 是这条样本或这个聚合窗口中的有效监督 token 数。用户问题、检索上下文、工具 observation 和 padding 通常不应在 assistant-only SFT 中被误算成目标；结构化字段、引用和拒答理由是否参与 loss，要由任务定义决定。分母使用有效 token 数，是为了避免长答案仅凭长度获得更大权重；按样本平均时则要明确采用了另一种加权策略。
+
+这里的 `M>0` 不是形式上的细节。若一条样本经模板渲染、截断或 mask 后没有任何 assistant token，它不是“loss 为零的好样本”，而是数据协议出了问题：可能是角色标记错了，可能是答案被截断，也可能是本来就只有检索材料。训练器可以跳过该 batch 或将它隔离复查，但必须记录空监督率；用 `max(1, M)` 或一个很小的分母把它算成正常 loss，会把数据损坏伪装成训练稳定。
 
 高质量样本比大量未经审查的行业文本更重要。专家应标记事实、推断、假设和需要人工确认的部分，避免模型把专业语气误学成确定性。专业文本本身还可能过期或包含隐私，训练前要保留来源、revision、生效日期和脱敏记录。
 
@@ -54,7 +58,7 @@ claim -> evidence -> confidence -> action -> escalation
 
 专家标注的价值不只在最终答案，还在于把隐含判断外显出来。一个可复核的标注记录应能回答：主张来自哪段证据，证据属于哪个版本，计算用了哪些输入，哪些条件会改变结论，模型可以提出什么动作，以及为什么需要人工接管。对于无法达成一致的样本，保留 alternative answer 和分歧原因，后续可以把它们变成澄清、拒答或不确定性训练样本。
 
-小白可以把 `claim -> evidence -> confidence -> action -> escalation` 看成答题卡旁边的判卷说明；专家则要进一步检查 evidence 是否足够支持 claim，confidence 是否校准，action 是否在权限范围内。若只记录“专家最终写了什么”，模型很容易学会口吻，却学不到判断条件。
+初学者可以把 `claim -> evidence -> confidence -> action -> escalation` 看成一条从事实到动作的记录链；专家则要进一步检查 evidence 是否足够支持 claim，confidence 是否校准，action 是否在权限范围内。若只记录“专家最终写了什么”，模型很容易学会口吻，却学不到判断条件。
 
 ## 15.5 为什么还需要 RL
 
@@ -69,7 +73,9 @@ R=R_{\mathrm{correct}}+\alpha R_{\mathrm{evidence}}
 
 奖励设计要先区分两种信号。正确性、证据完整度、表达清晰度和工具效率通常可以在合规轨迹中排序；隐私泄露、越权写入、伪造引用和违反硬性政策的动作则不应被“正确率高”抵消。工程上可以先用 policy/verifier 过滤不可接受轨迹，再在剩余候选中使用偏好或 RL 排序。这样做也更容易定位：是轨迹不合规，还是多个合规答案之间质量不同。
 
-奖励组件还应保留原始分量和版本。例如 `R_evidence` 由哪种检索器或 source verifier 产生，`R_risk` 使用哪版 policy，专家偏好是否经过冲突裁决，都要进入轨迹记录。只记录一个总 reward，会让 reward hacking 发生后难以判断是规则漏洞、数据偏差还是模型真的改进。
+奖励的每个分量都必须是有限且可解释的数值。verifier 超时、来源版本缺失、解析失败或专家尚未裁决时，结果应记为 `unknown` 或 `failed`，而不是方便地补成零分；零分表示“已经验证且表现最差”，未知则表示“没有足够证据评价”。只有硬性检查全部通过的轨迹才有定义良好的软奖励，且所有参与求和的 `R` 分量和权重都应是有限数。否则一次 `NaN`、无效引用或过期 policy 可能污染整个 batch 的梯度。
+
+奖励组件还应保留原始分量和版本。例如 `R_evidence` 由哪种检索器、语料 revision 或 source verifier 产生，`R_risk` 使用哪版 policy，专家偏好是否经过冲突裁决，都要进入轨迹记录。只记录一个总 reward，会让 reward hacking 发生后难以判断是规则漏洞、数据偏差还是模型真的改进；更严重的是，若允许越权、隐私泄露或未授权写入与高正确率相加抵消，训练目标本身就在奖励不应出现的行为。
 
 ## 15.6 一个金融报表例子
 
@@ -85,7 +91,7 @@ R=R_{\mathrm{correct}}+\alpha R_{\mathrm{evidence}}
 {\mathrm{Revenue}}
 ```
 
-但季度解释还要处理汇率、一次性项目、币种、期间和同比/环比口径。一个合格的候选答案应能指出使用了哪一版财报、哪些数字是直接读取、哪些是计算结果，并在数据缺失或期间不一致时停下来。数字 verifier 能发现算术错误，却不能独立判断“汇率变动是否是主要归因”；这部分需要来源检查和专家抽样。
+这个式子的定义域是 `Revenue != 0`，并且收入和成本应属于同一报告主体、币种、会计期间和口径。收入为零时毛利率没有定义，不能把它写成 `0%`；币种或期间不一致时，即便除法能执行，结果也不能用来解释经营变化。一个合格的候选答案应能指出使用了哪一版财报、哪些数字是直接读取、哪些是计算结果，并在数据缺失或期间不一致时停下来。数字 verifier 能发现算术错误，却不能独立判断“汇率变动是否是主要归因”；这部分需要来源检查和专家抽样。
 
 ## 15.7 领域工具和安全
 
@@ -111,7 +117,7 @@ R_{\mathrm{severity}}
 {\sum_i s_i}
 ```
 
-`s_i` 是第 `i` 个错误的业务严重度。一个漏掉药物过敏的样本不应和一个标点错误拥有相同权重。还要报告专家之间的一致性、人工接管率、工具调用延迟和单位成功成本，因为领域系统的质量不只由模型文本决定。
+`s_i` 是第 `i` 个错误的业务严重度，要求 `s_i\geq0` 且 `\sum_i s_i>0`。一个漏掉药物过敏的样本不应和一个标点错误拥有相同权重。若评测集中根本没有被赋予严重度的项目，指标应报告为未定义，并补齐评测设计；把分母替换为一个小常数会得到貌似很低的风险率，却没有任何风险覆盖。还要报告专家之间的一致性、人工接管率、工具调用延迟和单位成功成本，因为领域系统的质量不只由模型文本决定。
 
 ## 15.9 常见失败
 
@@ -185,15 +191,11 @@ Q=\alpha Q_{\mathrm{fact}}+\beta Q_{\mathrm{evidence}}
 
 只有格式通过而事实、边界或权限失败时，系统不能发布。训练阶段得到的能力要在真实业务工作流中重新验证。
 
-## 15.11 面试回答与练习
+## 15.11 领域后训练设计练习
 
-回答“如何为领域模型做 SFT+RL”时，应从专家数据、来源和版本开始，SFT 教语言/流程/协议，RL 用可验证结果、专家偏好和安全奖励优化；同时做事实、引用、工具、边界和时间切分评估，权限和人工审核不由训练替代。
+把前面的原则落到一个具体领域时，可以依次完成三项设计。第一，为医疗摘要或合同审查设计 `claim/evidence/confidence` 标注，并写出哪些字段必须由人工确认。第二，为一个有副作用的领域工具设计“允许、拒绝、需要人工确认”三类轨迹，分别定义 verifier 和 policy engine 的输入输出。第三，列出数据治理中不可缺少的版本字段，包括来源 revision、生效时间、脱敏版本、适用范围和回滚引用。
 
-练习一：为医疗摘要设计 claim/evidence/confidence 标注。
-
-练习二：给一个领域工具设计正确、拒绝、需人工三类奖励。
-
-练习三：列出领域数据治理的五个版本字段。
+练习的重点不是写出漂亮答案，而是检查训练信号是否能定位错误：事实错了回到来源，计算错了回到 verifier，动作越权回到 policy，信息不足回到澄清或升级路径。
 
 ## 15.12 领域后训练的分布覆盖
 
@@ -206,7 +208,7 @@ Q_{\mathrm{domain}}=\sum_i w_iq_i,\qquad
 \sum_iw_i=1
 ~~~
 
-提高高风险桶的权重可能降低普通任务平均分，却提高业务安全性。最终配方要由领域评估结果和失败成本决定。
+这里的任务桶集合必须非空，`w_i\geq0`，并且每个正权重桶都要有可评分的 `q_i`。某个长尾高风险桶缺样本、verifier 超时或专家尚未裁决时，应单独报告 `unknown`，不能悄悄把它从归一化分母中删掉。提高高风险桶的权重可能降低普通任务平均分，却提高业务安全性。最终配方要由领域评估结果和失败成本决定。
 
 ## 15.13 专业数据的三层正确性
 
@@ -233,9 +235,9 @@ R(y)
 
 上线前比较 base、SFT、领域 SFT、偏好优化和 RL 版本，记录每个版本的失败类型、引用、工具执行和单位成功成本。一个领域模型的价值是专业任务成功率，而不是训练 reward 单独升高。
 
-## 15.16 先看训练数据如何进入工程决策
+## 15.16 训练信号如何进入工程决策
 
-领域专家 SFT 与 RL 的目标不是让模型更像专家，而是让它在专业任务中有依据、可验证、遵守流程并知道边界。专家反馈、结构化 verifier、版本化知识和权限治理要共同成立。
+领域专家 SFT 与 RL 的目标不是让模型更像专家，而是让它在专业任务中有依据、可验证、遵守流程并知道边界。这个目标只有在五个对象互相引用时才可执行：专家反馈提供示范和争议，结构化 verifier 检查可计算结果，版本化知识限定证据范围，policy engine 限制动作，独立评估确认能力和风险变化。缺少任何一个对象，训练 reward 都可能变成无法解释的代理指标。
 
 ## 15.17 领域任务应先拆成可训练的动作
 
@@ -305,7 +307,7 @@ R_{\mathrm{soft}}(\tau)
 \text{ ranks only trajectories with }D_{\mathrm{release}}=1.
 ~~~
 
-先过滤不合规轨迹，再在合规集合内比较表达质量和效率，通常比把所有目标线性相加更安全。
+`\mathcal{C}_{\mathrm{hard}}` 必须是预先声明的非空集合，例如来源 revision 匹配、敏感字段不外泄、动作已授权、写入已人工确认和输出符合协议。每个条件至少有 `pass`、`fail`、`unknown` 三种状态；只有全部为 `pass` 才令乘积为一，超时和未知状态都不能进入软排序。被过滤的轨迹应保存失败原因，供数据修复和安全回归使用，而不是被当作一个较低但仍可被高质量文本弥补的 reward。先过滤不合规轨迹，再在合规集合内比较表达质量和效率，通常比把所有目标线性相加更安全。
 
 ## 15.21 领域 verifier 的组合
 
@@ -366,6 +368,8 @@ N_{\mathrm{successful\ tasks}}
 }.
 ~~~
 
+分母要求 `N_{\mathrm{successful\ tasks}}>0`，其中“成功”应由事先固定的任务完成、证据、权限和人工复核标准共同定义，而不是模型自己的自评。零成功任务时单位成功成本未定义，报告为无可发布结论比声称成本为零诚实得多。分子中的成本还要使用同一时间窗口、币种和分摊口径；否则一次性训练支出、按调用计费的工具费和人工工时相加，只会制造看似精确的数字。
+
 如果训练后平均答案更长、工具调用更多、人工复核率上升，模型 reward 提高也不代表业务成本下降。高价值任务可以接受更高成本，但必须有明确的质量和风险收益。
 
 ## 15.25 从领域任务到训练样本：先固定工作流再写答案
@@ -382,7 +386,7 @@ N_{\mathrm{successful\ tasks}}
 | `decision` | 通过、人工复核或拒绝 | 连接业务动作 |
 | `uncertainty` | 缺失字段和冲突证据 | 训练适当保留未知 |
 
-小白可以把它理解为“答案旁边必须放着答题过程和判卷规则”。面向专家时，要进一步区分 observation、inference 和 action：模型从输入中读到的事实不是模型推断出的风险，也不是已经执行的业务动作。若数据没有这层边界，后训练可能奖励“说得像已经查过系统”的幻觉。
+初学者可以把它理解为“输出旁边必须保存推导过程和验证规则”。面向专家时，要进一步区分 observation、inference 和 action：模型从输入中读到的事实不是模型推断出的风险，也不是已经执行的业务动作。若数据没有这层边界，后训练可能奖励“说得像已经查过系统”的幻觉。
 
 可以为一条样本定义结构化损失：
 
@@ -418,13 +422,211 @@ D_{\mathrm{release}}
 \mathbf{1}[P=1],
 ```
 
-其中 `Q` 是独立任务质量，`R` 是严重性加权风险，`C` 是单位成功任务成本，`P` 表示协议、权限和回滚测试全部通过，`D_release` 是发布决策的诊断量。乘法形式表达的是硬性条件：不能用平均质量抵消一次越权写入，也不能用低价格抵消不可审计的错误结论。
+其中 `Q` 是独立任务质量，`R` 是严重性加权风险，`C` 是单位成功任务成本，`P` 表示协议、权限和回滚测试全部通过，`D_release` 是发布决策的诊断量。`Q`、`R`、`C` 及其阈值必须是有限、同一评估版本下的量；若关键任务桶未评分、风险项未知、没有成功任务，或恢复演练尚未通过，决策应是“不可发布”，而不是把未知当作满足阈值。乘法形式表达的是硬性条件：不能用平均质量抵消一次越权写入，也不能用低价格抵消不可审计的错误结论。
 
-## 15.28 小结
+## 15.28 worked example：把一份候选发布记录变成可审计的结论
+
+前面的公式只有落到同一份记录中才会暴露接口问题。下面的例子不训练模型，而是审计一个“财报毛利分析”候选：它先确认证据 revision，再复算毛利率，随后核对 claim 的来源、动作权限和人工升级，最后才讨论质量、风险和单位成功成本。代码故意把“数据不合法”“动作不允许”和“证据足够但尚不能发布”分成不同结果；这样排查时不会把缺少证据误诊成模型能力不足。
+
+```python
+from copy import deepcopy
+from math import isfinite
+
+
+class DomainContractError(ValueError):
+    """An input, evidence, or policy contract is not satisfied."""
+
+
+def finite_number(value, name):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise DomainContractError(f"{name} must be a finite number")
+    value = float(value)
+    if not isfinite(value):
+        raise DomainContractError(f"{name} must be a finite number")
+    return value
+
+
+def require_nonempty_text(value, name):
+    if not isinstance(value, str) or not value.strip():
+        raise DomainContractError(f"{name} must be non-empty text")
+    return value
+
+
+def require_mapping(value, name):
+    if not isinstance(value, dict):
+        raise DomainContractError(f"{name} must be a mapping")
+    return value
+
+
+def required(mapping, key, owner):
+    if key not in mapping:
+        raise DomainContractError(f"{owner} is missing {key}")
+    return mapping[key]
+
+
+def probability(value, name):
+    value = finite_number(value, name)
+    if not 0.0 <= value <= 1.0:
+        raise DomainContractError(f"{name} must be between zero and one")
+    return value
+
+
+def gross_margin(revenue, cogs):
+    revenue = finite_number(revenue, "revenue")
+    cogs = finite_number(cogs, "cogs")
+    if revenue == 0:
+        raise DomainContractError("gross margin is undefined when revenue is zero")
+    return (revenue - cogs) / revenue
+
+
+def unit_success_cost(costs, successful_tasks):
+    successful_tasks = finite_number(successful_tasks, "successful_tasks")
+    if successful_tasks <= 0 or not successful_tasks.is_integer():
+        raise DomainContractError("successful_tasks must be a positive integer")
+    costs = require_mapping(costs, "costs")
+    total = 0.0
+    for name in ("training", "inference", "tool", "review"):
+        value = finite_number(required(costs, name, "costs"), name)
+        if value < 0:
+            raise DomainContractError(f"{name} cost must not be negative")
+        total += value
+    return total / successful_tasks
+
+
+def audit_candidate(record, quality_min=0.90, risk_max=0.05, cost_max=10.0):
+    record = require_mapping(record, "record")
+    source = require_mapping(required(record, "source", "record"), "source")
+    revision = require_nonempty_text(required(source, "revision", "source"), "source revision")
+    require_nonempty_text(required(source, "currency", "source"), "source currency")
+    require_nonempty_text(required(source, "period", "source"), "source period")
+
+    # A claim may cite several spans, but each must identify the reviewed revision.
+    claims = required(record, "claims", "record")
+    if not isinstance(claims, list) or not claims:
+        raise DomainContractError("claims must be a non-empty list")
+    for claim in claims:
+        claim = require_mapping(claim, "claim")
+        require_nonempty_text(required(claim, "text", "claim"), "claim text")
+        if claim.get("evidence_revision") != revision:
+            raise DomainContractError("claim does not cite the current source revision")
+
+    calculation = require_mapping(required(record, "calculation", "record"), "calculation")
+    margin = gross_margin(
+        required(calculation, "revenue", "calculation"),
+        required(calculation, "cogs", "calculation"),
+    )
+
+    hard_checks = require_mapping(required(record, "hard_checks", "record"), "hard_checks")
+    for name in ("privacy", "policy", "write_authorization"):
+        if hard_checks.get(name) != "pass":
+            raise DomainContractError(f"hard check failed or is unknown: {name}")
+
+    action = require_mapping(required(record, "action", "record"), "action")
+    action_name = require_nonempty_text(required(action, "name", "action"), "action name")
+    permissions = require_mapping(required(record, "permissions", "record"), "permissions")
+    allowed_actions = required(permissions, "allowed_actions", "permissions")
+    if not isinstance(allowed_actions, list) or not all(isinstance(name, str) for name in allowed_actions):
+        raise DomainContractError("allowed_actions must be a list of action names")
+    if action_name not in allowed_actions:
+        raise DomainContractError("action is outside the caller's permission")
+    requires_confirmation = required(action, "requires_human_confirmation", "action")
+    if not isinstance(requires_confirmation, bool):
+        raise DomainContractError("requires_human_confirmation must be boolean")
+    if requires_confirmation:
+        escalation = require_mapping(required(record, "escalation", "record"), "escalation")
+        if not (escalation.get("required") is True and escalation.get("completed") is True):
+            raise DomainContractError("required human escalation is incomplete")
+
+    release = require_mapping(required(record, "release", "record"), "release")
+    quality = probability(required(release, "quality", "release"), "quality")
+    risk = probability(required(release, "risk", "release"), "risk")
+    cost = unit_success_cost(
+        required(record, "costs", "record"),
+        required(release, "successful_tasks", "release"),
+    )
+    checks = {
+        "quality": quality >= quality_min,
+        "risk": risk <= risk_max,
+        "cost": cost <= cost_max,
+        "protocol": release.get("protocol_passed") is True,
+        "rollback": release.get("rollback_drill_passed") is True,
+    }
+    failed = [name for name, passed in checks.items() if not passed]
+    return {
+        "gross_margin": margin,
+        "unit_success_cost": cost,
+        "release_approved": not failed,
+        "release_reason": "all release conditions passed" if not failed else ", ".join(failed),
+    }
+
+
+candidate = {
+    "source": {"revision": "FY2026-Q2-v3", "currency": "CNY", "period": "2026-Q2"},
+    "claims": [{"text": "gross margin improved", "evidence_revision": "FY2026-Q2-v3"}],
+    "calculation": {"revenue": 100.0, "cogs": 64.0},
+    "hard_checks": {"privacy": "pass", "policy": "pass", "write_authorization": "pass"},
+    "action": {"name": "draft_analysis", "requires_human_confirmation": False},
+    "permissions": {"allowed_actions": ["draft_analysis"]},
+    "escalation": {"required": False, "completed": False},
+    "costs": {"training": 105.0, "inference": 126.0, "tool": 21.0, "review": 63.0},
+    "release": {
+        "quality": 0.93,
+        "risk": 0.02,
+        "successful_tasks": 42,
+        "protocol_passed": True,
+        "rollback_drill_passed": True,
+    },
+}
+
+report = audit_candidate(candidate)
+assert report == {
+    "gross_margin": 0.36,
+    "unit_success_cost": 7.5,
+    "release_approved": True,
+    "release_reason": "all release conditions passed",
+}
+print(report)
+
+
+def expect_contract_error(label, change):
+    broken = deepcopy(candidate)
+    change(broken)
+    try:
+        audit_candidate(broken)
+    except DomainContractError as error:
+        print(f"{label}: {error}")
+    else:
+        raise AssertionError(f"{label} should have failed")
+
+
+expect_contract_error("missing revision", lambda item: item["source"].update(revision=""))
+expect_contract_error("zero revenue", lambda item: item["calculation"].update(revenue=0.0))
+expect_contract_error(
+    "unauthorized write",
+    lambda item: item["action"].update(name="submit_financial_record"),
+)
+expect_contract_error(
+    "no successful tasks",
+    lambda item: item["release"].update(successful_tasks=0),
+)
+expect_contract_error(
+    "negative review cost",
+    lambda item: item["costs"].update(review=-1.0),
+)
+
+not_recovered = deepcopy(candidate)
+not_recovered["release"]["rollback_drill_passed"] = False
+assert audit_candidate(not_recovered)["release_reason"] == "rollback"
+print("rollback drill missing: release blocked")
+```
+
+正常路径的毛利率是 `0.36`，单位成功任务成本是 `7.5`，并且五个发布条件全部通过。前四个变体分别拒绝缺失来源 revision、零收入分母、未授权写入和零成功任务；恢复演练未完成的变体保留可读的审计结果，但 `release_approved` 为假。实际系统还应把 record 的 schema、证据片段哈希、调用身份、policy revision 和人工审批签名写入不可变审计日志。这个示例的目的是说明检查顺序：先保护事实和权限，再比较模型质量；它不能代替财务准则、真实授权系统或独立专家审查。
+
+## 15.29 小结
 
 领域 SFT 与 RL 的对象不是“专业口吻”，而是专业工作流中的事实、证据、计算、动作和边界。训练信号要分解，verifier 要版本化，知识要按时间更新，权限和副作用不能交给模型奖励代替。只有在独立专家、规则和真实工作流评估中都成立，领域后训练才算完成。
 
-## 15.29 资料与进一步阅读
+## 15.30 资料与进一步阅读
 
 1. [Training language models to follow instructions with human feedback（InstructGPT）](https://arxiv.org/abs/2203.02155)：预训练、SFT、reward model 和 PPO 组成的 RLHF 流程。
 2. [Direct Preference Optimization](https://arxiv.org/abs/2305.18290)：离线偏好优化和 reference policy 的目标函数。

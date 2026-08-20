@@ -72,7 +72,7 @@ optimizer.step()
 
 `nn.Module` 本身不是一个数学层，而是一套工程组织规则。理解它的关键不是记住很多类名，而是能回答三个问题：这个对象是否在模块树上、它是否会出现在保存状态中、优化器是否拿到了它。
 
-第一，参数量来自注册参数，而不是来自 Python 变量名。线性层参数量为：
+第一，参数量来自注册参数，而不是来自 Python 变量名。以下参数量公式假定各维度是正整数，并且只统计实际创建的参数，不把临时激活或未注册 tensor 算进去。线性层参数量为：
 
 ~~~math
 N = d_{in} d_{out} + d_{out}
@@ -114,7 +114,7 @@ g_t = \frac{\partial L}{\partial \theta_t}
 S(M) = P(M) \cup B_p(M)
 ~~~
 
-其中 `P(M)` 表示 module 树上的注册参数，`B_p(M)` 表示 `persistent=True` 的 buffer。普通属性、临时 tensor、`persistent=False` 的 buffer、`forward` 代码和 Python 类定义都不在模型 `state_dict` 里。
+其中 `P(M)` 表示 module 树上的注册参数，`B_p(M)` 表示 `persistent=True` 的 buffer。普通属性、临时 tensor、`persistent=False` 的 buffer、`forward` 代码和 Python 类定义都不在模型 `state_dict` 里。若两个模块共享同一个 `Parameter`，`state_dict` 可能为两个访问路径保留两个 key；因此 key 的数量不一定等于唯一参数存储的数量，参数统计时还要考虑别名。
 
 第四，参数高效微调或冻结模型时，先看可训练参数比例：
 
@@ -122,7 +122,7 @@ S(M) = P(M) \cup B_p(M)
 r = \frac{\sum_{p \in P_{train}} |p|}{\sum_{p \in P_{all}} |p|}
 ~~~
 
-其中 `|p|` 是一个参数 tensor 的元素个数。LoRA、adapter、prompt tuning 的核心工程检查就是：应该训练的参数是否都被注册、`requires_grad=True`、进入 optimizer，并且保存时能从 `state_dict` 或 `named_parameters()` 中筛出来。
+其中 `|p|` 是一个参数 tensor 的元素个数，且分母必须大于 0；如果模型没有参数，这个比例没有定义。LoRA、adapter、prompt tuning 的核心工程检查就是：应该训练的参数是否都被注册、`requires_grad=True`、进入 optimizer，并且保存时能从 `state_dict` 或 `named_parameters()` 中筛出来。
 
 第五，`train()` / `eval()` 改的是模块状态，不是梯度开关：
 
@@ -675,7 +675,7 @@ torch.save(model.state_dict(), "model.pt")
 
 ```python
 model = MyModel(config)
-state = torch.load("model.pt", map_location="cpu")
+state = torch.load("model.pt", map_location="cpu", weights_only=True)
 model.load_state_dict(state)
 ```
 
@@ -686,6 +686,8 @@ torch.save(model, "model.pt")
 ```
 
 这种方式依赖 Python pickle，需要加载时能找到完全一致的类路径和代码结构。工程迭代后很容易因为类名、文件路径或依赖变化加载失败。保存 `state_dict` 更稳定，也更符合跨版本和跨工程迁移习惯。
+
+较新的 PyTorch 提供了受限的 `weights_only` 加载路径。对于只包含权重或由张量、数字、字符串、列表和字典组成的 checkpoint，优先显式使用 `weights_only=True`；这能减少从文件反序列化任意 Python 对象的风险。若旧 checkpoint 包含自定义 Python 类而无法用受限路径加载，不要为了消除报错而无条件关闭限制，应先确认文件来源、隔离加载环境，并评估是否可以把 checkpoint 改成更简单且可审计的结构。
 
 完整训练 checkpoint 通常包含：
 
@@ -705,7 +707,7 @@ torch.save(checkpoint, "checkpoint.pt")
 恢复：
 
 ```python
-checkpoint = torch.load("checkpoint.pt", map_location="cpu")
+checkpoint = torch.load("checkpoint.pt", map_location="cpu", weights_only=True)
 model.load_state_dict(checkpoint["model"])
 optimizer.load_state_dict(checkpoint["optimizer"])
 scheduler.load_state_dict(checkpoint["scheduler"])
@@ -1005,7 +1007,15 @@ class TinyTransformer(nn.Module):
 self.lm_head.weight = self.embed_tokens.weight
 ```
 
-这表示两个模块引用同一个 `Parameter`。保存、加载、优化器更新时要理解它们是共享权重，而不是两份独立参数。共享权重会让参数统计、checkpoint key 和优化器状态出现别名关系：逻辑上可能有两个使用位置，实际只应有一份可训练存储。验证绑定是否保留时，不能只比较 key 数量，还要检查两个属性是否指向同一个参数对象或加载后是否重新建立了绑定。
+这表示两个模块引用同一个 `Parameter`。保存、加载、优化器更新时要理解它们是共享权重，而不是两份独立参数。共享权重会让参数统计、checkpoint key 和优化器状态出现别名关系：逻辑上可能有两个使用位置，实际只应有一份可训练存储。`model.parameters()` 默认会去重同一个参数对象，而 `state_dict` 可能保留两个名称，因此不能用 key 数量代替参数量。
+
+加载也不会凭空建立绑定。若模型构造函数先执行了 `self.lm_head.weight = self.embed_tokens.weight`，再加载 state dict，两个名称最终仍然写入同一份参数存储；若目标模型原本是两份独立参数，即使 checkpoint 中的两个 tensor 数值相同，`load_state_dict` 也只会分别拷贝数值，不会自动把它们变成别名。需要共享权重时，应在模型结构定义阶段显式绑定，并在加载后检查：
+
+```python
+assert model.lm_head.weight is model.embed_tokens.weight
+```
+
+如果手工构造 optimizer 参数列表，还要避免把共享参数重复加入；直接使用 `model.parameters()` 通常会得到去重后的参数迭代器。
 
 ## 3.17 大模型中的 Module 组织方式
 
@@ -1197,17 +1207,18 @@ hook 使用注意：
 class DynamicModel(nn.Module):
     def __init__(self, hidden_size, num_layers):
         super().__init__()
+        self.num_layers = num_layers
         for i in range(num_layers):
             setattr(self, f"layer_{i}", nn.Linear(hidden_size, hidden_size))
 
     def forward(self, x):
-        for i in range(3):
+        for i in range(self.num_layers):
             layer = getattr(self, f"layer_{i}")
             x = layer(x)
         return x
 ```
 
-这能工作，但不如 `ModuleList` 清晰，因为 forward 中还要知道层数。更好的写法：
+这样才会按照构造时的层数执行。它能工作，但不如 `ModuleList` 清晰，因为层名和遍历逻辑被拆开了，改结构时还要同步维护 `getattr`。更好的写法：
 
 ```python
 self.layers = nn.ModuleList([
@@ -1560,7 +1571,7 @@ with tempfile.TemporaryDirectory() as tmpdir:
     torch.save(model.state_dict(), path)
 
     clone = TinyClassifier(input_size, hidden_size, num_classes, num_blocks=2)
-    clone.load_state_dict(torch.load(path, map_location="cpu"))
+    clone.load_state_dict(torch.load(path, map_location="cpu", weights_only=True))
 
     model.eval()
     clone.eval()

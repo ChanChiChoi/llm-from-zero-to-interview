@@ -1,297 +1,364 @@
-# 第 18 章 Adaptive Thinking：根据难度动态分配推理预算
+# 第 18 章 Adaptive Thinking：把推理预算变成可校准的控制环
 
-## 18.1 最高预算不是默认答案
+## 18.1 为什么所有请求都用最高预算并不合理
 
-把所有任务交给最高思考档位很简单，却通常不是好系统。简单问题的正确率已经足够高，再增加 token 只会增加费用和排队；困难问题则可能需要检索、工具或人工，而不是盲目延长内部思考。
+把每个请求都交给最高思考档位，实施上很简单，却把三类任务混在了一起。简单问题可能已经能够可靠回答，额外 token 只增加费用和排队；困难问题可能真正缺少文档、工具观察或人工授权，延长内部生成并不会提供这些信息；高风险问题即使模型愿意继续思考，也不能因此获得更多权限。
 
-Adaptive thinking 的目标是先用较小成本判断任务需要什么，再根据证据动态增加预算。它可以发生在模型内部，也可以由外层 router、verifier 和 scheduler 共同实现。最重要的原则是：升级预算要有触发理由，降级也要有可解释的边界。
+Adaptive thinking 的目标不是让系统猜测模型“聪不聪明”，而是让控制器根据可观察进展决定下一步资源。它可以增加推理 token、采样候选、调用检索、运行测试、请求人工或直接停止。每次升级都要有触发原因，每次停止都要有可解释状态，预算和权限还必须分开管理。
 
-## 18.2 难度不是用户的一句话标签
+可以把一次请求看成一个有限资源决策问题：在当前证据、剩余时间和风险下，继续花费多少计算，是否能带来足够的任务价值？这和单纯把 max_output_tokens 调大不同，因为新增资源可能被分配给工具、验证、人工或恢复。
 
-任务难度可以来自多个信号：问题是否要求计算、是否包含冲突文档、是否需要工具、是否涉及高风险动作、历史上类似任务的失败率、verifier 是否通过，以及剩余 deadline。
+## 18.2 控制器的状态
 
-可以把任务状态表示为：
+设第 t 个决策时刻的任务状态为：
 
-```math
-s_t=(x,q,m_t,b_t,d_t,r_t)
-```
+~~~math
+s_t=(x,o_t,a_t,b_t,d_t,r_t,c_t)
+~~~
 
-其中 `m_t` 是当前证据或中间产物，`b_t` 是剩余预算，`d_t` 是剩余时间，`r_t` 是风险。控制器根据 `s_t` 选择继续直接回答、增加 reasoning、调用工具、请求人工或降级。
+x 是原始任务，o_t 是截至当前已确认的观察和证据，a_t 是已有 artifact 或候选，b_t 是剩余预算向量，d_t 是剩余 deadline，r_t 是风险状态，c_t 是服务容量状态。状态不应只保存模型的自然语言自报信心，还要保存 verifier、工具和权限的事实。
 
-不要把模型自己说的“我很有把握”当成唯一难度信号。语言模型的置信表达可能与真实正确率失配，必须结合可验证结果和历史校准。
+预算可以表示成：
 
-## 18.3 边际收益的直觉
+~~~math
+\mathbf{b}_t
+=(b_{\mathrm{reason}},b_{\mathrm{tool}},b_{\mathrm{verify}},b_{\mathrm{time}},b_{\mathrm{side}})
+~~~
 
-设预算为 `b`，成功概率为 `P(b)`，单位预算成本为 `c`。当增加一小段预算带来的成功概率提升 `\Delta P` 大于其成本和延迟时，升级才有价值：
+每个分量有自己的单位，必须是有限非负量；b_side=0 表示不允许外部副作用。不能把 token、毫秒和写操作次数直接相加。权限属于策略状态，不因预算向量变大而自动变化。
 
-```math
-\Delta U
-\approx V\,\Delta P-\lambda\,\Delta C-\mu\,\Delta T-\nu\,\Delta R
-```
+控制器的动作集合可以写成：
 
-简单任务的 `\Delta P` 很快接近 0，困难任务在首次验证或工具调用后可能有明显提升。动态控制器要估计的是这条边际曲线，而不是只看一个全局平均分。
+~~~text
+keep -> upgrade_reason -> call_tool -> verify
+     -> ask_clarification -> abstain -> human -> terminal
+~~~
 
-## 18.4 从 low 到 high 的逐级升级
+这些动作不是模型文本，而是 runtime 可以审计和计费的状态转换。call_tool 需要独立的 allowlist 和授权；human 可能增加等待时间，但不是“模型失败”的同义词；abstain 表示当前证据不足以满足成功契约。
 
-一种容易实现的策略是分级升级。low 路径先直接回答并做格式检查；若问题要求引用而没有找到证据，或 verifier 失败，则进入 medium；medium 允许一次检索、一次自检或一次代码测试；若仍然存在候选分歧、测试失败或风险较高，再进入 high。
+## 18.3 难度、风险与可验证性是三个维度
 
-升级条件应记录在 trace 中。例如：
+输入长度、任务难度、任务风险和可验证性经常被错误地压成一个分数。长日志可能只需抽取一个字段，短问题可能要求复杂证明；数学题可能难但风险低，支付确认可能简单却风险高；工具返回空结果可能不是难度变大，而是证据状态未知。
 
-```text
-upgrade: low -> medium
+可用信号包括：任务类型、历史同类失败率、引用覆盖、候选分歧、verifier 结果、工具错误、剩余 deadline、数据新鲜度和容量水位。模型自报“我很有把握”最多是一个候选信号，不能直接授权危险动作。
+
+对难度分数 d，可以在固定任务集上估计失败概率：
+
+~~~math
+\hat p_{\mathrm{fail}}(d)
+=P(\mathrm{fail}\mid d)
+~~~
+
+这只是校准关系，不是模型内部真实难度。校准必须按任务类型、语言、领域、输入长度和风险分组；未覆盖的组不能因为缺少历史失败就默认为简单。
+
+## 18.4 边际收益：下一单位预算换来什么
+
+设当前状态为 s，继续投入预算向量 Delta b 后，任务质量提升为 Delta Q(Delta b | s)，成本和风险增量分别为 Delta C、Delta R，则可以使用教学上的效用：
+
+~~~math
+\Delta U(\Delta\mathbf{b}\mid s)
+=V\,\Delta Q(\Delta\mathbf{b}\mid s)
+-\lambda\Delta C
+-\mu\Delta R
+~~~
+
+V 是任务成功的业务价值，Q 必须由独立评估定义，C 与 R 使用可比较的成本和风险尺度，lambda、mu 大于等于 0。若安全事件属于不可接受的硬约束，不能用很大的 V 抵消它，而应直接拒绝动作。
+
+质量提升可能来自不同资源：更多 reasoning token、一次新的检索、一次独立测试或一次人工确认。控制器要估计的是当前状态下的边际收益，而不是把历史上 high 档平均分提高的百分点直接套到每个请求。
+
+简单问题的边际收益通常很快饱和；困难问题在第一次获得关键证据后可能突然改善。若新增 token 只产生重复表达而没有新增证据，Delta Q 应接近 0；若 verifier 尚未运行，最有价值的动作可能是验证而不是继续生成。
+
+## 18.5 从 low 到 high 的升级路径
+
+一种可审计的策略是分级升级。low 路径做有限生成和格式检查；medium 路径允许一次只读检索、自检或测试；high 路径允许更多候选、工具观察和独立验证。每一级都要定义资源上限、成功条件和失败状态。
+
+升级不能只由“回答不够长”触发。更有意义的触发信号包括：引用缺失、候选结论冲突、结构化 schema 失败、测试返回新错误、证据过期、verifier 返回 unknown 或风险策略要求人工。
+
+每次升级写入 trace：
+
+~~~text
+decision_id: d-17
+from: low
+to: medium
 reason: citation_missing
-remaining_deadline: 3.8s
-budget_added: 1 tool call + 2K reasoning tokens
-```
-
-这样运营人员才能回答“为什么这次请求变贵”，也能分析升级是否真的减少了失败。
-
-## 18.5 一个研究问答例子
-
-用户问“论文 X 的结论是什么”，低预算模型可以从索引中取摘要。如果问题进一步要求比较论文 X 与论文 Y 的实验设置，并指出相互矛盾的结果，系统就需要检索原文、对齐实验条件和检查引用。
-
-若第一次回答缺少 Y 的证据，控制器不必重新生成一篇更长的文字，而是增加一个“获取 Y 原文结果表”的工具动作。工具返回后，模型再判断矛盾是否真实存在。这里的动态预算花在获得新信息上，比重复生成三段解释更有价值。
-
-## 18.6 预算控制器的伪代码
-
-```python
-state = classify(request)
-
-for level in ["low", "medium", "high"]:
-    result = run_level(state, level)
-    check = verifier(result, request)
-    if check.accepted:
-        return result
-    if not policy.may_upgrade(state, check):
-        return fallback_or_human(result, check)
-    state = state.update(result=result, check=check)
-
-return timeout_result(state)
-```
-
-生产版本还要限制升级次数、累计 token、工具时间和外部副作用。`may_upgrade` 不能只看模型置信度，还要看用户预算、任务风险和服务容量。
-
-## 18.7 选择性预测与拒答
-
-动态推理经常和 selective prediction 一起使用。模型在低预算下如果无法达到质量门槛，可以选择“不确定并升级”或“请求更多信息”，而不是强行回答。
-
-假设一个回答的置信分数为 `p`，但经过校准后只有当 `p>\tau` 才允许自动提交；否则进入验证或人工路径。阈值 `\tau` 应按任务风险设置。客服 FAQ 可以较低，支付和医疗建议应较高。
-
-拒答不是失败，它是把不可确定性暴露给路由器的一种结果。真正危险的是模型低置信度却用高 effort 写出一段很有说服力的错误结论。
-
-## 18.8 如何评估动态预算
-
-固定一批任务，比较 always-low、always-high 和 adaptive 三种策略。报告最终成功率、平均和 p95 成本、延迟、升级比例、人工接管、重复工具调用和安全事件。
-
-如果 adaptive 的成功率接近 always-high，但平均成本接近 always-low，它才体现出价值。还要按任务难度分桶，否则少量困难任务的收益会被大量简单任务掩盖。
-
-路由策略需要时间稳定性测试。模型、数据和流量变化后，原来用于升级的阈值可能失效；因此应持续校准，并为突然升高的升级比例设置容量告警。
-
-## 18.9 常见失败模式
-
-第一，路由器把“问题很长”当成“问题很难”。长输入可能只是重复日志，短问题也可能需要复杂证明。
-
-第二，升级没有硬预算。verifier 一直失败时，系统在 low、medium、high 之间循环。
-
-第三，升级只增加文本长度，不增加证据、工具或验证。
-
-第四，置信度没有校准。模型语气变得更肯定，不代表答案变得更正确。
-
-第五，降级没有安全边界。高风险任务在 high 失败后不能自动退回一个未经验证的 direct 答案。
-
-## 18.10 面试回答与练习
-
-面试官问“如何做动态推理预算”，可以回答：先按任务难度、风险和 deadline 给出初始预算，再用 verifier 失败、证据缺失、候选分歧和工具新信息作为升级信号；每个请求设置 token、工具、时间和副作用上限；比较 always-low、always-high 和 adaptive 的成功率、单位成功成本、尾延迟和安全事件，并持续校准阈值。
-
-练习一：为客服、代码修复和支付审核设计三套升级验收条件。
-
-练习二：给出一个例子，说明为什么“输入更长”不必然触发更高 reasoning level。
-
-练习三：设计一个升级比例异常告警，并列出可能的容量和质量原因。
-
-### 18.10.1 动态控制器的输入和输出
-
-控制器的输入可以包括任务类型、风险、输入长度、历史成功率、证据缺失、候选分歧、verifier 结果、剩余 deadline 和集群容量；输出是下一档 reasoning budget、允许的工具、是否升级人工或是否结束。
-
-控制器不应直接读取模型“自称的置信度”就批准危险动作。模型置信度可以帮助安排更多验证，但工具权限仍由 policy 层决定。控制器的每次升级都应记录触发信号，方便判断是任务变难、模型退化还是容量不足。
-
-### 18.10.2 一个升级验收条件
-
-设当前任务的证据缺口为 `g_e`，候选分歧为 `g_d`，验证收益预测为 `p`，剩余预算为 `b`。一个教学规则可以是：只有 `p` 超过阈值、`b` 足够且动作风险允许时才继续。
-
-```math
-G_{\mathrm{upgrade}}=\mathbf{1}[p>\delta]
- \mathbf{1}[b>b_{\min}]
- \mathbf{1}[R_{\mathrm{action}}<R_{\max}]
-```
-
-若系统无法估计 `p`，可以使用经过离线校准的启发式，但必须保留上限和人工路径。动态预算的目标是减少无效计算，不是让每次决策都看起来智能。
-
-### 18.10.3 always-low、always-high 和 adaptive 的实验
-
-至少建立三条基线：全部低预算、全部高预算、按规则动态升级。使用同一模型、同一工具和同一任务集，比较成功率、单位成功成本、p95、升级比例、人工接管和安全事件。再按任务难度切片，防止高预算只帮助极少数困难题却拖慢全部请求。
-
-如果 adaptive 的平均成本下降但困难任务成功率也下降，阈值过于激进；如果升级比例接近 100%，说明分类器、初始预算或容量策略没有发挥作用；如果升级比例突然上升，可能是模型版本、工具质量或检索数据发生漂移。
-
-## 18.11 控制器的误判代价
-
-动态预算控制器可能把难题判成简单，也可能把简单题判成困难。前者造成质量损失，后者造成不必要成本和延迟。应把升级、降级和人工复核分别计数，而不是只看平均 reasoning token。
-
-可以用风险调整目标：
-
-~~~math
-J=B_{\mathrm{reason}}
-+\lambda_q(1-Q)
-+\lambda_r R
+budget_added: tool=1, verify=1
+deadline_remaining_ms: 3800
+policy_revision: route-v4
 ~~~
 
-高风险任务应提高质量和安全项的权重，低风险批处理才适合更激进地节省预算。
+这样系统可以解释成本变化，也能在升级比例突然上升时区分模型退化、数据漂移、工具故障和容量不足。
 
-## 18.12 难度估计和预算策略
+## 18.6 选择性预测：不知道时要能停
 
-动态 thinking 需要一个难度信号，例如初步置信度、verifier 失败、搜索分支数、工具错误或历史任务统计。设预算为 B，难度估计为 d，可以用策略：
-
-~~~math
-B(d)=\mathrm{clip}(B_{\min}+k d,\ B_{\min},\ B_{\max})
-~~~
-
-这只是教学形式。实际策略还要考虑剩余时延、用户优先级、任务风险和可验证性。难度估计错误会造成简单任务浪费预算，难题提前停止。
-
-## 18.13 何时停止思考
-
-停止条件可以来自答案稳定、verifier 通过、搜索收益递减、预算耗尽或安全策略。答案看起来流畅不等于可以停止；对于数学、代码和工具任务，应优先使用可验证结果。
-
-评估要比较固定预算、动态预算、动态预算加 verifier 和错误预算下的回退。记录质量、thinking token、TTFT、总延迟、重试和单位成功成本，避免只报告平均正确率。
-
-## 18.14 动态预算的公平与安全
-
-按难度分配预算可能让低资源语言、陌生领域或表达不标准的用户被误判为高风险或低价值。策略应做分组校准，不能把历史失败率直接当作用户属性。
-
-高风险任务可以增加 verifier、人工确认和工具限制，而不是只增加隐藏思考 token。模型没有足够证据时，安全的停止动作可能是澄清或拒答。
-
-## 18.15 难度信号必须经过校准
-
-动态预算首先要回答“难度从哪里来”。输入长度、模型自报置信度、历史失败率、verifier 失败、候选分歧和工具错误都可以作为信号，但它们不是同一件事。长文档可能只是需要抽取一个字段；短问题也可能是高风险生产变更。把长度直接当难度，会造成系统性误路由。
-
-对一个难度分数 `d`，可以用离线任务集校准它与失败概率的关系：
-
-```math
-\hat p_{\mathrm{fail}}(d)=P(\mathrm{fail}\mid d)
-```
-
-校准要按任务类型、语言、领域和风险分组检查。一个在英语数学题上可靠的信号，不一定适合中文法律文档或代码 Agent。模型自报“我很有把握”只能作为升级线索，不能作为危险动作的授权依据。
-
-## 18.16 一个可实现的动态控制环
-
-动态控制器可分为观测、预测、决策、执行和反馈五步。观测收集任务类型、证据缺口、工具状态、verifier 结果和剩余时间；预测估计继续计算的边际收益；决策选择保持、升级、降级、拒答或人工；执行消耗预算；反馈把结果写回评估集。
-
-```text
-observe -> estimate marginal gain -> policy check
-        -> choose budget/tool -> execute
-        -> verify -> update controller
-```
-
-可以使用带迟滞的升级规则，避免任务在 `medium` 和 `high` 之间来回跳：连续 `m` 次出现新证据才升级，连续 `n` 次无进展才停止或人工。升级和权限必须分离；即便控制器预测 high 有收益，策略层仍要检查租户、工具和副作用。
-
-## 18.17 动态预算与队列容量
-
-自适应策略不仅影响单请求，也影响服务队列。若大量请求在同一时间被升级，GPU 上的长 reasoning 和 KV cache 会同时增长，尾延迟可能突然恶化。容量模型至少要把升级比例 `q`、平均预算 `b`、并发数 `N` 和每请求状态占用联系起来：
-
-```math
-M_{\mathrm{state}}\approx N\,\bigl(M_{\mathrm{base}}+qM_{\mathrm{deep}}+(1-q)M_{\mathrm{shallow}}\bigr)
-```
-
-这只是粗略估算，实际还受 batch、cache 复用和模型并行影响。但它能说明：动态预算需要容量保护。可设置全局升级配额、按租户配额、熔断和异步队列；当容量不足时，系统应明确返回延迟或降级，而不是静默把所有请求留在高预算路径上。
-
-## 18.18 一个完整评测案例
-
-以研究问答为例，先用低预算从索引中找候选证据；如果引用冲突或证据不足，升级到检索原文和交叉核验；若仍不能解决，返回不确定并列出缺口。评测时与 always-low、always-high 比较，并加入错误引用、过期文档、空检索、工具超时和恶意网页样本。
-
-报告应包含答案正确率、引用支持率、升级比例、平均和尾延迟、token/工具成本、过度升级率、漏升级率、错误拒答率和提示注入事件。动态策略若平均成本下降但漏升级集中在高风险任务，仍然不能发布；若升级比例接近 100%，应优先检查初始预算、分类器和检索质量，而不是继续加档位。
-
-## 18.19 预算控制器的输入、动作和约束
-
-一个可实现的 controller 应明确三类对象。输入是任务类型、证据覆盖、历史失败、工具状态、剩余时间和资源水位；动作是保持当前预算、升级、降级、请求澄清、转人工或拒绝；约束是总 token、队列容量、权限、SLO 和安全策略。
-
-如果 controller 只有一个“难度分数”，它无法解释为什么升级，也无法在工具半成功或权限撤销时恢复。每次动作应记录：
-
-```text
-decision_id, task_id, signal_snapshot, budget_before
-action, budget_after, policy_revision, stop_reason
-```
-
-这样才能区分“没有证据所以升级”和“队列过载所以降级”，也能在回放中发现控制器把高风险任务误判成普通问答。
-
-## 18.20 用边际收益决定是否继续思考
-
-动态推理的停止不是固定 token 数，而是比较继续计算的预期收益。设当前状态为 `s`，再投入 `b` 个 token 的质量提升为 `\Delta Q(b\mid s)`，成本和风险增量为 `\Delta C`、`\Delta R`，可以使用：
+选择性预测的核心是允许模型在无法满足质量条件时拒答、请求更多信息或转交人工，而不是强行输出。设校准后的自动提交分数为 `p`，其中 `p\in[0,1]`；自动提交阈值为 `\tau\in[0,1]`，只有满足：
 
 ~~~math
-\Delta U(b\mid s)
-=\Delta Q(b\mid s)-\lambda\Delta C(b\mid s)
- -\mu\Delta R(b\mid s).
+p\ge\tau
 ~~~
 
-若 `\Delta U` 已低于阈值，继续思考可能只是重复表达；若证据冲突或 verifier 尚未运行，哪怕文本看起来流畅，也可能应升级验证而不是继续生成。高风险动作的 `\Delta R` 还可以是硬性条件，不能用更多 token 抵消。
+才允许进入自动路径。`p` 必须先在与线上相似的任务集上校准，`\tau` 按风险、业务损失和人工容量设定；不应把原始 logits 或语气强度直接当作概率。
 
-## 18.21 动态预算的账本和回放
+可以把动作损失写成：
 
-每次任务要把预算分成推理、工具、验证、输出和恢复几个桶。输出变长可能再次增加 prefill；工具结果写回可能消耗新的上下文；人工等待也有成本。账本至少记录预留、实际消耗、未使用预算、失败原因和下一步动作。
+~~~math
+L
+=L_{\mathrm{wrong}}\Pr(\mathrm{wrong})
++L_{\mathrm{defer}}\Pr(\mathrm{defer})
++L_{\mathrm{cost}}\Pr(\mathrm{extra\ compute})
+~~~
 
-回放时固定任务、模型、工具和政策版本，比较 always-low、always-high 和 adaptive 三条路径。对 adaptive 还要记录触发信号，检查控制器是否只在看到结果之后才做出判断，避免数据泄漏让离线结果虚高。
+不同业务的损失权重不同。客服 FAQ 可以允许较多自动回答，支付和医疗建议要更重视错误动作；如果人工队列已满，盲目降低阈值会把容量问题伪装成效率提升。
 
-## 18.22 动态策略的容量保护
+拒答不是成功，也不是失败的简单标签。它是系统明确承认当前证据不足的一种可观察结果。评估时要分别报告覆盖率、选择性准确率、拒答率、人工接管和单位成功成本。
 
-升级比例突然上升会同时增加 KV 持有时间、队列等待和工具连接。容量保护可以包括每租户 high 配额、全局 reasoning token budget、最大升级深度、熔断和异步池。控制器发现资源不足时应进入受控降级，并把原因告诉用户或上游系统。
+## 18.7 工具和 verifier 是预算升级的不同用途
 
-不能把“为了保证 p99 而静默减少思考”当成无损行为。降级后要标记实际档位、证据覆盖、是否使用工具和未完成的验证；对需要精确结论的任务，可以转异步或人工，而不是返回看似完整但证据不足的答案。
+当问题缺少事实时，工具调用可能比更多 token 更有价值；当候选已经产生但无法判断时，verifier 比再次采样更有价值；当外部动作风险高时，人工确认比两倍 reasoning budget 更重要。
 
-## 18.23 公平性和安全边界
+研究问答可以先从索引读取摘要；如果用户要求比较两篇论文的实验条件，控制器应升级为获取原文表格和版本，而不是只生成更长的解释。代码任务可以先读取错误堆栈，再运行最小测试；测试失败后，新增观察决定是否值得继续。工具返回空结果、超时或版本冲突时，状态必须保留为 unknown 或 stale，不能当作“没有证据所以问题不存在”。
 
-如果动态控制器总把低资源语言、短问题或新用户判为高难度，用户会承担更高延迟和成本；如果它把熟悉模板的高风险请求判为简单，安全风险会被隐藏。评估必须按语言、领域、用户类型、任务风险和工具动作切片。
+每次工具和 verifier 动作都要进入同一任务账本，记录输入版本、调用时间、结果状态、资源使用和是否产生副作用。这样才能区分“预算花在思考”与“预算花在获得证据”。
 
-模型自报置信度、历史成功率和用户等级都不能直接授予权限。预算升级可以带来更多分析和验证，但不改变数据范围、工具 allowlist、审批要求和租户隔离。高 effort 与高 access 必须在系统设计上分离。
+## 18.8 预算控制器的决策状态机
 
-## 18.24 一个可运行的控制器练习
+控制器可分为 LOW、VERIFY、MEDIUM、HIGH、ABSTAIN、HUMAN 和 TERMINAL。一个示意状态机是：
 
-选择一组研究问答，定义 low、medium、high 三档，每档固定最大推理 token、工具轮数和超时。控制器先从 low 开始：若证据覆盖不足或引用冲突，升级一次；若连续两轮没有新增证据，停止并返回不确定；若工具状态未知，转人工而不是再次升级。
-
-记录每题的档位轨迹、升级原因、结果、成本和引用支持。再把“永远 high”和“永远 low”作为基线，检查 adaptive 是否在相同质量验收条件下减少成本。如果升级比例接近 100%，先修复难度信号或初始预算；如果高风险漏升级，停止实验并调整安全门。
-
-## 18.25 动态预算控制器的观测信号
-
-控制器不能直接读取“模型真正理解了多少”，只能使用可观察的代理信号。例如引用是否覆盖问题、结构化输出是否通过、多个候选是否一致、工具是否返回有效证据、验证器是否发现矛盾。每个信号都可能失真，所以升级条件最好使用多个独立条件，而不是一个模型自报置信度。
-
-一个简单的状态机可以写成：
-
-```text
+~~~text
 LOW
-  -> VERIFY
-  -> MEDIUM      when evidence_gap or verifier_conflict
-  -> HUMAN       when permission_unknown or side_effect_risk
+  -> VERIFY       when evidence_gap or schema_failure
+  -> MEDIUM       when verifier_conflict and budget_remains
+  -> HUMAN        when side_effect_risk
+VERIFY
+  -> TERMINAL     when verified
+  -> MEDIUM       when new_evidence and budget_remains
+  -> ABSTAIN      when unknown or no_progress
 MEDIUM
-  -> HIGH        when marginal_gain is positive and budget remains
-  -> ABSTAIN     when no_new_evidence after retry
-```
+  -> HIGH         when calibrated_gain_positive
+  -> ABSTAIN      when no_new_evidence
+HIGH
+  -> TERMINAL     when verified
+  -> ABSTAIN      when budget_exhausted
+  -> HUMAN        when permission_changed
+~~~
 
-这里 `VERIFY` 是一个真实的状态，不是升级前的一句提示。它允许系统先检查已有证据，再决定额外计算是否值得，从而避免所有请求都在 high 档起步。
+VERIFY 是一个真实的状态，不是升级前的一句提示。它允许系统先检查已有证据，再决定额外计算是否值得。状态转移应由事件触发：新证据、verifier 通过、重复调用、权限变化、deadline 接近和容量拒绝都要有明确处理。
 
-## 18.26 反例：自适应路由也会放大偏差
+为了避免在阈值附近来回升降，可以使用迟滞：连续 m 次有新证据才升级，连续 n 次无进展才停止或人工。m、n 必须是正整数，并且每次状态变更写入原因和状态版本。
 
-如果控制器把“回答很长”当成困难，把“回答很短”当成简单，模型可能通过输出冗长文本获得更多预算；如果把历史失败率作为唯一信号，新用户或新领域可能因为没有历史数据而被错误地分配低预算。控制器应使用与任务结果相关的、可解释的信号，并对语言、领域、输入长度和租户做校准。
+## 18.9 取消、租约与未知外部状态
 
-离线评测可把固定 low、固定 high、规则 adaptive 和随机分配作为四组对照。除了整体成功率，还要比较不同切片的升级率、漏升级率、无效升级率和预算耗尽率。自适应系统若只在平均分上略有提升，却让少数高风险任务更少获得验证，应判定为回归。
+动态预算不能只扣减一个 token 计数器。每次升级都应获得一个租约，包含剩余时间、reason token、工具轮数、验证额度、容量配额和允许的副作用。请求取消、用户撤回权限、workspace 改变或外部状态失效时，租约立即失效。
 
-## 18.27 预算的租约和取消语义
+取消时要区分已提交和未提交状态。未提交的候选可以丢弃；已经开始的工具动作需要查询执行状态；已经提交的副作用不能靠删除模型文本回滚。若客户端超时，不能直接把工具标为失败后重新发送。
 
-在线控制器要给每次升级分配租约，租约包含剩余时间、token、工具轮数和可用显存。请求取消、用户撤回权限或外部状态改变时，租约立即失效；已经提交的副作用按事务状态处理，未提交的候选全部丢弃。没有租约的动态预算很容易在重试中重复累加，最后让单个任务吃掉整个队列容量。
+租约还防止重试时重复累加预算。恢复流程读取原有 decision_id 和租约版本，确认剩余额度后再继续；旧租约不能在新请求中自动复活。高风险未知状态应暂停并请求人工，而不是用更多 reasoning token 猜测。
 
-## 18.28 控制器的冷启动和漂移
+## 18.10 容量：自适应升级会反过来改变系统
 
-新领域、新租户或新模型没有可靠历史数据时，控制器不能把未知当成简单。可以使用保守初始预算、少量 shadow 采样和人工标注建立校准集；模型、工具或数据分布变化后重新计算升级率和漏升级率。
+动态路由影响的不只是单请求质量，也影响队列和 KV cache。设并发请求数为 N，其中升级到深路径的比例为 q，浅路径和深路径每个请求的状态占用分别为 M_shallow、M_deep，基础占用为 M_base，则粗略状态需求为：
 
-## 18.29 小结与资料边界
+~~~math
+M_{\mathrm{state}}
+\approx N\left(
+M_{\mathrm{base}}
++qM_{\mathrm{deep}}
++(1-q)M_{\mathrm{shallow}}
+\right)
+~~~
 
-Adaptive thinking 把推理看成可调度资源：简单任务尽快结束，困难任务按证据增加计算，无法证明可靠时明确拒答或转人工。动态预算的核心不是让路由器猜模型“聪不聪明”，而是用可验证进展、边际收益、容量和风险约束决定下一步。
+这里 N 是非负整数，q 属于 [0,1]，各个内存量是有限非负数。这不是完整的 GPU 容量模型，还会受到 batch、KV 复用、模型并行和序列长度影响，但能说明升级比例上升会增加状态持有和尾延迟。
 
-选择性预测、adaptive inference 和 test-time compute 的一般方法有公开研究支持；具体产品的自动升级阈值、隐藏置信度和内部路由策略若未公开，不应写成确定事实。
+生产系统可以设置全局和租户级 high 配额、最大升级深度、reasoning token budget、熔断、异步队列和容量拒绝。容量不足时要明确返回降级、延迟或人工状态；不能静默减少验证后仍声称使用了 high 路径。
+
+## 18.11 公平性：谁被动态路由器判为难题
+
+按历史失败率分配预算可能把新领域、新用户、低资源语言和不熟悉的表达方式系统性判为难题，也可能因为样本太少把真正危险的请求判为简单。控制器应按语言、领域、任务类型、输入长度、租户和风险分组校准。
+
+公平性不意味着所有请求消耗相同资源，而是要确认资源差异来自任务和风险证据，而不是无关的用户属性。若某个分组的漏升级率显著更高，应先修复信号和数据，再谈节省成本。
+
+预算升级和访问权限必须分离。high 路径可以允许更多只读验证，但不能因此读取更多租户数据、绕过人工确认或写入生产。风险策略可以要求某类动作永远人工确认，即使其难度估计很低。
+
+## 18.12 如何评估 adaptive thinking
+
+离线评估至少比较三条基线：always-low、always-high 和 adaptive。任务集、模型版本、工具 allowlist、成功定义、时间上限和总成本口径要对齐。若 adaptive 使用了额外的隐性人工或更高总预算，不能只报告它的准确率。
+
+报告以下指标：总体和切片成功率、覆盖率、选择性准确率、升级率、漏升级率、无效升级率、平均和 P95/P99 延迟、模型/工具/验证成本、人工接管、重复副作用和安全事件。还要记录触发原因，否则无法知道升级是因为证据缺失、模型版本回归还是容量过载。
+
+如果 adaptive 接近 always-high 的质量，平均成本接近 always-low，且高风险切片没有回归，它才体现出系统价值。若升级比例接近 100%，先检查初始预算、分类器和工具质量；若升级比例很低但高风险漏升级增加，应立即停止自动发布。
+
+必须防止离线数据泄漏。路由器只能使用决策时已经可见的状态，不能在看到最终答案后用它选择预算。回放时要保存每次决策的 signal snapshot 和 budget ledger。
+
+## 18.13 一个研究问答的端到端案例
+
+用户先问某论文的结论，任务可以走 low：读取已索引的摘要，要求答案包含来源。若来源缺失，进入 VERIFY，检查索引版本和引用覆盖；如果用户随后要求与另一篇论文比较实验设置，升级为 medium，读取两篇原文的实验表。
+
+如果两篇论文的样本、指标或时间窗口不同，控制器不能继续把两个数字直接比较，而应把差异写入 artifact，并要求更高预算的核验或返回“不足以比较”。如果工具返回过期页面，状态是 stale；如果请求已经发送但没有响应，状态是 unknown。两者都不是普通的“检索没有结果”。
+
+评估这个案例时，不能只看最终答案。要检查引用是否支持 claim、版本是否正确、升级是否在证据缺口出现后触发、是否出现无效重复搜索、P95 是否超过 SLO，以及恶意网页中的指令是否被当作系统命令。
+
+## 18.14 常见失败模式
+
+第一，把输入长度直接当作难度。长文本可能只是重复，短文本可能包含高风险写操作。
+
+第二，把模型自报置信度当作自动提交许可。高 effort 可能只产生更长的错误解释。
+
+第三，升级没有硬上限。verifier 连续失败时，控制器在档位之间循环，最终耗尽队列和工具资源。
+
+第四，升级只增加输出长度。若没有新的证据、工具观察或独立验证，额外 token 的边际收益应被视为可疑。
+
+第五，降级没有安全边界。高风险任务在 high 失败后，不能自动退回未经验证的 direct 答案。
+
+第六，把 unknown 当作失败并重试。外部动作可能已经发生，恢复需要查询和幂等。
+
+第七，只看平均成本。少量高风险任务的漏升级和 P99 退化可能被大量简单请求掩盖。
+
+## 18.15 一个可运行的动态预算审计器
+
+下面的标准库示例不调用模型或网络，用固定事件模拟一个预算控制器。它检查任务状态、预算扣减、升级原因、无进展停止、工具未知状态和高风险人工路径。示例的目的不是预测真实难度，而是展示如何把动态策略变成可回放的状态机。
+
+~~~python
+from dataclasses import dataclass, field
+
+
+TASKS = {"research", "code", "payment"}
+RISKS = {"low", "high"}
+EVENTS = {"evidence_gap", "new_evidence", "verified", "no_progress", "permission_unknown", "budget_exhausted"}
+
+
+def require(condition, message):
+    if not condition:
+        raise ValueError(message)
+
+
+@dataclass
+class Budget:
+    reason: int
+    tool: int
+    verify: int
+
+    def __post_init__(self):
+        for name in ("reason", "tool", "verify"):
+            value = getattr(self, name)
+            require(type(value) is int and value >= 0, f"{name} must be a non-negative integer")
+
+    def spend(self, name, amount):
+        require(name in {"reason", "tool", "verify"}, "unknown budget bucket")
+        require(type(amount) is int and amount > 0, "amount must be a positive integer")
+        remaining = getattr(self, name)
+        require(amount <= remaining, f"{name} budget exhausted")
+        setattr(self, name, remaining - amount)
+
+
+@dataclass
+class Controller:
+    task: str
+    risk: str
+    budget: Budget
+    state: str = "LOW"
+    trace: list = field(default_factory=list)
+
+    def __post_init__(self):
+        require(self.task in TASKS, "unknown task")
+        require(self.risk in RISKS, "unknown risk")
+        require(self.state in {"LOW", "VERIFY", "MEDIUM", "HIGH", "ABSTAIN", "HUMAN", "TERMINAL"}, "unknown state")
+        self.trace.append(f"state:{self.state}")
+
+    def step(self, event):
+        require(event in EVENTS, "unknown event")
+        if self.state in {"TERMINAL", "HUMAN", "ABSTAIN"}:
+            raise ValueError("controller is already terminal")
+        if event == "permission_unknown":
+            self.state = "HUMAN"
+            self.trace.append("human:permission_unknown")
+            return self.state
+        if event == "budget_exhausted":
+            self.state = "ABSTAIN"
+            self.trace.append("abstain:budget_exhausted")
+            return self.state
+        if self.state == "LOW" and event == "evidence_gap":
+            self.budget.spend("verify", 1)
+            self.state = "VERIFY"
+            self.trace.append("upgrade:LOW->VERIFY")
+        elif self.state == "VERIFY" and event == "new_evidence":
+            self.budget.spend("reason", 1)
+            self.state = "MEDIUM"
+            self.trace.append("upgrade:VERIFY->MEDIUM")
+        elif self.state == "MEDIUM" and event == "new_evidence":
+            self.budget.spend("reason", 1)
+            self.state = "HIGH"
+            self.trace.append("upgrade:MEDIUM->HIGH")
+        elif self.state == "MEDIUM" and event == "new_evidence":
+            self.budget.spend("reason", 1)
+            self.state = "HIGH"
+            self.trace.append("upgrade:MEDIUM->HIGH")
+        elif self.state in {"VERIFY", "MEDIUM", "HIGH"} and event == "verified":
+            self.state = "TERMINAL"
+            self.trace.append("terminal:verified")
+        elif self.state in {"VERIFY", "MEDIUM", "HIGH"} and event == "no_progress":
+            self.state = "ABSTAIN"
+            self.trace.append("abstain:no_progress")
+        else:
+            raise ValueError(f"event {event} is invalid in state {self.state}")
+        return self.state
+
+
+research = Controller("research", "low", Budget(reason=2, tool=1, verify=1))
+research.step("evidence_gap")
+research.step("new_evidence")
+research.step("verified")
+
+payment = Controller("payment", "high", Budget(reason=2, tool=0, verify=1))
+payment.step("permission_unknown")
+
+stalled = Controller("code", "low", Budget(reason=1, tool=0, verify=1))
+stalled.step("evidence_gap")
+stalled.step("no_progress")
+
+print(research.state, research.trace)
+print(payment.state, payment.trace)
+print(stalled.state, stalled.trace)
+~~~
+
+预期输出为：
+
+~~~text
+TERMINAL ['state:LOW', 'upgrade:LOW->VERIFY', 'upgrade:VERIFY->MEDIUM', 'terminal:verified']
+HUMAN ['state:LOW', 'human:permission_unknown']
+ABSTAIN ['state:LOW', 'upgrade:LOW->VERIFY', 'abstain:no_progress']
+~~~
+
+这个控制器只模拟状态和资源扣减，不判断答案是否真的正确，也没有容量服务和权限服务。它刻意把 permission_unknown 直接送入人工状态，把 no_progress 变成 ABSTAIN，避免用更多 token 掩盖证据缺失。
+
+边界测试应包括：负预算、非整数预算、未知任务、未知风险、未知事件、重复终态迁移、验证预算耗尽、high 风险无权限和未授权工具调用。未知外部状态不能通过增加预算自动变成已成功。
+
+## 18.16 从审计器回到生产系统
+
+生产控制器需要把模型、工具、verifier、容量和策略服务的事件汇合到同一 task_id。每次决策至少保存 decision_id、状态版本、signal snapshot、预算前后值、动作、policy revision、停止原因和外部状态。这样才能回放“为什么升级”以及“升级后是否真的带来新证据”。
+
+还要为模型和工具版本变化建立 golden tasks。新模型可能改变自报置信度，新检索器可能改变证据覆盖，新 verifier 可能改变 unknown 比例；这些变化都可能让旧阈值失效。上线前应做 shadow 或受限 canary，逐步观察升级率、漏升级率、P95 和安全事件。
+
+冷启动时没有可靠历史数据，不能把未知当成简单。可以使用保守初始预算、少量 shadow 采样和人工标注建立校准集；数据分布变化后重新估计边际收益和容量，而不是永久沿用旧阈值。
+
+## 18.17 练习
+
+**练习一：升级条件。** 为客服问答、代码修复和支付审核分别定义 low、verify、high、human 的进入条件，并写出每一级的硬资源上限。
+
+**练习二：信号校准。** 设计一个实验，比较输入长度、模型自报置信度、引用覆盖和 verifier 失败对实际失败率的预测能力，按语言和风险切片。
+
+**练习三：容量保护。** 假设升级比例从 10% 突然升到 70%，列出可能的模型、工具、数据和流量原因，并设计一个不会静默越权的降级路径。
+
+**练习四：选择性预测。** 给定自动提交阈值和人工容量，画出 coverage—risk 曲线，说明什么时候增加验证比降低阈值更合理。
+
+## 18.18 资料边界与本章结论
+
+SelectiveNet、Learning to Defer、FrugalGPT 和 Adaptive Computation Time 等研究支持选择性预测、转人工、模型级联和动态计算分配的通用讨论；它们不能直接证明某个闭源模型的 hidden confidence、自动升级阈值或内部 routing。任务状态、预算账本、租约、容量保护和权限分离是工程设计，需要在目标系统上通过回放、压测和故障演练验证。
+
+Adaptive thinking 的核心是把“多想一会儿”变成一个有状态、可校准、受预算和风险约束的控制环。难题应在证据缺失或 verifier 失败时得到新的信息和验证，简单题应及时结束；未知状态应保持未知，高风险动作应进入独立授权或人工路径。真正的成功不是让平均答案更长，而是在固定资源下提高可验证质量，同时控制尾延迟、成本、容量和公平性。
+
+参考资料：
+
+- Geifman and El-Yaniv, SelectiveNet: A Deep Neural Network with an Integrated Reject Option：<https://arxiv.org/abs/1901.09149>
+- Madras et al., Predict Responsibly: Improving Fairness and Accuracy by Learning to Defer：<https://arxiv.org/abs/1711.06664>
+- Chen et al., FrugalGPT: How to Use Large Language Models While Reducing Cost and Improving Performance：<https://arxiv.org/abs/2305.05176>
+- Graves, Adaptive Computation Time for Recurrent Neural Networks：<https://arxiv.org/abs/1603.08983>
+- OpenAI, Reasoning Models Guide：<https://platform.openai.com/docs/guides/reasoning>

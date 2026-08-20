@@ -70,7 +70,7 @@ B(\tau,e)=\mathbf{1}[\text{时间、token、CPU、内存和工具调用均未超
 S(x,\tau,e)=C(x,y)\cdot F(x,y)\cdot P(\tau,e)\cdot B(\tau,e)
 ```
 
-这里的乘法不是说所有项目都必须用一个乘法 reward 实现，而是在语义上表达“任意关键条件失败，都不能称为完整成功”。安全违规不能仅仅是一个很小的负分，因为答案质量高不应该抵消越权读取、泄露 secret 或修改生产数据。
+这里的乘法不是说所有项目都必须用一个乘法 reward 实现，而是在语义上表达“任意关键条件失败，都不能称为完整成功”。它的定义域也要求 `C`、`F`、`P`、`B` 都已经得到可信的 `pass` 或 `fail` 结论；编译器崩溃、数据快照缺失、网络超时或策略版本不明时，正确状态是 `unknown`，不能偷偷代入零或一。安全违规不能仅仅是一个很小的负分，因为答案质量高不应该抵消越权读取、泄露 secret 或修改生产数据。
 
 质量可以在硬性条件通过后继续使用连续分数。例如代码 patch 已经通过测试且没有越权操作，再用修改行数、运行时间、可维护性和解释清晰度排序。这样的分层比把所有因素简单相加更容易解释：一条代码很漂亮但修改了测试文件，应该先被标记为不可用，而不是靠漂亮分数把它拉回平均值。
 
@@ -95,6 +95,8 @@ R(\tau)=D_{\mathrm{safety}}D_{\mathrm{permission}}D_{\mathrm{budget}}
 ```
 
 `D_safety`、`D_permission` 和 `D_budget` 是 0/1 诊断量，表示是否满足不可折中的约束；`R_out` 是结果奖励；`R_process` 是中间进展奖励；`C_length` 和 `C_retry` 是预算以内的软成本；`alpha`、`beta`、`gamma` 是权重。这个公式是一种可解释的设计框架，不是所有 RLVR 实现都必须照搬的固定算法。
+
+这个表达只适用于所有硬条件都已经可判定、所有连续分量和权重都是有限数的轨迹。若 `D_budget` 因执行器崩溃而未知，或者 `R_process` 因 verifier 超时而缺失，reward mapper 应返回“不可用于更新”的状态并留下原始诊断；把未知强行映射成 `0` 会把环境故障变成模型负例，而映射成 `1` 则会放过没有完成检查的轨迹。
 
 实际系统更应该先保存原始向量：
 
@@ -174,6 +176,8 @@ R_{\mathrm{process}}(\tau)=\sum_{t=1}^{T}w_t q(s_t,a_t,s_{t+1})
 
 `N_invalid` 是已知错误答案数量，`N_valid` 是已知正确答案数量。soundness 高意味着不容易放过错误，completeness 高意味着不容易错杀正确表达。两者的分母必须分开，否则一个偏向拒绝的 verifier 可能看起来很“严格”，却完全不能接受合理答案。
 
+这两个经验量分别要求 `N_invalid>0` 和 `N_valid>0`。挑战集中只有正确答案时无法估计错误放行率，只有错误答案时也无法估计误拒率；此时应报告对应量为未定义，并补齐挑战集，而不是用一个很小的平滑常数制造看似优异的分数。`FalseAccept`、`TrueAccept` 的参考标签还必须来自人工复核、形式化证明或独立实现，不能让待评估 verifier 给自己打分。
+
 要估计这两个量，不能只拿训练 rollout 来测。挑战集至少应包含等价答案、边界答案、格式合法但语义错误的答案、恶意输出、工具异常和超时结果。代码 verifier 还需要变异测试：有意插入一个 bug、越权访问或测试修改，看看检查器是否能发现。
 
 ### 16.4.6 覆盖率与独立性
@@ -185,7 +189,7 @@ R_{\mathrm{process}}(\tau)=\sum_{t=1}^{T}w_t q(s_t,a_t,s_{t+1})
 =\frac{\sum_{j=1}^{m}w_jc_j}{\sum_{j=1}^{m}w_j}
 ```
 
-这个量不是数学真理，因为失败类别的划分和权重本身也可能有偏差。它的作用是提醒工程师：verifier 的复杂度不等于覆盖率。一个只有字符串比较的复杂系统，可能仍然漏掉越权、回归和证据不支持；一个简单的只读执行器，可能覆盖了更重要的失败类别。
+这里需要有非空失败类别，`w_j\geq0`、`0\leq c_j\leq1`，且 `\sum_jw_j>0`；零权重类别可以保留在表中，但不能支持“已覆盖”的结论。这个量不是数学真理，因为失败类别的划分和权重本身也可能有偏差。它的作用是提醒工程师：verifier 的复杂度不等于覆盖率。一个只有字符串比较的复杂系统，可能仍然漏掉越权、回归和证据不支持；一个简单的只读执行器，可能覆盖了更重要的失败类别。
 
 独立性至少有三层含义：评估数据不与训练数据重复，独立 verifier 不复用同一漏洞，评价环境不向模型暴露隐藏答案。主 verifier 和独立 verifier 结果不一致时，应把不一致保存下来，而不是选一个分数更好看的结果。
 
@@ -271,12 +275,16 @@ verifier 得到对应奖励 `r_1,...,r_G`。组均值和标准差为：
 组内标准化优势可以写成：
 
 ```math
-A_i=\frac{r_i-\mu_G}{\sigma_G+\epsilon}
+A_i=
+\begin{cases}
+\dfrac{r_i-\mu_G}{\sigma_G}, & \sigma_G>0,\\
+0, & \sigma_G=0.
+\end{cases}
 ```
 
-`G` 是每道题的候选数量，`epsilon` 是防止数值除零的小常数。`A_i` 是相对信号，不是绝对正确概率：它只说明第 `i` 条轨迹在同组中高于还是低于平均水平。
+`G` 是每道题的候选数量。`A_i` 是相对信号，不是绝对正确概率：它只说明第 `i` 条轨迹在同组中高于还是低于平均水平。
 
-如果一组回答全部正确或全部错误，`sigma_G` 为 0。加上 `epsilon` 可以避免 NaN，却不能凭空创造区分度；一个合理实现应记录这类零方差组，并决定跳过、重新采样或使用其他批次信息。若所有候选都共享同一个 verifier 漏洞，标准化只会把共同错误当作正常背景。
+这里需要 `G\geq2`，并且每个 `r_i` 都是来自同一 reward schema 的有限数。如果一组回答全部正确、全部错误，或 reward 恰好完全相同，`sigma_G=0`；此时不能通过在分母加一个很小的数假装得到有信息的排序。一个合理实现应把这组显式记录为零优势的无信息组，并决定跳过、重新采样或使用其他批次信息。若所有候选都共享同一个 verifier 漏洞，标准化只会把共同错误当作正常背景。
 
 ### 16.8.1 从优势到策略更新
 
@@ -303,6 +311,8 @@ L_{\mathrm{clip}}(\theta)=
 ```
 
 `T_i` 是第 `i` 条轨迹中参与策略损失的 token 数，`epsilon` 控制一次更新的概率变化范围。不同实现可能使用序列级平均、全 batch token 平均、不同 mask 或不同 KL 估计，所以这条公式应理解为结构化示意，不能据此断言所有 GRPO 代码逐项相同。
+
+公式还隐含 `T_i>0`，`\pi_{\mathrm{old}}(a_{i,t}\mid s_{i,t})>0`，并且新旧 log-prob 在数值上可表示。若轨迹在模板处理后没有参与损失的 token，或旧策略的概率记录缺失，不能用 `1/T_i` 或任意 ratio 继续更新；应隔离为采样、mask 或日志协议错误。实现通常在 log-prob 空间计算 `\log\rho` 再裁剪，以避免直接相除时上溢或下溢。
 
 为了避免策略离参考模型过远，通常还会加入 KL 约束或 KL 惩罚：
 
@@ -333,6 +343,8 @@ L_{\mathrm{token}}=
 ```
 
 `ell_{i,t}` 可以是带优势和概率比的 token 损失。两种写法都可能合理，但必须在实验记录中明确。长回答比例变化时，如果没有说明归一化口径，训练版本之间的 reward 或 loss 对比没有可比性。
+
+两种归一化都继承前面的 `G\geq2` 和每条参与轨迹 `T_i>0` 的条件；token 平均还要求 `\sum_iT_i>0`。被截断、模板 mask 掉或 verifier 标为不可用的轨迹，不能在分母中占位置又不贡献 token 损失。若一个 batch 过滤后没有有效轨迹，正确处理是跳过更新并记录过滤原因，而不是以零 loss 写入训练曲线。
 
 ### 16.8.3 组大小与探索成本
 
@@ -388,6 +400,8 @@ DAPO 中的 decoupled clip 可以理解为对概率比的上下边界分别控�
 
 `N` 是抽样轨迹数。这个比例不是唯一的安全指标，但持续升高通常说明模型正在利用评分器与真实任务之间的缝隙。防御手段包括隐藏变体、独立实现、随机化测试、只读工具、资源限制、输出长度分桶和人工抽样。把所有 verifier 规则全部暴露给模型有助于调试，却可能降低它作为独立检查的价值。
 
+这里要求 `N>0`，并且每条抽样轨迹在主检查与独立检查上都有可判定结果。独立检查超时、专家未完成复核或轨迹无法重放时，应该单列为未知率；把未知一律当作“没有 disagreement”会系统性低估 reward hacking，把未知一律当作失败又会混淆模型问题与基础设施问题。
+
 ## 16.11 数据污染与 verifier 污染
 
 RLVR 的污染不只发生在训练文本和测试题之间。训练题面、标准答案、公开测试脚本、错误消息、verifier prompt、合成 teacher trace 甚至判题器的固定字符串，都可能成为模型记忆或利用的对象。
@@ -436,6 +450,8 @@ verifier 的经验 precision 和 recall 可以写成：
 
 这里的 precision 回答“被接受的结果有多少真的正确”，recall 回答“已知正确结果有多少被接受”。它们需要有人工或独立程序提供的参考标签，不能直接拿主 verifier 自己的输出计算。
 
+precision 的分母 `TrueAccept + FalseAccept` 与 recall 的分母 `TrueAccept + FalseReject` 都必须为正。若主 verifier 没有接受任何样本，precision 不是 `100%` 而是未定义；若独立标注中没有已知正确样本，recall 同样无法估计。应同时报告这些计数、未知复核数和置信区间，避免小样本或选择性人工抽样把一个不稳定检查器包装成高质量 verifier。
+
 迁移差距可以用一个简单的诊断量表示：
 
 ```math
@@ -453,6 +469,8 @@ P(\mathrm{correct}\mid L\in[b_j,b_{j+1}))
 
 `L` 是输出 token 数，`[b_j,b_{j+1})` 是长度区间。若长回答的 verifier 通过率上升，但独立正确率不变，模型可能只是用更多 token 做搜索或重复，而不是提高单步推理质量。
 
+每个长度桶都需要至少一条具有独立正确性标签的样本；空桶不应显示为 `0%` 或 `100%`。长度也要使用同一 tokenizer 和截断规则统计，否则不同模型或不同服务模板之间的长度分桶不能直接比较。
+
 ## 16.13 成本：一次通过不等于值得训练
 
 RLVR 的成本不仅是策略模型 forward。每个问题可能生成 `G` 条 rollout，每条轨迹还要执行编译器、测试器、数据库、浏览器或数学工具；失败后可能重试，更新时还可能保存 reference logits、梯度和日志。
@@ -465,6 +483,8 @@ C_{\mathrm{step}}
  +C_{\mathrm{reference}}+C_{\mathrm{storage}}+C_{\mathrm{retry}}
 ```
 
+这些项应为非负成本，并以同一训练窗口、货币和分摊规则记录。若只把 GPU forward 记入 `C_rollout` 而把测试集群、缓存、失败重试或人工复核留在另一张账上，后面的单位成功成本会低估 RLVR 的实际资源消耗。
+
 若 `N_success` 是独立评估中真正完成任务的数量，单位成功任务成本可以写成：
 
 ```math
@@ -473,7 +493,7 @@ C_{\mathrm{unit\ success}}
        {N_{\mathrm{success}}}
 ```
 
-这个指标会惩罚“通过率提高但答案变得极长”“每道题采样几十次才成功”“verifier 需要昂贵人工复核”等方案。它不是唯一目标，但比单独看 reward 更接近生产决策。
+这个指标要求 `N_success>0`，而且成功必须按独立 verifier、权限和预算的共同定义统计。若独立评估中没有成功任务，单位成功成本未定义，不能被写成零；三个成本项还要使用同一时间窗口、货币与分摊口径。这个指标会惩罚“通过率提高但答案变得极长”“每道题采样几十次才成功”“verifier 需要昂贵人工复核”等方案。它不是唯一目标，但比单独看 reward 更接近生产决策。
 
 如果一次尝试的成本为 `C_attempt`，真正成功的概率为 `p_success`，在独立重试近似成立时，期望成功一次的成本大致为：
 
@@ -482,7 +502,7 @@ C_{\mathrm{unit\ success}}
 \approx\frac{C_{\mathrm{attempt}}}{p_{\mathrm{success}}}
 ```
 
-这个近似在重试会改变环境状态、失败样本相关或存在固定启动成本时会失真，但足以说明一个问题：提升单次通过率和减少每次尝试成本，可能同样重要。
+这里要求 `C_attempt\geq0` 且 `0<p_success\leq1`。当成功概率为零时，期望成功成本不是一个有限可比较的数，而是“当前策略没有观察到成功”；当不同尝试有不同成本或重试会改变环境状态时，不能把平均成本和平均成功率简单相除。这个近似在重试会改变环境状态、失败样本相关或存在固定启动成本时会失真，但足以说明一个问题：提升单次通过率和减少每次尝试成本，可能同样重要。
 
 verifier 超时或外部工具不稳定会造成 reward 缺失。系统要区分 `timeout`、`invalid`、`policy_denied`、`verifier_error` 和 `model_wrong`。其中 `verifier_error` 通常应进入系统稳定性报表，而不应直接作为模型负样本。
 
@@ -524,22 +544,68 @@ class Verdict:
     reason: str
 
 
+class InvalidModelOutput(ValueError):
+    """The generated text cannot be interpreted under this JSON protocol."""
+
+
+def finite_number(value: object, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a finite number")
+    value = float(value)
+    if not math.isfinite(value):
+        raise ValueError(f"{name} must be a finite number")
+    return value
+
+
+def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    output: dict[str, object] = {}
+    for key, value in pairs:
+        if key in output:
+            raise InvalidModelOutput("duplicate JSON key")
+        output[key] = value
+    return output
+
+
+def reject_nonfinite_json_number(value: str) -> object:
+    raise InvalidModelOutput(f"non-finite JSON number: {value}")
+
+
 def verify_candidate(raw: str, expected: float, max_bytes: int = 512) -> Verdict:
+    if not isinstance(raw, str):
+        raise ValueError("raw model output must be text")
+    expected = finite_number(expected, "expected")
+    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes <= 0:
+        raise ValueError("max_bytes must be a positive integer")
+
     diagnostics = {
+        "encoding": False,
         "json": False,
         "schema": False,
         "correct": False,
         "permission": False,
-        "budget": len(raw.encode("utf-8")) <= max_bytes,
+        "budget": False,
     }
 
+    try:
+        byte_length = len(raw.encode("utf-8"))
+    except UnicodeEncodeError:
+        return Verdict(0.0, diagnostics, "invalid_utf8")
+
+    diagnostics["encoding"] = True
+    diagnostics["budget"] = byte_length <= max_bytes
     if not diagnostics["budget"]:
         return Verdict(0.0, diagnostics, "budget_exceeded")
 
     try:
-        payload = json.loads(raw)
+        payload = json.loads(
+            raw,
+            object_pairs_hook=unique_object,
+            parse_constant=reject_nonfinite_json_number,
+        )
     except json.JSONDecodeError:
         return Verdict(0.0, diagnostics, "invalid_json")
+    except InvalidModelOutput as error:
+        return Verdict(0.0, diagnostics, str(error))
 
     diagnostics["json"] = True
     diagnostics["schema"] = (
@@ -547,7 +613,9 @@ def verify_candidate(raw: str, expected: float, max_bytes: int = 512) -> Verdict
         and set(payload) == {"answer", "action"}
         and isinstance(payload["answer"], (int, float))
         and not isinstance(payload["answer"], bool)
+        and math.isfinite(float(payload["answer"]))
         and isinstance(payload["action"], str)
+        and bool(payload["action"].strip())
     )
     if not diagnostics["schema"]:
         return Verdict(0.0, diagnostics, "schema_error")
@@ -560,7 +628,7 @@ def verify_candidate(raw: str, expected: float, max_bytes: int = 512) -> Verdict
         abs_tol=1e-9,
     )
 
-    hard_conditions = ("json", "schema", "permission", "budget")
+    hard_conditions = ("encoding", "json", "schema", "permission", "budget")
     if not all(diagnostics[name] for name in hard_conditions):
         reason = next(name for name in hard_conditions if not diagnostics[name])
         return Verdict(0.0, diagnostics, f"hard_condition_failed:{reason}")
@@ -574,15 +642,26 @@ examples = [
     '{"answer": 41, "action": "calculate"}',
     '{"answer": 42, "action": "write"}',
     '{"answer": 42, "action": "calculate"',
+    '{"answer": NaN, "action": "calculate"}',
+    '{"answer": 42, "answer": 42, "action": "calculate"}',
+    '{"answer": 42, "action": "calculate", "note": "' + "x" * 512 + '"}',
 ]
 
 for candidate in examples:
     print(verify_candidate(candidate, expected=42))
+
+for bad_config in (("42", 512), (42, 0), (42, True)):
+    try:
+        verify_candidate('{"answer": 42, "action": "calculate"}', *bad_config)
+    except ValueError as error:
+        print(f"caller_contract: {error}")
+    else:
+        raise AssertionError("invalid verifier configuration should fail")
 ```
 
-这个例子有三个值得注意的地方。第一，`diagnostics` 在返回结果中保留了 schema、权限、预算和正确性，而不是只返回一个 0/1。第二，权限和预算是硬性条件，正确答案不能抵消它们。第三，`math.isclose` 的误差参数只是这个 toy 任务的假设；工程上应根据数值范围、单位和业务容忍度设定，不能把 `1e-9` 当成通用规则。
+这个例子有四个值得注意的地方。第一，`diagnostics` 在返回结果中保留了编码、schema、权限、预算和正确性，而不是只返回一个 0/1。第二，权限和预算是硬性条件，正确答案不能抵消它们。第三，Python 的标准 JSON 解析器默认会接受 `NaN`，也会把重复键静默覆盖；示例显式拒绝二者，使训练器和评估器不会对同一份输出产生不同解释。第四，`math.isclose` 的误差参数只是这个 toy 任务的假设；工程上应根据数值范围、单位和业务容忍度设定，不能把 `1e-9` 当成通用规则。
 
-把这个 verifier 接到 RL 训练之前，还要测试它自己的边界：`NaN` 和无穷值、极大的整数、重复 JSON 字段、Unicode 空白、未知字段、超长字符串、异常编码以及动作字段的大小写。还要确认执行器使用的 JSON 解析器与测试脚本使用的是同一个协议，避免训练端和评估端对同一字符串给出不同结论。
+代码中的 `NaN`、重复键、超长字符串和错误调用参数是最小边界回归。真正接入 RL 之前，还应增加无穷值、极大的整数、Unicode 空白、未知字段、异常编码以及动作字段大小写的测试，并确认执行器与测试脚本使用同一个 JSON 协议。`raw` 不是文本、期望答案不是有限数、字节上限不合法，属于调用方或实验配置错误，示例用异常将它们与模型产生的可评分失败分开；不能把这类系统配置错误反馈为模型的负奖励。
 
 ## 16.16 从 demo 到训练系统
 
@@ -631,17 +710,98 @@ RLHF 通过人类偏好或奖励模型评价帮助性、风格、拒答边界和
 
 最终的选择应看单位成功任务成本、独立正确率、安全副作用和回退能力，而不是只看训练 reward。RLVR 是一种反馈设计方法；它能放大可观察的任务信号，也会放大 verifier 的盲点。
 
-## 16.20 面试题：如何解释一个 RLVR 系统
+## 16.20 常见误区与诊断路径
 
-面试中回答“RLVR 和 RLHF 有什么区别”时，不能只说“一个可验证，一个人工反馈”。完整回答应先说明任务边界，再说明 verifier 产生什么信号、奖励是否稀疏、如何防止规则投机，以及用什么独立评估证明迁移。
+RLVR 系统出现异常时，最危险的做法是把一个现象直接翻译成能力结论。训练 reward 上升、生成长度增加、测试通过率提高，都可能由格式投机、环境变化或验证器漏洞造成。下面五个误区分别对应反馈来源、优势估计、结果验证、泛化判断和安全约束；它们需要不同的证据来区分。
 
-回答“为什么 GRPO 不需要 value model”时，应说明它用同一问题的一组 rollout 的相对奖励估计优势，减少了独立 value model 的参数和显存；但它并没有消除 baseline、采样方差、verifier 偏差和组内零方差问题。
+### 16.20.1 可验证奖励与人类偏好反馈不是同一个信号
 
-回答“代码测试通过是否足够”时，应补充 patch 应用、隐藏测试、回归测试、测试文件保护、网络和文件权限、资源限制以及依赖版本。测试通过只是一个观察结果，不能自动推出没有副作用。
+RLVR 的反馈通常来自可执行谓词、测试套件、解析器或等价性检查。它回答的是“这个结果是否满足当前写下来的规则”。RLHF 的反馈来自人类比较或奖励模型，回答的往往是“在若干候选中，哪个更有帮助、更清楚、更符合偏好”。前者容易重复，后者覆盖开放式质量；前者可能漏掉未写入的目标，后者可能受评价者、提示和奖励模型漂移影响。
 
-回答“reward 上升但能力没有提升怎么办”时，应按训练 verifier、同分布 holdout、独立 verifier、新题、长度、格式、污染和单位成本拆分。优先排查 reward hacking、数据泄漏、零方差组和环境变化，而不是盲目增加 RL 步数。
+两类信号的差异可以用反馈函数表示。对状态 s、轨迹 tau 和结果 y，RLVR 可能产生：
 
-回答“安全约束能不能作为负奖励”时，应区分不可接受行为和可优化质量。越权、泄露 secret、修改测试或生产写入通常应由执行器拒绝并作为硬性失败；长度、延迟和冗余可以作为软成本。不能让正确答案抵消安全违规。
+~~~math
+r_{\mathrm{ver}}=V(s,\tau,y,e),
+~~~
+
+其中 e 是执行环境和测试版本；RLHF 则常见为：
+
+~~~math
+r_{\mathrm{pref}}=R_\phi(s,\tau,y),
+~~~
+
+其中 R_phi 是由偏好数据训练出的奖励模型。前一个函数的变化可能来自代码、数据或环境版本，后一个函数的变化还可能来自标注分布和奖励模型参数。把两者都叫作“奖励”，不代表它们具有相同的可重复性、覆盖范围或故障模式。
+
+实际系统可以分阶段组合它们：SFT 学习协议和基本表达，偏好优化处理帮助性与风格，RLVR 强化可执行的任务结果。组合时要保留每个分量的独立日志，报告消融和冲突样本。例如，一个答案可能通过数学 verifier，却因为泄露隐私而不应被偏好模型选中；也可能表达很礼貌，却没有通过代码测试。总分掩盖这种冲突后，训练曲线就失去诊断价值。
+
+### 16.20.2 GRPO 减少了 value model 成本，但没有消除估计误差
+
+GRPO 使用同一输入的多条 rollout 形成组内相对比较。设第 i 条轨迹得到结果奖励 r_i，组内均值和标准差为：
+
+~~~math
+\mu_G=\frac{1}{G}\sum_{j=1}^{G}r_j,
+\qquad
+\sigma_G=\sqrt{\frac{1}{G}\sum_{j=1}^{G}(r_j-\mu_G)^2},
+~~~
+
+一种常见的组内优势写法是：
+
+~~~math
+\hat A_i=
+\begin{cases}
+\dfrac{r_i-\mu_G}{\sigma_G}, & \sigma_G>0,\\
+0, & \sigma_G=0.
+\end{cases}
+~~~
+
+这样可以用同组样本构造相对基线，不必为每个状态额外维护一个 value model。它减少了参数、显存和 value 训练目标的负担，但基线只是被换了一种构造方式。若 `G` 条 rollout 的奖励全部相同，`\hat A_i` 显式为零，策略更新自然缺少该题的相对信号；若 verifier 对某一类漏洞给高分，组内比较会把这个漏洞当成学习方向；若组内样本太少或难度太低，优势估计方差仍然可能很大。
+
+因此，GRPO 实验不能只记录平均 reward。至少还要记录组内奖励方差、零方差组比例、采样温度、有效 rollout 数、优势裁剪比例以及 verifier 的失败类别。增加组大小可能改善统计稳定性，却也会增加生成成本；提高温度可能增加探索，却可能制造更多不可解析或危险动作。它们都是在改变估计器和数据分布，而不是一个无条件有效的开关。
+
+### 16.20.3 代码测试通过只证明测试观察到的性质
+
+代码任务的 verifier 通常包含 patch 应用、依赖安装、测试执行、资源限制和结果解析。测试通过意味着在给定提交、依赖、数据、时间和测试集合下没有观察到失败，不能推出程序没有副作用，也不能推出所有输入都正确。
+
+一个完整的结果检查至少要区分以下层次：patch 是否只修改允许的文件；公开测试和隐藏测试是否通过；测试文件、基准答案和网络访问是否受到保护；进程是否越权读写；是否存在无限循环、资源耗尽、隐式外联或依赖漂移；最终 artifact 是否满足接口和数据契约。任何一层没有被执行，就不能把它的性质写进“代码正确”的结论。
+
+可以把代码 verifier 的观测写成向量，而不是一个单独的布尔值：
+
+~~~math
+v=(v_{\mathrm{patch}},v_{\mathrm{public}},v_{\mathrm{hidden}},
+v_{\mathrm{permission}},v_{\mathrm{resource}},v_{\mathrm{artifact}}).
+~~~
+
+其中每个分量都要说明检查条件和未知状态。权限违规、修改测试或泄露隐藏数据通常应直接终止执行；它们不应被“多通过了一个普通测试”抵消。对确实无法检查的性质，应标记为 unknown，不能静默地当作 pass。这样的多层诊断也能防止模型专门学习测试文件、输出固定字符串或利用环境泄漏。
+
+### 16.20.4 训练 reward 上升不等于能力发生迁移
+
+当主 verifier 的 reward 上升而独立任务结果没有改善时，首先要把观察拆成几组：训练 verifier 与独立 verifier 是否一致；训练题、同分布 holdout 和新题是否一致；正确率提升是否只发生在更长、更格式化或更频繁重试的样本；训练数据是否包含测试答案；环境、依赖、提示模板和超时规则是否在中途改变。
+
+一个简化的证据矩阵如下：
+
+| 观察 | 更可能的解释 | 下一步证据 |
+| --- | --- | --- |
+| 主 verifier 上升，独立 verifier 不变 | verifier 投机或规则过拟合 | 重放独立检查并抽取高分失败样本 |
+| 训练题上升，新题不变 | 记忆、污染或题型过窄 | 去重、换题面、换生成器和新环境 |
+| 正确率上升，长度与重试暴涨 | 奖励没有计入资源成本 | 按 token、延迟和尝试次数归一化 |
+| reward 上升，安全事件也上升 | 软奖励抵消了硬风险 | 在执行器层拒绝越权动作并单独统计 |
+
+只有当结果在新题、独立规则、不同环境和相同资源预算下仍然成立，才有理由把曲线变化解释为能力改善。改变 verifier 后分数下降也不一定说明模型退化，可能说明旧 verifier 之前漏掉了失败；这正是保留原始 artifact、轨迹和版本信息的原因。
+
+### 16.20.5 安全条件不能被普通质量奖励抵消
+
+长度、延迟、冗余和表达风格通常可以作为连续成本；越权访问、读取 secret、修改测试、删除未经授权的数据和向生产系统写入，则属于行为边界。把它们全部压成一个可相加的标量，会产生这样的错误激励：只要任务结果足够好，模型就可以用一次危险动作换取更高总分。
+
+更稳妥的结构是先由执行器实施硬性约束，再在允许的轨迹内优化质量。令 C(s, a) 表示动作是否违反权限或环境约束，可以把可执行策略写成：
+
+~~~math
+\pi(a\mid s)=0
+\quad\text{if }C(s,a)=1.
+~~~
+
+这不是说所有安全问题都能由一个完美的执行器解决，而是说明不能把关键权限交给奖励函数的平均值。执行器、沙箱和审计日志负责阻断与记录；verifier 负责任务结果；RL 优化负责在允许范围内寻找更高质量、更低成本的行为。对无法提前判定的风险，要把动作标记为需要人工确认或独立策略，而不是把未知当作安全。
+
+诊断时应把安全事件按动作、账户、资源、数据类型和结果拆分，并保留被拒绝的轨迹。一个模型即使独立正确率提高，也不能用平均 reward 掩盖安全召回下降。只有任务结果、安全副作用、人工介入和单位成功成本同时被报告，RLVR 的收益才具有工程意义。
 
 ## 16.21 小结
 

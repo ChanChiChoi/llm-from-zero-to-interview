@@ -84,7 +84,7 @@ M_{\mathrm{KV}}
 2LB T_{\mathrm{ctx}}H_{\mathrm{kv}}D_h b.
 ~~~
 
-其中 b 是每个元素的字节数，例如 FP16 和 BF16 通常是 2，FP8 或 INT8 的数据部分通常是 1。这个式子没有计入 block table、scale、对齐、复制、通信 buffer 和 allocator 元数据，所以它是容量模型的基础，不是最终显存读数。
+其中 `B\geq0`、`T_ctx\geq0`，`L,H_kv,D_h` 为正整数，`b>0` 是每个元素的字节数，例如 FP16 和 BF16 通常是 2，FP8 或 INT8 的数据部分通常是 1。这个式子没有计入 block table、scale、对齐、复制、通信 buffer 和 allocator 元数据，所以它是容量模型的基础，不是最终显存读数；空活跃 batch 的理论 cache 可以是零，但不能据此推出服务已经完成了一次有效 decode。
 
 ### 3.2.2 变长请求必须按总长度相加
 
@@ -110,7 +110,7 @@ M_{\mathrm{token}}
 2L H_{\mathrm{kv}}D_h b.
 ~~~
 
-这个量特别适合做容量规划。若可供 KV Cache 使用的显存预算为 M_budget，并且假定所有请求上下文长度都是 T_ctx，粗略并发上限为：
+这个量要求 `L,H_kv,D_h` 为正且 `b>0`。它特别适合做容量规划。若可供 KV Cache 使用的显存预算为 `M_budget>0`，并且假定所有请求上下文长度都是 `T_ctx>0`，粗略并发上限为：
 
 ~~~math
 B_{\mathrm{rough}}
@@ -121,7 +121,7 @@ B_{\mathrm{rough}}
 \right\rfloor.
 ~~~
 
-M_budget 必须是扣除权重、workspace、激活、通信和安全余量后的预算。这个式子用于看趋势，不应被当作线上可接受并发，因为真实请求是变长的，调度还需要为 prefill 和新请求保留空间。
+`M_budget` 必须是扣除权重、workspace、激活、通信和安全余量后的正预算。这个式子用于看趋势，不应被当作线上可接受并发，因为真实请求是变长的，调度还需要为 prefill 和新请求保留空间；若扣除后预算小于零，应报告容量不可行，而不是输出负并发上限。
 
 ### 3.2.3 一个可复算的 8k 例子
 
@@ -215,7 +215,7 @@ H_qT_{\mathrm{ctx}}D_h.
 
 如果生成 N 个 token，没有 cache 时，历史 K/V 投影会反复覆盖从 T_in 到 T_in+N 的长度，累计工作大致呈二次增长；有 cache 时，历史投影变为一次 prefill 加上 N 次单 token 投影。attention 对历史的读取仍然随每一步上下文增长，因此总成本不会变成严格线性于输出长度的简单常数。
 
-面试或设计评审中，最准确的说法是：“KV Cache 将重复的历史 K/V 投影换成状态读取；它降低了大量重复计算，但 decode 的 attention 读取、模型权重访问和逐步调度仍然存在。”
+更准确的工程表述是：“KV Cache 将重复的历史 K/V 投影换成状态读取；它降低了大量重复计算，但 decode 的 attention 读取、模型权重访问和逐步调度仍然存在。”
 
 ## 3.5 MHA、MQA、GQA：K/V head 数的取舍
 
@@ -295,7 +295,7 @@ M_{\mathrm{MLA/token/layer}}
 T_{\mathrm{effective}}=\min(T_{\mathrm{ctx}},W).
 ~~~
 
-该层的 cache 预算可以按 T_effective 估算，而拥有 global attention 的层仍可能保留更长历史。混合模型不能用一个统一窗口替代所有层的状态。实现上还要考虑 RoPE、位置偏移、跨窗口摘要以及从 cache 中删除旧 token 后 attention mask 是否仍然正确。
+这里要求 `T_ctx\geq0` 且窗口 `W>0`。该层的 cache 预算可以按 `T_effective` 估算，而拥有 global attention 的层仍可能保留更长历史。混合模型不能用一个统一窗口替代所有层的状态。实现上还要考虑 RoPE、位置偏移、跨窗口摘要以及从 cache 中删除旧 token 后 attention mask 是否仍然正确。
 
 ### 3.6.3 递归或线性 attention 的 state
 
@@ -410,6 +410,8 @@ attention kernel 仍然按逻辑顺序读取 token，只是在访问时通过 bl
 N_i=\left\lceil\frac{T_i}{S_{\mathrm{block}}}\right\rceil.
 ~~~
 
+该式要求 `T_i\geq0` 为整数且 `S_block>0` 为正整数；空序列需要零个 block，但不能使用零 block size 进行所谓的“自动计算”。
+
 所有请求分配的 token 槽位和尾部浪费为：
 
 ~~~math
@@ -451,7 +453,7 @@ W_tail 是 token 槽位口径的内部浪费；还要加 block table、对齐、
 \frac{b_{\mathrm{new}}}{b_{\mathrm{old}}}.
 ~~~
 
-例如 FP16/BF16 到 INT8，数据部分理论上约减半；到 FP8 也常是 1 byte 数据部分。但 scale、zero point、对齐和 kernel workspace 会让实际比例偏离，某些 runtime 还会在计算前把 cache 转回更高精度。
+这里要求 `M_old>0`、`b_old>0` 和 `b_new>0`，且两边的 token 数、shape 和状态范围确实相同。例如 FP16/BF16 到 INT8，数据部分理论上约减半；到 FP8 也常是 1 byte 数据部分。但 scale、zero point、对齐和 kernel workspace 会让实际比例偏离，某些 runtime 还会在计算前把 cache 转回更高精度。
 
 ### 3.9.2 量化和反量化
 
@@ -492,7 +494,7 @@ R_{\mathrm{prefix}}
 \frac{T_{\mathrm{shared}}}{T_{\mathrm{prompt}}}.
 ~~~
 
-这个比例不是实际延迟收益。前缀命中后仍可能需要读取 cache、做新 suffix 的 prefill、执行后续 decode；如果原先 prefill 主要受 MLP 而非 attention 限制，复用比例和延迟比例也不会完全相同。
+这个比例要求 `T_prompt>0` 且 `0\leq T_shared\leq T_prompt`。它不是实际延迟收益。前缀命中后仍可能需要读取 cache、做新 suffix 的 prefill、执行后续 decode；如果原先 prefill 主要受 MLP 而非 attention 限制，复用比例和延迟比例也不会完全相同。
 
 ### 3.10.2 Cache key 的组成
 
@@ -538,7 +540,7 @@ M_{\mathrm{cache,total}}
 =M_{\mathrm{active}}+M_{\mathrm{reusable}}+M_{\mathrm{metadata}}.
 ~~~
 
-当显存水位升高时，优先淘汰可重算的 reusable prefix；如果 active cache 也不足，系统应选择排队、拒绝、降级或有明确成本的 offload，而不是静默删除仍在生成请求的历史。
+这里每一项都应是同一时间点、同一 GPU 或同一资源域内的非负字节数。若监控只报告一个总量，却没有说明 active、reusable 和 metadata 的观测边界，就无法决定是淘汰前缀还是减少活跃请求。当显存水位升高时，优先淘汰可重算的 reusable prefix；如果 active cache 也不足，系统应选择排队、拒绝、降级或有明确成本的 offload，而不是静默删除仍在生成请求的历史。
 
 ### 3.11.3 1M context 的现实边界
 
@@ -589,6 +591,7 @@ cache 排查中常见三种分母：
 
 ~~~python
 import math
+from copy import deepcopy
 
 
 requests = [
@@ -608,11 +611,82 @@ workspace_gib = 1.0
 kv_head_options = {"MHA": 32, "GQA": 8, "MQA": 1}
 
 
+class CacheContractError(ValueError):
+    """A cache sizing input is outside its defined domain."""
+
+
+def positive_int(value, name):
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise CacheContractError(f"{name} must be a positive integer")
+    return value
+
+
+def nonnegative_int(value, name):
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise CacheContractError(f"{name} must be a non-negative integer")
+    return value
+
+
+def finite_nonnegative(value, name):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise CacheContractError(f"{name} must be finite and non-negative")
+    value = float(value)
+    if not math.isfinite(value) or value < 0:
+        raise CacheContractError(f"{name} must be finite and non-negative")
+    return value
+
+
+def validate_request(request):
+    if not isinstance(request, dict):
+        raise CacheContractError("request must be a mapping")
+    if not isinstance(request.get("id"), str) or not request["id"].strip():
+        raise CacheContractError("request id must be non-empty text")
+    prompt = nonnegative_int(request.get("prompt_tokens"), "prompt_tokens")
+    generated = nonnegative_int(request.get("generated_tokens"), "generated_tokens")
+    reserved = nonnegative_int(request.get("reserved_tokens"), "reserved_tokens")
+    if prompt + generated <= 0:
+        raise CacheContractError("active token count must be positive")
+    if reserved < prompt + generated:
+        raise CacheContractError("reserved tokens cannot be below active tokens")
+    return prompt + generated
+
+
+def validate_batch(items, block_size_value):
+    positive_int(block_size_value, "block_size")
+    if not isinstance(items, list) or not items:
+        raise CacheContractError("requests must be a non-empty list")
+    ids = [request.get("id") for request in items]
+    if len(ids) != len(set(ids)):
+        raise CacheContractError("request ids must be unique")
+    for request in items:
+        validate_request(request)
+
+
+def validate_configuration():
+    for name, value in (("layers", layers), ("query_heads", query_heads), ("head_dim", head_dim), ("bytes_bf16", bytes_bf16)):
+        positive_int(value, name)
+    finite_nonnegative(gpu_budget_gib, "gpu_budget_gib")
+    finite_nonnegative(weight_gib, "weight_gib")
+    finite_nonnegative(workspace_gib, "workspace_gib")
+    if not kv_head_options or any(not isinstance(value, int) or value <= 0 for value in kv_head_options.values()):
+        raise CacheContractError("kv head options must be positive integers")
+    if any(query_heads % value != 0 for value in kv_head_options.values()):
+        raise CacheContractError("each kv head count must divide query heads")
+
+
+validate_configuration()
+validate_batch(requests, block_size)
+
+
 def kv_bytes(tokens, kv_heads, dtype_bytes=bytes_bf16):
+    nonnegative_int(tokens, "cache tokens")
+    positive_int(kv_heads, "kv heads")
+    positive_int(dtype_bytes, "dtype bytes")
     return 2 * layers * tokens * kv_heads * head_dim * dtype_bytes
 
 
 def gib(num_bytes):
+    finite_nonnegative(num_bytes, "bytes")
     return num_bytes / 1024**3
 
 
@@ -673,6 +747,22 @@ print("paged_memory_gqa_gib={}".format(paged_memory_gqa))
 print("int8_gqa_gib={}".format(round(active_memory_gqa / 2, 3)))
 print("fixed_memory_gib={}".format(fixed_memory_gib))
 print("diagnostics={}".format(diagnostics))
+
+
+def expect_contract_error(label, edit, block_size_value=block_size):
+    broken = deepcopy(requests)
+    edit(broken)
+    try:
+        validate_batch(broken, block_size_value)
+    except CacheContractError as error:
+        print(f"{label}: {error}")
+    else:
+        raise AssertionError(f"{label} should have failed")
+
+
+expect_contract_error("zero block size", lambda items: None, block_size_value=0)
+expect_contract_error("reservation below active", lambda items: items[0].update(reserved_tokens=1))
+expect_contract_error("boolean token count", lambda items: items[0].update(prompt_tokens=True))
 ~~~
 
 按这组教学参数运行，关键输出为：
@@ -691,9 +781,12 @@ paged_memory_gqa_gib=0.703
 int8_gqa_gib=0.334
 fixed_memory_gib=8.5
 diagnostics={'gqa_reduces_mha': True, 'mqa_reduces_gqa': True, 'paged_rounding_overhead_positive': True, 'paged_plan_fits_budget': True, 'static_reserve_exceeds_budget': True}
+zero block size: block_size must be a positive integer
+reservation below active: reserved tokens cannot be below active tokens
+boolean token count: prompt_tokens must be a non-negative integer
 ~~~
 
-这里有三个值得注意的细节：分页仍然产生 300 个 token 槽位的尾部浪费，但比静态最大长度预留少；GQA 把理论 cache 从 MHA 的 2.666 GiB 降到 0.667 GiB；在固定权重和 workspace 后，分页方案落在教学预算内，而静态预留超出预算。真实 allocator 还需要加 table、对齐、scale、通信和 headroom，所以不能把 paged_plan_fits_budget=True 直接当成真实 GPU 一定不 OOM。
+这里有三个值得注意的细节：分页仍然产生 300 个 token 槽位的尾部浪费，但比静态最大长度预留少；GQA 把理论 cache 从 MHA 的 2.666 GiB 降到 0.667 GiB；在固定权重和 workspace 后，分页方案落在教学预算内，而静态预留超出预算。真实 allocator 还需要加 table、对齐、scale、通信和 headroom，所以不能把 `paged_plan_fits_budget=True` 直接当成真实 GPU 一定不 OOM。
 
 ## 3.14 常见误解与边界
 
@@ -725,15 +818,49 @@ diagnostics={'gqa_reduces_mha': True, 'mqa_reduces_gqa': True, 'paged_rounding_o
 
 不是。共享必须服从模型版本、模板、位置配置和租户权限。可复用的公共规则与含有用户私密历史的 prefix 不是同一类 cache；即使 token 完全相同，也不能绕过访问控制。
 
-## 3.15 面试与设计评审中的完整回答
+## 3.15 一个长上下文多租户服务的 cache 设计
 
-问“KV Cache 为什么能加速”时，先讲计算因果：自回归 decode 每步都需要历史 K/V；没有 cache 就会重复计算历史 token 的 K/V，有 cache 则只计算新 token 的 K/V，再让新 query 读取历史状态。然后补上代价：cache 占显存，attention 读取仍随上下文增长，所以长上下文服务仍可能 memory-bound。
+考虑一个企业分析服务。每个租户都有固定的 system policy 和工具 schema，用户请求会附带 4k--32k token 的文档，服务需要支持并发分析，同时不能让一个租户复用另一个租户的私有历史。目标不是把所有请求都塞进显存，而是在给定质量、延迟和隔离条件下决定哪些状态值得保留。
 
-问“如何估算显存”时，给出变量完整的式子：2 * L * H_kv * D_h * b * S_ctx，其中 S_ctx 是所有 active request 的真实上下文 token 总数。再说明需要额外加权重、activation、workspace、通信、block rounding、scale 和 headroom；如果是 TP，要核对 K/V 是分片还是复制，不能机械除以 GPU 数。
+先建立单 token 账本。假设模型有 32 层、32 个 query heads、8 个 K/V heads、head dimension 为 128，cache 使用 BF16。一个上下文 token 的理论 cache 成本为：
 
-问“PagedAttention 解决什么问题”时，说明它是内存管理和地址映射方法：逻辑序列按固定 block 切分，由 block table 映射到不连续的物理 block，支持按需增长、回收和前缀共享。它不能消除 cache 的理论成本，也不能替代调度、量化或质量评估。
+~~~math
+m_{\mathrm{token}}
+=2\times32\times8\times128\times2
+=131072\text{ bytes}.
+~~~
 
-问“长上下文为什么难”时，完整回答应同时包含 prefill 的输入计算、每步 decode 的历史状态访问、cache 显存随 token 数增长、尾延迟和任务质量风险。应按 workload 测 TTFT、TPOT、P99、cache bytes、抢占/拒绝和质量，而不是只引用 context window 上限。
+因此，8,192 个 token 约需要 1 GiB 的 GQA cache；如果同样结构使用 MHA，K/V head 从 8 增加到 32，理论值约变为 4 GiB。这个比例首先用于判断架构和并发的方向，实际预算还要扣除权重、workspace、通信和 headroom。不能因为某一条请求的 cache 计算为 1 GiB，就把 1 GiB 之外的剩余显存全部分给它；新请求的 prefill 和多个活跃请求会同时申请状态。
+
+再看变长请求和分页。某一时刻三个请求的上下文长度分别是 680、3,360 和 1,420 token，block size 为 128。分页分配需要的槽位是：
+
+~~~math
+N_{\mathrm{slots}}
+=128\left(\left\lceil\frac{680}{128}\right\rceil
++\left\lceil\frac{3360}{128}\right\rceil
++\left\lceil\frac{1420}{128}\right\rceil\right)
+=5760.
+~~~
+
+真实状态只有 5,460 token，因此尾部浪费是 300 个槽位。若使用静态预留 1,024、4,096 和 2,048 个槽位，则总预留为 7,168，浪费达到 1,708 个槽位。分页不是没有浪费，而是把浪费限制在 block 粒度，并允许完成的请求把物理 block 归还池中。block size 越小，尾部浪费往往越小，但 block table 和间接访问开销会上升；这个参数需要用真实长度分布和 kernel 测量。
+
+然后区分两类 cache。活跃 cache 保存当前请求继续生成所必需的状态，不能因为显存水位升高而静默淘汰；可复用 prefix cache 只是性能优化，可以在确认可重算后按 LRU 或成本收益淘汰。固定 system policy 的 prefix 可能适合复用，但用户文档、权限结果、工具返回和个人历史不应默认进入跨用户共享池。一个安全的缓存键至少要绑定：
+
+~~~text
+model_revision
+tokenizer_and_template_revision
+position_and_attention_revision
+cache_dtype_and_layout
+tenant_and_permission_domain
+tool_schema_revision
+prefix_token_hash
+~~~
+
+如果两个租户的 system 文本碰巧相同，也不能仅凭 token hash 就允许共享；还要判断该 prefix 是否包含租户策略、检索结果或其他可推断信息。prefix 命中指标还要记录复用 token 数和节省的 prefill 时间，不能只记录命中请求数。
+
+最后决定超预算时的动作。可以按优先级淘汰可复用 prefix、限制新请求进入、把长请求放入单独队列、降低最大输出或将可重算状态 offload；不能直接删除活跃请求的历史。每种降级都要在质量和用户契约中有对应语义：截断可能丢证据，摘要可能引入错误，offload 可能增加延迟，拒绝则要返回可重试的明确原因。对 1M context，也要分别测单请求 cache、并发容量、证据检索、跨段推理和单位成功成本；接口可接受的长度不是这些指标的替代物。
+
+这个设计过程把四个层次分开了：公式给出状态数量级，分页决定动态分配，prefix cache 决定可复用计算，权限和生命周期决定哪些状态可以被复用或淘汰。部署评审真正需要的是这些层次之间的证据链，而不是把“KV Cache”“PagedAttention”和“长上下文”合并成一个笼统的加速结论。
 
 ## 3.16 资料与证据边界
 

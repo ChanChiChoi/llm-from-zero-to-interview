@@ -14,6 +14,8 @@
 b=g(\ell,\mathrm{model},\mathrm{task},\mathrm{policy})
 ```
 
+这里 `\ell` 属于有限的离散 level 集合，例如 `{low, medium, high}`；`b` 应明确是标量还是预算向量，`g` 还可能因为当前 revision、任务画像、剩余容量和停止事件而返回不同结果。如果某个 level 不被当前后端支持，映射不是一个有效预算，而应返回显式的“不支持”状态。
+
 同一个 `high` 在不同模型、不同任务和不同版本中可能映射到不同的 `b`。甚至同一次请求也可能因为 verifier 提前通过而没有用满预算。因此输出文本长度不能反推 level 的真实成本。
 
 更现实的表达是把档位看成预算区间：
@@ -21,6 +23,8 @@ b=g(\ell,\mathrm{model},\mathrm{task},\mathrm{policy})
 ```math
 \ell_k\mapsto[b_k^{\min},b_k^{\max}]
 ```
+
+区间端点必须是同一资源单位下的有限非负数，并满足 `b_k^{\min}\le b_k^{\max}`。如果底层是多维预算，应写成向量区间或分别记录 token、工具、验证和时间上限，不能把不同单位未经换算相加。
 
 模型可以在区间内根据难度、停止条件和工具结果决定何时结束。工程师做跨 provider 比较时，应测量有效 reasoning token、工具次数、验证次数和 wall-clock，而不是比较字符串 `high`。
 
@@ -91,9 +95,9 @@ fallback_behavior
 
 第五，切换档位不做回归。模型升级可能让同一个档位的成本、输出协议和成功率同时变化。
 
-## 14.9 面试回答与练习
+## 14.9 综合判断与练习
 
-“thinking level 和 reasoning effort 有什么区别？”可以这样回答：thinking level 是面向产品的离散控制接口，reasoning effort 更接近请求级的计算和验证预算概念；level 的实际映射由 provider 和版本决定，不能跨厂商按名字比较。工程上要把档位映射到有效预算、工具、验证、事件、usage 和安全策略，并用质量、成本、延迟和风险做回归。
+理解 thinking level 和 reasoning effort 的关键，是把前者看成面向产品的离散控制接口，把后者看成请求级的计算和验证预算概念。level 的实际映射由 provider 和版本决定，不能跨厂商按名字比较。工程上要把档位映射到有效预算、工具、验证、事件、usage 和安全策略，并用质量、成本、延迟和风险做回归。
 
 练习一：为 low、medium、high 设计 capability matrix，标出 reasoning token、工具、verifier、deadline 和安全权限。
 
@@ -108,7 +112,7 @@ fallback_behavior
 | 项目 | low | medium | high |
 | --- | --- | --- | --- |
 | 最大 reasoning 预算 | 低 | 中 | 高 |
-| 工具轮次 | 禁用或少量 | 允许只读 | 允许受控写入 |
+| 工具轮次 | 禁用或少量 | 允许已授权只读 | 允许更多已授权调用 |
 | verifier | 格式/规则 | 单元测试 | 多阶段验证 |
 | deadline | 短 | 中 | 长 |
 | 人工确认 | 高风险必需 | 高风险必需 | 高风险必需 |
@@ -116,13 +120,85 @@ fallback_behavior
 
 这张表不是跨 provider 的事实，而是产品内部的契约。真正实现时要用 usage、事件和 trace 验证每个档位是否真的遵守了它；如果三个档位只改变 `max_tokens`，就不应把它描述成三种不同的推理能力。
 
-### 14.9.2 迁移实验：档位名称不一致怎么办
+表中的“允许更多已授权调用”不等于 level 赋予了写权限。工具权限、资源范围和人工确认由独立策略决定；一个 high 请求可以拥有更多验证轮次，但仍然只能读公开文件。若产品需要受控写入，必须在权限服务中显式授予，并在外部动作前完成确认。
+
+### 14.9.2 最小可运行的档位适配器
+
+下面的 demo 不连接任何 provider，只模拟三种后端：原生支持 thinking level 的后端、只能用输出长度近似的后端，以及完全没有可接受映射的后端。`adapted` 表示有明确的语义损失，`unsupported` 表示适配层拒绝假装兼容。无论 level 如何变化，`tool_permission` 都由调用方传入并原样保留。
+
+```python
+LEVELS = {
+    "low": {"reasoning_tokens": 512, "deadline_ms": 1500, "tool_rounds": 0},
+    "medium": {"reasoning_tokens": 2048, "deadline_ms": 4000, "tool_rounds": 1},
+    "high": {"reasoning_tokens": 8192, "deadline_ms": 10000, "tool_rounds": 3},
+}
+BACKENDS = {"native", "output_only", "plain"}
+PERMISSIONS = {"none", "read_only", "approved_write"}
+
+
+def require(condition, message):
+    if not condition:
+        raise ValueError(message)
+
+
+def compile_level(level, backend, tool_permission, allow_approximation=False):
+    require(level in LEVELS, "unknown level")
+    require(backend in BACKENDS, "unknown backend")
+    require(tool_permission in PERMISSIONS, "unknown tool permission")
+    config = LEVELS[level]
+    if backend == "native":
+        return {
+            "status": "native",
+            "field": "thinking_level",
+            "requested_level": level,
+            "reasoning_tokens": config["reasoning_tokens"],
+            "deadline_ms": config["deadline_ms"],
+            "tool_rounds": config["tool_rounds"],
+            "tool_permission": tool_permission,
+            "usage": "split",
+        }
+    if backend == "output_only" and allow_approximation:
+        return {
+            "status": "adapted",
+            "field": "max_output_tokens",
+            "requested_level": level,
+            "output_tokens": config["reasoning_tokens"],
+            "deadline_ms": config["deadline_ms"],
+            "tool_rounds": 0,
+            "tool_permission": tool_permission,
+            "usage": "output_only",
+            "losses": ["no_native_reasoning_budget", "no_structured_thinking_events"],
+        }
+    return {
+        "status": "unsupported",
+        "requested_level": level,
+        "tool_permission": tool_permission,
+    }
+
+
+native = compile_level("high", "native", "read_only")
+adapted = compile_level("high", "output_only", "read_only", allow_approximation=True)
+unsupported = compile_level("high", "plain", "read_only")
+print(native["status"], adapted["status"], unsupported["status"])
+print(native["tool_permission"], adapted["tool_permission"])
+```
+
+预期输出：
+
+```text
+native adapted unsupported
+read_only read_only
+```
+
+这个 demo 只验证适配器的状态和字段，不证明后端真的消耗了对应预算。生产适配层还应校验模型 revision、取消和超时语义、事件顺序、usage 拆分、工具参数、权限决定和 fallback 结果，并把 `losses` 写入 trace。
+
+### 14.9.3 迁移实验：档位名称不一致怎么办
 
 假设后端 A 支持 `thinking_level`，后端 B 只支持普通生成。迁移时可做三组对照：A 的 low/medium/high，B 的固定生成上限，B 加上外部 verifier 和工具循环。比较时固定任务和 deadline，报告实际输出 token、工具事件、验证次数、成功率和成本。
 
 如果 B 的长输出没有提高验证率，就只能把它标成“近似长度映射”，不能承诺等价；如果 B 的外部 verifier 带来了相近成功率，但延迟更高，应在 capability matrix 中标出不同的成本和事件语义。兼容层应向客户端返回实际路径，而不是伪造一个 provider 原生档位。
 
-### 14.9.3 档位和用户体验
+### 14.9.4 档位和用户体验
 
 低档位不等于低质量，也可能是对简单任务更合适的快速路径；高档位不等于一定正确，仍可能输出更长的错误理由。界面上应展示预计等待、是否会调用工具、是否需要确认和结果是否经过验证，而不是只显示一个“思考等级”。
 
@@ -156,6 +232,8 @@ fallback_behavior
 \Delta U_{\ell\rightarrow\ell+1}
 =[Q(\ell+1)-Q(\ell)]-\lambda[C(\ell+1)-C(\ell)]
 ```
+
+这里 `Q(\ell)` 应在同一任务集、同一成功定义和同一评估 oracle 上计算；如果它表示概率，则取值在 `[0,1]`。`C(\ell)` 是有限非负成本，`\lambda\ge0` 是把成本换算成效用的权重。两个档位的任务、超时、重试和安全失败处理不一致时，差值不能解释为档位本身的收益。
 
 当边际收益为负时，继续升级没有经济意义；但高风险任务还要加上失败损失。支付、生产发布或医疗建议不能只用平均质量减成本，必须把严重错误作为硬性条件：即使 high 档位的平均分更高，只要工具越权率超过阈值，也不能上线。
 
@@ -198,7 +276,7 @@ U(\ell\mid x)
  -\mu R(\ell\mid x),
 ~~~
 
-其中 `x` 是任务画像，`Q` 是通过质量验收条件的概率或分数，`C` 是 token、GPU 和时间成本，`R` 是错误或副作用风险。`high` 只有在它提高目标任务的可接受质量时才有价值；对不可逆动作，`R` 仍由权限和审批控制，不能由档位直接覆盖。
+其中 `x` 是任务画像，`Q` 是通过质量验收条件的概率或分数，`C` 是 token、GPU 和时间成本，`R` 是错误或副作用风险。要求这些量在同一任务和版本条件下可比较，成本和风险不得用负数抵消质量损失；`\lambda、\mu` 是非负权重。`high` 只有在它提高目标任务的可接受质量时才有价值；对不可逆动作，`R` 仍由权限和审批控制，不能由档位直接覆盖。
 
 ## 14.16 预算和队列必须一起看
 
@@ -209,7 +287,7 @@ M_{\mathrm{active}}
 \approx N\left((1-q)M_{\mathrm{low}}+qM_{\mathrm{high}}\right),
 ~~~
 
-其中 `N` 是活跃请求数，`q` 是 high 占比。实际还要计入 batch、cache、工具等待和 preemption，但这个式子足以提醒我们：档位路由是容量问题，不是 UI 问题。
+其中 `N` 是非负整数形式的活跃请求数，`q\in[0,1]` 是 high 占比，`M_low` 和 `M_high` 是在同一时间窗口、同一资源单位下估计的单请求资源占用，并且都应为有限非负数。`N=0` 时没有活跃负载；`q` 缺失或超出 `[0,1]` 时不能用这个式子推算容量。实际还要计入 batch、cache、工具等待和 preemption，但这个式子足以提醒我们：档位路由是容量问题，不是 UI 问题。
 
 因此应设置每租户升级配额、全局 reasoning token 预算和过载策略。容量不足时可以排队、异步、降级或请求用户确认；不能偷偷把 high 变成 low，却仍然向用户宣称执行了同一档位。
 
@@ -217,13 +295,13 @@ M_{\mathrm{active}}
 
 从 provider A 迁移到 provider B 时，先建立行为矩阵，而不是把字符串字段直接替换。测试集至少包括：简单问答、长文档中间证据、数学/代码、结构化输出、单工具、并行工具、工具拒绝、取消、超时和多轮状态。
 
-每个用例保存实际档位、输入 token、reasoning/visible output usage、事件序列、工具调用、finish reason、延迟、成本和权限决定。迁移结果可以标记为 `native`、`mapped`、`degraded` 或 `unsupported`；`mapped` 必须有质量、成本和协议回归，不能只因为请求没有报错就认为兼容。
+每个用例保存实际档位、输入 token、reasoning/visible output usage、事件序列、工具调用、finish reason、延迟、成本和权限决定。适配器内部可以使用 `native`、`adapted` 和 `unsupported`；发布报告也可以把有损适配进一步标记为 `mapped` 或 `degraded`。无论采用哪套标签，都必须写明语义损失并完成质量、成本和协议回归，不能只因为请求没有报错就认为兼容。
 
 ## 14.18 一个文档分析路由例子
 
 用户上传一份合同并提出三个问题。第一个问题只要求查找定义，low 档位已足够；第二个问题需要比较跨页例外条款，medium 档位可能值得；第三个问题要求修改合同并发送给外部人员，即使 high 档位能提高分析质量，也必须停在草稿和人工确认。
 
-路由日志应让人看出这三件事：为什么选择该档位，消耗了多少预算，最终动作是否仍受权限门控制。这样“档位升级”不会被误解成“授权升级”，也便于在用户投诉延迟或成本时回放决策。
+路由日志应让人看出这三件事：为什么选择该档位，消耗了多少预算，最终动作是否仍受独立权限策略和人工确认约束。这样“档位升级”不会被误解成“授权升级”，也便于在用户投诉延迟或成本时回放决策。
 
 ## 14.19 评测档位的停止条件
 
@@ -262,3 +340,5 @@ M_{\mathrm{active}}
 Thinking level 的价值是把复杂的 test-time compute 策略包装成易用界面，代价是隐藏了预算、协议、队列和成本差异。阅读这类字段时，先问它实际改变了什么资源、什么事件和什么 SLO，再问它是否让目标任务更可靠。
 
 档位名称、映射和计费必须以对应版本的官方模型文档为准；没有公开映射时，本书只能讨论可测的外部行为，不能把产品标签当成内部算法证明。任何档位都不能绕过身份、最小权限、审批和工具执行验收条件。
+
+本章可进一步核对的公开资料包括：OpenAI Reasoning 指南（请求级 reasoning 参数和 usage 说明入口）<https://platform.openai.com/docs/guides/reasoning>；Anthropic Extended Thinking 文档（思考预算和工具协议入口）<https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking>；以及前文的 Self-Consistency、Tree of Thoughts 和 test-time compute 研究论文。官方文档能支持字段和外部协议的说明，不能证明 provider 未公开的内部搜索、verifier 或停止策略。

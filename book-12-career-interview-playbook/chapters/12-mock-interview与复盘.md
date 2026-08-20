@@ -37,7 +37,7 @@ S
 A
 ~~~
 
-K 表示知识或经历真实性，R 表示检索成功率，S 表示结构和表达质量，A 表示交互适应能力。乘积不是心理测量学定律，只是一个训练直觉：任何一项接近零，其他项再强也可能无法在现场体现。
+K、R、S、A 应先被映射到同一有限尺度（例如 \`[0, 1]\`）；K 表示知识或经历真实性，R 表示检索成功率，S 表示结构和表达质量，A 表示交互适应能力。乘积不是心理测量学定律，也不是可以由一次评分直接估计的能力真值，只是一个训练直觉：任何一项接近零，其他项再强也可能无法在现场体现。
 
 ### 12.1.2 为什么“看懂”不等于“说出”
 
@@ -85,7 +85,7 @@ b_r
 
 ### 12.2.2 评分的分母和样本
 
-如果一轮 mock 有 n 个评分项，简单平均为：
+如果一轮 mock 有 \`n > 0\` 个评分项，且每个 y_i 都使用同一评分尺度，简单平均为：
 
 ~~~math
 \bar{y}
@@ -94,7 +94,7 @@ b_r
 \sum_{i=1}^{n}y_i
 ~~~
 
-但平均分会掩盖关键失败。例如九个低风险问题都答得好，只在一个权限问题上给出越权方案，平均分仍可能很高。因此应同时报告：
+当评分项为空时，平均分未定义，不能报告为 0。但平均分即使有定义，也会掩盖关键失败。例如九个低风险问题都答得好，只在一个权限问题上给出越权方案，平均分仍可能很高。因此应同时报告：
 
 - 各能力维度；
 - 高严重度错误数量；
@@ -222,7 +222,7 @@ w_f F
 w_u U
 ~~~
 
-M 是机制深度，C 是约束数量，F 是失败和追问压力，U 是陌生度，w 是训练者选定的权重。这不是通用评分公式，但有助于避免把“题目更熟”误认为“能力更强”。
+M、C、F、U 应先按固定规则归一化，w 是训练者选定的有限非负权重；如果要比较题目，题目集合和权重必须保持一致。这不是通用评分公式，但有助于避免把“题目更熟”误认为“能力更强”。
 
 ### 12.4.3 题目污染
 
@@ -348,7 +348,7 @@ problem
 
 ### 12.6.3 计算题的表达
 
-遇到数量估算时，应先写假设。假设请求率为 lambda，平均输入输出 token 为 T_in 和 T_out，则 token 需求可估算为：
+遇到数量估算时，应先写假设。假设请求率为非负的 lambda，平均输入输出 token 为非负的 T_in 和 T_out，则 token 需求可估算为：
 
 ~~~math
 D_{\mathrm{token}}
@@ -514,7 +514,7 @@ T_{\mathrm{result}}
 T_{\mathrm{learning}}
 ~~~
 
-例如把总时间设为 120 秒，背景约 20 秒，行动和证据约 55 秒，结果和代价约 25 秒，学习约 20 秒。数字不是硬规则，但能防止背景占满全部时间。
+例如把总时间设为有限正数 120 秒，背景约 20 秒，行动和证据约 55 秒，结果和代价约 25 秒，学习约 20 秒，五项预算相加应等于总时间。数字不是硬规则，但能防止背景占满全部时间。
 
 ### 12.10.2 英文技术解释
 
@@ -536,7 +536,7 @@ The short answer is that retrieval supplies task-relevant evidence to the langua
 
 ### 12.10.3 录音的听感指标
 
-录音复盘时可以粗略记录语速。若有效词数为 N_words，有效讲话时间为 T_minutes，则：
+录音复盘时可以粗略记录语速。若有效词数为 N_words，且有效讲话时间为 \`T_minutes > 0\`，则：
 
 ~~~math
 \mathrm{WPM}
@@ -705,7 +705,7 @@ The short answer is that retrieval supplies task-relevant evidence to the langua
 
 ### 12.14.3 训练资源的机会成本
 
-假设一次训练耗时 T，复盘耗时 R，真正发生的有效回答次数为 n，则平均每个有效回答的时间成本为：
+假设一次训练耗时 T、复盘耗时 R 都是非负时长，且真正发生的有效回答次数为 \`n > 0\`，则平均每个有效回答的时间成本为：
 
 ~~~math
 C_{\mathrm{practice}}
@@ -713,7 +713,7 @@ C_{\mathrm{practice}}
 \frac{T+R}{n}
 ~~~
 
-一场两小时、题目很多但没有复盘的 mock，可能比一场四十分钟、针对两个问题并完成重练的 mock 更低效。这里的 n 不是题目数量，而是能够产生下一次行为改变的有效练习单元。
+当没有有效练习单元时，单位练习成本未定义，不能因为完成了很多题目就报告为零。一场两小时、题目很多但没有复盘的 mock，可能比一场四十分钟、针对两个问题并完成重练的 mock 更低效。这里的 n 不是题目数量，而是能够产生下一次行为改变的有效练习单元。
 
 ## 12.15 一个可运行的 Mock 评估例子
 
@@ -721,6 +721,7 @@ C_{\mathrm{practice}}
 
 ~~~python
 from dataclasses import dataclass
+from math import isfinite
 
 
 @dataclass(frozen=True)
@@ -730,6 +731,18 @@ class Attempt:
     score: float
     critical_error: bool
     hint_count: int
+
+
+def validate(attempts):
+    rows = list(attempts)
+    if not rows:
+        raise ValueError("attempts must not be empty")
+    for item in rows:
+        if not isfinite(item.score) or not 0 <= item.score <= 5:
+            raise ValueError("score must be finite and within [0, 5]")
+        if item.hint_count < 0:
+            raise ValueError("hint_count must be non-negative")
+    return rows
 
 
 before = [
@@ -748,15 +761,18 @@ after = [
 
 
 def average(attempts):
-    return sum(item.score for item in attempts) / len(attempts)
+    rows = validate(attempts)
+    return sum(item.score for item in rows) / len(rows)
 
 
 def independent_rate(attempts):
-    return sum(item.independent for item in attempts) / len(attempts)
+    rows = validate(attempts)
+    return sum(item.independent for item in rows) / len(rows)
 
 
 def critical_count(attempts):
-    return sum(item.critical_error for item in attempts)
+    rows = validate(attempts)
+    return sum(item.critical_error for item in rows)
 
 
 print({

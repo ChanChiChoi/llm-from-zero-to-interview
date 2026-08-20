@@ -124,6 +124,8 @@ R_syn = sum_{i:o_i in {syn, distill}}(keep_i * T_i) / sum_i(keep_i * T_i)
 
 其中 `o_i` 是样本来源类型，`T_i` 是 token 数。`R_syn` 过高时，要警惕同质化、teacher 偏差和 model collapse 风险。
 
+这些比例的定义域必须写清楚：只有保留集合中的 token 总数大于零时，`R_syn` 才有定义；只有目标标签集合非空时，`C_cover` 才有定义；只有存在样本时，`R_dup` 才有定义。没有保留样本时应记录为 `undefined`，而不是把“没有可测分母”写成合成占比 `0` 或覆盖率 `0`。如果原始数据存在但经过过滤后一个样本也没有，保留率可以是 `0`，同时还必须触发补充或恢复数据的动作。
+
 能力覆盖可以按标签集合计算：
 
 ~~~math
@@ -489,6 +491,10 @@ MIN_QUALITY = 0.80
 MAX_SYN_RATIO = 0.72
 
 
+def safe_ratio(numerator, denominator):
+    return round(numerator / denominator, 3) if denominator else None
+
+
 def reject_reason(item):
     if not item["authorized"]:
         return "unauthorized_teacher"
@@ -533,12 +539,14 @@ report = {
     "kept_ids": [item["id"] for item in kept],
     "rejected": dict(sorted(rejected.items())),
     "reason_counts": dict(sorted(Counter(rejected.values()).items())),
-    "retention": round(kept_tokens / raw_tokens, 3),
-    "origin_mix": {k: round(origin_tokens[k] / kept_tokens, 3) for k in sorted(origin_tokens)},
-    "task_mix": {k: round(task_tokens[k] / kept_tokens, 3) for k in sorted(task_tokens)},
-    "teacher_mix": {k: round(teacher_tokens[k] / kept_tokens, 3) for k in sorted(teacher_tokens)},
-    "synthetic_like_ratio": round(synthetic_like_tokens / kept_tokens, 3),
-    "diversity_coverage": round(len(covered_tags & TARGET_TAGS) / len(TARGET_TAGS), 3),
+    "retention": safe_ratio(kept_tokens, raw_tokens),
+    "origin_mix": {k: safe_ratio(origin_tokens[k], kept_tokens) for k in sorted(origin_tokens)},
+    "task_mix": {k: safe_ratio(task_tokens[k], kept_tokens) for k in sorted(task_tokens)},
+    "teacher_mix": {k: safe_ratio(teacher_tokens[k], kept_tokens) for k in sorted(teacher_tokens)},
+    "synthetic_like_ratio": safe_ratio(synthetic_like_tokens, kept_tokens),
+    "diversity_coverage": safe_ratio(
+        len(covered_tags & TARGET_TAGS), len(TARGET_TAGS)
+    ),
 }
 
 checks = {
@@ -548,8 +556,13 @@ checks = {
     "unsafe_output_blocked": "unsafe_or_policy_fail" in report["reason_counts"],
     "privacy_blocked": "privacy_or_pii" in report["reason_counts"],
     "diversity_ok": report["diversity_coverage"] >= 0.85,
-    "synthetic_ratio_ok": report["synthetic_like_ratio"] <= MAX_SYN_RATIO,
-    "natural_anchor_present": origin_tokens["natural"] > 0,
+    "synthetic_ratio_ok": (
+        report["synthetic_like_ratio"] is not None
+        and report["synthetic_like_ratio"] <= MAX_SYN_RATIO
+    ),
+    "natural_anchor_present": any(
+        item["origin"] == "natural" and item["natural_anchor"] for item in kept
+    ),
 }
 signals = {
     "unauthorized_teacher_not_blocked": not checks["unauthorized_teacher_blocked"],
@@ -560,6 +573,7 @@ signals = {
     "diversity_gap": not checks["diversity_ok"],
     "synthetic_ratio_too_high": not checks["synthetic_ratio_ok"],
     "natural_anchor_missing": not checks["natural_anchor_present"],
+    "no_retained_tokens": kept_tokens == 0,
 }
 actions = []
 if signals["unauthorized_teacher_not_blocked"]:
@@ -578,6 +592,8 @@ if signals["synthetic_ratio_too_high"]:
     actions.append("reduce_generated_ratio_and_add_natural_anchors")
 if signals["natural_anchor_missing"]:
     actions.append("restore_natural_data_anchor")
+if signals["no_retained_tokens"]:
+    actions.append("restore_or_collect_generation_records")
 decision = "continue_to_ablation" if not actions else "hold_for_repair"
 report["checks"] = checks
 report["signals"] = signals
@@ -611,6 +627,9 @@ assert all(report["checks"].values())
 assert not any(report["signals"].values())
 assert report["actions"] == []
 assert report["decision"] == "continue_to_ablation"
+assert safe_ratio(0, 0) is None
+assert safe_ratio(0, 100) == 0.0
+assert report["checks"]["natural_anchor_present"] is True
 ~~~
 
 运行后会看到类似输出：
@@ -631,7 +650,7 @@ actions= []
 decision= continue_to_ablation
 ~~~
 
-这个 demo 的重点是：合成数据进入训练前必须被当成可审计数据产品，而不是 teacher 随手生成的文本。它要能证明授权成立、错误被验证拦截、污染被隔离、PII 被过滤、近重复被降掉，并且合成 / 蒸馏 token 没有压过自然数据锚点。
+这个 demo 的重点是：合成数据进入训练前必须被当成可审计数据产品，而不是 teacher 随手生成的文本。它要能证明授权成立、错误被验证拦截、污染被隔离、PII 被过滤、近重复被降掉，并且合成 / 蒸馏 token 没有压过自然数据锚点。`safe_ratio(0, 0)` 返回 `None`，表示没有可解释的 token 分母；如果原始数据存在但最终一个样本也没有，保留率才是 `0.0`，并且系统应要求恢复或补充生成数据。
 
 ---
 

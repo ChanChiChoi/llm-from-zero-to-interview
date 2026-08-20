@@ -4,11 +4,11 @@ Multi-Agent，多智能体系统，是把多个 Agent 组织成协作网络来�
 
 Multi-Agent 真正解决的问题是：复杂任务中，单个 Agent 的上下文、工具权限、专业视角和自我验证能力都有限。多 Agent 可以通过角色分工、并行执行、独立检查和冲突暴露提升可靠性。但它也会带来通信成本、责任不清、重复劳动、冲突处理、权限扩散和错误传播。
 
-本章系统讲 Multi-Agent：为什么需要多 Agent，角色分工、通信协议、协调器、共享状态、辩论与评审、任务分配、冲突解决、共识与投票、成本控制、安全边界、评估指标和面试表达。
+本章系统讲 Multi-Agent：为什么需要多 Agent，角色分工、通信协议、协调器、共享状态、辩论与评审、任务分配、冲突解决、共识与投票、成本控制、安全边界和评估指标。
 
 ## 0. 本讲范围与资料
 
-本章参考 AutoGen、CAMEL、MetaGPT、ChatDev、AI safety via debate 和近年 LLM multi-agent survey 相关资料。这里不把任何框架写成唯一标准，也不展开特定框架 API，而是抽象出面试和工程设计中更稳定的共性问题：
+本章参考 AutoGen、CAMEL、MetaGPT、ChatDev、AI safety via debate 和近年 LLM multi-agent survey 相关资料。这里不把任何框架写成唯一标准，也不展开特定框架 API，而是抽象出系统设计中更稳定的共性问题：
 
 1. 角色如何定义，什么时候值得拆成多个 Agent。
 2. Agent 之间应该传什么，不应该传什么。
@@ -29,11 +29,9 @@ Multi-Agent 真正解决的问题是：复杂任务中，单个 Agent 的上下�
 
 Multi-Agent 的核心直觉是把复杂任务拆成多个受控角色，让它们专业化、互相校验或并行完成子任务。
 
-面试回答：
+Multi-Agent 的价值可以从一个具体问题理解。假设任务是调查供应商事故：需要有人整理时间线、有人查合同、有人分析日志、有人审查结论。让一个 Agent 同时拥有所有资料和权限，会导致上下文拥挤，也很难独立检查自己的结论；拆成多个 Agent 后，任务可以并行，权限可以按资料类型切开，审查者也可以看到生成者没有看到的证据。
 
-```text
-Multi-Agent 是用多个 Agent 通过角色分工、通信和协调来完成复杂任务。它可以提升并行性、专业化和互相检查能力，例如 planner、researcher、coder、reviewer 分别负责不同环节。但它也会增加通信成本、协调复杂度、冲突解决和权限管理问题。是否使用多 Agent，要看它是否真实提升任务成功率、验证质量或并行效率，而不是看系统里有几个 Agent。
-```
+但拆分带来新的系统变量：子任务之间如何传递结果，谁负责发现冲突，谁拥有最终决策权，多个 Agent 是否使用了同一条错误来源，以及并行节省的时间是否抵消了通信和验证成本。因此 Multi-Agent 的设计单位不是 Agent 数量，而是任务依赖、权限边界、验证独立性和可观测状态。
 
 ## 9.2 Multi-Agent 的基本结构
 
@@ -52,15 +50,15 @@ Multi-Agent 是用多个 Agent 通过角色分工、通信和协调来完成复�
 
 可以把一个 multi-agent 系统中的 Agent 集合写成：
 
-```math
+~~~math
 \mathcal{A}=\{a_1,\ldots,a_n\}
-```
+~~~
 
 其中每个 Agent 不只是一个 prompt，而是一个带角色、工具、权限、上下文和预算的执行单元：
 
-```math
+~~~math
 a_i=(r_i,T_i,P_i,C_i,B_i)
-```
+~~~
 
 变量含义：
 
@@ -80,9 +78,9 @@ Multi-Agent 的核心对象包括 Agent、消息、任务分配、通信图、�
 
 一条 Agent 间消息可以抽象为：
 
-```math
+~~~math
 m_t=(s_t,r_t,\iota_t,c_t,E_t,\gamma_t)
-```
+~~~
 
 其中 `s_t` 是 sender，`r_t` 是 receiver，`\iota_t` 是 intent，`c_t` 是消息内容，`E_t` 是证据集合，`\gamma_t` 是置信度。
 
@@ -94,103 +92,119 @@ m_t=(s_t,r_t,\iota_t,c_t,E_t,\gamma_t)
 
 消息有效率可以写成：
 
-```math
+~~~math
 R_{\mathrm{msg}}=\frac{1}{T}\sum_{t=1}^{T}\mathbf{1}[\mathrm{valid}(m_t)]
-```
+~~~
 
 其中 `valid` 表示消息 schema 可解析、字段完整、接收方明确、意图合法。
+只有实际记录了消息时，`R_msg` 才有数值；`T=0` 表示没有消息证据，
+应记为 `None` 或 `unknown`，不能因为没有观察到无效消息就记成 `1`。
 
 ### 9.4.2 任务分配
 
 一个子任务分配可以写成：
 
-```math
+~~~math
 z_j=(u_j,a(z_j),d_j,\rho_j)
-```
+~~~
 
 其中 `u_j` 是子任务，`a(z_j)` 是被分配的 Agent，`d_j` 是 deadline 或依赖约束，`\rho_j` 是风险等级。
 
 角色匹配率衡量任务是否分给了合适角色：
 
-```math
+~~~math
 R_{\mathrm{role}}=\frac{1}{M}\sum_{j=1}^{M}\mathbf{1}[\mathrm{role}(a(z_j))=\mathrm{role}^{\star}(z_j)]
-```
+~~~
 
 其中 `M` 是子任务数量，`\mathrm{role}^{\star}(z_j)` 是该子任务理想角色。
+只有 `M>0` 时才定义角色匹配率。空计划表示没有角色匹配证据，而不是
+所有任务都分配正确。
 
 ### 9.4.3 通信图
 
 Agent 之间的通信关系可以写成有向图：
 
-```math
+~~~math
 G_{\mathrm{comm}}=(\mathcal{A},\mathcal{E}_{\mathrm{comm}})
-```
+~~~
 
 如果所有 Agent 都能任意互发消息，通信图接近完全图，沟通成本会迅速增加。若有 coordinator，通信图通常更接近星型或层级结构，更容易审计。
 
 通信成本可以粗略写成：
 
-```math
+~~~math
 C_{\mathrm{comm}}=\sum_{t=1}^{T}C(m_t)
-```
+~~~
 
 其中 `C(m_t)` 可以按 token、延迟、模型调用成本或人工审阅成本估算。
+若没有消息，通信成本可以记录为观测到的零成本，但通信质量指标仍然是
+`unknown`；二者不能混为一谈。
 
 ### 9.4.4 证据支持与冲突解决
 
 证据支持率衡量消息或结论是否有可追溯依据：
 
-```math
+~~~math
 R_{\mathrm{evid}}=\frac{1}{T}\sum_{t=1}^{T}\mathbf{1}[\mathrm{supported}(m_t)]
-```
+~~~
+
+这里的 `T` 是实际进入评估集的消息或结论数，`T=0` 时支持率未定义。
 
 冲突解决率衡量系统是否识别并解决矛盾结论：
 
-```math
+~~~math
 R_{\mathrm{conf}}=\frac{\sum_{k=1}^{K}\mathbf{1}[\mathrm{conflict}_k \land \mathrm{resolved}_k]}{\sum_{k=1}^{K}\mathbf{1}[\mathrm{conflict}_k]}
-```
+~~~
 
 注意：冲突“被解决”不等于“解决正确”。高风险任务还要看解决正确率：
 
-```math
+~~~math
 R_{\mathrm{conf\_ok}}=\frac{\sum_{k=1}^{K}\mathbf{1}[\mathrm{conflict}_k \land \mathrm{correct}_k]}{\sum_{k=1}^{K}\mathbf{1}[\mathrm{conflict}_k]}
-```
+~~~
+
+两个冲突指标都要求至少存在一个被检测到的冲突。没有冲突样本时，
+系统没有获得冲突处理能力的证据；不能把它当作解决率或正确率为 `1`。
 
 ### 9.4.5 重复劳动、收益和成本
 
 重复劳动率衡量多个 Agent 是否在做同一件事：
 
-```math
+~~~math
 R_{\mathrm{dup}}=\frac{1}{M}\sum_{j=1}^{M}\mathbf{1}[\mathrm{duplicate}(z_j)]
-```
+~~~
 
 Multi-Agent 相比单 Agent 的收益可以写成：
 
-```math
+~~~math
 L_{\mathrm{multi}}=S_{\mathrm{multi}}-S_{\mathrm{single}}
-```
+~~~
 
 其中 `S_{\mathrm{multi}}` 是 multi-agent 系统任务分数，`S_{\mathrm{single}}` 是单 Agent baseline 分数。这个指标很重要，因为 Multi-Agent 的比较对象不是“空系统”，而是更简单、更便宜的单 Agent 或固定 workflow。
+只有 multi-agent 与 baseline 在相同任务、输入、评估规则和可比预算下都
+有观测值时，`L_multi` 才有解释力。缺少 baseline 不能默认为零收益。
 
 总成本可以写成：
 
-```math
+~~~math
 C_{\mathrm{multi}}=\sum_{i=1}^{n}C(a_i)+\sum_{t=1}^{T}C(m_t)+C_{\mathrm{coord}}+C_{\mathrm{verify}}
-```
+~~~
 
 其中 `C_{\mathrm{coord}}` 是协调器成本，`C_{\mathrm{verify}}` 是验证和人工升级成本。
 
-### 9.4.6 Multi-Agent 上线条件
+### 9.4.6 Multi-Agent 综合交付检查
 
-一个简化的上线准入条件可以形式化为：
+一个简化的综合交付检查条件可以形式化为：
 
-```math
-G_{\mathrm{multi}}=\mathbf{1}[S_{\mathrm{multi}}\ge \tau_s \land L_{\mathrm{multi}}\ge \tau_l \land R_{\mathrm{conf}}\ge \tau_c \land R_{\mathrm{dup}}\le \tau_d \land R_{\mathrm{perm}}\le \tau_p \land C_{\mathrm{multi}}\le B]
-```
+~~~math
+I_{\mathrm{multi}}=\mathbf{1}[S_{\mathrm{multi}}\ge \tau_s \land L_{\mathrm{multi}}\ge \tau_l \land R_{\mathrm{conf}}\ge \tau_c \land R_{\mathrm{dup}}\le \tau_d \land R_{\mathrm{perm}}\le \tau_p \land C_{\mathrm{multi}}\le B]
+~~~
 
 其中 `R_{\mathrm{perm}}` 是权限违规率，`B` 是成本预算，`\tau_s,\tau_l,\tau_c,\tau_d,\tau_p` 是上线阈值。
 
-直觉：Multi-Agent 必须同时证明“做得好”“比单 Agent 有增益”“冲突能处理”“没有大量重复劳动”“权限不乱”“成本可接受”。只展示一个看起来很热闹的协作过程，不足以上线。
+直觉：Multi-Agent 必须同时证明“做得好”“比单 Agent 有增益”“冲突能处理”“没有大量重复劳动”“权限不乱”“成本可接受”。只展示一个看起来很热闹的协作过程，不足以交付。`I_multi` 是把这些维度汇总到审计表的教学记号，不是建议把复杂产品压缩成一个布尔字段。
+公式中的每个比例都需要自己的非空分母，收益需要配对 baseline，成本需要
+完整记录模型、通信、协调和验证开销。任一必要指标为 `None` 或 `unknown`
+时，综合结果应保持未定义，直到补齐相应证据；不能把未知当成通过。
 
 ## 9.5 角色分工
 
@@ -254,7 +268,7 @@ Agent 之间不能随意聊天，最好有结构化通信协议。
 5. 支持权限审计。
 6. 支持冲突定位。
 
-面试中可以强调：Multi-Agent 不是让多个模型互相发散聊天，而是要把通信变成可解析、可过滤、可度量的事件流。
+Multi-Agent 不是让多个模型互相发散聊天，而是要把通信变成可解析、可过滤、可度量的事件流。发送者、接收者、意图、证据、状态和风险字段共同决定一条消息能否进入下一个 Agent 的上下文；自由文本可以作为内容，但不能替代协议字段。
 
 ## 9.8 共享状态与 Blackboard
 
@@ -273,9 +287,9 @@ Agent 之间不能随意聊天，最好有结构化通信协议。
 
 工程上常用 blackboard 或 task state table：
 
-```text
+~~~text
 task_id | owner | status | evidence_ids | blockers | risk_level | decision
-```
+~~~
 
 Blackboard 的优点是状态集中、便于审计。缺点是容易成为上下文膨胀点。如果每个 Agent 都读取全部 blackboard，系统仍然会退化成一个超长上下文单 Agent。更稳的做法是：按角色、任务和权限过滤可见状态。
 
@@ -285,12 +299,12 @@ Blackboard 的优点是状态集中、便于审计。缺点是容易成为上下
 
 典型流程：
 
-```text
+~~~text
 Agent A 给出答案
 Agent B 找反例
 Agent C 检查证据
 Judge 汇总并选择最终结论
-```
+~~~
 
 优势：
 
@@ -307,7 +321,7 @@ Judge 汇总并选择最终结论
 4. 成本明显上升。
 5. 对可执行任务，工具验证通常比纯文本辩论更可靠。
 
-面试中要避免把 debate 说成万能验证器。更稳的表达是：辩论适合暴露候选假设和不确定性，最终最好结合证据、工具验证、测试、规则验收条件或人工复核。
+辩论不应被当成万能验证器。它适合暴露候选假设和不确定性，但最终结论最好结合证据、工具验证、测试、规则检查或人工复核。若所有参与者都读取同一份错误材料，更多发言只会把共同错误表达得更自信。
 
 ## 9.10 并行执行
 
@@ -397,12 +411,12 @@ Multi-Agent 和 workflow 可以结合。
 
 一种实用架构：
 
-```text
+~~~text
 固定 workflow 控制主流程
 关键步骤交给专门 Agent 执行
 Coordinator 汇总结果
 Verifier 做最终检查
-```
+~~~
 
 这样既保留 workflow 的稳定性，又利用 Agent 的灵活性。生产系统中更常见的是“workflow 主控 + Agent 局部自治”，而不是“多个 Agent 完全自由聊天”。
 
@@ -451,7 +465,7 @@ Multi-Agent 评估可以看：
 13. 人工接管率。
 14. 最终答案证据支持率。
 
-核心问题是：多 Agent 是否真的比单 Agent 更好，还是只是更贵、更复杂。面试中如果只说“多个 Agent 可以互相协作”，回答还停留在概念层；能说出 baseline、指标、成本、冲突和权限，才更像工程落地回答。
+核心问题是：多 Agent 是否真的比单 Agent 更好，还是只是更贵、更复杂。评估必须固定单 Agent 或 workflow baseline，记录相同任务、相同输入和相近预算，再比较成功率、证据质量、延迟、成本、冲突和权限事件。否则“协作提升”可能只是任务样本或预算不同造成的假象。
 
 ## 9.18 最小可运行 Multi-Agent audit demo
 
@@ -459,9 +473,25 @@ Multi-Agent 评估可以看：
 
 它演示的问题是：Multi-Agent 不能只看最终是否成功，还要看协作过程是否可控、可解释、低重复、低权限风险，并且是否真的优于单 Agent baseline。
 
-```python
+~~~python
+import math
 from collections import Counter
 from dataclasses import dataclass
+
+
+def require_text(value, field):
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field} must be non-empty text")
+
+
+def require_bool(value, field):
+    if type(value) is not bool:
+        raise TypeError(f"{field} must be bool")
+
+
+def require_tuple(value, field):
+    if not isinstance(value, tuple) or any(not isinstance(item, str) or not item.strip() for item in value):
+        raise TypeError(f"{field} must be a tuple of non-empty strings")
 
 
 @dataclass(frozen=True)
@@ -471,6 +501,12 @@ class AgentSpec:
     tools: tuple
     permissions: tuple
 
+    def __post_init__(self):
+        require_text(self.agent_id, "agent_id")
+        require_text(self.role, "role")
+        require_tuple(self.tools, "tools")
+        require_tuple(self.permissions, "permissions")
+
 
 @dataclass(frozen=True)
 class Assignment:
@@ -479,6 +515,13 @@ class Assignment:
     assigned_agent: str
     success: bool
     duplicate: bool = False
+
+    def __post_init__(self):
+        require_text(self.task_id, "task_id")
+        require_text(self.required_role, "required_role")
+        require_text(self.assigned_agent, "assigned_agent")
+        require_bool(self.success, "assignment.success")
+        require_bool(self.duplicate, "assignment.duplicate")
 
 
 @dataclass(frozen=True)
@@ -490,6 +533,12 @@ class Message:
     valid_schema: bool
     supported_by_evidence: bool
 
+    def __post_init__(self):
+        for field in ("message_id", "sender", "receiver", "intent"):
+            require_text(getattr(self, field), field)
+        require_bool(self.valid_schema, "message.valid_schema")
+        require_bool(self.supported_by_evidence, "message.supported_by_evidence")
+
 
 @dataclass(frozen=True)
 class Conflict:
@@ -497,6 +546,12 @@ class Conflict:
     detected: bool
     resolved: bool
     resolution_correct: bool
+
+    def __post_init__(self):
+        require_text(self.conflict_id, "conflict_id")
+        require_bool(self.detected, "conflict.detected")
+        require_bool(self.resolved, "conflict.resolved")
+        require_bool(self.resolution_correct, "conflict.resolution_correct")
 
 
 @dataclass(frozen=True)
@@ -507,14 +562,134 @@ class Run:
     messages: tuple
     conflicts: tuple
     final_success: bool
-    single_agent_success: bool
+    single_agent_success: bool | None
     total_cost: float
     permission_violations: int = 0
     unnecessary_multi_agent: bool = False
 
+    def __post_init__(self):
+        require_text(self.run_id, "run_id")
+        if not isinstance(self.agents, dict):
+            raise TypeError("agents must be a dict")
+        for field in ("assignments", "messages", "conflicts"):
+            if not isinstance(getattr(self, field), tuple):
+                raise TypeError(f"{field} must be a tuple")
+        require_bool(self.final_success, "final_success")
+        if self.single_agent_success is not None:
+            require_bool(self.single_agent_success, "single_agent_success")
+        if not isinstance(self.total_cost, (int, float)) or not math.isfinite(self.total_cost) or self.total_cost < 0:
+            raise ValueError("total_cost must be finite and non-negative")
+        if type(self.permission_violations) is not int or self.permission_violations < 0:
+            raise ValueError("permission_violations must be a non-negative integer")
+        require_bool(self.unnecessary_multi_agent, "unnecessary_multi_agent")
+
+
+def validate_runs(runs):
+    if not isinstance(runs, (list, tuple)):
+        raise TypeError("runs must be a list or tuple")
+    run_ids = set()
+    for run in runs:
+        if not isinstance(run, Run):
+            raise TypeError("runs must contain Run values")
+        if run.run_id in run_ids:
+            raise ValueError(f"duplicate run_id: {run.run_id}")
+        run_ids.add(run.run_id)
+        if any(key != spec.agent_id for key, spec in run.agents.items()):
+            raise ValueError("agent dictionary keys must match AgentSpec.agent_id")
+        if len(set(run.agents)) != len(run.agents):
+            raise ValueError("agent IDs must be unique")
+        if run.permission_violations > len(run.assignments):
+            raise ValueError("permission_violations must count assignment-level violations")
+
+        assignment_ids = set()
+        for assignment in run.assignments:
+            if not isinstance(assignment, Assignment):
+                raise TypeError("assignments must contain Assignment values")
+            if assignment.task_id in assignment_ids:
+                raise ValueError(f"duplicate task_id: {assignment.task_id}")
+            assignment_ids.add(assignment.task_id)
+            if assignment.assigned_agent not in run.agents:
+                raise ValueError(f"unknown assigned agent: {assignment.assigned_agent}")
+
+        message_ids = set()
+        for message in run.messages:
+            if not isinstance(message, Message):
+                raise TypeError("messages must contain Message values")
+            if message.message_id in message_ids:
+                raise ValueError(f"duplicate message_id: {message.message_id}")
+            message_ids.add(message.message_id)
+            if message.sender not in run.agents or message.receiver not in run.agents:
+                raise ValueError("message endpoints must be agents in the same run")
+
+        conflict_ids = set()
+        for conflict in run.conflicts:
+            if not isinstance(conflict, Conflict):
+                raise TypeError("conflicts must contain Conflict values")
+            if conflict.conflict_id in conflict_ids:
+                raise ValueError(f"duplicate conflict_id: {conflict.conflict_id}")
+            conflict_ids.add(conflict.conflict_id)
+
+
+def rate(numerator, denominator):
+    """Return a bounded rate, or None when the relevant set is empty."""
+    if type(numerator) is not int or type(denominator) is not int:
+        raise TypeError("rate counts must be integers")
+    if numerator < 0 or denominator < 0 or numerator > denominator:
+        raise ValueError("rate counts must satisfy 0 <= numerator <= denominator")
+    return None if denominator == 0 else round(numerator / denominator, 3)
+
+
+def at_least(value, threshold):
+    return value is not None and value >= threshold
+
+
+def at_most(value, threshold):
+    return value is not None and value <= threshold
+
+
+def exactly(value, expected):
+    return value is not None and value == expected
+
 
 def role_match(run, assignment):
-    return run.agents[assignment.assigned_agent].role == assignment.required_role
+    return (
+        assignment.assigned_agent in run.agents
+        and run.agents[assignment.assigned_agent].role == assignment.required_role
+    )
+
+
+def audit_metrics(runs):
+    validate_runs(runs)
+    total_runs = len(runs)
+    all_assignments = [assignment for run in runs for assignment in run.assignments]
+    all_messages = [message for run in runs for message in run.messages]
+    all_conflicts = [conflict for run in runs for conflict in run.conflicts if conflict.detected]
+
+    paired_baseline = [run for run in runs if run.single_agent_success is not None]
+    return {
+        "task_success_rate": rate(sum(run.final_success for run in runs), total_runs),
+        "single_agent_lift_rate": rate(
+            sum(run.final_success and not run.single_agent_success for run in paired_baseline),
+            len(paired_baseline),
+        ),
+        "role_match_rate": rate(
+            sum(role_match(run, assignment) for run in runs for assignment in run.assignments),
+            len(all_assignments),
+        ),
+        "assignment_success_rate": rate(sum(a.success for a in all_assignments), len(all_assignments)),
+        "message_valid_rate": rate(sum(m.valid_schema for m in all_messages), len(all_messages)),
+        "evidence_support_rate": rate(sum(m.supported_by_evidence for m in all_messages), len(all_messages)),
+        "conflict_resolution_rate": rate(sum(c.resolved for c in all_conflicts), len(all_conflicts)),
+        "correct_resolution_rate": rate(sum(c.resolution_correct for c in all_conflicts), len(all_conflicts)),
+        "duplicate_work_rate": rate(sum(a.duplicate for a in all_assignments), len(all_assignments)),
+        "permission_violation_rate": rate(
+            sum(run.permission_violations for run in runs), len(all_assignments)
+        ),
+        "unnecessary_multi_agent_rate": rate(
+            sum(run.unnecessary_multi_agent for run in runs), total_runs
+        ),
+        "avg_cost": None if total_runs == 0 else round(sum(run.total_cost for run in runs) / total_runs, 3),
+    }
 
 
 runs = [
@@ -572,6 +747,7 @@ runs = [
     Run(
         run_id="debate_answer",
         agents={
+            "coord": AgentSpec("coord", "coordinator", ("route",), ("assign",)),
             "a": AgentSpec("a", "debater", ("reason",), ("read",)),
             "b": AgentSpec("b", "debater", ("reason",), ("read",)),
             "j": AgentSpec("j", "judge", ("score",), ("read",)),
@@ -618,33 +794,8 @@ runs = [
     ),
 ]
 
-total_runs = len(runs)
-all_assignments = [assignment for run in runs for assignment in run.assignments]
-all_messages = [message for run in runs for message in run.messages]
-all_conflicts = [conflict for run in runs for conflict in run.conflicts if conflict.detected]
-
-metrics = {
-    "task_success_rate": round(sum(run.final_success for run in runs) / total_runs, 3),
-    "single_agent_lift_rate": round(
-        sum(run.final_success and not run.single_agent_success for run in runs) / total_runs, 3
-    ),
-    "role_match_rate": round(
-        sum(role_match(run, assignment) for run in runs for assignment in run.assignments) / len(all_assignments), 3
-    ),
-    "assignment_success_rate": round(sum(a.success for a in all_assignments) / len(all_assignments), 3),
-    "message_valid_rate": round(sum(m.valid_schema for m in all_messages) / len(all_messages), 3),
-    "evidence_support_rate": round(sum(m.supported_by_evidence for m in all_messages) / len(all_messages), 3),
-    "conflict_resolution_rate": round(sum(c.resolved for c in all_conflicts) / len(all_conflicts), 3),
-    "correct_resolution_rate": round(sum(c.resolution_correct for c in all_conflicts) / len(all_conflicts), 3),
-    "duplicate_work_rate": round(sum(a.duplicate for a in all_assignments) / len(all_assignments), 3),
-    "permission_violation_rate": round(
-        sum(run.permission_violations for run in runs) / len(all_assignments), 3
-    ),
-    "unnecessary_multi_agent_rate": round(
-        sum(run.unnecessary_multi_agent for run in runs) / total_runs, 3
-    ),
-    "avg_cost": round(sum(run.total_cost for run in runs) / total_runs, 3),
-}
+validate_runs(runs)
+metrics = audit_metrics(runs)
 
 failure_reasons = Counter()
 problem_runs = []
@@ -683,52 +834,106 @@ for run in runs:
     if run_has_problem:
         problem_runs.append(run.run_id)
 
-gates = {
-    "task_success": metrics["task_success_rate"] >= 0.80,
-    "single_agent_lift": metrics["single_agent_lift_rate"] >= 0.30,
-    "role_match": metrics["role_match_rate"] >= 0.90,
-    "message_valid": metrics["message_valid_rate"] >= 0.95,
-    "evidence_support": metrics["evidence_support_rate"] >= 0.80,
-    "conflict_resolution": metrics["conflict_resolution_rate"] >= 0.80,
-    "duplicate_work": metrics["duplicate_work_rate"] <= 0.10,
-    "permission": metrics["permission_violation_rate"] == 0.0,
-    "unnecessary_multi_agent": metrics["unnecessary_multi_agent_rate"] <= 0.10,
-    "cost": metrics["avg_cost"] <= 1.50,
+checks = {
+    "task_success": at_least(metrics["task_success_rate"], 0.80),
+    "single_agent_lift": at_least(metrics["single_agent_lift_rate"], 0.30),
+    "role_match": at_least(metrics["role_match_rate"], 0.90),
+    "message_valid": at_least(metrics["message_valid_rate"], 0.95),
+    "evidence_support": at_least(metrics["evidence_support_rate"], 0.80),
+    "conflict_resolution": at_least(metrics["conflict_resolution_rate"], 0.80),
+    "duplicate_work": at_most(metrics["duplicate_work_rate"], 0.10),
+    "permission": exactly(metrics["permission_violation_rate"], 0.0),
+    "unnecessary_multi_agent": at_most(metrics["unnecessary_multi_agent_rate"], 0.10),
+    "cost": at_most(metrics["avg_cost"], 1.50),
 }
 
 top_failure_reasons = sorted(failure_reasons.items(), key=lambda item: (-item[1], item[0]))
 
+# 空运行集和没有冲突的运行都不能伪装成“所有检查已通过”。
+empty_metrics = audit_metrics([])
+assert all(value is None for value in empty_metrics.values())
+no_conflict_metrics = audit_metrics([runs[1]])
+assert no_conflict_metrics["conflict_resolution_rate"] is None
+no_baseline_run = Run(
+    run_id="missing_single_agent_baseline",
+    agents={"a": AgentSpec("a", "researcher", ("search",), ("read",))},
+    assignments=(Assignment("collect", "researcher", "a", True),),
+    messages=(),
+    conflicts=(),
+    final_success=True,
+    single_agent_success=None,
+    total_cost=0.2,
+)
+assert audit_metrics([no_baseline_run])["single_agent_lift_rate"] is None
+assert not at_least(None, 0.0)
+assert not at_most(None, 0.0)
+assert not exactly(None, 1.0)
+
+try:
+    rate(1, float("nan"))
+except TypeError:
+    pass
+else:
+    raise AssertionError("non-integer denominator must be rejected")
+
+try:
+    audit_metrics([runs[0], runs[0]])
+except ValueError:
+    pass
+else:
+    raise AssertionError("duplicate run IDs must be rejected")
+
+invalid_run = Run(
+    run_id="invalid_agent_reference",
+    agents={"coord": AgentSpec("coord", "coordinator", ("route",), ("assign",))},
+    assignments=(Assignment("task", "planner", "missing", True),),
+    messages=(),
+    conflicts=(),
+    final_success=False,
+    single_agent_success=False,
+    total_cost=0.1,
+)
+try:
+    audit_metrics([invalid_run])
+except ValueError:
+    pass
+else:
+    raise AssertionError("unknown assigned agents must be rejected")
+
 print(f"metrics={metrics}")
 print(f"problem_runs={problem_runs}")
 print(f"top_failure_reasons={top_failure_reasons}")
-print(f"gates={gates}")
-print(f"gate_pass={all(gates.values())}")
-```
+all_checks_pass = all(checks.values())
+print(f"checks={checks}")
+print(f"empty_metrics={empty_metrics}")
+print(f"all_checks_pass={all_checks_pass}")
+~~~
 
 输出示例：
 
-```text
+~~~text
 metrics={'task_success_rate': 0.75, 'single_agent_lift_rate': 0.5, 'role_match_rate': 0.929, 'assignment_success_rate': 0.857, 'message_valid_rate': 0.929, 'evidence_support_rate': 0.714, 'conflict_resolution_rate': 0.5, 'correct_resolution_rate': 0.5, 'duplicate_work_rate': 0.143, 'permission_violation_rate': 0.071, 'unnecessary_multi_agent_rate': 0.25, 'avg_cost': 1.325}
 problem_runs=['code_review_swarm', 'debate_answer', 'over_coordinated_small_task']
 top_failure_reasons=[('unsupported_message', 4), ('assignment_failed', 2), ('duplicate_work', 2), ('invalid_message_schema', 1), ('permission_violation', 1), ('role_mismatch', 1), ('task_failed', 1), ('unnecessary_multi_agent', 1), ('unresolved_conflict', 1)]
-gates={'task_success': False, 'single_agent_lift': True, 'role_match': True, 'message_valid': False, 'evidence_support': False, 'conflict_resolution': False, 'duplicate_work': False, 'permission': False, 'unnecessary_multi_agent': False, 'cost': True}
-gate_pass=False
-```
+checks={'task_success': False, 'single_agent_lift': True, 'role_match': True, 'message_valid': False, 'evidence_support': False, 'conflict_resolution': False, 'duplicate_work': False, 'permission': False, 'unnecessary_multi_agent': False, 'cost': True}
+empty_metrics={'task_success_rate': None, 'single_agent_lift_rate': None, 'role_match_rate': None, 'assignment_success_rate': None, 'message_valid_rate': None, 'evidence_support_rate': None, 'conflict_resolution_rate': None, 'correct_resolution_rate': None, 'duplicate_work_rate': None, 'permission_violation_rate': None, 'unnecessary_multi_agent_rate': None, 'avg_cost': None}
+all_checks_pass=False
+~~~
 
-这个 demo 的 `gate_pass=False` 不是程序错误，而是刻意暴露 multi-agent 系统的常见问题：成功率不足、消息证据不够、冲突未解决、重复劳动、权限违规和小任务过度编排。真实系统上线前，必须把这些 trace 级问题纳入评估。
+这个 demo 的 `all_checks_pass=False` 不是程序错误，而是刻意暴露 multi-agent 系统的常见问题：成功率不足、消息证据不够、冲突未解决、重复劳动、权限违规和小任务过度编排。真实系统应把这些 trace 级问题作为待处理的工程发现，而不是用一个总结果掩盖具体原因。
 
-### 9.18.1 Agent Swarm 的收益、成本与责任边界
+## 9.19 Agent Swarm 的收益、成本与责任边界
 
-Kimi K2.6 等模型资料把多子 Agent 协作作为长周期任务能力的一部分。它可以让搜索、代码、测试、审查等子任务并行，但“子 Agent 越多越强”是错误的工程直觉。
+一些前沿模型和产品资料把多子 Agent 协作作为长周期任务能力的一部分。无论具体产品如何命名，这类系统都可能让搜索、代码、测试、审查等子任务并行，但“子 Agent 越多越强”是错误的工程直觉。若公开资料没有披露内部调度、失败合并和成本数据，书稿只能把它作为产品形态观察，不能把宣传描述写成通用能力结论。
 
 一个简化的总成本模型是：
 
-```math
+~~~math
 C_{\mathrm{swarm}}=\sum_{i=1}^{N}C_{\mathrm{agent},i}
 +C_{\mathrm{coord}}
 +C_{\mathrm{sync}}
 +C_{\mathrm{verify}}
-```
+~~~
 
 `C_sync` 包括消息、共享状态和上下文重建成本，`C_verify` 包括最终汇总、冲突解决和工具验证。并发只可能降低 wall-clock 的一部分，不能消除 token、工具和通信成本。
 
@@ -742,14 +947,14 @@ C_{\mathrm{swarm}}=\sum_{i=1}^{N}C_{\mathrm{agent},i}
 
 因此，多 Agent 的增益应相对单 Agent baseline 报告：
 
-```math
+~~~math
 \mathrm{NetLift}=\Delta\mathrm{Success}
 -\lambda_c\Delta\mathrm{Cost}
 -\lambda_l\Delta\mathrm{Latency}
 -\lambda_r\Delta\mathrm{Risk}
-```
+~~~
 
-## 9.19 常见失败模式
+## 9.20 常见失败模式
 
 1. 角色分工不清：每个 Agent 都在规划、执行和总结。
 2. Coordinator 分配错误：任务给错角色，后面再努力也难补救。
@@ -766,40 +971,60 @@ C_{\mathrm{swarm}}=\sum_{i=1}^{N}C_{\mathrm{agent},i}
 
 Multi-Agent 的目标不是把系统变热闹，而是提高任务成功率、可验证性、并行效率和权限可控性。
 
-## 9.20 面试题：什么时候需要 Multi-Agent
+## 9.21 何时值得拆成多个 Agent：一个决策案例
 
-回答要点：
+假设任务是生成一份供应商尽调报告。它包含合同条款核对、历史事故检索、财务指标整理、风险分级和最终建议。拆分成 researcher、contract reviewer、risk analyst 和 verifier 可能有价值，因为这些子任务使用不同资料和权限，也可以并行执行；但如果任务只是把一段已经给出的文字改成更短的摘要，拆成 planner、writer、reviewer 和 summarizer 只会增加通信轮数。
 
-```text
-当任务复杂、需要多个专业角色、可以并行处理、需要独立审查或需要不同视角暴露冲突时，可以考虑 Multi-Agent。例如研究报告、代码开发加 review、复杂规划、多来源验证和高不确定性决策。但简单任务不适合 Multi-Agent，因为通信和协调成本会超过收益。是否使用多 Agent 要看它是否真实提升任务成功率、验证质量、并行效率或权限隔离能力，并且要和单 Agent baseline 比较。
-```
+判断是否拆分时，可以先列出单 Agent baseline 的瓶颈：是上下文装不下，还是需要独立验证；是任务可以并行，还是权限必须隔离；是单 Agent 缺少工具，还是只是 prompt 不清楚。只有当角色分离直接解决其中一个瓶颈，Multi-Agent 才有明确的因果理由。
 
-## 9.21 面试题：如何设计 Multi-Agent 系统
+还要计算净收益。假设并行让墙钟时间从 120 秒降到 70 秒，但模型调用、通信和汇总成本翻倍，且冲突率增加，那么它可能只在有严格延迟目标的请求上值得使用。相反，如果 reviewer 能发现单 Agent 经常漏掉的高风险事实，质量收益可能超过额外成本，但必须用配对任务和相同预算进行验证。
 
-回答要点：
+最终选择可以是三种之一：单 Agent、固定 workflow，或 workflow 中局部使用多个专门 Agent。不要把架构选择变成全局开关；任务复杂度、风险、可并行性和工具权限都可能随请求变化。
 
-```text
-我会先明确任务是否真的需要多 Agent，然后设计 coordinator、角色分工、工具权限和通信协议。每个 Agent 只拿到完成任务所需的上下文和工具。共享状态通过结构化 blackboard 管理，冲突通过证据、工具验证、judge 或人工确认解决。系统需要记录 trace，评估任务成功率、单 Agent 增益、角色匹配率、消息有效率、证据支持率、冲突解决率、重复工作率、权限违规率、成本和延迟。
-```
+## 9.22 从角色到责任：设计一个可审计的协作系统
 
-## 9.22 面试题：Debate、Verifier 和投票有什么区别
+设计时先为每个角色写一份契约，而不是先创建多个聊天窗口。契约应说明输入 schema、输出 schema、可见上下文、可调用工具、读写权限、预算、失败状态和交付对象。例如 researcher 只能提交带来源的证据包，coder 才能生成 patch，reviewer 只能读取 diff、测试结果和证据，不应直接修改代码或替代最终权限判断。
 
-回答要点：
+Coordinator 维护全局状态，但不应成为所有内容的无条件转发器。它要根据任务依赖选择下一个 Agent，过滤上下文，合并 artifact，发现缺失字段，处理超时和冲突，并在成本或风险超过阈值时停止。共享 blackboard 可以保存状态索引和证据引用，完整对话应留在各自 trace 中，避免每个 Agent 都读取所有历史。
 
-```text
-Debate 让多个 Agent 从不同角度提出观点和反驳，适合暴露假设和不确定性；Verifier 更强调用规则、测试、检索证据或工具结果检查结论，适合可执行或可验证任务；投票适合多个相对独立候选答案的聚合。工程上不能只依赖 debate 的自然语言说服力，高风险任务最好结合 verifier、证据引用、测试和人工复核。
-```
+消息协议要区分事实、假设、建议和请求。一个 researcher 说“文档记录了 X”与说“因此应该执行 Y”具有不同的风险；前者可以作为待验证证据，后者不能直接成为高权限动作。接收方需要检查发送者权限、来源、时间、schema 和是否支持当前子任务，而不是因为消息来自内部 Agent 就默认可信。
 
-## 9.23 小练习
+责任归因需要绑定 owner 和事件。每个子任务要记录分配者、执行者、输入版本、输出 artifact、验证者和后续使用者；最终结论要能追溯到支持它的消息和工具结果。发生错误时，团队才能判断是分配错误、检索错误、消息污染、验证遗漏还是协调器过早停止。
+
+## 9.23 Debate、Verifier 与投票：三个不同的协作机制
+
+Debate 的作用是制造对立假设和反例。它可以让一个 Agent 解释为什么支持某个结论，另一个 Agent 寻找边界条件，再由协调器决定哪些问题需要外部验证。Debate 的输出通常是候选假设和未决问题，而不是事实证明；如果参与者共享同一错误前提，辩论可能只是把错误包装得更有说服力。
+
+Verifier 的作用是检查候选结果是否满足外部可观察条件。数学 verifier 可以重新计算，代码 verifier 可以运行测试，RAG verifier 可以检查 claim 与引用，业务 verifier 可以检查权限和对象状态。Verifier 不一定需要是一个模型，确定性规则和工具往往更适合高风险约束。
+
+投票的作用是聚合多个候选输出。它适合答案空间相对明确、候选错误较独立的任务；若所有 Agent 使用同一模型、同一检索结果和同一提示，票数并不代表独立证据。加权投票还必须记录权重来源、校准集和失效切片，不能只按主观可信度排序。
+
+一个稳健的组合是：先用 debate 展开候选与反例，再用 verifier 检查可验证条件，最后在仍有多个合格候选时投票或请求人工选择。顺序不能反过来把投票结果当作验证，也不能把 judge 的语言流畅度当作事实依据。
+
+## 9.24 小练习
 
 1. 给一个“写一份竞品调研报告”的任务，设计 4 个 Agent 角色、每个角色的工具权限和消息 schema。
 2. 给一个“修复代码 bug 并提交 patch”的任务，说明为什么 coder 和 reviewer 不应该拥有完全相同的权限。
 3. 设计一个冲突处理规则：当 researcher 和 verifier 对事实结论不一致时，系统应该如何升级。
-4. 修改本章 demo，让 `debate_answer` 的冲突被正确解决，观察 `conflict_resolution_rate` 和 `gate_pass` 如何变化。
-5. 比较单 Agent、固定 workflow 和 Multi-Agent 在成本、可靠性、可解释性上的差异。
+4. 修改本章 demo，让 `debate_answer` 的冲突被正确解决，观察 `conflict_resolution_rate` 和 `all_checks_pass` 如何变化，并检查是否还有其他失败维度。
+5. 为一个高风险外部动作设计统一 permission engine，说明为什么 coordinator、reviewer 和内部 Agent 的身份不能替代它。
+6. 记录一次并行运行的 wall-clock、模型 token、消息 token、验证成本和人工升级成本，计算 NetLift，并与串行 workflow 比较。
+7. 构造两个共享同一错误文档的 Agent，说明为什么多数票没有增加独立证据；再加入一个外部工具 verifier，比较冲突识别结果。
+8. 比较单 Agent、固定 workflow 和 Multi-Agent 在成本、可靠性、可解释性上的差异。
 
-## 9.24 本章小结
+## 9.25 本章小结
 
 Multi-Agent 通过角色分工、并行执行和互相检查，让 Agent 系统有机会处理更复杂任务。但它不是免费午餐，会引入通信成本、协调复杂度、冲突解决、权限管理、安全风险和评估难度。
 
 可靠的 Multi-Agent 系统通常不是一群 Agent 自由聊天，而是有 coordinator、结构化消息、共享状态、明确权限、冲突解决和评估闭环的工程系统。下一章会进入 Agent 评估，系统讨论如何衡量 Agent 是否真的完成任务、是否安全、是否高效。
+
+本章的代表性资料入口：
+
+- [AutoGen](https://microsoft.github.io/autogen/)：多 Agent 编排框架和消息协作入口。
+- [CAMEL](https://www.camel-ai.org/)：角色扮演和多 Agent 研究/工程入口。
+- [MetaGPT](https://arxiv.org/abs/2308.00352)：以软件组织角色组织多 Agent 工作流的研究入口。
+- [ChatDev](https://arxiv.org/abs/2307.07924)：软件开发场景中的多 Agent 协作研究入口。
+- [AI Safety via Debate](https://arxiv.org/abs/1805.00899)：用辩论暴露和检查模型结论的研究入口。
+- [LLM-based Multi-Agent Systems survey](https://arxiv.org/abs/2402.01680)：多 Agent 系统的综述入口。
+
+这些资料分别涉及框架、角色化工作流、软件开发协作、辩论和综述。它们可以帮助理解架构空间，却不能单独证明多 Agent 比单 Agent 更便宜、更可靠或更安全；具体结论仍需在相同任务、相近预算、明确 baseline、权限配置和失败切片下复测。

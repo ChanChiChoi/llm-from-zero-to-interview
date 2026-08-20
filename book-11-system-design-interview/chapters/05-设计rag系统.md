@@ -664,7 +664,7 @@ OUTPUT CONTRACT
 }
 ~~~
 
-如果答案说“所有员工都可以在出差前七天申请，每次上限 5 万元”，需要分别核对主体范围、时间条件和金额上限。只因为引用来自同一份制度，不代表它支持这三个部分。
+如果可核查 claim 数为 0，support ratio 未定义，应报告“没有可评估 claim”并单列该样本；不能把空答案默认为全支持或全不支持。如果答案说“所有员工都可以在出差前七天申请，每次上限 5 万元”，需要分别核对主体范围、时间条件和金额上限。只因为引用来自同一份制度，不代表它支持这三个部分。
 
 ### 5.12.3 引用粒度
 
@@ -753,19 +753,19 @@ w_5\,s_{\mathrm{stale}}
 \frac{
 \#\{\mathrm{queries\ with\ gold\ evidence\ in\ top\ }k\}
 }{
-\#\{\mathrm{queries}\}
+\#\{\mathrm{queries\ with\ evaluable\ gold\ evidence}\}
 }
 ~~~
 
 ~~~math
 \mathrm{MRR}
 =
-\frac{1}{|Q|}
-\sum_{q\in Q}
+\frac{1}{|Q_{\mathrm{valid}}|}
+\sum_{q\in Q_{\mathrm{valid}}}
 \frac{1}{\mathrm{rank}_q}
 ~~~
 
-还可以观察 nDCG、precision@k、permitted Recall@k 和空结果率。gold evidence 不一定只有一个 chunk，应允许多个等价证据和适用范围。
+这里的 $Q_{\mathrm{valid}}$ 只包含存在可判定 gold evidence 且评估协议允许计算 rank 的 query；无答案问题、没有标注证据的问题和无法判断的样本应单独报告，不能把它们的 MRR 或 Recall 机械记为 0。还可以观察 nDCG、precision@k、permitted Recall@k 和空结果率。gold evidence 不一定只有一个 chunk，应允许多个等价证据和适用范围。
 
 ### 5.14.2 Rerank 和上下文层
 
@@ -1041,11 +1041,11 @@ C_{\mathrm{online}}
 +
 C_{\mathrm{retry}}
 }{
-\max(1,N_{\mathrm{success}})
+N_{\mathrm{success}}
 }
 ~~~
 
-缓存可以降低在线成本，但如果命中的是过期或无权限结果，单位成功查询数应该把这些错误计入质量损失，不能只看账单下降。
+只有在评估窗口内至少有一个成功查询时，这个式子才有定义；当 $N_{\mathrm{success}}=0$ 时，应记录为“没有成功证据”，而不是把分母替换成 1。还要明确离线摊销、在线重试和人工处理是否已经包含在各成本项中，避免重复计费。缓存可以降低在线成本，但如果命中的是过期或无权限结果，单位成功查询数应该把这些错误计入质量损失，不能只看账单下降。
 
 ### 5.18.4 优化顺序
 

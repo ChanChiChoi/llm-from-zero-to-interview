@@ -443,7 +443,7 @@ T_{\mathrm{revoke}}
 -\mathrm{incident\_rate}(b)\right|.
 ~~~
 
-`incident_rate` 可能要等人工回放、延迟业务结果或事故调查完成后才能得到。因此上线当天“暂时没有事故”不等于已经校准。要按租户、语言、工具、资源敏感度和动作类型切片。
+这里要求 N>0，并且分桶中的事故标签已经完成回放或延迟确认；没有有效样本或标签尚未完成时，ECE 应记录为 N/A。incident_rate 可能要等人工回放、延迟业务结果或事故调查完成后才能得到。因此上线当天“暂时没有事故”不等于已经校准。要按租户、语言、工具、资源敏感度和动作类型切片。
 
 ### 15.12.3 期望损失和风险桶
 
@@ -468,7 +468,7 @@ R_{\mathrm{severity}}
 {\sum_i w_i}.
 ~~~
 
-`w_i` 是业务定义的影响权重，不是客观概率。它的价值是防止许多低影响误拦掩盖一次关键数据外发或跨租户写入。
+`w_i` 是业务定义的影响权重，不是客观概率；如果有效样本的权重总和为 0，结果应记为 N/A。它的价值是防止许多低影响误拦掩盖一次关键数据外发或跨租户写入。
 
 ## 15.13 代码 Agent 案例：从仓库读取到生产发布
 
@@ -528,7 +528,7 @@ staging -> canary tenant / small traffic -> monitored rollout -> full rollout
 {\#(\mathrm{high\ risk\ action\ attempts})}.
 ~~~
 
-分子必须看 executor 的真实状态，而不是模型提出了多少动作。还要单独记录“模型提出但策略拒绝”和“策略允许但 executor 拒绝”，否则无法定位控制层的价值。
+分母是已定义为高风险、且进入执行尝试的动作；如果没有此类尝试，结果应记为 N/A，而不是零放行。分子必须看 executor 的真实状态，而不是模型提出了多少动作。还要单独记录“模型提出但策略拒绝”和“策略允许但 executor 拒绝”，否则无法定位控制层的价值。
 
 ### 15.14.3 正常任务误阻率
 
@@ -538,7 +538,7 @@ staging -> canary tenant / small traffic -> monitored rollout -> full rollout
 {\#(\mathrm{legitimate\ task\ attempts})}.
 ~~~
 
-它要按动作和用户分组。把支付、只读摘要和本地草稿混在一个分母里，会掩盖某类任务被过度阻断。
+分母为空时，这个指标没有定义；不能把没有正常任务样本误写成“零误阻”。它要按动作和用户分组。把支付、只读摘要和本地草稿混在一个分母里，会掩盖某类任务被过度阻断。
 
 ### 15.14.4 撤销和策略延迟
 
@@ -697,7 +697,7 @@ production_release {'signals': {...}, 'actions': ['request_human_approval_before
 revoked_write {'signals': {...}, 'actions': ['deny_revoked_or_inactive_principal'], 'decision': 'deny'}
 ~~~
 
-实际输出中的 `signals` 会展开具体字段。这个 demo 没有计算“模型是否自信”，因为自信度既不是主体身份，也不是资源授权。真实系统还要加入参数 digest、资源 revision、approval token、幂等键和 executor 状态。
+实际输出中的 `signals` 会展开具体字段。这个 demo 没有计算“模型是否自信”，因为自信度既不是主体身份，也不是资源授权。真实系统还要加入参数 digest、资源 revision、approval token、幂等键和 executor 状态。这四条输出只是逐请求决策示例，不是总体危险放行率、误阻率或撤销时延的评估；总体指标仍需在带有明确分母的策略回归集和隔离执行环境上另行计算。
 
 ## 15.18 常见失败模式
 

@@ -104,7 +104,7 @@
 
 ### 6.2.4 混合比例决定模型看见什么
 
-设数据源有 `K` 类，第 k 类的目标采样比例为 `w_k`，满足 `w_k >= 0` 且所有比例之和为 1。若总有效训练 token 为 `D`，则第 k 类期望被采样的 token 数近似为：
+设数据源有 `K>0` 类，第 k 类的目标采样比例为 `w_k\geq0`，满足所有比例之和为 1。若总有效训练 token 为 `D>0`，则第 k 类期望被采样的 token 数近似为：
 
 ~~~math
 D_k
@@ -120,7 +120,7 @@ w_kD,
 
 ### 6.2.5 采样概率与数据量不是一回事
 
-设第 k 类原始有效 token 数为 `S_k`，采样权重为 `a_k`。如果按加权重采样，归一化后的概率为：
+设第 k 类原始有效 token 数为 `S_k\geq0`，采样权重为 `a_k\geq0`，且至少有一个 `a_kS_k` 为正。如果按加权重采样，归一化后的概率为：
 
 ~~~math
 p_k
@@ -150,7 +150,7 @@ D_{\mathrm{math}}=30\mathrm{B}
 
 原始字符数、token 数、序列槽位数和参与 loss 的目标 token 数是四个不同统计量。一个 batch 可能有 1,000,000 个分配的槽位，但其中一部分是 padding，一部分是 prompt mask，真正贡献梯度的 token 可能只有 760,000。
 
-令 batch 中第 i 条样本分配到的槽位数为 `c_i`，非 padding token 数为 `e_i`。padding 浪费率可以定义为：
+令一个非空 batch 中第 i 条样本分配到的槽位数为 `c_i>0`，非 padding token 数为 `0\leq e_i\leq c_i`。padding 浪费率可以定义为：
 
 ~~~math
 r_{\mathrm{pad}}
@@ -174,7 +174,7 @@ r_{\mathrm{pad}}
 
 ### 6.3.3 变长 batch 的 loss reduction
 
-设第 i 条序列有 `m_i` 个有效目标 token，每个 token 的损失为 `ell_{i,t}`。按 token 平均的 loss 为：
+设一个非空 batch 中第 i 条序列有 `m_i\geq0` 个有效目标 token，每个 token 的损失为 `ell_{i,t}`。在 `\sum_i m_i>0` 时，按 token 平均的 loss 为：
 
 ~~~math
 \mathcal{L}_{\mathrm{token}}
@@ -183,7 +183,7 @@ r_{\mathrm{pad}}
 {\sum_i m_i}
 ~~~
 
-按序列平均则为：
+若每条序列都满足 `m_i>0`，按序列平均则为：
 
 ~~~math
 \mathcal{L}_{\mathrm{seq}}
@@ -196,7 +196,7 @@ r_{\mathrm{pad}}
 \right)
 ~~~
 
-当 `m_i` 不相等时，两者并不相同。前者让每个 token 贡献相近，后者让每条样本贡献相近。预训练通常关注 token-level 预算，指令数据有时更关心每条任务的均衡；选择哪一种不是实现细节，而是优化目标的一部分。
+当 `m_i` 不相等时，两者并不相同；如果某条序列 `m_i=0`，它不能进入按序列平均的分母，应被显式跳过或作为无监督样本单独统计。前者让每个 token 贡献相近，后者让每条样本贡献相近。预训练通常关注 token-level 预算，指令数据有时更关心每条任务的均衡；选择哪一种不是实现细节，而是优化目标的一部分。
 
 ### 6.3.4 tokenizer 变化会改变训练预算
 
@@ -208,7 +208,7 @@ r_{\mathrm{pad}}
 
 ### 6.4.1 参数量不是显存账本
 
-训练显存至少由参数、梯度、优化器状态、激活和临时通信缓冲组成。设参数量为 `N`，参数和梯度每个元素分别使用 `b_w`、`b_g` 字节，优化器状态每个参数平均使用 `b_o` 字节，激活显存为 `M_act`，临时通信和 kernel 缓冲为 `M_temp`，则粗略显存模型为：
+训练显存至少由参数、梯度、优化器状态、激活和临时通信缓冲组成。设 `N>0`，参数和梯度每个元素分别使用正的 `b_w`、`b_g` 字节，优化器状态每个参数平均使用非负的 `b_o` 字节，激活显存为非负的 `M_act`，临时通信和 kernel 缓冲为非负的 `M_temp`，则粗略显存模型为：
 
 ~~~math
 M_{\mathrm{train}}
@@ -242,7 +242,7 @@ Dense 模型每个 token 都经过大部分参数。MoE 拥有较大的 total pa
 
 ### 6.4.4 训练 FLOPs 的数量级估算
 
-设 dense decoder-only 模型参数量为 `N`，训练 token 数为 `D`，每个 token 的前向加反向计算系数为 `k`。一个教学级估算是：
+设 dense decoder-only 模型参数量为 `N>0`，训练 token 数为 `D>0`，每个 token 的前向加反向计算系数为 `k>0`。一个教学级估算是：
 
 ~~~math
 C_{\mathrm{train}}
@@ -283,7 +283,7 @@ t_{\mathrm{ideal}}
 
 ### 6.5.1 Global batch 应按更新语义定义
 
-设每个设备的 micro-batch 为 `B_micro`，数据并行副本数为 `N_dp`，梯度累积步数为 `K_accum`。在等长、没有丢弃样本的简化场景中，global sample batch 为：
+设每个设备的 micro-batch 为正整数 `B_micro`，数据并行副本数为正整数 `N_dp`，梯度累积步数为正整数 `K_accum`。在等长、没有丢弃样本的简化场景中，global sample batch 为：
 
 ~~~math
 B_{\mathrm{global}}
@@ -321,7 +321,7 @@ AdamW 使用梯度的一阶和二阶统计，再将 weight decay 作为独立参
 
 ### 6.5.3 梯度裁剪是保护措施，不是修复器
 
-设聚合后的梯度向量为 `g`，其 L2 范数为 `||g||_2`，裁剪阈值为 `c`。全局范数裁剪可以写成：
+设聚合后的梯度向量为 `g`，其 L2 范数为 `||g||_2`，裁剪阈值为 `c\geq0`，并取 `\varepsilon>0`。全局范数裁剪可以写成：
 
 ~~~math
 g'
@@ -375,7 +375,7 @@ ZeRO 和 FSDP 的核心思想是避免每个 data-parallel 副本都保存完整
 
 ### 6.6.6 并行度与设备拓扑
 
-若 tensor、pipeline 和 data parallel 的并行度分别为 `P_tp`、`P_pp`、`P_dp`，总设备数在简单笛卡尔组织下近似为：
+若 tensor、pipeline 和 data parallel 的并行度分别为正整数 `P_tp`、`P_pp`、`P_dp`，总设备数在简单笛卡尔组织下近似为：
 
 ~~~math
 N_{\mathrm{device}}
@@ -543,7 +543,7 @@ def causal_lm_loss(logits, input_ids, ignore_index=-100):
 
 ### 6.9.2 有效吞吐的定义
 
-设一个 step 中实际经过设备的非 padding token 数为 `T_nonpad`，真正参与目标 loss 的 token 数为 `T_loss`，step 总耗时为 `t_step`。可以同时报告：
+设一个 step 中实际经过设备的非 padding token 数为 `T_nonpad\geq0`，真正参与目标 loss 的 token 数为 `T_loss\geq0`，并且 `t_step>0`。可以同时报告：
 
 ~~~math
 R_{\mathrm{compute}}
@@ -559,7 +559,7 @@ R_{\mathrm{loss}}
 
 ### 6.9.3 MFU 是模型定义下的指标
 
-设每个 token 的理论训练 FLOPs 估算为 `f_model`，有效训练 token 吞吐为 `R_token`，设备峰值 FLOPs 为 `F_peak`，设备数为 `N_device`，则教学化 MFU 为：
+设每个 token 的理论训练 FLOPs 估算为 `f_model>0`，有效训练 token 吞吐为 `R_token\geq0`，设备峰值 FLOPs 为 `F_peak>0`，设备数为正整数 `N_device`，则教学化 MFU 为：
 
 ~~~math
 \operatorname{MFU}
@@ -637,7 +637,7 @@ Validation loss 测量模型对一个保留数据分布的 token 预测能力。
 
 ### 6.11.3 二项任务的简单不确定性
 
-对一个有 `n` 个独立评估样本、正确数为 `k` 的二项任务，准确率估计为：
+对一个有 `n>0` 个独立评估样本、`0\leq k\leq n` 个正确样本的二项任务，准确率估计为：
 
 ~~~math
 \hat p=\frac{k}{n}
@@ -671,7 +671,7 @@ Validation loss 测量模型对一个保留数据分布的 token 预测能力。
 
 ### 6.12.2 Checkpoint 频率的成本模型
 
-设训练总时间为 `T_total`，checkpoint 间隔为 `I`，单次保存耗时为 `t_ckpt`，故障发生率为 `lambda_fail`（单位时间内的期望故障次数）。在故障近似独立且 checkpoint 间隔固定时，期望故障次数约为 `lambda_fail T_total`，每次故障平均需要重算约 `I/2` 的训练时间。因此：
+设 `T_total>0`，checkpoint 间隔 `I>0`，单次保存耗时 `t_ckpt\geq0`，故障发生率 `lambda_fail\geq0`（单位时间内的期望故障次数）。在故障近似独立且 checkpoint 间隔固定时，期望故障次数约为 `lambda_fail T_total`，每次故障平均需要重算约 `I/2` 的训练时间。因此：
 
 ~~~math
 T_{\mathrm{recompute}}
@@ -724,7 +724,7 @@ p_{\mathrm{gpu}}Gh+C_{\mathrm{other}}
 
 ### 6.13.2 单位能力成本
 
-假设某个训练候选在目标评估上的成功率为 `q`，总成本为 `C`。一个简单的单位成功成本是：
+假设某个训练候选在 `N_task>0` 个目标评估任务上的成功率为 `0\leq q\leq1`，总成本为 `C\geq0`。当 `q>0` 时，一个简单的单位成功成本是：
 
 ~~~math
 C_{\mathrm{per\ success}}
@@ -732,7 +732,7 @@ C_{\mathrm{per\ success}}
 \frac{C}{N_{\mathrm{task}}q}
 ~~~
 
-其中 `N_task` 是评估任务数。这个指标不是产品收入，也不能替代安全和质量约束，但它提醒我们：一个更大的模型如果只带来很小的成功率增益，可能不值得增加训练和服务成本。
+其中 `N_task` 是评估任务数。如果 `q=0`，单位成功成本未定义，应报告“没有成功任务”，不能用零代替。这个指标不是产品收入，也不能替代安全和质量约束，但它提醒我们：一个更大的模型如果只带来很小的成功率增益，可能不值得增加训练和服务成本。
 
 ### 6.13.3 训练排期的分解
 

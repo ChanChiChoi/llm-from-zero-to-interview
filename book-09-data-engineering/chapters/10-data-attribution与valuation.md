@@ -158,6 +158,8 @@ A_i = dot(g_i, g_T) / (norm(g_i) * norm(g_T))
 
 g_T 是目标任务、验证集或错误切片的梯度特征。A_i 高说明方向相近，不能单独证明训练样本导致了目标能力，也不能代替隐私、版权和污染检查。
 
+余弦相似度要求 `norm(g_i) > 0` 且 `norm(g_T) > 0`。零梯度可能来自已饱和的样本、被 mask 的目标或尚未产生梯度的计算路径，此时结果应记为 `undefined`，不能把零向量与目标方向相似误报为 0 或 1。类似地，`V_k` 要求 `effective_tokens_k > 0`；某个数据源如果经过过滤后没有有效 token，它没有可解释的单位价值，而不是单位价值为 0。
+
 Data Shapley 把数据看成参与者，价值是不同子集中的平均边际贡献：
 
 ~~~math
@@ -183,6 +185,8 @@ and Risk(selected) <= tau_R
 ~~~
 
 s_i 表示是否选择，v_i 是估计价值，b_i 是 token、标注或训练成本，B 是预算，tau_R 是风险上限。工程上还应加入语言、领域、任务、来源、多样性和最小覆盖约束，否则优化器可能把全部预算集中到单一高分数据。
+
+如果预算内没有任何正价值且满足约束的候选，选择结果应是空集并触发补充或重新估值，而不是强行填满预算。预算选择也必须说明是固定总 token、固定训练步数还是固定计算量；否则加入数据源后总训练量增加，`Delta_add_k` 可能把“训练得更多”误认为“数据更有价值”。
 
 ---
 
@@ -502,7 +506,7 @@ Data valuation 直接服务 data mixture。
 
 ### 19.1 最小可运行数据归因与估值 demo
 
-下面这个 demo 不依赖外部库，也不读写文件。输入是一组 toy 数据源，输出包括源级价值排名、目标任务 attribution proxy、token budget 下的数据选择、小规模 Shapley 估值、负价值 / 阻断数据和污染阻断清单。
+下面这个 demo 不依赖外部库，也不读写文件。输入是一组 toy 数据源，输出包括源级价值排名、目标任务 attribution proxy、token budget 下的数据选择、小规模 Shapley 估值、负价值 / 阻断数据和污染阻断清单。它把零向量相似度、空候选集和零有效 token 的结果保留为 `None`；demo 中的相似度和 Shapley 仅是待验证信号。
 
 它演示的是数据估值工程闭环，不是真实 influence function、生产级 Shapley、完整小模型训练或大规模数据选择系统。真实系统需要接入训练日志、数据版本、评估矩阵、embedding / gradient 特征、消融实验、人工审计和合规风险系统。demo 的 decision 只表示可以继续做小规模数据实验，不等于已经证明某个数据源对最终大模型有严格因果贡献。
 
@@ -534,7 +538,8 @@ def norm(a):
 
 
 def cosine(a, b):
-    return dot(a, b) / (norm(a) * norm(b))
+    denominator = norm(a) * norm(b)
+    return dot(a, b) / denominator if denominator else None
 
 
 def weighted_delta(src):
@@ -544,11 +549,14 @@ def weighted_delta(src):
 def source_value(src):
     if not src["license_ok"] or src["privacy"] or src["contam"]:
         return -1.0
+    grad_sim = cosine(src["grad"], target_grad)
+    if grad_sim is None:
+        return None
     raw = (
         weighted_delta(src)
         + 0.08 * src["quality"]
         + 0.05 * src["coverage"]
-        + 0.05 * cosine(src["grad"], target_grad)
+        + 0.05 * grad_sim
         - 0.12 * src["risk"]
         - 0.04 * src["cost"]
     )
@@ -562,16 +570,24 @@ for src in sources:
     rows.append({
         "id": src["id"],
         "weighted_delta": round(weighted_delta(src), 4),
-        "grad_sim": round(cosine(src["grad"], target_grad), 3),
-        "value": round(source_value(src), 4),
+        "grad_sim": None if cosine(src["grad"], target_grad) is None else round(cosine(src["grad"], target_grad), 3),
+        "value": None if source_value(src) is None else round(source_value(src), 4),
     })
 
-ranked = sorted(rows, key=lambda x: x["value"], reverse=True)
-negative = [row["id"] for row in ranked if row["value"] < 0]
+ranked = sorted(
+    rows,
+    key=lambda x: x["value"] if x["value"] is not None else float("-inf"),
+    reverse=True,
+)
+negative = [row["id"] for row in ranked if row["value"] is not None and row["value"] < 0]
 
 budget = 2600
 selected, used_tokens = [], 0
-for row in sorted(rows, key=lambda r: r["value"] / next(s["tokens"] for s in sources if s["id"] == r["id"]), reverse=True):
+for row in sorted(
+    (row for row in rows if row["value"] is not None),
+    key=lambda r: r["value"] / next(s["tokens"] for s in sources if s["id"] == r["id"]),
+    reverse=True,
+):
     src = next(s for s in sources if s["id"] == row["id"])
     if row["value"] <= 0 or used_tokens + src["tokens"] > budget:
         continue
@@ -603,7 +619,14 @@ shapley = {k: round(v / len(orders), 4) for k, v in shapley.items()}
 
 report = {
     "ranked_sources": [(row["id"], row["value"]) for row in ranked],
-    "top_attribution": [(row["id"], row["grad_sim"]) for row in sorted(rows, key=lambda x: x["grad_sim"], reverse=True)[:3]],
+    "top_attribution": [
+        (row["id"], row["grad_sim"])
+        for row in sorted(
+            (row for row in rows if row["grad_sim"] is not None),
+            key=lambda x: x["grad_sim"],
+            reverse=True,
+        )[:3]
+    ],
     "selected_under_budget": selected,
     "used_tokens": used_tokens,
     "negative_or_blocked": negative,
@@ -643,6 +666,7 @@ assert report["negative_or_blocked"] == ["old_legal_forum", "benchmark_leak"]
 assert report["shapley_demo"] == {"math_verified": 0.365, "code_tests": 0.26, "synthetic_template": -0.085}
 assert all(checks.values())
 assert report["decision"] == "continue_to_source_ablation"
+assert cosine([0.0, 0.0], [1.0, 0.0]) is None
 ~~~
 
 运行后会看到类似输出：

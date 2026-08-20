@@ -1,145 +1,71 @@
 # 第四部分：Hugging Face 微调实战
 
-## 第 19 讲：加载和运行一个开源 Causal LM
+真实的开源模型不是一个孤立的权重文件。它至少包含模型权重、结构配置、tokenizer、特殊 token 定义，以及与生成相关的配置。微调也不是只调用一个训练接口：输入文本如何渲染、哪些 token 参与 loss、显存中保存什么状态、如何恢复训练、如何证明行为真的变好，都会决定结果。
 
-### 本讲目标
-
-学完本讲，你应该能做到六件事：
-
-1. 使用 Hugging Face Transformers 加载一个开源 causal LM。
-2. 理解 tokenizer、model、config 三者的关系。
-3. 写出最小可运行推理代码。
-4. 掌握 `device_map`、`torch_dtype`、`eval()`、`no_grad()` 的作用。
-5. 理解 `generate` 的基本参数。
-6. 能排查模型下载、显存不足、tokenizer 不匹配等常见问题。
-
-前面第三部分我们从零训练了一个小 GPT。
-
-从这一讲开始，我们进入 Hugging Face 微调实战。
-
-真实工作中，很少从零训练大模型。
-
-更常见的是：
+本章沿着一条完整链路展开：
 
 ```text
-加载一个开源基座模型。
-构造指令数据。
-做 SFT 或 LoRA 微调。
-评估微调前后行为变化。
+checkpoint 与 tokenizer
+        ↓
+训练文本与监督 labels
+        ↓
+全参数 SFT、LoRA、QLoRA
+        ↓
+保存与恢复
+        ↓
+固定评测集上的行为变化
 ```
 
-本讲先完成第一步：加载并运行一个开源 causal language model。
+初学者可以把它看成从字符串到模型行为的实践路径；有经验的读者应关注每个边界的契约：token id 范围、序列长度、labels shift、可训练参数集合、量化权重的计算 dtype，以及比较实验中必须保持不变的变量。
 
-本讲使用 Hugging Face Transformers 的 `from_pretrained`、tokenizer、`generate`、`dtype` 和 `device_map` 接口，以及 PyTorch 的 `Module.eval()` 和 `torch.no_grad()`。重点是建立可复现的教学推理闭环：看清 tokenizer、model、config、logits shape 和生成长度之间的关系。模型下载缓存、服务化推理、流式输出和量化加载会在后续内容展开。Transformers 新版文档更常写 `dtype=...`，许多稳定版本和历史示例仍写 `torch_dtype=...`；两者都表示加载权重时的目标 dtype，实际代码应以本机安装版本的文档和签名为准。
+## 4.1 从 checkpoint 到第一次生成
 
----
+### 4.1.1 权重、配置与 tokenizer 是一个整体
 
-### 一、什么是 Causal LM
+模型权重告诉程序张量里有哪些数值，配置告诉程序如何组装网络，tokenizer 决定整数 token 的含义。把模型 A 的 tokenizer 换成模型 B 的 tokenizer，即使层结构相同，整数 123 也可能代表完全不同的片段。
 
-Causal LM 是 causal language model，也就是自回归语言模型。
-
-它的训练目标是：
-
-```text
-根据当前位置及之前的 token，预测下一个 token。
-```
-
-更形式化地说，给定 token 序列 `x_0,x_1,...,x_{T-1}`，decoder-only causal LM 把联合概率分解为：
+两者的最低契约是：
 
 ```math
-p(x_0,\ldots,x_{T-1})
+0\leq x_{b,t}<V,
+\qquad
+V=\mathrm{vocab\_size}
+```
+
+其中 \(x_{b,t}\) 是 token id，\(V\) 是 embedding 可接受的词表大小。如果 tokenizer 添加了新 token，必须同步扩展模型 embedding 和输出头；只改 tokenizer 文件不能凭空产生新的向量。
+
+可复现记录还应包含仓库 revision、Transformers/PyTorch 版本、dtype、设备，以及是否执行了远程自定义代码。一个随时间变化的默认分支名称，不足以标识一个固定模型。
+
+### 4.1.2 Causal LM 的 forward 形状
+
+给定序列 \(x_0,\ldots,x_{T-1}\)，自回归语言模型分解联合概率：
+
+```math
+p_\theta(x_0,\ldots,x_{T-1})
 =
-\prod_{t=0}^{T-1}p(x_t\mid x_0,\ldots,x_{t-1})
+\prod_{t=0}^{T-1}
+p_\theta(x_t\mid x_0,\ldots,x_{t-1})
 ```
 
-当 `t=0` 时，条件上下文可以理解为空上下文或 BOS token。实际工程中很多模型会用 BOS、special token 或 chat template 明确告诉模型“序列从哪里开始”。
-
-训练时常用 next-token 负对数似然：
+模型输入和输出的形状通常是：
 
 ```math
-L=
+X\in\mathbb{Z}^{B\times T},
+\qquad
+Z=f_\theta(X)\in\mathbb{R}^{B\times T\times V}
+```
+
+位置 \(t\) 的 logits 预测位置 \(t+1\) 的 token。下面的 next-token loss 假设 \(T\geq 2\)：只有这样才存在至少一个相邻 token 对；长度为 0 或 1 的序列不能单独产生 next-token 监督，不能用一个人为的 0 loss 掩盖这个事实。
+
+```math
+\mathcal{L}
+=
 -\frac{1}{T-1}
 \sum_{t=0}^{T-2}
-\log p(x_{t+1}\mid x_0,\ldots,x_t)
+\log p_\theta(x_{t+1}\mid x_0,\ldots,x_t)
 ```
 
-推理时，`generate` 做的事情就是不断把已生成 token 拼回上下文，再预测下一个 token。
-
-GPT、LLaMA、Qwen、Mistral、Yi 等 decoder-only 模型都属于 causal LM。
-
-Hugging Face 中常用类是：
-
-```python
-AutoModelForCausalLM
-```
-
-它表示：
-
-```text
-自动根据模型配置加载适合 causal language modeling 的模型结构。
-```
-
-对应 tokenizer 常用：
-
-```python
-AutoTokenizer
-```
-
----
-
-### 二、安装依赖
-
-基础依赖：
-
-```bash
-pip install torch transformers accelerate
-```
-
-如果后续要做 LoRA、QLoRA，还会用到：
-
-```bash
-pip install peft bitsandbytes datasets trl
-```
-
-本讲只需要：
-
-```text
-torch
-transformers
-accelerate
-```
-
-如果没有 GPU，也可以先用很小的模型在 CPU 上跑通流程。
-
----
-
-### 三、选择一个适合教学的小模型
-
-为了避免显存压力，本讲建议使用小模型演示。
-
-例如：
-
-```text
-sshleifer/tiny-gpt2
-distilgpt2
-gpt2
-```
-
-其中：
-
-```text
-sshleifer/tiny-gpt2：非常小，适合测试代码流程。
-distilgpt2：比 GPT-2 小，适合轻量实验。
-gpt2：经典小模型，但仍比 tiny-gpt2 大。
-```
-
-如果你有 GPU，也可以换成中文或开源指令模型，例如 Qwen 系列小模型。
-
-但首次跑通建议先用小模型。
-
----
-
-### 四、最小加载代码
+许多 Hugging Face CausalLM 类在接收等长 labels 后会在内部完成 shift。自己写 loss 时要确认这一点；手动错位后再交给会再次错位的模型，会让目标错一位。
 
 ```python
 import torch
@@ -147,234 +73,121 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 model_name = "sshleifer/tiny-gpt2"
-
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModelForCausalLM.from_pretrained(model_name)
 
 if tokenizer.pad_token is None:
     tokenizer.pad_token = tokenizer.eos_token
+if tokenizer.pad_token_id is None:
+    raise ValueError("tokenizer needs pad_token_id or eos_token_id")
 model.config.pad_token_id = tokenizer.pad_token_id
-
 model.eval()
 
-prompt = "Hello, my name is"
-inputs = tokenizer(prompt, return_tensors="pt")
-
-with torch.no_grad():
+inputs = tokenizer("Hello, my name is", return_tensors="pt")
+with torch.inference_mode():
     outputs = model(**inputs)
 
-logits = outputs.logits
-print(logits.shape)
+print("input_shape=", tuple(inputs["input_ids"].shape))
+print("logits_shape=", tuple(outputs.logits.shape))
 ```
 
-输出 shape 通常是：
+若 \(B=1\)，输出应为 \((1,T,V)\)。这里的 \(T\) 是 token 数而不是字符数；不同 tokenizer 会对中文、英文、空格和标点产生不同切分。
+
+### 4.1.3 编码、解码与生成
+
+tokenizer 的编码结果通常包含 input_ids 和 attention_mask：
+
+```python
+encoded = tokenizer("A small language model.", return_tensors="pt")
+print(encoded["input_ids"])
+print(encoded["attention_mask"])
+```
+
+attention mask 满足：
+
+```math
+A\in\{0,1\}^{B\times T}
+```
+
+有效 token 为 1，padding 为 0。单条不补齐的输入看不出它的重要性；批量输入不同长度的 prompt 时，它是模型区分真实内容和占位符的依据。
+
+generate 是一个重复过程：读取最后一个有效位置的 logits，选择一个 token，把它拼回上下文，再预测下一步，直到 EOS 或长度上限：
 
 ```text
-[batch, seq_len, vocab_size]
+prompt → logits → 选择 token → 追加 token → logits → … → 停止
 ```
 
-例如：
-
-```text
-torch.Size([1, 5, 50257])
-```
-
-这和我们前面从零实现的小 GPT 完全一致。
-
-用符号写就是：
+贪心选择可以写为：
 
 ```math
-X\in\mathbb{Z}^{B\times T}
-```
-
-```math
-Z=f_\theta(X),\qquad Z\in\mathbb{R}^{B\times T\times V}
-```
-
-其中 `B` 是 batch size，`T` 是输入 token 数，`V` 是 `model.config.vocab_size`，也应和 tokenizer 可产生的 token id 范围匹配。`Z[b,t,:]` 是第 `b` 条样本第 `t` 个位置预测下一个 token 的 logits。
-
-把 logits 转成概率后，第 `t` 个位置预测下一个 token 的分布是：
-
-```math
-p_\theta(x_{t+1}=v\mid x_0,\ldots,x_t)
+x_{t+1}
 =
-\mathrm{softmax}(Z_{b,t,:})_v
+\arg\max_v p_\theta(v\mid x_{\leq t})
 ```
 
-其中 `v` 是候选 token id。`generate` 每一步基本就是取最后一个有效位置的 logits，按 greedy 或 sampling 策略选出下一个 token id，再把它拼回上下文。
+温度采样使用：
 
----
+```math
+p_T(v)
+=
+\frac{\exp(z_v/T)}
+{\sum_u\exp(z_u/T)}
+```
 
-### 五、tokenizer 做了什么
+温度只改变已有分布的尖锐程度，不会增加模型知识。top-k 保留最高的 k 个候选，top-p 保留累计概率达到 p 的最小候选集合。
 
 ```python
+prompt = "The capital of France is"
 inputs = tokenizer(prompt, return_tensors="pt")
+
+with torch.inference_mode():
+    output_ids = model.generate(
+        **inputs,
+        max_new_tokens=24,
+        do_sample=False,
+        pad_token_id=tokenizer.eos_token_id,
+    )
+
+prompt_length = inputs["input_ids"].shape[-1]
+new_ids = output_ids[0, prompt_length:]
+print(tokenizer.decode(new_ids, skip_special_tokens=True))
 ```
 
-通常返回：
-
-```python
-{
-    "input_ids": tensor(...),
-    "attention_mask": tensor(...),
-}
-```
-
-其中：
-
-```text
-input_ids：token id 序列。
-attention_mask：哪些位置是有效 token。
-```
-
-打印：
-
-```python
-print(inputs)
-print(tokenizer.decode(inputs["input_ids"][0]))
-```
-
-你会看到 tokenizer 把字符串变成了整数 id。
-
-模型只认识 id，不直接认识字符串。
-
-tokenizer 和模型配置必须一致，核心约束是 token id 不能越界：
+max_new_tokens 是新增 token 数。若 prompt 长度为 \(T_p\)，上限为 \(M\)，则：
 
 ```math
-0\le x_{b,t}<V,\qquad V=\mathrm{config.vocab\_size}
+T_{\mathrm{final}}\leq T_p+M
 ```
 
-如果新增了特殊 token，例如 `<tool>`、`<image>` 或新的 chat role token，tokenizer 的长度可能变大。此时模型侧的 embedding matrix 和 lm head 也要同步 resize，否则轻则新 token 没有可训练表示，重则出现 token id 越界。
+评估时应切掉 prompt 再解码，否则问题中的关键词会被误算为模型输出。
 
----
+### 4.1.4 设备、dtype 与 batch padding
 
-### 六、用 generate 生成文本
-
-Hugging Face 模型自带 `generate`。
-
-```python
-generated_ids = model.generate(
-    **inputs,
-    max_new_tokens=50,
-    pad_token_id=tokenizer.eos_token_id,
-)
-
-generated_text = tokenizer.decode(generated_ids[0], skip_special_tokens=True)
-print(generated_text)
-```
-
-`max_new_tokens` 表示最多新生成多少个 token。
-
-注意它不是总长度。
-
-如果 prompt 长度是 5，`max_new_tokens=50`，最终最多是 55 个 token。
-
-更一般地说：
-
-```math
-T_{\mathrm{out}}\le T_{\mathrm{prompt}}+M
-```
-
-其中 `M` 是 `max_new_tokens`。如果生成过程中提前遇到 EOS token，实际输出会更短。
-
----
-
-### 七、加入采样参数
-
-上一讲我们手写过 temperature、top-k、top-p。
-
-Hugging Face `generate` 也支持这些参数。
-
-```python
-generated_ids = model.generate(
-    **inputs,
-    max_new_tokens=80,
-    do_sample=True,
-    temperature=0.8,
-    top_k=50,
-    top_p=0.9,
-)
-```
-
-关键参数：
+eval() 和 inference_mode() 解决不同问题：
 
 ```text
-do_sample=True：启用随机采样。
-temperature：控制分布尖锐程度。
-top_k：只从概率最高的 k 个 token 采样。
-top_p：只从累计概率达到 p 的候选集合采样。
+eval()：关闭 dropout 等训练态行为。
+inference_mode()：不构建反向图，减少推理开销。
 ```
 
-如果不设置 `do_sample=True`，很多采样参数不会生效。
-
-贪心生成：
-
-```python
-generated_ids = model.generate(
-    **inputs,
-    max_new_tokens=80,
-    do_sample=False,
-)
-```
-
----
-
-### 八、使用 GPU 和 dtype
-
-如果有 GPU：
+小模型可以手动放到设备：
 
 ```python
 device = "cuda" if torch.cuda.is_available() else "cpu"
-
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForCausalLM.from_pretrained(model_name).to(device)
+model.to(device)
 model.eval()
+inputs = tokenizer("A short prompt.", return_tensors="pt").to(device)
 
-inputs = tokenizer(prompt, return_tensors="pt").to(device)
+with torch.inference_mode():
+    output_ids = model.generate(
+        **inputs,
+        max_new_tokens=32,
+        do_sample=False,
+        pad_token_id=tokenizer.eos_token_id,
+    )
 ```
 
-对于较大模型，常用半精度：
-
-```python
-model = AutoModelForCausalLM.from_pretrained(
-    model_name,
-    torch_dtype=torch.float16,
-).to(device)
-```
-
-如果使用 bf16：
-
-```python
-model = AutoModelForCausalLM.from_pretrained(
-    model_name,
-    torch_dtype=torch.bfloat16,
-).to(device)
-```
-
-如果你的 `transformers` 版本已经采用新文档中的参数名，也可能写成：
-
-```python
-model = AutoModelForCausalLM.from_pretrained(
-    model_name,
-    dtype=torch.bfloat16,
-).to(device)
-```
-
-如果本机版本不认识 `dtype`，就使用旧写法 `torch_dtype`。面试或项目文档里更重要的是讲清楚 dtype 的含义：它控制权重加载和计算时使用的数值类型，影响显存、速度和数值稳定性。
-
-经验：
-
-```text
-新一些的 NVIDIA GPU 通常支持 bf16。
-老一些的 GPU 可能只适合 fp16。
-CPU 上通常不要强行用 fp16。
-```
-
----
-
-### 九、device_map="auto"
-
-加载稍大的模型时，可以使用：
+大模型常使用 Accelerate 的自动放置：
 
 ```python
 model = AutoModelForCausalLM.from_pretrained(
@@ -384,976 +197,410 @@ model = AutoModelForCausalLM.from_pretrained(
 )
 ```
 
-`device_map="auto"` 会让 accelerate 自动决定模型放在哪里。
+使用 device_map="auto" 后不要无条件再调用 model.to("cuda")，因为模型可能被分布到多张 GPU、CPU 或 offload 目录。新版文档可能推荐 dtype 参数，较多稳定版本仍使用 torch_dtype；应以本地版本签名为准。
 
-可能是：
-
-```text
-单张 GPU
-多张 GPU
-部分 CPU offload
-```
-
-对于入门实战，你可以先记住：
-
-```text
-小模型：model.to(device) 就够。
-较大模型：device_map="auto" 更方便。
-```
-
-但不要混用得太随意。
-
-如果用了 `device_map="auto"`，通常不要再手动 `model.to(device)`。
-
-`device_map="auto"` 依赖 `accelerate` 做模块放置。它适合“模型大到单卡放不下或不想手动切分”的场景；如果只是 tiny-gpt2、distilgpt2 这类小模型，手动 `model.to(device)` 更直观。
-
----
-
-### 十、完整推理脚本
+批量生成时通常使用左侧 padding：
 
 ```python
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+tokenizer.padding_side = "left"
+if tokenizer.pad_token is None:
+    tokenizer.pad_token = tokenizer.eos_token
 
+batch = tokenizer(
+    ["The capital of France is", "The largest planet is"],
+    padding=True,
+    return_tensors="pt",
+)
 
-def main():
-    model_name = "sshleifer/tiny-gpt2"
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForCausalLM.from_pretrained(model_name).to(device)
-    model.eval()
-
-    prompt = "Hello, my name is"
-    inputs = tokenizer(prompt, return_tensors="pt").to(device)
-
-    with torch.no_grad():
-        generated_ids = model.generate(
-            **inputs,
-            max_new_tokens=50,
-            do_sample=True,
-            temperature=0.8,
-            top_k=50,
-            top_p=0.9,
-            pad_token_id=tokenizer.eos_token_id,
-        )
-
-    generated_text = tokenizer.decode(
-        generated_ids[0],
-        skip_special_tokens=True,
+with torch.inference_mode():
+    output_ids = model.generate(
+        **batch,
+        max_new_tokens=24,
+        do_sample=False,
+        pad_token_id=tokenizer.pad_token_id,
     )
-    print(generated_text)
-
-
-if __name__ == "__main__":
-    main()
 ```
 
-这个脚本完成了：
+decoder-only 生成通常从批次最后一个位置继续。左补齐能让每条样本的最后位置仍是有效 prompt token；具体仍应遵循目标模型 tokenizer 的设置和运行时提示。
 
-```text
-加载 tokenizer
-加载 causal LM
-编码 prompt
-生成 token ids
-解码为文本
-```
+### 4.1.5 只验证接口的纯 Python 实验
 
-如果当前环境还没有安装 `transformers` 或不能下载模型，可以先用下面这个纯 Python toy demo 体会 Hugging Face 推理接口背后的数据流。它不是真实模型，只模拟 `tokenizer(...)`、`outputs.logits.shape`、batch padding、`attention_mask` 和 `generate` 的核心 shape 关系：
+没有 torch 或无法下载模型时，可以先验证 shape、padding 和生成长度。下面不模拟语言能力，只模拟接口契约：
 
 ```python
-class ShapeOnly:
-    def __init__(self, shape):
-        self.shape = shape
-
-
-class ToyOutput:
-    def __init__(self, logits_shape):
-        self.logits = ShapeOnly(logits_shape)
+class Shape:
+    def __init__(self, value):
+        self.shape = value
 
 
 class ToyTokenizer:
-    def __init__(self, padding_side="left"):
-        self.tokens = [
-            "<pad>", "<eos>", "Hello", "my", "name", "is",
-            "The", "answer", "I", "am", "a", "tiny", "demo", ".",
-        ]
-        self.stoi = {token: idx for idx, token in enumerate(self.tokens)}
-        self.itos = {idx: token for token, idx in self.stoi.items()}
-        self.pad_token_id = self.stoi["<pad>"]
-        self.eos_token_id = self.stoi["<eos>"]
-        self.padding_side = padding_side
+    def __init__(self):
+        self.tokens = ["<pad>", "<eos>", "Hello", "my", "name", "is", "I", "am", "toy"]
+        self.ids = {token: i for i, token in enumerate(self.tokens)}
+        self.pad_token_id = 0
+        self.eos_token_id = 1
+        self.padding_side = "left"
 
     def __len__(self):
         return len(self.tokens)
 
-    def encode(self, text):
-        return [self.stoi.get(token, self.eos_token_id) for token in text.split()]
-
     def __call__(self, texts, padding=False):
         if isinstance(texts, str):
             texts = [texts]
-        input_ids = [self.encode(text) for text in texts]
-        max_len = max(len(ids) for ids in input_ids)
-        if padding:
-            padded = []
-            for ids in input_ids:
-                pads = [self.pad_token_id] * (max_len - len(ids))
-                if self.padding_side == "left":
-                    padded.append(pads + ids)
-                else:
-                    padded.append(ids + pads)
-            input_ids = padded
-        attention_mask = [
-            [0 if token_id == self.pad_token_id else 1 for token_id in ids]
-            for ids in input_ids
+        rows = [
+            [self.ids.get(piece, self.eos_token_id) for piece in text.split()]
+            for text in texts
         ]
-        return {"input_ids": input_ids, "attention_mask": attention_mask}
+        if padding:
+            width = max(len(row) for row in rows)
+            rows = [
+                [self.pad_token_id] * (width - len(row)) + row
+                for row in rows
+            ]
+        masks = [
+            [0 if token_id == self.pad_token_id else 1 for token_id in row]
+            for row in rows
+        ]
+        return {"input_ids": rows, "attention_mask": masks}
 
-    def decode(self, ids, skip_special_tokens=True):
-        pieces = []
-        for idx in ids:
-            token = self.itos[idx]
-            if skip_special_tokens and token in {"<pad>", "<eos>"}:
-                continue
-            pieces.append(token)
-        return " ".join(pieces)
-
-
-class ToyConfig:
-    def __init__(self, vocab_size, hidden_size, num_hidden_layers):
-        self.vocab_size = vocab_size
-        self.hidden_size = hidden_size
-        self.num_hidden_layers = num_hidden_layers
+    def decode(self, ids):
+        return " ".join(self.tokens[i] for i in ids if i not in {0, 1})
 
 
-class ToyCausalLM:
+class ToyModel:
     def __init__(self, vocab_size):
-        self.config = ToyConfig(vocab_size, hidden_size=16, num_hidden_layers=2)
-        self.training = True
-        self.next_token = {5: 8, 8: 9, 9: 10, 10: 11, 11: 12, 12: 13, 13: 1}
+        self.vocab_size = vocab_size
+        self.next_token = {5: 6, 6: 7, 7: 8, 8: 1}
 
     def eval(self):
-        self.training = False
         return self
 
     def __call__(self, input_ids, attention_mask=None):
-        batch_size = len(input_ids)
-        seq_len = len(input_ids[0])
-        return ToyOutput((batch_size, seq_len, self.config.vocab_size))
+        return type("Output", (), {
+            "logits": Shape((len(input_ids), len(input_ids[0]), self.vocab_size))
+        })()
 
-    def generate(self, input_ids, max_new_tokens, pad_token_id=None):
-        outputs = [list(ids) for ids in input_ids]
-        for ids in outputs:
+    def generate(self, input_ids, max_new_tokens):
+        rows = [list(row) for row in input_ids]
+        for row in rows:
             for _ in range(max_new_tokens):
-                last_id = ids[-1]
-                next_id = self.next_token.get(last_id, 1)
-                ids.append(next_id)
-                if next_id == 1:
+                token_id = self.next_token.get(row[-1], 1)
+                row.append(token_id)
+                if token_id == 1:
                     break
-        return outputs
+        return rows
 
 
-def shape(batch):
-    return (len(batch), len(batch[0]))
-
-
-tokenizer = ToyTokenizer(padding_side="left")
-model = ToyCausalLM(vocab_size=len(tokenizer)).eval()
+tokenizer = ToyTokenizer()
+model = ToyModel(len(tokenizer)).eval()
 single = tokenizer("Hello my name is")
 batch = tokenizer(["Hello my name is", "Hello"], padding=True)
-single_outputs = model(**single)
-batch_outputs = model(**batch)
-generated_ids = model.generate(single["input_ids"], max_new_tokens=4)
-max_token_id = max(max(ids) for ids in batch["input_ids"])
+output = model(**single)
+generated = model.generate(single["input_ids"], max_new_tokens=4)
 
-print("vocab_match=", model.config.vocab_size == len(tokenizer))
-print("token_ids_in_range=", max_token_id < model.config.vocab_size)
-print("single_input_shape=", shape(single["input_ids"]))
-print("single_logits_shape=", single_outputs.logits.shape)
-print("generated_shape=", shape(generated_ids))
-print("new_tokens_added=", len(generated_ids[0]) - len(single["input_ids"][0]))
-print("decoded=", tokenizer.decode(generated_ids[0]))
-print("batch_input_ids=", batch["input_ids"])
+print("vocab_match=", model.vocab_size == len(tokenizer))
+print("single_logits_shape=", output.logits.shape)
 print("batch_attention_mask=", batch["attention_mask"])
-print("batch_logits_shape=", batch_outputs.logits.shape)
+print("new_tokens=", len(generated[0]) - len(single["input_ids"][0]))
+print("decoded=", tokenizer.decode(generated[0]))
 ```
 
-参考输出：
+vocab_match 为 True、logits 最后一维等于词表大小、左侧 padding 为 0，说明最基本的数据流闭合；这不能证明模型具有任何任务能力。
+
+### 4.1.6 第一次运行的实验记录
+
+第一次成功生成应留下可复现记录：
 
 ```text
-vocab_match= True
-token_ids_in_range= True
-single_input_shape= (1, 4)
-single_logits_shape= (1, 4, 14)
-generated_shape= (1, 8)
-new_tokens_added= 4
-decoded= Hello my name is I am a tiny
-batch_input_ids= [[2, 3, 4, 5], [0, 0, 0, 2]]
-batch_attention_mask= [[1, 1, 1, 1], [0, 0, 0, 1]]
-batch_logits_shape= (2, 4, 14)
+模型名称与 revision。
+tokenizer 词表大小和 special token id。
+Transformers、PyTorch、Accelerate 版本。
+设备、dtype、device_map。
+prompt 的原文和 token 数。
+生成参数、随机种子、完整输出和新生成部分。
 ```
 
-这段 demo 只验证接口和 shape，不验证真实模型能力。真实使用时仍应优先运行上面的 `AutoTokenizer` 和 `AutoModelForCausalLM` 示例。
+这些字段让后续的 SFT、LoRA 和评估有共同基线。只保存一张输出截图，无法判断变化来自模型参数、模板、采样参数还是依赖版本。
 
----
+## 4.2 把对话变成监督信号
 
-### 十一、`model.eval()` 和 `torch.no_grad()`
+### 4.2.1 SFT 学习的是条件分布
 
-推理时应该写：
-
-```python
-model.eval()
-with torch.no_grad():
-    ...
-```
-
-`model.eval()` 的作用：
+监督微调样本至少包含条件和目标：
 
 ```text
-关闭 dropout 等训练时随机行为。
+条件：system、user 以及此前的对话历史。
+目标：assistant 希望生成的回答。
 ```
 
-`torch.no_grad()` 的作用：
-
-```text
-不构建计算图，节省显存和计算。
-```
-
-如果忘记 `no_grad()`，推理也能跑，但会浪费显存。
-
-如果忘记 `eval()`，生成可能受 dropout 影响，不够稳定。
-
----
-
-### 十二、attention_mask 和 pad_token_id
-
-很多 decoder-only 模型没有默认 padding token。
-
-生成时可能看到警告：
-
-```text
-Setting pad_token_id to eos_token_id
-```
-
-可以显式设置：
-
-```python
-if tokenizer.pad_token is None:
-    tokenizer.pad_token = tokenizer.eos_token
-```
-
-生成时也可以传：
-
-```python
-pad_token_id=tokenizer.eos_token_id
-```
-
-`attention_mask` 用来告诉模型哪些 token 是有效输入。
-
-对于单条不 padding 的 prompt，影响不大。
-
-对于 batch 推理，它很重要。
-
-如果 `input_ids` 的 shape 是 `[B,T]`，那么 `attention_mask` 通常也是 `[B,T]`：
+单轮样本可以写成：
 
 ```math
-m_{b,t}=
-\begin{cases}
-1, & \mathrm{valid} \\
-0, & \mathrm{padding}
-\end{cases}
+(\mathrm{prompt}_i,\mathrm{response}_i)
 ```
 
-直觉上，模型应该关注 `m=1` 的真实 token，而不是把补齐长度用的 padding 当成语义内容。后续做 SFT 时，padding 位置的 labels 也通常要设为 `-100`，让 loss 忽略这些位置。
+完整训练序列是：
 
----
+```math
+x_i
+=
+\mathrm{Tokenize}
+(\mathrm{prompt}_i\oplus\mathrm{response}_i\oplus\mathrm{EOS})
+```
 
-### 十三、batch 推理
+只把 response 喂给模型会丢掉任务条件，只把 prompt 喂给模型又没有目标。SFT 的目标是提高：
 
-多个 prompt 一起推理：
+```math
+p_\theta(\mathrm{response}\mid\mathrm{prompt})
+```
+
+传统 instruction/input/output 数据可以写成：
 
 ```python
-prompts = [
-    "Hello, my name is",
-    "The capital of France is",
+example = {
+    "instruction": "把下面的句子翻译成英文。",
+    "input": "我喜欢机器学习。",
+    "output": "I like machine learning.",
+}
+```
+
+现代聊天数据常写成 messages：
+
+```python
+messages = [
+    {"role": "system", "content": "你是一个严谨的助手。"},
+    {"role": "user", "content": "什么是梯度下降？"},
+    {
+        "role": "assistant",
+        "content": "梯度下降沿负梯度方向更新参数以降低损失。",
+    },
 ]
-
-if tokenizer.pad_token is None:
-    tokenizer.pad_token = tokenizer.eos_token
-
-tokenizer.padding_side = "left"
-
-inputs = tokenizer(
-    prompts,
-    return_tensors="pt",
-    padding=True,
-).to(device)
-
-with torch.no_grad():
-    generated_ids = model.generate(
-        **inputs,
-        max_new_tokens=50,
-        do_sample=True,
-        temperature=0.8,
-        pad_token_id=tokenizer.eos_token_id,
-    )
-
-for ids in generated_ids:
-    print(tokenizer.decode(ids, skip_special_tokens=True))
 ```
 
-batch 推理时要注意：
+两种表示最终都要变成 token id。决定模型行为的不是字段名称，而是模板渲染后的序列、特殊 token 和参与 loss 的位置。
 
-```text
-padding=True
-attention_mask
-pad_token_id
-decoder-only 模型批量生成时通常优先使用 left padding
-```
+### 4.2.2 模板属于训练分布
 
-否则不同长度 prompt 可能处理不正确。原因是 decoder-only 生成通常从每条样本的最后一个有效 token 继续生成；如果 batch 里短 prompt 被 right padding 到同一长度，最后位置可能是 padding token，容易让生成起点和 `attention_mask` 语义变得不一致。具体 padding side 仍要以模型文档、tokenizer 默认设置和运行时 warning 为准。
-
----
-
-### 十四、查看模型配置
+一个简单模板可以这样渲染：
 
 ```python
-print(model.config)
-```
-
-你可以看到：
-
-```text
-vocab_size
-n_layer 或 num_hidden_layers
-n_head 或 num_attention_heads
-n_embd 或 hidden_size
-max_position_embeddings
-bos_token_id
-eos_token_id
-```
-
-这些配置对应我们前面手写 GPT 时的超参数。
-
-例如：
-
-```text
-hidden_size 对应 d_model。
-num_attention_heads 对应 num_heads。
-num_hidden_layers 对应 num_layers。
-vocab_size 对应 tokenizer 词表大小。
-```
-
-理解 config 很重要。
-
-微调、LoRA、量化和推理优化都会用到它。
-
----
-
-### 十五、常见错误排查
-
-#### 错误 1：模型下载失败
-
-可能原因：
-
-```text
-网络不可用。
-模型需要登录授权。
-模型名写错。
-```
-
-解决：
-
-```text
-检查 model_name。
-使用本地模型路径。
-提前下载模型。
-需要 gated access 的模型先登录并申请权限。
-```
-
-#### 错误 2：CUDA out of memory
-
-解决：
-
-```text
-换更小模型。
-使用 fp16/bf16。
-减小 max_new_tokens。
-减小 batch size。
-使用 device_map="auto"。
-后续使用 4bit 量化。
-```
-
-#### 错误 3：tokenizer 和 model 不匹配
-
-表现：
-
-```text
-生成乱码。
-embedding id 越界。
-输出质量异常。
-```
-
-解决：
-
-```python
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForCausalLM.from_pretrained(model_name)
-```
-
-尽量使用同一个 `model_name` 加载 tokenizer 和 model。
-
-#### 错误 4：输入和模型不在同一 device
-
-表现：
-
-```text
-Expected all tensors to be on the same device
-```
-
-解决：
-
-```python
-inputs = tokenizer(prompt, return_tensors="pt").to(device)
-model = model.to(device)
-```
-
-#### 错误 5：采样参数不生效
-
-如果设置了 temperature、top_p，但输出仍像贪心，检查是否设置：
-
-```python
-do_sample=True
-```
-
----
-
-### 十六、面试怎么讲加载开源模型
-
-如果面试官问“怎么用 Hugging Face 跑一个 causal LM”，可以这样回答：
-
-```text
-我会使用 AutoTokenizer 和 AutoModelForCausalLM 从同一个 model name 或本地路径加载 tokenizer 和模型。tokenizer 把 prompt 编码成 input_ids 和 attention_mask，模型 forward 输出 [B, T, vocab_size] logits；生成时使用 model.generate，设置 max_new_tokens、do_sample、temperature、top_k、top_p 等参数，最后用 tokenizer.decode 把 token ids 转回文本。
-```
-
-如果追问“`model.eval()` 和 `torch.no_grad()` 有什么作用”，可以回答：
-
-```text
-model.eval() 会关闭 dropout 等训练态行为，让推理稳定；torch.no_grad() 不构建计算图，可以节省显存和计算。推理时通常两者都要使用。
-```
-
-如果问“tokenizer 和模型为什么要匹配”，可以回答：
-
-```text
-模型 embedding 和输出 head 都是基于特定 vocab 训练的。如果 tokenizer 不匹配，同一个 token id 对应的文本片段可能不同，甚至 id 超出 embedding 范围，生成结果会异常，所以 tokenizer 和 model 必须来自同一个 checkpoint 或同一套训练资产。
-```
-
-如果问“显存不够怎么办”，可以回答：
-
-```text
-可以换更小模型、使用 fp16/bf16、减小 batch size 和生成长度、使用 device_map="auto" 做自动放置，或者在后续微调和推理中使用 8bit/4bit 量化。
-```
-
----
-
-### 十七、小练习
-
-#### 练习 1
-
-用 `sshleifer/tiny-gpt2` 跑通最小推理脚本。
-
-#### 练习 2
-
-打印 `inputs["input_ids"]`，再用 tokenizer decode 回文本。
-
-#### 练习 3
-
-分别测试 `do_sample=False` 和 `do_sample=True` 的生成差异。
-
-#### 练习 4
-
-调整 `temperature=0.7`、`top_p=0.9`，观察输出变化。
-
-#### 练习 5
-
-打印 `model.config`，找到 hidden size、层数、头数和 vocab size。
-
----
-
-### 本讲总结
-
-这一讲完成了开源 causal LM 的加载和运行。
-
-核心结论如下：
-
-1. Causal LM 是自回归语言模型，用于 next-token prediction。
-2. Hugging Face 中常用 `AutoTokenizer` 和 `AutoModelForCausalLM`。
-3. tokenizer 把文本转成 token ids，model 只处理 token ids。
-4. 模型 forward 输出 logits，shape 是 `[B, T, vocab_size]`。
-5. `generate` 封装了自回归生成过程。
-6. 推理时应使用 `model.eval()` 和 `torch.no_grad()`。
-7. tokenizer 和 model 必须匹配。
-8. 显存不足时可以使用小模型、半精度、`device_map="auto"` 或量化。
-
-下一讲，我们构造指令微调数据集，为 SFT 做准备。
-
-## 第 20 讲：构造指令微调数据集
-
-### 本讲目标
-
-学完本讲，你应该能做到六件事：
-
-1. 理解指令微调数据集的基本结构。
-2. 构造 `instruction/input/output` 格式样本。
-3. 构造 chat 格式的多轮对话样本。
-4. 使用 tokenizer 把样本变成 `input_ids`、`attention_mask`、`labels`。
-5. 理解为什么要 mask 掉 prompt 部分的 loss。
-6. 能排查 SFT 数据中的常见质量问题。
-
-上一讲我们加载并运行了开源 causal LM。
-
-本讲开始准备 SFT 数据。
-
-SFT 是 supervised fine-tuning，也就是监督微调。
-
-它的核心是：
-
-```text
-给模型看一批“用户输入 -> 理想回答”的样本，让模型学习按照指令回答。
-```
-
-很多微调失败，不是模型或 LoRA 配置问题，而是数据格式、labels mask、chat template 或数据质量出了问题。
-
-所以这一讲非常关键。
-
-本讲围绕 Hugging Face 的 chat template / `apply_chat_template`、TRL 的 `assistant_only_loss` 与 `completion_only_loss`，以及 PyTorch `CrossEntropyLoss(ignore_index=-100)` 来说明 SFT 数据和 loss mask。重点是让读者能从原始样本追踪到每一个监督 token；Trainer 参数、LoRA 配置和分布式训练留到后续讲解。
-
----
-
-### 一、什么是指令微调数据
-
-指令微调样本通常包含三部分：
-
-```text
-instruction：用户希望模型做什么。
-input：可选的额外上下文。
-output：期望模型输出的答案。
-```
-
-例如：
-
-```json
-{
-  "instruction": "把下面这句话翻译成英文。",
-  "input": "我喜欢机器学习。",
-  "output": "I like machine learning."
-}
-```
-
-如果没有额外上下文，也可以是：
-
-```json
-{
-  "instruction": "解释什么是过拟合。",
-  "input": "",
-  "output": "过拟合是指模型在训练集上表现很好，但在未见数据上表现较差的现象。"
-}
-```
-
-模型训练时看到的是拼接后的文本。
-
-例如：
-
-```text
-### Instruction:
-解释什么是过拟合。
-
-### Response:
-过拟合是指模型在训练集上表现很好，但在未见数据上表现较差的现象。
-```
-
----
-
-### 二、为什么不是直接喂 output
-
-SFT 的目标不是让模型背答案。
-
-而是让模型学会：
-
-```text
-在给定用户指令和上下文时，生成合适回答。
-```
-
-所以训练样本必须包含 prompt 和 response。
-
-prompt 告诉模型任务是什么。
-
-response 是模型要学习生成的内容。
-
-如果只训练 output，模型不知道这个回答对应什么问题。
-
----
-
-### 三、Alpaca 风格格式
-
-早期很多开源 SFT 数据使用 Alpaca 格式。
-
-有 input 时：
-
-```python
-def format_alpaca(example):
-    if example.get("input", ""):
+def format_instruction(example):
+    instruction = example["instruction"].strip()
+    extra_input = example.get("input", "").strip()
+    if extra_input:
         prompt = (
             "### Instruction:\n"
-            f"{example['instruction']}\n\n"
-            "### Input:\n"
-            f"{example['input']}\n\n"
-            "### Response:\n"
+            + instruction
+            + "\n\n### Input:\n"
+            + extra_input
+            + "\n\n### Response:\n"
         )
     else:
         prompt = (
             "### Instruction:\n"
-            f"{example['instruction']}\n\n"
-            "### Response:\n"
+            + instruction
+            + "\n\n### Response:\n"
         )
-
-    response = example["output"]
-    return prompt, response
+    return prompt, example["output"].strip()
 ```
 
-完整文本是：
+推理时必须复用同一套边界：
 
 ```python
-prompt, response = format_alpaca(example)
-text = prompt + response
+def build_prompt(instruction, extra_input=""):
+    if extra_input.strip():
+        return (
+            "### Instruction:\n"
+            + instruction.strip()
+            + "\n\n### Input:\n"
+            + extra_input.strip()
+            + "\n\n### Response:\n"
+        )
+    return (
+        "### Instruction:\n"
+        + instruction.strip()
+        + "\n\n### Response:\n"
+    )
 ```
 
-这种格式直观、容易调试。
-
-缺点是不同模型可能有自己的 chat template。
-
-真实微调时，应优先使用目标模型推荐的对话模板。
-
----
-
-### 四、Chat 格式数据
-
-很多现代指令模型使用 chat 格式。
-
-一条样本可能是：
+聊天模型应优先使用自己的 tokenizer 提供的 chat template：
 
 ```python
-messages = [
-    {"role": "system", "content": "你是一个有帮助的 AI 助手。"},
-    {"role": "user", "content": "解释什么是梯度下降。"},
-    {"role": "assistant", "content": "梯度下降是一种通过沿负梯度方向更新参数来最小化损失函数的优化方法。"},
+prompt_messages = [
+    {"role": "system", "content": "你是一个严谨的助手。"},
+    {"role": "user", "content": "解释过拟合。"},
 ]
-```
 
-多轮对话：
-
-```python
-messages = [
-    {"role": "system", "content": "你是一个有帮助的 AI 助手。"},
-    {"role": "user", "content": "什么是过拟合？"},
-    {"role": "assistant", "content": "过拟合是模型在训练集上表现好但泛化差的现象。"},
-    {"role": "user", "content": "怎么缓解？"},
-    {"role": "assistant", "content": "可以使用更多数据、正则化、dropout、早停或减小模型容量。"},
-]
-```
-
-chat 格式更接近真实聊天模型。
-
----
-
-### 五、使用 chat_template
-
-Hugging Face tokenizer 支持：
-
-```python
-tokenizer.apply_chat_template(...)
-```
-
-示例：
-
-```python
-text = tokenizer.apply_chat_template(
-    messages,
-    tokenize=False,
-    add_generation_prompt=False,
-)
-```
-
-`tokenize=False` 表示先返回字符串。
-
-`add_generation_prompt=False` 表示这是训练样本，最后已经包含 assistant 答案。
-
-推理时通常使用：
-
-```python
-text = tokenizer.apply_chat_template(
-    messages,
+prompt = tokenizer.apply_chat_template(
+    prompt_messages,
     tokenize=False,
     add_generation_prompt=True,
 )
 ```
 
-因为推理时只给到 user，后面要让模型生成 assistant。
+add_generation_prompt=True 适合推理，把序列渲染到 assistant 即将开始的位置；训练样本已经含有 assistant 回答时，通常使用 False。一个模型的 role 标记、换行和结束 token 不能移植到另一个模型。模板的微小差异也会改变 token 边界和监督位置。
 
-注意：
+### 4.2.3 labels mask 的数学定义
 
-```text
-不同模型 chat_template 不同。
-不要随便把 A 模型的模板套到 B 模型上。
-```
-
----
-
-### 六、SFT 的 labels 应该是什么
-
-causal LM 训练需要：
-
-```text
-input_ids
-attention_mask
-labels
-```
-
-通常：
-
-```text
-labels 和 input_ids 一样长。
-```
-
-但不一定所有位置都参与 loss。
-
-对于指令微调，我们希望模型学习回答部分。
-
-不希望它花主要精力学习 prompt 模板和用户问题。
-
-所以常见做法是：
-
-```text
-prompt 部分 labels 设为 -100。
-response 部分 labels 保留真实 token id。
-```
-
-PyTorch 的 `CrossEntropyLoss` 会忽略 label 为 `-100` 的位置。
-
-这叫 loss mask。
-
-用符号写，假设一条样本被拼成 token 序列 `x_0,...,x_{T-1}`，其中回答部分从位置 `s` 开始。可以定义一个 assistant mask：
+设完整序列为 \(x_0,\ldots,x_{T-1}\)，回答区域由 \(m_t\) 标记：
 
 ```math
 m_t=
 \begin{cases}
-0, & t<s \\
-1, & t\ge s
+0,& t\in\mathrm{prompt\ or\ padding}\\
+1,& t\in\mathrm{assistant\ response}
 \end{cases}
 ```
 
-训练用的 labels 是：
+labels 写成：
 
 ```math
 y_t=
 \begin{cases}
--100, & m_t=0 \\
-x_t, & m_t=1
+-100,&m_t=0\\
+x_t,&m_t=1
 \end{cases}
 ```
 
-直觉上，`m_t=0` 的 prompt token 仍然在 `input_ids` 里作为上下文输入模型，但不会作为监督目标参与 loss。
+PyTorch 的交叉熵默认把 -100 当作 ignore_index。prompt token 仍然保留在 input_ids 中，作为回答的上下文；它们只是不会成为监督目标。
 
----
+若模型内部负责 causal shift，labels 与 input_ids 等长，位置 \(t-1\) 的 logits 预测 labels 位置 \(t\)。令 \(S=\sum_{t=1}^{T-1}m_t\) 为这个序列中真正参与监督的回答 token 数。下面的 assistant-only 目标只在 \(S>0\) 时有定义；一个被截断到只剩 prompt 的样本不应进入 loss 的平均：
 
-### 七、为什么要 mask prompt loss
-
-假设训练文本是：
-
-```text
-### Instruction:
-解释什么是过拟合。
-
-### Response:
-过拟合是指...
+```math
+\mathcal{L}_{\mathrm{assistant}}
+=
+-
+\frac{
+\sum_{t=1}^{T-1}
+m_t\log p_\theta(x_t\mid x_{<t})
+}{
+\sum_{t=1}^{T-1}m_t
+}
 ```
 
-如果不 mask prompt，模型也会被训练去预测：
+回答结尾的 EOS 是否参与监督必须明确。把 EOS 纳入回答区域，模型更容易学到停止位置；如果模板把 EOS 放在 assistant 区域之外，mask 可能把它漏掉。应把有效 labels 解码出来检查。
 
-```text
-### Instruction:
-解释什么是过拟合。
-```
+### 4.2.4 用 offset mapping 构造回答 mask
 
-这不是我们最关心的目标。
-
-我们真正关心的是：
-
-```text
-给定 instruction 后，模型能生成 response。
-```
-
-所以更合理的 labels 是：
-
-```text
-prompt tokens:   -100 -100 -100 ...
-response tokens: 真实 token id
-```
-
-这会让 loss 只在回答部分计算。
-
-如果模型内部或训练框架按 causal LM 方式自动 shift labels，那么传入模型的 `labels` 通常和 `input_ids` 等长。Hugging Face 的 `AutoModelForCausalLM` 系列模型一般会在 forward 里处理这种 shift。若你自己手写 loss，则要显式使用 `logits[:, :-1, :]` 去预测 `labels[:, 1:]`，不要把同一位置的 token 当成自己的标签。
-
----
-
-### 八、构造单条 SFT 样本
-
-下面用 Alpaca 风格演示。
+对简单文本模板，可以用 fast tokenizer 的字符偏移定位 prompt 结束位置：
 
 ```python
-def preprocess_example(example, tokenizer, max_length=512):
-    prompt, response = format_alpaca(example)
+def tokenize_sft_example(example, tokenizer, max_length=512):
+    if not isinstance(max_length, int) or max_length <= 0:
+        raise ValueError("max_length must be a positive integer")
+    if not getattr(tokenizer, "is_fast", False):
+        raise ValueError("offset mapping requires a fast tokenizer")
+    prompt, response = format_instruction(example)
+    if not response:
+        raise ValueError("response must contain at least one character")
+    if tokenizer.eos_token is None:
+        raise ValueError("tokenizer.eos_token is required for this example")
     full_text = prompt + response + tokenizer.eos_token
-
-    full = tokenizer(
+    encoded = tokenizer(
         full_text,
-        max_length=max_length,
-        truncation=True,
         add_special_tokens=False,
+        truncation=True,
+        max_length=max_length,
         return_offsets_mapping=True,
     )
 
-    input_ids = full["input_ids"]
-    attention_mask = full["attention_mask"]
-    offsets = full["offset_mapping"]
+    labels = []
     prompt_end = len(prompt)
-    labels = [
-        token_id if end > prompt_end else -100
-        for token_id, (start, end) in zip(input_ids, offsets)
-    ]
-
+    for token_id, (start, end) in zip(
+        encoded["input_ids"],
+        encoded["offset_mapping"],
+    ):
+        labels.append(
+            -100 if end <= prompt_end else token_id
+        )
+    if not labels or not any(label != -100 for label in labels):
+        raise ValueError(
+            "truncation removed every supervised token; reserve space for response"
+        )
     return {
-        "input_ids": input_ids,
-        "attention_mask": attention_mask,
+        "input_ids": encoded["input_ids"],
+        "attention_mask": encoded["attention_mask"],
         "labels": labels,
     }
 ```
 
-这里的核心是：
+不能默认把 tokenize(prompt) 得到的 token 数当作完整序列的切分点。BPE 或 byte-level tokenizer 可能在边界处合并片段，两个独立 tokenize 的边界不一定相同。offset mapping 描述 token 覆盖的字符区间，通常更可靠；但它要求 fast tokenizer，特殊 token 的 offset 仍需实际检查。
+
+聊天模板可以尝试使用 assistant mask：
 
 ```python
+encoded = tokenizer.apply_chat_template(
+    messages,
+    tokenize=True,
+    return_dict=True,
+    add_generation_prompt=False,
+    return_assistant_tokens_mask=True,
+)
+
+if "assistant_masks" not in encoded:
+    raise RuntimeError(
+        "this tokenizer/template did not return assistant_masks; "
+        "inspect the template before constructing labels"
+    )
+input_ids = encoded["input_ids"]
+assistant_mask = encoded["assistant_masks"]
+if len(input_ids) != len(assistant_mask) or not any(assistant_mask):
+    raise ValueError("assistant mask must align with input_ids and mark a response")
 labels = [
-    token_id if end > len(prompt) else -100
-    for token_id, (start, end) in zip(input_ids, full["offset_mapping"])
+    token_id if flag else -100
+    for token_id, flag in zip(input_ids, assistant_mask)
 ]
 ```
 
-它根据完整文本的字符偏移把 prompt 部分从 loss 中排除。对于 BPE 或 byte-level tokenizer，分别 tokenize `prompt` 和 `prompt + response` 后再用两个 token 数相减并不总是可靠，因为边界处可能发生合并；offset mapping 或 tokenizer 提供的 assistant mask 更稳妥。`return_offsets_mapping` 通常要求 fast tokenizer，使用慢 tokenizer 时应改用模型模板支持的 assistant mask 或先验证边界行为。
+这个接口依赖 Transformers 版本和模板中的 generation 标记。运行时应打印 encoded.keys()，确认返回的 mask 真的覆盖回答；不支持 mask 时，应经过验证后使用 offset mapping 或框架提供的 completion-only 方案，不能无声地把整条序列都当成回答。
 
----
+### 4.2.5 截断与有效监督 token
 
-### 九、处理截断问题
-
-如果 `max_length` 太短，可能把 response 截没了。
-
-例如：
+回答通常位于序列尾部，普通 truncation 又常从尾部截断，因此可能出现：
 
 ```text
-prompt 很长，response 很短。
-max_length 截断后只剩 prompt。
+prompt 被保留。
+response 被完全截掉。
 labels 全是 -100。
+训练循环仍运行，但没有有效监督。
 ```
 
-这样的样本没有训练价值。
+有效监督 token 数为：
 
-这是因为常见 tokenizer 截断会保留序列前部、截掉尾部；而 SFT 的回答通常在尾部。如果 prompt 已经占满 `max_length`，response token 会被截掉，训练时就没有任何有效监督信号。
+```math
+n_{\mathrm{sup}}
+=
+\sum_{t=0}^{T-1}\mathbf{1}[y_t\neq-100]
+```
 
-可以过滤掉：
+样本至少要满足 \(n_{\mathrm{sup}}>0\)。如果任务要求完整 JSON、代码或回答，还要检查 EOS 是否存在、结构是否被截断。
 
 ```python
-def has_response_labels(example):
-    return any(label != -100 for label in example["labels"])
+def has_supervision(feature):
+    return any(label != -100 for label in feature["labels"])
+
+
+def supervision_count(feature):
+    return sum(label != -100 for label in feature["labels"])
 ```
 
-或者在预处理时检查：
+更稳妥的做法是先限制过长对话历史，再为回答保留空间；不能只把 max_length 调大而不检查显存和模型上下文上限。
 
-```python
-if all(label == -100 for label in labels):
-    return None
+### 4.2.6 三个字段必须同步 padding
+
+batch 中应有：
+
+```math
+X,A,Y\in\mathbb{Z}^{B\times T_{\max}}
 ```
-
-实际用 Hugging Face `Dataset.map` 时，返回 `None` 不总是方便。
-
-更常见做法是先 map，再 filter。
-
----
-
-### 十、构造一个小数据集
-
-```python
-raw_data = [
-    {
-        "instruction": "解释什么是过拟合。",
-        "input": "",
-        "output": "过拟合是指模型在训练集上表现很好，但在未见数据上表现较差的现象。",
-    },
-    {
-        "instruction": "把下面这句话翻译成英文。",
-        "input": "我喜欢机器学习。",
-        "output": "I like machine learning.",
-    },
-    {
-        "instruction": "给出三个缓解过拟合的方法。",
-        "input": "",
-        "output": "可以增加数据、使用正则化、加入 dropout、早停或减小模型容量。",
-    },
-]
-```
-
-转成 Hugging Face Dataset：
-
-```python
-from datasets import Dataset
-
-
-dataset = Dataset.from_list(raw_data)
-```
-
-预处理：
-
-```python
-tokenized_dataset = dataset.map(
-    lambda x: preprocess_example(x, tokenizer, max_length=512),
-    remove_columns=dataset.column_names,
-)
-```
-
-过滤无效样本：
-
-```python
-tokenized_dataset = tokenized_dataset.filter(
-    lambda x: any(label != -100 for label in x["labels"])
-)
-```
-
----
-
-### 十一、Data Collator
-
-不同样本长度不同，需要 padding。
-
-SFT 中要同时 pad：
 
 ```text
-input_ids
-attention_mask
-labels
+X：input_ids，padding 使用 pad_token_id。
+A：attention_mask，padding 使用 0。
+Y：labels，padding 使用 -100。
 ```
 
-其中 labels 的 padding 应该是 `-100`，避免 padding 参与 loss。
-
-一个简单 collator：
+最小 collator：
 
 ```python
 import torch
@@ -1363,272 +610,129 @@ class SFTDataCollator:
     def __init__(self, tokenizer, label_pad_token_id=-100):
         self.tokenizer = tokenizer
         self.label_pad_token_id = label_pad_token_id
+        if tokenizer.pad_token_id is None:
+            raise ValueError("SFT padding requires tokenizer.pad_token_id")
+        if label_pad_token_id != -100:
+            raise ValueError("this chapter uses -100 as the loss ignore index")
 
     def __call__(self, features):
-        input_ids = [torch.tensor(f["input_ids"], dtype=torch.long) for f in features]
-        attention_mask = [torch.tensor(f["attention_mask"], dtype=torch.long) for f in features]
-        labels = [torch.tensor(f["labels"], dtype=torch.long) for f in features]
-
-        input_ids = torch.nn.utils.rnn.pad_sequence(
-            input_ids,
-            batch_first=True,
-            padding_value=self.tokenizer.pad_token_id,
-        )
-        attention_mask = torch.nn.utils.rnn.pad_sequence(
-            attention_mask,
-            batch_first=True,
-            padding_value=0,
-        )
-        labels = torch.nn.utils.rnn.pad_sequence(
-            labels,
-            batch_first=True,
-            padding_value=self.label_pad_token_id,
-        )
-
+        if not features:
+            raise ValueError("cannot collate an empty feature list")
+        required = {"input_ids", "attention_mask", "labels"}
+        for index, item in enumerate(features):
+            missing = required.difference(item)
+            if missing:
+                raise ValueError(
+                    f"feature {index} is missing fields: {sorted(missing)}"
+                )
+            lengths = {len(item[key]) for key in required}
+            if len(lengths) != 1 or not lengths or min(lengths) == 0:
+                raise ValueError(
+                    f"feature {index} has empty or misaligned sequence fields"
+                )
+            if any(value < 0 for value in item["input_ids"]):
+                raise ValueError(f"feature {index} contains a negative token id")
+            if any(value not in {0, 1} for value in item["attention_mask"]):
+                raise ValueError(f"feature {index} has a non-binary attention mask")
+            if any(
+                value < 0 and value != self.label_pad_token_id
+                for value in item["labels"]
+            ):
+                raise ValueError(f"feature {index} has an invalid label value")
+            if not any(value != self.label_pad_token_id for value in item["labels"]):
+                raise ValueError(
+                    f"feature {index} has no supervised token after truncation"
+                )
+            if any(
+                mask_value == 0 and label_value != self.label_pad_token_id
+                for mask_value, label_value in zip(
+                    item["attention_mask"], item["labels"]
+                )
+            ):
+                raise ValueError(
+                    f"feature {index} supervises a padding position"
+                )
+        input_ids = [
+            torch.tensor(item["input_ids"], dtype=torch.long)
+            for item in features
+        ]
+        attention_mask = [
+            torch.tensor(item["attention_mask"], dtype=torch.long)
+            for item in features
+        ]
+        labels = [
+            torch.tensor(item["labels"], dtype=torch.long)
+            for item in features
+        ]
         return {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            "labels": labels,
+            "input_ids": torch.nn.utils.rnn.pad_sequence(
+                input_ids,
+                batch_first=True,
+                padding_value=self.tokenizer.pad_token_id,
+            ),
+            "attention_mask": torch.nn.utils.rnn.pad_sequence(
+                attention_mask,
+                batch_first=True,
+                padding_value=0,
+            ),
+            "labels": torch.nn.utils.rnn.pad_sequence(
+                labels,
+                batch_first=True,
+                padding_value=self.label_pad_token_id,
+            ),
         }
 ```
 
-使用：
+训练前做断言：
 
 ```python
-if tokenizer.pad_token is None:
-    tokenizer.pad_token = tokenizer.eos_token
-
-collator = SFTDataCollator(tokenizer)
+assert batch["input_ids"].shape == batch["attention_mask"].shape
+assert batch["input_ids"].shape == batch["labels"].shape
+for mask_row, label_row in zip(
+    batch["attention_mask"],
+    batch["labels"],
+):
+    for mask_value, label_value in zip(
+        mask_row.tolist(),
+        label_row.tolist(),
+    ):
+        if mask_value == 0:
+            assert label_value == -100
 ```
 
----
+这种检查能在梯度计算前发现字段错位，比训练数小时后猜测 loss 异常原因更可靠。
 
-### 十二、用 DataLoader 检查 batch
+### 4.2.7 数据质量、去重与分组划分
 
-```python
-from torch.utils.data import DataLoader
-
-
-dataloader = DataLoader(
-    tokenized_dataset,
-    batch_size=2,
-    shuffle=True,
-    collate_fn=collator,
-)
-
-batch = next(iter(dataloader))
-
-print(batch["input_ids"].shape)
-print(batch["attention_mask"].shape)
-print(batch["labels"].shape)
-```
-
-三者 shape 应该一致：
+SFT 清洗至少应覆盖：
 
 ```text
-[batch_size, seq_len]
+任务是否清楚，输入和输出是否错位。
+回答是否真正回应问题，而不是复制提示。
+空答案、乱码、模板残片、HTML 噪声。
+重复样本和近似重复样本。
+代码、JSON、表格和公式是否能解析。
+来源、许可证、隐私和安全限制。
 ```
 
-检查 labels：
+把同一文档切成相邻片段后随机拆分，会让验证集与训练集高度相似。更可靠的方式是按文档、来源、用户或任务族分组。每条记录应保存元数据：
 
 ```python
-print(batch["labels"][0])
+record = {
+    "id": "example-0001",
+    "source": "human_written",
+    "task": "translation",
+    "language": "zh-en",
+    "license": "recorded_in_dataset_card",
+    "messages": messages,
+}
 ```
 
-你应该看到 prompt 部分是 `-100`，response 部分是真实 token id。
+这样坏例能够追溯到数据来源和任务桶，而不是只知道某个 token 预测错误。
 
-从 shape 上看，collator 的目标是：
+### 4.2.8 纯 Python 预处理实验
 
-```math
-X,A,Y\in\mathbb{Z}^{B\times T_{\max}}
-```
-
-其中 `X` 是 `input_ids`，`A` 是 `attention_mask`，`Y` 是 `labels`。对 padding 位置，应满足 `A_{b,t}=0` 且 `Y_{b,t}=-100`，这样模型既不会把 padding 当作真实上下文，也不会在 padding 位置计算训练损失。
-
----
-
-### 十三、解码检查样本
-
-数据预处理后一定要人工检查。
-
-```python
-example = tokenized_dataset[0]
-
-print("full text:")
-print(tokenizer.decode(example["input_ids"]))
-
-response_ids = [
-    token_id for token_id, label in zip(example["input_ids"], example["labels"])
-    if label != -100
-]
-
-print("response only:")
-print(tokenizer.decode(response_ids))
-```
-
-你要确认：
-
-```text
-full text 包含 instruction 和 response。
-response only 只包含答案部分。
-```
-
-这一步能发现大部分 labels mask bug。
-
----
-
-### 十四、数据质量检查
-
-SFT 数据不是越多越好。
-
-低质量数据会直接污染模型行为。
-
-检查维度包括：
-
-```text
-instruction 是否清楚。
-input 是否缺失或错位。
-output 是否回答了问题。
-是否有乱码、HTML、无意义内容。
-是否有过长样本。
-是否有重复样本。
-是否有安全风险内容。
-是否有答案泄漏或格式混乱。
-```
-
-简单去重：
-
-```python
-seen = set()
-deduped = []
-
-for ex in raw_data:
-    key = (ex["instruction"].strip(), ex.get("input", "").strip(), ex["output"].strip())
-    if key not in seen:
-        seen.add(key)
-        deduped.append(ex)
-```
-
-过滤空答案：
-
-```python
-raw_data = [ex for ex in raw_data if ex["output"].strip()]
-```
-
----
-
-### 十五、训练集和验证集划分
-
-指令数据也需要验证集。
-
-```python
-split_dataset = dataset.train_test_split(test_size=0.05, seed=42)
-train_dataset = split_dataset["train"]
-eval_dataset = split_dataset["test"]
-```
-
-如果数据很少，可以用 10% 验证集。
-
-如果数据很多，1% 到 5% 也可以。
-
-注意：
-
-```text
-相似或重复样本不要同时出现在 train 和 eval。
-```
-
-否则验证 loss 会看起来过于乐观，不能代表对新任务或新来源样本的泛化能力。
-
-更严谨的做法是按任务、来源或文档分组划分。
-
----
-
-### 十六、完整预处理脚本骨架
-
-```python
-from datasets import Dataset
-from transformers import AutoTokenizer
-
-
-model_name = "Qwen/Qwen2.5-0.5B"
-tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-
-if tokenizer.pad_token is None:
-    tokenizer.pad_token = tokenizer.eos_token
-
-
-def format_alpaca(example):
-    if example.get("input", ""):
-        prompt = (
-            "### Instruction:\n"
-            f"{example['instruction']}\n\n"
-            "### Input:\n"
-            f"{example['input']}\n\n"
-            "### Response:\n"
-        )
-    else:
-        prompt = (
-            "### Instruction:\n"
-            f"{example['instruction']}\n\n"
-            "### Response:\n"
-        )
-    return prompt, example["output"]
-
-
-def preprocess_example(example, max_length=512):
-    prompt, response = format_alpaca(example)
-    full_text = prompt + response + tokenizer.eos_token
-
-    prompt_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
-    full = tokenizer(
-        full_text,
-        max_length=max_length,
-        truncation=True,
-        add_special_tokens=False,
-    )
-
-    input_ids = full["input_ids"]
-    attention_mask = full["attention_mask"]
-    labels = input_ids.copy()
-
-    prompt_len = min(len(prompt_ids), len(labels))
-    labels[:prompt_len] = [-100] * prompt_len
-
-    return {
-        "input_ids": input_ids,
-        "attention_mask": attention_mask,
-        "labels": labels,
-    }
-
-
-raw_data = [
-    {"instruction": "解释什么是过拟合。", "input": "", "output": "过拟合是模型在训练集上表现好但泛化差的现象。"},
-    {"instruction": "翻译成英文。", "input": "我喜欢机器学习。", "output": "I like machine learning."},
-]
-
-dataset = Dataset.from_list(raw_data)
-split_dataset = dataset.train_test_split(test_size=0.1, seed=42)
-
-train_dataset = split_dataset["train"].map(
-    preprocess_example,
-    remove_columns=dataset.column_names,
-)
-eval_dataset = split_dataset["test"].map(
-    preprocess_example,
-    remove_columns=dataset.column_names,
-)
-
-train_dataset = train_dataset.filter(lambda x: any(label != -100 for label in x["labels"]))
-eval_dataset = eval_dataset.filter(lambda x: any(label != -100 for label in x["labels"]))
-```
-
-这个脚本的输出可以直接用于下一讲全参数 SFT。
-
----
-
-### 十七、0 依赖最小预处理 demo
-
-如果当前环境没有安装 `datasets` 或 `transformers`，可以先用下面这个纯 Python demo 验证 SFT 数据构造的核心逻辑。它不是真实 tokenizer，但能展示 prompt/response 拼接、assistant-only labels、padding labels 和截断后无效样本过滤。
+下面的程序模拟模板、mask、截断、去重和 padding：
 
 ```python
 import re
@@ -1638,697 +742,213 @@ class ToyTokenizer:
     def __init__(self):
         self.pad_token = "<pad>"
         self.eos_token = "<eos>"
-        self.vocab = {self.pad_token: 0, self.eos_token: 1}
-        self.inv_vocab = {0: self.pad_token, 1: self.eos_token}
         self.pad_token_id = 0
-
-    def _pieces(self, text):
-        return re.findall(r"\n|[^\s]+", text)
+        self.vocab = {self.pad_token: 0, self.eos_token: 1}
+        self.inverse = {0: self.pad_token, 1: self.eos_token}
 
     def encode(self, text):
+        pieces = re.findall(r"\n|[^\s]+", text)
         ids = []
-        for piece in self._pieces(text):
+        for piece in pieces:
             if piece not in self.vocab:
-                idx = len(self.vocab)
-                self.vocab[piece] = idx
-                self.inv_vocab[idx] = piece
+                index = len(self.vocab)
+                self.vocab[piece] = index
+                self.inverse[index] = piece
             ids.append(self.vocab[piece])
         return ids
 
     def decode(self, ids):
-        pieces = []
-        for idx in ids:
-            token = self.inv_vocab[idx]
-            if token not in {self.pad_token, self.eos_token, "\n"}:
-                pieces.append(token)
-        return " ".join(pieces)
+        return " ".join(
+            self.inverse[index]
+            for index in ids
+            if index not in {self.pad_token_id, 1}
+        )
 
 
-def format_alpaca(example):
-    if example.get("input", "").strip():
-        prompt = (
-            "### Instruction:\n"
-            f"{example['instruction']}\n\n"
-            "### Input:\n"
-            f"{example['input']}\n\n"
-            "### Response:\n"
-        )
-    else:
-        prompt = (
-            "### Instruction:\n"
-            f"{example['instruction']}\n\n"
-            "### Response:\n"
-        )
+def format_example(example):
+    prompt = (
+        "Instruction: "
+        + example["instruction"]
+        + "\nResponse: "
+    )
     return prompt, example["output"].strip()
 
 
-def preprocess_example(example, tokenizer, max_length=64):
-    prompt, response = format_alpaca(example)
+def preprocess(example, tokenizer, max_length=32):
+    if not isinstance(max_length, int) or max_length <= 0:
+        raise ValueError("max_length must be a positive integer")
+    prompt, response = format_example(example)
+    if not response:
+        raise ValueError("response must not be empty")
     prompt_ids = tokenizer.encode(prompt)
-    full_ids = tokenizer.encode(prompt + response + " " + tokenizer.eos_token)
+    full_ids = tokenizer.encode(
+        prompt + response + " " + tokenizer.eos_token
+    )
     input_ids = full_ids[:max_length]
-    attention_mask = [1] * len(input_ids)
-    labels = input_ids.copy()
-    prompt_len = min(len(prompt_ids), len(labels))
-    labels[:prompt_len] = [-100] * prompt_len
-    return {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}
+    labels = input_ids[:]
+    labels[:min(len(prompt_ids), len(labels))] = [
+        -100
+    ] * min(len(prompt_ids), len(labels))
+    return {
+        "input_ids": input_ids,
+        "attention_mask": [1] * len(input_ids),
+        "labels": labels,
+    }
 
 
-def has_response_labels(example):
-    return any(label != -100 for label in example["labels"])
+def valid(feature):
+    required = {"input_ids", "attention_mask", "labels"}
+    if not required.issubset(feature):
+        return False
+    lengths = {len(feature[key]) for key in required}
+    if len(lengths) != 1 or not lengths or min(lengths) == 0:
+        return False
+    return any(label != -100 for label in feature["labels"])
 
 
-def collate(features, pad_token_id, label_pad_token_id=-100):
-    max_len = max(len(f["input_ids"]) for f in features)
-    batch = {"input_ids": [], "attention_mask": [], "labels": []}
-    for feature in features:
-        pad_len = max_len - len(feature["input_ids"])
-        batch["input_ids"].append(feature["input_ids"] + [pad_token_id] * pad_len)
-        batch["attention_mask"].append(feature["attention_mask"] + [0] * pad_len)
-        batch["labels"].append(feature["labels"] + [label_pad_token_id] * pad_len)
-    return batch
+def collate(features, pad_token_id):
+    if not features:
+        raise ValueError("cannot collate an empty feature list")
+    if pad_token_id is None:
+        raise ValueError("pad_token_id is required")
+    width = max(len(item["input_ids"]) for item in features)
+    output = {"input_ids": [], "attention_mask": [], "labels": []}
+    for item in features:
+        pad_count = width - len(item["input_ids"])
+        output["input_ids"].append(
+            item["input_ids"] + [pad_token_id] * pad_count
+        )
+        output["attention_mask"].append(
+            item["attention_mask"] + [0] * pad_count
+        )
+        output["labels"].append(
+            item["labels"] + [-100] * pad_count
+        )
+    return output
 
 
-def shape(matrix):
-    return (len(matrix), len(matrix[0]))
-
-
-raw_data = [
-    {"instruction": "解释 什么是 过拟合。", "input": "", "output": "过拟合 是 训练集 好 但 泛化 差。"},
-    {"instruction": "翻译 成 英文。", "input": "我 喜欢 机器学习。", "output": "I like machine learning."},
-    {"instruction": "解释 什么是 过拟合。", "input": "", "output": "过拟合 是 训练集 好 但 泛化 差。"},
-    {"instruction": "空 答案 样本。", "input": "", "output": "   "},
+raw = [
+    {"instruction": "解释过拟合。", "output": "训练集好但泛化差。"},
+    {"instruction": "解释过拟合。", "output": "训练集好但泛化差。"},
+    {"instruction": "翻译。", "output": "I like machine learning."},
 ]
-
-seen = set()
-cleaned = []
-for ex in raw_data:
-    key = (ex["instruction"].strip(), ex.get("input", "").strip(), ex["output"].strip())
-    if not ex["output"].strip() or key in seen:
-        continue
-    seen.add(key)
-    cleaned.append(ex)
 
 tokenizer = ToyTokenizer()
-tokenized = [preprocess_example(ex, tokenizer, max_length=64) for ex in cleaned]
-valid = [ex for ex in tokenized if has_response_labels(ex)]
-batch = collate(valid, tokenizer.pad_token_id)
+seen = set()
+features = []
+for example in raw:
+    key = (example["instruction"], example["output"])
+    if key in seen:
+        continue
+    seen.add(key)
+    item = preprocess(example, tokenizer)
+    if valid(item):
+        features.append(item)
+
+if not features:
+    raise ValueError("all examples lost their supervised response during truncation")
+batch = collate(features, tokenizer.pad_token_id)
 response_ids = [
     token_id
-    for token_id, label in zip(valid[0]["input_ids"], valid[0]["labels"])
+    for token_id, label in zip(
+        features[0]["input_ids"],
+        features[0]["labels"],
+    )
     if label != -100
 ]
-truncated = preprocess_example(cleaned[0], tokenizer, max_length=6)
-pad_label_values = [
-    label
-    for row_mask, row_labels in zip(batch["attention_mask"], batch["labels"])
-    for mask, label in zip(row_mask, row_labels)
+
+print("unique_valid_examples=", len(features))
+print("batch_width=", len(batch["input_ids"][0]))
+print("supervised_tokens=", sum(
+    label != -100 for label in features[0]["labels"]
+))
+print("response=", tokenizer.decode(response_ids))
+print("padding_labels_ok=", all(
+    label == -100
+    for mask_row, label_row in zip(
+        batch["attention_mask"],
+        batch["labels"],
+    )
+    for mask, label in zip(mask_row, label_row)
     if mask == 0
-]
-
-print("cleaned_count=", len(cleaned))
-print("valid_count=", len(valid))
-print("input_shape=", shape(batch["input_ids"]))
-print("label_shape=", shape(batch["labels"]))
-print("attention_shape=", shape(batch["attention_mask"]))
-print("first_prompt_mask_ok=", all(label == -100 for label in valid[0]["labels"][:8]))
-print("first_response_label_count=", sum(label != -100 for label in valid[0]["labels"]))
-print("pad_labels=", pad_label_values)
-print("pad_labels_all_minus100=", all(label == -100 for label in pad_label_values))
-print("decoded_response=", tokenizer.decode(response_ids))
-print("truncated_has_response=", has_response_labels(truncated))
+))
 ```
 
-参考输出：
+真实 tokenizer 还要处理 BPE 边界和特殊 token，这个 toy 实验只负责让监督范围可见。
+
+### 4.2.9 数据处理结果也要版本化
+
+划分数据集时，随机种子只是必要条件。还应固定去重规则、分组键、tokenizer、chat template、max_length、截断策略和无监督样本过滤规则。原始文本不变，tokenizer 版本变化也可能改变 token 数、截断位置和有效监督 token 数。因此应保存可抽查的中间样本：
 
 ```text
-cleaned_count= 2
-valid_count= 2
-input_shape= (2, 24)
-label_shape= (2, 24)
-attention_shape= (2, 24)
-first_prompt_mask_ok= True
-first_response_label_count= 8
-pad_labels= [-100, -100, -100, -100, -100]
-pad_labels_all_minus100= True
-decoded_response= 过拟合 是 训练集 好 但 泛化 差。
-truncated_has_response= False
+渲染后的完整文本。
+input_ids。
+attention_mask。
+labels。
+有效监督 token 数。
+来源与任务元数据。
 ```
 
-这个 demo 说明四件事：重复样本和空答案会被过滤；`input_ids`、`attention_mask`、`labels` 的 batch shape 对齐；prompt 和 padding 位置的 label 都是 `-100`；如果 `max_length` 过短导致回答被截掉，样本应被过滤。
+## 4.3 全参数 SFT：监督目标、显存与可恢复训练
 
----
+### 4.3.1 全参数训练的含义
 
-### 十八、Chat Template 版本预处理思路
-
-如果模型有 chat template，可以使用更标准的 messages 格式。
-
-```python
-def build_messages(example):
-    user_content = example["instruction"]
-    if example.get("input", ""):
-        user_content += "\n" + example["input"]
-
-    return [
-        {"role": "system", "content": "你是一个有帮助的 AI 助手。"},
-        {"role": "user", "content": user_content},
-        {"role": "assistant", "content": example["output"]},
-    ]
-```
-
-训练文本和 assistant mask 可以直接由 tokenizer 一起产生：
-
-```python
-messages = build_messages(example)
-encoded = tokenizer.apply_chat_template(
-    messages,
-    tokenize=True,
-    return_dict=True,
-    add_generation_prompt=False,
-    return_assistant_tokens_mask=True,
-)
-
-input_ids = encoded["input_ids"]
-attention_mask = encoded["attention_mask"]
-assistant_mask = encoded["assistant_masks"]
-labels = [
-    token_id if is_assistant else -100
-    for token_id, is_assistant in zip(input_ids, assistant_mask)
-]
-```
-
-这种写法要求 chat template 使用了 Transformers 支持的 generation 标记（通常是模板中的 `{% generation %}` / `{% endgeneration %}`），并且本地 Transformers 版本支持 `return_assistant_tokens_mask`。训练前应打印 mask 覆盖的 token，确认回答正文以及你希望训练的 EOS token 被包含。
-
-如果模板不支持 assistant mask，可以把完整渲染文本和字符区间交给 fast tokenizer 的 `return_offsets_mapping=True`，按字符范围构造 labels；不要默认用“prompt token 数”切片，因为模板控制 token、特殊 token 和 BPE 边界都可能让两个独立 tokenize 的长度不同。
-
-有两个边界要注意：
-
-1. `apply_chat_template(..., add_generation_prompt=False)` 适合已经包含 assistant 答案的训练样本。
-2. `apply_chat_template(..., add_generation_prompt=True)` 更适合推理或构造“只到 assistant 开始标记为止”的 prompt，用来计算 prompt token 长度。
-
-如果 tokenizer 的 chat template 不支持 assistant token mask，训练框架可能只能使用 completion-only loss 或基于偏移量的自定义 mask。TRL 的 `assistant_only_loss` 依赖模板能够标出 assistant 生成区间；不要把 `assistant_only_loss` 和“把整条序列都参与 loss”混为一谈。
-
----
-
-### 十九、常见工程坑
-
-#### 坑 1：labels 全等于 input_ids
-
-这会让模型同时学习 prompt 和 response。
-
-有些场景可以这么做，但指令微调通常更希望只训练回答部分。
-
-#### 坑 2：labels 全是 -100
-
-这说明 response 被截断掉了，或者 prompt_len 算错了。
-
-这种样本没有 loss。
-
-#### 坑 3：没有 eos token
-
-如果不加 eos，模型可能不知道回答在哪里结束。
-
-#### 坑 4：pad labels 用了 pad_token_id
-
-labels 的 padding 应该用 `-100`，不是 pad token id。
-
-#### 坑 5：chat template 和模型不匹配
-
-这会让模型学到错误格式。
-
-指令模型微调时应使用该模型自己的模板。
-
-#### 坑 6：训练集和验证集有重复样本
-
-验证 loss 会过于乐观。
-
-#### 坑 7：直接相信数据集质量
-
-开源指令数据常有重复、错答、格式混乱和安全问题。
-
-必须抽样检查。
-
-#### 坑 8：忘记区分框架内部 shift 和手写 loss shift
-
-如果使用 Hugging Face causal LM 的 `labels` 参数，通常传入等长 `labels` 即可；如果自己手写 loss，要显式把 logits 和 labels 错开一位。
-
----
-
-### 二十、面试怎么讲 SFT 数据构造
-
-如果面试官问“指令微调数据怎么构造”，可以这样回答：
-
-```text
-我会把原始样本整理成 instruction、input、output 或 messages 格式。然后根据目标模型的 prompt template 或 chat template 拼接成训练文本，用 tokenizer 编码成 input_ids 和 attention_mask。labels 通常复制 input_ids，但把 prompt 部分和 padding 部分设为 -100，只在 assistant response 部分计算 loss。最后做长度截断、过滤无效样本、去重和 train/eval 划分。
-```
-
-如果追问“为什么 prompt 部分 labels 要设为 -100”，可以回答：
-
-```text
-因为 SFT 的目标是让模型在给定用户指令后学习生成助手回答，而不是学习复述用户问题或模板。把 prompt 部分设为 -100 后，CrossEntropyLoss 会忽略这些位置，只在 response token 上计算 loss。
-```
-
-如果问“chat template 为什么重要”，可以回答：
-
-```text
-不同聊天模型在预训练或指令微调时使用的 system/user/assistant 标记不同。微调时如果模板不匹配，模型会学到和原始对话格式不一致的分布，影响推理效果。因此应优先使用 tokenizer 自带的 apply_chat_template。
-```
-
-如果问“SFT 数据质量怎么检查”，可以回答：
-
-```text
-我会检查 instruction 是否清楚、output 是否回答问题、是否有空答案、重复样本、过长样本、乱码和安全风险；还会 decode tokenized 样本，确认 prompt 和 response 拼接正确，labels 中只有 response 部分参与 loss。
-```
-
----
-
-### 二十一、小练习
-
-#### 练习 1
-
-构造 10 条 `instruction/input/output` 样本，并转成 Hugging Face Dataset。
-
-#### 练习 2
-
-实现 `format_alpaca`，打印拼接后的 prompt 和 response。
-
-#### 练习 3
-
-实现 `preprocess_example`，确认 prompt 部分 labels 是 `-100`。
-
-#### 练习 4
-
-写一个 collator，确认 labels 的 padding 是 `-100`。
-
-#### 练习 5
-
-用 `tokenizer.apply_chat_template` 重写预处理逻辑。
-
----
-
-### 本讲总结
-
-这一讲构造了指令微调数据集。
-
-核心结论如下：
-
-1. SFT 数据通常包含 instruction、input、output，或 chat messages。
-2. 模型训练看到的是 prompt 和 response 拼接后的 token 序列。
-3. labels 通常复制 input_ids，但 prompt 和 padding 部分应设为 `-100`。
-4. `-100` 会被 CrossEntropyLoss 忽略。
-5. chat 模型应优先使用目标 tokenizer 的 chat template。
-6. 数据预处理后必须 decode 抽查，确认格式和 labels mask 正确。
-7. 数据质量直接决定 SFT 效果，清洗、去重和验证集划分很重要。
-
-下一讲，我们使用这个数据集对小模型做全参数 SFT。
-
-## 第 21 讲：全参数 SFT 小模型
-
-### 本讲目标
-
-学完本讲，你应该能做到六件事：
-
-1. 理解全参数 SFT 和参数高效微调的区别。
-2. 使用 Hugging Face `Trainer` 对小模型做 SFT。
-3. 写出全参数 SFT 的核心训练配置。
-4. 理解显存占用、batch size、gradient accumulation 的关系。
-5. 保存和加载 SFT 后的模型。
-6. 能排查全参数微调中的常见问题。
-
-上一讲我们构造了指令微调数据集。
-
-本讲把数据喂给模型，做一次全参数 SFT。
-
-本讲沿用 Hugging Face Transformers 的 `Trainer`、`TrainingArguments`、模型保存加载和 gradient checkpointing 接口，并把它们和 PyTorch 的 optimizer / 训练循环对应起来。示例以小模型教学 SFT 为主，重点是训练目标、batch、gradient accumulation、保存加载和排错；大模型 LoRA、QLoRA 和高性能分布式训练放到后续讲解。
-
-所谓全参数 SFT，就是：
-
-```text
-模型所有可训练参数都参与梯度更新。
-```
-
-这和后面要讲的 LoRA 不同。
-
-LoRA 只训练少量低秩适配器参数。
-
-全参数 SFT 更直接，但显存和存储成本更高。
-
-所以本讲只建议对小模型做实验。
-
----
-
-### 一、什么是全参数 SFT
-
-SFT 是 supervised fine-tuning。
-
-目标是让模型学习指令数据中的回答风格和任务能力。
-
-全参数 SFT 表示：
-
-```text
-embedding、attention、MLP、norm、lm_head 等所有参数都更新。
-```
-
-优点：
-
-```text
-表达能力强。
-模型可以充分适配新数据。
-实现直接，不需要额外适配器结构。
-```
-
-缺点：
-
-```text
-显存占用大。
-训练成本高。
-容易灾难性遗忘。
-每个任务都要保存一份完整模型。
-```
-
-对于几百 MB 到几 GB 的小模型，可以尝试全参数 SFT。
-
-对于 7B、14B、70B 模型，通常更常用 LoRA、QLoRA 或其他参数高效方法。
-
-如果用上一讲构造好的 assistant mask `m_{b,t}`，全参数 SFT 的目标可以写成：
+全参数 SFT 使用上一节的 masked causal loss，只把可更新参数集合设为整个模型：
 
 ```math
-L_{\mathrm{sft}}(\theta)=
--
-\frac{
-\sum_{b=1}^{B}\sum_{t=1}^{T-1}m_{b,t}\log p_\theta(x_{b,t}\mid x_{b,0:t-1})
-}{
-\sum_{b=1}^{B}\sum_{t=1}^{T-1}m_{b,t}
-}
+\Theta_{\mathrm{train}}
+=
+\Theta_{\mathrm{model}}
 ```
 
-全参数的意思不是 loss 变了，而是优化时所有模型参数 `theta` 都允许更新。和 LoRA 相比，它的可训练参数集合更大：
+参数更新可抽象为：
 
 ```math
-\Theta_{\mathrm{train}}=\Theta_{\mathrm{model}}
+\theta_{k+1}
+=
+\theta_k-\eta\widehat{g}_k
 ```
 
-后面的 LoRA 会变成“冻结原模型参数，只训练 adapter 参数”。
+全参数的适配自由度大，但基座模型原来的能力也更容易被新数据覆盖。小数据、大学习率或过多训练轮次会放大遗忘和过拟合。
 
----
+### 4.3.2 显存估算
 
-### 二、准备依赖
+设可训练参数量为 \(P\)，权重、梯度和一个优化器状态元素分别占 \(b_w,b_g,b_o\) 字节，一个粗略训练内存表达为：
 
-```bash
-pip install torch transformers datasets accelerate
+```math
+M_{\mathrm{train}}
+\approx
+P(b_w+b_g+2b_o)
++
+M_{\mathrm{activation}}
++
+M_{\mathrm{temporary}}
 ```
 
-本讲使用：
+AdamW 通常保存一阶和二阶状态，所以出现 \(2b_o\)。实现还可能保留 fp32 master weights、梯度 scaler、通信 buffer 和 allocator 缓存。激活内存又随 batch、序列长度、层数、隐藏维度和 checkpointing 改变。
+
+fp16 权重约占 \(2P\) 字节只是推理权重的量级；模型能生成不代表同一设备能全参数训练。
+
+### 4.3.3 Trainer 与有效 batch
+
+Trainer 封装的仍是：
 
 ```text
-AutoTokenizer
-AutoModelForCausalLM
-Trainer
-TrainingArguments
-Dataset
+collator → forward → masked loss → backward
+→ optimizer.step → scheduler → logging/eval/save
 ```
 
-如果 GPU 显存有限，建议先用非常小的模型跑通流程。
+下面的 `TrainingArguments` 和 `Trainer` 片段假设 `model`、`train_dataset`、`eval_dataset` 和 `data_collator` 已分别按 4.1、4.2 节准备好；它们不是可以脱离上下文直接运行的完整训练脚本。
 
-例如：
-
-```text
-sshleifer/tiny-gpt2
-distilgpt2
-```
-
-真实中文 SFT 可以换成更合适的中文或多语言小模型。
-
----
-
-### 三、整体流程
-
-全参数 SFT 流程如下：
-
-```text
-1. 加载 tokenizer。
-2. 加载 causal LM。
-3. 构造 instruction 数据。
-4. tokenize，并构造 labels mask。
-5. 构造 data collator。
-6. 配置 TrainingArguments。
-7. 创建 Trainer。
-8. trainer.train()。
-9. 保存模型和 tokenizer。
-10. 加载微调后模型做推理测试。
-```
-
-这条流程是 Hugging Face 微调的基础。
-
-后面的 LoRA 和 QLoRA 也是在这条流程上改造。
-
----
-
-### 四、加载 tokenizer 和模型
+小模型配置：
 
 ```python
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
-
-
-model_name = "sshleifer/tiny-gpt2"
-
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-if tokenizer.pad_token is None:
-    tokenizer.pad_token = tokenizer.eos_token
-
-model = AutoModelForCausalLM.from_pretrained(model_name)
-model.config.pad_token_id = tokenizer.pad_token_id
-```
-
-为什么设置 `pad_token`？
-
-因为训练 batch 中不同样本长度不同，需要 padding。
-
-decoder-only 模型常常没有默认 pad token。
-
-小实验中可以用 eos token 兼作 pad token。
-
----
-
-### 五、准备小型 SFT 数据
-
-```python
-raw_data = [
-    {
-        "instruction": "解释什么是过拟合。",
-        "input": "",
-        "output": "过拟合是指模型在训练集上表现很好，但在未见数据上表现较差的现象。",
-    },
-    {
-        "instruction": "给出三个缓解过拟合的方法。",
-        "input": "",
-        "output": "可以增加数据、使用正则化、加入 dropout、早停或减小模型容量。",
-    },
-    {
-        "instruction": "把下面这句话翻译成英文。",
-        "input": "我喜欢机器学习。",
-        "output": "I like machine learning.",
-    },
-    {
-        "instruction": "解释什么是梯度下降。",
-        "input": "",
-        "output": "梯度下降是一种通过沿负梯度方向更新参数来最小化损失函数的优化方法。",
-    },
-]
-```
-
-转成 Dataset：
-
-```python
-from datasets import Dataset
-
-
-dataset = Dataset.from_list(raw_data)
-split_dataset = dataset.train_test_split(test_size=0.25, seed=42)
-train_raw = split_dataset["train"]
-eval_raw = split_dataset["test"]
-```
-
-真实项目中，数据至少应该有几千到几十万条。
-
-这里的小数据只用于跑通流程。
-
----
-
-### 六、格式化 prompt
-
-```python
-def format_alpaca(example):
-    if example.get("input", ""):
-        prompt = (
-            "### Instruction:\n"
-            f"{example['instruction']}\n\n"
-            "### Input:\n"
-            f"{example['input']}\n\n"
-            "### Response:\n"
-        )
-    else:
-        prompt = (
-            "### Instruction:\n"
-            f"{example['instruction']}\n\n"
-            "### Response:\n"
-        )
-    return prompt, example["output"]
-```
-
-这和上一讲保持一致。
-
-后续如果使用 chat 模型，建议改成 `apply_chat_template`。
-
----
-
-### 七、tokenize 并构造 labels
-
-```python
-max_length = 512
-
-
-def preprocess_example(example):
-    prompt, response = format_alpaca(example)
-    full_text = prompt + response + tokenizer.eos_token
-
-    full = tokenizer(
-        full_text,
-        max_length=max_length,
-        truncation=True,
-        add_special_tokens=False,
-        return_offsets_mapping=True,
-    )
-
-    input_ids = full["input_ids"]
-    attention_mask = full["attention_mask"]
-    offsets = full["offset_mapping"]
-    prompt_end = len(prompt)
-    labels = [
-        token_id if end > prompt_end else -100
-        for token_id, (start, end) in zip(input_ids, offsets)
-    ]
-
-    return {
-        "input_ids": input_ids,
-        "attention_mask": attention_mask,
-        "labels": labels,
-    }
-```
-
-预处理数据集：
-
-```python
-train_dataset = train_raw.map(
-    preprocess_example,
-    remove_columns=train_raw.column_names,
-)
-eval_dataset = eval_raw.map(
-    preprocess_example,
-    remove_columns=eval_raw.column_names,
-)
-
-train_dataset = train_dataset.filter(lambda x: any(label != -100 for label in x["labels"]))
-eval_dataset = eval_dataset.filter(lambda x: any(label != -100 for label in x["labels"]))
-```
-
-这份骨架沿用前一讲基于 `offset_mapping` 的 mask，因此应使用 fast tokenizer；如果目标 tokenizer 不支持 offsets，就改用它的 assistant mask 或实现经过验证的模板级 mask，不要静默退回到不可靠的 token 长度相减。
-
----
-
-### 八、Data Collator
-
-```python
-class SFTDataCollator:
-    def __init__(self, tokenizer, label_pad_token_id=-100):
-        self.tokenizer = tokenizer
-        self.label_pad_token_id = label_pad_token_id
-
-    def __call__(self, features):
-        input_ids = [torch.tensor(f["input_ids"], dtype=torch.long) for f in features]
-        attention_mask = [torch.tensor(f["attention_mask"], dtype=torch.long) for f in features]
-        labels = [torch.tensor(f["labels"], dtype=torch.long) for f in features]
-
-        input_ids = torch.nn.utils.rnn.pad_sequence(
-            input_ids,
-            batch_first=True,
-            padding_value=self.tokenizer.pad_token_id,
-        )
-        attention_mask = torch.nn.utils.rnn.pad_sequence(
-            attention_mask,
-            batch_first=True,
-            padding_value=0,
-        )
-        labels = torch.nn.utils.rnn.pad_sequence(
-            labels,
-            batch_first=True,
-            padding_value=self.label_pad_token_id,
-        )
-
-        return {
-            "input_ids": input_ids,
-            "attention_mask": attention_mask,
-            "labels": labels,
-        }
-
-
-data_collator = SFTDataCollator(tokenizer)
-```
-
-这里最重要的是：
-
-```text
-labels padding 用 -100。
-```
-
-否则 padding token 会参与 loss。
-
----
-
-### 九、检查一个 batch
-
-在训练前先检查 batch。
-
-```python
-from torch.utils.data import DataLoader
-
-
-loader = DataLoader(
-    train_dataset,
-    batch_size=2,
-    collate_fn=data_collator,
-)
-
-batch = next(iter(loader))
-print(batch["input_ids"].shape)
-print(batch["attention_mask"].shape)
-print(batch["labels"].shape)
-print(batch["labels"][0])
-```
-
-确认三件事：
-
-```text
-input_ids、attention_mask、labels shape 一致。
-prompt 部分 label 是 -100。
-response 部分 label 是真实 token id。
-```
-
-不要跳过这一步。
-
-SFT 训练异常，很多时候就是 labels 构造错了。
-
----
-
-### 十、TrainingArguments
-
-```python
 from transformers import TrainingArguments
 
 
 training_args = TrainingArguments(
-    output_dir="outputs/full_sft_tiny_gpt2",
+    output_dir="outputs/full_sft_tiny",
     num_train_epochs=3,
     per_device_train_batch_size=2,
     per_device_eval_batch_size=2,
@@ -2345,68 +965,7 @@ training_args = TrainingArguments(
 )
 ```
 
-如果你的 transformers 版本较旧，参数名可能是：
-
-```python
-evaluation_strategy="steps"
-```
-
-而不是：
-
-```python
-eval_strategy="steps"
-```
-
-根据本地版本调整即可。
-
-如果同时开启 gradient checkpointing，decoder-only 模型通常还应设置 `model.config.use_cache = False`。KV cache 为逐 token 推理设计，而训练反向传播需要保留另一套激活信息；两者同时开启往往会产生 warning 或额外开销。
-
----
-
-### 十一、gradient accumulation 是什么
-
-如果显存只能放下 batch size 2，但你想要等效 batch size 8，可以设置：
-
-```text
-per_device_train_batch_size = 2
-gradient_accumulation_steps = 4
-```
-
-等效 batch size 约为：
-
-```text
-2 * 4 = 8
-```
-
-如果是多卡，还要乘以 GPU 数：
-
-```math
-B_{\mathrm{eff}}
-=
-B_{\mathrm{device}}\times G\times N_{\mathrm{gpu}}
-```
-
-它的作用是：
-
-```text
-分多次 forward/backward 累积梯度，再执行一次 optimizer step。
-```
-
-这是显存不足时非常常用的技巧。
-
-更具体地说，假设累积 `G` 个 micro-batch 后更新一次参数，那么更新方向近似是：
-
-```math
-g=
-\frac{1}{G}
-\sum_{i=1}^{G}\nabla_\theta L_i(\theta)
-```
-
-如果你增大 `gradient_accumulation_steps`，显存压力通常下降，但 optimizer step 频率也会下降；学习率、warmup steps 和 logging/eval steps 都要按 optimizer step 的视角重新理解。
-
----
-
-### 十二、创建 Trainer 并训练
+旧版 Transformers 可能使用 evaluation_strategy，新版 Trainer 也可能用 processing_class 保存 tokenizer，而旧版使用 tokenizer 参数。版本差异应通过本地签名确认。
 
 ```python
 from transformers import Trainer
@@ -2418,261 +977,106 @@ trainer = Trainer(
     train_dataset=train_dataset,
     eval_dataset=eval_dataset,
     data_collator=data_collator,
-    tokenizer=tokenizer,
+    processing_class=tokenizer,
 )
-
 trainer.train()
+trainer.save_model("outputs/full_sft_tiny/final")
+tokenizer.save_pretrained("outputs/full_sft_tiny/final")
 ```
 
-较新的 Transformers 版本中，`Trainer` 更推荐使用 `processing_class=tokenizer` 来保存 tokenizer / processor 相关信息；很多旧教程仍使用 `tokenizer=tokenizer`。如果本地运行时看到 deprecation warning，可以把上面参数改成：
-
-```python
-processing_class=tokenizer
-```
-
-如果本机版本不认识 `processing_class`，继续使用 `tokenizer=tokenizer` 即可。
-
-训练结束后保存：
-
-```python
-trainer.save_model("outputs/full_sft_tiny_gpt2/final")
-tokenizer.save_pretrained("outputs/full_sft_tiny_gpt2/final")
-```
-
-保存目录会包含：
-
-```text
-model weights
-config.json
-tokenizer files
-generation config
-```
-
-推理时可以直接从这个目录加载。
-
----
-
-### 十三、完整训练脚本骨架
-
-```python
-import torch
-from datasets import Dataset
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    Trainer,
-    TrainingArguments,
-)
-
-
-model_name = "sshleifer/tiny-gpt2"
-output_dir = "outputs/full_sft_tiny_gpt2"
-max_length = 512
-
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-if tokenizer.pad_token is None:
-    tokenizer.pad_token = tokenizer.eos_token
-
-model = AutoModelForCausalLM.from_pretrained(model_name)
-model.config.pad_token_id = tokenizer.pad_token_id
-
-# raw_data = [...]
-# dataset split
-# preprocess_example
-# SFTDataCollator
-
-training_args = TrainingArguments(
-    output_dir=output_dir,
-    num_train_epochs=3,
-    per_device_train_batch_size=2,
-    per_device_eval_batch_size=2,
-    gradient_accumulation_steps=4,
-    learning_rate=5e-5,
-    logging_steps=10,
-    eval_strategy="steps",
-    eval_steps=20,
-    save_steps=20,
-    save_total_limit=2,
-    fp16=torch.cuda.is_available(),
-    report_to="none",
-)
-
-trainer = Trainer(
-    model=model,
-    args=training_args,
-    train_dataset=train_dataset,
-    eval_dataset=eval_dataset,
-    data_collator=data_collator,
-    tokenizer=tokenizer,
-)
-
-trainer.train()
-trainer.save_model(f"{output_dir}/final")
-tokenizer.save_pretrained(f"{output_dir}/final")
-```
-
-如果当前 `transformers` 版本提示 `tokenizer` 参数将被替换，可以把 `Trainer(...)` 里的 `tokenizer=tokenizer` 改成 `processing_class=tokenizer`。
-
-实际使用时，把前面数据构造代码补完整即可。
-
----
-
-### 十四、加载 SFT 后模型推理
-
-```python
-from transformers import AutoModelForCausalLM, AutoTokenizer
-
-
-sft_dir = "outputs/full_sft_tiny_gpt2/final"
-
-tokenizer = AutoTokenizer.from_pretrained(sft_dir)
-model = AutoModelForCausalLM.from_pretrained(sft_dir)
-model.eval()
-
-prompt = (
-    "### Instruction:\n"
-    "解释什么是过拟合。\n\n"
-    "### Response:\n"
-)
-
-inputs = tokenizer(prompt, return_tensors="pt")
-
-with torch.no_grad():
-    generated_ids = model.generate(
-        **inputs,
-        max_new_tokens=100,
-        do_sample=True,
-        temperature=0.7,
-        top_p=0.9,
-        pad_token_id=tokenizer.eos_token_id,
-    )
-
-print(tokenizer.decode(generated_ids[0], skip_special_tokens=True))
-```
-
-注意：
-
-```text
-推理 prompt 格式要和训练时一致。
-```
-
-如果训练时用 Alpaca 格式，推理也要用 Alpaca 格式。
-
-如果训练时用 chat template，推理也要用 chat template。
-
----
-
-### 十五、全参数 SFT 的显存开销
-
-全参数训练需要保存：
-
-```text
-模型参数
-梯度
-优化器状态
-激活值
-```
-
-AdamW 优化器通常还要保存一阶和二阶动量。
-
-粗略理解：
-
-```text
-训练显存远大于推理显存。
-```
-
-同一个模型，推理能跑，不代表全参数 SFT 能跑。
-
-粗略估算时可以先把模型参数量记作 `P`，权重、梯度和 AdamW 两个动量状态都会占显存：
+梯度累积下，有效 batch size 近似为：
 
 ```math
-M_{\mathrm{state}}
-\approx
-P\cdot(s_w+s_g+2s_o)
+B_{\mathrm{eff}}
+=
+B_{\mathrm{device}}
+\times
+N_{\mathrm{gpu}}
+\times
+G
 ```
 
-其中 `s_w` 是单个权重元素字节数，`s_g` 是梯度字节数，`s_o` 是 AdamW 一阶或二阶状态的单元素字节数。真实训练还要加上激活值、临时 buffer、通信 buffer 和框架开销，所以这个公式只是理解“为什么训练比推理贵”的下限估算。
+但语言模型更应记录有效监督 token：
 
-如果 OOM，可以尝试：
-
-```text
-减小 per_device_train_batch_size。
-增大 gradient_accumulation_steps。
-减小 max_length。
-使用 fp16/bf16。
-开启 gradient checkpointing。
-换更小模型。
-改用 LoRA 或 QLoRA。
+```math
+N_{\mathrm{token,step}}
+=
+\sum_i\sum_t\mathbf{1}[y_{i,t}\neq-100]
 ```
 
-开启 gradient checkpointing：
+当样本长度不同，逐 micro-batch 平均后再累积不一定等价于所有有效 token 的全局平均。严谨比较时要记录每步 token 数，必要时显式做 token-level normalization。
+
+### 4.3.4 checkpointing 与恢复
+
+gradient checkpointing 用重新计算换激活显存：
 
 ```python
 model.config.use_cache = False
 model.gradient_checkpointing_enable()
 ```
 
-它会用更多计算换更低激活显存。
+KV cache 为逐 token 推理优化，通常不应与训练 checkpointing 同时开启。
 
----
+可恢复 checkpoint 可能包含：
 
-### 十六、手写训练循环版本
+```text
+模型参数、optimizer state、学习率调度器 state。
+随机数状态、训练步数和 Trainer state。
+```
 
-虽然 `Trainer` 很方便，但你也应该知道底层逻辑。
+只加载权重可以继续推理，却不一定能恢复原优化轨迹：
 
 ```python
-from torch.utils.data import DataLoader
+trainer.train(
+    resume_from_checkpoint="outputs/full_sft_tiny/checkpoint-100"
+)
+```
+
+恢复前应确认数据顺序、batch、梯度累积、随机种子和版本没有改变。改变有效 batch 后，旧 optimizer state 对新 token 语义未必合适。
+
+### 4.3.5 手写训练循环
+
+这个循环同样依赖已经构造好的 `model`、`train_dataset` 和 `data_collator`。它展示训练状态如何流动；真实任务还要先确认数据集非空，并为保存、恢复和评估定义明确的目录与策略。
+
+```python
+import torch
 from torch.optim import AdamW
+from torch.utils.data import DataLoader
 
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 model.to(device)
 model.train()
-
 loader = DataLoader(
     train_dataset,
     batch_size=2,
     shuffle=True,
     collate_fn=data_collator,
 )
-
 optimizer = AdamW(model.parameters(), lr=5e-5)
 
 for epoch in range(3):
     for step, batch in enumerate(loader):
-        batch = {k: v.to(device) for k, v in batch.items()}
-        outputs = model(**batch)
-        loss = outputs.loss
-
-        optimizer.zero_grad(set_to_none=True)
+        batch = {
+            key: value.to(device)
+            for key, value in batch.items()
+        }
+        loss = model(**batch).loss
+        if not torch.isfinite(loss):
+            raise FloatingPointError("non-finite loss")
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
-
+        optimizer.zero_grad(set_to_none=True)
         if step % 10 == 0:
-            print(f"epoch {epoch}, step {step}, loss {loss.item():.4f}")
+            print("epoch=", epoch, "step=", step, "loss=", loss.item())
 ```
 
-`Trainer` 内部做的事情，本质也是：
+生产训练还要加入梯度裁剪、混合精度、异常 loss 检查、评估和 checkpoint 保存。理解这段底层循环，可以在 Trainer 的默认行为不符合预期时逐层定位。
 
-```text
-forward
-loss
-backward
-optimizer step
-logging
-evaluation
-checkpoint
-```
+### 4.3.6 纯 Python 的 masked loss 更新实验
 
-理解手写循环有助于排查问题。
-
----
-
-### 十七、0 依赖 toy 全参数训练循环
-
-如果当前环境不能安装 `torch`、`transformers` 或 `datasets`，可以用下面这个纯 Python demo 先理解全参数 SFT 的三个核心动作：只在非 `-100` label 上算 loss，累积多个 micro-batch 梯度后再更新，一次更新会修改模型的全部参数。
-
-这个 demo 用一个 bigram causal LM 代替真实 Transformer。它太小，不具备真实语言能力，但训练循环和 assistant-only loss 的逻辑是一样的。
+下面用 bigram logits 代替 Transformer，只验证目标 token 的梯度和全参数更新：
 
 ```python
 import math
@@ -2680,535 +1084,195 @@ import random
 
 
 random.seed(7)
-vocab_size = 12
-train_data = [
-    {"input_ids": [2, 3, 4, 5, 6, 7, 1], "labels": [-100, -100, -100, 5, 6, 7, 1]},
-    {"input_ids": [2, 8, 4, 9, 10, 11, 1], "labels": [-100, -100, -100, 9, 10, 11, 1]},
-]
+vocab_size = 10
+if vocab_size <= 1:
+    raise ValueError("vocab_size must be greater than one")
 logits = [
     [random.uniform(-0.02, 0.02) for _ in range(vocab_size)]
     for _ in range(vocab_size)
 ]
+data = [
+    {"ids": [2, 3, 4, 5, 6, 1], "labels": [-100, -100, -100, 5, 6, 1]},
+    {"ids": [2, 7, 4, 8, 9, 1], "labels": [-100, -100, -100, 8, 9, 1]},
+]
+if not data:
+    raise ValueError("masked-loss toy experiment requires non-empty data")
+for item in data:
+    if len(item["ids"]) != len(item["labels"]):
+        raise ValueError("ids and labels must have equal lengths")
+    if not item["ids"]:
+        raise ValueError("each sequence must contain at least one token")
+    if any(token_id < 0 or token_id >= vocab_size for token_id in item["ids"]):
+        raise ValueError("input token id is outside the toy vocabulary")
+    if any(
+        label != -100 and (label < 0 or label >= vocab_size)
+        for label in item["labels"]
+    ):
+        raise ValueError("supervised label is outside the toy vocabulary")
 
 
 def softmax(row):
-    max_logit = max(row)
-    exps = [math.exp(x - max_logit) for x in row]
-    total = sum(exps)
-    return [x / total for x in exps]
+    maximum = max(row)
+    values = [math.exp(value - maximum) for value in row]
+    total = sum(values)
+    return [value / total for value in values]
 
 
-def empty_grad():
-    return [[0.0 for _ in range(vocab_size)] for _ in range(vocab_size)]
+def zeros():
+    return [[0.0] * vocab_size for _ in range(vocab_size)]
 
 
-def add_grad(dst, src):
-    for i in range(vocab_size):
-        for j in range(vocab_size):
-            dst[i][j] += src[i][j]
-
-
-def loss_and_grad(batch):
-    grad = empty_grad()
-    total_loss = 0.0
-    valid_tokens = 0
+def loss_grad(batch):
+    grad = zeros()
+    loss = 0.0
+    count = 0
     for item in batch:
-        input_ids = item["input_ids"]
-        labels = item["labels"]
-        for t in range(1, len(input_ids)):
-            target = labels[t]
+        for pos in range(1, len(item["ids"])):
+            target = item["labels"][pos]
             if target == -100:
                 continue
-            context = input_ids[t - 1]
-            probs = softmax(logits[context])
-            total_loss -= math.log(max(probs[target], 1e-12))
-            valid_tokens += 1
-            for token_id, prob in enumerate(probs):
-                grad[context][token_id] += prob
-            grad[context][target] -= 1.0
-    if valid_tokens == 0:
-        return 0.0, grad, 0
-    for i in range(vocab_size):
-        for j in range(vocab_size):
-            grad[i][j] /= valid_tokens
-    return total_loss / valid_tokens, grad, valid_tokens
+            row = item["ids"][pos - 1]
+            probabilities = softmax(logits[row])
+            loss -= math.log(max(probabilities[target], 1e-12))
+            count += 1
+            for token_id, probability in enumerate(probabilities):
+                grad[row][token_id] += probability
+            grad[row][target] -= 1.0
+    if count == 0:
+        raise ValueError("masked loss is undefined when no label is supervised")
+    for row in grad:
+        for column in range(vocab_size):
+            row[column] /= count
+    return loss / count, grad, count
 
 
-def apply_update(grad, lr):
-    for i in range(vocab_size):
-        for j in range(vocab_size):
-            logits[i][j] -= lr * grad[i][j]
+def add(left, right):
+    for row in range(vocab_size):
+        for column in range(vocab_size):
+            left[row][column] += right[row][column]
 
 
-def evaluate_loss():
-    loss, _, valid_tokens = loss_and_grad(train_data)
-    return loss, valid_tokens
+def update(grad, learning_rate):
+    for row in range(vocab_size):
+        for column in range(vocab_size):
+            logits[row][column] -= learning_rate * grad[row][column]
 
 
-initial_loss, valid_tokens = evaluate_loss()
-lr = 1.2
-grad_accum_steps = 2
-optimizer_steps = 0
+initial, _, valid_tokens = loss_grad(data)
+for _ in range(30):
+    total_grad = zeros()
+    for item in data:
+        _, grad, _ = loss_grad([item])
+        add(total_grad, grad)
+    for row in total_grad:
+        for column in range(vocab_size):
+            row[column] /= len(data)
+    update(total_grad, 1.2)
 
-for epoch in range(25):
-    accum = empty_grad()
-    accum_count = 0
-    for example in train_data:
-        micro_loss, micro_grad, _ = loss_and_grad([example])
-        add_grad(accum, micro_grad)
-        accum_count += 1
-        if accum_count == grad_accum_steps:
-            for i in range(vocab_size):
-                for j in range(vocab_size):
-                    accum[i][j] /= accum_count
-            apply_update(accum, lr)
-            optimizer_steps += 1
-            accum = empty_grad()
-            accum_count = 0
-
-final_loss, _ = evaluate_loss()
-trainable_params = vocab_size * vocab_size
-prediction_after_marker = max(range(vocab_size), key=lambda k: softmax(logits[4])[k])
-
-print("valid_supervised_tokens=", valid_tokens)
-print("initial_loss=", round(initial_loss, 4))
-print("final_loss=", round(final_loss, 4))
-print("loss_decreased=", final_loss < initial_loss)
-print("optimizer_steps=", optimizer_steps)
-print("trainable_params=", trainable_params)
-print("trainable_ratio=", 1.0)
-print("predict_after_response_marker=", prediction_after_marker)
+final, _, _ = loss_grad(data)
+print("valid_tokens=", valid_tokens)
+print("initial_loss=", round(initial, 4))
+print("final_loss=", round(final, 4))
+print("loss_decreased=", final < initial)
+print("trainable_params=", vocab_size * vocab_size)
 ```
 
-参考输出：
+loss 下降只证明这组目标被优化了，不证明模型学会了自然语言或获得了泛化能力。后者必须用独立数据和行为评估确认。
+
+### 4.3.7 全参数 SFT 的边界
+
+应同时观察：
 
 ```text
-valid_supervised_tokens= 8
-initial_loss= 2.4823
-final_loss= 0.6518
-loss_decreased= True
-optimizer_steps= 25
-trainable_params= 144
-trainable_ratio= 1.0
-predict_after_response_marker= 5
+训练和验证的 masked loss。
+有效监督 token 数和实际训练 token 数。
+固定 prompt 的输出。
+独立任务、格式和安全样本。
 ```
 
-这里的 `trainable_ratio=1.0` 对应全参数训练；如果是 LoRA，这个比例会远小于 1。`valid_supervised_tokens=8` 说明只有 labels 非 `-100` 的回答 token 参与监督。
+学习率过大、数据量小而 epoch 过多、领域风格覆盖通用风格、训练集与验证集重复，都可能让 loss 看起来很好而行为变差。
 
----
+## 4.4 LoRA：用低秩增量适配基座模型
 
-### 十八、如何确认参数都在训练
+### 4.4.1 为什么冻结基座
 
-全参数 SFT 中，所有参数默认 `requires_grad=True`。
+全参数 SFT 的成本来自三部分：所有权重都需要梯度，所有可训练权重都可能需要优化器状态，反向传播还要保存激活。LoRA 的基本策略是冻结基座模型，只增加少量可训练参数。
 
-可以检查：
-
-```python
-total_params = 0
-trainable_params = 0
-
-for name, param in model.named_parameters():
-    total_params += param.numel()
-    if param.requires_grad:
-        trainable_params += param.numel()
-
-print("total params:", total_params)
-print("trainable params:", trainable_params)
-print("trainable ratio:", trainable_params / total_params)
-```
-
-全参数 SFT 中比例应该接近：
-
-```text
-1.0
-```
-
-后面 LoRA 中，这个比例会非常小。
-
----
-
-### 十九、常见工程坑
-
-#### 坑 1：数据 labels 全是 -100
-
-训练 loss 会异常，模型学不到东西。
-
-训练前必须检查 batch。
-
-#### 坑 2：pad token 没设置
-
-decoder-only 模型常没有 pad token。
-
-需要设置：
-
-```python
-tokenizer.pad_token = tokenizer.eos_token
-model.config.pad_token_id = tokenizer.pad_token_id
-```
-
-#### 坑 3：推理模板和训练模板不一致
-
-训练用 Alpaca，推理却用裸问题，效果会变差。
-
-#### 坑 4：学习率过大
-
-全参数 SFT 更新所有参数，学习率过大容易破坏模型原有能力。
-
-常见起点是：
-
-```text
-1e-5 到 5e-5
-```
-
-#### 坑 5：小数据训练太久
-
-容易过拟合和灾难性遗忘。
-
-#### 坑 6：以为能推理就能训练
-
-训练需要梯度、优化器状态和激活值，显存远高于推理。
-
-#### 坑 7：Trainer 版本参数名不一致
-
-不同 Transformers 版本中，`eval_strategy` / `evaluation_strategy`、`tokenizer` / `processing_class` 可能有差异。遇到报错或 warning 时，先查本地版本文档，不要机械复制旧教程。
-
----
-
-### 二十、面试怎么讲全参数 SFT
-
-如果面试官问“全参数 SFT 怎么做”，可以这样回答：
-
-```text
-我会先加载 tokenizer 和 AutoModelForCausalLM，然后把 instruction 数据按目标模型的 prompt 或 chat template 拼接，tokenize 成 input_ids、attention_mask 和 labels。labels 中 prompt 和 padding 部分设为 -100，只在 assistant response 上计算 loss。训练时所有模型参数 requires_grad=True，用 AdamW 或 Trainer 做监督微调，并根据验证集 loss 保存 checkpoint。
-```
-
-如果追问“全参数 SFT 和 LoRA 的区别”，可以回答：
-
-```text
-全参数 SFT 会更新模型所有参数，适配能力强，但显存、存储和训练成本高，也更容易灾难性遗忘；LoRA 冻结基座模型，只训练低秩适配器参数，成本更低，适合大模型微调。
-```
-
-如果问“为什么全参数训练显存比推理大很多”，可以回答：
-
-```text
-推理主要保存模型参数和少量 KV cache；训练除了参数，还要保存梯度、优化器状态以及反向传播需要的激活值。AdamW 还会保存一阶和二阶动量，所以训练显存远高于推理。
-```
-
-如果问“SFT 学习率怎么选”，可以回答：
-
-```text
-全参数 SFT 一般使用较小学习率，比如 1e-5 到 5e-5 起步。学习率太大容易破坏预训练能力，太小则适配慢。具体要结合数据规模、模型大小和验证集表现调参。
-```
-
----
-
-### 二十一、小练习
-
-#### 练习 1
-
-用 `sshleifer/tiny-gpt2` 跑通全参数 SFT。
-
-#### 练习 2
-
-训练前打印一个 batch，确认 labels mask 正确。
-
-#### 练习 3
-
-打印 total params 和 trainable params，确认比例接近 1。
-
-#### 练习 4
-
-把 `learning_rate` 从 `5e-5` 改成 `5e-4`，观察 loss 是否更不稳定。
-
-#### 练习 5
-
-训练后用同样 prompt 格式测试微调前后模型输出差异。
-
----
-
-### 本讲总结
-
-这一讲完成了小模型的全参数 SFT。
-
-核心结论如下：
-
-1. 全参数 SFT 会更新模型所有参数。
-2. SFT 数据必须正确构造 `input_ids`、`attention_mask` 和 `labels`。
-3. prompt 和 padding 部分的 labels 通常设为 `-100`。
-4. Hugging Face `Trainer` 可以快速完成训练、评估和保存。
-5. 全参数训练显存远高于推理显存。
-6. 小数据全参数训练容易过拟合和遗忘。
-7. 推理时 prompt 模板必须和训练时一致。
-
-下一讲，我们实现 LoRA 微调，用更少参数完成指令适配。
-
-## 第 22 讲：LoRA 微调
-
-### 本讲目标
-
-学完本讲，你应该能做到六件事：
-
-1. 理解 LoRA 为什么能降低微调成本。
-2. 使用 PEFT 给 causal LM 注入 LoRA adapter。
-3. 配置 LoRA 的 `r`、`alpha`、`dropout` 和 `target_modules`。
-4. 使用 Hugging Face `Trainer` 训练 LoRA。
-5. 保存、加载和合并 LoRA adapter。
-6. 能解释 LoRA 和全参数 SFT 的区别、优缺点和适用场景。
-
-上一讲我们做了全参数 SFT。
-
-全参数 SFT 很直接，但成本高。
-
-对于大模型，更新全部参数通常不现实。
-
-LoRA 是最常用的参数高效微调方法之一。
-
-它的核心思想是：
-
-```text
-冻结原始模型参数，只训练少量低秩矩阵，让模型学到任务增量。
-```
-
-本讲在上一讲 SFT 流程基础上，把全参数微调改造成 LoRA 微调。
-
-本讲以 LoRA 原论文和 Hugging Face PEFT 的 `LoraConfig`、adapter 保存/加载/merge 接口为依据，并特别关注 Transformers 版本边界。重点是理解低秩增量、参数量估算、`target_modules` 选择和 adapter 生命周期；QLoRA 的 4bit 量化基座训练放到下一讲。
-
----
-
-### 一、LoRA 解决什么问题
-
-大模型参数量很大。
-
-如果全参数训练，需要保存：
-
-```text
-参数
-梯度
-优化器状态
-激活值
-```
-
-显存成本非常高。
-
-LoRA 的目标是：
-
-```text
-尽量不动原始大模型参数，只训练很少的新增参数。
-```
-
-这样带来几个好处：
-
-```text
-可训练参数和优化器状态更少，通常显存更低。
-保存的 adapter 文件更小。
-多个任务可以保存多个 adapter。
-可以保留同一个基座，便于比较和切换任务。
-```
-
-LoRA 不保证每个任务都训练得更快，也不保证一定保留原始能力；冻结基座仍然要参与前向和反向中的部分计算，最终吞吐取决于实现、序列长度和硬件。
-
-代价是：
-
-```text
-适配能力可能弱于全参数 SFT。
-需要选择 target_modules。
-推理时要加载 adapter 或合并权重。
-```
-
----
-
-### 二、LoRA 的核心公式
-
-一个线性层原本是：
+对一个线性层：
 
 ```math
 y=W_0x
 ```
 
-LoRA 冻结原始权重 `W_0`，增加一个低秩增量：
+LoRA 改写为：
 
 ```math
-y=W_0x+\frac{\alpha}{r}BAx
+y
+=
+W_0x
++
+\frac{\alpha}{r}BAx
 ```
 
-其中：
+其中 \(d_{\mathrm{in}}>0\)、\(d_{\mathrm{out}}>0\)、\(r\) 是正整数；当 \(r\ll\min(d_{\mathrm{in}},d_{\mathrm{out}})\) 时，才把它称为低秩增量。缩放因子 \(\alpha\) 可以为零，但这会让 adapter 在该层没有有效增量，通常不是有意义的训练配置。这里的矩阵维度为：
 
 ```math
+A\in\mathbb{R}^{r\times d_{\mathrm{in}}},
+\qquad
+B\in\mathbb{R}^{d_{\mathrm{out}}\times r},
+\qquad
 \Delta W=\frac{\alpha}{r}BA
 ```
 
-如果原始权重形状是 `W_0: [d_out, d_in]`，则：
+原始权重 \(W_0\) 不更新，只有 \(A\) 和 \(B\) 参与优化。若 \(r\) 远小于输入输出维度，新增参数量为：
 
 ```math
-A\in\mathbb{R}^{r\times d_{\mathrm{in}}},\qquad
-B\in\mathbb{R}^{d_{\mathrm{out}}\times r}
-```
-
-`r` 是低秩维度，通常远小于 `d_in` 和 `d_out`。
-
-所以 LoRA 训练参数量是：
-
-```math
-N_{\mathrm{lora}}
+N_{\mathrm{LoRA}}
 =
 r(d_{\mathrm{in}}+d_{\mathrm{out}})
 ```
 
-而不是：
+全参数层的参数量是 \(d_{\mathrm{out}}d_{\mathrm{in}}\)。例如 \(4096\times4096\) 的线性层有约 16.8M 个参数；rank 为 8 时，LoRA 分支只有 \(8(4096+4096)=65536\) 个参数。
 
-```math
-N_{\mathrm{full}}
-=
-d_{\mathrm{out}}d_{\mathrm{in}}
-```
+LoRA 的低秩假设不是“所有任务变化都天然低秩”，而是一个容量与成本之间的工程近似。rank 太小可能表达不足，rank 太大则增加显存、训练时间和过拟合风险。最终选择应由独立验证结果决定。
 
-这就是省参数的来源。
+### 4.4.2 初始化与超参数
 
-LoRA 常见初始化方式会让增量分支一开始接近 0，这样刚注入 adapter 时模型行为接近原始模型；随后训练只更新 `A` 和 `B`，让它们学习任务相关的权重增量。
-
----
-
-### 三、LoRA 常见超参数
-
-#### 1. `r`
-
-低秩维度。
-
-常见值：
+常见初始化让增量分支在训练开始时接近零，使新模型行为接近基座模型：
 
 ```text
-4, 8, 16, 32, 64
+A 随机初始化或按库默认初始化。
+B 初始化为零或使初始增量很小。
 ```
 
-`r` 越大，可训练参数越多，表示增量的容量通常更大，但显存、计算和过拟合风险也更高；表达能力是否真的改善要用验证集确认。
+缩放因子 \(\alpha/r\) 决定增量分支对输出的影响。常见实验会把 alpha 设为 rank 的 2 倍或 4 倍，但这不是普适定律。dropout 作用在 LoRA 分支上，可以作为小数据场景的正则化。
 
-#### 2. `lora_alpha`
-
-缩放系数。
-
-LoRA 输出通常会乘：
-
-```math
-\frac{\alpha}{r}
-```
-
-常见设置：
+重要配置包括：
 
 ```text
-lora_alpha = 2r 或 4r
+r：低秩维度。
+lora_alpha：增量缩放。
+lora_dropout：适配器分支 dropout。
+target_modules：注入 LoRA 的真实模块名。
+bias：是否训练偏置。
 ```
 
-#### 3. `lora_dropout`
-
-LoRA 分支上的 dropout。
-
-小数据微调时可以用：
-
-```text
-0.05 或 0.1
-```
-
-#### 4. `target_modules`
-
-指定哪些线性层注入 LoRA。
-
-常见目标是 attention 投影层：
-
-```text
-q_proj, k_proj, v_proj, o_proj
-```
-
-有些模型命名不同，例如 GPT-2 使用：
-
-```text
-c_attn, c_proj
-```
-
-这是 LoRA 实战里最容易踩坑的地方。
-
----
-
-### 四、安装依赖
-
-```bash
-pip install peft transformers datasets accelerate
-```
-
-PEFT 是 Hugging Face 的 Parameter-Efficient Fine-Tuning 库。
-
-LoRA、Prefix Tuning、Prompt Tuning 等都在这个库里。
-
-本讲主要使用：
-
-```python
-from peft import LoraConfig, get_peft_model, TaskType
-```
-
----
-
-### 五、加载模型和 tokenizer
-
-```python
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
-
-
-model_name = "sshleifer/tiny-gpt2"
-
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-if tokenizer.pad_token is None:
-    tokenizer.pad_token = tokenizer.eos_token
-
-model = AutoModelForCausalLM.from_pretrained(model_name)
-model.config.pad_token_id = tokenizer.pad_token_id
-```
-
-这里仍然用小模型演示。
-
-如果换成 LLaMA/Qwen/Mistral 类模型，LoRA 配置里的 `target_modules` 需要相应调整。
-
----
-
-### 六、查看模型模块名
-
-在配置 `target_modules` 前，先打印模型模块名。
+target_modules 不能靠模型名称猜。先打印模块名：
 
 ```python
 for name, module in model.named_modules():
-    if "attn" in name or "proj" in name or "c_" in name:
-        print(name)
+    if any(key in name for key in [
+        "q_proj", "k_proj", "v_proj",
+        "o_proj", "c_attn", "c_proj",
+    ]):
+        print(name, type(module).__name__)
 ```
 
-对 GPT-2 类模型，常见模块名包括：
+Llama、Qwen、Mistral 类模型通常有 q_proj、k_proj、v_proj、o_proj，MLP 中还可能有 gate_proj、up_proj、down_proj。GPT-2 常见 c_attn 和 c_proj，其中 Conv1D 的权重布局与普通 Linear 不同，fan_in_fan_out 配置可能需要打开。
 
-```text
-transformer.h.0.attn.c_attn
-transformer.h.0.attn.c_proj
-transformer.h.0.mlp.c_fc
-transformer.h.0.mlp.c_proj
-```
+### 4.4.3 用 PEFT 注入 adapter
 
-对 LLaMA/Qwen 类模型，常见模块名包括：
-
-```text
-self_attn.q_proj
-self_attn.k_proj
-self_attn.v_proj
-self_attn.o_proj
-mlp.gate_proj
-mlp.up_proj
-mlp.down_proj
-```
-
-所以不要盲目复制别人的 `target_modules`。
-
-要先看当前模型的模块命名。
-
----
-
-### 七、配置 LoRA
-
-对 GPT-2 tiny 模型，可以先用：
+GPT-2 类结构的示例：
 
 ```python
 from peft import LoraConfig, TaskType, get_peft_model
@@ -3228,131 +1292,72 @@ model = get_peft_model(model, lora_config)
 model.print_trainable_parameters()
 ```
 
-GPT-2 的 `c_attn` 和 `c_proj` 通常基于 Transformers 的 `Conv1D` 兼容层，权重存储方向与普通 `nn.Linear` 不同；这里显式设置 `fan_in_fan_out=True`。LLaMA、Qwen、Mistral 的 `q_proj` 等通常是线性层，不应机械沿用这个选项。
-
-`print_trainable_parameters()` 会输出类似：
-
-```text
-trainable params: 1,024 || all params: 102,714 || trainable%: 0.99
-```
-
-实际数字取决于模型。
-
-你应该看到：
-
-```text
-可训练参数比例远小于 100%。
-```
-
-这就是 LoRA 和全参数 SFT 的直接区别。
-
-如果输出的 trainable params 是 0，通常说明 `target_modules` 没有匹配到任何模块，或者模型结构和你复制的配置不一致。
-
----
-
-### 八、LLaMA/Qwen 类模型的 target_modules
-
-如果使用 LLaMA、Qwen、Mistral 类架构，常见配置是：
+Llama、Qwen 或 Mistral 类结构可以从更保守的 attention 配置开始：
 
 ```python
-target_modules = [
-    "q_proj",
-    "k_proj",
-    "v_proj",
-    "o_proj",
-    "gate_proj",
-    "up_proj",
-    "down_proj",
-]
+lora_config = LoraConfig(
+    task_type=TaskType.CAUSAL_LM,
+    r=16,
+    lora_alpha=32,
+    lora_dropout=0.05,
+    target_modules=["q_proj", "v_proj"],
+    bias="none",
+)
 ```
 
-更轻量的配置可以只训练 attention：
+如果需要更高适配容量，再比较 q/k/v/o 或加入 MLP 投影。不要把“目标层越多”直接等同于“效果越好”；可训练参数、优化器状态和过拟合风险都会增加。
+
+注入后必须检查参数集合：
 
 ```python
-target_modules = ["q_proj", "v_proj"]
+total_params = 0
+trainable_params = 0
+unexpected_trainable = []
+for name, parameter in model.named_parameters():
+    total_params += parameter.numel()
+    if parameter.requires_grad:
+        trainable_params += parameter.numel()
+    if parameter.requires_grad and "lora" not in name.lower():
+        unexpected_trainable.append(name)
+
+if total_params == 0:
+    raise ValueError("model has no parameters")
+if trainable_params == 0:
+    raise ValueError("no trainable LoRA parameters were found")
+if unexpected_trainable:
+    raise ValueError(
+        "base parameters remain trainable: "
+        + ", ".join(unexpected_trainable[:3])
+    )
+print("total=", total_params)
+print("trainable=", trainable_params)
+print("ratio=", trainable_params / total_params)
 ```
 
-经验：
+如果 trainable 为 0，通常是 target_modules 没匹配到真实结构；如果大量基座参数仍可训练，则没有实现预期的冻结。
 
-```text
-只训 q/v：参数少，成本低。
-训 q/k/v/o：attention 适配更充分。
-再加 MLP：表达能力更强，但参数更多。
-```
+### 4.4.4 LoRA 不改变 SFT 的数据目标
 
-具体选择取决于任务、数据量和显存。
+LoRA 只改变 \(\Theta_{\mathrm{train}}\)，不改变 input_ids、attention_mask 和 labels。prompt 位置仍应使用 -100，padding 位置仍应使用 -100，回答位置仍然使用真实 token id。
 
----
-
-### 九、复用上一讲 SFT 数据
-
-LoRA 微调的数据处理和全参数 SFT 一样。
-
-仍然需要：
-
-```text
-input_ids
-attention_mask
-labels
-```
-
-仍然要：
-
-```text
-prompt labels = -100
-padding labels = -100
-response labels = token ids
-```
-
-也就是说，LoRA 只改变“训练哪些参数”。
-
-它不改变 SFT 数据目标。
-
-你可以直接复用第 20 讲和第 21 讲的数据预处理代码。
-
----
-
-### 十、TrainingArguments
-
-LoRA 在一些任务上可以使用比全参数 SFT 更大的学习率，但这不是固定规则；应从小范围候选值开始，并用同一验证集比较。
-
-例如：
+可以复用 4.2 的 collator 和预处理，只替换模型包装和训练参数：
 
 ```python
-from transformers import TrainingArguments
+from transformers import Trainer, TrainingArguments
 
 
 training_args = TrainingArguments(
-    output_dir="outputs/lora_tiny_gpt2",
+    output_dir="outputs/lora_tiny",
     num_train_epochs=3,
     per_device_train_batch_size=2,
-    per_device_eval_batch_size=2,
     gradient_accumulation_steps=4,
     learning_rate=2e-4,
-    weight_decay=0.0,
     logging_steps=10,
     eval_strategy="steps",
     eval_steps=20,
     save_steps=20,
-    save_total_limit=2,
-    fp16=torch.cuda.is_available(),
     report_to="none",
 )
-```
-
-如果 transformers 版本较旧，使用：
-
-```python
-evaluation_strategy="steps"
-```
-
----
-
-### 十一、创建 Trainer 并训练
-
-```python
-from transformers import Trainer
-
 
 trainer = Trainer(
     model=model,
@@ -3360,599 +1365,252 @@ trainer = Trainer(
     train_dataset=train_dataset,
     eval_dataset=eval_dataset,
     data_collator=data_collator,
-    tokenizer=tokenizer,
+    processing_class=tokenizer,
 )
-
 trainer.train()
 ```
 
-和上一讲一样，如果当前 `transformers` 版本提示 `tokenizer` 参数将被替换，可以改用 `processing_class=tokenizer`。如果版本较旧不支持 `processing_class`，继续保留 `tokenizer=tokenizer`。
+LoRA 常使用比全参数 SFT 更大的学习率作为起点，但这只是搜索范围，不是固定答案。应在相同评估集上比较 rank、alpha、学习率和训练步数。
 
-保存 LoRA adapter：
+### 4.4.5 Adapter 的保存、加载与合并
+
+adapter 文件通常只保存低秩参数和配置，不包含完整基座：
 
 ```python
-model.save_pretrained("outputs/lora_tiny_gpt2/adapter")
-tokenizer.save_pretrained("outputs/lora_tiny_gpt2/adapter")
+adapter_dir = "outputs/lora_tiny/adapter"
+model.save_pretrained(adapter_dir)
+tokenizer.save_pretrained(adapter_dir)
 ```
 
-这里保存的通常不是完整模型权重。
-
-而是 LoRA adapter 权重和配置。
-
-这也是 LoRA 文件小的原因。
-
----
-
-### 十二、完整 LoRA 训练脚本骨架
+推理时先加载训练时相同的 base model，再加载 adapter：
 
 ```python
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
-from peft import LoraConfig, TaskType, get_peft_model
-
-
-model_name = "sshleifer/tiny-gpt2"
-output_dir = "outputs/lora_tiny_gpt2"
-
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-if tokenizer.pad_token is None:
-    tokenizer.pad_token = tokenizer.eos_token
-
-model = AutoModelForCausalLM.from_pretrained(model_name)
-model.config.pad_token_id = tokenizer.pad_token_id
-
-lora_config = LoraConfig(
-    task_type=TaskType.CAUSAL_LM,
-    r=8,
-    lora_alpha=16,
-    lora_dropout=0.05,
-    target_modules=["c_attn", "c_proj"],
-    fan_in_fan_out=True,  # GPT-2 使用 Conv1D 权重布局
-    bias="none",
-)
-
-model = get_peft_model(model, lora_config)
-model.print_trainable_parameters()
-
-# train_dataset, eval_dataset, data_collator 复用上一讲
-
-training_args = TrainingArguments(
-    output_dir=output_dir,
-    num_train_epochs=3,
-    per_device_train_batch_size=2,
-    per_device_eval_batch_size=2,
-    gradient_accumulation_steps=4,
-    learning_rate=2e-4,
-    logging_steps=10,
-    eval_strategy="steps",
-    eval_steps=20,
-    save_steps=20,
-    save_total_limit=2,
-    fp16=torch.cuda.is_available(),
-    report_to="none",
-)
-
-trainer = Trainer(
-    model=model,
-    args=training_args,
-    train_dataset=train_dataset,
-    eval_dataset=eval_dataset,
-    data_collator=data_collator,
-    tokenizer=tokenizer,
-)
-
-trainer.train()
-model.save_pretrained(f"{output_dir}/adapter")
-tokenizer.save_pretrained(f"{output_dir}/adapter")
-```
-
----
-
-### 十三、加载 LoRA adapter 做推理
-
-推理时需要先加载 base model，再加载 adapter。
-
-```python
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
-base_model_name = "sshleifer/tiny-gpt2"
-adapter_dir = "outputs/lora_tiny_gpt2/adapter"
+base_name = "sshleifer/tiny-gpt2"
+adapter_dir = "outputs/lora_tiny/adapter"
 
 tokenizer = AutoTokenizer.from_pretrained(adapter_dir)
-base_model = AutoModelForCausalLM.from_pretrained(base_model_name)
+base_model = AutoModelForCausalLM.from_pretrained(base_name)
 model = PeftModel.from_pretrained(base_model, adapter_dir)
 model.eval()
-```
 
-然后正常 generate：
-
-```python
-prompt = (
-    "### Instruction:\n"
-    "解释什么是过拟合。\n\n"
-    "### Response:\n"
-)
-
-inputs = tokenizer(prompt, return_tensors="pt")
-
-with torch.no_grad():
-    generated_ids = model.generate(
+inputs = tokenizer("### Instruction:\n解释过拟合。\n\n### Response:\n",
+                   return_tensors="pt")
+with torch.inference_mode():
+    output_ids = model.generate(
         **inputs,
-        max_new_tokens=100,
-        do_sample=True,
-        temperature=0.7,
-        top_p=0.9,
+        max_new_tokens=64,
+        do_sample=False,
         pad_token_id=tokenizer.eos_token_id,
     )
-
-print(tokenizer.decode(generated_ids[0], skip_special_tokens=True))
+print(tokenizer.decode(output_ids[0], skip_special_tokens=True))
 ```
 
-注意：
-
-```text
-adapter 必须配合训练时的 base model 使用。
-```
-
-不要把 A 模型训练出来的 LoRA adapter 加到 B 模型上。
-
----
-
-### 十四、合并 LoRA 权重
-
-如果想把 LoRA 合并进 base model，方便部署，可以使用：
+如果部署链路不需要动态切换 adapter，可以合并权重：
 
 ```python
 merged_model = model.merge_and_unload()
-merged_model.save_pretrained("outputs/lora_tiny_gpt2/merged")
-tokenizer.save_pretrained("outputs/lora_tiny_gpt2/merged")
+merged_model.save_pretrained("outputs/lora_tiny/merged")
+tokenizer.save_pretrained("outputs/lora_tiny/merged")
 ```
 
-合并后得到的是普通 causal LM。
+合并后可以按普通 CausalLM 加载，但失去了多个任务 adapter 快速切换的灵活性。合并前后应使用同一批 prompt 做回归比较；不同版本的 PEFT、量化模型和特殊层可能对 merge 的支持不同。
 
-推理时不再需要 PEFT adapter。
+### 4.4.6 LoRA 的容量与资源对比
 
-加载方式：
-
-```python
-model = AutoModelForCausalLM.from_pretrained("outputs/lora_tiny_gpt2/merged")
-```
-
-合并的优点：
-
-```text
-部署简单。
-推理链路更普通。
-```
-
-合并的缺点：
-
-```text
-失去 adapter 灵活切换能力。
-每个任务要保存一份合并后的模型。
-```
-
----
-
-### 十五、LoRA 参数量估算
-
-假设某个线性层：
+假设同一个线性层的维度为 \(4096\times4096\)：
 
 ```math
-W_0\in\mathbb{R}^{4096\times4096}
+N_{\mathrm{full}}
+=
+4096^2
+\approx
+16.8\mathrm{M}
 ```
 
-全参数训练参数量：
+rank 为 8 时：
 
 ```math
-N_{\mathrm{full}}=4096\times4096\approx 16.8\mathrm{M}
-```
-
-LoRA 设置 `r=8`：
-
-```math
-N_{\mathrm{lora}}
+N_{\mathrm{LoRA}}
 =
 8\times4096+4096\times8
 =
 65536
 ```
 
-相比 16.8M，少很多。
+但 LoRA 并不是零成本。基座模型仍要参与前向，激活仍与序列长度有关，adapter 还要保存梯度和优化器状态。它主要减少可训练状态和 checkpoint 大小，不会把所有计算都变成低秩计算。
 
-这就是为什么 LoRA 适合大模型微调。
+### 4.4.7 纯 Python 的低秩更新实验
 
----
-
-### 十六、0 依赖 LoRA 机制 demo
-
-如果当前环境没有安装 `peft`，可以先用下面这个纯 Python demo 理解 LoRA 的低秩增量。它用均方误差训练一个小线性层的 LoRA adapter：原始权重 `W_0` 保持不变，只更新低秩矩阵 `A` 和 `B`。
+下面冻结 W，只更新 A、B，用均方误差验证低秩分支能够降低目标误差：
 
 ```python
 import random
 
 
 random.seed(3)
-d_in = 16
-d_out = 16
+d_in = 12
+d_out = 12
 rank = 2
-alpha = 4
-scale = alpha / rank
-
-W = [[random.uniform(-0.05, 0.05) for _ in range(d_in)] for _ in range(d_out)]
+scale = 2.0
+if d_in <= 0 or d_out <= 0:
+    raise ValueError("linear dimensions must be positive")
+if rank <= 0 or rank > min(d_in, d_out):
+    raise ValueError("rank must be in [1, min(d_in, d_out)]")
+if scale <= 0:
+    raise ValueError("scale must be positive")
+W = [
+    [random.uniform(-0.05, 0.05) for _ in range(d_in)]
+    for _ in range(d_out)
+]
 W_before = [row[:] for row in W]
-A = [[random.uniform(-0.02, 0.02) for _ in range(d_in)] for _ in range(rank)]
+A = [
+    [random.uniform(-0.02, 0.02) for _ in range(d_in)]
+    for _ in range(rank)
+]
 B = [[0.0 for _ in range(rank)] for _ in range(d_out)]
-
 data = []
-for input_idx, target_idx in [(0, 3), (1, 4), (2, 5), (3, 6)]:
-    x = [0.0] * d_in
+for input_index, target_index in [(0, 3), (1, 4), (2, 5), (3, 6)]:
+    vector = [0.0] * d_in
     target = [0.0] * d_out
-    x[input_idx] = 1.0
-    target[target_idx] = 0.8
-    data.append((x, target))
+    vector[input_index] = 1.0
+    target[target_index] = 0.8
+    data.append((vector, target))
+if not data:
+    raise ValueError("LoRA toy experiment requires non-empty data")
 
 
 def matvec(matrix, vector):
-    return [sum(w * x for w, x in zip(row, vector)) for row in matrix]
+    return [
+        sum(weight * value for weight, value in zip(row, vector))
+        for row in matrix
+    ]
 
 
-def forward(x):
-    base = matvec(W, x)
-    ax = matvec(A, x)
-    bax = matvec(B, ax)
-    y = [base_i + scale * delta_i for base_i, delta_i in zip(base, bax)]
-    return y, ax
+def forward(vector):
+    base = matvec(W, vector)
+    low_rank = matvec(B, matvec(A, vector))
+    return [
+        base_value + scale * delta
+        for base_value, delta in zip(base, low_rank)
+    ]
 
 
-def loss_only():
+def loss():
+    if not data:
+        raise ValueError("loss is undefined for an empty dataset")
     total = 0.0
-    for x, target in data:
-        y, _ = forward(x)
-        total += sum((yi - ti) ** 2 for yi, ti in zip(y, target)) / d_out
+    for vector, target in data:
+        prediction = forward(vector)
+        total += sum(
+            (value - expected) ** 2
+            for value, expected in zip(prediction, target)
+        ) / d_out
     return total / len(data)
 
 
-def train_step(lr):
-    grad_A = [[0.0 for _ in range(d_in)] for _ in range(rank)]
-    grad_B = [[0.0 for _ in range(rank)] for _ in range(d_out)]
-    for x, target in data:
-        y, ax = forward(x)
-        error = [yi - ti for yi, ti in zip(y, target)]
-        for out_idx in range(d_out):
-            for j in range(rank):
-                grad_B[out_idx][j] += scale * error[out_idx] * ax[j] / d_out
-        for j in range(rank):
-            upstream = sum(error[out_idx] * B[out_idx][j] for out_idx in range(d_out))
-            for in_idx in range(d_in):
-                grad_A[j][in_idx] += scale * upstream * x[in_idx] / d_out
+def train_step(learning_rate):
+    grad_a = [[0.0] * d_in for _ in range(rank)]
+    grad_b = [[0.0] * rank for _ in range(d_out)]
+    for vector, target in data:
+        prediction = forward(vector)
+        error = [value - expected for value, expected in zip(prediction, target)]
+        ax = matvec(A, vector)
+        for out_index in range(d_out):
+            for rank_index in range(rank):
+                grad_b[out_index][rank_index] += (
+                    scale * error[out_index] * ax[rank_index] / d_out
+                )
+        for rank_index in range(rank):
+            upstream = sum(
+                error[out_index] * B[out_index][rank_index]
+                for out_index in range(d_out)
+            )
+            for in_index in range(d_in):
+                grad_a[rank_index][in_index] += (
+                    scale * upstream * vector[in_index] / d_out
+                )
+    for rank_index in range(rank):
+        for in_index in range(d_in):
+            A[rank_index][in_index] -= (
+                learning_rate * grad_a[rank_index][in_index] / len(data)
+            )
+    for out_index in range(d_out):
+        for rank_index in range(rank):
+            B[out_index][rank_index] -= (
+                learning_rate * grad_b[out_index][rank_index] / len(data)
+            )
 
-    n = len(data)
-    for j in range(rank):
-        for in_idx in range(d_in):
-            A[j][in_idx] -= lr * grad_A[j][in_idx] / n
-    for out_idx in range(d_out):
-        for j in range(rank):
-            B[out_idx][j] -= lr * grad_B[out_idx][j] / n
 
-
-initial_loss = loss_only()
+initial = loss()
 for _ in range(500):
-    train_step(lr=8.0)
-final_loss = loss_only()
-
-full_params = d_out * d_in
-lora_params = rank * (d_in + d_out)
-
-print("initial_loss=", round(initial_loss, 4))
-print("final_loss=", round(final_loss, 4))
-print("loss_decreased=", final_loss < initial_loss)
-print("full_params=", full_params)
-print("lora_params=", lora_params)
-print("param_ratio=", round(lora_params / full_params, 4))
-print("scale=", scale)
-print("base_weight_changed=", W != W_before)
+    train_step(8.0)
+final = loss()
+print("initial_loss=", round(initial, 4))
+print("final_loss=", round(final, 4))
+print("loss_decreased=", final < initial)
+print("full_params=", d_in * d_out)
+print("lora_params=", rank * (d_in + d_out))
+print("base_changed=", W != W_before)
 ```
 
-参考输出：
+base_changed 应为 False。这个结果只说明冻结矩阵和低秩分支的优化逻辑成立，不说明 rank=2 对任何真实任务都足够。
+
+### 4.4.8 LoRA 的适用边界
+
+LoRA 适合基座模型保留、任务变化相对局部、需要保存多个任务适配器的场景。需要警惕：
 
 ```text
-initial_loss= 0.0416
-final_loss= 0.0185
-loss_decreased= True
-full_params= 256
-lora_params= 64
-param_ratio= 0.25
-scale= 2.0
-base_weight_changed= False
+target_modules 不匹配导致没有参数被训练。
+adapter 与 base model、词表或模板不一致。
+小数据上仍然会过拟合。
+rank 太小造成能力不足，rank 太大增加成本。
+merge 后未做输出回归。
 ```
 
-这个 demo 的重点不是任务本身，而是三个机制：LoRA 参数量是 `r(d_in+d_out)`，低秩分支可以降低 loss，原始权重 `W_0` 没有被更新。
+因此训练报告应同时保存 base revision、adapter 配置、可训练参数量、有效训练 token 数和评估结果。
 
----
+## 4.5 QLoRA：量化基座上的低秩训练
 
-### 十七、LoRA 和全参数 SFT 对比
+### 4.5.1 QLoRA 在 LoRA 上增加了什么
 
-```text
-全参数 SFT：
-更新全部参数。
-适配能力强。
-显存和存储成本高。
-更容易遗忘。
-
-LoRA：
-冻结基座模型。
-只训练低秩 adapter。
-成本低，文件小。
-适合多任务和大模型。
-在某些任务上适配能力可能弱于全参数，但也可能凭更强的正则化获得更好的泛化。
-```
-
-实际工作中：
-
-```text
-小模型、强适配、充足资源：可以尝试全参数 SFT。
-大模型、资源有限、多任务适配：优先 LoRA/QLoRA。
-```
-
----
-
-### 十八、常见工程坑
-
-#### 坑 1：target_modules 写错
-
-如果模块名不匹配，LoRA 可能没有注入成功，或者报错。
-
-训练前一定要：
-
-```python
-model.print_trainable_parameters()
-```
-
-确认可训练参数不是 0。
-
-#### 坑 2：把 adapter 当完整模型加载
-
-LoRA adapter 不是完整模型。
-
-加载时需要：
-
-```python
-base_model + adapter
-```
-
-或者先 merge 后再按普通模型加载。
-
-#### 坑 3：base model 不一致
-
-adapter 必须和训练时的 base model 匹配。
-
-#### 坑 4：学习率照搬全参数 SFT
-
-LoRA 有时可以用更高学习率，比如从 `1e-4` 到 `3e-4` 的范围开始试验。
-
-但仍要根据数据和 loss 调整。
-
-#### 坑 5：以为 LoRA 不会过拟合
-
-LoRA 参数少，但小数据上仍然会过拟合。
-
-#### 坑 6：保存时忘记 tokenizer
-
-adapter 推理仍需要 tokenizer。
-
-应该一起保存。
-
-#### 坑 7：合并前后没有做回归测试
-
-`merge_and_unload()` 后推理链路更简单，但仍要用同一批 prompts 检查合并前后的输出、困惑度或业务指标是否符合预期。
-
----
-
-### 十九、面试怎么讲 LoRA
-
-如果面试官问“LoRA 是什么”，可以这样回答：
-
-```text
-LoRA 是一种参数高效微调方法。它冻结原始模型权重，在部分线性层旁边增加低秩矩阵分支，用 BA 近似权重增量 ΔW。训练时只更新这些低秩矩阵，从而大幅减少可训练参数和优化器状态，降低显存和存储成本。
-```
-
-如果追问“LoRA 为什么省参数”，可以回答：
-
-```text
-原始线性层权重 W 的参数量是 out_dim * in_dim。LoRA 用两个低秩矩阵 A 和 B 表示增量，参数量是 r * in_dim + out_dim * r。当 r 远小于输入输出维度时，参数量会小很多。
-```
-
-如果问“LoRA 一般加在哪些层”，可以回答：
-
-```text
-常见做法是在 attention 的 q_proj、k_proj、v_proj、o_proj 上加 LoRA，也可以加到 MLP 的 gate_proj、up_proj、down_proj。更轻量的配置只加 q_proj 和 v_proj。具体 target_modules 要根据模型结构命名确认。
-```
-
-如果问“LoRA 怎么部署”，可以回答：
-
-```text
-可以推理时加载 base model 再加载 LoRA adapter，也可以把 adapter merge 到 base model 中保存成普通模型。前者方便多任务切换，后者部署链路更简单。
-```
-
----
-
-### 二十、小练习
-
-#### 练习 1
-
-打印模型模块名，找到适合注入 LoRA 的 target modules。
-
-#### 练习 2
-
-在 `sshleifer/tiny-gpt2` 上跑通 LoRA SFT。
-
-#### 练习 3
-
-比较全参数 SFT 和 LoRA 的 trainable parameter ratio。
-
-#### 练习 4
-
-把 `r` 从 8 改成 16，观察可训练参数量变化。
-
-#### 练习 5
-
-保存 adapter 后，重新加载 base model + adapter 做推理。
-
----
-
-### 本讲总结
-
-这一讲实现了 LoRA 微调。
-
-核心结论如下：
-
-1. LoRA 冻结原始模型，只训练低秩 adapter。
-2. LoRA 用 `ΔW = BA` 表示权重增量。
-3. `r` 越大，可训练参数越多，适配能力越强。
-4. `target_modules` 必须和模型真实模块名匹配。
-5. LoRA 训练数据和普通 SFT 一样，仍然需要正确 labels mask。
-6. LoRA adapter 不是完整模型，推理时要配合 base model 或先 merge。
-7. LoRA 适合资源有限的大模型任务适配。
-
-下一讲，我们实现 QLoRA，在 4bit 量化基座模型上训练 LoRA adapter。
-
-## 第 23 讲：QLoRA 微调
-
-### 本讲目标
-
-学完本讲，你应该能做到六件事：
-
-1. 理解 QLoRA 和 LoRA 的区别。
-2. 使用 bitsandbytes 以 4bit 方式加载基座模型。
-3. 配置 `BitsAndBytesConfig`。
-4. 使用 `prepare_model_for_kbit_training` 准备量化模型训练。
-5. 在 4bit 量化模型上训练 LoRA adapter。
-6. 能解释 QLoRA 的显存优势、限制和常见工程坑。
-
-上一讲我们实现了 LoRA。
-
-LoRA 冻结基座模型，只训练少量 adapter。
-
-但基座模型本身仍然要以 fp16、bf16 或 fp32 形式加载。
-
-对于 7B、14B 甚至更大的模型，光加载基座模型就可能占满显存。
-
-QLoRA 的核心思路是：
-
-```text
-把冻结的基座模型用 4bit 量化加载，只训练 LoRA adapter。
-```
-
-这样能进一步降低显存，让单卡微调更大的模型成为可能。
-
-本讲以 QLoRA 论文、Hugging Face bitsandbytes 4bit 量化文档、PEFT 的 `prepare_model_for_kbit_training` 和 Transformers 量化加载接口为依据。重点是理解 QLoRA 的工程机制、显存来源和配置边界；bitsandbytes kernel 细节和生产部署量化策略不在本讲展开。
-
----
-
-### 一、QLoRA 解决什么问题
-
-LoRA 已经减少了可训练参数。
-
-但 LoRA 中冻结的 base model 仍然要占显存。
-
-例如一个 7B 模型：
-
-```text
-fp16 参数约 14GB。
-```
-
-训练时还需要激活值、adapter、优化器状态等。
-
-显存压力仍然很大。
-
-QLoRA 进一步把 base model 量化到 4bit。
-
-粗略理解：
+普通 LoRA 通常以 fp16、bf16 或 fp32 加载冻结基座；QLoRA 将冻结基座以低比特形式存储，仍然只训练 LoRA 分支：
 
 ```math
-W_0 \rightarrow Q_4(W_0)
+y
+\approx
+\mathrm{dequant}(Q_4(W_0))x
++
+\frac{\alpha}{r}BAx
 ```
 
-其中 `Q_4` 表示 4bit 量化存储。前向时使用量化权重的反量化近似值，再叠加 LoRA 增量：
+Q_4 表示 4bit 量化存储，dequant 表示计算时恢复到某种计算 dtype。量化的是冻结基座权重，不意味着所有矩阵乘法、中间激活和 adapter 都以 4bit 计算。
 
-```math
-y\approx \mathrm{dequant}(Q_4(W_0))x+\frac{\alpha}{r}BAx
-```
-
-`Q_4(W_0)` 冻结，LoRA adapter 保持可训练。
-
-这样可以显著降低基座模型显存占用。
-
----
-
-### 二、QLoRA 和 LoRA 的区别
-
-LoRA：
+QLoRA 的显存收益来自：
 
 ```text
-base model 通常 fp16/bf16 加载。
-base model 冻结。
-训练 LoRA adapter。
+冻结基座的权重存储更小。
+基座不保存训练梯度和 optimizer state。
+只有 LoRA adapter 需要反向更新。
 ```
 
-QLoRA：
+### 4.5.2 NF4、double quant 与 compute dtype
 
-```text
-base model 以 4bit 量化加载。
-base model 冻结。
-训练 LoRA adapter。
-计算时使用合适的 compute dtype。
-```
+QLoRA 论文提出的 NF4 适合近似正态分布的权重。它是权重表示方式，不是“模型理解能力的量化单位”。double quantization 则进一步压缩量化所需的 scale 等元数据。QLoRA 还讨论了 paged optimizer，用来缓解训练过程中显存峰值。
 
-共同点：
-
-```text
-都只训练 adapter。
-都需要 target_modules。
-都可以保存 adapter。
-```
-
-关键区别：
-
-```text
-QLoRA 的 base model 是量化加载的，显存更低。
-```
-
----
-
-### 三、安装依赖
-
-```bash
-pip install transformers peft accelerate datasets bitsandbytes
-```
-
-`bitsandbytes` 用于 8bit/4bit 量化加载。
-
-注意：
-
-```text
-bitsandbytes 对 CUDA 环境比较敏感。
-CPU 或不兼容 CUDA 环境可能无法正常使用 4bit。
-```
-
-如果本地环境不支持，可以先阅读代码逻辑，实际运行时换到支持 CUDA 的机器。
-
----
-
-### 四、BitsAndBytesConfig
-
-4bit 加载通常使用：
+常见配置：
 
 ```python
-from transformers import BitsAndBytesConfig
 import torch
+from transformers import BitsAndBytesConfig
 
 
 if not torch.cuda.is_available():
-    raise RuntimeError("4bit bitsandbytes training requires a supported CUDA setup")
+    raise RuntimeError("4bit training needs a supported CUDA environment")
 
 supports_bf16 = torch.cuda.is_bf16_supported()
 compute_dtype = torch.bfloat16 if supports_bf16 else torch.float16
@@ -3965,34 +1623,19 @@ bnb_config = BitsAndBytesConfig(
 )
 ```
 
-参数解释：
+compute dtype 决定许多计算阶段使用 fp16 或 bf16，不是量化存储位数。GPU 不支持 bf16 时，应选择硬件支持的 fp16；CPU 环境不能因为配置写对了就获得 bitsandbytes 的 CUDA kernel。
 
-```text
-load_in_4bit=True：以 4bit 方式加载模型权重。
-bnb_4bit_quant_type="nf4"：使用 NormalFloat4，QLoRA 常用量化类型。
-bnb_4bit_compute_dtype：计算时使用的 dtype，常用 bf16 或 fp16。
-bnb_4bit_use_double_quant=True：使用双重量化，进一步节省显存。
-```
-
-NF4 可以理解为更适合近似正态分布权重的 4bit 数据类型；double quant 的直觉是连量化常数也继续量化，从而进一步压缩量化元数据。它们都是为了降低冻结基座模型的存储成本，但不会改变“只训练 LoRA adapter”的核心训练目标。
-
-如果 GPU 不支持 bf16，上面的代码会自动使用：
-
-```python
-bnb_4bit_compute_dtype=torch.float16
-```
-
----
-
-### 五、加载 4bit 基座模型
+### 4.5.3 加载量化基座并准备训练
 
 ```python
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 model_name = "Qwen/Qwen2.5-0.5B"
-
-tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+tokenizer = AutoTokenizer.from_pretrained(
+    model_name,
+    trust_remote_code=True,
+)
 if tokenizer.pad_token is None:
     tokenizer.pad_token = tokenizer.eos_token
 
@@ -4002,31 +1645,12 @@ model = AutoModelForCausalLM.from_pretrained(
     device_map="auto",
     trust_remote_code=True,
 )
-
 model.config.pad_token_id = tokenizer.pad_token_id
 ```
 
-这里的 `trust_remote_code=True` 只应在确实需要自定义模型代码且仓库来源可信时使用；它允许加载远端 Python 实现。生产环境应固定仓库 revision、审查代码或使用已经审核过的本地副本。`device_map="auto"` 也更适合单进程自动放置，分布式训练时应按训练框架的并行方案显式配置。
+trust_remote_code 会允许执行仓库中的自定义 Python 模型实现。只有在来源可信、revision 固定并且代码经过审查时才应打开；生产环境可以使用已经审核的本地副本。
 
-这里用 `device_map="auto"`。
-
-原因是量化模型加载通常依赖 accelerate 自动放置。
-
-如果你使用的是 tiny-gpt2，可能没有必要用 QLoRA。
-
-QLoRA 的价值主要体现在较大模型上。
-
----
-
-### 六、准备 k-bit training
-
-PEFT 提供了：
-
-```python
-prepare_model_for_kbit_training
-```
-
-用法：
+PEFT 提供量化训练准备函数：
 
 ```python
 from peft import prepare_model_for_kbit_training
@@ -4036,25 +1660,7 @@ model = prepare_model_for_kbit_training(model)
 model.config.use_cache = False
 ```
 
-它会做一些适合 k-bit 训练的准备，例如：
-
-```text
-处理 norm 层精度。
-确保输入梯度相关设置正确。
-为量化模型训练做兼容处理。
-```
-
-实际工程中，QLoRA 通常写成：
-
-```python
-model = prepare_model_for_kbit_training(model)
-```
-
-然后再注入 LoRA。
-
----
-
-### 七、配置 LoRA adapter
+它会处理适合 k-bit 训练的若干精度和梯度设置。随后注入 LoRA：
 
 ```python
 from peft import LoraConfig, TaskType, get_peft_model
@@ -4066,80 +1672,40 @@ lora_config = LoraConfig(
     lora_alpha=32,
     lora_dropout=0.05,
     target_modules=[
-        "q_proj",
-        "k_proj",
-        "v_proj",
-        "o_proj",
-        "gate_proj",
-        "up_proj",
-        "down_proj",
+        "q_proj", "k_proj", "v_proj", "o_proj",
+        "gate_proj", "up_proj", "down_proj",
     ],
     bias="none",
 )
-
 model = get_peft_model(model, lora_config)
 model.print_trainable_parameters()
 ```
 
-对于 Qwen/LLaMA/Mistral 类模型，这组 target modules 很常见。
+target_modules 仍需根据 model.named_modules() 验证。QLoRA 不会修复 LoRA 的模块选择错误。
 
-但仍然建议先打印模块名确认。
+### 4.5.4 QLoRA 训练配置
+
+数据处理与普通 SFT、LoRA 相同：
+
+```text
+input_ids：完整模板序列。
+attention_mask：有效 token。
+labels：prompt/padding 为 -100，assistant 为真实 token id。
+```
+
+训练参数示例：
 
 ```python
-for name, module in model.named_modules():
-    if any(key in name for key in ["q_proj", "v_proj", "gate_proj", "up_proj"]):
-        print(name)
-```
-
----
-
-### 八、QLoRA 数据处理
-
-QLoRA 的数据处理和 SFT/LoRA 一样。
-
-仍然使用：
-
-```text
-input_ids
-attention_mask
-labels
-```
-
-仍然需要：
-
-```text
-prompt labels = -100
-padding labels = -100
-response labels = token ids
-```
-
-也就是说：
-
-```text
-QLoRA 改变的是模型加载和训练参数方式，不改变 SFT 数据目标。
-```
-
-第 20 讲的数据预处理代码可以直接复用。
-
----
-
-### 九、TrainingArguments
-
-```python
-import torch
 from transformers import TrainingArguments
 
 
-supports_bf16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
-
 training_args = TrainingArguments(
-    output_dir="outputs/qlora_qwen_0_5b",
+    output_dir="outputs/qlora_model",
     num_train_epochs=3,
     per_device_train_batch_size=1,
     per_device_eval_batch_size=1,
     gradient_accumulation_steps=8,
     learning_rate=2e-4,
-    weight_decay=0.0,
     logging_steps=10,
     eval_strategy="steps",
     eval_steps=50,
@@ -4152,19 +1718,7 @@ training_args = TrainingArguments(
 )
 ```
 
-如果不使用上面的自动选择，也可以在确认硬件支持 fp16 后显式使用：
-
-```python
-fp16=True
-```
-
-不要同时随意开启 fp16 和 bf16。
-
-根据硬件选择一个。
-
----
-
-### 十、创建 Trainer 并训练
+然后复用 Trainer：
 
 ```python
 from transformers import Trainer
@@ -4176,132 +1730,38 @@ trainer = Trainer(
     train_dataset=train_dataset,
     eval_dataset=eval_dataset,
     data_collator=data_collator,
-    tokenizer=tokenizer,
+    processing_class=tokenizer,
 )
-
 trainer.train()
+model.save_pretrained("outputs/qlora_model/adapter")
+tokenizer.save_pretrained("outputs/qlora_model/adapter")
 ```
 
-和前两讲一样，如果当前 `transformers` 版本提示 `tokenizer` 参数将被替换，可以改用 `processing_class=tokenizer`。如果版本较旧不支持 `processing_class`，继续保留 `tokenizer=tokenizer`。
+device_map="auto" 更适合单进程自动放置；多卡分布式训练时要遵循训练框架的并行策略，不要把自动切分和数据并行的设备管理混在一起。
 
-保存 adapter：
+### 4.5.5 显存的量级理解
 
-```python
-model.save_pretrained("outputs/qlora_qwen_0_5b/adapter")
-tokenizer.save_pretrained("outputs/qlora_qwen_0_5b/adapter")
+只看冻结基座权重时，理想化估算为：
+
+```math
+M_{\mathrm{fp16}}
+\approx
+2P
 ```
 
-和 LoRA 一样，保存的主要是 adapter。
-
-base model 仍然来自原模型。
-
----
-
-### 十一、完整 QLoRA 脚本骨架
-
-```python
-import torch
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    BitsAndBytesConfig,
-    Trainer,
-    TrainingArguments,
-)
-from peft import (
-    LoraConfig,
-    TaskType,
-    get_peft_model,
-    prepare_model_for_kbit_training,
-)
-
-
-model_name = "Qwen/Qwen2.5-0.5B"
-output_dir = "outputs/qlora_qwen_0_5b"
-
-if not torch.cuda.is_available():
-    raise RuntimeError("4bit bitsandbytes training requires a supported CUDA setup")
-
-supports_bf16 = torch.cuda.is_bf16_supported()
-compute_dtype = torch.bfloat16 if supports_bf16 else torch.float16
-
-bnb_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_quant_type="nf4",
-    bnb_4bit_compute_dtype=compute_dtype,
-    bnb_4bit_use_double_quant=True,
-)
-
-tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-if tokenizer.pad_token is None:
-    tokenizer.pad_token = tokenizer.eos_token
-
-model = AutoModelForCausalLM.from_pretrained(
-    model_name,
-    quantization_config=bnb_config,
-    device_map="auto",
-    trust_remote_code=True,
-)
-model.config.pad_token_id = tokenizer.pad_token_id
-
-model = prepare_model_for_kbit_training(model)
-model.config.use_cache = False
-
-lora_config = LoraConfig(
-    task_type=TaskType.CAUSAL_LM,
-    r=16,
-    lora_alpha=32,
-    lora_dropout=0.05,
-    target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
-    bias="none",
-)
-
-model = get_peft_model(model, lora_config)
-model.print_trainable_parameters()
-
-# train_dataset, eval_dataset, data_collator 复用 SFT 数据处理代码
-
-training_args = TrainingArguments(
-    output_dir=output_dir,
-    num_train_epochs=3,
-    per_device_train_batch_size=1,
-    per_device_eval_batch_size=1,
-    gradient_accumulation_steps=8,
-    learning_rate=2e-4,
-    logging_steps=10,
-    eval_strategy="steps",
-    eval_steps=50,
-    save_steps=50,
-    save_total_limit=2,
-    bf16=supports_bf16,
-    fp16=torch.cuda.is_available() and not supports_bf16,
-    gradient_checkpointing=True,
-    report_to="none",
-)
-
-trainer = Trainer(
-    model=model,
-    args=training_args,
-    train_dataset=train_dataset,
-    eval_dataset=eval_dataset,
-    data_collator=data_collator,
-    tokenizer=tokenizer,
-)
-
-trainer.train()
-model.save_pretrained(f"{output_dir}/adapter")
-tokenizer.save_pretrained(f"{output_dir}/adapter")
+```math
+M_{\mathrm{4bit}}
+\approx
+0.5P+M_{\mathrm{quant\ metadata}}
 ```
 
-这个脚本是典型 QLoRA SFT 骨架。
+其中 \(P\) 是参数量，单位是字节量级。真实显存还要加量化元数据、LoRA 参数、梯度、optimizer state、激活、KV 或临时 buffer，因此不能把 \(0.5P\) 当成程序运行时的精确显存。
 
----
+QLoRA 降低的是冻结基座的存储和训练状态，不会消除长序列激活，也不会保证吞吐一定高于普通 LoRA。量化 kernel 的速度取决于硬件、库版本和模型结构。
 
-### 十二、加载 QLoRA adapter 推理
+### 4.5.6 量化 adapter 的加载与部署
 
-推理时同样需要 base model + adapter。
-
-如果想保持 4bit 加载：
+推理时可以继续以 4bit 加载 base，再挂载 adapter：
 
 ```python
 from peft import PeftModel
@@ -4313,960 +1773,438 @@ base_model = AutoModelForCausalLM.from_pretrained(
     device_map="auto",
     trust_remote_code=True,
 )
-
 model = PeftModel.from_pretrained(
     base_model,
-    "outputs/qlora_qwen_0_5b/adapter",
+    "outputs/qlora_model/adapter",
 )
 model.eval()
 ```
 
-然后正常 generate。
+如果需要合并，应根据部署目标加载合适精度的 base，并验证当前 PEFT/bitsandbytes 版本对该模型和量化布局的支持。不能假设任意 4bit 模型都能安全地原地 merge 后再保存。
 
-如果要部署，也可以考虑合并到高精度 base model。
+### 4.5.7 纯 Python 的量化加低秩实验
 
-但注意：
-
-```text
-4bit 量化模型上 merge_and_unload 的行为和可用性会受库版本与模型影响。
-```
-
-工程中常见做法是：
-
-```text
-训练时用 QLoRA。
-部署时根据需求选择 adapter 加载或合并到 fp16/bf16 模型。
-```
-
----
-
-### 十三、QLoRA 显存为什么更低
-
-QLoRA 降显存主要来自三点：
-
-```text
-1. base model 以 4bit 存储。
-2. base model 冻结，不保存其优化器状态。
-3. 只为 LoRA adapter 保存梯度和优化器状态。
-```
-
-相比全参数 SFT：
-
-```text
-不需要为全部参数保存梯度和 AdamW 状态。
-```
-
-相比普通 LoRA：
-
-```text
-base model 权重本身更省显存。
-```
-
-所以 QLoRA 是单卡微调大模型时非常常用的方法。
-
-如果只看冻结基座权重，理想情况下：
-
-```math
-M_{\mathrm{fp16}}\approx 2P
-```
-
-```math
-M_{\mathrm{4bit}}\approx 0.5P + M_{\mathrm{meta}}
-```
-
-其中 `P` 是参数量，单位是 byte 级粗略估算；`M_meta` 是量化 scale、zero point 或 double quant metadata 等额外开销。真实显存还包括 LoRA 权重、梯度、优化器状态、激活值和临时 buffer。
-
----
-
-### 十四、0 依赖量化基座 + LoRA demo
-
-如果当前环境没有 CUDA、bitsandbytes 或 peft，可以先用下面这个纯 Python demo 理解 QLoRA 的核心结构：基座权重量化后冻结，只训练 LoRA adapter。这里用简单均匀 4bit 量化演示存储和误差直觉；真实 QLoRA 常用 NF4 和 double quant，数值细节更复杂。
+下面用均匀量化模拟冻结基座和 LoRA。它不是 NF4 实现，只用于展示量化误差与可训练分支的关系：
 
 ```python
 import random
 
 
 random.seed(5)
-d = 16
+dimension = 12
 rank = 2
-alpha = 4
-scale = alpha / rank
-W_fp = [[random.uniform(-0.3, 0.3) for _ in range(d)] for _ in range(d)]
+scale = 2.0
+weight = [
+    [random.uniform(-0.3, 0.3) for _ in range(dimension)]
+    for _ in range(dimension)
+]
 
 
 def quantize_row(row, levels=16):
-    lo, hi = min(row), max(row)
-    step = (hi - lo) / (levels - 1) if hi != lo else 1.0
-    q = [round((x - lo) / step) for x in row]
-    return q, lo, step
+    if not row:
+        raise ValueError("cannot quantize an empty row")
+    if not isinstance(levels, int) or levels < 2:
+        raise ValueError("levels must be an integer greater than one")
+    low = min(row)
+    high = max(row)
+    step = (high - low) / (levels - 1) if high != low else 1.0
+    quantized = [round((value - low) / step) for value in row]
+    return quantized, low, step
 
 
-q_rows = []
+quantized_rows = []
 metadata = []
-for row in W_fp:
-    q, lo, step = quantize_row(row)
-    q_rows.append(q)
-    metadata.append((lo, step))
+for row in weight:
+    quantized, low, step = quantize_row(row)
+    quantized_rows.append(quantized)
+    metadata.append((low, step))
 
+quantized_weight = [
+    [low + value * step for value in row]
+    for row, (low, step) in zip(quantized_rows, metadata)
+]
+if not weight:
+    raise ValueError("toy QLoRA experiment requires non-empty weight")
+if rank <= 0 or rank > dimension:
+    raise ValueError("rank must be in the interval [1, dimension]")
+if scale <= 0:
+    raise ValueError("scale must be positive")
+frozen_before = [row[:] for row in quantized_weight]
+quantization_error = sum(
+    (left - right) ** 2
+    for left_row, right_row in zip(weight, quantized_weight)
+    for left, right in zip(left_row, right_row)
+) / (dimension * dimension)
 
-def dequantize():
-    return [
-        [lo + q * step for q in row]
-        for row, (lo, step) in zip(q_rows, metadata)
-    ]
-
-
-W_q = dequantize()
-W_q_before = [row[:] for row in W_q]
-quant_mse = sum(
-    (a - b) ** 2
-    for fp_row, q_row in zip(W_fp, W_q)
-    for a, b in zip(fp_row, q_row)
-) / (d * d)
-
-A = [[random.uniform(-0.02, 0.02) for _ in range(d)] for _ in range(rank)]
-B = [[0.0 for _ in range(rank)] for _ in range(d)]
+A = [
+    [random.uniform(-0.02, 0.02) for _ in range(dimension)]
+    for _ in range(rank)
+]
+B = [[0.0 for _ in range(rank)] for _ in range(dimension)]
 data = []
-for input_idx, target_idx in [(0, 5), (1, 6), (2, 7), (3, 8)]:
-    x = [0.0] * d
-    target = [0.0] * d
-    x[input_idx] = 1.0
-    target[target_idx] = 0.8
-    data.append((x, target))
+for input_index, target_index in [(0, 4), (1, 5), (2, 6), (3, 7)]:
+    vector = [0.0] * dimension
+    target = [0.0] * dimension
+    vector[input_index] = 1.0
+    target[target_index] = 0.8
+    data.append((vector, target))
+if not data:
+    raise ValueError("toy QLoRA experiment requires non-empty data")
 
 
 def matvec(matrix, vector):
-    return [sum(w * x for w, x in zip(row, vector)) for row in matrix]
+    return [
+        sum(weight * value for weight, value in zip(row, vector))
+        for row in matrix
+    ]
 
 
-def forward(x):
-    base = matvec(W_q, x)
-    ax = matvec(A, x)
-    bax = matvec(B, ax)
-    return [b + scale * delta for b, delta in zip(base, bax)], ax
+def forward(vector):
+    base = matvec(quantized_weight, vector)
+    adapter = matvec(B, matvec(A, vector))
+    return [left + scale * right for left, right in zip(base, adapter)]
 
 
 def loss():
-    total = 0.0
-    for x, target in data:
-        y, _ = forward(x)
-        total += sum((yi - ti) ** 2 for yi, ti in zip(y, target)) / d
-    return total / len(data)
+    if not data:
+        raise ValueError("loss is undefined for an empty dataset")
+    values = []
+    for vector, target in data:
+        prediction = forward(vector)
+        values.append(
+            sum((left - right) ** 2 for left, right in zip(prediction, target))
+            / dimension
+        )
+    return sum(values) / len(values)
 
 
-def train_step(lr):
-    grad_A = [[0.0 for _ in range(d)] for _ in range(rank)]
-    grad_B = [[0.0 for _ in range(rank)] for _ in range(d)]
-    for x, target in data:
-        y, ax = forward(x)
-        error = [yi - ti for yi, ti in zip(y, target)]
-        for out_idx in range(d):
-            for j in range(rank):
-                grad_B[out_idx][j] += scale * error[out_idx] * ax[j] / d
-        for j in range(rank):
-            upstream = sum(error[out_idx] * B[out_idx][j] for out_idx in range(d))
-            for in_idx in range(d):
-                grad_A[j][in_idx] += scale * upstream * x[in_idx] / d
-    n = len(data)
-    for j in range(rank):
-        for in_idx in range(d):
-            A[j][in_idx] -= lr * grad_A[j][in_idx] / n
-    for out_idx in range(d):
-        for j in range(rank):
-            B[out_idx][j] -= lr * grad_B[out_idx][j] / n
+def train_step(learning_rate):
+    grad_a = [[0.0] * dimension for _ in range(rank)]
+    grad_b = [[0.0] * rank for _ in range(dimension)]
+    for vector, target in data:
+        prediction = forward(vector)
+        error = [left - right for left, right in zip(prediction, target)]
+        ax = matvec(A, vector)
+        for out_index in range(dimension):
+            for rank_index in range(rank):
+                grad_b[out_index][rank_index] += (
+                    scale * error[out_index] * ax[rank_index] / dimension
+                )
+        for rank_index in range(rank):
+            upstream = sum(
+                error[out_index] * B[out_index][rank_index]
+                for out_index in range(dimension)
+            )
+            for in_index in range(dimension):
+                grad_a[rank_index][in_index] += (
+                    scale * upstream * vector[in_index] / dimension
+                )
+    for rank_index in range(rank):
+        for in_index in range(dimension):
+            A[rank_index][in_index] -= (
+                learning_rate * grad_a[rank_index][in_index] / len(data)
+            )
+    for out_index in range(dimension):
+        for rank_index in range(rank):
+            B[out_index][rank_index] -= (
+                learning_rate * grad_b[out_index][rank_index] / len(data)
+            )
 
 
-initial_loss = loss()
+initial = loss()
 for _ in range(500):
-    train_step(lr=8.0)
-final_loss = loss()
-
-print("quant_mse=", round(quant_mse, 6))
-print("initial_loss=", round(initial_loss, 4))
-print("final_loss=", round(final_loss, 4))
-print("loss_decreased=", final_loss < initial_loss)
-print("fp16_base_bytes=", d * d * 2)
-print("int4_base_bytes_ideal=", round(d * d * 0.5, 1))
-print("lora_trainable_params=", rank * (d + d))
-print("base_quantized_changed=", W_q != W_q_before)
+    train_step(8.0)
+final = loss()
+print("quantization_error=", round(quantization_error, 6))
+print("initial_loss=", round(initial, 4))
+print("final_loss=", round(final, 4))
+print("loss_decreased=", final < initial)
+print("frozen_base_changed=", quantized_weight != frozen_before)
+print("adapter_params=", rank * (dimension + dimension))
 ```
 
-参考输出：
+这里的量化方式比 NF4 简单得多，不能用来复现 QLoRA 论文数值；它只说明量化基座可以保持不变，而低秩分支仍能学习一部分任务增量。
+
+### 4.5.8 QLoRA 的工程边界
+
+应明确记录：
 
 ```text
-quant_mse= 9.6e-05
-initial_loss= 0.0632
-final_loss= 0.02
-loss_decreased= True
-fp16_base_bytes= 512
-int4_base_bytes_ideal= 128.0
-lora_trainable_params= 64
-base_quantized_changed= False
+bitsandbytes、CUDA、PyTorch 和 Transformers 版本。
+GPU 是否支持所选 compute dtype。
+量化类型、double quant 和 device_map。
+base revision、adapter 配置和训练 token 数。
+训练与部署阶段是否使用相同量化布局。
 ```
 
-这段 demo 对应 QLoRA 的核心直觉：量化基座有小的量化误差，理想 4bit 存储显著小于 fp16，训练过程中被冻结的量化基座不变，只有 LoRA adapter 在学习。
+4bit 训练失败可能来自 kernel、驱动、模型结构、dtype 或设备放置，而不一定是 labels 问题；诊断时应先单独验证量化加载，再注入 adapter，再运行一个很小 batch。
 
----
+## 4.6 评估 SFT 前后的行为变化
 
-### 十五、QLoRA 的限制
+### 4.6.1 训练完成不等于任务完成
 
-QLoRA 不是免费午餐。
-
-常见限制：
+SFT 训练最容易得到的结果是一个下降的训练 loss，但真正想知道的是模型行为是否改善：
 
 ```text
-依赖 bitsandbytes 和 CUDA 环境。
-4bit 量化会带来一定数值误差。
-训练速度不一定比 LoRA 更快。
-某些模型结构或算子兼容性可能有问题。
-部署链路比全参数模型复杂。
+是否更愿意遵循指令。
+是否能稳定输出指定格式。
+答案是否更正确、更完整。
+是否增加了幻觉、重复或不必要的拒答。
+原有通用能力和安全边界是否回归。
 ```
 
-实践中要关注：
+因此评估至少包含两条线：
 
 ```text
-loss 是否正常下降。
-生成质量是否稳定。
-是否出现 NaN。
-adapter 是否能正常加载。
+token-level：masked validation loss、有效 token 数、困惑度。
+task-level：生成结果、格式解析、事实检查、人工评分和坏例分析。
 ```
 
----
+训练 loss 是必要的诊断信号，但不是任务成功的同义词。
 
-### 十六、LoRA、QLoRA、全参数 SFT 对比
+### 4.6.2 固定比较对象
 
-```text
-全参数 SFT：
-base model 高精度加载，全部参数训练。
-成本最高，适配能力强。
-
-LoRA：
-base model 高精度加载，冻结 base，只训练 adapter。
-成本较低，文件小。
-
-QLoRA：
-base model 4bit 加载，冻结 base，只训练 adapter。
-显存更低，适合单卡微调较大模型。
-```
-
-选择建议：
-
-```text
-小模型 + 资源充足：全参数 SFT。
-中大模型 + 有一定显存：LoRA。
-大模型 + 显存紧张：QLoRA。
-```
-
----
-
-### 十七、常见工程坑
-
-#### 坑 1：bitsandbytes 安装或 CUDA 不匹配
-
-表现为导入失败或 4bit 加载失败。
-
-解决方式是检查 CUDA、PyTorch 和 bitsandbytes 版本兼容性。
-
-#### 坑 2：忘记 `prepare_model_for_kbit_training`
-
-量化模型训练前通常需要调用它。
-
-#### 坑 3：target_modules 不匹配
-
-和 LoRA 一样，必须根据模型真实模块名配置。
-
-#### 坑 4：bf16 硬件不支持
-
-如果 GPU 不支持 bf16，改用 fp16 compute dtype。
-
-#### 坑 5：以为 4bit 模型所有计算都是 4bit
-
-4bit 主要是权重存储，计算会使用指定 compute dtype，例如 fp16/bf16。
-
-#### 坑 6：adapter 和 base model 不匹配
-
-QLoRA adapter 仍然必须配合训练时的 base model。
-
-#### 坑 7：小模型上看不出 QLoRA 优势
-
-QLoRA 主要为大模型省显存。
-
-在 tiny 模型上只是演示流程。
-
-#### 坑 8：把 4bit 存储误解成 4bit 全流程计算
-
-QLoRA 的核心收益来自冻结基座权重的低比特存储；矩阵乘法、adapter、norm 和部分中间计算仍会使用 fp16/bf16 等 compute dtype。
-
----
-
-### 十八、面试怎么讲 QLoRA
-
-如果面试官问“QLoRA 是什么”，可以这样回答：
-
-```text
-QLoRA 是 LoRA 的量化版本。它把冻结的基座模型以 4bit 量化方式加载，同时只训练 LoRA adapter。这样既保留了 LoRA 只训练少量参数的优点，又显著降低了 base model 的显存占用，适合资源受限场景下微调较大模型。
-```
-
-如果追问“QLoRA 和 LoRA 区别是什么”，可以回答：
-
-```text
-LoRA 通常以 fp16 或 bf16 加载基座模型，然后冻结基座并训练 adapter；QLoRA 则以 4bit 方式加载基座模型，再训练 adapter。二者训练的参数都是 LoRA adapter，但 QLoRA 的基座权重存储更省显存。
-```
-
-如果问“QLoRA 需要哪些关键配置”，可以回答：
-
-```text
-关键配置包括 BitsAndBytesConfig 中的 load_in_4bit、量化类型 nf4、compute dtype、double quant；加载模型时传 quantization_config 和 device_map；然后用 prepare_model_for_kbit_training 准备模型，再通过 get_peft_model 注入 LoRA adapter。
-```
-
-如果问“QLoRA 有什么风险”，可以回答：
-
-```text
-主要风险包括 bitsandbytes 和 CUDA 兼容性、4bit 量化带来的数值误差、某些模型结构不兼容、训练或合并 adapter 链路复杂，以及 adapter 必须和 base model 严格匹配。
-```
-
----
-
-### 十九、小练习
-
-#### 练习 1
-
-检查本机是否能成功导入 bitsandbytes。
-
-#### 练习 2
-
-用 `BitsAndBytesConfig` 以 4bit 加载一个小模型。
-
-#### 练习 3
-
-调用 `prepare_model_for_kbit_training` 后注入 LoRA。
-
-#### 练习 4
-
-比较 LoRA 和 QLoRA 加载同一模型时的显存占用。
-
-#### 练习 5
-
-保存 QLoRA adapter，并重新加载 base model + adapter 做推理。
-
----
-
-### 本讲总结
-
-这一讲实现了 QLoRA 微调。
-
-核心结论如下：
-
-1. QLoRA = 4bit 量化 base model + LoRA adapter 训练。
-2. QLoRA 进一步降低了基座模型显存占用。
-3. `BitsAndBytesConfig` 是 4bit 加载的核心配置。
-4. QLoRA 通常需要 `prepare_model_for_kbit_training`。
-5. 数据处理和普通 SFT/LoRA 相同，仍要正确构造 labels mask。
-6. QLoRA adapter 仍然必须和 base model 匹配。
-7. QLoRA 适合显存有限但想微调较大模型的场景。
-
-下一讲，我们评估 SFT 前后模型行为变化，判断微调是否真的有效。
-
-## 第 24 讲：评估 SFT 前后模型行为变化
-
-### 本讲目标
-
-学完本讲，你应该能做到六件事：
-
-1. 设计 SFT 前后对比评测集。
-2. 对 base model 和 SFT model 使用同一套 prompt 做生成对比。
-3. 从格式遵循、任务正确性、幻觉、稳定性等维度分析行为变化。
-4. 写出简单的自动化评估脚本。
-5. 理解 loss、人工评估和自动指标之间的关系。
-6. 能把 SFT 评估结果整理成项目报告和面试表达。
-
-前面几讲我们完成了：
-
-```text
-加载开源 causal LM
-构造 SFT 数据集
-全参数 SFT
-LoRA 微调
-QLoRA 微调
-```
-
-但训练完成不等于任务完成。
-
-你必须回答一个问题：
-
-```text
-微调真的让模型变好了吗？
-```
-
-本讲专门讲 SFT 前后模型行为评估。
-
-本讲使用 Hugging Face Transformers 的 text generation / `generate`、`Trainer.evaluate` / `predict` 和 Evaluate 指标接口，建立离线 SFT 行为评估闭环：固定评测集、固定 prompt 模板、固定生成参数、任务级指标、人工复核和坏例归因。大规模 leaderboard、生产级 LLM-as-a-judge、在线 A/B 实验和安全红队评估需要独立的评测设计。
-
----
-
-### 一、为什么要评估 SFT 前后行为
-
-SFT 的目标不是单纯降低训练 loss。
-
-而是改变模型行为。
-
-例如：
-
-```text
-更愿意按指令回答。
-输出格式更稳定。
-领域知识更贴合数据。
-回答风格更符合要求。
-```
-
-如果 loss 降了，但模型生成质量没有改善，甚至变差，说明微调并不成功。
-
-所以评估要同时看：
-
-```text
-训练/验证 loss
-生成样例
-人工偏好
-任务正确性
-格式遵循
-安全性和幻觉
-```
-
-可以把一次离线行为评估写成：
+对每条评估样本 \(i\)，记录 prompt、类别、参考答案或检查点：
 
 ```math
-\mathcal{D}_{\mathrm{eval}}=\{(p_i,c_i,e_i)\}_{i=1}^{N}
+\mathcal{D}_{\mathrm{eval}}
+=
+\{(p_i,c_i,r_i)\}_{i=1}^{N}
 ```
 
-其中 `p_i` 是第 `i` 条评估 prompt，`c_i` 是评估类别，例如格式遵循、知识问答或安全边界，`e_i` 是期望检查点、参考答案或评分 rubric。
-
-对同一条样本，base 和 SFT 的输出分别是：
+base 和 SFT 模型在同一 prompt、同一模板和同一生成参数下产生：
 
 ```math
-y_i^{\mathrm{base}}=G(\theta_{\mathrm{base}},p_i,g),
-\qquad
-y_i^{\mathrm{sft}}=G(\theta_{\mathrm{sft}},p_i,g)
+y_i^{\mathrm{base}}
+=
+G(\theta_{\mathrm{base}},p_i,g)
 ```
 
-其中 `G` 表示生成过程，`g` 表示固定的生成参数，例如 `max_new_tokens`、`do_sample`、`temperature`、`top_p`。公平对比的核心是：只改变模型参数，不随意改变 prompt 模板和生成参数。
+```math
+y_i^{\mathrm{sft}}
+=
+G(\theta_{\mathrm{sft}},p_i,g)
+```
 
----
+其中 \(g\) 包括 max_new_tokens、do_sample、temperature、top-p、停止 token 和随机种子。比较时只应改变模型参数；如果同时改变 prompt 或采样策略，就不能把结果差异归因于 SFT。
 
-### 二、准备对比模型
+base 与 SFT 应尽量使用相同 tokenizer 和模板。LoRA/QLoRA 的 SFT 模型通常是同一个 base 加 adapter；全参数 SFT 则应从保存目录加载对应 tokenizer。若更换了 base、词表或模板，报告中必须把它作为独立变量。
 
-我们需要两个模型：
+### 4.6.3 评估集应覆盖不同风险
+
+一个只由训练集复制样本组成的评估集会产生过于乐观的结果。至少应分桶：
 
 ```text
-base model：微调前模型。
-sft model：微调后模型，可以是全参数模型、LoRA adapter 或 QLoRA adapter。
+训练分布内：确认模型是否学会目标格式和任务。
+相似但未见：观察近邻泛化。
+分布外：观察是否过度依赖模板。
+格式任务：JSON、列表、表格、代码。
+事实与来源任务：检查无依据断言。
+安全和边界任务：检查拒答、隐私和风险内容。
+旧能力回归：确认不相关能力没有明显损失。
 ```
 
-加载 base model：
+样本元数据可以这样记录：
 
 ```python
-from transformers import AutoModelForCausalLM, AutoTokenizer
-
-
-base_model_name = "sshleifer/tiny-gpt2"
-
-tokenizer = AutoTokenizer.from_pretrained(base_model_name)
-base_model = AutoModelForCausalLM.from_pretrained(base_model_name)
-base_model.eval()
+eval_item = {
+    "id": "format-json-001",
+    "category": "format",
+    "instruction": "用 JSON 输出三个机器学习术语。",
+    "input": "",
+    "expected_points": ["术语"],
+    "format": "json",
+    "source_requirement": False,
+}
 ```
 
-加载全参数 SFT 后模型：
-
-```python
-sft_dir = "outputs/full_sft_tiny_gpt2/final"
-sft_tokenizer = AutoTokenizer.from_pretrained(sft_dir)
-sft_model = AutoModelForCausalLM.from_pretrained(sft_dir)
-sft_model.eval()
-```
-
-如果是 LoRA adapter：
-
-```python
-from peft import PeftModel
-
-
-adapter_dir = "outputs/lora_tiny_gpt2/adapter"
-base_for_lora = AutoModelForCausalLM.from_pretrained(base_model_name)
-sft_model = PeftModel.from_pretrained(base_for_lora, adapter_dir)
-sft_model.eval()
-```
-
-注意：
-
-```text
-评估时 base 和 SFT 应尽量使用同一 tokenizer 和同一 prompt 模板。
-```
-
-如果 SFT 是 LoRA 或 QLoRA adapter，通常仍然复用 base model 的 tokenizer。不要把“不同基座模型之间的能力差异”混进“SFT 是否有效”的结论里；如果必须换 tokenizer、换 base 或换 chat template，需要在报告里单独说明。
-
----
-
-### 三、构造评测集
-
-评测集不要只用训练集样本。
-
-应该包含：
-
-```text
-训练分布内样本。
-训练分布外但相似的样本。
-格式要求样本。
-容易诱发幻觉的样本。
-安全边界样本。
-```
-
-示例：
-
-```python
-eval_prompts = [
-    {
-        "id": "overfit_def",
-        "instruction": "解释什么是过拟合。",
-        "input": "",
-        "expected_points": ["训练集", "泛化", "未见数据"],
-    },
-    {
-        "id": "regularization_methods",
-        "instruction": "给出三个缓解过拟合的方法。",
-        "input": "",
-        "expected_points": ["正则化", "dropout", "早停"],
-    },
-    {
-        "id": "translation",
-        "instruction": "把下面这句话翻译成英文。",
-        "input": "我喜欢机器学习。",
-        "expected_points": ["machine learning"],
-    },
-    {
-        "id": "format_json",
-        "instruction": "用 JSON 格式输出三个机器学习术语。",
-        "input": "",
-        "expected_points": ["{", "}", "术语"],
-    },
-]
-```
-
-这里的 `expected_points` 是非常粗糙的自动检查依据。
-
-真实评估可以更复杂。
-
-评测集设计至少要记录三类信息：
-
-```text
-样本来源：训练集、验证集、人工新增、线上坏例。
-样本类别：知识、格式、推理、安全、风格、拒答边界。
-期望行为：关键词、参考答案、格式规则、人工评分 rubric。
-```
-
-如果评估集里训练样本占比过高，结果会偏乐观。一个简单的分桶统计可以写成：
+类别数量也应报告：
 
 ```math
 N=\sum_{c\in\mathcal{C}}N_c
 ```
 
-其中 `N_c` 是类别 `c` 下的样本数。报告里不要只写总分，还要写每个类别的结果，否则格式类样本、幻觉类样本和普通问答样本会互相掩盖。
+总分掩盖类别回归时，分桶结果能告诉我们是格式变好了、事实性变差了，还是某个小类别样本太少。
 
----
+### 4.6.4 统一生成函数
 
-### 四、保持 prompt 模板一致
-
-如果训练时使用 Alpaca 模板，评估时也要用同样模板。
-
-```python
-def build_prompt(example):
-    if example.get("input", ""):
-        return (
-            "### Instruction:\n"
-            f"{example['instruction']}\n\n"
-            "### Input:\n"
-            f"{example['input']}\n\n"
-            "### Response:\n"
-        )
-    return (
-        "### Instruction:\n"
-        f"{example['instruction']}\n\n"
-        "### Response:\n"
-    )
-```
-
-如果训练时使用 chat template，评估时使用：
-
-```python
-messages = [
-    {"role": "system", "content": "你是一个有帮助的 AI 助手。"},
-    {"role": "user", "content": user_content},
-]
-
-prompt = tokenizer.apply_chat_template(
-    messages,
-    tokenize=False,
-    add_generation_prompt=True,
-)
-```
-
-模板不一致会严重影响评估结论。
-
----
-
-### 五、统一生成函数
-
-为了公平比较，base 和 SFT 使用同样生成参数。
+评估时必须只比较新生成的 token：
 
 ```python
 import torch
 
 
 @torch.no_grad()
-def generate_text(model, tokenizer, prompt, device="cpu"):
-    if not hasattr(model, "hf_device_map"):
-        model.to(device)
+def generate_new_text(model, tokenizer, prompt, max_new_tokens=128):
     model.eval()
-
-    inputs = tokenizer(prompt, return_tensors="pt").to(device)
-    prompt_len = inputs["input_ids"].shape[-1]
+    inputs = tokenizer(prompt, return_tensors="pt")
+    input_device = next(model.parameters()).device
+    inputs = inputs.to(input_device)
+    prompt_length = inputs["input_ids"].shape[-1]
     pad_token_id = tokenizer.pad_token_id
     if pad_token_id is None:
         pad_token_id = tokenizer.eos_token_id
 
-    outputs = model.generate(
+    output_ids = model.generate(
         **inputs,
-        max_new_tokens=128,
+        max_new_tokens=max_new_tokens,
         do_sample=False,
         pad_token_id=pad_token_id,
     )
-    new_tokens = outputs[0][prompt_len:]
-    return tokenizer.decode(new_tokens, skip_special_tokens=True)
+    new_ids = output_ids[0, prompt_length:]
+    return tokenizer.decode(new_ids, skip_special_tokens=True)
 ```
 
-小模型可以在函数内移动到 `device`；如果模型通过 `device_map="auto"` 分片或 offload，函数不会再移动它，调用方还要把输入放到模型的输入设备上，不能简单假定所有输入都应该送到同一张卡。
+如果模型通过 device_map 分片，next(model.parameters()).device 只用于把输入放到起始设备，不能再把整个模型移动到单卡。对采样评估，应固定随机种子并对同一 prompt 重复多次，报告均值和方差，而不是只挑一条好看的输出。
 
-这里先用 `do_sample=False`。
+### 4.6.5 任务级指标
 
-原因是贪心解码更稳定，便于对比。
-
-如果要评估多样性，可以再用采样生成多次。
-
-注意这里返回的是新生成的 response，而不是 prompt + response 的整体文本。否则关键词检查可能把 prompt 里的词误算成模型输出命中。
-
----
-
-### 六、批量生成对比
+对于明确格式，可以使用解析器：
 
 ```python
-device = "cuda" if torch.cuda.is_available() else "cpu"
+import json
 
-results = []
 
-for item in eval_prompts:
-    prompt = build_prompt(item)
-
-    base_output = generate_text(base_model, tokenizer, prompt, device=device)
-    sft_output = generate_text(sft_model, sft_tokenizer, prompt, device=device)
-
-    results.append({
-        "id": item["id"],
-        "prompt": prompt,
-        "base_output": base_output,
-        "sft_output": sft_output,
-        "expected_points": item["expected_points"],
-    })
+def format_pass(output, format_name):
+    if format_name is None:
+        return None
+    if format_name == "json":
+        try:
+            value = json.loads(output)
+        except json.JSONDecodeError:
+            return False
+        return isinstance(value, (dict, list))
+    raise ValueError(f"unsupported format: {format_name}")
 ```
 
-打印对比：
+格式通过率：
 
-```python
-for r in results:
-    print("=" * 80)
-    print("ID:", r["id"])
-    print("PROMPT:")
-    print(r["prompt"])
-    print("BASE:")
-    print(r["base_output"])
-    print("SFT:")
-    print(r["sft_output"])
-```
-
-观察 SFT 是否更像训练目标。
-
----
-
-### 七、评估维度
-
-建议从六个维度评估。
-
-#### 1. 指令遵循
-
-模型是否理解用户要求。
-
-例如要求“给三个方法”，是否真的给三个。
-
-#### 2. 格式遵循
-
-要求 JSON、列表、表格时，是否按格式输出。
-
-#### 3. 内容正确性
-
-回答是否事实正确、逻辑合理。
-
-#### 4. 风格一致性
-
-是否符合 SFT 数据中的回答风格。
-
-例如简洁、专业、中文回答。
-
-#### 5. 幻觉程度
-
-是否编造不存在的信息。
-
-#### 6. 稳定性
-
-多次生成是否稳定，是否容易跑偏或重复。
-
----
-
-### 八、一个简单打分表
-
-可以人工打分：
-
-```text
-0：完全错误
-1：部分正确
-2：基本正确
-3：很好
-```
-
-表格：
-
-```text
-样本 ID | base 指令遵循 | sft 指令遵循 | base 正确性 | sft 正确性 | 备注
-```
-
-或者用 Python 保存：
-
-```python
-scores = [
-    {
-        "id": "overfit_def",
-        "base_follow": 0,
-        "sft_follow": 2,
-        "base_correct": 0,
-        "sft_correct": 2,
-        "note": "SFT 能回答过拟合定义，base 输出不稳定。",
-    }
-]
-```
-
-小项目里人工评估比复杂自动指标更直观。
-
----
-
-### 九、关键词自动检查
-
-可以写一个非常简单的关键词命中率。
-
-```python
-def keyword_score(output, expected_points):
-    hit = 0
-    for point in expected_points:
-        if point.lower() in output.lower():
-            hit += 1
-    return hit / max(len(expected_points), 1)
-```
-
-应用：
-
-```python
-for r in results:
-    base_score = keyword_score(r["base_output"], r["expected_points"])
-    sft_score = keyword_score(r["sft_output"], r["expected_points"])
-    print(r["id"], "base", base_score, "sft", sft_score)
-```
-
-注意：
-
-```text
-关键词分数很粗糙，只能辅助，不能替代人工判断。
-```
-
-例如模型可能用了同义表达，但关键词没命中。
-
-也可能关键词命中，但整体回答是错的。
-
-更一般地，关键词命中率可以写成：
+令 \(N_{\mathrm{fmt}}=|\mathcal{I}_{\mathrm{fmt}}|\)。只有评估集中确实存在格式任务，即 \(N_{\mathrm{fmt}}>0\)，这个比例才有定义；没有格式样本时应记录为 `None`，而不是把空集合当作 100% 通过。
 
 ```math
-K_i=
-\frac{1}{M_i}
-\sum_{j=1}^{M_i}
-\mathbf{1}[q_{i,j}\subset y_i]
-```
-
-其中 `M_i` 是第 `i` 条样本的检查点数量，`q_{i,j}` 是第 `j` 个关键词或检查点，`y_i` 是模型输出。`K_i` 越高，说明粗粒度检查点命中越多，但它不等价于语义正确。
-
-如果样本有明确格式要求，可以统计格式通过率：
-
-```math
-A_{\mathrm{fmt}}=
+A_{\mathrm{fmt}}
+=
 \frac{1}{N_{\mathrm{fmt}}}
 \sum_{i\in\mathcal{I}_{\mathrm{fmt}}}
 \mathbf{1}[\mathrm{valid}(y_i)]
 ```
 
-其中 `\mathcal{I}_{\mathrm{fmt}}` 是有格式要求的样本集合，`\mathrm{valid}` 表示 JSON 解析成功、字段完整、表格列数正确等检查函数。
-
-对比 base 和 SFT 时，也可以统计胜率和回归率：
-
-```math
-W_{\mathrm{sft}}=
-\frac{1}{N}
-\sum_{i=1}^{N}
-\mathbf{1}[s(y_i^{\mathrm{sft}})>s(y_i^{\mathrm{base}})]
-```
-
-```math
-R_{\mathrm{reg}}=
-\frac{1}{N}
-\sum_{i=1}^{N}
-\mathbf{1}[s(y_i^{\mathrm{sft}})<s(y_i^{\mathrm{base}})]
-```
-
-其中 `s` 是人工分或自动综合分。回归率很重要，因为平均分提升可能掩盖某些类别明显变差。
-
----
-
-### 十、保存评估结果
+关键词或检查点命中率只能作为粗粒度辅助：
 
 ```python
-import json
-from pathlib import Path
-
-
-out_path = Path("outputs/eval_sft_outputs.jsonl")
-
-with out_path.open("w", encoding="utf-8") as f:
-    for r in results:
-        f.write(json.dumps(r, ensure_ascii=False) + "\n")
+def keyword_score(output, expected_points):
+    if not expected_points:
+        return None
+    if any(
+        not isinstance(point, str) or not point.strip()
+        for point in expected_points
+    ):
+        raise ValueError("expected_points must contain non-empty strings")
+    output_lower = output.lower()
+    hits = sum(
+        point.lower() in output_lower
+        for point in expected_points
+    )
+    return hits / len(expected_points)
 ```
 
-JSONL 的好处是：
+其数学形式为：
 
-```text
-一行一个样本。
-方便后续追加字段。
-方便人工检查和脚本处理。
-```
-
-也可以保存成 CSV。
-
-但长文本字段里有换行时，JSONL 更稳。
-
----
-
-### 十一、评估 loss 和行为评估的关系
-
-验证 loss 低，不一定表示回答更好。
-
-用 assistant-only labels 评估时，验证 loss 通常类似：
+对每个样本，令 \(M_i\) 为非空检查点的数量。只有 \(M_i>0\) 时，下面的关键词得分才有定义；它是便于定位坏例的字符串指标，不是语义正确率。
 
 ```math
-L_{\mathrm{val}}=
+K_i
+=
+\frac{1}{M_i}
+\sum_{j=1}^{M_i}
+\mathbf{1}[q_{i,j}\subset y_i]
+```
+
+关键词命中不等于语义正确：模型可能使用同义词而没有命中，也可能在错误语境中重复关键词。事实性、推理质量和安全性需要人工 rubric、程序验证或经过审查的评审模型共同判断。
+
+### 4.6.6 胜率与回归率
+
+如果每条输出都有综合评分 \(s_i\)，可以记录 SFT 胜率：
+
+下面假设有 \(N>0\) 条同时得到有效 base/SFT 评分的样本；平局不计入胜出或回归。
+
+```math
+W_{\mathrm{sft}}
+=
+\frac{1}{N}
+\sum_{i=1}^{N}
+\mathbf{1}
+[s(y_i^{\mathrm{sft}})>s(y_i^{\mathrm{base}})]
+```
+
+更重要的是回归率：
+
+```math
+R_{\mathrm{reg}}
+=
+\frac{1}{N}
+\sum_{i=1}^{N}
+\mathbf{1}
+[s(y_i^{\mathrm{sft}})<s(y_i^{\mathrm{base}})]
+```
+
+平均分上升仍可能伴随某个类别严重变差，因此报告应保存每个样本的 base 输出、SFT 输出、评分、类别和评语。
+
+一个简单的人工 rubric 可以把每一维打成 0 到 3 分：
+
+```text
+指令遵循：是否完成了用户要求。
+内容正确：事实和推理是否成立。
+格式遵循：是否满足 JSON、字段、数量等约束。
+表达质量：是否清晰、完整、无不必要重复。
+边界行为：是否对无依据问题保持谨慎。
+```
+
+0 到 3 只是记录工具，不是普适的科学量表。评审前应固定评分说明，并尽量让评审者看到相同的 prompt 和输出。
+
+### 4.6.7 validation loss 与行为评估的关系
+
+使用 assistant-only labels 时，验证 loss 为：
+
+令 \(S_{\mathrm{val}}=\sum_{i,t}m_{i,t}\)。只有 \(S_{\mathrm{val}}>0\) 时，验证 loss 和由它得到的困惑度才有定义。
+
+```math
+\mathcal{L}_{\mathrm{val}}
+=
 -
-\frac{1}{\sum_{i,t}m_{i,t}}
-\sum_{i,t}
-m_{i,t}\log p_{\theta}(x_{i,t}\mid x_{i,1:t-1})
+\frac{
+\sum_{i,t}m_{i,t}
+\log p_\theta(x_{i,t}\mid x_{i,<t})
+}{
+\sum_{i,t}m_{i,t}
+}
 ```
 
-其中 `m_{i,t}=1` 表示该 token 参与 loss，`m_{i,t}=0` 表示 prompt 或 padding 被 mask 掉。Hugging Face `Trainer.evaluate` 在数据里有 `labels` 时通常会返回 `eval_loss`，但这个值仍然是 token 级预测指标。
-
-原因包括：
+它衡量模型对目标 token 的概率预测，不能直接衡量：
 
 ```text
-验证集太像训练集。
-loss 只衡量 token 级预测，不直接衡量任务成功。
-格式、事实性、安全性很难只靠 loss 反映。
+回答是否真的完成任务。
+JSON 是否能解析。
+事实是否有来源。
+是否出现危险或隐私泄露。
+多轮交互是否保持角色边界。
 ```
 
-行为评估也有缺点：
+困惑度可以由平均负对数似然得到：
 
-```text
-人工成本高。
-容易受样本选择影响。
-采样随机性会影响结论。
+```math
+\mathrm{PPL}
+=
+\exp(\mathcal{L}_{\mathrm{val}})
 ```
 
-所以实践中要结合：
+只有当 tokenization、mask、评估文本和归一化方式一致时，PPL 才适合做相对比较。不同 tokenizer、不同回答长度和不同 mask 不能直接横向比较。
 
-```text
-验证 loss
-固定 prompt 对比
-人工评分
-自动指标
-真实业务测试
-```
+### 4.6.8 自动化 base/SFT 对比脚本
 
----
+下面的骨架使用 Alpaca 风格模板，实际聊天模型应把 build_prompt 换成目标 tokenizer 的 chat template：
 
-### 十二、微调后变差的常见原因
-
-#### 原因 1：数据质量差
-
-错答、重复、格式混乱会直接污染模型。
-
-#### 原因 2：模板不一致
-
-训练和推理 prompt 格式不同，模型不知道该如何回答。
-
-#### 原因 3：学习率过大
-
-模型原有能力被破坏。
-
-#### 原因 4：训练太久
-
-小数据上过拟合，模型变得机械或只会背训练样本。
-
-#### 原因 5：labels mask 错误
-
-如果 response 没有参与 loss，模型学不到回答。
-
-如果 prompt 也参与大量 loss，模型可能过度学习模板。
-
-#### 原因 6：评估 prompt 不合理
-
-评估问题和训练目标完全不一致，不能说明微调失败。
-
----
-
-### 十三、对比报告怎么写
-
-一个简单报告结构：
-
-```text
-1. 模型与微调方法
-2. 数据集规模与格式
-3. 训练配置
-4. 评估集设计
-5. SFT 前后样例对比
-6. 指标结果
-7. 主要改进
-8. 失败案例
-9. 后续改进方向
-```
-
-示例结论：
-
-```text
-微调后模型在训练领域问题上的指令遵循明显增强，能更稳定地输出中文解释，并按模板回答。关键词命中率从 0.25 提升到 0.70。但在未覆盖的复杂推理问题上提升有限，部分回答仍存在泛化不足和重复表达，后续需要扩大高质量指令数据并加入更严格的验证集。
-```
-
-这样的结论比“loss 降了”更有说服力。
-
----
-
-### 十四、自动化评估脚本骨架
+它假设 `sft_dir` 是已经保存好的全参数 SFT 目录；如果实际产物是 LoRA/QLoRA adapter，应先用训练时相同的 base model 挂载 adapter，不能把 adapter 目录当成完整 CausalLM 加载。
 
 ```python
 import json
@@ -5276,330 +2214,287 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
-def build_prompt(example):
-    if example.get("input", ""):
+def build_prompt(item):
+    if item.get("input", "").strip():
         return (
             "### Instruction:\n"
-            f"{example['instruction']}\n\n"
-            "### Input:\n"
-            f"{example['input']}\n\n"
-            "### Response:\n"
+            + item["instruction"].strip()
+            + "\n\n### Input:\n"
+            + item["input"].strip()
+            + "\n\n### Response:\n"
         )
     return (
         "### Instruction:\n"
-        f"{example['instruction']}\n\n"
-        "### Response:\n"
+        + item["instruction"].strip()
+        + "\n\n### Response:\n"
     )
 
 
 @torch.no_grad()
-def generate_text(model, tokenizer, prompt, device):
-    if not hasattr(model, "hf_device_map"):
-        model.to(device)
+def generate(model, tokenizer, prompt, device):
+    model.eval()
     inputs = tokenizer(prompt, return_tensors="pt").to(device)
-    prompt_len = inputs["input_ids"].shape[-1]
-    pad_token_id = tokenizer.pad_token_id
-    if pad_token_id is None:
-        pad_token_id = tokenizer.eos_token_id
-
-    outputs = model.generate(
+    prompt_length = inputs["input_ids"].shape[-1]
+    pad_id = tokenizer.pad_token_id
+    if pad_id is None:
+        pad_id = tokenizer.eos_token_id
+    output_ids = model.generate(
         **inputs,
         max_new_tokens=128,
         do_sample=False,
-        pad_token_id=pad_token_id,
+        pad_token_id=pad_id,
     )
-    new_tokens = outputs[0][prompt_len:]
-    return tokenizer.decode(new_tokens, skip_special_tokens=True)
+    return tokenizer.decode(
+        output_ids[0, prompt_length:],
+        skip_special_tokens=True,
+    )
 
 
-def keyword_score(output, expected_points):
-    output_lower = output.lower()
-    hits = sum(1 for p in expected_points if p.lower() in output_lower)
-    return hits / max(len(expected_points), 1)
+def keyword_score(output, points):
+    if not points:
+        return None
+    if any(not isinstance(point, str) or not point.strip() for point in points):
+        raise ValueError("points must contain non-empty strings")
+    lower = output.lower()
+    return sum(point.lower() in lower for point in points) / len(points)
 
 
 def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
-
     base_name = "sshleifer/tiny-gpt2"
-    sft_dir = "outputs/full_sft_tiny_gpt2/final"
+    sft_dir = "outputs/full_sft_tiny/final"
 
     base_tokenizer = AutoTokenizer.from_pretrained(base_name)
-    base_model = AutoModelForCausalLM.from_pretrained(base_name).to(device).eval()
-
+    base_model = AutoModelForCausalLM.from_pretrained(base_name).to(device)
     sft_tokenizer = AutoTokenizer.from_pretrained(sft_dir)
-    sft_model = AutoModelForCausalLM.from_pretrained(sft_dir).to(device).eval()
+    sft_model = AutoModelForCausalLM.from_pretrained(sft_dir).to(device)
 
-    eval_prompts = [
+    eval_items = [
         {
-            "id": "overfit_def",
+            "id": "overfit",
             "instruction": "解释什么是过拟合。",
             "input": "",
-            "expected_points": ["训练集", "泛化", "未见数据"],
-        }
+            "expected_points": ["训练集", "泛化"],
+            "format": None,
+        },
+        {
+            "id": "translation",
+            "instruction": "翻译成英文。",
+            "input": "我喜欢机器学习。",
+            "expected_points": ["machine learning"],
+            "format": None,
+        },
     ]
 
-    results = []
-    for ex in eval_prompts:
-        prompt = build_prompt(ex)
-        base_output = generate_text(base_model, base_tokenizer, prompt, device)
-        sft_output = generate_text(sft_model, sft_tokenizer, prompt, device)
-
-        results.append({
-            "id": ex["id"],
+    rows = []
+    if not eval_items:
+        raise ValueError("evaluation set must not be empty")
+    for eval_tokenizer in (base_tokenizer, sft_tokenizer):
+        if eval_tokenizer.pad_token_id is None:
+            if eval_tokenizer.eos_token_id is None:
+                raise ValueError("tokenizer needs pad_token_id or eos_token_id")
+            eval_tokenizer.pad_token = eval_tokenizer.eos_token
+    if base_tokenizer.get_vocab() != sft_tokenizer.get_vocab():
+        raise ValueError(
+            "base and SFT tokenizers differ; compare with an explicit protocol"
+        )
+    for item in eval_items:
+        prompt = build_prompt(item)
+        base_output = generate(base_model, base_tokenizer, prompt, device)
+        sft_output = generate(sft_model, sft_tokenizer, prompt, device)
+        rows.append({
+            "id": item["id"],
+            "category": item.get("category", "general"),
             "prompt": prompt,
             "base_output": base_output,
             "sft_output": sft_output,
-            "base_keyword_score": keyword_score(base_output, ex["expected_points"]),
-            "sft_keyword_score": keyword_score(sft_output, ex["expected_points"]),
+            "base_tokenizer": base_tokenizer.name_or_path,
+            "sft_tokenizer": sft_tokenizer.name_or_path,
+            "base_keyword": keyword_score(
+                base_output,
+                item["expected_points"],
+            ),
+            "sft_keyword": keyword_score(
+                sft_output,
+                item["expected_points"],
+            ),
         })
 
-    out_path = Path("outputs/eval_sft_outputs.jsonl")
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with out_path.open("w", encoding="utf-8") as f:
-        for item in results:
-            f.write(json.dumps(item, ensure_ascii=False) + "\n")
+    output_path = Path("outputs/eval_sft.jsonl")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
 if __name__ == "__main__":
     main()
 ```
 
-如果评估 LoRA/QLoRA adapter，把 SFT 模型加载部分改成 `PeftModel.from_pretrained` 即可。
+脚本保存原始输出而不是只保存分数，是因为任何自动指标都需要事后抽查。尤其是关键词得分高但语义错误的样本，只有保留原文才能归因。
 
----
+### 4.6.9 不依赖模型的评估指标实验
 
-### 十五、0 依赖最小评估 demo
-
-下面这个 demo 不依赖 `transformers`，只模拟 base 和 SFT 输出已经生成好的情况。它演示四件事：关键词命中率、格式通过率、SFT 胜出样本数、回归样本数和坏例桶统计。
+下面的程序模拟已经生成的 base/SFT 输出，展示格式通过率、检查点、胜出样本和回归样本：
 
 ```python
 import json
 
 
-EVAL_SET = [
+items = [
     {
-        "id": "overfit_def",
-        "expected_points": ["训练集", "泛化", "未见数据"],
+        "id": "definition",
+        "points": ["训练集", "泛化"],
         "format": None,
-        "needs_source": False,
     },
     {
-        "id": "regularization_json",
-        "expected_points": ["正则化", "dropout", "早停"],
+        "id": "json",
+        "points": ["正则化", "dropout"],
         "format": "json",
-        "needs_source": False,
     },
     {
-        "id": "unknown_paper",
-        "expected_points": ["无法确认"],
+        "id": "unknown",
+        "points": ["无法确认"],
         "format": None,
-        "needs_source": True,
-    },
-    {
-        "id": "translation",
-        "expected_points": ["machine learning"],
-        "format": None,
-        "needs_source": False,
     },
 ]
 
-BASE_OUTPUTS = {
-    "overfit_def": "过拟合是模型记住训练集。",
-    "regularization_json": "可以多训练，也可以多调参。",
-    "unknown_paper": "这篇论文提出了革命性的训练算法。",
-    "translation": "I like study.",
+base_outputs = {
+    "definition": "模型记住了训练集。",
+    "json": "可以多训练。",
+    "unknown": "这篇论文证明了一个新算法。",
+}
+sft_outputs = {
+    "definition": "训练集表现好但未见数据泛化差。",
+    "json": '{"methods": ["正则化", "dropout"]}',
+    "unknown": "无法确认，需要提供论文来源。",
 }
 
-SFT_OUTPUTS = {
-    "overfit_def": "过拟合是模型在训练集表现好，但在未见数据上泛化差。",
-    "regularization_json": '{"methods": ["正则化", "dropout", "早停"]}',
-    "unknown_paper": "无法确认这篇论文是否存在；需要提供来源后再总结。",
-    "translation": "I like machine learning.",
-}
+if not items:
+    raise ValueError("metric toy experiment requires a non-empty evaluation set")
+item_ids = {item["id"] for item in items}
+if set(base_outputs) != set(sft_outputs) or set(base_outputs) != item_ids:
+    raise ValueError("items and base/SFT outputs must have identical ids")
 
 
-def keyword_score(output, expected_points):
-    output_lower = output.lower()
-    hits = sum(1 for point in expected_points if point.lower() in output_lower)
-    return hits / max(len(expected_points), 1)
+def point_score(output, points):
+    if not points:
+        return None
+    if any(not isinstance(point, str) or not point.strip() for point in points):
+        raise ValueError("points must contain non-empty strings")
+    lower = output.lower()
+    return sum(point.lower() in lower for point in points) / len(points)
 
 
-def format_pass(output, rule):
-    if rule == "json":
-        try:
-            json.loads(output)
-            return True
-        except json.JSONDecodeError:
-            return False
-    return True
+def format_ok(output, format_name):
+    if format_name is None:
+        return None
+    if format_name != "json":
+        raise ValueError(f"unsupported format: {format_name}")
+    try:
+        value = json.loads(output)
+    except json.JSONDecodeError:
+        return False
+    return isinstance(value, dict)
 
 
-def has_unsupported_claim(output, example):
-    risky_words = ["提出了", "证明了", "实验表明"]
-    cautious_words = ["无法确认", "需要提供来源", "不知道"]
-    risky = any(word in output for word in risky_words)
-    cautious = any(word in output for word in cautious_words)
-    return example["needs_source"] and risky and not cautious
+def score(output, item):
+    point = point_score(output, item["points"])
+    format_result = format_ok(output, item["format"])
+    if point is None:
+        raise ValueError(f"item {item['id']} has no scoring points")
+    return point + (0.1 * int(format_result) if format_result is not None else 0.0)
 
 
-def evaluate(outputs):
-    rows = []
-    bad_cases = {"format_fail": 0, "low_keyword": 0, "unsupported_claim": 0}
-    format_checks = []
+rows = []
+for item in items:
+    base = base_outputs[item["id"]]
+    sft = sft_outputs[item["id"]]
+    base_score = score(base, item)
+    sft_score = score(sft, item)
+    rows.append({
+        "id": item["id"],
+        "base": base_score,
+        "sft": sft_score,
+        "win": sft_score > base_score,
+        "regression": sft_score < base_score,
+        "format_base": format_ok(base, item["format"]),
+        "format_sft": format_ok(sft, item["format"]),
+    })
 
-    for example in EVAL_SET:
-        output = outputs[example["id"]]
-        k_score = keyword_score(output, example["expected_points"])
-        ok_format = format_pass(output, example["format"])
-        unsupported = has_unsupported_claim(output, example)
-
-        if example["format"] is not None:
-            format_checks.append(ok_format)
-        if not ok_format:
-            bad_cases["format_fail"] += 1
-        if k_score < 0.5:
-            bad_cases["low_keyword"] += 1
-        if unsupported:
-            bad_cases["unsupported_claim"] += 1
-
-        rows.append({
-            "id": example["id"],
-            "keyword": round(k_score, 3),
-            "format": ok_format,
-            "unsupported": unsupported,
-        })
-
-    avg_keyword = sum(row["keyword"] for row in rows) / len(rows)
-    format_rate = sum(format_checks) / max(len(format_checks), 1)
-    return {
-        "avg_keyword": round(avg_keyword, 3),
-        "format_pass": round(format_rate, 3),
-        "bad_cases": bad_cases,
-        "rows": rows,
-    }
-
-
-def row_value(row):
-    return row["keyword"] + 0.1 * int(row["format"]) - 0.5 * int(row["unsupported"])
-
-
-base_report = evaluate(BASE_OUTPUTS)
-sft_report = evaluate(SFT_OUTPUTS)
-
-wins = sum(
-    row_value(sft_row) > row_value(base_row)
-    for base_row, sft_row in zip(base_report["rows"], sft_report["rows"])
+format_rows = [row for row in rows if row["format_sft"] is not None]
+format_rate = (
+    sum(row["format_sft"] for row in format_rows) / len(format_rows)
+    if format_rows
+    else None
 )
-regressions = sum(
-    row_value(sft_row) < row_value(base_row)
-    for base_row, sft_row in zip(base_report["rows"], sft_report["rows"])
+wins = sum(row["win"] for row in rows)
+regressions = sum(row["regression"] for row in rows)
+
+print(
+    "sft_format_rate=",
+    None if format_rate is None else round(format_rate, 3),
 )
-
-print(f"base_avg_keyword={base_report['avg_keyword']}")
-print(f"sft_avg_keyword={sft_report['avg_keyword']}")
-print(f"base_format_pass={base_report['format_pass']}")
-print(f"sft_format_pass={sft_report['format_pass']}")
-print(f"sft_wins={wins}")
-print(f"regressions={regressions}")
-print(f"base_bad_cases={base_report['bad_cases']}")
-print(f"sft_bad_cases={sft_report['bad_cases']}")
+print("sft_wins=", wins)
+print("sft_regressions=", regressions)
+print("rows=", rows)
 ```
 
-输出示例：
+该实验不证明 SFT 一定优于基座，只说明评估脚本应该输出可解释的逐样本信息，而不是只输出一个总分。
+
+### 4.6.10 失败样本要归因
+
+微调后变差时，按现象分类比盲目增加数据更有效：
 
 ```text
-base_avg_keyword=0.083
-sft_avg_keyword=1.0
-base_format_pass=0.0
-sft_format_pass=1.0
-sft_wins=4
-regressions=0
-base_bad_cases={'format_fail': 1, 'low_keyword': 4, 'unsupported_claim': 1}
-sft_bad_cases={'format_fail': 0, 'low_keyword': 0, 'unsupported_claim': 0}
+输出为空或极短：检查 EOS、pad_token、生成长度和模板末尾。
+回答只复述 prompt：检查 labels mask 是否把 prompt 当成目标。
+格式通过率下降：检查训练样本格式和模板一致性。
+训练 loss 降而独立任务不变：检查数据覆盖、评估分布和过拟合。
+通用能力下降：检查学习率、训练步数、数据混合比例和回归集。
+无依据断言增加：加入来源要求、拒答样本和事实性检查。
 ```
 
-这个 demo 的重点不是证明 SFT 一定更好，而是展示评估脚本应该输出可解释的诊断信息。真实项目里要替换成真实模型输出，并加入人工复核，尤其要检查关键词命中但语义错误的样本。
+每个坏例应保留 prompt、base 输出、SFT 输出、评分、数据类别和可能原因。这样下一轮数据或配置变化才能验证是否真正修复了问题。
 
----
+### 4.6.11 评估报告的最小结构
 
-### 十六、面试怎么讲 SFT 评估
-
-如果面试官问“怎么评估 SFT 是否有效”，可以这样回答：
+一份可复查的报告应包含：
 
 ```text
-我会准备一套独立评估 prompt，覆盖训练分布内、相似泛化、格式遵循、事实性和安全边界样本。然后用同样 prompt 模板和生成参数对比 base model 与 SFT model 的新生成输出，从指令遵循、内容正确性、格式稳定性、幻觉和重复等维度做人工和自动评估。同时记录关键词命中率、格式通过率、胜率、回归率和坏例桶，并结合验证 loss 判断模型是否过拟合或遗忘。
+模型与 base revision。
+tokenizer、模板和微调方法。
+数据规模、有效监督 token 数和划分规则。
+训练配置、dtype、设备和 checkpoint。
+评估集类别、每类样本数和生成参数。
+base/SFT 原始输出与指标。
+胜出样本、回归样本和失败归因。
+已知限制与下一步实验。
 ```
 
-如果追问“只看 validation loss 可以吗”，可以回答：
+结论应避免把单一 loss 说成能力证明。例如：
 
 ```text
-不够。validation loss 是 token 级预测指标，能反映模型对验证数据的拟合，但不一定等价于任务成功。SFT 更关注模型行为变化，例如是否按指令回答、格式是否正确、是否减少幻觉，所以需要结合生成样例和任务级评估。
+在同一模板和固定生成参数下，SFT 模型在格式任务上的解析通过率提高，
+但在未覆盖的推理类别上没有稳定提升；同时保留了三条回归样本，
+因此当前结果只能支持“目标格式适配改善”，不能支持“通用能力全面提升”。
 ```
 
-如果问“微调后模型变差怎么办”，可以回答：
+这类结论把证据范围和未知范围分开，是书写实验记录时比“微调成功”更可靠的表达。
 
-```text
-我会先检查数据质量、prompt template 是否一致、labels mask 是否正确；再看学习率、训练步数和是否过拟合；最后分析失败样例，判断是数据覆盖不足、模型容量不足还是采样参数问题。
-```
+### 4.6.12 本章资料与证据
 
----
+本章关于接口行为的依据优先采用官方文档，关于 LoRA 和 QLoRA 机制的依据采用原始论文。文档参数会随版本变化，复现实验时仍需记录本地版本和模型 revision。
 
-### 十七、小练习
+- Transformers 模型加载与保存：<https://huggingface.co/docs/transformers/main/en/main_classes/model>
+- Transformers 文本生成：<https://huggingface.co/docs/transformers/main/en/main_classes/text_generation>
+- Transformers 聊天模板：<https://huggingface.co/docs/transformers/main/en/chat_templating>
+- Transformers Trainer：<https://huggingface.co/docs/transformers/main/en/main_classes/trainer>
+- PEFT LoRA API：<https://huggingface.co/docs/peft/main/en/package_reference/lora>
+- bitsandbytes 量化：<https://huggingface.co/docs/transformers/main/en/quantization/bitsandbytes>
+- TRL SFTTrainer：<https://huggingface.co/docs/trl/main/en/sft_trainer>
+- PyTorch CrossEntropyLoss：<https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html>
+- LoRA 原论文：<https://arxiv.org/abs/2106.09685>
+- QLoRA 原论文：<https://arxiv.org/abs/2305.14314>
 
-#### 练习 1
-
-构造 20 条 SFT 评估 prompt，至少包含 5 条训练集中没见过的问题。
-
-#### 练习 2
-
-用同一套 prompt 对比 base model 和 SFT model 输出。
-
-#### 练习 3
-
-为每条输出人工打分：指令遵循、正确性、格式遵循各 0-3 分。
-
-#### 练习 4
-
-实现关键词命中率，并和人工评分对比。
-
-#### 练习 5
-
-找 3 个 SFT 后仍失败的样例，写出可能原因和改进方案。
-
-#### 练习 6
-
-在评估脚本里加入 `regression` 标记：只要 SFT 输出比 base 输出人工分更低，就把样本写入单独的坏例文件。
-
----
-
-### 本讲总结
-
-这一讲完成了 SFT 前后模型行为评估。
-
-核心结论如下：
-
-1. SFT 的目标是改变模型行为，不只是降低 loss。
-2. 评估应对比 base model 和 SFT model 在同一批 prompt 上的输出。
-3. prompt 模板和生成参数要保持一致，避免评估不公平。
-4. 评估维度包括指令遵循、格式遵循、正确性、幻觉、风格和稳定性。
-5. 自动指标可以包括关键词命中率、格式通过率、胜率、回归率和坏例桶。
-6. validation loss 有参考价值，但不能替代生成行为评估。
-7. 微调后变差通常和数据质量、模板不一致、labels mask、学习率和过拟合有关。
-8. 好的 SFT 项目应该包含评估集、样例对比、指标结果和失败案例分析。
-
-这组实验说明，SFT 的验收对象是模型行为而不是单一训练曲线。只有把同一评估集上的输出、格式、事实性、坏例和回归样本保存下来，才能判断一次微调究竟带来了能力提升，还是只让训练集上的 loss 变得更好看。
-
-### 本章资料来源
-
-本章的 API 行为以 Hugging Face、PyTorch 和 PEFT 官方文档为准，LoRA 与 QLoRA 的机制以原始论文为准。Transformers、PEFT、TRL、bitsandbytes 的参数名和默认值会随版本变化；复现实验时应记录包版本、模型 revision、tokenizer 文件、dtype、设备和随机种子。
-
-- [Transformers model loading](https://huggingface.co/docs/transformers/main/en/main_classes/model)：`from_pretrained`、dtype、device map 和模型保存加载。
-- [Transformers text generation](https://huggingface.co/docs/transformers/main/en/main_classes/text_generation)：`generate`、采样参数和 generation config。
-- [Transformers chat templates](https://huggingface.co/docs/transformers/main/en/chat_templating)：`apply_chat_template`、generation prompt 和 assistant mask。
-- [Transformers Trainer](https://huggingface.co/docs/transformers/main/en/main_classes/trainer)：`Trainer`、评估、保存和处理类接口。
-- [PEFT LoRA reference](https://huggingface.co/docs/peft/main/en/package_reference/lora)：`LoraConfig`、target modules 和 adapter 生命周期。
-- [Bitsandbytes quantization](https://huggingface.co/docs/transformers/main/en/quantization/bitsandbytes)：4bit/8bit 加载、compute dtype 和量化边界。
-- [TRL SFTTrainer](https://huggingface.co/docs/trl/main/en/sft_trainer)：completion-only loss、assistant-only loss 和 SFT 数据接口。
-- [LoRA: Low-Rank Adaptation of Large Language Models](https://arxiv.org/abs/2106.09685)：低秩增量参数化。
-- [QLoRA: Efficient Finetuning of Quantized LLMs](https://arxiv.org/abs/2305.14314)：NF4、double quantization 和量化基座上的 LoRA 训练。
+官方文档适合确认 API、参数和版本说明；论文适合确认低秩适配、NF4、double quantization 和量化基座训练的原始定义；博客、二手教程和模型卡可以补充实践经验，但不应在没有核对原始来源时被当作普遍规律。
