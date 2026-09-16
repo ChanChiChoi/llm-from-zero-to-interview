@@ -622,10 +622,12 @@ C_{\mathrm{gov}}(i)=\frac{|G_i\cap G_{\mathrm{need}}|}{|G_{\mathrm{need}}|}
 高风险治理率：
 
 ```math
-C_{\mathrm{risk}}(i)=1-\frac{|R_i\setminus P_i|}{\max(1,|R_i|)}
+C_{\mathrm{risk}}(i)=1-\frac{|R_i\setminus P_i|}{|R_i|},\qquad |R_i|>0
 ```
 
 这个简化公式的意思是：如果系统暴露了 shell、network、MCP、custom tools、cloud workspace、server API、enterprise integration 等风险面，却没有对应权限或治理机制，风险治理率就会下降。
+
+上述覆盖率都只在对应需求集合非空时定义。若 `S_target`、`C_need`、`T_need`、`P_need`、`E_need`、`V_need`、`G_need` 或 `R_i` 为空，指标应报告为 `not_applicable`（demo 中用 `None` 表示），而不是用 epsilon、历史值、默认 `1.0/0.0` 或人为下限分母填补。聚合分数和门禁必须显式处理该状态；没有有效样本时不能把系统判定为通过。
 
 可以组合成一个横向审计分：
 
@@ -768,12 +770,14 @@ targets = {
 
 def coverage(values, needed):
     if not needed:
-        return 1.0
+        return None
     return len(values & needed) / len(needed)
 
 
 def risk_governance(system):
     risk = systems[system]["risk"]
+    if not risk:
+        return None
     permission = systems[system]["permission"] | systems[system]["governance"]
     guarded = 0
     for item in risk:
@@ -798,6 +802,10 @@ def risk_governance(system):
     return coverage(set(range(guarded)), set(range(len(risk))))
 
 
+def at_least(value, threshold):
+    return value is not None and value >= threshold
+
+
 def score(system, scenario):
     spec = targets[scenario]
     parts = {
@@ -810,13 +818,22 @@ def score(system, scenario):
         "governance": coverage(systems[system]["governance"], spec["governance"]),
         "risk": risk_governance(system),
     }
-    total = sum(parts[name] * spec["weights"][name] for name in spec["weights"])
+    weighted_names = [name for name, weight in spec["weights"].items() if weight > 0]
+    total = (
+        None
+        if any(parts[name] is None for name in weighted_names)
+        else sum(parts[name] * spec["weights"][name] for name in weighted_names)
+    )
     gates = {
-        "permission": parts["permission"] >= 0.5,
-        "eval": parts["eval"] >= 0.5,
-        "risk": parts["risk"] >= 0.5,
+        "permission": at_least(parts["permission"], 0.5),
+        "eval": at_least(parts["eval"], 0.5),
+        "risk": at_least(parts["risk"], 0.5),
     }
-    return round(total, 3), {k: round(v, 3) for k, v in parts.items()}, gates
+    rounded_parts = {
+        key: None if value is None else round(value, 3)
+        for key, value in parts.items()
+    }
+    return (None if total is None else round(total, 3)), rounded_parts, gates
 
 
 for scenario in targets:
@@ -834,11 +851,15 @@ weak_spots = {
     system: [
         name
         for name, value in score(system, "enterprise_platform")[1].items()
-        if value < 0.5
+        if value is None or value < 0.5
     ]
     for system in systems
 }
 print(f"enterprise_weak_spots={weak_spots}")
+
+# 空需求集合必须是 not_applicable，不能被当作满覆盖；门禁对 None 显式拒绝。
+assert coverage({"repo"}, set()) is None
+assert not at_least(None, 0.5)
 ```
 
 一组典型输出：

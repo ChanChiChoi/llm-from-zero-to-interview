@@ -769,7 +769,7 @@ M_{\mathrm{history}}\approx
 
 | 模型或系列 | 与 KV/state 相关的公开信号 | 工程上应该追问什么 |
 |---|---|---|
-| Kimi K3 | `3 KDA + 1 Gated MLA`、1M context、无显式 position embedding | KDA state 如何 batch/reset，Gated MLA 的 latent/位置相关部分如何缓存 |
+| Kimi K3 | 官方发布文章提到 KDA、Gated MLA 与 1M context；`3:1` 层比例和无显式 position embedding 待模型卡/报告核验 | KDA state 如何 batch/reset，Gated MLA 的 latent/位置相关部分如何缓存 |
 | DeepSeek-V4-Pro / Flash | CSA + HCA、1M context | 哪些层使用哪种 attention，prefill/decode 是否使用不同 cache layout |
 | Qwen3.5 / Qwen3.6 | Gated DeltaNet + Gated Attention，原生长上下文并支持扩展 | state cache 与 attention KV 是否分别量化、分页和共享 |
 | Gemma 4 | local sliding-window + global attention，128K/256K 档位 | local 层的窗口、global 层的比例、跨层状态是否公开 |

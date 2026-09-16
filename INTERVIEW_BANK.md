@@ -3598,7 +3598,7 @@
 
 ## 2026-08 Frontier Model 与系统面试补充
 
-1. Kimi K3 的“无显式 position embedding”是否等于没有位置信息？
+1. Kimi K3 公开线索中的“无显式 position embedding”是否等于没有位置信息？（该配置本身仍待核验）
    考察点：NoPE、causal mask、KDA 递归状态、隐式顺序。
    回答框架：NoPE 只表示某个分支不显式施加 RoPE/ALiBi；顺序仍可由因果可见性、递归更新、衰减和局部/全局 pattern 提供。不要把教学抽象公式当成完整实现。
 
@@ -3657,3 +3657,344 @@
 15. p-RoPE、Gated Attention 和 CSA/HCA 分别改变了什么？
     考察点：位置策略、路径门控、压缩注意力、模型卡证据边界。
     回答框架：p-RoPE 关注位置处理策略，Gated Attention 控制显式 attention 路径贡献，CSA/HCA 压缩长历史访问；具体参数化不能从名字推断，要测长上下文、精确检索和 serving cache。
+
+## 2026-09 Frontier Architecture Updates
+
+1. Attention Residuals 与普通 residual、token self-attention 的作用轴分别是什么？请写出 Full/Block AttnRes 的公式，并说明伪查询为何利于批量计算。
+2. Kimi Delta Attention 的 `alpha`、`beta`、delta correction 分别控制什么？为什么固定状态不等于不会遗忘？
+3. 为什么 Kimi Linear 要混合 KDA 与全局 MLA？请比较精确检索、状态大小、prefill 和 decode kernel。
+4. DeepSeek V4 的 CSA 与 HCA 如何区分？压缩误差、top-k 漏检和滑动窗口分别属于哪一层风险？
+5. 1M context 为什么不能直接换算成并发数？请列出压缩 KV、indexer、局部窗口、权重和 workspace 的显存项。
+6. mHC 为什么使用双随机矩阵？请解释 Birkhoff polytope、矩阵乘法封闭性和 Sinkhorn 近似的限制。
+7. 如何公平比较标准残差、AttnRes、KDA 和 mHC？回答需固定模型规模、训练 token、硬件、并行策略、cache、吞吐和质量评测。
+
+## 2026-09 GPT-6 Astra 与运行时预算
+
+1. GPT-6 Astra 的 context window、maximum input 和 maximum output 有什么区别？
+   考察点：容量账本、输入输出耦合、工具结果和运行时状态。
+   回答框架：三者分别是总窗口、输入区域上限和输出区域上限；实际请求还要容纳系统消息、工具结果、推理状态和协议元数据，不能把三个数字相加后直接换算并发。
+
+2. `reasoning.effort` 为什么不能直接当作“模型质量等级”？
+   考察点：预算、成功率、延迟、成本、任务瓶颈。
+   回答框架：effort 是 provider-specific 的请求预算接口，可能改变隐藏推理 token 或验证工作量；应在固定任务、工具、超时和输出上限下比较成功率、p95 成本、TTFT/TPOT 与失败类型。
+
+3. 模型页列出 hosted shell、MCP 或 apply patch，为什么仍不能说明模型拥有任意系统权限？
+   考察点：模型与宿主执行器的责任边界。
+   回答框架：模型只能提出结构化调用；执行器、沙箱和策略层决定路径、网络、命令、身份、审批、超时、幂等和回滚，并将授权与执行结果写入 trace。
+
+4. 如何实现 GPT-6 Astra 长上下文请求的成本估算？
+   考察点：缓存命中、阈值费率、单位成功成本。
+   回答框架：分别计算未缓存输入、缓存读取、缓存写入、输出和工具成本；超过阈值时应用文档规定的整次请求倍率，再用成功任务数作为分母评估重试、验证和人工接管成本。
+
+5. 官方模型页没有参数量和训练报告时，面试回答应如何表达？
+   考察点：证据等级、避免过度推断。
+   回答框架：明确说“公开资料尚未披露”，只陈述模型页确认的模态、容量、effort、工具和端点；如果需要架构结论，提出寻找技术报告或设计可复现实验，而不是从榜单名称推断。
+
+## 2026-09 GLM-5.3 长任务与验证器
+
+1. 为什么长任务 Agent 训练需要可执行环境？
+   考察点：状态转移、工具反馈、artifact、恢复和结果验证。
+   回答框架：长 CoT 只表达步骤；可执行环境让模型面对真实版本、错误、测试和资源约束，验证器再根据任务契约判断完成。环境、verifier、harness 和预算必须一起记录，不能只看最终文本。
+
+2. oracle、no-op、unsolved-state 三类检查分别防什么？
+   考察点：任务可解性、空操作奖励、半成品误通过。
+   回答框架：oracle 检查至少存在成功路径，no-op 检查初始状态不能白得分，unsolved-state 检查明显未完成的 artifact 不能通过；三者都是必要而非充分条件，还要加入隐藏测试、权限隔离和人工抽检。
+
+3. 什么是 reward shortcut？如何防？
+   考察点：代理指标、测试篡改、环境残留、verifier 完备性。
+   回答框架：模型优化的是 verifier 可见分数，可能修改测试、利用残留状态或只满足格式。应保护 verifier、限制写权限、重置环境、加入隐藏/反事实测试并统计假阳性和假阴性。
+
+4. GLM-5.3 的 SAO with compaction 应如何回答？
+   考察点：证据边界、避免从缩写猜算法。
+   回答框架：官方文档只确认名称和继承关系，没有给出全称、损失或压缩机制；严谨回答应标为待核验，并讨论可迁移的上下文压缩评测，而不是声称掌握内部实现。
+
+5. 旧客户端如何迁移到 `thinking.type: enabled` 的 GLM-5.3？
+   考察点：schema、错误、流式、effort、回归和权限。
+   回答框架：先更新请求 schema 和 feature flag，再回归响应、错误、usage、流式、工具 call、effort、成本和安全 trace；旧的 disabled 路径应显式失败或改路由，不能静默丢弃字段。
+
+## 2026-09 Kimi K3 发布证据与 Harness
+
+1. 为什么 Kimi K3 发布文章中的技术名词不能直接当作完整架构配置？
+   考察点：发布披露、论文机制、模型卡、权重和证据等级。
+   回答框架：文章可证明团队公开提到某技术，但不能证明每层配置、训练比例、kernel 或权重状态；应等待模型卡/报告/实现，并把论文机制与 K3 事实分开。
+
+2. Kimi K3 的长任务结果为什么必须绑定 harness？
+   考察点：模型、工具、环境、effort、fallback、状态和任务版本。
+   回答框架：Agent 结果可写为 `R=F(M,H,E,B,D)`；只报告分数无法知道提升来自模型、工具、上下文压缩、硬件或预算。报告应记录 revision、环境、工具、权限、trace、失败类型和单位成功成本。
+
+3. “保留思考历史”在工程上应该保留什么？
+   考察点：结构化状态、协议兼容、隐藏推理边界。
+   回答框架：保留目标、已确认事实、假设、工具 observation、diff、验证结果、权限、版本和待执行动作；检查 role/tool schema、tokenizer/template 和未完成副作用，不能把它简化为复制全部隐藏 CoT。
+
+4. KDA 与 AttnRes 的作用轴有什么不同？
+   考察点：序列状态、深度残差、混合架构。
+   回答框架：KDA 沿序列维护 key-value 递归状态，AttnRes 沿网络深度选择历史层表示；分别评估状态大小、精确检索、残差流、通信、prefill 和 decode。
+
+5. 如何解释 Kimi K3 benchmark 的相对提升？
+   考察点：绝对百分点、相对比例、基线和 harness。
+   回答框架：同时报告基线/候选绝对分数、百分点差和相对提升，绑定任务、硬件、effort、fallback 与版本；不能把不同 harness 的结果拼成同条件结论。
+
+## 2026-09 Mistral Small 4 与 Step 3.5 Flash
+
+1. Mistral Small 4 的 119B 总参数和约 6.5B 激活参数分别影响什么？
+   考察点：MoE 权重存储、专家分片、每 token 计算和通信。
+   回答框架：激活参数近似主要矩阵乘规模；权重、KV cache、expert dispatch 和 all-to-all 仍按部署总规模核算。
+
+2. `reasoning_effort=none/high` 是否代表两个模型？如何设计公平实验？
+   考察点：请求级配置、质量/延迟/成本、评测控制变量。
+   回答框架：它是同一模型的模式配置；固定任务、版本、工具和输出上限，比较成功率、TTFT、TPOT、p95、输出长度和单位成功成本。
+
+3. EAGLE 草稿头与 NVFP4 量化分别改变哪一层？
+   考察点：推测解码、数值表示、接受率和误差。
+   回答框架：EAGLE 改变候选生成/验证路径，NVFP4 改变权重或计算表示；两者不能把宣传加速倍数直接相乘，需按后端消融。
+
+4. Step 3.5 Flash 的 3:1 sliding-window/full attention 为什么不是 O(n)？
+   考察点：局部 pair、周期性全注意力和长程检索。
+   回答框架：窗口层近似 `O(nw)`，full 层仍接近 `O(n^2)`；混合比例降低平均成本，但远程信息依赖 full 层和跨层传播。
+
+5. MTP-3 的有效吞吐由什么决定？
+   考察点：接受长度、验证开销、回退、批处理和 kernel 支持。
+   回答框架：有效 token 可近似为 `1+E[A]`；草稿接受率、目标验证并行度、同步和后端支持共同决定收益，不保证三倍吞吐。
+
+6. Step 3.5 的 Context Manager 应记录哪些字段？
+   考察点：模型与 harness 边界、状态重启和失败归因。
+   回答框架：记录上下文阈值、重启次数、压缩/重放策略、工具 schema、模型与 harness revision、硬件、超时和最终 artifact，不能把重启策略归因于模型记忆。
+
+## 2026-09 Grok 4.6 官方接口核验
+
+1. Grok 4.6 的 500K context 能否直接换算并发数？
+   考察点：上下文上限、KV cache、输出预算、权重和队列资源。
+   回答框架：不能。500K 是 prompt/context 接口字段，还要核算输入/输出、KV cache、权重、workspace、并发调度和长请求 p95；页面没有给出可直接推导并发的容量模型。
+
+2. xAI 页面列出 `low/medium/high/xhigh`，如何避免把它们误解成四个模型？
+   考察点：推理配置、实验控制变量和单位成功成本。
+   回答框架：它们是同一 `grok-4.6` 的请求级 effort；固定模型 revision、任务、工具、超时和输出上限，比较成功率、reasoning token、TTFT、TPOT、p95 与失败类型。
+
+3. function calling 和 Web Search/X Search 分别说明什么，不能说明什么？
+   考察点：协议输出、实时数据接入、宿主权限和证据边界。
+   回答框架：前者表示结构化工具调用能力，后者表示实时搜索接入路径；两者都不能证明模型拥有网络/文件权限、训练数据包含当前信息或采用某种内部架构。
+
+## 2026-09 Claude Opus 5 官方接口核验
+
+1. Claude Opus 5 的 1M context 能否直接换算并发数？
+   考察点：上下文上限、KV cache、输出预算、平台和队列资源。
+   回答框架：不能。1M 是接口字段，还要核算输入/输出、缓存、权重、workspace、调度和长请求尾延迟；页面没有给出可直接推导并发的容量模型。
+
+2. `adaptive=yes`、默认 `high` effort 是否说明 Anthropic 公开了内部推理算法？
+   考察点：接口配置与内部机制的证据边界。
+   回答框架：不是。它们是模型目录中的运行时字段；公平实验应固定任务、快照、工具、平台和 harness，比较质量、推理 token、延迟、成本和失败类型。
+
+3. Claude API、Bedrock、Vertex AI 和 Foundry 都列出同一模型时，怎样保证结果可比？
+   考察点：平台快照、协议、默认参数、限流和宿主差异。
+   回答框架：绑定平台、模型 revision、请求协议、默认 effort、工具实现、超时、限流、硬件和 harness；跨平台分数不能直接拼接成模型本体结论。
+
+4. 128K 最大输出与 300K batch 最大输出是什么关系？
+   考察点：请求类型、字段作用域和容量账本。
+   回答框架：前者是普通请求字段，后者是批处理字段；都受上下文、接口和任务预算约束，不能相加，也不能互换。
+
+## 2026-09 Claude Fable 5.1 官方接口核验
+
+1. Fable 5.1 的 `adaptive (always on)` 与 Opus 5 的 `adaptive` 有什么可验证差异？
+   考察点：模型目录字段、运行时配置和证据边界。
+   回答框架：当前可确认的是 Fable 页面标注 adaptive always-on、默认 high，Opus 页面标注 adaptive、默认 high；不能据此推断内部推理算法。应固定平台、revision、任务、工具和 harness，比较推理 token、质量、延迟和成本。
+
+2. `preserved thinking` 能否当作跨模型永久记忆？
+   考察点：thinking block、上下文状态和宿主责任。
+   回答框架：不能。它是页面列出的协议/状态能力，仍需处理模型兼容、编辑历史、权限、压缩、恢复和审计；不得把它写成参数记忆或无限上下文。
+
+3. Fable 5.1 页面自述的长任务优势如何验证？
+   考察点：产品定位与独立评测。
+   回答框架：构造固定长周期任务集，绑定模型 revision、平台、effort、工具、超时、上下文策略和 harness，报告任务成功率、恢复成功率、工具错误、尾延迟、token 与单位成功成本，并保留失败样本。
+
+4. per-message effort、turn-scoped system messages 和工具间进度更新有什么共同风险？
+   考察点：beta 协议迁移、状态一致性和回滚。
+   回答框架：它们改变请求或会话状态协议，需记录 API 版本、schema、默认值、重试/幂等、缓存影响、降级路径和审计字段；beta 字段不能直接当作稳定生产契约。
+
+## 2026-09 Claude Sonnet 5 官方接口核验
+
+1. Sonnet 5 的 `Adaptive` thinking 和 `Fast` latency field 能否证明其内部架构更简单？
+   考察点：目录字段与架构推断边界。
+   回答框架：不能。它们是官方目录的运行时/比较字段；参数规模、稠密/MoE 结构和训练方法仍待一手技术资料或可复现证据。
+
+2. 如何公平比较 Sonnet 5、Opus 5 和 Fable 5.1？
+   考察点：基础模型、effort、平台和 harness 控制变量。
+   回答框架：绑定模型 revision、平台、协议、任务切片、effort、工具、超时、输出上限、缓存和硬件，报告质量、推理 token、TTFT、TPOT、p95、失败类型与单位成功成本。
+
+3. 1M context、128K output 和 300K batch output 在 Sonnet 5 中分别约束什么？
+   考察点：单请求/批处理字段和容量账本。
+   回答框架：context 是会话 token 窗口，128K 是普通请求输出上限，300K 是批处理字段；三者不能相加，也不能直接推出并发。
+
+## 2026-09 DeepSWE v1.1 评测与 Harness 审计
+
+1. DeepSWE v1.1 的 `Pass@1` 能否直接说明基础模型更强？
+   考察点：评测对象、harness 归因和证据边界。
+   回答框架：不能。观测对象应写成 `F(model_revision, effort, mini_swe_agent, tools, task_set, verifier, timeout, retry, context_policy, provider)`；统一 harness 只减少一部分变量，仍需记录模型 revision、供应商、工具回执、超时、重试和环境。
+
+2. 为什么要同时报告 Pass@1、区间、平均成本、输出 token 和 Agent steps？
+   考察点：质量、统计不确定性与效率指标的联合解释。
+   回答框架：Pass@1 给成功比例，区间给抽样不确定性，成本/输出 token/steps 暴露预算和循环效率。高 token 或 steps 可能换来成功率，也可能反映重试、上下文管理或工具失败，必须结合失败类型和最终 artifact。
+
+3. 如何复现 DeepSWE 的一个模型配置并避免结果不可比？
+   考察点：版本化实验契约。
+   回答框架：固定任务集与版本、模型 ID/revision、effort、`mini-swe-agent` 版本、系统提示、工具 schema、verifier、超时、重试、上下文压缩、供应商和硬件；保存 trace、工具错误、verifier 拒绝、artifact hash 和随机种子，再报告切片结果。
+
+4. 页面声明任务原创、手写 verifier 和 113 个任务，哪些污染结论仍不能推出？
+   考察点：benchmark 设计声明与独立污染审计。
+ 回答框架：这些是 benchmark 设计方的控制声明，不能单独证明训练语料、提示迭代、评测脚本或供应商缓存没有泄漏。应核查数据发布时间、训练 cutoff、近重复样本、任务生成流程和独立变体评测。
+
+## 2026-09 Claude Haiku 4.5 官方目录核验
+
+1. `fastest` 延迟字段能否替代 TTFT/TPOT 基准？
+   考察点：目录比较字段与实测条件。
+   回答框架：不能。必须固定平台、输入长度、输出预算、并发、模型快照和网络路径，报告 p50/p95 TTFT、TPOT、吞吐、错误率和单位成功成本。
+2. 200K context、64K output 和 extended thinking 分别约束什么？
+   考察点：接口预算、推理配置和模型能力边界。
+   回答框架：context 是请求上下文窗口，64K 是输出上限，extended 是目录中的思考能力字段；三者不能相加推导并发或 KV 容量，也不能推出内部算法。
+3. 如何公平比较 Haiku 4.5 与 Sonnet/Opus/Fable？
+   考察点：基础模型、平台、effort 和 harness 控制。
+   回答框架：固定 revision、协议、任务、工具、超时、输出上限、缓存、硬件和 harness，分别报告质量、延迟、token、失败类型和单位成功成本；不把 `fastest` 或价格字段当作完整性能结论。
+
+## 2026-09 DeepSeek-R1-0528 发布页核验
+
+1. 发布页写“API 使用方式没有变化”可以推出什么？
+   考察点：兼容性承诺与实测边界。
+   回答框架：只能作为发布方的兼容性声明；仍需按 SDK、账户、限流、流式、错误码、模型 revision 和工具 schema 实测，不能推出永久稳定。
+2. JSON output/function calling 是模型架构还是协议能力？
+   考察点：模型输出与宿主执行器分层。
+   回答框架：它们是输出协议能力；工具执行、权限、网络、沙箱、审批、超时和审计由宿主系统负责，不能据此推断内部架构。
+
+## 2026-09 DeepSeek V4.1-Flash 架构与部署
+
+1. Causal Encoder-Decoder 为什么适合输入密集型 Agent？
+
+   回答要点：先区分 prefill 与 decode，再解释 20 层 causal encoder、20 层 decoder、global KV 从最终 encoder states 投影的公开描述；8B/16B 是激活参数代理，不是 FLOPs 或延迟保证，需用输入/输出 token、通信、cache 和 TTFT/TPOT 实测验证。
+
+2. SWA Bounded Replay 把什么成本换成了什么成本？
+
+   回答要点：减少 SWA KV 的持久化 HBM/SSD，增加恢复时的 bounded replay compute、校验和可能的恢复延迟；必须绑定窗口边界、position offset、tokenizer、model revision 和压缩尾部，不能说“无 SSD 即无恢复成本”。
+
+3. CSA2 的 `Full`、`Reindex`、`Reuse` 与 Hierarchical Sparse Indexer 如何协作？
+
+   回答要点：三种静态层模式分别承担基准建立、索引重算和跨层复用；第一 Full Mode layer 形成候选池，后续 indexer 在候选池内工作。要同时分析候选池漏检、Top-K 漏检、跨层状态一致性和候选建立成本。
+
+4. 890 bytes/token 能否直接换算成单卡显存？
+
+   回答要点：不能。它是模型卡的 global KV footprint；HBM 还包括权重、SWA、indexer、未封存尾部、量化 scale、workspace、通信 buffer 和并发请求。报告要注明 global KV、精度、模型 revision、上下文和 batch。
+
+5. 如何评估 FP4 main KV 的收益而不是只复述压缩率？
+
+   回答要点：固定 FP4 E2M1 与 scale 粒度、模型 revision、硬件和 batch，同时测 cache bytes、带宽、dequant 时间、局部复制、远端 evidence recall、Agent 成功率、p95 和单位成功成本。
+
+6. `reasoning_effort=100` 是否是一个新模型？
+
+   回答要点：不是，是同一模型的请求级推理预算；V4.1 编码说明还给出 1--100 连续范围与 `low=50`、`high=75`、`max=100` 别名。比较 effort 时固定任务、harness、工具、输出上限和超时。
+
+7. 没有 Jinja chat template 会带来什么迁移风险？
+
+   回答要点：需要使用独立 encoder；DSML 工具标签有前导空格，中途 system message 和图像顺序也有协议语义。应做 prompt、parser、流式工具调用、多图和错误恢复回归，不能只替换 model ID。
+
+8. 为什么 V4.1-Flash 的 DeepSWE 74.2 不能直接和别的模型排序？
+
+   回答要点：它是模型 revision + `mini-swe-agent`/DeepSeek Harness + 工具 + 环境 + verifier + timeout/retry/context policy 的组合结果；要一起报告任务版本、effort、harness、artifact、失败类型和区间，不归因给基础模型单项能力。
+
+## 2026-09 K2 Horizon MoVA 与 Uno
+
+1. K2-Horizon-MoVA-36B-A4B 的 `36B total / 4B active` 应怎样解释？
+
+   考察点：稀疏模型的参数口径、专家路由和 serving 资源。
+
+   回答框架：36B 是总权重规模，约 4B 是发布方的每 token active proxy，不等于 4B dense 模型的显存、FLOPs 或速度。还要核算专家 dispatch、负载倾斜、GQA KV cache、workspace、通信和 shared expert。
+
+2. MoVA 和普通 MoE FFN 分别路由什么？为什么不能简单写成 top-12 MoE？
+
+   考察点：value 路径、FFN 路径、路由位置和输出形状。
+
+   回答框架：MoVA 在 attention 的 value projection 侧从 64 个 value experts 选 top-4；FFN 侧从 100 个 routed experts 选 top-8，并额外计算 1 个 shared expert。两次路由发生在不同阶段，输入输出和通信账本不同。
+
+3. K2 的 router bias 和 scaling factor 如何影响复现？
+
+   考察点：源码语义与教学简化的差异。
+
+   回答框架：公开实现先对 logits 做 sigmoid，bias 只加入 top-k 选择分数；混合权重重新取原始 sigmoid 分数，归一化后乘 2.5。若直接对 `logits + bias` 做 softmax 再混合，checkpoint 行为会改变；权重和也不是 1，而是 2.5。
+
+4. 512K context 是否意味着 K2 使用 sliding-window attention？
+
+   考察点：配置字段、训练阶段和有效长上下文能力。
+
+   回答框架：不是。配置明确 `sliding_window=null`、`use_sliding_window=false`；512K 还应结合 8K/32K/128K/512K 分阶段训练与 SFT、RoPE、KV、prefill 峰值和长任务实测理解，不能只看最大位置字段。
+
+5. 为什么不能把 K2-Horizon-0.9B 的 MOPD 训练流程写成 36B MoVA 的训练事实？
+
+   考察点：同系列资料的证据边界与 expert merge/MoE 区别。
+
+   回答框架：0.9B 卡片披露的是领域专家分支合并后的 on-policy distillation 流程；36B 卡片没有给出同样的七分支与 MOPD recipe。离线权重合并和在线 token routing 也不是同一个优化对象，必须分开记载。
+
+6. K2-Horizon-7B-Uno 为什么不应放入排行榜新增模型表？
+
+   考察点：模型发现入口、adapter/base 关系和推测解码。
+
+   回答框架：本轮候选入口是 Artificial Analysis 与 DataCurve DeepSWE；Uno 是沿 K2 官方资料追到的 7B adapter/论文技术。它冻结 AR base，用 LoRA diffusion path 生成 draft，再以 `Psi-Spec` 做 rejection verification，不是 36B 架构，也不是独立榜单行。
+
+## 2026-09 Qwen3.8 架构与 Serving 面试补充
+
+1. Qwen3.8 的 GDN/Gated Attention 混合路径解决了什么矛盾？
+   考察点：固定递归状态、显式检索和长上下文成本。
+   回答框架：GDN 用带遗忘和 delta correction 的固定状态吸收大部分前缀，周期性 Gated Attention/QSA 保留精确检索路径；不能把混合架构简化成“没有 attention”，也不能把固定状态直接当作完美记忆。
+
+2. QSA 为什么先做 micro-block pooling，再做 partial RoPE 和 block-causal top-k？
+   考察点：压缩粒度、位置语义、因果性和候选召回。
+   回答框架：先池化避免不同 token 的 rotary phase 在 block 内相互抵消，再给 block 起始位置编码；只给完整暴露的 block 打分，最后展开选中 block 并保留当前 causal tail。预算应按完整 block 与 tail 分开核算。
+
+3. QSA 的两阶段训练为什么不能被一个 indexer 替代？
+   考察点：dense distillation、teacher 分布、sparse adaptation。
+   回答框架：第一阶段用 full-attention teacher 的 block max-pooled 分布训练 indexer，第二阶段启用 sparse attention 联合适应 backbone 和 indexer；还要固定 block mask、top-k、tail 和 kernel，单独实现 top-k 不等于复现报告。
+
+4. Gated Residual 的 read gate 和 write gate 为什么采用不同粒度？
+   考察点：逐元素读取、branch 级写回、带宽和稳定性。
+   回答框架：read gate 逐元素选择四个归一化 branch 的信息，write gate 用 branch scalar 控制新 block 写入，既保留细粒度读取又限制写回自由度；它与 mHC 的双随机 branch mixing 不是同一方法。
+
+5. N-gram Embedding 为什么不是 RAG，也不是 KV cache？
+   考察点：地址来源、知识来源、存储和带宽。
+   回答框架：N-gram 按局部 token 地址查模型内部训练表，RAG 查请求级外部文档，KV cache 保存当前请求的层状态；N-gram 的主要代价是 table storage、随机读、host-device 带宽和预取命中。
+
+6. 为什么 Flash-Next 报告把 Muon 与 AdamW/Adam 分工？
+   考察点：矩阵几何、fused parameter、router/embedding 边界和分布式优化器。
+   回答框架：Muon 更适合二维线性映射的矩阵更新，embedding、router、低秩投影和 table 可能保留 AdamW/Adam；fused QKV 或 gate/up 要按语义拆分后再正交化，跨 TP/DP 还要处理通信、负载和 CUDA graph。
+
+7. `125B total`、`6B active`、`51B N-gram` 和 `4B MTP` 如何分别进入 Serving 账本？
+   考察点：权重存储、每 token 计算、额外 table 和 draft 路径。
+   回答框架：total 影响权重分片，active 是每 token 计算代理，N-gram 影响额外存储/随机带宽，MTP 影响候选与验证路径；四个数字不能相加后当作 FLOPs、显存或吞吐。
+
+8. Qwen3.8-Max 与 A95B 是不是两个独立 open checkpoint？
+   考察点：榜单配置、模型卡、托管能力和证据边界。
+   回答框架：A95B 是公开 text-only MoE checkpoint，Max 是官方说明基于 A95B 的 hosted version；视觉、非 thinking、默认 1M 和工具属于服务能力，不能倒推为本地权重或另一套公开架构。
+
+## 2026-09 GLM-5.3-Flash 混合注意力与视觉闭环
+
+1. GLM-5.3-Flash 的 `320B total / 18B activated` 应怎样进入容量规划？
+   考察点：total/active 参数、MoE dispatch 和状态账本。
+   回答框架：320B 主要约束权重存储、专家分片和加载；18B 是发布方每 token 激活口径，不能当作 18B dense 的显存或延迟。还要加入 attention/state/KV、router、shared expert、all-to-all、workspace、batch padding 和并发余量。
+
+2. 为什么 GLM-5.3-Flash 采用 linear attention 与 sparse attention 的混合，而不是全量替换？
+   考察点：固定递归状态、远程精确检索和召回风险。
+   回答框架：linear state 以固定形状吸收连续历史，降低长上下文状态增长；sparse/indexer 路径为远程 token 保留显式检索。代价是 state 与 KV 两套账本、indexer/gather、候选漏检和 kernel 复杂度，不能把它说成“所有层都是 O(1)”。
+
+3. IndexPool 压缩的是什么？它和 KV cache 压缩有什么区别？
+   考察点：indexer 表示与主注意力状态的分层。
+   回答框架：IndexPool 对 indexer 使用的多个 key vector 做加权池化，主要减少候选筛选的计算和内存；KV cache 压缩改变主 attention 使用的历史 K/V 表示，二者的对象、误差和验证指标不同。`index_topk=2048` 也不能直接解释成最终读取 2048 个 token。
+
+4. mHC 的双随机约束保证了什么，又没有保证什么？
+   考察点：残差流稳定性与过度承诺。
+   回答框架：非负、行和 1、列和 1 约束 residual stream mixing，提供流量守恒和深层传播的稳定性倾向；它不保证激活范数恒定、不替代归一化/优化器，也不能由 `mhc=true` 反推出完整 kernel 或训练定理。
+
+5. “视觉 self-verification”能否替代 verifier？
+   考察点：模型观察能力、artifact 正确性和宿主权限。
+   回答框架：不能。视觉 coding loop 可以把渲染、交互反馈和截图差异纳入下一轮决策，但 compiler、行为测试、视觉 diff、artifact validator、权限、沙箱、超时和回滚仍由宿主与验证器负责；模型产生工具调用也不等于工具已执行。
+
+6. EPD 相比普通 PD 增加了什么系统问题？
+   考察点：Encode–Prefill–Decode 的阶段边界和恢复协议。
+   回答框架：多模态输入先经过 encode，再传 representation 到 prefill，最后把 KV/state metadata 交给 decode；需要处理跨池网络、revision/tokenizer/template、取消、失败重算、版本兼容、租户隔离和 trace correlation。短文本或低视觉比例不一定值得拆池。
+
+7. DataCurve 的 GLM-5.3-Flash `Pass@1=63.392857%` 能否当作模型单项能力？
+   考察点：榜单配置与组合系统归因。
+   回答框架：不能。它绑定 `max`、`mini-swe-agent`、工具、113 任务/91 仓库、环境、verifier、超时/重试和 4 runs；应与成本、输出 token、steps、失败类型和 artifact 一起记录，不能与 Artificial Analysis Intelligence Index 拼接。

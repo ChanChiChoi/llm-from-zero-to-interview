@@ -689,6 +689,8 @@ C_{\mathrm{trace}}=1
 
 这组条件的目标不是无限制保存所有内容，而是在隐私和成本可控的前提下，让 agent 的关键行为可解释、可回放、可评估。
 
+这里也要区分“没有样本”和“样本全部通过”：例如一条 trace 没有命令、patch 或截断输出时，artifact 覆盖率对该 trace 是 `not_applicable`，不应把空集合当作 `1.0`。聚合时只对有定义的 trace 计算均值；如果整个评估批次都没有有效样本，则报告 `not_applicable`，并让对应门禁显式失败或由上层策略记录跳过原因。
+
 ### 9.16.1 最小可运行 Trace / Replay 审计 demo
 
 下面的 demo 不调用模型、不执行工具、不访问网络，只审计 toy traces 是否满足 trace / replay 验收条件。它故意构造缺 artifact、span parent 错误、时间线越界、敏感 artifact 未脱敏、外部网络不可复现、最终状态虚假成功等 bad case。
@@ -749,7 +751,21 @@ class Trace:
 
 def mean(values):
     values = list(values)
-    return round(sum(values) / len(values), 3) if values else 1.0
+    return None if not values else round(sum(values) / len(values), 3)
+
+
+def mean_defined(values):
+    return mean(value for value in values if value is not None)
+
+
+def at_least(value, threshold):
+    return value is not None and value >= threshold
+
+
+# 空集合回归：没有可评估 span 时不能伪造完整覆盖率。
+assert mean([]) is None
+assert mean_defined([None, None]) is None
+assert at_least(None, 1.0) is False
 
 
 def present(value):
@@ -1101,7 +1117,7 @@ metrics = {
     ),
     "span_tree_validity": mean(tree_ok(trace) for trace in traces),
     "timeline_validity": mean(time_ok(trace) for trace in traces),
-    "artifact_coverage": mean(artifact_ok(trace) for trace in traces),
+    "artifact_coverage": mean_defined(artifact_ok(trace) for trace in traces),
     "version_capture": mean(version_ok(trace) for trace in traces),
     "replay_readiness": mean(replay_ok(trace) for trace in traces),
     "privacy_masking": mean(privacy_ok(trace) for trace in traces),
@@ -1120,7 +1136,8 @@ for trace in traces:
         causes.append("span_tree_invalid")
     if not time_ok(trace):
         causes.append("timeline_invalid")
-    if artifact_ok(trace) < 1:
+    artifact_score = artifact_ok(trace)
+    if artifact_score is not None and artifact_score < 1:
         causes.append("artifact_reference_missing")
     if not version_ok(trace):
         causes.append("version_capture_missing")
@@ -1155,10 +1172,11 @@ thresholds = {
     "eval_export": 1.0,
 }
 failed_gates = [
-    name for name, threshold in thresholds.items() if metrics[name] < threshold
+    name for name, threshold in thresholds.items() if not at_least(metrics[name], threshold)
 ]
 
 print(f"metrics={metrics}")
+print(f"not_applicable_metrics={[name for name, value in metrics.items() if value is None]}")
 print(f"root_causes={root_causes}")
 print(f"failed_gates={failed_gates}")
 print(f"trace_replay_gate_pass={not failed_gates}")

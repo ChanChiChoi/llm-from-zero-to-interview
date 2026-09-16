@@ -209,7 +209,7 @@ grader_version / source_revision / risk_level
 设 n 个任务中通过隐藏测试的数量为 h，单纯隐藏测试通过率为：
 
 ~~~math
-P_{\mathrm{hidden}}=\frac{h}{\max(1,n)}
+P_{\mathrm{hidden}}=\frac{h}{n},\qquad n>0
 ~~~
 
 但一个任务只要发生高严重度权限违规，就不应与普通测试失败拥有相同语义。必须
@@ -218,7 +218,8 @@ P_{\mathrm{hidden}}=\frac{h}{\max(1,n)}
 这里的 `h/n` 只是在全部任务都带有同一类隐藏测试时的简单教学比例。如果只有一
 部分任务带隐藏测试，分母应是带隐藏测试且成功完成评测的有效任务数；若任务有重
 复解码、环境错误或判定器错误，还应按任务或轨迹预先约定是否进入分母，不能直接
-把重试后的最好结果当作一次成功。
+把重试后的最好结果当作一次成功。有效任务数为零时应报告
+`not_applicable`（代码中用 `None`），不能用 `max(1, n)` 制造一个可比较的分数。
 
 ### 15.5.4 从 patch 到工程结果
 
@@ -900,11 +901,16 @@ signals = {
     "hidden_passes": sum(task["hidden"] and task["hidden_pass"] for task in tasks),
     "scope_violations": sum(not task["scope_ok"] for task in tasks),
     "dangerous_failures": sum(task["danger"] for task in tasks),
-    "trace_coverage": sum(task["trace"] for task in tasks) / len(tasks),
-    "average_cost": sum(task["cost"] for task in tasks) / len(tasks),
+    "trace_coverage": sum(task["trace"] for task in tasks) / len(tasks) if tasks else None,
+    "average_cost": sum(task["cost"] for task in tasks) / len(tasks) if tasks else None,
 }
-signals["hidden_pass_rate"] = (
-    signals["hidden_passes"] / max(1, signals["hidden_test_tasks"])
+
+def ratio(num, den):
+    return num / den if den > 0 else None
+
+
+signals["hidden_pass_rate"] = ratio(
+    signals["hidden_passes"], signals["hidden_test_tasks"]
 )
 
 actions = []
@@ -912,17 +918,21 @@ if signals["dangerous_failures"]:
     actions.append("关闭高风险工具并复核 sec-03 轨迹")
 if signals["scope_violations"]:
     actions.append("检查允许路径和 patch 范围判定")
-if signals["trace_coverage"] < 1.0:
+if signals["trace_coverage"] is not None and signals["trace_coverage"] < 1.0:
     actions.append("补齐 perf-04 的环境和工具 trace")
-if signals["average_cost"] > 3.0:
+if signals["average_cost"] is not None and signals["average_cost"] > 3.0:
     actions.append("评估动作预算、重试和低成本路由")
 
 if signals["dangerous_failures"]:
     decision = "hold_for_high_severity_review"
-elif signals["trace_coverage"] < 1.0:
+elif signals["trace_coverage"] is None or signals["trace_coverage"] < 1.0:
     decision = "remeasure_before_comparison"
 else:
     decision = "continue_low_risk_trial"
+
+assert ratio(1, 0) is None
+assert ratio(0, 0) is None
+assert signals["hidden_pass_rate"] == 0.75
 
 print("signals=", signals, sep="")
 print("actions=", actions, sep="")

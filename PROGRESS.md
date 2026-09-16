@@ -2281,4 +2281,174 @@
 
 第六册第 3 章 `book-06-llm-deployment/chapters/03-kv-cache与内存管理.md` 已从第一行完整复读到末尾并完成教材化修订。正文沿 KV Cache 的 attention 语义、MHA/MQA/GQA、MLA/滑动窗口/递归 state、变长 cache 账本、显存组成、PagedAttention、KV 量化、prefix cache、淘汰与 1M context 边界展开连续教材叙事，并新增长上下文多租户 cache 设计案例；修正 cache 容量、负预算、窗口、block size、量化比例、prefix reuse 和 active/reusable/metadata 账本的定义域，明确空状态和不可行容量不能伪装成正常指标。零依赖审计 demo 新增请求 schema、唯一 ID、非负 token、预留量、block size、head/layer/dtype 配置校验与失败回归；补齐 `deepcopy` 导入，AST、正常运行、零 block、预留不足和布尔 token 边界均通过，正文预期输出已同步，围栏、资料链接和 `git diff --check` 通过；章节当前 890 行、49510 字节。联网核验 Transformers KV Cache/Chat Templates、PagedAttention 原始论文、vLLM Paged Attention/Prefix Caching/Quantized KV Cache、TensorRT-LLM KV reuse、MQA、GQA、DeepSeek-V2 MLA、KIVI、Mamba、Mamba-2 入口，均返回 HTTP 200，并区分官方实现、原始研究和目标系统实测。下一步从第六册第 4 章第 221 行继续逐章节复读。
 
-本次会话在第六册第 4 章 `book-06-llm-deployment/chapters/04-解码策略与生成控制.md` 复读过程中中断。第 4 章已从第 1 行读到第 743 行末尾，确认正文已覆盖 logits/softmax、greedy、beam、sampling、temperature、top-k/top-p/min-p、penalty、stop/EOS、structured output、reasoning effort、speculative decoding、复现、任务调参、工具调用案例和资料边界；章节当前 743 行、41303 字节。已完成 AST 和示例正常运行，原有 demo 输出与正文一致。已落盘的本轮正文补充包括：候选集合/softmax 的非空与有限值定义域、beam 长度归一化的 `t>0` 边界、top-k 的 `1\leq k\leq V`、top-p 的 `0<p\leq1`、min-p 概率域、presence/frequency/repetition penalty 参数域；这些修改尚未完成最终运行回归和预期输出核对。下一次 session 应从第 4 章第 440 行附近继续：补充 speculative residual 分母、PassRate 有效 runs 正分母和 demo 参数校验/异常回归；随后重新运行第 4 章 Python 围栏、同步预期输出、核验 GenerationConfig/vLLM sampling/structured outputs/speculative decoding 等资料，并将第 4 章完成记录追加到本文件。
+此前会话在第六册第 4 章 `book-06-llm-deployment/chapters/04-解码策略与生成控制.md` 复读过程中中断，本次续接已完成收口。第 4 章已从第 1 行读到第 828 行末尾，正文覆盖 logits/softmax、greedy、beam、sampling、temperature、top-k/top-p/min-p、penalty、stop/EOS、structured output、reasoning effort、speculative decoding、复现、任务调参、工具调用案例和资料边界；章节当前 828 行、47080 字节。已补充 speculative residual 分母为零、PassRate 无有效 run 的 `not_applicable` 语义，以及 logits、temperature、top-k/top-p/min-p、penalty、历史 token、采样集合和 step 的参数校验。Python demo 内置 6 个非法配置回归，并额外通过 10 个边界输入测试；已通过 AST 和独立运行，预期输出同步 `invalid_cases`。本地尝试访问 GenerationConfig、vLLM sampling/structured outputs 和 speculative decoding 论文时均因 DNS 解析失败，未将失败写成资料不存在。下一步从第六册第 5 章第一行继续逐章节复读。
+
+## 2026-09 Frontier Model 更新
+
+- 第二十一册新增第 75-80 章：Attention Residuals、Kimi Delta Attention、CSA/HCA、mHC、Mistral Small 4、Step 3.5 Flash。
+- 已同步论文路线、知识图谱、项目路线、术语、面试题和练习；相关来源与待核验边界记录在 `plan_v2.md`、`progress_v2.md` 和 `research/model-update-2026-09/`。
+- 后续继续核验 GPT-6 Astra、GLM-5.3、DeepSeek V4、Kimi K3 的新版本资料，并完善第四册百科交叉引用。
+
+## 2026-09 新模型专题收口
+
+- GPT-6 Astra、GLM-5.3 与 Kimi K3 已分别形成第六册、第十六册、第十七册正式章节，并同步百科、术语、题库、练习、论文、项目和知识图谱。
+- GPT-6 Astra 章节代码、GLM-5.3 验证器代码均已运行通过；新增正文相对链接与 `git diff --check` 已通过。
+- 官方网络本轮存在 DNS 不稳定，后续复访时仍需重新核对价格、版本快照、模型卡和技术报告；当前不把架构、参数量、SAO 机制或 K3 完整配置写成已确认事实。
+
+## 2026-09 Mistral Small 4 与 Step 3.5 Flash
+
+- 新增第二十一册第 79 章 `Mistral Small 4：混合推理与 EAGLE/NVFP4 部署`，以及第 80 章 `Step 3.5 Flash：MTP-3、滑动窗口和 11B 激活参数`；两章均从官方模型卡的结构字段出发，提供教学公式、代码/实验设计、工程取舍和面试追问。
+- 已同步第四册百科、`GLOSSARY_EN_ZH.md`、`INTERVIEW_BANK.md`、`EXERCISES.md`、`PROJECTS.md`、`PAPERS.md`、`KNOWLEDGE_GRAPH.md`、README、`BOOK_SERIES.md` 和 `ROADMAP.md`；来源和证据边界记录在 `research/model-update-2026-09/`。
+- Mistral Small 4 的 119B/约 6.5B、128 experts/4 active、256K、`none/high`、EAGLE 和 NVFP4，以及 Step 3.5 的 196.81B/约 11B、288 routed + 1 shared、top-8、MTP-3、3:1 SWA/full attention 和 Context Manager，均限定为模型卡公开字段或评测协议；训练配方、发布日期含义、后端支持和独立复现仍待核验。
+- 两章 Python 示例已做 AST/运行检查；本轮对 26 个改动/新增 Markdown 文件完成本地相对链接检查、数学/代码围栏配对检查和 `git diff --check`。当前环境未提供 `pandoc`、`xelatex`、`wkhtmltopdf` 或 `typst`，PDF 构建留待环境具备工具后复查；候选模型发现与官方核验目标仍保持进行中。
+
+## 2026-09-10 Claude Opus 5 官方模型目录核验
+
+- 从 Anthropic 官方模型目录缓存页核验 `claude-opus-5`、页面发布日期字段 `2026-07-24`、1M context、128K 普通最大输出、300K batch 最大输出、Claude API/Bedrock/Vertex/Foundry 平台、adaptive thinking、默认 high effort、价格以及 2026-05 知识/训练截止字段。
+- 已新增 `research/model-update-2026-09/claude-opus-5-source-notes.md`，并同步来源索引、候选解释、第四册百科、术语、面试题、练习、论文、知识图谱、项目、README、`BOOK_SERIES.md` 和 `ROADMAP.md`。
+- 证据边界保持严格：模型目录支持接口与运行时字段，不支持参数量、稠密/MoE 架构、训练配方、后训练算法、完整推理机制或独立 benchmark 复现；当前网络无法复访官方页面时，以保存的页面快照和核验日期为准。
+- 后续需对 Anthropic system card/announcement 做逐页复核，并在可复现平台上固定模型 revision、平台、effort、工具和 harness；长期候选模型核验目标仍保持进行中。
+
+## 2026-09-10 排行榜与官方页面刷新尝试
+
+- 尝试刷新 Artificial Analysis、DeepSWE、Anthropic Fable 页面和 Fable 发布入口，当前环境四个域名均因 DNS 解析失败返回 curl 退出码 6；候选盘点继续使用 2026-09-09 已保存的榜单快照，并保留其采集日期，不将其描述为 2026-09-10 实时排行榜。
+
+## 2026-09-10 Claude Fable 5.1 官方模型页核验
+
+- 从 Anthropic Fable 5.1 专属页面缓存核验 `claude-fable-5-1`、2026-09-01 发布字段、1M context、128K 输出、adaptive always-on、默认 high effort、平台、价格和 2026-06 知识/训练截止字段。
+- 页面自述其面向 demanding reasoning、long-horizon agentic work、多步研究和文档/表格/幻灯片任务，并列出 preserved thinking、跨轮模型切换、per-message effort、turn-scoped system messages 和工具间进度更新等 beta 能力；这些不等于独立 benchmark 或内部架构证明。
+- 已新增 `research/model-update-2026-09/claude-fable-5.1-source-notes.md`，同步来源索引、候选解释、第四册百科、术语、面试题、练习、论文、知识图谱、项目、README、`BOOK_SERIES.md` 和 `ROADMAP.md`。
+- 参数规模、稠密/MoE 结构、训练配方、后训练算法、完整技术报告和独立 benchmark 复现继续标为待核验；Claude Mythos 5.1 的邀请制页面信号不作为公开独立模型纳入。
+
+## 2026-09-10 Claude Sonnet 5 官方模型目录核验
+
+- 从 Anthropic 官方模型目录缓存页核验 `claude-sonnet-5`、2026-06-30 发布字段、1M context、128K 普通最大输出、300K batch 最大输出、Adaptive thinking、默认 high effort、Fast latency 字段、平台、价格和 2026-01 知识/训练截止字段。
+- 已新增 `research/model-update-2026-09/claude-sonnet-5-source-notes.md`，并将模型字段同步到来源索引、候选解释、第四册百科、术语、面试题、练习、项目、论文、知识图谱以及 README、`BOOK_SERIES.md`、`ROADMAP.md`、`progress_v2.md` 和 `plan_v2.md`。
+- 当前证据仅支持接口与运行时字段；参数规模、稠密/MoE 架构、训练配方、后训练算法、完整推理机制和独立 benchmark 复现仍待核验。`Adaptive`、`Fast`、effort 和排行榜配置不用于推断基础模型架构。
+- 后续需在网络恢复后复访 system card、announcement、平台差异、价格/延迟快照和真实 API 行为；整体新模型发现与官方核验目标仍在进行中。
+
+## 2026-09-10 官方页面复访（DNS 重试）
+
+- 再次尝试访问 Anthropic Opus 5 announcement/system card、Opus/Fable 模型页，以及 Qwen3.8 官方博客/研究入口；`www.anthropic.com`、`platform.claude.com`、`qwen.ai` 和 `qwenlm.github.io` 均因 DNS 解析失败返回 curl 退出码 6。
+- 本次没有新增一手事实；Opus/Fable 的关联 announcement/system card 与 Qwen3.8 的模型卡/技术报告继续保持“待核验”，不把网络失败当作资料不存在。
+
+## 2026-09-10 新增专题代码离线验收
+
+- 重新提取并运行 Mistral Small 4、Step 3.5 Flash、Attention Residuals、KDA、CSA/HCA、mHC、DeepSeek V4、GPT-6 Astra、GLM-5.3 和 Kimi K3 章节中的 10 个 Python fenced blocks；全部通过 AST 解析和独立运行，无失败样例。
+- 新增章节与总控文件的 `git diff --check`、实际本地相对链接检查和 Markdown 围栏配对检查均通过；外部页面因 DNS 不可用未将访问失败写成资料不存在。
+
+## 2026-09-10 DeepSWE v1.1 快照同步
+
+- 从本地 `/tmp/deepswe.html` 快照整理页面标注的 v1.1、2026-09-03 更新时间、113 个任务、91 个仓库、5 种语言、统一 `mini-swe-agent` harness，以及主表 21 个可见配置的 Pass@1、区间、平均成本、输出 token 和 Agent steps。
+- 新增 `research/model-update-2026-09/deepswe-snapshot-notes.md`，并将评测方法与证据边界同步到 README、`BOOK_SERIES.md`、`ROADMAP.md`、`PAPERS.md`、`INTERVIEW_BANK.md`、`EXERCISES.md`、`PROJECTS.md`、`GLOSSARY_EN_ZH.md` 和 `KNOWLEDGE_GRAPH.md`。
+- 明确 DeepSWE 观测对象是模型 revision + effort + Agent harness + 工具 + verifier + timeout/retry/context policy/provider 的组合；不把榜单分数归因于基础模型，不与 Artificial Analysis、SWE-bench 或其他 harness 分数直接合并。
+- 当前网络仍无法复访 DeepSWE 域名；快照按采集/页面更新时间保留，模型完整 revision、供应商、工具 schema、硬件、重试和独立复现继续标为待核验。
+
+## 2026-09-10 第六册第 4 章解码策略收口
+
+- 第六册第 4 章 `book-06-llm-deployment/chapters/04-解码策略与生成控制.md` 已完成此前中断处的第二轮收口，当前 830 行、47246 字节；补充 speculative decoding 残差分母 `Z_r=0` 的回退/不可采样语义，以及 PassRate 无有效 run 时的 `not_applicable` 语义。
+- 零依赖 logits demo 现在拒绝空/非有限 logits、非法 temperature、top-k/top-p/min-p、负 penalty、未知历史 token、越界采样索引和非法 step；内置 6 个非法配置回归，并额外通过 10 个边界输入测试，预期输出同步 `invalid_cases`。
+- 本轮对 11 个新增/专题章节 Python 围栏完成 AST 与独立运行：第 4 章、第二十一册第 75-80 章、第五册第 18 章、第六册第 18 章、第十六册第 20 章和第十七册第 15 章均通过。GenerationConfig、vLLM sampling/structured outputs 与 speculative decoding 论文的在线复访因 DNS 解析失败，未将网络失败写成资料不存在。
+
+## 2026-09-11 第二十册第 5 章文件编辑审计边界收口
+
+- 继续会话 `01a0843d-2910-7993-840a-8587cea054bd`，完成 `book-20-agent-harness-runtime/chapters/05-文件系统与代码编辑.md` 的空集合/空分母回归：`safe_div(1, 0)`、`safe_mean([])` 和 `rounded(None)` 均返回 `None`，`at_least`、`at_most`、`equals_zero` 对 `None` 均拒绝通过，空指标不会被门禁误判为成功。
+- 质量指标正文明确：分母为零报告 `not_applicable`，不使用 epsilon、上次分数或默认 `1.0` 伪造安全/成功率；没有有效样本时必须补充样本或由上层策略显式决定是否跳过评估。
+- 章节当前 1106 行、35957 字节；唯一 Python fenced block 通过 AST 解析、独立运行及上述边界断言。正常输出保持 `not_applicable_metrics=[]`、失败门禁为 `context_ok`、`patch_success_ok`、`unrelated_diff_ok`，`file_edit_gate_pass=False` 的教学结论。目录已包含第 5 章与下一入口第 6 章，下一步继续复读“终端执行与命令安全”。
+
+## 2026-09-11 第二十册第 6-8 章审计指标边界收口
+
+- 第 6 章 `book-20-agent-harness-runtime/chapters/06-终端执行与命令安全.md` 的命令安全 demo 已去除 `safe_div` 默认 `1.0`，新增 `safe_mean`、`rounded`、`at_least` 与空分母回归；指标无有效样本时返回 `None` 并列入 `not_applicable_metrics`，门禁不会静默通过。章节当前 1111 行、37667 字节，Python 围栏通过 AST、独立运行和边界检查；既有高风险错误放行、网络失控、超时未取消和 trace 缺失坏例仍使 `command_safety_gate_pass=False`。
+- 第 7 章 `book-20-agent-harness-runtime/chapters/07-上下文管理与记忆压缩.md` 同步修正空分母语义，`stale_summary_rate` 等指标不再用 `default=0.0` 伪造新鲜度；新增空集合回归和 `not_applicable_metrics` 输出。章节当前 1094 行、35067 字节，Python 围栏通过 AST、独立运行与边界检查；缺失关键文件、过期摘要、工具信号丢失、当前 diff 缺失和不可信边界坏例保持可见。
+- 第 8 章 `book-20-agent-harness-runtime/chapters/08-权限模型与安全沙箱.md` 将 `mean([])` 从默认 1.0 改为 `None`，所有阈值比较对 `None` 显式失败，并加入空集合回归及 `not_applicable_metrics` 输出。章节当前 1116 行、33545 字节，Python 围栏通过 AST、独立运行与边界检查；权限矩阵缺行、网络外发、沙箱缺失、dry run 缺失等坏例仍使 `permission_sandbox_gate_pass=False`。
+- 第 5-8 章目录入口均已存在；下一步继续第二十册第 9 章“trace、日志回放与可观测性”，并在阶段性收口时重跑全库围栏、链接和 `git diff --check`。
+
+## 2026-09-11 第二十册第 9 章 Trace/Replay 指标边界收口
+
+- `book-20-agent-harness-runtime/chapters/09-trace日志回放与可观测性.md` 补充空样本语义：`mean([])` 与全为 `None` 的 `mean_defined` 返回 `None`，artifact 覆盖率只聚合有适用 span 的 trace；没有可评估事件时报告 `not_applicable`，不默认填满分。
+- 新增 `at_least` 门禁比较和空集合回归；`artifact_reference_missing` 根因仅在指标有定义且低于阈值时触发，避免把“无 artifact 需求”误报为缺失。唯一 Python fenced block 通过 AST、独立运行和边界断言。
+- 章节当前 1246 行、37444 字节；正常 demo 输出的 trace schema、span tree、timeline、artifact、replay、隐私、最终一致性等坏例仍使 `trace_replay_gate_pass=False`。下一步继续第二十册第 10 章 Evaluation Harness。
+
+## 2026-09-11 第二十册第 10 章 Evaluation Harness 指标边界收口
+
+- `book-20-agent-harness-runtime/chapters/10-evaluation-harness.md` 的评估 demo 去除 `mean([])=1.0` 与零权重除法隐患：`mean`、`weighted_mean` 在无有效样本时返回 `None`，新增 `at_least`/`at_most` 门禁比较和空评估集回归。
+- 指标输出新增 `not_applicable_metrics`；没有有效 run、零权重或空筛选集合时不伪造成功率、成本通过率或安全零率。原有环境不可复现、验收器缺失、baseline 不公平、flaky、安全诱导执行和报告缺失坏例保持使 `evaluation_harness_gate_pass=False`。
+- 章节当前 1211 行、33865 字节；唯一 Python fenced block 通过 AST、独立运行和边界断言。下一步扫描第二十册后续章节的同类空分母与默认值问题。
+- 2026-09-11：第二十册第 11、12、14、15、16 章统一收口空分母指标：`ratio`、`rate`、`avg` 对空样本返回 `None`，第 14 章 `a2a_lifecycle` 空集合不再除零；五章加入 `at_least`、`not_applicable_metrics` 与空集合回归。五个 Python fenced blocks 均通过 AST、独立运行和边界断言；第 17-22 章未发现同类评估代码或定义域问题。
+
+## 2026-09-11 第二十册指标公式定义域复核
+
+- 复核第 11、12、14、15、16 章指标正文，补充统一约定：对应集合为空时返回 `not_applicable`（demo 用 `None`），不使用 epsilon、历史值、默认满分/零分或人为下限分母掩盖缺样本；门禁必须显式拒绝 `None`。
+- 第 14 章 `C_{\\mathrm{risk}}` 公式改用真实高风险能力数作分母，并明确空高风险集合不适用；A2A lifecycle 要求非空 agent 集合和非空状态需求集合。其他四章同步写明 `N`、模块组、风险集和 trace 必需集的非空定义域，消除正文公式与代码语义不一致。
+- 第二十册 22 个章节共 16 个 Python fenced blocks 全部通过 AST 与独立运行；全库 659 个 Markdown 文件、9622 对代码围栏配对通过，1290 个 Python blocks AST 全部通过；`git diff --check` 通过。相对链接扫描仍仅报告既有代码样式误报，未擅自改动无关文本。
+
+## 2026-09-14 第二十册剩余指标定义域收口
+
+- 第 13、17、18、21 章残留 `max(1, …)` 指标分母已统一改为严格非空定义域；空集合/零分母报告 `not_applicable`，禁止默认 0/1 或人为下限分母伪造指标。
+- 第 13 章 Coding Agent 横向审计 demo 的覆盖率、风险治理率、总分和门禁均显式处理 `None`，空需求集合回归通过；第二十册 16 个 Python 围栏 AST/独立运行、全库围栏配对与 Python AST、`git diff --check` 均通过。
+- 官方页面复访仍因 DNS 解析失败，未新增一手事实；GPT-6、Kimi K3、GLM-5.3 等待核验项保持待核验。
+
+- 复读本地 Kimi K3 官方发布页与 DeepSWE v1.1 快照：补记 Kimi API/客户端/价格与评测采样条件、Mooncake 和缓存命中率自报，以及 DeepSWE 精确生成时间、统一 `mini-swe-agent`、Kimi K3 309/451 与重复运行区间。所有字段均保留快照与发布方自报边界，不视为长期费率、普遍性能或独立复现。
+
+## 2026-09-14 第七册专项 Frontier 评测指标定义域复核
+
+- `book-07-evaluation-experiments/chapters/15-specialized-frontier-eval-cluster.md` 隐藏测试通过率改为严格正分母 `h/n`；空隐藏测试集合、空任务集的指标返回 `None/not_applicable`，不使用 `max(1, …)` 伪造分数。
+- 新增 `ratio` 空分母回归和空任务集重测门禁；章节 demo AST、独立运行与 `git diff --check` 通过。
+- 按反引号与波浪号两种围栏重新扫描全库，1,698 个 Python 围栏全部 AST 通过且无未闭合围栏；1,290 个反引号 Python 围栏为此前历史统计口径。
+
+## 2026-09-14 Claude Haiku 4.5 官方目录快照补充
+
+- 基于本地 Anthropic Models Overview 快照核验 `claude-haiku-4-5-20251001`、别名、2025-10-15 发布字段、200K context、64K 输出、extended thinking、`fastest` 延迟、平台、价格和 cutoff 字段。
+- 新增研究笔记并同步百科、术语、题库、练习、论文、知识图谱和项目；参数、训练架构、system card 全文与独立 benchmark 仍待核验。
+- 该模型未出现在 2026-09-09 Artificial Analysis 采集切片中，已在模型盘点中明确标记为官方目录发现，不伪造榜单日期。
+- Haiku 4.5 入口已同步到 `plan_v2.md`、`README.md`、`BOOK_SERIES.md` 和 `ROADMAP.md`，受影响链接检查通过。
+
+## 2026-09-14 Artificial Analysis 快照字段边界补强
+
+- 从本地 2026-09-09 Artificial Analysis 快照提取配置级指数示例，并同步来源索引与候选解释；明确 `releaseDate`、`parameters` 和开放性分类是第三方页面字段，不能替代官方资料。
+- Fable/GPT-6/Opus/GLM/Grok/Kimi/Gemini 的指数均保留 effort/fallback 和快照日期边界，不与 DeepSWE 或其他 harness 分数直接拼接。
+- 该第三方快照解释入口已加入 `plan_v2.md`，后续引用统一绑定采集日期、effort/fallback、revision 与 harness。
+- 记录了快照中 GLM-5.3/Kimi K3 的第三方 parameters 字段（753/2800）及其不确定性，未写入正式模型规格结论。
+- 复读 Z.AI `llms.txt` 文档索引，补记 GLM-5.3-Flash 页面和 coding-agent 接入入口；Flash 的详细规格仍待专属页面或模型卡核验。
+
+## 2026-09-14 模型候选盘点表结构审计
+
+- `model-inventory.md` 的 2026-09-09 历史表有 273 条候选记录，名称与链接均唯一，日期范围 2026-01-04 至 2026-09-07，格式检查通过；2026-09-14 实时增量另列 8 个 canonical 条目。该结果仅说明盘点表结构完整，不替代官方逐项核验。
+
+## 2026-09-14 DeepSeek-R1-0528 官方发布页补充
+
+- 基于本地 DeepSeek API Docs 快照核验 2025/05/28 发布页、JSON/function calling、API 兼容性承诺和开源权重入口；新增研究笔记并同步来源索引与候选盘点。
+- benchmark 图片数字、参数/架构、训练配方、许可证、revision 和独立复现仍待核验；该模型未出现在本轮 Artificial Analysis 切片，不补写榜单日期。
+- 已记录 Artificial Analysis 与 Anthropic 页面快照的大小、时间和 SHA-256，后续复访可按哈希比较页面是否发生变化。
+
+## 2026-09-14 DeepSeek V4.1-Flash 与实时榜单快照
+
+- 通过网页代理 `10.24.27.134:7890` 成功复访 Artificial Analysis；独立保存 `/tmp/proxy-live-artificialanalysis.html` 的 1,771,961 bytes 快照，SHA-256 为 `ebda1f3ff7fc1956dc629b82ab56400300683a8a134446882d12dfbb4d814423`。页面解析到约 702 个配置条目、673 个唯一名称，最新日期字段为 2026-09-11；相对 2026-09-09 快照新增 13 个结构 slug/别名。
+- 新增发现包括 Agnes 3.0 Flash、Ling-3.0-flash-VL、K2 Horizon 系列、`mbzuai` 目录项和 DeepSeek V4 Flash Non-reasoning 配置；在该快照记录时，只有 DeepSeek V4.1-Flash 已获得官方发布页、模型卡和固定 revision 支撑。之后 K2 Horizon MoVA 36B/A4B 已完成官方资料核验，其他名称继续标为待核验，不把榜单字段当作官方规格。
+- 新增研究笔记 `research/model-update-2026-09/deepseek-v4.1-flash-source-notes.md` 与独立快照 `artificial-analysis-2026-09-14-snapshot.md`；记录官方发布页 SHA-256、模型卡 revision `dba1be0a40aa45a94ad051997016db3960a90277`、README/config/PDF 哈希和 PDF 尚未逐页提取的限制。
+- 新增第二十一册第 81 章 `book-21-transformer-architecture-evolution/chapters/81-deepseek-v4.1-flash-causal-encoder-decoder.md`，覆盖 20+20 CED、8B/16B prefill/decode 激活口径、SWA Bounded Replay、CSA2 三种层模式、Hierarchical Sparse Indexer、FP4 global KV、MoE、Engram、mHC、DSpark、DeepSeek-ViT、协议迁移和 serving 账本；目录和第四册百科已同步。
+- 已同步 `PAPERS.md`、`INTERVIEW_BANK.md`、`EXERCISES.md`、`GLOSSARY_EN_ZH.md`、`PROJECTS.md`、`KNOWLEDGE_GRAPH.md`、`README.md`、`BOOK_SERIES.md`、`ROADMAP.md`、`plan_v2.md`、`progress_v2.md`、来源索引、候选解释和模型盘点历史快照说明。
+- 模型卡自报的 MMLU-Pro 74.1、HumanEval 79.4、GSM8K 93.0、MMMU-Pro 56.5、DocVQA 95.6、Terminal-Bench 2.1 90.6、DeepSWE v1.1 74.2、AutomationBench 54.8 和 Agent's Last Exam 31.8 均绑定官方评测协议；没有写成基础模型独立能力或本项目复现。
+- 本轮新增章节教学 Python 围栏待最终统一验收；技术报告正文、完整 kernel、API 价格图片、实际 alias/限流行为和线上接受率仍待后续核验，整体新模型资料主线保持进行中。
+
+## 2026-09-14 DeepSeek V4.1-Flash 技术报告逐页核验
+
+- 通过可用网页代理 `10.24.27.134:7890` 重新获取固定 revision 的技术报告；51 页正文逐页提取成功，PDF SHA-256 仍为 `ba68e2e40408125ae6d2f63a9a241b61c73910691c74ec1a2a7023c851eac08d`。
+- 报告新增证据已补入研究笔记和第二十一册第 81 章：精确 CED/CSA2 层排布、HSI `2048*8=16,384` 候选池、Single-Pass mHC、Engram/DSpark 具体设置、FP4 QAT 位置、EPD 与 SWA cache 部署、45T/100.6M-token 训练、异步 RL/OPD 和评测边界。
+- 报告 Table 1/3、effort 曲线、Dsec 容器密度和 cache 生命周期仍标为发布方自报；完整 kernel source、所有参数分片、线上接受率、目标硬件 profiling、API 价格/限流和独立 benchmark 仍待核验。
+- 已同步 `source-index.md`、`PAPERS.md`、`BOOK_SERIES.md`、`KNOWLEDGE_GRAPH.md` 和 `plan_v2.md` 的报告状态，随后执行全库围栏、Python AST、链接和 diff 检查。
+
+## 2026-09-14 K2 Horizon MoVA 36B/A4B 与 Uno 周边技术
+
+- K2 Horizon MoVA 36B/A4B 由 Artificial Analysis 榜单发现；DataCurve DeepSWE 本地 v1.1 快照未检出 K2，因此只把 Artificial Analysis 记为本轮 K2 的发现证据。
+- 已读取 IFM 官方模型卡、固定 revision `de2d2efb32ed7639b7140bccbefe131a0063a982` 的配置与实现，以及 SGLang 部署参考；核验 36B/约 4B active proxy、48 层、前 3 层 dense、后 45 层 MoVA + MoE、32Q/8KV GQA、64 value experts/top-4、100 routed FFN experts/top-8 + 1 shared expert、524,288 context 和路由语义。
+- 新增第二十一册第 82 章，并同步第四册第 19 章、目录、来源索引、模型盘点、候选解释、`PAPERS.md`、`INTERVIEW_BANK.md`、`EXERCISES.md`、`GLOSSARY_EN_ZH.md`、`PROJECTS.md`、`KNOWLEDGE_GRAPH.md`、README、`BOOK_SERIES.md`、`ROADMAP.md` 和本计划/进度文件。
+- `K2-Horizon-7B-Uno` 仅作为官方关联 adapter/论文技术记录：冻结 K2 7B AR base、LoRA diffusion draft 和 `Psi-Spec` AR rejection verification；它不是排行榜新增模型，也不是 36B 架构变体。0.9B 卡片的 MOPD 只保留为同系列训练流程边界，不能反推 36B recipe。
+- 完整训练报告、MoVA/FFN 生产 kernel、Uno 接受率、目标硬件 profiling 和独立 benchmark 仍待核验；本轮新增资料不下载几十 GB 权重，正式评测需固定 revision、后端、硬件和 harness。
+
+## 2026-09-14 Qwen3.8 纵向同步与 demo 收口
+
+- 已完成 Qwen3.8 研究笔记、第二十一册第 83 章以及 `PAPERS.md`、`INTERVIEW_BANK.md`、`EXERCISES.md`、`GLOSSARY_EN_ZH.md`、`PROJECTS.md`、`KNOWLEDGE_GRAPH.md`、`README.md`、`BOOK_SERIES.md` 和 `ROADMAP.md` 的纵向同步。
+- 同步主线固定为 GDN/Gated Attention、QSA micro-block indexer/两阶段训练、四分支 Gated Residual、N-gram host-memory prefetch、Muon/AdamW 参数分工和 thinking protocol；Max 仅作为基于 A95B 的 hosted version 记录。
+- 修复第 83 章 QSA 教学 demo 的 tail 截断 bug：先预留 causal tail 预算，再选择完整 block；预算不足时显式报错，并增加尾部保留断言。标准库 demo 已实际运行通过，输出保留尾部 `[8, 9]`，但不能替代生产 kernel。
+- Flash-Next 报告的速度、loss、benchmark 和稳定性继续标为发布方自报；完整 kernel、线上 acceptance rate、目标硬件 profiling、host-memory 端到端收益、完整训练/后训练配方和独立 benchmark 仍待核验。

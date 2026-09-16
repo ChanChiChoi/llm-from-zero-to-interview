@@ -999,3 +999,133 @@
 17. 为 p-RoPE 设计 local/global layer schedule 审计，测试顺序交换、跨窗口引用、position id、packed batch 和 checkpoint resume。
 18. 做 Gated Attention ablation，比较 `g=0`、`g=1` 和真实 gate 在局部检索、远距离引用、TPOT、显存和 gate 分布上的差异。
 19. 为 CSA/HCA 设计压缩注意力评测，比较原始 KV、只局部、只压缩和混合路径的检索召回、压缩误差、TTFT、TPOT 和单位成功成本。
+
+## 2026-09 Frontier Architecture Updates
+
+1. 手算三层 Full AttnRes 的 softmax 权重，并实现 Block AttnRes 的 partial sum。
+2. 用零依赖 Python 实现 KDA 递推，比较逐通道 `alpha` 与标量衰减的状态轨迹。
+3. 写一个二维 CSA/HCA toy cache，分别统计压缩误差、top-k 召回和滑动窗口补偿。
+4. 实现 Sinkhorn 迭代，记录双随机误差随迭代轮数的变化，并比较负值输入与正值 logits 的差异。
+5. 设计同预算架构消融，比较标准 residual、AttnRes、KDA+MLA 和 mHC 的 loss、梯度、显存、通信与成功检索率。
+
+## 2026-09 Mistral Small 4 与 Step 3.5 Flash
+
+1. 为 Mistral Small 4 的 `none/high` 模式写一份固定任务、工具、硬件和输出上限的对照实验表，报告质量、TTFT、TPOT、p95 和单位成功成本。
+2. 估算 119B BF16 与 NVFP4 权重的理论存储，并把专家分片、scale、KV cache、路由 buffer 和 workspace 单独列账。
+3. 写一个 toy EAGLE 推测解码模拟器，改变平均接受长度和草稿成本，输出目标模型调用次数、有效 token 和回退比例。
+4. 实现 Step 3.5 的 3:1 SWA/full causal pair 统计，比较窗口大小和 full 层周期对长程访问预算的影响。
+5. 为 MTP-3 加入 top-8 MoE 路由容量因子，记录专家负载方差、overflow、all-to-all token 数和验证阶段峰值。
+6. 设计带 Context Manager 重启的 BrowseComp toy harness，区分模型失败、工具失败、上下文重启、超时和最终 artifact 未完成。
+
+## 2026-09 Grok 4.6 接口与 Harness 审计
+
+1. 为 500K prompt 设计 token/KV/cache/workspace 并发账本，明确 context、输入上限和输出上限不能直接相加。
+2. 设计 `low/medium/high/xhigh` 的同任务对照实验，固定工具、超时、输出上限和 harness，输出成功率、reasoning token、TTFT、TPOT、p95 成本和失败类型。
+3. 为 function calling、Web Search 和 X Search 写权限矩阵，记录模型输出、宿主授权、网络范围、超时、回执、重试、幂等和回滚。
+
+## 2026-09 Claude Opus 5 长上下文与 adaptive effort 验收
+
+1. 为 1M context 设计 token/KV/cache/workspace 并发账本，解释为什么不能由上下文上限直接推出并发数。
+2. 设计 `adaptive` 与固定 effort 的对照实验，固定模型快照、平台、任务、工具和输出上限，输出成功率、推理 token、TTFT、TPOT、p95 和单位成功成本。
+3. 画出 Claude API、Bedrock、Vertex AI、Foundry 的模型接口、宿主工具、沙箱、权限和审计边界，列出跨平台不可比因素。
+4. 给一个长周期 coding task 设计 runtime manifest，至少记录模型 ID、平台、effort、输入/输出 token、缓存、工具 call、压缩、错误码、artifact hash 和回滚状态。
+5. 阅读 Anthropic 官方模型目录，分别列出“页面明确写出”“可由接口实验验证”“当前不能确认”的字段，禁止从 `adaptive` 或模型分类反推参数规模和训练方法。
+
+## 2026-09 Claude Fable 5.1 长任务与状态协议验收
+
+1. 为 Fable 5.1 的 1M context 和 128K 输出设计 token/KV/cache/workspace 账本，区分接口上限、有效能力和并发资源。
+2. 设计 Opus 5 与 Fable 5.1 的固定任务对照，分别记录 adaptive thinking、effort、推理 token、TTFT、TPOT、工具轮次、恢复成功率和单位成功成本。
+3. 实现 toy `preserved thinking` manifest，覆盖模型产生者、目标模型、消息版本、thinking block hash、权限、压缩、编辑历史和恢复结果；加入不兼容与篡改失败样例。
+4. 设计 per-message effort、turn-scoped system message 和 `display: "updates"` 的 schema 迁移与回滚检查，区分 beta 协议错误和模型能力失败。
+5. 将 Fable 5.1 页面自述的长任务、研究和文档工作优势拆成可复现任务切片，禁止把产品定位直接写成 benchmark 结论。
+
+## 2026-09 Claude Sonnet 5 接口与平台对照验收
+
+1. 为 Sonnet 5 的 context、普通输出和 batch 输出画出请求/批处理 token 账本，并标出缓存、KV、权重和 workspace 资源。
+2. 设计 Sonnet 5、Opus 5、Fable 5.1 的同任务 `Adaptive`/effort 对照，输出质量、推理 token、TTFT、TPOT、p95 和单位成功成本。
+3. 列出 Claude API、Bedrock、Google Cloud、Foundry 和 AWS 平台的模型 ID、协议、限流、工具和审计差异，标出不可直接合并的指标。
+4. 为 `claude-sonnet-5` 建立发布门禁：模型 revision、价格/延迟页面快照、上下文行为、工具 schema、回滚和独立复现证据必须分栏记录。
+
+## 2026-09 DeepSWE v1.1 Harness 复现验收
+
+1. 从 `research/model-update-2026-09/deepswe-snapshot-notes.md` 抄录 21 个配置，分别标注模型 ID、effort、Pass@1、区间、成本、输出 token 和 Agent steps，并解释为什么它们不是 21 个独立基础模型。
+2. 为一个长周期软件工程任务建立 runtime manifest，记录任务/仓库版本、模型 revision、`mini-swe-agent`、工具 schema、verifier、超时、重试、上下文压缩、trace 和 artifact hash。
+3. 设计固定模型换 harness、固定 harness 换模型、固定模型与 harness 换 effort 的三组实验，分别报告成功率、工具错误、verifier 拒绝、恢复率、p95 延迟、成本和失败类型。
+4. 用 bootstrap 或 Wilson 区间重算 toy Pass@1，比较区间重叠、绝对百分点差、相对提升和单位成功成本；禁止只按榜单排序下结论。
+5. 构造 no-op、unsolved-state、测试绕过、工具超时和最终 artifact 缺失的 verifier 反例，统计误通过率与误拒率，并说明 benchmark 设计声明不能替代独立污染审计。
+
+## 2026-09 Claude Haiku 4.5 接口与低成本评测验收
+
+1. 为 200K context、64K output 的请求建立 token 账本，说明输入、输出、缓存和思考 token 的边界。
+2. 固定同一任务集、平台、并发和输出预算，对比 Haiku 4.5 的目录 `fastest` 字段与实测 TTFT、TPOT、p95 和单位成功成本。
+3. 设计 Haiku 4.5、Sonnet 5、Opus 5 的质量/延迟/成本 Pareto 表，明确哪些字段来自官方目录、哪些来自独立实验。
+
+## 2026-09 DeepSeek-R1-0528 发布与兼容性验收
+
+1. 根据官方发布页设计 JSON output 和 function calling 的协议回归，覆盖合法 schema、拒绝路径、流式事件和错误码。
+2. 为开源权重入口建立 revision、许可证、参数、硬件和 tokenizer 的核验清单；在资料缺失时输出 `待核验` 而不是推断。
+3. 复现 benchmark 图片前，补齐任务集、采样、硬件、输出预算和统计区间字段，说明为什么发布页摘要不能替代独立复现。
+
+## 2026-09 GPT-6 Astra 与运行时预算验收
+
+1. 给定 context window 为 1,050,000、maximum input 为 922,000、maximum output 为 128,000，解释为什么它们不能直接相加来推导并发数，并画出一次请求的 token 账本。
+2. 用零依赖 Python 实现 GPT-6 Astra 的阈值计费估算，覆盖缓存命中、超过 272K 输入阈值、输出费用和失败重试成本，并对空输入、负 token 和缓存超过输入的情况报错。
+3. 设计 `low`、`high`、`max` 三档 reasoning effort 的公平实验，固定 prompt、工具、超时和输出上限，输出成功率、reasoning token、TTFT、TPOT、p95 成本和单位成功成本。
+4. 为 hosted shell、MCP、apply patch 和 computer use 画出模型、宿主执行器、沙箱、策略、审批和审计日志的责任边界。
+5. 给一个长周期 coding task 设计 runtime manifest，至少记录模型 ID、effort、输入/输出 token、缓存读写、工具 call id、权限决策、上下文压缩、错误码、artifact hash 和回滚状态。
+6. 阅读 GPT-6 Astra 官方模型页，分别列出“页面明确写出”“可由接口实验验证”“当前不能确认”的字段，禁止把工具名称当作架构证据。
+
+## 2026-09 Kimi K3 发布证据与 Harness 验收
+
+1. 阅读 Kimi K3 发布文章，把总参数、视觉、长上下文、KDA、AttnRes、Stable LatentMoE、量化、评测和权重状态分别标成“发布披露 / 论文机制 / 待核验配置”。
+2. 为跨模型代码任务写一个 state manifest，覆盖目标、事实、假设、diff、工具 observation、权限、版本、预算、artifact hash 和未完成副作用。
+3. 设计固定模型换 harness、固定 harness 换模型、固定模型与 harness 换 effort 的三组实验，并分别报告成功率、工具轮数、恢复成功率、延迟、成本和失败类型。
+4. 比较 KDA、全注意力和混合路径，固定模型规模、训练 token、硬件和任务集，测精确检索、TTFT、TPOT、cache bytes 和长任务恢复。
+5. 给出一组带 fallback 的基线/候选分数，计算绝对提升、相对提升和单位成功成本，指出哪些结果不可比。
+
+## 2026-09 GLM-5.3 长任务与验证器验收
+
+1. 为“修复吞吐回归且保持输出顺序”写一份任务契约，列出初始状态、允许动作、成功条件和终止失败。
+2. 运行第十六册第 20 章的验证器 demo，解释 initial、completed 和 shortcut 三个 artifact 分别触发 no-op、成功和奖励捷径门禁的原因。
+3. 给一个代码 Agent 环境设计 oracle、no-op、unsolved-state、隐藏测试和权限隔离五项质量检查。
+4. 设计完整 trace 与压缩 trace 的对照实验，测关键状态召回、重复工具调用、恢复成功率、任务成功率和 token 成本；不要把 SAO 当作已知算法。
+5. 写一份 GLM-5.3 迁移清单，分别覆盖 `thinking.type`、`reasoning_effort`、响应/流式协议、工具生命周期、错误处理、版本和回滚。
+
+## 2026-09 DeepSeek V4.1-Flash 架构、缓存与协议验收
+
+1. 构造输入 1M token、输出 4K token 的 CED/decoder-only 计算代理账本，分别报告 prefill、decode、active-parameter proxy、TTFT 和 TPOT；在报告中说明代理量不能替代 FLOPs profiler。
+2. 实现 SWA cache 的 `persist`/`replay` 两种恢复路径，注入错误 position offset、窗口边界、模型 revision 和未封存尾部，要求门禁返回失败而不是继续解码。
+3. 用 toy block 构造 `Full -> Reindex -> Reuse` 层序列，统计 candidate recall、Top-K recall、indexer 次数、cache bytes 和跨层复用命中；把两级漏检分开报告。
+4. 对二维 KV 向量实现 E2M1-like FP4、INT8 和 BF16 教学表示，按 group size 测量量化误差、scale metadata 和检索排序变化；不要把 toy 数字写成 V4.1 kernel 性能。
+5. 模拟 3-token DSpark 草稿，改变 acceptance length 和验证成本，比较目标调用数、有效 token、回退次数和 p95；加入草稿/目标 cache 不一致的恢复测试。
+6. 根据独立 `encoding.py` 设计协议回归，覆盖 `reasoning_effort` 整数和别名、DSML 前导空格标签、中途 system message、交错图片、流式工具调用和 malformed output。
+7. 设计多模态 Agent 的安全评测：图像中分别放普通文字、伪 system 指令、越权工具参数和恶意链接，记录模型识别、策略拒绝、工具执行和审计日志四层结果。
+8. 复读模型卡 Agent 评测表，为 Terminal-Bench、DeepSWE、AutomationBench 和 Agent's Last Exam 建立条件表，标明哪些数字是发布方自报，哪些字段还没有独立复现。
+
+## 2026-09 K2 Horizon MoVA 与 Uno 验收
+
+1. 根据 K2-Horizon-MoVA-36B-A4B 的配置，画出前 3 个 dense layer 与后 45 个 MoVA + MoE layer 的执行图，分别标注 32Q/8KV GQA、64 value experts/top-4、100 routed FFN experts/top-8 和 1 个 shared expert。
+2. 用零依赖 Python 实现 sigmoid routing、selection-only bias、top-k 原始分数归一化和 `scaling_factor=2.5`，加入错误实现对照，验证两者的 selected experts、权重和与输出差异。
+3. 为 `B * T` 个 token 建立 MoVA/FFN assignment、hidden payload、GQA KV cache、权重、workspace 和通信 buffer 账本；改变 EP 设备数、负载倾斜和 padding，解释为什么 4B active 不能直接换算显存或吞吐。
+4. 用 8K、32K、128K 和 512K 四个阶段设计长上下文实验，记录 position 配置、prefill 峰值、KV bytes、TTFT、TPOT、召回和失败类型；不得把 `max_position_embeddings=524288` 当作长任务成功率。
+5. 把 0.9B 卡片的领域专家合并/MOPD 与 36B 的运行时 MoVA routing 做对照表，分别写清优化对象、发生阶段、checkpoint 形态、部署影响和可核验来源。
+6. 设计 Uno adapter 的 speculative decoding toy：冻结 AR base，加入 LoRA diffusion draft，比较 draft 接受率、rejection verification、回退比例、有效 token/target call 和质量；固定 base/adapter revision、采样器、batch、硬件和 harness。
+7. 写一份 K2 迁移清单，至少覆盖固定 revision、tokenizer/chat template、reasoning/tool parser、TP/EP 拓扑、FlashAttention-3、路由 GEMM override、流式工具调用、错误恢复和许可证；将模型卡声明与本地实验结果分栏。
+
+## 2026-09 Qwen3.8 架构与 Serving 验收
+
+1. 用零依赖 Python 实现 QSA 的 micro-block 评分、block-causal top-k、token 展开和 causal tail 保留；分别测试预算足够、不足以容纳 tail、query 位于完整 block 末尾和空输入的边界。
+2. 比较先 pooling 后 partial RoPE 与先 RoPE 后 pooling 的 toy 表示，记录位置相位抵消、block recall 和排序变化；明确 toy 结果不能当作 Flash-Next kernel 性能。
+3. 为 QSA 设计 dense distillation、sparse-only 和两阶段训练三组消融，固定 teacher、block size、top-k、tail、tokenizer 和 revision，报告长上下文召回、loss、indexer 成本和失败类型。
+4. 实现标准 residual、四分支无 gate、逐元素 read gate/branch scalar write gate 三种 toy 结构，记录激活范数、梯度代理、residual bytes、读写带宽和下游检索结果。
+5. 建立 N-gram table 账本，改变 slot 数、n-gram 命中率、host bandwidth、prefetch latency 和 out-of-domain PPL，同时与 RAG、KV cache 的存储/请求时机做对照。
+6. 实现 Muon/AdamW 参数分组审计，比较全 AdamW、按语义拆分、错误地对 fused QKV 直接正交化三种配置，检查 router overflow、loss spike、step time 和 checkpoint resume。
+7. 为 27B、A95B、Flash-Next、Max 建立接口对照表，分别记录榜单来源、模型卡、total/active 参数、模态、thinking、hosted/open 状态和待核验字段；不要把 effort 行计为新 checkpoint。
+
+## 2026-09 GLM-5.3-Flash 混合注意力与视觉闭环验收
+
+1. 根据固定 `config.json` 画出 45 层中 34 个 `linear_attention` 与 11 个 `deepseek_sparse_attention` 的路径，分别标记递归 state、显式 KV、indexer、top-k 和 causal tail；用 toy 输入验证候选池漏检与最终 top-k 漏检是两个错误来源。
+2. 实现 4 个 indexer key 的加权 pooling 和 block top-k，改变 pool size、block size、tail 规则与 `index_topk`，分别报告候选召回、最终 token 召回、排序成本和 buffer 字节；不要把 toy 数字写成 GLM 生产 kernel 性能。
+3. 实现标准 residual 与 Sinkhorn 双随机 residual mixing，比较深度增加时的行和、列和、激活范数代理和数值误差；说明 mHC 约束不等于范数恒等式或零开销稳定性证明。
+4. 构造 Encode–Prefill–Decode 的多模态请求 manifest，注入 image encode 超时、representation revision 不一致、取消、decode 重算、工具权限不足和视觉 diff 变差，要求系统拒绝错误 artifact 并保留 trace。
+5. 用相同 toy 任务对比“只编译通过”“只截图相似”“编译 + 行为测试 + 视觉 diff + artifact validator”四种完成门禁，计算误通过率；把模型 self-judgment 与宿主 verifier 分栏。

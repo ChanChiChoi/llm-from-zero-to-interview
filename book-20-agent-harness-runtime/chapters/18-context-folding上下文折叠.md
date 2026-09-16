@@ -261,8 +261,13 @@ item = {
 ```math
 E_{\mathrm{constraint}}
 =1-\frac{N_{\mathrm{constraints\ obeyed\ after\ folding}}
-             {\max(1,N_{\mathrm{constraints\ tested}})}
+             {N_{\mathrm{constraints\ tested}}},\qquad
+             N_{\mathrm{constraints\ tested}}>0
 ```
+
+只有存在被测试的约束时，`E_constraint` 才有定义；若 `N_constraints tested=0`，应报告
+`not_applicable`，不能把无约束样本填成 `0.0` 损失或 `1.0` 遵守率。折叠验收门禁必须
+显式拒绝 `None` 或记录跳过原因。
 
 对高风险任务，行为测试还要加入“摘要中明确写了不要做”的反例：模型收到一个看似合理的工具调用请求时，是否仍能拒绝；外部动作已经 `unknown` 时，是否先查询；workspace revision 变化时，是否避免覆盖。平均答案相似度很高，却在这些验收条件上失败，仍然说明折叠不合格。
 

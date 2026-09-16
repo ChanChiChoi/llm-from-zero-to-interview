@@ -96,8 +96,13 @@ checkpoint checksum
 ```math
 R_{\mathrm{resume}}
 =\frac{N_{\mathrm{tasks\ resumed\ without\ duplicate\ effects}}}
-{\max(1,N_{\mathrm{interrupted\ tasks}})}
+ {N_{\mathrm{interrupted\ tasks}}},\qquad
+ N_{\mathrm{interrupted\ tasks}}>0
 ```
+
+该指标只在确实注入或观测到中断任务时定义；若 `N_interrupted tasks=0`，应报告
+`not_applicable`，而不是用人为下限分母得到 `0.0` 或 `1.0`。聚合器和门禁必须
+显式处理无样本状态。
 
 此外还要记录 checkpoint 写入延迟、恢复时间、重复副作用率、状态丢失率、artifact 一致性和人工接管率。一个能从断点恢复但生成重复付款的系统不能算可靠。
 
@@ -261,8 +266,11 @@ G_{\mathrm{resume}}
 ```math
 D_{\mathrm{duplicate}}
 =\frac{N_{\mathrm{effects\ with\ duplicate\ business\ result}}
-       {\max(1,N_{\mathrm{external\ effects}})}
+       {N_{\mathrm{external\ effects}}},\qquad
+       N_{\mathrm{external\ effects}}>0
 ```
+
+没有外部副作用样本时，`D_duplicate` 应报告为 `not_applicable`，不能把空集合解释成“重复率为零”。
 
 恢复 SLO 可以允许一次安全的人工接管，却不能把重复扣款、越权写入或不可逆删除当作普通失败。这样评测才会把“能继续运行”和“能安全地继续运行”区分开。
 

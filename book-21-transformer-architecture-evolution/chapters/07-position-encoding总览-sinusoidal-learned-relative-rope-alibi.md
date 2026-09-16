@@ -914,7 +914,7 @@ RoPE 的每一对维度对应一个旋转频率。常见形式是：
 
 #### 7.22.1.1 Kimi K3：无显式 position embedding 的正确读法
 
-Kimi K3 的公开模型卡给出 `3 KDA + 1 Gated MLA` 的结构信号，并说明模型不使用显式 position embedding。这里不要把它改写成“完全没有位置信息”。更适合教学的抽象是：
+Kimi K3 的官方发布文章展示了 KDA 与 Gated MLA 的结构信号；本轮未取得可核验模型卡来确认 `3 KDA + 1 Gated MLA` 的层比例或“不使用显式 position embedding”等完整配置。这里不要把任何 NoPE 线索改写成“完全没有位置信息”。在配置得到核验前，更适合教学的抽象是：
 
 ```math
 s_t=F(s_{t-1},x_t;\alpha_t)

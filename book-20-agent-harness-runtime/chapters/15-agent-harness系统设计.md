@@ -875,6 +875,8 @@ m_i=(n_i,g_i,p_i,c_i,s_i,a_i,b_i,e_i,t_i,r_i,q_i,u_i,v_i,h_i)
 
 其中 `n_i` 是模块名，`g_i` 是模块组，例如 session、orchestrator、context、model、capability、permission、execution、sandbox、trace、replay、eval、api，`p_i` 表示模块是否存在，`c_i` 表示接口契约是否清楚，`s_i` 表示是否有状态机或生命周期，`a_i` 表示是否绑定权限，`b_i` 表示是否受上下文和输出预算控制，`e_i` 表示执行是否隔离，`t_i` 表示 trace 是否覆盖，`r_i` 表示 replay 是否就绪，`q_i` 表示 evaluation 是否接入，`u_i` 表示恢复能力，`v_i` 表示版本是否捕获，`h_i` 表示企业治理是否覆盖。
 
+下面的比率仅对非空定义域计算。若 `M_{\mathrm{present}}`、`M_{\mathrm{required}}` 或某个按模块组筛选出的集合为空，指标统一报告 `not_applicable`（demo 中为 `None`）；不以 epsilon、历史值或默认 `1.0/0.0` 代替缺失样本。上线门禁必须显式处理该状态。
+
 必需模块覆盖率：
 
 ```math
@@ -1025,13 +1027,23 @@ components = [
 
 
 def rate(values):
-    return round(sum(values) / len(values), 3) if values else 1.0
+    return round(sum(values) / len(values), 3) if values else None
+
+
+def ratio(numerator, denominator):
+    if denominator == 0:
+        return None
+    return round(numerator / denominator, 3)
+
+
+def at_least(value, minimum):
+    return value is not None and value >= minimum
 
 
 present_names = {component["name"] for component in components if component["present"]}
 missing_required = sorted(required_modules - present_names)
 metrics = {
-    "module_coverage": round(len(required_modules & present_names) / len(required_modules), 3),
+    "module_coverage": ratio(len(required_modules & present_names), len(required_modules)),
     "interface_contract": rate([component["contract"] for component in components if component["present"]]),
     "state_machine": rate([component["stateful"] for component in components if component["group"] in stateful_groups]),
     "permission_integration": rate([component["permission"] for component in components if component["group"] in risky_groups]),
@@ -1059,7 +1071,16 @@ thresholds = {
     "version_capture": 0.9,
     "enterprise_governance": 0.9,
 }
-failed_gates = [name for name, minimum in thresholds.items() if metrics[name] < minimum]
+failed_gates = [
+    name
+    for name, minimum in thresholds.items()
+    if not at_least(metrics[name], minimum)
+]
+not_applicable_metrics = [name for name, value in metrics.items() if value is None]
+
+assert rate([]) is None
+assert ratio(0, 0) is None
+assert not at_least(None, 0.9)
 
 root_causes = {}
 for component in components:
@@ -1093,6 +1114,7 @@ for component in components:
 
 print(f"missing_required={missing_required}")
 print(f"metrics={metrics}")
+print(f"not_applicable_metrics={not_applicable_metrics}")
 print(f"failed_gates={failed_gates}")
 print(f"root_causes={root_causes}")
 print(f"harness_system_gate_pass={not failed_gates}")
@@ -1103,6 +1125,7 @@ print(f"harness_system_gate_pass={not failed_gates}")
 ```text
 missing_required=[]
 metrics={'module_coverage': 1.0, 'interface_contract': 0.857, 'state_machine': 0.857, 'permission_integration': 0.75, 'context_control': 0.4, 'execution_isolation': 0.25, 'trace_coverage': 0.857, 'replay_readiness': 0.643, 'eval_readiness': 0.857, 'recovery_coverage': 0.786, 'version_capture': 0.714, 'enterprise_governance': 0.714}
+not_applicable_metrics=[]
 failed_gates=['interface_contract', 'state_machine', 'permission_integration', 'context_control', 'execution_isolation', 'trace_coverage', 'replay_readiness', 'eval_readiness', 'recovery_coverage', 'version_capture', 'enterprise_governance']
 root_causes={'api_server': ['eval_not_ready'], 'agent_orchestrator': ['state_machine_missing', 'replay_not_ready', 'recovery_missing', 'governance_missing'], 'context_builder': ['context_budget_uncontrolled'], 'model_adapter': ['replay_not_ready', 'version_not_captured'], 'capability_registry': ['interface_contract_missing', 'permission_not_bound', 'context_budget_uncontrolled', 'version_not_captured', 'governance_missing'], 'execution_engine': ['execution_isolation_missing', 'replay_not_ready', 'recovery_missing'], 'sandbox_manager': ['execution_isolation_missing', 'trace_missing', 'replay_not_ready', 'recovery_missing', 'version_not_captured'], 'replay_engine': ['replay_not_ready', 'version_not_captured'], 'eval_runner': ['interface_contract_missing', 'trace_missing', 'eval_not_ready', 'governance_missing'], 'policy_auth': ['governance_missing'], 'mcp_a2a_gateway': ['module_missing', 'permission_not_bound', 'context_budget_uncontrolled', 'execution_isolation_missing']}
 harness_system_gate_pass=False

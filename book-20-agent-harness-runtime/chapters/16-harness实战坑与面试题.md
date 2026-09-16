@@ -572,6 +572,8 @@ h_i=(g_i,c_i,t_i,p_i,e_i,s_i,o_i,r_i,v_i,u_i)
 
 其中 $g_i$ 是用户目标和验收标准，$c_i$ 是上下文与预算，$t_i$ 是工具和协议能力，$p_i$ 是权限决策，$e_i$ 是文件 / 终端 / sandbox 执行，$s_i$ 是 session 状态和 diff，$o_i$ 是 trace / log / artifact，$r_i$ 是 replay 条件，$v_i$ 是 eval / 版本条件，$u_i$ 是用户影响和事故分级。
 
+以下指标只在有事故样本时定义。若 `N=0`，聚合结果为 `not_applicable`（demo 中用 `None` 表示），不使用 epsilon、历史值或默认满分/零分伪造安全、稳定或覆盖率；`F_{\mathrm{req}}` 也必须是非空的必需 trace 字段集合。
+
 常用排查指标可以写成：
 
 ```math
@@ -970,7 +972,11 @@ required_trace = {"goal", "context", "tool", "permission", "diff", "trace", "err
 
 
 def avg(values):
-    return round(sum(values) / len(values), 3)
+    return round(sum(values) / len(values), 3) if values else None
+
+
+def at_least(value, threshold):
+    return value is not None and value >= threshold
 
 
 def trace_score(case):
@@ -1024,12 +1030,21 @@ thresholds = {
     "environment_parity": 0.90,
 }
 
-failed_gates = [name for name, limit in thresholds.items() if metrics[name] < limit]
+failed_gates = [
+    name
+    for name, limit in thresholds.items()
+    if not at_least(metrics[name], limit)
+]
+not_applicable_metrics = [name for name, value in metrics.items() if value is None]
+
+assert avg([]) is None
+assert not at_least(None, 0.9)
 root_causes = {}
 for case in incidents:
     root_causes.setdefault(case["root"], []).append(case["id"])
 
 print(f"metrics={metrics}")
+print(f"not_applicable_metrics={not_applicable_metrics}")
 print(f"failed_gates={failed_gates}")
 print(f"root_causes={root_causes}")
 print(f"harness_pitfall_gate_pass={not failed_gates}")
@@ -1039,6 +1054,7 @@ print(f"harness_pitfall_gate_pass={not failed_gates}")
 
 ```text
 metrics={'triage_coverage': 0.9, 'permission_safety': 0.8, 'context_budget_pass': 0.8, 'edit_safety': 0.9, 'command_safety': 0.8, 'prompt_injection_boundary': 0.8, 'trace_completeness': 0.5, 'replay_readiness': 0.3, 'eval_determinism': 0.4, 'cost_loop_control': 0.6, 'environment_parity': 0.7}
+not_applicable_metrics=[]
 failed_gates=['triage_coverage', 'permission_safety', 'context_budget_pass', 'edit_safety', 'command_safety', 'prompt_injection_boundary', 'trace_completeness', 'replay_readiness', 'eval_determinism', 'cost_loop_control', 'environment_parity']
 root_causes={'permission_overreach': ['permission_overreach'], 'context_overload': ['context_overload'], 'edit_overwrite': ['user_edit_overwrite'], 'shell_hang': ['shell_hang'], 'prompt_injection_boundary': ['prompt_injection_from_issue'], 'trace_missing': ['trace_missing'], 'eval_flakiness': ['eval_flaky'], 'doom_loop': ['doom_loop'], 'mcp_tool_overload': ['mcp_tool_overload'], 'environment_drift': ['env_drift']}
 harness_pitfall_gate_pass=False

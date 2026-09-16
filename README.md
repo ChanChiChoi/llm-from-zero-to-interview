@@ -164,6 +164,10 @@
 
 如果目标是面试，建议每周至少做一次 mock interview，并用 [`PROGRESS.md`](PROGRESS.md) 或自己的笔记记录复盘。
 
+## 统一写作规范
+
+今后所有章节写作、扩写、题库、练习和项目路线更新必须遵循 [`WRITING_SPEC.md`](WRITING_SPEC.md)。`WRITING_PLAN.md` 与 `写作注意事项.md` 已标记为废弃。
+
 ## 写作原则
 
 本项目会尽量保持以下风格：
@@ -195,3 +199,27 @@
 本项目内容免费开放，欢迎学习、阅读、引用和分享。
 
 如果后续需要用于更正式的开源分发、转载或商业场景，建议补充标准开源协议文件，例如 `LICENSE`。
+
+## 2026-09 新模型专题更新
+
+本轮已围绕 Artificial Analysis、DeepSWE 与官方资料新增一批 Frontier Model 研究和正式章节：第二十一册第 75-85 章覆盖 Attention Residuals、Kimi Delta Attention、DeepSeek V4 的 CSA/HCA/mHC、Mistral Small 4、Step 3.5 Flash、V4.1-Flash、K2 Horizon、Qwen3.8、GLM-5.3-Flash 和 V4 Flash Vision 的多模态 API/路由账本；第六册第 18 章、第十六册第 20 章和第十七册第 15 章承接 GPT-6、GLM-5.3 与 Kimi K3 的运行时专题。相关模型、论文、模型卡、代码示例、面试题、练习、术语、知识图谱和项目路线已同步，未核验的模型机制继续标注为待核验。
+
+Claude Opus 5 的官方模型目录字段也已加入研究索引：当前确认 `claude-opus-5`、1M context、128K 最大输出、adaptive thinking、平台和价格字段；参数量、训练架构、完整推理机制与独立 benchmark 复现继续保留为待核验项。
+
+Claude Fable 5.1 也已纳入候选盘点：官方页面确认 `claude-fable-5-1`、1M context、128K 输出、adaptive always-on、preserved thinking 和若干 beta 状态协议；长任务优势属于产品页自述，参数、架构、训练方法和独立复现仍标为待核验。
+
+Claude Sonnet 5 已从候选名称升级为官方模型目录字段核验：当前确认 `claude-sonnet-5`、2026-06-30 发布字段、1M context、128K 普通最大输出、300K batch 最大输出、Adaptive thinking、默认 high effort、Fast latency 字段、平台、价格和 2026-01 知识/训练截止字段；参数量、训练架构、完整推理机制和独立 benchmark 复现仍待核验。
+
+同一 Anthropic 官方目录快照还补充 Claude Haiku 4.5：当前确认 `claude-haiku-4-5-20251001`、2025-10-15 发布字段、200K context、64K 最大输出、extended thinking、`fastest` 延迟字段、平台、价格和 cutoff 字段；它未出现在本轮 Artificial Analysis 采集切片中，因此不伪造榜单日期。参数量、训练架构、system card 细节和独立 benchmark 复现仍待核验。
+
+DeepSWE v1.1 评测快照也已归档：页面标注 113 个任务、91 个仓库、5 种语言和统一 `mini-swe-agent` harness，主表记录 Pass@1、区间、平均成本、输出 token 与 Agent steps。快照中的每一行都是模型 revision、effort、工具、verifier、超时/重试和上下文策略的组合结果，不能直接当作基础模型排名；详见 [`deepswe-snapshot-notes.md`](research/model-update-2026-09/deepswe-snapshot-notes.md) 和 [`source-index.md`](research/model-update-2026-09/source-index.md)。
+
+DeepSeek V4.1-Flash 已完成一轮官方资料核验：第二十一册第 81 章讲解 CED、SWA Bounded Replay、CSA2、Hierarchical Sparse Indexer、FP4 main KV、MoE/Engram/mHC/DSpark、原生多模态和 numeric reasoning effort；第四册同步百科条目。模型卡 revision、官方发布页哈希和待核验边界见 [`deepseek-v4.1-flash-source-notes.md`](research/model-update-2026-09/deepseek-v4.1-flash-source-notes.md)。
+
+2026-09-14 的 Artificial Analysis 首页已单独保存为实时快照：约 702 个配置条目、673 个唯一名称、最新日期字段为 2026-09-11，新增 13 个结构 slug/别名。Agnes、Ling、K2 Horizon 3.7B 和 `mbzuai` 仍只作为榜单发现；K2 36B/A4B 后续已由官方资料核验。所有第三方日期、参数或指数都不直接写成官方模型事实；快照见 [`artificial-analysis-2026-09-14-snapshot.md`](research/model-update-2026-09/artificial-analysis-2026-09-14-snapshot.md)。
+
+K2 Horizon MoVA 36B/A4B 已作为当前锚点完成一轮官方资料核验：第二十一册第 82 章讲解 36B/4B active proxy、前 3 层 dense、后 45 层 MoVA + MoE、GQA、路由语义、512K 训练/Serving 账本；同章还说明 K2-Horizon-7B-Uno 是冻结 K2 7B 的 LoRA diffusion adapter 与 `Psi-Spec` 关联技术。K2 候选来自 Artificial Analysis，官方模型卡、配置、实现和部署文档只用于核验；Uno 不作为排行榜新模型。相关来源见 [`k2-horizon-source-notes.md`](research/model-update-2026-09/k2-horizon-source-notes.md)。
+
+后续新模型候选发现入口固定为 Artificial Analysis 与 DataCurve DeepSWE 两个排行榜；其他官方页面、论文、模型卡和代码仓库只能核验已发现候选或扩展锚点周边技术，不能单独把新名称加入模型候选表。
+
+Qwen3.8 已完成一轮内容专题闭环：第二十一册第 83 章与纵向资料同步覆盖 27B、2.4T-A95B、Flash-Next 和基于 A95B 的 Max hosted 边界，以及 GDN/Gated Attention、QSA、Gated Residual、N-gram Embedding、Muon/AdamW 和 thinking protocol。Flash-Next 报告中的 benchmark、loss、速度和稳定性数字仍标为发布方自报；完整生产 kernel、线上 acceptance rate、目标硬件 profiling 和独立复现继续作为待核验项。

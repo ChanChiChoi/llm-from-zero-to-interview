@@ -478,6 +478,8 @@ a_i=(n_i,g_i,d_i,p_i,c_i,r_i)
 
 其中 `n_i` 是组件名，`g_i` 是组件分组，`d_i` 表示是否有公开文档或可观察产品行为支撑，`p_i` 表示该组件是否出现在本次架构分析中，`c_i` 表示是否有明确治理机制，`r_i` 表示是否属于高风险能力面。
 
+下面的覆盖率都只在对应观测集合非空时定义。若 `N`、`|\mathcal{R}|`、`|\mathcal{A}|` 等分母为零，指标记为 `not_applicable`（demo 中用 `None` 表示），不能用 epsilon、上一轮分数或默认满分/零分替代；高风险集合为空时，`C_{\mathrm{risk}}` 同样是 `not_applicable`。
+
 公开证据覆盖率：
 
 ```math
@@ -546,6 +548,8 @@ C_{\mathrm{eval}}=\frac{\sum_{i\in \mathcal{V}} p_i c_i}{|\mathcal{V}|}
 C_{\mathrm{risk}}=\frac{\sum_{i:r_i=1} c_i}{\sum_{i=1}^{N} r_i}
 ```
 
+上式要求 `\sum_i r_i>0`；否则按上述约定报告 `not_applicable`，而不是把空的高风险面当作治理率 `1.0`。
+
 最后可以把这些指标组成 Claude Code 类架构分析验收条件：
 
 ```math
@@ -605,8 +609,12 @@ components = [
 
 def ratio(numerator, denominator):
     if denominator == 0:
-        return 1.0
+        return None
     return round(numerator / denominator, 3)
+
+
+def at_least(value, threshold):
+    return value is not None and value >= threshold
 
 
 def group_items(group):
@@ -667,9 +675,18 @@ thresholds = {
     "eval_readiness": 0.8,
     "high_risk_governance": 1.0,
 }
-failed_gates = [name for name, threshold in thresholds.items() if metrics[name] < threshold]
+failed_gates = [
+    name
+    for name, threshold in thresholds.items()
+    if not at_least(metrics[name], threshold)
+]
+not_applicable_metrics = [name for name, value in metrics.items() if value is None]
+
+assert ratio(0, 0) is None
+assert not at_least(None, 0.8)
 
 print(f"metrics={metrics}")
+print(f"not_applicable_metrics={not_applicable_metrics}")
 print(f"root_causes={dict(root_causes)}")
 print(f"failed_gates={failed_gates}")
 print(f"claude_code_architecture_gate_pass={not failed_gates}")
@@ -679,6 +696,7 @@ print(f"claude_code_architecture_gate_pass={not failed_gates}")
 
 ```text
 metrics={'public_evidence': 0.97, 'required_module_coverage': 0.75, 'access_governance': 0.4, 'core_loop_governance': 0.625, 'permission_control': 0.4, 'state_recovery': 0.75, 'extension_governance': 0.0, 'observability': 0.5, 'eval_readiness': 0.0, 'high_risk_governance': 0.0}
+not_applicable_metrics=[]
 root_causes={'terminal': ['required_component_not_governed', 'high_risk_surface_ungoverned'], 'workspace_files': ['required_component_not_governed', 'high_risk_surface_ungoverned'], 'project_memory': ['required_component_not_governed', 'high_risk_surface_ungoverned'], 'context_builder': ['required_component_not_governed', 'high_risk_surface_ungoverned'], 'execution_engine': ['required_component_not_governed', 'high_risk_surface_ungoverned'], 'response_renderer': ['required_component_not_governed'], 'tool_allowlist': ['required_component_not_governed'], 'sandbox': ['required_component_missing', 'high_risk_surface_ungoverned'], 'network_control': ['required_component_not_governed', 'high_risk_surface_ungoverned'], 'auto_memory_scope': ['required_component_missing', 'high_risk_surface_ungoverned'], 'hooks': ['required_component_not_governed', 'high_risk_surface_ungoverned'], 'mcp_allowlist': ['required_component_missing'], 'skills_extensions': ['required_component_not_governed', 'high_risk_surface_ungoverned'], 'trace_logger': ['required_component_missing'], 'trace_export': ['required_component_missing'], 'regression_cases': ['required_component_missing'], 'safety_metrics': ['required_component_missing'], 'cost_metrics': ['required_component_missing'], 'internal_planner_kernel': ['undocumented_architecture_claim']}
 failed_gates=['public_evidence', 'required_module_coverage', 'access_governance', 'core_loop_governance', 'permission_control', 'state_recovery', 'extension_governance', 'observability', 'eval_readiness', 'high_risk_governance']
 claude_code_architecture_gate_pass=False

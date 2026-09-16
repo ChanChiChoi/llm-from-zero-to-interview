@@ -179,7 +179,7 @@
 
 ### 已落地的知识主线
 
-1. **架构与位置**：Kimi K3 的 KDA + Gated MLA、无显式 position embedding 的正确解释；Qwen3.5/3.6 的 Gated DeltaNet + Gated Attention；Gemma 4 的 local/global attention 和 p-RoPE；North Mini Code 的 local RoPE/global NoPE；DeepSeek-V4 的 CSA/HCA；total/active parameters 与显式 KV、latent cache、递归 state 的预算公式。
+1. **架构与位置**：Kimi K3 发布文章披露的 KDA + Gated MLA，以及“无显式 position embedding”线索的正确证据边界（层比例与 NoPE 配置待核验）；Qwen3.5/3.6 的 Gated DeltaNet + Gated Attention；Gemma 4 的 local/global attention 和 p-RoPE；North Mini Code 的 local RoPE/global NoPE；DeepSeek-V4 的 CSA/HCA；total/active parameters 与显式 KV、latent cache、递归 state 的预算公式。
 2. **后训练与 reasoning**：领域专家 SFT/RL、RLVR、on-policy distillation、reasoning effort、thinking levels、adaptive thinking、preserve thinking、interleaved thinking，以及不同厂商字段不能直接互换的协议边界。
 3. **Agent 与 harness**：Qwen-AgentWorld 作为模型+环境体系，Kimi Agent Swarm 的并行协作成本，长周期任务的 persistent workspace、checkpoint、context folding、harness-aware evaluation，以及 Responses API/OpenAI-compatible API 的兼容边界。
 4. **Serving**：MTP、EAGLE/EAGLE3、NEXTN、DSpark 的 draft 来源分层；acceptance length 和 speculative speedup 公式；FP4/MXFP4/NVFP4、FP8 KV、native INT4 与 custom encoding/chat template 门禁。
@@ -242,9 +242,9 @@
 
 | 新增知识点 | 独立章节 | 主要证据层级 |
 |---|---|---|
-| KDA / Kimi Delta Attention | [第二十一册第61章](book-21-transformer-architecture-evolution/chapters/61-kda递归注意力.md) | Kimi K3 官方模型卡/技术报告 |
+| KDA / Kimi Delta Attention | [第二十一册第61章](book-21-transformer-architecture-evolution/chapters/61-kda递归注意力.md) | Kimi K3 官方发布文章；完整模型卡/技术报告待核验 |
 | Gated DeltaNet | [第二十一册第62章](book-21-transformer-architecture-evolution/chapters/62-gated-deltanet门控线性注意力.md) | Qwen3.5/3.6 官方模型卡 |
-| Gated MLA | [第二十一册第63章](book-21-transformer-architecture-evolution/chapters/63-gated-mla门控潜变量注意力.md) | Kimi K3 官方模型卡 |
+| Gated MLA | [第二十一册第63章](book-21-transformer-architecture-evolution/chapters/63-gated-mla门控潜变量注意力.md) | Kimi K3 官方发布文章；完整模型卡待核验 |
 | NoPE 与隐式顺序 | [第二十一册第64章](book-21-transformer-architecture-evolution/chapters/64-nope与隐式顺序.md) | Kimi/North Mini Code 模型卡 |
 | Hybrid Attention | [第二十一册第65章](book-21-transformer-architecture-evolution/chapters/65-hybrid-attention局部全局与递归状态.md) | Gemma/Qwen/DeepSeek 模型卡 |
 | Total Parameters 与 Active Parameters | [第二十一册第66章](book-21-transformer-architecture-evolution/chapters/66-total-parameters与active-parameters.md) | 官方模型卡 |

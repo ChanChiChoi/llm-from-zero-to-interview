@@ -298,3 +298,161 @@ Practitioner Playbook -> Problem Boundary -> Evidence Collection -> Minimal Repr
 ### 研究链
 
 Paper Reading -> Hypothesis -> Baseline -> Experiment -> Ablation -> Error Analysis -> Reproduction Report -> New Research Idea
+
+### 2026-09 新模型架构分支
+
+Long Context -> KV Cache -> 压缩表示 -> CSA/HCA -> 异构 KV Cache -> Serving Engine
+
+Sequence Modeling -> Linear Attention -> Delta Rule -> Gated DeltaNet -> KDA -> KDA/MLA Hybrid
+
+Residual Stream -> Hyper-Connections -> 双随机矩阵 -> Sinkhorn 投影 -> mHC -> 深层信号稳定性
+
+Transformer Depth -> 标准残差 -> Attention Residuals -> Block AttnRes -> 深度历史选择 -> Pipeline/Inference 优化
+
+Post-Training -> 领域专家培养 -> GRPO -> on-policy distillation -> 统一模型能力
+
+每条边都要区分“公开模型/论文披露”与“本项目教学抽象”；不能由排行榜名称反推内部机制。
+
+### GPT-6 Astra 运行时预算分支
+
+GPT-6 Astra -> Context Window -> Maximum Input / Maximum Output -> Reasoning Effort -> Tool Host -> Sandbox Policy -> Permission Trace -> Token Cost Threshold -> Unit Success Cost -> Long-Context Evaluation
+
+该分支描述官方模型页已公开的接口与容量关系；模型架构、参数规模和训练方法仍属于待核验信息。
+
+GLM-5.3 -> GLM-5.2 Base -> Post-Training -> Executable Environment -> Judge Agent -> Oracle Check -> No-op Check -> Unsolved-state Check -> Reward Shortcut Audit -> Context Compaction (SAO 待核验) -> Long-Task Evaluation
+
+该分支只连接官方文档明确描述的版本关系和流程概念；SAO 的具体定义与内部实现仍未核验。
+
+Kimi K3 -> 发布文章披露 -> KDA / AttnRes / Stable LatentMoE -> 论文机制解释 -> State Manifest -> Harness Revision -> Tool/Permission Trace -> Fallback Audit -> Harness-Aware Evaluation
+
+该分支把模型发布信号、独立论文机制和 Agent 运行时证据分开；K3 完整配置、权重和报告状态仍需独立核验。
+
+### Mistral Small 4 与 Step 3.5 Flash
+
+Mistral Small 4 -> 稀疏 MoE -> total/active parameter ledger -> reasoning_effort -> EAGLE draft head -> NVFP4 -> speculative serving audit
+
+Step 3.5 Flash -> 稀疏 MoE/top-8 routing -> 3:1 SWA/full attention -> MTP-3 -> acceptance length -> Context Manager -> harness-aware long-task evaluation
+
+模型卡公开的结构字段、推测解码机制和 Agent harness 策略分别记录；吞吐、接受率、完整训练配方和后端支持仍需绑定版本与实验核验。
+
+### Grok 4.6
+
+Grok 4.6 -> 500K Context -> reasoning effort (`low/medium/high/xhigh`) -> structured output/function calling -> Web Search/X Search -> Tool Host/Sandbox -> Harness-aware evaluation
+
+上述链路只连接 xAI 官方模型页公开的接口和运行时概念；参数量、训练架构、许可证、完整报告与首次发布日期仍待核验。
+
+### Claude Opus 5
+
+Claude Opus 5 -> 1M Context -> 128K Max Output -> Adaptive Thinking -> Default High Effort -> Claude API/Bedrock/Vertex/Foundry -> Tool Host/Sandbox -> Harness-aware evaluation
+
+上述链路只连接 Anthropic 官方模型目录公开的接口、平台和运行时字段；参数量、训练架构、训练配方、后训练算法和独立 benchmark 复现仍待核验。
+
+### Claude Fable 5.1
+
+Claude Fable 5.1 -> 1M Context -> Adaptive Thinking (always on) -> Default High Effort -> Preserved Thinking -> Per-message Effort (beta) -> Tool Progress Updates (beta) -> Tool Host/Sandbox -> Long-horizon Harness Evaluation
+
+上述链路连接 Anthropic 专属模型页公开的接口、状态协议和产品定位；参数量、训练架构、训练配方、完整推理机制和独立 benchmark 复现仍待核验。
+
+### Claude Sonnet 5
+
+Claude Sonnet 5 -> 1M Context -> 128K Max Output -> 300K Batch Max Output -> Adaptive Thinking -> Default High Effort -> Fast Latency Field -> Multi-platform API -> Tool Host/Sandbox -> Fixed-harness Evaluation
+
+Claude Haiku 4.5 -> 200K Context -> 64K Max Output -> Extended Thinking -> Fastest Latency Field -> Low-cost Multi-platform API -> Tool Host/Sandbox -> Latency/Quality/Unit-cost Evaluation
+
+DeepSeek-R1-0528 -> Official Release Page -> JSON Output/Function Calling -> Open Weights Entry -> Thinking Mode/API Compatibility -> Revision/License Audit -> Harness-aware Evaluation
+
+上述链路只连接 Anthropic 官方模型目录公开的接口字段；参数量、训练架构、训练配方和独立 benchmark 复现仍待核验。
+
+### DeepSWE v1.1
+
+DeepSWE -> 113 Tasks / 91 Repositories / 5 Languages -> mini-SWE-agent -> Tool Host -> Verifier -> Timeout/Retry/Context Policy -> Pass@1 + Interval -> Cost / Output Tokens / Agent Steps -> Harness-Aware Evaluation -> Artifact and Failure Audit
+
+上述链路描述公开页面快照中的评测组成，不把任何一行分数当作基础模型能力。模型 revision、供应商、工具 schema、硬件、重试和 verifier 版本仍需绑定并独立复现；原始快照见 `research/model-update-2026-09/deepswe-snapshot-notes.md`。
+
+### DeepSeek V4.1-Flash
+
+DeepSeek V4.1-Flash -> 552B Backbone -> CED (20-layer Causal Encoder + 20-layer Decoder) -> 8B Prefill / 16B Decode Active Proxy -> Global KV Projection
+
+DeepSeek V4.1-Flash -> CSA2 -> Full/Reindex/Reuse -> Shared Main KV + Indexer K -> Hierarchical Sparse Indexer -> Candidate Pool Recall -> Top-K Recall -> Global KV 890 Bytes/Token
+
+DeepSeek V4.1-Flash -> FP4 Main KV (E2M1 + E4M3 Scale) -> Quantization Error -> Long-Context Retrieval Evaluation
+
+DeepSeek V4.1-Flash -> SWA Bounded Replay -> Recent Window Replay -> Replay Compute -> Cache Revision/Position/Boundary Check -> Restore Gate
+
+DeepSeek V4.1-Flash -> 384 Routed Experts + 1 Shared Expert -> 6 Routed Experts/Token -> Dispatch/All-to-All -> Load Balance/Latency
+
+DeepSeek V4.1-Flash -> Engram Conditional Memory -> Token Lookup -> Conditional Model Memory -> Ablation/Hit-Miss Audit
+
+DeepSeek V4.1-Flash -> Single-Pass mHC -> Residual Stream Mixing -> Mega-mHC Kernel -> Deep Signal Stability
+
+DeepSeek V4.1-Flash -> DSpark -> Semi-autoregressive Draft -> Confidence-Scheduled Verification -> Acceptance Length -> Effective Tokens/Target Call -> Speculative Serving Audit
+
+DeepSeek V4.1-Flash -> DeepSeek-ViT -> 2D-RoPE + 3x3 Pixel-Unshuffle -> MLP Projector -> Joint Vision/Text Tokens -> Multimodal Prompt/Permission Audit
+
+DeepSeek V4.1-Flash -> 45T Multimodal Pretraining Tokens -> 64K Sparse Attention Training -> 34T Context Extension Data -> 1M Context Evaluation
+
+DeepSeek V4.1-Flash -> SFT -> RL -> On-Policy Distillation -> Agent Task/Environment/Rollout Data Pipeline -> Verifier/Harness Evaluation
+
+DeepSeek V4.1-Flash -> Numeric Reasoning Effort (1-100) -> Token/Latency/Quality Budget -> Tool Calls/Timeout/Unit Success Cost
+
+上述链路使用模型卡、固定 `config.json`、encoding README、官方 API 发布页和已逐页读取的技术报告支持的字段；报告补充的具体 kernel 名称、训练/部署设置和评测边界仍是发布方自报，完整 kernel source、线上接受率和独立 profiling 仍待核验。Agent benchmark 必须连接 model revision、effort、harness、工具、环境、verifier、timeout/retry 和 context policy，不能把组合结果归因给基础模型。
+
+### K2 Horizon MoVA 与 Uno
+
+Artificial Analysis -> K2 Horizon MoVA 36B/A4B -> IFM official model card -> Fixed Revision `de2d2efb32ed7639b7140bccbefe131a0063a982` -> 36B Total / 4B Active Proxy -> 48 Layers -> Dense First 3 / Sparse Last 45
+
+K2 Horizon -> GQA (32Q/8KV) -> 64 MoVA Value Experts -> Top-4 Value Routing -> Attention -> 100 Routed FFN Experts -> Top-8 + 1 Shared Expert -> Dual Dispatch/Load Balance/Latency
+
+K2 Horizon -> 524,288 Context -> 8K/32K/128K/512K Staged Training -> BF16 KV/Weights -> Long-Context Prefill -> TTFT/TPOT/Memory Evaluation
+
+K2 Horizon -> Sigmoid Router -> Selection-only Bias -> Raw-score Normalization -> Scaling 2.5 -> Softplus Attention Gate -> Checkpoint Semantic Regression
+
+K2 Horizon 0.9B Card -> Domain Expert Merge -> MOPD Disclosure -> On-policy Distillation -> Merge Interference Audit; this edge cannot be copied to 36B MoVA Training Recipe
+
+K2 Horizon 7B -> Uno Adapter -> Frozen AR Base + LoRA Diffusion Path -> Parallel Draft -> `Psi-Spec` AR Rejection Verification -> Acceptance Length/Target Calls -> Speculative Serving Audit
+
+该分支中 K2 36B/A4B 是两个排行榜候选链路中的 Artificial Analysis 发现并经官方资料核验的锚点；DataCurve DeepSWE 本地快照未检出 K2。Uno 是沿官方资料追踪到的关联 adapter/论文技术，不是新的排行榜候选。完整训练报告、接受率、kernel 性能和目标硬件 profiling 仍待核验。
+
+### Qwen3.8
+
+Artificial Analysis -> Qwen3.8 27B / 2.4T-A95B / Flash-Next / Max -> Qwen official model cards and Qwen Cloud -> hosted/open checkpoint boundary
+
+Qwen3.8 27B -> Dense 27B -> 64 Layers -> 3 GDN + 1 Gated Attention -> Native Vision-Language -> Request-level Thinking Control
+
+Qwen3.8 2.4T-A95B -> 2.4T Total / 95B Active Proxy -> 92 Layers -> 512 Experts -> 10 Routed + 1 Shared -> Text-only -> Forced Thinking
+
+Qwen3.8 Flash-Next -> 125B Main / 6B Active Proxy -> GDN + QSA -> 4-branch Gated Residual -> 51B N-gram Table -> 4B MTP
+
+GDN -> Gated Forgetting -> Delta Correction -> Fixed-size Recurrent State -> Long-prefix Cost Reduction
+
+QSA -> Micro-block Pooling -> Partial RoPE -> Block-causal Indexer -> Top-k Complete Blocks -> Token Expansion + Causal Tail -> Sparse Explicit Attention
+
+QSA -> Dense Teacher Attention -> Block Max Pooling + KL Distillation -> Sparse Training -> Backbone/Indexer Adaptation -> Candidate Recall / Long-context Evaluation
+
+Gated Residual -> Per-branch RMSNorm -> Elementwise Read Gate -> Branch-scalar Write Gate -> Four Residual Paths -> Reduced Branch Mixing/Memory Traffic
+
+N-gram Embedding -> Local Token Address -> 20M Slots / 51B Parameters -> Host-memory Prefetch -> Random Read/Bandwidth/Hit-rate Trade-off; this is neither RAG nor KV cache
+
+Muon + AdamW/Adam -> Semantic Parameter Groups -> Per-matrix Newton-Schulz vs Embedding/Router/Table Updates -> Fused-parameter Split -> Distributed Optimizer/Kernel Constraints
+
+Qwen3.8 -> enable_thinking / reasoning_effort / preserve_thinking -> Request Budget and Context Protocol -> Agent Quality/Latency/Unit-cost Evaluation
+
+Flash-Next Report -> Self-reported Loss/Benchmark/7.6x Prefill/4.9x Decode -> Fixed Report Conditions -> Independent Kernel, Hardware Profiling and Acceptance-rate Verification Pending
+
+该分支的模型候选来自两个排行榜，官方模型卡、Flash-Next 报告和仓库只用于核验与扩展；Qwen3.8-Max 是基于 A95B 的 hosted version，不作为独立 open checkpoint。
+
+### GLM-5.3-Flash
+
+Artificial Analysis/DataCurve -> `glm-5-3-flash` max -> Z.ai official docs/blog -> fixed revision model card/config -> 320B total / 18B activated -> 45 layers -> 34 linear + 11 sparse attention
+
+Hybrid linear-sparse attention -> recurrent state + explicit sparse KV -> Indexer -> 4-key weighted IndexPool -> candidate top-k -> causal retrieval/evidence recall
+
+GLM-5.3-Flash -> 288 routed experts -> top-8 + 1 shared expert -> token-expert dispatch -> all-to-all/load balance -> active/total/communication ledger
+
+GLM-5.3-Flash -> mHC -> widened residual flow -> Sinkhorn projection -> doubly stochastic constraint -> deep-signal stability audit
+
+GLM-5.3-Flash -> visual input -> Encode -> representation transfer -> Prefill -> KV/state metadata -> Decode -> tool stream -> Render/Observe -> Verify -> Refine -> artifact gate
+
+Tool stream -> host parser -> schema/policy/permission check -> executor -> timeout/cancel/retry -> tool result -> model continuation; model output is not execution authority
+
+该分支的模型锚点来自两个排行榜；Z.ai 的架构、视觉 workflow、serving 组件和 speedup 是官方资料/发布方口径，不能由配置字段推导完整 kernel、训练 recipe、真实 state bytes、硬件 profiling 或独立 benchmark。DataCurve 的 `Pass@1` 仍是 `mini-swe-agent` 组合系统结果。

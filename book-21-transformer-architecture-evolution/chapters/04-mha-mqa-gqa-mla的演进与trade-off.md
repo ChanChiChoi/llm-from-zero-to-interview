@@ -589,7 +589,7 @@ M_{\mathrm{state}}\approx BL_r d_k d_v b
 
 | 模型或系列 | 公开结构信号 | 对本章的启发 | 证据边界 |
 |---|---|---|---|
-| Kimi K3 | `3 KDA + 1 Gated MLA`，约 `2.8T total / 104B active` | 递归状态与 latent attention 可以组合，不能再用“KV head 数”解释全部 cache | 官方模型卡；实现细节以模型卡为准 |
+| Kimi K3 | 官方发布文章提到 KDA、Gated MLA 与约 `2.8T` 规模；`3:1` 层比例和 `104B active` 待核验 | 递归状态与 latent attention 可以组合，不能再用“KV head 数”解释全部 cache | Kimi 官方发布文章；完整配置待核验 |
 | DeepSeek-V4-Pro / Flash | CSA 与 HCA 混合注意力，约 `1.6T / 49B` 和 `284B / 13B` | 长上下文优化同时涉及注意力模式和 active compute | 官方模型卡；参数为模型卡披露 |
 | Qwen3.5 / Qwen3.6 | Gated DeltaNet 与 Gated Attention 组合 | 线性/递归层和显式 attention 可以按层混合 | 官方模型卡；不要把它简化成纯 linear attention |
 | Gemma 4 | local sliding-window attention + global attention，并使用 p-RoPE 等位置机制 | 局部层降低 pair 数，全局层保留远距离路由，属于 pattern 级折中 | 官方 model card |

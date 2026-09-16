@@ -627,6 +627,8 @@ o_i=(n_i,g_i,d_i,p_i,c_i,s_i,r_i)
 
 其中 `n_i` 是能力名，`g_i` 是分组，`d_i` 表示是否有官方文档或仓库证据，`p_i` 表示本次架构分析是否覆盖，`c_i` 表示是否有治理机制，`s_i` 表示是否有可恢复或可观测状态，`r_i` 表示是否属于高风险能力面。
 
+以下覆盖率的定义域约定保持一致：对应集合非空时才计算；当 `N`、`|\mathcal{R}|`、`|\mathcal{C}|` 或其他分母为零时，指标报告为 `not_applicable`（demo 中为 `None`）。不得用 epsilon、历史值或默认 `1.0/0.0` 填补空样本；高风险能力集合为空时，风险治理率也不适用。
+
 公开证据覆盖率：
 
 ```math
@@ -692,6 +694,8 @@ C_{\mathrm{recover}}=\frac{\sum_{i\in \mathcal{S}} p_i s_i}{|\mathcal{S}|}
 ```math
 C_{\mathrm{risk}}=\frac{\sum_{i:r_i=1} c_i}{\sum_{i=1}^{N} r_i}
 ```
+
+上式仅在 `\sum_i r_i>0` 时成立；没有高风险能力样本时应报告 `not_applicable`，而不是把空风险面解释为全部治理通过。
 
 评估准备度：
 
@@ -760,8 +764,12 @@ capabilities = [
 
 def ratio(numerator, denominator):
     if denominator == 0:
-        return 1.0
+        return None
     return round(numerator / denominator, 3)
+
+
+def at_least(value, threshold):
+    return value is not None and value >= threshold
 
 
 def group_items(group):
@@ -830,9 +838,18 @@ thresholds = {
     "eval_readiness": 0.8,
     "high_risk_governance": 1.0,
 }
-failed_gates = [name for name, threshold in thresholds.items() if metrics[name] < threshold]
+failed_gates = [
+    name
+    for name, threshold in thresholds.items()
+    if not at_least(metrics[name], threshold)
+]
+not_applicable_metrics = [name for name, value in metrics.items() if value is None]
+
+assert ratio(0, 0) is None
+assert not at_least(None, 0.8)
 
 print(f"metrics={metrics}")
+print(f"not_applicable_metrics={not_applicable_metrics}")
 print(f"root_causes={dict(root_causes)}")
 print(f"failed_gates={failed_gates}")
 print(f"opencode_architecture_gate_pass={not failed_gates}")
@@ -842,6 +859,7 @@ print(f"opencode_architecture_gate_pass={not failed_gates}")
 
 ```text
 metrics={'public_docs': 1.0, 'runtime_module_coverage': 0.853, 'config_governance': 0.5, 'agent_isolation': 0.75, 'tool_permission_binding': 0.6, 'extension_governance': 0.25, 'server_api_governance': 0.5, 'snapshot_recovery': 1.0, 'eval_readiness': 0.0, 'high_risk_governance': 0.154}
+not_applicable_metrics=[]
 root_causes={'server_api': ['covered_but_not_governed', 'high_risk_extension_or_api_ungoverned'], 'sdk_client': ['covered_but_not_governed', 'high_risk_extension_or_api_ungoverned'], 'remote_config': ['covered_but_not_governed', 'high_risk_extension_or_api_ungoverned'], 'managed_config': ['required_open_runtime_capability_not_covered', 'high_risk_extension_or_api_ungoverned'], 'custom_agent_permissions': ['covered_but_not_governed', 'high_risk_extension_or_api_ungoverned'], 'bash_tool': ['covered_but_not_governed', 'high_risk_extension_or_api_ungoverned'], 'lsp_tool': ['covered_but_not_governed'], 'mcp_servers': ['covered_but_not_governed', 'high_risk_extension_or_api_ungoverned'], 'custom_tools': ['covered_but_not_governed', 'high_risk_extension_or_api_ungoverned'], 'plugins': ['required_open_runtime_capability_not_covered', 'high_risk_extension_or_api_ungoverned'], 'http_auth_boundary': ['covered_but_not_governed', 'high_risk_extension_or_api_ungoverned'], 'share_api': ['covered_but_not_governed', 'high_risk_extension_or_api_ungoverned'], 'summary_compaction': ['covered_but_not_governed'], 'regression_harness': ['required_open_runtime_capability_not_covered'], 'safety_eval_cases': ['required_open_runtime_capability_not_covered'], 'cost_latency_report': ['required_open_runtime_capability_not_covered']}
 failed_gates=['runtime_module_coverage', 'config_governance', 'agent_isolation', 'tool_permission_binding', 'extension_governance', 'server_api_governance', 'eval_readiness', 'high_risk_governance']
 opencode_architecture_gate_pass=False

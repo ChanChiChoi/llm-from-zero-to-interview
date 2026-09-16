@@ -8205,3 +8205,187 @@ HCA / Heavily Compressed Attention：高度压缩注意力；DeepSeek-V4 资料�
 Native Multimodal Token Budget：原生多模态 token 预算；把图像、音频、视频输入的处理 token 与文本、工具和输出共同纳入上下文、显存和成本预算。
 
 Reasoning/Agent Unit Cost：推理/Agent 单位成本；以成功任务而不是单个输出 token 为分母，合并模型、工具、验证、重试、GPU 和人工审核成本。
+
+## 2026-09 Frontier Architecture Updates
+
+Attention Residuals / AttnRes：注意力残差；沿网络深度对历史层表示做输入相关加权聚合，不等同于 token self-attention。
+
+Block Attention Residuals：分块注意力残差；块内累加、块间对块表示做注意力，以减少深度历史表示的存储和通信。
+
+Kimi Delta Attention / KDA：Kimi Delta Attention；带逐通道衰减和 delta 更新的线性注意力状态机制。
+
+Delta Rule：Delta 规则；把当前 key/value 看作对关联记忆状态的定向纠正与写入。
+
+Compressed Sparse Attention / CSA：压缩稀疏注意力；先压缩序列维 KV，再对压缩条目做稀疏 top-k 选择。
+
+Heavily Compressed Attention / HCA：高度压缩注意力；更激进地压缩 KV，但在压缩表示上保持 dense attention。
+
+Manifold-Constrained Hyper-Connections / mHC：流形约束超连接；将残差映射约束到双随机矩阵集合，以改善深层信号传播稳定性。
+
+Doubly Stochastic Matrix：双随机矩阵；元素非负且每行、每列之和均为 1。
+
+Sinkhorn Projection：Sinkhorn 投影；通过交替行归一化和列归一化，把正矩阵近似投影到双随机矩阵集合。
+
+Heterogeneous KV Cache：异构 KV Cache；不同层或路径使用不同压缩倍率、维度、窗口和淘汰策略的缓存系统。
+
+GPT-6 Astra：OpenAI 官方模型页列出的 `gpt-6-astra`；本项目当前仅确认其公开接口、上下文/输入/输出预算、reasoning effort、工具和端点支持。
+
+Maximum Input Tokens：最大输入 token 数；一次请求允许计入输入区域的上限，不能与 context window 或 maximum output 混为一个数字。
+
+Maximum Output Tokens：最大输出 token 数；一次请求允许生成的输出上限，受上下文总容量、接口和任务预算共同约束。
+
+Context Window Budget：上下文窗口预算；把系统消息、用户输入、历史、工具结果、推理状态和输出放进同一个有限 token 账本。
+
+Reasoning Effort Profile：推理档位配置；模型请求级的 `low`/`medium`/`high`/`xhigh`/`max` 等预算旋钮，具体含义依 provider 文档，不能跨厂商直接等价。
+
+Hosted Tool Boundary：托管工具边界；模型提出工具调用，宿主执行器负责授权、沙箱、网络/文件范围、超时、回执和审计。
+
+Thresholded Token Pricing：阈值计费；当输入超过指定阈值时，整次请求适用新的输入/输出费率，不能只对超出部分加价。
+
+GLM-5.3：Z.ai 文档列出的长任务模型版本；官方称沿用 GLM-5.2 基础模型并通过后训练改进，SAO with compaction 的具体机制待核验。
+
+Executable Task Environment：可执行任务环境；为 Agent 提供初始状态、动作、工具反馈、终止条件和资源/权限边界，使长任务能力可以通过实际结果评估。
+
+Oracle Check：可解性检查；验证任务至少存在一条满足契约的成功路径，不能单独证明 verifier 完备。
+
+No-op Check：空操作检查；确认 Agent 什么也不做时不能直接获得任务奖励。
+
+Unsolved-state Check：未完成状态检查；用明显未满足目标的 artifact 检查 verifier 是否会把半成品误判为成功。
+
+Reward Shortcut：奖励捷径；通过修改代理指标、测试或环境残留获得高分，却没有满足真实任务目标的行为。
+
+SAO with Compaction：GLM-5.3 文档提到的策略名称；本项目当前没有核验其全称、数学机制或实现，不能据缩写推断。
+
+Kimi K3：Kimi 官方发布文章中的模型版本；文章披露 KDA、AttnRes、Stable LatentMoE、量化和长任务 Agent 信号，完整配置、权重与报告状态需独立核验。
+
+State Manifest：状态清单；跨轮或跨模型保存目标、事实、假设、diff、工具 observation、权限、版本、预算和 artifact 引用的结构化记录。
+
+Harness Revision：Harness 版本；评测或 Agent 运行时的提示、工具、验证器、记忆、压缩和恢复实现版本。
+
+Absolute vs Relative Lift：绝对提升与相对提升；绝对提升是百分点差，相对提升是相对基线的比例，二者不能混用。
+
+## 2026-09 Mistral Small 4 与 Step 3.5 Flash
+
+Mistral Small 4 119B A6B：Mistral 的稀疏 MoE 模型；模型卡给出约 119B 总参数、约 6.5B 激活参数、128 experts/4 active、256K context，并支持 `reasoning_effort=none/high`。
+
+MTP-3 / 3-way Multi-Token Prediction：三路多 token 预测；一次主干前向产生多个候选 token，再由目标模型验证，实际收益取决于接受长度和后端实现。
+
+Step 3.5 Flash：StepFun 的稀疏 MoE 模型；模型卡给出约 196.81B 总参数、约 11B 激活参数、288 routed experts 加 1 shared expert、top-8 路由和 256K context。
+
+3:1 Sliding-Window/Full Attention：每三个滑动窗口注意力层配一个全注意力层的模型卡配置描述；它降低部分层的 pair 数，不等于整体复杂度都变成线性。
+
+EAGLE Draft Head：训练好的推测解码草稿头；先提出候选 token，再由目标模型验证，必须以接受率、回退比例和后端支持评估收益。
+
+NVFP4：Mistral Small 4 模型卡链接的 4-bit 浮点检查点；量化可降低存储和带宽，但误差、校准和 kernel 支持需要独立验证。
+
+Context Manager：Agent 评测或运行时的上下文管理器；可在上下文超过阈值时重启 loop，属于 harness 状态策略，不是模型永久记忆。
+
+Grok 4.6：xAI 官方模型页列出的模型标识；已核验 500K prompt/context、文本/图像输入、文本输出、function calling、structured outputs 和 `low/medium/high/xhigh` reasoning effort，参数与训练架构待核验。
+
+Web Search / X Search：xAI 文档列出的实时搜索工具；用于把当前信息接入请求，不等于模型训练知识或模型本身拥有网络权限。
+
+Claude Opus 5：Anthropic 官方模型目录列出的 `claude-opus-5`；当前核验 1M context、128K 最大输出、adaptive thinking、默认 high effort、平台和价格字段，参数与训练架构待核验。
+
+Adaptive Thinking：自适应思考；模型目录中的运行时配置描述，表示推理预算可随任务调整，不等于公开了内部推理算法。
+
+Batch Max Output：批处理最大输出；批处理接口的输出上限字段，不能当作普通单请求最大输出或上下文窗口。
+
+Claude Fable 5.1：Anthropic 官方模型页列出的 `claude-fable-5-1`；当前核验 1M context、128K 最大输出、adaptive always-on thinking、默认 high effort、平台和价格字段，参数与训练架构待核验。
+
+Preserved Thinking：保留思考状态；跨轮对话或模型切换时保留可继续使用的 thinking blocks 的接口/协议能力，不等于模型永久记忆。
+
+Per-message Effort：按消息设置 effort；Fable 5.1 页面列出的 beta 运行时控制，可在对话中改变推理预算，具体行为需按 API 版本复测。
+
+Claude Sonnet 5：Anthropic 官方模型目录列出的 `claude-sonnet-5`；当前核验 2026-06-30 发布字段、1M context、128K 普通最大输出、300K batch 最大输出、Adaptive thinking、默认 high effort、Fast latency、平台和价格字段，参数与训练架构待核验。
+
+Claude Haiku 4.5：Anthropic 官方模型目录列出的 `claude-haiku-4-5-20251001`（别名 `claude-haiku-4-5`）；当前核验 2025-10-15 发布字段、200K context、64K 最大输出、extended thinking、`fastest` 延迟字段、平台和价格字段，参数与训练架构待核验。
+
+mini-SWE-agent：DeepSWE 页面标注的统一 Agent harness；负责把模型接入软件工程任务、工具交互和运行轨迹，不能与基础模型能力混为一谈。
+
+Pass@1 Interval：Pass@1 的统计不确定性区间；应与任务数量、采样协议和评测版本一起解读，区间重叠时不能仅凭点估计排序。
+
+Agent Steps：Agent 运行步数；是模型、工具、上下文策略、重试和终止条件共同影响的运行时指标，不等于推理 token 或模型层数。
+
+DeepSeek-R1-0528：DeepSeek API 官方发布页标注 2025/05/28 的版本；页面明确提到 JSON output、function calling、API 使用方式不变和开源权重入口，模型卡、架构、训练细节与 benchmark 复现仍待核验。
+
+## 2026-09 DeepSeek V4.1-Flash
+
+Causal Encoder-Decoder (CED)：因果编码器-解码器；DeepSeek V4.1-Flash 模型卡描述的 40 层结构，由 20 层 causal encoder 和 20 层 decoder 组成，decoder 的 global KV 从最终 encoder hidden states 投影。不能自动等同于双向 encoder 或传统翻译 Transformer。
+
+SWA Bounded Replay：滑动窗口有界重放；不把全部 SWA KV 持久化，而在恢复时重放最近 `n_win` 个 token 重建状态，用持久化空间换重算和恢复延迟。
+
+CSA2：Compressed Sparse Attention 2，压缩稀疏注意力 2；V4.1 模型卡公开的跨层 KV/index 复用机制，包含 `Full`、`Reindex`、`Reuse` 三种静态模式。
+
+Hierarchical Sparse Indexer：层次化稀疏索引器；先由 Full Mode layer 形成候选池，再让后续 indexing layer 在候选池内继续选择，降低深层 indexer 对完整上下文的依赖，但候选池漏检会造成不可恢复的召回损失。
+
+FP4 Main KV Cache：FP4 主 KV 缓存；V4.1 模型卡称使用 E2M1 main KV、每 16 个 channel 一个 E4M3 scale，global KV footprint 为 890 bytes/token。该数值不是整机 HBM 或所有 cache 的总和。
+
+Engram Conditional Memory：Engram 条件记忆；模型卡披露的 196B 参数、按 token lookup 稀疏访问的模型内记忆组件；不能直接等同于外部 RAG 或 KV cache。
+
+DSpark Speculative Decoding：DSpark 推测解码；模型卡描述的半自回归草稿生成与按置信度调度验证路径，实际吞吐取决于接受长度、验证成本、后端和状态回退。
+
+Numeric Reasoning Effort：数值推理预算；V4.1 encoding 说明中的 1--100 整数控制面，`low=50`、`high=75`、`max=100`，不是多个基础模型或统一跨厂商标尺。
+
+Global KV Footprint：全局 KV 占用口径；统计 global KV 的 bytes/token，必须和模型 revision、精度、上下文、batch 及是否包含 indexer/SWA 一起引用。
+
+Candidate Recall：候选池召回率；相关历史块进入 hierarchical candidate pool 的比例。它与候选池内 Top-K recall 分开统计，端到端召回不能只看后者。
+
+## 2026-09 K2 Horizon MoVA 与 Uno
+
+MoVA / Mixture-of-Value Attention：混合值注意力；在 attention 的 value projection 路径按 token 选择多个 value experts，再将 value 表示混合后送入注意力，不等同于复制完整 attention head。
+
+Value Expert：值专家；MoVA 中负责生成 value 表示的专家。K2-Horizon-MoVA-36B-A4B 配置公开为 64 个 value experts、每 token top-4，和 FFN routed expert 分开计账。
+
+Selection-only Router Bias：仅用于选择的路由偏置；router bias 参与 top-k 排序，但混合权重重新取未加 bias 的原始 routing score，不能简化成对 `logits + bias` 做 softmax。
+
+Active-Parameter Proxy：激活参数代理；稀疏模型发布资料中对每 token 主要参与计算的参数规模近似，不等同于严格 FLOPs、显存需求或端到端吞吐。
+
+K2-Horizon-MoVA-36B-A4B：IFM K2 Horizon 系列中的约 36B 总参数、约 4B/token active proxy 模型；公开配置为前 3 层 dense、后 45 层 MoVA + MoE，524,288 context。其候选由 Artificial Analysis 发现，完整事实绑定官方模型卡和固定 revision。
+
+K2-Horizon-7B-Uno：K2 7B 的官方关联 adapter/论文技术；冻结 AR base，以 LoRA diffusion path 生成 draft，并用 `Psi-Spec` 做 AR rejection verification。它不是排行榜新增模型，也不是 36B MoVA 架构变体。
+
+Psi-Spec：Uno 论文中的并行草稿与 AR rejection verification 路线；目标是在指定采样协议下利用 diffusion draft 提高 decode 并行度，实际接受率和吞吐必须按 base/adapter revision、采样器、硬件和 harness 实测。
+
+MOPD：K2 0.9B 同系列卡片披露的 on-policy distillation 阶段名称，用于缓解领域专家合并后的结构干扰；本项目不把该卡片的流程转写为 36B MoVA 的训练 recipe。
+
+Value-Routing Dispatch：值路径路由分发；将 token 的 hidden payload 按 MoVA top-k 分配到 value experts 并聚合的运行时过程，需与 FFN MoE dispatch、GQA KV cache 和通信 overlap 分开测量。
+
+## 2026-09 Qwen3.8
+
+Qwen3.8：Qwen 官方模型卡和 Flash-Next 技术报告涉及的模型家族；本项目候选发现绑定 Artificial Analysis/DataCurve 条目，规格与技术机制分别绑定官方资料。
+
+Gated DeltaNet / GDN：带门控衰减与 delta correction 的递归记忆路径；通过状态遗忘、定向修正和写入压缩历史，不等于任意长距离精确检索。
+
+QSA：Qwen3.8 Flash-Next 报告中的稀疏显式注意力路径；先做 micro-block index，再展开有限 token 集合，具体缩写全称和生产实现以报告/源码为准。
+
+Micro-block Indexer：以小块而不是单 token 为单位的候选选择器；先压缩 key、做 block-causal scoring 和 top-k，再展开为 token，需单独记录 block recall 与 tail recall。
+
+Block-causal Scoring：块级因果打分；只允许 query 看到已经完整出现在当前位置之前的 block，避免 indexer 使用未来 token。
+
+Gated Residual / GR：门控残差；四个 residual branch 使用逐元素 read gate 与 branch-level scalar write gate，减少 branch mixing 与 widened residual 的读写开销。
+
+N-gram Embedding：N-gram 嵌入表；按局部 token n-gram 地址查训练参数，可把大 table 的随机读和带宽放到 host memory，但不是 RAG 或 KV cache。
+
+Host-memory Prefetch：主机内存预取；在 accelerator 计算主干时异步搬运 N-gram table 条目，收益取决于命中率、带宽、并发冲突和 kernel overlap。
+
+Muon/AdamW Parameter Split：Muon/AdamW 参数分工；Muon 主要处理合适的二维矩阵，AdamW/Adam 处理 embedding、router、低秩投影或 table 等不匹配对象，必须按语义拆分 fused parameter。
+
+Batch-size Warmup：批大小预热；从小 batch 逐步增加到目标 batch 的训练策略；Flash-Next 报告中的结论只适用于其数据、学习率、token budget 和稳定性实验，不能泛化为 Muon 定理。
+
+Hosted/Open Checkpoint Boundary：托管服务与开放权重边界；hosted model 可以基于某个 checkpoint 并额外提供视觉、工具或协议能力，但这些服务字段不能被写成新的 open checkpoint 架构事实。
+
+## 2026-09 GLM-5.3-Flash
+
+Hybrid Linear-Sparse Attention：混合线性—稀疏注意力；用固定形状的递归状态处理大部分历史，再用稀疏 indexer 为远程精确检索保留显式 attention 路径，不能简化为纯线性注意力。
+
+IndexPool：索引池；将多个 indexer key vector 加权池化为候选表示，以减少长上下文候选筛选开销；它不是主 KV cache 压缩，也不自动决定最终可见 token 集合。
+
+ReplaySSM：重放式状态空间/递归状态组件名称；GLM-5.3-Flash 官方 serving 资料提到的工程线索，具体状态布局、kernel 和收益必须绑定实现版本与硬件核验。
+
+EPD（Encode–Prefill–Decode）：编码—预填充—解码的多阶段 serving 拆分；视觉表示先由 encode worker 产生，再传给 prefill，随后把 KV/state metadata 交给 decode，需处理跨池传输、取消、重算和版本一致性。
+
+Visual Self-Verification：视觉自验证；把渲染、交互和视觉差异纳入模型/Agent 的下一轮决策，不等于独立完备 verifier、工具权限或 artifact 正确性证明。
+
+Tool Streaming：工具流式输出；模型以多个事件/片段增量产生工具名和参数，宿主必须按 call index 聚合、做 schema/权限/确认校验后再执行，不能把生成事件当作执行结果。
+
+Activated Parameters：激活参数；某个 token 路径实际参与主要计算的参数口径，不能直接替代总权重、通信、cache、workspace 或并发显存账本。

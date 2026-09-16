@@ -236,8 +236,13 @@ request deletion
 ```math
 R_{\mathrm{workspace}}
 =\frac{N_{\mathrm{tasks\ with\ verified\ artifact\ and\ revision}}
-       {\max(1,N_{\mathrm{completed\ tasks}})}
+       {N_{\mathrm{completed\ tasks}}},\qquad
+       N_{\mathrm{completed\ tasks}}>0
 ```
+
+`R_workspace` 只在存在已完成任务样本时定义；若 `N_completed tasks=0`，应报告
+`not_applicable`，不能用人为下限分母伪造 `0.0` 或 `1.0`。聚合和质量门禁要显式处理
+该状态，再决定补充样本或跳过整组评估。
 
 同时记录冲突发现率、错误覆盖率、锁接管成功率、checksum 不一致率、删除验证失败率和跨租户拒绝率。一个系统如果“任务完成率”很高，却没有办法回答某个文件由谁、基于哪个 revision 修改，就不具备可审计的持久工作区能力。
 

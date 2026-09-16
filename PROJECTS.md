@@ -661,3 +661,73 @@
 目标：构建一个不联网的教学版 AI Infra 面试准备度审计工具，把训练平台、GPU 调度、推理平台、RAG / Agent、模型仓库、评估、可观测性、安全、成本和多租户回答统一记录成 answer 表，并输出 topic / formula / demo / risk / trade-off 覆盖、薄弱题定位、修复计划和面试门禁。
 
 简历表达：实现 AI Infra interview readiness audit，输入 toy mock interview answers 的 topics、formulas、demos、risks、tradeoffs、score、red flags 和 revision plan，输出 topic coverage、formula coverage、demo evidence coverage、risk coverage、trade-off coverage、average score、red flag rate、weak questions、revision plan 和 interview gate；扩展 AI Infra 面试准备度审计 demo，覆盖 scope boundary clarity、training platform lifecycle、GPU scheduler quota fairness、training debug evidence、inference platform token SLO、TTFT / TPOT / KV formula、RAG Agent permission trace、model registry release gate、eval platform reproducibility、observability correlation、SLO error budget readiness、cost governance、security multitenancy、incident postmortem、trade-off boundary reasoning 和 interview revision gate；还能把每道弱题绑定到一个缺失主题、一个缺失公式、一个 toy demo、一个生产风险和一个下一轮修复动作，并把它们沉淀回题库、练习、术语和知识图谱。
+
+## 2026-09 新架构实战项目
+
+### 项目：Million-Context Attention Budget Lab
+
+实现一个零依赖或 PyTorch 教学实验，对比原始 KV、块压缩 KV、稀疏 top-k、递归状态和混合路径。记录压缩误差、检索召回、TTFT、TPOT、缓存字节、峰值显存和单位成功成本。实验报告必须固定模型/版本、精度、硬件、上下文长度、压缩倍率和评测 harness。
+
+### 项目：Residual Flow Stability Lab
+
+实现标准 residual、简化 AttnRes 和 Sinkhorn 双随机残差映射，比较深度增加时的激活范数、梯度范数、loss、吞吐和通信量。报告应解释教学矩阵与生产 mHC/kernel 的差距，并包含消融和失败案例。
+
+### 项目：GPT-6 Astra Runtime Budget Lab
+
+实现一个不调用真实付费 API 的预算与权限审计器。输入 toy 请求的模型 ID、reasoning effort、输入/输出 token、缓存命中、工具调用、权限决策、超时和重试，输出阈值计费、单位成功成本、TTFT/TPOT 占位指标、工具失败率、权限拒绝率、审计字段覆盖和发布门禁。实验必须把 context window、maximum input、maximum output 分开建模，并比较不同 effort 对质量、延迟、成本和工具依赖的影响；报告不得把教学计费函数当作实时价格或把工具列表当作模型权限。
+
+### 项目：GLM-5.3 Long-Task Verifier Lab
+
+构建一个零依赖 toy 环境，输入任务契约、初始状态、Agent 动作、工具反馈和 artifact，依次审计 oracle、no-op、unsolved-state、隐藏测试、权限隔离、环境 reset、verifier 假阳性/假阴性和上下文压缩后的状态召回。输出任务成功率、奖励捷径率、未完成误通过率、关键状态召回率、恢复成功率、token 成本和环境门禁；将 GLM-5.3 文档中的 SAO with compaction 仅作为待核验标签，不实现或宣称其内部算法。
+
+### 项目：Kimi K3 Harness Evidence Lab
+
+构建一个不调用真实模型的评测审计器，输入模型 revision、harness revision、环境硬件、effort、任务版本、工具、fallback、思考状态回传和 benchmark 分数，输出绝对/相对提升、单位成功成本、状态字段覆盖、权限风险、不可比结果和发布门禁。将 KDA/AttnRes 仅作为论文机制标签，将 Stable LatentMoE、量化和 K3 完整配置保留为发布披露/待核验字段。
+
+### 项目：Mistral/Step Hybrid Serving Lab
+
+构建一个不调用真实模型的 serving toy 审计器，对比 Mistral Small 4 的 `none/high`、EAGLE/NVFP4 组合与 Step 3.5 Flash 的 MTP-3、3:1 SWA/full attention 和 top-8 MoE。固定模型 revision、硬件、后端、任务和 harness，输出 active/total 参数账本、KV cache 字节、专家负载、接受长度、重启次数、TTFT、TPOT、吞吐、质量回归和单位成功成本；将模型卡宣传数字与本地教学模拟结果分开。
+
+### 项目：Claude Opus 5 Adaptive Effort Lab
+
+构建一个不调用真实付费 API 的长上下文与 effort 审计器。输入 toy 请求的模型 ID、平台、模型 revision、context/input/output token、缓存命中、adaptive/fixed effort、工具调用、压缩事件、超时和权限决策，输出 1M context 预算、128K 普通输出与 300K batch 输出边界、TTFT、TPOT、成功率、推理 token、工具失败率、平台差异、单位成功成本和发布门禁；将 Anthropic 模型目录的接口字段与本地教学模拟分开，不把 adaptive thinking 解释成已知内部算法。
+
+### 项目：Claude Fable 5.1 Long-Horizon State Lab
+
+构建一个不调用真实付费 API 的长任务状态审计器。输入 toy 任务目标、模型 ID、平台、revision、1M context、128K 输出上限、adaptive always-on effort、preserved thinking、跨轮模型切换、per-message effort、turn-scoped system message、工具进度更新、压缩事件、超时和最终 artifact，输出状态召回率、工具回执完整率、恢复成功率、协议错误率、TTFT、TPOT、单位成功成本和发布门禁；将页面自述的长任务优势与本地 harness 实测分开，不把 beta 协议当成内部记忆或推理算法。
+
+### 项目：Claude Family Serving Matrix Lab
+
+构建一个不调用真实付费 API 的模型目录审计器，对比 Claude Sonnet 5、Opus 5 和 Fable 5.1 的 context、输出、thinking、effort、平台、缓存、工具协议和价格字段。输入固定任务、平台、模型 revision、harness、超时、工具和 token 账本，输出质量、推理 token、TTFT、TPOT、p95、缓存命中、工具失败、单位成功成本和不可比原因；把目录/产品页声明与实测结果分栏，禁止由速度或模型分类推断内部架构。
+
+扩展同一审计器加入 Claude Haiku 4.5：记录 200K/64K 接口预算、extended thinking、`fastest` 目录字段、平台 ID、缓存价格和实测延迟；将低成本定位与实际成功成本分开，禁止用目录标签替代固定 harness 评测。
+
+扩展发布证据审计器加入 DeepSeek-R1-0528：记录官方发布页日期、JSON/function calling、API 兼容性承诺、开源权重入口和 benchmark 图片引用；将页面声明、权重 revision、许可证、协议实测与独立复现分栏，禁止把发布摘要或图片数字当作基础模型结论。
+
+### 项目：DeepSWE Harness Reproduction Audit
+
+构建一个不调用真实模型的长周期软件工程评测审计器。输入任务/仓库版本、模型 revision、effort、`mini-swe-agent`、工具 schema、verifier、超时、重试、上下文策略、供应商和硬件，输出 Pass@1 及区间、平均成本、输出 token、Agent steps、工具错误、verifier 拒绝、恢复率、最终 artifact 完整率和单位成功成本。对照固定模型换 harness、固定 harness 换模型和固定模型换 effort 三组实验，将 DeepSWE v1.1 页面快照与本地 toy 结果分栏，禁止把组合分数归因给基础模型。
+
+### 项目：DeepSeek V4.1 CED/Cache/Multimodal Lab
+
+构建一个不调用真实付费 API 的教学审计器，分别模拟 CED 的 prefill/decode 激活账本、CSA2 的 `Full/Reindex/Reuse` 层模式、Hierarchical Sparse Indexer 候选池、FP4 main KV、SWA Bounded Replay、DSpark 接受前缀和图像 token 预算。输入模型 revision、上下文长度、输入/输出 token、压缩块、候选池、Top-K、replay、量化精度、effort、媒体顺序、工具权限和 verifier，输出 global KV bytes、HBM/SSD 账本、候选召回、量化误差、replay time、acceptance length、TTFT、TPOT、p95、工具失败率和单位成功成本。
+
+实验必须把模型卡自报的 890 bytes/global-KV-token、1/4 HBM、1/8 SSD、8B/16B active 和 Agent benchmark 数字与本地教学模拟分栏；固定 revision `dba1be0a40aa45a94ad051997016db3960a90277`、后端、硬件和 harness。报告应覆盖错误 position、错误 DSML 空格、候选池漏检、cache revision 不一致、SWA replay 失败、图像 prompt injection 和空评测集，并对不适用指标返回 `not_applicable`。
+
+### 项目：K2 Horizon MoVA/Uno Serving Lab
+
+构建一个不下载 K2 权重的教学审计器，模拟 36B/A4B 的 dense/sparse layer 排布、MoVA value routing、FFN top-k routing、GQA KV cache、专家 dispatch 和 TP/EP serving 账本。输入 token 数、hidden size、两类 top-k、负载倾斜、padding、设备数、精度和路由实现版本，输出 active-parameter proxy、assignment 数、通信 payload、KV bytes、workspace、TTFT/TPOT 占位指标和单位成功成本；明确这些是教学估算，不是生产 kernel profiling。
+
+扩展同一项目加入 Uno adapter 的 speculative decoding toy：冻结 K2 7B AR base，用 LoRA diffusion path 生成并行 draft，再按 `Psi-Spec` 做 rejection verification。固定 base/adapter revision、采样器、batch、硬件和 harness，报告接受长度、目标调用数、有效 token、回退比例、质量回归和失败类型；将 Uno 标为 K2 周边关联技术，不把它写成排行榜新模型或 36B 变体。
+
+### 项目：Qwen3.8 QSA/Gated Residual Serving Lab
+
+构建一个不下载 Qwen3.8 权重的教学审计器，模拟 27B、2.4T-A95B 和 Flash-Next 的 GDN/Gated Attention 或 QSA 混合路径、四分支 Gated Residual、N-gram host-memory prefetch、Muon/AdamW 参数账本和 thinking protocol。输入模型版本、revision、block size、token budget、query position、tail、prefetch 带宽、table slots、active/total 参数、effort 和 hosted/open 标记，输出 block/token 召回、causal tail 保留、indexer 成本、GR residual bytes、N-gram storage/bandwidth、参数存储代理、TTFT/TPOT 占位值、单位成功成本和失败类型。
+
+实验至少覆盖 QSA 的 max/average pooling、block size、top-k、tail、dense-distillation/sparse-training 阶段，GR 的 read/write gate 消融，N-gram 的容量与 host 带宽曲线，以及 Muon 全量/分组/fused 错误实现对照。报告必须把 Flash-Next 技术报告的 `7.6x/4.9x`、loss、benchmark 和稳定性数字作为发布方自报，与本地 toy 结果分栏；Max 作为基于 A95B 的 hosted version 记录，不写成独立 open checkpoint，也不把 `reasoning_effort` 行计为新模型。
+
+### 项目：GLM-5.3-Flash Visual EPD Audit Lab
+
+构建一个不调用真实付费 API 的多模态 Agent serving 审计器，模拟 `linear_attention` 递归 state、sparse/indexer 候选、IndexPool、MoE dispatch、mHC residual mixing，以及 Encode–Prefill–Decode 三阶段。输入模型 revision、45 层路径、index pool/top-k、上下文长度、图像尺寸、visual representation、KV/state metadata、工具事件、权限、取消、超时、重算和 verifier，输出候选召回、视觉证据支持、state/cache bytes、dispatch payload、跨池传输、TTFT/TPOT、artifact 完整率、误通过率和单位成功成本。
+
+实验至少覆盖：pool/block/tail 变化；linear state 与显式 KV 的容量账本；Sinkhorn 行列和误差；图像 encode 失败、revision/template 不一致、工具参数流式拼接错误、伪造视觉指令、取消后的幂等清理、视觉 diff 退化和未完成 artifact。报告必须把 Z.ai 的 `3.01x/4.44x`、约 `3x` serving 和 visual self-judgment 标作发布方自报，与本地 toy 结果分栏；不能把模型 self-verification 当作权限层或独立 verifier。

@@ -117,7 +117,7 @@ Red Teaming、Mechanistic Interpretability、SAE、Model Editing、Unlearning、
 3. [Qwen3.5-397B-A17B](https://huggingface.co/Qwen/Qwen3.5-397B-A17B)：Gated DeltaNet/Gated Attention、原生多模态和长上下文。
 4. [Qwen3.6-35B-A3B](https://huggingface.co/Qwen/Qwen3.6-35B-A3B)：hybrid attention、长上下文和 speculative decoding 入口。
 5. [Qwen-AgentWorld-35B-A3B](https://huggingface.co/Qwen/Qwen-AgentWorld-35B-A3B)：world model/Agent environment 训练和评测边界。
-6. [Kimi K3](https://huggingface.co/moonshotai/Kimi-K3)：KDA、Gated MLA、NoPE 和 total/active 参数入口。
+6. [Kimi K3 官方发布文章](https://www.kimi.com/en/blog/kimi-k3)：KDA、Gated MLA、规模与长上下文的发布披露入口；NoPE、层比例和 total/active 参数仍待模型卡/技术报告核验。
 7. [Mistral Small 4](https://huggingface.co/mistralai/Mistral-Small-4-119B-2603)：MoE、EAGLE、NVFP4 和统一 Instruct/Reasoning/Devstral 路线。
 8. [Leanstral 1.5](https://huggingface.co/mistralai/Leanstral-1.5-119B-A6B)：Lean 4 形式化证明 coding agent。
 9. [Shieldstral 1.0](https://huggingface.co/mistralai/Shieldstral-1.0-3B)：policy-adaptive multimodal safety classifier。
@@ -138,3 +138,72 @@ Red Teaming、Mechanistic Interpretability、SAE、Model Editing、Unlearning、
 3. [Shieldstral](https://arxiv.org/abs/2607.25857)：policy-adaptive multimodal safety classifier。
 4. [EAGLE](https://arxiv.org/abs/2401.15077) 与 [EAGLE-3](https://arxiv.org/abs/2503.01840)：推测解码 draft head 路线。
 5. [Scaling LLM Test-Time Compute Optimally](https://arxiv.org/abs/2408.03314)：推理预算、候选和验证成本的实验基础。
+
+### 2026-09 新模型架构专题
+
+1. [Kimi Linear: An Expressive, Efficient Attention Architecture](https://arxiv.org/abs/2510.26692)：Kimi Delta Attention、门控线性状态、DPLR 简化与混合 MLA。
+2. [Attention Residuals](https://arxiv.org/abs/2603.15031)：沿深度选择历史表示、Block AttnRes、流水线通信与两阶段推理。
+3. [DeepSeek-V4 Technical Report](https://arxiv.org/abs/2606.19348)：CSA/HCA、mHC、Muon、FP4/FP8、GRPO 与 on-policy distillation。
+4. [Step 3.5 Flash Technical Report](https://arxiv.org/abs/2602.10604)：稀疏 MoE、滑动窗口/全注意力混合与 MTP-3；模型卡中的部署和评测字段仍需绑定 revision、硬件与后端。
+5. [xAI Models](https://docs.x.ai/developers/models)：Grok 4.6 的 500K context、reasoning effort、结构化输出和工具接口；这是官方模型文档，不是架构论文。
+
+6. [Anthropic Models Overview](https://platform.claude.com/docs/en/models/overview)：Claude Opus 5 的模型 ID、1M context、最大输出、adaptive thinking、平台与价格字段；这是官方模型目录，不是架构论文。
+7. [Claude Opus 5 system card](https://www.anthropic.com/claude-opus-5-system-card)：官方安全/系统资料入口；本轮仅记录入口，不把未读取的完整内容扩写成已核验训练或架构事实。
+8. [Claude Fable 5.1 overview](https://platform.claude.com/docs/en/models/fable-5-1/overview)：官方模型页，记录 1M context、adaptive always-on thinking、preserved thinking、beta 状态协议和平台/价格字段；不是架构论文。
+9. [Claude Sonnet 5 overview](https://platform.claude.com/docs/en/models/sonnet-5/overview)、[system card](https://www.anthropic.com/claude-sonnet-5-system-card)：官方模型页和系统资料入口，记录 1M context、128K/300K 输出、Adaptive、平台与成本字段；本轮尚未读取系统卡全文，不把未核验训练或架构细节写成事实。
+10. [Claude Haiku 4.5 overview](https://platform.claude.com/docs/en/models/haiku-4-5/overview)、[system card](https://www.anthropic.com/claude-haiku-4-5-system-card)：官方模型页和系统资料入口，记录 200K context、64K 输出、extended thinking、fastest 延迟字段、平台与成本字段；本轮尚未读取 system card 全文，不把未核验训练或架构细节写成事实。
+11. [DeepSeek-R1-0528 Release](https://api-docs.deepseek.com/news/news250528)：官方 API 发布页，记录 2025/05/28、JSON/function calling、API 兼容性承诺和开源权重入口；benchmark 图片、模型卡、架构与训练细节仍待核验。
+
+### GPT-6 Astra 官方接口资料
+
+1. [GPT-6 Astra model page](https://developers.openai.com/api/docs/models/gpt-6-astra.md)：`gpt-6-astra` 的输入/输出模态、context window、maximum input/output、reasoning effort、Responses 工具与端点支持。
+2. 本资料只证明模型页公开的接口和容量字段；参数规模、训练架构、数据、发布日期和技术报告仍需独立的一手来源，不从榜单条目反推。
+
+### GLM-5.3 官方文档与长任务环境
+
+1. [GLM-5.3 Guide](https://docs.z.ai/guides/llm/glm-5.3)：模型版本关系、1M context、128K output、推理档位、可执行环境与验证器流程描述。
+2. [GLM-5.2 Guide](https://docs.z.ai/guides/llm/glm-5.2)：长任务定位和前代接口背景；正文未提供 SAO with compaction 的数学定义。
+3. 证据边界：上述文档支持接口与高层训练流程，不支持参数量、完整训练配方或 SAO 全称/实现的确定结论。
+
+### Kimi K3 发布与长任务 Harness
+
+1. [Kimi K3 官方发布文章](https://www.kimi.com/en/blog/kimi-k3)：KDA、AttnRes、Stable LatentMoE、量化、视觉、长上下文、Agent 限制和评测脚注入口。
+2. K3 文章中的技术和 benchmark 需绑定发布时的模型、harness、硬件、effort 与 fallback；Kimi Linear、Attention Residuals 论文只用于解释一般机制，不证明 K3 的完整配置。
+
+### DeepSWE v1.1 评测快照
+
+1. [DeepSWE](https://deepswe.datacurve.ai/)：长周期软件工程 benchmark 入口；本项目保存了页面更新时间为 2026-09-03 的 `/tmp/deepswe.html` 快照。
+2. [`deepswe-snapshot-notes.md`](research/model-update-2026-09/deepswe-snapshot-notes.md)：整理 113 个任务、91 个仓库、5 种语言、统一 `mini-swe-agent` harness，以及 21 个配置的 Pass@1、区间、成本、输出 token 和 Agent steps。
+3. 证据边界：这些是模型 revision + effort + Agent harness + 工具 + verifier + 运行策略的组合结果；不能直接与 Artificial Analysis、SWE-bench 或其他 harness 的结果拼接，也不能反推参数量、架构或训练方法。
+
+### DeepSeek V4.1-Flash
+
+1. [DeepSeek-V4.1-Flash model card](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash)：固定 revision `dba1be0a40aa45a94ad051997016db3960a90277` 的模型卡，披露 CED、CSA2、FP4 KV、Engram、DSpark、原生多模态、训练规模和 Agent 评测协议；它是模型卡，不等于独立论文复现。
+2. [DeepSeek-V4.1-Flash Technical Report](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/blob/main/DeepSeek_V41_Tech_Report.pdf)：官方 51 页技术报告；本轮已逐页提取并核对 CED、CSA2、HSI、mHC、Engram、DSpark、FP4 KV、训练基础设施、SWA replay 和 Agent 评测边界。完整 kernel source、线上接受率和独立 profiling 仍待核验。
+3. [DeepSeek-V4.1-Flash API Release](https://api-docs.deepseek.com/news/news260910)：API alias、兼容路由和服务端发布日期入口；路由说明带日期，不能替代权重身份。
+
+### K2 Horizon MoVA 与 Uno
+
+1. [K2-Horizon-MoVA-36B-A4B model card](https://huggingface.co/IFM/K2-Horizon-MoVA-36B-A4B)：固定 revision 下核对 MoVA value routing、稀疏 MoE、GQA、长上下文、训练阶段和部署字段。
+2. [K2 Horizon modeling implementation](https://huggingface.co/IFM/K2-Horizon-MoVA-36B-A4B/blob/de2d2efb32ed7639b7140bccbefe131a0063a982/modeling_k2_horizon.py)：核对 value router 的 top-k 选择语义、attention gate 和专家执行路径；源码阅读不能替代完整训练报告。
+3. [Uno paper, arXiv:2609.04010](https://arxiv.org/abs/2609.04010)：学习冻结 K2 7B AR base、LoRA diffusion path、Diffusion Distillation 和 `Psi-Spec` rejection verification；Uno 是关联 adapter/论文技术，不是排行榜新增模型。
+
+### Qwen3.8 官方模型卡与 Flash-Next 技术报告
+
+1. [Qwen3.8-27B model card](https://huggingface.co/Qwen/Qwen3.8-27B)：核对 27B dense native vision-language、64 层、GDN/Gated Attention、MTP 和 thinking 控制。
+2. [Qwen3.8-2.4T-A95B model card](https://huggingface.co/Qwen/Qwen3.8-2.4T-A95B)：核对 2.4T total/95B active、92 层、512 experts、text-only 和强制 thinking。
+3. [Qwen3.8-Flash-Next model card](https://huggingface.co/Qwen/Qwen3.8-Flash-Next)：核对 125B/6B active、约 51B N-gram、4B MTP、GDN + QSA、四分支 Gated Residual 和视觉字段。
+4. [Qwen3.8-Flash-Next GitHub](https://github.com/QwenLM/Qwen3.8-Flash-Next)：实验性架构预览、实现入口和技术报告索引。
+5. [Flash-Next 技术报告](https://github.com/QwenLM/Qwen3.8-Flash-Next/blob/main/tech_report.pdf)：QSA 的 micro-block indexer/两阶段训练、GR、N-gram host-memory prefetch、Muon/AdamW 分工与评测设置。
+6. [Artificial Analysis Qwen3.8 条目](https://artificialanalysis.ai/models/qwen3-8-flash-next)：候选发现来源；[DataCurve DeepSWE](https://deepswe.datacurve.ai/) 当前快照只检出 `qwen3.8-max`。
+
+模型卡和报告可证明公开字段与作者披露的技术路线，不能自动证明完整生产 kernel、目标硬件 profiling、线上 acceptance rate、全系列训练配方或独立 benchmark。Flash-Next 报告中的速度、loss、稳定性和 benchmark 数字必须保留为发布方自报；Qwen3.8-Max 是官方说明基于 A95B 的 hosted version，不作为新的 open checkpoint。
+
+### GLM-5.3-Flash 官方资料与混合 Serving
+
+1. [GLM-5.3-Flash 官方模型文档](https://docs.z.ai/guides/vlm/glm-5.3-flash)：输入模态、thinking/tool streaming、模型定位和接入边界。
+2. [GLM-5.3-Flash 官方博客](https://z.ai/blog/glm-5.3-flash)：hybrid linear+sparse attention、IndexPool、视觉 coding loop、SGLang/ReplaySSM、混合 cache 和 EPD 的发布方描述。
+3. [GLM-5.3-Flash 模型卡](https://huggingface.co/zai-org/GLM-5.3-Flash/tree/eb9eb208eb0d988989d07a6a12d0fdeb5f52574a) 与 [固定配置](https://huggingface.co/zai-org/GLM-5.3-Flash/blob/eb9eb208eb0d988989d07a6a12d0fdeb5f52574a/config.json)：`320B/18B`、45 层、`34/11` layer types、MoE、IndexPool、mHC 和 vision 字段。
+4. [Artificial Analysis 条目](https://artificialanalysis.ai/models/glm-5-3-flash) 与 [DataCurve DeepSWE](https://deepswe.datacurve.ai/)：分别提供 `max` 配置字段和 `mini-swe-agent` Agent 结果；两者不是同一 benchmark，也不是裸模型分数。
+
+这些资料中没有公开 GLM-5.3-Flash 的完整训练报告或生产 kernel。`3.01x/4.44x` attention/KV、约 `3x` serving 和视觉 self-verification 必须标作发布方自报；研究笔记与正式章节见 [`glm-5.3-flash-source-notes.md`](research/model-update-2026-09/glm-5.3-flash-source-notes.md) 和 [`第二十一册第 84 章`](book-21-transformer-architecture-evolution/chapters/84-glm-5.3-flash混合注意力与视觉闭环.md)。

@@ -77,3 +77,27 @@
 3. 所有内容面向面试能力、工程能力和研究判断，而不是单纯知识罗列。
 4. 后续每次精修章节时，优先保证可理解、可复述、可实战、可被专家追问。
 5. 纵向训练系统文件用于组织学习，并需要随正文第二轮精修同步更新。
+
+## 2026-09 架构专题增补
+
+第二十一册新增 Frontier Model 架构章节：AttnRes、KDA、CSA/HCA、mHC、Mistral Small 4 和 Step 3.5 Flash。它们分别覆盖深度方向残差选择、线性递归状态、长上下文压缩注意力、双随机残差流约束、统一推理模式、EAGLE/NVFP4、MTP-3、滑动窗口注意力和稀疏 MoE，并与第二十四册 serving engine、第五册训练、第二十三册 AI Infra 形成交叉阅读路径。
+
+## 2026-09 新模型专题增补
+
+第六册新增 GPT-6 Astra 长上下文、reasoning effort、工具宿主和阈值计费章节；第十六册新增 GLM-5.3 长任务环境、验证器、奖励捷径和协议迁移章节；第十七册新增 Kimi K3 发布证据、思考状态和 Harness 评测章节；第二十一册新增 Mistral Small 4、Step 3.5 Flash、DeepSeek V4.1-Flash、K2 Horizon、Qwen3.8、GLM-5.3-Flash 与 DeepSeek V4 Flash Vision 架构/多模态专题。相关章节均以官方模型页、发布文档、模型卡和论文为事实边界，并将参数规模、训练架构、完整配置、alias 路由与未公开缩写保留为待核验或带日期字段。
+
+Anthropic 官方模型目录核验新增 Claude Opus 5：第四册记录 1M context、adaptive thinking、平台和宿主边界；第六册、第七册、第十七册和第二十册分别承接长上下文成本、固定 effort 评测、Agent 工具和状态审计。参数规模、内部架构和训练方法不从模型目录字段反推。
+
+Anthropic 专属模型页进一步核验 Claude Fable 5.1：第四册记录 adaptive always-on、preserved thinking、beta 状态协议和长任务产品定位；第六册、第七册、第十七册和第二十册承接上下文成本、公平评测、工具进度与状态恢复。Fable 5.1 的参数规模和训练/推理内部机制仍待核验。
+
+Anthropic 官方模型目录继续核验 Claude Sonnet 5：第四册记录 `claude-sonnet-5`、1M context、128K/300K 输出边界、Adaptive thinking、默认 high effort、Fast latency 字段、平台和成本；第六册与第二十四册承接缓存、延迟、并发和成本账本，第七册承接与 Opus/Fable 的固定条件对照。参数规模、内部架构、训练方法和独立 benchmark 复现仍待核验。
+
+同一官方目录快照补充 Claude Haiku 4.5：第四册记录 `claude-haiku-4-5-20251001`、200K context、64K 输出、extended thinking、`fastest` 延迟字段、平台和低价位；第六册/第二十四册承接延迟、缓存与单位成功成本，第七册承接与 Sonnet/Opus/Fable 的固定 harness 对照。参数规模、内部架构、训练方法和独立 benchmark 复现仍待核验。
+
+DeepSWE v1.1 快照作为评测方法专题接入第七册、第十七册和第二十册：第七册拆解 Pass@1、区间、成本和 Agent steps 的统计口径，第十七册审计工具回执、权限、上下文与恢复，第二十册固定 `mini-swe-agent`、verifier、重试和环境版本。排行榜行记录的是完整 Agent 系统组合，不能把分数直接归因于基础模型；原始快照与待核验字段见 [`research/model-update-2026-09/deepswe-snapshot-notes.md`](research/model-update-2026-09/deepswe-snapshot-notes.md)。
+
+DeepSeek V4.1-Flash 接入第二十一册第 81 章：先用 CED 分开 prefill/decode，再学习 CSA2、层次化索引、FP4 global KV 和 SWA Bounded Replay，随后连接 MoE、Engram、mHC、DSpark、多模态 prompt 与协议迁移。第五册承接 45T 多模态预训练和 `SFT -> RL -> OPD`，第六册承接 HBM/SSD/replay/cache 账本，第七册、第十七册和第二十册承接 Agent harness、verifier、工具权限和恢复评估。模型卡与技术报告的自报数字必须和独立实测分栏；技术报告正文已逐页读取，但完整 kernel source、线上接受率和独立 profiling 仍待核验。
+
+K2 Horizon MoVA 36B/A4B 接入第二十一册第 82 章：先学习 36B total/4B active proxy 与 dense/sparse layer 排布，再学习 MoVA value routing、FFN MoE、GQA KV cache、512K 分阶段训练和 TP/EP serving。第五册承接 0.9B 卡片披露的 MOPD 边界，第六册承接双重 dispatch、KV、workspace 和通信账本；第二十一册同章介绍 K2 7B Uno 的 LoRA diffusion draft 与 `Psi-Spec` rejection verification。Uno 是官方关联 adapter/论文技术，不是排行榜新增模型；完整训练 recipe、接受率和生产 profiling 仍待核验。
+
+Qwen3.8 接入第二十一册第 83 章：先从 27B/A95B 的 GDN + Gated Attention 层布局进入，再学习 Flash-Next 的 QSA micro-block indexer、两阶段稀疏训练、四分支 Gated Residual、N-gram host-memory prefetch 和 Muon/AdamW 参数分工。第四册承接术语与模型家族边界，第五册承接优化器/训练消融，第六册承接长上下文 cache、带宽和参数账本，第七册承接报告自报数字与独立评测，第十六册/第十七册承接 thinking protocol、工具和长任务 harness。Qwen3.8-Max 只作为基于 A95B 的 hosted version 记录；完整 kernel、线上接受率、目标硬件 profiling 和独立 benchmark 仍待核验。

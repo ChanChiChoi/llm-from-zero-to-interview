@@ -677,7 +677,7 @@ P_{\mathrm{active}}=P_{\mathrm{shared}}+k P_e+P_r
 
 | 模型或系列 | 公开的参数/结构信号 | 阅读重点 | 证据边界 |
 |---|---|---|---|
-| Kimi K3 | 约 `2.8T total / 104B active`，`3 KDA + 1 Gated MLA` | MoE 容量和混合 attention 是两件事，要分别评估 | 官方模型卡 |
+| Kimi K3 | 官方发布文章披露约 `2.8T total`、`16/896` 专家稀疏信号，并提到 KDA/AttnRes/Stable LatentMoE | MoE 容量、激活参数和混合 attention 是不同口径；active 参数及层级配置待模型卡/报告核验 | Kimi 官方发布文章；完整模型卡待核验 |
 | DeepSeek-V4-Pro / Flash | 约 `1.6T / 49B`、`284B / 13B` | active 参数与 CSA/HCA、1M context 的 serving 成本共同决定 | 官方模型卡 |
 | Qwen3.5 / Qwen3.6 | 约 `397B / 17B`、`35B / 3B`；采用 Gated DeltaNet + Gated Attention | active 参数不意味着全部层都是稀疏专家，结构需单独看 | 官方模型卡 |
 | Qwen3-Coder-Next | 约 `80B / 3B`，面向 coding agent | 任务专用训练和工具环境可能比总参数更影响 Agent 表现 | 官方模型卡 |

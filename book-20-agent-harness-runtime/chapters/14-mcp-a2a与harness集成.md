@@ -558,10 +558,12 @@ MCP 和 A2A 落地中常见坑包括：
 协议接入 harness 时，可以把第 `i` 个外部能力抽象为：
 
 ```math
-c_i=(n_i,p_i,k_i,d_i,m_i,\sigma_i,\pi_i,r_i,b_i,u_i,\ell_i,t_i,v_i,y_i)
+c_i=(n_i,p_i,k_i,d_i,m_i,\sigma_i,\pi_i,r_i,h_i,b_i,u_i,\ell_i,t_i,v_i,y_i)
 ```
 
-其中 `n_i` 是能力名称，`p_i` 是协议类型，例如 MCP 或 A2A，`k_i` 是能力类型，例如 tool、resource、prompt 或 remote agent，`d_i` 表示是否完成 discovery / connection，`m_i` 表示 namespace 是否隔离，`\sigma_i` 表示 schema 或 Agent Card 是否有效，`\pi_i` 表示权限策略，`r_i` 表示风险等级，`b_i` 表示上下文和输出预算，`u_i` 表示外部内容信任边界，`\ell_i` 表示 A2A task lifecycle 覆盖，`t_i` 表示 trace 字段覆盖，`v_i` 表示版本捕获，`y_i` 表示 replay 策略。
+其中 `n_i` 是能力名称，`p_i` 是协议类型，例如 MCP 或 A2A，`k_i` 是能力类型，例如 tool、resource、prompt 或 remote agent，`d_i` 表示是否完成 discovery / connection，`m_i` 表示 namespace 是否隔离，`\sigma_i` 表示 schema 或 Agent Card 是否有效，`\pi_i` 表示权限策略，`r_i` 表示风险等级，`h_i` 表示高风险动作是否获得确认，`b_i` 表示上下文和输出预算，`u_i` 表示外部内容信任边界，`\ell_i` 表示 A2A task lifecycle 覆盖，`t_i` 表示 trace 字段覆盖，`v_i` 表示版本捕获，`y_i` 表示 replay 策略。
+
+以下公式都采用显式定义域：对应能力集合非空时才计算；若 `N=0`、A2A 集合 `|\mathcal{A}|=0` 或某个风险分母为零，指标记为 `not_applicable`（demo 中用 `None` 表示）。不使用人为下限分母、epsilon、历史值或默认满分/零分来掩盖没有样本；`L_{\mathrm{need}}` 也必须是非空的状态要求集合。
 
 能力发现覆盖率：
 
@@ -594,9 +596,11 @@ C_{\mathrm{risk}}=
 \frac{
 \sum_{i=1}^{N}\mathbb{1}[r_i\in\mathcal{R}_{\mathrm{high}}]\mathbb{1}[\pi_i=\mathrm{deny}\ \mathrm{or}\ (\pi_i=\mathrm{ask}\ \mathrm{and}\ h_i=1)]
 }{
-\max(1,\sum_{i=1}^{N}\mathbb{1}[r_i\in\mathcal{R}_{\mathrm{high}}])
+\sum_{i=1}^{N}\mathbb{1}[r_i\in\mathcal{R}_{\mathrm{high}}]
 }
 ```
+
+上式要求高风险能力数严格大于零；没有高风险动作样本时，`C_{\mathrm{risk}}` 是 `not_applicable`，不能把人为设定的固定分母当作默认分母。
 
 上下文预算覆盖率：
 
@@ -820,7 +824,11 @@ capabilities = [
 
 
 def rate(items):
-    return round(sum(items) / len(items), 3) if items else 1.0
+    return round(sum(items) / len(items), 3) if items else None
+
+
+def at_least(value, threshold):
+    return value is not None and value >= threshold
 
 
 def trace_ok(capability):
@@ -859,15 +867,14 @@ metrics = {
         for capability in capabilities
     ]),
     "trust_boundary": rate([capability["trust_boundary"] for capability in capabilities]),
-    "a2a_lifecycle": round(
-        sum(
+    "a2a_lifecycle": rate([
+        round(
             len(capability.get("lifecycle_states", set()) & required_a2a_states)
-            / len(required_a2a_states)
-            for capability in a2a_caps
+            / len(required_a2a_states),
+            3,
         )
-        / len(a2a_caps),
-        3,
-    ),
+        for capability in a2a_caps
+    ]),
     "trace": rate([trace_ok(capability) for capability in capabilities]),
     "replay": rate([replay_ok(capability) for capability in capabilities]),
     "version_capture": rate([capability["version_captured"] for capability in capabilities]),
@@ -896,8 +903,12 @@ thresholds = {
 failed_gates = [
     name
     for name, minimum in thresholds.items()
-    if metrics[name] < minimum
+    if not at_least(metrics[name], minimum)
 ]
+not_applicable_metrics = [name for name, value in metrics.items() if value is None]
+
+assert rate([]) is None
+assert not at_least(None, 0.9)
 
 root_causes = {}
 for capability in capabilities:
@@ -933,6 +944,7 @@ for capability in capabilities:
         root_causes[capability["name"]] = causes
 
 print(f"metrics={metrics}")
+print(f"not_applicable_metrics={not_applicable_metrics}")
 print(f"failed_gates={failed_gates}")
 print(f"root_causes={root_causes}")
 print(f"protocol_integration_gate_pass={not failed_gates}")
@@ -942,6 +954,7 @@ print(f"protocol_integration_gate_pass={not failed_gates}")
 
 ```text
 metrics={'discovery': 0.875, 'namespace': 0.875, 'schema': 0.875, 'permission_binding': 1.0, 'high_risk_approval': 0.5, 'auth_scope': 0.75, 'context_budget': 0.75, 'trust_boundary': 0.75, 'a2a_lifecycle': 0.667, 'trace': 0.5, 'replay': 0.625, 'version_capture': 0.625, 'failure_handling': 0.625}
+not_applicable_metrics=[]
 failed_gates=['discovery', 'namespace', 'schema', 'high_risk_approval', 'auth_scope', 'context_budget', 'trust_boundary', 'a2a_lifecycle', 'trace', 'replay', 'version_capture', 'failure_handling']
 root_causes={'mcp.db.query_customer': ['high_risk_without_approval', 'auth_scope_too_broad', 'context_or_output_unbounded', 'trace_incomplete', 'replay_not_deterministic', 'version_missing'], 'filesystem.write_file': ['namespace_collision_risk', 'trust_boundary_missing', 'trace_incomplete', 'failure_handling_incomplete'], 'a2a.test_runner_agent': ['schema_or_agent_card_invalid', 'a2a_lifecycle_incomplete', 'trace_incomplete', 'replay_not_deterministic', 'version_missing', 'failure_handling_incomplete'], 'a2a.deploy_agent': ['capability_not_connected', 'high_risk_without_approval', 'auth_scope_too_broad', 'context_or_output_unbounded', 'trust_boundary_missing', 'a2a_lifecycle_incomplete', 'trace_incomplete', 'replay_not_deterministic', 'version_missing', 'failure_handling_incomplete']}
 protocol_integration_gate_pass=False
