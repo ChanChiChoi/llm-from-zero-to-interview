@@ -93,3 +93,32 @@ AA 的四条 effort 链接和 DataCurve 的四条配置行应归并为 Grok 4.6 
 5. 第十七册与第二十册：function calling、built-in tools、MCP、权限、重试、幂等、验证器和长任务状态账本。
 
 当前状态：资料级闭环。两个排行榜的锚点、xAI 官方发布页、官方模型/API 文档、研究笔记和论文负检索均已具备；没有独立正式章节。参数规模、内部架构、完整训练/后训练 recipe、线上接受率、生产 kernel、独立 benchmark 复现和完整安全评测仍待核验。
+
+## 2026-09-21 当前时点排行榜复验
+
+本节只记录当前时点的排行榜复验，不把榜单测量字段变化解释为 Grok 4.6 模型版本或内部技术变化。模型仍然只来自 Artificial Analysis 与 DataCurve DeepSWE；本轮没有从 xAI 官方目录、论文或其他页面另发现模型。
+
+### Artificial Analysis 当前快照
+
+本轮直接抓取 [Grok 4.6 详情页](https://artificialanalysis.ai/models/grok-4-6) 得到 `/tmp/grok46-aa-20260921.out`，HTTP 200，文件大小 `3,859,075` bytes，SHA-256 为 `a23b19aceae3fee2b1a92421d21358eb5739043c86b6d24a81348d849f887e94`。页面仍是 `Grok 4.6 (high)`，仍列出 `low/medium/high/xhigh`，并且第三方 `releaseDate` 仍为 `2026-08-12`。
+
+当前页面字段为：Artificial Analysis Intelligence Index `44.3113073012592`，median output speed `66.6843264403358 tokens/s`，TTFT `46.00s`（页面原始输入时间约 `45.9997646444999s`），500K context，输入/输出价格 `$2/$6`，proprietary，parameters 未公开。9 月 15 日缓存详情页的对应字段约为 `44.4050073012592`、`58.5035284934629 tokens/s` 和 `40.8595908855s`；这两组值属于不同采集时点的第三方测量，不能据此推断模型 revision、训练变化或 API 合同变化。
+
+### DataCurve 当前快照
+
+本轮通过 `10.237.126.170:1234` 获取 `/tmp/ds-current-1234.html`，文件大小 `268,571` bytes，SHA-256 为 `67a6b5350a1bc986e814097a87928f5064ba6955ca78be44795e11b2413f2870`。页面更新时间仍为 2026-09-03，`generated_at` 仍为 `2026-09-03T22:24:37.984682+00:00`，评测规模为 113 tasks、91 repositories、5 languages，统一 harness 为 `mini-swe-agent`。当前重新提取的四行与既有记录一致：
+
+| effort | 配置 | Pass@1 | Pass@4 | 平均成本 | 平均输出 token | 平均 Agent steps |
+|---|---|---:|---:|---:|---:|---:|
+| low | `mini_swe_agent_grok_4_6_low` | 41.648% | 69.027% | `$1.0424` | 16,458 | 44.19 |
+| medium | `mini_swe_agent_grok_4_6_medium` | 67.478% | 84.071% | `$3.4490` | 49,764 | 70.29 |
+| high | `mini_swe_agent_grok_4_6_high` | 65.188% | 84.956% | `$4.3849` | 61,161 | 78.96 |
+| xhigh | `mini_swe_agent_grok_4_6_xhigh` | 66.741% | 84.956% | `$5.4977` | 71,404 | 87.22 |
+
+这些结果仍绑定 `mini-swe-agent`、113 个任务、4 runs、工具、环境、重试和 verifier；当前复验没有新增 DataCurve 结果，也不能把 medium 高于 high 的单次观察解释成基础模型能力排序。
+
+### xAI 官方页面的当前网络边界
+
+本轮重新尝试 [Grok 4.6 发布公告](https://x.ai/news/grok-4-6)、[官方模型页](https://docs.x.ai/developers/grok-4.6)、Markdown 模型页、Reasoning、Context Compaction、Tools 和 Remote MCP 文档。`10.237.126.170:1234` 返回 EOF/超时，`10.24.27.134:7890` 和 `10.24.27.134:8098` 均连接超时；因此本轮没有新的 xAI 官方网页响应。已有 2026-09-15 的官方快照继续作为历史证据，但不能伪装成本轮新鲜响应。
+
+当前结论不变：Grok 4.6 仍为资料级闭环，不增加新的技术结论或专属架构章节。参数、架构、完整训练/后训练 recipe、专属技术报告、公开权重、生产 kernel、硬件 profiling、线上 acceptance 和独立 benchmark 复现仍待核验；下一步继续从两个排行榜的八家重点厂商条目选择或复验锚点。

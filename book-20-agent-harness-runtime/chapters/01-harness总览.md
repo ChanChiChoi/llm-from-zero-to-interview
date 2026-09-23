@@ -509,6 +509,14 @@ GPT-5.5、GPT-5.6 Sol/Terra/Luna、Claude、Gemini、DeepSeek-V4、Qwen3.5/3.6�
 
 Qwen-AgentWorld、Kimi Agent Swarm 这类资料还提醒我们：Agent 的能力边界由模型、环境和 harness 共同决定。模型支持更多子 Agent 或更长任务，不意味着系统已经解决状态隔离、错误恢复和责任归属。
 
+### 1.13.2 GPT-5.6 Luna：服务档位与状态协议要分账
+
+GPT-5.6 Luna 是 GPT-5.6 家族的服务档位锚点，不能把 `Luna`、`reasoning.effort`、`standard/pro` mode 和 Artificial Analysis 的 `max` 标签合并成一个“模型强弱”字段。面试或评测 manifest 至少要记录精确 model ID、snapshot、mode、effort、工具、上下文策略、harness、任务集和 verifier。当前双榜结果仍分别属于 AA 的第三方 max 测量与 DataCurve 的 `mini-swe-agent` 组合系统。
+
+运行时状态也有不同责任：`reasoning.context`/opaque reasoning item 负责跨轮推理连续性，prompt cache breakpoint 负责服务侧稳定前缀复用，compaction item 负责长任务上下文压缩，Responses output item 负责工具循环回放。它们都不是应用永久记忆，也不是可以直接读取的 chain-of-thought 或 GPU KV cache。函数调用后若手工裁剪 reasoning item，可能破坏下一步规划；但回放状态仍不能赋予模型工具执行权限。
+
+Luna 的高并发定位不能替代容量实验。1.05M context、922K maximum input、128K maximum output、272K 整次请求价格阈值、reasoning token 和工具结果必须分别进入 token、缓存、延迟、重试、权限和单位成功成本账本。tool search/Programmatic Tool Calling 可以减少 schema 往返或上下文负担，但 schema 版本、权限、沙箱、幂等、超时和最终 verifier 仍由 harness 负责。
+
 ## 1.14 常见误区
 
 误区一：Harness 就是把工具列表塞进 prompt。

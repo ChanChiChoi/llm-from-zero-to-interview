@@ -739,3 +739,35 @@ audit_consistent=True
 8. Hugging Face Transformers multimodal chat templates，https://huggingface.co/docs/transformers/main/en/chat_templating_multimodal
 
 论文和模型卡可以支持公开的 token 化、上下文设置和实验条件；processor/API 文档可以支持某个版本的输入协议；目标系统的有效上下文、质量曲线、缓存行为和单位成功成本必须在目标版本和硬件上独立测量。Native multimodal 是能力或产品标签，不应被写成未公开的内部架构事实。
+
+## Qwen3-VL：视频时间戳也是预算字段
+
+Qwen3-VL 的视频预算不只有视觉 token 数。processor 还要为 temporal/height/width position、Video Timestamp、DeepStack residual、文本推理、工具 schema、工具结果和输出预留状态空间。`262,144` context 是接口/config/训练阶段字段，不保证任意长视频中的关键帧都被有效使用。
+
+设计长视频实验时，应同时记录媒体 revision、采样率、frame index、真实 timestamp、视觉 grid、token 数、chunk offset、未覆盖区间和回放结果；用 Interleaved-MRoPE 处理三轴位置，用显式 timestamp 提供可读时间证据。完整模型证据见 [`qwen3-vl-source-notes.md`](../../research/model-update-2026-09/qwen3-vl-source-notes.md)，不要把 Qwen3-Omni 的音频 token rate 或其他 Qwen 的 context 字段迁移到 Qwen3-VL。
+
+## 14.19 Qwen3-Omni：音频 token rate、真实时间与输出码本
+
+Qwen3-Omni 提供一个适合面试的多模态预算案例。AuT 的公开音频 token rate 约为 12.5 Hz，即约 80 ms 一个音频时间步；TM-RoPE 又把视频真实 timestamp 对齐到相同时间尺度。但这两个数字只描述输入/位置粒度，不描述最终音频首包或播放体验。
+
+输出侧还要单独计算首码本 AR、residual-codebook MTP、Code2Wav、packet 和播放器缓冲。于是媒体预算至少包含：输入媒体 token、Thinker reasoning/tool token、Talker codebook steps、waveform chunk、网络和 verifier。把“66K context”“80 ms token”或报告 `234 ms` 首包数字相加，不能得到可用 SLO；必须绑定 variant、媒体采样、后端、硬件、并发和缓存命中实测。
+
+## 14.20 Qwen3.7 Plus：GUI 交互也是多模态预算
+
+Qwen3.7 Plus 的官方托管文档把图像和视频输入连接到读屏、GUI 交互、视觉参考生成代码和移动端导航。这个定位带来一个容易漏记的预算项：截图不是普通的一张图片，它还携带窗口尺寸、设备像素比、页面 revision、坐标系和动作后的观察证据。
+
+一次可回放的 GUI 请求至少应有：
+
+```text
+media hash/size/resize/crop
+frame index/timestamp/visual token estimate
+text/tool schema/tool result/thinking/output reservation
+screen revision/window/viewport/device pixel ratio
+action proposal/permission/executor receipt/observation/verifier
+```
+
+1M context 只能说明服务合同的窗口上限，不能说明所有截图细节都会被保留，更不能说明坐标动作一定成功。预算器应先把媒体处理结果和工具历史放进账本，再为 action schema、权限回执、观察和 verifier 预留空间。若预算不足，回退策略必须明确丢弃了哪些帧、分辨率或历史，并生成 coverage report；不能静默截掉包含按钮状态或错误提示的关键截图。
+
+还要把媒体预算和执行预算分开。`Structured Outputs` 可以保证 action JSON 形状，`Function Calling` 可以承载工具调用协议，但真实点击、输入和导航仍由宿主 executor 完成。页面 revision 变化后，旧坐标应失效并触发重新观测。于是有效能力应按四层验收：媒体被接受、关键证据被保留、模型提出了合法动作、宿主执行并验证了副作用。
+
+Qwen3.7 Plus 官方文档还把 Context Caching、Prefix Completion、Function Calling 和 Web Search 按 region/scope 列出。它们都可能改变输入预算或状态回放，但不能与 GPU KV cache 或应用 memory 混为一谈。缓存 key 至少应绑定模型 alias/snapshot、region/scope、媒体 revision 和 tool schema hash；价格则绑定输入长度档位、cache 状态和 provider，不用 Artificial Analysis 的一组价格替代实际合同。

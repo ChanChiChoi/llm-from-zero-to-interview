@@ -1,6 +1,6 @@
-# K2 Horizon MoVA-36B-A4B：从 value routing 到长上下文 Serving
+# K2 Horizon 3.7B 与 MoVA-36B-A4B：从 dense 对照、value routing 到长上下文 Serving
 
-> 本章核验日期：2026-09-14。K2 候选由 [Artificial Analysis 中文榜单入口](https://artificialanalysis.ai/zh) 发现；模型事实主要来自 [IFM/K2-Horizon-MoVA-36B-A4B 官方模型卡](https://huggingface.co/IFM/K2-Horizon-MoVA-36B-A4B)、固定 revision `de2d2efb32ed7639b7140bccbefe131a0063a982` 的配置与实现，以及模型卡引用的 [SGLang K2 Horizon cookbook](https://docs.sglang.io/cookbook/autoregressive/IFM/K2-Horizon)。本章把发布方字段、代码语义、教学抽象和生产实测严格分开。
+> 本章核验日期：2026-09-22。K2 候选由 [Artificial Analysis 中文榜单入口](https://artificialanalysis.ai/zh) 发现；36B/A4B 事实主要来自 [IFM/K2-Horizon-MoVA-36B-A4B 官方模型卡](https://huggingface.co/IFM/K2-Horizon-MoVA-36B-A4B)、固定 revision `de2d2efb32ed7639b7140bccbefe131a0063a982` 的配置与实现；3.7B 对照来自 [IFM/K2-Horizon-3.7B](https://huggingface.co/IFM/K2-Horizon-3.7B) 当前 revision、migration manifest、[vLLM recipe](https://recipes.vllm.ai/IFM/K2-Horizon-3.7B) 和 [SGLang PR #37654](https://github.com/sgl-project/sglang/pull/37654)。本章把发布方字段、代码语义、教学抽象和生产实测严格分开。
 
 ## 1. 先看一个真实问题：为什么 4B active 仍然可能很重
 
@@ -294,7 +294,57 @@ K2 的 `L=48`、`H_KV=8`、`d=128`，BF16 每元素 2 bytes。这里的 `2` 是 
 
 训练阶段还要加 optimizer states、gradients、activation checkpoint 和 all-reduce；Serving 阶段通常没有 optimizer states，却会承受 KV cache、continuous batching、专家通信和长尾请求。不能用训练显存数字直接回答线上并发，也不能用一个单请求 KV 公式替代训练容量规划。
 
-## 9. MOPD：先分清同系列卡片的证据范围
+## 9. 3.7B dense 对照：相同长上下文目标，不同计算路径
+
+### 9.1 为什么需要一个 dense 对照
+
+K2 Horizon 36B/A4B 和 K2 Horizon 3.7B 都公开了 512K 级上下文，也都使用 32 个 query heads、8 个 KV heads 和 128 head dimension。若只看模型名称，很容易把 3.7B 当成 36B 的缩小版；固定 revision 的配置实际上给出了一个更清晰的对照：3.7B 是 36 层 dense decoder，而 36B 在后 45 层同时启用 MoVA value routing 和 FFN MoE。
+
+| 维度 | K2 Horizon 3.7B | K2 Horizon MoVA 36B/A4B |
+|---|---|---|
+| 当前模型类 | `K2HorizonForCausalLM` | 同系列 MoVA 实现 |
+| 层数 | 36，全部 dense | 48；前 3 层 dense，后 45 层 sparse |
+| value 路径 | dense projection，`mova_num_experts=0` | 64 value experts，top-4 |
+| FFN | dense，intermediate size 10240 | 100 routed experts，top-8，1 shared expert |
+| attention | 32Q/8KV GQA，head dim 128 | 32Q/8KV GQA，head dim 128，并带 attention gate |
+| 上下文配置 | 524,288，`sliding_window=null` | 524,288，`sliding_window=null` |
+| 主要 serving 成本 | dense GEMM、KV、长 prefill | 两套路由 dispatch、EP/TP、KV、通信和 workspace |
+
+因此，3.7B 适合做一个教学和工程上的 dense baseline：在相近的 hidden/head/context 语境里，单独测量 dense GEMM、KV cache、reasoning/tool parser 和长 prefill；36B 则额外引入 value/FFN 两条路由、负载倾斜、token dispatch 与 expert parallel。不能把 3.7B 的 dense 速度或显存直接乘一个参数比例，反推 36B 的 serving 成本。
+
+### 9.2 core、embedding 和 dtype 的参数账本
+
+3.7B 的名称、权重文件和旧文档不是同一个参数字段：当前 BF16 权重 index 的 `total_size=10,116,510,720` bytes 对应约 5.06B 个存储参数；vLLM recipe 也写 `5.06B DENSE`。同仓库较旧的 `APPENDIX.md` 另写 `3.78B core / 5.06B including embeddings`，但同时保留 `XllmForCausalLM` 和 FP32 字段。
+
+面试回答应明确三件事：
+
+1. AA 的 `3.7B` 是排行榜身份标签。
+2. `3.78B core` 与 `5.06B including embeddings` 可以是 core/embedding 的不同口径。
+3. 当前 config、迁移清单和权重 index 支持 `K2HorizonForCausalLM` + BF16；旧 `XllmForCausalLM`/FP32 只能标为旧 revision 或残留文档，不能覆盖当前运行时证据。
+
+### 9.3 3.7B 的长上下文训练和 RL 分支
+
+3.7B 模型卡把训练写成阶段增量：pretraining 为 22.9T/8K，midtraining 依次为 1.1T/32K、498B/128K、110B/512K 和 199B/512K，随后 SFT Phase 1 为 199B/512K、Phase 2 为 50B/512K。阶段间从前一 checkpoint 继续，所以不能把每一行当成互不相干的数据集，也不能把 512K 归因于某一个配置字段。
+
+RL 还分出 Math、Code 和 STEM-Code expert；模型卡描述 merge 时 self-attention 使用 ISO merge、其他权重使用 RAM。它公开了阶段和合并规则的高层结构，却没有公开完整 loss、采样配方、系数、教师数量和分布式实现。中间 checkpoint 的公开则允许比较能力随上下文阶段、RL 分支和 SFT 阶段的变化。
+
+这和第 3 节讨论的 36B 运行时 expert 不同：3.7B 的 RL expert 是训练分支/权重合并概念，不能写成 forward 时的 MoE expert；同样也不能把同系列 0.9B 卡片的 MOPD 细节自动迁移到 3.7B。
+
+### 9.4 migration manifest 和 serving revision
+
+`/tmp/k2-migration-fixed-20260922.out` 显示 3.7B 的 artifact 迁移为 `k2_aurora -> k2_horizon`，目标类 `K2HorizonForCausalLM`，`weight_mode=copy`、`weights_reencoded=false`、BF16，36 shards/327 tensors。迁移清单证明的是 artifact 登记与权重复制关系，不是重新训练，也不单独证明所有后端行为等价；tokenizer、chat template、reasoning 参数、tool parser 和输出协议仍需回归。
+
+部署资料也有 revision 边界：vLLM recipe 更新时间为 2026-09-02，给出 H200 的 5.06B dense/512K 配方和 `k2_horizon` reasoning/tool parser；SGLang PR #37654 给出 3.7B、TP1、BF16、FlashAttention-3 的 H200 配方，但引用的固定 revision `c177771836a4c460743c00002c22483f6f18d1eb` 当前通过 HF raw/API 返回 404。正确结论是“部署文档旧 revision 当前不可解析”，不是“模型不存在”。
+
+SGLang 发布方还报告 concurrency 1 时 TTFT 158.71 ms、TPOT 5.10 ms、1712.15 tok/s/GPU，concurrency 64 时 TTFT 5174.71 ms、TPOT 28.83 ms、16998.94 tok/s/GPU，GSM8K 92.00%（两次 92.12%/91.89%）。这些数字绑定发布方 recipe、H200、输入输出长度和测试脚本；它们不能替代本机 profiling，也不能与 DataCurve Agent 分数合并。
+
+### 9.5 面试结论
+
+可以这样概括：
+
+> K2 Horizon 3.7B 是一个 dense 长上下文对照模型，不是 36B MoVA 的简单缩小版。当前 revision 是 `K2HorizonForCausalLM`，36 层、32Q/8KV GQA、524K position，MoE/MoVA expert 数为零；36B 则在后 45 层加入 MoVA top-4 和 FFN top-8。两者共享长上下文目标，但训练阶段、权重参数口径、迁移 artifact、serving revision 和 benchmark harness 必须分别固定。
+
+## 10. MOPD：先分清同系列卡片的证据范围
 
 ### 9.1 0.9B 卡片公开了什么
 
@@ -327,9 +377,9 @@ K2 的 `L=48`、`H_KV=8`、`d=128`，BF16 每元素 2 bytes。这里的 `2` 是 
 
 “都有 expert”不等于“是同一个算法”。这是架构阅读和训练 recipe 阅读中很常见的偷换。
 
-## 10. Serving：模型结构最终要落到启动参数
+## 11. Serving：模型结构最终要落到启动参数
 
-### 10.1 vLLM 路径
+### 11.1 vLLM 路径
 
 模型卡给出的 vLLM 主线包含 TP=2、expert parallel、BF16、remote code，以及 `k2_horizon` reasoning/tool parser：
 
@@ -347,7 +397,7 @@ vllm serve IFM/K2-Horizon-MoVA-36B-A4B \
 
 这里的 `main` 是示例分支，不是永久 revision。评测应把 `--revision` 固定到具体 branch/commit，并保存 tokenizer、chat template、parser 和后端版本。
 
-### 10.2 SGLang 路径
+### 11.2 SGLang 路径
 
 模型卡引用的 SGLang 配方在 2 张 H200 上验证，使用 TP=2、EP=2、FlashAttention-3 和路由 GEMM override：
 
@@ -373,21 +423,21 @@ python3 -m sglang.launch_server \
 4. reasoning/tool parser 的格式正确率。
 5. 不同 revision 与不同后端的输出一致性。
 
-### 10.3 请求协议也属于模型接入的一部分
+### 11.3 请求协议也属于模型接入的一部分
 
 模型卡推荐 `reasoning_effort="high"`、`temperature=1.0`、`top_p=0.95`，思考内容返回 `reasoning_content`，答案返回 `content`。工具格式支持 `json`、`xml`、`xml_typed`，默认是 `xml`。
 
 这仍然是协议字段，不等于模型天然拥有网络、文件或终端权限。工具执行器、沙箱、审批、超时、回滚和审计由宿主系统负责。
 
-## 11. Uno：K2 7B 周边的 diffusion adapter
+## 12. Uno：K2 7B 周边的 diffusion adapter
 
-### 11.1 它从哪里来
+### 12.1 它从哪里来
 
 `K2-Horizon-7B-Uno` 不是本轮两个排行榜中的独立候选行。它是在 K2 7B 官方资料链上追到的关联 adapter，并由 [Uno 论文](https://arxiv.org/abs/2609.04010)解释其通用方法。本项目将它记录为“锚点周边技术”，而不是新模型发现。
 
 这一点很重要：Artificial Analysis 的 K2 Horizon 条目负责告诉我们“值得围绕 K2 查什么”；官方模型卡和论文负责告诉我们“Uno adapter 做了什么”。两种来源的职责不能反过来。
 
-### 11.2 AR pathway 和 diffusion pathway
+### 12.2 AR pathway 和 diffusion pathway
 
 Uno 的核心拆分是：
 
@@ -404,7 +454,7 @@ Uno 的核心拆分是：
 
 论文使用“lossless”时有明确的采样协议语境：目标是保持底层 AR 模型分布，而不是承诺任何硬件、batch、量化、parser 或工具 harness 下都没有质量损失。接受率、有效 token、回退次数、验证成本和 p95 仍需要在目标后端独立测量。
 
-### 11.3 为什么它是 K2 的好周边技术
+### 12.3 为什么它是 K2 的好周边技术
 
 MoVA 主要回答“如何减少每个 token 的主要计算和扩大模型容量”；Uno 主要回答“如何让自回归 decode 更并行”。二者可以放在同一张 serving 设计图上，却不是同一层的优化：
 
@@ -416,9 +466,9 @@ MoVA 主要回答“如何减少每个 token 的主要计算和扩大模型容�
 
 加载 Uno 时不能只记录 adapter 名称。至少要同时记录 base model、adapter revision、LoRA target modules、采样器、验证规则和后端版本；否则“同一个 Uno”可能对应不同的 base 和不同的接受率。
 
-## 12. 证据边界和常见错误
+## 13. 证据边界和常见错误
 
-### 12.1 当前可以说
+### 13.1 当前可以说
 
 - Artificial Analysis 2026-09-14 页面快照发现了 K2 Horizon 系列；快照字段不是官方发布日期或参数证明。
 - `IFM/K2-Horizon-MoVA-36B-A4B` 官方卡片和固定 revision 支持本章的 36B/4B、48 层、GQA、MoVA、MoE、512K 配置及阶段训练表。
@@ -426,7 +476,7 @@ MoVA 主要回答“如何减少每个 token 的主要计算和扩大模型容�
 - 0.9B 同系列卡片公开了 RL specialist merge 和 MOPD 的高层描述。
 - Uno 是 K2 7B 的关联 adapter/论文技术，不是两个排行榜中的独立候选发现。
 
-### 12.2 当前不能说
+### 13.2 当前不能说
 
 - 不能把 4B active 当作 4B dense 的显存、FLOPs 或端到端速度。
 - 不能把 512K 配置写成“所有长文任务都可靠”或“使用 sliding window”。
@@ -435,7 +485,7 @@ MoVA 主要回答“如何减少每个 token 的主要计算和扩大模型容�
 - 不能把 HF 模型页、论文或 SGLang 文档出现的关联模型当成绕过排行榜的新增候选。
 - IFM blog 正文本轮被 Cloudflare challenge 拦截，不能声称已经阅读正文。
 
-## 13. 面试题
+## 14. 面试题
 
 ### 问题 1：MoVA 和普通 MoE 的区别是什么？
 
@@ -469,7 +519,7 @@ MoVA 主要回答“如何减少每个 token 的主要计算和扩大模型容�
 
 回答要点：不是。Uno 是 K2-Horizon-7B 的关联 diffusion/LoRA adapter，冻结 AR base，新增轻量 diffusion path，用 `Psi-Spec` 做并行 draft 和 AR rejection verification。它属于 K2 周边 decode 加速技术，不是 36B MoVA 的架构改名，也不是排行榜独立候选。
 
-## 14. 练习
+## 15. 练习
 
 1. 把 toy router 改成同时输出 FFN top-8 和 MoVA top-4 的 assignment histogram，分别报告两类 expert 的负载方差，不要把它们合并成 top-12。
 2. 取 `B=1,T=131072` 和 `B=2,T=4096` 两种请求，按本章 KV 公式计算 BF16 K/V cache，分别加上 2-way dispatch 的 one-way payload，说明为什么 cache 和通信随不同变量增长。
@@ -477,7 +527,7 @@ MoVA 主要回答“如何减少每个 token 的主要计算和扩大模型容�
 4. 为 0.9B 的 specialist merge + MOPD 画训练状态图，再为 36B 的公开训练表画状态图，标出哪些节点只有同系列参考证据。
 5. 在相同任务、revision、硬件和 harness 下比较 `reasoning_effort=high` 的普通 decode 与 Uno draft/verify，至少报告有效 token、接受率、回退次数、质量、TTFT、TPOT 和 p95。
 
-## 15. 本章来源
+## 16. 本章来源
 
 1. [Artificial Analysis K2 Horizon MoVA 36B A4B](https://artificialanalysis.ai/models/k2-horizon-mova-36b-a4b)：候选发现入口；页面字段按第三方快照处理。
 2. [IFM/K2-Horizon-MoVA-36B-A4B](https://huggingface.co/IFM/K2-Horizon-MoVA-36B-A4B)：模型卡、训练概览、checkpoint、Serving 和协议字段。
@@ -487,4 +537,6 @@ MoVA 主要回答“如何减少每个 token 的主要计算和扩大模型容�
 6. [K2-Horizon-7B-Uno model card](https://huggingface.co/IFM/K2-Horizon-7B-Uno)：K2 7B 关联 adapter 入口；不是两个排行榜的候选发现入口。
 7. [Unlocking Lossless Speedups in LLMs via Discrete Diffusion](https://arxiv.org/abs/2609.04010)：Uno、Diffusion Distillation 和 Psi-Spec 的方法来源。
 8. [SGLang K2 Horizon cookbook](https://docs.sglang.io/cookbook/autoregressive/IFM/K2-Horizon)：TP/EP、FlashAttention-3 和 router GEMM override 的部署入口。
-
+9. [K2 Horizon 3.7B model card](https://huggingface.co/IFM/K2-Horizon-3.7B)：当前 `K2HorizonForCausalLM`、36 层 dense、GQA、524K、训练阶段、RL merge 和 checkpoint 入口。
+10. [K2 Horizon 3.7B vLLM recipe](https://recipes.vllm.ai/IFM/K2-Horizon-3.7B) 与 [SGLang PR #37654](https://github.com/sgl-project/sglang/pull/37654)：H200 serving、parser、TP1/BF16/FlashAttention-3 和发布方结果；不替代本机 full-weight profiling。
+11. `/tmp/k2-migration-fixed-20260922.out`、`/tmp/hf-api-7890-20260922.out` 和 `/tmp/aa-k2-horizon-3-7b-1234-20260922.html`：本轮固定 revision、migration、榜单快照和哈希的本地证据；临时文件不作为仓库长期 artifact。

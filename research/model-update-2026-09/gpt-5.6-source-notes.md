@@ -1,6 +1,6 @@
 # GPT-5.6：推理状态、缓存与 Agent 运行时资料摘记
 
-核验日期：2026-09-14。本笔记只把 GPT-5.6 在 Artificial Analysis 与 DataCurve DeepSWE 中的条目作为锚点，再沿 OpenAI 官方模型页、API 文档和开发者博客追踪周边技术。官方当前没有公开 GPT-5.6 的参数规模、网络结构或完整训练报告；运行时字段不能反推出这些内部事实。
+核验日期：2026-09-22；当前时点榜单复验：2026-09-22（保留 2026-09-21 的历史测量）。本笔记只把 GPT-5.6 在 Artificial Analysis 与 DataCurve DeepSWE 中的条目作为锚点，再沿 OpenAI 官方模型页、API 文档和开发者博客追踪周边技术。官方当前没有公开 GPT-5.6 的参数规模、网络结构或完整训练报告；运行时字段不能反推出这些内部事实。
 
 ## 1. 榜单锚点与归并口径
 
@@ -96,12 +96,16 @@ GPT-5.6 的一项关键运行时差异是：在多步会话中，模型默认会
 ### 7.1 Tool search 与 Programmatic Tool Calling
 
 - tool search 允许把不常用的函数定义延迟加载；开发者可以把函数放入 namespace，并给不常用的工具设置 `defer_loading: true`，模型需要时再搜索并加载定义。官方工具页说明 GPT-5.4 及以后模型支持 tool search，因此 GPT-5.6 属于支持范围。
+- 官方把 tool search 分成两种协议路径：[hosted tool search](https://developers.openai.com/api/docs/guides/tools-tool-search) 由 OpenAI 在同一个 response 中搜索已声明的函数、namespace 或 MCP server；[client-executed tool search](https://developers.openai.com/api/docs/guides/tools-tool-search) 则由模型发出 `tool_search_call`，应用按项目/租户状态完成搜索，再以相同 `call_id` 回传 `tool_search_output`。前者的 `execution` 为 `server` 且 `call_id` 为 `null`，后者的 `execution` 为 `client`，返回的工具集合才进入后续可调用集合。
+- 两种路径都会把已加载工具追加到上下文末端，以尽量保留已有缓存前缀；这降低 schema 的初始 token，但把工具发现、schema 校验、版本、权限和可信来源变成了新的会话状态。`tool_search` 或 `defer_loading` 只改变发现/加载，不授予文件、网络、shell 或业务写权限。
 - Programmatic Tool Calling 让模型生成 JavaScript 来编排一组工具调用，减少“模型调用一次、应用回传一次”的往返；安全执行、工具权限、失败处理和最终结果回传仍由宿主负责。
 - `parallel_tool_calls`、工具 schema、MCP approval 和 function output 都会改变 Agent 的观测轨迹。评测时应将它们记录在配置中，而不是只记录模型名称。
 
 ### 7.2 Agents API、Agents SDK 与 Responses API
 
-官方 [Agents](https://developers.openai.com/api/docs/guides/agents.md) 将三者分工为：Agents API 由 OpenAI 管理 agent loop 和 Codex harness；Agents SDK 把 agent loop、工具、handoff 和部署控制交给应用；Responses API 直接暴露模型 response、历史和工具循环。Agents API 文档还列出 automatic context compaction、multi-agent orchestration、programmatic tool calling 和 MCP 支持。
+官方 [Agents](https://developers.openai.com/api/docs/guides/agents.md) 将三者分工为：Agents API 由 OpenAI 管理 agent loop、Codex harness、session configuration、turns 和 items；Agents SDK 把 agent loop、工具、handoff、部署、存储、审批和 runtime 集成控制交给应用；Responses API 直接暴露模型 response、历史和工具循环，应用自行组合 Agent。Agents API 文档还列出 automatic context compaction、multi-agent orchestration、programmatic tool calling 和 MCP 支持。
+
+这三个入口不是三个模型，也不是同一 session 的不同 SDK 名称：Agents API session、Agents SDK session、Responses conversation 和 sandbox 是不同资源，状态保存、清理、工具执行环境和审计责任不同。面试中应先选运行时所有者，再讨论模型能力：OpenAI 托管 harness、应用自持 loop，或者直接管理 response item。
 
 这组 API 是运行时层的选择，不是三个不同模型。面试回答时应把模型能力、Responses 协议、Agent harness、执行环境和业务应用拆成层次：模型提出计划/工具意图，协议携带 output items，harness 维护状态和循环，执行器决定真实权限，业务系统负责审批与落库。
 
@@ -115,6 +119,8 @@ GPT-5.6 的一项关键运行时差异是：在多步会话中，模型默认会
 压缩 item 会携带继续任务所需的状态和 reasoning，但本身是 opaque、不可供人阅读的摘要。stateless input-array chaining 要把 output items（包括 compaction item）接回下一轮；使用 `previous_response_id` 时传新的 user message 即可让服务端携带它。独立 compact endpoint 返回的窗口不能再手工裁剪，否则可能破坏 canonical context。
 
 Compaction 解决的是上下文窗口和长期运行问题，不等于把全部历史无损保存，也不等于 prompt cache。应用仍需测量压缩前后的成功率、工具错误、重试、token、延迟和缓存命中。
+
+Prompt Caching 文档进一步明确：`context_management` 触发 compaction 后，渲染上下文从第一个变化位置开始可能不再匹配旧 cache prefix；工具搜索虽把新工具追加到末尾以保留前缀，但 compaction 会替换较早对话。于是长期 Agent 的成本账本至少要同时记录 `cached_tokens`、`cache_write_tokens`、compaction 次数、压缩后输入长度和任务成功率，不能只看“窗口变短了”。
 
 ## 8. 官方开发者博客给出的系统层证据
 
@@ -183,3 +189,43 @@ input -> reasoning item -> tool call -> tool result -> reasoning continuation ->
 - 第五册与第八册：把 `reasoning`、`pro`、tool use 和 compaction 记录为运行时控制或系统行为，不能反推后训练 loss、RL 配方或安全训练细节。
 
 完整来源与候选状态已同步到 [`source-index.md`](source-index.md)、[`model-inventory.md`](model-inventory.md)、[`inventory-interpretation.md`](inventory-interpretation.md)、[`plan_v2.md`](../../plan_v2.md) 和 [`progress_v2.md`](../../progress_v2.md)。
+
+## 12. 2026-09-21 当前时点榜单复验与 OpenAI 访问边界
+
+本轮仍只复验已经出现在两个排行榜的 `GPT-5.6 Luna`，没有从 OpenAI 官方目录另发现模型。Artificial Analysis 精确详情页 [GPT-5.6 Luna (max)](https://artificialanalysis.ai/models/gpt-5-6-luna) HTTP 200，快照为 `3,861,087` bytes、SHA-256 `00c856c1ecc7bb7d79363f4d2b6814e9cd15a6a02cb8f0c99060862dfbd99cac`；页面第三方字段为 release `2026-07-09`、Intelligence Index `37.3244239690841`、median output speed `164.509614645781 tokens/s`、1M context、约 `$0.20/$1.20` input/output。它是 `max` 配置的第三方测量，不是 OpenAI 内部能力或版本变更证明。
+
+DataCurve 当前快照为 `268,571` bytes、SHA-256 `67a6b5350a1bc986e814097a87928f5064ba6955ca78be44795e11b2413f2870`。精确行 `mini_swe_agent_gpt_5_6_luna_max` 为 `n_attempted=448`、`n_passed=301`、Pass@1 `0.671875`、Pass@4 `0.9026548672566371`、平均成本 `$0.6056233620535714`、平均输出 `73399.70758928571` token、平均 `101.68080357142857` Agent steps；该结果绑定 `mini-swe-agent`、effort、工具、任务环境、超时、重试和 verifier，不能与 AA 指数拼成裸模型能力。当前 `xhigh/high/medium/low` 行也存在，但不把它们合并成一个模型分数。
+
+本轮经 `10.237.126.170:1234` 访问 `developers.openai.com` 的模型索引、Luna 模型页、Reasoning 和 Prompt Caching 页面均返回 HTTP `403`；`7890`/`8098` 对同一官方路径超时；直连因 DNS 解析失败。故本轮没有把旧的官方页面快照冒充新鲜响应，也没有改变既有官方资料结论。当前仍是**双榜资料级闭环**：已有官方运行时资料、研究笔记和全局配套，但没有独立 GPT-5.6 架构/训练报告；下一步只在官方页面恢复可核验时补新鲜哈希和行为差异，不新增重复架构章节。
+
+## 13. 2026-09-22 当前时点复验与官方页面恢复
+
+本节只记录已存在的 GPT-5.6 Luna 锚点在 2026-09-22 的页面复验，不从 OpenAI 官方目录另发现模型，也不把 provider 测量漂移解释成模型升级。
+
+### 13.1 两个排行榜的当前快照
+
+- Artificial Analysis [GPT-5.6 Luna (max)](https://artificialanalysis.ai/models/gpt-5-6-luna) HTTP 200；快照 `3,861,318` bytes，SHA-256 `1b425d8f2a93f8418702ac7acbb62b26850b98fe20680f82205bed5fce38fed0`。第三方字段为 release `2026-07-09`、Intelligence Index `37.3244239690841`、median output speed `158.728370482714 tokens/s`、cost per Intelligence Index task `0.17829726152289094`、1M context、页面价格 input/output `$0.20/$1.20`。
+- DataCurve [DeepSWE](https://deepswe.datacurve.ai/) HTTP 200；当前快照 `268,036` bytes，SHA-256 `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7e6e095ad59f1f1`。精确行 `mini_swe_agent_gpt_5_6_luna_max` 为 attempted `448`、passed `301`、Pass@1 `67.1875%`、Pass@4 `90.26548672566371%`、平均成本 `$0.6056233620535714`、平均输出 `73399.70758928571` tokens、平均 Agent steps `101.68080357142857`、median peak context `201647` tokens。
+- DataCurve 这一行仍是 `mini-swe-agent + tools + task environment + verifier` 的系统结果；AA 指数、速度和 task cost 是另一种第三方配置/provider 测量。9 月 21 日的 AA `164.509614645781 tokens/s`、`3,861,087` bytes 及 DataCurve `268,571` bytes 快照保留为历史证据，不与本轮拼成趋势。
+
+### 13.2 2026-09-22 官方页面哈希
+
+本轮通过 `10.24.27.134:7890` 取得 HTTP 200 的 Markdown 页面；以下哈希对应实际抓取内容：
+
+| 页面 | bytes | SHA-256 |
+|---|---:|---|
+| [GPT-5.6 Luna](https://developers.openai.com/api/docs/models/gpt-5.6-luna.md) | 3,744 | `1f425d8f2a93f8418702ac7acbb62b26850b98fe20680f82205bed5fce38fed0` |
+| [Reasoning models](https://developers.openai.com/api/docs/guides/reasoning.md) | 70,253 | `91604df954335250d16e33f3b07ebbfa3e6e2b7f821f0722ad7a69b9d586719a` |
+| [Agents](https://developers.openai.com/api/docs/guides/agents.md) | 5,432 | `df4f61b609550619a3f9e445c66d28318b9f681affe1a819ef0098cde32bf43a` |
+| [Using tools](https://developers.openai.com/api/docs/guides/tools.md) | 33,282 | `4722fa102070178c1a1d603e718c69575c7c1768fa901218eab359bafdcba341` |
+| [Tool search](https://developers.openai.com/api/docs/guides/tools-tool-search.md) | 39,288 | `9d6c3855a4cb722a98fb364618a852fb436e9822a36fe9b54650f75bbc8d1fd8` |
+| [Prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching.md) | 47,097 | `c70d858eecd09681cdc671a1a037e7d51916a793eb85c9dc08be240d1cb9b2d1` |
+| [Compaction](https://developers.openai.com/api/docs/guides/compaction.md) | 14,272 | `73fd2fd1afd44bd6f29ce7bd86fd0ae3413c98ec00ae5476879e98171b0b60dd` |
+
+### 13.3 本轮新增的面试主线
+
+1. **运行时所有权**：Agents API 托管 Codex harness 和会话进度；Agents SDK 把 loop、部署、存储、审批和 runtime 交给应用；Responses API 让应用直接管理 response item 与工具循环。
+2. **工具发现协议**：hosted tool search 在同一响应内返回 `tool_search_call`/`tool_search_output`；client-executed tool search 要求应用搜索并以原 `call_id` 回传，返回工具才可用。二者都追加到上下文尾部来保护前缀缓存。
+3. **状态与成本交互**：reasoning item、tool search output、compaction item 和 prompt cache prefix 是四种不同状态。compaction 可能从变更点起打断旧 cache prefix；tool search 可以减少初始 schema token，但不能替代授权、沙箱、幂等和 verifier。
+
+当前状态仍为**双榜资料级闭环**：运行时协议、官方页面和书系配套已具备；参数、架构、完整训练/后训练 recipe、system card、生产 kernel、目标硬件 profiling 和独立 GPT-5.6 报告仍待核验，因此不新增 GPT-5.6 专属 Transformer 正式章节。

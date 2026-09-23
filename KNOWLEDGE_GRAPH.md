@@ -315,17 +315,28 @@ Post-Training -> 领域专家培养 -> GRPO -> on-policy distillation -> 统一�
 
 ### GPT-6 Astra 运行时预算分支
 
-GPT-6 Astra -> Context Window -> Maximum Input / Maximum Output -> Reasoning Effort -> Tool Host -> Sandbox Policy -> Permission Trace -> Token Cost Threshold -> Unit Success Cost -> Long-Context Evaluation
+GPT-6 Astra -> Context Window -> Maximum Input / Maximum Output -> Reasoning Effort -> Configuration Update -> Reasoning Item / Phase Replay -> Prompt Cache Prefix -> Deferred Tool Search -> Async Function/Custom Tool -> Response Lineage / call_id -> WebSocket Mid-turn Steering -> Compaction Canonical Context -> Skills / AGENTS.md Progressive Disclosure -> Tool Host -> Sandbox Policy -> Misalignment Monitoring -> Permission Trace -> Token Cost Threshold -> Unit Success Cost -> Long-Context Evaluation
 
-该分支描述官方模型页已公开的接口与容量关系；模型架构、参数规模和训练方法仍属于待核验信息。
+该分支描述 OpenAI 官方模型页、模型指南、运行时文档和开发者博客已公开的接口、容量、状态、提示词路由和安全控制关系；模型架构、参数规模和训练方法仍属于待核验信息。`phase` 的现行专节以 GPT-5.5/GPT-5.4 为示例，不把它单独连接成 GPT-6 专属能力。
 
-GLM-5.3 -> GLM-5.2 Base -> Post-Training -> Executable Environment -> Judge Agent -> Oracle Check -> No-op Check -> Unsolved-state Check -> Reward Shortcut Audit -> Context Compaction (SAO 待核验) -> Long-Task Evaluation
+GLM-5.3 -> GLM-5.2 Base -> Post-Training -> Executable Environment -> Judge Agent -> Oracle Check -> No-op Check -> Unsolved-state Check -> Reward Shortcut Audit -> SAO with Compaction inheritance -> Context Compaction implementation (5.3-specific, unverified) -> Long-Task Evaluation
+GLM-5.2 -> DSA -> IndexShare -> shared top-k index -> MTP -> speculative decoding -> acceptance length -> critic-based PPO -> compacted sub-traces -> anti-hack verifier
 
-该分支只连接官方文档明确描述的版本关系和流程概念；SAO 的具体定义与内部实现仍未核验。
+该分支把官方继承声明、SAO 论文公开算法和产品侧实现分开；论文提供 single-rollout/DIS/critic/Skip-Observation GAE 证据，但不等于 GLM-5.3 专属 compaction 或完整 post-training recipe。
+
+### GLM-5.3 继承的 SAO 算法边界
+
+GLM-5.3 -> official inheritance claim -> GLM-5.2 `SAO with compaction`
+SAO -> single-rollout per prompt -> immediate async update -> reduced group barrier/straggler wait
+SAO -> rollout engine logprob -> token ratio -> double-sided clipping/masking -> policy-lag control
+SAO -> value model -> critic K=2 -> frozen attention + MoE projection update -> critic stability
+SAO -> action/observation segments -> Skip-Observation GAE -> cross-segment value bootstrap -> credit assignment
+SAO paper -> Qwen3-30B-A3B experiments + GLM-5.2 deployment statement -> not GLM-5.3 benchmark/architecture proof
+GLM-5.3 product compaction -> serialization/state boundary/verifier -> unverified
 
 Kimi K3 -> 发布文章披露 -> KDA / AttnRes / Stable LatentMoE -> 论文机制解释 -> State Manifest -> Harness Revision -> Tool/Permission Trace -> Fallback Audit -> Harness-Aware Evaluation
 
-该分支把模型发布信号、独立论文机制和 Agent 运行时证据分开；K3 完整配置、权重和报告状态仍需独立核验。
+该分支把模型发布信号、独立论文机制和 Agent 运行时证据分开；K3 report 与固定 HF config 已确认主要配置，完整权重未下载，线上服务和独立 benchmark 仍需独立核验。
 
 ### Mistral Small 4 与 Step 3.5 Flash
 
@@ -343,13 +354,17 @@ Grok 4.6 -> 500K Context -> reasoning effort (`low/medium/high/xhigh`) -> struct
 
 ### Claude Opus 5
 
-Claude Opus 5 -> 1M Context -> 128K Max Output -> Adaptive Thinking -> Default High Effort -> Claude API/Bedrock/Vertex/Foundry -> Tool Host/Sandbox -> Harness-aware evaluation
+Claude Opus 5 -> 1M Context -> 128K Max Output -> 300K Batch Output -> Adaptive Thinking -> Default High Effort -> Thinking Block/Signature Replay -> Refusal/Fallback Ledger -> Tool Host/Sandbox -> Harness-aware evaluation
 
 上述链路只连接 Anthropic 官方模型目录公开的接口、平台和运行时字段；参数量、训练架构、训练配方、后训练算法和独立 benchmark 复现仍待核验。
 
 ### Claude Fable 5.1
 
-Claude Fable 5.1 -> 1M Context -> Adaptive Thinking (always on) -> Default High Effort -> Preserved Thinking -> Per-message Effort (beta) -> Tool Progress Updates (beta) -> Tool Host/Sandbox -> Long-horizon Harness Evaluation
+Claude Fable 5.1 -> 1M Context -> Adaptive Thinking (always on) -> Default High Effort -> Preserved Thinking -> Thinking Block Compatibility -> Thinking Block Invalidation on History Edit -> Forced Tool Capability Error -> Per-message Effort (beta) -> Turn-scoped System Message (beta) -> Tool Progress Updates (`display: "updates"`) -> Structured Tool Result -> Content Provenance -> Tool Host/Sandbox -> Long-horizon Harness Evaluation
+
+Claude Fable 5.1 -> Mythos 5.1 -> Same Underlying Model -> Different Safeguards/Access Plan -> benchmark and refusal policy boundary -> not a separate architecture claim
+
+Claude Fable 5.1 -> no exact `mini_swe_agent_claude_fable_5_1_*` DataCurve row -> no migration of Fable 5 `316/452` or other Claude Agent scores -> source-aware evaluation manifest
 
 上述链路连接 Anthropic 专属模型页公开的接口、状态协议和产品定位；参数量、训练架构、训练配方、完整推理机制和独立 benchmark 复现仍待核验。
 
@@ -394,6 +409,10 @@ DeepSeek V4.1-Flash -> 45T Multimodal Pretraining Tokens -> 64K Sparse Attention
 DeepSeek V4.1-Flash -> SFT -> RL -> On-Policy Distillation -> Agent Task/Environment/Rollout Data Pipeline -> Verifier/Harness Evaluation
 
 DeepSeek V4.1-Flash -> Numeric Reasoning Effort (1-100) -> Token/Latency/Quality Budget -> Tool Calls/Timeout/Unit Success Cost
+
+DeepSeek V4.1-Flash -> Fixed HF Revision -> Reference `model.py`/TileLang `kernel.py` -> SWA Ring + Compressed KV + Candidate/Indexer + mHC/Sinkhorn -> Source/Runtime Audit
+
+DeepSeek V4.1-Flash -> `forward_spec`/DSpark Block Exists -> `generate.py` Plain Autoregressive Entry -> Draft/Verify/Rollback Scheduler Missing -> No Speculative Throughput Claim
 
 上述链路使用模型卡、固定 `config.json`、encoding README、官方 API 发布页和已逐页读取的技术报告支持的字段；报告补充的具体 kernel 名称、训练/部署设置和评测边界仍是发布方自报，完整 kernel source、线上接受率和独立 profiling 仍待核验。Agent benchmark 必须连接 model revision、effort、harness、工具、环境、verifier、timeout/retry 和 context policy，不能把组合结果归因给基础模型。
 
@@ -441,6 +460,26 @@ Flash-Next Report -> Self-reported Loss/Benchmark/7.6x Prefill/4.9x Decode -> Fi
 
 该分支的模型候选来自两个排行榜，官方模型卡、Flash-Next 报告和仓库只用于核验与扩展；Qwen3.8-Max 是基于 A95B 的 hosted version，不作为独立 open checkpoint。
 
+### Qwen3.8 Max (0902) 服务 revision
+
+Artificial Analysis `qwen3-8-max` -> `Qwen3.8 Max (0902)` -> release slug `qwen3-8-max-0902` -> Qwen Cloud alias `qwen3.8-max-2026-09-02` -> upgraded snapshot -> hosted revision, not new open checkpoint
+
+Qwen3.8 Max 0902 -> `1M context` -> `991K` normal input / `983K` thinking input / `131K` output -> reasoning/tool/cache/workspace budget -> TTFT/TPOT/p95/unit-success-cost ledger
+
+`reasoning_effort` low/medium/xhigh -> default xhigh -> mutually exclusive with `thinking_budget` -> request capability validation -> effort is configuration, not model identity
+
+Thinking mode -> `tool_choice auto/none only` -> forced tool requires non-thinking path -> MultiModalConversation -> host schema/permission/confirmation -> executor receipt -> final artifact
+
+Qwen Context Cache -> explicit cache / implicit cache / session cache -> minimum 1,024 tokens -> different hit/billing/validity semantics -> revision/tokenizer/template/tenant/session key audit -> reuse or recompute decision
+
+QwenCloud endpoint migration -> `dashscope-intl.aliyuncs.com` -> `maas.qwencloudapi.com` -> provider adapter/transport/auth regression -> not model architecture or capability evidence
+
+QwenCloud account+model quota -> workspace override -> monthly TPM tier -> soft limit -> guaranteed TPM vs observed TPM -> 429/Retry-After/queue latency -> retry/idempotency/unit-success-cost audit
+
+Qwen3.8 Max family -> generic DataCurve `qwen3_8_max_xhigh` -> 258/449 -> Pass@1 `57.4610%` -> mini-swe-agent + tools + environment + verifier -> no exact 0902 row -> no revision-level score migration
+
+Qwen 0902 product claims -> coding / engineering-scale project / long autonomous development / multi-tool Agent / vision -> fixed harness + task contract + verifier -> recovery/quality/cost evaluation; product description is not architecture or training evidence
+
 ### GLM-5.3-Flash
 
 Artificial Analysis/DataCurve -> `glm-5-3-flash` max -> Z.ai official docs/blog -> fixed revision model card/config -> 320B total / 18B activated -> 45 layers -> 34 linear + 11 sparse attention
@@ -455,4 +494,586 @@ GLM-5.3-Flash -> visual input -> Encode -> representation transfer -> Prefill ->
 
 Tool stream -> host parser -> schema/policy/permission check -> executor -> timeout/cancel/retry -> tool result -> model continuation; model output is not execution authority
 
+GLM-5.3-Flash -> paged KV pool + KDA state pool -> dual-state scheduler -> prefix/cache recovery -> state-pool concurrency bottleneck -> separate capacity ledger
+
+GLM-5.3-Flash -> SGLang MTP 5/1/6 -> low-latency policy -> draft/verify/rollback -> accepted tokens/tool boundary/task success; high-throughput route may disable speculative decoding
+
+KV dtype + page/layout -> DSA backend pairing -> Blackwell FP8 KV/TRT-LLM DSA or H100/H200 BF16 KV/TileLang DSA -> invalid pairing gate -> numerical/recall/profile validation
+
+GLM-5.3-Flash -> EPD -> encode/prefill/decode transfer -> representation/KV/state metadata -> cancellation/recompute/version/tenant isolation -> PD dummy-weight gate != production correctness
+
+Transformers GLM5-Next -> no MTP layer; vLLM/SGLang -> serving-layer MTP recipe -> framework feature surface != checkpoint structure != target hardware acceptance
+
+SGLang v0.5.20 -> fixed GLM5Next source entry -> stable source evidence -> full-weight/target-hardware gates remain open
+SGLang main -> projection fusion + KDA prefill metadata + mHC boundary fusion + AMD FP8/Quark MXFP4 -> mutable upstream evolution -> not stable release proof
+vLLM main `glm5next` -> IndexerCache(pool metadata) + TailCache(raw BF16 K/gate tail) + KDA state + MTP top-k/slot mapping -> multi-state manifest -> recovery/precision/profile gate
+vLLM v0.29.0 tree -> no `vllm/models/glm5next/` in fixed snapshot -> negative stable-tag evidence -> recipe `0.29.0+` is not proof of stable GLM5Next path
+
+GLM-5.3-FlashX -> associated service endpoint -> speed/quota metadata -> not a new Artificial Analysis/DataCurve model candidate
+
 该分支的模型锚点来自两个排行榜；Z.ai 的架构、视觉 workflow、serving 组件和 speedup 是官方资料/发布方口径，不能由配置字段推导完整 kernel、训练 recipe、真实 state bytes、硬件 profiling 或独立 benchmark。DataCurve 的 `Pass@1` 仍是 `mini-swe-agent` 组合系统结果。
+
+### DeepSeek V3.2
+
+Artificial Analysis `deepseek-v3-2` -> `Non-reasoning` 配置 -> 官方 V3.2 模型卡/技术报告 -> DSA + scalable RL + large-scale agentic task synthesis -> 长上下文检索、后训练计算和工具任务数据闭环
+
+DSA -> lightweight indexer -> candidate positions -> main attention -> index recall / final evidence recall -> KV/indexer bytes -> TTFT/TPOT -> dense fallback and failure audit
+
+Thinking with Tools -> revised message/encoding protocol -> reasoning boundary -> tool call -> host schema/permission/confirmation -> tool result replay -> final answer -> trace and artifact gate
+
+Agentic task synthesis -> task contract + environment + tools -> trajectory generation -> verifier/filter -> hard/failed sample audit -> contamination/shortcut check -> post-training data admission
+
+V3.2 -> tool-calling capable checkpoint; V3.2-Speciale -> deep-reasoning variant -> no tool calling -> not a direct coding-agent substitute
+
+DSA -> dense indexer warm-up -> KL alignment to dense attention -> sparse training -> 2048 KV candidates/query -> detached indexer loss + LM loss
+
+V3.2 post-training -> specialist distillation -> mixed GRPO -> unbiased KL estimate + negative off-policy masking -> Keep Routing + Keep Sampling Mask -> more stable MoE RL
+
+thinking with tools -> tool-only message retains reasoning -> new user message drops reasoning -> harness message encoding determines token reuse -> serving must preserve event boundaries
+
+agentic task synthesis -> search/code/general/interpreter environments -> solution function restricted to tools -> independent verifier -> pass@100 admission -> contamination/shortcut audit
+
+该分支是 Artificial Analysis 单榜资料级闭环；DataCurve 当前没有精确 V3.2 行，因此不挂接 DeepSWE Pass@1、成本或 Agent steps。公开资料未确认的 DSA kernel/indexer loss、完整 RL/synthesis recipe、硬件 profiling 和线上 acceptance rate 保持待核验。
+
+DeepSeek V3.2-Exp inference -> FP8 Indexer -> non-interleaved Indexer RoPE -> FP8 Q/K cache -> `fp8_index` -> causal mask -> top-k candidate positions
+
+DeepSeek V3.2 fixed config -> `q_lora_rank=1536` / `kv_lora_rank=512` -> 61 layers / DSA index fields -> final-model structure evidence
+
+DeepSeek V3.2-Exp -> `q_lora_rank=1536` experimental inference config -> `kv_lora_rank=512` latent KV + positional cache -> prefill MHA / decode MQA -> FP8 KV deployment cache; same-valued final config and experiment remain separate revisions/artifacts
+
+FP8 Index Score -> radix/histogram Top-k Selector -> selected KV gather -> causal sparse MLA -> index recall / final evidence recall -> TTFT/TPOT / KV bytes
+
+TileLang `deepseek_v32` -> Lightning Indexer -> Top-k Selector -> Sparse MLA -> pipelined producer/consumer -> double buffering -> FP8 K-major V layout / shared-memory transpose
+
+DeepGEMM PR #200 -> FP8 MQA logits / paged MQA logits -> MoE + MQA serving path -> SM90/SM100 kernel boundary
+
+FlashMLA PR #98 -> sparse prefill / sparse FP8 decode -> SM90 sparse MLA -> metadata/combine/quantization -> hardware-specific profiling gate
+
+vLLM V3.2-Exp recipe -> DeepGEMM dependency -> `DP=8, EP=8, TP=1` recommendation -> TP fallback -> FP8/BF16 KV choice -> `max-num-seqs` tuning -> recipe/harness result, not base-model score
+
+V3.2 implementation evidence -> model artifact / inference demo / kernel / serving recipe / eval harness separation -> q_lora rank conflict audit -> benchmark attribution gate
+
+DeepSeek V3.2 current AA page -> 685B/37B, 128K, Intelligence Index 16.0435, price 0.28/0.42 -> third-party directory/provider fields -> 9/20 648B vs 9/21 685B is page drift, not model revision
+
+V3.2-Exp README -> V3.1-Terminus aligned comparison -> indexer non-interleaved RoPE / MLA layout correction -> implementation reproducibility evidence
+
+V3.2-Exp README -> TileLang readable kernel / DeepGEMM indexer logits / FlashMLA sparse MLA -> implementation-layer separation -> no automatic full-weight, hardware, or SLO acceptance
+
+SGLang dsv32 tags -> tp=8, dp=8, enable-dp-attention -> serving recipe entry -> hardware/dependency/full-weight/numerical/tool acceptance gates
+
+vLLM recipe current URL -> HTTP 404 access boundary -> historical recipe evidence retained -> no inference that vLLM lacks V3.2 implementation
+
+### GPT-5.3 Codex
+
+Artificial Analysis `gpt-5-3-codex` -> `GPT-5.3 Codex (xhigh)` -> OpenAI official model page -> `gpt-5.3-codex` -> Responses-only -> agentic coding model
+
+`low/medium/high/xhigh` -> reasoning effort configuration -> reasoning/visible output/tool/workspace budget -> TTFT/TPOT/task-success/unit-cost evaluation
+
+400K context -> 272K maximum input + 128K maximum output -> input/output/reasoning/tool schema/workspace accounting -> admission and truncation gate
+
+Codex Prompting Guide -> autonomy/persistence + codebase exploration + fixed workdir + `apply_patch` + tool schema + parallel calls -> Codex harness -> model/harness attribution boundary
+
+Responses output items -> assistant `phase` (`commentary`/`final_answer`) + tool call/result + encrypted reasoning item -> full replay -> next-turn recovery gate
+
+Server-side compaction -> encrypted compaction item; standalone compact endpoint -> canonical context -> preserve goals/receipts/permissions/artifacts -> duplicate-side-effect and recovery audit
+
+Prompt caching -> stable rendered prefix -> KV state reuse -> cache hit/saved prefill -> tool schema/order/template/revision invalidation audit; cache is not compaction or permanent memory
+
+Model proposes tool -> schema/parser -> host permission/approval -> sandbox executor -> receipt/result -> artifact verifier -> committed side effect; model call is not authorization or execution
+
+GPT-5.3 Codex -> DataCurve no exact `mini_swe_agent_gpt_5_3_codex_*` row -> no migration of other GPT/Codex Pass@1/cost/steps -> configuration/harness evaluation boundary
+
+GPT-5.3 Codex -> no public parameters/architecture/training recipe/system card/kernel/online acceptance rate -> no duplicate Transformer chapter -> map to deployment, reasoning, agent/tool, evaluation and inference-serving chapters
+
+### OpenAI gpt-oss
+
+Artificial Analysis `gpt-oss-120b`/`gpt-oss-20b` -> `high` reasoning configuration -> OpenAI Model Card/arXiv + official repository + Harmony + Hugging Face/Cookbook -> open-weight autoregressive MoE family
+
+120B/20B -> total parameters vs active parameters -> 128/32 experts -> top-4 routing -> dispatch/load-balance/communication ledger -> weight/KV/workspace/concurrency memory audit
+
+Alternating sliding-window/full attention -> local window cost + periodic dense global exchange -> GQA -> RoPE/YaRN -> long-context recall vs TTFT/TPOT experiment
+
+MoE weights -> post-training MXFP4 -> group scale/kernel/quantization error -> checkpoint and single-GPU deployment boundary -> hardware/provider profiling gate
+
+`o200k_harmony` -> Harmony roles/instruction hierarchy -> `analysis`/`commentary`/`final` channels -> recipient/tool schema/structured output -> render/parse/replay contract
+
+`low/medium/high` -> variable-effort reasoning -> CoT/visible output/tool/workspace budget -> quality-latency-cost curve -> effort is configuration, not checkpoint
+
+Model proposes tool -> Harmony parser -> schema/permission/approval -> sandbox/browser/Python executor -> tool result replay -> verifier/artifact -> committed side effect; model output is not execution authority
+
+gpt-oss raw CoT -> Responses `reasoning.content[].reasoning_text` -> `response.reasoning_text.delta/done` -> item/index/turn lineage replay -> Harmony continuation; raw CoT is not end-user display content
+
+gpt-oss provider -> API shape/channel/schema smoke test -> official `compatibility-test` -> AIME/GPQA/HealthBench quality eval -> kernel/precision/hardware/production gates; 0 invalid requests and >90% pass@k/pass^k are signals, not full proof
+
+gpt-oss -> open weights -> downstream fine-tuning/copy/safety drift -> deployment permissions/sandbox/output filter/audit -> open-weight safety responsibility
+
+gpt-oss -> DataCurve no exact `mini_swe_agent_gpt_oss_*` row -> no migration of other OpenAI/Codex Pass@1/cost/steps -> benchmark evidence boundary
+
+gpt-oss -> no full training recipe/router balance/kernel profiling/online acceptance rate -> map to MoE, quantization, reasoning, Agent protocol and serving chapters -> no second architecture chapter for the sibling size
+
+### Claude Opus 4.6
+
+Artificial Analysis `claude-opus-4-6-adaptive`/`claude-opus-4-6` -> same base model + runtime configuration -> `effort`/adaptive thinking -> reasoning/tool/visible-output budget -> quality/latency/cost audit
+
+Thinking block + encrypted signature -> exact replay -> tool call/result -> server-side `compact-2026-01-12` -> compaction block -> continuation state -> duplicate-side-effect/recovery audit
+
+`defer_loading` -> regex/BM25 tool search -> up to 5 `tool_reference` -> schema gate -> permission/approval -> executor -> receipt -> verifier; tool discovery is not authorization
+
+`computer_20251124` -> model action proposal -> host sandbox/allowlist/human confirmation -> screenshot/result -> prompt-injection defense -> artifact verifier; computer use is not browser permission
+
+Opus 4.6 -> AA configuration fields + Anthropic product/runtime facts + publisher-reported benchmark -> separate evidence ledgers; DataCurve no exact row -> no migration of Opus 4.8/5 Agent scores -> no internal architecture inference
+
+### Claude Opus 4.7
+
+Artificial Analysis `claude-opus-4-7`/`claude-opus-4-7-non-reasoning` -> same base model + runtime configuration -> `high/xhigh/max` effort -> step/loop/request budget separation -> quality/latency/cost audit
+
+`effort` -> step policy; task budget -> thinking/tool/result/output loop budget; `max_tokens` -> single-response hard cap -> independent accounting -> no direct concurrency addition
+
+Updated tokenizer -> same input about `1.0-1.35x` legacy token range -> cache/input/thinking/output/retry remeasurement -> migration cost audit
+
+Opus 4.7+ high-resolution vision -> `2576 px` max edge / `4784` visual tokens -> image resize/patch/token budget -> dense screenshot/document recall vs TTFT/cache/cost evaluation
+
+Server-side compaction -> continuation state -> preserve budget/accounting/tool receipts/permissions/artifacts -> replay and duplicate-side-effect audit
+
+Cyber safeguards -> policy detection/blocking + Cyber Verification Program -> authorization/sandbox/network isolation/audit/human escalation -> model capability is not execution permission
+
+Claude Opus 4.7 -> DataCurve no exact `mini_swe_agent_claude_opus_4_7_*` row -> no migration of other Claude Agent scores -> runtime/control-plane evidence boundary -> no internal architecture inference
+
+GLM-5.3 -> Z.ai Code Bench -> completion/checklist accuracy -> output-token efficiency -> private benchmark evidence boundary
+
+GLM-5.3 -> executable long-horizon environment -> judge agent -> reference-free verifier -> solver trajectory -> reward-shortcut audit -> oracle/no-op/unsolved-state -> binary reward gate
+
+GLM-5.3 -> CyberGym discovery/validation -> ExploitBench exploitation reasoning -> ExploitGym TPS-normalized time budget -> discovery/verification/exploitation-chain separation
+
+GLM-5.3 benchmark footnotes -> harness/tool/container/timeout/domain whitelist/Tool Search/verifier -> model-plus-system result -> no cross-benchmark score merge
+
+### Kimi K3
+
+Kimi K3 -> sequence-length scaling -> KDA + Gated MLA (3:1, terminal Gated MLA) -> lower-bounded decay `g_min=5` -> recurrent state + global content interaction -> KDA context parallelism/state-aware prefix cache
+
+Kimi K3 -> depth scaling -> Block AttnRes (8 blocks x 12 layers + embedding) -> block-level state -> cross-stage communication/memory reduction -> depth-selective residual flow
+
+Kimi K3 -> width scaling -> Stable LatentMoE -> latent routed experts + full-width shared experts -> RMSNorm + SiTU-GLU -> Quantile Balancing -> frozen bias/fixed Top-k -> expert load/communication ledger
+
+Kimi K3 -> MXFP4 weights + MXFP8 activations QAT -> low-precision deployment contract -> MoonEP/static shapes/zero-copy EP -> hardware and kernel profiling gate
+
+Kimi K3 -> XTM -> `think/response/tool` channels + dynamic `tool-declare` + `tool/index` -> replay/permission/artifact state -> long-horizon RL + resumable microVM sandbox
+
+Kimi K3 -> HF revision `f831ab...` + `config.json` -> model identity/config manifest -> 93 layers / 69 KDA + 24 Gated MLA / q-lora 1536 / kv-lora 512 -> revision-aware evidence boundary
+
+Kimi K3 -> FlashKDA commit `7afb9f...` -> `8x8 fp32 forward substitution + 16x16 bf16 merge` -> recurrent-state kernel path -> SM90+/CUDA 12.9+/PyTorch 2.4+ gate -> H20/GB200 benchmark ledger
+
+Kimi K3 -> vLLM recipe -> hybrid KV manager -> MLA attention cache + KDA recurrent state -> prefix caching / `prefix-match-unit=128` / DCP-TP-DEP topology -> schema validation + retry + verifier for tool-call parser drift
+
+Kimi K3 -> fixed HF revision -> safetensors index -> 497,220 tensor mappings / 96 contiguous shards -> artifact manifest audit -> no full-weight-download claim
+
+Kimi K3 -> MXFP4 packed weights + scale tensors -> 247,296 packed/scale pairs -> quantization artifact gate -> kernel/runtime gate remains separate
+
+Kimi K3 -> `KimiDynamicCache` -> full-attention `key/value` cache + KDA `conv/recurrent` state -> `chunk_kda` prefill vs `fused_recurrent_kda` decode -> hybrid cache recovery
+
+### Qwen3.5-397B-A17B
+
+Qwen3.5-397B-A17B -> 397B total / 17B active -> 512-expert sparse MoE -> total/active/resident/KV/communication serving ledger
+
+Qwen3.5 -> 15 x [`3 x Gated DeltaNet -> MoE` + `1 x Gated Attention -> MoE`] -> recursive state + periodic explicit retrieval -> hybrid cache and long-context trade-off
+
+Qwen3.5 -> vision encoder + early-fusion multimodal tokens -> unified text/image/video path -> visual token budget/alignment/throughput evaluation
+
+Qwen3.5 -> MTP training -> draft/verify/accepted length/rollback/committed KV -> speculative decoding acceptance and serving SLO
+
+Qwen3.5 -> official million-agent RL/asynchronous RL claim -> rollout/environment/verifier/policy freshness ledger -> distinguish publisher claim from independent reproduction
+
+Qwen3.5 -> Qwen3.8 architectural foundation -> QSA/Gated Residual/N-gram/Muon only supported by Qwen3.8 evidence -> version-isolated technology attribution
+
+### GLM-5
+
+Artificial Analysis `glm-5` -> `GLM-5 (Reasoning)` historical AA anchor -> DataCurve no exact `mini_swe_agent_glm_5_*` row -> no migration of GLM-5.2/5.3 Agent scores -> configuration/evidence boundary
+
+GLM-5 -> 744B total / 40B active -> 256 routed experts + top-8 + 1 shared expert -> total/active/resident/communication/cache/workspace ledger -> serving capacity and p99 audit
+
+GLM-5 -> DSA -> lightweight indexer -> candidate scores -> top-k positions -> main attention -> index recall/final evidence recall -> long-context needle/task-success evaluation
+
+GLM-5 -> `q_lora_rank=2048` / `kv_lora_rank=512` -> latent/cache bandwidth hypothesis -> indexer/top-k/gather buffer -> end-to-end TTFT/TPOT and memory profiling gate
+
+GLM-5 -> `slime` -> async rollout workers -> tool/environment trace -> verifier/reward -> trainer -> policy version -> policy lag/sample freshness/checkpoint consistency -> long-trajectory RL audit
+
+GLM-5 -> Agentic Engineering -> plan/edit/execute/observe/test/diagnose/repair -> host permission/sandbox -> tool receipt -> verifier -> artifact digest -> completion gate
+
+GLM-5 -> model output is proposal -> host executor is authority -> permission/approval/side-effect/replay -> independent verifier -> no-op/shortcut/false-completion audit
+
+### Gemini 3.5 Flash-Lite
+
+Artificial Analysis `gemini-3-5-flash-lite` -> AA 单榜候选 -> DataCurve no exact `mini_swe_agent_gemini_3_5_flash_lite_*` row -> no migration of Gemini 3.5/3.6 Flash Agent scores -> configuration/evidence boundary
+
+Gemini 3.5 Flash-Lite -> low-latency/high-throughput multimodal API -> subagent/document parsing/classification -> input/media/token/latency/cost ledger -> serving SLO audit
+
+Gemini 3.5 Flash-Lite -> default `thinking_level=minimal` + `minimal/low/medium/high` -> request-level test-time compute -> quality/TTFT/TPOT/tool-round/unit-success-cost comparison -> not four checkpoints
+
+video input -> static fixed sampling -> one context build; video input -> agentic timeline exploration -> transcript/frame/audio on demand -> `processing_call` -> `processing_result` -> auditable media evidence state
+
+agentic video -> fewer irrelevant media tokens hypothesis -> extra processing steps/latency/retry risk -> evidence recall/timeout/replay audit -> host authorization remains separate
+
+Gemini 3.5 Flash-Lite -> Model Card says based on Gemini 3.1 Flash-Lite -> architecture/training/hardware/software point to predecessor -> version dependency boundary -> no independent architecture inference
+
+Lite Model Card benchmark -> Google publisher harness/price/safety evidence -> AA Intelligence Index -> third-party configuration evidence; DataCurve exact row absent -> separate benchmark ledgers -> no score concatenation
+
+### Kimi K2.6
+
+Artificial Analysis `kimi-k2-6` -> AA 单榜锚点 -> DataCurve no exact `mini_swe_agent_kimi_k2_6_*` row -> no migration of K2.7 Code/K3 Agent scores -> configuration/evidence boundary
+
+Kimi K2.6 -> 1T total / 32B active -> 384 routed experts + top-8 + 1 shared -> total/active/resident/communication/cache/workspace ledger -> serving capacity and p99 audit
+
+Kimi K2.6 -> MLA -> `q_lora_rank=1536` + `kv_lora_rank=512` -> latent/position cache + gather/dispatch + tool/media state -> long-context TTFT/TPOT/recall evaluation
+
+Kimi K2.6 -> MoonViT + native INT4 -> multimodal tokens + group-size-32 compressed weights + unquantized modules -> vision/quantization/kernel/compute-dtype audit
+
+Kimi K2.6 -> Agent Swarm -> 300 sub-agents + 4,000 coordinated steps -> task DAG/parallel workers/isolated workspace/permission/budget/rollback -> artifact verifier and unit-success-cost audit
+
+Kimi K2.6 -> `preserve_thinking` + `reasoning_content` -> interleaved thinking + multi-step tool call -> replay/schema/permission/executor receipt -> context and token-cost ledger
+
+Kimi K2.6 -> Kimi Vendor Verifier -> pre-flight/OCRBench/MMMU-Pro/AIME2025/ToolCall/SWE-Bench -> model-vs-serving-vs-harness diagnosis -> deployment trust chain
+
+### GPT-5.4 mini/nano
+
+Artificial Analysis `gpt-5-4-mini` / `gpt-5-4-nano` -> AA 单榜精确 sibling -> DataCurve only `mini_swe_agent_gpt_5_4_xhigh` base row -> no migration of base Agent scores -> sibling evidence boundary
+
+GPT-5.4 mini/nano -> `2026-03-17` snapshots -> 400K context / 272K maximum input / 128K maximum output -> separate manifest and cost ledger -> no inheritance of base 1.05M context
+
+mini -> coding/computer-use/Agent workflow -> task-shape classifier + explicit prompt contract -> tool/verifier/escalation loop -> high-throughput route
+
+nano -> classification/extraction/ranking/narrow sub-agent -> fixed schema + bounded tools + abstain/stop condition -> verifier -> upgrade to mini/base for open planning
+
+mini model page lists `tool_search`/`computer_use`; nano page does not -> model_id/snapshot/endpoint capability probe -> precise tool catalog -> host authorization/sandbox/receipt -> no family-name inheritance
+
+reasoning effort -> request-level behavior/investment knob -> input/reasoning/output/tool/retry/cache/executor ledger -> capacity and unit-success-cost evaluation -> not a hard token budget
+
+GPT-5.4 mini/nano -> no public parameter/architecture/training report/exact DataCurve row -> reuse reasoning/Agent serving/tool/evaluation chapters -> no duplicate Transformer chapter
+
+### DeepSeek V4 Pro 0813
+
+Artificial Analysis `deepseek-v4-pro` -> `Reasoning, Max Effort` -> official `deepseek-v4-pro` API identity -> DataCurve `mini_swe_agent_deepseek_v4_pro_max` -> model/config/harness evidence ledger
+
+V4 Pro -> 1.6T total / 49B active -> 384 routed experts / 6 selected / 1 shared -> resident/dispatch/communication/cache/workspace ledger -> serving capacity and p99 analysis
+
+V4 Pro -> CSA -> compressed KV blocks + indexer top-k -> sparse remote retrieval -> compression loss/index recall/evidence recall separation
+
+V4 Pro -> HCA -> heavier KV compression + dense compressed read -> local sliding-window branch -> remote efficiency versus local fidelity trade-off
+
+V4 Pro -> mHC -> doubly stochastic residual mixing -> stable deep signal propagation -> residual geometry distinct from CSA/HCA and Attention Residuals
+
+V4 Pro -> Muon + AdamW -> module-specific optimizer path -> training throughput/communication/optimizer-state ledger -> no inference-kernel inference
+
+V4 Pro -> domain SFT + GRPO experts -> on-policy distillation -> unified student -> post-training teacher/student boundary -> not inference-time MoE routing
+
+V4 Pro -> `low/high/max` -> request-level reasoning effort -> reasoning/visible output/tool/retry/cache ledger -> same model identity, different harness configuration
+
+V4 Pro -> stateless Responses -> no `previous_response_id`/`conversation`/`background`/`store` -> host persistence + tool authorization + executor receipt + verifier -> protocol/serving responsibility boundary
+
+### GLM-5.1 长周期 Agent 与过程质量
+
+GLM-5.1 -> Artificial Analysis `glm-5-1`/`glm-5-1-non-reasoning` -> AA 单榜资料级闭环 -> DataCurve 无精确 `mini_swe_agent_glm_5_1_*` -> 不迁移相邻 GLM 版本 Agent 结果
+
+GLM-5.1 -> 200K context / 128K output -> `glm-5.1` API -> text in/text out -> thinking/function calling/MCP/structured output/cache capability manifest
+
+GLM-5.1 -> `GlmMoeDsaForCausalLM` -> 78 layers -> first 3 dense -> 256 routed experts / top-8 / 1 shared -> config-level DSA/MoE ledger -> no complete production-kernel inference
+
+GLM-5.1 -> `q_lora_rank=2048` + `kv_lora_rank=512` + `index_topk=2048` -> low-rank/indexer implementation fields -> cache/indexer/attention cost questions -> no automatic migration of GLM-5 report details
+
+GLM-5.1 -> long-horizon Agent -> up to 8-hour publisher claim -> experiment/analyze/optimize -> goal alignment + strategy revision + tool loop -> external tests/verifier/artifact gate
+
+GLM-5.1 -> multi-turn SFT + RL + process-quality evaluation framework -> release-note training/assessment direction -> concrete RL algorithm/reward/verifier undisclosed -> evidence boundary
+
+GLM-5.1 -> `thinking.type=enabled/disabled` -> request-level reasoning mode -> GLM-5.2+ `reasoning_effort` must not be inherited -> capability probe and version-specific API manifest
+
+GLM-5.1 -> Function Calling/MCP -> model tool proposal -> host schema/permission -> executor -> tool result replay -> verifier -> final artifact
+
+GLM-5.1 -> implicit context caching -> repeated prompt/history -> `cached_tokens` usage -> provider cache/billing layer -> not identical to permanent GPU KV cache
+
+GLM-5.1 -> Z.ai self-reported SWE-Bench/KernelBench/Linux desktop -> benchmark/harness/measurement conditions -> not combinable with AA index or DataCurve -> fair evaluation ledger
+
+GLM-5.1 -> model card links GLM-5 report + official blog JS recovered on 2026-09-21 + no precise GLM-5.1 arXiv report -> blog is publisher experiment evidence, not an independent technical report -> no duplicate Transformer chapter -> reuse GLM-5 DSA/MoE and Agent serving chapters
+
+GLM-5.1 -> VectorDBBench -> Recall >= 95% + QPS feedback -> outer edit/compile/test/profile loop -> 600+ iterations / 6,000+ tool calls / 21.5k QPS publisher claim -> strategy transitions and constraint recovery
+
+GLM-5.1 -> KernelBench Level 3 -> 50 problems + H100/Docker + 1,200-turn cap -> correctness tolerance + Claude Opus 4.6/GPT-5.4 anti-exploitation audits -> lower audited speedup -> verifier-aware performance evaluation
+
+GLM-5.1 -> Linux desktop -> no single scalar objective -> self-review harness -> 8-hour iterative artifact refinement -> self-evaluation is not an independent verifier -> external tests/artifact acceptance
+
+### Grok 4.20
+
+Artificial Analysis `grok-4-20` -> `Grok 4.20 0309 v2 (Reasoning)` -> AA 单榜资料级锚点 -> DataCurve no exact `mini_swe_agent_grok_4_20_*` row -> no migration of Grok 4.5/4.6 Agent scores
+
+Grok 4.20 -> xAI `grok-4.20-0309-reasoning` / non-reasoning / `grok-4.20-multi-agent-0309` -> endpoint-specific capability manifest -> model identity distinct from product display name
+
+Grok 4.20 Multi-agent -> `agent_count=4/16` -> parallel specialist Agents -> leader synthesis -> orchestration topology, not MoE expert count or ordinary reasoning depth
+
+Grok 4.20 Multi-agent -> sub-Agent reasoning/tool state hidden by default -> `use_encrypted_content` -> opaque encrypted replay state -> no readable chain-of-thought or client-side editing
+
+Grok 4.20 -> AA 2M context vs xAI official 1M prompt/context -> source/snapshot/endpoint manifest + capability probe -> evidence discrepancy preserved -> no unconditional single context claim
+
+Grok 4.20 -> Responses compaction -> single opaque `compaction` item -> whole-item ordered replay -> compaction cost/information-loss/recovery ledger -> not ordinary editable summary
+
+Grok 4.20 -> prompt caching -> repeated prefix reuse -> provider compute/billing optimization -> not permanent GPU KV cache, conversation memory or reasoning state
+
+Grok 4.20 -> server-side web/X/code/collections tools + client-side function calling -> server execution vs host authorization/execution/receipt -> hybrid Agent state machine -> verifier/artifact gate
+
+Grok 4.20 -> Remote MCP `allowed_tools` -> smaller tool schema/context + smaller callable surface -> context-cost and least-privilege improvement -> host policy still required
+
+Grok 4.20 -> no dedicated arXiv technical report -> architecture/training/kernel/independent benchmark undisclosed -> reuse reasoning/Agent/tool/serving/evaluation chapters -> evidence boundary
+
+### Gemini 3.8 Flash
+
+Artificial Analysis `gemini-3-8-flash` low/medium/high -> one canonical Gemini 3.8 Flash model -> effort is request configuration, not three checkpoints -> source-aware capability manifest
+
+Gemini 3.8 Flash -> `thinking_level=low/medium/high` + shared output budget -> reasoning/tool/output budget trade-off -> thinking ablation -> TTFT/TPOT/token/cost/success ledger
+
+Gemini 3.8 Flash -> thought summary + opaque thought signature -> partial visible explanation plus cross-turn reasoning continuity -> stateful/stateless replay -> not full chain-of-thought, permanent memory or GPU KV cache
+
+Gemini 3.8 Flash -> Interactions API -> `thought/tool_call/tool_result/model_output` steps + SSE -> observable Agent trace -> host executes tools and verifies artifacts
+
+Gemini 3.8 Flash -> Search/URL Context/File Search/Code Execution/function calling -> external evidence or computation re-enters context -> plan/act/observe loop -> citation/schema/business verifier
+
+Gemini 3.8 Flash -> Computer Use -> screenshot + action intent + normalized coordinates -> client approval/execution -> new screenshot/result -> UI drift, permission and side-effect risk
+
+Gemini 3.8 Flash -> 1M input + implicit caching -> long-context and repeated-prefix serving trade-off -> recall/TTFT/billing/TPOT experiment -> not equivalent to model architecture or GPU KV cache
+
+Gemini 3.8 Flash -> DataCurve high `mini-swe-agent` row -> Pass@1/4 + cost + Agent steps -> model+harness+tools+environment+verifier result -> no migration to low/medium or adjacent Gemini
+
+Gemini 3.8 Flash -> no independent 3.8 architecture/training report -> API/runtime evidence only -> no parameter/MoE/RL/verifier claim -> evidence boundary
+
+Gemini 3.8 Flash -> `store=true` + `previous_interaction_id` -> server-side conversation history -> tools/system/generation config remain interaction-scoped -> replay manifest must re-specify runtime controls
+
+Gemini 3.8 Flash -> `store=false` / 55-day paid / 1-day free / delete -> lifecycle and privacy control -> not permanent memory -> retention/deletion test
+
+Gemini 3.8 Flash -> `max_output_tokens` -> thought + visible output hard cutoff -> `incomplete`/truncation risk -> use thinking-level routing for cost control
+
+Gemini 3.8 Flash -> Thinking signature scope vs Tool-combination signature scope -> official documentation field-range conflict -> preserve returned opaque fields and call/result id -> endpoint/schema capability probe
+
+Gemini 3.8 Flash -> tool context circulation -> built-in/custom server/client tools -> host permission/executor/verifier -> `validated` mode and side-effect audit
+
+Gemini 3.8 Flash -> replay toy -> local protocol evidence -> state/signature/id/SSE/retention/modality checks -> not real API/model/SLO evidence
+
+### DeepSeek V4 Pro：实现证据扩展
+
+HF revision `b5968e...` -> fixed config/encoding/inference artifact -> reproducible file identity -> no full-weight download claim
+
+`Compressor` -> gated compressed KV + overlap state -> block-boundary continuity -> heterogeneous KV/cache lifecycle
+
+`Indexer` -> learned score + causal mask + top-k -> candidate recall -> evidence recall -> task success
+
+`window_size=128` -> local uncompressed/less-compressed branch -> recent-token fidelity -> remote compressed retrieval trade-off
+
+`n_hash_layers=3` + `sqrtsoftplus` -> hash/score routing split -> expert selection vs routing weight -> dispatch/communication ledger
+
+FP4/FP8 block quantization -> TileLang GEMM/online softmax/Sinkhorn -> dtype/scale/workspace constraints -> hardware-specific profiling
+
+DSML encoding -> tool role / `<tool_result>` / string-vs-JSON parameter -> parser -> schema/permission/executor/verifier separation
+
+`MP=8` conversion example -> artifact-specific parallel configuration -> not universal production deployment claim
+
+### DeepSeek V4.1-Flash：deepseek-recipe 协议实现
+
+DeepSeek V4.1-Flash -> Artificial Analysis anchor -> pinned `deepseek-recipe` commit `8cadfede...` -> protocol adapter -> `ConversationRequest` -> V4.1 prompt/tokenizer -> external inference backend
+
+`InferenceChunk` -> incremental state machine -> reasoning/DSML/JSON/stop segmentation -> `StreamProcessor` -> Messages/Chat Completions/Responses events -> transport/tool executor/verifier remain host responsibilities
+
+V4.1 recipe -> tokenizer attached explicitly -> token IDs require matching tokenizer -> prompt special tokens not injected twice -> tokenizer revision enters golden manifest
+
+Image URL/data URL/bytes -> quota/concurrency/retry/preprocess -> 600 images / 32 MiB image / 64 MiB request / 8 concurrent defaults -> default fetcher lacks SSRF/private-address filtering -> host security gate
+
+recipe README unsupported features -> `logprobs`/server web search/JSON Schema strict/`n>1`/Responses storage/encrypted thinking -> adapter capability boundary -> not model architecture or model capability negative evidence
+
+### Kimi K3 upstream/runtime evidence graph
+
+Kimi K3 -> vLLM stable supported-models -> `KimiK3ForConditionalGeneration` / `Kimi-K3` -> stable documentation discoverability -> not stable wheel proof
+
+Kimi K3 -> vLLM stable K3 API -> `KimiK3MTP` -> API/class visibility -> not MTP acceptance or speculative serving proof
+
+Kimi K3 -> PyPI vLLM `0.29.0` + v0.29.0 registry -> `KimiK3ForConditionalGeneration` + `K3DSparkModel` + `KimiK3MTPModel` -> stable release/source entry -> not target hardware runtime or production proof
+
+Kimi K3 -> `kimi_k3/__init__.py` -> `current_platform` -> NVIDIA/ROCm branch isolation -> platform-specific kernel/load/profile gates
+
+Kimi K3 -> pre-release vLLM recipe -> K3-enabled nightly + CUDA 13/cu130 + r580+ driver -> optimized hybrid KV / TP-TEP-DEP-PP / DCP path -> not target hardware runtime or production SLO
+
+Kimi K3 -> `KimiDynamicCache` -> MLA `key_cache/value_cache` + KDA `conv_states/recurrent_states` -> dual-state recovery -> revision/dtype/backend/prefix/topology gates
+
+FlashKDA commit -> recurrent/chunk KDA kernel -> local H20/GB200 benchmark -> kernel evidence -> not end-to-end K3 throughput, cache recovery or tool-call acceptance
+
+docs/API -> stable release/source entry -> optimized recipe -> full-weight load -> target hardware profile -> hybrid cache recovery -> tool schema/retry/idempotency/verifier -> production serving evidence
+
+Kimi K3 -> SGLang `v0.5.20` `kimi_k3.py` -> stable text implementation entry -> not full-weight load or target hardware acceptance
+Kimi K3 -> SGLang `main` `kimi_k3.py` -> LatentMoE + EP/A2A + shared-expert TP/reduce-scatter + SBO/ModelSlim/KDA gate -> mutable source evolution -> not stable release or production evidence
+Kimi K3 -> SGLang `main`/`v0.5.20` `kimi_k3_vl.py` same blob -> MoonViT3d/2D RoPE/varlen vision backend -> source parity -> not visual numerical correctness or multimodal SLO
+LatentMoE -> latent down projection -> A2A expert GEMM -> latent reduce/RMSNorm -> up projection -> communication and numerical-order gate
+shared experts -> replicated or TP-sharded branch -> gather/MLP/reduce-scatter -> SBO side stream -> join before tail add -> stream/allocator/capture gate
+
+### GPT-5.6 Luna：运行时与证据分层
+
+GPT-5.6 Luna -> Artificial Analysis `max` -> Intelligence Index/speed/price/context -> third-party provider measurement
+GPT-5.6 Luna -> DataCurve `mini_swe_agent_gpt_5_6_luna_max` -> Pass@1/4/cost/output/Agent steps -> mini-swe-agent + tools + environment + verifier
+
+GPT-5.6 Sol/Terra/Luna -> service tier/model ID -> `reasoning.effort` -> `standard/pro` mode -> source-aware evaluation manifest
+`reasoning.context` -> `current_turn` / `all_turns` -> opaque reasoning item replay -> same-family state compatibility -> not visible CoT/permanent memory/GPU KV cache
+Stable developer prefix -> prompt-cache breakpoint -> cache read/write/TTL -> dynamic tool result -> compaction can change prefix -> cost/latency/replay audit
+Tool schema -> deferred tool search / Programmatic Tool Calling -> model intent -> host schema/permission/sandbox/executor -> idempotency/timeout/retry -> verifier
+1.05M context -> 922K maximum input + 128K maximum output + reasoning/tool items -> 272K whole-request price threshold -> unit success cost
+
+OpenAI official page 403/timeout/DNS -> access-path evidence -> preserve historical official snapshot dates -> no claim of model absence/API change -> wait for fresh official verification
+
+### Claude Sonnet 5：System Card 与 adaptive Agent
+
+Claude Sonnet 5 -> Artificial Analysis `max` -> Intelligence Index/provider measurement -> third-party configuration evidence
+Claude Sonnet 5 -> DataCurve five effort rows -> Pass@1/4/cost/steps -> `mini-swe-agent` + tools + environment + verifier -> Agent system evidence
+Claude Sonnet 5 -> `thinking: adaptive` + `output_config.effort` -> behavior signal -> `max_tokens` hard cap -> task budget remains separate
+Claude Sonnet 5 -> thinking block/signature + tool call/result -> opaque protocol state -> exact replay/compatibility gate -> not visible CoT or permanent memory
+Claude Sonnet 5 -> context awareness + server-side compaction -> long-task state transition -> tool receipt/permission/artifact recovery -> not infinite context
+Claude Sonnet 5 -> System Card -> RSP/cyber/agentic safety + benchmark harness -> safeguards/task/environment-bound evidence -> not internal training recipe or universal safety score
+Claude Sonnet 5 -> no exact arXiv title / no public architecture recipe -> evidence boundary -> no parameter/MoE/adaptive algorithm claim
+
+### Grok 4.7：长轨迹与运行时状态
+
+Grok 4.7 -> Artificial Analysis `grok-4-7` / xhigh -> Intelligence Index/provider measurement -> AA configuration evidence
+Grok 4.7 -> no exact DataCurve `mini_swe_agent_grok_4_7_*` -> no Agent score migration -> Grok 4.6 rows remain non-transferable
+Grok 4.7 -> xAI release -> larger base + longer RL + harder long-horizon tasks -> publisher training disclosure -> not complete optimizer/reward/rollout recipe
+Grok 4.7 -> `reasoning.encrypted_content` -> opaque state -> exact Responses replay -> not visible CoT / prompt cache / application memory
+Grok 4.7 -> server-side tool encrypted output -> same replay responsibility -> preserve item lineage/call id -> not tool execution proof
+Grok 4.7 -> `response.reasoning_text.delta` / `response.reasoning_summary_text.delta` -> developer-visible reasoning summary stream -> observation layer -> not complete CoT or replay substitute
+Grok 4.7 -> `store` -> `previous_response_id` response storage behavior -> server-side state reference -> not permanent application memory
+Grok 4.7 -> `/v1/responses/compact` -> opaque `compaction` item -> immutable context restart -> not over-limit rescue / budget reset
+Grok 4.7 -> `reasoning_effort` low/medium/high/xhigh -> one model's runtime configuration -> effort sweep manifest -> not four checkpoints or MoE expert count
+Grok 4.7 -> function calling / structured outputs -> model proposal/schema -> host permission/executor -> verifier/artifact
+Grok 4.7 -> Remote MCP `allowed_tools` -> smaller schema + least privilege -> authorization/audit/network/idempotency gates
+Remote MCP -> Responses `allowed_tools`/`headers` -> xAI SDK `allowed_tool_names`/`extra_headers` -> adapter capability matrix -> not unified security policy
+Remote MCP -> Streaming HTTP/SSE only -> transport gate -> `require_approval`/`connector_id` unsupported in Responses API -> explicit rejection
+Grok 4.7 -> xAI publisher benchmarks -> benchmark/harness/effort/environment/verifier labels -> not AA/DataCurve unified score
+Grok 4.7 -> arXiv exact-title search no result -> evidence boundary -> no parameter/architecture/full recipe claim
+
+### DeepSeek V3.2：deprecated identity merge
+
+`deepseek-v3-2-reasoning-0925` -> V3.2 Exp reasoning -> deprecated/redirect -> historical revision
+`deepseek-v3-2-0925` -> V3.2 Exp non-reasoning -> deprecated/redirect -> historical revision
+`deepseek-v3-2-reasoning` / `deepseek-v3-2` -> V3.2 canonical configurations -> deprecated/redirect -> same family, not new models
+`deepseek-v3-2-speciale` -> V3.2 special reasoning checkpoint -> deprecated/redirect -> same family checkpoint
+V3.2 family -> no exact DataCurve `mini_swe_agent_deepseek_v3_2_*` -> no V4/V3.1 Agent score migration
+
+### K2 Horizon 3.7B：dense 对照与 artifact 迁移
+
+K2 Horizon 3.7B -> Artificial Analysis `k2-horizon-3-7b` -> AA 单榜 identity -> DataCurve 无精确 `mini_swe_agent_k2_horizon_3_7b_*` -> 不迁移其他 K2/模型 Agent 分数
+K2 Horizon 3.7B -> fixed revision `6360f705b2e57d542959e6a2e67ebeb95dae0373` -> `K2HorizonForCausalLM` -> 36 layers -> dense path
+`num_experts=0` + `mova_num_experts=0` -> no forward-time MoE/MoVA routing -> dense GEMM + 32Q/8KV GQA + KV cache -> 512K long-context serving
+K2 3.7B -> 22.9T/8K pretraining -> 32K/128K/512K midtraining -> 512K SFT -> intermediate checkpoints -> stage-aware capability comparison
+Math/Code/STEM-Code RL branches -> self-attention ISO merge / other weights RAM -> unified checkpoint -> not runtime MoE expert routing
+`k2_aurora` -> `k2_horizon` -> copy + `weights_reencoded=false` + BF16 -> 36 shards/327 tensors -> artifact migration evidence -> not retraining or backend equivalence
+K2 3.7B -> vLLM 5.06B dense/H200/`k2_horizon` parser -> SGLang TP1/BF16/FA3 -> publisher recipe evidence -> not local profiling
+K2 3.7B -> current config/BF16 vs old APPENDIX Xllm/FP32 -> revision conflict -> core/embedding/dtype parameter ledger -> do not force one total parameter number
+K2 3.7B dense baseline -> compare K2 36B/A4B -> MoVA value top-4 + FFN top-8 + shared expert -> dual dispatch/EP communication/workspace -> dense-vs-sparse serving experiment
+
+### Qwen3-Omni：Thinker-Talker 与流式多模态
+
+Qwen3-Omni -> Artificial Analysis `qwen3-omni-30b-a3b-instruct` -> AA 单榜模型身份 -> DataCurve 无精确 `mini_swe_agent_qwen3_omni_*` -> 不迁移其他 Qwen Agent 分数
+Qwen3-Omni -> Instruct / Thinking / Captioner -> same family artifacts -> 不按三个基础模型计数
+Qwen3-Omni -> AuT -> 12.5 Hz audio token rate -> 约 80 ms temporal granularity -> 不等于端到端 first-packet latency
+Qwen3-Omni -> Qwen3-VL/SigLIP2-So400m vision encoder -> multimodal representation -> image/video spatial-temporal evidence
+Qwen3-Omni -> TM-RoPE -> temporal/height/width axes + real timestamp -> cross-media temporal alignment -> 仍需 timestamp/chunk/state replay
+Qwen3-Omni -> Thinker -> understanding/reasoning/tool proposal -> RAG/function calling/safety/verifier host boundary -> proposal != execution
+Qwen3-Omni -> Talker -> multimodal-conditioned first codebook AR -> residual codebook MTP -> reduced codebook serial depth
+Qwen3-Omni -> Code2Wav causal ConvNet -> audio code -> waveform -> packet/codec/realtime acceptance
+Qwen3-Omni -> asynchronous chunked prefill -> Thinker/Talker scheduling -> high-concurrency serving -> needs cancel/retry/state manifest
+Qwen3-Omni -> report first audio/video packet `234/547 ms` -> publisher/theory measurement -> not local p99/SLO
+Qwen3-Omni -> vLLM README -> Thinker mainly supported, Instruct audio output progressing -> repository/runtime evidence -> not production audio acceptance
+Qwen3-Omni -> S1 freeze LLM + train encoder/adapter -> S2 mixed multimodal ~2T tokens -> S3 8K->32K long audio/video -> training curriculum
+Qwen3-Omni -> Thinker post-training -> SFT/distillation/GSPO/rule+model reward -> multimodal reasoning/tool behavior -> full recipe unverified
+Qwen3-Omni -> Talker post-training -> continual pretraining/long-context/multilingual DPO/speaker fine-tuning -> voice quality/control -> full recipe unverified
+
+### Qwen3-VL-235B-A22B
+
+Artificial Analysis `qwen3-vl-235b-a22b-instruct/reasoning` -> same Qwen3-VL base model configurations -> AA identity -> DataCurve no exact `mini_swe_agent_qwen3_vl_*` -> no migration of other Qwen Agent scores
+
+Qwen3-VL -> SigLIP2 vision encoder -> two-layer MLP merger -> Qwen3 MoE decoder -> visual/text token stream
+Qwen3-VL config -> 94 layers + 64Q/4KV + 128 experts/top-8 + 262K position -> implementation fields -> not complete parameter/training proof
+Interleaved-MRoPE -> interleaved temporal/height/width rotary frequencies -> lower long-video spectral bias -> position representation -> not 1M context or video retrieval proof
+DeepStack `[8,16,24]` -> intermediate vision features + dedicated merger -> residual injection into early LLM layers -> multi-level visual alignment -> no extra visual sequence length but extra projection/activation cost
+Video Timestamp -> seconds/HMS text before video temporal patch -> explicit temporal evidence -> long-video grounding -> still needs sampling/frame/chunk/replay audit
+Qwen3-VL -> S0 merger alignment 67B/8K -> S1 multimodal pretraining 1T/8K -> S2 long-context 1T/32K -> S3 ultra-long 100B/262K -> curriculum -> not complete training recipe
+Qwen3-VL -> square-root normalized per-token loss -> balance text-only/multimodal sources -> data mixture ledger -> not independent optimizer proof
+Thinking with Images -> grounding cold start + visual-agent SFT/RL + 120K interaction distillation -> multimodal reasoning/tool behavior -> answer/multi-turn/tool-call rewards -> verifier and anti-shortcut audit
+answer accuracy + multi-turn reasoning only -> fixed one-tool-call shortcut -> tool-calling reward -> action count/timing/complexity alignment -> trajectory quality separate from final answer
+Qwen3-VL -> GUI/search/code proposal -> schema/permission/sandbox/executor -> observation replay -> artifact/verifier -> model proposal != external action success
+HF config/Transformers raw main -> class/position/DeepStack/processor entry -> implementation evidence -> raw main no fixed commit -> not production kernel/full-weight/hardware acceptance
+
+### Qwen3.7 Plus：托管多模态 Agent 合同
+
+Artificial Analysis `qwen3-7-plus` -> exact leaderboard identity -> AA third-party fields -> DataCurve no exact `mini_swe_agent_qwen3_7_plus_*` -> no Agent-score migration
+Qwen3.7 Plus -> text/image/video input + text output -> multimodal interactive hybrid Agent -> read screen/GUI/mobile navigation/visual-reference coding positioning -> product contract, not architecture disclosure
+visual evidence -> resize/crop/frame/timestamp/token budget -> context/input/output/thinking reservation -> evidence coverage -> effective capability != accepted context window
+model action proposal -> structured schema -> region/scope capability -> host permission -> GUI/mobile executor -> observation/idempotency/retry -> verifier/artifact
+Function Calling / Structured Outputs / Web Search -> API capability matrix -> Beijing/Global/Virginia US differences -> authorization/executor -> supported endpoint != universal model behavior
+Prefix Completion -> continuation protocol; Context Caching -> provider prefix reuse; GPU KV cache -> runtime attention state; application memory -> business state -> four different layers
+Qwen3.7 alias -> `qwen3.7-plus-2026-05-26` snapshot -> hosted model identity -> no public checkpoint/parameters/technical report -> do not back-port Qwen3.5/Qwen3.8/Qwen3-VL/Qwen3-Omni architecture
+
+### GLM-5.3 标准 DSA runtime
+
+GLM-5.3 standard -> `glm_moe_dsa` -> `GlmMoeDsaForCausalLM` -> 78 layers -> first 3 dense -> 256 routed/top-8/1 shared -> config evidence != full training ledger
+GLM-5.3 standard -> 21 Full indexer layers -> interleaved indexer RoPE + causal score/top-k -> 57 Shared indexer layers -> reuse `prev_topk_indices` -> lower indexer cost + possible candidate miss
+`index_topk=2048` -> candidate selection field -> index recall -> evidence recall -> Agent task success -> three separate metrics
+MLA latent cache + indexer top-k state + RoPE offset + block table + MTP iteration -> request recovery manifest -> cannot collapse into `kv_length`
+`GlmMoeDsaForCausalLM` -> vLLM `deepseek_v32` registry -> DeepSeek-V3.2 DSA runtime reuse -> source routing evidence -> not checkpoint/training/kernel equivalence
+`is_glm_moe_dsa` -> SGLang `DeepseekV32ForCausalLM` -> cross-layer top-k state -> stable/main source evidence -> not full-weight/target-hardware/production acceptance
+GLM-5.3 standard -> stable tag vs mutable main -> registry/source entry -> full-weight load -> numerical check -> index/evidence recall -> MTP/cache recovery -> target profile -> tool/verifier/SLO
+GLM-5.3 standard != GLM-5.3-Flash -> no automatic KDA/RadixLinearAttention/vision/dual-state-pool/EPD transfer
+
+### DeepSeek V4.1-Flash vLLM `v0.30.0` stable release surface
+
+DeepSeek V4.1-Flash -> Artificial Analysis anchor -> fixed HF revision -> vLLM main -> vLLM `v0.30.0` stable tag -> `DeepseekV41ForCausalLM` / `DSparkV41DraftModel` registry -> stable release/source evidence
+vLLM `v0.29.0` registry -> no V4.1-specific class names -> historical negative evidence -> cannot be filled by mutable main
+vLLM `v0.30.0` registry/package -> NVIDIA/ROCm `vl_model.py` + `dspark.py` + `quant_config.py` -> release surface -> not full-weight/target-hardware proof
+PyPI vLLM `0.30.0` -> wheel/sdist metadata -> distributable artifact -> not installed dependency/kernel/numerical proof
+v0.30.0 release notes -> FlashMLA V4.1 MXFP8 whole-KV + Mega-mHC + Engram async prefetch/DP sharding + DSpark state folding/EPLB isolation + XGrammar strict tools -> runtime release evidence -> not DeepSeek independent benchmark
+stable release/source -> full-weight load -> numerical/FP4/recall -> DSpark verify/rollback/acceptance -> EPD -> target profile -> tool/verifier/SLO
+
+Artificial Analysis `claude-opus-5-5` -> canonical Claude Opus 5.5 -> `max with fallback` configuration -> DataCurve exact row absent -> no neighboring Agent score migration
+Anthropic Opus 5.5 release -> token efficiency + fewer steps/tool calls -> quality-cost curve -> requires fixed effort/tools/verifier
+Opus 5.5 benchmark table -> adaptive/max, xhigh, medium/default -> effort/harness/provider mismatch -> no bare-model ranking
+Cyber/Life Sciences/Distillation safeguards -> risk classification -> fallback/verification program/preserved thinking -> actual-model and permission trace
+long-horizon coding -> context snapshot -> complete patch -> test receipt -> artifact verifier -> verified success
+WANDR/OSWorld/Terminal/Automation -> model + tools + environment + verifier -> system result -> not bare model capability
+Opus 5.5 always-on adaptive thinking -> effort control -> no disabled/manual budget -> compatibility gate
+thinking block -> model/conversation/prefix binding -> replay/drop/error -> state-aware harness trace
+forced tool_choice any/tool -> 400 -> auto + strict tool/structured output -> final tool verifier
+computer_20251124 -> provider migration -> computer_toolset_20260801 -> platform capability manifest
+on-demand compaction + inline tool_addition -> signed summary/tool schema update -> cache/state replay gate
+fast mode -> same weights/faster inference config -> usage.speed + independent rate limit -> latency/cost ledger
+
+### GPT-6 Sol：预算与 Agent runtime
+
+Artificial Analysis `gpt-6-sol` -> canonical model -> `max` effort configuration -> DataCurve exact row absent -> no neighboring GPT Agent score migration
+`gpt-6-sol` -> 1.05M context -> 922K maximum input -> 128K maximum output -> reasoning/tool/output budget ledger
+GPT-6 family -> `reasoning.mode=standard|pro` + `reasoning.effort=none|low|medium|high|xhigh|max` -> independent control planes -> fair evaluation manifest
+`configuration_update` -> mid-conversation effort change -> stateful protocol item -> not checkpoint/model-weight switch
+reasoning tokens -> output/context accounting -> `incomplete` on budget exhaustion -> reserve reasoning/output capacity
+Responses API -> typed response items + function calling -> application executor -> permission -> artifact verifier
+Agents API -> OpenAI-managed Codex harness; Agents SDK -> application-managed loop/storage/approval; Responses API -> application-managed response/history/tool loop
+tool search -> deferred schema -> loaded-tool registry/schema hash -> permission/executor/verifier -> cache-prefix and replay state
+server-side compaction -> `context_management.compact_threshold` -> encrypted compaction item -> canonical continuation state
+standalone `/responses/compact` -> full window -> canonical next context -> no arbitrary pruning
+272K input threshold -> whole-request input/cache 2x + output 1.5x -> Batch/Flex 50% -> Fast mode 2x -> serving cost ledger
+GPT-6 Sol API/runtime evidence -> model contract/observable state -> does not prove parameters, architecture, training recipe or production SLO
+
+GPT-6 Luna -> Artificial Analysis `gpt-6-luna` canonical -> max configuration -> no exact DataCurve `mini_swe_agent_gpt_6_luna_*` row -> no Agent-score migration
+GPT-6 Luna -> focused/high-volume contract -> task-shape router -> separate sibling ledger from GPT-6 Sol
+GPT-6 Luna -> 1.05M context / 922K maximum input / 128K maximum output -> reasoning + tool + compaction budget
+GPT-6 Luna -> 272K whole-request threshold -> input/cache 2x + output 1.5x -> Batch/Flex 50% -> Fast mode 2x -> unit-success-cost ledger
+GPT-6 Luna -> GPT-6 family runtime docs -> `standard/pro` mode + `none`--`max` effort -> `configuration_update` -> later-turn budget change, not checkpoint swap
+GPT-6 Luna -> Responses tools -> capability surface -> permission -> executor -> verifier -> model intent is not host authority
+GPT-6 Luna -> official model/runtime evidence -> does not prove parameters, architecture, training recipe or production SLO
+
+### DeepSeek V4.1-Flash API contract
+
+Artificial Analysis `deepseek-v4-1-flash` -> official API `deepseek-flash` -> requested model / served model -> route and reproducibility ledger
+`deepseek-flash` -> 1M context + 384K max output + 2500 concurrency -> provider contract -> not parameter/FLOPs evidence
+Vision guide -> URL/file/request limits + 600 images + ~1024 image tokens/image -> media evidence budget -> not visual quality/full evidence use
+Files API -> `purpose=user_data` + lifecycle/quota -> file artifact manifest -> expiry/permission/replay gate
+Responses API -> stateless semantic SSE + `sequence_number` + terminal events -> typed item state machine -> no `[DONE]` assumption
+`function_call_output` / `custom_tool_call_output` -> text/image observation -> client tool replay -> permission -> executor -> verifier
+`/beta strict=true` -> JSON Schema enforcement -> structure valid -> host authorization -> execution -> business verifier
+API contract -> reference/runtime source -> full-weight load -> FP4/FP8 quality + Top-K recall -> DSpark verify/rollback -> hardware/profile/SLO

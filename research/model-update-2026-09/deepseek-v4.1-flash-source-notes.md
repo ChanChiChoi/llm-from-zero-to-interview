@@ -1,6 +1,6 @@
 # DeepSeek-V4.1-Flash 官方资料摘记
 
-核验日期：2026-09-14。本文把 DeepSeek 官方发布页、Hugging Face 模型卡、模型配置和随仓库发布的编码/评测说明分开记录。技术报告 PDF 已下载、校验哈希并按页提取 51 页正文；报告中的内部实验和部署数字仍按发布方自报记录，不等同于本项目复现。
+首轮核验日期：2026-09-14；固定 revision 实现复验：2026-09-20；当前时点联网复验：2026-09-22。本文把 DeepSeek 官方发布页、Hugging Face 模型卡、模型配置和随仓库发布的编码/评测说明分开记录。技术报告 PDF 已下载、校验哈希并按页提取 51 页正文；报告中的内部实验和部署数字仍按发布方自报记录，不等同于本项目复现。
 
 ## 来源与快照
 
@@ -14,6 +14,39 @@
 | [evaluation README](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/blob/main/evaluation/README.md) | DeepSWE 复现实验的 harness 说明 | 已读取；明确区分 `mini-swe-agent` 与 `dsh-minimal` |
 
 页面哈希只用于识别本轮资料快照，不代表页面或模型权重永久不变。模型卡 revision 是权重/仓库的版本锚点，不能用首页当前内容替代。
+
+## 2026-09-20：固定 revision 的 HF inventory 与 reference implementation
+
+本轮通过可用代理 `10.24.27.134:7890` 读取固定 revision 的 Hugging Face API metadata 和公开源码；没有下载任何 safetensors 权重。API 响应本身为 6,687 bytes，SHA-256 为 `fb3aefa7794da9101d0253ccc4e6e36fbace841778f6857b1370cb2880235d63`，记录的 `lastModified` 为 `2026-09-10T08:18:10Z`，revision 仍为 `dba1be0a40aa45a94ad051997016db3960a90277`。
+
+API inventory 列出 48 个 safetensors 分片，并报告 dtype bucket 的参数计数合计 `763,205,315,794`（BF16 `1,976,441,856`、F32 `42,307,282`、F8_E4M3 `204,015,223,296`、I8 `557,171,343,360`）。这是仓库清单的 dtype/存储元数据，不是去重后的架构参数定义，不能覆盖模型卡的 `552B backbone`，也不能据此推导单卡显存；完整权重仍未下载。
+
+固定 revision 的关键文本 artifact 哈希如下。哈希用于锁定源码快照，不等于已经在本机执行了 CUDA/TileLang 推理。
+
+| artifact | bytes | SHA-256 |
+|---|---:|---|
+| `inference/README.md` | 2,029 | `2834402823199ee24e9a42bdf36a0fc6daf94448f444cb062c042a057a798f1c` |
+| `inference/config.json` | 1,982 | `2e84f45cf1dac8c7fcbb200e96667d4b913275690ed496f24c7747207a809` |
+| `inference/convert.py` | 9,458 | `035028340479145594a81d6084a8424e57363adf83c0d5983914783d95614d76` |
+| `inference/engram.py` | 8,138 | `11f35ecbead8150c35aa002b3d180ef290b05a25afe883a11884f94d476d3897` |
+| `inference/kernel.py` | 23,790 | `1236c3507019ed176f5dba5e04bcea58867cf654818c6cf138ed4845398c2455` |
+| `inference/model.py` | 61,549 | `4e9ae23620edc8028ccc5d5fef552ab7fdc7dcd6f79608754fe9f67644056f65` |
+| `inference/generate.py` | 8,722 | `8668d67f7d108e32b90d50cb0d8606889ceb2219bfe95741d84e22f70768e9f0` |
+| `inference/image_processor.py` | 7,699 | `482759e3bcc4e9bb5ee582b244cc563f5d0e163d8b48dda91ebb7106e62f9272` |
+| `inference/vision.py` | 4,457 | `5d49edc196a4ef22384abe76d35a40098cbe1e74b586c8f66a2edff4f076b26c` |
+| `evaluation/README.md` | 3,977 | `b1367cba184ce632e1e24e4dfc29cf40b02fdc297ef316bb82599e38eba6dae0` |
+| `evaluation/dsh-minimal.patch` | 28,725 | `11f934726bdffb2111072c7dc121fe4734f5948311dad1ab9aa4b76e2ae2f24c` |
+| `encoding/encoding.py` | 37,316 | `502bdaec8a3fd88ebc24c4721a7038fbe42f2063c664638127056107920035c1` |
+
+### 实现证据能确认什么
+
+- `inference/config.json` 是一个可运行路径的 runtime snapshot：包含 `n_mtp_layers=3`、`dspark_block_size=5`、DSpark target layers `[37, 38, 39]`、Markov rank `256`、DSpark `128/3` routed/active experts、`window_size=128`、`index_topk=512`、`candidate_topk_blocks=2048`、`candidate_block_size=8`、`hc_mult=4`、20 次 Sinkhorn、Engram layers `[1, 14]` 和 FP4 expert dtype。它比模型卡高层名称更接近参考代码的执行账本，但仍绑定该 revision 和该 runtime。
+- `model.py` 显式实现 ring-buffer 的 SWA window、压缩 KV 的 overlap state、两级 candidate/index top-k、sparse attention、MoE、Engram、Hyper-Connections/Sinkhorn 和 DSpark block；`kernel.py` 提供 block FP8/FP4 quantization、FP8/FP4 GEMM、sparse online softmax 和 Sinkhorn 的 TileLang 路径。源码存在证明“参考实现公开”，不证明所有生产 kernel、召回率或目标硬件性能已经公开。
+- `convert.py` 将 HF safetensors 按 model-parallel rank 分片，按权重名称推断 backbone/MTP expert 数，并可选择 FP4 或 FP8 expert 路径；`inference/README.md` 给出 `MP=8` 转换示例，但示例并不等于我们已经下载权重或完成多卡运行。
+- `generate.py` 的实际生成循环调用普通 `model.forward`，README 也明确称 generation 是 plain autoregressive sampling。源码虽有 `forward_spec`/DSpark forward path，但本参考生成入口没有 acceptance scheduler、目标模型 verify/rollback 账本，因此不能把“DSpark 模块存在”写成“本地已复现 speculative throughput”。
+- `evaluation/README.md` 和 `dsh-minimal.patch` 把 `mini-swe-agent` 与 `dsh-minimal` 分开；它们是评测 harness/环境补丁，不是 V4.1 裸模型分数。模型卡中的 DeepSWE 数字仍必须绑定任务集、工具、容器、verifier、effort、超时和 scaffold。
+
+本轮本地只对下载的 Python 源码做 `py_compile`，并对 `encoding.py` 做 DSML 前导空格、`reasoning_effort=max`、中途 system message 和 thinking parse 的 smoke test；没有 CUDA、TileLang、完整权重或线上 API 推理验收。
 
 ## 技术报告逐页核验
 
@@ -120,9 +153,67 @@
 
 因此正文只把这些数字作为“官方自报、协议绑定的参考点”，不把 74.2 写成基础模型单独能力，不将它与不同 harness 的 DeepSWE、SWE-bench 或 Artificial Analysis 指数拼接成一张排行榜。
 
+## 2026-09-20：CPU 教学实验补充召回与 FP4 误差账本
+
+新增 [`deepseek_v41_cache_demo.py`](code/deepseek_v41_cache_demo.py)，文件大小 `6,317` bytes，SHA-256 为 `6c65d44f2f092369ac8b0cdf83a58fe4c2dad38e46698e5d7f1badc209c9517e`。脚本只依赖 Python 标准库和合成分数/向量，不加载 V4.1 权重、不调用 CUDA/TileLang，也不模拟生产 DSpark scheduler。
+
+实验把层次化 indexer 的两个召回门拆开：先按 block 最大分数构造 candidate pool，再在候选池内做最终 Top-K；同时用分组 E2M1-like codebook 计算 toy KV 向量的 MSE 和最大绝对误差。固定合成输入的输出为 candidate recall `0.600`、conditional Top-K recall `0.667`、端到端 recall `0.400`、toy FP4-like MSE `0.025862`、最大绝对误差 `0.300000`。这些结果只证明指标分解和代码可运行，不能替代真实 gold-evidence recall、FP4 logits/质量对照、acceptance length 或 GPU profiling。
+
+这项实验补足了面试中的一个重要边界：`candidate recall × conditional Top-K recall` 才能近似描述两级检索的端到端证据召回；仅报告最终 Top-K 或 cache bytes 都不足以证明稀疏注意力和 FP4 cache 的收益。
+
+## 2026-09-21：`deepseek-recipe` 固定 commit 的协议与流式实现证据
+
+本轮补齐模型卡和 V4.1 `encoding/encoding.py` 之外的官方协议工具链，固定 [DeepSeek 官方 `deepseek-recipe` 仓库](https://github.com/deepseek-ai/deepseek-recipe/tree/8cadfede7063c896b944e7bae05daa3549ae97ea) 到 commit `8cadfede7063c896b944e7bae05daa3549ae97ea`。官方 `main.atom` 的最新条目是 2026-09-10 10:39:01 UTC 的 `docs: update project documentation`；提交记录快照为 2,280 bytes、SHA-256 `70e83744340349e637a6569557439a493d6ce5483540d172ea2a6560c255fa05`。固定 commit 的源码归档为 3,996,119 bytes、SHA-256 `1116ca33e9dc62a913fb9214578c400f1704e6bca33487f4a4c31b32c67a21a6`，不是可变 `main` 页面或模型权重。
+
+关键文件快照如下：
+
+| artifact（固定 commit） | bytes | SHA-256 |
+|---|---:|---|
+| `README.md` | 5,261 | `0cccc69baa118d7689fc3ff2c2e47ab652e05410b777744c43a424f4db5fc0af` |
+| `docs/streaming.md` | 3,495 | `654091c8f5b79075c5232bcf8314d5a1baeea540a1d472496ba1de40493c5c8d` |
+| `docs/tokenizer.md` | 6,918 | `9fb1dd444abe6729c9cafe29a2e3766d9e14b02a28e68e07d06e6d9aaac0c0db` |
+| `deepseek-recipe/src/request/mod.rs` | 3,639 | `3481c3a6cfee9b98063831314ee1b96eac3e7dc121d65984060c535bc699ac07` |
+| `deepseek-recipe/src/stream/state_machine.rs` | 18,527 | `e6b65c2d2d91191ac97378376bd666b537db32147f6c522a2363f4cd2e080154` |
+| `deepseek-recipe/src/stream/processor.rs` | 14,029 | `7d3f35c6278c5fdd8b33592db9506d1b2eef28f80ebb555353e900941eea4c1e` |
+| `deepseek-recipe-encoding/src/v4/dsv41.rs` | 2,072 | `3408554e8a4ade05e034231cab8f87efcee7459d7fdd28fbb926f652e3b56786` |
+| `deepseek-recipe-image/src/resolver.rs` | 15,977 | `1ef5e98d262cb6ba96af35173e39551d147521aa323bc1d55d8e75384779f367` |
+
+### 协议规范化层，而不是推理引擎
+
+README 将仓库定位为 Rust libraries + Python bindings：把 Messages、Chat Completions 和 Responses 转换为共享的 `Conversation`，再渲染成 DeepSeek V4/V4.1 prompt 或 token IDs，并把后端输出转换回目标协议。源码的 `ConversationRequest` 进一步保存 `InferenceOptions`、`ParsingOptions`、原始 model、stream 标志和共享 conversation；未指定的温度、`top_p`、token budget 等仍由调用方/模型后端决定。这一层次让“API 兼容”不再等于“模型推理已经实现”。
+
+固定 commit 的执行链可以写成：
+
+```text
+protocol request
+  -> validate/convert
+  -> ConversationRequest
+  -> V4.1 prompt rendering
+  -> optional tokenizer -> backend inference (external)
+  -> InferenceChunk
+  -> streaming state machine / StreamProcessor
+  -> Messages, Chat Completions, or Responses events
+```
+
+这条链支持思考、工具调用、图像和流式响应，但官方 README 明确把模型推理、工具执行和 HTTP transport 留给外部应用。仓库同时列出当前不支持的协议能力：`logprobs`/`top_logprobs`、document/audio/video/file retrieval、server-side `web_search`、JSON Schema/正则约束和 `strict` 强制、`n > 1`、除 `apply_patch` 外的 Responses custom tool、`previous_response_id` 存储恢复以及 `encrypted_content`。这些是该 commit 的适配器边界，不能反推 V4.1 模型本身不具备相应能力。
+
+### 流式解析是有状态的，不是按 chunk 做字符串替换
+
+`stream/state_machine.rs` 把 `<think>`、DSML tool-call 标签、JSON fence/raw JSON、stop sequence 和普通回答拆为 `Common`、`Json`、`ToolCalls`、`ToolName`、参数解析、`Reasoning`、`Finished` 等状态。`feed()` 会保留跨 chunk 尚未闭合的 marker，`finish()` 再处理输入尾部；工具参数被分成 name/type/value，字符串值和非字符串值走不同转义路径。`StreamProcessor` 再把这些 segment 与 backend 的 `InferenceChunk`、token usage 和 finish reason 组合成协议事件。
+
+因此面试中要问的不是“能不能 parse 一段完整字符串”，而是：标签被拆在两个 SSE/token chunk 之间时是否丢失；reasoning、tool markup、JSON 和 stop sequence 是否分别计入输出；token ID 流是否附着了匹配 tokenizer；异常结束时 parser 是否重复发 tool call 或把未验证 JSON 当成有效结构。仓库的 parser 能把文本分段并生成协议事件，但不执行工具、不校验业务结果，也不充当 verifier。
+
+### tokenizer、图像和安全门禁仍是独立账本
+
+`docs/tokenizer.md` 明确要求先渲染 prompt，再显式附加与模型匹配的 tokenizer；由于 prompt 已经含有 special-token 文本，编码时关闭 tokenizer 的额外 special-token 注入。没有 tokenizer 时，`encode` 或 token-ID 流会返回错误；这可以避免把 tokenizer mismatch 隐藏为模型质量回归。
+
+图像路径由 `deepseek-recipe-image` 负责 URL/data URL/bytes 的解析、并发 resolve、重试、字节预算和 OpenCV 预处理。固定 commit 的默认 `ImageLimits` 是最多 600 张图、单图 32 MiB、单请求 64 MiB、每次 resolve 最多 8 个并发源；HTTP fetcher 默认 5 次重定向、10 秒连接超时和 60 秒请求超时。源码特别警告默认 fetcher 不过滤私网、loopback 或 link-local 地址，因此接入外部 URL 时仍必须由宿主增加 SSRF 防护；“支持图像 URL”绝不等于“可以安全地抓取任意 URL”。
+
+仓库的 `server-py`/`server-rs` 只是带 mock inference 的示例应用，展示如何把准备好的 prompt、图像和 `InferenceChunk` 接到协议层；它不下载权重，也不证明 V4.1 的 CUDA/TileLang、线上 alias、工具 acceptance 或生产 SLO 已经验收。本轮只完成固定 commit 的源码静态阅读与哈希核验，没有把示例服务器运行结果写成模型推理结果。
+
 ## 待核验与后续动作
 
-- 技术报告正文已逐页读取并纳入上面的页码记录；报告没有公开完整 kernel source、所有权重/参数分片、线上接受率或目标硬件上的独立 profiling。
+- 技术报告正文已逐页读取并纳入上面的页码记录；报告没有公开完整 production kernel source、所有权重/参数分片、线上接受率或目标硬件上的独立 profiling。固定 HF 仓库另有 reference `inference/kernel.py`，其证据边界见上面的 2026-09-20 小节。
 - 公开资料没有给出完整参数分片与服务端并发账本；552B backbone、196B Engram 和权重仓库 tensor dtype 不能简单相加后当作单卡显存。
 - CED、CSA2、SWA Bounded Replay、Engram、mHC 和 DSpark 的生产级 kernel、容错、接受率和硬件依赖需要按 revision/后端复测。
 - API 价格图片、账户限流、流式错误码、实际 alias 路由和多模态 token 计费需要通过实时 API 文档或不产生费用的接口探测继续核验。
@@ -134,3 +225,135 @@
 - 第五册：45T 多模态预训练、SFT -> RL -> OPD 与 Agent 数据管线。
 - 第六册：1M context、异构 KV/cache tier、HBM/SSD/重算和 numeric reasoning effort 预算。
 - 第七册、第十七册和第二十册：官方 Agent benchmark 的 harness、verifier、工具权限、恢复和复现账本。
+
+## 2026-09-22：三代理当前时点复验与 revision 边界
+
+本轮重新发起此前可能落在夜间工作时段的联网任务。Artificial Analysis 中文首页通过三条代理均返回 HTTP 200，快照为 `1,762,420` bytes、SHA-256 `de45e583216f236e0eb6c0b69b65b251394eea04137368a056c43e072a97a6f6`；DeepSWE 页面三条代理也均返回 HTTP 200，快照为 `268,036` bytes、SHA-256 `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7e6e095ad59f1f1`。这两个页面没有产生新的重点厂商 canonical 模型。
+
+沿既有榜单锚点复验时，DeepSeek V4.1 发布页三条代理均返回 HTTP 200，快照为 `27,838` bytes、SHA-256 `bea79d60a0712f1971554724c94e8ff2145a048d3c0e80326efa4bacd2bf8e11`；Artificial Analysis 的 [`deepseek-v4-1-flash`](https://artificialanalysis.ai/models/deepseek-v4-1-flash) 详情页三条代理均返回 HTTP 200，快照为 `3,948,908` bytes、SHA-256 `114cc90d1cb8125174d9464141cbfd0faeac76f52b132f78630c0375c9fcf8fe`。当前 AA 条目仍是 `deepseek-v4-1-flash`，Intelligence Index 为 `39.456167472527`，约 1M context，第三方价格约 `$0.30/$1.20`；这些是榜单/provider 字段，不是本项目实测。
+
+DataCurve 当前没有精确的 `mini_swe_agent_deepseek_v4_1_flash_*` 行，因此不把 V4 Pro/V4 Flash 或其他 DeepSeek 版本的 Pass@1、成本、输出 token、steps 和 verifier 结果迁移给 V4.1-Flash。这里的“无 DataCurve 行”是榜单覆盖边界，不是模型能力为零。
+
+Hugging Face API 经 `10.24.27.134:7890` 成功返回 `6,714` bytes，SHA-256 为 `df3cb8b368d3a77a4eb3b96c8a4f85abfb3a199245bf9006a68d374a4b425ca3`；revision 仍为 `dba1be0a40aa45a94ad051997016db3960a90277`，`lastModified` 仍为 `2026-09-10T08:18:10Z`，文件清单仍包含 48 个 safetensors 分片。8098 对该 API 返回 503/连接失败，1234 未成功；这只能记录为代理线路边界，不能解释成 HF 页面或 revision 不存在。`deepseek-recipe` README 经 1234/7890 仍可获取，8098 对 GitHub raw 出现 TLS EOF，内容没有观察到变化。
+
+本轮结论是：已确认的 V4.1-Flash canonical identity、官方发布页、HF revision、reference inference、技术报告和 recipe commit 均未产生新的模型或 revision；当前状态保持“内容专题 + reference implementation + recipe protocol evidence（AA 单榜）”。后续仍只补完整权重加载、production kernel、candidate/index Top-K recall、真实 FP4 误差、DSpark draft/verify/rollback、EPD 调度、目标硬件 profiling、tool acceptance 和独立 benchmark，不把 reference 代码或 README 写成生产验收。
+
+## 2026-09-22：vLLM upstream V4.1 专用 runtime 补证
+
+本轮仍以 Artificial Analysis 的 `deepseek-v4-1-flash` 为模型发现锚点，没有从 vLLM 仓库另发现模型。通过 1234 和 7890 代理取得的 vLLM `main` registry 内容逐字节一致；8098 对同一组 raw 文件超时。这里的 `main` 是未绑定 release tag 的 upstream 实现快照，必须与 vLLM `0.29.0` stable source 分开记录。
+
+### 快照与入口
+
+| artifact | 作用 | bytes / SHA-256 |
+|---|---|---|
+| [vLLM main `registry.py`](https://raw.githubusercontent.com/vllm-project/vllm/main/vllm/model_executor/models/registry.py) | 专用 model registry 入口 | `64,391` / `64c80d8c6659833a9abf836180f2b7549903db2a664e22bc38e38c258a6f572e` |
+| [vLLM main `deepseek_v41/__init__.py`](https://raw.githubusercontent.com/vllm-project/vllm/main/vllm/models/deepseek_v41/__init__.py) | V4.1 NVIDIA/ROCm 包分流 | `625` / `6b928f07c6f67f4fd1b599a143cd15a1309a177c877f7f08b29d5fa30db659fe` |
+| [`quant_config.py`](https://raw.githubusercontent.com/vllm-project/vllm/main/vllm/models/deepseek_v41/quant_config.py) | V4.1 expert dtype 与量化路径 | `9,006` / `bfc500c4989607809577cbd10512b96e9162a7359ad407f772b7f695eaa34cd9` |
+| [`nvidia/vl_model.py`](https://raw.githubusercontent.com/vllm-project/vllm/main/vllm/models/deepseek_v41/nvidia/vl_model.py) | NVIDIA 视觉 wrapper | `13,027` / `627a321c526295547c065778b610b62b16d4cacc9f73572e987b5cfc8949ea80` |
+| [`nvidia/dspark.py`](https://raw.githubusercontent.com/vllm-project/vllm/main/vllm/models/deepseek_v41/nvidia/dspark.py) | NVIDIA DSpark draft runtime | `23,356` / `30e5362e96491a2b7c99b03998de3bf359e053f2d189bbffc250084e17678326` |
+| [`amd/vl_model.py`](https://raw.githubusercontent.com/vllm-project/vllm/main/vllm/models/deepseek_v41/amd/vl_model.py) | ROCm 视觉 wrapper | `13,035` / `0e17395ab5720085ebaaec30977cf1fd37e2a9802bc1f09ca80e2e3d4a16db34` |
+| [`amd/dspark.py`](https://raw.githubusercontent.com/vllm-project/vllm/main/vllm/models/deepseek_v41/amd/dspark.py) | ROCm DSpark draft runtime | `22,731` / `a109e581711a74a7c5597b3f5a07d81ed05aac0ed2619dfa3f859050efc0b9d9` |
+| [vLLM `v0.29.0` stable `registry.py`](https://raw.githubusercontent.com/vllm-project/vllm/v0.29.0/vllm/model_executor/models/registry.py) | stable 对照 | `63,102` / `fef8293fe19cef01768a4c5bd8adc05e120202f1c1597eb264d090672894fbd7` |
+
+`main` registry 明确登记 `DeepseekV41ForCausalLM -> vllm.models.deepseek_v41` 和 `DSparkV41DraftModel -> vllm.models.deepseek_v41`。正确的实现路径是 `vllm/models/deepseek_v41/` 包；先前猜测的 `vllm/model_executor/models/deepseek_v41.py` 404 不能解释成“vLLM 没有实现”。相同的 v0.29.0 stable registry 快照只有通用 V4/DSpark 入口，没有上述两个 V4.1 专用类名，因此当前证据只能写成“upstream main 已出现专用入口，stable 0.29.0 专用登记尚未证明”。
+
+### 代码证据对应的技术点
+
+- **Expert dtype 分支**：`quant_config.py` 把 `expert_dtype` 限定为 `fp4`/`fp8`。FP4 expert 走 MXFP4，并使用 `ue8m0`/`e8m0fnu` 风格的 FP8 linear scale；FP8 expert 走 block-FP8 与 float32 scale。V4.1 的量化配置通过 `deepseek_v4_fp8` 路径接入，不能只看一个通用 `fp8` 字符串就假设两种 checkpoint 的权重布局相同。
+- **Vision wrapper**：`vl_model.py` 将 ViT 与 aligner 产生的 image embedding 注入 `inputs_embeds`，同时保留原始 `input_ids`，让 MoE router 能依据 image token 应用 `bias_vl`。代码还暴露 encoder CUDA graph 与 ViT data-parallel 的 serving 接口。视觉权重映射显式把 `mtp.*` 标为跳过，当前 vision variant 不支持 MTP/DSpark draft heads；这比“V4.1 有视觉输入且有 DSpark”更精确，因为两条路径在这个 wrapper 中并未合并为一个可直接验收的组合。
+- **DSpark draft runtime**：`dspark.py` 从 `num_nextn_predict_layers` 读取预测层数，按 `dspark_target_layer_ids` 绑定目标层，并分配 `[max_num_batched_tokens, index_topk]` 的 Top-K buffer。V4.1 当前配置为 3 个预测层；draft 权重从目标 checkpoint 的 `mtp.{0,1,2}.*` 前缀加载，embedding 与 lm head 与 target 共享。代码还实现 Markov head、confidence head 和逐位置 `sigmoid` confidence、context KV 预计算、SWA cache 插入，以及 FP4/FP8 scale 的分支处理。
+- **恢复/验证边界**：这些文件说明 vLLM upstream 已经为 V4.1 的视觉、量化和 draft runtime 建立了实现入口；它们没有在本轮证明完整权重加载、目标 GPU kernel 正确性、speculative acceptance length、EPD 调度、FP4 质量、p99 或生产 SLO。尤其是 `main` registry、Python/CUDA 扩展入口与 stable wheel、可运行镜像是三种不同证据等级。
+
+### 本轮结论
+
+V4.1-Flash 现在可标记为“官方内容 + HF reference implementation + vLLM upstream main runtime evidence + recipe protocol evidence（AA 单榜）”。仍不升级为 stable serving 闭环，也不把 vLLM `main` 的类注册写成已经下载权重或完成 GPU/线上验收。下一步继续补具体 revision、stable release、硬件和 harness 绑定的加载、召回、量化误差、DSpark acceptance 与 EPD profiling；若外部条件不允许，则保持待核验状态并选择两榜已有 canonical 条目推进。
+
+## 2026-09-23：vLLM `v0.30.0` stable release surface
+
+2026-09-23 重新核验了 vLLM 正式 release，而不是只看 mutable `main`。vLLM `v0.30.0` 于 `2026-09-22T05:20:54Z` 发布，tag commit 为 `ced6857afa0ea7b2e3f0846a62e1394e90f15607`。固定的 [release API 响应](https://api.github.com/repos/vllm-project/vllm/releases/tags/v0.30.0) 为 `65,334` bytes / SHA-256 `bc5d0dee9296de133c54209afab0ae4eb9d2c7c3f331261f1dfdd4d0ab23a48`；[tag registry](https://raw.githubusercontent.com/vllm-project/vllm/v0.30.0/vllm/model_executor/models/registry.py) 为 `64,420` bytes / SHA-256 `a08a98aaae52ced32226aa647f58d682ac600b9572651a9b377b97846bc99212`。registry 已把 `DeepseekV41ForCausalLM` 和 `DSparkV41DraftModel` 登记到 `vllm.models.deepseek_v41`，所以 V4.1 现在有明确的 stable release/source entry；这比 v0.29.0 的“专用类名未出现”更强，但仍只证明 release surface。
+
+v0.30.0 tag 的 V4.1 包文件也已固定：`__init__.py` 为 `625` bytes / `6b928f07c6f67f4fd1b599a143cd15a1309a177c877f7f08b29d5fa30db659fe`；`quant_config.py` 为 `9,006` bytes / `bfc500c4989607809577cbd10512b96e9162a7359ad407f772b7f695eaa34cd9`；NVIDIA `vl_model.py` 为 `13,728` bytes / `a5a3f477225990946093092d4781db181b59b52102aff2e0e345e631973817f1`，`dspark.py` 为 `23,059` bytes / `4d9c2bfa4c123aa5b95b637f24dc3d04748227455857bdc1376b27cda8af5954`；ROCm `vl_model.py` 为 `13,736` bytes / `6f3fcc8a5896432ef51f809348097e92c7782ab226adb5ecb32cdc599ce05af4`，`dspark.py` 为 `22,731` bytes / `a109e581711a74a7c5597b3f5a07d81ed05aac0ed2619dfa3f859050efc0b9d9`。因此 stable source 已同时呈现 NVIDIA/ROCm 平台分支，但不等于两种平台都已被本机或生产环境验收。
+
+release notes 还把一些实现变化显式列为 v0.30.0 内容：DeepSeek V4.1-Flash 接入；SM100 上 FlashMLA V4.1 record 的 MXFP8 whole-KV；DeepGEMM Mega-mHC；mHC post block folded into delayed pre projection；Triton-fused input metadata preparation；CPU-offloaded Engram 的 async prefetch 与 Engram DP sharding；DSpark draft states 在 sequence-parallel all-gather 前折叠；DSpark 不继承未初始化的 EPLB state；V4.1 strict tool parameters 的 XGrammar 约束；Responses text parts；Vision-Exp 专用 image sentinel padding。这些是 vLLM release/runtime 的实现证据，不能改写成 DeepSeek 独立论文 benchmark、完整模型卡结论或本机吞吐。
+
+[PyPI `vllm/0.30.0` metadata](https://pypi.org/pypi/vllm/0.30.0/json) 快照为 `13,218` bytes / SHA-256 `43020551808911e4cabfca5ea71951766c25101b3817a10d306d88fe42d860b8`；x86_64 wheel 为 `314,883,777` bytes / `ef52ee58c410ead0b8afb190838fa4cbcb52075596f67862a03859d984966ac4`，aarch64 wheel 为 `309,984,160` bytes / `eb3e11bab695d085098579a6eda2d602419adec3826ebfbcce9a3ffa543eb62e`，sdist 为 `42,432,229` bytes / `5f8f4e890c042ffa1c3e103f81c35e2d96f60a0a175ac43a4adbae7006bef62b`。wheel/SDist 元数据证明可分发的 release artifact 存在，不证明当前环境已安装、完整权重已加载或目标 GPU/ROCm/NPU 路径可运行。
+
+GitHub release API 还列出 CUDA 12.9 的平台 artifact：`vllm-0.30.0+cu129-cp38-abi3-manylinux_2_28_x86_64.whl` 为 `545,459,905` bytes / `e98cb69659bfcfc849cf11ce0781a7161d40b02b51a6c3636924a5909f2aabcc`；aarch64 wheel 为 `519,981,036` bytes / `fdb57ab5fa1c3ac4c94a6eff52579df32cc9aab5da9863880d03e7167e088e77`。这说明 release API 的平台 artifact 与 PyPI 默认 wheel 是不同的分发对象，部署 manifest 不能只记录 `vllm==0.30.0`，还要记录 CUDA/ROCm、架构、Python ABI 和 wheel 名称。
+
+release body 还把几个 vLLM-wide serving 技术列为 v0.30.0 的周边变化，适合放进 V4.1 的系统面试上下文，但不能写成 DeepSeek 专属结构：
+
+- **Fast Start**：持久化的 per-GPU weight-cache daemon 保存 post-quantized、TP-sharded weights，重启时通过 CUDA IPC 和 `--load-format ipc_cache` 复用，减少从磁盘重新加载的冷启动路径；这需要额外验证 cache revision、GPU 拓扑、权限和失效协议。
+- **HiSparse**：在 GPU 压力下把 sparse-MLA decode 的 KV page 溢出到 pinned host memory，并用每请求 GPU hot buffer 服务 top-k miss；`HiSparseConnector`、Prometheus counters 和 TP-shared host cache 是 serving 组件，不等于 V4.1 的 CSA2 candidate recall。
+- **Model Runner V2 与 adaptive verification**：release body 同时列出 dual-batch overlap、PP 下的 MTP/EAGLE3/DFlash/DSpark，以及通过 online acceptance estimator 做自适应验证。这些可以解释 DSpark 的运行时演进，但仍不能替代 V4.1 的 draft/target trace、接受长度、rollback 和目标硬件测量。
+
+目前 V4.1 的 serving 证据阶梯应写成：固定 HF reference -> vLLM main -> vLLM v0.30.0 stable release/source -> SGLang main -> stable release/wheel 安装 -> 完整权重与目标硬件验收。`v0.29.0` 仍作为历史负证据保存，不能用它覆盖 v0.30.0 的新 release surface，也不能反过来把 release surface 当作 acceptance。完整权重、真实 FP4 质量、candidate/index Top-K recall、DSpark acceptance/rollback、EPD、tool acceptance、独立 benchmark 和生产 SLO 继续为 `unverified`。
+
+## 2026-09-22：SGLang main/stable 的 V4.1 runtime 边界
+
+本轮继续沿 Artificial Analysis 的 `deepseek-v4-1-flash` 锚点补 SGLang serving 证据，没有从 SGLang 仓库另发现模型。通过 `10.237.126.170:1234` 的 GitHub Contents API 取得 SGLang `main` 文件并解码；GitHub raw 端点曾超时，不能把 raw 线路失败解释成源码不存在。固定快照如下：
+
+| artifact | Git blob | bytes / SHA-256 |
+|---|---|---|
+| [`deepseek_v4.py`](https://github.com/sgl-project/sglang/blob/main/python/sglang/srt/models/deepseek_v4.py) | `a3b8b610235e84353e2e0b5c4680441295bffedd` | `241,421` / `4164c354f38e7b35e6bf5445b4d506e610b9f956f3e85f1431946ff6b0471ded` |
+| [`deepseek_v4_dspark.py`](https://github.com/sgl-project/sglang/blob/main/python/sglang/srt/models/deepseek_v4_dspark.py) | `baebc2de6fcc0188cb2eddb90bd7ef15c99a8acf` | `47,640` / `61dc79f075c9e1e5a68a466de5eb95a85ff1fa2e5a9f4d66c2fa69e956fd7b61` |
+| [`deepseek_v41_vit.py`](https://github.com/sgl-project/sglang/blob/main/python/sglang/srt/models/deepseek_v41_vit.py) | `d5777a4f007eb2a12cace0d514de5028529d516d` | `5,126` / `29f4d98802b28ac443699c9a899e3b66406d54cc33a757017d506549a45c94eb` |
+| [`deepseek_v4_nextn.py`](https://github.com/sgl-project/sglang/blob/main/python/sglang/srt/models/deepseek_v4_nextn.py) | `6694abb603a8cda9e5a2b12d1ce29d731ce90a3a` | `9,459` / `a3ca101dfec7ba4aa1577066e26c58dd0daa8f26b05016ac742cc543ddc5d90b` |
+
+`deepseek_v4.py` 在 `config.model_type == "deepseek_v41"` 且 `vision_n_layers > 0` 时实例化 V4.1 ViT、Aligner 和图像边界 embedding。V4.1 vision 路径公开支持 TP/EP/DP，但代码明确限制 CP、PP 和 MoE A2A；图像特征经过 patch embedding、full bidirectional attention、2D RoPE、ViT blocks 和 Aligner 后写入多模态 embedding/span。`deepseek_v41_vit.py` 还暴露 attention data parallel 路径，说明这是 serving/runtime 中独立的视觉子图，而不是仅靠 prompt 拼接实现的图片输入。
+
+同一份 main 源码还给出几个可用于面试的实现细节：
+
+- `_dequant_fp8` 的注释区分 V4 的 `128x128` block size 与 V4.1 的 `32x32` block size；scale 可以是 `fp8_e8m0fnu` 或 `float32`。这只能说明当前 SGLang 代码的解量化分支，不能直接推出 checkpoint 已在本机加载成功。
+- 主路径包含 MXFP8/FP8 prefill autotune、FlashInfer backend、unified KV、DSV4 sparse indexer 和 cache 写入；这些是 upstream code surface，不是目标 GPU 的 profiling 结果。
+- `deepseek_v4_dspark.py` 读取 target layer ids 或 `num_nextn_predict_layers`，构造 Markov/confidence head、`mtp.*` draft 权重映射，并共享 target embedding/lm head。它的 `_dspark_stage_config` 在存在 vision 时将 `vision_n_layers` 设为 `0`，所以 draft stage 不实例化 vision tower；V4.1 draft hidden states 还走 collapsed forward，最后阶段处理 mHC head。
+- confidence head 缺失权重会直接报错。这是 artifact completeness gate，不等于 speculative acceptance、rollback 或吞吐已经验收。
+
+main 中可定位到的相关提交包括 `a6cf05817f11d22023fd951a76255ef50fb09f49`（2026-09-18，`dsv4.1: remaining model and runtime integration (#38798)`）和 `7fac84b6391b56b4469e0c29fd1ae0a3c0d871c6`（2026-09-19，`[DSV4.1] Reduce mHC, metadata and small-batch router overhead (#39704)`）。它们支持“main 正在补齐 V4.1 runtime integration”的时间线判断，但不改变 release 证据等级。
+
+### stable 对照
+
+SGLang 最新 release `v0.5.20` 的 tag commit 是 `94602c9c2b7cbdb8efd5c52802dac6a1c180089e`，发布时间为 `2026-09-18T22:41:33Z`。固定 tag 中 [`deepseek_v4.py`](https://github.com/sgl-project/sglang/blob/v0.5.20/python/sglang/srt/models/deepseek_v4.py) 为 `170,193` bytes / SHA-256 `252f6176338bf7849c9297de930745f46b761d22ff4161073a1031340f60caa4`，Git blob `af76c73f7225d14379906a341b2f51adb4447dcc`；[`deepseek_v4_dspark.py`](https://github.com/sgl-project/sglang/blob/v0.5.20/python/sglang/srt/models/deepseek_v4_dspark.py) 为 `40,396` bytes / SHA-256 `59ac079e28d4d0a90b82c1ca641ba89f2851d081ce4fddf2bec2e003dda9fd04`，Git blob `4994a92547b6bec244b1f6e20fa276cd80e79640`。tag 中 `deepseek_v41_vit.py` HTTP 404，两个文件中 `deepseek_v41` 和 `dsv41` 出现次数均为 0，未形成 V4.1 专用 vision/runtime 证据。
+
+因此当前准确结论是：SGLang `main` 已有 V4.1 vision、DSV4.1 sparse/indexer、FP8/unified KV 和 DSpark integration；SGLang `v0.5.20` stable 只证明通用 V4/DSpark 文件存在，不能证明 V4.1 专用 vision/runtime 已进入 stable release。SGLang main 与 stable tag 的 compare 为 `diverged`，main ahead 403、stable ahead 5，merge base `d58342deab27e6f8bb507d9db2a0f87c6f42cee3`；这进一步说明不能用当前 main 文件替代已发布包。
+
+本轮将 V4.1 状态更新为“官方内容 + HF reference implementation + vLLM `v0.30.0` stable release/source evidence + SGLang upstream main runtime evidence + recipe protocol evidence（AA 单榜）”。vLLM `main` 与 v0.29.0 仍作为时间线对照保留。仍未完成完整权重加载、GPU/ROCm/NPU 运行、视觉 token 的 draft/target verify、真实 FP4/FP8 质量、candidate/index recall、DSpark acceptance/rollback、EPD 调度、目标硬件 profiling、tool acceptance 和生产 SLO。
+
+## 2026-09-23：DeepSeek 官方 API capability contract
+
+本轮通过 `10.237.126.170:1234` 重新取得 DeepSeek 官方 API 文档。下面的内容是 API/provider contract，不能反推 V4.1-Flash 的参数、attention 结构、训练算法或线上权重快照。
+
+| 官方页面 | 用途 | 快照 |
+|---|---|---|
+| [Pricing](https://api-docs.deepseek.com/quick_start/pricing) | 价格、模型版本与计费字段 | `23,149` bytes / `2fecee48bf6ad791bce38d1d5504d8ad5c8b0fd4da93e6dc198ae88ff1a4506a` |
+| [Rate Limit](https://api-docs.deepseek.com/quick_start/rate_limit) | 并发、速率和请求限制 | `35,133` bytes / `1190b37c138b132b45ed3fa6e19861e7fa40be95a9a9c5a36104cc88ad26413a` |
+| [Error Codes](https://api-docs.deepseek.com/quick_start/error_codes) | HTTP/API 错误语义 | `20,387` bytes / `0df2698a3c67c567476e476c75c74f69313b9025ded16eeb324514c52ae5094a` |
+| [Vision](https://api-docs.deepseek.com/guides/vision) | 图像输入与媒体预算 | `78,174` bytes / `a805d8a40388ee238c626b83419c2cf786ac3002187c072699710132fc77dac7` |
+| [Files](https://api-docs.deepseek.com/guides/files) | `file_id` 生命周期与配额 | `61,828` bytes / `1020efca2be22faf0ec88f04aed7ee701b290c0d5ff0a465f7ec617314240345` |
+| [Responses API](https://api-docs.deepseek.com/guides/responses_api) | typed items、SSE 和状态终结 | `56,250` bytes / `1719ac1b05e29579acd0cbc5ba0bcdb629cf7722eb551b5cd6d6d62c271e3ca2` |
+| [Tool Calls](https://api-docs.deepseek.com/guides/tool_calls) | function tool 与中途工具回灌 | `70,636` bytes / `5ee72ac00e5594bffac058cfef8872beb121b97e122f914c114a618f6a2b4027` |
+
+### 可观察的服务合同
+
+- 当前价格/模型文档把 `deepseek-flash` 映射为 V4.1-Flash，记录为 1M context、384K maximum output 和最高 2500 concurrency。`requested_model`、文档 alias 与响应中的 `model` 必须分开存储，旧 alias 的兼容路由不能写成新的 checkpoint。
+- Vision guide 的当前限制包括：外部 URL 最长 8192 字符、请求超时 60 秒、URL 单图 32 MiB、`file_id` 单图 64 MiB、请求体 48 MiB、最多 600 张图；单图约 1024 image tokens 是当前 guide 的预算提示。历史实验公告中的 384 image tokens 仍保留为旧 alias/旧文档语境，不能混成一个统一数字。
+- Files API 支持 `purpose=user_data`，单文件上限 64 MiB，保存期可为约 1 小时至 30 天或永久，用户配额为 25 GiB、最多 10,000 个文件。资源过期、删除和权限必须进入宿主的 artifact manifest；`file_id` 存在不代表模型已经使用了完整图像证据。
+- Responses 是 stateless。SSE 使用 semantic event 类型和递增 `sequence_number`，以 `response.completed`、`response.incomplete` 或 `response.failed` 等终态结束，不发送 `[DONE]`。`previous_response_id`、`conversation`、`background`、context management 等不支持项不能被客户端默认为持久会话；部分不支持字段可能被静默忽略。
+- `function_call_output` 与 `custom_tool_call_output` 可以回灌文本或图像；响应解析器必须按 item、index、call id 和 turn lineage 重放，而不是按到达顺序拼接字符串。客户端仍负责权限、执行、重试、幂等和 verifier。
+- Tool Calls 文档支持在 Responses/兼容 Anthropic 的回路中插入客户端工具调用；Chat Completions 不提供同样的中途插入协议。因而“模型会生成 tool call”与“某 endpoint 能完成多轮 tool loop”是两个 capability probe。
+- `/beta` endpoint 的 `strict=true` 可启用 JSON Schema 约束；这属于 API 端的 schema enforcement。固定 `deepseek-recipe` adapter 的 strict enforcement 尚未证明，协议转换器能生成字段不等于服务端或宿主已验证 JSON、权限与业务结果。
+
+### 面试与验收边界
+
+应把 V4.1-Flash 的闭环拆成四本账：排行榜 canonical identity、官方 API contract、reference/runtime source、完整权重与目标硬件 acceptance。API 文档可以支持 alias、媒体预算、SSE 状态机、文件生命周期、schema 和工具回灌问题；它不能替代 FP4/FP8 误差、candidate/index Top-K recall、DSpark acceptance/rollback、EPD 调度、p99、独立 benchmark 或生产 SLO。后续实验应至少记录 `requested_model`、`served_model`、API snapshot、tool/schema hash、权限决定、executor receipt、verifier receipt 和最终成本。
+
+## 2026-09-23：API contract toy audit
+
+新增零依赖脚本 [`deepseek_v41_api_contract_audit.py`](code/deepseek_v41_api_contract_audit.py)，不访问网络、不调用付费 API、不加载 V4.1 权重，只把官方 contract 中可复现的协议门禁缩成教学实验：
+
+- `SemanticSSEParser` 按 semantic event、JSON data、递增 `sequence_number` 和 `response.completed/incomplete/failed` 维护状态；把输入按 5 字符切块，验证事件边界不能依赖网络 chunk，乱序序号会被拒绝，终态之后的事件也会被拒绝。
+- `StrictObjectSchema` 拒绝缺失字段、错误类型和额外字段；这是 JSON Schema 的最小 toy，不冒充 DeepSeek `/beta strict=true` 的完整实现。
+- `PermissionPolicy` 在 executor 之前检查工具名与路径前缀；权限拒绝不会进入执行或重试。
+- `ToolHarness` 只对执行前的合成 transient failure 做有限重试；成功 receipt 按 idempotency key 保存，重复 call 返回 duplicate receipt 而不重复副作用。独立 verifier 再比较 receipt 结果，故 `executed=true` 不自动等于 `verified=true`。
+- `tool_output_item` 同时演示文本与 `input_image/file_id` 结构化回灌，强调 tool output 是 observation，不是权限授予或业务成功。
+
+本次脚本运行结果：SSE 3 个事件、文本 `contract audit`、终态 `response.completed`；首次工具调用因一次预执行 transient failure 经过 2 次尝试后完成，重复调用没有增加副作用；额外字段触发 `SchemaError`，越权路径触发 `PermissionDenied`；`network_called=false`。这些结果只证明 toy 的状态机和审计逻辑，不证明真实 endpoint、alias 路由、模型质量、strict enforcement、生产 executor 或 verifier 已验收。

@@ -692,3 +692,35 @@ unknown_after_revoke_query_blocked unknown preserve_unknown_and_handoff
 Fallback routing 的本质是：当原路径不可用时，系统要在已知状态、有限权限和明确证据下选择下一步。无副作用的传输故障可以有限重试；provider 限流可以排队或切换同权限副本；工具状态未知必须查询；策略拒绝不能绕过；协议不兼容应改为信息、草稿、人工或拒绝；上下文不足要显式标记证据缺口。
 
 一个成熟的降级系统会保存 request ID、action ID、幂等键、错误分类、模型和工具版本、策略版本、权限范围、状态变化和用户可见语义。它允许低风险任务继续，也能在高风险动作无法确认时停下来。路由器并不负责把所有失败隐藏掉，它负责把失败变成可解释、可恢复、可审计且不会扩大伤害的有限服务。
+
+## 16.20 Claude Opus 5.5：能力分级与透明 fallback
+
+Anthropic 发布页把 Opus 5.5 的网络安全、生物和蒸馏防护描述为能力相关的路由策略：普通软件生命周期中的 bug 修复可以继续，更多高风险 cyber 任务可能转到 Opus 4.8；生物研究需要 Life Sciences Verification Program；preserved thinking 被用于 anti-distillation。这个案例说明 fallback 不是“模型失败后再重试一次”，而是安全策略选择了另一条能力、权限和审计边界不同的执行路径。
+
+安全路由的最小记录应包含：原始模型与 revision、风险分类、触发规则、目标模型、工具 allowlist、网络/数据区域、thinking 状态、缓存是否复用、重试次数、外部副作用和最终 verifier。若用户只看到一个成功答案，却不知道任务由 fallback 模型完成，评测和责任归因都会失真。
+
+发布方称 Opus 5.5 在 prompt injection、越界 sandbox 和模拟环境误判等行为上有改进，但这不等于 Agent harness 已安全。宿主仍需做权限门禁、工具结果 provenance、外部状态查询、幂等和人工升级；模型级拒答率不能替代执行器级安全保持率。
+
+### 16.20.1 System Card 的风险阈值和评测开关
+
+System Card 给出的 RSP 结论是 CB-1、未达到 CB-2；autonomy threat model 1 适用但整体风险仍为 low，threat model 2 未达到。这里的“未达到阈值”不是“没有能力”，而是当前 threat model、评测方法和 safeguards 下没有跨过对应安全门槛。CoBench 2.1 的 Opus 5.5 `55.8%`、AECI `169.36` 也应与其 confidence interval、model pool 和 benchmark fit 一起阅读。
+
+Cyber 证据更需要防止误读：在关闭 cyber safeguards 的评测中，ExploitBench 完整 ACE 为 `301/410 = 73.4%`，CyScenarioBench 为 `67.6%`，ExploitGym 2 小时/6 小时为 `289/869`、`300/869`。生产请求可能经过拒答、工具限制或 fallback，所以这些数字不能用来估算线上越权率。相反，Gray Swan IPI 在 k=1/10/15 为 `0.1%/0.7%/1.0%`，约 18% rollout fallback 到 Opus 4.8；1,310 个 fallback rollout 无成功攻击。报告时要同时写 attack success、fallback 覆盖率和实际模型。
+
+安全路由的类型也不是统一的“重试”：biology/CB -> Opus 5，cyber -> Opus 4.8，窄范围 frontier LLM kernel/AI R&D -> Opus 5；conventional weapons/high-yield explosives 与 distillation/hidden reasoning extraction 没有 fallback，其他 provider 可能不同。系统必须先做风险分类和状态确认，再决定是否降级，并把 `original_model`、`actual_model`、safeguard 状态、工具权限、外部副作用和 verifier 写入审计轨迹。
+
+## 16.21 Claude Fable 5.1：共享权重与不同 safeguards
+
+Fable 5.1 的 System Card 给出一个清晰的安全路由案例：Claude Fable 5.1 与 Claude Mythos 5.1 共享相同模型权重，但属于不同 safeguards/访问计划。Fable 面向一般使用并限制部分高风险双用途生物与网络安全任务；Mythos 面向受信任访问。这里的变化发生在策略、分类器、工具权限和 fallback 层，不能被写成两个架构不同的模型。
+
+System Card 对 Mythos 5.1 的 RSP 判断为 CB-1、未达 CB-2；autonomy threat model 1 适用但整体风险为 low，threat model 2 未达阈值。网络安全和 prompt-injection 评测中还存在 helpful-only、关闭 safeguards、fallback 到其他 Claude 版本等条件。Gray Swan IPI、Shade、browser-use、permission-hook bypass 与 sandbox 事件必须绑定 `safeguard_state`、`actual_model`、`fallback_reason`、工具 allowlist、执行环境和 verifier，不能把发布方条件结果当作 Fable 生产路径的普遍安全率。
+
+一次安全 fallback 的 trace 至少应回答：
+
+1. 原始请求由哪个模型、revision、effort 和权限集合接收。
+2. 哪个风险分类器或 policy 规则触发了 fallback，是否发生了 refusal、能力收窄或实际模型切换。
+3. thinking block、工具调用、缓存前缀和已产生的外部副作用是否仍兼容，是否需要重建状态。
+4. fallback 后实际执行模型是谁，工具是否只读，是否保留原 action ID/幂等键。
+5. 最终 artifact 是否经过独立 verifier，用户看到的是完成、草稿、未知、拒绝还是待人工处理。
+
+这也解释了为什么“安全模型更强”不能只用拒答率表达：系统安全取决于模型能力、分类器、权限、执行器、状态恢复和最终验证的组合。降级可以收窄能力与权限，但不能借换模型绕过原策略拒绝，也不能把已提交或未知状态的外部动作重新提交。

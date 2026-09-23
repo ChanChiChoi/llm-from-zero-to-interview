@@ -952,3 +952,67 @@ decision=publish_scoped_task_claim_and_hold_architecture
 
 越新的模型，越应该明确哪些是事实、哪些是实验、哪些是推断、哪些仍然未知。能
 够准确写出未知，不会削弱技术判断，反而让已经被证据支持的部分更可信。
+
+## Grok 4.7：发布方 benchmark 与榜单结果分账
+
+Grok 4.7 的 Artificial Analysis 条目、xAI 发布页 benchmark 和 DataCurve DeepSWE（当前没有精确行）属于三种不同证据。AA 的 Intelligence Index/速度/成本是 provider 配置测量；xAI 的 DeepSWE、CursorBench、Terminal-Bench、Harvey、HealthBench 和 GDPval 绑定发布方 prompt、effort、工具、环境与 verifier；DataCurve 的 Pass@1/4 绑定 `mini-swe-agent` 和自己的任务集。它们不能因为都出现了模型名就互相校准。
+
+评测报告至少要把下列字段作为 manifest 的一部分：
+
+```text
+model_id / revision / provider / effort
+benchmark / task revision / prompt / tool set
+harness / environment / timeout / retry / verifier
+score / cost / output tokens / agent steps / date
+```
+
+若某一层缺少精确条目，例如 DataCurve 没有 `mini_swe_agent_grok_4_7_*`，应保留缺失而不是从 Grok 4.6 或邻近模型借分。完整来源和 9 月 22 日快照见 [`grok-4.7-source-notes.md`](../../research/model-update-2026-09/grok-4.7-source-notes.md)。
+
+## 14.23 Claude Opus 5.5：质量、成本与 fallback 的三账
+
+Opus 5.5 的 Artificial Analysis 条目是 `max with fallback`，而 Anthropic 发布页又同时给出 max、xhigh 和 default/medium 的 benchmark/成本描述。评测 manifest 不能只保存一个模型名，应至少拆成：
+
+| 账本 | 必须固定 | 不能替代 |
+|---|---|---|
+| 模型账 | canonical slug、revision、provider、effort、fallback policy | 内部参数或架构 |
+| Harness 账 | tools、permissions、sandbox、task/environment、retry、verifier | 裸模型能力 |
+| 成本账 | input、cache read/write、output、tool、retry、fallback、wall clock | 只看 token 单价 |
+
+发布方报告的 Terminal-Bench、FrontierCode、CursorBench、OSWorld、AutomationBench 和 WANDR 应保留为发布方/harness 结果；DataCurve 当前没有 `mini_swe_agent_claude_opus_5_5_*` 精确行，不能迁移 Opus 5 或 Fable 5.1 的 Agent 结果。若安全干预导致 cyber 或 biology 任务交给其他 Claude，最终结果应另记 `actual_model` 和 `fallback_reason`。
+
+一个公平实验应分别画 quality-cost、quality-steps 和 verified-success-latency 曲线，并报告 token、工具轮次、fallback 次数、失败类别和 artifact verifier。这样才能区分“模型更有效率”“模型更少触发安全路由”和“任务 harness 更宽松”三种解释。
+
+### 14.23.1 System Card 数字也必须带配置
+
+Opus 5.5 的 System Card 把“能力分数”和“安全行为”放进了同一份条件账本。Terminal-Bench 4.0 的 `66.36%` 绑定 xhigh、Claude Code `--bare` 和 5 trials；ProgramBench 的 `91.2%` 绑定 166 个 golden tasks；OSWorld 2.0 的 partial/strict 是 `81.8%/48.7%`，绑定 108 tasks、1080p、最多 500 actions、5 runs，以及超过 100K tokens 后的 server-side compaction。评测报告若只复制分数而丢掉成功定义和上下文策略，就不能复现原 claim。
+
+System Card 的 CoBench 2.1 `55.8%`、AECI `169.36` 和 Cyber 的 ACE `301/410 = 73.4%` 也不能放在同一列当作“综合能力”。AECI 使用新的 374 benchmarks、7,985 observations 和 732 models fit；Cyber 数字又明确关闭 safeguards。应在 manifest 中增加：
+
+```text
+snapshot / safeguard_state / fallback_policy
+benchmark_revision / success_definition / trials
+effort / harness / tools / environment / verifier
+raw_score / confidence_interval / actual_model / artifact
+```
+
+多 Agent 的 ProgramBench 同分约 `2.7x` latency improvement 和 DRACO `0.5x` latency budget 下约 `2.8x` speedup 是 derived latency，不是 wall-clock。它们可以作为编排研究证据，但不能替代并发、排队、共享工具、失败恢复和真实墙钟的独立验收。
+
+## 14.24 Claude Fable 5.1：System Card 的条件化评测
+
+Claude Fable 5.1 的证据至少分成三层：Artificial Analysis 的 provider/configuration 指标、Anthropic System Card 的发布方评测，以及 DataCurve `mini-swe-agent` 的精确 Agent 行。当前 DataCurve 没有 `mini_swe_agent_claude_fable_5_1_*`，所以不能把 Fable 5 的 Pass@1、成本或 steps 借给 Fable 5.1。
+
+System Card 正文报告了 Terminal-Bench 4.0 `55.8%`、Terminal-Bench-Science 0.1 `52.6%`、CursorBench `73.4%`、OSWorld partial/strict `77.9%/41.7%`、GDPval-AA v2 `1853`、AutomationBench `31.4%` 和 ProgramBench `87.6%`。这些结果仍需要记录 benchmark revision、snapshot、effort、工具、任务环境、fallback、safeguards、试验次数和成功判定；OSWorld 的 partial 与 strict 不是同一个分母，不能只挑更高的数字。
+
+安全评测还揭示了一个常被忽略的变量：Fable 5.1 与 Mythos 5.1 共享模型权重，但服务配置的 safeguards 不同，且部分 cyber、biology 和 prompt-injection 结果来自 Mythos、helpful-only 或关闭 safeguards 的配置。Gray Swan IPI、Shade coding、browser-use、permission-hook bypass 和 sandbox vulnerability 应分别保存 `safeguard_state`、`actual_model`、`fallback_reason`、工具权限和 verifier。发布方结果可以支持“在该条件下观察到某行为”，不能直接支持“Fable 裸模型在生产中具有该分数/风险”。
+
+因此评测 manifest 至少要拆成：
+
+```text
+model_id / snapshot / provider / effort
+benchmark / task_revision / tools / permissions
+safeguard_state / fallback_policy / actual_model
+harness / environment / timeout / trials / verifier
+score / cost / output_tokens / agent_steps / date
+```
+
+如果无法填出实际执行模型或 safeguards 状态，结果应标为发布方条件证据或 `not_comparable`，而不是进入跨模型排行榜。Fable 5.1 当前适合用于训练“证据分层、fallback 归因和安全开关”的面试题，不足以支持参数、架构、完整训练 recipe 或独立能力结论。

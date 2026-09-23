@@ -1235,3 +1235,42 @@ runtime_gate_pass: False
 7. 生产级 runtime 必须处理错误、取消、超时、并发、权限和隐私。
 
 下一章会进入 Coding Agent 工作流，重点讨论一个 coding agent 在真实代码库中如何探索、计划、编辑、验证和总结。
+
+## 2.27 GPT-5.6 的三层 Agent runtime 所有权
+
+OpenAI 的 Agents 文档给出了一个很适合 runtime 设计的切分：Agents API、Agents SDK 和 Responses API 都能完成 Agent 工作，但它们的状态所有者不同。把它们都叫作“Agent API”会让恢复、审计和权限责任变得模糊。
+
+| 层 | 主要所有者 | Runtime 需要记录什么 |
+|---|---|---|
+| Agents API | OpenAI 托管 Codex harness | session configuration、turns、items、托管工具、sandbox 与平台进度 |
+| Agents SDK | 应用及其 runner | deployment、storage、approval、handoff、工具集、session 和本地 sandbox |
+| Responses API | 应用自建 harness | input/output item、previous response 或完整 replay、executor、permission、artifact 和 verifier |
+
+这里的“所有者”不是账户归属，而是谁负责把状态恢复到一个可继续执行的状态。一个 Agents SDK session、Responses conversation、Agents API session 和 sandbox 不能互相替换。Runtime 的 capability manifest 至少要包含：
+
+```text
+runtime_owner, session_id, model, snapshot, effort, tools_hash,
+reasoning_state_policy, context_policy, permission_policy,
+executor, sandbox, checkpoint, verifier, retention
+```
+
+GPT-5.6 的 reasoning item 是 opaque protocol state，不是可读 CoT；`reasoning.context` 的选择也不等于应用永久记忆。Tool search 还引入了“能力发现状态”：hosted path 由服务端返回 loaded tools，client path 由应用回传 `tool_search_output`，同一 `call_id`、schema hash、tenant scope 和 policy version 都应进入 trace。模型搜索到工具不代表 executor 已授权。
+
+Prompt cache 与 compaction 也要进入 runtime 状态机。稳定 developer 前缀、工具定义和历史回执可以形成可复用 cache prefix；tool search 把新增定义追加到尾部以尽量保护它。Compaction 则会替换早期上下文，触发 canonical context 更新，首次恢复可能 cache miss。验收不能只看压缩后 token 数，还要比较 `cache hit/write`、恢复后的工具重复率、artifact 一致性、E2E 延迟和单位成功成本。
+
+面试中可以用一句话收束：模型负责提出 reasoning/tool intent，Responses 负责携带 typed items，harness 负责 loop/state/policy，executor 负责真实副作用，verifier 负责判断任务是否完成。
+
+## 2.28 Qwen3.7 Plus：把 region/scope 也纳入 capability manifest
+
+Qwen3.7 Plus 的官方 Model Studio 文档说明，同一个模型 alias 在不同 region/scope 下可能拥有不同能力。例如 Virginia 的 Global scope 支持 Structured Outputs 和 Web Search，而 Virginia 的 US scope 不支持；Batch、价格、endpoint 和 API key 也按区域变化。因此 runtime 不能只在 manifest 里写 `model=qwen3.7-plus`，还要写：
+
+```text
+model_alias/snapshot/provider/region/scope/endpoint
+input_output_modalities/context_and_thinking_limits
+capability_flags/tool_schema_hash/permission_policy
+cache_policy/media_revision/executor/verifier
+```
+
+启动时先做 capability probe，或读取带日期的 provider manifest；发现 schema 不支持、API key 属于另一地域或 Web Search 被 scope 禁用时，应在执行前失败，并把错误归因于合同/配置，而不是误报为模型推理失败。模型生成合法 JSON 也不能跳过权限、沙箱、超时、幂等和真实 executor。
+
+Qwen3.7 Plus 的 `qwen3.7-plus-2026-05-26` 是托管 snapshot 关系，不是本地可加载的公开 checkpoint。runtime 应把 alias、resolved snapshot、页面采集日期和 provider revision 记录下来；不能用 Qwen3.5、Qwen3.8、Qwen3-VL 或 Qwen3-Omni 的 config 填充缺失的内部架构字段。

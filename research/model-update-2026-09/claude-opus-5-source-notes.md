@@ -1,15 +1,15 @@
 # Claude Opus 5：排行榜锚点、adaptive reasoning 与长任务运行时
 
-核验日期：2026-09-15。本笔记只把 Artificial Analysis 与 DataCurve DeepSWE 的条目作为模型锚点，再沿 Anthropic 官方模型页、开发者文档、发布页和 system card 追踪面试相关技术。Anthropic 没有公开 Opus 5 的参数规模、网络结构或完整训练报告；运行时协议、产品定位和发布方评测不能反推出这些内部事实。
+原始资料核验日期：2026-09-15；当前时点联网复验：2026-09-21、2026-09-22（先失败后恢复）。本笔记只把 Artificial Analysis 与 DataCurve DeepSWE 的条目作为模型锚点，再沿 Anthropic 官方模型页、开发者文档、发布页和 system card 追踪面试相关技术。Anthropic 没有公开 Opus 5 的参数规模、网络结构或完整训练报告；运行时协议、产品定位和发布方评测不能反推出这些内部事实。
 
 ## 1. 榜单锚点与快照
 
 - Artificial Analysis 的 canonical 条目为 [Claude Opus 5](https://artificialanalysis.ai/models/claude-opus-5)，配置名为 `Claude Opus 5 (Adaptive Reasoning, Max Effort)`，canonical slug 为 `claude-opus-5`，页面 `releaseDate` 字段为 `2026-07-24`。
-- Artificial Analysis 当前详情页给出约 `50.7002` Intelligence Index、`50.0725` output tokens/s、`46.5045s` median time to first chunk、1M context 和约 `$5.8584`/Intelligence Index task。页面还把参数字段留为 null、开放性标为 proprietary；这些是第三方测量或目录字段，不是 Anthropic 的参数披露。
+- Artificial Analysis 2026-09-21 新鲜详情页给出 `50.7771115797629` Intelligence Index（`intelligenceIndexIsEstimated=false`）、`60.707552496689` median output speed、`46.6837206345s` median time to first chunk、1M context 和约 `$5.8584`/Intelligence Index task。页面仍把参数字段留为 null、开放性标为 proprietary；这些是第三方测量或目录字段，不是 Anthropic 的参数披露。
 - DataCurve [DeepSWE v1.1](https://deepswe.datacurve.ai/) 页面标注 2026-09-03 更新、113 个任务、91 个仓库、5 种语言，统一使用 `mini-swe-agent`。Opus 5 的 max 配置是 `mini_swe_agent_claude_opus_5_max`：327/444 次尝试通过，Pass@1 为 `73.6486%`（页面约 `74% +/-4%`），Pass@4 为 `88.4956%`，平均成本 `$11.8376`，平均输出 117,566 tokens，平均 99.04 个 Agent steps，4 次完整 benchmark run。
 - DataCurve 同时提供 low/medium/high/xhigh/max 档位；这些是同一模型在不同运行配置下的系统观测，不应计作五个基础模型。上面的 max 数字还绑定任务集、工具、环境、verifier、重试和 `mini-swe-agent` harness。
 
-本轮复验临时快照如下。临时文件不作为长期数据源，哈希用于复现本轮页面版本和区分代理传输问题。
+2026-09-15 历史复验临时快照如下。临时文件不作为长期数据源，哈希用于复现历史页面版本。
 
 | 页面 | 临时文件 | 大小 | SHA-256 |
 |---|---|---:|---|
@@ -17,7 +17,30 @@
 | Artificial Analysis Opus 5 详情 | `/tmp/recheck-aa-opus5-1234.html` | 3,532,163 bytes | `c9626e404c0ff538a28bc58fff9f05bd276db64a1791b72bfa22ce7f4202d47f` |
 | DataCurve DeepSWE | `/tmp/recheck-deepswe-1234.html` | 268,313 bytes | `8fdbb59257d00cbb0772248bb602aafc1d20a51822388cd4eaf4625505182be7` |
 
-`10.237.126.170:1234` 和 `10.24.27.134:8098` 对三个目标页面均返回 HTTP 200；`10.24.27.134:7890` 对 DataCurve 返回 200，但 Artificial Analysis 大页面在超时前只收到部分内容。代理超时不解释为页面不存在。
+该表保留 2026-09-15 的历史证据；本轮新鲜快照见下方，不覆盖历史哈希。
+
+### 1.1 2026-09-21 新鲜快照
+
+| 页面 | 代理/临时文件 | 大小 | SHA-256 |
+|---|---|---:|---|
+| Artificial Analysis 中文首页 | `7890:/tmp/aa-current-7890.html` | 1,778,568 bytes | `f4ba39ee5b5638def213f29fa5e9f6aac9954a26cb291f6a6064283f9b0eba93` |
+| Artificial Analysis Opus 5 详情 | 三条代理 `/tmp/current-aa-opus5-*.html` | 3,868,875 bytes | `e1710da9c158833bad7c1cc8b02dcfdd77d72ea8f6b5652274faa399dde7b615` |
+| DataCurve DeepSWE | 三条代理 `/tmp/current-deepswe-*.html` | 268,571 bytes | `67a6b5350a1bc986e814097a87928f5064ba6955ca78be44795e11b2413f2870` |
+| Anthropic Opus 5 模型页 | `1234:/tmp/current-anthropic-opus5-1234.html` | 461,560 bytes | `57d20b24a8d7961bd2ea76d71080035677ec27deac07991bcc73cc3d305a03b5` |
+| Anthropic Opus 5 发布页 | `8098:/tmp/current-anthropic-release-8098.html` | 352,773 bytes | `72490a50c0d5c96021954261ed4201d03c41e5134f2432647eed8ac58644c31f` |
+
+三条代理对 AA Opus 5 详情和 DataCurve 均返回 HTTP 200 且逐字节一致；Anthropic 模型页的 8098/1234 内容一致，发布页包含动态页面内容，记录选定代理快照而不把不同哈希解释成模型变化。AA canonical slug 集合相对上一快照没有新增八家重点厂商候选；出现的其他新增 slug 不进入当前关注范围。
+
+### 1.2 2026-09-22 当前时点新鲜快照
+
+本轮继续复验同一个 `claude-opus-5` 锚点，没有从官方目录另发现模型。Artificial Analysis 详情页快照 `/tmp/aa-opus5-fresh-20260922.html` 为 `3,869,351` bytes，SHA-256 为 `c18260ab4ff331d5bd3305691db2d4b6051dc2ebe642aa1458c5b8fa2c367643`；中文首页快照 `/tmp/aa-zh-refresh-escalated-1234-20260922.html` 为 `1,762,446` bytes，SHA-256 为 `247d5f3aab6819ab0b22f1852d2d8b27f831feecefc2281ac8e7eb4228b46d63`。
+
+- 当前 AA 详情仍是 `releaseDate=2026-07-24`、`claude-opus-5`、1M context；本次读取的第三方/provider 字段为 Intelligence Index `50.7771115797629`、median output speed `56.4471785104486 tokens/s`、median time to first chunk `49.2490756305s`、cost per Intelligence Index task `$5.858396237036018`。这些是当前测量值，不是 revision、参数或训练变化的证据。
+- 9 月 21 日记录的 `60.707552496689 tokens/s` 和 `46.6837206345s` 仍保留为历史测量；两次页面值不能拼成趋势，也不能用一次 provider 测量覆盖另一次。
+- 本轮先后取得的 DataCurve 页面都没有产生新的模型身份。Opus 5 的精确配置仍为 `mini_swe_agent_claude_opus_5_max`：327/444、Pass@1 `73.64864864864865%`、Pass@4 `88.49557522123894%`、平均成本约 `$11.8376`、平均输出约 `117,566` tokens、平均 `99.04` Agent steps；这些数字继续绑定 DeepSWE v1.1 的任务集、工具、环境、verifier 和 `mini-swe-agent` harness。
+- Anthropic 发布页当前快照为 `352,846` bytes、SHA-256 `7bb18f8e14e20fe2651e4a8308947f53a9541b0dcce6b7549e2b2c244202dce5`；Opus 5 System Card 为 `16,281,258` bytes、SHA-256 `0950dae1ba6b341e4f1a009e535e0f025625efeca21bd043a9a5ae148a3f2e6b`。System Card 的二进制快照不能替代正文抽取，不据此扩写未明确的安全数字。
+
+因此本轮只更新第三方测量的时间戳和官方入口证据，Opus 5 仍为**资料级闭环**，不新增重复 Transformer 正式章节，也不把 9 月 22 日的测量漂移解释为模型升级。
 
 ## 2. 官方模型字段
 
@@ -82,7 +105,7 @@ Anthropic 发布页声称 Opus 5 在 Frontier-Bench v0.1 超过其他模型且�
 - [arXiv 精确标题检索](https://arxiv.org/search/?query=%22Claude+Opus+5%22&searchtype=title) 本轮返回 2 个结果，快照 `/tmp/recheck-arxiv-opus5-1234.html` 为 25,204 bytes，SHA-256 `16950ff350d2f534fe918ecda302adc76fe695c53b6f278e6e277e670cf05c2f`。结果是 arXiv:2608.14992 和 arXiv:2608.07776：前者研究工具结果与文本权威性的合成任务，后者研究 SOC 2 合规代码；两篇把 Opus 5 当作被测模型，标题、作者和摘要都不显示它们是 Anthropic 发布的 Opus 5 技术报告。
 - 因此截至 2026-09-15，公开入口没有检出 Opus 5 专属参数/架构报告、完整训练报告、官方论文或公开权重。这个结论是有范围和日期的负面检索证据，不是对未来发布的绝对否定。
 
-官方发布页本轮通过 1234 返回 `/research/claude-opus-5`，快照为 355,501 bytes、SHA-256 `c247a02562f799d87e76546ec77a6c6750da7a966501fe101998ae03d6c1be1b`；Anthropic 开发者文档完整 Markdown `/tmp/anthropic-llms-full-1234` 为 34,524,040 bytes、SHA-256 `76330f83cc797addb31bb5a92dbbeef28b884e40b9de75a27c64d31b71d2c63f`。官方页面和文档是本轮 API 事实的优先证据。
+官方发布页历史快照本轮通过 1234 返回 `/research/claude-opus-5`，为 355,501 bytes、SHA-256 `c247a02562f799d87e76546ec77a6c6750da7a966501fe101998ae03d6c1be1b`；2026-09-21 新鲜发布页快照见表。Anthropic 开发者文档完整 Markdown `/tmp/anthropic-llms-full-1234` 为 34,524,040 bytes、SHA-256 `76330f83cc797addb31bb5a92dbbeef28b884e40b9de75a27c64d31b71d2c63f`。官方页面和文档是本轮 API 事实的优先证据。
 
 ## 6. 尚待核验与书系映射
 
@@ -95,3 +118,9 @@ Anthropic 发布页声称 Opus 5 在 Frontier-Bench v0.1 超过其他模型且�
 - 第十七册与第二十册：Agent 工具宿主、工具目录版本、subagent budget、checkpoint、权限审计和 artifact 门禁。
 
 当前状态：**资料级闭环**。已有两个排行榜锚点、官方模型/API/发布/system card 入口、研究笔记、负面论文检索和同步记录；没有独立参数/架构专题，因此不新增 Opus 5 专属正式章节。
+
+## 7. 2026-09-21 当前时点代理复验时间线
+
+本轮早先重新尝试三条用户提供的代理时，`10.24.27.134:7890`、`10.24.27.134:8098`、`10.237.126.170:1234` 均出现连接失败；随后同一轮重试已全部恢复并取得 HTTP 200。前一失败状态只代表当时的短时访问路径故障，不代表网页不存在。
+
+因此，2026-09-15 页面快照、哈希和运行时结论仍保留为历史缓存证据，2026-09-21 新鲜快照已在 1.1 节单独登记。新鲜页面只更新第三方指标/页面字段和官方可读入口，不升级为参数、架构、训练 recipe 或独立 benchmark 证据，不迁移相邻 Claude 版本分数。

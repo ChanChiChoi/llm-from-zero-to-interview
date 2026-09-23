@@ -81,4 +81,15 @@ GLM-5 的定位从 vibe coding 转向 agentic engineering。对应的能力对�
 
 ## 7. 当前结论
 
-GLM-5 当前为 **AA 单榜资料闭环**：Artificial Analysis 精确发现、Z.ai 官方模型卡、专属技术报告、API/部署资料和面试技术主线已经具备；DataCurve 当前没有精确 GLM-5 配置，因此不升级为双榜锚点，也不新增 GLM-5 的 DeepSWE 分数。暂不新增独立正式章节，先与已有 GLM-5.3/GLM-5.3-Flash 的架构与 Agent 章节交叉映射；后续优先补 DSA/slime 的实现与独立复现证据。
+GLM-5 当前为 **内容专题闭环（AA 单榜）**：Artificial Analysis 精确发现、Z.ai 官方模型卡、专属技术报告、API/部署资料、面试技术主线和正式章节已经具备；DataCurve 当前没有精确 GLM-5 配置，因此不升级为双榜锚点，也不新增 GLM-5 的 DeepSWE 分数。后续仍优先补 DSA/slime 的实现与独立复现证据。
+
+## 8. 2026-09-20 重新联网复验
+
+本轮重新访问两个唯一排行榜和 GLM-5 官方周边资料，结果按线路和站点分别记录：
+
+- Artificial Analysis 详情快照 `/tmp/glm-aa-20260920.out`，`3,811,809` bytes，SHA-256 `0b9c56ff97a87b1dd0a006d1c300057f5ef20c3f65a19bcddf0f6803d8a94f8d`。当前页面标题为 `GLM-5 (Reasoning)`，并提示已有更新模型 `GLM-5.1`；因此 GLM-5 保留为历史 AA 锚点，不能把页面提示误写成 GLM-5.1 的技术证据。页面第三方字段约为 744B/40B、200K context、Intelligence Index `27.9111550817227` 和约 69 tokens/s；指数、速度、TTFT 和价格仍是第三方配置/provider 字段。
+- DataCurve 快照 `/tmp/aa-check-8098-ds-20260920.out`，`268,571` bytes，SHA-256 `67a6b5350a1bc986e814097a87928f5064ba6955ca78be44795e11b2413f2870`。仍未找到精确 `mini_swe_agent_glm_5_*` 行，不迁移 GLM-5.2/5.3/5.3 Flash 结果。
+- Z.ai 博客入口资源 `/tmp/glm-blog-js-20260920.out`，`145,189` bytes，SHA-256 `99d27d6132c25e1b39fe26df0605ad1abd855e9b30b098996c64423093fb618f`；资源正文可检出 `GLM-5`、`DSA`、`slime`、`744B`、`40B`、`28.5T` 和 `Agentic` 等字符串，作为博客入口资源的复验，不把压缩 JavaScript 中的字符串扩写成未公开实现细节。
+- `https://docs.z.ai/guides/llm/glm-5.md` 和无扩展名文档页本轮经 `8098/1234` 返回代理 HTTP 503；这只记录为本轮文档线路失败。已有 9 月 16 日官方文档/模型卡快照继续作为资料来源，不能把 503 解释为页面不存在。Hugging Face/GitHub 本轮的线路失败同样不改变已有固定快照的证据状态。
+
+本轮新增正式章节 [`第二十一册第 89 章`](../../book-21-transformer-architecture-evolution/chapters/89-glm-5-dsa-slime与agentic-engineering.md)，内容只确认：DSA 的候选召回问题、MoE 的 total/active 分账、`slime` 的异步 rollout/trainer 系统问题，以及 Agentic Engineering 的可执行验证闭环。完整 indexer loss、top-k recall、生产 kernel、异步调度、policy freshness 控制、完整训练/后训练 recipe、硬件 profiling、线上工具接受率和独立复现仍待核验。

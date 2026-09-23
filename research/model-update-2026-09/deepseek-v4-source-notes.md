@@ -70,3 +70,94 @@ mHC 将残差映射矩阵 `B_l` 约束在双随机矩阵集合（Birkhoff polyto
 当前 [Vision guide](https://api-docs.deepseek.com/guides/vision) 支持 base64、外部 URL 和 Files API `file_id`，并按图片尺寸自动 resize；文档给出的当前上限约为每图 1024 image tokens。发布公告对 `deepseek-v4-flash-vision-exp` 的历史表述是每图最多 384 tokens、按 V4-Flash 价格计费。两个数字属于不同时间/路由/文档语境，应并列记录并在实时接入时以响应的 model、usage 和文档版本为准。
 
 本次复核的临时快照仅用于证据识别：Vision announcement 25,247 bytes，SHA-256 `f381bb106aa6d046a7a32015715e4e283320ad1fcf6b608ad439599600cf5784`；Quick Start 46,116 bytes，SHA-256 `6e2eb037db92ebef6a8f6408d87c12318c973388d6e27321606bb0e67dd67a6c`；Vision guide 78,192 bytes，SHA-256 `d6797f08bdb139e486e9cdd846003c14d3598254a76adbc932c3217be7a2b0df`；Files API guide 61,828 bytes，SHA-256 `4a7b7a36f57f8a3f946af7307071499c02c378d28e19096d36bba5d7b9b6f8a6`；Responses guide 56,250 bytes，SHA-256 `1fbc3261d73a2954466b75c17e233c5d7b94248ba3c5888da84eb63810e34b44`；Pricing page 23,359 bytes，SHA-256 `755aa9b488d1185cba016ca4de3b3b6b8f593f5e13e5f9f961305289a5c8d242`。
+
+## 2026-09-20：DeepSeek V4 Pro 0813 当前活动锚点
+
+本轮把 `DeepSeek V4 Pro 0813 (Reasoning, Max Effort)` 作为新的活动锚点。模型发现仍来自两个允许的排行榜：Artificial Analysis 精确页为 [DeepSeek V4 Pro](https://artificialanalysis.ai/models/deepseek-v4-pro)，页面标题为 `DeepSeek V4 Pro 0813 (Reasoning, Max Effort)`，release date 为 `2026-08-13`，Intelligence Index 为 `35.9967791278402`，目录 context 为 `1,000,000`，total/active 参数字段为 `1.6T/49B`；页面未标记 deprecated、标记开放权重和 MIT。以上指数、目录字段和开放性标签首先属于 AA 快照，只有与官方模型卡/配置一致的字段才进入模型事实。
+
+AA 详情快照为 3,934,926 bytes，SHA-256 `b14ce625eb337401f4faa63eed37f1b08fe109a693dcdf2a34e21924b6cddff1`。DataCurve 当前精确行是：
+
+```text
+model: deepseek-v4-pro
+harness: mini-swe-agent
+reasoning_effort: max
+config: mini_swe_agent_deepseek_v4_pro_max
+Pass@1: 62.831858%
+Pass@4: 88.495575%
+n_runs: 4
+mean_cost_usd: 1.6660232187
+mean_output_tokens: 105998.9
+mean_agent_steps: 154.71
+```
+
+这组数字是 `model + max effort + mini-swe-agent + 工具 + 任务集 + 环境 + verifier` 的组合结果；它可以说明该配置在该 harness 下的观察结果，不能写成 DeepSeek V4 Pro 裸模型能力，也不能迁移给 V4 Flash、V4.1-Flash 或其他 DeepSeek 版本。
+
+### 官方 API 与运行时证据
+
+- [V4 Pro GA 公告](https://api-docs.deepseek.com/news/news260813)确认 2026-08-13 上线、`low/high/max` reasoning effort、原生 Responses API 和 Codex 优化。V4 Pro 的 API 模型名保持为 `deepseek-v4-pro`；effort 是请求级运行配置，不是三个基础权重。
+- [DeepSeek Quick Start](https://api-docs.deepseek.com/quick_start) 的当前页面列出 `deepseek-v4-pro`；[Responses API 文档](https://api-docs.deepseek.com/guides/responses_api)明确 DeepSeek Responses 是 stateless，不支持 `previous_response_id`、`conversation`、`background` 或 `store`，支持 function tools、`apply_patch`，并行工具调用始终开启；不支持的参数可能被静默忽略。
+- [Thinking 文档](https://api-docs.deepseek.com/guides/thinking)、[Tool Calls 文档](https://api-docs.deepseek.com/guides/tool_calls)和[价格页](https://api-docs.deepseek.com/quick_start/pricing)用于解释 thinking/tool loop、参数边界和成本语境。协议字段只能证明 API 行为，不能反推模型内部的推理算法。
+
+本轮临时快照用于证据识别：GA 公告 23,248 bytes，SHA-256 `a5d1169a61c8c33e1810873818257ace891ea09e27e9457038785adec7f1a362`；官方模型卡 README 13,149 bytes，SHA-256 `c4d714818a4d3333542edc7d38ea065825a0cf7aa8fea3605bbd1d1c18e4a610`；配置 JSON SHA-256 `5fe4568daee51c208cb8a79538eaeda090ae011ade1dee2c386aa95f569c810e`；技术报告摘要页 SHA-256 `fe89d8f32de038d4b0daeee279ab90d3e087bc5a1c7889aac38250dc9d9482a4`；Responses、Thinking、Pricing、Tool Calls 页面分别为 `1719ac1b05e29579acd0cbc5ba0bcdb629cf7722eb551b5cd6d6d62c271e3ca2`、`8f7d45a2a97d7a18d480130d24f26a4a4f6f4c8de2b4cc39be86438e9d6da5b3`、`2fecee48bf6ad791bce38d1d5504d8ad5c8b0fd4da93e6dc198ae88ff1a4506a`、`5ee72ac00e5594bffac058cfef8872beb121b97e122f914c114a618f6a2b4027`。
+
+### 模型卡、配置与报告的技术边界
+
+[官方 V4-Pro 模型卡](https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro)、[配置](https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/main/config.json)和 [DeepSeek V4 技术报告](https://arxiv.org/abs/2606.19348)共同支持以下可用于面试的主线：V4-Pro 为 1.6T total/49B active、1M context 的 MoE；CSA/HCA 混合注意力压缩远程 KV，再分别做稀疏或 dense 读取；mHC 约束残差流；Muon 与 AdamW 分工；32T+ 预训练；SFT 与 GRPO 培养领域教师，再用 on-policy distillation 合并能力；FP4/FP8 与异构 KV cache 面向百万上下文 serving。
+
+配置快照还公开了 61 层、384 routed experts、每 token 6 个 routed experts、1 个 shared expert、hidden size 7168、1M position、`q_lora_rank=1536`、`o_lora_rank=1024`、`index_topk=1024`、YaRN factor 16 和 FP8 quantization 等实现字段。配置字段描述的是该公开 artifact 的实现接口，不等于完整训练 recipe、目标硬件最优 kernel 或所有服务端快照的内部结构。
+
+### V4 Pro 的闭环状态
+
+当前状态为**内容专题闭环（双榜锚点）**：排行榜发现、AA/DataCurve 精确配置、DeepSeek 官方公告/API 文档、模型卡、配置、技术报告入口、研究笔记和既有 CSA/HCA、mHC、MoE、低精度与后训练章节均已具备。由于现有书系已经覆盖核心架构，不新增重复的 Transformer 正式章节；第 77 章只补充 V4 Pro 的锚点与评测分层。
+
+仍待核验：V4 Pro 专属完整报告正文中的所有实验协议、生产 kernel 与目标硬件 profiling、线上 tool acceptance、不同 API 快照的行为差异、完整训练/后训练超参，以及独立于发布方的 benchmark 复现。特别是 `low/high/max` 的质量—延迟—成本曲线必须绑定固定模型快照、任务、harness 和 verifier，不能跨模型按档位名比较。
+
+## 2026-09-20：官方 Hugging Face revision 与 inference implementation 补证
+
+本节把“模型卡/论文宣称的技术”与“公开 artifact 中确实存在的实现路径”分开记录。模型发现仍只来自 Artificial Analysis 与 DataCurve DeepSWE；Hugging Face 仅作为已经发现的 V4 Pro 锚点的官方实现来源。
+
+### 固定 artifact 与权重边界
+
+- [DeepSeek-V4-Pro HF API](https://huggingface.co/api/models/deepseek-ai/DeepSeek-V4-Pro) 当前 `sha` 为 `b5968e9190ef611bbf34a7229255be88a0e937c1`，`lastModified` 为 `2026-06-22T12:12:50Z`；metadata 响应 SHA-256 为 `08c362390ff25f26f1744b695ff7ef32cc0e153f6a81545b17776b2cec24febf`。
+- 该 revision 列出 64 个 safetensors 分片；safetensors metadata 的总 storage 为 `1,598,839,674,782` bytes。完整权重没有下载，也没有在本地加载 V4 Pro；metadata 不能写成“权重已获取/推理已运行”。
+- 固定文件哈希如下，便于把配置、协议和 inference 代码与以后变化的 `main` 分开：
+
+| revision 文件 | bytes | SHA-256 |
+|---|---:|---|
+| `README.md` | 13,149 | `c4d714818a4d3333542edc7d38ea065825a0cf7aa8fea3605bbd1d1c18e4a610` |
+| `config.json` | 1,828 | `5fe4568daee51c208cb8a79538eaeda090ae011ade1dee2c386aa95f569c810e` |
+| `encoding/README.md` | 8,118 | `605363e9e43ee91beba88ea96c7806ce6ecdb2924e481459c9d16e1526470c10` |
+| `encoding/encoding_dsv4.py` | 27,908 | `bdbd57c132a1b3725042323d02b98b9d1df28e5f388f134399555d041f5055e0` |
+| `encoding/test_encoding_dsv4.py` | 3,741 | `c2bc54c4c934f5c64096bd9c555efa7d1ddf179c1eff58f01ceb2dcd60adcf28` |
+| `inference/README.md` | 951 | `68dba94f8676578cddff2b0e8861586ef89d1857c6ad29e40bf5f17610b03bdf` |
+| `inference/config.json` | 1,070 | `a6aded1806a2dbacbbab89bae2380d0422a6d0dcc55c946b421c7f5e06ef6094` |
+| `inference/kernel.py` | 22,198 | `59b325083d7103975cba025bd0d60ea343bb82d8fff53088afb7c04bd380c0c2` |
+| `inference/model.py` | 38,632 | `ce962f1face79d4f633d36436576214057a7e11443c9789935e1deb5c6cd1d71` |
+| `generation_config.json` | 170 | `5fccff80f55a4d455bbe516bdd552edf3e9623df95e99fbf2a3c3389fdf91af0` |
+
+`config.json` 的实现字段包括 `DeepseekV4ForCausalLM`、61 层、hidden size 7168、128 attention heads/1 KV head、384 routed experts、每 token 6 个 routed experts、1 个 shared expert、`q_lora_rank=1536`、`o_lora_rank=1024`、`index_topk=1024`、1,048,576 positions、YaRN factor 16 和 FP8 `e4m3`/scale 配置。它是固定公开 artifact 的配置账本，不等于服务端每个快照都使用同一 kernel，也不等于完整训练账本。
+
+### inference config 与模型实现
+
+`inference/config.json` 进一步公开了参考 inference 路径的字段：`n_hash_layers=3`、`score_func=sqrtsoftplus`、`route_scale=2.5`、`swiglu_limit=10`、`window_size=128`、`index_n_heads=64`、`index_head_dim=128`、`hc_mult=4`、`hc_sinkhorn_iters=20`、`expert_dtype=fp4`，以及 128/4 交错的压缩倍率布局。README 给出 `EXPERTS=384`、`MP=8` 的转换示例，并说明可在 FP4 与 FP8 expert dtype 之间切换；`MP=8` 是该官方转换示例的并行配置，不是所有硬件的生产部署结论。
+
+从 `inference/model.py` 可读出以下可追踪路径：
+
+1. `Compressor` 以 gated KV pooling 生成压缩表示；ratio=4 的路径保留 overlap state，以便块边界和因果可见性连续。
+2. `Indexer` 对压缩 KV 做 learned scoring、causal mask 与 top-k 选择；indexer 路径有 FP4 模拟量化，不能只按论文中的“稀疏注意力”四字推断实现细节。
+3. `Attention` 组合 MLA 的低秩 Q/O 投影、128-token sliding window 和 compressed-KV sparse attention；远程压缩分支与局部窗口分支是两类状态。
+4. `Gate` 前 3 层使用 token-id hash routing，后续层使用 `sqrtsoftplus` score routing；bias 只参与 expert selection，不改变最终 routing weights。
+5. `MoE` 使用 top-6 routed experts 加 1 个 shared expert，专家按 tensor parallel 分片；`MTPBlock` 还公开了 multi-token prediction block。
+6. `Block` 使用 Hyper-Connections，`hc_mult=4`，通过 20 轮 Sinkhorn 近似双随机混合；这与第 78 章讲的 mHC 几何约束相互对应，但 inference 代码字段不能替代训练报告的完整推导。
+
+### kernel 与协议实现
+
+`inference/kernel.py` 是 TileLang 参考实现，包含按 `[128,128]` block 的 FP8 activation quantization、FP4 quantization、FP8/FP4 GEMM、稀疏 attention 的 online softmax，以及 HC Sinkhorn kernel。代码还显示 FP4 权重在按 K 维打包后参与 FP8/FP4 GEMM；这证明公开 artifact 有 kernel 路径，不证明在本机或线上硬件达到论文/README 的吞吐。
+
+独立的 `encoding/encoding_dsv4.py` 是 prompt encoder/parser，不应写成模型内部思维算法。它支持 `system/user/assistant/tool/latest_reminder/developer` 角色，其中 `developer` 只给内部 search-agent 使用；tool role 会合并为 user 的 `<tool_result>` block。工具调用使用 DSML：`<｜DSML｜tool_calls>`、`<｜DSML｜invoke>` 和 `<｜DSML｜parameter>`，字符串与 JSON 参数由 `string="true/false"` 区分。`thinking_mode="thinking"` 使用 `<think>...</think>`；`drop_thinking=True` 默认删除旧 reasoning，但有 tools 时会自动保留 reasoning。
+
+parser 对 malformed output 采取严格失败路径，不负责恢复；它检查特殊 token、EOS、参数和 tool-call 结构。`reasoning_effort` encoder 只接受 `max`、`high` 或 `None`，这是 prompt protocol 字段，不等于公开了内部 reasoning 算法。已做 Python AST 检查和无 CUDA 的手工 encode/parse round trip；没有运行需要 CUDA/TileLang 或完整权重的 inference。
+
+### 本轮证据结论
+
+本轮把 V4 Pro 从“模型卡/报告的内容专题闭环”推进到“固定 revision + encoding + reference inference implementation 的实现证据补强”。仍不能宣称完整权重已下载、本地推理成功、生产 kernel 已验收或 `MP=8` 是普适部署方案。下一步若继续补证，应固定 kernel/convert commit、目标 GPU、量化误差、compression/index recall、端到端 prefill/decode profiling、线上 tool acceptance 和 API snapshot 行为；所有结果都要绑定模型 revision、effort、harness、工具、环境和 verifier。

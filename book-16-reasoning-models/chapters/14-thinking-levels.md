@@ -342,3 +342,57 @@ Thinking level 的价值是把复杂的 test-time compute 策略包装成易用�
 档位名称、映射和计费必须以对应版本的官方模型文档为准；没有公开映射时，本书只能讨论可测的外部行为，不能把产品标签当成内部算法证明。任何档位都不能绕过身份、最小权限、审批和工具执行验收条件。
 
 本章可进一步核对的公开资料包括：OpenAI Reasoning 指南（请求级 reasoning 参数和 usage 说明入口）<https://platform.openai.com/docs/guides/reasoning>；Anthropic Extended Thinking 文档（思考预算和工具协议入口）<https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking>；以及前文的 Self-Consistency、Tree of Thoughts 和 test-time compute 研究论文。官方文档能支持字段和外部协议的说明，不能证明 provider 未公开的内部搜索、verifier 或停止策略。
+
+## 14.28 Gemini 3.8 Flash：思考预算、签名状态与可审计回放
+
+Gemini 3.8 Flash 把 `low`、`medium`、`high` 暴露为请求级 thinking level，默认/合法档位必须以该模型版本的官方表为准；本版本的 `minimal` 不支持。它们是同一基础模型的运行配置，不是三个 checkpoint。`max_output_tokens` 还可能同时约束 thinking 和可见输出，因此“回答短”不等于“没有思考”，预算耗尽也可能表现为最终答案截断。
+
+Google 的 thought summary 是开发者可见的摘要，thought signature 是跨轮维持 reasoning 连续性的 opaque 协议状态；两者都不是完整 chain-of-thought、应用永久记忆或 GPU KV cache。Interactions API 进一步把 `thought`、`tool_call`、`tool_result`、`model_output` 组织成 steps。评测档位时，除了成功率，还要保存 summary/signature 是否存在、SSE 事件、回放顺序、thinking/visible usage、工具轮数、TTFT/TPOT、截断和单位成功成本。
+
+本节的原则是：level 改变的是可观察的预算/行为控制面，不能从名称推导 Google 未公开的搜索树、RL 目标、verifier 或 Transformer 结构。完整案例与快照见 [`gemini-3.8-flash-source-notes.md`](../../research/model-update-2026-09/gemini-3.8-flash-source-notes.md)。
+
+2026-09-23 的官方 Thinking 文档又给出一个容易漏掉的硬边界：`max_output_tokens` 同时计入 thought 与可见输出；如果在思考阶段触顶，Interaction 会以 `incomplete` 结束，可能没有完整最终答案，但已经生成的 thought tokens 仍计费。要降低成本应调低 `thinking_level`，而不是把硬上限压到会截断答案。Interactions 的 `thought.signature` 是必需的 opaque 状态，`summary` 可以为空；因此 usage、summary、signature 和 visible output 必须在实验账本中分开。
+
+## 14.26 Gemini 3.5 Flash-Lite：默认 minimal 与任务级预算
+
+Google Thinking 文档把 `gemini-3.5-flash-lite` 列为默认 `On (minimal)`，并支持 `minimal`、`low`、`medium`、`high`。这里的 level 是请求级 test-time compute 控制，不是四个 checkpoint，也不是严格的 reasoning token 上限。`minimal` 仍可能在复杂请求中产生少量思考，所以“minimal”不能简单等同于关闭 reasoning。
+
+对于低延迟 subagent，合理的路由策略是把 level、输出上限、工具轮数、deadline 和 verifier 作为一个版本化预算策略。例如分类或抽取优先 minimal；需要少量规划的工具任务使用 low；复杂代码或多步验证再升到 medium/high。比较不同 level 时必须固定模型 revision、prompt、工具 schema、工具结果、缓存命中和任务验证器，并记录 reasoning token、可见输出、TTFT、TPOT、重试和单位成功成本。
+
+不要把 Gemini 3.5 Flash 的默认 `medium` 迁移到 Flash-Lite。正确的 `whats-new-gemini-3.5` 页面属于 Flash；Lite 自己的 Thinking 表和 Model Card 才是本模型的直接证据。Model Card 同时把 Lite 的架构、训练数据、软硬件资料指向 Gemini 3.1 Flash-Lite，因此公开 level 变化不能被扩写成新的内部推理算法。
+
+## 14.27 Grok 4.20：`reasoning.effort` 可能是 Agent 数量
+
+xAI 的 Grok 4.20 文档给出了一个容易误读的例子：对普通 reasoning 模型，`reasoning.effort` 可以表示 test-time compute 或推理预算；但对 `grok-4.20-multi-agent`，官方明确把它映射为协作规模：`low/medium` 使用 4 个 Agent，`high/xhigh` 使用 16 个 Agent。它不是四个 checkpoint，也不是每个 Agent 内部“多想几层”的公开证明。
+
+应把控制面拆成两层：
+
+```text
+ordinary model: effort -> reasoning budget/observable usage
+multi-agent:   effort -> agent_count -> sub-agent DAG -> leader synthesis
+```
+
+因此评测多 Agent 时必须同时记录子 Agent 数量、分工、工具调用、来源、汇总和 leader verifier。16 Agent 可能提高检索覆盖，却也会增加 token、延迟、重复证据和错误汇总；不能只比较最终文本长度。xAI 当前没有为普通 Grok 4.20 专属页公开完整 effort 档位，所以不能把 Grok 4.6 的 effort 表自动迁移给它。
+
+## Grok 4.7：encrypted reasoning state 与 compaction
+
+Grok 4.7 的 `reasoning_effort` 仍是同一模型的运行配置，不是四个 checkpoint。更重要的边界在 Responses 协议：每次响应可能包含 `reasoning.encrypted_content`，后续请求需要原样回传。这个字段是 opaque runtime state，不是可见 chain-of-thought、应用永久记忆或可以编辑的摘要；Chat Completions 也不提供同样的 ciphertext。
+
+Context Compaction 返回单个 opaque `type=compaction` item。它不能被裁剪、重排或手工改写，而且只能在请求还没有超过当前 context limit 时帮助重组上下文。长任务 trace 应同时保留：
+
+```text
+model/revision/effort
+reasoning item and encrypted state order
+tool call/result, call_id, permission and side effect
+compaction trigger/item, restored context and verifier result
+```
+
+因此“不能关闭 reasoning”不等于公开了隐藏推理算法；“发生 compaction”也不等于清空历史或重置预算。真正的评测要观察状态能否完整回放、工具副作用是否重复、压缩后任务是否仍能通过独立 verifier。
+
+Reasoning 文档刷新后还要把三类状态分开：每次 Responses 返回的 `reasoning.encrypted_content` 及服务端工具的加密输出是原样回放的 opaque state；`response.reasoning_text.delta` 和 `response.reasoning_summary_text.delta` 是面向开发者的可见 reasoning/summary 流，不等于完整隐藏 CoT；`store` 决定 response 是否可由 `previous_response_id` 复用，不能把它与 encrypted field 的默认返回或服务端 rehydration 混为一谈。
+
+## 14.29 Qwen3-Omni：思考配置和 Talker 状态不是同一预算
+
+Qwen3-Omni 的 Thinker/Talker 结构提醒我们，`thinking`、文本输出和语音输出不能只用一个 `max_tokens` 解释。Thinker 的理解/推理 token、工具调用和 policy/verifier 事件会影响 Talker 何时开始生成；Talker 又有首码本、residual codebooks、Code2Wav 和音频 packet 的独立状态。
+
+因此评测多模态 reasoning 时至少记录：模型 variant、Thinker 输入/推理/文本 token、工具轮数、RAG/安全等待、Talker codebook steps、首音频包、waveform/packet 和最终 verifier。AuT 的 12.5 Hz/约 80 ms 是编码时间粒度，不是 thinking budget；报告的 `234 ms` 首音频包也不是通用 p99。Instruct、Thinking、Captioner 仍是同家族 artifact，不把它们当成不同 reasoning checkpoint。

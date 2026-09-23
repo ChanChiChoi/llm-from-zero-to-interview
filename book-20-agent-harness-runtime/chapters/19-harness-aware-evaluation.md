@@ -296,3 +296,107 @@ G_{\mathrm{release}}
 Harness-aware evaluation 的核心是承认 Agent 能力属于系统，而不是孤立的模型输出。只有绑定模型、编排、环境、预算、工具和数据，评测结果才可解释、可复现、可用于生产决策。条件事件、任务分桶、trace 回放、组件消融和副作用验收条件，才能把“分数变化”还原为可行动的原因。
 
 公开 benchmark 可以提供任务和指标参考，但任何结果都应保留 harness 版本、工具权限、重试、环境和日期；厂商或框架的默认 harness 不能被默认为中立条件。
+
+## 19.30 Grok 4.20：Multi-agent 评测必须拆开编排收益
+
+Grok 4.20 的 `grok-4.20-multi-agent` 为研究任务提供 4 或 16 个协作 Agent，但 Artificial Analysis 的 `grok-4-20` 页面与 DataCurve 的 `mini-swe-agent` 行不是同一评测对象；当前 DataCurve 没有精确 `mini_swe_agent_grok_4_20_*` 行。评测 manifest 应至少写入：
+
+```text
+model_id, snapshot, effort, agent_count
+tool set, source allowlist, prompt revision
+sub-agent roles, leader policy, max_turns
+environment, verifier, retries, cost and latency
+```
+
+比较 4 Agent 与 16 Agent 时，不能只保持问题不变，还要记录并行检索是否带来重复来源、错误互相确认、leader 摘要丢证据和额外工具账单。建议把结果拆成四层：单 Agent 事实质量、子 Agent evidence recall、leader synthesis quality、最终 verifier/artifact success。这样才能判断收益来自覆盖面、汇总策略还是更高的 token 预算。
+
+此外，xAI 的普通模型页写 1M maximum prompt，而 Artificial Analysis 当前页面写 2M context；这是 capability manifest 的冲突，不应在评测报告中静默选择较大的数字。请求前应按精确 model ID/endpoint 做上限探测，并把 compaction、prompt cache、工具 schema/result 和输出预算列入成本账本。没有这些字段，所谓“长上下文/多 Agent 更强”无法复现。
+
+## 19.31 Gemini 3.8 Flash：把模型、Interactions 和工具 harness 分层
+
+Gemini 3.8 Flash 的 DataCurve high 行是一个完整系统配置，而不是裸模型测量：`gemini-3-8-flash`、high thinking、`mini-swe-agent`、工具、任务环境和 verifier 共同决定 Pass@1、Pass@4、输出 token、Agent steps 和成本。评测 manifest 应同时记录模型 snapshot、thinking level、`max_output_tokens`、Interactions state 模式、工具 schema、Computer Use 审批策略、缓存命中、任务仓库 revision、重试和 verifier 版本。
+
+Interactions 的 step trace 让归因更细：可以区分模型没有提出正确计划、工具没有执行、工具结果没有被正确回灌、signature/state 丢失、宿主拒绝动作和 verifier 误判。对同一任务做 low/medium/high 消融时，必须固定其余变量，并报告 thinking/visible output、工具失败、重复副作用、TTFT/TPOT、最终 artifact 和单位成功成本。单看 Pass@1 会把长轨迹和高成本隐藏掉。
+
+1M context 也只表示接口预算。长文档的 needle 位置、工具 schema/result、implicit cache hit、缓存前缀、输出预算和多轮状态会改变有效召回与延迟；因此不能用 context 数字代替长上下文评测，也不能把服务侧 implicit caching 写成 GPU KV cache。完整复现实验设计见 [`EXERCISES.md`](../../EXERCISES.md) 与 [`gemini-3.8-flash-source-notes.md`](../../research/model-update-2026-09/gemini-3.8-flash-source-notes.md)。
+
+本轮官方协议复验还要求 manifest 记录 Interaction 的 retention/deletion、`store` 模式、`previous_interaction_id`、每轮重新指定的 tools/system/generation config，以及 signature 字段的实际位置。Thinking 与 Tool combination 文档对标准 function call 是否带 signature 有范围差异，评测器不能用假设字段填充缺失值；应保存原始 response schema、call/result `id`、opaque fields 和 capability-probe 结果。否则所谓 stateless replay 可能在丢失 reasoning/tool context 后仍错误地计为成功。
+
+## 19.32 GLM-5.1：长周期任务要拆分反馈信号与验收门禁
+
+Z.ai 的官方博客 [*GLM-5.1: Towards Long-Horizon Tasks*](https://z.ai/blog/glm-5.1) 给出的重点不是“上下文更长所以自然能工作 8 小时”，而是让 Agent 在工具执行、观察结果、修订策略和验收之间形成外层闭环。博客中的数字属于发布方实验设置，不能改写成 GLM-5.1 的内部推理深度、训练算法或独立复现结果。研究底稿和快照证据见 [`glm-5.1-source-notes.md`](../../research/model-update-2026-09/glm-5.1-source-notes.md)。
+
+这篇博客把长周期任务拆成三种反馈条件，面试时应分别讨论：
+
+| 条件 | 反馈信号与外层循环 | 验收与边界 |
+| --- | --- | --- |
+| VectorDBBench | Rust ANN 数据库、SIFT-1M 和 Recall ≥ 95% 约束；模型在 50-turn 工具预算内执行，外层循环反复 edit、compile、test、profile、submit。博客报告 600+ iterations、6,000+ tool calls、21.5k QPS，并观察到约第 90、240 轮的结构性策略切换。 | Recall 是质量门槛，QPS 是优化目标；必须绑定数据集、硬件、编译参数、停止条件和 profile 方法。不能把 21.5k QPS 当作裸模型能力。 |
+| KernelBench Level 3 | 50 个问题、每题独立 Docker、1 张 H100、最多 1,200 次工具回合；模型通过数值正确性检查后才比较加速。 | `atol=rtol=1e-4` 是 correctness gate；Claude Opus 4.6 与 GPT-5.4 做 benchmark-exploitation 审计并取较低 speedup。博客报告 GLM-5.1 约 3.6×、`torch.compile max-autotune` 为 1.49×，但这是该 harness 的发布方结果。 |
+| Linux desktop | 没有单一标量目标；每轮由 self-review harness 检查缺失功能、粗糙样式、坏交互和边界情况，再继续迭代约 8 小时。 | 自评可以产生下一步反馈，却不是独立 verifier。最终仍需读取 artifact、运行测试、检查业务状态或人工验收，不能用“模型说完成了”作为成功判据。 |
+
+这个对照说明长周期 Agent 至少有三层问题：
+
+1. **反馈是否可计算。** 有标量目标时，Recall、QPS 或 kernel correctness 可以驱动搜索；没有标量目标时，只能把 rubric、self-review 和外部检查组合起来，不能假定模型的自评无偏。
+2. **外层循环是否真的改变策略。** 600 多轮不等于有效进步。应记录每轮 patch、编译/测试/profile 输出、失败原因、策略切换和回滚；如果模型只是重复同一动作，工具调用数不能证明规划能力。
+3. **最终结果是否由独立门禁确认。** 代码、性能和桌面任务都要把模型产出的 artifact 交给 verifier。正确性、性能、反作弊审计和权限安全应分别计数，不能用一个总分掩盖危险副作用或错误验收。
+
+因此，GLM-5.1 的长任务评测 manifest 至少应固定：
+
+```text
+model_id, model_revision, provider
+task_set, data_revision, initial_snapshot
+harness_revision, tool_schema, tool_budget, wall_clock_budget
+feedback_signal, correctness_verifier, performance_verifier
+anti_exploitation_auditor, retries, human_intervention
+artifact_digest, final_state, cost, latency, failure_category
+```
+
+比较不同模型时，必须同时固定任务、环境、工具和预算；比较不同 harness 时，则应固定模型 revision，并把新增的 retry、profile、self-review 或 verifier 单独计入。GLM-5.1 博客提供的是一个很好的面试切入点：真正要问的不是“能否连续运行 8 小时”，而是“每一轮拿到什么反馈、何时发生策略更新、什么条件阻止错误继续扩大，以及谁最终确认 artifact 正确”。完整发布方数字、哈希和未公开项见研究笔记；当前没有精确 DataCurve GLM-5.1 行，因此不能把相邻 GLM 版本的 Agent 成绩迁移过来。
+
+## 19.33 Claude Sonnet 5：把 System Card 结果放回 harness
+
+Sonnet 5 的公开结果至少分成三账：Artificial Analysis 的 `max` Intelligence Index、DataCurve 的五档 `mini-swe-agent` 结果、Anthropic System Card/发布方 benchmark。它们的 provider、effort、工具、任务集、环境、verifier、trials、safeguards 和统计方法不同，不能凭模型名称做横向排名。
+
+System Card 的安全数字也需要同样的 manifest。Claude Code 恶意请求拒答率 92.37%、computer-use 恶意任务拒答率 84.68%、Gray Swan IPI 的 28 个场景和 1,130 个去重攻击，测量的是给定策略与 Agent harness 的行为。一个可复现的记录至少包括：
+
+```text
+model_id, snapshot, effort, thinking state
+tools, permissions, sandbox, network policy
+task/scenario revision, safeguards, trials
+verifier, retry/timeout, compaction trigger
+refusal/action/side-effect/artifact outcomes
+```
+
+发布方 benchmark 的 `85.2%` SWE-bench Verified、`80.4%` Terminal-Bench 2.1、`84.7%` BrowseComp 和 `81.2%` OSWorld-Verified，应在报告中保留来源标签；它们不能替换固定任务、固定 harness 下的独立回放。安全评测中的“拒绝”也不能自动计为业务成功，应该与正确执行、权限阻断和人工接管分开统计。
+
+## 19.34 Grok 4.7：长轨迹评测要把状态与发布方 benchmark 分账
+
+Grok 4.7 的 xAI 发布页给出 DeepSWE v1.1 `71.0%`、Terminal-Bench 4.0 `38.0%`、CursorBench 4.0 `46.3%`、Harvey `19.6%`、HealthBench Professional `56.7%` 等结果；它们各自绑定发布方任务、prompt、effort、工具、环境和统计口径。Artificial Analysis 的 `46.4465` Intelligence Index 是另一种 provider 测量，DataCurve 又没有精确 `mini_swe_agent_grok_4_7_*` 行。三者不能排成一张裸模型榜。
+
+对 Grok 4.7 的 harness 回放，建议把每条任务 trace 固定为：
+
+```text
+model/revision/effort/provider
+encrypted reasoning item / compaction trigger and item
+tool schema / allowed_tools / permission / execution receipt
+task environment / retries / timeout / verifier
+artifact digest / side effects / success / cost / latency
+```
+
+自验证可以作为反馈信号，但不能作为唯一验收者。压缩后的 opaque item 还必须与工具回执、未完成副作用和 workspace artifact 一起恢复；否则 benchmark 可能因重复执行或丢失历史而虚高。完整研究记录见 [`grok-4.7-source-notes.md`](../../research/model-update-2026-09/grok-4.7-source-notes.md)。
+
+## 19.35 Claude Opus 5.5：少 token 不等于少责任
+
+Anthropic 对 Opus 5.5 的长任务描述强调更少的工具调用、步骤和输出 token。对 harness 来说，这应转化成效率指标，而不是删除 trace：首次上下文读取、patch、命令、测试、重试、fallback 和 verifier 都要留下可回放事件。否则无法判断成本下降来自真正的 token efficiency，还是来自少做了一项测试。
+
+发布方 benchmark 中的 adaptive/max、xhigh、medium/default 以及 WANDR 的离线搜索、代码执行和 980K task budget 都是不同 harness。评测记录应把 `model + effort + fallback + tools + environment + verifier` 当作一个配置键；AA 的第三方指数和 Anthropic 的发布方结果不能和 DataCurve 的 `mini-swe-agent` 结果拼成裸模型排名。
+
+特别要审计安全路由：Opus 5.5 的 cyber/biology safeguards 可能将任务透明地交给 Opus 4.8 或 Opus 5。trace 必须显示实际模型、触发类别、权限、缓存、重试和最终 artifact；“最终成功”不能在缺少这些字段时归因给 primary model。模型声称完成、工具返回成功和独立 verifier 通过仍是三个不同状态。
+
+Opus 5.5 的官方 API 文档把 harness 的状态账本再推进了一层：thinking block 与生成模型和 conversation 前缀绑定，tool-call 之间的进度默认可能以空的 thinking block 返回，按需 compaction 会产生签名摘要，fast mode 则在同一模型上切换更快推理配置。评测 trace 至少保存 `model_id`、`thinking_binding`、`prefix_hash`、`compaction_digest`、`tool_schema_version`、`speed`、`usage.speed` 和错误/拒答字段；否则无法重放一次“模型能力下降”到底是状态丢失、工具契约不兼容、上下文压缩还是限流。
+
+同样不能把模型级 refusal 当作 harness 级完成。官方契约允许 HTTP 200 搭配 `stop_reason: "refusal"` 和 policy category，fallback 触发后要把实际执行模型和最终 artifact 分开计分。来源：[What's new](https://platform.claude.com/docs/en/models/opus-5-5/whats-new-opus-5-5.md)、[Fast mode](https://platform.claude.com/docs/en/build-with-claude/fast-mode)。
+
+System Card 的安全数字也必须进入同一条 trace：Claude Code malicious refusal `79.8%`、dual-use/benign success `99.8%`、malicious computer-use refusal `79.46%`；Gray Swan IPI k=1/10/15 为 `0.1%/0.7%/1.0%`，约 18% rollout fallback 到 Opus 4.8。coding Shade 的无 safeguards/probe 开启结果为 `54.61%/11.13%`，computer-use probe 为 `0.04%`，browser auto 为 `0/110`。这些数的分母、probe、fallback 和 safeguards 都要保留，否则无法解释“拒答率下降”到底来自模型行为还是路由。
+
+OSWorld 2.0 的 partial/strict `81.8%/48.7%` 还揭示了 compaction 的评测责任：108 tasks、1080p、最多 500 actions、5 runs、完整 screenshot，以及超过 100K tokens 后的 server-side compaction 都是条件。多 Agent 的约 `2.7x`/`2.8x` speedup 使用 derived latency；harness 应额外记录共享资源、排队和真实 wall-clock，不能直接把论文式 speedup 当作线上 SLO。

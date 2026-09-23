@@ -845,3 +845,215 @@ OpenAI Codex CLI、local shell、patch/edit 工具和 Claude Code 等产品文�
 - [Claude Code overview](https://code.claude.com/docs/en/overview)：代码 Agent 工作流和产品边界的官方说明。
 
 这些资料分别代表 benchmark、研究论文和产品文档。它们可以帮助读者理解任务环境、工具接口和公开评估口径，但不能自动证明某个 Agent 会保护用户改动、正确处理未知副作用或安全执行依赖安装；这些性质必须在目标仓库、版本和权限配置下单独测试。
+
+## 7.30 Gemini 3.8 Flash：Interactions 与 Computer Use 的责任链
+
+Gemini 3.8 Flash 的 Interactions API 适合把代码 Agent 的长任务保存成可审计步骤：模型产生 thought 或 tool call，宿主执行 Search、URL Context、File Search、Code Execution 或自定义 function，再将 tool result 回灌，模型决定修正、继续还是输出。SSE 的 step/event 不是最终答案的替代品；断线重连、重复消费、超时和取消都要有幂等键与状态机。
+
+Computer Use 把“看屏幕”和“执行动作”分开。模型只返回 screenshot 上的 action intent/参数，客户端负责坐标映射、域名与资源 allowlist、人工确认、敏感动作拦截、真实点击、回传新截图和 artifact 验收。`regular`、`require_confirmation`、`blocked` 是安全决策入口，不是模型已经拥有桌面权限的证明。代码 Agent 评测因此至少要区分模型提案、宿主批准、动作执行、测试/业务 verifier 和最终副作用。
+
+这条责任链同样适用于结构化输出：JSON Schema 能减少解析错误，但不能保证代码正确、引用完整或业务规则满足。Gemini 3.8 的 DeepSWE high 数字还绑定 `mini-swe-agent`、工具、环境和 verifier，不能当作裸模型能力或迁移给其他 effort。
+
+补充一个状态工程门禁：Interactions 的 `previous_interaction_id` 只恢复 conversation history，`tools`、`system_instruction` 和 generation config 是当前 turn 的参数；`store=false` 不能再用该 ID 续接，付费/免费默认保留期为 55/1 天。stateless harness 需要原样回放实际返回的 thought/tool opaque fields，并用 function call/result `id` 对齐副作用。Thinking 页面与 Tool combination 页面对标准 function-call signature 的范围描述不完全一致，适配器应保留 provider 返回字段并通过 endpoint probe 决定是否要求 custom function signature，不能自行篡改历史。
+
+## 7.25 GPT-5.3 Codex：把模型能力接入代码 Agent
+
+GPT-5.3 Codex 的官方资料把本章的代码 Agent 闭环具体化为一个 Responses-only harness 案例。模型页确认 `gpt-5.3-codex` 面向 agentic coding，支持 `low/medium/high/xhigh` reasoning effort、文本/图像输入、400K context、272K maximum input、128K maximum output，以及 function calling、web search、hosted shell 和 skills。Codex Prompting Guide 进一步强调代码库探索、固定工作目录、`apply_patch`、工具 schema、并行调用和长时间自治。
+
+这不意味着模型直接拥有 shell 或仓库权限。更准确的责任链是：
+
+```text
+model proposal -> tool/schema gate -> permission/approval
+-> sandbox executor -> result/receipt -> tests/diff verifier -> artifact
+```
+
+Responses 的 assistant `phase` 也应进入 trace：`commentary` 是中间说明，`final_answer` 是最终答复。它不能替代测试结果，更不能把模型的完成声明当作 artifact 已提交。长任务恢复时，完整 output item、工具回执、加密 reasoning item、phase 和 compaction item 需要按官方协议回放；只存最终文本会让下一轮丢失状态或重复执行。
+
+因此，GPT-5.3 Codex 的代码 Agent 评估至少要同时报告：patch 定位精度、测试/构建覆盖、用户改动触碰率、tool error/timeout、compaction recovery、workspace artifact 完整率、重复副作用、task success、p95 延迟和单位成功成本。Artificial Analysis 的 `xhigh` 指数是第三方配置字段，DataCurve 当前没有精确 GPT-5.3 Codex 行；不能把其他 GPT/Codex 的榜单或 DeepSWE 结果写成该模型的裸能力。
+
+## 7.26 GPT-OSS：Harmony 工具协议与开放权重 Agent 边界
+
+gpt-oss 的 Harmony 不是普通字符串模板：它把 system/developer/user/assistant/tool 角色、instruction hierarchy、`analysis`/`commentary`/`final` channel、recipient、函数参数和 structured output 放进可渲染、可解析的协议。代码 Agent 需要把 Harmony parser、tool schema、权限、沙箱、超时、结果回灌和 verifier 作为独立状态机；模型生成 function call 只能算提案。
+
+开放权重还改变了责任边界。模型卡中的拒答、越狱、工具和安全评估绑定发布方 checkpoint、effort、工具和测试 harness；下游可以微调、复制和改变行为。因此生产 Agent 需要额外固定权重 revision、tokenizer/template、微调数据、允许的工具 namespace、文件/网络沙箱、审计与回滚策略，不能把公开 model card 当成部署安全保证。
+
+## 7.27 Claude Opus 4.6：长任务状态不是普通摘要
+
+Claude Opus 4.6 的公开资料把代码 Agent 的状态问题具体化为一组可回放协议。`effort` 是行为信号，`max_tokens` 才是硬上限；adaptive thinking 的 thinking block/signature、tool call/result 和 server-side compaction block 都应作为 trace item 保存。只保留最终回答，可能让下一轮失去 opaque state，进而重复执行工具或错误地宣称任务已完成。
+
+工具规模较大时，`defer_loading` 配合 regex/BM25 tool search 可以把工具定义按需引入上下文，但搜索结果不是权限。实际责任链仍是：
+
+```text
+tool search -> tool_reference -> schema/permission gate
+-> sandbox executor -> receipt -> tests/verifier -> artifact
+```
+
+Opus 4.6 的 `computer_20251124` 同样只产生动作提案。域名 allowlist、人工确认、截图回灌、prompt-injection 防护和副作用回滚由宿主负责。面试或生产评估应把模型提案、宿主接受、真实执行和 artifact 验证分开计分；Artificial Analysis 的配置字段、Anthropic 发布方 benchmark 和无精确 DataCurve 行也必须分开记录。
+
+## 7.28 Claude Opus 4.7：把长任务预算和视觉输入纳入 Code Agent
+
+Claude Opus 4.7 把代码 Agent 中经常混在一起的三类预算明确分开。`effort` 是单步的行为控制信号，task budget 是一个完整 Agent loop 的 advisory 预算，`max_tokens` 是单次响应的硬上限。task budget 还覆盖 thinking、tool call、tool result 和最终 output，因此不能只按模型可见文本统计。
+
+一个可靠的代码 Agent trace 至少应维护三本账：
+
+| 账本 | 约束对象 | 典型问题 |
+|---|---|---|
+| step policy | `effort` | 当前这一步是否值得继续推理、搜索或修复 |
+| loop budget | task budget | 整条工具链还剩多少空间，是否应总结并结束 |
+| request cap | `max_tokens` | 当前响应最多能生成多少 thinking、工具参数和文本 |
+
+三者不能相加得到并发容量。实际 serving 还要记录输入 token、工具 schema、工具结果、重试、compaction、缓存命中、KV 状态和 workspace artifact。服务端倒计时只描述当前 Agent turn 的预算语义；应用重发完整历史时，不能把历史 payload 再次当作新消耗，也不能因为发生 compaction 就把已用预算清零。
+
+迁移到 Opus 4.7 时还要重新测量输入成本。Anthropic 发布资料说明更新 tokenizer 可能使同一内容产生旧版本约 `1.0-1.35x` 的 token，实际倍数依赖内容类型。代码仓库中的长文件、差异、日志和工具回执分布不同，不能用一个全局比例修正旧的预算。评测应固定仓库和任务，分别记录输入 token、缓存前缀、thinking/output token、工具轮数、重试和单位成功成本。
+
+视觉输入也属于代码 Agent 的预算问题。Opus 4.7 及之后的 high-resolution tier 支持最长边 `2576 px`、最多 `4784` visual tokens，普通档位为 `1568 px` 和 `1568` visual tokens。它适合读取密集 IDE 截图、图表、终端和设计稿，但应用仍应在回灌前固定缩放策略，保存原图尺寸和缩放比例，并验证坐标映射。更大的视觉输入可能提高证据召回，同时增加输入成本、延迟和缓存失配风险；它不是视觉编码器内部结构已经公开的证据。
+
+发布页中的 cyber safeguards 和 Cyber Verification Program 应被放入 Agent 的控制面，而不是模型能力栏。一次网络安全相关任务仍要经过模型输出、实时策略、用户/组织授权、工具 schema、沙箱、网络隔离、审计和人工升级。自动阻断是策略结果，不等于模型拥有执行权限；误报、漏报、提示注入、工具副作用和研究例外都需要独立记录。
+
+因此，Opus 4.7 的代码 Agent 验收至少要检查：
+
+1. `effort`、task budget、`max_tokens` 是否在 trace 中独立可见；
+2. compaction 后工具回执、权限决定、未完成副作用和 artifact 是否可恢复；
+3. tokenizer 变化是否触发新的输入、缓存和成本基线；
+4. 高分辨率视觉请求是否保存像素、缩放、visual token 和坐标映射信息；
+5. 模型提案、策略拦截、宿主授权、真实执行和最终测试是否分层计分。
+
+本节依据 Artificial Analysis 的 Opus 4.7 配置条目和 Anthropic 官方发布页、模型页、Task budgets、Vision、Compaction 与安全资料。DataCurve 当前没有精确的 `mini_swe_agent_claude_opus_4_7_*` 行，因此不迁移其他 Claude 版本的 Agent 分数；官方也没有公开 Opus 4.7 的参数、内部架构、完整训练 recipe、生产 kernel 或线上 acceptance rate。
+
+## 7.29 Gemini 3.5 Flash-Lite：视频 Agent 的证据读取器
+
+Gemini 3.5 Flash-Lite 的 API 定位是低延迟、高吞吐的多模态模型，适合 subagent 和文档处理。对代码 Agent 或多模态 Agent 而言，最值得迁移的不是一个未公开的网络结构，而是视频输入的两条路径：static 以固定帧率一次性建立证据，agentic 根据问题动态探索时间轴。
+
+一次 agentic video 调用可以抽象为：
+
+```text
+video/file handle -> model processing_call
+-> selected transcript/frame/audio segment
+-> processing_result -> reasoning/tool step -> answer/verifier
+```
+
+`processing_call` 只表示模型请求读取某段证据，`processing_result` 只表示宿主返回了该证据；两者都不是文件访问权或外部工具执行权。宿主仍应校验 file handle、租户权限、媒体类型、读取范围、超时、取消、重试和审计字段。对长视频，还要保存媒体 revision、时间轴坐标、采样策略、处理事件和最终引用，避免下一轮只看到摘要却无法复现证据。
+
+Agentic 路径可能减少无关帧和 token，但会增加规划步骤、处理延迟和失败状态。评估应固定视频集合、问题位置和模型 level，比较 static/agentic 的证据召回、处理调用次数、token、TTFT、端到端成功率、错误恢复率和单位成功成本。DeepMind Model Card 明确 Lite based on Gemini 3.1 Flash-Lite；这部分是公开运行时/工具协议知识，不能写成 Lite 独有的视觉编码器或训练算法。
+
+## 7.31 Claude Sonnet 5：System Card 与代码 Agent 验收
+
+Sonnet 5 的代码 Agent 不能只用“模型输出了 patch”验收。Anthropic 的 System Card 把 Claude Code 恶意请求拒答率报告为 92.37%，把 computer-use 恶意任务拒答率报告为 84.68%，并用 Gray Swan IPI 覆盖 coding、computer use、tool use 的 28 个场景、1,130 个去重攻击。它们是在特定 safeguards、工具和环境中的行为结果；宿主仍必须独立执行文件范围、命令风险、网络 allowlist、secret 隔离、人工确认和 artifact verifier。
+
+代码任务的 trace 至少应保留：
+
+```text
+model/revision/effort/max_tokens
+thinking blocks and signatures
+tool call/result, permission decision, timeout/retry
+compaction item, context trigger and restored state
+patch, test/lint/type-check output, verifier result
+```
+
+`thinking` 与 `signature` 是协议状态，不是可随意编辑的自然语言摘要；compaction 也不是“清空历史”。如果只保存最终回答，下一轮可能丢失工具调用、未完成副作用和验证证据，进而重复执行或误报完成。
+
+System Card 的 SWE-bench、Terminal-Bench、BrowseComp 和 OSWorld 数字也必须带上 harness 标签。评估 Sonnet 5 时，应至少区分模型提案、工具执行、权限拦截、测试通过、独立 verifier 通过和最终 artifact；不能把拒答率、Agent steps 或 Pass@1 混成一个模型能力总分。
+
+## Grok 4.7：工具提案、MCP 与最小权限
+
+Grok 4.7 的 function calling 只是模型提出调用，执行仍由宿主负责。完整责任链应写成：
+
+```text
+model proposal -> schema/permission gate -> executor
+-> timeout/retry/idempotency -> result receipt -> verifier/artifact
+```
+
+Structured Outputs 的 JSON Schema 能降低参数解析错误，但不保证业务语义、代码正确性或副作用安全。Remote MCP 的 `server_url`、`server_label`、authorization、headers 和 `allowed_tools` 把远程工具接入合同化；其中 `allowed_tools` 同时减少工具 schema 的上下文成本并收窄可调用集合，但不能代替凭据隔离、网络 allowlist、租户授权、审计和结果校验。
+
+评测代码 Agent 时，应把工具调用成功与任务成功分开统计，并保留模型 ID、effort、工具版本、权限决定、重试、compaction item、测试结果和 artifact digest。xAI 发布方 DeepSWE `71.0%` 没有 DataCurve 的精确 Grok 4.7 行支撑，不能把发布方数字迁移成通用 coding-agent 能力。
+
+Grok 4.7 的 Remote MCP 还暴露了一个适配器边界：Responses API 使用 `allowed_tools` 和 `headers`，xAI 原生 SDK 对应 `allowed_tool_names` 和 `extra_headers`；当前 transport 是 Streaming HTTP/SSE，`require_approval` 与 `connector_id` 在 OpenAI Responses API 中不可用。MCP 字段能过滤 schema 和缩小工具集合，但不能替代宿主授权、凭据隔离、网络策略、审计和 verifier。
+
+## Qwen3-Omni：Talker 不是工具执行器
+
+在 Qwen3-Omni 中，Thinker 可以提出 RAG、function calling 或其他行动，但模型提案仍要经过宿主 schema、权限、执行器、结果回灌和 verifier。Talker 接收允许的多模态条件后生成音频 code；它不应被当成拥有工具权限的执行器，也不应把输出 waveform 当成行动已经成功。
+
+长任务 trace 还要保存媒体 timestamp、Thinker chunk offset、工具回执、Talker 首码本/残差码本、Code2Wav chunk、audio packet sequence、取消/重试和最终 artifact。这样才能区分“模型理解失败”“工具没有执行”“音频 packet 丢失”和“业务 verifier 未通过”。完整模型证据见 [`qwen3-omni-source-notes.md`](../../research/model-update-2026-09/qwen3-omni-source-notes.md)。
+
+## Qwen3-VL：GUI action 只是 proposal
+
+Qwen3-VL 的 Thinking with Images 训练将 answer accuracy、multi-turn reasoning 和 tool-calling reward 分开；这给视觉 Agent 一个重要的评测边界：模型提出点击、搜索、OCR 或代码动作，不代表宿主已经执行，也不代表 artifact 已通过验证。工具调用次数必须和任务复杂度匹配，固定一次调用同样可能是 reward shortcut。
+
+GUI Agent trace 至少保存截图或页面 revision、窗口尺寸、设备像素比、坐标、动作序号、schema、权限决定、executor receipt、超时/重试/幂等和独立 verifier。页面 revision 变化时应拒绝旧坐标或重新观测，不能把模型输出的坐标直接当作成功动作。完整证据见 [`qwen3-vl-source-notes.md`](../../research/model-update-2026-09/qwen3-vl-source-notes.md)。
+
+## 7.32 GPT-5.6 Luna：Coding Agent 的状态、工具发现与成本门禁
+
+GPT-5.6 Luna 的 `max` 既是 Artificial Analysis 的第三方配置，也是 DataCurve `mini-swe-agent` 行中的一个 effort 配置；DataCurve 的 301/448、Pass@1 `67.1875%`、Pass@4 `90.2655%` 和约 101.68 steps 是模型、harness、工具、仓库环境和 verifier 的组合结果，不是裸模型分数。Coding Agent 评测必须把这些字段写入 manifest，而不是只保存 `gpt-5.6-luna`。
+
+一个可复盘的 manifest 至少包含：
+
+```text
+model/snapshot/effort/reasoning.mode
+tools_hash/tool_search_mode/loaded_tools/call_id
+workspace/sandbox/approval/network_policy
+reasoning_items/response_chain/compaction_items
+prompt_cache_mode/breakpoints/cached_tokens/cache_write_tokens
+patch/test/verifier/artifact_digest/retry/timeout
+```
+
+Tool search 的 hosted 路径由服务端从声明的 namespace/MCP/function 中加载工具；client-executed 路径由应用根据项目或租户状态搜索，并用同一 `call_id` 回传 `tool_search_output`。两者只解决 schema 的按需发现，不能跳过文件范围、命令策略、凭据隔离、网络 allowlist 或用户确认。工具加载追加到上下文尾部，有利于稳定前缀，但动态加载仍会改变工具集合和 trace。
+
+长任务恢复时，reasoning item、tool call/result、compaction item、patch、测试回执和权限决定都属于状态。Prompt cache 是重复前缀的计算/计费复用；compaction 是上下文替换；应用 workspace 是 artifact 真相。三者不能互相替代。验收应比较 compaction 前后任务成功率、重复工具调用、cache hit/write、恢复延迟和单位成功成本，并检查 `previous_response_id` 或完整 item replay 是否丢失了未完成副作用。
+
+面试回答可以按责任链展开：模型提出计划和工具意图，Responses item 记录协议状态，harness 管理 loop/上下文/恢复，permission engine 决定 allow/ask/deny，executor 产生真实回执，测试与 verifier 决定 patch 是否合格。这样既能解释 GPT-5.6 的 Agent 运行时能力，也不会把排行榜的 Agent 系统结果误写成模型内部架构。
+
+## Qwen3.7 Plus：视觉动作提案与移动端执行器
+
+Qwen3.7 Plus 的官方定位把代码 Agent 延伸到视觉参考生成代码、读屏、GUI 和移动端导航。对 Agent 设计而言，关键不是给模型增加一个 `click(x, y)` 工具，而是把视觉证据、动作协议和外部副作用分层：
+
+```text
+screen/image/video -> model proposal -> schema validation
+-> region/scope + permission -> GUI/mobile executor
+-> observation -> retry/idempotency -> verifier/artifact
+```
+
+模型输出的坐标、文本输入或导航步骤只是 proposal。harness 应把 screenshot hash、窗口尺寸、设备像素比、页面/App revision、坐标系、动作序号、call id 和 tool schema hash 写入 trace。executor 返回 receipt 后，必须回灌新的屏幕状态；如果 revision 变化或动作超时，不能静默沿用旧坐标。
+
+这类 Agent 的成功指标至少拆成四层：proposal schema 解析率、宿主授权率、真实执行成功率和独立 verifier 通过率。最终回答正确但产生了越权副作用，不是成功；一次点击后页面恰好改变而没有可回放 receipt，也不能当作可靠成功。`Structured Outputs` 只减少格式错误，不能保证动作语义；`Function Calling` 只承载调用合同，不能授予手机、桌面或网络权限。
+
+Qwen3.7 Plus 当前只有 AA 精确榜单条目，DataCurve 没有精确 `mini_swe_agent_qwen3_7_plus_*` 行。因此本章中的 GUI/mobile harness 是教学和系统设计闭环，不把其他 Qwen 的 Agent 分数迁移过来，也不把官方产品描述写成真实设备 acceptance 或公开的视觉 policy 架构。
+
+## GPT-6 Sol：复杂 coding 与 Agent 工具边界
+
+OpenAI 官方将 GPT-6 Sol 定位为复杂 coding 与 agentic workflows，并在模型页列出 Responses API 下的 web search、file search、code interpreter、hosted shell、apply patch、skills、computer use、MCP 和 tool search。这里要先做一层拆分：模型页的工具列表是 capability surface；工具真正能访问什么、是否需要审批、在哪个 sandbox 执行以及副作用是否成功，仍由宿主 runtime 决定。
+
+一个可靠的 GPT-6 Sol coding agent 可以按下面的链路审计：
+
+```text
+model proposal -> typed response item -> tool/schema validation
+-> permission and sandbox -> executor receipt
+-> patch/test/artifact -> independent verifier
+```
+
+Responses API 适合承载 built-in tools 和 function calling；模型页同时保留 Chat Completions，但对 GPT-6 Sol 的 function calling 只在 `reasoning_effort=none` 时支持。迁移时不能只替换 model ID，还要检查 endpoint、reasoning effort、tool schema、response item、错误和回放语义。一个能生成 shell 命令的模型不等于已经获得 shell 权限。
+
+Tool search 的工程价值在于延迟暴露大型工具库的 schema：namespace 描述和 `defer_loading` 可以让模型先发现，再加载需要的工具定义。它减少初始上下文，但增加了 tool registry、schema hash、search call、权限校验和 cache prefix 的状态。因此 trace 至少需要保存 `tool_search_call`、加载的 schema、原始 `call_id`、权限决定、执行 receipt 和 verifier 结果。
+
+GPT-6 Sol 的长上下文也不能替代 coding agent 的状态设计。1,050,000 context、922,000 maximum input 和 128,000 maximum output 要与 reasoning tokens、工具输出、patch、测试日志和 compaction item 一起算账。若 compaction 或预算耗尽，harness 必须明确是继续、重试、缩小任务、转人工还是停止，不能把空响应当作代码正确。
+
+资料边界：GPT-6 Sol 当前是 AA 单榜资料级闭环，DataCurve 没有精确 Agent 行。上面的工具和 verifier 逻辑是官方 API/runtime 合同与工程设计，不是 GPT-6 Sol 的内部训练方法、参数规模或架构披露。
+
+## 7.24 Claude Opus 5.5：长任务 coding 的效率验收
+
+Opus 5.5 的发布方描述把长任务 coding 的优势落在一次收集足够上下文、完成更大 patch、少重复尝试和少工具轮次。实现 coding agent 时，可以把这组描述转成四个可验证事件：`context_snapshot`、`patch_set`、`test_receipt` 和 `artifact_verifier`。只有测试与最终 artifact 通过，才把任务记为成功；少调用命令本身不是质量证明。
+
+成本还要包含 cache read/write、可见输出、工具执行、失败重试和 fallback。若 Cyber safeguard 将请求路由到其他模型，trace 中必须保留 `actual_model`、`fallback_reason`、权限与工具版本。Artificial Analysis 的 `max with fallback` 和 Anthropic 的发布方 coding benchmark 都不能替代固定仓库、固定工具、固定 verifier 下的本地回放。
+
+迁移到 Opus 5.5 时，agent loop 还要通过 API contract 门禁：thinking 不能关闭或改成手工 budget；`tool_choice` 不能使用 `any` 或指定工具强制调用；工具间进度可能以默认隐藏文本的 thinking block 返回；Claude API/Google Cloud 的旧 `computer_20251124` 要迁移为 `computer_toolset_20260801`。客户端应按 content block 的 `type` 解析并原样回传可保留的 thinking block，而不是假设每一轮只有 text -> tool_use -> text。
+
+对长任务，on-demand compaction 会返回带签名的摘要 block，inline tools 可以在 mid-conversation system message 中增加或升级工具定义。两者都应写入 trace、cache key 和回放测试；否则看似减少了上下文或工具 schema 的 token，实际可能破坏 reasoning state 或 prompt cache。详见 [What's new in Claude Opus 5.5](https://platform.claude.com/docs/en/models/opus-5-5/whats-new-opus-5-5.md)。
+
+System Card 的 coding/GUI 结果进一步说明，Agent 成绩要写成条件事件：Terminal-Bench 4.0 `66.36%` 使用 xhigh、Claude Code `--bare`、5 trials；OSWorld 2.0 partial/strict 为 `81.8%/48.7%`，超过 100K tokens 后由 server-side compaction 维持轨迹；五 Agent team 的约 `2.7x` 和 DRACO 的约 `2.8x` 是 derived-latency 结果。Agent trace 还应记录 screenshot、context token、tool time、handoff、fallback 和 verifier，不能把更少步骤直接当作更可靠代码。
+
+System Card 同时暴露了长轨迹、多 Agent、语言差异和模拟环境真实性的盲点。对 coding agent 来说，最小验收链仍是 `context_snapshot -> patch_set -> test_receipt -> artifact_verifier`；模型声称完成、工具返回成功、独立 verifier 通过必须分别计数。
+
+## GPT-6 Luna：高吞吐 coding agent 的合同边界
+
+Luna 官方定位为 focused/high-volume，模型页列出 Responses 的 hosted shell、apply patch、computer use、MCP 和 tool search；这些是 capability surface，不是宿主权限。coding agent 仍需把模型意图、permission、schema、executor、sandbox、副作用回执、artifact 和 verifier 分开记录，并固定 `gpt-6-luna` 的 effort、工具和 harness。
+
+DataCurve 当前没有精确 `mini_swe_agent_gpt_6_luna_*` 行，不能把 GPT-6 Sol/Astra/GPT-5.6 的 Agent 分数迁移过来。Luna 的 1.05M/922K/128K 与 reasoning/tool/compaction tokens 一起进入预算；超过 272K 是整次请求的 input/cache 2x、output 1.5x。详见 [`gpt-6-luna-source-notes.md`](../../research/model-update-2026-09/gpt-6-luna-source-notes.md)。

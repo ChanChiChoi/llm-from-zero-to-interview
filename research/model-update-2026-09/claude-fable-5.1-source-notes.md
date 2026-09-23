@@ -1,6 +1,6 @@
 # Claude Fable 5.1：Anthropic 官方模型页核验
 
-核验日期：2026-09-15（首次模型页字段来自 2026-09-10 缓存；本次重新联网复验并补抓 Anthropic 发布页、排行榜和 System Card）。主要来源为 [Claude Fable 5.1 专属模型页](https://platform.claude.com/docs/en/models/fable-5-1/overview) 与 [Anthropic 官方发布页](https://www.anthropic.com/claude-fable-and-mythos-5-1)。当前模型页 URL 在本环境返回区域不可用跳转，因此仍区分缓存字段、当前发布页正文和第三方榜单字段，不把一次代理/区域失败解释成资料不存在。
+核验日期：2026-09-21（2026-09-15 的首次复验记录保留为历史快照；本轮重新联网获取 Artificial Analysis 详情、Anthropic 模型页/发布页和 System Card 文件）。主要来源为 [Claude Fable 5.1 专属模型页](https://platform.claude.com/docs/en/models/fable-5-1/overview) 与 [Anthropic 官方发布页](https://www.anthropic.com/claude-fable-and-mythos-5-1)。模型页、发布页、榜单和 System Card 文件按各自证据责任记录，不把代理线路差异解释成模型事实。
 
 ## 已确认字段
 
@@ -13,6 +13,50 @@
 - 页面列出 preserved thinking、跨轮模型切换/思考块、per-message effort（beta）、turn-scoped system messages（beta）、工具调用间进度更新（`display: "updates"`，beta）和 content provenance 等能力入口。
 - 页面提到 Claude Mythos 5.1 与 Fable 5.1 共享规格和价格，但 Mythos 5.1 通过 Project Glasswing 邀请制提供；本项目不把它当作独立公开可用模型。
 
+## 2026-09-21 当前时点复验
+
+本轮重新获取的 Artificial Analysis Fable 5.1 详情页为 `3,854,152` bytes，SHA-256 为 `bc83faa8117eebdd2ff28660800be4abf7016af7e10511cb4783f2ca12fbc02a`。页面的 canonical slug 为 `claude-fable-5-1`，主标题为 `Claude Fable 5.1 (Adaptive Reasoning, Max Effort, Default Fallback)`，`releaseDate` 为 `2026-09-01`，`deprecated=false`。当前主配置字段为 Intelligence Index `53.3549259623252`、median output speed `68.7301566560472` tokens/s、cost per Intelligence Index task `7.629706364004841`、context `1,000,000`；这些仍是 Artificial Analysis 的配置/provider 测量，不是裸模型能力或通用 API 延迟。
+
+本轮官方资源快照如下，临时文件不作为模型权重或源码归档：
+
+| 资源 | 大小 | SHA-256 |
+|---|---:|---|
+| Anthropic Fable 5.1 模型页资源 | `14,914` bytes | `f773571dce563d7cb8a501b9ad2eb6531d8164938c5868f1aee8dbda8b462f` |
+| Anthropic Fable/Mythos 5.1 发布页资源 | `449,779` bytes | `70d5aaccdd890496070d810944693b9738e8b8c68a97c4e545ddd0e83f9fcd18` |
+| Fable/Mythos 5.1 System Card PDF | `16,397,488` bytes | `b0d59edc7a60eef32a879c13d713cce60c3fefd7e6b5183afdc8b835af3c8c39` |
+
+## 2026-09-23 当前时点复验与 System Card 正文证据
+
+本轮重新抓取的 Artificial Analysis Fable 5.1 详情页为 `4,006,915` bytes，SHA-256 为 `d80b226b7a4756cac93d6a065f400f39c9f756b971b827ecf0efbd5a67bffaeb`。canonical slug 仍为 `claude-fable-5-1`，`releaseDate=2026-09-01`、`deprecated=false`；主配置的 Intelligence Index 为 `53.3549259623252`，median output speed 为 `65.4865856934115 tokens/s`，median TTFT 为 `298.446428812s`，context 为 `1,000,000`，cost per Intelligence Index task 为 `7.629706364004841`。这些仍是第三方 provider/configuration 测量，不能写成裸模型能力、固定 API 延迟或跨 provider 排名。
+
+本轮官方快照如下；临时下载和正文抽取文件不作为模型权重或源码归档：
+
+| 资源 | 大小 | SHA-256 |
+|---|---:|---|
+| Artificial Analysis 中文首页 | `1,783,605` bytes | `7a954aed8916ec9c5c88380cfc159274573dc9547182032ca142f556c0fc2916` |
+| Anthropic Fable/Mythos 5.1 发布页 | `534,503` bytes | `610f2e5cf15100fdc85edf0c4bee750878cdbf2db3520606aed088f757bd33f2` |
+| Fable/Mythos 5.1 System Card PDF | `16,397,488` bytes | `b0d59edc7a60eef32a879c13d713cce60c3fefd7e6b5183afdc8b835af3c8c39` |
+| DataCurve DeepSWE | `268,036` bytes | `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7e6e095ad59f1f1` |
+
+使用新增的 [`pdf_text_extract.js`](code/pdf_text_extract.js) 对 System Card 做了只读解析，提取正文 `/tmp/fable51-system-card-extracted-20260923.txt`，大小 `376,181` bytes，SHA-256 为 `d61d0a99b770ae104150ceb2ee04e0ee02fc4a728d7521ee0319b3742ed091e5`。解析器只恢复 PDF 文本和 ToUnicode/CMap 映射，不改变原始 PDF，也不把临时文本当作官方独立发布物。
+
+### 正文确认的模型、训练数据与风险边界
+
+- System Card 明确写出 Fable 5.1 与 Mythos 5.1 共享相同模型权重，差异是配置与 safeguards。Fable 面向一般使用，Mythos 对部分高风险双用途生物/网络安全任务使用更宽松的 safeguards，并限制为受信任访问；不能把 Mythos 当成第二个公开 checkpoint。
+- 训练数据被描述为互联网公开信息、公共和私有数据、其他模型生成的合成数据的组合；训练过程中使用 deduplication、classification 等清洗/过滤，并通过 ClaudeBot 抓取公共网站，遵守 robots.txt，不访问密码保护、登录或 CAPTCHA 页面。知识截止时间为 2026-06。公开资料仍没有参数规模、层数、dense/MoE 结构、优化器或完整训练/后训练 recipe。
+- System Card 的 RSP 结论针对 Mythos 5.1：化学/生物风险保守判为 CB-1，未达到 CB-2；autonomy threat model 1 适用但整体风险评为 low，threat model 2 未达到阈值。Fable 的生产能力不能直接等同于这些更宽松 safeguards 下的 Mythos 评测结果。
+- 网络安全章节主要在关闭或改变 safeguards 的 Mythos/helpful-only snapshot 上测量。Fable 5.1 允许源代码漏洞发现，但阻止编译二进制漏洞发现和 exploit 开发；相较 Fable 5 发布时 false positives 减少，但仍比 Opus 5 safeguards 更容易触发。因而 cyber capability、生产拒答和 fallback 必须分开记账。
+
+### 正文能力评测与安全评测的条件账本
+
+System Card 报告的代表性能力结果包括：Terminal-Bench 4.0 `55.8%`、Terminal-Bench-Science 0.1 `52.6%`、CursorBench 3.2.0 `73.4%`、OSWorld 2.0 partial/strict `77.9%/41.7%`、GDPval-AA v2 `1853`、AutomationBench `31.4%` 和 ProgramBench `87.6%`。这些数字必须绑定 Anthropic 的 snapshot、effort、工具、任务版本、fallback、safeguards、试验次数和 verifier；它们不是本项目独立复现，也不是 Fable 5.1 的统一综合分数。
+
+安全章节还报告了 Gray Swan IPI 在 `k=1/10/15` 时 `0.1%/0.7%/1.0%` 的 attack success rate；较强 Shade coding attacker 在无 probes/启用 probes 时分别为 `56.87%/12.80%`，browser auto 为 `0/110`，无 safeguards 的 browser-use 对照为 `2.64%`。这些结果含有不同程度的 fallback，成功攻击主要来自 fallback 的结论也必须保留 `actual_model` 和 `fallback_reason`。System Card 同时披露了 rare permission-hook/classifier bypass、sandbox vulnerability、白盒内部分析、SHADE/LinuxArena covert behavior 与 chain-of-thought controllability；它们适合用于安全与 Agent 监控面试，不应被概括为“模型必然越权”或“生产攻击率”。
+
+由此得到一个可迁移的面试规则：System Card 的能力、safeguard、fallback 和 monitorability 是四个不同维度。评测 manifest 至少应记录 `model_id`、snapshot、effort、tools、permissions、safeguard state、fallback target、task/environment、verifier、score、cost 和实际执行模型；缺失其中关键字段时，结论应降级为发布方条件结果或 `not_comparable`。
+
+DataCurve 当前页面仍没有精确 `mini_swe_agent_claude_fable_5_1_*` 行，只有 Fable 5 的 effort 行。因此继续不记录 Fable 5.1 的 Pass@1、成本或 Agent steps，也不把 Fable 5 的 `316/452` 结果迁移给 Fable 5.1。
+
 ## 2026-09-15 重新联网复验
 
 本轮使用 `10.237.126.170:1234` 和 `10.24.27.134:8098` 抓取两个排行榜；两者对目标页面均返回 HTTP 200。`10.24.27.134:7890` 仍可作为备用代理，但对 Artificial Analysis 大页面存在 TLS EOF/读取不稳定。复验快照均为临时文件，不作为仓库长期数据文件：
@@ -24,13 +68,25 @@
 | DataCurve DeepSWE | `/tmp/recheck-deepswe-20260915.html` | 268,313 bytes | `8fdbb59257d00cbb0772248bb602aafc1d20a51822388cd4eaf4625505182be7` |
 | Anthropic Fable/Mythos 5.1 System Card | `/tmp/recheck-anthropic-fable51-system-card-page-20260915.bin` | 16,397,488 bytes | `b0d59edc7a60eef32a879c13d713cce60c3fefd7e6b5183afdc8b835af3c8c39` |
 
-Artificial Analysis 当前详情页确认 canonical slug `claude-fable-5-1`，主配置为 `Claude Fable 5.1 (Adaptive Reasoning, Max Effort, Default Fallback)`，内嵌 `releaseDate` 为 `2026-09-01`。该配置的第三方字段为 Intelligence Index `53.3737509623252`、median output speed `65.9769929669683` tokens/s、median time to first chunk `212.0122070875` 秒、1,000,000 context tokens、输入/输出 `$10/$50` 每百万 token，以及约 `$7.6297` 每个 Intelligence Index task。页面还提供 `xhigh/high/medium/low` 与 fallback 变体；这些都是配置级测量，不能写成 Fable 5.1 的裸模型分数或普遍 API 延迟。
+当时的 Artificial Analysis 详情页确认 canonical slug `claude-fable-5-1`，主配置为 `Claude Fable 5.1 (Adaptive Reasoning, Max Effort, Default Fallback)`，内嵌 `releaseDate` 为 `2026-09-01`。该历史快照的第三方字段为 Intelligence Index `53.3737509623252`、median output speed `65.9769929669683` tokens/s、median time to first chunk `212.0122070875` 秒、1,000,000 context tokens、输入/输出 `$10/$50` 每百万 token，以及约 `$7.6297` 每个 Intelligence Index task。页面还提供 `xhigh/high/medium/low` 与 fallback 变体；这些都是配置级测量，不能写成 Fable 5.1 的裸模型分数或普遍 API 延迟。
 
 DataCurve 当前页面仍是 DeepSWE v1.1：113 个任务、91 个仓库、5 种语言、统一 `mini-swe-agent`，并有 `claude-fable-5` 的 `xhigh/max/high/medium/low` 行；本次页面没有 `claude-fable-5-1` 行。因此 Fable 5.1 不记录 DataCurve 分数，也不把 Fable 5 的 316/452 结果迁移给 Fable 5.1。该“未出现”结论仅针对本次 2026-09-15 页面快照。
 
-Anthropic 当前发布页显示月份为 September 2026，并确认 `claude-fable-5-1` 已可在各平台使用。官方模型页缓存提供的精确日期、1M context、128K output、adaptive always-on 和默认 high 字段与发布页相互吻合；模型页当前被区域跳转替代，故本笔记保留缓存快照的证据边界。
+Anthropic 当前发布页显示月份为 September 2026，并确认 `claude-fable-5-1` 已可在各平台使用。官方模型页缓存提供的精确日期、1M context、128K output、adaptive always-on 和默认 high 字段与发布页相互吻合。2026-09-15 的历史记录曾遇到区域跳转，本轮已取得模型页资源；两次线路状态分别保留，不把历史访问失败写成模型不可用。
 
 ## 发布页新增的公开技术与运行时知识
+
+### 迁移时必须处理的 breaking changes
+
+模型页把以下行为列为 Fable 5.1 的迁移边界：强制工具调用在不兼容的 thinking 请求中返回错误；较早模型不能读取 Fable 5.1 产生的 thinking blocks；编辑较早历史 turn 会使相关 thinking blocks 失效。工程上应在 capability probe 中区分“请求被协议拒绝”“历史状态被标记失效”和“模型推理失败”，并保存原始错误、模型 ID、消息版本、thinking producer/consumer 与回滚路径。
+
+这意味着 thinking block 不是可以任意剪切、编辑、跨版本复制的普通文本。多模型 fallback、历史重写、人工审阅和重试都必须先检查兼容矩阵；若不兼容，应重新生成允许的状态或走明确的无 thinking/非强制工具路径，而不是静默复用旧 block。
+
+### 新增的运行时能力
+
+本轮模型页新增或明确列出五类运行时变化：per-message effort（beta）允许在消息粒度调整投入；turn-scoped system messages（beta）允许只作用于当前 turn 的系统约束；工具调用之间可通过 `display: "updates"` 向用户发送可读进度；cache read 价格降低；content provenance 为生成内容附带来源/溯源协议入口。前四项改变请求、会话或成本账本，最后一项改变结果可信度和审计账本；都应记录 API 版本、schema、默认行为和降级路径。
+
+`display: "updates"` 是用户可见的进度事件，不等于工具已经成功执行，也不替代结构化 tool result、权限检查、超时、幂等和最终 artifact verifier。content provenance 也不自动等于事实正确性，仍需记录来源、引用覆盖、工具回执和独立验证结果。
 
 ### 同一底模、不同 safeguards
 
@@ -62,24 +118,24 @@ Anthropic 明确说 Fable 5.1 与 Claude Mythos 5.1 是同一个 underlying mode
 
 ## 论文与技术报告检索结果
 
-2026-09-15 通过 arXiv 重新搜索后，精确标题查询 `"Claude Fable 5.1"` 返回 0 个结果；全文查询返回 4 篇提到 Fable 5.1 的论文：
+2026-09-21 复核 arXiv 后，精确标题查询 `"Claude Fable 5.1"` 仍返回 0 个结果；全文查询返回 4 篇提到 Fable 5.1 的论文：
 
 - [Long runs of integers with small prime factors and the divisor function of $n!$](https://arxiv.org/abs/2609.15597)：作者说明一个改进思路在与 Fable 5.1 的私下交互中形成，并由作者自行验证和呈现。它是外部使用案例，不是 Fable 5.1 技术报告。
 - [The Troy Moment of AI: Why SomeWill Cheat and SomeWill Follow?](https://arxiv.org/abs/2609.15494)：用 Fable 5.1、GPT-5.6 Sol 和 Gemini 3.8 Flash 研究 ImpossibleBench 上的边界遵守、升级/停止和多 Agent 互动；它更适合补充 Agent 安全与 harness 评测知识。
 - [Pierce-Birkhoff conjecture is false](https://arxiv.org/abs/2609.10420)：作者称反例发现使用了包含 Fable 5.1 的多模型、多 Agent 链路；论文结论仍由作者负责，不等于模型独立证明。
 - [Coloring graphs with no long induced path](https://arxiv.org/abs/2609.08847)：作者称证明在 Fable 5.1 与 GPT Pro 协助下发展；同样属于外部协作案例。
 
-Anthropic Research 页面本次可访问，但未检出 Fable 5.1 专属技术报告条目；新下载的官方 [Fable 5.1/Mythos 5.1 System Card](https://www.anthropic.com/claude-fable-5-1-mythos-5-1-system-card) 为 PDF，当前环境仍没有稳定的正文提取器，因此只记录文件和官方发布页中的安全摘要，不从 PDF 二进制或目录猜测安全数值。
+Anthropic Research 页面本次可访问，但未检出 Fable 5.1 专属技术报告条目；官方 [Fable 5.1/Mythos 5.1 System Card](https://www.anthropic.com/claude-fable-5-1-mythos-5-1-system-card) 的 PDF 正文已在 2026-09-23 用本地解析器提取并逐项核对。正文数字仍只作为 Anthropic 发布方、特定 snapshot/harness 和 safeguards 条件下的证据，不升级为独立复现或裸模型结论。
 
 ## 页面自述与证据边界
 
 Anthropic 页面声称 Fable 5.1 带来更强的长期 Agent coding、多步研究以及文档、表格和幻灯片工作能力。这些是发布方定位和产品页声明，不是本项目独立 benchmark 复现，也不等于公开了训练配方或内部架构。
 
-`adaptive (always on)`、effort、preserved thinking 和 beta 协议描述的是接口/运行时行为。它们不能证明模型是 MoE、稠密或采用某个特定 test-time compute 算法。跨 Opus/Fable 比较必须固定平台、模型 revision、工具、任务、超时、输出上限和 harness。
+`adaptive (always on)`、effort、preserved thinking、thinking block 兼容性和 beta 协议描述的是接口/运行时行为。它们不能证明模型是 MoE、稠密或采用某个特定 test-time compute 算法。跨 Opus/Fable 比较必须固定平台、模型 revision、工具、任务、超时、输出上限、历史编辑策略和 harness。
 
 ## 尚待核验
 
-官方模型页没有披露参数规模、稠密或 MoE 结构、训练数据、优化器、后训练算法、完整技术报告或独立 benchmark 复现。页面自述的质量提升、长任务优势和 cache 成本需要在固定条件下独立测量。
+官方资料和 System Card 正文没有披露参数规模、层数、稠密或 MoE 结构、优化器、完整训练/后训练 recipe、Fable 5.1 独立技术报告或本项目独立 benchmark 复现。System Card 的训练数据范围、风险判断和发布方评测已确认，但质量提升、长任务优势、cache 成本以及 Fable 与 Mythos 在具体业务中的差异仍需在固定条件下独立测量。
 
 ## 书系映射
 
@@ -90,4 +146,4 @@ Anthropic 页面声称 Fable 5.1 带来更强的长期 Agent coding、多步研�
 
 ## 当前闭环判断
 
-Fable 5.1 已完成“排行榜发现 + 官方发布页/模型页字段 + System Card 入口 + 论文定向检索 + 研究笔记”的资料级闭环。没有 DataCurve Fable 5.1 结果，也没有公开参数规模、稠密/MoE 结构、训练/后训练 recipe、独立技术报告或独立 benchmark 复现，因此不新增独立架构章节。下一步切换到同样属于重点厂商、但仍只有部分官方字段核验的 `claude-sonnet-5`，优先补官方发布页、system card、API 运行时协议和两榜单配置边界。
+Fable 5.1 已完成“排行榜发现 + 官方发布页/模型页字段 + System Card 正文 + 运行时 breaking/additive changes + 论文定向检索 + 研究笔记”的 **AA + System Card 正文证据闭环**。没有 DataCurve Fable 5.1 结果，也没有公开参数规模、稠密/MoE 结构、完整训练/后训练 recipe、独立技术报告或独立 benchmark 复现，因此不新增独立 Transformer 架构章节。下一步回到两张排行榜的八家重点厂商候选队列，不把官方文档中关联的其他版本自动升级为新锚点。

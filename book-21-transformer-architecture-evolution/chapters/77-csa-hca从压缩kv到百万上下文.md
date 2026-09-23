@@ -98,3 +98,58 @@ DeepSeek V4 报告给出 1M 场景下相对 V3.2 的单 token FLOPs 和 KV Cache
 2. 加入 causal mask，验证当前位置不会读取未来压缩块。
 3. 比较无压缩、CSA 风格和 HCA 风格的缓存元素数。
 4. 设计一个检索评测，分别测压缩损失、top-k 漏检和局部窗口补偿。
+
+## 2026-09-20 更新：V4 Pro 的模型、effort 与 harness 账本
+
+本章的架构主线现在以 `DeepSeek V4 Pro 0813` 作为活动锚点，但必须把三种身份分开：
+
+| 层 | 本轮证据 | 能回答什么 |
+|---|---|---|
+| 榜单配置 | Artificial Analysis 的 `deepseek-v4-pro`，标题为 `Reasoning, Max Effort` | 第三方目录、速度/指数、context 和 release date 的观察 |
+| 模型与 API | 官方 V4 Pro 公告、模型卡、配置和 Responses/Thinking 文档 | `deepseek-v4-pro`、`low/high/max`、1.6T/49B、1M、CSA/HCA 及协议边界 |
+| Agent 评测系统 | DataCurve 的 `mini_swe_agent_deepseek_v4_pro_max` | 该模型配置在固定 harness、工具、环境和 verifier 下的 Pass@1/Pass@4、成本和 steps |
+
+DataCurve 本轮记录为 Pass@1 `62.831858%`、Pass@4 `88.495575%`、平均成本 `$1.6660232187`、平均输出 `105998.9` token、平均 `154.71` steps，`n_runs=4`。这些数字不是“V4 Pro 的裸能力”，因为它们同时包含 max effort、`mini-swe-agent`、工具宿主、任务集、执行环境和 verifier。面试中若只说“V4 Pro 的 SWE 是 62.8%”，就丢掉了最重要的实验条件。
+
+官方配置补充了本章的实现账本：61 层、384 routed experts、每 token 6 个 routed experts、1 个 shared expert、`q_lora_rank=1536`、`o_lora_rank=1024`、`index_topk=1024`、YaRN factor 16 和 FP8 quantization。它们是公开 artifact 的配置字段，不等于某次 API 服务一定使用完全相同的 kernel，也不能由配置直接推出实际吞吐。
+
+API 层还提出一个容易被忽视的面试点：DeepSeek Responses 是 stateless，不支持 `previous_response_id`、`conversation`、`background` 或 `store`；function tools、`apply_patch` 和并行工具调用仍需要宿主执行器、权限、幂等和 verifier。也就是说，百万上下文的 cache/state 设计不能把“模型能读到历史”误写成“服务端自动替用户保存会话”。
+
+**面试追问：为什么 `max` 不是一个新模型？** 因为官方将其定义为同一 V4 Pro API 的 reasoning effort，改变请求级 test-time compute/预算行为；只有当权重、model ID 或 revision 明确变化时，才有理由单独建立模型身份。`max` 的 DataCurve 行仍必须作为独立配置记录，不能和 low/high 或 V4 Flash 的结果混用。
+
+**面试追问：CSA/HCA、mHC、Muon 和 on-policy distillation 是同一层面的技术吗？** 不是。CSA/HCA 是注意力与 KV serving 结构，mHC 是残差流的几何约束，Muon 是优化器/参数更新路径，on-policy distillation 是后训练中的能力合并流程。把它们按“V4 的四个模块”并列，会掩盖架构、优化、后训练和 serving 的责任边界。
+
+## 官方 inference implementation：从架构描述到可追踪执行路径
+
+模型卡和论文告诉我们为什么要压缩 KV；固定 Hugging Face artifact 则让我们看到“压缩、索引、局部窗口、专家和残差混合”在参考实现中如何连起来。2026-09-20 固定的 V4 Pro revision 是 `b5968e9190ef611bbf34a7229255be88a0e937c1`。本节只讨论公开代码路径，不宣称完整权重已下载或本机 GPU 推理已成功。
+
+### 参考实现的状态图
+
+```text
+token hidden state
+  -> gated KV compressor (ratio 128/4, overlap tail)
+  -> learned indexer score + causal mask + top-k
+  -> compressed sparse attention
+  -> 128-token local sliding window
+  -> MLA low-rank Q/O path
+  -> MoE top-6 routed + 1 shared expert
+  -> Hyper-Connections / Sinkhorn mixing
+  -> next block / MTP prediction
+```
+
+这里的“状态”不是一块统一的 KV 数组。压缩 KV、indexer 所需的候选状态、局部窗口和压缩块边界的 overlap state 必须分别管理。对 serving engine 来说，prefix hit、eviction、decode continuation 和恢复都要知道当前层属于 CSA/HCA 哪条路径，以及尾部是否已经完成压缩。
+
+### 从 `model.py` 读出的实现证据
+
+- `Compressor` 使用 gated KV pooling；ratio=4 的路径保留 overlap state，避免块边界切断因果历史。
+- `Indexer` 对压缩 KV 计算 learned score，施加 causal mask 后做 top-k；参考 inference 路径中的 indexer 还有 FP4 模拟量化。压缩损失和 top-k 漏检因此必须分开测量。
+- `Attention` 同时维护 MLA 低秩投影、compressed-KV sparse attention 和 `window_size=128` 的局部窗口；窗口不是“额外的完整注意力”，而是对近期细节的补偿分支。
+- `Gate` 的前三层使用 token-id hash routing，后续使用 `sqrtsoftplus` score routing；selection bias 只改变候选专家选择，不改变 routing weight。该字段来自公开 inference code，不应外推成完整训练策略。
+- `MoE` 为 top-6 routed experts + 1 shared expert，专家按 tensor parallel 分片；`MTPBlock` 公开了 multi-token prediction block。MTP 仍要单独记录 draft、verify、accepted length、rollback 与 committed cache，不能看到类名就宣称端到端 speculative decoding 已验收。
+- `Block` 用 `hc_mult=4` 和 20 轮 Sinkhorn 近似双随机残差混合，与第 78 章的 mHC 数学主线相连；这是残差流约束，不是 CSA/HCA 的一种变体。
+
+### `kernel.py` 的低精度与部署边界
+
+TileLang 参考 kernel 显示了 `[128,128]` block 的 FP8 activation quantization、FP4 quantization、FP8/FP4 GEMM、稀疏 attention online softmax 和 HC Sinkhorn 路径；FP4 权重沿 K 维打包后参与 GEMM。官方 inference README 的 `EXPERTS=384`、`MP=8` 是转换示例参数，不能改写为所有硬件的生产 TP/EP 结论。FP4/FP8 的 scale、KV cache dtype、专家 dispatch、workspace 和通信需要与 GPU 型号、并行拓扑及 batch 一起 profiling。
+
+因此本章新增的实现证据可以回答“公开参考代码怎么把概念串起来”，但还不能回答“线上 1M context 一定达到多少 tokens/s”。后者需要固定权重、commit、GPU、batch、prefill/decode 比例、cache 命中、压缩召回和 verifier，并把发布方 benchmark 与本地结果分栏。

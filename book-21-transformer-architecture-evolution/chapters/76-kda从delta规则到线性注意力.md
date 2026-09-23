@@ -143,3 +143,7 @@ Kimi K3 官方文章称其采用 KDA、AttnRes、Stable LatentMoE，并披露了
 2. 把 `alpha` 改为标量，比较逐通道衰减和统一衰减的状态轨迹。
 3. 为代码加入长度为 `T` 的循环，验证状态内存不随 `T` 增长。
 4. 设计一个混合层消融：全 KDA、3:1 KDA/MLA 和 1:1 KDA/MLA，在相同训练 token 与推理预算下比较长程检索、吞吐、显存和延迟。
+
+## Kimi K3 配置补证（2026-09-18）
+
+Kimi K3 技术报告确认 69 个 KDA、24 个 Gated MLA，每 3 个 KDA 后接 1 个 Gated MLA，末尾另置 Gated MLA，并采用 `g_min=5` 的 lower-bounded decay。Kimi Linear 论文用于解释递推、delta rule 和 chunkwise 机制；K3 report 才是这些具体比例、层数和 decay 下界的来源。FlashKDA 生产 kernel、K3 完整训练 recipe 和目标硬件 profiling 仍待核验。

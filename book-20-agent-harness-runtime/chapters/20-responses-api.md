@@ -60,6 +60,8 @@ response.created
 
 服务端托管状态很方便，但会带来数据保留、租户隔离、删除和费用问题。客户端自管状态更可控，却要自己保存 item、call id、artifact 和幂等信息。不能因为接口支持“继续响应”就假设它是永久 memory。
 
+对 Grok 4.7，Responses 每次返回的 encrypted reasoning item 以及服务端工具的加密输出都属于协议状态；客户端若自行管理历史，应原样回传。这个默认返回行为不等于 response 一定可通过 `previous_response_id` 找回，后者受 `store` 控制。可见的 reasoning summary 流事件也应与 opaque encrypted state 分账，不能用摘要替换回放状态。
+
 ## 20.6 Streaming 的正确拼接
 
 流式响应不只是把文本逐字吐出。客户端要处理 item 开始、文本增量、工具参数增量、完成、错误、取消和 usage。若用户已经看到一段文本，而后续验证发现响应失败，应用需要定义这段文本是草稿还是已提交答案。
@@ -267,3 +269,69 @@ Responses 风格的 item 流可以同时承载文本、推理、工具调用、�
 Responses API 的工程价值是把复杂 Agent 交互从字符串解析提升为有类型的响应对象和事件协议。真正困难的部分仍然是状态、工具、权限、流式一致性、错误恢复、成本对账和版本迁移。协议完整不等于业务完成，HTTP 200 也不等于副作用已经提交。
 
 本章关于具体字段和事件不作跨 provider 泛化；字段名称、模型支持、状态保留和计费以对应版本的官方 API 文档为准。
+
+## 20.26 GPT-5.6 Luna：Responses item 与 Agent runtime 所有权
+
+GPT-5.6 Luna 当前最适合用来讲清一个经常被混淆的边界：模型、响应协议和 Agent runtime 不是同一层。Luna 模型页公开的是模型合同，例如 `1,050,000` context、`922,000` maximum input、`128,000` maximum output、`none`--`max` effort 和支持的端点/工具；这些字段不能反推出参数规模、MoE/稠密结构或训练配方。
+
+OpenAI 官方 Agents 文档把运行时分成三种入口：
+
+| 入口 | 谁管理 agent loop | 状态/执行边界 | 适合的问题 |
+|---|---|---|---|
+| Agents API | OpenAI 管理 Codex harness 和底层 Agent 基础设施 | 保存 session configuration、turns、items，并可使用托管 sandbox/工具 | 长任务，希望由平台托管进度 |
+| Agents SDK | 应用管理部署、存储、审批和 runtime；SDK runner 管理 loop/handoff | 工具、sandbox、session 和业务状态由应用集成 | 需要自定义工作流和多 Agent 编排 |
+| Responses API | 应用直接管理 response、历史和工具循环 | 应用决定 item 回放、executor、权限和状态存储 | 直接调用模型或从零构造 harness |
+
+三种入口的 session、conversation 和 sandbox 不是同一个资源。迁移时要把下面的状态分开保存：
+
+```text
+model contract
+-> response items / reasoning state
+-> tool discovery and tool call
+-> permission + executor
+-> artifact + verifier
+-> session / trace / cost ledger
+```
+
+GPT-5.6 的 tool search 又把“工具存在”和“工具已加载”分开。Hosted tool search 由服务端搜索已声明的 namespace/MCP/function，并在同一个 response 中产生 `tool_search_call` 与 `tool_search_output`；client-executed tool search 由模型产生 `tool_search_call`，应用搜索自己的项目/租户状态，再用相同 `call_id` 回传 `tool_search_output`。两种路径都会把已加载工具追加到上下文末端，以尽量复用前缀缓存；返回工具仍需通过 schema、权限、沙箱和 verifier。
+
+长期任务要同时维护两本账：一是状态账，记录 reasoning item、tool search output、tool call/result、compaction item 和 artifact；二是成本账，记录 model、effort、工具 schema、`cached_tokens`、`cache_write_tokens`、compaction 次数和重试。Compaction 会替换较早上下文，可能让旧 cache prefix 从变化位置开始失配；它不是 prompt cache，也不是可读的人工摘要。面试中如果只回答“把历史压缩后继续请求”，就遗漏了 canonical context、opaque state、权限和副作用恢复。
+
+## 20.27 GPT-6 Sol：三种 Agent runtime 的所有权矩阵
+
+GPT-6 Sol 的官方模型页只规定 `gpt-6-sol` 的模型合同；Agents 文档把平台入口分为 Agents API、Agents SDK 和 Responses API。三者都能驱动 Agent，但状态所有者不同：
+
+| 入口 | 主要状态所有者 | 恢复/审计时的最小记录 |
+|---|---|---|
+| Agents API | OpenAI 托管 Codex harness | session configuration、turn、item、托管工具、sandbox、平台进度 |
+| Agents SDK | 应用及 SDK runner | deployment、storage、approval、handoff、工具、session、sandbox |
+| Responses API | 应用自建 harness | input/output item、previous response 或完整 replay、executor、permission、artifact、verifier |
+
+这三个入口不能因为都叫 Agent API 就共享同一份状态。尤其是 session、conversation 和 sandbox 是不同资源；迁移时必须明确谁保存历史、谁执行工具、谁批准副作用、谁决定 compaction 后是否继续。
+
+### 20.27.1 Opaque state 的回放规则
+
+Reasoning 与 compaction item 不是可读思维链。stateless input-array chaining 需要保留 output items，包括 encrypted reasoning/compaction item；`previous_response_id` chaining 只传新用户消息。standalone `/responses/compact` 返回的是 canonical next context，不能只取一段摘要再自行拼装。
+
+一份可恢复的 manifest 可以写成：
+
+```text
+model, snapshot, mode, effort, request_prefix_hash
+response_id, previous_response_id, input/output_items
+tool_registry_hash, call_id, permission, executor_receipt
+compaction_id, cache_state, artifact_digest, verifier_result
+```
+
+GPT-6 family 的 `configuration_update` 还需要记录在原始历史位置；相邻 update 会被拒绝，且不能与自动 compaction/truncation 同用。这样做的意义不是保存 raw CoT，而是让下一轮能够判断哪些协议状态可以继续、哪些必须重新生成。
+
+### 20.27.2 面试中的一句话
+
+回答 GPT-6 Sol Agent 系统设计时，可以用一句话收束：模型提出 reasoning/tool intent，Responses 携带 typed items，harness 管理 loop 和状态，permission engine 决定 allow/ask/deny，executor 产生副作用回执，verifier 判定任务是否完成。1.05M context 和工具目录不等于模型拥有永久记忆、网络权限或公开了内部架构。
+
+资料依据：[GPT-6 Sol model page](https://developers.openai.com/api/docs/models/gpt-6-sol.md)、[Agents](https://developers.openai.com/api/docs/guides/agents.md)、[Compaction](https://developers.openai.com/api/docs/guides/compaction.md)。
+
+### 20.28 GPT-6 Luna：同一 runtime，不同 sibling contract
+
+Luna 可以复用 GPT-6 family 的 Agents API、Agents SDK、Responses API ownership、tool search 和 opaque compaction replay 规则，但 trace 中必须保留精确 model ID、snapshot、effort、mode、价格和 provider。模型页的工具列表不自动授予 shell、MCP、computer use 或网络权限；permission engine、executor、sandbox 和 verifier 仍归宿主 harness。
+
+Luna 当前是 AA 单榜资料级闭环，DataCurve 没有精确 Agent 行。因而测试应在 sibling 之间做合同和成本对照，而不是迁移 Sol 的 Agent score；缺失精确行时输出 `not_applicable`。证据见 [`gpt-6-luna-source-notes.md`](../../research/model-update-2026-09/gpt-6-luna-source-notes.md)。

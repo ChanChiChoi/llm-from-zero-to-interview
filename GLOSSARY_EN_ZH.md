@@ -8230,6 +8230,14 @@ Heterogeneous KV Cache：异构 KV Cache；不同层或路径使用不同压缩�
 
 GPT-6 Astra：OpenAI 官方模型页列出的 `gpt-6-astra`；本项目当前仅确认其公开接口、上下文/输入/输出预算、reasoning effort、工具和端点支持。
 
+Configuration update：配置更新；GPT-6 及后续模型可通过追加 input item 调整后续响应的 reasoning effort；它是运行时协议，不是权重更新或训练算法。
+
+Reasoning item：推理状态项；Responses API 返回的加密、不可读状态项，replay 时通常应与其他 output items 一起保留，不能当作公开思维链。
+
+Deferred tool search：延迟工具搜索；先暴露 namespace/MCP 概览，模型需要时再加载具体工具 schema，以减少初始上下文并保护稳定缓存前缀；加载结果仍受宿主权限和 schema 审计约束。
+
+Canonical context：规范上下文；compaction endpoint 返回的、下一轮应直接使用的完整上下文窗口，不是可以任意裁剪的纯摘要字符串。
+
 Maximum Input Tokens：最大输入 token 数；一次请求允许计入输入区域的上限，不能与 context window 或 maximum output 混为一个数字。
 
 Maximum Output Tokens：最大输出 token 数；一次请求允许生成的输出上限，受上下文总容量、接口和任务预算共同约束。
@@ -8240,9 +8248,19 @@ Reasoning Effort Profile：推理档位配置；模型请求级的 `low`/`medium
 
 Hosted Tool Boundary：托管工具边界；模型提出工具调用，宿主执行器负责授权、沙箱、网络/文件范围、超时、回执和审计。
 
+Async Tool Calling：异步工具调用；应用执行 function/custom tool 时，模型可先处理独立工作，应用之后用原始 `call_id` 回传结果；不等于 hosted tool 自动异步，也不替代任务状态、幂等和权限管理。
+
+Mid-turn Steering：响应中途 steering；GPT-6 Astra 在 Responses WebSocket 中通过 `response.steer` 接收追加约束并创建 continuation；不会撤销已发送输出、已启动工具或外部副作用。
+
+Response Lineage：响应血缘；由 `previous_response_id`、steering、工具 `call_id` 和 continuation 组成的可追踪响应关系，用于恢复、计费和副作用审计。
+
+Progressive Disclosure：渐进披露；skill 根文档只提供适用条件和路由，细节在任务需要时再读取，以减少无关上下文和冲突指令。
+
+Misalignment Monitoring：错位监控；平台异步检查高后果 Agent 的推理与动作并发出告警或阻断；可能误报/漏报，不能替代权限、审批、沙箱和 verifier，也不会回滚既有副作用。
+
 Thresholded Token Pricing：阈值计费；当输入超过指定阈值时，整次请求适用新的输入/输出费率，不能只对超出部分加价。
 
-GLM-5.3：Z.ai 文档列出的长任务模型版本；官方称沿用 GLM-5.2 基础模型并通过后训练改进，SAO with compaction 的具体机制待核验。
+GLM-5.3：Z.ai 文档列出的长任务模型版本；官方称沿用 GLM-5.2 基础模型并通过后训练改进，继承 `SAO with compaction`。SAO 的公开算法已有 arXiv 论文，但 5.3 专属 compaction 实现仍待核验。
 
 Executable Task Environment：可执行任务环境；为 Agent 提供初始状态、动作、工具反馈、终止条件和资源/权限边界，使长任务能力可以通过实际结果评估。
 
@@ -8254,15 +8272,41 @@ Unsolved-state Check：未完成状态检查；用明显未满足目标的 artif
 
 Reward Shortcut：奖励捷径；通过修改代理指标、测试或环境残留获得高分，却没有满足真实任务目标的行为。
 
-SAO with Compaction：GLM-5.3 文档提到的策略名称；本项目当前没有核验其全称、数学机制或实现，不能据缩写推断。
+SAO with Compaction：GLM-5.3 文档提到的继承策略名称；SAO 论文公开了 single-rollout asynchronous RL、DIS、双侧 token clipping、value-model 和 Skip-Observation GAE，但没有公开 GLM-5.3 产品侧 compaction 序列化和完整 recipe，不能把论文结果写成 5.3 独有能力。
 
-Kimi K3：Kimi 官方发布文章中的模型版本；文章披露 KDA、AttnRes、Stable LatentMoE、量化和长任务 Agent 信号，完整配置、权重与报告状态需独立核验。
+Kimi K3：Kimi 官方发布文章中的模型版本；文章披露 KDA、AttnRes、Stable LatentMoE、量化和长任务 Agent 信号，K3 report 与固定 HF config 已补充主要配置证据；完整权重下载、生产 serving 和独立复现仍需单独核验。
 
 State Manifest：状态清单；跨轮或跨模型保存目标、事实、假设、diff、工具 observation、权限、版本、预算和 artifact 引用的结构化记录。
 
 Harness Revision：Harness 版本；评测或 Agent 运行时的提示、工具、验证器、记忆、压缩和恢复实现版本。
 
 Absolute vs Relative Lift：绝对提升与相对提升；绝对提升是百分点差，相对提升是相对基线的比例，二者不能混用。
+
+## 2026-09 GLM-5.3 官方博客增量
+
+Z.ai Code Bench：Z.ai 为 GLM-5.3 描述的私有 coding-agent benchmark；同时观察端到端完成率和细粒度 checklist accuracy，发布方称 GLM-5.3 相对 GLM-5.2 提升 50%。它不是 Artificial Analysis 或 DataCurve 的同一评测。
+
+CyberGym：漏洞发现/验证阶段的 benchmark；从 white-box source code 出发，通过触发故障判断漏洞，不能直接等同完整 exploitation chain。
+
+ExploitBench：更深的真实漏洞利用推理 benchmark；与 CyberGym 的任务定义、分母和 verifier 不同，分数不能直接合并。
+
+## 2026-09 SAO 与 Agentic RL
+
+Single-Rollout Asynchronous Optimization (SAO)：单 rollout 异步优化；每个 prompt 只采样一条 rollout，完成后立即更新，适配长任务异步 RL。它减少 group barrier，但需要 value model 估计 token-level advantage。
+
+Direct Double-Sided Importance Sampling (DIS)：直接双侧重要性采样；读取 rollout engine 的 token log-probability 计算当前/rollout policy ratio，并在 `[1-epsilon_low, 1+epsilon_high]` 外进行 clipping/masking，以限制 policy lag 的极端 token。
+
+Policy Lag：策略滞后；rollout 生成策略与训练时当前策略之间的版本差异。异步吞吐提高时可能扩大 off-policy drift，必须记录 rollout revision、log-probability 和训练 update。
+
+Skip-Observation GAE：跳过 observation 的广义优势估计；在 action segment 之间 bootstrap value，避免环境返回文本的长度/格式污染 credit assignment；不表示 observation 可以从回放或审计中删除。
+
+Frozen-Attention Value Model：冻结 attention 的价值模型；SAO 论文中的 critic 稳定性设计，只更新 MoE projections，并配合更频繁的 value update；不等于 GLM-5.3 的基础模型架构声明。
+
+SAO Evidence Boundary：SAO 证据边界；论文主干实验使用 Qwen3-30B-A3B，摘要称部署到 GLM-5.2（750B-A40B）Agent RL pipeline。GLM-5.3 官方文档只确认继承 `SAO with compaction`，5.3 专属 compaction、完整 recipe、权重和生产验收仍为 `unverified`。
+
+ExploitGym：在时间归一化预算下统计完成的 exploitation tasks；必须同时记录模型 TPS、2 小时/6 小时预算、任务集、harness 和 domain whitelist。
+
+Benchmark Harness Manifest：评测 harness 清单；记录模型 revision、effort、工具、环境、temperature/top-p、上下文、输出上限、turn、timeout、隔离、域名策略、Tool Search、verifier 和统计聚合，用来阻止把系统结果误写成裸模型能力。
 
 ## 2026-09 Mistral Small 4 与 Step 3.5 Flash
 
@@ -8284,7 +8328,17 @@ Grok 4.6：xAI 官方模型页列出的模型标识；已核验 500K prompt/cont
 
 Web Search / X Search：xAI 文档列出的实时搜索工具；用于把当前信息接入请求，不等于模型训练知识或模型本身拥有网络权限。
 
-Claude Opus 5：Anthropic 官方模型目录列出的 `claude-opus-5`；当前核验 1M context、128K 最大输出、adaptive thinking、默认 high effort、平台和价格字段，参数与训练架构待核验。
+Claude Opus 5：Anthropic 官方模型目录列出的 `claude-opus-5`；当前核验 1M context、128K 普通最大输出、300K Batch 最大输出、adaptive thinking、默认 high effort、五档 effort、512-token 最小缓存 prompt、fallback 和多平台字段，参数与训练架构待核验。
+
+Thinking Display Omitted：思考展示省略；Opus 5 的 `thinking.display: "omitted"` 表示原始 thinking 不向用户展示，但兼容的 thinking block/signature 仍可能是多轮工具协议状态，不能当作可丢弃的文本。
+
+Thinking Replay Contract：思考状态回放契约；多轮工具调用时按原序、原样回传 thinking block/signature，并绑定模型、revision、消息版本和编辑状态。它是 opaque runtime state，不是可读思维链，也不是永久记忆。
+
+Thinking Effort Capability Gate：思考 effort 能力门槛；Opus 5 的 `thinking disabled` 与 `xhigh/max` 组合不能直接视为有效请求，应在 capability probe 中分类为请求契约错误并走明确降级。
+
+Refusal/Fallback Ledger：拒答/回退账本；`refusal` 是业务响应状态，fallback 可能改变实际服务模型、工具能力、缓存、成本和安全策略，评测必须记录原始模型与最终模型，不能把成功归因给原模型单体。
+
+Web Fetch Host Boundary：网页抓取宿主边界；模型文档不支持 web fetch 时，搜索、抓取、域名策略、SSRF 防护、超时、溯源和验证均由宿主工具负责，工具调用能力不等于网络权限。
 
 Adaptive Thinking：自适应思考；模型目录中的运行时配置描述，表示推理预算可随任务调整，不等于公开了内部推理算法。
 
@@ -8295,6 +8349,20 @@ Claude Fable 5.1：Anthropic 官方模型页列出的 `claude-fable-5-1`；当�
 Preserved Thinking：保留思考状态；跨轮对话或模型切换时保留可继续使用的 thinking blocks 的接口/协议能力，不等于模型永久记忆。
 
 Per-message Effort：按消息设置 effort；Fable 5.1 页面列出的 beta 运行时控制，可在对话中改变推理预算，具体行为需按 API 版本复测。
+
+Thinking Block Compatibility：思考块兼容性；Fable 5.1 的 thinking blocks 带有模型生产者/消费者和消息版本边界，较早模型可能无法读取，不能像普通文本一样跨版本复制。
+
+Thinking Block Invalidation：思考块失效；编辑较早历史 turn 可能使后续 thinking blocks 失效，运行时必须重新生成允许的状态或走明确降级路径，不能静默回放旧状态。
+
+Forced Tool Capability Error：强制工具能力错误；当 thinking 与 forced tool use 的组合不被 Fable 5.1 协议接受时返回的可分类错误。它是请求契约失败，不等于工具执行失败或模型质量失败。
+
+Turn-scoped System Message：回合作用域系统消息；只对当前 turn 生效的系统约束（Fable 5.1 beta 入口），需要记录作用域、版本、重试和回滚语义，不能误当作永久系统提示。
+
+Tool Progress Update：工具进度更新；Fable 5.1 的 `display: "updates"` 用户可见事件。它只表示进度通知，不等于结构化 tool result、工具执行成功或最终 artifact 通过验证。
+
+Fable/Mythos Safeguards Split：Fable/Mythos 安全策略分层；Fable 5.1 与 Mythos 5.1 共享 underlying model，但 safeguards 和访问计划不同。公开资料支持服务策略差异，不支持把它们写成两个独立基础模型。
+
+Fable 5.1 DataCurve Evidence Boundary：Fable 5.1 的 DataCurve 证据边界；当前没有精确 `mini_swe_agent_claude_fable_5_1_*` 行，不能迁移 Fable 5 或其他 Claude 版本的 Pass@1、成本和 Agent steps。
 
 Claude Sonnet 5：Anthropic 官方模型目录列出的 `claude-sonnet-5`；当前核验 2026-06-30 发布字段、1M context、128K 普通最大输出、300K batch 最大输出、Adaptive thinking、默认 high effort、Fast latency、平台和价格字段，参数与训练架构待核验。
 
@@ -8329,6 +8397,14 @@ Numeric Reasoning Effort：数值推理预算；V4.1 encoding 说明中的 1--10
 Global KV Footprint：全局 KV 占用口径；统计 global KV 的 bytes/token，必须和模型 revision、精度、上下文、batch 及是否包含 indexer/SWA 一起引用。
 
 Candidate Recall：候选池召回率；相关历史块进入 hierarchical candidate pool 的比例。它与候选池内 Top-K recall 分开统计，端到端召回不能只看后者。
+
+Reference Inference Implementation：参考推理实现；固定 revision 发布的可读代码，用于展示模型路径、张量形状、转换和 kernel 接口。它不自动等于生产 serving engine、目标硬件性能或线上可用性。
+
+Forward Spec Path：推测解码前向路径；例如 V4.1 reference `model.py` 中的 DSpark `forward_spec`/draft block。必须继续核对生成入口是否真正接入 draft、verify、rollback 和 acceptance scheduler。
+
+Plain Autoregressive Entry：普通自回归生成入口；每次用目标模型生成下一个 token 的参考路径。即使同一仓库存在 speculative forward code，也不能据此宣称推测解码已经在生成循环中生效。
+
+Runtime Artifact Boundary：运行时 artifact 边界；模型卡、技术报告、`config.json`、reference code、权重 revision、provider、harness 和硬件各自承担不同证据责任，不能把字段跨 artifact 无来源合并。
 
 ## 2026-09 K2 Horizon MoVA 与 Uno
 
@@ -8374,6 +8450,30 @@ Batch-size Warmup：批大小预热；从小 batch 逐步增加到目标 batch �
 
 Hosted/Open Checkpoint Boundary：托管服务与开放权重边界；hosted model 可以基于某个 checkpoint 并额外提供视觉、工具或协议能力，但这些服务字段不能被写成新的 open checkpoint 架构事实。
 
+Qwen3.8 Max 0902 Snapshot：Qwen3.8 Max 0902 快照；Qwen Cloud 对 `qwen3.8-max-2026-09-02` 的服务 revision 表述，不能自动解释为新的公开权重或基础架构。
+
+Revision-Level Model Identity：版本级模型身份；同时记录 canonical model、release/snapshot、alias、provider、tokenizer/template 和 hosted/open 状态，避免把 revision、effort、fallback 或 provider 行计成多个基础模型。
+
+Context Budget Geometry：上下文预算几何；区分 context window、maximum input、maximum output、reasoning token、工具结果、cache/KV 和 workspace，不能把接口上限简单相加来估算并发。
+
+Thinking-Mode Tool Choice Constraint：思考模式工具选择约束；Qwen3.8 Max 0902 thinking 模式下 `tool_choice` 只能为 `auto` 或 `none`，强制指定工具需要关闭 thinking，这是 API capability 约束而非模型不会调用工具。
+
+Qwen Reasoning Effort：Qwen 推理努力档位；0902 文档中的 `low`、`medium`、`xhigh` 请求级控制，默认 `xhigh`，与 `thinking_budget` 互斥，不是三个独立模型。
+
+Explicit Context Cache：显式上下文缓存；应用主动创建、管理和复用的上下文缓存对象，需要记录 identity、权限、失效和计费。
+
+Implicit Context Cache：隐式上下文缓存；provider 自动识别可复用前缀的缓存机制，需要记录命中、未命中、实际费用和前缀稳定性。
+
+Session Context Cache：会话上下文缓存；围绕 session identity 维持历史状态连续性的缓存语义，需要记录过期、切换、并发和租户隔离。
+
+Dynamic Rate Limiting：动态限流；provider 根据账户消费和服务策略调整 TPM tier，并以 account+model 聚合请求、允许 workspace override；它是托管服务配额机制，不是模型架构或 GPU 性能指标。
+
+Soft TPM Limit：软 TPM 限制；达到 provider 保证的 tokens-per-minute 后，如果平台仍有余量可能继续接受请求，因此 guaranteed TPM 不能直接当作硬拒绝线、模型吞吐或 GPU capacity。
+
+Hosted Endpoint Migration：托管 endpoint 迁移；provider 将 API/Realtime 示例从一个域名或路由迁移到另一个 endpoint，影响 adapter、认证、transport、缓存和限流回归，但不能单凭域名变化推导模型升级。
+
+Revision-Bound Agent Result：版本绑定 Agent 结果；只有当榜单配置明确绑定到具体 model revision，并同时固定 harness、工具、环境、verifier 和任务集时，Agent 结果才可归因到该 revision 的评测配置；泛化 alias 不能迁移。
+
 ## 2026-09 GLM-5.3-Flash
 
 Hybrid Linear-Sparse Attention：混合线性—稀疏注意力；用固定形状的递归状态处理大部分历史，再用稀疏 indexer 为远程精确检索保留显式 attention 路径，不能简化为纯线性注意力。
@@ -8386,6 +8486,606 @@ EPD（Encode–Prefill–Decode）：编码—预填充—解码的多阶段 ser
 
 Visual Self-Verification：视觉自验证；把渲染、交互和视觉差异纳入模型/Agent 的下一轮决策，不等于独立完备 verifier、工具权限或 artifact 正确性证明。
 
+IndexShare：索引共享；GLM-5.2 官方博客描述的 DSA 优化，让连续四层共享一个轻量 indexer 的 top-k indices，以减少 indexer dot product 与 top-k 开销；共享可能引入层间召回损失，不能当作无损保证。
+
+Critic-based PPO：基于 critic 的 PPO；GLM-5.2 博客描述其用于 compaction 后数量和长度不稳定的 sub-traces，通过 critic 提供 token-level advantage；这是公开训练方向，完整 loss、mask 和 recipe 仍待核验。
+
+Coding-agent Anti-hack：编码 Agent 反作弊；用规则过滤器与模型分类器检测读取隐藏评测文件、下载参考解等 reward shortcut，并对违规动作施加负反馈；不等于权限隔离或独立安全保证。
+
 Tool Streaming：工具流式输出；模型以多个事件/片段增量产生工具名和参数，宿主必须按 call index 聚合、做 schema/权限/确认校验后再执行，不能把生成事件当作执行结果。
 
 Activated Parameters：激活参数；某个 token 路径实际参与主要计算的参数口径，不能直接替代总权重、通信、cache、workspace 或并发显存账本。
+
+Paged KV Pool：分页 KV 状态池；为显式 attention 的 key/value 以 page/block 方式分配、复用和回收的 runtime 资源，不能代表混合模型的全部历史状态。
+
+KDA State Pool：KDA 递归状态池；保存 KDA/线性 attention 路径的 recurrent state，生命周期、shape、写回和恢复不同于 paged KV pool，可能先成为并发瓶颈。
+
+MTP Acceptance：多 token prediction 接受率；draft/target speculative 路径中被 target 验证并提交的 token 统计，必须和回滚、verify 成本、工具边界和 task success 分开。
+
+KV/DSA Backend Pairing：KV dtype 与 DSA 后端配对；KV 的量化格式、scale/page layout 与稀疏 attention kernel 的读取/反量化契约需要联合配置，不能独立切换 FP8 或 backend。
+
+Serving Evidence Gate：服务证据门禁；按 recipe 可发现、dummy wiring、完整权重、数值正确性、状态恢复、目标硬件 profiling、工具/verifier/SLO 逐级验收，前一级不能自动证明后一级。
+
+Glm5NextIndexerCache：GLM5Next 索引缓存；vLLM main 中按 `index_kpool` 的 pool 粒度寻址已完成 indexer metadata，并与 block table/对齐约束绑定；它不是完整 KV cache，也不能由 v0.29.0 stable tag 的 recipe 门槛反推存在。
+
+Glm5NextTailCache：GLM5Next 尾部缓存；vLLM main 中保存尚未填满 index pool 的 raw BF16 K 与 gate score，供 prefill、decode/spec-decode 和 PD connector 继续推进；恢复时丢失 tail 会造成 pool 边界历史缺口。
+
+Stable/Main/Recipe Evidence：stable/main/recipe 证据分层；固定 tag 证明发布源码入口，mutable main 证明当前 upstream 实现，recipe 证明特定版本/硬件部署路线，三者都不自动等于完整权重、目标硬件或生产 SLO 已通过。
+
+GLM-5.3-FlashX：Z.ai 文档列出的 Flash 关联服务入口；约 200 tokens/s、配额和 endpoint 字段属于服务层，不是本轮两个排行榜中的新模型锚点。
+
+## 2026-09 DeepSeek V3.2
+
+DeepSeek Sparse Attention / DSA：DeepSeek 稀疏注意力；先用轻量 indexer 估计历史位置相关性，再让主 attention 访问有限候选，以降低长上下文注意力成本。V3.2 公开资料未给出完整 kernel、训练目标或硬件 profiling。
+
+Thinking with Tools：带工具的思考；把 reasoning 内容、工具调用、工具结果回灌和最终回答放进明确的消息/encoding 协议。它是模型输出协议与训练方向，不等于宿主权限或工具已经执行。
+
+Agentic Task Synthesis：Agent 任务合成；系统化生成包含环境、工具和轨迹的训练任务/数据的流程。面试审计应覆盖任务定义、轨迹生成、verifier、困难样本、失败轨迹、污染检查和后训练目标，不能由名称推断完整 recipe。
+
+Scalable RL Framework：可扩展强化学习框架；DeepSeek V3.2 模型卡列出的后训练方向，强调 RL protocol 与 post-training compute 的扩展；未披露的 PPO/GRPO、奖励、KL、rollout 和优化器细节必须标为待核验。
+
+V3.2-Speciale Boundary：V3.2-Speciale 边界；官方模型卡定位为深度推理变体且不支持 tool calling，不能把它当作 V3.2 Agent 工具协议的兼容替代品。
+
+Indexer Warm-up：索引器预热；DeepSeek V3.2 报告中的第一阶段，保持 dense attention、冻结主模型，只用主 attention 分布的 KL 对齐训练 lightning indexer。
+
+Sparse Training Stage：稀疏训练阶段；在 V3.2 DSA 中引入细粒度 token selection，indexer 输入与主计算图 detach，indexer 由 KL loss、主模型由 language-modeling loss 分别更新；报告给出每个 query 选择 2,048 个 KV tokens。
+
+Keep Routing：保持路由；MoE 强化学习中保存 rollout 推理时的 expert routing，并在训练时复用相同路径，减少训练/推理框架差异造成的 active parameter subspace 跳变。
+
+Keep Sampling Mask：保持采样掩码；保留 old policy 采样时的 top-p/top-k truncation mask，并将其应用到 current policy，避免 RL 中 old/current policy 的 action space 不一致。
+
+Thinking Context Management：工具推理上下文管理；V3.2 报告描述只追加 tool message 时保留历史 reasoning，出现新 user message 时才丢弃 reasoning，同时保留工具轨迹；收益取决于 harness 如何编码工具事件。
+
+Indexer RoPE Layout：索引器 RoPE 布局；V3.2-Exp inference demo 明确 indexer 使用 non-interleaved 布局，而 MLA 使用另一种布局；不能因为都使用 RoPE 就复用通道排列、权重切分或 cache 实现。
+
+FP8 Index Score：FP8 索引分数；用 FP8 query/key cache 和 index kernel 估计历史位置相关性，再经过 causal mask 与 top-k 选择候选 KV。它是候选检索分数，不是最终 attention 输出。
+
+Prefill MHA / Decode MQA：Prefill 多头注意力 / Decode 多查询注意力；V3.2-Exp 参考路径在 prefill 与 decode 使用不同访问形态，前者处理多 query，后者复用 latent KV 与 positional cache；两阶段的显存、带宽和延迟不能混算。
+
+Radix Top-k Selector：基数 Top-k 选择器；TileLang 示例用 histogram 找阈值桶，再用有限轮次 radix refinement 取得 top-k，避免对整个长序列完全排序；仍须验证 ties、causal 边界、paged KV 和不同长度 batch。
+
+Sparse MLA Gather：稀疏 MLA 聚集；根据 indexer/top-k 位置只 gather 被选 KV，再在候选集合上做主 attention；`top-k` 的选择成本、候选漏检和 gather 访存仍属于端到端成本。
+
+Latent KV / Positional Cache：潜在 KV / 位置缓存；MLA 将低秩 latent KV 与独立位置部分分开缓存，V3.2-Exp 还区分 FP8 实际部署 cache 与 demo 的精度模拟；不能只按传统完整 K/V 张量估算显存。
+
+Recipe-Level Benchmark：Recipe 级基准；绑定模型 artifact、推理引擎、kernel、prompt、few-shot、硬件和 harness 的结果，例如 vLLM recipe 的 GSM8K；不能直接归因于裸模型，也不能填补缺失的排行榜精确行。
+
+榜单单榜闭环：模型在 Artificial Analysis 或 DataCurve 其中一个排行榜有精确条目，同时通过官方模型卡/报告/文档核验技术资料；它不是两个排行榜都出现，也不允许迁移相邻模型的分数。
+
+Directory Drift：目录漂移；同一榜单 canonical model 在不同采集时间出现参数、价格、上下文或 provider 测量字段差异。除非有固定 checkpoint/revision 证据，否则不能解释为模型训练或架构变化。
+
+Implementation Evidence Layer：实现证据层；把官方 README/模型卡、可读 reference kernel、CUDA kernel、serving recipe 和目标硬件验收分开。某一层存在不能自动证明下一层已通过。
+
+Access Boundary Evidence：访问边界证据；当前 URL 返回 404、503、超时或代理失败时，只记录该时点的页面可取得性，不据此断言资源或实现不存在；固定 revision 的历史证据仍应保留。
+
+## 2026-09 GPT-5.3 Codex
+
+GPT-5.3 Codex：OpenAI 官方模型页中的 agentic coding 模型，模型 ID 为 `gpt-5.3-codex`；本项目确认其 `low/medium/high/xhigh` effort、400K context、272K maximum input、128K maximum output、Responses-only、function calling、web search、hosted shell 和 skills。参数、架构和训练配方未公开。
+
+Codex harness：围绕 Codex 模型组织的 Agent 执行外壳；包括代码库探索、固定工作目录、工具 schema、并行调用、`apply_patch`、workspace、权限、沙箱、测试、artifact 和 verifier。harness 的系统结果不能直接归因于裸模型。
+
+Responses-only：只支持 OpenAI Responses API 的接入边界；迁移时必须处理 input/output item、tool call/result、stream event、phase、状态引用和错误恢复，不能只替换 model ID。
+
+Assistant phase：assistant 输出的协议阶段字段；`commentary` 表示工具前说明或中间进度，`final_answer` 表示最终答复。它不是 chain-of-thought，也不等于工具已执行。
+
+Full output item replay：完整 Responses 输出项回放；无状态继续任务时保留消息、工具调用/结果、加密 reasoning item、phase 和 compaction item 等必要状态，而不是只保存最终可见文本。
+
+Canonical context：compaction endpoint 返回的、下一轮应直接使用的完整上下文窗口；不是可以任意编辑或裁剪的普通摘要字符串。
+
+Codex compaction：为多小时 coding/Agent 轨迹提供的上下文压缩协议；server-side compaction 可返回 encrypted compaction item，standalone compact endpoint 可返回 canonical context。官方未公开内部压缩算法。
+
+Tool contract：模型提出调用、schema 校验、宿主权限/审批、执行器运行、工具回执和最终 artifact 之间的可审计契约；模型输出 tool call 不等于宿主授权或真实副作用已提交。
+
+Tool-search boundary：工具 schema 延迟发现能力与普通 function calling/skills 的边界。本项目不把 GPT-5.4+ 文档中的 deferred `tool_search` 自动迁移给 GPT-5.3 Codex。
+
+Codex evidence boundary：GPT-5.3 Codex 的 Artificial Analysis Intelligence Index 是第三方配置字段；DataCurve 当前无精确行。不能把其他 GPT/Codex 的 Pass@1、成本、Agent steps、参数或训练结论迁移给该模型。
+
+## 2026-09 GPT-OSS
+
+GPT-OSS：OpenAI 的开放权重 text-only autoregressive MoE 模型族；本项目记录 `gpt-oss-120b` 与 `gpt-oss-20b`，不把 `high` effort 当成新 checkpoint。
+
+Active Parameters：激活参数；一个 token 当前路径参与主要计算的参数口径。它不等于总权重显存、KV cache、通信 buffer、workspace 或并发容量。
+
+MXFP4：一种块/组尺度的低比特浮点表示；gpt-oss 模型卡将 MoE 权重的 post-training quantization 与部署目标绑定。公开资料不等于所有后端 kernel、误差和硬件 profiling 已确认。
+
+Sliding-window/Full Attention Alternation：滑动窗口/全注意力交替；局部层限制访问范围，dense 层周期性提供远程信息交换。不能把模型的 context window 直接理解成所有层都做 dense attention。
+
+o200k_harmony：gpt-oss 使用的 Harmony tokenizer 名称；tokenizer、chat format、stop token 和模型 revision 需要一起固定，不能只替换字符串模板。
+
+Harmony Response Format：Harmony 响应格式；定义角色层级、`analysis`/`commentary`/`final` channel、recipient、工具调用和 structured outputs 的训练/推理协议。
+
+Raw CoT / Reasoning Text：原始链式思考/推理文本；gpt-oss 工具循环可能需要在下一轮回放，但可能泄露有害内容或 developer instruction，默认不能直接展示给终端用户。
+
+`reasoning_text`：Responses reasoning item 中承载 raw CoT 的 content 类型；通过 `response.reasoning_text.delta`/`done` 流事件传输，必须按 item、index 和 turn lineage 去重和回放。
+
+Provider Compatibility Gate：供应商兼容性门禁；把 Harmony 渲染、API shape、tool call/result、streaming、状态回放与模型质量 eval 分层，不能用单轮 200 或一个 benchmark 分数替代全部验证。
+
+Variable-effort Reasoning：可变推理档位；gpt-oss 的 `low/medium/high` 是同一权重的 test-time compute 配置，影响 CoT 长度、成本和延迟，不是三个基础模型。
+
+Open-weight Safety Boundary：开放权重安全边界；发布方 model card 的安全结果不能替代下游微调、工具权限、沙箱、输出过滤、审计和副作用治理。
+
+GPT-OSS Evidence Boundary：gpt-oss 证据边界；Artificial Analysis 提供两个候选发现，DataCurve 当前无精确 Agent 行；不能迁移其他 OpenAI/Codex 的评测、参数或训练结论。
+
+## 2026-09 Claude Opus 4.6
+
+Adaptive Thinking：自适应思考；由模型在运行时决定是否及如何投入 reasoning，Opus 4.6 通过 `thinking: {type: "adaptive"}` 显式启用；不等于公开了内部思考算法。
+
+Effort Signal：推理投入信号；`low/medium/high/max` 影响模型行为倾向，不是严格 token 预算；应与 `max_tokens`、context window 和实际 usage 分开记录。
+
+Thinking Signature：思考签名；Anthropic 返回的加密状态字段，工具循环中需要按协议回传；不能当作普通可编辑摘要。
+
+Server-side Compaction：服务端上下文压缩；长任务达到 trigger 后返回 `compaction` block，以保留继续任务所需协议状态；不是 prompt cache 或永久 memory。
+
+Deferred Tool Loading：延迟工具加载；工具定义先以 `defer_loading` 标记，再通过 regex/BM25 tool search 按需返回 `tool_reference`；降低上下文成本但不提供权限。
+
+Computer-use Host Boundary：Computer Use 宿主边界；模型提出屏幕动作，宿主负责 `computer_20251124` 执行器、沙箱、allowlist、人工确认、截图回灌和 prompt-injection 防护。
+
+Claude Opus 4.6 Evidence Boundary：Opus 4.6 证据边界；AA 有 adaptive/基础配置，DataCurve 无精确行；官方公开 API/Agent 协议而非参数、架构、完整训练 recipe 或独立 Agent 复现。
+
+## 2026-09 Claude Opus 4.7
+
+Task Budget：任务预算；Anthropic 文档中覆盖一个完整 Agent loop 的 advisory token 预算，包含 thinking、tool calls、tool results 和 output；不等于单次 `max_tokens`。
+
+Xhigh Effort：`xhigh` 推理投入档位；Opus 4.7 中位于 `high` 与 `max` 之间，是运行时配置，不是新权重或独立模型。
+
+High-resolution Vision Tier：高分辨率视觉档位；Opus 4.7 及以后最长边 `2576 px`、最多 `4784` visual tokens；这是 API 输入契约，不等于视觉编码器结构公开。
+
+Tokenizer Migration Multiplier：tokenizer 迁移倍数；Anthropic 发布资料给出的同一输入约 `1.0-1.35x` token 经验范围，应通过固定语料实测，不能当作所有请求的常数。
+
+Cyber Safeguards Control Plane：网络安全防护控制面；自动检测/拦截和 Cyber Verification Program 属于部署策略、授权与验证入口，不等于模型获得工具权限，也不等于公开了内部安全训练算法。
+
+Claude Opus 4.7 Evidence Boundary：Opus 4.7 证据边界；AA 有 adaptive/max 与 non-reasoning/high 配置，DataCurve 无精确 Agent 行；官方公开运行时协议和安全控制面，不支持参数、架构、完整训练 recipe 或独立 Agent 复现结论。
+
+## 2026-09 Kimi K3
+
+KDA/Gated MLA Hybrid：KDA 与门控 MLA 混合注意力；K3 report 中每 3 个 KDA 后接 1 个 Gated MLA，末尾另置 Gated MLA，用递归状态和周期性全局交互平衡长序列成本。
+
+Block Attention Residuals：块级注意力残差；K3 使用 8 个 block、每 block 12 层，并额外保留 embedding representation，沿深度选择历史表示。
+
+Stable LatentMoE：稳定潜空间 MoE；routed expert 在 latent width 中计算，shared expert 保留 full-width 路径，聚合后用 RMSNorm 稳定尺度。
+
+Quantile Balancing：分位数负载均衡；从 router-score quantiles 生成 expert bias，推理时冻结 bias + fixed Top-k，不运行时计算 quantile。
+
+XTM Channel Protocol：XTM 风格 channel 协议；K3 report 描述 `think`/`response`/`tool` channel、动态 `tool-declare`、`tool/index` 配对和 `[open]/[sep]/[close]/[end_of_msg]` token。
+
+Kimi K3 HF Revision：Kimi K3 的固定 Hugging Face revision；本轮为 `f831ab66814297da540d832a5235f8e904f29d06`。它固定模型身份和配置文件版本，不代表完整 safetensors 已下载或本地推理已成功。
+
+FlashKDA：Kimi 官方 KDA kernel/实现仓库；K3 补证中固定 master commit `7afb9f454f160a6c4bbc0999beca0a8c40a38934`，使用 `8x8 fp32 forward substitution + 16x16 bf16 merge`、`chunk_kda` backend 和 recurrent state。仓库 benchmark 不能直接当作 K3 端到端收益。
+
+Hybrid KV Manager：混合 KV 管理器；K3 vLLM recipe 中同时管理 MLA attention cache 与 KDA recurrent state。两类状态的生命周期、恢复、prefix hit 和 dtype/拓扑约束必须分开记录。
+
+Prefix Match Unit：前缀匹配粒度；K3 vLLM Blackwell recipe 建议 `--prefix-match-unit 128`，它影响 prefix-cache 命中边界和可复用块粒度，不是模型上下文长度或 KDA 状态大小。
+
+## 2026-09 Kimi K3 manifest/runtime
+
+Safetensors Index：safetensors 索引；把 tensor 名映射到固定分片，并提供 packed 文件的 `metadata.total_size`。它证明 artifact 清单可审计，不证明完整权重已下载或已成功加载。
+
+Packed/Scale Pair：packed/scale 对；MXFP4 packed weight 与对应 scale tensor 的成对关系。缺 scale 可能使量化权重无法正确解释；index 审计可以检查配对，但不能替代 kernel 数值验收。
+
+KimiDynamicCache：Kimi 动态缓存；K3 reference code 中同时维护 full-attention 的 `key_cache/value_cache` 与 KDA 的 `conv_states/recurrent_states`。它不是只有一个按 token 计数的 KV cache。
+
+Hybrid Cache Recovery：混合缓存恢复；同时恢复 MLA attention history、KDA convolution/recurrent state、prefix-cache 元数据、模型 revision、dtype/backend 和 Agent 协议状态的过程。只恢复一种状态可能导致输出连续性、prefix hit 或外部副作用归因错误。
+
+Tool-call Parser Drift：工具调用解析漂移；模型生成的 tool-call 格式与宿主 parser/schema 预期不一致。应通过 schema validation、retry/idempotency、权限、executor receipt 和 verifier 处理，不能直接执行或把解析失败等同于模型能力。
+
+## 2026-09 Qwen3.5-397B-A17B
+
+Qwen3.5-397B-A17B：Qwen3.5 的 397B total/17B active MoE 多模态模型；本项目将它作为 Qwen3.8 架构专题的前置锚点。
+
+Gated DeltaNet：带门控的 delta 状态更新模块；用固定形状递归 state 压缩历史，并以当前 value 与 state 读出之间的误差进行写入。Qwen3.5 公开了模块和 head layout，但没有公开本轮完整 kernel/state layout。
+
+Qwen3.5 Hybrid Layout：Qwen3.5-397B-A17B 的 15 组 `3 x (Gated DeltaNet -> MoE) + 1 x (Gated Attention -> MoE)` 层排布；体现递归 state 与显式 attention 的周期性交互。
+
+Native Multimodal Early Fusion：原生多模态早期融合；Qwen 官方声明文本、图像和视频 token 在统一 foundation model 训练中处理，具体 token budget、loss 和生产 kernel 仍待核验。
+
+Multi-Token Prediction (MTP)：多 token 预测训练/推测解码路线；必须分开 draft、target verification、accepted length、rollback 和 committed KV，不能只看 speculative 开关。
+
+Million-Agent RL Environment：Qwen 官方对大规模 Agent RL 环境的发布方称呼；面试时应追问 rollout 并发、verifier、policy freshness、异步 learner 和失败重试，不把它当成公开完整训练 recipe。
+
+Qwen3.5 Evidence Boundary：Qwen3.5 的结构字段来自官方模型卡/配置，训练规模和 benchmark 多为官方自报；Qwen3.8 的 QSA、Gated Residual、N-gram 和 Muon 不反向迁移。
+
+## 2026-09 GLM-5
+
+GLM-5：Z.ai 的 744B total/40B active MoE 模型；公开资料包含 DSA、长周期 Agent、异步 RL 基础设施和 Agentic Engineering 方向。本项目将其标为 Artificial Analysis 单榜锚点，DataCurve 没有精确 Agent 行。
+
+DeepSeek Sparse Attention / DSA：先用轻量 indexer 为历史位置打分，再让主 attention 读取 top-k 候选的稀疏注意力路径。`index_topk=2048` 是公开配置字段，不等于所有请求最终只看 2048 个 token；召回率、尾部保留和生产 kernel 仍需核验。
+
+Indexer Recall：索引器候选集合包含关键历史位置的比例；必须与最终 evidence recall、needle retrieval 和 Agent task success 分开，不能只用 attention FLOPs 评价稀疏注意力。
+
+Total/Active Parameter Ledger：MoE 中总参数容量与每 token 激活参数的分账；还必须加入 resident weights、shared/router、专家通信、KV/indexer cache、workspace 和并发。
+
+slime：Z.ai 将其描述为异步 RL 基础设施；面试时重点追问 rollout/trainer 解耦、policy lag、sample freshness、verifier 队列、版本一致性和失败重试，不能由名称推导完整训练 recipe。
+
+Policy Lag：rollout 轨迹由旧策略生成而 trainer 已更新到新策略时的策略版本差距；异步 RL 中需要通过版本元数据、样本 TTL、重要性修正或丢弃策略控制 off-policy 风险。
+
+Agentic Engineering：从代码生成扩展到规划、编辑、执行、观察、测试、诊断、修复和 artifact 验收的工程闭环；模型输出是提案，权限、执行器和 verifier 仍属于宿主控制面。
+
+GLM-5 Evidence Boundary：GLM-5 有 AA 精确条目、官方模型卡和专属技术报告，但当前 DataCurve 无精确 `mini_swe_agent_glm_5_*` 行；不得迁移 GLM-5.2/5.3 的 Agent 结果，也不得从公开字段补写完整 DSA kernel 或 `slime` recipe。
+
+## 2026-09 Gemini 3.5 Flash-Lite
+
+Gemini 3.5 Flash-Lite：Google 的低延迟、低成本、高吞吐原生多模态 reasoning model；API code 为 `gemini-3.5-flash-lite`，支持文本/图像/视频/音频/PDF 输入和 1,048,576 输入 token。Model Card 明确 based on Gemini 3.1 Flash-Lite，不能据此推导独立架构。
+
+Thinking Level：Gemini 请求级 `thinking_level` 控制；Lite 默认 `minimal`，支持 `minimal/low/medium/high`。它影响 test-time compute、质量、延迟和成本，不等于四个模型或严格 reasoning token 上限。
+
+Agentic Video Understanding：模型根据 prompt 动态探索视频时间轴，按需加载 transcript、帧或音频；相对于固定 1 FPS static processing，可能减少无关 token，但会增加处理步骤、延迟和回放状态。
+
+`processing_call` / `processing_result`：agentic video 处理事件；前者表示模型请求读取媒体片段，后者表示宿主返回结果并以 `call_id` 关联。它们是可审计协议状态，不是文件、网络或工具执行授权。
+
+Model Card Dependency Boundary：新版本 Model Card 将 architecture、training data、hardware 或 software 指向前代 Model Card 时，只能记录公开依赖关系；不能把前代资料包装成新版本独有发明，也不能由产品定位反推内部结构。
+
+## 2026-09 Kimi K2.6
+
+Kimi K2.6：Kimi 的原生多模态 Agent 模型；官方模型卡公开 1T total/32B active、61 层、384 routed experts、top-8、1 shared expert、MLA、256K context、MoonViT 和 native INT4。完整训练 recipe、生产 kernel 和独立技术报告仍待核验。
+
+Native INT4：原生 4-bit 权重部署路线；K2.6 配置给出 `compressed-tensors`、group size 32 和部分未量化模块。不能用总参数乘 4 bit 直接推导端到端显存，仍需计入 scale、compute dtype、KV/cache、通信和 workspace。
+
+Agent Swarm：由 Agent harness 创建并调度多个领域子 Agent 的并行任务系统。K2.6 博客的 300 sub-agents/4,000 coordinated steps 是系统案例，不是 MoE experts 数量或模型内部推理深度。
+
+Preserve Thinking：Kimi API 中保留历史 `reasoning_content` 的多轮状态协议；它用于 interleaved thinking 和 multi-step tool call 的连续性，并带来上下文、缓存和 token 成本，不等于无条件公开完整隐藏思维。
+
+Kimi Vendor Verifier（KVV）：Kimi 随 K2.6 发布的推理实现验收项目；通过参数 pre-flight、视觉、长输出、ToolCall schema 和 Agent coding 检查区分模型能力问题与供应商/后端实现偏差。KVV 结果不是裸模型 benchmark。
+
+## 2026-09 GPT-5.4 mini/nano
+
+GPT-5.4 mini / nano：GPT-5.4 家族的两个精确 API sibling。官方 snapshot 分别为 `gpt-5.4-mini-2026-03-17` 和 `gpt-5.4-nano-2026-03-17`，各自为 400K context、272K maximum input、128K maximum output；mini 偏 coding/Agent workflow，nano 偏 classification、extraction、ranking 和窄任务 sub-agent。不能把 base GPT-5.4 的 1.05M context、工具矩阵或 Agent 评测结果自动迁移给它们。
+
+Task-shape routing：按任务边界、歧义、规划深度、工具数量、失败代价、模态和输出 schema 选择模型档位的路由方法；它把“便宜”当作成本约束，而不是唯一选择条件。典型链路是 `task classifier -> capability probe -> mini/nano/base -> verifier -> escalation`。
+
+Prompt contract：为小模型显式规定目标、规则、前置依赖、工具顺序、输入缺失时的 abstain、失败恢复、输出 schema、停止条件和示例的提示契约。它补足小模型不一定主动完成隐含消歧或补步骤的行为边界，但不能替代权限、执行器和 verifier。
+
+Capability probe：在真实调用前，针对精确 `model_id + snapshot + endpoint` 探测输入模态、工具、结构化输出、上下文和宿主限制，并把支持/拒绝/降级结果写入 manifest。GPT-5.4 mini 当前页面列出 `tool_search`/`computer_use`，nano 页面未列出这两项，不能按家族名继承。
+
+Sibling evidence boundary：同一产品家族的不同 model ID 仍必须分开记录 snapshot、context、价格、工具、评测 harness 和证据等级；家族名称不是参数、架构、能力或 benchmark 可迁移的证明。
+
+## 2026-09 DeepSeek V4 Pro
+
+DeepSeek V4 Pro 0813：DeepSeek V4 Pro 的 Artificial Analysis/官方 API 锚点；AA 标题为 `Reasoning, Max Effort`，官方 API 模型名为 `deepseek-v4-pro`。不能把 AA 标题、API model ID 和 DataCurve harness 行混成一个身份。
+
+CSA（Compressed Sparse Attention）：压缩稀疏注意力；先沿序列压缩 KV，再用 indexer 对压缩条目打分并选择 top-k。压缩误差和候选漏检是两个独立风险。
+
+HCA（Heavily Compressed Attention）：重压缩注意力；以更大跨度压缩 KV，但在压缩后的条目上保留 dense read。它与 CSA 的“压缩后稀疏选择”路径不同。
+
+DeepSeek V4 Responses Stateless：DeepSeek Responses 的无状态协议边界；当前文档不支持 `previous_response_id`、`conversation`、`background`、`store`。会话持久化、工具执行、权限和 verifier 必须由宿主负责。
+
+Harness-aware evaluation：harness 感知评测；将模型 revision、effort、prompt、工具、环境、任务集、verifier 和成本/步骤一起记录。DataCurve 的 V4 Pro 数字只能作为该组合的结果。
+
+On-policy distillation：在当前策略分布上采样并用教师能力蒸馏学生的后训练路线；V4 报告中的领域教师合并不能解释为推理时运行多个 MoE experts。
+
+## 2026-09 GLM-5.1
+
+GLM-5.1：Z.ai 面向 long-horizon agentic engineering 的旗舰模型；Artificial Analysis 有精确条目，DataCurve 当前无精确 Agent 行。本项目将其标为 AA 单榜资料级闭环。
+
+Long-horizon Agent：长周期 Agent；GLM-5.1 官方文档称可在单一任务上连续、自主工作最长约 8 小时，涵盖规划、执行、实验、测试、修复、策略迭代和交付。它是模型 + 工具 + 环境 + harness + verifier 的系统能力描述，不等于单纯扩大 context window。
+
+Process-quality evaluation framework：过程质量评估框架；Z.ai release notes 将其与 multi-turn SFT、RL 并列为 GLM-5.1 的训练/评估方向，但没有公开具体奖励模型、RL 算法或 verifier 实现，不能擅自写成 GRPO、PPO 或 RLVR。
+
+Experiment–analyze–optimize loop：实验—分析—优化闭环；Agent 运行基准或实验、读取真实结果、识别瓶颈、修改方案并再次执行。最终质量要由测试、性能指标和 artifact verifier 判断，不能只看模型声称完成。
+
+GLM-MoE-DSA config ledger：GLM-MoE-DSA 配置账本；GLM-5.1 config 公开 `GlmMoeDsaForCausalLM`、78 层、前三层 dense、256 routed/top-8/1 shared、`q_lora_rank=2048`、`kv_lora_rank=512`、`index_topk=2048` 和 202752 positions。它是实现字段集合，不等于完整参数账本、indexer loss 或生产 kernel。
+
+GLM-5.1 Thinking Mode：GLM-5.1 思考模式；当前 Z.ai 文档支持 `thinking.type=enabled/disabled`，属于请求级行为配置。`reasoning_effort` 当前文档列为 GLM-5.2 及以上能力，不能跨版本迁移。
+
+Process-quality evidence boundary：过程质量证据边界；Z.ai 的 SWE-Bench Pro `58.4`、655 次 Linux desktop 迭代/6.9× 吞吐和 KernelBench Level 3 `3.6×` 对比 `torch.compile` max-autotune `1.49×` 是发布方自报，必须绑定任务、工具、机器、停止条件和 verifier。
+
+GLM-5.1 Evidence Boundary：GLM-5.1 证据边界；AA 有精确模型条目，DataCurve 没有精确 `mini_swe_agent_glm_5_1_*` 行；模型卡链接 GLM-5 报告，2026-09-21 已取得官方博客正文资源但它仍是发布方实验说明，arXiv 精确检索未发现 GLM-5.1 专属报告。不能迁移 GLM-5 的训练/`slime` 结论或其他版本的 Agent 分数。
+
+VectorDBBench Outer Optimization：VectorDBBench 外层优化；将 ANN 数据库、Recall 约束和 QPS 变成反馈，把一次受限工具会话包在可重复的 edit/compile/test/profile/submit 外循环中。GLM-5.1 博客的 600+ iterations、6,000+ tool calls 和 21.5k QPS 是发布方 harness 数字，不等于模型内部推理深度或通用性能。
+
+Verifier-aware Kernel Evaluation：验证器感知的 Kernel 评测；KernelBench Level 3 先做数值正确性检查，再由独立模型审计 benchmark exploitation，并以较低 speedup 作为结果。它把 correctness、泛化/反作弊和性能三个门禁分开，不能只看加速比。
+
+## 2026-09 Grok 4.20
+
+Grok 4.20 Multi-agent：xAI 提供的研究型多 Agent runtime；通过 4 或 16 个协作 Agent 并行搜索、分析、交叉核验，再由 leader 汇总。它是服务/编排能力，不是已公开证明的新 MoE 结构或专家数量。
+
+Agent-count semantics：Agent 数量语义；在 `grok-4.20-multi-agent` 中，SDK 的 `agent_count=4/16` 与 Responses 的 `reasoning.effort` 档位对应协作规模。不能把它解释为普通模型的 reasoning depth 或每个 Agent 的隐藏 token 配额。
+
+Leader synthesis：leader 汇总；多 Agent runtime 中负责接收子 Agent 的研究产物、交叉结果和工具状态，并生成最终响应。可靠系统应保留子任务、来源、调用 ID、冲突和 verifier 结果，不能只保存 leader 文本。
+
+Opaque encrypted state：不透明加密状态；xAI 文档中用于保存/恢复子 Agent 或 reasoning 的协议状态。客户端应按 API 要求原样回传，不能解析、裁剪、重排或把它当作可读 chain-of-thought。
+
+Compaction item：上下文压缩项；xAI Responses compaction 返回的单个 `type=compaction` item。后续请求应在正确位置完整回放它；它不同于可编辑摘要、prompt cache 和应用数据库中的会话状态。
+
+Server-side vs client-side tools：服务端工具与客户端工具；Web/X Search、Code Execution、Collections Search 等由 provider 执行，而 function call 只是模型提案，宿主负责授权、执行、幂等、结果回灌和 verifier。混合工具的 turn、成本和副作用要分账。
+
+MCP allowed_tools：MCP 工具白名单；限制远程 MCP 暴露给模型的工具定义，既减少上下文 schema 成本，也降低误调用和攻击面；它不是租户、资源、参数、审批或高风险动作的最终授权。
+
+Context evidence discrepancy：上下文证据差异；Grok 4.20 的 Artificial Analysis 页面写 2M，而 xAI 官方模型页/注册表写 1M。应保留来源、snapshot、endpoint 和核验时间，不把不同口径合并成单一无条件结论。
+
+Grok 4.20 Evidence Boundary：Grok 4.20 证据边界；AA 有精确条目，DataCurve 没有精确 `mini_swe_agent_grok_4_20_*` 行，xAI 有 runtime 文档但无专属公开架构/训练报告。不能迁移 Grok 4.5/4.6 的 Agent 分数，也不能由 API 字段补写模型内部结构。
+
+## 2026-09 Gemini 3.8 Flash
+
+Thinking level：思考档位；Gemini 3.8 Flash 的 `low/medium/high` 请求级预算/策略选项。它不是三个模型或三个 checkpoint，`minimal` 在该模型官方字段中不支持。
+
+Thought summary：思考摘要；面向开发者的 reasoning 摘要，不是完整 chain-of-thought，也不保证每个 thought block 都存在。
+
+Thought signature：思考签名；用于跨轮保持 reasoning 连续性的 opaque 协议内容。应按 API 原样回放，不能解析成可读推理、永久记忆或 GPU KV cache。
+
+Interactions step：Interactions 步骤；长任务中的 `thought`、`tool_call`、`tool_result`、`model_output` 等可观测状态单元。SSE 事件让 Agent runtime 能记录开始、增量、结束和重连。
+
+Grounding citation：落地引用；Search grounding 返回的来源/引用映射。开启搜索不等于事实必然正确，仍需检查覆盖、新鲜度、冲突和业务验证。
+
+Computer Use action intent：电脑操作意图；模型根据截图提出点击、输入、滚动等动作和参数，宿主负责坐标映射、审批、执行、权限、超时和审计。
+
+Implicit caching：隐式缓存；服务侧对重复前缀的复用/计费优化。它和一次生成中的 GPU KV cache、应用永久记忆、thought signature 都不是同一层。
+
+Gemini 3.8 Evidence Boundary：Gemini 3.8 证据边界；AA 有 low/medium/high 条目，DataCurve 有 high 的 `mini-swe-agent` 行，Google 文档公开了 API/runtime 与评测入口，但没有独立 3.8 参数、架构、训练 recipe 或 verifier 报告。不能把 DeepSWE 数字写成裸模型能力。
+
+Interaction-scoped parameter：交互级参数；Interactions 中每一轮单独生效的 `tools`、`system_instruction` 和 `generation_config`，不会因 `previous_interaction_id` 自动继承。
+
+Stateful continuation：有状态续接；使用 `store=true` 和 `previous_interaction_id` 让服务端读取已存的 conversation history。它不等价于应用永久记忆、完整 runtime 配置或 GPU KV cache。
+
+Stateless replay：无状态回放；客户端每次请求携带完整历史，必须原样保留 thought/tool 的实际 opaque fields 和 call/result `id`，并自行承担顺序、真实性和幂等检查。
+
+Interaction retention：交互保留期；Gemini Interactions 默认付费层 55 天、免费层 1 天，付费项目可配置 7/14/28/55 天并按 ID 删除。它是数据生命周期合同，不是模型记忆能力。
+
+Tool context circulation：工具上下文循环；Gemini 3 工具组合机制，让 built-in/custom tool 的调用、结果和相关上下文在同一 interaction 中继续流转。它需要 `id` 对齐、opaque state 回放和宿主执行/权限门禁。
+
+Signature field-scope conflict：签名字段范围冲突；Thinking 页面把 Interactions signature 描述为 thought/built-in tool 字段，Tool combination 页面又扩展到 Gemini 3+ tool call/result。实现应保留真实响应字段，以 endpoint/schema/SDK probe 为准。
+
+Max-output hard cutoff：最大输出硬截止；`max_output_tokens` 同时计算 thought 与 visible output，思考阶段触顶可能导致 `incomplete`/截断/空输出；降低 thinking level 与设置过小硬上限不是同一策略。
+
+## 2026-09 DeepSeek V4 Pro implementation terms
+
+Overlap State：重叠状态；压缩块边界保留的连续历史状态，避免 ratio=4 pooling 在 chunk 切换时破坏因果上下文。它属于压缩 KV/reference inference state，不是通用 GPU KV cache 的同义词。
+
+Reference Inference Artifact：参考推理 artifact；固定 revision 中公开的 inference config、model、kernel、convert 或 README。它证明代码/配置路径存在，不自动证明完整权重、本机推理、生产吞吐或线上 API 使用同一实现。
+
+DSML：DeepSeek Markup Language；V4 encoding 中用于 tool calls/invoke/parameter 的公开文本协议，区分字符串和 JSON 参数。它是 parser/schema 层格式，不是模型内部 reasoning 算法或隐藏思维链。
+
+Hash Routing：哈希路由；V4 reference inference 前 `n_hash_layers=3` 使用 token-id hash 选择专家的路径。它与后续 score routing、selection bias、routing weight、dispatch 和训练负载均衡需要分开讨论。
+
+Candidate Recall：候选召回率；indexer top-k 候选是否包含相关历史位置的指标。它不同于压缩误差、最终 attention evidence recall 和任务成功率。
+
+FP4/FP8 Block Quantization：FP4/FP8 分块量化；V4 reference kernel 按 block 对激活/权重及 scale 做低精度表示并执行 GEMM。误差、scale、packing、hardware kernel 和端到端吞吐必须绑定具体实现与硬件。
+
+## 2026-09 DeepSeek `deepseek-recipe` 协议术语
+
+ConversationRequest：共享请求中间表示；`deepseek-recipe` 将不同 API 的消息转换为 conversation、inference options、parsing options、model 和 stream 的组合。它不是模型输出，也不是 HTTP 请求已经执行的证明。
+
+Incremental Stream State Machine：增量流式状态机；跨 token/SSE chunk 保存 reasoning、DSML tool call、JSON、stop sequence 和流尾状态，避免把未闭合 marker 当成完整事件。它负责解析，不负责工具执行或业务验证。
+
+Tokenizer Bridge：tokenizer 桥接层；先渲染含 special-token 文本的 V4/V4.1 prompt，再显式附加匹配 tokenizer 生成 token IDs/解码 token chunks。tokenizer revision、特殊 token 和 stop 条件必须进入 golden manifest。
+
+Image Byte Budget：图像字节预算；对单图和单请求 encoded bytes 做原子预留，并与图像数、并发、重试和预处理一起限制资源。它不是图像可信度或模型视觉质量指标。
+
+Protocol Capability Boundary：协议能力边界；`deepseek-recipe` README 中未支持的 `logprobs`、server-side web search、JSON Schema/strict、`n>1`、Responses storage 和 encrypted thinking 只说明适配器范围，不说明 V4.1 模型内部能力缺失。
+
+SSRF Boundary：SSRF 边界；协议库的默认 image fetcher 即便有重定向/超时/字节限制，也不自动过滤 private、loopback 或 link-local 地址。宿主必须独立执行出站网络、DNS rebinding、MIME、权限和审计策略。
+
+## 2026-09 Kimi K3 vLLM evidence boundaries
+
+Docs-vs-Wheel Evidence Boundary：文档与 wheel 证据边界；stable supported-models/API 页面能证明模型类名和接口可发现，不证明安装的 stable wheel、完整权重加载、目标硬件性能或线上 serving 已通过。
+
+Hardware-Isolated Model Entry：硬件隔离模型入口；vLLM K3 package 根据 `current_platform` 分流 NVIDIA/ROCm，并避免 TPU 主动加载 GPU 实现。它是模块加载边界，不是 CUDA/ROCm kernel、通信、dtype 或 SLO 验收结果。
+
+MTP/DSpark Registry Entry：MTP/DSpark registry 入口；main registry 中的 `KimiK3MTPModel`、`K3DSparkModel` 表示源码注册项存在，不能直接推出 draft/verify/rollback、speculative acceptance 或生产线上可用。
+
+Pre-release Recipe Boundary：预发布 recipe 边界；K3 recipe 的 `Pre-release`、K3-enabled nightly、CUDA 13/cu130 和 driver 约束说明特定优化部署组合。它与 PyPI stable vLLM release 可以并存，但不等于目标硬件覆盖或生产 SLO。
+
+Stable Artifact vs Runtime Acceptance：稳定 artifact 与运行时验收；PyPI vLLM `0.29.0` 和 v0.29.0 K3 source 可以证明 stable release 中有实现入口；只有安装版本、完整权重加载、目标 GPU/ROCm backend、MLA/KDA 双状态恢复、profiling 和线上 verifier 通过，才能证明 runtime acceptance。
+
+Hybrid Cache Acceptance：混合缓存验收；K3 必须分别恢复 full-attention 的 `key_cache/value_cache` 与 KDA 的 `conv_states/recurrent_states`，并绑定 revision、dtype、backend、prefix-match unit、拓扑和工具协议。单个 KV length 不是完整验收凭证。
+
+## 2026-09 GPT-5.6 Luna runtime terms
+
+Service Tier：服务档位；GPT-5.6 的 Sol/Terra/Luna 是服务层级或精确 model ID，不能与 `reasoning.effort`、`standard/pro` mode 或榜单 harness 标签混成同一字段。
+
+Persisted Reasoning：持久化推理状态；Responses 跨轮可回放的 opaque reasoning item。它不是可见 chain-of-thought、永久记忆或 GPU KV cache，必须绑定模型家族、历史 response/item 和协议版本。
+
+Reasoning Context：推理上下文；如 `current_turn`/`all_turns` 这类请求级状态可见范围控制。它改变后续 sample 可使用的 reasoning item，不等于改变模型权重或训练过程。
+
+Prompt Cache Breakpoint：提示缓存断点；把稳定输入前缀与动态内容分开的显式服务缓存位置。要与 1,024 token 最小前缀、30m TTL、cache read/write 计费和 compaction 前缀变化一起核算。
+
+Whole-request Price Threshold：整次请求价格阈值；GPT-5.6 文档中的 272K 输入阈值会影响整次请求的输入/缓存输入/输出费率，不是只对超出部分单独计价。
+
+Deferred Tool Search：延迟工具搜索；先只暴露 namespace/描述，模型需要时再加载函数 schema。它减少初始上下文和选择噪声，但不替代权限、审批、executor、幂等和 verifier。
+
+Leaderboard Evidence Boundary：排行榜证据边界；AA 的 Intelligence Index/速度/价格和 DataCurve 的 `mini-swe-agent` Pass@1/4、成本、steps 属于不同配置/系统测量，不能合并为裸模型能力。
+
+## 2026-09 Claude Sonnet 5
+
+Adaptive Thinking：自适应思考；Sonnet 5 的请求级 thinking 模式，由模型/服务根据任务决定实际思考行为；不等于固定 `budget_tokens` 或公开的内部推理算法。
+
+Effort Signal：思考投入信号；`low/medium/high/xhigh/max` 等请求配置，影响思考深度、工具行为或输出倾向；不是严格 token 预算，也不是新的 checkpoint。
+
+Thinking Replay Contract：思考状态回放契约；多轮工具调用时按协议保留 thinking block/signature 的顺序、生产者和消息版本；不能像普通摘要一样编辑或丢弃。
+
+System Card Harness Boundary：System Card harness 证据边界；发布方 benchmark、安全和拒答数字绑定任务、工具、环境、trials 与 safeguards，不能直接当作裸模型分数或通用安全模块准确率。
+
+Gray Swan IPI：Gray Swan 间接提示注入评测；Sonnet 5 System Card 中覆盖 coding、computer use、tool use 的攻击场景，结果用于分析给定 Agent harness 的攻击成功/拒答行为，不等于模型结构披露。
+
+Task Budget：Agent 任务预算；覆盖一个完整 Agent loop 的思考、工具、工具结果、重试、压缩和验证资源；与单次 `max_tokens`、请求级 `effort` 分开记录。
+
+Sonnet 5 Evidence Boundary：Sonnet 5 证据边界；两个排行榜、Anthropic API/System Card 和负面论文检索已形成资料级闭环，但参数、内部架构、完整训练/后训练 recipe、adaptive-thinking 机制和独立 benchmark 复现仍未公开确认。
+
+Grok 4.7：xAI 于 2026-09-21 发布的 proprietary 模型，Artificial Analysis 已有 `grok-4-7` 条目；本项目当前没有精确 DataCurve DeepSWE 行，不迁移 Grok 4.6 的 Agent 结果。
+
+Encrypted Reasoning Content：加密推理内容；xAI Responses 返回的 opaque reasoning item，后续请求应原样回传，不能当作可读 CoT、prompt cache 或应用记忆。
+
+Opaque Compaction Item：不透明压缩项；`/v1/responses/compact` 返回的单个上下文起点，不能修改、裁剪或重排，也不能挽救已超限请求或清零已用预算。
+
+Allowed Tools：允许工具集合；Remote MCP/function tool 的最小权限与 schema 过滤字段，同时减少工具上下文开销；不能替代宿主授权、凭据隔离和 verifier。
+
+Summarized Reasoning Content：摘要化推理内容；Grok 4.7 Responses 文档公开的 `response.reasoning_text.delta`/`response.reasoning_summary_text.delta` 等开发者观察事件。它不是完整隐藏 CoT，也不能替换必须原样回放的 encrypted reasoning item。
+
+Reasoning State Storage Boundary：推理状态存储边界；Grok 4.7 中 encrypted reasoning 默认返回、服务端 thinking trace rehydration 和 `store` 控制的 `previous_response_id` response 存储是不同语义，不能把任一项写成永久应用记忆。
+
+MCP SDK Parameter Divergence：MCP SDK 参数差异；Responses API 使用 `allowed_tools`/`headers`，xAI 原生 SDK 使用 `allowed_tool_names`/`extra_headers`；当前只支持 Streaming HTTP/SSE，Responses API 不支持 `require_approval`/`connector_id`。
+
+Provider Benchmark Boundary：发布方/提供方评测边界；发布方 benchmark、Artificial Analysis 指数和 DataCurve `mini-swe-agent` 结果必须保留各自 provider、任务、effort、harness、环境和 verifier。
+
+Thinker：理解器/思考器；Qwen3-Omni 中负责文本、音频、图像、视频理解、推理及可能的工具/策略接口的 MoE 模块。
+
+Talker：语音生成器；Qwen3-Omni 中利用多模态特征生成流式音频 code，再交给 Code2Wav 生成 waveform 的模块。
+
+AuT：Audio Transformer；Qwen3-Omni 的音频编码器，公开约 12.5 Hz 音频 token rate、动态 attention window 和多语言/音频理解训练路线。
+
+TM-RoPE：Temporal/Height/Width Rotary Position Embedding；把时间、高度、宽度拆成位置维度，并将音频/视频真实 timestamp 对齐到约 80 ms 时间栅格的多模态位置机制。
+
+Residual Codebook：残差码本；RVQ 音频 codec 中在首码本之后表达剩余重建误差的多个 codebook。
+
+Talker MTP：Talker Multi-Token Prediction；首码本使用自回归预测，其他 residual codebooks 由 MTP 预测，以减少码本维度的串行深度。
+
+Code2Wav：从音频 code 到 waveform 的声码器路径；Qwen3-Omni 报告描述为轻量 causal ConvNet，不能与文本 token 解码器混写。
+
+Chunked Prefill：分块预填充；把长多模态输入或 Thinker/Talker 前缀切成 chunk 调度，降低高并发下的阻塞；需要保存 offset、timestamp 和状态边界。
+
+First Packet Latency：首包延迟；从请求开始到首个音频/视频 packet 的时间，不等于 encoder token 粒度、TTFT 或线上 p99。
+
+Multimodal Timestamp Alignment：多模态时间戳对齐；把音频、视频事件映射到同一时间轴，需和采样、丢帧、chunk overlap、缓存和回放策略一起验收。
+
+## 2026-09 K2 Horizon 3.7B
+
+K2HorizonForCausalLM：K2 Horizon 3.7B 当前固定 revision 的 causal language model 类名；与旧 `APPENDIX.md` 中的 `XllmForCausalLM` 不同，当前 config/migration 口径为 BF16。
+
+Dense K2 Horizon 对照：36 层、32Q/8KV GQA、524K position、`num_experts=0`、`mova_num_experts=0` 的 3.7B 路径；用于和 36B/A4B 的 MoVA/FFN 双路由比较，不是 36B 的简单缩小版。
+
+RL Expert Merge：训练阶段把 Math、Code、STEM-Code 等 RL 分支合并为统一 checkpoint 的过程；3.7B 模型卡描述 self-attention 使用 ISO merge、其他权重使用 RAM，不能等同于 forward-time MoE routing。
+
+Artifact Migration Manifest：记录模型 artifact 从 source model type 到 target model type 的复制/登记清单；K2 3.7B 当前证据为 `k2_aurora -> k2_horizon`、`K2HorizonForCausalLM`、BF16、36 shards/327 tensors、`weights_reencoded=false`，不等于重新训练或所有后端等价。
+
+Parameter Ledger Conflict：同一模型不同 revision/文档出现 core、embedding、dtype 或模型类不一致时的参数账本冲突；应按 revision、core/embedding、存储字节和 dtype 分栏，不能强行选一个总参数数字。
+
+## 2026-09 Qwen3-VL-235B-A22B
+
+Qwen3-VL-235B-A22B：由 Artificial Analysis 发现的 Qwen3-VL 视觉语言模型锚点；instruct/reasoning/Thinking 是同一基础模型的配置或 artifact，不应重复计数。AA 页面约为 235B total/22B active、262K context；DataCurve 当前没有精确 Qwen3-VL Agent 行。
+
+Qwen3VLMoeForConditionalGeneration：Qwen3-VL 当前 HF config 的模型类名；不能仅凭类名推导完整权重、生产 kernel 或硬件性能。
+
+Interleaved-MRoPE：交错多模态旋转位置编码；将 temporal、height、width 三轴对应的 rotary frequency 在低频和高频中交错分配，用于缓解长视频频谱偏置；不是 1M context 证明，也不是视频检索算法。
+
+DeepStack：从视觉 encoder 的多个中间层提取特征，经专用 merger 后以 residual 注入语言模型早期层的视觉信息流机制。Qwen3-VL config 的公开层索引为 `[8,16,24]`；不增加额外视觉 token 长度，但会增加投影/激活计算。
+
+Video Timestamp：视频时间 patch 前加入 `<3.0 seconds>` 或 HMS 形式的显式时间锚点；它帮助模型引用真实时间，不代替采样率、frame index、丢帧检测和 chunk replay。
+
+Square-root Normalized Per-token Loss：按数据源 token 统计做平方根归一化后再聚合的损失账本，用于平衡 text-only 与 multimodal 数据贡献；不等于完整优化器或训练 recipe。
+
+Thinking with Images：Qwen3-VL 的视觉推理/Agent 训练方向；包含 grounding cold start、visual-agent SFT、tool-integrated RL、多轮交互和 answer accuracy/multi-turn reasoning/tool-calling reward 分账。
+
+Tool-calling Reward：对工具调用时机、参数、次数和任务复杂度匹配程度进行约束的 reward；用于避免只奖励最终答案导致的固定一次调用、猜测或不可恢复捷径。
+
+Visual Agent Evidence Boundary：视觉 Agent 证据边界；模型生成 GUI/search/code action 只是 proposal，仍需宿主 schema、权限、执行器、观察回灌、幂等、审计和独立 verifier。
+
+Multimodal Serving Gate：多模态 serving 验收门禁；依次检查 processor、视觉数值正确性、完整权重、M-RoPE/DeepStack/timestamp replay、TP/EP、KV/cache、目标硬件 profile 和 GUI/tool acceptance。
+
+## 2026-09 Qwen3.7 Plus
+
+Interactive Hybrid Agent：交互式混合 Agent；Qwen3.7 Plus 官方托管文档对视觉理解、读屏、GUI 交互、视觉参考生成代码和移动端导航的产品定位，不等于公开了模型内部 GUI policy 或执行器。
+
+Action Proposal：动作提案；模型输出的点击、滚动、输入、导航或代码动作意图，必须经过 schema、权限、宿主执行器、观察回灌和 verifier 才能转化为真实结果。
+
+GUI Replay Manifest：GUI 回放清单；记录 screenshot hash、窗口尺寸、设备像素比、页面/App revision、坐标系、动作序号、权限决定、executor receipt、重试、幂等和 artifact。
+
+Provider Region/Scope：服务区域/范围；同一模型 alias 在 Beijing、Virginia Global、Virginia US 等 scope 下可能拥有不同 Structured Outputs、Web Search、Batch、价格和 API key 合同。
+
+Qwen3.7 Context Contract：Qwen3.7 上下文合同；官方给出 1M context、991808 max input、131072 max output、thinking max input 983616 和 262144 max chain-of-thought length，这些是 API 字段而不是内部架构披露。
+
+Prefix Completion：前缀补全；在给定文本前缀后继续生成的 API 行为，和 Context Caching、GPU KV cache、应用 memory 分属不同层。
+
+Hosted Context Caching：托管上下文缓存；provider 对重复请求前缀的复用，必须绑定 region、scope、媒体 revision、tool schema hash 和失效原因，不能当成应用永久记忆。
+
+Multimodal Evidence Budget：多模态证据预算；文本、图像/视频 token、工具 schema、工具结果、thinking 和 output reservation 的总账本，用于区分 API 接受媒体和真正保留/使用关键证据。
+
+AA Single-board Closure：AA 单榜资料级闭环；模型已在 Artificial Analysis 有精确条目并有官方资料、研究笔记和配套同步，但 DataCurve 无精确 Agent 行，不能迁移相邻模型成绩。
+
+## 2026-09 GLM-5.3 标准 DSA runtime
+
+GLM-5.3 Standard DSA：标准 GLM-5.3 DSA 版；固定 config 使用 `glm_moe_dsa` / `GlmMoeDsaForCausalLM`，当前 runtime 证据沿 DeepSeek-V3.2 DSA 路径，不能与 `GLM-5.3-Flash` 的 `glm5_next` 线性/KDA/视觉路径混用。
+
+Full Indexer Layer：完整索引器层；标准 GLM-5.3 中重新计算 indexer score、causal mask 和 top-k 候选的层，公开实现账本为 21 层。
+
+Shared Indexer Layer：共享索引器层；复用相邻 Full layer 的 `prev_topk_indices`，减少重复 indexer 计算；它可能带来候选漏检，必须单独测 index recall 和 evidence recall，公开实现账本为 57 层。
+
+Interleaved Indexer RoPE：交错索引器 RoPE；标准 GLM-5.3 Transformers 实现中 indexer 使用的 RoPE 排布，不能因为主 MLA 也使用 RoPE 就假定通道布局或 cache 可以直接复用。
+
+DSA Indexer Cache：DSA 索引器缓存；保存或复用候选 top-k、因果 offset、block mapping 等索引状态的缓存，不等于 MLA latent KV cache，也不能只用 `kv_length` 恢复。
+
+Index Recall：索引候选召回率；相关历史位置进入 indexer 候选集合的比例。它不同于最终 attention 实际读取到证据的 evidence recall，也不同于 Agent 任务成功率。
+
+Standard GLM-5.3 Serving Gate：标准 GLM-5.3 服务门禁；按 config/revision、source entry、完整权重、dense/sparse 数值、index/evidence recall、MLA/indexer cache 恢复、MTP、目标硬件、工具/verifier/SLO 逐级验收。
+
+Stable/Main Runtime Evidence：稳定版/主分支运行时证据；stable tag 证明发布源码入口，mutable main 证明当前 upstream 实现，二者都不自动证明完整权重、目标硬件、线上性能或生产 SLO。
+
+GLM-5.3 Flash Boundary：GLM-5.3 Flash 边界；Flash 的 `RadixLinearAttention`、KDA、视觉模块、paged KV/KDA state pool 和 EPD 不得迁移为标准 `glm_moe_dsa` 版的事实。
+
+## 2026-09 DeepSeek V4.1-Flash vLLM `v0.30.0`
+
+Stable Release Surface：稳定版发布面；由固定 tag 的 registry、package source 和 release artifact 证明专用入口随正式版本发布，但不等于完整权重、目标硬件或生产验收。
+
+Registry Entry：模型注册入口；例如 vLLM `v0.30.0` 的 `DeepseekV41ForCausalLM` 与 `DSparkV41DraftModel` 映射。它证明模型类型可被 release source 发现，不证明 forward 数值、draft/target verify 或 acceptance length。
+
+Wheel Artifact Evidence：wheel artifact 证据；PyPI metadata、wheel 和 sdist 的存在/哈希只能证明可分发包，不能证明当前环境安装成功、依赖匹配或 GPU/ROCm/NPU 路径可运行。
+
+Release-Note Attribution：发布说明归因；FlashMLA、Mega-mHC、Engram prefetch、DSpark state folding 和 XGrammar 等条目应归因于 vLLM release/runtime 变化，不能未经模型方直接来源证明就改写为 DeepSeek 新算法或独立 benchmark。
+
+V4.1 Serving Evidence Ladder：V4.1 服务证据阶梯；固定 HF reference -> vLLM main -> vLLM `v0.30.0` stable release/source -> wheel/install -> full-weight load -> numerical/recall/acceptance -> target profile -> tool/verifier/SLO。每一级都必须有自己的 manifest 和结果。
+
+## 2026-09 Claude Opus 5.5
+
+Token Efficiency：Token 效率；在固定任务、工具、verifier、effort 和 fallback 后，用更少 token/步骤完成可验证任务的系统指标，不能等同于模型参数更少或架构更简单。
+
+Quality-Cost Curve：质量-成本曲线；同时记录 verified success、input/output/cache/tool/retry/fallback 成本，避免把 max effort 的质量和 medium/default 的成本混成一个分数。
+
+Capability Fallback：能力 fallback；按 cyber、biology、distillation 等风险类别，把请求路由到不同模型或受限策略。必须记录触发原因、实际模型、权限、工具、缓存、重试和最终 artifact。
+
+Preserved Thinking Anti-distillation：保留思考反蒸馏；Anthropic 对 Opus 5.5 的服务/输出保护描述，不能自动解释成公开思维链、参数水印或某种已证实的训练算法。
+
+Thinking Block Binding：思考块绑定；Claude Opus 5.5 的 thinking block 与产生它的模型、conversation 及消息前缀存在 API 兼容性关系。模型切换或 system/tools 前缀变化可能使 block 被丢弃或请求失败；这是状态协议，不等于公开完整思维链。
+
+Always-on Adaptive Thinking：始终开启的自适应思考；Opus 5.5 不接受 `thinking.type=disabled` 或手工 `budget_tokens`，由 `output_config.effort` 调整深度、延迟和成本。它是官方 API contract，不是内部算法披露。
+
+Computer Toolset Migration：Computer 工具集迁移；Claude API/Google Cloud 上从 `computer_20251124` 迁移到 `computer_toolset_20260801`，Bedrock 等平台的兼容边界可能不同，必须按 provider capability manifest 验证。
+
+Fast Mode：快速模式；在同一模型上使用更快的 inference configuration，Opus 5.5 官方文档称最高约 2.5x output tokens/s，具有独立 beta header、限流、`usage.speed` 和价格，不是新模型权重。
+
+Claude Opus 5.5 Evidence Boundary：Opus 5.5 证据边界；Artificial Analysis 有精确 canonical 条目，DataCurve 当前无精确 Agent 行，Anthropic model page/发布页/System Card 支持 API contract、成本、长任务、benchmark 条件和安全路由；参数、架构、完整训练/后训练 recipe、独立 benchmark 和生产 acceptance 仍待核验。
+
+## 2026-09 GPT-6 Sol
+
+Reasoning Mode：推理模式；OpenAI Reasoning 文档中 GPT-6 family 的 `standard`/`pro` 执行模式。它选择执行模式，不等于 `reasoning.effort`，也不等于新的模型 checkpoint。
+
+Reasoning Effort：推理投入档位；GPT-6 Sol 模型页支持 `none`、`low`、`medium`、`high`、`xhigh`、`max`，默认 `medium`。它是请求/会话控制面，不能作为跨厂商统一的模型等级。
+
+Configuration Update：配置更新；Responses input 中用于在标准单 Agent 会话里改变后续 effort 的 typed item。必须随历史保留在原位置；相邻 update 会被拒绝，且不能与自动 compaction/truncation 组合。
+
+Reasoning Token：推理 token；不可直接读取为 raw CoT，但会占用 context、计入 output token，并可在 usage 的 `output_tokens_details.reasoning_tokens` 中计量。
+
+Opaque Compaction Item：不透明压缩项；长任务 compaction 返回的加密协议 item，用于携带必要状态和 reasoning 到下一窗口。它不是面向人的摘要，也不是永久应用 memory。
+
+Agents Runtime Ownership：Agent runtime 所有权；Agents API 由 OpenAI 托管 Codex harness，Agents SDK 由应用控制部署/存储/审批/runtime，Responses API 由应用控制 response/history/tool loop。session、conversation 和 sandbox 不是同一资源。
+
+Whole-request Pricing Threshold：整次请求价格阈值；GPT-6 Sol 的 input 超过 `272K` 后，整次请求 input/cache 按 2x、output 按 1.5x，而不是只给超出部分加价。
+
+GPT-6 Sol Evidence Boundary：GPT-6 Sol 证据边界；AA 有精确 `gpt-6-sol` canonical 条目，DataCurve 当前无精确 Agent 行；OpenAI 官方资料支持模型合同、预算、工具和 runtime 协议，但不支持参数、架构、完整训练 recipe、独立 benchmark 或生产 acceptance。
+
+GPT-6 Luna：GPT-6 Luna；Artificial Analysis 中的 `gpt-6-luna` canonical release，OpenAI 官方定位为 focused/high-volume 模型。模型页确认 1.05M/922K/128K、六档 effort、Responses 工具和 `$0.10/$0.50` input/output 合同；不由“高效率”反推参数、架构或训练 recipe。
+
+Sibling Model Contract：兄弟模型合同；同一模型家族的不同 model ID 仍需分别记录 snapshot、上下文、effort、价格、endpoint、provider、harness 和评测结果，不能因共享 family 名称而迁移指标。
+
+Exact Agent Row Gate：精确 Agent 行门禁；只有 DataCurve 中与 canonical model ID、effort 和 harness 对齐的 `mini_swe_agent_*` 行才可引用，缺失时标记 `not_applicable`，不迁移相邻模型分数。
+
+## 2026-09 DeepSeek V4.1-Flash API contract
+
+Requested Model：请求模型；客户端提交的 model 字符串，可能是 alias，不等于实际服务权重。
+
+Served Model：实际服务模型；从响应或 provider 元数据记录的后端身份，用于路由、计费和复现。
+
+Semantic SSE：语义化 Server-Sent Events；以事件类型、item/index 和递增 `sequence_number` 传输 Responses 状态，不能按字符串 chunk 直接拼接。
+
+Terminal Response Event：响应终态事件；如 `response.completed`、`response.incomplete` 或 `response.failed`，用于结束 parser 状态机；DeepSeek Responses 不以 `[DONE]` 结束。
+
+File Lifecycle Contract：文件生命周期合同；包含 `purpose`、大小、保存期、配额、删除/过期和权限，`file_id` 存在不代表模型已正确消费媒体。
+
+Strict Schema Enforcement：严格 Schema 约束；`/beta` 的 `strict=true` 对 JSON 结构施加约束，不替代权限、执行、幂等和业务 verifier。
+
+Tool Output Replay：工具结果回放；通过 `function_call_output`/`custom_tool_call_output` 按 call id、item/index 和 turn lineage 回灌文本或图像；回灌能力不等于宿主授权。
+
+Compaction State Contract：压缩状态合同；规定长任务上下文折叠后必须继续保留的目标、计划、工具回执、权限、幂等键、待执行副作用、artifact、verifier、版本和预算字段。它是可审计协议，不等于某个模型的内部算法。
+
+Canonical Context：规范上下文；经过版本化和确定性序列化、可作为下一轮输入的状态表示。它不等于人工摘要，必须能关联工具副作用、外部 artifact 和验收结果。
+
+Orphan Tool Call：孤儿工具调用；compaction 或重放后只剩 call 没有对应 result，或 result 的 call id/turn lineage 不匹配。宿主应拒绝继续执行或进入可恢复错误状态，避免重复副作用。
+
+Local Protocol Toy：本地协议教学实验；用合成数据验证状态机、序列化或门禁的内部一致性，不能替代官方实现、完整权重、目标硬件、真实 API 或生产 SLO 证据。

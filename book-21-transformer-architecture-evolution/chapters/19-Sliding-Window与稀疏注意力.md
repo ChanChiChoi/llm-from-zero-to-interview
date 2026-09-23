@@ -241,3 +241,81 @@ I(\mathrm{evidence};\mathrm{query})
 一次完整压测应把以下基线放在同一表格中：dense attention、固定 sliding window、window + global、sparse + RAG，以及发生 fallback 的路径。对每条路径记录质量切片、证据支持率、TTFT、TPOT、p99、峰值显存、非零 block、fallback 比例和单位成功成本。这样读者可以看清“少算了多少”与“少答错了多少”之间的关系。
 
 稀疏注意力真正值得采用的条件不是复杂度符号更漂亮，而是它在任务需要的证据路径上足够可靠，在硬件上真的执行稀疏 kernel，并且出现异常时有可解释的回退。把这三个条件讲清楚，才算把 sliding window 从一个结构名词讲成了可验证的工程技术。
+
+## 19.28 DeepSeek V3.2 的 DSA：检索阶段与主注意力阶段要分账
+
+DeepSeek V3.2 官方模型卡把 DeepSeek Sparse Attention（DSA）列为面向长上下文的技术突破。面试时可以用一个保守的两阶段抽象理解它：轻量 indexer 先估计哪些历史位置与当前 query 相关，再由主 attention 对有限候选做精确读取。这样讨论的重点不是把 DSA 简化成“只保留 top-k”，而是区分候选召回和最终证据读取。
+
+至少要分开记录 `index_recall`、`final_evidence_recall`、top-k 排序成本、主 KV 与 indexer 表示的字节数、TTFT/TPOT、长程 needle retrieval 和 dense fallback。候选阶段漏掉关键位置时，主 attention 即使计算完全正确也无法恢复；候选很多时，稀疏收益又可能被 indexer、排序和 gather 成本吃掉。
+
+技术报告补充了 DSA 的训练路径：它基于 MLA 的 MQA 模式，让一个 latent KV entry 在 query token 的多个 query heads 间共享。dense warm-up 冻结主模型，只训练 lightning indexer；indexer 把各 head 的 dense attention 分数聚合并做序列维度的 L1 归一化，以 KL loss 对齐主 attention 分布。随后进入 sparse training：indexer 输入与主图 detach，indexer 只由 KL loss 更新，主模型只由 language-modeling loss 更新；每个 query 选择 2,048 个 KV tokens，warm-up 约 2.1B tokens，sparse stage 约 943.7B tokens。
+
+因此复杂度账本要写成“主 attention 从二次复杂度降到与 selected-token 数线性相关，但 indexer 仍有二次项，并依赖更低常数的实现”。官方 Exp README 还指向 DeepGEMM 的 indexer-logit kernel、FlashMLA 的 sparse-attention kernel 和 TileLang 的研究实现，并记录 indexer RoPE 布局 bug 修复。这里的实现入口不能冒充本地复现结果；GLM-5 的 `index_topk`、GLM-5.2 的 IndexShare 和 DeepSeek V4 的 CSA/HCA 也不能迁移成 V3.2 的精确字段。完整层排布、生产 kernel 行为、KV/indexer 字节账本、召回曲线和硬件 profiling 仍待核验。
+
+## 19.29 DeepSeek V3.2 的实现证据账本：最终模型与实验 demo 分开
+
+Artificial Analysis 的精确条目是 `deepseek-v3-2`，当前页面标签为 `Non-reasoning`。2026-09-20 详情快照为 3,625,720 bytes，SHA-256 为 `7d4fd97ed7f2efbc9ab2f001072b353f00e2476cb884abe0d8185f16d7562052`；页面的 128K context、约 648B/37B total/active 和 Intelligence Index `16.043537719683` 都是第三方目录字段。DataCurve 当前没有精确的 `mini_swe_agent_deepseek_v3_2_*` 行，所以不能借用 V4 的 DeepSWE 结果。
+
+本轮最容易写错的是把两个 artifact 合成一个“V3.2 配置”。应该维护两行账本，并先固定官方 revision：模型仓库 commit 为 `a7e62ac04ecb2c0a54d736dc46601c5606cf10a6`，`config.json` SHA-256 为 `c7fa8b191e9936d8e6a57d864baab82b792fae16a116416cdd3a75ba76bc5af1`。
+
+| artifact | 可核验字段 | 允许得出的结论 |
+| --- | --- | --- |
+| 最终 V3.2 模型资料 | `q_lora_rank=1536`、`kv_lora_rank=512`、61 layers、前三层 dense、256 routed/top-8/1 shared、64 index heads、`index_head_dim=128`、`index_topk=2048`、163840 positions、YaRN factor 40、BF16/FP8 配置 | 固定 revision 的 `config.json` 字段；记录最终模型资料，不自动证明所有生产 kernel |
+| V3.2-Exp inference demo | 61 layers、前三层 dense、256 routed/8 active、`q_lora_rank=1536`、`kv_lora_rank=512`、64 index heads、`index_topk=2048`、FP8 index path | 解释实验版推理路径，不覆盖最终 V3.2 字段 |
+
+此前把最终 V3.2 的字段读成与实验不同的数值是证据错误；固定官方配置与 V3.2-Exp demo 都是 `q_lora_rank=1536`。两行账本仍不能合并成一份“生产配置”：最终模型的 revision/config、实验 demo 的代码快照、kernel 和 serving recipe 的证据等级不同。面试中应先问清楚“你说的是最终模型、实验推理 demo、kernel 还是 serving recipe”，再讨论结构和性能。
+
+## 19.30 从 FP8 indexer 到 sparse MLA 的执行顺序
+
+V3.2-Exp 的可读实现可以抽象为：
+
+```text
+query/key cache
+    -> FP8 index score (`fp8_index`)
+    -> non-interleaved indexer RoPE
+    -> causal mask
+    -> top-k candidate positions
+    -> gather latent KV + positional cache
+    -> sparse MLA
+```
+
+这里有两个经常混淆的 RoPE：indexer 的 non-interleaved layout 与 MLA 主路径的布局不同。把它们当作同一通道排列，会得到看似合理但排序完全不同的候选位置。`top-k` 也只是在候选阶段筛选历史位置，不等于主 attention 已经正确读取了证据；所以要同时测 `index_recall`、`final_evidence_recall` 和 attention 输出误差。
+
+实现还暴露了 prefill/decode 的不同账本：prefill 参考路径使用 MHA，decode 使用 MQA，并把低秩 latent KV 与 positional cache 分开保存；部署路径涉及 FP8 KV cache，而教学 demo 的量化/反量化不能直接当作生产精度和性能结论。输入长度、dtype、cache page 或 kernel 条件不满足时，系统可能回退到 dense path，必须在 trace 中记录实际路径。
+
+## 19.31 kernel、recipe 与模型能力不能互相替代
+
+TileLang 示例把执行拆成 Lightning Indexer、radix/histogram top-k selector 和 sparse MLA，并描述 double buffering 与 FP8 sparse MLA；DeepGEMM 的公开 PR 涉及 FP8 MQA logits，FlashMLA 的公开 PR 涉及 sparse MLA 路径；vLLM recipe 建议 `DP=8, EP=8, TP=1`，并说明 DeepGEMM、TP fallback、FP8/BF16 KV cache 和 `max-num-seqs` 等部署选项。
+
+这些材料证明“公开实现路径可追溯”，不证明最终 V3.2 权重已经在本地用这些 kernel 达到某个吞吐，也不证明 recipe 的 GSM8K 结果是裸模型分数。正式报告至少要分开：
+
+1. 模型能力：固定 checkpoint、prompt、工具和任务集后的结果。
+2. kernel 行为：候选召回、排序、gather、cache bytes 和实际执行路径。
+3. serving 行为：并行拓扑、batch、TP/EP fallback、TTFT/TPOT 和 p99。
+4. recipe 结果：vLLM/DeepGEMM/FlashMLA/lm-eval 版本、硬件、few-shot 和运行参数。
+
+只有四本账都绑定 revision 和 harness，才能讨论“稀疏 attention 是否带来端到端收益”。否则把一个 kernel 的局部加速写成模型能力提升，就是典型的证据越界。
+
+## 19.32 V3.2 的 thinking-with-tools 协议边界
+
+V3.2 的模型卡和技术报告还把 scalable RL、large-scale agentic task synthesis 与 `thinking with tools` 放在同一条后训练主线上。消息协议需要区分 reasoning、tool call、tool result 和 final answer；parser 只能把输出转换成候选事件，不能授予工具权限，也不能证明工具已执行。
+
+V3.2-Speciale 是关联的深度推理变体，官方边界是不支持 tool calling。它不能被当成 V3.2 coding agent 的直接替代品；Speciale 的工具指标应记为 `not_applicable`，而不是当成失败率为零。宿主仍要执行 schema、权限、确认、超时、重试、结果回灌和 artifact verifier。
+
+## 19.33 DSML encoding 是消息协议，不是权限系统
+
+固定 revision 的 `encoding/encoding_dsv32.py`（SHA-256 `5e068c2ba2a6e5ebe37a49bb005650c507e7935d77a32f3f7c11ee071498b370`）把 V3.2 的工具交互落成可审计的文本边界：`system`、`developer`、`user`、`assistant` 和 `tool` role 进入编码器；工具调用使用 DSML 风格的 `<｜DSML｜function_calls>` / `<｜DSML｜invoke>`，思考内容使用 `<think>`/`</think>` 与 `reasoning_content`，工具返回使用 `<function_results>`/`<result>`。参数还要区分普通字符串与 JSON scalar/object/list，不能一律当作字符串拼接。
+
+这给面试题一个明确的分层答案：encoding/parser 负责把消息与候选事件变成模型可读或宿主可读的格式，schema validator 负责结构，权限系统负责“能不能调用”，执行器负责“是否真的执行”，verifier 负责“结果是否满足任务”。即使 DSML 文本解析成功，也不能据此授予权限、确认副作用已经发生，或把模型输出当作工具执行回执。重放测试应保留 reasoning、tool call、tool result、final 的事件边界，并记录异常格式、重复调用和未知执行状态。
+
+本节的公开实现和报告入口见 [DeepSeek V3.2 模型卡](https://huggingface.co/deepseek-ai/DeepSeek-V3.2)、[技术报告](https://huggingface.co/deepseek-ai/DeepSeek-V3.2/blob/main/assets/paper.pdf)、[V3.2-Exp inference](https://huggingface.co/deepseek-ai/DeepSeek-V3.2-Exp/tree/main/inference)、[TileLang 示例](https://github.com/tile-ai/tilelang/tree/main/examples/deepseek_v32)、[DeepGEMM PR](https://github.com/deepseek-ai/DeepGEMM/pull/200)、[FlashMLA PR](https://github.com/deepseek-ai/FlashMLA/pull/98) 和 [vLLM recipe](https://docs.vllm.ai/projects/recipes/en/latest/DeepSeek/DeepSeek-V3_2-Exp.html)。
+
+## 19.34 当前 AA 目录漂移与 README 证据边界
+
+2026-09-21 的 Artificial Analysis 详情页仍然是同一个 deepseek-v3-2 条目，但页面结构化字段变为 685B total、37B active、128K context 和 Intelligence Index 16.043537719683；9 月 20 日快照曾显示约 648B total。这个差异应回答为“第三方目录/provider 数据在不同采集时点发生漂移”，不能回答为模型突然扩容、重新训练或换了架构。当前页面没有可用 output-speed/TTFT 字段，也不应从其他 provider 或相邻模型补齐。
+
+V3.2-Exp README 还给出一个很适合面试的实现证据链：实验版本基于 V3.1-Terminus，并用对齐配置做 reasoning without tool use 与 agentic tool use 的发布方对照；2025-11-17 更新明确修复 indexer non-interleaved RoPE 与 MLA interleaved RoPE 的布局差异。这里要把“算法名相同”和“通道/内存布局相同”分开，复现时同时固定 RoPE layout、权重切分、cache 格式和 top-k 边界。
+
+实现入口也要按证据等级回答：TileLang 更适合研究可读性，DeepGEMM 提供 indexer logits/paged logits 的 CUDA 路径，FlashMLA 提供 sparse MLA 路径，SGLang README 给出 dsv32 镜像和 tp=8、dp=8、enable-dp-attention 的服务命令。它们证明公开实现路径存在，不证明本机已经完成 full-weight load、数值正确性、目标硬件 profiling 或线上工具验收。若 vLLM recipe URL 当前返回 404，结论只能是“当前链接/线路不可取得”，不能升级为“vLLM 没有 V3.2 实现”。
+
+这一节的面试追问可以收束成三句：第一，榜单参数字段是目录证据，不是训练变更；第二，README、reference kernel 和 serving recipe 分别回答发布描述、实现路径和部署入口；第三，真正的 production gate 还要经过 revision、依赖、硬件、完整权重、召回/误差、状态恢复、p99 和 tool/verifier acceptance。

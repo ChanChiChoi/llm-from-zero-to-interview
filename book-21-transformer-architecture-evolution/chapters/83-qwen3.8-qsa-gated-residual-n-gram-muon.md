@@ -520,3 +520,91 @@ A95B 是公开 text-only MoE checkpoint；Max 是官方页面说明基于它的�
 - [DataCurve DeepSWE](https://deepswe.datacurve.ai/)：本轮快照只辅助确认 Qwen3.8 Max 条目。
 
 截至本章核验日期，完整生产 kernel、目标硬件 profiling、线上接受率、全系列训练配方、host-memory 预取在不同服务环境下的行为，以及 independent benchmark 仍待核验。没有这些证据，不能把报告中的 `7.6x`、`4.9x`、loss 或 Agent 结果写成普遍保证。
+
+## 83.13 Qwen3.8 Max (0902)：把 revision 当作服务契约
+
+Qwen3.8 Max (0902) 是本章架构主线的一个重要边界案例。Artificial Analysis 将 canonical `qwen3-8-max` 展示为 `Qwen3.8 Max (0902)`，Qwen Cloud 官方页则给出 alias `qwen3.8-max-2026-09-02`，并称它是 `qwen3.8-max` 的 upgraded snapshot。这里的“新”首先发生在 hosted service 的 revision 和接口契约上，而不是已公开一个新的本地权重架构。
+
+官方页面给出的资源边界是：context `1M`、普通最大输入 `991K`、thinking 最大输入 `983K`、最大输出 `131K`。这几个数字不能直接相加来估计并发，因为 reasoning token、工具 schema/结果、缓存、KV、workspace、batch 和 provider 限流也会占用预算。AA 页面约 `984K` 的第三方 context 字段只能作为榜单目录字段，不能覆盖官方 API 的模式级上限。
+
+0902 的高频面试点是协议组合：`reasoning_effort` 可选 `low/medium/xhigh`，默认 `xhigh`，且不能与 `thinking_budget` 同时设置；thinking 模式下 `tool_choice` 只能是 `auto` 或 `none`，需要强制选择某个工具时必须关闭 thinking。也就是说，effort 是请求级预算控制，tool choice 是接口约束，二者都不应被记录成新的模型架构。多模态调用还要遵循 `MultiModalConversation` 接口，不能把普通文本消息模板直接外推。
+
+Context Cache 文档又把 Qwen Max 的缓存拆成 explicit、implicit 和 session 三类。它们的 owner、生命周期、命中、计费和失效语义不同，最小缓存长度为 `1,024` tokens；这不等于三种“永久 GPU KV cache”。在 serving 设计中，cache identity 至少要与模型 revision、tokenizer/template、租户、权限、输入前缀和会话状态关联，并在 trace 中记录命中、失效、重算和实际费用。
+
+产品页对 coding、工程规模项目、长周期 autonomous development、多工具 Agent 和视觉理解的描述应转成可验收的任务契约：固定 0902 alias、effort、工具、环境、超时、verifier 和输出预算，测任务成功率、恢复率、TTFT、TPOT、p95、cache hit 和单位成功成本。它们不能直接被写成 QSA、GDN、MoE、训练数据或生产 kernel 的证据。
+
+本轮 DataCurve 只有 `mini_swe_agent_qwen3_8_max_xhigh` 泛化行，没有 0902 精确行。因此其 Pass@1、成本、输出 token 和 Agent steps 只能作为 Qwen3.8 Max 系列的 harness 参考，不能迁移为 0902 revision 的独立模型分数。0902 的参数、层排布、专属训练报告、线上 acceptance rate 和目标硬件 profiling 仍待核验。
+
+## 83.14 Qwen3.5-397B-A17B：Qwen3.8 架构演进的前置锚点
+
+Qwen3.5-397B-A17B 是理解 Qwen3.8 的更早锚点。它已经出现在 Artificial Analysis，页面的 Reasoning/Non-reasoning 是同一基础模型的运行配置；DataCurve 当前没有精确的 `mini_swe_agent_qwen3_5_397b_a17b_*` 行，因此不能把其他 Qwen 模型的 Agent 评测迁移到这里。官方模型卡、固定 `config.json`、Qwen 官方仓库和发布博客则提供了 397B/17B、混合架构、原生视觉和 serving 的核验字段。
+
+### 83.14.1 公开结构：Gated DeltaNet、Gated Attention 与 MoE
+
+模型卡给出的最小结构账本如下：
+
+| 字段 | Qwen3.5-397B-A17B 的公开口径 | 为什么重要 |
+|---|---|---|
+| 参数 | 397B total、17B activated | active 参数只描述 token 的计算路径，不等于总权重、KV/state cache 或并发显存 |
+| 深度与宽度 | 60 层、hidden size 4096 | 可用于粗略 FLOPs 和通信账本，不能替代完整实现配置 |
+| 层布局 | 15 次重复 `3 x (Gated DeltaNet -> MoE) + 1 x (Gated Attention -> MoE)` | 递归 state 和显式 attention 周期性交替，形成 hybrid token mixing |
+| Gated DeltaNet | 64 个 value heads、16 个 query/key heads、head dimension 128 | 以固定大小 state 压缩前缀，推理时不能按普通 full-attention KV 处理 |
+| Gated Attention | 32 Q heads、2 KV heads、head dimension 256、RoPE dimension 64 | 提供显式历史交互；2 KV heads 带来 GQA-like KV 共享，但不公开完整 kernel |
+| MoE | 512 experts，10 routed + 1 shared，expert intermediate dimension 1024 | 总容量和每 token 计算量分离，路由、通信和专家驻留必须单独计账 |
+
+这组字段与 Qwen3.8 的公开材料构成清晰的演进关系：Qwen3.8 README 称其建立在 Qwen3.5 的架构基础上；Qwen3.8/Flash-Next 再加入 QSA、Gated Residual、N-gram Embedding 和更具体的 Muon 训练分工。不能反向把这些 Qwen3.8 细节写成 Qwen3.5 已经公开的技术。
+
+### 83.14.2 Gated DeltaNet 的状态更新直觉
+
+教学上，可把 Gated DeltaNet 的状态写成：
+
+```math
+\widetilde{S}_{t-1}=\alpha_t S_{t-1}
+```
+
+```math
+e_t=v_t-\widetilde{S}_{t-1}^{\top}k_t
+```
+
+```math
+S_t=\widetilde{S}_{t-1}+\beta_t k_t e_t^{\top}
+```
+
+```math
+y_t=S_t^{\top}q_t
+```
+
+`S_t` 是固定形状的递归 state，`alpha` 控制已有信息的保留，`beta` 控制本次 delta 写入；`e_t` 表示当前 value 与 state 读出之间的误差。它的面试重点不是背公式，而是说明这条路径把历史压缩为可更新 state，因而在长序列推理中拥有不同于显式 attention 的 cache 形态。
+
+这里的公式是理解 Gated DeltaNet 的教学抽象。官方模型卡公开的是模块名称、head layout 和层排布，并没有在本轮公开 Qwen3.5 的完整 state layout、kernel、跨卡同步或硬件 profiling。不要把 Qwen3.8 Flash-Next 报告的 QSA、Gated Residual 或 N-gram 公式回填到 Qwen3.5。
+
+### 83.14.3 原生多模态与 Agent 训练声明
+
+Qwen3.5 是带 vision encoder 的 causal language model。固定配置公开了 vision encoder 的部分字段：27 层、hidden size 1152、16 heads、patch size 16、temporal patch size 2，输出 hidden size 4096。模型卡和博客进一步把它定位为 early-fusion multimodal foundation，并声明使用 trillions of multimodal tokens、扩展到 million-agent environments 的 RL、asynchronous RL framework 和 201 languages/dialects。
+
+这些内容可转化为面试中的系统问题：视觉 token 如何与文本 token 对齐；视频 temporal patch 如何进入统一序列；rollout、环境、verifier 和 learner 如何异步解耦；policy version 与轨迹 freshness 如何管理。但它们仍是 Qwen 官方发布声明，不是完整训练 recipe 或独立复现。vision encoder 的公开配置也不能证明视觉预训练 loss、跨模态对齐损失、图像/视频 token 预算或生产吞吐。
+
+### 83.14.4 MTP 与混合 cache 的 serving 边界
+
+模型卡明确写出 `MTP: trained with multi-steps`，并给出 SGLang `NEXTN` 与 vLLM `qwen3_next_mtp` 的 speculative decoding 示例。完整 MTP 账本要分开：draft tokens、target verification、accepted length、rollback 和 committed KV。打开 `speculative` 参数本身不能证明线上加速，因为 acceptance rate、batch、后端 kernel、工具调用和视觉路径都会改变结果。
+
+Qwen3.5 的 serving 示例还揭示一个容易忽略的边界：`--language-model-only` 可以跳过 vision encoder，释放显存给 KV cache。这是服务模式选择，不是新的模型 checkpoint；同一个模型在 multimodal mode 与 language-only mode 下，显存、输入协议、缓存容量和验收指标不同。官方示例建议 8-GPU tensor parallel，也只是发布方示例配置，不能当作所有硬件的最低要求。
+
+### 83.14.5 与 Qwen3.8 的对照
+
+| 维度 | Qwen3.5-397B-A17B | Qwen3.8 公开材料 |
+|---|---|---|
+| 主体 | 397B total / 17B active | 27B dense、2.4T/95B 和 Flash-Next 等多个形态 |
+| 混合核心 | Gated DeltaNet + Gated Attention + sparse MoE | 延续 GDN/GA，并在 Flash-Next 展开 QSA、Gated Residual、N-gram、Muon 等路线 |
+| 多模态 | 原生 vision-language，带 vision encoder | 不同 checkpoint 的视觉支持和 hosted/open 边界分别核验 |
+| 长上下文 | 原生 262,144，可用 YaRN 扩展约 1,010,000 | 同样需要区分原生窗口、外推配置、有效召回和服务端上限 |
+| MTP | 模型卡声明 multi-step training，提供 NEXTN/MTP serving 示例 | Flash-Next 的 MTP 与 QSA 结合更具体，但不能迁移回 Qwen3.5 |
+
+面试中可以用一句话收束：Qwen3.5 已把“递归 state + 周期性显式 attention + sparse MoE + 原生视觉 + Agent RL”作为公开基础方向，Qwen3.8 再围绕稀疏显式检索、残差流、外置容量和优化器协同做更激进的工程化展开。
+
+### 83.14.6 证据与待核验清单
+
+- Artificial Analysis 的 Intelligence Index、context、速度和价格是第三方配置字段；DataCurve 没有 Qwen3.5-397B-A17B 精确行，不能迁移其他 Qwen 的 DeepSWE 结果。
+- Qwen 官方的 multimodal token、million-agent RL、异步 RL 和 benchmark 数字是发布方自报；不能写成独立复现或完整训练配方。
+- 参数、层排布和 serving 示例来自官方模型卡/配置；完整 GDN/GA kernel、state layout、MTP acceptance length、视觉独立复现、目标硬件 profiling 和 Qwen3.5-Plus hosted/open 精确服务差异仍待核验。
+- 研究证据详见 [`Qwen3.5-397B-A17B 官方资料摘记`](../../research/model-update-2026-09/qwen3.5-397b-a17b-source-notes.md)。本节不新增 Qwen3.5 独立章节，以免与 Qwen3.8 的混合架构专题重复。

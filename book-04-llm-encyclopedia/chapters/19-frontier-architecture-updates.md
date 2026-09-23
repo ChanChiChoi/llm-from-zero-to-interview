@@ -1,6 +1,6 @@
 # Frontier Architecture 更新：AttnRes、KDA、CSA/HCA 与 mHC
 
-> 更新时间：2026-09-14。条目依据 Kimi Linear、Attention Residuals、DeepSeek V4、K2 Horizon 官方论文/模型卡；模型具体版本和实验数字需回到来源核对。
+> 更新时间：2026-09-22。条目依据 Kimi Linear、Attention Residuals、DeepSeek V4、K2 Horizon 官方论文/模型卡；模型具体版本和实验数字需回到来源核对。
 
 ## Attention Residuals / AttnRes
 
@@ -58,6 +58,8 @@
 
 **成本与评测**：本次官方页快照标示输入每百万 token 10 美元、缓存输入 1 美元、缓存写入 12.5 美元、输出 50 美元；输入超过 272K 时，输入与缓存费率乘 2、输出费率乘 1.5。价格是带日期的文档快照，不能替代上线前的实时价格核对。比较不同 effort 时，应同时记录成功率、reasoning token、工具次数、TTFT、TPOT、p95 成本、超时和权限事件。
 
+**新增运行时知识**：GPT-6 Astra 官方指南还公开了应用侧 function/custom tool 的 async calling，以及 Responses WebSocket 的 `response.steer`。前者允许模型在慢工具运行时处理独立部分，但应用仍负责执行、`call_id` 对齐、超时、幂等和结果回灌；后者允许用户在同一响应进行中追加约束，但不会撤销已发送文本、已启动工具或既有副作用。技能描述、`AGENTS.md` 和任务提示应按“短描述、渐进披露、按需读取、明确定义完成条件”治理；这些是 Agent/harness 工程建议，不是模型架构证据。安全监控是平台控制面，告警或阻断也不能替代宿主权限、人工审批和 verifier。
+
 **尚未确认**：官方模型页未披露参数规模、稠密或 MoE 架构、训练数据、优化器、强化学习算法、首次发布日期或完整技术报告。本条目不从模型名、榜单排名或工具名称反推这些内部信息。
 
 **相关章节**：第六册第 18 章 [`gpt-6-astra长上下文与工具预算.md`](../../book-06-llm-deployment/chapters/18-gpt-6-astra长上下文与工具预算.md)。
@@ -67,6 +69,10 @@
 **已核验事实**：Z.ai 官方文档称 GLM-5.3 沿用 GLM-5.2 基础模型，改进来自后训练；页面标称 1M 上下文、128K 最大输出，推理始终开启，并提供 `low`、`high`、`max` reasoning effort。文档还描述了可执行环境、judge agent、oracle/no-op/未完成状态检查和奖励捷径检查。
 
 **知识边界**：文档提到 “SAO with compaction”，但未给出 SAO 全称、损失函数或压缩算法。本项目只把它记为待核验名称，不从缩写推断内部机制。长任务训练的通用方法、验证器假阳性/假阴性和协议迁移见第十六册 [`20-glm-5.3长任务环境与验证器.md`](../../book-16-reasoning-models/chapters/20-glm-5.3长任务环境与验证器.md)。
+
+GLM-5.3 官方博客正文资源的增量证据进一步说明，前沿模型的能力记录必须把模型、后训练环境和评测 harness 分开。Z.ai Code Bench 的 50% 提升是发布方私有基准声明；CyberGym、ExploitBench 和 ExploitGym 分别处在漏洞发现/验证、更深利用推理和时间归一化任务完成阶段。269 个项目、2,436 个漏洞和 1,097 个中高危发现属于发布方合作统计，不能改写成模型单独的独立复现。
+
+博客脚注还固定了 mini-swe-agent、Claude Code、容器隔离、Tool Search、域名白名单、turn/timeout、TPS 归一化和官方 verifier 等条件。它们适合进入模型能力的证据链，但不公开 GLM-5.3 独有网络结构或完整训练 recipe；相关长任务、验证器和评测正文见第十六册与第二十册。
 
 ## Kimi K3：发布证据与长任务 Harness
 
@@ -87,6 +93,12 @@ Kimi 官方发布文章提到 KDA、AttnRes、Stable LatentMoE、量化感知训
 **评测边界**：Artificial Analysis 的 Intelligence Index/速度/TTFT/价格是第三方 `max` 配置字段；DataCurve 的 284/448、Pass@1 63.392857% 等是 `mini-swe-agent` + 工具 + 环境 + verifier 的组合结果。官方 3.01×/4.44× attention/KV 和约 3× serving 也是发布方自报，不能当作普遍硬件保证。
 
 **相关章节**：第二十一册第 84 章 [`GLM-5.3-Flash：混合注意力、mHC 与视觉闭环`](../../book-21-transformer-architecture-evolution/chapters/84-glm-5.3-flash混合注意力与视觉闭环.md)；研究证据见 [`glm-5.3-flash-source-notes.md`](../../research/model-update-2026-09/glm-5.3-flash-source-notes.md)。
+
+## GLM-5.2：IndexShare 与长轨迹训练
+
+Z.ai 正确博客路由为 [`z.ai/blog/glm-5.2`](https://z.ai/blog/glm-5.2)。新增公开技术线索包括四层共享 DSA indexer 的 IndexShare、用于 speculative decoding 的 MTP 改进、百万上下文的 KV/CPU cache 与调度优化、面向 compaction sub-trace 的 critic-based PPO，以及 coding-agent anti-hack 检测。它们解释了“长上下文可用性”如何同时落在注意力、解码、Serving、RL 和 verifier 上。
+
+这些内容仍是官方博客披露，不能扩写为完整训练配方、生产 kernel 或独立复现；SAO/compaction 原始定义继续待核验。正式专题见第二十一册第 86 章 [`GLM-5.2：IndexShare、MTP 与长轨迹 RL`](../../book-21-transformer-architecture-evolution/chapters/86-glm-5.2-indexshare-mtp与长轨迹rl.md)。
 
 ## Mistral Small 4
 
@@ -122,6 +134,10 @@ Kimi 官方发布文章提到 KDA、AttnRes、Stable LatentMoE、量化感知训
 
 **正确解读**：1M 是接口上下文上限，不等于并发数、KV cache 容量或长任务成功率。adaptive thinking 与 effort 是请求级运行时配置；比较不同档位时应固定任务、模型快照、工具、平台、超时、输出上限和 harness，记录成功率、推理 token、TTFT、TPOT、p95 和单位成功成本。
 
+**状态协议**：Opus 5 的 thinking 响应是异构 content block 序列；`thinking.display: "omitted"` 只改变可见展示，不意味着 thinking block/signature 可以丢弃。工具循环应按原序、原样保存并回放兼容的 opaque 状态，同时绑定模型 ID、revision、消息版本和编辑事件。`thinking disabled` 与 `xhigh/max` 存在能力门槛，客户端应在 capability probe 阶段分类请求契约错误，而不是静默改写后继续评测。
+
+**回退与宿主边界**：`refusal` 是业务响应状态；server-side fallback 可能改变实际模型、工具权限、缓存命中、成本和安全策略，必须在评测账本中记录原始模型、回退目标、拒答类别和最终 artifact。Opus 5 不支持 web fetch 时，搜索/抓取、SSRF 防护、超时、溯源和 verifier 仍由宿主工具负责，不能把工具协议写成模型天然联网。
+
 **宿主边界**：页面列出的平台和工具使用只说明接入路径。网络、文件、代码执行、审批、沙箱、权限、超时、回滚和审计由宿主系统负责，不能从模型目录推断模型天然拥有这些权限。
 
 **尚待核验**：官方目录和关联页面没有在本轮核验中披露参数量、稠密/MoE 架构、训练数据、后训练算法、完整推理机制或独立 benchmark 复现。模型 ID、分类、价格和榜单行不能替代技术报告。
@@ -134,7 +150,15 @@ Kimi 官方发布文章提到 KDA、AttnRes、Stable LatentMoE、量化感知训
 
 **运行时边界**：preserved thinking、跨轮模型切换、per-message effort、turn-scoped system messages 和工具调用间进度更新等字段描述协议与状态管理能力。`adaptive always-on` 不是公开的内部推理算法，也不能据此推断稠密/MoE 结构；工具执行、权限、压缩、恢复和审计仍由宿主系统负责。
 
-**尚待核验**：官方模型页没有披露参数量、训练数据、训练/后训练配方、完整推理机制或独立 benchmark 复现。Claude Mythos 5.1 虽被页面描述为共享规格的邀请制模型，但本项目不将其当作公开可用独立基础模型。
+**版本兼容性**：本轮模型页还明确了三类迁移失败：forced tool use 在不兼容的 thinking 路径返回错误；较早模型不能读取 Fable 5.1 产生的 thinking blocks；编辑较早历史 turn 会使相关 thinking blocks 失效。因此 thinking block 应被视为带 producer/consumer、消息版本和编辑状态的 opaque runtime item，而不是可随意剪切的普通文本。多模型 fallback 或人工改写历史前必须做 capability probe，并在不兼容时重新生成状态或走明确降级路径。
+
+**进度与溯源**：`display: "updates"` 是工具调用之间的用户可见进度事件，不是工具执行回执；必须与 tool-call ID、结构化 tool result、权限、幂等、超时和最终 artifact verifier 分开记账。content provenance 是来源/溯源协议入口，也不自动等于事实正确性。Fable 5.1 与 Mythos 5.1 共享 underlying model 但 safeguards 不同，拒答、工具权限和 benchmark 结果必须按服务策略分层，不能写成两个公开架构不同的基础模型。
+
+**System Card 正文补证**：2026-09-23 解析 Anthropic System Card 后，可以进一步确认 Fable 5.1 与 Mythos 5.1 共享相同模型权重；差异主要在 safeguards 和访问计划。公开训练数据描述包括互联网公开信息、公共/私有数据和合成数据，并提到 deduplication、classification、ClaudeBot 以及 2026-06 knowledge cutoff。System Card 的 RSP 结论是 Mythos 5.1 具备 CB-1、未达 CB-2，autonomy threat model 1 适用但整体风险 low，threat model 2 未达阈值。它们是发布方风险判断，不是本项目对 Fable 生产能力的独立结论。
+
+**评测条件账本**：System Card 报告 Terminal-Bench 4.0 `55.8%`、Terminal-Bench-Science 0.1 `52.6%`、CursorBench `73.4%`、OSWorld partial/strict `77.9%/41.7%`、GDPval-AA v2 `1853`、AutomationBench `31.4%` 和 ProgramBench `87.6%`。安全章节还报告 Gray Swan IPI、Shade、browser-use、permission-hook bypass 和 sandbox vulnerability 等结果。每个数字都必须绑定 snapshot、effort、tools、permissions、safeguards、fallback、任务环境、成功定义和 verifier；尤其 cyber 结果不能把 Mythos/helpful-only 或关闭 safeguards 的配置写成 Fable 生产结果。评测 manifest 应额外记录 `actual_model` 与 `fallback_reason`。
+
+**尚待核验**：官方资料仍没有披露参数量、层数、稠密/MoE 结构、优化器、完整训练/后训练配方、完整推理机制、Fable 5.1 独立 benchmark 复现或本项目独立实验。System Card 的训练数据范围和发布方评测条件已确认，但不能越级替代这些缺失证据。Claude Mythos 5.1 虽被页面描述为共享权重的邀请制配置，但本项目不将其当作公开可用独立基础模型。
 
 ## DeepSeek V4.1-Flash：CED、CSA2 与重算型缓存
 
@@ -173,6 +197,12 @@ SWA Bounded Replay 以最近 `n_win` 个 token 重放来重建缺失的滑动窗
 **正确解读**：Sonnet 5 的 `Adaptive` 和多档 effort 是请求级配置；排行榜中的 low/medium/high/xhigh 行仍属于同一基础模型的评测条件。1M context 也不能直接换算并发或有效检索能力，跨平台对照必须绑定 revision、协议、工具、限流、硬件和 harness。
 
 **尚待核验**：官方模型目录没有披露参数规模、稠密/MoE 架构、训练和后训练配方、完整推理机制或独立 benchmark 复现。页面的速度、价格和能力描述是平台快照，不替代线上复测。
+
+**System Card 深读**：System Card 只把训练数据描述为公开互联网、公开/私有数据和合成数据构成的专有混合数据，并提到去重、分类、ClaudeBot 爬取和 post-training/fine-tuning；没有公开完整训练 recipe。因此面试中可以说“公开了安全与能力评测条件”，不能说“已经公开了 Sonnet 5 的训练算法”。RSP 还给出不跨 automated AI R&D threshold、Autonomy threat model 1 和未跨 CB-2 的分级结论；这些是发布方风险框架，不是通用安全分数。
+
+**评测边界**：发布方报告的 SWE-bench Verified 85.2%、Terminal-Bench 2.1 80.4%、BrowseComp 84.7%、OSWorld-Verified 81.2% 等结果，绑定 adaptive/max、任务集、工具、环境、verifier 和 safeguards。DataCurve 的五档 Pass@1 与 Artificial Analysis 的 Intelligence Index 也各自绑定不同 harness/provider，不能拼成裸模型排名。尤其要检查是否使用了 5 trials、BrowseComp 的 10M token limit 和约 200K compaction 触发条件。
+
+**安全与 Agent 运行时**：Claude Code 恶意请求拒答率 92.37%、computer-use 恶意任务拒答率 84.68%，Gray Swan IPI 覆盖 28 个场景、去重后 1,130 个攻击。这些结果说明 safeguards、工具和环境是测量对象的一部分；模型输出动作仍只是提案，权限、allowlist、沙箱、人工确认、幂等和 artifact verifier 仍属于宿主责任。
 
 ## Claude Haiku 4.5：低成本与 fastest 延迟字段
 
@@ -228,3 +258,58 @@ Muon 主要处理 attention/GDN/MoE expert/N-gram projection 等二维线性映�
 ### 4. 关联阅读与边界
 
 完整规格、来源哈希、模型家族边界和待核验项见 [`qwen3.8-source-notes.md`](../../research/model-update-2026-09/qwen3.8-source-notes.md)；架构推导、零依赖 demo 和面试追问见第二十一册第 83 章 [`Qwen3.8：QSA、Gated Residual、N-gram Embedding 与 Muon`](../../book-21-transformer-architecture-evolution/chapters/83-qwen3.8-qsa-gated-residual-n-gram-muon.md)。完整生产 kernel、线上 MTP acceptance rate、目标硬件 profiling、全系列训练/后训练配方和独立 benchmark 仍待核验。
+
+## GPT-OSS：开放权重 MoE 的结构、协议与部署边界
+
+OpenAI 的 `gpt-oss-120b` 与 `gpt-oss-20b` 是本轮从 Artificial Analysis 发现的同一开放权重模型族。官方 Model Card 披露两者分别为 116.8B/5.13B active 和 20.9B/3.61B active，采用 128/32 experts、每 token top-4 路由；active 参数只表示当前 token 的主要计算路径，不能代替总权重、KV cache、dispatch、通信和并发 workspace 的 serving 账本。
+
+架构主线是交替 sliding-window/full attention、GQA、RoPE/YaRN 和 post-training MXFP4。局部层控制大多数 token 的访问范围，dense 层周期性完成远程信息交换；因此 130K context 不是每层都对 130K token 做 dense attention。MXFP4 又把量化、checkpoint 大小、MoE kernel 和单 GPU 部署目标联结起来，不能只把它当作上线后可随意替换的压缩格式。
+
+模型还以 Harmony 作为训练/推理响应协议，规定角色层级、channel、recipient、工具调用和 structured outputs；`low/medium/high` 是同一权重的 variable-effort reasoning 配置。模型产生 tool call 不等于工具已经执行，宿主仍要做 schema、权限、沙箱、超时、结果回灌和 artifact 验证。参数、完整训练 recipe、router 负载均衡、MXFP4 kernel、目标硬件 profiling 和线上接受率仍待核验。研究证据见 [`gpt-oss-source-notes.md`](../../research/model-update-2026-09/gpt-oss-source-notes.md)，正式专题见第二十一册第 87 章。
+
+## Gemini 3.5 Flash-Lite：低延迟推理与按需视频证据
+
+Gemini 3.5 Flash-Lite 是本轮从 Artificial Analysis 发现的 Google 重点锚点。Google API 页面公开了 `gemini-3.5-flash-lite`、文本/图像/视频/音频/PDF 输入、文本输出、1M 输入和 65K 输出上限，以及 caching、code execution、File Search、function calling、Search/Maps grounding、structured output、thinking 和 Computer Use Preview。它适合高吞吐 subagent、文档解析和分类任务，但这些接口字段不等于内部 Transformer 结构。
+
+它的一个可迁移知识点是“模型能力”和“读取策略”要分开：Video understanding 文档把 Lite 列入 agentic video。static 路径固定采样视频帧；agentic 路径根据 prompt 动态浏览时间轴，按需加载 transcript、帧或音频，并以 `processing_call`/`processing_result` 形成可审计事件。系统评估应同时记录证据召回、处理调用次数、总 token、TTFT、端到端成功率和单位成功成本，不能只报告一个质量百分比。
+
+另一个边界是版本继承。DeepMind Model Card 明确 3.5 Flash-Lite based on Gemini 3.1 Flash-Lite，并将 architecture、training data、hardware 和 software 指向 3.1 Model Card。因此本百科只记录公开的 API、thinking 和视频处理契约，不把前代卡片内容包装成 Lite 独有发明，也不把 Gemini 3.5 Flash 页面的默认 `medium` 或 GA 叙述迁移给 Lite。完整证据见 [`gemini-3.5-flash-lite-source-notes.md`](../../research/model-update-2026-09/gemini-3.5-flash-lite-source-notes.md)。
+
+## Grok 4.7：服务字段不能替代架构证据
+
+Grok 4.7 是 Artificial Analysis 已发现的 `grok-4-7` canonical 条目，当前展示为 `xhigh`；DataCurve 没有精确的 `mini_swe_agent_grok_4_7_*` 行。AA 的指数、速度和成本属于第三方配置/provider 测量，不能与 xAI 发布方的 DeepSWE、CursorBench 或本地 Agent 结果合并成一个裸模型分数。
+
+xAI 公开的是服务和训练方向：更大的 base model、更长的 RL run、困难长任务混合、自验证、长上下文管理和新的 safeguard stack。模型页公开的 500K context、`low/medium/high/xhigh`、价格、限流和 `algorithm` 配置字段回答的是 API 合同问题，不回答参数规模、MoE/稠密结构、层数或 optimizer。arXiv 精确标题检索没有 Grok 4.7 专属论文，因此不能用产品字段补齐内部架构。
+
+读前沿模型资料时，应固定这条证据链：
+
+```text
+leaderboard identity -> provider/API contract -> official training disclosure
+-> implementation artifact -> reproducible hardware/benchmark evidence
+```
+
+只有最后两层都出现，才可以讨论具体 kernel、参数账本或端到端性能。完整快照与未知项见 [`grok-4.7-source-notes.md`](../../research/model-update-2026-09/grok-4.7-source-notes.md)。
+
+## K2 Horizon 3.7B：用 dense 对照读懂 MoVA 的额外成本
+
+K2 Horizon 3.7B 是 Artificial Analysis 已发现、但 DataCurve 没有精确 Agent 行的 AA 单榜锚点。当前 IFM revision 使用 `K2HorizonForCausalLM`，36 层、hidden 2560、32Q/8KV GQA、head dim 128、524,288 position、default RoPE，`num_experts=0`、`mova_num_experts=0`，因此所有层都是 dense。它与 K2 Horizon MoVA 36B/A4B 共享 GQA 和 512K 目标，却不是 36B 的简单缩小版。
+
+36B/A4B 在后 45 层增加 64 value experts/top-4 的 MoVA、100 routed FFN experts/top-8 和 1 个 shared expert；3.7B 则把变量减少到 dense GEMM、GQA KV、长 prefill 和 parser。这个对照能把“active parameter”之外的系统成本讲清楚：MoVA/FFN 还要支付 router、token dispatch、EP 通信、负载倾斜、workspace 和回收；3.7B 的 dense 速度不能按参数比例外推 36B serving。
+
+3.7B 的模型卡还公开 22.9T/8K pretraining、32K/128K/512K 分阶段 midtraining、512K SFT Phase 1/2、Math/Code/STEM-Code RL 分支以及 self-attention ISO merge/其他权重 RAM。中间 checkpoint 是阶段性研究入口，但不等于完整训练 recipe。migration manifest 的 `k2_aurora -> k2_horizon`、copy、BF16、36 shards/327 tensors 是 artifact 迁移证据；vLLM/SGLang 的 H200 结果属于发布方 recipe。当前旧 APPENDIX 的 `XllmForCausalLM`/FP32 与新 config 的 `K2HorizonForCausalLM`/BF16 冲突，应按 revision 处理。完整底稿见 [`k2-horizon-3.7b-source-notes.md`](../../research/model-update-2026-09/k2-horizon-3.7b-source-notes.md)，正式对照见第二十一册第 82 章。
+
+## Qwen3-Omni：理解和语音生成的双节奏
+
+Qwen3-Omni 是 Artificial Analysis 已发现的 AA 单榜锚点；DataCurve 当前没有精确 `mini_swe_agent_qwen3_omni_*` 行。官方技术报告把系统拆成 Thinker 与 Talker：Thinker 处理多模态理解、推理和工具/策略接口，Talker 利用音频/视觉特征生成流式多码本语音，再由 Code2Wav 生成 waveform。
+
+它的面试主线是三本账：AuT 以约 12.5 Hz 形成约 80 ms 音频时间粒度，TM-RoPE 将 temporal/height/width 与真实音频/视频 timestamp 对齐，Talker 以首码本 AR + residual-codebook MTP 降低码本串行深度。报告的 `234/547 ms` 首包数字属于发布方口径，不能替代目标硬件和并发下的 p99。
+
+模型边界也要保留：Instruct、Thinking、Captioner 是同家族 artifact；仓库可运行、Thinker serving、Instruct 音频输出和生产 streaming acceptance 是不同 gate。完整资料见 [`qwen3-omni-source-notes.md`](../../research/model-update-2026-09/qwen3-omni-source-notes.md)，专题见第二十一册第 91 章。
+
+## Qwen3-VL：三轴位置与视觉层级
+
+Qwen3-VL-235B-A22B 是 Artificial Analysis 已发现的 AA 单榜锚点；instruct/reasoning 页面归并为同一基础模型的配置，DataCurve 当前没有精确 `mini_swe_agent_qwen3_vl_*` 行。公开 config 和技术报告给出 SigLIP2 vision encoder、两层 MLP merger、Qwen3 MoE decoder、Interleaved-MRoPE、DeepStack `[8,16,24]` 与 Video Timestamp。
+
+Interleaved-MRoPE 在 temporal/height/width 三轴之间交错分配低频和高频 rotary dimensions，目标是缓解长视频中的频谱偏置；它不是 1M context 证明。DeepStack 把多个视觉中间层经专用 merger 后残差注入语言模型早期层，不增加额外视觉 token 序列长度，但会增加投影和激活计算。Video Timestamp 把 seconds/HMS 形式的时间锚点写进视频 patch 上下文，仍需宿主保存采样、frame、chunk 和 replay 状态。
+
+完整证据见 [`qwen3-vl-source-notes.md`](../../research/model-update-2026-09/qwen3-vl-source-notes.md)，正式专题见第二十一册第 92 章。AA 字段、论文训练阶段、上游 raw main 和本机多模态/GUI serving 实测必须分账。

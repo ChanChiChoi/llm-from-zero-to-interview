@@ -5,7 +5,7 @@
 ## 1. 榜单锚点与归并口径
 
 - Artificial Analysis 的 2026-09-09 历史快照记录了 `GPT-5.5` 的 `xhigh`、`high`、`medium`、`low` 和 `Non-reasoning` 配置，以及 `GPT-5.5 Pro (xhigh)`；这些页面日期均为 2026-04-23。对应条目保存在 [`model-inventory.md`](model-inventory.md) 中。
-- 同一 Artificial Analysis 历史表还出现了 `GPT-5.5 Instant` 的 2026-05-05 和 2026-06-25 条目。它们目前只有榜单级记录，本笔记不把它们自动映射成 OpenAI API 的 `gpt-5.5`，也不把产品名称当成同一基础模型的正式别名。
+- 同一 Artificial Analysis 历史表还出现了 `GPT-5.5 Instant` 的 2026-05-05 和 2026-06-25 条目。本轮重新抓取两个详情页并检查 OpenAI 精确 `gpt-5.5-instant` 路径；它们仍不能自动映射成 OpenAI API 的 `gpt-5.5`，产品名称也不当作同一基础模型的正式别名。
 - DataCurve DeepSWE v1.1 的 2026-09-03 快照包含 `gpt-5.5` 的 `xhigh` 配置：Pass@1 67%（页面区间 ±6%）、平均成本约 `$7.23`、输出 token 约 46K、82 个 Agent steps。快照没有 `gpt-5.5-pro` 主表行。
 
 DeepSWE 的观测对象应写成：
@@ -192,12 +192,25 @@ model + snapshot + effort + verbosity + image_detail
 - 第六册与第二十四册：1.05M context、272K whole-session 价格门槛、图像 detail、prompt cache 和单位成功成本。
 - 第七册：固定 snapshot/effort/tools/harness/task/verifier 的公平评测。
 
-## 9. 来源清单
+## 9. GPT-5.5 Instant：榜单配置与官方身份负证据
+
+本节只处理已经出现在 Artificial Analysis 的 `GPT-5.5 Instant (May 2026)` 与 `GPT-5.5 Instant (June 2026)`；它们不能因为名称相近就并入官方 `gpt-5.5` API model ID。
+
+| 条目 | Artificial Analysis 快照/字段 | OpenAI 官方身份 | 当前状态 |
+|---|---|---|---|
+| GPT-5.5 Instant (May 2026) | [`gpt-5-5-instant-05-26`](https://artificialanalysis.ai/models/gpt-5-5-instant-05-26)，2026-05-05；3,548,855 bytes，SHA-256 `ed410b6cecbd8eb1dcaf65715547771bcb7435e444f6c5ba7ce815e16614e51e`；AA Intelligence Index `22.6863693000789`（页面四舍五入为 23）；400K context；页面标记 deprecated | [GPT-5.5 模型页](https://developers.openai.com/api/docs/models/gpt-5.5.md) 只确认 `gpt-5.5`，不存在可直接对应的 Instant model ID | 榜单级关联；不与 `gpt-5.5` 或 June revision 合并 |
+| GPT-5.5 Instant (June 2026) | [`gpt-5-5-instant-06-26`](https://artificialanalysis.ai/models/gpt-5-5-instant-06-26)，2026-06-25；3,847,333 bytes，SHA-256 `9c6fa94b9c42a89eb7c8f59bad08a30c168bf0860971fbb666c4be47e6a05599`；AA Intelligence Index `26.0135173401368`（页面四舍五入为 26）；约 130.9925 output tokens/s；400K context；页面标记未 deprecated | 直接访问 [OpenAI `gpt-5.5-instant` 模型页](https://developers.openai.com/api/docs/models/gpt-5.5-instant.md) 返回 HTTP 404（9 bytes）；可获取的官方页面仍是 `gpt-5.5` | 下一锚点；尚未形成模型专属资料级闭环 |
+
+两个 AA 页面都把对象描述为 text/image → text、reasoning 配置，知识截止为 2025-08-31，价格字段为 input `$5/M`、output `$30/M`；这些是第三方目录/测量与 API 价格引用，不是 OpenAI 对 Instant model ID、内部结构或训练机制的确认。DataCurve 当前快照只有 `gpt-5.5` 的 `xhigh` base 行，没有 `gpt_5_5_instant` 精确 `mini_swe_agent` 行，因此不能迁移 67% Pass@1、成本、输出 token 或 Agent steps。
+
+官方 `gpt-5.5` 模型页确认的是 `gpt-5.5-2026-04-23`、1,050,000 context、128,000 max output、`none`--`xhigh` effort、text/image → text 和 Responses/Chat Completions/Batch；这些家族级资料只作为对照，不能改写成 Instant June 的独有能力。当前没有找到 `GPT-5.5 Instant` 专属官方博客、模型卡、技术报告、system card、参数、训练 recipe、公开权重或独立 benchmark。正确结论是：**AA 已发现一个可追踪的 June 配置，但官方身份与 API 端点未建立映射；不新增架构章节，不把 GPT-5.5 base 的技术或评测迁移给 Instant。**
+
+## 10. 来源清单
 
 ### 榜单发现
 
 - [Artificial Analysis GPT-5.5](https://artificialanalysis.ai/models/gpt-5-5)、[GPT-5.5 high](https://artificialanalysis.ai/models/gpt-5-5-high)、[medium](https://artificialanalysis.ai/models/gpt-5-5-medium)、[low](https://artificialanalysis.ai/models/gpt-5-5-low)、[Non-reasoning](https://artificialanalysis.ai/models/gpt-5-5-non-reasoning) 和 [GPT-5.5 Pro](https://artificialanalysis.ai/models/gpt-5-5-pro)：2026-04-23 榜单配置日期。
-- [Artificial Analysis GPT-5.5 Instant (May)](https://artificialanalysis.ai/models/gpt-5-5-instant-05-26) 与 [June](https://artificialanalysis.ai/models/gpt-5-5-instant-06-26)：只作为未完成核验的榜单条目记录。
+- [Artificial Analysis GPT-5.5 Instant (May)](https://artificialanalysis.ai/models/gpt-5-5-instant-05-26) 与 [June](https://artificialanalysis.ai/models/gpt-5-5-instant-06-26)：2026-09-20 详情快照和哈希见第 9 节；June 是当前下一锚点，但仍是榜单级关联配置。
 - [DataCurve DeepSWE](https://deepswe.datacurve.ai/)：2026-09-03 v1.1 快照中的 `gpt-5.5` xhigh 行；完整快照解释见 [`deepswe-snapshot-notes.md`](deepswe-snapshot-notes.md)。
 
 ### OpenAI 官方资料
@@ -206,5 +219,6 @@ model + snapshot + effort + verbosity + image_detail
 - [Using GPT-5.5](https://developers.openai.com/api/docs/guides/latest-model/gpt-5.5.md)
 - [Reasoning](https://developers.openai.com/api/docs/guides/reasoning.md)、[Prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching.md)、[Compaction](https://developers.openai.com/api/docs/guides/compaction.md)、[Tools](https://developers.openai.com/api/docs/guides/tools.md)、[Tool search](https://developers.openai.com/api/docs/guides/tools-tool-search.md)
 - [Images and vision](https://developers.openai.com/api/docs/guides/images-vision.md)、[Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs.md)、[Conversation state](https://developers.openai.com/api/docs/guides/conversation-state.md)、[Background mode](https://developers.openai.com/api/docs/guides/background.md)
+- [GPT-5.5 Instant 精确路径](https://developers.openai.com/api/docs/models/gpt-5.5-instant.md)：2026-09-20 通过 `7890` 检查返回 HTTP 404；这是官方身份负证据，不是模型能力或训练资料。
 
 本轮还实际检查了 `https://developers.openai.com/api/docs/guides/latest-model?model=gpt-5.5` 的查询路由；当前返回的通用页面 front matter/正文实际指向 GPT-6 Astra，因此没有把它当作 GPT-5.5 专属指南。证据以可直接获取的 `latest-model/gpt-5.5.md`、模型页和明确的 API 指南为准。

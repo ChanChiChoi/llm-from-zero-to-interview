@@ -1,6 +1,6 @@
 # GLM-5.3-Flash：榜单锚点、混合架构与视觉闭环资料摘记
 
-核验日期：2026-09-15。本文件是研究底稿，不把榜单配置、发布方自报 benchmark 或模型卡配置字段升级成未公开的训练事实。
+核验日期：2026-09-22。本文件是研究底稿，不把榜单配置、发布方自报 benchmark 或模型卡配置字段升级成未公开的训练事实。
 
 ## 1. 锚点和证据范围
 
@@ -32,6 +32,8 @@ GLM-5.3-Flash 是本轮从两个允许的排行榜中确认的重点锚点。发
 
 这些是当前页面快照中与配置相关的字段。尤其不能把 `max` 行当成一个新的 checkpoint，也不能把页面价格当成所有地区、账户、时间和 API 路由的长期价格承诺。
 
+2026-09-21 当前时点复验：页面大小 `3,942,546` bytes，SHA-256 为 `42f880600d3637489a0c48ff27357fe7986e53510ad5ee016c7d6170bd201fae`；release date 仍为 `2026-08-26`，context `1,048,576`，Intelligence Index `41.807466113455`，median output speed `95.0131572798129 tokens/s`，cost per Intelligence Index task `0.2532595604307378`，页面价格约 `$0.15/$0.50` 每百万输入/输出 token。与旧快照相比指数和速度有测量漂移；没有证据表明这是模型版本或训练变化。
+
 ### 2.2 DataCurve DeepSWE v1.1
 
 对应配置记录为：
@@ -52,6 +54,8 @@ n_runs=4
 ```
 
 `n_passed/n_attempted`、Pass@1/Pass@4、成本、输出 token 和 steps 描述的是一个“模型配置 + Agent harness + 工具执行 + 环境 + verifier”的系统。它可以作为面试中的可复现实验索引，但不能写成“GLM-5.3-Flash 裸模型在代码任务上有 63.4% 能力”。
+
+2026-09-21 当前时点复验仍命中精确行 `mini_swe_agent_glm_5_3_flash_max`，结果为 `284/448`、Pass@1 `0.6339285714285714`、Pass@4 `0.8495575221238938`、平均成本 `$0.24098185622767856`、平均输出 `72829.77008928571` token、平均 Agent steps 约 `122.89`。DataCurve 页面快照为 `268,571` bytes，SHA-256 为 `67a6b5350a1bc986e814097a87928f5064ba6955ca78be44795e11b2413f2870`；这些数字仍绑定 `mini-swe-agent`、工具、任务集、环境和 verifier。
 
 ## 3. 官方身份与结构化配置
 
@@ -262,6 +266,86 @@ Decode worker pool   --streaming text---------->  client
 
 官方博客称在相同硬件、从初始 baseline 到优化栈后端到端 serving performance 约提升 3×，并称每 token 成本/硬件效率接近主流 NVIDIA GPU。该数字是 Z.ai 对特定国产加速器、网络、batch、请求分布和实现的发布方自报；需要固定 backend commit、硬件、并行度、输入长度、输出长度、视觉比例、并发、TTFT/TPOT 定义和 p95/p99 后才可复现。不能从“3×”推导一般部署收益。
 
+### 8.4 2026-09-21 serving/runtime 复核
+
+本次复核把“模型公开配置”“runtime 实现入口”和“目标硬件验收”分开记录。SGLang 页面是当前最具体的 serving 证据，但页面中的 benchmark 和硬件支持仍属于 recipe/发布方结果，不是本机复现。
+
+#### SGLang：两类状态池和 MTP 开关
+
+当前 [SGLang GLM-5.3-Flash cookbook](https://docs.sglang.io/cookbook/autoregressive/GLM/GLM-5.3-Flash.md) 页面更新时间为 `2026-09-21T12:21:10.188Z`，快照大小 `247,030` bytes，SHA-256 为 `fef983feab9a25311de8cf0b62c539b8450ef9acef9015a288ab6639ecd89019`。页面描述的模型/服务组合包括：45 个文本层（MLA、DSA、KDA 组合）、24 层视觉 encoder、288 routed experts/top-8、原生 MTP。
+
+对调度最重要的不是“有 MTP”这四个字，而是 runtime 同时管理两类历史状态：
+
+1. paged KV pool：显式 attention 路径使用的分页 K/V；
+2. KDA state pool：KDA/线性路径的递归状态。
+
+页面明确提示 KDA state pool 可能先成为并发上限。因此混合模型不能只以 `kv_tokens` 作为恢复和容量字段；请求 manifest 至少还应保存 state pool 的句柄、长度、dtype/backend、MTP 位置和模型 revision。
+
+低延迟配置使用 MTP `5/1/6`，高吞吐配置可以关闭 speculative decoding。这说明 MTP 是带 workload 取舍的 serving 策略，不是每个请求都必须启用的静态模型属性。关闭 speculative 后仍可使用主体模型路径，但吞吐、接受率和调度账本必须重新测量。
+
+#### KV dtype 与 DSA backend 必须成对切换
+
+该页面给出的硬件路线具有明确的配对约束：Blackwell 默认 FP8 KV + TRT-LLM DSA；H100/H200 默认 BF16 KV + TileLang DSA。页面同时标明 FP8 KV + TileLang DSA 是无效组合。面试中应把这回答成“cache dtype 和 sparse-attention backend 共享 kernel/数值契约”，而不是泛泛地说“FP8 更省显存”。
+
+页面发布方在 GB300 上报告 FP8 KV + TRT-LLM DSA 相比 BF16 路线约有 `2.9%--5.7%` throughput 差异、KV token capacity 约 `1.8x`，GSM8K 差异在噪声范围内。这些数字未在本机复现，也不是跨 GPU、batch、context 或 provider 的普遍保证。
+
+#### 多模态 EPD/PD 的门禁
+
+SGLang 页面把视频默认采样写为 2 FPS，最多约 240,000 visual tokens，并要求 `torchcodec`；4x GB300 encoder disaggregation 的页面结果把最大 decode gap 从 `5.53s` 降到 `1.79s`。这些结果说明 EPD 的收益要看 encode 阶段是否阻塞 decode，不能只拿文本 PD 的 TTFT/TPOT 推导。
+
+同一页面对 PD disaggregation 的证据边界更谨慎：当前只是 dummy weights 的机械验证，没有 load/accuracy 验证；普通 speculative decoding 还不支持，不同 TP 的数值正确性也尚未验证。因此“页面有 PD 命令”只能说明接线入口存在，不能写成生产 correctness 或多卡一致性已经通过。
+
+#### vLLM 和 Transformers 的边界
+
+当前 vLLM recipe 页面于 2026-09-18 更新，要求 vLLM `0.29.0+`，描述 native FP8、MTP、1M context 和 hybrid KDA+sparse MLA，并列出 H100、B200、GB200、MI355X、Ascend 950PR 8x 等路线。当前快照暂存为 `/tmp/glm53flash-vllm-recipe-20260921.out`，SHA-256 为 `cfd032baa545b0749c171bebac7ad9fab30e3478ef20b5233f1ab44971539103`。这些是 recipe 的验证/支持声明，不是本机加载或 profiling 结果。页面自身还出现 FlashInfer `0.6.17+` 与 troubleshooting `0.6.18+` 两个门槛，迁移时应锁定实际报错路径和完整依赖，而不是只抄一个版本号。
+
+Ascend 950PR 路线的页面说明 native FP8 约需 306 GiB、使用 `--block-size 512`，且不应传 `--quantization ascend`；A2/A3/BF16 尚未验证。MI355X 路线支持 MTP，并关联 vLLM PR `#55239`。这些信息可以进入部署 checklist，但不能升级成目标设备已验收。
+
+Transformers 的 [GLM5-Next 文档](https://github.com/huggingface/transformers/blob/main/docs/source/en/model_doc/glm5_next.md) 当前实现明确不包含 MTP layer；快照大小 `2,783` bytes，SHA-256 为 `e08af95e1b8cab25e11e0623ee0e14ab8280396bdd014f9d1a035aeb48f2fdf2`。因此要区分：Transformers 是模型接入/基础前向实现，vLLM/SGLang recipe 可以在 serving 层提供 MTP；后者不能反向证明 Transformers checkpoint 本身含有 MTP layer。
+
+#### FlashX 不是新模型候选
+
+Z.ai 文档把 `GLM-5.3-FlashX` 列为关联服务入口，并标注约 200 tokens/s；Flash 页面同时给出 1M context、128K maximum output、`thinking.type=enabled`、推荐 `temperature=1`/`top_p=0.95`，以及 Flash Coding Plan 约为 GLM-5.3 配额的 3 倍（FlashX 尚未加入该 plan）。这些是 endpoint/service 差异。`GLM-5.3-FlashX` 不在本轮两个排行榜的新增候选中，因此不另建模型条目，也不把它的服务速度当成新 checkpoint 的架构事实。
+
+API 迁移时，Coding/Agent 场景建议 `clear_thinking=false` 并完整、原样回传 reasoning content；流式工具参数仍按 tool-call `index` 拼接。推理内容回传是协议状态要求，不是权限凭证，tool call 也不等于宿主已经执行成功。
+
+## 8.5 2026-09-22 upstream implementation 与 stable/main 对照
+
+本轮用 GitHub Contents/tree API 固定了 SGLang 与 vLLM 的源码路径和提交历史。源码存在、测试类存在和测试门禁写在 upstream 中，都是 **implementation evidence**；本机没有安装对应框架、Flash 权重或目标 GPU，因此不把它们写成已运行的硬件结果。
+
+### SGLang：v0.5.20 已有 Flash 入口，main 继续收敛 kernel/融合
+
+SGLang `v0.5.20` tag（tag commit `94602c9c2b7cbdb8efd5c52802dac6a1c180089e`，发布时间 `2026-09-18T22:41:33Z`）已经包含：
+
+- `python/sglang/srt/models/glm5_next.py`，源码 `61,466` bytes，SHA-256 `12c5157b07fb7c6d93f34e84c43a37866d2e382e703729e2205aed9f8961f9c2`；
+- `python/sglang/srt/configs/glm5_next.py`，`12,026` bytes，SHA-256 `3b3c7aa3ae60e1cf59edf91e1c11a6aa49be7532340c8e2482f7f75ed859f3e0`；
+- `glm5_next_nextn.py`、GLM-5.3-Flash cookbook，以及 B200/H200 注册测试。
+
+因此“Flash 只有文档 recipe、没有 SGLang 模型入口”的说法不成立；但 tag 中存在源码不等于本机权重加载或目标卡验收通过。当前 `main` tree 为 `9d58189c12e4e14a7eea20f24f9aa7b17e221778`，main 模型文件 `68,097` bytes，SHA-256 `1cd324533aa0827e7542e27fc39c5901c2330823c4b3a32b79bcb26521dbcfec`。main 相对 v0.5.20 的可观察增量包括：
+
+1. `Glm5NextLinearAttention` 增加按量化配置决定的 q/k/v/b/f/g projection fusion；LoRA 或不兼容 quant method 时回退到非融合路径。
+2. `c8eb54c41da1`（2026-09-20）加入 GLM-5.3-Flash KDA projection 与 prefill metadata 融合；`2fa6b94e3440`（2026-09-20）加入 mHC attention-to-MLP boundary fusion；`b44e2486824e`（2026-09-22）加入 gfx950 的 FP8/Quark MXFP4 MoE 路径。
+3. main 的 B200/H200 测试使用真实模型路径 `zai-org/GLM-5.3-Flash`。B200 是 TP4/EP4，FP8 KV + TRT-LLM DSA，要求 GSM8K 500 题/20-shot 达到 `0.93`，低延迟还检查 EAGLE MTP `5/1/6` 的接受长度 `4.0` 与单请求速度阈值；另有 DFlash2 和 high-throughput DP/Deepep 变体。H200 对应 TP8/EP8、BF16 KV + TileLang DSA，也有 `0.93` GSM8K 门禁。测试文件存在不代表本轮已经运行这些测试。
+
+SGLang cookbook 的提交历史显示 serving 组合仍在演进：初始 recipe 为 `dfc40e0efe10`（2026-08-26），`e27a7fac772b` 固定 Blackwell 的 FP8 KV + TRT-LLM DSA，`b5a2aebc7ecc` 固定 MTP `5/1/6`，`a0781f271462`（2026-09-22）将 reasoning/tool-call parser 默认改为 `auto`。这些提交说明 recipe 是版本化工程 artifact，不应把 mutable main 的当前开关迁移到所有旧镜像。
+
+### vLLM：main 已拆出 GLM5Next runtime，v0.29.0 tag 没有同名专属路径
+
+vLLM `main` tree（`81d7293c2167e39f3ffddc9a82d633f94e8a1eaa`）包含 `vllm/models/glm5next/`，包括：
+
+- `common/attention.py`：`Glm5NextIndexerCache` 把 `tokens_per_state` 设为 `index_kpool`，让 KV metadata 以 pool 粒度寻址；它与同 block 的 MLA 共用 block table，并对 `cache_config.block_size` 与 `index_kpool * 32` 的整除关系做前置检查。
+- `common/attention.py`：`Glm5NextTailCache` 单独保存未完成 pool 的 raw BF16 K 与 gate score。prefill 先 seed tail，decode/spec-decode 原地推进，PD connector 传递 tail；已压缩的 indexer entry 则在另一份 `Glm5NextIndexerCache` 中保存。这证明“indexer cache”和“递归 KDA state”之外，pool 边界还有第三类需要恢复的临时状态。
+- `common/kda.py`：`Glm5NextLinearAttention` 通过独立的 Mamba/GDN state dtype/shape 接口分配 KDA state；conv state 宽度包含 `num_spec`，以覆盖 draft/verify 的滑动更新；FlashKDA 只在 CUDA SM90/SM10x/SM12x、BF16、head dim 128 且 gate 有 lower bound 时启用，否则回退 Triton。KDA projection 保持 BF16，因为 FP8 checkpoint 没有对应 scales。
+- `common/mtp.py`：MTP 有显式的 layer/weight mapping；`set_skip_topk()` 让 MTP 后续迭代复用 sparse index top-k，`compact_topk_indices()` 按 slot id 重排 buffer。MTP logits 路径可以只做 vocab-parallel local argmax，不必每个 draft step all-gather 全词表。
+
+相关 main 路径的快照大小/SHA-256 为：`attention.py` `24,145`/`a7554347a8e91215a9cf884f74bdcbaa4eb4a3870dbd016994b92d93293b1c57`，`kda.py` `31,136`/`37745b45892cb26d9193160c4f446191f6cc276031fe8f7de5dbb37784cf8e8b`，`model.py` `51,591`/`9d30ec0bf2eb052b96c6fc995435979993a68cced3376734d0ea72002e0f5dfc`，`mtp.py` `17,490`/`db158eec6731fb11e3072cd9d9a76f34f3267007a821277ce3463090eb8f85c0`，`common/sparse_indexer.py` `6,294`/`a3ab1edda8490b8e21c1c240e07e8c8fcd0bb34246a9ed1f64acfe067d15067c`。关键历史为：`4fe9e6f6e564`（2026-09-16）将 sparse indexer kpool 移入模型目录并拆分 AMD/NVIDIA，`c8d1cf077a78`（2026-09-16）修复 ROCm Quark MXFP4 load/inference，`36fa72d2d0d2`（2026-09-19）为 decode workspace 节省约 3072 MiB 的提交说明。
+
+对照 vLLM `v0.29.0` tag tree：快照 `1,979,822` bytes、SHA-256 `7131879ae9592d90738776d24ae213f789577317b2c5427f350761a87ca05070`，路径搜索没有 `vllm/models/glm5next/` 或 GLM-5.3-Flash 专属 common runtime 文件；该 tag 只有 GLM-4/通用 GLM 与 DeepSeek V3.2 相关条目。因而现有 vLLM recipe 的“`0.29.0+`”是 recipe 的版本门槛/部署声明，不能单独证明公开 `v0.29.0` tag 已包含这些专属源码。正确状态是：vLLM GLM5Next 为 main/post-tag upstream evidence；recipe、stable tag、wheel 和目标硬件 acceptance 必须分开记录。
+
+### 面试上应保留的实现边界
+
+可以确认：GLM-5.3-Flash 的 runtime 不是一个只按 `kv_tokens` 计数的缓存；至少要管理显式稀疏/MLA KV、KDA recurrent/conv state、indexer compressed pool、in-progress tail pool、MTP top-k/slot mapping、MoE dispatch 和视觉/EPD metadata。不能确认：这些源码在本机完整权重、各硬件 backend、PD/EPD recovery、数值正确性和线上 tool/verifier 上已经通过。源码提交、recipe benchmark 和 CI threshold 都不能替代这些 gate。
+
 ## 9. 三本账：参数、状态、带宽
 
 研究和面试回答至少要同时画出以下三本账：
@@ -466,4 +550,4 @@ print("visual_diff_after_refinement:", visual_verification_loop())
 6. [固定 revision `config.json`](https://huggingface.co/zai-org/GLM-5.3-Flash/blob/eb9eb208eb0d988989d07a6a12d0fdeb5f52574a/config.json)：层数、层类型、MoE、IndexPool、mHC、视觉和量化配置。
 7. [GLM-5 Technical Report](https://arxiv.org/abs/2602.15763)：模型卡引用的关联技术报告；仅用于关联路线和术语，不把报告中未明确归属 Flash 的数字写成 Flash 内部事实。
 8. [Z.ai Thinking Mode](https://docs.z.ai/guides/capabilities/thinking-mode)、[Streaming](https://docs.z.ai/guides/capabilities/stream-tool)、[Function Calling](https://docs.z.ai/guides/capabilities/function-calling)、[Context Caching](https://docs.z.ai/guides/capabilities/cache)、[Structured Output](https://docs.z.ai/guides/capabilities/struct-output)：API/Agent 协议核验。
-9. [SGLang GLM-5.3-Flash cookbook](https://cookbook.sglang.io/autoregressive/GLM/GLM-5.3-Flash)、[vLLM recipes](https://recipes.vllm.ai/zai-org/GLM-5.3-Flash)、[Transformers GLM5-Next docs](https://github.com/huggingface/transformers/blob/main/docs/source/en/model_doc/glm5_next.md)：部署入口，不替代目标硬件实测。
+9. [SGLang GLM-5.3-Flash cookbook](https://docs.sglang.io/cookbook/autoregressive/GLM/GLM-5.3-Flash.md)、[vLLM recipes](https://recipes.vllm.ai/zai-org/GLM-5.3-Flash)、[Transformers GLM5-Next docs](https://github.com/huggingface/transformers/blob/main/docs/source/en/model_doc/glm5_next.md)：部署入口，不替代目标硬件实测；Transformers 当前文档不包含 MTP layer。

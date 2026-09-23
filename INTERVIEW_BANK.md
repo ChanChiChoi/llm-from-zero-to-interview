@@ -3598,7 +3598,7 @@
 
 ## 2026-08 Frontier Model 与系统面试补充
 
-1. Kimi K3 公开线索中的“无显式 position embedding”是否等于没有位置信息？（该配置本身仍待核验）
+1. Kimi K3 公开线索中的“无显式 position embedding”是否等于没有位置信息？（K3 report/config 已固定相关证据，但仍要区分 K3 配置与一般论文机制）
    考察点：NoPE、causal mask、KDA 递归状态、隐式顺序。
    回答框架：NoPE 只表示某个分支不显式施加 RoPE/ALiBi；顺序仍可由因果可见性、递归更新、衰减和局部/全局 pattern 提供。不要把教学抽象公式当成完整实现。
 
@@ -3690,6 +3690,38 @@
    考察点：证据等级、避免过度推断。
    回答框架：明确说“公开资料尚未披露”，只陈述模型页确认的模态、容量、effort、工具和端点；如果需要架构结论，提出寻找技术报告或设计可复现实验，而不是从榜单名称推断。
 
+6. GPT-6 及后续模型的 `configuration_update` 改变了什么？
+   考察点：请求配置、模型权重、实验变量。
+   回答框架：它是追加到 input 中的配置更新，只控制后续响应的 reasoning effort，不是重新加载权重或改变训练过程。评测要记录升档时点，并分别统计 reasoning token、可见输出、工具轮数、延迟和单位成功成本。
+
+7. 为什么 Responses replay 不能只保存最终文本？
+   考察点：加密 reasoning item、`phase`、工具状态、状态协议。
+   回答框架：官方文档要求无状态 replay 保留完整 output items；加密 reasoning item 和 assistant `phase` 可能是后续推理和工具循环所需的状态。`previous_response_id` 是服务端状态引用，仍需区分计费和保留策略。
+
+8. deferred tool search 如何同时影响上下文成本和权限安全？
+   考察点：schema 延迟加载、缓存前缀、namespace、权限审计。
+   回答框架：初始只暴露 namespace/MCP 概览，按需加载具体 schema 并把新增工具放在上下文末端，有利于复用稳定前缀；但工具集合成为会话状态，schema 版本、来源、权限和移除行为必须审计，模型搜索到工具不等于获得执行授权。
+
+9. standalone compaction 返回的为什么不是普通摘要？
+   考察点：canonical context、加密 compaction item、手工裁剪风险。
+   回答框架：官方把返回的整个窗口定义为下一轮 canonical context，里面可能包含加密 compaction item 和继续任务所需的其他 item。再次手工删除前置 item 可能破坏恢复；应验证目标、回执、权限和 artifact 状态，而不是只检查摘要可读性。
+
+10. GPT-6 Astra 的 async tool calling 解决了什么问题？应用还必须负责什么？
+    考察点：模型继续生成、应用侧 job、`call_id`、幂等、结果回灌。
+    回答框架：它让模型在应用执行慢的 function/custom tool 时处理独立部分；应用仍负责启动任务、维护句柄和状态、处理超时/重试/幂等，并用原始 `call_id` 回传结果。工具完成不等于模型已消费结果，不能把它与 hosted tool 或后台响应生成混为一谈。
+
+11. WebSocket `response.steer` 与普通的新一轮请求有什么不同？
+    考察点：同一响应中追加约束、事件确认、响应 lineage、副作用边界。
+    回答框架：GPT-6 Astra 可在 Responses WebSocket 中对已创建响应发送 steering；服务端先确认排队，再创建 continuation，原响应可能以 `steered` incomplete 结束。它不会撤销已发送内容、取消已启动工具或回滚外部副作用，因此需要保留事件和补偿状态。
+
+12. 为什么 OpenAI 建议重新审计 GPT-6 Astra 可见的 skills、`AGENTS.md` 和任务提示？
+    考察点：上下文路由、渐进披露、instruction conflict、完成定义。
+    回答框架：这些内容会影响模型选择技能、读取资料和决定何时停止；过长、冲突或过度脚本化的说明会消耗上下文并降低路由质量。应使用短而精确的适用条件、最小根文档、按需加载支持材料，并明确完成条件与可自主推进范围。
+
+13. misalignment monitoring 能否替代权限和人工审批？
+    考察点：安全控制面、异步告警、阻断、已发生副作用。
+    回答框架：不能。官方文档把它定义为异步监控和风险告警/阻断机制，可能误报或漏报；阻断时应停止自动重试并审计已有工具动作，但不会撤销已经完成的动作。权限、沙箱、审批、幂等和 verifier 仍需独立存在。
+
 ## 2026-09 GLM-5.3 长任务与验证器
 
 1. 为什么长任务 Agent 训练需要可执行环境？
@@ -3711,6 +3743,24 @@
 5. 旧客户端如何迁移到 `thinking.type: enabled` 的 GLM-5.3？
    考察点：schema、错误、流式、effort、回归和权限。
    回答框架：先更新请求 schema 和 feature flag，再回归响应、错误、usage、流式、工具 call、effort、成本和安全 trace；旧的 disabled 路径应显式失败或改路由，不能静默丢弃字段。
+
+## 2026-09 GLM-5.3 官方博客增量
+
+1. 为什么 GLM-5.3 的 CyberGym、ExploitBench、ExploitGym 不能合并成一个网络安全分数？
+   考察点：漏洞发现、故障验证、利用推理、时间归一化预算、任务分母。
+   回答框架：三个 benchmark 处在不同能力阶段；CyberGym 偏白盒发现与触发验证，ExploitBench 更接近真实漏洞利用推理，ExploitGym 按模型 TPS 对 2 小时/6 小时任务预算归一化。必须分别保留任务集、harness、timeout、TPS、verifier 和统计聚合。
+
+2. Z.ai Code Bench 的 50% 提升声明能否直接证明 GLM-5.3 比 GLM-5.2 强 50%？
+   考察点：私有 benchmark、completion、checklist、effort、输出 token 和发布方证据。
+   回答框架：不能。它说明 Z.ai 在自己的任务集和评测协议中报告了提升，还要知道模型 revision、effort、harness、任务分布、checklist、输出成本和独立复现，不能迁移成通用能力比例。
+
+3. 为什么评测 manifest 必须记录容器、域名白名单和 Tool Search？
+   考察点：环境权限、作弊路径、工具集合、verifier 和结果归因。
+   回答框架：web、安装源、Git 元信息、工具 schema 和隔离方式都会改变任务难度与作弊空间；没有这些字段，分数变化可能来自环境或工具而非模型。最终还要报告 artifact、verifier 和失败类别。
+
+4. 如何理解官方披露的 2,436 个漏洞？
+   考察点：合作统计、专家复核、筛选去重、公开 ledger、模型单独能力边界。
+   回答框架：这是 Z.ai 描述的真实代码库合作统计，包含 269 个项目和 1,097 个中高危问题；它不等于模型单独发现全量漏洞，不等于所有问题都已公开，也不等于完整利用链已验证。
 
 ## 2026-09 Kimi K3 发布证据与 Harness
 
@@ -3792,6 +3842,26 @@
    考察点：请求类型、字段作用域和容量账本。
    回答框架：前者是普通请求字段，后者是批处理字段；都受上下文、接口和任务预算约束，不能相加，也不能互换。
 
+5. `thinking.display: "omitted"` 时，为什么仍然要保存 thinking block/signature？
+   考察点：可见性与协议状态的区别。
+   回答框架：`omitted` 表示原始 thinking 不作为可见文本展示，不表示 block/signature 可以丢弃。工具循环需要按原序、原样回放兼容的状态块；应用应保存 opaque block、签名、消息版本和模型 revision，不把签名当作可读思维链。
+
+6. `thinking: disabled` 与 `xhigh`/`max` 的组合为什么应在 capability probe 阶段拒绝？
+   考察点：能力矩阵、请求契约和错误分类。
+   回答框架：官方运行时组合存在能力门槛；这是 schema/capability error，不是工具执行失败或模型质量失败。客户端应预检模型、thinking 类型和 effort，明确降级到允许的 effort/路径，不能静默改写请求后继续计分。
+
+7. Opus 5 的 refusal/fallback 如何避免污染模型评测？
+   考察点：业务状态、实际服务模型和成本归因。
+   回答框架：`stop_reason="refusal"` 及 category 是业务响应；server-side fallback 或重试会改变实际模型、工具能力、缓存和安全边界。评测记录原始模型、fallback 目标、拒答类别、重试次数、缓存命中、成本和最终 artifact，不能把 fallback 成功归因给 Opus 5 单体。
+
+8. Opus 5 不支持 web fetch 时，长任务 Agent 如何接入网页信息？
+   考察点：模型能力、宿主工具和安全边界。
+   回答框架：由宿主提供搜索/抓取工具，并负责域名白名单、SSRF 防护、超时、权限、内容溯源、重试和 verifier；模型的工具调用协议不等于模型天然拥有网络权限，也不能把抓取结果未经验证地当成事实。
+
+9. 为什么要限制 Opus 5 的 subagent 深度、并发和自验证次数？
+   考察点：长周期 Agent 的预算控制与 over-verification。
+   回答框架：自验证和 delegation 可能提高质量，也可能形成重复劳动、递归扩张和成本/延迟尾部。应为规划、执行、验证、汇总分别设 effort 与 task budget，设置深度、并发、总成本、取消条件和 artifact verifier，并在 trace 中记录每个子任务。
+
 ## 2026-09 Claude Fable 5.1 官方接口核验
 
 1. Fable 5.1 的 `adaptive (always on)` 与 Opus 5 的 `adaptive` 有什么可验证差异？
@@ -3809,6 +3879,42 @@
 4. per-message effort、turn-scoped system messages 和工具间进度更新有什么共同风险？
    考察点：beta 协议迁移、状态一致性和回滚。
    回答框架：它们改变请求或会话状态协议，需记录 API 版本、schema、默认值、重试/幂等、缓存影响、降级路径和审计字段；beta 字段不能直接当作稳定生产契约。
+
+5. 为什么 Fable 5.1 的 forced tool use 可能返回错误，而不是让模型“尽量调用”？
+   考察点：thinking/tool capability gate 与错误语义。
+   回答框架：当前公开资料只支持“某些 thinking 与 forced tool 组合在协议层不兼容”这一行为，不支持推断内部算法。运行时应在 capability probe 中提前检测，返回可分类的 schema/capability error；随后走允许的 `auto`/`none` 或非 thinking 路径，不能静默改写成成功调用，也不能把协议拒绝记成模型质量失败。
+
+6. 旧模型不能读取 Fable 5.1 thinking blocks、编辑历史 turn 又会使 block 失效，说明了什么？
+   考察点：版本化状态、跨模型 fallback 和历史编辑。
+   回答框架：thinking block 是带 producer/consumer 兼容条件的 opaque 状态，不是普通文本。状态 manifest 至少记录模型 ID、revision、消息版本、block hash、编辑事件和压缩事件；跨模型切换或改写历史前先做兼容检查，失败时重新生成允许的状态，不能静默回放旧 block 或把它当永久记忆。
+
+7. `display: "updates"` 的工具间进度消息能否证明工具执行成功？
+   考察点：用户可见进度与真实执行回执的区别。
+   回答框架：不能。它只是进度事件，必须与结构化 tool result、tool-call ID、权限判定、超时/幂等结果和最终 artifact verifier 分开记录。进度发送成功、工具执行成功、业务结果验证通过是三个不同状态，重试时也不能因已有进度就重复副作用。
+
+8. Fable 5.1 与 Mythos 5.1 共享底模但 safeguards 不同，为什么不能把它们当两个模型比较？
+   考察点：模型身份、服务策略和评测条件分层。
+   回答框架：公开资料支持的是 underlying model 相同、访问计划和 safeguards 不同；差异可能改变拒答、工具权限、fallback 和 benchmark 计分，但没有公开参数或训练证据证明是两个基础模型。比较时要固定模型 revision、effort、平台、工具、safeguards 和 verifier，并把安全策略差异单列。
+
+9. 为什么不能给 Fable 5.1 写入 Fable 5 的 DataCurve 分数？
+   考察点：精确 model ID 与 Agent harness 证据边界。
+   回答框架：当前 DataCurve 没有精确 `mini_swe_agent_claude_fable_5_1_*` 行，只有 Fable 5 的行；Fable 5 的 Pass@1/成本/steps 绑定另一个 model ID、effort、harness、工具、环境和 verifier。应记录“精确行缺失”，不能迁移相邻版本的结果，也不能把 AA Intelligence Index 当作替代分数。
+
+10. System Card 说 Fable 5.1 与 Mythos 5.1 共享模型权重，为什么仍不能把两者当成同一个评测对象？
+    考察点：模型身份、safeguards、访问计划和实际执行模型。
+    回答框架：权重相同不等于服务条件相同。Fable 面向一般使用并有更严格的高风险双用途 safeguards，Mythos 只向受信任访问开放更宽松路径；分类器、工具权限、拒答和 fallback 都可能改变结果。评测必须记录 `model_id`、snapshot、safeguard state、permissions、fallback target 和 `actual_model`，不能把 Mythos/helpful-only 结果回写成 Fable 生产能力。
+
+11. 如何解释 Fable 5.1 System Card 中 CB-1、CB-2 和 autonomy threat model 1/2？
+    考察点：RSP 阈值与风险结论的作用域。
+    回答框架：CB-1 表示能显著帮助具备基础技术背景的人完成已知化学/生物武器相关任务，CB-2 涉及替代稀缺专家完成新颖武器开发；System Card 对 Mythos 5.1 判为 CB-1、未达 CB-2。autonomy threat model 1 适用但整体风险评为 low，threat model 2 未达阈值。它们是特定 threat model、评测和 safeguards 下的风险判断，不是“没有能力”或 Fable 生产攻击率。
+
+12. 为什么 System Card 的 `55.8%` Terminal-Bench、`77.9%/41.7%` OSWorld 不能拼成一个综合能力分数？
+    考察点：benchmark 条件、成功定义和证据归因。
+    回答框架：每个数字都有自己的 snapshot、effort、工具、任务版本、试验次数、fallback、safeguards 和 verifier；OSWorld partial/strict 还是不同成功定义。应把发布方 benchmark、AA provider 指标和 DataCurve harness 结果分账，缺少关键条件时标记 `not_comparable`。
+
+13. Fable 5.1 的 Gray Swan/Shade/browser-use 安全数字如何写进面试回答？
+    考察点：prompt injection、fallback 污染和实际模型归因。
+    回答框架：先报告 benchmark 与配置，再报告 attack success、probe、fallback 覆盖率和 `actual_model`。例如 IPI 的 `k=1/10/15` 为 `0.1%/0.7%/1.0%`，较强 Shade coding attacker 无 probes/启用 probes 为 `56.87%/12.80%`，browser auto 为 `0/110`；不能把任一数字当作所有 Agent 或生产系统的通用安全率。
 
 ## 2026-09 Claude Sonnet 5 官方接口核验
 
@@ -3896,6 +4002,34 @@
 8. 为什么 V4.1-Flash 的 DeepSWE 74.2 不能直接和别的模型排序？
 
    回答要点：它是模型 revision + `mini-swe-agent`/DeepSeek Harness + 工具 + 环境 + verifier + timeout/retry/context policy 的组合结果；要一起报告任务版本、effort、harness、artifact、失败类型和区间，不归因给基础模型单项能力。
+
+9. HF reference implementation 已经有 `forward_spec`，能否说 DSpark 已经接入推测解码？
+
+   回答要点：不能。`model.py` 暴露 DSpark block/forward path，但 `generate.py` 的参考入口仍调用普通 `model.forward`，README 也称 generation 为 plain autoregressive sampling；还缺 draft/verify/rollback、接受长度和状态一致性实测。
+
+10. `inference/config.json` 的 `index_topk=512`、候选池 `2048 × 8` 与模型卡/技术报告字段不一致时，哪个是真的？
+
+    回答要点：先标注 artifact、revision 和用途；模型卡/报告是公开架构描述，inference config 是该参考 runtime 的执行快照，不能把两者拼成一个跨后端配置。应在 manifest 中同时保存来源和代码哈希。
+
+11. 如何证明一份 reference kernel 真能服务线上长上下文？
+
+   回答要点：分层验收源码可解析、权重转换、单卡/多卡正确性、CUDA/TileLang 执行、候选召回/量化误差、TTFT/TPOT/p99、故障恢复、工具 acceptance 和成本；源码存在或 Python 编译通过只完成最前面的门禁。
+
+12. vLLM `v0.30.0` registry 已经登记 `DeepseekV41ForCausalLM` 和 `DSparkV41DraftModel`，这能证明什么？
+
+   回答要点：它证明 v0.30.0 stable release/source 有 V4.1 专用 release surface，强于未绑定 tag 的 main，也不同于 v0.29.0 的历史负证据；但 registry 不证明完整权重、依赖、目标 GPU/ROCm、数值正确性、DSpark acceptance 或生产 SLO。
+
+13. vLLM v0.30.0 的 PyPI wheel 能下载，是否就等于 DeepSeek V4.1 已经可以生产部署？
+
+   回答要点：不能。PyPI metadata/wheel 只证明可分发 artifact；还要绑定模型 revision、权重分片与转换、平台分支、kernel、硬件、batch/context、FP4 质量、candidate/index recall、draft/target verify、rollback、tool/verifier 和 p99。
+
+14. release notes 中的 FlashMLA、Mega-mHC、Engram prefetch 和 XGrammar strict parameters 应如何归因？
+
+   回答要点：它们是 vLLM `v0.30.0` runtime/release 的实现变化或接入说明，适合回答 serving 工程演进；不能据此声称 DeepSeek 论文新增了这些算法，也不能把 release note 数字当作本机 benchmark 或模型独立能力。
+
+15. 为什么要同时保留 vLLM v0.29.0 的负证据和 v0.30.0 的正证据？
+
+   回答要点：tag 是时间和发布面的边界。v0.29.0 registry 未出现 V4.1 专用类名，不能被 main 代码反向填充；v0.30.0 已出现专用入口，说明后来进入 stable，但两者都不能跳过 full-weight load、target hardware 和 acceptance gate。
 
 ## 2026-09 K2 Horizon MoVA 与 Uno
 
@@ -3998,3 +4132,1178 @@
 7. DataCurve 的 GLM-5.3-Flash `Pass@1=63.392857%` 能否当作模型单项能力？
    考察点：榜单配置与组合系统归因。
    回答框架：不能。它绑定 `max`、`mini-swe-agent`、工具、113 任务/91 仓库、环境、verifier、超时/重试和 4 runs；应与成本、输出 token、steps、失败类型和 artifact 一起记录，不能与 Artificial Analysis Intelligence Index 拼接。
+
+8. 为什么 GLM-5.3-Flash serving 需要 paged KV pool 和 KDA state pool 两本账？
+   考察点：混合 attention 的状态生命周期、并发上限和恢复。
+   回答框架：显式 sparse/MLA 路径管理分页 K/V，KDA/linear 路径管理递归 state；两者的 shape、dtype、写回时机、prefix reuse 和恢复协议不同。SGLang 页面还提示 KDA state pool 可能先限制并发，所以 `kv_tokens` 不能代表完整容量。
+
+9. SGLang 的 MTP `5/1/6` 是否意味着所有请求都必须启用 speculative decoding？
+   考察点：模型 capability、runtime policy 和 workload acceptance。
+   回答框架：不是。recipe 给出低延迟路线的 MTP 配置，高吞吐路线可以关闭 speculative；实际还要测 draft/verify 成本、接受率、回滚、工具边界、显存和 p99。MTP serving 入口也不能证明 Transformers checkpoint 含 MTP layer。
+
+10. 为什么 FP8 KV 不能任意搭配 TileLang DSA？
+    考察点：量化格式、page layout、kernel backend 和数值契约。
+    回答框架：KV dtype、scale/layout、DSA 的读取和反量化路径是成对契约。SGLang recipe 给出的默认组合是 Blackwell 的 FP8 KV + TRT-LLM DSA、H100/H200 的 BF16 KV + TileLang DSA，并把 FP8 KV + TileLang DSA 标为无效；不能只把 FP8 当作独立省显存开关。
+
+11. 为什么 PD/EPD 页面有命令仍不能说明生产 serving 已通过？
+    考察点：evidence gate、dummy weights、正确性和恢复。
+    回答框架：当前 PD 只做 dummy-weight 机械验证，没有 full-weight load/accuracy；普通 speculative 和不同 TP 数值正确性也未完全验证。应依次通过 wiring、完整权重、数值、EPD/PD recovery、目标硬件 profiling、工具/verifier/SLO 门禁。
+
+12. vLLM/SGLang 支持 MTP，而 Transformers 文档不含 MTP layer，如何解释？
+   考察点：checkpoint、基础框架和 serving runtime 的证据层级。
+   回答框架：Transformers 是基础接入/前向实现，vLLM/SGLang 可在 serving 层提供 MTP/draft-verify 路径；一个层次不能反向证明另一个层次。还要固定 revision、硬件、backend 和 acceptance，不能把框架 feature 当成模型训练结构。
+
+13. SGLang `v0.5.20` 已有 `glm5_next.py`，这是否等于 GLM-5.3-Flash 已经生产可用？
+    考察点：stable source、完整权重、硬件和生产 gate 的证据层级。
+    回答框架：它证明固定 stable source 有模型入口、配置和相关测试入口；仍需安装对应 wheel/依赖、加载完整权重、固定目标硬件和 workload，验证显式 KV、indexer/tail、KDA state、MTP、视觉/EPD、工具协议、恢复和 SLO。
+
+14. vLLM main 的 `Glm5NextIndexerCache` 与 `Glm5NextTailCache` 分别解决什么问题？
+    考察点：pool-granular indexer metadata 与未完成 pool 的边界状态。
+    回答框架：前者按 `index_kpool` 粒度保存已完成 pool 的 indexer metadata；后者保存未完成 pool 的 raw BF16 K 和 gate score，跨 prefill/decode/spec-decode/PD connector 继续推进。一个是压缩池索引，一个是边界临时状态，不能用普通 KV length 代替。
+
+15. 为什么 KDA state 不能直接塞进显式 KV page table？
+    考察点：recurrent/conv state 与可检索 token KV 的 shape、dtype 和生命周期差异。
+    回答框架：KDA/linear path 是固定形状的 recurrent/conv state，有独立 shape、dtype、更新和恢复时机；sparse/MLA path 的 KV 是按 token/page 可检索的显式历史。两者即使共享 session，也必须在 manifest 和 allocator 中分开记录。
+
+16. vLLM `v0.29.0+` recipe 与公开 `v0.29.0` tag 的证据冲突时怎么回答？
+    考察点：recipe 版本门槛、stable tag 负证据和 mutable main 的边界。
+    回答框架：recipe 的版本门槛是部署路线声明；本轮固定的 v0.29.0 tree 未检出 `vllm/models/glm5next/` 专属路径，因此把 GLM5Next 归为 vLLM main/post-tag source evidence，不能写成 stable tag 已包含。应继续核对目标 wheel、revision、完整权重和硬件运行日志。
+
+## 2026-09 GLM-5.2 IndexShare、MTP 与长轨迹 RL
+
+1. IndexShare 为什么能降低 DSA 的成本？共享四层 top-k 有什么风险？
+   考察点：indexer 计算、候选召回和层间复用。
+   回答框架：GLM-5.2 官方博客描述连续四层共享一个轻量 indexer，由第一层生成 indices，后面三层复用，从而减少 dot product 与 top-k 操作。代价是不同层 query 的相关性可能不同，应分别测 index recall、最终 token recall、长程 needle retrieval、TTFT/TPOT 和层间 index 稳定性；不能只用理论 FLOPs 宣称无损。
+
+2. GLM-5.2 的 MTP speculative decoding 需要观察哪些指标？
+   考察点：draft/verify 闭环和训练—推理一致性。
+   回答框架：MTP 产生候选，target 一次验证，再按接受/拒绝与 residual correction 提交 KV。应观察 acceptance length、draft 成本、target verify 成本、target calls per output token、回退比例和 p95。博客提到共享 index/top-k、参数共享、rejection sampling、TV loss 和 20% acceptance-length 消融，但这是发布方结果，不是所有任务的保证。
+
+3. 为什么 compaction 后的长轨迹可能不适合直接使用 group-wise advantage？
+   考察点：sub-trace 数量、长度差异和 credit assignment。
+   回答框架：同一 prompt 的 rollout 经 compaction 后可能切成不同数量、不同长度的片段，组内样本不再自然对齐。官方博客描述转向 critic-based PPO，用 critic 估计 token-level advantage，并把 compacted sub-traces 纳入训练。实现时还要定义 segment mask、bootstrap、KL、奖励归属和长度归一化；不能据博客推导出完整 loss。
+
+4. coding-agent anti-hack 为什么应同时进入训练和评测？
+   考察点：reward hacking、检测器和环境安全。
+   回答框架：pass/fail reward 可能被读取隐藏文件、下载参考解或访问上游答案的 shortcut 利用。博客描述规则过滤器加模型分类器的两阶段检测，对违规动作给负反馈并继续轨迹。继续轨迹可以保留信号，但要隔离污染、记录误报/漏报、重置环境并用独立 verifier 检查最终 artifact；检测器不是权限系统的替代品。
+
+5. 1M context 的压测为什么不能只看 tokens/s？
+   考察点：KV/cache、PD、尾延迟和单位成本。
+   回答框架：长上下文瓶颈还包括 KV 容量、indexer buffer、cache transfer、CPU 调度和 GPU bubble。至少固定 revision、长度、batch、并发和硬件，记录 TTFT、TPOT、p95/p99、cache 命中、传输字节、失败重算、显存峰值和单位成功成本。
+
+## 2026-09 DeepSeek V3.2 DSA、工具推理与 Agent 数据
+
+1. DeepSeek V3.2 的 DSA 为什么不能只回答“保留 top-k”？
+
+   考察点：indexer、候选召回、主 attention 和端到端成本。
+
+   回答框架：应拆成轻量 indexer 估计历史位置相关性、候选筛选、主 attention 读取有限集合三步；要分别测 index recall、最终证据 recall、top-k 排序成本、KV/indexer bytes、TTFT/TPOT 和长程失败。V3.2 官方资料没有公开完整层排布、loss、kernel 或硬件 profiling，不能把 GLM/DeepSeek V4 的字段迁移过来。
+
+2. `scalable RL` 在面试中应如何避免被说成“就是 GRPO”？
+
+   考察点：公开方向与未披露 recipe 的边界。
+
+   回答框架：技术报告明确 V3.2 使用 GRPO，并披露 unbiased KL estimate、negative off-policy sequence masking、Keep Routing 和 Keep Sampling Mask；但仍需追问 rollout、verifier、奖励权重、更新预算和完整 token mask。不能把已披露的稳定化策略扩写成完整训练 recipe。
+
+3. large-scale agentic task synthesis pipeline 的数据闭环有哪些环节？
+
+   考察点：合成任务是否真的提升泛化，而不是制造 shortcut。
+
+   回答框架：至少包括任务定义、环境/工具接口、轨迹生成、结果验证、困难样本筛选、失败轨迹处理、污染检查和后训练目标。报告已经给出 code/search/general/interpreter 的任务规模、1,827 个 general environments 和可执行 verifier 约束，但仍要审计 verifier 是否奖励捷径、环境是否泄漏答案、成功轨迹是否过度单一。
+
+4. `thinking with tools` 与普通 function calling 的差别是什么？
+
+   考察点：推理状态、模板协议、宿主执行边界。
+
+   回答框架：V3.2 将 reasoning、工具调用、工具结果回灌和最终回答放进更新后的消息/encoding 协议；这要求 parser 能区分这些边界，但模型输出 call 不等于工具已执行。宿主仍要做 schema、权限、确认、超时、重试和结果可信边界校验。
+
+5. 为什么 V3.2-Speciale 不能直接替代 coding agent 的 V3.2？
+
+   考察点：checkpoint 变体与运行时能力边界。
+
+   回答框架：官方模型卡把 Speciale 定位为深度推理变体，并明确不支持 tool calling；coding agent 需要工具协议、执行器、权限和 verifier。不能因为 Speciale 推理更强，就推断它具备完整 Agent runtime。
+
+6. 为什么本轮不记录 DeepSeek V3.2 的 DataCurve 分数？
+
+   考察点：榜单锚点和评测可比性。
+
+   回答框架：当前 DataCurve 没有精确 `mini_swe_agent_deepseek_v3_2_*` 行；不能把 V3.1、V4 或其他模型的 Agent 结果迁移给 V3.2。Artificial Analysis 指数和 DataCurve Pass@1 也属于不同配置/系统评测，不能合并成一个裸模型分数。
+
+7. 固定官方 V3.2 配置与 V3.2-Exp inference 都是 `q_lora_rank=1536`，是否因此可以把它们当成同一份生产配置？
+
+   考察点：模型 artifact、实验 demo 和模型卡字段的证据绑定。
+
+   回答框架：不能。固定 revision 的最终 `config.json` 与实验 inference config 虽然都核验为 `q_lora_rank=1536`，但 revision、代码快照、权重 artifact、kernel 和 serving recipe 的证据等级不同。相同字段不能证明权重、训练数据、RL 配方、生产 kernel 和能力完全相同；必须按 artifact 和 harness 分账。
+
+8. DSA inference demo 中 indexer 与 MLA 的 RoPE 实现有什么工程陷阱？
+
+   考察点：旋转位置编码的布局、cache 和 kernel 合约。
+
+   回答框架：官方 demo 明确 indexer 使用 non-interleaved RoPE，而 MLA 使用另一种布局；即使数学上都叫 RoPE，也不能直接复用通道排列、权重切分和 cache。复现必须固定 layout、dtype、scale 和位置范围。
+
+9. 为什么 V3.2-Exp 的 prefill 和 decode 要分别讨论 MHA 与 MQA？
+
+   考察点：阶段性计算形态和 KV cache 账本。
+
+   回答框架：prefill 同时处理多个 query，参考路径保留 MHA 形态；decode 每步 query 少，利用 latent KV 与 positional cache 以 MQA 方式读取历史。只测 decode cache 不能代表 prefill 显存峰值、indexer 开销或 TTFT。
+
+10. TileLang 的 radix/histogram top-k 与普通全排序有什么差异？
+
+    考察点：稀疏选择器的复杂度、正确性和边界。
+
+    回答框架：它先通过 histogram 找阈值桶，再对阈值桶做有限轮次 radix refinement，避免对整段序列完全排序；仍要验证 ties、causal mask、paged KV、不同长度 batch 和 top-k 大于当前历史长度时的行为。
+
+11. 为什么 vLLM recipe 推荐 `DP=8, EP=8, TP=1` 不能当成模型的唯一并行方案？
+
+    考察点：kernel/硬件约束与并行策略的关系。
+
+    回答框架：这是特定 recipe、kernel 和 GPU 拓扑下的部署建议；TP fallback 可能更稳但性能不同。面试时要把正确性、通信、显存、warmup、batch、故障恢复和 p99 分开测，不能从模型名直接推导并行度。
+
+12. vLLM recipe 的 GSM8K `0.9591`/`0.9538` 应如何归因？
+
+    考察点：模型、推理实现和评测 harness 的证据分层。
+
+    回答框架：它们是 V3.2-Exp 权重 + vLLM + lm-eval + prompt/few-shot/运行参数的 recipe 结果，不是最终 V3.2 裸模型能力、Artificial Analysis 指数或 DataCurve Pass@1；报告必须同时记录版本、硬件和 harness。
+
+## 2026-09 DeepSeek V3.2 当前快照与实现证据补充
+
+1. AA 页面从约 648B 变成 685B，是否说明 DeepSeek V3.2 扩容或重新训练？
+
+   考察点：第三方目录字段、采集时点和模型身份。
+
+   回答框架：不能这样推断。两个值来自不同页面快照的第三方目录/provider 字段；canonical slug、release date 和模型标签仍一致。应保留两个快照并标注 directory drift，不能把它写成 checkpoint、训练或架构变化。
+
+2. V3.2-Exp README 的 RoPE 修复为什么是高价值面试点？
+
+   考察点：算法概念相同不等于张量布局相同。
+
+   回答框架：README 明确 indexer 使用 non-interleaved layout、MLA 使用另一种布局。复现时必须固定通道排列、权重切分、cache 格式和位置边界；只把两处都称作 RoPE 并不能保证候选 score 或 top-k 一致。
+
+3. TileLang、DeepGEMM、FlashMLA 和 SGLang 分别证明什么？
+
+   考察点：研究实现、CUDA kernel 和 serving recipe 的证据分层。
+
+   回答框架：TileLang 偏可读研究实现，DeepGEMM 是 indexer logits CUDA 入口，FlashMLA 是 sparse MLA CUDA 入口，SGLang README 是特定镜像和并行启动路径。它们证明公开实现路径存在，不证明完整权重、目标硬件 profiling、p99 或线上 tool/verifier acceptance。
+
+4. vLLM recipe URL 当前返回 404，能否宣布 vLLM 不支持 V3.2？
+
+   考察点：负面网络证据的边界。
+
+   回答框架：不能。404 只说明当前 URL/线路没有取得页面；历史 README/recipe 证据仍保留，后续应固定可访问 revision、依赖和硬件后复核。线路失败不能升级为实现不存在。
+
+## 2026-09 Qwen3.8 Max (0902) Revision、工具协议与缓存面试补充
+
+1. Qwen3.8 Max (0902) 是不是一个新的 open checkpoint？
+
+   考察点：榜单 release、hosted revision、canonical model 和基础模型身份。
+
+   回答框架：Artificial Analysis 把 canonical `qwen3-8-max` 展示为 `Qwen3.8 Max (0902)`，Qwen Cloud 给出 `qwen3.8-max-2026-09-02` alias，并称它是 `qwen3.8-max` 的 upgraded snapshot。当前应记录为 hosted service revision；没有公开 0902 权重、参数、层排布或专属架构报告，不能写成新的 open checkpoint。
+
+2. 为什么 1M context、991K/983K 最大输入和 131K 最大输出不能直接相加？
+
+   考察点：接口上限与 serving 资源账本。
+
+   回答框架：1M 是产品 context window，991K/983K 是不同模式的输入 cap，131K 是输出 cap；reasoning token、工具 schema/结果、cache/KV、workspace、batch、并发和 provider 限流还会消耗资源。压测应固定 mode、effort、工具、缓存、长度和并发，分别记录 TTFT、TPOT、尾延迟、峰值内存和单位成功成本。
+
+3. `reasoning_effort` 与 `thinking_budget` 如何迁移？
+
+   考察点：互斥字段、请求级配置和模型归并。
+
+   回答框架：0902 支持 `low/medium/xhigh`，默认 `xhigh`；`reasoning_effort` 与 `thinking_budget` 不能同时设置。它们是同一服务 revision 的不同预算表达，不是新模型。客户端应在发送前做互斥校验，并在 trace 记录实际字段、mode、reasoning/output token 和任务结果。
+
+4. 为什么 thinking 模式下不能强制指定工具？
+
+   考察点：模型推理与工具协议 capability matrix。
+
+   回答框架：官方 Function Calling 文档规定 thinking 下 `tool_choice` 只能是 `auto` 或 `none`；需要强制工具时要关闭 thinking。adapter 不能悄悄把 `required` 改写成 `auto`，应返回清晰协议错误或由业务显式选择非 thinking 路径。即使模型产生 call，宿主仍要做 schema、权限、确认、超时、幂等和回执审计。
+
+5. explicit、implicit、session cache 有什么区别？
+
+   考察点：缓存 owner、生命周期、计费和可复用边界。
+
+   回答框架：explicit 是应用主动管理的上下文对象，implicit 是 provider 自动识别的前缀复用，session 是会话状态连续性。官方文档给出最小 1,024 tokens，并分别规定命中、计费和有效期语义。它们都不能被笼统当成跨 revision、跨租户永久 GPU KV；cache key、失效、权限、tokenizer/template 和重算都要进 trace。
+
+6. DataCurve 的 `57.4610%` Pass@1 能否直接写成 Qwen3.8 Max (0902) 能力？
+
+   考察点：泛化 alias、revision 归因和组合系统评测。
+
+   回答框架：不能。该行是 `mini_swe_agent_qwen3_8_max_xhigh`，没有 0902 精确 ID，且绑定 `mini-swe-agent`、工具、环境、verifier、4 runs 和任务集。应报告为 Qwen3.8 Max 系列配置的组合结果，不迁移到 0902，也不与 Artificial Analysis Intelligence Index 合并成裸模型分数。
+
+7. 为什么 QwenCloud 的 endpoint 迁移不是模型升级？
+
+   考察点：模型 revision、provider adapter、transport 和能力证据的分层。
+
+   回答框架：文档示例从 `dashscope-intl.aliyuncs.com` 迁移到 `maas.qwencloudapi.com`，改变的是域名、路由、认证/transport 配置和回归面；它没有公开新的权重、参数、层排布或训练配方。manifest 应同时保存 endpoint、生效时间、provider、alias、resolved revision、API mode 和 tokenizer/template，不能从 endpoint 名称推导模型能力。
+
+8. soft TPM、observed TPM、RPM 和模型吞吐有什么区别？
+
+   考察点：托管服务 quota、排队行为与模型/GPU 性能的分账。
+
+   回答框架：soft TPM 是 provider 对 account+model 的保证配额，达到后若平台有余量可能继续服务；observed TPM 是实测完成 token 速率，还受排队、重试、输出长度和错误影响；RPM 是请求数频率；模型吞吐还要按 batch、硬件、kernel、KV/cache 和并发测量。`qwen3.8-max-0902` 的 `1,500,000 / 1,500,000 / 1,500,000` 只能写进 hosted quota 字段，不能写成 GPU capacity 或模型 benchmark。
+
+9. account/workspace/model 三层限流如何进入 Agent serving manifest？
+
+   考察点：多租户聚合、override、可观测性和故障恢复。
+
+   回答框架：把 account 作为聚合 owner，workspace 作为可选的单模型 override，model/revision 作为限流 key 的服务对象；记录 guaranteed/observed TPM、并发、queue latency、429、`Retry-After`、重试、请求去重和单位成功成本。限流事件要和 endpoint、alias、effort、cache、工具回执以及最终 artifact 关联，避免把 provider 拒绝误归因于模型质量或工具 verifier。
+
+## 2026-09 GPT-5.3 Codex：模型、协议与 Coding Agent
+
+1. GPT-5.3 Codex 的 400K context、272K maximum input 和 128K maximum output 有什么区别？
+   考察点：输入/输出/推理/工具/workspace 预算。
+   回答框架：400K 是 context window，272K 是 maximum input，128K 是 maximum output；reasoning tokens、系统指令、工具 schema/results 和状态 item 也要占预算，不能把三个数字相加换算并发。
+
+2. 为什么 GPT-5.3 Codex 的 Responses-only 约束会影响 Agent runtime 设计？
+   考察点：API adapter、input/output item、stream、replay。
+   回答框架：不能只替换 model ID。adapter 要处理 tool call/result、加密 reasoning item、assistant `phase`、状态引用、流式事件、取消、重试和错误恢复；只把 Chat Completions 的最终文本塞回去可能丢失继续任务所需状态。
+
+3. `phase=commentary` 和 `phase=final_answer` 是不是 chain-of-thought？
+   考察点：协议状态与可见推理的边界。
+   回答框架：不是。phase 标记 assistant 输出处在中间说明/工具循环还是最终答复；它帮助 harness 判断是否继续，但不暴露原始思维链，也不证明工具已执行。
+
+4. Codex Prompting Guide 中的 `apply_patch`、固定 workdir 和并行工具调用为什么是模型能力之外的问题？
+   考察点：模型—harness—executor 分层。
+   回答框架：它们是工具契约和执行环境设计。模型提出动作，harness 提供上下文、工具 schema 和 workspace，权限/沙箱决定能否执行，测试与 verifier 决定 artifact 是否合格；系统结果不能全部归因于裸模型。
+
+5. compaction 后为什么不能只保存一段人工摘要？
+   考察点：opaque state、canonical context、恢复安全。
+   回答框架：官方 server-side compaction 会产生 encrypted compaction item，standalone endpoint 返回下一轮应直接使用的 canonical context。手工删掉工具回执、权限、未完成副作用或 artifact 信息可能造成错误恢复和重复执行。
+
+6. GPT-5.3 Codex 支持 hosted shell/skills，是否意味着模型拥有任意系统权限？
+   考察点：工具授权与执行边界。
+   回答框架：不意味着。应分离模型 call、schema 校验、宿主授权/审批、沙箱执行、回执、幂等/回滚和 artifact；工具搜索到能力也不等于获得执行权限。
+
+7. 能否把 GPT-5.5 或其他 Codex 的 DeepSWE 分数迁移给 GPT-5.3 Codex？
+   考察点：榜单证据归因。
+   回答框架：不能。GPT-5.3 Codex 出现在 Artificial Analysis，但 DataCurve 当前没有精确 `mini_swe_agent_gpt_5_3_codex_*` 行；必须把 AA 指数、DataCurve 系统结果、harness、任务环境和 verifier 分开记录。
+
+8. 如何设计 GPT-5.3 Codex 的上线门禁？
+   考察点：task-level metrics 和可恢复性。
+   回答框架：固定 model/snapshot/effort、prompt、工具 schema、权限、harness、任务集和 verifier；验收完整 replay、phase 转移、tool contract、sandbox、patch/test/artifact、compaction recovery、重复副作用、task success、E2E p95 和 unit-success cost。
+
+## 2026-09 GPT-OSS：开放权重 MoE、Harmony 与可变推理
+
+1. `gpt-oss-120b` 的 5.13B active parameters 能否直接当作单卡显存需求？
+
+   考察点：MoE total/active 账本与 serving 资源。
+
+   回答框架：不能。active 只描述当前 token 的主要计算路径；总专家权重仍需存储或分片，还要加 KV cache、token dispatch、通信 buffer、workspace、padding 和并发请求。官方单 80GB GPU 目标绑定 MXFP4、实现和硬件条件，不能泛化为所有后端 SLO。
+
+2. 交替 sliding-window/full attention 为什么能兼顾局部成本和长程依赖？
+
+   考察点：稀疏注意力的访问范围与全局信息交换。
+
+   回答框架：sliding 层限制局部访问，降低大多数层的长上下文成本；dense 层周期性地跨全序列交换信息。要分别测两类层的 FLOPs、KV 形状、长程检索召回和端到端 TTFT/TPOT，不能把 130K context 理解成每一层都是 dense attention。
+
+3. MXFP4 为什么是模型与部署联合设计，而不只是上线后的压缩？
+
+   考察点：量化误差、权重占比和评测条件。
+
+   回答框架：MoE 专家权重占比很高，post-training MXFP4 直接改变 checkpoint、显存和单卡可运行边界；官方评测也绑定该量化条件。应同时记录 scale、kernel、误差、通信和 batch 行为，不能用 BF16 结果替换发布方 MXFP4 结论。
+
+4. Harmony 与普通 ChatML 模板的差异是什么？
+
+   考察点：训练接口与输出协议。
+
+   回答框架：Harmony 不只是分隔符，它规定角色层级、channel、recipient、工具 namespace、参数和 structured outputs，并提供可逆渲染/解析。历史 assistant reasoning trace 还要按模型卡要求处理，不能无条件回灌全部隐藏推理。
+
+5. `Reasoning: high` 是第三个 gpt-oss checkpoint 吗？
+
+   考察点：模型身份与运行时配置归并。
+
+   回答框架：不是。同一权重支持 low/medium/high variable-effort reasoning，档位改变 test-time compute、CoT 长度、延迟和成本。实验必须固定 revision、工具、sampling、最大输出和 verifier，不能把 effort 行计成独立基础模型。
+
+6. gpt-oss 输出了 function call，为什么还不能说工具已经执行？
+
+   考察点：模型—协议—宿主—执行器边界。
+
+   回答框架：模型只提出符合 Harmony 的调用。宿主仍要校验 schema、权限、审批、沙箱、超时、重试、结果回灌和副作用回执；最终 artifact 还需要测试或 verifier 证明。
+
+7. 为什么本轮不记录 gpt-oss 的 DataCurve Pass@1？
+
+   考察点：精确榜单行与评测归因。
+
+   回答框架：当前 DataCurve 没有 `mini_swe_agent_gpt_oss_120b_*` 或 `20b_*` 精确行。不能迁移 GPT-5.3 Codex、GPT-5.5 或其他 OpenAI 模型的结果；Artificial Analysis 指数也不能和其他 harness 的 Pass@1 拼成裸能力。
+
+8. 开放权重会怎样改变安全责任？
+
+   考察点：model card 安全评估与下游治理。
+
+   回答框架：权重发布后可被下游微调、复制和改变拒答行为，发布方无法统一撤回每个副本。部署方必须单独治理微调数据、工具权限、网络/文件沙箱、输出过滤、审计和 incident response，不能把发布方安全评估当作所有下游系统保证。
+
+9. 为什么 gpt-oss provider 不能只返回最终答案？
+
+   考察点：raw CoT、工具循环与状态回放。
+
+   回答框架：tool call 可能发生在 CoT 内部，下一次 sampling 需要 raw CoT、tool call 和 tool result 才能延续状态。Responses 应用 `reasoning.content[].reasoning_text` 和对应的 delta/done 事件承载它；raw CoT 默认不展示给用户，只在受控链路中保存和回放。
+
+10. 如何验证一个 gpt-oss provider 的实现是否真的兼容？
+
+    考察点：协议 smoke test 与模型质量评测的分层。
+
+    回答框架：先固定 Harmony 渲染、Responses/Chat Completions API shape、schema、tool call/result、streaming、取消和重试，运行官方 `compatibility-test`；再运行 AIME/GPQA/HealthBench eval。0 invalid requests 且 `pass@k`/`pass^k` 超过 90% 只是强信号，不等于 kernel、MXFP4、MoE dispatch、硬件 profiling 或生产 acceptance 已通过。
+
+11. raw CoT 为什么不能直接展示给终端用户？
+
+    考察点：推理可观测性与安全边界。
+
+    回答框架：raw CoT 可能含有害内容或 developer instruction，应该与可展示的 summary 分离；产品展示经过审查的 summary，raw CoT 只进入受控调试/解释性研究/状态回放链路，并按 item id、index 和 turn lineage 做去重与审计。
+
+## 2026-09 Claude Opus 4.6：adaptive thinking、Compaction 与 Tool Search
+
+1. `effort` 和 `max_tokens` 有什么区别？
+
+   `effort` 是模型行为信号，影响推理/工具/回答的投入倾向，不是严格 token 配额；`max_tokens` 才是请求的硬上限。还要单独核算输入、thinking、可见输出、工具 schema、工具结果、重试和 compaction。
+
+2. 为什么 thinking signature 不能被应用层改写成摘要？
+
+   它是多轮工具状态的一部分。下一轮必须按 API 要求原样回传，才能保留 opaque reasoning state；自行摘要可能造成上下文不一致、重复工具调用或错误终止。
+
+3. Tool search 解决了什么问题，没解决什么问题？
+
+   `defer_loading`、regex/BM25 和 `tool_reference` 让大量工具定义按需进入上下文，减少 schema 噪声；但它不提供权限、审批、沙箱或执行结果。搜索、调用提案、宿主授权、执行回执和 artifact 验证必须分层。
+
+4. Opus 4.6 的 computer use 是否等于模型拥有浏览器权限？
+
+   不等于。模型只提出屏幕动作，宿主负责 `computer_20251124` 执行器、沙箱、域名 allowlist、人工确认、截图回灌和 prompt-injection 防护。
+
+5. 为什么不能把 Opus 4.8/5 的 DeepSWE 结果迁移给 Opus 4.6？
+
+   DataCurve 当前没有精确 `mini_swe_agent_claude_opus_4_6_*` 行。不同模型、effort、harness、工具、任务环境和 verifier 的结果不可迁移；AA 指数也不能与 DeepSWE Pass@1 拼成裸模型分数。
+
+## 2026-09 Claude Opus 4.7：三层预算、视觉与安全控制面
+
+1. `xhigh` 是不是一个新的 Opus 权重？
+
+   不是。它是位于 `high` 与 `max` 之间的运行时 effort 档位；模型身份仍由 `claude-opus-4-7` 和固定 snapshot 定义。
+
+2. `effort`、task budget 和 `max_tokens` 分别控制什么？
+
+   `effort` 控制单步投入倾向，task budget 约束一个 Agent loop 的 advisory 总预算，`max_tokens` 是单次请求的硬上限。task budget 还覆盖 thinking、tool call、tool result 和 output，不能只按可见回答计费。
+
+3. 为什么 Opus 4.7 迁移时要重新测输入成本？
+
+   官方发布资料说明更新 tokenizer 可能令同一输入变为旧版本的约 `1.0-1.35x` token。应固定内容集，分别测输入 token、缓存命中、thinking/output、工具结果、compaction 和端到端成功成本。
+
+4. 高分辨率视觉接口带来什么工程代价？
+
+   Opus 4.7 及以后 high-resolution tier 的最长边为 `2576 px`、最多 `4784` visual tokens，普通档位为 `1568 px`/`1568` visual tokens。它提升密集截图和文档的可读性，但会改变输入预算、延迟、坐标映射和缓存命中；它不是视觉编码器结构公开的证据。
+
+5. cyber safeguards 是否意味着模型拥有安全执行权限？
+
+   不意味着。发布页公开的是服务策略和验证项目；生产系统仍需用户/组织授权、沙箱、网络隔离、审计、人工升级和误报/漏报评测。模型能力、策略拦截和工具执行必须分层。
+
+6. 为什么不能把 Opus 4.6/4.8/5 的 DeepSWE 结果迁移给 Opus 4.7？
+
+   DataCurve 当前没有精确 `mini_swe_agent_claude_opus_4_7_*` 行。不同模型、effort、harness、工具、任务环境和 verifier 的组合结果不可迁移；AA 指数也不能与 DeepSWE Pass@1 拼成裸模型分数。
+
+## 2026-09 Kimi K3：架构与 Agent 协议
+
+1. K3 为什么采用 KDA 与 Gated MLA 的 3:1 混合？答：KDA 维护低成本递归状态，Gated MLA 周期性提供全局内容交互；末尾额外的 Gated MLA 保证最后一层仍具备 global attention。
+2. K3 的 8 个 Block AttnRes block 与普通残差有什么区别？答：它沿深度方向对历史表示做选择性聚合，按 block 而不是按层保存跨 stage 状态；它不替代 token 维度的长上下文注意力。
+3. Quantile Balancing 如何不同于 auxiliary loss？答：报告描述它从 router-score quantiles 直接得到 expert bias，并通过 coordinate minimization 追求最大得分的 balanced assignment；推理时使用冻结 bias + fixed Top-k。
+4. K3 的 `think/response/tool` channel 为什么要保留 tool/index？答：channel 和 index 是 replay、工具结果归属、重试幂等和跨模型迁移的协议状态；只保存最终可见文本会丢失这些边界。
+5. `104B activated` 能否直接换算显存？答：不能。total/activated、resident weights、KV cache、通信 buffer、workspace 和并发都要分账。
+
+6. FlashKDA 的 `1.85x`/`2.31x` 应该如何表述？答：它们是 FlashKDA 仓库在固定 `T=8192,H=96,D=128` 与指定 H20/GB200 baseline 下的实现 benchmark，不是 K3 端到端吞吐、所有 GPU 的收益或本地复现；回答时必须同时给出硬件、backend、warmup/iters、baseline 和测量口径。
+7. 为什么 K3 的 serving manifest 要同时保存 MLA cache 和 KDA recurrent state？答：两条路径的状态语义不同：MLA 保存 attention 的可检索历史，KDA 保存沿序列递归更新的固定状态。只恢复一种状态可能导致 prefix 命中、输出连续性或状态边界错误；还要绑定模型 revision、KV dtype、backend、prefix-match unit 和并行拓扑。
+8. vLLM recipe 已经公开，为什么仍不能说 K3 已经完成生产部署闭环？答：PyPI vLLM 0.29.0 与 v0.29.0 source 已有 K3 实现入口，但 recipe 仍依赖 K3-enabled nightly、特定 CUDA/driver；目标硬件 profiling、完整权重加载、双状态恢复和线上 tool-call acceptance 仍未证实。部署还必须验证 schema、权限、retry、幂等和 artifact。
+9. K3 偶发生成 parser 不期望的 tool-call 格式时，应该由谁负责修复？答：模型输出是结构化提案；宿主 parser/schema 层负责兼容与拒绝，权限层负责授权，executor 负责副作用，verifier 负责结果和 artifact。不能把 parser 失败率直接写成模型推理能力分数，也不能无校验执行。
+
+## 2026-09 Kimi K3：固定 manifest 与双状态 cache
+
+1. 为什么固定 `model.safetensors.index.json` 仍不能说 K3 权重已经加载？
+   回答框架：index 只证明固定 revision 下 tensor 到 96 个分片的映射自洽；还要有分片下载校验、权重加载日志、dtype/backend 兼容和目标硬件运行结果。本轮只读 `497,220` 个映射，没有下载 TB 级权重。
+2. `metadata.total_size=1,560,860,324,864` 和 HF API `safetensors.total=2,779,931,837,184` 为什么不能相加？
+   回答框架：前者是 MXFP4 packed 分片文件口径，后者是 U8/BF16/F32 参数 dtype 统计；它们服务于文件分发和参数统计两个不同账本。
+3. K3 为什么不能用一个 KV-cache 字段恢复？
+   回答框架：full-attention/MLA 保存 `key_cache/value_cache`，KDA 保存 `conv_states/recurrent_states`；两者的更新、长度、dtype、eviction 和 backend 语义不同。恢复必须同时绑定模型 revision、cache layout、prefix unit 和并行拓扑。
+4. K3 的 `chunk_kda` 与 `fused_recurrent_kda` 分别适合什么路径？
+   回答框架：prefill/chunk 或变长 batch 使用 chunk 路径和 `cu_seqlens`；带 cache 的单 token decode 使用 fused recurrent 路径。不能用 chunk benchmark 直接推导端到端 decode 吞吐。
+5. manifest 审计器应该检查哪些门禁？
+   回答框架：分片连续性、层 partition、expert id 覆盖、packed/scale 配对、量化格式和“完整权重未下载”状态；审计通过仍不等于 CUDA kernel、生产 serving 或 Agent 验收通过。
+
+## 2026-09 Qwen3.5-397B-A17B：混合架构、多模态与 MTP
+
+1. Qwen3.5-397B-A17B 的 `397B total / 17B active` 应如何解释？答：17B 是每 token 激活路径的计算口径，不是总权重显存、state/KV cache、通信 buffer 或并发容量；MoE 路由和 resident weights 还要单独计账。
+2. Qwen3.5 的 15 组层布局是什么？答：每组是 3 个 `Gated DeltaNet -> MoE` 后接 1 个 `Gated Attention -> MoE`；前者维护递归 state，后者周期性提供显式历史交互。
+3. 为什么不能把 Qwen3.8 的 QSA、Gated Residual、N-gram 和 Muon 直接写进 Qwen3.5？答：官方 README 只确认 Qwen3.8 建立在 Qwen3.5 架构基础上，具体新增机制来自 Qwen3.8/Flash-Next 材料；证据必须按模型版本隔离。
+4. Qwen3.5 的 MTP serving 如何验收？答：分开记录 draft tokens、target verification、accepted length、rollback 和 committed KV；speculative 开关、官方示例或模型卡声明都不能替代目标硬件上的 acceptance/TTFT/TPOT 测量。
+5. Qwen 官方的 million-agent RL environments 对面试有什么启发？答：应追问 rollout、环境并发、verifier、轨迹 freshness、policy version、异步 learner 和失败重试；“million-agent”是发布方规模声明，不是完整 RL recipe。
+6. `--language-model-only` 改变了什么？答：跳过 vision encoder，释放显存给 KV cache，是同一 checkpoint 的 serving mode，不是新的模型；多模态与 text-only 模式要分别记录输入、缓存和 SLO。
+
+## 2026-09 GLM-5：DSA、slime 与 Agentic Engineering
+
+1. GLM-5 的 `744B total / 40B active` 应如何进入容量和延迟分析？
+
+   回答框架：total 是总权重容量，active 是每 token 主要激活路径的发布方口径；还要单独计 resident expert weights、router/shared expert、dispatch/combine、KV/indexer cache、workspace 和并发。active 参数不能直接换算显存、TTFT 或 p99。
+
+2. `index_topk=2048` 是否等于每个 query 最终只看 2048 个 token？
+
+   回答框架：只能确认公开配置的 top-k 字段。indexer、因果 mask、尾部保留、层布局、gather、batch 和 kernel 可能改变最终可见路径；应测 index recall、最终 evidence recall、needle retrieval 和端到端任务成功率。
+
+3. DSA 为什么要把收益拆成 indexer、main attention 和 recall 三本账？
+
+   回答框架：主 attention 的候选访问减少了，但 indexer 需要打分、选择、存储和搬运；漏掉关键历史会导致任务失败。理论 FLOPs 下降不等于端到端成本或质量无损。
+
+4. `slime` 异步 rollout/trainer 解耦最容易引入什么问题？
+
+   回答框架：policy lag、sample freshness、verifier 队列、奖励延迟、重复工具副作用和 checkpoint/schema 版本不一致。报告 rollout tokens/s 时还要报告 stale ratio、有效样本率、失败重试和任务成功率。
+
+5. Agentic Engineering 与普通 coding Agent 的完成条件有什么区别？
+
+   回答框架：前者把规划、编辑、执行、观察、测试、诊断、修复和 artifact 验收放进闭环；宿主 verifier 独立检查权限、真实回执、测试和 artifact digest，模型说“完成”不是最终证据。
+
+6. 为什么 GLM-5 当前不能称为两个排行榜的 Agent 双榜闭环？
+
+   回答框架：Artificial Analysis 有精确 GLM-5 配置，但 DataCurve 当前没有精确 `mini_swe_agent_glm_5_*` 行。GLM-5.2/5.3 的结果绑定不同 checkpoint、effort、harness、工具和环境，不能迁移。
+
+## 2026-09 Gemini 3.5 Flash-Lite：低成本推理与视频 Agent
+
+1. Gemini 3.5 Flash-Lite 的 `minimal/low/medium/high` 是四个模型吗？
+
+   不是。Google Thinking 文档把它们定义为请求级 `thinking_level`，默认是 `On (minimal)`；它们改变 test-time compute、质量、延迟和成本曲线，不是四个 checkpoint，也不是严格的 reasoning token 上限。
+
+2. 为什么不能把 Gemini 3.5 Flash 的默认 `medium` 迁移给 Flash-Lite？
+
+   因为 `whats-new-gemini-3.5` 页面正文属于 `gemini-3.5-flash`。Lite 的直接证据是自己的 API Model Page、Thinking 表和 Model Card，后者明确 Lite based on Gemini 3.1 Flash-Lite。不同 model code 的运行时字段必须按版本隔离。
+
+3. Static video processing 和 agentic video understanding 有什么区别？
+
+   Static 按固定约 1 FPS 取帧并一次性构建上下文；agentic 根据 prompt 动态浏览时间轴，按需加载 transcript、帧或音频。后者可能减少无关 token，但增加 processing steps、延迟、超时和回放状态，必须同时评估证据召回、处理调用、总 token 和端到端成功率。
+
+4. `processing_call`/`processing_result` 是否说明模型拥有视频或工具执行权限？
+
+   不说明。它们是处理请求和宿主返回结果的协议事件；文件句柄、租户权限、读取范围、网络、沙箱和副作用仍由宿主控制。模型提出读取不等于读取已被授权或已成功执行。
+
+5. Model Card 说 Lite based on Gemini 3.1 Flash-Lite，面试中能否直接讲 3.1 的架构？
+
+   只能说官方把 Lite 的 architecture、training data、hardware 和 software 指向 3.1 Model Card，不能把 3.1 的资料包装成 3.5 Lite 独有创新。还要明确 3.5 Lite 自己的参数、层结构、完整训练 recipe 和生产 kernel 仍未公开确认。
+
+6. Gemini 3.5 Flash-Lite 的 Google benchmark 能否和 DataCurve/Artificial Analysis 合并？
+
+   不能。Google Model Card 的 SWE-Bench Pro、Terminal-Bench、OSWorld 和 GDM-MRCR 绑定发布方评测设置；AA 是第三方 Intelligence Index，DataCurve 绑定 `mini-swe-agent`、工具、仓库、verifier 和 runs。Lite 当前没有精确 DataCurve Agent 行，不得迁移 3.5 Flash 或 3.6 Flash 的结果。
+
+## 2026-09 Kimi K2.6：架构、Agent Swarm 与供应商验收
+
+1. Kimi K2.6 的 `1T total / 32B active` 如何用于显存和延迟分析？
+
+   回答框架：total 是专家与共享权重的容量账，active 是每 token 的主要计算路径；还要加入 resident weights、router/shared expert、dispatch/combine、MLA cache、媒体 token、工具状态、workspace 和并发余量。不能把 32B 当作完整 serving 显存，也不能由 active 直接推出 p99。
+
+2. `q_lora_rank=1536`、`kv_lora_rank=512` 和 MLA 对长上下文 serving 有什么影响？
+
+   回答框架：它们支持低秩 latent/cache 的工程讨论，但不能单独还原生产 kernel。应同时测 latent/position cache、top-k expert dispatch、gather buffer、工具/视觉 token、TTFT、TPOT、cache bytes 和有效召回。
+
+3. K2.6 的 300 sub-agents 是不是 300 个 MoE experts？
+
+   不是。384 routed experts/top-8 是模型内部路由；300 sub-agents 是 Agent harness 创建的外部运行实例，拥有独立上下文、权限、预算、workspace 和生命周期。博客中的 4,000 coordinated steps 也不是 4,000 个推理 token。
+
+4. `preserve_thinking`/`reasoning_content` 的工程价值是什么？
+
+   它们用于跨轮和多步工具调用的状态回放，必须连同工具 schema、tool call/result、权限和执行回执管理；不能把它简化为任意拼接隐藏 chain-of-thought，也不能让模型输出直接获得执行权限。
+
+5. Kimi Vendor Verifier 为什么不是普通 benchmark？
+
+   它把 API 参数、视觉预处理、长输出 KV/量化、ToolCall schema 和 Agent sandbox 分层检查，目标是区分模型能力缺陷与推理实现偏差。KVV 结果属于部署/harness 验收，不是 K2.6 裸模型分数。
+
+6. 为什么 K2.6 仍可称为资料级闭环而不是评测闭环？
+
+   因为 AA 有精确条目，官方模型卡、配置、博客和部署/验收资料齐全；但 DataCurve 没有精确行，所以没有 K2.6 的精确 Agent 评测，不能迁移 K2.7 Code/K3 的结果。
+
+## 2026-09 GPT-5.4 mini/nano：小模型路由、Prompt Contract 与 Capability Probe
+
+1. **GPT-5.4 mini/nano 和 GPT-5.4 base 的上下文、评测结果可以直接共用吗？**
+
+   不能。mini/nano 的官方 snapshot 是 `gpt-5.4-mini-2026-03-17`/`gpt-5.4-nano-2026-03-17`，各自为 400K context、272K maximum input、128K maximum output；不能套用 base 的 1.05M context。DataCurve 当前只有 GPT-5.4 base 的 `mini_swe_agent_gpt_5_4_xhigh` 行，没有 mini/nano 精确模型 ID，不能迁移 Pass@1、成本或 Agent steps。
+
+2. **为什么不能只按“更便宜”把所有请求路由到 nano？**
+
+   官方把 nano 定位为 classification、extraction、ranking 和窄任务 sub-agent，而不是开放式多步规划器。router 应先判断任务边界、歧义、工具数量、失败代价和是否需要深层规划；复杂任务应升级到 mini/base，或由强模型规划、nano 执行固定子任务。价格只能参与排序，不能替代任务形状和 verifier。
+
+3. **mini/nano 的 `reasoning_effort=xhigh` 是严格的 token 预算吗？**
+
+   不是。它是请求级行为/投入旋钮，不能直接换算成并发容量或最大 reasoning token。容量账本仍需拆开 input、reasoning、visible output、tool schema/result、retry、cache hit 和 executor wait，并用固定任务与 verifier 比较成功率、延迟和单位成功成本。
+
+4. **能否把 GPT-5.4 base 的 `tool_search` 和 `computer_use` 自动复制给 nano？**
+
+   不能。当前 mini 模型页列出 `tool_search`/`computer_use`，nano 模型页没有列出这两项；必须按精确 `model_id + snapshot + endpoint` 做 capability probe。即使页面列出工具，也仍需宿主授权、沙箱、审批、超时、审计和执行回执，模型输出 tool call 不等于副作用已发生。
+
+5. **小模型 Prompt Contract 至少要写什么？**
+
+   写清目标、规则、前置依赖、工具顺序、输入缺失时的 abstain、工具失败恢复、输出 schema/长度、停止条件和正确示例。mini/nano 更依赖显式契约来减少隐含补步骤和消歧；`请认真完成` 不是可靠的 Agent 控制面。
+
+6. **为什么 mini/nano 是资料级闭环，却没有新增 Transformer 章节？**
+
+   因为已有证据支持 API snapshot、上下文/预算、任务定位、工具矩阵和 serving 路由，但没有公开参数、层/专家/注意力结构、训练 recipe、system card、独立技术报告、精确 DataCurve 结果或生产 kernel。新知识复用既有 reasoning、Agent serving、工具协议和公平评测章节，并保留这些负面证据。
+
+## 2026-09 DeepSeek V4 Pro：百万上下文、Reasoning Effort 与评测归因
+
+1. **DeepSeek V4 Pro 的 `low/high/max` 是三个模型吗？**
+
+   不是。官方 GA 公告把它们定义为同一个 `deepseek-v4-pro` API 模型的 reasoning effort；它们是请求级运行配置。DataCurve 的 `mini_swe_agent_deepseek_v4_pro_max` 仍应作为独立配置记录，但不能把 max 行写成新的基础权重。
+
+2. **DataCurve 的 Pass@1 `62.831858%` 能否直接说成 V4 Pro 的代码能力？**
+
+   不能。它绑定 `max`、`mini-swe-agent`、工具、任务集、环境、`n_runs=4` 和 verifier，同时伴随平均成本、输出 token 和 Agent steps。面试回答应先说“在该 harness 下的组合结果”，再讨论模型配置。
+
+3. **CSA/HCA、mHC、Muon 和 on-policy distillation 分别处在哪一层？**
+
+   CSA/HCA 是注意力/KV 表示与 serving 路径；mHC 是残差流几何约束；Muon 是优化器路径；on-policy distillation 是后训练的能力合并流程。它们不能被笼统地称作四种“注意力机制”。
+
+4. **V4 Pro 的 Responses API 是否自动保存会话状态？**
+
+   当前官方文档明确 Responses 是 stateless，不支持 `previous_response_id`、`conversation`、`background` 或 `store`。function tools、`apply_patch` 和并行调用只是协议能力，仍需宿主保存历史、授权工具、处理回执、保证幂等并运行 verifier。
+
+5. **配置里的 1.6T/49B、384 experts、6 selected、`index_topk=1024` 能直接推出显存和吞吐吗？**
+
+   不能。它们是模型卡/配置字段；容量分析还要加入 resident weights、shared/router、专家通信、KV/indexer cache、量化 scale、workspace、batch、并发和具体 kernel。`index_topk` 也不等于最终所有层只读取固定数量的原始 token。
+
+## 2026-09 GLM-5.1：长周期 Agent、过程质量与协议边界
+
+1. **GLM-5.1 的“最长 8 小时工作”是不是只因为它有 200K context？**
+
+   不是。200K 只是输入窗口字段；长周期 Agent 还要解决目标保持、状态/历史管理、工具执行、错误累积、策略更新、预算、停止条件和外部 verifier。Z.ai 的“8 小时”是发布方长任务描述，回答时必须追问完整 harness、机器、工具、超时和验收脚本。
+
+2. **GLM-5.1 的 experiment–analyze–optimize loop 应如何拆成系统？**
+
+   模型提出计划、实验和下一步工具调用；宿主执行实验并回传真实结果；模型识别瓶颈、修改策略并重试；最后由测试、性能指标、artifact digest 和权限审计验收。655 次迭代和数千工具调用是轨迹/harness 统计，不是模型内部层数、专家数或 reasoning token 数。
+
+3. **multi-turn SFT、RL 和 process-quality evaluation framework 是否等于 GRPO/RLVR？**
+
+   不能。Z.ai release notes 只公开了这些方向，没有公开具体 RL 算法、奖励模型、轨迹过滤、优势估计或 verifier 实现。面试回答应把它们标为发布方后训练/评测描述，不能补写成 GLM-5 或其他版本的 recipe。
+
+4. **GLM-5.1 的 `thinking.type` 和 `reasoning_effort` 如何区分？**
+
+   当前 Z.ai 文档对 GLM-5.1 支持 `thinking.type=enabled/disabled`，这是请求级思考模式；同一文档把 `reasoning_effort` 支持列为 GLM-5.2 及以上。不能把 GLM-5.2 的 `max/high/low` 选项迁移给 GLM-5.1，也不能把 thinking 模式写成不同 checkpoint。
+
+5. **配置里的 `GlmMoeDsaForCausalLM`、78 层、256 experts/top-8/1 shared、`index_topk=2048` 能证明 GLM-5.1 有完整 DSA 生产实现吗？**
+
+   不能。它们是官方 config 的实现字段；还缺 DSA indexer 训练目标、召回曲线、尾部保留、gather/kernel、硬件 profiling 和端到端质量对照。也不能因为 GLM-5 使用相近字段，就把 GLM-5 的训练 tokens、`slime` 或报告结论改名为 GLM-5.1 专属事实。
+
+6. **GLM-5.1 的 Function Calling、MCP 和 Context Caching 分别解决什么问题？**
+
+   Function Calling 描述模型提出结构化工具调用；MCP 统一外部工具/数据源接入；Context Caching 复用重复输入并报告 cached tokens。三者都不是权限、执行器或永久 GPU KV cache：宿主仍要做 schema/授权检查、执行、结果回灌、TTL/租户隔离和最终 verifier。
+
+7. **为什么 GLM-5.1 目前只能称 AA 单榜资料级闭环？**
+
+   Artificial Analysis 有精确 `glm-5-1` 条目，但 DataCurve 没有精确 `mini_swe_agent_glm_5_1_*` 行；因此不能记录或迁移 GLM-5/5.2/5.3 的 DeepSWE 分数。2026-09-21 已重新取得官方博客正文资源，但模型卡仍链接 GLM-5 报告，arXiv 精确检索也没有 GLM-5.1 专属报告，所以仍不新增重复 Transformer 章节。
+
+8. **VectorDBBench 的 600+ 次迭代为什么比一次 SWE-Bench 分数更能说明长周期 Agent？**
+
+   考察点：外层优化循环、反馈信号、约束保持与策略切换。
+
+   回答框架：一次 SWE-Bench 主要给出固定任务上的单次结果；博客中的 VectorDBBench 把 Rust ANN 实现、SIFT-1M、Recall ≥ 95% 和 QPS 组成可执行反馈，外层 harness 允许模型编辑、编译、测试、profile、提交并据结果换策略。600+ iterations、6,000+ tool calls、21.5k QPS 是发布方系统结果，面试时还要追问预算、提交规则、指标泄漏、失败回滚和独立 verifier，不能把迭代次数当作模型内部推理深度。
+
+9. **KernelBench Level 3 的双审计器说明了什么？**
+
+   考察点：正确性门禁、benchmark exploitation、性能评测的证据链。
+
+   回答框架：每个问题在独立 Docker/H100 上运行，先用数值容差检查输出正确性，再由 Claude Opus 4.6 与 GPT-5.4 审计是否利用 benchmark 特例，最后取较低 speedup。它说明“生成了更快 kernel”必须同时通过 correctness、泛化/反作弊和性能门禁；3.6× 与 1.49× 只属于博客公开实验设置，不是 GLM-5.1 的独立硬件 profiling 或通用吞吐保证。
+
+## 2026-09 Grok 4.20：Multi-agent、opaque state 与工具协议
+
+1. **Grok 4.20 Multi-agent 的 4/16 个 Agent 是 reasoning 深度、MoE expert 数量还是外部编排规模？**
+
+   是外部 Agent runtime 的协作规模。xAI 文档把 SDK 的 `agent_count=4/16` 与 Responses 的 `reasoning.effort=low/medium`、`high/xhigh` 对应起来；它不证明普通 Grok 4.20 的隐藏思考层数、MoE expert 数量或新的基础模型权重。回答时要先区分 model capability、orchestration topology 和 neural architecture。
+
+2. **16-agent 为什么不一定优于 4-agent？如何设计公平对照？**
+
+   16 个 worker 可能增加检索覆盖和视角多样性，但也会增加 token、工具调用、延迟、重复工作、来源相关性和 leader 汇总错误。应固定问题、模型 ID、来源白名单、工具、预算、停止条件和 verifier，记录子 Agent 任务分片、证据召回、引用支持率、重复率、最终成功率、p95 延迟和单位成功成本。
+
+3. **leader 能看到子 Agent 的完整 reasoning 和工具状态吗？`use_encrypted_content` 解决什么问题？**
+
+   默认返回的是 leader 的工具调用和最终响应，子 Agent 的中间 reasoning、工具调用和输出不以可读文本直接暴露。`use_encrypted_content` 让子 Agent 状态以加密 opaque 内容保留，便于后续上下文恢复；它不是公开 chain-of-thought，也不允许客户端解析、裁剪或重排内部状态。审计系统仍要保存任务分片、来源、调用 ID、失败/重试和 leader 的引用依据。
+
+4. **Artificial Analysis 的 2M context 与 xAI 官方页的 1M prompt/context 冲突时，面试应该怎么回答？**
+
+   不应强行选一个数字。2M 是第三方目录字段，1M 是官方模型页/注册表对具体服务对象的字段；应在 capability manifest 中绑定 `source`、snapshot、model ID、endpoint、区域和核验时间，并用实际 capability probe 确认可用上限。context window 也不等于可用工作记忆，还要扣除工具 schema/result、缓存、压缩和输出预算。
+
+5. **Grok 4.20 的 context compaction 与 prompt caching、reasoning encrypted state 有什么区别？**
+
+   encrypted reasoning state 是供协议继续推理的 opaque 状态；prompt caching 是 provider 对重复前缀的计算/计费复用；compaction 是把长 Responses 历史压成一个 `type=compaction` item。压缩结果必须整体、原样回放，不能当作普通摘要手工编辑；三者都不能替代应用自己的会话、工具回执和 artifact 持久化。
+
+6. **server-side tool、client-side function call 和 `max_turns` 如何分责？**
+
+   Web/X Search、Code Execution、Collections Search 等 server-side tool 由 xAI 服务执行；function call 只是模型的结构化提案，宿主仍负责授权、执行、幂等、结果回灌和最终 verifier。`max_turns` 限制一次请求中的 server-side tool turns；client-side call 会暂停请求，后续 follow-up request 重新计数，所以还要有跨请求的全局轮数、成本和副作用预算。
+
+7. **Remote MCP 的 `allowed_tools` 为什么同时是上下文优化和安全控制？**
+
+   远程 MCP 的工具 schema 会进入上下文；不设 allowlist 会扩大 schema token、可调用面和误用/注入风险。`allowed_tools` 可以减少暴露工具和上下文开销，但不是最终授权，宿主还必须校验租户、资源、参数、审批、速率、网络、敏感数据和幂等。工具结果仍是带来源的证据，不是自动升级的系统指令。
+
+8. **为什么不能把 Grok 4.6 的 DataCurve 结果迁移给 Grok 4.20？**
+
+   DataCurve 当前没有精确 `mini_swe_agent_grok_4_20_*` 行；可见的 Grok 4.5/4.6 结果绑定不同 model ID、effort、`mini-swe-agent`、工具、环境、任务集和 verifier。Grok 4.20 当前只能称 AA 单榜资料级闭环，不能把相邻版本的 Pass@1、成本、输出 token 或 Agent steps 写成 4.20 的能力。
+
+## 2026-09 Gemini 3.8 Flash：Thinking、Interactions 与工具闭环
+
+1. **Gemini 3.8 Flash 的 `low/medium/high` 是三个模型吗？**
+
+   不是。它们是同一基础模型的请求级 thinking 配置/预算档位；AA 的三个页面应归并为一个模型，不能由 effort 行推断三个 checkpoint、三套权重或三种架构。`minimal` 在该模型的 Google 官方字段中不支持，也不能自行补成合法档位。
+
+2. **`max_output_tokens` 与 thinking budget 如何影响结果？**
+
+   请求预算可能同时覆盖 thinking token 与可见输出；预算过小会让思考或最终答案截断。比较档位时应固定模型 snapshot、任务、工具、输出上限，记录 thinking/visible output、TTFT/TPOT、工具轮数、重试、最终 artifact 和单位成功成本，而不是只比较回答长度。
+
+3. **Thought summary、thought signature 和普通对话历史有什么区别？**
+
+   thought summary 是面向开发者的摘要，不是完整 chain-of-thought；thought signature 是供协议维持推理连续性的 opaque 表示。它们不是永久记忆，也不是等同于 GPU KV cache。客户端应按文档原样保留/回放，不能假设每个 thought block 都有 summary，也不能把 signature 当可读推理文本。
+
+4. **Interactions API 对 Agent runtime 的价值是什么？**
+
+   它把长任务显式拆成 `thought`、`tool_call`、`tool_result`、`model_output` 等 steps，并可用 `previous_interaction_id` 做 stateful continuation；SSE 事件让运行时能审计 step 的开始、增量和结束。服务端生成调用意图，宿主仍负责权限、执行、超时、幂等、重试、回滚和 artifact verifier。
+
+5. **Search、URL Context、File Search、Code Execution 和 Function Calling 能否视为模型新结构？**
+
+   不能。它们是外部工具/应用上下文协议：检索或代码结果再次进入上下文，模型据此继续规划、修正或结束。File Search 的 embedding/chunk/store 也不是模型训练或永久记忆；Function Calling 只是结构化提案，真实执行权属于宿主。
+
+6. **Computer Use 的安全责任应该放在哪里？**
+
+   模型根据截图提出 action intent 和归一化坐标，客户端执行动作并回传新状态。客户端必须做域名/资源 allowlist、权限与人工确认、敏感动作拦截、超时、审计和幂等；`regular/require_confirmation/blocked` 是安全决策入口，不代表模型已经完成点击或交易。
+
+7. **怎样解释 Gemini 3.8 的 DataCurve 74% Pass@1？**
+
+   它是 `gemini-3-8-flash` + high + `mini-swe-agent` + 工具/任务环境/verifier 的组合结果：本轮精确行有 `n_runs=4`、`n_attempted=447`、Pass@1 `73.8255%`、Pass@4 `85.8408%`、平均成本约 `$2.36` 和平均 `166.31` steps。不能把它写成裸模型分数，也不能迁移到 low/medium 或其他 Gemini 版本。
+
+8. **Gemini 3.8 的 Model Card 没有独立架构报告时，面试如何回答？**
+
+说明公开资料能确认的是 API 能力、Model Card 继承关系、工具和评测设置；当前不能确认参数量、层数、MoE/稠密结构、训练数据、RL 算法或 verifier。把“使用更小 reasoning steps、工具迭代和验证”回答成公开系统行为，并明确内部机制仍是证据缺口。
+
+9. **Interactions API 的 `previous_interaction_id` 会继承哪些东西？**
+
+   它只让服务端取回 conversation history。`tools`、`system_instruction` 和 `generation_config`（包括 `thinking_level`、temperature）是当前 interaction-scoped，下一轮要重新指定；不能把 history 链接理解成整份运行配置自动继承。
+
+10. **`store=false`、stateless replay 和 retention 如何区分？**
+
+   `store=false` 是不保存该 Interaction，不能继续使用它的 `previous_interaction_id`，但客户端仍可自行维护完整 history 做 stateless 请求。官方当前写明付费/免费 Interaction 默认保留 55/1 天，并支持按 ID delete；这些是服务侧生命周期合同，不是永久记忆。
+
+11. **为什么 Gemini 文档对 function-call signature 的描述要谨慎？**
+
+   Thinking 页面把 Interactions signature 限定为 thought/built-in tool steps；Tool combination 页面又把 Gemini 3+ 的 tool call/result signature 描述为 tool context circulation 字段。面试应明确这是官方页面之间的字段范围差异：原样保存实际返回的 opaque fields，使用 call/result `id` 对齐，并以具体 endpoint/schema/SDK probe 为准，不能自行生成或删除 signature。
+
+12. **`max_output_tokens` 太小和降低 thinking level 的区别是什么？**
+
+   前者是包含 thought 与 visible output 的硬截止线，思考阶段触顶会让 Interaction `incomplete`、输出截断/为空且已生成 thought 仍计费；后者是请求级预算/策略控制。要降低成本和延迟，不能用过小的硬上限替代 level 路由。
+
+## 2026-09 DeepSeek V4 Pro：reference inference、协议与证据边界
+
+1. **为什么说 V4 Pro 的 HF inference 代码比模型卡多回答了一层问题？**
+
+   模型卡/论文说明 CSA、HCA、mHC 和 FP4/FP8 的设计动机；固定 revision 的 `model.py`、`kernel.py` 和 `inference/config.json` 进一步展示 compressor、overlap state、causal/top-k indexer、128-token local window、hash/score routing、MTP 和 Sinkhorn 的参考连接方式。但它仍不是完整权重加载、线上服务或生产 profiling 的证明。
+
+2. **压缩误差、indexer 漏检和最终 evidence recall 有什么区别？**
+
+   压缩误差发生在多个 token 汇聚成压缩 KV 时；indexer 漏检发生在候选排序/top-k 时；evidence recall 关注最终注意力实际读到的候选是否包含任务所需证据。局部窗口可以补偿近期细节，但不能自动修复远程候选漏检。
+
+3. **`n_hash_layers=3` 和 `sqrtsoftplus` 说明了什么？**
+
+   公开 reference path 让前三层使用 token-id hash routing，后续层使用 score routing；这是实现字段，能说明路由分支存在，不能推出训练时的完整负载均衡、hash collision 处理或线上专家热度。
+
+4. **`MP=8` 是否等于 V4 Pro 的生产并行方案？**
+
+   不是。它是官方 inference conversion 的示例参数。实际部署还要固定 GPU、权重布局、TP/EP/DCP、通信链路、batch、KV/cache dtype、workspace 和 verifier，并通过端到端 profiling 验收。
+
+5. **DSML parser 能否证明模型内部使用了某种 reasoning 算法？**
+
+   不能。DSML、`<think>`、`reasoning_effort` 和 tool-role 合并是公开 prompt/protocol 行为。parser 只能说明如何编码和解析消息；隐藏状态、训练算法和真实思维过程不能由协议字符串推断。
+
+6. **如果 DataCurve 与 reference toy 的结果都很好，能否说 V4 Pro 已经复现？**
+
+   不能。DataCurve 行绑定 max、mini-swe-agent、工具、环境、任务集和 verifier；toy 只验证局部机制。完整复现还需要固定权重/revision、kernel commit、GPU、数据、采样、量化、服务配置和独立 verifier。
+
+## 2026-09 DeepSeek V4.1-Flash：`deepseek-recipe` 协议实现
+
+1. **`deepseek-recipe` 是 V4.1 推理引擎吗？**
+
+   不是。固定 commit `8cadfede7063c896b944e7bae05daa3549ae97ea` 的职责是把 Messages、Chat Completions、Responses 规范化为 `ConversationRequest`，渲染 V4/V4.1 prompt、附加 tokenizer，并把后端 `InferenceChunk` 解析回协议事件。模型 inference、HTTP transport、工具执行、权限和 verifier 由宿主提供。
+
+2. **为什么流式 parser 不能按每个 chunk 做字符串替换？**
+
+   因为 `<think>`、DSML、JSON fence 和 stop marker 可能跨 token/SSE chunk 被拆开。仓库的 state machine 保留未闭合 marker，再由 `StreamProcessor` 组装 reasoning/tool/content/usage/finish 事件；parser 成功仍不等于工具执行成功或业务 JSON 通过。
+
+3. **tokenizer bridge 的验收门禁是什么？**
+
+   先渲染已经包含 special-token 文本的 prompt，再附加匹配 revision 的 tokenizer，并关闭额外 special-token 注入；未附 tokenizer 时拒绝 token encoding/ID stream。应把 prompt、token IDs、special tokens、stop 条件和 stream event 保存为 golden trace。
+
+4. **支持图像 URL 是否等于安全地抓取任意 URL？**
+
+   不等于。固定实现有图像数量/单图/总字节/并发/超时限制，但默认 fetcher 不过滤 private、loopback 或 link-local 地址。URL 可控时仍要加 SSRF、DNS rebinding、MIME、出站网络、权限和审计门禁。
+
+## 2026-09 Kimi K3：vLLM 证据层级与硬件分叉
+
+1. **vLLM stable supported-models 页面列出 K3，能否直接说 stable wheel 已支持？**
+
+   不能。它证明 stable 文档目录能发现 `KimiK3ForConditionalGeneration`、`Kimi-K3` 和 `moonshotai/Kimi-K3`；还要固定 wheel 版本，实际加载完整权重，并在目标硬件上验证输出、性能和恢复。
+
+2. **main registry 中的 `KimiK3MTP` 和 `K3DSparkModel` 证明了什么？**
+
+   证明 main 源码有 registry 入口，不证明 MTP 的 draft/verify/rollback、DSpark speculative acceptance 或线上 tool-call 已通过。必须把类名、实现分支、权重、硬件和 acceptance 分栏。
+
+3. **为什么 K3 package 要按 NVIDIA/ROCm 分流？**
+
+   不同平台的 kernel、dtype、通信和 cache backend 可能不同；入口分流避免在错误平台主动加载 GPU 实现，但仍需分别做权重加载、kernel、通信、双状态恢复和 profiling 验收。
+
+4. **K3 recipe 标为 `Pre-release` 时，面试回答应如何措辞？**
+
+   可以说 PyPI vLLM 0.29.0 stable release/source 已有 K3 实现入口，同时存在特定 CUDA 13/cu130、driver、TP/TEP/DEP/PP、DCP 和 hybrid KV 的 nightly 优化部署路径；不能说目标硬件 runtime 或生产 SLO 已经证明。FlashKDA 的局部 benchmark 也不能替代端到端 serving。
+
+5. **如何设计 K3 的 serving evidence manifest？**
+
+   至少记录 docs/API、main registry、platform branch、pinned recipe、wheel/version、model revision、full-weight load、MLA `key/value_cache`、KDA `conv/recurrent_states`、硬件 profiling、tool schema/retry/idempotency 和 verifier 状态；缺失项写 `unverified`，不要默认成功。
+
+## 2026-09 Kimi K3：SGLang stable/main 与 EP runtime
+
+1. **SGLang `main` 的 K3 文件比 `v0.5.20` 大，能否直接说 main 的能力已经进入 stable？**
+
+   不能。`v0.5.20` 是固定 tag，`main` 是 mutable branch；应分别记录 tag commit、Git blob、文件哈希、实现差异和目标 release。源码差异只能说明 upstream 实现演进，不能证明 stable wheel 或目标硬件 acceptance。
+
+2. **K3 LatentMoE 为什么要在 expert 前后各有一个 projection？**
+
+   routed expert 在 latent width 中计算，先用 down projection 压缩 full hidden，expert 处理 latent representation，聚合和必要的 latent reduction/RMSNorm 后再用 up projection 回到 full width。这样解耦 expert GEMM 宽度与主干宽度，但增加了 projection、归约和通信账本。
+
+3. **EP/A2A、shared-expert TP 和 SP-MoE 如何共同影响 decode？**
+
+   attention 的 reduce-scatter 先形成 token shard；A2A 只 dispatch 当前 rank 的 rows；shared experts 若复制权重可本地计算，若 TP-shard 则要 gather 输入和 reduce-scatter 输出；尾部再 all-gather 恢复后续层布局。配置不匹配会造成重复 dispatch、错误 partial sum、死锁或 p99 抖动，不能只回答 `TP=8/EP=8`。
+
+4. **SBO 为什么可以降低 latency，什么情况下反而会出问题？**
+
+   它把 shared-expert branch 放在 side stream，与 routed A2A/latent tail 重叠，在消费前 join；收益取决于分支独立、显存容量、event/allocator 生命周期和 capture mode。join 太早没有重叠，stream 记录错误会产生读写竞态，shared TP 分支还必须正确处理 partial sum。
+
+5. **KDA fused decode capability gate 的意义是什么？**
+
+   它根据 conv layout、`A_log`、`dt_bias`、head 数、dtype 和 backend 检查是否命中编译 kernel；不命中则回退普通链路。它证明的是可选执行路径，不是完整权重、KDA/MLA 双状态恢复、fallback 数值、目标 profiling 或 Agent tool acceptance 已通过。
+
+6. **SGLang 两版本的视觉文件一致，能否说明 K3 多模态 serving 已稳定？**
+
+   不能。它只说明两个源码快照的视觉实现一致；仍需验收 vision weight/grid/patch 对齐、变长 `cu_seqlens`、attention backend、CUDA graph、视觉 embedding 注入文本模型、双状态 cache 和 tool/verifier 回归。
+
+7. **如何在面试中准确描述 K3 当前 serving 状态？**
+
+   可以说：K3 有 HF/vLLM 证据，SGLang `v0.5.20` 有 stable text/vision implementation entry，SGLang `main` 继续演进文本通信/量化/KDA runtime；但完整权重加载、目标硬件 profile、双状态 recovery、视觉正确性和线上 tool/schema/idempotency/verifier acceptance 仍是独立待验收门禁。
+
+## 2026-09 GPT-5.6 Luna：服务档位、状态回放与成本边界
+
+1. **为什么 GPT-5.6 Luna 的 `max` 不能直接和 Sol/Terra 的 `max` 比成一个模型等级？**
+
+   考察点：服务档位、effort、mode、provider 和评测条件。
+   回答框架：Luna/Sol/Terra 是服务档位，`max` 是请求 effort，`standard/pro` 是 reasoning mode；还要固定 snapshot、工具、harness、任务集和 verifier。AA 的 Intelligence Index 与 DataCurve 的 Pass@1 是不同测量对象。
+
+2. **GPT-5.6 的 `reasoning.context=all_turns` 保存的是什么？**
+
+   考察点：opaque reasoning item、跨轮回放、可见输出与永久记忆。
+   回答框架：它允许同一模型家族在后续请求使用可兼容的 reasoning state，但不是可读 CoT、永久记忆或 GPU KV cache；需要 `previous_response_id`、Conversation 或完整 item 回放，手工裁剪函数调用前后的状态可能破坏规划。
+
+3. **GPT-5.6 prompt caching 的显式 breakpoint 解决什么问题？**
+
+   考察点：稳定前缀、1,024 token 门槛、30m TTL、compaction 和计费。
+   回答框架：把稳定 developer/instruction 前缀与动态工具结果分开，明确缓存断点；读取、写入、未缓存输入和 output 分账。compaction 会替换旧前缀，第一次压缩后请求可能 cache miss，不能把 prompt cache 当 GPU KV cache。
+
+4. **为什么 1.05M context 不等于 1.05M 可自由使用的输入？**
+
+   考察点：maximum input/output、reasoning token、工具结果和价格阈值。
+   回答框架：1.05M 是总窗口，922K 是 maximum input，128K 是 maximum output；系统消息、工具、reasoning 和协议 item 也占容量。超过 272K 的整次请求还会触发文档中的费率倍率，必须测 token、延迟、缓存和成功成本。
+
+5. **tool search 或 Programmatic Tool Calling 是否让模型拥有工具权限？**
+
+   考察点：模型意图、schema 加载、executor、权限和 verifier。
+   回答框架：它们改变工具发现或调用编排，不能授予文件、网络、shell 或业务写入权限。宿主仍负责 schema/version、审批、沙箱、超时、重试、幂等、回滚和最终结果验证。
+
+6. **本轮 OpenAI 官方页面返回 403 时，如何更新 GPT-5.6 Luna 研究？**
+
+   考察点：证据时间语境与负面证据。
+   回答框架：可以记录 AA/DataCurve 新鲜快照和代理状态；已有官方页面快照继续标为历史证据，不把它改写为本轮成功访问，也不因 403 断言模型不存在。新的 API 行为和版本差异必须等官方页面可复核后再写入。
+
+7. **Hosted tool search 和 client-executed tool search 有什么区别？**
+
+   考察点：工具发现责任、`tool_search_call`/`tool_search_output`、`call_id`、缓存与权限。
+   回答框架：Hosted 路径由 OpenAI 在同一个 response 中搜索已声明的 namespace/MCP/function，并返回服务端执行的 search item 和 loaded subset；client 路径由模型发出 `tool_search_call`，应用根据项目或租户状态搜索，再用相同 `call_id` 回传 `tool_search_output`。两者都把工具追加到上下文尾部以尽量保留 cache prefix，但搜索结果仍需 schema 校验、权限审批、沙箱、幂等和 verifier；加载工具不等于获得执行权。
+
+8. **Agents API、Agents SDK 和 Responses API 应如何选型？**
+
+   考察点：Agent loop 所有权、session/conversation/sandbox 资源边界、状态持久化。
+   回答框架：Agents API 由 OpenAI 托管 Codex harness、会话配置、turns 和 items，适合希望平台管理长任务进度；Agents SDK 由应用控制部署、存储、审批、runtime、工具和 handoff；Responses API 直接暴露 response/history/tool loop，应用自己构造 harness。三者不是三个模型，session、conversation 和 sandbox 也不能混为一谈。
+
+9. **GPT-5.6 的 prompt cache 和 compaction 如何一起计入长任务成本？**
+
+   考察点：prefix match、1,024 token 门槛、显式 breakpoint、`context_management`、opaque item、cache miss。
+   回答框架：GPT-5.6 支持至少 1,024 个 visible input token 的可缓存前缀、implicit/explicit breakpoint、最多四次 cache writes 和 `30m` TTL；tool search 把新增 schema 追加到末尾，有利于保护稳定前缀。Compaction 会替换较早上下文，可能从变化点开始打断 cache prefix；因此要记录 cached tokens、cache writes、compaction 次数、恢复后的工具重复率、延迟和单位成功成本，不能把压缩后的 token 数直接当节省金额。
+
+## Claude Sonnet 5：System Card 与 adaptive thinking
+
+1. **为什么 Sonnet 5 的 `effort=max` 不是固定的 thinking token budget？**
+
+   回答框架：`effort` 是请求级行为信号，`max_tokens` 才是 thinking、工具调用和可见文本共享的单次硬上限；整个 Agent loop 还要单独记录 task budget、工具结果、重试和 verifier 成本。同一 effort 的实际 token 数会随任务变化。
+
+2. **如何解释 Artificial Analysis、DataCurve 和 Anthropic System Card 的不同分数？**
+
+   回答框架：AA 是 provider/configuration 的第三方测量；DataCurve 是 Sonnet 5 + effort + `mini-swe-agent` + 工具 + 仓库环境 + verifier；System Card 是发布方 harness，通常还绑定 adaptive/max、trials、safeguards 和特定任务。三者必须分账，不能做一个裸模型排名。
+
+3. **Sonnet 5 的 System Card 能否证明训练方法或内部安全模块？**
+
+   回答框架：不能。公开信息只到专有混合训练数据的高层描述、RSP 分级和给定 harness 的安全/能力结果；没有完整训练 recipe、参数/架构或内部 adaptive-thinking 机制。Claude Code 92.37% 和 computer-use 84.68% 的拒答率是配置下的行为测量，不是独立安全模块准确率。
+
+4. **为什么 compaction 后不能只把摘要发给模型？**
+
+   回答框架：thinking block/signature、tool call/result、权限决定、未完成副作用和 artifact 都是可继续任务所需状态。恢复应按协议原样回放并检查幂等/验证；只保存最终摘要可能导致重复工具调用或错误宣称完成。
+
+## Grok 4.7：长轨迹、状态与工具协议
+
+1. **Grok 4.7 的 `reasoning_effort` 是四个模型吗？**
+
+   回答框架：不是。`low/medium/high/xhigh` 是同一 `grok-4.7` 服务的请求级配置；不能把 effort 行当成 checkpoint、MoE expert 数量或四套参数。比较时要固定 model revision、provider、工具、任务集、verifier 和预算。
+
+2. **`reasoning.encrypted_content` 与可见 CoT、prompt cache、应用记忆有什么区别？**
+
+   回答框架：它是 Responses 协议中的 opaque runtime state，需要后续原样回放；不是可读的完整 CoT、不是缓存前缀、不是应用永久记忆，也不是可直接访问的 GPU KV cache。Chat Completions 没有同样的 ciphertext 字段。
+
+3. **为什么 context compaction 不能简单理解为删除旧历史？**
+
+   回答框架：xAI 返回单个 opaque compaction item，不能修改、裁剪或重排；compaction 只能在请求还没有超限时重组上下文，也不能清零预算或撤销已提交副作用。工具回执、权限决定、artifact 和恢复事件必须进入 trace。
+
+4. **更长的 RL run 如何证明收益不是输出变长？**
+
+   回答框架：固定模型、初始环境、工具、effort、墙钟和 verifier，分开测任务成功、artifact 正确性、独立验证、工具轮数、reasoning/output token、恢复率、单位成功成本和副作用。模型自验证只能产生反馈，不能替代独立 verifier。
+
+5. **`allowed_tools` 为什么同时影响安全和上下文成本？**
+
+   回答框架：它缩小模型可见/可调用的工具集合，既减少 schema token 和选择噪声，也构成最小权限的一层；但还需要凭据隔离、网络策略、宿主授权、超时、审计、幂等和结果校验。
+
+6. **为什么不能把 xAI 发布的 DeepSWE `71.0%` 与 DataCurve 或 AA 分数合并？**
+
+   回答框架：三者的 provider、effort、任务集、harness、工具、环境、verifier 和统计口径不同；而且 DataCurve 当前没有精确 Grok 4.7 行。必须保留来源标签，不能构造统一裸模型排名。
+
+7. **Grok 4.7 的 `encrypted_content`、reasoning summary 和 `store`/`previous_response_id` 分别是什么？**
+
+   回答框架：`encrypted_content` 是 Responses 跨轮继续推理所需的 opaque state，服务端工具的加密输出也要保留并原样回放；`response.reasoning_text.delta`/`response.reasoning_summary_text.delta` 是面向开发者的可见 summary/stream，不是完整隐藏 CoT；`store` 决定 response 是否可由 `previous_response_id` 复用。三者分别属于回放状态、观察面和服务端状态引用，不能互相替代。
+
+8. **为什么 MCP 的 `allowed_tools`、`allowed_tool_names`、`extra_headers` 和 `require_approval` 不能直接当作统一安全模型？**
+
+   回答框架：Responses API 与 xAI SDK 的字段名不同，当前 transport 只支持 Streaming HTTP/SSE，`require_approval`/`connector_id` 在该 Responses API 不支持；allowlist 只缩小 schema/调用集合，宿主仍要做凭据隔离、网络策略、用户授权、超时、幂等、审计和独立 verifier。
+
+## Qwen3-Omni：Thinker-Talker、AuT 与流式多模态
+
+1. **Q：为什么 Qwen3-Omni 要拆成 Thinker 和 Talker？**
+
+   **答：** Thinker 负责多模态理解、推理、文本和工具/策略接口；Talker 负责连续语音 token 和 waveform。Talker 还使用音频/视觉多模态特征，因此 Thinker 链路可以插入 RAG、function calling、安全策略和 verifier，而不是先把全部信息压成文本再做 TTS。
+
+2. **Q：AuT 的 12.5 Hz 和约 80 ms 代表什么？**
+
+   **答：** 它是音频 token 的时间粒度，约为 `1 / 12.5 = 80 ms`；不等于端到端首包延迟。音频解码、encoder、Thinker prefill、工具/安全门禁、Talker、Code2Wav、网络和播放缓冲都要单独计入。
+
+3. **Q：TM-RoPE 相比普通 RoPE 解决了什么问题？**
+
+   **答：** TM-RoPE 把 temporal、height、width 分开，并按真实 timestamp 将音频/视频对齐到约 80 ms 时间轴。它解决跨媒体位置表示，不自动解决跨 chunk 状态恢复、长视频检索、丢帧和网络乱序。
+
+4. **Q：Talker 中的 MTP 如何降低生成延迟？**
+
+   **答：** 第一个 codebook 走自回归路径，剩余 residual codebooks 由 MTP 预测，减少码本维度的串行深度。是否提升端到端实时率仍要测 code rate、后端 kernel、Code2Wav、packet 拼接和质量/接受率。
+
+5. **Q：报告中的 audio/video first packet `234/547 ms` 能否直接作为线上 SLO？**
+
+   **答：** 不能。它们是论文/发布方口径数字；线上必须固定媒体、并发、后端、GPU、网络、工具、缓存、取消和播放缓冲后测 p50/p95/p99。
+
+6. **Q：Qwen3-Omni 当前有 DataCurve DeepSWE 成绩吗？**
+
+   **答：** 当前快照没有精确 `mini_swe_agent_qwen3_omni_*` 行，所以不能迁移其他 Qwen 的 Pass@1、成本、输出 token 或 Agent steps。它是 AA 单榜内容专题闭环，不是双榜 Agent 评测闭环。
+
+7. **Q：为什么“仓库能运行”不等于“vLLM 已支持 Qwen3-Omni 语音输出”？**
+
+   **答：** 官方 README 当前说明 vLLM 主要支持 Thinker，Instruct 音频输出仍在实现推进中。模型加载、音频预处理、Talker 多码本、Code2Wav、streaming、取消恢复和目标硬件 acceptance 是不同 gate。
+
+## 2026-09 K2 Horizon 3.7B：dense 对照、训练阶段与 revision
+
+1. **Q：K2 Horizon 3.7B 是 K2 Horizon MoVA 36B/A4B 的缩小版吗？**
+
+   **答：** 不能这样说。当前 3.7B revision 是 36 层 dense `K2HorizonForCausalLM`，`num_experts=0`、`mova_num_experts=0`；36B 后 45 层才有 MoVA value top-4、FFN top-8 和 shared expert。两者共享 32Q/8KV GQA 与 524K 配置，但 forward 路径和 serving 成本不同。
+
+2. **Q：为什么 3.7B 还会出现 5.06B 参数？**
+
+   **答：** AA 的 3.7B 是目录身份；当前 BF16 权重 index 的字节数和 vLLM recipe 支持约 5.06B 存储参数/含 embedding 的口径。旧 APPENDIX 的 3.78B core/5.06B including embeddings 可以解释为字段拆分，但 `XllmForCausalLM`/FP32 与当前 config 冲突，必须按 revision 分账。
+
+3. **Q：3.7B 的 512K 是把 `max_position_embeddings` 改大就得到的吗？**
+
+   **答：** 不是。模型卡给出 8K pretraining、32K/128K/512K midtraining 和 512K SFT 的阶段增量；能力还取决于数据 packing、位置分布、激活/通信峰值和长任务评估。配置上限不等于所有 512K 任务稳定，也不等于 sliding-window attention。
+
+4. **Q：RL expert merge 和 36B 的 MoE expert 有什么区别？**
+
+   **答：** 3.7B 的 Math/Code/STEM-Code expert 是 RL 分支和 checkpoint 合并概念，模型卡描述 self-attention ISO merge、其他权重 RAM；36B 的 MoVA/FFN expert 是每次 forward 的动态 token routing。一个是训练/权重处理，一个是运行时计算路径，不能混写。
+
+5. **Q：migration manifest 证明了什么？**
+
+   **答：** 它证明 `k2_aurora -> k2_horizon` 的 artifact copy、BF16、36 shards/327 tensors 和 `weights_reencoded=false`。它不证明重新训练、所有 backend 行为等价或工具调用已经验收；tokenizer、chat template、parser、revision 和输出协议仍要回归。
+
+6. **Q：SGLang 的 92% GSM8K 和 DataCurve 的 Agent 分数可以合并吗？**
+
+   **答：** 不可以。SGLang 数字属于 H200 发布方 recipe，AA 是第三方 provider/configuration 测量，DataCurve 当前没有 3.7B 精确行。三者的任务、harness、硬件、verifier 和统计口径不同，必须分账。
+
+## 2026-09 Qwen3-VL：Interleaved-MRoPE、DeepStack 与视觉 Agent
+
+1. **问：Qwen3-VL 的 Interleaved-MRoPE 解决什么问题？**
+
+   **答：** 它仍使用 temporal、height、width 三轴位置，但把三轴对应的 rotary frequency 在低频和高频中交错分配，缓解长视频中的频谱偏置。它不是 1M context 证明，也不是视频检索器；采样率、chunk 和时间轴仍由宿主管理。
+
+2. **问：DeepStack 为什么要把视觉中间层送进语言模型？**
+
+   **答：** 最后视觉层偏高层语义，中间层还保留局部纹理、区域关系和不同深度的结构信息。Qwen3-VL 从 `[8,16,24]` 等中间层提取特征，经专用 merger 后以 residual 注入 LLM 早期层，增强早期跨模态对齐。它不复制三倍视觉 token，但会增加投影、激活和计算成本。
+
+3. **问：Video Timestamp 和 M-RoPE 是否重复？**
+
+   **答：** 不重复。M-RoPE 是模型内部的三轴位置表示；Video Timestamp 把 `<3.0 seconds>` 等可读绝对时间写入视频 patch 上下文。一个表示位置关系，一个提供可引用时间证据；两者都不能替代媒体采样、丢帧检测和回放 manifest。
+
+4. **问：为什么 visual Agent 需要 tool-calling reward？**
+
+   **答：** 只奖励最终答案和多轮推理，模型可能固定只调用一次工具、猜答案或走不可恢复捷径。tool-call reward 应约束调用时机、参数和次数与任务复杂度匹配。最终答案正确不等于轨迹高质量，工具调用多也不等于探索更好。
+
+5. **问：Qwen3-VL 的 235B total / 22B active 能直接用于显存估算吗？**
+
+   **答：** 不能。AA 的数字是第三方目录口径；显存还要计 resident experts、KV cache、视觉 embedding、expert placement、通信、workspace 和并发。要用固定 revision、dtype、TP/EP、输入媒体和目标硬件实测。
+
+6. **问：Qwen3-VL 的 262K context 是否意味着任意长视频都能有效理解？**
+
+   **答：** 不是。262K 是 AA/config/论文阶段各自绑定的上下文字段，不保证有效召回。还要控制视频采样、视觉 token 数、时间戳、长视频定位、工具结果和质量—成本曲线，并报告未覆盖证据。
+
+7. **问：Transformers 上游已有 Qwen3-VL 实现，是否等于生产 serving 已完成？**
+
+   **答：** 不等于。还要通过固定 revision 的完整权重加载、processor、视觉数值正确性、M-RoPE/DeepStack/timestamp replay、TP/EP、KV/cache、目标硬件 profiling、GUI/tool 权限和独立 verifier。raw main 快照没有固定 commit 时，也不能当作不可变生产版本。
+
+8. **问：如何公平报告 Qwen3-VL 的 Agent 能力？**
+
+   **答：** 绑定模型 variant/revision、reasoning 配置、工具 schema、权限、任务集、环境、超时、重试、verifier 和统计方法。AA Intelligence Index、论文自报 benchmark、未来 DataCurve 行和本地 GUI/tool 实验分开记账；当前 DataCurve 没有精确 Qwen3-VL 行，不迁移其他 Qwen 结果。
+
+## 2026-09 Qwen3.7 Plus：交互式混合 Agent 与托管合同
+
+1. **问：Qwen3.7 Plus 的“多模态交互式混合 Agent”具体意味着什么？**
+
+   **答：** 官方托管文档把它定位为可接收文本、图像、视频并输出文本的 Agent，覆盖读屏、GUI 交互、依据视觉参考生成代码和移动端导航。面试中不能把它简化成“模型直接点击手机”：模型产生 action proposal，宿主还要负责 schema、region/scope capability、权限、执行器、观察回灌、重试、幂等和 verifier。
+
+2. **问：模型输出了一个 GUI 坐标，为什么还不能算动作成功？**
+
+   **答：** 坐标依赖截图、窗口尺寸、设备像素比和页面/App revision。宿主应绑定 screenshot hash 和 action sequence，检查权限并执行，再回灌 observation，最后由独立 verifier 判断结果。页面变化后应重新观测或拒绝旧坐标，不能把模型文本直接当成真实副作用。
+
+3. **问：Qwen3.7 Plus 的 1M context 能否直接理解任意长视频？**
+
+   **答：** 不能。1M 是 provider 合同字段，还要从中扣除文本、视觉 token、视频采样、工具 schema、工具结果、thinking 和输出预留。应记录媒体 revision、帧号、timestamp、resize/crop、token 估算和未覆盖区间，分别评估“API 接受”“关键证据保留”和“模型实际使用”。
+
+4. **问：官方列出的 Function Calling、Structured Outputs、Web Search 是否就是模型本体能力？**
+
+   **答：** 它们首先是 API capability。Structured Outputs 约束形状，Function Calling 约束调用协议，Web Search 还受 region/scope 和 provider 开关影响；业务语义、授权、沙箱、超时、幂等和搜索结果校验仍属于宿主。回答应给出 `model -> schema -> authorization -> executor -> observation -> verifier` 责任链。
+
+5. **问：为什么必须区分 region、scope 和模型名称？**
+
+   **答：** Qwen3.7 Plus 的官方 capability table 显示 Virginia 的 US scope 不支持 Structured Outputs/Web Search，而 Global scope 支持；Batch、价格、API key 和 endpoint 也按区域变化。模型 alias 相同不代表请求合同、价格或能力开关相同，评测 manifest 必须记录 region、scope、endpoint 和 API key 所属区域。
+
+6. **问：Prefix Completion 和 Context Caching 是不是 KV Cache？**
+
+   **答：** 不是。Prefix Completion 是生成协议，Context Caching 是 provider 对重复上下文的复用；GPU KV cache 是推理执行中的注意力状态，应用 memory 是业务状态。媒体 revision、工具 schema、region、compaction 或上下文变化都可能导致 provider cache 失效，三者应分开记录。
+
+7. **问：Qwen3.7 Plus 的 max chain-of-thought length `262,144` 能证明内部推理算法吗？**
+
+   **答：** 不能。这只是官方 API 合同字段，不等于可读 CoT，也不披露参数、attention、RL 或 hidden-state 实现。当前没有公开 Qwen3.7 Plus 专属技术报告和权重，不能把 Qwen3.5、Qwen3.8、Qwen3-VL 或 Qwen3-Omni 的架构反向迁移。
+
+8. **问：如何报告 Qwen3.7 Plus 的 Agent 能力？**
+
+   **答：** 当前 DataCurve 没有精确 `mini_swe_agent_qwen3_7_plus_*` 行，所以不填充其他 Qwen 的 Pass@1、成本或 Agent steps。应单独报告 AA 的第三方配置字段、官方产品定位和本地 GUI/tool harness 结果，并固定 alias/snapshot、region、工具、权限、设备、任务、verifier、失败恢复和统计方法。
+
+## 2026-09 Kimi K3：SGLang upstream runtime
+
+1. **问：8ac19cc 为什么要把 f_a 延迟到 fused KDA decode？**
+
+   **答：** 该路径的约定是 fused decode 接收 f_a，由 kernel 内部应用 f_b。模型层提前完成 f_a @ f_b 会重复投影；回答时要说明这是 deferred projection 的 ownership contract，不是单纯少一次 GEMM 的宣传。
+
+2. **问：CUDA graph stream explosion 修复和 K3 的数值正确性有什么关系？**
+
+   **答：** KDA/MLA gate 可能在 side stream 产生，主 stream 在 o-proj 或 gated norm 前必须等待。c4d3770 把 fork、计算和 join 收敛到可追踪的 capture segment；否则 replay 的 stream 图、event 依赖或 allocator 生命周期可能改变，造成未定义数据或隐蔽的数值错误。
+
+3. **问：为什么 O(1) expert weight lookup 是面试点？**
+
+   **答：** K3 有大量 expert tensor，加载器若反复扫描映射会把启动时间和代码复杂度放大。c2c3629 用 expert name pattern 直接定位 w1/w2/w3，同时还要保持 packed weight、scale、ModelSlim fused QKVG 和 NPU 分支的一致；复杂度优化不能牺牲 checkpoint mapping correctness。
+
+4. **问：PP prefill、DCP decode、DSpark 和 KDA cache 能否只靠一个 KV length 恢复？**
+
+   **答：** 不能。要分别恢复 MLA key/value、KDA conv/recurrent、draft/target 接受位置和跨节点 transfer metadata。还要按 prefill、decode、verify、rollback 逐阶段检查 topology、dtype、event 和数值一致性。
+
+5. **问：SGLang main 已有 Ascend A5/ROCm K3 分支，是否代表 K3 已经跨硬件生产可用？**
+
+   **答：** 不代表。commit 只能证明 upstream 有对应分支和测试入口；还要在固定 revision、完整权重、目标 driver/runtime 上验证 kernel 数值、通信、显存、吞吐、恢复和 tool-call acceptance。NVIDIA、ROCm、NPU 的 fallback 与量化布局也不能互相迁移。
+
+## 2026-09 GLM-5.3 标准 DSA runtime
+
+1. **问：标准 GLM-5.3 和 GLM-5.3-Flash 的实现入口有什么不同？**
+
+   **答：** 标准版固定 config 是 `glm_moe_dsa` / `GlmMoeDsaForCausalLM`，当前 vLLM/SGLang 复用 DeepSeek-V3.2 DSA 路径；Flash 版是 `Glm5NextForConditionalGeneration`，才涉及 `RadixLinearAttention`、KDA、视觉和双 state pool。不能按产品名迁移实现结论。
+
+2. **问：Full/Shared indexer 是怎么工作的？**
+
+   **答：** 标准 GLM-5.3 的公开实现中，21 个 Full 层重新计算 indexer top-k，57 个 Shared 层复用前一个 Full 层的 `prev_topk_indices`，再把候选交给 sparse main attention。这样减少重复 indexer 计算，但可能引入候选漏检，必须分别测 index recall 和最终 evidence recall。
+
+3. **问：`index_topk=2048` 能否直接说明每个 query 只看 2048 个 token？**
+
+   **答：** 不能。它是 config 层候选选择字段；因果 mask、tail、层间复用、gather、MTP、batch 和 kernel 可能改变实际可见路径。还要测最终 attention 证据召回与任务成功率。
+
+4. **问：vLLM registry 已经把模型映射到 `deepseek_v32`，是否就代表标准 GLM-5.3 已经生产可用？**
+
+   **答：** 只证明 source/registry entry 存在。还需要固定权重加载、dense/sparse 数值对照、Full/Shared recall、MLA/indexer cache 恢复、MTP acceptance、目标硬件 profile、工具权限和 verifier/SLO 验收。main 的优化不能自动回写到 stable wheel。
+
+5. **问：为什么不能把 IndexCache 或 SAO 论文直接称为 GLM-5.3 内部算法？**
+
+   **答：** IndexCache 是 DSA serving 的关联证据，SAO 的直接论文对象是 GLM-5.2；GLM-5.3 页面只说明继承 `SAO with compaction`，没有公开 5.3 专属数学定义或完整实现。应写成关联技术和证据边界，而不是已证实的 5.3 独有 recipe。
+
+6. **问：标准 GLM-5.3 的 serving manifest 最少要记录什么？**
+
+   **答：** model/revision/class、MLA latent cache、interleaved indexer RoPE、Full/Shared 层和 top-k 索引、causal offset、MTP iteration、dtype、TP/EP、batch、硬件、数值误差、index/evidence recall、cache recovery、tool schema、verifier 和 p99/SLO；不能只记录一个 `kv_length` 或 `supported=true`。
+
+## 2026-09 Claude Opus 5.5：效率、评测与安全路由
+
+1. **问：为什么“成本比 Opus 5 低 40%”不能直接证明模型更小或架构更简单？**
+   **答：** 这是发布方典型工作负载结果，可能同时来自更少输出 token、更少工具轮次、更少重试、cache read 价格和 fallback 策略。需要固定 model/revision、effort、provider、工具、任务、verifier 后分别计算 token、steps、cache、retry、fallback 和单位成功成本。
+
+2. **问：`Claude Opus 5.5 (max with fallback)` 是一个新 checkpoint 吗？**
+   **答：** 不是。`max` 是 effort 配置，fallback 是安全/服务路由；AA 的多个 effort slug 应归并到一个 canonical 模型。DataCurve 当前没有精确 `mini_swe_agent_claude_opus_5_5_*` 行，不能迁移 Opus 5 或 Fable 5.1 的成绩。
+
+3. **问：Opus 5.5 的 benchmark 如何做公平比较？**
+   **答：** 发布页多数结果使用 adaptive + max，Terminal-Bench 使用 xhigh，成本图常用 medium/default，且不同项目的工具、任务和 verifier 不同。比较时要固定 effort、harness、工具、预算、环境、重试、fallback 和判定器，并报告 quality-cost/steps 曲线。
+
+4. **问：Cyber safeguard 把任务交给 Opus 4.8 后，成功算谁的？**
+   **答：** 算带 fallback 的系统结果，不能算 Opus 5.5 单体结果。trace 要记录原始模型、触发分类、实际模型、权限、缓存、重试、外部副作用和最终 artifact verifier。
+
+5. **问：为什么更少工具调用仍要保留完整 trace？**
+   **答：** 少调用可能代表更好的上下文收集和 patch，也可能代表少做了测试或绕过了验证。必须保存 context snapshot、patch、命令 receipt、测试、权限事件和独立 verifier，才能证明 token efficiency 没有牺牲正确性。
+
+6. **问：把 Opus 5 换成 Opus 5.5 后，为什么 `thinking: {"type":"disabled"}` 不能继续用？**
+   **答：** Opus 5.5 的 adaptive thinking always-on，disabled 和手工 `budget_tokens` 都会返回 400；要用 `output_config.effort` 调整思考深度，并按 `content[].type` 解析可能先出现的 thinking block。
+
+7. **问：为什么 thinking block 不能像普通文本一样跨模型、跨历史编辑重放？**
+   **答：** 官方把 block 绑定到产生它的模型、conversation 和前缀；模型切换或 system/tools 变化可能丢弃 block 或返回错误。harness 要保存 binding/prefix hash，并选择 append-only、drop 或重新生成策略。
+
+8. **问：Opus 5.5 为什么不支持 `tool_choice: any`？**
+   **答：** 这是该模型的 API compatibility boundary。应使用 `auto` 配合 strict tool use/structured outputs 和 prompt 约束，再由 verifier 检查工具是否真正调用；不能把强制工具选择当作跨模型通用能力。
+
+9. **问：fast mode 是不是一个新的 Opus 5.5 checkpoint？**
+   **答：** 不是。它是同一模型的更快 inference configuration；需要记录 `speed`、`usage.speed`、独立限流、429/529、TTFT、output tokens/s 和 premium cost，不能与普通速度结果混成一个裸模型分数。
+
+10. **问：为什么 CoBench 2.1 的 `55.8%` 和 AECI `169.36` 不能直接证明 Opus 5.5 达到了某个自治等级？**
+    **答：** 它们是特定 System Card snapshot、benchmark、model pool 和 fit 的发布方结果。AECI 新 fit 使用 374 benchmarks、7,985 observations、732 models，不能与旧 fit 直接比较；RSP 的 CB/autonomy 结论还要单独看 threat model 和安全阈值。
+
+11. **问：为什么 Cyber 的完整 ACE `301/410 = 73.4%` 不能当作生产网络安全成绩？**
+    **答：** 该组评测明确关闭了 cyber safeguards，并绑定 ExploitBench、环境、时间预算和 verifier。生产路径可能拒答、限制工具或 fallback 到 Opus 4.8，所以必须分别记录 capability score、safeguard、actual_model 和最终副作用。
+
+12. **问：OSWorld 2.0 的 partial `81.8%` 和 strict `48.7%` 应如何比较？**
+    **答：** 它们是不同成功定义，不能只选较高者。比较时要固定 108 tasks、1080p、最多 500 actions、5 runs、截图保留以及超过 100K tokens 后的 server-side compaction。
+
+13. **问：为什么 System Card 的五 Agent `2.7x` speedup 不是线上墙钟加速？**
+    **答：** 该数字是 derived latency，按各 Agent 的 context token、tool time 和 handoff clock 计算；team size、组织结构、任务和 verifier 也会改变结果。线上还要实测排队、共享资源、失败恢复和真实 wall-clock。
+
+14. **问：prompt injection 的 `0.1%/0.7%/1.0%` 结果能否当作模型在所有 Agent 中的通用安全率？**
+    **答：** 不能。它们是 Gray Swan IPI 在 k=1/10/15 的 attack success rate，且约 18% rollout fallback 到 Opus 4.8，1,310 个 fallback rollout 无成功攻击；coding Shade、computer-use probe 和 browser auto 使用不同 harness，必须分开报告。
+
+## 2026-09 GPT-6 Sol：预算与 Agent runtime
+
+1. **问：GPT-6 Sol 的 context window、maximum input 和 maximum output 为什么要分开？**
+   **答：** `1,050,000` 是总 context window，`922,000` 是模型页给出的最大 input，`128,000` 是最大 output；reasoning tokens、工具 schema、工具结果和历史 item 也占窗口。它们不是可以简单相加的三个独立额度。
+
+2. **问：`reasoning.mode` 和 `reasoning.effort` 的区别是什么？**
+   **答：** OpenAI Reasoning 文档把 GPT-6 family 的 mode 分成 `standard/pro`，mode 选择执行模式；effort 的 `none`--`max` 控制模式内投入多少推理。两者正交，不能把 `pro` 当成新的 checkpoint 或把 effort 当成跨厂商统一等级。
+
+3. **问：`configuration_update` 是否会在会话中切换模型？**
+   **答：** 不会。它是 Responses input item，用于改变后续 effort。必须随 `previous_response_id` 或完整 replay 保留在原位置；两个相邻 update 会被拒绝，且不能和自动 compaction/truncation 组合。它改变 test-time compute policy，不改变权重。
+
+4. **问：GPT-6 Sol 的 function calling 为什么优先用 Responses API？**
+   **答：** 官方模型页明确 Responses 用于 built-in tools 和 function calling；Chat Completions 对 GPT-6 Sol 只有在 `reasoning_effort=none` 时支持 function calling。迁移时必须同时检查 endpoint、typed response items、tool result、call id、权限和 replay 语义，不能只替换 model ID。
+
+5. **问：模型页列出 hosted shell、computer use、MCP，是否意味着模型已经拥有这些权限？**
+   **答：** 不意味着。工具列表是 capability surface；真正执行还要经过 tool schema、permission engine、sandbox/executor、审批、幂等、超时和独立 verifier。模型提出 tool intent，不自动产生外部副作用授权。
+
+6. **问：Agents API、Agents SDK 和 Responses API 有什么 runtime 差异？**
+   **答：** Agents API 由 OpenAI 托管 Codex harness 和 session/turn/item；Agents SDK 让应用控制部署、存储、审批和 runtime；Responses API 让应用直接管理 response/history/tool loop。session、conversation 和 sandbox 不是同一资源，恢复和清理责任不能混写。
+
+7. **问：compaction item 是不是模型给出的可读摘要？**
+   **答：** 不是。server-side compaction 和 standalone `/responses/compact` 返回 opaque/encrypted state；stateless chain 要保留 output items，`previous_response_id` chain 只传新用户消息，standalone 返回的整个窗口是 canonical next context。它不是 raw CoT、永久记忆或可随意重写的摘要。
+
+8. **问：超过 GPT-6 Sol 的 272K input threshold 时，是否只给超出部分加价？**
+   **答：** 不是。官方模型页写的是整次请求 input/cache 按 2x、output 按 1.5x；Batch/Flex 为标准价格的 50%，Fast mode 为适用价格的 2x。还要加入 tool、retry、compaction 和 verifier 失败成本，才能得到单位成功成本。
+
+9. **问：为什么不能把 AA 的 GPT-6 Sol max 指标或 GPT-5.6 的 DeepSWE 行迁移给 Sol？**
+   **答：** AA 指标是第三方 provider/configuration 测量；DataCurve 当前没有精确 `mini_swe_agent_gpt_6_sol_*` 行。不同模型、effort、provider、harness、任务、工具和 verifier 未固定，迁移会把系统结果伪装成裸模型能力。
+
+## GPT-6 Luna：sibling 路由与成本账本
+
+10. **问：GPT-6 Luna 的“高效率”是否说明它参数更小、是 dense 模型，或者一定比 GPT-6 Sol 快？**
+    **答：** 不能这样推断。“focused、high-volume”是 OpenAI 的产品定位；AA 的 `sizeClass` 和速度是第三方/provider 字段，官方没有公开参数规模、dense/MoE 结构或 kernel。应按精确 model ID、snapshot、provider、effort 和任务实测比较。
+
+11. **问：为什么 GPT-6 Luna 不能直接继承 GPT-6 Sol 的 DeepSWE 分数？**
+    **答：** DataCurve 当前没有精确 `mini_swe_agent_gpt_6_luna_*` 行。即使两个模型属于 GPT-6 family，也不能跨 model ID、effort、harness、工具、环境和 verifier 迁移 Agent 结果；缺失精确行时应写 `not_applicable`。
+
+12. **问：Luna 与 Sol 的长上下文账本应如何比较？**
+    **答：** 两者都要分别记录 1.05M/922K/128K、reasoning tokens、工具 schema、历史 output items 和 compaction。Luna 还要绑定自己的 2026-05-18 cutoff 与 `$0.10/$0.50` 价格；超过 272K 后是整次请求 input/cache 2x、output 1.5x，不能只对超出部分加价。
+
+13. **问：Luna 模型页列出 hosted shell、computer use、MCP 和 tool search，是否意味着模型自身拥有这些权限？**
+    **答：** 不是。模型页只声明 capability surface；Agents/Responses runtime 仍分别管理状态、权限、schema、executor、sandbox、副作用和 verifier。面试回答要把“模型产生意图”和“宿主执行并验收”拆成两层。
+
+14. **问：`deepseek-flash`、`deepseek-v4-1-flash` 和响应里的 `model` 为什么要分别记录？**
+    **答：** 前者可能是官方 API alias，第二个是排行榜 canonical identity，响应字段是实际 served model。兼容 alias 可能随服务端迁移而变化；如果把三者混为一个字段，就无法解释路由漂移、计费差异和结果复现问题。
+
+15. **问：DeepSeek Responses 为什么不能像有状态 Agent 一样只保存 `previous_response_id`？**
+    **答：** 官方 contract 是 stateless，且部分 conversation/background/store/context-management 字段不支持或可能静默忽略。客户端要保存 typed response items、tool call/result、`sequence_number`、终态和自己的权限/executor receipt；这属于协议回放，不是模型永久记忆。
+
+16. **问：Vision guide 的 600 张图、64 MiB `file_id` 和约 1024 image tokens/图能否证明模型看懂了全部图片？**
+    **答：** 不能。它们只是输入接受和预算上限。还要记录 resize、采样、实际 usage、关键帧覆盖、跨轮 cache、视觉 encoder 数值正确性和独立 verifier；“请求被接受”不等于“证据被完整使用”。
+
+17. **问：`strict=true` JSON Schema 通过后，tool call 是否可以直接执行？**
+    **答：** 不能。strict 主要约束结构，仍需要宿主做权限、目标范围、幂等、超时、重试和业务语义验证。`deepseek-recipe` 能生成协议字段也不等于 executor 或 verifier 已完成。
+
+18. **问：`function_call_output` 回灌图像时，怎样避免把异步 chunk 拼错？**
+    **答：** 以 item/index/call id/turn lineage 为主键，按 `sequence_number` 处理 semantic SSE，显式记录 response.completed/incomplete/failed；不能按网络到达顺序拼接字符串，也不能把工具结果、权限决定和最终 artifact 混成模型文本。
+
+## 2026-09 Kimi K3：当前快照、评测限制与协议边界
+
+1. **问：2026-09-23 的 K3 复验发现了新模型版本吗？**
+   **答：** 没有。AA/DataCurve 页面和 K3 官方 README/HF metadata 均完成当前时点复验，HF revision 仍为 `f831ab...`；SGLang main 只见 import/type annotation 级变化。应写成“榜单和 artifact 未漂移”，不能写成架构升级。
+
+2. **问：DataCurve 的 K3 `309/451`、Pass@1 和 Pass@4 能否作为 K3 裸模型分数？**
+   **答：** 不能。它们绑定 `mini-swe-agent + tools + environment + verifier`、`max`、4 runs 和 113 tasks，是系统/harness 结果。必须同时记录工具、环境、任务集、模型配置和 verifier，不能迁移到 low 或其他 Agent harness。
+
+3. **问：K3 官方材料提到的约 `2.5x scaling efficiency` 应如何引用？**
+   **答：** 作为发布方声明，而非独立复现。要追问比较对象、硬件、序列长度、backend、warmup/iters、harness、任务集和统计口径；没有同条件实验，不能推导普遍吞吐或质量提升。
+
+4. **问：为什么 K3 要求 preserved thinking history？**
+   **答：** 因为长任务回放需要保留 channel、tool/index、工具结果、reasoning effort 和状态归属等结构化协议信息。它不等于无条件暴露隐藏推理，也不能用 visible response 拼接替代；跨模型切换还要检查 schema、cache 和状态兼容性。
+
+5. **问：K3 中途切换模型质量不稳定，应该如何处理？**
+   **答：** 把它当成 continuation contract 风险：manifest 绑定 model/revision、消息格式、thinking/tool 状态、schema 版本和 cache 状态；不满足兼容性就摘要、重启或拒绝继续，而不是静默把另一模型的历史喂给 K3。
+
+6. **问：K3 的 excessive proactiveness 是模型能力还是安全问题？**
+   **答：** 首先是官方提示的行为限制。模型输出是提案，不是授权；宿主仍要执行权限检查、预算/范围约束、sandbox、幂等、artifact 和业务 verifier，不能把可解析的主动动作直接执行。
+
+7. **问：K3 发布 benchmark 为什么不能跨表格拼排名？**
+   **答：** 其条件混用了 Kimi Code、Claude Code、Codex 等 harness，以及 H20/H100 和 compaction 设置。不同 harness、硬件、fallback、任务版本会改变结果；比较时至少锁定 revision、provider、effort、hardware、harness、task set、tool version 和 verifier。
+
+## 2026-09 GLM-5.3：SAO、policy lag 与 compaction
+
+1. **问：SAO 为什么不直接沿用 GRPO 的 group-wise sampling？**
+   **答：** 异步长任务的 rollout 长度差异很大，group-wise sampling 会等待同组最慢轨迹，且 compaction 后每个 prompt 的 sub-trace 数量不再稳定。SAO 用每个 prompt 一条 rollout，完成后立即训练，牺牲组内相对比较，换取更低的 barrier 和更可控的异步更新。
+
+2. **问：SAO 的 DIS 在解决什么问题？**
+   **答：** rollout engine 产生样本时使用的是旧的或滞后的策略；训练策略更新后，token 的概率比会偏离。DIS 直接使用 rollout engine 的 log-probability 计算 token-level ratio，并用双侧 clipping/masking 限制极端 off-policy token，不能把它解释成消除了 policy lag。
+
+3. **问：为什么 SAO 仍然需要 value model？**
+   **答：** single-rollout 没有 GRPO 的组内均值可用来估计 advantage，所以需要 critic/value model 提供 token-level value 和 advantage。论文还使用每次 policy update `K=2` 次 value update，并冻结 value model attention、只优化 MoE projections；这些是稳定性设计，不是 GLM-5.3 的独有架构证明。
+
+4. **问：Skip-Observation GAE 为什么要跳过 observation token？**
+   **答：** observation 是环境返回的文本，不是 Agent 的 action。把它按普通 action 反传会让环境输出长度和格式噪声污染 credit assignment；Skip-Observation GAE 在 action 段之间 bootstrap value，同时仍要保留 observation、tool receipt 和 reward 来源用于 replay 和审计。
+
+5. **问：SAO 论文中的 Qwen3-30B-A3B 实验能否证明 GLM-5.3 的能力？**
+   **答：** 不能。论文实验主干使用 Qwen3-30B-A3B，摘要另称 SAO 部署到 GLM-5.2（750B-A40B）Agent RL pipeline；GLM-5.3 官方文档只声明继承该路线。论文 benchmark、GLM-5.2 结果、GLM-5.3 DataCurve 行和 AA 指标必须分别归因。
+
+6. **问：官方说 GLM-5.3 继承 `SAO with compaction`，是否等于 compaction 算法已经公开？**
+   **答：** 不等于。SAO 论文公开了 rollout、ratio、critic 和 GAE 的训练机制，但没有公开 Z.ai 产品侧的 compaction 序列化、状态边界、压缩质量门禁或 5.3 完整 post-training recipe。面试时要明确“公开算法”和“型号专属实现”是两层证据。
+
+7. **问：如何把 SAO 的训练指标与 DataCurve 的 `311/451` 对齐？**
+   **答：** 不能直接对齐。DataCurve 行绑定 `mini-swe-agent`、`max`、工具、任务集、环境、verifier、runs 和成本统计，是 Agent 系统结果；SAO 论文的训练设置和 benchmark 是另一套实验。最多把它们放在同一证据矩阵中，不能合成一个裸模型提升率。
+
+8. **问：面试中如何设计 SAO 的最小验证实验？**
+   **答：** 用合成长任务固定 prompt、rollout engine、observation/action boundary 和 verifier，比较 synchronous GRPO、single-rollout、DIS on/off、critic `K=1/2`、普通 GAE/Skip-Observation GAE。报告 policy lag、ratio 超界率、训练稳定性、verified success、token/step 成本和失败恢复；不要声称这复现了 GLM-5.3。
+
+9. **问：SAO 证据链目前还缺什么？**
+   **答：** 缺 GLM-5.3 专属 compaction 实现、完整 post-training recipe、完整权重运行、目标硬件 profile、独立 benchmark、tool/verifier acceptance 和生产 SLO。论文 HTML/PDF 解决的是公开算法定义，不是这些后续门禁。
+
+10. **问：如何审计一个模型的 compaction 是否真的可恢复？**
+    **答：** 不应只验证摘要能否解析。至少要做确定性序列化回环，并保留目标/计划、工具 call-result lineage、权限、幂等键、待执行副作用、artifact digest、verifier 状态、schema/version、截断标记和预算；再比较压缩前后重复副作用、关键状态召回、任务完成和独立验收。GLM-5.3 的公开资料没有给出这些字段的官方格式，本项目的 toy 只能作为通用协议审计，不能冒充 Z.ai 实现。

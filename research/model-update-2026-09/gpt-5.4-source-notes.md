@@ -165,6 +165,14 @@ compaction item 是 opaque 的，不要把它当人写的摘要；standalone end
 
 对工具任务，仍需显式写出前置依赖、错误恢复和高影响动作前的验证；对研究任务，官方给出的三遍模式是 plan → retrieve → synthesize。Structured Outputs 解决格式一致性，不替代 citation grounding、事实 verifier 或权限门禁。
 
+### 3.9 mini/nano sibling 不能按家族名继承
+
+GPT-5.4 mini/nano 的精确 AA 条目和 OpenAI 模型页已经单独记录在 [`gpt-5.4-mini-nano-source-notes.md`](gpt-5.4-mini-nano-source-notes.md)。这里保留家族级交叉链接，不把 base GPT-5.4 的 1,050,000 context、`tool_search`、`computer_use` 或 DeepSWE base 行自动迁移给两个 sibling。
+
+mini/nano 各自是 `2026-03-17` snapshot、400,000 context、272,000 maximum input、128,000 maximum output，并支持 `none`--`xhigh` effort；mini 偏高吞吐 coding、computer use 和 Agent workflow，nano 偏 classification、extraction、ranking 和窄任务 sub-agent。当前 mini 模型页列出 `tool_search`/`computer_use`，nano 页面未列出这两项，因此 serving manifest 必须以 `model_id + snapshot + endpoint` 为键做 capability probe。
+
+这组 sibling 的面试重点从家族级长上下文能力转向 task-shape routing、显式 prompt contract、窄任务 verifier 和升级路径；它们没有公开参数、层/专家/注意力结构、训练 recipe 或独立技术报告，也不新增 GPT-5.4 的重复 Transformer 章节。
+
 ## 4. 评测设计与面试回答抓手
 
 ### 4.1 推荐记录的完整配置

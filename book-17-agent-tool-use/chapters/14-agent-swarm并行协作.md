@@ -735,3 +735,37 @@ Agent Swarm 的核心不是 worker 数量，而是协作协议。任务图决定
 可以先记住：多人一起写报告，不等于多人一起证明事实。工程审查还要继续追问：这些 worker 是否真的独立，是否看到了相同错误来源，候选是否经过外部验证，谁能够提交副作用，取消时外部状态是什么，以及并行带来的质量提升是否值得通信、延迟、GPU 和治理成本。
 
 当所有重要结论都能回到带版本的 artifact，当所有外部写入都经过受控执行和状态回读，swarm 才从“同时生成很多答案”变成了可审计的并行系统。
+
+## 14.25 Kimi K2.6：Agent Swarm 数量不是模型内部结构
+
+Kimi K2.6 官方博客把 Agent Swarm 描述为最多 300 个 sub-agents、4,000 个 coordinated steps，并给出数小时到十几小时的 coding 案例。阅读这类数字时，必须先区分：384 experts/top-8 是模型内部 MoE 路由；300 sub-agents 是 harness 创建的外部运行实例。后者需要单独的任务图、上下文、权限、预算、workspace、取消和 artifact verifier。
+
+一个可审计的 K2.6 swarm trace 至少记录：
+
+```text
+model/revision -> subtask DAG -> worker context/permission
+-> tool call -> executor receipt -> test/verifier
+-> artifact revision -> coordinator merge/retry/cancel
+```
+
+K2.6 的 `preserve_thinking`/`reasoning_content` 和多步 tool call 还要求把思考状态、工具 schema、工具结果和权限决定一起回放。模型提出调用不等于宿主执行；Agent Swarm 案例中的成功率、工具次数和持续时间必须绑定 harness、环境和验收条件。完整模型规格、KVV 六类部署验收和 DataCurve 精确行缺失边界见第二十一册第 90 章；不能迁移 K2.7 Code/K3 的 Agent 结果。
+
+## 14.26 Grok 4.20：研究型 Multi-agent 的运行时账本
+
+xAI 将 `grok-4.20-multi-agent` 定义为 Realtime Multi-agent Research beta。一次请求不是简单复制 16 份 prompt，而是由多个专门 Agent 搜索、分析、交叉核验，再由 leader agent 综合。可观察的系统图应写成：
+
+```text
+user goal
+  -> task decomposition
+  -> 4/16 sub-agents
+  -> web/X/code/collections tools
+  -> evidence + failures + citations
+  -> leader synthesis
+  -> verifier / final response
+```
+
+这里的 4/16 是 harness/runtime 的协作规模，不是 MoE experts；`reasoning.effort=low/medium` 与 `high/xhigh` 在该服务上是 agent-count 映射，而不能解释成普通模型内部推理深度。生产 trace 至少要保存 sub-agent role、prompt/revision、工具调用、来源、重试、汇总依据和 leader 的最终引用。
+
+xAI 默认只把工具调用和 leader 最终响应返回给调用方；子 Agent 的中间状态可以用 `use_encrypted_content` 作为 opaque encrypted state 回放。它能帮助多轮延续，但不意味着客户端可以读取、编辑或重排隐藏 reasoning。内置 server-side tools 与宿主 function calling 还必须分账：前者由 xAI 执行，后者只产生模型提案，权限、数据库/API 副作用和幂等仍由宿主控制。
+
+评测时至少做 4-agent/16-agent/单 Agent 三组消融，并固定来源白名单、工具版本、问题集、预算、超时和 verifier。输出不仅包括最终质量，还包括证据召回、引用覆盖、重复检索率、错误汇总率、工具成本、p95 延迟和单位成功成本。更多 Agent 只有在这些指标的 Pareto 曲线改善时才是收益；多数票不能替代独立来源和外部验证。

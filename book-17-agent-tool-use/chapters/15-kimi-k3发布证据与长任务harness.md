@@ -1,6 +1,6 @@
 # 第 15 章 Kimi K3：模型发布信号、长任务 Harness 与证据边界
 
-> 资料边界：本章依据 [Kimi 官方 K3 发布文章](https://www.kimi.com/en/blog/kimi-k3)、其官方博客索引以及 Kimi Linear 与 Attention Residuals 论文。发布文章中的参数、能力和评测数字属于厂商公开披露；除非有模型卡、权重或技术报告交叉确认，否则不把它们写成独立复现实验结论。
+> 资料边界：本章依据 [Kimi 官方 K3 发布文章](https://www.kimi.com/en/blog/kimi-k3)、[Kimi K3 官方仓库](https://github.com/MoonshotAI/Kimi-K3)、固定 Hugging Face revision/config、`k3_tech_report.pdf`、Kimi K3 License、FlashKDA 和 vLLM recipe，以及 Kimi Linear 与 Attention Residuals 论文。2026-09-20 已补充权重仓库 metadata、KDA kernel 和 serving recipe；榜单分数、发布方 benchmark、实际权重加载和独立复现仍按各自证据边界记录。
 
 ## 15.1 为什么模型发布文章不能直接当作架构报告
 
@@ -131,7 +131,7 @@ print(round(absolute_lift, 2), round(relative_lift, 2), comparable(baseline, dif
 
 ## 15.6 常见误区与面试追问
 
-**误区一：发布文章列出的每个技术都已在 K3 的所有层实现。** 文章是技术披露入口，不是完整配置文件；应等待权重、模型卡或技术报告。
+**误区一：发布文章列出的每个技术都已在 K3 的所有层实现。** 现在 K3 技术报告已经给出 3:1 KDA/Gated MLA、Block AttnRes 和 Stable LatentMoE 的具体配置，但仍不能由报告补写完整训练 recipe、所有 kernel 版本或独立线上复现。
 
 **误区二：百万 token 上下文等于能可靠检索百万 token。** 接口容量、有效检索、压缩误差、位置偏差和 serving cache 是不同指标。
 
@@ -154,4 +154,65 @@ print(round(absolute_lift, 2), round(relative_lift, 2), comparable(baseline, dif
 
 ## 15.8 本章总结
 
-Kimi K3 的公开资料最适合作为一张研究地图：它把 KDA、AttnRes、稀疏专家、低精度训练和长任务 Agent 放在同一个系统叙事中。学习时应沿论文和工程文档分别展开机制，再用版本化 harness、状态 manifest 和条件化评测把模型能力与运行时能力分开。这样既能理解前沿技术的方向，也能避免把发布信号、榜单行和内部实现混成一个未经验证的结论。
+Kimi K3 的公开资料把 KDA、AttnRes、稀疏专家、低精度训练和长任务 Agent 放在同一个系统叙事中。2026-09-18 的技术报告已经让 3:1 KDA/Gated MLA、8 个 Block AttnRes、Stable LatentMoE 路由和 XTM channel 协议进入“官方报告明确披露”层；它仍没有公开完整训练数据、所有 kernel 版本和独立线上复现。学习时应沿报告、论文和工程仓库分别展开机制，再用版本化 harness、状态 manifest 和条件化评测把模型能力与运行时能力分开。
+
+## 15.9 技术报告补证：协议不是隐藏状态的字符串拼接
+
+K3 技术报告把工具交互写成 XTM 风格的消息结构，使用 `[open]`、`[sep]`、`[close]` 和 `[end_of_msg]` 等特殊 token。全局 option 可以声明工具和 `reasoning_effort`，一次请求的 option 可以声明 `tool_choice` 与 `response_format`。工具集还可以通过后续 `tool-declare` message 动态扩展，这使得工具 schema 的加载成为上下文协议的一部分，而不是初始化时一次性拼接的字符串。
+
+assistant 消息分为 `think`、`response` 和 `tool` channel。thinking channel 即使为空也保留结构；tool call 和 tool result 通过 `tool/index` 配对。对 Agent harness 来说，最小可恢复状态至少应包括 channel、tool index、工具声明版本、reasoning effort、工具回执和权限决定。只保存最终可见回答，会导致重试时重复调用、跨模型切换时丢失工具归属，或者把旧工具结果错误地回灌给新请求。
+
+报告还披露 K3 的长轨迹训练包含 web search、专业知识工作、软件工程与 kernel 优化、vision-in-the-loop、持久助手、web development 和 autonomous execution；轨迹可能包含数百或数千次工具调用和百万级上下文 token。训练基础设施使用 partial rollout、外部 KV-cache retention、adaptive throttling 和可恢复 microVM sandbox。这里能支持“长任务 harness 是模型能力的一部分”的面试论点，但不能把这些环境描述推导成公开的完整 RL loss、数据配比或线上成功率。
+
+对于面试题“为什么 K3 的技术报告比发布文章更重要”，准确回答应是：发布文章给出方向和产品边界，报告给出可核验的配置与设计动机，官方实现仓库给出代码入口，榜单只给出配置级外部观察；四者不能互相替代。K3 License 已覆盖权重、参数、配置、代码和文档，但 README 的“完整权重已发布”仍不等于我们已经确认具体文件和 revision。
+
+## 15.10 从状态 manifest 到 hybrid serving manifest
+
+2026-09-20 的官方实现补证让 K3 的 Agent 问题多了一层容易漏掉的部署状态。Hugging Face API 已固定 revision `f831ab66814297da540d832a5235f8e904f29d06`，并列出 96 个 safetensors 分片；这解决了“模型身份/文件是否存在”的证据问题，但没有证明本地已经加载成功。
+
+K3 的 serving manifest 还必须保存两类不同状态：
+
+1. 模型/协议状态：model revision、reasoning effort、XTM channel、tool/index、schema version、权限决定和未完成副作用。
+2. 运行时状态：KDA recurrent state、MLA attention cache、prefix-cache block、DCP/TP/TEP/DEP/PP 拓扑、KV dtype、backend 和 GPU/driver。
+
+vLLM recipe 明确 K3 是 hybrid 模型：MLA attention 与 KDA recurrent state 由两个 KV-cache group 管理；Blackwell 通过 `--prefix-match-unit 128` 调整粗粒度 prefix hit，decode-heavy 场景可用 DCP 跨 TP rank 分片 decode cache。它还提示 K3 偶尔产生 parser 不期望的 tool-call 格式，因此“模型输出了 tool call”仍必须经过 schema validation、retry/idempotency 和 verifier。
+
+面试中可以用下面的因果链回答长任务故障：
+
+```text
+模型 revision/config
+    -> KDA state + MLA cache
+    -> prefix/DCP/parallel topology
+    -> tool parser/schema/permission
+    -> execution receipt
+    -> verifier/artifact
+```
+
+如果只保存最终文本，可能丢失 reasoning/tool 状态；如果只保存 GPU KV state，可能无法重放权限和工具副作用；如果只验证 parser 成功，又不能证明工具真的执行或 artifact 正确。K3 的可恢复 Agent 必须同时审计协议状态、缓存状态和外部执行状态。
+
+## 15.11 用固定 manifest 审计长任务恢复
+
+K3 的固定权重 index 让“恢复一个 Agent 会话”可以拆成两个互不替代的检查。第一检查是模型 artifact：revision、config、分片总数、tensor key、packed weight/scale 配对和量化格式；第二检查是运行时状态：XTM channel、工具 schema、权限决定、KDA recurrent state、MLA cache、prefix-cache block 和 sandbox checkpoint。
+
+零依赖脚本 [`kimi_k3_manifest_audit.py`](../../research/model-update-2026-09/code/kimi_k3_manifest_audit.py) 只读取 `config.json` 与 `model.safetensors.index.json`，不会触碰 TB 级权重。它通过了 96 个连续分片、497,220 个 tensor、93 层、92 个 MoE layer 和 247,296 对 packed/scale tensor 的一致性门禁。这个结果只能证明 metadata 自洽，不能证明 GPU kernel、完整加载或线上服务已验收。
+
+恢复故障的测试应分别注入：
+
+1. index 与 config revision 不一致；
+2. 某个 expert shard 或量化 scale 缺失；
+3. MLA cache 存在但 KDA recurrent/conv state 缺失；
+4. KDA state 存在但 prefix-match unit、KV dtype 或 backend 不一致；
+5. tool/index 被重排、schema 版本变化或未完成副作用未知；
+6. 模型输出可解析但 artifact verifier 失败。
+
+前四类属于模型/serving 状态门禁，后两类属于 Agent 协议/执行门禁。把它们都归结为“模型上下文丢了”会让故障无法归因，也容易导致系统在外部副作用未知时错误重试。
+
+## 15.12 2026-09-23 当前榜单复验：指标、限制与可比性
+
+本轮 K3 的 AA 与 DataCurve 页面重新抓取后没有新增 canonical 模型，也没有发现官方 artifact revision 变化。AA `max` 的 Intelligence Index、速度和成本是第三方/provider 观察字段；DataCurve 的 `309/451`、Pass@1/Pass@4、平均 token、steps 和成本则属于 `mini-swe-agent + tools + environment + verifier` 系统。面试回答中应把它们写成两本不同的账，不能把 Pass@4 写成裸模型准确率。
+
+官方发布材料中的“约 `2.5x scaling efficiency`”同样应标为发布方声明。若没有相同硬件、序列长度、backend、warmup/迭代、harness、任务集和 verifier 的复现，就不能把它当成普遍吞吐或质量提升。发布评测混用了 Kimi Code、Claude Code、Codex，以及 H20/H100 和 compaction 条件，跨表格拼接排名会把 harness 差异误当成模型差异。
+
+K3 还给出了三个直接影响长任务设计的限制：preserved thinking history 需要按协议原样保留结构化思考/工具历史；中途从其他模型切换到 K3 可能造成质量不稳定；模型可能 excessive proactive。第一项进入 replay/schema 账本，第二项进入跨模型迁移门禁，第三项进入权限、预算和 verifier，而不是简单归咎于“上下文不够长”。
+
+面试中可以用一句完整结论收口：**K3 当前是榜单观察稳定、官方 revision 未漂移、内容专题已闭环；它仍不是完整权重、目标硬件、双状态恢复或生产 Agent acceptance 已证明。**

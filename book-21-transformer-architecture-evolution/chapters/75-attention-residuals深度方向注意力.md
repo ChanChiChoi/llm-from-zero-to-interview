@@ -125,3 +125,7 @@ AttnRes 也不等于“记忆无限”。它仍然只访问有限层表示，sof
 2. 将代码扩展为 Block AttnRes：块内维护 partial sum，块间保存 completed blocks。
 3. 设计一个消融：固定参数量和训练 token，只改变块数 `N`，比较 loss、梯度范数、吞吐和显存。
 4. 画出 Full AttnRes、Block AttnRes 和标准残差的跨 stage 通信量，说明 `L`、`N`、pipeline stage 数量之间的关系。
+
+## Kimi K3 配置补证（2026-09-18）
+
+Kimi K3 技术报告已明确给出 8 个 Block AttnRes block、每 block 12 层，并把 embedding representation 作为额外的 block-level representation。这个配置属于 K3 report，不是 Attention Residuals 论文所有实验的固定配置；本章前文的论文实验数字也不是 K3 实测结果。

@@ -1,6 +1,6 @@
 # Claude Sonnet 5：排行榜、官方 API 与 Agent 运行时核验
 
-核验日期：2026-09-15。Sonnet 5 的候选身份来自 Artificial Analysis 与 DataCurve DeepSWE；其余页面只用于核验已发现锚点的官方事实和周边技术。本文把基础模型、推理档位、fallback、provider、harness、工具和 verifier 分开记录。
+核验日期：初次核验 2026-09-15；当前快照复核 2026-09-21。Sonnet 5 的候选身份来自 Artificial Analysis 与 DataCurve DeepSWE；其余页面只用于核验已发现锚点的官方事实和周边技术。本文把基础模型、推理档位、fallback、provider、harness、工具和 verifier 分开记录。
 
 ## 证据入口与联网复核
 
@@ -21,13 +21,26 @@
 | Anthropic Research 页面 | `/tmp/anthropic-research-live.html`，315,200 bytes | `eec4cf8b7332fe074fc536f9cfc691d0cd5f0079448582450435e403c8ca7b0d` |
 | arXiv 精确标题检索页 | `/tmp/arxiv-sonnet5-title-live.html`，16,449 bytes | `742bc93981fcab07bd8db46c10bd46f4a7814f3a27e93856c40e915007fd2cee` |
 
+2026-09-21 当前快照（用于与上表的 2026-09-15 历史值对照）：
+
+| 内容 | 文件与大小 | SHA-256 |
+|---|---:|---|
+| Artificial Analysis Sonnet 5 详情页 | `/tmp/aa-sonnet5-20260921.html`，3,872,014 bytes | `2bd51075cf1ad426140a25dddb097e62af0ef4d07308c00fbc8c022b9158318e` |
+| DataCurve DeepSWE | 当前快照 268,571 bytes | `67a6b5350a1bc986e814097a87928f5064ba6955ca78be44795e11b2413f2870` |
+| Anthropic Sonnet 5 发布页 | `/tmp/sonnet5-release-20260921.html`，262,651 bytes | `61714676503e6aafa41689e7ad7fa27738983e244a31bbd9acbc95d8728925a0` |
+| Sonnet 5 模型 overview | `/tmp/sonnet5-overview-20260921.html`，461,560 bytes | `57d20b24a8d7961bd2ea76d71080035677ec27deac07991bcc73cc3d305a03b5` |
+| Sonnet 5 System Card | `/tmp/sonnet5-system-card-20260921.html`，10,786,341 bytes | `33573adb9f1871b903f79b77d7755a44cc20bb913ef48ac9000ddb090e41f7ed` |
+| System Card 标准库文本提取 | `/tmp/sonnet5-system-card-extracted.txt`，约 237K 字符 | `3daed308eaedefa8ea61fe3bcfcc99a1206d03dcb02148dc63ba8ffdea9c47f6` |
+
+当前 AA 页面相对 9 月 15 日的 `38.3576962882576` Intelligence Index、约 80.00 tokens/s 和约 202.63s TTFT，变为 `38.1638712882576`、`86.1790204452512 tokens/s` 和 `137.660255319s`。这是第三方 provider/测量时点的字段漂移；没有 revision、权重或训练变更证据，不能把差异解释成模型升级。当前页面还保留 1M context、输入/输出 `$2/$10/M`、cache hit `$0.20/M`、约 `$5.0912`/task 和约 8 个 Anthropic API provider 的配置级语义。
+
 ## Artificial Analysis：基础模型与配置级字段
 
 页面 canonical slug 和模型 ID 都是 `claude-sonnet-5`，主详情页标题为 `Claude Sonnet 5 (Adaptive Reasoning, Max Effort)`。页面的 `releaseDate` 为 `2026-06-30`，当前未标记 deprecated；模型被标为 proprietary、非 open weights，`parameters` 为 null。
 
-页面列出的 `max`、`xhigh`、`high`、`medium`、`low` 和 `Non-reasoning` 是同一基础模型的运行配置或页面变体，不是六个独立模型。主配置为 adaptive reasoning + `max` effort。页面字段还给出 1,000,000 context、约 80.0022 output tokens/s、约 202.6275 秒 median time to first chunk/页面 TTFT、输入 `$2` / 输出 `$10` 每百万 token，cache hit `$0.20/M`、cache write `$2.50/M`，以及约 `$5.0912`/Artificial Analysis Intelligence Index task。
+页面列出的 `max`、`xhigh`、`high`、`medium`、`low` 和 `Non-reasoning` 是同一基础模型的运行配置或页面变体，不是六个独立模型。主配置为 adaptive reasoning + `max` effort。页面字段还给出 1,000,000 context、输入 `$2` / 输出 `$10` 每百万 token、cache hit `$0.20/M`、cache write `$2.50/M`，以及约 `$5.0912`/Artificial Analysis Intelligence Index task；速度和 TTFT 以采集日期绑定，见上面的历史/当前对照。
 
-Artificial Analysis 页面显示 Intelligence Index 为 `38.3576962882576`（页面主视觉约显示 38），评测整套累计约 `$6998.25`，产生约 `370M` output tokens；页面说明使用 Anthropic API 的 8 个 provider。该快照还说明 Intelligence Index v4.3 包含 10 个评测。上述数字都是 Artificial Analysis 的第三方配置级测量，不能与 Anthropic 发布方评测或 DeepSWE 结果拼成一个裸模型排名。
+9 月 15 日历史快照中的 Intelligence Index 为 `38.3576962882576`、约 80.0022 output tokens/s、约 202.6275 秒 TTFT；9 月 21 日当前快照为上段所列值。页面还说明 Intelligence Index v4.3 包含 10 个评测、整套评测累计约 `$6998.25`、产生约 `370M` output tokens，并使用 Anthropic API 的 8 个 provider。上述数字都是 Artificial Analysis 的第三方配置级测量，不能与 Anthropic 发布方评测或 DeepSWE 结果拼成一个裸模型排名。
 
 ## DataCurve DeepSWE v1.1：配置 + harness 结果
 
@@ -81,6 +94,32 @@ Sonnet 5 使用 adaptive thinking。官方文档说明，Claude 4.7 及之后的
 
 这些接口事实的面试价值在于：Agent 的能力由模型、协议、工具执行器、权限策略、上下文压缩和 verifier 共同决定。模型页支持某个工具，不代表宿主已经提供该工具，也不代表工具结果可信。
 
+## System Card 深读：训练公开性、安全与评测边界（2026-09-21）
+
+System Card 公开的是安全/能力评测所需的高层信息，不是完整训练报告。训练数据只被描述为专有的混合数据，包含公开互联网、公开和私有数据、合成数据，以及去重、分类、ClaudeBot 爬取、post-training/fine-tuning 等处理阶段；没有公开完整数据组成、优化器、训练超参数、RL 目标或可独立复现的训练 recipe。多数评测由 Anthropic 内部执行，通常使用最终 snapshot 和默认 safeguards；卡片会在个别能力或安全实验中明确关闭 safeguards。因而“有 System Card”不等于“训练方法和评测可以独立复现”。
+
+RSP/能力风险部分把 Sonnet 5 放在不跨越 automated AI R&D threshold 的位置；Autonomy threat model 1 适用，但 stealth rate 接近零；CB-2 也未跨越。这些是发布方风险框架中的分级结论，不能换算成通用的“安全分数”。网络安全评测没有针对网络安全做专项训练，覆盖 ExploitBench、OSS-Fuzz、CyberGym 和 Firefox 147 等任务；在生产默认 mitigations 下，部分 cyber 评测结果为 0。阅读时要同时保留任务、safeguard 和执行环境，否则容易把“拒绝执行”与“不会完成能力任务”混为一谈。
+
+Agentic safety 新增了两类拒答与攻击面证据：Claude Code 恶意请求拒答率为 `92.37%`，computer-use 恶意任务拒答率为 `84.68%`；Gray Swan IPI benchmark 覆盖 coding、computer use 和 tool use，共 28 个场景，去重后有 1,130 个攻击样本。它们测量的是给定 harness、工具和 safeguards 下的行为，不是模型内部安全模块的独立测量；宿主仍需通过权限、沙箱、allowlist、人工确认和 verifier 控制副作用。
+
+### 发布方 benchmark 的配置标签
+
+System Card 的常见能力配置为 adaptive thinking + `max` effort，通常运行 5 个 trials，context 上限随评测变化；BrowseComp 使用 10M token limit，并在 200K 附近触发 compaction。代表性发布方或其 system-card harness 结果如下：
+
+| 评测 | 发布方结果 | 解读边界 |
+|---|---:|---|
+| SWE-bench Verified | 85.2% | 发布方 harness 结果 |
+| SWE-bench Pro | 63.2% | 任务集和执行配置绑定 |
+| Multilingual SWE-bench | 78.3% | 多语言任务配置绑定 |
+| Terminal-Bench 2.1 | 80.4% | `xhigh`、`mini-SWE-agent` 配置 |
+| BrowseComp | 84.7% | 10M token limit/compaction 语义 |
+| OSWorld-Verified | 81.2% | computer-use harness 结果 |
+| GDPval-AA v2 | Elo 1618 | 发布方比较评测 |
+| Toolathlon Pass@1 | 54.3% | 工具、任务环境和 verifier 绑定 |
+| AA-Briefcase | Elo 1393 | 发布方评测配置绑定 |
+
+安全相关的发布方材料还报告 Gray Swan bug-bounty unique attack success 约 `0.19%`；Shade coding 在无 safeguards 时 thinking/disabled 分别为 `0.31%/0.29%`，有 safeguards 时为 `0.09%/0.13%`。评测 awareness 约影响 6% rollouts。以上数字必须与 Artificial Analysis 的 Intelligence Index、DataCurve 的 Pass@1/Pass@4 分开记账：三者的模型配置、harness、任务、verifier、统计和执行者不同，不能组成统一排名。
+
 ## System Card 与发布方评测
 
 System Card/发布页记录的代表性数字如下；它们属于 Anthropic 发布方或其 system-card 评测，不是 Artificial Analysis 或 DataCurve 的独立复现：
@@ -99,11 +138,11 @@ System Card/发布页记录的代表性数字如下；它们属于 Anthropic 发
 
 ## 论文、Research 与公开性负检索
 
-- 截至 2026-09-15，针对精确标题 `"Claude Sonnet 5"` 的 [arXiv 标题检索](https://arxiv.org/search/?query=%22Claude+Sonnet+5%22&searchtype=title) 返回 0 个结果。
+- 截至 2026-09-21，针对精确标题 `"Claude Sonnet 5"` 的 [arXiv 标题检索](https://arxiv.org/search/?query=%22Claude+Sonnet+5%22&searchtype=title) 仍返回 0 个结果。
 - Anthropic [Research 页面](https://www.anthropic.com/research) 可访问，但本轮公开列表未检出 Sonnet 5 专属技术报告。
 - 当前没有公开确认的 Sonnet 5 参数规模、稠密/MoE 架构、注意力变体、完整训练数据、优化器、后训练 recipe、内部 adaptive-thinking 机制或可独立复现的训练报告。
 
-以上是截至日期、在上述公开入口中的负面检索结果，不是对未来发布论文或技术报告的绝对否定。官方模型目录、API 文档和排行榜配置字段不能替代这些缺失的内部证据。
+以上是截至 2026-09-21、在上述公开入口中的负面检索结果，不是对未来发布论文或技术报告的绝对否定。官方模型目录、API 文档和排行榜配置字段不能替代这些缺失的内部证据。
 
 ## 面试主线与书系映射
 
@@ -119,4 +158,4 @@ System Card/发布页记录的代表性数字如下；它们属于 Anthropic 发
 
 ## 当前结论
 
-Claude Sonnet 5 已完成“排行榜锚点 → 官方模型/API/Agent 资料 → System Card/发布评测 → arXiv/Research 负检索 → 研究笔记”的资料级闭环。闭环不表示内部架构和训练 recipe 已公开；下一锚点必须继续从两个排行榜的剩余重点厂商候选中选择，不能仅因 Anthropic 官方目录中的 Haiku 4.5 等名称直接新增候选。
+Claude Sonnet 5 已完成“排行榜锚点 → 官方模型/API/Agent 资料 → System Card 深读/发布评测 → arXiv/Research 负检索 → 研究笔记”的资料级闭环。闭环不表示内部架构和训练 recipe 已公开；System Card 的安全数字也不能替代独立复现。下一锚点继续从两个排行榜的剩余重点厂商候选中选择，不能仅因 Anthropic 官方目录中的其他名称直接新增候选。

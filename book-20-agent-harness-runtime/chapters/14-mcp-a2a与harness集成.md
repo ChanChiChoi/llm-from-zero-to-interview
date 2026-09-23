@@ -1030,3 +1030,35 @@ MCP 面向 agent 到工具、资源和外部系统的连接，核心是 tools、
 7. 协议解决互联问题，harness 负责治理问题。
 
 下一章会进入 Agent Harness 系统设计，把前面所有模块合并成一个完整 runtime 架构。
+
+## 14.25 Hosted tool search 与 client-executed tool search
+
+MCP 工具多起来后，问题不再只是“能否连接 server”，还包括哪些工具应该进入当前上下文。OpenAI Tool Search 文档给出了两种可迁移的加载协议。二者都可以使用 `defer_loading: true`，但搜索责任不同。
+
+```text
+Hosted:
+registry -> request(tool_search + deferred tools)
+         -> provider searches
+         -> tool_search_call(server)
+         -> tool_search_output(loaded subset)
+         -> function call -> executor
+
+Client:
+request(tool_search execution=client)
+         -> model emits tool_search_call(call_id)
+         -> application searches tenant/project registry
+         -> same call_id + tool_search_output
+         -> function call -> executor
+```
+
+Hosted 路径适合请求创建时已经知道完整工具清单的场景；服务端返回已加载集合，调用方仍需保存 response item。Client 路径适合工具取决于租户、项目状态或实时策略的场景；应用必须验证搜索结果的 schema、来源、版本、风险级别和租户范围，再回传工具。回传集合之外的工具不应被模型调用。
+
+两种路径都会把加载工具放到上下文末端，目标是尽量保留已有 prompt cache prefix。但“追加到末尾”只是上下文和成本优化，不是权限授予。MCP 接入仍要经过：
+
+```text
+tool discovery -> schema validation -> server/tool/parameter policy
+-> user approval if needed -> sandbox/network gate
+-> executor -> result sanitization -> verifier -> trace
+```
+
+如果发生 compaction，早期 MCP tool list、审批决定和未完成副作用可能被压缩进 opaque context item。恢复时应保留 canonical context 和 tool registry version；不能只把一段可读摘要发给模型，也不能因工具已经被搜索过就跳过当前租户的授权检查。评测应同时报告 schema token、search call 次数、cache hit、工具调用成功率、权限拒绝率、重复副作用和最终任务成功率。

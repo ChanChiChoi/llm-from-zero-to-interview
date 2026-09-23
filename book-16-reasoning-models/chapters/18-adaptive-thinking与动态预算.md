@@ -355,6 +355,30 @@ SelectiveNet、Learning to Defer、FrugalGPT 和 Adaptive Computation Time 等�
 
 Adaptive thinking 的核心是把“多想一会儿”变成一个有状态、可校准、受预算和风险约束的控制环。难题应在证据缺失或 verifier 失败时得到新的信息和验证，简单题应及时结束；未知状态应保持未知，高风险动作应进入独立授权或人工路径。真正的成功不是让平均答案更长，而是在固定资源下提高可验证质量，同时控制尾延迟、成本、容量和公平性。
 
+## 18.19 Claude Sonnet 5：从 effort 到 System Card 证据
+
+Sonnet 5 把 adaptive thinking 和 `output_config.effort` 放在请求协议中。`low`、`medium`、`high`、`xhigh`、`max` 是行为控制信号，不是预先分配好的固定 thinking token 数；`max_tokens` 才是单次响应对 thinking、工具调用和可见文本共享的硬上限。因而一次实验至少要记录 effort、`max_tokens`、工具轮数、thinking/output token、超时和任务级预算，不能只记录“使用了 max”。
+
+这个区分也解释了 DeepSWE 的五档结果：同一 Sonnet 5 在 max 与 low 下的 Pass@1、成本和 Agent steps 不同，但变化来自模型配置、`mini-swe-agent`、工具、仓库环境、预算和 verifier 的组合。它可以说明 test-time compute 的系统取舍，不能证明出现了五个 checkpoint，也不能把 max 分数迁移到其他 harness。
+
+System Card 还提供了一个更严格的读表方式。发布方能力结果通常使用 adaptive + max、多个 trials 和特定工具环境；BrowseComp 的 10M token limit、约 200K compaction 触发和 safeguards 状态都可能改变结果。安全评测中 Claude Code 恶意请求拒答率 92.37%、computer-use 恶意任务拒答率 84.68%，并不等于模型具备一个独立的安全分类器；它们是给定策略和执行环境中的行为结果。
+
+面试时可以用下面的三层预算回答：
+
+```text
+effort       -> 当前请求倾向于投入多少推理/工具行为
+max_tokens   -> 当前响应允许生成的硬上限
+task budget  -> 整个 Agent loop 可消耗的思考、工具、重试和验证资源
+```
+
+三层都需要独立的停止条件。若 verifier 没有新证据、工具状态未知或权限不明确，增加 effort 不能自动把 unknown 变成 success；控制器应转入验证、人工确认或安全停止。
+
+## Qwen3-VL：视觉推理的 reward 也要分层
+
+Qwen3-VL 的 Thinking with Images 训练把 answer accuracy、multi-turn reasoning 和 tool-calling reward 分开。这个拆分把 reasoning 的“想得对”与 Agent 的“取证和行动过程可靠”区分开：最终答案正确，不能证明视觉证据读取充分；调用工具更多，也不能证明探索策略更好。
+
+SAPO/General RL 和视觉 Agent tool-integrated RL 的完整超参、reward 权重和 rollout recipe 仍未公开到可独立复现的程度。面试或实验中应固定模型 variant/revision、工具、权限、任务环境、verifier 和统计方法，并把论文/发布方结果与本地轨迹实验分开。
+
 参考资料：
 
 - Geifman and El-Yaniv, SelectiveNet: A Deep Neural Network with an Integrated Reject Option：<https://arxiv.org/abs/1901.09149>
@@ -362,3 +386,81 @@ Adaptive thinking 的核心是把“多想一会儿”变成一个有状态、�
 - Chen et al., FrugalGPT: How to Use Large Language Models While Reducing Cost and Improving Performance：<https://arxiv.org/abs/2305.05176>
 - Graves, Adaptive Computation Time for Recurrent Neural Networks：<https://arxiv.org/abs/1603.08983>
 - OpenAI, Reasoning Models Guide：<https://platform.openai.com/docs/guides/reasoning>
+
+## 18.20 Claude Opus 5.5：把 token efficiency 纳入 effort 控制
+
+Anthropic 对 Claude Opus 5.5 的发布描述把重点从“回答更长”转向“同一项长任务使用更少的 token、工具轮次和重试”。这不能证明模型内部采用了某种新的推理算法，但给出了一个很适合面试的系统指标：在固定任务和 verifier 下，比较单位成功成本，而不是只比较最终答案。
+
+```text
+successful_task_cost
+  = input_cost + cache_read/write_cost + output_cost
+  + tool_cost + retry_cost + fallback_cost
+
+quality_per_cost = verified_successes / successful_task_cost
+```
+
+`effort`、`max_tokens` 和 Agent 任务预算仍然是三个不同控制面。发布方多数 Opus 5.5 benchmark 使用 adaptive + max，Terminal-Bench 使用 xhigh，而成本曲线会使用 default/medium；如果把这些结果放在同一行，就会把推理预算差异误读成模型能力差异。
+
+因此评测记录至少需要保存 model/revision、effort、fallback、thinking/output token、工具轮数、任务预算、verifier、成功 artifact 和真实成本。若 Cyber 或 biology safeguard 触发 fallback，最终结果必须写成带路由的系统结果，不能归因给 Opus 5.5 单体。
+
+这也改变了“更强 reasoning”的验收方式：模型先取得完整上下文、减少局部重复修改，再由测试、静态检查或领域 verifier 判断是否成功；没有新证据时增加 effort 不能把 unknown 变成 success。
+
+Opus 5.5 的官方 API contract 还给出一个重要迁移约束：adaptive thinking 始终开启，`thinking.type=disabled` 和手工 `budget_tokens` 都会失败，推理深度由 `output_config.effort` 控制。thinking block 可能先于 text block 返回，且会绑定产生它的模型、conversation 和消息前缀；模型切换、工具定义变化或 compaction 后，harness 必须验证 block 是否仍可回放。这里的“thinking”是 API state protocol，不等于服务向用户暴露完整思维链。
+
+因此 reasoning evaluator 应把请求验证和响应解析也纳入测试：旧客户端若按位置取第一个 text block、把 `any` 当成通用强制工具，或在消息前缀变化后盲目重放 thinking block，都会在模型分数不变时产生线上回归。资料依据：[Claude Opus 5.5 model page](https://platform.claude.com/docs/en/models/opus-5-5/overview.md) 与 [What's new](https://platform.claude.com/docs/en/models/opus-5-5/whats-new-opus-5-5.md)。
+
+资料边界：Opus 5.5 当前有 Artificial Analysis 精确条目和 Anthropic 官方 API contract、发布页/System Card 入口，但 DataCurve 没有精确 Agent 行，参数、架构、完整训练 recipe、adaptive thinking 内部实现和独立复现仍未确认。
+
+### 18.20.1 System Card 让 effort 评测回到条件曲线
+
+System Card 的能力数字不能脱离 effort 和 harness。Terminal-Bench 4.0 `66.36%` 使用 xhigh、Claude Code `--bare`、5 trials；OSWorld 2.0 partial/strict `81.8%/48.7%` 绑定 108 tasks、500 actions 上限和超过 100K tokens 后的 compaction；ProgramBench `91.2%` 绑定 166 golden tasks。因而 adaptive thinking 的评估至少应同时保存 effort、max token、compaction、工具动作、verifier 和实际模型。
+
+CoBench 2.1 `55.8%` 和 AECI `169.36` 是 System Card 的发布方 fit 结果，不是“推理 token 越多就越自治”的证明；AECI 新 fit 的 374 benchmarks、7,985 observations、732 models 也使它不能和旧 fit 直接纵向比较。多 Agent 的约 `2.7x`/`2.8x` speedup 使用 derived latency，说明编排可以改变测试时计算路径，但不等于某个新的 reasoning checkpoint。
+
+## 18.21 GPT-6 Sol：mode、effort 与会话内预算更新
+
+GPT-6 Sol 很适合用来说明“模型档位”和“推理预算”不是同一个字段。OpenAI 官方模型页确认 `reasoning.effort` 支持 `none`、`low`、`medium`、`high`、`xhigh`、`max`，默认是 `medium`；Reasoning 文档进一步把 GPT-6 family 的 `reasoning.mode` 分成 `standard` 与 `pro`。前者选择执行模式，后者控制所选模式内投入多少推理，不能把 `pro + low` 或 `standard + high` 简化成一个统一的“模型等级”。
+
+这会改变评测 manifest。除了模型和 snapshot，还要保存：
+
+```text
+model, snapshot, mode, effort, max_output_tokens
+reasoning_tokens, visible_output_tokens, tool_tokens
+task_budget, timeout, retries, verifier, final_artifact
+```
+
+Reasoning token 不直接暴露为可读思维链，但会占用 context 并计入 output token。响应可能在可见文本出现前因为 `max_output_tokens` 或 context limit 变成 `incomplete`，所以“没有最终答案”不能简单归因于模型不会做题；也可能是预算、工具或恢复策略先耗尽。实验开始时应为 reasoning 和 visible output 预留足够空间，再用 usage object 校准。
+
+### 18.21.1 `configuration_update` 是会话状态，不是换模型
+
+GPT-6 family 在标准单 Agent 会话中支持 `configuration_update`。例如第一轮用 low 生成草案，下一轮在用户消息前插入：
+
+```json
+{
+  "type": "configuration_update",
+  "reasoning": {"effort": "high"}
+}
+```
+
+它只改变后续响应的 effort；request-level `reasoning.effort` 仍可保持原值。更新项必须随 `previous_response_id` 或完整 history replay 保留在原位置，两个相邻 update 会被拒绝。它不能和自动 compaction/automatic truncation 组合；显式 compact 后要在下一条用户消息之前重新放置所需 update。
+
+因此 runtime trace 应区分：
+
+```text
+model identity -> request-level effort -> configuration update
+-> actual response usage -> tool/verifier result
+```
+
+`configuration_update` 改变的是 test-time compute policy，不证明权重、训练阶段或内部 attention 发生变化。无新证据时把 effort 从 low 提高到 max，也不能把 verifier 失败自动变成成功。
+
+### 18.21.2 和榜单结果如何对齐
+
+Artificial Analysis 的 `GPT-6 Sol (max)` 是一个配置级第三方测量；DataCurve 当前没有精确 `mini_swe_agent_gpt_6_sol_*` 行。因而不能把 GPT-6 Astra 或 GPT-5.6 的 Agent 结果移植给 Sol，也不能把 AA 的 Intelligence Index 当成“max 模型裸分”。公平实验至少固定 mode、effort、工具、harness、任务环境、压缩策略和 verifier，并报告 quality、reasoning/output token、steps、延迟和单位成功成本。
+
+资料依据：[GPT-6 Sol model page](https://developers.openai.com/api/docs/models/gpt-6-sol.md)、[Reasoning models](https://developers.openai.com/api/docs/guides/reasoning.md)。这些资料公开的是 API/runtime 契约；参数、dense/MoE、attention 变体和完整训练 recipe 仍未知。
+
+## 18.22 GPT-6 Luna：family runtime 与 sibling budget
+
+Luna 的 `reasoning.effort` 同样支持 `none`、`low`、`medium`、`high`、`xhigh`、`max`，但“高效率”是 focused/high-volume 产品定位，不是一个可推导的模型架构。GPT-6 family 的 `reasoning.mode=standard/pro` 与 effort 仍是两个控制面，`configuration_update` 只改变后续会话预算，不切换 Luna/Sol checkpoint。
+
+Artificial Analysis 有精确 `GPT-6 Luna (max)`，DataCurve 没有精确 `mini_swe_agent_gpt_6_luna_*` 行；因此不能把 Sol/Astra/GPT-5.6 的 Agent 结果移植给 Luna。公平对照还要绑定 Luna 自己的 model ID、2026-05-18 cutoff、价格、provider、工具、harness、压缩策略和 verifier。证据见 [`gpt-6-luna-source-notes.md`](../../research/model-update-2026-09/gpt-6-luna-source-notes.md)。
