@@ -1,6 +1,6 @@
 # Kimi K3：官方资料摘记与扩写入口
 
-首轮核验日期：2026-09-22；当前时点复验：2026-09-23。本文是研究记录，尚非正式书籍章节；本次补充字段来自 Kimi 官方仓库、技术报告 PDF、许可证、vLLM/SGLang 官方源码和排行榜快照。
+首轮核验日期：2026-09-22；复核日期：2026-09-24、2026-09-29。本文是研究记录；本次补充字段来自 Kimi 官方仓库、技术报告 PDF、许可证、vLLM/SGLang 官方源码和排行榜快照。
 
 ## 已读取来源
 
@@ -238,3 +238,79 @@ AA/DataCurve Kimi K3 identity
     -> dual-state recovery + target profiling
     -> tool/schema/idempotency/verifier acceptance
 ```
+
+## 2026-09-24 vLLM v0.30.0：stable release 与 K3 runtime 实现演进
+
+本轮继续以两榜已经确认的 `kimi-k3` 为唯一模型锚点；vLLM release、registry 和源码只用于核验其 serving 入口，不从框架仓库另发现模型。固定依据为 [vLLM v0.30.0 release](https://github.com/vllm-project/vllm/releases/tag/v0.30.0)，release commit `ced6857afa0ea7b2e3f0846a62e1394e90f15607`，发布时间 `2026-09-22T05:20:54Z`。GitHub release metadata SHA-256 为 `f1e8d5677982f426cabe0f5432815c4a4643e54ae5140baffa6053f5c89b0b31`；commit API snapshot SHA-256 为 `a7e82d1f2edab94f061a0dcb1823970804e536436e6303d50f313aaabb005b3f`。
+
+- [PyPI vLLM metadata](https://pypi.org/pypi/vllm/json)：`v0.30.0` metadata `13,218` bytes / SHA-256 `43020551808911e4cabfca5ea71951766c25101b3817a10d306d88fe42d860b8`。x86_64 wheel metadata 为 `314,883,777` bytes、SHA-256 `ef52ee58c410ead0b8afb190838fa4cbcb52075596f67862a03859d984966ac4`，状态未撤回；本轮没有下载或安装该 wheel。
+- 固定 tag 的 [registry.py](https://github.com/vllm-project/vllm/blob/v0.30.0/vllm/model_executor/models/registry.py) 为 `64,420` bytes / SHA-256 `a08a98aaae52ced32226aa647f58d682ac600b9572651a9b377b97846bc99212`。K3、MTP、DSpark 的相关注册入口在 `v0.29.0` 已存在，因此 `v0.30.0` 不能写成 K3 首次进入 stable。
+- NVIDIA [K3 model.py v0.30.0](https://github.com/vllm-project/vllm/blob/v0.30.0/vllm/models/kimi_k3/nvidia/model.py) 为 `88,517` bytes / `27cbd7f0dceb493cf20e29056c3e1f00cddfae2074a5bd4bde52d6a6b73a38fe`；对照 [v0.29.0 model.py](https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/models/kimi_k3/nvidia/model.py) 的 `87,313` bytes / `e74026a83c28cce7ee62889e9ed434d1fff6076dbd263d388aa379f4cf987a4d`，实现有变化。[K3 DSpark MLA v0.30.0](https://github.com/vllm-project/vllm/blob/v0.30.0/vllm/models/kimi_k3/nvidia/dspark_mla.py) 为 `20,001` bytes / `ba5c555c8e3e392a0b69af91a371488e857cdef7685749853793bd9eda4aa793`；[v0.29.0 对照](https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/models/kimi_k3/nvidia/dspark_mla.py) 为 `19,451` bytes / `e86bb9848310f5f0fbc9738c520406a343241228c9476c8cba13bade3a54d499`。K3 hardware-isolated package [`__init__.py`](https://github.com/vllm-project/vllm/blob/v0.30.0/vllm/models/kimi_k3/__init__.py) 在两个 tag 都是 `1,444` bytes、SHA-256 `a8ce9cbcd0d8f45f27fe58e70f7dbe080da30886a744f21e60a8ee13ea955a0b`。
+
+### 源码可确认的 runtime 面试点
+
+1. **权重缓存 IPC 与 ownership。** v0.30 的 MegaMoE finalize 路径可接收 weight-cache daemon 导出的 transformed buffers，直接零拷贝复用，并释放 raw packed parameters；没有可复用缓存时才走本地 finalize。应同时审计 transformed buffer 的生命周期、映射和释放，不把“代码支持 IPC cache”说成实测启动加速。
+2. **流式权重加载的两阶段 finalize。** v0.29 在 `load_weights` 返回前调用 MegaMoE finalize；v0.30 将其移至 `process_weights_after_loading`。源码注释说明父级 loader 可能因非连续 streamed prefixes 多次调用 `load_weights`，必须等完整权重流结束后再 finalize，避免对不完整权重提前转换。
+3. **PP / speculative / AttnRes 辅助状态边界。** v0.30 声明 auxiliary hidden states 可跨 pipeline parallel stage 传递，并在开启 AttnRes auxiliary stream 时拒绝某些落在非末级 PP 边界的配置。DSpark/MTP 的 draft/target 路径需要按 layer 捕获和传输辅助 hidden states；单一 KV length 不能表达这些状态及接受/回滚边界。
+4. **DSpark context-KV 的分组量化 gate。** 新路径可在受支持 cache dtype、各层 dtype 一致且 block layout 均匀时批量投影并插入 context KV；量化 cache 还显式收集每层 scale。条件不满足时应保留原路径，源码 gate 不是所有 dtype/layout 都可用的保证。
+5. **KDA state dtype 账本。** KDA state dtype 计算显式接入 `mamba_ssm_cache_dtype`，说明模型权重 dtype、普通 Mamba cache dtype 与 SSM recurrent-state dtype 应在 serving manifest 中分别记录。
+
+这些是 vLLM `v0.30.0` 固定 tag 的框架实现变化，不是 Kimi K3 技术报告新增的训练方法，也不证明 wheel 安装、K3 完整权重加载、目标硬件数值正确性、DSpark acceptance、cache recovery、profiling 或生产 SLO。当前准确状态是 **K3 stable release/source entry 已在 v0.29.0 存在，v0.30.0 继续演进权重加载、IPC cache、PP auxiliary state 与 DSpark/KV cache 路径**。
+
+## 2026-09-29 vLLM recipe、adaptive DSpark 与 ROCm serving 补证
+
+本节仍只沿两榜已发现的 `kimi-k3` canonical 推进。Artificial Analysis 当前首页快照为 1,746,726 bytes / SHA-256 `7a2d98fadd16d7c5b620ebd6a0a3b953e469b7a2bd10f5c21f0d5364d0a31bba`，60 个 `/models/<slug>` 路由与 2026-09-29 前一留存快照相同，包含 `/models/kimi-k3`；DataCurve 为 268,036 bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`，70 个配置 ID 未变，仍有精确 `mini_swe_agent_kimi_k3_max`。这次只是扩展既有锚点，不从 runtime 仓库增加模型。
+
+vLLM 官方 [Kimi K3 recipe](https://github.com/vllm-project/recipes/blob/d71af9ad11aae587822a9a73a9c470c409c29ecc/models/moonshotai/Kimi-K3.yaml) 在 2026-09-26 的提交 `d71af9ad11aae587822a9a73a9c470c409c29ecc` 对齐了 MI355X InferenceX AgentX 配置；固定文件 32,538 bytes / SHA-256 `40d96d65ed07e88133ffa465f39f94b02aabc0438a331df0c8e7c069114ec257`，`date_updated` 为 2026-09-25。该配置明确是 pre-release 路径，使用 ROCm 10 nightly；其中引用的 SemiAnalysis 配置固定到 `InferenceX` commit `03bfdecc33f174f22ad8ac5221ae464a4428adab`，其过期 Docker digest 不代表现在仍可拉取。
+
+### Adaptive DSpark verify：变长请求与固定 CUDA graph
+
+vLLM main 的 [Kimi K3 adaptive variable-length decode commit](https://github.com/vllm-project/vllm/commit/88aa0d287dd3abac9386e90ea1a63e6ed5d50580)（2026-09-23；patch 28,487 bytes / SHA-256 `7fdec0d0c8a050ff12f77ce6973549a486c59fc1ac8c8407db4108b7a10a56c4`）加入可选 `DSparkConfidenceHead`，按位置输出 `sigmoid(confidence_head(...))` 作为 draft-token 接受概率。调度器因而可以为不同请求选择不同 verify 长度。
+
+实现要同时面对动态长度与 CUDA graph 的固定形状约束：KDA metadata builder 声明 graph capture 可用，并让一个 `k+1` capture 覆盖同批请求中 1 到 `k+1` 的 verify 长度组合；设备侧 offsets/masks 保留每个请求自己的边界。另一处修正用 `is_prefilling` 请求状态识别 verify row，不能再用 `scheduled_tokens == draft_tokens + 1` 推断，因为 adaptive scheduling 会重写 token 分配。capture dummy rows 还需用承诺的 `max_query_len` 上界，而不是 dummy 当前测得的最大长度。以上是 main commit 的实现证据；stable `v0.30.0` 早于该提交，不代表该能力已进入当前 stable wheel 或目标环境。
+
+### Cache rebind：指针缓存必须跟随 buffer 生命周期
+
+vLLM [PR #58814](https://github.com/vllm-project/vllm/pull/58814) 于 2026-09-28 合入，修复 K3 DSpark 在 KV cache rebinding 后继续复用旧 context-cache pointer 的路径。固定 patch 为 1,416 bytes / SHA-256 `619dce6a98855a0508edc1568dd795136507125a918dd5f2f84bfbfe0dc6d933`。实现用各层 `data_ptr()` 组成 key；cache buffer 地址变化时使缓存的 context pointers 失效并重建，同时禁止在 CUDA graph capture 中更新。PR 页面将问题描述为 GPU memory fault 与 silent memory corruption。这里的通用工程知识是：GPU buffer 地址是有生命周期的资源句柄，cache rebinding 后旧指针不能仅因 Python 对象或逻辑 cache 名称相同就继续有效。该修复晚于 v0.30.0 stable，仍是上游 source evidence。
+
+### ROCm SiTU 与非因果 draft backend 门禁
+
+最新 recipe 为 MI355X 路径描述了 SiTUv2 FlyDSL `a4w4` routed-MoE kernel；需要含 vLLM [PR #53940](https://github.com/vllm-project/vllm/pull/53940) 的构建及 AITER `v0.1.20+` tuned config。旧环境变量名 `VLLM_ROCM_USE_AITER_MOE_SITUV2_A8W4` 保留为兼容 alias，但新语义启用的是 a4w4，v0.30.0 没有该变更，因此该 recipe 指向 nightly，而非 stable 性能保证。PR patch 20,055 bytes / SHA-256 `25bc9909e24546dcfcd9d04b08db340b44b80514ccb36255bf4866afc309a9d1`。
+
+另一个 ROCm 风险是 AITER 的 `AITER_SITUV2_A8W4` 与 vLLM 权重 shuffle/layout gate 不一致。vLLM [PR #53954](https://github.com/vllm-project/vllm/pull/53954) 页面当前为 Open；其 patch（7,242 bytes / `2197d91d91a9bf4cf0292bd1b591d2c2269aac956882123dfac5be2ec44342d7`）记录了只设置 AITER flag 时 kernel 采用 interleaved layout、而 vLLM 仍准备 separated weights，可能无报错地产生退化输出。遵循 recipe 的同步开关与版本要求，不要从 PR patch 推断修复已合入 stable。
+
+vLLM [PR #55966](https://github.com/vllm-project/vllm/pull/55966) 的 ROCm AITER MLA support（patch 84,348 bytes / `a17e44c0c410c4a3da23d705c894d1ea31ace42133b6e4f2cfcf861f36a48a85`）增加非因果 draft-block decode 的 capability 检查和受限形状拒绝；Recipe 表明 v0.30.0 含 #55966，但不含 #53940。以 FP8 cache 的 2-token 非因果 block 为例，代码要求拒绝该 kernel 路径并提示改用 `TRITON_MLA`，而不是让不匹配的 kernel 静默执行。这是 backend capability gate，不是 K3 权重或数学架构变化。
+
+### AgentX 指标：synthetic acceptance 不是正确性验证
+
+固定的 [InferenceX MI355X lane](https://github.com/SemiAnalysisAI/InferenceX/blob/03bfdecc33f174f22ad8ac5221ae464a4428adab/benchmarks/single_node/agentic/kimik3_fp4_mi355x_mtp.sh) 为 12,132 bytes / SHA-256 `1b87d65bef741895f1e00176b14e32484c2519080f64bf046e8e8c5c8795dc81`；其 golden acceptance 表为 827 bytes / `78255f8764d2762e30b3cb16614f9d3e9d0fddab91e0aa1f34a9dd682dea8876`。lane 区分两类实验：真实 verification 使用 block rejection，并通过 Kimi tool-call schema suite；单独的吞吐扫描把 rejection 方法改成 `synthetic`，直接注入从 B300/SPEED-Bench 条件取得的 golden acceptance length。后者跳过 target verification，只回答给定接受长度时的吞吐上限，不能用于线上 serving、准确性或真实 acceptance-rate 结论。以上是 SemiAnalysis 的固定 benchmark 配置，不是本机测量。
+
+vLLM 当前 release Atom 为 734,377 bytes / SHA-256 `9933c44ff0413dce0b7565f5df9f4046eebea4fb121b95efc19ca94fd245933e`：最新 `v0.31.0rc1` 条目只改 CUDA 12 镜像 CI，最新 stable 仍为 `v0.30.0`。SGLang release Atom 为 1,058,795 bytes / `9c9c5e9bcc5fc55fea6be1d8e9c77fd84d330522638083a80e74f2134ddd5eb2`，最新 stable 仍是 `v0.5.20`。没有下载/安装 wheel、获取 K3 权重或运行 AMD GPU；K3 仍是**内容专题闭环 + stable/main source 与 recipe 增量**，目标硬件正确性、双状态恢复、实际接受率、独立 benchmark 和生产 SLO 未验证。
+
+## 2026-09-30 DFLASH：K3 草稿模型、论文机制与 SGLang 接入
+
+本轮仍只沿两榜已有的 `kimi-k3` 锚点推进。9 月 30 日 Artificial Analysis 中文首页快照为 `1,752,755` bytes / SHA-256 `35e3197c2ad3b4259369bf55f72d912e03c0ecd61ad7d181db1fdda86f0dd527`；DataCurve DeepSWE 为 `268,036` bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`。页面是动态响应，不能仅凭字节变化判定模型 revision；本轮没有从榜单新增 canonical。
+
+### 公开 K3 DFLASH 草稿的身份边界
+
+[HF model metadata](https://huggingface.co/api/models/modal-labs/Kimi-K3-DFlash) 固定返回 revision `c192d15a43407bf758b5ae0880d5c72052fef1de`，2,000 bytes / SHA-256 `48a5d60f2b729d742edcd072699c969bcd605f995f991e1543e3ce6d722a4c00`，公开、未 gated，包含 README、config 和一个 `model.safetensors`。metadata 的 BF16 parameter count 为 `2,598,473,216`；本轮没有下载该权重。
+
+固定 revision 的 [README](https://huggingface.co/modal-labs/Kimi-K3-DFlash/blob/c192d15a43407bf758b5ae0880d5c72052fef1de/README.md) 为 4,058 bytes / `6924c345a25dc3360ca0a554469d59849378570eb6bfc8ce00189c239ad95235`。模型卡明确：它以 `moonshotai/Kimi-K3` 为 base model，是 draft-only 配套模型，使用 generic data mix 训练，不含 tool calls 或 agentic traces，不能独立作为语言模型服务；它必须与 K3 target model 配合 speculative decoding。
+
+固定 `config.json` 为 1,215 bytes / `92e2928e57f417921cd1c031a18840834c55ed13ed0d722acfa8f41b01080717`。配置给出 `DFlashDraftModel`、6 层、7,168 hidden、32 attention heads/8 KV heads、4096 sliding window、`target_layer_ids=[19,37,54,66,78,90]`、93 个 target layers、block size 16 和 BF16。模型卡建议默认 block size 8；这两个数字属于运行参数与 checkpoint 配置的不同层面，部署时必须记录实际使用值。
+
+### DFlash 论文的面试知识点
+
+[DFlash: Block Diffusion for Flash Speculative Decoding](https://arxiv.org/abs/2602.06036) v2 HTML 为 391,888 bytes / SHA-256 `3613e0871e0fe0570296d2e819c57e173879341bad9166b6bdab79cc2858c4a7`，页面日期为 2026-05-28。论文的核心组合有三层：target prefill 从浅到深抽取多层 hidden features，经 projection 融合成 target context feature；该 feature 被投影后注入 draft 每一层的 K/V，并跨 draft iteration 保留；block diffusion 在一个 forward pass 中并行预测 mask positions，再由 target model 批量 verify。
+
+训练与推理对齐也有明确设计：随机采样 response anchor，把其后的 `block_size-1` 个位置作为并行预测目标；多个 block 拼接后用 sparse attention mask，块内双向、块间隔离；早位置错误会使后续 token 无法接受，因此交叉熵采用 `w_k=exp(-(k-1)/gamma)` 的位置衰减；embedding 与 LM head 和 target 共享且冻结。论文还报告固定每序列 masked block 数、随机 anchor 以控制长上下文训练成本。这里的“无损”来自 target verification 的 speculative decoding 合同，不能把 draft 的接受率直接当作质量等价证明。
+
+### SGLang main 接入与性能证据边界
+
+[SGLang PR #40794](https://github.com/sgl-project/sglang/pull/40794) 网页快照为 381,910 bytes / SHA-256 `05971ce5ca09d01068297c09db275c61246943afe9ab0b0a56b7d3293ccf3128`；PR 于 2026-09-23 合入，merge commit `208f6f7501f748e70b3aaab9fc96ec659d39463b`。Kimi K3 原来只有 DSpark capture hook；PR 增加 `set_dflash_layers_to_capture`，复用同一 layer-output taps。DFLASH 的 `target_layer_ids` 指向 layer outputs，因此这里不采用针对 layer-input target 的 `+1` 偏移；多模态 wrapper 也透传该 hook。
+
+PR cookbook 将公开 `modal-labs/Kimi-K3-DFlash` 配置为 block size 8，并在 pipeline parallel、DP attention、NPU、Hopper 和 AMD recipe 上禁用或限制，当前验证范围是 Blackwell。PR body 的 GSM8K 结果使用 8xB300 per role、PD 1P1D 和**未公开的 production draft checkpoint**，并且构建同时包含五个 PR；报告 95.7% accuracy、0.1% invalid、平均 accept length 4.99、accept rate 57%。这些结果不能归因给 #40794 单个改动，也不能替代公开 draft 的可复现结果。
+
+PR 首个 patch 曾加入 focused capture unit test，第二个 patch 将其删除；最终净改动不含该测试。网页 CI 状态的 Base/Extra/AMD 均为失败标记。SGLang release Atom 9 月 30 日仍为 `v0.5.20`，1,058,795 bytes / `9c9c5e9bcc5fc55fea6be1d8e9c77fd84d330522638083a80e74f2134ddd5eb2`，因此 #40794 是 main/source evidence，不是 stable release acceptance，也没有在本机执行 GPU 或完整权重测试。
+
+准确的面试表述是：DFlash 用 target hidden state 做每层 K/V 条件注入，把 block diffusion 的并行 draft 成本与 target verifier 结合；K3 接入的关键工程问题是 capture tap 的语义、block-size/硬件 capability gate 和 draft/target 状态账本。仍待完整权重加载、Blackwell 数值回归、真实 acceptance、fallback、工具调用行为和生产 SLO 验收。

@@ -81,26 +81,98 @@ class ResponseState:
     incomplete_reason: Optional[str] = None
     side_effects: List[str] = field(default_factory=list)
     events: List[str] = field(default_factory=list)
+    connection_id: str = "ws-1"
+    connected: bool = True
+    steering_id: Optional[str] = None
+    blocked_code: Optional[str] = None
 
 
-def steer(response: ResponseState, instruction: str) -> ResponseState:
+def _assert_connection(response: ResponseState, connection_id: str) -> None:
+    if not response.connected or response.connection_id != connection_id:
+        raise ProtocolError("steering is scoped to the current WebSocket connection")
+
+
+def steer(
+    response: ResponseState,
+    instruction: str,
+    connection_id: str = "ws-1",
+    steering_id: str = "steer_1",
+) -> ResponseState:
     """Model response steering: queue input and preserve existing side effects."""
 
+    _assert_connection(response, connection_id)
     if response.status != "running":
         raise ProtocolError("only a running response can be steered")
     if not instruction.strip():
         raise ProtocolError("steering input must be non-empty")
+    if response.steering_id is not None:
+        raise ProtocolError("a response can accept steering only once")
+    if not steering_id:
+        raise ProtocolError("steering_id must be non-empty")
+    response.steering_id = steering_id
     response.events.append("response.steer.accepted")
     response.status = "incomplete"
     response.incomplete_reason = "steered"
     response.events.append("response.incomplete:steered")
+    response.events.append("response.steer.pending")
     continuation = ResponseState(
         response_id="resp_2",
         previous_response_id=response.response_id,
+        connection_id=response.connection_id,
         side_effects=list(response.side_effects),
     )
     continuation.events.append("response.created:continuation")
     return continuation
+
+
+def disconnect(response: ResponseState, connection_id: str) -> None:
+    """Close a WebSocket; queued steering is not a durable cross-connection command."""
+
+    if response.connection_id != connection_id:
+        raise ProtocolError("connection does not own this response")
+    if not response.connected:
+        raise ProtocolError("the WebSocket is already closed")
+    response.connected = False
+    response.events.append("websocket.closed")
+
+
+def recover_after_disconnect(
+    response: ResponseState, connection_id: str
+) -> ResponseState:
+    """Create an explicit recovery response without replaying steering implicitly."""
+
+    if response.connected:
+        raise ProtocolError("recovery requires a disconnected WebSocket")
+    recovered = ResponseState(
+        response_id="resp_recovery",
+        previous_response_id=response.response_id,
+        connection_id=connection_id,
+        side_effects=list(response.side_effects),
+    )
+    recovered.events.extend(
+        ["response.created:recovery", "steering.not_replayed"]
+    )
+    return recovered
+
+
+def block_for_misalignment(response: ResponseState) -> None:
+    """Apply a safety block without pretending that external effects were undone."""
+
+    if response.blocked_code is not None:
+        raise ProtocolError("response is already blocked")
+    response.blocked_code = "misalignment_policy_violation"
+    response.status = "blocked"
+    response.events.append("error:misalignment_policy_violation")
+
+
+def retry_after_block(response: ResponseState) -> None:
+    """The host must stop blind retries after a policy block."""
+
+    if response.blocked_code == "misalignment_policy_violation":
+        raise ProtocolError(
+            "automatic retry is forbidden after misalignment_policy_violation"
+        )
+    raise ProtocolError("response is not eligible for this retry path")
 
 
 @dataclass(frozen=True)
@@ -122,11 +194,42 @@ def route_skills(skills: List[Skill], task: str) -> List[Skill]:
     return selected
 
 
+def expect_protocol_error(action, expected: str) -> None:
+    """Assert a failure gate while keeping the toy dependency-free."""
+
+    try:
+        action()
+    except ProtocolError as exc:
+        assert expected in str(exc), (expected, str(exc))
+    else:
+        raise AssertionError(f"expected ProtocolError containing {expected!r}")
+
+
 def main() -> None:
     registry = AsyncJobRegistry()
     registry.start("resp_1", "weather-job", "call_weather")
+    expect_protocol_error(
+        lambda: registry.start("resp_1", "weather-job", "call_other"),
+        "unique",
+    )
+    expect_protocol_error(
+        lambda: registry.start("resp_1", "other-job", "call_weather"),
+        "unique",
+    )
+    expect_protocol_error(
+        lambda: registry.result_item("weather-job"),
+        "pending",
+    )
+    expect_protocol_error(
+        lambda: registry.complete("weather-job", "wrong_call", "demo weather"),
+        "call_id",
+    )
     assert registry.complete("weather-job", "call_weather", "demo weather") == "accepted"
     assert registry.complete("weather-job", "call_weather", "demo weather") == "duplicate"
+    expect_protocol_error(
+        lambda: registry.complete("weather-job", "call_weather", "changed result"),
+        "cannot change",
+    )
     item = registry.result_item("weather-job")
     assert item["call_id"] == "call_weather"
     assert registry.jobs["weather-job"].consumed is False
@@ -139,6 +242,31 @@ def main() -> None:
     assert initial.incomplete_reason == "steered"
     assert continuation.previous_response_id == "resp_1"
     assert continuation.side_effects == ["started:slow_lookup"]
+    expect_protocol_error(
+        lambda: steer(initial, "Steer again"),
+        "only a running",
+    )
+
+    disconnected = ResponseState("resp_disconnect")
+    disconnect(disconnected, "ws-1")
+    expect_protocol_error(
+        lambda: steer(disconnected, "Reuse the old steering", connection_id="ws-2"),
+        "current WebSocket",
+    )
+    recovered = recover_after_disconnect(disconnected, "ws-2")
+    assert recovered.previous_response_id == "resp_disconnect"
+    assert recovered.steering_id is None
+    assert "steering.not_replayed" in recovered.events
+
+    safety_blocked = ResponseState("resp_safety")
+    safety_blocked.side_effects.append("started:external_write")
+    block_for_misalignment(safety_blocked)
+    expect_protocol_error(
+        lambda: retry_after_block(safety_blocked),
+        "automatic retry",
+    )
+    assert safety_blocked.status == "blocked"
+    assert safety_blocked.side_effects == ["started:external_write"]
 
     skills = [
         Skill(
@@ -169,6 +297,18 @@ def main() -> None:
                     "incomplete_reason": initial.incomplete_reason,
                     "continuation_previous_response_id": continuation.previous_response_id,
                     "side_effect_preserved": continuation.side_effects,
+                    "events": initial.events,
+                },
+                "disconnect_recovery": {
+                    "previous_response_id": recovered.previous_response_id,
+                    "steering_replayed": recovered.steering_id is not None,
+                    "events": recovered.events,
+                },
+                "misalignment": {
+                    "status": safety_blocked.status,
+                    "code": safety_blocked.blocked_code,
+                    "side_effects_preserved": safety_blocked.side_effects,
+                    "automatic_retry": "rejected",
                 },
                 "skill_routing": {
                     "selected": [skill.name for skill in selected],

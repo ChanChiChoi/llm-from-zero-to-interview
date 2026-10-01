@@ -1,5 +1,8 @@
 # 中英文术语表
 
+GPT-6.1 Sol	OpenAI GPT-6.1 Sol 模型；公开资料主要是 API/runtime 合同，不等同于内部架构披露。
+reasoning context	推理上下文范围；`current_turn` 与 `all_turns` 控制可复用的 opaque reasoning items。
+
 ## Core Terms
 
 Language Model：语言模型
@@ -8534,6 +8537,10 @@ Keep Routing：保持路由；MoE 强化学习中保存 rollout 推理时的 exp
 
 Keep Sampling Mask：保持采样掩码；保留 old policy 采样时的 top-p/top-k truncation mask，并将其应用到 current policy，避免 RL 中 old/current policy 的 action space 不一致。
 
+Unbiased KL Estimate：无偏梯度 KL 估计；DeepSeek V3.2 报告以 current/old policy importance ratio 修正基于 old-policy rollout 的 reference-KL 项，并称所得估计器梯度无偏；这是论文公式与主张，不代表已公开完整训练实现或方差保证。
+
+Off-Policy Sequence Masking：离策略序列屏蔽；V3.2 报告仅当 outcome advantage 为负且 response 平均 log(old-policy/current-policy probability ratio) 超过阈值时屏蔽该序列的 policy objective；Eq. (8) 中 KL penalty 本身不乘该 mask。
+
 Thinking Context Management：工具推理上下文管理；V3.2 报告描述只追加 tool message 时保留历史 reasoning，出现新 user message 时才丢弃 reasoning，同时保留工具轨迹；收益取决于 harness 如何编码工具事件。
 
 Indexer RoPE Layout：索引器 RoPE 布局；V3.2-Exp inference demo 明确 indexer 使用 non-interleaved 布局，而 MLA 使用另一种布局；不能因为都使用 RoPE 就复用通道排列、权重切分或 cache 实现。
@@ -8920,6 +8927,22 @@ Thinker：理解器/思考器；Qwen3-Omni 中负责文本、音频、图像、�
 
 Talker：语音生成器；Qwen3-Omni 中利用多模态特征生成流式音频 code，再交给 Code2Wav 生成 waveform 的模块。
 
+## 2026-09 Claude Sonnet 5.5
+
+Between-tools Thinking：工具间思考模式；Anthropic Sonnet 5.5 的 `thinking.type=between_tools` 关闭工具前的 upfront thinking，但工具之间仍可能返回 progress/thinking block；不是通用 `disabled` 别名。
+
+Sonnet 5.5 Thinking Block Binding：Sonnet 5.5 思考块绑定；thinking block 受 producer model、会话前缀（system/tools/先前消息）及账号/组织边界约束；不兼容状态可能被丢弃或导致 400，不能当作普通可编辑文本或长期记忆。
+
+Progress-update Thinking Block：进度更新 thinking 块；Sonnet 5.5 工具间较长的进度文本可能以 `thinking` 类型返回；默认 display 下内容可能为空，UI 若只渲染 `text` 会静默。
+
+Category-specific Fallback：类别化 fallback；安全 refusal 是否可重试取决于分类类别。Sonnet 5.5 官方 server-side fallback 覆盖 cyber/frontier_llm，不覆盖 bio/reasoning_extraction/general_harms；必须记录实际执行模型。
+
+Actual-model Attribution：实际模型归因；benchmark/request manifest 同时记录 requested model、fallback reason 与实际 served model，避免将 fallback 后的混合系统结果误标为单一裸模型成绩。
+
+Terminal-Bench 4.0 Resource Adaptation：Terminal-Bench 4.0 资源自适应；部分任务提高 timeout，并按任务需求调整 RAM/CPU，以减轻资源配置和 harness 差异对评估的混杂；不能替代任务版本、容器提供方与测量条件说明。
+
+Claude Sonnet 5.5 Evidence Boundary：Sonnet 5.5 证据边界；AA 有 canonical 锚点，DataCurve 当前无精确 Agent 行；Anthropic API 文档与 System Card 支持 thinking/tool/safeguard 合同及发布方评测，不支持参数、内部架构、完整训练 recipe、独立复现或生产 SLO 结论。
+
 AuT：Audio Transformer；Qwen3-Omni 的音频编码器，公开约 12.5 Hz 音频 token rate、动态 attention window 和多语言/音频理解训练路线。
 
 TM-RoPE：Temporal/Height/Width Rotary Position Embedding；把时间、高度、宽度拆成位置维度，并将音频/视频真实 timestamp 对齐到约 80 ms 时间栅格的多模态位置机制。
@@ -9089,3 +9112,9 @@ Canonical Context：规范上下文；经过版本化和确定性序列化、可
 Orphan Tool Call：孤儿工具调用；compaction 或重放后只剩 call 没有对应 result，或 result 的 call id/turn lineage 不匹配。宿主应拒绝继续执行或进入可恢复错误状态，避免重复副作用。
 
 Local Protocol Toy：本地协议教学实验；用合成数据验证状态机、序列化或门禁的内部一致性，不能替代官方实现、完整权重、目标硬件、真实 API 或生产 SLO 证据。
+
+Gemini 4 Argon：Google 2026-09 公告的 frontier model；当前以 AA 单榜 + Google 发布方资料记录，1M 输出上限和评测结果不等于独立工程验收。
+
+Publisher-Reported Result：发布方报告结果；必须绑定任务集、harness、工具、预算、verifier 和分母，不能直接写成裸模型能力。
+
+Cyber Defense Guardrail：网络安全防御护栏；涉及授权范围、沙箱、出站控制、人工审批和漏洞修复 verifier，不能因模型具备漏洞能力而跳过宿主安全控制。

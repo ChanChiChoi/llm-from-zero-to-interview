@@ -316,3 +316,9 @@ U_i=\frac{\mathrm{decision\ value}_i
 Context folding 的目标不是让历史看起来更短，而是以更少 token 保留继续执行所需的约束、证据、假设和副作用状态。任何折叠都应分层处理、保留来源、显式表示矛盾、可回溯、可版本化，并通过中断和安全回放。折叠失败时，系统必须知道该降级、重读原文还是停止副作用。
 
 本章的状态压缩、摘要引用和上下文管理是通用架构方法；具体 harness 如何实现 context compaction、summary item 或 hidden state，需要以其公开文档和版本实现为准。
+
+## 18.27 工具轨迹溢出：摘要、前缀淘汰与整段重启
+
+DeepSeek V3.2 技术报告的 Search Agent 实验提供了一个具体的策略对照：工具轨迹使用量超过上下文窗口 80% 后，`Summary` 摘要溢出轨迹再开始 rollout；`Discard-75%` 丢掉最早四分之三的工具调用历史；`Discard-all` 清空全部旧工具调用历史。作者另以 N 条独立轨迹并选择最少 steps 的 `Parallel-fewest-step` 比较串行与并行 test-time compute。V3.2 报告的 BrowseComp Pass@1 为无 context management 51.4、带管理 67.6*；这是特定 Search Agent、商业搜索 API 和 harness 的作者结果，不是通用的摘要收益保证，细节见 [第二十一册第 19 章 19.35](../../book-21-transformer-architecture-evolution/chapters/19-Sliding-Window与稀疏注意力.md)。
+
+这组方案可归纳为三种不同损失：摘要会引入压缩遗漏/误述，前缀淘汰会失去早期证据，整段重启会丢失全部工具轨迹；并行基线则用额外 rollout 计算换取多条搜索路径。恢复所需的事实、引用、未决项和副作用状态应由 harness 在上下文外持久化，并做来源回指与 verifier 检查。实验还提醒，token 使用逼近硬上限时可以主动切换策略，但 80% 是该论文的触发设置，不是普适最佳阈值。

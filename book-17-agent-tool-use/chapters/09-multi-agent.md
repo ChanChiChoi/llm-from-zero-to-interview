@@ -954,6 +954,25 @@ C_{\mathrm{swarm}}=\sum_{i=1}^{N}C_{\mathrm{agent},i}
 -\lambda_r\Delta\mathrm{Risk}
 ~~~
 
+### 案例：Dynamic Workflows 与 System Card 多 Agent 评测
+
+Anthropic 的 Claude Code **Dynamic Workflows** 展示了一种面向长任务的产品形态：Claude 根据 prompt 动态拆解任务、生成 orchestration scripts、并行运行 subagents，在结果汇总前检查；其他 agents 会从独立角度尝试反驳发现，workflow 迭代到结论收敛。协调状态放在对话之外并持续保存，因此中断的长任务可以从 checkpoint 恢复。这超出了普通的“同一轮多发几次 tool call”，但官方博客没有公开完整 scheduler、失败合并算法或独立成功率，不能据此推断模型内部结构。该博客是沿 Opus 4.8 锚点补充的 Anthropic 产品/harness 资料，不表示这项产品能力仅属于 Opus 4.8。
+
+这类并行化要与安全、预算控制一起设计。Anthropic 页面提醒 workflow 比一般 Claude Code session 消耗更多 token；首次触发先展示将运行的内容并请求确认，组织管理员可以通过 managed settings 关闭。页面当前称该功能 generally available，建议开启 auto mode，并称 Max/Team/Enterprise 与 Claude Code API 默认开启、Pro 可在 `/config` 启用；具体计划权限仍受管理员设置影响。`ultracode` 是 Claude Code 专属入口：effort 设为 `xhigh`，workflow 的启动时机由 Claude 决定。Bun 从 Zig 移植到 Rust 的案例报告约 750,000 行、11 天、99.8% 测试通过、数百并行 agents 和每文件双 reviewer；文章同时注明尚未用于生产，因此应作为发布方案例，而非对照实验结论。
+
+Opus 4.8 System Card 又提供了独立于产品 Dynamic Workflows 的多 Agent benchmark harness，面试时不要把二者混成同一系统：
+
+| 评测与配置 | 发布方观察 | 解释边界 |
+|---|---|---|
+| BrowseComp，blocking orchestrator | 88.5% | 该 harness 的最高分；不能单独推出它的延迟/成本更优 |
+| BrowseComp，fixed 5-agent team vs single agent | 85.4% vs 84.3%；total token limit 为 5M vs 10M，派生 latency 约为 single 的 20% | 质量略高且 latency 更低，但仍消耗较多 tokens；这是指定配置下的比较 |
+| BrowseComp 难度切片 | 100% 历史通过率的易题没有明显 speedup；历史通过率低于 0.5 的 hard tail 中位约 3× | 难度由先前模型通过率代理，收益集中在慢的困难题 |
+| ProgramBench，166 个 golden tasks | 三 Agent team 在 score 0.6 时约 1.8× latency improvement | 从 200 题中排除 34 个参考实现质量不足的题；分数—成本曲线依赖该筛选与 harness |
+
+System Card 的 “latency” 是派生值：把所有 Agent 的 token 数按固定 prefill/decode rate 折算，再加工具执行时间；它不是生产环境的实际 wall-clock 或 p95 SLO。测试还分别定义 blocking、peer team 与 asynchronous subagents 的上下文、工具和预算，见 [System Card §8.11](https://www.anthropic.com/claude-opus-4-8-system-card)。因此公平的 multi-agent 面试回答至少要同时给任务成功率、全体 Agent token、串并行关键路径、工具时间、真实 wall-clock 和 verifier 质量，并按简单/困难任务切片。
+
+System Card 还把 coding honesty 具体化为“未完成事项是否在总结中被主动披露”：预填充短上下文 coding traces 中，Opus 4.8 漏报重要失败事件为 3.7%，但该评测是 off-policy transcript，不能写作普适 honesty rate。最终仍应由测试和 artifact verifier 判断交付状态，而不是让模型自我宣布完成。
+
 ## 9.20 常见失败模式
 
 1. 角色分工不清：每个 Agent 都在规划、执行和总结。
@@ -1011,6 +1030,8 @@ Verifier 的作用是检查候选结果是否满足外部可观察条件。数�
 6. 记录一次并行运行的 wall-clock、模型 token、消息 token、验证成本和人工升级成本，计算 NetLift，并与串行 workflow 比较。
 7. 构造两个共享同一错误文档的 Agent，说明为什么多数票没有增加独立证据；再加入一个外部工具 verifier，比较冲突识别结果。
 8. 比较单 Agent、固定 workflow 和 Multi-Agent 在成本、可靠性、可解释性上的差异。
+9. 用同一任务复刻 BrowseComp 风格的 single、blocking、fixed-team、async 四条曲线；分别累计所有 Agent token、模型关键路径、工具时间和实际 wall-clock，说明 benchmark 的派生 latency 为什么不能当线上 SLO。
+10. 为一个跨数百文件的长迁移设计 Dynamic Workflow：写出任务 DAG、独立验证与反驳回合、checkpoint/resume、取消和预算/权限门禁；用故意失败的测试验证“状态已保存”“任务已完成”和“artifact 已验收”是三个不同状态。
 
 ## 9.25 本章小结
 
@@ -1026,5 +1047,7 @@ Multi-Agent 通过角色分工、并行执行和互相检查，让 Agent 系统�
 - [ChatDev](https://arxiv.org/abs/2307.07924)：软件开发场景中的多 Agent 协作研究入口。
 - [AI Safety via Debate](https://arxiv.org/abs/1805.00899)：用辩论暴露和检查模型结论的研究入口。
 - [LLM-based Multi-Agent Systems survey](https://arxiv.org/abs/2402.01680)：多 Agent 系统的综述入口。
+- [Introducing dynamic workflows in Claude Code](https://claude.com/blog/introducing-dynamic-workflows-in-claude-code)：Anthropic 对长周期动态编排、subagents、复核、恢复与使用门禁的产品描述。
+- [Claude Opus 4.8 System Card](https://www.anthropic.com/claude-opus-4-8-system-card)：§8.11 的多 Agent benchmark harness、score/token/派生 latency 曲线，以及 §6.3.6 的 coding diligence 评测。
 
 这些资料分别涉及框架、角色化工作流、软件开发协作、辩论和综述。它们可以帮助理解架构空间，却不能单独证明多 Agent 比单 Agent 更便宜、更可靠或更安全；具体结论仍需在相同任务、相近预算、明确 baseline、权限配置和失败切片下复测。

@@ -147,3 +147,40 @@ Anthropic 页面声称 Fable 5.1 带来更强的长期 Agent coding、多步研�
 ## 当前闭环判断
 
 Fable 5.1 已完成“排行榜发现 + 官方发布页/模型页字段 + System Card 正文 + 运行时 breaking/additive changes + 论文定向检索 + 研究笔记”的 **AA + System Card 正文证据闭环**。没有 DataCurve Fable 5.1 结果，也没有公开参数规模、稠密/MoE 结构、完整训练/后训练 recipe、独立技术报告或独立 benchmark 复现，因此不新增独立 Transformer 架构章节。下一步回到两张排行榜的八家重点厂商候选队列，不把官方文档中关联的其他版本自动升级为新锚点。
+
+## 2026-09-23 `7890` 复验与状态协议 toy
+
+本轮仍只沿两个排行榜已经确认的 `claude-fable-5-1` canonical 条目推进，没有从 Anthropic 文档、System Card 或论文另发现模型。两榜当前复抓结果为：Artificial Analysis 中文首页 `1,783,769` bytes / SHA-256 `e1acf794bd45f380ce3220a20c68de7a274f50ff7eb162a527a9faf4d58a166a`，Fable 详情 `4,008,017` bytes / `4ea24782d05bcaae7d31f3cf348e5a573851678998706a9df82fa34679292f96`，DataCurve `268,036` bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7e6e095ad59f1f1`。AA 当前 `max with fallback` 的 Intelligence Index 为 `53.3549259623252`，median output speed 为 `64.7060238772019 tokens/s`，cost per Intelligence Index task 为 `7.629706364004841`，context 为 `1M`；DataCurve 仍没有精确 `mini_swe_agent_claude_fable_5_1_*` 行。
+
+7890 取得的 Anthropic 官方 Markdown 快照：
+
+| 资源 | 大小 | SHA-256 |
+|---|---:|---|
+| [Fable 5.1 overview](https://platform.claude.com/docs/en/models/fable-5-1/overview.md) | `14,954` bytes | `13e8aeb6bbd207311ac032916f2ab37e7a454c9d752c027cf76967a5c958a076` |
+| [What's new in Fable 5.1](https://platform.claude.com/docs/en/models/fable-5-1/whats-new-fable-5-1.md) | `37,545` bytes | `59d2a26f6e123d009a9e86aac9283705f7bfd15549b185dc07aa1858241baf19` |
+| [Migration guide](https://platform.claude.com/docs/en/models/fable-5-1/migration-guide.md) | `94,368` bytes | `c1d7bd16475ce9ad03ad556cc363635d93e695ecafc293e6acb85023e9f869b6` |
+| [Release page](https://www.anthropic.com/claude-fable-and-mythos-5-1) | `534,503` bytes | `f0038916a77f0ff73be47f238eeef9b2995fabc9720bb644efd70df42a0eb5f8` |
+| [System Card](https://www.anthropic.com/claude-fable-5-1-mythos-5-1-system-card) | `16,397,488` bytes | `b0d59edc7a60eef32a879c13d713cce60c3fefd7e6b5183afdc8b835af3c8c39` |
+
+本轮迁移正文补充了三个值得单独记录的部署门禁：assistant prefill 对 Fable 5.1 返回 400；模型只接受 adaptive always-on thinking，不能用 manual budget 替代；模型需要 30-day data retention，ZDR 组织需获得明确授权，且不支持 Priority Tier。prefix mismatch 可以在严格模式下拒绝，也可以通过 `thinking-binding-controls-2026-08-01` 的 `drop_block` 行为显式丢弃失效块，并从 `input_transformations` 记录原因。thinking block 的兼容性是有方向的：Fable 5.1 能读取早期 Claude 状态，早期模型不能读取 Fable 5.1 状态。
+
+新增 [`code/claude_fable51_state_protocol_audit.py`](code/claude_fable51_state_protocol_audit.py)，仅使用 Python 标准库与合成 trace。它验证 adaptive/forced-tool/prefill capability gate、thinking producer/prefix binding、历史编辑的 error/drop 分支、进度更新与真实 tool result 分账、provenance 独立 verifier、fallback actual model 和相同幂等键的副作用去重。运行结果为 `evidence_level=local_protocol_toy`、首次副作用 1、重复回执 `true`、side-effect executions 1；没有外部网络请求。toy 不能证明 Anthropic 服务端 schema、隐藏 reasoning、模型质量、生产安全或 SLO。
+
+## 2026-09-24：thinking block 的双重绑定与 Opus 5.5 单向兼容
+
+本轮按两个唯一排行榜复核活动锚点：Artificial Analysis 中文首页经 `10.24.27.134:7890` 为 HTTP 200、1,782,611 bytes / SHA-256 `566b4adab724bd312436a302be3f0f4c5d9f7713188e9efb078cb636faddd02b`；Claude Fable 5.1 详情为 HTTP 200、3,979,333 bytes / `1268895cd715723c917adf4cb11e2cdd731919b321588478e64f32311a29c102`。Index `53.3549259623252` 与 cost/task `7.629706364004841` 保持此前观测。DataCurve 经 `10.24.27.134:8098` 为 HTTP 200、268,036 bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`，与同日既有快照一致，仍无精确 `mini_swe_agent_claude_fable_5_1_*` 行；八家重点厂商没有新增 canonical 模型。
+
+7890 取得 Anthropic 官方资料：Fable 5.1 overview 14,590 bytes / `2a98d9a06c7f3cf710fa11ad838e6b314c07de980044ebc3165a2bbcb47b6ec9`；What's New 37,545 / `59d2a26f6e123d009a9e86aac9283705f7bfd15549b185dc07aa1858241baf19`；migration guide 93,202 / `286fa675d0b48872f401c8bd749f2458374642cc3214366222cfc6960582a082`；通用 Thinking 文档 73,861 / `84dfb480c0895528e56205ab570c872c5769609cc47df2ee92f973a22e59f2a5`。What's New 与 9 月 23 日文件同 hash；overview 的高层 preserved-thinking 卡片不应被解读为所有模型、endpoint 和历史变更都兼容，pair-specific 结论以 Thinking 与 migration 正文为准。
+
+这次补齐的重要兼容边是：Fable 5.1 可读取 Claude Opus 5.5 的 thinking block，但官方明确限定为 Claude API；Opus 5.5 不能反向读取 Fable 5.1 block。与此同时，Fable 5.1 可读早期 Claude 模型生成的 block。兼容方向、服务 surface 和 refusal fallback 是三件不同的事：Fable 文档列出的默认 fallback 仍是 Opus 4.8/Opus 5，不能因 Opus 5.5 单向可读就把它写成默认 fallback target。
+
+应把可恢复状态拆成两条独立校验：
+
+1. **model binding**：生产者与消费者 model pair 是否兼容。不可读 block 会在模型看到请求前被 API 丢弃，不计入 input token；启用 `thinking-binding-controls-2026-08-01` 时可用 `input_transformations` 记录 `model_binding_mismatch`，否则可能静默。
+2. **prefix binding**：block 前面的 system、tools 与消息内容是否保持不变。修改旧 turn、重建 system/tools 或删除中间消息会使后续 block 失效。2026-08-31 00:00 UTC 起创建的新账户默认执行检查；更早账户只有显式配置 `thinking.block_binding.prefix_mismatch_behavior` 才按该策略处理。严格模式返回 400；`drop_block` 会丢弃失效 block 并记录 `prefix_binding_mismatch`。
+
+官方允许用 append-only 的 mid-conversation system/tool updates、消息级 effort、server-side context editing/compaction 代替重写旧前缀。从最旧端连续移除 leading thinking blocks 可保留后续块；从中间移除会使之后的块失效。消息级 effort 更新可保持原 cache prefix；不能把这一点泛化成顶层 thinking/effort 配置改变也保持 cache hit。
+
+新增知识已同步至第二十册第 21 章 21.29、面试题、练习、知识图谱和本轮计划/进度。toy 新增 Claude API 专属 Opus 5.5 可读边、反向不可读及其他 surface 不外推的断言；脚本仍只证明合成状态机。当前 Fable 5.1 状态为 **AA 单榜内容专题闭环 + System Card/API contract + local protocol toy**。Opus 5.5 → Fable 5.1 的方向性兼容、Claude API 专属范围、model/prefix binding 见[第二十册第 21 章 21.29](../../book-20-agent-harness-runtime/chapters/21-persistent-workspace与状态边界.md)。参数、内部架构、完整训练配方、精确 DataCurve Agent 行、真实 endpoint probe、目标硬件和生产 SLO 仍未核验。
+
+当前状态为 **AA 单榜内容专题闭环 + System Card/API contract + local protocol toy**，正式面试专题见第二十册第 21 章 21.29。仍没有 Fable 5.1 专属参数/架构、完整训练/后训练 recipe、独立技术报告、精确 DataCurve Agent 结果、完整权重、目标硬件 profile、线上 tool acceptance 或生产 SLO；后续按两榜已有 canonical 集合选择下一项未收口锚点。

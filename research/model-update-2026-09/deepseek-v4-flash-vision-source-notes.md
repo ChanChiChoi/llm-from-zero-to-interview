@@ -1,12 +1,12 @@
 # DeepSeek V4 Flash Vision：多模态 API、榜单锚点与版本路由漂移
 
-核验日期：2026-09-15。本笔记只把 Artificial Analysis 中已经出现的 `deepseek-v4-flash-vision` 作为模型锚点；DataCurve DeepSWE 当前页面没有该条目。DeepSeek 官方发布页、Vision/Files/Responses 文档和价格页用于核验这个锚点及其周边技术，不作为新的模型发现入口。
+首次核验日期：2026-09-15；当前时点复验：2026-09-24。本笔记只把 Artificial Analysis 中已经出现的 `deepseek-v4-flash-vision` 作为模型锚点；DataCurve DeepSWE 当前页面没有该条目。DeepSeek 官方发布页、Vision/Files/Responses 文档和价格页用于核验这个锚点及其周边技术，不作为新的模型发现入口。
 
 ## 1. 锚点身份与两个榜单的证据边界
 
-### Artificial Analysis
+### Artificial Analysis（2026-09-15 首次快照）
 
-当前详情页是 [DeepSeek V4 Flash Vision](https://artificialanalysis.ai/models/deepseek-v4-flash-vision)，canonical slug 为 `deepseek-v4-flash-vision`，配置名为 `DeepSeek V4 Flash Vision (Reasoning, Max Effort)`。页面结构化字段给出：
+首次抓取的详情页是 [DeepSeek V4 Flash Vision](https://artificialanalysis.ai/models/deepseek-v4-flash-vision)，canonical slug 为 `deepseek-v4-flash-vision`，配置名为 `DeepSeek V4 Flash Vision (Reasoning, Max Effort)`。该快照结构化字段给出：
 
 | 字段 | 页面值 | 正确读法 |
 |---|---:|---|
@@ -170,3 +170,24 @@ Responses 的流式事件还拆出 reasoning、message、function_call、custom 
 不能直接说：Vision 变体一定有独立的视觉 backbone；AA 的 35.012 指数是裸模型能力；DataCurve 的 V4 Flash/Pro 分数属于 Vision；发布方“接近 Opus-4.8”是独立 benchmark 复现；`file_id` 是长期模型记忆；Responses API 的兼容字段都实际生效。
 
 相关正式章节：第二十一册第 81 章的 V4.1-Flash cache/多模态路径、第二十一册第 85 章的本锚点视觉 API 与路由账本，以及第四册第 19 章的模型谱系条目。
+
+## 2026-09-24：Vision alias 路由与当前图片预算复验
+
+通过 `10.24.27.134:7890` 重新获取两榜及 DeepSeek 官方页面。快照如下；SHA-256 用于识别本次页面内容，不代表页面永久不变：
+
+| 页面 | HTTP / 大小 | SHA-256 |
+|---|---:|---|
+| Artificial Analysis `deepseek-v4-flash-vision` 详情 | 200 / `3,967,107` bytes | `a5e5259ee84eac5aa88915dd6436ba155e265ede940ab663b52c4a681ae43ed7` |
+| Artificial Analysis 中文首页 | 200 / `1,781,428` bytes | `15e9763f0d516791e7b7c2c5679e87e5878eaffed4bef31e485c9043b758ba59` |
+| DataCurve DeepSWE | 200 / `268,036` bytes | `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1` |
+| DeepSeek V4 Flash Vision 实验公告 | 200 / `22,032` bytes | `56babe7f597f37b31c4440174272d4090f32056902c76e3984be3d54d5864de8` |
+| DeepSeek V4.1-Flash 9/10 发布页 | 200 / `24,438` bytes | `f18dc22d37393381b31c9069996138f45aa7b02b08442d43af7c6c57f587bdce` |
+| Quick Start / Pricing / Vision / Files / Responses | `48,088` / `23,982` / `80,467` / `62,188` / `57,105` bytes | `7ce9db1b1cc7e2efafe7cbfd57b9d46d240c20399f7bd87672c7e3a5250ccdd0` / `210f102275ccf1a6542f08a3bc9e4b4c7c83278cb74b35217bffa112df6363b2` / `5654a198302edd80aea443fb123d14b14d675ccc76730959dd55414d9baee1e2` / `1a825256f4dfae25b40751044bc069860897e30582d5b492e8edeea96b37297a` / `3af115c64774731d42e29b8b6982b914351d501882aaa9440dfa55c83f549ce0` |
+
+AA 当前仍保留 `deepseek-v4-flash-vision` canonical 条目。Index 为 `34.8390628035969`，median output speed `217.762710468086 tokens/s`，median TTFC `0.970116780000126s`，cost per Intelligence Index task `$0.314372044499279`；1M context 和 `$0.44/$1.32/$0.014` 的 input/output/cache-hit provider 字段仍在页面上。与 9/15 的 Index `35.0122378035969`、速度 `215.179167697513`、TTFT `1.29855545700002s` 相比，按榜单/provider 测量的当前时点变化记录，不推断模型权重或 served route 发生变化。当前 DataCurve 快照中没有精确 `mini_swe_agent_deepseek_v4_flash_vision_*` 行。
+
+9/10 官方 V4.1-Flash 发布页称 V4-Flash 与 V4-Flash-Vision-Exp 已 retired，两个旧名称暂时路由到 V4.1-Flash；该发布页还把路由目标描述为新架构系列中最小、具备 native visual understanding 的模型。这个视觉能力声明属于 V4.1-Flash 服务目标，不能反向当成旧 Vision-Exp 的架构披露。9/24 Quick Start 与 Pricing 进一步明确：旧名仍被接受，但对应模型已退役，请求由 V4.1-Flash 服务，并按 Flash 价格计费。当前首选 API 名 `deepseek-flash`，Pricing 将版本标为 `DeepSeek-V4.1-Flash`，给出 1M context、384K 最大输出；Flash 的峰/谷每百万 token 价格分别为 cache hit `$0.006/$0.003`、cache-miss input `$0.30/$0.15`、output `$1.20/$0.60`，峰时为工作日 01:00–04:00 与 06:00–10:00 UTC（中国法定节假日除外）。这与 AA 对旧锚点列出的 `$0.44/$1.32` 不是同一计费快照或服务身份，不能拼成一个价格。
+
+9/24 Vision guide 仍明确每图经 resize 后最多 `1024` tokens：例如 2000×2000 与 5000×5000 图像可 resize 到相同预算，多图按每张分别计算。请求最多 600 张图；单图 base64/URL 为 32 MiB、`file_id` 为 64 MiB；总请求体 48 MiB，总图片大小不含 `file_id` 图为 64 MiB、含 `file_id` 图最高 200 MiB；单边最大 8192 px，包含至少 15 张图时降为 4096 px。发布公告的 384 image tokens 是 8/21 实验 alias 的历史产品规则，必须与当前 1024 上限及当次 served model 分开。
+
+工程结论不变：排行榜模型名、客户端请求 alias 和响应 `model` 必须分账。官方文档确认 alias 当前会路由至 V4.1-Flash，但本轮没有真实 API key 或已授权 endpoint，未观察实际响应 `model`；也没有获得 Vision 变体独立架构/训练报告或 DataCurve 结果，故不新增独立视觉架构结论。

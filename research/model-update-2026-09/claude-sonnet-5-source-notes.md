@@ -1,13 +1,14 @@
 # Claude Sonnet 5：排行榜、官方 API 与 Agent 运行时核验
 
-核验日期：初次核验 2026-09-15；当前快照复核 2026-09-21。Sonnet 5 的候选身份来自 Artificial Analysis 与 DataCurve DeepSWE；其余页面只用于核验已发现锚点的官方事实和周边技术。本文把基础模型、推理档位、fallback、provider、harness、工具和 verifier 分开记录。
+核验日期：初次核验 2026-09-15；排行榜/System Card 快照复核至 2026-09-28，官方 API/Agent 文档复核至 2026-09-28。Sonnet 5 的候选身份来自 Artificial Analysis 与 DataCurve DeepSWE；其余页面只用于核验已发现锚点的官方事实和周边技术。本文把基础模型、推理档位、fallback、provider、harness、工具和 verifier 分开记录。
 
 ## 证据入口与联网复核
 
 - 排行榜锚点：[Artificial Analysis Claude Sonnet 5](https://artificialanalysis.ai/models/claude-sonnet-5)；[DataCurve DeepSWE](https://deepswe.datacurve.ai/)。
-- 官方资料：[Anthropic Models Overview](https://platform.claude.com/docs/en/models/overview)、[Sonnet 5 模型页](https://platform.claude.com/docs/en/models/sonnet-5/overview)、[发布公告](https://www.anthropic.com/news/claude-sonnet-5)、[Sonnet 5 System Card](https://www.anthropic.com/claude-sonnet-5-system-card)。
-- 官方 API/Agent 文档：[Adaptive thinking](https://platform.claude.com/docs/en/build-with-claude/thinking)、[Effort](https://platform.claude.com/docs/en/build-with-claude/effort)、[Prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)、[Compaction](https://platform.claude.com/docs/en/build-with-claude/compaction)、[Programmatic tool calling](https://platform.claude.com/docs/en/agents-and-tools/tool-use/programmatic-tool-calling)、[Context editing](https://platform.claude.com/docs/en/build-with-claude/context-editing)。
+- 官方资料：[Anthropic Models Overview](https://platform.claude.com/docs/en/models/overview)、[Sonnet 5 模型页](https://platform.claude.com/docs/en/models/sonnet-5/overview)、[What's New](https://platform.claude.com/docs/en/models/sonnet-5/whats-new-sonnet-5)、[Migration guide](https://platform.claude.com/docs/en/models/sonnet-5/migration-guide)、[Prompting guide](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5)、[发布公告](https://www.anthropic.com/news/claude-sonnet-5)、[Sonnet 5 System Card](https://www.anthropic.com/claude-sonnet-5-system-card)。
+- 官方 API/Agent 文档：[Adaptive thinking](https://platform.claude.com/docs/en/build-with-claude/thinking)、[Effort](https://platform.claude.com/docs/en/build-with-claude/effort)、[Prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)、[Compaction overview](https://platform.claude.com/docs/en/build-with-claude/compaction)、[On-demand compaction](https://platform.claude.com/docs/en/build-with-claude/compaction-on-demand)、[Threshold compaction](https://platform.claude.com/docs/en/build-with-claude/compaction-threshold)、[Compaction and preserved thinking](https://platform.claude.com/docs/en/build-with-claude/compaction-thinking-blocks)、[Background compaction](https://platform.claude.com/docs/en/build-with-claude/compaction-background)、[Keep recent turns](https://platform.claude.com/docs/en/build-with-claude/compaction-keep-recent-turns)、[Preserved thinking](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking)、[Programmatic tool calling](https://platform.claude.com/docs/en/agents-and-tools/tool-use/programmatic-tool-calling)、[Context editing](https://platform.claude.com/docs/en/build-with-claude/context-editing)。
 - 重新联网后，代理 `10.237.126.170:1234` 与 `10.24.27.134:8098` 对排行榜和 Anthropic 发布页均可用；`10.24.27.134:7890` 可访问部分页面，但 Artificial Analysis 大页面仍有 TLS/读取超时。因此单个代理失败不作为“页面不存在”的证据。
+- 2026-09-28 本工作区显式使用 `curl --proxy http://10.24.27.134:7890` 得到百度 HTTP 200、2,381 bytes；Artificial Analysis Sonnet 5 详情、DataCurve DeepSWE 和下列 Anthropic 文档也均取得完整响应。代理连通性只对本次 URL/时点成立，不等于所有目标都可达。
 
 本轮临时快照及 SHA-256：
 
@@ -31,6 +32,24 @@
 | Sonnet 5 模型 overview | `/tmp/sonnet5-overview-20260921.html`，461,560 bytes | `57d20b24a8d7961bd2ea76d71080035677ec27deac07991bcc73cc3d305a03b5` |
 | Sonnet 5 System Card | `/tmp/sonnet5-system-card-20260921.html`，10,786,341 bytes | `33573adb9f1871b903f79b77d7755a44cc20bb913ef48ac9000ddb090e41f7ed` |
 | System Card 标准库文本提取 | `/tmp/sonnet5-system-card-extracted.txt`，约 237K 字符 | `3daed308eaedefa8ea61fe3bcfcc99a1206d03dcb02148dc63ba8ffdea9c47f6` |
+
+2026-09-28 当前排行榜与 Anthropic 官方 Markdown 快照：
+
+| 内容 | 文件与大小 | SHA-256 |
+|---|---:|---|
+| Artificial Analysis Sonnet 5 详情页 | `/tmp/aa-sonnet5-20260928.html`，3,849,279 bytes | `16557ff25caed39a04c1481ba199cd09eeb213db8a33534ff9c291b58fbce8a1` |
+| DataCurve DeepSWE | `/tmp/datacurve-7890-20260928.html`，268,036 bytes | `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1` |
+| What's New | `/tmp/sonnet5-whatsnew-20260928.md`，13,195 bytes | `02f0df53f8780f93ca88c9691f530f07032ebd5d41c88ec838fc0f9aa85007db` |
+| Migration guide | `/tmp/sonnet5-migration-20260928.md`，38,656 bytes | `d53d15d2b5a4c30fbf75e4181954bc1748472dd3186a65f6dac517255857a2ca` |
+| Prompting guide | `/tmp/sonnet5-prompting-20260928.md`，16,479 bytes | `07e7db846f96915a1d533fe6f62f7812790a966361b9982b6522557e74d08127` |
+| Compaction overview | `/tmp/sonnet5-compaction-20260928.md`，11,974 bytes | `351fe6c8454b3762356aa0066575ad369506b289ecfcf3af1fad2c060a43c9cc` |
+| On-demand compaction | `/tmp/sonnet5-on-demand-20260928.md`，46,724 bytes | `823190dbde68807fe73a9db88e83e37b05857395af7d0357b93588fdaa30e39d` |
+| Threshold compaction | `/tmp/sonnet5-threshold-20260928.md`，113,841 bytes | `5877f49f14e6192d050829e64d5149e381f4ccbf8933dac9a2e0a34e1515d748` |
+| Compaction/preserved-thinking rules | `/tmp/sonnet5-thinking-blocks-20260928.md`，30,956 bytes | `5a3c28c48516182033b5f83078e22ae729257d5b06a067bc1aad3a93a78f409e` |
+| Background compaction | `/tmp/sonnet5-background-20260928.md`，23,242 bytes | `1a40328fd97ecebfbd6ca1e4092cc522f2afdb3f0052a950118cd9d9fa8b560f` |
+| Keep recent turns | `/tmp/sonnet5-keep-recent-20260928.md`，21,987 bytes | `81682a12b3933d9dbff4a1cbfea739ad5479ada0c5c1e5bf4840488d42776745` |
+| Preserved thinking | `/tmp/sonnet5-preserved-thinking-20260928.md`，113,656 bytes | `a93aaa211a4ca45a1dea9532f77f43652d3bf2b6e01ca14298277089e0f09457` |
+| Models Overview | `/tmp/sonnet5-models-overview-20260928.md`，17,052 bytes | `404372e69b13defcb4598bb8a8cfbc359c0c31384d809daf53d75c3ca9316bc3` |
 
 当前 AA 页面相对 9 月 15 日的 `38.3576962882576` Intelligence Index、约 80.00 tokens/s 和约 202.63s TTFT，变为 `38.1638712882576`、`86.1790204452512 tokens/s` 和 `137.660255319s`。这是第三方 provider/测量时点的字段漂移；没有 revision、权重或训练变更证据，不能把差异解释成模型升级。当前页面还保留 1M context、输入/输出 `$2/$10/M`、cache hit `$0.20/M`、约 `$5.0912`/task 和约 8 个 Anthropic API provider 的配置级语义。
 
@@ -87,7 +106,7 @@ Sonnet 5 使用 adaptive thinking。官方文档说明，Claude 4.7 及之后的
 
 - 非默认 `temperature`、`top_p`、`top_k` 会返回 400；assistant prefill 不支持，Priority Tier 也不支持。
 - context awareness 会自动追踪剩余上下文预算；1M 是接口上限，不等于 1M tokens 都具有相同的检索质量，也不等于 KV cache 容量或无限有效记忆。
-- server-side compaction 支持 Sonnet 5，相关 beta header 为 `compact-2026-01-12`。compaction 是长任务状态管理能力，不能被描述为模型自动获得了无限上下文。
+- Sonnet 5 支持两种不同的 server-side compaction beta：threshold 模式通过 `context_management.edits` 使用 `compact_20260112` / `compact-2026-01-12`；on-demand 模式使用顶层 `compaction: {type: "summarize"}` / `compact-2026-09-04`。两者不是同一接口，也不能在同一请求混用；其 block 放置、历史替换方式与支持平台不同。compaction 是长任务状态管理能力，不能被描述为模型自动获得了无限上下文。
 - `computer_toolset_20260801` 可用于 Claude API 和 Google Cloud；browser use、web fetch 等能力仍受宿主权限、网络、沙箱、审批和审计控制。
 - programmatic tool calling 通过 `code_execution_20260120` 或更新版本，让模型在代码执行容器内批量调用工具，减少模型往返和部分输入 token。文档中 BrowseComp/DeepSearchQA 的收益是通用文档结果，不能写成 Sonnet 5 专属 benchmark。
 - Sonnet 5 不支持 mid-conversation system messages，应使用请求顶层 `system` 字段；工具协议和多轮历史必须保留服务端要求的 block 顺序与签名。
@@ -156,6 +175,33 @@ System Card/发布页记录的代表性数字如下；它们属于 Anthropic 发
 
 内容映射到第四册（模型/API 字段与上下文边界）、第六册和第二十四册（tokenizer、cache、TTFT/TPOT、并发与成本）、第七册（固定条件评测）、第十七册和第二十册（thinking block、工具循环、compaction、权限和状态恢复）。目前没有足够公开的 Sonnet 5 独立架构/训练证据，因此不新增 Sonnet 5 专属正式架构章节。
 
+## 2026-09-28：Compaction 双接口、回放约束与迁移提示
+
+本轮用 `10.24.27.134:7890` 重新获取上述 11 份 Anthropic 官方 Markdown 文档，均返回 HTTP 200、`text/markdown`；9 月 28 日早前留下的 What's New/Migration/Prompting 70-byte 响应不是正文，本节只依据这次完整快照。没有调用 Anthropic Messages API，也没有把文档合同写成真实 endpoint 行为验收。
+
+### 两条 server-side compaction 合同不可混为一谈
+
+| 项目 | On-demand | Threshold / automatic |
+|---|---|---|
+| 版本 / 参数 | beta `compact-2026-09-04`；顶层 `compaction: {"type":"summarize"}` | beta `compact-2026-01-12`；`context_management.edits` 中的 `compact_20260112` |
+| 触发与流转 | 应用主动发出独立 summarization 请求；返回单个 `compaction` block，`stop_reason: "compaction"`，不生成普通回复 | 普通 Messages 请求达到设定 input-token threshold 时在本次响应中压缩并继续；默认 trigger 为 150K、最小 50K，可用 `pause_after_compaction` 控制是否在 summary 后暂停 |
+| 后续历史 | block 带可读 summary 与 signature；后续每次请求都要带 beta header，历史只留一个最新 block，将它放在 `messages` 最前并删除其已总结的前缀；block 内容/signature 原样回传 | response 按正常方式追加；block 在服务端响应中替代旧历史，后续 API 自动丢弃 block 之前的内容 |
+| 关键边界 | 不能与 `context_management` 同请求；不能在上下文已超限后才请求压缩；不能留下未返回结果的 assistant tool call | 不能与携带 on-demand signed block 的 request 组合；threshold 路径不是单独的摘要请求 |
+
+两页的当前支持列表都包含 `claude-sonnet-5`，但平台覆盖不完全相同：on-demand 文档列 Claude API、Claude Platform on AWS、Google Cloud、Microsoft Foundry beta，不列 Amazon Bedrock；threshold 文档还列 Amazon Bedrock beta。可用带相应 beta header 的 Models API 读取 `capabilities.compaction`，不要把某一平台能力外推到其他 provider。
+
+On-demand 的失败也不能只看 HTTP status：summary request 可返回 HTTP 200 但 `content` 为空，此时应先检查 `stop_reason`；正常 compaction 才是 `stop_reason: "compaction"`。摘要调用记在 `usage.iterations`，顶层 input/output token 可能为 0。常见 400 包括 `compaction_block_misplaced`、`compaction_signature_invalid`、`compaction_content_mismatch`、重复 block，或最后一个 assistant tool call 尚无 tool result。图片、文档、`container_upload` 和被抓取 URL 等 summarized payload 不会随文本摘要保留，后续仍需要时必须重新附上或转成可引用 artifact。
+
+长任务可以选择保留近期尾部，或让摘要在后台生成。Keep-tail 由应用选择切分点，tool call 与对应 result 不能被切开；后台模式在发起摘要时记录已提交前缀，等待期间只 append 新轮次，不能编辑旧历史或并行启动另一次 compaction，摘要到达后用 block 精确替换已提交前缀、保留新追加 tail。并发摘要会占用 rate limit 且同时打开两个请求，因此要为等待期间增长的上下文预留空间。
+
+压缩之后的 cache 账本也会变化：summary 是新 cache content；官方建议在 system prompt 尾部设置 `cache_control` breakpoint，使系统提示仍可单独 cache，而只把摘要写成新 cache entry。`cache_control` 也可设在 compaction block 上，为摘要自身建立 breakpoint。
+
+### Thinking 状态与证据边界
+
+对确实保留 thinking 的 keep-tail/background 流程，官方给出的有效条件包括：参与 compaction 的模型具备相应 preserved-thinking 能力；保留消息紧邻 summary 覆盖边界并原样回放；`system` 与未延迟加载的 `tools` 保持一致。把“服务端接受 compaction block”与“每个保留 thinking block 仍通过会话绑定检查”分开。尤其要注意：当前 Preserved thinking 文档把 prefix-binding 检查描述为从 Claude Fable 5.1 开始；Claude Sonnet 5 属较早模型，不运行这项 prefix check。因此这些条件可用作安全的 harness 回放不变量，但不能声称 Sonnet 5 会因 prefix mismatch 必然 400 或 drop。
+
+Prompting/Migration 文档补充了 Agent 面试点：Sonnet 5 默认开启 adaptive thinking，effort 是深度控制而非固定 token budget；`max_tokens` 同时覆盖 thinking 与最终文本，high/xhigh/max 时需给输出留空间。Anthropic 的 Sonnet 5 prompting 指南称 high/xhigh 在 coding/search 场景会更频繁触发工具和自验证，并建议按观测到的 thinking 长度而不是跨模型相同 effort 名称来校准；这是发布方操作建议，不是独立因果实验。迁移时 `thinking` block 可能先于 text block，客户端要按 `content[].type` 解析并在工具回合原样回传 block；默认 thinking display 为 `omitted`，并且非默认 `temperature/top_p/top_k` 会返回 400。网络安全请求若被拒，文档说明这是 HTTP 200 + `stop_reason: "refusal"`，需作为正常业务结果分支处理。
+
 ## 当前结论
 
-Claude Sonnet 5 已完成“排行榜锚点 → 官方模型/API/Agent 资料 → System Card 深读/发布评测 → arXiv/Research 负检索 → 研究笔记”的资料级闭环。闭环不表示内部架构和训练 recipe 已公开；System Card 的安全数字也不能替代独立复现。下一锚点继续从两个排行榜的剩余重点厂商候选中选择，不能仅因 Anthropic 官方目录中的其他名称直接新增候选。
+Claude Sonnet 5 已完成“排行榜锚点 → 官方模型/API/Agent 资料 → System Card 深读/发布评测 → arXiv/Research 负检索 → 研究笔记”资料级闭环；2026-09-28 追加复核了 compaction 双接口、签名 block 回放、背景 tail、cache 和 migration/prompting 合同。闭环不表示内部架构和训练 recipe 已公开，也不代表已对真实 API 做集成验收；System Card 的安全数字不能替代独立复现。后续模型锚点仍只能从两个排行榜的重点厂商 canonical 条目中选择，不能仅因 Anthropic 官方目录中的其他名称直接新增候选。

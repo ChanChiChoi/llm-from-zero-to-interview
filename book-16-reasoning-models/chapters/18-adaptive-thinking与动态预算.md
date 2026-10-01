@@ -401,13 +401,17 @@ quality_per_cost = verified_successes / successful_task_cost
 
 `effort`、`max_tokens` 和 Agent 任务预算仍然是三个不同控制面。发布方多数 Opus 5.5 benchmark 使用 adaptive + max，Terminal-Bench 使用 xhigh，而成本曲线会使用 default/medium；如果把这些结果放在同一行，就会把推理预算差异误读成模型能力差异。
 
+部署时还要把同步请求和批处理合同分开：Anthropic 当前模型页给出同步输出上限 128K；Message Batches API 在 `output-300k-2026-03-24` beta header 下才支持最多 300K。模型页同时列出 1M context、512-token 最小可缓存 prompt，以及 cache read 和 5 分钟/1 小时 cache write 的独立价格。预算账本应记录 endpoint、effort、输出上限、cache read/write 和 verifier 成本；不能把 Batch 的上限当成同步 API 的模型能力。
+
 因此评测记录至少需要保存 model/revision、effort、fallback、thinking/output token、工具轮数、任务预算、verifier、成功 artifact 和真实成本。若 Cyber 或 biology safeguard 触发 fallback，最终结果必须写成带路由的系统结果，不能归因给 Opus 5.5 单体。
 
 这也改变了“更强 reasoning”的验收方式：模型先取得完整上下文、减少局部重复修改，再由测试、静态检查或领域 verifier 判断是否成功；没有新证据时增加 effort 不能把 unknown 变成 success。
 
 Opus 5.5 的官方 API contract 还给出一个重要迁移约束：adaptive thinking 始终开启，`thinking.type=disabled` 和手工 `budget_tokens` 都会失败，推理深度由 `output_config.effort` 控制。thinking block 可能先于 text block 返回，且会绑定产生它的模型、conversation 和消息前缀；模型切换、工具定义变化或 compaction 后，harness 必须验证 block 是否仍可回放。这里的“thinking”是 API state protocol，不等于服务向用户暴露完整思维链。
 
-因此 reasoning evaluator 应把请求验证和响应解析也纳入测试：旧客户端若按位置取第一个 text block、把 `any` 当成通用强制工具，或在消息前缀变化后盲目重放 thinking block，都会在模型分数不变时产生线上回归。资料依据：[Claude Opus 5.5 model page](https://platform.claude.com/docs/en/models/opus-5-5/overview.md) 与 [What's new](https://platform.claude.com/docs/en/models/opus-5-5/whats-new-opus-5-5.md)。
+因此 reasoning evaluator 应把请求验证和响应解析也纳入测试：旧客户端若按位置取第一个 text block、把 `any` 当成通用强制工具，或在消息前缀变化后盲目重放 thinking block，都会在模型分数不变时产生线上回归。官方模型页还要求将同步 128K 输出、带 beta header 的 Batch 300K、always-on thinking、默认 medium 和 cache 账本分别处理。资料依据：[Claude Opus 5.5 model page](https://platform.claude.com/docs/en/models/opus-5-5/overview.md) 与 [What's new](https://platform.claude.com/docs/en/models/opus-5-5/whats-new-opus-5-5.md)。
+
+对应的教学实现见 [`claude_opus55_protocol_audit.py`](../../research/model-update-2026-09/code/claude_opus55_protocol_audit.py)：脚本按 `block.type` 解析 thinking/tool/result/compaction，检查 producer 与 prefix binding，并用负例验证 disabled thinking、手工 budget、forced tool choice、旧 computer tool 和错误进度块会被拒绝。输出仅是 `local_protocol_toy`，不等于 Anthropic 服务端行为或模型 reasoning 质量。
 
 资料边界：Opus 5.5 当前有 Artificial Analysis 精确条目和 Anthropic 官方 API contract、发布页/System Card 入口，但 DataCurve 没有精确 Agent 行，参数、架构、完整训练 recipe、adaptive thinking 内部实现和独立复现仍未确认。
 
@@ -442,7 +446,9 @@ GPT-6 family 在标准单 Agent 会话中支持 `configuration_update`。例如�
 }
 ```
 
-它只改变后续响应的 effort；request-level `reasoning.effort` 仍可保持原值。更新项必须随 `previous_response_id` 或完整 history replay 保留在原位置，两个相邻 update 会被拒绝。它不能和自动 compaction/automatic truncation 组合；显式 compact 后要在下一条用户消息之前重新放置所需 update。
+它只改变后续响应的 effort；request-level `reasoning.effort` 仍可保持原值。effective effort 会一直延续到后续响应，直到另一条 update 覆盖。更新项必须随 `previous_response_id` 或完整 history replay 保留在原位置，两个相邻 update 会被拒绝。它不能和自动 compaction/automatic truncation 组合；独立 `/responses/compact` 也拒绝含 update 的历史；显式 compact 后要在下一条用户消息之前重新放置所需 update。该 item 可放入 Responses 请求或 WebSocket `response.create`。
+
+有个监控陷阱：官方文档说明响应的 `reasoning.effort` 字段仍反映 request-level setting，不代表 `configuration_update` 选出的 effective effort。trace 应同时保存请求级值、按历史 item 还原的当前值和 token usage。保持 request-level 设置不变、只追加 update，可以保留原 prompt prefix，利于 prompt-cache 复用；这不保证服务端一定 cache hit。
 
 因此 runtime trace 应区分：
 
@@ -458,6 +464,10 @@ model identity -> request-level effort -> configuration update
 Artificial Analysis 的 `GPT-6 Sol (max)` 是一个配置级第三方测量；DataCurve 当前没有精确 `mini_swe_agent_gpt_6_sol_*` 行。因而不能把 GPT-6 Astra 或 GPT-5.6 的 Agent 结果移植给 Sol，也不能把 AA 的 Intelligence Index 当成“max 模型裸分”。公平实验至少固定 mode、effort、工具、harness、任务环境、压缩策略和 verifier，并报告 quality、reasoning/output token、steps、延迟和单位成功成本。
 
 资料依据：[GPT-6 Sol model page](https://developers.openai.com/api/docs/models/gpt-6-sol.md)、[Reasoning models](https://developers.openai.com/api/docs/guides/reasoning.md)。这些资料公开的是 API/runtime 契约；参数、dense/MoE、attention 变体和完整训练 recipe 仍未知。
+
+### 18.21.3 用 toy 验证配置更新的失败路径
+
+配套 [`gpt6_sol_contract_audit.py`](../../research/model-update-2026-09/code/gpt6_sol_contract_audit.py) 将 `configuration_update` 当作历史 item，而不是普通的请求参数：相邻 update、`pro`/multi-agent、automatic compaction/truncation 和 standalone compact 都拒绝；显式 compaction 后必须在下一条用户消息前重新插入 update。脚本同时检查 reasoning/output/context 的 `incomplete`、272K whole-request pricing 和 verifier/幂等门禁。运行结果为 `ok=true`、`network_called=false`，证据等级仅为 `local_protocol_toy`。
 
 ## 18.22 GPT-6 Luna：family runtime 与 sibling budget
 

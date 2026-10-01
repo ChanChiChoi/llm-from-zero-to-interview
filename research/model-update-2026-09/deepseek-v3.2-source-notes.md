@@ -1,15 +1,15 @@
 # DeepSeek V3.2 官方资料摘记
 
-核验日期：2026-09-20。本笔记只升级已经出现在 Artificial Analysis 的 DeepSeek V3.2；本轮 DataCurve DeepSWE 快照没有精确的 V3.2 行，因此不记录或迁移相邻版本的 DeepSWE 分数。
+核验日期：2026-09-29（本轮榜单复验并视觉核对 Figures 1–7；原始模型/实现资料于 2026-09-20 起核对）。本笔记只升级已经出现在 Artificial Analysis 的 DeepSeek V3.2；本轮 DataCurve DeepSWE 快照没有精确的 V3.2 行，因此不记录或迁移相邻版本的 DeepSWE 分数。
 
 ## 榜单锚点与快照
 
 | 来源 | 结果 | 证据边界 |
 |---|---|---|
-| [Artificial Analysis DeepSeek V3.2](https://artificialanalysis.ai/models/deepseek-v3-2) | 页面标题为 `DeepSeek V3.2 (Non-reasoning)`；页面显示 2025 年 12 月、128K context、Intelligence Index `16.043537719683`、约 37B active / 648B total 的第三方参数字段 | 这是第三方配置页；`Non-reasoning` 是运行配置，release/参数/指数不是 DeepSeek 官方发布或裸模型能力证明 |
+| [Artificial Analysis DeepSeek V3.2](https://artificialanalysis.ai/models/deepseek-v3-2) | 当前复取标题为 `DeepSeek V3.2 (Non-reasoning)`；页面显示 2025-12-01、128K context、Intelligence Index `16.043537719683`、37B active / 685B total 的第三方目录字段 | 这是第三方配置页；`Non-reasoning` 是运行配置，release/参数/指数不是 DeepSeek 官方发布或裸模型能力证明；约 648B 是 2026-09-20 历史快照字段 |
 | [DataCurve DeepSWE](https://deepswe.datacurve.ai/) | 当前快照没有精确 `mini_swe_agent_deepseek_v3_2_*` 行 | 不把 DeepSeek V3.1、V4 或其他模型的 Pass@1、成本和 Agent steps 迁移给 V3.2 |
-| Artificial Analysis 详情页快照 | HTTP 200；3,391,821 bytes；SHA-256 `488c2c63fdb6d1746525f317222642d12cd57c7daf0f0abeba31653a6924ab7a` | 页面版本和测量字段随榜单变化；只用于候选发现与第三方配置复现 |
-| DataCurve 当前快照 | HTTP 200；268,571 bytes；SHA-256 `67a6b5350a1bc986e814097a87928f5064ba6955ca78be44795e11b2413f2870` | 页面模型集合证据；无 V3.2 精确行 |
+| Artificial Analysis 详情页历史快照（2026-09-18） | HTTP 200；3,391,821 bytes；SHA-256 `488c2c63fdb6d1746525f317222642d12cd57c7daf0f0abeba31653a6924ab7a` | 页面版本和测量字段随榜单变化；只用于候选发现与第三方配置复现 |
+| DataCurve 历史快照（2026-09-18） | HTTP 200；268,571 bytes；SHA-256 `67a6b5350a1bc986e814097a87928f5064ba6955ca78be44795e11b2413f2870` | 页面模型集合证据；无 V3.2 精确行 |
 
 ## 官方资料
 
@@ -95,8 +95,8 @@
 
 ## 待核验与书系映射
 
-- 待核验：PDF 抽取失真的图表/公式逐页视觉复核、完整 DSA 层排布和 kernel 源码行为、indexer 训练召回曲线、KV/indexer 字节账本、完整 RL 超参/奖励权重/rollout 配方、合成数据污染审计、线上 tool-call acceptance rate、硬件 profiling 和独立 benchmark。
-- 不新增 V3.2 专属独立架构册章：DSA 已有第二十一册第 19 章承接一般机制，本轮在该章新增 19.29--19.32，补齐最终模型/实验 demo、kernel、serving recipe 和 thinking-with-tools 的证据分层。
+- 待核验：Figures 1–7 均已取得原始图/面板并视觉复核；arXiv v1 HTML 中全部编号公式 Eq. (1)–(9) 的 TeX annotations 已逐式文本核对，但未在 PDF 页面视觉核验；未编号行内数学表达式未做穷尽审计。完整 DSA 层排布和 kernel 源码行为、indexer 训练召回曲线、KV/indexer 字节账本、完整 RL 超参/奖励权重/rollout 配方、合成数据污染审计、线上 tool-call acceptance rate、硬件 profiling 和独立 benchmark 也仍待核验。
+- 不新增 V3.2 专属独立架构册章：DSA 已由第二十一册第 19 章承接，19.28--19.34 覆盖 DSA、实现、kernel、serving、encoding 和榜单证据分层；19.35 补 Search Agent context management，19.36 补 Figure 2 的 indexer/top-k 与 Core Attention 分工，19.37 补 Figure 3 的成本曲线及部署证据边界，19.38 补 Figure 4 的 thinking-retention/harness 边界，19.39 补 Figure 5 合成 Agent 数据 RL 实验的图表证据边界，19.40 补 Figure 7 MLA MHA/MQA 两种执行形态，19.41 补 Figure 1 多指标/多评测口径边界，19.42 补 DSA Eq. (1)–(4) 的检索与 indexer 蒸馏目标，19.43 补 scalable RL Eq. (5)–(9) 的目标、KL 估计和 off-policy 稳定化边界；第二十册第 18 章保留通用折叠策略映射。
 - 研究笔记和现有第 19 章专题段共同作为本轮交付；模型清单、来源索引、榜单解释、题库、练习、术语、项目、知识图谱、`plan_v2.md` 与 `progress_v2.md` 均同步记录模型和证据边界。
 
 ## 2026-09-20 排行榜复验与下一锚点确认
@@ -165,3 +165,88 @@ README 同时把实现入口按层次分开：TileLang 用于可读的研究 ker
 README 链接的 vLLM recipe 当前通过 1234 返回 HTTP 404。该负证据只说明本次 URL/线路在当前时点不可取得，不能推导 vLLM 没有实现，也不能删除已有 recipe 证据；后续应固定可访问的 recipe revision 后再核对依赖和 benchmark。HF 当前固定文件与论文 PDF 通过同一线路出现 503 时，也只记为传输/站点访问失败，不改写已固定 revision 的历史哈希。
 
 当前状态仍为 **AA 单榜资料级闭环**。本轮新增的是榜单目录漂移解释和 Exp README 的 RoPE/kernel/SGLang 证据分层；完整最终 production kernel、召回/误差曲线、GPU profiling、线上 tool-call acceptance、独立 benchmark 和完整 RL recipe 仍待核验。
+
+## 2026-09-28 7890 复验与 Search Agent context management
+
+本轮只沿 Artificial Analysis 已有的 `deepseek-v3-2` canonical 锚点补证，没有从论文或工具链发现新模型。当前工作区显式经 `10.24.27.134:7890` 访问百度、Artificial Analysis、DataCurve 和 arXiv 均成功；对这几个 URL 的可达性只作本时点记录。
+
+- Artificial Analysis 详情页 HTTP 200，3,647,642 bytes，SHA-256 `239b8fef11d18d7b06e5e7c177ed76cbbfd29e07d795d83c5dc3e6ac8acef0b8`；当前页为 `DeepSeek V3.2 (Non-reasoning)`，2025-12-01、128K、685B total/37B active，Intelligence Index `16.043537719683`。这些均为第三方目录/provider 字段。9 月 20 日的 648B 继续作为历史页面快照，不解释为模型扩容；同日另一个同尺寸快照 hash 不同，hash 只绑定具体抓取字节。
+- DataCurve DeepSWE HTTP 200，268,036 bytes，SHA-256 `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`；当前页面没有精确 `mini_swe_agent_deepseek_v3_2_*` 行。没有迁移相邻 DeepSeek 型号的 Pass@1、成本或 Agent steps。
+- [arXiv v1 HTML](https://arxiv.org/html/2512.02556v1) HTTP 200，295,170 bytes，SHA-256 `5da74d488b218a45a995838b94feb95aacc63c03b806f8462496bfd4bceb07ef`；该固定版本的 [PDF](https://arxiv.org/pdf/2512.02556v1) 为 980,616 bytes、SHA-256 `2bec0671778769c159ec389412727d1f3d4889fe1c71564b61edaa24705bd17b`。它与 HF 模型卡 `assets/paper.pdf`（907,086 bytes、SHA-256 `f6fda5753db7b106baa5eeb1286877f17e6a111354762f8aa53c7e6556498df7`）是不同抓取 artifact；本文 §4.4 结论直接绑定 versioned arXiv HTML，不宣称两个 PDF 字节相同。
+
+### 论文 §4.4：Search Agent 的上下文管理
+
+论文在 Search Agent 工具轨迹使用量超过 context window 80% 时触发上下文管理。对比项为：
+
+1. `Summary`：摘要已溢出的轨迹并重新开始 rollout；
+2. `Discard-75%`：丢弃轨迹中最早的 75% tool-call history；
+3. `Discard-all`：重置上下文并丢弃此前全部 tool-call history；
+4. `Parallel-fewest-step`：采样 N 条独立轨迹，选择步骤数最少的一条，作为并行 test-time compute 基线。
+
+Search Agent 评估使用 standard commercial search API。作者称 V3.2 最大 context 为 128K，约 20% 以上测试案例超过此上限；无 context management 的参考 BrowseComp 分数为 51.4。论文 Table 2 将 BrowseComp 标为 Pass@1，并以星号标注使用 context management 的结果，列为 `51.4/67.6*`；§4.4 另称 `Discard-all` 得分 67.6，与 parallel scaling 可比但使用显著更少 steps。作者还报告 `Summary` 平均扩展到 364 steps，performance improvement “up to 60.2”。该句没有百分号；已视觉核对的 Figure 6 纵轴为 Browsecomp，图中 Summary 曲线约在 364 real steps 达到 60.2，因此应把 60.2 作为该图上的分数/指标值理解，而不是 `+60.2%` 的相对增幅。图中没有逐点数字标签，不从曲线像素外推精确点值。
+
+Figure 6 视觉复核（2026-09-28）：通过 `10.24.27.134:7890` 获取 arXiv v1 的 [search.svg](https://arxiv.org/html/2512.02556v1/search.svg)，75,689 bytes、SHA-256 `e2fb1029cf88458b2881d49546c1b9db4dd426fb4d2b3337dd6897b9c6fdb7a3`；与先前经 1234 获取的 SVG 逐字节一致。渲染后确认横轴为 Real Steps、纵轴为 Browsecomp，图例含 `Summary`、`Discard-75%`、`Discard-all` 和 `Parallel-fewest-step` 四种策略。曲线定性支持作者关于串行 context management 与并行 test-time compute 的效率/扩展性权衡；精确报告值仍以正文/Table 2 为准，图中未标注的散点不作数字化录入。
+
+面试中的可迁移结论是：上下文管理是 Agent harness 的 test-time compute 与状态保留策略，不是模型永久记忆。摘要策略保留压缩后的历史但引入摘要失真，丢弃前缀/全部工具历史省 token 却可能失去来源链和已发现证据；实际系统需在外部持久化来源 URL、关键观察、未决问题和副作用状态，并用相同任务预算对比成功率、steps、工具调用成本、证据可追溯性与 artifact 完成率。上述 51.4/67.6/364/60.2 是论文中的 Search Agent/BrowseComp harness 结果，不是 DataCurve DeepSWE、Artificial Analysis 指数、裸模型分数或通用 API 行为保证。
+
+## 2026-09-29 7890 双榜复验、Figures 1–7 视觉核验与 DSA 公式文本审计
+
+- 当前工作区经 `10.24.27.134:7890` 对百度与 arXiv Figure 2 均曾取得 HTTP 200；其后代理连接短暂失败，获批重试成功。该记录描述不同请求时点，不把一次成功泛化为持续可用保证。
+- Artificial Analysis `/zh` 快照为 1,694,614 bytes，SHA-256 `04f62f3f39c1f65c3c1d8dd564782f9d7d20fb506fa671ee75fcfaf4e9482f9f`；相较留存基线，唯一模型路由从 55 增至 62，无移除。新增路由中，GLM-5.3-Flash、Kimi K3、Qwen3.8 2.4T A95B、Qwen3.8 27B 均已是盘点内重点 canonical；其余三项属于暂不跟踪厂商。没有新增重点 canonical 锚点。
+- DataCurve DeepSWE 快照为 268,036 bytes，SHA-256 `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`；70 个唯一 `mini_swe_agent_*` 配置 ID 与留存快照一致，仍无精确 V3.2 行，不迁移相邻模型成绩。
+
+### Figure 2：Lightning Indexer、Top-k 与核心注意力的分工
+
+通过 `10.24.27.134:7890` 获取 arXiv v1 的 [v32_arch.svg](https://arxiv.org/html/2512.02556v1/v32_arch.svg)，HTTP 200，269,427 bytes，SHA-256 `1e6bc6c61ea26ae2b8528edb1eab14874832470fd38f115fe9b8feb615facb9a`；渲染为 1600×833 后完成视觉复核。图中 Lightning Indexer 计算索引分数，Top-k Selector 据此筛出候选 KV entries；被选条目进入 Multi-Query Attention（Core Attention），与主注意力 query 一起产生 attention 输出。图注、§2.1 与 Eq. (2) 的叙述相互印证。面试时应明确：index score/top-k 是候选检索与筛选信号，不是 attention 输出，也不取代 MLA 主注意力。图示解释模块关系，不证明某个 production kernel 的完整行为或性能。
+
+### Figure 3：长上下文 prefill/decode 成本曲线
+
+从同一固定版本的 arXiv v1 页面取得 Figure 3 两个 panel：[prefilling SVG](https://arxiv.org/html/2512.02556v1/cost_prefilling.svg)，33,398 bytes、SHA-256 `b045c26eb19d92325de7e86aabec905a9ac8bdb6729db94e04c8701693b19705`；[decoding SVG](https://arxiv.org/html/2512.02556v1/cost_decoding.svg)，31,868 bytes、SHA-256 `5894e01515f7f9e9ef9045ae8e30a092f5cc1e4229936c493c66c4748127c61d`。两图均渲染为 1600×1200 并视觉核对：横轴是 Token Position，纵轴是 Cost Per Million Tokens；蓝线为 DeepSeek-V3.1-Terminus，橙线为 DeepSeek-V3.2。随着 token position 增长，V3.2 的 prefill/decode 曲线都比 V3.1 平缓，长位置上的成本差距明显；极短位置的曲线接近并有交叉，不能宣称每个长度点都更便宜。图上没有可支持逐点抄录的数字标签，不从像素估算精确数值。
+
+报告正文称成本基于 H800 上实际部署服务的 benchmark，并按每 GPU 小时 2 美元的租赁价格估算；短序列 prefill 还特别采用 masked MHA mode 模拟 DSA。故 Figure 3 是绑定作者服务实现、H800 与该租赁假设的发布方成本测量，不是官方 API 价目、硬件无关结论或独立复现。结合主 attention 从 `O(L^2)` 到 `O(Lk)`、但 indexer 仍为 `O(L^2)` 的正文边界，面试应追问 kernel、短/长上下文路径和服务账本，而不能把复杂度式直接换算成全模型成本比例。
+
+### Figure 4：工具调用时 thinking 的保留边界
+
+arXiv v1 的 [Figure 4 JPEG](https://arxiv.org/html/2512.02556v1/figures/template.JPEG) 为 76,981 bytes、SHA-256 `58623875cc487b3cbbd60955c14801c07d5f526d2b2e875795e3bf5ace511733`；原图 1280×671，已目视核验。图示显示：同一 user turn 内追加 tool call/result 后，前序 `Thinking` 块继续保留并可继续生成 reasoning/tool call；形成 Answer 1 后收到新的 user message，下一轮输入保留此前工具调用、工具结果和回答，但不再包含旧 thinking 块。它与 §3.2.1 的文字规则一致：工具消息续接不清除历史 reasoning，新 user message 到来时清除 reasoning，而工具轨迹仍保留。
+
+面试边界：这是模型上下文/消息类型驱动的回放策略，不是模型永久记忆，也不代表任意客户端都按该方式构造 history。若 harness 把工具结果包装成 user message（报告举 Roo Code、Terminus 为例），消息类别可能触发不同保留行为；应审计实际 role、上下文构造和版本，而不是仅看“工具调用”语义。
+
+### Figure 5：合成 Agent 数据上的 RL 训练曲线
+
+arXiv v1 的 [synthesis-rl-plot.png](https://arxiv.org/html/2512.02556v1/figures/synthesis-rl-plot.png) 经 `10.24.27.134:7890` 获取，为 222,137 bytes、SHA-256 `2107344cc2002f51bc1922df0bdcabd7afa74bb0f6cb5d3aa996f33e3f0d7cc3`，尺寸 1432×1024，已视觉复核。图例对比 `DeepSeek-V3.2-RL-Synthetic-Data`（蓝色训练曲线）、`DeepSeek-V3.2-SFT`（绿色基线）和 `DeepSeek-V3.2-Exp`（黑色基线）；横轴为 Steps，分面覆盖 Tau2-Bench Airline/Retail/Telecom/Overall、MCP-Mark Filesystem/PostgreSQL 与 MCP-Universe Financial Analysis/Location-Navigation/3D-Designing。曲线随训练步骤总体上升，但不同分面波动和幅度不同；不从像素读出未标注的精确成绩。
+
+§4.3 将该实验限定为从 V3.2-SFT checkpoint 出发、只用合成 general-agent tasks、non-thinking mode 进行 RL，再与 SFT 及仅在 search/code environments 做 RL 的 V3.2-Exp 比较。Figure 5 支持“该发布方实验中的合成 Agent 训练在若干不同环境评测上出现提升”的观察，不证明最终 V3.2 的独立 benchmark、真实环境泛化因果、训练数据无污染或完整 RL recipe 已公开。结果属于发布方训练消融/评测，不是 AA 或 DataCurve 分数。
+
+- Figures 1–7 已视觉复核；其余论文公式仍未全部检查。完整 production kernel、召回/误差曲线、硬件 profiling、线上 acceptance、独立 benchmark 与完整 RL recipe 继续待核验。
+
+### Figure 7：MLA 的 MHA 与 MQA modes
+
+从 arXiv v1 HTML 的 Appendix A 定位到 Figure 7 的真实图资源（不是猜测路径 `figure7.svg`）：[MHA panel](https://arxiv.org/html/2512.02556v1/MLA-MHA.svg)，HTTP 200，244,227 bytes，SHA-256 `afd21a50bbaef58314036862cb6ce44dca81a9d42a414c0969074fbf954b32b4`；[MQA panel](https://arxiv.org/html/2512.02556v1/MLA-MQA.svg)，HTTP 200，224,311 bytes，SHA-256 `c6aa4f3e2ea222d2a75ef000dca2f9e8c48a820116957c6a741cbd0f253d77c3`。两图均渲染后视觉核验。
+
+图示对比 MLA 中 MHA 与 MQA 的表示：MHA 从共享 latent KV `c_t^KV` 经各头投影形成 per-head K/V；MQA 让 query heads 共享 latent KV entry 与位置 key，再产生各头 attention output。正文称 latent vector（MLA 的 KV entry）由当前 token 的 query heads 共享。图注只将 V3.1-Terminus 的 training/prefill→MHA、decode→MQA 作为特定阶段安排；V3.2-Exp inference demo 另有对应 prefill/decode 路径证据。不要把它写成所有 V3.2 serving 后端都必须遵循的合同，也不能从图直接推出实际 cache bytes、吞吐、kernel 覆盖或质量等价。此前试探 `/figures/figure7.svg` 返回 404 是路径猜错；按 HTML 中的真实对象 URL 复取两图均成功。Figures 1–7 已视觉复核，其他论文公式仍未全部检查。
+
+### Figure 1：多指标图表中的评测协议
+
+arXiv v1 的 [Figure 1 SVG](https://arxiv.org/html/2512.02556v1/v32_performance.svg) 经 7890 获取，HTTP 200，128,338 bytes，SHA-256 `14354740f4d54692b6af6323cc12d3a5f0e0f937bc2b7dd65021307bd7820973`；渲染后视觉核验图例、Reasoning/Agentic 分组、各 benchmark 标签及双纵轴。Codeforces Rating 使用右侧量纲，其他 accuracy/Pass@1 使用左侧百分比轴，不能跨量纲看柱高排总名次。
+
+图注注明 HMMT 是 February 2025 赛次、HLE 是 text-only 子集。§4.1 写明评测温度 1.0、上下文 128K，数学任务使用统一的 step-by-step 模板；另以 HLE 官方模板评估 V3.2-Thinking，报告 23.9，而 Figure 1 同一模型的 HLE bar 标为 25.1。这是模板敏感性的直接例子。Tool-use 使用 standard function-call format + thinking mode；MCP-Universe/MCP-Mark 使用内部环境，作者指出与官方环境可能略有差异。故 Figure 1 是发布方、特定 task/prompt/environment/model mode 下的评测结果，不是 AA/DataCurve 数据、独立复现或统一模型排行榜。该发现映射到第二十一册第 19 章 19.41。
+
+### Eq. (1)–(4)：index score、候选集和 indexer loss
+
+对照 arXiv v1 HTML 的 MathML `annotation encoding="application/x-tex"` 核对了 Eq. (1)–(4)：Eq. (1) 是 indexer 多头加权 ReLU 点积的排序分数，不是 softmax 概率；Eq. (2) 按 Top-k 取 latent KV `c_s`，再由主 attention 计算 `u_t`；Eq. (3) 以 dense attention heads 求和并沿序列 L1-normalize 的 `p_{t,:}` 监督 indexer softmax；Eq. (4) 将 KL 对齐限定到 `S_t` 选中的位置。Sparse-stage `p_{t,S_t}` 是否在截取后另行归一化，展示式/该段正文没有明确写出，不补作假设。报告说明 indexer input detach、indexer 只由 `L_I` 更新、主模型只由 LM loss 更新。
+
+经 7890 下载 arXiv v1 PDF：980,616 bytes / SHA-256 `2bec0671778769c159ec389412727d1f3d4889fe1c71564b61edaa24705bd17b`。此环境缺少可用 PDF renderer/extractor（GDK thumbnailer 不能识别 PDF），所以记录为“HTML TeX 源文本核对”，没有声称 PDF 公式视觉复核。对应第二十一册第 19 章 19.42；实现级的 loss normalization 细节仍待公开训练代码/补充材料确认。
+
+随后经 7890 检查 [DeepSeek-V3.2-Exp 官方仓库网页](https://github.com/deepseek-ai/DeepSeek-V3.2-Exp) 和 [raw README](https://raw.githubusercontent.com/deepseek-ai/DeepSeek-V3.2-Exp/main/README.md)：分别 HTTP 200、295,427 bytes 与 6,899 bytes；README SHA-256 `dffcdf358a42599945d49293a4f210dbe589141085207b76c081c9ace1f8fd74`，与既有快照一致。可见根目录列有 README、report PDF、license、cost image 和 `inference/`；README 指向 inference demo 及 TileLang/DeepGEMM/FlashMLA kernel，没有 trainer/loss 代码入口。GitHub API tree endpoint 返回 403，故结论仅限于当前可见公开 V3.2-Exp 仓库；不能外推为其他官方仓库或私有训练代码不存在。`p_{t,S_t}` 的归一化仍未由代码解决。
+
+### Eq. (5)–(9)：GRPO token 目标与稳定化策略（2026-09-29）
+
+本轮沿既有 DeepSeek V3.2 锚点继续核对同一份 arXiv v1 HTML；7890 返回 HTTP 200，295,170 bytes，SHA-256 5da74d488b218a45a995838b94feb95aacc63c03b806f8462496bfd4bceb07ef，与已留存快照一致。直接从每个 numbered equation 对应的 application/x-tex annotations 核对 Eq. (5)–(9)，没有把 HTML 源文本验证说成 PDF 公式视觉检查。
+
+- Eq. (5) 的目标先对 group 中 G 条 response 求平均，再在每条 response 内按长度 |o_i| 对 token 目标取均值；token 项包含 PPO-style clipping 与 KL penalty。
+- Eq. (6) 的 importance ratio 是 current/old 的逐 token 条件概率比。正文把每条 response 的 outcome reward 减去 group mean 定义为 advantage；展示式没有标准差除法，故公开公式支持“组内中心化”，不支持擅自改写成 z-score。
+- Eq. (7) 用 pi_theta/pi_old importance weight 将 old-policy rollout 用于估计 current-vs-reference KL。论文具体声称该 estimator 的 gradient unbiased；作者对 K3 高噪声/无界权重及按领域调节 KL 强度的解释应保留为论文主张，而不是独立验证。
+- Eq. (8) 的 mask 乘在 clipped policy 项上，KL 项不受 mask 直接屏蔽。Eq. (9) 仅在 advantage 为负、且 response 长度平均的 log(pi_old/pi_theta) 超过 delta 时置零；旧策略概率来自 inference framework 返回值。此门控按 sequence divergence 判断，不是逐 token divergence threshold。
+- Keep Routing 复用 rollout 时 inference framework 的 MoE expert routes；Keep Sampling Mask 把 top-p/top-k sampling 的截断支持集同时用于 current policy。报告把二者作为稳定化策略，但没有因此公开完整 RL recipe。
+
+面试重点：区分 policy ratio 与 KL 内部 ratio、group centering 与标准化、token-mean 与 group-mean、policy mask 与 KL penalty，以及负优势条件和序列级 divergence 门槛。待补项仍包括完整 reward/rollout/update recipe、训练代码、production acceptance、硬件 profiling 和独立复现。

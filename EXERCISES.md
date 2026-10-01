@@ -1,5 +1,9 @@
 # 练习与验收体系
 
+## GPT-6.1 Sol：长任务状态账本
+
+设计一个 replay manifest，分别记录 `model_id`、`reasoning.mode`、`reasoning.effort`、`reasoning.context`、tool call/result、compaction item、executor receipt 和 verifier receipt。用合成输入比较 `current_turn` 与 `all_turns`，再模拟 stateless input-array chaining 和 `previous_response_id` chaining；不得调用真实 API，也不得把 toy 结果写成模型质量结论。
+
 ## 阶段 1：基础验收
 
 1. 3 句话讲清楚 LLM 到底在学什么。
@@ -1015,7 +1019,7 @@
 3. 写一个 toy EAGLE 推测解码模拟器，改变平均接受长度和草稿成本，输出目标模型调用次数、有效 token 和回退比例。
 4. 实现 Step 3.5 的 3:1 SWA/full causal pair 统计，比较窗口大小和 full 层周期对长程访问预算的影响。
 5. 为 MTP-3 加入 top-8 MoE 路由容量因子，记录专家负载方差、overflow、all-to-all token 数和验证阶段峰值。
-6. 设计带 Context Manager 重启的 BrowseComp toy harness，区分模型失败、工具失败、上下文重启、超时和最终 artifact 未完成。
+6. 扩展 BrowseComp toy harness：在工具轨迹 token 使用量超过 80% 时分别实现 `Summary`、`Discard-75%`、`Discard-all`，并加入 N 条轨迹选最少 steps 的并行基线；区分模型失败、工具失败、上下文重启、超时和最终 artifact 未完成，比较 Pass@1、steps、工具成本、证据可追溯率与 artifact 完成率。把 DeepSeek V3.2 报告的 `51.4/67.6*` 标为 Search Agent/BrowseComp harness 参考值，不作为 toy 的预期分数或裸模型基线。
 
 ## 2026-09 Grok 4.6 接口与 Harness 审计
 
@@ -1048,9 +1052,11 @@
 9. 将 Fable 5.1 与 Mythos 5.1 的同底模/不同 safeguards 建成 source-aware manifest，固定 revision、effort、平台、工具、拒答策略和 verifier，对比拒答率、工具可用性、任务成功率与单位成本，禁止把策略差异写成架构差异。
 10. 为 DataCurve 精确行缺失写一个评测门禁：当只有 `claude-fable-5` 而没有 `mini_swe_agent_claude_fable_5_1_*` 时拒绝导入相邻版本 Pass@1、成本和 Agent steps，并输出清晰的 `not_applicable` 原因。
 11. 根据 System Card 建立 Fable/Mythos 条件矩阵：分别记录最终 snapshot、helpful-only、关闭 safeguards、cyber/biology fallback、effort、工具权限和实际执行模型；检查同一任务在不同配置下是否仍可比较。
+12. 运行 [`claude_fable51_state_protocol_audit.py`](research/model-update-2026-09/code/claude_fable51_state_protocol_audit.py)，解释为什么 progress update 不是 tool result，为什么 prefix mismatch 必须显式拒绝或 drop 并记录 `input_transformations`，以及为什么 provenance 仍需独立 artifact verifier；把脚本的 `local_protocol_toy` 证据等级与真实 API/模型质量分开。
 12. 复现一个安全评测 manifest，输入 IPI、Shade coding、browser-use 和 sandbox 事件，输出 attack success、fallback 覆盖率、`actual_model`、`fallback_reason`、safeguard state 和 verifier；禁止把不同 harness 的数字合成一条安全率。
 13. 将 Terminal-Bench、ProgramBench、OSWorld partial/strict 和 AA Intelligence Index 放入三本独立账本，构造缺失 snapshot、工具或成功定义的样本，要求系统返回 `not_comparable` 而不是自动排序。
 14. 设计 RSP 阈值练习：解释 CB-1/CB-2 与 autonomy threat model 1/2 的定义、证据和不确定性；分别写出“未达阈值”“没有能力”“生产 safeguards 已阻止”三句话为什么不能互换。
+15. 为 Claude Fable 5.1 与 Opus 5.5 建立有方向的 thinking-block compatibility matrix：验证 Claude API 与其他托管 surface 的差别、model_binding_mismatch 与 prefix_binding_mismatch 的不同处理、旧/新账户的 prefix 检查门槛，以及 fallback 是否真正可用。不得把“能读取”直接当成默认 fallback 或跨平台保证。
 
 ## 2026-09 Claude Sonnet 5 接口与平台对照验收
 
@@ -1058,6 +1064,10 @@
 2. 设计 Sonnet 5、Opus 5、Fable 5.1 的同任务 `Adaptive`/effort 对照，输出质量、推理 token、TTFT、TPOT、p95 和单位成功成本。
 3. 列出 Claude API、Bedrock、Google Cloud、Foundry 和 AWS 平台的模型 ID、协议、限流、工具和审计差异，标出不可直接合并的指标。
 4. 为 `claude-sonnet-5` 建立发布门禁：模型 revision、价格/延迟页面快照、上下文行为、工具 schema、回滚和独立复现证据必须分栏记录。
+5. 实现一个 compaction trace checker，分别验证 on-demand `compact-2026-09-04` 和 threshold `compact-2026-01-12` 的 beta/header/参数组合、block 位置与历史裁剪；拒绝混用两种接口、重复或被修改的 signed block，以及未闭合的 tool call。
+6. 对 background keep-tail 构造“压缩请求发出 → 新轮次 append → 摘要返回 → 前缀替换”的并发轨迹，检查只替换已提交前缀、保留 tail、保留 context headroom、无并行 compaction，并把工具副作用与应用状态分别验收。
+7. 比较 compaction 前后的 prompt-cache breakpoint：在 system prompt 尾部与 compaction block 分别设置 `cache_control`，估算 system cache 保留、summary cache 写入及旧前缀失效；不得把 cache miss 当成模型质量变化。
+8. 为 keep-thinking 测试建立证据矩阵：分别验证原样回放/错误排序/删改 block、模型是否能读取 block、prefix check 是否启用；明确 Sonnet 5 不运行 Fable 5.1 起的 prefix mismatch check，测试输出只能记为文档合同或 local harness 结果，不能伪装成线上 API probe。
 
 ## 2026-09 DeepSWE v1.1 Harness 复现验收
 
@@ -1092,6 +1102,8 @@
 9. 根据 Async tool calling 文档实现一个零依赖 toy job registry，覆盖原始 `call_id`、唯一 task handle、重复结果、超时、失败重试和最新 response lineage；输出“工具已完成”和“模型已消费结果”两个独立状态。
 10. 根据 Mid-turn steering 文档画出 WebSocket 事件状态机，覆盖 `response.steer.accepted`、`incomplete_details.reason=steered`、自动 continuation、已发送输出和已启动副作用；为不可回滚动作设计补偿门禁。
 11. 将一份过长且互相冲突的 skill/`AGENTS.md` 说明重构为最小路由器与渐进披露目录，比较无关上下文 token、工具选择、停止原因、压缩次数和任务成功率；把误报/漏报的安全监控单独统计。
+12. 扩展 [`gpt6_agent_protocol_demo.py`](research/model-update-2026-09/code/gpt6_agent_protocol_demo.py) 的负向测试：重复 task handle/call ID、错误 call ID、pending job 消费、重复 steering、旧 WebSocket steering 在新连接上的误重放，以及 `misalignment_policy_violation` 后的自动 retry；输出副作用保留和人工补偿所需的审计字段。
+13. 对比 2026-09-21 Astra 专属 guide 与 2026-09-23 GPT-6 family guide，制作 capability matrix：`none` effort、Responses/Chat Completions function calling、EU data residency、unsupported parameters 和 cache-preserving `configuration_update`；说明为什么文档路由变化不能直接当作模型 revision。
 
 ## 2026-09 Kimi K3 发布证据与 Harness 验收
 
@@ -1119,6 +1131,15 @@
 3. 用 toy 任务模拟 Z.ai Code Bench 的 completion 与 checklist 两个指标，再加入 output-token cost，比较“完成率提升”和“单位成功成本”的关系。
 4. 为一个漏洞发现任务分别实现发现/触发验证、深度利用推理和时间预算三种 verifier，记录假阳性、假阴性、超时、权限拒绝和人工复核。
 5. 解释 269 个项目、2,436 个漏洞和 1,097 个中高危发现为什么不能写成模型单独的独立 benchmark；设计一张合作统计与模型评测的证据分层表。
+
+## 2026-09 GLM-5.3 关联框架：Straw checkpoint 与 archive 恢复
+
+1. 阅读固定 slime `checkpoint.py`，画出 actor/critic、rollout manager、queue/builder snapshot 到 `committed_<step>.json` 的提交顺序；注入缺 optimizer、缺 queue state、文件 size 变化和 metadata hash 变化，说明每种情况应允许 resume、拒绝 resume 还是进入 empty queue。
+2. 从 step 1 回滚并创建 branch，断言旧 branch 的模型、queue snapshot 和 archive byte-for-byte 不变；检查新 branch 的 queue/task authority 不复用旧 receipt，同时仍能读取共享 immutable payload。
+3. 为 `.straw.json` archive 实现 sample key/task key 查询，分别测试 `close()`、`release()`、多个 owner、活跃 reader 与 online GC；证明删除 index 不能代替释放 storage ownership。
+4. 对照 `.straw.json` 与导出的 `.pt`：移除原 Straw pool 后，前者应明确失败，后者仍能读取；记录 tensor materialization 的内存峰值和导出成本。
+5. 构造 fully async rollout 的 completed/partial/fresh 队列，改变 serving weight version，报告 staleness 分布、排队顺序、policy-lag 与 verified success；验证排序不会自动丢弃 stale sample。
+6. 将上游 Qwen2.5-0.5B 四卡测试改写成可执行验收 manifest，标出模型、GPU 拓扑、queue pool、commit step、数据集、环境版本和预期断言；在没有实际执行前只能记录为 test design/source evidence。
 
 ## 2026-09 DeepSeek V4.1-Flash 架构、缓存与协议验收
 
@@ -1158,6 +1179,9 @@
 5. 建立 N-gram table 账本，改变 slot 数、n-gram 命中率、host bandwidth、prefetch latency 和 out-of-domain PPL，同时与 RAG、KV cache 的存储/请求时机做对照。
 6. 实现 Muon/AdamW 参数分组审计，比较全 AdamW、按语义拆分、错误地对 fused QKV 直接正交化三种配置，检查 router overflow、loss spike、step time 和 checkpoint resume。
 7. 为 27B、A95B、Flash-Next、Max 建立接口对照表，分别记录榜单来源、模型卡、total/active 参数、模态、thinking、hosted/open 状态和待核验字段；不要把 effort 行计为新 checkpoint。
+8. 静态审计 vLLM `v0.30.0` 的 QSA dtype gate：将权重 dtype、QSA 激活/QKV、主 KV 与压缩 indexer-key cache 分成四列，验证 BF16/FP8 E4M3 组合边界；不得把源码读测写成 GPU 运行通过。
+9. 对照 SGLang `v0.5.20` 的 stream 依赖图，标出 indexer、当前 stream 的 Q/K/V 准备与最终 attention launch；用 event trace 设计一个可证伪的 overlap profile，并注明报告中静态源码核对不证明 kernel 实际重叠或端到端加速。
+10. 为 51B PLE/N-gram table 建立 device、pinned-host/UVA 和 file-backed mmap 三种容量/延迟账本；分开引用 SGLang 注释的约 47.7 GiB FP8 table 与 vLLM recipe 的 H100 余量提醒，再设计包含 page fault、预取命中、RSS、带宽和 TTFT 的硬件实验。
 
 ## 2026-09 GLM-5.3-Flash 混合注意力与视觉闭环验收
 
@@ -1175,10 +1199,10 @@
 4. 将 EPD/PD 部署拆成 wiring、dummy-weight、full-weight load、numerical correctness、state recovery、target profiling、tool/verifier acceptance 七道 gate；分别注入视觉 encode 超时、representation revision 不匹配、取消、TP 数值偏差和 speculative 不支持。
 5. 对同一 toy 模型分别记录 Transformers 基础接入、vLLM recipe、SGLang recipe 和本机 runtime 验收，输出 capability、依赖、硬件、权重、cache/state recovery 和 SLO 的证据矩阵；禁止用框架类名替代端到端通过。
 
-6. 建立 GLM-5.3-Flash 的 source-aware capability matrix：分别登记 SGLang `v0.5.20` tag、SGLang `main`、vLLM `main`、vLLM `v0.29.0` tag 和 recipe 的版本/commit、模型入口、MTP、KDA、indexer/tail、视觉/EPD 和测试门禁；把“路径存在”“源码实现”“本地运行”“目标硬件通过”编码为不同状态。
+6. 建立 GLM-5.3-Flash 的 source-aware capability matrix：分别登记 SGLang `v0.5.20` tag、SGLang `main`、vLLM `v0.29.0`、`v0.30.0` tag、固定 main commit 和 recipe。逐文件比对 stable/main 的目录、blob 与关键 diff（Indexer/Tail cache、KDA、MTP、RoPE、Quark loading、KPool stride），区分“目录项存在”“文件实现已逐项确认”“本地运行”“目标硬件通过”；为不同 tail-cache stride/layout 构造数值与边界测试，但在测试前不预判故障归属。
 7. 构造 indexer pool 边界故障：让 `index_kpool=4` 的历史在最后一个 pool 未填满时切换 prefill/decode/PD，分别恢复只完成 pool、pool+tail、pool+tail+KDA 三种 manifest，比较可见 token、重算范围和错误类型。
 8. 对 MTP 的 top-k 复用做正确性实验：固定 draft/target logits，分别启用/关闭 sparse index top-k reuse、slot compact 和 local argmax，注入拒绝、工具调用边界和 batch reorder，记录 accepted/rollback token、index recall、全词表通信量和最终 task result。
-9. 为 stable/main/recipe 证据设计审计报告：当 vLLM `v0.29.0` 没有 GLM5Next 专属路径而 main 有时，报告必须保留负证据、源码快照、目标 wheel、权重 revision 和未完成 gate，禁止自动生成“stable supported”结论。
+9. 为 stable/main/recipe 证据设计审计报告：保留 vLLM `v0.29.0` 无专属路径、`v0.30.0` 有 `glm5next` 目录项、main 有详细文件的时间线；目标 wheel、逐文件比对、权重 revision 和未完成 gate 必须独立核验，禁止从目录存在自动生成“stable runtime 已验收”结论。
 
 ## 2026-09 GLM-5.2 IndexShare、MTP 与长轨迹 RL 验收
 
@@ -1203,6 +1227,8 @@
 10. 复现 serving 并行账本：输入 GPU 数、专家数、`DP/EP/TP`、batch、KV dtype 和拓扑，比较 `DP=8, EP=8, TP=1` 与 TP fallback 的专家通信、KV/权重显存、warmup、p99、失败恢复和单位成功成本。
 11. 将 vLLM recipe 的 GSM8K 5-shot/20-shot 结果做证据分层表，绑定 V3.2-Exp revision、vLLM/DeepGEMM/FlashMLA 版本、lm-eval prompt、硬件和并发；输出 `recipe_result`，不得输出 `base_model_score`。
 
+12. 按报告 Eq. (5)–(9) 实现一个可检查的 GRPO toy：分别记录组均值、response token mean、current/old importance ratio、reference KL、clipped objective 和 sequence mask。构造正/负 advantage、长短 response、训练/推理概率不一致的样本，验证 Eq. (9) 的门控只屏蔽负 advantage 且高序列级 divergence 的 policy 项，而 KL 项仍保留；比较组内中心化与额外 z-score 作为显式教学变体，不能把变体说成报告实现。
+
 ## 2026-09 DeepSeek V3.2 当前快照与实现证据分层
 
 1. 读取两个 AA 页面快照，比较 9 月 20 日的 648B 与 9 月 21 日的 685B，设计一个只输出 directory/provider drift 的解析器；若输入没有 output-speed/TTFT，则保持 null，不能用其他模型补值。
@@ -1213,10 +1239,11 @@
 
 1. 为 1M context、991K 普通输入、983K thinking 输入和 131K 输出建立 token/KV/cache/workspace 账本，改变 reasoning effort、工具结果长度和并发，输出 TTFT、TPOT、p95、峰值内存、失败重算和单位成功成本；不要把四个上限直接相加。
 2. 实现客户端 schema gate：`reasoning_effort` 与 `thinking_budget` 同时出现时拒绝；thinking + forced `tool_choice` 时拒绝或显式切换到非 thinking 路径；记录协议错误与模型质量失败的区别。
-3. 构造 `explicit`、`implicit`、`session` 三类 toy cache，固定 1,024-token 最小长度，模拟命中、失效、计费、session affinity、跨 revision/tokenizer/template 复用和租户隔离，输出 cache hit、saved prefill、重算 token 和错误复用率。
+3. 构造 `explicit`、`implicit`、`session` 三类 toy cache，模拟 1,024-token 资格阈值（不等于保证命中）、`ephemeral` marker（最多 4 个且只取最后 4 个）、20 content-block lookback 与独立的 `other messages≤20` follow-up 规则、命中/失效/5 分钟 reset 和租户隔离。分别解析 Responses `usage.input_tokens_details.cached_tokens` 与 Chat Completions `usage.prompt_tokens_details.cached_tokens`；标记文档中 `1,024` 资格表述与 explicit-cache 请求示例 `>1,024` 的边界差异，不能声称 toy 已证明线上 hit。
 4. 为 Qwen3.8 Max 0902 设计多工具 Agent manifest，记录 alias、resolved revision、mode、effort、工具 schema、权限决定、tool call、执行回执、超时、取消、重试和最终 artifact；把模型 call、宿主接受和真实副作用三种状态分开。
 5. 对比 Qwen3.8 Max 泛化 `qwen3_8_max_xhigh` 与一个固定 revision 的 toy harness，报告模型/版本、harness、工具、环境、verifier、Pass@1、区间、成本和 output tokens；验证不能把泛化 DataCurve 行迁移成 0902 独立结果。
 6. 模拟 QwenCloud endpoint 从 `dashscope-intl.aliyuncs.com` 迁移到 `maas.qwencloudapi.com`，加入 account+model 聚合、workspace override、月度 soft TPM、429、`Retry-After`、queue latency 和 observed TPM；报告 provider quota、模型 tokens/s、GPU capacity 与单位成功成本的差异，验证 endpoint/限流变化不能被写成模型升级。
+7. 运行 [`qwen_max0902_cache_contract_audit.py`](research/model-update-2026-09/code/qwen_max0902_cache_contract_audit.py)，确认 thinking + forced tool、`reasoning_effort`/`thinking_budget` 冲突、两种 20 上限、endpoint-specific usage 解析、implicit 非保证命中和 `previous_response_id` session lineage 的边界；将结果标为 `local_protocol_toy`，并说明未请求真实 endpoint。
 
 ## 2026-09 GPT-5.3 Codex Responses 与 Agent harness 验收
 
@@ -1253,6 +1280,14 @@
 3. 用同一文档集对比 `1568 px/1568 visual tokens` 与 `2576 px/4784 visual tokens`，记录图表/坐标召回、输入 token、TTFT、缓存命中、坐标映射错误和单位成功成本；不要把 toy 结果写成视觉编码器性能。
 4. 构造 tokenizer 迁移账本，固定内容类型，比较旧版本与 Opus 4.7 的输入 token、缓存前缀、thinking/output 和重试成本，验证 `1.0-1.35x` 只是发布方经验范围而非每个请求的保证。
 5. 构造 cyber safeguard 测试矩阵，分别记录模型能力、实时策略拦截、组织授权、沙箱、网络隔离、人工升级和最终 artifact；将误报/漏报与工具执行副作用分栏。
+
+## 2026-09 Claude Opus 4.8 Dynamic Workflows 与多 Agent 评测
+
+1. 为同一个 BrowseComp-style 任务实现 single-agent、blocking orchestrator、fixed peer team 和 async-subagent 四种 harness；明确每个 Agent 的任务视图、工具、上下文、消息协议、token cap 和结束条件。
+2. 按 System Card 的报告方式分别计算 score、跨全部 Agent 的 total tokens 与 derived latency；再记录真实 wall-clock/p50/p95。解释 blocking orchestrator 88.5%、fixed 5-agent 85.4% vs single 84.3%（5M vs 10M token limit、约 20% 派生 latency）为什么不是模型裸能力或生产 SLO。
+3. 将任务按预先固定的难度切片，比较易题和 hard tail 的多 Agent 净收益；加入协调成本、重复劳动、token 成本和 verifier 错误率，检查 Agent 数量增加是否真的提升 NetLift。
+4. 设计可恢复的长迁移 workflow：持久化任务 DAG、checkpoint、子任务 owner、重试/取消、permission manifest 与最终 artifact digest；让 reviewer 进行反驳，再由独立测试/verifier 验收，覆盖中断恢复和重复副作用。
+5. 复现“总结不完整 coding transcript”的 honesty 测试，分别标记未完成特性、失败测试和未批准设计；把模型是否主动披露与外部测试结果分开计分，并说明发布方短上下文 off-policy `3.7%` 漏报率不是通用诚信率。
 
 ## 2026-09 Kimi K3
 
@@ -1296,6 +1331,20 @@
 6. 按 KVV 六类检查设计部署验收报告：pre-flight、OCRBench、MMMU-Pro、AIME2025、K2VV ToolCall 和 SWE-Bench；明确每项故障应归因于模型、量化、kernel、parser、harness 还是 verifier。
 7. 写证据分层表：Artificial Analysis 第三方字段、Kimi 官方模型卡/博客 benchmark、KVV 验收、DataCurve 精确行缺失和本地 toy；禁止迁移 K2.7 Code/K3 的 DeepSWE 结果，也禁止把 Agent Swarm 数量写成 MoE expert 数量。
 
+## 2026-09 Kimi K2.7 Code：INT4、长周期工具状态与视频 token 预算
+
+1. 根据固定 K2.7 Code config 写权重内存账本，区分 total 1T、active 32B、驻留权重、4-bit pack、group size 32、量化忽略模块和运行时开销；全量 INT4 只计算理论原始字节下限，不宣称 checkpoint 或 GPU 显存大小。
+2. 用 kv_lora_rank=512、qk_rope_head_dim=64、61 层和 BF16 构造 MLA cache shape 估算，分别改变 context、dtype 与并发；明确该算式是假设代理，不能替代 K2.7 的目标 backend profile。
+3. 运行 kimi_k27_contract_budget_toy.py，注入 disabled thinking、temperature/top_p 偏离、tool_choice=required、错配 tool_call_id 和遗漏 reasoning_content；区分硬错误与文档建议产生的连续性 warning。
+4. 设计长周期 coding Agent 的工具回放账本：记录 proposal、schema validation、permission decision、执行 receipt、幂等键、工具版本、reasoning state 与 verifier；模拟执行成功但响应丢失，证明重试不能无条件重复副作用。
+5. 用同一视频样本比较不同抽帧、片段长度和分辨率的 token estimate、TTFT、tool calls、成本和任务成功率；包含上传大小限制、URL 图片拒绝、file handle 过期及时间段越权。
+6. 复核 Kimi Code Bench v2、Program-Bench、MLS Bench Lite、Kimi Claw 24/7、MCP Atlas、MCP Mark Verified 的官方结果；记录 snapshot、CLI/harness、参数、context、工具预算和 verifier，禁止与 DataCurve 或 AA 直接合并排序。
+7. 把 Kimi K2.7 Code Highspeed 作为同模型服务路由变量设计 profile；若比较 180/260 tokens/s 发布方声明，需同时固定输入/输出长度、并发、TTFT/TPOT、供给和错误率，不新增模型候选。
+8. 固定 KTransformers commit `c40722bf04c494f2492b7eb9e86ef01a4ede45b3`，逐项对照 K2.7 deployment guidance、K2.5 serving guide 和 Native Precision 支持矩阵。输出 `publisher_command`、`generic_matrix_entry`、`runtime_version`、`weight_load`、`numerical_test` 五列，缺证项标为 `unverified`；不得因矩阵未列就判定不支持，也不得因命令存在就判定已兼容。
+9. 用 `threshold=400` 写出 dual prefill 的边界表：399、400、401 tokens 分别对应哪个模式；标注这是 pinned tutorial 的文档语义。设计目标 GPU 测试，记录 CPU/GPU expert placement、NUMA/threadpool、prefill peak VRAM、TTFT 和吞吐，并检查 K2.7 示例未显式传入 dynamic expert update 开关。
+10. 对比 K2.7 发布指南 LoRA SFT 段、K2.5 旧 source-install 教程与 `0.7.0.post4` release tutorial/YAML。标记版本后，分别记录 base checkpoint、权重后端、`bf16` 训练字段、LoRA target modules、sequence length、optimizer 和硬件；不得把旧文档的 BF16 转换或新 K2.5 配方外推为 K2.7 事实。若无 K2.7 原始材料，就写出需要的权重/训练 probe manifest，不下载权重或伪造复现结果。
+11. 根据 K2.5 release tutorial/YAML 画出 `base RAWINT4 -> attention/expert LoRA training -> resumable checkpoint -> SGLang adapter conversion -> serving` 数据流；标注普通/expert adapter 与 optimizer/RNG/scheduler 状态的保存边界，并列出 exact-resume 比对项。把该流程限定在 K2.5 `0.7.0.post4`，不要改写成 K2.7 已验证能力。
+
 ## 2026-09 Kimi K3 固定 manifest 与 hybrid cache
 
 1. 下载固定 revision 的 `config.json` 和 `model.safetensors.index.json`（只下载 metadata），运行 [`kimi_k3_manifest_audit.py`](research/model-update-2026-09/code/kimi_k3_manifest_audit.py)，解释 96 个分片、497,220 个 tensor、93 层、92 个 MoE layer 和 247,296 对 packed/scale tensor 的关系。
@@ -1319,6 +1368,14 @@
 3. 建立 1.6T/49B MoE serving 账本，加入 384 routed experts、6 selected、1 shared、resident weights、FP4/FP8 scale、dispatch/combine、KV/indexer cache、workspace 和 batch；比较专家热点、通信量、p99 和单位成功成本，不能用 49B 直接当完整显存。
 4. 写 stateless Responses replay toy：模拟 `function_call`、`apply_patch`、并行工具、工具回执、失败重试和宿主持久化；注入 `previous_response_id`、`conversation`、`background`、`store` 等不支持字段，验证 capability probe、静默忽略检测、权限和幂等门禁。
 5. 对 `low/high/max` 固定任务、工具、revision 和 verifier，报告 reasoning/visible output、TTFT、TPOT、工具轮数、失败类型、Pass@1、成本和 steps；说明 effort 行不是三个 checkpoint，并把 DataCurve 数字与本地 toy 结果分栏。
+
+## 2026-09 DeepSeek V4 Flash SGLang：分支缓存与 kernel 证据审计
+
+1. 写一个不依赖 SGLang/CUDA 的混合状态 cache toy：记录 Full/Compressed KV、SWA slots、共享 prefix node、分支点 state、eviction 与 restore。先模拟 chunked prefill 释放滑出窗口 slots，再让 sibling requests 在共享前缀分叉；比较“仅 Full KV 命中”与“Full KV + 对应 SWA branch state 均可复用”的判定，并注入缺失状态、过期 branch key 和不一致恢复点。
+2. 为 PR #34565 的 workload 建立可复现实验 manifest，固定 `DeepSeek-V4-Flash-0731`、TP=2、FlashInfer MXFP4、DSpark、24,576 shared-prefix tokens、8,192 question tokens、128 output tokens、64 requests/8 groups、chunk size、缓存开关和测量区间。分别记录 token hit rate、cached tokens、mean/p95 TTFT、input throughput；标注这些数字是 PR 自报而非本地复现。
+3. 设计三列 kernel 证据账本：B200/SM100-103 的 FP8/TP=1 CSA/HCA unit kernel、4× RTX PRO 6000/SM120 的 paged-MQA indexer/sparse prefill/FP4 MoE、端到端共享前缀 Agent workload。每列分别锁定 baseline、batch/context、精度、并行度、warmup、吞吐/延迟定义与质量指标；禁止把 `1.2x`、`1.45x` 和 `3.4x` 组合成同一个 V4 加速结论。
+4. 写 serving release gate：固定 SGLang tag/commit、权重 revision、GPU/driver/kernel/backend，覆盖 cache-hit 正确性、SWA 分支恢复、稀疏 index recall、量化误差、长上下文 TTFT/TPOT、并发 p95/p99、工具执行与 verifier、单位成功成本。把源码存在、PR benchmark、本机复现和生产 acceptance 分列记录。
+5. 为 SGLang PR #39313 设计 main / fusion-index / fused-kernel / fused-kernel-plus-fork 四臂实验，固定 DeepSeek-V4-Flash-0731、混合 FP8/MXFP4 权重与 scale layout、SM100 门禁、CUDA Graph capture 和 alternate-stream 依赖。分别测 kernel 数、stream overlap、prefill/decode 与端到端吞吐、greedy/sample quality 和逐请求 answer flips；注入不满足 gate 的配置验证 fallback。把发布方 4×B300 表与自己的复现分栏，不能迁移成 V4.1 成绩。
 
 ## 2026-09 GLM-5.1 长周期 Agent 与过程质量审计
 
@@ -1348,9 +1405,13 @@
 4. 实现 compaction replay toy：将历史压成单个 opaque `compaction` item，注入手工裁剪、重排、重复插入、过期状态和 context 已超限场景，检查恢复成功率、信息损失、重复工具调用、压缩成本和 cache 命中；禁止解析或伪造内部 blob。
 5. 实现混合工具状态机：server-side web/X/code/collections tool 自动执行，client-side function call 进入宿主授权、幂等执行、结果回灌和 artifact verifier；注入超时、未知副作用、重复 call、工具 schema 版本变化和 `max_turns` 跨请求重置。
 6. 实现 Remote MCP 最小权限实验：比较全量工具 schema 与 `allowed_tools` allowlist 的上下文 token、工具选择、误调用、prompt-injection 和权限拒绝；验证 allowlist 不能替代租户、资源、参数和高风险动作授权。
-7. 写最终证据报告：AA 指数/速度/价格、xAI API 字段、DataCurve 行缺失、本地 toy 结果和待核验的架构/训练/kernel 分开列账；不得声称复现 xAI 的生产多 Agent 性能、参数规模或 Grok 4.20 专属论文结论。
+7. 写最终证据报告：AA 指数/速度/价格、页面 snapshot 日期、指标 workload 与 benchmark freshness、xAI API 字段、DataCurve 行缺失、本地 toy 结果和待核验的架构/训练/kernel 分开列账。模拟 AA 标注“deprecated；仅默认 10K input workload 继续更新，其他 workload 为历史数据”的情况，不得把页面抓取时间冒充每项指标的测试时间，也不得声称复现 xAI 的生产多 Agent 性能、参数规模或 Grok 4.20 专属论文结论。
+
+8. 加入 multi-agent API contract gate：拒绝 Chat Completions、`max_tokens` 和 client-side/custom function tools；允许 Responses `previous_response_id`、内置工具与 Remote MCP。模拟 beta contract 变更、encrypted sub-agent state 未携带、token/tool usage 只记录 leader 的错误账本；最终报告应汇总所有 Agent 的 input/output/reasoning tokens、server-side tool calls、continuation success、wall-clock 与单位成功成本，不调用真实 API。
 
 ## 2026-09 Gemini 3.8 Flash Thinking、Interactions 与 Computer Use 审计
+
+配套正式章节：[Gemini Interactions：跨轮状态、签名回放与工具责任链](book-20-agent-harness-runtime/chapters/23-gemini-interactions与thought-state回放.md)。
 
 构建一个不调用真实付费 API 的教学审计器，模拟 `gemini-3.8-flash` 的 `low/medium/high` thinking、共同 output budget、thought summary/signature、Interactions state、Search/URL/File/Code/function 工具、Computer Use、structured output、1M context、implicit caching 和外部 verifier。报告必须把 AA/DataCurve、Google 官方文档和本地 toy 分栏。
 
@@ -1361,11 +1422,13 @@
 3. SSE trace：记录 `interaction.created`、step start/delta/stop、tool call/result 和 completed 事件，验证事件重连、重复消费、工具超时、取消和最终 artifact 的幂等。
 4. 工具组合对照：比较 Search grounding、URL Context、File Search、Code Execution、function calling 的检索/执行/结果回灌链路，记录 citation coverage、chunk recall、执行错误、重试和业务校验失败；明确工具不等于模型权重或永久记忆。
 5. Computer Use 安全：用截图和归一化 `1000x1000` 坐标模拟 action intent，注入 UI 漂移、遮挡、敏感操作、域名越权、重复点击和状态竞争，分别评估模型提案、宿主审批、执行回执和 verifier。
+6. Agentic Video 对照：固定视频 revision、问题位置和模型配置，比较默认 static 1 FPS 与按需 agentic transcript/frame/audio 读取；用合成 Interaction steps 覆盖 `processing_call.id` → `processing_result.call_id` 的配对、断线重放、超时/取消和媒体权限拒绝。记录关键事件召回、时间定位、processing 次数、thought/tool-use tokens、TTFT、端到端成功和单位成功成本；不要把文档中的最高 88% token 减少/约 7% 质量提升当成本地复现结果。
 6. 长上下文与缓存：比较 128K/512K/1M 输入、needle 位置、文档数量、重复前缀和 implicit-cache hit/miss，分开记录有效召回、TTFT、计费 token、KV/cache 代理和后续轮 TPOT，不能把服务侧缓存写成 GPU KV cache。
 7. 评测 manifest：重现 DataCurve high 的 `n_runs=4`、`n_attempted=447`、Pass@1/4、平均成本和 steps 字段；所有本地数字绑定任务、工具、环境、verifier 和代码版本，不宣称复现 Google 或 DataCurve 生产结果。
-8. 直接运行 [`gemini_interactions_replay_demo.py`](research/model-update-2026-09/code/gemini_interactions_replay_demo.py)，检查 stateful continuation 只继承 history、stateless replay 保留 signature、call/result `id` 对齐、SSE completed/done 顺序、store/delete 和 `55/1` retention toy 结果；记录 `network_called=false`。
+8. 直接运行 [`gemini_interactions_replay_demo.py`](research/model-update-2026-09/code/gemini_interactions_replay_demo.py)，检查 stateful continuation 只继承 history、stateless replay 保留 signature、`function_call.id` → `function_result.call_id` 对齐、SSE completed/done 顺序、store/delete 和 `55/1` retention toy 结果；记录 `network_called=false`。
 9. 为同一份 Interaction history 生成两个 manifest：一个把 `tools`/`generation_config` 错误地当作跨 turn 继承，另一个按 interaction-scoped 重新指定；比较 schema、tool choice、thinking level 和 verifier 结果，说明为什么 `previous_interaction_id` 不是完整 runtime snapshot。
-10. 建立 signature 兼容性对照：按 Thinking 页面只保留 thought/built-in signatures，再按 Tool combination 页面保留 custom function call/result signatures；两个版本都原样回放并报告差异，明确这是文档冲突待 capability probe，不把 toy 选择写成真实 endpoint 结论。
+10. 建立 signature 兼容性对照：比较 Thinking prose、Tool combination prose、当前 Interactions API reference 与固定 SDK schema。记录 Tool combination 的 `function_response.id` 与正式 reference/SDK 的 `function_result.call_id` 命名差异；记录 custom function signature 在 prose 与 typed schema 的差异，以及 `ThoughtStep.signature` prose 必需、schema optional 的差异。让 custom function signatures 缺省/存在两种 history 都能由本地 toy 保真 round-trip；对照 `extra="allow"`、`UnknownStep.raw`。结论必须区分 schema 声明和 endpoint 行为：不伪造、不静默删除实际 opaque fields；没有授权/API key 时不声称完成 capability probe。
+11. 审计固定 SDK `6d012889752f65c1a51d0ad6e5970fc97d19c4ca` 的 Interactions 类型路径：区分 `_gaos/types/interactions/*` schema 与普通 `_common.BaseModel`，核对 `_gaos` 的 `extra="allow"`、thought optional signature、custom function 未声明 signature 和 lenient `UnknownStep.raw`。扩展 demo 测试：schema profile 允许省略 thought signature，而默认宿主 replay gate 仍可以拒绝该 history；明确这是两种不同证据层，不声称 endpoint 真实拒绝。
 
 ## 2026-09 DeepSeek V4 Pro reference implementation 审计练习
 
@@ -1400,6 +1463,7 @@
 3. 模拟 Responses 多工具回放：构造 user -> opaque reasoning item -> function call -> function output -> reasoning continuation -> final output，分别删除 reasoning item、tool result、call id 和 compaction item，输出 replay rejection、重复副作用和恢复结果。
 4. 设计 deferred tool search/Programmatic Tool Calling 实验，比较全量 schema、延迟加载和批量编排的 prompt token、选择错误、往返次数、权限拒绝、超时、幂等和 verifier 通过率；不能把 schema 省略写成权限放开。
 5. 写一份网络故障证据报告：AA/DataCurve 当前快照可写入“新鲜榜单证据”，OpenAI 403/超时/DNS 写入“访问边界”，旧官方页面写入“历史快照”；禁止把任一线路结果升级成模型不存在或官方接口改变。
+6. 运行 [`gpt56_luna_state_replay_audit.py`](research/model-update-2026-09/code/gpt56_luna_state_replay_audit.py)，解释为什么 `current_turn/all_turns`、compaction canonical window、cache prefix、tool-search `call_id` 和 artifact verifier 必须分别验收；再人为改变 function output 或重复 idempotency key，记录拒绝原因。报告只标为 `local_protocol_toy`。
 
 ## 2026-09 Claude Sonnet 5：System Card 与长任务回放实验
 
@@ -1470,23 +1534,35 @@
 5. 写一个不调用真实 API 的 `Opus55CompatibilityHarness`：对 `thinking` disabled/manual budget、`tool_choice` any/tool、旧 computer tool 和错误 block 顺序生成请求，按官方契约输出预期 400、迁移建议和 response parser 测试结果。
 6. 实现 thinking-binding/compaction replay：记录 `model_id`、prefix hash、tools hash、thinking block、signed compaction block、inline tool schema 和 cache key，分别模拟 append-only、prefix mismatch、drop block 和 tool upgrade，检查状态是否被错误归因于模型质量。
 7. 给同一 toy task 跑 standard/fast 两个 serving profile，记录 TTFT、output tokens/s、`usage.speed`、429/529、input/output/cache/tool cost 和 verified artifact，画出速度-成本曲线并说明 fast mode 不是新权重。
+8. 根据当前 Opus 5.5 model page 实现输出预算与缓存成本计算器：输入同步 Messages 与 Batch endpoint、是否带 `output-300k-2026-03-24` beta header、输入/输出 token、cacheable prompt 长度、cache read/write TTL；拒绝把 Batch 300K 当作同步上限，校验 512-token cache minimum，并分别计算 `$4/$20` 基础输入/输出、`$0.20` cache read、5m `$5`/1h `$8` cache write 每 MTok。结果标为服务合同演算，不得据此推断模型内部推理 token 或真实账单。
+
+8. 运行 [`claude_opus55_protocol_audit.py`](research/model-update-2026-09/code/claude_opus55_protocol_audit.py)，解释为什么请求 capability error、thinking state invalidation、tool execution、fallback 和 verifier failure 必须分开计数；将 toy 输出与 Anthropic 官方 API contract 分栏，不把 `local_protocol_toy` 当作真实 API 验收。
+
+9. 为 Opus 5.5 实现 on-demand/threshold compaction compatibility matrix：分别校验 beta header、请求字段、平台可用性、签名 block 续接、服务端旧前缀裁剪和混用时的拒绝路径；加入 Bedrock 仅 threshold 列 beta 的负例。
+10. 构造相同长任务的 keep-tail replay：对照 on-demand 条件满足、on-demand tail 被编辑、threshold tail 含旧 `thinking`、threshold tail 已剥除 reasoning、`drop_block` 五种情况；检查摘要、普通 text/tool blocks、reasoning binding 和 side-effect lineage，不以“请求成功”推断原 reasoning 被接受。
+11. 为 2026-08-31 00:00 UTC 前后创建的账号分别模拟 prefix mismatch：区分新账号默认 `error`、显式 `drop_block` 与旧账号 opt-in；同时加入目标模型无法读取 producer block 的 model-binding mismatch，确保两种不兼容原因分开记账。输出标为文档驱动的 local toy，不调用真实 Messages API。
 
 ## 2026-09 GPT-6 Sol：预算、状态与工具 runtime 验收
 
 1. 为 `gpt-6-sol` 建立 source-aware manifest，记录 AA `max` 配置、DataCurve 精确行缺失、model page、Reasoning、Agents、Tools、Compaction 页面和快照哈希；禁止迁移 GPT-6 Astra/GPT-5.6 的 Agent 分数。
 2. 用零依赖代码计算 `1,050,000` context、`922,000` maximum input、`128,000` maximum output 的预算，加入 reasoning tokens、工具 schema、工具结果、历史 output 和可见文本；覆盖 `incomplete` 与 25K reasoning/output reserve。
-3. 模拟 `standard/pro` mode 与 `none`--`max` effort 的正交矩阵，插入合法 `configuration_update`、相邻 update、自动 compaction 和 automatic truncation，输出接受/拒绝原因。
+3. 模拟 `standard/pro` mode 与 `none`--`max` effort 的正交矩阵，插入合法 `configuration_update`、相邻 update、自动 compaction 和 automatic truncation，输出接受/拒绝原因；另验证 update 只改变 effective effort 并持续到覆盖、response 中的 `reasoning.effort` 仍是 request-level 值、稳定 prompt prefix digest 不变。将 prefix 保留标记为 cache-friendly 设计，不得声称 toy 验证了真实 cache hit。
 4. 构造 Responses item replay：保留 reasoning summary、encrypted/opaque item、tool call/result、permission、executor receipt、compaction item 和 artifact verifier；分别删除、重排或重复 item，检查恢复、重复副作用和 lineage。
 5. 设计 Agents API、Agents SDK、Responses API ownership 对照，分别记录谁保存 session/history、谁运行 loop、谁做 approval、谁执行工具、谁负责 sandbox 和 verifier。
 6. 模拟 tool search 的 namespace、`defer_loading`、schema hash、search call、loaded tool、permission deny 和 cache prefix；比较全量 schema 与按需加载的 token、延迟、错误和复用。
 7. 实现 272K whole-request threshold、input/cache 2x、output 1.5x、Batch/Flex 50%、Fast mode 2x 的成本账本，再加入 tool、retry、compaction 和 verifier 失败成本。
+8. 运行 [`gpt6_sol_contract_audit.py`](research/model-update-2026-09/code/gpt6_sol_contract_audit.py)，解释为什么 mode/effort、configuration update、automatic compaction/truncation、standalone compact 和 explicit compaction 必须分支；记录每个拒绝原因。
+9. 将 toy 的 permission/executor/verifier 和 idempotency receipt 映射到一次真实 coding-agent trace，分别统计 proposal、authorized、executed、verified、duplicate 和 incomplete，禁止用最终文本替代 artifact 验收。
+10. 用 272,000 与 272,001、compaction 前后 prefix、1,024 与 1,023 cache tokens 做边界测试；说明为什么这些边界测试不等于真实 provider billing、cache hit rate 或 GPT-6 Sol 质量。
+11. 为 GPT-6 Sol/Luna 增加独立 residency capability gate：验证 EU data residency 仅明确覆盖 Standard processing 的 Responses/Chat Completions；将 `processing_mode` 与 `reasoning.mode` 分栏，分别对 regional storage、regional processing、Fast/Batch/Flex、system data、Remote MCP、retention controls 和 10% regional uplift 输出 eligible / not_established / external_policy，并写明这不是法律合规保证。
 
 ## 2026-09 GPT-6 Luna：sibling routing 与服务合同验收
 
 1. 为 `gpt-6-luna` 建立 source-aware manifest：记录 AA canonical slug、max 配置、详情页哈希、DataCurve 精确行缺失、OpenAI model ID、snapshot、effort、mode、provider 和 endpoint；将 Luna 与 Sol 分开。
 2. 实现 task-shape router：在 focused/high-volume、长推理、工具调用和高失败代价任务之间切换 Luna/Sol 的候选配置；输出选择依据、可观测 capability、`not_applicable` 评测字段和回滚条件，禁止用“高效率”猜测参数或架构。
 3. 复算 Luna 的 1.05M/922K/128K budget、reasoning/output/tool/schema/compaction token 账本和 272K whole-request threshold；分别计算 standard、Batch/Flex、Fast mode、retry、tool 和 verifier 失败后的单位成功成本。
-4. 构造 Responses/Agents runtime replay：保留 `configuration_update`、typed items、tool call/result、permission、executor receipt、opaque compaction item 和 verifier；测试 model ID 替换、跨 sibling 迁移和缺失 DataCurve 行时的拒绝策略。
+4. 构造 Responses/Agents runtime replay：保留 `configuration_update`、typed items、tool call/result、permission、executor receipt、opaque compaction item 和 verifier；测试 model ID 替换、跨 sibling 迁移和缺失 DataCurve 行时的拒绝策略。另分别验证自动 compaction/truncation 与 standalone `/responses/compact` 对 update 历史的拒绝，以及显式 `compaction_trigger` 后、下一条用户消息前重插 update 的可恢复路径。
+5. 扩展 capability manifest 加入 `endpoint`、`region`、`processing_mode`、data-residency eligibility、retention control 与第三方 MCP policy。验证 GPT-6 Sol/Luna 的 EU residency 只对 Standard processing 的 Responses/Chat Completions 有官方支持；把它与 reasoning `standard/pro` 模式区分。注入 Fast/Flex、Batch、未获 retention approval、system metadata 和远端 MCP 请求，分别输出 eligible / not_established / external-policy 状态，并把适用地域溢价纳入单位成功成本。实验不得声称模型 API 或本地 toy 自动提供法律合规保证。
 
 ## 2026-09 DeepSeek V4.1-Flash：API contract 与媒体/工具状态验收
 
@@ -1495,6 +1571,14 @@
 3. 实现 Vision/Files 预算 toy：覆盖 URL 8192 字符、60 秒、32 MiB、`file_id` 64 MiB、48 MiB request、600 图、25 GiB/10,000 文件和到期/删除；输出实际媒体证据覆盖率，不把接受请求当作模型质量。
 4. 对比 `/beta strict=true`、普通 schema 和 host-side verifier：注入缺字段、额外字段、权限越界、重复 `call_id`、超时重试和业务错误，分别报告 schema valid、authorized、executed、verified。
 5. 把 Responses stateless 与本地 Agent state 分开回放：删除 `previous_response_id`、重排 item、重复 tool result、丢失文件和 alias 路由变化，检查 parser 是否拒绝、重试、回退或产生重复副作用。
+
+## 2026-09 DeepSeek V4.1-Flash：Harness provider、MCP 与 webhook 审计
+
+1. 运行 [`deepseek_harness_protocol_audit.py`](research/model-update-2026-09/code/deepseek_harness_protocol_audit.py)，核对 provider credential 脱敏、稳定 provider ID、session model 固化、插件 cleanup、MCP reconnect budget 和 webhook `202`；将输出证据等级标为 `local_protocol_toy`。
+2. 为 provider/session 建立 recovery manifest，字段至少包含 `provider_id`、requested/served model、session/workspace revision、credential reference、protocol claim、tool schema hash 和实际 capability probe；故意修改 provider ID 或模型后拒绝静默迁移已有 session。
+3. 模拟 MCP server 断线、工具 schema 变化和重连预算耗尽，分别输出 reconnect、rediscovery、namespace、registry unregister、permission recheck 和人工恢复状态；禁止复用断线前的工具集合。
+4. 模拟 GitHub review webhook 的签名校验、重复 delivery、异步 admission、workspace/session 创建、出站权限和最终 artifact verifier；比较 HTTP `202`、executor receipt、测试通过和 verifier 通过四个状态。
+5. 把 `model_intent -> admitted -> authorized -> executed -> verified` 做成 trace 状态机，注入错误 signature、缺少幂等键、重复 call、未清理 plugin effect 和越权出站请求，输出 failed gates 和 root causes。
 
 ## 2026-09 Kimi K3：当前榜单复验与评测边界
 
@@ -1520,3 +1604,114 @@
 2. 依次删除 goal、工具 result digest、幂等键、pending effect、artifact digest 和 verifier 状态，记录每个门禁应拒绝哪一种候选，并区分 schema valid、authorized、executed、verified。
 3. 将 toy 扩展为三种切分：完整 tool call 前切分、call 与 result 之间切分、result 完成后切分；要求系统拒绝 orphan call，并报告重复执行率和最终 artifact 一致性。
 4. 写一份证据边界说明：Z.ai 的 `SAO with compaction` 是官方高层声明，toy 是通用协议实验，只有官方实现或绑定 revision 的真实 API/权重实验才能升级为模型专属结论。
+
+## 2026-09 GLM-5.3：compaction-aware RL trajectory 与 token provenance
+
+1. 阅读固定版 [`slime` Agentic RL roadmap](https://github.com/THUDM/slime/blob/8ee9c1e1c8871ccd6dc8ec812edfaefa3dd1156b/docs/en/get_started/agent.md) 与 `TrajectoryManager`，画出 session message tree 和 token-prefix alignment 两层结构。用“原始工具轨迹被 compacted history 改写”的例子标注何处分支。
+2. 为一次 model → tool → observation → model 轨迹写出 `prompt_ids`、`output_ids`、log-prob 与 `loss_mask`。分别将模板/user/tool/environment token 设为 loss-zero、模型采样 token 设为 loss-one；若历史里的已生成文本发生漂移，说明何时 realign、何时 fork，以及为何不能通过重 token 化恢复原始 rollout provenance。
+3. 对照固定 revision 的 `fork_threshold_tokens=1,024` 与 `< threshold` 的 realign 条件，证明该值限制短 re-render/token drift，而非上下文压缩触发阈值；写出不能把它迁移给 GLM-5.3 的理由。
+4. 审计同一 commit 的 reward 文档、`TrajectoryManager.get_trajectory()`、coding-agent `generate()` 和 branching tests。报告 `reward/K` 与 full-reward-per-sample 的矛盾；不要把共享 `rollout_id` 当作 reward averaging 证据。因本地没有 pytest，源码单测只能记为已阅读的断言，不可写成已运行通过。
+
+研究笔记：[`glm-5.3-source-notes.md`](research/model-update-2026-09/glm-5.3-source-notes.md)。
+
+## 2026-09 Kimi K3：vLLM v0.29.0 -> v0.30.0 runtime 演进审计
+
+1. 固定 `v0.29.0`、`v0.30.0` tag 与 release commit，读取 registry、NVIDIA K3 model、DSpark 和 PyPI metadata；做 source manifest，保存 URL、tag/commit、字节数与 SHA-256。分别标记 `registry entry`、`wheel metadata`、`wheel installed`、`full-weight load`、`numerical pass` 和 `target hardware acceptance`，不得由前项自动推断后项。
+2. 对照权重生命周期：定位 v0.29 在 `load_weights` 内 finalize 与 v0.30 `process_weights_after_loading` 的变化。构造可重复的 streamed/non-contiguous weight fragment 序列，写出为何 finalize 必须等待完整 stream，以及失败重试时如何避免重复转换。
+3. 追踪 IPC weight-cache 的 transformed buffer：列出 daemon 与 model process 的 ownership、buffer lifetime、raw packed tensor 释放点、cache miss fallback 和异常清理。源码有零拷贝分支不等于已测出启动速度或峰值显存改善。
+4. 为 PP + AttnRes + DSpark/MTP 画状态 manifest，至少分开记 KDA recurrent/conv state、MLA/context KV、auxiliary hidden states、draft/target position、accepted/rejected token 和 PP rank；注入非末级边界与 verify rollback，检查系统是正确转发、拒绝还是恢复。
+5. 从 DSpark context-KV 路径提取 dtype、per-layer scale 与 block-layout gates；分别构造 BF16、FP8、混合 dtype 和不均匀 block layout，预期不支持的情况回退而不是静默错误写 cache。注明该练习基于 source reading，不是 kernel 正确性或硬件 benchmark。
+
+## 2026-09 Claude Opus 5：Prompt-Injection 评测可比性审计
+
+根据 [Claude Opus 5 System Card](https://www.anthropic.com/claude-opus-5-system-card) 和研究笔记，设计一个只处理评测元数据、不执行真实攻击的 audit ledger：
+
+1. 为 IPI、live bounty、Shade coding、computer-use 与 Cowork browser 分别建立 manifest，记录模型 snapshot、scenario set、攻击者版本、attempt budget、thinking/effort、endpoint、tool-result probe、action classifier、Auto mode、harness revision 和 verifier。
+2. 每份记录同时保存 `successful_attempts / valid_attempts` 与 `scenarios_with_success / tested_scenarios`。用合成数据验证两种分母不会互相替代，并将重复/自适应尝试标为相关样本，不把 ASR 直接解释成线上用户风险概率。
+3. 重现 2026-08-19 的评测修订决策：先注入 Opus 5 与基线使用不同 Cowork harness 的元数据，要求审计器拒绝直接排名；统一 harness 后为所有模型生成 rerun 要求。再注入 Cowork 不支持的 thinking-disabled 条件，要求记录为 `not_supported`，不能暗中降配后计分。
+4. 对比 model-only、输入侧 probe、Auto mode 的不同结果，输出 `model_robustness` 与 `product_system_robustness` 两栏。任何评测摘要都必须显示 safeguard 状态、attempt count、scenario coverage 和置信/噪声说明。
+5. 将 Anthropic System Card 的 CB-1/CB-2 与 ASL-3 归类记作 `publisher_risk_assessment`；与 DataCurve/AA、外部复现、真实 endpoint 和生产 SLO 分栏，禁止从这组安全评测推断 Opus 5 的参数、架构或普遍风险率。
+
+原始数据与正文摘要：[`claude-opus-5-source-notes.md`](research/model-update-2026-09/claude-opus-5-source-notes.md)。本练习是评测账本设计，不要求生成或复现任何攻击 payload。
+
+## 2026-09 Qwen3.5-Omni：ARIA 与跨媒体时间轴验收
+
+1. 用合成 token 序列实现 ARIA 的样本级 ratio 上限：构造不同 text/speech tokenizer 速率，检查每个 prefix 是否违反 speech:text global ratio；对照固定 interleave schedule。只验证约束和调度性质，不把 toy 指标写成模型质量或论文复现。
+2. 构造 VFR 视频帧、音频片段与随机音频 timestamp，分别模拟绝对 temporal ID、160 ms 统一时间粒度、秒级文本 timestamp；注入丢帧、重复帧、音画偏移和跨 chunk replay，输出各自的时间对齐误差。
+3. 建立预训练数据账本：S1 encoder alignment、S2 的五类 token 数、S3 `32,768 -> 262,144` 序列长度；核验列项合计约 4.29T 而报告称约 4T，并把精度/重叠未知留为 `unverified`。不得把总体 100M+ 小时、AuT 40M 和 Talker 20M+ 小时合并。
+4. 设计 Thinker-Talker 首包 trace：AuT chunk、Thinker TTFT、Talker 首 speech chunk、MTP residual codes、codec decode、网络 packet、播放器首播、并发和取消恢复各自计时。为 Plus/Flash 保留独立部署资源字段，不能直接排名。
+5. 从 Model Studio 文档提取 `qwen3.5-omni-plus`、`stream=True`、Plus/Flash custom voice 与 snapshot 限制，建立 API contract manifest；明确不能由示例推断内部架构，也不发起未经授权的真实 API 请求。
+
+研究笔记：[`qwen3.5-omni-source-notes.md`](research/model-update-2026-09/qwen3.5-omni-source-notes.md)。
+
+## 2026-09 Qwen3.6-27B：混合递归状态的树验证与指标审计
+
+1. 画一个 5-token MTP spine + root sibling 的候选树，为每个节点标 parent。用合成递归状态实现 branch-local scan/replay；断言每个子节点从 parent state 计算，并演示把 sibling 状态误接为 packed-row 前项时如何产生错误历史。标明这只是 toy，不是 vLLM kernel。
+2. 根据 GDN Tree-Scan 预印本重算并解释三种分母：committed tokens/event 4.11→4.82、token-weighted decode TPS 18.80→23.88、per-request-equal TPS 17.80→18.51。说明为什么 +27.0% decode-only 数字不能外推为 task-wall 加速，并把四个 SWE/Codex tasks、B=1、temperature 0.6 绑定到结论。
+3. 为 40-turn recurrent-oracle p-rescore 设计补充验收：定义清晰 margin flip、每组 task/turn、native numerical floor、request-cluster bootstrap、多 seeds、B=4 与 Stage-D timing；写出哪些结论可称“within observed floor”，哪些还不能称为 full distribution equivalence。
+4. 制作来源类型表：Qwen 官方模型卡/config 证明模型结构；AA 是榜单/provider 字段；GDN Tree-Scan 是外部单作者预印本的 serving 实验；pinned code 和本文复现是不同证据级别。禁止把第三方 +27% 写成 Qwen 官方宣传或本地实测。
+5. 审计 Qwen 官方发布博客的四个分数及脚注：为 SWE-bench Pro 标注修订任务并重跑全部基线，为 SkillsBench 标注 78 个 self-contained 子集与五次平均，为 Terminal-Bench 标注 Harbor/Terminus-2、时限和资源。另把模型卡 native 262,144、OpenClaw `contextWindow=131072` 与 `maxTokens=16384` 分列，解释它们属于不同预算层；API 示例不能替代真实 endpoint probe。
+
+研究笔记：[qwen3.6-27b-source-notes.md](research/model-update-2026-09/qwen3.6-27b-source-notes.md)；论文：[GDN Tree-Scan](https://arxiv.org/abs/2609.23900v1)。
+
+## 2026-09 Qwen3.6-35B-A3B：thinking trace 与历史状态验收
+
+1. 阅读固定 revision 的 [Qwen3.6 chat template](https://www.modelscope.cn/models/Qwen/Qwen3.6-35B-A3B/resolve/1a5ae24e867f8d82388070d3f61590158a01d15c/chat_template.jinja)，用合成 transcript（旧 user/assistant-think/tool 轮次 + 最新 user/assistant 轮次）追踪 `last_query_index`。分别渲染 `preserve_thinking` 缺省、true 和 false，断言哪些 `<think>` 内容进入 prompt；把模板静态审计标成 source evidence，不当作线上 API probe。
+2. 将 `enable_thinking` 独立开关与 `preserve_thinking` 做 2×2 矩阵：检查生成前缀如何改变、历史 reasoning 是否改变。检查 Model Studio 顶层字段与 vLLM/SGLang `chat_template_kwargs` 的差异，设计 endpoint schema gate，拒绝将一种 surface 的参数形状默默转发到另一种。
+3. 构造删掉、重排和跨会话未加载 transcript 的恢复用例，证明 `preserve_thinking` 不能恢复不存在的历史；再将权威计划/事实显式写入 workspace，比较 checkpoint replay、旧 reasoning 和持久状态三者的恢复结果。
+4. 对同一长任务比较保留旧 thinking 与只留最新轮：记录输入 token、context/KV 占用、重复推理 token、前缀 digest、cache hit、TTFT 与任务 verifier。净成本使用 `保留历史新增开销 - 减少的重复推理开销` 评估，不假设官方效率 claim 必然成立。
+5. 建立模型身份和证据 manifest：把 AA 的 reasoning/non-reasoning slug 归并为同一模型配置组；记录官方 35B/3B、40 层 GDN/Gated Attention 排布、MTP 与 262K native / YaRN 外推；DataCurve 无精确 Qwen3.6 行时不得填其他 Qwen 的成绩。
+6. 读取 Qwen3.6-35B-A3B 官方博客，建立评测依赖矩阵，至少区分被测模型、Agent CLI/harness、user simulator、judge model、工具/server version、任务集 revision、截断与资源预算。用 TAU3-Bench、VITA-Bench、MCPMark、MCP-Atlas 的博客脚注填表；模拟 judge 版本漂移时，明确要锁定/重跑哪些 baselines。将 `qwen3.6-flash` 标为同一榜单锚点的 hosted API alias，不增加模型候选；不得发起真实 API 请求。
+
+研究笔记：[`qwen3.6-35b-a3b-source-notes.md`](research/model-update-2026-09/qwen3.6-35b-a3b-source-notes.md)。
+
+## 2026-09 Qwen3.7 Max：环境扩展与长程 Agent 证据审计
+
+1. 按 Qwen 官方博客画出 `Task × Harness × Verifier` 训练矩阵；固定 task set，分别留出未见过的 harness/verifier 组合和 OOD 任务域。写出如何检测 task leakage、verifier 难度漂移与只在已见组合上提升。
+2. 把博客的“环境多样性带来可预测增益”转成可证伪实验：记录环境数量/质量分层、训练配比、seen/unseen 组合、run-level 结果、置信区间和失败类型；说明为什么只报告一个子集相关性不足以宣称通用 scaling law。
+3. 为 model-assisted reward-hacking monitor 构造合成轨迹，运行 candidate-pattern → replay → counterexample mining → versioned-rule 流程；使用人工标注 holdout 计算 precision、recall、false-positive rate 和漏检类别。说明新增规则需冻结版本并回放历史轨迹，不能只报告规则数或命中数。
+4. 根据 M890 案例复原 kernel 优化时间线：Split-KV/online softmax、消除同步/临时分配、adaptive split、reduction batching、MTP `γ=4` 特化；将每个阶段绑定正确性 gate、设备/编译器、baseline 和 workload。分别重算“相对 Triton 的 10.0x 几何平均”与“KernelBench L3 的 eager median / torch.compile win-rate”，禁止把二者混成同一分数。无需下载权重或运行真实 API。
+5. 建立 dated-snapshot manifest：将 AA `qwen3-7-max`、Model Studio May-20 alias、May-17 reasoning-only early snapshot 和 June-08 image/video snapshot 分行；标注 context、mode、region/scope、工具能力与来源时间。演示 `preserve_thinking` 只有在 transcript 被回放时才保留历史，不等于跨会话 memory。
+
+研究笔记：[`qwen3.7-max-source-notes.md`](research/model-update-2026-09/qwen3.7-max-source-notes.md)。
+
+## 2026-09 Qwen3.6-35B-A3B：VHD-Play 机制先行的环境与 reward 审计
+
+1. 画出 environment-first 与 mechanism-first 两条依赖链，标注 `M(θ)`、solver、`zθ=(u*,u₀)`、`D(θ)`、`E(θ)`、policy trajectory 和 reward 的构造先后。回答：哪一步消除了 learned judge？哪一步仍可能引入 environment implementation bug？
+2. 为一个小型两期库存问题手算 optimum 与默认策略结果，按 `r=clip((u-u₀)/(u*-u₀),0,1)` 计算三条轨迹的终局分数；再讨论 `u*=u₀`、负向目标、数值容差和部分可观测导致 optimum 不可达时应怎样设计族级 admission 规则。不要把扩展设计误写成论文已披露的实现。
+3. 给生成环境实现 C1 executability、C2 default-region、C3 optimum/replay checks；分别注入异常工具、默认策略超界、reward 与 reference 不一致、重复运行不稳定，验证拒绝/重试行为。另说明为什么 8/11 family 的 replay audit 不等于全体 environment 的形式化证明。
+4. 根据论文分区复算 2,200 train + 300 in-domain held-out + 800 unseen-family evaluation，并画出按机制族隔离的划分；检查参数 seed、语料 passage、工具 schema 与任务模板是否会跨 split 泄漏。把 34-step、34,816 scored rollouts、one run/one evaluation seed 一并写进可复现 manifest。
+5. 解释 Base 的 written-out/agentic `0.962/0.204` 与训练后 `0.992/0.815` 的差异；分别指出能支持什么“stateful policy gap”结论、不能证明什么普适 scaling law。把 Qwen3.7-Max 标成比较模型而非本论文受训对象。
+
+研究笔记：[`qwen3.6-35b-a3b-source-notes.md`](research/model-update-2026-09/qwen3.6-35b-a3b-source-notes.md#9-vhd-play先求解机制再生成可交互环境)；arXiv：[2609.27321v1](https://arxiv.org/abs/2609.27321v1)。
+
+## 2026-09 Claude Sonnet 5.5：协议迁移与安全评测账本
+
+1. 写出 `disabled` → `between_tools` 迁移的 request contract matrix；覆盖合法 effort、400 条件、无工具任务、工具间进度 block、`display` 解析和 assistant-turn replay。只依据官方 schema，不调用未授权 API。
+2. 建立 thinking-block replay ledger，分别模拟 producer model 不兼容、system/tools 前缀改写、跨账号回放和 compaction 后保留 tail；每种用例选择 `replay`、`drop` 或 `reject`，并记录 `input_transformations`/错误及原始 block hash。
+3. 构建 refusal/fallback 路由矩阵：`cyber`、`frontier_llm`、`bio`、`reasoning_extraction`、`general_harms`。验证非允许类别不会自动重试；对允许的 fallback 保存 requested/actual model、category、permission set、副作用状态和 verifier。
+4. 为 Gray Swan IPI 与 Coding Shade 编写仅含汇总计数的 benchmark manifest，分别记 attempt-level 与 scenario-level 分母、fallback/probe 覆盖、实际执行模型、thinking 可见性及置信区间。不要生成攻击 payload，也不要把发布方结果称为独立复现。
+5. 重述 Terminal-Bench 4.0 `70.6%` 和 OSWorld 2.1 `80.1% partial / 43.5% strict` 的所有必要条件；指出 resource-adaptive benchmark revision、server-side compaction、grader model 和 fallback 如何影响可比性。
+
+研究笔记：[`claude-sonnet-5.5-source-notes.md`](research/model-update-2026-09/claude-sonnet-5.5-source-notes.md)；正式章节：[第二十册第 24 章](book-20-agent-harness-runtime/chapters/24-claude-sonnet-5.5-thinking-state与安全路由.md)。
+
+## 2026-09 Kimi K3：DSpark serving 验收边界
+
+1. 为同一 K3 请求批次画出 `draft length -> verify query length -> k+1 graph capture -> offsets/masks -> KDA state capacity` 的账本。覆盖不同请求长度、prefill/decode row 和超界 profiling dummy，指出哪些应执行、mask 或拒绝；不得用固定长度 scheduler 的 token-count 等式替代请求状态。
+2. 设计 cache rebind 故障注入：记录每层 buffer 地址、context-pointer cache key、graph capture 生命周期和 draft rollback。地址变化时验证旧 pointer 被清除并重建；分别检查 graph capture 内更新是否被拒绝，以及地址复用是否导致错误命中。
+3. 建立版本/benchmark manifest，对照 vLLM `v0.30.0` stable、adaptive DSpark main commit、MI355X nightly recipe、SiTUv2/AITER 版本与 InferenceX lane。将真实 block verification 和 synthetic acceptance sweep 分开，逐项记录 target verification、任务 verifier、hardware、dtype/layout 与结果来源；synthetic 结果不得作为正确性、线上接受率或独立复现。
+
+研究笔记：[`kimi-k3-source-notes.md`](research/model-update-2026-09/kimi-k3-source-notes.md)；教材：[第二十一册第 88 章](book-21-transformer-architecture-evolution/chapters/88-kimi-k3-kda-stable-latentmoe与百万token-agent.md)与[第二十四册第 32 章](book-24-llm-inference-engine/chapters/32-multi-turn-tool-use和agent-serving支持.md)。
+
+## 2026-09 Kimi K3：DFlash draft 与 target-feature 注入
+
+1. 根据固定 DFlash config，画出 93 层 K3 target 中六个 `target_layer_ids` 的 hidden output 如何经 projection 写入 6 层 draft 的 K/V；标记每个 tensor 的 owner、dtype、cache lifetime 和 block iteration。
+2. 用 block size 8 构造 anchor + 7 masked positions 的训练样本，写出块内双向、块间隔离的 attention mask；再用 `w_k=exp(-(k-1)/gamma)` 比较第 1、4、8 个位置的 loss 权重。把这是论文训练机制还是本地 toy 结果分别记录。
+3. 建立 DFLASH serving manifest：K3 target revision、DFlash revision、`target_layer_ids`、block size、draft/target backend、hardware、graph bound、真实 acceptance 和拒绝回滚。用一个错误的 `+1` layer mapping 注入 capture mismatch，并说明为什么 shape 通过也不能证明层语义正确。
+4. 对照公开 HF draft README 与 SGLang PR #40794 的 benchmark：区分公开 checkpoint、未公开 production checkpoint、stable `v0.5.20` 和 main source；禁止把 95.7% GSM8K 或 synthetic/发布方 acceptance 写成本地复现。
+
+## 2026-10 Gemini 4 Argon：发布方证据账本
+
+1. 将 AA `gemini-4-argon`、Google The Keyword、DataCurve 缺失行分别登记为榜单、官方发布和负证据。
+2. 对 1M output、DeepSWE 77.9%、AutomationBench 51.3%、LVBench 91.7% 和 CWE-bench 68% 记录任务集、harness、预算、verifier、分母和证据等级。
+3. 为 cyber vulnerability workflow 设计权限、沙箱、出站控制、人工审批、artifact digest 和修复 verifier 字段；不执行真实攻击或调用 endpoint。

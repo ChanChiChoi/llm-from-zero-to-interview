@@ -1,5 +1,7 @@
 # 大模型知识图谱
 
+GPT-6.1 Sol -> Artificial Analysis canonical -> OpenAI model contract -> reasoning.mode standard/pro -> reasoning.effort low..max -> reasoning.context current_turn/all_turns -> opaque reasoning replay -> Responses tool calling -> encrypted compaction item -> replay ledger/verifier
+
 ## 核心依赖链
 
 ### 语言模型链
@@ -324,6 +326,17 @@ GLM-5.2 -> DSA -> IndexShare -> shared top-k index -> MTP -> speculative decodin
 
 该分支把官方继承声明、SAO 论文公开算法和产品侧实现分开；论文提供 single-rollout/DIS/critic/Skip-Observation GAE 证据，但不等于 GLM-5.3 专属 compaction 或完整 post-training recipe。
 
+### Compaction-aware RL trajectory：关联框架实现，不是 GLM-5.3 内部算法
+
+`GLM-5.3 official docs -> inherited SAO-with-compaction (high-level claim only)`
+`THUDM/slime@8ee9c1e -> session message tree -> token-prefix alignment -> short-drift realign / history-divergence fork -> pre/post-compaction Samples`
+`rollout token IDs + logprobs -> provenance-preserving training target -> prompt/tool/environment loss_mask=0 -> sampled model tokens loss_mask=1`
+`shared assistant prefix -> train once -> sibling context loss_mask=0 -> shared rollout_id`
+`fork_threshold_tokens=1,024 -> generic re-render/token-drift gate != GLM-5.3 compaction trigger`
+`customization/README reward/K claim <> trajectory.py + generate.py + tests full reward/sample -> pinned-source discrepancy; intended semantics unresolved`
+
+此实现能解释 compaction 对 Agent RL 样本切分、loss provenance 和 rollout 分组的影响；它不证明 GLM-5.3 实际使用这段 adapter，也不提供 Z.ai 摘要算法。reward 分配文档与实现的冲突必须保持显式。
+
 ### GLM-5.3 继承的 SAO 算法边界
 
 GLM-5.3 -> official inheritance claim -> GLM-5.2 `SAO with compaction`
@@ -358,9 +371,18 @@ Claude Opus 5 -> 1M Context -> 128K Max Output -> 300K Batch Output -> Adaptive 
 
 上述链路只连接 Anthropic 官方模型目录公开的接口、平台和运行时字段；参数量、训练架构、训练配方、后训练算法和独立 benchmark 复现仍待核验。
 
+### Claude Opus 5.5
+
+Claude Opus 5.5 -> On-demand Compaction (`compact-2026-09-04`) -> Signed Summary Block + Conditional Preserved-Thinking Tail
+Claude Opus 5.5 -> Threshold Compaction (`compact-2026-01-12`) -> `context_management.edits` -> Pre-compaction Thinking Dropped
+Claude Opus 5.5 -> Model Binding != Prefix Binding -> Account-age-dependent Prefix Check -> `error` / `drop_block`
+Claude Opus 5.5 -> Platform/Beta Compatibility Matrix -> Append-only Replay -> Agent Harness Trace and State Recovery
+
+以上是 Anthropic 文档描述的 API/runtime 合同；本项目没有调用 Messages API。参数量、训练架构、训练配方和生产端点行为仍待独立证据。
+
 ### Claude Fable 5.1
 
-Claude Fable 5.1 -> 1M Context -> Adaptive Thinking (always on) -> Default High Effort -> Preserved Thinking -> Thinking Block Compatibility -> Thinking Block Invalidation on History Edit -> Forced Tool Capability Error -> Per-message Effort (beta) -> Turn-scoped System Message (beta) -> Tool Progress Updates (`display: "updates"`) -> Structured Tool Result -> Content Provenance -> Tool Host/Sandbox -> Long-horizon Harness Evaluation
+Claude Fable 5.1 -> 1M Context -> Adaptive Thinking (always on) -> Default High Effort -> Preserved Thinking -> directional model binding (reads Opus 5.5 only on Claude API; reverse unreadable) -> independent prefix binding -> model_binding_mismatch vs prefix_binding_mismatch -> Forced Tool Capability Error -> Per-message Effort (beta) -> Turn-scoped System Message (beta) -> Tool Progress Updates (`display: "updates"`) -> Structured Tool Result -> Content Provenance -> Tool Host/Sandbox -> Long-horizon Harness Evaluation
 
 Claude Fable 5.1 -> Mythos 5.1 -> Same Underlying Model -> Different Safeguards/Access Plan -> benchmark and refusal policy boundary -> not a separate architecture claim
 
@@ -452,6 +474,12 @@ Gated Residual -> Per-branch RMSNorm -> Elementwise Read Gate -> Branch-scalar W
 
 N-gram Embedding -> Local Token Address -> 20M Slots / 51B Parameters -> Host-memory Prefetch -> Random Read/Bandwidth/Hit-rate Trade-off; this is neither RAG nor KV cache
 
+QSA serving -> QSA activations/QKV + primary KV BF16 (current NVIDIA vLLM path) -> KV quantization/context-parallel restrictions -> compressed indexer-key cache BF16 or FP8 E4M3 -> dtype dimensions must be tracked separately from FP8 weight dtype
+
+SGLang QSA indexer -> alternate CUDA stream -> overlaps current-stream Q/K/V preparation under specific graph-capture/token conditions -> attention launches afterward; not overlap with final attention kernel
+
+PLE/N-gram capacity -> device table vs pinned-host/UVA vs file-backed mmap -> SGLang source comment ~47.7 GiB FP8 table / vLLM recipe H100 80GB headroom warning -> profile page faults, prefetch, bandwidth and end-to-end latency
+
 Muon + AdamW/Adam -> Semantic Parameter Groups -> Per-matrix Newton-Schulz vs Embedding/Router/Table Updates -> Fused-parameter Split -> Distributed Optimizer/Kernel Constraints
 
 Qwen3.8 -> enable_thinking / reasoning_effort / preserve_thinking -> Request Budget and Context Protocol -> Agent Quality/Latency/Unit-cost Evaluation
@@ -470,7 +498,11 @@ Qwen3.8 Max 0902 -> `1M context` -> `991K` normal input / `983K` thinking input 
 
 Thinking mode -> `tool_choice auto/none only` -> forced tool requires non-thinking path -> MultiModalConversation -> host schema/permission/confirmation -> executor receipt -> final artifact
 
-Qwen Context Cache -> explicit cache / implicit cache / session cache -> minimum 1,024 tokens -> different hit/billing/validity semantics -> revision/tokenizer/template/tenant/session key audit -> reuse or recompute decision
+Qwen Context Cache -> explicit `ephemeral` marker / implicit common-prefix matching / Responses session header -> minimum 1,024 tokens -> max 4 markers / last-four rule -> 20 content-block lookback -> 5-minute TTL/reset or provider cleanup -> `cached_tokens` usage -> reuse or recompute decision
+
+Qwen session cache -> `x-dashscope-session-cache: enable` + `previous_response_id` -> account/model isolation -> session lineage/expiry gate -> cached input accounting; `input_tokens` != necessarily cache creation + cached hit tokens
+
+Qwen cache billing -> explicit/session create `125%` + hit `10%` / implicit create `100%` + hit `20%` -> product-page dollar prices -> usage/alias/time-bound ledger, not model architecture or GPU KV guarantee
 
 QwenCloud endpoint migration -> `dashscope-intl.aliyuncs.com` -> `maas.qwencloudapi.com` -> provider adapter/transport/auth regression -> not model architecture or capability evidence
 
@@ -505,8 +537,10 @@ GLM-5.3-Flash -> EPD -> encode/prefill/decode transfer -> representation/KV/stat
 Transformers GLM5-Next -> no MTP layer; vLLM/SGLang -> serving-layer MTP recipe -> framework feature surface != checkpoint structure != target hardware acceptance
 
 SGLang v0.5.20 -> fixed GLM5Next source entry -> stable source evidence -> full-weight/target-hardware gates remain open
+vLLM v0.29.0 tree -> no `vllm/models/glm5next/` -> v0.30.0 stable tree `118165530271cb3aa749d77bf927499957db2bd4` -> cache/KDA/MTP/multimodal files verified -> fixed-main diffs recorded -> wheel/load/hardware acceptance gates
 SGLang main -> projection fusion + KDA prefill metadata + mHC boundary fusion + AMD FP8/Quark MXFP4 -> mutable upstream evolution -> not stable release proof
-vLLM main `glm5next` -> IndexerCache(pool metadata) + TailCache(raw BF16 K/gate tail) + KDA state + MTP top-k/slot mapping -> multi-state manifest -> recovery/precision/profile gate
+vLLM v0.30.0 stable `nvidia/attention.py` -> IndexerCache(pool metadata) + TailCache(raw BF16 K/gate tail); stable `nvidia/kda.py`/`mtp.py` -> KDA state + MTP top-k/slot mapping -> stable source evidence
+vLLM fixed main -> model-specific sparse indexer + pool-length workspace + RoPE remap + stride-aware tail kernel + Quark scale mapping -> source deltas, not inherited by stable -> cache recovery/precision/profile gate
 vLLM v0.29.0 tree -> no `vllm/models/glm5next/` in fixed snapshot -> negative stable-tag evidence -> recipe `0.29.0+` is not proof of stable GLM5Next path
 
 GLM-5.3-FlashX -> associated service endpoint -> speed/quota metadata -> not a new Artificial Analysis/DataCurve model candidate
@@ -553,7 +587,15 @@ vLLM V3.2-Exp recipe -> DeepGEMM dependency -> `DP=8, EP=8, TP=1` recommendation
 
 V3.2 implementation evidence -> model artifact / inference demo / kernel / serving recipe / eval harness separation -> q_lora rank conflict audit -> benchmark attribution gate
 
-DeepSeek V3.2 current AA page -> 685B/37B, 128K, Intelligence Index 16.0435, price 0.28/0.42 -> third-party directory/provider fields -> 9/20 648B vs 9/21 685B is page drift, not model revision
+DeepSeek V3.2 current AA page -> 685B/37B, 128K, Intelligence Index 16.0435, price 0.28/0.42 -> third-party directory/provider fields -> 9/20 648B vs 9/21 and 9/28 685B is page drift, not model revision
+
+DeepSeek V3.2 Search Agent -> tool-trajectory usage >80% context -> Summary / Discard-75% / Discard-all -> serial context-management strategies -> token-budget extension vs evidence-retention trade-off
+
+DeepSeek V3.2 Search Agent -> Parallel-fewest-step -> N independent trajectories -> select trajectory with fewest steps -> parallel test-time-compute baseline
+
+DeepSeek V3.2 report §4.4 -> >20% cases exceed 128K -> BrowseComp Pass@1 51.4 without management / 67.6* with management -> author-reported commercial-search Agent harness result -> not DataCurve or bare-model score
+
+Summary strategy -> average 364 steps / reported “up to 60.2” -> paper-specific result wording -> no percent interpretation; figure curves not visually audited
 
 V3.2-Exp README -> V3.1-Terminus aligned comparison -> indexer non-interleaved RoPE / MLA layout correction -> implementation reproducibility evidence
 
@@ -639,6 +681,16 @@ Cyber safeguards -> policy detection/blocking + Cyber Verification Program -> au
 
 Claude Opus 4.7 -> DataCurve no exact `mini_swe_agent_claude_opus_4_7_*` row -> no migration of other Claude Agent scores -> runtime/control-plane evidence boundary -> no internal architecture inference
 
+### Claude Opus 4.8
+
+Dynamic Workflows -> prompt-conditioned orchestration scripts outside the conversation -> parallel subagents -> independent checks + adversarial refutation -> persisted progress/checkpoint resume -> coordinated answer; token cost + first-run confirmation + admin policy remain host controls
+
+Opus 4.8 System Card -> blocking orchestrator / fixed team / async-subagent harnesses -> BrowseComp + ProgramBench score/token/derived-latency curves -> benchmark harness result, not Dynamic Workflows SLO or raw model score
+
+Short off-policy coding transcript -> proactive failure disclosure evaluation (`3.7%` missed events in the stated setup) -> external tests + artifact verifier -> honesty metric must retain task/prompt/context definition
+
+AA `claude-opus-4-8` -> historical anchor now deprecated to `claude-opus-5`; DataCurve `xhigh/max + mini-swe-agent` -> keep configs/harnesses separate -> no parameter/architecture/full-recipe inference
+
 GLM-5.3 -> Z.ai Code Bench -> completion/checklist accuracy -> output-token efficiency -> private benchmark evidence boundary
 
 GLM-5.3 -> executable long-horizon environment -> judge agent -> reference-free verifier -> solver trajectory -> reward-shortcut audit -> oracle/no-op/unsolved-state -> binary reward gate
@@ -716,6 +768,18 @@ agentic video -> fewer irrelevant media tokens hypothesis -> extra processing st
 Gemini 3.5 Flash-Lite -> Model Card says based on Gemini 3.1 Flash-Lite -> architecture/training/hardware/software point to predecessor -> version dependency boundary -> no independent architecture inference
 
 Lite Model Card benchmark -> Google publisher harness/price/safety evidence -> AA Intelligence Index -> third-party configuration evidence; DataCurve exact row absent -> separate benchmark ledgers -> no score concatenation
+
+### Kimi K2.7 Code
+
+Artificial Analysis kimi-k2-7-code + DataCurve mini_swe_agent_kimi_k2_7_code_default -> 同一 canonical 模型的榜单与 harness 证据
+Kimi K2.7 Code -> 1T total / 32B active / 384 routed experts top-8 / 1 shared -> total-active-resident-communication-workspace ledger
+Kimi K2.7 Code -> native INT4 group-size-32 + quantization ignore list -> raw packed lower bound is not checkpoint size or HBM peak
+Kimi K2.7 Code -> MLA kv_lora_rank 512 + RoPE key dim 64 + 256K context -> explicit cache-shape proxy -> target runtime layout remains unverified
+Kimi API default max_tokens 32K vs 256K context -> request generation budget != context window
+Kimi API forced thinking + fixed sampling + auto/none tool_choice -> API contract != internal architecture or training recipe
+assistant reasoning_content + tool_call ID -> host authorization/execution receipt/idempotency/verifier -> replay continuity is not persistent memory
+image/video token estimate + keyframe sampling + ffprobe/ffmpeg host tool -> multimodal cost/context ledger -> no direct local file access by model
+Kimi K2.7 Code Highspeed -> official same-model service route statement + limited supply -> no new canonical model candidate; provider/latency measurement remains separate
 
 ### Kimi K2.6
 
@@ -847,11 +911,21 @@ Gemini 3.8 Flash -> `store=false` / 55-day paid / 1-day free / delete -> lifecyc
 
 Gemini 3.8 Flash -> `max_output_tokens` -> thought + visible output hard cutoff -> `incomplete`/truncation risk -> use thinking-level routing for cost control
 
-Gemini 3.8 Flash -> Thinking signature scope vs Tool-combination signature scope -> official documentation field-range conflict -> preserve returned opaque fields and call/result id -> endpoint/schema capability probe
+Gemini 3.8 Flash -> Thinking/Tool-combination prose vs current API reference -> signature required/optional and `function_response.id` vs `function_result.call_id` conflicts -> preserve raw opaque fields and separate wire schemas -> endpoint capability probe
+
+Gemini Interactions -> current API reference + pinned `python-genai` `_gaos` Step schema -> custom-function signatures undeclared, `ThoughtStep.signature` optional, Google Search signatures optional -> Interactions `_gaos` base `extra="allow"` vs separate `_common.BaseModel` `extra="forbid"` -> schema declaration is not endpoint prohibition -> lossless forward-compatible replay
+
+Gemini Interactions -> lenient open Step union + `UnknownStep.raw` -> unknown step/payload forward compatibility -> preserve raw event and version manifest -> no silent lossy downgrade
 
 Gemini 3.8 Flash -> tool context circulation -> built-in/custom server/client tools -> host permission/executor/verifier -> `validated` mode and side-effect audit
 
 Gemini 3.8 Flash -> replay toy -> local protocol evidence -> state/signature/id/SSE/retention/modality checks -> not real API/model/SLO evidence
+
+Gemini 3.8 Flash -> Interactions formal chapter (Book 20, Chapter 23) -> provider history vs host task ledger -> stateful/stateless recovery + idempotent tool effects -> capability probe and artifact verifier
+
+Gemini 3.8 Flash video input -> static 1-FPS context or agentic timeline navigation -> `processing_call.id` / `processing_result.call_id` -> query-conditioned transcript/frame/audio evidence -> media permission, timestamp provenance, TTFT/token/call-count evaluation
+
+Agentic video publisher claim (up to ~88% fewer tokens / ~7% higher quality on long-form content) -> workload-specific documentation result -> possible TTFT regression below 5 minutes -> independent fixed-video ablation needed; not an architecture/training claim
 
 ### DeepSeek V4 Pro：实现证据扩展
 
@@ -870,6 +944,14 @@ FP4/FP8 block quantization -> TileLang GEMM/online softmax/Sinkhorn -> dtype/sca
 DSML encoding -> tool role / `<tool_result>` / string-vs-JSON parameter -> parser -> schema/permission/executor/verifier separation
 
 `MP=8` conversion example -> artifact-specific parallel configuration -> not universal production deployment claim
+
+DeepSeek V4 Flash -> Full/Compressed KV + SWA slots -> chunked-prefill eviction -> shared-prefix branch may hit Full KV but miss branch-point SWA state -> false/partial prefix reuse
+
+SGLang radix-tree branch-point caching -> preserve reusable SWA state across sibling-request fork -> defer/perform out-of-window cleanup at safe points -> hybrid cache correctness + memory lifecycle
+
+V4 Flash serving benchmark -> PR #34565 shared-prefix workload / PR #30805 B200 CSA-HCA unit kernel / PR #29927 SM120 indexer-MoE path -> distinct workload, hardware, baseline and metric -> no cross-PR aggregate speedup
+
+SGLang source/release evidence -> full checkpoint load -> target-hardware correctness/profile -> cache recovery + Agent verifier -> production p95/p99 and unit-success-cost gate
 
 ### DeepSeek V4.1-Flash：deepseek-recipe 协议实现
 
@@ -919,6 +1001,10 @@ Tool schema -> deferred tool search / Programmatic Tool Calling -> model intent 
 1.05M context -> 922K maximum input + 128K maximum output + reasoning/tool items -> 272K whole-request price threshold -> unit success cost
 
 OpenAI official page 403/timeout/DNS -> access-path evidence -> preserve historical official snapshot dates -> no claim of model absence/API change -> wait for fresh official verification
+
+2026-09-23 `7890` -> AA Luna current provider measurement -> speed drift only -> DataCurve exact row unchanged
+`gpt56_luna_state_replay_audit.py` -> `current_turn/all_turns` -> opaque replay -> function lineage/idempotency -> canonical compaction -> cache miss -> hosted/client tool-search ownership -> artifact verifier
+local protocol toy -> synthetic contract evidence -> not endpoint capability/model quality/full weight/hardware/SLO
 
 ### Claude Sonnet 5：System Card 与 adaptive Agent
 
@@ -1043,6 +1129,8 @@ forced tool_choice any/tool -> 400 -> auto + strict tool/structured output -> fi
 computer_20251124 -> provider migration -> computer_toolset_20260801 -> platform capability manifest
 on-demand compaction + inline tool_addition -> signed summary/tool schema update -> cache/state replay gate
 fast mode -> same weights/faster inference config -> usage.speed + independent rate limit -> latency/cost ledger
+Opus 5.5 Messages API -> 128K synchronous output cap -> Batch `output-300k-2026-03-24` beta -> endpoint-scoped budget, not a model checkpoint change
+Opus 5.5 prompt cache -> 512-token minimum + read/write price tiers -> request cost ledger -> separate cache effects from model reasoning cost
 
 ### GPT-6 Sol：预算与 Agent runtime
 
@@ -1058,12 +1146,22 @@ server-side compaction -> `context_management.compact_threshold` -> encrypted co
 standalone `/responses/compact` -> full window -> canonical next context -> no arbitrary pruning
 272K input threshold -> whole-request input/cache 2x + output 1.5x -> Batch/Flex 50% -> Fast mode 2x -> serving cost ledger
 GPT-6 Sol API/runtime evidence -> model contract/observable state -> does not prove parameters, architecture, training recipe or production SLO
+GPT-6 Sol -> mode/effort orthogonality -> configuration_update placement -> standard single-agent budget control, not checkpoint swap
+`configuration_update` -> effective effort persists until override -> response `reasoning.effort` remains request-level telemetry -> replay history to recover active budget
+stable request config + appended `configuration_update` -> preserve prompt prefix -> cache-friendly state transition, not guaranteed cache hit
+GPT-6 Sol -> 272K whole-request threshold -> input/cache 2x + output 1.5x -> cache prefix/compaction cost ledger
+GPT-6 Sol -> function call -> permission -> executor receipt -> artifact verifier -> idempotent replay and side-effect audit
+GPT-6 Sol -> `gpt6_sol_contract_audit.py` -> local_protocol_toy -> protocol exercise, not endpoint/model-quality evidence
+GPT-6 Sol/Luna -> EU residency -> Standard processing + Responses/Chat Completions -> endpoint × region × processing_mode capability gate
+`Standard processing` != GPT-6 `reasoning.mode=standard` -> separate deployment fields -> avoid false eligibility inference
+regional storage != regional processing -> system data excluded + Remote MCP third-party policy -> customer-content boundary
 
 GPT-6 Luna -> Artificial Analysis `gpt-6-luna` canonical -> max configuration -> no exact DataCurve `mini_swe_agent_gpt_6_luna_*` row -> no Agent-score migration
 GPT-6 Luna -> focused/high-volume contract -> task-shape router -> separate sibling ledger from GPT-6 Sol
 GPT-6 Luna -> 1.05M context / 922K maximum input / 128K maximum output -> reasoning + tool + compaction budget
 GPT-6 Luna -> 272K whole-request threshold -> input/cache 2x + output 1.5x -> Batch/Flex 50% -> Fast mode 2x -> unit-success-cost ledger
 GPT-6 Luna -> GPT-6 family runtime docs -> `standard/pro` mode + `none`--`max` effort -> `configuration_update` -> later-turn budget change, not checkpoint swap
+`configuration_update` -> incompatible with automatic compaction/truncation and standalone `/responses/compact` -> explicit `compaction_trigger` then reinsert before next user -> replayable budget state
 GPT-6 Luna -> Responses tools -> capability surface -> permission -> executor -> verifier -> model intent is not host authority
 GPT-6 Luna -> official model/runtime evidence -> does not prove parameters, architecture, training recipe or production SLO
 
@@ -1077,3 +1175,123 @@ Responses API -> stateless semantic SSE + `sequence_number` + terminal events ->
 `function_call_output` / `custom_tool_call_output` -> text/image observation -> client tool replay -> permission -> executor -> verifier
 `/beta strict=true` -> JSON Schema enforcement -> structure valid -> host authorization -> execution -> business verifier
 API contract -> reference/runtime source -> full-weight load -> FP4/FP8 quality + Top-K recall -> DSpark verify/rollback -> hardware/profile/SLO
+
+### DeepSeek V4.1-Flash Harness preview
+
+DeepSeek Harness Preview -> provider ID + credential redaction -> stable provider/session identity -> capability probe
+session log -> actual model + workspace/tool/runtime events -> replay manifest -> not model-internal memory
+Cordis plugin tree -> dependency check + listener/resource cleanup -> lifecycle gate -> external effect cleanup
+MCP bridge -> `mcp__<server>__<tool>` namespace + secret/`DSH_*` env filtering -> reconnect/rediscovery -> registry unregister after budget exhaustion
+GitHub review webhook -> signature verification -> asynchronous `202` admission -> duplicate delivery risk -> delivery dedupe/session policy
+inbound webhook secret -> request authentication -> separate outbound GitHub permission -> executor -> artifact/verifier
+model tool call -> Harness admission -> permission -> executor receipt -> artifact digest -> business verifier
+`deepseek_harness_protocol_audit.py` -> provider/session/plugin/MCP/webhook toy -> `local_protocol_toy` -> not V4.1 architecture/quality/SLO evidence
+
+### Kimi K3 / vLLM v0.30.0 runtime evidence
+
+Artificial Analysis + DataCurve Kimi K3 anchor -> vLLM v0.29.0 stable registry/model entry -> v0.30.0 tagged implementation evolution -> PyPI wheel metadata -> installation/full-weight load -> numerical/cache recovery -> target hardware profile -> DSpark acceptance/production SLO
+
+v0.30.0 streamed `load_weights` -> `process_weights_after_loading` -> finalize only after complete stream -> avoid premature/repeated MoE weight transform
+v0.30.0 IPC weight-cache daemon -> transformed MegaMoE buffers -> zero-copy reuse -> raw packed parameter release -> ownership/lifetime/fallback audit
+Kimi K3 PP + AttnRes + DSpark/MTP -> auxiliary hidden states across PP -> draft/target/accept-reject state -> explicit boundary and rollback manifest
+DSpark context-KV -> cache dtype + per-layer quantization scale + uniform block layout gate -> grouped insert or fallback
+KDA state -> `mamba_cache_dtype` + `mamba_ssm_cache_dtype` -> recurrent-state manifest distinct from MLA KV cache
+v0.30.0 release/source hash -> runtime implementation evidence -> not Kimi training novelty, local wheel install, numerical correctness, target-hardware benchmark, or production acceptance
+
+### Claude Opus 5 / System Card Agentic Safety
+
+Artificial Analysis `claude-opus-5` + DataCurve `mini_swe_agent_claude_opus_5_*` -> canonical model/config anchor -> AA provider metric and DeepSWE harness result remain separate
+2026-08-19 System Card changelog -> Cowork harness mismatch discovered -> rerun old model baselines -> remove unsupported thinking-disabled condition
+Saturated ART -> indirect prompt injection benchmark + adaptive red-team + live bounty -> attacker budget/scenario/version ledger
+IPI / Shade / bounty -> attempt-level ASR + scenario-level ASR -> preserve separate numerators, denominators, confidence/noise
+untrusted tool result -> input-side prompt-injection probe -> model context boundary
+candidate dangerous tool call -> action-side classifier -> outbound action gate -> Auto mode = product/system result, not bare-model robustness
+System Card RSP -> Opus 5 assessed CB-1 / not CB-2 -> publisher risk assessment + ASL-3 controls -> not independent guarantee or zero risk
+System Card PDF -> parsed with `pdf_text_extract.js` -> 2026-08-19 revision evidence -> official self-report, not independent replication
+
+### Qwen3.5-Omni：ARIA、AuT 与显式多模态时间戳
+
+Artificial Analysis `qwen3-5-omni-plus` / `qwen3-5-omni-flash` -> same Qwen3.5-Omni family configurations -> AA anchor; DataCurve no exact `mini_swe_agent_qwen3_5_omni_*` -> no transfer of other Qwen Agent scores
+Qwen3.5-Omni Technical Report v2 -> Hybrid MoE Thinker + Talker -> multimodal context plus current-turn text -> RVQ speech tokens
+Qwen3.5 tokenizer -> byte-level BPE 250K vocabulary (from 150K) -> publisher-claimed 10–60% encode/decode efficiency in most languages -> not uniform prompt-token reduction
+AuT -> ~40M hours Qwen3-ASR-generated audio-text pairs -> 16x Conv2D downsampling -> 6.25 Hz / ~160 ms -> token granularity != end-to-end latency
+TM-RoPE temporal/height/width -> explicit second-valued video/audio-video timestamp + random audio timestamp -> 160 ms aligned temporal IDs -> long-video grounding still requires sampling/replay evaluation
+ARIA -> single interleaved text/speech stream -> per-prefix speech:text ratio capped by item-level global ratio -> adaptive cross-language alignment -> independent loss/ablation unverified
+RVQ -> MTP residual codebooks -> causal streaming codec -> waveform chunks -> network/player/cancel state are separate serving stages
+S1 frozen LLM + encoder/adapters -> S2 ~4T mixed tokens -> S3 32,768 -> 262,144 -> long-audio/video curriculum
+100M+ audio-visual / 40M AuT / 20M+ Talker hours -> different dataset/training-stage scopes -> do not add without dedup/overlap evidence
+Model Studio `qwen3.5-omni-plus` + `stream=True` -> hosted API contract -> not model-architecture evidence or live endpoint probe
+Internal vLLM first-packet results -> publisher measurement under deployment-specific resources -> Plus/Flash not strict horizontal comparison -> not local p50/p99/SLO
+
+### Qwen3.6-35B-A3B：历史 thinking serialization 与混合架构
+
+Artificial Analysis `qwen3-6-35b-a3b` / `qwen3-6-35b-a3b-non-reasoning` -> 同一 Qwen3.6-35B-A3B 模型的两个 reasoning 配置 -> 单一 canonical anchor
+DataCurve current snapshot -> no exact Qwen3.6 Agent row -> no migration from other Qwen variants
+Qwen3.6 -> 40 layers -> 3×Gated DeltaNet + 1×Gated Attention -> each layer MoE -> 256 experts / 8 routed + 1 shared -> 35B total / 3B active
+Qwen3.6 `preserve_thinking` -> historical assistant reasoning blocks serialize into prompt -> input transcript contract -> token/context/KV cost
+Qwen3.6 `enable_thinking` -> current generation prefix/mode -> independent control from history serialization
+preserved thinking -> caller must continue supplying history -> not server-side cross-session memory -> durable facts belong in explicit workspace/database/checkpoint
+Model Studio top-level flags vs vLLM/SGLang `chat_template_kwargs` -> endpoint capability/schema gate -> do not blindly reuse request shape
+262,144 native context -> static YaRN factor 4 up to ~1,010,000 -> extended positional configuration != long-context recall quality or API limit
+Qwen3.8 Flash-Next QSA/Gated Residual/N-gram/Muon -> version-bound evidence -> do not attribute to Qwen3.6
+Qwen official Qwen3.6-35B-A3B blog -> SWE-Pro task revision + Terminal-Bench/OpenCode subset conditions -> publisher score must stay bound to task revision, harness, resources, repeats
+Qwen Agent benchmark -> TAU3 GPT-5.2 low-reasoning user simulator + BM25 / VITA judge migration Claude-3.7-Sonnet -> Claude-4-Sonnet / MCPMark GitHub-MCP v0.30.3 + 32K Playwright truncation / MCP-Atlas Gemini-2.5-Pro judge -> evaluator/toolchain version is part of the measured system
+Qwen3.6-35B-A3B checkpoint -> Bailian `qwen3.6-flash` API alias -> same pre-existing AA anchor, not a new model discovery
+Qwen3.6 blog timestamp 2026-04-15 +08 vs AA/README date 2026-04-16 -> source-specific date ledger -> do not silently reconcile
+
+### Qwen3.6-27B：dense hybrid 与 GDN Tree-Scan serving
+
+Artificial Analysis qwen3-6-27b + non-reasoning config -> one Qwen3.6-27B anchor -> DataCurve has no exact Agent row
+Qwen official config -> 27B dense, 64 layers -> 3×Gated DeltaNet + 1×Gated Attention -> periodic recurrent/full-attention mixing
+Qwen3.6-27B / 35B-A3B identical chat-template hash -> preserve_thinking is family-shared transcript serialization -> not a 27B-exclusive invention or persistent memory
+Attention tree ancestry mask -> only controls which prompt/tree tokens a row sees -> insufficient for recurrent-hybrid verification
+GDN Tree-Scan external preprint -> branch-local GDN scan/replay from parent recurrent state + FA2 tree bias + MTP tree + device commit -> publish accepted-chain state only
+Partial tree acceptance -> next MTP row maps to accepted-path leaf -> never sample from rejected sibling hidden state
+Qwen3.6-27B-FP8, B=1, temperature 0.6 -> author reports +17.2% committed tokens/event / +27% token-weighted decode TPS / +4% per-request-equal TPS -> decode-only, four SWE/Codex tasks, not task-wall speedup
+40-turn p-rescore -> compare against native recurrent-oracle flip floor -> not full distribution-distance proof -> request bootstrap, more seeds, B=4 and Stage-D timing remain open
+GDN Tree-Scan arXiv/repo -> external single-author research artifact -> not Qwen official disclosure and not independently reproduced in this project
+Qwen official blog (article API body, 2026-04-22) -> publisher-reported SWE-Bench/Terminal-Bench/SkillsBench scores + Agent integrations -> benchmark footnotes remain attached; not independent evaluation or new architecture disclosure
+Qwen blog OpenClaw example -> `contextWindow=131072`, `maxTokens=16384` -> client/harness budget -> distinct from model-card native context 262144 and not proof of endpoint limits
+Qwen `preserve_thinking` -> earlier assistant thinking serialized into supplied transcript -> Agent continuity interface -> not durable cross-session memory; Bailian availability not established by article examples
+
+### Qwen3.7 Max：环境 scaling、跨框架训练与核函数 Agent
+
+Artificial Analysis `qwen3-7-max` -> exact existing Qwen anchor -> DataCurve no exact `mini_swe_agent_qwen3_7_max_*` -> do not migrate another Qwen's Agent score
+Qwen blog `Task × Harness × Verifier` orthogonal rollout components -> recombine same task with different runtime/verifier revisions -> cross-harness/verifier RL -> aim to learn policy instead of framework shortcut
+training environment diversity/quality -> publisher-reported gains on unseen OOD environments -> possible Agent scaling dimension -> no universal scaling law without task inventory, curves, runs and intervals
+unfamiliar M890 PPU -> SGLang Extend Attention + Triton reference + evaluator -> 35h / 432 kernel evaluations / 1,158 calls -> publisher reports 10.0x geometric mean vs Triton on stated workloads
+Split-KV + online-softmax partial reduction -> reduce under-occupancy; sync/allocation elimination -> adaptive split -> reduction batching -> MTP γ=4 shared K/V -> iterative hardware-feedback optimization, not architecture disclosure
+M890 10.0x vs Triton -> distinct from KernelBench L3 H100 1.98x median eager / 96% faster than torch.compile -> device, baseline, sample and statistic are distinct
+SWE RL trajectories -> candidate reward-hack patterns -> replay/validate -> counterexample mining -> evolving heuristic rule set -> publisher reports 13 rules / 1,618 cases -> no disclosed precision/recall, labels or denominator
+Model Studio `qwen3.7-max` -> May-20 text snapshot; May-17 early reasoning-only; June-08 adds image/video -> no modality backport across dated revisions
+`preserve_thinking` -> caller serializes earlier assistant reasoning into transcript -> not persistent memory; blog date (May 16) vs API metadata (May 20) remains source discrepancy
+YC-Bench simulated one-year business trajectory -> benchmark/evaluator outcome, not real revenue or deployment proof
+robot-dog demo -> Qwen3.7-Max tool proposal + Qwen-RobotNav + Qwen-RobotClaw + Qwen-Plus visual tools + embodied executor -> full system composition, not Max-internal navigation/control disclosure or new ranking anchors
+
+### Qwen3.6-35B-A3B：VHD-Play mechanism-first Agent RL
+
+Artificial Analysis `qwen3-6-35b-a3b` + non-reasoning config -> one Qwen3.6-35B-A3B anchor -> no exact DataCurve Agent row
+arXiv:2609.27321v1 comment “Qwen Technical Report” -> VHD-Play -> sample/solve `M(θ)` -> freeze `zθ=(u*,u₀)` and reward -> realize dynamics `D(θ)` -> expose stateful interface `E(θ)`
+mechanism family -> reusable sampler + reference solver + realization/replay adapter -> parameter resampling / corpus grounding -> no LLM judge on scalar outcome scoring path
+reward -> clip((policy utility − default utility)/(solver optimum − default utility), 0, 1) -> reference-based normalized terminal signal -> optimum may be unreachable under partial observation
+frozen setter -> full hidden draw + corpus passage -> generated DB/tools/instructions -> player sees only declared interface -> information-acquisition + commitment under horizon
+3,300 admitted environments -> 2,200 train + 300 in-domain held-out + 800 unseen-family test -> 3 training families / 8 unseen families / 11 total
+Qwen3.6-35B-A3B Base -> 34-step GRPO -> author-reported agentic diagnostic mean 0.204→0.815; written-out 0.962→0.992 -> one training run/one evaluation seed
+Admission audit -> 8/11 families support reference replay -> 480 execution checks / stable duplicate outcomes in reported sample -> not exhaustive proof over all families or trajectories
+Qwen3.7-Max -> extra setter / benchmark comparator -> not the VHD-Play-trained checkpoint -> do not transfer Qwen3.6 GRPO gains or call VHD-Play Max's internal recipe
+Qwen3.7 blog Task×Harness×Verifier -> separate disclosed method -> VHD-Play paper does not explicitly claim equivalence -> keep linkage thematic, not implementation attribution
+
+### Claude Sonnet 5.5：Thinking State、API contract 与发布方安全评估
+
+Claude Sonnet 5.5 -> Artificial Analysis `max + Default Fallback` -> third-party config measurement; DataCurve exact Agent row absent -> no score transfer
+`thinking.type=between_tools` -> disables upfront thinking, not every tool-progress block -> effort/provider/error compatibility gate
+thinking block -> model binding + prefix binding + account binding -> exact replay/drop/error behavior -> not UI text or durable memory
+forced `tool_choice=any/tool` -> unsupported -> strict schema / Structured Outputs alternative -> validate host executor separately
+Cyber misuse -> activation probe + lightweight classifier + second LLM classifier -> refusal/fallback routing -> `requested_model` != `actual_model`
+refusal category -> cyber/frontier_llm may fallback -> bio/reasoning_extraction/general_harms do not -> no blanket retry
+Terminal-Bench 4.0 / OSWorld 2.1 -> task/harness/effort/safeguard/fallback/verifier -> publisher-reported evaluation -> not AA/DataCurve or independent reproduction
+CoT controllability -> weak publisher evidence about monitorability -> visible-vs-hidden reasoning changes monitor result -> not proof of faithful CoT or universal honesty
+
+### Gemini 4 Argon
+
+Artificial Analysis `gemini-4-argon` -> Google The Keyword official announcement -> 1M output limit + Fairwind restricted rollout -> coding/enterprise/cyber workflows -> publisher-reported DeepSWE 77.9 / AutomationBench 51.3 / LVBench 91.7 / CWE-bench v1 68 -> safety controls and indirect prompt-injection defense -> no public model card/weights/full recipe/API probe -> no exact DataCurve row -> no metric transfer

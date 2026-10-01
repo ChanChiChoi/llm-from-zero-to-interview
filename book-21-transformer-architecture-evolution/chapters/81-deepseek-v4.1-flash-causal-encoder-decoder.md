@@ -760,6 +760,32 @@ schema_valid -> authorized -> executed -> verified
 
 运行结果中首次工具调用是 `schema_valid=true`、`authorized=true`、`executed=true`、`verified=true`；重复调用标记 `duplicate=true` 且副作用计数仍为 1；额外字段只有 `schema_valid=false`，越权路径只有 `schema_valid=true`；`network_called=false`。这是一份协议和 harness 教学证据，不是 DeepSeek endpoint 的实测吞吐、真实 strict enforcement、工具权限或模型质量证据。
 
+### 81.13.10 DeepSeek Harness：模型 API 到 verifier 的责任边界
+
+DeepSeek Harness 的官方文档是一个独立的 Agent runtime preview，不能因为它与 V4.1-Flash 同属 DeepSeek 就把 Harness 的插件机制写成 V4.1 的网络结构。正确的面试抽象是：
+
+```text
+AA canonical model
+  -> API provider / requested-served model
+  -> Harness session + agent loop + workspace
+  -> MCP/tool registry + permission + executor
+  -> artifact / business verifier
+```
+
+官方 preview 文档给出的可观察合同可以按责任分层：
+
+| 层 | 可确认的合同 | 不能由此推出 |
+|---|---|---|
+| Provider | provider ID 是持久身份；保存 key 后返回脱敏描述；协议、reasoning/image 等是 route configuration | endpoint 一定具备手工声明的能力，或 provider ID 改名不会破坏历史记录 |
+| Session | session log 记录实际使用的 model；已有请求不能静默切换 provider/model；workspace、工具和 session 版本应进入恢复账本 | session log 等于模型内部 memory，或摘要可以替代原始副作用 receipt |
+| Plugin runtime | 依赖缺失时不加载；listener/resource 由上下文清理，外部连接需要显式 cleanup；profile bundle 顺序会影响运行树 | 插件源码存在就代表已加载，或卸载天然能清理所有外部资源 |
+| MCP bridge | 工具名使用 `mcp__<server>__<tool>` namespace；子进程过滤 credential/`DSH_*` 环境变量；断线重连后重新发现，预算耗尽后注销旧工具 | MCP 内容可信、旧 tool registry 仍有效，或本地 JSONL memory 自动具备 embedding/冲突解决 |
+| GitHub review | 签名 webhook 只做入站 admission；`202` 是异步接纳；重复 delivery 可能建立多个 session；出站 GitHub 权限仍需单独授权 | `202` 等于任务完成、测试通过或 artifact verified |
+
+因此一次 Agent 任务至少要记录 `provider_id`、requested/served model、session/workspace revision、tool schema hash、permission decision、executor receipt、artifact digest、verifier result 和 delivery/idempotency key。模型发出 tool call、Harness 接纳任务、工具执行成功和业务验收通过是四个不同状态，不能用一个最终文本代替。
+
+本节对应 [`deepseek_harness_protocol_audit.py`](../../research/model-update-2026-09/code/deepseek_harness_protocol_audit.py)。它用标准库合成验证 provider secret 脱敏与稳定 ID、session model 固化、插件依赖/卸载清理、MCP 重连预算和 GitHub webhook 重复投递；运行输出 `ok=true`、`duplicate_webhook_admissions=2`、预算耗尽后工具集合为空、`network_called=false`。这只是 `local_protocol_toy`，不启动 DeepSeek Harness、不调用 API、不运行 MCP/GitHub，也不证明 V4.1 的内部架构、工具成功率或生产 SLO。
+
 ## 81.14 一个可运行的教学实验
 
 下面的代码不加载模型、不实现真实 FP4 kernel，也不声称复现 V4.1。它把本章的四个账本缩小为可检查的标准库示例：CED 激活代理、global KV 字节、E2M1 风格教学量化和草稿接受前缀。
@@ -945,6 +971,26 @@ python3 research/model-update-2026-09/code/deepseek_v41_cache_demo.py
 
    不能。它们证明专用类和可分发 artifact 进入 stable release surface；还必须独立验证完整权重加载、依赖与平台分支、数值正确性、candidate/index recall、FP4 误差、DSpark acceptance/rollback、EPD、目标硬件 profile、工具 verifier 和生产 SLO。
 
+12. **DeepSeek Harness 的 provider ID 为什么不能直接改名？**
+
+   因为 provider ID 会被已保存的请求、session、默认模型和 credential reference 使用。改名应视为新 provider 的创建和旧 provider 的删除，否则历史 trace 可能无法解释；保存的 key 也只能在 UI/API 中以脱敏描述出现。
+
+13. **Harness 文档手工声明支持 reasoning/image，能否证明 endpoint 真的支持？**
+
+   不能。它只是 route configuration 或 provider capability claim；必须做真实 capability probe，并在 trace 中记录 endpoint、模型、请求字段、响应能力和失败语义。不能把 Harness 的声明迁移成 V4.1 内部能力。
+
+14. **MCP 断线重连后为什么要重新发现工具并注销旧工具？**
+
+   因为 server 的 capability、schema、权限或版本可能已经变化。继续使用旧 namespace 会把过期 schema 和权限当成有效合同；达到 reconnect budget 后应清空 registry，并要求显式恢复或人工处理。
+
+15. **GitHub webhook 返回 `202` 是否表示代码审查完成？**
+
+   不是。`202` 只表示签名请求被异步接纳；重复 delivery 可能创建多个 session，测试、artifact 和 verifier 仍未完成。入站 webhook secret 认证也不能自动授予 Agent 出站修改 GitHub 的权限。
+
+16. **这些 Harness 资料能否补齐 V4.1 的模型架构闭环？**
+
+   不能。它们补的是 provider/session/plugin/MCP/webhook 的 runtime 合同；V4.1 的参数、训练 recipe、完整权重、kernel、DSpark acceptance、目标硬件和生产 SLO 仍须独立验收。
+
 ## 81.17 小练习与实验设计
 
 1. 实现一个 CED 与 decoder-only 的 token 账本，分别改变输入/输出长度，报告 prefill/decode proxy；再说明为什么 proxy 不能替代 profiler。
@@ -955,12 +1001,21 @@ python3 research/model-update-2026-09/code/deepseek_v41_cache_demo.py
 6. 模拟 DSpark 的草稿接受率为 0.2、0.5、0.8，加入验证成本和状态回退，测量有效 token、目标调用数和 p95 延迟。
 7. 设计多模态 prompt injection 测试：同一张图分别包含普通说明、伪 system 指令和恶意工具参数，验证模型输入、策略层和执行器的边界。
 8. 固定 `reasoning_effort`、工具、超时和 verifier，复现一个短任务与长任务矩阵，并记录 `not_applicable` 的空任务集，不用默认分母伪造成功率。
+9. 运行 [`deepseek_harness_protocol_audit.py`](../../research/model-update-2026-09/code/deepseek_harness_protocol_audit.py)，把输出字段映射到 provider、session、MCP 和 webhook 四个责任层；再说明为什么 `network_called=false` 不能当作真实 endpoint 已通过。
+10. 为 provider/session 建立恢复 manifest，故意修改 provider ID、model ID、workspace revision 和 tool schema hash，验证系统是否拒绝静默迁移已有 session。
+11. 模拟 MCP server 断线、schema 变化和 reconnect budget 耗尽，分别报告旧工具调用、重新发现、注销和人工恢复的状态；禁止复用断线前的 registry。
+12. 为 GitHub review webhook 加入 delivery dedupe、出站权限和最终 artifact verifier，比较“返回 `202`”“任务执行完成”和“代码验证通过”三个时间点。
 
 ## 81.18 来源与进一步阅读
 
 - [DeepSeek-V4.1-Flash Hugging Face 模型卡](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash)：架构、训练、评测、prompt encoding 和许可证。
 - [DeepSeek-V4.1-Flash `config.json`](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/blob/main/config.json)：本章配置字段快照。
 - [DeepSeek-V4.1-Flash API 发布页](https://api-docs.deepseek.com/news/news260910)：API alias、兼容路由和服务端发布说明。
+- [DeepSeek Harness 快速开始](https://deepseek-harness.github.io/deepseek-harness/en/guide/quickstart)：Preview 的 workspace、session、审批和 Agent 工作流。
+- [DeepSeek Harness model providers](https://deepseek-harness.github.io/deepseek-harness/en/guide/providers)：provider ID、密钥脱敏、协议兼容和 capability claim。
+- [DeepSeek Harness architecture/reference](https://deepseek-harness.github.io/deepseek-harness/en/reference/)：Cordis plugin tree、session log、agent loop 和事件域。
+- [DeepSeek Harness MCP memory](https://deepseek-harness.github.io/deepseek-harness/en/guide/mcp-memory)：MCP namespace、secret 环境过滤、重连、工具注销和本地 memory 边界。
+- [DeepSeek Harness GitHub review](https://deepseek-harness.github.io/deepseek-harness/en/guide/github-review)：签名 webhook、异步 admission、workspace 和重复投递语义。
 - [DeepSeek-V4.1-Flash 技术报告 PDF](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/blob/main/DeepSeek_V41_Tech_Report.pdf)：51 页报告已逐页读取；页码对应的层排布、训练/部署设置和评测边界见本章相关小节。完整 production kernel、线上接受率和独立 profiling 仍待核验；reference `inference/kernel.py` 见 81.13.4。
 - [DeepSeek `deepseek-recipe` 固定 commit](https://github.com/deepseek-ai/deepseek-recipe/tree/8cadfede7063c896b944e7bae05daa3549ae97ea)：Rust/Python 协议转换、V4/V4.1 prompt/tokenizer、流式 parser、图像 quota/预处理和 mock server 接线；源码归档 SHA-256 为 `1116ca33e9dc62a913fb9214578c400f1704e6bca33487f4a4c31b32c67a21a6`。该仓库不等于推理后端、工具执行器、verifier 或生产 SLO。
 - [vLLM main V4.1 registry](https://raw.githubusercontent.com/vllm-project/vllm/main/vllm/model_executor/models/registry.py)：`DeepseekV41ForCausalLM` 与 `DSparkV41DraftModel` 专用入口；main 快照 `64,391` bytes / SHA-256 `64c80d8c6659833a9abf836180f2b7549903db2a664e22bc38e38c258a6f572e`。
@@ -974,3 +1029,48 @@ python3 research/model-update-2026-09/code/deepseek_v41_cache_demo.py
 - [第二十一册第 80 章：Step 3.5 Flash](80-step-3-5-flash的mtp与滑动窗口moe.md)：MTP、SWA/full attention 和 Context Manager 对照。
 
 本章的结论可以压缩成一句话：DeepSeek V4.1-Flash 把长上下文的主要问题拆成输入/输出计算不对称、远端表示压缩、候选索引、持久化与重算、低精度缓存、条件记忆、推测验证和多模态协议等多个账本；只有在固定 revision 与固定 harness 下分别测量，再把账本合并，才能判断架构是否真的改善了生产任务。
+
+## 81.19 SGLang v0.5.20：V4.1 kernel pin 与完整 runtime 的边界
+
+截至 2026-09-24，SGLang 官方 `releases/latest` 仍解析到 `v0.5.20`。release 中有 PR [#39171](https://github.com/sgl-project/sglang/pull/39171)，标题为更新 DeepSeek-V4.1 fork 的 FlashMLA 至 rebase head（V4.1 kernels）。PR 正文说明它是 #38942 的 main-branch rebase，故可记录为 stable release 里的 V4.1 相关 kernel/dependency 更新。
+
+但这条证据不等于完整的 V4.1 模型 runtime 已进入 stable：它没有证明模型专属视觉 wrapper、V4.1 sparse indexer/cache 的全部实现、完整权重加载或硬件 acceptance。既有对 `v0.5.20` 固定 tag 的文件检查仍未找到 `deepseek_v41_vit.py`；因此准确表述是“stable release 含 V4.1 FlashMLA kernel pin，但本章所需的完整 V4.1 vision/runtime acceptance 未证明”。不要因 release note 里出现 “V4.1 kernels” 就把 SGLang `main` 文件或 V4 Flash/Pro 的性能结果迁移到本模型。
+
+## 81.20 SGLang v0.5.20：混合缓存与 DSpark 的运行时不变量
+
+2026-09-29 经 7890 复验，SGLang latest stable 仍为 `v0.5.20`；release body 含 DeepSeek-V4 家族的 AMD/HIP serving PR。它们补充的是 runtime 怎么正确管理异构状态，不是 V4.1 论文新增算法。完整快照和 patch 边界见[研究笔记](../../research/model-update-2026-09/deepseek-v4.1-flash-source-notes.md)。
+
+| PR | 运行时问题 | 教学抽象 | 证据边界 |
+|---|---|---|---|
+| [#39116](https://github.com/sgl-project/sglang/pull/39116) | DSpark graph replay 使用旧 `swa_loc`，以及 verify metadata 构造中的 host 同步 | graph 捕获后指针地址固定；重放时应原位更新被捕获 buffer。仅在 token 数确实精确时，才能用 `output_size` 避免隐式 D2H 求和同步 | SGLang DSV4 HIP 路径；release 报告修复 accept length/host bubble，patch 中的 AMD 测试本轮未运行 |
+| [#38192](https://github.com/sgl-project/sglang/pull/38192) | unified KV 将全注意力 KV 与 per-request SWA ring 混算 | ring slots 属于请求的循环状态，不等于可跨前缀分支复用的 radix-tree KV token；allocator、scheduler 和回收逻辑需共享同一容量账本 | AMD/DSV4、fully gated；`+83.6% full-attention KV tokens` 是 release 的指定负载报告 |
+| [#37764](https://github.com/sgl-project/sglang/pull/37764) | FP4 indexer prefill 的 schedule setup 含许多小型 host/Torch 操作 | 融合 schedule-prep 可减少 dispatch；仍需保留 AITER CTA-info、workspace 生命周期、graph-capture 边界和大 batch fallback | AMD HIP；release 报告 concurrency 4 下 output throughput `+15.3%`，不是端到端模型或跨硬件保证 |
+
+面试追问时，先把三个状态域分开：
+
+1. **图内状态**：graph-captured kernel 读取的是捕获时记录的地址；更新 Python 对象的引用不等于更新图内 buffer。要么复制新值进稳定地址，要么重录图，并以 replay correctness 验收。
+2. **容量状态**：full-attention KV 可由共享前缀 radix tree 复用；per-request SWA ring 按位置覆盖，拥有不同生命周期。统一池只有在 allocator、scheduler、decode admission 和回收同时理解两种状态，容量估计才可信。
+3. **推测验证状态**：`num_tokens` 若含 padding，就不能假定等于 `sum(extend_seq_lens)`。省略输出长度可避免 device-to-host 同步，但必须保留真实/填充长度区别，否则会把性能优化变成错误的张量契约。
+
+同一 v0.5.20 feed 还列有 ROCm DSA cooperative exact top-k PR #37591；其 patch 注释和测试样例指向 V3.2/GLM-5.2，而非 V4.1，因此不迁移为本节的 V4.1 技术证据。所有发布指标和 PR 代码只证明指定 release/runtime 路径，不证明完整权重、FP4 精度、目标设备 profiling、真实 acceptance/rollback 或生产 SLO。
+
+## 81.21 SGLang main：混合精度 MegaMoE shared-expert fusion
+
+SGLang PR [#39313](https://github.com/sgl-project/sglang/pull/39313) 于 2026-09-29 合入 main（merge commit `0e586fd12d63f06306ec20beb637bfeb331f1088`）。它是 DeepSeek V4-family 的 runtime 优化，不是 V4.1 新架构论文。PR 描述的 V4 checkpoint 把 shared expert 保持 block-FP8、routed experts 量化为 MXFP4；旧融合逻辑要求两边精度兼容，所以无法直接把 shared MLP 塞进 routed-expert kernel。
+
+新路径把 FP8 shared L1/L2 weights 作为独立输入交给 DeepGEMM FP8×FP4 MegaMoE kernel；pre-dispatch 按消费端实际 `BLOCK_M` 写出 shared activation scales。启用需要 MegaMoE backend、SM100-supported device、已构建的 MegaMoE weights、`fp8xfp4` MMA、FP8 shared expert、`[128, 128]` block size 和 `SGLANG_OPT_DEEPGEMM_MEGA_MOE_FUSE_SHARED_EXPERTS`；不满足时保留普通 shared-expert fallback。代码目标是把每层 6 个 standalone kernels 收进 routed MegaMoE，但减少 launch 不等于必然提高端到端吞吐。
+
+PR 作者指出，朴素融合会提前返回并绕过既有 alternate-stream overlap；未融合时 shared expert 第二个 GEMM 在测试的 184/184 次/rank 与 routed MegaMoE 重叠，中位覆盖对方耗时 94.1%–95.6%。最终版本在 CUDA-graph capture 中 fork 整个 router/top-k/pre-dispatch/MegaMoE 区域到 alternate stream，再 join，而不是只融合 kernel 后留在当前 stream。
+
+以下是 PR 在 4×B300（SM103）、`sgl-deep-gemm 0.1.7`、1,024 input/256 output tokens 下报告的 overall throughput（tokens/s）；DSpark 使用模拟接受长度 6：
+
+| 路径 | Batch 1 | Batch 8 | Batch 32 | Batch 64 |
+|---|---:|---:|---:|---:|
+| DSpark main | 3,052.04 | 19,255.64 | 53,236.74 | 76,347.80 |
+| DSpark fusion + fork | 3,125.89 | 19,624.04 | 54,022.42 | 81,739.39 |
+| Regular main | 737.25 | 5,147.25 | 16,123.12 | 27,562.54 |
+| Regular fusion + fork | 748.13 | 5,252.39 | 16,245.61 | 27,506.76 |
+
+这些是 PR 发布方结果，且 batch 64 regular 路径的 fusion+fork 略慢于 main。相同 PR 报告 greedy accuracy `0.899 -> 0.897`（198 题）与 sampled pass@1 `0.900 -> 0.910`（792 samples），并存在逐请求 answer flips；没有足够信息把点估计解释为统计等价或普遍质量提升。实验对象是 `DeepSeek-V4-Flash-0731`，不是本章锚点 V4.1-Flash；Flash/Pro expert counts 和成绩不能迁移到 V4.1。#39313 已进入 SGLang main，但不在当时 latest stable `v0.5.20`；PR Checks 快照存在失败和跳过项，因此 merge 也不能写成完整 CI 全绿或本机验收。
+
+面试追问：为什么 fused kernel 还要 fork 整段 region？回答应指出融合减少 launch 与丢失 stream-level 并行可能互相抵消；还要联合检查 kernel/layout guard、activation-scale 排布、CUDA Graph capture/fallback 和 batch-size 下的端到端结果。完整快照及来源边界见[研究笔记](../../research/model-update-2026-09/deepseek-v4.1-flash-source-notes.md#2026-09-29-sglang-main-pr-39313-混合精度-megamoeshared-expert-fusion) 与 [SGLang PR #39313](https://github.com/sgl-project/sglang/pull/39313)。

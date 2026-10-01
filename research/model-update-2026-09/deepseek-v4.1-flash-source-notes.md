@@ -1,12 +1,18 @@
 # DeepSeek-V4.1-Flash 官方资料摘记
 
-首轮核验日期：2026-09-14；固定 revision 实现复验：2026-09-20；当前时点联网复验：2026-09-22。本文把 DeepSeek 官方发布页、Hugging Face 模型卡、模型配置和随仓库发布的编码/评测说明分开记录。技术报告 PDF 已下载、校验哈希并按页提取 51 页正文；报告中的内部实验和部署数字仍按发布方自报记录，不等同于本项目复现。
+首轮核验日期：2026-09-14；固定 revision 实现复验：2026-09-20；当前时点联网复验：2026-09-23。本文把 DeepSeek 官方发布页、DeepSeek Harness 官方预览文档、Hugging Face 模型卡、模型配置和随仓库发布的编码/评测说明分开记录。技术报告 PDF 已下载、校验哈希并按页提取 51 页正文；报告中的内部实验和部署数字仍按发布方自报记录，不等同于本项目复现。
 
 ## 来源与快照
 
 | 来源 | 作用 | 本轮状态 |
 |---|---|---|
-| [DeepSeek-V4.1-Flash 发布页](https://api-docs.deepseek.com/news/news260910) | 发布日期、API 模型名、兼容路由、官方产品描述 | 页面快照返回 HTTP 200；页面导航标注 `2026/09/10`，快照 SHA-256 为 `420cbb7b5e8e97632fa45cb49cd2b5f22b57c8f9e125d1c34a22bd67bbc33705` |
+| [DeepSeek-V4.1-Flash 发布页](https://api-docs.deepseek.com/news/news260910) | 发布日期、API 模型名、兼容路由、非对称激活和 KV/cache 产品描述 | 2026-09-23 通过 `10.24.27.134:7890` 返回 HTTP 200，`27,838` bytes，SHA-256 `bea79d60a0712f1971554724c94e8ff2145a048d3c0e80326efa4bacd2bf8e11`；页面导航标注 `2026/09/10`。此前 `420cbb...` 快照保留为历史页面版本 |
+| [DeepSeek Harness 快速开始](https://deepseek-harness.github.io/deepseek-harness/en/guide/quickstart) | Web UI、workspace、session、审批和 Agent 工作流 | 2026-09-23 HTTP 200，`83,023` bytes，SHA-256 `1e816c2bbead769f57b2c344334c02d6136eeb5831d46a9a3d5cc46f9f135966`；官方站点标为 Preview |
+| [DeepSeek Harness model providers](https://deepseek-harness.github.io/deepseek-harness/en/guide/providers) | provider ID、密钥脱敏、协议兼容、模型发现和 reasoning/image 声明 | `113,025` bytes，SHA-256 `1761dd552158cfe6e01245744414ef5c81273f2ba09026d4a5b6e94a3065182d` |
+| [DeepSeek Harness Python SDK](https://deepseek-harness.github.io/deepseek-harness/en/guide/python-sdk) | isolated home/workspace、profile、插件和 native runtime wheel | `110,733` bytes，SHA-256 `3459ca57567d8a3ff982674ac57a390ecd8215336a5e426d40e4b4ead6c51edf` |
+| [DeepSeek Harness architecture/reference](https://deepseek-harness.github.io/deepseek-harness/en/reference/) | Cordis plugin tree、profiles/bundles、session log、agent loop和事件域 | `130,135` bytes，SHA-256 `3595d42386804b571bb5976592e07f10a1342764d64485c08e37ea1604b74837` |
+| [DeepSeek Harness MCP memory](https://deepseek-harness.github.io/deepseek-harness/en/guide/mcp-memory) | MCP namespace、secret 环境过滤、重连和工具注销 | `96,150` bytes，SHA-256 `43751eb6e0f5a363397d26844c2068a6d820adf6d65cbf8381fe993d3764fa33` |
+| [DeepSeek Harness GitHub review](https://deepseek-harness.github.io/deepseek-harness/en/guide/github-review) | signed webhook、异步 admission、workspace 和重复投递语义 | `94,772` bytes，SHA-256 `3dfae298c9af189c1965a1ff19e78ccbab3f575fd98b0f1ced45925497b0f31f` |
 | [Hugging Face 模型卡](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash) | 架构、训练、评测、协议和开源入口 | revision `dba1be0a40aa45a94ad051997016db3960a90277`；README 快照 SHA-256 为 `347c9db4e5506acb531cbc3b724407ab88e9af8781679152f0823d7bac16d251` |
 | [模型配置](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/blob/main/config.json) | 可机器读取的结构字段 | `DeepseekV41ForCausalLM`、`deepseek_v41`；配置快照 SHA-256 为 `8be45ce0476004a3f529fd896115a4a2e800a129ad2d3ec05b16050f52e21879` |
 | [技术报告 PDF](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/blob/main/DeepSeek_V41_Tech_Report.pdf) | 架构、训练基础设施、推理系统、后训练和评测细节 | 51 页正文已逐页提取；SHA-256 为 `ba68e2e40408125ae6d2f63a9a241b61c73910691c74ec1a2a7023c851eac08d` |
@@ -14,6 +20,33 @@
 | [evaluation README](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/blob/main/evaluation/README.md) | DeepSWE 复现实验的 harness 说明 | 已读取；明确区分 `mini-swe-agent` 与 `dsh-minimal` |
 
 页面哈希只用于识别本轮资料快照，不代表页面或模型权重永久不变。模型卡 revision 是权重/仓库的版本锚点，不能用首页当前内容替代。
+
+## 2026-09-23：官方发布页与 DeepSeek Harness preview
+
+本轮通过已验证的 `10.24.27.134:7890` 重新取得 DeepSeek V4.1-Flash 发布页和官方 DeepSeek Harness 文档。这里把模型发布合同、Harness runtime 和本地教学审计分开，避免把 Harness 的工程能力写成 V4.1 的内部网络结构。
+
+### 发布页新增的产品级确认
+
+官方发布页用产品层语言补充了模型卡的架构账本：V4.1-Flash 是 552B MoE，采用 Causal Encoder--Decoder（CED），prefill 每 token 约 8B active、decode 每 token 约 16B active；发布页同时宣称相对上一代约需要 `1/4 HBM` 和 `1/8 SSD` 的 KV/cache 存储。这里的 `8B/16B`、HBM 比例和 SSD 比例分别来自激活与产品存储口径，不能合并为单卡显存或端到端加速保证。
+
+发布页还确认了服务迁移边界：首选 API model name 是 `deepseek-flash`；旧的 `deepseek-v4-flash` 与 `deepseek-v4-flash-vision-exp` 在兼容期路由到 V4.1-Flash；`deepseek-v4-pro` 从 2026-09-14 04:00 UTC 起临时路由到 V4.1-Flash，直到 V4.1-Pro 发布。客户端必须同时记录 requested alias、served model、时间、价格和响应能力，不能把 alias redirect 当作权重身份。
+
+### Harness 的可观察责任边界
+
+官方 DeepSeek Harness 文档把它描述为构建 Agent Harness 的插件化 SDK，并将 Web UI、headless/SDK profile、workspace、session、agent loop、tools 和 MCP 放在同一 Cordis plugin tree 中。可用于面试的事实和边界如下：
+
+1. **Provider 与 session identity**：provider ID 是持久身份，已保存请求、session、默认模型和 credential reference 都依赖它；改名应新建 provider 后删除旧 provider。保存 key 后 UI 只返回脱敏描述，不能把明文 secret 回显。已有请求的 session 保留其日志中的 model，不能在中途静默切换 provider/model。
+2. **协议兼容不是探测结果**：内置 provider 使用安装时 catalog；custom provider 可以声明 `openai-completions`、`openai-responses` 或 `anthropic-messages`。reasoning level、image input、header、timeout、retry 和兼容开关属于 route configuration。文档明确说手工声明的 image/reasoning 是对 endpoint 的 claim，不能替代真实 capability probe。
+3. **插件和生命周期**：插件通过 `apply` 注册配置与服务，依赖未满足时不应加载；由 `ctx` 注册的 listener/resource 在卸载时自动清理，外部连接等资源要使用显式 effect cleanup。profile 的 bundle 顺序和 patch 路径决定最终运行树，不能把“插件源码存在”当成应用已经加载。
+4. **session log 是上下文来源**：reference 文档把 session log 作为模型可见 context 的来源，并通过 `turn/*`、`step/*`、`tool/*`、`agent/*` 和 `llm/stream` 事件扩展 runtime。恢复时应保留 workspace、工具、权限、模型和 session 版本；一个可读摘要不能替代原始状态或副作用 receipt。
+5. **MCP 重连和最小权限**：MCP 工具使用 `mcp__<server>__<tool>` 命名空间；stdio bridge 会过滤通常表示 credential 的环境变量及 `DSH_*` 变量。断线时调用失败，重连会重新发现/同步工具；达到重连预算后工具被注销，不能继续使用旧 registry。文档给出的 reference memory 还明确是本地 JSONL/substring search，不自动提供 embedding、摘要、冲突解决或 forgetting policy。
+6. **Webhook admission 不等于任务完成**：GitHub review overlay 使用签名 webhook，把请求送入 workspace/session；HTTP `202` 只代表规则接纳，不能代表 Agent 已完成、测试已通过或 artifact 已 verified。官方文档还说明 webhook runtime 不保存 delivery/execution state，重复投递可能创建多个 session；入站 webhook secret 认证不自动授予 Agent 对 GitHub 的出站权限。
+
+这些内容是 DeepSeek Harness 的官方 preview/runtime 合同，不是 V4.1 的参数、训练 recipe、DSpark acceptance 或生产 SLO 证据。它们适合放入面试中的“模型 API -> Harness -> tool/MCP -> workspace -> verifier”责任图。
+
+### 本地协议审计
+
+新增 [`deepseek_harness_protocol_audit.py`](code/deepseek_harness_protocol_audit.py)，只使用 Python 标准库和合成事件，验证 provider 脱敏与稳定 ID、session model 固化、plugin dependency/cleanup、MCP credential 过滤与 reconnect budget，以及 webhook `202`/重复投递/入站认证与出站权限分离。它不启动 DeepSeek Harness、不调用 API、不运行 MCP 或 GitHub，证据等级固定为 **local_protocol_toy**。
 
 ## 2026-09-20：固定 revision 的 HF inventory 与 reference implementation
 
@@ -314,9 +347,15 @@ main 中可定位到的相关提交包括 `a6cf05817f11d22023fd951a76255ef50fb09
 
 SGLang 最新 release `v0.5.20` 的 tag commit 是 `94602c9c2b7cbdb8efd5c52802dac6a1c180089e`，发布时间为 `2026-09-18T22:41:33Z`。固定 tag 中 [`deepseek_v4.py`](https://github.com/sgl-project/sglang/blob/v0.5.20/python/sglang/srt/models/deepseek_v4.py) 为 `170,193` bytes / SHA-256 `252f6176338bf7849c9297de930745f46b761d22ff4161073a1031340f60caa4`，Git blob `af76c73f7225d14379906a341b2f51adb4447dcc`；[`deepseek_v4_dspark.py`](https://github.com/sgl-project/sglang/blob/v0.5.20/python/sglang/srt/models/deepseek_v4_dspark.py) 为 `40,396` bytes / SHA-256 `59ac079e28d4d0a90b82c1ca641ba89f2851d081ce4fddf2bec2e003dda9fd04`，Git blob `4994a92547b6bec244b1f6e20fa276cd80e79640`。tag 中 `deepseek_v41_vit.py` HTTP 404，两个文件中 `deepseek_v41` 和 `dsv41` 出现次数均为 0，未形成 V4.1 专用 vision/runtime 证据。
 
-因此当前准确结论是：SGLang `main` 已有 V4.1 vision、DSV4.1 sparse/indexer、FP8/unified KV 和 DSpark integration；SGLang `v0.5.20` stable 只证明通用 V4/DSpark 文件存在，不能证明 V4.1 专用 vision/runtime 已进入 stable release。SGLang main 与 stable tag 的 compare 为 `diverged`，main ahead 403、stable ahead 5，merge base `d58342deab27e6f8bb507d9db2a0f87c6f42cee3`；这进一步说明不能用当前 main 文件替代已发布包。
+因此当前准确结论是：SGLang `main` 已有 V4.1 vision、DSV4.1 sparse/indexer、FP8/unified KV 和 DSpark integration；`v0.5.20` stable 除通用 V4/DSpark 文件外，还包含 V4.1 专属 FlashMLA fork/rebase pin（PR #39171），但这仍不能证明 V4.1 专用 vision/runtime 的完整实现或验收已经进入 stable。SGLang main 与 stable tag 的 compare 为 `diverged`，main ahead 403、stable ahead 5，merge base `d58342deab27e6f8bb507d9db2a0f87c6f42cee3`；不能用当前 main 文件替代已发布包。
 
-本轮将 V4.1 状态更新为“官方内容 + HF reference implementation + vLLM `v0.30.0` stable release/source evidence + SGLang upstream main runtime evidence + recipe protocol evidence（AA 单榜）”。vLLM `main` 与 v0.29.0 仍作为时间线对照保留。仍未完成完整权重加载、GPU/ROCm/NPU 运行、视觉 token 的 draft/target verify、真实 FP4/FP8 质量、candidate/index recall、DSpark acceptance/rollback、EPD 调度、目标硬件 profiling、tool acceptance 和生产 SLO。
+本轮将 V4.1 状态更新为“官方内容 + HF reference implementation + vLLM `v0.30.0` stable release/source evidence + SGLang `v0.5.20` stable 的 FlashMLA dependency-pin evidence + SGLang upstream main runtime evidence + recipe protocol evidence（AA 单榜）”。vLLM `main` 与 v0.29.0 仍作为时间线对照保留。仍未完成完整权重加载、GPU/ROCm/NPU 运行、视觉 token 的 draft/target verify、真实 FP4/FP8 质量、candidate/index recall、DSpark acceptance/rollback、EPD 调度、目标硬件 profiling、tool acceptance 和生产 SLO。
+
+## 2026-09-24：SGLang latest stable 与 V4.1 FlashMLA pin
+
+经 `10.24.27.134:7890` 读取 GitHub 官方 `/repos/sgl-project/sglang/releases/latest`，截至本次检查仍为 `v0.5.20`（发布于 `2026-09-18T22:41:33Z`），API 响应 `87,872` bytes / SHA-256 `c75daa307a5ead07993a00b9d8367579a9146dfc63b12ccfe31ae29cd4154bdc`。
+
+release 中的 [PR #39171](https://github.com/sgl-project/sglang/pull/39171) 名为“Bump FlashMLA to the fork's rebase head (v4.1 kernels)”，于 `2026-09-13T22:43:20Z` 合并。PR API 响应 `31,159` bytes / SHA-256 `c150a9f705fbb5f730ddcaecf3d157f2157795dec723a2caf1125896109ec452`；正文说明它是 #38942 的 main-branch rebase，未提供独立 benchmark/accuracy 数据。因此这可证明稳定 release 包含 V4.1 相关 FlashMLA kernel dependency 更新；不能升级成 V4.1 vision wrapper、完整模型 forward、全部 sparse/cache runtime 或生产 acceptance 已验证。
 
 ## 2026-09-23：DeepSeek 官方 API capability contract
 
@@ -357,3 +396,64 @@ SGLang 最新 release `v0.5.20` 的 tag commit 是 `94602c9c2b7cbdb8efd5c52802da
 - `tool_output_item` 同时演示文本与 `input_image/file_id` 结构化回灌，强调 tool output 是 observation，不是权限授予或业务成功。
 
 本次脚本运行结果：SSE 3 个事件、文本 `contract audit`、终态 `response.completed`；首次工具调用因一次预执行 transient failure 经过 2 次尝试后完成，重复调用没有增加副作用；额外字段触发 `SchemaError`，越权路径触发 `PermissionDenied`；`network_called=false`。这些结果只证明 toy 的状态机和审计逻辑，不证明真实 endpoint、alias 路由、模型质量、strict enforcement、生产 executor 或 verifier 已验收。
+
+## 2026-09-28：7890 复验与 vLLM stable/预发布边界
+
+当前工作区显式经 `10.24.27.134:7890` 请求百度、Artificial Analysis `/zh`、DataCurve DeepSWE、DeepSeek V4.1 公告及 GitHub release 页面均取得 HTTP 200。榜单本轮只确认可达，没有重新解析 canonical 集合，不据此声称模型清单无变化。DeepSeek 公告最终 URL 为 [`news260910/`](https://api-docs.deepseek.com/news/news260910/)，`24,438` bytes / SHA-256 `f18dc22d37393381b31c9069996138f45aa7b02b08442d43af7c6c57f587bdce`。
+
+vLLM [`releases/latest`](https://github.com/vllm-project/vllm/releases/latest) 最终重定向到 `v0.30.0` 稳定版页面，`615,462` bytes / SHA-256 `ff2ddd43e2e969a5ccd9b141c43c9aa0dc36af24402cca781eb2e9760f4f8aa2`。官方 [release Atom feed](https://github.com/vllm-project/vllm/releases.atom) 为 `734,203` bytes / `30131b0cf21894d9e8bf4cbd4eb0f51d8e47b364e3849db0ee1c5f8724810de5`；最新 feed entry 是 `v0.30.1rc0`，时间 `2026-09-23T08:06:15Z`。其固定页面为 `224,871` bytes / `8034c62c3dbc34f8fb7897e8c2c5ed763ca8538884cc0965714a71b5629fb015`，可见标题为 `[ROCm][CI] Add MI355 dense NVFP4 and MoRI kernel mirrors (#58281)`；这是 RC/ROCm-CI 条目，不是新的稳定版，也没有显示 V4.1 专属 release-note 增量。`api.github.com/repos/vllm-project/vllm/releases/latest` 在同一代理下返回 HTTP 403，因此以可用的 GitHub release 页面和 Atom feed 交叉确认，不把 API 403 当成 release 不存在。
+
+本日另有已保存的 SGLang/PyPI 快照：GitHub latest release 仍为 `v0.5.20`（`2026-09-18T22:41:33Z`；`433,353` bytes / `11c41065c3d9dff6d381437e33f1c8be3600ed9066c0fa5d5c2e51217fd49cd1`），PyPI `info.version` 仍为 `0.5.20`（`350,431` bytes / `267bc13e757f4ca70d0cf0f5de5c463ee819b34097475c7d7e55bf02fab7a05c`）。因此 V4.1 serving 证据仍是 vLLM `v0.30.0` stable source、SGLang `v0.5.20` stable/source 与各自上游更新分开记录；没有安装 wheel、加载权重或做硬件验收，完整模型与生产验收待核验项不变。
+
+## 2026-09-29：SGLang v0.5.20 的 DeepSeek-V4 AMD/HIP cache 与 DSpark 增量
+
+### 榜单复验与 release 边界
+
+本轮仅沿已有 Artificial Analysis 锚点 `deepseek-v4-1-flash` 继续查 runtime，没有从代码仓库发现模型。经 `10.24.27.134:7890` 取得 AA `/zh`（1,747,860 bytes / SHA-256 `0933d776618e8530dccb05f28c0f3ce2398a3184552c8c988df9a60e6da5d0c5`）、[AA V4.1-Flash 详情](https://artificialanalysis.ai/models/deepseek-v4-1-flash)（3,969,971 bytes / `630f1c9df1abd6ce900d6a7016daf1038d5482c349fd5f4f2a419973ef790a91`）和 [DataCurve](https://deepswe.datacurve.ai/)（268,036 bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`）。详情首请求遇 TLS EOF，重试 HTTP 200；AA 路由集合与同日快照一致。DataCurve 有 `mini_swe_agent_deepseek_v4_flash_max`，没有精确 `mini_swe_agent_deepseek_v4_1_flash_*`；V4 Flash 行不迁移成 V4.1 成绩。
+
+7890 获得 [vLLM release Atom](https://github.com/vllm-project/vllm/releases.atom)，734,377 bytes / SHA-256 `9933c44ff0413dce0b7565f5df9f4046eebea4fb121b95efc19ca94fd245933e`；最新项为 2026-09-29 `v0.31.0rc1`，标题是跳过 CUDA 12 镜像中的 snapshot runtime（CI/build），不是新的稳定版。当前 stable 仍 `v0.30.0`。 [SGLang release Atom](https://github.com/sgl-project/sglang/releases.atom) 为 1,058,795 bytes / `9c9c5e9bcc5fc55fea6be1d8e9c77fd84d330522638083a80e74f2134ddd5eb2`；latest stable `v0.5.20` 发布于 2026-09-18。
+
+### 三项可迁移的 serving 知识
+
+这些是 v0.5.20 release body 与固定 PR patch 的 V4 家族 ROCm/HIP serving 证据，不是 V4.1 专属模型结构，也不是本机/独立性能测试。
+
+1. **DSpark graph replay 的指针语义与 host bubble（SGLang [PR #39116](https://github.com/sgl-project/sglang/pull/39116)）**：release 标题称“修复 DSV4 DSpark accept length 并降低 host bubble”。patch 解释了一个具体状态 bug：CUDA/HIP graph 捕获的 store kernel 按记录时的 `swa_loc` 指针读写；eager target-verify 每步新建 tensor 后，Python 层重新绑定引用并不会更新图保留的 buffer，因此 replay 可能持续写旧 SWA ring slots。修复把 `swa_loc` 改为 copy-field，在固定地址缓冲区内覆盖新值。另将统一长度 DSpark verify 的 metadata materialization 移入图内，并用 `exact_num_tokens` 区分真实 token 数与 padded tier：只有长度精确时才给 `repeat_interleave(output_size=...)`，避免用 D2H `.item()` 同步换取速度却错误声明输出长度。patch 附有原位更新与 graph-routing 测试；本轮未运行这些 AMD 测试。
+
+2. **统一 KV 中的 request-owned SWA ring（SGLang [PR #38192](https://github.com/sgl-project/sglang/pull/38192)）**：15-commit patch 将压缩比为 4 的 SWA recurrent/compress state 放到每请求 ring（按 request slot 与 position 模运算寻址），并让 unified-KV pool sizing、scheduler capacity check 和状态回收共同识别 ring 布局。关键不是“多塞一些普通 KV”，而是避免把每请求、循环覆盖的 SWA state 错算成统一 radix tree 中可跨分支复用的 full-attention token slots。release note 将路径标为 AMD/DSV4、fully gated，并报告可容纳的 full-attention KV tokens `+83.6%`；该数字是指定 release workload 的发布方结果，feed 未给出完整硬件/负载表，不能推广成一般吞吐或 V4.1 模型分数。
+
+3. **FP4 indexer 的 schedule 准备融合（SGLang [PR #37764](https://github.com/sgl-project/sglang/pull/37764)）**：HIP patch 将原先约 27 个小 Torch 调度操作收敛为融合的 prefill-schedule prep kernel，再接 AITER CTA-info kernel；page-table padding 与 schedule buffers 显式保活。由于 AITER fallback 会释放其 scratch，该路径要求 schedule build 在 CUDA-graph capture 外执行，超过 `MAX_FUSED_ROWS` 时回退到 AITER 旧 preamble。release note 报告 concurrency 4 的 output throughput `+15.3%`；这是 AMD FP4 indexer 指定实现/负载结果，不代表所有 GPU、并发或端到端任务速度。
+
+### 不把同一 release feed 的模型实现混归
+
+SGLang v0.5.20 还列出 DSA cooperative exact top-k PR [#37591](https://github.com/sgl-project/sglang/pull/37591)，但该 patch 的代码注释和测试样例明确指向 DeepSeek V3.2 / GLM-5.2 的 index_topk workload（有例子来自 GLM-5.2、134,849-context decode），不是 V4.1 的专属证据，因此不并入本模型技术结论。类似地，V4.1 官方模型结构、V4-family runtime patch、AMD HIP kernel 和发布方测量必须分层写入。
+
+本轮更新把 V4.1 serving 证据推进到 SGLang `v0.5.20` 已发布的 V4-family ROCm/HIP cache/DSpark 路径；它不关闭完整权重加载、V4.1-specific vision/runtime、FP4/FP8 quality、index recall、实际 DSpark acceptance/rollback、目标硬件 profile、工具验收或生产 SLO。
+
+## 2026-09-29：SGLang main PR #39313 混合精度 MegaMoE shared-expert fusion
+
+本节继续沿既有 Artificial Analysis canonical `deepseek-v4-1-flash` 追踪 V4-family runtime，没有从 SGLang 代码中发现模型。fresh GitHub commits API（156,291 bytes / SHA-256 `f7529dd2c868848510b3bdbb1e003d91d5527da1b70a9c7e6b973cdea72bba44`）显示 `deepseek_v4.py` 的 2026-09-29 最新相关提交 `0e586fd12d63f06306ec20beb637bfeb331f1088`，标题为 `fuse shared experts with routed experts in MegaMoE's DeepGEMM (#39313)`。fresh PR API（45,675 bytes / `fbe33b6da871321cf7445d948086d7ce9456a3e211865ef7e4ddfe953db00970`）确认 PR 于 `2026-09-29T09:25:11Z` 合并进 `main`；merge commit 为上述 SHA，head 为 `1aff3627e28222654bac599e20be27d90ef2bb86`。固定 `.patch` 为 35,120 bytes / `2ceee8fb5122d9e571a1608416e5699d824ee703b4ad641e9ab50f8fc3192e6b`。
+
+### 机制：让 mixed-precision shared expert 进入 routed MegaMoE
+
+PR 描述的 DeepSeek-V4 checkpoint 将 shared expert 保持 block-FP8，而 routed experts 使用 MXFP4/QAT；Flash 路径为 1 shared + 256 routed、每 token 选 6 个 routed experts，Pro 路径为 1 shared + 384 routed。旧的 shared/routed fusion gate 要求两边量化精度兼容，因此这组异构布局无法直接走原融合路径。PR 将 FP8 shared L1/L2 权重作为独立输入交给 DeepGEMM `fp8_fp4_mega_moe`，转换 shared scale 到 kernel 所需布局，并在 pre-dispatch 依据实际 `BLOCK_M` 写入 shared activation scales；routed scaling factor 则可前移并折入 top-k weights。
+
+该路径由门禁控制：MegaMoE A2A backend、SM100-supported device、已构建的 MegaMoE expert weights、`fp8xfp4` MMA、FP8 shared expert、`[128, 128]` shared weight block size，以及默认开启的 `SGLANG_OPT_DEEPGEMM_MEGA_MOE_FUSE_SHARED_EXPERTS`。原始 shared weights 仍保留给不满足 token-cap/kernel 条件时的普通 fallback。代码目标是把 shared expert 原先每层的 6 个独立 kernel 收入 routed MegaMoE；这会省 launch，但不自动意味着端到端更快。
+
+### overlap 与评测账本
+
+PR 作者报告，若融合后直接从 `forward_mega_moe` 返回，就会绕过现有 alternate-stream fork；未融合时 shared expert 的第二个 GEMM 在所测 184/184 次/rank 与 routed MegaMoE 重叠，中位覆盖其耗时的 94.1%–95.6%。最终实现因此在 CUDA-graph capture 时把完整 router/top-k/pre-dispatch/MegaMoE 区域 fork 到 alternate stream，再 join。PR 给出的 4×B300（SM103）、`sgl-deep-gemm 0.1.7`、输入 1,024/output 256 tokens 的 overall throughput（tokens/s）如下；DSpark 使用 `SGLANG_SIMULATE_ACC_LEN=6`，数字均是 PR 发布方结果：
+
+| 路径 | Batch 1 | Batch 8 | Batch 32 | Batch 64 |
+|---|---:|---:|---:|---:|
+| DSpark main | 3,052.04 | 19,255.64 | 53,236.74 | 76,347.80 |
+| DSpark fusion + fork | 3,125.89 | 19,624.04 | 54,022.42 | 81,739.39 |
+| Regular main | 737.25 | 5,147.25 | 16,123.12 | 27,562.54 |
+| Regular fusion + fork | 748.13 | 5,252.39 | 16,245.61 | 27,506.76 |
+
+结果依 batch 与 prefill/decode 组成变化；例如 regular batch 64 的 overall throughput 略低于 main。PR 同时报出 greedy accuracy `0.899 -> 0.897`（198 题）、sampled pass@1 `0.900 -> 0.910`（792 samples），并有逐请求 answer flips。不能把小样本的点估计写成统计等价、质量提升或一般性能保证；完整 prefill/decode 表、paired comparison 和任务设置以 PR body 为准。
+
+证据边界尤其重要：PR 的准确性/速度实验使用 `deepseek-ai/DeepSeek-V4-Flash-0731`，不是 `DeepSeek-V4.1-Flash`；PR prose 里的 Flash/Pro expert counts 也不能覆盖 V4.1 固定 config。本段是 **V4-family SGLang main serving 实现上下文**，不是 V4.1 专属结构、V4.1 分数或新架构论文。SGLang 当前 release Atom（1,058,795 bytes / `9c9c5e9bcc5fc55fea6be1d8e9c77fd84d330522638083a80e74f2134ddd5eb2`）仍指向 stable `v0.5.20`（2026-09-18），故 9 月 29 日合入的 #39313 不属于该 stable tag。
+
+CI 也不应被简化成“全绿”：Checks API 快照为 129,420 bytes / `b045fed811e051416ed84de214b4fbc2e80c28173c1b33115f620225ebe818b8`，`total_count=171`，默认页返回 30 项，其中 15 success、9 skipped、6 failure；PR body 的最新 Base、Extra、AMD finish 项显示失败标记。未逐页审计全部 171 条检查，因此不声称完整 CI 汇总。没有在本机运行 SGLang 测试、安装依赖或执行 GPU benchmark。
+
+面试要点：kernel fusion 的优化对象不只是 kernel launch 数，还包括它是否破坏原有 stream overlap；正确的优化单位可能是“融合后的整段调度区域”，而不是单个 fused kernel。部署 manifest 应显式绑定权重布局、scale layout、SM capability、MegaMoE backend、token cap、graph capture 和 fallback 条件。当前仍保持 **DeepSeek V4.1 AA 单榜内容专题 + family-level main source 增量**，不提升为 stable、目标硬件或生产验收闭环。

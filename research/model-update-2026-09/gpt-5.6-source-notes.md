@@ -1,6 +1,6 @@
 # GPT-5.6：推理状态、缓存与 Agent 运行时资料摘记
 
-核验日期：2026-09-22；当前时点榜单复验：2026-09-22（保留 2026-09-21 的历史测量）。本笔记只把 GPT-5.6 在 Artificial Analysis 与 DataCurve DeepSWE 中的条目作为锚点，再沿 OpenAI 官方模型页、API 文档和开发者博客追踪周边技术。官方当前没有公开 GPT-5.6 的参数规模、网络结构或完整训练报告；运行时字段不能反推出这些内部事实。
+核验日期：2026-09-23；当前时点榜单复验：2026-09-23（保留 2026-09-21/22 的历史测量）。本笔记只把 GPT-5.6 在 Artificial Analysis 与 DataCurve DeepSWE 中的条目作为锚点，再沿 OpenAI 官方模型页、API 文档和开发者博客追踪周边技术。官方当前没有公开 GPT-5.6 的参数规模、网络结构或完整训练报告；运行时字段不能反推出这些内部事实。
 
 ## 1. 榜单锚点与归并口径
 
@@ -190,6 +190,41 @@ input -> reasoning item -> tool call -> tool result -> reasoning continuation ->
 
 完整来源与候选状态已同步到 [`source-index.md`](source-index.md)、[`model-inventory.md`](model-inventory.md)、[`inventory-interpretation.md`](inventory-interpretation.md)、[`plan_v2.md`](../../plan_v2.md) 和 [`progress_v2.md`](../../progress_v2.md)。
 
+## 14. 2026-09-23 `7890` 当前时点复验与状态回放审计
+
+本轮仍只沿两个排行榜中已经确认的 `GPT-5.6 Luna` 推进，没有从 OpenAI 官方目录另发现模型。使用 `10.24.27.134:7890` 获取 Artificial Analysis 详情和 OpenAI 官方 Markdown；页面可达性恢复不改变模型身份，也不把页面测量漂移解释成模型 revision。
+
+### 14.1 两榜快照与测量漂移
+
+- Artificial Analysis [GPT-5.6 Luna (max)](https://artificialanalysis.ai/models/gpt-5-6-luna) HTTP 200；当前快照为 `3,996,959` bytes、SHA-256 `4246b96416b4aaf4f8bbcacf72f8c45787944e24f02c59c6e3db1fed4de93c41`。页面仍记录 release `2026-07-09`、Intelligence Index `37.3244239690841`、1M context、约 `$0.20/$1.20` input/output；当前 median output speed 为 `142.271568203031 tokens/s`，cost per Intelligence Index task 为 `0.17829726152289094`。这些都是 AA/provider 当前采集时点字段，速度相对 9 月 22 日的 `158.728370482714` 只记为测量漂移。
+- DataCurve [DeepSWE](https://deepswe.datacurve.ai/) 当前快照仍为 `268,036` bytes、SHA-256 `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7e6e095ad59f1f1`。精确 `mini_swe_agent_gpt_5_6_luna_max` 行仍是 attempted `448`、passed `301`、Pass@1 `67.1875%`、Pass@4 `90.26548672566371%`、平均成本 `$0.6056233620535714`、平均输出 `73399.70758928571` tokens、平均 Agent steps `101.68080357142857`、median peak context `201647`。它仍是 `mini-swe-agent + tools + task environment + verifier` 的系统结果。
+
+### 14.2 官方文档当前哈希
+
+本轮通过 `7890` 取得的实际 Markdown 页面如下。模型页、Tools 和 Compaction 与既有快照一致；Reasoning 和 Prompt caching 的当前内容/字节数以本轮实际响应为准，解释仍沿用既有协议结论。
+
+| 页面 | bytes | SHA-256 |
+|---|---:|---|
+| [GPT-5.6 Luna](https://developers.openai.com/api/docs/models/gpt-5.6-luna.md) | 3,744 | `1f425d8f2a93f8418702ac7acbb62b26850b98fe20680f82205bed5fce38fed0` |
+| [Reasoning models](https://developers.openai.com/api/docs/guides/reasoning.md) | 70,315 | `93327c5eb19df7ecf8c0bd9d581f58052dee9f090c38bb48906110b08d0ce251` |
+| [Prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching.md) | 47,098 | `69680fbec38e31a7abc8b0e33a6582b0aae29687e8de98404789337a55b55e2e` |
+| [Compaction](https://developers.openai.com/api/docs/guides/compaction.md) | 14,272 | `73fd2fd1afd44bd6f29ce7bd86fd0ae3413c98ec00ae5476879e98171b0b60dd` |
+| [Using tools](https://developers.openai.com/api/docs/guides/tools.md) | 33,282 | `4722fa102070178c1a1d603e718c69575c7c1768fa901218eab359bafdcba341` |
+
+没有由这些页面推出新的参数规模、内部架构、训练/后训练 recipe、system card 或生产性能结论。当前仍应把以下字段当作可观察运行时合同：`reasoning.context` 的 `current_turn/all_turns`、同家族兼容的 opaque reasoning item、完整 output item replay、显式缓存最多四个 breakpoint、1,024 visible-token 最小前缀、`30m` TTL、server-side/standalone compaction 的 canonical window，以及 hosted/client tool search 的所有权差异。
+
+### 14.3 本地状态协议审计
+
+新增 [`gpt56_luna_state_replay_audit.py`](code/gpt56_luna_state_replay_audit.py)，只使用 Python 标准库和合成状态。主流程通过，输出 `ok=true`、`evidence_level=local_protocol_toy`、`network_called=false`，并覆盖：
+
+1. `current_turn`、`all_turns` 和 `auto` 的 reasoning 可用范围，以及 GPT-5.6 家族切换时丢弃不兼容 reasoning；
+2. encrypted reasoning、assistant phase、function call/output 的原样回放和 `call_id` 血缘；
+3. idempotency key、重复回执、结果漂移拒绝和独立 artifact verifier；
+4. compaction item 的 opaque/canonical replay，及压缩后 prefix 改变导致的 cache miss；
+5. 1,024 token 门槛、四个 explicit breakpoint、30 分钟 toy TTL，以及 hosted/server 与 client tool search 的 `call_id` 所有权。
+
+该 toy 不证明真实 endpoint 的 schema enforcement、服务端事件顺序、隐藏 reasoning、模型质量、完整权重、目标硬件 profiling 或生产 SLO。GPT-5.6 Luna 当前状态更新为：**双榜当前时点复验 + 官方 runtime contract + local protocol toy**；无独立架构/训练报告，仍不新增 GPT-5.6 专属 Transformer 正式章节。
+
 ## 12. 2026-09-21 当前时点榜单复验与 OpenAI 访问边界
 
 本轮仍只复验已经出现在两个排行榜的 `GPT-5.6 Luna`，没有从 OpenAI 官方目录另发现模型。Artificial Analysis 精确详情页 [GPT-5.6 Luna (max)](https://artificialanalysis.ai/models/gpt-5-6-luna) HTTP 200，快照为 `3,861,087` bytes、SHA-256 `00c856c1ecc7bb7d79363f4d2b6814e9cd15a6a02cb8f0c99060862dfbd99cac`；页面第三方字段为 release `2026-07-09`、Intelligence Index `37.3244239690841`、median output speed `164.509614645781 tokens/s`、1M context、约 `$0.20/$1.20` input/output。它是 `max` 配置的第三方测量，不是 OpenAI 内部能力或版本变更证明。
@@ -229,3 +264,17 @@ DataCurve 当前快照为 `268,571` bytes、SHA-256 `67a6b5350a1bc986e814097a879
 3. **状态与成本交互**：reasoning item、tool search output、compaction item 和 prompt cache prefix 是四种不同状态。compaction 可能从变更点起打断旧 cache prefix；tool search 可以减少初始 schema token，但不能替代授权、沙箱、幂等和 verifier。
 
 当前状态仍为**双榜资料级闭环**：运行时协议、官方页面和书系配套已具备；参数、架构、完整训练/后训练 recipe、system card、生产 kernel、目标硬件 profiling 和独立 GPT-5.6 报告仍待核验，因此不新增 GPT-5.6 专属 Transformer 正式章节。
+
+## 15. 2026-09-28：GPT-5.6 Terra 的 DataCurve 配置行补核
+
+沿 AA 已有 canonical `gpt-5-6-terra` 复核两榜，不新增模型。AA `/zh` 快照为 `1,660,542` bytes / SHA-256 `bc147b7c89c75bfb81257de530184f7f2d25b93543ee0ac82c93b2304a6cc38f`；Terra 详情为 `3,841,417` bytes / `ecb893eec11fc3528e2df327abb152a773bd5cc1eb2a2cb13b7973d75333c41d`，页面列出 `max/xhigh/high/medium/low/non-reasoning`，AA 的 releaseDate 为 `2026-07-09`。DataCurve DeepSWE 当前页 `268,036` bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`，与当天先前保存快照逐字节一致；原页面内嵌配置对象已包含以下五个精确条目。因此这是补正此前“Terra 无 DataCurve 主表行”的抽取遗漏，不是新发布或分数更新。
+
+| DataCurve config / effort | passed / attempted | Pass@1 | Pass@4 | mean cost (USD) | mean output tokens | mean Agent steps |
+|---|---:|---:|---:|---:|---:|---:|
+| `mini_swe_agent_gpt_5_6_terra_low` / low | 108 / 449 | 24.05% | 44.25% | 0.342 | 8,572 | 21.46 |
+| `mini_swe_agent_gpt_5_6_terra_medium` / medium | 158 / 450 | 35.11% | 60.18% | 0.467 | 11,747 | 25.15 |
+| `mini_swe_agent_gpt_5_6_terra_high` / high | 243 / 452 | 53.76% | 80.53% | 0.908 | 21,517 | 33.51 |
+| `mini_swe_agent_gpt_5_6_terra_xhigh` / xhigh | 272 / 452 | 60.18% | 80.53% | 1.702 | 39,617 | 43.07 |
+| `mini_swe_agent_gpt_5_6_terra_max` / max | 314 / 451 | 69.62% | 88.50% | 3.957 | 71,939 | 75.93 |
+
+五行均为 113 个已尝试任务、4 runs，且受 `mini-swe-agent`、工具、环境、超时/重试及 verifier 影响；不同 effort 的尝试数略有差异。页面的 95% CI 方法按 whole-benchmark repeated runs 估计。可以讨论这个 harness 下 pass rate、token/cost 与 Agent steps 的观测权衡；不能由这些配置行单独推出 effort 的因果效果或裸模型质量。该补核不改变 GPT-5.6 家族已完成的 API/runtime 专题状态。

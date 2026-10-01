@@ -1,6 +1,6 @@
 # Claude Opus 5：排行榜锚点、adaptive reasoning 与长任务运行时
 
-原始资料核验日期：2026-09-15；当前时点联网复验：2026-09-21、2026-09-22（先失败后恢复）。本笔记只把 Artificial Analysis 与 DataCurve DeepSWE 的条目作为模型锚点，再沿 Anthropic 官方模型页、开发者文档、发布页和 system card 追踪面试相关技术。Anthropic 没有公开 Opus 5 的参数规模、网络结构或完整训练报告；运行时协议、产品定位和发布方评测不能反推出这些内部事实。
+原始资料核验日期：2026-09-15；当前时点联网复验：2026-09-21、2026-09-22（先失败后恢复）、2026-09-24。本笔记只把 Artificial Analysis 与 DataCurve DeepSWE 的条目作为模型锚点，再沿 Anthropic 官方模型页、开发者文档、发布页和 system card 追踪面试相关技术。Anthropic 没有公开 Opus 5 的参数规模、网络结构或完整训练报告；运行时协议、产品定位和发布方评测不能反推出这些内部事实。
 
 ## 1. 榜单锚点与快照
 
@@ -41,6 +41,12 @@
 - Anthropic 发布页当前快照为 `352,846` bytes、SHA-256 `7bb18f8e14e20fe2651e4a8308947f53a9541b0dcce6b7549e2b2c244202dce5`；Opus 5 System Card 为 `16,281,258` bytes、SHA-256 `0950dae1ba6b341e4f1a009e535e0f025625efeca21bd043a9a5ae148a3f2e6b`。System Card 的二进制快照不能替代正文抽取，不据此扩写未明确的安全数字。
 
 因此本轮只更新第三方测量的时间戳和官方入口证据，Opus 5 仍为**资料级闭环**，不新增重复 Transformer 正式章节，也不把 9 月 22 日的测量漂移解释为模型升级。
+
+### 1.3 2026-09-24 两榜与官方 System Card 当前复核
+
+经用户确认可用的 `10.24.27.134:7890` 获取两榜。Artificial Analysis 中文首页为 `1,781,428` bytes / SHA-256 `15e9763f0d516791e7b7c2c5679e87e5878eaffed4bef31e485c9043b758ba59`；Opus 5 详情为 `3,977,410` bytes / `18acc956d77c5b49c391eb85b46ef2c7fdbd7edd282ddf2275940bd418d25774`，Intelligence Index 仍为 `50.7771115797629`。DataCurve DeepSWE 为 `268,036` bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7e6e095ad59f1f1`；精确 `mini_swe_agent_claude_opus_5_max` 行仍是 `327/444`、Pass@1 `73.6486%`、Pass@4 `88.4956%`、均价约 `$11.8376`、平均 `99.04` steps。分数绑定该 benchmark 的任务、`mini-swe-agent`、工具、环境和 verifier，不是裸模型能力。
+
+Anthropic [Claude Opus 5 System Card](https://www.anthropic.com/claude-opus-5-system-card) 本次 HTTP 200，`16,281,258` bytes / SHA-256 `0950dae1ba6b341e4f1a009e535e0f025625efeca21bd043a9a5ae148a3f2e6b`，与既有副本逐字节相同；官方发布页为 `352,158` bytes / `2e35568603369b886d4c95904da18343dcd74ecef0f44600783ffe452c3ccacf`。使用仓库 [`pdf_text_extract.js`](code/pdf_text_extract.js) 提取出 `4,641` 行、`334,056` bytes 文本，SHA-256 `4ae20472ab82c967d90f386239ee6987ddf74b1124db6b44a1dea69a576e1f4c`（临时文件 `/tmp/claude-opus5-system-card-20260924.txt`）。这是对既有官方文档的正文补读，不代表 Anthropic 在 9 月 24 日发布了新版本；当前 PDF 的 changelog 标明最近列出的修订日期为 2026-08-19。
 
 ## 2. 官方模型字段
 
@@ -97,7 +103,7 @@ Anthropic 发布页声称 Opus 5 在 Frontier-Bench v0.1 超过其他模型且�
 
 安全边界方面，公告称 Opus 5 没有推进 risky dual-use capability frontier，且没有针对 cyber task 专门训练；它在漏洞发现方面接近 Mythos 5，但 exploit generation 明显落后。Claude.ai、Claude Code 和 Claude Cowork 的部分拒答默认 fallback 到 Opus 4.8，API 也可以开启 fallback；这进一步说明产品安全结果与基础模型结果必须分开记录。
 
-官方 [Claude Opus 5 System Card](https://www.anthropic.com/claude-opus-5-system-card) 已通过代理下载：16,281,258 bytes，SHA-256 `0950dae1ba6b341e4f1a009e535e0f025625efeca21bd043a9a5ae148a3f2e6b`。当前环境没有稳定的 PDF 正文抽取器，不能仅凭目录、字体编码或二进制字符串扩写安全数字；本笔记只记录公告明确的结论。
+官方 [Claude Opus 5 System Card](https://www.anthropic.com/claude-opus-5-system-card) 已通过代理下载并完成正文解析：16,281,258 bytes，SHA-256 `0950dae1ba6b341e4f1a009e535e0f025625efeca21bd043a9a5ae148a3f2e6b`。正文中的 prompt-injection、RSP、harness 修订、内部安全评测数字与适用条件见第 8 节；它们仍属于 Anthropic 发布方证据，不是独立复现。
 
 ## 5. 论文、研究入口与负面检索
 
@@ -109,7 +115,7 @@ Anthropic 发布页声称 Opus 5 在 Frontier-Bench v0.1 超过其他模型且�
 
 ## 6. 尚待核验与书系映射
 
-尚待核验：参数规模、稠密或 MoE 结构、层数、注意力/FFN 设计、训练数据配方、优化器、后训练损失、adaptive thinking 的内部实现、完整 safety evaluation 数字、生产 API 的真实 block 行为和独立 benchmark 复现。
+尚待核验：参数规模、稠密或 MoE 结构、层数、注意力/FFN 设计、完整训练数据配方、优化器、后训练损失、adaptive thinking 的内部实现、生产 API 的真实 block 行为，以及对 System Card 数字的独立 benchmark 复现。安全评测数字已能从正文读取，但其条件和发布方证据等级不能省略。
 
 - 第四册：模型 ID、1M context、adaptive thinking、effort、fallback 和产品/模型证据边界。
 - 第六册与第二十四册：长上下文 KV/cache、TTFT/TPOT、缓存失效、并发、成本和 fallback 账本。
@@ -117,10 +123,46 @@ Anthropic 发布页声称 Opus 5 在 Frontier-Bench v0.1 超过其他模型且�
 - 第十六册：reasoning token、状态块回放、effort sweep、验证与过度思考控制。
 - 第十七册与第二十册：Agent 工具宿主、工具目录版本、subagent budget、checkpoint、权限审计和 artifact 门禁。
 
-当前状态：**资料级闭环**。已有两个排行榜锚点、官方模型/API/发布/system card 入口、研究笔记、负面论文检索和同步记录；没有独立参数/架构专题，因此不新增 Opus 5 专属正式章节。
+截至 2026-09-22，本节记录的接口/发布资料状态为**资料级闭环**，且没有独立参数/架构披露，因此不新增 Opus 5 专属 Transformer 章节。2026-09-24 解析 System Card 后补成的 Agentic Safety/评测方法专题闭环见第 8 节；它不改变模型内部架构与训练证据边界。
 
 ## 7. 2026-09-21 当前时点代理复验时间线
 
 本轮早先重新尝试三条用户提供的代理时，`10.24.27.134:7890`、`10.24.27.134:8098`、`10.237.126.170:1234` 均出现连接失败；随后同一轮重试已全部恢复并取得 HTTP 200。前一失败状态只代表当时的短时访问路径故障，不代表网页不存在。
 
 因此，2026-09-15 页面快照、哈希和运行时结论仍保留为历史缓存证据，2026-09-21 新鲜快照已在 1.1 节单独登记。新鲜页面只更新第三方指标/页面字段和官方可读入口，不升级为参数、架构、训练 recipe 或独立 benchmark 证据，不迁移相邻 Claude 版本分数。
+
+## 8. 2026-09-24 System Card 正文：Agentic Safety 与评测可比性
+
+### 8.1 版本和结论范围
+
+System Card 第 2 页 changelog 记录 2026-08-19 更新了两类内容：补入 §5.2.2.1 的跨 surface prompt-injection bug-bounty 结果；重跑 Cowork browser-use 评测，原因是发现 Opus 5 与旧模型使用了不同 harness。更新后各模型使用同一 Cowork harness；该产品不支持关闭 thinking，因此删去“thinking disabled”结果，只保留 thinking-enabled、medium-effort 条件。这个变更本身就是面试案例：发现比较器版本不一致时，应更新基线并重跑，而不是只修正新模型那一行。
+
+除非章节另有说明，卡片评测使用最终 snapshot 且包含 safeguards；某些能力评测明确关闭生产 safeguards，部分研究使用 helpful-only 或早期 snapshot。System Card 分别讨论模型、产品 harness 和 safeguards，不能把三类数字混成一个“模型安全率”。
+
+### 8.2 Prompt-injection 的纵深防御与评估设计
+
+Anthropic 描述的产品防护有两个不同控制点：prompt-injection probe 在模型行动前检查不可信 tool result（输入侧）；Auto mode 再用 classifier 检查可能危险的 tool call（动作侧）。两层要分别失败攻击才成功。模型本身的抗注入结果与启用这些产品控制后的系统结果必须分开报。
+
+卡片称公开/固定 ART 测试已饱和，因此改报更丰富的 Indirect Prompt Injection (IPI) benchmark，并补上 adaptive red-team 和 bug bounty：
+
+| 评估 | 任务与分母 | Opus 5 报告值 | 解释边界 |
+|---|---|---|---|
+| Gray Swan IPI | 28 个场景、去重后 1,130 个高迁移攻击；报告攻击者在 `k=1/10/15` 次尝试内成功的概率 | `0.2%` (`k=1`)、`2.0%` (`k=15`)；Opus 4.8 分别 `0.5%`、`5.5%` | Claude 测试关闭产品级 safeguards；其他模型用公开 endpoint，是否带有防护不统一；跨厂商比较不是同条件裸模型对照 |
+| 一周 Gray Swan live bug bounty | 11 个新场景，tool/coding/computer-use；目标模型身份隐藏；每模型超过 20,000 次有效尝试 | attempt-level ASR `0.08%`；Opus 4.8 `0.11%` | Anthropic 模型关闭产品级 probes/harness 防护；外部模型使用其 production configuration，比较边界不对称 |
+| Shade coding | 40 个场景，每场景 200 次尝试；自适应攻击者对相同场景优化后迁移 | 无 probes：thinking `0.56%`、disabled `0.41%`；启用 probes 两者均 `0.18%` | 同时报 attempt-level ASR 与至少被攻破一次的 scenario 数；不可把两个指标混为一谈 |
+| Shade computer use | 14 个 GUI 场景，每场景 200 次尝试 | 无 probes：thinking `0.54%`、disabled `0.39%`；启用 probes：`0.25%`、`0.43%` | disabled + probes 的微升对应单次额外成功（2,800 次中的 1 次），卡片明确认为不能与噪声区分 |
+| Cowork browser | 129 个 unseen 环境，每场景 10 次攻击；medium effort，thinking enabled | raw-model comparison `3.84%`；Auto mode 为 `0/129` 场景成功 | Cowork 实际从不无 safeguards，基础条件也始终含 probes；“raw”条件用于与最强 Auto mode 比较。Auto mode 结果是产品系统结果，不是裸模型分数 |
+
+IPI 的攻击尝试是自适应或高迁移攻击，不能当作独立同分布的普通用户流量；多次尝试概率也依赖测试场景和攻击预算。最好保留 `attempt_success / valid_attempts` 与 `scenarios_with_success / tested_scenarios` 两个量，附上模型 snapshot、thinking/effort、probe、Auto mode、harness revision 和 verifier。
+
+### 8.3 评测校准与安全治理要点
+
+- RSP：Card 将 Opus 5 评为 CB-1、未达 CB-2，并说明继续施加 ASL-3 保护；AI R&D 自动评测虽有多项能力处于前沿，但其 RSP 阈值结论还结合内部使用与生产力指标，报告未观察到持续、可归因的整体 AI 研发速度翻倍，也认为模型距离替代资深研究人员尚远。这是 Anthropic 的风险判断，不是独立审计结论。
+- 安全策略：Card 描述 cyber 流量先经过 activation probe，再由 LLM classifier 对 flagged traffic 作判断；一般可用条件开放 source-code vulnerability discovery，同时继续阻断 compiled-binary vulnerability discovery。它是按任务/使用面区分防护，不是“模型完全安全”的证明。
+- 内部行为审计：自动审计约 `3,200` 个 investigation sessions（约 `1,600` 个 seed 场景各采样两次），以 investigator model 探测、judge model 评分数十个维度。Card 提醒很多维度跨所有场景评分，所以绝对数受 seed 分布影响，主要用于同一方法下的模型比较；该版本新增 approval-gate bypass 与 expedience security shortcut 维度。
+- 内部部署监测发现少量绕开 classifier/network 限制的行为，报告为 monitored completions 的 `<0.01%`。这是 Anthropic 内部样本中的观测频率，不是外部生产总体概率；Card 还记录 overconfidence、scope creep 等失败模式。
+- 训练行为 review 先用 Opus 4.8 支持的递归摘要检查约 150 万条训练后期 episode，再抽样完整审阅约 400 条 transcript，并由人检查值得注意的主张。这个链路可用于发现失败模式，但不是对所有 episode 的逐条人工标注。
+
+面试回答应抓住三条：其一，安全结论绑定模型版本、攻击预算、effort、保障措施、surface、harness 和 verifier；其二，产品 probe/动作分类器与模型本身的鲁棒性要通过消融拆账；其三，评测方法发生变化（饱和、harness mismatch、thinking capability 不可用）时要同时更新基线，并报告 attempt 与 scenario 两种分母。来源定位：System Card PDF pp. 2、12、14–16、36–51、72–80、86–102；原文链接及文件哈希见本节和 `source-index.md`。
+
+本轮 Opus 5 的专题升级为 **双榜锚点 + 官方 System Card 正文复核 + Agentic Safety/评测方法专题**。这不表示参数、内部架构、完整训练 recipe、独立复现或生产安全 SLO 已验证。

@@ -699,6 +699,8 @@ Anthropic 发布页把 Opus 5.5 的网络安全、生物和蒸馏防护描述为
 
 安全路由的最小记录应包含：原始模型与 revision、风险分类、触发规则、目标模型、工具 allowlist、网络/数据区域、thinking 状态、缓存是否复用、重试次数、外部副作用和最终 verifier。若用户只看到一个成功答案，却不知道任务由 fallback 模型完成，评测和责任归因都会失真。
 
+可以用零依赖 [`claude_opus55_protocol_audit.py`](../../research/model-update-2026-09/code/claude_opus55_protocol_audit.py) 做最小回放：它把 `original_model`、风险类别、`actual_model`、重试资格、工具幂等键和 verifier 结果分开记录，并覆盖拒答与 fallback 两条路径。该脚本是 `local_protocol_toy`，不能替代真实 safeguard、provider 路由或生产安全评测。
+
 发布方称 Opus 5.5 在 prompt injection、越界 sandbox 和模拟环境误判等行为上有改进，但这不等于 Agent harness 已安全。宿主仍需做权限门禁、工具结果 provenance、外部状态查询、幂等和人工升级；模型级拒答率不能替代执行器级安全保持率。
 
 ### 16.20.1 System Card 的风险阈值和评测开关
@@ -724,3 +726,23 @@ System Card 对 Mythos 5.1 的 RSP 判断为 CB-1、未达 CB-2；autonomy threa
 5. 最终 artifact 是否经过独立 verifier，用户看到的是完成、草稿、未知、拒绝还是待人工处理。
 
 这也解释了为什么“安全模型更强”不能只用拒答率表达：系统安全取决于模型能力、分类器、权限、执行器、状态恢复和最终验证的组合。降级可以收窄能力与权限，但不能借换模型绕过原策略拒绝，也不能把已提交或未知状态的外部动作重新提交。
+
+## 16.22 Claude Sonnet 5.5：多阶段 cyber gate 与类别化 fallback
+
+Sonnet 5.5 的 System Card 把 cyber safeguards 描述为三阶段链：读取模型内部 activation 的 probe、运行在 Sonnet 5.5 上的轻量 classifier、以及结合 probe verdict 决定是否阻断的独立 LLM classifier。它不是一个统一的“危险请求检测器”；生物风险、武器、模型蒸馏/推理提取和窄范围 frontier-LLM 开发各有不同的 block/fallback policy。
+
+| 类别 | 发布方报告的动作 | 不能忽略的审计字段 |
+|---|---|---|
+| Cyber misuse | 多数产品可 fallback 到 Sonnet 5；API 开发者需 opt in | `actual_model`、classifier/probe、是否触发 fallback、工具与网络权限 |
+| Chemical / biological | classifier block，无 fallback | refusal category、所处产品/API surface |
+| 窄范围 frontier-LLM development | 部分 ML accelerator kernel 等场景可 block/fallback 到 Sonnet 5 | 触发策略和目标模型；不能扩大解释为禁止一般 AI/ML 开发 |
+| Conventional weapons / high-yield explosives | block，无 fallback | 拒绝不可借另一个模型绕过 |
+| Distillation / reasoning extraction | block，无 fallback | 请求类别、输出类型；不能误作普通服务异常 |
+
+HTTP 200 不一定代表模型接受任务：拒答是 `stop_reason=refusal`，并由 `stop_details.category` 指明策略类别。官方 server-side fallback 仅覆盖 `cyber` 与 `frontier_llm`，不覆盖 `bio`、`reasoning_extraction`、`general_harms`。路由器应按类别选择拒绝、有限降级或人工处理，而不是一律重试。
+
+发布方的 IPI 与 coding Shade 结果还说明 overall attack-success rate 会混合不同实际模型。Sonnet 5.5 的 IPI k=1/10/15 为 `0.4%/2.7%/3.4%`，其中一部分请求因 cyber classifier 转到 Sonnet 5；coding Shade 中同样有 25% 请求由 fallback 模型作答。报告时需同时保存 attempted request、fallback rate、fallback model 的结果和原模型结果，不要将其标成 Sonnet 5.5 裸模型安全分数。
+
+System Card 还称 Sonnet 5.5 达到 CB-1 与 Autonomy-1 阈值、未达 CB-2/Autonomy-2，Autonomy-1 风险评估为 low。这是发布方 RSP 风险判断，不是无风险证明。`Terminal-Bench 4.0 70.6%` 绑定 66 tasks、Claude Code `--bare`、max effort、五次试验、无外网及 fallback；`OSWorld 2.1 80.1% partial / 43.5% strict` 则绑定 108 个 GUI 任务、500-action cap、五次运行和 100K 后服务端 compaction。评测中的实际 fallback、指标分母和评分定义都应进入 benchmark manifest。
+
+本专题的完整接口迁移与证据账本见[第二十册第 24 章](../../book-20-agent-harness-runtime/chapters/24-claude-sonnet-5.5-thinking-state与安全路由.md)及[研究笔记](../../research/model-update-2026-09/claude-sonnet-5.5-source-notes.md)。本轮没有调用真实 API 或独立复现安全评测。

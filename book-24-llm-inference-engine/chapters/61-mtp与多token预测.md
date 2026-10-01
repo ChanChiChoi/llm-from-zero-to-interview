@@ -294,3 +294,17 @@ MTP head、base model、tokenizer、template、position、dtype、量化和 engi
 MTP artifact 至少绑定 base model、head、tokenizer/template、position、dtype、quantization、grammar 和 engine ABI。启动时用固定 prefix 做 candidate/target 对照，运行时按 acceptance、p99、显存和协议错误动态关闭。关闭发生在一轮提交或回滚之后，保留正式 KV，丢弃临时候选。
 
 MTP 的合理定位是一个可回退的候选路径。它在目标 workload 上同时通过 token-level 等价性、结构化输出、工具安全、SLO、恢复和成本约束后才有生产意义；模型卡中的“支持多 token 预测”不能替代这些端到端证据。
+
+## 61.31 混合线性注意力模型的树形 MTP：GDN Tree-Scan
+
+在 attention-only transformer 中，树形 speculative verifier 通常用 ancestry mask 保证每个候选只关注 prompt 和祖先。但 recurrent-hybrid 模型还必须维护每条候选路径自己的递归状态。对 Gated DeltaNet 而言，节点状态应从 parent state 沿 root-to-node 顺序 scan/replay 得到；把 packed row 的上一个状态直接交给 sibling，会让它依赖一段从未发生过的递归历史，即使注意力 mask 本身没有错。
+
+单作者 arXiv 预印本 [GDN Tree-Scan](https://arxiv.org/abs/2609.23900v1) 报告了 Qwen3.6-27B-FP8 上的一个实现：FA2 tree-bias 处理 attention ancestry，branch-local GDN scan/replay 处理循环状态，MTP 形成候选树，device-side multidraft committer 执行 target 分布下的接受/残差采样，只有 accepted chain 的状态进入下一次 decode。partial acceptance 后还要把下一次 MTP 输入行映射到被接受路径的叶节点，不能误读被拒绝 sibling 的 hidden state。
+
+预印本在 clean B=1、temperature 0.6、四个 SWE/Codex tasks 上报告 cat6root 将 committed tokens/event 从 4.11 提升到 4.82，verify-forward 约 0.137/0.138 秒；token-weighted decode TPS 为 18.80→23.88（+27.0%），而 per-request-equal TPS 是 17.80→18.51（+4.0%）。解码吞吐不等于任务总墙钟加速：该工作负载反复 prefill 约 11K–14K tokens，且没有启用 prefix cache，论文没有提出通用 task-wall 提速数字。等价性依据是 40-turn p-rescore 与 native recurrent-oracle flip floor 的比较，不是 full distribution-distance proof；B=4、更多 seeds、request-cluster bootstrap 和 Stage-D timing 仍待完成。将这组数字作为外部预印本自报、绑定模型/批大小/温度/workload 的证据，不写成通用 serving 保证；本项目未运行其代码或复现实验。
+
+## 61.32 模型原生上下文与 Agent 客户端预算不是同一字段
+
+Qwen3.6-27B 与 35B-A3B 的模型卡都给出 262,144 native context；两篇 Qwen 官方博客中的 OpenClaw 示例都配置 `contextWindow=131072`、`maxTokens=16384`。35B-A3B 的百炼 API 示例另使用 hosted ID `qwen3.6-flash`。这不是规格冲突：native window、hosted alias、endpoint 限制和客户端/harness 的请求与生成预算属于不同层；官方示例没有解释为何采用较小窗口，也没有证明实际 endpoint 一定开放完整 native window。面试或部署账本应分别记录模型 ID/alias、native context、endpoint 实际限制、客户端窗口、单次输出上限与工具回合预留，不能把客户端示例反写成模型原生规格。
+
+证据见 [Qwen3.6-27B 研究笔记](../../research/model-update-2026-09/qwen3.6-27b-source-notes.md) 与 [Qwen3.6-35B-A3B 研究笔记](../../research/model-update-2026-09/qwen3.6-35b-a3b-source-notes.md)。两篇博客对百炼 API 状态的措辞均不足以代替真实 endpoint probe；本项目没有实际调用或验证账户、地区和限额。

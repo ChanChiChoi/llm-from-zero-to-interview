@@ -1164,7 +1164,19 @@ Qwen3.8 Max (0902) 的服务接入说明了为什么模型 alias、effort、工�
 4. 多模态消息、tool result、取消、超时和重试能否保持同一 session 的状态一致；
 5. DataCurve 泛化 Agent 结果是否被错误写入 0902 的模型级 dashboard。
 
-### 32.32.1 QwenCloud 动态限流与 endpoint 迁移
+### 32.32.1 QwenCloud Context Cache 的协议门禁
+
+Context Cache 的实现不能只保留一个 `cache_hit=true` 布尔值。Explicit cache 要校验 `cache_control.type=ephemeral`、`1,024` token 资格门槛、最多 4 个 marker 和 marker 向前最多 20 个 content block 的 lookback；超过 4 个 marker 时只有最后 4 个生效。达到 token 门槛不保证实际命中。并行工具调用如果把每个结果拆成多个 content block，可能把待复用前缀推过该窗口。
+
+文档另给出一个不同的 follow-up 规则：相对既有 cache block A 的 `other messages` 不超过 20 条时，可以命中 A、刷新 TTL 并建立扩展 block；超过 20 条时 A 不复用，服务按完整上下文建新 block。它按 message 计数，不能和 marker 向前检查的 20 个 content block 合并成一个阈值。Chat Completions、DashScope、Anthropic-compatible API 中 explicit/implicit cache 互斥；Responses 未开启 session cache 时，支持的模型仍可能自动使用 implicit cache。
+
+Explicit/session 的 cache block 有 5 分钟有效期，命中会刷新；implicit cache 没有固定 TTL，命中概率也不保证。文档中的典型计费因子为 explicit/session 创建 `1.25x`、命中 `0.10x`，implicit 创建 `1.00x`、命中 `0.20x`；产品页的实际美元价格字段必须单独绑定到当前 alias 和时点，不能把两套口径混成 GPU 成本。
+
+Responses session cache 还要把 `x-dashscope-session-cache: enable`、`previous_response_id`、account 和 model 绑定到同一 session lineage。Responses API 的命中字段是 `usage.input_tokens_details.cached_tokens`；Chat Completions cache 示例则用 `usage.prompt_tokens_details.cached_tokens`，不能跨 endpoint 套字段。Responses API 会延续前轮 input/output 并追加当前 input，但前轮 `instructions` 不会自动继承，调用方要逐轮重发；`previous_response_id` 不能与 `conversation` 同用，`store=false` 的 response 不能续接。总 token、cache creation 和 hit 也不能用简单减法推导 prefill、KV 字节或账单。
+
+本轮的 [`qwen_max0902_cache_contract_audit.py`](../../research/model-update-2026-09/code/qwen_max0902_cache_contract_audit.py) 用标准库验证这些 host-side invariants，并覆盖 thinking + forced tool、`reasoning_effort`/`thinking_budget` 冲突、implicit 非保证命中和 session continuation。它是 `local_protocol_toy`，不代表 QwenCloud 的生产调度、实际命中率或结算结果。
+
+### 32.32.2 QwenCloud 动态限流与 endpoint 迁移
 
 2026-09-21 的 QwenCloud 文档示例已经从 `dashscope-intl.aliyuncs.com` 迁移到 `maas.qwencloudapi.com`。例如 OpenAI-compatible mode 使用 `https://maas.qwencloudapi.com/compatible-mode/v1`，DashScope API 使用 `https://maas.qwencloudapi.com/api/v1`，Realtime WebSocket 也迁移到同一 host。这个变化首先影响 provider adapter、认证、路由和 transport 回归；它不能证明模型权重、架构或能力升级。历史日志可以保留旧 endpoint，但当前 manifest 必须明确 endpoint 生效时间和文档版本。
 
@@ -2002,10 +2014,49 @@ TTFT/TPOT/p95/429/incomplete/verifier/artifact
 
 OpenAI 的 Agents 文档还要求把 Agents API、Agents SDK 和 Responses API 的状态所有权分开。因而部署 GPT-6 Sol 时，不能仅凭模型页的 `hosted_shell` 或 `computer_use` 就声称目标硬件、sandbox、网络访问和生产 SLO 已通过；这些必须由对应 executor、权限和 verifier 实测。
 
-资料边界：GPT-6 Sol 当前是 AA 单榜资料级闭环，DataCurve 没有精确 Agent 行。本节的成本公式和 serving trace 是官方模型/API 合同驱动的工程账本，不是模型内部架构或真实 provider 性能复现。
+资料边界：GPT-6 Sol 当前是 AA 单榜资料级闭环 + 当前时点复验 + local protocol toy，DataCurve 没有精确 Agent 行。本节的成本公式和 serving trace 是官方模型/API 合同驱动的工程账本，不是模型内部架构或真实 provider 性能复现。可运行的 [`gpt6_sol_contract_audit.py`](../../research/model-update-2026-09/code/gpt6_sol_contract_audit.py) 仅验证 whole-request threshold、cache prefix 变化、幂等和 verifier 的本地逻辑。
+
+### 32.55.2 配置更新、compaction 与成本门禁的最小回放
+
+服务端实现或本地 harness 至少应拒绝三类隐性错误：把 `configuration_update` 当成换 checkpoint，把 compaction 后的旧 cache prefix 当成必然命中，把 permission-approved 误记为 artifact 已验证。toy 先保留 canonical compaction item，再用新的 prefix 做 cache lookup；同时把 `reasoning_tokens + visible_output_tokens` 计入 output/context，并对超过 `272K` 的整次请求应用价格倍率。这样得到的是可解释账本，不是 provider profiling。
+
+### 32.55.3 GPT-6 Sol/Luna：EU data residency 与 processing gate
+
+OpenAI 官方 [data residency guide](https://developers.openai.com/api/docs/guides/your-data.md) 明确说明：GPT-6 Sol 与 Luna 的 EU data residency 只对 **Standard processing 的 Responses API 和 Chat Completions** 可用。模型页所说的 `Standard processing` 是数据驻留/服务处理资格；它不同于 GPT-6 `reasoning.mode=standard`，后者是 test-time execution mode。部署 manifest 应分别记录 `processing_mode` 与 `reasoning.mode`，不可因为同名 `standard` 就推导出 residency eligibility。
+
+Regional storage 与 regional processing 也不是一回事：前者约束合同定义的 customer content 静态存储位置；只有 endpoint/model 的 regional-processing 支持表明确列出的组合，才能说明推理在该区域执行。system data（账号、用量、计费与支持元数据、structured-output schema 等）不属于 customer-content residency 保证，Remote MCP 的请求数据由第三方自己的政策管辖；客户或终端用户基础设施的位置还可能导致区域外传输。非美国地区需满足适用的 abuse-monitoring/retention controls，regional processing 在可用区域有 10% uplift。
+
+Batch/Flex 的价格折扣与 Fast mode 的加价不是 residency 资格声明；若 endpoint × region × processing mode 的官方表格没有明确支持，就记为 `not_established`，先验证服务合同再上线。建议对 capability tuple 做显式门禁：
+
+```text
+model × endpoint × region × processing_mode
+    -> storage_eligible / inference_region / retention_controls / cost_uplift
+```
+
+这是平台服务边界，不证明 Sol/Luna 的内部架构、权重路由或法律合规；外部工具、日志、用户设施和合同条款仍需独立审计。
 
 ## 32.56 GPT-6 Luna：sibling serving 与全请求计费
 
 GPT-6 Luna 的官方合同给出 `1,050,000` context、`922,000` maximum input、`128,000` maximum output，以及 input `$0.10/M`、cached input `$0.01/M`、cache writes `$0.125/M`、output `$0.50/M`。超过 `272K` input tokens 后，整次请求 input/cache 按 2x、output 按 1.5x；Batch/Flex 为 50%，Fast mode 为 2x。Serving 账本必须把 reasoning、可见输出、工具 schema/result、缓存、compaction、retry 和 verifier 失败成本一起计算。
 
+Luna 与 Sol 共享上述 EU data-residency processing gate：仅 Standard processing 下的 Responses/Chat Completions 有明确支持；`Standard processing` 不等于 `reasoning.mode=standard`。regional storage/processing、system-data exclusions、Remote MCP 第三方边界与 retention/cost controls 统一见 32.55.3。Luna 的 Fast mode、Batch/Flex 价格不能自动视作 EU-residency eligible；部署仍应逐项校验 `model × endpoint × region × processing_mode`，并分别计算它自己的 token 与地域成本。
+
 Luna 与 Sol 不能共享 provider benchmark 或 DataCurve Agent 结果。DataCurve 当前没有精确 `mini_swe_agent_gpt_6_luna_*` 行；本节的 sibling routing、cost ledger 和 replay trace 只建立在官方模型/API 合同上，不证明 Luna 的内部架构、生产 kernel、目标硬件性能或生产 SLO。详见 [`gpt-6-luna-source-notes.md`](../../research/model-update-2026-09/gpt-6-luna-source-notes.md)。
+
+## 32.57 GPT-5.6 Luna：persisted reasoning、compaction 与 cache replay
+
+GPT-5.6 Luna 的 serving trace 需要把模型档位、effort、`reasoning.context`、reasoning item、function call/output、tool-search 结果、compaction item 和 cache 统计分开。`all_turns` 是同家族 opaque reasoning 的可用范围，不是可见 CoT、永久记忆或 KV cache；`current_turn` 可以减少旧 reasoning 的渲染，但旧 item 仍可能留在协议 payload 中。
+
+GPT-5.6 的 prompt caching 以至少 `1,024` 个 visible input token 为门槛，支持 explicit/implicit breakpoint，单请求最多四次 explicit cache write，`30m` 是文档给出的 TTL。compaction 替换早期上下文后，逻辑上相同的下一请求也可能失去旧 cache prefix；因此 serving 账本必须同时记录 `cached_tokens`、`cache_write_tokens`、compaction 次数、恢复延迟、重复工具调用和单位成功成本。
+
+工具搜索的 hosted/client 两种路径还要分别记 `execution` 和 `call_id`。schema 被加载不等于权限授予；permission、sandbox、executor receipt、幂等键和 artifact verifier 仍由宿主负责。无网络 [`gpt56_luna_state_replay_audit.py`](../../research/model-update-2026-09/code/gpt56_luna_state_replay_audit.py) 已覆盖这些拒绝路径，证据等级固定为 `local_protocol_toy`，不代表生产 endpoint 或硬件 profiling。
+
+## 32.58 Kimi K3：adaptive DSpark、cache pointer 与 ROCm 版本门禁
+
+K3 的 hybrid state 让 speculative serving 同时管理 MLA/context KV、KDA recurrent state 和 draft/target verification metadata。vLLM main 的 adaptive DSpark path 用 confidence head 为每个位置输出 draft 接受概率；一个 `k+1` CUDA graph capture 可以承载批内不同 verify 长度，设备 offsets/masks 记录每个 request 的实际边界。由于 adaptive scheduler 会重写 scheduled-token 数，verify row 必须依据 request 状态分类；不能把固定长度 scheduler 的等式继续当成通用规则。
+
+DSpark context KV 还要考虑 buffer 重新绑定。vLLM 2026-09-28 合入的 K3 修复在 cache 层 `data_ptr()` 改变时清掉并重建 context pointer cache，并限制该更新不能在 graph capture 内发生。服务端恢复/重分配测试应显式覆盖：cache owner 变化、地址重用、图重捕获和拒绝 token rollback。固定 `v0.30.0` tag 早于这项修复与 9 月 23 日的 variable-length commit，不能把 main 功能反写成 stable 支持。
+
+ROCm 部署还需要精确匹配 SiTU 权重布局和 AITER kernel。最新 MI355X recipe 选择 SiTUv2 a4w4 FlyDSL 路径，需要相应 vLLM/AITER 版本；带 `A8W4` 的旧 flag 名是兼容 alias，不代表实际执行 a8w4。独立设置 AITER 的 a8w4 dispatch flag而没有同步 vLLM weight-shuffle flag，可能使 kernel 与 packed weight layout 不一致，且没有运行时错误；相关修复 PR 在本次快照仍 open。AITER MLA 对 DSpark 的非因果 draft block 同样有 query-length/dtype capability gate，不支持时应拒绝或切至 `TRITON_MLA`。
+
+版本和结果必须分层：vLLM `v0.30.0` 仍是 stable，含 ROCm non-causal MLA PR #55966，但不含 SiTUv2 a4w4 PR #53940；9 月 29 日最新 `v0.31.0rc1` 与 K3 无关。固定 recipe 指向 ROCm nightly，并引用 SemiAnalysis MI355X AgentX lane。lane 的真实评测使用 block rejection；吞吐专用 sweep 的 `synthetic` 模式用固定 golden acceptance length 跳过 target verification，因此只能讨论受控接受长度假设下的吞吐，不能证明准确性或真实 acceptance rate。权重加载、硬件数值、cache recovery 与生产 SLO 仍待目标机器验收。细节见[Kimi K3 研究笔记](../../research/model-update-2026-09/kimi-k3-source-notes.md#2026-09-29-vllm-recipeadaptive-dspark-rocm-serving-)。

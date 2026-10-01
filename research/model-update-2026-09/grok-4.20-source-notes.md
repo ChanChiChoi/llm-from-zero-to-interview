@@ -1,12 +1,12 @@
 # Grok 4.20：多 Agent 研究运行时、推理状态与工具协议
 
-核验日期：2026-09-20。本笔记只研究已经出现在 Artificial Analysis 的 `Grok 4.20 0309 v2 (Reasoning)`。DataCurve DeepSWE 当前没有精确的 `mini_swe_agent_grok_4_20_*` 行，因此不迁移 Grok 4.5 或 Grok 4.6 的 Agent 结果。xAI 官方文档、模型目录和 release notes 用于核验该榜单候选及扩展面试知识，不作为新的模型发现入口。
+首次核验日期：2026-09-20；最近复核：2026-09-24。本笔记只研究已经出现在 Artificial Analysis 的 `Grok 4.20 0309 v2 (Reasoning)`。DataCurve DeepSWE 当前没有精确的 `mini_swe_agent_grok_4_20_*` 行，因此不迁移 Grok 4.5 或 Grok 4.6 的 Agent 结果。xAI 官方文档、模型目录和 release notes 用于核验该榜单候选及扩展面试知识，不作为新的模型发现入口。
 
 ## 1. 榜单锚点与证据边界
 
 ### Artificial Analysis
 
-[Grok 4.20 0309 v2](https://artificialanalysis.ai/models/grok-4-20) 的当前 canonical 页面标题为 `Grok 4.20 0309 v2 (Reasoning)`。本轮通过 `7890`、`8098` 和 `1234` 三条代理获取 HTTP 200，文件均为 513,564 bytes，SHA-256 均为 `2fc88248faf152f46f659310f300f2fe3e5b84e419babb9c8c7dc3752452cdd8`。
+[Grok 4.20 0309 v2](https://artificialanalysis.ai/models/grok-4-20) 的 canonical 页面标题为 `Grok 4.20 0309 v2 (Reasoning)`。2026-09-20 的三代理历史快照均为 513,564 bytes、SHA-256 `2fc88248faf152f46f659310f300f2fe3e5b84e419babb9c8c7dc3752452cdd8`。2026-09-24 经 `10.24.27.134:7890` 复抓 HTTP 200，当前快照为 3,857,337 bytes、SHA-256 `d56d4557d8a661ee9c3015c6a3661f5baae6c00f9b16c5b2acf5eabcd3e61300`。
 
 详情页当前字段为：
 
@@ -14,14 +14,16 @@
 - Artificial Analysis Intelligence Index：`25.6550155187053`，且 `intelligenceIndexIsEstimated: true`；页面约显示 26。
 - `contextWindowTokens: 2,000,000`；输入为 text/image，输出为 text；参数字段为空，开放性为 proprietary。
 - 输入价格 `$1.25/M`、输出价格 `$2.50/M`、缓存命中价格 `$0.20/M`；页面性能数据源标为 first-party provider `SpaceXAI`。
-- 输出速度中位数 `97.0079005937196` tokens/s；首 token 时间中位数 `22.709823743` s；端到端响应时间中位数 `27.864043110080814` s。
+- 2026-09-24 页面快照显示输出速度中位数 `106.190642707844` tokens/s、首 token 时间中位数 `21.53034693` s、端到端响应时间中位数 `26.23885972594964` s。页面性能来源标为 first-party provider `SpaceXAI`；这些仍是 AA/provider 测量字段，不是模型 revision 或能力变化证据。
 - 当前 Artificial Analysis 对该页面标记 `deprecated: true`、`deprecatedTo: grok-4-3`。这只是第三方目录的当前状态；xAI 当前文档仍列出 Grok 4.20 的模型名和别名，不能用目录状态替代 API capability probe。
+
+当前页另有一条重要的评测时效声明：模型已 deprecated，Artificial Analysis 只继续更新默认 **10K input token workload** 的性能基准；其他 workload 的结果属于历史数据、不再更新。因此不能把页面上所有 benchmark workload 或历史性能曲线都描述为当前测量。当前响应仍展示 estimated Intelligence Index `25.6550155187053`、2M context 和上述速度/延迟，但页面没有把每个汇总字段逐一绑定到“仍在更新的 10K workload”；报告应记录抓取时间、输入 workload 和指标的更新时间/历史状态，不能仅凭页面刚刚抓取就称所有数字都是新测结果。`deprecatedTo: grok-4-3` 是 AA 目录字段，不是 xAI 官方迁移或 API 下线公告。
 
 这里存在一个必须保留的版本/提供方差异：Artificial Analysis 记录 2M context，而 xAI 当前模型页与 HTML 模型注册表记录 1M maximum prompt/context。它们可能对应不同的 snapshot、服务配置或第三方目录口径；本项目不把两者强行合并为一个无条件上下文结论。
 
 ### DataCurve DeepSWE
 
-[DataCurve DeepSWE](https://deepswe.datacurve.ai/) 本轮通过三条代理均返回 HTTP 200，当前响应为 48,451 bytes，SHA-256 为 `67a6b5350a1bc986e814097a87928f5064ba6955ca78be44795e11b2413f2870`。页面可见的 Grok 配置包括：
+[DataCurve DeepSWE](https://deepswe.datacurve.ai/) 的 2026-09-20 历史响应为 48,451 bytes、SHA-256 `67a6b5350a1bc986e814097a87928f5064ba6955ca78be44795e11b2413f2870`；2026-09-24 经 7890 复抓 HTTP 200，响应为 268,036 bytes、SHA-256 `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`。两次页面响应大小不同不代表 Grok 4.20 评测发生变化。当前页面可见的 Grok 配置包括：
 
 - `mini_swe_agent_grok_4_5_high`；
 - `mini_swe_agent_grok_4_6_low`、`medium`、`high`、`xhigh`。
@@ -30,7 +32,7 @@
 
 ## 2. xAI 官方身份与服务字段
 
-主要来源是 [Grok 4.20 模型页](https://docs.x.ai/developers/models/grok-4.20) 及其 [Markdown 版本](https://docs.x.ai/developers/models/grok-4.20.md)。本轮模型页 HTML 为 396,958 bytes、SHA-256 `7997425c354b938ae78881b6c0b5d6a4efc9c10dfbf687c70828575c80fd3f34`；Markdown 为 1,564 bytes、SHA-256 `99057608aeb1a4e6ace5d87bf6c4b27b3bff4af5248babad475500da31fdc2e3`。
+主要来源是 [Grok 4.20 模型页](https://docs.x.ai/developers/models/grok-4.20) 及其 [Markdown 版本](https://docs.x.ai/developers/models/grok-4.20.md)。历史模型页 HTML 为 396,958 bytes、SHA-256 `7997425c354b938ae78881b6c0b5d6a4efc9c10dfbf687c70828575c80fd3f34`；Markdown 为 1,564 bytes、SHA-256 `99057608aeb1a4e6ace5d87bf6c4b27b3bff4af5248babad475500da31fdc2e3`。2026-09-24 通过 7890 复抓 Markdown 仍为 HTTP 200、1,564 bytes、同一 SHA-256；其模型 ID、1M context 与价格/限流合同未见快照变化。
 
 官方 Markdown 页面明确给出：
 
@@ -193,7 +195,7 @@ model proposal
 4. 第二十四册：1M/2M context discrepancy、prompt cache、compaction、TTFT/TPOT、tool-turn budget、区域限流和单位成功成本。
 5. 第七册：AA Intelligence Index 与 DataCurve DeepSWE 的配置/harness 证据分层；Grok 4.20 没有精确 DataCurve 行，不迁移相邻版本结果。
 
-当前状态：**资料级闭环（AA 单榜）**。已具备精确 Artificial Analysis 条目、DataCurve 精确行缺失证据、xAI 模型页/注册表、multi-agent/reasoning/compaction/tools/release notes 和论文负检索；没有独立 Grok 4.20 技术报告、公开权重、参数架构、完整训练/后训练 recipe、生产 kernel、硬件 profiling、线上 acceptance rate 或独立 Agent benchmark。因此不新增重复 Transformer 架构章节，先复用既有 reasoning、Agent serving、工具协议和评测章节。
+当前状态：**AA 单榜内容专题闭环（runtime/API 与 harness）**。已具备精确 Artificial Analysis 条目、DataCurve 精确行缺失证据、xAI 模型页/注册表、multi-agent/reasoning/compaction/tools/release notes、论文负检索，以及第二十册第 19.30 节和配套面试/练习；2026-09-29 又补齐 multi-agent beta、API/tool 限制、opaque continuation 与全体 Agent 成本合同。没有独立 Grok 4.20 技术报告、公开权重、参数架构、完整训练/后训练 recipe、生产 kernel、硬件 profiling、线上 acceptance rate 或独立 Agent benchmark。因此不新增重复 Transformer 架构章节。
 
 ## 9. 来源清单
 
@@ -219,3 +221,16 @@ model proposal
 - [arXiv 标题精确检索："Grok 4.20"](https://arxiv.org/search/?query=%22Grok+4.20%22&searchtype=title)：本轮无精确标题结果。
 - [xAI Python SDK](https://github.com/xai-org/xai-sdk-python)：官方 SDK 入口；用于确认多 Agent、工具和 Responses 的调用生态，不等于 Grok 4.20 权重或训练实现。
 
+## 2026-09-29：Multi-agent API 限制、Beta 与成本账本补证
+
+经 `10.24.27.134:7890` 重新获取 xAI 官方 [Multi Agent 文档](https://docs.x.ai/developers/model-capabilities/text/multi-agent.md)，HTTP 200，19,603 bytes / SHA-256 `0463d9d2022fd9453ece718e3fc898103c9cab20dc8cd4a2601d7c92b0fab6d4`。同日模型 Markdown 为 1,564 bytes / `99057608aeb1a4e6ace5d87bf6c4b27b3bff4af5248babad475500da31fdc2e3`，与 9 月 24 日固定快照一致；Context Compaction Markdown 为 12,281 bytes / `466906990c559aeb84c16f785764f47ba9c735d7d7c821ca6ebd00511f33a938`；Release Notes Markdown 为 18,182 bytes / `ff4c876fbf0707ee7439b06357af40f5acc1103b4e7a9b264be7909f8a8753c7`。Release Notes 仍以 March 2026 条目标记 Grok 4.20/Multi-agent 已上线；本次没有发现该服务新的专属发布说明。
+
+官方 Multi Agent 页面明确把能力标为 **beta**，API interface/behavior 可能变化，并补足了可操作的服务边界：
+
+- 服务支持 xAI SDK 与 Responses API；OpenAI Chat Completions API 不支持该变体。
+- 内置工具与 Remote MCP 可用；client-side function calling/custom tools 当前不支持。不能把普通 Grok 4.20 的 function-calling 能力直接套到 multi-agent 服务对象。
+- `max_tokens` 参数不支持。文档提供 `previous_response_id` 多轮续接方式；集成测试应固定 Responses API、状态续接方式和输出预算字段，而不是假定普通 Chat Completions 参数可移植。
+- 默认仅返回 leader 的工具调用和最终回答；子 Agent 的中间 reasoning、工具调用与输出是加密状态，需通过 xAI SDK 的 `use_encrypted_content=True` 请求携带。它仍是不可读 opaque state，不是完整可审计的明文 trace。
+- leader 与所有 sub-agents 消耗的 input/output/reasoning tokens 都计费；任一 Agent 发起的 server-side tool call 也计入工具费用。官方建议从 response `usage` 与 `server_side_tool_usage` 观察用量。
+
+因此 4-agent/16-agent 对比除了延迟和最终答案，还应分别记录实际全体 Agent token、server-side tool usage、可观察 leader 输出、opaque continuation state 是否携带、multi-turn 恢复结果与单位成功成本。Beta 文档明确限制了接口形态，但没有公开内部调度算法、worker 权重或训练架构；这些仍不能从 API 行为反推。

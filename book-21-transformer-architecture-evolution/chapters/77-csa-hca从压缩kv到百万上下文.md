@@ -153,3 +153,26 @@ token hidden state
 TileLang 参考 kernel 显示了 `[128,128]` block 的 FP8 activation quantization、FP4 quantization、FP8/FP4 GEMM、稀疏 attention online softmax 和 HC Sinkhorn 路径；FP4 权重沿 K 维打包后参与 GEMM。官方 inference README 的 `EXPERTS=384`、`MP=8` 是转换示例参数，不能改写为所有硬件的生产 TP/EP 结论。FP4/FP8 的 scale、KV cache dtype、专家 dispatch、workspace 和通信需要与 GPU 型号、并行拓扑及 batch 一起 profiling。
 
 因此本章新增的实现证据可以回答“公开参考代码怎么把概念串起来”，但还不能回答“线上 1M context 一定达到多少 tokens/s”。后者需要固定权重、commit、GPU、batch、prefill/decode 比例、cache 命中、压缩召回和 verifier，并把发布方 benchmark 与本地结果分栏。
+
+## 2026-09 更新：SGLang 的 SWA 分支点缓存与 V4 serving kernel
+
+### 共享前缀的两个状态不能混成一个 cache hit
+
+把一个大 system prompt 后接多个 Agent 子任务想成树：共同前缀只 prefill 一次，每个分支追加自己的 question 和 tool history。普通 radix cache 可能保留完整 KV，但 DeepSeek V4 还要维护滑动窗口分支的状态。chunked prefill 清理窗口外的 SWA slots 后，后续 sibling 即使命中 Full KV，也未必能从正确的分叉位置恢复 SWA；此时服务端需要重新计算相应前缀，或者会错误地把不完整状态当作完整命中。
+
+SGLang `v0.5.20` 的统一 radix tree PR [#34565](https://github.com/sgl-project/sglang/pull/34565) 让 SWA 状态在分支点继续保留：先按分支位置调整窗口外 slots，把新分支插入 tree，再清理其余无用状态。这样 branch point 成为一等缓存边界。它需要额外状态占用，因此优化目标不是“永远不释放”，而是在复用概率、缓存容量和后续请求之间做生命周期管理。
+
+PR 的 DeepSeek-V4-Flash-0731 shared-prefix workload 固定 TP=2、FlashInfer MXFP4、DSpark，system prompt 24,576 tokens，question 8,192，output 128；64 条请求分成 8 个共享前缀组。开启 out-of-window free 时，branch-point caching 把 token hit rate 从 `43.81%` 提到 `60.75%`，mean TTFT 从 `1.570s` 降至 `1.070s`，p95 TTFT 从 `3.427s` 降至 `2.373s`；input throughput 从 `66.3K` 到 `70.5K tokens/s`。这是 SGLang PR 自报的指定负载结果，不是本地复现，也不能替代真实 Agent workload 的 p95/p99 与单位成功成本。
+
+面试追问应落到状态账本：Full KV、压缩 KV、indexer state、SWA slots 和 overlap tail 是否分别有 owner、branch key、TTL、eviction 与 restore 规则？工具调用造成分支后，`call_id`、工具结果和 verifier artifact 是否也绑定在同一个 task lineage？只报一个 prefix hit rate 会掩盖这些问题。
+
+### CSA/HCA kernel 优化必须绑定硬件与 baseline
+
+SGLang `v0.5.20` release 还收录了两类 DeepSeek V4 serving 路径：
+
+| 后端/硬件 | 发布的实现证据 | 数字应如何理解 |
+|---|---|---|
+| B200（SM100/103） | TRT-LLM attention kernel 覆盖 V4 的 CSA/HCA，与 FlashMLA 比较 | PR #30805 报告 FP8/TP1 单元 kernel prefill 约 `1.2x`、decode 约 `1.45x`；不是 Agent 端到端或所有 V4 变体结果 |
+| 4× RTX PRO 6000（SM120） | DeepGEMM paged-MQA sparse indexer、FlashInfer sparse prefill、DeepGEMM FP4 MoE 与 SWA page-split 改进 | PR #29927 报告相对 torch fallback 的单请求 TPOT 最多 `3.4x`；同一 PR 将 HC prenorm 的附加贡献约 `3.2%` 单独披露，baseline/backend 条件必须同时报告 |
+
+硬件专用实现说明 attention 的收益来自多层协作：稀疏索引 kernel 影响候选准备，CSA/HCA kernel 影响实际读取，MoE backend 影响 expert compute，SWA page layout 影响每步内存搬运。不能把某一个 kernel 的倍数当成模型能力提升。SGLang release/PR 记录的是框架实现证据；本机没有相同 GPU、完整权重和固定 benchmark 时，只能标为发布方结果，不能声称复现或生产 acceptance。

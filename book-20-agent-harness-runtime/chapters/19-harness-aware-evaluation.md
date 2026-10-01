@@ -312,6 +312,12 @@ environment, verifier, retries, cost and latency
 
 此外，xAI 的普通模型页写 1M maximum prompt，而 Artificial Analysis 当前页面写 2M context；这是 capability manifest 的冲突，不应在评测报告中静默选择较大的数字。请求前应按精确 model ID/endpoint 做上限探测，并把 compaction、prompt cache、工具 schema/result 和输出预算列入成本账本。没有这些字段，所谓“长上下文/多 Agent 更强”无法复现。
 
+评测结果还要带上时间与 workload 标签。Artificial Analysis 于 2026-09-24 将该条目标记为 deprecated，并明确只继续更新默认 10K input token workload 的性能基准；其他 workload 结果是历史数据、不再更新。页面当前仍显示 estimated Intelligence Index `25.6550155187053`、2M context、输出速度 `106.19 tokens/s`、TTFT `21.53s` 和端到端时间 `26.24s`，但不能仅因页面刚抓取就把所有历史 workload 数据都称为当前测量。报告应逐项记录 snapshot、输入 token workload、更新时间和指标来源；AA 的 `deprecatedTo: grok-4-3` 也不能替代 xAI 对 API 可用性或迁移路径的正式说明。
+
+xAI 官方 Multi Agent 文档还把 `grok-4.20-multi-agent` 标为 beta，并给出单独的 API 能力边界：使用 xAI SDK 或 Responses API，不支持 Chat Completions、client-side function calling/custom tools 或 `max_tokens`；内置工具与 Remote MCP 可用。多轮可用 `previous_response_id` 续接。默认只返回 leader 的工具调用和最终结果，子 Agent 中间状态只有通过 `use_encrypted_content` 才以 opaque 加密内容携带。评测 manifest 因而还要固定 API surface、beta 文档日期、续接方式和 encrypted-state 开关，避免把普通模型的工具/输出参数合同当成 multi-agent 变体的合同。
+
+成本同样必须按整个协作系统统计：leader 与子 Agent 的输入、输出、reasoning tokens 全部计费；任何 Agent 调用的 server-side tool 也计费。对照 4/16 Agent 时，除 end-to-end 成功和 wall-clock 外，还应读取响应中的 `usage`、`server_side_tool_usage`，报告全体 token、工具调用、单位成功成本和 continuation 成功率。子 Agent 的 opaque state 便于恢复但不会自动提供可读审计 trace，故来源、任务分片、失败/重试和 verifier 记录仍需由应用层维护。详见[研究笔记](../../research/model-update-2026-09/grok-4.20-source-notes.md#2026-09-29-multi-agent-api-限制beta-与成本账本补证)。
+
 ## 19.31 Gemini 3.8 Flash：把模型、Interactions 和工具 harness 分层
 
 Gemini 3.8 Flash 的 DataCurve high 行是一个完整系统配置，而不是裸模型测量：`gemini-3-8-flash`、high thinking、`mini-swe-agent`、工具、任务环境和 verifier 共同决定 Pass@1、Pass@4、输出 token、Agent steps 和成本。评测 manifest 应同时记录模型 snapshot、thinking level、`max_output_tokens`、Interactions state 模式、工具 schema、Computer Use 审批策略、缓存命中、任务仓库 revision、重试和 verifier 版本。
@@ -395,8 +401,115 @@ Anthropic 对 Opus 5.5 的长任务描述强调更少的工具调用、步骤和
 
 Opus 5.5 的官方 API 文档把 harness 的状态账本再推进了一层：thinking block 与生成模型和 conversation 前缀绑定，tool-call 之间的进度默认可能以空的 thinking block 返回，按需 compaction 会产生签名摘要，fast mode 则在同一模型上切换更快推理配置。评测 trace 至少保存 `model_id`、`thinking_binding`、`prefix_hash`、`compaction_digest`、`tool_schema_version`、`speed`、`usage.speed` 和错误/拒答字段；否则无法重放一次“模型能力下降”到底是状态丢失、工具契约不兼容、上下文压缩还是限流。
 
+可运行的最小状态回放见 [`claude_opus55_protocol_audit.py`](../../research/model-update-2026-09/code/claude_opus55_protocol_audit.py)。它用签名摘要、prefix hash、工具调用/结果 lineage、compaction replacement 和幂等 ledger 检查“重放是否重复副作用”；同时把 fallback 的实际模型与原始模型分账。该 demo 不调用真实 API，不解密 opaque thinking，也不证明线上 harness 的 SLO。
+
 同样不能把模型级 refusal 当作 harness 级完成。官方契约允许 HTTP 200 搭配 `stop_reason: "refusal"` 和 policy category，fallback 触发后要把实际执行模型和最终 artifact 分开计分。来源：[What's new](https://platform.claude.com/docs/en/models/opus-5-5/whats-new-opus-5-5.md)、[Fast mode](https://platform.claude.com/docs/en/build-with-claude/fast-mode)。
 
 System Card 的安全数字也必须进入同一条 trace：Claude Code malicious refusal `79.8%`、dual-use/benign success `99.8%`、malicious computer-use refusal `79.46%`；Gray Swan IPI k=1/10/15 为 `0.1%/0.7%/1.0%`，约 18% rollout fallback 到 Opus 4.8。coding Shade 的无 safeguards/probe 开启结果为 `54.61%/11.13%`，computer-use probe 为 `0.04%`，browser auto 为 `0/110`。这些数的分母、probe、fallback 和 safeguards 都要保留，否则无法解释“拒答率下降”到底来自模型行为还是路由。
 
 OSWorld 2.0 的 partial/strict `81.8%/48.7%` 还揭示了 compaction 的评测责任：108 tasks、1080p、最多 500 actions、5 runs、完整 screenshot，以及超过 100K tokens 后的 server-side compaction 都是条件。多 Agent 的约 `2.7x`/`2.8x` speedup 使用 derived latency；harness 应额外记录共享资源、排队和真实 wall-clock，不能直接把论文式 speedup 当作线上 SLO。
+
+## 19.36 DeepSeek Harness Preview：把 runtime 合同写进评测 manifest
+
+DeepSeek Harness 的官方文档提供了一个很具体的 runtime case study，但它不是 V4.1-Flash 的架构报告。它把 Web UI、headless/SDK profile、workspace、session、agent loop、tool 和 MCP 放进插件树；评测时应把这些组件作为系统变量显式记录，而不是只保存 model ID。
+
+一条可恢复的 Harness trace 至少需要：
+
+```text
+provider_id, requested_model, served_model, protocol_claim
+session_id, workspace_revision, plugin_bundle, session_log_version
+tool_schema_hash, mcp_server/version, auth_scope, permission_decision
+executor_receipt, artifact_digest, verifier_result
+webhook_delivery_id, idempotency_key, retry, timeout, final_status
+```
+
+官方 preview 的几个关键边界是：provider ID 与 credential reference 是持久身份，密钥只能脱敏回显；session log 固化实际使用的模型，不能中途静默换模型；插件依赖不满足时不能加载，listener/resource 与外部连接必须在卸载时清理；MCP 断线后要重新发现工具，重连预算耗尽后注销旧 registry；GitHub review webhook 的 `202` 只表示异步 admission，重复 delivery 可能创建多个 session，且入站签名不等于出站 GitHub 写权限。
+
+这组边界直接转化为评测门禁：
+
+| 观测状态 | 应记录 | 不能替代 |
+|---|---|---|
+| model emitted tool call | call ID、schema、模型和 session | 权限允许 |
+| Harness admitted task | webhook signature、delivery ID、`202`、session | 执行完成 |
+| executor succeeded | side effect、receipt、幂等键 | artifact 正确 |
+| verifier passed | artifact digest、测试/业务断言 | 模型单项能力 |
+
+[`deepseek_harness_protocol_audit.py`](../../research/model-update-2026-09/code/deepseek_harness_protocol_audit.py) 将这些合同缩成无网络 toy：运行结果为 `ok=true`，provider credential 为 `<redacted>`，重复 webhook admission 为 `2`，MCP 重连预算耗尽后工具集合为空，且 `network_called=false`。它的证据等级是 `local_protocol_toy`，只能说明审计字段和拒绝路径自洽，不能证明 DeepSeek Harness 生产行为、V4.1 模型质量、真实工具成功率或 SLO。
+
+面试时可以用这条链路回答“模型是否完成任务”：模型输出意图 -> Harness 建立/恢复 session -> permission 决策 -> executor 产生 receipt -> verifier 确认 artifact。任一中间层缺失，都不能把最终文本或 HTTP `202` 直接计为成功。
+
+## 19.37 GPT-5.6 Luna：状态回放与缓存/压缩分账
+
+GPT-5.6 Luna 的当前榜单锚点仍要分成两本账：AA 的 `max` 是 provider 测量，DataCurve 的 `mini-swe-agent` 行是模型、工具、环境和 verifier 的系统测量。Agent harness 评估应把 `reasoning.context`、完整 output item、function call/output、compaction item、cache prefix 和 tool-search ownership 写进同一份 manifest。
+
+核心恢复门禁是：同家族的 opaque reasoning 才可继续使用；`current_turn` 不渲染早期 turn，`all_turns` 也不创造不存在的 reasoning。无状态链路要原样回放 reasoning、assistant phase、tool call/result 和 compaction item；standalone compaction 返回的整个窗口是 canonical context。prompt cache 只记录稳定前缀的读写和 TTL，compaction 改写前缀后 cache miss 是可接受的观测，不是模型质量结论。
+
+[`gpt56_luna_state_replay_audit.py`](../../research/model-update-2026-09/code/gpt56_luna_state_replay_audit.py) 已将这些门禁转为标准库 toy，并验证 hosted/server 与 client tool search 的 `call_id` 所有权、重复副作用的幂等回执和独立 artifact verifier。它只证明合成状态机自洽，不能证明真实 OpenAI endpoint、隐藏 reasoning、服务端事件顺序、模型质量或生产 SLO。
+
+## 19.38 Claude Opus 5：Prompt-Injection ASR 不是一个数字
+
+Anthropic 的 Opus 5 System Card 展示了 harness 版本漂移：2026-08-19 更新因发现 Cowork browser harness 与旧模型不一致，重跑了各模型基线；修订后统一 Cowork harness。Cowork 不支持关闭 thinking，因此不再报告该条件，只保留 thinking-enabled、medium-effort 结果。若评测器、工具或策略变更，正确做法是重跑基线并记录版本，不是只修正新模型分数。
+
+一次 prompt-injection 评测至少要绑定：
+
+```text
+model_id, snapshot, thinking, effort, endpoint, product_surface
+attacker_revision, scenario_set, scenario_id, attempt_id, attempt_budget
+tool_result_probe, action_classifier, auto_mode, harness_revision
+attempt_success, scenario_success, verifier, retry, trace_digest
+```
+
+System Card 的评估例子包括：Gray Swan IPI 的 28 个场景和 1,130 个高迁移攻击（Opus 5 在 1/15 次尝试内的成功概率为 `0.2%/2.0%`）；一周 live bounty 的 11 个场景、每模型超过 20,000 次有效尝试（Opus 5 attempt-level ASR `0.08%`）；Shade coding 的 40 个场景、每场景 200 次尝试；Cowork browser 的 129 个环境、每场景 10 次攻击。攻击者适应能力、guardrails 和产品配置各不相同，不能合并成总安全率。
+
+必须把 `attempt-level ASR = successful_attempts / valid_attempts` 与 `scenario-level ASR = scenarios_with_success / tested_scenarios` 分开。前者回答“总尝试中有多少次成功”，后者回答“多少场景至少出现过一次成功”；若重试自适应、场景难度不均或预算不同，它们不能互相换算。Opus 5 computer-use 的 probes 条件下，disabled thinking 的 ASR `0.39% → 0.43%` 对应 2,800 次中的单次增量，卡片明确认为无法与噪声区分，说明小数点变化不自动构成改进或退步。
+
+还要区分模型级和产品级防护：probe 在模型行动前检查不可信 tool result，动作侧 classifier 阻止危险 tool call；Auto mode 同时使用两者。Opus 5 Cowork browser 条件下 medium-effort、thinking-enabled 的 raw comparison 为 `3.84%`，启用 Auto mode 后 `0/129` 场景成功；后者描述带 harness 的产品系统，不是裸模型。反过来，关闭额外保护的研究设置也不等同真实用户部署。
+
+System Card 还把 Opus 5 列为 CB-1、未达 CB-2，并按其 RSP 判断保持 ASL-3 防护；这是发布方风险判断。面试回答的核心是把模型快照、攻击预算、输入/动作防护、harness、成功判据和两个分母一并呈现。完整证据及原始来源哈希见 [`claude-opus-5-source-notes.md`](../../research/model-update-2026-09/claude-opus-5-source-notes.md)。
+
+## 19.39 Qwen3.6-27B：榜单分与发布方 Harness 要拆开
+
+Qwen3.6-27B 的 AA 页面是模型/config 发现与第三方指标来源；官方 ModelScope 模型卡另列 SWE-Bench、Terminal-Bench、SkillsBench、QwenClawBench、QwenWebBench 等自报评测。两者不是同一数据口径，不能合成单一“模型分数”。
+
+该卡最值得面试的评测方法披露有四类：
+
+1. **任务集版本和重跑基线。** 卡片称修正公开 SWE-Bench Pro 中部分问题，并在 refined set 上评估所有 baselines。修改 benchmark 后重跑所有比较对象是控制变量的正确方向，但要把修订版 task-set/hash 与原始 public score 分开。
+2. **环境预算。** Terminal-Bench 2.0 的结果绑定 Harbor/Terminus-2、3 小时 timeout、32 CPU、48 GB RAM、256K context、80K output 上限和 5-run mean。每个 benchmark 都应保存这些条件和 run-level dispersion，而不只存平均分。
+3. **抽样范围。** SkillsBench 使用 78 个自包含任务子集，明确排除 API-dependent tasks，并做五次平均。它不是完整 SkillsBench 全集的结果；覆盖率要和准确率并列报告。
+4. **模型评审器分数。** QwenWebBench 对双语前端任务先自动渲染，再以多模态 judge 判代码/视觉正确性，最后用 Bradley–Terry/Elo 汇总。应绑定 renderer/browser 版本、视觉 judge checkpoint/prompt、pairwise 样本、盲测顺序和置信区间。Elo 反映相对偏好次序，不能解释成通过率或严格功能正确率。
+
+QwenClawBench 被描述为 real-user-distribution Claw benchmark，但公开卡片没有给出可完整重建的任务集/数据抽样和 verifier；应标记 `publisher_described_internal`，不拿它作独立复现实证。更多条件与来源哈希见 [`qwen3.6-27b-source-notes.md`](../../research/model-update-2026-09/qwen3.6-27b-source-notes.md)。
+
+## 19.40 Qwen3.7 Max：Task、Harness、Verifier 的组合式 Agent RL
+
+Qwen 官方把 Agent 训练环境扩展作为 scaling 方向：增加环境质量与多样性，并在训练未见的 OOD 环境上报告泛化。更值得抽象为面试方法论的是它公开的 rollout 基础设施：把每个实例拆成正交的 `Task × Harness × Verifier`，让同一任务与不同运行框架及 verifier 版本重新组合，再做跨 harness / 跨 verifier RL。目标是让模型学习任务策略，而不是记住某个工具循环、环境或验收器的捷径。
+
+这与“把同一 benchmark 换一个 UI 再跑一次”不同：训练本身对同源任务改变交互框架和判分器，测试则需要留出训练中未见过的组合。要检验该主张，应固定并记录三类组件的 revision/hash，报告 seen/unseen 组合、OOD 任务域、各 verifier 的难度和失败分布；若只给总平均分，无法区分真正的策略迁移、任务泄漏或较宽松的 verifier。文章称子集性能增益可以预测整体增益，但没有提供足够的任务规模、曲线数值和区间来建立普适 Agent scaling law，后续技术报告仍待取得。
+
+另一项训练监控案例是 reward-hacking 自监测：模型回放超过 80 小时 SWE RL 轨迹、归纳疑似作弊模式、验证候选规则并挖掘反例；Qwen 报告累计超过万次调用、新增 13 条启发式规则、识别 1,618 个案例。这证明的是发布方描述了一个 model-assisted auditor，不足以证明检测准确率或没有奖励作弊。
+
+```text
+RL trace -> candidate abuse pattern -> replay
+-> counterexample mining -> versioned rule set
+-> held-out / human audit -> feed back to training monitor
+```
+
+线上使用这类规则时应给规则集版本化、保留反例与人工抽样，并在隔离的 holdout trace 上报告 precision、recall、false-positive rate 和漏检类型。否则 detector 可能仅对已知作弊 pattern 过拟合，甚至把合法但少见的工具使用误判为作弊。规则命中数量 `1,618` 不能替代带分母的检测质量。
+
+该博文还以未知 M890 PPU 上的 35 小时 kernel 优化为长程 Agent 案例；其执行轨迹、baseline 和 KernelBench L3 的区别见[第十七册 Code Agent 章的 Qwen3.7 Max 小节](../../book-17-agent-tool-use/chapters/07-code-agent.md)及[研究底稿](../../research/model-update-2026-09/qwen3.7-max-source-notes.md)。官方模型文档中的 `qwen3.7-max` alias 对应 May 20 纯文本 snapshot；June 8 视觉版不能回写到该 alias。完整 benchmark 条件、API transcript 和证据边界见研究底稿。当前 DataCurve 没有精确 Qwen3.7 Max Agent 行，所有 Qwen 博客结果均是发布方报告，不是独立复现。
+
+## 19.41 Qwen3.6-35B-A3B：先求解机制，再构造可验证 Agent 环境
+
+arXiv v1 论文 [《Verifiable Hidden Dynamics Play: Generating Agentic RL Environments from Solved Mechanisms》](https://arxiv.org/abs/2609.27321v1) 的评论标为 “Qwen Technical Report”。它提出的 VHD-Play 把生成顺序倒过来：先从机制族抽样 `θ` 并用可复用 solver 求出 optimum/default reference，再固定 reward；随后 frozen setter 把同一机制实现为有隐藏状态、跨步决策和工具接口的环境。核心链路是 `M(θ) → solve zθ → freeze Rθ → realize D(θ) → wrap E(θ)`，避免让一个 learned judge 同时猜测任务答案和评判 rollout。
+
+论文给出的 episode reward 将在线策略效用归一化到求解器算出的参考区间：
+
+```text
+r(π; θ) = clip_[0,1]((u(π; θ) - u₀(θ)) / (u*(θ) - u₀(θ)))
+```
+
+`u₀` 是默认策略基线，`u*` 是机制 solver 给出的最优值。默认结果映射到 0，最优参考映射到 1；在部分可观测任务中，full-information optimum 只是上界，不一定是可在线达到的分数。评分不调用 LLM judge，但可靠性仍依赖 solver 与生成动态的一致性，因此论文用执行、默认区间和 replay/reference agreement 做 admission。
+
+规模上，论文报告 3,300 个环境、28 个语料主题和至少 10 个工具/环境；训练分区为 2,200 条，另有 300 条训练族 held-out 与 800 条八种未见机制族评测。三种训练族为 inventory DP、routing、negotiation。Qwen3.6-35B-A3B Base 经 GRPO 34 步后，五族 agentic diagnostic mean 从 `0.204` 到 `0.815`，而 written-out mean 仅从 `0.962` 到 `0.992`；外部 BFCL V4 交互子集、TravelBench、365-day E-Commerce Bench 也有作者报告的增益。
+
+阅读结果时要保留三个限制：生成环境的 reference replay audit 覆盖 8/11 机制族，而非全覆盖形式化证明；论文报告 one training run / one evaluation seed，E-Commerce 每臂五次运行也不足以建立普遍胜出；成本、迁移和 co-scaling 均未在本项目独立复现。Qwen3.7-Max 在论文中只是额外 setter 与 benchmark comparator，实际受训 checkpoint 是 Qwen3.6-35B-A3B；不能把这篇论文写成 Qwen3.7-Max 的内部训练 recipe，也不能默认它就是 Qwen3.7 博客所说的 `Task × Harness × Verifier` 系统。完整来源快照和实验账本见[研究笔记 §9](../../research/model-update-2026-09/qwen3.6-35b-a3b-source-notes.md#9-vhd-play-先求解机制再生成可交互环境)。

@@ -28,7 +28,7 @@ DeepSeek V4 Flash Vision 的面试价值正好在这里：它让我们同时讨�
 
 ### 85.2.1 Artificial Analysis 条目
 
-Artificial Analysis 详情页的 canonical slug 是 `deepseek-v4-flash-vision`，配置名为 `DeepSeek V4 Flash Vision (Reasoning, Max Effort)`。当前页面字段为：
+Artificial Analysis 详情页的 canonical slug 是 `deepseek-v4-flash-vision`，配置名为 `DeepSeek V4 Flash Vision (Reasoning, Max Effort)`。2026-09-24 当前快照字段为：
 
 | 字段 | 页面值 | 应如何解释 |
 |---|---:|---|
@@ -36,16 +36,18 @@ Artificial Analysis 详情页的 canonical slug 是 `deepseek-v4-flash-vision`�
 | 推理配置 | `reasoning=true`、`effort=max` | 一次测量的推理配置，不是新的基础权重 |
 | 参数目录字段 | `284` total、`13` active | 第三方目录口径；不能据此证明 Vision 变体有独立公开权重 |
 | 上下文 | `1,000,000` | 配置窗口，不等于百万 token 召回或并发保证 |
-| Intelligence Index | `35.0122378035969` | Artificial Analysis 自有评测下的配置级指数 |
-| 输出速度 | `215.179167697513 tokens/s` | 页面测量字段，受 provider、输入和时间影响 |
-| median TTFT | `1.29855545700002s` | 页面测量字段，不是所有请求的固定首响 |
+| Intelligence Index | `34.8390628035969` | Artificial Analysis 自有评测下的配置级指数 |
+| 输出速度 | `217.762710468086 tokens/s` | 页面测量字段，受 provider、输入和时间影响 |
+| median TTFC | `0.970116780000126s` | 页面测量字段，不是所有请求的固定首响 |
 | 价格字段 | `$0.44/M` input、`$1.32/M` output、`$0.014/M` cache hit | 页面引用的 provider/API 价格字段 |
+
+9 月 15 日快照曾记录 Index `35.0122378035969`、速度 `215.179167697513 tokens/s`、TTFT `1.29855545700002s`。这些是不同采集时点的榜单/provider 数据，不作为模型 revision 变化证据。本次 AA 详情为 `3,967,107` bytes / SHA-256 `a5e5259ee84eac5aa88915dd6436ba155e265ede940ab663b52c4a681ae43ed7`。
 
 这些字段很有用，但它们回答的是“这个榜单配置当时如何被测”。它们没有回答“当前请求由哪个后端处理”。特别是 `release` 字段关联到 `DeepSeek V4 Flash 0731`，而官方当前文档已经把旧 Vision alias 路由到 V4.1-Flash；复现报告必须同时保存请求 ID、模型请求名、响应中的实际 model、API 文档日期和价格表版本。
 
 ### 85.2.2 DataCurve 当前没有 Vision 行
 
-本次通过两个可用代理获取的 DataCurve DeepSWE v1.1 页面中，`deepseek-v4-flash-vision` 出现次数为 0。页面有 `deepseek-v4-pro` 和 `deepseek-v4-flash` 的 `mini-swe-agent` 配置，但它们不能迁移成 Vision 的结果。
+2026-09-24 DataCurve DeepSWE v1.1 快照（HTTP 200，`268,036` bytes / SHA-256 `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`）中，`mini_swe_agent_deepseek_v4_flash_vision_*` 精确行仍不存在。页面有 V4 Pro 与 V4 Flash 的 `mini-swe-agent` 配置，但它们不能迁移成 Vision 的结果。
 
 因此本章不写 Vision 的 DataCurve Pass@1。若面试官问“它在 DeepSWE 有多少分”，正确回答是：当前保存的页面没有该配置，不能用同系列其他行补齐；需要等榜单出现同名配置，或者自行固定模型/路由/harness 做新实验。
 
@@ -64,7 +66,7 @@ Artificial Analysis 详情页的 canonical slug 是 `deepseek-v4-flash-vision`�
 
 ## 85.4 当前服务路由：requested、catalog、served 三个身份
 
-2026-09-15 当前 [Quick Start](https://api-docs.deepseek.com/quick_start) 以 `deepseek-flash` 为主模型名；价格表把它的 Model Version 写为 `DeepSeek-V4.1-Flash`，并列出 Vision、1M context 和最大 384K 输出。Quick Start 同时说明旧的 `deepseek-v4-flash` 与 `deepseek-v4-flash-vision-exp` 已 retired，兼容请求由 V4.1-Flash 服务。
+2026-09-24 复读 [Quick Start](https://api-docs.deepseek.com/quick_start)、[Models & Pricing](https://api-docs.deepseek.com/quick_start/pricing) 和 [V4.1-Flash 发布页](https://api-docs.deepseek.com/news/news260910)：主模型名为 `deepseek-flash`，Model Version 是 `DeepSeek-V4.1-Flash`，支持 Vision、1M context 和最多 384K 输出。官方写明 V4-Flash-Vision-Exp 已 retired；旧 alias 仍接受，但请求暂时由 V4.1-Flash 服务并按 Flash 价格计费。V4.1-Flash 发布页称路由目标来自新架构系列且具备 native visual understanding；这是对 V4.1-Flash 的产品说明，不是旧 Vision-Exp 的视觉架构披露。Flash 当前峰/谷每百万 token 价格为 cache hit `$0.006/$0.003`、cache-miss input `$0.30/$0.15`、output `$1.20/$0.60`；峰时是工作日 01:00–04:00 与 06:00–10:00 UTC（中国法定节假日除外）。AA 页面仍列旧锚点的 `$0.44/$1.32/$0.014` provider 字段；两者不是可合并的一张价目表。
 
 因此一次实验至少要保留三种身份：
 
@@ -92,7 +94,7 @@ served_model    = response.model (runtime observation)
 2. **external URL**：请求只携带地址；代价是 URL 可用性、内容变化、SSRF、隐私和 provenance 风险。
 3. **Files API `file_id`**：先上传再引用；适合大图、多轮和重复使用，但要管理 key、过期、删除和审计。
 
-当前 guide 给出 `detail` 级别：`low` 会缩放到约 512×512，`high` 与 `original` 保留原图，`auto` 当前等价于 `original`。当前文档给出约 1024 tokens/image 的上限和具体请求限制；历史实验公告的 384 tokens/image 是另一时点、另一 alias 的产品规则。不能把两个数字合成一个永久模型属性。
+当前 guide 给出 `detail` 级别：`low` 会缩放到约 512×512，`high` 与 `original` 保留原图，`auto` 当前等价于 `original`。当前文档给出 resize 后最多 1024 tokens/image；2000×2000 与 5000×5000 图像可能被 resize 到同一预算，多图逐张独立计数。限制还包括每请求最多 600 张，单图 base64/URL 32 MiB、`file_id` 64 MiB，请求体 48 MiB，总图片体积不含 `file_id` 最多 64 MiB、含 `file_id` 最多 200 MiB；单边最多 8192 px，15 张及以上图片时单边限制降至 4096 px。历史实验公告的 384 tokens/image 是另一时点、另一 alias 的产品规则，不能把两个数字合成一个永久模型属性。
 
 对一组图片，更好的预算式是：
 
@@ -401,7 +403,7 @@ Artificial Analysis 的 Intelligence Index、TTFT、速度和价格，只是一�
 
 ### 问题 2：发布公告的 384 image tokens 和当前文档的约 1024 tokens/image 哪个是真的？
 
-两者都可能在各自时间和 alias 语境下成立。前者是 2026-08-21 实验公告的产品规则，后者是 2026-09-15 当前 Vision guide 的规则；不能当作同一模型的永久常数，实时实验要绑定当前路由、detail、resize 和 usage。
+两者都可能在各自时间和 alias 语境下成立。前者是 2026-08-21 实验公告对当时实验 alias 的产品规则，后者在 2026-09-24 Vision guide 复核中仍是 resize 后每图上限；不能当作同一模型的永久常数，实时实验要绑定当前路由、detail、resize 和 usage。
 
 ### 问题 3：Files API 的 `file_id` 是否等于模型记住了这张图？
 

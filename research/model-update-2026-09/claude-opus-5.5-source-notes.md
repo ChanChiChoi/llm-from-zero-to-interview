@@ -1,6 +1,6 @@
 # Claude Opus 5.5：token efficiency、安全 fallback 与长任务 Agent
 
-核验日期：2026-09-23。本笔记只把 Artificial Analysis 与 DataCurve DeepSWE 作为模型发现入口；Anthropic 官方模型页、开发者文档、发布页和 System Card 只用于扩展已经确认的 `Claude Opus 5.5` 锚点。官方公开了 API/model contract，但没有公开参数规模、网络结构或完整训练 recipe，因此不能从产品 benchmark、effort、成本或安全路由反推这些内部事实。
+核验日期：2026-09-23；当前时点复验：2026-09-28。本笔记只把 Artificial Analysis 与 DataCurve DeepSWE 作为模型发现入口；Anthropic 官方模型页、开发者文档、发布页和 System Card 只用于扩展已经确认的 `Claude Opus 5.5` 锚点。官方公开了 API/model contract，但没有公开参数规模、网络结构或完整训练 recipe，因此不能从产品 benchmark、effort、成本或安全路由反推这些内部事实。
 
 ## 1. 榜单身份与快照
 
@@ -141,7 +141,7 @@ System Card 还主动列出盲点：长轨迹、多 Agent、语言差异以及�
 
 当前不能确认：参数量、dense/MoE 结构、层数、attention/FFN 设计、训练数据比例、优化器、后训练损失、adaptive thinking 内部实现、preserved thinking 的具体机制、所有 region/provider 的完整差异、System Card 数字的独立复现、公开权重、目标硬件 kernel 和生产 SLO。尤其是关闭 safeguards、fallback 或使用早期 snapshot 的数字，不能直接迁移到生产配置。
 
-因此状态升级为 **AA 单榜 + System Card 正文证据**：已有榜单快照、官方发布页/API contract、System Card 正文、研究笔记和书系映射；DataCurve 精确 Agent 行、参数/架构、完整 recipe、System Card 数字的独立 benchmark、生产 acceptance 和本地运行仍待核验。不新增重复 Transformer 架构章节。
+因此 Opus 5.5 的面试内容状态为 **AA 单榜内容专题闭环 + 官方 System Card/API contract + local protocol toy**：榜单、官方资料、研究笔记、正式章节和配套练习均已闭合；DataCurve 精确 Agent 行、参数/架构、完整 recipe、System Card 数字的独立 benchmark、目标硬件和生产 acceptance 仍待核验。不新增重复 Transformer 架构章节。
 
 ## 5. 面试追问
 
@@ -171,3 +171,75 @@ System Card 还主动列出盲点：长轨迹、多 Agent、语言差异以及�
    它们对应不同成功定义。比较时要固定 108 tasks、分辨率、action 上限、runs、截图保留和超过 100K tokens 后的 compaction 策略，不能挑较高数字代表整体电脑使用能力。
 13. **为什么 System Card 的多 Agent speedup 不能直接写成 wall-clock 加速？**
    因为报告使用 derived latency，纳入各 Agent 的 context token、tool time 和 handoff clock；并且 team size、组织结构、任务和 verifier 都会改变结果。生产系统还要实测共享资源、排队、失败恢复和真实 wall-clock。
+
+## 6. 2026-09-23：7890 当前时点官方 Markdown 复验与协议 toy
+
+本轮使用用户提供的 `10.24.27.134:7890` 重新获取 `claude-opus-5-5` 详情和 Anthropic 官方 Markdown。Artificial Analysis 详情为 `3,824,658` bytes / SHA-256 `727da6095c069bf0750a36cea442c7e582bbfeefdf4fc4a330a656bd8bd45c31`；当前字段仍为 `releaseDate=2026-09-22`、1M context、Intelligence Index `57.6223698102963`、proprietary、`parameters=null`、`$4/$20` input/output。DataCurve 仍为 `268,036` bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7e6e095ad59f1f1`，没有精确 `mini_swe_agent_claude_opus_5_5_*` 行。
+
+本轮的 raw Markdown 快照如下；之前研究记录中的较小字节数属于早先抓取形态，本表以本轮 `curl` 文件为准：
+
+| 页面 | bytes | SHA-256 |
+|---|---:|---|
+| [Claude Opus 5.5 model page](https://platform.claude.com/docs/en/models/opus-5-5/overview.md) | `14,613` | `aa9389d5f328023dea11650d26898b43b4e04969a4facd327881df145a307927` |
+| [What's new](https://platform.claude.com/docs/en/models/opus-5-5/whats-new-opus-5-5.md) | `21,525` | `90fb6efa547a193cbf1eb4b836ef5310234da054f2e83abbe15ce41b0d4c5a6a` |
+| [Migration guide](https://platform.claude.com/docs/en/models/opus-5-5/migration-guide.md) | `16,296` | `0c8f717ab25184446431b1c579905a2458e4917258cfb71d66b65737eb3feab5` |
+
+当前文档把迁移门禁写得更具体：`thinking.type=disabled` 和手工 `budget_tokens` 返回 400；`tool_choice=any/tool` 返回 400，建议 `auto + strict tool use` 或 structured outputs；thinking block 的 producer、conversation 和 prefix 改动有读取/丢弃/400 边界；Claude API 与 Google Cloud 拒绝 `computer_20251124`，Bedrock 保留该兼容路径；工具间进度在默认 `display=omitted` 时可能是空的 `thinking` block；`compact-2026-09-04`、inline tools、refusal category/fallback 和 `usage.speed` 都需要进入 trace。这些是 API observable behavior，不是内部架构披露。
+
+新增 [`claude_opus55_protocol_audit.py`](code/claude_opus55_protocol_audit.py)，只用 Python 标准库审计：请求 capability gate、按 `block.type` 解析、thinking producer/prefix binding、工具 `id`/幂等键、signed compaction、进度块、风险类别 fallback 和 verifier/副作用账本。脚本主流程及负例通过，证据等级固定为 `local_protocol_toy`；它不调用 Anthropic、不解密 thinking、不执行真实工具，也不能证明生产 API、模型质量或安全 SLO。
+
+本轮状态升级为 **AA 单榜 + System Card/API contract + local protocol toy**。参数规模、架构、完整 recipe、精确 DataCurve Agent 结果、完整权重、目标硬件、生产 kernel、独立 benchmark 和线上 acceptance 仍为 `unverified`。
+
+## 7. 2026-09-24：当前榜单快照与模型服务合同复验
+
+本轮仍以两排行榜已经确认的 `Claude Opus 5.5` 为锚点。Artificial Analysis 中文首页经 `10.24.27.134:7890` 抓取为 HTTP 200、`1,784,805` bytes，SHA-256 `5284847a4499b219872725221324a3461de68464956a4b8f44b5cdd96d34c2c8`；与 2026-09-23 快照比较，八家重点厂商 canonical 模型集合未新增。DataCurve 为 HTTP 200、`268,036` bytes，SHA-256 `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`；`mini_swe_agent_*` 精确配置集合与上一快照一致，仍没有 `mini_swe_agent_claude_opus_5_5_*`。不迁移 Opus 5、Fable 5.1 或其他 Claude 配置的 Agent 结果。
+
+AA Opus 5.5 详情快照为 `3,810,653` bytes / SHA-256 `cc5a94faec8125d88e46dc6545a564f91f32855b5d05da4df7cd3bca08851e95`。`releaseDate=2026-09-22`、`intelligenceIndex=57.6223698102963`、`costPerIntelligenceIndexTask=5.982012019521066` 与既有记录一致；AA 页面显示的整数 `58` 是舍入展示。页面快照字节数/哈希变化本身不构成模型 revision 证据。GPT-6 Luna 详情为 `3,975,044` bytes / `4aaaeefba90808253aee562a64d10b95a32c1e808c1b4aacaf44a2e2adc04516`，Index `37.2559686869738`、cost/task `0.06809498628701058` 与先前一致；速度 `131.449006457181 tokens/s` 作为 provider/测量时点字段记录。
+
+本轮重新获取的 Anthropic [Opus 5.5 model page](https://platform.claude.com/docs/en/models/opus-5-5/overview.md) 为 `14,244` bytes / SHA-256 `3325e10a852cc3f40cfaf01737d97a5cdf3a37b4cd7c0b68005e204ea32b1dd4`。当前合同明确：1M context、同步 Messages API 最大输出 128K、adaptive thinking always-on、默认 `medium` effort、基础价格 `$4/$20` 每百万输入/输出 token、cache read `$0.20`/MTok、最小可缓存 prompt 512 tokens；5 分钟/1 小时 cache write 分别为 `$5/$8` 每 MTok。Message Batches API 在 `output-300k-2026-03-24` beta header 下支持最多 300K 输出 token。Serving 账本应区分同步/Batch 上限、cache read/write、effort 和实际 provider 用量；这些合同字段不能反推模型内部推理实现。
+
+本轮补强的是可追溯性和服务合同精度，不改变闭环等级：**AA 单榜 + System Card/API contract + local protocol toy**。参数规模、架构、完整 recipe、精确 DataCurve Agent 行、独立 benchmark、生产 kernel/硬件与线上 acceptance 仍为 `unverified`。
+
+## 8. 2026-09-24：7890 网络复验与 System Card 证据审计
+
+用户提供的 `curl` 已证明 `10.24.27.134:7890` 可访问百度；本轮也从当前工作环境通过同一代理读取了排行榜和 Anthropic 官方页：
+
+| 来源 | 当前抓取 | 结论 |
+|---|---:|---|
+| [Artificial Analysis 中文首页](https://artificialanalysis.ai/zh) | `1,783,893` bytes / `3b895865547acf9b8d9d67d0c2a9a0a0369648f925014b2367817e1f5ac42f36` | 与同日已记快照一致，首页重点 canonical 集合没有新增；页面字节变化不代表模型 revision |
+| [Artificial Analysis Claude Opus 5.5](https://artificialanalysis.ai/models/claude-opus-5-5) | `3,809,722` bytes / `683005dd64dba034487fa6207167ce8239161e83cf198cd03d2a9445204caf23` | Index `57.6223698102963`、cost/task `$5.982012019521066` 未变；字段仍是 AA 配置/provider 口径 |
+| [DataCurve DeepSWE](https://deepswe.datacurve.ai/) | `268,036` bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1` | 配置快照未变，仍无精确 `mini_swe_agent_claude_opus_5_5_*` 行 |
+| [Anthropic Opus 5.5 model page](https://platform.claude.com/docs/en/models/opus-5-5/overview.md) | `14,244` bytes / `3325e10a852cc3f40cfaf01737d97a5cdf3a37b4cd7c0b68005e204ea32b1dd4` | 服务合同快照与既有记录一致 |
+
+System Card PDF 的本地固定副本为 `17,795,106` bytes / `7311c9c6bbb16d012f1c12c7418b05949fcf7ae3e30d2c40f22050074b2a7378`，本轮复核哈希一致。评测口径复查没有发现研究笔记和第二十册遗漏的 Opus 专属结论：snapshot 混用、safeguard 开关与 fallback、OSWorld partial/strict 成功定义、多 Agent derived latency 均已记录。本轮将同一证据压缩成面向治理文档的审计方法，加入第八册第 11 章；不重复抄整张 benchmark 表。
+
+因此 Opus 5.5 的面试内容状态为 **AA 单榜内容专题闭环 + 官方 System Card/API contract + local protocol toy**。这只表示研究笔记、正式章节和练习链路已闭合；参数、架构、完整训练 recipe、DataCurve 精确 Agent 行、System Card 数字的独立复现、目标硬件和生产 acceptance 仍为 `unverified`。
+
+## 9. 2026-09-28：Compaction 双协议与 Opus 5.5 thinking-state 边界
+
+本轮继续沿 AA 已有的 `claude-opus-5-5` canonical 锚点推进。DataCurve 没有精确 `mini_swe_agent_claude_opus_5_5_*` 行，因此不迁移 Opus 5、Sonnet 5 或 Fable 5.1 的 Agent 结果。经 `10.24.27.134:7890` 重新读取 Anthropic 当前官方 Markdown：
+
+| 官方页面 | bytes | SHA-256 |
+|---|---:|---|
+| [Compaction overview](https://platform.claude.com/docs/en/build-with-claude/compaction.md) | `11,974` | `351fe6c8454b3762356aa0066575ad369506b289ecfcf3af1fad2c060a43c9cc` |
+| [Compaction on demand](https://platform.claude.com/docs/en/build-with-claude/compaction-on-demand.md) | `46,724` | `823190dbde68807fe73a9db88e83e37b05857395af7d0357b93588fdaa30e39d` |
+| [Compaction at a token threshold](https://platform.claude.com/docs/en/build-with-claude/compaction-threshold.md) | `113,841` | `5877f49f14e6192d050829e64d5149e381f4ccbf8933dac9a2e0a34e1515d748` |
+| [Compaction and preserved thinking](https://platform.claude.com/docs/en/build-with-claude/compaction-thinking-blocks.md) | `30,956` | `5a3c28c48516182033b5f83078e22ae729257d5b06a067bc1aad3a93a78f409e` |
+| [Preserved thinking](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking.md) | `113,656` | `a93aaa211a4ca45a1dea9532f77f43652d3bf2b6e01ca14298277089e0f09457` |
+| [Models overview](https://platform.claude.com/docs/en/models/overview.md) | `17,052` | `404372e69b13defcb4598bb8a8cfbc359c0c31384d809daf53d75c3ca9316bc3` |
+| [What's new in Claude Opus 5.5](https://platform.claude.com/docs/en/models/opus-5-5/whats-new-opus-5-5.md) | `21,800` | `6ba1ff350b0ced73d0eeba0330b37f14cd516a7100f3eb404410f82e6826d546` |
+
+官方 frontmatter 的 `supportedModels` 明确同时列出 `claude-opus-5-5` 与 Sonnet 5，但两种 API compaction 是不同状态机，平台可用性也不完全相同：
+
+| 模式 | Beta / 请求入口 | Opus 5.5 支持与状态行为 |
+|---|---|---|
+| On-demand | `compact-2026-09-04` + 顶层 `compaction` 参数 | Opus 5.5 明列为支持模型；应用选择何时请求，返回签名 `compaction` block。Claude API、Claude Platform on AWS、Google Cloud、Microsoft Foundry 列为 beta；Amazon Bedrock 不可用。可以保留最近轮次；保留的 thinking 只有满足模型、连续/原样 tail、system/tools 不变等 preserved-thinking 条件才有效。 |
+| Threshold | `compact-2026-01-12` + `context_management.edits` | Opus 5.5 明列为支持模型；API 在普通请求达到 token trigger 时压缩，并从后续上下文移除 block 前的旧内容。Claude API、Claude Platform on AWS、Amazon Bedrock、Google Cloud、Microsoft Foundry 均列为 beta；但 Opus 5.5 旧轮次中的 thinking/redacted-thinking 不随压缩保留，摘要是旧 reasoning 的唯一延续载体。 |
+
+若 threshold compaction 配置 `pause_after_compaction` 并手动重插最后几条消息，Opus 5.5 需要从这些 assistant turns 去掉 `thinking` 与 `redacted_thinking`，或在继续请求时用 `thinking-binding-controls-2026-08-01` beta + `thinking.block_binding.prefix_mismatch_behavior="drop_block"`；普通 text/tool blocks 可以保留。On-demand keep-tail 则有独立的条件模型：每次相关 compaction 都须运行在支持 preserved thinking 的模型上，保留轮次紧接被总结内容且原样不变，`system` 与未 defer 的 `tools` 不变。不能把 on-demand 的 kept-thinking 能力外推到 threshold，也不能将两个 beta/header、参数结构或平台列表合并。
+
+另一个容易误判的点是 prefix-binding 检查不是简单的“Opus 5.5 一律 400”：模型兼容性检查适用于所有账户；prefix-mismatch 检查默认应用于 **2026-08-31 00:00 UTC 或之后创建**的账号（Claude API 与云平台一致）。旧账号只有在请求设置 `prefix_mismatch_behavior` 时才执行该 prefix check；在旧账号上设置 `error` 或 `drop_block` 都会 opt in。新账号默认 `error`，不匹配返回 400；选择 `drop_block` 则丢弃受影响 reasoning block 并继续。账户日期改变的是 prefix-check 的默认执行策略，不改变模型身份或能力。模型本身不能读取的其他模型 thinking block 是另一条路径：API 会静默丢弃，且不计费。
+
+Opus 5.5 的 model-binding 也有方向性：它能读取 Opus 5 与更早 Opus/Sonnet/Haiku 的 thinking blocks，但不能读取 Fable/Mythos；Claude API 上 Fable 5.1 与 Mythos 5.1 可以读取 Opus 5.5 blocks，没有其他模型具备该反向读取边。客户端仍应保存 block producer、模型/会话上下文和 prefix 变更，并优先采用 append-only history；不要把“请求成功”解释成原 reasoning 一定进入了目标模型。
+
+以上是 Anthropic 当前文档描述的 API 合同，不是对生产账号行为的实测。本轮没有调用 Messages API、没有发送 beta 请求，也没有新增 Opus 5.5 参数、架构或训练 recipe 证据；模型专题保持 **AA 单榜内容专题闭环 + 官方 System Card/API contract + local protocol toy**。

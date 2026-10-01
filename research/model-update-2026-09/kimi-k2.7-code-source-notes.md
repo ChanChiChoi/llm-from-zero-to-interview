@@ -1,6 +1,6 @@
 # Kimi K2.7 Code：长周期编码 Agent、MoE/MLA 与思考状态协议
 
-核验日期：2026-09-15。本笔记只把 Artificial Analysis 与 DataCurve DeepSWE 的条目作为 Kimi K2.7 Code 的模型锚点，再沿 Moonshot/Kimi 官方资源页、API 文档、Hugging Face 模型卡、配置和部署指南提取面试相关知识。排行榜结果、官方模型卡 benchmark 和产品运行时字段分别承担不同证据责任，不能互相替代。
+初次核验日期：2026-09-15；榜单/官方资料复核日期：2026-09-24、2026-09-29。本笔记只把 Artificial Analysis 与 DataCurve DeepSWE 的条目作为 Kimi K2.7 Code 的模型锚点，再沿 Moonshot/Kimi 官方资源页、API 文档、Hugging Face 模型卡、配置和部署指南提取面试相关知识。排行榜结果、官方模型卡 benchmark 和产品运行时字段分别承担不同证据责任，不能互相替代。
 
 ## 1. 榜单锚点与评测边界
 
@@ -32,7 +32,7 @@ result = F(base_model, model_revision, harness, tools, task_set,
 - API 快速开始：[Kimi K2.7 Code](https://platform.kimi.com/docs/guide/kimi-k2-7-code-quickstart)。本次 HTML 快照大小 433,442 bytes，SHA-256 为 `10a7875220daccec89d64108631200cd5379f3f60991934f7f13b218ce5fb09a`。
 - 官方模型卡：[moonshotai/Kimi-K2.7-Code](https://huggingface.co/moonshotai/Kimi-K2.7-Code)。本轮使用固定 revision `74797c9c62378b951a1f6fcf5c4631024e9b8bef` 的 raw README，大小 15,061 bytes，SHA-256 为 `c78bbe5af19636b180eda956abf1f30a79027ec04d6642ebddc44edbc4470879`。
 - 固定配置：[config.json](https://huggingface.co/moonshotai/Kimi-K2.7-Code/blob/74797c9c62378b951a1f6fcf5c4631024e9b8bef/config.json)。配置快照大小 5,420 bytes，SHA-256 为 `ffbb57bff844e024f6c112640b63da80af228ceb8fb3e2e21908a21febbcdffb`。
-- 部署指南：[docs/deploy_guidance.md](https://huggingface.co/moonshotai/Kimi-K2.7-Code/blob/74797c9c62378b951a1f6fcf5c4631024e9b8bef/docs/deploy_guidance.md)。
+- 部署指南：[docs/deploy_guidance.md](https://huggingface.co/moonshotai/Kimi-K2.7-Code/blob/74797c9c62378b951a1f6fcf5c4631024e9b8bef/docs/deploy_guidance.md)。2026-09-29 经 `10.24.27.134:7890` 固定 revision 复取 HTTP 200，3,689 bytes / SHA-256 `b1bc4c5fb7c8b1da727663d4da83999afc902f6166ff862fbaef514b86de2c65`；与工作区留存的 2026-09-28 快照逐字节一致。
 
 官方模型卡把 Kimi K2.7 Code 描述为基于 Kimi K2.6 的 coding-focused agentic model，重点是现实世界的长周期编码任务、复杂软件工程工作流的端到端完成，以及相对 Kimi K2.6 约 30% 的 thinking-token 使用量下降。这里的“约 30%”是发布方自述，不是独立 profiling 结论。
 
@@ -77,7 +77,9 @@ result = F(base_model, model_revision, harness, tools, task_set,
 - SGLang：文档给出 `sglang>=0.5.10.post1`，同样需要 `kimi_k2` parser；
 - KTransformers：提供 CPU/GPU 异构、RAWINT4 和 LoRA SFT 示例。
 
-部署指南中的吞吐数字绑定 8 张 L20、Intel 6454S、并发和具体 KTransformers 参数，是发布方环境示例，不是普遍性能承诺。
+部署指南中的 KTransformers+SGLang 示例将 RAWINT4 专家权重和 CPU/GPU 异构执行结合：发布方报告在 8×NVIDIA L20 + 2×Intel 6454S、48 路并发下 prefill 640.12 tokens/s、decode 24.51 tokens/s；命令同时绑定 `--kt-cpuinfer 96`、`--kt-num-gpu-experts 30`、TP=4、prefill 阈值 400 和 `--max-total-tokens 50000` 等配置。另一条 KTransformers+LLaMA-Factory LoRA SFT 示例报告端到端 44.55 tokens/s，硬件为 2×RTX 4090 + Intel 8488C，原文还写 `1.97T RAM` 与 `200G swap`；单位未进一步解释，保留原文，不擅自换算为 GB/TB。两组都是官方指南给出的场景数字，不是本项目复现，也不能互相比较或外推到其他硬件/任务。
+
+这些示例适合面试时追问权重驻留与计算位置、prefill/decode 分账、专家 offload、LoRA 训练数据/序列长度和测量分母。公开指南未同时给出足以独立复现这些数字的完整 workload、batch/序列分布、功耗与计时定义，故性能结论仍按 publisher-reported 保留。
 
 ## 3. K2.7 Code 的 Agent 运行时协议
 
@@ -151,9 +153,32 @@ Kimi 官方 API 文档还提供动态加载工具、自动 Context Caching、Par
 
 因此当前不能把 Kimi Linear、Attention Residuals、Mooncake 或 K2 Thinking 的论文/实现直接改名为 K2.7 Code 的专属训练报告。它们可以作为 Kimi 技术路线的关联背景，但必须单独标注来源和与 K2.7 的证据距离。
 
+## 2026-09-24 两榜与官方 API 快速开始复核
+
+本轮仍沿用榜单中已存在的 Kimi K2.7 Code canonical 条目；没有从 Kimi 文档或 arXiv 新增模型候选。
+
+| 来源 | 当前快照 | 本轮核对 |
+|---|---|---|
+| Artificial Analysis Kimi K2.7 Code | HTTP 200，4,047,429 bytes，SHA-256 1a8818a6ee812da88ba7b9a95b691ae7481dac7b55d7126084fbd1d5e964e56b | canonical slug kimi-k2-7-code 仍在榜；Intelligence Index 25.8121062401836、256K context 是第三方字段 |
+| DataCurve DeepSWE | HTTP 200，268,036 bytes，SHA-256 14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1 | 精确 mini_swe_agent_kimi_k2_7_code_default 行仍在：113 tasks、4 runs、452 attempts、138 passed；Pass@1 30.53%、Pass@4 61.06%、平均成本约 $2.82、平均输出约 59.3K tokens、平均 149.1 steps |
+| Kimi 官方资源页 | HTTP 200，270,859 bytes，SHA-256 f3696d9842d595fa8777bfedb7dcd2b9251186ac965fe4e5d0cc0c3ba9a38f51 | 用于核验已发现模型，不产生新候选 |
+| Kimi 官方 API 快速开始 HTML | HTTP 200，455,287 bytes，SHA-256 2613331b1ace91d15f9babd118aa854285e523cec4a598fab78dddf94a7530c0 | 与 Markdown 快照交叉检查 |
+| Kimi 官方 API 快速开始 Markdown | HTTP 200，12,445 bytes，SHA-256 7c1ecbbfb1d2103772a00ca99b6e058c7a6f018cb00744ae241042f7f8071ec7 | 补充默认 max_tokens 32,768、视觉 token estimate、媒体上传和 highspeed 服务变体 |
+| arXiv 精确检索 | HTTP 200，16,442 bytes，SHA-256 a305e3e8bb51f7e9e64e44266a1dc58a7df5c6aae879b818f0c59654186af4fa | 精确查询 “Kimi K2.7 Code” 返回 no results；只说明本次检索，不证明未来不会发布报告 |
+
+本轮官方文档补充：
+
+- 256K 是 context window；API 快速开始另给默认 max_tokens=32,768，两者不是同一限制。
+- thinking 默认 enabled，关闭会报错；temperature 固定 1.0、top_p 固定 0.95、n 固定 1、presence/frequency penalty 固定 0；tool_choice 只接受 auto/none。
+- 多步工具调用建议保留 assistant 消息中的 reasoning_content；省略通常不报错，但可能降低连续性。它是协议状态提示，不代替工具授权、执行回执、幂等账本或 verifier。
+- 图像/视频 token 动态计算；视频由关键帧组成，分辨率和帧数影响预算。文档建议使用 token-estimate 接口；当前 quickstart 还写有 request body 100 MB 限制、图片 URL 不支持（需 base64）、大视频推荐文件上传、图片不超过 4K/视频不超过 1080p。
+- 示例由宿主工具用 ffprobe/ffmpeg 按时间片段准备视频，再将视觉结果回灌。这是 API/harness 能力，不代表模型能直接读取本机文件或拥有工具权限。
+- 文档新列出 kimi-k2.7-code-highspeed，并明确它与 kimi-k2.7-code 是同一个模型。官方宣称输出速度约为普通版 5–6 倍、常规编程中位输入场景约 180 tokens/s、短上下文约 260 tokens/s，同时注明资源有限、体验可能波动。它只作为已发现 K2.7 Code 的服务/路由变体记录，不另建模型条目，也不把发布方速度当作独立测量。
+- 快速开始称 Kimi Code Bench v2、Program-Bench、MLS Bench Lite 相对 K2.6 分别提升 21.8%、11%、31.5%，Agent 类基准约提升 10%；均按发布方对照声明记录，不等于本项目独立复现。2026-09-29 经 7890 重取固定 HF revision `74797c9c62378b951a1f6fcf5c4631024e9b8bef` 的 README（15,061 bytes / `c78bbe5af19636b180eda956abf1f30a79027ec04d6642ebddc44edbc4470879`）与 config（5,420 bytes / `ffbb57bff844e024f6c112640b63da80af228ceb8fb3e2e21908a21febbcdffb`），均与原固定快照逐字节一致；2026-09-24 曾记录的代理超时现已成功复验，不再是当前访问阻塞。部署指南的新鲜快照与异构推理/LoRA SFT 数字见本节。
+
 ## 7. 状态与面试映射
 
-Kimi K2.7 Code 当前为 **资料级闭环**：两个排行榜中的可追溯条目、官方资源/API/模型卡/配置/部署资料、研究笔记和进度同步均已具备；没有独立专属训练报告或外部复现，因此暂不新增 Kimi K2.7 Code 专属正式章节。
+Kimi K2.7 Code 当前为 **双榜内容专题闭环**：排行榜身份、官方来源、研究笔记、第二十一册第 94 章和配套面试/练习资料均已同步。没有独立专属训练报告或外部复现；完整权重、目标硬件 profile、真实 API 行为、线上 acceptance 和生产 SLO 仍未确认。闭环表示公开面试知识专题已整理，不是模型或生产验收闭环。
 
 推荐面试主线：
 
@@ -164,7 +189,7 @@ Kimi K2.7 Code 当前为 **资料级闭环**：两个排行榜中的可追溯条
 5. Kimi Code CLI、mini-SWE-agent、验证器和模型分数如何拆开归因；
 6. multimodal tool result、Partial Mode、context caching 和长周期 coding agent 如何共同管理上下文预算。
 
-后续锚点切换为 `grok-4.5`。Kimi K2.7 Code 仍可补证线上接受率、目标硬件 profiling、完整训练/后训练配方和独立 benchmark，但这些缺口不阻止当前资料级闭环。
+研究笔记中的后续锚点曾切换为 Grok 4.5；K2.7 Code 当前的未确认项仍是线上接受率、目标硬件 profiling、完整训练/后训练配方和独立 benchmark。新增正式落点为第二十一册第 94 章。
 
 ## 8. 来源清单
 
@@ -181,3 +206,36 @@ Kimi K2.7 Code 当前为 **资料级闭环**：两个排行榜中的可追溯条
 - [模型部署指南](https://huggingface.co/moonshotai/Kimi-K2.7-Code/blob/74797c9c62378b951a1f6fcf5c4631024e9b8bef/docs/deploy_guidance.md)
 - [arXiv 定向搜索](https://arxiv.org/search/?query=Kimi+K2.7+Code&searchtype=all)
 
+## 9. 2026-09-29 KTransformers 部署复核：版本支持与文档冲突
+
+本轮继续沿两榜已发现的 Kimi K2.7 Code 锚点，没有从 serving 仓库新增模型。固定 HF revision 的 K2.7 部署指南（`3,689` bytes，SHA-256 `b1bc4c5fb7c8b1da727663d4da83999afc902f6166ff862fbaef514b86de2c65`）称 K2.7 Code 与 K2.5/K2.6 架构相同、部署方法可直接复用，并给出 KTransformers + SGLang 的 RAWINT4 命令；指南同时提醒这些只是示例命令，不保证最优。
+
+为核对它引用的实现，本轮经 `10.24.27.134:7890` 读取 KTransformers `main` Atom。feed 的最新提交是 `c40722bf04c494f2492b7eb9e86ef01a4ede45b3`（2026-09-23；feed `21,972` bytes，SHA-256 `04d2f2e3ddfb18a5e03ebb93100569656db843f038eb4cad9eb275d67c0fca78`）。以下 raw 文档均固定在该 commit，HTTP 200，并与同日已取快照逐字节一致：
+
+| 固定文档 | bytes / SHA-256 | 对本锚点的证据 |
+|---|---|---|
+| `doc/en/Kimi-K2.5.md` | `5,536` / `07f8d0c56ab503235c6b040da1a52a207d1cfb8104845593a3c45f7c49d18204` | 给出 K2.5 的 RAWINT4 CPU/GPU 异构推理示例；不是 K2.7 权重加载测试 |
+| `doc/en/kt-kernel/Native-Precision-Tutorial.md` | `9,597` / `aed37372f057ef24d726cfb4c45010721afeb719156bcfc83fc9ab90b64aa93e` | RAWINT4 支持矩阵列 Kimi-K2-Thinking；示例说明当前 `kt-cli` 支持名单也没有列 K2.7/K2.5 |
+| `doc/en/kt-kernel/experts-sched-Tutorial.md` | `8,002` / `f7714175e6d3d7f3c64a25a45f66d9533f47252fcffa1f89609ff107da365ced` | `kt-num-gpu-experts` 是每个 MoE layer 的驻留专家数；动态更新需要显式开关 |
+| `doc/en/SFT_Installation_Guide_KimiK2.5.md` | `6,858` / `e6d792a8a7383340b24bc3675c7e94c31c29b42588e43a610f532561b511e6e0` | 文档顶部说明其 source-install 正文属于旧版本，`0.7.0.post4` 应使用下列 release tutorial |
+| `.github/release/examples/kimi-k25/README.md` | `19,251` / `c3345dccdccf43c3df8ad708a0e0644500bf00368aaef88ca17b85eb0df75d02` | KTransformers `0.7.0.post4` K2.5 LoRA recipe：使用原始完整权重、不转全 BF16；不是 K2.7 recipe |
+| `.github/release/examples/kimi-k25/README_EN.md` | `20,724` / `8c2f5a5c5c05bf3313a3da5caaee3af8fa0a14574b7c672979387089105b1ff1` | 英文版与中文版描述一致 |
+| `.github/release/examples/kimi-k25/train-neko.yaml` | `1,660` / `a42b713c57790afc192660e7419533d81781400f3f0bfa9fe9bb6b0639e7529a` | 同时列 `kt_backend: RAWINT4`、`kt_expert_weight_format: rawint4` 与 `bf16: true`；权重格式和训练精度是不同配置维度 |
+
+因此 RAWINT4 结论必须保持为**文档未对齐、K2.7 兼容性未实测**：Kimi 部署指南提供可执行命令，KTransformers 的同提交通用支持矩阵没有列 K2.7；K2.5 专页是相邻型号的部署依据，不等于 K2.7 的独立兼容证明。命令给出 `--kt-cpuinfer 96`、`--kt-threadpool-count 2`、`--kt-num-gpu-experts 30`、`--kt-gpu-prefill-token-threshold 400`、TP=4、RAWINT4；通用教程建议 CPU infer 线程约为物理核的 90%、thread pool 数按 NUMA 节点数设置、GPU experts 按每个 MoE layer 计。K2.7 示例没有传 `--kt-enable-dynamic-expert-update`，故不能把它描述成已启用动态专家重排。
+
+Native Precision 教程把 dual prefill 写为：输入 token 数 `< threshold` 使用 CPU-GPU hybrid，`>= threshold` 使用 layerwise prefill，并将 CPU 权重传到 GPU；后者会增加显存压力。K2.7 命令设置阈值 400，但这是通用教程描述与发布方配置，不是本机已验证的 K2.7 分支边界或性能 profile。
+
+SFT 文档存在版本差异：旧的 K2.5 source-install guide 顶部明确说 `0.7.0.post4` 应使用 release tutorial，后续 BF16 转换步骤不应冒充当前发行配方。固定提交里的 `0.7.0.post4` K2.5 release tutorial 使用固定模型 revision `54383e83fa343a1331754112fb9e3410c55efa2f`，要求完整原始模型、不转成全 BF16；随附 YAML 同时设置 `kt_backend: RAWINT4`、`kt_expert_weight_format: rawint4` 和 `bf16: true`。它说明量化权重后端与训练精度字段可以并存，不等于把基座权重转换成 BF16；文档没有逐算子解释所有 dtype。该 K2.5 配方是 NekoQA 风格微调，参考训练配置为 8×RTX 5090、LoRA rank 8/alpha 16、最大序列长度 4096、每卡 batch 1、梯度累积 8，并训练 attention 与 fused expert 两类 LoRA。checkpoint 分开保存普通与 expert adapter、优化器等状态，再转换成 SGLang adapter；教程还用 LoRA tensor、optimizer、RNG、scheduler 和恢复后的 loss 核对 resume。它们是 K2.5 发行版发布的流程/验收说明，不是本地复现，也不是 K2.7 配方。K2.5 的训练与 K2.7 部署指南 2×RTX 4090 的 SFT 数字属于不同 recipe/硬件口径，不能横向比较。
+
+K2.7 部署指南报告一条 KTransformers + LLaMA-Factory LoRA SFT 命令和 2×RTX 4090 场景吞吐，但没有给 K2.7 专属训练 YAML、权重 revision 或精度/转换说明。K2.5 release tutorial 是相邻型号的积极证据，仍不足以证明 K2.7 对应 checkpoint 可按该路径训练；完整权重加载、目标环境版本、数值正确性和本地吞吐仍未验证。
+
+本轮代理结果按端点区分：Google 首页先返回 HTTP 302（372 bytes），跟随跳转的定向搜索 HTTP 200（91,749 bytes）；GitHub commit 页面 HTTP 200（283,724 bytes），固定 raw 文档 HTTP 200。GitHub API tree 返回 HTTP 403 rate-limit，两个初始猜测的 raw 路径返回 404 后改用 README 中的实际路径成功取得文件。API 限流与路径 404 都不是代理断网证据。
+
+- [KTransformers 固定提交 `c40722b`](https://github.com/kvcache-ai/ktransformers/commit/c40722bf04c494f2492b7eb9e86ef01a4ede45b3)
+- [K2.5 serving guide at fixed commit](https://github.com/kvcache-ai/ktransformers/blob/c40722bf04c494f2492b7eb9e86ef01a4ede45b3/doc/en/Kimi-K2.5.md)
+- [Native Precision tutorial at fixed commit](https://github.com/kvcache-ai/ktransformers/blob/c40722bf04c494f2492b7eb9e86ef01a4ede45b3/doc/en/kt-kernel/Native-Precision-Tutorial.md)
+- [Expert scheduling tutorial at fixed commit](https://github.com/kvcache-ai/ktransformers/blob/c40722bf04c494f2492b7eb9e86ef01a4ede45b3/doc/en/kt-kernel/experts-sched-Tutorial.md)
+- [K2.5 SFT tutorial at fixed commit](https://github.com/kvcache-ai/ktransformers/blob/c40722bf04c494f2492b7eb9e86ef01a4ede45b3/doc/en/SFT_Installation_Guide_KimiK2.5.md)
+- [K2.5 `0.7.0.post4` release SFT tutorial at fixed commit](https://github.com/kvcache-ai/ktransformers/blob/c40722bf04c494f2492b7eb9e86ef01a4ede45b3/.github/release/examples/kimi-k25/README.md)
+- [K2.5 release training YAML at fixed commit](https://github.com/kvcache-ai/ktransformers/blob/c40722bf04c494f2492b7eb9e86ef01a4ede45b3/.github/release/examples/kimi-k25/train-neko.yaml)

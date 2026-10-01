@@ -1,6 +1,6 @@
 # GPT-6 Astra：长上下文、推理档位与工具预算
 
-> 资料来源：[OpenAI 官方 GPT-6 Astra 模型页](https://developers.openai.com/api/docs/models/gpt-6-astra.md)、[Using GPT-6 Astra](https://developers.openai.com/api/docs/guides/latest-model/gpt-6-astra.md)、[Reasoning](https://developers.openai.com/api/docs/guides/reasoning.md)、[Prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching.md)、[Conversation state](https://developers.openai.com/api/docs/guides/conversation-state.md)、[Compaction](https://developers.openai.com/api/docs/guides/compaction.md)、[Tool search](https://developers.openai.com/api/docs/guides/tools-tool-search.md)、[Async tool calling](https://developers.openai.com/api/docs/guides/async-tool-calling.md)、[Mid-turn steering](https://developers.openai.com/api/docs/guides/steering.md)、[Misalignment monitoring](https://developers.openai.com/api/docs/guides/safety-checks/misalignment-monitoring.md) 和 [Rethinking skills and prompts](https://developers.openai.com/blog/rethinking-skills-and-prompts-for-gpt-6-astra)，核验日期 2026-09-21。本章只讨论官方明确公开的接口、容量和运行时能力，不根据产品功能推断参数量、MoE 结构或训练算法。
+> 资料来源：[OpenAI 官方 GPT-6 Astra 模型页](https://developers.openai.com/api/docs/models/gpt-6-astra.md)、[OpenAI API 定价页](https://developers.openai.com/api/docs/pricing.md)、[Using GPT-6 Astra](https://developers.openai.com/api/docs/guides/latest-model/gpt-6-astra.md)、[Reasoning](https://developers.openai.com/api/docs/guides/reasoning.md)、[Prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching.md)、[Conversation state](https://developers.openai.com/api/docs/guides/conversation-state.md)、[Compaction](https://developers.openai.com/api/docs/guides/compaction.md)、[Tool search](https://developers.openai.com/api/docs/guides/tools-tool-search.md)、[Async tool calling](https://developers.openai.com/api/docs/guides/async-tool-calling.md)、[Mid-turn steering](https://developers.openai.com/api/docs/guides/steering.md)、[Misalignment monitoring](https://developers.openai.com/api/docs/guides/safety-checks/misalignment-monitoring.md) 和 [Rethinking skills and prompts](https://developers.openai.com/blog/rethinking-skills-and-prompts-for-gpt-6-astra)，核验日期 2026-09-23，2026-09-28 复验。9 月 23 日 latest-model guide 已从 Astra 专属指南漂移为 GPT-6 family 迁移指南；9 月 28 日其哈希未变，开发者博客 Markdown 正文复核亦未发现新方法。本章只讨论官方明确公开的接口、容量和运行时能力，不根据产品功能推断参数量、MoE 结构或训练算法。
 
 ## 先分清三个“长度”
 
@@ -22,7 +22,16 @@ GPT-6 Astra 官方页列出 `reasoning.effort` 支持 `low`、`medium`、`high`�
 
 ## 长上下文成本不是线性直觉
 
-模型页本次标示每百万 token 输入 10 美元、缓存输入 1 美元、缓存写入 12.5 美元、输出 50 美元；输入超过 272K token 时，整次请求的输入和缓存费率按 2 倍、输出费率按 1.5 倍计算。价格是文档快照，正式系统应读取当前价格页并在实验记录中保存日期。
+截至 2026-09-28，官方模型页与定价页列出的费率如下，金额均为每百万 token，字段次序为 input / cached input / cache writes / output：
+
+| 计费模式 | Short context | Long context |
+|---|---|---|
+| Standard | `$10 / $1 / $12.50 / $50` | `$20 / $2 / $25 / $75` |
+| Batch | `$5 / $0.50 / $6.25 / $25` | `$10 / $1 / $12.50 / $37.50` |
+| Flex | `$5 / $0.50 / $6.25 / $25` | `$10 / $1 / $12.50 / $37.50` |
+| Fast mode | `$20 / $2 / $25 / $100` | `$40 / $4 / $50 / $150` |
+
+模型页说明，输入超过 272K token 时，整次请求的 input/cache 费率按 2 倍、output 按 1.5 倍计算，而不是只对超出部分加价；Standard long-context 行与该规则相符。Batch/Flex 为 Standard 的 50%，Fast mode 为适用费率的 2 倍。价格是 2026-09-28 的官方文档快照，正式系统应继续读取当前[定价页](https://developers.openai.com/api/docs/pricing.md)并记录日期。GPT-6 Astra Fast mode 没有 latency SLA，且 EU data residency 不支持该模式，因此价格倍数不等于速度保证。
 
 一个预算函数可以写成：
 
@@ -30,7 +39,7 @@ GPT-6 Astra 官方页列出 `reasoning.effort` 支持 `low`、`medium`、`high`�
 C=C_{\mathrm{input}}+C_{\mathrm{cache}}+C_{\mathrm{output}}+C_{\mathrm{tool}}.
 ```
 
-它只是成本分解，不是完整计费公式。缓存命中、缓存写入、工具调用、批处理和 fast mode 可能有不同规则；超过阈值后是整次请求改变费率，而不是只对超出的 token 加价。
+它只是成本分解，不是完整计费公式。缓存命中、缓存写入和工具调用需要分项；Batch、Flex 与 Fast mode 的公开价格不同，超过阈值后则是整次请求改变费率。下方示例只演示 Standard 费率，不估算工具费、Batch/Flex/Fast 或账户级折扣。
 
 ## 零依赖预算计算示例
 
@@ -70,6 +79,8 @@ print(round(estimate_cost(300_000, 20_000, cache_hit_tokens=100_000), 4))
 
 GPT-6 及后续模型还支持在对话中追加 `configuration_update`，调整后续响应的 reasoning effort。它是请求协议中的配置更新，不是重新加载模型或修改权重。公平评测应固定初始配置，或把每次升档事件记录为实验变量，并分别统计 reasoning token、visible output、TTFT、工具轮数、恢复率和单位成功成本。
 
+官方 latest-model guide 目前按 GPT-6 family 给出迁移矩阵：Astra 不支持 `none` effort，Sol/Luna 支持；Astra 的 reasoning tool calling 需要 Responses，Sol/Luna 只有在 `reasoning_effort="none"` 时支持 Chat Completions function calling；三者在 EU data residency 下只使用 Standard processing。这个矩阵是接口/部署契约，必须进入 capability manifest，不能推导成三个模型的内部架构或训练差异。
+
 当工具数量较多时，可用 deferred tool search 只把 namespace/MCP 的概览放进初始上下文，在模型需要时再加载具体 schema。加载工具到上下文末端有助于复用稳定前缀，但工具集合也因此成为会话状态的一部分。工具 schema 的版本、权限和来源必须审计；不能因为模型“搜索到工具”就自动授予执行权限。
 
 ## 异步工具调用与中途 steering
@@ -87,6 +98,8 @@ OpenAI 的模型指南和开发者博客把技能描述、`AGENTS.md` 和任务�
 这是一条可迁移的 Agent 工程知识，不是 GPT-6 Astra 的内部记忆机制。评测技能或 `AGENTS.md` 时，应固定模型、harness、工具目录和权限，测工具选择、无关上下文 token、任务成功率、压缩次数、停止原因和单位成功成本；不能把“更会遵循指令”写成参数或训练配方。
 
 Misalignment monitoring 属于平台安全控制面。官方文档说明它异步检查高后果上下文中的推理与动作，可能发出告警或阻断后续执行；被阻断时应识别 `misalignment_policy_violation`，停止自动重试，保留 response/tool/request ID 并检查已经发生的副作用。监控可能误报或漏报，且不会撤销早已完成的工具动作，所以它不能替代权限、人工审批、沙箱和 verifier。
+
+因此失败路径必须是显式状态，而不是异常后“再发一次请求”。任务注册表应拒绝重复 `task_handle`、错误 `call_id` 和 pending job 的提前消费；steering 应拒绝同一 response 的第二次 steering，WebSocket 断开后也不能把旧 steering 隐式带到新连接；安全阻断后应冻结自动 retry，保留已启动副作用并交给审计/补偿流程。配套 toy 只验证这些状态转换，不证明真实服务端的事件时序或安全检测准确率。
 
 ## Compaction 的 canonical context
 
@@ -115,8 +128,9 @@ Server-side compaction 在 `context_management` 中设置 `compact_threshold`，
 7. 设计 async function tool 的任务注册表，模拟工具延迟、重复回传、超时和响应 lineage 变化，验证原始 `call_id`、幂等键和 verifier 的关系。
 8. 用 WebSocket 事件序列模拟 `response.create -> response.created -> response.steer -> response.incomplete(steered) -> response.created`，检查已发送文本、已启动工具和外部副作用不会被假设为自动回滚。
 9. 将一套冗长技能说明改成“最小路由器 + 渐进披露”结构，比较无关上下文 token、技能选择、压缩次数和任务完成率；单独记录 misalignment 告警，不把它当作质量分数。
+10. 扩展协议 toy 的故障矩阵：重复 task handle、错误 call ID、pending consume、重复 steering、WebSocket 断线恢复和 `misalignment_policy_violation`；要求安全阻断禁止自动 retry，且已启动副作用必须进入审计/补偿账本。
 
-配套的零依赖状态机示例见 [`gpt6_agent_protocol_demo.py`](../../research/model-update-2026-09/code/gpt6_agent_protocol_demo.py)。它只验证 `call_id`、响应血缘、重复回传和渐进披露的账本，不调用真实 API，也不代表 GPT-6 Astra 的真实延迟或质量。
+配套的零依赖状态机示例见 [`gpt6_agent_protocol_demo.py`](../../research/model-update-2026-09/code/gpt6_agent_protocol_demo.py)。它验证 `call_id`/task handle 失败门禁、pending/重复回传、响应血缘、steering 断线恢复、misalignment 后禁止自动重试、既有副作用保留和渐进披露账本；不调用真实 API，也不代表 GPT-6 Astra 的真实延迟、事件时序或质量。
 
 ## GPT-5.3 Codex 对照：更小窗口，不同 Agent 契约
 
@@ -144,6 +158,10 @@ Sol 的价格合同包含一个 whole-request threshold：超过 `272K` input to
 
 因此本章的部署结论保持一致：模型合同、推理预算、工具宿主、缓存/压缩、权限和 artifact verifier 是不同层。GPT-6 Sol 当前没有公开参数规模、内部架构、完整训练 recipe 或独立生产 benchmark；本节只把官方可观察 API/runtime 字段纳入服务账本。
 
+### Sol 合同审计 toy：把预算和副作用变成门禁
+
+配套的 [`gpt6_sol_contract_audit.py`](../../research/model-update-2026-09/code/gpt6_sol_contract_audit.py) 用零依赖状态机验证这些边界：`standard/pro` 与 effort 正交；`configuration_update` 只能在 standard single-agent 中调整后续 effort，不能和 automatic compaction/truncation 或 standalone compact 混用；超过 `272K` input 后按整次请求放大 input/cache 与 output 费率；工具必须经过 permission、executor、idempotency 和 artifact verifier。toy 还模拟 opaque compaction 后的 cache prefix miss，并输出 `local_protocol_toy`，不代表真实 API、模型质量或目标硬件性能。
+
 ## GPT-OSS 对照：active 参数、MXFP4 与 Harmony serving
 
 gpt-oss-120b/20b 的部署账本与 GPT-6 Astra 的 API 预算账本不同：前者是开放权重 MoE，必须分开记录 total/active parameters、专家驻留或分片、top-4 dispatch、GQA KV cache、MXFP4 weight storage、通信和 workspace；不能用 5.13B 或 3.61B active 参数直接决定显存。
@@ -155,3 +173,13 @@ gpt-oss-120b/20b 的部署账本与 GPT-6 Astra 的 API 预算账本不同：前
 Artificial Analysis 的 `gpt-6-luna` 与 OpenAI model page 是独立证据：Luna 的 focused/high-volume 定位、1.05M/922K/128K、2026-05-18 cutoff 和 `$0.10/$0.50` 合同不能覆盖 GPT-6 Sol 的价格、provider 指标或 Agent 行。部署 manifest 仍要固定 model ID、snapshot、effort、mode、tool schema、compaction、executor 和 verifier。
 
 “高效率”只能指导 task-shape routing 和成本账本，不能反推参数、dense/MoE、kernel 或 FLOPs。DataCurve 当前没有 `mini_swe_agent_gpt_6_luna_*` 精确行，因此本章只纳入官方可观察合同；完整权重、目标硬件 profiling、生产 kernel 和线上 SLO 保持 `unverified`。详见 [`gpt-6-luna-source-notes.md`](../../research/model-update-2026-09/gpt-6-luna-source-notes.md)。
+
+## GPT-6.1 Sol：近 Astra 能力的成本与状态账本
+
+Artificial Analysis 的实时榜单新增 OpenAI `gpt-6-1-sol` 及多个 effort 变体；DataCurve 没有精确 `mini_swe_agent_gpt_6_1_sol_*` 行，因此不能迁移其他 GPT 的 Agent 分数。OpenAI 官方模型页将它定位为较低成本的复杂 coding、computer use 和 professional work 模型，公开合同为 1,050,000 context、922,000 maximum input、128,000 maximum output，输入支持 text/image，输出为 text。
+
+它支持 `low/medium/high/xhigh/max` reasoning effort，默认 `medium`，但不支持 `none/minimal`。GPT-6.1 Sol 的 `reasoning.mode`（`standard/pro`）和 `reasoning.effort` 是两个独立字段；mode 选择执行档位，effort 控制该档位中的推理预算。
+
+官方 Reasoning 文档允许 `reasoning.context=all_turns` 复用兼容的历史 opaque reasoning items，`current_turn` 则只让当前回合 reasoning 可用；两者都不暴露原始思维链。Compaction 文档要求把加密 compaction item 作为下一轮输入的一部分保留；stateless input-array chaining 与 `previous_response_id` chaining 的裁剪规则不同。模型合同、推理状态、compaction、工具执行和业务 verifier 应在 replay ledger 中分栏。
+
+本节只写官方可观察 API/runtime 合同。GPT-6.1 Sol 的参数、架构、训练配方、完整权重、真实 endpoint 行为和生产硬件验收仍未公开核验。

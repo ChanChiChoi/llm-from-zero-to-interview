@@ -56,25 +56,51 @@ def _step_copy(steps: Iterable[Step]) -> List[Step]:
     return [deepcopy(step) for step in steps]
 
 
-def validate_history(history: List[Step]) -> None:
-    """Validate the fields a stateless client must preserve."""
+def validate_history(
+    history: List[Step],
+    *,
+    require_function_signatures: bool = False,
+    require_thought_signatures: bool = True,
+) -> None:
+    """Validate local replay policy, not the SDK's Pydantic response schema.
+
+    `require_thought_signatures` is a conservative stateless-replay policy: if a
+    thought signature was expected, the host requires it to preserve it. The
+    pinned Interactions SDK declares ThoughtStep.signature optional, so callers
+    can disable this gate to model schema-level field optionality. Custom
+    function signatures are undeclared in typed fields but accepted as extras by
+    the Interactions-specific BaseModel; the stricter function switch models the
+    broader Tool-combination prose. Neither mode predicts endpoint output.
+    """
 
     calls: Dict[str, Step] = {}
+    results = set()
     for step in history:
-        if step.step_type == "thought" and not step.signature:
+        if (
+            step.step_type == "thought"
+            and require_thought_signatures
+            and not step.signature
+        ):
             raise ReplayError("thought signature is missing")
-        if step.step_type in {"function_call", "function_response"}:
-            if not step.step_id:
-                raise ReplayError(f"{step.step_type} id is missing")
-            if not step.signature:
-                raise ReplayError(f"{step.step_type} signature is missing")
         if step.step_type == "function_call":
+            if not step.step_id:
+                raise ReplayError("function_call id is missing")
+            if require_function_signatures and not step.signature:
+                raise ReplayError(f"{step.step_type} signature is missing")
             if step.step_id in calls:
                 raise ReplayError(f"duplicate function call id: {step.step_id}")
             calls[step.step_id] = step
-        elif step.step_type == "function_response":
-            if step.step_id not in calls:
-                raise ReplayError(f"orphan function response: {step.step_id}")
+        elif step.step_type == "function_result":
+            call_id = step.data.get("call_id")
+            if not call_id:
+                raise ReplayError("function_result call_id is missing")
+            if require_function_signatures and not step.signature:
+                raise ReplayError(f"{step.step_type} signature is missing")
+            if call_id not in calls:
+                raise ReplayError(f"orphan function result: {call_id}")
+            if call_id in results:
+                raise ReplayError(f"duplicate function result for call: {call_id}")
+            results.add(call_id)
 
 
 class InteractionStore:
@@ -137,17 +163,20 @@ class InteractionStore:
             step_id=call_id,
             signature=_signature(interaction_id, "function_call"),
         )
-        function_response = Step(
-            "function_response",
-            {"name": tool_names[0], "result": {"temperature_c": 25}},
-            step_id=call_id,
-            signature=_signature(interaction_id, "function_response"),
+        function_result = Step(
+            "function_result",
+            {
+                "name": tool_names[0],
+                "call_id": call_id,
+                "result": {"temperature_c": 25},
+            },
+            signature=_signature(interaction_id, "function_result"),
         )
         model_output = Step(
             "model_output",
             {"text": "Beijing is 25 C in this synthetic trace."},
         )
-        output_steps = [thought, function_call, function_response, model_output]
+        output_steps = [thought, function_call, function_result, model_output]
         history = parent_history + [user_step] + _step_copy(output_steps)
         validate_history(history)
 
@@ -255,6 +284,33 @@ def main() -> None:
     assert not stateless.stored
     assert stateless.interaction_id not in store.stored_ids
 
+    # The pinned SDK does not declare custom function-call/result signatures.
+    # Keep both optional-signature schema behavior and the stricter doc profile
+    # testable without asserting which fields the live endpoint actually emits.
+    sdk_shaped_history = _step_copy(first.history)
+    for step in sdk_shaped_history:
+        if step.step_type in {"thought", "function_call", "function_result"}:
+            step.signature = None
+    validate_history(sdk_shaped_history, require_thought_signatures=False)
+    expect_error(
+        lambda: validate_history(
+            sdk_shaped_history,
+            require_function_signatures=True,
+            require_thought_signatures=False,
+        ),
+        "function_call signature is missing",
+    )
+    expect_error(
+        lambda: validate_history(sdk_shaped_history),
+        "thought signature is missing",
+    )
+    function_result = next(
+        step for step in first.history if step.step_type == "function_result"
+    )
+    assert function_result.data["call_id"] == next(
+        step.step_id for step in first.history if step.step_type == "function_call"
+    )
+
     tampered = _step_copy(first.history)
     tampered[1].signature = "opaque:tampered"
     expect_error(
@@ -306,7 +362,11 @@ def main() -> None:
         "ok": True,
         "stateful_parent_history_preserved": True,
         "stateless_history_signature_preserved": True,
-        "tool_call_result_id_aligned": True,
+        "sdk_schema_allows_missing_function_signatures": True,
+        "sdk_schema_allows_missing_thought_signature": True,
+        "local_replay_policy_requires_thought_signature_by_default": True,
+        "strict_doc_profile_rejects_missing_function_signature": True,
+        "function_call_id_matches_function_result_call_id": True,
         "sse_event_order": [event["event_type"] for event in events],
         "paid_retention_days": retention_days("paid"),
         "free_retention_days": retention_days("free"),

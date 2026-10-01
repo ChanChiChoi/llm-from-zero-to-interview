@@ -1,6 +1,6 @@
 # Qwen3.8 Max (0902) 官方资料摘记
 
-核验日期：2026-09-21（runtime recheck）。本笔记只处理已经出现在 Artificial Analysis 与 DataCurve DeepSWE 中的 `Qwen3.8 Max (0902)`。官方资料将它描述为 `qwen3.8-max` 的 upgraded snapshot/service revision；本轮没有证据表明它是新的公开权重、独立基础架构或新的开源 checkpoint。官方产品描述、API 文档和缓存文档用于核验服务行为，不能反向创造新的模型候选。
+核验日期：2026-09-23（7890 runtime/cache recheck）。本笔记只处理已经出现在 Artificial Analysis 与 DataCurve DeepSWE 中的 `Qwen3.8 Max (0902)`。官方资料将它描述为 `qwen3.8-max` 的 upgraded snapshot/service revision；本轮没有证据表明它是新的公开权重、独立基础架构或新的开源 checkpoint。官方产品描述、API 文档和缓存文档用于核验服务行为，不能反向创造新的模型候选。
 
 ## 1. 榜单锚点与证据分层
 
@@ -20,8 +20,8 @@
 - [Qwen3.8-Max-0902 产品页](https://www.qwencloud.com/models/qwen3.8-max-0902)：页面名称为 `Qwen3.8-Max-0902`，alias 为 `qwen3.8-max-2026-09-02`，并明确称其为 `qwen3.8-max` 的 upgraded snapshot。页面 `last-modified` 已更新为 `2026-09-21 11:01:05`；三条代理均取得 `98,992` bytes，但页面含动态 trace/CSS/asset 字段，哈希分别为 7890=`aef93a9892e52504043a81a941a2150a24a5210dd3daf769a85e72dbe5949dad`、8098=`8aa221b29ac0236eee10dc745c374e2c77362077e9d852789a6a9f3fd3c70270`、1234=`39cabb0a6291c417acf6c9904c2c769be89c4739016d41c3ceecfd6f10160e5e`；因此以页面字段和 last-modified 作为正文核验依据，不把动态哈希差异误判为模型差异。
 - [Thinking 文档](https://docs.qwencloud.com/developer-guides/text-generation/thinking)：说明 `reasoning_effort`、`thinking_budget` 和 reasoning mode 的调用边界。
 - [Function Calling 文档](https://docs.qwencloud.com/developer-guides/tool-calling/function-calling)：说明 thinking 模式的 `tool_choice` 约束及 `MultiModalConversation` 接口。
-- [Context Cache 文档](https://docs.qwencloud.com/developer-guides/run-and-scale/context-cache)：说明 explicit、implicit、session cache 的语义、命中和计费边界。
-- [Dynamic Rate Limiting](https://docs.qwencloud.com/developer-guides/administration/dynamic-rate-limits)：说明 account+model 聚合、workspace override、月度 TPM tier 和 soft limit；文档快照为 `408,930` bytes，SHA-256 `ba010f2386fbb32c0b69bcbdde64efb520435cefc16475cb030b55253909949e`。
+- [Context Cache 文档](https://docs.qwencloud.com/developer-guides/run-and-scale/context-cache)：说明 explicit、implicit、session cache 的语义、命中和计费边界。2026-09-23 经 `7890` 获取的 server-rendered response 为 `1,133,845` bytes，SHA-256 `42d5d39fe4cb29680a27fcdd8d1b9bb1c07cdea93f01cb2ae31f40b02ca2edb8`；页面正文补充了 marker、lookback、TTL、隔离和 usage 字段。
+- [Dynamic Rate Limiting](https://docs.qwencloud.com/developer-guides/administration/dynamic-rate-limits)：说明 account+model 聚合、workspace override、月度 TPM tier 和 soft limit；2026-09-23 经 `7890` 获取的 response 为 `411,250` bytes，SHA-256 `b517a331efcdd822bfd63e81894e735a686db01baf1e77702155a0d8905ce82f`。页面动态资源可能造成不同响应大小，正文字段优先于页面哈希。
 
 产品页把 0902 的升级方向描述为更强的 coding、工程规模项目、长周期 autonomous development、多工具 Agent 协作和视觉理解，同时保留 1M context、thinking mode 和完整工具生态。这些是官方服务定位和能力说明；在没有专属技术报告、配置文件或公开权重的情况下，不能改写成新的 attention、MoE、训练数据或 kernel 事实。
 
@@ -105,15 +105,31 @@ Function Calling 文档明确：在 thinking 模式下，`tool_choice` 只能使
 
 ## 7. Explicit、implicit 与 session cache
 
-Qwen Cloud 的 Context Cache 文档把 Qwen Max 模型列入三类缓存能力：
+Qwen Cloud 的 Context Cache 文档把 Qwen Max 模型列入三类缓存能力。三者都复用请求前缀以减少重复计算，官方说明不影响响应质量；但 owner、确定性、生命周期和计费不同：
 
-| 类型 | 适合回答的问题 | 评测/服务时要记录 |
-|---|---|---|
-| Explicit cache | 应用是否主动创建并复用一个可管理的上下文前缀？ | cache identity、创建/更新/失效、命中、租户和权限 |
-| Implicit cache | provider 是否自动识别可复用前缀？ | 命中与未命中、实际计费、前缀稳定性和请求路由 |
-| Session cache | 同一个会话的历史状态如何继续复用？ | session identity、过期/切换、并发访问、恢复与隔离 |
+| 类型 | 请求控制面 | 命中/生命周期 | 文档中的相对计费口径 | 评测/服务时要记录 |
+|---|---|---|---|---|
+| Explicit cache | 在 `messages` 内容上放 `cache_control: {"type":"ephemeral"}`；单请求最多 4 个 marker，超过 4 个时只有最后 4 个生效 | 应用主动创建；至少 `1,024` tokens 才满足缓存资格条件，但不保证实际命中；有效 5 分钟，每次命中再延长 5 分钟；marker 前向回看最多 20 个 content block | 创建通常为标准输入价的 `125%`，命中通常为 `10%` | marker 位置、prefix、cache identity、创建/命中/失效、账户、模型、权限和 endpoint-specific `cached_tokens` |
+| Implicit cache | 无额外开关，provider 自动对 `messages` 做 common-prefix matching，不能关闭 | 最小 `1,024` tokens；命中概率不保证；系统周期性清理长期未使用数据，无固定 TTL | 创建按标准输入价 `100%`，命中部分通常为 `20%` | 静态前缀、变量后缀、命中/未命中、实际计费、请求路由和清理漂移 |
+| Session cache | Responses API 使用 `x-dashscope-session-cache: enable`，多轮继续使用 `previous_response_id` | 最小缓存门槛与真实命中概率须分开；5 分钟，命中刷新；适用于 Responses 多轮上下文 | 按实际落入的 explicit/implicit 类型计费；session 示例沿用 explicit 的创建 `125%`/命中 `10%` 口径 | session identity、previous response lineage、过期/切换、账户/模型隔离、并发恢复和 endpoint-specific `cached_tokens` |
 
-文档给出最小缓存长度 `1,024` tokens，并为不同模式规定不同的命中、计费和有效期语义。不要把三者都简化成“KV cache 永久放在 GPU”；它们可能对应不同的 provider 状态、生命周期和账单。也不要只看 cache hit rate：还要记录 cache bytes、命中节省的 prefill、provider 路由、失效后的重算和跨 revision/tokenizer/template 的兼容性。
+这些是官方文档的典型相对计费表述；产品页同时给出当前服务价格字段（input/output/implicit cache `$2/$6/$0.25`，explicit create/read `$2.50/$0.17` 每百万 token），两者不能机械相加。部署时应以固定 alias、mode、实际价格页和响应 usage 为准。也不要把三者简化成“KV cache 永久放在 GPU”：它们可能对应 provider 的不同状态、生命周期和账单。
+
+### 7.1 Cache marker、lookback 与 usage 细节
+
+官方 Context Cache 页面补充了几个容易漏掉的协议边界：
+
+1. `cache_control.type` 当前只能是 `ephemeral`；一个请求最多四个 marker，marker 应放在稳定的 system/静态内容位置。多余 marker 不应被客户端默认为全部生效，文档明确只有最后四个有效。
+2. Explicit cache 使用 backward prefix matching：每个 marker 最多检查前方 20 个 content block。并行 tool call 如果把每个 tool result 拆成多个 content block，会快速消耗这个窗口；将连续同角色的 tool result 合并到一个消息的多个 content block，可以改善命中机会，但不能保证命中。
+3. Implicit cache 是 common-prefix 自动识别，不保证命中；静态内容放前、变量内容放后。视觉理解时，反复问同一图像/视频应把媒体放前；对不同媒体问同一问题则把问题放前。这是 prompt layout 的 serving 优化，不是模型架构声明。
+4. Usage 字段按 API 区分：QwenCloud Responses API reference 与 session cache 示例使用 `usage.input_tokens_details.cached_tokens`；Context Cache 页的 Chat Completions 示例使用 `usage.prompt_tokens_details.cached_tokens`。不要把一种 endpoint 的 usage schema 硬套给另一种。
+5. 1,024-token 门槛只表示满足缓存资格条件，不保证命中；同一文档的一处带 `cache_control` marker 的 explicit-cache 请求示例注释又写“input must exceed 1024 tokens”。边界 `1,023/1,024/1,025` 应通过获授权的 endpoint probe 裁决，当前文档不支持把等号细节写死。
+6. 当前文档给出两种不同的 20 上限，单位不可混用：marker 的 backward lookback 是最多 20 个前置 content block；显式缓存块后追加 `other messages` 的示例则称不超过 20 条 message 时可复用 block A 并刷新 TTL、超过 20 条时不命中 A 而按完整上下文建新块。前者约束块回看，后者约束多轮追加消息。
+7. 在 Chat Completions、DashScope 和 Anthropic-compatible API 中，explicit 与 implicit cache 互斥；Responses API 未启用 session cache 时，若模型支持则会使用 implicit cache。
+8. Responses API 的 `previous_response_id` 会取回前一轮 input/output 并追加本轮新 input，但上一轮的 `instructions` 不会自动继承；需按当前请求重发。`previous_response_id` 不能与 `conversation` 同用；response ID 有效期文档称为 7 天，`store=false` 的 response 不能继续引用。
+9. Session cache 的有效期语义不是控制台 Model Experience/Model Debugging 中的对话历史保留；Responses API 的 response lineage、cache TTL 和产品控制台历史必须分开建模。
+
+因此，面试或压测不能只报 cache hit rate。至少要记录 marker/prefix、content-block 距离、cache type、account/model/revision、命中 token、saved prefill、失效重算、endpoint、tokenizer/template 和实际账单。
 
 ## 8. 面试中的技术归纳
 
@@ -122,7 +138,7 @@ Qwen Cloud 的 Context Cache 文档把 Qwen Max 模型列入三类缓存能力�
 1. snapshot/revision 与基础模型身份要分开；旧 0803 deprecated、新 0902 alias、canonical entry 和 hosted/open 状态要同时记录。
 2. 1M context 不是一条可直接换算吞吐的数字；991K/983K input cap、131K output、reasoning、工具结果和 cache 都要进入预算账本。
 3. reasoning effort 与 thinking budget 是互斥的 API 表达；thinking 模式又限制强制 tool choice，客户端迁移必须做 schema 回归。
-4. explicit/implicit/session cache 的生命周期、命中和计费不同；cache key、租户、revision、模板和权限必须进入可观测性。
+4. explicit/implicit/session cache 的生命周期、命中和计费不同；`ephemeral` marker、四-marker 上限、20-block lookback、5 分钟刷新、账户/模型隔离和 `cached_tokens` 都是可测试的协议边界。
 5. coding、长周期 autonomous development、多工具 Agent 和视觉理解是产品定位，应通过固定 harness、工具、环境和 verifier 验收，不能直接当作架构或 benchmark 事实。
 
 ## 9. 待核验与书系映射
@@ -132,3 +148,12 @@ Qwen Cloud 的 Context Cache 文档把 Qwen Max 模型列入三类缓存能力�
 DataCurve 的泛化 `qwen3_8_max_xhigh` 行可以作为 Qwen3.8 Max Agent 配置的参考，但不能写成 `qwen3.8-max-0902` 的独立 Pass@1。Artificial Analysis Intelligence Index、DataCurve Pass@1、Qwen 官方产品字段也不合并成一个裸模型能力分数。
 
 本轮不新增重复的 Qwen3.8 架构章节：扩展第二十一册第 83 章的模型身份/协议段，并把 cache、tool-choice 和 revision 迁移映射到第二十四册工具 serving 章节、题库、练习、术语、项目和知识图谱。后续若获得 0902 专属技术报告或固定实现，再单独评估是否有必要增加专题。
+
+## 10. 2026-09-28：7890 当前复验与 cache / Responses 契约精化
+
+- 当前工作区显式使用 `10.24.27.134:7890` 获取 Artificial Analysis `/zh`（HTTP 200，1,674,048 bytes，SHA-256 `56359658c7d187e4a214ae65857f0a7668d42ebcc1da0e2d4fab477642e2640c`）、release 页面（HTTP 200，938,807 bytes，`913306564eb762ad0587c8845bece903f5004a0198f64709af7318fbcb960ff2`）、Qwen3.8 Max 详情（HTTP 200，3,881,440 bytes，`f9c920db61e73a4d71fcd9a10d057d7bf22ce01d979974dd32ec4ed1f911cccb`）与 DataCurve（HTTP 200，268,036 bytes，`14436c31be1e50a0b62171e4eeb4dd0ae0ce66b1e390af89c7e6e095ad59f1f1`）。DataCurve 精确 Qwen3.8 Max 0902 行仍不存在。AA 首页较本日先前快照字节差异仅记录为动态页面漂移，不据此推断模型变化。
+- QwenCloud 产品页当前为 98,992 bytes / `ce97b7c9098ed54c195aa2c6b1a5c0dfc6ad43e7290aea10bcce8484f42b9a6b`，`last-modified=2026-09-28 09:55:09`；仍称 0902 是 `qwen3.8-max` 的 upgraded snapshot。新抓页面对 coding、长周期 autonomous development、多工具协调、端到端任务交付和视觉理解作更细描述，但没有量化指标、评测条件或架构/训练披露；这些仅作厂商产品定位，不代表模型 revision 已被独立验证。
+- 当前 Context Cache 页面为 1,134,820 bytes / `47a01521f4ce689acf6f017c36c66af7c7c98984029eb5ba5c5f58e170b69a74`，Dynamic Rate Limiting 为 412,225 bytes / `033d1381bfd1c759834bb3402b75e53acca8a7c617480f3424b53b0080ec6460`。核心缓存/限流字段复验仍含 4 markers、5-minute TTL、explicit/implicit 相对计费和 0902 的 `1,500,000 / 1,500,000 / 1,500,000` guaranteed TPM；quota 仍不是吞吐/benchmark。
+- 当前 [Responses API reference](https://docs.qwencloud.com/api-reference/chat/openai-responses) 为 952,619 bytes / `fd467c8d7ce159e2c98f7220ee599014ee28a1f3b9a6dd6309075313926a1940`。它确认 `input_tokens_details.cached_tokens`、session cache 和 `previous_response_id` 语义；与 Context Cache 页 Chat Completions 示例的 `prompt_tokens_details.cached_tokens` 是 endpoint-specific usage schema，不应混为文档冲突。
+- Cache 文档补充了资格阈值与真实命中的区别、20 个前置 content block 与最多 20 条后续 message 两套独立窗口、API 间 explicit/implicit mutual exclusion；Responses 参考进一步说明上一轮 `instructions` 不会随 `previous_response_id` 自动继承，且不可同时使用 `conversation`，`store=false` 的 response 不可继续引用。
+- 本轮仅复验官方网页/静态榜单，未调用 QwenCloud endpoint、未提供 API key、未下载权重或测试 production cache。官方产品页变化是服务定位文案；本轮可新增的技术教学内容是协议边界与接口差异，不是模型内部架构。

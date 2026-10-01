@@ -112,6 +112,25 @@ mean_agent_steps: 154.71
 
 仍待核验：V4 Pro 专属完整报告正文中的所有实验协议、生产 kernel 与目标硬件 profiling、线上 tool acceptance、不同 API 快照的行为差异、完整训练/后训练超参，以及独立于发布方的 benchmark 复现。特别是 `low/high/max` 的质量—延迟—成本曲线必须绑定固定模型快照、任务、harness 和 verifier，不能跨模型按档位名比较。
 
+## 2026-09-24：DeepSeek V4 Flash 的 SGLang v0.5.20 serving 补证
+
+本节只扩展此前已由 Artificial Analysis/DataCurve 收录的 DeepSeek V4 Flash/Pro 锚点；SGLang 版本与 PR 是 runtime 证据，不是模型发现入口。经 7890 读取 GitHub 官方 `releases/latest` API，stable tag 仍为 `v0.5.20`，发布日期 `2026-09-18T22:41:33Z`；release 响应 `87,872` bytes / SHA-256 `c75daa307a5ead07993a00b9d8367579a9146dfc63b12ccfe31ae29cd4154bdc`。
+
+### SWA 分支点缓存：Full KV 命中不代表混合状态完整
+
+DeepSeek V4 Flash 同时有完整/压缩注意力 KV 与 sliding-window attention（SWA）状态。chunked prefill 可释放已滑出窗口的 SWA slots 以降低内存；但在共享前缀处分叉的 sibling request，可能仍命中完整 KV，却找不到对应分支点的 SWA 状态，只能重新计算前缀。SGLang PR [#34565](https://github.com/sgl-project/sglang/pull/34565) 在统一 radix tree 中保留可复用的 SWA branch-point state：插入分支前处理 out-of-window slots，分支进入树后再清理不再需要的状态；关闭对应优化开关时不改变旧路径。它说明混合注意力 serving 不能只用一个 `prefix_hit` 或 KV 长度代表所有状态。
+
+PR 的内部 shared-prefix workload 使用 `DeepSeek-V4-Flash-0731`、TP=2、FlashInfer MXFP4、DSpark、共享 system prompt 24,576 tokens、question 8,192 tokens、output 128 tokens、64 个请求分成 8 组并发分支；server 上限、chunk size 和缓存开关也固定在 PR 中。启用 out-of-window free 时，PR 对照数据为：token hit rate `43.81% → 60.75%`，cached tokens `939,264 → 1,302,528`，mean TTFT `1,569.93 → 1,069.58 ms`，p95 TTFT `3,427.47 → 2,372.52 ms`，input throughput `66,310.37 → 70,509.72 tokens/s`。这是 SGLang PR 的指定合成 shared-prefix serving 结果，不是独立复现或对所有硬件/流量的保证；该 PR API 响应 `58,568` bytes / SHA-256 `cf0f40241e79c9b3cf0a8798a438784118d65ac1c0d2ba0fe8af0b364e5156a3`。
+
+### CSA/HCA kernel 与硬件分支
+
+| 来源/目标 | runtime 变化 | 发布方测量与边界 |
+|---|---|---|
+| [PR #30805](https://github.com/sgl-project/sglang/pull/30805)，B200 / SM100、SM103 | 为 DeepSeek V4 的 CSA/HCA attention 接入 TRT-LLM kernel，与 FlashMLA backend 对照 | PR 的 unit-kernel 结果约为 prefill `1.2x`、decode `1.45x`；测试注明 B200、FP8、TP=1 和私有 benchmark repo，不能写成端到端 V4 Flash 或 DataCurve 提升。API 响应 `55,177` bytes / SHA-256 `8a9bdc0788755b5082d0d1f5abbb340811e9a6fc5ecaf06b5dfc5402a4b13d7f` |
+| [PR #29927](https://github.com/sgl-project/sglang/pull/29927)，4× RTX PRO 6000 / SM120 | sparse-MLA indexer 改走 DeepGEMM paged-MQA logits；prefill 使用 FlashInfer paged sparse attention；启用 DeepGEMM FP4 MoE，并避免每步重排整个 SWA KV pool | PR 报告单并发 TPOT 可到 `3.4x`，但基线是当时唯一能启动的慢速 torch indexer fallback；PR 说明另一个 HC prenorm kernel 贡献了 8K/BS1 TPOT 增益的约 `3.2%`。同 PR 的 MTP accepted length 接近，故报告把提升归因于 decode path，而非更高接受长度。不能将其简化为模型本身加速。API 响应 `47,628` bytes / SHA-256 `3e968d8d1f0eb5940e8c7be7fe8556b666264596f14cd99286457b4655065819` |
+
+面试时应先问比较的是 kernel、token-cache 命中还是端到端 Agent task；然后锁定模型 snapshot、硬件、baseline backend、并行度、batch/context、共享前缀、speculation 和 verifier。SGLang `v0.5.20` 的 V4 serving 证据是系统/内核实现，不是 CSA/HCA 的新论文算法，也不证明完整权重、目标硬件、本地 acceptance 或生产 SLO。V4.1 的 `FlashMLA` dependency bump 另见 [`deepseek-v4.1-flash-source-notes.md`](deepseek-v4.1-flash-source-notes.md)，不能与通用 V4/Flash 实验混作同一 checkpoint 结果。
+
 ## 2026-09-20：官方 Hugging Face revision 与 inference implementation 补证
 
 本节把“模型卡/论文宣称的技术”与“公开 artifact 中确实存在的实现路径”分开记录。模型发现仍只来自 Artificial Analysis 与 DataCurve DeepSWE；Hugging Face 仅作为已经发现的 V4 Pro 锚点的官方实现来源。

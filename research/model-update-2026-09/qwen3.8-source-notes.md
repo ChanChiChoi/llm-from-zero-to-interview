@@ -1,6 +1,6 @@
 # Qwen3.8 官方资料摘记
 
-核验日期：2026-09-14。本文把两个排行榜作为候选发现入口，把 Qwen 官方模型卡、GitHub 仓库、技术报告和 Qwen Cloud 页面作为事实核验来源。模型卡和技术报告中的 benchmark、吞吐、稳定性与成本数字均保留为发布方自报，不能替代独立复现。
+架构与报告核验日期：2026-09-14；serving/runtime 补证：2026-09-24。本文把两个排行榜作为候选发现入口，把 Qwen 官方模型卡、GitHub 仓库、技术报告和 Qwen Cloud 页面作为事实核验来源。模型卡和技术报告中的 benchmark、吞吐、稳定性与成本数字均保留为发布方自报，不能替代独立复现。
 
 ## 1. 榜单发现与证据分层
 
@@ -30,12 +30,18 @@ DataCurve DeepSWE 当前快照只检出 `qwen3.8-max`，页面入口为 [DeepSWE
 - [Qwen3.8-Flash-Next 模型卡](https://huggingface.co/Qwen/Qwen3.8-Flash-Next)：125B/6B active、N-gram 参数、QSA、GR、MTP、视觉和部署入口。
 - [Qwen3.8-Flash-Next 官方仓库](https://github.com/QwenLM/Qwen3.8-Flash-Next)：实验性架构说明、代码引用、技术报告和推理框架入口。
 - [Qwen3.8-Flash-Next 技术报告](https://github.com/QwenLM/Qwen3.8-Flash-Next/blob/main/tech_report.pdf)：*On the Design of Qwen3.8-Next Architecture: Evaluation, Efficiency, and Training Stability*，日期为 2026-08-26。
+- [Qwen 官方 Flash-Next README（固定提交）](https://github.com/QwenLM/Qwen3.8-Flash-Next/blob/69885871a64393807d988b27b1b5e380e8f28526/README.md)：称 Flash-Next 是 Qwen4 架构的早期预览，并给出 Transformers、SGLang、vLLM、TokenSpeed 的部署命令；这不是另一个排行榜模型锚点。
+- [vLLM v0.30.0 Qwen4Exp 实现](https://github.com/vllm-project/vllm/tree/v0.30.0/vllm/models/qwen4_exp) 与 [模型注册表](https://github.com/vllm-project/vllm/blob/v0.30.0/vllm/model_executor/models/registry.py)：固定 release tag 下的 Qwen4Exp、QSA、PLE、Gated Residual 与 MTP serving 代码。
+- [vLLM Qwen3.8-Flash-Next recipe](https://recipes.vllm.ai/Qwen/Qwen3.8-Flash-Next)：vLLM 发布的硬件配置和 serve 参数；动态页面标注 vLLM `0.29.0+`，不能等同本地安装或独立硬件复现。
+- [SGLang v0.5.20 Qwen4Exp 实现](https://github.com/sgl-project/sglang/tree/v0.5.20/python/sglang/srt/models)：固定 release tag 下的 QSA 调度、MTP 和 PLE host-offload 实现。
 - [Qwen3.8-Max 产品页](https://www.qwencloud.com/models/qwen3.8-max)：托管版本能力边界和产品配置。
 - [Qwen3.8-27B 产品页](https://www.qwencloud.com/models/qwen3.8-27b)：27B hosted version 的产品入口。
 - [Qwen3.8-Flash 产品页](https://www.qwencloud.com/models/qwen3.8-flash)：Flash-Next 对应的托管版本入口。
 - [Qwen3.8 发布页路由](https://qwen.ai/blog?id=qwen3.8) 与 [Flash-Next 发布页路由](https://qwen.ai/blog?id=qwen3.8-flash-next)：Qwen 官方博客入口；页面内容可能由动态站点渲染，模型事实以模型卡和报告为准。
 
 本轮保存的本地资料包括 `hf-qwen38-27b-card-2026-09-14.out`、`hf-qwen38-a95b-card-2026-09-14.out`、`hf-qwen38-flash-card-2026-09-14.out`、`qwen-flash-readme-2026-09-14.out` 和报告文本。技术报告 PDF 的 SHA-256 为 `04f263446d74a35cb7cea368574e0c561f3b05c133be2c777ac884404063655d`，正文共 28 页。
+
+2026-09-24 新增固定来源快照：Qwen README 9,735 bytes / SHA-256 `34d45d3486c29dcc23dade1472b5cbf1347ffe0a1adc3334aec83b3dc4e08c50`（commit `69885871a64393807d988b27b1b5e380e8f28526`）；vLLM Recipe 页面 1,859,526 bytes / SHA-256 `6895396ab217c1e14d1832fa0006a6aadc9a25820f3868daa2989409b9d8a78a`。vLLM `v0.30.0` 固定 tag commit 为 `ced6857afa0ea7b2e3f0846a62e1394e90f15607`；SGLang `v0.5.20` 固定 tag commit 为 `94602c9c2b7cbdb8efd5c52802dac6a1c180089e`。实现文件的 Git blob ID 与两 tag 的 tree listing 一致。
 
 ## 3. 模型家族边界
 
@@ -192,22 +198,39 @@ Muon 使用 Nesterov momentum，`mu=0.95`，并进行 8 次 Newton-Schulz orthog
 
 `preserve_thinking` 是历史消息协议和上下文组织策略，不是 KV cache 的替代品，也不能直接被解释成模型内部永久记忆。切换 hosted API 时还要检查字段嵌套方式、streaming、tool parser 和 chat template。
 
-## 10. 待核验边界
+## 10. Serving/runtime 证据补充（2026-09-24）
+
+这次仍沿 Artificial Analysis 已发现的 `Qwen3.8-Flash-Next` 推进，不从 runtime 仓库新增模型。Qwen 官方固定 README 把它描述为 Qwen4 的早期架构预览，并展示 262,144 context、TP=4 的 SGLang/vLLM 启动方式；这是发布方推荐命令，不代表这些命令在本地已运行。
+
+| 固定来源 | 直接确认的 serving 实现 | 重要边界 |
+|---|---|---|
+| vLLM `v0.30.0`（commit `ced6857a…`） | registry 将 `Qwen4ExpForConditionalGeneration` / `Qwen4ExpMTP` 映射到独立实现；专属目录含 QSA、N-gram/PLE、Gated Residual、MTP 及对应测试。 | 这是 release 源码证据，不是本地 wheel、完整权重或线上实例验收。仓库还保留独立 `Qwen3Next` 路径，不能把两种架构混作一个实现。 |
+| vLLM Qwen recipe（页面标注 `v0.29.0+`，2026-09-17 更新） | 提供 H100/H200、GB200/GB300、MI355X 等 profile；FP8 主权重验证配置记录在 4×H200 TP4。 | recipe 所述验证是发布方条件：`max-model-len=16384`、eager、16 sequences、8192 batched tokens，使用 vLLM commit `d1b4028d7e`；不能外推成 262K、吞吐承诺或本地复现。 |
+| SGLang `v0.5.20`（commit `94602c9c…`） | 有独立 Qwen4Exp、MTP、PLE 模块；满足捕获模式与 token 阈值时，QSA indexer 可在 alternate CUDA stream 上与当前 stream 的 Q/K/V 准备工作并行，之后再启动 attention；MTP 可复用 draft-extend 对齐的索引。 | 这里不是 indexer 与最终 attention kernel 重叠。PLE 路径明确拒绝 two-batch overlap、N-gram speculation，且 speculative `topk` 只支持 1；是当前这条实现路径的组合限制。 |
+
+可考的实现细节：
+
+- vLLM QSA 将主模型 KV、raw-index-key circular state、压缩 indexer-key cache 与 top-k buffer 分开管理。当前 NVIDIA QSA 实现把 QSA 激活/QKV 与主 KV 路径限制在 BF16，且不接受 KV quantization 或 context parallelism；压缩 indexer cache 则允许 BF16 或无 scale 的 FP8 E4M3。这不排斥使用 **FP8 权重**：权重精度与 BF16 主 KV 是不同配置维度。
+- QSA 先压缩索引候选、再展开成稀疏注意力 token；MTP 第 0 步选索引，后续 draft 步重用与 target 对齐的 top-k 行，同时仍维护 QSA side cache。它省掉重复索引工作，但接受长度/最终加速仍须实测。
+- vLLM PLE/N-gram 可在 device table 与 pinned-host/UVA table 间选择，host lookup 使用独立 CUDA stream；SGLang 另提供 pinned-host 与 file-backed sparse `mmap`。约 47.7 GiB 的 FP8 PLE 表容量来自 SGLang 源码注释；其 file backend 在适用的 unified-memory 设备上通过 host page tables、按需 fault、`WILLNEED` prefetch 和 RSS trimmer 管理表容量。代码注释指出统一内存上的 pinned allocation 可能与权重争用同一容量，所以不能默认“pinned 一定省显存”。
+- vLLM recipe 指出 H100 80GB/GPU 对 51B PLE/N-gram 表缺少足够余量；GB300 FP8 以 TP2 为最小部署，TP4/TEP4 有包含 MTP3 的配置，8×H200 则推荐 TEP8，plain TP8 与 128-wide quant block 不兼容。这些是该 recipe 的部署条件，不是跨硬件定律。
+- vLLM tag 含 QSA reference、PLE shard/offload、Gated Residual 运算测试；SGLang tag 含同系列专属实现。本轮只审阅源码和测试文件，未执行 pytest、未安装 wheel、未加载权重、未做 GPU profile。
+
+## 11. 待核验边界
 
 以下结论截至本轮仍不应写成已独立确认的事实：
 
 - Qwen3.8-Max、Qwen3.8-Flash 等 hosted service 的完整权重、revision、线上 kernel 和实际限流行为。
-- QSA、GR、N-gram 和 Muon 在目标硬件上的端到端 TTFT、TPOT、并发和峰值显存；报告的 kernel speedup 不是独立 profiling。
+- QSA、GR、N-gram 和 Muon 在目标硬件上的端到端 TTFT、TPOT、并发、峰值显存和跨服务后端差异；本轮确认了 vLLM/SGLang 固定 tag 源码和测试文件，但没有运行测试或做目标硬件 profiling。报告/recipe 中的性能仍非本地独立复现。
 - Qwen3.8 全系列的完整训练数据、奖励模型、后训练损失、MTP 训练配方和发布版本差异。
 - 模型卡和技术报告中的 benchmark、loss、稳定性、训练 FLOPs 与成本数字之外的外部复现。
 - 27B、A95B、Flash-Next 之间未公开的权重共享、服务路由和每层实现差异。公开的同系列基础关系不等于 checkpoint 完全相同。
 
 本轮不下载几十 GB 权重作为研究前置条件。后续若要做性能实验，应固定模型 revision、tokenizer、后端、硬件、batch、context、effort、工具和 harness，并将发布方数字与本地结果分栏。
 
-## 11. 书系落点
+## 12. 书系落点
 
 - 正式专题：[`第二十一册第 83 章`](../../book-21-transformer-architecture-evolution/chapters/83-qwen3.8-qsa-gated-residual-n-gram-muon.md)。
 - 架构基础：第二十一册第 61、62、73、74、75、77、78 章，用于对比 KDA/GDN、Gated Attention、压缩注意力、AttnRes、CSA/HCA 和 mHC。
 - 训练与优化：第五册的 MoE、长上下文、Muon、稳定性和后训练章节。
 - Serving 与评测：第六册、第二十四册、第七册和第二十册，用于建立 KV/预取/通信/effort/harness 账本。
-

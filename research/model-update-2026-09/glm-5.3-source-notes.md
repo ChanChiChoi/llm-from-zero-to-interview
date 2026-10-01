@@ -187,3 +187,89 @@ GLM-5.3 已从“初步官方文档摘记”升级为**双榜资料级闭环（�
 新增 [`glm53_compaction_contract_audit.py`](code/glm53_compaction_contract_audit.py) 作为零依赖的 `local_protocol_toy`。它用合成状态检查确定性 JSON 序列化回环、任务目标/计划、工具 call-result lineage、permission scope、幂等键、待执行副作用、artifact digest、verifier 状态、预算单调性和切分标记；故意丢弃这些字段的候选会被拒绝。脚本已运行通过，但这只是“如何验收 compaction”的教学协议，不是 Z.ai 内部实现、真实 GLM-5.3 行为或 SAO 论文复现。
 
 当前结论保持不变：**GLM-5.3 双榜资料级闭环 + SAO 关联论文算法证据 + stable/main runtime source evidence**；5.3 专属 compaction、完整 recipe、完整权重、目标硬件和线上 tool/verifier acceptance 仍为 `unverified`。网络恢复后先复抓两个排行榜和官方页面，再按 pinned revision 继续门禁；不从代码仓库或文档另发现模型。
+
+## 2026-09-24：7890 当前时点复验与标准版状态升级
+
+本轮使用用户确认可用的 `10.24.27.134:7890` 重新核验两个指定排行榜、标准 GLM-5.3 详情和 Z.ai 官方资料。没有从官方目录、博客、模型卡或 runtime 仓库另发现模型，锚点仍严格是两榜已有的标准 `GLM-5.3`；`GLM-5.3-Flash` 的 KDA/linear attention、视觉模块、双 state pool 和 EPD 结论不迁移到本条。
+
+### 当前快照
+
+- [Artificial Analysis 中文首页](https://artificialanalysis.ai/zh)：HTTP 200，`1,784,793` bytes / SHA-256 `a374adfb81fea4fc68e7071ef191612d7f7d92c1c0e05412f3c338e7fe9edbc2`；与同日较早快照只相差 12 bytes，八家重点厂商 canonical 集合没有新增。
+- [Artificial Analysis GLM-5.3 详情](https://artificialanalysis.ai/models/glm-5-3)：HTTP 200，`4,057,703` bytes / SHA-256 `4f60e893bcfee4586479c77c9d43f1af9f9dee3145e92a23661666d7a072a3fd`。当前页面仍显示标准 `GLM-5.3 (max)`、open weights、约 1M context、约 45 的 Intelligence Index、约 `$2.01/task`、约 61 tokens/s 和 `$1.40/$4.40` 每百万 input/output token。它们是 AA/provider 当前测量字段，动态数值不解释为 revision。
+- [DataCurve DeepSWE](https://deepswe.datacurve.ai/)：HTTP 200，`268,036` bytes / SHA-256 `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`；精确 `mini_swe_agent_glm_5_3_max` 行仍绑定 `mini-swe-agent`、工具、任务环境和 verifier，没有新增重点厂商配置。
+- [Z.ai GLM-5.3 Markdown](https://docs.z.ai/guides/llm/glm-5.3)：`23,446` bytes / SHA-256 `9545c3d6fb1cabfa5951928bbe9a535e6958561d3bd6b5f4354cd5d3b0f6c929`，与既有官方快照一致。
+- [Z.ai GLM-5.3 博客壳](https://z.ai/blog/glm-5.3)：`598` bytes / SHA-256 `240cedb6d23b13b8bdd177e51410dbe1c7783fbd0cfca98be1e0af26688878c0`；正文资源 [`glm-5.3-BIDw01m9.js`](https://z.ai/blog/assets/glm-5.3-BIDw01m9.js)：`30,414` bytes / SHA-256 `f809bf586f74b40a01ecd8d674f9ec3de469a5abeae125e2a849c9805605d0f3`。正文哈希未漂移。
+
+### 当前闭环与未完成门禁
+
+已有研究笔记、第二十一册第 89 章、题库、练习、项目、论文路线和知识图谱已经覆盖 DSA、Full/Shared indexer、MoE、环境生成、judge/verifier、SAO 关联算法、slime 训练—rollout 对齐、API thinking/tool/cache 及 compaction 验收方法。Transformers fixed revision、vLLM main/stable 入口和 SGLang main/stable 入口也已固定。因此当前状态升级为：
+
+**GLM-5.3 双榜内容专题闭环 + stable/main runtime source evidence。**
+
+这次升级表示“面试知识与权威资料已形成专题闭环”，不表示真实权重或生产服务已经验收。仍必须保留以下未完成门禁：
+
+1. 完整权重下载/加载与 stable wheel 实际运行。
+2. index/evidence recall、MLA/indexer cache 恢复、FP8/量化误差、MTP acceptance 和目标硬件 profiling。
+3. 5.3 专属 compaction schema、序列化格式、触发阈值、质量门禁和完整 post-training recipe。
+4. 5.3 独立技术报告、独立 benchmark 复现、tool/verifier acceptance、PD/EP/PP recovery 与生产 SLO。
+
+`glm53_compaction_contract_audit.py` 仍只是 `local_protocol_toy`：它检验候选 compaction 合同应保存目标、计划、tool lineage、权限、幂等键、待执行副作用、artifact/verifier 和预算，但不能证明 Z.ai 内部实现。后续若网络继续可用，优先复抓两榜和官方 revision；若本机仍缺少权重、runtime 或 NVIDIA 驱动，则继续记录门禁为 `unverified`，不下载大权重、不虚构 benchmark。
+
+## 2026-09-28：当前榜单复验与 `slime` 的 compaction-aware trajectory
+
+### 两榜与 Z.ai 一手资料复验
+
+- 经 `10.24.27.134:7890` 获取 Artificial Analysis `/zh` HTTP 200，`1,674,048` bytes / SHA-256 `b5b25416290ba65caf3aa8ab19cb4d35ccb42a1e77c00b140d75b505807d4e70`；GLM-5.3 详情 HTTP 200，`3,966,481` bytes / `cbc848636ff90d05fad3b45c1228291e0f4dc226b0a76dbf1837948e0b9bfe87`。详情仍是已有 canonical `glm-5-3`；重点厂商集合无新增锚点。首页与 9 月 28 日早些时候快照长度相同但哈希不同，按动态页面内容变化处理，不解释为模型 revision。
+- DataCurve DeepSWE HTTP 200，`268,036` bytes / SHA-256 `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7e6e095ad59f1f1`；与该站既有 canonical 快照哈希一致，精确 `mini_swe_agent_glm_5_3_max` 仍是 `311/451`，绑定 `max`、`mini-swe-agent`、工具、任务环境和 verifier。
+- Z.ai GLM-5.3 Markdown HTTP 200，`23,446` bytes / `9545c3d6fb1cabfa5951928bbe9a535e6958561d3bd6b5f4354cd5d3b0f6c929`；GLM-5.2 Markdown 为 `25,293` bytes / `eeca971119068b0619137ce9c9d3c9362131baf16fdab0c067eefe5802919023`；GLM-5.3 博客正文 JS 为 `30,414` bytes / `f809bf586f74b40a01ecd8d674f9ec3de469a5abeae125e2a849c9805605d0f3`，都与既有内容一致。GLM-5.3 文档 `dateModified` 为 `2026-09-18T04:25:55.193Z`。它们仍只证明沿用 GLM-5.2 基座、post-training 改进及继承 `SAO with compaction`，没有披露模型侧的 compaction schema、触发条件、序列化或质量门禁。
+
+### 固定 `slime` 实现给出的训练侧案例
+
+Z.ai 博客引用了 [THUDM/slime](https://github.com/THUDM/slime)。GitHub Atom 最新提交记录为 `8ee9c1e1c8871ccd6dc8ec812edfaefa3dd1156b`（2026-09-23，`Remove obsolete rollout global dataset flag`）；经代理 API 查询遇匿名 rate limit 403，但 pinned codeload 与 Atom 均成功。固定归档为 `6,070,438` bytes / SHA-256 `b9defc4bba405f8a27f662cc5176f6d2e621c93fe11e01b63d03d638f4e23335`。
+
+该 revision 的 [Agentic RL roadmap](https://github.com/THUDM/slime/blob/8ee9c1e1c8871ccd6dc8ec812edfaefa3dd1156b/docs/en/get_started/agent.md) 明确支持把 compaction 前后的轨迹表示为多个训练 segment，并让同一 prompt rollout 的 sibling samples 共享 `rollout_id`。固定实现把这件事拆成两层：先按每个 session 的 role/message 相等关系构建消息树；再用真实 token ID 前缀把每个 root-to-leaf chain 线性化。上下文改写导致 prompt 分叉时，轨迹树保留分叉关系，而不是假设压缩后的文字与原始生成 token 相同。
+
+面试上最值得带走的是 token provenance，而不是把这里误称为 GLM 的压缩算法：
+
+1. [Coding-agent example](https://github.com/THUDM/slime/blob/8ee9c1e1c8871ccd6dc8ec812edfaefa3dd1156b/examples/coding_agent_rl/README.md) 采用 string-in/token-out：保存 rollout 时精确的 `prompt_ids`、模型实际采样的 `output_ids` 和 token log-probs；解码后的 `response` 只是可读旁注，不再 token 化以重建训练目标。
+2. tool/user/environment 等新增上下文用 `loss_mask=0`，可证明来源的模型采样 token 用 `loss_mask=1`。如果重渲染或 compaction 使旧输出无法与保存的 token 前缀对齐，不把被改写文本伪装为模型原始输出。
+3. [`TrajectoryManager`](https://github.com/THUDM/slime/blob/8ee9c1e1c8871ccd6dc8ec812edfaefa3dd1156b/slime/agent/trajectory.py) 默认 `fork_threshold_tokens=1,024`。在当前这段实现中，短漂移仅当发生在最新生成响应内部时可 realign；落在更早历史或超过阈值则 fork 为新 sample。该数值是通用 adapter 的 token-drift/rewrite 分界，不是 GLM-5.3 的 context-compaction 触发阈值。
+4. 同一分支中共享的 assistant 生成响应只在首个 sample 上带训练 loss，其他 sibling 将其作为 `loss_mask=0` 上下文；所有 sibling 继续带相同 `rollout_id`，以保留同一 rollout 的分组关系。
+
+还有一处应显式保留的源内不一致：[通用 customization 文档](https://github.com/THUDM/slime/blob/8ee9c1e1c8871ccd6dc8ec812edfaefa3dd1156b/docs/en/get_started/customization.md)把 `reward/K` 描述为一种常见分配模式，coding-agent README 也称每条 chain 分到 `reward/K`；但该 revision 的 `TrajectoryManager.get_trajectory()` 把完整 reward 赋给每个输出 sample，coding-agent `generate()` 原样传入 reward，固定测试也断言每个 sample 获得完整 reward。当前应记作同一提交内的 docs/example-versus-code discrepancy；不能把“同 rollout_id”当作 reward 必然被平均，也不替上游猜测哪个意图优先。
+
+引用的固定文件 SHA-256：`agent.md` `33f669e24bf7f013eb1dd15fdc1e47f37460eba9a129719f81e14d006f4979fc`；`customization.md` `b63272df42b39957a75f7827ea559eabbb034ef18d10c84ff75e87de0179472f`；coding-agent README `646fd38afdcda441e853d378651171bb7657de0d1873deda2e152c0d93ef8e9f`；`trajectory.py` `6dbb7bec446d81fa0542a4c954d458b4a11edab6776b45a63bc33bca08dd0469`；`generate.py` `493f995c961ae302d81725c134f122a6933a4396236a498d514550dd8d7707b1`；trajectory branching tests `7258a3f94a3ac2465d8662043a15cd3508ad27a16adf3b5cd547e9e93d2a9238`。源码测试文件已阅读，但本机未安装 `pytest`，没有运行测试。
+
+**证据边界与状态：**这是 `slime` 固定 revision 的通用训练数据/Agent adapter 实现，example 还使用 Claude Code harness；它说明长任务压缩如何影响 RL trajectory segmentation 与 token-level loss，不证明 GLM-5.3 实际采用这些分叉规则、默认阈值或 reward 语义，更不公开其摘要生成策略。新增状态是 **GLM-5.3 内容专题闭环 + 关联框架的 compaction-aware trajectory source evidence**；GLM-5.3 专属 compaction、完整 recipe、目标硬件和生产验收继续 `unverified`。
+
+## 2026-09-29：`slime` Straw 异步 rollout、checkpoint rollback 与索引 archive
+
+### 榜单锚点与联网复验
+
+本轮仍只沿 Artificial Analysis/DataCurve 已确认的标准 GLM-5.3 锚点推进；沿用此前固定的两榜快照，本轮没有重新抓取排行榜，也没有从框架仓库新增模型。当前工作区通过 `10.24.27.134:7890` 请求百度（HTTP 200，2,381 bytes）、[Z.ai GLM-5.3 文档](https://docs.z.ai/guides/llm/glm-5.3)（HTTP 200，515,625 bytes）和 [THUDM/slime main Atom feed](https://github.com/THUDM/slime/commits/main.atom)（HTTP 200，16,120 bytes）。feed 最新提交是 `8088a4b4450ac374e1439cf2310ba3add370997d`，时间 `2026-09-29T09:35:00Z`，标题为 “Support straw checkpoint rollback and indexed rollout archives (#2427)”；前序 `68572249359201b42bd2020a584c370bc8b403e1`（#2410，2026-09-28）引入 distributed fully async rollout 和 Straw。
+
+Z.ai 官方 [GLM-5.3 博客](https://z.ai/blog/glm-5.3)引用 slime；截至当前 main 的 [slime README](https://github.com/THUDM/slime/blob/8088a4b4450ac374e1439cf2310ba3add370997d/README.md)也把 GLM-5.3 列为其训练框架所服务的模型。这个关联只给出研究该训练框架的合理入口；不能据此断言 9 月 28–29 日提交的 Straw/checkpoint 代码就是 GLM-5.3 当时训练所用实现。
+
+### 训练状态的联合提交边界
+
+固定 [checkpoint 实现](https://github.com/THUDM/slime/blob/8088a4b4450ac374e1439cf2310ba3add370997d/slime/backends/megatron_utils/checkpoint.py)先保存 actor/critic 与 rollout manager，再发布 `committed_<step>.json`。标记同时列出模型 checkpoint、`queue_state` 和 `builder_state`；queue/builder snapshot 带 SHA-256，模型文件记录 size，并对 JSON / `.metadata` 文件计算 SHA-256。缺 optimizer 或 RNG state 时 commit 会标成不可用于训练恢复。这个 marker 是逻辑上的“模型 + 数据生产/消费状态”联合提交边界，不应夸大为整个共享文件系统上的原子事务或对所有 tensor shard 的全量密码学校验。
+
+因此长程异步 RL 的可恢复状态不只是参数和 optimizer：dataset cursor、pending/partial prompt groups、ready groups 顺序、queue/builder 状态、rollout ID 与 serving weight version 都决定下一批数据从何处继续。若只有旧式模型 checkpoint、没有 queue snapshot，实现会显式进入空 queue 路径；有旧 dataset cursor 时可恢复 cursor，否则从 offset 0 开始，但这都不等于精确 replay。
+
+### 回滚分支与不可变 payload
+
+选定历史 step 后，恢复创建独立 branch 和新的 queue ID；源 checkpoint/branch 不被覆盖。Straw 中的 immutable payload 可由新 queue 以 copy-on-write 方式共享，但新 queue 使用新的 task/receipt authority。若选择空快照路径，不会悄悄从另一个 step 拼入 pending 或 ready 数据。共享 pool 必须仍可用；只复制 checkpoint 目录不包含其引用的 Straw payload。恢复也不保存 GPU KV cache 与 generation RNG，因此队列样本可以恢复，后续新生成 token 仍不保证逐位可复现。
+
+### Indexed rollout archive 与在线 GC
+
+固定 [archive 实现](https://github.com/THUDM/slime/blob/8088a4b4450ac374e1439cf2310ba3add370997d/slime/data/archive.py)按 chunk 保存 sample，并用 `sample_key` / `task_key` 建索引；lazy tensor 仍引用 pool 中的不可变记录。读取归档会移除 live queue lease/receipt 等控制字段：归档是可查询的训练/调试输入，不是重新获得修改原队列的授权。`close()` 关闭 reader；只有所有 reader 完成后显式 `release()` 才释放 archive 的 storage ownership。删除 `.straw.json` 索引不会释放 retention；在线 GC 还要等 task、queue、checkpoint、archive 等全部引用释放后才能回收 pack。单独索引不含全部 payload；导出的 `.pt` 则可物化为自包含数据。
+
+异步调度的补充边界见固定 [Straw guide](https://github.com/THUDM/slime/blob/8088a4b4450ac374e1439cf2310ba3add370997d/docs/en/advanced/straw.md)：completed groups 优先于 partial groups，再优先于 fresh prompts；队列以生成时的 weight version 衡量 staleness，但排序不自动丢弃 stale sample。Fully async worker 在 weight sync 时暂停 admission，并持久化进行中的结果；这提供 fault-tolerant dataflow 的实现案例，不证明 GLM-5.3 的实际采样策略或可接受 policy lag。
+
+### 测试证据、固定文件与边界
+
+固定 [fork integration test](https://github.com/THUDM/slime/blob/8088a4b4450ac374e1439cf2310ba3add370997d/tests/test_straw_checkpoint_fork.py)设计为 4 张 GPU、Qwen2.5-0.5B、1 个 trainer + 3 个 rollout worker。源码断言覆盖指定 step/自动分支恢复、旧分支与 archive 不变、queue cursor/ready samples 和新 queue authority、缺 queue snapshot 时的 empty recovery，以及 indexed `.straw.json` 与自包含 `.pt` replay。当前环境没有运行该集成测试；这些是源码中声明的测试场景，不是本机 GPU 验收。
+
+当前 main Atom feed：16,120 bytes，SHA-256 `58ab5ae1ebf4cc3f5fc641d92798b229c338ff940121149470b5ddd891904999`；README：SHA-256 `47cf69f284c175823244262a3ea712f53fc42e3a968fdcfbc4f76536e59c7ea3`；Straw guide：`ae8cda5701cd90fc79c275745b3d59e81d35fb08c08fe00363d48b9762cb9a54`；`archive.py`：`9f114885da58f970e00c1ed7ed4b8d4b2c809a80870ea18e0dfe2af8e3f46742`；`checkpoint.py`：`38470782211793fde1a1633be9deb77fbf60516c3d64b2949b4c99aeff0de02e`；fork test：`c79327f0a89764c6bb1ccc8f2061572a38d5ae10de1a8efae38b02caaff2c1dd`。#2427 patch SHA-256 `e14f0235af13fddd21dba39535e64c650219dd59c14641f03d4784a44a11fb2e`；#2410 patch `dff6b3688272d23fa6d6271160bbcfba082efa142f22a10b3cd8a43a383f46f8`。
+
+**状态：**GLM-5.3 仍为双榜锚点下的内容专题闭环；新增的是“其官方关联的通用 RL 框架在 9 月底公开的 Straw 异步队列、联合 checkpoint、branch rollback 和 archive retention”固定源码证据。GLM-5.3 专属 compaction schema、实际训练是否使用该提交、完整 recipe、4-GPU 测试执行、目标硬件 profiling 和生产验收继续标为 `unverified`。此前 README / 代码的 `reward/K` 差异仍是独立的固定 revision 观察，不因这次更新而消解。

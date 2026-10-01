@@ -1,6 +1,86 @@
 # 大模型资料更新进度 v2
+更新时间：2026-10-01
 
-更新时间：2026-09-23
+## 2026-10-01 Gemini 4 Argon：排行榜新锚点但官方资料未闭环
+
+- 使用用户提供的 Clash 代理 `http://10.24.27.134:7890` 显式请求，Artificial Analysis `/zh` HTTP 200，`1,930,493` bytes / `4fa2574617fc125da6e0cf6a8575d5b81084baf22a134fb69a5ad450504c8c8d`；DataCurve HTTP 200，`268,036` bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`。AA 当前包含 `gemini-4-argon`，DataCurve 没有精确 Argon 行。
+- Google AI Developers 模型目录 HTTP 200，`155,241` bytes / `032840f32f36ad8cfa30d0b2767f9ae17dbaca5a17ed3acfc8a1e6fa97b95c47`，没有 Argon；本轮没有获得可核验的 Google 官方模型卡、技术报告、博客或代码入口。
+- Argon 当前标记为“AA 新锚点 + 官方资料缺口”，不新增技术章节，不把 AA/provider 字段写成 Google 官方规格，也不迁移其他 Gemini 的 Agent 结果。goal 保持 `active`。
+- 同一 AA 快照还出现重点厂商 OpenAI 的新 canonical `gpt-6-1-sol`（含 effort 变体）；DataCurve 没有精确 `mini_swe_agent_gpt_6_1_sol_*`。本轮 OpenAI 专属模型页请求随后再次失败，尚未取得官方资料，因此单独标为“仅榜单新锚点，官方资料待核验”，不迁移 GPT-6 Sol/Astra/Luna 的指标或 Agent 结果。
+
+## 2026-10-01 GPT-6.1 Sol：官方模型与 runtime 合同收口
+
+- 修正 OpenAI URL 后取得官方模型页 HTTP 200，4,294 bytes / `e3ebaa16dd9b9f9fc107c42183fb6cf9d22927e1af03dbbdfa0ccc38e4e4ac31`；Reasoning、Agents、Compaction 文档均 HTTP 200。
+- 已核验 `gpt-6.1-sol`、Responses tool calling、Chat Completions 无 tool calling、`low/medium/high/xhigh/max`（默认 medium，禁用 none/minimal）、standard/pro mode、1,050,000 context、922,000 input、128,000 output、text/image input、EU residency 与 Fast mode 限制。
+- `reasoning.context=all_turns` 可复用兼容历史 opaque reasoning items；`compact_threshold` 触发 encrypted compaction item，stateless chaining 必须回放该 item。Agents API、Agents SDK、Responses conversation 和 sandbox 是不同资源。
+- 已同步研究笔记、source-index、model-inventory 和计划；正式书籍与题库配套随后补齐。当前状态为 **AA 单榜内容专题闭环 + OpenAI API/runtime contract**；参数、架构、完整训练 recipe、完整权重、独立 benchmark、真实 endpoint、目标硬件和生产验收仍待核验。goal 保持 `active`。
+
+## 2026-10-01 Gemini 4 Argon：官方入口负检索复查
+
+- 通过用户提供的 Clash 代理刷新两榜：AA HTTP 200，`1,930,493` bytes / `a47cc50856c95c96d04679f1d52c6cf76dacb26a78248d8e278ccacdf5590efe`；DataCurve HTTP 200，`268,036` bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`。AA 没有新增重点厂商 canonical，DataCurve 无 Argon 行。
+- Google AI Developers sitemap HTTP 200，`15,361,787` bytes / `f74529bc6bc9685feab9c9dba0116a2dfcebe0ea16c2b7a6b764c3857da00e98`，全文无 `argon`；AI Developers 与 DeepMind 猜测页面均 HTTP 404。
+- Argon 继续标记为“AA 新锚点 + 官方资料缺口”，不新增技术章节或模型规格；goal 保持 `active`，等待官方资料出现或排行榜移除该 canonical 后重新审计。
+- AA Argon 详情页复查 HTTP 200，`3,813,855` bytes / `aaaf7cbe1b821904de6149a9dfd0810c54c9db878054e30b9014676d77db341`；页面标注 Google/proprietary、2026-09、1 个 API provider，并说明参数规模未公开。该页是第三方目录/provider 观测，不能替代 Google 官方来源，因此 Argon 仍未闭环。
+
+## 2026-09-30 Kimi K3：DFlash 论文、公开 draft 与 SGLang capture hook
+
+- 通过 7890 沙箱外成功刷新两榜：Artificial Analysis `/zh` `1,752,755` bytes / SHA-256 `35e3197c2ad3b4259369bf55f72d912e03c0ecd61ad7d181db1fdda86f0dd527`；规范 DataCurve DeepSWE `268,036` bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`。DataCurve 与旧快照一致；AA 为动态页面，未据字节变化推断模型 revision；没有新重点 canonical。
+- 取得公开 [modal-labs/Kimi-K3-DFlash](https://huggingface.co/modal-labs/Kimi-K3-DFlash) metadata revision `c192d15a43407bf758b5ae0880d5c72052fef1de`（2,000 bytes / `48a5d60f2b729d742edcd072699c969bcd605f995f991e1543e3ce6d722a4c00`）、固定 README（4,058 / `6924c345a25dc3360ca0a554469d59849378570eb6bfc8ce00189c239ad95235`）和 config（1,215 / `92e2928e57f417921cd1c031a18840834c55ed13ed0d722acfa8f41b01080717`）。模型卡明确它是约 2.6B BF16 的 K3 draft-only 配套模型，generic data mix 不含 tool calls/agentic traces；本轮未下载权重。
+- 取得 DFlash v2 HTML（391,888 / `3613e0871e0fe0570296d2e819c57e173879341bad9166b6bdab79cc2858c4a7`）。面试知识点已整理为：target prefill 抽取多层 hidden feature 并投影；向 draft 每层 K/V 注入并跨 iteration 保留；block diffusion 并行生成 mask positions；随机 anchor、块内双向/块间隔离 sparse mask、早位置指数 loss decay 和冻结 shared embedding/LM head。论文结果不作本地复现。
+- 7890 取得 [SGLang PR #40794](https://github.com/sgl-project/sglang/pull/40794) 网页（381,910 / `05971ce5ca09d01068297c09db275c61246943afe9ab0b0a56b7d3293ccf3128`），PR 于 2026-09-23 合入 `208f6f7501f748e70b3aaab9fc96ec659d39463b`。K3 DFLASH hook 复用 DSpark layer-output taps，不做 `+1`；cookbook 按 PP/DP attention/NPU/Hopper/AMD 条件 gate。PR 的 8xB300 GSM8K 95.7%/accept length 4.99 使用未公开 production draft、多个 PR build；focused unit test 曾加入后在最终 patch 删除，CI aggregate 有失败项，不能写成公开 draft 的复现或单 PR 贡献。
+- SGLang release Atom 仍为 stable `v0.5.20`（1,058,795 / `9c9c5e9bcc5fc55fea6be1d8e9c77fd84d330522638083a80e74f2134ddd5eb2`），因此 DFLASH 是 main/source evidence。已同步研究笔记、第二十一册第 88.26–88.27 节、PAPERS、INTERVIEW_BANK、EXERCISES、source-index、model-inventory、BOOK_SERIES 和 plan；goal 保持 `active`。未做权重下载、GPU 测试、真实 API probe 或生产 acceptance。
+
+## 2026-09-29 DeepSeek V4.1 锚点：SGLang main 混合精度 MegaMoE 增量
+
+- 在此前两榜刷新后，继续沿 AA 已有 `deepseek-v4-1-flash` 锚点查 SGLang `deepseek_v4.py` history；30 条提交中最新 `0e586fd12d63`（2026-09-29T09:25:10Z）为 PR #39313。未从 runtime 仓库发现新模型。
+- PR API（45,675 bytes / SHA-256 `fbe33b6da871321cf7445d948086d7ce9456a3e211865ef7e4ddfe953db00970`）显示 #39313 于 `2026-09-29T09:25:11Z` 合入 main，merge commit `0e586fd12d63f06306ec20beb637bfeb331f1088`；patch 35,120 bytes / `2ceee8fb5122d9e571a1608416e5699d824ee703b4ad641e9ab50f8fc3192e6b`。机制是为 block-FP8 shared expert + MXFP4 routed experts 增加 guarded DeepGEMM FP8×FP4 MegaMoE 路径；朴素融合会丢失 alternate-stream overlap，最终代码在 CUDA-graph capture 下 fork 整段 fused region。PR 历史与完整哈希、fallback/门禁见 [`deepseek-v4.1-flash-source-notes.md`](research/model-update-2026-09/deepseek-v4.1-flash-source-notes.md)。
+- PR 自报 4×B300（SM103）、DeepSeek-V4-Flash-0731、sgl-deep-gemm 0.1.7 结果：固定 1,024 输入/256 输出 token 下，DSpark overall tokens/s baseline→fusion+fork 的 batch 1/8/32/64 为 3,052.04→3,125.89、19,255.64→19,624.04、53,236.74→54,022.42、76,347.80→81,739.39；regular 为 737.25→748.13、5,147.25→5,252.39、16,123.12→16,245.61、27,562.54→27,506.76。数据有 workload 依赖；regular batch 64 略降。Greedy `0.899→0.897`、sampled pass@1 `0.900→0.910`，并有 per-request answer flips；不作显著性/普遍质量结论，绝不迁移成 V4.1 成绩。
+- Fresh SGLang release Atom 仍为 v0.5.20（1,058,795 bytes / `9c9c5e9bcc5fc55fea6be1d8e9c77fd84d330522638083a80e74f2134ddd5eb2`），不含 9 月 29 日 main merge。Checks API 总数 171、默认返回 30 项中 15 success/9 skipped/6 failure；PR 的 Base/Extra/AMD aggregate 标记未全绿，不声称 CI 全通过。没有本机测试或 GPU benchmark。
+- 已同步研究笔记、第二十一册第 81.21 节、EXERCISES、INTERVIEW_BANK、source-index、model-inventory、BOOK_SERIES 与 `plan_v2.md`；内容状态为既有 V4.1 专题的 family-level main runtime 补证，仍非 stable/硬件/生产验收闭环；goal 保持 `active`。
+
+## 2026-09-29：本会话代理差异、两榜复验与 Kimi K3 PR 状态
+
+- 用户提供的 shell 输出证明其执行环境经 `10.24.27.134:7890` 访问百度返回 HTML；本会话显式 `curl --proxy` 访问同一代理时连接超时（curl 28，10 秒），按权限在沙箱外重试仍超时。因此只记录为本会话当前网络路径不可达，不推断代理全局失效。
+- 备用 `10.237.126.170:1234` 本会话访问百度 HTTP 200（2,381 bytes），Artificial Analysis `/zh` HTTP 200（1,747,602 bytes / SHA-256 `970aaacc0dedaf2a624b5ede1e07fa7f6659da78f8b8d2a0dd451b67da3b3120`），规范 DataCurve DeepSWE HTTP 200（268,036 bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`）。两榜与本日 20:19 留存快照逐字节一致；AA 仍为 60 个 `/models/<slug>` 路由，DataCurve 为 70 个 `mini_swe_agent_*` 配置 ID，没有新的重点厂商 canonical。
+- 通过 `1234` 重新取得 vLLM PR #53954 patch（7,242 bytes / SHA-256 `2197d91d91a9bf4cf0292bd1b591d2c2269aac956882123dfac5be2ec44342d7`），与 [Kimi K3 研究笔记](research/model-update-2026-09/kimi-k3-source-notes.md) 已记录快照一致。新鲜 GitHub PR API 响应（25,527 bytes / `a206d5c20f727962b00898bd17d47d8f81142cf3ac19a73faf3bb8ba4afe3a61`）显示标题为 `[Bugfix][ROCm] Derive a8w4 SiTU MoE layout from AITER_SITUV2_A8W4 too`、状态 `open`、`merged_at=null`，最后更新 `2026-09-15T05:52:57Z`；补丁明确针对 Kimi-K3，修复 AITER 与 vLLM layout gate 不一致导致的静默退化输出，不属于 DeepSeek V4.1 证据。技术结论已在 K3 笔记中，不重复新增书稿内容。
+- 整体 goal 保持 `active`；下一项仍从两个排行榜已确认的八家重点厂商 canonical 中选择有权威材料支撑的未闭环知识缺口。
+
+## 2026-09-29：7890 当前工作区复验与 Gemini Interactions schema 更新检查
+
+- 用户贴出的百度页面确认其 shell 经 `10.24.27.134:7890` 可用；本工作区也用该代理取得百度 HTTP 200（2,381 bytes）、Artificial Analysis `/zh` HTTP 200（1,747,602 bytes / SHA-256 `970aaacc0dedaf2a624b5ede1e07fa7f6659da78f8b8d2a0dd451b67da3b3120`）、规范 DataCurve HTTP 200（268,036 bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`）和 Google Interactions 文档 HTTP 200。AA 同日对照快照为 1,747,864 bytes / `b2ec54e7332d68b569c698a7bc427932b264d286aa9689bd40d7550f4b824dfc`；两份快照的完整 `/models/<slug>` 路由集合均为 60 项且无差异。DataCurve 与此前快照逐字节一致，70 个 `mini_swe_agent_*` 配置 ID 无变化。此前试探的 `datacurve.ai/benchmarks/deepswe` 仍是错误路径并返回 404，不代表规范站点不可达。
+- 本轮新鲜 Google 页面：Interactions overview 154,408 bytes / `d96ea69f069954e120811027a5b43117cd748192dc7ea40f30c74fee603bc71f`；API reference 739,127 / `6f0aad30591ec004c4de404f0746762a6bf2047b91f1b5c22bbcdadfd73347a6`；Tool combination 136,835 / `84e1ae87bfa171972f30cbdcbd73f526f4af14b3e4fa085503cc14c3512c2d30`；Thinking 286,232 / `079e06dc8cf69c42ee3ab6746b9e819f7a6999e713c72e692812f0aed2f6e554`。文档冲突仍在：Thinking 对 Interactions 标准自定义 function 与 thought signature 的窄口径，与 Tool combination 的宽口径不一致；API reference 仍未在 custom function schema 声明 signature，并把 `ThoughtStep.signature` 标为 optional。
+- Google Gen AI Python SDK main Atom feed 最新项为 2026-09-29T06:17:59Z commit `b6535e822a6a984bec43056551b2788cd61509f0`（GCS tuning-job metrics URI）。该提交下 Interactions `FunctionCallStep`、`FunctionResultStep`、`ThoughtStep`、Google Search call step、Step union 和 `_gaos` BaseModel 的原始文件均成功经 7890 取得；六个文件哈希与研究笔记 §18 已记录值完全相同，schema 没有变化。没有 API key/授权 endpoint，未做真实 Gemini API probe，不把文档或 SDK schema 推断成服务端行为。
+- 两榜本轮没有新 canonical。Gemini 条目是既有锚点的协议文档复验；最近已收口的排行榜锚点仍是 Kimi K2.7 Code，下一项仍须从刷新后的两榜八家重点厂商 canonical 中选择。总体 goal 保持 `active`。
+
+## 2026-09-29：7890 外网代理验证与 Grok 4.20 Multi-agent 合同补齐
+
+- 本工作区沙箱内经 `10.24.27.134:7890` 请求百度及 SGLang feed 均连接失败（curl error 7）；按授权在沙箱外重试官方 SGLang release Atom 后 HTTP 200，1,058,795 bytes / SHA-256 `9c9c5e9bcc5fc55fea6be1d8e9c77fd84d330522638083a80e74f2134ddd5eb2`，与已存快照一致，最新 stable 仍为 `v0.5.20`。因此本轮失败是当前 sandbox 网络路径限制，不能据此判定用户代理全局不可用；用户提供的百度成功结果与获批沙箱外成功请求均保留。
+- DeepSeek V4.1-Flash 的 release/runtime 阶段未出现新的 SGLang stable；权重、目标硬件、真实 recall/FP4、DSpark acceptance 等仍是需后续 artifact/hardware 才能验证的工程门禁。本轮转到两榜已存在的 Grok 4.20 canonical，只沿官方 API/runtime 文档扩展，不从文档新增模型。
+- 获批经同一 7890 代理复取 xAI 官方 Grok 4.20 Markdown（1,564 bytes / `99057608aeb1a4e6ace5d87bf6c4b27b3bff4af5248babad475500da31fdc2e3`，与此前一致）、Multi Agent（19,603 bytes / `0463d9d2022fd9453ece718e3fc898103c9cab20dc8cd4a2601d7c92b0fab6d4`）、Context Compaction（12,281 bytes / `466906990c559aeb84c16f785764f47ba9c735d7d7c821ca6ebd00511f33a938`）和 Release Notes（18,182 bytes / `ff4c876fbf0707ee7439b06357af40f5acc1103b4e7a9b264be7909f8a8753c7`）。Multi Agent 专页明确 beta、Responses/xAI SDK 支持面、Chat Completions/client-side tools/`max_tokens` 限制、`previous_response_id`、opaque 子 Agent state，以及 leader+workers tokens 和 server-side tools 全量计费。
+- 已补充 Grok 4.20 研究笔记、第二十册第 19.30 节、来源索引、模型盘点、题库、练习、`plan_v2.md` 和本进度。新增的是 Agent API contract/成本与审计知识，不是模型架构或训练披露；未使用 API key、未调用付费 endpoint、未下载权重。Grok 4.20 状态更新为 **AA 单榜内容专题闭环（runtime/API 与 harness）**，goal 保持 `active`。
+
+## 2026-09-29：7890 代理复验与 Interactions 超时文档补取
+
+- 用户终端的百度结果已在工作区扩展复验：`10.24.27.134:7890` 访问 Artificial Analysis `/zh` HTTP 200（1,746,541 bytes / SHA-256 `e0b467739db28960b4736aaee3e0e27951eda5d4794843d7d53f1284b32ca2e9`）；规范 DataCurve `https://deepswe.datacurve.ai/` HTTP 200（268,036 bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`）。错误路径 `https://datacurve.ai/benchmarks/deepswe` 返回 404，是路径/主机不正确，不是代理网络不通。
+- AA 与当日先前留存页面相比，60 个唯一 `/models/<slug>` 路由无新增/删除；DataCurve 内容哈希相同，70 个唯一 `mini_swe_agent_*` 配置无变化。没有新增八家重点厂商 canonical；DataCurve 仍无精确 `mini_swe_agent_deepseek_v4_1_flash_*` 行。
+- 成功重试先前记录超时的 Google 官方页面：Interactions overview Markdown `154,404` bytes / `73047c07e2547f6ccd1817098c59ded2c2dfc4d1e968ae24e490bc127a9960ea`；API reference Markdown `739,127` / `ba1c19a6868a16d29c66008a34b27f66fb5babcbdbeeba00f3b33ebb48a857b8`；Tool combination `136,839` / `f4f2645b78da6388ce20f2814107f5475c4dcf11373c7f33f98225afa0b8426e`；Thinking `286,232` / `68cde323e37c84ab63aa66d02c22cd3f5d2bb028d8c4185beef3102263b19a22`。旧失败是当时具体请求/线路状态，不代表网页不存在。
+- 新鲜文档仍有签名范围冲突：Thinking prose 与 API schema 对 thought signature 必需性的说法不同；Tool combination prose 对自定义 function call/result 的宽泛签名声明与 Thinking 窄口径及 API reference schema 不一致。只记录正式文档/schema 边界，不推断真实 Gemini endpoint 行为；无 API key/授权，未发起真实请求。详见 [`gemini-3.8-flash-source-notes.md`](research/model-update-2026-09/gemini-3.8-flash-source-notes.md) §21。此为既有锚点补充，不改变当前 DeepSeek V4.1-Flash 活动项；goal 保持 `active`。
+- 同一代理还成功补取 Kimi K2.7 Code 固定 HF revision `74797c9c62378b951a1f6fcf5c4631024e9b8bef`：README 15,061 bytes / `c78bbe5af19636b180eda956abf1f30a79027ec04d6642ebddc44edbc4470879`、config 5,420 bytes / `ffbb57bff844e024f6c112640b63da80af228ceb8fb3e2e21908a21febbcdffb`，均与旧快照逐字节相同；固定部署指南 HTTP 200，3,689 bytes / `b1bc4c5fb7c8b1da727663d4da83999afc902f6166ff862fbaef514b86de2c65`，也与工作区留存的 2026-09-28 文件逐字节相同。复核的指南记录 KTransformers+SGLang RAWINT4 CPU/GPU 专家分工、8×L20+2×Intel 6454S 48-way 发布方 serving 结果，以及 2×4090+Intel 8488C LoRA SFT 发布方结果。原文 `1.97T RAM` 单位未解释，且两类 tokens/s 不可直接比较。已同步第二十一册第 94 章、研究笔记、INTERVIEW_BANK、model-inventory、source-index；未加载权重或复现硬件吞吐。
+
+## 2026-09-29 Claude Sonnet 5.5：7890 恢复后继续联网研究
+
+- 用户终端通过 `10.24.27.134:7890` 访问百度成功；当前工作区也经该代理获取 Artificial Analysis 中文首页（1,747,864 bytes / `b2ec54e7332d68b569c698a7bc427932b264d286aa9689bd40d7550f4b824dfc`）、Sonnet 5.5 详情（3,894,403 bytes / `fb64dfeaf034616ea4a5c31573fdad771584b4ed9b4aafbf3e7225fbe59174c0`）和 DataCurve（268,036 bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7e6e095ad59f1f1`）。AA 出现 canonical `claude-sonnet-5-5`，releaseDate `2026-09-28`，max + Default Fallback 与 low/medium/high/xhigh 配置；DataCurve 无精确 `mini_swe_agent_claude_sonnet_5_5_*` 行，不迁移其他 Claude 结果。
+- 经 7890 获取 Anthropic 官方 overview、What's New、migration guide、prompting guide 与发布页；System Card PDF 13,101,289 bytes / SHA-256 `89cfd6a6d3aa6148eaf23f4a53006950ee7746009f381237c62920c720725785`，使用仓库 `pdf_text_extract.js` 解析为 148 页、223,920 bytes / `7b858f699d0361a9aab979caf872eb75774976a2f4946962362ca469392ca483`。未视觉核验 PDF。获批沙箱外 arXiv 精确检索返回 `totalResults=0`。
+- 新增 [Sonnet 5.5 研究笔记](research/model-update-2026-09/claude-sonnet-5.5-source-notes.md)、第二十册第 24 章与第八册第 16.22 节；同步 PAPERS、source-index、model-inventory、榜单解释、BOOK_SERIES、知识图谱、面试题、练习和术语表。核心新增点是 `between_tools` 协议约束、三类 thinking block binding、forced-tool/computer-use breaking changes、拒答类别与 fallback 路由，以及 benchmark 中实际执行模型归因。
+- System Card 结果按 publisher/harness 证据记录：Terminal-Bench 4.0 `70.6%`、OSWorld 2.1 `80.1% partial / 43.5% strict`，都绑定任务集、effort、工具、资源、fallback 和评分定义；没有独立复现。未调用 Messages API、未下载权重，也不推断参数/架构/完整训练 recipe。QA 已完成：`git diff --check` 通过；新笔记和章节的代码围栏成对，关键相对链接目标存在。之后已从两榜已确认 canonical 队列选择 DeepSeek V4.1-Flash 继续推进，goal 保持 `active`。
+
+## 2026-09-29 DeepSeek V4.1-Flash：7890 当前可用与 SGLang serving 增量
+
+- 用户终端的 `10.24.27.134:7890` 百度成功结果已在本轮复现到目标站点：Artificial Analysis `/zh` HTTP 200、1,747,860 bytes / SHA-256 `0933d776618e8530dccb05f28c0f3ce2398a3184552c8c988df9a60e6da5d0c5`；DeepSeek V4.1-Flash 详情首次 TLS EOF，重试 HTTP 200、3,969,971 bytes / `630f1c9df1abd6ce900d6a7016daf1038d5482c349fd5f4f2a419973ef790a91`；DataCurve HTTP 200、268,036 bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`。同日快照间 AA 模型路由集合无变化。
+- 锚点身份仍是 AA `deepseek-v4-1-flash`。DataCurve 只有 `mini_swe_agent_deepseek_v4_flash_max`，没有精确 V4.1 配置名；不把 V4 Flash/Max 行迁移成 V4.1 成绩。用户本轮任务是联网/serving 来源补证，不从 SGLang/vLLM 发现模型。
+- vLLM Atom feed 最新 `v0.31.0rc1`（2026-09-29T03:18:39Z）标题只涉及 CUDA 12 镜像 CI；稳定版仍为 `v0.30.0`。SGLang 官方 release Atom 的最新稳定版是 `v0.5.20`（2026-09-18）。当前工作区经 7890 获取两份 feed、AA 详情和 SGLang PR patches；大小、SHA-256 及边界见 [`deepseek-v4.1-flash-source-notes.md`](research/model-update-2026-09/deepseek-v4.1-flash-source-notes.md)。
+- SGLang v0.5.20 的 V4 家族 AMD/HIP 增量：PR #39116 处理 DSpark 图 replay 中 `swa_loc` stale pointer、精确 token count/D2H sync 与 verify metadata；#38192 在 gated unified-KV 路径加入 request-owned SWA ring，release note 报告 full-attention KV token capacity +83.6%；#37764 融合 FP4 indexer prefill schedule prep，release note 报告 concurrency 4 下 output throughput +15.3%。这些是上游 patch 和发布方负载结果，不是本机 benchmark、V4.1 专属算法或生产验收。
+- 边界检查发现同一 feed 的 cooperative exact top-k PR #37591 patch 明确举例 DeepSeek V3.2/GLM-5.2，故未归到 V4.1。新增第二十一册第 81.20 节、研究笔记、source-index、model-inventory、PAPERS、BOOK_SERIES 与面试题；没有改写权重/目标硬件/线上验收为已通过。QA 已通过：`git diff --check` 无错误；相关 Markdown 围栏成对、关键相对链接目标存在、新增章节/题目唯一，相关文件无尾随空白；goal 保持 `active`。
 
 ## 当前状态
 
@@ -8,9 +88,30 @@
 - 主线：新模型发现 → 官方资料核验 → 技术知识映射 → 书系同步 → 代码/链接/证据审计
 - 规划文件：[`plan_v2.md`](plan_v2.md)
 - 旧版进度：`PROGRESS.md`，仅作历史记录
-- 当前活动锚点：`Kimi K3`；Gemini 3.8 Flash 已完成本轮 Thinking/Interactions state/signature、tool context 和 local replay toy 阶段，DeepSeek V4.1-Flash 已完成官方 API contract 和 local protocol toy 阶段。K3 本轮沿两个排行榜已有的 `kimi-k3` canonical 条目继续，不从 Kimi 官方仓库、HF、vLLM 或 SGLang 另发现模型；重点是当前榜单复验、官方 artifact revision、DataCurve harness 账本和发布限制的面试边界。`low/max` 仍归并为一个基础模型，DataCurve 只引用精确 `mini_swe_agent_kimi_k3_max` 行；K3 完整权重、目标硬件、双状态恢复、tool/verifier acceptance 和生产 SLO 仍为 `unverified`。
+- 当前执行项：在 2026-09-29 成功刷新且集合不变的两榜上，沿既有 DeepSeek V4.1-Flash 锚点补入 SGLang main PR #39313 的 family-level mixed-precision MegaMoE 证据；不是 V4.1 分数或 stable acceptance。后续从两榜现有八家重点厂商 canonical 中选择下一处未闭环资料缺口。完整权重、V4.1 FP4 质量/recall、目标硬件 profile、端到端接受率和生产 SLO 仍待核验；整体 goal 保持 `active`。
+- 最近完成的独立专题：Qwen3.6-35B-A3B 官方博客证据恢复。7890 首次请求失败，按权限流程的获批沙箱外重试返回 HTTP 200；文章 HTML 91,941 bytes / SHA-256 `706889d145ea17b8c8234c4cda35b00fdecc0b6bcb9e1f5f20d2ed3ff9e15ed1`。新增知识重点为公开分数的 evaluator/user model/toolchain 依赖，而非新的模型架构；`qwen3.6-flash` 记录为同一榜单锚点的 API alias。OpenClaw 128K/16K 是客户端预算，百炼 endpoint 未 probe。
 
 ## 已完成
+
+- 2026-09-24 Kimi K2.7 Code 内容专题闭环：用户终端实测证明 7890 可访问百度，但本轮 agent 沙箱内连接失败，获准沙箱外重试后仍超时；通过备用 1234 刷新两榜和 Kimi 官方资源/API Markdown。AA K2.7 页面 4,047,429 bytes / 1a8818a6ee812da88ba7b9a95b691ae7481dac7b55d7126084fbd1d5e964e56b，Index 25.8121062401836；DataCurve 268,036 bytes / 14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1，精确行 113 tasks/4 runs、Pass@1 30.53%、Pass@4 61.06%。官方 Markdown 快照补充 max_tokens 默认 32,768、强制 thinking、fixed sampling、媒体 token estimate、视频抽帧/文件上传边界，并说明 Highspeed 与 K2.7 Code 是同一模型。固定 HF revision 代理超时，未伪称刷新成功。新增第二十一册第 94 章及 kimi_k27_contract_budget_toy.py，脚本通过，证据级别 local_protocol_toy；同步 source notes、inventory/interpretation、source index、书目、题库、练习、项目、知识图谱、plan 和 progress。专属训练报告、完整权重、真实 endpoint、GPU profile、独立 benchmark 和生产验收仍未确认，goal 保持 active。
+- 2026-09-24 当前会话代理复测与 QA：用户 shell 的 7890 百度成功结果已收到；本 agent 会话经沙箱内及沙箱外对同一代理均在 10 秒连接超时，不能据此判定代理全局不可用。备用 1234 返回百度 HTTP 200，并取得 Artificial Analysis `/zh`（1,781,428 bytes，SHA-256 `15e9763f0d516791e7b7c2c5679e87e5878eaffed4bef31e485c9043b758ba59`）与 DataCurve（268,036 bytes，SHA-256 `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`）；与已有同日快照一致，未发现新 canonical 模型。全库 718 个 Markdown 文件围栏检查通过，代码/数学片段外 1,530 个本地链接缺失 0；16 个研究 Python 文件 AST 检查、`git diff --check` 均通过。
+
+- 2026-09-24 Qwen3.8-Flash-Next serving/runtime 补证：通过备用 `10.237.126.170:1234` 复取 Artificial Analysis `/zh`（HTTP 200，1,781,428 bytes，SHA-256 `15e9763f0d516791e7b7c2c5679e87e5878eaffed4bef31e485c9043b758ba59`）和规范 DataCurve DeepSWE（HTTP 200，268,036 bytes，SHA-256 `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`）；均与同日已记录快照一致，未见重点厂商新 canonical 模型。7890 在用户终端可访问，但从当前 agent 网络路径（沙箱内及沙箱外重试）均连接超时；不能据此说代理全局不可用。1234 成功读取 GitHub API 和 Qwen 固定 README。已校正 QSA stream overlap、BF16/FP8 dtype 边界及 47.7 GiB/H100 信息的来源归属，并同步研究笔记、第 83 章、source index、inventory、PAPERS、题库、练习、项目、知识图谱、计划和进度。固定 vLLM/SGLang release 源码只做静态核对；未运行测试、安装 wheel、加载完整权重或做 GPU profiling，硬件/生产验收仍待核验。goal 保持 `active`。
+
+- 2026-09-24 DeepSeek V4 Flash SGLang serving 补证：沿两榜已有锚点核验 SGLang `v0.5.20` 与 PR #34565/#30805/#29927/#39171；补充混合 Full/Compressed KV 与 SWA 分支点缓存、B200 CSA/HCA kernel、SM120 sparse-indexer/FP4 MoE 路径及 benchmark 归因边界。已同步研究笔记、source index、inventory/interpretation、第二十一册第 77 章、PAPERS、题库、练习、知识图谱、计划与进度；不新增重复章节。发布方测量、完整权重、目标硬件独立复现和生产 SLO 均未越级表述。
+
+- 2026-09-24 GLM-5.3-Flash vLLM stable source-tree 补证：第一阶段确认 v0.30.0 目录项；随后固定 stable tag 与 main commit 做逐文件/hash/diff 审计，结论已由本进度末尾的最新记录细化。未把 main 独有的 Quark loading、sparse-indexer 和 stride-aware kernel 细节写成 stable；wheel/权重/硬件/SLO 均未声称通过。
+
+- 2026-09-24 Claude Fable 5.1 thinking-state 专题：双榜与官方文档复验后，新增第二十册第 21 章 21.29；补入 Opus 5.5 单向/Claude API 专属兼容矩阵，区分 model-binding 和 prefix-binding，扩展本地协议 toy，并同步来源索引、盘点、题库、练习、知识图谱、计划与进度。内容专题闭环不代表真实 API、架构、训练、硬件或生产验收。
+
+- 2026-09-24 7890 当前工作区复验：当前环境通过 `10.24.27.134:7890` 取得 Artificial Analysis `/zh`（HTTP 200，`1,782,611` bytes，SHA-256 `566b4adab724bd312436a302be3f0f4c5d9f7713188e9efb078cb636faddd02b`）和 DataCurve DeepSWE（HTTP 200，`268,036` bytes，SHA-256 `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`）；与已有同日快照一致，八家重点厂商没有新增 canonical 模型。该次质量门禁：`git diff --check`、研究代码 Python 编译、全库 Markdown 围栏检查通过；相对 Markdown 链接检查 1,495 个、缺失 0。随后已选择 DeepSeek V4 Flash serving 补证作为当前活动锚点，goal 保持 `active`。
+
+- 2026-09-24 Kimi K3 runtime 更新：固定 vLLM v0.30.0 release commit、PyPI wheel metadata、registry 与 K3 NVIDIA/DSpark source；对照 v0.29.0 确认 stable entry 原已存在，新增记录只表述实现演进。已更新 `kimi-k3-source-notes.md`、第二十一册第 88 章、source index、model inventory、`PAPERS.md`、`INTERVIEW_BANK.md`、`EXERCISES.md`、`KNOWLEDGE_GRAPH.md`、`plan_v2.md` 与本进度。wheel 未下载/安装，目标硬件与端到端 serving 未验收。
+- 2026-09-24 后续联网与专题推进：沙箱内访问 7890 代理失败；经批准在沙箱外通过同一代理抓取榜单主机成功。Artificial Analysis `/zh` 为 HTTP 200、`1,784,793` bytes、SHA-256 `a374adfb81fea4fc68e7071ef191612d7f7d92c1c0e05412f3c338e7fe9edbc2`；规范主机 DataCurve `https://deepswe.datacurve.ai/` 为 HTTP 200、`268,036` bytes、SHA-256 `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`。当前 AA 重点厂商 slug 与 DataCurve 配置集未发现新 canonical 模型；AA 同日页面较早记录相差 12 bytes，按动态页面快照变化处理，不解释为模型 revision。
+- 按计划选取已有锚点 Gemini 3.8 Flash，将 9 月 23 日已核验的 Google 官方 Interactions/Thinking/Tool combination/Thought signatures 资料落为[第二十册第 23 章](book-20-agent-harness-runtime/chapters/23-gemini-interactions与thought-state回放.md)。章节覆盖 stateful/stateless、interaction-scoped 配置、opaque signature 文档差异、SSE/工具幂等、保留删除、预算与 capability probe；研究笔记、模型盘点、榜单解释、来源索引、计划和本进度，以及目录、题库、练习、项目和知识图谱均已同步。状态升为“内容专题闭环”；内部架构/训练、真实 API probe、目标硬件和线上验收仍待核验。
+
+- 2026-09-24 当前时点复验：通过 `10.24.27.134:7890` 获取 Artificial Analysis 中文首页（1,784,805 bytes / `5284847a4499b219872725221324a3461de68464956a4b8f44b5cdd96d34c2c8`）、DataCurve（268,036 bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`）、AA Claude Opus 5.5 与 GPT-6 Luna 详情，以及 Anthropic Opus 5.5 官方 model page。比较 9 月 23 日快照，八家厂商 AA canonical 集合和 DataCurve 配置集合无新增；Opus 5.5 Index/cost 与旧值相同，Luna Index/cost 相同、速度作为 provider 时点字段记录。Opus 5.5 官方服务合同补齐同步/Batch 输出限制、cache minimum 与缓存读写价格；研究笔记、来源索引、盘点、解释、计划和推理/Agent 正式章节已同步。DataCurve 无精确 Opus 5.5 Agent 行，不迁移其他 Claude 结果。
+- 2026-09-24 Opus 5.5 治理证据审计：用户给出的 7890 代理请求可达；本轮对 Artificial Analysis 首页、Opus 详情、DataCurve 与 Anthropic 官方模型页均取得 HTTP 200。最新 AA Opus 详情 `3,809,722` bytes / `683005dd64dba034487fa6207167ce8239161e83cf198cd03d2a9445204caf23`，Index `57.6223698102963`、cost/task `$5.982012019521066` 未变；首页 `1,783,893` bytes / `3b895865547acf9b8d9d67d0c2a9a0a0369648f925014b2367817e1f5ac42f36`，DataCurve 和官方 model page 哈希与既有记录一致。System Card PDF 固定副本 `17,795,106` bytes / `7311c9c6bbb16d012f1c12c7418b05949fcf7ae3e30d2c40f22050074b2a7378` 校验通过。研究笔记和第二十册已包含上述评测条件；本轮仅在第八册第 11 章补充治理视角的证据账本，不重复 benchmark 数字。状态为 **AA 单榜内容专题闭环 + System Card/API contract + local protocol toy**；DataCurve 精确行、独立复现、参数/架构、完整 recipe、目标硬件和生产 acceptance 仍未核验。
 
 - 上一活动锚点收口（2026-09-22）：已由 Artificial Analysis 发现的 `Qwen3-VL-235B-A22B` 完成专题写作和同步。三条代理取得 AA instruct/reasoning 详情页逐字节一致快照，DataCurve 没有精确 Agent 行；本轮完成 HF 固定 revision/config、Qwen3-VL Technical Report、三模块结构、Interleaved-MRoPE、DeepStack、Video Timestamp、S0-S3 curriculum、SAPO、Thinking with Images 和 tool-call reward 证据核验，并新增第二十一册第 92 章；K2 Horizon 3.7B、Qwen3-Omni、Grok 4.7 和 Claude Sonnet 5 作为前序历史记录保留。当前活动锚点见文件顶部和最后一条记录。
 
@@ -21,7 +122,7 @@
 - 已核验新增章节的 Python 示例、AST、围栏配对、相对链接和 `git diff --check`；未公开架构、参数量、发布日期和 SAO 机制均保留为待核验。
 - 已完成 K2 Horizon MoVA 36B/A4B 的榜单发现、官方模型卡/固定 revision 核验、第二十一册第 82 章和全局资料同步；K2-Horizon-7B-Uno 作为官方关联 adapter/论文技术记录，不作为排行榜新增模型。
 - 已完成 Qwen3.8 的榜单归并、官方 27B/A95B/Flash-Next 模型卡、Flash-Next GitHub/技术报告和 Qwen Cloud 关系核验；新增研究笔记、第二十一册第 83 章及书系配套同步。Qwen3.8 当前状态为“内容专题闭环”。
-- 已完成 Gemini 3.8 Flash 的两榜单归并、Google 官方模型页、DeepMind Model Card、发布博客、评测 PDF 及 Gemini API 周边文档核验；新增研究笔记并完成索引/清单/计划同步。Gemini 3.8 Flash 当前状态为“资料级闭环”，暂无独立正式章节。
+- 已完成 Gemini 3.8 Flash 的两榜单归并、Google 官方模型页、DeepMind Model Card、发布博客、评测 PDF 及 Gemini API 周边文档核验；随后新增第二十册第 23 章并完成书系配套同步，当前状态为“内容专题闭环”；最新 SDK schema 补证见本进度末尾。
 - 已完成 Gemini 3.8 Flash 2026-09-23 官方文档复验：通过 7890 获取模型页、Thinking、Interactions、Tool combination 和 Thought signatures；补齐 stable `1,048,576/65,536`、默认 medium、`max_output_tokens` 合计预算/`incomplete`、store/retention/delete、previous interaction 参数作用域、stateful/stateless replay、modality compatibility、tool call/result `id`、server/client-side tool 和 validated mode。Thinking 与 Tool combination 对标准 function call signature 的位置描述不完全一致，已保留为文档冲突并要求 capability probe。
 - 已新增 [`gemini_interactions_replay_demo.py`](research/model-update-2026-09/code/gemini_interactions_replay_demo.py)，标准库合成验证 stateful/stateless、opaque signature、call/result id、SSE 事件顺序、store/delete/retention 和 modality gate；运行输出 `ok=true`、15 个有序事件、`network_called=false`。证据等级为 local protocol toy，不代表真实 Gemini API、模型质量或生产 SLA。
 - 已完成 Gemini 3.7 Flash 的夜间断点联网复验：重新获取 Artificial Analysis、DataCurve、Google AI Developers 模型页、DeepMind Model Card、DeepMind Research/可用 publications 入口和 arXiv 精确/全文检索；新增研究笔记并完成来源索引、模型盘点和计划同步。Gemini 3.7 Flash 当前状态为“资料级闭环”，暂无独立正式章节。
@@ -35,9 +136,9 @@
 - 已完成 Kimi K2.7 Code 的 Artificial Analysis/DataCurve 锚点归并、Moonshot/Kimi 官方资源/API 文档、固定 revision 模型卡、配置、许可证和部署指南核验；新增研究笔记并完成来源索引、模型盘点、榜单解释、计划和进度同步。Kimi K2.7 Code 当前状态为“资料级闭环”，暂无独立正式章节。
 - 已完成 Grok 4.5 的 Artificial Analysis/DataCurve 锚点归并、xAI 发布公告、Grok 4.5 官方模型页、Reasoning/Responses/Compaction/Tools/Web Search/X Search/Remote MCP 文档核验；新增研究笔记并完成来源索引、模型盘点、榜单解释、计划和进度同步。Grok 4.5 当前状态为“资料级闭环”，暂无独立正式章节。
 - 已完成 Grok 4.6 的 Artificial Analysis/DataCurve 四档锚点归并、xAI 发布公告、Grok 4.6 官方模型页、Reasoning/Compaction/Tools 文档和论文精确标题检索；新增研究笔记并完成来源索引、模型盘点、榜单解释、计划和进度同步。Grok 4.6 当前状态为“资料级闭环”，暂无独立正式章节。
-- 已完成 Grok 4.20 0309 v2 的 Artificial Analysis 精确条目核验、DataCurve 精确行缺失核验、xAI 模型页/模型注册表、Reasoning/Multi Agent/Compaction/Tools/Release Notes 和 arXiv/新闻入口负检索；新增研究笔记并同步来源索引、模型盘点、榜单解释、计划和本进度表。Grok 4.20 当前状态为“AA 单榜资料级闭环”，暂无独立正式章节。
+- 历史阶段已完成 Grok 4.20 0309 v2 的 Artificial Analysis 精确条目核验、DataCurve 精确行缺失核验、xAI 模型页/模型注册表、Reasoning/Multi Agent/Compaction/Tools/Release Notes 和 arXiv/新闻入口负检索；新增研究笔记并同步来源索引、模型盘点、榜单解释、计划和本进度表。该阶段当时记为“AA 单榜资料级闭环”；2026-09-29 已补入第二十册第 19.30 节和 Multi-agent beta/API/成本合同，当前状态见本进度顶部，已升级为内容专题闭环。
 - 已完成 Claude Opus 5 的 Artificial Analysis/DataCurve 锚点归并、Anthropic 官方模型目录/专属页、完整开发者文档、发布公告、System Card 下载和 Anthropic Research/arXiv 定向检索；研究笔记、来源索引、模型盘点、候选解释、计划和进度已同步。已确认 adaptive thinking、五档 effort、工具/effort 中途变更、512-token 缓存门槛、fallback、1M context 和配置级评测边界；Claude Opus 5 当前状态为“资料级闭环”，暂无独立正式章节。
-- 已完成 Claude Fable 5.1 的断点恢复核验：重新抓取 Artificial Analysis、DataCurve、Anthropic 发布页和 System Card，补齐 Fable/Mythos safeguards 分层、cache read 定价、产品入口 effort、发布方 benchmark/安全摘要及 arXiv 外部使用检索；确认 DataCurve 当前没有 Fable 5.1 行。Claude Fable 5.1 当前状态为“资料级闭环”，暂无独立正式章节。
+- 已完成 Claude Fable 5.1 的断点恢复核验：重新抓取 Artificial Analysis、DataCurve、Anthropic 发布页和 System Card，补齐 Fable/Mythos safeguards 分层、cache read 定价、产品入口 effort、发布方 benchmark/安全摘要及 arXiv 外部使用检索；确认 DataCurve 当前没有 Fable 5.1 行。随后新增第二十册第 21 章 21.29，当前为“AA 单榜内容专题闭环”；参数/架构/训练和真实 endpoint 仍待核验。
 - 已完成 Claude Sonnet 5 的断点恢复核验：重新获取 Artificial Analysis、DataCurve、Anthropic 发布页、System Card、完整开发者文档、Research 页面和 arXiv 精确标题检索；补齐 adaptive thinking、effort/`max_tokens`、thinking block/signature、new tokenizer、context awareness、server-side compaction、computer toolset、programmatic tool calling、System Card/发布方评测及负面证据。Claude Sonnet 5 当前状态为“资料级闭环”，暂无独立正式章节。
 - 已完成 Grok 4.7 的基础锚点核验：三条代理取得一致的 Artificial Analysis 中文首页、Grok 4.7 详情页和 DataCurve 快照；已核验 xAI 模型页、发布页、Reasoning、Context Compaction、Function Calling、Structured Outputs、Remote MCP，并记录更大 base、更长 RL、困难长任务混合、自验证与 safeguard stack 的发布方披露。已同步 encrypted reasoning state、opaque compaction、工具最小权限和发布方 benchmark 的证据边界；DataCurve 没有精确行，不迁移 Grok 4.6 结果。Grok 4.7 当前状态为“AA 单榜内容专题闭环”，暂无独立架构章节。
 - 已完成 Qwen3-Omni 30B A3B 的当前锚点核验：三条代理取得一致的 Artificial Analysis instruct 详情页，并取得 reasoning 页面快照；已核验 Qwen3-Omni 官方 GitHub、HF Instruct/Thinking 配置、Qwen 博客、阿里云文档、arXiv `2509.17765` 论文与源码。已同步 Thinker-Talker、AuT、TM-RoPE、视觉 encoder、多码本 Talker/MTP、Code2Wav、异步 chunked prefill、三阶段训练和 Thinker/Talker 后训练的证据边界；DataCurve 没有精确行，不迁移其他 Qwen 结果。新增第二十一册第 91 章，Qwen3-Omni 当前状态为“AA 单榜内容专题闭环”。
@@ -474,20 +575,20 @@
 | OpenAI | GPT-5.5、GPT-5.5 Pro、GPT-5.5 Instant | AA；基础 GPT-5.5 亦见 DS | GPT-5.5/Pro 资料级闭环；Instant 为 AA-only 关联配置 | GPT-5.5/Pro 的模型页、专属指南、推理/工具/缓存/状态/后台文档已完成；Instant May/June 的 AA 快照已复核，但官方 `gpt-5.5-instant` 路径 404、DataCurve 无精确行，不能并入 `gpt-5.5` 或迁移其 Agent 结果。 |
 | OpenAI | GPT-5.4、GPT-5.4 Pro、GPT-5.4 mini/nano | AA；基础 GPT-5.4 亦见 DS | GPT-5.4/mini/nano 资料级闭环；Pro 为关联档位 | GPT-5.4 base 的两个排行榜配置、mini/nano 的精确 AA 条目、OpenAI sibling 模型页和专属指南已完成；mini/nano 的 400K/272K/128K、effort、任务定位、价格和精确工具矩阵已分开核验；未公开架构、训练 recipe、独立技术报告和 mini/nano 精确 Agent 复现。 |
 | OpenAI | gpt-oss-120b、gpt-oss-20b | AA 单榜 | 内容专题闭环 | DataCurve 当前没有精确 `mini_swe_agent_gpt_oss_*` 行；OpenAI Model Card/arXiv、官方仓库、Harmony、Hugging Face 和 Cookbook 已核验；MoE、MXFP4、Harmony、variable-effort reasoning 已进入第二十一册第 87 章，完整 recipe、kernel、profiling 和独立 Agent 评测待补证。 |
-| Anthropic | Claude Fable 5.1 | AA | 资料级闭环 | 官方专属模型页、研究笔记和全套配套同步已完成；没有独立正式专题，参数、架构、训练细节和外部复现待补证。 |
+| Anthropic | Claude Fable 5.1 | AA | 内容专题闭环（AA 单榜） | 已新增第二十册第 21 章 21.29，补齐 Opus 5.5 → Fable 5.1 单向 thinking-block 可读边、Claude API 专属范围及 model/prefix binding 区分；真实 API、内部架构/训练、独立复现和目标硬件仍待核验。 |
 | Anthropic | Claude Fable 5 | AA/DS | 资料级闭环 | Artificial Analysis 的 `max + Opus 4.8 Fallback`、DeepSWE 的 `xhigh + mini-swe-agent`、Anthropic 模型页、发布/重新部署公告、API/Agent 文档、system card 入口和研究笔记已完成；参数、架构、训练配方和独立 benchmark 待核验。 |
 | Anthropic | Claude Opus 5 | AA/DS | 资料级闭环 | 两榜单配置、官方模型目录/专属页、开发者文档、发布公告、System Card 入口、研究笔记和配套同步已完成；参数、架构、训练细节和独立 benchmark 待核验。 |
 | Anthropic | Claude Opus 4.8 | AA/DS | 资料级闭环 | Artificial Analysis 的 `max`、DeepSWE 的 `xhigh`/`max` + `mini-swe-agent`、Anthropic 发布公告、System Card 入口、Dynamic Workflows 博客、研究笔记和配套同步已完成；参数、架构、训练配方和独立 benchmark 待核验。 |
 | Anthropic | Claude Sonnet 5 | AA/DS | 资料级闭环 | 两榜单配置、Anthropic 发布页/模型目录、完整 API/Agent 文档、System Card、Research/arXiv 定向检索、研究笔记和配套同步已完成；参数、架构、完整训练/后训练 recipe 和独立 benchmark 仍待核验。 |
 | Anthropic | Claude Sonnet 4.6 | AA/DS | 资料级闭环 | 两榜单配置、Anthropic 发布页、真实模型目录、System Card 入口和 Agent 运行时资料已完成；1M context beta、adaptive/extended thinking、compaction、tool search、computer use 已核验；参数、架构、训练 recipe 和独立 benchmark 待核验。 |
 | Anthropic | Claude Opus 4.7 | AA；DataCurve 无精确行 | 内容专题闭环（复用章节） | AA 的 adaptive/max 与 non-reasoning/high 配置、Anthropic 发布页/System Card/模型页、三层预算、更新 tokenizer、高分辨率视觉、compaction、tool search 和 cyber safeguards 控制面已核验；参数、架构、训练 recipe、生产 kernel 和独立 benchmark 待核验。 |
-| Z.ai（GLM） | GLM-5.3 | AA/DS | 内容专题闭环 | 官方 GLM-5.3/5.2 文档、研究笔记、第十六册第 20 章及配套同步已完成；SAO with compaction 原始定义、模型卡、权重和许可证待补证。 |
+| Z.ai（GLM） | GLM-5.3 | AA/DS | 内容专题闭环 + stable/main runtime source evidence | 已完成 Z.ai 文档/博客、SAO 关联论文、fixed config、标准 DSA 的 Transformers/vLLM/SGLang 入口、第二十一册第 89 章和配套同步；5.3 专属 compaction、完整 recipe、权重加载、目标硬件、独立 benchmark 与生产验收仍待核验。 |
 | Z.ai（GLM） | GLM-5.3-Flash | AA/DS | 内容专题闭环 | 已核验 Z.ai 文档/博客、固定 revision 模型卡与配置；已新增第二十一册第 84 章并同步书系配套。完整训练 recipe、生产 kernel、硬件 profiling、线上接受率和独立评测仍待补证。 |
 | Z.ai（GLM） | GLM-5 | AA 单榜 | 内容专题闭环（AA 单榜） | Artificial Analysis 有精确 `glm-5` 条目；DataCurve 当前没有精确 `mini_swe_agent_glm_5_*` 行。已核验 Z.ai 模型卡、GLM-5 专属技术报告、DSA、744B/40B MoE、`slime` 异步 RL 和 Agentic Engineering；已新增第二十一册第 89 章及配套同步。完整 DSA kernel、调度细节、训练 recipe、硬件 profiling 和独立复现待补证。 |
 | Z.ai（GLM） | GLM-5.2 | AA/DS | 资料级闭环 | 已完成 AA/DataCurve high/max 复验、Z.ai 官方文档、正确博客正文、研究笔记和第二十一册第 86 章；IndexShare、MTP、长上下文 serving、critic-based PPO、anti-hack、1M/128K、MCP、缓存和工作流已核验；参数、架构、SAO/compaction 原始定义、训练 recipe 和独立复现待补证。 |
 | Qwen | Qwen3.8 Max、Qwen3.8 Max (0902)、Qwen3.8 27B、Qwen3.8 2.4T A95B、Qwen3.8-Flash-Next | AA；Max/0902 亦见 DS 泛化条目 | 系列内容专题闭环；0902 revision 资料级闭环 | 三份官方模型卡、Flash-Next GitHub/技术报告、Qwen Cloud Max/0902 页面与运行时文档、研究笔记、第 83 章及配套同步已完成；0902 无精确 DataCurve 行；完整生产 kernel、线上接受率、目标硬件 profiling、全系列训练配方和独立 benchmark 待核验。 |
 | Kimi/Moonshot | Kimi K3 | AA/DS | 内容专题闭环 + stable release/source implementation evidence | 官方发布资料、K3 仓库/技术报告/许可证、HF 固定 revision/config、FlashKDA README/commit、vLLM `0.29.0` stable release/source、recipe、研究笔记、第十七册第 15 章和第二十一册第 88 章已同步；完整权重未下载，未完成本地 wheel 安装、目标硬件加载、完整 recipe、profiling、独立复现、hybrid cache recovery 和线上 acceptance。 |
-| Kimi/Moonshot | Kimi K2.7 Code | AA/DS | 资料级闭环 | 官方资源/API 文档、固定 revision 模型卡/配置/许可证、部署指南和研究笔记已完成；1T/32B active MoE、MLA、MoonViT、native INT4、thinking/preserve-thinking/tool-call 协议已核验；专属训练报告、完整后训练配方、线上接受率和独立 benchmark 待核验。 |
+| Kimi/Moonshot | Kimi K2.7 Code | AA/DS | 双榜内容专题闭环 | 已新增第二十一册第 94 章和 local protocol toy；已核验 1T/32B active MoE、MLA、MoonViT、native INT4、32K 默认生成预算、256K context、thinking/tool-call 协议与多模态视频预算。Highspeed 按官方同模型服务变体记录，不新增候选；专属训练报告、完整后训练配方、权重加载、线上接受率、目标硬件和独立 benchmark 待核验。 |
 | DeepSeek | DeepSeek V4.1 Flash | AA | 内容专题闭环 | 官方发布页、模型卡、技术报告、研究笔记和第二十一册第 81 章已完成；完整 kernel、线上接受率、目标硬件 profiling 和独立 benchmark 待补证。 |
 | DeepSeek | DeepSeek V4 Pro、V4 Flash | AA/DS | V4 Pro 双榜内容专题闭环；V4 Flash 为系列资料闭环 | V4 Pro 已有 AA 精确 `deepseek-v4-pro`、DataCurve `mini_swe_agent_deepseek_v4_pro_max`、官方公告/API/模型卡/配置/技术报告和第 77/78 章映射；DataCurve 结果绑定 max + `mini-swe-agent`，生产 kernel、硬件 profiling、线上 acceptance 和独立复现仍待核验。V4 Flash/Flash Vision 的 alias 与视觉边界另行记录。 |
 | DeepSeek | DeepSeek V4 Flash Vision | AA | 资料级闭环 | 已完成实验发布、Vision/Files/Responses/价格文档、研究笔记和第二十一册第 85 章；历史 alias、当前路由、图像预算和工具回灌已核验；视觉专属架构/训练报告、DataCurve 同名结果和独立评测仍待核验。 |
@@ -501,7 +602,7 @@
 - 官方技术报告 PDF 已经通过 7890 下载，907,086 bytes、SHA-256 `f6fda5753db7b106baa5eeb1286877f17e6a111354762f8aa53c7e6556498df7`；已用标准库完成正文抽取，抽取文本 252,018 bytes、SHA-256 `f082910a550666ad32c914db94056daa59a13b75a7ffd2bbd548695aa5cd043c`。报告正文补充确认 DSA 的 dense warm-up/sparse training、2,048 KV top-k、约 2.1B/943.7B tokens、主 attention 复杂度边界、specialist distillation、GRPO 的 unbiased KL/off-policy masking/Keep Routing/Keep Sampling Mask，以及 code/search/general/interpreter Agent 数据规模与 verifier 闭环。公式/图表因 PDF 字体抽取失真仍待视觉复核；完整 kernel、层排布、训练超参、线上 acceptance rate、硬件 profiling 和独立 benchmark 继续待核验。
 - 当前状态为“AA 单榜资料级闭环”，不新增重复正式章节；研究笔记见 [`deepseek-v3.2-source-notes.md`](research/model-update-2026-09/deepseek-v3.2-source-notes.md)。后续继续从两个排行榜剩余重点条目选择下一锚点。
 - 配套闭环已完成：已同步 `PAPERS.md`、`INTERVIEW_BANK.md`、`EXERCISES.md`、`GLOSSARY_EN_ZH.md`、`PROJECTS.md`、`KNOWLEDGE_GRAPH.md`，并在第二十一册稀疏注意力、第四册后训练与第二十四册工具 serving 中补入 DSA、Agent 任务合成和 `thinking with tools` 的面试映射；未把 GLM/DeepSeek V4 的实现字段迁移为 V3.2 事实。
-| Google（Gemini） | Gemini 3.8 Flash | AA/DS | 资料级闭环 | Google 官方模型页、DeepMind Model Card、发布博客、评测 PDF、研究笔记及工具/推理文档已入库；GA/stable、1M 输入、64K 输出、thinking、Interactions API 和工具闭环已核验；3.8 独立架构/训练报告和正式专题待补证。 |
+| Google（Gemini） | Gemini 3.8 Flash | AA/DS | 内容专题闭环 | Google 官方模型页、DeepMind Model Card、发布博客、评测 PDF、Interactions 专题和书系配套已入库；固定 SDK schema 补充 custom `function_call.id` → `function_result.call_id`、可选 signature 与 forward-compatible decode 证据；真实 endpoint 字段行为、3.8 独立架构/训练报告仍待核验。 |
 | Google（Gemini） | Gemini 3.7 Flash | AA/DS | 资料级闭环 | 已完成 Google AI Developers 模型页、DeepMind Model Card、评测/安全入口、Interactions/工具/视频文档和 arXiv 定向检索；1M 输入、thinking、agentic video、step/state/signature 回放已核验；独立架构/训练报告待补证。 |
 | Google（Gemini） | Gemini 3.6 Flash | AA/DS | 资料级闭环 | 已完成 Artificial Analysis/DataCurve 原始配置、Google AI Developers 模型页、DeepMind Model Card、Thinking/Interactions/工具组合/视频/缓存/Computer Use 文档和 arXiv 9 篇外部使用论文核验；默认 medium 与 `minimal/low/medium/high` thinking、agentic video、Model Card benchmark/safety 已记录，独立架构/训练报告待补证。 |
 | Google（Gemini） | Gemini 3.5 Flash | AA/DS | 资料级闭环 | 已完成 Artificial Analysis/DataCurve 原始配置、Google AI Developers 模型页、What's New、DeepMind Model Card、Gemini 3 Flash 依赖 Model Card、Thinking/Interactions/工具组合/视频/缓存/Computer Use 文档和 arXiv 定向检索；默认 medium、thought preservation、工具上下文循环、Computer Use prompt-injection detection 和证据边界已记录；独立架构/训练报告待补证。 |
@@ -1301,7 +1402,7 @@
 - SGLang `v0.5.20` tag（commit `94602c9c2b7cbdb8efd5c52802dac6a1c180089e`）已固定 `glm5_next.py`：`61,466` bytes、SHA-256 `12c5157b07fb7c6d93f34e84c43a37866d2e382e703729e2205aed9f8961f9c2`；对应 config `12,026` bytes、SHA-256 `3b3c7aa3ae60e1cf59edf91e1c11a6aa49be7532340c8e2482f7f75ed859f3e0`。这证明固定 stable source entry，不代表本机权重加载或目标硬件 profile。
 - SGLang `main` tree commit `9d58189c12e4e14a7eea20f24f9aa7b17e221778` 的 GLM5Next 模型文件为 `68,097` bytes、SHA-256 `1cd324533aa0827e7542e27fc39c5901c2330823c4b3a32b79bcb26521dbcfec`；补证 projection fusion、KDA projection/prefill metadata、mHC boundary fusion、AMD FP8/Quark MXFP4 和 B200/H200 测试门禁。相关提交 `c8eb54c41da1`、`2fa6b94e3440`、`b44e2486824e` 作为 mutable upstream history 记录。
 - vLLM `main` tree commit `81d7293c2167e39f3ffddc9a82d633f94e8a1eaa` 已有 `vllm/models/glm5next/`：`attention.py`、`kda.py`、`model.py`、`mtp.py`、`common/sparse_indexer.py`。源码事实包括 pool 粒度 `Glm5NextIndexerCache`、保存未完成 pool raw BF16 K/gate score 的 `Glm5NextTailCache`、独立 KDA/Mamba/GDN state、`num_spec` conv 宽度和 MTP layer/weight mapping、top-k reuse、slot compact/local argmax。
-- vLLM `v0.29.0` tree 快照为 `1,979,822` bytes、SHA-256 `7131879ae9592d90738776d24ae213f789577317b2c5427f350761a87ca05070`，路径搜索未发现 `vllm/models/glm5next/` 专属路径。因此 recipe 的 `v0.29.0+` 只能记录为部署门槛/路线声明；当前正确状态是 SGLang stable source + SGLang main + vLLM main implementation evidence，不能写成 vLLM `v0.29.0` stable tag 已含 GLM5Next。
+- vLLM `v0.29.0` tree 快照为 `1,979,822` bytes、SHA-256 `7131879ae9592d90738776d24ae213f789577317b2c5427f350761a87ca05070`，路径搜索未发现 `vllm/models/glm5next/` 专属路径。截至本条 2026-09-22 记录，证据为 SGLang stable/main + vLLM main implementation；2026-09-24 后续确认 v0.30.0 stable source 并完成逐文件对照，见本进度末尾最新 GLM 条目。recipe 的 `v0.29.0+` 仍不能写成 v0.29.0 stable tag 已含 GLM5Next。
 - 已同步研究笔记、来源索引、模型清单、榜单解释、`plan_v2.md`、第二十一册第 84 章、第二十四册第 32.47.6 节、`INTERVIEW_BANK.md`、`EXERCISES.md`、`PROJECTS.md`、`PAPERS.md`、`GLOSSARY_EN_ZH.md` 和 `KNOWLEDGE_GRAPH.md`。完整权重、stable wheel 运行、目标硬件数值/性能、PD/EPD recovery、MTP acceptance、tool/verifier 和生产 SLO 仍待核验；goal 保持 active。
 
 ## 2026-09-22 GLM-5.3 标准 DSA runtime 闭环推进
@@ -1470,3 +1571,501 @@
 - 本机不存在 GLM 权重文件；`torch`、`transformers`、`vllm`、`sglang`、`safetensors` 不可导入，`nvidia-smi` 无法连接驱动。因此未进行完整权重加载、kernel、数值、硬件 profiling 或线上 acceptance，相关项目继续标记 `unverified`。
 - 新增并运行 [`glm53_compaction_contract_audit.py`](research/model-update-2026-09/code/glm53_compaction_contract_audit.py)：完整候选的 schema round-trip、goal/plan、工具回执链、幂等键、待执行副作用、artifact digest、verifier 状态、预算和 cut marker 检查全部通过；故意丢字段的候选被拒绝。输出证据等级为 `local_protocol_toy`，不代表 Z.ai 内部实现、真实 GLM-5.3 或 SAO 论文 benchmark。
 - 当前状态保持：**GLM-5.3 双榜资料级闭环 + SAO 关联论文算法证据 + stable/main runtime source evidence**；5.3 专属 compaction、完整 recipe、完整权重、目标硬件和 tool/verifier acceptance 仍待核验，goal 保持 `active`。
+
+## 2026-09-23：`7890` 代理恢复、两榜复验与 Grok 4.7 回放审计
+
+- 当前工作目录确认是 `/data/zzc/llm-from-zero-to-interview`，与 `/home/zzc/llm-from-zero-to-interview` 为同一 inode。沙箱内访问代理失败，但使用已验证的 `10.24.27.134:7890` 沙箱外请求成功：百度 HTTP 200，Artificial Analysis 和 DataCurve 均 HTTP 200。
+- 当前 Artificial Analysis 中文首页为 `1,783,572` bytes / SHA-256 `999ead1b8d025a8abccc5d6e879e548544770335863dec1be06b21d99378f8e2`；DataCurve 为 `268,036` bytes / SHA-256 `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7e6e095ad59f1f1`。按八家重点厂商 canonical slug 去重后没有新增模型，未从官方目录、论文或 runtime 仓库扩展候选。
+- 两榜当前仍含 `Grok 4.7`、`Claude Opus 5.5`、`GPT-6 Sol/Luna`、`GLM-5.3`、`Gemini 3.8 Flash`、`DeepSeek V4.1-Flash`、`Kimi K3`、`Qwen3.8 Max` 等既有条目；Grok 4.7 仍无精确 `mini_swe_agent_grok_4_7_*` DataCurve 行。
+- Grok 4.7 详情当前 `3,992,680` bytes / `9b24aa029ee4023aa2918495910a282a96f8bd9bba42848921f9496684e3e6bb`，release `2026-09-21`、Intelligence Index `46.4465506302286`、500K context、proprietary、parameters null；动态页面 hash 变化不解释为 revision 更新。
+- xAI 模型页、Reasoning、Context Compaction 当前分别为 `376,911`/`72e4d59db379c9be4e1d68c9f5c14eff2281d9c9ffa5d2f3bcdb0e701471319c`、`522,822`/`f69666e9a7a47e75c7a394875e280ec15e6e2003a8cd1a6ec6a0e64334fa357a`、`521,433`/`ff467261f7174c235987232139c6c839d0488858507f3ac0f598afd3d0f48eb3`；正文未观察到新的模型合同、架构或训练披露。
+- 新增 [`grok47_state_replay_audit.py`](research/model-update-2026-09/code/grok47_state_replay_audit.py)：验证 opaque reasoning/tool state 原样回放、summary/state 分离、tool lineage、单一 compaction、`store=false`/`previous_response_id` 约束和幂等副作用。脚本不联网、不解密、不调用 xAI，证据等级为 `local_protocol_toy`，不代表 Grok 4.7 生产实现或质量。
+- 当前 Grok 4.7 状态更新为 **AA 单榜内容专题闭环 + 当前时点复验 + local protocol toy**；参数、架构、完整 recipe、生产 kernel、硬件 profiling、线上 acceptance、独立 benchmark 和完整安全评测仍为 `unverified`。goal 保持 `active`。
+
+## 2026-09-23 GPT-6 Astra 当前时点复验与失败路径审计
+
+- 当前工作目录仍为 `/data/zzc/llm-from-zero-to-interview`，与用户指定的 `/home/zzc/llm-from-zero-to-interview` 等同；保留 dirty worktree。模型发现入口仍严格限制为 Artificial Analysis 与 DataCurve DeepSWE，重点厂商仍为 OpenAI、Anthropic、Z.ai/GLM、Qwen、Kimi、DeepSeek、Gemini、Grok。
+- 使用用户提供的 `10.24.27.134:7890` 重新抓取百度、Artificial Analysis 中文首页、Astra 详情和 DataCurve，全部 HTTP `200`。AA 中文首页为 `1,783,572` bytes / SHA-256 `999ead1b8d025a8abccc5d6e879e548544770335863dec1be06b21d99378f8e2`；Astra 详情为 `3,997,013` bytes / `c4c040e6708555c1965efaf4eecd3d61b4199ffe337d07ce53970150b79103ce`；DataCurve 为 `268,036` bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7e6e095ad59f1f1`。八家重点厂商没有新 canonical 模型。
+- AA Astra `max` 当前字段为 `releaseDate=2026-09-03`、`knowledgeCutoffDate=2026-04-30`、1M context、Intelligence Index `52.673669395513`、median output speed `58.6808088606541 tokens/s`、cost per Intelligence Index task `3.2575003134834164`、输入/输出 `$10/$50`、cache hit/write `$1/$12.5`；全部按第三方/provider 字段记录。DataCurve 生成时间为 `2026-09-22T06:27:15.860279+00:00`，五个精确行是 `mini_swe_agent_gpt_6_astra_{low,medium,high,xhigh,max}`，对应 passed/attempts `303/452`、`329/452`、`331/452`、`335/452`、`331/452`；不把这些 Agent 结果写成裸模型能力。
+- 7890 重新取得 Astra model page、latest-model guide、Async tool calling、Steering 和 Misalignment monitoring Markdown，分别为 `3,812`、`17,456`、`24,200`、`12,983`、`7,830` bytes。model page、Async/Steering/Misalignment 直接页面与既有快照一致；latest-model guide 从 9 月 21 日 Astra 专属版本 `16,592` bytes / `aac7e7e1b0bf90b346f5fc4ffd523902279841c60c3adf572452a529bd5b1e5e` 漂移为当前 GPT-6 family 版本 `17,456` bytes / `8982485767fcefe9b4c588777de67683b4f56abe9c9af1121c9431eb9c305557`。新增的是 family capability matrix 和迁移边界，没有新的 Astra 独有协议字段。
+- 扩展 [`gpt6_agent_protocol_demo.py`](research/model-update-2026-09/code/gpt6_agent_protocol_demo.py)：新增重复 `task_handle`/`call_id`、错误 `call_id`、pending consume、重复结果内容漂移、重复 steering、断线后旧 steering 不重放、misalignment 阻断后禁止自动重试和已启动副作用保留等断言。当前脚本 `11,820` bytes / SHA-256 `f3ef1aea13de9dc432fb427f15e02a6f9b96e2505311a8cd219f54681f62f245`；`py_compile`、主流程、`git diff --check` 均通过。证据等级为 `local_protocol_toy`，不代表真实 API、服务端事件顺序、隐藏 reasoning、模型质量或生产安全。
+- 当前 Astra 状态为 **内容专题闭环 + 双榜当前时点复验 + local protocol toy**。参数规模、内部架构、训练/后训练 recipe、system card、专属技术报告、完整权重、生产 kernel、目标硬件 profiling、独立 benchmark、tool/verifier acceptance 和生产 SLO 继续标记为 `unverified`。下一步先完成第六册、题库/练习的失败路径同步，再从两榜当前八家重点厂商已有 canonical 集合选择下一项未收口锚点。
+
+## 2026-09-23：Claude Opus 5.5 协议门禁补证
+
+- 本轮继续只沿两个排行榜已有的 `claude-opus-5-5` canonical 条目推进。使用 `10.24.27.134:7890` 取得 AA 详情 `3,824,658` bytes / SHA-256 `727da6095c069bf0750a36cea442c7e582bbfeefdf4fc4a330a656bd8bd45c31`；release `2026-09-22`、1M context、Intelligence Index `57.6223698102963`、proprietary、`parameters=null`、`$4/$20` input/output 保持不变。DataCurve `268,036` bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7e6e095ad59f1f1` 仍没有精确 `mini_swe_agent_claude_opus_5_5_*` 行，不迁移 Opus 5/Fable 5.1 的 Agent 分数。
+- Anthropic 官方 raw Markdown 当前为 model page `14,613` bytes、What's new `21,525` bytes、Migration guide `16,296` bytes；哈希与来源索引一致。文档明确 adaptive thinking 永远开启，disabled/manual budget 和 `tool_choice=any/tool` 返回 400；thinking block 绑定 producer/conversation/prefix；Claude API/Google Cloud 需迁移 `computer_toolset_20260801`；工具间进度可能以空 thinking block 出现；compaction、inline tools、refusal/fallback 和 fast mode `usage.speed` 必须进入 trace。
+- 新增 [`claude_opus55_protocol_audit.py`](research/model-update-2026-09/code/claude_opus55_protocol_audit.py)，标准库验证 request capability gate、按 `block.type` 解析、thinking binding、签名 compaction、tool idempotency、fallback 实际模型和 8 组负例。主流程、重复回放和失败断言通过；证据等级固定为 `local_protocol_toy`，不调用 Anthropic、不解密 thinking、不执行真实工具。
+- 已同步 Opus 5.5 研究笔记、来源索引、模型盘点、计划、题库、练习、项目以及第八/十六/二十册相关章节。当前状态为 **AA 单榜 + System Card/API contract + local protocol toy**；参数、架构、完整 recipe、精确 DataCurve Agent 行、独立 benchmark、目标硬件、生产 kernel 和线上 acceptance 仍为 `unverified`。goal 保持 `active`。
+
+## 2026-09-23：7890 恢复后的 OpenAI gpt-oss 当前时点复验
+
+- 本轮使用用户确认可用的 `10.24.27.134:7890` 重新验证外网：百度、Artificial Analysis 中文首页和 DataCurve DeepSWE 均 HTTP `200`。AA 中文首页为 `1,783,626` bytes / SHA-256 `0580fad58c167fb96e87289addbabccd40cbd60302c527437805c8eb6ee7530b`；DataCurve 为 `268,036` bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7e6e095ad59f1f1`。八家重点厂商的 canonical 集合没有新增模型。
+- 本轮继续只沿两个排行榜已存在的 `gpt-oss-120b` / `gpt-oss-20b` 推进，没有从 OpenAI Cookbook、GitHub 或 Hugging Face 另发现模型。AA 详情快照分别为 120B `4,078,295` bytes / `43e5f13a3e58976b077acac1810bce82ac60ce33a7d81476f0dc2b17175532de`、20B `4,083,068` bytes / `64d67047a5964c0109f103108f9b77c64edbaf1ee17f3fec3c82ffccd7cea2cc`。
+- AA 当前第三方/provider 字段：120B/high 为 117B total、5.1B active、131,072 context、Index `11.6028431512592`、约 `196.389235173389 tokens/s`、cost/task `0.10742452290394947`；20B/high 为 21B total、3.6B active、131,072 context、Index `8.9675171856126`、约 `185.656167974395 tokens/s`、cost/task `0.012460640242179213`。这些是采集时点观察值，不是新的权重、架构或 revision 证据。
+- DataCurve 当前仍没有精确 `mini_swe_agent_gpt_oss_120b_*` / `mini_swe_agent_gpt_oss_20b_*` 行，因此不迁移 GPT-5.x、Codex 或其他 OpenAI 模型的 Agent 分数；缺失只作为当前快照负证据记录。
+- 7890 当前取得的官方 Cookbook 页面：实现兼容性验证 `337,423` bytes / `e6500d57bc6041133a8f63acc03101260182ea58d45d2f7248806ae609c85474`，raw CoT 处理 `339,052` bytes / `1c08e3fb06a129256596c1af9ba907b7b3c435be3b61cfb00a72da83b1071fe6`。动态正文哈希变化没有带来新的模型 ID、权重 revision 或架构声明；继续保留 Harmony/API shape、tool loop、raw CoT lineage、质量 eval 与 kernel/硬件/生产验收分层。
+- 研究笔记、来源索引、模型盘点和榜单解释已完成本轮同步；第二十一册第 87 章及既有题库、练习、项目入口已存在，无需重复建章。当前 gpt-oss 状态为 **当前时点 AA 复验 + 官方 provider compatibility/raw-CoT evidence 的内容专题闭环**；完整 recipe、MoE 负载均衡、MXFP4 kernel/误差、目标硬件、独立 Agent 评测、tool/verifier acceptance 和生产 SLO 仍为 `unverified`。goal 保持 `active`。
+
+## 2026-09-23 DeepSeek V4.1-Flash Harness Preview 补证
+
+- 本轮确认工作目录 `/data/zzc/llm-from-zero-to-interview` 与用户指定的 `/home/zzc/llm-from-zero-to-interview` 等同，保留既有 dirty worktree。模型发现入口仍严格限制为 Artificial Analysis 与 DataCurve DeepSWE，重点厂商仍为 OpenAI、Anthropic、Z.ai/GLM、Qwen、Kimi/Moonshot、DeepSeek、Google/Gemini 和 xAI/Grok。
+- 使用用户确认可用的 `10.24.27.134:7890` 继续联网；前序两榜复验没有新的八家重点厂商 canonical 模型。本轮不从 Harness 文档、GitHub、论文、HF 或 API 目录另发现模型，活动锚点继续是已有 `deepseek-v4-1-flash`。
+- 固定官方 Harness Preview 文档：quickstart `83,023` bytes / `1e816c2bbead769f57b2c344334c02d6136eeb5831d46a9a3d5cc46f9f135966`；providers `113,025` / `1761dd552158cfe6e01245744414ef5c81273f2ba09026d4a5b6e94a3065182d`；Python SDK `110,733` / `3459ca57567d8a3ff982674ac57a390ecd8215336a5e426d40e4b4ead6c51edf`；architecture/reference `130,135` / `3595d42386804b571bb5976592e07f10a1342764d64485c08e37ea1604b74837`；MCP memory `96,150` / `43751eb6e0f5a363397d26844c2068a6d820adf6d65cbf8381fe993d3764fa33`；GitHub review `94,772` / `3dfae298c9af189c1965a1ff19e78ccbab3f575fd98b0f1ced45925497b0f31f`。
+- 提取的权威知识点是：provider ID 持久化且 credential 只脱敏；session log 固化实际使用模型；插件依赖和 listener/resource 需要生命周期清理；MCP 使用 `mcp__<server>__<tool>` namespace、过滤 credential/`DSH_*` 环境变量、断线重连后重新发现并在预算耗尽后注销旧工具；GitHub review 的签名 webhook 和 `202` 只表示异步 admission，重复 delivery 与出站权限必须单独治理。
+- 新增并运行 [`deepseek_harness_protocol_audit.py`](research/model-update-2026-09/code/deepseek_harness_protocol_audit.py)：输出 `ok=true`、provider credential `<redacted>`、`session_model=deepseek-flash`、`duplicate_webhook_admissions=2`、预算耗尽后 MCP 工具为空、`network_called=false`。证据等级固定为 `local_protocol_toy`，不代表 DeepSeek Harness 生产实现、真实 API、V4.1 模型质量或 SLO。
+- 已同步第二十一册第 81 章、第二十册第 19 章、来源索引、模型盘点、榜单解释、计划、题库、练习、项目、论文和知识图谱。当前状态为 **AA 单榜内容专题 + 官方 API/runtime + Harness Preview + local protocol toy**；DataCurve 无精确 V4.1 行，不能迁移其他 DeepSeek 的 Agent 分数。下一步仍是 pinned revision -> runtime import -> 完整权重 -> 目标硬件 -> 数值/工具/verifier/SLO 门禁，goal 保持 `active`。
+
+## 2026-09-23 Qwen3.8 Max (0902) Context Cache 协议补证
+
+- 本轮继续只沿 Artificial Analysis 与 DataCurve 已确认的 `Qwen3.8 Max (0902)` 推进，没有从 QwenCloud 文档另发现模型。使用 `10.24.27.134:7890` 重新抓取 QwenCloud Thinking、Function Calling、Context Cache 和 Dynamic Rate Limiting 页面，HTTP 均为 `200`；Context Cache response 为 `1,133,845` bytes / SHA-256 `42d5d39fe4cb29680a27fcdd8d1b9bb1c07cdea93f01cb2ae31f40b02ca2edb8`，Dynamic Rate Limiting response 为 `411,250` bytes / `b517a331efcdd822bfd63e81894e735a686db01baf1e77702155a0d8905ce82f`。
+- Context Cache 正文补充确认：`cache_control.type` 只能为 `ephemeral`；单请求最多 4 个 marker，超过 4 个只有最后 4 个生效；最小缓存前缀 `1,024` tokens；marker 到命中内容超过 20 个 content block 时 backward lookback 可能 miss。
+- Explicit/session cache 的典型有效期为 5 分钟且命中刷新；implicit cache 自动启用、命中不保证、无固定 TTL而由 provider 清理长期未使用数据。文档典型相对计费为 explicit/session 创建 `125%`、命中 `10%`，implicit 创建 `100%`、命中 `20%`；与产品页当前 `$2/$6/$0.25/$2.50/$0.17` 价格字段分开记录。
+- Session cache 的可观察合同为 Responses API + `x-dashscope-session-cache: enable` + `previous_response_id`；cache 按 account/model 隔离，命中从 `usage.input_tokens_details.cached_tokens` 读取。后端 marker 后追加通常少于 10 个 token，导致总 `input_tokens` 不一定等于 cache creation + cached hit tokens。
+- 新增并运行 [`qwen_max0902_cache_contract_audit.py`](research/model-update-2026-09/code/qwen_max0902_cache_contract_audit.py)：`py_compile` 通过，主流程输出 `ok=true`、4-marker 截断、显式命中/过期、20-block miss、account/model 隔离、implicit 非保证命中、session `cached_tokens=1024`、thinking forced-tool 和 reasoning budget 冲突负例均通过；`network_called=false`，证据等级 `local_protocol_toy`。
+- 已同步 [`qwen3.8-max-0902-source-notes.md`](research/model-update-2026-09/qwen3.8-max-0902-source-notes.md)、第 83 章、第二十四册第 32 章、`source-index.md`、`model-inventory.md`、`inventory-interpretation.md`、`PAPERS.md`、`INTERVIEW_BANK.md`、`EXERCISES.md`、`PROJECTS.md` 和 `KNOWLEDGE_GRAPH.md`。Qwen3.8 Max 0902 仍是 **hosted revision 资料级闭环 + Context Cache 官方协议补证 + local protocol toy**，没有新增 open checkpoint 或 0902 专属架构证据；goal 保持 `active`。
+
+## 2026-09-23 Claude Fable 5.1 状态协议门禁
+
+- 本轮继续在 `/data/zzc/llm-from-zero-to-interview` 工作，使用用户确认可用的 `10.24.27.134:7890`。百度、Artificial Analysis 中文首页、Fable 详情和 DataCurve 均 HTTP `200`；AA 首页为 `1,783,769` bytes / SHA-256 `e1acf794bd45f380ce3220a20c68de7a274f50ff7eb162a527a9faf4d58a166a`，Fable 详情为 `4,008,017` bytes / `4ea24782d05bcaae7d31f3cf348e5a573851678998706a9df82fa34679292f96`，DataCurve 为 `268,036` bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7e6e095ad59f1f1`。八家重点厂商按 canonical slug 去重后没有新增模型。
+- Artificial Analysis 当前 `claude-fable-5-1` 仍为 `max with fallback`，Intelligence Index `53.3549259623252`、median output speed `64.7060238772019 tokens/s`、cost per Intelligence Index task `7.629706364004841`、1M context；这些是第三方 provider/configuration 字段。DataCurve 没有精确 `mini_swe_agent_claude_fable_5_1_*` 行，继续保持负证据，不迁移 Fable 5 的 `316/452` 或其他 Claude 的 Agent 结果。
+- 7890 取得 Anthropic 官方 Markdown：overview `14,954` bytes / SHA-256 `13e8aeb6bbd207311ac032916f2ab37e7a454c9d752c027cf76967a5c958a076`；What's new `37,545` / `59d2a26f6e123d009a9e86aac9283705f7bfd15549b185dc07aa1858241baf19`；migration guide `94,368` / `c1d7bd16475ce9ad03ad556cc363635d93e695ecafc293e6acb85023e9f869b6`。System Card 原始 PDF 仍为 `16,397,488` bytes / `b0d59edc7a60eef32a879c13d713cce60c3fefd7e6b5183afdc8b835af3c8c39`。
+- 官方迁移正文新增可面试边界：prefill 也返回 400；模型只接受 adaptive always-on thinking；thinking block 可读性是单向的；prefix mismatch 可拒绝或显式 `drop_block` 并记录 `input_transformations`；30-day retention/ZDR 和 Priority Tier 是部署约束。`display: "updates"` 仍只是用户可见进度，不替代 tool result、权限、幂等和 artifact verifier；provenance 也不替代事实验证。
+- 新增并运行 [`claude_fable51_state_protocol_audit.py`](research/model-update-2026-09/code/claude_fable51_state_protocol_audit.py)：`py_compile` 与主流程通过，输出 `local_protocol_toy`、首次副作用 1、重复回放 duplicate receipt true、side-effect executions 1；故意构造的 thinking 配置、forced tool、prefill、旧模型读取、prefix mismatch、缺失 tool result 和 unsupported provenance 均被拒绝。该脚本不联网、不调用 Anthropic、不解密 thinking。
+- 已同步 Fable 研究笔记、来源索引、模型清单、榜单解释、第二十一册第 19 章、`INTERVIEW_BANK.md`、`EXERCISES.md` 和 `PROJECTS.md`。当前状态为 **AA + System Card/API contract + local protocol toy**；参数、架构、完整训练/后训练 recipe、独立 Fable 5.1 技术报告、精确 DataCurve Agent 行、目标硬件 profile、tool/verifier acceptance 和生产 SLO 仍为 `unverified`，goal 保持 `active`。
+
+## 2026-09-23 GPT-5.6 Luna：7890 复验与状态回放审计
+
+- 本轮继续只沿两个排行榜已有的 `GPT-5.6 Luna` 推进，工作目录仍为 `/data/zzc/llm-from-zero-to-interview`，等同用户指定的 `/home/zzc/llm-from-zero-to-interview`；保留既有 dirty worktree。使用 `10.24.27.134:7890` 重新取得 AA 详情和 OpenAI 官方 Markdown，没有从官方目录另发现模型。
+- Artificial Analysis 详情 HTTP 200，当前快照 `3,996,959` bytes / SHA-256 `4246b96416b4aaf4f8bbcacf72f8c45787944e24f02c59c6e3db1fed4de93c41`；`max` 的 release `2026-07-09`、Intelligence Index `37.3244239690841`、median output speed `142.271568203031 tokens/s`、cost per Intelligence Index task `0.17829726152289094`、1M context 和约 `$0.20/$1.20` 均按第三方/provider 字段记录。相对 9 月 22 日速度 `158.728370482714` 的变化只作为采集时点漂移，不解释为模型 revision 或训练升级。
+- DataCurve 当前快照仍为 `268,036` bytes / SHA-256 `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7e6e095ad59f1f1`；精确 `mini_swe_agent_gpt_5_6_luna_max` 仍是 attempted `448`、passed `301`、Pass@1 `67.1875%`、Pass@4 `90.26548672566371%`、平均成本 `$0.6056233620535714`、平均输出 `73399.70758928571` tokens、平均 Agent steps `101.68080357142857`、median peak context `201647`。结果继续绑定 `mini-swe-agent + tools + task environment + verifier`，不写成裸模型能力。
+- 7890 当前官方 Markdown 快照：Luna `3,744` bytes / `1f425d8f2a93f8418702ac7acbb62b26850b98fe20680f82205bed5fce38fed0`；Reasoning `70,315` / `93327c5eb19df7ecf8c0bd9d581f58052dee9f090c38bb48906110b08d0ce251`；Prompt caching `47,098` / `69680fbec38e31a7abc8b0e33a6582b0aae29687e8de98404789337a55b55e2e`；Compaction `14,272` / `73fd2fd1afd44bd6f29ce7bd86fd0ae3413c98ec00ae5476879e98171b0b60dd`；Tools `33,282` / `4722fa102070178c1a1d603e718c69575c7c1768fa901218eab359bafdcba341`。页面恢复可读，但没有产生公开参数、架构、训练 recipe 或 system card 证据。
+- 新增并运行 [`gpt56_luna_state_replay_audit.py`](research/model-update-2026-09/code/gpt56_luna_state_replay_audit.py)：`py_compile` 和主流程通过，输出 `ok=true`、`evidence_level=local_protocol_toy`、`network_called=false`。覆盖 `current_turn/all_turns/auto`、同家族 reasoning 兼容、opaque reasoning/assistant phase/function call-output 原样回放、`call_id` 血缘、idempotency/verifier、compaction canonical window、compaction 后 cache miss、1,024 token 门槛、四个 explicit breakpoint、30m toy TTL、hosted/client tool search 所有权。
+- 当前状态更新为 **双榜当前时点复验 + 官方 runtime contract + local protocol toy**。toy 不代表真实 endpoint schema enforcement、服务端事件顺序、隐藏 reasoning、模型质量、完整权重、目标硬件 profiling 或生产 SLO；不新增 GPT-5.6 专属 Transformer 正式章节。已同步研究笔记、source index、model inventory、inventory interpretation、`plan_v2.md`、第十七/二十/二十四册相关章节及题库/练习/项目/论文/知识图谱，goal 保持 `active`。
+- 下一步门禁：若环境允许，做真实 API capability probe；否则保留 `unverified`，继续按 pinned revision -> runtime import -> 完整权重 -> 目标硬件 -> 数值/工具/verifier/SLO 顺序推进，不从官方目录、论文、HF 或 runtime 仓库绕过两榜新增模型。
+
+## 2026-09-23 GPT-6 Sol：7890 当前时点复验与合同审计 toy
+
+- 工作目录确认仍为 `/data/zzc/llm-from-zero-to-interview`，与用户指定的 `/home/zzc/llm-from-zero-to-interview` 等同；保留既有 dirty worktree。模型发现入口仍严格限制为 Artificial Analysis 与 DataCurve DeepSWE，重点厂商仍为 OpenAI、Anthropic、Z.ai/GLM、Qwen、Kimi/Moonshot、DeepSeek、Google/Gemini 和 xAI/Grok。
+- 使用已验证的 `10.24.27.134:7890` 重新抓取两个指定排行榜：Artificial Analysis 中文首页 HTTP 200，`1,783,769` bytes / SHA-256 `e1acf794bd45f380ce3220a20c68de7a274f50ff7eb162a527a9faf4d58a166a`；DataCurve HTTP 200，`268,036` bytes / SHA-256 `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7e6e095ad59f1f1`。当前 AA 首页仍出现 `GPT-6 Sol`，本轮没有从官方目录、论文、HF、GitHub 或 runtime 仓库另发现模型。
+- AA [`gpt-6-sol`](https://artificialanalysis.ai/models/gpt-6-sol) 详情 HTTP 200，当前快照为 `3,994,562` bytes / SHA-256 `3d08f91c71e2770a4ef84b593c2a197d711193bbcbd8c3a1f330393b65f0ea86`；标题为 `GPT-6 Sol (max)`，release 为 2026-09，Intelligence Index `47.5276426437724`、median output speed `126.038858615917 tokens/s`、cost per Intelligence Index task `1.0564240894076389`。上一轮约 `115.205383643174 tokens/s` 只保留为历史 provider 测量，速度变化不解释为模型 revision。
+- DataCurve 当前没有精确 `mini_swe_agent_gpt_6_sol_*` 行，因此不迁移 GPT-6 Astra、GPT-5.6 或其他 GPT 的 Pass@1、成本、输出 token、steps 和 Agent 结果；AA 的 max 配置也只作为第三方/provider configuration 字段记录。
+- 7890 当前官方 Markdown 快照为：GPT-6 Sol model page `3,991` bytes / `5566589803b6f0ac79c00125a7c1af9291e46d5724c1c414f932d36ab92a8ad0`；Reasoning `70,315` / `93327c5eb19df7ecf8c0bd9d581f58052dee9f090c38bb48906110b08d0ce251`；Agents `5,432` / `df4f61b609550619a3f9e445c66d28318b9f681affe1a819ef0098cde32bf43a`；Tools `33,282` / `4722fa102070178c1a1d603e718c69575c7c1768fa901218eab359bafdcba341`；Compaction `14,272` / `73fd2fd1afd44bd6f29ce7bd86fd0ae3413c98ec00ae5476879e98171b0b60dd`；Prompt caching `47,098` / `69680fbec38e31a7abc8b0e33a6582b0aae29687e8de98404789337a55b55e2e`。
+- 官方新增/复核面试主线已归纳为：`reasoning.mode=standard/pro` 与 effort 独立；标准单 Agent 中 `configuration_update` 只改后续 effort、相邻 update 拒绝，且不能与 automatic compaction/truncation 或 standalone compact 历史组合；`incomplete` 需要分账 reasoning/output/context 预算；超过 `272K` input 是整次请求 input/cache 2x、output 1.5x；模型工具目录不授予宿主权限，必须分开记录 permission、executor、artifact verifier 和幂等 replay；opaque compaction 可能造成新的 cache prefix miss。
+- 新增并运行 [`gpt6_sol_contract_audit.py`](research/model-update-2026-09/code/gpt6_sol_contract_audit.py)：`py_compile` 与主流程均通过，输出 `ok=true`、`evidence_level=local_protocol_toy`、`network_called=false`。toy 覆盖 mode/effort、合法/非法 update、compaction 后 update、budget incomplete、272K 计价、permission/executor/verifier、function-call lineage、idempotent replay、opaque canonical compaction、1,024 token cache minimum、4 个 explicit breakpoint 和 30m toy TTL；不调用 OpenAI、不解密 reasoning、不代表真实 endpoint、模型质量或生产 SLO。
+- 已同步 [`gpt-6-sol-source-notes.md`](research/model-update-2026-09/gpt-6-sol-source-notes.md)、`source-index.md`、`model-inventory.md`、`inventory-interpretation.md`、`plan_v2.md`，并将下一步入口写入第六/十六/十七/二十/二十四册及 `PAPERS.md`、`INTERVIEW_BANK.md`、`EXERCISES.md`、`PROJECTS.md`、`KNOWLEDGE_GRAPH.md`。当前状态为 **AA 单榜资料级闭环 + 当前时点复验 + local protocol toy**；参数、架构、完整训练/后训练 recipe、完整权重、目标硬件 profiling、生产 kernel、精确 DataCurve Agent 行、独立 benchmark 和线上 acceptance 仍为 `unverified`，goal 保持 `active`。
+
+## 2026-09-24 GLM-5.3：7890 复验与内容专题闭环升级
+
+- 使用用户确认可用的 `10.24.27.134:7890` 重新抓取两榜和标准 GLM-5.3 资料；Artificial Analysis `/zh` HTTP 200，`1,784,793` bytes / SHA-256 `a374adfb81fea4fc68e7071ef191612d7f7d92c1c0e05412f3c338e7fe9edbc2`；DataCurve DeepSWE HTTP 200，`268,036` bytes / SHA-256 `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7e6e095ad59f1f1`。八家重点厂商 canonical 集合没有新增，仍严格沿两榜已有模型推进。
+- Artificial Analysis GLM-5.3 详情 HTTP 200，`4,057,703` bytes / SHA-256 `4f60e893bcfee4586479c77c9d43f1af9f9dee3145e92a23661666d7a072a3fd`；当前页面可见约 1M context、约 45 Index、约 `$2.01/task`、约 61 tokens/s、`$1.40/$4.40` input/output 和 open weights。均按第三方/provider 当前观测记录，不解释为 revision。
+- Z.ai GLM-5.3 Markdown `23,446` bytes / `9545c3d6fb1cabfa5951928bbe9a535e6958561d3bd6b5f4354cd5d3b0f6c929`；博客壳 `598` bytes / `240cedb6d23b13b8bdd177e51410dbe1c7783fbd0cfca98be1e0af26688878c0`；博客正文 JS `30,414` bytes / `f809bf586f74b40a01ecd8d674f9ec3de469a5abeae125e2a849c9805605d0f3`。官方资料与既有快照一致；没有公开 5.3 专属 compaction schema、阈值或完整 recipe。
+- 标准版 `glm_moe_dsa` / `GlmMoeDsaForCausalLM` 的 fixed config、Transformers、vLLM 和 SGLang source entry 已与第 89 章、研究笔记及配套题库/练习/项目/知识图谱对齐；Flash 版 KDA、视觉、双 state pool、EPD 不迁移。
+- 当前状态由“资料级闭环 + stable/main runtime source evidence”升级为 **内容专题闭环 + stable/main runtime source evidence**。这表示面试知识闭环已经形成，不表示完整权重、stable wheel、目标硬件或生产服务验收完成。
+- 未完成门禁：完整权重加载、index/evidence recall、MLA/indexer cache recovery、FP8/量化误差、MTP、目标硬件 profiling、5.3 专属 compaction 实现、完整 post-training recipe、独立 benchmark、tool/verifier acceptance 和生产 SLO。`glm53_compaction_contract_audit.py` 仍仅为 `local_protocol_toy`。
+- 下一步：运行 GLM-5.3 compaction toy 与全库一致性检查；通过后从两榜当前 canonical 集合选择下一项未收口锚点，优先既有的 `GPT-6 Luna` 等资料级条目；goal 继续保持 `active`。
+
+## 2026-09-24 GPT-6 Luna：两榜/官方合同复验
+
+- 按 GLM-5.3 记录中的后续顺序，继续处理两榜既有的 `gpt-6-luna`，未从 OpenAI 官方目录另发现模型。使用 `10.24.27.134:7890` 对百度、Artificial Analysis `/zh`、AA Luna 详情、DataCurve 和 OpenAI 官方模型页请求成功；百度 HTTP 200，榜单对象及官方页面也均 HTTP 200。
+- AA `/zh` 当前 `1,783,893` bytes / SHA-256 `3b895865547acf9b8d9d67d0c2a9a0a0369648f925014b2367817e1f5ac42f36`；AA Luna 详情 `3,974,113` bytes / `8a4603328627740cab856ad4d9b0b37415697b66cc33c59220b0f16615327c81`。Luna `max` Intelligence Index `37.2559686869738`、cost/task `$0.06809498628701058` 与既有观测相同；median output speed `131.449006457181 tokens/s` 记为当前 provider/采集时点字段。
+- DataCurve 仍为 `268,036` bytes / SHA-256 `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7e6e095ad59f1f1`，没有精确 `mini_swe_agent_gpt_6_luna_*` 行；不迁移 Sol、Astra 或 GPT-5.6 的 Agent 结果。
+- OpenAI 官方 [GPT-6 Luna model page](https://developers.openai.com/api/docs/models/gpt-6-luna.md) 当前 `4,019` bytes / SHA-256 `561a86af72eced9a76a4e3a96c45ae7fff7782732514a8429b55ebddb4404945`，与原快照一致；1.05M/922K/128K、effort、endpoint/tool support 和 pricing 合同无可见变化。官方站内搜索路径返回 404，故直接核对并读取了精确官方模型页；此路径错误不表示页面不存在。
+- Luna 内容仍落在第六、十六、十七、二十、二十四册现有正式小节和题库/练习中；本轮无新专属架构/训练披露，不重复建章。当前状态保持 **AA 单榜资料级闭环**，goal 保持 `active`。
+
+## 2026-09-24 Claude Opus 5.5：7890 复验与 System Card 治理证据审计
+
+- 使用 `10.24.27.134:7890` 读取 Artificial Analysis 首页、Opus 5.5 详情、DataCurve DeepSWE 和 Anthropic 官方 model page，均 HTTP 200。首页为 `1,783,893` bytes / `3b895865547acf9b8d9d67d0c2a9a0a0369648f925014b2367817e1f5ac42f36`；Opus 详情为 `3,809,722` bytes / `683005dd64dba034487fa6207167ce8239161e83cf198cd03d2a9445204caf23`；DataCurve 为 `268,036` bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`；官方 model page 为 `14,244` bytes / `3325e10a852cc3f40cfaf01737d97a5cdf3a37b4cd7c0b68005e204ea32b1dd4`。
+- AA 当前 Opus 5.5 Index `57.6223698102963`、cost/task `$5.982012019521066` 未变；DataCurve 没有精确 `mini_swe_agent_claude_opus_5_5_*` 行。System Card 固定 PDF 本地副本为 `17,795,106` bytes / `7311c9c6bbb16d012f1c12c7418b05949fcf7ae3e30d2c40f22050074b2a7378`，SHA-256 校验通过。
+- 对照研究笔记、第二十册第 19 章和题库后，确认评测口径均已覆盖。本轮在第八册第 11 章新增治理审计案例：评测 claim 绑定 snapshot、safeguards、harness、成功定义/分母、fallback 实际模型及计时定义；OSWorld partial/strict 与多 Agent derived latency 不应简化成一个裸分数或线上 wall-clock。
+- 已同步研究笔记、来源索引、模型盘点、榜单解释、`plan_v2.md`、本进度及第八册治理章节。内容状态为 **AA 单榜内容专题闭环 + System Card/API contract + local protocol toy**；这不表示参数/架构/完整 recipe、独立复现、精确 DataCurve Agent 行、目标硬件或生产 acceptance 已通过。goal 保持 `active`。
+
+## 2026-09-24 Grok 4.20：7890 复验与 AA benchmark freshness 边界
+
+- 用户提供的 `curl` 结果证明 `10.24.27.134:7890` 可访问百度；本轮沿该代理取得 Artificial Analysis Grok 4.20 详情、DataCurve DeepSWE 和 xAI 官方 Grok 4.20 Markdown，均 HTTP 200。模型仍是 AA 已有锚点，不从 xAI 官方文档另发现模型。
+- AA 详情为 `3,857,337` bytes / SHA-256 `d56d4557d8a661ee9c3015c6a3661f5baae6c00f9b16c5b2acf5eabcd3e61300`。当前页面标记 `deprecated: true`、`deprecatedTo: grok-4-3`，并明确仅默认 10K input token workload 的性能基准继续更新，其他 workload 结果历史且不再更新。页面仍显示 Index `25.6550155187053`（estimated）、2M context、速度 `106.190642707844 tokens/s`、TTFT `21.53034693s`、端到端 `26.23885972594964s`；这些数字应保留来源、workload 和更新时间边界，不能因刚抓取就统称为当前 benchmark，也不能从指标波动推断模型 revision。
+- DataCurve 当前 `268,036` bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`，无精确 `mini_swe_agent_grok_4_20_*` 行；不迁移 Grok 4.5/4.6 Agent 结果。xAI 官方模型 Markdown `1,564` bytes / `99057608aeb1a4e6ace5d87bf6c4b27b3bff4af5248babad475500da31fdc2e3`，内容未见变化，仍写 1M context。AA 的 deprecated/deprecatedTo 不是 xAI API 下线或迁移公告。
+- 新的面试知识点已加入第二十册第 19 章、`INTERVIEW_BANK.md` 和 `EXERCISES.md`：每个 benchmark 结果应记录 snapshot、输入 workload、provider 与最后更新时点；页面抓取日期不能替代指标采集日期。已同步研究笔记、source index、model inventory、inventory interpretation、`plan_v2.md` 和本进度。活动锚点保持在 Grok 4.20 的补证阶段，整体 goal 继续 active。
+
+## 2026-09-24 GPT-6 Luna：7890 连通确认后的同日快照续查
+
+- 用户贴出的 `http://www.baidu.com` 成功响应确认 `10.24.27.134:7890` 代理可达；当前环境也经该代理成功获取 OpenAI 官方 data-residency 文档。此证据只说明代理当前可用，不回溯证明此前失败请求成功。
+- AA Luna 同日后续详情快照为 `3,974,386` bytes / SHA-256 `9c6376c8ca63fe1ed56fcc6a85cb5042900ba3ec96df92512760d85002cf594f`；Index `37.2559686869738`、cost/task `$0.06809498628701058` 未变。median output speed 从较早的 `131.449006457181` 变为 `132.242651126596 tokens/s`，保留为 provider/采集时点字段，不推断模型 revision。
+- DataCurve 仍为 `268,036` bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7e6e095ad59f1f1`，没有精确 `mini_swe_agent_gpt_6_luna_*` 行。OpenAI 官方 residency 文档确认 EU residency 对 Luna 仅适用于 Standard processing 的 Responses/Chat Completions；regional storage 不等同 regional processing，system data 与 Remote MCP 第三方数据不自动包含在保证范围内，且资格/保留控制与地域附加费应单独核对。
+- 已同步 `plan_v2.md`、模型盘点、榜单解释、来源索引和 Luna 研究笔记。当前活动锚点为 GPT-6 Luna，状态仍是 **AA 单榜资料级闭环**；没有新 Luna 专属架构、训练 recipe、技术报告或精确 Agent 行，goal 保持 `active`。
+
+## 2026-09-24 GPT-6 Sol：两榜复验与 EU residency 面试边界
+
+- 刷新两个唯一模型发现榜单：Artificial Analysis `/zh` 经 `10.237.126.170:1234` 获取，HTTP 成功，`1,783,966` bytes / SHA-256 `0baa28c8ab69a104a078645983ca843c95c5db879b6c52789104aa3d1758efb8`；DataCurve DeepSWE 经 `10.24.27.134:7890` 获取，`268,036` bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`，与前次相同。对照八家重点厂商 canonical 集合，无新增模型/配置。
+- 选取仍在 AA 的既有 GPT-6 Sol 继续补证。AA 详情为 `3,976,802` bytes / `ff0aeaedb21ad7a672653b3d019c0574c6e468a74808db1f3973731d311d5ba5`；Index `47.5276426437724`、cost/task `$1.0564240894076389` 稳定，速度 `109.551294011457 tokens/s`，旧观测 `126.038858615917` 作为 provider/时点历史，不解释为 revision。DataCurve 无精确 `mini_swe_agent_gpt_6_sol_*` 行，不迁移其他 GPT 的 Agent 成绩。
+- 通过 7890 重新读取 OpenAI 官方 GPT-6 Sol model page（`3,991` bytes / `5566589803b6f0ac79c00125a7c1af9291e46d5724c1c414f932d36ab92a8ad0`）及 [data residency guide](https://developers.openai.com/api/docs/guides/your-data.md)（HTTP 200，`79,672` bytes / `4ea5386847a06cbaae7eef04f691d395fed3abcd925b133c4a808e999b700648`）。指南明确 Sol/Luna 的 EU residency 仅对 Standard processing 的 Responses/Chat Completions 可用；regional storage 不等于 regional processing，system data 与 Remote MCP 第三方数据不自动覆盖，非美国地区有 retention/abuse-monitoring 条件，适用 regional processing 有 10% uplift。
+- 新增可考面试边界：`Standard processing` 与 `reasoning.mode=standard` 是两个控制面；将 `model × endpoint × region × processing_mode` 作为独立 capability gate，Batch/Flex/Fast 的价格不能替代资格证明。已同步 Sol 笔记、第二十四册 32.55.3、模型盘点/榜单解释/来源索引、题库、练习、知识图谱、论文索引、项目和书系索引。Sol 仍为 **AA 单榜资料级闭环 + 当前时点复验 + local protocol toy**；没有新增模型专属架构/训练 recipe、DataCurve 行或生产验收证据，goal 保持 `active`。
+
+## 2026-09-24 GPT-6 Sol：7890 复验与动态 effort telemetry 补证
+
+- 用户贴出的百度响应证明 `10.24.27.134:7890` 在其环境可访问。本轮受限环境内对榜单地址出现 TLS EOF；经批准在限制外使用同一代理，Artificial Analysis `/zh` HTTP 200，`1,783,966` bytes / SHA-256 `0baa28c8ab69a104a078645983ca843c95c5db879b6c52789104aa3d1758efb8`；规范 DataCurve `https://deepswe.datacurve.ai/` HTTP 200，`268,036` bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`。八家重点厂商无新 canonical 模型。错误 host `www.datacurve.ai/deepswe` 返回 404，随后已改用规范主机。
+- OpenAI Developers 的直接 `.md` 路径对 GPT-6 Sol model/Reasoning/Compaction 页分别出现 TLS EOF（7890）或 403（1234、8098）；改从官方 `platform.openai.com/docs/...` clean HTML 路径获取，跳转至 Developers 后 HTTP 200。Model 页面 `432,023` bytes / `e8a4f18b6e60883740510c3c521801867e90961113e6a4b2f41959a9d606c836`；Reasoning `1,070,709` / `3bcb1b7771731d3269783464180b72c2b45283688118dda185ebd2d65e84616c`；Compaction `455,842` / `d3825ca5955cba651e7fbf368a8fe6905056fc726cfc6d47a708d4f1b37dfa8a`。Agents/Tools Markdown 快照哈希与原记录一致。
+- 重点补强 `configuration_update`：只控制 GPT-6 family standard single-agent mode 的 reasoning effort，可用于 Responses 与 WebSocket `response.create`；effective effort 持续到下一次覆盖；响应里的 `reasoning.effort` 仍代表 request-level setting。固定原 request config、把更新作为历史 item 插在新用户消息前，有利保留 prompt prefix/缓存复用，但不是 cache-hit 保证。与自动 compaction/truncation 或独立 `/responses/compact` 的冲突和显式 compact 后 fresh update 的要求已记入。
+- 已扩展 `gpt6_sol_contract_audit.py`，toy 验证 low request + high update 的有效档位、覆盖回 low、response 字段仍报告 low，以及 stable prefix digest 不变；脚本主流程输出 `ok=true`、`cache_hit_claimed=false`、`network_called=false`，以执行成功同时确认语法有效。`git diff --check` 通过。已同步 GPT-6 Sol 研究笔记、第二十册/第十六册、`INTERVIEW_BANK.md`、`EXERCISES.md`、`KNOWLEDGE_GRAPH.md`、`plan_v2.md`、模型清单与来源索引；goal 仍 `active`。
+
+## 2026-09-24 Gemini 3.8 Flash：官方 signature 文档冲突复验
+
+- 用户提供的 `curl` 已证明 `10.24.27.134:7890` 可连接；当前环境使用同一代理请求 `www.baidu.com` 得到 HTTP 200（2,381 bytes）。本轮沿用已复核的 Artificial Analysis `/zh`（`1,783,966` bytes / `0baa28c8ab69a104a078645983ca843c95c5db879b6c52789104aa3d1758efb8`）与 DataCurve DeepSWE（`268,036` bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7e6e095ad59f1f1`）快照；两榜八家重点厂商无新 canonical 锚点。
+- 7890 获取 Google 官方 Markdown：Thinking `286,147` bytes / `fb492e15a1ffeed4d2244e90db56352194f87d2adea5d775d2f2ac8fd993ed16`；Tool combination `136,858` / `f2b104688cf487094ec37fc944843261b417d0c68eee97203e34e0fa30a83de0`；Function calling `983,336` / `f0e00d0dc8f9876ba15d9a1f4fb6997332a199de794a5d8a0a933e2746934ee0`；Thought signatures 旧入口 `88,620` / `799b3ed22f5afcb653f5ab589903ecf04e170750961653720d078924dbaace45`，现已迁移/重定向至 Thinking。Interactions Markdown 本轮超时；未调用真实 API。
+- 关键区分：Thinking 说 GenerateContent 没有 dedicated thought step，signature 可属于任意 part（含 `functionCall`）；Interactions 的 thought 是一等 step，signature 按 Thinking 只属于 thought/built-in tools、不属于标准 function call。Tool combination 却在 Interactions 上下文中把 Gemini 3+ `function_call`/`function_response` 也列为可能带 signature。文档冲突经当前时点复验仍存在；Function calling 页“SDK 自动处理”没有给出对冲突字段位置的独立裁决。
+- 已将 API-scope 区分与当前冲突边界同步到 Gemini 3.8 研究笔记、第二十册第 23 章、source index、model inventory、plan 和本进度。工程要求继续原样保留实际返回的 opaque fields、不得自行生成/剥除/改写，并用 `id` 配对 function call/result；真实字段行为须在有授权、API key 和 endpoint 时另做 capability probe。当前仍为 **内容专题闭环 + 官方文档冲突待实测**，不把 local protocol toy 升级成服务端证据。
+- 下一步先跑 Markdown/链接/Python 与 `git diff --check` 门禁，然后按两榜现有八家厂商 canonical 集合选下一项高价值未收口锚点；不扩大厂商范围，goal 保持 `active`。
+## 2026-09-24 Kimi K3：vLLM v0.30.0 stable/runtime 更新
+
+- 沿两榜已发现的 Kimi K3 锚点复核 vLLM `v0.30.0` release commit `ced6857afa0ea7b2e3f0846a62e1394e90f15607`、PyPI metadata、registry、NVIDIA model 与 DSpark source。`v0.29.0` 已有 K3 stable source entry，因此只记录 runtime 实现演进，不称首次支持。
+- 新增面试知识：IPC transformed-weight zero-copy reuse 与资源 ownership；streamed weights 完成后再 post-load finalize；PP auxiliary hidden state/AttnRes boundary；DSpark context-KV dtype/scale/layout gate；KDA `mamba_ssm_cache_dtype`。
+- 已同步研究笔记、第 88 章、source index、model inventory、`PAPERS.md`、`INTERVIEW_BANK.md`、`EXERCISES.md`、`KNOWLEDGE_GRAPH.md` 和计划。wheel 未下载/安装；完整权重、目标硬件数值/profile、cache recovery、DSpark acceptance 与生产 SLO 未验证；goal 继续 `active`。
+## 2026-09-24 Claude Fable 5.1：thinking-state 专题同步
+
+本轮使用 `10.24.27.134:7890` 获取 AA 首页、Fable 详情及 Anthropic 官方资料；7890 对 AA/Anthropic 返回 HTTP 200。DataCurve 的 7890 请求 TLS 提前断开，改由用户提供的 `10.24.27.134:8098` 重试成功，返回 HTTP 200 且与同日快照字节一致。未把单一线路失败记成页面不存在。两榜复验未发现八家重点厂商的新 canonical 模型，DataCurve 无精确 Claude Fable 5.1 Agent 行。
+
+已新增第二十册第 21 章 21.29，解释 thinking state 的 model binding 与 prefix binding、Opus 5.5 → Fable 5.1 仅 Claude API 的可读边、反向不可读、block drop 的计费/telemetry、账号创建日期影响的 prefix enforcement，以及 append-only 更新与安全裁剪。同步更新研究笔记、source index、model inventory、INTERVIEW_BANK、EXERCISES、KNOWLEDGE_GRAPH、计划和进度；协议 toy 增加方向性与 endpoint-scope 合成断言。
+
+当前状态：**AA 单榜内容专题闭环 + 官方 System Card/API contract + local protocol toy**。没有真实 API key/probe；参数、内部架构、训练配方、独立 benchmark、目标硬件与生产验收仍待核验。goal 保持 active。
+
+## 2026-09-24 DeepSeek V4 Flash：SGLang serving 补证
+
+用户提供的百度 `curl` 响应确认其环境内 `10.24.27.134:7890` 可用；工作区此前也经该代理取得两份排行榜 HTTP 200 快照，Artificial Analysis `/zh` 为 `1,782,611` bytes / SHA-256 `566b4adab724bd312436a302be3f0f4c5d9f7713188e9efb078cb636faddd02b`，DataCurve 为 `268,036` bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`；与已有同日快照一致，无新重点厂商 canonical 模型。
+
+选取既有 DeepSeek V4 Flash 锚点补 SGLang serving 证据：PR #34565 的 SWA branch-point cache 处理共享前缀分叉后的混合状态复用；#30805 是 B200 FP8/TP=1 CSA/HCA unit-kernel 对照；#29927 是 RTX PRO 6000/SM120 paged-MQA indexer、sparse prefill、FP4 MoE 路径。PR 的 `43.81% → 60.75%` token hit rate、`1.2x/1.45x` kernel 和最高 `3.4x` TPOT 均保留各自 workload/hardware/baseline 条件，不写为同类端到端或独立 benchmark。#39171 仅记录 V4.1 FlashMLA dependency pin 边界。
+
+已把新知识同步进第二十一册第 77 章，并更新 DeepSeek V4/V4.1 研究笔记、source index、model inventory、inventory interpretation、PAPERS、INTERVIEW_BANK、EXERCISES、KNOWLEDGE_GRAPH、plan 与本进度。未新增重复架构章节。完整权重加载、目标硬件独立复现、混合 cache/state 线上恢复、端到端 Agent acceptance 与生产 SLO 仍待核验；goal 保持 `active`。
+
+## 2026-09-24 GLM-5.3-Flash：vLLM v0.30.0 stable/fixed-main 文件对照
+
+本轮沿两榜既有 GLM-5.3-Flash 锚点推进，vLLM 仅作 serving 来源。vLLM `v0.30.0` release 于 `2026-09-22T05:20:54Z` 发布，tag commit `ced6857afa0ea7b2e3f0846a62e1394e90f15607`；stable GLM5Next directory tree SHA 为 `118165530271cb3aa749d77bf927499957db2bd4`。对照固定 main commit `81d7293c2167e39f3ffddc9a82d633f94e8a1eaa`，不是 mutable main。
+
+网络记录：用户终端通过 `10.24.27.134:7890` 请求百度成功；本执行环境沙箱内连接该代理失败，获准在沙箱外后通过同一代理只读取得 GitHub fixed-tree API 和不可变 raw source。故本轮失败属于沙箱网络隔离，不是代理或 GitHub 源码缺失。
+
+- stable `nvidia/attention.py` 含 `Glm5NextIndexerCache` 与 `Glm5NextTailCache`；stable `nvidia/kda.py` 和 `nvidia/multimodal.py` 分别与 main `common/` 文件同 blob。MTP diff 仅 fused norm import 路径，主体保持一致。
+- attention 两版不同 blob：main 将 sparse indexer 移入 GLM5Next 专属实现、将 indexer workspace 改按 pool 数 sizing，并调整 RoPE scaling 映射。stable KPool tail seed 依据 dense layout 算偏移；main 读取 `tail.stride(0/1)` 并校验 tensor layout。需针对实际 paged/alias cache 做测试；没有运行测试前不把它定性为 stable bug。
+- main `model.py` 另增加 gate/up packed mapping 与 Quark `.weight_scale` 接受逻辑，这些不属于 v0.30.0 stable。stable/main 文件大小、Git blob 与来源链接已记在 `glm-5.3-flash-source-notes.md` 和 `source-index.md`。
+
+状态为 **v0.30.0 stable source feature paths confirmed + fixed-main deltas documented**，不是运行时/生产验收。wheel 未安装，完整权重未加载，cache/state recovery、MTP acceptance、EPD、目标硬件数值/性能和 tool/verifier SLO 未测。资料同步至 model inventory、interpretation、第二十一册第 84 章、PAPERS、INTERVIEW_BANK、EXERCISES、KNOWLEDGE_GRAPH、plan 与 progress；goal 保持 `active`。
+
+## 2026-09-24 Gemini 3.8 Flash：Interactions API reference 与固定 SDK schema 补证
+
+用户提供的 `10.24.27.134:7890` 请求已证明代理可用；本轮沿双榜既有 Gemini 3.8 Flash 锚点复核官方 Interactions API reference（HTTP 200，`787,186` bytes / SHA-256 `a06a779e779608c470b178dce0361fb3548ae5121b0c7a17766f8dcce91ceb2e`）及固定 Google Gen AI Python SDK revision `4742c9a5c213a587add126a500a271824e2f0add`。
+
+SDK typed schema：`ThoughtStep.signature` optional；`FunctionCallStep` 要求 `id` 但未声明 signature；`FunctionResultStep` 要求 `call_id` 但未声明 signature；Google Search call/result 的 signature 为 optional。`BaseModel extra="allow"`、lenient open union 与 `UnknownStep.raw` 表明未知字段/step 可被兼容性路径保留，typed field 缺席不能当作线上禁止字段的证据。Interactions 使用 `function_call.id` 对 `function_result.call_id`，区别于 GenerateContent 的 `functionCall`/`functionResponse`。Thinking 与 Tool combination 对 custom-function signature 的官方描述差异仍在；没有 API key/授权 endpoint，未进行真实 probe。
+
+已同步研究笔记、第 23 章、source index、model inventory、PAPERS、题库、练习、项目和知识图谱。协议 toy 增加 SDK-schema-compatible 可缺省签名与较严格文档 profile 对照，运行通过：`ok=true`、15 个有序 SSE 事件、`network_called=false`。状态仍是**内容专题闭环 + 官方 schema 补证 + local protocol toy**；真实 endpoint、3.8 内部架构/训练、目标硬件和生产验收不在已证范围内。下一步执行受影响文件检查，再从两榜已有重点厂商 canonical 集合选择下一锚点；goal 保持 `active`。
+
+## 2026-09-24 Claude Opus 5：System Card 安全评测方法专题
+
+本轮沿两榜已有的 Claude Opus 5 继续，没有发现新的八家重点厂商 canonical 锚点。经 `10.24.27.134:7890` 取得 Artificial Analysis 首页（`1,781,428` bytes / `15e9763f0d516791e7b7c2c5679e87e5878eaffed4bef31e485c9043b758ba59`）、Opus 5 详情（`3,977,410` bytes / `18acc956d77c5b49c391eb85b46ef2c7fdbd7edd282ddf2275940bd418d25774`）及规范 DataCurve DeepSWE（`268,036` bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7e6e095ad59f1f1`），均 HTTP 200。AA Index 为 `50.7771115797629`；DataCurve 精确 max 行为 `327/444`，仍按 harness/环境/verifier 结果记录。
+
+重新读取 Anthropic 官方 System Card PDF，当前 `16,281,258` bytes / `0950dae1ba6b341e4f1a009e535e0f025625efeca21bd043a9a5ae148a3f2e6b`，与既有副本相同；仓库 parser 产生 4,641 行、334,056 bytes 文本 / `4ae20472ab82c967d90f386239ee6987ddf74b1124db6b44a1dea69a576e1f4c`。读到卡片 2026-08-19 changelog：新增 prompt-injection bounty 数据，并因 Cowork harness 不一致重跑基线、删除不支持的 thinking-disabled 条件。
+
+专题归纳：区分 ART 饱和后采用的 IPI 与 adaptive red-team；attempt-level / scenario-level ASR 分开报告；输入侧 tool-result probe 与动作侧 classifier 分开消融；Cowork Auto mode 成绩是产品系统结果，不等于裸模型安全率。RSP 的 CB-1/CB-2 与 ASL-3 属 Anthropic 发布方判断。详见研究笔记 §8。
+
+已同步研究笔记、`source-index.md`、模型盘点与解释、第八册第 11 章 6.5、第二十册第 19 章 19.38、PAPERS、题库、练习、PROJECTS 和 KNOWLEDGE_GRAPH。当前状态为 **System Card Agentic Safety/评测方法专题闭环**；参数、架构、完整 recipe、独立复现、外部真实 endpoint 和生产 SLO 仍 `unverified`。下一步执行门禁，再从两榜已有八家重点厂商 canonical 集合选择后续锚点；goal 保持 `active`。
+
+## 2026-09-24：DeepSeek V4 Flash Vision 路由与图像预算复验
+
+- 使用 `10.24.27.134:7890` 重新抓取指定榜单；Artificial Analysis 中文首页 HTTP 200，`1,781,428` bytes / SHA-256 `15e9763f0d516791e7b7c2c5679e87e5878eaffed4bef31e485c9043b758ba59`；DataCurve DeepSWE HTTP 200，`268,036` bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`。两份快照均与已有同日记录一致，八家重点厂商无新 canonical 模型。
+- AA `deepseek-v4-flash-vision` 详情 HTTP 200，`3,967,107` bytes / `a5e5259ee84eac5aa88915dd6436ba155e265ede940ab663b52c4a681ae43ed7`；Index `34.8390628035969`、median output speed `217.762710468086 tokens/s`、median TTFC `0.970116780000126s`、cost/task `$0.314372044499279`。9/15 的 Index `35.0122378035969`、速度 `215.179167697513`、TTFT `1.29855545700002s` 作为历史 provider 测量保留，不解释为 revision。DataCurve 没有精确 `mini_swe_agent_deepseek_v4_flash_vision_*` 行。
+- DeepSeek V4.1-Flash 9/10 发布页首次连接失败，重试后 HTTP 200（`24,438` bytes / `f18dc22d37393381b31c9069996138f45aa7b02b08442d43af7c6c57f587bdce`）。Quick Start（`48,088` / `7ce9db1b1cc7e2efafe7cbfd57b9d46d240c20399f7bd87672c7e3a5250ccdd0`）、Pricing（`23,982` / `210f102275ccf1a6542f08a3bc9e4b4c7c83278cb74b35217bffa112df6363b2`）、Vision（`80,467` / `5654a198302edd80aea443fb123d14b14d675ccc76730959dd55414d9baee1e2`）、Files（`62,188` / `1a825256f4dfae25b40751044bc069860897e30582d5b492e8edeea96b37297a`）、Responses（`57,105` / `3af115c64774731d42e29b8b6982b914351d501882aaa9440dfa55c83f549ce0`）和 Vision 实验公告（`22,032` / `56babe7f597f37b31c4440174272d4090f32056902c76e3984be3d54d5864de8`）均成功。
+- 官方现行合同：旧 `deepseek-v4-flash-vision-exp` 名称仍接受，但对应模型已退役，请求暂由 V4.1-Flash 服务并按 `deepseek-flash` 峰谷价计费。Vision guide 当前为 resize 后每图最多 1,024 tokens；最多 600 张/请求，区分 URL/base64 与 `file_id` 单图大小、请求体/合计体积及 8192/4096 px 限制。AA 页面 provider 价与现行官方 Flash 价分开记录。
+- 已同步 `deepseek-v4-flash-vision-source-notes.md`、`source-index.md`、`model-inventory.md` 和第二十一册第 85 章。当前为 **AA 单榜资料级闭环 + 当前路由与图片预算复验**；未进行真实 API probe，未获得独立 Vision 架构/训练报告、DataCurve 精确行或线上验收证据。后续仍只从两榜八家重点厂商的已有 canonical 集合选择；goal 保持 `active`。
+
+## 2026-09-24 Qwen3.5-Omni Plus / Flash：ARIA、AuT 与时间戳
+
+- 用户提供的终端输出确认 `10.24.27.134:7890` 在用户 shell 可经代理访问百度。当前 agent 网络路径对同一代理重试两次（沙箱内、沙箱外）均连接超时；备用 `10.237.126.170:1234` 可用，百度返回 HTTP 200，并成功刷新本轮两条 Artificial Analysis 页面、DataCurve、arXiv v2 abstract 和 Model Studio 文档。
+- Artificial Analysis Plus 页面 HTTP 200，`3,826,061` bytes / SHA-256 `b2127d33c029c55eac112636964f2a9cb9196b69ca5f792c90a2a9ae79f387d9`；Flash 页面 HTTP 200，`3,834,828` bytes / `17bd65b3597f29af8a655e00d038b774dc2ae89c821848262b7d0e4bfc8d560c`。Plus 当时第三方/provider 字段：256K、Index `20.3839890713777`、输出速度 `84.6202668152731 tokens/s`、输入/输出 `$0.40/$4.80` 每百万 token。
+- DataCurve HTTP 200，`268,036` bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`；未检出精确 `mini_swe_agent_qwen3_5_omni_*` 行，不迁移其他 Qwen Agent 结果。Plus/Flash 按同一家族配置记录。
+- Qwen Team 技术报告 [Qwen3.5-Omni Technical Report v2](https://arxiv.org/abs/2604.15804v2) 摘要 HTTP 200，`42,723` bytes / `7c93a28bd4e5bd795492e20ee6fcbb991920d5834bc6f9f1d4f83dfc0472a34a`；源码包 `2,984,159` bytes / `fd53a97d5be7eaa8c981c853f1e6a4faa9b86c69c5fe6f3dbcfa33b66abd81ff`。已核读 architecture、pretraining、posttraining、experiments 段落。
+- 技术要点：Hybrid MoE Thinker-Talker；AuT 16× Conv2D 下采样、6.25 Hz / 约 160 ms；TM-RoPE + 秒级显式视频/音视频 timestamp 和随机音频 timestamp；ARIA 单交错流及 prefix-level speech:text ratio 上限；RVQ/MTP residual codebooks 与因果流式 codec。训练为 S1 对齐、S2 约 4T 多模态 tokens、S3 32,768→262,144；Thinker specialist/on-policy distillation + interaction-aligned RL，Talker 长上下文 CPT/DPO/GSPO/speaker fine-tuning。报告的 100M+ 总体音视频、AuT 40M 与 Talker 20M+ 小时是不同口径，不相加。
+- Model Studio 文档 HTTP 200，`402,771` bytes / SHA-256 `9140a68a7b0a98def6a8cca23e759359895046bd3fc6123b9c361c7526bd7578`；托管调用示例为 `qwen3.5-omni-plus` 且须 `stream=True`，custom voice 只列 Plus/Flash、snapshot 不支持。未做真实 endpoint probe。
+- 已新增 [`qwen3.5-omni-source-notes.md`](research/model-update-2026-09/qwen3.5-omni-source-notes.md) 和第二十一册第 93 章，同步来源索引、模型盘点/解释、PAPERS、INTERVIEW_BANK、EXERCISES、PROJECTS、KNOWLEDGE_GRAPH、BOOK_SERIES 和计划。本专题为 **AA 单榜内容闭环 + 官方报告/API 文档核验**，不是完整参数/训练配方、权重、独立 benchmark、GPU profile 或生产 acceptance 验收；goal 继续 `active`。
+
+## 2026-09-24 Qwen3.6-35B-A3B：Thinking Preservation 与混合注意力
+
+用户 shell 提供的 `curl` 结果确认 `10.24.27.134:7890` 能访问百度。当前 agent 环境复测同一 7890 代理对百度连接超时；限制外重试仍超时。因此只说明两个网络路径结果不同，不说该代理全局不可用。备用 `10.237.126.170:1234` 在 agent 环境返回百度 HTTP 200（2,381 bytes），并成功刷新两个指定榜单：
+
+| 来源 | 当前快照 | 结果 |
+|---|---|---|
+| Artificial Analysis `/zh` | HTTP 200，1,781,428 bytes，SHA-256 `15e9763f0d516791e7b7c2c5679e87e5878eaffed4bef31e485c9043b758ba59` | 与同日已有快照一致；八家重点厂商 canonical 集合本轮的未覆盖项选为 Qwen3.6-35B-A3B |
+| AA Qwen3.6-35B-A3B Reasoning | HTTP 200，4,056,617 bytes，SHA-256 `120de76d2630e0fe777fa10bb82ec7b484f4c33ef2a7487085c489f4158e6391` | canonical `qwen3-6-35b-a3b`，榜单日期 2026-04-16；Non-reasoning slug 为同一模型配置 |
+| DataCurve DeepSWE | HTTP 200，268,036 bytes，SHA-256 `14436c31be1e50a0b62171e4ee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1` | 当前快照无精确 Qwen3.6 Agent 行，不迁移其他 Qwen 的成绩 |
+
+固定官方资料：QwenLM/Qwen3.8 README commit `2ea10dc725823bf7c3e21ce8557cbe15245132ae`，14,334 bytes / `a71ec46607f81d6056336fb0a8431a26a1c7d8db6ac568a0c021c36f1ed3c92e`；Qwen ModelScope 模型卡 README revision `913c459c5c83fa016a0e54a52e5b95f6c894e0fe`，64,550 bytes / `c4ddaa065649ff6352648f64747a16eda31726f3e34add94ce04abb461c77b75`；config/chat template revision `1a5ae24e867f8d82388070d3f61590158a01d15c`，分别 3,686 bytes / `93a4693fa9d8392fbfccd4b3c9873f4bfdcb14fdede978b123d07d19675efe99` 与 7,764 bytes / `e84f32a23fdda27689f868aa4a1a5621f41133e51a48d7f3efcbea2839574259`。通过 1234 直取固定 GitHub raw README 本轮 TLS timeout，继续使用此前取得并固定哈希的 README；官方博客入口本次只返回客户端渲染 shell。arXiv 精确检索快照未见 Qwen3.6 专属报告，只作为当前检索边界。
+
+官方卡确认 35B total/3B active、40 层的 `3×Gated DeltaNet + 1×Gated Attention` 周期布局、256 experts（8 routed + 1 shared）、MTP multi-step training、262,144 native context / YaRN 可扩展约 1,010,000，并提醒 static YaRN 可能影响短文本。chat template 在 `preserve_thinking` 关闭时只保留最新 user 之后的 assistant reasoning，开启时保留历史 reasoning；`enable_thinking` 独立控制生成前缀。面试落点是“历史推理序列化 ≠ 跨会话持久记忆”；Model Studio 与 vLLM/SGLang 参数路径亦不同。Qwen 对减少重复推理/KV-cache 效果属于发布方声明，没有独立验证。
+
+
+## 2026-09-24 Qwen3.6-27B：官方 dense 架构与 GDN Tree-Scan serving 预印本
+
+- 用户终端给出的响应确认 10.24.27.134:7890 在用户 shell 可访问百度。当前 agent 对同一代理的百度/Qwen 博客请求在沙箱内失败，沙箱外重试百度也连接超时；该结论只描述当前 agent 网络路径，不代表该代理全局不可用。备用 10.237.126.170:1234 成功取得 arXiv 搜索/API、预印本 HTML 与 GitHub pinned commit。
+- Artificial Analysis Qwen3.6-27B 页面：4,051,359 bytes / SHA-256 97375509bc5e428c1886206338a512e3ffb5bccd72b46bc92ed8cd5df8f17e44；Reasoning 与 Non-reasoning 两配置按同一基础模型归并。DataCurve DeepSWE：268,036 bytes / 14436c31be1e50a0b62171e4ee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1，无精确 Qwen3.6-27B Agent 行。
+- 官方 ModelScope README revision cea40373b9214dd387123e68841890af30dcd469：62,593 bytes / bb936d6da51014f1edc9aa4cf9abf28d98695b7616ad56adfeeebfa752051d3d；config/template revision c53c4820996523bb6413f1002e24c5dfb0bad548，哈希分别 69db4eb7196bc8190813231b3018ca05d8c2e3abc7b1af19d55c157af44a9d9c 与 e84f32a23fdda27689f868aa4a1a5621f41133e51a48d7f3efcbea2839574259。卡片确认 27B dense、64 层、每四层 3×Gated DeltaNet + 1×Gated Attention；与 35B-A3B 的 chat-template 内容哈希相同，preserve_thinking 是家族共享序列化接口。
+- arXiv 当前 ti:Qwen3.6-27B 和 ti:Qwen3.6 title-field 查询分别为 0 条；all-field 查询有 50 条，不据此断言不存在相关论文。成功读取 Zhiyuan Ma 单作者预印本 [GDN Tree-Scan: Served Tree Verification for Recurrent-Hybrid Language Models](https://arxiv.org/abs/2609.23900v1)，日期 2026-09-20。HTML 为 275,937 bytes / 8b935c50f17284cb6ad85cf03454ce321ec50f6c80da6269f7fd48639034c0f7；API XML 为 2,757 bytes / 7a149feb604a9450bd06f03b59bdc7762b50fd2b6ab2cd6b9f0458ae00e89986。
+- 技术要点：在 Qwen3.6-27B-FP8 上，用 FA2 tree-bias 处理 attention ancestry、branch-local GDN scan/replay 维护各树分支的 parent recurrent state、MTP spine/root sibling 形成候选树、device-side multidraft committer 做提交，并只发布 accepted-chain state。作者在 B=1、temperature 0.6、四个 SWE/Codex tasks 报告 committed tokens/event 4.11→4.82（+17.2%）；verify-forward 0.137/0.138 秒；token-weighted decode TPS 18.80→23.88（+27%），per-request-equal TPS 17.80→18.51（+4%）。这是 decode-only 指标，不是任务总墙钟加速；重复 11K–14K prefill 且未开 prefix cache，论文未给出通用 task-wall 提速。
+- 正确性依据是 40-turn recurrent-oracle p-rescore 与 native numerical flip floor 比较，不能称为 full distribution-distance proof；request-cluster bootstrap、更多 seeds、B=4 与 Stage-D timing 仍 open。固定 artifact 指向 Lumo_FlyWheel commit 55f55854328b37f262e97d57b5863d8fadd7ff76；本项目未运行代码、下载权重或复现实验。该预印本是第三方 serving 研究，不是 Qwen 官方技术披露。
+- 已同步 qwen3.6-27b-source-notes.md、第二十一册第 83 章 83.16.4、第二十四册第 61 章 61.31、source-index.md、model-inventory.md、PAPERS、INTERVIEW_BANK、EXERCISES、KNOWLEDGE_GRAPH、计划与进度。仍未读取到 Qwen 官方博客正文或 Qwen 自有专属技术报告；完整训练 recipe、权重、真实 API、独立复现、production SLO 与硬件 profile 未验证。
+- 当前状态：**AA 单榜锚点核验 + 官方模型卡/config/template + 外部 serving 预印本专题**。整体 goal 保持 active。下一步先完成全局链接/围栏与 diff 门禁，再从两榜八家重点厂商的 canonical 集合选择未覆盖的高价值技术缺口。
+
+## 2026-09-28 Qwen3.6-27B 官方博客正文恢复与跨书系同步
+
+- 7890 当前实测：通过 `10.24.27.134:7890` 请求 `www.baidu.com` 返回 HTTP 200、2,381 bytes；同一代理访问 Qwen 官方文章 API `https://qwen.ai/api/v2/article/?language=zh-CN&path=qwen3.6-27b&type=qwen_ai` 返回 HTTP 200、94,527 bytes。JSON 快照 SHA-256 `036a9cfc6a38b04fed0b72aaf9339296296356dd9441a9e63d4b720283ed90c0` 含动态 request_id；稳定文章 HTML 为 91,758 bytes / `7748e75a7c5a47943d6abe4e6415cb6b8d4749713eeff39323eb831f2d8ae367`。元数据：Qwen Team，《Qwen3.6-27B：270亿参数稠密模型，旗舰级编程能力》，2026-04-22。
+- 直抓 `https://qwenlm.github.io/zh/blog/qwen3.6-27b/` 仍因当前连接失败未取得；此失败与 API 成功并存，不能推断代理或整站不可用。Qwen 官方博客 API 的正文已完整可读，不再把此前的客户端 shell 当作正文证据。
+- 9 月 28 日榜单复验：AA `/zh` HTTP 200，1,674,187 bytes / `891ad0a15cd12b7ae704512351bdee86c0136b75e11704b8bd5f6705c0dab42f`；AA release 页面 941,371 bytes / `20d83181c16942ddc1b7a14268635f80848b87b4d77e11f9b6e9febc74f41afa`；DataCurve 268,036 bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`。八家厂商无新 canonical 锚点；Muse Spark 超出关注范围，DeepSeek V3.2 Exp 是弃用历史 revision，不升格为新模型。
+- 正文披露发布方 SWE-bench Verified/Pro、Terminal-Bench 2.0、SkillsBench 分数及修订/评测口径，并示例 `preserve_thinking`、Chat Completions/Responses 与 Anthropic-compatible API、OpenClaw/Qwen Code/Claude Code。新增的教学强调：OpenClaw `131072` context / `16384` maxTokens 是客户端预算，与 262,144 native context 分层；百炼可用性文案有不一致，本轮未调用真实 endpoint。博客没有提供 Qwen3.6-27B 独有架构或完整训练报告。
+- 交付同步到 Qwen3.6-27B 研究笔记、第二十一册第 83 章 83.16.5、第二十四册第 61 章 61.32、source-index、model-inventory、PAPERS、INTERVIEW_BANK、EXERCISES、KNOWLEDGE_GRAPH、BOOK_SERIES、plan_v2 和本进度。目标 Markdown 围栏平衡，关键交叉引用目标存在，`git diff --check` 通过；goal 保持 `active`，下一步继续从两榜八家重点厂商 canonical 集合中选取下一项知识缺口。
+
+## 2026-09-28 Qwen3.6-35B-A3B 官方博客正文与 Agent evaluator 专题
+
+- 当前锚点只来自既有 Artificial Analysis `qwen3-6-35b-a3b` 与 Non-reasoning 配置；DataCurve 无精确 Qwen3.6 Agent 行。本次 API 获取仅扩展已确认锚点。
+- 7890 请求第一次连接失败；通过权限审批后在沙箱外重试成功：Qwen 文章 API HTTP 200、94,678 bytes，JSON SHA-256 `d287402f27a6ffa3226466aa57407310f670eb73a6d72bcfef03597a94e35d49`（含动态 request_id）；稳定 HTML 正文 91,941 bytes / `706889d145ea17b8c8234c4cda35b00fdecc0b6bcb9e1f5f20d2ed3ff9e15ed1`。标题《Qwen3.6-35B-A3B：智能体编程利器，现已开源》，Qwen Team，文章时间 2026-04-15 10:00 +08；Artificial Analysis 和 QwenLM README 标 2026-04-16，未强行统一。
+- 博客报告对 Qwen3.5-35B-A3B 的若干提升：SWE Verified 70.0→73.4、SWE-Pro 44.6→49.5、Terminal-Bench 40.5→51.5、SkillsBench Avg5 4.4→28.7、QwenClawBench 47.7→52.6、NL2Repo 20.5→29.4。成绩保留为 publisher-reported；记下 SWE-Pro 修订/重跑全部 baseline、Terminal-Bench 资源/时限/5 次均值、SkillsBench 78-task 子集/5 次均值，以及 NL2Repo 的 Claude Code/900-turn 条件。
+- Agent evaluator 不是旁枝：TAU3 user simulator 为 GPT-5.2 low reasoning + BM25；VITA judge 替换为 Claude 4 Sonnet（原 Claude 3.7 Sonnet 不可用）；MCPMark 固定 GitHub MCP v0.30.3 与 32K Playwright 截断；MCP-Atlas 采用 Gemini 2.5 Pro judge。它们仅作该 Qwen 发布方评测设置，不从中另发现模型。`qwen3.6-flash` 是博客中同一 35B-A3B checkpoint 的百炼 API alias；OpenClaw 128K/16K 配置与 native 262,144 context/API 实际限额分开记录，未调用真实 endpoint。
+- 已将知识同步到两本现有架构/Agent 章节及 inference budget 章节、研究笔记、榜单索引/盘点、PAPERS、面试题、练习、知识图谱、书系、计划和进度。专属架构与完整 training recipe 仍未从该博客证实；goal 保持 `active`。
+- QA：Artificial Analysis 当前快照中确认 `qwen3-6-35b-a3b` 与 `qwen3-6-35b-a3b-non-reasoning` 两条配置；相关 Markdown 围栏平衡，关键交叉引用文件存在，`git diff --check` 通过。全程为文档研究/编辑，未下载权重或发起百炼 endpoint 请求；goal 保持 `active`，下一步继续从两榜现存八家厂商锚点选取知识缺口。
+
+## 2026-09-28 Qwen3.8 Max (0902)：7890 复验与 cache / Responses 状态精化
+
+- 用户贴出的百度 HTML 证明用户 shell 可经 `10.24.27.134:7890` 出网；本工作区本轮也经显式 `--proxy` 访问两榜和 QwenCloud 文档成功，均 HTTP 200。此前 agent 路径失败只描述先前时点，不等同于当前状态。
+- Artificial Analysis 首页 1,674,048 bytes / `56359658c7d187e4a214ae65857f0a7668d42ebcc1da0e2d4fab477642e2640c`；AA releases 938,807 / `913306564eb762ad0587c8845bece903f5004a0198f64709af7318fbcb960ff2`；Qwen3.8 Max detail 3,881,440 / `f9c920db61e73a4d71fcd9a10d057d7bf22ce01d979974dd32ec4ed1f911cccb`；DataCurve 268,036 / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7e6e095ad59f1f1`。AA 首页同日响应差 139 bytes，按动态页面变化处理；无新 canonical，DataCurve 无 0902 精确 Agent 行。
+- 官方 QwenCloud 产品页 98,992 bytes / `ce97b7c9098ed54c195aa2c6b1a5c0dfc6ad43e7290aea10bcce8484f42b9a6b`，last-modified `2026-09-28 09:55:09`；Context Cache 1,134,820 / `47a01521f4ce689acf6f017c36c66af7c7c98984029eb5ba5c5f58e170b69a74`；Dynamic Rate Limits 412,225 / `033d1381bfd1c759834bb3402b75e53acca8a7c617480f3424b53b0080ec6460`；Responses reference 952,619 / `fd467c8d7ce159e2c98f7220ee599014ee28a1f3b9a6dd6309075313926a1940`。
+- 关键补充：content block 与后续 message 的两种 20 窗口不能混为一谈；1,024 是 cache eligibility，非 hit guarantee，同页 explicit-cache 请求示例另写 `>1,024`，文档在边界上措辞不一；Chat Completions/Responses 分别用 `prompt_tokens_details.cached_tokens` 与 `input_tokens_details.cached_tokens`。Responses continuation 不继承 `instructions`，不能与 `conversation` 同用，`store=false` 不可续接，ID 文档有效 7 天。
+- 已更新 Qwen3.8 Max 0902 source notes、source index、model inventory、第二十一册第 83 章、第二十四册第 32 章、INTERVIEW_BANK、EXERCISES 和 cache audit toy；将“input must exceed 1024 tokens”准确归到 explicit-cache 请求示例，而非 Session 示例。toy 输出 `ok=true`、`evidence=local_protocol_toy`、`network_called=false`；`git diff --check`、目标 Markdown 围栏平衡、关键引用目标存在、错误旧标签无残留均通过。未发起 QwenCloud API 请求、未下载权重或声称生产 cache/Agent 已验收；goal 保持 active。
+
+## 2026-09-28 GPT-5.5 Instant：OpenAI 官方动态 Instant alias 补证
+
+- 本条目在前序阶段已经收口为 **AA 榜单级关联配置 + 官方身份负证据**；本次是当前官方目录复核，不重新列为活动锚点。继续只沿 AA 已有的 May/June 条目核查，没有从 OpenAI 模型目录另发现候选。
+- 用户终端和当前工作区均已证明可通过 `10.24.27.134:7890` 访问外网；本轮对 OpenAI official docs 目录/模型页取回 HTTP 200，精确 `/api/docs/models/gpt-5.5-instant.md` 返回 HTTP 404（9 bytes / SHA-256 `e3ebaa16dd9d9b9fc107c42183fb6cf9d22927e1af03dbbdfa0ccc38e4e4ac31`）。OpenAI Models Markdown 12,055 bytes / `ad6adde919a6b4f2e92b03acb891366d2ded0e078229f406a519722c71a406c3`；GPT-5.5 模型页 4,132 / `fdb0fc8fe9ea7f276716c2a5b49b902e7e676ff262bb8adfdf2d5b8911bad3ba`；Chat Latest 3,294 / `b6b9dc5e8a6c720641cfc8ada231e311d66ebbf2ba5ac14d7d480535679079cc`；GPT-5.3 Chat 3,206 / `df599cfb2ef17e5de61e912684cefad0db9101f6dccd91ff15d72e5528cda6d2`。
+- 官方目录将 `chat-latest` 描述为 ChatGPT 当前 latest Instant model，模型页说明其 underlying snapshot 会定期更新，但未披露当前 snapshot；GPT-5.3 Chat 页面明确指向 GPT-5.3 Instant 且已 deprecated。GPT-5.5 API 页明确 `gpt-5.5` / `gpt-5.5-2026-04-23`。没有官方证据证明 AA `GPT-5.5 Instant` 等于 `chat-latest` 或 `gpt-5.5`；不迁移 API 能力、价格或 DataCurve 结果，也没有发起真实模型 API 请求。
+- 已同步到 GPT-5.5 source notes、model inventory、source index、第二十册 Responses API 既有章节和面试题；不新建重复架构章节。完整证据与 SHA-256 见 [`gpt-5.5-source-notes.md`](research/model-update-2026-09/gpt-5.5-source-notes.md) §9.2。下一步仍从两榜既有重点 canonical 队列选锚点，goal 保持 `active`。
+
+## 2026-09-28 GLM-5.3：7890 复验与 slime compaction-aware trajectory
+
+- 当前工作区显式通过 `10.24.27.134:7890` 请求两榜与 Z.ai 官方资料成功：AA `/zh` HTTP 200，`1,674,048` bytes / SHA-256 `b5b25416290ba65caf3aa8ab19cb4d35ccb42a1e77c00b140d75b505807d4e70`；GLM-5.3 详情 HTTP 200，`3,966,481` bytes / `cbc848636ff90d05fad3b45c1228291e0f4dc226b0a76dbf1837948e0b9bfe87`；DataCurve HTTP 200，`268,036` bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7e6e095ad59f1f1`。仍是 AA `glm-5-3` 与 DataCurve `mini_swe_agent_glm_5_3_max` `311/451`，没有重点厂商新增 canonical。AA 同为 1,674,048 bytes 的两份同日首页哈希不同，按动态响应差异处理。
+- Z.ai GLM-5.3 Markdown 与 GLM-5.3 博客正文 JS 哈希分别仍为 `9545c3d6fb1cabfa5951928bbe9a535e6958561d3bd6b5f4354cd5d3b0f6c929` 和 `f809bf586f74b40a01ecd8d674f9ec3de469a5abeae125e2a849c9805605d0f3`；文档 `dateModified=2026-09-18T04:25:55.193Z`。官方继续只披露 GLM-5.3 继承 `SAO with compaction`，未公布 5.3 专属 schema、触发条件或质量门禁。
+- 沿 Z.ai 博客引用的官方训练框架检查固定 [THUDM/slime commit `8ee9c1e`](https://github.com/THUDM/slime/tree/8ee9c1e1c8871ccd6dc8ec812edfaefa3dd1156b)，提交日期 2026-09-23。GitHub REST API 命中匿名 rate limit 403，但 Atom、固定 codeload archive 与源码均成功取得；因此不把 API 403 误报为代理/整站不通。
+- 新的训练侧知识：按 session message equality 建树，再按精确 token-ID prefix 对齐；保留 rollout 的 `prompt_ids/output_ids/logprobs`，tool/environment context 用 `loss_mask=0`、可追溯模型输出用 `1`；历史改写可 realign 或 fork，shared assistant prefix 只在一个分支训练，siblings 共享 `rollout_id`。默认 `fork_threshold_tokens=1,024` 是短 re-render/token-drift gate，不是 GLM compaction trigger。
+- 固定 commit 的 customization 文档与 coding-agent README 写 `reward/K`，但 `TrajectoryManager.get_trajectory()`、`generate()` 和单测断言每个输出 sample 拿 full reward；记录为源内 docs-code discrepancy，不推断模型训练策略。源文件大小、SHA、证据边界与说明见 [`glm-5.3-source-notes.md`](research/model-update-2026-09/glm-5.3-source-notes.md#2026-09-28-当前榜单复验与-slime-的-compaction-aware-trajectory)。本地未安装 pytest，单测未运行。
+- 已同步研究底稿、来源索引、模型盘点、第二十册第 20.22、INTERVIEW_BANK、EXERCISES 和 KNOWLEDGE_GRAPH；GLM-5.3 内容专题维持闭环，增加“关联框架源码证据”，不升级成 GLM-5.3 内部实现。QA 尚待本轮全部编辑完成后执行；goal 保持 `active`，随后只从复验过的两榜重点 canonical 队列选择下一项。
+
+## 2026-09-28 GPT-6 Luna：7890 复验与 reasoning-update / compaction 边界
+
+- 用户提供的百度 HTML 已证明其 shell 经 `10.24.27.134:7890` 可访问外网；本工作区也显式使用同一代理，百度、Artificial Analysis、DataCurve 与 OpenAI 官方页面均可读取。不同网络位置/时点的结果分别记账，不再把此前连接失败说成当前代理全局不可用。
+- 当前快照：AA `/zh` `1,660,578` bytes / SHA-256 `d95b93814772c81fd71e3b33bf2851b7b87edf7d62ce5a7ef1336ae0169bae2f`；AA GPT-6 Luna detail HTTP 200，`3,840,137` bytes / `0c62e5133280f5b671d1d9c0b2fd550672d7ed2f3a96feab9149448969224f1f`，仍见 canonical `gpt-6-luna`。DataCurve `268,036` bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7e6e095ad59f1f1`，无精确 `mini_swe_agent_gpt_6_luna_*` 行；未迁移其他 GPT 配置分数。首页/详情动态字节变化不作为模型 revision 证据。对照现有模型清单没有新增重点厂商 canonical；AA 历史候选 GLM-5/GLM-5V Turbo 等不属于本轮锚点。
+- OpenAI `gpt-6-luna.md` 为 `4,019` bytes / `561a86af72eced9a76a4e3a96c45ae7fff7782732514a8429b55ebddb4404945`；Reasoning `70,315` / `93327c5eb19df7ecf8c0bd9d581f58052dee9f090c38bb48906110b08d0ce251`；Agents `5,432` / `df4f61b609550619a3f9e445c66d28318b9f681affe1a819ef0098cde32bf43a`；Tools `33,282` / `4722fa102070178c1a1d603e718c69575c7c1768fa901218eab359bafdcba341`；Compaction `14,272` / `73fd2fd1afd44bd6f29ce7bd86fd0ae3413c98ec00ae5476879e98171b0b60dd`。与已保存快照一致，未见文档漂移。
+- 官方 GPT-6-family API 合同补记：`configuration_update` 不得与自动 compaction/truncation 组合，含 update 的历史不能提交给 standalone `/responses/compact`；显式压缩可在 `/responses` 放 `compaction_trigger`，之后在下一条 user message 前重新加入 update。相邻 update 仍无效。该知识不是 Luna 专属架构，未调用真实 API；第二十册既有 20.27.2 已有通用状态说明，本轮仅补 Luna 来源锚点及面试/练习区分。
+- 已同步 `gpt-6-luna-source-notes.md`、`model-inventory.md`、`source-index.md`、第二十册第 20.28 官方来源引用、INTERVIEW_BANK、EXERCISES、KNOWLEDGE_GRAPH、本计划与本进度。当前仍为 **AA 单榜资料级闭环**；官方未披露参数、架构、完整训练 recipe，精确 DataCurve 行、独立 benchmark 和生产验收仍缺。
+- QA：对本轮 Markdown 执行围栏配对、关键本地链接和 `git diff --check` 检查；无 API 请求、模型权重下载或外部副作用。下一步仅从两个指定排行榜的八家重点厂商现有 canonical 中选择下一项高价值未闭环知识缺口；goal 保持 `active`。
+
+## 2026-09-28 Qwen3.7 Max：官方博客正文、跨框架 RL 与长程 kernel
+
+- 锚点只取自已有榜单：AA canonical `qwen3-7-max` 详情快照 `3,834,482` bytes / SHA-256 `829a322408dc044f12eefaa769eab0001904ceecb33d891abc801061fced7522`；同日 DataCurve DeepSWE 快照 `268,036` bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7e6e095ad59f1f1`，无精确 `mini_swe_agent_qwen3_7_max_*` 行。AA Index `29`、约 207 tokens/s、1M context、约 `$1.15` 平均任务成本及 `$2.50/$7.50` input/output 均按第三方/provider 字段记录。
+- 代理分开记账：本工作区显式经 7890 请求 `http://www.baidu.com` 返回 HTTP 200、2,381 bytes；同一代理下 Google、Qwen、Alibaba HTTPS 在 TLS 握手时 EOF。用户贴出的 shell 结果证明用户端 `7890` 可访问百度，不代表所有 HTTPS 站点/此时点的 agent 网络路径都成功。通过备用 8098 访问 Qwen 官方文章 API 成功（HTTP 200）。本轮复用当日 AA/DataCurve 快照，不把旧快照冒称为刚刚经 7890 重新获取。
+- Qwen 官方文章 `https://qwen.ai/blog?id=qwen3.7` / API `path=qwen3.7` 返回完整正文：`122,153` bytes / SHA-256 `41e1f58384b99f1d2495111c3f6f55d01850283daa7ce5d07d38a764eea9108c`（含动态 request ID）。官方材料的新方法包括 environment scaling / OOD claim、`Task × Harness × Verifier` 组合式 rollout 与跨 harness/verifier RL；35 小时 M890 PPU kernel 案例报告 432 次 evaluation、1,158 次 tool calls、相对 Triton 几何平均 `10.0x`；SWE RL reward-hacking monitor 报告 >80 小时、>10k calls、13 条规则、1,618 个案例。均为发布方主张，不是独立复现；规则没有 precision/recall/分母披露。
+- 重要区别：M890 的 10.0x vs Triton，不等于 H100 KernelBench L3 的 `1.98x/96%`；后者是中位 per-problem eager speedup / 快于 `torch.compile` 的题目比例。model alias `qwen3.7-max` 对应 May-20 纯文本 snapshot，June-08 才加 image/video；博文日期 (May 16)、API 元数据日期 (May 20) 与 AA release (May 19) 不强行合并。
+- 论文状态：Qwen 博客称 environment-scaling 细节将见后续技术报告；arXiv 搜索请求超时，本轮未取到独立报告，不据此声称报告不存在。未下载权重、未做真实 API probe 或硬件复现。
+- 已新增 [`qwen3.7-max-source-notes.md`](research/model-update-2026-09/qwen3.7-max-source-notes.md)，同步第二十册 19.40、第十七册 Code Agent 小节、source index、model inventory、PAPERS、BOOK_SERIES、面试题、练习、知识图谱及 plan。QA：研究笔记和两处章节围栏数均为偶数，关键相对引用目标存在，相关文件无行尾空格，`git diff --check` 通过；未下载权重、未调用模型 API 或运行 GPU 实验。goal 保持 `active`，下一步仍从两指定排行榜的现有 canonical 队列选高价值知识缺口。
+
+## 2026-09-28 VHD-Play：Qwen3.6-35B-A3B 的 Agent RL 环境技术报告
+
+- 7890 代理按 URL / 时点记账：arXiv 摘要页 HTTPS 200，43,529 bytes / SHA-256 `34bfd8e7f8b4931a008b3f1b35771f748ac00da837681be3861abaedad7a6e2b`；稍后相同代理请求完整 `/html/2609.27321v1` 遇 curl error 7。用户贴出的百度 HTTP 与摘要 HTTPS 都成功，但不保证每个目标稳定可达。此前经 1234 获取的完整论文 HTML 为 461,978 bytes / `da56349817e450cde05eeed3be1cf2274217cec17a849f4111c697e270cee28a`，据此分析全文；不完整 PDF 未使用。
+- [arXiv:2609.27321v1](https://arxiv.org/abs/2609.27321v1)《Verifiable Hidden Dynamics Play: Generating Agentic RL Environments from Solved Mechanisms》，2026-09-23，页面评论为 “Qwen Technical Report”。VHD-Play 先抽样并求解数学机制，冻结 solver optimum/default references 与归一化终局 reward，再生成具有隐藏状态和 stateful tools 的环境。3,300 admitted environments 分为 2,200 train、300 同族 held-out、800 八种 unseen-family eval；11 个机制族里 3 个参与训练。
+- 受训 checkpoint 明确是 Qwen3.6-35B-A3B。GRPO 报告设置为 64 prompts/step、每 prompt 从 18 attempts 留 16 rollouts、34 optimizer steps；五族 agentic diagnostic mean `0.204 → 0.815`，written-out `0.962 → 0.992`。外部 BFCL 十 cell mean `61.25 → 64.08`、TravelBench `0.700 → 0.794`、365-day E-Commerce 五次 run 的 mean ending balance `54,294 → 182,844`。所有分数/成本均属论文作者报告，不是独立复现。
+- 重要限制与归属：作者注明 one training run / one evaluation seed；同类 reference replay 检查只支持 8/11 机制族。Qwen3.7-Max 是额外 setter / benchmark comparator，不是受训模型；E-Commerce 小样本中训练模型高于 Max，而 TravelBench 仍低于 Max。论文未声明 VHD-Play 等同于 Max 博客的 `Task × Harness × Verifier` 组合或其内部 recipe，不把 3.6 的训练结果回写给 3.7。
+- 已补充 Qwen3.6-35B-A3B 与 Qwen3.7-Max source notes、第二十册第 19.41 节、source-index、model-inventory、PAPERS、BOOK_SERIES、INTERVIEW_BANK、EXERCISES、KNOWLEDGE_GRAPH、plan_v2 与本进度。QA：相关 Markdown 围栏配平，新加本地相对链接/章节锚点均存在，`git diff --check` 通过。未下载权重、未调用模型 API、未独立运行论文代码或硬件实验；goal 保持 `active`，下一步按两榜 canonical 队列继续。
+
+## 2026-09-28 Gemini 3.8 Flash：7890 联网确认与 Interactions 字段范围复核
+
+- 当前工作区用 `10.24.27.134:7890` 请求百度返回 HTTP 200（2,381 bytes），与用户贴出的 shell 结果相符；同代理读取 Google 官方 Thinking、Tool combination、Function calling、Interactions overview 与新 API reference 均成功。Google overview 当前链接 `/api/interactions-api`；旧 `/api/interactions` 返回 HTTP 404。
+- 最新正式 reference 与 SDK `main` 2026-09-26 commit `6d012889752f65c1a51d0ad6e5970fc97d19c4ca` 的生成 schema 一致：custom function 调用/结果分别为 `function_call.id` 与 `function_result.call_id`，二者 typed fields 未声明 signature；`ThoughtStep.signature` 在 reference/SDK 为 optional。Thinking prose 把 thought signature 说成必需并排除 custom function；Tool combination prose 则用 `function_response.id` 并称 Gemini 3+ 自定义 tool call/result 也有 signature，文档冲突仍在。
+- 固定 SDK `extra="allow"`、dump 保留 extra fields、lenient open Step union 的 `UnknownStep.raw` 仍提供兼容性路径；这些静态 schema 不能证明真实 endpoint 接受/返回何种 extra 字段。没有 API key/授权 endpoint，未做真实 Interactions 请求或 capability probe。
+- 已同步研究笔记 §18、第二十册第 23 章、source-index、model-inventory、inventory-interpretation、PAPERS、INTERVIEW_BANK、EXERCISES、KNOWLEDGE_GRAPH、plan。本轮只沿既有 Gemini 3.8 Flash 锚点，没有扩展模型清单。QA 通过：`git diff --check` 无错误、相关 Markdown 围栏配对；replay demo 输出 `ok=true`、`network_called=false`。真实 endpoint probe 仍待授权/API key，goal 保持 `active`。
+
+## 2026-09-28 GPT-6 Astra：7890 官方文档复验
+
+- 两榜当日快照中仍可见既有 GPT-6 Astra canonical；DataCurve 有 `mini_swe_agent_gpt_6_astra_{low,medium,high,xhigh,max}` 行。Artificial Analysis `/zh` 快照为 1,660,562 bytes / SHA-256 `19d1fb6c3bd1a433e16438e5a4fb7a330ceeca20716799c561c8eafa84fda838`；DataCurve 为 268,036 bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`。本条只记录已选锚点，不据首页片段推断全榜模型集合没有变化。
+- 7890 下 OpenAI 官方模型页 Markdown 返回 HTTP 200、3,812 bytes / SHA-256 `f45ae813c3f69708e2576328056de14cdf71fec174c875f4b81d236105545625`；GPT-6 family guide 返回 HTTP 200、17,456 bytes / `8982485767fcefe9b4c588777de67683b4f56abe9c9af1121c9431eb9c305557`，均与现有快照一致。Astra 技能/提示词博客 Markdown 返回 HTTP 200、6,517 bytes / `a1deee4c0b3ca16a20385c27f0692e22d5150fdec81710c04742dd5da29f0468`。
+- 技能渐进披露、任务相关 `AGENTS.md` 路由、避免冗长 recipe、定义完成条件与自主范围，已存在于 Astra 研究笔记和第六册第 18 章；没有发现模型架构、训练 recipe 或新运行时协议披露。已同步研究笔记、来源索引、模型盘点、正式章节、计划与进度；后续按计划继续 GPT-6 Luna。未调用模型 API 或下载权重，goal 保持 `active`。
+
+## 2026-09-28 GPT-6 Luna：7890 复验与 reasoning effort 观测边界
+
+- 用户终端提供的 `curl` 响应确认可经 `10.24.27.134:7890` 访问百度；本工作区本轮使用显式 `curl --proxy` 重新取得 OpenAI 官方 Luna model page、GPT-6 family guide、Reasoning 与 Compaction Markdown。四份文档分别为 `4,019`、`17,456`、`70,315`、`14,272` bytes，SHA-256 均与研究底稿中的既有版本一致。代理或单一 URL 的短时失败不据此外推为全局不可用。
+- Reasoning guide 明确响应中的 `reasoning.effort` 继续报告 request-level setting，而非 `configuration_update` 选定的 effective effort；因此状态重建依赖有序会话历史。`configuration_update` 与 automatic compaction/truncation 及独立 `/responses/compact` 不兼容；显式 `compaction_trigger` 后，须在下一条 user message 前重新插入 update。该项是 GPT-6-family API/runtime 协议，不是 Luna 独有架构，本轮未调用真实 API。
+- 已补充 [`gpt-6-luna-source-notes.md`](research/model-update-2026-09/gpt-6-luna-source-notes.md)、来源索引、本计划与本进度。Luna 仍为 **AA 单榜资料级闭环**，DataCurve 无精确 Agent 行；未迁移其他 GPT 成绩。下一步继续按两个指定排行榜的重点厂商 canonical 集合选择高价值、未闭环知识缺口；goal 保持 active。
+
+## 2026-09-28 Claude Sonnet 5：7890 复验与 compaction 双接口入库
+
+- 用户贴出的 `http_proxy=http://10.24.27.134:7890` 百度成功输出已在当前工作区复验：显式 `curl --proxy` 请求返回 HTTP 200、2,381 bytes。代理结论按具体 URL 与时点记录，不推断其他目标同样可用。
+- 两榜仍锚定既有 Claude Sonnet 5，没有从 Anthropic 文档另增候选。AA 详情 `/tmp/aa-sonnet5-20260928.html` 为 3,849,279 bytes / SHA-256 `16557ff25caed39a04c1481ba199cd09eeb213db8a33534ff9c291b58fbce8a1`；DataCurve DeepSWE 为 268,036 bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`。
+- 7890 取回 11 份 Anthropic 官方 Markdown：What's New、Migration、Prompting、Models Overview、Compaction overview、on-demand、threshold、preserved-thinking、keep-tail、background 与 thinking-block conditions，均 HTTP 200 / `text/markdown`；快照大小和 SHA-256 逐项登记在 [`claude-sonnet-5-source-notes.md`](research/model-update-2026-09/claude-sonnet-5-source-notes.md)。早先 70-byte regional/error 文件不作为正文证据。
+- 新增重点：`compact-2026-09-04` 是显式 on-demand `compaction` 请求，返回 summary/signature block，后续唯一最新 block 必须原样置于 messages 首部并持续带 beta header；`compact-2026-01-12` 是由 `context_management.edits` 配置的 threshold compaction，服务端在普通请求中触发并裁剪旧前缀。两种 beta/header、block flow 和平台兼容表不同，不能混用；两份支持列表都含 Sonnet 5。on-demand 还需检查空 content/`stop_reason`、完整 tool result、summary usage、signed block 错误码及图像/文档/URL payload 不随摘要保留。
+- 补充 background keep-tail 的并发换前缀流程、compaction 后 prompt-cache breakpoint、Models API `capabilities.compaction` 查询方法，以及 preserved-thinking 边界：通用原样 replay 是安全不变量；当前官方 prefix-binding enforcement 从 Fable 5.1 开始，Sonnet 5 不运行该 prefix check，不能把通用不变量写成 Sonnet 5 必然 400/drop。
+- 已同步研究笔记、source-index、model-inventory、第二十册第 7 章、INTERVIEW_BANK、EXERCISES、plan_v2 与本文件。Migration/Prompting 的面试补充包括默认 adaptive thinking、`content[].type` 解析、`max_tokens` thinking+text 共用硬上限、effort 档位与工具/自验证使用建议、sampling 非默认值 400 及 HTTP 200 refusal 分支；发布方建议未写成独立因果实验。
+- QA/证据边界：本轮只阅读官方文档，不调用 Anthropic Messages API，不宣称真实线上 compaction、平台集成、prefix-check 行为或模型质量已经实测。Sonnet 5 保持资料级闭环，不新增模型或重复架构章节。受影响文件 `git diff --check` 通过，第二十册第 7 章 fence 数为 58（偶数），关键研究笔记/章节文件存在；goal 继续 active。
+
+## 2026-09-28：7890 当前链路复验与两榜快照比对
+
+- 当前执行环境显式经 `10.24.27.134:7890` 请求 `http://www.baidu.com`、Artificial Analysis `/zh` 和 DataCurve DeepSWE 均 HTTP 200；百度返回 2,381 bytes。由此确认本轮 agent 网络路径可用，不把单一代理/站点的历史失败外推为全局不可用。
+- 刚取回的 AA `/zh` 快照为 1,660,509 bytes / SHA-256 `1e13276cae1ec1d9e5a510946b80029c3eb1c15cb746df7e7f647ecd6f1640bc`，与本日 `/tmp/aa-zh-7890-20260928-next-turn.html` 逐字节一致；DataCurve 为 268,036 bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`，与本日 next-turn 快照逐字节一致。对照两榜重点厂商配置，没有新的 canonical 锚点；本轮不从模型文档、论文或代码仓库另发现模型。
+- 作为既有 GLM-5.3 compaction 专题的只读 QA，重跑 `glm53_compaction_contract_audit.py` 成功：安全 candidate 的 schema round-trip、goal/plan、tool lineage、side-effect identity、pending effect、artifact/verifier、budget、cut marker 与 token budget 检查均通过；unsafe candidate 因状态丢失/重复副作用线索而被拒。输出明确标为 `local_protocol_toy`；不证明 GLM-5.3 实际 schema、触发逻辑或 SAO 实现。
+- 本轮没有新增模型技术结论或专题章节，因此不改写闭环状态。下一步仍从复验过的两个排行榜既有八家重点厂商 canonical 集合中，挑选公开证据能继续推进、面试价值高的未闭环知识缺口；goal 保持 `active`。
+
+## 2026-09-28 Claude Opus 5.5：Compaction 双协议与 thinking-state 边界
+
+- 本轮沿 Artificial Analysis 已确认的 `claude-opus-5-5` canonical 锚点推进；DataCurve DeepSWE 当前无精确 `mini_swe_agent_claude_opus_5_5_*` 行，不迁移 Opus 5、Sonnet 5 或 Fable 5.1 的 Agent 成绩。没有从 Anthropic 官方文档另发现模型。
+- 用户提供的 `10.24.27.134:7890` 百度请求成功；当前工作区先前同代理获取了 Anthropic 官方 compaction、preserved-thinking、Models Overview 与 Opus 5.5 What's New 等 Markdown。七份页面的 bytes/SHA-256 与逐页结论登记在 [`claude-opus-5.5-source-notes.md` §9](research/model-update-2026-09/claude-opus-5.5-source-notes.md)。两榜快照复验未发现新的 canonical 条目。
+- 收尾时当前工作区再用 7890 直测：Anthropic compaction Markdown HTTP 200、11,974 bytes；Artificial Analysis `/zh` HTTP 200、1,660,509 bytes。仅记录这两个 URL 在该时点的可达性，不外推到所有外网地址。
+- 关键增量：on-demand `compact-2026-09-04` 用顶层 `compaction`、返回 signed block，平台列表不含 Bedrock；threshold `compact-2026-01-12` 用 `context_management.edits`、在普通请求内压缩，平台列表含 Bedrock beta。Opus 5.5 只有 on-demand 在 preserved-thinking 条件满足时才可能保留最近 tail 的 thinking；threshold compaction 前的 thinking/redacted-thinking 不保留。prefix-mismatch 默认 enforcement 从 2026-08-31 00:00 UTC 创建的账号启用，旧账号需显式 opt in；model binding 与 prefix binding 是独立门禁。以上是官方 API 文档合同。
+- 已同步第二十册第 7.25 节、研究笔记、source-index、model-inventory、INTERVIEW_BANK、EXERCISES、BOOK_SERIES、KNOWLEDGE_GRAPH、本计划和本进度。第二十册新增面试问答和练习覆盖协议混用、Bedrock 覆盖、thinking tail 与账号边界。
+- QA：运行 `claude_opus55_protocol_audit.py` 成功，输出标记 `local_protocol_toy`、未发起网络调用；新增 negative cases 均通过。受影响文件 `git diff --check` 通过；第七章围栏数 58、研究笔记 4（均为偶数），相对引用目标存在。未调用 Messages API、未下载权重、未补写参数/架构/训练 recipe；Opus 5.5 保持 **AA 单榜内容专题闭环 + 官方 System Card/API contract + local protocol toy**。Sonnet 5 作为上一活动锚点；下一步仍从两指定排行榜的八家重点厂商 canonical 队列挑选，不扩展排行榜外模型，goal 继续 `active`。
+
+## 2026-09-28 Gemini 3.8 Flash：7890 收尾复验
+
+- 用户贴出的百度 HTML 与本工作区实际请求互相印证：当前工作区通过 `10.24.27.134:7890` 获取 Google Interactions API reference、Artificial Analysis `/zh` 与 DataCurve 均成功（HTTP 200）。本次 reference 为 `739,123` bytes / SHA-256 `c5a0220ed169d8b6b60ece04fd548b392530a0685b6bae0cd6d140272d1400a7`；相关字段仍显示 custom `FunctionCallStep`/`FunctionResultStep` typed fields 不含 signature，`ThoughtStep.signature` 为 optional。Hash 与同尺寸的先前快照不同，不据此推断 schema 变更；Thinking 与 Tool combination prose 的范围冲突仍未裁决。
+- 两榜最新快照：AA `/zh` `1,660,509` bytes / SHA-256 `c53e90519dc3bf22b391bc7673fe59fabecc83d930b74d5023e42cf4790a9d0d`；同日先前页面 hash 不同，但页面抽取的 `/zh/models/...` 路径集合一致。DataCurve `268,036` bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`，与先前快照及配置 ID 集合一致；没有新的榜单路径/配置 ID，本轮不追其他厂商。
+- QA：Gemini replay demo 输出 `ok=true`、`network_called=false`；研究笔记与第二十册第 23 章 fenced-code 数为 2、6；本轮相关改动 `git diff --check` 通过。真实 Gemini endpoint/capability probe 仍未进行，无 API key/授权 endpoint；goal 保持 `active`，下一步只从两榜既有八家重点厂商 canonical 队列选高价值知识缺口。
+
+## 2026-09-28 DeepSeek V3.2：7890 复验与 Search Agent context management
+
+- 当前工作区通过 `10.24.27.134:7890` 访问 arXiv v1 HTML/PDF、Artificial Analysis DeepSeek V3.2 详情与 DataCurve DeepSWE 均 HTTP 200。用户提供的百度结果与本工作区访问 arXiv 成功相互印证；代理结论只针对本时点的具体 URL。
+- AA 当前详情 3,647,642 bytes / SHA-256 `239b8fef11d18d7b06e5e7c177ed76cbbfd29e07d795d83c5dc3e6ac8acef0b8`，仍为 `DeepSeek V3.2 (Non-reasoning)`、685B total/37B active、128K、Index `16.043537719683`；9 月 20 日 648B 是历史第三方目录字段，不是模型升级。DataCurve 268,036 bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`，仍无精确 `mini_swe_agent_deepseek_v3_2_*` 行。
+- 固定 [arXiv v1 HTML](https://arxiv.org/html/2512.02556v1) 295,170 bytes / SHA-256 `5da74d488b218a45a995838b94feb95aacc63c03b806f8462496bfd4bceb07ef`。§4.4 的新整理为：上下文用量超过 80% 时可摘要重启、丢弃最早 75% 工具历史、或清空全部旧工具历史；并行基线采 N 条独立轨迹并选最少 steps。报告称约 20%+ Search Agent 案例超过 128K；BrowseComp Pass@1 为 51.4 无管理 / 67.6* 有管理。Summary 平均 364 steps，“up to 60.2”原文未给百分号；结果绑定商业搜索 API 与 Agent harness，不是 DataCurve 或裸模型成绩。
+- 已把知识写入第二十一册第 19 章 19.35、第二十册第 18 章 18.27、INTERVIEW_BANK、既有 BrowseComp Context Manager exercise、PAPERS、KNOWLEDGE_GRAPH、model-inventory、source-index、DeepSeek 研究笔记和 `plan_v2.md`。未新增模型或迁移相邻版本分数。arXiv v1 PDF 与 HF 模型卡 PDF 是不同字节 artifact；章节引用版本化 HTML 段落，避免把它们称作字节一致。
+- 该阶段 QA 已完成：受影响文件 `git diff --check` 无错误；第二十一册第 19 章与第二十册第 18 章的相对链接均解析到现存文件；新增 heading 唯一，两个书稿章节 fenced-code 数分别为 8 和 20（均为偶数）。当时 Figure 6 尚未视觉核验，随后已在本文件下方的“7890 Figure 6 视觉复核”记录中补核；完整权重/production kernel/硬件 profiling/线上 acceptance/独立 benchmark/完整 RL recipe 不在该阶段完成声明内；总目标保持 `active`。
+
+## 2026-09-28 Claude Opus 4.8：Dynamic Workflows、System Card 多 Agent 评测与 PDF 正文补证
+
+- 按既定规则沿两榜已有 `claude-opus-4-8` 历史锚点推进；未从 Anthropic 官方目录/博客另发现模型。用户提供的 `10.24.27.134:7890` 百度页面与本轮请求相互验证；经 7890 获取 AA `/zh`（1,660,509 bytes，`ac519155a550f6c4ae12a8f8a884f661c0f7b65127549f082a071f1281f91700`）、AA 详情（3,843,474 bytes，`bd4a6e4a148e099297a10e1aa7a5bcd7ab60762b912a6d1f4ed38c442b0b9579`）、DataCurve（268,036 bytes，`14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`）、Anthropic 公告（231,511 bytes，`285e10bb0b33c067c5c7e748e9dc02329e0eac259b37d36fa0c3cd9e8462ff22`）和 Dynamic Workflows 博客（559,172 bytes，`b939087ba9302ddaf433a8d99e548da130433ea0986a17b3689210cd5ec5f7ea`）。Dynamic Workflows 的首个 TLS 连接 EOF；用 `www.claude.com` + HTTP/1.1 重试 HTTP 200，内容 hash 与先前同日快照一致。
+- System Card PDF HTTP 200，20,587,425 bytes / SHA-256 `0df5d061b6688c2d5839476620d66960011cb69043185dbed87ed1f68ab76d8f`。项目 `pdf_text_extract.js` 成功输出 246 页、422,194 bytes，提取文本 hash `fe6da487661e212b3e003da0c8e8d163d29d18f3a2ed6c7afb0fb2b2d7495f8e`。Card §8.11 定义 blocking orchestrator、fixed team、async-subagent 三类独立 benchmark harness；BrowseComp blocking 为 88.5%，五 Agent fixed team 85.4% vs single 84.3%（total token limit 5M vs 10M、derived latency 约 20%）；hard tail 中位约 3×、易题无明显 speedup。ProgramBench 166 golden tasks 上，三 Agent 在 score 0.6 约 1.8× latency improvement。Latency 是按固定 prefill/decode rate 折算 token 并加工具时间的派生指标，非 raw wall-clock/生产 SLO。
+- 新知识落点：Dynamic Workflows 在对话外生成编排脚本、平行派发、独立检查/反驳、保存 checkpoint 后恢复；官方同时披露较高 token 使用、首次触发确认和管理员关闭选项。System Card 的短上下文 off-policy code-summary 测试中重要失败漏报率 3.7%，仅适用于该特定 transcript 评测，不能写成通用 honesty rate。Changelog 纠正 blocking budget 为 unlimited，并更正 live prompt-injection bounty 最终结果为 Opus 4.8 与 Opus 4.7 attack success 相同；以后引用以当前 Card/changelog 为准。
+- DataCurve exact rows 未变化：`xhigh` 243/447（113 个尝试任务、91 个至少通过一次、Pass@1 54.36%、Pass@4 80.53%、平均 `$8.01` / 94.64 steps）；`max` 253/429（111 个尝试任务、88 个至少通过一次、Pass@1 58.97%、Pass@4 79.28%、平均 `$13.22` / 120 steps）。AA 当前标为 deprecated 并指向 `claude-opus-5`；本轮不把历史榜单状态写成当前推荐，不迁移跨 harness 分数。
+- 已同步研究笔记、第十七册第九章、EXERCISES、INTERVIEW_BANK、PAPERS、BOOK_SERIES、KNOWLEDGE_GRAPH、source-index、model-inventory、`plan_v2.md` 与本进度。状态为 Opus 4.8 历史锚点的 Dynamic Workflows/Multi-Agent **内容专题闭环**；没有独立架构章节，真实 API/生产 workflow、内部架构和完整训练 recipe 仍未验证/未公开；总体 goal 继续 `active`。
+
+## 2026-09-28 Gemini 3.8 Flash：Agentic Video processing steps 与 7890 复测
+
+- 本轮沿用两榜已有 Gemini 3.8 Flash 锚点；没有从 Google 文档或榜单外另增模型。已检查 DataCurve 本地快照中的精确 `mini_swe_agent_gemini_3_8_flash_high` 行：330/447 attempts passed、113 tasks attempted、4 runs、Pass@1 `73.8255%`、Pass@4 `85.8408%`、平均成本 `$2.3623`、平均输出 `143,242.7` tokens、平均 `166.31` Agent steps。该成绩绑定 high + mini-SWE-agent + 工具/环境/verifier。
+- AA 本地详情快照确认 Gemini 3.7 Flash 已标为 deprecated，目录指向 `gemini-3-8-flash`；`39.0594566404896` Intelligence Index 属于 3.7 详情页的第三方字段，不能当作 3.8 当前分数。该阶段 AA 3.8 详情在线重试未成功；后续 7890 HTTP/1.1 重试成功，见本进度后续记录。
+- Google Video Understanding 先前成功响应（经 `10.24.27.134:7890`）为 `303,547` bytes / SHA-256 `b2ec14972a66fd969108167f338e19e00cc3c80d3fc0ee604cfd962545d825c5`；同日 Gemini 3.8 模型页为 `106,650` bytes / `6ac136b1e6161438f10cdf1b509272e89825173e0b646a770e9c0cfe958a479b`。文档示例明确使用 `gemini-3.8-flash`。
+- 新增面试主线：static 默认按 1 FPS 抽帧；agentic 根据问题动态加载 transcript/frame/audio，以 `processing_call.id` 和 `processing_result.call_id` 记录可观察的媒体证据读取过程。自定义 FPS/clip intervals 仅支持 static；视频导航 thought 使用 `total_thought_tokens`，按需媒体使用 `total_tool_use_tokens`。发布方称长视频最多约 88% token 减少、约 7% 质量提升，但短于 5 分钟可能增加 TTFT；均非本项目独立复现，需按固定 workload 实验。
+- 7890 即时复测当时：`http://www.baidu.com` HTTP 200 / 2,381 bytes；AA Gemini 3.8 详情与 Google Video Understanding 的 HTTPS 请求均 curl `35`（TLS unexpected EOF），没有取得新响应。用户 shell 的 HTTP 成功与 agent 当时对具体 HTTPS 目标失败并不矛盾；后续 HTTP/1.1 重试成功，见本进度末尾。
+- 已同步研究笔记 §20、第十七册 Code Agent、第十七册/第二十册交叉引用、题库、练习、PAPERS、BOOK_SERIES、KNOWLEDGE_GRAPH、model-inventory 和 source-index。本地只读的 2026-09-20 video 文档快照为 262,504 bytes / SHA-256 `7f58e353ad4b3753b6db639430f1aad76372c4fc37ebe5c26f4ac286bf40ede6`。QA：`git diff --check` 通过；研究笔记/第十七册第 7 章/第二十册第 23 章 fenced-code 数分别为 2/18/6（均为偶数）；关键跨文件目标与章节标题存在。真实 Gemini API probe 未做（无 API key/授权 endpoint），未下载权重；goal 继续 `active`。
+
+## 2026-09-28 DeepSeek V4.1-Flash：7890 网络复验与 vLLM stable/RC 状态
+
+- 用户贴出的 `http_proxy=http://10.24.27.134:7890` 百度请求成功，当前工作区也通过该代理取得百度 HTTP 200 / 2,381 bytes、Artificial Analysis `/zh` HTTP 200 / 1,660,542 bytes、DataCurve DeepSWE HTTP 200 / 268,036 bytes。这里只验证具体 URL 可达性，本轮没有解析两榜 canonical 集合。
+- DeepSeek V4.1 官方公告经 7890 跟随重定向后 HTTP 200，`24,438` bytes / SHA-256 `f18dc22d37393381b31c9069996138f45aa7b02b08442d43af7c6c57f587bdce`。
+- GitHub `vllm-project/vllm/releases/latest` 经 7890 HTTP 200，最终 URL 为 `.../releases/tag/v0.30.0`，`615,462` bytes / `ff2ddd43e2e969a5ccd9b141c43c9aa0dc36af24402cca781eb2e9760f4f8aa2`。release Atom feed 为 `734,203` bytes / `30131b0cf21894d9e8bf4cbd4eb0f51d8e47b364e3849db0ee1c5f8724810de5`，最新项是 `v0.30.1rc0`（2026-09-23T08:06:15Z）；固定 RC 页面 `224,871` bytes / `8034c62c3dbc34f8fb7897e8c2c5ed763ca8538884cc0965714a71b5629fb015`，可见标题为 ROCm/MI355 CI 的 NVFP4/MoRI kernel mirror。Latest-release API 返回 403，但网页和 Atom feed 可用；当前 stable 证据仍为 v0.30.0，没有看到 V4.1 专属 RC 增量。
+- 当日已留存的 SGLang GitHub release 与 PyPI metadata 仍分别指向 `v0.5.20`，时间与 SHA-256 见 [DeepSeek V4.1 来源笔记](research/model-update-2026-09/deepseek-v4.1-flash-source-notes.md#2026-09-28-7890-复验与-vllm-stable预发布边界)。没有下载/安装 wheel、加载权重或做硬件验收；完整模型、目标硬件和生产 SLO 仍 `unverified`。无新增技术章节；goal 保持 `active`。
+
+## 2026-09-28 GPT-5.6 Terra：DataCurve 原始快照漏项修正
+
+- 沿 AA 已有 `gpt-5-6-terra` canonical 刷新两榜：AA `/zh` `1,660,542` bytes / SHA-256 `bc147b7c89c75bfb81257de530184f7f2d25b93543ee0ac82c93b2304a6cc38f`；AA Terra 详情 `3,841,417` bytes / `ecb893eec11fc3528e2df327abb152a773bd5cc1eb2a2cb13b7973d75333c41d`，`releaseDate=2026-07-09`。DataCurve `268,036` bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`，与本日先前保存的 DataCurve 快照逐字节一致。
+- 原始页面内嵌数据已有五条精确配置：low `108/449`，Pass@1/4 `24.05%/44.25%`，均价 `$0.342`、21.46 steps；medium `158/450`，`35.11%/60.18%`，`$0.467`、25.15 steps；high `243/452`，`53.76%/80.53%`，`$0.908`、33.51 steps；xhigh `272/452`，`60.18%/80.53%`，`$1.702`、43.07 steps；max `314/451`，`69.62%/88.50%`，`$3.957`、75.93 steps。各档均尝试 113 个任务、4 runs；attempts 有轻微差异。
+- 这是修复此前“Terra 无 DataCurve 行”的抽取遗漏，不是新的发布或分数更新。数据绑定 `mini-swe-agent + effort + tools + task environment + verifier`；可用于讨论成本/通过率观测权衡，不作裸模型质量或 effort 因果结论。已更新 GPT-5.6 研究笔记 §15、model-inventory、source-index、plan 和本进度；未新增书稿章节，GPT-5.6 原技术专题闭环状态不变。
+
+## 2026-09-28 GPT-6 Astra：7890 恢复后官方定价页补齐
+
+- 用户贴出的百度页面确认其终端可通过 `10.24.27.134:7890` 访问外网；当前工作区沙箱内显式请求同一代理先报 `curl: (7)`，获批的沙箱外重试成功建立代理隧道，并取得 OpenAI 官方 Astra model page 与 pricing page HTTP 200。此差异只说明执行环境路径不同，不代表代理或站点全局不可用。
+- Astra model Markdown 为 `3,812` bytes / SHA-256 `f45ae813c3f69708e2576328056de14cdf71fec174c875f4b81d236105545625`，与 9 月 18/23 日相同；pricing Markdown 为 `23,475` bytes / `0de899a93b1d9a8c7cf7b3a01ed3553337636c7ff374153821f218a203a203c8`。对应 HTML 动态页面分别为 `431,650` bytes / `63be1ce7336601a62056eb8436f68d5cee0780aa6f095267c8f811dffe5c6ab5`、`552,704` bytes / `ec4a7fd545d1fb71e03de5278d417bb8eae77859df046b0c6d6d36590fe50f1a`；HTML hash/大小变化不单独视为模型 revision。
+- 官方 model page 仍只列默认 snapshot/alias `gpt-6-astra`，无日期化固定 snapshot ID。pricing page 补全每百万 token 的 input/cached-input/cache-write/output 费率：Standard short/long `$10/$1/$12.50/$50`、`$20/$2/$25/$75`；Batch 与 Flex 分别为 `$5/$0.50/$6.25/$25`、`$10/$1/$12.50/$37.50`；Fast mode 为 `$20/$2/$25/$100`、`$40/$4/$50/$150`。模型页的 `>272K` whole-request 规则为 input/cache 2x、output 1.5x；Astra Fast mode 没有 latency SLA，EU data residency 不支持 Fast。费率和服务限制不构成架构、训练或质量披露。
+- 已同步 Astra 研究笔记、第六册第 18 章、source-index、model-inventory、plan_v2 与本进度。本轮不新增模型、技术章节或架构主张；GPT-6 Astra 继续为内容专题闭环，整体 goal 保持 `active`。
+
+## 2026-09-28 DeepSeek V3.2：7890 Figure 6 视觉复核
+
+- 用户提供的 `10.24.27.134:7890` 代理请求已返回百度页面；当前工作区也经该代理从 `https://arxiv.org/html/2512.02556v1/search.svg` 取得 HTTP 200、75,689 bytes。该 SVG SHA-256 为 `e2fb1029cf88458b2881d49546c1b9db4dd426fb4d2b3337dd6897b9c6fdb7a3`，与先前经 1234 取得的 `/tmp/deepseek-v32-figure6-1234.svg` 逐字节一致。
+- 用 `gdk-pixbuf-thumbnailer` 将 SVG 渲染后，视觉确认 Figure 6 横轴 `Real Steps`、纵轴 `Browsecomp`，图例为 Summary、Discard-75%、Discard-all、Parallel-fewest-step。它支持论文对串行 context management 与并行 test-time compute 效率/扩展性的定性比较。
+- 结合纵轴，正文 Summary “up to 60.2”是图中 Browsecomp 指标值，不是 `+60.2%` 相对增幅；364 steps 与 60.2 以论文正文为精确报告依据。图中散点无数字标签，未从像素估算并记录其他点位，也不声称其他 PDF 图表/公式已完成视觉核验。
+- 已同步 DeepSeek V3.2 研究笔记、第二十一册第 19 章 19.35、source-index、model-inventory、`plan_v2.md` 与本进度；没有发现/新增模型，活动锚点和整体 goal 不变。QA 已完成：`git diff --check` 通过，章节 heading 唯一，引用目标文件存在。
+
+## 2026-09-28 Gemini 3.8 Flash：7890 HTTPS 失败项重试成功
+
+- 两榜先行刷新：Artificial Analysis `/zh` 为 `1,660,542` bytes / SHA-256 `f5d63499b482b9510d14f2162e8317231da77f9b3875fa36171f53e5891e5c65`；与此前 `next-turn` 快照比较，55 个唯一 `/models/<slug>` 路由无新增/删除。DataCurve 为 `268,036` bytes / SHA-256 `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`，与同日先前快照逐字节一致；未发现新 canonical 锚点。
+- 重试此前记录的 AA Gemini 3.8 high 详情与 Google Video Understanding 文档，均通过 `10.24.27.134:7890` + `--http1.1` HTTP 200。AA 页面 `3,842,574` bytes / SHA-256 `f88d6155277116adc1580030fa298d821edf244375c76526e9d68572762b12f5`；release `2026-09-02`、Index `40.9262321765904`、1M context、`$0.75/$3.75` 未变。本页 `medianOutputSpeed=311.225851164667`，此前同日另一页面为 `328.820180257944`；按 AA 第三方 provider measurement snapshot 分开保存，不推断模型 revision。
+- Google Video Understanding HTTP 200，`303,547` bytes / SHA-256 `e65216368a92d03403d4e37485148f7048b1f7e75be6de37891fd0ab2cb01414`。同字节数的先前成功页 hash 为 `b2ec14972a66fd969108167f338e19e00cc3c80d3fc0ee604cfd962545d825c5`；核心 `processing_call`/`processing_result`、`total_thought_tokens`/`total_tool_use_tokens` 字段仍在，动态 HTML hash 不单独证明文档语义变化。
+- 结果已同步 Gemini 3.8 研究笔记 §20.4、source-index、model-inventory 和本进度；当前联网失败项修复，但无 API key，真实 Gemini API probe 仍未进行，也没有新增锚点或模型。
+
+## 2026-09-29 DeepSeek V3.2：两榜复验与 Figures 1–7 视觉核验
+
+首轮 QA：`git diff --check` 通过、19.36–19.38 heading 唯一、相关本地目标存在，所有受影响 Markdown 文件代码围栏均成对；后续 Figure 5/7 同步及 19.39/19.40 检查见本节后续记录。
+
+- 用户终端的百度响应与本工作区复测相符：经 `10.24.27.134:7890`，当前工作区对百度和 arXiv Figure 2 曾分别取得 HTTP 200（百度 2,381 bytes；Figure 2 SVG 269,427 bytes）。随后的另一次代理连接短暂失败；按审批流程重试后取回 Figure 2，SHA-256 `1e6bc6c61ea26ae2b8528edb1eab14874832470fd38f115fe9b8feb615facb9a`。这是时点性连通记录，不代表代理持续稳定。
+- Figure 2 已渲染为 1600×833 并视觉复核。Lightning Indexer 产生索引分数，Top-k Selector 选择候选 KV entries，随后候选与主 query 进入 MLA Core Attention 计算输出；图注、§2.1 与 Eq. (2) 共同支持。没有把分数/候选选择写成 attention 输出或 production-kernel 验收。
+- Figure 3 的 `cost_prefilling.svg`（33,398 bytes / `b045c26eb19d92325de7e86aabec905a9ac8bdb6729db94e04c8701693b19705`）与 `cost_decoding.svg`（31,868 bytes / `5894e01515f7f9e9ef9045ae8e30a092f5cc1e4229936c493c66c4748127c61d`）经代理获取，均渲染为 1600×1200 并视觉核验。Token Position 越长，V3.2 曲线成本增长更缓；极短位置存在交叉。报告把曲线限定为 H800 部署服务、按 `$2/GPU-hour` 估价的发布方 benchmark，而不是 API 定价或独立复现。
+- Figure 4 原始 JPEG 为 76,981 bytes / SHA-256 `58623875cc487b3cbbd60955c14801c07d5f526d2b2e875795e3bf5ace511733`，1280×671，已视觉核验。图示与 §3.2.1 一致：同一轮追加 tool messages 后保留 thinking；下一条 user message 到来后清除旧 thinking，但保留工具调用/结果与前轮 answer。该行为取决于 message role/history replay，不是永久记忆。
+- Artificial Analysis `/zh` 快照为 1,694,614 bytes / SHA-256 `04f62f3f39c1f65c3c1d8dd564782f9d7d20fb506fa671ee75fcfaf4e9482f9f`；唯一路由数 55→62、无移除。新增七条中四条（GLM-5.3-Flash、Kimi K3、Qwen3.8 2.4T A95B、Qwen3.8 27B）已是重点 canonical，另三条不在八家范围。DataCurve 为 268,036 bytes / SHA-256 `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`，70 个唯一配置 ID 无变化；没有新增重点锚点，也没有精确 V3.2 Agent 行。
+- 已同步研究笔记、第二十一册第 19 章 19.36–19.39、来源索引、模型清单、PAPERS、INTERVIEW_BANK、计划与进度。Figure 2、3、4、5、6 已视觉核验，其他论文图表/公式仍未全部核对；production kernel、indexer recall/误差曲线、目标硬件 profiling、线上 acceptance、独立 benchmark 和完整 RL recipe 仍待核验。下一步继续从两榜既有八家重点 canonical 队列选择知识缺口，goal 保持 `active`。
+
+Figure 5 补充记录：用户终端提供的百度 HTML 显示 7890 可用；当前工作区用同一 `10.24.27.134:7890` 请求 Google 也得到 HTTP 200、84,771 bytes。随后经该代理取得 arXiv v1 `synthesis-rl-plot.png`，原图 1432×1024、222,137 bytes / SHA-256 `2107344cc2002f51bc1922df0bdcabd7afa74bb0f6cb5d3aa996f33e3f0d7cc3`。视觉核验其图例、分面和总体训练走势后，补入 19.39：Figure 5 是 synthetic general-agent data 上的发布方 RL 消融，不能当最终模型独立 benchmark，也不能证明真实环境泛化因果、数据无污染或完整 recipe 已公开。
+
+同步与 QA：已补研究笔记、第二十一册 19.39、source-index、model-inventory、PAPERS、INTERVIEW_BANK、plan_v2。Figure 7 的猜测 URL `/figures/figure7.svg` 返回 HTTP 404（7,901 bytes），仅表示文件路径猜错/不存在，不据此认定无法访问或论文没有该图。`git diff --check`、19.39 唯一性、目标链接和相关 Markdown 围栏检查随后执行；goal 保持 `active`。
+
+## 2026-09-29 DeepSeek V3.2：Figure 7 MLA-MHA/MQA 视觉复核
+
+- 通过 7890 访问 arXiv v1 HTML 后，从 Appendix A 对应对象定位正确资源：`MLA-MHA.svg` HTTP 200、244,227 bytes / SHA-256 `afd21a50bbaef58314036862cb6ce44dca81a9d42a414c0969074fbf954b32b4`；`MLA-MQA.svg` HTTP 200、224,311 bytes / SHA-256 `c6aa4f3e2ea222d2a75ef000dca2f9e8c48a820116957c6a741cbd0f253d77c3`。两张图均渲染并视觉复核。先前 `/figures/figure7.svg` 的 404 是资源名错误，不是网络中断。
+- Appendix A 和正文说明，MHA mode 将共享 latent KV 投影成各 query head 的 K/V；MQA mode 让 query heads 共享 latent KV entry 与位置 key。图注把 V3.1-Terminus 的 training/prefill 使用 MHA、decode 使用 MQA 明确绑定于该版本；V3.2-Exp inference demo 对应路径是独立实现证据，不能泛化成所有 V3.2 backend 的强制合同。图不独立证明具体 cache bytes、吞吐、kernel 覆盖或质量等价。
+- 已同步第二十一册第 19 章 19.40、研究笔记、source-index、model-inventory、PAPERS、INTERVIEW_BANK 与 plan_v2。当前 Figures 2–7 已视觉核验，其余图表/公式仍有待检查。最终 QA：`git diff --check` 通过；19.39 与 19.40 标题各唯一；本轮相关本地链接目标存在；所有受影响 Markdown 代码围栏成对。goal 保持 `active`。
+
+## 2026-09-29 DeepSeek V3.2：Figure 1 benchmark protocol 视觉核验
+
+- arXiv v1 `v32_performance.svg` 通过 7890 返回 HTTP 200，128,338 bytes / SHA-256 `14354740f4d54692b6af6323cc12d3a5f0e0f937bc2b7dd65021307bd7820973`；渲染后确认 Reasoning/Agentic 分组、benchmark/metric 标签、双纵轴和图例。Codeforces Rating 用右轴，其他 accuracy/Pass@1 用左轴。
+- Figure caption 与 §4.1 确认 HMMT February 2025、HLE text-only；通用数学提示下 V3.2-Thinking 的 HLE bar 为 25.1，另用 HLE official template 为 23.9。Tool-use 用 thinking + standard function-call，MCP-Universe/MCP-Mark 使用作者内部环境；这些是发布方条件化评测，非榜单分数或独立复现。
+- 已同步第二十一册 19.41、DeepSeek 研究笔记、source-index、model-inventory、PAPERS、INTERVIEW_BANK、plan_v2 与本进度。至此 Figures 1–7 均完成视觉核验；公式后续核对见下一节。中间 QA：`git diff --check` 通过，19.39–19.41 标题唯一，相关链接目标存在、Markdown 围栏成对。
+
+## 2026-09-29 DeepSeek V3.2：DSA Eq. (1)–(4) 原文文本审计
+
+- 通过 `10.24.27.134:7890` 取得 arXiv v1 PDF HTTP 200，980,616 bytes / SHA-256 `2bec0671778769c159ec389412727d1f3d4889fe1c71564b61edaa24705bd17b`。本工作区没有 PDF 渲染/抽取器，GDK thumbnailer 也无法识别 PDF；因此本轮没有声称 PDF 页面视觉核验。
+- 使用 arXiv v1 HTML `application/x-tex` annotations 逐项核对 Eq. (1)–(4)：Eq. (1) 是多头加权 ReLU index score（无 softmax，不是概率）；Eq. (2) 根据 Top-k latent KV 候选由主 attention 计算 `u_t`；Eq. (3) 以跨主 attention heads 聚合、序列维 L1-normalize 的 dense distribution 监督 indexer；Eq. (4) 将 KL 对齐限定在 `S_t`。正文还明确 dense warm-up freeze 主模型、只训 indexer；sparse stage detach indexer input，indexer 只由 `L_I` 更新、主模型只用 LM loss。
+- Eq. (4) 展示 `p_{t,S_t}`，但报告这段没有明确写出选中子集后是否重新归一化。V3.2-Exp 官方仓库网页/raw README 通过 7890 分别 HTTP 200（295,427 / 6,899 bytes，README hash 与既有快照相同）；公开根目录列出 inference、报告、README、license、cost image，没有 trainer/loss 入口。GitHub API tree 单独 403；不将其扩大成“没有任何官方训练实现”的结论。该 repo 未解决 `p_{t,S_t}` 归一化，记为公开资料边界。
+- 已同步第二十一册 19.42、研究笔记、source-index、model-inventory、PAPERS、INTERVIEW_BANK、plan_v2。本轮标题 19.39–19.42 唯一；相关 Markdown 数学/代码 fence 配对与本地引用已检查，最终 `git diff --check` 待收尾执行，goal 仍 `active`。
+
+## 2026-09-29 DeepSeek V3.2：GRPO Eq. (5)–(9) 原文文本审计
+
+- 当前工作区经 10.24.27.134:7890 获取 arXiv v1 HTML，HTTP 200，295,170 bytes / SHA-256 5da74d488b218a45a995838b94feb95aacc63c03b806f8462496bfd4bceb07ef，与既有快照一致。
+- Eq. (5)–(9) 的 application/x-tex annotations 已逐式文本核对。整篇 arXiv v1 HTML 共有的编号公式只有 (1)–(9)；重点澄清 group mean 与 response token mean 的嵌套口径；Eq. (6) advantage 展示减组均值而未写标准差归一化；Eq. (7) 外层 current/old ratio 与 KL 内层 reference/current ratio 不同；Eq. (8) mask 只作用于 clipped policy 项；Eq. (9) 只屏蔽负 advantage 且 response 平均 divergence 超阈值的样本。
+- 补充 Keep Routing（复用 rollout MoE 路由）与 Keep Sampling Mask（复用 top-p/top-k 截断支持集），并明确这仍不是完整奖励、rollout、优化器或更新预算 recipe。PDF 页面公式视觉检查未完成；未编号行内数学表达式未做穷尽审计。
+- 已新增第二十一册第 19 章 19.43，并同步 DeepSeek 研究笔记、source-index、model-inventory、PAPERS、面试题、练习、术语表与 plan_v2。QA：git diff --check 通过；受影响 Markdown 代码围栏均成对；章节 display-math fence 数为 12（成对）；19.43 标题唯一；PAPERS 本地章节链接目标存在。整体 goal 保持 active。
+
+## 2026-09-29 Kimi K3：adaptive DSpark 与 ROCm serving 补证
+
+- 7890 当前可用的证据来自用户终端对 `http://www.baidu.com` 的 HTTP 成功结果；本轮没有把单站点连通性等同于所有 HTTPS 站点可达。按已有两榜证据继续 Kimi K3，没有从 serving 仓库发现新锚点。Artificial Analysis `/zh` 快照 1,746,726 bytes / SHA-256 `7a2d98fadd16d7c5b620ebd6a0a3b953e469b7a2bd10f5c21f0d5364d0a31bba`，60 个模型路由且含 `/models/kimi-k3`；DataCurve 为 268,036 bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`，70 个配置 ID，仍有 `mini_swe_agent_kimi_k3_max`。榜单指标仍只解释为 provider observation 与 mini-swe-agent/tools/environment/verifier 系统结果。
+- vLLM recipe 固定 commit `d71af9ad11aae587822a9a73a9c470c409c29ecc`（2026-09-26），32,538 bytes / SHA-256 `40d96d65ed07e88133ffa465f39f94b02aabc0438a331df0c8e7c069114ec257`，对应 MI355X ROCm 10 nightly/pre-release 路径。vLLM main adaptive DSpark commit `88aa0d287dd3abac9386e90ea1a63e6ed5d50580`（2026-09-23）的 patch 为 28,487 bytes / `7fdec0d0c8a050ff12f77ce6973549a486c59fc1ac8c8407db4108b7a10a56c4`：confidence head 产生逐位置接受概率，`k+1` capture 上界配合 offsets/masks 表达批内不同 verify 长度；row 分类依据 request 状态，不沿用可能被 scheduler 改写的 token count 等式。
+- vLLM PR #58814 于 2026-09-28 合入，patch 1,416 bytes / SHA-256 `619dce6a98855a0508edc1568dd795136507125a918dd5f2f84bfbfe0dc6d933`，使 DSpark context pointer cache 在 cache buffer `data_ptr()` 变化后失效并重建，且不允许在 CUDA graph capture 中更新。ROCm SiTUv2 a4w4 需匹配 vLLM/AITER nightly 与 tuned config；PR #53954 检查时仍 Open，记录 kernel/weight layout gate 不一致可能静默退化。vLLM stable `v0.30.0` 不含这条 SiTUv2 recipe 路径；stable/source、main PR 与 pre-release recipe 分开记账。
+- 固定 InferenceX MI355X AgentX lane 区分真实 block rejection 与 synthetic throughput sweep；synthetic 路径注入 golden acceptance length 并跳过 target verification，不能用于准确性、真实 acceptance-rate 或线上服务结论。本轮未下载权重、安装 wheel/nightly、运行 GPU、执行 cache recovery 或做独立 benchmark；SGLang stable `v0.5.20`、vLLM stable `v0.30.0` 与 `v0.31.0rc1` 的关系和源码哈希见研究笔记。
+- 已同步 [`kimi-k3-source-notes.md`](research/model-update-2026-09/kimi-k3-source-notes.md)、[`source-index.md`](research/model-update-2026-09/source-index.md)、[`model-inventory.md`](research/model-update-2026-09/model-inventory.md)、[`inventory-interpretation.md`](research/model-update-2026-09/inventory-interpretation.md)、[第二十一册第 88 章](book-21-transformer-architecture-evolution/chapters/88-kimi-k3-kda-stable-latentmoe与百万token-agent.md)、[第二十四册第 32 章](book-24-llm-inference-engine/chapters/32-multi-turn-tool-use和agent-serving支持.md)、INTERVIEW_BANK、EXERCISES 与 plan_v2。文档 QA 待本轮收尾；目标保持 `active`，下一步从两榜既有八家重点 canonical 队列选下一高价值缺口。
+
+- QA 收尾已通过：本轮涉及的 10 个 Markdown 文件代码围栏均为偶数；新增活动标题唯一；K3 研究笔记、source-index、清单、解释文件和两处教材链接目标存在；`git diff --check` 无错误。没有运行权重、GPU 或生产 serving 测试。整体 goal 保持 `active`。
+
+## 2026-09-29 Kimi K2.7 Code：7890 复验与 KTransformers 文档冲突核对
+
+- 用户终端提供的 `www.baidu.com` 响应表明其 shell 的 7890 代理可用；本工作区本轮也经 `10.24.27.134:7890` 访问 Google 首页（HTTP 302，372 bytes），跟随跳转的定向搜索返回 HTTP 200（91,749 bytes），GitHub commit 页面返回 HTTP 200（283,724 bytes）。GitHub API tree 返回 403 rate-limit；两个初始猜测路径返回 404，修正到仓库 README 的真实文档路径后，固定 raw 文档均 HTTP 200。将端点限流/路径错误与代理网络状态分开记录。
+- Kimi K2.7 Code 仍只沿 AA/DataCurve 既有 canonical 锚点推进；本轮未从 KTransformers 新发现模型。Kimi 固定 HF revision 的 deploy guidance 为 3,689 bytes / SHA-256 `b1bc4c5fb7c8b1da727663d4da83999afc902f6166ff862fbaef514b86de2c65`，称 K2.7 与 K2.5/K2.6 架构相同、部署方法可复用，并给出 KTransformers RAWINT4 命令。
+- KTransformers main Atom 最新项为 2026-09-23 commit `c40722bf04c494f2492b7eb9e86ef01a4ede45b3`（21,972 bytes / `04d2f2e3ddfb18a5e03ebb93100569656db843f038eb4cad9eb275d67c0fca78`）。该固定提交下：K2.5 serving guide 5,536 bytes / `07f8d0c56ab503235c6b040da1a52a207d1cfb8104845593a3c45f7c49d18204`；Native Precision tutorial 9,597 bytes / `aed37372f057ef24d726cfb4c45010721afeb719156bcfc83fc9ab90b64aa93e`；expert scheduling tutorial 8,002 bytes / `f7714175e6d3d7f3c64a25a45f66d9533f47252fcffa1f89609ff107da365ced`；K2.5 SFT tutorial 6,858 bytes / `e6d792a8a7383340b24bc3675c7e94c31c29b42588e43a610f532561b511e6e0`。固定文档与同日快照逐字节一致。
+- 证据结论：K2.7 发布指南存在 RAWINT4 serving 命令，但 KTransformers 同提交通用 Native Precision 支持矩阵只列 Kimi-K2-Thinking，`kt-cli` 示例名单也未列 K2.7/K2.5。记录为文档覆盖不一致、K2.7 兼容性未实测；不能因此判定支持或不支持。命令的 `kt-cpuinfer=96`、threadpool=2、每 MoE layer 的 GPU experts=30、prefill threshold=400、TP=4 和发布方 8×L20/48-way 数字均保留其硬件/文档口径。
+- pinned tutorial 将 `< threshold` 定义为 CPU-GPU hybrid，将 `>= threshold` 定义为 layerwise prefill，并指出 layerwise 会把 CPU 权重传到 GPU、增加 VRAM；expert scheduling 文档称 GPU expert count 按 MoE layer 计，线程建议约 90% physical cores、threadpool count 对应 NUMA 节点。K2.7 示例未显式启用 dynamic expert update。另取回 K2.5 `0.7.0.post4` release tutorial（19,251 bytes / `c3345dccdccf43c3df8ad708a0e0644500bf00368aaef88ca17b85eb0df75d02`）、英文版（20,724 bytes / `8c2f5a5c5c05bf3313a3da5caaee3af8fa0a14574b7c672979387089105b1ff1`）与训练 YAML（1,660 bytes / `a42b713c57790afc192660e7419533d81781400f3f0bfa9fe9bb6b0639e7529a`）。旧 source-install 教程本身注明 post4 应使用新 release tutorial；新 YAML 使用原始 K2.5 权重、`kt_backend: RAWINT4` / expert `rawint4`，同时配置 `bf16: true`。该 K2.5 NekoQA recipe 还记录 attention/fused-expert LoRA、optimizer 等可恢复 checkpoint 与 SGLang adapter 转换流程。上述区别不能推断 K2.7 专属 SFT 配方或权重兼容性。
+- 已同步 K2.7 研究笔记 §9、第二十一册第 94.14–94.15 节、source-index、model-inventory、inventory-interpretation、INTERVIEW_BANK、EXERCISES 和 plan_v2。仍未下载/加载 K2.7 完整权重、安装目标 runtime、运行 GPU、做真实 API probe 或独立 benchmark；本轮只达到固定公开文档/source evidence。goal 保持 `active`，之后继续从两个指定排行榜的八家重点厂商锚点选择知识缺口。
+
+## 2026-09-29 GLM-5.3：slime Straw async rollout、checkpoint rollback 与 indexed archive
+
+- 工作区通过 `10.24.27.134:7890` 实测百度 HTTP 200（2,381 bytes）、Z.ai GLM-5.3 文档 HTTP 200（515,625 bytes）、GitHub slime Atom HTTP 200（16,120 bytes）。Atom 当前 hash `58ab5ae1ebf4cc3f5fc641d92798b229c338ff940121149470b5ddd891904999`，最新 main `8088a4b4450ac374e1439cf2310ba3add370997d` / #2427（9 月 29 日）；#2410 `68572249359201b42bd2020a584c370bc8b403e1`（9 月 28 日）引入 distributed fully async rollout + Straw。
+- Z.ai GLM-5.3 博客引用 slime，slime current README 也列出 GLM-5.3；因此沿用 GLM-5.3 锚点研究其相关训练基础设施，但不从框架 repo 发现模型。9 月底提交晚于 GLM-5.3 的榜单 release date，不能据此声称模型原训练流程采用相同实现。
+- #2427 的 `checkpoint.py` 在 actor/critic 与 rollout manager 保存后写联合 commit marker，包含 model 文件 size、部分 metadata SHA-256 和 queue/builder state SHA-256；optimizer/RNG 缺失时不能用于训练 resume。历史 step 恢复创建新 branch/queue ID，保留旧 branch，并可共享 Straw immutable payload；无 queue snapshot 时显式 empty recovery，不伪造精确 replay。
+- `RolloutArchive` 用 sample/task key 查询 chunk，读取时剥离旧 queue lease/receipt；`.straw.json` 索引与数据 ownership 分离，reader close 后还需在无活跃 reader 时 release，所有 queue/checkpoint/archive 引用释放后 online GC 才能回收。`.pt` export 是自包含副本。Fully async 的 staleness 会参与排序，但不自动丢弃 stale sample。
+- fork test 是 Qwen2.5-0.5B、4 GPU 的上游集成测试源码，设计覆盖 explicit/automatic rollback、queue cursor 与 ready sample 恢复、empty queue 以及 Straw/PT archive replay；本机未安装/运行对应训练栈，未执行 GPU 测试。源码没有证明 GLM-5.3 私有 compaction 或生产性能。
+- 固定证据哈希：Straw guide `ae8cda5701cd90fc79c275745b3d59e81d35fb08c08fe00363d48b9762cb9a54`；archive `9f114885da58f970e00c1ed7ed4b8d4b2c809a80870ea18e0dfe2af8e3f46742`；checkpoint `38470782211793fde1a1633be9deb77fbf60516c3d64b2949b4c99aeff0de02e`；fork test `c79327f0a89764c6bb1ccc8f2061572a38d5ae10de1a8efae38b02caaff2c1dd`；#2427 patch `e14f0235af13fddd21dba39535e64c650219dd59c14641f03d4784a44a11fb2e`；#2410 patch `dff6b3688272d23fa6d6271160bbcfba082efa142f22a10b3cd8a43a383f46f8`。完整来源和 marker 校验边界见 GLM-5.3 研究笔记及 source index。
+- 已同步 GLM-5.3 研究笔记、第二十册第 20.23 节、INTERVIEW_BANK、EXERCISES、source-index、model-inventory 和 plan_v2。整体 goal 继续 `active`；下一步按两榜重点厂商 canonical 队列选下一知识缺口。
+
+## 2026-09-29 当前时点榜单刷新重试
+
+- 通过 `10.24.27.134:7890` 获取百度、Z.ai 官方文档和 GitHub slime Atom 仍为 HTTP 200；但对 Artificial Analysis `/zh` 与规范 DataCurve 主机的重试在连接阶段超时，沙箱内和获批沙箱外重试均为 curl HTTP `000`。这只说明本轮该代理到两个榜单主机的请求失败，不说明榜单不可访问或内容未更新。
+- 最近成功的同日榜单基线沿用已记录快照：AA `1,747,602` bytes / SHA-256 `970aaacc0dedaf2a624b5ede1e07fa7f6659da78f8b8d2a0dd451b67da3b3120`，当时 60 个唯一路由；DataCurve `268,036` bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`，当时 70 个配置 ID。不要把旧快照的“无新增”外推到当前时点。
+- 下一次选择模型锚点前先成功刷新两榜并对照 canonical 集合；当前没有据此新增或删除任何候选，整体 goal 保持 `active`。
+- 2026-10-01 两榜与 Google 官方入口再次刷新：AA `/zh` HTTP 200，`1,930,483` bytes / SHA-256 `3a962c79cec028baf1e642d8e14fa20928c6b8470d2f70b3568b5fff7e559ee6`，仍有 `gemini-4-argon`；DataCurve HTTP 200，`268,036` bytes / `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7c6e095ad59f1f1`，70 个配置无精确 Argon 行。Google 模型目录 `155,241` bytes / `a0491f5f0b9f9fc107c42183fb6cf9d22927e1af03dbbdfa0ccc38e4e4ac31` 与 sitemap `253` bytes / `8dadac65fc82806836873c16fc1f813597e99b3e5f838d61c0e4435b8cfc8f7b` 均无 Argon。没有新的八家重点 canonical；Argon 继续保持官方资料缺口，goal 保持 `active`。
+- 2026-10-01 扩展 Google 官方入口复查：Blog 搜索、Google AI Blog、Vertex AI 模型目录和 Gemini API 模型目录均 HTTP 200，但正文没有 Argon/Gemini 4；API/Vertex 页面当前可见 Gemini 3.x/3.8 条目。新增负检索哈希已写入 Argon 研究笔记与来源索引。该证据仍不足以形成模型闭环，goal 保持 `active`。
+- 2026-10-01 重点厂商 canonical 集合审计：AA 当前相关路由为 Claude Fable/Sonnet/Opus 5.x、DeepSeek V4、Gemini 3.8/Argon、GLM-5.3、GPT-6.x、Grok 4.7、Kimi K3、Qwen3.8；DataCurve 当前 70 个配置的重点厂商行均已在 `model-inventory.md` 或对应研究笔记中登记。`gemini`、`grok-stt`、`qwen3-asr` 是聚合/语音入口，不新增主流文本模型锚点；`deepseek-v4-pro-non-reasoning` 与 Qwen3.8 Max 亦已有既有条目。没有新遗漏候选，Argon 仍是唯一官方资料缺口，goal 保持 `active`。
+- 2026-10-01 Argon 详情与公开搜索复验：AA 详情页仍为 `Gemini 4 Argon (high)`，Google/Bing exact phrase 搜索未形成 Google 官方一手页面；详情和搜索快照哈希已写入研究笔记与来源索引。Argon 仍未闭环，goal 保持 `active`。
+- 2026-10-01 Google 限定域名检索：对 `ai.google.dev`、`cloud.google.com`、`deepmind.google`、`blog.google` 和 `google.com` 的 exact/site 查询均未提取出官方 Argon URL；五个搜索快照哈希已写入研究笔记与来源索引。该结果进一步确认当前只有 AA/provider 发现证据，Argon 仍未闭环，goal 保持 `active`。
+- 2026-10-01 Argon 官方发布出现：Google The Keyword 官方文章 `Introducing Gemini 4 Argon`（`408,929` bytes / `1c09a8019b06eada8703e67c7da2d4269ff3dc9169ae66226784dbec2d3043df`）已核验。文章披露 1M 输出上限、Fairwind 受限 rollout、coding/enterprise/cyber 场景、Google 自报 DeepSWE/AutomationBench/LVBench/CWE-bench 结果及分阶段安全措施。研究对象升级为“AA 单榜内容专题闭环（Google 发布方证据）”；公开模型卡、技术报告、权重、完整 API、独立复现和精确 DataCurve 行仍待核验。
+- 2026-10-01 当前排行榜重点模型闭环审计完成：AA/DataCurve 重点 canonical 已全部在 inventory/研究笔记中登记；Argon 已补齐 Google 官方发布资料、正式章节、题库、练习、术语、论文索引、项目、知识图谱、计划和进度同步。剩余项目均属于参数/权重/硬件/独立 benchmark/生产 SLO 等工程验证边界，不属于本 goal 的资料级闭环门槛。按用户定义，当前 goal 达成。

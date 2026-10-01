@@ -433,6 +433,39 @@ System card 要回答以下问题：
 
 如果用户问“这个模型能不能自动发邮件”，单看 model card 无法回答。必须查看 system card 中工具权限、收件人策略、确认机制、审计和回滚。
 
+### 6.4 System Card 数字的证据账本：Claude Opus 5.5 案例
+
+System Card 中的分数不是脱离条件的模型常数。审计一项结论时，至少把它写成：
+
+~~~text
+claim = (model_snapshot, safeguards, task_set, harness, success_definition,
+         numerator/denominator, fallback_policy, metric_clock, uncertainty)
+~~~
+
+Claude Opus 5.5 的 System Card 展示了这些字段为何不能省略：
+
+| 证据字段 | System Card 中的例子 | 审计时要避免的误读 |
+|---|---|---|
+| 模型快照 | 大多数评测使用最终 snapshot；少数章节使用早期/替代 snapshot | 不把不同 snapshot 的风险变化写成同一版本的稳定属性 |
+| Safeguards 与实际执行模型 | 部分 cyber 能力评测关闭 cyber safeguards；另一些安全测试会触发 fallback | 关闭 safeguard 的能力分数不等于生产表现；记录 `original_model`、`actual_model`、触发原因和策略状态 |
+| 成功定义与分母 | OSWorld 2.0 的 partial/strict 为 `81.8%/48.7%`，基于 108 个任务、5 runs、最多 500 actions 等条件 | 两个比例对应不同成功定义；同时保留任务数、runs 和判定规则，不能只挑较高比例 |
+| 时钟与系统边界 | 五 Agent team 在相同 ProgramBench 分数下报告约 `2.7x` latency improvement；多 Agent 指标按 context token、tool time 和 handoff clock 计算 | 这是 derived latency，不是端到端 wall-clock；线上 SLO 还要实测排队、共享资源、失败恢复和真实耗时 |
+
+本案例依据 Anthropic 的 [Claude Opus 5.5 System Card](https://www.anthropic.com/claude-opus-5-5-system-card)。评测记录应同时保留原始 numerator/denominator、snapshot、权限与 safeguard 配置、fallback 轨迹、任务环境、verifier 和计时定义。官方 System Card 能证明发布方在这些条件下报告了什么；它本身不等于独立复现，也不自动覆盖不同产品路由或生产环境。
+
+### 6.5 System Card 的版本更新也属于评测证据：Claude Opus 5
+
+Claude Opus 5 System Card 的 2026-08-19 changelog 补入跨 surface prompt-injection bug-bounty 结果，并因发现 Cowork browser harness 不一致而重跑模型基线。修订后的比较统一使用 Cowork harness；该产品不能关闭 thinking，因此不再报告“thinking disabled”条件。这不是模型升级，而是测量协议的修正：harness 变化时应重跑旧基线，不能只更新新模型分数。
+
+| 评测面 | 官方披露的设置 | Opus 5 观测 | 正确解读 |
+|---|---|---|---|
+| Gray Swan IPI | 28 个场景、1,130 个去重高迁移攻击；比较攻击者在 1/10/15 次内成功的概率 | 1 次 `0.2%`、15 次 `2.0%`；Opus 4.8 是 `0.5%`、`5.5%` | Claude 评测关闭产品级保护，外部模型走公开 endpoint；不能据此宣称严格同配置跨模型排名 |
+| Adaptive coding | 40 场景、每场景 200 次尝试；统计 attempt-level ASR，也统计被攻破场景数 | thinking 条件无 probes `0.56%`、启用 tool-result probes `0.18%` | probes 检查进入模型的 tool result；这是模型与输入侧防护的消融，不是同一条件下的裸模型分数 |
+| Computer use | 14 个 GUI 场景、每场景 200 次攻击 | thinking 条件无 probes `0.54%`、启用 probes `0.25%` | disabled 条件启用 probes 后从 `0.39%` 到 `0.43%`只差 2,800 次中的 1 次，Card 认为不能与噪声区分 |
+| Cowork browser | 129 个未见环境、每场景 10 次；medium effort、thinking enabled | 不启用 Auto mode 时 `3.84%`，启用 Auto mode 后 `0/129` 场景成功 | Auto mode 同时检查不可信 tool result 与危险 tool call；它是产品系统结果。Cowork 实际始终有 probes，不能把“raw comparison”误写成真实无防护产品模式 |
+
+阅读注入结果时同时保存两种分母：`successful_attempts / valid_attempts` 与 `scenarios_with_success / tested_scenarios`。多次自适应攻击彼此不必独立，attempt-level 比率不等于每个真实用户/部署的风险概率。跨表比较还要绑定 snapshot、thinking/effort、攻击预算、probe、Auto mode、harness 版本和成功判据。完整版本和快照信息见 [Claude Opus 5 研究笔记](../../research/model-update-2026-09/claude-opus-5-source-notes.md)。
+
 ## 7. Risk-Calibrated Access 与 Fallback Routing
 
 ### 7.1 为什么能力不能平均分配

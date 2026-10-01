@@ -158,6 +158,8 @@ Z.ai 正确博客路由为 [`z.ai/blog/glm-5.2`](https://z.ai/blog/glm-5.2)。�
 
 **评测条件账本**：System Card 报告 Terminal-Bench 4.0 `55.8%`、Terminal-Bench-Science 0.1 `52.6%`、CursorBench `73.4%`、OSWorld partial/strict `77.9%/41.7%`、GDPval-AA v2 `1853`、AutomationBench `31.4%` 和 ProgramBench `87.6%`。安全章节还报告 Gray Swan IPI、Shade、browser-use、permission-hook bypass 和 sandbox vulnerability 等结果。每个数字都必须绑定 snapshot、effort、tools、permissions、safeguards、fallback、任务环境、成功定义和 verifier；尤其 cyber 结果不能把 Mythos/helpful-only 或关闭 safeguards 的配置写成 Fable 生产结果。评测 manifest 应额外记录 `actual_model` 与 `fallback_reason`。
 
+**状态协议审计**：本轮用 [`claude_fable51_state_protocol_audit.py`](../../research/model-update-2026-09/code/claude_fable51_state_protocol_audit.py) 做了零依赖教学审计。它把 Fable 5.1 的 capability error、thinking producer/prefix binding、历史修改后的 `drop_block`、`display: "updates"`、tool result、provenance verifier 和 fallback actual model 放在同一条可回放 trace 中；同一幂等键的重放只产生一次副作用。该结果是 `local_protocol_toy`，只验证宿主状态机，不是 Anthropic API、隐藏 reasoning 或模型质量的复现。
+
 **尚待核验**：官方资料仍没有披露参数量、层数、稠密/MoE 结构、优化器、完整训练/后训练配方、完整推理机制、Fable 5.1 独立 benchmark 复现或本项目独立实验。System Card 的训练数据范围和发布方评测条件已确认，但不能越级替代这些缺失证据。Claude Mythos 5.1 虽被页面描述为共享权重的邀请制配置，但本项目不将其当作公开可用独立基础模型。
 
 ## DeepSeek V4.1-Flash：CED、CSA2 与重算型缓存
@@ -297,6 +299,14 @@ K2 Horizon 3.7B 是 Artificial Analysis 已发现、但 DataCurve 没有精确 A
 36B/A4B 在后 45 层增加 64 value experts/top-4 的 MoVA、100 routed FFN experts/top-8 和 1 个 shared expert；3.7B 则把变量减少到 dense GEMM、GQA KV、长 prefill 和 parser。这个对照能把“active parameter”之外的系统成本讲清楚：MoVA/FFN 还要支付 router、token dispatch、EP 通信、负载倾斜、workspace 和回收；3.7B 的 dense 速度不能按参数比例外推 36B serving。
 
 3.7B 的模型卡还公开 22.9T/8K pretraining、32K/128K/512K 分阶段 midtraining、512K SFT Phase 1/2、Math/Code/STEM-Code RL 分支以及 self-attention ISO merge/其他权重 RAM。中间 checkpoint 是阶段性研究入口，但不等于完整训练 recipe。migration manifest 的 `k2_aurora -> k2_horizon`、copy、BF16、36 shards/327 tensors 是 artifact 迁移证据；vLLM/SGLang 的 H200 结果属于发布方 recipe。当前旧 APPENDIX 的 `XllmForCausalLM`/FP32 与新 config 的 `K2HorizonForCausalLM`/BF16 冲突，应按 revision 处理。完整底稿见 [`k2-horizon-3.7b-source-notes.md`](../../research/model-update-2026-09/k2-horizon-3.7b-source-notes.md)，正式对照见第二十一册第 82 章。
+
+## Kimi K2.7 Code：长周期编码 Agent 的模型与服务边界
+
+Kimi K2.7 Code 是 Artificial Analysis 与 DataCurve DeepSWE 中已出现的 coding-agent 锚点。固定 revision 模型卡公开约 1T total / 32B active 的 MoE、384 routed experts/top-8/1 shared、MLA、MoonViT 和 native INT4；这些字段可以支撑架构与部署预算讨论，但不能推出完整训练 recipe、真实驻留显存或生产吞吐。
+
+官方 API 快速开始把服务合同讲得更具体：256K context 与默认 max_tokens 32K 分开计；thinking 必须启用，若干 sampling 字段固定；多模态视频输入由宿主工具检查/裁剪后回灌，reasoning_content 可用于多步状态连续性。文档称 Highspeed 与普通 ID 是同一模型，故仅作为服务路由变量，不另列模型。Kimi 发布方 benchmark、AA provider 指标、DataCurve mini-swe-agent 结果和本地 toy 必须分栏。
+
+深入解释见[第二十一册第 94 章](../../book-21-transformer-architecture-evolution/chapters/94-kimi-k2.7-code-long-horizon-coding-agent.md)和[研究笔记](../../research/model-update-2026-09/kimi-k2.7-code-source-notes.md)。独立技术报告、完整训练配方、权重加载、目标硬件 profile 和线上 Agent 验收仍未确认。
 
 ## Qwen3-Omni：理解和语音生成的双节奏
 

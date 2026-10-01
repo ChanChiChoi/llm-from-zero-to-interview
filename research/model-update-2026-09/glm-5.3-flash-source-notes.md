@@ -340,7 +340,7 @@ vLLM `main` tree（`81d7293c2167e39f3ffddc9a82d633f94e8a1eaa`）包含 `vllm/mod
 
 相关 main 路径的快照大小/SHA-256 为：`attention.py` `24,145`/`a7554347a8e91215a9cf884f74bdcbaa4eb4a3870dbd016994b92d93293b1c57`，`kda.py` `31,136`/`37745b45892cb26d9193160c4f446191f6cc276031fe8f7de5dbb37784cf8e8b`，`model.py` `51,591`/`9d30ec0bf2eb052b96c6fc995435979993a68cced3376734d0ea72002e0f5dfc`，`mtp.py` `17,490`/`db158eec6731fb11e3072cd9d9a76f34f3267007a821277ce3463090eb8f85c0`，`common/sparse_indexer.py` `6,294`/`a3ab1edda8490b8e21c1c240e07e8c8fcd0bb34246a9ed1f64acfe067d15067c`。关键历史为：`4fe9e6f6e564`（2026-09-16）将 sparse indexer kpool 移入模型目录并拆分 AMD/NVIDIA，`c8d1cf077a78`（2026-09-16）修复 ROCm Quark MXFP4 load/inference，`36fa72d2d0d2`（2026-09-19）为 decode workspace 节省约 3072 MiB 的提交说明。
 
-对照 vLLM `v0.29.0` tag tree：快照 `1,979,822` bytes、SHA-256 `7131879ae9592d90738776d24ae213f789577317b2c5427f350761a87ca05070`，路径搜索没有 `vllm/models/glm5next/` 或 GLM-5.3-Flash 专属 common runtime 文件；该 tag 只有 GLM-4/通用 GLM 与 DeepSeek V3.2 相关条目。因而现有 vLLM recipe 的“`0.29.0+`”是 recipe 的版本门槛/部署声明，不能单独证明公开 `v0.29.0` tag 已包含这些专属源码。正确状态是：vLLM GLM5Next 为 main/post-tag upstream evidence；recipe、stable tag、wheel 和目标硬件 acceptance 必须分开记录。
+对照 vLLM `v0.29.0` tag tree：快照 `1,979,822` bytes、SHA-256 `7131879ae9592d90738776d24ae213f789577317b2c5427f350761a87ca05070`，路径搜索没有 `vllm/models/glm5next/` 或 GLM-5.3-Flash 专属 common runtime 文件；该 tag 只有 GLM-4/通用 GLM 与 DeepSeek V3.2 相关条目。因此 recipe 的“`0.29.0+`”是版本门槛/部署声明，不能单独证明公开 `v0.29.0` tag 已包含这些源码。**截至 2026-09-22 的阶段结论**是 main/post-tag upstream evidence；2026-09-24 已在下文补齐 v0.30.0 stable 文件审计，现阶段状态按最新小节为准。recipe、stable tag、wheel 和目标硬件 acceptance 仍须分开记录。
 
 ### 面试上应保留的实现边界
 
@@ -551,3 +551,20 @@ print("visual_diff_after_refinement:", visual_verification_loop())
 7. [GLM-5 Technical Report](https://arxiv.org/abs/2602.15763)：模型卡引用的关联技术报告；仅用于关联路线和术语，不把报告中未明确归属 Flash 的数字写成 Flash 内部事实。
 8. [Z.ai Thinking Mode](https://docs.z.ai/guides/capabilities/thinking-mode)、[Streaming](https://docs.z.ai/guides/capabilities/stream-tool)、[Function Calling](https://docs.z.ai/guides/capabilities/function-calling)、[Context Caching](https://docs.z.ai/guides/capabilities/cache)、[Structured Output](https://docs.z.ai/guides/capabilities/struct-output)：API/Agent 协议核验。
 9. [SGLang GLM-5.3-Flash cookbook](https://docs.sglang.io/cookbook/autoregressive/GLM/GLM-5.3-Flash.md)、[vLLM recipes](https://recipes.vllm.ai/zai-org/GLM-5.3-Flash)、[Transformers GLM5-Next docs](https://github.com/huggingface/transformers/blob/main/docs/source/en/model_doc/glm5_next.md)：部署入口，不替代目标硬件实测；Transformers 当前文档不包含 MTP layer。
+
+## 2026-09-24：vLLM v0.30.0 stable GLM5Next 逐文件对照
+
+本轮仍只扩展 Artificial Analysis 与 DataCurve 已确认的 GLM-5.3-Flash 锚点；vLLM 是 serving 来源，不是模型发现入口。官方 `v0.30.0` release commit 为 `ced6857afa0ea7b2e3f0846a62e1394e90f15607`（2026-09-22 发布）。[stable GLM5Next tree](https://api.github.com/repos/vllm-project/vllm/git/trees/118165530271cb3aa749d77bf927499957db2bd4?recursive=1) 的目录 SHA 为 `118165530271cb3aa749d77bf927499957db2bd4`；逐文件比较基线固定为 [vLLM main commit `81d7293c2167e39f3ffddc9a82d633f94e8a1eaa`](https://api.github.com/repos/vllm-project/vllm/git/trees/81d7293c2167e39f3ffddc9a82d633f94e8a1eaa?recursive=1)，不使用 mutable `main`。
+
+| v0.30.0 stable | 固定 main 对应文件 | 对照结论 |
+|---|---|---|
+| `nvidia/attention.py`，24,145 B，blob `0be749348494f6679fc3e856112b9c0d6272b89d` | `common/attention.py`，24,145 B，blob `4f776e8a8e764eae0a40a78f1ef5b86a3b93a5ce` | blob 不同；两边都有 `Glm5NextIndexerCache`/`Glm5NextTailCache`。差异包括 `SparseAttnIndexerKpool` 从通用 model-executor 路径迁到 GLM5Next 自有实现、最大长度 workspace 改按 pool 数计，以及 RoPE scaling 类型映射变化。stable 已有 pool-granular cache 与未完成 pool tail 的双缓存职责。 |
+| `nvidia/kda.py`，31,136 B，blob `436b9685cb12d71ea1f8531f0569057d0e4329ce` | `common/kda.py`，同大小、同 blob | 文件完全相同；KDA 独立 state、speculative conv-state 宽度等源码细节可归于 v0.30.0。 |
+| `nvidia/model.py`，50,793 B，blob `21918bdf6bed8dfcb614758e3d6974905779c2ad` | `common/model.py`，51,591 B，blob `e4f669835e49b981d494b6552b5f02ae32f255e3` | main 额外加入 dense `gate_up_proj` 到 `gate_proj`/`up_proj` 的 packed mapping，并接受 Quark `.weight_scale`；这两项不能写成 v0.30.0 stable 已有。 |
+| `nvidia/mtp.py`，17,463 B，blob `35b452f44f798b09728921e24ee3618be201fdb6` | `common/mtp.py`，17,490 B，blob `33a5402b8fd102b8470ddf9f7d645e4de72eefed` | diff 只有 `fused_eh_norm` import 路径变化；MTP layer/weight mapping、top-k buffer compaction 等主体一致。 |
+| `nvidia/multimodal.py`，26,437 B，blob `d2b21345d052be17bc8156682c6344f5d8baad5e` | `common/multimodal.py`，同大小、同 blob | 文件完全相同。 |
+| `nvidia/ops/kpool_compress.py`，31,998 B，blob `70b41021aab0560a1a770872f2d4742e7b153ccd` | 同路径，33,149 B，blob `416d3b5c48ea25982c602854e827703f66452cd8` | main 的 tail-cache seed kernel 改为读取目标 cache 的真实 block/head stride，并加形状/stride 断言；stable 使用按 dense layout 推导的偏移。它提示要针对 paged/alias cache layout 做数值与边界测试，但未运行测试前不将其定性为 stable 缺陷。 |
+
+目录结构也发生演进：v0.30.0 将核心文件放在 `nvidia/`，并有 `amd/`；固定 main 改为 `common/` 核心代码，加 backend-specific sparse indexer 和 root wrapper。stable `attention.py` 仍调用通用 `SparseAttnIndexerKpool`；不能把 main 后续自有 sparse-indexer 文件反向归给 stable。NVIDIA third-party KDA 和 AMD/NVIDIA KPool kernel 的若干 blob 也不同，相关细节按各自 commit 归因。
+
+因此证据状态从“stable package-directory presence”升级为 **v0.30.0 stable source 中 cache/KDA/MTP/multimodal 路径已逐项确认，且已记录与固定 main 的差异**。这不证明 PyPI/wheel 安装、完整权重加载、cache stride/layout 数值正确、目标 GPU/ROCm profile、PD/EPD recovery、MTP acceptance 或线上 tool/SLO 通过；这些仍需带固定 wheel、权重、硬件和 workload 的实测。

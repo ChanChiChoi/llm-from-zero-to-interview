@@ -1,6 +1,6 @@
 # Qwen3.8：QSA、Gated Residual、N-gram Embedding 与 Muon
 
-> 本章核验日期：2026-09-14。Qwen3.8 的候选发现来自 [Artificial Analysis](https://artificialanalysis.ai/zh) 的具体模型页面；DataCurve DeepSWE 快照只检出 Qwen3.8 Max。模型规格主要来自 [Qwen3.8-27B 模型卡](https://huggingface.co/Qwen/Qwen3.8-27B)、[Qwen3.8-2.4T-A95B 模型卡](https://huggingface.co/Qwen/Qwen3.8-2.4T-A95B)、[Qwen3.8-Flash-Next 模型卡](https://huggingface.co/Qwen/Qwen3.8-Flash-Next) 和 [Flash-Next 技术报告](https://github.com/QwenLM/Qwen3.8-Flash-Next/blob/main/tech_report.pdf)。报告 benchmark、kernel speedup、稳定性和训练效率数字均属于发布方自报。
+> 架构与报告资料核验：2026-09-14；Serving/runtime 源码补证：2026-09-24。Qwen3.8 的候选发现来自 [Artificial Analysis](https://artificialanalysis.ai/zh) 的具体模型页面；DataCurve DeepSWE 快照只检出 Qwen3.8 Max。模型规格主要来自 [Qwen3.8-27B 模型卡](https://huggingface.co/Qwen/Qwen3.8-27B)、[Qwen3.8-2.4T-A95B 模型卡](https://huggingface.co/Qwen/Qwen3.8-2.4T-A95B)、[Qwen3.8-Flash-Next 模型卡](https://huggingface.co/Qwen/Qwen3.8-Flash-Next) 和 [Flash-Next 技术报告](https://github.com/QwenLM/Qwen3.8-Flash-Next/blob/main/tech_report.pdf)。报告 benchmark、kernel speedup、稳定性和训练效率数字均属于发布方自报。
 
 ## 83.1 先从一个长任务场景开始
 
@@ -337,6 +337,23 @@ N_{assign}\approx B\times T\times k_{route}\times L_{sparse}
 
 面试中应把“基础模型关系”“服务端能力”“线上实测”列成三列。
 
+### 83.9.5 Serving runtime：QSA 与 PLE 是多套状态/内存账
+
+Qwen 官方 README 将 Flash-Next 称为 Qwen4 架构的早期预览，并给出 SGLang/vLLM 的 262,144 context、TP=4 启动命令。这里的 Qwen4 是官方对架构路线的描述，不据此新增模型候选；服务命令也只证明文档推荐，不能代替实际部署验收。
+
+固定版本源码把架构名和服务实现对应起来：vLLM `v0.30.0` 在 registry 中注册 `Qwen4ExpForConditionalGeneration` / `Qwen4ExpMTP`，实现位于独立 `qwen4_exp` 目录；SGLang `v0.5.20` 也有 Qwen4Exp、MTP 和 PLE 专属模块。不要因为代码复用了 Qwen3Next/Qwen3.5 的组件，就把 Flash-Next 简化成普通 Qwen3-Next；配置的架构名是 `Qwen4ExpForConditionalGeneration`。
+
+| 运行时 | 可从固定源码确认的实现 | 重要约束/边界 |
+|---|---|---|
+| vLLM `v0.30.0` | QSA owner 调用 Triton sparse paged-attention；索引器维护 raw-key circular state、压缩 key cache、top-k buffer；MTP 首步选索引、后续 draft 步复用对齐行。N-gram/PLE 支持 device table 与 pinned-host/UVA lookup；Gated Residual 用 grouped RMSNorm、低秩 gate projection，并融合 residual combine/norm。 | 当前 NVIDIA QSA 实现把 QSA 激活/QKV 与主 KV 路径限制在 BF16，不支持 KV quantization/context parallelism；压缩 indexer-key cache 可为 BF16 或 FP8 E4M3。FP8 权重与 BF16 主 KV 是两项独立设置。 |
+| SGLang `v0.5.20` | QSA indexer 在特定 graph-capture/小 batch 条件下，可放入 alternate CUDA stream，与当前 stream 的 Q/K/V 准备工作并行，之后再启动 attention；MTP 可重用 target-aligned sparse indices。PLE offload 支持 pinned-host 和 file-backed sparse `mmap`。 | indexer 并非与最终 attention kernel 重叠。PLE 明确不兼容 two-batch overlap 和 N-gram speculation，speculative `topk` 仅支持 1。file backend 需要设备能经 host page tables 访问 pageable memory，不是通用替代品。 |
+
+这也解释为什么“6B active”不等于“轻量部署”：主干权重、51B N-gram table、主 KV、QSA raw/compressed side cache、MoE 通信和 workspace 分别占用不同资源。约 47.7 GiB 的 FP8 PLE 表容量来自 SGLang 源码注释；vLLM recipe 则另行提醒 H100 80GB/GPU 对 51B PLE/N-gram 表余量不足。SGLang 通过 file-backed mmap、按需 page fault、`WILLNEED` 预取和 RSS trimmer 面向特定统一内存设备处理容量压力。Pinned-host/UVA 能释放离散 GPU 的部分 HBM，却不能消除随机读取延迟和 host-device 带宽成本。
+
+vLLM recipe 页面（2026-09-17 更新）标注版本 `0.29.0+`，列出 H100/H200、GB200/GB300、MI355X 等部署配置。其记录的 FP8 checkpoint 验证是 4×H200、TP4、最大序列 16,384、eager、16 sequences 和 8192 batched tokens，并使用 commit `d1b4028d7e`；recipe 还说明 GB300 的 TP2 是 FP8 最低配置、TP4/TEP4 配置包含 MTP3，而 8×H200 需 TEP8，plain TP8 与 128-wide quantization blocks 不兼容。这些都应保留为该版本 recipe 的条件，不外推为任意硬件/上下文下的性能保证。
+
+源码树包含 QSA reference、PLE shard/offload 和 Gated Residual 运算测试；本轮只检查了固定 tag 源码及测试文件，未运行 pytest、安装 wheel、加载权重或做 GPU profiling。因此当前结论是 **vLLM/SGLang stable source support paths confirmed**，不是完整运行时或生产验收。
+
 ## 83.10 零依赖 QSA/GR 教学 demo
 
 下面的程序只用 Python 标准库。它做四件事：对 block 做压缩和因果选择，保留尾部 token；模拟四分支 GR 的 read/write；计算 total/active/N-gram 参数账本；用断言锁定教学不变量。它没有实现 RoPE、softmax、真实 kernel、MoE all-to-all 或 GPU offload，不应被当作生产实现。
@@ -515,11 +532,15 @@ A95B 是公开 text-only MoE checkpoint；Max 是官方页面说明基于它的�
 - [Qwen3.8-2.4T-A95B 模型卡](https://huggingface.co/Qwen/Qwen3.8-2.4T-A95B)：2.4T/95B active、92 层、512 experts、text-only 和强制 thinking。
 - [Qwen3.8-Flash-Next 模型卡](https://huggingface.co/Qwen/Qwen3.8-Flash-Next)：125B/6B active、51B N-gram、QSA/GR/MTP、视觉、配置和服务入口。
 - [Qwen3.8-Flash-Next GitHub](https://github.com/QwenLM/Qwen3.8-Flash-Next)：实验性架构概览、代码和技术报告入口。
+- [Qwen 官方固定 README](https://github.com/QwenLM/Qwen3.8-Flash-Next/blob/69885871a64393807d988b27b1b5e380e8f28526/README.md)：Qwen4 架构预览表述及 SGLang/vLLM/TokenSpeed 部署命令。
 - [Flash-Next 技术报告](https://github.com/QwenLM/Qwen3.8-Flash-Next/blob/main/tech_report.pdf)：GDN、QSA、GR、N-gram、Muon、scaling law、稳定性和评测；28 页报告中的速度、loss、benchmark 与稳定性为作者自报。
+- [vLLM v0.30.0 Qwen4Exp source](https://github.com/vllm-project/vllm/tree/v0.30.0/vllm/models/qwen4_exp)、[registry](https://github.com/vllm-project/vllm/blob/v0.30.0/vllm/model_executor/models/registry.py) 与 [QSA/PLE/HC tests](https://github.com/vllm-project/vllm/tree/v0.30.0/tests/models/qwen4_exp)：固定 release source evidence；本章未运行这些测试。
+- [vLLM Qwen3.8-Flash-Next recipe](https://recipes.vllm.ai/Qwen/Qwen3.8-Flash-Next)：动态部署 recipe 与其硬件/FP8 条件，数字属于该 recipe 的自述配置。
+- [SGLang v0.5.20 Qwen4Exp source](https://github.com/sgl-project/sglang/tree/v0.5.20/python/sglang/srt/models)：QSA、MTP 和 PLE offload 的固定 tag 实现入口。
 - [Artificial Analysis Qwen3.8 Max](https://artificialanalysis.ai/models/qwen3-8-max)、[27B](https://artificialanalysis.ai/models/qwen3-8-27b)、[A95B](https://artificialanalysis.ai/models/qwen3-8-2-4t-a95b)、[Flash-Next](https://artificialanalysis.ai/models/qwen3-8-flash-next)：本章的候选发现来源。
 - [DataCurve DeepSWE](https://deepswe.datacurve.ai/)：本轮快照只辅助确认 Qwen3.8 Max 条目。
 
-截至本章核验日期，完整生产 kernel、目标硬件 profiling、线上接受率、全系列训练配方、host-memory 预取在不同服务环境下的行为，以及 independent benchmark 仍待核验。没有这些证据，不能把报告中的 `7.6x`、`4.9x`、loss 或 Agent 结果写成普遍保证。
+vLLM/SGLang 固定 tag 已确认存在相应 Qwen4Exp、QSA、PLE、Gated Residual 与 MTP 实现；但目标硬件 profile、完整 262K/多模态压力测试、cache/state recovery、线上接受率、跨后端行为、全系列训练配方和 independent benchmark 仍待核验。没有这些证据，不能把报告中的 `7.6x`、`4.9x`、loss、recipe 配置或 Agent 结果写成普遍保证。
 
 ## 83.13 Qwen3.8 Max (0902)：把 revision 当作服务契约
 
@@ -530,6 +551,26 @@ Qwen3.8 Max (0902) 是本章架构主线的一个重要边界案例。Artificial
 0902 的高频面试点是协议组合：`reasoning_effort` 可选 `low/medium/xhigh`，默认 `xhigh`，且不能与 `thinking_budget` 同时设置；thinking 模式下 `tool_choice` 只能是 `auto` 或 `none`，需要强制选择某个工具时必须关闭 thinking。也就是说，effort 是请求级预算控制，tool choice 是接口约束，二者都不应被记录成新的模型架构。多模态调用还要遵循 `MultiModalConversation` 接口，不能把普通文本消息模板直接外推。
 
 Context Cache 文档又把 Qwen Max 的缓存拆成 explicit、implicit 和 session 三类。它们的 owner、生命周期、命中、计费和失效语义不同，最小缓存长度为 `1,024` tokens；这不等于三种“永久 GPU KV cache”。在 serving 设计中，cache identity 至少要与模型 revision、tokenizer/template、租户、权限、输入前缀和会话状态关联，并在 trace 中记录命中、失效、重算和实际费用。
+
+### 83.13.1 从“缓存类型”追到可执行协议
+
+7890 重新取得的 QwenCloud Context Cache 正文把上面的分类变成了可以写进 adapter 的门禁：
+
+| 检查项 | 官方可观察合同 | 面试中的系统含义 |
+|---|---|---|
+| Explicit marker | `cache_control.type` 只能是 `ephemeral`；单请求最多 4 个 marker，超过时只有最后 4 个生效 | marker 不是任意 metadata；客户端必须规范化并记录实际生效位置 |
+| Prefix window | `1,024` tokens 只是具备缓存资格的条件，不保证实际命中；marker 向前最多检查 20 个 content block | 并行工具结果不能无限拆分；需要把 content-block 距离纳入 prompt layout 和 trace |
+| Follow-up message window | 示例中的其他消息 `≤20` 时可命中既有 block A、刷新 TTL 并建立扩展 block；`>20` 时 A 不复用，按完整上下文创建新 block | 这是 message 数量规则，不是上面的 content-block lookback；两种窗口必须分开计量 |
+| API/cache combination | Chat Completions、DashScope、Anthropic-compatible API 下 explicit/implicit 互斥；Responses 未开 session 时，支持的模型仍可走 implicit cache | adapter 要把 endpoint、cache mode 和响应 schema 作为协议版本记录 |
+| TTL | explicit/session 为 5 分钟，命中会刷新；implicit 没有固定 TTL，由 provider 清理长期未使用数据 | hit rate、expiry、recompute 和 provider scheduler 要分开观测，不能假定“命中过一次就永久热” |
+| Tenant/model boundary | implicit/explicit cache 按 account 隔离，cache data 也按 model 隔离 | prefix key 至少要包含 account、model/revision、tokenizer/template、权限和 session lineage |
+| Usage | Responses API 示例用 `usage.input_tokens_details.cached_tokens`；Chat Completions 示例用 `usage.prompt_tokens_details.cached_tokens` | 字段随 endpoint 变化；不能把一种 API 的 usage schema 硬套给另一种，也不能用简单相减估 GPU KV 字节 |
+
+显式 cache 的文档典型口径是创建按标准输入价 `125%`、命中 `10%`；隐式 cache 创建 `100%`、命中 `20%`；session cache 的账单取决于实际采用的 cache 类型。产品页另有当前美元价格字段，必须以同一 alias 和同一时点的价格页/usage 为准。这里的计费比例、TTL 和 lookback 是 hosted provider 合同，不是 Qwen3.8 Max 的 attention、KV layout 或内部调度实现。
+
+Session cache 还要求把 `x-dashscope-session-cache: enable`、Responses API 和 `previous_response_id` 作为一个 lineage 验证：第一轮创建状态，后续轮次沿 response id 继续；账户、模型、过期和切换任何一项不匹配，都应触发重新计算或明确错误。Responses API 会取回前一轮 input/output 并追加新 input，但不会自动继承前一轮 `instructions`；调用方必须按当前请求重发。`previous_response_id` 不能与 `conversation` 同用，response ID 文档有效期为 7 天，`store=false` 的 response 不能续接。它与控制台对话历史不是同一个功能，也不能把 session cache 误写成永久记忆。
+
+本轮新增的零依赖 [`qwen_max0902_cache_contract_audit.py`](../../research/model-update-2026-09/code/qwen_max0902_cache_contract_audit.py) 只模拟宿主门禁：验证 `reasoning_effort`/`thinking_budget` 互斥、thinking 下 forced tool 拒绝、四-marker 截断、content-block/message 两种 20 上限、endpoint-specific `cached_tokens` 解析、5 分钟 expiry/reset、account/model 隔离、implicit 非保证命中和 session response lineage。输出证据等级为 `local_protocol_toy`，不代表 QwenCloud 生产实现、真实命中率、价格结算或模型质量。
 
 产品页对 coding、工程规模项目、长周期 autonomous development、多工具 Agent 和视觉理解的描述应转成可验收的任务契约：固定 0902 alias、effort、工具、环境、超时、verifier 和输出预算，测任务成功率、恢复率、TTFT、TPOT、p95、cache hit 和单位成功成本。它们不能直接被写成 QSA、GDN、MoE、训练数据或生产 kernel 的证据。
 
@@ -608,3 +649,113 @@ Qwen3.5 的 serving 示例还揭示一个容易忽略的边界：`--language-mod
 - Qwen 官方的 multimodal token、million-agent RL、异步 RL 和 benchmark 数字是发布方自报；不能写成独立复现或完整训练配方。
 - 参数、层排布和 serving 示例来自官方模型卡/配置；完整 GDN/GA kernel、state layout、MTP acceptance length、视觉独立复现、目标硬件 profiling 和 Qwen3.5-Plus hosted/open 精确服务差异仍待核验。
 - 研究证据详见 [`Qwen3.5-397B-A17B 官方资料摘记`](../../research/model-update-2026-09/qwen3.5-397b-a17b-source-notes.md)。本节不新增 Qwen3.5 独立章节，以免与 Qwen3.8 的混合架构专题重复。
+
+## 83.15 Qwen3.6-35B-A3B：混合架构与历史 Thinking Preservation
+
+Qwen3.6-35B-A3B 于 2026-04-16 出现在 Artificial Analysis 的 Reasoning 与 Non-reasoning 配置中。它们是同一模型的配置，不应按两行算成两个锚点。DataCurve 当前没有精确 Agent 结果，因此不能借用其他 Qwen 型号的 DeepSWE 分数。证据明细见 [`qwen3.6-35b-a3b-source-notes.md`](../../research/model-update-2026-09/qwen3.6-35b-a3b-source-notes.md)。
+
+### 83.15.1 周期性 Gated Attention 与 Gated DeltaNet
+
+官方模型卡公开 35B total / 3B activated、40 层与 256 experts（每 token 8 routed + 1 shared）。层布局为：
+
+```text
+10 × [3 × (Gated DeltaNet → MoE) + 1 × (Gated Attention → MoE)]
+```
+
+也就是用三层 Gated DeltaNet 的状态式 token mixing，再周期性插入一层显式 Gated Attention，让低成本状态更新与更直接的历史检索交替出现。模型卡还公开了 GDN 的 32V/16QK heads、head dimension 128，以及显式 attention 的 16Q/2KV、head dimension 256、RoPE dimension 64。此处只复述 Qwen3.6 的模型卡字段；不能把 Qwen3.8 Flash-Next 的 QSA、Gated Residual、N-gram embedding 或 Muon 反向搬到本模型。
+
+### 83.15.2 Thinking Preservation 是模板协议，不是长期记忆
+
+这次更值得面试追问的不是新增一个“memory 模块”，而是**训练行为与对话序列化接口配套设计**。Qwen 官方称 Qwen3.6 经额外训练，可以保留并利用旧消息的 thinking traces；固定 chat template 展示了实际控制点：
+
+- 默认只把最近 user turn 之后生成的 assistant reasoning block 序列化进 prompt；
+- 设 `preserve_thinking=True` 后，历史 assistant thinking block 也进入渲染后的 prompt；
+- `enable_thinking` 独立控制生成 prompt 的 thinking 模式，不负责决定旧历史是否保留。
+
+因此，模型卡所说的“利用历史思考”依赖调用方持续提供 transcript，并由 chat template 决定保留哪些字段。它不是跨会话记忆、不是可变 workspace，也不保证模型在任何被删减/重排过的 transcript 上都能恢复旧计划。完整状态边界与 API surface 差异见第二十册第 21 章 21.30。
+
+官方卡还公开 native context 262,144 tokens、以 YaRN `factor=4.0` 为例扩展约 1,010,000 tokens，以及 MTP multi-step training。static YaRN 的缩放因子可能影响短上下文；推理框架的 MTP 参数与 acceptance rate 也不能互相替代。完整训练 recipe、权重加载、推理效果和硬件 profile 目前均未独立验证。
+
+### 83.15.3 Agent benchmark 分数绑定 evaluator 与执行器
+
+Qwen Team 的[官方发布博客](https://qwen.ai/blog?id=qwen3.6-35b-a3b)补出了模型卡之外的比较表。以下是发布方报告的 Qwen3.5-35B-A3B → Qwen3.6-35B-A3B 分数，不是本项目复现：
+
+| Benchmark | Qwen3.5-35B-A3B | Qwen3.6-35B-A3B |
+|---|---:|---:|
+| SWE-bench Verified | 70.0 | 73.4 |
+| SWE-bench Pro | 44.6 | 49.5 |
+| Terminal-Bench 2.0 | 40.5 | 51.5 |
+| SkillsBench Avg5 | 4.4 | 28.7 |
+| QwenClawBench | 47.7 | 52.6 |
+| NL2Repo | 20.5 | 29.4 |
+
+SWE-bench Pro 的部分任务经修订，发布方称在 refined set 上重跑全部基线；Terminal-Bench 2.0 使用 Harbor/Terminus-2、3 小时 timeout、32 CPU/48 GB RAM、256K context、最高 80K output 并取 5 次均值；SkillsBench 用 OpenCode，只测 78 个 self-contained 子集任务，排除 API-dependent tasks，也取 5 次均值。NL2Repo 的对比模型使用 Claude Code、最多 900 turns。结果因此是“模型 + task set + harness + 资源 + 重复策略”的组合，而非脱离评测版本的裸模型常数。
+
+评测器和模拟器本身也会改变结论：该博客称 TAU3-Bench 使用 GPT-5.2 low-reasoning 作为 user model 并配默认 BM25；VITA-Bench 改用 Claude 4 Sonnet 作 judge，因为当时原指定的 Claude 3.7 Sonnet 已不可用；MCPMark 固定 GitHub MCP v0.30.3，且 Playwright responses 截断到 32K tokens；MCP-Atlas 使用公开集并以 Gemini 2.5 Pro 判分。这些外部模型只作为 Qwen 发布方评测流程的依赖记录，不是本项目另行发现或追踪的模型锚点。QwenClawBench 被标为内部、real-user-distribution 评测，缺少足以独立重建的 task/verifier 细节；QwenWebBench 的自动渲染、多模态 judge 和 Bradley–Terry/Elo 输出也不等同客观 pass rate。
+
+面试审计应逐项固定 task revision、Agent CLI/runtime、user simulator、judge model/version、工具版本、输出截断、资源预算和 seeds/runs；如果其中任何一项改变，应检查所有 baseline 是否在相同条件重跑。更多脚注与来源哈希见 [Qwen3.6-35B-A3B 研究笔记](../../research/model-update-2026-09/qwen3.6-35b-a3b-source-notes.md)。
+
+### 83.15.4 Hosted API alias 与客户端预算
+
+官方博客把该 checkpoint 的百炼调用名写为 `qwen3.6-flash`，同时展示 OpenAI-compatible Chat Completions/Responses、Anthropic-compatible API 与 OpenClaw/Qwen Code/Claude Code 集成。这是已由 Artificial Analysis 发现的 35B-A3B 锚点之 hosted/API 命名证据，不据 `Flash` 另增一个排行榜候选；本项目未实际调用 endpoint。OpenClaw 示例中的 128K context / 16K output 是客户端预算，不能覆盖模型卡的 262,144 native context，详见第二十四册第 61 章 61.32。
+
+## 83.16 Qwen3.6-27B：混合线性注意力的 dense 路线
+
+AA 在 2026-04-22 同时列出 `qwen3-6-27b` Reasoning 与 Non-reasoning；这是一个 Qwen3.6-27B 基础锚点的两种配置。DataCurve 当前没有其精确 Agent 行。与上一节 35B-A3B 的 MoE 结构不同，Qwen 官方 ModelScope 卡将 27B 明确描述为 **dense model**，其 FFN 是 dense，而不是每 token 路由专家。
+
+### 83.16.1 Dense FFN 与周期性 full attention
+
+Qwen3.6-27B 的 64 层可写作：
+
+```text
+16 × [3 × (Gated DeltaNet → FFN) + 1 × (Gated Attention → FFN)]
+```
+
+每四层三层线性/状态式 Gated DeltaNet，再插一层完整 Gated Attention；config 也按 `linear_attention × 3 + full_attention × 1` 重复。它的 FFN intermediate size 是 17,408，GDN 为 16QK/48V、dimension 128，Gated Attention 为 24Q/4KV、head dimension 256、RoPE dimension 64。
+
+| | Qwen3.6-27B | Qwen3.6-35B-A3B |
+|---|---|---|
+| 主体 | 27B dense FFN | 35B total / 3B active sparse MoE |
+| 层数 | 64 | 40 |
+| 每 token FFN | Dense intermediate 17,408 | 256 experts 中 8 routed + 1 shared |
+| Token mixing | 每 4 层 3×GDN + 1×Gated Attention | 同样的 3+1 节奏，每层接 MoE |
+| context | Native 262,144；YaRN `factor=4.0` 示例约 1,010,000 | Native 262,144；同类 YaRN 外推提示 |
+
+同一混合 token-mixing 节奏不意味着部署成本相同：dense 与 MoE 的 active parameters、权重常驻、路由和通信必须分开记账；模型参数名中 `Qwen3_5ForConditionalGeneration` 则是 config/runtime 命名，不是改写排行榜 canonical identity 的理由。
+
+### 83.16.2 MTP 与 Thinking Preservation 的版本边界
+
+官方 config 声明一个 MTP hidden layer、非独立 dedicated embeddings；模型卡另给出 multi-step training。SGLang recipe 使用 NEXTN/3 steps/4 draft tokens，vLLM 示例使用 `qwen3_next_mtp`/2 speculative tokens。这些是框架专属配置示例，不是相同推测解码路径的性能对照；本项目没有独立测 MTP acceptance length、硬件速度或显存收益。另有一篇第三方预印本报告了 Qwen3.6-27B-FP8 的 B=1 GDN 树形验证结果及其严格证据边界，见 83.16.4。
+
+Qwen3.6-27B 与 35B-A3B 的 chat-template 哈希相同，均有 `preserve_thinking`；它说明一个 Qwen3.6 家族共享的对话序列化接口，不应重复算成 27B 新发明。仍要分清历史 thinking 注入、当前 `enable_thinking` 及显式 workspace memory。
+
+### 83.16.3 官方 benchmark 不是脱离 harness 的裸分数
+
+Qwen 官方模型卡披露了若干评测脚注：SWE-Bench Pro 的问题修订后重跑全部基线；Terminal-Bench 2.0 绑定 Harbor/Terminus-2、3 小时与 CPU/RAM 预算；SkillsBench 只评 78 个无 API 依赖子集并取五次均值；QwenWebBench 将代码自动渲染后交给多模态 judge，再用 Bradley–Terry/Elo 汇总。后一种分数是带 evaluator 的偏好排序，不是客观 pass rate；前几种数字也都绑定 task-set/harness/runtime 条件。
+
+可面试的追问是：如果 benchmark 修改任务，是否重跑所有 baseline？多模态 judge 的版本、浏览器和渲染设置是否固定？Elo 的 pairwise coverage 与不确定性如何报告？详细来源与证据边界见 [`qwen3.6-27b-source-notes.md`](../../research/model-update-2026-09/qwen3.6-27b-source-notes.md)。
+
+### 83.16.4 GDN Tree-Scan：混合模型的树验证还要守住递归状态
+
+普通 attention-only transformer 的树形 speculative verification，核心是让每个候选行只能看到 prompt 与祖先节点；Gated DeltaNet 这类 recurrent-hybrid 模型还要求每个树节点携带沿真实 root-to-node 路径得到的 recurrent state。若把打包后的前一行状态错误地交给兄弟节点，即使 attention ancestry mask 正确，候选仍建立在不可能的递归历史上。
+
+第三方预印本 [GDN Tree-Scan](https://arxiv.org/abs/2609.23900v1) 描述的 vLLM 路线结合 FA2 tree-bias attention、branch-local GDN scan/replay、原生 MTP spine、device-side multidraft commitment，以及只发布 accepted chain 的状态边界。它提供一个重要的 serving 面试点：对混合架构，验证不仅要管 KV/attention mask，还要把循环状态的分支、回滚和最终提交纳入同一个树契约。
+
+作者在 Qwen3.6-27B-FP8、B=1、temperature 0.6、四个 SWE/Codex task 上报告，cat6root 相比 native 五步 MTP：每次 verify 的 committed tokens 从 4.11 增至 4.82（+17.2%），verify-forward 时间约为 0.137/0.138 秒；token-weighted decode TPS 从 18.80 到 23.88（+27.0%），per-request-equal TPS 仅 +4.0%。这不是 27% 端到端任务提速：重复 prefill 很重且未启用 prefix cache，论文未报告可推广的 task-wall 增益。
+
+正确性论据是 40-turn recurrent-oracle p-rescore 中的模型 argmax flip 落在观察到的 native numerical floor 附近；它不是完整分布距离证明，也没有 request-cluster bootstrap。作者仍将 B=4、多 seeds 与阶段耗时归因留作后续门槛。这些数字是单作者 arXiv 预印本的自报结果，本项目未运行其 pinned artifact 或独立复现；不归作 Qwen 官方性能数字。详见 [`qwen3.6-27b-source-notes.md`](../../research/model-update-2026-09/qwen3.6-27b-source-notes.md)。
+
+### 83.16.5 官方发布博客：评测分数与 Agent 接入边界
+
+Qwen Team 的[官方发布博客](https://qwen.ai/blog?id=qwen3.6-27b)称，27B dense 多模态模型在智能体编程任务上超过前代 Qwen3.5-397B-A17B；发布方给出的代表性分数如下：
+
+| Benchmark | Qwen3.6-27B | Qwen3.5-397B-A17B |
+|---|---:|---:|
+| SWE-bench Verified | 77.2 | 76.2 |
+| SWE-bench Pro | 53.5 | 50.9 |
+| Terminal-Bench 2.0 | 59.3 | 52.5 |
+| SkillsBench | 48.2 | 30.0 |
+
+这些是发布方报告的结果，不是独立复现。尤其 SWE-bench Pro 使用修订后的部分任务并在修订集上重跑全部基线；SkillsBench 只包含 78 个 self-contained 子集任务。应连同 83.16.3 的 harness、资源和重复次数一起阅读，不能将分数解释成与评测设置无关的模型常数，也不能据此推断未披露的训练技术。
+
+博客还展示 `preserve_thinking`、OpenAI-compatible Chat Completions/Responses、Anthropic-compatible API，以及 OpenClaw、Qwen Code、Claude Code 接入示例。这些说明产品/API 与 transcript 接入面，不是架构披露；OpenClaw 示例的 128K context / 16K output 是客户端预算，低于模型卡的 262,144 native context。博客对百炼 API 可用状态的文字有不一致，本项目未调用真实 endpoint，因此不作可用性结论。官方文章通过 Qwen 文章 API 取得正文，题名、日期、快照哈希和其余证据边界见研究笔记。

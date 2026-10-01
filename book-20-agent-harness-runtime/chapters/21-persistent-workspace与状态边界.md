@@ -275,3 +275,50 @@ workspace 保存可版本化的文件和状态，memory 可能保存偏好、摘
 Persistent workspace 让长任务拥有真实、可版本化的工作环境，但它不是隐式 memory，也不是外部系统授权。可靠设计必须把模型 state、workspace state 和 external state 分开，以 manifest、revision、artifact、权限和提交边界连接它们；并发修改、删除派生副本和后台任务恢复都必须进入同一套审计链路。
 
 本章的版本控制、artifact、租户隔离和分布式一致性是通用工程原则；具体 harness 的 workspace 目录、保留策略和持久化语义以其文档为准。
+
+## 21.29 Claude Fable 5.1：thinking state 有两道独立的绑定门
+
+Persistent workspace 之外，长对话还可能携带 provider 返回的 thinking block。它不是可自由编辑的文本，也不是 workspace 文件；客户端必须把原始 block 当作不透明状态回传。Claude Fable 5.1 的公开协议显示，能否继续使用某个 block 要分别通过两道门：
+
+1. **Model binding：产生 block 的模型是否在目标模型的可读集合内。**
+2. **Prefix binding：该 block 之前的 system、tools 和消息前缀是否保持不变。**
+
+两类不匹配不能混成一个“上下文坏了”错误。当前官方文档给出的关键方向如下：
+
+| thinking block 的 producer | 目标模型 | 公开兼容结论 |
+| --- | --- | --- |
+| Claude Opus 5 或更早的已列 Claude 模型 | Claude Fable 5.1 | 可读 |
+| Claude Opus 5.5 | Claude Fable 5.1 | 仅 Claude API 文档明确可读，不外推到其他托管平台 |
+| Claude Fable 5.1 | Claude Opus 5 或 Claude Opus 5.5 | 目标模型不可读；block 会被丢弃 |
+
+具体可读集合必须按 provider 和 model pair 查官方矩阵。模型兼容是有方向的：Fable 5.1 能读取 Opus 5.5 的 block，不代表 Opus 5.5 能读取 Fable 5.1 的 block；同样，“可读”也不表示该模型是 refusal fallback 的默认目标。Fable 5.1 的文档列出的默认 fallback target 是 Opus 4.8 与 Opus 5，不能因 Opus 5.5 的单向兼容性而擅自加入。
+
+Model-binding 不匹配时，API 会在目标模型看到请求前丢弃不可读 block；文档说明它不进入 input-token 计费。启用 `thinking-binding-controls-2026-08-01` 后，响应的 `input_transformations` 可报告 `model_binding_mismatch`；不启用时这类丢弃可能不显眼。它是状态兼容/路由事件，不是模型拒答或推理失败。
+
+Prefix-binding 检查的是 block 前面的内容。改写早先消息、重建 system prompt 或 tools、删除中间 turn，都会使其后的 thinking blocks 失效。Fable 5.1 对 2026-08-31 00:00 UTC 及之后创建的 API 账户默认执行该检查；更早的账户要通过 `thinking.block_binding.prefix_mismatch_behavior` 明确启用。严格路径返回 400；显式选择 `drop_block` 时，API 丢弃失效 block 并以 `prefix_binding_mismatch` 记录转换原因。
+
+长会话宜采用 append-only transcript：不要为了改指令而重写旧消息，可使用 mid-conversation system message；工具更新使用 `tool_addition`/`tool_removal`；改 effort 使用 per-message `output_config`；裁剪历史优先采用服务端 context editing 或 compaction。文档还区分了安全删除形状：可以从最旧端移除连续的 thinking-block 前缀；从中间挖掉一个 block 会使后续 blocks 失效。effort-only 的消息级更新可以保留已有 prompt prefix/cache，而修改顶层 thinking 配置或早期内容则不能据此假设 cache 仍命中。
+
+因此，一个可恢复的 Agent trace 至少应分别记录 producer/consumer model ID、API surface、block 顺序与 opaque signature 的引用、prefix digest、历史编辑/压缩事件、`input_transformations` 和实际 fallback model。签名与 thinking 内容仍按 provider 的 opaque state 处理，不应作为可读 CoT 展示给用户，也不能把它当作跨模型通用 memory。
+
+当前复核依据为 Anthropic [Fable 5.1 What's New](https://platform.claude.com/docs/en/models/fable-5-1/whats-new-fable-5-1.md)、[Fable 5.1 migration guide](https://platform.claude.com/docs/en/models/fable-5-1/migration-guide.md) 和通用 [Thinking / preserved thinking](https://platform.claude.com/docs/en/build-with-claude/thinking.md)。对应的零依赖协议样例见 [claude_fable51_state_protocol_audit.py](../../research/model-update-2026-09/code/claude_fable51_state_protocol_audit.py)；它只验证本地合成状态机，不代表真实 Anthropic endpoint probe。
+
+## 21.30 Qwen3.6：历史 thinking trace 不等于持久记忆
+
+“模型能利用旧思考”容易被误解成模型在服务端保存了跨轮记忆。Qwen3.6-35B-A3B 的公开实现更具体：模型卡称它经训练以利用历史 thinking；chat template 决定调用方提交的历史里哪些 assistant reasoning block 会被序列化进本次 prompt。
+
+| 控制项 | 作用范围 | 不能推出什么 |
+|---|---|---|
+| `enable_thinking` | 当前生成模式；模板控制生成提示词里的 `<think>` 前缀 | 不代表旧 reasoning block 会保留 |
+| `preserve_thinking` | 输入 transcript；让历史 assistant `<think>…</think>` block 随 prompt 保留 | 不创建服务端 memory，也不保存调用方未再提交的历史 |
+| workspace / 数据库 / memory store | 应用或 Agent runtime 的显式持久化状态 | 不由 chat-template 参数自动创建 |
+
+固定模板在 `preserve_thinking` 未启用时，只输出最后一条 user 消息之后的 assistant reasoning；启用后才将更早的 reasoning block 一并渲染。Qwen 官方称这可能减少重复推理并改善 KV cache 利用，但保留的历史本身也会消耗上下文/KV，实际成本要测，不能把发布方说明写成必然净节省。
+
+请求协议还要区分 endpoint：本地 vLLM/SGLang 示例把开关放在 `chat_template_kwargs`；Model Studio 示例使用相应的顶层字段。相同模型、不同 endpoint 的字段位置不保证相同，宜先做 schema/capability 检查。若 transcript 被删掉、改写或跨会话未重新载入，`preserve_thinking` 无法替应用恢复旧内容。
+
+这与前文 workspace 持久化的层次关系是：模型可处理历史 reasoning ≠ API 自动保存历史 ≠ Agent runtime 将事实写入持久 workspace。一次可靠的长任务系统应明确存储权威事实、压缩/裁剪策略、来源和版本；不要把模型原始 thinking 当作唯一 checkpoint 或用户可见解释。
+
+Qwen 官方发布博客也明确推荐 Agent 使用 `preserve_thinking`，并示例 `qwen3.6-flash` hosted ID 与 OpenClaw/Claude Code/Qwen Code 接入；这些是 API/产品合同示例，不证明真实 endpoint 当前可用，也不改变“调用方必须重传 transcript”的状态边界。博客评测依赖的 user model、judge 和任务执行器另见第二十一册第 83 章 83.15.3。
+
+来源与固定 artifact 记录见 [`Qwen3.6-35B-A3B 资料摘记`](../../research/model-update-2026-09/qwen3.6-35b-a3b-source-notes.md)。本节依据静态官方模型卡、模板和发布博客，不代表真实 API 行为、端到端任务连续性或生产级 memory 评估。

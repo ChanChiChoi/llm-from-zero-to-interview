@@ -130,3 +130,13 @@ Remote MCP 支持 `server_url`、`server_label`、可选的 `server_description`
 6. 为什么不能把 xAI 发布方的 DeepSWE `71.0%` 与 DataCurve 或 AA 分数合并？
 7. Grok 4.7 的 `encrypted_content`、可见 reasoning summary 和 `store`/`previous_response_id` 分别解决什么问题？
 8. 为什么 MCP 的 `allowed_tools`、`allowed_tool_names`、`extra_headers` 和 `require_approval` 不能直接当作统一安全模型？
+
+## 9. 2026-09-23 `7890` 当前复验与本地回放审计
+
+本轮用已验证可达的 `10.24.27.134:7890` 重新取得两张排行榜。Artificial Analysis 中文首页为 `1,783,572` bytes、SHA-256 `999ead1b8d025a8abccc5d6e879e548544770335863dec1be06b21d99378f8e2`；DataCurve DeepSWE 为 `268,036` bytes、SHA-256 `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7e6e095ad59f1f1`。按八家重点厂商的 canonical slug 去重后没有新模型，也没有精确的 `mini_swe_agent_grok_4_7_*` 行。
+
+Grok 4.7 详情当前为 `3,992,680` bytes、SHA-256 `9b24aa029ee4023aa2918495910a282a96f8bd9bba42848921f9496684e3e6bb`。页面仍确认 `releaseDate=2026-09-21`、Intelligence Index `46.4465506302286`、500K context、proprietary、parameters null；页面尺寸/hash 变化只按动态页面刷新记录，不解释为模型 revision。xAI 模型页、Reasoning 和 Context Compaction 当前快照分别为 `376,911`/`72e4d59db379c9be4e1d68c9f5c14eff2281d9c9ffa5d2f3bcdb0e701471319c`、`522,822`/`f69666e9a7a47e75c7a394875e280ec15e6e2003a8cd1a6ec6a0e64334fa357a`、`521,433`/`ff467261f7174c235987232139c6c839d0488858507f3ac0f598afd3d0f48eb3`；正文没有观察到合同变化。
+
+新增 [`grok47_state_replay_audit.py`](code/grok47_state_replay_audit.py) 作为本地协议 toy。它验证 Responses trace 中模型身份与 transport、encrypted reasoning/tool state 原样保存、summary 与 opaque state 分离、function call/output lineage、单一 compaction item、`store=false` 与 `previous_response_id` 的边界，以及幂等回放不重复执行副作用。脚本不联网、不解密、不调用 xAI，证据等级固定为 **local_protocol_toy**；它不能升级为真实 provider 行为、模型质量、内部推理算法、完整权重、硬件 profiling 或生产 SLO。
+
+当前状态仍为 **AA 单榜内容专题闭环 + 当前时点快照复验 + local protocol toy**。参数、架构、完整训练/后训练 recipe、生产 kernel、线上 acceptance、硬件 profiling、独立 benchmark 和完整安全评测继续保持 `unverified`。

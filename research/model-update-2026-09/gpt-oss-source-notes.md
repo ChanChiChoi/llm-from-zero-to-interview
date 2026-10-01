@@ -1,6 +1,6 @@
 # OpenAI gpt-oss 官方资料摘记
 
-核验日期：2026-09-18。本笔记只升级已经在 Artificial Analysis 出现的 `gpt-oss-120b` 与 `gpt-oss-20b`。DataCurve DeepSWE 当前快照没有精确的 `mini_swe_agent_gpt_oss_*` 行，因此不迁移其他 OpenAI 模型或其他 Agent harness 的分数。
+初始核验日期：2026-09-18；当前时点复验：2026-09-23。本笔记只升级已经在 Artificial Analysis 出现的 `gpt-oss-120b` 与 `gpt-oss-20b`。DataCurve DeepSWE 当前快照没有精确的 `mini_swe_agent_gpt_oss_*` 行，因此不迁移其他 OpenAI 模型或其他 Agent harness 的分数。
 
 ## 1. 榜单锚点与证据分层
 
@@ -232,3 +232,27 @@ Harmony/render + API shape
 ```
 
 本轮新增的是官方兼容性和 raw CoT 协议证据；没有新增模型、权重 revision 或独立 benchmark。完整训练 recipe、router 负载均衡、MXFP4 kernel 误差、真实 provider 行为、目标硬件 profiling、线上接受率和独立复现仍待核验。
+
+## 14. 2026-09-23 7890 当前时点复验：榜单字段与负证据
+
+本轮使用用户确认可用的 `10.24.27.134:7890` 重新验证联网状态：百度、Artificial Analysis 中文首页和 DataCurve DeepSWE 均返回 HTTP 200。当前榜单页面快照为：AA 中文首页 `1,783,626` bytes / SHA-256 `0580fad58c167fb96e87289addbabccd40cbd60302c527437805c8eb6ee7530b`；DataCurve `268,036` bytes / SHA-256 `14436c31be1e50a0b62171e4aee4dd0ae0ce66b1e390af89c7e6e095ad59f1f1`。
+
+本次仍只沿两个榜单已经存在的 `gpt-oss-120b` 与 `gpt-oss-20b` 推进，没有从 OpenAI Cookbook、GitHub 或 Hugging Face 另发现模型。AA 详情页的当前快照和第三方观察字段如下：
+
+| AA 条目 | 详情快照 | 当前观察字段 |
+|---|---|---|
+| `gpt-oss-120b (high)` | `4,078,295` bytes / SHA-256 `43e5f13a3e58976b077acac1810bce82ac60ce33a7d81476f0dc2b17175532de` | 117B total、5.1B active、131,072 context、Intelligence Index `11.6028431512592`、median output speed `196.389235173389 tokens/s`、cost per Intelligence Index task `0.10742452290394947` |
+| `gpt-oss-20b (high)` | `4,083,068` bytes / SHA-256 `64d67047a5964c0109f103108f9b77c64edbaf1ee17f3fec3c82ffccd7cea2cc` | 21B total、3.6B active、131,072 context、Intelligence Index `8.9675171856126`、median output speed `185.656167974395 tokens/s`、cost per Intelligence Index task `0.012460640242179213` |
+
+这些是 AA/provider 在采集时点的目录与测量字段，不是 OpenAI 模型卡的新架构、训练或权重证据。详情页的动态页面内容发生变化也不能单独证明模型 revision 变化。DataCurve 当前快照仍没有精确的 `mini_swe_agent_gpt_oss_120b_*` 或 `mini_swe_agent_gpt_oss_20b_*` 行，因此不迁移 GPT-5.x、Codex 或其他 OpenAI 模型的 Agent 结果；该缺失是本快照的负证据，不宣称所有历史版本都不存在。
+
+### 14.1 官方 Cookbook 当前快照
+
+7890 当前取得的两个官方页面为：
+
+| 官方资料 | 当前快照 | 与上一轮的解释 |
+|---|---|---|
+| [Verifying gpt-oss implementations](https://developers.openai.com/cookbook/articles/gpt-oss/verifying-implementations) | `337,423` bytes / SHA-256 `e6500d57bc6041133a8f63acc03101260182ea58d45d2f7248806ae609c85474` | 动态正文快照更新；仍是 API shape、tool call/result、streaming、invalid request 和质量 eval 分层指南 |
+| [How to handle the raw chain of thought](https://developers.openai.com/cookbook/articles/gpt-oss/handle-raw-cot) | `339,052` bytes / SHA-256 `1c08e3fb06a129256596c1af9ba907b7b3c435be3b61cfb00a72da83b1071fe6` | 动态正文快照更新；仍确认 `reasoning_text`、raw CoT 受控回放和终端不可见边界 |
+
+与 9 月 22 日快照相比，页面字节数/哈希发生变化，但本轮没有观察到新的模型 ID、权重 revision 或架构声明。当前 gpt-oss 状态因此更新为：**AA 当前时点复验 + 官方 Model Card/仓库/Harmony/Cookbook 证据 + provider compatibility/raw-CoT protocol evidence**；完整训练/后训练 recipe、MoE 负载均衡、MXFP4 kernel/误差、目标硬件 profiling、独立 Agent 评测和生产 acceptance 仍待核验。

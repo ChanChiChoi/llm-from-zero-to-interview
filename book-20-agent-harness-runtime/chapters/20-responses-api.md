@@ -322,7 +322,7 @@ tool_registry_hash, call_id, permission, executor_receipt
 compaction_id, cache_state, artifact_digest, verifier_result
 ```
 
-GPT-6 family 的 `configuration_update` 还需要记录在原始历史位置；相邻 update 会被拒绝，且不能与自动 compaction/truncation 同用。这样做的意义不是保存 raw CoT，而是让下一轮能够判断哪些协议状态可以继续、哪些必须重新生成。
+GPT-6 family 的 `configuration_update` 还需要记录在原始历史位置；相邻 update 会被拒绝，且不能与自动 compaction/truncation 或独立 `/responses/compact` 同用。显式 compact 后，下一条用户消息前要重新插入 update。effective effort 会持续到下一个覆盖项；响应中的 `reasoning.effort` 仍是 request-level 值，因此不能拿它当实际生效档位。更新项适用于 Responses 与 WebSocket `response.create`，并以保留原 prompt prefix、利于缓存复用为设计动机；缓存命中仍须看实际 usage，而非从协议设计推定。
 
 ### 20.27.2 面试中的一句话
 
@@ -330,8 +330,26 @@ GPT-6 family 的 `configuration_update` 还需要记录在原始历史位置；�
 
 资料依据：[GPT-6 Sol model page](https://developers.openai.com/api/docs/models/gpt-6-sol.md)、[Agents](https://developers.openai.com/api/docs/guides/agents.md)、[Compaction](https://developers.openai.com/api/docs/guides/compaction.md)。
 
+### 20.27.3 GPT-6 Sol 合同审计 toy
+
+本节的最小可运行练习是 [`gpt6_sol_contract_audit.py`](../../research/model-update-2026-09/code/gpt6_sol_contract_audit.py)。它把 mode/effort、update placement、budget `incomplete`、whole-request pricing、permission decision、executor receipt、artifact digest、function-call lineage、opaque compaction 和 cache prefix 分成独立状态；重复相同 idempotency key 只返回 duplicate receipt，不重复外部执行。该结果只能说明本地状态机通过，不能证明 OpenAI 服务端实现、隐藏 reasoning 或生产 SLO。
+
 ### 20.28 GPT-6 Luna：同一 runtime，不同 sibling contract
 
 Luna 可以复用 GPT-6 family 的 Agents API、Agents SDK、Responses API ownership、tool search 和 opaque compaction replay 规则，但 trace 中必须保留精确 model ID、snapshot、effort、mode、价格和 provider。模型页的工具列表不自动授予 shell、MCP、computer use 或网络权限；permission engine、executor、sandbox 和 verifier 仍归宿主 harness。
 
-Luna 当前是 AA 单榜资料级闭环，DataCurve 没有精确 Agent 行。因而测试应在 sibling 之间做合同和成本对照，而不是迁移 Sol 的 Agent score；缺失精确行时输出 `not_applicable`。证据见 [`gpt-6-luna-source-notes.md`](../../research/model-update-2026-09/gpt-6-luna-source-notes.md)。
+Luna 当前是 AA 单榜资料级闭环，DataCurve 没有精确 Agent 行。因而测试应在 sibling 之间做合同和成本对照，而不是迁移 Sol 的 Agent score；缺失精确行时输出 `not_applicable`。effort 更新与 compaction 的拒绝/恢复边界见 20.27.2；该 family-level API 合同不是 Luna 的内部架构特性。证据见 [`gpt-6-luna-source-notes.md`](../../research/model-update-2026-09/gpt-6-luna-source-notes.md) 与 [OpenAI Reasoning guide](https://developers.openai.com/api/docs/guides/reasoning.md)。
+
+## 20.29 榜单标签、API alias 与 resolved snapshot 必须分账
+
+评测和线上 trace 至少要区分排行榜展示名、排行榜 canonical/configuration、请求 API ID、动态服务 alias、响应中的实际 `model` 和 resolved snapshot。名字相近、能力描述相似或都带 “Instant” 都不构成身份映射。
+
+OpenAI 官方目录把 `chat-latest` 描述为 ChatGPT 当前 latest Instant model，且说明底层 snapshot 会定期更新，但没有公开当前 snapshot；GPT-5.5 模型页则给出独立 API ID `gpt-5.5` 和 snapshot `gpt-5.5-2026-04-23`。AA 的 `GPT-5.5 Instant (June 2026)` 因而不能仅凭名称等同于 `chat-latest` 或 `gpt-5.5`。如果评测 harness 不能观察 resolved snapshot，报告应明确记为 `unresolved`，而非填入猜测值。
+
+| 字段 | 示例 | 证据用途 |
+|---|---|---|
+| leaderboard label/config | AA `GPT-5.5 Instant (June 2026)` | 识别第三方评测对象；不自动等同于 API ID |
+| requested API model | `chat-latest` 或 `gpt-5.5` | 记录客户端实际请求字符串；两者不能互换 |
+| served model / resolved snapshot | `response.model`、provider trace 或明确版本记录 | 证明请求最终落到哪个模型版本；当前 `chat-latest` 文档未给出预映射 |
+
+面试回答的核心是：先证明模型身份与请求血缘，再比较分数、价格、延迟或能力；没有显式 mapping 或可审计的 endpoint trace，就不迁移 benchmark 结果。资料依据：[OpenAI Models](https://developers.openai.com/api/docs/models.md)、[Chat Latest](https://developers.openai.com/api/docs/models/chat-latest.md)、[GPT-5.5](https://developers.openai.com/api/docs/models/gpt-5.5.md) 和 [`gpt-5.5-source-notes.md`](../../research/model-update-2026-09/gpt-5.5-source-notes.md)。

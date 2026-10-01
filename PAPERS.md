@@ -1,5 +1,13 @@
 # 论文路线
 
+## Gemini 4 Argon（官方发布资料，非论文）
+
+[Google The Keyword: Introducing Gemini 4 Argon](https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-4-argon/)。记录 1M 输出预算、长程 coding/enterprise/cyber 定位、发布方评测和分阶段安全措施。Google 未公开 Argon 专属技术报告或完整训练 recipe；文章中的评测均按发布方结果处理，不当作独立复现。
+
+## GPT-6.1 Sol（2026-10-01）
+
+暂无 GPT-6.1 Sol 专属公开论文或技术报告。本轮使用 OpenAI 官方模型页、Reasoning、Agents、Compaction 文档记录 API/runtime 合同；不把文档当作内部架构或训练论文。
+
 ## 入门必读
 
 1. Attention Is All You Need
@@ -65,6 +73,7 @@ FlashAttention、PagedAttention、Speculative Decoding、量化论文。
 5. Speculative Decoding / Speculative Sampling。
 6. Medusa、EAGLE 等多 token 预测和推测解码路线。
 7. GPTQ、AWQ、SmoothQuant、KV Cache Quantization 等量化路线。
+8. [DFlash: Block Diffusion for Flash Speculative Decoding](https://arxiv.org/abs/2602.06036)：target hidden feature 的跨层融合、逐层 K/V 注入、block diffusion draft 与 target verification。
 
 ### Agent、工具协议与 Coding Agent
 
@@ -199,6 +208,8 @@ Red Teaming、Mechanistic Interpretability、SAE、Model Editing、Unlearning、
 5. [DeepSeek `deepseek-recipe` pinned commit](https://github.com/deepseek-ai/deepseek-recipe/tree/8cadfede7063c896b944e7bae05daa3549ae97ea)：固定源码归档 SHA-256 `1116ca33e9dc62a913fb9214578c400f1704e6bca33487f4a4c31b32c67a21a6`；记录协议转换、V4.1 encoding/tokenizer、增量流式 parser、图像 quota 和 mock server 接线。它不是推理后端、工具执行器或 verifier。
 6. [vLLM v0.30.0 release](https://github.com/vllm-project/vllm/releases/tag/v0.30.0) 与 [stable registry](https://raw.githubusercontent.com/vllm-project/vllm/v0.30.0/vllm/model_executor/models/registry.py)：tag commit `ced6857afa0ea7b2e3f0846a62e1394e90f15607`，registry 已登记 `DeepseekV41ForCausalLM`/`DSparkV41DraftModel`；这是 V4.1 stable release/source evidence，不是完整权重、硬件 profiling 或生产 acceptance。
 7. [PyPI vLLM 0.30.0 metadata](https://pypi.org/pypi/vllm/0.30.0/json)：固定 release artifact、wheel 和 sdist 的大小/SHA-256；它证明可分发包存在，不证明当前环境安装成功、target/draft verify、FP4 质量或线上 SLO。
+8. [DeepSeek Harness quickstart](https://deepseek-harness.github.io/deepseek-harness/en/guide/quickstart)、[providers](https://deepseek-harness.github.io/deepseek-harness/en/guide/providers)、[architecture/reference](https://deepseek-harness.github.io/deepseek-harness/en/reference/)、[MCP memory](https://deepseek-harness.github.io/deepseek-harness/en/guide/mcp-memory) 和 [GitHub review](https://deepseek-harness.github.io/deepseek-harness/en/guide/github-review)：官方 Preview runtime 文档，覆盖 provider/session/plugin/MCP/webhook 合同；它不是 V4.1 技术报告或内部架构证据。
+9. [SGLang v0.5.20 release notes](https://github.com/sgl-project/sglang/releases/tag/v0.5.20) 与 [PR #39116](https://github.com/sgl-project/sglang/pull/39116)、[#38192](https://github.com/sgl-project/sglang/pull/38192)、[#37764](https://github.com/sgl-project/sglang/pull/37764)：DeepSeek-V4 AMD/HIP 路径中的 DSpark graph replay、unified-KV/SWA ring 容量记账、FP4 indexer schedule fusion。发布数字绑定指定实现/负载，不是模型能力或独立复现；具体边界见 V4.1 研究笔记。
 
 该协议 artifact 的面试价值在于把 `model -> protocol -> transport -> executor -> verifier` 分层。README 列出的 `logprobs`、server-side web search、JSON Schema/strict enforcement、`n>1`、Responses context storage 和 encrypted thinking 未支持项属于该适配器 commit 的能力边界，不能改写成 V4.1 模型能力的负面证明；图像 fetcher 的 SSRF 警告也必须保留。
 
@@ -215,7 +226,9 @@ Red Teaming、Mechanistic Interpretability、SAE、Model Editing、Unlearning、
 3. [Qwen3.8-Flash-Next model card](https://huggingface.co/Qwen/Qwen3.8-Flash-Next)：核对 125B/6B active、约 51B N-gram、4B MTP、GDN + QSA、四分支 Gated Residual 和视觉字段。
 4. [Qwen3.8-Flash-Next GitHub](https://github.com/QwenLM/Qwen3.8-Flash-Next)：实验性架构预览、实现入口和技术报告索引。
 5. [Flash-Next 技术报告](https://github.com/QwenLM/Qwen3.8-Flash-Next/blob/main/tech_report.pdf)：QSA 的 micro-block indexer/两阶段训练、GR、N-gram host-memory prefetch、Muon/AdamW 分工与评测设置。
-6. [Artificial Analysis Qwen3.8 条目](https://artificialanalysis.ai/models/qwen3-8-flash-next)：候选发现来源；[DataCurve DeepSWE](https://deepswe.datacurve.ai/) 当前快照只检出 `qwen3.8-max`。
+6. [vLLM `v0.30.0` Qwen4Exp](https://github.com/vllm-project/vllm/tree/v0.30.0/vllm/models/qwen4_exp) 与 [model registry](https://github.com/vllm-project/vllm/blob/v0.30.0/vllm/model_executor/models/registry.py)：固定版本 QSA、PLE、Gated Residual、MTP 实现和测试入口；本项目只做静态源码核对。
+7. [SGLang `v0.5.20` model sources](https://github.com/sgl-project/sglang/tree/v0.5.20/python/sglang/srt/models) 与 [vLLM Qwen recipe](https://recipes.vllm.ai/Qwen/Qwen3.8-Flash-Next)：用于核对 indexer 调度、PLE offload 与特定部署条件；性能/容量数据属于来源方条件，不是本地验收。
+8. [Artificial Analysis Qwen3.8 条目](https://artificialanalysis.ai/models/qwen3-8-flash-next)：候选发现来源；[DataCurve DeepSWE](https://deepswe.datacurve.ai/) 当前快照只检出 `qwen3.8-max`。
 
 模型卡和报告可证明公开字段与作者披露的技术路线，不能自动证明完整生产 kernel、目标硬件 profiling、线上 acceptance rate、全系列训练配方或独立 benchmark。Flash-Next 报告中的速度、loss、稳定性和 benchmark 数字必须保留为发布方自报；Qwen3.8-Max 是官方说明基于 A95B 的 hosted version，不作为新的 open checkpoint。
 
@@ -230,7 +243,7 @@ Red Teaming、Mechanistic Interpretability、SAE、Model Editing、Unlearning、
 7. [Transformers GLM5-Next 文档](https://github.com/huggingface/transformers/blob/main/docs/source/en/model_doc/glm5_next.md)：基础接入文档明确不包含 MTP layer，用于区分 checkpoint/framework 与 serving runtime 能力。
 
 8. [SGLang `v0.5.20` GLM5Next source](https://github.com/sgl-project/sglang/blob/v0.5.20/python/sglang/srt/models/glm5_next.py) 与 [SGLang main source](https://github.com/sgl-project/sglang/blob/main/python/sglang/srt/models/glm5_next.py)：分别作为固定 stable entry 和 mutable upstream 演进证据。
-9. [vLLM main GLM5Next source](https://github.com/vllm-project/vllm/tree/main/vllm/models/glm5next) 与 [vLLM v0.29.0 tree](https://github.com/vllm-project/vllm/tree/v0.29.0)：前者支持 indexer/tail/KDA/MTP 源码级讨论，后者用于记录当前快照未检出专属目录的负证据。
+9. [vLLM v0.30.0 GLM5Next fixed tree](https://github.com/vllm-project/vllm/tree/v0.30.0/vllm/models/glm5next)、[fixed main commit](https://github.com/vllm-project/vllm/tree/81d7293c2167e39f3ffddc9a82d633f94e8a1eaa/vllm/models/glm5next) 与 [v0.29.0 tree](https://github.com/vllm-project/vllm/tree/v0.29.0)：stable source 已逐文件确认 cache/KDA/MTP/multimodal 路径；attention/indexer、KPool stride-aware tail kernel、Quark weight-loading 与 fixed main 有差异，具体 blob 和结论见 [研究笔记](research/model-update-2026-09/glm-5.3-flash-source-notes.md)。源码进入 stable 不等于 wheel、权重、硬件或生产 acceptance 通过。
 
 这些资料中没有公开 GLM-5.3-Flash 的完整训练报告或生产 kernel。`3.01x/4.44x` attention/KV、约 `3x` serving 和视觉 self-verification 必须标作发布方自报；研究笔记与正式章节见 [`glm-5.3-flash-source-notes.md`](research/model-update-2026-09/glm-5.3-flash-source-notes.md) 和 [`第二十一册第 84 章`](book-21-transformer-architecture-evolution/chapters/84-glm-5.3-flash混合注意力与视觉闭环.md)。
 
@@ -238,7 +251,7 @@ Red Teaming、Mechanistic Interpretability、SAE、Model Editing、Unlearning、
 
 1. [Artificial Analysis DeepSeek V3.2](https://artificialanalysis.ai/models/deepseek-v3-2)：本轮模型发现锚点，当前页面为 `Non-reasoning` 配置；Artificial Analysis 的指数、参数和上下文字段只作为第三方榜单/目录字段。
 2. [DeepSeek V3.2 模型卡](https://huggingface.co/deepseek-ai/DeepSeek-V3.2)：官方资料明确列出 DeepSeek Sparse Attention、scalable RL framework、large-scale agentic task synthesis pipeline，以及 `thinking with tools` 和新的工具调用模板。
-3. [DeepSeek V3.2 技术报告](https://huggingface.co/deepseek-ai/DeepSeek-V3.2/blob/main/assets/paper.pdf)：官方报告入口；已抽取并核对正文段落，补充 DSA 两阶段训练、2,048 KV top-k、约 2.1B/943.7B tokens、GRPO 稳定化和 Agent 任务合成规模；图表/公式因 PDF 字体抽取失真仍不作未经视觉复核的精确引用。
+3. [DeepSeek V3.2 技术报告](https://huggingface.co/deepseek-ai/DeepSeek-V3.2/blob/main/assets/paper.pdf)：官方报告入口；已核对 DSA 两阶段训练、2,048 KV top-k、约 2.1B/943.7B tokens、GRPO 稳定化和 Agent 任务合成规模。Figures 1–7 已从 arXiv v1 单独取图/面板并视觉核验；arXiv v1 HTML 中全部编号公式 Eq. (1)–(9) 的 TeX annotations 已文本核对但未在 PDF 页面视觉核验；未编号行内数学表达式未做穷尽审计。
 4. [DeepSeek V3.2-Exp 仓库](https://github.com/deepseek-ai/DeepSeek-V3.2-Exp)：模型卡指向的本地运行与结构入口；`V3.2-Exp`、`V3.2-Speciale` 是关联版本/变体，不作为新的排行榜基础模型。
 
 DataCurve 当前快照没有精确的 `mini_swe_agent_deepseek_v3_2_*` 行，所以不迁移其他 DeepSeek 版本的 Pass@1、成本或 Agent steps。DSA 的完整 indexer 训练目标、kernel、KV 字节账本、scalable RL 的完整 recipe、任务合成过滤器和线上 tool-call acceptance rate 均待核验。
@@ -249,7 +262,16 @@ DataCurve 当前快照没有精确的 `mini_swe_agent_deepseek_v3_2_*` 行，所
 6. [DeepGEMM PR #200](https://github.com/deepseek-ai/DeepGEMM/pull/200) 与 [FlashMLA PR #98](https://github.com/deepseek-ai/FlashMLA/pull/98)：分别提供 FP8 MQA logits/paged MQA logits，以及 sparse prefill/sparse FP8 decode/SM90 sparse MLA 的高性能 CUDA 入口。
 7. [TileLang DeepSeek V3.2 examples](https://github.com/tile-ai/tilelang/tree/main/examples/deepseek_v32)：将执行链拆为 Lightning Indexer、radix/histogram top-k selector 和 sparse MLA，并展示 pipelined double buffering 与 FP8 sparse MLA；这是研究实现证据，不是本地性能复现。
 8. [vLLM DeepSeek-V3.2-Exp recipe](https://docs.vllm.ai/projects/recipes/en/latest/DeepSeek/DeepSeek-V3_2-Exp.html)：核对 DeepGEMM 的 MoE/MQA logits 使用、`DP=8, EP=8, TP=1`、TP fallback、FP8/BF16 KV cache、`max-num-seqs` 与 GSM8K recipe 结果。5-shot `0.9591`/20-shot `0.9538` 绑定 V3.2-Exp + vLLM + lm-eval，不能写成裸模型分数。
-9. 正式落点为第二十一册第 19 章的 [`19.29--19.33`](book-21-transformer-architecture-evolution/chapters/19-Sliding-Window与稀疏注意力.md)：补充最终 V3.2 与 V3.2-Exp artifact 分层、FP8 indexer/sparse MLA 执行链、kernel/recipe/模型能力分账和 `thinking with tools`/DSML encoding 协议边界。
+9. 正式落点为第二十一册第 19 章的 [`19.29--19.43`](book-21-transformer-architecture-evolution/chapters/19-Sliding-Window与稀疏注意力.md)：补充最终 V3.2 与 V3.2-Exp artifact 分层、FP8 indexer/sparse MLA 执行链、kernel/recipe/模型能力分账、`thinking with tools`/DSML encoding 协议边界、Search Agent context management，以及 Figures 1–7 与 DSA/scalable RL Eq. (1)–(9) 的架构、评测、训练和证据边界。
+10. [DeepSeek V3.2 arXiv v1 HTML](https://arxiv.org/html/2512.02556v1)：§4.4 对比 `Summary`、`Discard-75%`、`Discard-all` 与 `Parallel-fewest-step`；报告给出 80% context trigger、128K 上限下约 20%+ 案例超限，以及 BrowseComp Pass@1 无管理 51.4/带管理 67.6*。这些是商业 Search API + Agent harness 的论文结果；“up to 60.2”原文未标百分号，不能改写成 `+60.2%`。
+11. Figure 3 的 [prefill cost panel](https://arxiv.org/html/2512.02556v1/cost_prefilling.svg) 与 [decode cost panel](https://arxiv.org/html/2512.02556v1/cost_decoding.svg) 已视觉核验：token position 越长，V3.2 的每百万 token 成本曲线越平缓；极短位置存在交叉。报告口径为 H800 实际部署服务并按 `$2/GPU-hour` 估算，不是 API 单价或独立复现；不从无数值标签曲线估读点值。
+12. [Figure 4 thinking-retention illustration](https://arxiv.org/html/2512.02556v1/figures/template.JPEG)：同一轮中追加工具消息时保留历史 thinking；新的 user message 到来后清除旧 thinking，但保留 tool-call/result 与前轮 answer。该图说明消息类别与上下文回放策略的耦合，不是永久记忆或通用客户端保证。
+13. [Figure 5 合成 Agent 数据 RL 曲线](https://arxiv.org/html/2512.02556v1/figures/synthesis-rl-plot.png)：对比 synthetic-data RL、V3.2-SFT 与 search/code RL 的 V3.2-Exp 基线。曲线属于发布方训练消融，不是最终模型的独立 benchmark，也不能证明真实环境泛化因果、数据无污染或完整 RL recipe 已公开。
+14. Figure 7 的 [MLA-MHA panel](https://arxiv.org/html/2512.02556v1/MLA-MHA.svg) 与 [MLA-MQA panel](https://arxiv.org/html/2512.02556v1/MLA-MQA.svg) 展示 per-head K/V 投影与 shared latent KV 两种形式。V3.1-Terminus 阶段安排与 V3.2-Exp inference demo 必须分别归因；图示不单独证明 cache bytes、吞吐、kernel 覆盖或质量等价。
+15. [Figure 1 benchmark chart](https://arxiv.org/html/2512.02556v1/v32_performance.svg) 分隔 reasoning/agentic 指标，且 Codeforces 使用不同纵轴。HMMT 2025 February、HLE text-only 与 HLE 模板变体应显式记录；V3.2-Thinking 在通用模板与 HLE 官方模板下的 HLE 数字不同（图中 25.1，正文另报 23.9）。作者报告的内部 tool-use 环境结果不等于 AA/DataCurve 或独立复现。
+16. DSA Eq. (1)–(4) 的 HTML TeX 文本说明：index score 不等于概率/attention output；Top-k 只选 latent KV，主 attention 再算结果；dense warm-up 与 sparse stage 使用不同范围的 indexer KL。Eq. (4) 没有明确写子集后的 target normalization，训练代码待核验；本轮 PDF 下载成功但未视觉核验。
+17. [DeepSeek-V3.2-Exp 官方仓库](https://github.com/deepseek-ai/DeepSeek-V3.2-Exp)：本轮 7890 可读网页与 raw README，仓库明确公开 inference demo 并链接 TileLang/DeepGEMM/FlashMLA；可见根目录没有 trainer/loss 源码入口。该负证据只限当前仓库，不能推断其他官方或私有训练代码不存在，也没有解答 Eq. (4) 的 target normalization。
+18. Eq. (5)–(9) 的 arXiv v1 HTML TeX annotations 已文本核对：Eq. (5) 嵌套 group response mean 与 per-response token mean；Eq. (6) 展示 outcome reward 减 group mean；Eq. (7) 用 current/old importance weight 修正 KL estimator；Eq. (8) mask 只乘 clipped policy 项；Eq. (9) 仅屏蔽负 advantage 且 response-mean divergence 超阈值的序列。Keep Routing 与 Keep Sampling Mask 是作者披露的额外稳定化策略。仅为 HTML 源文本检查，未在 PDF 页面视觉核验，不代表完整训练 recipe。
 
 配置边界纠正：固定官方 V3.2 `config.json` 与 V3.2-Exp inference config 都是 `q_lora_rank=1536`，但属于不同 revision/artifact；不能把实验实现字段、kernel 或 recipe 合并成最终 V3.2 的完整生产配置或独立 benchmark。
 
@@ -265,11 +287,11 @@ V3.2-Exp README 当前快照为 6,899 bytes / SHA-256 dffcdf358a42599945d49293a4
 2. [Qwen3.8-Max-0902](https://www.qwencloud.com/models/qwen3.8-max-0902)：官方产品页；alias 为 `qwen3.8-max-2026-09-02`，明确称其为 `qwen3.8-max` 的 upgraded snapshot，并给出 1M/991K/983K/131K 请求边界和价格快照。
 3. [Qwen Cloud Thinking](https://docs.qwencloud.com/developer-guides/text-generation/thinking)：核对 `reasoning_effort=low/medium/xhigh`、默认 `xhigh` 和与 `thinking_budget` 的互斥关系。
 4. [Qwen Cloud Function Calling](https://docs.qwencloud.com/developer-guides/tool-calling/function-calling)：核对 thinking 模式下 `tool_choice` 只能为 `auto`/`none`，以及 `MultiModalConversation` 接口。
-5. [Qwen Cloud Context Cache](https://docs.qwencloud.com/developer-guides/run-and-scale/context-cache)：核对 explicit、implicit、session cache、最小 1,024-token 长度及不同命中/计费/有效期语义。
+5. [Qwen Cloud Context Cache](https://docs.qwencloud.com/developer-guides/run-and-scale/context-cache)：核对 explicit、implicit、session cache、最小 1,024-token 长度及不同命中/计费/有效期语义；7890 复核还确认 `ephemeral` marker、最多 4 个且只取最后 4 个、20 content-block lookback、5 分钟 TTL/reset、账户/模型隔离、`previous_response_id` lineage 和 `usage.input_tokens_details.cached_tokens`。
 6. [Qwen Cloud Dynamic Rate Limiting](https://docs.qwencloud.com/developer-guides/administration/dynamic-rate-limits)：核对 account+model 聚合、workspace override、月度 TPM tier、soft limit 和 `qwen3.8-max-0902` 的 `1,500,000 / 1,500,000 / 1,500,000` 保证 TPM；这是 hosted quota 证据，不是模型吞吐或 GPU capacity。
 7. [DataCurve DeepSWE](https://deepswe.datacurve.ai/)：只有泛化 `mini_swe_agent_qwen3_8_max_xhigh` 行；没有 0902 精确行，不迁移 Pass@1、成本或 Agent steps。
 
-本轮没有检出 0902 专属论文、独立技术报告、公开新权重或完整架构说明。QwenCloud 文档示例已从 `dashscope-intl.aliyuncs.com` 迁移到 `maas.qwencloudapi.com`，这是 provider adapter/transport 配置变更；产品页当前价格还区分 input/output/implicit cache `$2/$6/$0.25` 与 explicit cache creation/read `$2.50/$0.17` 每百万 token。0902 的 coding、长周期 autonomous development、多工具 Agent 和视觉理解按官方产品定位记录，不升级为训练/架构事实；Qwen3.8 Max 继续作为基于 A95B 的 hosted service 记录，而非新的 open checkpoint。
+本轮没有检出 0902 专属论文、独立技术报告、公开新权重或完整架构说明。QwenCloud 文档示例已从 `dashscope-intl.aliyuncs.com` 迁移到 `maas.qwencloudapi.com`，这是 provider adapter/transport 配置变更；产品页当前价格还区分 input/output/implicit cache `$2/$6/$0.25` 与 explicit cache creation/read `$2.50/$0.17` 每百万 token，Context Cache 文档的典型相对口径则为 explicit/session 创建 `125%`、命中 `10%`，implicit 创建 `100%`、命中 `20%`。新增 [`qwen_max0902_cache_contract_audit.py`](research/model-update-2026-09/code/qwen_max0902_cache_contract_audit.py) 仅提供 `local_protocol_toy` 证据。0902 的 coding、长周期 autonomous development、多工具 Agent 和视觉理解按官方产品定位记录，不升级为训练/架构事实；Qwen3.8 Max 继续作为基于 A95B 的 hosted service 记录，而非新的 open checkpoint。
 
 ### GPT-5.3 Codex：官方运行时与 Agent harness 资料
 
@@ -307,6 +329,14 @@ DataCurve 当前没有精确 `mini_swe_agent_claude_opus_4_6_*` 行，不能迁�
 4. [Task budgets](https://platform.claude.com/docs/en/build-with-claude/task-budgets)、[Vision](https://platform.claude.com/docs/en/build-with-claude/vision)、[Compaction](https://platform.claude.com/docs/en/build-with-claude/compaction) 和 [Tool search](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool)：Agent loop 预算、`2576 px/4784 visual tokens`、状态压缩和按需工具 schema。
 
 这些资料支持 API、Agent 和部署控制面的面试结论，不支持参数量、内部架构、完整训练 recipe、生产 kernel 或线上 acceptance rate。DataCurve 当前没有精确 Opus 4.7 行，不得迁移 Opus 4.6、4.8、5 的 Agent 结果。完整证据见 [`claude-opus-4.7-source-notes.md`](research/model-update-2026-09/claude-opus-4.7-source-notes.md)。
+
+### Claude Opus 4.8：Dynamic Workflows 与多 Agent benchmark
+
+1. [Artificial Analysis Claude Opus 4.8](https://artificialanalysis.ai/models/claude-opus-4-8) 与 [DataCurve DeepSWE v1.1](https://deepswe.datacurve.ai/) 的 `xhigh/max + mini-swe-agent` 行：仅用于锚点及配置条件下的榜单结果；AA 当前已将模型标为 deprecated。
+2. [Claude Opus 4.8 System Card](https://www.anthropic.com/claude-opus-4-8-system-card)：§8.11 描述 BrowseComp/ProgramBench 的 blocking orchestrator、fixed team 和 async-subagent harness 及 score/token/派生 latency 评估；§6.3.6 描述 coding diligence 与状态总结诚实度。
+3. [Introducing dynamic workflows in Claude Code](https://claude.com/blog/introducing-dynamic-workflows-in-claude-code)：长任务的动态外部编排、并行 subagents、独立检查/反驳、checkpoint 恢复，以及成本、首次确认和管理员控制。
+
+System Card 分数是特定 Anthropic harness 的发布方结果；其 latency 由固定 prefill/decode rate、token 数与工具耗时推导，不是生产 wall-clock。Dynamic Workflows 产品不能与 System Card benchmark harness 视为同一实现。完整证据及页面 hash、勘误和限制见 [`claude-opus-4.8-source-notes.md`](research/model-update-2026-09/claude-opus-4.8-source-notes.md)。没有独立技术报告、内部架构或完整训练配方，不新增第二十一册架构章节。
 
 ## 2026-09 Kimi K3 技术报告
 
@@ -376,6 +406,17 @@ K3 report 与固定 config 是官方配置证据，不等于完整训练 recipe�
 
 本轮没有把 V4 Pro 资料写成全新的架构章节，因为 CSA/HCA、mHC、MoE、低精度和后训练已有第二十一册第 77/78 章及 DeepSeek V4/V4.1 专题承载；生产 kernel、硬件 profiling、完整 recipe、线上 acceptance 和独立复现仍待核验。
 
+### DeepSeek V4 Flash：SGLang serving implementation artifacts
+
+以下是已确认 DeepSeek V4 锚点的框架实现资料，不是新的模型发现入口，也不是学术论文：
+
+1. [SGLang v0.5.20 release](https://github.com/sgl-project/sglang/releases/tag/v0.5.20)：stable tag 与发布日期入口；release metadata 固定值和快照哈希见 [`deepseek-v4-source-notes.md`](research/model-update-2026-09/deepseek-v4-source-notes.md)。
+2. [PR #34565：SWA branch-point caching](https://github.com/sgl-project/sglang/pull/34565)：混合注意力下保留共享前缀分支点的 SWA 状态；PR 中 token hit rate、TTFT 等数字绑定其 V4-Flash-0731 workload。
+3. [PR #30805：TRT-LLM CSA/HCA attention for SM100/103](https://github.com/sgl-project/sglang/pull/30805) 与 [PR #29927：DeepSeek V4 on SM120](https://github.com/sgl-project/sglang/pull/29927)：分别对应 B200 单元 kernel 对照与 RTX PRO 6000 sparse-indexer/MoE 路径；不同 baseline/硬件/测量范围不能横向合并成一个加速倍数。
+4. [PR #39171：V4.1 FlashMLA fork rebase](https://github.com/sgl-project/sglang/pull/39171)：只能证明相关依赖 pin 更新，不等同于 V4.1 完整 vision/runtime 或生产验收。
+
+源码与发布方 benchmark 均不替代完整权重加载、目标硬件独立复现、准确性/召回和生产流量端到端 SLO；证据细节见 [`deepseek-v4-source-notes.md`](research/model-update-2026-09/deepseek-v4-source-notes.md) 与第二十一册第 77 章。
+
 ## GLM-5.1：长周期 Agent 与过程质量资料入口
 
 1. [Artificial Analysis GLM-5.1](https://artificialanalysis.ai/models/glm-5-1)：模型发现入口；DataCurve 当前没有精确 `mini_swe_agent_glm_5_1_*` 行。
@@ -401,9 +442,10 @@ GLM-5.1 的 SWE-Bench Pro `58.4`、655 次 Linux desktop 迭代/6.9× 吞吐和 
 ## Gemini 3.8 Flash：Thinking、Interactions 与工具协议资料
 
 1. [Artificial Analysis Gemini 3.8 Flash high/medium/low](https://artificialanalysis.ai/models/gemini-3-8-flash)：榜单发现入口；三个 effort 行归并为一个基础模型。DataCurve high 精确行绑定 `mini-swe-agent`、工具、环境和 verifier，不能迁移到其他 effort 或 Gemini 版本。
-2. [Gemini 3.8 Flash 模型页](https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash)、[Thinking](https://ai.google.dev/gemini-api/docs/thinking) 与 [Thought signatures](https://ai.google.dev/gemini-api/docs/thought-signatures)：1M 输入、65,536 输出、thinking level、共同 output budget、thought summary/signature 和回放边界。
-3. [Interactions API](https://ai.google.dev/gemini-api/docs/interactions-overview)：stateful/stateless continuation、`previous_interaction_id`、step 类型和 SSE trace；用于 Agent 状态协议，而非内部架构证明。
-4. [工具组合](https://ai.google.dev/gemini-api/docs/tool-combination)、[Google Search grounding](https://ai.google.dev/gemini-api/docs/google-search)、[URL Context](https://ai.google.dev/gemini-api/docs/url-context)、[File Search](https://ai.google.dev/gemini-api/docs/file-search) 和 [Code Execution](https://ai.google.dev/gemini-api/docs/code-execution)：检索、索引、沙箱和结果回灌的上下文循环。
+2. [Gemini 3.8 Flash 模型页](https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash)、[Thinking](https://ai.google.dev/gemini-api/docs/thinking) 与 [Thought signatures](https://ai.google.dev/gemini-api/docs/thought-signatures)：1M 输入、65,536 输出、thinking level、共同 output budget、thought summary/signature 和回放边界；模型页列出视频输入。
+3. [Interactions API](https://ai.google.dev/gemini-api/docs/interactions-overview) 与[当前正式 API reference](https://ai.google.dev/api/interactions-api)：stateful/stateless continuation、`previous_interaction_id`、step 类型和 SSE trace；用于 Agent 状态协议，而非内部架构证明。旧 reference 路径 `/api/interactions` 当前返回 404。
+   [Google Gen AI Python SDK pinned revision](https://github.com/googleapis/python-genai/tree/6d012889752f65c1a51d0ad6e5970fc97d19c4ca)（2026-09-26 main commit）：custom `FunctionCallStep`/`FunctionResultStep` 未声明 signature，`ThoughtStep.signature` optional；`extra="allow"`、lenient union 和 `UnknownStep.raw` 提供 forward-compatible 保留路径，但不代表 endpoint 字段禁令。正式 schema 使用 `function_call.id` → `function_result.call_id`；Thinking/Tool-combination prose 的签名范围和 `function_response` 命名仍有冲突。
+4. [工具组合](https://ai.google.dev/gemini-api/docs/tool-combination)、[Video Understanding](https://ai.google.dev/gemini-api/docs/video-understanding)、[Google Search grounding](https://ai.google.dev/gemini-api/docs/google-search)、[URL Context](https://ai.google.dev/gemini-api/docs/url-context)、[File Search](https://ai.google.dev/gemini-api/docs/file-search) 和 [Code Execution](https://ai.google.dev/gemini-api/docs/code-execution)：覆盖检索/索引/沙箱结果回灌，以及静态抽帧与按需 `processing_call` / `processing_result` 媒体读取；token/质量收益属于发布方文档声明。
 5. [Computer Use](https://ai.google.dev/gemini-api/docs/computer-use) 与 [Structured outputs](https://ai.google.dev/gemini-api/docs/structured-output)：action intent、坐标/审批/宿主执行边界，以及 JSON Schema 的结构约束边界。
 6. [Google DeepMind Model Card](https://deepmind.google/models/model-cards/gemini-3-8-flash/)、[官方发布博客](https://blog.google/innovation-and-ai/models-and-research/gemini-models/3-8-flash-and-3-8-flash-cyber/) 和 [官方评测 PDF](https://storage.googleapis.com/deepmind-media/gemini/gemini_3-8_flash_model_evaluation.pdf)：发布方定位、安全/评测和对前代资料的继承关系。
 7. arXiv 对精确 `Gemini 3.8 Flash` 标题未检出独立技术报告；因此本轮不补写参数量、MoE/注意力结构、训练 recipe、RL 或 verifier 实现。完整核验和 2026-09-20 哈希见 [`gemini-3.8-flash-source-notes.md`](research/model-update-2026-09/gemini-3.8-flash-source-notes.md)。
@@ -431,10 +473,11 @@ PyPI `vllm 0.29.0` 的 x86_64 wheel 于 2026-09-09 发布，大小 `315,961,042`
 
 ### GPT-5.6 Luna 当前榜单与运行时资料
 
-1. [GPT-5.6 Luna Artificial Analysis](https://artificialanalysis.ai/models/gpt-5-6-luna)：当前 `max` 详情页快照为 `3,861,087` bytes、SHA-256 `00c856c1ecc7bb7d79363f4d2b6814e9cd15a6a02cb8f0c99060862dfbd99cac`；Intelligence Index、速度、价格和 context 是第三方配置字段。
+1. [GPT-5.6 Luna Artificial Analysis](https://artificialanalysis.ai/models/gpt-5-6-luna)：2026-09-23 当前 `max` 详情页快照为 `3,996,959` bytes、SHA-256 `4246b96416b4aaf4f8bbcacf72f8c45787944e24f02c59c6e3db1fed4de93c41`；Intelligence Index `37.3244239690841`、当前速度 `142.271568203031 tokens/s`、cost/task `0.17829726152289094` 和 1M context 都是第三方配置/provider 字段，速度变化按采集时点漂移记录。
 2. [GPT-5.6 官方模型页族](https://developers.openai.com/api/docs/models/gpt-5.6-luna.md)、[Reasoning](https://developers.openai.com/api/docs/guides/reasoning.md)、[Prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching.md)、[Tools](https://developers.openai.com/api/docs/guides/tools.md) 和 [Compaction](https://developers.openai.com/api/docs/guides/compaction.md)：既有官方快照支持 effort/mode、persisted reasoning、显式缓存断点、tool search、工具宿主责任和长任务压缩。
 3. DataCurve 精确 `mini_swe_agent_gpt_5_6_luna_max` 行为 `301/448`、Pass@1 `67.1875%`、Pass@4 `90.2655%`、平均成本约 `$0.6056`、平均输出约 `73.4K` token、101.68 steps；它绑定 `mini-swe-agent`、工具、环境和 verifier，不能与 AA 指数合并。
-4. 本轮 OpenAI 官方路径返回 403/超时/DNS 失败，旧页面快照不标为新鲜响应；没有独立 GPT-5.6 架构/训练报告，因此不新增架构论文专题。
+4. 2026-09-23 通过 `10.24.27.134:7890` 取得当前官方 Markdown；Luna/Reasoning/Prompt caching/Compaction/Tools 的大小与哈希见 [`gpt-5.6-source-notes.md`](research/model-update-2026-09/gpt-5.6-source-notes.md)。页面恢复可读但没有新的公开架构、训练 recipe 或 system card。
+5. [`gpt56_luna_state_replay_audit.py`](research/model-update-2026-09/code/gpt56_luna_state_replay_audit.py) 是无网络 local protocol toy，覆盖 opaque reasoning 的 turn scope、完整 item replay、function lineage、canonical compaction、cache miss、hosted/client tool search 和幂等 verifier；不代表真实 endpoint、模型质量或生产 SLO。
 
 ## Claude Sonnet 5：System Card、Adaptive Thinking 与 Agent 运行时
 
@@ -444,6 +487,15 @@ PyPI `vllm 0.29.0` 的 x86_64 wheel 于 2026-09-09 发布，大小 `315,961,042`
 4. [Artificial Analysis Claude Sonnet 5](https://artificialanalysis.ai/models/claude-sonnet-5) 与 [DataCurve DeepSWE](https://deepswe.datacurve.ai/)：分别是第三方配置测量和 `mini-swe-agent` 系统结果；不能与 Anthropic 发布方分数合成裸模型排名。
 
 本轮没有检出精确标题为 Sonnet 5 的 arXiv 技术报告。面试应把 `effort -> max_tokens -> task budget`、发布方 safeguards/harness、compaction/state replay 和“参数/训练 recipe 未公开”作为证据分层问题，而不是猜测内部结构。
+
+## Claude Sonnet 5.5：Thinking State、Agent Runtime 与分层安全
+
+1. [Claude Sonnet 5.5 System Card](https://www.anthropic.com/claude-sonnet-5-5-system-card)：训练过程公开边界、RSP 风险分级、三阶段 cyber safeguard、类别化 fallback、Agent prompt-injection 与 capability benchmark。评测数字绑定 snapshot、harness、effort、工具、safeguards、fallback 和 verifier。
+2. [官方模型页](https://platform.claude.com/docs/en/models/sonnet-5-5/overview)、[What's New](https://platform.claude.com/docs/en/models/sonnet-5-5/whats-new-sonnet-5-5)、[Migration guide](https://platform.claude.com/docs/en/models/sonnet-5-5/migration-guide) 与 [Prompting guide](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5-5)：`between_tools` 约束、forced-tool 不支持、thinking block 的 model/prefix/account binding、computer toolset 迁移、progress-block 呈现和 effort 重新校准。
+3. [Artificial Analysis 条目](https://artificialanalysis.ai/models/claude-sonnet-5-5) 是第三方 max + fallback 配置测量；[DataCurve DeepSWE](https://deepswe.datacurve.ai/) 当前没有精确 Sonnet 5.5 Agent 行。不迁移其他 Claude 版本的 Agent 分数。
+4. 2026-09-29 arXiv 精确查询返回 `totalResults=0`；本轮以 Anthropic System Card/API 文档为官方证据，不把被引用的 IPI 背景论文说成 Sonnet 5.5 技术报告。
+
+研究笔记：[claude-sonnet-5.5-source-notes.md](research/model-update-2026-09/claude-sonnet-5.5-source-notes.md)；正式教材：[第二十册第 24 章](book-20-agent-harness-runtime/chapters/24-claude-sonnet-5.5-thinking-state与安全路由.md)与[第八册第 16.22 节](book-08-ai-safety-alignment/chapters/16-fallback-routing与安全降级.md#1622-claude-sonnet-55多阶段-cyber-gate-与类别化-fallback)。
 
 ## Grok 4.7：论文与官方资料边界
 
@@ -492,6 +544,14 @@ PyPI `vllm 0.29.0` 的 x86_64 wheel 于 2026-09-09 发布，大小 `315,961,042`
 
 面试阅读重点是把模型 action proposal、schema、region/scope、宿主权限、GUI/mobile executor、observation、幂等、缓存和独立 verifier 分层。官方托管文档足以支持 API/runtime 合同，不能证明内部视觉 encoder、GUI policy、生产 kernel 或真实移动设备成功率。
 
+## Qwen3.7 Max：Agent 环境扩展与跨框架 RL（官方博客，非技术论文）
+
+1. [Qwen Team《Qwen3.7：智能体新前沿》](https://qwen.ai/blog?id=qwen3.7)：文章 API `path=qwen3.7` 于 2026-09-28 返回 HTTP 200；Qwen 自述训练环境质量/多样性扩展、留出 OOD benchmark、`Task × Harness × Verifier` 可组合 rollout、跨 harness/verifier RL、35 小时 M890 kernel 优化和 RL trajectory reward-hacking monitor。
+2. 关键口径：M890 PPU 的 `10.0x` 相对 SGLang Triton 多 workload 几何平均；KernelBench L3 `1.98x/96%` 是 H100 50 题的两种不同统计量；两者不可混写。奖励监控的 13 条规则/1,618 个案例是发布方计数，不是 precision/recall。
+3. 后续找到 [arXiv:2609.27321v1《Verifiable Hidden Dynamics Play》](https://arxiv.org/abs/2609.27321v1)，页面评论标为 “Qwen Technical Report”。它与 environment scaling 主题相关，但训练主体是 Qwen3.6-35B-A3B；Qwen3.7-Max 只在 setter/benchmark 对照出现。论文未声明 VHD-Play 实现了博客的 `Task × Harness × Verifier` 组合或 Max 的内部训练 recipe，不作该归属推断。
+4. 仍未披露 Qwen3.7 Max 的参数量、内部 Transformer 架构或完整专属训练 recipe；VHD-Play 的作者结果尚无本项目独立复现。
+5. 本地 Qwen 博客响应快照 `/tmp/qwen37-article-api-8098-20260928.json`：`122,153` bytes / `41e1f58384b99f1d2495111c3f6f55d01850283daa7ce5d07d38a764eea9108c`（含动态 request ID）；完整博客边界见 [`qwen3.7-max-source-notes.md`](research/model-update-2026-09/qwen3.7-max-source-notes.md)。
+
 ## GLM-5.3 标准 DSA：实现与 serving 证据
 
 1. [GLM-5.3 模型卡与固定 config](https://huggingface.co/zai-org/GLM-5.3/tree/aca966e4e02791568aa6a4ced368624b3d897f42)：阅读 `GlmMoeDsaForCausalLM`、78 层、前三层 dense、256 routed/top-8/1 shared、`q_lora_rank`/`kv_lora_rank`、`index_topk`、Full/Shared indexer 类型和 MTP index sharing；不要把 config 当成完整训练账本。
@@ -523,7 +583,10 @@ System Card 的面试重点包括：Terminal-Bench 4.0 `66.36%`（xhigh、Claude
 5. [Using tools](https://developers.openai.com/api/docs/guides/tools.md)：function calling、web/file search、MCP、skills、shell、computer use、tool search 和 programmatic tool calling 的通用平台接口。工具列表是 capability surface，不是模型架构证据。
 6. [Compaction](https://developers.openai.com/api/docs/guides/compaction.md)：server-side `context_management.compact_threshold`、encrypted compaction item、stateless output replay、`previous_response_id` chaining 和 standalone `/responses/compact` canonical context。
 
-当前没有 GPT-6 Sol 专属参数、架构、完整训练/后训练 recipe、system card、公开权重、独立技术报告或生产 benchmark 复现；本条目服务于模型合同、长上下文预算、Agent 状态和 serving 评测方法。
+7. [Prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching.md) 与 [`gpt6_sol_contract_audit.py`](research/model-update-2026-09/code/gpt6_sol_contract_audit.py)：1,024 token minimum、30m toy TTL、最多四个 explicit breakpoints、configuration update 保持原 prefix、compaction 后可能 cache miss；toy 还验证 permission/executor/verifier、幂等 replay、预算 incomplete 和 272K whole-request pricing。
+8. [API data residency guide](https://developers.openai.com/api/docs/guides/your-data.md)：GPT-6 Sol/Luna 的 EU residency 仅对 Standard processing 的 Responses/Chat Completions 有明确支持；regional storage 与 regional processing、system data 与 customer content、OpenAI endpoint 与 Remote MCP 第三方策略必须分账。
+
+当前没有 GPT-6 Sol 专属参数、架构、完整训练/后训练 recipe、system card、公开权重、独立技术报告或生产 benchmark 复现；本条目服务于模型合同、长上下文预算、Agent 状态和 serving 评测方法。toy 的证据等级是 `local_protocol_toy`，不是 API 验收或模型质量结果。
 
 ## GPT-6 Luna：官方模型合同与 family runtime
 
@@ -532,3 +595,50 @@ System Card 的面试重点包括：Terminal-Bench 4.0 `66.36%`（xhigh、Claude
 3. [Reasoning](https://developers.openai.com/api/docs/guides/reasoning.md)、[Agents](https://developers.openai.com/api/docs/guides/agents.md)、[Using tools](https://developers.openai.com/api/docs/guides/tools.md)、[Compaction](https://developers.openai.com/api/docs/guides/compaction.md)：复用 GPT-6 family 的 mode/effort、`configuration_update`、tool capability surface、runtime ownership 和 opaque compaction replay 证据。
 
 当前没有 GPT-6 Luna 专属参数、架构、完整训练/后训练 recipe、system card、公开权重、独立技术报告、精确 DataCurve Agent 结果或生产 benchmark 复现；本条目服务于 sibling 路由、长上下文预算、单位成功成本、Agent 状态和 serving 评测方法。
+
+## 2026-09-24 Kimi K3：vLLM v0.30.0 stable/runtime 来源
+
+- [vLLM v0.30.0 release](https://github.com/vllm-project/vllm/releases/tag/v0.30.0)：release commit `ced6857afa0ea7b2e3f0846a62e1394e90f15607`，2026-09-22 发布；[PyPI metadata](https://pypi.org/pypi/vllm/json) 为 13,218 bytes / SHA-256 `43020551808911e4cabfca5ea71951766c25101b3817a10d306d88fe42d860b8`。x86_64 wheel metadata 为 314,883,777 bytes / SHA-256 `ef52ee58c410ead0b8afb190838fa4cbcb52075596f67862a03859d984966ac4`；本轮未下载/安装。
+- 固定 [v0.30.0 registry](https://github.com/vllm-project/vllm/blob/v0.30.0/vllm/model_executor/models/registry.py)（64,420 bytes / `a08a98aaae52ced32226aa647f58d682ac600b9572651a9b377b97846bc99212`）、[NVIDIA K3 model](https://github.com/vllm-project/vllm/blob/v0.30.0/vllm/models/kimi_k3/nvidia/model.py)（88,517 bytes / `27cbd7f0dceb493cf20e29056c3e1f00cddfae2074a5bd4bde52d6a6b73a38fe`）和 [K3 DSpark MLA](https://github.com/vllm-project/vllm/blob/v0.30.0/vllm/models/kimi_k3/nvidia/dspark_mla.py)（20,001 bytes / `ba5c555c8e3e392a0b69af91a371488e857cdef7685749853793bd9eda4aa793`）。对照 v0.29.0 tag：K3 stable registry/model/DSpark entry 已存在，故 v0.30.0 属实现演进，不是首次支持。
+- 技术点：MegaMoE IPC transformed-weight 零拷贝复用和 raw packed-weight 释放；多次 streamed `load_weights` 后在 post-load hook finalize；PP auxiliary hidden state 与 AttnRes 边界 gate；DSpark grouped context-KV dtype/scale/layout gate；KDA SSM cache dtype。全部是 vLLM runtime source evidence，不是 K3 新训练算法或目标硬件验收。
+
+## Claude Opus 5：Prompt-Injection 评测方法相关论文
+
+- [How vulnerable are AI agents to indirect prompt injections? Insights from a Large-Scale Public Competition](https://arxiv.org/abs/2603.15714)：System Card 引用的 Gray Swan 大规模公开 red-team competition 背景；卡片据此构造 IPI 场景/攻击集。它不是 Anthropic 的 Opus 5 技术报告，也不代表 Opus 5 作者发布的模型论文。
+- [The attacker moves second: Stronger adaptive attacks bypass defenses against LLM jailbreaks and prompt injections](https://arxiv.org/abs/2510.09023)：用于理解 adaptive attacker 与静态攻击集的差异；模型安全结果仍要绑定攻击预算、scenario set、产品 safeguards 和 harness。
+
+Opus 5 研究笔记的 arXiv 精确标题检索仍未发现 Opus 5 专属技术报告；以上为 System Card 所引用的评测背景资料，不作为模型架构或训练证据。
+
+## Qwen3.5-Omni Technical Report：ARIA 与实时多模态语音
+
+1. [Qwen3.5-Omni Technical Report](https://arxiv.org/abs/2604.15804v2)（Qwen Team，v2，2026-04-17）：沿 Artificial Analysis 已有的 Qwen3.5-Omni-Plus/Flash 条目，精读 Hybrid MoE Thinker-Talker、AuT 6.25 Hz 编码、TM-RoPE + 秒级显式 timestamp、RVQ/MTP/Code2Wav 与 ARIA。
+2. 阅读 ARIA 时抓住其核心约束：text 与 speech token 合成一个交错序列，任意前缀的累计 speech:text token ratio 不超过样本级全局 ratio；对照固定 interleave rate 和 MFA alignment，讨论 tokenizer 速率跨语言不均衡时的流式同步。
+3. 对照 `S1 encoder alignment -> S2 ~4T multimodal tokens -> S3 262,144 context` 与 Thinker specialist/on-policy distillation、interaction-aligned RL、Talker DPO/GSPO/speaker fine-tuning。报告的 100M+ 小时总体音视频、AuT 40M 小时和 Talker 20M+ 小时不可简单相加。
+4. 将作者报告的 215 项任务、内部 vLLM 首包数据、AA provider 指标与本地/独立实测分开；Plus 与 Flash 使用不同部署资源，不做无条件横向性能结论。
+5. 官方 API 入口：[Alibaba Cloud Model Studio Qwen-Omni](https://help.aliyun.com/zh/model-studio/user-guide/qwen-omni)。示例模型 ID `qwen3.5-omni-plus` 与 `stream=True` 是托管 API 使用合同，不证明模型内部机制或已通过真实 endpoint probe。
+6. 完整证据索引见 [`qwen3.5-omni-source-notes.md`](research/model-update-2026-09/qwen3.5-omni-source-notes.md) 和[第二十一册第 93 章](book-21-transformer-architecture-evolution/chapters/93-qwen3.5-omni-aria-aut-timestamp与流式语音.md)。DataCurve 当前无精确 Qwen3.5-Omni Agent 行。
+
+## Qwen3.6-35B-A3B：混合注意力与 Thinking Preservation
+
+1. [Artificial Analysis Qwen3.6-35B-A3B Reasoning](https://artificialanalysis.ai/models/qwen3-6-35b-a3b) 与 [Non-reasoning](https://artificialanalysis.ai/models/qwen3-6-35b-a3b-non-reasoning)：榜单发现入口，两种配置合并为一个模型锚点。DataCurve 当前快照没有精确 Qwen3.6 Agent 行。
+2. [QwenLM/Qwen3.8 官方仓库固定 README](https://github.com/QwenLM/Qwen3.8/blob/2ea10dc725823bf7c3e21ce8557cbe15245132ae/README.md)：仓库发布记录将 Qwen3.6-35B-A3B 标为 2026-04-16 发布，并链接官方博客。
+3. [Qwen3.6-35B-A3B ModelScope 模型卡](https://www.modelscope.cn/models/Qwen/Qwen3.6-35B-A3B)：固定 README revision `913c459c5c83fa016a0e54a52e5b95f6c894e0fe`。固定 [config](https://www.modelscope.cn/models/Qwen/Qwen3.6-35B-A3B/resolve/1a5ae24e867f8d82388070d3f61590158a01d15c/config.json) 与 [chat template](https://www.modelscope.cn/models/Qwen/Qwen3.6-35B-A3B/resolve/1a5ae24e867f8d82388070d3f61590158a01d15c/chat_template.jinja)：前者核对架构字段，后者明确 `preserve_thinking` 与 `enable_thinking` 的渲染边界。
+4. 模型卡称 35B total/3B activated、40 层、每组 3×Gated DeltaNet + 1×Gated Attention、256 experts（8 routed + 1 shared），native context 262,144、YaRN 可扩展约 1,010,000，并声明 MTP multi-step training。
+5. `preserve_thinking` 让历史 assistant reasoning block 继续进入 prompt；它不是跨会话 memory。Qwen 对减少重复推理/KV cache 利用率的描述是发布方 claim，保留历史也可能增加 token/KV 成本；须与 `enable_thinking` 的本轮生成控制分开。
+6. [Qwen 官方发布博客](https://qwen.ai/blog?id=qwen3.6-35b-a3b) 正文于 2026-09-28 通过 Qwen 文章 API 取得：JSON 94,678 bytes / SHA-256 `d287402f27a6ffa3226466aa57407310f670eb73a6d72bcfef03597a94e35d49`（含动态 request_id）；HTML 正文 91,941 bytes / `706889d145ea17b8c8234c4cda35b00fdecc0b6bcb9e1f5f20d2ed3ff9e15ed1`。博客报告发布方 benchmark，并给出 SWE-bench Pro 修订、Terminal-Bench 资源/重复次数、SkillsBench 子集、TAU3/VITA judge、MCPMark/MCP-Atlas 工具和评测器条件；这些适合作为 evaluator/harness 审计素材，不是独立复现或新架构披露。
+7. 博客将开源 checkpoint 的百炼 API 名称写作 `qwen3.6-flash`，并给出 OpenClaw `contextWindow=131072` / `maxTokens=16384` 示例；alias 与客户端预算不等于新增模型候选、native context 或实测 API 上限。文章元数据日期为 2026-04-15 +08，与榜单/仓库标注 2026-04-16 并列保留；本项目未做真实 endpoint probe。
+
+8. [arXiv:2609.27321v1《Verifiable Hidden Dynamics Play: Generating Agentic RL Environments from Solved Mechanisms》](https://arxiv.org/abs/2609.27321v1)，评论标为 “Qwen Technical Report”，2026-09-23。先采样并求解数学机制，冻结 optimum/default references 与 normalized reward，再由 frozen setter 合成 corpus-grounded stateful tools；论文报告 3,300 environments、Qwen3.6-35B-A3B 的 34-step GRPO 与 agentic diagnostic mean `0.204 → 0.815`。Replay audit 覆盖 8/11 families；one training run / one evaluation seed，结果均为论文作者报告。
+
+本轮取得了 Agent RL 环境方法技术报告，但不是完整基础模型预训练 recipe。早期 arXiv 搜索快照没有列出此报告，现已由 v1 论文页核验并纠正记录。完整证据与未知项见 [`qwen3.6-35b-a3b-source-notes.md`](research/model-update-2026-09/qwen3.6-35b-a3b-source-notes.md)，教学映射为第二十一册第 83 章 83.15、第二十册第 19 章 19.41 / 第 21 章 21.30、第二十四册第 61 章 61.32。
+
+## Qwen3.6-27B：GDN Tree-Scan serving 预印本
+
+1. [Artificial Analysis Qwen3.6-27B](https://artificialanalysis.ai/models/qwen3-6-27b) 的 Reasoning / Non-reasoning 条目合并为同一模型锚点；[DataCurve DeepSWE](https://deepswe.datacurve.ai/) 当前无精确 Qwen3.6-27B Agent 行。
+2. [Qwen 官方 ModelScope 模型卡](https://www.modelscope.cn/models/Qwen/Qwen3.6-27B)、固定 config 与 chat template 支持 27B dense、3×Gated DeltaNet + 1×Gated Attention 周期，以及共享的 preserve_thinking 序列化接口。
+3. [GDN Tree-Scan: Served Tree Verification for Recurrent-Hybrid Language Models](https://arxiv.org/abs/2609.23900v1) 是 Zhiyuan Ma 的外部单作者预印本（2026-09-20），不是 Qwen 技术报告。其 vLLM 路线把 FA2 tree-bias、branch-local GDN scan/replay、MTP tree draft 和 accepted-chain-only state publication 合为 serving verifier。
+4. 预印本在 Qwen3.6-27B-FP8、B=1、temperature 0.6、四个 SWE/Codex tasks 上报告 +17.2% committed tokens/event、+27.0% token-weighted decode TPS，但 per-request-equal 仅 +4.0%；没有给出可推广的 task-wall 提速。40-turn p-rescore 只是与 native recurrent-oracle flip floor 的有限样本比较，不是 full distribution-distance proof；B=4、更多 seeds 与 request-cluster bootstrap 仍待补。
+5. 实现/测量仓库的固定入口为 [Lumo_FlyWheel commit 55f55854328b37f262e97d57b5863d8fadd7ff76](https://github.com/MaCoredroid/Lumo_FlyWheel/tree/55f55854328b37f262e97d57b5863d8fadd7ff76)。本项目未运行 pinned code、加载权重或独立复现；所有数字须保留为作者报告。
+6. [Qwen3.6-27B 官方发布博客](https://qwen.ai/blog?id=qwen3.6-27b) 的正文于 2026-09-28 经官方文章 API 恢复（嵌入 HTML 91,758 bytes / SHA-256 `7748e75a7c5a47943d6abe4e6415cb6b8d4749713eeff39323eb831f2d8ae367`）。博客提供发布方 benchmark、`preserve_thinking` 和 Agent 客户端示例，不是独立技术报告；OpenClaw 的 128K/16K 是 harness 配置，不是 native context/output 规格。正文/API 证据与未做真实 endpoint probe 的边界见研究笔记。
+
+arXiv title-field 查询 ti:Qwen3.6 当前返回 0 条，但 all-field 查询有多篇把 Qwen3.6-27B 当测试模型的工作；这不是“没有相关研究”的证据。完整技术摘录和边界见 [qwen3.6-27b-source-notes.md](research/model-update-2026-09/qwen3.6-27b-source-notes.md)，教学映射为第二十一册第 83 章 83.16.4–83.16.5、第二十四册第 61 章 61.31–61.32。

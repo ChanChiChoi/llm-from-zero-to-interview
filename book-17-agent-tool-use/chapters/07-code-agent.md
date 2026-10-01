@@ -856,6 +856,14 @@ Computer Use 把“看屏幕”和“执行动作”分开。模型只返回 scr
 
 补充一个状态工程门禁：Interactions 的 `previous_interaction_id` 只恢复 conversation history，`tools`、`system_instruction` 和 generation config 是当前 turn 的参数；`store=false` 不能再用该 ID 续接，付费/免费默认保留期为 55/1 天。stateless harness 需要原样回放实际返回的 thought/tool opaque fields，并用 function call/result `id` 对齐副作用。Thinking 页面与 Tool combination 页面对标准 function-call signature 的范围描述不完全一致，适配器应保留 provider 返回字段并通过 endpoint probe 决定是否要求 custom function signature，不能自行篡改历史。
 
+### Agentic Video：从整段采帧到问题驱动的时间轴检索
+
+Gemini 3.8 Flash 的模型页确认视频输入；Google 的 [Video understanding 文档](https://ai.google.dev/gemini-api/docs/video-understanding) 还以 `gemini-3.8-flash` 展示 agentic processing。默认 static 路径按固定 `1 FPS` 抽帧并一次性送入上下文；agentic 路径则根据问题选择 transcript、帧或音频片段。返回的 `processing_call`（含调用 `id`）与 `processing_result`（以 `call_id` 关联）让媒体读取过程进入 Interaction trace，而非隐藏在最终回答后面。
+
+这是一种问题驱动的媒体证据检索，不是已公开的新视觉编码器或任意文件访问能力。宿主仍要校验媒体权限与读取范围，记录时间戳/媒体 revision，并处理超时、取消、重试和证据引用。Stateful 可沿服务端 Interaction history 继续；stateless 则按 API 规则回放完整 steps。实现时不要将视频专用 processing steps 和普通自定义 function-call signature schema 混为一谈。
+
+官方文档对长视频报告了最高约 `88%` 的 token 减少和约 `7%` 的质量提升，同时说明短于 5 分钟的视频可能因导航与处理往返增加 TTFT；自定义 FPS 和片段区间仅适用于 static 模式。它们是发布方描述而非通用保证。实验要同时测事件召回/时间定位、processing 调用数、thought 与 tool-use token、TTFT、端到端成功和单位成功成本。详细来源快照与限制见[研究笔记 §20](../../research/model-update-2026-09/gemini-3.8-flash-source-notes.md#20-2026-09-28-gemini-38-flashagentic-video-的按需证据读取)。
+
 ## 7.25 GPT-5.3 Codex：把模型能力接入代码 Agent
 
 GPT-5.3 Codex 的官方资料把本章的代码 Agent 闭环具体化为一个 Responses-only harness 案例。模型页确认 `gpt-5.3-codex` 面向 agentic coding，支持 `low/medium/high/xhigh` reasoning effort、文本/图像输入、400K context、272K maximum input、128K maximum output，以及 function calling、web search、hosted shell 和 skills。Codex Prompting Guide 进一步强调代码库探索、固定工作目录、`apply_patch`、工具 schema、并行调用和长时间自治。
@@ -1002,6 +1010,8 @@ Tool search 的 hosted 路径由服务端从声明的 namespace/MCP/function 中
 
 面试回答可以按责任链展开：模型提出计划和工具意图，Responses item 记录协议状态，harness 管理 loop/上下文/恢复，permission engine 决定 allow/ask/deny，executor 产生真实回执，测试与 verifier 决定 patch 是否合格。这样既能解释 GPT-5.6 的 Agent 运行时能力，也不会把排行榜的 Agent 系统结果误写成模型内部架构。
 
+2026-09-23 的本地 [`gpt56_luna_state_replay_audit.py`](../../research/model-update-2026-09/code/gpt56_luna_state_replay_audit.py) 把这条责任链压缩成一个无网络 toy：`current_turn/all_turns`、opaque reasoning、function call/output 血缘、compaction canonical window、cache prefix miss、hosted/client tool search 和幂等 artifact verifier 都有正例与拒绝路径。它的证据等级是 `local_protocol_toy`；不能替代真实 endpoint capability、隐藏 reasoning、完整权重、目标硬件 profile 或线上 SLO。
+
 ## Qwen3.7 Plus：视觉动作提案与移动端执行器
 
 Qwen3.7 Plus 的官方定位把代码 Agent 延伸到视觉参考生成代码、读屏、GUI 和移动端导航。对 Agent 设计而言，关键不是给模型增加一个 `click(x, y)` 工具，而是把视觉证据、动作协议和外部副作用分层：
@@ -1017,6 +1027,23 @@ screen/image/video -> model proposal -> schema validation
 这类 Agent 的成功指标至少拆成四层：proposal schema 解析率、宿主授权率、真实执行成功率和独立 verifier 通过率。最终回答正确但产生了越权副作用，不是成功；一次点击后页面恰好改变而没有可回放 receipt，也不能当作可靠成功。`Structured Outputs` 只减少格式错误，不能保证动作语义；`Function Calling` 只承载调用合同，不能授予手机、桌面或网络权限。
 
 Qwen3.7 Plus 当前只有 AA 精确榜单条目，DataCurve 没有精确 `mini_swe_agent_qwen3_7_plus_*` 行。因此本章中的 GUI/mobile harness 是教学和系统设计闭环，不把其他 Qwen 的 Agent 分数迁移过来，也不把官方产品描述写成真实设备 acceptance 或公开的视觉 policy 架构。
+
+## Qwen3.7 Max：在陌生硬件上做长程 kernel 优化
+
+Qwen 官方博客给出的案例比“连续调用很多工具”更有面试价值：任务是优化 SGLang 的变长 Extend Attention，在最长 32K 前缀 KV-cache 上处理 MTP 新生成 token；目标设备是训练中未见的平头哥真武 M890 PPU。发布方称模型初始只有任务说明、SGLang Triton 参考实现和评估脚本，没有该芯片的 profile、硬件文档或示例 kernel。约 35 小时执行了 432 次 kernel evaluation、1,158 次工具调用，报告多个 workload 相对 Triton 的几何平均加速比为 `10.0x`。
+
+```text
+低并行度基线
+  -> Split-KV + online-softmax partial reduction
+  -> 减少 host/device sync 与临时分配
+  -> 按 workload 调节 split 数
+  -> 降低 reduction/barrier 开销并复用寄存器/持久化结果
+  -> MTP γ=4：一个 block 并行处理 4 个 query，共享 K/V load
+```
+
+这条轨迹适合说明 code agent 如何利用 compiler/test/profile 反馈，在陌生目标上提出假设、修复正确性问题并持续重构；它不能证明模型“记住了 M890 架构”。特别是最后一步不是模型 Transformer 架构变化，而是生成 kernel 对工作负载形态的特化。
+
+务必区分同一篇博客里的两种数字：M890 案例是相对 SGLang Triton reference 的 `10.0x` 几何平均；KernelBench L3 的 `1.98x / 96%` 是 50 题、H100 上的中位 per-problem eager speedup / 快于 `torch.compile` 的比例，并受 Docker、联网和工具调用预算限制。硬件、baseline、任务集和统计量都不同，不能合并或写成普遍性能保证。完整阶段轨迹与官方测量边界见 [`qwen3.7-max-source-notes.md`](../../research/model-update-2026-09/qwen3.7-max-source-notes.md)。
 
 ## GPT-6 Sol：复杂 coding 与 Agent 工具边界
 
@@ -1036,13 +1063,15 @@ Tool search 的工程价值在于延迟暴露大型工具库的 schema：namespa
 
 GPT-6 Sol 的长上下文也不能替代 coding agent 的状态设计。1,050,000 context、922,000 maximum input 和 128,000 maximum output 要与 reasoning tokens、工具输出、patch、测试日志和 compaction item 一起算账。若 compaction 或预算耗尽，harness 必须明确是继续、重试、缩小任务、转人工还是停止，不能把空响应当作代码正确。
 
-资料边界：GPT-6 Sol 当前是 AA 单榜资料级闭环，DataCurve 没有精确 Agent 行。上面的工具和 verifier 逻辑是官方 API/runtime 合同与工程设计，不是 GPT-6 Sol 的内部训练方法、参数规模或架构披露。
+资料边界：GPT-6 Sol 当前是 AA 单榜资料级闭环 + 当前时点复验 + local protocol toy，DataCurve 没有精确 Agent 行。上面的工具和 verifier 逻辑是官方 API/runtime 合同与工程设计，不是 GPT-6 Sol 的内部训练方法、参数规模或架构披露。零依赖审计入口见 [`gpt6_sol_contract_audit.py`](../../research/model-update-2026-09/code/gpt6_sol_contract_audit.py)，其 `permission -> executor -> artifact verifier` 和幂等回放断言不能替代真实工具 acceptance。
 
 ## 7.24 Claude Opus 5.5：长任务 coding 的效率验收
 
 Opus 5.5 的发布方描述把长任务 coding 的优势落在一次收集足够上下文、完成更大 patch、少重复尝试和少工具轮次。实现 coding agent 时，可以把这组描述转成四个可验证事件：`context_snapshot`、`patch_set`、`test_receipt` 和 `artifact_verifier`。只有测试与最终 artifact 通过，才把任务记为成功；少调用命令本身不是质量证明。
 
 成本还要包含 cache read/write、可见输出、工具执行、失败重试和 fallback。若 Cyber safeguard 将请求路由到其他模型，trace 中必须保留 `actual_model`、`fallback_reason`、权限与工具版本。Artificial Analysis 的 `max with fallback` 和 Anthropic 的发布方 coding benchmark 都不能替代固定仓库、固定工具、固定 verifier 下的本地回放。
+
+输出预算也有 endpoint 边界：Opus 5.5 同步 Messages API 的 max output 是 128K；Message Batches API 只有在 `output-300k-2026-03-24` beta header 下可到 300K。长任务调度器要按实际 endpoint 选择预算，不能因同一模型在 Batch 中支持更长输出，就把同步请求或 DataCurve harness 的限制改写成 300K。
 
 迁移到 Opus 5.5 时，agent loop 还要通过 API contract 门禁：thinking 不能关闭或改成手工 budget；`tool_choice` 不能使用 `any` 或指定工具强制调用；工具间进度可能以默认隐藏文本的 thinking block 返回；Claude API/Google Cloud 的旧 `computer_20251124` 要迁移为 `computer_toolset_20260801`。客户端应按 content block 的 `type` 解析并原样回传可保留的 thinking block，而不是假设每一轮只有 text -> tool_use -> text。
 

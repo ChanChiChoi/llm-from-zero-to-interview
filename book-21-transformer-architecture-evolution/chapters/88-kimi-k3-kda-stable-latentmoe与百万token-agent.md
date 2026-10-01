@@ -315,3 +315,87 @@ join point:                                                    tail add
 - excessive proactive：模型输出是提案，不是授权；仍需权限、预算、sandbox、幂等和 artifact verifier。
 
 因此 K3 的面试主线可以从“新架构名词”推进到“证据和控制面”：榜单负责发现，官方报告/仓库负责解释，harness 负责可比性，runtime manifest 负责恢复，verifier 负责把可解析输出变成可接受结果。
+
+## 88.22 vLLM v0.30.0：模型接入之后，runtime 还在演进什么
+
+K3 的 vLLM 支持不能用一个 `supported=true` 概括。公开 tag 显示 v0.29.0 已有 K3 registry、NVIDIA model 和 DSpark 实现入口；v0.30.0 是这些实现继续变化，不是 K3 首次进入 stable。固定 release commit 为 `ced6857afa0ea7b2e3f0846a62e1394e90f15607`（2026-09-22）；release、PyPI metadata 和源码快照详见[研究笔记](../../research/model-update-2026-09/kimi-k3-source-notes.md#2026-09-24-vllm-v0300stable-release-与-k3-runtime-实现演进)。
+
+### 88.22.1 权重加载是一个有结束边界的生命周期
+
+模型权重不是一口气到齐的。父级 loader 可能因文件分片或非连续 stream 多次调用 `load_weights`。如果每次调用后都做 MegaMoE packed-weight 转换，当前阶段看到的不一定是完整权重，过早 finalize 还可能重复做昂贵转换。v0.30 把这一步放到统一的 `process_weights_after_loading` hook：先完成全部映射/装载，再构造推理用的权重表示。这是典型的两阶段生命周期：
+
+```text
+streamed checkpoint tensors
+    -> map/load all parameter fragments
+    -> post-load finalize exactly once
+    -> runtime-ready transformed weights
+```
+
+v0.30 还允许 MegaMoE weight-cache daemon 导出的 transformed buffers 通过 IPC 零拷贝复用，并释放原始 packed 参数。面试时除了问“是否省了一次转换”，还应问缓存 buffer 的 owner、生命周期、失败回退和 raw/transformed 两份内存何时释放。本轮只核验源码，不是启动时延或显存的本地实测。
+
+### 88.22.2 PP 与 speculative decode 需要携带辅助状态
+
+K3 同时包含 AttnRes 的深度状态、MLA attention cache、KDA recurrent/conv state，以及 DSpark/MTP draft-target 的验证和回滚边界。v0.30 的 K3 模型实现支持 auxiliary hidden state 跨 PP stage 传递，并在开启 AttnRes auxiliary stream 时拒绝不安全的非末级 stage 边界配置。含义是：状态不能只由“当前 token 到第几个”或单个 KV cache 长度表达；还要说明捕获了哪些层表示、属于 draft 还是 target、PP rank 如何传递，以及拒绝 token 时怎样回滚。
+
+同一版本的 DSpark context-KV 快速路径按 cache dtype、量化 scale、各层 dtype 一致性和 block layout 设置 gate。只有满足条件时才批量投影和插入；其他情况必须走兼容路径。KDA state dtype 也显式考虑 `mamba_ssm_cache_dtype`。因此 serving manifest 应分别登记 attention KV、context KV、KDA SSM state、AttnRes auxiliary hidden states 和 speculative state，而不是把它们折叠成一个 `cache_dtype/cache_length`。
+
+### 88.22.3 版本证据表与部署结论
+
+| 证据 | v0.29.0 | v0.30.0 | 能得出的结论 |
+|---|---|---|---|
+| K3 registry/model/DSpark entry | 已存在 | 仍存在且源码有演进 | stable source entry 不是 v0.30 首次加入 |
+| NVIDIA K3 model source | 87,313 bytes，`e74026a8…` | 88,517 bytes，`27cbd7f0…` | 实现变化，不能只依据文件变大推断性能/正确性 |
+| DSpark source | 19,451 bytes，`e86bb984…` | 20,001 bytes，`ba5c555c…` | draft/context-KV 和状态路径继续发展 |
+| PyPI x86_64 wheel | 0.29.0 wheel 已有发布记录 | 0.30.0 wheel metadata 可用；314,883,777 bytes | artifact 可获取不等于本地安装或硬件验收 |
+
+面试回答应分开说四件事：tag 中有代码、PyPI 有 wheel、目标环境能装载完整权重并正确运行、生产负载达到 SLO。当前证据支持前两层的 release/source 事实，不支持后两层。
+
+**追问：为什么 stable v0.29 已有 K3，而 v0.30 的 model.py 仍明显变化？**
+
+答：模型注册只是入口。权重流式加载、post-load 转换、IPC cache ownership、PP 辅助状态、DSpark context-KV layout 和 KDA state dtype 都会在实现演进中变化。应固定 tag 比较源码，并分别运行完整权重加载、数值回归、cache recovery、目标硬件 profile 和 draft acceptance；不能把 `supported` 文档标签或 registry 命中当作生产验收。
+
+## 88.23 DSpark 自适应 verify：动态长度如何落入固定图
+
+vLLM main 的 K3 DSpark 实现加入可选 confidence head，为每个 draft 位置估计接受概率。scheduler 可据此为不同 request 选择不同 draft/verify 长度；但 CUDA graph 希望形状稳定。实现折中是 capture 到 `k+1` 的上界，再让 device-side offsets/masks 在一次图回放中表达同批请求各自 1 到 `k+1` 的长度。它不是把所有请求强行补成相同的逻辑长度，而是用固定执行外形承载变长 request metadata。
+
+这会影响 row 分类和状态容量：adaptive scheduler 会重写 `num_scheduled_tokens`，所以不能再用它与 draft 数的简单等式判断是否处于 verify；实现改看 request 的 prefill/decode 状态。RecoverSSM 只为 `k+1` 窗口准备状态，较长的 profiling dummy rows 必须被 mask 出去。capture 使用 scheduler 承诺的 `max_query_len`，而非某个 dummy batch 的实测最大行长，以保证 graph 对之后的 replay 仍成立。以上来自 2026-09-23 main commit；vLLM stable `v0.30.0` 早于该改动。
+
+另一个 2026-09-28 合入 main 的修复为 DSpark context KV pointer 加入 buffer-address key。cache rebinding 导致任一层 `data_ptr()` 改变时，旧 pointer cache 必须失效并重建；图捕获期间不允许更新。PR 描述的失败包括 GPU memory fault 与静默内存破坏，说明 context cache 的正确性依赖分配生命周期，而不是仅依赖模型层或逻辑 cache 名称。
+
+## 88.24 ROCm 后端契约与 benchmark 证据
+
+Kimi K3 的 MI355X recipe 显示，模型接入后仍有量化布局与 attention backend 的双向契约。SiTUv2 的新 AITER 路径是 a4w4，要求匹配的 vLLM flag、AITER `v0.1.20+` 和对应 tuned config；兼容保留的 flag 名字仍含 `A8W4`，不能从变量名猜测实际 kernel。另一个 AITER flag 若单独选择 interleaved weight kernel，而 vLLM 没有做对应权重 shuffle，PR #53954 记录可能出现无报错的退化输出；截至本次快照该 PR 仍 open。
+
+DSpark verify 也需要后端能力 gate。ROCm AITER MLA 对非因果 draft block 检查 `causal` 接口与受支持形状；例如 FP8 的 2-token block 无匹配 kernel 时应显式拒绝并切换到 `TRITON_MLA`，而不是冒险进入不兼容分支。Backend 是否支持某个 dtype、query length、mask 与 DCP 组合，要作为 capability tuple 测试。
+
+发布方 AgentX 配置还把真实 block verification 与 synthetic-acceptance throughput sweep 分开。synthetic sweep 注入从 B300/SPEED-Bench 得到的 golden acceptance length、绕开真实 target verification，只能估计给定接受长度假设下的吞吐；正确性、线上 acceptance rate 与用户服务都必须用真实校验路径。完整源码与约束见[研究笔记](../../research/model-update-2026-09/kimi-k3-source-notes.md#2026-09-29-vllm-recipeadaptive-dspark-rocm-serving-)。
+
+**面试追问：为什么 `synthetic_acceptance_length` 下的 TPS 不能和真实 block verification 的 Agent 分数并列？**
+
+答：synthetic 路径人为指定了 draft 接受长度并跳过 target verification，改变了计算量，也不测量 draft 与 target 是否逐 token 一致。它隔离的是给定接受率假设下的调度/吞吐；真实任务还要执行 verifier、处理拒绝与回滚，并受工具 schema、环境和任务 verifier 影响。
+
+## 88.25 小练习补充
+
+11. 画出 K3 adaptive DSpark 的长度账本：request 的 confidence、draft tokens、verify query length、`k+1` graph bound、KDA offsets 和 RecoverSSM capacity。分别构造 1-token、`k`-token、`k+1`-token、prefill 与超界 profiling dummy case，解释哪些要执行、mask 或拒绝。
+12. 对照 vLLM stable `v0.30.0`、main commit 和 K3 recipe pinned commit，标注每项功能是 stable source、mutable upstream 还是 pre-release recipe；再把真实 block rejection 与 synthetic acceptance 分成两个 benchmark manifest。
+
+## 88.26 DFLASH：把 K3 的 target features 变成并行 draft
+
+Kimi K3 的 DFLASH 接入提供了一个很适合面试的推测解码案例。公开的 `modal-labs/Kimi-K3-DFlash` 是约 2.6B BF16 的 draft-only 模型，不能脱离 K3 单独提供语言模型服务。其 config 使用 6 层 draft Transformer，读取 K3 的 93 层 target 中的 `[19,37,54,66,78,90]` 层输出，推荐 block size 为 8；这些字段描述的是 draft 与 target 的接口合同，不是 K3 本体参数规模或新的排行榜模型。
+
+DFlash 的关键不是简单地把一个小模型接在 K3 前面。论文描述的流程是：K3 prefill 时抽取多层 hidden states，经 projection 融合为 target context feature；draft 将该 feature 投影进每一层的 Key/Value，并把它保存在 draft KV cache 中。之后 block diffusion 在一次 forward pass 中同时生成一个 block 的 mask positions，K3 再并行验证。这样 draft 不必从 token embedding 重新猜完整未来，且 draft 层数增加时 target context 不会只作为输入信号逐层稀释。
+
+训练也模拟了真实 verify 形状。每个 response 随机选 anchor，anchor 后的 `block_size - 1` 个 token 同时 mask；不同 block 拼成一条序列，用 sparse mask 让同一 block 内可双向注意、不同 block 互相隔离。由于第一个错误会阻断后续接受，论文用 `w_k = exp(-(k-1)/gamma)` 强调 block 前部位置，并冻结与 target 共享的 embedding 和 LM head。面试中可以把它和普通 AR drafter 对照：AR draft 的成本随 draft token 数线性增长，DFlash 的 draft forward 更接近一次并行 block 成本；最终速度仍取决于 draft latency、verify latency 和平均 acceptance length。
+
+SGLang PR #40794 解决的是接入契约。K3 原有 DSpark capture 的是 layer outputs，DFLASH 的 `target_layer_ids` 也命名 layer outputs，所以新 hook 复用 DSpark taps 且不做通常的 `+1` layer-input 偏移。cookbook 固定公开 draft、block size 8，并按 pipeline parallel、DP attention、NPU、Hopper/AMD 等条件禁用；PR 的 8xB300 数字使用未公开 production draft 和多个合并 PR，不能当成单 PR 加速或公开 checkpoint 的复现结果。SGLang stable 仍为 `v0.5.20`，该功能属于 main source evidence。
+
+| 面试问题 | 应检查的账本 |
+|---|---|
+| 为什么 target hidden feature 要注入每层 K/V？ | 条件信息是否跨 draft depth 保持；draft KV 的生命周期与 block iteration 是否一致 |
+| 为什么 target layer id 不能随意 `+1`？ | hook 捕获的是 layer input 还是 layer output；目标索引的语义必须和 capture tap 对齐 |
+| 为什么 DFLASH 的 TPS 不能直接由 accept length 推出？ | `T_draft`、`T_verify`、并行 block size、GPU backend、graph/capture、拒绝回滚和请求分布都影响吞吐 |
+
+## 88.27 小练习补充
+
+13. 根据 K3 的 93 个 target layers 和 DFLASH 的六个 `target_layer_ids`，画出 prefill hidden extraction、projection、draft KV injection、block mask 和 target verification 的时序；分别标注 draft-only 权重、target 权重和共享 frozen embedding 的所有权。
+14. 构造 block size 8/16 的 acceptance manifest，记录公开 draft revision、target revision、硬件、backend、真实 verifier、平均 accept length 和 wall-clock；把 SGLang PR 的未公开 production checkpoint 结果单独标记为不可复现发布方 evidence。

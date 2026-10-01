@@ -1,5 +1,9 @@
 # 榜单条目解释规则
 
+## 2026-09-29 Claude Sonnet 5.5
+
+Artificial Analysis 新增 `claude-sonnet-5-5` 与 effort 配置，归并为一个 canonical 模型锚点；DataCurve 无精确 Sonnet 5.5 Agent 行。Anthropic 官方材料补齐 `between_tools`、thinking block 三种绑定、工具迁移、三阶段 cyber safeguards 与 refusal-specific fallback。System Card 数字须绑定 harness、effort、fallback/actual model、资源和 verifier；不推导参数/架构/训练 recipe，也不迁移相邻 Claude 的 Agent 结果。状态：**AA 单榜专题闭环 + 官方 API/System Card 证据**，详见 [`claude-sonnet-5.5-source-notes.md`](claude-sonnet-5.5-source-notes.md)。
+
 核验日期：2026-09-23。
 
 Artificial Analysis 与 DeepSWE 的页面同时列出模型、reasoning effort、非推理版本、Agent harness、供应商和不同快照。排行榜中的每一行不等于一个独立基础模型。本项目后续采用三层记录：
@@ -12,20 +16,20 @@ Artificial Analysis 与 DeepSWE 的页面同时列出模型、reasoning effort�
 
 | 基础模型 | 页面上发现的配置 | 当前一手核验状态 |
 |---|---|---|
-| GPT-6 Astra | low/medium/high/xhigh/max/Non-reasoning | 已读取 OpenAI 官方模型页、专属模型指南、Reasoning/状态/缓存/压缩/工具搜索/异步工具/steering 文档；训练机制与发布日期待核验 |
+| GPT-6 Astra | low/medium/high/xhigh/max/Non-reasoning | 两榜当前时点已复验；已读取 OpenAI 官方模型页、专属模型指南、Reasoning/状态/缓存/压缩/工具搜索/异步工具/steering/misalignment 文档；运行时协议与 local toy 已核验，训练机制、官方发布日期和内部架构待核验 |
 | GPT-5.6 Sol/Terra/Luna | 各自的 low/medium/high/xhigh/max/Non-reasoning；DeepSWE 的 Sol/Luna 为 max | 已读取三个 OpenAI 官方模型页及 Reasoning/Tools/Prompt Caching/Compaction 文档；运行时字段已核验，参数、架构、训练配方和独立技术报告待核验 |
 | GPT-5.5 / GPT-5.5 Pro | GPT-5.5 的 low/medium/high/xhigh/Non-reasoning，Pro 的 xhigh；DeepSWE 的 GPT-5.5 为 xhigh | 已读取 OpenAI 两个官方模型页、GPT-5.5 专属指南和 Reasoning/Tools/Tool search/Prompt Caching/Compaction/Images/Conversation state/Background 文档；高效 reasoning、`phase`、图像 detail、缓存差异和 Pro 后台边界已核验，参数、架构、训练配方和独立技术报告待核验 |
 | GPT-5.4 / GPT-5.4 Pro | GPT-5.4 的 xhigh/low/Non-reasoning，Pro 的 xhigh；DeepSWE 的 GPT-5.4 为 xhigh | 已读取 GPT-5.4 官方模型页、专属指南和 Reasoning/Tools/Tool search/Compaction/Conversation state/Prompt caching/Agents 文档；1M context、deferred tool loading、computer use、custom tools/CFG、`allowed_tools`、`phase`、compaction 和状态回放已核验，参数、架构、训练配方和独立技术报告待核验 |
 | GPT-5.4 mini / nano | Artificial Analysis 的 `gpt-5-4-mini`、`gpt-5-4-nano` 多档配置；DataCurve 只有 GPT-5.4 base 的 `mini_swe_agent_gpt_5_4_xhigh` | 已读取两个精确 sibling 模型页和 GPT-5.4 指南；400K/272K/128K、effort、任务定位、价格和逐模型工具清单已核验；mini/nano 没有精确 DataCurve Agent 行，不迁移 base 结果 |
 | Claude Fable 5 | Artificial Analysis 的 `max + Opus 4.8 Fallback`；DeepSWE 的 `xhigh + mini-swe-agent` | 已读取 Anthropic 官方模型页、发布/重新部署公告、Thinking/Effort、拒答/fallback、Fallback credit、Memory、Programmatic tool calling、Compaction、Context editing 和 Task budgets 文档；运行时与安全边界已核验，参数、架构、训练配方和独立技术报告待核验 |
 | Claude Opus 4.8 | Artificial Analysis 的 `max`；DeepSWE 的 `xhigh`/`max` + `mini-swe-agent` | 已读取 Anthropic 发布公告、System Card 入口和 Dynamic Workflows 博客；发布日期、effort、Messages API system entries、动态编排、并行 subagents、独立验证和断点恢复边界已核验，参数、架构、训练配方和独立技术报告待核验 |
-| Kimi K3 | low/max；Kimi Code 等 Agent 组合 | 内容专题闭环；已固定官方 HF revision/config、FlashKDA README/commit、vLLM K3 recipe 与 hybrid serving 边界；完整权重未下载，stable upstream merge、完整 recipe、硬件 profiling、独立复现和线上 acceptance 仍待核验 |
-| Kimi K2.7 Code | Artificial Analysis 的 `kimi-k2-7-code`；DeepSWE 的 `mini-swe-agent`、`reasoning_effort:null` | 已读取 Kimi 官方资源/API 文档、固定 revision 模型卡、配置、许可证和部署指南；1T/32B active MoE、MLA、MoonViT、native INT4、always-on thinking、preserve_thinking 和 tool-call 协议已核验，专属技术报告与独立 benchmark 待核验 |
+| Kimi K3 | low/max；Kimi Code 等 Agent 组合 | 内容专题闭环 + vLLM `v0.29.0`/`v0.30.0` stable source entry 和 main/recipe 增量；adaptive DSpark 与 cache-rebind 修复仍是 stable tag 之后的 main 证据，MI355X ROCm recipe 是 nightly/pre-release。完整权重、目标硬件 profiling、cache recovery、独立复现和线上 acceptance 未验收 |
+| Kimi K2.7 Code | Artificial Analysis 的 `kimi-k2-7-code`；DeepSWE 的 `mini-swe-agent`、`reasoning_effort:null` | 双榜内容专题闭环，正式章节为第二十一册第 94 章；已读取 Kimi 官方资源/API 文档、固定 revision 模型卡、配置、许可证和部署指南。KTransformers 有 RAWINT4 发布方命令，但同提交通用支持矩阵未列 K2.7，兼容性未实测；K2.5 `0.7.0.post4` SFT recipe 的 RAWINT4 权重后端与 `bf16:true` 训练精度字段不外推为 K2.7 配方。Highspeed 是官方称为同一模型的服务路由变体，不另建候选；专属技术报告、训练 recipe、独立 benchmark 与生产验收待核验 |
 | Kimi K2.6 | Artificial Analysis 的 `kimi-k2-6`/`kimi-k2-6-non-reasoning`；DataCurve 当前无精确 `mini_swe_agent_kimi_k2_6_*` | AA 单榜资料级闭环；已读取 Kimi K2.6 模型卡、固定配置、部署指南、Agent Swarm 博客、Thinking API 和 Vendor Verifier；K2.5 架构路线复用、1T/32B MoE、MLA、MoonViT、native INT4 和验收分层已核验，完整 recipe、生产 kernel、硬件 profiling 和独立复现待核验 |
-| GLM-5.3 | max | 已读取 Z.ai 官方文档与 SAO 原始论文；公开 SAO 算法已核验，5.3 专属 compaction、技术报告、权重细节待核验 |
-| GLM-5.3-Flash | max；`mini_swe_agent_glm_5_3_flash_max` | 已读取 Z.ai 官方文档/博客、固定 revision 模型卡与配置；hybrid attention、IndexPool、mHC、视觉 coding、EPD 和 API 协议已核验，完整训练 recipe、生产 kernel、硬件 profiling 和独立 benchmark 待核验 |
+| GLM-5.3 | max | 内容专题闭环 + stable/main runtime source evidence；已读取 Z.ai 官方文档/博客、SAO 原始论文、固定 config 与标准 DSA runtime 入口；5.3 专属 compaction、完整 recipe、权重加载、硬件和生产验收待核验 |
+| GLM-5.3-Flash | max；`mini_swe_agent_glm_5_3_flash_max` | 已读取 Z.ai 官方文档/博客、固定 revision 模型卡与配置；hybrid attention、IndexPool、mHC、视觉 coding、EPD 和 API 协议已核验。vLLM `v0.30.0` stable 的 cache/KDA/MTP/multimodal 路径已与固定 main 逐文件对照，并记录 kernel/quant/indexer 差异。完整训练 recipe、目标硬件 profiling 和独立 benchmark 待核验 |
 | GLM-5 | Artificial Analysis `glm-5`/`glm-5-non-reasoning`；DataCurve 当前无 `mini_swe_agent_glm_5_*` | AA 单榜资料闭环；已读取 Z.ai 模型卡、GLM-5 专属技术报告、API/部署资料；DSA、744B/40B MoE、`slime` 异步 RL 和 Agentic Engineering 已核验，完整 DSA/训练 recipe、生产 kernel、硬件 profiling 和独立复现待核验 |
-| DeepSeek V4 系列 | Flash/Pro、Vision、不同推理档位和快照 | 已读取 DeepSeek 官方公告、模型卡与技术报告；不同快照行为和独立 benchmark 复现仍待核验 |
+| DeepSeek V4 系列 | Flash/Pro、Vision、不同推理档位和快照 | 已读取 DeepSeek 官方公告、模型卡与技术报告；补充 SGLang v0.5.20 的 V4 Flash SWA branch-point cache、CSA/HCA kernel 与 SM120 indexer/MoE source evidence；runtime PR benchmark 仍按硬件、baseline 与 workload 归因，不替代模型独立复现 |
 | DeepSeek V4 Flash Vision | Artificial Analysis `deepseek-v4-flash-vision` max；DataCurve 当前无该行 | 已读取 DeepSeek 实验发布页、Vision/Files/Responses/价格文档；历史实验 alias、当前 `deepseek-flash` -> V4.1-Flash 路由、图像预算和工具回灌已核验，视觉架构、专属训练报告和 DataCurve 结果待核验 |
 | K2 Horizon MoVA 36B/A4B | MoVA 36B/A4B、K2 Horizon 7B/3.7B/0.9B | 36B/A4B 已由 IFM 官方模型卡、固定配置和实现核验；7B/0.9B 的官方卡片仅用于 Uno/MOPD 关联边界，3.7B 完整资料待核验 |
 | DeepSeek-R1-0528 | 官方发布页；JSON/function calling；开放权重入口 | 已读取 DeepSeek API 发布页快照；模型卡、架构和独立 benchmark 仍待核验 |
@@ -79,9 +83,11 @@ Artificial Analysis 的 `glm-5-3-flash` 主配置为 `max`，页面 `releaseDate
 
 Z.ai 官方文档、博客和固定 revision 模型卡公开了 320B total/18B activated、45 层、前 3 层 dense MLP、34 `linear_attention`/11 `deepseek_sparse_attention`、288 routed experts/top-8/1 shared、1M position、IndexPool（4 个 indexer key vectors 加权池化）和 mHC（`hc_mult=4`、20 次 Sinkhorn 字段）。视觉路径支持 video/image/text/file 输入，并将 self-visual judgment、test-time improvement、GUI/渲染反馈纳入 coding loop；serving 资料公开 SGLang、ReplaySSM、W8A8、混合 cache quantization、Layer Split 和 EPD。
 
-当前状态为“内容专题闭环 + SGLang stable/main 与 vLLM main implementation evidence”，正式落点为第二十一册第 84 章。不能把 `index_topk=2048` 直接解释为最终可见 token 数，不能把 18B active 当作 18B dense 的显存/延迟，也不能把官方 3.01×/4.44× attention/KV、约 3× serving 和 benchmark 数字写成独立复现。SGLang `v0.5.20` 的固定 tag 已有 Flash 源码入口；vLLM `main` 的 GLM5Next 路径包含 indexer/tail/KDA/MTP 实现线索，但公开 vLLM `v0.29.0` tag 未检出同名专属路径。完整训练/后训练 recipe、生产 kernel、真实 state/KV/indexer bytes、目标硬件 profiling、线上 acceptance rate、API 错误/限流行为和独立 benchmark 仍待核验；详见 [`glm-5.3-flash-source-notes.md`](glm-5.3-flash-source-notes.md)。
+当前状态为“内容专题闭环 + SGLang stable/main、vLLM `v0.30.0` stable source 与固定 main 对照证据”，正式落点为第二十一册第 84 章。不能把 `index_topk=2048` 直接解释为最终可见 token 数，不能把 18B active 当作 18B dense 的显存/延迟，也不能把官方 3.01×/4.44× attention/KV、约 3× serving 和 benchmark 数字写成独立复现。vLLM stable 已确认 IndexerCache/TailCache、KDA、MTP 和 multimodal 路径；KDA/multimodal 同 blob，MTP 主体相同，attention/indexer 路径及 KPool stride handling 与固定 main 有具体差异，main 的 Quark 权重映射增量不属于 stable。完整训练/后训练 recipe、真实 state/KV/indexer bytes、目标硬件 profiling、线上 acceptance rate、API 错误/限流行为和独立 benchmark 仍待核验；详见 [`glm-5.3-flash-source-notes.md`](glm-5.3-flash-source-notes.md)。
 
 ### GLM-5.3-Flash 的 upstream/runtime 证据分层
+
+证据链应写成：vLLM `v0.30.0` stable source -> 已核验的 cache/KDA/MTP/multimodal 文件 -> 与固定 main 的逐项差异 -> stable wheel 安装与完整权重 -> cache/state recovery、数值/recall、目标硬件 profile -> EPD、tool/verifier 与生产 SLO。目录、源码和 release artifact 不能跨级替代后续验证。
 
 固定 stable tag、mutable main、recipe 和本地运行结果必须分栏：SGLang `v0.5.20` 的 `glm5_next.py` 证明 stable source entry；SGLang `main` 的新增 fusion/量化与测试门禁证明 upstream 正在演进；vLLM `main` 的 `Glm5NextIndexerCache`、`Glm5NextTailCache`、独立 KDA state 和 MTP top-k mapping 证明 runtime 实现细节；vLLM `v0.29.0` 的专属路径缺失是负证据，不能被 recipe 的版本门槛覆盖。任何一层都不能替代固定权重加载、目标硬件数值/性能、PD/EPD recovery、tool/verifier 和生产 SLO 验收。
 
@@ -97,11 +103,13 @@ Flash-Next 技术报告中的 QSA、GR、N-gram 和 Muon 机制、训练设置�
 
 2026-09-21 的 Artificial Analysis 页面继续将 canonical `qwen3-8-max` 展示为 `Qwen3.8 Max (0902)`，release slug 为 `qwen3-8-max-0902`；旧的 0803 条目已标记 deprecated。当前详情快照为 `3,835,865` bytes、SHA-256 `e879b3b7dfe5beac76808114a200afa69ab7e078d61d1685cea4076c4d8e0541`，第三方 Intelligence Index `45.4152084980521`、约 `37.275289705095 tokens/s`、约 `$5.408509428374016`/task、约 `984K` context；这些不替代一方模型说明。Qwen Cloud 官方页给出 alias `qwen3.8-max-2026-09-02`，并将它描述为 `qwen3.8-max` 的 upgraded snapshot。因此，本项目将 0902 记作 hosted service revision，而不是新增基础模型或公开权重。
 
-官方页/文档确认 1M context、991K 普通最大输入、983K thinking 最大输入、131K 最大输出、`reasoning_effort=low/medium/xhigh`（默认 `xhigh`）、与 `thinking_budget` 互斥、thinking 模式下 `tool_choice` 只能为 `auto`/`none`，以及 `MultiModalConversation` 和 explicit/implicit/session cache。2026-09-21 文档示例已从 `dashscope-intl.aliyuncs.com` 迁移到 `maas.qwencloudapi.com`；这属于 provider endpoint/adapter 变化，不是模型能力变化。产品页当前还显示 input/output/implicit cache 为 `$2/$6/$0.25`，explicit cache 创建/读取为 `$2.50/$0.17` 每百万 token。coding、工程规模项目、长周期 autonomous development、多工具 Agent 和视觉理解属于产品升级描述；没有专属 0902 架构、训练或 kernel 证据时，不把这些描述扩写成内部机制。
+官方页/文档确认 1M context、991K 普通最大输入、983K thinking 最大输入、131K 最大输出、`reasoning_effort=low/medium/xhigh`（默认 `xhigh`）、与 `thinking_budget` 互斥、thinking 模式下 `tool_choice` 只能为 `auto`/`none`，以及 `MultiModalConversation` 和 explicit/implicit/session cache。2026-09-23 经 `7890` 复核的 Context Cache 正文进一步确认 `ephemeral` marker、最多 4 个且只取最后 4 个、20 content-block lookback、explicit/session 5 分钟 TTL/reset、implicit 无固定 TTL且不保证命中、account/model 隔离、`x-dashscope-session-cache: enable` + `previous_response_id` 和 `usage.input_tokens_details.cached_tokens`。2026-09-21 文档示例已从 `dashscope-intl.aliyuncs.com` 迁移到 `maas.qwencloudapi.com`；这属于 provider endpoint/adapter 变化，不是模型能力变化。产品页当前还显示 input/output/implicit cache 为 `$2/$6/$0.25`，explicit cache 创建/读取为 `$2.50/$0.17` 每百万 token；Context Cache 文档的典型相对口径是 explicit/session 创建 `125%`、命中 `10%`，implicit 创建 `100%`、命中 `20%`，二者按不同层级记录。coding、工程规模项目、长周期 autonomous development、多工具 Agent 和视觉理解属于产品升级描述；没有专属 0902 架构、训练或 kernel 证据时，不把这些描述扩写成内部机制。
 
 Dynamic Rate Limiting 是 hosted provider 的服务配额机制：限流按 `account + model` 聚合，workspace 可以覆盖单模型 quota，TPM tier 按自然月消费调整，达到保证 TPM 后仍可能因平台余量继续服务。`qwen3.8-max-0902` 的保证 TPM tier 为 `1,500,000 / 1,500,000 / 1,500,000`。应在 serving manifest 中分开记录 guaranteed/observed TPM、429、`Retry-After`、queue latency、account、workspace 和 revision；不能把保证 TPM 当作模型吞吐、GPU capacity 或 Artificial Analysis/DataCurve 结果。
 
 DataCurve 当前只有 `mini_swe_agent_qwen3_8_max_xhigh` 泛化行（258/449，Pass@1 `57.4610%`，Pass@4 `83.1858%`，约 `$3.7291`/task，约 `95,075` output tokens，约 `111.34` steps，4 runs），没有 `qwen3_8_max_0902` 精确行。该结果只能作为 Qwen3.8 Max 系列的 Agent 配置参考，不能迁移成 0902 revision 的独立成绩。完整证据见 [`qwen3.8-max-0902-source-notes.md`](qwen3.8-max-0902-source-notes.md)。
+
+新增 [`qwen_max0902_cache_contract_audit.py`](code/qwen_max0902_cache_contract_audit.py) 只验证标准库 toy 中的请求 capability gate、cache marker/lookback/TTL、account/model 隔离、session lineage 和 `cached_tokens` 读取；其证据等级为 `local_protocol_toy`，不能替代真实 QwenCloud 命中率、结算、模型质量或生产 SLO。
 
 ## Gemini 3.6 Flash 当前核验结果
 
@@ -125,13 +133,15 @@ Artificial Analysis 的 2026-09-02 快照记录了 Gemini 3.8 Flash 的 low/medi
 
 Google Gemini API 模型页将 `gemini-3.8-flash` 标为 GA/stable，公开了 1,048,576 输入 token、65,536 输出 token、文本/图像/视频/音频/PDF 输入、文本输出，以及 low/medium/high thinking 和多种内置工具。官方最新模型页还描述了长任务中的小步 reasoning、迭代工具调用和过程验证；这些是公开的系统行为描述，不是内部算法证明。
 
-Gemini 3.8 Flash 的周边面试主线是 Interactions API 的 step/event 状态协议、thought summary/signature 的连续性、Search/URL Context/File Search/Code Execution/Computer Use 的工具闭环、Structured Outputs 的结构约束、1M 长上下文与 implicit caching 的成本账本。完整证据和待核验项见 [`gemini-3.8-flash-source-notes.md`](gemini-3.8-flash-source-notes.md)。目前标为“资料级闭环”，不新增 Gemini 专属正式章节。
+Gemini 3.8 Flash 的周边面试主线是 Interactions API 的 step/event 状态协议、thought summary/signature 的连续性、Search/URL Context/File Search/Code Execution/Computer Use 的工具闭环、Structured Outputs 的结构约束、1M 长上下文与 implicit caching 的成本账本。该锚点现为“内容专题闭环”，正式专题落在[第二十册第 23 章](../../book-20-agent-harness-runtime/chapters/23-gemini-interactions与thought-state回放.md)；2026-09-24 固定 SDK schema 补证明确 `function_call.id` → `function_result.call_id`、custom function signature 未在 typed fields 声明、额外字段/未知 step 有 forward-compatible 保留路径，但 endpoint 实际字段行为仍待 probe。3.8 独立架构/训练资料仍待核验。完整证据和边界见 [`gemini-3.8-flash-source-notes.md`](gemini-3.8-flash-source-notes.md)。
 
 2026-09-23 文档复验进一步明确了三层边界：
 
 - `thinking_level`、`max_output_tokens`、`total_thought_tokens` 是可观察预算/usage 控制面；它们能支持 thinking 消融和成本账本，不能反推内部搜索、RL 或 Transformer 结构。
 - `store=true`/`previous_interaction_id` 是服务端 history 管理；`store=false`、55/1 天 retention、delete 和 stateless full-history replay 是数据生命周期/状态协议，不能写成永久记忆或 GPU KV cache。tools、system instruction、generation config 是 interaction-scoped，不能假设跨 turn 继承。
-- Thinking 页面与 Tool combination 页面对标准 function call signature 的出现位置存在表述差异。工程实现应原样保存实际响应中的 opaque fields，使用 call/result `id` 对齐，直到 endpoint/schema/SDK capability probe 给出具体答案。
+- Thinking 页面与 Tool combination 页面对标准 function-call signature 的出现位置存在表述差异。固定 Python SDK typed schema 未声明 custom function signature，但 `extra="allow"` 允许额外字段；Interactions 的明确关联为 `function_call.id` → `function_result.call_id`。工程应原样保存实际响应的 opaque fields，真实 endpoint 行为仍待授权 probe。
+
+2026-09-28 当前正式 API reference 与 Python SDK main commit 的 schema 都使用 `function_call.id` → `function_result.call_id`、不在 custom-function typed fields 声明 signature；但 Tool combination prose 仍使用 `function_response.id` 并称自定义 tool steps 有 signature，Thinking prose 的 thought signature “必有”也与 schema optional 标记冲突。应报告为“正式 schema 更支持窄口径，服务端实际响应未 probe”，不能写成 endpoint 已禁止/必返回字段。具体快照见研究笔记 §18。
 
 本地 [`gemini_interactions_replay_demo.py`](code/gemini_interactions_replay_demo.py) 只证明合成协议状态机可审计：stateful/stateless、signature、id、SSE 终态、删除/保留期和 modality gate；不升级真实 Gemini endpoint、模型质量或生产 SLA。
 
@@ -155,9 +165,9 @@ GPT-5.5 官方指南的主要面试主线是：同 effort 下更少 reasoning to
 
 ### GPT-5.5 Instant 的身份边界
 
-AA 的 `gpt-5-5-instant-05-26` 与 `gpt-5-5-instant-06-26` 是可追踪的榜单条目，June 版本的第三方 Index 为 `26.0135173401368`、约 130.9925 output tokens/s、400K context；May 版本的第三方 Index 为 `22.6863693000789`，且页面已标记 deprecated。两个页面都不能替代 OpenAI 的 model ID、snapshot 或技术报告。
+AA 的 `gpt-5-5-instant-05-26` 与 `gpt-5-5-instant-06-26` 是可追踪的榜单条目，June 版本的第三方 Index 为 `26.0135173401368`、当前约 123.8052 output tokens/s、400K context；约 130.9925 tokens/s 是历史采集值。May 版本的第三方 Index 为 `22.6863693000789`，且页面已标记 deprecated。两个页面都不能替代 OpenAI 的 model ID、snapshot 或技术报告。
 
-本轮通过 `7890` 检查 `https://developers.openai.com/api/docs/models/gpt-5.5-instant.md` 返回 HTTP 404；官方可获取的页面是 `gpt-5.5`，其 `gpt-5.5-2026-04-23`、1.05M context、128K output 和 effort 字段只作为家族对照。DataCurve 当前没有 Instant 精确行，不能迁移 GPT-5.5 base 的 Agent 结果。GPT-5.5 Instant June 本轮收口为“榜单级关联配置 + 官方身份负证据”，不再把它当作当前活动锚点，也不把缺失的官方 ID 补写成 `gpt-5.5`。
+本轮通过 `7890` 再次检查精确页面，仍返回 HTTP 404；当前 9-byte body 的 SHA-256 为 `e3ebaa16dd9d9b9fc107c42183fb6cf9d22927e1af03dbbdfa0ccc38e4e4ac31`。官方可获取的页面是 `gpt-5.5`，其 `gpt-5.5-2026-04-23`、1.05M context、128K output 和 effort 字段只作为家族对照。DataCurve 当前没有 Instant 精确行，不能迁移 GPT-5.5 base 的 Agent 结果。GPT-5.5 Instant June 当前时点收口为“榜单级关联配置 + 官方身份负证据”，不再把它当作当前活动锚点，也不把缺失的官方 ID 补写成 `gpt-5.5`。
 
 ## GPT-5.4 当前核验结果
 
@@ -213,11 +223,17 @@ Artificial Analysis 的 `kimi-k2-7-code` 与 DataCurve 的 `mini-swe-agent` 行�
 
 官方模型卡和固定配置公开了 1T 总参数、32B active、61 层、384 routed experts、top-8、1 shared expert、MLA、256K/262,144 context、MoonViT 400M 和 native INT4 路线。官方 API 文档还规定 always-on thinking、`preserve_thinking`、固定采样参数、`auto`/`none` tool choice 和多步调用中的 `reasoning_content` 回传。动态工具、Context Caching、Partial Mode 和断线重连保留为 API 周边，其中动态工具文档当前只支持 K3，不能直接归因给 K2.7。
 
-当前状态为“资料级闭环”：已有两榜单锚点、官方资料、研究笔记和同步记录，但没有 K2.7 专属公开训练报告或独立 benchmark 复现。详见 [`kimi-k2.7-code-source-notes.md`](kimi-k2.7-code-source-notes.md)。
+当前状态为“双榜内容专题闭环”：已有两榜单锚点、官方资料、研究笔记和同步记录，但没有 K2.7 专属公开训练报告或独立 benchmark 复现。KTransformers 的 RAWINT4 部署命令、通用支持矩阵、dual prefill 阈值与 K2.5 旧/新 SFT 文档必须按版本和型号分别解释，不代表 K2.7 已完成运行时兼容或训练验证。详见 [`kimi-k2.7-code-source-notes.md`](kimi-k2.7-code-source-notes.md) §9。
 
 ## DeepSWE v1.1 当前核验结果
 
 DeepSWE 页面快照（2026-09-03 更新）显示 113 个长周期软件工程任务、91 个仓库、5 种语言，并说明所有模型使用 `mini-swe-agent`。页面主表的 Pass@1、平均成本、输出 token 和 Agent steps 是 Agent 系统组合结果；`gpt-6-astra`、`claude-opus-5`、`glm-5.3`、`kimi-k3`、`claude-sonnet-5` 等行不能直接当作基础模型能力排名。完整配置、revision、供应商、工具 schema、重试、硬件和独立复现仍待核验，详见 `deepswe-snapshot-notes.md`。
+
+## 2026-09-23 GPT-6 Astra 当前时点解释
+
+7890 复验的 AA 详情仍是同一 `gpt-6-astra` canonical release 的 `max` 配置，`parameters=null`、`proprietary`、1M context 和第三方 Intelligence Index/速度/成本字段没有被解释为参数或架构披露。DataCurve 当前同时列出 low/medium/high/xhigh/max 五个 `mini_swe_agent` 配置；它们是同一基础模型在不同 effort 下的 Agent 系统行，不是五个 checkpoint。
+
+当前资料状态为**内容专题闭环 + 双榜当前时点复验 + local protocol toy**。9 月 23 日 latest-model guide 从 Astra 专属页面漂移为 GPT-6 family 迁移页面；其 effort、endpoint、function-calling 和 EU data residency 矩阵属于 family-level API contract，不能当作 Astra 内部机制。toy 的重复句柄、错误 `call_id`、pending 结果、重复 steering、断线 recovery、misalignment 阻断和副作用账本属于本地协议验证；它们不提升为真实 API capability probe、服务端实现、质量、延迟或生产安全证据。官方未公开的参数规模、dense/MoE、训练/后训练 recipe、system card、专属技术报告、生产 kernel、目标硬件 profile 和独立 benchmark 继续标为 `unverified`。
 
 ## Claude Opus 5 当前核验结果
 
@@ -226,6 +242,8 @@ Artificial Analysis 的 `claude-opus-5` 是 `max` 配置（并列出其他 effor
 Anthropic 官方模型目录和专属页列出 `claude-opus-5`、2026-07-24 发布字段、1M context、128K 普通/300K Batch 最大输出、adaptive thinking、默认 `high` effort、五档 effort、512-token 最小可缓存 prompt、平台和价格字段。官方完整 Markdown 文档进一步确认 thinking block 回放、tool/effort 中途变更、refusal/fallback、fallback credit、web fetch 不支持以及相关安全/缓存边界。
 
 当前证据支持接口、运行时协议和发布方评测边界，不支持参数量、MoE/稠密结构、训练配方、后训练算法、adaptive thinking 内部机制或独立 benchmark 复现。arXiv 精确标题检索返回的两篇文章只是将 Opus 5 作为被测模型，没有 Opus 5 专属技术报告；详见 [`claude-opus-5-source-notes.md`](claude-opus-5-source-notes.md)。
+
+2026-09-24 补读 System Card 正文后，Opus 5 的专题增加 Agentic Safety 与评测方法证据：card changelog 因 Cowork harness mismatch 而重跑基线；IPI/bug bounty/Shade/Cowork 分别有不同攻击集、预算、产品 safeguard 和分母，不能合成统一安全率。产品级双层防护将 probe 放在不可信 tool result 的输入侧、classifier 放在危险 tool call 的动作侧。系统卡将 Opus 5 评为 CB-1、未达 CB-2，并报告内部安全监测/行为审计；这些仍是 Anthropic 发布方结果，不是独立安全审计或生产普遍概率。当前内容专题覆盖已闭环，但模型参数、架构、完整训练 recipe 和独立复现仍未证实。
 
 ## Claude Fable 5.1 当前核验结果
 
@@ -236,6 +254,12 @@ Anthropic 模型页和发布页确认 `claude-fable-5-1`、2026-09-01、1M conte
 迁移时必须单独记录三个 breaking changes：forced tool use 可能返回错误；较早模型不能读取 Fable 5.1 thinking blocks；编辑历史 turn 会使 thinking blocks 失效。新增能力包括 per-message effort、turn-scoped system messages、`display: "updates"` 工具间进度事件、较低 cache read 价格和 content provenance。它们共同说明模型接口是带版本、状态和审计语义的协议，不能把 thinking block 当普通文本、把进度事件当工具成功或把 provenance 当事实正确性证明。
 
 arXiv 标题精确检索返回 0 篇，全文检索返回 4 篇外部使用/评测论文；Anthropic Research 页面未检出 Fable 5.1 专属报告。当前仍不支持参数量、MoE/稠密结构、训练配方、独立技术报告或独立 benchmark 复现结论，详见 [`claude-fable-5.1-source-notes.md`](claude-fable-5.1-source-notes.md)。
+
+## 2026-09-23 Claude Fable 5.1 状态协议解释
+
+7890 复验没有产生新模型：AA Fable 详情仍是 `claude-fable-5-1`，DataCurve 没有精确 Fable 5.1 行。最新官方 Markdown 把模型迁移门禁具体化为：assistant prefill 400、adaptive thinking always-on、forced tool 400、方向性的 thinking block 兼容、prefix mismatch 的 reject/drop 分支，以及 30-day retention/ZDR 和 Priority Tier 部署边界。这里的 `drop_block` 是显式状态转换并需要 `input_transformations` 记录，不能当作静默成功。
+
+本轮 [`claude_fable51_state_protocol_audit.py`](code/claude_fable51_state_protocol_audit.py) 的 toy 结果只证明宿主账本的内部一致性：进度事件不计作工具完成，结构化 tool result 必须带回 call/idempotency lineage，provenance 需要独立 artifact verifier，重复回放只产生一个副作用。它不能证明 Anthropic server-side schema、hidden reasoning、Fable 5.1 质量或生产 SLO。随后新增[第二十册第 21 章 21.29](../../book-20-agent-harness-runtime/chapters/21-persistent-workspace与状态边界.md)，将当前闭环升级为 **AA 单榜内容专题闭环 + System Card/API contract + local protocol toy**，而非架构或权重闭环。
 
 ## Claude Sonnet 5 当前核验结果
 
@@ -301,6 +325,10 @@ OpenAI Model Card、官方 gpt-oss 仓库、Harmony 仓库、Hugging Face 固定
 OpenAI Cookbook 的实现验证与 raw CoT 指南进一步把服务验收拆成：Harmony/render 和 API shape、tool-call compatibility smoke test、raw CoT/state replay、AIME/GPQA/HealthBench quality eval，以及 kernel/precision/hardware/production acceptance。Responses 使用 `reasoning.content[].reasoning_text` 与 `response.reasoning_text.delta/done`；Chat Completions provider 可采用 `reasoning` 字段约定。raw CoT 默认不能展示给终端用户，且 final、tool call、analysis 的保留范围必须按 turn lineage 回放。
 
 当前状态为“内容专题闭环 + 官方 provider 兼容性/raw CoT protocol evidence”：正式章节为第二十一册第 87 章，研究笔记为 [`gpt-oss-source-notes.md`](gpt-oss-source-notes.md)。这两个尺寸属于一个模型族，不重复创建两篇架构章节。兼容性 smoke test 的通过不能替代 MXFP4 kernel、MoE dispatch、质量 eval、目标硬件 profiling 或线上 acceptance。
+
+2026-09-23 的当前时点复验没有改变上述归并：7890 代理下百度、AA 中文首页和 DataCurve 均 HTTP 200；AA 详情为 120B `4,078,295` bytes / `43e5f13a3e58976b077acac1810bce82ac60ce33a7d81476f0dc2b17175532de`、20B `4,083,068` bytes / `64d67047a5964c0109f103108f9b77c64edbaf1ee17f3fec3c82ffccd7cea2cc`。当前 AA 字段为 120B `11.6028431512592` / `196.389235173389 tokens/s` / `0.10742452290394947` cost/task，20B `8.9675171856126` / `185.656167974395 tokens/s` / `0.012460640242179213` cost/task；它们只说明第三方 provider 测量时点，不能写成模型升级。
+
+本轮 DataCurve 快照仍无两个 gpt-oss 的精确 Agent 行，故保持“不适用/负证据”而不是把相邻 OpenAI 模型的 harness 结果借过来。官方 Cookbook 页面当前哈希变化也只记为动态文档快照：兼容性验证 `337,423` bytes / `e6500d57bc6041133a8f63acc03101260182ea58d45d2f7248806ae609c85474`，raw CoT `339,052` bytes / `1c08e3fb06a129256596c1af9ba907b7b3c435be3b61cfb00a72da83b1071fe6`；没有观察到新的模型 ID、权重 revision 或架构声明。
 
 ## Claude Opus 4.6 的证据分层
 
@@ -412,6 +440,8 @@ Z.ai 文档、release notes 和官方博客把 GLM-5.1 的新重点放在最长�
 Artificial Analysis 有精确的 `grok-4-20` 页面，canonical 标题为 `Grok 4.20 0309 v2 (Reasoning)`；DataCurve 当前只有 Grok 4.5/4.6 配置，没有精确 `mini_swe_agent_grok_4_20_*` 行。因此 Grok 4.20 是 **AA 单榜资料级闭环**，不能迁移相邻 Grok 版本的 Agent 成绩。
 
 AA 当前字段为第三方 estimated Intelligence Index `25.6550155187053`、2M context、约 97.01 tokens/s、TTFT 22.71s、`$1.25/$2.50` input/output，并标记页面 deprecated -> `grok-4-3`。xAI 官方模型页/注册表则确认主 ID `grok-4.20-0309-reasoning`、non-reasoning 与 multi-agent sibling，写明 1M maximum prompt、text/image -> text、function calling、structured output、reasoning、Batch、200K long-context price threshold 和区域限流。2M vs 1M 是第三方目录与官方服务字段差异，不能压成一个结论。
+
+2026-09-24 7890 快照为 3,857,337 bytes / SHA-256 `d56d4557d8a661ee9c3015c6a3661f5baae6c00f9b16c5b2acf5eabcd3e61300`；当前页面给出的速度为 `106.190642707844 tokens/s`、TTFT `21.53034693s`、端到端 `26.23885972594964s`。页面同时声明只继续更新默认 10K input token workload 的性能基准、其他 workload 为不再更新的历史结果。快照中的指标数值变化只说明 AA/provider 展示值或采集时点变化，不证明模型 revision；未绑定具体 workload 的汇总字段应标 freshness 未确认。`deprecatedTo: grok-4-3` 是 AA 目录关系，不是 xAI API 下线证据。
 
 xAI 的新技术公开在 Agent runtime：`grok-4.20-multi-agent` 为 beta，由多个专门 Agent 搜索、分析、交叉核验，leader agent 汇总；4/16 agents 由 `agent_count` 或 `reasoning.effort` 映射。子 Agent 中间状态默认不直接返回，`use_encrypted_content` 可携带 opaque encrypted state。Context Compaction、自动 prompt caching、server-side Web/X Search/Code Execution、client-side function calling、parallel calls、Remote MCP `allowed_tools` 和 mixed-tool `max_turns` 是可迁移的面试主线。
 
@@ -551,6 +581,12 @@ xAI 发布页提供“更大 base、更长 RL、困难长任务、自验证和 s
 发布方 benchmark 必须带 benchmark、prompt、effort、harness、任务集、verifier 和统计时间；`reasoning_effort` 不是四个模型，`allowed_tools` 也不是完整安全边界。arXiv 精确标题检索无 Grok 4.7 结果，因此当前结论是 **AA 单榜内容专题闭环**，而不是架构或训练配方已公开。
 
 本轮 reasoning 页面刷新把运行时证据再拆成三层：`reasoning.encrypted_content` 及服务端工具加密输出是必须原样回放的 opaque state；`response.reasoning_text.delta`/`response.reasoning_summary_text.delta` 是面向开发者的可见 summary/stream 事件；`store` 与 `previous_response_id` 决定服务端 response 状态引用，不能替代客户端自己的事件账本。Remote MCP 还存在 API/SDK 字段差异：Responses 使用 `allowed_tools`/`headers`，xAI SDK 使用 `allowed_tool_names`/`extra_headers`，当前 transport 只到 Streaming HTTP/SSE，`require_approval`/`connector_id` 不能作为已支持的权限控制面。它们都属于 API 合同与 harness 设计证据，不是 Grok 4.7 的内部推理或安全算法披露。
+
+## 2026-09-23 Grok 4.7 当前复验
+
+`7890` 沙箱外请求恢复后，两榜首页均返回 HTTP 200；当前快照没有八家重点厂商的新 canonical 条目。Grok 4.7 AA 详情的页面 hash/大小发生动态变化，但 release、Intelligence Index、500K context、proprietary 和无参数字段保持一致。xAI 模型页、Reasoning、Compaction 的正文也没有新的模型合同差异，因此这次只算当前时点复验，不算新版本。
+
+新增的 [`grok47_state_replay_audit.py`](code/grok47_state_replay_audit.py) 把公开协议转成最小 host-side 门禁：encrypted content 必须按 opaque item 原样保存；可见 summary 不能替代它；tool call/output 必须以 call id 和 idempotency key 对齐；compaction 只能有一个且不能重复执行已提交副作用；`store=false` 不能依赖 `previous_response_id`。这是 `local_protocol_toy`，不提供 xAI 真实实现、加密语义或模型能力证据。
 
 ## 2026-09-22 K2 Horizon 3.7B 的证据分层
 
@@ -718,7 +754,7 @@ Artificial Analysis 的 `gpt-6-sol` canonical 条目是 `GPT-6 Sol (max)`，页�
 
 GPT-6 family 的 `reasoning.mode` 与 `reasoning.effort` 是不同控制面，`configuration_update` 可以改变后续 effort；这不等于会话内更换权重。Agents API、Agents SDK、Responses API 的 loop/state/executor 所有权不同；server-side 和 standalone compaction 都返回 opaque/encrypted state，不能把它们简化成可读摘要或永久记忆。评测必须固定模型、snapshot、effort、mode、工具、harness、任务环境、verifier、compaction 策略和 whole-request pricing threshold。
 
-当前状态为 **AA 单榜资料级闭环**：榜单身份、官方模型页、运行时协议、研究笔记和配套同步已具备；DataCurve 精确 Agent 行、参数规模、内部架构、完整训练 recipe、公开权重、生产 kernel、目标硬件 profile 和独立 benchmark 仍待核验。
+本轮重新抓取后的状态为 **AA 单榜资料级闭环 + 当前时点复验 + local protocol toy**：榜单身份、官方模型页、运行时协议、研究笔记和配套同步已具备；DataCurve 精确 Agent 行、参数规模、内部架构、完整训练 recipe、公开权重、生产 kernel、目标硬件 profile 和独立 benchmark 仍待核验。`gpt6_sol_contract_audit.py` 只验证公开协议的状态机，不升级为真实模型能力或生产验收。
 
 ## GPT-6 Luna：同 family，不同模型合同
 
@@ -763,3 +799,94 @@ GLM-5.3 canonical榜单身份
 ```
 
 因此，SAO 论文可以成为 GLM-5.3 面试锚点的技术解释材料，但不能填充 5.3 的独立训练、参数、权重、硬件或 Agent 质量字段。论文的 Qwen3-30B-A3B 实验、GLM-5.2 结果和 DataCurve 的 `mini_swe_agent_glm_5_3_max` 行必须各自保留来源和配置。
+
+## 2026-09-23 DeepSeek V4.1-Flash：Harness preview 的解释边界
+
+本轮没有新增模型。`deepseek-v4-1-flash` 仍是 Artificial Analysis 已确认的 canonical 条目，官方 API 使用 `deepseek-flash`；DeepSeek Harness 文档来自同一厂商的 Agent runtime preview，只能扩展周边系统知识，不能反向证明 V4.1 的内部架构。
+
+证据阶梯应保持为：
+
+```text
+AA canonical identity
+  -> official API/provider contract
+  -> Harness preview: provider/session/plugin/MCP/webhook
+  -> local protocol toy
+  -> full-weight / hardware / tool acceptance / SLO (unverified)
+```
+
+Harness 文档可支持的面试结论是：provider ID 和 session 中的实际模型必须稳定可追溯；credential 只可脱敏；插件依赖和外部 effect 要随生命周期清理；MCP 断线后必须重新发现并在预算耗尽后注销旧工具；GitHub review 的签名 webhook 和 HTTP `202` 只表示异步 admission，重复 delivery、出站权限、artifact 和 verifier 需要独立记录。
+
+[`deepseek_harness_protocol_audit.py`](code/deepseek_harness_protocol_audit.py) 只验证上述责任边界的合成拒绝路径，证据等级为 `local_protocol_toy`。因此当前状态是 **AA 单榜内容专题 + API/runtime + Harness preview + local protocol toy**；DataCurve 无精确 V4.1 行，不能迁移其他 DeepSeek 的 Agent 结果。Harness 资料、API 资料、vLLM/SGLang source、完整权重和生产验收必须继续分账。
+
+## 2026-09-23 GPT-5.6 Luna：当前时点复验的解释边界
+
+本轮没有新增模型。`GPT-5.6 Luna` 仍是 Artificial Analysis 与 DataCurve 已确认的 canonical 条目；7890 恢复访问后，AA 的速度字段发生 provider/采集时点漂移，官方五份 Markdown 没有产生足以证明模型升级的新架构或训练信息。
+
+证据阶梯保持为：
+
+```text
+AA canonical identity + current provider measurement
+  -> DataCurve mini-swe-agent system measurement
+  -> OpenAI model/API runtime contract
+  -> local state-replay toy
+  -> full-weight / hardware / endpoint capability / verifier / SLO (unverified)
+```
+
+本轮最有价值的面试知识不是“1M context 能装多少”，而是状态所有权：`current_turn/all_turns` 控制 opaque reasoning 的可用范围；完整 output item、function call/output 和 compaction item 组成可回放协议；prompt cache 只复用稳定前缀，compaction 改写前缀后可能 miss；hosted/client tool search 只改变 schema 发现责任，不授予 executor 权限。[`gpt56_luna_state_replay_audit.py`](code/gpt56_luna_state_replay_audit.py) 将这些边界转为可运行的拒绝路径和幂等回执，证据等级固定为 `local_protocol_toy`。
+
+因此 GPT-5.6 Luna 当前状态是 **双榜当前时点复验 + 官方 runtime contract + local protocol toy**。不能从 API 字段、榜单速度、DataCurve Agent 行或 toy 结果反推出参数、内部架构、训练 recipe、完整权重、目标硬件性能或生产 SLO。
+
+## 2026-09-24 两榜刷新：无新增重点 canonical 模型
+
+当前 AA 中文首页与 DataCurve 页面均通过 7890 返回 HTTP 200。相较 2026-09-23 快照，AA 的八家重点厂商 canonical path 集合与 DataCurve 的 `mini_swe_agent_*` 配置集合都没有新增；AA 当前发布列表中的 Opus 5.5、GPT-6 Luna、GPT-6 Sol 均已有记录。因此本轮继续沿 Opus 5.5 官方 API 状态协议推进，不从 provider/effort 变体扩张模型清单。
+
+Opus 5.5 与 Luna 的 AA 快照哈希/字节数变化，但 Opus 的 Intelligence Index 和 task cost、Luna 的 Index 和 task cost 与既有观测相同；Luna 输出速度作为当前 provider 时点值保存。页面快照变化只说明获取内容不同，不能证明模型权重或 revision 变化。DataCurve 配置集合相同且没有 Opus 5.5 精确行，所以它仍是 AA 单榜锚点，其他 Claude 的 Agent 结果不可迁移。
+
+Opus 5.5 model page 的当前合同将同步 128K 与 Batch beta 300K 输出上限分开，并列出 always-on adaptive thinking、默认 medium、512-token cache minimum 与 cache read/write 单价。面试中应将上下文/输出限制、effort、缓存与 endpoint 账单拆开；这些公开字段不能用于反推 adaptive thinking 内部算法。第八册第 11 章新增 System Card 治理审计案例，统一绑定 snapshot、safeguards、fallback、成功定义/分母与计时口径；专题状态更新为 **AA 单榜内容专题闭环 + System Card/API contract + local protocol toy**。
+
+## 2026-09-24 GLM-5.3：复验后的证据边界
+
+本轮 7890 代理成功访问两榜和 Z.ai 资料，但没有产生新的 canonical 模型。Artificial Analysis `/zh` 当前快照为 `1,784,793` bytes / `a374adfb…`，标准 GLM-5.3 详情为 `4,057,703` bytes / `4f60e893…`；DataCurve 仍为 `268,036` bytes / `14436c31…`。这些页面的动态字节和 provider 测量只能说明当前获取观察，不证明权重 revision 或训练升级。
+
+标准 GLM-5.3 的证据阶梯现在应写成：
+
+```text
+两榜 canonical identity
+  -> Z.ai 官方 API/博客与 GLM-5.2 基座继承声明
+  -> SAO 公开论文算法 + GLM-5.3 环境/verifier/slime 资料
+  -> fixed config + Transformers/vLLM/SGLang DSA source entry
+  -> local compaction contract toy
+  -> full-weight / hardware / independent benchmark / production acceptance（未核验）
+```
+
+因此状态可以从“资料级闭环”升级为**内容专题闭环 + stable/main runtime source evidence**：面试所需的技术主线、权威来源、实现入口和本地教学验收已串起来。但不能把 `glm_moe_dsa` source entry 写成完整权重已加载，不能把 `index_topk=2048` 写成最终可见 token 数，不能把 vLLM/SGLang main/stable 入口写成目标硬件性能或线上 SLO，也不能把 Flash 版 KDA/视觉/EPD 迁移给标准版。
+
+剩余门禁继续单独记账：完整权重与 stable wheel、index/evidence recall、FP8/量化误差、MTP、目标硬件 profiling、5.3 专属 compaction schema/阈值/质量门禁、完整 post-training recipe、独立 benchmark、tool/verifier acceptance 和生产 SLO。
+
+## 2026-09-24 GPT-6 Luna：榜单复验与证据不升级
+
+7890 实时抓取显示 AA `/zh` 首页 `1,783,893` bytes / `3b895865…`，Luna 同日后续详情 `3,974,386` bytes / `9c6376c8…`，DataCurve `268,036` bytes / `14436c31…`。Luna 当前 AA 字段为 Intelligence Index `37.2559686869738`、cost/task `$0.06809498628701058`、median output speed `132.242651126596 tokens/s`。较早同日详情为 `3,974,113` bytes / `8a460332…`、速度 `131.449006457181 tokens/s`；Index/成本稳定，动态字节与速度测量变化均不构成模型 revision 证据。
+
+OpenAI model page `4,019` bytes / `561a86af…` 与既有官方快照相同。DataCurve 仍没有精确 Luna Agent 行，因此不迁移其他 GPT 的工具环境系统结果。Luna 的服务合同、siblings 对照、预算门槛和 harness responsibility 已有正式书册小节与题库/练习；这一轮无新的 Luna 专属技术披露，状态维持 **AA 单榜资料级闭环**，不为状态升级而重复开章。
+
+同日另复核 OpenAI [data residency guide](https://developers.openai.com/api/docs/guides/your-data.md)：EU residency 对 GPT-6 Luna 仅明确适用于 Standard processing 的 Responses 与 Chat Completions。regional storage 不等同 regional processing；system data、Remote MCP 第三方服务数据不自动包含在驻留保证内，非美国地区还需满足适用的 abuse-monitoring/retention 条件。此为服务合同边界，不是 Luna 专属模型技术。
+
+## 2026-09-24 GPT-6 Sol：EU residency 合同与榜单时点
+
+当前 AA `/zh` 首页 `1,783,966` bytes / `0baa28c8…`，GPT-6 Sol 详情 `3,976,802` bytes / `ff0aeaed…`；Index `47.5276426437724`、cost/task `$1.0564240894076389` 未变，median output speed 为 `109.551294011457 tokens/s`，较早记录 `126.038858615917` 只作 provider/采集时点变化。DataCurve 当前仍为 `268,036` bytes / `14436c31…`，无精确 `mini_swe_agent_gpt_6_sol_*` 行。
+
+OpenAI data-residency guide 明确 Sol/Luna EU residency 仅适用于 Standard processing 的 Responses/Chat Completions；regional storage 与 inference regional processing 区分，system data 不在 customer-content guarantee 内，Remote MCP 遵循第三方 policy。`Standard processing` 不等于模型 `reasoning.mode=standard`。这是一条 API/部署 capability contract，不是架构或模型能力证据；Sol 保持 AA 单榜资料级闭环，不迁移其他 GPT 的 Agent 分数。
+
+## 2026-09-24 Qwen3.5-Omni Plus / Flash 的证据分层
+
+Artificial Analysis 已有 `qwen3-5-omni-plus` 与 `qwen3-5-omni-flash` 两条配置；当日刷新后两页哈希分别为 `b2127d33…`、`17bd65b3…`。DataCurve 刷新为 `268,036` bytes / `14436c31…`，未检出精确 `mini_swe_agent_qwen3_5_omni_*` 行，故不迁移其他 Qwen 的 Agent 结果。榜单中的 Plus 价格、Index、速度和上下文只作为第三方/provider 当时字段。
+
+内容专题依据 Qwen Team 技术报告 v2：AuT 为 `6.25 Hz`/约 `160 ms`，Thinker 与 Talker 采用 Hybrid MoE，显式秒级 timestamp 补充 TM-RoPE，ARIA 以样本级整体 speech:text token ratio 限制任一生成前缀；训练报告披露 S1 encoder alignment、约 4T S2 和 262,144-token S3。阿里云当前 API 文档则说明 `qwen3.5-omni-plus`、流式音频输出和 Plus/Flash custom voice 的接口边界。
+
+口径上必须与 Qwen3-Omni 分代：本代 6.25 Hz 不沿用前代 12.5 Hz；报告中的 1 亿小时整体音视频、AuT 4,000 万小时与 Talker 2,000 万小时以上分属不同说明口径，不简单相加。作者 benchmark/延迟不等于本地复现；完整参数、数据 recipe、权重运行、真实 API response、DataCurve 行与线上 SLO 仍待核验。研究笔记和正式章见 [`qwen3.5-omni-source-notes.md`](qwen3.5-omni-source-notes.md) 与第二十一册第 93 章。
+
+## 2026-09-29 Kimi K3：serving 证据分层
+
+本次仍由 AA `kimi-k3` 与 DataCurve `mini_swe_agent_kimi_k3_max` 确认模型身份；vLLM、SGLang、InferenceX 只用于解释该锚点周边的 serving，不作为模型发现入口。adaptive DSpark、cache-pointer invalidation 与 ROCm capability gate 补足了调度、内存生命周期和后端约束知识，但 main commit、合入 PR、stable tag 与 nightly recipe 是不同证据等级。
+
+面试或部署结论至少拆成四层：stable release 中存在实现入口；mutable main/PR 有后续实现或修复；固定 recipe 描述特定硬件/依赖组合；目标机器上的完整权重、数值正确性、恢复与性能验收。本轮只推进前三层的公开资料证据，没有完成最后一层。`synthetic acceptance` 注入外部给定的接受长度并跳过 target verification，只能回答假设接受率下的吞吐，不能和真实 block rejection 的正确性/任务结果混用。完整状态见 [`kimi-k3-source-notes.md`](kimi-k3-source-notes.md)。
