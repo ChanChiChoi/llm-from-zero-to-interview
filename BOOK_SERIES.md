@@ -144,4 +144,4 @@ OpenAI GPT-6 Luna 接入同一 GPT-6/Agent 路线，但保留独立模型合同�
 GPT-6 Sol/Luna 的新增数据驻留知识点并入第二十四册第 32.55.3 节：区分 `Standard processing` 与 `reasoning.mode=standard`，并把 regional storage/processing、endpoint、region、retention controls、system data、Remote MCP 和地域溢价拆成可审计 capability tuple；该服务合同不构成模型架构或合规证明。
 
 围绕 Claude Opus 4.8 历史锚点补入 Anthropic 的 Dynamic Workflows 产品资料与 System Card 多 Agent 评测，接入第十七册第九章既有 Multi-Agent 专题：学习对话外动态编排、subagent 独立复核/反驳、长任务 checkpoint-resume、预算与审批门禁，并按 total tokens、score、任务难度及 latency 定义解读 BrowseComp/ProgramBench 曲线；System Card harness 与产品 Dynamic Workflows 分开记账，且 Dynamic Workflows 并非 Opus 4.8 独有能力。其历史榜单条目已 deprecated，不新增 Opus 4.8 架构专章；完整快照、评测口径和勘误见 [`claude-opus-4.8-source-notes.md`](research/model-update-2026-09/claude-opus-4.8-source-notes.md)。
-Gemini 4 Argon 已接入第二十一册第 95 章：围绕 Google 官方发布的 1M 输出预算、长程 coding/enterprise/cyber 工作流、Fairwind 受限 rollout、发布方评测与安全措施建立证据账本；公开模型卡、完整训练/架构、权重、独立复现和生产验收仍待核验。DataCurve 无精确 Argon 行，不迁移其他 Gemini Agent 结果。
+Gemini 4 Argon 已接入第二十一册第 95 章：围绕 Google 官方发布的 1M 输出预算、长程 coding/enterprise/cyber 工作流、Fairwind 受限 rollout、发布方评测与安全措施建立证据账本；公开模型卡、完整训练/架构、权重、独立复现和生产验收仍待核验。DataCurve 无精确 Argon 行，不迁移其他 Gemini Agent 结果。当前排行榜资料级闭环已完成。

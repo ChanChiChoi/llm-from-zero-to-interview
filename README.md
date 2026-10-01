@@ -17,6 +17,8 @@
 
 当前阶段：第二轮全系列精修阶段。
 
+排行榜专题状态：已完成当前 Artificial Analysis 与 DataCurve/DeepSWE 重点模型的资料级闭环。最后收口的 `gemini-4-argon` 已有 Google The Keyword 官方发布资料，并已同步第二十一册第 95 章及研究笔记、题库、练习、术语、论文、项目和知识图谱。参数、完整训练配方、权重、目标硬件 profiling、独立 benchmark 和生产 SLO 仍按证据边界标为待核验；这不影响本轮“资料级闭环”目标完成。完整审计见 [`progress_v2.md`](progress_v2.md) 和 [`research/model-update-2026-09/model-inventory.md`](research/model-update-2026-09/model-inventory.md)。
+
 进度摘要：
 
 1. 24 本主书均已完成正文第一版，已打通从基础、训练、部署、评估、安全、数据、论文、系统设计、求职、数学、PyTorch、多模态、Reasoning、Agent、产品化、实战坑、Agent Runtime、架构演进、工具协议、AI Infra 到推理框架的完整闭环。
@@ -28,7 +30,7 @@
 7. 第三册、第五册到第九册、第十三册到第十八册、第十九册到第二十四册的已记录章节均有阶段性第二轮精修成果；其中第二十二册、第二十三册和第二十四册已完成当前落盘章节的第二轮收口。
 8. 第二十四册 `book-24-llm-inference-engine/` 当前落盘 60 章已完成第二轮精修，并已同步第四册百科、面试题库、练习、术语、项目路线、知识图谱和 `PROGRESS.md`。
 
-详细进度见：[`PROGRESS.md`](PROGRESS.md)
+详细总览进度见：[`PROGRESS.md`](PROGRESS.md)；最新模型专题增量与证据审计见：[`progress_v2.md`](progress_v2.md)。
 
 ## 书系总览
 
@@ -91,6 +93,37 @@
 5. [`EXERCISES.md`](EXERCISES.md)：用练习检验自己是否真的掌握。
 6. [`book-02-advanced-100/目录.md`](book-02-advanced-100/目录.md)：进入进阶原理和前沿研究。
 7. [`book-03-practical-handbook/目录.md`](book-03-practical-handbook/目录.md)：把理论转成代码、实验和项目作品集。
+
+## 如何生成 PDF
+
+项目提供 [`scripts/build_pdfs.py`](scripts/build_pdfs.py)，会按书籍目录和章节文件名顺序，把每本书合并生成 PDF，并保存到对应的 `book-*` 目录。
+
+先安装 `pandoc`、`xelatex`、中文 TeX 支持和中文字体（Debian/Ubuntu）：
+
+```bash
+sudo apt update
+sudo apt install pandoc texlive-xetex texlive-lang-chinese fonts-noto-cjk
+```
+
+在仓库根目录批量生成全部书籍：
+
+```bash
+python3 scripts/build_pdfs.py
+```
+
+只生成一本书：
+
+```bash
+python3 scripts/build_pdfs.py --book book-24-llm-inference-engine
+```
+
+生成前只查看将执行的命令：
+
+```bash
+python3 scripts/build_pdfs.py --dry-run
+```
+
+完整参数、字体替换、多个 `--book`、自定义输出文件名和常见问题见 [`docs/build-pdfs.md`](docs/build-pdfs.md)。
 
 ## 已完成重点内容
 
@@ -188,6 +221,8 @@
 4. 对高时效主题做联网校验，修正过时、片面或证据不足的表述。
 5. 同步维护第四册百科、面试题库、练习体系、项目路线、论文路线、术语表、知识图谱和 `PROGRESS.md`。
 
+当前排行榜专题已收口；后续模型更新仍只从 Artificial Analysis 与 DataCurve/DeepSWE 发现候选，再按 `WRITING_SPEC.md` 执行增量核验和同步。
+
 ## 适用边界
 
 这个项目是学习与面试训练资料，不是 OpenAI 官方资料，也不代表任何公司的招聘标准。
@@ -201,6 +236,10 @@
 如果后续需要用于更正式的开源分发、转载或商业场景，建议补充标准开源协议文件，例如 `LICENSE`。
 
 ## 2026-09 新模型专题更新
+
+### 2026-10 Gemini 4 Argon 收口
+
+`gemini-4-argon` 由 Artificial Analysis 发现，DataCurve 当前没有精确 Agent 行。Google The Keyword 官方文章确认 1M 输出上限、Fairwind 受限 rollout、coding/enterprise/cyber 场景、发布方评测和分阶段安全措施。对应正式章节为[第二十一册第 95 章](book-21-transformer-architecture-evolution/chapters/95-gemini-4-argon长程推理与网络安全防御.md)，详细来源见[`gemini-4-argon-source-notes.md`](research/model-update-2026-09/gemini-4-argon-source-notes.md)。官方未公开的参数、训练、权重、完整 API 和生产验收不作推断。
 
 本轮已围绕 Artificial Analysis、DeepSWE 与官方资料新增一批 Frontier Model 研究和正式章节：第二十一册第 75-85 章覆盖 Attention Residuals、Kimi Delta Attention、DeepSeek V4 的 CSA/HCA/mHC、Mistral Small 4、Step 3.5 Flash、V4.1-Flash、K2 Horizon、Qwen3.8、GLM-5.3-Flash 和 V4 Flash Vision 的多模态 API/路由账本；第六册第 18 章、第十六册第 20 章和第十七册第 15 章承接 GPT-6、GLM-5.3 与 Kimi K3 的运行时专题。相关模型、论文、模型卡、代码示例、面试题、练习、术语、知识图谱和项目路线已同步，未核验的模型机制继续标注为待核验。
 

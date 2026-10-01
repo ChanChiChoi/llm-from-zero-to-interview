@@ -1,5 +1,11 @@
 # 学习进度追踪
 
+## 2026-10-01 排行榜专题收口
+
+当前 Artificial Analysis 与 DataCurve/DeepSWE 重点模型的资料级闭环已完成。最后的 `gemini-4-argon` 已从 AA 榜单锚点推进到 Google The Keyword 官方发布证据，并同步第二十一册第 95 章、研究笔记、模型盘点、来源索引、题库、练习、术语、论文索引、项目、知识图谱、`plan_v2.md` 与 `progress_v2.md`。发布方结果与独立评测保持分栏；参数、完整训练配方、权重、目标硬件、独立 benchmark、真实 API 和生产 SLO 仍是未验证边界。
+
+最新增量记录见 [`progress_v2.md`](progress_v2.md)，模型证据盘点见 [`research/model-update-2026-09/model-inventory.md`](research/model-update-2026-09/model-inventory.md)。
+
 ## 当前阶段
 
 阶段：第二轮全系列精修阶段
