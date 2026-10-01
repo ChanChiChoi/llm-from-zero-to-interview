@@ -86,7 +86,7 @@
 
 推荐基础阅读顺序：
 
-1. [`background.md`](background.md)：了解项目目标和写作定位。
+1. [`WRITING_SPEC.md`](WRITING_SPEC.md)：了解项目目标、书系定位和完整写作规范。
 2. [`ROADMAP.md`](ROADMAP.md)：选择 3 个月、6 个月或 12 个月学习路线。
 3. [`book-01-core-30/目录.md`](book-01-core-30/目录.md)：从核心 38 讲建立主干知识。
 4. [`INTERVIEW_BANK.md`](INTERVIEW_BANK.md)：配合每一讲做面试题训练。
@@ -153,7 +153,7 @@ python3 scripts/build_pdfs.py --dry-run
 | [`EXERCISES.md`](EXERCISES.md) | 练习与阶段验收体系，检查是否真正掌握。 |
 | [`GLOSSARY_EN_ZH.md`](GLOSSARY_EN_ZH.md) | 中英文术语表，方便读论文和英文面试。 |
 | [`ENGLISH_INTERVIEW_TEMPLATES.md`](ENGLISH_INTERVIEW_TEMPLATES.md) | 英文面试表达模板。 |
-| [`WRITING_PLAN.md`](WRITING_PLAN.md) | 写作计划与扩写规范。 |
+| [`WRITING_SPEC.md`](WRITING_SPEC.md) | 写作计划、扩写规范与质量检查。 |
 | [`PROGRESS.md`](PROGRESS.md) | 当前进度追踪。 |
 | [`docs/build-pdfs.md`](docs/build-pdfs.md) | PDF 生成说明，包含依赖安装、批量生成、单本生成、字体设置和常见问题。 |
 
@@ -199,7 +199,7 @@ python3 scripts/build_pdfs.py --dry-run
 
 ## 统一写作规范
 
-今后所有章节写作、扩写、题库、练习和项目路线更新必须遵循 [`WRITING_SPEC.md`](WRITING_SPEC.md)。`WRITING_PLAN.md` 与 `写作注意事项.md` 已标记为废弃。
+今后所有章节写作、扩写、题库、练习和项目路线更新必须遵循 [`WRITING_SPEC.md`](WRITING_SPEC.md)。
 
 ## 写作原则
 
