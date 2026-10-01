@@ -2069,3 +2069,16 @@ Figure 5 补充记录：用户终端提供的百度 HTML 显示 7890 可用；�
 - 2026-10-01 Google 限定域名检索：对 `ai.google.dev`、`cloud.google.com`、`deepmind.google`、`blog.google` 和 `google.com` 的 exact/site 查询均未提取出官方 Argon URL；五个搜索快照哈希已写入研究笔记与来源索引。该结果进一步确认当前只有 AA/provider 发现证据，Argon 仍未闭环，goal 保持 `active`。
 - 2026-10-01 Argon 官方发布出现：Google The Keyword 官方文章 `Introducing Gemini 4 Argon`（`408,929` bytes / `1c09a8019b06eada8703e67c7da2d4269ff3dc9169ae66226784dbec2d3043df`）已核验。文章披露 1M 输出上限、Fairwind 受限 rollout、coding/enterprise/cyber 场景、Google 自报 DeepSWE/AutomationBench/LVBench/CWE-bench 结果及分阶段安全措施。研究对象升级为“AA 单榜内容专题闭环（Google 发布方证据）”；公开模型卡、技术报告、权重、完整 API、独立复现和精确 DataCurve 行仍待核验。
 - 2026-10-01 当前排行榜重点模型闭环审计完成：AA/DataCurve 重点 canonical 已全部在 inventory/研究笔记中登记；Argon 已补齐 Google 官方发布资料、正式章节、题库、练习、术语、论文索引、项目、知识图谱、计划和进度同步。剩余项目均属于参数/权重/硬件/独立 benchmark/生产 SLO 等工程验证边界，不属于本 goal 的资料级闭环门槛。按用户定义，当前 goal 达成。
+
+
+## 第二轮全系列精修历史状态（归档自 SECOND_PASS_REVIEW_PLAN.md）
+
+## 5. 当前状态
+
+截至最近一次进度同步：
+
+- 24 本主书正文第一版完成。
+- `book-llm-engineer` 第 60-82 章完成，补充篇第一版完成。
+- 第二轮全系列精修已持续推进，已覆盖公式修正、demo 级代码补充、联网资料校准、纵向文件同步和 `PROGRESS.md` 进度记录。
+- 第二十四册 `book-24-llm-inference-engine/` 当前落盘第 1-60 章已完成第二轮精修，相关百科、题库、练习、术语、项目路线和知识图谱已同步。
+- 下一步：继续推进未收口章节的第二轮精修；对已完成第二轮的专题册执行总体验收、目录/索引一致性检查和最终收口。

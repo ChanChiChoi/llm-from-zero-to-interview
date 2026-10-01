@@ -30,7 +30,7 @@
 7. 第三册、第五册到第九册、第十三册到第十八册、第十九册到第二十四册的已记录章节均有阶段性第二轮精修成果；其中第二十二册、第二十三册和第二十四册已完成当前落盘章节的第二轮收口。
 8. 第二十四册 `book-24-llm-inference-engine/` 当前落盘 60 章已完成第二轮精修，并已同步第四册百科、面试题库、练习、术语、项目路线、知识图谱和 `PROGRESS.md`。
 
-详细总览进度见：[`PROGRESS.md`](PROGRESS.md)；最新模型专题增量与证据审计见：[`progress_v2.md`](progress_v2.md)。
+详细总览进度见：[`PROGRESS.md`](PROGRESS.md)；第二轮精修执行计划见：[`plan_v2.md`](plan_v2.md)；最新模型专题增量与证据审计见：[`progress_v2.md`](progress_v2.md)。
 
 ## 书系总览
 
@@ -153,8 +153,10 @@ python3 scripts/build_pdfs.py --dry-run
 | [`EXERCISES.md`](EXERCISES.md) | 练习与阶段验收体系，检查是否真正掌握。 |
 | [`GLOSSARY_EN_ZH.md`](GLOSSARY_EN_ZH.md) | 中英文术语表，方便读论文和英文面试。 |
 | [`ENGLISH_INTERVIEW_TEMPLATES.md`](ENGLISH_INTERVIEW_TEMPLATES.md) | 英文面试表达模板。 |
-| [`WRITING_SPEC.md`](WRITING_SPEC.md) | 写作计划、扩写规范与质量检查。 |
+| [`WRITING_SPEC.md`](WRITING_SPEC.md) | 长期写作规范与质量检查。 |
+| [`plan_v2.md`](plan_v2.md) | 第二轮精修执行计划、优先级、专题任务和待处理缺口。 |
 | [`PROGRESS.md`](PROGRESS.md) | 当前进度追踪。 |
+| [`progress_v2.md`](progress_v2.md) | 模型专题增量、证据快照、核验状态和阶段性进度。 |
 | [`docs/build-pdfs.md`](docs/build-pdfs.md) | PDF 生成说明，包含依赖安装、批量生成、单本生成、字体设置和常见问题。 |
 
 ## 项目结构
@@ -169,7 +171,10 @@ python3 scripts/build_pdfs.py --dry-run
 ├── PROJECTS.md
 ├── PAPERS.md
 ├── GLOSSARY_EN_ZH.md
+├── WRITING_SPEC.md
+├── plan_v2.md
 ├── PROGRESS.md
+├── progress_v2.md
 ├── docs/
 ├── book-01-core-30/
 ├── book-02-advanced-100/
@@ -195,7 +200,7 @@ python3 scripts/build_pdfs.py --dry-run
 4. 写下一个容易混淆的点。
 5. 用 2 分钟模拟面试回答一次。
 
-如果目标是面试，建议每周至少做一次 mock interview，并用 [`PROGRESS.md`](PROGRESS.md) 或自己的笔记记录复盘。
+如果目标是面试，建议每周至少做一次 mock interview，并用 [`PROGRESS.md`](PROGRESS.md)、[`progress_v2.md`](progress_v2.md) 或自己的笔记记录复盘。
 
 ## 统一写作规范
 
@@ -215,11 +220,11 @@ python3 scripts/build_pdfs.py --dry-run
 
 近期重点：
 
-1. 按 `SECOND_PASS_REVIEW_PLAN.md` 继续推进尚未收口部分的第二轮全系列精修。
+1. 按 [`plan_v2.md`](plan_v2.md) 继续推进尚未收口部分的第二轮全系列精修。
 2. 对已完成第二轮的专题册做总体验收、目录/索引一致性检查和交叉引用收口。
 3. 为适合代码辅助理解的核心知识点补充 demo 级 Python 示例，并验证可运行性。
 4. 对高时效主题做联网校验，修正过时、片面或证据不足的表述。
-5. 同步维护第四册百科、面试题库、练习体系、项目路线、论文路线、术语表、知识图谱和 `PROGRESS.md`。
+5. 同步维护第四册百科、面试题库、练习体系、项目路线、论文路线、术语表、知识图谱，以及 [`PROGRESS.md`](PROGRESS.md) 和 [`progress_v2.md`](progress_v2.md)。
 
 当前排行榜专题已收口；后续模型更新仍只从 Artificial Analysis 与 DataCurve/DeepSWE 发现候选，再按 `WRITING_SPEC.md` 执行增量核验和同步。
 
