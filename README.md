@@ -30,7 +30,7 @@
 7. 第三册、第五册到第九册、第十三册到第十八册、第十九册到第二十四册的已记录章节均有阶段性全书精修成果；其中第二十二册、第二十三册和第二十四册已完成当前落盘章节的阶段性收口。
 8. 第二十四册 `book-24-llm-inference-engine/` 当前落盘 60 章已完成阶段性全书精修，并已同步第四册百科、面试题库、练习、术语、项目路线、知识图谱和 `progress_v2.md`。
 
-详细总览进度见：[`progress.md`](progress.md)；项目总计划见：[`plan.md`](plan.md)；全书精修执行记录见 [`progress_v2.md`](progress_v2.md)；最新模型专题增量与证据审计见 [`progress_v3.md`](progress_v3.md)。
+第一次计划的历史记录见 [`progress.md`](progress.md)；项目总计划见 [`plan.md`](plan.md)；全书精修执行记录见 [`progress_v2.md`](progress_v2.md)；最新模型专题增量与证据审计见 [`progress_v3.md`](progress_v3.md)。
 
 ## 书系总览
 
@@ -87,12 +87,13 @@
 推荐基础阅读顺序：
 
 1. [`WRITING_SPEC.md`](WRITING_SPEC.md)：了解项目目标、书系定位和完整写作规范。
-2. [`ROADMAP.md`](ROADMAP.md)：选择 3 个月、6 个月或 12 个月学习路线。
-3. [`book-01-core-30/目录.md`](book-01-core-30/目录.md)：从核心 38 讲建立主干知识。
-4. [`INTERVIEW_BANK.md`](INTERVIEW_BANK.md)：配合每一讲做面试题训练。
-5. [`EXERCISES.md`](EXERCISES.md)：用练习检验自己是否真的掌握。
-6. [`book-02-advanced-100/目录.md`](book-02-advanced-100/目录.md)：进入进阶原理和前沿研究。
-7. [`book-03-practical-handbook/目录.md`](book-03-practical-handbook/目录.md)：把理论转成代码、实验和项目作品集。
+2. [`plan.md`](plan.md)：了解第一次计划、常态化全书精修和新模型更新的总计划与文件分工。
+3. [`ROADMAP.md`](ROADMAP.md)：选择 3 个月、6 个月或 12 个月学习路线。
+4. [`book-01-core-30/目录.md`](book-01-core-30/目录.md)：从核心 38 讲建立主干知识。
+5. [`INTERVIEW_BANK.md`](INTERVIEW_BANK.md)：配合每一讲做面试题训练。
+6. [`EXERCISES.md`](EXERCISES.md)：用练习检验自己是否真的掌握。
+7. [`book-02-advanced-100/目录.md`](book-02-advanced-100/目录.md)：进入进阶原理和前沿研究。
+8. [`book-03-practical-handbook/目录.md`](book-03-practical-handbook/目录.md)：把理论转成代码、实验和项目作品集。
 
 ## 如何生成 PDF
 
@@ -153,6 +154,7 @@ python3 scripts/build_pdfs.py --dry-run
 | [`EXERCISES.md`](EXERCISES.md) | 练习与阶段验收体系，检查是否真正掌握。 |
 | [`GLOSSARY_EN_ZH.md`](GLOSSARY_EN_ZH.md) | 中英文术语表，方便读论文和英文面试。 |
 | [`ENGLISH_INTERVIEW_TEMPLATES.md`](ENGLISH_INTERVIEW_TEMPLATES.md) | 英文面试表达模板。 |
+| [`AGENTS.md`](AGENTS.md) | 贡献者指南，说明目录结构、文件职责、校验命令和提交要求。 |
 | [`WRITING_SPEC.md`](WRITING_SPEC.md) | 长期写作规范与质量检查。 |
 | [`plan.md`](plan.md) | 项目总纲、总原则、第一次计划、两类常态化计划、审计方法和完成定义。 |
 | [`progress.md`](progress.md) | 第一次计划的全书编写、首轮建设和首轮 QA 记录。 |
@@ -172,11 +174,14 @@ python3 scripts/build_pdfs.py --dry-run
 ├── PROJECTS.md
 ├── PAPERS.md
 ├── GLOSSARY_EN_ZH.md
+├── AGENTS.md
 ├── WRITING_SPEC.md
 ├── plan.md
 ├── progress.md
 ├── progress_v2.md
 ├── progress_v3.md
+├── research/
+├── scripts/
 ├── docs/
 ├── book-01-core-30/
 ├── book-02-advanced-100/
@@ -187,7 +192,8 @@ python3 scripts/build_pdfs.py --dry-run
 ├── book-21-transformer-architecture-evolution/
 ├── book-22-tool-protocol-ecosystem/
 ├── book-23-ai-infra/
-└── book-24-llm-inference-engine/
+├── book-24-llm-inference-engine/
+└── book-llm-engineer/
 ```
 
 ## 学习方法
@@ -242,7 +248,9 @@ python3 scripts/build_pdfs.py --dry-run
 
 如果后续需要用于更正式的开源分发、转载或商业场景，建议补充标准开源协议文件，例如 `LICENSE`。
 
-## 2026-09 新模型专题更新
+## 新模型专题更新
+
+新模型专题的完整时间线、证据边界、失败记录和同步状态以 [`progress_v3.md`](progress_v3.md) 及 [`research/model-update-2026-09/`](research/model-update-2026-09/) 为准。下面只保留当前已落地专题的导航摘要，不在 README 重复维护完整执行日志。
 
 ### 2026-10 Gemini 4 Argon 收口
 
