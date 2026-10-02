@@ -4,13 +4,15 @@
 
 本文件用于把二十四本书组织成可执行学习路径，并根据当前正文进度动态调整。
 
+进度文件按计划类型分工：`progress.md` 只记录第一次计划的全书编写与首轮 QA；`progress_v2.md` 记录常态化全书精修；`progress_v3.md` 记录以排行榜新进模型为锚点的新模型、新知识点及周边技术更新。模型事实和来源证据进入 `research/`。
+
 ## 当前可优先阅读内容
 
 1. 第一册 `book-01-core-30/`：正文第一版已完成，共 38 讲，适合建立核心主线。
 2. 第二册 `book-02-advanced-100/`：正文第一版已完成，共 120 讲，适合进阶拔高和开放研究题训练。
 3. 第三册 `book-03-practical-handbook/`：正文第一版已完成，共 72 讲，适合把理论转成代码、实验和项目。
 4. 第四册到第十九册：正文第一版已完成，适合系统补齐百科索引、训练、部署、评估、安全、数据、论文、系统设计、求职、数学、PyTorch、多模态、Reasoning、Agent、产品落地和实战坑。
-5. 第二十册到第二十四册：正文第一版已完成，适合补齐 Agent Harness、Transformer 架构演进、工具协议生态、AI Infra 和推理框架专题；其中第二十四册现有 60 章已完成第二轮精修，可优先作为推理框架专题阅读版本。
+5. 第二十册到第二十四册：正文第一版已完成，适合补齐 Agent Harness、Transformer 架构演进、工具协议生态、AI Infra 和推理框架专题；其中第二十四册现有 60 章已完成阶段性精修，可优先作为推理框架专题阅读版本。
 6. `book-llm-engineer/`：补充篇第一版已完成，适合作为大模型工程师面试和职业表达的延伸材料。
 
 ## 3 个月冲刺路线
@@ -42,12 +44,12 @@
 
 ## 当前维护路线
 
-排行榜模型资料专题已完成当前一轮收口：AA/DataCurve 重点 canonical 均已登记并形成可追溯资料链，Gemini 4 Argon 的 Google 官方发布资料已接入第二十一册第 95 章。后续只在排行榜出现新重点模型或已有模型出现新的权威资料时增量更新，不把工程待验证项误写成已完成验收。
+排行榜模型资料专题已完成当前一轮收口：AA/DataCurve 重点 canonical 均已登记并形成可追溯资料链，Gemini 4 Argon 的 Google 官方发布资料已接入第二十一册第 95 章。后续只在排行榜出现新重点模型或已有模型出现新的权威资料时增量更新，不把工程待验证项误写成已完成验收；相关执行记录见 [`progress_v3.md`](progress_v3.md)，来源证据见 `research/`。
 
-1. 第一优先级：继续推进尚未收口章节的第二轮全系列精修；第二十四册现有第 1-60 章已完成第二轮，可进入总体验收和目录/索引一致性检查。
+1. 第一优先级：继续推进尚未收口章节的常态化全书精修；第二十四册现有第 1-60 章已完成阶段性精修，可进入总体验收和目录/索引一致性检查。
 2. 第二优先级：补充 demo 级 Python 代码，优先覆盖 cross entropy、attention、sampling、KV Cache、RAG、Agent 工具调用和推理调度等高频知识点。
 3. 第三优先级：联网校验高时效主题，重点包括优化器、后训练算法、推理框架、Agent 协议、多模态、Reasoning、AI Infra 和架构演进。
-4. 第四优先级：同步更新第四册百科、`INTERVIEW_BANK.md`、`EXERCISES.md`、`PROJECTS.md`、`PAPERS.md`、`GLOSSARY_EN_ZH.md`、`KNOWLEDGE_GRAPH.md` 和 `PROGRESS.md`。
+4. 第四优先级：同步更新第四册百科、`INTERVIEW_BANK.md`、`EXERCISES.md`、`PROJECTS.md`、`PAPERS.md`、`GLOSSARY_EN_ZH.md`、`KNOWLEDGE_GRAPH.md`；全书精修结果记入 [`progress_v2.md`](progress_v2.md)，新模型和新知识点更新结果记入 [`progress_v3.md`](progress_v3.md)。
 
 ## 新模型专题插入路线
 

@@ -15,9 +15,9 @@
 
 ## 当前进度
 
-当前阶段：第二轮全系列精修阶段。
+当前阶段：常态化全书精修与常态化新模型、新知识点更新阶段。
 
-排行榜专题状态：已完成当前 Artificial Analysis 与 DataCurve/DeepSWE 重点模型的资料级闭环。最后收口的 `gemini-4-argon` 已有 Google The Keyword 官方发布资料，并已同步第二十一册第 95 章及研究笔记、题库、练习、术语、论文、项目和知识图谱。参数、完整训练配方、权重、目标硬件 profiling、独立 benchmark 和生产 SLO 仍按证据边界标为待核验；这不影响本轮“资料级闭环”目标完成。完整审计见 [`progress_v2.md`](progress_v2.md) 和 [`research/model-update-2026-09/model-inventory.md`](research/model-update-2026-09/model-inventory.md)。
+排行榜专题状态：已完成当前 Artificial Analysis 与 DataCurve/DeepSWE 重点模型的资料级闭环。最后收口的 `gemini-4-argon` 已有 Google The Keyword 官方发布资料，并已同步第二十一册第 95 章及研究笔记、题库、练习、术语、论文、项目和知识图谱。参数、完整训练配方、权重、目标硬件 profiling、独立 benchmark 和生产 SLO 仍按证据边界标为待核验；这不影响本轮“资料级闭环”目标完成。全书精修审计见 [`progress_v2.md`](progress_v2.md)，新模型与新知识点更新审计见 [`progress_v3.md`](progress_v3.md) 和 [`research/model-update-2026-09/model-inventory.md`](research/model-update-2026-09/model-inventory.md)。
 
 进度摘要：
 
@@ -26,11 +26,11 @@
 3. 第四册到第十九册已完成正文第一版，其中第四册定位为后续持续回填和补全的概念索引。
 4. 第二十册到第二十四册已完成正文第一版，分别覆盖 Agent Harness、Transformer 架构演进、工具协议生态、AI Infra 和 LLM Serving Engine。
 5. `book-llm-engineer/` 已完成大模型工程师面试补充篇第一版，覆盖第 60-82 章。
-6. 第二轮精修已从单册试改进入多专题阶段性收口，重点包括公式兼容性、demo 级代码补充、联网校验、广度审计、深度增强、术语和题库同步。
-7. 第三册、第五册到第九册、第十三册到第十八册、第十九册到第二十四册的已记录章节均有阶段性第二轮精修成果；其中第二十二册、第二十三册和第二十四册已完成当前落盘章节的第二轮收口。
-8. 第二十四册 `book-24-llm-inference-engine/` 当前落盘 60 章已完成第二轮精修，并已同步第四册百科、面试题库、练习、术语、项目路线、知识图谱和 `PROGRESS.md`。
+6. 常态化全书精修已从单册试改进入多专题阶段性收口，重点包括公式兼容性、demo 级代码补充、联网校验、广度审计、深度增强、术语和题库同步。
+7. 第三册、第五册到第九册、第十三册到第十八册、第十九册到第二十四册的已记录章节均有阶段性全书精修成果；其中第二十二册、第二十三册和第二十四册已完成当前落盘章节的阶段性收口。
+8. 第二十四册 `book-24-llm-inference-engine/` 当前落盘 60 章已完成阶段性全书精修，并已同步第四册百科、面试题库、练习、术语、项目路线、知识图谱和 `progress_v2.md`。
 
-详细总览进度见：[`PROGRESS.md`](PROGRESS.md)；第二轮精修执行计划见：[`plan_v2.md`](plan_v2.md)；最新模型专题增量与证据审计见：[`progress_v2.md`](progress_v2.md)。
+详细总览进度见：[`progress.md`](progress.md)；项目总计划见：[`plan.md`](plan.md)；全书精修执行记录见 [`progress_v2.md`](progress_v2.md)；最新模型专题增量与证据审计见 [`progress_v3.md`](progress_v3.md)。
 
 ## 书系总览
 
@@ -135,9 +135,9 @@ python3 scripts/build_pdfs.py --dry-run
 
 第五册到第十八册分别覆盖训练全流程、部署推理工程、评估实验、AI Safety 与 Alignment、数据工程、论文复现、系统设计、求职面试、数学基础、PyTorch 工程、多模态、Reasoning、Agent 和产品商业化。第十九册到第二十四册进一步覆盖资深工程师实战坑、Agent Harness 与 Coding Agent Runtime、Transformer 架构演进、Function Calling/MCP/A2A/Skill 工具协议生态、AI Infra 平台工程，以及大模型推理框架与 Serving Engine 实战。
 
-第二轮精修已经完成一批阶段性成果：第三册实战手册已完成既有 72 讲的公式和 demo 精修；第五册到第九册、第十三册到第十八册的已记录章节完成阶段性第二轮精修；第十九册到第二十一册完成当前已落盘章节的第二轮精修；第二十二册、第二十三册和第二十四册完成当前落盘章节的第二轮收口。
+常态化全书精修已经完成一批阶段性成果：第三册实战手册已完成既有 72 讲的公式和 demo 精修；第五册到第九册、第十三册到第十八册的已记录章节完成阶段性精修；第十九册到第二十一册完成当前已落盘章节的精修；第二十二册、第二十三册和第二十四册完成当前落盘章节的阶段性收口。
 
-截至当前，第二十四册 `book-24-llm-inference-engine/` 现有落盘第 1-60 章已完成第二轮公式、demo、资料校准和纵向文件同步，可作为推理框架专题的优先阅读版本；相关内容已经同步到第四册百科、面试题库、练习、术语、项目路线和知识图谱。
+截至当前，第二十四册 `book-24-llm-inference-engine/` 现有落盘第 1-60 章已完成公式、demo、资料校准和纵向文件同步，可作为推理框架专题的优先阅读版本；相关内容已经同步到第四册百科、面试题库、练习、术语、项目路线和知识图谱。
 
 ## 配套训练文件
 
@@ -154,9 +154,10 @@ python3 scripts/build_pdfs.py --dry-run
 | [`GLOSSARY_EN_ZH.md`](GLOSSARY_EN_ZH.md) | 中英文术语表，方便读论文和英文面试。 |
 | [`ENGLISH_INTERVIEW_TEMPLATES.md`](ENGLISH_INTERVIEW_TEMPLATES.md) | 英文面试表达模板。 |
 | [`WRITING_SPEC.md`](WRITING_SPEC.md) | 长期写作规范与质量检查。 |
-| [`plan_v2.md`](plan_v2.md) | 第二轮精修执行计划、优先级、专题任务和待处理缺口。 |
-| [`PROGRESS.md`](PROGRESS.md) | 当前进度追踪。 |
-| [`progress_v2.md`](progress_v2.md) | 模型专题增量、证据快照、核验状态和阶段性进度。 |
+| [`plan.md`](plan.md) | 项目总纲、总原则、第一次计划、两类常态化计划、审计方法和完成定义。 |
+| [`progress.md`](progress.md) | 第一次计划的全书编写、首轮建设和首轮 QA 记录。 |
+| [`progress_v2.md`](progress_v2.md) | 常态化全书精修、逐章复读、公式/代码修订和全书审计的执行记录。 |
+| [`progress_v3.md`](progress_v3.md) | 以排行榜新进模型为锚点的新模型、新知识点及周边技术更新记录；事实证据保存在 `research/`。 |
 | [`docs/build-pdfs.md`](docs/build-pdfs.md) | PDF 生成说明，包含依赖安装、批量生成、单本生成、字体设置和常见问题。 |
 
 ## 项目结构
@@ -172,9 +173,10 @@ python3 scripts/build_pdfs.py --dry-run
 ├── PAPERS.md
 ├── GLOSSARY_EN_ZH.md
 ├── WRITING_SPEC.md
-├── plan_v2.md
-├── PROGRESS.md
+├── plan.md
+├── progress.md
 ├── progress_v2.md
+├── progress_v3.md
 ├── docs/
 ├── book-01-core-30/
 ├── book-02-advanced-100/
@@ -200,7 +202,7 @@ python3 scripts/build_pdfs.py --dry-run
 4. 写下一个容易混淆的点。
 5. 用 2 分钟模拟面试回答一次。
 
-如果目标是面试，建议每周至少做一次 mock interview，并用 [`PROGRESS.md`](PROGRESS.md)、[`progress_v2.md`](progress_v2.md) 或自己的笔记记录复盘。
+如果目标是面试，建议每周至少做一次 mock interview；首轮编写复盘记在 [`progress.md`](progress.md)，全书精修复盘记在 [`progress_v2.md`](progress_v2.md)，新模型专题复盘记在 [`progress_v3.md`](progress_v3.md)。
 
 ## 统一写作规范
 
@@ -220,11 +222,11 @@ python3 scripts/build_pdfs.py --dry-run
 
 近期重点：
 
-1. 按 [`plan_v2.md`](plan_v2.md) 继续推进尚未收口部分的第二轮全系列精修。
-2. 对已完成第二轮的专题册做总体验收、目录/索引一致性检查和交叉引用收口。
+1. 按 [`plan.md`](plan.md) 手动发起并推进常态化全书精修或新模型、新知识点更新。
+2. 对已完成阶段性精修的专题册做总体验收、目录/索引一致性检查和交叉引用收口。
 3. 为适合代码辅助理解的核心知识点补充 demo 级 Python 示例，并验证可运行性。
 4. 对高时效主题做联网校验，修正过时、片面或证据不足的表述。
-5. 同步维护第四册百科、面试题库、练习体系、项目路线、论文路线、术语表、知识图谱，以及 [`PROGRESS.md`](PROGRESS.md) 和 [`progress_v2.md`](progress_v2.md)。
+5. 同步维护第四册百科、面试题库、练习体系、项目路线、论文路线、术语表、知识图谱；第一次计划记录写入 [`progress.md`](progress.md)，全书精修写入 [`progress_v2.md`](progress_v2.md)，新模型和新知识点更新写入 [`progress_v3.md`](progress_v3.md)。
 
 当前排行榜专题已收口；后续模型更新仍只从 Artificial Analysis 与 DataCurve/DeepSWE 发现候选，再按 `WRITING_SPEC.md` 执行增量核验和同步。
 

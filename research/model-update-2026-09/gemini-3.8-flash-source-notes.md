@@ -158,7 +158,7 @@ Google 最新模型页称，Gemini 3.8 Flash 在困难、多步任务上会使�
 - Serving 与长上下文：1M 输入、隐式缓存、TTFT/TPOT、token 成本和长文档检索。
 - 评测：DeepSWE 的模型配置 + harness 归因、固定版本与长轨迹复现。
 
-2026-09-24 已将高价值 API/runtime 面试主线落为[第二十册第 23 章](../../book-20-agent-harness-runtime/chapters/23-gemini-interactions与thought-state回放.md)，因此 Gemini 3.8 Flash 从“资料级闭环”升级为“内容专题闭环”。这只表示排行榜、权威资料、研究笔记、正式章节与配套同步齐备；独立架构/训练来源、真实 endpoint capability probe、独立 benchmark、目标硬件和线上 acceptance 仍待核验。相关状态同步到 [`source-index.md`](source-index.md)、[`model-inventory.md`](model-inventory.md)、[`inventory-interpretation.md`](inventory-interpretation.md)、[`progress_v2.md`](../../progress_v2.md) 和 [`plan_v2.md`](../../plan_v2.md)。
+2026-09-24 已将高价值 API/runtime 面试主线落为[第二十册第 23 章](../../book-20-agent-harness-runtime/chapters/23-gemini-interactions与thought-state回放.md)，因此 Gemini 3.8 Flash 从“资料级闭环”升级为“内容专题闭环”。这只表示排行榜、权威资料、研究笔记、正式章节与配套同步齐备；独立架构/训练来源、真实 endpoint capability probe、独立 benchmark、目标硬件和线上 acceptance 仍待核验。相关状态同步到 [`source-index.md`](source-index.md)、[`model-inventory.md`](model-inventory.md)、[`inventory-interpretation.md`](inventory-interpretation.md)、[`progress_v3.md`](../../progress_v3.md) 和 [`plan.md`](../../plan.md)。
 
 ## 12. 本地快照审计标识
 

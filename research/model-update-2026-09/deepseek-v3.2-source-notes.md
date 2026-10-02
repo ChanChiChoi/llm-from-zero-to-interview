@@ -97,7 +97,7 @@
 
 - 待核验：Figures 1–7 均已取得原始图/面板并视觉复核；arXiv v1 HTML 中全部编号公式 Eq. (1)–(9) 的 TeX annotations 已逐式文本核对，但未在 PDF 页面视觉核验；未编号行内数学表达式未做穷尽审计。完整 DSA 层排布和 kernel 源码行为、indexer 训练召回曲线、KV/indexer 字节账本、完整 RL 超参/奖励权重/rollout 配方、合成数据污染审计、线上 tool-call acceptance rate、硬件 profiling 和独立 benchmark 也仍待核验。
 - 不新增 V3.2 专属独立架构册章：DSA 已由第二十一册第 19 章承接，19.28--19.34 覆盖 DSA、实现、kernel、serving、encoding 和榜单证据分层；19.35 补 Search Agent context management，19.36 补 Figure 2 的 indexer/top-k 与 Core Attention 分工，19.37 补 Figure 3 的成本曲线及部署证据边界，19.38 补 Figure 4 的 thinking-retention/harness 边界，19.39 补 Figure 5 合成 Agent 数据 RL 实验的图表证据边界，19.40 补 Figure 7 MLA MHA/MQA 两种执行形态，19.41 补 Figure 1 多指标/多评测口径边界，19.42 补 DSA Eq. (1)–(4) 的检索与 indexer 蒸馏目标，19.43 补 scalable RL Eq. (5)–(9) 的目标、KL 估计和 off-policy 稳定化边界；第二十册第 18 章保留通用折叠策略映射。
-- 研究笔记和现有第 19 章专题段共同作为本轮交付；模型清单、来源索引、榜单解释、题库、练习、术语、项目、知识图谱、`plan_v2.md` 与 `progress_v2.md` 均同步记录模型和证据边界。
+- 研究笔记和现有第 19 章专题段共同作为本轮交付；模型清单、来源索引、榜单解释、题库、练习、术语、项目、知识图谱、`plan.md` 与 `progress_v3.md` 均同步记录模型和证据边界。
 
 ## 2026-09-20 排行榜复验与下一锚点确认
 

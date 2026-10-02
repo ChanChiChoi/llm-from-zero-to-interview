@@ -188,7 +188,7 @@ input -> reasoning item -> tool call -> tool result -> reasoning continuation ->
 - 第七册：固定 model/revision/mode/effort/tools/harness/task/verifier 的公平评测。
 - 第五册与第八册：把 `reasoning`、`pro`、tool use 和 compaction 记录为运行时控制或系统行为，不能反推后训练 loss、RL 配方或安全训练细节。
 
-完整来源与候选状态已同步到 [`source-index.md`](source-index.md)、[`model-inventory.md`](model-inventory.md)、[`inventory-interpretation.md`](inventory-interpretation.md)、[`plan_v2.md`](../../plan_v2.md) 和 [`progress_v2.md`](../../progress_v2.md)。
+完整来源与候选状态已同步到 [`source-index.md`](source-index.md)、[`model-inventory.md`](model-inventory.md)、[`inventory-interpretation.md`](inventory-interpretation.md)、[`plan.md`](../../plan.md) 和 [`progress_v3.md`](../../progress_v3.md)。
 
 ## 14. 2026-09-23 `7890` 当前时点复验与状态回放审计
 

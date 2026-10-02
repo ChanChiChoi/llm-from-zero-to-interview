@@ -342,7 +342,7 @@ Anthropic 公告称 Frontier-Bench、CursorBench、ARC-AGI 3、Zapier Automation
 
 Anthropic 发布页新增的面试线索包括：Fable 5.1 与 Mythos 5.1 共享 underlying model 但 safeguards 不同；Fable 5.1 在 Claude Code 默认 High、Claude Cowork/Claude.ai 默认 Medium；cache reads 为 `$0.25/M`；EFS 以客户云基础设施支持零数据保留语义；anti-distillation 通过限制新账户编辑历史同时保留 prior thinking transcript；以及模型在科学工作流中的自定义 GPU kernel 与中间结果缓存案例。上述能力和数字均标明为发布方自述，不升级为内部架构或训练配方。
 
-arXiv 标题精确检索返回 0 篇，全文检索返回 4 篇外部使用/评测论文，详见 [`claude-fable-5.1-source-notes.md`](claude-fable-5.1-source-notes.md)。当前没有 Fable 5.1 专属参数/架构披露、完整训练报告、可独立复现技术报告或 DataCurve 结果；不新增独立架构章节。该段记录当时的后续顺序；当前活动锚点和下一步以文件最新补充及 `plan_v2.md`/`progress_v2.md` 顶部为准。
+arXiv 标题精确检索返回 0 篇，全文检索返回 4 篇外部使用/评测论文，详见 [`claude-fable-5.1-source-notes.md`](claude-fable-5.1-source-notes.md)。当前没有 Fable 5.1 专属参数/架构披露、完整训练报告、可独立复现技术报告或 DataCurve 结果；不新增独立架构章节。该段记录当时的后续顺序；当前活动锚点和下一步以文件最新补充及 `plan.md`/`progress_v3.md` 顶部为准。
 
 ## 2026-09-21 Claude Fable 5.1 runtime recheck
 
@@ -1419,7 +1419,7 @@ Anthropic 当前 [Claude Opus 5.5 model page](https://platform.claude.com/docs/e
 
 OpenAI 官方 Reasoning 当前正文 HTTP 200（经官方 `platform.openai.com` clean HTML 路径跳转），`1,070,709` bytes / SHA-256 `3bcb1b7771731d3269783464180b72c2b45283688118dda185ebd2d65e84616c`。GPT-6 family 的 `configuration_update` 可在 standard single-agent Responses/WebSocket `response.create` 历史中调节 effective effort，直到下一次覆盖；响应里的 `reasoning.effort` 仍表示 request-level setting。保留固定请求配置并追加 update 可保留 prompt prefix、利于 cache reuse，但不保证 cache hit。与 automatic compaction/truncation、独立 `/responses/compact` 的 incompatibility 及显式 compaction 后 fresh update 要求仍有效。
 
-已将该区别同步至 GPT-6 Sol 研究笔记、第十六/二十册、`INTERVIEW_BANK.md`、`EXERCISES.md`、`KNOWLEDGE_GRAPH.md` 与 `plan_v2.md`。新增 toy 检验 session override 和 request-level telemetry 分离、稳定 prefix digest 不变；仍明确不等同真实 endpoint 或 cache hit。Sol 继续是 AA 单榜资料级闭环，内部结构/recipe/完整权重/独立评测/DataCurve 精确 Agent 行仍未确认。
+已将该区别同步至 GPT-6 Sol 研究笔记、第十六/二十册、`INTERVIEW_BANK.md`、`EXERCISES.md`、`KNOWLEDGE_GRAPH.md` 与 `plan.md`。新增 toy 检验 session override 和 request-level telemetry 分离、稳定 prefix digest 不变；仍明确不等同真实 endpoint 或 cache hit。Sol 继续是 AA 单榜资料级闭环，内部结构/recipe/完整权重/独立评测/DataCurve 精确 Agent 行仍未确认。
 
 ## 2026-09-24 Kimi K3：vLLM v0.30.0 release/source 更新
 
