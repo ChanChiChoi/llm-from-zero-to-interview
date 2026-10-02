@@ -19,17 +19,6 @@
 
 排行榜专题状态：已完成当前 Artificial Analysis 与 DataCurve/DeepSWE 重点模型的资料级闭环。最后收口的 `gemini-4-argon` 已有 Google The Keyword 官方发布资料，并已同步第二十一册第 95 章及研究笔记、题库、练习、术语、论文、项目和知识图谱。参数、完整训练配方、权重、目标硬件 profiling、独立 benchmark 和生产 SLO 仍按证据边界标为待核验；这不影响本轮“资料级闭环”目标完成。全书精修审计见 [`progress_v2.md`](progress_v2.md)，新模型与新知识点更新审计见 [`progress_v3.md`](progress_v3.md) 和 [`research/model-update-2026-09/model-inventory.md`](research/model-update-2026-09/model-inventory.md)。
 
-进度摘要：
-
-1. 24 本主书均已完成正文第一版，已打通从基础、训练、部署、评估、安全、数据、论文、系统设计、求职、数学、PyTorch、多模态、Reasoning、Agent、产品化、实战坑、Agent Runtime、架构演进、工具协议、AI Infra 到推理框架的完整闭环。
-2. 第一册 `book-01-core-30/` 已完成核心 38 讲，第二册 `book-02-advanced-100/` 已完成进阶 120 讲，第三册 `book-03-practical-handbook/` 已完成实战 72 讲。
-3. 第四册到第十九册已完成正文第一版，其中第四册定位为后续持续回填和补全的概念索引。
-4. 第二十册到第二十四册已完成正文第一版，分别覆盖 Agent Harness、Transformer 架构演进、工具协议生态、AI Infra 和 LLM Serving Engine。
-5. `book-llm-engineer/` 已完成大模型工程师面试补充篇第一版，覆盖第 60-82 章。
-6. 常态化全书精修已从单册试改进入多专题阶段性收口，重点包括公式兼容性、demo 级代码补充、联网校验、广度审计、深度增强、术语和题库同步。
-7. 第三册、第五册到第九册、第十三册到第十八册、第十九册到第二十四册的已记录章节均有阶段性全书精修成果；其中第二十二册、第二十三册和第二十四册已完成当前落盘章节的阶段性收口。
-8. 第二十四册 `book-24-llm-inference-engine/` 当前落盘 60 章已完成阶段性全书精修，并已同步第四册百科、面试题库、练习、术语、项目路线、知识图谱和 `progress_v2.md`。
-
 第一次计划的历史记录见 [`progress.md`](progress.md)；项目总计划见 [`plan.md`](plan.md)；全书精修执行记录见 [`progress_v2.md`](progress_v2.md)；最新模型专题增量与证据审计见 [`progress_v3.md`](progress_v3.md)。
 
 ## 书系总览
@@ -125,20 +114,6 @@ python3 scripts/build_pdfs.py --dry-run
 ```
 
 完整参数、字体替换、多个 `--book`、自定义输出文件名和常见问题见 [`docs/build-pdfs.md`](docs/build-pdfs.md)。
-
-## 已完成重点内容
-
-24 本主书已经完成正文第一版，覆盖大模型算法岗从基础原理、训练、对齐、推理部署、评估安全、数据工程、论文研究、系统设计、求职表达、数学、PyTorch、多模态、Reasoning、Agent、产品落地、工程实战、Agent Runtime、架构演进、工具协议、AI Infra 到 Serving Engine 的完整主线。
-
-第一册到第三册形成基础闭环：第一册覆盖 LLM 入门、机器学习基础、tokenization、embedding、self-attention、Transformer、RoPE、预训练、SFT、RLHF、DPO、decoding、KV Cache、FlashAttention、量化部署、评估安全、多模态基础和总复习；第二册覆盖现代 Transformer 变体、长上下文、MoE、SSM/S4/Mamba、Reasoning、Agent、多模态、评估、安全和研究前沿；第三册把前两册知识转成 PyTorch 代码、Transformer 组件、miniGPT、微调、偏好优化、推理优化、RAG、Agent、评估 debug、简历项目和多模态实战。
-
-第四册《大模型百科全书》定位为全书系概念索引，不是普通专题书。其他各册中成熟的重要知识点会持续回填到第四册，用于速查、交叉引用和面试入口整理。
-
-第五册到第十八册分别覆盖训练全流程、部署推理工程、评估实验、AI Safety 与 Alignment、数据工程、论文复现、系统设计、求职面试、数学基础、PyTorch 工程、多模态、Reasoning、Agent 和产品商业化。第十九册到第二十四册进一步覆盖资深工程师实战坑、Agent Harness 与 Coding Agent Runtime、Transformer 架构演进、Function Calling/MCP/A2A/Skill 工具协议生态、AI Infra 平台工程，以及大模型推理框架与 Serving Engine 实战。
-
-常态化全书精修已经完成一批阶段性成果：第三册实战手册已完成既有 72 讲的公式和 demo 精修；第五册到第九册、第十三册到第十八册的已记录章节完成阶段性精修；第十九册到第二十一册完成当前已落盘章节的精修；第二十二册、第二十三册和第二十四册完成当前落盘章节的阶段性收口。
-
-截至当前，第二十四册 `book-24-llm-inference-engine/` 现有落盘第 1-60 章已完成公式、demo、资料校准和纵向文件同步，可作为推理框架专题的优先阅读版本；相关内容已经同步到第四册百科、面试题库、练习、术语、项目路线和知识图谱。
 
 ## 配套训练文件
 
