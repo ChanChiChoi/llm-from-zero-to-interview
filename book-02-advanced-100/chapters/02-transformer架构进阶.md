@@ -2,6 +2,8 @@
 
 Transformer 的关键不在于记住一张组件清单，而在于理解信息如何流动、计算为什么变贵、哪些近似会改变模型行为，以及架构选择如何传导到训练和部署。
 
+本章覆盖第 11—25 讲；文末的统一评估部分用于收束本章主线，不另计为一讲。下面的 Python 片段均使用 Python 3.12+ 标准库，可分别复制运行，不依赖第三方包。
+
 本部分把一个 decoder-only Transformer 拆成一条完整链路：
 
 1. Self-Attention 如何在 token 之间做内容寻址和信息路由；
@@ -139,7 +141,7 @@ attention 负责跨位置的信息混合，MLP 负责每个位置的特征变换
 
 ### 11.9 一个纯 Python 的单头实现
 
-下面的代码用列表实现小规模 causal attention，适合手工检查每一步。它没有使用高效矩阵库，所以只用于教学。
+输入为列表形式的 Q、K `[T,d_h]` 和 V `[T,d_v]`；函数返回输出 `[T,d_v]` 与路由权重 `[T,T]`。下面的代码用列表实现小规模 causal attention，适合手工检查每一步。它没有使用高效矩阵库，所以只用于教学。
 
 ~~~python
 import math
@@ -148,11 +150,25 @@ import math
 def dot(left, right):
     if len(left) != len(right) or not left:
         raise ValueError("dot product requires non-empty vectors of equal length")
-    return sum(a * b for a, b in zip(left, right))
+    if any(not is_finite_number(value) for value in left + right):
+        raise ValueError("dot product inputs must be finite real numbers")
+    result = sum(a * b for a, b in zip(left, right))
+    if not is_finite_number(result):
+        raise ValueError("dot product overflowed")
+    return result
+
+
+def is_finite_number(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(float(value))
+    except OverflowError:
+        return False
 
 
 def softmax(values):
-    if not values or any(not math.isfinite(value) for value in values):
+    if not values or any(not is_finite_number(value) for value in values):
         raise ValueError("softmax input must be non-empty and finite")
     peak = max(values)
     weights = [math.exp(value - peak) for value in values]
@@ -173,6 +189,9 @@ def causal_attention(query, keys, values):
         raise ValueError("query and key dimensions must be consistent")
     if any(len(row) != value_dim for row in values):
         raise ValueError("value dimensions must be consistent")
+    if any(not is_finite_number(value)
+           for row in query + keys + values for value in row):
+        raise ValueError("query, key and value entries must be finite real numbers")
     outputs = []
     routes = []
     scale = math.sqrt(query_dim)
@@ -184,6 +203,8 @@ def causal_attention(query, keys, values):
             sum(weight * value[dimension] for weight, value in zip(weights, values))
             for dimension in range(len(values[0]))
         ]
+        if any(not is_finite_number(value) for value in output):
+            raise ValueError("attention output overflowed")
         outputs.append(output)
         routes.append(weights)
     return outputs, routes
@@ -198,7 +219,7 @@ print("last output:", [round(value, 4) for value in outputs[-1]])
 assert all(routes[i][j] < 1e-8 for i in range(3) for j in range(i + 1, 3))
 ~~~
 
-最后一个断言验证了因果性。真正的 Transformer 还需要多头投影、batch 维、位置编码、残差、归一化和高效 kernel；这段代码只把“分数—mask—权重—value 聚合”这条主线显式化。
+最后一个断言验证了因果性。对给定的最后一个 query，路由权重约为 `[0.2308, 0.4063, 0.3629]`，聚合输出约为 `[3.3965, 6.6035]`。真正的 Transformer 还需要多头投影、batch 维、位置编码、残差、归一化和高效 kernel；这段代码只把“分数—mask—权重—value 聚合”这条主线显式化。
 
 ### 11.10 分层理解
 
@@ -223,7 +244,7 @@ C_{QK}=O(T^2d_h),\qquad C_{AV}=O(T^2d_h)
 
 H 个 head 合起来可近似写成 O(T²d_model)。Q/K/V 投影和输出投影是 O(Td_model²)，在短序列、大宽度模型中也可能占很大比例，但长上下文的独特瓶颈是 T²。
 
-长度从 4K 变成 32K，T 增加 8 倍，交互数增加 64 倍。长度从 32K 变成 1M，交互数再增加约 976 倍。这个数量级足以说明：把窗口声明得很大，必须同时说明采用了什么注意力结构、训练方式和推理成本。
+长度从 4K 变成 32K，T 增加 8 倍，交互数增加 64 倍。若把 32K 解释为 32,768、把 1M 解释为 1,000,000，交互数约增加 931 倍；若两者都按二进制单位理解（32 Ki tokens 与 1 Mi tokens），则增加 1,024 倍。比较上下文长度时应写清单位约定。这个数量级足以说明：把窗口声明得很大，必须同时说明采用了什么注意力结构、训练方式和推理成本。
 
 ### 12.2 训练显存与推理显存
 
@@ -233,7 +254,7 @@ H 个 head 合起来可近似写成 O(T²d_model)。Q/K/V 投影和输出投影�
 32768^2=1,073,741,824
 ~~~
 
-个元素。即使每个元素 2 字节，也约 2 GiB，还未计入 batch、多头、反向保存和临时 buffer。FlashAttention 通过分块和在线 softmax 避免把完整矩阵写回高层显存，但并没有让精确 dense attention 的数学交互数消失。
+个元素。即使每个元素 2 字节，也约 2 GiB，还未计入 batch、多头、反向保存和临时 buffer。FlashAttention 通过分块和在线 softmax 避免把完整矩阵写回高层显存，但并没有让精确 dense attention 的数学交互数消失；这是 IO 与中间存储优化，不是稀疏连接。其算法和适用边界见 [FlashAttention](https://arxiv.org/abs/2205.14135) 与 [FlashAttention-2](https://arxiv.org/abs/2307.08691)。
 
 自回归解码有另一种瓶颈。使用 KV Cache 后，第 t 步的新 query 仍需读取前 t 个 key/value，单步读量随 t 增长；缓存本身大致需要：
 
@@ -262,18 +283,18 @@ C_{\mathrm{window}}=O(Twd_h)
 
 global token 的直觉是：局部 token 负责细节，全局位置负责汇聚和广播。它能缩短某些信息传播路径，却也会产生汇聚瓶颈：如果所有证据都压到少数全局位置，容量不足时可能损失细节。
 
-Longformer、BigBird 等路线说明，稀疏模式既是算法归纳偏置，也是硬件布局。需要同时报告理论保留的边、实际 kernel 是否利用稀疏、以及任务质量是否下降。
+Longformer 和 BigBird 分别展示了局部/全局与块状稀疏模式；这些工作说明稀疏结构既是算法归纳偏置，也是硬件布局。需要同时报告理论保留的边、实际 kernel 是否利用稀疏、以及任务质量是否下降：[Longformer](https://arxiv.org/abs/2004.05150)、[BigBird](https://arxiv.org/abs/2007.14062)。
 
 ### 12.5 低秩和线性 attention
 
-若认为 attention 交互矩阵存在可压缩结构，可以用低秩投影、landmark token 或 kernel feature map 减少显式 T×T 计算。线性 attention 的抽象形式是：
+若认为 attention 交互矩阵存在可压缩结构，可以用低秩投影、landmark token 或 kernel feature map 减少显式 T×T 计算。Performer 是随机特征近似路线的代表，线性 attention 的抽象形式是：
 
 ~~~math
 \mathrm{Attention}(Q,K,V)
 \approx\phi(Q)\left(\phi(K)^\mathsf TV\right)
 ~~~
 
-它尝试先聚合 K 与 V，再让 Q 查询聚合结果，从而避免显式构造完整交互矩阵。但 softmax attention 的归一化、因果前缀和数值稳定性并不会自动保留；任何近似都要验证检索、组合推理和语言建模质量。
+它尝试先聚合 K 与 V，再让 Q 查询聚合结果，从而避免显式构造完整交互矩阵；该近似路线见 [Performer](https://arxiv.org/abs/2009.14794)。但 softmax attention 的归一化、因果前缀和数值稳定性并不会自动保留；任何近似都要验证检索、组合推理和语言建模质量。
 
 ### 12.6 FlashAttention 与稀疏 attention 必须分开
 
@@ -299,27 +320,29 @@ Longformer、BigBird 等路线说明，稀疏模式既是算法归纳偏置，�
 
 ### 12.8 一个量级估算
 
+函数输入序列长度、batch、head、层数、窗口和 head dimension 等正整数，输出单层 score/window 交互数及 BF16 显存估算。下面的结果按 batch=1 计算：score 数是单层 dense attention 的矩阵元素上界，显存按未融合的 BF16 score 矩阵估算；KV Cache 则按给定层数和 KV heads 估算。因果 kernel 可能利用三角结构，FlashAttention 也不会物化完整 score 矩阵，所以这些数字不是实际峰值显存或 profiler 结果。
+
 ~~~python
 def gibibytes(elements, bytes_per_element=2):
-    if elements < 0 or bytes_per_element <= 0:
+    if (type(elements) is not int or elements < 0
+            or type(bytes_per_element) is not int or bytes_per_element <= 0):
         raise ValueError("elements must be non-negative and bytes must be positive")
     return elements * bytes_per_element / (1024 ** 3)
 
 
 def attention_accounting(seq_len, heads=32, layers=32, kv_heads=8,
-                         head_dim=128, window=4096):
-    if any(value <= 0 for value in [seq_len, heads, layers, kv_heads, head_dim]):
-        raise ValueError("sequence and model dimensions must be positive")
-    if window <= 0:
-        raise ValueError("window must be positive")
-    if kv_heads > heads:
-        raise ValueError("kv_heads cannot exceed query heads")
-    dense_pairs = heads * seq_len * seq_len
-    window_pairs = heads * seq_len * min(seq_len, window)
-    kv_elements = 2 * layers * seq_len * kv_heads * head_dim
+                         head_dim=128, window=4096, batch=1):
+    dimensions = [seq_len, heads, layers, kv_heads, head_dim, window, batch]
+    if any(type(value) is not int or value <= 0 for value in dimensions):
+        raise ValueError("sequence, batch and model dimensions must be positive integers")
+    if kv_heads > heads or heads % kv_heads != 0:
+        raise ValueError("query heads must be divisible by KV heads")
+    dense_pairs = batch * heads * seq_len * seq_len
+    window_pairs = batch * heads * seq_len * min(seq_len, window)
+    kv_elements = 2 * batch * layers * seq_len * kv_heads * head_dim
     return {
         "dense_pairs_per_layer": dense_pairs,
-        "window_pairs_per_layer": window_pairs,
+        "window_pairs_per_layer_upper_bound": window_pairs,
         "dense_score_gib_bf16": gibibytes(dense_pairs),
         "kv_cache_gib_bf16": gibibytes(kv_elements),
     }
@@ -332,7 +355,7 @@ for length in [4096, 32768]:
         print(" ", name, "=", round(value, 4) if isinstance(value, float) else value)
 ~~~
 
-这段代码只能做数量级估算，不能替代实际 profiler。真实显存还包括权重、激活、通信 buffer、allocator 碎片和并发请求。
+例如 batch=1、32 heads、32 层、8 个 KV heads、head_dim=128 时，4K 输入对应单层未融合 score 约 1 GiB、KV Cache 约 0.5 GiB；32K 时分别约 64 GiB 和 4 GiB。窗口设为 4K 时，32K 的窗口交互上界约 8 GiB。它们是按公式计算的容量账本，不是实际峰值；真实显存还包括权重、激活、通信 buffer、allocator 碎片和并发请求。
 
 ### 12.9 评估长上下文优化
 
@@ -372,13 +395,13 @@ x_{l+1}=x_l+F_l(x_l)
 
 ### 13.2 为什么 Pre-LN 通常更稳
 
-Pre-LN 保留了较直接的 identity path。即使子层 F 的梯度不理想，主干仍然可以把一部分梯度传过许多层。深层模型通常更容易使用较大的学习率，也较少依赖极精细的 warmup。
+Pre-LN 保留了较直接的 identity path。即使子层 F 的梯度不理想，主干仍然可以把一部分梯度传过许多层。Xiong 等人在其分析和实验设置中发现，Pre-LN 的初始化梯度更稳定，训练对 warmup 的依赖较低；这不意味着所有模型、数据和预算下它都优于 Post-LN。具体选择还要验证训练稳定性与下游质量。
 
 但 Pre-LN 的 residual stream 没有在每个 add 之后立即被中心化，层数增加时表示尺度仍需监控，输出前常见 final norm。训练稳定也不自动意味着下游质量更高。
 
 ### 13.3 Post-LN 的边界
 
-Post-LN 让每层输出尺度被 norm 约束，在浅层模型和原始 Transformer 配置中可以工作；深层时，梯度要经过多层归一化变换，训练对初始化、学习率和 warmup 更敏感。它不是错误架构，而是深度扩展时工程裕量较小。
+Post-LN 让每层输出尺度被 norm 约束，在浅层模型和原始 Transformer 配置中可以工作；Xiong 等人的分析与实验显示，深层设置下它对初始化和 warmup 更敏感。它不是错误架构，而是在该类设置下深度扩展的工程裕量较小；其他结构仍需按目标配置验证。
 
 ### 13.4 Sandwich-LN 和额外控制
 
@@ -399,7 +422,7 @@ x_{l+1}=x_l+\mathrm{Norm}_2
 x_L=x_0+\sum_{l=1}^{L}\Delta x_l
 ~~~
 
-深度变大时，增量累积可能使表示或梯度失控。DeepNorm/DeepNet 的核心思想是让 residual 缩放和初始化随深度配套设计，从而控制累积效应。应把它理解为一组架构与初始化规则，而不是简单在某一行代码乘一个常数。
+深度变大时，增量累积可能使表示或梯度失控。DeepNorm/DeepNet 的核心思想是让 residual 缩放和初始化随深度配套设计，从而控制累积效应。应把它理解为一组架构与初始化规则，而不是简单在某一行代码乘一个常数；论文给出的系数依赖网络形态和深度，见 [DeepNet](https://arxiv.org/abs/2203.00555)。
 
 论文中的具体系数依赖 encoder/decoder、层数和残差定义。移植时需要核对公式、参数初始化、学习率和最终 norm，不能只复制一个 α。
 
@@ -419,10 +442,21 @@ x_L=x_0+\sum_{l=1}^{L}\Delta x_l
 ### 13.7 一个 toy 递推
 
 ~~~python
+import math
+
+
 def residual_stack(value, updates, scale=1.0):
+    if not isinstance(updates, (list, tuple)):
+        raise ValueError("updates must be a list or tuple of layer increments")
+    numbers = [value, scale, *updates]
+    if any(isinstance(number, bool) or not isinstance(number, (int, float))
+           or not math.isfinite(float(number)) for number in numbers):
+        raise ValueError("value, scale and updates must be finite real numbers")
     history = [value]
     for update in updates:
         value = value + scale * update
+        if not math.isfinite(value):
+            raise ValueError("residual accumulation overflowed")
         history.append(value)
     return history
 
@@ -432,13 +466,13 @@ for scale in [1.0, 0.25, 0.125]:
     print("scale =", scale, "last =", residual_stack(0.0, updates, scale)[-1])
 ~~~
 
-这个例子不模拟深度网络，却显示相同的每层增量在深度累积时会迅速放大；残差缩放的作用是控制累积尺度，而不是消除学习能力。
+函数接收一个标量初值、一列逐层标量增量和 scale，返回含初值在内的长度为 9 的状态轨迹。这个例子不模拟深度网络，却显示相同的每层增量在深度累积时会迅速放大：8 层、每层增量为 1 时，三个 scale 的末值分别为 8、2、1。残差缩放的作用是控制累积尺度，而不是消除学习能力。
 
 ## 14. LayerNorm、RMSNorm、ScaleNorm 与统计维度
 
 ### 14.1 LayerNorm 的统计对象
 
-对一个 token 的 hidden vector x∈R^d，LayerNorm 在 hidden 维度上计算：
+对一个 token 的 hidden vector x∈R^d，LayerNorm 在 hidden 维度上计算均值和方差；公式采用总体方差约定，学习到的 γ、β 是逐维参数。LayerNorm 的原始定义见 [Layer Normalization](https://arxiv.org/abs/1607.06450)：
 
 ~~~math
 \mu=\frac{1}{d}\sum_{i=1}^{d}x_i,
@@ -454,7 +488,7 @@ y_i=\gamma_i\frac{x_i-\mu}{\sqrt{\sigma^2+\epsilon}}+\beta_i
 
 ### 14.2 RMSNorm 做了什么
 
-RMSNorm 只控制向量的均方根：
+RMSNorm 只控制向量的均方根；这里采用 ε 加在均方根平方项中的常见写法，原论文的定义与实验见 [RMSNorm](https://arxiv.org/abs/1910.07467)：
 
 ~~~math
 r(x)=\sqrt{\frac{1}{d}\sum_{i=1}^{d}x_i^2+\epsilon}
@@ -464,11 +498,11 @@ r(x)=\sqrt{\frac{1}{d}\sum_{i=1}^{d}x_i^2+\epsilon}
 y_i=\gamma_i\frac{x_i}{r(x)}
 ~~~
 
-它不保证输出均值为零，但在许多 decoder-only LLM 中，尺度控制已经足以获得稳定训练。减少均值计算还可能带来更轻的实现，实际收益取决于融合 kernel 和内存访问。
+它不保证输出均值为零；RMSNorm 已出现在包括 LLaMA 在内的 decoder-only 架构中，但这一采用事实不等于它在所有模型上都更稳定或更快。减少均值计算还可能带来更轻的实现，实际收益取决于融合 kernel 和内存访问，LLaMA 的架构实例见 [LLaMA](https://arxiv.org/abs/2302.13971)。
 
 ### 14.3 ScaleNorm 的不同取舍
 
-ScaleNorm 直接按向量 L2 范数缩放：
+ScaleNorm 使用一个可学习标量按向量 L2 范数缩放，论文中的研究结论来自特定机器翻译设置，不能直接推广为所有 LLM 都更快或更准，见 [Transformers without Tears](https://arxiv.org/abs/1910.05895)：
 
 ~~~math
 y=g\frac{x}{\lVert x\rVert_2+\epsilon}
@@ -490,36 +524,56 @@ norm 的 γ/β 主要控制尺度和平移，通常从 weight decay 参数组中
 
 ### 14.7 一个无框架比较
 
+为突出归一化统计量，下面令 LayerNorm/RMSNorm 的逐维 γ=1、β=0，并把 ScaleNorm 的目标范数设为 2；代码不模拟可学习 affine 参数。
+
 ~~~python
 import math
 
 
 def validate_vector(values, eps):
-    if not values or any(not math.isfinite(value) for value in values):
+    if (not values or any(isinstance(value, bool)
+                          or not isinstance(value, (int, float))
+                          for value in values)):
         raise ValueError("values must be non-empty and finite")
-    if not math.isfinite(eps) or eps <= 0:
+    try:
+        finite_values = all(math.isfinite(float(value)) for value in values)
+        finite_eps = math.isfinite(float(eps))
+    except (TypeError, ValueError, OverflowError):
+        finite_values = finite_eps = False
+    if not finite_values:
+        raise ValueError("values must be non-empty and finite")
+    if (not isinstance(eps, (int, float)) or not finite_eps
+            or isinstance(eps, bool) or eps <= 0):
         raise ValueError("eps must be finite and positive")
 
 
 def layer_norm(values, eps=1e-6):
     validate_vector(values, eps)
-    mean = sum(values) / len(values)
-    variance = sum((value - mean) ** 2 for value in values) / len(values)
+    mean = math.fsum(values) / len(values)
+    centered = [value - mean for value in values]
+    if any(not math.isfinite(value) for value in centered):
+        raise ValueError("centering overflowed")
+    squares = [value * value for value in centered]
+    if any(not math.isfinite(value) for value in squares):
+        raise ValueError("variance overflowed")
+    variance = math.fsum(squares) / len(values)
     scale = math.sqrt(variance + eps)
     return [(value - mean) / scale for value in values]
 
 
 def rms_norm(values, eps=1e-6):
     validate_vector(values, eps)
-    rms = math.sqrt(sum(value * value for value in values) / len(values) + eps)
+    rms = math.hypot(*(value / math.sqrt(len(values)) for value in values),
+                     math.sqrt(eps))
     return [value / rms for value in values]
 
 
 def scale_norm(values, target=2.0, eps=1e-6):
     validate_vector(values, eps)
-    if not math.isfinite(target) or target < 0:
+    if (isinstance(target, bool) or not isinstance(target, (int, float))
+            or not math.isfinite(float(target)) or target < 0):
         raise ValueError("target must be finite and non-negative")
-    norm = math.sqrt(sum(value * value for value in values))
+    norm = math.hypot(*values)
     return [target * value / (norm + eps) for value in values]
 
 
@@ -536,7 +590,7 @@ for name, function in [
     print(name, "mean=", round(mean, 4), "rms=", round(rms, 4), "l2=", round(norm, 4))
 ~~~
 
-输出会显示 LayerNorm 的均值接近 0，RMSNorm 的 RMS 接近 1，ScaleNorm 的 L2 接近设定目标。三者控制的统计量不同，不能只看“输出看起来都差不多”就认为等价。
+输入是长度 d 的有限向量，三个函数都返回相同长度的归一化向量。对 `[5, 6, 4, 5]`，LayerNorm 的输出均值为 0、RMS 和 L2 范数分别约为 1 和 2；RMSNorm 与 ScaleNorm 的均值约 0.9901，RMS 约 1，L2 约 2。三者控制的统计量不同，不能只看“输出看起来都差不多”就认为等价。
 
 ## 15. FFN、GeLU、SwiGLU 与 MLP 容量
 
@@ -578,7 +632,7 @@ GeLU 是：
 \mathrm{GELU}(x)=x\Phi(x)
 ~~~
 
-SiLU 是：
+GeLU 的定义来自标准正态分布的累积分布函数；原论文比较了其在若干视觉、语言和语音任务上的表现，但不构成对现代 LLM 的普遍优越性证明，见 [Gaussian Error Linear Units](https://arxiv.org/abs/1606.08415)。SiLU 是：
 
 ~~~math
 \mathrm{SiLU}(x)=x\sigma(x)
@@ -603,7 +657,7 @@ h=u\odot\mathrm{SiLU}(g)
 \mathrm{SwiGLU}(x)=W_{\mathrm{down}}h
 ~~~
 
-逐元素乘法让控制分支根据输入调节内容特征。它提供了比单分支激活更丰富的乘法交互，但同时多了一条投影矩阵。
+逐元素乘法让控制分支根据输入调节内容特征。它提供了比单分支激活更丰富的乘法交互，但同时多了一条投影矩阵；GLU 变体及相应实验见 [GLU Variants Improve Transformer](https://arxiv.org/abs/2002.05202)。
 
 ### 15.5 为什么 hidden size 常接近 8/3
 
@@ -625,12 +679,15 @@ h\approx\frac{8}{3}d_{\mathrm{model}}
 
 ### 15.6 FFN 与知识表示
 
-FFN 具有大量参数和高维非线性变换，因此可能编码许多知识模式。把它类比为 key-value memory 有助于研究特征，但不能据此断定某条事实只存储在某一个神经元或某一层。embedding、attention、MLP、residual stream 和输出头共同构成分布式表示。
+FFN 具有大量参数和高维非线性变换，因此可能编码许多知识模式。Geva 等人在特定 Transformer 语言模型中将 FFN 分析为 key-value memory；这是解释性研究视角，不表示某条事实只存储在某一个神经元或某一层。embedding、attention、MLP、residual stream 和输出头共同构成分布式表示，见 [Transformer Feed-Forward Layers Are Key-Value Memories](https://arxiv.org/abs/2012.14913)。
 
 ### 15.7 一个参数量比较器
 
 ~~~python
 def ffn_parameters(d_model, hidden, projections):
+    if any(type(value) is not int or value <= 0
+           for value in [d_model, hidden, projections]):
+        raise ValueError("dimensions and projection count must be positive integers")
     return projections * d_model * hidden
 
 
@@ -646,7 +703,7 @@ for d_model in [1024, 4096]:
     )
 ~~~
 
-这里输出的是以 d_model² 为单位的相对账本，方便比较结构，而不是完整模型参数量。embedding、norm、bias、MoE router 和输出头需要单独计算。
+函数接收正整数模型宽度、MLP 中间宽度和矩阵数量，输出归一化到 d_model² 的 MLP 参数量对比。这里输出的是以 d_model² 为单位的相对账本：GeLU 两矩阵 FFN 约为 8d_model²；匹配参数量后的 SwiGLU 约为 8.001d_model²（d=1024）和 8d_model²（d=4096）。这只是 MLP 参数对照，不是完整模型参数量；embedding、norm、bias、attention 和输出头需要另算。
 
 ## 16. RoPE：旋转几何与相对位置
 
@@ -687,19 +744,25 @@ R(\theta_j-\theta_i)k_j
 
 ### 16.3 频率与位置
 
-通常第 r 个二维子空间的角度与位置 i 和频率 ω_r 的乘积有关：
+通常第 r 个二维子空间的角度与位置 i 和频率 ω_r 的乘积有关。一个常见约定是令频率基数 Θ>1、维度为偶数，并取 r=0,…,d_h/2−1：
 
 ~~~math
 \theta_{i,r}=i\omega_r
 ~~~
 
-不同频率提供不同周期。高频对短距离变化敏感，低频变化慢，更适合表示较长距离。实际实现还要考虑 base、维度配对顺序、数据类型和 kernel。
+~~~math
+\omega_r=\Theta^{-2r/d_h}
+~~~
+
+不同频率提供不同周期。高频对短距离变化敏感，低频变化慢，更适合表示较长距离。基数 θ、维度配对顺序和实现布局需要与模型配置保持一致；RoPE 的旋转构造见 [RoFormer](https://arxiv.org/abs/2104.09864)。实际实现还要考虑数据类型和 kernel。
 
 ### 16.4 RoPE 与长度泛化
 
 RoPE 的相对结构为长度外推提供了更自然的先验，但不是无限长度保证。若训练只覆盖 4K，直接推理到 128K 可能出现相位分布、attention score、训练数据和有效检索能力的共同漂移。
 
 位置插值、频率缩放和继续预训练的目标，是把更长的实际位置映射到模型更熟悉的相位范围，或者让模型在长序列上重新适应。任何 scaling 都可能影响短上下文，因此必须做长度分段回归。
+
+Position Interpolation 和 YaRN 给出了 RoPE 上下文扩展的具体训练方案；论文结果绑定其模型、微调预算和任务，不能据此推断任意 checkpoint 都能无损外推：[Position Interpolation](https://arxiv.org/abs/2306.15595)、[YaRN](https://arxiv.org/abs/2309.00071)。
 
 ### 16.5 RoPE 与 ALiBi 的区别
 
@@ -712,6 +775,13 @@ import math
 
 
 def rotate(vector, angle):
+    if (not isinstance(vector, (list, tuple)) or len(vector) != 2
+            or any(isinstance(value, bool) or not isinstance(value, (int, float))
+                   or not math.isfinite(float(value)) for value in vector)):
+        raise ValueError("rotate expects a finite 2D vector")
+    if (isinstance(angle, bool) or not isinstance(angle, (int, float))
+            or not math.isfinite(float(angle))):
+        raise ValueError("angle must be finite")
     cosine = math.cos(angle)
     sine = math.sin(angle)
     x, y = vector
@@ -719,6 +789,11 @@ def rotate(vector, angle):
 
 
 def dot(left, right):
+    if len(left) != len(right) or len(left) != 2:
+        raise ValueError("dot expects two equal-length 2D vectors")
+    if any(isinstance(value, bool) or not isinstance(value, (int, float))
+           or not math.isfinite(float(value)) for value in left + right):
+        raise ValueError("dot inputs must be finite real numbers")
     return sum(a * b for a, b in zip(left, right))
 
 
@@ -733,7 +808,7 @@ for i, j in [(1, 4), (3, 6), (2, 9)]:
     assert abs(absolute - relative) < 1e-9
 ~~~
 
-这个二维例子只验证旋转矩阵的代数性质，不代表完整 LLM 的长度能力。真正的 RoPE 还包括多频率维度、批量计算、缓存和精度处理。
+输入为两个二维向量和位置频率，函数返回旋转后的二维向量；三个位置对的绝对位置点积与相对位移点积逐项相等，示例数值包括 −0.63111691 和 −0.24694281。这个二维例子只验证旋转矩阵的代数性质，不代表完整 LLM 的长度能力。真正的 RoPE 还包括多频率维度、批量计算、缓存和精度处理。
 
 ### 16.7 评估位置扩展
 
@@ -753,7 +828,7 @@ for i, j in [(1, 4), (3, 6), (2, 9)]:
 
 ### 17.1 直接把距离写进分数
 
-ALiBi 在 attention logits 上加入距离相关的线性偏置：
+ALiBi 在 attention logits 上加入距离相关的线性偏置；原论文的斜率构造和长度外推实验见 [Train Short, Test Long](https://arxiv.org/abs/2108.12409)：
 
 ~~~math
 \widetilde S_{ij}
@@ -777,14 +852,17 @@ m_h 是第 h 个 head 的斜率。距离越远，默认分数越低，但这只�
 
 ### 17.5 一个 bias 生成器
 
+输入序列长度 n 和非负斜率，函数返回 n×n 的加性 bias 矩阵；未来位置写为 `-inf`，供 softmax 前与 causal mask 组合。
+
 ~~~python
 import math
 
 
 def alibi_bias(seq_len, slope):
-    if not isinstance(seq_len, int) or seq_len <= 0:
+    if type(seq_len) is not int or seq_len <= 0:
         raise ValueError("seq_len must be a positive integer")
-    if not math.isfinite(slope) or slope < 0:
+    if (isinstance(slope, bool) or not isinstance(slope, (int, float))
+            or not math.isfinite(float(slope)) or slope < 0):
         raise ValueError("slope must be finite and non-negative")
     matrix = []
     for i in range(seq_len):
@@ -801,6 +879,8 @@ for slope in [0.25, 1.0]:
     assert bias[0][1] == float("-inf")
     assert bias[-1][0] < bias[-1][-1]
 ~~~
+
+当斜率为 0.25 时，最后一行从最远可见位置到当前 token 依次为 `[-1.0, -0.75, -0.5, -0.25, 0.0]`；未来位置则是 `-inf`，由 causal mask 屏蔽。
 
 ### 17.6 RoPE、ALiBi 与绝对位置的选择表
 
@@ -863,17 +943,19 @@ KV paging     改善缓存的分配、共享和调度
 量化/压缩      进一步减少每个元素的字节数
 ~~~
 
-实际吞吐还取决于 batch 调度、并发请求长度、attention kernel 和内存带宽。
+实际吞吐还取决于 batch 调度、并发请求长度、attention kernel 和内存带宽。PagedAttention 通过分页管理 KV block、减少碎片并支持缓存共享；这是缓存分配与调度优化，不会减少模型每 token 的 KV 表示量，见 [PagedAttention](https://arxiv.org/abs/2309.06180)。
 
 ### 18.6 估算缓存
+
+输入 batch、序列长度、层数、KV heads、head dimension 和每元素字节数，函数返回单请求 KV Cache 的 MiB 估算；例子使用 BF16 的 2 字节。
 
 ~~~python
 def kv_cache_mib(batch, seq_len, layers, kv_heads, head_dim, bytes_per_value=2):
     dimensions = [batch, seq_len, layers, kv_heads, head_dim]
-    if any(not isinstance(value, int) or value <= 0 for value in dimensions):
+    if any(type(value) is not int or value <= 0 for value in dimensions):
         raise ValueError("cache dimensions must be positive integers")
-    if bytes_per_value <= 0:
-        raise ValueError("bytes_per_value must be positive")
+    if type(bytes_per_value) is not int or bytes_per_value <= 0:
+        raise ValueError("bytes_per_value must be a positive integer")
     elements = 2 * batch * seq_len * layers * kv_heads * head_dim
     return elements * bytes_per_value / (1024 ** 2)
 
@@ -886,7 +968,7 @@ for kv_heads in [32, 8, 1]:
 assert kv_cache_mib(1, 8192, 32, 8, 128) == kv_cache_mib(1, 8192, 32, 32, 128) / 4
 ~~~
 
-这个账本没有包括权重、激活、allocator 碎片和多请求排队。线上容量规划要用真实引擎的峰值显存与 P95/P99 延迟验证。
+当 batch=1、长度 8192、32 层、head_dim=128、BF16 时，32 个 KV heads 约需 4096 MiB，8 个需 1024 MiB，1 个需 128 MiB。缓存大小随 KV head 数线性缩放；这个账本没有包括权重、激活、allocator 碎片和多请求排队。线上容量规划要用真实引擎的峰值显存与 P95/P99 延迟验证。
 
 ### 18.7 分层理解
 
@@ -907,16 +989,13 @@ z_t=W_r x_t,\qquad
 p_t=\mathrm{softmax}(z_t)
 ~~~
 
-若选择的 expert 集合为 S_t，则一个 top-k MoE 输出可以写成：
+若选择的 expert 集合为 S_t，一个常见的路由加权形式为：
 
 ~~~math
-y_t=\sum_{e\in S_t}w_{t,e}F_e(x_t),
-\qquad
-w_{t,e}=\frac{p_{t,e}}
-{\sum_{u\in S_t}p_{t,u}}
+y_t=\sum_{e\in S_t}p_{t,e}F_e(x_t)
 ~~~
 
-总参数量随 E 增长，但每个 token 只激活 k 个 expert。这里要区分 total parameters 和 activated parameters：前者说明模型潜在容量，后者更接近每 token 计算。
+其中 p 是 router 对全部 expert 的 softmax 概率，未选 expert 的权重为零。实现也可能对选中的权重重新归一化，因此比较 MoE 代码时要检查 combine 规则。总参数量随 E 增长，但每个 token 只激活 k 个 expert。这里要区分 total parameters 和 activated parameters：前者说明模型潜在容量，后者更接近每 token 计算。稀疏路由的经典定义见 [Sparsely-Gated Mixture-of-Experts](https://arxiv.org/abs/1701.06538)；top-1 路由实例见 [Switch Transformers](https://arxiv.org/abs/2101.03961)。
 
 ### 19.2 Top-1 与 Top-2
 
@@ -950,17 +1029,30 @@ MoE 把部分算力压力换成了：
 
 ### 19.5 一个 top-1 路由模拟
 
+输入矩阵形状为 `[token 数, expert 数]` 的有限 router logits，输出每个 token 的 expert id，再统计每个 expert 收到的 token 数；这里仅模拟 argmax 路由，不计算概率权重或 expert MLP。
+
 ~~~python
+import math
+
+
 def top1_route(logits):
-    if not logits or any(not row for row in logits):
+    if not logits or any(not isinstance(row, (list, tuple)) or not row for row in logits):
         raise ValueError("logits must contain non-empty rows")
+    width = len(logits[0])
+    if any(len(row) != width for row in logits):
+        raise ValueError("all router rows must have the same expert count")
+    for row in logits:
+        for value in row:
+            if (isinstance(value, bool) or not isinstance(value, (int, float))
+                    or not math.isfinite(float(value))):
+                raise ValueError("router logits must be finite real numbers")
     return [max(range(len(row)), key=row.__getitem__) for row in logits]
 
 
 def count_assignments(assignments, num_experts):
-    if not isinstance(num_experts, int) or num_experts <= 0:
+    if type(num_experts) is not int or num_experts <= 0:
         raise ValueError("num_experts must be a positive integer")
-    if any(not isinstance(expert, int) or not 0 <= expert < num_experts
+    if any(type(expert) is not int or not 0 <= expert < num_experts
            for expert in assignments):
         raise ValueError("expert assignments are out of range")
     counts = [0] * num_experts
@@ -982,7 +1074,7 @@ print("assignments =", assignments)
 print("counts =", counts)
 ~~~
 
-结果中第一个 expert 可能获得过多 token。这个 toy 现象就是下一节需要处理的负载不均衡问题。
+结果为 assignments `[0, 0, 1, 0, 2]`、counts `[3, 1, 1]`，第一个 expert 获得了多数 token。这个 toy 现象就是下一节需要处理的负载不均衡问题。
 
 ## 20. MoE 负载均衡、容量与通信
 
@@ -1000,40 +1092,44 @@ collapse 的表现不仅是平均利用率下降，还包括：
 
 ### 20.2 Auxiliary load-balancing loss
 
-设 f_e 是被路由到 expert e 的 token 比例，P_e 是 router 对 expert e 的平均概率，E 是 expert 数，一个常见的辅助损失形式为：
+在 Switch 的 top-1 形式中，设 N 是当前路由组中的 token 数，f_e 是硬路由到 expert e 的 token 比例，P_e 是 router 对该 expert 的平均 softmax 概率，E 是 expert 数；一个常见辅助损失为：
 
 ~~~math
 \mathcal L_{\mathrm{aux}}
-=\alpha E\sum_{e=1}^{E}f_eP_e
+=\alpha E\sum_{e=1}^{E}f_eP_e,
+\qquad
+f_e=\frac{1}{N}\sum_{t=1}^{N}\mathbf{1}[\arg\max_j p_{t,j}=e],
+\qquad
+P_e=\frac{1}{N}\sum_{t=1}^{N}p_{t,e}
 ~~~
 
-当 f 和 P 都均匀时，乘积和达到较理想的平衡尺度；当 token 和概率都集中到少数 expert 时，损失变大。不同论文和实现的归一化、top-k 处理和系数可能不同，这个公式用于说明机制，不应替代具体实现文档。
+当 f 和 P 都均匀时，乘积和达到较理想的平衡尺度；当 token 和概率都集中到少数 expert 时，损失变大。不同论文和实现的归一化、top-k 处理、路由组范围和系数可能不同；上式是 Switch top-1 的一种定义，不应直接套用到任意 top-k 实现。
 
 辅助损失只能鼓励均衡，不能保证任务质量。过强的均衡约束可能把本应由某个 expert 处理的 token 强行分散，损害 specialization。
 
 ### 20.3 Expert capacity 与 token dropping
 
-一个 batch 有 N 个 token，E 个 expert，capacity factor 为 c，则每个 expert 的槽位通常近似：
+若一个路由组含 N 个 token、每个 token 只分配给一个 expert、共有 E 个 expert，capacity factor 为 c，则每个 expert 的槽位常按下式估算：
 
 ~~~math
 C=\left\lceil c\frac{N}{E}\right\rceil
 ~~~
 
-若分配给某 expert 的 token 数超过 C，就发生 overflow。系统可以丢弃、转发到备选 expert、增加 capacity 或采用更复杂的合并策略。
+top-k 路由、多设备分组和具体实现会改变 capacity 的统计范围或分配量；若分配给某 expert 的 token 数超过 C，就发生 overflow。系统可以丢弃、转发到备选 expert、增加 capacity 或采用更复杂的合并策略。Switch 的容量定义和 token dropping 见 [Switch Transformers](https://arxiv.org/abs/2101.03961)。
 
 c 太小会增加 token dropping 和训练信号损失；c 太大则需要更多 padding、显存和通信。capacity 不是越大越安全，而是一个资源—丢失风险的折中。
 
 ### 20.4 Router logits 的数值稳定
 
-router logits 过大时，softmax 过于尖锐，路由很早锁死。z-loss 的抽象目标是约束 log-sum-exp 的尺度：
+logits 间差异过大时，softmax 会变尖，router 可能过早偏向少数 expert。另一个数值稳定问题是 log-sum-exp 的尺度过大。设 N 是当前路由组中的 token 数，z_t 是 token t 的 logits；ST-MoE 提出的 router z-loss 直接约束后者：
 
 ~~~math
 \mathcal L_z
-=\frac{1}{T}\sum_{t=1}^{T}
+=\frac{1}{N}\sum_{t=1}^{N}
 \left(\log\sum_{e=1}^{E}\exp z_{t,e}\right)^2
 ~~~
 
-训练中也可能加入 jitter 或噪声，让早期路由保留探索空间。噪声太大则会使 dispatch 不稳定，因此要结合路由熵、drop rate 和验证质量一起调。
+训练中也可能加入 jitter 或噪声，让早期路由保留探索空间。噪声太大则会使 dispatch 不稳定，因此要结合路由熵、drop rate 和验证质量一起调。z-loss 的定义及稳定性讨论见 [ST-MoE](https://arxiv.org/abs/2202.08906)。
 
 ### 20.5 All-to-all 的端到端账本
 
@@ -1061,6 +1157,8 @@ router logits 过大时，softmax 过于尖锐，路由很早锁死。z-loss 的
 
 ### 20.7 capacity 模拟
 
+输入每个 token 的单个 expert assignment、expert 数和正 capacity factor，输出槽位数、各 expert 保留量以及按输入顺序保留/丢弃的 token 下标。这个 demo 对应 top-1 的简单容量截断。
+
 ~~~python
 import math
 
@@ -1068,14 +1166,19 @@ import math
 def apply_capacity(assignments, num_experts, capacity_factor):
     if not assignments:
         raise ValueError("assignments must not be empty")
-    if not isinstance(num_experts, int) or num_experts <= 0:
+    if type(num_experts) is not int or num_experts <= 0:
         raise ValueError("num_experts must be a positive integer")
-    if not math.isfinite(capacity_factor) or capacity_factor <= 0:
+    if (isinstance(capacity_factor, bool)
+            or not isinstance(capacity_factor, (int, float))
+            or not math.isfinite(float(capacity_factor)) or capacity_factor <= 0):
         raise ValueError("capacity_factor must be finite and positive")
-    if any(not isinstance(expert, int) or not 0 <= expert < num_experts
+    if any(type(expert) is not int or not 0 <= expert < num_experts
            for expert in assignments):
         raise ValueError("expert assignments are out of range")
-    capacity = math.ceil(capacity_factor * len(assignments) / num_experts)
+    expected_load = capacity_factor * len(assignments) / num_experts
+    if not math.isfinite(expected_load):
+        raise ValueError("capacity calculation overflowed")
+    capacity = math.ceil(expected_load)
     used = [0] * num_experts
     kept = []
     dropped = []
@@ -1095,20 +1198,20 @@ for factor in [1.0, 1.5, 2.0]:
           "used =", result[1], "dropped =", result[3])
 ~~~
 
-这个实验把负载不均衡、capacity 和 drop 的关系变成可以手算的结果。真实 top-k 路由还要处理每个 token 的权重、备选 expert、padding 和跨设备通信。
+这个实验按输入顺序保留 token，factor 为 1、1.5、2 时 capacity 分别为 3、4、5，drop 数分别为 2、1、0。它展示负载、capacity 和 drop 的关系，但输入顺序策略只是 toy 约定；真实 top-k 路由还要处理每个 token 的权重、备选 expert、padding 和跨设备通信。
 
 ## 21. Encoder-only、Decoder-only 与 Encoder–Decoder
 
 ### 21.1 三种信息流
 
-Encoder-only 通常使用双向 self-attention，位置 i 可以读取完整输入；decoder-only 使用 causal self-attention，位置 i 只能读取左侧上下文；encoder–decoder 则组合了 source encoder 和 target decoder：
+Encoder-only 通常使用双向 self-attention，位置 i 可以读取完整输入；decoder-only 使用 causal self-attention，位置 i 只能读取左侧上下文；encoder–decoder 则组合了 source encoder 和 target decoder。BERT、GPT 和 T5 分别提供了这些范式的代表实例：[BERT](https://arxiv.org/abs/1810.04805)、[GPT](https://cdn.openai.com/research-covers/language-unsupervised/language_understanding_paper.pdf) 与 [T5](https://arxiv.org/abs/1910.10683)：
 
 ~~~math
 \begin{aligned}
 \text{Encoder-only:}&\quad H=\mathrm{Enc}(X)\\
 \text{Decoder-only:}&\quad y_t\sim P(y_t\mid y_{1:t-1},x)\\
-\text{Encoder-decoder:}&\quad H=\mathrm{Enc}(X),\
-Y=\mathrm{Dec}(Y_{1:t-1},H)
+\text{Encoder-decoder:}&\quad H=\mathrm{Enc}(X),\\
+&\quad Y=\mathrm{Dec}(Y_{1:t-1},H)
 \end{aligned}
 ~~~
 
@@ -1151,23 +1254,25 @@ encoder 先把 source 编码为 H，decoder 的每个位置通过 cross-attentio
 
 ### 21.6 mask 账本
 
+函数输入 source 和 target 的正整数长度，返回 encoder self-attention、decoder causal self-attention 和 cross-attention 三个矩阵；下面构造的是未加 padding 的可见性矩阵：1 表示 query 可以读取该 key，0 表示不可读。生产实现还要组合 padding、packed sequence、prefix-LM 或其他任务 mask。
+
 ~~~python
 def encoder_mask(length):
-    if not isinstance(length, int) or length <= 0:
+    if type(length) is not int or length <= 0:
         raise ValueError("length must be a positive integer")
     return [[1 for _ in range(length)] for _ in range(length)]
 
 
 def causal_mask(length):
-    if not isinstance(length, int) or length <= 0:
+    if type(length) is not int or length <= 0:
         raise ValueError("length must be a positive integer")
     return [[1 if column <= row else 0 for column in range(length)]
             for row in range(length)]
 
 
 def encoder_decoder_masks(source, target):
-    if (not isinstance(source, int) or source <= 0
-            or not isinstance(target, int) or target <= 0):
+    if (type(source) is not int or source <= 0
+            or type(target) is not int or target <= 0):
         raise ValueError("source and target lengths must be positive integers")
     return {
         "encoder_self": encoder_mask(source),
@@ -1181,7 +1286,7 @@ print("decoder =", causal_mask(3))
 print("enc-dec =", encoder_decoder_masks(4, 2))
 ~~~
 
-把 mask 画出来比背定义更容易发现训练目标和信息泄漏问题。
+例如长度为 3 的 causal mask 是 `[[1,0,0],[1,1,0],[1,1,1]]`，cross-attention mask 的形状为 target length × source length。把 mask 画出来比背定义更容易发现训练目标和信息泄漏问题。
 
 ## 22. State Space Models：压缩历史的序列算子
 
@@ -1191,14 +1296,14 @@ Transformer 的优势是显式读取任意历史 token，代价是 dense 交互�
 
 ### 22.2 连续与离散状态方程
 
-经典离散形式可以写为：
+线性离散状态空间模型可以写为：
 
 ~~~math
 h_t=Ah_{t-1}+Bx_t,\qquad
 y_t=Ch_t+Dx_t
 ~~~
 
-A 控制历史状态如何衰减和混合，B 决定输入如何写入，C 决定状态如何读出，D 是输入的直接通路。对线性、时不变系统，可以把递推展开为卷积；训练时用卷积并行，推理时用状态递推。
+A 控制历史状态如何衰减和混合，B 决定输入如何写入，C 决定状态如何读出，D 是输入的直接通路。对线性、时不变系统，可以把递推展开为卷积；训练时可用卷积或并行 scan，推理时可用状态递推。S4 和 Mamba 分别展示了结构化状态空间与选择性状态更新路线：[S4](https://arxiv.org/abs/2111.00396)、[Mamba](https://arxiv.org/abs/2312.00752)。
 
 离散化连续系统会得到带步长的 A_bar、B_bar 等参数。实际 S4、Mamba 等模型有更复杂的结构化参数化和数值处理，不能用四个矩阵的 toy 公式替代论文实现。
 
@@ -1212,17 +1317,29 @@ attention 显式保留 token-to-token 访问；SSM 把历史压缩进状态。�
 
 固定状态更新可能无法区分“必须长期保留的约束”和“可以遗忘的噪声”。选择性 SSM 让部分状态更新参数依赖输入，让模型动态决定写入、保留和遗忘哪些信息。Mamba 的 selective scan 同时要解决两件事：内容相关的状态控制，以及并行/硬件效率。
 
-Mamba-2/SSD 等工作还展示了 SSM 与 attention 在更一般的结构空间中存在联系，因此更合理的趋势判断是“出现融合和可互换的序列算子”，而不是简单预测谁会完全淘汰谁。
+Mamba-2/SSD 展示了 SSM 与 attention 在更一般的结构空间中存在联系，因此更合理的判断是这些路线存在可分析的统一结构与融合空间，而不是据此预测谁会完全淘汰谁，见 [Transformers are SSMs](https://arxiv.org/abs/2405.21060)。
 
 ### 22.5 一个标量状态实验
 
+输入有限标量序列和 A、B、C、D 四个系数，输出逐步生成的标量状态读出；状态递推可手算，代码不实现向量状态或选择性参数。
+
 ~~~python
+import math
+
+
 def scalar_ssm(inputs, a, b=1.0, c=1.0, d=0.0):
+    parameters = [a, b, c, d, *inputs]
+    if any(isinstance(value, bool) or not isinstance(value, (int, float))
+           or not math.isfinite(float(value)) for value in parameters):
+        raise ValueError("inputs and coefficients must be finite real numbers")
     state = 0.0
     outputs = []
     for value in inputs:
         state = a * state + b * value
-        outputs.append(c * state + d * value)
+        output = c * state + d * value
+        if not math.isfinite(state) or not math.isfinite(output):
+            raise ValueError("state update overflowed")
+        outputs.append(output)
     return outputs
 
 
@@ -1231,7 +1348,7 @@ for a in [0.2, 0.8]:
     print("a =", a, "outputs =", [round(v, 4) for v in scalar_ssm(inputs, a)])
 ~~~
 
-a 越接近 1，历史衰减越慢；这只是状态记忆的直觉，不是 Mamba 的完整实现。
+a 越接近 1，历史衰减越慢；输入 `[1,0,0,0,0]` 在 a=0.2 时产生 `[1,0.2,0.04,0.008,0.0016]`，在 a=0.8 时产生 `[1,0.8,0.64,0.512,0.4096]`。这只是状态记忆的直觉，不是 Mamba 的完整实现。
 
 ### 22.6 SSM 的评价维度
 
@@ -1275,8 +1392,14 @@ attention 适合精确读取，SSM 适合连续状态传播，卷积适合局部
 
 ### 23.3 一个粗略成本模型
 
+每层输入序列长度、算子类型和线性算子的宽度，返回一个交互数 proxy；stack 函数把各层 proxy 相加。它不计算真实 FLOPs、内存流量或 kernel 延迟。
+
 ~~~python
 def layer_cost(length, kind, width=64):
+    if type(length) is not int or length <= 0:
+        raise ValueError("length must be a positive integer")
+    if type(width) is not int or width <= 0:
+        raise ValueError("width must be a positive integer")
     if kind == "attention":
         return length * length
     if kind in {"ssm", "conv"}:
@@ -1299,7 +1422,7 @@ for name, kinds in stacks.items():
     print(name, round(stack_cost(length, kinds) / baseline, 4))
 ~~~
 
-这是一个交互数 proxy，不包含每种算子的真实常数、宽度、kernel 和质量。它只能帮助形成“减少二次层会降低某类成本”的直觉。
+按这个交互数 proxy，hybrid 和 mostly-SSM 分别是 dense baseline 的约 25.6% 和 17.3%。它不包含每种算子的真实常数、宽度、kernel 和质量，只能帮助形成“减少二次层会降低某类成本”的直觉，不能据此预测端到端速度。
 
 ### 23.4 混合架构的失败模式
 
@@ -1346,7 +1469,7 @@ P_{\mathrm{ffn}}\approx2d_{\mathrm{model}}d_{\mathrm{ff}}
 
 ### 24.3 Head 数和 head dimension
 
-head 太少可能限制路由子空间，head 太多则让 d_h 过小、投影和 kernel 更碎。64、80、96、128 等 head dimension 常见于硬件友好配置，但它不是语义规律，而是表达、并行和 kernel 的折中。
+head 数和 d_h 共同决定子空间数量及每个子空间的宽度；d_h 过小会限制单头表示维度，过大则减少 head 数或增加矩阵计算。对齐要求随硬件、精度和 kernel 变化，因此具体尺寸必须在目标实现上测量，不能把某个 d_h 清单当成通用最优值。
 
 ### 24.4 FFN 与 SwiGLU 尺寸
 
@@ -1367,17 +1490,24 @@ head 太少可能限制路由子空间，head 太多则让 d_h 过小、投影�
 
 ### 24.6 计算最优不是只增大参数
 
-在固定计算预算下，要平衡模型参数、训练 token、数据质量和训练步数。模型过大而训练不足会欠训练；模型过小而数据很多会受容量限制。架构尺寸必须和 scaling law、数据配比、优化器状态显存与推理成本一起决定。
+在固定计算预算下，要平衡模型参数、训练 token、数据质量和训练步数。模型过大而训练不足会欠训练；模型过小而数据很多会受容量限制。Chinchilla 研究展示了这一类参数与数据预算的联合取舍，但其计算最优关系依赖论文数据和训练设置；架构尺寸还必须和数据配比、优化器状态显存与推理成本一起决定，见 [Training Compute-Optimal Large Language Models](https://arxiv.org/abs/2203.15556)。
 
 ### 24.7 参数量估算
 
+下面把四个 attention 投影与 MLP 矩阵分开计数：普通两层 FFN 有 2 个主要矩阵，SwiGLU 有 up、gate、down 三个；输入模型宽度、中间宽度和层数，忽略 bias、norm、embedding 和输出头。
+
 ~~~python
 def round_multiple(value, multiple):
+    if type(value) is not int or value < 0 or type(multiple) is not int or multiple <= 0:
+        raise ValueError("value and multiple must be integers; value non-negative and multiple positive")
     return ((value + multiple - 1) // multiple) * multiple
 
 
-def block_params(d_model, d_ff, projections=4):
-    return projections * d_model * d_model + 2 * d_model * d_ff
+def block_params(d_model, d_ff, mlp_projections):
+    if (any(type(value) is not int or value <= 0 for value in [d_model, d_ff])
+            or type(mlp_projections) is not int or mlp_projections not in {2, 3}):
+        raise ValueError("dimensions must be positive integers and MLP must have 2 or 3 projections")
+    return 4 * d_model * d_model + mlp_projections * d_model * d_ff
 
 
 d_model = 4096
@@ -1386,14 +1516,14 @@ gelu_ff = 4 * d_model
 swiglu_ff = round_multiple(8 * d_model // 3, 256)
 
 for name, hidden, projection_count in [
-    ("GeLU", gelu_ff, 4),
-    ("SwiGLU", swiglu_ff, 4),
+    ("GeLU", gelu_ff, 2),
+    ("SwiGLU", swiglu_ff, 3),
 ]:
     total = block_params(d_model, hidden, projection_count) * layers
     print(name, "intermediate =", hidden, "block stack params ~", round(total / 1e9, 3), "B")
 ~~~
 
-它是架构账本，不是完整模型统计。真实配置应使用框架的参数计数，并把 tied embedding、MoE expert、router 和输出头说明清楚。
+该配置输出 GeLU 约 6.442B、SwiGLU 约 6.476B 个 block-stack 参数；差异来自 intermediate size 取整，而不是 SwiGLU 漏算投影矩阵。它是架构账本，不是完整模型统计。真实配置应使用框架的参数计数，并把 tied embedding、MoE expert、router 和输出头说明清楚。
 
 ## 25. 从配置文件拆解现代 LLM
 
@@ -1433,8 +1563,12 @@ for name, hidden, projection_count in [
 
 ### 25.6 配置解析器
 
+输入一个含层数、hidden size、query/KV heads 和 intermediate size 的配置字典；解析器返回结构摘要，并拒绝非整数、非正数及不满足 head 整除关系的维度。它检查字段一致性，不替代框架对完整模型配置的校验。
+
 ~~~python
 def inspect_config(config):
+    if not isinstance(config, dict):
+        raise ValueError("config must be a dictionary")
     required = {
         "num_attention_heads",
         "num_hidden_layers",
@@ -1447,13 +1581,18 @@ def inspect_config(config):
     query_heads = config["num_attention_heads"]
     kv_heads = config.get("num_key_value_heads", query_heads)
     if any(
-        not isinstance(value, int) or value <= 0
+        type(value) is not int or value <= 0
         for value in [query_heads, kv_heads, config["num_hidden_layers"],
                       config["hidden_size"], config["intermediate_size"]]
     ):
         raise ValueError("model dimensions must be positive integers")
     if kv_heads > query_heads or query_heads % kv_heads != 0:
         raise ValueError("query heads must be divisible by KV heads")
+    if config["hidden_size"] % query_heads != 0:
+        raise ValueError("hidden_size must be divisible by query heads")
+    experts = config.get("num_experts", 0)
+    if type(experts) is not int or experts < 0:
+        raise ValueError("num_experts must be a non-negative integer")
     if kv_heads == query_heads:
         attention = "MHA"
         cache_ratio = 1.0
@@ -1468,12 +1607,13 @@ def inspect_config(config):
     intermediate = config["intermediate_size"]
     return {
         "layers": config["num_hidden_layers"],
+        "head_dim": hidden // query_heads,
         "attention": attention,
         "kv_cache_ratio_vs_mha": round(cache_ratio, 4),
         "mlp_ratio": round(intermediate / hidden, 4),
         "norm": config.get("norm", "unknown"),
         "position": config.get("position", "unknown"),
-        "experts": config.get("num_experts", 0),
+        "experts": experts,
     }
 
 
@@ -1488,6 +1628,8 @@ llama_like = {
 }
 print(inspect_config(llama_like))
 ~~~
+
+示例解析结果是 32 层、head_dim=128、GQA、相对 MHA 的 KV Cache 比例 0.25、MLP/hidden 比例 2.6875、RMSNorm 与 RoPE。代码只对字段做结构一致性检查，不验证权重、训练配方或长上下文能力。
 
 ### 25.7 一个完整架构审计问题集
 
@@ -1516,9 +1658,9 @@ print(inspect_config(llama_like))
 
 如果再加入 64 experts、top-k=2，就要增加 capacity、router loss、expert parallel 和通信的审计线。一个配置拆解的结论必须停在证据允许的范围内。
 
-## 26. 架构选择的统一评估
+## 本章总结：架构选择的统一评估
 
-### 26.1 四本账
+### 四本账
 
 比较 attention、SSM、MoE 或不同 norm 时，至少维护四本账：
 
@@ -1527,13 +1669,13 @@ print(inspect_config(llama_like))
 3. 系统账：显存、带宽、kernel、并行、P95/P99；
 4. 风险账：训练失败、数据泄漏、能力回归、未知边界。
 
-只有四本账都改善，才可以把一个架构改动称为整体收益。
+先根据产品或研究目标定义四本账的优先级。若某些账变好、另一些变坏，应明确写出代价和目标权重；不能用单一指标把 trade-off 描述成无条件的整体收益。
 
-### 26.2 最小 ablation
+### 最小 ablation
 
 架构实验要固定数据、token budget、随机种子范围和评估协议，至少保留 dense baseline。SwiGLU 要匹配参数量或 FLOPs；GQA 要比较质量和缓存；MoE 要报告 activated parameters、通信和 drop；SSM/混合要加入精确检索任务。
 
-### 26.3 章节主线
+### 架构知识主线
 
 本部分的知识关系可以写成：
 
@@ -1608,3 +1750,19 @@ Q/K/V 路由
     https://arxiv.org/abs/2302.13971
 26. Hoffmann et al., Training Compute-Optimal Large Language Models：模型尺寸、数据和计算预算的平衡。
     https://arxiv.org/abs/2203.15556
+27. Ba, Kiros and Hinton, Layer Normalization：逐样本、逐层归一化定义。
+    https://arxiv.org/abs/1607.06450
+28. Nguyen and Salazar, Transformers without Tears：Pre-Norm 与 ScaleNorm 的特定机器翻译实验。
+    https://arxiv.org/abs/1910.05895
+29. Hendrycks and Gimpel, Gaussian Error Linear Units：GeLU 定义和原始实验范围。
+    https://arxiv.org/abs/1606.08415
+30. Zoph et al., ST-MoE：router z-loss 与稀疏专家训练稳定性。
+    https://arxiv.org/abs/2202.08906
+31. Kwon et al., Efficient Memory Management for Large Language Model Serving with PagedAttention：KV block 管理和 vLLM serving 系统。
+    https://arxiv.org/abs/2309.06180
+32. Geva et al., Transformer Feed-Forward Layers Are Key-Value Memories：特定模型上的 FFN 机制分析。
+    https://arxiv.org/abs/2012.14913
+33. Chen et al., Extending Context Window of Large Language Models via Positional Interpolation：RoPE 上下文扩展方法及对应实验。
+    https://arxiv.org/abs/2306.15595
+34. Peng et al., YaRN: Efficient Context Window Extension of Large Language Models：RoPE 扩展方案和论文实验范围。
+    https://arxiv.org/abs/2309.00071

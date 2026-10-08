@@ -23,6 +23,10 @@ Token ID：token 编号
 
 Byte Pair Encoding / BPE：字节对编码
 
+Unigram Language Model Tokenizer：基于 unigram 子词概率的分词器
+
+Token Fertility：词元密度 / 每字符词元数；需注明文本与 tokenizer 统计口径
+
 WordPiece：WordPiece 子词切分方法
 
 SentencePiece：SentencePiece 分词方法 / 工具
@@ -71,7 +75,7 @@ L2 Distance：L2 距离 / 欧氏距离
 
 Zero-Shot Classification：零样本分类
 
-Recall@K：Top-K 召回率
+Recall@K：前 K 条结果中召回的相关项占全部相关项的比例；多相关项任务按 gold 集合覆盖率计算。
 
 Linear Algebra：线性代数
 
@@ -3569,7 +3573,7 @@ Pairwise Ranking：成对排序
 
 Listwise Ranking：列表级排序
 
-Hit@k：前 k 命中率
+Hit@k：前 k 条结果是否至少包含一个相关项；不表示召回了全部相关项。
 
 Context Recall：上下文召回率
 
@@ -3589,7 +3593,7 @@ Access Control：访问控制
 
 Document Freshness：文档新鲜度
 
-Recall@k：前 k 召回率
+Recall@k：前 k 条结果中召回的相关项占全部相关项的比例；多相关项任务按 gold 集合覆盖率计算。
 
 Precision@k：前 k 精确率
 

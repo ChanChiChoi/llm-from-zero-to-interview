@@ -1608,7 +1608,7 @@
 
 23. 如何评估向量检索质量？
     考察点：recall@k、precision@k、MRR、nDCG、latency、下游质量。
-    回答框架：用标注 query-doc 数据评估 recall@k、precision@k、MRR、nDCG，同时看检索延迟、索引成本和下游 RAG 答案质量。
+    回答框架：用标注 query-doc 数据评估 Recall@k、Precision@k、MRR、nDCG 和检索延迟。Recall@k 按每个 query 的 gold 相关文档集合计算覆盖比例；Hit@k 只判断前 k 个结果是否至少命中一个相关文档。若一个 query 有多个 gold 文档，二者不能混用；无 gold 的 query 应单独标记，不进入召回率分母。还要看索引成本和下游 RAG 答案质量。
 
 24. RAG 检索不到正确文档怎么排查？
     考察点：入库、chunk、metadata、embedding、top-k、ANN、BM25、query rewrite。

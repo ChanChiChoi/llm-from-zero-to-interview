@@ -16,8 +16,8 @@
 4. InstructGPT
 5. Scaling Laws for Neural Language Models
 6. Chinchilla
-7. LoRA
-8. Direct Preference Optimization
+7. [LoRA: Low-Rank Adaptation of Large Language Models](https://arxiv.org/abs/2106.09685)
+8. [Direct Preference Optimization](https://arxiv.org/abs/2305.18290)
 9. FlashAttention
 10. CLIP
 11. PagedAttention / vLLM 相关论文与技术报告
@@ -28,12 +28,25 @@
 16. DeepSeek-R1 / GRPO / RLVR / DAPO 等 reasoning 后训练论文线
 17. vAttention / FlashInfer 等 inference serving 内存与 kernel 论文线
 18. GraphRAG 等结构化 RAG 论文线
+19. [Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks](https://arxiv.org/abs/2005.11401)：从参数化与非参数化记忆的结合理解 RAG；论文实验范围不等于任意生产检索系统的事实性保证。
 
 ## 核心方向
+
+### Tokenizer、数据与预训练
+
+1. [Neural Machine Translation of Rare Words with Subword Units](https://aclanthology.org/P16-1162/)：BPE 子词切分和开放词表的研究入口。
+2. [SentencePiece](https://aclanthology.org/D18-2012/) 与 [Subword Regularization](https://aclanthology.org/P18-1007/)：原始文本 tokenizer 接口、Unigram 和子词采样。
+3. [C4 / T5](https://arxiv.org/abs/1910.10683)、[The Pile](https://arxiv.org/abs/2101.00027) 与 [FineWeb](https://arxiv.org/abs/2406.17557)：不同规模和流程下的数据构造案例。
+4. [Deduplicating Training Data Makes Language Models Better](https://arxiv.org/abs/2107.06499)：去重、记忆与质量的论文实验；结论受其数据和评测设置约束。
+5. [The Stack v2 / StarCoder 2](https://arxiv.org/abs/2402.19173) 与 [BigCode Responsible AI](https://arxiv.org/abs/2308.07124)：代码语料、许可和治理资料。
+6. [Scaling Laws](https://arxiv.org/abs/2001.08361) 与 [Chinchilla](https://arxiv.org/abs/2203.15556)：模型规模、训练 token 和计算预算的经验研究。
+7. [Mixed Precision Training](https://arxiv.org/abs/1710.03740) 与 [A Study of BFLOAT16 for Deep Learning Training](https://arxiv.org/abs/1905.12322)：FP16 loss scaling 和 BF16 数值特性；论文实验不代表当前所有硬件的性能。
 
 ### 架构
 
 Transformer、GPT、LLaMA、Mistral、MoE、SSM、S4、Mamba、RWKV、RetNet、Hyena、Linear Attention、Attention + SSM 混合架构。
+
+可解释性入口：[Transformer Feed-Forward Layers Are Key-Value Memories](https://arxiv.org/abs/2012.14913)：阅读 FFN 的 key–value memory 视角时，应保留论文的特定模型与机制分析范围，不把它理解成神经元存储事实的定论。
 
 建议补读论文线：
 
@@ -44,9 +57,43 @@ Transformer、GPT、LLaMA、Mistral、MoE、SSM、S4、Mamba、RWKV、RetNet、H
 5. Hyena Hierarchy。
 6. Linear Transformers / Performer 等线性注意力路线。
 
+Transformer 核心机制入口：
+
+1. [Attention Is All You Need](https://arxiv.org/abs/1706.03762)：scaled dot-product attention、多头结构和正弦位置编码。
+2. [BERT](https://arxiv.org/abs/1810.04805)：WordPiece、双向 encoder 与 masked language modeling 的代表性实例。
+3. [SentencePiece](https://arxiv.org/abs/1808.06226)：从原始文本训练子词模型的 tokenizer 工具与模型入口。
+4. [RoFormer](https://arxiv.org/abs/2104.09864)：RoPE 的旋转位置机制。
+5. [ALiBi](https://arxiv.org/abs/2108.12409)：在 attention 分数中加入距离相关线性 bias 的位置方案。
+6. [RMSNorm](https://arxiv.org/abs/1910.07467) 与 [Pre-LN/Post-LN 分析](https://arxiv.org/abs/2002.04745)：归一化及深层 Transformer 梯度路径。
+7. [GQA](https://arxiv.org/abs/2305.13245)：共享 K/V heads 与 KV Cache 取舍。
+8. [Lost in the Middle](https://arxiv.org/abs/2307.03172)：长上下文中信息位置效应的研究实例。
+9. [Layer Normalization](https://arxiv.org/abs/1607.06450)、[ScaleNorm](https://arxiv.org/abs/1910.05895) 与 [GeLU](https://arxiv.org/abs/1606.08415)：归一化和激活的原始定义及实验范围。
+10. [Position Interpolation](https://arxiv.org/abs/2306.15595) 与 [YaRN](https://arxiv.org/abs/2309.00071)：RoPE 上下文扩展的代表性训练方案；结果受模型、训练预算和评测任务约束。
+11. [PagedAttention](https://arxiv.org/abs/2309.06180)：KV block 分配、缓存共享和 vLLM serving 系统。
+12. [Switch Transformers](https://arxiv.org/abs/2101.03961) 与 [ST-MoE](https://arxiv.org/abs/2202.08906)：top-1 路由、capacity、token dropping 和 router z-loss。
+
+这些论文的实验结论要按其模型、数据和评测设置阅读，不能直接当作所有现代 LLM 的配置或性能保证。
+
+### 长上下文、检索与 RAG
+
+1. [Position Interpolation](https://arxiv.org/abs/2306.15595)、[YaRN](https://arxiv.org/abs/2309.00071) 与 [LongLoRA](https://arxiv.org/abs/2309.12307)：位置扩展和长序列适配路线；评估要同时看目标长度、短任务回归和部署成本。
+2. [Lost in the Middle](https://arxiv.org/abs/2307.03172)、[LongBench](https://arxiv.org/abs/2308.14508) 与 [RULER](https://arxiv.org/abs/2404.06654)：分别研究位置效应和长上下文任务覆盖；needle 成绩不等于跨任务有效利用。
+3. [REALM](https://arxiv.org/abs/2002.08909)、[Dense Passage Retrieval](https://arxiv.org/abs/2004.04906) 与 [RAG](https://arxiv.org/abs/2005.11401)：检索增强语言模型的主要早期路线。
+4. [HNSW](https://arxiv.org/abs/1603.09320)、[FAISS](https://arxiv.org/abs/1702.08734)、[BEIR](https://arxiv.org/abs/2104.08663) 与 [MTEB](https://arxiv.org/abs/2210.07316)：近似检索系统和跨任务评估；目标语料仍要单独测过滤后召回和端到端质量。
+5. [MonoT5](https://arxiv.org/abs/2003.06713) 与 [ColBERT](https://arxiv.org/abs/2004.12832)：生成式精排与 late-interaction 检索设计。
+6. [ALCE](https://arxiv.org/abs/2305.14627)、[ARES](https://arxiv.org/abs/2311.09476) 与 [RAGTruth](https://arxiv.org/abs/2401.00396)：带引用生成、RAG 自动评估和不忠实回答分析。
+
 ### 训练
 
 Scaling Law、Chinchilla、数据配比、分布式训练、训练稳定性。
+
+建议补读论文线：
+
+1. [Scheduled Sampling](https://arxiv.org/abs/1506.03099) 与 [Huszár 对其目标的分析](https://arxiv.org/abs/1511.05101)：训练上下文/生成上下文差异及其方法争议。
+2. [Distilling the Knowledge in a Neural Network](https://arxiv.org/abs/1503.02531) 与 [Rethinking the Inception Architecture](https://arxiv.org/abs/1512.00567)：软目标蒸馏和 label smoothing 的早期研究入口。
+3. [Reconciling Modern Machine-Learning Practice and the Classical Bias–Variance Trade-Off](https://arxiv.org/abs/1812.11118) 与 [Deep Double Descent](https://arxiv.org/abs/1912.02292)：插值区间和不同复杂度轴上的双下降实验。
+4. [What Uncertainties Do We Need in Bayesian Deep Learning for Computer Vision?](https://arxiv.org/abs/1703.04977) 与 [On Calibration of Modern Neural Networks](https://arxiv.org/abs/1706.04599)：不确定性类型和分类校准；结论需按论文任务阅读。
+5. [Understanding the Difficulty of Training Deep Feedforward Neural Networks](https://proceedings.mlr.press/v9/glorot10a.html) 与 [On the Difficulty of Training Recurrent Neural Networks](https://arxiv.org/abs/1211.5063)：初始化尺度与梯度消失/爆炸问题。
 
 ### 对齐
 
@@ -54,11 +101,22 @@ InstructGPT、RLHF、DPO、Constitutional AI、RLAIF、KTO、ORPO。
 
 建议补读论文线：
 
-1. Direct Preference Optimization / DPO。
-2. KTO、ORPO、SimPO 等不显式训练 reward model 或不依赖 reference model 的偏好优化路线。
-3. DeepSeekMath / GRPO、DeepSeek-R1 和 DAPO 等 reasoning RL 与 RLVR 路线。
-4. Constitutional AI / RLAIF 与 AI feedback 相关路线。
-5. Reward overoptimization、reward hacking、scalable oversight 与偏好评估校准相关论文。
+1. [InstructGPT](https://arxiv.org/abs/2203.02155)：示范数据、偏好排序和 RLHF 的代表性研究；论文设置不代表所有对齐流程。
+2. [Direct Preference Optimization / DPO](https://arxiv.org/abs/2305.18290)：从 KL 约束下的偏好优化推导 pairwise 目标；阅读时区分论文目标、toy loss 与具体训练器的 mask/长度实现。
+3. KTO、ORPO、SimPO 等不显式训练 reward model 或不依赖 reference model 的偏好优化路线。
+4. DeepSeekMath / GRPO、DeepSeek-R1 和 DAPO 等 reasoning RL 与 RLVR 路线。
+5. Constitutional AI / RLAIF 与 AI feedback 相关路线。
+6. Reward overoptimization、reward hacking、scalable oversight 与偏好评估校准相关论文。
+
+### Reasoning 与 Test-Time Compute
+
+1. [Chain-of-Thought Prompting](https://arxiv.org/abs/2201.11903) 与 [Zero-shot Reasoners](https://arxiv.org/abs/2205.11916)：分别作为少样本和零样本分步提示的研究入口；提示效果不能外推为所有模型和任务上的稳定推理提升。
+2. [Language Models Do Not Always Say What They Think](https://arxiv.org/abs/2305.04388)：用干预研究检验可见 CoT 与模型答案之间的忠实性边界。
+3. [Self-Consistency Improves Chain of Thought Reasoning](https://arxiv.org/abs/2203.11171)：多路径采样、答案抽取和一致性聚合；结果依赖任务、采样和答案判定协议。
+4. [Training Verifiers to Solve Math Word Problems](https://arxiv.org/abs/2110.14168)、[Let's Verify Step by Step](https://arxiv.org/abs/2305.20050) 与 [PRM800K](https://github.com/openai/prm800k)：结果选择、过程监督和步骤级标注的研究/数据入口，需区分论文实验与本地 toy verifier。
+5. [Tree of Thoughts](https://arxiv.org/abs/2305.10601)、[Language Agent Tree Search](https://arxiv.org/abs/2310.04406) 与 [AlphaZero](https://arxiv.org/abs/1712.01815)：分别阅读 thought 搜索、Agent 环境反馈和策略/价值/MCTS 组合；具体状态、奖励和预算不能跨任务照搬。
+6. [Scaling LLM Test-Time Compute Optimally](https://arxiv.org/abs/2408.03314) 与 [Large Language Monkeys](https://arxiv.org/abs/2407.21787)：分析特定实验设置下的推理预算分配和重复采样收益；不能据此推断所有请求都应提高预算。
+7. [CodeRL](https://arxiv.org/abs/2207.01780) 与 [Teaching Large Language Models to Self-Debug](https://arxiv.org/abs/2304.05128)：分别阅读测试反馈驱动的代码生成训练和基于反馈的迭代修复；论文任务与评测设置不等于真实仓库代码维护。
 
 ### 推理优化
 
@@ -66,14 +124,15 @@ FlashAttention、PagedAttention、Speculative Decoding、量化论文。
 
 建议补读论文线：
 
-1. FlashAttention / FlashAttention-2 / FlashAttention-3。
-2. PagedAttention and vLLM。
+1. [FlashAttention](https://arxiv.org/abs/2205.14135) 与 [FlashAttention-2](https://arxiv.org/abs/2307.08691)：IO-aware attention、并行划分与负载调度；论文中的加速数据绑定具体 GPU、序列长度和 baseline。
+2. [PagedAttention / vLLM](https://arxiv.org/abs/2309.06180)：KV block 管理、请求生命周期和 serving 系统设计。
 3. vAttention：把动态 KV 显存管理放到虚拟内存 / 按需映射视角下理解 PagedAttention 的替代路线。
 4. FlashInfer：从 serving kernel、batching、attention backend 和框架集成角度理解推理性能优化。
-5. Speculative Decoding / Speculative Sampling。
-6. Medusa、EAGLE 等多 token 预测和推测解码路线。
-7. GPTQ、AWQ、SmoothQuant、KV Cache Quantization 等量化路线。
-8. [DFlash: Block Diffusion for Flash Speculative Decoding](https://arxiv.org/abs/2602.06036)：target hidden feature 的跨层融合、逐层 K/V 注入、block diffusion draft 与 target verification。
+5. [Speculative Decoding](https://arxiv.org/abs/2211.17192)：draft/target 接受与修正规则；若候选分布、采样处理或验证实现改变，需重新确认分布保证。
+6. [Medusa](https://arxiv.org/abs/2401.10774) 与 [EAGLE](https://arxiv.org/abs/2401.15077)：多预测头与隐藏状态 draft 路线，训练目标、候选树和部署成本各不相同。
+7. 量化路线包括 [GPTQ](https://arxiv.org/abs/2210.17323)、[AWQ](https://arxiv.org/abs/2306.00978)、[SmoothQuant](https://arxiv.org/abs/2211.10438) 和 KV Cache 专项的 [KIVI](https://arxiv.org/abs/2402.02750)；比较时要分清权重、激活和运行时缓存的量化对象。
+8. Serving 调度可对照 [Orca](https://www.usenix.org/conference/osdi22/presentation/yu)、[Sarathi-Serve](https://arxiv.org/abs/2403.02310) 与 [SGLang](https://arxiv.org/abs/2312.07104)：分别阅读迭代级调度、chunked prefill 与结构化生成/前缀复用。
+9. [DFlash: Block Diffusion for Flash Speculative Decoding](https://arxiv.org/abs/2602.06036)：target hidden feature 的跨层融合、逐层 K/V 注入、block diffusion draft 与 target verification。
 
 ### Agent、工具协议与 Coding Agent
 
@@ -87,6 +146,10 @@ ReAct、Toolformer、function calling、MCP、A2A、agent evaluation、coding ag
 4. Model Context Protocol 官方规范和 SDK 文档。
 5. Agent benchmark、tool-use benchmark 和 SWE-bench 相关资料。
 6. GraphRAG / RAPTOR / Agentic RAG 等结构化、多跳和多轮检索增强路线。
+7. [Gorilla](https://arxiv.org/abs/2305.15334)、[API-Bank](https://arxiv.org/abs/2304.08244) 与 [ToolLLM](https://arxiv.org/abs/2307.16789)：工具/API 选择、调用数据和评估基准。
+8. [Plan-and-Solve Prompting](https://arxiv.org/abs/2305.04091)、[Reflexion](https://arxiv.org/abs/2303.11366) 与 [Voyager](https://arxiv.org/abs/2305.16291)：规划、反馈更新和长程环境技能积累的不同研究设置。
+9. [Indirect Prompt Injection](https://arxiv.org/abs/2302.12173)：外部检索内容如何影响工具型应用的安全研究。
+10. [MemGPT](https://arxiv.org/abs/2310.08560)、[Generative Agents](https://arxiv.org/abs/2304.03442) 与 [LongMem](https://arxiv.org/abs/2306.07174)：运行时记忆、反思规划和长程上下文增强；不构成隐私或删除保证。
 
 ### AI Infra 与 Serving Engine
 
@@ -94,18 +157,35 @@ GPU 集群、分布式训练系统、LLM serving engine、调度、KV Cache 管�
 
 建议补读资料线：
 
-1. Megatron-LM、DeepSpeed、FSDP、Ray 等训练系统资料。
-2. vLLM、SGLang、TensorRT-LLM、TGI 等推理框架文档和源码导读。
-3. Kubernetes GPU 调度、NVIDIA GPU operator、MIG、NCCL 和集群网络资料。
-4. LLMOps、模型仓库、评估平台、实验追踪和 artifact 管理资料。
+1. 分布式训练与并行： [ZeRO](https://arxiv.org/abs/1910.02054)、[Megatron-LM 张量并行](https://arxiv.org/abs/1909.08053)、[GPipe](https://arxiv.org/abs/1811.06965)、[Sequence Parallel](https://arxiv.org/abs/2205.05198) 和 [Ring Attention](https://arxiv.org/abs/2310.01889)；配合 PyTorch DDP/FSDP 文档核对具体 API 与版本语义。
+2. Megatron-LM、DeepSpeed、FSDP、Ray 等训练系统资料。
+3. vLLM、SGLang、TensorRT-LLM、TGI 等推理框架文档和源码导读。
+4. Kubernetes GPU 调度、NVIDIA GPU operator、MIG、NCCL 和集群网络资料。
+5. LLMOps、模型仓库、评估平台、实验追踪和 artifact 管理资料。
 
 ### 多模态
 
-CLIP、Flamingo、BLIP、LLaVA、Stable Diffusion、DALL·E、Whisper、视频生成路线。
+1. 视觉对齐与 VLM： [ViT](https://arxiv.org/abs/2010.11929)、[ConvNeXt](https://arxiv.org/abs/2201.03545)、[CLIP](https://arxiv.org/abs/2103.00020)、[SigLIP](https://arxiv.org/abs/2303.15343)、[Flamingo](https://arxiv.org/abs/2204.14198)、[BLIP-2](https://arxiv.org/abs/2301.12597) 与 [LLaVA](https://arxiv.org/abs/2304.08485)。重点比较双编码器对比学习、查询压缩、交叉注意力和视觉 token 接入。
+2. 扩散生成： [DDPM](https://arxiv.org/abs/2006.11239)、[Latent Diffusion](https://arxiv.org/abs/2112.10752)、[DiT](https://arxiv.org/abs/2212.09748) 与 [SDXL](https://arxiv.org/abs/2307.01952)。
+3. 采样与条件控制： [Classifier-Free Guidance](https://arxiv.org/abs/2207.12598)、[DDIM](https://arxiv.org/abs/2010.02502)、[DPM-Solver](https://arxiv.org/abs/2206.00927) 和[扩散噪声 schedule 分析](https://arxiv.org/abs/2305.08891)。
+4. 生成评估： [FID](https://arxiv.org/abs/1706.08500) 与 [FVD](https://arxiv.org/abs/1812.01717)。两者依赖特征提取器和数据设定，不替代条件遵循、任务正确性和安全评估。
+5. 语音与视频： [Whisper](https://arxiv.org/abs/2212.04356)、[SoundStream](https://arxiv.org/abs/2107.03312)、[EnCodec](https://arxiv.org/abs/2210.13438)、[Video Diffusion Models](https://arxiv.org/abs/2204.03458)；Sora 的 2024 研究脉络可参阅[二手综述](https://arxiv.org/abs/2402.17177)，不以综述推断闭源内部架构。
 
 ### Safety 与 Interpretability
 
 Red Teaming、Mechanistic Interpretability、SAE、Model Editing、Unlearning、Privacy。
+
+### 后训练评估与公开基准
+
+1. [MMLU](https://arxiv.org/abs/2009.03300) 与 [MMLU-Pro](https://arxiv.org/abs/2406.01574)：知识与推理题目评测；注意题目版本、提示、选项格式和污染风险。
+2. [GSM8K](https://arxiv.org/abs/2110.14168) 与 [MATH](https://arxiv.org/abs/2103.03874)：数学文字题和竞赛数学基准；报告时应固定解析器、生成预算和答案判分规则。
+3. [HumanEval](https://arxiv.org/abs/2107.03374) 与 [MBPP](https://arxiv.org/abs/2108.07732)：代码生成任务集；分数依赖采样、测试执行和 pass@k 口径。
+4. [IFEval](https://arxiv.org/abs/2311.07911) 与 [LongBench](https://arxiv.org/abs/2308.14508)：分别覆盖可验证的指令遵循和多任务长上下文评估；两者都不能概括整个产品或所有语言、长度与工具任务。
+
+### 学习科学与知识迁移
+
+1. [Test-Enhanced Learning](https://doi.org/10.1111/j.1467-9280.2006.01693.x)：主动测试与重复学习对即时、延迟保持的影响；结论受论文任务和测试间隔限定。
+2. [Distributed practice in verbal recall tasks: A review and quantitative synthesis](https://doi.org/10.1037/0033-2909.132.3.354)：练习间隔与最终保持间隔对 verbal recall 的联合影响，不提供普遍适用的固定复习日历。
 
 ## 2026-08 Frontier Model Release 与技术报告入口
 

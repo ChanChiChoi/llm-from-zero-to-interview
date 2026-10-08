@@ -31,17 +31,18 @@ Chain-of-Thought、self-consistency、verifier、search、数学训练、代码�
 
 如果这些状态都被压缩在很短的输出中，某一步出错后，后续 token 没有稳定的中间表示可以依赖。Chain-of-Thought，简称 CoT，要求模型生成一串中间推理步骤，再给出最终答案。它的价值不是“文字越多越聪明”，而是为多步求解提供了可继续读取的工作空间。
 
-可以把两种策略写成：
+直接回答只需对问题进行一次条件生成；CoT 则先生成轨迹，再在轨迹条件下生成答案。两者的差异可以写成：
 
 ~~~math
-\hat y_{\mathrm{direct}} = f_\theta(x)
+p_\theta(y\mid x)
 ~~~
 
 ~~~math
-(\hat r,\hat y)_{\mathrm{cot}} = f_\theta(x;\,r)
+p_\theta(r,y\mid x)
+=p_\theta(r\mid x)\,p_\theta(y\mid x,r)
 ~~~
 
-其中 x 是问题，r 是中间推理轨迹，y 是最终答案。第二种策略允许模型在生成 y 之前多次更新上下文中的中间状态。
+其中 $x$ 是问题，$r$ 是模型在 $x$ 条件下生成的中间轨迹，$y$ 是最终答案。第一式描述直接生成答案的条件分布；第二式表示先生成 $r$，再在 $(x,r)$ 条件下生成 $y$。实际系统再按选定的解码策略从这些分布产生输出；$r$ 不是预先提供给模型的输入。CoT 允许模型在生成答案之前多次更新上下文中的中间状态。
 
 ### 87.2 为什么中间步骤可能有帮助
 
@@ -139,7 +140,10 @@ S_{\mathrm{int}}
 \sum_{i=1}^{N}
 \mathbf{1}
 [f(x_i,r_i)\ne f(x_i,r'_i)]
+\qquad N>0
 ~~~
+
+这里 $N$ 是完成原始/干预成对评估的样本数；分母为零时该指标记为 `N/A`。
 
 如果关键步骤被改错，答案仍然总是不变，说明模型可能没有依赖这段文本；如果随便修改无关步骤也改变答案，说明系统可能对表面扰动过敏。两种结果都不能单独证明忠实性，还需要结合隐藏状态、工具调用、答案正确性和多次重复实验。
 
@@ -191,30 +195,33 @@ import operator
 import re
 
 
-STEP_RE = re.compile(r"(-?\d+)\s*([+\-*/])\s*(-?\d+)\s*=\s*(-?\d+)")
+STEP_RE = re.compile(r"(-?\d+)\s*([-+*])\s*(-?\d+)\s*=\s*(-?\d+)")
 FINAL_RE = re.compile(r"(?:final|answer|答案)[:：]\s*([a-zA-Z0-9_-]+)", re.I)
-OPS = {"+": operator.add, "-": operator.sub, "*": operator.mul, "/": operator.truediv}
+OPS = {"+": operator.add, "-": operator.sub, "*": operator.mul}
 
 
 def final_answer(text):
     if not isinstance(text, str):
         raise TypeError("text must be a string")
     match = FINAL_RE.search(text)
-    if match:
-        return match.group(1).lower()
-    numbers = re.findall(r"-?\d+", text)
-    return numbers[-1] if numbers else ""
+    return match.group(1).lower() if match else ""
 
 
 def step_checks(text):
     if not isinstance(text, str):
         raise TypeError("text must be a string")
     checks = []
-    for left, op, right, stated in STEP_RE.findall(text):
+    equations = [part for part in re.split(r"[;,\n]", text) if "=" in part]
+    for equation in equations:
+        match = STEP_RE.search(equation)
+        if not match:
+            checks.append(None)
+            continue
+        left, op, right, stated = match.groups()
         try:
             expected = OPS[op](int(left), int(right))
             checks.append(expected == int(stated))
-        except (ValueError, ZeroDivisionError):
+        except ValueError:
             checks.append(False)
     return checks
 
@@ -265,12 +272,14 @@ validate_records(records)
 
 correct = 0
 invalid_but_correct = 0
+uncheckable_samples = 0
 changed = 0
 for row in records:
     answer_ok = final_answer(row["cot"]) == row["gold"]
     checks = step_checks(row["cot"])
     correct += answer_ok
-    invalid_but_correct += int(answer_ok and bool(checks) and not all(checks))
+    invalid_but_correct += int(answer_ok and any(check is False for check in checks))
+    uncheckable_samples += int(not checks or any(check is None for check in checks))
     changed += int(final_answer(row["cot"]) != final_answer(row["perturbed"]))
     print(row["id"], "answer_ok=", answer_ok, "steps=", checks)
 
@@ -278,6 +287,7 @@ answer_accuracy = None if not records else round(correct / len(records), 3)
 intervention_rate = None if not records else round(changed / len(records), 3)
 print("answer_accuracy=", "N/A" if answer_accuracy is None else answer_accuracy)
 print("invalid_but_correct=", invalid_but_correct)
+print("uncheckable_samples=", uncheckable_samples)
 print("intervention_rate=", "N/A" if intervention_rate is None else intervention_rate)
 ~~~
 
@@ -289,10 +299,11 @@ lucky_answer answer_ok= True steps= [False]
 no_formula answer_ok= True steps= []
 answer_accuracy= 1.0
 invalid_but_correct= 1
+uncheckable_samples= 1
 intervention_rate= 0.667
 ~~~
 
-这组数据故意让三条最终答案都正确，但其中一条算式错误，另一条没有可检查的算式。真实系统应把“没有步骤”与“步骤全部正确”区分开，而不是把空列表自动视为成功。
+这组数据故意让三条最终答案都正确，但其中一条整数算式错误，另一条没有可检查的算式。审计器只识别整数加、减、乘；等式中出现其他运算或未识别格式会标为不可检查，即使同一段中另有可识别算式，也会计入不可检查样本。真实系统应把“没有步骤”“步骤错误”“不可检查”和“步骤通过”分开统计，不能把空列表当作成功。
 
 ### 87.8 失效模式、练习与证据边界
 
@@ -426,9 +437,10 @@ w_i\mathbf{1}[a_i=a]
 
 ~~~math
 w_i = \exp(v_i/\tau_v)
+\qquad \tau_v>0
 ~~~
 
-tau_v 较小会让最高分路径占据主导，较大则更接近多数投票。模型自报置信度如果没有校准，不能直接当作可靠权重。
+$v_i$ 是第 $i$ 条路径的 verifier 分数，$\tau_v$ 是正温度。$\tau_v$ 较小会让高分路径占据更大权重，较大则让权重差异变小；当温度增大时，权重趋近相等。模型自报置信度如果没有校准，不能直接当作可靠权重。
 
 更强的流程是先让 verifier 检查每条路径，再选择最高分候选。它可以在少数路径正确而多数路径错误时救回答案，但引入了 verifier 的偏差、成本和攻击面。因此报告时要分别给出：
 
@@ -469,6 +481,7 @@ import re
 
 
 FINAL_RE = re.compile(r"(?:final|answer)[:：]\s*([0-9./%a-zA-Z_-]+)", re.I)
+TAU_V = 0.2
 
 
 def normalize(raw):
@@ -477,10 +490,14 @@ def normalize(raw):
     text = raw.strip().lower().rstrip("。,. ")
     try:
         if text.endswith("%"):
-            value = Fraction(text[:-1]) / 100
-        elif "/" in text:
-            value = Fraction(text)
-        elif re.fullmatch(r"-?\d+(\.\d+)?", text):
+            number = text[:-1]
+            if not re.fullmatch(r"-?(?:\d+(?:\.\d+)?|\.\d+)", number):
+                return text
+            value = Fraction(number) / 100
+        elif re.fullmatch(r"-?\d+/-?\d+", text):
+            numerator, denominator = text.split("/", 1)
+            value = Fraction(int(numerator), int(denominator))
+        elif re.fullmatch(r"-?(?:\d+(?:\.\d+)?|\.\d+)", text):
             value = Fraction(text)
         else:
             return text
@@ -500,12 +517,18 @@ def majority(rows):
     return Counter(answer(row["text"]) for row in rows).most_common(1)[0][0]
 
 
-def weighted(rows):
+def weighted(rows, tau_v=TAU_V):
+    if isinstance(tau_v, bool) or not isinstance(tau_v, (int, float)):
+        raise ValueError("tau_v must be numeric")
+    if not math.isfinite(tau_v) or tau_v <= 0:
+        raise ValueError("tau_v must be finite and positive")
     if not rows:
         return None
+    max_score = max(row["verifier"] for row in rows)
     scores = defaultdict(float)
     for row in rows:
-        scores[answer(row["text"])] += row["verifier"]
+        weight = math.exp((row["verifier"] - max_score) / tau_v)
+        scores[answer(row["text"])] += weight
     return max(scores.items(), key=lambda item: (item[1], item[0]))[0]
 
 
@@ -572,6 +595,8 @@ def validate_cases(cases):
 
 
 validate_cases(cases)
+assert normalize("not 4") != normalize("4")
+assert normalize("0.5") == normalize("1/2")
 
 for case in cases:
     maj = majority(case["rows"])
@@ -720,7 +745,7 @@ t_i^{\mathrm{err}}
 =\min\{t:p_{i,t}<\tau\}
 ~~~
 
-若不存在这样的 $t$，表示当前阈值下没有标出的错误，而不是证明整条路径一定正确；空集合的第一错步应记录为 `N/A`。
+这里要求 $0\le p_{i,t}\le1$、$0\le\tau\le1$ 且 $1\le t\le T_i$。若不存在这样的 $t$，表示当前阈值下没有标出的错误，而不是证明整条路径一定正确；空集合的第一错步应记录为 `N/A`。
 
 ### 89.4 生成、评价和搜索的组合
 
@@ -1401,14 +1426,14 @@ P_{\mathrm{hit}}(N,p)
 =1-(1-p)^N
 ~~~
 
-这里要求 $N\ge0$ 且 $0\le p\le1$；它描述候选集合 coverage。系统最终准确率还取决于 vote、verifier 或 search 是否选中正确候选：
+这里假设每次采样独立且命中概率相同，要求整数 $N\ge0$ 且 $0\le p\le1$；它描述候选集合 coverage。令 $A_{\mathrm{final}}$ 表示系统最终输出正确的概率。如果最终选择器只能从这 $N$ 个候选中选一个，且不能在选择后改写答案，那么最终答案正确事件必然包含于候选命中事件：
 
 ~~~math
 A_{\mathrm{final}}(N)
 \le P_{\mathrm{hit}}(N,p)
 ~~~
 
-当候选错误相关、模型系统性误解问题或 verifier 不可靠时，更多计算可能几乎不带来收益，甚至把错误选择做得更稳定。
+若系统能在候选池外另行生成、修复或调用工具得到答案，这个上界不再适用。候选错误相关或模型系统性误解问题时，上面的独立同分布公式也不适用；更多计算可能几乎不带来收益，甚至把错误选择做得更稳定。
 
 ### 91.4 边际收益和提前停止
 
@@ -1485,7 +1510,8 @@ RESULTS = {
     },
     "regulated": {
         "direct": (False, True, 1.0, 0.8),
-        "search": (True, False, 7.0, 5.0),
+        "search": (False, False, 7.0, 5.0),
+        "manual_review": (False, False, 0.2, 0.1),
     },
 }
 
@@ -1554,6 +1580,8 @@ def route(request, policy):
         return "search"
     if policy != "adaptive":
         raise ValueError(f"unknown policy: {policy}")
+    if request["risk"] == "high" and not request["verifiable"]:
+        return "manual_review"
     if request["risk"] == "high":
         return "search"
     if request["difficulty"] == "hard":
@@ -1585,6 +1613,7 @@ def evaluate(policy):
         "total_cost": round(cost, 2),
         "avg_latency": "N/A" if not total else round(latency / total, 2),
         "modes": dict(modes),
+        "manual_review_count": modes["manual_review"],
     }
 
 
@@ -1598,13 +1627,13 @@ print("cost_saved=", round(reports["fixed_high"]["total_cost"] - reports["adapti
 输出：
 
 ~~~text
-fixed_low= {'solve_rate': 0.25, 'violation_rate': 0.25, 'total_cost': 4.0, 'avg_latency': 0.8, 'modes': {'direct': 4}}
-fixed_high= {'solve_rate': 1.0, 'violation_rate': 0.0, 'total_cost': 25.0, 'avg_latency': 4.25, 'modes': {'search': 4}}
-adaptive= {'solve_rate': 1.0, 'violation_rate': 0.0, 'total_cost': 18.8, 'avg_latency': 2.9, 'modes': {'direct': 1, 'self_consistency': 1, 'search': 2}}
-cost_saved= 6.2
+fixed_low= {'solve_rate': 0.25, 'violation_rate': 0.25, 'total_cost': 4.0, 'avg_latency': 0.8, 'modes': {'direct': 4}, 'manual_review_count': 0}
+fixed_high= {'solve_rate': 0.75, 'violation_rate': 0.0, 'total_cost': 25.0, 'avg_latency': 4.25, 'modes': {'search': 4}, 'manual_review_count': 0}
+adaptive= {'solve_rate': 0.75, 'violation_rate': 0.0, 'total_cost': 12.0, 'avg_latency': 1.67, 'modes': {'direct': 1, 'self_consistency': 1, 'search': 1, 'manual_review': 1}, 'manual_review_count': 1}
+cost_saved= 13.0
 ~~~
 
-这个教学构造显示，固定低预算便宜但会在难题和高风险请求上失败，固定高预算稳定但浪费简单请求，自适应路由在示例中保留成功率并减少成本。真实系统需要用独立数据估计路由收益，不能把示例数字当作模型保证。
+这个教学构造显示，固定低预算便宜但会在难题和高风险请求上失败；固定高预算仍无法把不可独立验证的高风险结果变成已解决任务；自适应路由将该请求转人工复核，在本例里以相同自动求解率降低成本。真实系统应分别报告自动解决率、待复核数量、违规率和成本，并用独立数据评估路由收益；示例数字不是模型保证。
 
 ### 91.8 证据边界
 
@@ -1761,15 +1790,16 @@ A_b
 \max_j sim(x_i^{eval},x_j^{train})\ge\tau
 \right]
 ,
-\qquad N>0
+\qquad N=|D_{\mathrm{eval}}|>0,\quad |D_{\mathrm{train}}|>0
 ~~~
 
-它是风险估计，不是单凭相似度就能证明模型看过题目。泛化评估必须加入同构变体、数字替换、语言变化和新来源题目。
+其中 $D_{\mathrm{eval}}$ 是待审计评估样本，$D_{\mathrm{train}}$ 是非空训练候选集合，$\tau$ 是预先设定的相似度阈值。它是风险估计，不是单凭相似度就能证明模型看过题目。泛化评估必须加入同构变体、数字替换、语言变化和新来源题目。
 
 ### 92.7 一个过程感知的数据过滤器
 
 ~~~python
 from collections import Counter, defaultdict
+from fractions import Fraction
 import math
 import re
 
@@ -1816,8 +1846,29 @@ validate_candidates(CANDIDATES)
 
 
 def normalize(text):
-    numbers = re.findall(r"-?\d+(?:\.\d+)?", str(text))
-    return numbers[-1] if numbers else str(text).strip().lower()
+    if not isinstance(text, str):
+        raise TypeError("answer must be text")
+    value = " ".join(text.strip().lower().split()).rstrip("。.!?")
+    if not value:
+        raise ValueError("answer must be non-empty")
+    try:
+        if value.endswith("%") and re.fullmatch(r"-?(?:\d+(?:\.\d+)?|\.\d+)%", value):
+            number = Fraction(value[:-1]) / 100
+        elif re.fullmatch(r"-?\d+/-?\d+", value):
+            numerator, denominator = value.split("/", 1)
+            number = Fraction(int(numerator), int(denominator))
+        elif re.fullmatch(r"-?(?:\d+(?:\.\d+)?|\.\d+)", value):
+            number = Fraction(value)
+        else:
+            return value
+        return str(number.numerator) if number.denominator == 1 else f"{number.numerator}/{number.denominator}"
+    except (ValueError, ZeroDivisionError):
+        return value
+
+
+assert normalize("not 4") != normalize("4")
+assert normalize("0.5") == normalize("1/2")
+assert normalize("50%") == normalize("1/2")
 
 
 def final_ok(row):
@@ -1932,7 +1983,7 @@ p_{t+1}
 =1-\frac{\binom{n-c}{k}}{\binom{n}{k}}
 ~~~
 
-n 是采样总数，c 是通过测试的候选数，k 是实际允许检查的候选数；要求 n 不小于 k。这个量回答的是“候选池里至少有一个成功解的概率估计”，不是“系统一定会选中成功解”。如果生成器产生了正确程序，但选择器先挑了错误程序，实际用户成功率仍然可能很低。
+$n$、$c$、$k$ 均为整数，分别表示候选总数、通过测试的候选数和允许检查的候选数；定义域为 $n\ge1$、$0\le c\le n$、$1\le k\le n$。当 $n-c<k$ 时，分子按 $\binom{n-c}{k}=0$ 处理。这个无放回估计回答的是“从候选池抽查 $k$ 个时至少有一个通过测试的概率”，不是“系统一定会选中成功解”。如果生成器产生了正确程序，但选择器先挑了错误程序，实际用户成功率仍然可能很低。
 
 因此至少要同时记录：
 
@@ -2122,7 +2173,7 @@ attempt=2 passed=3/3 feedback=all tests passed
 ### 93.8 证据边界
 
 - [Evaluating Large Language Models Trained on Code](https://arxiv.org/abs/2107.03374)：HumanEval 与代码生成评估，支持以函数测试衡量候选程序表现。
-- [CodeRL](https://arxiv.org/abs/2302.00003)：利用执行反馈训练代码生成策略的研究。
+- [CodeRL](https://arxiv.org/abs/2207.01780)：利用测试反馈训练代码生成策略的研究。
 - [Teaching Large Language Models to Self-Debug](https://arxiv.org/abs/2304.05128)：讨论通过反馈和自我调试改善代码生成。
 
 这些论文支持“执行反馈可以成为代码推理信号”的研究判断，但不能推出某个模型在任意仓库、任意依赖和任意安全环境中都能自主修复代码。HumanEval 的函数级任务与生产软件的依赖、权限、并发和数据治理差异很大；部署结论必须来自目标代码库上的独立测试。

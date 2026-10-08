@@ -6,6 +6,8 @@
 
 这里的代码大多是教学实现。它们用于验证 token、shape、mask、残差和 loss 的关系，不代表某个厂商的生产 kernel 或完整训练系统。阅读代码时，应同时问两个问题：它在数学上想表达什么，和真实系统相比还缺少什么。
 
+本部分代码均按 CPU 教学示例设计：纯 Python 片段使用 Python 3.13+ 标准库，NumPy 片段使用 NumPy 2.4.6，PyTorch 片段使用 PyTorch 2.12.0（与仓库锁定版本一致）。除非注明“接续上一个代码块”，每个示例都应在干净进程中独立运行；示例说明会标出输入、输出、shape 和需要观察的结果。随机初始化只用于展示数据流，不代表可复现实验结论。
+
 ## 第 6 讲：Tokenization
 
 ### 从字符串到离散序列
@@ -56,7 +58,7 @@ Tokenizer 不是简单预处理，而是模型输入空间的定义。
 
 举例：
 
-如果一个中文句子被切成很多碎片，那么同样 8K context window 能装的中文内容会更少，训练和推理成本也更高。
+如果某个 tokenizer 把一批中文样本切成更多 token，那么在同一个 8K-token 窗口中可放入的字符会更少，按 token 计费或计算的成本也可能更高。这个结果依赖具体 tokenizer 和样本，不能概括成所有中文都比英文更费 token。
 
 ### Token、Vocabulary 和 Token ID
 
@@ -206,11 +208,11 @@ BPE 的优点：
 
 ### WordPiece 和 SentencePiece
 
-WordPiece 和 BPE 类似，也是一种子词方法。它通常根据 likelihood 改善选择合并，而不只是简单频率合并。BERT 系列模型常见 WordPiece。
+WordPiece 和 BPE 都能构造子词词表，但词表构造、合并评分和编码规则不同；不能把 WordPiece 概括成“只按最高频 pair 合并”。具体评分取决于实现。BERT 使用 WordPiece 词表，但 WordPiece 不是 BERT 专属算法。
 
-SentencePiece 更像一个 tokenizer 工具和方法集合。它的特点是可以直接从原始文本训练，不依赖预先分词，常用于多语言模型。
+SentencePiece 是直接处理原始文本的子词 tokenizer 工具，提供 BPE 和 Unigram 等模型，不要求先按空格切成词。它常用于多语言模型，但“SentencePiece”指工具及其模型接口，不是单一切分算法。
 
-SentencePiece 常把空格也当成普通符号处理，例如用特殊符号表示词边界。这对没有空格分词的语言更方便。
+SentencePiece 可以把空格编码成可见的边界标记（例如 `▁`），使 encode/decode 能处理词间空格；这对没有空格分词的语言也便于统一预处理。
 
 ### Byte-Level Tokenization
 
@@ -232,23 +234,22 @@ Byte-level tokenizer 从字节层面保证所有输入都可表示。
 
 大模型 tokenizer 里通常有特殊 token。
 
-常见包括：
+常见类型包括：
 
 ```text
 BOS: beginning of sequence
 EOS: end of sequence
 PAD: padding
 UNK: unknown
-system/user/assistant: chat role token
-tool: 工具调用相关 token
-image/audio: 多模态占位 token
+chat 格式中的 role/header/separator token：可能表示 system、user、assistant 或 tool 消息
+image/audio 等多模态 token：具体形式取决于模型和 tokenizer
 ```
 
-特殊 token 非常重要。它们不仅是文本片段，还定义了模型如何理解对话结构、何时停止、如何识别工具调用或多模态输入。
+特殊 token 的可见拼写不等于其 token id；`system`、`user`、`assistant` 等角色名也不一定各自对应独立特殊 token。具体协议要以模型的 tokenizer 和 chat template 为准。边界 token 会参与消息结构、停止条件、工具路由或多模态输入解析，误配可能改变模型行为。
 
 ### 一个最小 BPE 代码例子
 
-下面用纯 Python 写一个非常简化的 BPE 合并过程。它不是生产 tokenizer，只用于理解 BPE 的核心思想。
+下面用 Python 3.13+ 标准库写一个非常简化的 BPE 合并过程。输入是四个各出现一次的英文词；输出逐步打印最高频相邻片段和合并后的序列。它不实现真实 tokenizer 的词频加权、Unicode 处理或 encode/decode，只用于观察合并状态如何变化。
 
 ```python
 from collections import Counter
@@ -393,12 +394,12 @@ Tokenizer 不是一次性的字符串预处理，而是模型输入空间的一�
 
 可以把 token 成本粗略写成：
 
-~~~math
+```math
 C_{\mathrm{token}}
 \approx N_{\mathrm{input}}c_{\mathrm{in}}
 +N_{\mathrm{output}}c_{\mathrm{out}}
 +N_{\mathrm{cached}}c_{\mathrm{cache}}
-~~~
+```
 
 N 的定义必须绑定同一 tokenizer。若中文文本比英文文本产生更多 token，context window、训练吞吐和服务价格都会受到影响，这不是语言本身的质量判断，而是离散化方案的工程结果。
 
@@ -482,23 +483,23 @@ Token embedding 是把离散 token id 映射成连续向量的过程。
 
 假设：
 
-~~~math
+```math
 V=|\mathcal{V}|,\qquad d=d_{\mathrm{model}}
-~~~
+```
 
 那么 embedding matrix 的形状是：
 
-~~~math
+```math
 [V,d]
-~~~
+```
 
 每一行对应一个 token 的向量表示。
 
 如果 token id 是 `i`，那么它的 embedding 就是：
 
-~~~math
+```math
 E_i
-~~~
+```
 
 例如：
 
@@ -563,6 +564,8 @@ Embedding matrix 是模型参数的一部分。
 
 ### 一个最小 PyTorch 例子
 
+输入是 `input_ids:[2,4]`，输出 embedding 为 `[2,4,768]`；随机初始化仅用于观察查表 shape，不代表训练后的语义空间。依赖 PyTorch 2.12.0，CPU 可运行。
+
 ```python
 import torch
 import torch.nn as nn
@@ -588,7 +591,7 @@ print(outputs.shape)  # [2, 4, 768]
 
 ### 为什么需要位置编码
 
-Self-attention 本身对输入顺序不敏感。
+在没有位置特征、也没有顺序 mask 时，self-attention 对排列是等变的：交换输入 token 后，输出只会按同样方式交换，机制本身无法判断原序列中的先后关系。
 
 如果没有位置信息，Transformer 看到：
 
@@ -614,21 +617,21 @@ you love I
 
 假设最大长度是 `max_seq_len`，hidden size 是 `d`，那么 position embedding matrix 形状是：
 
-~~~math
+```math
 [T_{\max},d]
-~~~
+```
 
 第 `t` 个位置对应：
 
-~~~math
+```math
 P_t
-~~~
+```
 
 输入表示通常是：
 
-~~~math
+```math
 h_t=E_{x_t}+P_t
-~~~
+```
 
 优点：
 
@@ -647,13 +650,13 @@ Transformer 原论文使用 sinusoidal positional encoding。
 
 它不是学习出来的参数，而是用固定函数生成：
 
-~~~math
+```math
 \mathrm{PE}(p,2i)=\sin\left(\frac{p}{10000^{2i/d}}\right)
-~~~
+```
 
-~~~math
+```math
 \mathrm{PE}(p,2i+1)=\cos\left(\frac{p}{10000^{2i/d}}\right)
-~~~
+```
 
 其中 $p$ 是位置编号，$i$ 是维度对编号，$d$ 是 hidden size。
 
@@ -667,7 +670,7 @@ Transformer 原论文使用 sinusoidal positional encoding。
 缺点：
 
 1. 不一定最适合现代 LLM。
-2. 实践中很多模型改用 RoPE、ALiBi 或其他方法。
+2. 现代架构也会采用其他位置方案。RoPE 把位置作用到 Q/K；ALiBi 则在 attention logits 中加入与相对距离相关的线性 bias。两者都改变位置信息进入 attention 的路径，细节见 [RoPE 与长上下文](#第-14-讲rope-与长上下文) 和第二册的架构进阶内容。
 
 ### 相对位置思想
 
@@ -706,11 +709,17 @@ RoPE 是现代 LLM 常见的位置编码方法。
 1. token embedding 本质是按 token id 查表。
 2. 位置编码可以和 token embedding 相加，让同一个 token 在不同位置有不同输入表示。
 
+输入 `input_ids:[4]`、词表大小 `6`、hidden size `4`；输出 token embedding、位置编码和相加后向量均为 `[4,4]`。依赖 NumPy 2.4.6，随机种子固定为 0；运行后应观察同一 id 在位置 0 和 2 的查表向量相同，加位置编码后不同。
+
 ```python
 import numpy as np
 
 
 def sinusoidal_position_encoding(seq_len, hidden_size):
+    if isinstance(seq_len, bool) or not isinstance(seq_len, int) or seq_len < 0:
+        raise ValueError("seq_len must be a non-negative integer")
+    if isinstance(hidden_size, bool) or not isinstance(hidden_size, int) or hidden_size <= 0:
+        raise ValueError("hidden_size must be a positive integer")
     positions = np.arange(seq_len)[:, None]
     dims = np.arange(hidden_size)[None, :]
     angle_rates = 1.0 / (10000 ** (2 * (dims // 2) / hidden_size))
@@ -750,15 +759,15 @@ print(inputs[0], inputs[2])
 
 输出层通常是：
 
-~~~math
+```math
 \ell=hW_{\mathrm{out}}^T
-~~~
+```
 
 其中 `output_weight` 形状也是：
 
-~~~math
+```math
 [V,d]
-~~~
+```
 
 很多模型会让输入 embedding matrix 和输出层 weight 共享参数，叫 weight tying。
 
@@ -816,10 +825,10 @@ Token embedding 的优点：
 
 Embedding 的核心不是把 token id 当成一个有大小关系的数字，而是从可训练矩阵中按行查出向量。若词表大小为 V，模型宽度为 d，则：
 
-~~~math
+```math
 E\in\mathbb{R}^{V\times d},\qquad
 X_{\mathrm{token}}=\mathrm{Lookup}(\mathrm{input\_ids},E)
-~~~
+```
 
 input_ids 的形状为 [B,T] 时，查表结果为 [B,T,d]。这一步通常没有跨位置的信息混合；同一个 token id 在不同上下文和不同位置的初始 embedding 可以相同，经过 attention、MLP 和位置处理后才会形成动态表示。
 
@@ -829,10 +838,10 @@ input_ids 的形状为 [B,T] 时，查表结果为 [B,T,d]。这一步通常没�
 
 语言模型输出 logits 时，通常需要一个从 hidden size 到词表大小的线性映射：
 
-~~~math
+```math
 L=HW_{\mathrm{out}}^T,\qquad
 W_{\mathrm{out}}\in\mathbb{R}^{V\times d}
-~~~
+```
 
 输入 embedding 和输出矩阵可以共享参数，即 weight tying。它能减少参数，并让输入 token 表示与输出分类空间使用同一组向量，但不是所有架构都必须共享。若新增 token，必须同步检查词表、输入 embedding、输出 head、权重共享关系、初始化和 optimizer 参数组。
 
@@ -1097,21 +1106,22 @@ The book that I borrowed from the library yesterday was fascinating.
 
 ### Self-Attention 的代价
 
-Self-attention 的主要代价是复杂度。
+Self-attention 的主要代价来自 token 两两交互。
 
-如果序列长度是 `T`，每个 token 都要和其他 token 计算关系，所以 attention score 矩阵大小是：
+对单个 head、单条序列，attention score 矩阵大小是：
 
-~~~math
+```math
 [T,T]
-~~~
+```
 
-计算和显存复杂度大致是：
+矩阵存储量与 `T²` 成正比；若 head dimension 为 `d`，计算 QKᵀ 和 AV 的算术量与 `T²d` 成正比：
 
-~~~math
-O(T^2)
-~~~
+```math
+\mathrm{score\ storage}=O(T^2),\qquad
+\mathrm{attention\ compute}=O(T^2d)
+```
 
-这就是长上下文困难的重要原因之一。
+批量和多头还会带来相应倍数。优化 kernel 可以避免把完整 score 矩阵写入显存，但不会因此消除标准 dense attention 的 token 两两交互计算。这是长上下文困难的重要原因之一。
 
 后面的 FlashAttention、稀疏 attention、长上下文方法，都在尝试缓解这个问题。
 
@@ -1123,15 +1133,15 @@ GPT 是自回归模型，生成第 `t` 个 token 时不能看到未来 token。
 
 也就是说，第 `t` 个位置只能关注：
 
-~~~math
+```math
 1,2,\ldots,t
-~~~
+```
 
 不能关注：
 
-~~~math
+```math
 t+1,t+2,\ldots
-~~~
+```
 
 这通过 causal mask 实现。
 
@@ -1254,33 +1264,33 @@ X: [B, T, d_model]
 
 其中：
 
-~~~math
+```math
 B=\mathrm{batch\ size},\qquad T=\mathrm{sequence\ length},\qquad d_{\mathrm{model}}=\mathrm{hidden\ size}
-~~~
+```
 
 Self-attention 会通过三个线性变换得到 Q、K、V：
 
-~~~math
+```math
 Q=XW_Q
-~~~
+```
 
-~~~math
+```math
 K=XW_K
-~~~
+```
 
-~~~math
+```math
 V=XW_V
-~~~
+```
 
 如果单头 attention 的 head dimension 是 `d_k`，那么：
 
-~~~math
+```math
 W_Q:[d_{\mathrm{model}},d_k],\qquad W_K:[d_{\mathrm{model}},d_k],\qquad W_V:[d_{\mathrm{model}},d_v]
-~~~
+```
 
-~~~math
+```math
 Q:[B,T,d_k],\qquad K:[B,T,d_k],\qquad V:[B,T,d_v]
-~~~
+```
 
 通常 `d_k = d_v`。
 
@@ -1288,9 +1298,9 @@ Q:[B,T,d_k],\qquad K:[B,T,d_k],\qquad V:[B,T,d_v]
 
 标准公式：
 
-~~~math
+```math
 \mathrm{Attention}(Q,K,V)=\mathrm{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V
-~~~
+```
 
 分步骤看：
 
@@ -1303,47 +1313,47 @@ Q:[B,T,d_k],\qquad K:[B,T,d_k],\qquad V:[B,T,d_v]
 
 对单头 attention：
 
-~~~math
+```math
 Q:[B,T,d_k],\qquad K:[B,T,d_k],\qquad V:[B,T,d_v]
-~~~
+```
 
 计算 attention scores：
 
-~~~math
+```math
 S=QK^T
-~~~
+```
 
 shape：
 
-~~~math
+```math
 [B,T,d_k]\times[B,d_k,T]\to[B,T,T]
-~~~
+```
 
 `scores[b, i, j]` 表示第 `i` 个 token 对第 `j` 个 token 的关注分数。
 
 softmax 后：
 
-~~~math
+```math
 A:[B,T,T]
-~~~
+```
 
 再乘 V：
 
-~~~math
+```math
 [B,T,T]\times[B,T,d_v]\to[B,T,d_v]
-~~~
+```
 
 输出 shape：
 
-~~~math
+```math
 [B,T,d_v]
-~~~
+```
 
 ### 为什么使用 QK^T
 
 $QK^T$ 是在计算 query 和 key 的匹配程度。
 
-点积越大，说明两个向量方向越相似，当前 token 越应该关注对应 token。
+点积越大通常会提高该 key 对应的 softmax 权重，但点积同时受向量方向和范数影响；它不是归一化后的余弦相似度。最终权重还取决于同一 query 下其他 key 的分数。
 
 直觉：
 
@@ -1355,7 +1365,7 @@ Q · K: 我想找的东西和你的索引匹配程度
 
 ### 为什么除以 sqrt(d_k)
 
-如果 $d_k$ 很大，点积 $Q\cdot K$ 的方差会变大。
+如果 $d_k$ 很大，点积 $Q\cdot K$ 的方差通常会随维度增大；这一解释依赖各维近似独立、均值接近 0 且方差受控的假设。
 
 分数太大时，softmax 会变得非常尖锐：
 
@@ -1369,13 +1379,29 @@ Q · K: 我想找的东西和你的索引匹配程度
 
 这就是 scaled dot-product attention 中 “scaled” 的含义。
 
+#### 手算一个两 key 的 attention 输出
+
+取一个 query `q=(1,0)`，两个 key 为 `k_1=(1,0)`、`k_2=(0,1)`，对应的 value 为 `v_1=(2,0)`、`v_2=(0,4)`。这里 `d_k=2`，所以缩放后的分数为：
+
+```math
+qK^T/\sqrt{2}=[1/\sqrt{2},0]\approx[0.7071,0]
+```
+
+对两个分数做 softmax，权重约为 `[0.6698,0.3302]`；加权求和得到：
+
+```math
+0.6698v_1+0.3302v_2\approx(1.3395,1.3208)
+```
+
+这个数值例子只有一个 query 和两个 key，用来核对“分数—归一化权重—value 汇总”三步。真实模型会对 batch、多个 head 和整段序列并行执行同样的数据流。
+
 ### Mask 如何加入
 
 对于 causal LM，不能看到未来 token。通常会在 softmax 前对未来位置加一个很大的负数：
 
-~~~math
+```math
 S=S+M
-~~~
+```
 
 这里 $S$ 是 attention scores，$M$ 是 mask 矩阵。未来位置通常填一个很大的负数，例如 `-1e9`，softmax 后概率会接近 0。
 
@@ -1391,21 +1417,46 @@ softmax 后这些位置概率接近 0。
 
 ### PyTorch shape 对照
 
-下面的 PyTorch 代码主要用于对照真实工程里的 shape 和 mask 写法。它不是为了隐藏内部机制；如果想看 attention 的核心计算细节，重点看后面的 NumPy demo。
+下面的 PyTorch 代码使用 CPU 张量，输入 `q/k:[B,T,d_k]`、`v:[B,T,d_v]`，输出为 `[B,T,d_v]` 和 `[B,T,T]` 权重。自定义函数把布尔 `allowed_mask=True` 解释为“允许访问”；示例会检查形状、有限值和全屏蔽行。运行后应看到输出 `[2,4,8]`、权重 `[2,4,4]`，以及未来位置权重为零。
 
 ```python
 import math
 import torch
 
 
-def scaled_dot_product_attention(q, k, v, mask=None):
+def scaled_dot_product_attention(q, k, v, allowed_mask=None):
     # q, k: [B, T, d_k]
     # v:    [B, T, d_v]
+    if q.ndim != 3 or k.ndim != 3 or v.ndim != 3:
+        raise ValueError("q, k, and v must have shape [B, T, D]")
+    if q.size(0) != k.size(0) or q.size(0) != v.size(0):
+        raise ValueError("q, k, and v must have the same batch size")
+    if k.size(1) != v.size(1) or q.size(-1) != k.size(-1):
+        raise ValueError("key/value lengths and query/key widths must match")
+    if q.size(1) == 0 or k.size(1) == 0 or q.size(-1) == 0 or v.size(-1) == 0:
+        raise ValueError("sequence lengths and feature widths must be non-zero")
+    if not all(t.is_floating_point() for t in (q, k, v)):
+        raise TypeError("q, k, and v must be floating-point tensors")
+    if len({t.dtype for t in (q, k, v)}) != 1 or len({t.device for t in (q, k, v)}) != 1:
+        raise ValueError("q, k, and v must use the same dtype and device")
+    if not all(torch.isfinite(t).all() for t in (q, k, v)):
+        raise ValueError("q, k, and v must contain only finite values")
+
     d_k = q.size(-1)
     scores = q @ k.transpose(-2, -1) / math.sqrt(d_k)  # [B, T, T]
 
-    if mask is not None:
-        scores = scores.masked_fill(mask == 0, float("-inf"))
+    if allowed_mask is not None:
+        if allowed_mask.dtype != torch.bool:
+            raise TypeError("allowed_mask must be a boolean tensor")
+        if allowed_mask.device != q.device:
+            raise ValueError("allowed_mask must be on the same device as q")
+        try:
+            allowed_mask = torch.broadcast_to(allowed_mask, scores.shape)
+        except RuntimeError as exc:
+            raise ValueError("allowed_mask must broadcast to [B, T_q, T_k]") from exc
+        if not allowed_mask.any(dim=-1).all():
+            raise ValueError("every query row must have at least one allowed key")
+        scores = scores.masked_fill(~allowed_mask, float("-inf"))
 
     weights = torch.softmax(scores, dim=-1)             # [B, T, T]
     output = weights @ v                                # [B, T, d_v]
@@ -1420,29 +1471,41 @@ v = torch.randn(B, T, d)
 output, weights = scaled_dot_product_attention(q, k, v)
 print(output.shape)   # [2, 4, 8]
 print(weights.shape)  # [2, 4, 4]
+
+causal = torch.tril(torch.ones(T, T, dtype=torch.bool))
+causal_output, causal_weights = scaled_dot_product_attention(
+    q, k, v, allowed_mask=causal
+)
+assert torch.count_nonzero(torch.triu(causal_weights, diagonal=1)) == 0
+try:
+    scaled_dot_product_attention(q, k, v, allowed_mask=torch.zeros_like(causal))
+except ValueError as exc:
+    print("all-masked row rejected:", exc)
 ```
 
 ### Causal Mask 代码
 
 ```python
-T = 4
-causal_mask = torch.tril(torch.ones(T, T)).unsqueeze(0)  # [1, T, T]
+import torch
 
-output, weights = scaled_dot_product_attention(q, k, v, mask=causal_mask)
+T = 4
+causal_mask = torch.tril(torch.ones(T, T, dtype=torch.bool))  # [T, T], True = allowed
 print(causal_mask)
 ```
 
-mask 形状可以 broadcast 到 `[B, T, T]`。
+这个独立片段只生成可见性矩阵，不依赖前一个代码块中的 `q/k/v`。它可 broadcast 到自定义 attention helper 的 `[B,T,T]` scores；传给 `nn.MultiheadAttention` 时要注意该 API 对布尔 mask 的约定相反，`True` 表示屏蔽。
 
 ### 用 NumPy 从零实现 Attention
 
-下面这个 demo 演示 scaled dot-product attention 的完整数据流，包括 softmax、加权求和和 causal mask。
+下面这个 demo 使用 NumPy 2.4.6 和固定随机种子。输入 `q/k/v:[T,d]`，输出 attention 结果和 `[T,T]` 权重；它检查空序列、shape 不匹配和非有限值，并打印 full/causal 权重矩阵供逐行核对。代码是单头、单序列的教学实现。
 
 ```python
 import numpy as np
 
 
 def softmax(x, axis=-1):
+    if x.size == 0 or not np.isfinite(x).all():
+        raise ValueError("softmax input must be non-empty and finite")
     x = x - x.max(axis=axis, keepdims=True)
     exp_x = np.exp(x)
     return exp_x / exp_x.sum(axis=axis, keepdims=True)
@@ -1450,8 +1513,18 @@ def softmax(x, axis=-1):
 
 def attention(q, k, v, causal=False):
     # q, k, v: [T, d]
+    if q.ndim != 2 or k.ndim != 2 or v.ndim != 2:
+        raise ValueError("q, k, and v must have shape [T, D]")
+    if q.shape[0] == 0 or k.shape[0] == 0 or q.shape[1] == 0:
+        raise ValueError("sequence lengths and query/key widths must be non-zero")
+    if q.shape[0] != k.shape[0] or k.shape[0] != v.shape[0]:
+        raise ValueError("this self-attention demo requires equal sequence lengths")
+    if q.shape[1] != k.shape[1] or not all(np.isfinite(t).all() for t in (q, k, v)):
+        raise ValueError("feature widths must match and inputs must be finite")
     d_k = q.shape[-1]
     scores = q @ k.T / np.sqrt(d_k)  # [T, T]
+    if not np.isfinite(scores).all():
+        raise ValueError("attention scores overflowed to a non-finite value")
 
     if causal:
         mask = np.triu(np.ones_like(scores), k=1).astype(bool)
@@ -1480,6 +1553,11 @@ print("full attention weights:")
 print(np.round(full_weights, 3))
 print("causal attention weights:")
 print(np.round(causal_weights, 3))
+
+try:
+    attention(q[:0], k[:0], v[:0])
+except ValueError as exc:
+    print("empty sequence rejected:", exc)
 ```
 
 观察 `causal attention weights` 的右上角：当前位置不能关注未来 token，所以对应概率接近 0。
@@ -1490,21 +1568,21 @@ print(np.round(causal_weights, 3))
 
 计算复杂度大致是：
 
-~~~math
+```math
 O(T^2d)
-~~~
+```
 
 显存复杂度主要来自 attention weights：
 
-~~~math
+```math
 O(T^2)
-~~~
+```
 
 这就是为什么长上下文很贵。
 
 如果序列长度从 4K 增加到 8K，attention matrix 大小约变成 4 倍。
 
-下面用一个很短的代码把这个数量级算出来：
+下面的标准库代码输入四个序列长度，输出每条序列一个 `[T,T]` FP16 score 矩阵的理想化大小。它忽略 batch、head、反向状态和其他激活；例如 `T=8192` 时这一张矩阵是 `128 MiB`，不是整个模型的显存需求。
 
 ```python
 for seq_len in [1024, 2048, 4096, 8192]:
@@ -1559,9 +1637,9 @@ Causal attention 是 GPT 类模型使用的 attention。
 
 第 `i` 个 token 只能关注：
 
-~~~math
+```math
 1,\ldots,i
-~~~
+```
 
 优点：
 
@@ -1641,23 +1719,23 @@ Linear attention 试图把 attention 的复杂度从 $O(T^2)$ 降到 $O(T)$。
 
 标准 attention 的瓶颈是：
 
-~~~math
+```math
 \mathrm{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V
-~~~
+```
 
 linear attention 通常通过 kernel trick 或特征映射，把计算顺序改写，避免显式构造 `[T, T]` attention matrix。
 
 非常粗略地说，它可能把某类 attention 写成：
 
-~~~math
+```math
 \mathrm{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V
-~~~
+```
 
 近似或改造成：
 
-~~~math
+```math
 \phi(Q)\left(\phi(K)^T V\right)
-~~~
+```
 
 这样可以先聚合 $K$ 和 $V$，再和 $Q$ 结合。这个式子只是说明“改变计算顺序”的示意，不是所有 linear attention 的统一定义；实际方法通常还需要归一化项，causal 版本还要维护随位置递推的状态。因此，不能只凭这一个式子断言它与 softmax attention 完全等价。
 
@@ -1768,33 +1846,33 @@ FlashAttention 的核心是 IO 优化，通常不是通过牺牲 attention 数�
 
 给定
 
-~~~math
+```math
 X\in\mathbb{R}^{B\times T\times d_{\mathrm{model}}}
-~~~
+```
 
 单头投影产生：
 
-~~~math
+```math
 Q=XW_Q,\qquad K=XW_K,\qquad V=XW_V
-~~~
+```
 
 若 head dimension 分别为 d_k 和 d_v，则：
 
-~~~math
+```math
 Q,K\in\mathbb{R}^{B\times T\times d_k},
 \qquad
 V\in\mathbb{R}^{B\times T\times d_v}
-~~~
+```
 
 分数矩阵和输出依次为：
 
-~~~math
+```math
 S=\frac{QK^T}{\sqrt{d_k}}\in\mathbb{R}^{B\times T\times T},
 \qquad
 A=\mathrm{softmax}(S+M),
 \qquad
 Y=AV\in\mathbb{R}^{B\times T\times d_v}
-~~~
+```
 
 S[b,i,j] 表示位置 i 对位置 j 的匹配分数；M 在允许位置为 0，在禁止位置为负无穷或等价的大负值。mask 必须在 softmax 前加入，否则归一化后的权重和会被破坏。
 
@@ -1918,21 +1996,21 @@ X: [B, T, d_model]
 
 有：
 
-~~~math
+```math
 n_{\mathrm{heads}}=h,\qquad d_{\mathrm{head}}=d_h,\qquad d=h\cdot d_h
-~~~
+```
 
 其中 `d` 表示 `d_model`，`d_h` 表示单个 head 的维度。
 
 通常先用线性层得到 Q、K、V：
 
-~~~math
+```math
 Q=XW_Q,
 \qquad
 K=XW_K,
 \qquad
 V=XW_V
-~~~
+```
 
 如果投影后仍是 `d_model` 维：
 
@@ -1948,9 +2026,9 @@ Q, K, V: [B, T, d_model]
 
 每个 head 独立做 attention：
 
-~~~math
+```math
 H_i=\mathrm{Attention}(Q_i,K_i,V_i)
-~~~
+```
 
 得到：
 
@@ -1966,27 +2044,27 @@ heads: [B, h, T, d_head]
 
 最后经过 output projection：
 
-~~~math
+```math
 O=H_{\mathrm{concat}}W_O
-~~~
+```
 
 ### 公式
 
 Multi-Head Attention 可以写成：
 
-~~~math
+```math
 H_i=\mathrm{Attention}(XW_Q^i,XW_K^i,XW_V^i)
-~~~
+```
 
-~~~math
+```math
 \mathrm{MHA}(X)=\mathrm{Concat}(H_1,\ldots,H_h)W_O
-~~~
+```
 
 其中每个 head 有自己的 `W_Q^i, W_K^i, W_V^i`。
 
 ### PyTorch 最小实现（第 10 讲）
 
-下面是一个简化版 MHA，只用于理解 shape。
+下面是一个简化版 MHA，只用于理解 shape。输入为 `x:[B,T,d_model]`，可选布尔 `allowed_mask` 中 `True` 表示允许访问；输出仍为 `[B,T,d_model]`。CPU 示例使用 `B=2,T=4,d_model=32,h=4`，预期打印 `[2,4,32]`；不含 RoPE、KV Cache 或生产 kernel。
 
 ```python
 import math
@@ -1997,7 +2075,12 @@ import torch.nn as nn
 class MultiHeadAttention(nn.Module):
     def __init__(self, d_model, num_heads):
         super().__init__()
-        assert d_model % num_heads == 0
+        if isinstance(d_model, bool) or not isinstance(d_model, int) or d_model <= 0:
+            raise ValueError("d_model must be a positive integer")
+        if isinstance(num_heads, bool) or not isinstance(num_heads, int) or num_heads <= 0:
+            raise ValueError("num_heads must be a positive integer")
+        if d_model % num_heads != 0:
+            raise ValueError("d_model must be divisible by num_heads")
         self.d_model = d_model
         self.num_heads = num_heads
         self.head_dim = d_model // num_heads
@@ -2007,8 +2090,10 @@ class MultiHeadAttention(nn.Module):
         self.v_proj = nn.Linear(d_model, d_model)
         self.out_proj = nn.Linear(d_model, d_model)
 
-    def forward(self, x, mask=None):
+    def forward(self, x, allowed_mask=None):
         # x: [B, T, d_model]
+        if x.ndim != 3 or x.size(-1) != self.d_model or x.size(1) == 0:
+            raise ValueError("x must be non-empty with shape [B, T, d_model]")
         B, T, _ = x.shape
 
         q = self.q_proj(x)
@@ -2022,8 +2107,16 @@ class MultiHeadAttention(nn.Module):
 
         scores = q @ k.transpose(-2, -1) / math.sqrt(self.head_dim)  # [B, h, T, T]
 
-        if mask is not None:
-            scores = scores.masked_fill(mask == 0, float("-inf"))
+        if allowed_mask is not None:
+            if allowed_mask.dtype != torch.bool or allowed_mask.device != x.device:
+                raise ValueError("allowed_mask must be boolean and on the same device as x")
+            try:
+                allowed_mask = torch.broadcast_to(allowed_mask, scores.shape)
+            except RuntimeError as exc:
+                raise ValueError("allowed_mask must broadcast to [B, h, T, T]") from exc
+            if not allowed_mask.any(dim=-1).all():
+                raise ValueError("every query row must have at least one allowed key")
+            scores = scores.masked_fill(~allowed_mask, float("-inf"))
 
         weights = torch.softmax(scores, dim=-1)
         out = weights @ v  # [B, h, T, head_dim]
@@ -2050,8 +2143,13 @@ import torch
 
 def mini_mha(x, num_heads, causal=False):
     # x: [B, T, d_model]
+    if x.ndim != 3 or x.size(0) == 0 or x.size(1) == 0 or x.size(2) == 0:
+        raise ValueError("x must have a non-empty [B, T, d_model] shape")
     batch_size, seq_len, d_model = x.shape
-    assert d_model % num_heads == 0
+    if isinstance(num_heads, bool) or not isinstance(num_heads, int) or num_heads <= 0:
+        raise ValueError("num_heads must be a positive integer")
+    if d_model % num_heads != 0:
+        raise ValueError("d_model must be divisible by num_heads")
     head_dim = d_model // num_heads
 
     q_proj = torch.nn.Linear(d_model, d_model, bias=False)
@@ -2086,6 +2184,10 @@ def mini_mha(x, num_heads, causal=False):
 x = torch.randn(2, 4, 32)
 y = mini_mha(x, num_heads=4, causal=True)
 print(y.shape)
+try:
+    mini_mha(x, num_heads=0)
+except ValueError as exc:
+    print("invalid head count rejected:", exc)
 ```
 
 输出应为：
@@ -2098,20 +2200,22 @@ torch.Size([2, 4, 32])
 
 如果忽略 bias，MHA 的主要参数是：
 
-~~~math
+```math
 W_Q\in\mathbb{R}^{d\times d},\qquad
 W_K\in\mathbb{R}^{d\times d},\qquad
 W_V\in\mathbb{R}^{d\times d},\qquad
 W_O\in\mathbb{R}^{d\times d}
-~~~
+```
 
 其中 `d` 表示 `d_model`。
 
 总参数量约：
 
-~~~math
+```math
 4d^2
-~~~
+```
+
+例如 `d_model=4096` 时，四个 `[d,d]` 投影矩阵共有 `4×4096²=67,108,864` 个权重；若每个线性层有 bias，还要额外计入约 `4d` 个参数。该数值不随 head 数变化，前提是 `d_model` 固定且投影仍为 `d_model→d_model`。
 
 注意：增加 head 数不一定增加总参数量。如果 `d_model` 固定，`num_heads` 增加时 `head_dim` 通常变小，总投影矩阵仍然是 `[d_model, d_model]`。
 
@@ -2213,9 +2317,9 @@ KV Cache 大小和以下因素相关：
 
 用一个简化的字节数估算，可以写成：
 
-~~~math
+```math
 M_{\mathrm{KV}}\approx 2\cdot L\cdot B\cdot T\cdot n_{\mathrm{kv}}\cdot d_h\cdot b
-~~~
+```
 
 其中 `2` 表示 K 和 V 两份缓存，`L` 是层数，`B` 是并发序列数，`T` 是每条序列当前缓存长度，`n_{\mathrm{kv}}` 是 K/V head 数，`d_h` 是 head dimension，`b` 是每个标量占用的字节数。MHA 取 `n_{\mathrm{kv}}=n_q`，MQA 取 `n_{\mathrm{kv}}=1`，GQA 则位于两者之间。这个估算忽略了 block 对齐、分页元数据和临时 workspace，但足以说明为什么减少 K/V head 会直接影响 serving 容量。
 
@@ -2224,6 +2328,16 @@ MHA 中 K/V head 多，KV Cache 大。
 MQA/GQA 减少 K/V head 数，因此能显著降低 KV Cache 显存。
 
 这对长上下文和高并发 serving 很关键。
+
+例如，取 `L=32` 层、单条 `T=8192` token 序列、`d_h=128`、BF16（每个元素 2 字节），并假设 32 个 query heads：
+
+| 结构 | `n_kv` | 单序列 K/V 原始缓存估算 |
+| --- | ---: | ---: |
+| MHA | 32 | 4 GiB |
+| GQA | 8 | 1 GiB |
+| MQA | 1 | 128 MiB |
+
+表中仅按前面的公式计算 K 和 V 的元素载荷，`1 GiB=2^30` 字节；它不包括分页对齐、元数据、临时 buffer 或运行时碎片。实际占用须绑定模型配置和 serving 实现。并发序列数为 `B` 时，理想化估算再乘以 `B`。
 
 ### MHA/MQA/GQA 对比表
 
@@ -2285,12 +2399,12 @@ MQA/GQA 缺点：
 
 Multi-Head Attention 首先把宽度 d_model 划成 h 个子空间，每个 head 计算自己的 attention，再拼接回 d_model。若 d_model=h·d_head，则 shape 变化为：
 
-~~~math
+```math
 [B,T,d]\rightarrow[B,h,T,d_h]
 \rightarrow[B,h,T,T]
 \rightarrow[B,h,T,d_h]
 \rightarrow[B,T,d]
-~~~
+```
 
 在 d 固定且 Q/K/V/O 都是 d 到 d 的投影时，MHA 的主要参数量约为 4d²；增加 head 数通常改变 head_dim，而不是让参数量线性增加。head 数的价值在于子空间划分和硬件 shape，不能简单理解为“越多越强”。
 
@@ -2298,11 +2412,11 @@ Multi-Head Attention 首先把宽度 d_model 划成 h 个子空间，每个 head
 
 自回归 decode 保存历史 K/V，简化的 KV Cache 字节数为：
 
-~~~math
+```math
 M_{\mathrm{KV}}
 \approx
 2LBTn_{\mathrm{kv}}d_hb
-~~~
+```
 
 L 是层数，B 是并发序列数，T 是缓存长度，n_kv 是 K/V head 数，d_h 是每个 head 的宽度，b 是每个标量的字节数。MHA 让 n_kv 接近 query head 数，MQA 令其接近 1，GQA 介于两者之间，因此 MQA/GQA 主要改变推理内存和吞吐。
 
@@ -2367,9 +2481,9 @@ MHA 工程中优先检查：
 
 GPT 类模型的训练目标是：
 
-~~~math
+```math
 P(x_t\mid x_{1:t-1})
-~~~
+```
 
 也就是第 $t$ 个 token 只能依赖前面的 token。
 
@@ -2421,14 +2535,14 @@ Causal mask 是一个下三角 mask。
 
 合起来：
 
-~~~math
+```math
 \begin{bmatrix}
 1 & 0 & 0 & 0 \\
 1 & 1 & 0 & 0 \\
 1 & 1 & 1 & 0 \\
 1 & 1 & 1 & 1
 \end{bmatrix}
-~~~
+```
 
 这就是 causal mask。
 
@@ -2436,9 +2550,9 @@ Causal mask 是一个下三角 mask。
 
 attention scores shape 是：
 
-~~~math
+```math
 [B,h,T,T]
-~~~
+```
 
 其中 $S[\ldots,i,j]$ 表示第 $i$ 个位置关注第 $j$ 个位置的分数。
 
@@ -2446,9 +2560,9 @@ attention scores shape 是：
 
 通常做法是在 softmax 前把未来位置加上 `-inf`：
 
-~~~math
+```math
 S_{\mathrm{masked}}=S+M
-~~~
+```
 
 未来位置：
 
@@ -2510,7 +2624,7 @@ tensor([[1., 0., 0., 0.],
         [1., 1., 1., 1.]])
 ```
 
-加入 attention：
+下面的独立 PyTorch 示例输入 `q/k/v:[B,h,T,d]`，输出 `[B,h,T,d]`；`B=1,h=2,T=4,d=8`。它会断言未来位置权重为零，展示完整序列在训练时如何使用下三角可见性矩阵。
 
 ```python
 import math
@@ -2519,29 +2633,51 @@ import torch
 
 def causal_attention(q, k, v):
     # q, k, v: [B, h, T, d]
+    if q.ndim != 4 or k.ndim != 4 or v.ndim != 4:
+        raise ValueError("q, k, and v must have shape [B, h, T, d]")
+    if q.shape[:2] != k.shape[:2] or q.shape[:2] != v.shape[:2]:
+        raise ValueError("q, k, and v must have the same batch and head dimensions")
+    if q.size(-1) != k.size(-1) or q.size(-2) != k.size(-2) or k.size(-2) != v.size(-2):
+        raise ValueError("query/key widths and key/value lengths must match")
     B, h, T, d = q.shape
+    if T == 0 or d == 0 or v.size(-1) == 0:
+        raise ValueError("sequence length and feature widths must be non-zero")
+    if not all(t.is_floating_point() for t in (q, k, v)):
+        raise TypeError("q, k, and v must be floating-point tensors")
+    if len({t.dtype for t in (q, k, v)}) != 1 or len({t.device for t in (q, k, v)}) != 1:
+        raise ValueError("q, k, and v must use the same dtype and device")
+    if not all(torch.isfinite(t).all() for t in (q, k, v)):
+        raise ValueError("q, k, and v must contain only finite values")
     scores = q @ k.transpose(-2, -1) / math.sqrt(d)  # [B, h, T, T]
 
-    mask = torch.tril(torch.ones(T, T, device=q.device)).view(1, 1, T, T)
-    scores = scores.masked_fill(mask == 0, float("-inf"))
+    allowed = torch.tril(torch.ones(T, T, dtype=torch.bool, device=q.device))
+    scores = scores.masked_fill(~allowed.view(1, 1, T, T), float("-inf"))
 
     weights = torch.softmax(scores, dim=-1)
-    return weights @ v
+    return weights @ v, weights
+
+
+B, h, T, d = 1, 2, 4, 8
+q, k, v = (torch.randn(B, h, T, d) for _ in range(3))
+output, weights = causal_attention(q, k, v)
+assert output.shape == (B, h, T, d)
+assert torch.count_nonzero(torch.triu(weights, diagonal=1)) == 0
+print(output.shape, weights.shape)
 ```
 
 ### 训练时为什么也要 Mask
 
 训练时我们一次输入完整序列：
 
-~~~math
+```math
 [x_1,x_2,x_3,x_4]
-~~~
+```
 
 模型并行预测：
 
-~~~math
+```math
 x_2,x_3,x_4
-~~~
+```
 
 因为整个序列都在输入里，如果不加 causal mask，第 1 个位置可能看到第 2、3、4 个位置。
 
@@ -2587,9 +2723,9 @@ I love
 
 第 1 步：
 
-~~~math
+```math
 P(y_1\mid \mathrm{prompt}=\texttt{I\ love})
-~~~
+```
 
 假设生成：
 
@@ -2605,9 +2741,9 @@ I love machine
 
 第 2 步：
 
-~~~math
+```math
 P(y_2\mid \mathrm{context}=\texttt{I\ love\ machine})
-~~~
+```
 
 继续生成：
 
@@ -2710,14 +2846,14 @@ Causal mask 不是生成时才打开的开关。训练时完整序列同时位�
 
 对于长度 T 的序列，允许矩阵是下三角；在 scores 上：
 
-~~~math
+```math
 S_{\mathrm{masked}}=S+M,\qquad
 M_{ij}=
 \begin{cases}
 0,&j\le i;\\
 -\infty,&j>i.
 \end{cases}
-~~~
+```
 
 mask 在 softmax 前应用，才能让禁止位置的归一化权重为零。padding mask 解决无效填充，causal mask 解决未来泄漏，prefix 或 tool mask 则可能描述更复杂的可见性；它们不能互相替代。
 
@@ -2812,13 +2948,13 @@ token ids
 
 现代 LLM 多使用 Pre-LN 结构，简化写法：
 
-~~~math
+```math
 x=x+\mathrm{Attention}(\mathrm{Norm}(x))
-~~~
+```
 
-~~~math
+```math
 x=x+\mathrm{MLP}(\mathrm{Norm}(x))
-~~~
+```
 
 这两行就是一个 Transformer block 的核心。
 
@@ -2832,23 +2968,23 @@ x: [B, T, d_model]
 
 第一步，self-attention 让每个 token 和上下文交互：
 
-~~~math
+```math
 a=\mathrm{Attention}(\mathrm{Norm}(x))
-~~~
+```
 
-~~~math
+```math
 x=x+a
-~~~
+```
 
 第二步，MLP 对每个位置独立做非线性变换：
 
-~~~math
+```math
 m=\mathrm{MLP}(\mathrm{Norm}(x))
-~~~
+```
 
-~~~math
+```math
 x=x+m
-~~~
+```
 
 输出仍然是：
 
@@ -2885,9 +3021,9 @@ MLP 也叫 FFN，Feed-Forward Network。
 
 典型结构：
 
-~~~math
+```math
 \mathrm{MLP}(x)=\mathrm{Linear}_2(\mathrm{Activation}(\mathrm{Linear}_1(x)))
-~~~
+```
 
 形状通常是：
 
@@ -2895,7 +3031,7 @@ MLP 也叫 FFN，Feed-Forward Network。
 d_model -> d_ff -> d_model
 ```
 
-其中 `d_ff` 通常比 `d_model` 大，例如 4 倍左右，现代 LLM 也常用 SwiGLU 等门控结构。
+其中 `d_ff` 通常比 `d_model` 大，例如 4 倍左右。SwiGLU 等门控 FFN 会用两条投影分支逐元素相乘，例如省略 bias 时可写成 `W_down(SiLU(xW_gate) ⊙ xW_value)`；它不等同于普通的两层 GELU FFN。参数量和中间维度的完整讨论见[第二册 Transformer 架构进阶](../../book-02-advanced-100/chapters/02-transformer架构进阶.md)与[百科深度学习组件](../../book-04-llm-encyclopedia/chapters/02-深度学习组件.md)。
 
 MLP 的作用可以理解为：
 
@@ -2910,9 +3046,9 @@ Attention 负责“token 之间交流”，MLP 负责“每个 token 内部思�
 
 残差连接形式：
 
-~~~math
+```math
 x=x+\mathrm{sublayer}(x)
-~~~
+```
 
 它的作用：
 
@@ -2938,7 +3074,7 @@ Transformer 中常见：
 
 它们通常作用在 hidden dimension 上。
 
-现代 decoder-only LLM 多使用 Pre-LN 或 RMSNorm。
+现代 decoder-only LLM 常采用 Pre-Norm block；归一化算子则常见 LayerNorm 或 RMSNorm。Pre-Norm 描述子层与残差的相对位置，RMSNorm 描述归一化公式，二者是不同维度的架构选择。
 
 第 13 讲会详细讲 LayerNorm、RMSNorm 和残差连接，这里先理解它们在 block 中的位置。
 
@@ -2946,23 +3082,23 @@ Transformer 中常见：
 
 Post-LN 是原始 Transformer 常见形式：
 
-~~~math
+```math
 x=\mathrm{Norm}(x+\mathrm{Attention}(x))
-~~~
+```
 
-~~~math
+```math
 x=\mathrm{Norm}(x+\mathrm{MLP}(x))
-~~~
+```
 
 Pre-LN 是现代 LLM 常见形式：
 
-~~~math
+```math
 x=x+\mathrm{Attention}(\mathrm{Norm}(x))
-~~~
+```
 
-~~~math
+```math
 x=x+\mathrm{MLP}(\mathrm{Norm}(x))
-~~~
+```
 
 Pre-LN 的优点：
 
@@ -2977,7 +3113,7 @@ Post-LN 的问题：
 
 ### PyTorch 最小实现（第 12 讲）
 
-下面是一个简化版 decoder-only Transformer block。
+下面是一个简化版 decoder-only Transformer block。输入 `x:[B,T,d_model]`，最大长度由 `block_size` 限制，输出 shape 与输入一致；CPU 示例预期输出 `[2,4,32]`。布尔 `attn_mask=True` 表示屏蔽，这里采用 `nn.MultiheadAttention` 的语义。
 
 ```python
 import torch
@@ -3000,6 +3136,10 @@ class SimpleMLP(nn.Module):
 class TransformerBlock(nn.Module):
     def __init__(self, d_model, num_heads, d_ff, block_size):
         super().__init__()
+        if block_size <= 0 or d_ff <= 0 or d_model <= 0 or num_heads <= 0:
+            raise ValueError("block_size, d_model, num_heads, and d_ff must be positive")
+        if d_model % num_heads != 0:
+            raise ValueError("d_model must be divisible by num_heads")
         self.norm1 = nn.LayerNorm(d_model)
         self.attn = nn.MultiheadAttention(d_model, num_heads, batch_first=True)
         self.norm2 = nn.LayerNorm(d_model)
@@ -3011,6 +3151,10 @@ class TransformerBlock(nn.Module):
         self.register_buffer("causal_mask", causal_mask)
 
     def forward(self, x, attn_mask=None):
+        if x.ndim != 3 or x.size(-1) != self.norm1.normalized_shape[0]:
+            raise ValueError("x must have shape [B, T, d_model]")
+        if x.size(1) == 0 or x.size(1) > self.causal_mask.size(0):
+            raise ValueError("T must be between 1 and block_size")
         # Pre-LN attention block.
         h = self.norm1(x)
         if attn_mask is None:
@@ -3036,6 +3180,7 @@ print(y.shape)  # [2, 4, 32]
 ### 最小 demo：检查 block 的 shape 和残差约束
 
 下面这个 demo 只验证两个关键点：block 输入输出 shape 必须一致；attention 和 MLP 的输出必须能和残差分支相加。
+输入为 `[B,T,d_model]` 且 `1≤T≤block_size`，输出 shape 不变；代码用断言核对残差两侧的 shape。依赖 PyTorch 2.12.0，CPU 可运行。
 
 ```python
 import torch
@@ -3045,6 +3190,10 @@ import torch.nn as nn
 class TinyPreLNBlock(nn.Module):
     def __init__(self, d_model, num_heads, d_ff, block_size):
         super().__init__()
+        if min(d_model, num_heads, d_ff, block_size) <= 0:
+            raise ValueError("all dimensions and block_size must be positive")
+        if d_model % num_heads != 0:
+            raise ValueError("d_model must be divisible by num_heads")
         self.norm1 = nn.LayerNorm(d_model)
         self.attn = nn.MultiheadAttention(d_model, num_heads, batch_first=True)
         self.norm2 = nn.LayerNorm(d_model)
@@ -3060,6 +3209,8 @@ class TinyPreLNBlock(nn.Module):
 
     def forward(self, x):
         # x: [B, T, d_model]
+        if x.ndim != 3 or x.size(1) == 0 or x.size(1) > self.causal_mask.size(0):
+            raise ValueError("x must have shape [B, T, d_model] within block_size")
         seq_len = x.size(1)
         mask = self.causal_mask[:seq_len, :seq_len]
         attn_out, _ = self.attn(
@@ -3167,11 +3318,11 @@ Transformer block 的优点：
 
 一个 decoder-only block 的核心是：
 
-~~~math
+```math
 x\leftarrow x+\mathrm{Attention}(\mathrm{Norm}_1(x)),
 \qquad
 x\leftarrow x+\mathrm{MLP}(\mathrm{Norm}_2(x))
-~~~
+```
 
 Attention 负责跨 token 信息混合，MLP 通常对每个位置独立进行非线性变换。把 Attention 说成通信、把 MLP 说成局部特征加工是有帮助的直觉，但二者共同参与表示变换，不能把所有知识机械地归到某一模块。
 
@@ -3260,9 +3411,9 @@ BatchNorm 常用于 CNN。
 
 然后归一化：
 
-~~~math
+```math
 z=\frac{x-\mu}{\sqrt{\sigma^2+\varepsilon}}
-~~~
+```
 
 其中 `mu` 是 batch 统计得到的均值，`sigma^2` 是 batch 统计得到的方差。
 
@@ -3287,23 +3438,23 @@ x: [d_model]
 
 计算：
 
-~~~math
+```math
 \mu=\frac{1}{d}\sum_{i=1}^{d}x_i
-~~~
+```
 
-~~~math
+```math
 \sigma^2=\frac{1}{d}\sum_{i=1}^{d}(x_i-\mu)^2
-~~~
+```
 
-~~~math
+```math
 z_i=\frac{x_i-\mu}{\sqrt{\sigma^2+\varepsilon}}
-~~~
+```
 
 然后加上可学习缩放和平移：
 
-~~~math
+```math
 y_i=\gamma_i z_i+\beta_i
-~~~
+```
 
 在 Transformer 中，如果输入是：
 
@@ -3336,13 +3487,13 @@ LayerNorm 做两件事：
 
 RMSNorm 不减均值，只用 root mean square 归一化：
 
-~~~math
+```math
 \mathrm{rms}=\sqrt{\mathrm{mean}(x^2)+\varepsilon}
-~~~
+```
 
-~~~math
+```math
 y=\frac{\gamma x}{\mathrm{rms}}
-~~~
+```
 
 RMSNorm 省略了 mean centering。
 
@@ -3371,9 +3522,9 @@ RMSNorm 只标准化向量尺度
 
 残差连接：
 
-~~~math
+```math
 x=x+F(x)
-~~~
+```
 
 它让每层学习的是增量 `F(x)`，而不是从零生成新表示。
 
@@ -3388,13 +3539,13 @@ x=x+F(x)
 
 Pre-LN：
 
-~~~math
+```math
 x=x+\mathrm{Attention}(\mathrm{Norm}(x))
-~~~
+```
 
-~~~math
+```math
 x=x+\mathrm{MLP}(\mathrm{Norm}(x))
-~~~
+```
 
 因为 Norm 在子层前，子层收到的输入尺度更稳定。
 
@@ -3404,13 +3555,15 @@ x=x+\mathrm{MLP}(\mathrm{Norm}(x))
 
 Post-LN：
 
-~~~math
+```math
 x=\mathrm{Norm}(x+\mathrm{Attention}(x))
-~~~
+```
 
-在深层模型中更容易出现梯度传播不稳定。
+在一些深层设置中更容易出现梯度传播不稳定；实际稳定性还取决于初始化、深度、学习率和其他训练细节。Pre-LN 也不是所有 Transformer 的统一结构。
 
 ### PyTorch 实现 LayerNorm 和 RMSNorm
+
+两个片段都用 CPU 上的 float32 输入 `x:[2,4,8]`，输出 shape 保持不变；前者调用官方 LayerNorm，后者展示含可学习 scale 的最小 RMSNorm。依赖 PyTorch 2.12.0。
 
 LayerNorm：
 
@@ -3427,6 +3580,7 @@ print(y.shape)  # [2, 4, 8]
 手写 RMSNorm：
 
 ```python
+import math
 import torch
 import torch.nn as nn
 
@@ -3434,11 +3588,20 @@ import torch.nn as nn
 class RMSNorm(nn.Module):
     def __init__(self, dim, eps=1e-6):
         super().__init__()
+        if isinstance(dim, bool) or not isinstance(dim, int) or dim <= 0:
+            raise ValueError("dim must be a positive integer")
+        if not math.isfinite(eps) or eps <= 0:
+            raise ValueError("eps must be finite and positive")
+        self.dim = dim
         self.eps = eps
         self.weight = nn.Parameter(torch.ones(dim))
 
     def forward(self, x):
         # x: [..., dim]
+        if x.ndim == 0 or x.size(-1) != self.dim:
+            raise ValueError("the last input dimension must equal dim")
+        if not x.is_floating_point() or not torch.isfinite(x).all():
+            raise ValueError("x must be a finite floating-point tensor")
         rms = torch.sqrt(torch.mean(x * x, dim=-1, keepdim=True) + self.eps)
         return self.weight * x / rms
 
@@ -3451,7 +3614,7 @@ print(y.shape)  # [2, 4, 8]
 
 ### 最小 demo：手写 LayerNorm 和 RMSNorm 对比
 
-下面这个 demo 用同一个向量对比 LayerNorm 和 RMSNorm。你会看到：LayerNorm 会先减均值，输出均值接近 0；RMSNorm 不减均值，只把向量尺度归一化。
+下面这个 PyTorch CPU demo 输入一个 float32 向量 `[1,2,3,10]`，输出 LayerNorm/RMSNorm 结果和各自的统计量。它使用总体方差与 `eps=1e-6`，用于核对中心化和尺度归一化的差别，不含可学习仿射参数。
 
 ```python
 import torch
@@ -3482,6 +3645,8 @@ print("RMSNorm rms:", torch.sqrt((rms_out * rms_out).mean(dim=-1)))
 
 1. `LayerNorm mean` 接近 0，因为 LayerNorm 做了 mean centering。
 2. `RMSNorm rms` 接近 1，因为 RMSNorm 只控制向量的 RMS 尺度。
+
+对输入 `x=[1,2,3,10]`，使用总体方差和 `eps=0` 手算时，LayerNorm 的均值为 `4`、标准差为 `sqrt(12.5)≈3.5355`，输出约为 `[-0.8485,-0.5657,-0.2828,1.6971]`。RMSNorm 的分母为 `sqrt(28.5)≈5.3385`，不含可学习权重时输出约为 `[0.1873,0.3746,0.5620,1.8732]`。代码中的 `eps=1e-6` 只会对这些四舍五入结果产生极小变化；例子显示 LayerNorm 做中心化，而 RMSNorm 保留均值偏移。
 
 ### 在 Transformer Block 中的位置
 
@@ -3560,17 +3725,17 @@ LayerNorm 在每个 token 的 hidden dimension 上计算均值和方差，不依
 
 对 hidden vector x，LayerNorm 可写成：
 
-~~~math
+```math
 \mu=\frac{1}{d}\sum_i x_i,\qquad
 \sigma^2=\frac{1}{d}\sum_i(x_i-\mu)^2,\qquad
 y_i=\gamma_i\frac{x_i-\mu}{\sqrt{\sigma^2+\varepsilon}}+\beta_i
-~~~
+```
 
 RMSNorm 不做均值中心化，而是：
 
-~~~math
+```math
 y_i=\gamma_i\frac{x_i}{\sqrt{\frac{1}{d}\sum_i x_i^2+\varepsilon}}
-~~~
+```
 
 因此 RMSNorm 更轻，但不与 LayerNorm 完全等价。替换 norm 需要重新检查初始化、精度、训练曲线、最终输出和 checkpoint，不能仅凭公式更短就断定更好。
 
@@ -3661,9 +3826,9 @@ position 1 -> p_1
 
 然后：
 
-~~~math
+```math
 x=E_{\mathrm{token}}+E_{\mathrm{pos}}
-~~~
+```
 
 问题：
 
@@ -3694,47 +3859,47 @@ RoPE 的核心思想：
 
 一个向量 `(x_1, x_2)` 旋转角度 `θ` 后：
 
-~~~math
+```math
 x_1'=x_1\cos\theta-x_2\sin\theta
-~~~
+```
 
-~~~math
+```math
 x_2'=x_1\sin\theta+x_2\cos\theta
-~~~
+```
 
 RoPE 会把 hidden dimension 两两分组，对每组做类似旋转。
 
 不同位置使用不同角度。
 
-位置越靠后，旋转角度越大。
+位置索引与每个维度对的旋转相位成正比；旋转本身具有周期性，不能把更大的位置直接解释成几何上更远的方向。
 
 ### RoPE 如何作用到 Q 和 K
 
 标准 attention：
 
-~~~math
+```math
 \mathrm{score}(i,j)=q_i\cdot k_j
-~~~
+```
 
 RoPE 中，先对 `q_i` 和 `k_j` 注入位置旋转：
 
-~~~math
+```math
 q_i'=R_i q_i
-~~~
+```
 
-~~~math
+```math
 k_j'=R_j k_j
-~~~
+```
 
 其中 `R_i` 和 `R_j` 表示由位置 `i`、`j` 决定的旋转变换。
 
 然后计算：
 
-~~~math
+```math
 \mathrm{score}(i,j)=q_i'\cdot k_j'
-~~~
+```
 
-关键性质是：这个点积会依赖 $i-j$，也就是相对位置。
+关键性质是：对每个二维维度对，旋转后的点积会依赖位置差。按上面的矩阵约定，`R_i^T R_j=R_{j-i}`，因此它依赖 `j-i`；使用相反的旋转符号约定时，差值符号也会相反。
 
 所以 RoPE 不是显式加一个相对位置 bias，而是通过旋转让 attention score 自然感知相对距离。
 
@@ -3742,7 +3907,9 @@ k_j'=R_j k_j
 
 在二维旋转中，两个旋转向量的内积与它们旋转角度差有关。
 
-如果 $q$ 在位置 $i$ 旋转，$k$ 在位置 $j$ 旋转，那么它们的匹配关系会受到 $i-j$ 影响。
+如果 $q$ 在位置 $i$ 旋转，$k$ 在位置 $j$ 旋转，那么它们的匹配关系会受到相对位移 `j-i`（或等价的反号约定）影响。
+
+若第 $r$ 个二维维度对的角速度为 $\omega_r$，位置 $p$ 使用的相位为 $\theta_{p,r}=p\omega_r$。标准 RoPE 选择一组随 $r$ 变化的频率；旋转矩阵满足 $R_{i,r}^{\mathsf T}R_{j,r}=R_{j-i,r}$，所以每一对维度都编码相对位移，但频率不同。
 
 这让模型更容易学习类似：
 
@@ -3756,7 +3923,7 @@ k_j'=R_j k_j
 
 ### 最小 PyTorch 代码直觉
 
-下面是简化版 RoPE，对最后一维两两旋转。真实实现会更注意缓存、频率、精度和 shape。
+下面是简化版 RoPE，对最后一维相邻坐标成对旋转。输入 `x:[B,T,d]`、`cos/sin:[1,T,d/2]`，要求 `d` 为正偶数，输出 shape 与输入一致；依赖 PyTorch 2.12.0，CPU 可运行。真实实现还要核对 head 维度布局、缓存、频率和精度。
 
 ```python
 import torch
@@ -3764,6 +3931,17 @@ import torch
 
 def apply_rope(x, cos, sin):
     # x: [B, T, d], d must be even
+    if x.ndim != 3 or x.size(-1) == 0 or x.size(-1) % 2 != 0:
+        raise ValueError("x must have shape [B, T, d] with positive even d")
+    expected = (1, x.size(1), x.size(-1) // 2)
+    if tuple(cos.shape) != expected or tuple(sin.shape) != expected:
+        raise ValueError("cos and sin must have shape [1, T, d/2]")
+    if cos.device != x.device or sin.device != x.device:
+        raise ValueError("x, cos, and sin must be on the same device")
+    if cos.dtype != x.dtype or sin.dtype != x.dtype:
+        raise ValueError("x, cos, and sin must use the same dtype")
+    if not all(torch.isfinite(t).all() for t in (x, cos, sin)):
+        raise ValueError("x, cos, and sin must contain only finite values")
     x1 = x[..., 0::2]
     x2 = x[..., 1::2]
 
@@ -3790,9 +3968,11 @@ y = apply_rope(x, cos, sin)
 print(y.shape)  # [2, 4, 8]
 ```
 
+输入 `x` 为 `[B,T,d]`，其中 `d` 必须为偶数；`cos` 和 `sin` 为 `[1,T,d/2]`，输出 shape 与 `x` 相同。这个片段用 `d=8`、`T=4` 只验证相邻维度成对旋转后的 shape；真实模型还要按 head 维度构造频率并核对 Q/K 布局。
+
 ### 最小 demo：点积如何随相对位置变化
 
-下面这个 demo 用二维向量模拟 RoPE。固定同一个 `q` 和 `k`，只改变它们的位置。由于旋转角度不同，旋转后的点积会随位置差变化。
+下面这个 PyTorch CPU demo 用二维向量模拟 RoPE。输入固定为 `q=k=(1,0)`，位置步长 `0.25` 弧度；输出每组 `(i,j)` 的 `j-i` 和旋转后点积，核对相同位移对应相同分数。它不模拟多频率、多 head 或训练。
 
 ```python
 import math
@@ -3814,8 +3994,10 @@ for i, j in [(0, 0), (1, 0), (2, 0), (2, 1)]:
     q_rot = rotate_2d(q, i * base_angle)
     k_rot = rotate_2d(k, j * base_angle)
     score = torch.dot(q_rot, k_rot).item()
-    print(f"i={i}, j={j}, i-j={i-j}, score={score:.4f}")
+    print(f"i={i}, j={j}, j-i={j-i}, score={score:.4f}")
 ```
+
+令 `q=k=(1,0)`、每个位置步长的角度为 `0.25` 弧度时，四组输出依次约为 `1.0000`、`0.9689`、`0.8776`、`0.9689`。最后两组的 `j-i` 都是 `-1`，所以分数相同。该二维例子只验证相对位移性质，不代表多维模型中的完整 attention 分布。
 
 这段代码不是完整 RoPE 实现，只展示一个关键直觉：attention score 不再只取决于 `q` 和 `k` 的内容，也会受到位置差的影响。
 
@@ -3823,19 +4005,19 @@ for i, j in [(0, 0), (1, 0), (2, 0), (2, 1)]:
 
 绝对位置编码：
 
-~~~math
+```math
 x=E_{\mathrm{token}}+E_{\mathrm{pos}}
-~~~
+```
 
 RoPE：
 
-~~~math
+```math
 q'=R_p q
-~~~
+```
 
-~~~math
+```math
 k'=R_p k
-~~~
+```
 
 其中 `p` 表示当前位置。
 
@@ -3843,8 +4025,8 @@ k'=R_p k
 
 1. 绝对位置编码直接加到 hidden states。
 2. RoPE 作用在 attention 的 Q/K 上。
-3. RoPE 更自然地影响 token 间匹配分数。
-4. RoPE 具有相对位置性质。
+3. RoPE 通过旋转结构让 attention 分数包含相对位移信息。
+4. RoPE 具有相对位置性质，但这项性质本身不保证超出训练长度后仍能可靠外推。
 
 ### 长上下文为什么困难
 
@@ -3988,8 +4170,8 @@ RoPE 优点：
 
 1. 把位置注入 Q/K，适合 attention。
 2. 具有相对位置性质。
-3. 现代 LLM 实践广泛。
-4. 比简单绝对位置编码更适合外推。
+3. 现代 LLM 中有广泛实践。
+4. 旋转结构可用于设计位置扩展方法；外推效果仍需按训练长度、频率方案和任务评估。
 
 RoPE 缺点：
 
@@ -4009,7 +4191,7 @@ RoPE 缺点：
 
 RoPE 对 Q、K 的二维分量成对旋转。对位置 p 和角度 θ_p：
 
-~~~math
+```math
 R(\theta_p)
 \begin{bmatrix}x_1\\x_2\end{bmatrix}
 =
@@ -4018,7 +4200,7 @@ R(\theta_p)
 \sin\theta_p&\cos\theta_p
 \end{bmatrix}
 \begin{bmatrix}x_1\\x_2\end{bmatrix}
-~~~
+```
 
 把 q_i 和 k_j 分别旋转后再做点积，结果会包含角度差，因此具备相对位置性质。这个性质改善了 attention 中的位置表达，但不保证模型在任意更长位置上都能泛化。
 
@@ -4188,7 +4370,7 @@ label: [2, 3, 4, 5]
 
 ### 完整最小代码
 
-下面代码是一个教学版 miniGPT。它可以独立理解，但真实训练需要更多工程处理。
+下面代码定义一个可在 CPU 运行的教学版 miniGPT，依赖 PyTorch 2.12.0。输入 `idx:[B,T]` 和可选同 shape 的整数 `targets`，输出 logits `[B,T,V]` 与交叉熵 loss；要求 token id 在词表范围内、`1≤T≤block_size`。生成路径接收 prompt 和非负 `max_new_tokens`，输出追加 token 的序列。代码末尾含正常路径与空序列边界检查；完整代码不实现 KV Cache。
 
 ```python
 import math
@@ -4200,17 +4382,22 @@ import torch.nn.functional as F
 class CausalSelfAttention(nn.Module):
     def __init__(self, n_embd, n_head, block_size):
         super().__init__()
-        assert n_embd % n_head == 0
+        if min(n_embd, n_head, block_size) <= 0:
+            raise ValueError("n_embd, n_head, and block_size must be positive")
+        if n_embd % n_head != 0:
+            raise ValueError("n_embd must be divisible by n_head")
         self.n_head = n_head
         self.head_dim = n_embd // n_head
 
         self.qkv = nn.Linear(n_embd, 3 * n_embd)
         self.proj = nn.Linear(n_embd, n_embd)
 
-        mask = torch.tril(torch.ones(block_size, block_size))
+        mask = torch.tril(torch.ones(block_size, block_size, dtype=torch.bool))
         self.register_buffer("mask", mask.view(1, 1, block_size, block_size))
 
     def forward(self, x):
+        if x.ndim != 3 or x.size(1) == 0 or x.size(1) > self.mask.size(-1):
+            raise ValueError("x must have shape [B, T, C] within block_size")
         B, T, C = x.shape
         qkv = self.qkv(x)  # [B, T, 3C]
         q, k, v = qkv.split(C, dim=-1)
@@ -4220,7 +4407,7 @@ class CausalSelfAttention(nn.Module):
         v = v.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
 
         scores = q @ k.transpose(-2, -1) / math.sqrt(self.head_dim)
-        scores = scores.masked_fill(self.mask[:, :, :T, :T] == 0, float("-inf"))
+        scores = scores.masked_fill(~self.mask[:, :, :T, :T], float("-inf"))
         weights = torch.softmax(scores, dim=-1)
 
         out = weights @ v  # [B, h, T, head_dim]
@@ -4258,7 +4445,12 @@ class Block(nn.Module):
 class MiniGPT(nn.Module):
     def __init__(self, vocab_size, block_size, n_layer=2, n_head=4, n_embd=128):
         super().__init__()
+        if min(vocab_size, block_size, n_layer, n_head, n_embd) <= 0:
+            raise ValueError("vocab_size, block_size, n_layer, n_head, and n_embd must be positive")
+        if n_embd % n_head != 0:
+            raise ValueError("n_embd must be divisible by n_head")
         self.block_size = block_size
+        self.vocab_size = vocab_size
         self.token_emb = nn.Embedding(vocab_size, n_embd)
         self.pos_emb = nn.Embedding(block_size, n_embd)
         self.blocks = nn.ModuleList([
@@ -4268,13 +4460,20 @@ class MiniGPT(nn.Module):
         self.lm_head = nn.Linear(n_embd, vocab_size, bias=False)
 
     def forward(self, idx, targets=None):
-        if idx.ndim != 2:
-            raise ValueError("idx must have shape [B, T]")
+        if idx.ndim != 2 or idx.size(0) == 0 or idx.dtype != torch.long:
+            raise ValueError("idx must be a non-empty batch of torch.long token ids")
         B, T = idx.shape
         if T == 0 or T > self.block_size:
             raise ValueError("T must be between 1 and block_size")
+        if idx.min() < 0 or idx.max() >= self.vocab_size:
+            raise ValueError("idx contains a token id outside the vocabulary")
         if targets is not None and targets.shape != idx.shape:
             raise ValueError("targets must have the same shape as idx")
+        if targets is not None:
+            if targets.dtype != torch.long or targets.device != idx.device:
+                raise ValueError("targets must be torch.long and on the same device as idx")
+            if targets.min() < 0 or targets.max() >= self.vocab_size:
+                raise ValueError("targets contain a token id outside the vocabulary")
 
         pos = torch.arange(0, T, device=idx.device)
         x = self.token_emb(idx) + self.pos_emb(pos)[None, :, :]
@@ -4295,6 +4494,12 @@ class MiniGPT(nn.Module):
 
     @torch.no_grad()
     def generate(self, idx, max_new_tokens):
+        if isinstance(max_new_tokens, bool) or not isinstance(max_new_tokens, int) or max_new_tokens < 0:
+            raise ValueError("max_new_tokens must be a non-negative integer")
+        if idx.ndim != 2 or idx.size(0) == 0 or idx.size(1) == 0 or idx.dtype != torch.long:
+            raise ValueError("idx must be a non-empty batch of torch.long token ids")
+        if idx.min() < 0 or idx.max() >= self.vocab_size:
+            raise ValueError("idx contains a token id outside the vocabulary")
         for _ in range(max_new_tokens):
             idx_cond = idx[:, -self.block_size:]
             logits, _ = self(idx_cond)
@@ -4303,11 +4508,28 @@ class MiniGPT(nn.Module):
             next_id = torch.multinomial(probs, num_samples=1)
             idx = torch.cat([idx, next_id], dim=1)
         return idx
+
+
+torch.manual_seed(0)
+model = MiniGPT(vocab_size=16, block_size=8, n_layer=2, n_head=4, n_embd=32)
+idx = torch.tensor([[1, 2, 3, 4]], dtype=torch.long)
+targets = torch.tensor([[2, 3, 4, 5]], dtype=torch.long)
+logits, loss = model(idx, targets)
+assert logits.shape == (1, 4, 16) and torch.isfinite(loss)
+print("logits:", logits.shape, "loss finite:", bool(torch.isfinite(loss)))
+print("generated shape:", model.generate(idx[:, :2], max_new_tokens=3).shape)
+try:
+    model(torch.empty((1, 0), dtype=torch.long))
+except ValueError as exc:
+    print("empty sequence rejected:", exc)
 ```
 
 ### 训练 loop 示例
 
+这是前一代码块的接续示例：请在同一 Python 文件中先定义 `MiniGPT` 并保留 PyTorch imports。输入是重复的字符级文本 `"hello world\n"`，每步采样 `[batch_size,block_size]` 训练片段；输出每 50 步打印 loss，并生成 50 个字符。运行设备为 CPU，随机种子固定；输出只验证端到端数据流，不代表模型泛化能力。
+
 ```python
+torch.manual_seed(0)
 text = "hello world\n" * 1000
 chars = sorted(list(set(text)))
 stoi = {ch: i for i, ch in enumerate(chars)}
@@ -4343,6 +4565,7 @@ for step in range(200):
         print(step, loss.item())
 
 start = torch.tensor([[stoi["h"]]], dtype=torch.long)
+model.eval()
 out = model.generate(start, max_new_tokens=50)[0].tolist()
 print("".join(itos[i] for i in out))
 ```
@@ -4525,11 +4748,16 @@ miniGPT 的字符级 tokenizer、学习位置 embedding、全量 attention 和�
 ## 资料入口与证据边界
 
 - [Attention Is All You Need](https://arxiv.org/abs/1706.03762)：Transformer、scaled dot-product attention、multi-head 和位置编码的原始论文入口；论文中的实验设置不等于现代 decoder-only LLM 的完整实现。
+- [BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding](https://arxiv.org/abs/1810.04805)：支持 BERT 使用 WordPiece 词表、双向 encoder 与 masked language modeling 的历史实例；不代表所有 WordPiece tokenizer 的训练算法完全相同。
 - [Neural Machine Translation of Rare Words with Subword Units](https://arxiv.org/abs/1508.07909)：BPE 子词建模论文入口，支持罕见词与子词切分的讨论。
+- [Train Short, Test Long: Attention with Linear Biases](https://arxiv.org/abs/2108.12409)：ALiBi 在 attention 分数中加入距离相关线性偏置的论文入口；其长度泛化结果受模型和实验设置约束。
 - [SentencePiece](https://arxiv.org/abs/1808.06226)：直接从原始文本训练子词模型的论文入口，支持 SentencePiece 的基本边界。
 - [RoFormer: Enhanced Transformer with Rotary Position Embedding](https://arxiv.org/abs/2104.09864)：RoPE 论文入口，支持旋转位置和相对位置性质的机制说明。
+- [Root Mean Square Layer Normalization](https://arxiv.org/abs/1910.07467)：RMSNorm 的提出背景、定义和论文实验；不证明它在所有架构中都优于 LayerNorm。
+- [On Layer Normalization in the Transformer Architecture](https://arxiv.org/abs/2002.04745)：分析 Pre-LN/Post-LN 梯度路径和训练稳定性的研究入口；其结论要限定在论文研究的架构和训练设置内。
 - [FlashAttention](https://arxiv.org/abs/2205.14135)：IO-aware 精确 attention 计算的论文入口，支持“计算实现优化”和“改变稀疏连接”之间的区分。
 - [GQA: Training Generalized Multi-Query Transformer Models](https://arxiv.org/abs/2305.13245)：GQA 论文入口，支持 K/V head 共享与推理效率取舍的讨论。
+- [Lost in the Middle: How Language Models Use Long Contexts](https://arxiv.org/abs/2307.03172)：支持长上下文信息位置可能影响任务表现的研究实例；不能外推为所有模型、数据和任务都具有相同曲线。
 - [PyTorch MultiheadAttention](https://docs.pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html)：官方模块接口和 shape 语义入口；教学模块不能直接代表生产 kernel、缓存和分布式实现。
 
 这些资料分别支持经典架构、tokenizer、位置编码、attention kernel、GQA 和官方接口。论文结论、框架语义、本章教学代码和目标模型的实测结果属于不同证据层级；涉及长上下文、速度、显存和质量的结论，必须在固定硬件、dtype、batch、kernel、数据和评估任务下复测。

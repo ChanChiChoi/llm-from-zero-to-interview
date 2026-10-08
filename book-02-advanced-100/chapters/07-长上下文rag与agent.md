@@ -109,7 +109,7 @@ RoPE scaling 是更大的方法族。它可以统一缩放位置、调整 RoPE b
 ~~~math
 \mathcal{L}=\sum_k\lambda_k\,\mathbb{E}_{x\sim D_k}
 \left[-\frac{1}{|M_x|}\sum_{t\in M_x}\log p_\theta\bigl(x_t\mid x_{1:t-1}\bigr)\right],
-\qquad |M_x|>0
+\qquad |M_x|>0,\quad \lambda_k\ge0,\quad \sum_k\lambda_k=1
 ~~~
 
 D_k 可以是长文档、短文本、代码、指令或多语言数据，lambda_k 是采样权重，M_x 是参与监督的 token 位置。继续预训练通常监督大部分语言 token；长上下文 SFT 则常只监督 assistant answer，避免把长 prompt 当作模型要复述的目标。
@@ -133,13 +133,15 @@ D_k 可以是长文档、短文本、代码、指令或多语言数据，lambda_
 
 ### 76.8 训练成本的平方项和部署成本的线性项
 
-只看 self-attention 的两次矩阵乘法，单层计算量可以粗略写成：
+只看 self-attention 的两次矩阵乘法，按完整 $S\times S$ 分数矩阵估算，单层计算量可以粗略写成：
 
 ~~~math
 C_{\mathrm{attn}}\approx 4BHS^2d_h
 ~~~
 
 B 是 batch size，H 是 query head 数，S 是序列长度，d_h 是 head dimension。这个公式没有包含投影、MLP 和通信，但能说明长度平方项的来源。4k 到 32k，粗略 attention 计算比例是 64；4k 到 128k，比例是 1024。
+
+采用因果遮罩时，部分 kernel 会跳过上三角区域，因而常数项会改变；无论是否利用这一点，序列长度仍带来平方级 attention 工作量。
 
 部署时，KV Cache 的字节数近似为：
 
@@ -328,7 +330,8 @@ S_{\mathrm{quality}}=A_{\mathrm{long}}
 -\lambda_t\frac{T_{\mathrm{TTFT}}}{T_{\mathrm{ref}}}
 -\lambda_m\frac{M_{\mathrm{KV}}}{M_{\mathrm{ref}}}
 -\lambda_c\frac{C_{\mathrm{req}}}{C_{\mathrm{ref}}},
-\qquad T_{\mathrm{ref}},M_{\mathrm{ref}},C_{\mathrm{ref}}>0
+\qquad T_{\mathrm{ref}},M_{\mathrm{ref}},C_{\mathrm{ref}}>0,
+\quad \lambda_t,\lambda_m,\lambda_c\ge0
 ~~~
 
 它不是发布标准，而是提醒读者不能把质量和资源消耗拆成两份互不相干的报告。$A_{\mathrm{long}}$ 是长任务质量，$T_{\mathrm{TTFT}}$、$M_{\mathrm{KV}}$ 和 $C_{\mathrm{req}}$ 分别是首 token 延迟、KV Cache 占用和请求成本；参考量必须为正，权重则应在同一业务目标下固定后再比较。
@@ -748,7 +751,7 @@ B_{\mathrm{PQ}}\approx\frac{mr}{8},
 \qquad m>0,\ r>0
 ~~~
 
-这些式子解释了内存和延迟趋势，却不等于真实硬件性能；索引构建、缓存命中、分布偏斜和过滤条件都要实测。
+这个 payload 估算不包含 codebook、ID 和索引元数据。上述式子解释内存和延迟趋势，却不等于真实硬件性能；索引构建、缓存命中、分布偏斜和过滤条件都要实测。
 
 ### 79.5 评估检索而不是只看生成
 
@@ -756,9 +759,11 @@ B_{\mathrm{PQ}}\approx\frac{mr}{8},
 
 ~~~math
 \mathrm{Recall}@k=\frac{1}{N}\sum_{i=1}^{N}
-\mathbf{1}[G_i\cap D_{i,k}\ne\varnothing],
-\qquad N>0,\ k>0
+\frac{|G_i\cap D_{i,k}|}{|G_i|},
+\qquad N>0,\ k>0,\ |G_i|>0
 ~~~
+
+如果只关心“top-k 是否命中至少一个相关文档”，应把指标称为 Hit@k，而不是 Recall@k。没有 gold 文档的 query 应从这些比率的分母中剔除并单独报告；固定名额的 Precision@k 以 k 为分母，表示未返回的名额也没有命中。
 
 ~~~math
 \mathrm{Precision}@k=\frac{1}{N}\sum_{i=1}^{N}
@@ -860,6 +865,7 @@ precision_at_2= 0.5
 - [Hierarchical Navigable Small World Graphs](https://arxiv.org/abs/1603.09320)：HNSW 原始论文。
 - [FAISS](https://arxiv.org/abs/1702.08734)：大规模相似度搜索工程系统。
 - [BEIR](https://arxiv.org/abs/2104.08663) 与 [MTEB](https://arxiv.org/abs/2210.07316)：跨任务检索和 embedding 评估。
+- [Stanford IR book: Evaluation in information retrieval](https://nlp.stanford.edu/IR-book/html/htmledition/evaluation-in-information-retrieval-1.html)：集合检索与排序检索的经典指标定义。
 
 公开 benchmark 能揭示模型在某些任务上的相对表现，不代表企业语料中的召回保证。
 
@@ -881,7 +887,7 @@ C_K(q)=\mathrm{TopK}_{d\in D}\,s_{\mathrm{bi}}(q,d)
 R_M(q)=\mathrm{TopM}_{d\in C_K(q)}\,s_{\mathrm{rank}}(q,d)
 ~~~
 
-如果正确文档不在 $C_K$，reranker 无法恢复召回失败；通常要求 $K>0$，并且最终保留的 $M$ 不超过候选数。因此召回和精排的职责必须分开记录。
+如果正确文档不在 $C_K$，reranker 无法恢复召回失败；通常要求 $K>0$ 且 $0\le M\le |C_K|$。因此召回和精排的职责必须分开记录。
 
 ### 80.2 Bi-encoder、Cross-encoder 和 Late Interaction
 
@@ -1509,18 +1515,20 @@ stop_reason：完成、无法继续、需要确认、超预算或错误
 
 ### 82.8 一个带 schema 与权限的工具循环
 
-下面的示例不访问网络，只模拟一个查询工具、一个高风险写入工具和一个未知工具。它把结构检查、权限检查和确认状态放在模型输出与执行器之间。
+下面的示例不访问网络，只模拟一个查询工具、一个高风险写入工具和一个未知工具。它把结构检查、参数类型、权限和确认状态放在模型输出与执行器之间，只返回策略结果，不实际调用工具。
 
 ~~~python
 TOOLS = {
     "lookup_weather": {
         "kind": "read",
         "required": {"city"},
+        "argument_types": {"city": str},
         "allowed_roles": {"user", "assistant", "admin"},
     },
     "delete_record": {
         "kind": "destructive",
         "required": {"record_id"},
+        "argument_types": {"record_id": str},
         "allowed_roles": {"admin"},
     },
 }
@@ -1544,6 +1552,11 @@ def validate_call(call, role, confirmed=False):
         return "invalid_arguments"
     if set(args) - spec["required"]:
         return "unexpected_arguments"
+    if any(
+        type(args[key]) is not expected
+        for key, expected in spec["argument_types"].items()
+    ):
+        return "invalid_argument_type"
     if not isinstance(role, str) or not role:
         return "invalid_role"
     if type(confirmed) is not bool:
@@ -1552,7 +1565,7 @@ def validate_call(call, role, confirmed=False):
         return "permission_denied"
     if spec["kind"] == "destructive" and not confirmed:
         return "confirmation_required"
-    return "executed"
+    return "allow"
 
 
 planned = [
@@ -1569,7 +1582,7 @@ for call, confirmed in planned:
 输出：
 
 ~~~text
-lookup_weather -> executed
+lookup_weather -> allow
 delete_record -> confirmation_required
 send_secret -> tool_not_found
 ~~~
@@ -2007,11 +2020,12 @@ trace 还要记录模型版本、提示版本、工具 schema 版本、检索索
 一个简单的可靠性账本可以写成：
 
 ~~~math
-L_{\mathrm{expected}}=\sum_{i=1}^{n}p_i I_i+C_{\mathrm{recovery}},
+L_{\mathrm{expected}}=\sum_{i=1}^{n}p_i
+\bigl(I_i+C_{\mathrm{recovery},i}\bigr),
 \qquad 0\le p_i\le1,\quad n\ge0
 ~~~
 
-其中 $p_i$ 是第 $i$ 类失败发生的概率，$I_i$ 是该失败的影响量，$C_{\mathrm{recovery}}$ 是恢复或补偿成本；这些量必须在同一时间窗口和业务口径下定义。降低模型错误率只是其中一项；缩小权限、降低单次影响、增加状态确认和准备补偿流程，同样可以降低期望损失。
+其中 $p_i$ 是第 $i$ 类失败在观察窗口内发生的概率，$I_i$ 是该失败造成的影响，$C_{\mathrm{recovery},i}$ 是以该失败发生为条件的恢复或补偿成本。若失败类别会重叠，影响量应按增量口径拆分，避免重复计算；所有量需使用同一观察窗口和业务单位。降低模型错误率只是其中一项；缩小权限、降低单次影响、增加状态确认和准备补偿流程，同样可以降低期望损失。
 
 ### 84.8 从风险类型到测试样本
 
@@ -2049,15 +2063,13 @@ def decide(request):
     required = {"tool", "principal", "resource"}
     if not required.issubset(request):
         return "deny:missing_request_fields"
-    if set(request) - required - {"confirmed", "reversible"}:
+    if set(request) - required - {"confirmed"}:
         return "deny:unknown_request_fields"
     for field in ("tool", "principal", "resource"):
         if not isinstance(request[field], str) or not request[field]:
             return "deny:invalid_request"
     if "confirmed" in request and type(request["confirmed"]) is not bool:
         return "deny:invalid_confirmation"
-    if "reversible" in request and type(request["reversible"]) is not bool:
-        return "deny:invalid_reversibility"
     spec = POLICIES.get(request["tool"])
     if spec is None:
         return "deny:unknown_tool"
@@ -2076,7 +2088,7 @@ requests = [
     {"tool": "search", "principal": "agent", "resource": "workspace"},
     {"tool": "send_email", "principal": "agent", "resource": "drafts"},
     {"tool": "delete_file", "principal": "agent", "resource": "workspace",
-     "confirmed": True, "reversible": True},
+     "confirmed": True},
 ]
 
 for request in requests:
@@ -2122,7 +2134,7 @@ memory：跨回合或跨任务保存、未来可能复用的信息
 
 ### 85.2 记忆的类型
 
-不同类型的记忆需要不同的写入标准：
+以下是便于设计写入和保留策略的一种工程分类，不是唯一的学术本体；不同系统可以按用途采用不同类别：
 
 ~~~text
 profile memory：稳定偏好、语言、时区和用户明确设置
@@ -2176,6 +2188,7 @@ w_r\,\mathrm{relevance}(m,q)
 +w_s\,\mathrm{scope\_match}(m,q)
 -w_p\,\mathrm{privacy\_cost}(m)
 -w_l\,\mathrm{token\_cost}(m)
+\qquad w_r,w_t,w_c,w_s,w_p,w_l\ge0
 ~~~
 
 这里的权重应在离线样本和线上成本约束下校准，并且不应把一个任意分数当作授权结论。先做权限和作用域过滤，再做相关性排序。不能让一条与当前问题高度相似、但属于另一个用户或项目的 memory 进入候选。对于高敏感记忆，可以只返回“需要确认”的标记，而不把原文直接交给模型。
@@ -2296,7 +2309,7 @@ class MemoryStore:
         require_text(owner, "owner")
         require_text(kind, "kind")
         require_text(text, "text")
-        if sensitivity not in VALID_SENSITIVITY:
+        if not isinstance(sensitivity, str) or sensitivity not in VALID_SENSITIVITY:
             raise ValueError("unknown sensitivity")
         self.rows.append({
             "key": key,
@@ -2355,6 +2368,7 @@ hits = store.retrieve("report language", "u1", {"profile"})
 print("retrieved=", [(row["key"], row["value"]) for row in hits])
 print("sensitive_hidden=", store.retrieve("access token", "u1", {"profile"}) == [])
 print("deleted=", store.delete("language", "u1"))
+print("tombstones=", sorted(store.tombstones))
 print("after_delete=", store.retrieve("report language", "u1", {"profile"}))
 ~~~
 
@@ -2364,6 +2378,7 @@ print("after_delete=", store.retrieve("report language", "u1", {"profile"}))
 retrieved= [('language', 'Chinese')]
 sensitive_hidden= True
 deleted= True
+tombstones= [('u1', 'language')]
 after_delete= []
 ~~~
 
@@ -2451,17 +2466,18 @@ Memory：用户偏好的邮件语言和格式
 
 ~~~text
 c1：订单 ORD-1042 属于产品 P
-c2：订单当前支付状态为 paid
-c3：当前季度政策允许在发货后 30 天内退款
-c4：订单发货时间距今 18 天
-c5：因此当前订单满足退款资格
+c2：订单所属地区为 R，当前支付状态为 paid
+c3：当前季度政策允许该产品与地区在发货后 30 天内退款
+c4：订单发货时间距今 18 天，且当前没有已退款金额
+c5：政策条文没有适用于该地区或订单状态的例外
+c6：因此当前订单满足退款资格
 ~~~
 
-其中 c1、c2、c4 来自订单工具，c3 来自政策证据，c5 是规则验证器根据前四项推导的结论。不能给 c5 只附一个政策链接，因为它还依赖实时订单字段。引用账本应区分来源：
+其中 c1、c2、c4 来自订单工具，c3、c5 来自当前版本的政策证据，c6 是规则验证器根据这些输入推导的结论。不能给 c6 只附一个政策链接，因为它还依赖实时订单字段。引用账本应区分来源：
 
 ~~~json
 {
-  "claim_id": "c5",
+  "claim_id": "c6",
   "supports": [
     {"source_type": "policy", "evidence_id": "p-17"},
     {"source_type": "order_snapshot", "evidence_id": "ord-snap-88"}

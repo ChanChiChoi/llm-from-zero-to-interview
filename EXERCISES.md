@@ -274,6 +274,7 @@
 12. 列出训练显存的 5 个主要组成部分。
 13. 画出 DDP 的梯度同步流程。
 14. 比较 ZeRO-1、ZeRO-2、ZeRO-3。
+14A. rank 0 有 100 个有效 token、mean loss 为 1，rank 1 有 10 个有效 token、mean loss 为 2。比较 rank mean 与全局 token mean，并推导 DDP 默认按 rank 平均梯度时每个 rank 应怎样缩放本地 loss sum。
 15. 用自己的话解释 Tensor Parallel 和 Pipeline Parallel。
 16. 思考为什么通信开销会限制多 GPU 训练加速。
 17. 用自己的话解释 base model 和 instruct model 的区别。
@@ -478,7 +479,7 @@
 134. 解释 in-batch negatives、hard negatives 和 false negatives。
 135. 构造一个 query、positive document、hard negative document 的训练样本。
 136. 比较 HNSW、IVF、PQ 的直觉、优点和代价。
-137. 设计一个向量检索评估集，包含 recall@k、precision@k、MRR、nDCG。
+137. 设计一个向量检索评估集，包含 Recall@k、Hit@k、Precision@k、MRR、nDCG；至少构造一个包含多个 gold 文档的 query，说明 Recall@k 与 Hit@k 为什么会给出不同结果，并处理无 gold 的 query。
 138. 设计一个 hybrid retrieval 方案，说明如何合并 BM25 和向量检索结果。
 139. 分析 embedding 模型升级为什么通常需要重建索引。
 140. 用 3 分钟回答“RAG 检索不到正确文档时如何排查”。
@@ -960,7 +961,7 @@
 41. 设计一个 OCR / 文档图像数据 schema，字段包含 page id、recognized text、bounding box、reading order、confidence、language、table region、PII flag 和 source license。
 42. 设计一个音频 / 视频时间对齐抽检流程，说明如何用 WER / CER、subtitle shift、VAD segment、clip boundary 和人工抽样判断样本是否可进入训练。
 43. 用 3 分钟回答“为什么多模态数据工程的核心不是增加模态数量，而是证明模态之间真的对齐”。
-44. 给 8 个 toy 数据源设计 valuation 表，字段包含 tokens、quality、coverage、risk、cost、license、contamination、目标能力收益向量和数据版本。
+44. 给 8 个 toy 数据源设计 valuation 表，字段包含 tokens、quality、coverage、risk、cost、license、contamination、目标能力收益向量和数据版本；先把许可未获准、隐私风险和评估污染定义为独立准入/隔离门槛，再对通过门槛的样本计算质量价值，说明为什么加权高分不能抵消硬性风险。
 45. 写一个 0 依赖 Python demo，计算每个数据源的加权目标收益、风险 / 成本修正价值、梯度相似 attribution proxy 和 token budget 下的选择结果。
 46. 对 3 个 toy 数据源手算一次小规模 Shapley value，说明平均边际贡献为什么会受到数据交互影响。
 47. 构造一个“看起来提升 benchmark 但其实是污染”的数据源，并说明为什么高 attribution / 高相似度不能覆盖污染门禁。

@@ -47,7 +47,7 @@ tokenizer 决定了字符串被切成多少个基本单元，以及每个单元�
 
 ### 26.3 BPE：从频繁相邻片段开始合并
 
-Byte Pair Encoding（BPE）最初是压缩领域的方法，后来被用于子词建模。它的训练过程可以抽象为：从字符或 byte 作为初始符号，统计相邻 pair 的频率，每次把最高频 pair 合并为一个新符号，直到达到目标词表大小。
+Byte Pair Encoding（BPE）最初是压缩领域的方法，后来被用于子词建模；用于机器翻译的子词做法见 [Sennrich 等人的原始论文](https://aclanthology.org/P16-1162/)。它的训练过程可以抽象为：从字符或 byte 作为初始符号，统计相邻 pair 的频率，每次把最高频 pair 合并为一个新符号，直到达到目标词表大小。
 
 假设训练语料中有如下片段：
 
@@ -71,7 +71,7 @@ Byte-level BPE 把 byte 而不是 Unicode 字符作为起点。它几乎可以�
 
 ### 26.4 Unigram：把切分当作概率选择
 
-Unigram tokenizer 采用另一条路径：先构造较大的候选子词集合，为每个候选片段学习一个概率或代价，再从可能的切分中选择总体概率较高的方案。给定字符串 s 的一个切分 z=(z_1,...,z_m)，其近似概率可以写成：
+Unigram tokenizer 采用另一条路径：先构造较大的候选子词集合，为每个候选片段学习一个概率或代价，再从可能的切分中选择总体概率较高的方案；子词采样的提出可参见 [Kudo 的论文](https://aclanthology.org/P18-1007/)。给定字符串 s 的一个切分 z=(z_1,...,z_m)，其近似概率可以写成：
 
 ~~~math
 P(z\mid s)\propto\prod_{i=1}^{m}P(z_i)
@@ -83,7 +83,7 @@ Unigram 并不意味着一定优于 BPE。它带来概率建模和采样的灵�
 
 ### 26.5 SentencePiece 解决的是边界假设
 
-SentencePiece 是 tokenizer 训练与编码框架，不等同于某一个单独算法。它可以承载 BPE 或 Unigram，并把原始句子视为字符流处理，而不是强制先按空格切词。这个设计对中文、日文等没有天然空格边界的语言尤其重要。
+SentencePiece 是 tokenizer 训练与编码框架，不等同于某一个单独算法。它可以承载 BPE 或 Unigram，并把原始句子视为字符流处理，而不是强制先按空格切词；这与 [SentencePiece 论文](https://aclanthology.org/D18-2012/)描述的 raw-sentence 接口一致。这个设计对中文、日文等没有天然空格边界的语言尤其重要。
 
 SentencePiece 常把空格作为一种显式边界符号，例如 `▁`。这样编码器能区分词首和词内位置，也能在解码时恢复原始空格。这里需要区分三件事：算法决定如何学习片段，框架决定如何训练和编码，词表与归一化规则决定最终协议。只写“用了 SentencePiece”还不足以复现 tokenizer。
 
@@ -119,15 +119,26 @@ P_{\mathrm{vocab}}\approx 2Vd
 
 ### 26.8 一个可检查 BPE 合并过程的最小实现
 
-下面的实现刻意保持简单：它用字符作为初始符号，不处理 byte、Unicode 规范化和跨词边界，只用于观察频率统计与合并顺序。
+下面的实现刻意保持简单：输入是“空格分隔的符号串 -> 正整数频次”映射，输出是合并后的新映射；它用字符作为初始符号，不处理 byte、Unicode 规范化和跨词边界，只用于观察频率统计与合并顺序。使用 Python 3.12 标准库即可运行。示例每轮选择最高频 pair；并列时按语料插入顺序打破平局，这只是确定性的教学约定。
 
 ~~~python
 from collections import Counter
+from collections.abc import Mapping
+
+
+def validate_corpus(words):
+    if not isinstance(words, Mapping) or not words:
+        raise ValueError("words must be a non-empty mapping")
+    for word, frequency in words.items():
+        if not isinstance(word, str) or not word.split():
+            raise ValueError("each word must contain space-separated symbols")
+        if (not isinstance(frequency, int) or isinstance(frequency, bool)
+                or frequency <= 0):
+            raise ValueError("frequencies must be positive integers")
 
 
 def pair_counts(words):
-    if not words:
-        raise ValueError("words must not be empty")
+    validate_corpus(words)
     counts = Counter()
     for word, frequency in words.items():
         symbols = word.split()
@@ -137,8 +148,12 @@ def pair_counts(words):
 
 
 def merge_pair(words, pair):
-    if len(pair) != 2 or not all(pair):
+    validate_corpus(words)
+    if (not isinstance(pair, tuple) or len(pair) != 2
+            or any(not isinstance(symbol, str) or not symbol for symbol in pair)):
         raise ValueError("pair must contain two non-empty symbols")
+    if pair_counts(words)[pair] == 0:
+        raise ValueError("pair must occur in the corpus")
     merged = "".join(pair)
     result = {}
     for word, frequency in words.items():
@@ -172,7 +187,7 @@ for _ in range(4):
 print(corpus)
 ~~~
 
-工业 tokenizer 还要处理词边界、特殊 token、规范化和高效编码，但这个例子能说明一个容易被忽略的事实：词表不是人工列出的词典，而是训练语料统计和预设边界共同产生的结果。
+该语料共有 8 个词实例；第一轮中 pair `("l", "o")` 的加权计数是 8。读者可以改动频次或加入新词，观察合并顺序如何变化。工业 tokenizer 还要处理词边界、特殊 token、规范化和高效编码，但这个例子能说明一个容易被忽略的事实：词表不是人工列出的词典，而是训练语料统计和预设边界共同产生的结果。
 
 ### 26.9 证据边界
 
@@ -247,14 +262,16 @@ BPE 的子词开放词表思想可以由原始论文支持；SentencePiece 的 r
 
 ### 27.7 一个 tokenizer 统计脚本
 
-下面的代码不依赖第三方 tokenizer 库，用一个可替换的 `encode` 函数演示如何按领域统计长度分布。实际使用时，只需把示例编码器替换为目标 tokenizer。
+下面的代码使用 Python 3.12 标准库和一个可替换的 `encode` 函数，输入是按领域标注的文本样本，输出每个领域的样本数、逐样本 token 数和语料加权 fertility。样例编码器会把 ASCII 字母数字串作为一个片段、其余非空白字符逐个计数；它不是实际模型 tokenizer。实际测量时替换 `toy_encode`，并报告真实样本量，不能把这里每桶两条构造样本的结果解释为语言总体统计。
 
 ~~~python
 from collections import defaultdict
-from statistics import mean, median
+from statistics import median
 
 
 def toy_encode(text):
+    if not isinstance(text, str):
+        raise TypeError("text must be a string")
     # 教学用：把 ASCII 单词视作片段，其他字符按字符处理。
     tokens = []
     current = []
@@ -274,34 +291,38 @@ def toy_encode(text):
 
 samples = [
     ("zh", "模型会读取上下文。"),
+    ("zh", "词表影响序列长度。"),
     ("en", "The model reads context."),
+    ("en", "A tokenizer maps text to ids."),
     ("code", "def add_numbers(left, right):\n    return left + right"),
+    ("code", "value = model(input_ids)"),
+    ("empty", ""),
 ]
 lengths = defaultdict(list)
 for domain, text in samples:
+    if not isinstance(domain, str) or not domain:
+        raise ValueError("domain must be a non-empty string")
     tokens = toy_encode(text)
     lengths[domain].append((len(tokens), len(text)))
 
 
 def safe_ratio(numerator, denominator):
-    return round(numerator / denominator, 3) if denominator else None
+    if denominator == 0:
+        return None
+    return round(numerator / denominator, 3)
 
 
 for domain, values in lengths.items():
-    ratios = [
-        safe_ratio(token_count, char_count)
-        for token_count, char_count in values
-    ]
-    measured = [value for value in ratios if value is not None]
-    print(domain, "tokens=", [item[0] for item in values])
-    print(
-        "  mean fertility=",
-        round(mean(measured), 3) if measured else None,
-    )
-    print("  median tokens=", median(item[0] for item in values))
+    token_counts = [item[0] for item in values]
+    total_chars = sum(item[1] for item in values)
+    pooled_fertility = safe_ratio(sum(token_counts), total_chars)
+    print("domain=", domain, "n=", len(values))
+    print("  tokens/sample=", token_counts)
+    print("  median tokens=", median(token_counts))
+    print("  corpus fertility=", pooled_fertility)
 ~~~
 
-这个统计器的价值不在于 toy tokenizer 的数值，而在于把“词表好不好”改写成按语言、领域、长度和协议逐项测量的问题。字符数为零时 fertility 没有定义，代码保留 `None`，不会把分母替换成 1 后制造一个看似正常的比例。
+这个统计器的价值不在于 toy tokenizer 的数值，而在于把“词表好不好”改写成按语言、领域、长度和协议逐项测量的问题。`corpus fertility` 是总 token 数除以总字符数；`empty` 桶展示了全空文本时分母为零，结果保留 `None`，不会把分母替换成 1 后制造一个看似正常的比例。生产报告还应给出 P50/P95 长度、置信区间或分层抽样方案；七条演示记录只用来验证统计口径。
 
 ### 27.8 chat template 与 tokenizer 的边界
 
@@ -357,10 +378,10 @@ dedup_cluster, pii_flag, safety_flag, benchmark_overlap, version
 可以把样本质量记成一个可解释的组合分数：
 
 ~~~math
-q(x)=w_r r(x)+w_l l(x)+w_d d(x)+w_v v(x)-w_n n(x)
+q(x)=w_r r(x)+w_d d(x)+w_v v(x)-w_n n(x)
 ~~~
 
-其中 `r` 是可读性，`l` 是许可与来源完整度，`d` 是领域相关性，`v` 是可验证性，`n` 是噪声或风险。这个式子是工程记账，不是自然定律；权重应由目标任务和验证结果校准。
+其中 `r` 是可读性，`d` 是领域相关性，`v` 是可验证性，`n` 是内容噪声；实现时应把各项映射到一致尺度，并令权重非负。这个式子只是对已获准进入候选池的样本做质量排序，不是自然定律，权重要由目标任务和验证结果校准。来源可追溯性、许可是否符合项目策略、隐私与安全审查、评估集污染等应作为独立准入门槛或隔离条件，不能并入加权分数；否则一个高质量分可能错误地抵消许可未知或隐私风险。
 
 ### 28.5 语言、代码和多模态数据的特殊清洗
 
@@ -384,7 +405,7 @@ q(x)=w_r r(x)+w_l l(x)+w_d d(x)+w_v v(x)-w_n n(x)
 
 ### 28.8 一个带来源字段的清洗示例
 
-下面的代码展示数据记录应该如何携带 metadata。它不是完整的隐私检测器，也不应被直接用于生产；它的重点是让“过滤结果可解释、可回溯”。
+下面的代码展示数据记录如何携带来源和许可 metadata，并把许可策略作为硬门槛。输入是包含文本与来源字段的字典，以及由项目合规策略提供的许可白名单；输出包含内容哈希、拒绝原因和准入布尔值。它只检查两类凭证模式和若干结构规则，不是完整的隐私检测器，也不能代替法务审查。
 
 ~~~python
 import hashlib
@@ -398,11 +419,23 @@ SECRET_PATTERNS = [
 
 
 def content_hash(text):
+    if not isinstance(text, str):
+        raise TypeError("text must be a string")
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def inspect_record(record):
+def inspect_record(record, allowed_licenses):
+    if not isinstance(record, dict):
+        raise TypeError("record must be a dictionary")
+    if not isinstance(allowed_licenses, (set, frozenset)) or not allowed_licenses:
+        raise ValueError("allowed_licenses must be a non-empty set")
+    if any(not isinstance(item, str) or not item.strip()
+           or item.strip().casefold() in {"unknown", "unspecified", "none"}
+           for item in allowed_licenses):
+        raise ValueError("allowed licenses must be named policy entries")
     text = record["text"]
+    if not isinstance(text, str):
+        raise TypeError("record text must be a string")
     stripped = text.strip()
     flags = []
     if len(stripped) < 80:
@@ -411,11 +444,20 @@ def inspect_record(record):
         flags.append("template_or_script_heavy")
     if any(pattern.search(text) for pattern in SECRET_PATTERNS):
         flags.append("possible_secret")
+    source = record.get("source")
+    if (not isinstance(source, str) or not source.strip()
+            or source.strip().casefold() == "unknown"):
+        flags.append("source_untraceable")
+    license_name = record.get("license")
+    if (not isinstance(license_name, str) or not license_name.strip()
+            or license_name.strip().casefold() in {"unknown", "unspecified", "none"}
+            or license_name not in allowed_licenses):
+        flags.append("license_not_approved")
     return {
         "id": content_hash(text),
-        "source": record.get("source", "unknown"),
+        "source": source if isinstance(source, str) else "unknown",
         "language": record.get("language", "unknown"),
-        "license": record.get("license", "unknown"),
+        "license": license_name if isinstance(license_name, str) else "unknown",
         "flags": flags,
         "keep": not flags,
     }
@@ -426,20 +468,20 @@ records = [
     {"text": "A" * 120, "source": "docs", "language": "en", "license": "CC-BY"},
 ]
 for record in records:
-    print(inspect_record(record))
+    print(inspect_record(record, allowed_licenses={"CC-BY"}))
 ~~~
 
-生产系统中应把 `keep=False` 拆成具体原因，不能让一个综合布尔值掩盖“短文本”“疑似密钥”和“许可未知”之间完全不同的处理路径。
+运行方式为 Python 3.12 标准库直接执行；两条构造记录中，短文本且许可未知的第一条会因多个硬门槛被拒绝，第二条仅在该示例白名单策略下通过。生产系统中应把 `keep=False` 拆成具体原因，不能让一个综合布尔值掩盖“短文本”“疑似密钥”“来源不可追溯”和“许可未获准”之间完全不同的处理路径。白名单是项目输入，不表示这些许可在所有地区、用途或产品中都自动适用。
 
 ### 28.9 证据边界
 
-数据清洗规则的具体阈值通常是项目经验，不应写成普适定律。C4、The Pile、FineWeb、BigCode 等数据工作可以支持某些数据构造与过滤经验；但某个模型到底使用了多少网页、代码或合成数据，只有其正式技术报告或模型卡披露后才能作为事实。
+数据清洗规则的具体阈值通常是项目经验，不应写成普适定律。[C4](https://arxiv.org/abs/1910.10683)、The Pile、[FineWeb](https://arxiv.org/abs/2406.17557) 和 [BigCode](https://arxiv.org/abs/2308.07124) 等数据工作可以支持某些数据构造与过滤经验；但某个模型到底使用了多少网页、代码或合成数据，只有其正式技术报告或模型卡披露后才能作为事实。
 
 ## 29. 去重与数据污染：避免把记忆误判为泛化
 
 ### 29.1 为什么重复会改变训练结果
 
-相同或近似样本被重复采样，会同时影响优化、记忆和评估。它可能降低训练 loss，却不增加等量的新信息；热门仓库或模板被大量 fork，会让某一领域在混合数据中被隐性放大；验证集或 benchmark 若出现在训练集，分数就不能再解释为未见泛化。
+相同或近似样本被重复采样，会同时影响优化、记忆和评估。[Lee 等人](https://arxiv.org/abs/2107.06499)在公开实验中研究了训练数据去重对语言模型记忆和质量的影响，但这不构成所有数据集上的统一收益结论。重复可能降低训练 loss，却不增加等量的新信息；热门仓库或模板被大量 fork，会让某一领域在混合数据中被隐性放大；验证集或 benchmark 若出现在训练集，分数就不能再解释为未见泛化。
 
 重复并非总是坏事。高质量样本在目标能力稀缺时可以有意过采样，低资源语言也可能需要重复暴露。关键是区分“有计划的重复采样”和“数据管道不知道自己重复了”。前者应记录 exposure，后者会让预算和评估失真。
 
@@ -497,8 +539,16 @@ J(A,B)=\frac{|A\cap B|}{|A\cup B|}
 
 ### 29.7 一个可复现的 shingle 相似度示例
 
+代码输入两段字符串和正整数窗口宽度，输出字符 shingle 集合及其 Jaccard 相似度；若文本短于窗口，无法构造 shingle，函数返回 `None`，调用方不能把它解释为“完全相同”。它使用 Python 3.12 标准库运行。
+
 ~~~python
 def shingles(text, width=5):
+    if not isinstance(text, str):
+        raise TypeError("text must be a string")
+    if not isinstance(width, int) or isinstance(width, bool):
+        raise TypeError("width must be an integer")
+    if width <= 0:
+        raise ValueError("width must be positive")
     normalized = " ".join(text.lower().split())
     return {
         normalized[index:index + width]
@@ -507,8 +557,10 @@ def shingles(text, width=5):
 
 
 def jaccard(left, right):
+    if not isinstance(left, set) or not isinstance(right, set):
+        raise TypeError("left and right must be sets")
     union = left | right
-    return len(left & right) / len(union) if union else 1.0
+    return len(left & right) / len(union) if union else None
 
 
 documents = [
@@ -522,7 +574,7 @@ for i in range(len(documents)):
         print(i, j, round(score, 3))
 ~~~
 
-这个实现只是候选生成器，不足以承担生产去重。它没有处理词序变化、代码语法、跨语言改写或模板公共部分；它的意义是让 Jaccard 阈值、样本长度和误删风险可以被实际观察。
+三个样本两两比较会输出相似度；若把 `width` 改为大于所有样本长度，分数为 `None`，因为空集合之间的相似度在这里没有可用的判定意义。这个实现只是候选生成器，不足以承担生产去重。它没有处理词序变化、代码语法、跨语言改写或模板公共部分；它的意义是让 Jaccard 阈值、样本长度和误删风险可以被实际观察。
 
 ### 29.8 记忆与泛化的实验边界
 
@@ -598,36 +650,87 @@ q_i^{(t+1)}\propto q_i^{(t)}\exp\left(\eta\,g_i^{(t)}\right)
 
 ### 30.6 一个采样与暴露量计算器
 
+下面的 Python 3.12 标准库示例输入各数据桶可用 token 数、总训练预算和温度，输出采样比例、计划 token 数及每桶 exposure。实现使用 log-space 归一化，避免直接计算极端温度的幂时让所有权重同时下溢；它假设各桶数据量为正，不能表达“没有可用数据”的桶。
+
 ~~~python
 import math
+from collections.abc import Mapping
 
 
 def normalize(values):
-    if not values or any(
-        not math.isfinite(value) or value < 0 for value in values.values()
-    ):
-        raise ValueError("values must be non-empty and finite non-negative")
-    total = sum(values.values())
-    if total <= 0:
+    if not isinstance(values, Mapping) or not values:
+        raise ValueError("values must be a non-empty mapping")
+    numbers = {}
+    for key, value in values.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise TypeError("weights must be real numbers, not booleans")
+        try:
+            numeric = float(value)
+        except OverflowError as error:
+            raise ValueError("weights must be representable as finite floats") from error
+        if not math.isfinite(numeric) or numeric < 0:
+            raise ValueError("weights must be finite and non-negative")
+        numbers[key] = numeric
+    maximum = max(numbers.values())
+    if maximum <= 0:
         raise ValueError("values must have a positive total")
-    return {key: value / total for key, value in values.items()}
+    scaled = {key: value / maximum for key, value in numbers.items()}
+    total = math.fsum(scaled.values())
+    return {key: value / total for key, value in scaled.items()}
 
 
 def temperature_ratio(available, temperature):
+    if isinstance(temperature, bool) or not isinstance(temperature, (int, float)):
+        raise TypeError("temperature must be a real number")
+    try:
+        temperature = float(temperature)
+    except OverflowError as error:
+        raise ValueError("temperature must be finite") from error
     if not math.isfinite(temperature) or temperature <= 0:
         raise ValueError("temperature must be finite and positive")
-    raw = normalize(available)
-    alpha = 1.0 / temperature
-    adjusted = {key: value ** alpha for key, value in raw.items()}
-    return normalize(adjusted)
+    if not isinstance(available, Mapping) or not available:
+        raise ValueError("available must be a non-empty mapping")
+    amounts = {}
+    for key, amount in available.items():
+        if isinstance(amount, bool) or not isinstance(amount, (int, float)):
+            raise TypeError("available amounts must be real numbers")
+        try:
+            numeric = float(amount)
+        except OverflowError as error:
+            raise ValueError("available amounts must be finite floats") from error
+        if not math.isfinite(numeric) or numeric <= 0:
+            raise ValueError("available amounts must be finite and positive")
+        amounts[key] = numeric
+    log_amounts = {key: math.log(amount) for key, amount in amounts.items()}
+    largest_log = max(log_amounts.values())
+    weights = {
+        key: math.exp((log_amount - largest_log) / temperature)
+        for key, log_amount in log_amounts.items()
+    }
+    return normalize(weights)
+
+
+def sampling_plan(available, budget, temperature):
+    if isinstance(budget, bool) or not isinstance(budget, (int, float)):
+        raise TypeError("budget must be a real number")
+    try:
+        budget = float(budget)
+    except OverflowError as error:
+        raise ValueError("budget must be finite") from error
+    if not math.isfinite(budget) or budget < 0:
+        raise ValueError("budget must be finite and non-negative")
+    ratio = temperature_ratio(available, temperature)
+    planned = {key: budget * value for key, value in ratio.items()}
+    exposure = {key: planned[key] / float(available[key]) for key in available}
+    if any(not math.isfinite(value) for value in exposure.values()):
+        raise OverflowError("exposure exceeds the Python float range")
+    return ratio, planned, exposure
 
 
 available = {"web": 900, "code": 300, "math": 80, "bilingual": 200}
 budget = 400
 for temperature in [1.0, 2.0, 4.0]:
-    ratio = temperature_ratio(available, temperature)
-    planned = {key: budget * value for key, value in ratio.items()}
-    exposure = {key: planned[key] / available[key] for key in available}
+    ratio, planned, exposure = sampling_plan(available, budget, temperature)
     print("T=", temperature)
     print("ratio=", {key: round(value, 3) for key, value in ratio.items()})
     print("exposure=", {key: round(value, 2) for key, value in exposure.items()})
@@ -678,26 +781,47 @@ for temperature in [1.0, 2.0, 4.0]:
 
 ### 31.5 分布坍缩与错误放大
 
-若学生模型反复训练模型生成的数据，数据分布可能逐渐丢失长尾和多样性，错误模式也会被循环放大。研究者将这种风险称为 model collapse，但具体程度取决于数据混合比例、真实数据保留量、生成质量和任务。
+若学生模型反复训练模型生成的数据，数据分布可能逐渐丢失长尾和多样性，错误模式也会被循环放大。[Shumailov 等人的研究](https://www.nature.com/articles/s41586-024-07566-y)展示了递归使用生成数据可能造成的分布退化；具体程度仍取决于数据混合比例、真实数据保留量、生成质量和任务，不能据此推断所有合成数据都会导致坍缩。
 
 工程上可采取：保留足量人类数据；限制同一 teacher 风格的占比；按 semantic cluster 限制重复；引入不同 teacher 或不同采样策略；在 fresh 与人工数据上验证；为每个合成批次保留回滚能力。合成数据应该提高单位 token 的有效学习信号，而不是替代所有真实分布。
 
 ### 31.6 一个教学用的合成数据筛选器
 
+下面的 Python 3.12 标准库 demo 输入一条带验证、来源、许可、隐私和安全标志的候选记录，输出是否接受；硬门槛必须全部通过，质量分再做软阈值筛选。代码只展示策略组合，不验证这些标志本身是否由可靠流程产生。
+
 ~~~python
+import math
+
+
 def accept(candidate):
+    required_flags = (
+        "format_ok", "answer_verified", "safety_ok", "provenance_ok",
+        "license_ok", "privacy_ok",
+    )
+    if not isinstance(candidate, dict):
+        raise TypeError("candidate must be a dictionary")
+    if any(not isinstance(candidate.get(key), bool) for key in required_flags):
+        raise ValueError("all hard-gate fields must be present booleans")
+    quality = candidate.get("quality")
+    if isinstance(quality, bool) or not isinstance(quality, (int, float)):
+        raise TypeError("quality must be a real number")
+    try:
+        quality = float(quality)
+    except OverflowError as error:
+        raise ValueError("quality must be a finite score") from error
+    if not math.isfinite(quality) or not 0 <= quality <= 1:
+        raise ValueError("quality must be finite and within [0, 1]")
     return (
-        candidate["format_ok"]
-        and candidate["answer_verified"]
-        and candidate["safety_ok"]
-        and candidate["quality"] >= 0.8
+        all(candidate[key] for key in required_flags)
+        and quality >= 0.8
     )
 
 
 candidates = [
-    {"id": "a", "format_ok": True, "answer_verified": True, "safety_ok": True, "quality": 0.91},
-    {"id": "b", "format_ok": True, "answer_verified": False, "safety_ok": True, "quality": 0.97},
-    {"id": "c", "format_ok": True, "answer_verified": True, "safety_ok": False, "quality": 0.95},
+    {"id": "a", "format_ok": True, "answer_verified": True, "safety_ok": True, "provenance_ok": True, "license_ok": True, "privacy_ok": True, "quality": 0.91},
+    {"id": "b", "format_ok": True, "answer_verified": False, "safety_ok": True, "provenance_ok": True, "license_ok": True, "privacy_ok": True, "quality": 0.97},
+    {"id": "c", "format_ok": True, "answer_verified": True, "safety_ok": False, "provenance_ok": True, "license_ok": True, "privacy_ok": True, "quality": 0.95},
+    {"id": "d", "format_ok": True, "answer_verified": True, "safety_ok": True, "provenance_ok": True, "license_ok": False, "privacy_ok": True, "quality": 0.99},
 ]
 accepted = [item for item in candidates if accept(item)]
 print("accepted:", [item["id"] for item in accepted])
@@ -713,13 +837,13 @@ print("accepted:", [item["id"] for item in accepted])
 
 ### 31.8 证据边界
 
-Self-Instruct、Textbooks Are All You Need、Phi 系列和 model collapse 研究可以支持合成数据的路线与风险讨论；具体模型采用多少合成数据、由哪个 teacher 生成、过滤器是什么，必须以对应技术报告为准。教学中构造的 verifier 或评分器只能说明方法，不等于生产系统已经具备同等可靠性。
+运行输出为 `accepted: ['a']`。把候选 `a` 的 `license_ok` 改为 `False`，即使质量分仍为 0.91，也会被硬门槛拒绝。真实系统的 `answer_verified` 不能由同一个生成模型自报。它应来自执行器、独立证明器、检索来源、规则检查或人工标注；对不同任务，应记录验证器的覆盖率和误判率。Self-Instruct、Textbooks Are All You Need、Phi 系列和 model collapse 研究可以支持合成数据的路线与风险讨论；具体模型采用多少合成数据、由哪个 teacher 生成、过滤器是什么，必须以对应技术报告为准。教学中构造的 verifier 或评分器只能说明方法，不等于生产系统已经具备同等可靠性。
 
 ## 32. Scaling Law：用实验曲线规划参数、数据与计算
 
 ### 32.1 Scaling Law 研究的对象
 
-Scaling Law 讨论的是模型规模、训练数据、计算量与某个可测指标之间的经验关系。最经典的指标是验证集上的 next-token cross-entropy loss。它不是“模型越大越好”的口号，而是一个预算规划工具：在可用算力下，参数量和训练 token 应如何分配，何时继续扩大模型，何时应该改善数据或 recipe。
+Scaling Law 讨论的是模型规模、训练数据、计算量与某个可测指标之间的经验关系。[Kaplan 等人](https://arxiv.org/abs/2001.08361)和 [Hoffmann 等人](https://arxiv.org/abs/2203.15556)分别在各自公开的模型、数据和训练设置下研究了这类关系。最经典的指标是验证集上的 next-token cross-entropy loss。它不是“模型越大越好”的口号，而是一个预算规划工具：在可用算力下，参数量和训练 token 应如何分配，何时继续扩大模型，何时应该改善数据或 recipe。
 
 常用变量包括模型参数量 N、训练 token 数 D 和训练计算量 C。对于 dense Transformer，可用非常粗略的近似表达：
 
@@ -783,13 +907,48 @@ S=f(N,D,C_{\mathrm{train}},C_{\mathrm{test}},Q,H)
 
 ### 32.8 一个外推失效的教学实验
 
+下面的 Python 3.12 标准库示例输入正的规模因子和有限的曲线参数，输出构造的 loss 曲线；它演示 recipe 或数据分布发生变化时，外推曲线可能整体偏移。
+
 ~~~python
+import math
+
+
+def finite_number(name, value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"{name} must be a real number")
+    try:
+        value = float(value)
+    except OverflowError as error:
+        raise ValueError(f"{name} must be finite") from error
+    if not math.isfinite(value):
+        raise ValueError(f"{name} must be finite")
+    return value
+
+
 def predicted_loss(scale, floor=1.0, amplitude=3.0, exponent=0.22):
-    return floor + amplitude / (scale ** exponent)
+    scale = finite_number("scale", scale)
+    floor = finite_number("floor", floor)
+    amplitude = finite_number("amplitude", amplitude)
+    exponent = finite_number("exponent", exponent)
+    if scale <= 0 or floor < 0 or amplitude < 0 or exponent <= 0:
+        raise ValueError("require scale > 0, floor/amplitude >= 0 and exponent > 0")
+    try:
+        result = floor + amplitude / (scale ** exponent)
+    except OverflowError as error:
+        raise ValueError("scale and exponent exceed the demo's numeric range") from error
+    if not math.isfinite(result):
+        raise ValueError("predicted loss is not finite")
+    return result
 
 
 def shifted_loss(scale, penalty=0.18):
-    return predicted_loss(scale) + penalty
+    penalty = finite_number("penalty", penalty)
+    if penalty < 0:
+        raise ValueError("penalty must be non-negative")
+    result = predicted_loss(scale) + penalty
+    if not math.isfinite(result):
+        raise ValueError("shifted loss is not finite")
+    return result
 
 
 small = [1, 2, 4, 8]
@@ -805,7 +964,7 @@ for scale in large:
     print(scale, round(shifted_loss(scale), 4))
 ~~~
 
-这个实验没有拟合真实模型，它只说明：小规模曲线可以非常平滑，但大规模阶段若数据、架构或训练 recipe 发生系统变化，真实结果会整体偏离。正确做法是把中等规模结果回填模型，而不是把外推误差归因于“Scaling Law 完全无效”。
+使用 Python 3.12 标准库直接运行，代码输入正的 `scale` 及有限的曲线参数，输出构造曲线上的 loss 数值；例如 `predicted_loss(1)=4.0`，`predicted_loss(64)` 约为 `2.202`。负尺度、非有限参数和无法表示的幂运算会被拒绝。这个实验没有拟合真实模型，它只说明：小规模曲线可以非常平滑，但大规模阶段若数据、架构或训练 recipe 发生系统变化，真实结果会整体偏离。正确做法是把中等规模结果回填模型，而不是把外推误差归因于“Scaling Law 完全无效”。
 
 ### 32.9 预算决策的顺序
 
@@ -873,6 +1032,8 @@ loss 可能按 token 平均、按序列平均，可能包含 padding，也可能
 
 ### 33.7 交叉熵与 PPL 的可运行示例
 
+代码依赖 PyTorch 2.x，输入 logits 的 shape 为 `[batch, length, vocab]`、token id 的 shape 为 `[batch, length]`，输出 token 平均交叉熵及其指数 PPL。标签右移后才与预测位置对齐；若传入 `ignore_index`，相应目标不计入 loss；类别索引和忽略规则见 [PyTorch `CrossEntropyLoss` 文档](https://docs.pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html)。
+
 ~~~python
 import math
 import torch
@@ -884,8 +1045,17 @@ def lm_loss_and_ppl(logits, input_ids, ignore_index=None):
         raise ValueError("logits must be [batch, length, vocab] and ids must be [batch, length]")
     if logits.shape[:2] != input_ids.shape:
         raise ValueError("logits and input_ids must have matching batch and length")
-    if input_ids.size(1) < 2 or logits.size(-1) <= 0:
-        raise ValueError("sequence length must be at least two and vocab must be non-empty")
+    if input_ids.size(1) < 2 or logits.size(-1) <= 1:
+        raise ValueError("sequence length must be at least two and vocab must have at least two classes")
+    if not torch.is_floating_point(logits):
+        raise TypeError("logits must use a floating-point dtype")
+    if input_ids.dtype != torch.long:
+        raise TypeError("input_ids must use torch.long class indices")
+    if logits.device != input_ids.device:
+        raise ValueError("logits and input_ids must be on the same device")
+    if (ignore_index is not None
+            and (not isinstance(ignore_index, int) or isinstance(ignore_index, bool))):
+        raise TypeError("ignore_index must be an integer or None")
     if not torch.isfinite(logits).all().item():
         raise ValueError("logits must be finite")
     shift_logits = logits[:, :-1, :].contiguous()
@@ -907,17 +1077,21 @@ def lm_loss_and_ppl(logits, input_ids, ignore_index=None):
     )
     if not torch.isfinite(loss).item():
         raise ValueError("loss must be finite")
-    return loss, math.exp(loss.item())
+    try:
+        ppl = math.exp(loss.item())
+    except OverflowError as error:
+        raise OverflowError("perplexity exceeds the Python float range") from error
+    return loss, ppl
 
 
 torch.manual_seed(0)
 logits = torch.randn(2, 5, 8)
-input_ids = torch.tensor([[1, 2, 3, 4, 5], [1, 2, 2, 3, 6]])
-loss, ppl = lm_loss_and_ppl(logits, input_ids)
+input_ids = torch.tensor([[1, 2, 3, 4, 5], [1, 2, 2, -100, 6]])
+loss, ppl = lm_loss_and_ppl(logits, input_ids, ignore_index=-100)
 print("loss=", round(loss.item(), 4), "ppl=", round(ppl, 4))
 ~~~
 
-`shift_logits` 与 `shift_labels` 的错位是语言模型 loss 中最常见的实现细节之一。若把同一位置的 logits 与同一位置的 input 当作目标，就会改变任务定义；若 padding 没有设为 ignore index，短样本会被无效位置污染。
+在固定随机种子的示例中，函数返回有限 loss 和 `exp(loss)`；具体浮点末位依赖 PyTorch 版本。`shift_logits` 与 `shift_labels` 的错位是语言模型 loss 中最常见的实现细节之一。若把同一位置的 logits 与同一位置的 input 当作目标，就会改变任务定义；若 padding 没有设为 ignore index，短样本会被无效位置污染。该示例没有实现序列级加权、分布式 reduction 或模型训练评估。
 
 ### 33.8 checkpoint 选择不能只看最低 loss
 
@@ -985,30 +1159,66 @@ FP16 动态范围有限，attention logits、softmax、norm、loss 和梯度都�
 
 ### 34.8 finite 检查与裁剪代码
 
+输入是 PyTorch 2.x `model`、可供 `model(**batch)` 使用的 batch、optimizer，以及正的有限 `max_grad_norm`；输出为标量 loss 和裁剪前梯度范数。代码末尾用一个线性模型的平方误差演示一次更新，不是语言模型训练。AMP 下还必须先 unscale 再裁剪。
+
 ~~~python
+import math
 import torch
+from types import SimpleNamespace
 
 
 def train_step(model, batch, optimizer, max_grad_norm=1.0):
-    if not torch.isfinite(torch.tensor(max_grad_norm)).item() or max_grad_norm <= 0:
+    if isinstance(max_grad_norm, bool) or not isinstance(max_grad_norm, (int, float)):
+        raise TypeError("max_grad_norm must be a real number")
+    try:
+        max_grad_norm = float(max_grad_norm)
+    except OverflowError as error:
+        raise ValueError("max_grad_norm must be finite") from error
+    if not math.isfinite(max_grad_norm) or max_grad_norm <= 0:
         raise ValueError("max_grad_norm must be finite and positive")
     optimizer.zero_grad(set_to_none=True)
     output = model(**batch)
     loss = output.loss
-    if not torch.isfinite(loss):
+    if not isinstance(loss, torch.Tensor) or loss.ndim != 0:
+        raise ValueError("model output must contain a scalar loss tensor")
+    if not torch.is_floating_point(loss):
+        raise TypeError("loss must use a floating-point dtype")
+    if not torch.isfinite(loss).item():
         raise RuntimeError("non-finite loss")
 
     loss.backward()
     grad_norm = torch.nn.utils.clip_grad_norm_(
         model.parameters(), max_norm=max_grad_norm
     )
-    if not torch.isfinite(grad_norm):
+    if not torch.isfinite(grad_norm).item():
         raise RuntimeError("non-finite gradient norm")
     optimizer.step()
+    if any(not torch.isfinite(parameter).all().item()
+           for parameter in model.parameters()):
+        raise RuntimeError("optimizer produced non-finite parameters")
     return float(loss.detach()), float(grad_norm)
+
+
+class ToyModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.projection = torch.nn.Linear(2, 1)
+
+    def forward(self, features):
+        prediction = self.projection(features)
+        return SimpleNamespace(loss=prediction.square().mean())
+
+
+torch.manual_seed(0)
+model = ToyModel()
+optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+loss, grad_norm = train_step(
+    model, {"features": torch.tensor([[1.0, 2.0], [2.0, 1.0]])}, optimizer
+)
+print("loss=", round(loss, 4), "preclip_grad_norm=", round(grad_norm, 4))
 ~~~
 
-在 AMP 中必须先把 scaled gradient unscale，再裁剪；这一点放到下一节详细解释。生产训练还要避免在异常后无条件执行 optimizer.step，并保证最后一个健康 checkpoint 不被覆盖。
+这里使用单卡 eager 模式、无 AMP 的 PyTorch 标量 loss；调用方须提供有限 batch，并在该函数报错后保留异常现场。AMP 中必须先把 scaled gradient unscale，再裁剪。生产训练还要避免在异常后无条件执行 optimizer.step，并保证最后一个健康 checkpoint 不被覆盖。
 
 ## 35. 混合精度：FP16、BF16 与 FP8 的数值取舍
 
@@ -1016,7 +1226,7 @@ def train_step(model, batch, optimizer, max_grad_norm=1.0):
 
 浮点数的指数位主要决定动态范围，尾数位主要决定相对精度。数值范围不足会 overflow 或 underflow；精度不足会让相近数被舍入到相同表示。训练中两种问题都可能影响收敛，但大模型首先需要防止 Inf、NaN 和梯度归零。
 
-FP32 使用 32 bit，范围和精度都较好；FP16 使用 16 bit，节省显存但指数位少；BF16 也是 16 bit，却保留接近 FP32 的指数范围，尾数更短；FP8 进一步压缩到 8 bit，需要显式缩放和高精度累加。
+FP32 使用 32 bit，范围和精度都较好；FP16 使用 16 bit，节省显存但指数位少；BF16 也是 16 bit，却保留接近 FP32 的指数范围，尾数更短；FP8 进一步压缩到 8 bit，需要显式缩放和高精度累加。FP16 loss scaling 的训练动机和实验设置见 [Micikevicius 等人的论文](https://arxiv.org/abs/1710.03740)；框架中的 autocast、GradScaler 和更新次序见 [PyTorch AMP 指南](https://docs.pytorch.org/tutorials/recipes/recipes/amp_recipe.html)。
 
 ### 35.2 FP16 与 loss scaling
 
@@ -1032,7 +1242,7 @@ AMP 的正确顺序是：autocast 前向，scale loss，反向，unscale 梯度�
 
 ### 35.3 为什么 BF16 常用于大模型
 
-BF16 的指数位与 FP32 接近，因此大激活和梯度更不容易溢出，通常不需要 FP16 那样的动态 loss scaling。它的尾数精度较低，所以并非“完全等同 FP32”；loss、归一化统计、reduction、optimizer state 和关键累加仍常保留 FP32。
+BF16 的指数位与 FP32 接近，因此大激活和梯度更不容易溢出，通常不需要 FP16 那样的动态 loss scaling。[Kalamkar 等人的 BFLOAT16 研究](https://arxiv.org/abs/1905.12322)比较了多类训练任务中的该数值格式；实际支持和操作语义还取决于设备与框架。它的尾数精度较低，所以并非“完全等同 FP32”；loss、归一化统计、reduction、optimizer state 和关键累加仍常保留 FP32。
 
 在支持 BF16 的硬件上，BF16 往往是效率与稳定性的折中。旧硬件、特定 kernel 或精细数值任务可能不支持或不适合 BF16，因此 dtype 选择必须与设备和实现绑定。
 
@@ -1066,6 +1276,8 @@ s 太大可能溢出，太小会让大量值量化为 0；如果 x 的分布随�
 即使 dtype 合理，错误的 mask、过大的 attention score 或自定义 kernel 中的 accumulation dtype 也能造成 NaN。
 
 ### 35.7 CPU 上观察范围和精度
+
+依赖 PyTorch 2.x CPU；输入四个构造数值，输出每种 dtype 的最大有限值、机器精度、转换后的张量和有限值标志。该代码观察浮点表示，不测量设备吞吐或训练收敛。
 
 ~~~python
 import torch
@@ -1120,13 +1332,13 @@ checkpoint 名称和 manifest 应包含 run id、step、consumed tokens、数据
 
 ### 36.4 sharded 与 consolidated
 
-在 FSDP、ZeRO 或 tensor parallel 中，参数和 optimizer state 分散在多个 rank。sharded checkpoint 让各 rank 并行写入，适合超大模型；consolidated checkpoint 方便单机推理和发布，却可能需要额外聚合内存与 I/O。
+在 FSDP、ZeRO 或 tensor parallel 中，参数和 optimizer state 分散在多个 rank。sharded checkpoint 让各 rank 并行写入，适合超大模型；consolidated checkpoint 方便单机推理和发布，却可能需要额外聚合内存与 I/O。PyTorch 的 [distributed checkpoint 文档](https://pytorch.org/docs/stable/distributed.checkpoint.html)提供了对应的分布式状态保存接口入口，具体语义仍要按所用版本核对。
 
 恢复时不一定保持相同 GPU 数。若要从 128 卡保存的状态恢复到 64 卡，需要 resharding 和可靠的元数据。只把 shard 文件拼接起来通常不够，因为参数布局、optimizer 分片和并行组都可能变化。
 
 ### 36.5 异步保存的一致性
 
-大 checkpoint 写入可能需要很长时间。异步保存可以让训练更快继续，但必须保证“写入完成”与“状态可用”之间有明确协议。常见流程是写临时目录、完成所有 shard、写 manifest、校验 checksum、原子切换目录名，再把 status 标成 complete。加载器只接受 complete 且校验通过的状态。
+大 checkpoint 写入可能需要很长时间。异步保存可以让训练更快继续，但必须保证“写入完成”与“状态可用”之间有明确协议。常见做法是写入新的不可变前缀、完成所有 shard、写 manifest 并校验 checksum，最后提交一个 `complete` 标记或更新版本指针；同一文件系统上的目录改名可以使用原子 rename，而对象存储通常应使用 manifest/条件写入等提交协议，不能假定 rename 原子。加载器只接受 complete 且校验通过的状态。
 
 ### 36.6 恢复后 loss 跳变的定位
 
@@ -1135,6 +1347,8 @@ checkpoint 名称和 manifest 应包含 run id、step、consumed tokens、数据
 严格 bitwise reproducibility 需要相同硬件、kernel、随机数、数据顺序和并行策略。许多大规模训练只要求 statistical reproducibility，即恢复后的趋势和最终能力接近；但无论目标是哪一种，都应避免未解释的巨大 loss 跳变。
 
 ### 36.7 一个简化的保存与恢复示例
+
+以下示例依赖 PyTorch 2.x 与 NumPy，输入是小型线性模型、AdamW optimizer、学习率 scheduler、step 和数据游标；输出展示保存后修改参数，再从 checkpoint 恢复模型、优化器、scheduler、CPU 随机状态和游标。它是 CPU 教学演示，不覆盖 CUDA RNG、分布式 shard 或故障原子性。PyTorch 的通用 checkpoint 指南也建议按恢复目标保存必要状态，参见[官方示例](https://pytorch.org/tutorials/recipes/recipes/saving_and_loading_a_general_checkpoint.html)。
 
 ~~~python
 import random
@@ -1161,6 +1375,7 @@ def save_state(path, model, optimizer, scheduler, step, data_state=None):
 
 
 def load_state(path, model, optimizer, scheduler=None):
+    # weights_only=False 会反序列化 Python 对象；仅对可信 checkpoint 使用。
     state = torch.load(path, map_location="cpu", weights_only=False)
     model.load_state_dict(state["model"])
     optimizer.load_state_dict(state["optimizer"])
@@ -1170,9 +1385,33 @@ def load_state(path, model, optimizer, scheduler=None):
     np.random.set_state(state["rng"]["numpy"])
     torch.set_rng_state(state["rng"]["torch"])
     return state["step"], state["data_state"]
+
+
+torch.manual_seed(7)
+model = torch.nn.Linear(2, 1)
+optimizer = torch.optim.AdamW(model.parameters(), lr=0.01)
+scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.5)
+batch = torch.tensor([[1.0, 2.0]])
+optimizer.zero_grad(set_to_none=True)
+model(batch).square().mean().backward()
+optimizer.step()
+scheduler.step()
+expected = {key: value.detach().clone() for key, value in model.state_dict().items()}
+
+with tempfile.TemporaryDirectory() as directory:
+    path = f"{directory}/training-state.pt"
+    save_state(path, model, optimizer, scheduler, step=1,
+               data_state={"shard": 2, "offset": 16})
+    with torch.no_grad():
+        for parameter in model.parameters():
+            parameter.add_(100.0)
+    step, data_state = load_state(path, model, optimizer, scheduler)
+    restored = all(torch.equal(model.state_dict()[key], value)
+                   for key, value in expected.items())
+    print("restored:", step, data_state, "parameters=", restored)
 ~~~
 
-生产系统还要保存 CUDA RNG、GradScaler、分布式分片、版本和 manifest。加载不可信 checkpoint 时必须遵守框架的安全加载约束；训练状态文件不能因为扩展名是 `.pt` 就被当作可信输入。
+预期输出为 `restored: 1 {'shard': 2, 'offset': 16} parameters= True`。这里的 `weights_only=False` 会反序列化 checkpoint 中的 Python 对象，只能用于可信文件；不可信权重应优先采用受限加载或张量专用格式。生产系统还要保存 CUDA RNG、GradScaler、分布式分片、版本和 manifest；训练状态文件不能因为扩展名是 `.pt` 就被当作可信输入。
 
 ## 37. 评估集设计与停止决策
 
@@ -1235,7 +1474,12 @@ SE\approx\sqrt{\frac{\hat p(1-\hat p)}{n}}
 
 ### 37.7 一个候选选择器
 
+代码输入三个带验证 loss、代码 loss、数学分数、安全分数和稳定性标志的候选 checkpoint，先执行硬性筛选，再在剩余候选中按预先声明的目标分排序；`code` 越低越好，`math` 越高越好。它使用 Python 3.12 标准库运行，分数是构造数据，不代表真实模型质量。
+
 ~~~python
+import math
+
+
 checkpoints = [
     {"name": "a", "val": 1.90, "code": 1.48, "math": 0.41, "safety": 0.97, "stable": True},
     {"name": "b", "val": 1.87, "code": 1.46, "math": 0.45, "safety": 0.95, "stable": True},
@@ -1243,6 +1487,22 @@ checkpoints = [
 ]
 if not checkpoints:
     raise ValueError("at least one checkpoint is required")
+required_numeric = ("val", "code", "math", "safety")
+for item in checkpoints:
+    if not isinstance(item, dict) or not isinstance(item.get("name"), str) or not item["name"]:
+        raise ValueError("each checkpoint must have a name")
+    for key in required_numeric:
+        value = item.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("checkpoint metrics must be finite numbers")
+        try:
+            finite = math.isfinite(float(value))
+        except OverflowError:
+            finite = False
+        if not finite:
+            raise ValueError("checkpoint metrics must be finite numbers")
+    if not isinstance(item.get("stable"), bool):
+        raise ValueError("stable must be a boolean")
 
 best_val = min(item["val"] for item in checkpoints)
 eligible = [
@@ -1259,7 +1519,7 @@ print("eligible:", [item["name"] for item in eligible])
 print("selected:", selected["name"])
 ~~~
 
-这段代码展示的是决策顺序，不是通用权重。不同产品可以把代码通过率、语言一致性、延迟或偏好指标放在目标函数中，但规则应在看结果之前确定，避免事后只挑最有利的 checkpoint。
+预期输出为 `eligible: ['a', 'b']` 和 `selected: b`。这段代码展示的是决策顺序，不是通用权重。不同产品可以把代码通过率、语言一致性、延迟或偏好指标放在目标函数中，但规则应在看结果之前确定，避免事后只挑最有利的 checkpoint。
 
 ### 37.8 评估频率的分层
 
@@ -1272,6 +1532,8 @@ print("selected:", selected["name"])
 多语言模型要同时解决数据数量不均衡、质量差异、tokenizer 效率、共享容量竞争、跨语言迁移和评估覆盖不足。按原始网页量训练通常让英文等高资源语言占主导；完全均匀采样又可能让低资源语言重复过多。
 
 产品目标决定配比：全球助手、中英技术助手、翻译模型和低资源语言模型需要不同的数据、tokenizer 和评估，不能用一个“多语言比例”概括。
+
+XLM-R 与 NLLB 分别研究了多语言预训练表示和多语言机器翻译的数据扩展；它们的经验必须限定在各自的语料、模型与任务范围内（[XLM-R](https://arxiv.org/abs/1911.02116)，[NLLB](https://arxiv.org/abs/2207.04672)）。
 
 ### 38.2 温度采样与重复暴露
 
@@ -1317,27 +1579,54 @@ q_i=\frac{p_i^\alpha}{\sum_jp_j^\alpha}
 
 ### 38.8 采样表的教学实现
 
+下面的 Python 3.12 标准库代码输入语言可用 token 数、总预算和温度，输出各语言计划量与 exposure。它在 log-space 中计算温度权重，并拒绝布尔值、非正可用量、负预算和非有限参数；这个离线计划不包含有放回抽样方差或动态数据耗尽策略。
+
 ~~~python
 import math
+from collections.abc import Mapping
 
 
 def language_plan(available, budget, temperature):
-    if not available or any(
-        not math.isfinite(amount) or amount <= 0
-        for amount in available.values()
-    ):
-        raise ValueError("available data must be non-empty and positive")
+    if not isinstance(available, Mapping) or not available:
+        raise ValueError("available data must be a non-empty mapping")
+    amounts = {}
+    for language, amount in available.items():
+        if not isinstance(language, str) or not language:
+            raise ValueError("language keys must be non-empty strings")
+        if isinstance(amount, bool) or not isinstance(amount, (int, float)):
+            raise TypeError("available amounts must be real numbers")
+        try:
+            amount = float(amount)
+        except OverflowError as error:
+            raise ValueError("available amounts must be finite") from error
+        if not math.isfinite(amount) or amount <= 0:
+            raise ValueError("available amounts must be finite and positive")
+        amounts[language] = amount
+    if isinstance(budget, bool) or not isinstance(budget, (int, float)):
+        raise TypeError("budget must be a real number")
+    if isinstance(temperature, bool) or not isinstance(temperature, (int, float)):
+        raise TypeError("temperature must be a real number")
+    try:
+        budget = float(budget)
+        temperature = float(temperature)
+    except OverflowError as error:
+        raise ValueError("budget and temperature must be finite") from error
     if not math.isfinite(budget) or budget < 0:
         raise ValueError("budget must be finite and non-negative")
     if not math.isfinite(temperature) or temperature <= 0:
         raise ValueError("temperature must be finite and positive")
-    total = sum(available.values())
-    raw = {lang: amount / total for lang, amount in available.items()}
-    alpha = 1.0 / temperature
-    weights = {lang: ratio ** alpha for lang, ratio in raw.items()}
-    normalizer = sum(weights.values())
-    plan = {lang: budget * weight / normalizer for lang, weight in weights.items()}
-    exposure = {lang: plan[lang] / available[lang] for lang in available}
+    log_amounts = {lang: math.log(amount) for lang, amount in amounts.items()}
+    largest_log = max(log_amounts.values())
+    weights = {
+        lang: math.exp((log_amount - largest_log) / temperature)
+        for lang, log_amount in log_amounts.items()
+    }
+    normalizer = math.fsum(weights.values())
+    ratios = {lang: weight / normalizer for lang, weight in weights.items()}
+    plan = {lang: budget * ratio for lang, ratio in ratios.items()}
+    exposure = {lang: plan[lang] / amounts[lang] for lang in amounts}
+    if any(not math.isfinite(value) for value in exposure.values()):
+        raise OverflowError("exposure exceeds the Python float range")
     return plan, exposure
 
 
@@ -1349,7 +1638,7 @@ for temperature in [1.0, 2.0, 5.0]:
     print("exposure=", {k: round(v, 2) for k, v in exposure.items()})
 ~~~
 
-斯瓦希里语等低资源语言在高温度下会获得更多训练比例，但曝光倍数也可能非常高。模型最终是否受益，需要由原生 fresh 评估和人工质量验证回答。
+温度 `T=1` 对应原始数据比例；温度增大时，斯瓦希里语等低资源语言获得更高比例，但曝光倍数也可能变大。计划表可以用来提前发现重复风险，模型最终是否受益仍需由原生 fresh 评估和人工质量验证回答。
 
 ## 39. 代码模型预训练：结构、执行反馈与软件工程任务
 
@@ -1363,7 +1652,7 @@ for temperature in [1.0, 2.0, 5.0]:
 
 常见来源包括开源仓库、官方 API 文档、README、issue、PR、commit、技术问答、单元测试、合成任务和获授权的内部代码。采集时需要保存仓库 revision、license、语言、路径和时间，过滤二进制、minified 文件、vendor 依赖、自动生成代码、密钥和敏感配置。
 
-代码去重要处理 fork、模板、复制粘贴、不同版本和 benchmark 污染。仅对完整文件做 hash 不够，还要在函数、token n-gram 和仓库关系上建立重复簇。
+代码去重要处理 fork、模板、复制粘贴、不同版本和 benchmark 污染。仅对完整文件做 hash 不够，还要在函数、token n-gram 和仓库关系上建立重复簇；代码语料与许可治理的公开案例可参见 [The Stack v2 / StarCoder 2](https://arxiv.org/abs/2402.19173) 和 [BigCode Responsible AI](https://arxiv.org/abs/2308.07124)。
 
 ### 39.3 代码 tokenizer
 
@@ -1395,7 +1684,7 @@ Fill-in-the-Middle 将代码拆成 prefix、middle、suffix，让模型根据左
 
 ### 39.7 pass@k 的定义
 
-若为一道题生成 n 个候选，其中 c 个通过测试，常用的 pass@k 无偏估计形式为：
+若为一道题生成 n 个候选，其中 c 个通过测试，常用的 pass@k 无偏估计形式为 [HumanEval 论文](https://arxiv.org/abs/2107.03374)所用的组合估计：
 
 ~~~math
 \widehat{\mathrm{pass@}k}
@@ -1406,11 +1695,17 @@ Fill-in-the-Middle 将代码拆成 prefix、middle、suffix，让模型根据左
 
 ### 39.8 一个 FIM 与 pass@k 示例
 
+下面的 Python 3.12 标准库示例输入原始代码和 middle span 的半开区间 `[start, end)`，构造 FIM 协议字符串，并根据候选数 `n`、通过数 `c` 与抽样数 `k` 计算 pass@k。FIM 训练目标见 [Bavarian 等人的论文](https://arxiv.org/abs/2301.03988)；示例特殊 token 字面值仅作说明，实际名称由 tokenizer 协议决定。
+
 ~~~python
-from math import comb
-
-
 def build_fim(code, start, end):
+    if not isinstance(code, str):
+        raise TypeError("code must be a string")
+    if any(not isinstance(value, int) or isinstance(value, bool)
+           for value in (start, end)):
+        raise TypeError("start and end must be integers")
+    if start < 0 or end < start or end > len(code):
+        raise ValueError("require 0 <= start <= end <= len(code)")
     return (
         "<fim_prefix>" + code[:start]
         + "<fim_suffix>" + code[end:]
@@ -1428,7 +1723,10 @@ def pass_at_k(n, c, k):
         return 0.0
     if n - c < k:
         return 1.0
-    return 1.0 - comb(n - c, k) / comb(n, k)
+    miss_probability = 1.0
+    for index in range(k):
+        miss_probability *= (n - c - index) / (n - index)
+    return 1.0 - miss_probability
 
 
 code = "def area(r):\n    return 3.14 * r * r\n"
@@ -1455,7 +1753,7 @@ for k in [1, 5, 10]:
 8. 安全漏洞与不安全 API 识别；
 9. 延迟、采样次数和执行成本。
 
-SWE-bench 等仓库任务把模型放进更接近真实的软件环境，但其结果仍依赖 harness、补丁应用、测试命令和环境版本。评估报告必须把这些条件写清楚。
+SWE-bench 等仓库任务把模型放进更接近真实的软件环境；[SWE-bench 论文](https://arxiv.org/abs/2310.06770)定义了其 issue 解决任务，但结果仍依赖 harness、补丁应用、测试命令和环境版本。评估报告必须把这些条件写清楚。
 
 ### 39.10 代码安全与工具权限
 
@@ -1602,14 +1900,14 @@ tokenizer_version, data_version, inclusion_reason
     https://arxiv.org/abs/2005.14165
 15. Micikevicius et al., *Mixed Precision Training*：FP16、loss scaling 与混合精度。
     https://arxiv.org/abs/1710.03740
-16. Wang and Kanwar, *BFloat16: The secret to high performance on Cloud TPUs*：BF16 的范围与硬件背景。
+16. Kalamkar et al., *A Study of BFLOAT16 for Deep Learning Training*：BF16 数值范围及多类训练任务实验；不代表所有当前硬件的吞吐或 kernel 表现。
     https://arxiv.org/abs/1905.12322
 17. Micikevicius et al., *FP8 Formats for Deep Learning*：FP8 格式与训练数值问题。
     https://arxiv.org/abs/2209.05433
 18. Wang et al., *DeepNet: Scaling Transformers to 1,000 Layers*：深层 Transformer 稳定性与 DeepNorm。
     https://arxiv.org/abs/2203.00555
 19. PyTorch, *Automatic Mixed Precision package*：autocast、GradScaler 与 AMP 工程接口。
-    https://pytorch.org/tutorials/recipes/recipes/amp_recipe.html
+    https://docs.pytorch.org/tutorials/recipes/recipes/amp_recipe.html
 20. PyTorch, *Saving and Loading a General Checkpoint in PyTorch*：模型、优化器和训练状态保存。
     https://pytorch.org/tutorials/recipes/recipes/saving_and_loading_a_general_checkpoint.html
 21. PyTorch, *torch.distributed.checkpoint*：分布式 checkpoint 接口。
@@ -1630,3 +1928,9 @@ tokenizer_version, data_version, inclusion_reason
     https://arxiv.org/abs/2305.06161
 29. *BigCode: Open Code LLMs Meet Responsible AI*：代码模型数据治理、许可和责任边界。
     https://arxiv.org/abs/2308.07124
+30. Raffel et al., *Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer*：T5 与 C4 语料的构造和使用背景。
+    https://arxiv.org/abs/1910.10683
+31. PyTorch, *Automatic Mixed Precision examples*：autocast、GradScaler 与 AMP 更新次序的官方教程。
+    https://docs.pytorch.org/tutorials/recipes/recipes/amp_recipe.html
+32. PyTorch, *CrossEntropyLoss*：类别索引、`ignore_index` 和 reduction 的公开接口语义。
+    https://docs.pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html

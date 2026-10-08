@@ -12,6 +12,7 @@ htmlcov/
 .venv/
 venv/
 env/
+.tmp/
 
 # Build and packaging artifacts
 build/
