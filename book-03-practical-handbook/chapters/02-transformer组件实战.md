@@ -1194,6 +1194,8 @@ class PreLNBlock(nn.Module):
         self.ffn = FeedForward(d_model, d_model * mlp_ratio, dropout)
 
     def forward(self, x, keep_mask=None, return_weights=False):
+        if keep_mask is None:
+            raise ValueError("decoder block requires keep_mask; callers must include causal visibility")
         attn_out, weights = self.attn(self.ln1(x), keep_mask)
         x = x + attn_out
         ffn_out = self.ffn(self.ln2(x))
@@ -1217,7 +1219,7 @@ print("block_output_shape=", tuple(y.shape))
 print("block_weights_shape=", tuple(weights.shape))
 ```
 
-这个 block 尚未包含 RoPE、KV Cache 或 RMSNorm；组合新组件时要逐层替换，并保留这些 shape 断言。
+这个 block 尚未包含 RoPE、KV Cache 或 RMSNorm；组合新组件时要逐层替换，并保留这些 shape 断言。由于它用于 decoder，调用时必须传入因果 keep mask（并按需与 padding mask 组合）；省略 mask 会让未来位置可见，因此实现会明确报错。
 
 ### 2.5.6 残差连接的梯度路径
 
@@ -1889,6 +1891,8 @@ class ModernDecoderBlock(nn.Module):
         self.hidden_dim = hidden_dim
 
     def forward(self, x, keep_mask=None, position_offset=0):
+        if keep_mask is None:
+            raise ValueError("decoder block requires keep_mask; callers must include causal visibility")
         attn_out, weights = self.attn(
             self.attn_norm(x),
             keep_mask=keep_mask,
@@ -1973,7 +1977,8 @@ SwiGLU output             [B,T,D]
 2. PyTorch nn.Embedding：<https://docs.pytorch.org/docs/stable/generated/torch.nn.Embedding.html>。查表、padding_idx 和索引输入。
 3. PyTorch scaled_dot_product_attention：<https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html>。SDPA、布尔/浮点 mask 和 causal 参数。
 4. PyTorch MultiheadAttention：<https://docs.pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html>。官方 MHA 的输入、输出和 mask 语义。
-5. Su 等，RoFormer: Enhanced Transformer with Rotary Position Embedding：<https://arxiv.org/abs/2104.09864>。RoPE 的旋转构造和相对位置性质。
-6. Zhang 与 Sennrich，Root Mean Square Layer Normalization：<https://arxiv.org/abs/1910.07467>。RMSNorm。
-7. Shazeer，GLU Variants Improve Transformer：<https://arxiv.org/abs/2002.05202>。GLU 变体与 SwiGLU。
-8. Touvron 等，LLaMA: Open and Efficient Foundation Language Models：<https://arxiv.org/abs/2302.13971>。RMSNorm、RoPE、SwiGLU 组合的公开架构背景。
+5. PyTorch LayerNorm 与 Dropout：<https://docs.pytorch.org/docs/stable/generated/torch.nn.LayerNorm.html>、<https://docs.pytorch.org/docs/stable/generated/torch.nn.Dropout.html>。核对归一化维度和训练/评估模式行为。
+6. Su 等，RoFormer: Enhanced Transformer with Rotary Position Embedding：<https://arxiv.org/abs/2104.09864>。RoPE 的旋转构造和相对位置性质。
+7. Zhang 与 Sennrich，Root Mean Square Layer Normalization：<https://arxiv.org/abs/1910.07467>。RMSNorm。
+8. Shazeer，GLU Variants Improve Transformer：<https://arxiv.org/abs/2002.05202>。GLU 变体与 SwiGLU。
+9. Touvron 等，LLaMA: Open and Efficient Foundation Language Models：<https://arxiv.org/abs/2302.13971>。RMSNorm、RoPE、SwiGLU 组合的公开架构背景。

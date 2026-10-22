@@ -17,18 +17,19 @@
 5. Scaling Laws for Neural Language Models
 6. Chinchilla
 7. [LoRA: Low-Rank Adaptation of Large Language Models](https://arxiv.org/abs/2106.09685)
-8. [Direct Preference Optimization](https://arxiv.org/abs/2305.18290)
-9. FlashAttention
-10. CLIP
-11. PagedAttention / vLLM 相关论文与技术报告
-12. Mamba / Selective State Space Models
-13. Constitutional AI / RLAIF 相关论文
-14. ReAct / Toolformer / Function Calling 与 Agent 工具使用论文线
-15. SimPO / ORPO / KTO 等 reference-free 或轻量偏好优化论文线
-16. DeepSeek-R1 / GRPO / RLVR / DAPO 等 reasoning 后训练论文线
-17. vAttention / FlashInfer 等 inference serving 内存与 kernel 论文线
-18. GraphRAG 等结构化 RAG 论文线
-19. [Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks](https://arxiv.org/abs/2005.11401)：从参数化与非参数化记忆的结合理解 RAG；论文实验范围不等于任意生产检索系统的事实性保证。
+8. [QLoRA: Efficient Finetuning of Quantized LLMs](https://arxiv.org/abs/2305.14314)
+9. [Direct Preference Optimization](https://arxiv.org/abs/2305.18290)
+10. FlashAttention
+11. CLIP
+12. PagedAttention / vLLM 相关论文与技术报告
+13. Mamba / Selective State Space Models
+14. Constitutional AI / RLAIF 相关论文
+15. ReAct / Toolformer / Function Calling 与 Agent 工具使用论文线
+16. SimPO / ORPO / KTO 等 reference-free 或轻量偏好优化论文线
+17. DeepSeek-R1 / GRPO / RLVR / DAPO 等 reasoning 后训练论文线
+18. vAttention / FlashInfer 等 inference serving 内存与 kernel 论文线
+19. GraphRAG 等结构化 RAG 论文线
+20. [Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks](https://arxiv.org/abs/2005.11401)：从参数化与非参数化记忆的结合理解 RAG；论文实验范围不等于任意生产检索系统的事实性保证。
 
 ## 核心方向
 
@@ -82,6 +83,8 @@ Transformer 核心机制入口：
 4. [HNSW](https://arxiv.org/abs/1603.09320)、[FAISS](https://arxiv.org/abs/1702.08734)、[BEIR](https://arxiv.org/abs/2104.08663) 与 [MTEB](https://arxiv.org/abs/2210.07316)：近似检索系统和跨任务评估；目标语料仍要单独测过滤后召回和端到端质量。
 5. [MonoT5](https://arxiv.org/abs/2003.06713) 与 [ColBERT](https://arxiv.org/abs/2004.12832)：生成式精排与 late-interaction 检索设计。
 6. [ALCE](https://arxiv.org/abs/2305.14627)、[ARES](https://arxiv.org/abs/2311.09476) 与 [RAGTruth](https://arxiv.org/abs/2401.00396)：带引用生成、RAG 自动评估和不忠实回答分析。
+7. [FActScore](https://arxiv.org/abs/2305.14251) 与 [AttributionBench](https://aclanthology.org/2024.findings-acl.886/)：细粒度事实核验和自动引用归因评估；结论绑定其原论文数据与评审协议。
+8. [RAGAS](https://arxiv.org/abs/2309.15217)：RAG 自动化评估框架；指标应结合人工校准和目标语料解释。
 
 ### 训练
 
@@ -94,6 +97,7 @@ Scaling Law、Chinchilla、数据配比、分布式训练、训练稳定性。
 3. [Reconciling Modern Machine-Learning Practice and the Classical Bias–Variance Trade-Off](https://arxiv.org/abs/1812.11118) 与 [Deep Double Descent](https://arxiv.org/abs/1912.02292)：插值区间和不同复杂度轴上的双下降实验。
 4. [What Uncertainties Do We Need in Bayesian Deep Learning for Computer Vision?](https://arxiv.org/abs/1703.04977) 与 [On Calibration of Modern Neural Networks](https://arxiv.org/abs/1706.04599)：不确定性类型和分类校准；结论需按论文任务阅读。
 5. [Understanding the Difficulty of Training Deep Feedforward Neural Networks](https://proceedings.mlr.press/v9/glorot10a.html) 与 [On the Difficulty of Training Recurrent Neural Networks](https://arxiv.org/abs/1211.5063)：初始化尺度与梯度消失/爆炸问题。
+6. [Adam](https://arxiv.org/abs/1412.6980) 与 [Decoupled Weight Decay Regularization / AdamW](https://arxiv.org/abs/1711.05101)：自适应矩估计、偏差修正和解耦 weight decay；算法公式不替代目标框架的版本化实现语义。
 
 ### 对齐
 
@@ -150,6 +154,7 @@ ReAct、Toolformer、function calling、MCP、A2A、agent evaluation、coding ag
 8. [Plan-and-Solve Prompting](https://arxiv.org/abs/2305.04091)、[Reflexion](https://arxiv.org/abs/2303.11366) 与 [Voyager](https://arxiv.org/abs/2305.16291)：规划、反馈更新和长程环境技能积累的不同研究设置。
 9. [Indirect Prompt Injection](https://arxiv.org/abs/2302.12173)：外部检索内容如何影响工具型应用的安全研究。
 10. [MemGPT](https://arxiv.org/abs/2310.08560)、[Generative Agents](https://arxiv.org/abs/2304.03442) 与 [LongMem](https://arxiv.org/abs/2306.07174)：运行时记忆、反思规划和长程上下文增强；不构成隐私或删除保证。
+11. [AgentDojo](https://arxiv.org/abs/2406.13352) 与 [ToolSandbox](https://arxiv.org/abs/2408.04682)：分别研究 prompt injection 防御及状态化工具使用评估；其测试环境不替代目标系统的权限和副作用审计。
 
 ### AI Infra 与 Serving Engine
 

@@ -129,7 +129,7 @@ private holdout：不公开、不参与日常调参，用于防止过拟合
 选择题、标签分类和严格协议适合 exact match：
 
 ```math
-s_i^{\mathrm{EM}}=\mathbb{1}[\operatorname{normalize}(\hat y_i)=\operatorname{normalize}(y_i)]
+s_i^{\mathrm{EM}}=\mathbb{1}[\mathrm{normalize}(\hat y_i)=\mathrm{normalize}(y_i)]
 ```
 
 其中 `normalize` 只能做预先约定的处理，例如去掉首尾空白、统一大小写或抽取选项字母。不能为了让分数变高而任意删除内容。
@@ -138,7 +138,7 @@ s_i^{\mathrm{EM}}=\mathbb{1}[\operatorname{normalize}(\hat y_i)=\operatorname{no
 
 ```math
 s_i^{\mathrm{claim}}=
-\frac{\sum_{j=1}^{k_i}w_{ij}\mathbb{1}[\operatorname{support}(\hat y_i,c_{ij})]}{\sum_{j=1}^{k_i}w_{ij}}
+\frac{\sum_{j=1}^{k_i}w_{ij}\mathbb{1}[\mathrm{support}(\hat y_i,c_{ij})]}{\sum_{j=1}^{k_i}w_{ij}}
 ```
 
 其中 \(k_i>0\)，\(w_{ij}\) 是有限的非负权重，且该样例的权重和必须大于 0；\(c_{ij}\) 是第 \(i\) 条样例的第 \(j\) 个关键 claim。这个分数只表示关键事实覆盖，不自动表示没有额外错误；答案可能覆盖了两个正确 claim，同时添加一个未经支持的第三个 claim。没有 claim 或权重和为 0 时，分数应记为“不适用”，不能把它伪装成 0 分。
@@ -149,9 +149,9 @@ s_i^{\mathrm{claim}}=
 
 ```math
 s_i^{\mathrm{schema}}=
-\mathbb{1}[\operatorname{parse}(\hat y_i)]\cdot
-\mathbb{1}[\operatorname{schema\_valid}(\hat y_i)]\cdot
-\mathbb{1}[\operatorname{business\_valid}(\hat y_i)]
+\mathbb{1}[\mathrm{parse}(\hat y_i)]\cdot
+\mathbb{1}[\mathrm{schema\_valid}(\hat y_i)]\cdot
+\mathbb{1}[\mathrm{business\_valid}(\hat y_i)]
 ```
 
 三个条件不能合成“看起来像 JSON”。例如 `{"age":"十八"}` 可能是合法 JSON，却不符合数值字段约束；`{"name":"张三","age":18,"action":"refund"}` 可能通过 schema，却没有权限执行退款。
@@ -181,13 +181,13 @@ S_{\mathrm{macro}}=\frac{1}{|G|}\sum_{g\in G}S_g
 对 \(0\le x\le n\) 且 \(n>0\) 的二值结果，成功率 \(\hat p=x/n\) 的简单标准误近似为：
 
 ```math
-\operatorname{SE}(\hat p)=\sqrt{\frac{\hat p(1-\hat p)}{n}}
+\mathrm{SE}(\hat p)=\sqrt{\frac{\hat p(1-\hat p)}{n}}
 ```
 
 小样本或成功率接近 0、1 时，直接使用正态区间可能不可靠。Wilson 区间通常更稳健：
 
 ```math
-\operatorname{CI}_{\mathrm{Wilson}}=
+\mathrm{CI}_{\mathrm{Wilson}}=
 \frac{\hat p+\frac{z^2}{2n}\pm z\sqrt{\frac{\hat p(1-\hat p)}{n}+\frac{z^2}{4n^2}}}{1+\frac{z^2}{n}}
 ```
 
@@ -466,8 +466,8 @@ D_{\mathrm{test}}=\{z:t(z)\ge T_2\}
 对于实体泄漏，先按实体分组再切分：
 
 ```math
-\operatorname{group}(z_i)=g_i,\qquad
-\operatorname{partition}(g_i)\in\{\mathrm{train},\mathrm{valid},\mathrm{test}\}
+\mathrm{group}(z_i)=g_i,\qquad
+\mathrm{partition}(g_i)\in\{\mathrm{train},\mathrm{valid},\mathrm{test}\}
 ```
 
 同一个 \(g_i\) 不得出现在多个分区。客服场景中的 `customer_id`、合同场景中的 `contract_id`、代码场景中的 `repository_id` 都可能是这种分组键。
@@ -636,7 +636,7 @@ claim 2：特殊支付渠道可能需要五个工作日。
 对回答 \(a\) 做 claim 分解，得到 \(C(a)=\{c_j\}_{j=1}^{k}\)。给定证据集合 \(E\)，定义支持关系：
 
 ```math
-\operatorname{support}(e,c_j)\in\{0,1,\mathrm{contradict}\}
+\mathrm{support}(e,c_j)\in\{0,1,\mathrm{contradict}\}
 ```
 
 这不是语言模型天然提供的标签，而是需要规则、信息抽取、检索匹配、人工或另一个评估模型判断。至少要保存“哪一段证据支持哪一个 claim”，否则一个总分无法定位问题。
@@ -645,14 +645,14 @@ claim 2：特殊支付渠道可能需要五个工作日。
 
 ```math
 P_{\mathrm{support}}(a\mid E)=
-\frac{\sum_j w_j\mathbb{1}[\exists e\in E:\operatorname{support}(e,c_j)=1]}{\sum_j w_j}
+\frac{\sum_j w_j\mathbb{1}[\exists e\in E:\mathrm{support}(e,c_j)=1]}{\sum_j w_j}
 ```
 
 如果把回答中的所有可核验 claim 作为分母，证据覆盖率则可以写成：
 
 ```math
 R_{\mathrm{support}}(a\mid E)=
-\frac{\sum_j w_j\mathbb{1}[\exists e\in E:\operatorname{support}(e,c_j)=1]}{\sum_j w_j\mathbb{1}[c_j\ \mathrm{judged\_by}\ E]}
+\frac{\sum_j w_j\mathbb{1}[\exists e\in E:\mathrm{support}(e,c_j)=1]}{\sum_j w_j\mathbb{1}[c_j\ \mathrm{judged\_by}\ E]}
 ```
 
 两式都要求参与计算的 claim 权重有限且为正。\(P_{\mathrm{support}}\) 的总权重必须大于 0；\(R_{\mathrm{support}}\) 还要求至少有一个 claim 被证据实际判定，因而分母大于 0。没有可核验 claim、没有证据可判断的 claim 或分母为 0 时，应报告“不适用”，而不是把它当成 0。实际报告中，很多团队把两个方向都叫 faithfulness，容易造成混淆。写清分子、分母和 claim 抽取规则，比背一个指标名更重要。
@@ -726,7 +726,7 @@ confidence
 可以把错误严重度纳入风险加权：
 
 ```math
-R_{\mathrm{hall}}=\frac{\sum_j w_j\mathbb{1}[\operatorname{unsupported}(c_j)]}{\sum_j w_j},\qquad
+R_{\mathrm{hall}}=\frac{\sum_j w_j\mathbb{1}[\mathrm{unsupported}(c_j)]}{\sum_j w_j},\qquad
 w_j=w_{\mathrm{base}}(c_j)\cdot w_{\mathrm{risk}}(c_j)
 ```
 
@@ -1779,12 +1779,12 @@ b(u)=\mathbb{1}[r(u)<\rho]
 提升量的近似标准误为：
 
 ```math
-\operatorname{SE}_{\Delta}=
+\mathrm{SE}_{\Delta}=
 \sqrt{\frac{\hat p_A(1-\hat p_A)}{n_A}
 +\frac{\hat p_B(1-\hat p_B)}{n_B}}
 ```
 
-这些比例要求 \(n_A,n_B>0\)，并且 \(0\le x_A\le n_A\)、\(0\le x_B\le n_B\)。95% 近似区间为 \(\Delta\pm1.96\operatorname{SE}_{\Delta}\)。检验两组是否来自同一成功率时，常用合并比例：
+这些比例要求 \(n_A,n_B>0\)，并且 \(0\le x_A\le n_A\)、\(0\le x_B\le n_B\)。95% 近似区间为 \(\Delta\pm1.96\mathrm{SE}_{\Delta}\)。检验两组是否来自同一成功率时，常用合并比例：
 
 ```math
 \hat p=\frac{x_A+x_B}{n_A+n_B}

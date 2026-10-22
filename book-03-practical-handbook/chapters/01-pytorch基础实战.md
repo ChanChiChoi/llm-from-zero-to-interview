@@ -6,6 +6,8 @@
 
 代码中的超参数、数据和输出是教学构造，不能被误读为任何真实数据集上的基准结果。PyTorch 文档对 API 行为的说明属于官方接口资料；优化算法的数学表达则来自论文或教材。二者在这里并列使用，但证据等级不同：一个 API 的默认值需要以目标版本的文档为准，一个算法是否有效则还需要看任务、数据和训练规模。
 
+本章的 PyTorch 示例按 CPU 环境设计，不要求 CUDA、GPU 或特定硬件；运行前只需安装与代码兼容的 PyTorch 版本。示例中的随机初始化、损失数值和训练输出绑定到代码、版本和随机种子，读者若更换版本或设备，应以形状、梯度关系和趋势为主要核对对象，而不是把每个小数位当成跨环境保证。
+
 ## 1.1 从线性回归开始：一个参数更新到底改变了什么
 
 ### 1.1.1 先把对象和形状写在纸上
@@ -281,11 +283,13 @@ for step in range(80):
     optimizer.step()
 
 with torch.no_grad():
-    predicted = model(features).argmax(dim=1)
+    final_logits = model(features)
+    final_loss = loss_fn(final_logits, labels)
+    predicted = final_logits.argmax(dim=1)
     accuracy = (predicted == labels).float().mean()
 
 print(predicted.tolist())
-print(round(loss.item(), 4))
+print(round(final_loss.item(), 4))
 print(round(accuracy.item(), 4))
 ```
 
@@ -293,11 +297,11 @@ print(round(accuracy.item(), 4))
 
 ```text
 [0, 0, 1, 1, 2, 2]
-0.0891
+0.0869
 1.0
 ```
 
-这里的损失和预测是在本地 PyTorch 2.12.0 环境实测得到的教学输出；更换 PyTorch 版本、硬件或随机数实现后，小数位可能变化。类别完全可分时，训练集准确率达到 1.0 并不说明模型学会了普遍规律；它只说明这六个样本在当前评估方式下被正确分类。
+这里的 loss 在第 80 次参数更新后重新前向计算，与预测和准确率对应同一组最终参数。输出是在本地 PyTorch 2.12.0 CPU 环境实测得到的教学结果；更换 PyTorch 版本、硬件或随机数实现后，小数位可能变化。类别完全可分时，训练集准确率达到 1.0 并不说明模型学会了普遍规律；它只说明这六个样本在当前评估方式下被正确分类。
 
 `CrossEntropyLoss` 对目标张量的要求也很具体。对于 `[B,C]` 的 logits，类别索引目标通常应是形状 `[B]`、整数类型 `torch.long`，取值范围为 `0` 到 `C-1`。如果传入 one-hot 浮点标签，某些版本可能支持概率目标，但语义与类别索引不同，不能把两种格式混为一谈。训练前检查形状和 dtype，比在损失变成 `nan` 后猜原因更有效。
 
@@ -441,6 +445,8 @@ L_{\text{mean}}=\frac{1}{B}\sum_i\ell_i
 ```
 
 `reduction="mean"` 会让梯度规模与批次样本数大致保持可比；`sum` 则会随着有效样本数量增加而增大。在使用梯度累积、动态 padding 或分布式训练时，不能默认“每张卡的 mean 再平均”一定等于“全局有效 token 的 mean”。如果不同设备上的有效 token 数量不同，应明确分子和分母，按有效元素总数归一化。
+
+当 `CrossEntropyLoss` 使用类别权重且目标为类别索引时，`reduction="mean"` 的分母是本批次未忽略目标对应权重之和，而不是简单的样本数；没有类别权重时，每个有效目标的权重为 1，才退化为按有效样本数平均。若目标使用概率分布格式，接口的 reduction 语义不同，应以对应 PyTorch 版本文档为准。
 
 类别不均衡时可以引入类别权重 \(\alpha_c\)：
 
@@ -850,7 +856,7 @@ print(len(decay_parameters), len(no_decay_parameters))
 
 ### 1.5.5 一个可靠的训练循环需要明确顺序
 
-典型的单批次训练顺序是。下面的代码包含了运行它所需的最小对象；在较大的训练程序中，`inputs`、`labels`、`model`、`loss_fn` 和 `optimizer` 通常由数据管道与训练初始化代码提供：
+典型的单批次训练按以下顺序执行。下面的代码包含了运行它所需的最小对象；在较大的训练程序中，`inputs`、`labels`、`model`、`loss_fn` 和 `optimizer` 通常由数据管道与训练初始化代码提供：
 
 ```python
 import torch
@@ -929,7 +935,7 @@ for micro_step, (inputs, labels) in enumerate(loader):
 print(optimizer_steps)
 ```
 
-输出为 `2`：前四个 micro-batch 产生一次更新，最后一个 micro-batch 单独产生一次更新。若简单地把最后一个损失仍除以 4，第二次更新的梯度就会被缩小到应有值的四分之一。这个边界在 `drop_last=True` 时可以通过丢弃不完整组来回避，但是否丢弃数据必须成为明确的训练决策。
+输出为 `2`：5 个 micro-batch 被分成大小为 4 和 1 的两组，因此产生两次参数更新。代码按当前组大小分别除以 4 和 1；若把最后一个损失仍除以 4，第二次更新的梯度就会被缩小到应有值的四分之一。这个边界在 `drop_last=True` 时可以通过丢弃不完整组来回避，但是否丢弃数据必须成为明确的训练决策。
 
 有效批次大小常写成：
 
@@ -1086,6 +1092,7 @@ print(rates)
 ```python
 import torch
 from torch import nn
+from pathlib import Path
 
 model = nn.Linear(2, 2)
 optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
@@ -1102,8 +1109,11 @@ checkpoint = {
     "scheduler": scheduler.state_dict(),
     "step": global_step,
 }
-torch.save(checkpoint, "checkpoint.pt")
+Path(".tmp").mkdir(exist_ok=True)
+torch.save(checkpoint, ".tmp/pytorch-chapter-checkpoint.pt")
 ```
+
+示例把临时 checkpoint 写入仓库中已忽略的 `.tmp/`，避免运行教学代码在项目根目录留下生成物；真实训练应按项目的 checkpoint 目录和保留策略配置路径。
 
 恢复时先构造相同的模型、优化器和调度器，再分别加载对应状态。若先加载 scheduler 状态却改变了 optimizer 参数组数量或顺序，可能出现难以察觉的学习率错配；参数组结构应在恢复前保持兼容。
 
@@ -1150,11 +1160,11 @@ print({
 
 本章的 API 行为以 PyTorch 官方文档为主，算法部分用经典论文和官方实现文档交叉核对。网页版本会更新，读者复现实验时应记录访问日期、PyTorch 版本、CUDA/CPU 环境和关键默认值。
 
-1. PyTorch, *Autograd mechanics*：<https://pytorch.org/docs/stable/notes/autograd.html>。用于核对计算图、梯度记录、`no_grad` 与 `detach` 的行为。
-2. PyTorch, *CrossEntropyLoss*：<https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html>。用于核对 logits、目标形状、`ignore_index`、`reduction` 和概率目标的接口语义。
-3. PyTorch, *torch.logsumexp*：<https://pytorch.org/docs/stable/generated/torch.logsumexp.html>。用于核对稳定 log-sum-exp 运算的 API。
-4. PyTorch, *SGD*、*Adam* 与 *AdamW*：<https://pytorch.org/docs/stable/generated/torch.optim.SGD.html>、<https://pytorch.org/docs/stable/generated/torch.optim.Adam.html>、<https://pytorch.org/docs/stable/generated/torch.optim.AdamW.html>。用于核对实现参数、状态和更新顺序；页面中的默认值不能脱离目标版本使用。
+1. PyTorch, *Autograd mechanics*：<https://docs.pytorch.org/docs/stable/notes/autograd.html>。用于核对计算图、梯度记录、`no_grad` 与 `detach` 的行为。
+2. PyTorch, *CrossEntropyLoss*：<https://docs.pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html>。用于核对 logits、目标形状、`ignore_index`、`reduction` 和概率目标的接口语义。
+3. PyTorch, *torch.logsumexp*：<https://docs.pytorch.org/docs/stable/generated/torch.logsumexp.html>。用于核对稳定 log-sum-exp 运算的 API。
+4. PyTorch, *SGD*、*Adam* 与 *AdamW*：<https://docs.pytorch.org/docs/stable/generated/torch.optim.SGD.html>、<https://docs.pytorch.org/docs/stable/generated/torch.optim.Adam.html>、<https://docs.pytorch.org/docs/stable/generated/torch.optim.AdamW.html>。用于核对实现参数、状态和更新顺序；页面中的默认值不能脱离目标版本使用。
 5. D. P. Kingma and J. Ba, *Adam: A Method for Stochastic Optimization*，arXiv:1412.6980。用于一阶/二阶矩和偏差修正的原始算法表述。
-6. I. Loshchilov and F. Hutter, *Decoupled Weight Decay Regularization*，ICLR 2019。用于 AdamW 与 L2 正则解耦的算法动机。
-7. PyTorch, *How to Adjust Learning Rate* 与 scheduler API：<https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate>。用于核对 scheduler 的调用顺序、状态和不同调度器的接口。
+6. I. Loshchilov and F. Hutter, [*Decoupled Weight Decay Regularization*](https://arxiv.org/abs/1711.05101)，ICLR 2019。用于 AdamW 与 L2 正则解耦的算法动机。
+7. PyTorch, *How to Adjust Learning Rate* 与 scheduler API：<https://docs.pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate>。用于核对 scheduler 的调用顺序、状态和不同调度器的接口。
 8. Hugging Face Transformers, *Optimization and Schedules*：<https://huggingface.co/docs/transformers/main_classes/optimizer_schedules>。用于对照语言模型训练中 warmup、更新步和调度器封装的工程语境；它是框架文档，不等同于某个模型训练结果的独立证据。

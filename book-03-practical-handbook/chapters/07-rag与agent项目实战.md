@@ -238,7 +238,7 @@ s(q,c_j)
 ```math
 I_K
 =
-\operatorname{TopK}_{j\in\{1,\ldots,M\}}s(q,c_j)
+\mathrm{TopK}_{j\in\{1,\ldots,M\}}s(q,c_j)
 ```
 
 这里要求候选数量 \(M>0\)，并约定 \(1\leq K\leq M\)；如果索引为空，应返回“无候选”状态，而不是把空集合解释成低分命中。
@@ -250,10 +250,15 @@ I_K
 有外部依赖时，可以使用 Sentence Transformers 编码：
 
 ```python
+# Requires numpy, sentence-transformers, and the selected model files.
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
 
+chunks = [
+    {"text": "工作满一年后，每年有 10 天带薪年假。"},
+    {"text": "单笔超过 5000 元需要额外审批。"},
+]
 embed_model = SentenceTransformer("BAAI/bge-small-zh-v1.5")
 texts = [row["text"] for row in chunks]
 embeddings = embed_model.encode(
@@ -264,12 +269,28 @@ embeddings = embed_model.encode(
 print("embedding_shape=", embeddings.shape)
 ```
 
+输出形状为 `(片段数, embedding_dimension)`；具体维度由 checkpoint 决定，行数应等于输入片段数。
+
 如果使用 FAISS 的 inner-product 索引：
 
 ```python
+# Requires numpy, faiss-cpu (or a compatible FAISS build), sentence-transformers,
+# and the selected model files.
+import numpy as np
 import faiss
+from sentence_transformers import SentenceTransformer
 
 
+texts = [
+    "工作满一年后，每年有 10 天带薪年假。",
+    "单笔超过 5000 元需要额外审批。",
+]
+embed_model = SentenceTransformer("BAAI/bge-small-zh-v1.5")
+embeddings = embed_model.encode(
+    texts,
+    normalize_embeddings=True,
+    convert_to_numpy=True,
+).astype("float32")
 dimension = embeddings.shape[1]
 index = faiss.IndexFlatIP(dimension)
 index.add(embeddings)
@@ -278,7 +299,8 @@ query_vector = embed_model.encode(
     normalize_embeddings=True,
     convert_to_numpy=True,
 ).astype("float32")
-scores, indices = index.search(query_vector, 3)
+k = min(3, len(texts))
+scores, indices = index.search(query_vector, k)
 ```
 
 这两个片段依赖目标 Python、sentence-transformers、numpy、faiss 和模型文件。IndexFlatIP 是精确线性扫描索引；大规模数据可以选择 HNSW、IVF、PQ 或托管向量数据库，但近似索引会引入召回与内存的取舍。
@@ -477,7 +499,7 @@ print("used_tokens=", used)
 
 - Retrieval-Augmented Generation：<https://arxiv.org/abs/2005.11401>
 - Sentence-BERT：<https://arxiv.org/abs/1908.10084>
-- Sentence Transformers semantic search：<https://sbert.net/examples/sentence_transformer/applications/semantic-search/README.html>
+- Sentence Transformers semantic search：<https://sbert.net/examples/sentence_transformer/applications/semantic-search/>
 - FAISS 文档：<https://github.com/facebookresearch/faiss/wiki>
 - MTEB：<https://arxiv.org/abs/2210.07316>
 - BEIR：<https://arxiv.org/abs/2104.08663>
@@ -510,7 +532,7 @@ reranker 不能找回完全没有被第一阶段召回的 chunk。它解决的�
 ```math
 B_K
 =
-\operatorname{TopK}_{c\in\mathcal{C}}
+\mathrm{TopK}_{c\in\mathcal{C}}
 s_{\mathrm{bi}}(q,c)
 ```
 
@@ -528,7 +550,7 @@ g_{\psi}(q,c_i),
 ```math
 J_M
 =
-\operatorname{TopM}_{c_i\in B_K}r_i,
+\mathrm{TopM}_{c_i\in B_K}r_i,
 \qquad
 M\le K\ll|\mathcal{C}|
 ```
@@ -574,6 +596,7 @@ batching、GPU、候选长度和 cross-encoder 的最大输入长度都会改变
 Sentence Transformers 的 CrossEncoder 可以这样使用：
 
 ```python
+# Requires sentence-transformers and the selected model files.
 from sentence_transformers import CrossEncoder
 
 
@@ -586,7 +609,7 @@ scores = reranker.predict(pairs)
 print("scores=", scores)
 ```
 
-这是外部依赖示例。模型输出的分数可能是 logits，也可能是经过某种变换的相关性分数；不要跨模型比较绝对值。应使用同一模型、同一版本、同一候选集观察排序变化。
+这是外部依赖示例，输入是两个 query-candidate pair，输出是对应的两个分数。具体数值随模型文件和版本变化；分数可能是 logits 或经过变换的相关性分数，不应跨模型比较绝对值。应使用同一模型、同一版本、同一候选集观察排序变化。
 
 ### 7.2.3 无依赖精排 demo
 
@@ -907,10 +930,18 @@ print(claim_record["evidence"][0]["support"])
 ```math
 \mathrm{coverage}(\tau)
 =
-\Pr(\mathrm{answer\ accepted}\mid \mathrm{confidence}\ge\tau)
+\Pr(\mathrm{confidence}\ge\tau)
 ```
 
-这个条件概率只有在 \(\Pr(\mathrm{confidence}\ge\tau)>0\) 时才有定义；若阈值下没有样本，应记录为空桶。置信度还必须说明是模型分数、检索分数还是经校准的选择概率，不能把不同来源的数值直接比较。
+在覆盖样本上还可以报告选择性准确率：
+
+```math
+\mathrm{selective\_accuracy}(\tau)
+=
+\Pr(\mathrm{answer\ correct}\mid \mathrm{confidence}\ge\tau)
+```
+
+选择性准确率只在 \(\Pr(\mathrm{confidence}\ge\tau)>0\) 时有定义；若阈值上没有样本，应记录为空桶。置信度还必须说明是模型分数、检索分数还是经校准的选择概率，不能把不同来源的数值直接比较。
 
 随着阈值 \(\tau\) 提高，系统可能回答更少但更可靠。真实系统应按任务风险选择阈值；医疗、财务、权限和合同场景的证据要求不同。
 
@@ -940,10 +971,10 @@ chunk 太小：
 
 - RAG 原论文：<https://arxiv.org/abs/2005.11401>
 - Self-RAG：<https://arxiv.org/abs/2310.11511>
-- FActScore：<https://arxiv.org/abs/2305.14250>
-- AttributionBench：<https://arxiv.org/abs/2402.04397>
-- OpenAI structured outputs：<https://platform.openai.com/docs/guides/structured-outputs>
-- OpenAI file search：<https://platform.openai.com/docs/guides/tools-file-search>
+- FActScore：<https://arxiv.org/abs/2305.14251>
+- AttributionBench：<https://aclanthology.org/2024.findings-acl.886/>
+- OpenAI structured outputs：<https://developers.openai.com/api/docs/guides/structured-outputs>
+- OpenAI file search：<https://developers.openai.com/api/docs/guides/tools-file-search>
 
 论文支持检索增强、事实性和自反思检索的研究背景，官方文档支持结构化输出与文件检索接口；引用支持率和拒答阈值必须在目标数据上进行人工或独立评审。
 
@@ -1319,7 +1350,7 @@ C_{\mathrm{success}}
 ### 7.4.9 资料与证据边界
 
 - RAGAS：<https://arxiv.org/abs/2309.15217>
-- FActScore：<https://arxiv.org/abs/2305.14250>
+- FActScore：<https://arxiv.org/abs/2305.14251>
 - ARES：<https://arxiv.org/abs/2311.09476>
 - BEIR：<https://arxiv.org/abs/2104.08663>
 - MTEB：<https://arxiv.org/abs/2210.07316>
@@ -1488,8 +1519,26 @@ print("calculator_rejected=", calculator("__import__('os')"))
 工具 schema 和可执行函数必须分别保存：
 
 ```python
+TOOLS = [
+    {
+        "name": "calculator",
+        "parameters": {
+            "properties": {"expression": {"type": "string"}},
+            "required": ["expression"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "search_docs",
+        "parameters": {
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+    },
+]
 REGISTRY = {
-    "calculator": calculator,
+    "calculator": lambda expression: "5" if expression == "2 + 3" else "unsupported",
     "search_docs": lambda query: "检索结果：" + query,
 }
 SCHEMA_BY_NAME = {tool["name"]: tool for tool in TOOLS}
@@ -1530,9 +1579,11 @@ def execute_registered(tool_name, arguments):
     if tool_name not in REGISTRY:
         return {"ok": False, "error": "not_executable"}
     try:
-        return {"ok": True, "result": REGISTRY[tool_name](**arguments)}
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
+        result = REGISTRY[tool_name](**arguments)
+    except Exception:
+        # Return a stable public error; production code should log details securely.
+        return {"ok": False, "error": "tool_execution_failed"}
+    return {"ok": True, "result": result}
 
 
 print("good_call=", execute_registered("calculator", {"expression": "2 + 3"}))
@@ -1575,6 +1626,14 @@ final 解析失败 → 重试或返回可解释的协议错误。
 模型一次返回多个调用时：
 
 ```python
+def execute_registered(name, arguments):
+    if name == "calculator" and set(arguments) == {"expression"}:
+        return {"ok": True, "result": str(128 * 256)}
+    if name == "search_docs" and set(arguments) == {"query"}:
+        return {"ok": True, "result": "检索结果：" + arguments["query"]}
+    return {"ok": False, "error": "invalid_or_unknown_call"}
+
+
 DECISION = {
     "tool_calls": [
         {
@@ -1603,9 +1662,6 @@ print("output_ids=", [item["tool_call_id"] for item in outputs])
 ### 7.5.6 Tool Calling 审计 demo
 
 ```python
-import json
-
-
 def mock_decision(query):
     if not isinstance(query, str):
         raise TypeError("query must be a string")
@@ -1654,6 +1710,14 @@ def run_tool_calls(query):
     return trace
 
 
+def execute_registered(name, arguments):
+    if name == "calculator" and set(arguments) == {"expression"}:
+        return {"ok": True, "result": "32768"}
+    if name == "search_docs" and set(arguments) == {"query"}:
+        return {"ok": True, "result": "检索结果：" + arguments["query"]}
+    return {"ok": False, "error": "invalid_or_unknown_call"}
+
+
 for query in ("帮我计算 128 * 256", "员工年假有多少天？", "你好"):
     trace = run_tool_calls(query)
     print(
@@ -1692,9 +1756,9 @@ schema 通过了，业务范围却不合法；
 同一个非幂等操作因重试被执行两次。
 ```
 
-- OpenAI Function Calling：<https://platform.openai.com/docs/guides/function-calling>
-- OpenAI Responses tools：<https://platform.openai.com/docs/guides/tools>
-- Anthropic tool use：<https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/overview>
+- OpenAI Function Calling：<https://developers.openai.com/api/docs/guides/function-calling>
+- OpenAI Responses tools：<https://developers.openai.com/api/docs/guides/tools>
+- Anthropic tool use：<https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview>
 - Transformers chat templates：<https://huggingface.co/docs/transformers/main/en/chat_templating>
 - JSON Schema：<https://json-schema.org/specification>
 
@@ -2350,19 +2414,23 @@ class Guard:
         if schema["risk"] == "high":
             event["decision"] = "need_confirmation"
             self.audit.append(event)
-            return {"ok": False, "confirmation": True}
+            return {
+                "ok": False,
+                "status": "confirmation_required",
+                "error": "high_risk_action_not_executed",
+            }
         self.seen.add(action_key)
         self.calls += 1
         if name == "calculator":
             result = "32"
         elif name == "lookup_employee":
-            result = redact({"employee_id": arguments["employee_id"], "salary": 100000})
+            result = {"employee_id": arguments["employee_id"], "salary": 100000}
         else:
             result = "not executed"
         event["decision"] = "executed"
         event["result"] = redact(result)
         self.audit.append(event)
-        return {"ok": True, "result": result}
+        return {"ok": True, "result": redact(result)}
 
 
 guard = Guard(role="user", max_calls=1)
@@ -2375,6 +2443,10 @@ print("high_risk=", admin.dispatch(
     "send_email",
     {"to": "boss@company.com", "subject": "x", "body": "draft"},
 ))
+print(
+    "redacted_result=",
+    admin.dispatch("lookup_employee", {"employee_id": "E02"}),
+)
 print("decisions=", [event["decision"] for event in guard.audit])
 ```
 
@@ -2439,8 +2511,8 @@ R_{\mathrm{duplicate}}
 成功率提高但未授权动作率也提高。
 ```
 
-- OWASP Top 10 for LLM Applications：<https://owasp.org/www-project-top-10-for-large-language-model-applications/>
-- OWASP Agentic AI Threats and Mitigations：<https://genai.owasp.org/agentic-ai-threats-and-mitigations/>
+- OWASP Top 10 for LLM Applications：<https://owasp.org/projects/top-10-for-large-language-model-applications>
+- OWASP Agentic AI Threats and Mitigations：<https://genai.owasp.org/resource/agentic-ai-threats-and-mitigations/>
 - NIST AI Risk Management Framework：<https://www.nist.gov/itl/ai-risk-management-framework>
 - NIST Generative AI Profile：<https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf>
 - AgentDojo：<https://arxiv.org/abs/2406.13352>

@@ -1180,11 +1180,26 @@ weights_only=True 的具体支持和默认行为随 PyTorch 版本变化；应�
 
 本章把 step 定义为“已经完成的 optimizer update 数量”。因此初始模型是 step 0，先评估，再完成一次更新；完成后状态变成 step 1。恢复时从记录的 step 继续，下一轮会重新评估当前状态，然后执行下一次更新。另一种系统可以把 step 定义为“下一次待执行的更新编号”，但保存端和加载端必须使用同一种定义。
 
-下面是训练循环的结构示意，依赖本章前面定义的 `model`、`estimate_loss`、`get_batch`、`save_checkpoint`、`append_log`、路径和配置对象；它用于说明 step 语义，不是脱离上下文即可运行的完整脚本。示意代码假设 `get_batch` 已返回当前设备可接受的张量：
+下面的循环依赖前文 3.2.4/3.2.6 定义的 `model`、`estimate_loss`、`get_batch`、`optimizer` 和 `device`，以及 3.4.3 定义的 `save_checkpoint`；把它接在这些代码之后即可运行。它显式记录评估/保存 step 和已完成的 optimizer update 数，checkpoint 写入仓库 `.tmp/`：
 
 ```python
+from pathlib import Path
+
+Path(".tmp").mkdir(exist_ok=True)
+run_dir = Path(".tmp/step-semantics")
+run_dir.mkdir(parents=True, exist_ok=True)
+best_path = run_dir / "best.pt"
+last_path = run_dir / "last.pt"
+config = {"batch_size": 2, "block_size": 16}
+tokenizer_meta = {"type": "character"}
+eval_iters = 5
+eval_interval = 1
+max_steps = 2
 best_val_loss = float("inf")
 start_step = 0
+saved_steps = []
+optimizer_updates = 0
+log_rows = []
 
 for step in range(start_step, max_steps + 1):
     if step % eval_interval == 0 or step == max_steps:
@@ -1212,14 +1227,8 @@ for step in range(start_step, max_steps + 1):
             tokenizer_meta,
         )
         tokens_seen = step * config["batch_size"] * config["block_size"]
-        append_log(
-            log_path,
-            step,
-            train_loss,
-            val_loss,
-            best_val_loss,
-            tokens_seen,
-        )
+        saved_steps.append(step)
+        log_rows.append((step, train_loss, val_loss, best_val_loss, tokens_seen))
 
     if step == max_steps:
         break
@@ -1229,6 +1238,10 @@ for step in range(start_step, max_steps + 1):
     optimizer.zero_grad(set_to_none=True)
     loss.backward()
     optimizer.step()
+    optimizer_updates += 1
+
+print("saved_steps=", saved_steps)
+print("optimizer_updates=", optimizer_updates)
 ```
 
 这个循环会在 step 0 和最后一个 step 做评估。恢复训练时，如果 last.pt 中 step 已经是 max_steps，应直接结束，而不是再做一次更新。重复恢复时还要处理日志去重，否则同一个 step 会在 CSV 中出现两次。
@@ -1276,12 +1289,13 @@ def append_log(path, step, train_loss, val_loss, best_val_loss, tokens_seen):
         ])
 
 
-init_log("/tmp/mini_char_gpt_log.csv")
-append_log("/tmp/mini_char_gpt_log.csv", 0, 3.46, 3.47, 3.47, 0)
-print(Path("/tmp/mini_char_gpt_log.csv").read_text(encoding="utf-8").strip())
+Path(".tmp").mkdir(exist_ok=True)
+init_log(".tmp/mini_char_gpt_log.csv")
+append_log(".tmp/mini_char_gpt_log.csv", 0, 3.46, 3.47, 3.47, 0)
+print(Path(".tmp/mini_char_gpt_log.csv").read_text(encoding="utf-8").strip())
 ```
 
-在共享或长时间运行的环境中，示例中的 /tmp 应换成明确的实验目录，并为不同 run 使用不同路径；日志和 checkpoint 不能靠文件名猜测相互对应。
+示例把日志写入仓库中被忽略的 `.tmp/`；真实实验应为不同 run 使用独立目录和明确的保留策略，日志和 checkpoint 不能靠文件名猜测相互对应。
 
 
 ## 3.5 训练曲线与生成行为：从 loss 到证据
@@ -1484,16 +1498,14 @@ x_j=d_{s+j},\qquad y_j=d_{s+j+1}
 R_{\mathrm{score}}=\frac{T_b^2}{T_c^2}
 ```
 
-当 \(T_b<T_c\) 时，序列相关的 attention 计算和中间显存会下降。但词表从 \(V_c\) 变成 \(V_b\) 后，embedding 参数量从 \(V_cD\) 变成 \(V_bD\)，未绑权重的 lm head 还大约增加 \(DV_b+V_b\)。因此 BPE 的净收益要看：
+当 \(T_b<T_c\) 时，序列相关的 attention 计算和中间显存会下降。但词表从 \(V_c\) 变成 \(V_b\) 后，embedding 参数量从 \(V_cD\) 变成 \(V_bD\)，未绑权重的 lm head 还大约增加 \(DV_b+V_b\)。因此应分开记录序列计算量和词表参数量，而不是把单位不同的 FLOPs 与参数个数直接相加：
 
 ```math
-\Delta\mathrm{cost}
-\approx
-\Delta\mathrm{attention\;cost}
-+\Delta\mathrm{embedding/head\;cost}
+(\Delta\mathrm{FLOPs}_{\mathrm{attention}},
+\Delta N_{\mathrm{embedding+head}})
 ```
 
-这不是严格的硬件成本公式，而是提醒读者不要只看 token 数。小语料、小模型和超大词表组合在一起时，embedding 与 lm head 可能吞掉相当比例的参数预算。
+这里两个 `\Delta` 都表示 BPE 相对字符级的差值。attention FLOPs 还要结合序列长度、kernel、dtype 和硬件才能换算成运行成本；embedding/head 的参数量则影响权重与优化器状态内存。小语料、小模型和超大词表组合在一起时，embedding 与 lm head 可能吞掉相当比例的参数预算。
 
 ### 3.6.3 使用现成 tokenizer 的接口
 

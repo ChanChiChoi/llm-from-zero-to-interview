@@ -2206,6 +2206,8 @@ JSON 是否能解析。
 
 它假设 `sft_dir` 是已经保存好的全参数 SFT 目录；如果实际产物是 LoRA/QLoRA adapter，应先用训练时相同的 base model 挂载 adapter，不能把 adapter 目录当成完整 CausalLM 加载。
 
+示例中的 `sshleifer/tiny-gpt2` 只适合验证加载、生成和结果落盘的接口流程；它不能支持任何任务质量或微调收益结论。真实评估应替换成固定 revision 的目标 base/SFT 模型，并使用独立、分桶且经过审查的评估集。
+
 ```python
 import json
 from pathlib import Path
@@ -2493,7 +2495,7 @@ base/SFT 原始输出与指标。
 - PEFT LoRA API：<https://huggingface.co/docs/peft/main/en/package_reference/lora>
 - bitsandbytes 量化：<https://huggingface.co/docs/transformers/main/en/quantization/bitsandbytes>
 - TRL SFTTrainer：<https://huggingface.co/docs/trl/main/en/sft_trainer>
-- PyTorch CrossEntropyLoss：<https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html>
+- PyTorch CrossEntropyLoss：<https://docs.pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html>
 - LoRA 原论文：<https://arxiv.org/abs/2106.09685>
 - QLoRA 原论文：<https://arxiv.org/abs/2305.14314>
 
