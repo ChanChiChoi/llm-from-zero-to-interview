@@ -7,13 +7,24 @@
 - `scope`：从第一册第一份正文开始，按书系顺序覆盖 24 册及 `book-llm-engineer` 补充篇；每份正文逐行复读，并检查必要的简介、目录、索引和配套资料。
 - `basis`：当前版 `WRITING_SPEC.md`、`plan.md` 中常态化全书精修要求及仓库 `AGENTS.md`。
 - `acceptance`：按内容类型审查问题和动机、连续机制解释、公式/状态、数值例子/代码、工程边界、失败模式、评测、证据范围、链接、导航和按需配套同步；全文复读并验证声明范围内的代码和公式；未完成项明确保留。
-- `status`：进行中。第一册五份正文、第二册全部十份正文、第三册全部十一份正文以及第四册第一至十五份正文已有本轮验收记录。
-- `next`：继续第四册第十六份正文 `book-04-llm-encyclopedia/chapters/16-多模态学习.md`，按百科类型检查定义、机制、例子/反例及专题入口。
+- `status`：进行中。第一册五份正文、第二册全部十份正文、第三册全部十一份正文以及第四册第一至十六份正文已有本轮验收记录。
+- `next`：继续第四册第十七份正文 `book-04-llm-encyclopedia/chapters/17-图像生成与视频生成.md`，按百科类型检查定义、机制、例子/反例及专题入口。
 - `open_risks`：全书量大，按章节推进并逐批记录；未实际核验的代码、公式或配套同步不得标为完成。代码验证以可执行且输出能说明机制为准；优先使用 `.tmp/` 下被 Git 忽略的 CPU-only PyTorch 环境，不安装 CUDA 库，也不为性能或 100% 复现扩大依赖。已有章节中的 CUDA、GPU 性能、多节点、真实模型/语料和生产 serving 边界仍按各章记录。PDF 构建 dry-run 因环境缺少 Pandoc 未能执行。
 
 维护者要求本轮从头开始，不沿用此前半成品记录作为覆盖证据。旧的 `progress_v2.md` 记录已清空重建；`progress_v3.md` 保持原样。维护者进一步明确：代码用于展示和解释知识，只要代码经检查可执行且输出有助于说明问题即可；可使用 PyTorch CPU，不安装 CUDA 库，也不要求读者逐一进行完整复现。联网资料使用指定代理 `http://10.24.27.134:7890`。
 
 ## 本轮执行记录
+
+### 第四册第十六份正文：`book-04-llm-encyclopedia/chapters/16-多模态学习.md`（2026-10-23）
+
+- `scope`：全文复读 16.0—16.31，覆盖模态表示与采样、modality gap、上下文预算、输入保真与证据召回、CLIP/SigLIP 对齐、视觉编码器与形状审计、VLM 三条路线、连接器（Linear/MLP/Q-Former/Resampler/Cross-Attention）、placeholder 契约、token 压缩、多模态指令微调与模板审计、扩散与条件控制、Latent Diffusion、视频生成与一致性、音频表示与 ASR/TTS、WER/CER/MOS、统一多模态三层含义、评估六层、多模态安全、事故复盘、端到端账本与产品取舍；按百科类型验收，未修改长期规范。
+- `changes`：修正 8 处 `\operatorname{...}` 为 `\mathrm{...}`；其余无需语义修改。
+- `evidence`：14 个唯一外链，9 篇新 arXiv 题名经 abs 页面核对全部一致，其余沿用前轮证据。详见 `research/encyclopedia-multimodal-learning-review-2026-10-23.md`。
+- `code_status`：1 个 Python 块独立执行通过（token 预算 660、支持率 1.0、拒答漏判 0.5、None/0 语义区分断言）；json 样本可解析。
+- `formula_status`：64 个 math 围栏花括号平衡、无禁用宏；patch 数 576/2304（4 倍）、196、960,000 等复算一致；F_input/R_evidence/S_support/FVD/C_success 等分母与定义域限定核对通过；`git diff --check` 通过。
+- `sync_status`：`PAPERS.md` 多模态区已有本章主要入口；术语表、练习、题库已覆盖对应主题；第四册目录映射正确。
+- `open_risks`：未运行真实多模态训练或推理；flicker 代理、成功概率链等为教学模型（正文已声明）；论文题名核对不等于全文复核；PDF 仍受 Pandoc 缺失限制。
+- `status`：本章声明范围内精修验收完成；主线进入第四册第十七份正文 `book-04-llm-encyclopedia/chapters/17-图像生成与视频生成.md`，全书 goal active。
 
 ### 第四册第十五份正文：`book-04-llm-encyclopedia/chapters/15-面试高频对比表.md`（2026-10-23）
 
