@@ -115,10 +115,10 @@
 ### 第四册第十份正文：`book-04-llm-encyclopedia/chapters/10-分布式训练系统.md`（2026-10-23）
 
 - `scope`：全文复读 10.1—10.24 及小结，覆盖训练账本、数据/张量/流水并行、ZeRO/FSDP、重计算与混合精度、效率与 MFU、故障定位、拓扑、网络、存储与 checkpoint、容器与 K8s、多租户调度、平台契约、实验追踪、可观测性、SLO、成本、安全供应链、审计变更和综合实验；按百科类型验收，未修改长期规范。
-- `changes`：修正 10.23 的 GPipe 论文题名（实际为 "GPipe: Efficient Training of Giant Neural Networks using Pipeline Parallelism"）；修正 Data Cards 错链（`2203.15556` 实为 Chinchilla 论文，改为 `2204.01075`）；`\operatorname{Optimizer}` 改为 `\mathrm{Optimizer}`；围栏风格与第四册已验收章节一致，保持 `~~~` 不变。
-- `evidence`：18 个唯一外链经指定代理全部 HTTP 200；5 篇 arXiv 题名经 abs 页面核对，2 处错误已修正，3 处一致。详见 `research/encyclopedia-distributed-training-review-2026-10-23.md`。
-- `code_status`：11 个标准库 Python 块逐块独立执行，11/11 通过；未安装 CUDA 或额外依赖。
-- `formula_status`：32 个 math 围栏花括号平衡、无禁用宏；复算 ring 14 GiB、bubble 0.2、ZeRO 30 GiB、dominant share 0.25、burn rate 2.0、global batch 64 及 TP 切分 1376/512，均与正文一致；`git diff --check` 通过。
+- `changes`：首轮修正 10.23 的 GPipe 论文题名（实际为 "GPipe: Efficient Training of Giant Neural Networks using Pipeline Parallelism"）；修正 Data Cards 错链（`2203.15556` 实为 Chinchilla 论文，改为 `2204.01075`）；`\operatorname{Optimizer}` 改为 `\mathrm{Optimizer}`；围栏风格与第四册已验收章节一致，保持 `~~~` 不变。**2026-10-23 内容精修补做**：确认首轮仅达核验级后，按规范补齐全部 11 个 python 块的代码前观察目标与代码后输出解释/可修改数值/教学与真实系统差距；bubble、MFU、dominant share 三处公式补变量说明、直觉解释或数值例子；column parallel 直觉段改写为具体机制表述。详见 `research/encyclopedia-ch10-content-refine-2026-10-23.md`。
+- `evidence`：18 个唯一外链经指定代理全部 HTTP 200；5 篇 arXiv 题名经 abs 页面核对，2 处错误已修正，3 处一致。详见 `research/encyclopedia-distributed-training-review-2026-10-23.md`；内容精修证据见 `research/encyclopedia-ch10-content-refine-2026-10-23.md`。
+- `code_status`：11 个标准库 Python 块逐块独立执行，11/11 通过（精修补做后复跑通过，打印值与新增后文说明逐一核对一致）；未安装 CUDA 或额外依赖。
+- `formula_status`：32 个 math 围栏花括号平衡、无禁用宏；复算 ring 14 GiB、bubble 0.2、ZeRO 30 GiB、dominant share 0.25、burn rate 2.0、global batch 64 及 TP 切分 1376/512，均与正文一致；精修补做新增数值例子（MFU≈0.17、bubble(8,12)=7/19、峰值 41 GiB 等）已脚本复核；`git diff --check` 通过。
 - `sync_status`：`PAPERS.md` 补入 Megatron-LM 集群训练与 ZeRO-Infinity 入口；`EXERCISES.md`、`INTERVIEW_BANK.md`、`GLOSSARY_EN_ZH.md` 已覆盖本章主题，不重复添加；第四册目录映射正确。
 - `open_risks`：未在真实 GPU/NCCL/多节点环境验证通信、MFU、吞吐或故障恢复；未运行 ZeRO/FSDP/Megatron 实际训练；教学公式为数量级近似；PDF 仍受 Pandoc 缺失限制。
 - `status`：本章声明范围内精修验收完成；主线进入第四册第十一份正文 `book-04-llm-encyclopedia/chapters/11-长上下文rag与agent.md`，全书 goal active。
