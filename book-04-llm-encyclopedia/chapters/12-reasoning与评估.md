@@ -111,7 +111,7 @@ Self-consistency 常先采样多条推理路径，再抽取和聚合最终答案
 
 ~~~math
 \hat a_i
-=\operatorname*{arg\,max}_{a}
+=\mathrm{arg\,max}_{a}
 \sum_{k=1}^{K}\mathbf{1}[a_i^{(k)}=a].
 ~~~
 
@@ -142,7 +142,7 @@ print(majority_vote(["42", "42", "41"]))
 
 ~~~math
 \hat a
-=\operatorname*{arg\,max}_{a}
+=\mathrm{arg\,max}_{a}
 \sum_{k:a_k=a}w(s_k).
 ~~~
 
@@ -163,7 +163,7 @@ print(majority_vote(["42", "42", "41"]))
 ~~~math
 \hat y_i=y_{ij^\star},
 \qquad
-j^\star=\operatorname*{arg\,max}_{j}s_{ij}.
+j^\star=\mathrm{arg\,max}_{j}s_{ij}.
 ~~~
 
 重排效果由生成候选覆盖和验证器排序共同决定。若正确答案没有生成，验证器无法凭空创造它；若 hard negative 得分过高，增加候选反而可能增加错误完成。
@@ -187,15 +187,15 @@ ECE 和 Brier score 都要求 N>0；分桶应覆盖每个样本且互不重叠�
 如果验证器输出 p_i，系统可能用阈值决定自动通过、拒答或转人工。把预测分数分成 B 个桶，ECE 可写成：
 
 ~~~math
-\operatorname{ECE}
+\mathrm{ECE}
 =\sum_{b=1}^{B}\frac{|S_b|}{N}
-\left|\operatorname{Acc}(S_b)-\operatorname{Conf}(S_b)\right|.
+\left|\mathrm{Acc}(S_b)-\mathrm{Conf}(S_b)\right|.
 ~~~
 
 S_b 是第 b 个分桶，Acc 是实际正确率，Conf 是平均预测置信度。Brier score 为：
 
 ~~~math
-\operatorname{BS}
+\mathrm{BS}
 =\frac{1}{N}\sum_{i=1}^{N}(p_i-y_i)^2,
 ~~~
 
@@ -258,7 +258,7 @@ C_{\mathrm{label}}
 
 ~~~math
 B_{t+1}
-=\operatorname{TopK}
+=\mathrm{TopK}
 \left(
 \{b+a:b\in B_t,a\in\mathcal{A}(b)\},
 S_{\mathrm{process}}
@@ -287,7 +287,7 @@ Beam search 按层展开候选，每层保留分数最高的 K 个状态：
 
 ~~~math
 F_{t+1}
-=\operatorname{TopK}\left(
+=\mathrm{TopK}\left(
 \{T(s,a):s\in F_t,a\in\mathcal{A}(s)\},
 S,K
 \right).
@@ -305,7 +305,7 @@ Best-first search 在全局 frontier 中取当前分数最高的节点，而不�
 Tree of Thoughts 论文 [arXiv:2305.10601](https://arxiv.org/abs/2305.10601) 将中间想法组织成可搜索的树，并通过评估与回溯探索多条路径。MCTS 则在选择、扩展、模拟和回传之间反复分配预算。UCT 常用的选择分数可写成：
 
 ~~~math
-\operatorname{UCT}(v)
+\mathrm{UCT}(v)
 =\frac{W_v}{N_v}
 +c\sqrt{\frac{\ln N_{\mathrm{parent}}}{N_v}},
 ~~~
@@ -395,7 +395,7 @@ Benchmark contamination 指评估题或近重复题泄漏到训练数据，导�
 HumanEval 论文 [arXiv:2107.03374](https://arxiv.org/abs/2107.03374) 讨论了代码生成评估中的 pass@k。若生成 n 个候选，其中 c 个通过测试，常用无偏估计为：
 
 ~~~math
-\operatorname{pass@}k
+\mathrm{pass@}k
 =1-\frac{\binom{n-c}{k}}{\binom{n}{k}}.
 ~~~
 
@@ -459,7 +459,7 @@ D_{\mathrm{robust}}=A_{\mathrm{orig}}-A_{\mathrm{var}}.
 ~~~math
 \Delta^{(b)}=\frac{1}{N}\sum_{r=1}^{N}d_{i_r^{(b)}},
 \qquad
-\operatorname{CI}_{95\%}
+\mathrm{CI}_{95\%}
 =\left[
 q_{0.025}(\Delta^{(b)}),
 q_{0.975}(\Delta^{(b)})
@@ -645,7 +645,7 @@ R_{\mathrm{severity}}
 \mathcal{D}
 =\left(
 \Delta_{\mathrm{pair}},
-\operatorname{CI}_{\mathrm{pair}},
+\mathrm{CI}_{\mathrm{pair}},
 \min_{s\in\mathcal{S}}\Delta_s,
 R_{\mathrm{contam}},
 A_{\mathrm{jh}},
