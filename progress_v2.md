@@ -7,13 +7,24 @@
 - `scope`：从第一册第一份正文开始，按书系顺序覆盖 24 册及 `book-llm-engineer` 补充篇；每份正文逐行复读，并检查必要的简介、目录、索引和配套资料。
 - `basis`：当前版 `WRITING_SPEC.md`、`plan.md` 中常态化全书精修要求及仓库 `AGENTS.md`。
 - `acceptance`：按内容类型审查问题和动机、连续机制解释、公式/状态、数值例子/代码、工程边界、失败模式、评测、证据范围、链接、导航和按需配套同步；全文复读并验证声明范围内的代码和公式；未完成项明确保留。
-- `status`：进行中。第一册五份正文、第二册全部十份正文、第三册全部十一份正文以及第四册第一至十二份正文已有本轮验收记录。
-- `next`：继续第四册第十三份正文 `book-04-llm-encyclopedia/chapters/13-安全与治理.md`，按百科类型检查定义、机制、例子/反例及专题入口。
+- `status`：进行中。第一册五份正文、第二册全部十份正文、第三册全部十一份正文以及第四册第一至十三份正文已有本轮验收记录。
+- `next`：继续第四册第十四份正文 `book-04-llm-encyclopedia/chapters/14-重要论文索引.md`，按索引类型检查条目、链接和与正文/配套的映射。
 - `open_risks`：全书量大，按章节推进并逐批记录；未实际核验的代码、公式或配套同步不得标为完成。代码验证以可执行且输出能说明机制为准；优先使用 `.tmp/` 下被 Git 忽略的 CPU-only PyTorch 环境，不安装 CUDA 库，也不为性能或 100% 复现扩大依赖。已有章节中的 CUDA、GPU 性能、多节点、真实模型/语料和生产 serving 边界仍按各章记录。PDF 构建 dry-run 因环境缺少 Pandoc 未能执行。
 
 维护者要求本轮从头开始，不沿用此前半成品记录作为覆盖证据。旧的 `progress_v2.md` 记录已清空重建；`progress_v3.md` 保持原样。维护者进一步明确：代码用于展示和解释知识，只要代码经检查可执行且输出有助于说明问题即可；可使用 PyTorch CPU，不安装 CUDA 库，也不要求读者逐一进行完整复现。联网资料使用指定代理 `http://10.24.27.134:7890`。
 
 ## 本轮执行记录
+
+### 第四册第十三份正文：`book-04-llm-encyclopedia/chapters/13-安全与治理.md`（2026-10-23）
+
+- `scope`：全文复读 13.1—13.27，覆盖威胁模型、对齐错配、scalable oversight、3H 冲突、指令层级、jailbreak/注入、taint 数据流、拒答曲线、PII 与记忆提取、DP-SGD、数据治理、水印与 C2PA、红队与危险能力、分层安全评估、事故响应、机制可解释性、steering、model editing、unlearning、工具/Agent 安全、模型卡与治理发布、偏见公平毒性、审核 guardrail、供应链和安全工程账；按百科类型验收，未修改长期规范。
+- `changes`：修正 25 处 `\operatorname{...}` 为 `\mathrm{...}`；其余无需语义修改。
+- `evidence`：18 个唯一外链（11 篇 arXiv、MITRE ATLAS、NIST、OWASP x2、SLSA、C2PA）经指定代理均 HTTP 200；11 篇 arXiv 题名经 abs 页面核对全部一致；章首两条书内相对链接目标存在。详见 `research/encyclopedia-safety-governance-review-2026-10-23.md`。
+- `code_status`：3 个 Python 块逐块独立执行通过（风险排序、taint 传播、activation patching 线性干预）。
+- `formula_status`：40 个 math 围栏花括号与环境平衡、无禁用宏；Wilson 区间、DP-SGD、水印 z 分数、FNR/ASR/拒答率等分母与定义域限定核对通过；`git diff --check` 通过。
+- `sync_status`：`PAPERS.md` Safety 区新增 11 个论文直链；术语表/练习/题库已有对应主题；第四册目录映射正确。
+- `open_risks`：未运行真实攻击、红队、DP 训练或模型编辑实验；水印检测为教学简化；论文题名核对不等于全文复核；PDF 仍受 Pandoc 缺失限制。
+- `status`：本章声明范围内精修验收完成；主线进入第四册第十四份正文 `book-04-llm-encyclopedia/chapters/14-重要论文索引.md`，全书 goal active。
 
 ### 第四册第十二份正文：`book-04-llm-encyclopedia/chapters/12-reasoning与评估.md`（2026-10-23）
 

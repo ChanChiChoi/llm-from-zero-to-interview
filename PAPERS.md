@@ -194,6 +194,14 @@ GPU 集群、分布式训练系统、LLM serving engine、调度、KV Cache 管�
 
 Red Teaming、Mechanistic Interpretability、SAE、Model Editing、Unlearning、Privacy。
 
+建议补读资料线：
+
+1. [Concrete Problems in AI Safety](https://arxiv.org/abs/1606.06565) 与 [Risks from Learned Optimization](https://arxiv.org/abs/1906.01820)：奖励设计、副作用、specification gaming 与目标错配的基础分析。
+2. [Constitutional AI](https://arxiv.org/abs/2212.08073)：原则 + AI feedback 的对齐研究方法。
+3. [Extracting Training Data from LLMs](https://arxiv.org/abs/2012.07805)、[Membership Inference](https://arxiv.org/abs/1610.05820) 与 [DP-SGD](https://arxiv.org/abs/1607.00133)：隐私攻击与差分隐私保护入口。
+4. [ROME](https://arxiv.org/abs/2202.05262) 与 [MEMIT](https://arxiv.org/abs/2210.07229)：参数化知识定位与批量编辑研究方法。
+5. [Model Cards](https://arxiv.org/abs/1810.03993)、[StereoSet](https://arxiv.org/abs/2004.09456) 与 [RealToxicityPrompts](https://arxiv.org/abs/2009.11462)：模型披露、偏见与毒性评估入口；结合任务和群体切片使用。
+
 ### 后训练评估与公开基准
 
 1. [MMLU](https://arxiv.org/abs/2009.03300) 与 [MMLU-Pro](https://arxiv.org/abs/2406.01574)：知识与推理题目评测；注意题目版本、提示、选项格式和污染风险。
