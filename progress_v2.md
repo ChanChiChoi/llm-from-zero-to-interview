@@ -7,13 +7,321 @@
 - `scope`：从第一册第一份正文开始，按书系顺序覆盖 24 册及 `book-llm-engineer` 补充篇；每份正文逐行复读，并检查必要的简介、目录、索引和配套资料。
 - `basis`：当前版 `WRITING_SPEC.md`、`plan.md` 中常态化全书精修要求及仓库 `AGENTS.md`。
 - `acceptance`：按内容类型审查问题和动机、连续机制解释、公式/状态、数值例子/代码、工程边界、失败模式、评测、证据范围、链接、导航和按需配套同步；全文复读并验证声明范围内的代码和公式；未完成项明确保留。
-- `status`：进行中。第一册五份正文和第二册第一至九份正文已完成；第二册第十份正文第 105—124 讲均已有首轮复读或局部修订和代码验证记录，但第 108—124 讲来源核验、整章验收和配套同步仍待完成，整份正文未标完成。
-- `next`：继续第三册第八份正文 `book-03-practical-handbook/chapters/08-评估与debug实战.md`，按当前规范从头复读；第二册第十份正文的来源、公式/代码全章一致性、目录链接和研究记录仍作为遗留审计任务，不能视作已完成。
+- `status`：进行中。第一册五份正文、第二册全部十份正文、第三册全部十一份正文以及第四册第一至十一份正文已有本轮验收记录。
+- `next`：继续第四册第十二份正文 `book-04-llm-encyclopedia/chapters/12-reasoning与评估.md`，按百科类型检查定义、机制、例子/反例及专题入口。
 - `open_risks`：全书量大，按章节推进并逐批记录；未实际核验的代码、公式或配套同步不得标为完成。代码验证以可执行且输出能说明机制为准；优先使用 `.tmp/` 下被 Git 忽略的 CPU-only PyTorch 环境，不安装 CUDA 库，也不为性能或 100% 复现扩大依赖。已有章节中的 CUDA、GPU 性能、多节点、真实模型/语料和生产 serving 边界仍按各章记录。PDF 构建 dry-run 因环境缺少 Pandoc 未能执行。
 
 维护者要求本轮从头开始，不沿用此前半成品记录作为覆盖证据。旧的 `progress_v2.md` 记录已清空重建；`progress_v3.md` 保持原样。维护者进一步明确：代码用于展示和解释知识，只要代码经检查可执行且输出有助于说明问题即可；可使用 PyTorch CPU，不安装 CUDA 库，也不要求读者逐一进行完整复现。联网资料使用指定代理 `http://10.24.27.134:7890`。
 
 ## 本轮执行记录
+
+### 第四册第十一份正文：`book-04-llm-encyclopedia/chapters/11-长上下文rag与agent.md`（2026-10-23）
+
+- `scope`：全文复读 11.1—11.25，覆盖长上下文预算与位置敏感性、上下文工程、RAG 架构、检索与融合、证据状态与 Agentic RAG、引用与版本、Agent 抽象与规划、工具契约与执行、MCP、A2A、Memory、Code/Browser/Multi-Agent、组合边界、trace/replay、评估、提示注入安全、成本延迟和端到端设计；按百科类型验收，未修改长期规范。
+- `changes`：正文无需语义修改；格式与来源核验通过。MCP 规范固定 2025-06-18 版本、A2A 固定 latest 并要求实现绑定版本的写法保留。
+- `evidence`：12 个唯一外链中 10 个经指定代理核验 HTTP 200（含全部 6 篇 arXiv、MCP/A2A 规范、Anthropic、HELM）；6 篇 arXiv 题名经 abs 页面核对全部与引用主题一致。详见 `research/encyclopedia-long-context-rag-agent-review-2026-10-23.md`。
+- `code_status`：5 个 Python 块逐块独立执行，5/5 通过；RRF 数值复算排名 B > A > D > C 与正文一致；退避 [1,2,4,4,4] 与 budget 拒绝一致。
+- `formula_status`：23 个 math 围栏花括号平衡；工具调用 Precision/Recall、SupportRate、Pass@k、成本/延迟分解的分母非空与定义域限定核对通过；`git diff --check` 通过。
+- `sync_status`：`PAPERS.md` Agent 区补入 ReAct、Toolformer 直链与 SWE-bench 入口；术语表和练习已有对应主题，不重复添加；第四册目录映射正确。
+- `open_risks`：未运行真实检索器、embedding、MCP/A2A Server、沙箱或生产 Agent；`u(p)` 与 `P(success)` 为教学模型，正文已声明；PDF 仍受 Pandoc 缺失限制。
+- `status`：本章声明范围内精修验收完成；主线进入第四册第十二份正文 `book-04-llm-encyclopedia/chapters/12-reasoning与评估.md`，全书 goal active。
+
+### 第四册第十份正文：`book-04-llm-encyclopedia/chapters/10-分布式训练系统.md`（2026-10-23）
+
+- `scope`：全文复读 10.1—10.24 及小结，覆盖训练账本、数据/张量/流水并行、ZeRO/FSDP、重计算与混合精度、效率与 MFU、故障定位、拓扑、网络、存储与 checkpoint、容器与 K8s、多租户调度、平台契约、实验追踪、可观测性、SLO、成本、安全供应链、审计变更和综合实验；按百科类型验收，未修改长期规范。
+- `changes`：修正 10.23 的 GPipe 论文题名（实际为 "GPipe: Efficient Training of Giant Neural Networks using Pipeline Parallelism"）；修正 Data Cards 错链（`2203.15556` 实为 Chinchilla 论文，改为 `2204.01075`）；`\operatorname{Optimizer}` 改为 `\mathrm{Optimizer}`；围栏风格与第四册已验收章节一致，保持 `~~~` 不变。
+- `evidence`：18 个唯一外链经指定代理全部 HTTP 200；5 篇 arXiv 题名经 abs 页面核对，2 处错误已修正，3 处一致。详见 `research/encyclopedia-distributed-training-review-2026-10-23.md`。
+- `code_status`：11 个标准库 Python 块逐块独立执行，11/11 通过；未安装 CUDA 或额外依赖。
+- `formula_status`：32 个 math 围栏花括号平衡、无禁用宏；复算 ring 14 GiB、bubble 0.2、ZeRO 30 GiB、dominant share 0.25、burn rate 2.0、global batch 64 及 TP 切分 1376/512，均与正文一致；`git diff --check` 通过。
+- `sync_status`：`PAPERS.md` 补入 Megatron-LM 集群训练与 ZeRO-Infinity 入口；`EXERCISES.md`、`INTERVIEW_BANK.md`、`GLOSSARY_EN_ZH.md` 已覆盖本章主题，不重复添加；第四册目录映射正确。
+- `open_risks`：未在真实 GPU/NCCL/多节点环境验证通信、MFU、吞吐或故障恢复；未运行 ZeRO/FSDP/Megatron 实际训练；教学公式为数量级近似；PDF 仍受 Pandoc 缺失限制。
+- `status`：本章声明范围内精修验收完成；主线进入第四册第十一份正文 `book-04-llm-encyclopedia/chapters/11-长上下文rag与agent.md`，全书 goal active。
+
+### 第二册第十份正文：整章遗留审计与验收（2026-10-23）
+
+- `scope`：补齐 2026-10-14 至 10-19 局部检查点遗留的整章审计：第 105—124 讲全章 15,753 行的来源核验、公式格式统一、代码回归、配套同步与整章验收；未修改长期规范。
+- `changes`：发现并修正第 120—124 讲遗留的 152 对旧式 `$$` 数学围栏（10-19 审计记录声称全章旧式围栏为 0，实际未覆盖这些讲次），机械转换为 fenced `math` block；本轮未改动正文语义内容。
+- `evidence`：32 个唯一外链经指定代理核验，29 个 HTTP 200，3 个 openai.com 页面 403（代理限制，与第一册多模态章记录一致，不作链接失效证据）；23 个唯一 arXiv ID 题名经 abs 页面逐个核对，与引用主题全部一致（含 Whisper 正确题名）。Atom API 批量查询限流（429/000），改用 abs 页面。详见 `research/multimodal-advanced-chapter10-review-2026-10-23.md`。
+- `code_status`：转换后 17 个 Python 块逐块独立执行，17/17 通过；此前各讲检查点记录的 90 余项边界断言适用于未改动代码路径。未安装 CUDA。
+- `formula_status`：全章 318 个 `math` 围栏成对、花括号平衡；无 `\operatorname`、无尖括号下标；全部围栏（text/python/json）闭合；`git diff --check` 通过。
+- `sync_status`：`PAPERS.md` 多模态区新增 DALL·E 1/2、Tacotron 2、FastSpeech 1/2、VITS、VALL-E、CLIPScore、MME、MMBench、MMMU、POPE、LayoutLMv3 入口；`GLOSSARY_EN_ZH.md` 新增 POPE、CLIPScore、FID、LayoutLMv3 条目；`EXERCISES.md`、`INTERVIEW_BANK.md` 已覆盖本章主题，不重复添加；第二册目录第 105—124 讲映射正确。
+- `open_risks`：未运行真实多模态模型、GPU、生成质量回归或生产 serving；论文题名/链接核验不等于全文与实验复核；openai.com 三页 403 须在引用当前状态前重新核验；PDF 构建仍受 Pandoc 缺失限制。
+- `status`：第二册第十份正文整章验收完成，第二册全部十份正文已有本轮验收记录；全书精修主线继续第四册第十份正文 `book-04-llm-encyclopedia/chapters/10-分布式训练系统.md`，全书 goal active。
+
+### 第四册第九份正文：推理部署账本首个检查点（2026-10-23）
+
+- `scope`：全文初读第 9.1—9.19，局部核验请求生命周期、token workload、scheduler、KV/PagedAttention、online softmax、虚拟页、量化、runtime、PD、扩缩容和分位数摘要。
+- `changes`：所有教学代码整数输入拒绝 bool；scheduler 分离 running sequence 与 waiting prefill token 预算；percentile 明确 nearest-rank 离散口径。
+- `evidence`：新增 `research/encyclopedia-inference-deployment-review-2026-10-23.md`；尚未完成来源论文/官方文档逐项读取。
+- `code_status`：`python3 /tmp/check_deployment_review.py` 通过，12 个标准库 Python 块独立执行，非法输入、预算、分位数及 21 个 math 块结构/围栏检查通过。
+- `open_risks`：动态 batching 公平性、paged/prefix cache 引用计数、FlashAttention/量化公式、PD/多级 KV/路由保护、API/流式协议/发布回滚、全章链接及配套仍待核验；第二册第十份正文遗留审计保留。
+- `status`：第四册第九份正文局部检查点，顶部 next 保持，全书 goal active。
+
+### 第四册第九份正文：生命周期与缓存边界检查点（2026-10-23）
+
+- `scope`：继续核验请求状态、prefix cache 命中分母、online softmax 与量化教学代码边界。
+- `changes`：生命周期账本增加显式合法状态转移，并修正示例漏过 TOKENIZED 状态；prefix 命中率明确输入 token 分母大于零；量化值拒绝 bool。
+- `code_status`：`python3 /tmp/check_deployment_review.py` 通过，额外验证 RECEIVED 直接 DECODING 被拒、bool 量化值被拒；12 个代码块及 21 个 math 块结构仍通过。
+- `open_risks`：动态 batching 公平性、PagedAttention/Prefix Cache 完整引用计数、FlashAttention/量化来源、PD/多级 KV/路由保护、API/流式协议、全章链接和配套仍待收口。
+- `status`：局部检查点，第四册第九份正文继续进行中，全书 goal active。
+
+### 第四册第九份正文：后半部署边界与来源检查点（2026-10-23）
+
+- `scope`：继续核验多级 KV/跨节点、模型路由与扩缩容、保护策略、流式 API、发布治理、事故诊断及 Agent serving；同步部署练习。
+- `changes`：生命周期状态、prefix cache 分母和量化输入边界继续收紧；补 FlashAttention tiling、vAttention 连续虚拟视图、GPTQ 二阶近似和 AWQ activation-aware 的来源边界说明。
+- `evidence`：读取 FlashAttention v2、vAttention、GPTQ、AWQ HTML 摘要/方法段落；`python3 /tmp/check_deployment_review.py --links` 通过代理核验 18 个链接中的 17 个 HTTP200，`docs.vllm.ai` 返回 403；本地 `--links` 与代码边界检查通过。
+- `sync_status`：EXERCISES.md 新增 5 项推理优化与部署练习。
+- `code_status`：12 个标准库 Python 块、非法输入和 21 个 math 块结构检查通过；未运行 GPU/kernel/serving 压测。
+- `open_risks`：PagedAttention 固定 HTML 404、vLLM 文档 403、完整来源/导航收口、API/协议/回滚语义及全章验收仍待完成；第二册第十份正文遗留审计保留。
+- `status`：局部检查点，第四册第九份正文继续进行中，全书 goal active。
+
+### 第四册第九份正文：整章验收（2026-10-23）
+
+- `scope`：完成第 9.1—9.19 及回顾的全文复读、部署账本代码、公式结构、来源、导航和配套同步验收。
+- `changes`：修正生命周期状态链、running 与 prefill token 预算混用、prefix 命中率空分母、量化 bool 输入和 nearest-rank 口径；补动态 batching、KV 引用、PD 取消、fallback 幂等、startup/readiness/drain、Agent 工具权限边界。
+- `evidence`：读取 FlashAttention v2、vAttention、GPTQ、AWQ 摘要/方法段落及官方文档；18 个链接目标中 17 个 HTTP200，vLLM 文档 403、PagedAttention HTML 固定路径 404，abs 入口可达；详见 `research/encyclopedia-inference-deployment-review-2026-10-23.md`。可达性和摘要不代表完整论文或运行时验证。
+- `code_status`：`python3 /tmp/check_deployment_review.py` 通过；12 个标准库 Python 块独立执行，状态转移、bool 输入、scheduler、KV、页表、量化、PD、replica、percentile 边界通过。
+- `formula_status`：21 个 math 块花括号/环境及围栏结构通过，未使用外部公式渲染器；`git diff --check` 通过。
+- `sync_status`：EXERCISES.md 新增 5 项推理优化与部署练习；下一章路径核对为 `book-04-llm-encyclopedia/chapters/10-分布式训练系统.md`。
+- `open_risks`：未运行真实 GPU、kernel、serving、网络压力、跨节点迁移或量化质量回归；两个来源链接受代理/版本路径限制；第二册第十份正文遗留审计保留。
+- `status`：本章声明范围内精修验收完成；主线进入第四册第十份正文 `book-04-llm-encyclopedia/chapters/10-分布式训练系统.md`，全书 goal active。
+
+### 第四册第八份正文：采样与延迟局部检查点（2026-10-22）
+
+- `scope`：全文初读第 8.1—8.15 节及回顾，局部核验采样数值、top-p 与首 token/延迟口径；整章进行中。
+- `changes`：修复采样全局 random 状态、高温极端 logits 差值溢出、top-p 归一化溢出与零概率尾项；明确排序前缀、greedy 确定性和硬约束失败；首 token 使用 prefill logits，延迟拒绝空观测与原点不一致。预算/KV 拒绝 bool，已选 token 概率限定 (0,1]。
+- `evidence`：读取 Transformers GenerationConfig 相关参数与 speculative decoding v2 采样方法段落；投机部分正文尚待修订。见 `research/encyclopedia-decoding-review-2026-10-22.md`。
+- `code_status`：13 个标准库 Python 块独立编译执行通过；极端温度概率、非法分布、局部随机流、top-p 大权重/零概率和延迟边界断言通过。命令 `python3 /tmp/check_decoding_review.py`。
+- `formula_status`：24 个 math 块花括号/环境及围栏结构通过，未使用外部数学渲染器；git diff --check 通过。
+- `open_risks`：penalty/beam/entropy/约束/账本代码、best-of-N、KV 边界、投机解码及全章来源/链接/配套仍待收口；第二册遗留审计保留。
+- `status`：第四册第八份正文局部检查点，顶部 next 保持，全书 goal active。
+
+### 第四册第八份正文：投机解码与边界扩展检查点（2026-10-23）
+
+- `scope`：继续第八章，核验 speculative decoding 的同 token 空间、p/q 支持集、接受—拒绝和残差分布；并补查 penalty、beam、best-of-N、KV、约束与配置账本代码边界。
+- `changes`：正文补原论文方法链接、sampling-adjusted 分布和 tokenizer 对齐要求；残差单步 toy 例恢复 target `[0.5,0.3,0.2]`，q=0 提议、p=q 零残差及全部接受边界明确。修正 repetition 计数、beam 非正 logprob、best-of-N 独立性、投票最高票/平票语义、KV 适用前提和配置字段校验。
+- `evidence`：读取 speculative decoding v2 第 2 节和 Transformers GenerationConfig 页面；论文入口题名已核对，2202.00666 修正为正式题名 `Locally Typical Sampling`。HF 文档随后 HTTP403，参数核对来自已下载页面，不作为线上可达性证据。
+- `code_status`：13 个标准库 Python 块独立执行；残差分布、非法候选、局部随机、top-p、大权重、延迟、penalty、beam、KV、约束及配置账本边界断言通过。命令 `python3 /tmp/check_decoding_review.py`。
+- `formula_status`：24 个 math 块结构通过，未使用外部公式渲染器；git diff --check 待本批完成后复跑。
+- `open_risks`：HF 文档线上 403、剩余 arXiv/官方链接完整核验、配套同步和整章收口仍待完成；未运行真实模型、GPU、serving 或完整 speculative rollout。第二册遗留审计保留。
+- `status`：局部检查点，第四册第八份正文继续进行中，全书 goal active。
+
+### 第四册第八份正文：整章验收（2026-10-23）
+
+- `scope`：完成第 8.1—8.15 及回顾的全文复读、算法边界、教学代码、来源、导航和配套同步验收。
+- `changes`：采样改局部 RNG 与极端 logits 稳定实现；top-p 采用排序前缀并处理大权重；投机解码补残差恢复 target 的数值证据；延迟区分 prefill 首 token、TTFT 和 TPOT；best-of-N、投票、KV、约束与配置账本补适用边界。
+- `evidence`：读取 speculative decoding v2 第 2 节、Transformers GenerationConfig 参数页；13 个链接目标中 11 个外部页面 HTTP200，两个 docs 页面受代理 403 限制，论文题名与正文资料项核对一致；详见 `research/encyclopedia-decoding-review-2026-10-22.md`。
+- `code_status`：13 个标准库 Python 块独立执行；极端数值、随机状态、top-p、penalty、beam、预算、延迟、残差分布、KV、约束、best-of-N 和配置输入边界断言通过。命令 `python3 /tmp/check_decoding_review.py`。
+- `formula_status`：24 个 math 块花括号/环境与围栏结构通过，未使用外部公式渲染器；`git diff --check` 通过。
+- `sync_status`：EXERCISES.md 新增 5 项推理与解码练习；第四册目录/简介映射、第六册/第二十四册专题入口及下一章路径核对。
+- `open_risks`：未运行真实模型、GPU、serving 性能或完整 speculative rollout；docs.vllm 与一个 Transformers 文档页面的线上可达性受代理限制；PDF 仍受 Pandoc 缺失限制。第二册第十份正文遗留审计继续保留。
+- `status`：本章声明范围内精修验收完成；主线进入第四册第九份正文 `book-04-llm-encyclopedia/chapters/09-推理优化与部署.md`，全书 goal active。
+
+### 第四册第七份正文：整章验收（2026-10-22）
+
+- `scope`：接续四个局部检查点，复核 SFT—偏好优化—RLVR—蒸馏—发布链路，完成本章声明范围内验收；长期规范未修改。
+- `changes`：诊断账本增加逐条非负整数计数、enabled 不超 expected、布尔标签及安全切片冲突校验；RLHF 公式标明最大化目标与负号约定；线上反馈限定授权/脱敏/保留。配套题库纠正 reference-free 推导部署成本更低的错误，论文索引明确 KTO 使用 reference。
+- `evidence`：此前方法段落核验范围见 `research/encyclopedia-posttraining-alignment-review-2026-10-22.md`；本次 24 个唯一外部页面 HTTP200，29 个链接目标的本地路径及外部引用锚点通过；16 篇 abs 页面题名核对所引方法一致。页面可达和题名不作为全文核验。
+- `code_status`：唯一标准库块独立编译执行通过，正常五项输出不变；六组非法账本输入、DPO 非法概率/beta/溢出、零分母、小 softplus 及此前方法数值例子通过。命令为 `python3 /tmp/check_posttraining_review.py`；外链检查使用 `--links`，沙箱网络失败后经授权通过代理执行。
+- `formula_status`：35 个 math 块花括号/环境与围栏结构通过，重要目标语义及数值已按局部记录核对；未调用外部公式渲染器。
+- `sync_status`：EXERCISES.md 的 5 项练习、INTERVIEW_BANK.md 对应题、PAPERS.md 分类已同步；本册目录/简介章节映射、本章专题入口及下一章路径核对；git diff --check 通过。
+- `open_risks`：未运行完整训练、真实模型、GPU、RL/工具生产系统或安全验证；官方 main 文档动态变化，PDF 仍受 Pandoc 缺失限制。第二册第十份正文遗留审计仍未完成。
+- `status`：本章声明范围内精修验收完成；主线进入第四册第八份正文，全书 goal 保持 active。
+
+### 第四册第七份正文：IPO、SimPO 与 V3.2 来源检查点（2026-10-22）
+
+- `scope`：接续第七章，核验 IPO/SimPO 方法段落、RLAIF 摘要及 V3.2 后训练报告与模型卡；整章仍在进行中。
+- `changes`：IPO 明确 τ 为正则强度、原文动作概率与实现均值口径；补两侧梯度例子。SimPO 补 margin/β 阈值、损失及长度翻倍反例，限定长度平均与下游回归。长度偏差不再由 logprob 求和直接推出；RLAIF 区分 AI 评价、规则奖励与离线偏好训练。V3.2 补固定报告引用和四项稳定化措施的独立解释。
+- `evidence`：读取 IPO v2 第 5.2 节及相关正则说明、SimPO v2 目标和限制段落、RLAIF 摘要、V3.2 v1 第 3/3.1 节与官方模型卡相应段落。详见对应 research note；未声称全文阅读或训练复现。
+- `code_status`：`python3 /tmp/check_posttraining_review.py` 通过；单个标准库代码块正常输出不变，新增 IPO 平方误差和 SimPO 0.513015 数值断言通过；35 个公式块结构及 git diff --check 通过。
+- `sync_status`：EXERCISES.md 新增 5 项 mask、目标、归一化、奖励与蒸馏边界练习。
+- `open_risks`：诊断代码完整输入边界、全章外链/锚点与论文题名、导航和剩余配套验收仍待完成；未使用外部公式渲染器。第二册第十份正文遗留审计保留。
+- `status`：局部检查点，顶部 next 保持第四册第七份正文，全书 goal 继续 active。
+
+### 第四册第七份正文：DAPO、GSPO 与蒸馏边界检查点（2026-10-22）
+
+- `scope`：接续第七章，核验 DAPO 动态采样、GSPO 比率/截断及蒸馏公式适用条件；整章保持进行中。
+- `changes`：DAPO 明确过滤组内全对/全错并补混合奖励例子、分布变化和采样预算；GSPO 修正 GRPO 连乘暗示，补几何平均与逐 token clip 反例，限定非空有效生成 token、clip 尺度及共享优势；蒸馏区分固定历史 forward KL、教师软分布与硬修订；安全指标零分母记未定义，轨迹保留加入权限和脱敏边界。
+- `evidence`：读取 DAPO v1 第 3.2 节与 GSPO v1 第 4.1 节方法段落并加入固定版本引用；未声称全文核验或训练复现。蒸馏交叉熵/KL 恒等式为局部数学检查，不代表具体训练方法复现。
+- `code_status`：`python3 /tmp/check_posttraining_review.py` 通过；唯一标准库代码块独立执行，五项输出不变；三组奖励过滤、优势 [-1,-1,1,1]、GSPO 几何平均重复不变及 CE-H=KL 数值断言通过。
+- `formula_status`：35 个 math 块花括号/环境及围栏结构通过，未使用外部公式渲染器；git diff --check 通过。
+- `open_risks`：IPO/SimPO、RLAIF 定义、章末 V3.2 来源、诊断器完整边界、全章外链和配套同步仍待验收；第二册第十份正文遗留审计保持未完成。
+- `status`：局部检查点，顶部 next 仍为第四册第七份正文；全书 goal 保持 active。
+
+### 第四册第七份正文：偏好变体与归一化局部检查点（2026-10-22）
+
+- `scope`：接续本章进行中任务，深入核验KTO、ORPO、Dr.GRPO及reward-human gap；整章未验收。
+- `changes`：KTO从BCE示意替换为有界sigmoid价值及KL参考点目标；ORPO补长度平均概率、odds-ratio项与数值例子；Dr.GRPO补去组内std和固定L_max分母；reward-human gap先统一事件与量纲。
+- `evidence`：读取KTO v3第4节、ORPO v2目标、Dr.GRPO v1长度/难度偏置相关段落，见 `research/encyclopedia-posttraining-alignment-review-2026-10-22.md`，未复现训练。
+- `code_status`：唯一标准库Python块重新独立编译执行通过，正常输出不变；KTO0.268941/0.731059、ORPO0.223144数值复算通过。
+- `formula_status`：35个math块花括号/环境结构通过；未使用外部公式渲染器，git diff --check通过。
+- `open_risks`：IPO/SimPO、GRPO/DAPO/GSPO、RLAIF、蒸馏、V3.2证据、诊断器边界、全章外链与配套仍待收口。
+- `status`：继续第四册第七份正文，顶部next保留；第二册遗留审计仍未完成。
+
+### 第四册第七份正文：后训练与对齐局部检查点（2026-10-22）
+
+- `scope`：全文初读7.1—7.15、小结及V3.2补充，局部核验SFT、LoRA、PPO和DPO；整章保持进行中。
+- `changes`：修正SFT shift示意、LoRA秩上界、PPO clip非硬约束、DPO sum/mean目标差异和beta含义；诊断代码使用log1p并拒绝非法概率/beta和溢出margin。
+- `evidence`：读取DPO v2推导、Spinning Up PPO及TRL DPO相关段落，范围见 `research/encyclopedia-posttraining-alignment-review-2026-10-22.md`；尚未完成全章来源验收。
+- `code_status`：唯一标准库Python块独立编译执行通过；输出0.917/0.688/0.667/0.500/1.000，首条DPO loss0.673347167228034；bool/正log probability/非法beta/溢出margin拒绝断言与小softplus值通过。
+- `formula_status`：34个math块和围栏结构通过，整章语义核验尚未结束；未调用外部数学渲染器。
+- `open_risks`：偏好变体、GRPO系列、奖励指标量纲、蒸馏、章末V3.2证据、外链及配套仍待核验；未运行真实训练或GPU，PDF仍受Pandoc缺失限制。
+- `status`：继续第四册第七份正文，顶部next保留；第二册遗留审计仍未完成；git diff --check通过。
+
+### 第四册第六份正文：整章验收（2026-10-22）
+
+- `scope`：接续局部检查点复读6.1—6.14及小结，按百科定义、机制、反例和专题入口验收，未修改长期规范。
+- `changes`：明确温度采样、空池和effective epoch口径；区分替换/累积合成数据的collapse证据；scaling改有来源的N/D拟合与6ND约束，训练compute-optimal不混称生命周期成本；收紧消融预算、主动学习、扫描命中/风险率和版本删除边界。
+- `evidence`：读取collapse与accumulation摘要，复核Chinchilla公式，接续TRL与去重资料；8篇正文arXiv题名/版本核对，13个唯一外链HTTP200。详见 `research/encyclopedia-pretraining-data-review-2026-10-22.md`。
+- `code_status`：5个标准库Python块独立编译执行通过；质量分数/风险flag、去重计数、packing维度/token与shift目标、合成字段和误标边界通过；pack目标数3，EOS监督保留。
+- `formula_status`：13个math块与围栏结构通过；温度权重[0.2,0.8]与[1/3,2/3]、6ND等数值复算通过，未使用外部数学渲染器。
+- `sync_status`：EXERCISES.md新增5项数据口径/边界验收，本章、专题、本册目录、练习及下一章目标存在，git diff --check通过。
+- `open_risks`：未运行真实语料平台、近重复系统、TRL、训练、GPU、多节点恢复、模型遗忘或生产安全；来源可达/题名不当作全文与合规核验；PDF仍受Pandoc缺失限制。
+- `status`：本章声明范围内精修验收完成；继续第四册第七份正文，第二册遗留审计保持未完成。
+
+### 第四册第六份正文：预训练与数据局部检查点（2026-10-22）
+
+- `scope`：全文初读6.1—6.14与小结，局部核验token计数、去重、packing与合成过滤；整章保持进行中。
+- `changes`：分开输入/监督token与shift后分母；限定URI hash和碰撞；去重区分共有hash与命中文档数；独立样本attention与跨边界loss分别处理，补packing数值例子；修复单字符答案“2”被过滤却宣称通过的问题，明确verified不是事实证明。
+- `evidence`：读取TRL packing配置相关说明、去重论文2107.06499摘要；范围见 `research/encyclopedia-pretraining-data-review-2026-10-22.md`。未安装TRL或运行去重平台。
+- `code_status`：5个标准库Python块独立编译执行通过；重复评估文档计数、单字符/空白答案及verified误标反例通过。packed labels为[-100,2,0,-100,0]，shift目标3，EOS监督保留。
+- `formula_status`：13个math块和围栏结构通过；完整语义核验尚未结束，scaling公式明确待修正；未运行外部渲染器。
+- `open_risks`：mixture、collapse、scaling、删除恢复、消融、全章来源和配套仍待验收；PDF仍受Pandoc缺失限制。
+- `status`：继续第四册第六份正文；顶部next不变，第二册遗留审计保留；git diff --check通过。
+
+### 第四册第五份正文：整章验收（2026-10-22）
+
+- `scope`：接续局部检查点复读5.1—5.15与小结，按百科类型验收，长期规范未修改。
+- `changes`：修复极端logits/温度的差值溢出；限定greedy确定性、ICL冲突分母、记忆/泛化与涌现证据；成本分类避免重试/人工重复计数，补单位成功成本；可靠性按任务合取而非边际相乘，日志保留权限与复现边界。
+- `evidence`：接续Chinchilla/CE/random资料，读取Memorization和Emergence摘要；11篇论文题名/版本核对，14个唯一外链HTTP200。详见 `research/encyclopedia-llm-foundations-review-2026-10-22.md`，可达性不冒充全文核验。
+- `code_status`：两个标准库Python块独立编译执行，NLL/温度/概率/全局随机流边界通过；±1e308与温度1e308的概率约0.880797/0.119203，相等超大logits和极小温度为0.5/0.5。
+- `formula_status`：18个math块和围栏结构通过；6ND、PPL反例、20/80=0.25元、联合率0.5与乘积0.25复算通过，未使用外部公式渲染器。
+- `sync_status`：EXERCISES.md新增5项目标/分母验收；目录、本章、练习与下一章入口有效；git diff --check通过。
+- `open_risks`：未运行真实模型、训练、生产解码/安全/运营；摘要与元数据范围已注明，PDF仍受Pandoc缺失限制。
+- `status`：本章声明范围内精修验收完成；继续第四册第六份正文，第二册第十份正文遗留审计保留。
+
+### 第四册第五份正文：大语言模型基础局部检查点（2026-10-22）
+
+- `scope`：全文初读5.1—5.15与小结；局部核验概率目标、NLL、PPL、采样与scaling，整章保持进行中。
+- `changes`：明确hidden目标索引及shift后有效分母；NLL拒绝未归一化行、变动词表宽度和非法目标；区分PPL与预测熵、temperature=0接口开关；采样改局部Random且不选零概率；scaling改为有来源的N/D拟合和6ND计算约束。
+- `evidence`：读取Chinchilla v1相关公式、PyTorch2.12 CE与Python random说明，见 `research/encyclopedia-llm-foundations-review-2026-10-22.md`；尚未完成全章外链/论文核验。
+- `code_status`：两个标准库Python块独立编译执行通过，NLL0.458145、采样概率[0.771,0.1848,0.0443]；非法分布、bool目标、全忽略目标、零概率与全局随机状态断言通过。
+- `formula_status`：18个math块和围栏结构通过；6ND=1.2×10^20FLOPs复算通过；未运行外部数学渲染器，整章语义验收尚未结束。
+- `open_risks`：极端温度、记忆/泛化、涌现、ICL/成本分母、全章来源和配套仍待核验；未运行模型或训练，PDF仍受Pandoc缺失限制。
+- `status`：继续第四册第五份正文，顶部next保留；第二册遗留审计仍未完成。git diff --check通过。
+
+### 第四册第四份正文：Transformer 架构（2026-10-22）
+
+- `scope`：全文复读4.1—4.13与小结，按百科机制、定义、反例和专题入口验收；长期规范未修改。
+- `changes`：修正next-token方向、共享embedding更新、RoPE相位、dropout行和、布尔mask与缓存query绝对位置；补CPU未来/padding隔离与缓存对齐；补线性attention分母、FFN向量约定、具体gated delta纠错；限定KV复用、TTFT和batch缓存口径。
+- `evidence`：读取SDPA2.12、RoFormer、Gated Delta、Performers相关段落及Kimi Linear摘要；13篇arXiv题名/版本核对。发现Kimi Linear原链接为软件安全论文，修正2510.26620为2510.26692，最终15个外链入口HTTP200。范围见 `research/encyclopedia-transformer-architecture-review-2026-10-22.md`。
+- `code_status`：5个Python块独立编译执行通过；CPU PyTorch2.12.0+cpu下未来/padding隔离、切片缓存对齐、GQA重复映射通过；非方形causal反例输出3/1，维度与head整除边界通过。
+- `formula_status`：24个math块结构与围栏通过；attention7.01253185、缓存4GiB、RoPE相对相位、delta2.5/2.75复算通过，未使用外部数学渲染器。
+- `sync_status`：EXERCISES.md新增5项信息路径/状态验收；相对入口、专题、本册目录、练习与下一章目标存在；git diff --check通过。
+- `open_risks`：局部attention示例不证明完整模型缓存正确；未运行权重、训练、GPU、FlashAttention性能、分页/多租户缓存或生产serving；元数据/HTTP200不等于全部论文全文验证；PDF仍受Pandoc缺失限制。
+- `status`：本章声明范围内精修验收完成；继续第四册第五份正文，第二册遗留审计保持未完成。
+
+### 第四册第三份正文：整章验收（2026-10-22）
+
+- `scope`：接续局部检查点复读 3.1—3.12 与小结，按百科类型验收，长期规范未修改。
+- `changes`：补 WordPiece 贪心失败与 Unigram 路径反例、Unicode 码点/字素簇和文本/任意字节边界；共享 EOS/PAD 按位置屏蔽；说明特殊 token 非自动安全隔离；修正上下文预算重复计数、causal shift 分母和不同 tokenizer PPL 比较，补 BPB 数值与条件。
+- `evidence`：读取 UAX #29、Transformers PPL、BERT WordPiece 源码类、Subword Regularization v1 第3节相关段落，加上此前模板和切分资料。12 个唯一外链均 HTTP 200。详细范围及代理重试见 `research/encyclopedia-tokenization-review-2026-10-22.md`。
+- `code_status`：五个标准库 Python 块独立编译执行通过；长度、id、mask、label、padding 和重叠 merge 边界通过；提取 BERT WordPiece 类验证 abc 贪心 UNK，未运行完整 BERT 或真实 tokenizer。
+- `formula_status`：16 个 math 块与围栏结构通过；Unigram 边缘路径0.49、窗口预算900、PPL7.389056/2.718282与共同BPB0.721348复算通过；未调用外部数学渲染器。
+- `sync_status`：EXERCISES.md 新增5项覆盖/计数验收，GLOSSARY_EN_ZH.md 同步 fertility 分母；本章、专题、练习、目录与下一章入口存在；git diff --check 通过。
+- `open_risks`：未实测目标 tokenizer、模型训练、生产服务、安全或吞吐；动态文档/源码非固定commit，外链可达不等于所有论文全文核验；PDF仍受Pandoc缺失限制。
+- `status`：本章声明范围内精修验收完成；继续第四册第四份正文，第二册遗留审计保留。
+
+### 第四册第三份正文：NLP 与 Tokenization 局部检查点（2026-10-22）
+
+- `scope`：全文初读 3.1—3.12，局部核验 BPE、模板及审计代码，整章保持进行中。
+- `changes`：修正 BPE 编码/解码混淆、普通字符 BPE 不保证字节覆盖、重叠 pair 的非重叠替换；分开模板边界与训练 label mask，补重复 BOS/EOS 风险；审计代码拒绝非法负标签、非整数 mask 和被监督 padding，明确 valid_labels 尚未 shift。
+- `evidence`：读取 Transformers tokenizer summary 和 chat template 对应段落，SentencePiece 模型协议说明；动态来源与未验证范围见 `research/encyclopedia-tokenization-review-2026-10-22.md`。
+- `code_status`：三个标准库 Python 块独立编译执行通过；五组审计拒绝断言和 aaa 重叠 merge 反例通过，git diff --check 通过。
+- `open_risks`：Unicode、WordPiece/Unigram、上下文预算、PPL、全章公式/外链及配套同步尚待验收；未运行真实 tokenizer 或模型，不能将本检查点视为整章完成。
+- `status`：继续第四册第三份正文；顶部下一步保留不变，第二册遗留审计仍未完成。
+
+### 第四册第二份正文：`book-04-llm-encyclopedia/chapters/02-深度学习组件.md`（2026-10-22）
+
+- `scope`：全文复读 2.1—2.17 与小结，按百科类型验收，遵循当前 WRITING_SPEC.md，未修改规范。
+- `changes`：修复 AMP 裁剪参数与调用，补 CPU 可执行例子；修正归一化统计、仿射输出、线性组合方向、warmup 定义域、reserved 重复计数、布尔 mask、checkpoint 浅引用和 shape；PAD/EOS 计数与 causal shift 分开；限定变长累积、数据并行组、no_sync 和 KV 复用条件。
+- `evidence`：读取 PyTorch 2.12 AMP、BN、LN、DDP、Module、MHA 相关段落；18 个正文唯一外链均 HTTP 200，8 篇 arXiv 题名/版本核对。范围与限制见 `research/encyclopedia-deep-learning-components-review-2026-10-22.md`。
+- `code_status`：8 个 Python 块独立编译执行通过；CPU PyTorch 2.12.0+cpu 下 AdamW 公式对照、scaler 梯度裁剪、mask 相反语义、BN running variance、LN affine、错误 shape 拒绝、checkpoint 快照与 batch 边界通过。有效 label/shift 目标/padding/pad ID 为 5/3/1/3。
+- `formula_status`：34 个 math 块及围栏结构通过；复核 AdamW 首步 0.9890000004999999、梯度范数 2 与参数 0.9；变长 micro-batch 均值 2 与 token 加权 2.5 反例通过。未运行外部公式渲染器。
+- `link_status`：本章相对链接与专题目标存在；PyTorch 引用固定为 2.12 文档入口。
+- `sync_status`：EXERCISES.md 新增 5 项组件验收，INTERVIEW_BANK.md 同步 no_sync 与归一化要求；git diff --check 通过。
+- `open_risks`：未运行 GPU/autocast、真实训练、多进程 DDP、性能或生产恢复；来源可达及元数据不等于全文验证。PDF 仍受 Pandoc 缺失限制。
+- `status`：本章声明范围内精修验收完成；继续第四册第三份正文，第二册第十份正文遗留审计仍未完成。
+
+### 第四册第一份正文：`book-04-llm-encyclopedia/chapters/01-数学与机器学习.md`（2026-10-22）
+
+- `scope`：全文复读，按百科的定义/关系/误区/入口类型验收；核对本册简介和目录，不替代第十三册专题精修。
+- `changes`：修正特征向量、SVD误差/能量、条件概率、KL、PPL与熵、似然比和Bayes更新；Dropout缩放、global batch、测试集无偏条件；precision/F1/AUC边界；PPO不保证硬约束；标准误/区间/bootstrap/McNemar/BH前提；交叉熵大数消减；LoRA参数比和成功成本分母。
+- `evidence`：读取Deep Learning概率、PyTorch2.12 Dropout、NIST均值区间、Spinning Up PPO、scikit-learn指标和SciPy FDR相关材料；11个正文外链均HTTP200。来源读取范围、TLS/候选路径失败与限制见 `research/encyclopedia-math-ml-review-2026-10-22.md`。
+- `code_status`：唯一标准库Python块独立编译和执行通过；空/非法target、NaN/Inf/bool、单类别与±1e20等边界通过。loss为0.939831/0.229358，相同超大logits为log(3)=1.098612。
+- `formula_status`：6个math块和总围栏结构通过；贝叶斯后验0.875/0.7/0.6747、熵/PPL反例、LoRA参数比128、token平均6/11与成功成本0.25元复算通过。未使用外部数学渲染器。
+- `link_status`：本章相对链接和第十三册/第五册专题目标均存在；PyTorch引用改用当前内容域，Dropout固定2.12。
+- `sync_status`：EXERCISES.md新增5项反例练习，INTERVIEW_BANK.md第62题同步PPO边界；术语表已有条目不重复；git diff --check通过。
+- `open_risks`：索引目标正文不因链接存在而视为已精修；未运行真实训练、GPU、统计工具库或生产评估。动态资料有版本边界，PDF仍受Pandoc缺失限制。
+- `status`：本章声明范围内复读、修订、来源/代码/公式/导航与配套验收完成；继续第四册第二份正文，第二册遗留审计仍未完成。
+
+### 第三册第十一份正文：整章验收（2026-10-22）
+
+- `scope`：第 63—72 讲全章复读完成，接续首个局部检查点核验后六讲，遵循当前 WRITING_SPEC.md，未修改规范。
+- `changes`：证据融合落实租户/ACL、关联扩展复查、空候选和图片版本；DDPM增加反向一步，说明索引、干净边界和toy非纯噪声；Whisper特征标为抽象并补实现差异；说明时间戳契约、CER/WER规范化及加权口径；规则评估改称rule_pass，加入关键词/否定误判边界；容量到达率与硬件吞吐、总成本与任务分母分开；补练习及跨册入口。
+- `code_status`：最终12个Python块编译，10个标准库示例独立执行通过，2个外部接口未运行。前后两部分边界检查通过，覆盖权限、空集、关联越权、扩散shape/数值/时间步/零方差、CER>1、空参考、时间戳、规则漏检误放及零基线。未安装CUDA或下载模型。
+- `formula_status`：56个math块及总围栏结构检查通过，无operatorname/尖括号历史下标；复算扩散反向均值[1.976,-0.3]、后验方差0.034063、CER0.0909/WER0.1667、输入/输出需求1536/256 token/s和单位成功成本0.25元。
+- `evidence`：21个唯一外链最终HTTP200，10篇arXiv题名/版本核对；读取DDPM采样算法、Whisper音频源码和Azure security filter相关段落，加上此前CLIP/模板/模型卡来源。完整范围及未全文复核限制见 `research/multimodal-practical-review-2026-10-22.md`。
+- `link_status`：目录、章节相对入口、第四册导航与练习/项目目标存在；未使用外部公式渲染器。
+- `sync_status`：EXERCISES.md新增6项机制/边界验收，PROJECTS.md项目11/12补权限、关键字段及分母要求；论文索引已有主要来源，不复制摘要。git diff --check通过。
+- `open_risks`：未运行真实VLM/Whisper/CLIP、训练/OCR、GPU、线上容量或安全隔离；规则盲点只被演示，没有冒充语义验证。动态来源未固定为依赖版本；PDF受Pandoc缺失限制。
+- `status`：本章及第三册声明范围内精修验收完成，继续第四册第一份正文；第二册第十份正文仍保留未完成审计。
+
+### 第三册第十一份正文：第 63—66 讲局部检查点（2026-10-22）
+
+- `scope`：第 11 章全文初读；深入修订 CLIP 检索/损失、VLM 接口、数据构造四讲，后六讲未验收。长期规范未修改。
+- `changes`：补实际打乱配对反例、多相关目标 Recall 分母、N=1 loss 退化与温度条件；跨卡标签按 logits 布局区分；VLM 真实模型入口、tokenize=False 和新增 token 截取；assistant 位置 mask；拒绝冲突标注和重复 ID；明确路径切分不等于去泄漏；补导航和公式宏/历史下标格式。
+- `evidence`：读取 CLIP v1 HTML 相关机制、Transformers 多模态模板文档以及 Qwen2.5-VL-3B 模型卡相关接口示例；不是逐篇全文或本地权重验证。详见 `research/multimodal-practical-review-2026-10-22.md`。
+- `code_status`：全章 12 个 Python 块编译通过，其中 10 个标准库块独立执行通过，2 个外部模型接口未运行；第 63—66 讲额外边界检查通过，后六讲尚无完整边界验收。正常 loss=0.000095，打乱=10.008890；检索打乱 Recall@1=0；数据4条、同图不跨 split。
+- `formula_status`：全章机械统一 mathrm 和历史序列下标；第 63—66 讲核对对比损失、矩阵 shape、视觉预算与位置 mask。后六讲数学、数值和结构仍待整章复查，未运行外部渲染器。
+- `link_status`：新增及既有本章相对链接目标存在；三项读取资料成功，整章外链尚未逐一检查。
+- `sync_status`：研究记录和顶部下一步同步；题库/练习/项目等配套留待整章验收时按需补齐。`git diff --check` 通过。
+- `open_risks`：后续重点是证据融合 ACL、DDPM 反向计算、Whisper 特征与时间戳、语音关键实体和规则评分误判、容量指标口径；真实模型未运行，PDF 仍受 Pandoc 缺失限制。
+- `status`：局部修订及声明范围内验证完成，整章保持进行中；第二册第十份正文遗留审计仍未完成。
+
+### 第三册第十份正文：`book-03-practical-handbook/chapters/10-面试实战训练.md`（2026-10-22）
+
+- `scope`：全文复读 10.1—10.7，覆盖 attention、GPT、项目证据、候选决策、系统设计、论文表达和回答纪律，遵循当前 `WRITING_SPEC.md`。
+- `changes`：补 cache mask 绝对位置与全 mask 边界、相同 mask 下的熵对照、shift 与 KV 复用条件；证据引用率不冒充语义支持；无合格方案返回 None；Little's Law 均值口径、ceil 精度、串行预算与分位数边界；增加在线 softmax 分子递推和独立代码；限定 Mamba 递推与 LoRA 卡片检查范围，字段完整与证据核验分开；补章节导航和练习。
+- `code_status`：七个标准库 Python 块独立编译和执行通过，输入边界及不变量检查通过；CPU PyTorch 2.12.0 SDPA 对照一致，并验证 cache 显式 mask 与 upper-left causal 对齐差异。未新增依赖或安装 CUDA。
+- `formula_status`：61 个 math 围栏结构检查通过；修复 qquad 转义和 operatorname；分块加权输出 2.897438、router 分数 0.5572、容量 KV 1265.62 MiB 等与示例一致。
+- `evidence`：13 个唯一来源入口均 HTTP 200，六篇 arXiv 题名/版本核对；FlashAttention、Mamba、SRE 相关内容读取范围与 SDPA 跳转页限制见 `research/technical-expression-system-design-review-2026-10-22.md`，未将可达性写成全文核验。
+- `sync_status`：章节前后入口及目录目标存在；练习、题库和项目文件已有相关主题，本轮以本章新增边界练习承接，不复制摘要；研究记录与顶部进度同步。
+- `open_risks`：合成审计不能证明语义支持、真实模型收益、GPU 性能、生产 SLO 或安全非劣效；未运行外部公式渲染器，PDF 仍受 Pandoc 缺失限制。
+- `status`：本章全文复读、修订和声明范围内的代码、公式、来源与导航检查完成；继续第三册第十一份正文，第二册第十份正文遗留审计保持未完成。
+
+### 第三册第九份正文：`book-03-practical-handbook/chapters/09-简历项目实战.md`（2026-10-22）
+
+- `scope`：全文复读 9.1—9.7，覆盖 miniGPT 序列审计、SFT/LoRA、DPO、服务 trace、RAG、数学评估与实验纪律；遵循当前 `WRITING_SPEC.md`，不修改长期规范。
+- `changes`：补项目代码与已有训练章节的职责边界、交付目录及面试表达；修正 softmax 索引和公式宏；概率分布完整校验；声明 SFT 只监督最后一轮且 labels 供内部 shift；DPO 校验 log probability 与重复 ID；压测窗口纳入失败结束时间、全失败吞吐返回 0；RAG 空 ACL 默认拒绝、空候选安全返回、RRF 拒绝重复；数学评分保留单位、不任取过程数字、不从采样分母删除解析失败；限制算术解释器数值范围并区分候选归因与确定根因。
+- `code_status`：Python 3.12.9 下七个标准库 Python 围栏均语法编译、独立运行通过；正常输出与正文一致。边界验证涵盖非法 token/概率、SFT 截断/分隔符、DPO 非法 beta/正 log probability/NaN/重复 ID、晚失败/全失败/等值容量、零向量/空 ACL/重复 RRF/无证据、错误单位/解析失败/非法表达式/pass@k/重复问题。真实训练、GPU、模型服务与外部工具未执行。
+- `formula_status`：83 个 math 围栏结构平衡，围栏成对；operatorname 已统一为 mathrm，无尖括号下标、text 下划线或旧式 $$。复算 NLL 1.609438/0.223144、LoRA 参数 448、DPO loss 0.664830、QPS 1.3363 与晚失败 QPS 0.3、KV 384 MiB、合成投票和 pass@3。
+- `evidence`：19 个正文唯一来源入口最终均 HTTP 200；9 个 arXiv 题名经 Atom 核准；读取 DPO 和 HumanEval/pass@k 原文相关定义，以及 TRL SFT/DPO、chat template、vLLM APC 官方相关内容。详见 `research/project-practicals-review-2026-10-22.md`；入口可达不冒充逐篇全文核验。
+- `link_status`：第三册目录、本章前后入口以及相关项目/练习链接目标存在；vLLM APC 改为当前目录路径。
+- `sync_status`：`PROJECTS.md` 同步产物证据范围、失败 trace 窗口、ACL 和数学采样验收；`EXERCISES.md` 增加项目边界练习。论文索引、题库和术语已有主题，无需复制摘要；`git diff --check` 通过，正文与研究笔记异常内容扫描无无关命中。
+- `open_risks`：本章仅验证合成数据的审计与评估层，不证明真实训练收益、模型能力、语义引用、生产权限隔离、GPU 性能或线上可用性；main/latest 文档未固定为依赖版本。未运行外部数学渲染器，PDF 构建仍受 Pandoc 缺失限制。
+- `status`：本章全文复读、机制与边界修订、公式/代码/数值检查、来源核验及按需配套同步完成；继续第三册第十份正文。第二册第十份正文的遗留审计保持未完成。
+
+### 第三册第八份正文：`book-03-practical-handbook/chapters/08-评估与debug实战.md`（2026-10-22）
+
+- `scope`：从头复读 8.1—8.7 全文，覆盖 benchmark、污染与泄漏、claim 事实性、训练调试、微调退化、人工评测和线上 A/B；依据当前 `WRITING_SPEC.md`，未修改长期规范。
+- `changes`：分开定义回答支持率与必需事实完整性；claim 检查器使用独立政策证据；修正 FActScore 和 Cohen's Kappa 错引、回放比例方向及样本量分位数；使用稳定 logits 二元交叉熵；澄清裁剪指标、KL 方向、人工标注统计单元、SRM 判定和稀疏安全事件边界；A/B 不再按安全点估计自动扩量；补前置/后续入口、数值输出和练习。
+- `code_status`：Python 3.12.9 下七个 Python 围栏全部语法编译、独立运行通过，无第三方依赖；相关边界断言通过，覆盖空集、重复 ID/标注、非法计数、零分母、NaN/Inf、否定证据误判、全平局和分桶稳定性。训练最终预测 `[0,0,0,1]`；claim r1/r2 为 1.0/0.0；A/B 解决率差约 2.39 个百分点，安全复核未通过，决策保持观察。
+- `formula_status`：46 个 math 围栏结构平衡，围栏成对，无 `$$`、`operatorname`、尖括号下标或 `text` 下划线；复核支持率/完整性、Wilson、梯度与更新、KL、回放、人工偏好、二比例、SRM 和每组样本量例子。
+- `evidence`：最终 20 个唯一外链中 16 个 HTTP 200，4 个 DOI 落地页 HTTP 403；四项 DOI 由 Crossref API 核准书目，不能当作出版商全文验证。10 个 arXiv 题名核准；另读取 FActScore 定义、NIST 比例区间与 Microsoft SRM 相关内容。详见 `research/evaluation-debug-practical-review-2026-10-22.md`。
+- `sync_status`：第三册目录及新增相邻章节链接目标有效；`PAPERS.md` 增加评审偏差、一致性和实验方法入口，`EXERCISES.md` 增加证据分母、重复标注和安全放行练习；术语和题库已有相关主题，不复制摘要。顶部状态摘要同步第三册已有记录，保留第二册未收口缺口。
+- `open_risks`：字符串 toy 不代表语义事实核验；未运行真实模型、污染检测、完整论文实验、线上 A/B 或安全非劣效验收。四项 DOI 全文访问受限；未运行外部数学渲染器。PDF dry-run 因缺少 Pandoc 失败。
+- `status`：本章全文复读、机制修订、代码/边界/数值检查、来源核验与按需配套同步完成，保留上述警告；全书精修继续进入第三册第九份正文。
 
 ### 第三册第七份正文：`book-03-practical-handbook/chapters/07-rag与agent项目实战.md`（2026-10-21）
 

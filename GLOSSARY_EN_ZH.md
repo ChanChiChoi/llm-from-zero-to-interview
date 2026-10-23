@@ -25,7 +25,7 @@ Byte Pair Encoding / BPE：字节对编码
 
 Unigram Language Model Tokenizer：基于 unigram 子词概率的分词器
 
-Token Fertility：词元密度 / 每字符词元数；需注明文本与 tokenizer 统计口径
+Token Fertility：词元密度 / 每参考单位的词元数；分母可为词、码点、字素簇或字节，需注明语料与 tokenizer 口径
 
 WordPiece：WordPiece 子词切分方法
 
@@ -3428,6 +3428,14 @@ Chart Relaxed Accuracy：图表问答宽松准确率
 Grounding IoU：视觉定位交并比
 
 Multimodal Hallucination Rate：多模态幻觉率
+
+POPE / Polling-based Object Probing Evaluation：基于轮询的对象探查评估 / 多模态对象幻觉评测协议
+
+CLIPScore：CLIP 分数 / 无参考图文一致性指标
+
+Fréchet Inception Distance / FID：弗雷歇初始距离
+
+LayoutLMv3：文档 AI 预训练模型 / 文本-布局-图像统一掩码预训练
 
 Multimodal Prompt Injection：多模态提示注入
 

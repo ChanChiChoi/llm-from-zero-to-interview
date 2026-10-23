@@ -34,8 +34,8 @@ Transformer 让每个位置通过 attention 直接读取其他可见位置的表
 
 ~~~math
 \begin{aligned}
-u_l &= x_l+\operatorname{Attention}_l(\operatorname{Norm}_l(x_l)),\\
-x_{l+1} &= u_l+\operatorname{FFN}_l(\operatorname{Norm}'_l(u_l)).
+u_l &= x_l+\mathrm{Attention}_l(\mathrm{Norm}_l(x_l)),\\
+x_{l+1} &= u_l+\mathrm{FFN}_l(\mathrm{Norm}'_l(u_l)).
 \end{aligned}
 ~~~
 
@@ -55,7 +55,7 @@ input_ids [B,T]
  -> position-aware hidden [B,T,d]
  -> L 个 Transformer blocks
  -> logits [B,T,V]
- -> labels 右移一位
+ -> logits[:, :-1] 对齐 labels[:, 1:]
  -> masked cross-entropy
 ~~~
 
@@ -83,7 +83,7 @@ h^{(0)}_t=E[x_t],
 E\in\mathbb{R}^{V\times d}.
 ~~~
 
-id 为 7 并不意味着它在语义空间中靠近 id 为 8 的 token。连续向量的关系由训练得到。低频 token 的向量得到的更新较少，新增 special token 若没有训练数据也不会自动拥有所需语义。
+id 为 7 并不意味着它在语义空间中靠近 id 为 8 的 token。连续向量的关系由训练得到。低频 token 作为输入时被查表和接收相应梯度的机会较少；若与输出头共享权重，全词表 softmax 仍可能通过输出路径更新该行，不能说它只在出现时更新。新增 special token 若没有训练数据也不会自动拥有所需语义。
 
 ### Weight tying
 
@@ -133,10 +133,10 @@ RoPE 把二维子空间中的 Q、K 按位置旋转。若一个二维子向量�
 ~~~math
 q_p=R(\theta_p)q,
 \qquad
-k_q=R(\theta_q)k.
+k_s=R(\theta_s)k.
 ~~~
 
-旋转后的点积具有相对相位信息，直观上能让 q_p 与 k_q 的匹配依赖位置差。RoPE 通常作用于 Q 和 K，而不是把一个位置向量直接加到 embedding 上。base、旋转维度、频率和 position offset 都是 checkpoint 契约的一部分。
+在同一二维频率下，θ_p=pω、θ_s=sω，因此 q_p 与 k_s 的点积等于 qᵀR((s-p)ω)k。它依赖相对位置相位和内容，不是仅由距离决定。RoPE 通常作用于 Q 和 K，而不是把一个位置向量直接加到 embedding 上。base、旋转维度、频率和 position offset 都是 checkpoint 契约的一部分。
 
 ### RoPE scaling 与外推
 
@@ -187,7 +187,7 @@ Q=XW_Q,\qquad K=XW_K,\qquad V=XW_V.
 
 ~~~math
 A(Q,K,V)
-=\operatorname{softmax}\left(
+=\mathrm{softmax}\left(
 \frac{QK^\top}{\sqrt{d_h}}+M
 \right)V.
 ~~~
@@ -202,7 +202,7 @@ Q 的形状是 [B,H,T_q,d_h]，K/V 的形状是 [B,H,T_k,d_h]。QK^T 的结果�
 
 ### Attention weight
 
-softmax 后的权重通常满足每个 query 行和约为 1：
+存在至少一个可见 key、数值有限且尚未执行 attention dropout 时，softmax 后的权重满足每个 query 行和约为 1：
 
 ~~~math
 \sum_{s=1}^{T_k}P_{t,s}=1.
@@ -210,14 +210,16 @@ softmax 后的权重通常满足每个 query 行和约为 1：
 
 权重大的位置表示当前 head 在这一层对相应 value 做了更大的聚合，但它不等于模型最终答案的完整因果解释。后续 MLP、残差、其他层和不同 head 都会改变信息路径。
 
+训练中的 dropout 会随机置零并缩放部分权重，单次采样后的行和不必为 1。验证归一化时应检查 dropout 前的概率，或关闭 dropout。
+
 ### 计算与存储复杂度
 
 对长度 T 的 full attention，score 矩阵含 T^2 个位置对。若忽略 batch 和常数，计算和中间存储的关键项分别近似为：
 
 ~~~math
-\operatorname{cost}_{\mathrm{score}}=O(T^2d_h),
+\mathrm{cost}_{\mathrm{score}}=O(T^2d_h),
 \qquad
-\operatorname{memory}_{\mathrm{score}}=O(T^2).
+\mathrm{memory}_{\mathrm{score}}=O(T^2).
 ~~~
 
 实际 kernel 可能不显式存完整 score 矩阵，但数学依赖关系仍然存在；FlashAttention 减少 IO 和中间存储，不会把精确 full attention 的连接数变成线性。
@@ -256,7 +258,7 @@ padding mask 处理的是 batch 对齐带来的无效 token。若样本被补到
 M=C+P.
 ~~~
 
-实际实现可能使用 bool mask、加性 mask 或 fused kernel 的不同 API，必须确认其 True/False 语义，不能只凭变量名猜。
+实际实现可能使用 bool mask、加性 mask 或 fused kernel 的不同 API。PyTorch SDPA 的布尔 True 表示允许，MultiheadAttention 的布尔 True 表示屏蔽，不能直接复用同一矩阵。
 
 ### 左 padding 与右 padding
 
@@ -295,6 +297,54 @@ for row in causal_mask(3):
 ~~~
 
 预期三行表示每个位置能看到自己和之前的位置。这个布尔矩阵没有 batch、head、padding 和 dtype 语义，不能直接当作高性能 attention mask 使用。
+
+### 缓存 query 要按绝对位置对齐
+
+缓存已有 P 个位置，再处理 Q 个新位置时，第 i 个新 query 的绝对位置为 P+i，允许读取的 key 满足 j≤P+i。不能简单对 `[Q,P+Q]` 做左上角下三角。例如 P=2、Q=1 时，正确行是 `[True,True,True]`，而不是 `[True,False,False]`。PyTorch SDPA 的非方形 `is_causal=True` 采用左上对齐，因此此处使用显式 mask。
+
+下面用 CPU float64、单 head、无位置编码或 dropout 演示 attention 局部机制；它不是完整 Transformer。三种检查分别验证未来隔离、逐位置缓存与全量对齐、padding key 隔离。
+
+~~~python
+import torch
+from torch.nn.functional import scaled_dot_product_attention as sdpa
+
+
+torch.manual_seed(7)
+q = torch.randn(1, 1, 4, 2, dtype=torch.float64)
+k = torch.randn_like(q)
+v = torch.randn_like(q)
+positions = torch.arange(4)
+allow = positions[None, :] <= positions[:, None]
+full = sdpa(q, k, v, attn_mask=allow, dropout_p=0.0)
+
+changed_k, changed_v = k.clone(), v.clone()
+changed_k[:, :, 2:] += 20
+changed_v[:, :, 2:] -= 30
+changed = sdpa(q, changed_k, changed_v, attn_mask=allow, dropout_p=0.0)
+assert torch.allclose(full[:, :, :2], changed[:, :, :2], atol=1e-12, rtol=1e-12)
+
+steps = []
+for position in range(4):
+    query = q[:, :, position:position + 1]
+    keys, values = k[:, :, :position + 1], v[:, :, :position + 1]
+    visible = torch.arange(position + 1)[None, :] <= position
+    steps.append(sdpa(query, keys, values, attn_mask=visible, dropout_p=0.0))
+cached = torch.cat(steps, dim=2)
+error = (full - cached).abs().max().item()
+assert torch.allclose(full, cached, atol=1e-12, rtol=1e-12)
+
+padding_allow = allow & (positions[None, :] != 1)
+baseline = sdpa(q, k, v, attn_mask=padding_allow, dropout_p=0.0)
+pad_k, pad_v = k.clone(), v.clone()
+pad_k[:, :, 1] += 100
+pad_v[:, :, 1] -= 100
+padding_changed = sdpa(q, pad_k, pad_v, attn_mask=padding_allow, dropout_p=0.0)
+assert torch.allclose(baseline, padding_changed, atol=1e-12, rtol=1e-12)
+print("future_and_padding_isolated=", True)
+print("cache_max_error=", round(error, 12))
+~~~
+
+输出隔离检查为 True，最大误差舍入到 12 位小数为 0。这里缓存的是预先生成的 K/V 切片，只验证 attention 的位置与读取语义；真实模型还须验证逐层投影、RoPE、position id、adapter 和请求状态，不能从这段代码推导生产缓存正确。
 
 ## 4.5 MHA、MQA、GQA 与 MLA：改变 K/V 的共享关系
 
@@ -368,7 +418,7 @@ MHA、MQA、GQA、MLA 是不同的设计选择，不存在脱离模型规模和�
 
 ### 为什么缓存有效
 
-生成第 t+1 个 token 时，历史 token 的 K/V 在模型参数和历史输入不变的情况下不会改变。若每一步都重新计算完整前缀，会重复计算历史投影。KV cache 保存每一层历史 K/V，使新 query 只需读取缓存并追加当前 token 的 K/V。
+固定模型参数、adapter、因果结构、历史输入及位置配置，并关闭随机 dropout 时，追加未来 token 不会改变已有位置的 K/V。若每一步都重新计算完整前缀，会重复计算历史投影。KV cache 保存每一层历史 K/V，使新 query 只需读取缓存并追加当前 token 的 K/V。双向编码或改变历史位置的路径不能直接沿用这个条件。
 
 ### 两个阶段
 
@@ -385,7 +435,7 @@ cached K/V [B,H,T_cache,d_h]
 new K/V appended to cache
 ~~~
 
-TTFT 主要受 prefill 影响；TPOT、ITL 和吞吐则受到 decode、cache、batch 调度和输出长度共同影响。
+TTFT 包含排队、输入处理、prefill、首 token 采样与传输等阶段，不能只归因于 prefill。TPOT、ITL 和吞吐则受到 decode、cache、batch 调度和输出长度共同影响，必须说明测量边界。
 
 ### cache 与全量重算对齐
 
@@ -424,7 +474,7 @@ def kv_cache_bytes(
 print(kv_cache_bytes(32, 4, 8192, 8, 128, 2) / 1024**3)
 ~~~
 
-输出约为 4.0 GiB。这个结果只计算 K/V 元素，不包括 allocator、workspace、权重、激活、分页碎片和并发请求；它的作用是建立量级直觉。
+输出为 4.0 GiB，已经包含 batch=4 的四条等长序列。这个结果只计算这些序列的 K/V 元素，不包括 allocator、workspace、权重、激活、分页碎片或 batch 之外的其他请求；它的作用是建立量级直觉。公式假设所有层都保存等长、相同宽度的 K/V；MLA、混合状态和分层滑窗模型应分别统计，量化还需计入 scale 等元数据。
 
 ## 4.7 Full、Local、Sparse、Linear 与 FlashAttention
 
@@ -456,6 +506,8 @@ Linear attention 试图利用特征映射或计算重排，把显式的 QK^T 连
 
 括号内的状态可以沿序列递推，避免显式保存 T×T 矩阵。代价是它通常改变了 softmax attention 的精确形式，表达、数值、归一化和硬件效率需要单独评估。
 
+上式只是未归一化分子。若采用非负特征映射的归一化 causal kernel attention，还需状态 z_t=Σ_{j≤t}φ(k_j)，并用 φ(q_t)ᵀz_t 归一化分子；分母为零或很小时要定义数值策略。固定特征维度和 head 宽度时，递推工作量随 T 线性增长，但其维度成本仍在，不能把它理解为所有尺度下常数成本。
+
 ### FlashAttention
 
 FlashAttention 是 exact attention 的 IO-aware 实现。它通过 tiling、在线 softmax 和分块重计算，减少 HBM 与片上存储之间的往返和中间矩阵写入。它改变的是计算组织，而不是把 attention 连接模式变成稀疏或把 softmax 近似成另一种函数。
@@ -482,13 +534,13 @@ FlashAttention 对长序列 prefill 往往有明显帮助；decode 的主要瓶�
 Pre-LN 的一个形式是：
 
 ~~~math
-y=x+F(\operatorname{Norm}(x)).
+y=x+F(\mathrm{Norm}(x)).
 ~~~
 
 Post-LN 的一个形式是：
 
 ~~~math
-y=\operatorname{Norm}(x+F(x)).
+y=\mathrm{Norm}(x+F(x)).
 ~~~
 
 Pre-LN 让残差主路径更接近恒等映射，通常更容易训练深层模型；Post-LN 是原始 Transformer 中的常见形式，在特定初始化和训练设置下也可以工作。两者的差异不只是代码位置，还会影响梯度、初始化、最终 norm 和学习率策略。
@@ -498,11 +550,13 @@ Pre-LN 让残差主路径更接近恒等映射，通常更容易训练深层模�
 Attention 把其他位置的信息引入当前位置，FFN 再在当前位置内部做非线性变换。普通 FFN 可以写成：
 
 ~~~math
-\operatorname{FFN}(x)
+\mathrm{FFN}(x)
 =W_2\phi(W_1x+b_1)+b_2.
 ~~~
 
 SwiGLU 等门控 FFN 使用多个投影分支，增加特征选择能力和参数容量。很多 LLM 的 FFN 参数量大于 attention 投影，因此只优化 attention 不能代表优化了整个模型。
+
+这里 FFN 式采用列向量 x：W_1 为 `[d_ff,d]`，W_2 为 `[d,d_ff]`。前面的批量 Q=XW_Q 则采用最后一维为特征的行向量约定；实现时应按相应转置关系对齐，不能直接混用左右乘法。
 
 ### 残差尺度
 
@@ -545,8 +599,8 @@ Encoder 先双向编码输入，decoder 使用 causal self-attention 生成输�
 若 decoder query 为 Q_d，encoder 输出产生 K_e、V_e：
 
 ~~~math
-\operatorname{CrossAttn}
-=\operatorname{softmax}
+\mathrm{CrossAttn}
+=\mathrm{softmax}
 \left(\frac{Q_dK_e^\top}{\sqrt{d_h}}+M_{de}\right)V_e.
 ~~~
 
@@ -607,16 +661,34 @@ y_t=g_\theta(S_t,x_t).
 
 ### Delta rule 与 gated update
 
-一种抽象的 delta 更新是：
+以 Gated DeltaNet 论文的状态方向为例，令 S 的形状为 `[d_v,d_k]`，k 为 d_k 维列向量，v 为 d_v 维列向量，α、β 为标量遗忘门和写入门。一个具体递推式是：
 
 ~~~math
-S_t
-=\alpha_t\odot S_{t-1}
-+u_t v_t^\top
--\Delta_t.
+\begin{aligned}
+\bar S_{t-1}&=\alpha_t S_{t-1},\\
+e_t&=v_t-\bar S_{t-1}k_t,\\
+S_t&=\bar S_{t-1}+\beta_t e_t k_t^\top.
+\end{aligned}
 ~~~
 
-α_t 可以控制保留历史的程度，u_t v_t^T 是低秩写入，Δ_t 表示基于当前输入的修正。不同论文对状态、门和值的定义不同，不能把一个示意式当作所有 DeltaNet/KDA 实现的精确公式。
+e_t 是目标 value 与衰减后状态当前读出的误差，写入依赖旧状态，而不是无条件把新 value 相加。它等价于 S_t=α_t S_{t-1}(I-β_t k_t k_tᵀ)+β_t v_t k_tᵀ。α 控制整体遗忘，β 控制纠正幅度；这不是 KDA 的逐维门公式。单位范数 key 和门的约束也是稳定性条件，不能从一个裸递推式推导所有实现的数值性质。
+
+用标量状态可以看清“纠错”与“叠加”的区别。令 S=2、k=1、v=3、α=1、β=0.5，则旧读出为2，误差为1，更新得到2.5；再写入同一对得到2.75，而不是每次直接增加1.5。
+
+~~~python
+def scalar_delta_step(state, key, value, alpha, beta):
+    decayed = alpha * state
+    error = value - decayed * key
+    return decayed + beta * error * key
+
+
+state = 2.0
+for _ in range(2):
+    state = scalar_delta_step(state, 1.0, 3.0, 1.0, 0.5)
+    print(state)
+~~~
+
+本例输出2.5和2.75，只说明给定标量下的纠正过程，不覆盖向量 key 干扰、训练、并行 chunk kernel 或实际模型性能。
 
 ### KDA、Gated DeltaNet 与混合注意力
 
@@ -767,9 +839,9 @@ print(attention_shapes(2, 16, 64, 8, 2))
 - [Lost in the Middle](https://arxiv.org/abs/2307.03172)：长上下文位置偏差。
 - [Retentive Network](https://arxiv.org/abs/2307.08621)：递归状态与并行/递归形式。
 - [Gated Delta Networks](https://arxiv.org/abs/2412.06464)：门控 delta state。
-- [Kimi Linear](https://arxiv.org/abs/2510.26620)：Kimi Delta Attention 与混合长序列架构。
-- [PyTorch scaled dot product attention](https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html)：官方 attention 接口。
-- [PyTorch MultiheadAttention](https://pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html)：官方多头接口。
+- [Kimi Linear](https://arxiv.org/abs/2510.26692)：Kimi Delta Attention 与混合长序列架构。
+- [PyTorch scaled dot product attention](https://docs.pytorch.org/docs/2.12/generated/torch.nn.functional.scaled_dot_product_attention.html)：官方 attention 接口。
+- [PyTorch MultiheadAttention](https://docs.pytorch.org/docs/2.12/generated/torch.nn.MultiheadAttention.html)：官方多头接口。
 
 论文中的实验结论、框架 API 的行为、教学代码的输出和目标模型在目标硬件上的吞吐，属于不同证据层。尤其是 KDA、Gated DeltaNet、Gated MLA、NoPE 等较新架构，必须核对具体论文和实现版本，不应从名称或一条宣传语推出通用能力。
 
@@ -791,3 +863,5 @@ token id
 ~~~
 
 进一步比较架构时，还要回答三个问题：历史信息是通过完整 KV、压缩 cache 还是递归 state 保存的；信息连接是 full、local、sparse、linear 还是混合的；总参数、每 token 激活参数、显存、通信和质量如何共同决定成本。Transformer 的名字只是入口，真正需要理解的是信息从哪里来、沿什么路径传播、在哪里被截断，以及这些路径在目标任务和目标硬件上是否得到证据支持。
+
+配套验收见[Transformer 信息路径与状态练习](../../EXERCISES.md#transformer-百科信息路径与状态验收)；下一章见[大语言模型基础](05-大语言模型基础.md)。

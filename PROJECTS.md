@@ -14,6 +14,8 @@
 
 ## 项目 1：miniGPT from scratch
 
+第三册[第九章项目实作](book-03-practical-handbook/chapters/09-简历项目实战.md)为下列六类项目提供审计和评估层，实际模型代码回指第三至七章。只运行合成数据脚本时，成果应表述为数据契约或指标验证；真实训练、部署或能力提升必须另附模型、数据、版本和运行证据。统一交付结构与个人贡献说明见该章 9.7.6。
+
 目标：从零实现 decoder-only Transformer，并完成小语料自回归语言建模实验。
 
 简历表达：基于 PyTorch 实现 miniGPT，包括 tokenizer、tensor shape / dtype / device / stride 审计、autograd / backward / zero_grad / detach / no_grad 审计、nn.Module / Parameter / buffer / state_dict / train-eval / save-load 审计、Dataset / DataLoader / collate_fn / sampler / padding waste 审计、训练循环 / 梯度累积 / 梯度裁剪 / scheduler / eval / checkpoint resume 审计、mixed precision / autocast / GradScaler / activation checkpointing / OOM audit 审计、DDP rank / world size / all-reduce / DistributedSampler / global batch / no_sync / rank 0 checkpoint 审计、debug/profiling metadata / finite / hook / grad norm / timing / profiler 审计、causal attention、Transformer block、验证 loss、perplexity、序列 log probability 和采样生成，并分析重复生成、过拟合、概率高不等于事实正确、上下文长度限制、分布式训练同步风险和性能瓶颈归因。
@@ -64,11 +66,15 @@
 
 ## 项目 5：高性能推理服务
 
+验收补充：吞吐窗口包含失败请求的结束时间；有请求且窗口为正、但全部失败时，成功吞吐为 0，成功延迟不适用。使用当前并发/队列占用量时，到达容量上限就不能再加入一个请求。报告同时保留错误率、超时和成功延迟分布。
+
 目标：部署开源 LLM，支持 Chat API、SSE 流式输出、限流、监控和压测。
 
 简历表达：构建大模型推理服务，测量 TTFT、P95/P99、tokens/s、QPS、显存和错误率，对比 Transformers generate、vLLM、量化和不同并发下的性能差异。
 
 ## 项目 6：企业知识库 RAG 系统
+
+验收补充：空 ACL 默认不可见，无可见证据时明确返回证据不足；公开材料也要有显式授权约定。重复 RRF 候选不得重复加分，引用编号/短语命中与逐 claim 的语义支持、完整性分别验证。
 
 目标：完成文档解析、清洗、chunk、embedding、混合召回、rerank、引用生成、权限过滤和评估。
 
@@ -77,6 +83,8 @@
 扩展要求：补充 RAG 事故审计模块，用 0 依赖脚本输入 toy corpus、expected evidence、retrieved、reranked、context、claims、ACL、staleness、latency、cost 和线上反馈，输出 retrieval recall、MRR、context recall / precision、citation accuracy、unsupported claim rate、permission leak rate、stale evidence rate、abstention accuracy、root cause、failed gates 和 RAG incident gate，并解释为什么企业 RAG 不能只看最终答案正确率，还要同时审计证据是否召回、是否进入上下文、引用是否支持 claim、权限是否前置过滤和文档是否过期。
 
 ## 项目 7：数学推理增强实验
+
+验收补充：以明确的最终答案协议解析十进制数与任务单位，不能删除单位或从过程里任取最后一个数字。self-consistency 投票可排除无法解析的答案，但 pass@k 的采样数仍包含这些失败生成；全失败和答案正确但表达式错误都必须有可回放样例。
 
 目标：构造数学推理评测集，比较 zero-shot、few-shot、CoT、self-consistency 和工具校验。
 
@@ -162,11 +170,15 @@
 
 目标：把 OCR、图片描述、文本检索、图像检索和 LLM 生成结合起来。
 
+验收：依据[第三册多模态实战](book-03-practical-handbook/chapters/11-多模态实战.md)，为文本、图片和关联扩展分别检查租户、ACL 与版本；空权限、零相关候选和关联私有文档必须有反例。将词袋 toy、真实 OCR/视觉编码、检索与语义引用的证据分开报告，图片可见不授予关联文字访问权。
+
 简历表达：构建多模态 RAG demo，将图片 OCR、caption、metadata 与文本知识库统一索引，支持图文混合检索和基于证据的答案生成。
 
 ## 项目 12：语音转文本再问答 Demo
 
 目标：串联 Whisper ASR、LLM 问答和文本/TTS 输出。
+
+验收：除 WER/CER 外单独标注否定、金额、日期和商品实体错误，保留转写、检索与生成的中间结果；测试低 CER 但关键否定遗漏、空参考、重叠/未知时间戳与关键词误放。按完整窗口统计失败、延迟和总成本/成功任务数，不能把局部规则通过率当作任务正确率。
 
 简历表达：实现语音输入到文本转写、问题理解、知识库问答和结果输出的端到端 demo，并分析 ASR 错误如何影响下游问答。
 

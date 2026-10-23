@@ -25,7 +25,7 @@
 13. Mamba / Selective State Space Models
 14. Constitutional AI / RLAIF 相关论文
 15. ReAct / Toolformer / Function Calling 与 Agent 工具使用论文线
-16. SimPO / ORPO / KTO 等 reference-free 或轻量偏好优化论文线
+16. SimPO / ORPO / KTO 等不同反馈格式与 reference 约束的偏好优化论文线（KTO 使用 reference）
 17. DeepSeek-R1 / GRPO / RLVR / DAPO 等 reasoning 后训练论文线
 18. vAttention / FlashInfer 等 inference serving 内存与 kernel 论文线
 19. GraphRAG 等结构化 RAG 论文线
@@ -86,6 +86,16 @@ Transformer 核心机制入口：
 7. [FActScore](https://arxiv.org/abs/2305.14251) 与 [AttributionBench](https://aclanthology.org/2024.findings-acl.886/)：细粒度事实核验和自动引用归因评估；结论绑定其原论文数据与评审协议。
 8. [RAGAS](https://arxiv.org/abs/2309.15217)：RAG 自动化评估框架；指标应结合人工校准和目标语料解释。
 
+### 评估与 Debug 的统计和方法
+
+正文入口：[第三册第八章](book-03-practical-handbook/chapters/08-评估与debug实战.md)。
+
+1. [Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena](https://arxiv.org/abs/2306.05685)：位置、冗长和自我偏好等评审偏差；结论绑定其题目、模型和人工比较协议。
+2. [A Coefficient of Agreement for Nominal Scales](https://doi.org/10.1177/001316446002000104) 与 [Reliability in Content Analysis](https://doi.org/10.1111/j.1468-2958.2004.tb00738.x)：分类与内容分析一致性；一致不等于事实正确。
+3. [Trustworthy online controlled experiments: five puzzling outcomes explained](https://doi.org/10.1145/2339530.2339653) 与 [CUPED](https://doi.org/10.1145/2433396.2433413)：线上实验可信度与实验前协变量降方差；需另审随机化单元、稀疏安全事件和停止规则。
+
+上述 DOI 的书目身份已通过 Crossref 核验，出版商落地页本次返回 403；[核验范围与限制](research/evaluation-debug-practical-review-2026-10-22.md)另记。
+
 ### 训练
 
 Scaling Law、Chinchilla、数据配比、分布式训练、训练稳定性。
@@ -144,10 +154,11 @@ ReAct、Toolformer、function calling、MCP、A2A、agent evaluation、coding ag
 
 建议补读资料线：
 
-1. ReAct: Synergizing Reasoning and Acting in Language Models。
-2. Toolformer: Language Models Can Teach Themselves to Use Tools。
+1. [ReAct](https://arxiv.org/abs/2210.03629): Synergizing Reasoning and Acting in Language Models。
+2. [Toolformer](https://arxiv.org/abs/2302.04761): Language Models Can Teach Themselves to Use Tools。
 3. OpenAI function calling / tools 官方文档。
 4. Model Context Protocol 官方规范和 SDK 文档。
+5. [SWE-bench](https://arxiv.org/abs/2310.06770): Can Language Models Resolve Real-World GitHub Issues?；代码 Agent 评测绑定各自 harness 与测试执行。
 5. Agent benchmark、tool-use benchmark 和 SWE-bench 相关资料。
 6. GraphRAG / RAPTOR / Agentic RAG 等结构化、多跳和多轮检索增强路线。
 7. [Gorilla](https://arxiv.org/abs/2305.15334)、[API-Bank](https://arxiv.org/abs/2304.08244) 与 [ToolLLM](https://arxiv.org/abs/2307.16789)：工具/API 选择、调用数据和评估基准。
@@ -162,7 +173,7 @@ GPU 集群、分布式训练系统、LLM serving engine、调度、KV Cache 管�
 
 建议补读资料线：
 
-1. 分布式训练与并行： [ZeRO](https://arxiv.org/abs/1910.02054)、[Megatron-LM 张量并行](https://arxiv.org/abs/1909.08053)、[GPipe](https://arxiv.org/abs/1811.06965)、[Sequence Parallel](https://arxiv.org/abs/2205.05198) 和 [Ring Attention](https://arxiv.org/abs/2310.01889)；配合 PyTorch DDP/FSDP 文档核对具体 API 与版本语义。
+1. 分布式训练与并行： [ZeRO](https://arxiv.org/abs/1910.02054)、[Megatron-LM 张量并行](https://arxiv.org/abs/1909.08053)、[GPipe](https://arxiv.org/abs/1811.06965)、[Megatron-LM GPU 集群训练](https://arxiv.org/abs/2104.04473)、[ZeRO-Infinity](https://arxiv.org/abs/2104.07857)、[Sequence Parallel](https://arxiv.org/abs/2205.05198) 和 [Ring Attention](https://arxiv.org/abs/2310.01889)；配合 PyTorch DDP/FSDP 文档核对具体 API 与版本语义。
 2. Megatron-LM、DeepSpeed、FSDP、Ray 等训练系统资料。
 3. vLLM、SGLang、TensorRT-LLM、TGI 等推理框架文档和源码导读。
 4. Kubernetes GPU 调度、NVIDIA GPU operator、MIG、NCCL 和集群网络资料。
@@ -175,6 +186,9 @@ GPU 集群、分布式训练系统、LLM serving engine、调度、KV Cache 管�
 3. 采样与条件控制： [Classifier-Free Guidance](https://arxiv.org/abs/2207.12598)、[DDIM](https://arxiv.org/abs/2010.02502)、[DPM-Solver](https://arxiv.org/abs/2206.00927) 和[扩散噪声 schedule 分析](https://arxiv.org/abs/2305.08891)。
 4. 生成评估： [FID](https://arxiv.org/abs/1706.08500) 与 [FVD](https://arxiv.org/abs/1812.01717)。两者依赖特征提取器和数据设定，不替代条件遵循、任务正确性和安全评估。
 5. 语音与视频： [Whisper](https://arxiv.org/abs/2212.04356)、[SoundStream](https://arxiv.org/abs/2107.03312)、[EnCodec](https://arxiv.org/abs/2210.13438)、[Video Diffusion Models](https://arxiv.org/abs/2204.03458)；Sora 的 2024 研究脉络可参阅[二手综述](https://arxiv.org/abs/2402.17177)，不以综述推断闭源内部架构。
+6. 自回归图像生成： [DALL·E（dVAE + 自回归 Transformer）](https://arxiv.org/abs/2102.12092) 与 [DALL·E 2（unCLIP 两阶段）](https://arxiv.org/abs/2204.06125)；论文中的模型规模、codebook 与数据配比是各自实验选择，不是通用超参数。
+7. 语音合成演进： [Tacotron 2](https://arxiv.org/abs/1712.05884)、[FastSpeech](https://arxiv.org/abs/1905.09263)、[FastSpeech 2](https://arxiv.org/abs/2006.04558)、[VITS](https://arxiv.org/abs/2106.06103) 与 [VALL-E](https://arxiv.org/abs/2301.02111)；覆盖 mel 回归 + 声码器、非自回归和 codec token 语言建模三条路线。
+8. 多模态评估与文档： [CLIPScore](https://arxiv.org/abs/2104.08718)、[MME](https://arxiv.org/abs/2306.13394)、[MMBench](https://arxiv.org/abs/2307.06281)、[MMMU](https://arxiv.org/abs/2311.16502)、[POPE](https://arxiv.org/abs/2305.10355) 与 [LayoutLMv3](https://arxiv.org/abs/2204.08387)；分数绑定各自任务集、prompt、解析规则和版本，不概括整体产品能力。
 
 ### Safety 与 Interpretability
 

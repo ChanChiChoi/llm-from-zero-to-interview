@@ -1711,8 +1711,128 @@
 3. 建立 DFLASH serving manifest：K3 target revision、DFlash revision、`target_layer_ids`、block size、draft/target backend、hardware、graph bound、真实 acceptance 和拒绝回滚。用一个错误的 `+1` layer mapping 注入 capture mismatch，并说明为什么 shape 通过也不能证明层语义正确。
 4. 对照公开 HF draft README 与 SGLang PR #40794 的 benchmark：区分公开 checkpoint、未公开 production checkpoint、stable `v0.5.20` 和 main source；禁止把 95.7% GSM8K 或 synthetic/发布方 acceptance 写成本地复现。
 
+## 六类实作：从 toy 审计到项目交付
+
+配套正文：[第三册第九章](book-03-practical-handbook/chapters/09-简历项目实战.md)。
+
+1. 复算目标概率为 0.2/0.8 时的 NLL；在 SFT 多轮样例中分别画出最后一轮监督与全部 assistant span 监督，解释内部 shift 的调用契约。
+2. 把服务 trace 的失败结束时间改为 10000 ms，检查成功 QPS 降到 0.3；再将全部请求设为失败，区分零吞吐与未定义的延迟分布。
+3. 为 RAG 构造空 ACL、重复 RRF ID、无可见文档和引用否定句，分别验收权限、排序与证据支持，不能以引用合法率替代语义正确性。
+4. 将“250厘米”改为“250米”，再构造两次解析失败、一次正确的三候选集，检查投票分母、pass@3 与可重复正确率的区别。
+5. 按 9.7.6 为一个实际完成的模块整理数据清单、版本、运行命令、原始结果和失败案例；只完成 toy 时不得填入真实模型提升或生产性能。
+
+## 评估与 Debug：分母、证据与安全放行
+
+配套正文：[第三册第八章](book-03-practical-handbook/chapters/08-评估与debug实战.md)。
+
+1. 在四条 benchmark 全部正确时复算 Wilson 下界；把 JSON 年龄改成字符串，区分键检查、字段类型、业务约束与模型正确率。
+2. 构造“两条必需事实只正确回答一条”的例子，分别计算回答支持率和完整性；将证据改成否定句，证明字符串命中不代表语义支持。
+3. 向人工标注表重复插入同一 `(case, model, annotator)`，要求拒绝重复计数；设计每个问题标注人数不均的例子，比较记录平均与问题平均。
+4. 用正文的 6/7 次安全事件设计放行报告：写明预定非劣效界限、区间方法、随机化单元、离线高风险验证和人工复核；没有充分证据时保持观察，不能只用安全率点估计或“不显著”放行。
+
 ## 2026-10 Gemini 4 Argon：发布方证据账本
 
 1. 将 AA `gemini-4-argon`、Google The Keyword、DataCurve 缺失行分别登记为榜单、官方发布和负证据。
 2. 对 1M output、DeepSWE 77.9%、AutomationBench 51.3%、LVBench 91.7% 和 CWE-bench 68% 记录任务集、harness、预算、verifier、分母和证据等级。
 3. 为 cyber vulnerability workflow 设计权限、沙箱、出站控制、人工审批、artifact digest 和修复 verifier 字段；不执行真实攻击或调用 endpoint。
+
+## 多模态实战：机制与证据边界
+
+配套正文：[第三册第十一章](book-03-practical-handbook/chapters/11-多模态实战.md)。
+
+1. 分别只轮换 CLIP 文本向量、同步轮换向量与标签，解释哪一种破坏配对；验证单样本零 loss 不代表学会对齐，并说明多相关目标的 Recall 分母。
+2. 向数据构造器加入同图同问题的冲突答案和不同记录的重复 ID，要求拒绝；构造不同路径的同一图片，说明路径切分为何不足以排除泄漏。
+3. 向公开图片的 linked_doc_ids 插入私有文字与不存在 ID，验证不能扩展越权内容；空 ACL、错误租户和无相关候选应返回空证据。
+4. 对五步 DDPM schedule 核对累计 alpha、反向均值与后验方差；验证最后一步随机项为零，解释使用已知 x0 反解噪声为何不能替代生成时噪声预测器，以及最终 alpha 约 0.8583 为何不是纯噪声。
+5. 构造 CER 小于 0.2 但漏掉否定词的转写，以及“不是 128 元”的图片回答；确认 toy 规则可能通过，另设计关键字段和语义标注验收。比较语料级 CER 与逐句平均，并测试插入导致 CER 大于 1。
+6. 分开计算视觉/文本输入与输出 token 到达率；用总成本 20 元、100 次请求、80 次成功计算单位成功成本，再说明重试按任务归并后应如何统一分母。
+
+## 数学百科：定义域与反例
+
+配套正文：[第四册数学与机器学习](book-04-llm-encyclopedia/chapters/01-数学与机器学习.md)。
+
+1. 用 A=-I 与非零向量验证负特征值反向；用 diag(3,1) 的 rank-1 截断验证误差范数为1、平方误差为1、保留能量为9/10，区分矩阵能量和任务能力。
+2. 对 `[0.99,0.01]` 和均匀分布计算熵与第二类目标的 PPL，解释为什么更确定不等于困惑度更低。
+3. 固定先验0.7，分别用通过率(0.9,0.3)、(0.9,0.9)、(0.8,0.9)计算后验，说明检查通过何时提高、保持或降低可靠性。
+4. 运行三个相同的1e20 logits，比较中心化交叉熵和先算logsumexp再相减的结果；检查空输入、非有限值、非法target和单类别边界。
+5. 写出PPO正负优势下的裁剪项，解释为何这不是硬KL约束；为同题多采样、人评多标注设计配对/聚类标准误或bootstrap单位，避免把相关记录当作独立样本。
+
+## 深度学习组件：接口与状态验收
+
+配套正文：[第四册深度学习组件](book-04-llm-encyclopedia/chapters/02-深度学习组件.md)。
+
+1. 执行 CPU GradScaler 的 scale/unscale/clip/step 示例，核对未缩放范数2、裁剪后参数约0.9；解释累积窗口和溢出跳步时为何不能无条件推进 scheduler。
+2. 构造共用 EOS/PAD ID 的 batch，分别统计 ID 命中、mask padding、未 shift labels 与真正 shifted targets；测试全 ignore、监督 padding 和非法 mask。
+3. 用同一 bool mask 分别调用 SDPA 与 MultiheadAttention，验证 True 的含义相反；对 LayerNorm 设置非零 bias，说明输出均值不再为0。
+4. 用相同键、错误 shape 的 state_dict 测试 strict=False；保存普通 state_dict 引用后修改参数，与深拷贝比较，解释键相同为何不等于权重恢复正确。
+5. 两个 micro-batch 分别有10和1个有效 token，比较均值再平均与token加权平均；将同一推导扩展到默认按rank平均梯度的DDP，说明no_sync为什么不修正权重错误。
+
+## Tokenization 百科：覆盖与计数契约
+
+配套正文：[第四册 NLP 与 Tokenization](book-04-llm-encyclopedia/chapters/03-nlp与tokenization.md)。
+
+1. 比较 `"\u00e9"` 和 `"e\u0301"` 的码点数、UTF-8 字节数与 NFC 结果，说明 Python len 不等于字素簇数；对真实 tokenizer 另测 token 数，不能从字符数推断。
+2. 对 `aaa` 执行一次非重叠 BPE 合并；再用词表 `ab`、`a`、`##bc` 分析 WordPiece 贪心失败，说明存在可覆盖切分为何不保证贪心成功。
+3. 固定总 NLL=4、字节数=8，分别用2和4个目标 token 计算 PPL 与 BPB；解释不同 PPL 不代表不同文本质量，并列出规范化、文档边界和窗口 stride 的控制条件。
+4. 构造 EOS/PAD 共用 ID 的标签，按实际 padding 位置屏蔽，保留真实 EOS；分别统计原始有效标签和 causal shift 后分母，验证非法负标签和被监督 padding 会被审计器拒绝。
+5. 为模板直接返回 IDs 和先渲染字符串再编码建立对照，核查 BOS/EOS 是否重复；用输入600、可见输出200、隐藏输出100核对总预算900，解释输出上限已含隐藏部分时为何不能重复相加。
+
+## Transformer 百科：信息路径与状态验收
+
+配套正文：[第四册 Transformer 架构](book-04-llm-encyclopedia/chapters/04-transformer架构.md)。
+
+1. 执行 CPU attention 的未来位置和 padding 反事实测试；再故意取消 mask，构造输出发生变化的输入。说明 attention 局部通过为何还不能证明完整模型无泄漏。
+2. 缓存2个位置后加入1个 query，写出正确允许矩阵；用零 Q/K、V=[1,2,6] 比较显式 mask 与 SDPA 非方形 is_causal=True 的3和1，解释左上对齐问题。
+3. 对4个 query heads、2个 KV heads，比较 enable_gqa 与 repeat_interleave K/V；核对 head 映射，再计算32层、batch4、8192 token、8 KV heads、head_dim128、FP16缓存为4 GiB，说明它已经包含四条序列。
+4. 从非负特征映射的 kernel attention 分子重排补出归一化分母，列出分母为零的处理策略；说明固定特征宽度下线性复杂度与精确 softmax attention 的区别。
+5. 用 S=2、k=1、v=3、α=1、β=0.5计算两次 delta 写入2.5/2.75；与直接叠加比较，再讨论非正交 key 对旧记忆的干扰。另验证 RoPE 点积的相对相位恒等式，避免将它误解为点积只依赖距离。
+
+## 大语言模型基础：目标与评估分母
+
+配套正文：[第四册大语言模型基础](book-04-llm-encyclopedia/chapters/05-大语言模型基础.md)。
+
+1. 对masked NLL分别输入未归一化log probabilities、bool目标、全忽略目标和不一致词表宽度，确认拒绝；说明它与接收logits的CrossEntropyLoss及内部shift有何区别。
+2. 比较预测分布[0.99,0.01]与[0.5,0.5]的熵，以第二类为参考目标计算PPL100/2，解释低熵为何不能证明预测正确。
+3. 对logits=[1e308,-1e308]、temperature=1e308核对概率约[0.880797,0.119203]；测试相同超大logits和极小温度，再检查采样不改变全局random状态及固定seed的使用边界。
+4. 用N=10^9、D=2×10^10核对6ND，再在固定compute下将N翻倍；说明该dense训练近似不能直接推出下游质量或端到端费用。为涌现曲线分别设计连续分数和离散阈值对照。
+5. 100个任务全部尝试花20元、80个成功，计算平均成本与单位成功成本；再用四个任务中两项条件同时成功2次、同时失败2次，比较真实联合通过率0.5与边际乘积0.25，说明失败/重试成本及相关条件如何影响口径。
+
+## 预训练百科：数据口径与边界
+
+配套正文：[第四册预训练与数据](book-04-llm-encyclopedia/chapters/06-预训练与数据.md)。
+
+1. 同一训练文本与两条仅空白不同的评估文本比较，核对共有hash数1、命中文档数2；解释hash相同、规范化相同、答案污染与模型记忆四者为何不能等同。
+2. 对packed输入[1,2,0,3,0]构造独立样本attention边界和labels[-100,2,0,-100,0]，核对shift后目标3且EOS保留；再说明有意允许跨文档读取的预训练流为何是另一种目标。
+3. 用池大小[100,400]计算τ=1和τ=2的权重[0.2,0.8]与[1/3,2/3]；换成不同长度文档后，说明文档采样权重为何不是token比例，以及有放回采样的effective epoch为何不是逐样本曝光保证。
+4. 将合成答案“2”改为“3”却保留verified=True，观察教学函数仍会通过，设计独立验证证据；分别说明替换旧数据与保留真实数据并累积的model collapse研究条件，不能把任一结果外推到所有合成训练。
+5. 为数据消融选择固定token或固定compute预算，列出序列长度、packing、步数和学习率的伴随变化；设计扫描器命中率、误报/漏报和小桶风险的分层报告。说明数据删除与模型参数遗忘、不可变版本与永久保留的区别。
+
+## 后训练百科：目标与反馈边界
+
+配套正文：[第四册后训练与对齐](book-04-llm-encyclopedia/chapters/07-后训练与对齐.md)。
+
+1. 用 stored labels `[-100,-100,a0,a1,EOS]` 列出内部 shift 后的四个目标及其预测位置；解释为何 mask 正确仍可能因 shift 错误监督到用户内容。
+2. 在 IPO 中取 τ=0.5，分别计算间隔 0.8 与 1.2 的损失和导数；比较 DPO 的 logistic 目标，说明有限目标间隔为何不保证全模型无回归。
+3. 用 SimPO 平均 log probability -0.4/-0.7、β=2、γ=0.2 核对损失约 0.513015；将长度和 log probability 总和同时翻倍，说明长度平均为什么没有直接惩罚总长度。
+4. 对奖励组 `[0,0,0,0]`、`[1,1,1,1]`、`[0,0,1,1]` 执行 DAPO 过滤；核对最后一组优势并解释保留组成功率为何不能代表题池成功率。对 token ratio 2/0.5 比较逐 token clip 与 GSPO 几何平均。
+5. 为 RLAIF judge、规则 verifier 和教师软分布分别写出反馈类型与可用目标；核对固定历史下 CE-H=forward KL，解释为何成败标签不能直接作为 token 分布。设计安全可答集合为空时的报告，以及工具轨迹的脱敏与权限边界。
+
+## 推理与解码百科：分布、预算与延迟
+
+配套正文：[第四册推理与解码](book-04-llm-encyclopedia/chapters/08-推理与解码.md)。
+
+1. 对 logits `[2,1]` 分别取 temperature 0.5、1、2，核对第一 token 概率；再用 `[1e308,-1e308]` 与温度 `1e308` 验证先缩放和先相减的差异。
+2. 对权重 `[1e308,1e308,0]` 取 top-p=0.75，说明为什么要先按最大权重缩放；比较 p=1、零概率尾项和全候选被 mask 时的处理契约。
+3. 用 target `[0.5,0.3,0.2]`、draft `[0.4,0.4,0.2]` 计算接受质量、拒绝概率、残差分布并恢复 target；说明 q=0 提议为何非法、p=q 时残差未定义。
+4. 用上下文 4096、输入 3800、保留 32、请求 800 核对有效输出 264；设计空输出、时间原点不一致和单 token 时 TTFT/TPOT 的报告。
+5. 比较 MHA/GQA 的 KV 字节量，列出滑动窗口、混合层和前缀共享为何不能直接套用单一公式；为 best-of-N 独立候选、相关候选和选择器误判分别设计报告。
+
+## 推理优化与部署百科：资源、协议与回滚
+
+配套正文：[第四册推理优化与部署](book-04-llm-encyclopedia/chapters/09-推理优化与部署.md)。
+
+1. 用请求状态图拒绝 `RECEIVED -> DECODING`，说明 `FINISHED` 与 `CLEANED` 为什么不能合并；为取消、超时和模型异常分别列出 KV 释放证据。
+2. 对 running sequence 数和 waiting prefill token 分别设预算，复现长请求先到与短请求先到的调度差异；设计 aging、优先级和 P99 公平性指标。
+3. 计算 GQA 相对 MHA 的 KV 节省，再列出 prefix cache 指纹中的模型、模板、adapter、位置配置、媒体和租户条件；解释命中率为何不等于 TTFT 收益。
+4. 用对称 INT4 教学量化计算 scale 和 MSE，说明校准分布、kernel、KV 精度和真实任务回归为何不能由 toy MSE 推断。
+5. 为一次已开始 streaming 的工具调用设计 fallback、幂等键、取消和回滚流程；列出 startup/liveness/readiness、trace/metrics、drain 和 canary 的证据字段。

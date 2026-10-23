@@ -32,6 +32,8 @@
 
 更深入的读者还需要记录 tokenizer、数据快照、模型 revision、随机种子、解码参数、检索版本、工具版本、硬件、精度、评估脚本版本以及样本筛选规则。没有这些条件，两个分数即使看起来不同，也可能没有可比性。
 
+前置知识是[第三册第一章的训练循环](01-pytorch基础实战.md)和[第七章的 RAG 与工具证据链](07-rag与agent项目实战.md)。本章七段 Python 示例均可用 Python 3.10+ 标准库分别保存为脚本运行，不需要模型文件或 GPU；输入是代码内的合成记录，输出是统计报告或训练轨迹。它们验证测量机制，不代表真实模型质量或线上发布验收。后续可在[第九章项目实作](09-简历项目实战.md)中应用这些评估方法。
+
 ## 8.1 小型 benchmark：把“感觉变好”变成可复现测量
 
 ### 8.1.1 先从一个具体场景开始
@@ -195,7 +197,7 @@ Wilson 式同样要求 \(n>0\)、\(0\le x\le n\)，并且 \(z>0\) 为有限的�
 
 ### 8.1.7 一个零依赖 benchmark runner
 
-下面的实现只使用 Python 标准库，演示 JSONL 读取、模型接口、不同评分器、切片统计和 Wilson 区间。真实项目可以把 `call_model` 替换为本地模型、vLLM、远程 API 或 RAG pipeline；评测主流程不应因此改变。
+下面的实现只使用 Python 标准库，以内存中的样例字典演示模型接口、不同评分器、切片统计和 Wilson 区间。若从 JSONL 读取，应逐行解析后调用同一个 `validate_rows`；本例不包含文件读取。真实项目可以把 `call_model` 替换为本地模型、vLLM、远程 API 或 RAG pipeline；评测主流程不应因此改变。
 
 ```python
 import json
@@ -374,7 +376,7 @@ report = {
 print(json.dumps(report, ensure_ascii=False, sort_keys=True))
 ```
 
-这个 runner 有两个有意保留的限制。第一，关键词分数是连续值，而 `fully_correct_rate` 只把完整命中的样例算作成功，两者回答不同问题；第二，示例中的模型调用是确定性占位函数，真实模型应记录每次请求的原始响应、错误码、延迟、输入输出 token 和采样参数。
+运行后四条样例的 `micro_mean` 和 `fully_correct_rate` 都是 1.0，但四次成功的 Wilson 95% 区间约为 `[0.5101, 1.0]`，不能据此宣称系统可靠。JSON 评分器只检查对象和必填键，不验证类型、业务权限或完整 JSON Schema；例如年龄为字符串仍会通过。关键词分数是连续值，而 `fully_correct_rate` 只把完整命中的样例算作成功，两者回答不同问题。示例中的模型调用是确定性占位函数，真实模型应记录每次请求的原始响应、错误码、延迟、输入输出 token 和采样参数；空输出应作为失败记录，不应让整个评测批次丢失。
 
 ### 8.1.8 失败样例比总分更能指导改动
 
@@ -648,14 +650,14 @@ P_{\mathrm{support}}(a\mid E)=
 \frac{\sum_j w_j\mathbb{1}[\exists e\in E:\mathrm{support}(e,c_j)=1]}{\sum_j w_j}
 ```
 
-如果把回答中的所有可核验 claim 作为分母，证据覆盖率则可以写成：
+这衡量回答中有多少内容有依据，不衡量回答是否完整。若要衡量问题所需事实的覆盖，应另外定义由问题和参考资料确定的必需事实集 \(Q=\{q_j\}\)，并为其指定有限正权重 \(v_j\)。完整性可以写成：
 
 ```math
-R_{\mathrm{support}}(a\mid E)=
-\frac{\sum_j w_j\mathbb{1}[\exists e\in E:\mathrm{support}(e,c_j)=1]}{\sum_j w_j\mathbb{1}[c_j\ \mathrm{judged\_by}\ E]}
+R_{\mathrm{required}}(a\mid Q,E)=
+\frac{\sum_{q_j\in Q}v_j\mathbb{1}[a\ \mathrm{covers}\ q_j]\mathbb{1}[E\ \mathrm{supports}\ q_j]}{\sum_{q_j\in Q}v_j}
 ```
 
-两式都要求参与计算的 claim 权重有限且为正。\(P_{\mathrm{support}}\) 的总权重必须大于 0；\(R_{\mathrm{support}}\) 还要求至少有一个 claim 被证据实际判定，因而分母大于 0。没有可核验 claim、没有证据可判断的 claim 或分母为 0 时，应报告“不适用”，而不是把它当成 0。实际报告中，很多团队把两个方向都叫 faithfulness，容易造成混淆。写清分子、分母和 claim 抽取规则，比背一个指标名更重要。
+两式分别要求回答 claim 的总权重大于 0、必需事实集的总权重大于 0；缺少相应集合时报告“不适用”。若回答有 claim，但证据不支持其中任何一条，支持率是 0，而不是“不适用”。例如政策要求说明普通和特殊渠道两种到账时间，回答只正确说明普通渠道：其支持率可为 1，等权完整性却只有 1/2；额外捏造“当天到账”会降低支持率。这里的完整性是教学定义，不能当作 FActScore 的原始指标；写清分子、分母和 claim 抽取规则，比背一个指标名更重要。
 
 ### 8.3.2 开放世界、闭合证据集与拒答
 
@@ -745,6 +747,7 @@ CASES = [
     {
         "id": "r1",
         "answer": "退款通常三个工作日到账，特殊支付渠道可能需要五个工作日。",
+        "evidence_text": "退款通常三个工作日到账，特殊支付渠道可能需要五个工作日。",
         "claims": [
             {"text": "通常三个工作日到账", "evidence": ["三个工作日"], "weight": 1.0},
             {"text": "特殊支付渠道可能五个工作日", "evidence": ["特殊支付渠道", "五个工作日"], "weight": 1.5},
@@ -753,6 +756,7 @@ CASES = [
     {
         "id": "r2",
         "answer": "退款会在当天到账。",
+        "evidence_text": "退款通常三个工作日到账，特殊支付渠道可能需要五个工作日。",
         "claims": [
             {"text": "当天到账", "evidence": ["当天到账"], "weight": 1.0},
         ],
@@ -767,6 +771,8 @@ def evaluate_case(case):
         raise ValueError("case id must be a non-empty string")
     if not isinstance(case.get("answer"), str) or not case["answer"].strip():
         raise ValueError("answer must be a non-empty string")
+    if not isinstance(case.get("evidence_text"), str) or not case["evidence_text"].strip():
+        raise ValueError("evidence_text must be a non-empty string")
     claims = case.get("claims")
     if not isinstance(claims, list) or not claims:
         raise ValueError("a case must contain at least one claim")
@@ -783,7 +789,7 @@ def evaluate_case(case):
             raise ValueError("each claim needs non-empty evidence pieces")
         if any(not isinstance(piece, str) or not piece.strip() for piece in evidence):
             raise ValueError("evidence pieces must be non-empty strings")
-        evidence_hit = all(piece in case["answer"] for piece in evidence)
+        evidence_hit = all(piece in case["evidence_text"] for piece in evidence)
         weight = claim.get("weight")
         if not isinstance(weight, (int, float)) or isinstance(weight, bool):
             raise TypeError("claim weight must be numeric")
@@ -805,7 +811,7 @@ report = [evaluate_case(case) for case in CASES]
 print(json.dumps(report, ensure_ascii=False, indent=2))
 ```
 
-这里的程序把答案文本同时当作 claim 和 evidence 的载体，只能做极粗的字符串检查；生产实现应把 evidence 换成真实文档片段，并对否定、条件、时间和数字做结构化解析。它故意会把“不是三个工作日”误判为命中，这正是失败边界：字符串存在不等于语义支持。
+输出中 r1 的支持率为 1.0，r2 为 0.0：答案说了“当天到账”，但独立的政策证据没有这一条件。`claims` 是人工从答案提取的事实，`evidence` 是人工给出的待查短语；程序既不自动抽取 claim，也不判断短语与 claim 是否语义等价。把政策改成“退款不是当天到账”，r2 仍会误判为支持，这说明字符串存在不等于语义支持。真实实现应保存文档 ID、版本和片段，并对否定、条件、时间和数字做语义判断；无检索结果时也应保留样例，单独标记证据缺失。
 
 ### 8.3.6 幻觉的故障归因
 
@@ -838,7 +844,7 @@ print(json.dumps(report, ensure_ascii=False, indent=2))
 
 ### 8.3.7 评估工具的证据边界
 
-[TruthfulQA](https://arxiv.org/abs/2109.07958) 适合观察模型是否会复述常见错误观念，但它不是企业知识库事实性测试；[FActScore](https://arxiv.org/abs/2305.14250)把长文本拆成原子事实并检查支持关系，强调了 claim 粒度的重要性；[SelfCheckGPT](https://arxiv.org/abs/2303.08896)把多次采样不一致作为无外部知识时的风险信号，但不能把一致性当作真值证明。
+[TruthfulQA](https://arxiv.org/abs/2109.07958) 适合观察模型是否会复述常见错误观念，但它不是企业知识库事实性测试；[FActScore](https://arxiv.org/abs/2305.14251)把长文本拆成原子事实并检查支持关系，强调了 claim 粒度的重要性；[SelfCheckGPT](https://arxiv.org/abs/2303.08896)把多次采样不一致作为无外部知识时的风险信号，但不能把一致性当作真值证明。
 
 事实性评估的最终结论应注明：证据来自给定文档还是开放网络，claim 如何抽取，否定和条件如何处理，评估模型是否经过人工校准，以及模型拒答是否算作成功。只有这样，“幻觉率下降”才是可解释的工程结论。
 
@@ -875,7 +881,7 @@ batch size 与梯度累积
 
 ```math
 \mathcal{L}(\theta)=
--\frac{1}{|T|}\sum_{t\in T}\log p_\theta(y_t\mid x_{<t})
+-\frac{1}{|T|}\sum_{t\in T}\log p_\theta(y_t\mid x_{1:t-1})
 ```
 
 集合 \(T\) 只应包含有效标签位置，并且必须满足 \(|T|>0\)；没有有效标签时，平均损失未定义，训练循环应报告数据或 mask 配置错误，而不是返回 0。padding、用户输入、被屏蔽的 assistant 前缀是否进入 \(T\)，会直接改变训练目标。
@@ -946,7 +952,7 @@ loss 大幅振荡：学习率过大、batch 太小、数据分布混合或梯度
 g\leftarrow g\cdot\min\left(1,\frac{c}{\lVert g\rVert_2}\right),\quad \lVert g\rVert_2>0
 ```
 
-当 \(\lVert g\rVert_2=0\) 时梯度保持为 0；实现中若用 \(\varepsilon>0\)，它只是防止浮点除零的数值稳定项，不应被当作解决梯度为空的办法。它可以缓解异常梯度，但不会修复错误标签和错误损失。若裁剪比例长期接近 1，说明训练经常超过上限，应回到学习率、数据和数值稳定性检查；不能把裁剪当作所有爆炸问题的永久解决方案。
+当 \(\lVert g\rVert_2=0\) 时梯度保持为 0；实现中若用 \(\varepsilon>0\)，它只是防止浮点除零的数值稳定项，不应被当作解决梯度为空的办法。裁剪可以缓解异常梯度，但不会修复错误标签和错误损失。若“触发裁剪的步数 / 总步数”长期接近 1，说明训练经常超过上限；若缩放系数 \(\min(1,c/\lVert g\rVert_2)\) 接近 1，则表示裁剪很轻或未裁剪。应区分这两个量，再检查学习率、数据和数值稳定性。
 
 Adam 的基本形式是：
 
@@ -1019,9 +1025,7 @@ for step in range(300):
     for features, target in DATA:
         logit = sum(w * x for w, x in zip(weights, features)) + bias
         probability = sigmoid(logit)
-        probability = min(max(probability, 1e-12), 1 - 1e-12)
-        loss -= target * math.log(probability)
-        loss -= (1 - target) * math.log(1 - probability)
+        loss += max(logit, 0.0) - target * logit + math.log1p(math.exp(-abs(logit)))
         error = probability - target
         for index, feature in enumerate(features):
             grad_w[index] += error * feature
@@ -1044,7 +1048,7 @@ for features, _ in DATA:
 print("predictions=", predictions)
 ```
 
-运行时应看到平均 loss 下降，最后预测接近 [0, 0, 0, 1]。把 learning_rate 改成非常大的数，可以复现振荡或数值异常；把 DATA 中的 target 全改成同一个值，则可以观察到模型只学到常数基线。这个实验把“训练失败”转成了可以人为制造和观察的现象。
+损失采用 logits 形式的稳定二元交叉熵，避免截断概率后让损失与梯度失配。日志中的 loss 属于本步更新前的参数，而打印的权重和 bias 属于更新后；最终预测单独使用最后一次更新后的参数。运行时应看到平均 loss 从约 0.6931 下降，最后预测为 `[0, 0, 0, 1]`。把 learning_rate 改成非常大的数，可以观察振荡或数值异常；把 DATA 中的 target 全改成同一个值，则可以观察到模型只学到常数基线。这个实验把“训练失败”转成了可以人为制造和观察的现象。
 
 ### 8.4.6 真实训练中的定位顺序
 
@@ -1085,7 +1089,7 @@ print("predictions=", predictions)
 
 ### 8.4.8 资料与边界
 
-[PyTorch Autograd 文档](https://pytorch.org/docs/stable/notes/autograd.html)说明了梯度记录和计算图行为；[Adam 论文](https://arxiv.org/abs/1412.6980)给出了自适应优化器的基本形式；[Deep Learning](https://www.deeplearningbook.org/)系统讨论了优化、数值和泛化问题。这里的调试顺序是工程方法，不是保证所有训练故障都能一次定位的算法；复杂分布式训练还需要结合通信、内存、数据加载和硬件错误日志。
+[PyTorch Autograd 文档](https://docs.pytorch.org/docs/stable/notes/autograd.html)说明了梯度记录和计算图行为；[Adam 论文](https://arxiv.org/abs/1412.6980)给出了自适应优化器的基本形式；[Deep Learning](https://www.deeplearningbook.org/)系统讨论了优化、数值和泛化问题。这里的调试顺序是工程方法，不是保证所有训练故障都能一次定位的算法；复杂分布式训练还需要结合通信、内存、数据加载和硬件错误日志。
 
 ## 8.5 微调后的能力退化：从目标任务提升到整体能力衡量
 
@@ -1196,7 +1200,7 @@ r_{\mathrm{update}}=\frac{\lVert\theta-\theta_0\rVert_2}{\lVert\theta_0\rVert_2}
 (1-\alpha)\mathcal{L}_{\mathrm{replay}}
 ```
 
-需要通过切片实验寻找 \(\alpha\) 的范围；比例太低会学不会目标任务，比例太高则适配速度慢。对回放数据要保留版本和去重信息，避免把测试样例重新混入训练。
+这里 \(0\le\alpha\le1\)。新任务比例 \(\alpha\) 太低，适配可能较慢或不足；太高则对旧能力的保护减弱。上述损失混合等价于按该比例采样，需要两类损失的归一化口径一致；按样本采样但按 token 平均时，还应考虑长度差异。对回放数据要保留版本和去重信息，避免把测试样例重新混入训练。
 
 #### 路线二：降低更新强度
 
@@ -1210,13 +1214,13 @@ r_{\mathrm{update}}=\frac{\lVert\theta-\theta_0\rVert_2}{\lVert\theta_0\rVert_2}
 \mathcal{L}_{\mathrm{KL}}=
 \frac{1}{|T|}\sum_{t\in T}
 D_{\mathrm{KL}}\left(
-p_{\theta_0}(\cdot\mid x_{<t})
+p_{\theta_0}(\cdot\mid x_{1:t-1})
 \Vert
-p_{\theta}(\cdot\mid x_{<t})
+p_{\theta}(\cdot\mid x_{1:t-1})
 \right)
 ```
 
-它能约束输出分布，却不自动保证事实、安全或格式；如果基座模型在某个任务上本来就错误，盲目锚定会保留错误。
+这里要求有效位置集合 \(T\) 非空、两模型使用同一词表和上下文，且学生分布在教师具有正概率的位置也为正。此处是教师到学生的 KL，前面的总目标只示意一种可能的锚定方向；交换方向会改变优化行为，不能混用。它能约束输出分布，却不自动保证事实、安全或格式；如果基座模型在某个任务上本来就错误，盲目锚定会保留错误。
 
 #### 路线四：参数正则与重要性保护
 
@@ -1649,7 +1653,15 @@ def validate_inputs():
         if not isinstance(threshold, int) or not 1 <= threshold <= 5:
             raise ValueError(f"threshold for {name} must be an integer in [1, 5]")
     allowed = set(DIMENSIONS)
+    seen = set()
     for row in ROWS:
+        for field in ("case", "model", "annotator"):
+            if not isinstance(row.get(field), str) or not row[field].strip():
+                raise ValueError(f"{field} must be a non-empty string")
+        key = (row["case"], row["model"], row["annotator"])
+        if key in seen:
+            raise ValueError(f"duplicate annotation: {key}")
+        seen.add(key)
         if not isinstance(row.get("scores"), dict) or set(row["scores"]) != allowed:
             raise ValueError("each row must contain one score for every dimension")
         for name, value in row["scores"].items():
@@ -1705,7 +1717,7 @@ summary["pairwise"] = {
 print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
 ```
 
-代码中的 condition_failure_rate 只对模拟的四个维度做判断，真实评测还应分开统计解析失败、引用错误、严重安全事件和领域专家否决。不同错误的严重程度不能被一个布尔值完全表达。
+输出中 A、B 的 `weighted_mean` 分别为 0.6725、0.94，`condition_failure_rate` 分别为 0.5、0；排除两次平局后 B 胜率为 4/5，即 0.8。均值和失败率按标注记录计算，本例每条回答恰有两名标注员，不能把八条评分记录视为八个独立问题。多人评分数量不均时，应先按回答汇总，再按问题聚合；区间估计也应保留同一问题内的相关性。真实评测还应分开统计解析失败、引用错误、严重安全事件和领域专家否决。不同错误的严重程度不能被一个布尔值完全表达。
 
 ### 8.6.9 评测表的最小字段
 
@@ -1732,7 +1744,9 @@ timestamp
 
 ### 8.6.10 资料与边界
 
-[Cohen's Kappa 原始论文](https://doi.org/10.1037/h0048435)提出了分类判断一致性的一种校正方法；[Krippendorff 关于内容分析一致性的论文](https://doi.org/10.1111/j.1468-2958.2004.tb00738.x)讨论了不同数据类型的一致性；HELM 和 OpenAI Evals 则提供了多维评估与可复现评测基础设施的公开参考。
+[Cohen's Kappa 原始论文 A Coefficient of Agreement for Nominal Scales](https://doi.org/10.1177/001316446002000104)提出了分类判断一致性的一种校正方法；[Krippendorff 关于内容分析一致性的论文](https://doi.org/10.1111/j.1468-2958.2004.tb00738.x)讨论了不同数据类型的一致性；HELM 和 OpenAI Evals 则提供了多维评估与可复现评测基础设施的公开参考。
+
+[Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena](https://arxiv.org/abs/2306.05685)讨论位置、冗长和自我偏好等评审偏差；其人工一致性结论绑定论文的模型、题目和协议，不代表任意 judge 在新业务中都可靠。
 
 人工评测不是把主观判断伪装成客观真值。量表、标注员、证据来源和仲裁过程都应进入结果记录；任何“模型 B 更好”的结论都应能追溯到具体任务、具体维度和具体失败样例。
 
@@ -1856,7 +1870,7 @@ P50、P95、P99 延迟以及首 token 延迟
 \chi^2_{\mathrm{SRM}}=\sum_{j=1}^{k}\frac{(o_j-e_j)^2}{e_j}
 ```
 
-该式要求每个期望计数 \(e_j>0\)，且总样本数大于 0；如果某个分组的计划比例为 0，卡方统计量不适用。SRM 异常可能来自：
+该式要求每个期望计数 \(e_j>0\)，且总样本数大于 0；如果某个分组的计划比例为 0，卡方统计量不适用。卡方近似还需要足够的期望计数，稀疏分桶应使用适合小样本的方法。计数应对应分配的随机化单元；按用户分桶时，不能直接用受到 treatment 影响的请求数检验原定用户比例。SRM 异常可能来自：
 
 ```text
 实验路由条件与统计过滤条件不一致
@@ -1877,14 +1891,14 @@ SRM 本身不解释业务指标，但它是随机化有效性的前置检查。�
 ```math
 n\approx
 \frac{\left(
-z_{\alpha/2}\sqrt{2\bar p(1-\bar p)}
-+z_\beta\sqrt{p_1(1-p_1)+p_2(1-p_2)}
+z_{1-\alpha/2}\sqrt{2\bar p(1-\bar p)}
++z_{1-\beta}\sqrt{p_1(1-p_1)+p_2(1-p_2)}
 \right)^2}{(p_2-p_1)^2},
 \qquad
 \bar p=\frac{p_1+p_2}{2}
 ```
 
-预期提升越小，所需样本量按提升量平方的倒数增长。用户反馈有延迟、指标方差很大或用户级随机化时，有效样本量还会进一步下降。
+这里 \(z_q\) 为标准正态分布的第 \(q\) 分位数，\(n\) 是每组样本量。例如 \(p_1=0.77,p_2=0.79,\alpha=0.05\)、功效 0.8 时，取 \(z_{0.975}\approx1.96,z_{0.8}\approx0.842\)，每组约需 6,736 个独立单元（将近似值 6,735.15 向上取整）。预期提升越小，所需样本量按提升量平方的倒数增长。用户反馈有延迟、指标方差很大或用户级随机化时，有效样本量还会进一步下降。
 
 统计显著不等于业务值得。一个 0.1 个百分点的提升可能在百万请求下显著，却无法覆盖新增 token 成本；一个高风险错误率的微小上升可能未达到显著，却仍值得暂停扩量。报告要同时给出点估计、置信区间、样本量、成本和风险后果。
 
@@ -2009,7 +2023,7 @@ def srm(control_count, treatment_count, expected_treatment_ratio=0.5):
     return {
         "chi_square": round(statistic, 4),
         "p_value": round(p_value, 6),
-        "looks_randomized": p_value >= 0.001,
+        "no_srm_detected": p_value >= 0.001,
     }
 
 
@@ -2066,7 +2080,7 @@ safety_change = (
 )
 
 conditions = {
-    "srm_ok": srm(control["sessions"], treatment["sessions"])["looks_randomized"],
+    "srm_ok": srm(control["sessions"], treatment["sessions"])["no_srm_detected"],
     "resolution_lower_bound_above_1pt": (
         resolution["ci95"] is not None and resolution["ci95"][0] > 0.01
     ),
@@ -2076,7 +2090,7 @@ conditions = {
     ),
     "p95_latency_increase_under_15pct": latency_change <= 0.15,
     "cost_increase_under_20pct": cost_change <= 0.20,
-    "safety_rate_change_under_0.02pct": safety_change <= 0.0002,
+    "safety_review_passed": False,
 }
 
 report = {
@@ -2097,7 +2111,9 @@ report = {
 print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
 ```
 
-这个 demo 把“主指标提升”和“条件是否满足”分开。即使 resolution 的区间为正，如果成本、延迟或安全条件不满足，也不应只凭一个正向数字扩大流量。真实分析还要考虑多重比较、集群随机化、分层协变量、缺失数据和实验周期。
+本例把每个会话当作独立分配单元，且每个安全计数代表发生事件的会话数，不是同一会话内的事件总次数。解决率由 0.77 升到约 0.7939，差约 2.39 个百分点；延迟增加约 8.33%，成本增加约 15.63%。安全事件只有 6 与 7 次，点估计差很小也不能证明满足安全非劣效要求，所以 `safety_review_passed` 显式为 False，输出决策为 `hold_and_investigate`。真实放行应事先定义安全容忍界限，结合适合稀疏事件的区间、定向离线测试和人工复核，不能把这个布尔值直接改成 True 来替代证据。
+
+`no_srm_detected` 只表示在预定阈值下没有检出分配比例异常，不证明所有随机化条件成立。`two_rate_delta` 的普通正态区间用于本例成功/失败数充足的指标；稀疏或边界比例应改用专门方法。即使 resolution 的区间为正，如果成本、延迟或安全条件不满足，也不应只凭一个正向数字扩大流量。真实分析还要考虑多重比较、集群随机化、分层协变量、缺失数据和实验周期。
 
 ### 8.7.7 日志字段决定实验能否解释
 
@@ -2198,6 +2214,15 @@ Control / Treatment 的流量与 SRM 检查
 
 ### 8.7.12 资料与边界
 
-[Trustworthy Online Controlled Experiments](https://doi.org/10.1145/2339530.2339653)系统讨论了随机化实验、指标、样本量和实验陷阱；CUPED 的原始论文 [Improving the sensitivity of online controlled experiments by utilizing pre-experiment data](https://doi.org/10.1145/2433396.2433413)展示了如何用实验前协变量降低方差。实际使用时应核对链接对应的版本和方法假设，不把一段 Python demo 当作完整统计软件。
+[Trustworthy Online Controlled Experiments: Five Puzzling Outcomes Explained](https://doi.org/10.1145/2339530.2339653)讨论了线上实验中容易误读的结果和可信度问题；[Microsoft SRM 排查说明](https://www.microsoft.com/en-us/research/articles/diagnosing-sample-ratio-mismatch-in-a-b-testing/)提供了比例异常的诊断入口；[NIST 比例置信区间说明](https://www.itl.nist.gov/div898/handbook/prc/section2/prc241.htm)解释了 Wilson 和精确区间。CUPED 的原始论文 [Improving the sensitivity of online controlled experiments by utilizing pre-experiment data](https://doi.org/10.1145/2433396.2433413)展示了如何用实验前协变量降低方差。不应把一段 Python demo 当作完整统计软件。
 
 A/B 实验的证据范围始终有限：它回答的是某个版本、某组流量、某段时间和某套系统条件下的差异。模型、提示词、检索器、工具、用户群和业务活动改变后，结论需要重新验证。
+
+## 本章练习与面试迁移
+
+1. 一个系统四条样例全部正确，能否声明准确率接近 100%？运行 8.1 的 runner，解释点估计与 Wilson 下界为何不同，并把一条 JSON 年龄改成字符串，指出评分器没有检查什么。
+2. 政策要求说明两种渠道，回答只正确覆盖一种。分别计算回答支持率与必需事实完整性；再把证据改为否定句，解释为什么 8.3 的字符串检查会误判。
+3. 在 8.4 中把标签全部改成 0，再恢复标签并把学习率改为 100。比较损失、梯度和最终预测，说明什么证据支持“数据问题”或“更新强度问题”，以及哪些结论不能外推到 Transformer。
+4. 面试中回答“新模型离线提升了，为什么不扩量”：先明确评估版本和随机化单元，再报告区间、SRM、成本延迟与安全证据；用 8.7 的 6/7 次安全事件说明“没有显著变差”为什么不等于“已经证明安全非劣效”。
+
+本章的共同方法是固定测量协议、保留逐样本证据、用对照排除替代解释，再在风险约束下做决策。总分、训练曲线、人工偏好和线上指标分别观察不同对象，只有明确各自分母与证据范围，才能把一次模型改动解释清楚。

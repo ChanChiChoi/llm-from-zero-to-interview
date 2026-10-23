@@ -88,7 +88,7 @@ N_{\mathrm{padded}}
 padding waste 可以用下面的比例表示：
 
 ~~~math
-\operatorname{waste}
+\mathrm{waste}
 =1-\frac{\sum_i T(x_i)}{B T_{\max}}.
 ~~~
 
@@ -99,7 +99,7 @@ padding waste 可以用下面的比例表示：
 在中文、代码或多语言比较中，经常需要定义 token fertility。一个简单版本是：
 
 ~~~math
-\operatorname{fertility}
+\mathrm{fertility}
 =\frac{N_{\mathrm{tokens}}}{N_{\mathrm{reference}}}.
 ~~~
 
@@ -227,16 +227,16 @@ l o w e r
 
 ~~~math
 (a^\*,b^\*)
-=\underset{(a,b)}{\operatorname{argmax}}\;C(a,b),
+=\underset{(a,b)}{\mathrm{argmax}}\;C(a,b),
 ~~~
 
-然后把所有相邻的 a*、b* 替换成新符号 ab，并把新符号加入词表。重复到达到目标词表大小或没有值得合并的 pair。
+然后按确定顺序把不重叠的相邻 a*、b* 替换成新符号 ab，并把新符号加入词表。例如对 `aaa` 合并 `aa` 时，一次从左到右扫描得到 `[aa,a]`，不能同时消费两对重叠字符。重复到达到目标词表大小或没有值得合并的 pair。
 
-解码时，tokenizer 依据学习到的 merge 规则把输入拆成基础符号和合并片段。训练阶段的 merge 顺序必须被保存；只保存最终词表而丢失规则，无法保证 encode 一致。
+编码时，tokenizer 从输入的基础符号出发，按照已保存的 merge 优先级执行合并；不是重新统计当前请求的最高频 pair。解码则把 id 还原为对应片段，再按字节和边界规则恢复文本。训练阶段的 merge 顺序必须被保存；只保存最终词表而丢失规则，无法保证 encode 一致。
 
 ### BPE 为什么能处理未见词
 
-词级词表遇到新词时容易把整个词映射成 UNK。BPE 则允许新词退化为更小的已知片段，最差可以退化到字节级。因此开放词汇不再依赖“训练时见过完整词”，但这不代表新词一定被高质量理解。一个专有名词被拆成十几个碎片时，序列成本和学习难度都可能上升。
+词级词表遇到新词时容易把整个词映射成 UNK。BPE 则允许新词退化为更小的已知片段，但普通字符级 BPE 遇到基础词表外字符仍可能产生 UNK；只有完整字节基础集合或配置了适用的 byte fallback，才能进一步保证相应输入覆盖。覆盖不代表新词一定被高质量理解。一个专有名词被拆成十几个碎片时，序列成本和学习难度都可能上升。
 
 ### Byte-level BPE
 
@@ -303,7 +303,7 @@ print(data)
 
 WordPiece 也使用子词词表，但它的候选选择通常与语言模型似然或特定 score 相关，而不是简单按 pair 原始频率逐次合并。BERT 体系中常见的 ## 标记用于表示某个片段处在词内部，但这只是具体实现的可见标记，不是所有 WordPiece 系统都必须使用同一表示。
 
-在推理时，WordPiece 往往在候选词表中寻找能够覆盖输入的片段组合。词表学习目标、最长匹配细节和未知词处理必须以具体 tokenizer 实现为准。把 WordPiece 简化成“最长词典匹配”会漏掉其训练过程和 score 定义。
+在推理时，[BERT 的 WordPiece 实现](https://github.com/google-research/bert/blob/master/tokenization.py)采用从当前位置开始的贪心最长匹配，词内候选添加 `##`；无法继续匹配时，整个当前词退回 `[UNK]`，不是任意挑一组能覆盖的片段。它也不会回溯尝试所有切分：若词表只有 `ab`、`a`、`##bc`，输入 `abc` 会先选 `ab`，再因没有 `##c` 而失败，尽管 `[a,##bc]` 可以覆盖。训练时如何选词表和推理时如何用词表是两个问题；具体实现的长度上限和未知词规则也应记录。
 
 ### Unigram LM 的概率视角
 
@@ -316,10 +316,12 @@ P(x,z)=\prod_{j=1}^{m}P(z_j).
 给定字符串 x，tokenizer 可能选择概率较高的切分：
 
 ~~~math
-z^\*=\underset{z\in\mathcal{Z}(x)}{\operatorname{argmax}}\;P(x,z).
+z^\*=\underset{z\in\mathcal{Z}(x)}{\mathrm{argmax}}\;P(x,z).
 ~~~
 
 实际算法会处理候选集合、似然、删词和动态规划，以上公式只是核心直觉。Unigram 的一个重要特点是可以保留多种候选切分，从而支持 subword regularization 或采样式数据增强。
+
+例如字符串 `ab` 有切分 `[ab]` 和 `[a,b]`，若三种片段的概率分别为 0.4、0.3、0.3，两条路径的概率为 0.4 和 0.09。最大概率路径选择 `[ab]`，但字符串的边缘概率是两条合法路径之和 0.49。训练的边缘似然、确定性最佳切分和随机采样不是同一操作；采样温度等配置还会改变路径分布。
 
 ### SentencePiece 是工具与方法集合
 
@@ -351,13 +353,26 @@ subword regularization 让同一文本在训练时有机会采用不同合法切
 
 字符是 Unicode 层面的抽象符号，字节是编码后的存储单位，子词是从语料统计中学习出的片段。一个 Unicode 字符可能由多个 UTF-8 字节表示；一个子词又可能包含多个字符或多个字节。因此“字符数”“字节数”和“token 数”不能互换。
 
+这里还要区分码点和用户感知字符。Python 的 `len(str)` 统计码点，不是按 Unicode 字素簇计数；一个带组合重音的字母或 emoji 序列可以含多个码点。下面只演示码点、UTF-8 和 NFC 规范化，不实现完整字素簇算法：
+
+~~~python
+import unicodedata
+
+
+for text in ("\u00e9", "e\u0301", "\u4e2d"):
+    normalized = unicodedata.normalize("NFC", text)
+    print(len(text), len(text.encode("utf-8")), len(normalized))
+~~~
+
+输出分别为 `(1,2,1)`、`(2,3,1)`、`(1,3,1)`。前两者通常呈现同一带重音字母，但未经规范化的码点数和字节数不同；不能据此断言目标 tokenizer 的 token 数也相同。若 fertility 按字素簇计数，需要另用符合 [Unicode UAX #29](https://unicode.org/reports/tr29/) 的实现并固定版本。
+
 ### Character-level
 
 字符级 tokenizer 的词表较小，规则直观，几乎不需要完整词级词表。代价是序列变长，模型需要自己学习字符组合成词、短语、代码标识符和语义单位。对于上下文长度和 attention 计算，长序列会带来直接成本。
 
 ### Byte-level
 
-字节级表示覆盖更鲁棒，能够处理罕见符号、emoji、混合文本和任意文件内容。代价是某些字符需要多个字节，若没有足够有效的 merge，token fertility 会升高。byte-level 解决的是覆盖问题，不自动解决语言公平和语义效率问题。
+完整的 256 字节基础集合可以表示任意字节序列，但常见文本 tokenizer 的公开入口接收 Unicode 字符串，再转换为 UTF-8；这不等于它能直接接收任意二进制文件。非法编码、孤立代理码点和规范化如何处理仍由接口决定。代价是某些字符需要多个字节，若没有足够有效的 merge，token fertility 会升高。byte-level 解决的是相应表示层的覆盖问题，不自动解决语言公平和语义效率问题。
 
 ### Subword-level
 
@@ -433,6 +448,8 @@ BOS 是否自动添加、EOS 是否参与 loss、PAD 是否参与 attention，�
 3. 生成器是否把 pad 当作停止条件。
 4. 左右 padding 的 position id 是否正确。
 
+PAD 与 EOS 共用 ID 时，不能直接把所有等于 pad_id 的 labels 都改成 ignore_index，否则真实结束目标也会被删除。应按实际 padding 位置屏蔽，再独立检查结束 token 的监督和停止配置。
+
 ### EOS 是训练和生成之间的连接点
 
 训练数据若没有一致的结束标记，模型可能不知道回答什么时候结束；推理侧若配置了错误的 eos_token_id，模型可能过早停止或持续生成。max_new_tokens 只是上限，不是语义上的正常结束。
@@ -455,7 +472,7 @@ BOS 是否自动添加、EOS 是否参与 loss、PAD 是否参与 attention，�
 
 ### special token 的字面冲突
 
-若一个特殊字符串既可作为普通用户文本出现，又被 tokenizer 当作控制 token，系统必须定义转义或禁止规则。否则用户输入可能意外改变角色边界或工具调用结构。安全系统尤其要把“可见文本”和“不可由用户伪造的控制 token”分开处理。
+若一个特殊字符串既可作为普通用户文本出现，又被 tokenizer 当作控制 token，系统必须定义转义、普通文本编码或拒绝规则。否则用户输入可能意外改变角色边界或工具调用结构。特殊 token 本身不保证不可伪造；需要验证用户文本是否能被编码为控制 ID。即使这条通道被阻止，普通自然语言 prompt injection 仍需独立防护。
 
 ### 特殊符号的最小测试
 
@@ -493,9 +510,11 @@ decode 后是否保留、跳过或变换该 token
 - 每轮消息是否添加换行或特殊标记。
 - 是否在最后追加 assistant generation prompt。
 - 工具调用的 JSON 或文本结构。
-- 哪些边界 token 参与 loss。
+- 边界 token 在序列中的位置；是否参与 loss 还取决于训练器和 label mask。
 
 所以“prompt 文本一样”不能证明输入一样。评估时应保存模板渲染后的字符串、token ids、special token 位置和 generation prompt。
+
+若先调用 `apply_chat_template(tokenize=False)` 再单独编码，通常应设置 `add_special_tokens=False`，避免重复添加模板已有的 BOS/EOS。直接让模板返回 token ids 可减少这一类重复；具体行为仍以模型模板为准。模板生成了 assistant 边界，也不等于训练器已经自动屏蔽 user labels。
 
 ### SFT 中的 prompt/completion 边界
 
@@ -505,10 +524,10 @@ decode 后是否保留、跳过或变换该 token
 L
 =-\frac{1}{|\mathcal{I}|}
 \sum_{t\in\mathcal{I}}
-\log p_\theta(y_t\mid y_{<t},x),
+\log p_\theta(y_t\mid y_{1:t-1},x),
 ~~~
 
-其中 I 是 assistant completion 的有效位置集合。若把 system、user 或 padding 误加入 I，模型会学到复述指令、生成角色标记或预测 padding 的行为。
+其中 I 是 assistant completion 的有效位置集合，要求非空。若把 system、user 或 padding 误加入 I，训练目标就不再是预定的 assistant-only 目标，可能强化复述指令、生成角色标记或预测 padding；全序列监督本身也可以是有意选择的训练目标，不能脱离任务一概判错。
 
 ### Tool calling 和多模态占位符
 
@@ -547,14 +566,14 @@ target  = assistant completion
 
 ### 上下文预算
 
-若模型最大上下文长度为 C，输入 token 数为 T_in，最大生成预算为 T_out，隐藏思考、工具结果或多模态 token 也占用同一预算时，总约束可以写成：
+若模型最大上下文长度为 C，当前输入总 token 数为 T_in，预留的用户可见输出为 T_visible，额外预留的隐藏输出为 T_hidden，且三项互不重叠并共享窗口，总约束可以写成：
 
 ~~~math
-T_{\mathrm{in}}+T_{\mathrm{out}}+T_{\mathrm{hidden}}
+T_{\mathrm{in}}+T_{\mathrm{visible}}+T_{\mathrm{hidden}}
 \le C.
 ~~~
 
-有些服务把 T_hidden 或工具 token 单独计费，有些把它们统一计入窗口；不能只依据产品界面上的一个数字推断具体 API 语义。
+T_in 应包含本次输入中实际计入窗口的历史、工具结果、模板和多模态位置。如果接口的输出上限已经包含可见输出和隐藏输出，就只加这一个总上限，不能再加一次 T_hidden。例如输入 600、可见预留 200、隐藏预留 100，总计 900；若输出预算字段已经为 300，总计仍是 900。未来工具结果进入下一次调用后应重新计算输入账本。窗口占用、输出上限和计费是不同口径，具体 API 的计数规则须以其文档为准。
 
 ### 截断策略
 
@@ -701,11 +720,15 @@ def audit_record(
     if any(isinstance(token_id, bool) or not isinstance(token_id, int)
            or token_id < 0 for token_id in token_ids):
         raise ValueError("token_ids must contain non-negative integers")
-    if any(mask not in (0, 1) for mask in attention_mask):
-        raise ValueError("attention_mask must contain only 0 or 1")
+    if any(isinstance(mask, bool) or not isinstance(mask, int)
+           or mask not in (0, 1) for mask in attention_mask):
+        raise ValueError("attention_mask must contain integer 0 or 1")
     if any(isinstance(label, bool) or not isinstance(label, int)
-           or label < -100 for label in labels):
-        raise ValueError("labels must contain integers >= -100")
+           or (label != -100 and label < 0) for label in labels):
+        raise ValueError("labels must be -100 or non-negative integers")
+    if any(mask == 0 and label != -100
+           for mask, label in zip(attention_mask, labels)):
+        raise ValueError("padding positions must have ignored labels")
     if any(isinstance(token_id, bool) or not isinstance(token_id, int)
            or token_id < 0 for token_id in special_ids):
         raise ValueError("special_ids must contain non-negative integers")
@@ -736,7 +759,7 @@ print(
 )
 ~~~
 
-这个审计结构不判断模型回答质量，只确保编码、mask 和 label 的长度契约一致。真实项目还应保存 tokenizer 文件哈希、版本、模板版本和 decode 回环结果。
+这个审计结构检查长度、整数值域和 padding 标签，不判断模型回答质量，也不验证 id 是否小于模型词表大小。这里固定 ignore_index=-100；负数 -99 不是合法类别。`valid_labels` 是尚未 causal shift 的数量，不等于最终损失分母；空序列或 shift 后没有目标仍需要训练器拒绝。真实项目还应保存 tokenizer 文件哈希、版本、模板版本和 decode 回环结果。
 
 ## 3.11 Tokenization 对训练目标和评估的影响
 
@@ -748,20 +771,40 @@ print(
 L_{\mathrm{token}}
 =-\frac{1}{N}
 \sum_{i=1}^{N}
-\log p_\theta(y_i\mid y_{<i}),
+\log p_\theta(y_i\mid y_{1:i-1}),
 ~~~
 
-N 是有效 label token 数。相同的字符数据，如果 tokenizer 切成更多 token，就会产生更多预测位置和更长的依赖链。训练 token 数不是“文本量”的唯一表达，比较训练预算时必须说明 tokenizer。
+这里 N 是实际参与损失的预测目标数，必须大于零。采用内部 causal shift 的常见训练接口中，输入和 labels 对齐存储，但实际用 logits 的前 T-1 个位置预测 labels 的后 T-1 个位置；分母应在 shift、padding 和 prompt mask 后统计。相同的字符数据，如果 tokenizer 切成更多 token，就会产生更多预测位置和更长的依赖链。训练 token 数不是“文本量”的唯一表达，比较训练预算时必须说明 tokenizer。
 
 ### Perplexity 的 tokenizer 依赖
 
 若平均 token loss 为 L，perplexity 可以写为：
 
 ~~~math
-\operatorname{PPL}=\exp(L)
+\mathrm{PPL}=\exp(L)
 ~~~
 
-但不同 tokenizer 的 token 单位不同，因此不能直接比较两个 tokenizer 下的 PPL，除非明确接受这种差异或换算到共同的字符、字节或词级单位。对跨语言比较尤其要谨慎。
+但不同 tokenizer 的 token 单位不同，因此不同切分下的 token PPL 不能直接当作文本建模质量排名。可以在同一原始语料、相同边界与规范化约定下，将各自累计负对数似然除以共同的字节数，得到 bits per byte：
+
+~~~math
+\mathrm{BPB}=\frac{\mathrm{NLL}_{\mathrm{total}}}{N_{\mathrm{bytes}}\ln 2}.
+~~~
+
+这只是共同单位的编码路径评分；若规范化丢失信息、边界覆盖不一致或多种 token 序列可解码为同一文本，还不能把它无条件视为严格可比的原始字节概率。下面用构造数据说明：总 NLL 相同，token 数不同，token PPL 就不同。
+
+~~~python
+import math
+
+
+total_nll = 4.0
+byte_count = 8
+for token_count in (2, 4):
+    ppl = math.exp(total_nll / token_count)
+    bpb = total_nll / (byte_count * math.log(2))
+    print(round(ppl, 6), round(bpb, 6))
+~~~
+
+两行 PPL 为 7.389056 和 2.718282，但 BPB 都为 0.721348。这些数字不来自真实 tokenizer 或模型。即使 tokenizer 相同，[固定窗口 PPL 评估](https://huggingface.co/docs/transformers/main/en/perplexity)也要固定上下文长度、stride、文档边界和目标计数，不能把可用历史更多造成的改善归因为模型改变。
 
 ### 评估样本的污染
 
@@ -813,3 +856,5 @@ tokenization 的核心不是记住 BPE、WordPiece 和 SentencePiece 的名词�
 ~~~
 
 当模型输出异常时，问题可能不在 Transformer 参数，而在 tokenizer 版本、special token、模板、padding、label mask 或 decode 边界。只有把这些中间产物保存下来，才能区分模型能力问题、数据协议问题和服务实现问题。下一章将进入 Transformer 架构，继续追踪 token embedding 之后的张量如何在 attention 和 MLP 中流动。
+
+配套验收见[Tokenization 覆盖与计数练习](../../EXERCISES.md#tokenization-百科覆盖与计数契约)，下一章见[Transformer 架构](04-transformer架构.md)。

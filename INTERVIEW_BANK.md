@@ -271,7 +271,7 @@
 
 62. PPO clipped objective 在 RLHF 里解决什么问题？
    考察点：新旧 policy ratio、clip、训练稳定性。
-   回答框架：PPO 用 `pi_new / pi_old` 衡量更新幅度，并把 ratio clip 到 `1 +/- epsilon` 附近，避免一次更新让语言模型行为大幅漂移。
+   回答框架：PPO-Clip 比较 `rho*A` 与 `clip(rho,1-epsilon,1+epsilon)*A` 并取较小值，抑制继续朝有利方向大幅改变概率的收益；old policy 是生成 rollout 的策略。裁剪代理目标不等于把所有实际 ratio 或 KL 硬限制在区间内，仍需监控 KL、优势估计与策略漂移。
 
 63. RLHF 为什么需要 KL penalty？
    考察点：reference model、reward hacking、语言能力保持、beta。
@@ -561,7 +561,7 @@
 
 54. 梯度累积时为什么要用 DDP 的 `no_sync()`？
     考察点：micro-step、同步频率、通信浪费、最后一步同步。
-    回答框架：如果每个 micro-step 都同步梯度，通信次数会放大。`no_sync()` 可以让前几个 accumulation step 只本地累积梯度，最后一个 micro-step 再同步并 optimizer step，从而减少通信。
+    回答框架：如果每个 micro-step 都同步梯度，通信次数会放大。`no_sync()` 应包含对应的 forward 和 backward，让非最后的 micro-step 只本地累积；最后一个恢复同步再更新。通信次数减少不改变归一化要求，变长 micro-batch 或不同 rank 的有效 token 不等时，不能只平均各自的 mean loss。
 
 55. DDP 和 FSDP 的区别是什么？
     考察点：完整模型副本、参数 / 梯度 / optimizer state 分片、显存。
@@ -1054,7 +1054,7 @@
 
 20B. SimPO 和 DPO / KTO / ORPO 的核心区别是什么？
     考察点：reference-free、平均 log probability、margin、长度偏置、偏好数据质量、KL 锚点缺失。
-    回答框架：先把 DPO 讲成相对 reference 的 chosen/rejected log-ratio 优化，再说明 SimPO 直接用 policy 对回答的平均 log probability 差构造偏好 margin，不需要 reference model，工程链路更轻。优点是训练和部署成本低、避免 reference 同步；风险是少了显式分布锚点，对 beta、margin、长度归一、数据噪声和能力回归更敏感。KTO 更强调从好/坏单样本效用学习，ORPO 把 SFT 与偏好 odds ratio 结合；面试中要落到适用场景和回归评估，而不是只背公式。
+    回答框架：先把 DPO 讲成相对 reference 的 chosen/rejected log-ratio 优化，再说明 SimPO 直接用 policy 对回答的平均 log probability 差构造偏好 margin，不需要 reference model，可减少训练时的 reference 存储和计算；实际成本仍取决于长度、batch 和重算，不能据此推断部署成本更低，因为 DPO 推理也通常只用 policy。风险是少了显式分布锚点，对 beta、margin、长度归一、数据噪声和能力回归更敏感。KTO 更强调从好/坏单样本的有界价值学习，仍使用 reference；ORPO 把 SFT 与偏好 odds ratio 结合。面试中应落到数据格式、具体目标和回归评估，不能把这些方法都称为 reference-free。参见[第四册后训练与对齐](book-04-llm-encyclopedia/chapters/07-后训练与对齐.md)。
 
 20C. RLVR 和 DeepSeek-R1 为什么不能简单等同于 DPO？
     考察点：verifiable reward、数学/代码/可执行任务、rollout、GRPO/PPO 类更新、冷启动、蒸馏、偏好监督边界。
