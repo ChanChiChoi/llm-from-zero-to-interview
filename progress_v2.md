@@ -7,13 +7,33 @@
 - `scope`：从第一册第一份正文开始，按书系顺序覆盖 24 册及 `book-llm-engineer` 补充篇；每份正文逐行复读，并检查必要的简介、目录、索引和配套资料。
 - `basis`：当前版 `WRITING_SPEC.md`、`plan.md` 中常态化全书精修要求及仓库 `AGENTS.md`。
 - `acceptance`：按内容类型审查问题和动机、连续机制解释、公式/状态、数值例子/代码、工程边界、失败模式、评测、证据范围、链接、导航和按需配套同步；全文复读并验证声明范围内的代码和公式；未完成项明确保留。
-- `status`：进行中。第一册五份正文、第二册全部十份正文、第三册全部十一份正文以及第四册第一至十七份正文已有本轮验收记录。
-- `next`：继续第四册第十八份正文 `book-04-llm-encyclopedia/chapters/18-语音大模型.md`，按百科类型检查定义、机制、例子/反例及专题入口。
+- `status`：进行中。第一册五份正文、第二册全部十份正文、第三册全部十一份正文以及第四册第一至十八份正文（全部 18 份）已有本轮验收记录。第四册全部正文已完成整章精修验收。
+- `next`：第四册全部 19 个章节文件核验完毕（18 份正文整章验收 + 第 19 份 frontier 更新条目格式/链接核验），整册目录与导航一致。主线下一步：进入第五册第一份正文，按 `plan.md` 4.2/4.4 继续全书精修。
 - `open_risks`：全书量大，按章节推进并逐批记录；未实际核验的代码、公式或配套同步不得标为完成。代码验证以可执行且输出能说明机制为准；优先使用 `.tmp/` 下被 Git 忽略的 CPU-only PyTorch 环境，不安装 CUDA 库，也不为性能或 100% 复现扩大依赖。已有章节中的 CUDA、GPU 性能、多节点、真实模型/语料和生产 serving 边界仍按各章记录。PDF 构建 dry-run 因环境缺少 Pandoc 未能执行。
 
 维护者要求本轮从头开始，不沿用此前半成品记录作为覆盖证据。旧的 `progress_v2.md` 记录已清空重建；`progress_v3.md` 保持原样。维护者进一步明确：代码用于展示和解释知识，只要代码经检查可执行且输出有助于说明问题即可；可使用 PyTorch CPU，不安装 CUDA 库，也不要求读者逐一进行完整复现。联网资料使用指定代理 `http://10.24.27.134:7890`。
 
 ## 本轮执行记录
+
+### 第四册收尾：第 19 份正文与整册导航核对（2026-10-23）
+
+- `scope`：检查第四册第 19 份正文 `chapters/19-frontier-architecture-updates.md`（frontier 模型更新条目，progress_v3 轨道）的格式与链接完整性；核对整册目录与 19 个章节文件的映射。
+- `changes`：第 19 份正文无需修改（无 `$$`、无 `\operatorname`、backtick 围栏闭合）；`progress_v2.md` 修正 1 处笔误（voice clong→cloning）。
+- `evidence`：23 个相对链接（book-06/16/17/21 各专题章与 `research/model-update-2026-09/*` 笔记及审计脚本）全部存在；第四册目录第 19 条映射正确。
+- `code_status`/`formula_status`/`sync_status`：该文件无代码块与 math 围栏，条目边界与"尚未确认"声明完整，属 progress_v3 轨道维护内容，本轮只做格式与链接核验，不重复登记模型事实。
+- `open_risks`：frontier 条目的模型事实核验归属 progress_v3 轨道与 `research/model-update-2026-09/`，其快照随时间失效属预期。
+- `status`：第四册 19 个章节文件全部核验完毕，整册目录与导航一致。第四册精修收官；主线下一步按 `plan.md` 进入下一册（第五册第一份正文）。
+
+### 第四册第十八份正文：`book-04-llm-encyclopedia/chapters/18-语音大模型.md`（2026-10-23）
+
+- `scope`：全文复读 18.0—18.23，覆盖 waveform/Mel/speech encoder、ASR 与 WER/CER/关键字段、Whisper 路线、speech-to-text 链路、speech token 四类表示、neural codec 三角关系、TTS 质量维度与 RTF、prosody、speaker embedding 与 voice cloning 授权、speech-to-speech、streaming ASR、VAD/endpointing、turn-taking 与 barge-in 状态机、端到端语音模型、Voice Agent 权限与失败链、系统评估、安全与来源、工程账本；按百科类型验收，未修改长期规范。
+- `changes`：修正 3 处 `\operatorname{...}` 为 `\mathrm{...}`；其余无需语义修改。
+- `evidence`：9 个唯一外链，6 篇新 arXiv 题名经 abs 页面核对全部一致，其余沿用前轮证据。详见 `research/encyclopedia-speech-llm-review-2026-10-23.md`。
+- `code_status`：1 个 Python 块（语音账本）独立执行通过；first_audio 630ms、字段准确率 0.5、4,800 codec token 复算一致。
+- `formula_status`：13 个 math 围栏花括号平衡、无禁用宏；WER/CER 分母与可大于 1 的说明、RTF 定义域、T_response 并行语义、P_task 条件分母、C_success 定义域核对通过；`git diff --check` 通过。
+- `sync_status`：`PAPERS.md` 语音区已有主要入口；术语表、练习、题库已覆盖语音主题；第四册目录映射正确。
+- `open_risks`：未运行真实语音系统；P_task/T_response 为教学分解（正文已声明）；论文题名核对不等于全文复核；PDF 仍受 Pandoc 缺失限制。
+- `status`：本章声明范围内精修验收完成。至此第四册 18 份正文全部完成整章精修验收；主线进入第四册收尾核对（目录/导航/剩余文件），随后按计划进入下一册。
 
 ### 第四册第十七份正文：`book-04-llm-encyclopedia/chapters/17-图像生成与视频生成.md`（2026-10-23）
 
