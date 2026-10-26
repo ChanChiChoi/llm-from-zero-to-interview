@@ -250,7 +250,7 @@ C_{\mathrm{label}}
 =\sum_i\sum_j(1-a_{ij})c_{ij},
 ~~~
 
-其中 c_ij 是该步骤人工切分、判断、复核和仲裁的成本。提高自动覆盖率不等于提高标签质量，自动规则仍需要抽样审计。
+其中 `a_ij` 必须是 0/1 覆盖标记，`c_ij` 是该步骤人工切分、判断、复核和仲裁的有限非负成本；步骤数为零的样本不进入这个分母，并应单独报告覆盖率。提高自动覆盖率不等于提高标签质量，自动规则仍需要抽样审计。
 
 ### PRM 剪枝
 
@@ -474,6 +474,13 @@ from numbers import Integral
 
 
 def _validate_pairs(base, candidate):
+    if isinstance(base, (str, bytes)) or isinstance(candidate, (str, bytes)):
+        raise ValueError("paired inputs must be numeric sequences")
+    try:
+        base = tuple(base)
+        candidate = tuple(candidate)
+    except TypeError as exc:
+        raise ValueError("paired inputs must be numeric sequences") from exc
     if len(base) != len(candidate) or not base:
         raise ValueError("paired inputs must have equal non-zero length")
     if any(
@@ -527,6 +534,12 @@ except ValueError:
     print("invalid bootstrap rounds rejected")
 else:
     raise AssertionError("invalid bootstrap rounds was accepted")
+try:
+    bootstrap_lift(None, [1, 1], rounds=20)
+except ValueError:
+    print("invalid paired input rejected")
+else:
+    raise AssertionError("invalid paired input was accepted")
 print("lift=", lift, "interval=", interval)
 ~~~
 

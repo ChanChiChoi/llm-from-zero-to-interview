@@ -125,6 +125,7 @@ python3 scripts/build_pdfs.py --dry-run
 | [`KNOWLEDGE_GRAPH.md`](KNOWLEDGE_GRAPH.md) | 大模型知识图谱，帮助理解概念依赖关系。 |
 | [`PROJECTS.md`](PROJECTS.md) | 项目路线与实战项目规划，用于形成简历作品集。 |
 | [`PAPERS.md`](PAPERS.md) | 论文阅读路线，帮助建立研究视角。 |
+| [`信息源收录.md`](信息源收录.md) | 论文检索、LLM 技术博客、GitHub 教程与实现仓库、模型厂商官方文档入口；作为资料发现导航，不替代具体证据。 |
 | [`INTERVIEW_BANK.md`](INTERVIEW_BANK.md) | 集中面试题库，用于自测和模拟面试。 |
 | [`EXERCISES.md`](EXERCISES.md) | 练习与阶段验收体系，检查是否真正掌握。 |
 | [`GLOSSARY_EN_ZH.md`](GLOSSARY_EN_ZH.md) | 中英文术语表，方便读论文和英文面试。 |
@@ -148,6 +149,7 @@ python3 scripts/build_pdfs.py --dry-run
 ├── EXERCISES.md
 ├── PROJECTS.md
 ├── PAPERS.md
+├── 信息源收录.md
 ├── GLOSSARY_EN_ZH.md
 ├── AGENTS.md
 ├── WRITING_SPEC.md
