@@ -93,6 +93,13 @@
 85. 给定 `p=0.5`、MDE `0.05`、`z_alpha=1.96`、`z_power=0.84`，估算双比例实验每组样本量。
 86. 给定 5 个 p-value，分别用 Bonferroni 和 Benjamini-Hochberg 判断哪些发现保留。
 87. 设计一个 LLM A/B test 门禁，至少包含主指标、置信区间、样本量、latency、cost、safety regression 和分层结果。
+87A. Treatment 组随机开放了模型建议，但 70% 的用户实际看到建议、50% 采纳；control 组主指标成功率为 54%，treatment ITT 成功率为 60%。计算 ITT，并解释为什么不能只比较采纳者和 control；若要估计实际使用效果，随机开放权限作为工具变量还需要哪些假设？
+87B. 对照 QJE 的客服助手分阶段部署、三家公司的代码助手随机试验、肯尼亚基层医疗的 LLM 集群随机试验。分别列出随机/分批单位、treatment、主要结局、结果窗口、最重要的外推边界，并说明它们回答的不是同一个“LLM 提升率”。
+87C. 为一项允许中途查看结果的 LLM 上线实验设计停止规则：区分事故触发回滚与统计停止，写出为何普通固定终点 p 值不能支持任意 optional stopping，并说明多主指标如何控制错误发现。
+87D. 两个模型在同一批题上出现 `b=1` 道“旧对新错”和 `c=8` 道“旧错新对”。计算连续性校正 McNemar 统计量与双侧精确二项 p 值；说明为什么精确 p 值不是新模型更好的后验概率，并列出仍需检查的抽样单位与 holdout 条件。
+87E. 一次评估同时比较 20 个语言/任务切片，切片共享题目和用户。说明 Bonferroni、Holm、BH 与 BY 各控制什么错误；若目标是少数预设安全门禁与大量探索性切片，分别如何安排检验家族、校正和独立复验？
+87F. 一个 RAG 系统在 50 条已失败 trace 中，向模型提供核验过的目标文档后有 31 条答对。写出至少三个竞争根因假设，设计只改变单一组件的复现实验；说明 31/50 能支持什么、不能支持什么，并给出未见公司/年份的 holdout 和需要保留的中间证据字段。
+87G. 对照 CheckList、The ML Test Score、HELM、EvalPlus 和 Agent trace grading：逐项说明它们补的是行为覆盖、系统工程、横向比较、程序 oracle 还是工作流可观测性；为一个 Agentic RAG 产品选择组合方案，并写出每种方法不能证明的结论。
 88. 设计一个最小评估统计审计 demo，输出 accuracy、paired diff、bootstrap CI、McNemar p-value、sample size、multiple comparison 和上线决策。
 89. 给第十三册 9 类数学主题建立 required topic set，并列出每类至少 2 个必须会写的公式。
 90. 用 0 依赖 Python 写一个公式审计 demo，验证 CE/KL 分解、softmax gradient、LoRA 参数量、DPO loss 和 paired eval lift。
@@ -180,6 +187,13 @@
 171. 录一段 3 分钟 PyTorch 工程面试回答，按 mechanism、shape/formula、pitfall、debug path、demo evidence 五项自评。
 172. 选择一个最薄弱的 PyTorch 工程主题，补一个最小 demo，并说明它如何支持面试回答。
 173. 写一个 0 依赖 Python 训练稳定性审计 demo，输入 toy step 日志，输出 first bad step、loss spike steps、non-finite steps、grad explosion steps、AMP overflow steps、有效 label token 异常、LR resume jump、rank loss skew、failed gates 和 gate pass 结论。
+174. 对照 Molybog 的 Adam instability 与 adaptive-preconditioner decoupling 研究，画出各自的因果链、观测量和证据边界，并设计一次固定 checkpoint 的反事实重放。
+175. 为 global norm clipping、降低 Adam β₂、SPAM 和 GradientStabilizer 设计同口径对照；报告机制、状态改动、额外超参、吞吐、目标质量和失败条件。
+176. 用逐层 activation RMS、gradient RMS、残差流 RMS 和 update/parameter ratio 比较 Post-LN、Pre-LN、DeepNorm、Peri-LN 的训练信号；说明为何架构改动应从初始化开始验证。
+177. 为两个 checkpoint 冻结完整 evaluation contract，至少记录 tokenizer/template、task/split、prompt/few-shot、generation/scorer 和 harness revision；对照一次只变 template 的小规模复测，保存逐样本输出并归因分数变化。
+178. 构造两个模型在同一批 100 道题上的 paired outcomes，统计两边都对/都错和各自独有正确的样本数；说明为何独立准确率看不出 discordant pairs，并比较 McNemar、paired bootstrap 与多训练 seed 分别估计什么。
+179. 分别为可访问训练语料的开源模型和不可访问语料的闭源模型设计 benchmark contamination 审计；组合 overlap scan、新写/隐藏留出集、样本输出检查以及 Oren 顺序似然检验或 ConStat 泛化差距，列出访问条件、误报与漏报边界。
+180. 用固定 loss cap 和权重实现多指标 checkpoint 选择 demo：先应用 stability、resume completeness、safety 与 domain 硬门槛，再归一化 validation、benchmark、safety 和 regression 分量；测试无合格候选、权重和不为 1、配置字段缺失及 benchmark 键不一致。
 
 ## 阶段 2：Transformer 验收
 
@@ -307,6 +321,9 @@
 43A. 写一个 0 依赖 Python SFT / 对齐训练事故审计 demo，输入 toy SFT 样本的 role token 数和 label 数、base / after 各能力分数、误拒 / 漏拒案例、chosen/rejected 偏好 pair、reward 样本、DPO policy / reference log probability 和工具 schema，输出 assistant mask coverage、prompt loss leak、PAD loss leak、EOS coverage、capability regression、over-refusal rate、unsafe leak rate、preference margin、reward-human gap、reward length bias、DPO negative margins、tool schema drift、failed gates 和 gate pass 结论。
 43B. 比较 DPO、KTO、ORPO 和 SimPO，要求写出每种方法是否需要 reference model、是否需要成对偏好、最容易出现的偏差和上线前必须看的回归指标。
 43C. 设计一个 RLVR / DeepSeek-R1 风格 reasoning 后训练审计表，字段包含任务是否可验证、reward 来源、rollout 数、采样策略、错误答案处理、过程质量、人审切片、安全回归、蒸馏目标和污染标记。
+43D. 同一 prompt 的 reward 为 [1, 0]，response 长度为 20 和 100，generation budget 为 100。分别计算 group-standardized GRPO advantage 与只中心化的 DrGRPO advantage；对照逐 response 长度 mean 和固定预算分母时两条回答的总 token 权重。再构造全同 reward group，说明 DrGRPO 为什么仍没有相对信号，DAPO dynamic sampling 和 DCPO 的历史 SAS 分别改变什么。
+43E. 设计 GRPO、DAPO、DrGRPO、GSPO、DCPO 的同条件消融表，固定 base checkpoint、题目/模板、verifier、reward、训练 token、rollout 数、最大长度、采样参数和硬件。至少报告正确率及 Avg@1/Avg@32、长度切片、非零 advantage/RUR、token clipping rate、保留/过滤 group、wall-clock、单位成功成本、通用能力和安全回归；解释哪些指标仍然不可互换。
+43F. 为一个 RLVR 代码修复任务设计 verifier 红队评估：给出已知正确/错误 patch、可被变形的输入、与规格冲突的测试、可注入的 mutation 和独立 artifact grader。比较固定样例通过率、变形一致率、错误 mutation 检出率和独立正确率；再在相同底模、数据、训练预算与随机种子下增加随机/打乱 reward 对照，说明哪些结果可以归因于 verifier，哪些只能归因于训练流程或底模先验。
 44. 分析一次训练异常。
 45. 用自己的话解释 AI Safety 和 Alignment 的区别，要求覆盖目标、风险、训练、评估和部署。
 46. 给 8 条 toy 请求设计 risk taxonomy，至少包含 harmful content、privacy、jailbreak、prompt injection、tool misuse、high risk domain 和 benign help。
@@ -318,6 +335,11 @@
 52. 比较 outer alignment 和 inner alignment，要求各举 2 个 LLM 场景例子。
 53. 设计一个 goal misgeneralization 评估，让训练分布中的两个目标在测试分布中分离。
 54. 列出 5 个 specification gaming 例子，至少覆盖 reward model、benchmark、judge、引用和安全关键词。
+54A. 对照 HarmBench、StrongREJECT、JailbreakBench：分别说明它们怎样构造行为、怎样判定回答、怎样固定攻击成本，以及各自没有证明什么。
+54B. 为一个只读日历摘要 Agent 设计抽象的间接注入评估，分别定义 benign utility、utility under attack、targeted ASR、工具状态断言和零攻击样本时的报告状态；不要写可复用攻击载荷。
+54C. 将四种隐私事件分别归入训练数据抽取、成员推断、属性推断或应用权限越权：说明攻击者目标、可观察证据、适用指标和不能推出的结论。
+54D. 某固定测试集做了 100 次独立有效尝试，观察到 0 次失败。用 95% 单侧零事件上界计算失败率上界；再讨论样本相关或没有有效尝试时为什么不能照搬该结果。
+54E. 为一条安全策略设计一个 MFT、一个语义保持的 INV 和一个 DIR。说明由谁确认语义关系，并分别检查 clean correctness、perturbed correctness 和 action consistency。
 55. 写一个 0 依赖 Python demo，计算 outer mismatch、behavior mismatch、proxy follow、Goodhart gap、goal misgeneralization 和 alignment gate。
 56. 用 3 分钟回答 deceptive alignment，要求说明它是潜在研究风险、需要什么证据、为什么不能当作当前事实断言。
 57. 用自己的话解释 Scalable Oversight，要求覆盖人类监督瓶颈、AI feedback、verifier、人审和上线门禁。
@@ -334,6 +356,45 @@
 68. 用 3 分钟回答“为什么 KL penalty 有用但不能根治 reward hacking”。
 69. 写一个 0 依赖 Python tokenizer / 格式事故审计 demo，输入一条 system/user/assistant 多轮样本，输出 token ids、decode 前缀、assistant-only label 覆盖率、prompt loss 泄漏率、PAD loss 泄漏率、EOS 是否参与 label、训练 / 推理 template 是否一致、截断是否丢关键边界、多模态 placeholder 是否匹配和 gate pass 结论。
 
+### 训练成本：最优点、扩展效率与能耗账本
+
+配套正文：[第五册第十三章](book-05-llm-training/chapters/13-训练成本与资源规划.md)。
+
+1. 对照 Kaplan、Chinchilla 和 inference-aware scaling 的优化目标、代表性方法和限制；给定服务请求量，列出选择模型规模前仍需采集的质量、长度、硬件和价格变量。
+2. 某训练作业需要 `1T` 有效 token，deadline 60 天、非训练时间 20%，单卡长期吞吐 4,000 token/s，128 卡扩展效率 0.55。复算所需吞吐、集群吞吐和剩余裕量；再说明将 GPU 数翻倍时应实测哪些通信与收敛指标。
+3. 计算 0.4 kW 平均设备功率、100,000 GPU-hours、PUE 1.2、电网碳强度 0.5 kgCO₂e/kWh 的设施用电与运行排放；分别列出 TDP、设施电表、PUE、电网因子和 embodied carbon 口径。
+4. 从一个大规模训练案例中分别记录 MFU/吞吐、长程故障次数、自动恢复比例和有效时间率；说明为何单步 benchmark 不足以证明数周训练的可用率。
+5. 比较 1 小时与 4 小时 checkpoint 间隔的平均丢失窗口、写入开销和恢复窗口；列出要从目标集群测量的保存时长、带宽、故障分布与数据游标状态。
+
+### On-Policy Distillation：目标、时间信用与行业证据
+
+配套正文：[第五册第十七章](book-05-llm-training/chapters/17-on-policy-distillation.md)。
+
+1. 令学生分布为 `p_S=(0.5,0.5)`、教师分布为 `p_T=(0.8,0.2)`。计算两个动作的 `log p_T-log p_S`、学生期望、reverse KL 以及以动作无关 baseline 校正后的优势；说明为什么逐样本 `-r` 不能直接当监督标签，且教师偏好不等于任务真值。
+2. 对照 MiniLLM 与 GKD：画出状态来源、监督目标和梯度路径，指出哪个方法显式处理未来 token 对早期动作的信用，哪个方法把学生 rollout 比例与条件 divergence 分开；列出一项公平比较必须固定的变量。
+3. 读 Qwen3 Technical Report 表 21，计算 RL 与 OPD 的 AIME'24、AIME'25、LiveCodeBench v5 分差，以及 GPU-hours 比例。分别写一条“数据直接支持的结论”和一条“不能从该表推出的结论”，再设计多 seed 的同起点复现协议。
+4. 为 REOPOLD、EOPD、vOPD、RG-OPD、MOPD 设计故障到机制诊断表：每个方法对应一个待解决症状、改变的数学/采样环节、作者报告的证据、可能的新偏差或成本，以及一个能证伪该方法有效性的消融。
+5. 依据 TRL DistillationTrainer/GKDTrainer 动态文档做版本化实现审计，记录 rollout 来源、`lmbda`/`beta` 的代码语义、loss 方向与 reduction、teacher/student tokenizer、生成和 teacher compute、tool token mask。没有实际运行时不得填造性能数值。
+
+### 训练系统综合设计与故障诊断
+
+配套正文：[第五册第十四章](book-05-llm-training/chapters/14-训练系统综合设计与故障诊断.md)。
+
+1. 设计一个 7B 训练账本，明确目标、数据版本、有效 token、模型、优化器、并行拓扑、评测协议、风险状态和证据。让一个配置故意缺失评估或污染状态，说明审计为什么应失败。
+2. 对照默认 mixture 与 DoReMi 风格 proxy mixture。固定总 token、模型和评测；记录域权重变化、代理成本、逐域 loss、下游任务和误差范围，并说明 proxy 权重为何不能代替许可、质量和污染门禁。
+3. 为一条 loss spike 设计可证伪排查：从异常前 checkpoint 重放固定 batch，区分数据/mask、数值/kernel、optimizer state 和恢复游标；分别列出能支持与不能支持的结论。
+4. 对一个 benchmark 同时做语料近似匹配、PaCoST 类改写题置信度检查和一组新鲜隐藏题。分开记录覆盖率、候选命中、人工确认、行为信号和新题结果，解释为什么它们不能折成一个污染率。
+
+### 领域专家 SFT 与 RL：适配信号、行业证据与评估
+
+配套正文：[第五册第十五章](book-05-llm-training/chapters/15-领域专家sft与rl.md)。
+
+1. 对术语 loss 高、答案格式错、财报版本过期、专家偏好不一致、数学答案错误和越权工具调用六种故障，分别选择 continued pretraining、RAG、SFT、偏好优化、RLVR 或独立 policy；说明为什么其余信号不能直接解决该故障。
+2. 对照 FinGPT 的 LoRA/市场弱标签、TIMER 的时间戳指令 SFT 和 DeepSeekMath 的可验证奖励 RL。逐项写出研究问题、监督信号、指标、改善证据、混杂/失败条件，并说明哪些论文结果不能横向比较。
+3. 为纵向医疗记录设计 Recent-Events、Timeline-Extremes 和 Full-Timeline 三种训练切分；固定底模、样本数与 token budget，按病人隔离训练和测试，报告 correctness、completeness、关键事件召回、时间窗错误和亚群指标。
+4. 评审一条“新闻后股价上涨，因此新闻情感为正”的标签链。画出新闻、市场事件、价格窗口、交易成本和输出标签之间可能的混杂，设计时间切分、行业/市场基线、负控制以及专家标签对照。
+5. 依据 FinBen 或 MedAlign 做一页评测计划：区分基准覆盖、模型能力、训练收益和部署安全；列出任务分桶、来源版本、时间/实体泄漏检查、自动 verifier、专家抽检及未覆盖项。
+
 ## 阶段 4：部署与系统验收
 
 1. 解释 prefill/decode。
@@ -343,7 +404,9 @@
 5. 用自己的话解释 greedy decoding 和 sampling 的区别。
 6. 手算一个 temperature 降低后分布变尖锐的例子。
 7. 给定 token 概率，分别选出 top-k 和 top-p 候选集合。
+7A. 对 `p=(0.40,0.30,0.20,0.10)` 手算 entropy 和 locally typical 的 surprisal 距离顺序，再比较 `top-p=0.40`、`typical_p=0.40`、`min_p=0.30` 保留的 token；解释为何候选集合不同本身不能证明输出质量高低。
 8. 为事实问答、代码生成、创意写作分别设计 decoding 参数。
+8A. 令 target `p=(0.50,0.30,0.20)`、draft `q=(0.20,0.50,0.30)`，逐项计算接受概率和拒绝后的 residual distribution，并验证最终 A/B/C 边际概率；说明 exact distribution guarantee 与同 seed 重放的区别，以及 Medusa typical acceptance 为什么不能直接称为严格分布保持。
 9. 解释为什么 repetition penalty 过强可能伤害代码生成。
 10. 用自己的话解释 KV Cache 为什么能加速推理。
 11. 比较 prefill 和 decode 阶段的瓶颈。
@@ -366,6 +429,8 @@
 28. 比较 block size 过大和过小分别会带来什么问题。
 29. 说明 PagedAttention 为什么有助于 Continuous Batching。
 29A. 比较 PagedAttention、vAttention 和普通连续 KV 分配，要求从显存碎片、动态加入退出、系统复杂度、kernel 适配、可观测性和故障边界六个角度回答。
+29B. 用 20 个 token 和 8 个 KV 槽作教学例子，对照最近窗口、H₂O 的 heavy hitters + recent tokens、StreamingLLM 的 attention sinks + recent window 各自会保留哪些 token；说明这些有损 eviction 与完整 KV offload、KV 量化的差别，并设计能发现中段证据丢失的评测切片。
+29C. 用 KIVI 教学参数 `G=2`、`R=4` 手推 6 个 token 后和第 7 个 token 到来后的 K/V 量化状态；解释 K per-channel 与 V per-token 的选择理由、scale/zero-point/residual 对实际显存的影响，以及论文 cache 量化算法和 runtime FP8 配置为什么不能视为同一方案。
 30. 写一个 0 依赖 Python 推理性能事故审计 demo，输入 toy 请求 trace，输出 P95 TTFT、P95 TPOT、P99 E2E、P95 queue、KV pressure、cache hit rate、prompt cost drift、错误 / 取消率、失败门禁和 gate pass。
 31. 给定一组请求日志，区分 TTFT regression 和 TPOT regression 的根因，并说明哪些证据能排除 GPU kernel 本身是瓶颈。
 32. 设计一个 prompt cost drift 仪表盘，至少拆分 system prompt、RAG chunk、tool schema、多轮历史、输入 token、prefill 时间、KV Cache 和单位成功任务成本。
@@ -420,6 +485,11 @@
 78. 设计一个 LLM rate limit 方案，覆盖 request、input token、output token 和并发。
 79. 设计一个 LLM serving 监控 dashboard，包含 P50/P95/P99、tokens/s、KV blocks、error rate。
 80. 用系统设计面试方式回答“如何设计一个 ChatGPT 类推理服务”。
+80A. 对照 Orca、PagedAttention/vLLM、Sarathi-Serve、SGLang 和 vAttention：分别写出它们针对的系统瓶颈、机制、作者报告的模型/硬件/指标、主要限制及后来者改进方向；明确为什么论文中的 36.9×、2–4×、2.6×、6.4× 和 1.23×不能组成一张横向性能排行榜。
+80B. 为同一模型设计两个引擎压测：一个固定并发闭环，一个固定 RPS 开环；分别控制请求长度、burstiness、prefix cache 冷热和重复 prompt。定义 TTFT、TPOT、ITL、E2E 和满足质量/SLO 的 goodput，并说明哪个结果能回答容量、交互延迟和过载问题。
+80C. 比较 Orca、FastServe、Sarathi-Serve 和 DistServe：把它们分别映射到 iteration 级重排、长请求抢占、prefill 分块、prefill/decode 资源隔离；针对每种方法写出问题、核心状态、资源代价、失败边界和一项可以证伪其收益的 trace/benchmark。
+80D. 单服务台的平均服务率为 10 req/s。用 Little 定律和 M/M/1 直觉模型分别估算到达率 5 req/s 与 9 req/s 时的平均系统在途请求数和平均停留时间；说明为什么这组数不能直接作为异构 LLM serving 集群容量预测，并设计需要采集的多资源 trace。
+80E. 为共置 + chunked prefill、DistServe、Mooncake、TaiChi 和 SmartGen 设计一组可证伪的 P/D serving 对照：固定模型 revision、真实输入/输出长度和 prefix reuse trace、GPU/网络、并发及 TTFT/TPOT SLO，分别记录 P/D 算力分配、KV payload、transfer overlap、destination KV reservation、TTST、TPOT、goodput 和成本。再解释 SpectrumKV 的 PPL 与这些延迟指标为什么不能合成一个排行榜，并列出会让 P/D 解耦退化为反模式的网络或 workload 条件。
 81. 用 `6 * P * T` 估算 7B 模型训练 1T token 的训练 FLOPs。
 82. 解释为什么真实训练成本不等于 final run 成本。
 83. 设计一个推理成本估算表，包含 input token、output token、KV Cache、GPU 小时和系统 overhead。
@@ -472,6 +542,9 @@
 129A. 用纯 Python 写一个 RAG 事故审计 demo，输入 toy corpus、expected evidence、retrieved、context、claims、ACL 和 staleness，输出 retrieval recall、MRR、context recall / precision、citation accuracy、unsupported claim rate、permission leak rate、stale evidence rate 和 failed gates。
 129B. 构造 5 个 RAG bad case：retrieval miss、context drop、旧版本引用、越权证据进入上下文、证据不足却未拒答，并为每个样本写出 root cause 和修复优先级。
 129C. 设计一个 GraphRAG 小型案例：给 8 段跨文档材料抽取 entity、relation 和 community summary，并比较 GraphRAG、向量 RAG、Agentic RAG 在全局问题、多跳问题和局部事实问题上的适用边界。
+129D. 对照原始固定 top-k RAG、Self-RAG、CRAG、GraphRAG 和 Agentic RAG：为“局部事实漏召回、检索候选不可靠、语料全局总结、多跳证据缺口”分别选方案，列出核心机制、运行/索引成本、失效条件、需要的评估集和一项下一步改进假设。
+129E. 用同一组 query、context、reference 和人工标签比较 RAGAS 与 ARES 风格 judge：记录 faithfulness、context relevance、answer relevance、人工一致率和置信区间；构造一个跨领域分布变化样本，说明自动指标为什么需要重新校准。
+129F. 设计检索投毒红队样本：攻击者可向一个公开知识源写入被优化的恶意文档，正常用户查询触发召回，Agent 持有读邮件与外发工具。分别验证 ingestion provenance、retrieval hit、source taint、least privilege、pre-tool policy、人工确认和 clean-task utility；说明为何仅依赖提示注入分类器无法证明系统安全。
 130. 用 5 分钟回答“如何设计一个企业知识库 RAG 问答系统”。
 131. 画出 embedding retrieval 的离线索引和在线查询流程。
 132. 用自己的话解释双塔检索为什么适合大规模召回。
@@ -623,8 +696,18 @@
 6A. 写一个 0 依赖评估指标事故审计 demo，输入 toy baseline / candidate 评估样本、切片、污染标记、人工偏好、judge 偏好、输出长度、成本、延迟、线上反馈和安全状态，输出 paired lift、bootstrap CI、slice regression、clean eval lift、judge-human agreement、judge length bias、cost ratio、latency delta、failed gates 和 gate pass。
 6B. 做一张模型发布 benchmark 审计表，至少覆盖 MMLU / MMLU-Pro、GPQA、AIME、HLE、HumanEval、LiveCodeBench、SWE-bench、SWE-Lancer、DeepSWE、WebArena、OSWorld、GAIA、tau-bench、BrowseComp、LongBench、RULER、FRAMES、SimpleQA、TruthfulQA、MMMU、MathVista、OCRBench 和 Video-MME；每行写清数据规模、主要能力、评分方式、仿写样例、污染风险、适用场景和不能代表什么。
 6C. 做一次 frontier release radar 复盘：任选一个近期模型发布报告，按架构、预训练、后训练、test-time compute、serving、Agent/tool、多模态、评估、安全治理、产品工程和技术生命周期 11 个维度提取新知识；至少写出 3 个已稳定进入主干的知识点、3 个 P1 观察项、3 个可能被模型能力吸收或淘汰的过渡技术，并说明应同步到哪本书、哪道面试题和哪个术语条目。
+6D. 以客服 RAG 的模型升级为例，分别选用 HELM 式覆盖矩阵、lm-eval 式固定 runner、human/pairwise、ConStat 式改写题检查和线上实验；逐项写清输入对象、能支持的判断、主要限制及下一步补证，说明为什么不能由一张总分表替代整条评估链。
+6E. 为一个新发布的科学问答助手设计 benchmark，比较 GPQA 式专家构题、IFEval 式可程序核验约束、LiveBench 式滚动新题和选项/评分协议扰动审计；说明每种设计验证什么、不能证明什么、需要保存哪些版本字段，以及如何把固定回归集与新鲜题集同时维护。
+6F. 对一组 1,000 个 pairwise 评审（新模型胜 420、旧模型胜 350、平局 230）计算折半平局偏好率、单条得分方差和独立样本近似区间；比较错误地套用 Bernoulli 方差会得到什么；再按目标最小差异规划样本量，并设计 prompt/user 聚类 bootstrap。最后说明 Arena 的自适应对战抽样、Elo/Bradley--Terry 聚合、MT-Bench 专家偏好和 ICLR 2026 最坏情况删点审计各自解决什么问题、不能支持什么结论；再对照 Zhao 等人基于旧 Arena 快照注入随机/定向低质量票的压力测试，说明模拟比例不等于真实坏票率，并列出人评报告需保留的抽样、评审、质量控制和不确定性字段。
+6G. 为同一个客服问答任务比较 G-Eval、Prometheus 2 和 SAJA：分别画出一次样本从输入、评分到汇总的路径，指出它们依赖 token 概率、专用 evaluator 训练数据或人工校准标签中的哪些资源；分别选择标签一致、模型排序、绝对分数校准或自动放行指标。再设计一组仅改变答案事实、仅反转 rubric 的反事实样本，并用独立 holdout 检查候选方法在目标数据上的边界；解释论文 headline score 为什么不能直接横向排名。
+6H. 为同一个评估计划比较 GSM8K、GSM-Symbolic/GSM-NoOp、ORM/PRM/ProcessBench、EvalPlus、LiveCodeBench 和 SWE-bench Verified：每条路线说明测量对象、关键操作、论文或官方报告支持的结论、作者设置中的限制，以及针对该限制的下一步补证。为一项数学任务和一项代码助手任务各选一条主路径，设计固定回归集、滚动新题和独立 holdout 的分工；说明为何这些分数不能合成一个总分。
+6I. 为一个“多页合同 + 图表附件 + 会议录音”的助手设计评估组合。比较 DocVQA/ANLS、MMLongBench-Doc、ChartQA、AudioBench、Video-MME/MLVU，以及 NIAH、Lost in the Middle、RULER、NoLiMa、LongBench v2 各自能测的失败；选出主任务基准和补充探针，写出各自的样本构造、指标、答案/证据格式、提示与预处理版本、一个重要限制，以及针对该限制的私有对照。最后说明为什么不能把这些分数平均成一个“多模态长上下文总分”。
+6J. 为一个声明支持 1M context 的研究助手设计一套评测证据链。分别说明 NIAH、Lost in the Middle、RULER、NoLiMa、LongBench v1/v2、LongBench Pro 和 MRCR v2 各自补上什么缺口、使用什么长度单位、最容易误读的结论是什么；组合成“输入/位置冒烟 → 受控复杂度 → 自然任务覆盖 → 1M 目标语料”的评测矩阵。固定 tokenizer、模板、工具权限、推理预算和文档来源，设计至少一个冲突归因与一个不可回答对照；按任务和长度报告正确率、证据召回、引用支持、P95、单位成功成本与不确定性，并指出哪些结果仍不能支持“模型有效使用任意 1M 输入”。
+6K. 选择一个刚发布的 frontier model claim，先拆成模型身份、架构/接口、任务能力和产品效果等最小命题，再比较 Model Card、Datasheet、HELM、CheckList、G-Eval 与 Evaluation Card 分别解决什么问题。为每种方法写出输入、操作机制、它能支持的结论、作者结果或证据、主要限制及下一步补证；再用 Claim Ledger 记录来源、revision、harness、预算、独立性和未知项。最后选一项厂商 benchmark、一项第三方 provider/config 测量和一项固定 harness 的独立评测，说明为何缺失榜单行不等于零分，也不能借用相邻模型的结果。
+6L. 为一个要自动处理真实工作流的 Agent 设计评测组合，比较 SWE-bench、SWE-Gym、Terminal-Bench 2.0、WebArena、OSWorld、BrowserGym、τ-bench、ToolSandbox、AgentDojo、GAIA、ScienceAgentBench、PaperBench、METR 和 Gaia2。每种选用的方法都写清任务对象、机制、判定器、作者证据、限制和下一步补证；明确区分 benchmark、实验框架、训练资源、难度标尺与动态环境。再设计工具合同审计，验证工具前置条件、状态变化和 grader 实际读取字段，并说明为什么“潜在缺陷”不能直接推出 Agent 曾触发或榜单结论已改变。
 7. 解释 benchmark contamination 为什么会误导模型比较。
 7A. 用英文术语 data contamination、benchmark leakage 和 train-test leakage 分别写一个 LLM 评估风险例子，并说明如何用 exact match、near duplicate、canary、时间切分和私有动态集降低风险。
+7B. 为同一个公开 benchmark 比较语料 exact/near overlap 检查、Oren 顺序似然检验、ConStat、PaCoST、发布前 benchmark watermark 和 AntiLeakBench 式新鲜知识集。逐项写明它直接检验的命题、所需数据/API、核心假设、能支持的结论、失败条件和补证手段；再为“只有文本生成 API”“有 token log-prob 但无训练语料”“即将发布新 benchmark”三种条件选方案。区分数据重合、行为记忆信号与分数不泛化，不把异质结果合成一个污染率。
 8. 写 3 个防御性 jailbreak / prompt injection 抽象测试样本，只记录风险类别、期望策略动作和评估指标，不写可复用攻击提示词。
 9. 设计一个包含 helpfulness、honesty、harmlessness 的评估表。
 10. 用自己的话回答“如何判断模型是否真的具备推理能力”。
@@ -816,6 +899,9 @@
 35CZ. 写一个 0 依赖 Artifact 管理审计 demo，输入 toy artifact cases 的 artifact metadata、dataset manifest、checkpoint、eval report、deployment package、release manifest、integrity、lineage、store split、access policy、lifecycle、promotion、experiment tracking、rollback、delete plan 和 artifact management gate 字段；实现 artifact metadata contract、dataset artifact manifest、checkpoint artifact recoverability、eval report reproducibility、deployment package completeness、release manifest integrity、checksum integrity gate、artifact lineage completeness、artifact store metadata split、permission access control、lifecycle retention policy、promotion gate readiness、experiment tracking linkage、rollback artifact readiness、deletion dependency safety 和 artifact management gate；输出 metadata completeness、dataset manifest completeness、checksum coverage、checkpoint recoverable、eval metric count、deployment package completeness、release ref coverage、lineage node count、monthly storage cost、candidate delete safe、artifact size、metrics、hard blocker count、failed cases、failed gates 和 artifact management gate；要求覆盖 artifact metadata 缺失、dataset manifest 样本数不一致、checkpoint 恢复状态缺失、eval report prompt 版本缺失、deployment package 缺 health check、release manifest 可变、checksum 未验证、artifact lineage 断边、metadata DB 混入大 blob、权限公开、retention policy 缺依赖检查、promotion 缺 safety、experiment outputs 缺失、rollback artifact 缺失、删除仍有下游依赖和没有最终 artifact 管理门禁等 bad case。
 35DA. 写一个 0 依赖实验追踪审计 demo，输入 toy experiment runs 的 run metadata、params、metrics、logs、sample results、code、data、model、environment、prompt、evaluation、artifacts、cost、state transitions、search index、lineage 和 decision 字段；实现 run metadata contract、parameter config capture、metric curve step capture、log run linkage、sample result diagnosis、code version reproducibility、data version reproducibility、model checkpoint linkage、environment capture、prompt eval config capture、artifact output linkage、cost attribution、run state transition、search index readiness、lineage graph readiness、decision note capture 和 experiment tracking gate；输出 metadata completeness、parameter coverage、metric step coverage、sample result coverage、environment coverage、sample error types、success rate、total cost、cost per success、lineage node count、reproducibility ready、metrics、hard blocker count、failed cases、failed gates 和 experiment tracking gate；要求覆盖 metadata 缺 owner、参数缺 seed、metric 缺 step、日志 run id 不匹配、样本缺 error type、代码 dirty、数据 manifest 缺失、checkpoint linkage 缺失、环境缺 NCCL、prompt / eval 配置缺 metric definition、artifact 缺 checksum、成本不可归因、状态跳转非法、搜索索引缺 metric、lineage 断边和实验结论缺失等 bad case。
 35DB. 写一个 0 依赖评估平台审计 demo，输入 toy eval platform cases 的 dataset、offline config、metrics、judge、human review、pairwise、online、release gate、report、slice metrics、regression suite、scheduler、cache、observability、artifacts 和 platform gate 字段；实现 eval dataset contract、offline batch reproducibility、metric definition versioning、LLM judge calibration、human review quality control、pairwise blinding randomization、online eval guardrail、release gate readiness、eval report completeness、slice regression detection、regression suite coverage、eval job scheduler reliability、eval cache key integrity、eval observability、artifact tracking linkage 和 evaluation platform gate；输出 dataset coverage、contamination rate、offline accuracy、pairwise win rate、human gold accuracy、human pair agreement、judge-human agreement、online guardrail pass、release ready、cache hit rate、report field count、lineage edge count、estimated eval cost、metrics、hard blocker count、failed cases、failed gates 和 evaluation platform gate；要求覆盖 dataset 缺版本或切片、离线配置缺评估代码版本、metric 无版本、judge 缺人类校准、人评 gold set 低、pairwise 未盲评、在线安全事件、release gate 缺 rollback、报告缺样本结果、切片退化、回归集覆盖不足、调度缺重试、缓存 key 缺 prompt、观测缺 judge error、artifact lineage 缺失和没有最终平台门禁等 bad case。
+
+评估平台追问（承接 35DB）：为一次样本运行设计 run_id、sample_id、attempt_id、score_id 与 trace/artifact 引用；分别定义 execution、scoring、maturity 状态。模拟请求已发送但客户端超时，说明何时重试、如何保留原 attempt、如何把失败计入系统可用性/成本，以及哪些情况下工具副作用使盲目重试不安全。
+
 35DC. 写一个 0 依赖特征向量索引基础设施审计 demo，输入 toy feature embedding index cases 的 feature definition、offline online sample、point-in-time join、embedding records、chunk lineage、vector index、ANN quality、metadata permission filter、shadow index、retrieval traces、lineage graph、tenant isolation、quality monitoring、cost capacity、RAG / Agent integration 和 infrastructure gate 字段；实现 feature definition contract、offline online consistency、point in time correctness、embedding version contract、chunk embedding lineage、vector index build readiness、ANN quality latency gate、metadata permission filter、shadow index switch readiness、retrieval trace completeness、feature embedding lineage graph、multi tenant isolation、quality monitoring metrics、cost capacity governance、RAG agent integration 和 feature embedding index gate；输出 feature contract coverage、offline online skew rate、point in time leak rate、embedding dimension、embedding norm ok、chunk embedding coverage、bruteforce top3、permission filtered top3、cross tenant blocked、ANN recall、retrieval P95、vector memory、shadow index ready、lineage edge count、estimated build cost、metrics、hard blocker count、failed cases、failed gates 和 feature embedding index gate；要求覆盖特征定义缺字段、offline / online transform 不一致、未来特征泄漏、embedding version 缺失、chunk lineage 缺 offset / checksum、索引构建不就绪、ANN recall 低、metadata filter 缺 tenant / ACL、shadow index 缺 rollback、retrieval trace 缺 index version、lineage graph 断边、跨租户命中未阻断、质量监控缺 permission leak、成本容量无预算、RAG / Agent 引用缺 source pointer 和没有最终基础设施门禁等 bad case。
 35DD. 写一个 0 依赖 RAG / Agent 平台存储审计 demo，输入 toy RAG agent storage cases 的 knowledge base、documents、chunks、sync job、user、retrieval trace、prompt trace、citations、agent definition、tools、tool policy、tool traces、execution trace、replay、memory、trace privacy、costs、audit logs 和 platform gate 字段；实现 knowledge base contract、document chunk version contract、sync delete propagation、ACL permission enforcement、retrieval trace completeness、prompt assembly trace、citation version binding、agent definition versioning、tool definition contract、tool permission gate、tool call trace completeness、execution trace replay readiness、memory privacy lifecycle、trace privacy retention、cost attribution governance 和 RAG agent storage gate；输出 kb contract coverage、document version coverage、chunk citation coverage、permission filtered chunks、retrieval trace complete、prompt hash ready、citation version bound、tool schema coverage、dangerous tool blocked、tool trace complete、trace replay ready、memory private blocked、trace redaction coverage、estimated run cost、audit event count、metrics、hard blocker count、failed cases、failed gates 和 RAG agent storage gate；要求覆盖知识库缺 owner、chunk 缺 checksum、删除未传播、ACL filter 缺失、retrieval trace 缺 embedding version、prompt hash 缺失、citation 缺 document version、agent definition 未版本化、tool schema 缺失、高风险工具绕过权限、tool call trace 缺权限决策、execution replay 缺 tool output、敏感 memory 未阻断、trace 无脱敏 / TTL、成本缺 tenant 和没有最终 storage gate 等 bad case。
 35DE. 写一个 0 依赖 AI Infra 可观测性审计 demo，输入 toy telemetry cases 的 signals、metrics、SLO、latency、traces、logs、events、correlation、labels、training、inference、data quality、RAG / Agent、cost、privacy、alerts 和 platform gate 字段；实现 signal inventory coverage、metric contract completeness、SLO error budget readiness、latency quantile guard、trace span coverage、log event structure、correlation ID coverage、cardinality budget control、training observability、inference observability、data quality observability、RAG agent observability、cost observability、privacy redaction retention、alert actionability 和 observability platform gate；输出 signal coverage、metric contract coverage、availability、error budget remaining、latency p99、trace span coverage、log structure coverage、event timeline coverage、correlation ID coverage、cardinality estimate、training tokens/s、inference TTFT p95、RAG agent trace ready、cost per 1k tokens、redaction coverage、actionable alerts、metrics、hard blocker count、failed cases、failed gates 和 observability gate；要求覆盖信号清单缺 events、metric 缺 owner、SLO 错误预算烧穿、p99 超阈值、trace 缺 decode span、日志缺 trace id、关联 ID 覆盖不足、request id 进入 metrics label、训练 data wait 过高、推理 KV cache 压力过高、数据质量门禁失败、RAG / Agent tool trace 缺失、成本不可按 tenant 归因、日志 / trace 脱敏和 TTL 不合格、告警无行动性和没有最终可观测性门禁等 bad case。
@@ -885,10 +971,11 @@
 35E42. 写一个 0 依赖异步 Serving 架构审计 demo，输入 r1/r2/r3/r4 四个 raw requests、tokenizer queue、engine input queue、engine output queue、per-client stream queue 和 cancel queue；实现 BoundedQueue、RawRequest、TokenizedRequest、EngineOutput、RequestState、ClientStream、ToyAsyncServingRuntime、async boundary design、API admission boundary、tokenizer worker queue、engine input queue、bounded engine drain、engine output queue、per-client stream queue、stream queue backpressure、cancel signal queue、engine state ownership、idempotent async cleanup 和 async serving architecture gate；输出 API admitted / rejected、tokenized、first drain added、engine input backlog、finished、cancelled、client streams、queues empty、cleanup events、metrics 和 gates；要求说明异步 serving 不是给同步 loop 套 `async`，而是通过有界队列、状态所有权、backpressure、cancel signal 和幂等 cleanup 让 GPU engine core 不被 API、tokenizer、慢 client 或网络发送阻塞。
 35E43. 写一个 0 依赖 Multi Worker Router 审计 demo，输入 chat/code worker、GPU group、worker load、prefix hot set、loaded adapters、r1/r2/r3/r4 四个 tokenized requests 和 heartbeat timestamp；实现 WorkerLoad、WorkerHandle、TokenizedRequest、RoutedRequestState、RouterConfig、ToyMultiWorkerRouter、router worker capability filter、request cost block estimate、load aware worker score、sticky route fallback、global router admission、worker heartbeat timeout、safe retry boundary、request worker map、worker selection imbalance 和 multi worker router gate；输出 round-robin choice、load-aware choice、sticky preferred、actual worker、big request admitted、code worker、unhealthy after timeout、state rows、selection counts、selection imbalance、metrics 和 gates；要求说明多 worker router 不能只做 round-robin，而要同时证明能力过滤、KV 容量、负载、prefix locality、过载 fallback、全局拒绝、heartbeat failure、未输出重试和已 streaming 显式失败。
 35E44. 写一个 0 依赖 Distributed Parallel KV 审计 demo，输入 ParallelConfig、RequestProfile、TP ranks、PP stages、block size、link bandwidth 和 latency；实现 TPRankKV、PPStageKV、ToyDistributedParallelKVAuditor、parallel group boundary、TP head shard assignment、TP block table consistency、PP layer ownership、distributed KV byte accounting、collective communication cost、pipeline bubble ratio、KV migration decision、cross rank cleanup 和 distributed parallel KV gate；输出 worker unit、TP head ranges、head coverage、logical blocks、TP block table consistency、PP layer ranges、layer coverage、KV total MiB、per TP rank MiB、per PP stage MiB、communication report、pipeline bubble ratio、migration decision、cleanup events 和 gates；要求说明多 GPU inference 不是只看 GPU 数量，而要证明 TP / PP 的 worker 边界、KV 分片、逻辑 block 一致性、collective 成本、pipeline bubble、迁移代价和跨 rank / stage 清理都闭环。
-35E45. 写一个 0 依赖 OpenAI Compatible API 审计 demo，输入 bearer token、tenant model permission、chat completion request、unsupported field、long context request、rate-limited tenant 和 busy tenant；实现 APITenant、EngineRequest、ToyOpenAICompatibleAPI、API compatibility contract、chat request schema validation、SSE stream frame contract、OpenAI style error shape、bearer auth gate、model permission gate、token rate limit gate、concurrency limit gate、usage accounting check、API privacy log check 和 OpenAI compatible API gate；输出 non-stream response、stream chunk count、first delta、last `[DONE]`、usage、auth error、unsupported field error、permission error、context error、RPM error、concurrency error、metrics 和 gates；要求说明 OpenAI-compatible API 不是简单把 engine 包成 HTTP，而要证明字段契约、流式帧、错误形状、鉴权、模型权限、多维限流、usage 和隐私日志都可验证。
-35E46. 写一个 0 依赖 Production Deployment 审计 demo，输入 image artifact、model artifact、deployment config、old/new workers、canary users 和 canary metrics；实现 ImageArtifact、ModelArtifact、WorkerState、DeploymentConfig、CanaryMetrics、ToyProductionDeploymentAuditor、runtime compatibility matrix、model artifact manifest、startup readiness gate、warmup probe check、worker registration gate、drain completion gate、rolling update capacity gate、canary traffic split、canary regression gate、rollback readiness gate 和 production deployment gate；输出 runtime compatible、artifact ready、startup phases、probe report、registered workers、capacity before/after drain、drain events、canary routes、canary report、rollback ready、observability logs、metrics 和 gates；要求说明 LLM serving 生产部署不能只看容器进程是否启动，而要证明 runtime、模型 manifest、readiness、滚动容量、drain、灰度、回滚和 revision 级观测都闭环。
-35E47. 写一个 0 依赖 Capacity SLO Fault Drill 审计 demo，输入 workloads、worker benchmark、cost config、SLO target、incoming burst 和 fault scenarios；实现 WorkloadProfile、WorkerBenchmark、CostConfig、SLOTarget、FaultScenario、ToyCapacitySLOFaultDrillAuditor、workload token profile、benchmark stable capacity、GPU count estimate、KV concurrency limit、cost attribution model、SLO error budget、admission overload policy、fault drill scenario、runbook coverage check 和 capacity SLO fault drill gate；输出 traffic profile、required workers by request/prefill/decode/KV、base/safe/N+1/release workers、planned GPUs、cost report、SLO report、admission decision、fault drill rows 和 gates；要求说明 LLM serving 容量规划不能只看 QPS，而要把 token 压力、KV 并发、稳定压测容量、利用率、成本、error budget、admission 和故障演练放在一起复算。
-35E48. 写一个 0 依赖 Inference Engine Interview Readiness 审计 demo，输入 question rubrics、candidate answers 和 project evidence；实现 QuestionRubric、CandidateAnswer、ProjectEvidence、ToyInferenceEngineInterviewAuditor、interview question rubric、concept coverage score、request lifecycle answer、KV cache answer evidence、scheduler answer evidence、serving metrics coverage、ordered debug path、production governance answer、project evidence portfolio、tradeoff coverage 和 inference engine interview gate；输出 concept rows、metric gate、debug gate、tradeoff gate、project gate、weak questions、revision plan 和 gates；要求说明推理框架面试不能只背框架名，而要证明生命周期、KV/PagedAttention、调度、指标、debug、生产治理、项目证据和 trade-off 都能闭环表达。
+35E45. 比较两种 toy serving 配置的 raw output tokens/s 与请求级 SLO goodput；输入每请求 TTFT、request-level TPOT、E2E、完成/取消状态、输出 token 数和测量窗口，指定 SLO 后分别计算 request goodput 与 token goodput，并展示“吞吐上升但达标请求减少”的反例；讨论请求被中途丢弃时 hard-threshold goodput 的偏差，以及 smooth-goodput 研究口径的目的与未标准化边界。
+35E46. 写一个 0 依赖 OpenAI Compatible API 审计 demo，输入 bearer token、tenant model permission、chat completion request、unsupported field、long context request、rate-limited tenant 和 busy tenant；实现 APITenant、EngineRequest、ToyOpenAICompatibleAPI、API compatibility contract、chat request schema validation、SSE stream frame contract、OpenAI style error shape、bearer auth gate、model permission gate、token rate limit gate、concurrency limit gate、usage accounting check、API privacy log check 和 OpenAI compatible API gate；输出 non-stream response、stream chunk count、first delta、last `[DONE]`、usage、auth error、unsupported field error、permission error、context error、RPM error、concurrency error、metrics 和 gates；要求说明 OpenAI-compatible API 不是简单把 engine 包成 HTTP，而要证明字段契约、流式帧、错误形状、鉴权、模型权限、多维限流、usage 和隐私日志都可验证。
+35E47. 写一个 0 依赖 Production Deployment 审计 demo，输入 image artifact、model artifact、deployment config、old/new workers、canary users 和 canary metrics；实现 ImageArtifact、ModelArtifact、WorkerState、DeploymentConfig、CanaryMetrics、ToyProductionDeploymentAuditor、runtime compatibility matrix、model artifact manifest、startup readiness gate、warmup probe check、worker registration gate、drain completion gate、rolling update capacity gate、canary traffic split、canary regression gate、rollback readiness gate 和 production deployment gate；输出 runtime compatible、artifact ready、startup phases、probe report、registered workers、capacity before/after drain、drain events、canary routes、canary report、rollback ready、observability logs、metrics 和 gates；要求说明 LLM serving 生产部署不能只看容器进程是否启动，而要证明 runtime、模型 manifest、readiness、滚动容量、drain、灰度、回滚和 revision 级观测都闭环。
+35E48. 写一个 0 依赖 Capacity SLO Fault Drill 审计 demo，输入 workloads、worker benchmark、cost config、SLO target、incoming burst 和 fault scenarios；实现 WorkloadProfile、WorkerBenchmark、CostConfig、SLOTarget、FaultScenario、ToyCapacitySLOFaultDrillAuditor、workload token profile、benchmark stable capacity、GPU count estimate、KV concurrency limit、cost attribution model、SLO error budget、admission overload policy、fault drill scenario、runbook coverage check 和 capacity SLO fault drill gate；输出 traffic profile、required workers by request/prefill/decode/KV、base/safe/N+1/release workers、planned GPUs、cost report、SLO report、admission decision、fault drill rows 和 gates；要求说明 LLM serving 容量规划不能只看 QPS，而要把 token 压力、KV 并发、稳定压测容量、利用率、成本、error budget、admission 和故障演练放在一起复算。
+35E49. 写一个 0 依赖 Inference Engine Interview Readiness 审计 demo，输入 question rubrics、candidate answers 和 project evidence；实现 QuestionRubric、CandidateAnswer、ProjectEvidence、ToyInferenceEngineInterviewAuditor、interview question rubric、concept coverage score、request lifecycle answer、KV cache answer evidence、scheduler answer evidence、serving metrics coverage、ordered debug path、production governance answer、project evidence portfolio、tradeoff coverage 和 inference engine interview gate；输出 concept rows、metric gate、debug gate、tradeoff gate、project gate、weak questions、revision plan 和 gates；要求说明推理框架面试不能只背框架名，而要证明生命周期、KV/PagedAttention、调度、指标、debug、生产治理、项目证据和 trade-off 都能闭环表达。
 36. 为 5 个多模态产品设计 multimodal product audit 表，字段至少包含 modalities、samples total、task success、quality pass、supported claims、OCR CER、ASR WER、generation adopted、safety pass、privacy pass、copyright pass、high-risk reviewed、token equivalent、P95 latency、unit cost、eval ready、feedback loop 和 business metric。
 37. 写一个 0 依赖多模态产品审计 demo，输出 task success、input quality、evidence support、OCR quality、ASR quality、generation adoption、safety pass、privacy pass、copyright pass、multimodal score、multimodal gate、failed gates 和 needs rework。
 38. 构造 3 个输入质量不足样本，分别覆盖模糊文档、噪声音频和长视频关键片段缺失，并说明产品应如何引导重传、裁剪、澄清或转人工。
@@ -1004,6 +1091,12 @@
 17. 为 p-RoPE 设计 local/global layer schedule 审计，测试顺序交换、跨窗口引用、position id、packed batch 和 checkpoint resume。
 18. 做 Gated Attention ablation，比较 `g=0`、`g=1` 和真实 gate 在局部检索、远距离引用、TPOT、显存和 gate 分布上的差异。
 19. 为 CSA/HCA 设计压缩注意力评测，比较原始 KV、只局部、只压缩和混合路径的检索召回、压缩误差、TTFT、TPOT 和单位成功成本。
+20. 用统一的模型 revision、校准样本和 workload 比较 GPTQ、AWQ、SmoothQuant、FP8 KV、KIVI 或 TurboQuant 中至少四条路线：先说明各自量化对象与误差机制，再记录 effective bits（含 scale）、质量切片、kernel 路径、峰值显存、TTFT、TPOT、吞吐和并发；明确标注不同论文数字不可直接排名，并设计一个能区分“算法误差”与“kernel fallback”的消融。
+21. 对权重 [-0.9, -0.2, 0.3, 1.1] 使用有符号 INT4 对称码本 [-7, 7] 手算 scale、整数码和反量化结果；再加入一个 outlier，说明它如何改变 group scale、普通值的分辨率和 clipping 的代价。
+22. 给定一个 2×2 的假设逆 Hessian和一次权重舍入误差，按 GPTQ 更新式计算剩余坐标的补偿量。解释该 Hessian为何来自校准激活的层重建目标而不是整个模型任务 loss，并对照 RTN、GPTQ 在误差处理和转换成本上的差别。
+23. 从 Y=XW 推导 AWQ 的等价缩放 X D_s^-1 与 D_s W；用一个输入通道说明放大权重、缩小激活如何影响量化步长。解释 alpha 搜索和 clipping 的冲突、为何 AWQ 主方法不需要保留 1% FP16 权重，以及校准分布变化后仍需验证什么。
+24. 对照 RTN、GPTQ、AWQ、LLM-QAT 和 MARLIN：逐个写出问题、机制、实验指标/设置、主要代价和适用边界。明确区分量化算法、训练方法、artifact 和执行 kernel；为“质量退化”“加载成功但数值错误”“质量通过但速度未提升”分别设计下一轮定位实验。
+25. 100 个原始请求合计花费 120 个成本单位、最终 90 个成功，计算单位成功成本；设计 trace 字段分别记录首次推理、验证、重试、fallback 和人工审核成本，说明怎样避免分子重复计算，以及怎样避免把每次 attempt 当成独立请求。
 
 ## 2026-09 Frontier Architecture Updates
 
@@ -1092,11 +1185,11 @@
 
 ## 2026-09 GPT-6 Astra 与运行时预算验收
 
-1. 给定 context window 为 1,050,000、maximum input 为 922,000、maximum output 为 128,000，解释为什么它们不能直接相加来推导并发数，并画出一次请求的 token 账本。
-2. 用零依赖 Python 实现 GPT-6 Astra 的阈值计费估算，覆盖缓存命中、超过 272K 输入阈值、输出费用和失败重试成本，并对空输入、负 token 和缓存超过输入的情况报错。
-3. 设计 `low`、`high`、`max` 三档 reasoning effort 的公平实验，固定 prompt、工具、超时和输出上限，输出成功率、reasoning token、TTFT、TPOT、p95 成本和单位成功成本。
+1. 给定 context window 为 1,050,000、max output 为 128,000，说明为什么官方没有单列的 922,000 maximum input；将 922,000 标为预留满额输出后的算术余量，并画出输入、reasoning、工具状态和输出预算。
+2. 用零依赖 Python 实现 GPT-6 Astra 的 token 费用估算，分别计量普通输入、缓存读取、30 分钟/12 小时缓存写入和输出；覆盖恰好 272K 与超过 272K、Standard/Batch/Flex/Fast/Ultrafast，并在 token 费用之外单列工具、重试和验证器成本。
+3. 设计 `standard/pro` 与 `low/high/max` 的组合评测，固定 prompt、工具、超时和输出上限，分别记录 mode、effort、reasoning token、TTFT、TPOT、成功率、p95 成本和单位成功成本。
 4. 为 hosted shell、MCP、apply patch 和 computer use 画出模型、宿主执行器、沙箱、策略、审批和审计日志的责任边界。
-5. 给一个长周期 coding task 设计 runtime manifest，至少记录模型 ID、effort、输入/输出 token、缓存读写、工具 call id、权限决策、上下文压缩、错误码、artifact hash 和回滚状态。
+5. 给一个长周期 coding task 设计 runtime manifest，记录 model ID、mode/effort、输入/输出 token、cache read/write TTL、每类工具的调用/并发/timeout、全局 cost cap、重试/幂等、权限决策、compaction/steering lineage、错误码、artifact hash 和回滚状态。
 6. 阅读 GPT-6 Astra 官方模型页，分别列出“页面明确写出”“可由接口实验验证”“当前不能确认”的字段，禁止把工具名称当作架构证据。
 7. 根据 OpenAI 官方 Reasoning 与 Conversation state 文档，构造一组完整 output item、仅最终文本和 `previous_response_id` 的 replay 对照，检查 reasoning/phase、工具调用、计费和恢复结果。
 8. 根据 Tool search 与 Compaction 文档，设计 deferred schema、namespace 版本、权限变更和 canonical context 的回归用例，覆盖工具移除、手工 prune、重复执行和缓存失配。
@@ -1369,6 +1462,16 @@
 3. 建立 1.6T/49B MoE serving 账本，加入 384 routed experts、6 selected、1 shared、resident weights、FP4/FP8 scale、dispatch/combine、KV/indexer cache、workspace 和 batch；比较专家热点、通信量、p99 和单位成功成本，不能用 49B 直接当完整显存。
 4. 写 stateless Responses replay toy：模拟 `function_call`、`apply_patch`、并行工具、工具回执、失败重试和宿主持久化；注入 `previous_response_id`、`conversation`、`background`、`store` 等不支持字段，验证 capability probe、静默忽略检测、权限和幂等门禁。
 5. 对 `low/high/max` 固定任务、工具、revision 和 verifier，报告 reasoning/visible output、TTFT、TPOT、工具轮数、失败类型、Pass@1、成本和 steps；说明 effort 行不是三个 checkpoint，并把 DataCurve 数字与本地 toy 结果分栏。
+
+## 2026-10 DeepSeek V4 后训练：多教师全词表 OPD
+
+配套正文：[第五册第十八章](book-05-llm-training/chapters/18-deepseek-v4领域专家与统一蒸馏.md)。
+
+1. 给定 `p_S=(0.60,0.30,0.10)`、`p_T=(0.70,0.20,0.10)`，手算 `D_KL(p_S||p_T)`，列出三种 sampled log-ratio 及其学生采样概率，算出单样本估计的标准差；解释 full-vocabulary 求和消除哪类方差、仍保留哪类状态采样。
+2. 设两个教师在同一前缀上给出 `p_A=(0.9,0.1)`、`p_B=(0.2,0.8)`。推导等权 reverse-KL 最优学生分布的归一化几何平均，与算术平均比较；改变两个教师权重，并说明什么任务路由错误会导致这种合并目标不合适。
+3. 按 `token_positions × vocabulary_size × bytes_per_logit × teacher_count` 估计 BF16 logits 缓冲。对 8,192 个 token 位置、100,000 词表项和 10 个教师计算 GiB；再设计一个只保留 teacher hidden states、按教师索引加载输出头的调度流程，列出它省下与仍保留的成本。
+4. 比较 Model Soups、固定教师答案的离线 SFT、GKD、MiniLLM 与 V4 报告中的 full-vocabulary multi-teacher OPD。分别说明它们合并的是参数、token 序列还是条件分布；为一项公平消融固定底模、学生 rollout、训练 token、教师前向预算、数据、评测集与随机种子。
+5. 审核“V4 用 OPD 取代 mixed RL，所以 V4 后训练没有 RL”这句话。画出领域 SFT/GRPO 专家与后续 OPD 的顺序，再列出 GRM、verifier、rubric 和独立评估中仍未由公开报告说明的字段。
 
 ## 2026-09 DeepSeek V4 Flash SGLang：分支缓存与 kernel 证据审计
 
@@ -1747,6 +1850,17 @@
 5. 构造 CER 小于 0.2 但漏掉否定词的转写，以及“不是 128 元”的图片回答；确认 toy 规则可能通过，另设计关键字段和语义标注验收。比较语料级 CER 与逐句平均，并测试插入导致 CER 大于 1。
 6. 分开计算视觉/文本输入与输出 token 到达率；用总成本 20 元、100 次请求、80 次成功计算单位成功成本，再说明重试按任务归并后应如何统一分母。
 
+## 多模态训练：目标函数与配方对照
+
+配套正文：[第五册第十二章](book-05-llm-training/chapters/12-多模态训练.md)。
+
+1. 对一个正确图文 logit 为 3、语义相关错误负例 logit 为 2 的 batch，分别计算两候选 CLIP softmax 概率与 SigLIP 单对 logistic loss；再设计多正例标签，解释 sigmoid 目标为何不能自行发现语义相关性。
+2. 为冻结视觉端且算力受限、视觉指令数据较多、以及多分辨率混合预训练三种条件，分别选 BLIP-2、LLaVA-1.5、MM1 作为研究对照；写出共同评测集和分辨率/token 消融，禁止跨论文分数直接排名。
+3. 对一张双栏收据，比较 OCR pipeline、LayoutLMv3、Donut 和 Pix2Struct 的输入/监督/输出；构造“税额识别正确但总额关系错误”的样例，并定义字段关系、区域证据与解析成功指标。
+4. 目标字符为 `book` 时写最短 CTC 路径；按 `T=160,U=20` 估算 RNN-T 格点。再给出支持低延迟 partial transcript 的 encoder/endpoint 约束，说明它们不由 loss 名称自动保证。
+5. 令 `γ=5`，计算 `SNR=100` 和 `0.1` 时 `x0`、`epsilon`、`v` 三种 Min-SNR 权重，并把论文收敛/FID 数字绑定回目标参数化、schedule 和实验设置。
+6. 对 8 帧 `224×224` 和 16 帧 `448×448`、patch `16` 计算 patch tokens 与全注意力 score cell 比值；设计固定帧、按桶与 Frame Pack 的等 token 预算对照，并加入时序事件召回评测。
+
 ## 数学百科：定义域与反例
 
 配套正文：[第四册数学与机器学习](book-04-llm-encyclopedia/chapters/01-数学与机器学习.md)。
@@ -1816,6 +1930,7 @@
 3. 用 SimPO 平均 log probability -0.4/-0.7、β=2、γ=0.2 核对损失约 0.513015；将长度和 log probability 总和同时翻倍，说明长度平均为什么没有直接惩罚总长度。
 4. 对奖励组 `[0,0,0,0]`、`[1,1,1,1]`、`[0,0,1,1]` 执行 DAPO 过滤；核对最后一组优势并解释保留组成功率为何不能代表题池成功率。对 token ratio 2/0.5 比较逐 token clip 与 GSPO 几何平均。
 5. 为 RLAIF judge、规则 verifier 和教师软分布分别写出反馈类型与可用目标；核对固定历史下 CE-H=forward KL，解释为何成败标签不能直接作为 token 分布。设计安全可答集合为空时的报告，以及工具轨迹的脱敏与权限边界。
+6. 对同一模型、同一数学题池比较 GRPO、DAPO、DrGRPO、GSPO 与 DCPO：先列出每种方法修改的是 advantage、ratio 粒度、clip bounds、采样还是 loss denominator；再实现一个固定预算/逐 response token mean 对照，计算非零 advantage 率与正确率。论文中的 DAPO progressive ablation、DrGRPO AIME24 分数和 DCPO RUR 必须保留各自模型、数据、模板和统计口径，不能拼成统一排行榜。
 
 ## 推理与解码百科：分布、预算与延迟
 
@@ -1836,3 +1951,74 @@
 3. 计算 GQA 相对 MHA 的 KV 节省，再列出 prefix cache 指纹中的模型、模板、adapter、位置配置、媒体和租户条件；解释命中率为何不等于 TTFT 收益。
 4. 用对称 INT4 教学量化计算 scale 和 MSE，说明校准分布、kernel、KV 精度和真实任务回归为何不能由 toy MSE 推断。
 5. 为一次已开始 streaming 的工具调用设计 fallback、幂等键、取消和回滚流程；列出 startup/liveness/readiness、trace/metrics、drain 和 canary 的证据字段。
+
+## 第六册第十章：多模态部署
+
+配套正文：[第六册第十章](book-06-llm-deployment/chapters/10-多模态部署.md)。
+
+1. 对 1800×2400 图像、patch=32 计算原始 patch 数；比较固定 resize、tiling 与动态分辨率的视觉细节、token cap 和长尾成本。再用 1,000,000×1 图像与 cap=1 检查教学 resize 的边界，并说明为什么真实 processor 输出才是部署账本。
+2. 用 45 秒视频、0.5 FPS、每帧 256 token 计算抽帧后的 token 预算，再分别比较 encoder 前减少帧数与 encoder 后使用 EVS/VidCom2 pruning：哪些成本已经发生、哪些成本还能节省？设计一组包含静态字幕、短暂事件和重复背景的视频，报告 temporal recall、证据支持、prefill、KV 和 encoder 工作量。
+3. 计算 Riva 两种窗口：低延迟 `chunk=0.16s, padding=1.92s` 与高吞吐 `chunk=0.8s, padding=1.6s`。比较模型窗口时长、更新间隔和在“每个窗口均完整重算”假设下的输入覆盖率；再列出 runtime feature reuse、GPU 并发、WER/CER、首个 stable 延迟需要记录的实测项。
+4. 给客服语音助手设计级联 ASR→LLM→TTS 和原生 speech/omni 两条方案。固定一组否定词、数字、打断和工具写操作样本，定义首个 stable、首包音频、打断残留、转写证据、工具副作用和单位成功成本门禁；解释语音模型是否原生不能替代服务端权限校验。
+5. 为 Thinker→Talker→Code2Wav 比较融合、完整 payload handoff 和 async chunk handoff。设计含背压、乱序 chunk、取消、下游崩溃、重试和客户端断开的状态表；把 TTFT（文本首 token）、TTFP（音频首包）与 E2EL 分开测量。
+
+## 第六册第十一章：监控、评估与安全
+
+配套正文：[第六册第十一章](book-06-llm-deployment/chapters/11-监控评估与安全.md)。
+
+1. 构造 root span [0,500] ms，其中检索 span [20,170]、模型 span [100,430]、审核 span [410,490]。计算根 span 的 E2E 和子 span 持续时间之和，解释为什么有并行时不能把 span duration 直接加成用户延迟；再区分逐请求 decode rate 与 10 秒墙钟窗口内的服务 output tokens/s。
+2. 对 100 条安全样本、20 条攻击样本分别给出 TP/FP/FN/TN，计算 block rate、FPR、FNR 和 ASR，明确每个指标的样本集合与分母。将攻击集缩为 1 条且零次成功，按 95% 单侧零事件上界 1-0.05^(1/n) 计算结果；讨论攻击样本相关或分布不代表真实攻击时，这个区间能说明什么、不能说明什么。
+3. 同一组 200 个请求运行 baseline 与 candidate，按请求 ID 配对计算质量分差，并用请求级 bootstrap 报告区间。构造 25% candidate 请求没有评分的例子，同时报告评分覆盖率、已评分回答均值和失败/拒答处理方式；说明只比较成功评分样本会如何改变结论。
+4. 为开放式客服、RAG 企业问答和工具型 Agent 分别选择 HELM、MT-Bench/Chatbot Arena、RAGAS/ARES、HarmBench 或 AgentDojo 中的适用方法。每项写明方法解决的问题、判分机制、关键限制，以及在目标系统中增加的切片、人工校准、工具副作用或线上回放。
+
+## 第六册第十二章：成本优化
+
+配套正文：[第六册第十二章](book-06-llm-deployment/chapters/12-成本优化.md)。
+
+1. 为一个含文本 RAG、图片理解、GPU 推理、重试和人工复核的请求列资源向量；分别按 API 和自托管两种口径换算成本，指出哪些账目不能相加或重复计费。再用单次成本 0.010→0.007、成功率 0.90→0.60 计算每成功任务成本变化，并说明零成功时分母的语义。
+2. API 固定月费 0、边际 0.0024 美元/请求；自托管固定月费 48,000 美元、边际 0.0008 美元/请求。求交叉点，计算 20M 与 40M 请求的成本；随后把自托管边际成本上调到 0.0018、固定成本加上 20% 冗余，重算阈值并说明真实 trace 中还应改变哪些假设。
+3. 对同一组 1,000 条带成功标签的请求设计 FrugalGPT cascade 和 RouteLLM preference router。画出每种方案一次请求的模型调用轨迹，写出期望调用成本与串行延迟来源，并构造一个 Arena 偏好数据与企业任务不匹配的测试切片，定义 fallback 和安全路由门槛。
+4. 对一份长 RAG 文档分别选 LLMLingua、LongLLMLingua 或 LLMLingua-2，说明每种压缩机制要保留的证据、条件、否定和引用。用每百万输入 token 2 美元、10,000→6,000 token、压缩成本 0.0015 美元、恢复成本 0.002 美元计算净节省；再求恢复成本达到多少时压缩不再回本。
+5. Prefix cache 与 response cache 各列出命中率分母、资源收益、版本/权限 key 和失效风险。若完整模型路径成本 0.01 美元、查找 0.0001 美元、维护摊销 0.0002 美元，求纯货币回本命中率；另列出哪些安全/新鲜度条件即使通过回本计算也必须绕过缓存。
+6. Draft 每轮提出 K=4 个候选且各位置条件接受率为 0.8，计算 speculative sampling 的期望输出 token 数，解释为什么它不是加速比。比较独立 draft、MTP、EAGLE 与 n-gram/suffix 的候选来源、额外资源和分布保证。
+7. 给权重显存受限、activation W8A8 受限和长上下文 KV 受限三个场景，分别比较 GPTQ、AWQ、SmoothQuant、KIVI 的目标张量、误差处理和 runtime 依赖。再设计目标任务质量切片与有效 bit/scale/峰值显存/吞吐报告。
+8. 对 μ=10 请求/秒的 M/M/1 队列，分别计算 λ=8 与 9.5 时的利用率和平均排队时延，并解释它不能直接当作 LLM 容量公式。对 4 个副本、观测指标为目标 1.8 倍的 HPA 控制环算出建议副本数，并补充 queue age、待处理 token、KV 和冷启动指标。
+9. Agent 首次带入 1,000 token，每步追加 400 token，连续 6 步都重发完整历史，计算累计输入 token；与每步固定 1,000-token 摘要比较，并把摘要生成成本、失败恢复和工具提交状态加入生命周期成本。
+
+## 第六册第十三章：生产系统设计
+
+1. 某服务有 FAQ、RAG 和多步 Agent 三类请求。给出每类到达率、有效输入/输出长度、模型调用数、任务停留时间和实测模型服务时间，分别计算 input/output token/s、端到端任务并发与模型 active sequence；再按单副本 prefill/decode/sequence 容量和 20% 余量求副本数。注入一个模型副本故障，检查 N+1 后余量，并说明为什么三个不同负载下测出的峰值不能直接拼接。
+2. 为“30 天内 95% 有效同步请求在 3.5 秒内完成”写出 SLI 分子、分母、窗口和测量边界。分别决定服务端超时、客户端断连、用户取消和未完成请求如何入账；计算 10,000 个 eligible 请求对应的 bad-event budget，并另设任务质量与高风险安全门槛。
+3. 设计一次退款 Agent 的 commit-unknown 恢复流程：列出 intent、授权、dispatch、回执未知、状态查询和最终反馈的持久字段。比较幂等键、Transactional Outbox 与 Saga 各自的原子性边界、重复投递处理、参数变化行为和补偿限制；构造“同 key 不同金额”和“下游已退款但响应丢失”两个反例。
+4. 设计带 control 组的模型 canary。候选流量占 5%、候选错误率 20%，计算在 control 无错误时全服务聚合错误率的变化；再设计按租户、任务类型、请求长度和 cache 状态分层的归因表，列出质量、安全、P95、成本、未知提交和回滚 guardrail，并说明样本不足时的决策。
+5. 用本章教学 demo 修改 small/large pool 的 prefill 吞吐、TPOT 或 GPU 预算，手算一个请求的模型服务时间和 active sequence 变化，再运行代码对照输出。把 `model_path_estimate_ms` 与观测到的端到端 P95 分开；给缺少真实 P95、任务质量或安全证据的版本补上暂停门禁。
+6. 为模型 pod 分别写 startup、readiness、liveness 检查条件。构造“权重仍在加载”“队列暂时过长”“进程死锁”“检索依赖暂时不可用”四种状态，说明哪些应延迟探活、摘流量、重启或只做 admission control；解释为何把过载统一设成 liveness 失败可能触发重启级联。
+
+## 第六册第十四章：部署方案推导与故障复盘
+
+配套正文：[第六册第十四章](book-06-llm-deployment/chapters/14-部署方案推导与故障复盘.md)。
+
+1. 用每秒 60 个请求、平均输入/输出 1,500/200 token、输入 token 复用 25%、单副本 prefill/decode 吞吐 80,000/2,500 token/s、单副本活跃序列容量 12、模型 runtime 平均占槽 1.2 秒和 `γ=1.2`，分别计算输入、输出、活跃序列三个容量比例。求满足余量的副本数，并在失去一个副本后仍保留该余量时计算总池规模。说明如果 1.2 秒包含 RAG 或工具等待，哪些数字必须重测。
+2. 比较 PagedAttention 和 vAttention 的 KV 管理层、kernel 依赖、碎片处理、机制代价和论文评测边界；再比较 GPTQ、AWQ、SmoothQuant、KIVI 各自量化的张量、误差机制和适用约束。为“校准分布偏移”“量化质量掉点”“缓存容量仍不足”分别提出下一轮实验假设，并标明哪些是论文已报告机制、哪些是待验证改进。
+3. 以正文的合成 prompt 发布事故为例，画出“模板字段顺序变化 → token 前缀变短 → cache 复用下降 → 重复 prefill/KV 生命周期增加 → queue wait 与 TTFT 尾延迟上升”的因果链。给出至少两条支持证据和两条能推翻假设的反证；区分观测事实、机制推断和仍未知的质量影响。数值必须标为教学合成值，不能写成真实事故。
+4. 写一份无责复盘草案，包含影响范围、检测/响应/缓解/恢复时间线、直接触发、系统促成因素、未确定项、行动 owner、截止时间和关闭证据。至少为 prompt 模板契约、cache/prefill 分层监控、长短请求隔离或公平调度、canary 回滚各设计一个可验收行动项；解释为何“建了 ticket”不等于行动项关闭。
+5. 修改本章 Python demo 的 QPS、平均 runtime 占槽时间、cache token 复用比例或 `γ`，逐项预测 active sequence 与副本数变化后执行示例核对。把输出中的 token 成本与 GPU 固定成本、缓存开销、重试、fallback 和人工升级分开；指出哪些输入需要目标 workload 才能测得。
+
+## 第六册第十五章：FP4、MXFP4 与 NVFP4
+
+配套正文：[第六册第十五章](book-06-llm-deployment/chapters/15-fp4-mxfp4-nvfp4.md)。
+
+1. 用 E2M1 码本 `0、±0.5、±1、±1.5、±2、±3、±4、±6` 量化数值 `0.9`。分别令共享 scale 为 20 和 0.9，算出归一化值、最近码值、重构值和绝对误差；再解释为何真实 MXFP4/NVFP4 还要计入 scale 自身的量化。
+2. 对 `N=4096×4096` 个参数，分别计算 FP16、OCP MXFP4、NVFP4 一维分组的 payload、scale 字节、理论压缩比和有效 bits/element。列出 padding、rowwise/columnwise layout、二维权重 scaling、未量化层与 workspace 会怎样改变 artifact 或峰值显存。
+3. 比较 RTN、通用 rotation、MR-GPTQ 与 NVFP4 scale learning：各自处理哪一种误差，核心步骤是什么，代表性结果绑定什么模型/任务/硬件，在哪些条件下不能推广？据此为目标 workload 设计一个先诊断 scale error、再选择补偿方法的消融矩阵。
+4. 对同一模型建立 BF16、FP4-weight-only、FP4-weight+activation、NVFP4-W4A4 与高精度回退组，固定模型 revision、校准集、kernel、engine 和请求分布；分别记录 scale/saturation、准确率切片、格式合法率、峰值显存、TTFT、TPOT 和 fallback，说明每类结果能支持什么结论。
+
+## 第六册第十六章：FP8 KV Cache
+
+配套正文：[第六册第十六章](book-06-llm-deployment/chapters/16-fp8-kv-cache.md)；研究来源见[精修记录](research/fp8-kv-cache-depth-review-2026-10-27.md)。
+
+1. 用 OCP E4M3/E5M2 的 max finite、最小 normal/subnormal 和特殊值字段，计算一组输入最大值 500、`s=500/448` 时，`x=1` 如何映射到 E4M3 的 0.875 并重构为约 0.9766。再计算 `448s` 的上溢边界和 `2^-9s` 的下溢边界；说明 OCP 格式规范为什么不能单独决定 runtime scale。
+2. 对两位置 logits `[1,0]` 计算 softmax；把第一项改为 0.7，重算概率并说明排序未变时输出如何变化。再令 `V=[1,0]`，分别计算 K 误差和 `V_1 += 0.1` 对输出的影响。指出该标量例子不等于模型级准确率预测。
+3. 对 `L=64, B=1, T=131072, H_kv=8, D_h=128` 分别算 BF16、FP8 payload，再加入假设 8% metadata 得 17.28 GiB。说明这个账本不包含 allocator、workspace 和模型结构差异；将 KIVI 的 K-per-channel/V-per-token、KVQuant 的 pre-RoPE key 与 vLLM per-head scales 分别放到“研究算法/运行时能力”层比较。
+4. 解释为什么已写入 page 的 scale 从 0.1 改为 0.2 而 payload 不重编码，会让 `D(q)=10` 的值从 1 重构为 2。为 append、共享 prefix、swap/restore 和并发读取分别设计可维持 scale revision 一致性的检查。
+5. 阅读 vLLM H100/FlashAttention 3 案例：按 128k NIAH 的 91%/13%/89% 结果重建“BF16 基线—原 FP8 路径—two-level accumulation 修复”因果链；再解释 ITL slope、break-even、TTFT 和并发输出吞吐是不同指标。为目标部署列出固定模型、backend、scale、长度分布、并发和任务样本的验收矩阵。

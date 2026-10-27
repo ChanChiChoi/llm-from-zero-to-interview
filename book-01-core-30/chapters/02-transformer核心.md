@@ -1,4379 +1,491 @@
 # 第二部分：Transformer 核心
 
-## 本部分路线
+## 本部分要回答的问题
 
-这一部分沿着“离散输入如何变成上下文表示，再如何组成可训练的生成模型”展开。第 6 讲讲 tokenizer，第 7 讲讲 embedding 和位置编码，第 8、9 讲分别建立 attention 直觉和公式，第 10 讲进入多头与 KV Cache，第 11 讲落实自回归约束，第 12、13 讲把 attention、MLP、归一化和残差组合成 Transformer block，最后第 14、15 讲分别处理长上下文与一个可运行的 miniGPT。
+一个语言模型怎样把一段文本变成“下一个 token 应该是什么”的分布？答案不是一组互不相干的模块名称，而是一条有输入、有状态、有约束的数据流：文本先被离散化，离散编号被查表变成向量，注意力让每个位置读取允许看到的上下文，多个子层组成可堆叠的 Transformer Block，最后语言模型头把上下文表示映射到词表上的 logits。
 
-这里的代码大多是教学实现。它们用于验证 token、shape、mask、残差和 loss 的关系，不代表某个厂商的生产 kernel 或完整训练系统。阅读代码时，应同时问两个问题：它在数学上想表达什么，和真实系统相比还缺少什么。
+本部分沿 decoder-only 文本模型这条主线讲清基础机制。它不试图收录所有 Transformer 变体，也不把推理框架、训练系统和长上下文评测展开成平行百科；这些专题分别由第二册、第五册、第六册和第二十四册接手。
 
-本部分代码均按 CPU 教学示例设计：纯 Python 片段使用 Python 3.13+ 标准库，NumPy 片段使用 NumPy 2.4.6，PyTorch 片段使用 PyTorch 2.12.0（与仓库锁定版本一致）。除非注明“接续上一个代码块”，每个示例都应在干净进程中独立运行；示例说明会标出输入、输出、shape 和需要观察的结果。随机初始化只用于展示数据流，不代表可复现实验结论。
+| 讲次 | 本讲回答的问题 | 留给下一讲的结果 |
+| --- | --- | --- |
+| 第 6 讲 | 文本如何变成模型可读的 token ID？ | 一个有序的整数序列 |
+| 第 7 讲 | 整数如何变成向量，模型怎样知道位置？ | 带有位置处理的初始表示 |
+| 第 8 讲 | 一个位置怎样从其他位置读取信息？ | Q、K、V 的信息路由直觉 |
+| 第 9 讲 | 注意力怎样从直觉变成计算？ | 可逐项检查的分数、权重与输出 |
+| 第 10 讲 | 多个注意力头怎样组织，K/V 共享会改变什么？ | 多头张量与 KV Cache 的账本 |
+| 第 11 讲 | 模型如何只预测下一个 token？ | 训练标签、因果可见性和生成循环 |
+| 第 12 讲 | Attention、MLP 如何成为一个 Block？ | 可以重复堆叠的层结构 |
+| 第 13 讲 | 深层网络怎样保持信息与梯度通路？ | 对残差、Pre-LN、LayerNorm 和 RMSNorm 的理解 |
+| 第 14 讲 | 位置信息怎样进入 Q/K，长上下文又受什么限制？ | RoPE 的机制及其能力边界 |
+| 第 15 讲 | 怎样把这些部件接成一个最小 GPT？ | 一次前向、训练和逐 token 生成 |
 
-## 第 6 讲：Tokenization
+后文统一使用以下 shape 账本：B 表示 batch 大小，T 表示每条序列的 token 数，D 表示隐藏维度，H 表示 Query 头数，H_kv 表示 Key/Value 头数，d_h=D/H 表示每个头的维度，V 表示词表大小。贯穿例子使用示意性序列“我 喜欢 模型。”，假设 tokenizer 将它映射为 [12, 44, 9, 31]。这些编号只用于追踪 shape，不代表任何真实 tokenizer 词表。讲训练数据时取前三个 ID 作为 input，后三个 ID 作为右移 target，因此示例 shape 账本中的 T=3。
 
-### 从字符串到离散序列
+## 从文本到下一个 token 的总路径
 
-大模型处理的不是原始字符串，而是 tokenizer 产生的离散序列。本节从 token、词表和 token id 的定义开始，比较 word-level、character-level、subword、BPE、WordPiece、SentencePiece 与 byte-level 方法，再把切分方式放回上下文长度、训练吞吐、多语言和代码能力中理解。
+下图把十讲放回一次 decoder-only 语言模型计算中。训练和生成共享模型前向路径，但目标不同：训练把预测与真实后续 token 比较并更新参数；生成取最后位置的分布，选择一个 token 后再追加到上下文。
 
-Tokenizer 不是无关紧要的预处理脚本。它定义了模型的输入空间，也定义了训练、推理、评估和计费时如何数 token。后面的每一个长度和成本结论，都必须绑定具体 tokenizer。
+~~~mermaid
+flowchart LR
+    A[文本] --> B[Tokenizer]
+    B --> C[Token IDs B×T]
+    C --> D[Token Embedding B×T×D]
+    D --> E[Transformer Blocks：位置机制、Attention 与 MLP]
+    E --> F[Logits B×T×V]
+    F --> G[下一 token 概率]
+    Y[右移后的目标 token] --> H[交叉熵 loss]
+    F --> H
+    H --> I[梯度与参数更新]
+    I -.更新 embedding.-> D
+    I -.更新 block 参数.-> E
+    I -.更新输出层.-> F
+    G --> J[选择一个 token]
+    J --> K[追加到上下文]
+    K --> D
+~~~
 
-### 从字符串到模型输入
+Shape 是读代码时的导航工具。输入 [B,T] 经 embedding 后成为 [B,T,D]；注意力内部暂时拆成多个头，输出再回到 [B,T,D]；语言模型头最后产生 [B,T,V]。位置可以加在 embedding 上，也可以作用于 Q/K 或 attention score，因此图中把位置机制放在 Transformer Blocks 内说明。后续残差分支都必须回到相同的 [B,T,D]，否则不能相加。
 
-神经网络处理的是数字，不是文字。
+## 第 6 讲：Tokenization——文本怎样变成离散编号
 
-原始文本：
+### 模型接收的是编号，不是字符串
 
-```text
-I love machine learning.
-```
+神经网络不能直接把“我喜欢模型”当作文本对象处理。Tokenizer 按固定规则把文本切成 token，再把每个 token 映射到词表中的整数 ID：
 
-模型不能直接吃这个字符串。通常要先经过 tokenizer，把文本变成 token，再把 token 映射成整数 id：
+~~~text
+文本 -> token 序列 -> token ID 序列
+~~~
 
-```text
-text -> tokens -> token ids
-```
+Token 可以是词、子词、字符、字节片段或专用控制符。ID 只是词表项的索引：12 不比 4 更大、更接近“喜欢”，也没有天然的语义顺序。真正的表示要到下一讲从 embedding 表中查出向量后才出现。
 
-例如：
+### 为什么常见做法是子词或字节级切分
 
-```text
-text:      I love machine learning.
-tokens:    ["I", " love", " machine", " learning", "."]
-token ids: [40, 3021, 5780, 6975, 13]
-```
+| 切分粒度 | 好处 | 代价 |
+| --- | --- | --- |
+| 词级 | 常见词直观、序列较短 | 词表膨胀；新词、拼写变化和无空格语言难处理 |
+| 字符级 | 词表小，组合能力强 | 序列变长，模型需要更多步组合词义 |
+| 子词 | 在词表规模与序列长度之间折中 | 切分规则与训练词表绑定 |
+| 字节级 | 可表示任意文本字节，减少未知符号 | 序列长度和 Unicode 处理成本可能增加 |
 
-不同 tokenizer 切出来的结果可能完全不同。
+BPE 的基本思路是在训练语料的符号序列中反复合并高频相邻单元。例如仅为解释 merge 过程，若玩具序列是 a b a b，频率最高的相邻对是 a b，合并后得到 ab ab。真实 tokenizer 还涉及预切分、边界标记、字节映射、词表停止条件和编码规则；这个两步例子不等于任何模型的实际词表构造流程。[Sennrich 等人的 BPE 论文](https://arxiv.org/abs/1508.07909)讨论了用子词单元处理罕见词的动机。
 
-### Tokenizer 的系统影响
+WordPiece 和 BPE 都会得到子词词表，但不能把它们说成同一种 merge 算法。SentencePiece 是直接面向原始文本训练和应用子词模型的工具，支持的模型类型不等于“SentencePiece 这一种切分算法”。[BERT 论文](https://arxiv.org/abs/1810.04805)是 WordPiece 的代表性实例；[SentencePiece 论文](https://arxiv.org/abs/1808.06226)介绍了其原始文本处理和子词建模方式。
 
-Tokenizer 不是简单预处理，而是模型输入空间的定义。
+### Tokenizer 是模型输入契约的一部分
 
-它会影响：
+Tokenizer 会影响一段文本占多少 token、固定上下文窗口能容纳多少文本、训练样本如何构造，以及特殊 token 如何表示。这个影响必须针对具体 tokenizer 和语料测量，不能直接总结为“某种语言总是更费 token”。
 
-1. 同样一段文本占多少 token。
-2. 上下文窗口能装多少有效内容。
-3. 训练和推理成本。
-4. 多语言表现。
-5. 代码能力。
-6. 数字、符号、公式处理能力。
-7. 模型是否容易复制、拼写、处理罕见词。
+训练和推理应使用兼容的 tokenizer、词表、特殊 token 配置和模型 embedding。若 tokenizer 新增或重排词表项，模型的 embedding 行也必须按约定同步；仅仅重新编号会改变每个 ID 对应的向量。评估 token 长度或 token 成本时，也必须记录使用的 tokenizer。
 
-举例：
+**交接：**现在得到的是一个有序 ID 序列。下一讲把它变为 [B,T,D] 的向量序列，并处理“模型怎样区分位置”。
 
-如果某个 tokenizer 把一批中文样本切成更多 token，那么在同一个 8K-token 窗口中可放入的字符会更少，按 token 计费或计算的成本也可能更高。这个结果依赖具体 tokenizer 和样本，不能概括成所有中文都比英文更费 token。
+## 第 7 讲：Embedding 与位置信息——编号怎样变成表示
 
-### Token、Vocabulary 和 Token ID
+### 查表把离散 ID 变成向量
 
-Token 是模型处理文本的基本离散单位。它可以是：
+Embedding 是一个可训练矩阵 $E \in \mathbb{R}^{V \times D}$。输入 ID 为 i 时，模型取出矩阵第 i 行作为该 token 的初始向量。对一批长度为 T 的序列查表后，shape 从 [B,T] 变成 [B,T,D]。
 
-1. 一个词。
-2. 一个子词。
-3. 一个字符。
-4. 一个字节片段。
-5. 一个特殊符号。
+~~~math
+X_{b,t,:} = E[\mathrm{token\_id}_{b,t}]
+~~~
 
-Vocabulary 是所有 token 的集合。
+编号本身没有语义距离：ID 12 和 13 不代表两个 token 的意思相近。训练通过 loss 和梯度调整 embedding 行，使它们参与后续计算时有用。若输出层与输入 embedding 权重共享，词表 logits 可以由 $X E^\top$ 得到；权重共享是一种架构选择，不是所有模型都必须采用的规则。
 
-Token id 是 token 在 vocabulary 中对应的整数编号。
+### 为什么还需要位置
 
-例如：
+Self-Attention 依据向量内容计算 token 间关系。若完全不提供位置或顺序约束，模型没有足够信息区分相同 token 的不同排列。不同位置机制把位置信息放在不同位置：
 
-```text
-vocab = {
-  "I": 40,
-  " love": 3021,
-  " machine": 5780,
-  " learning": 6975,
-  ".": 13
-}
-```
+| 位置机制 | 位置信息进入哪里 | 本章需要记住的区别 |
+| --- | --- | --- |
+| Learned absolute embedding | 加到 token embedding 上 | 位置向量由训练学习，表长与最大位置有关 |
+| Sinusoidal absolute encoding | 加到 token embedding 上 | 用不同频率的正弦/余弦构造位置向量 |
+| Relative bias / ALiBi | 加到 attention score 上 | 按相对距离调整注意力分数 |
+| RoPE | 旋转 Query 和 Key | 让 Q/K 点积随相对位置变化；第 14 讲再推导 |
 
-模型真正接收的是 token id 序列。
+原始 Transformer 使用正弦位置编码；后续模型采用了多种不同方案。[Attention Is All You Need](https://arxiv.org/abs/1706.03762)是原始结构与 scaled dot-product attention 的来源。此处只需要知道位置机制放在计算路径的哪里；RoPE 的公式要等 Q/K 定义清楚后再讲。
 
-### 为什么不用 word-level tokenization
+ALiBi 是一种在 attention score 中按距离加入线性 bias 的方案；此处只作为位置机制分类，具体效果和长度外推结论应限于论文设置。[Train Short, Test Long](https://arxiv.org/abs/2108.12409)介绍了该方法。
 
-最直观的方法是按词切分。
+对于常见的绝对位置相加方式，令位置向量为 P，则初始状态是 $X_0 = E[\mathrm{ids}] + P$，shape 仍为 [B,T,D]。注意力之后，位置和上下文信息会逐层混合，不能把最终 hidden state 继续理解成静态的“词向量”。
 
-例如：
+**交接：**现在每个位置有一个向量，但还没有从同一句中的其他位置汇入信息。第 8 讲提出这种信息路由的直觉。
 
-```text
-I love machine learning
--> ["I", "love", "machine", "learning"]
-```
+## 第 8 讲：Self-Attention 直觉——当前位置怎样读取上下文
 
-问题是：
+### 表示需要依赖上下文
 
-1. 词表会非常大。
-2. 罕见词和新词无法处理。
-3. 拼写变化会造成大量 OOV。
-4. 中文、日文等语言没有天然空格分词。
-5. 代码、URL、数字、公式很难稳定处理。
+同一个 token 在不同上下文中的作用可能不同。比如“苹果”可以指水果，也可以指公司；单看 token 本身无法确定当前语境。模型需要根据当前序列，把其他位置的信息有选择地汇入当前位置表示。
 
-OOV 指 out-of-vocabulary，也就是词表外 token。
+Self-Attention 的每个位置都会从同一序列的表示中生成三种向量：
 
-### 为什么不用纯 character-level tokenization
+- **Query（查询）**：当前位置用来计算“我和哪些位置相关”的向量；
+- **Key（键）**：每个位置用来参与匹配的向量；
+- **Value（值）**：匹配后实际被加权汇入的信息向量。
 
-另一种方法是按字符切分。
+这只是对学习到的投影功能的直觉，不意味着模型内部显式执行人类语言中的“提问、查找、取答案”。
 
-优点：
+### 从匹配到加权汇总
 
-1. 词表很小。
-2. 几乎不会 OOV。
-3. 可以处理任意新词。
+对某个 Query，模型计算它与所有可见 Key 的相似分数，把分数归一化成权重，再按这些权重混合 Value。权重高的位置对当前输出贡献更大。计算过程稍后会写成矩阵公式。
 
-缺点：
+“Attention 权重”说明的是模型在这一层如何分配 Value 的加权系数，不能单独当作完整的因果解释或特征归因。网络有多层、多个头和后续非线性，输出由整条计算路径共同决定。
 
-1. 序列会变得很长。
-2. 同样 context window 能装的信息变少。
-3. 模型需要更多步才能组合出词义。
-4. 训练和推理更慢。
+### 为什么它适合并行，也为什么代价随长度上升
 
-例如：
+对一条长度为 T 的序列，所有 Query、Key、Value 投影和注意力矩阵都可以通过矩阵运算并行计算，不需要像标准 RNN 那样必须先完成第 t-1 步再算第 t 步。但每个位置都要和许多其他位置比较，完整注意力会产生与 $T^2$ 成比例的分数项。并行计算并不等于长序列没有成本。
 
-```text
-machine
--> ["m", "a", "c", "h", "i", "n", "e"]
-```
+Self-Attention 也不应简单等同于“关键词搜索”：Key/Query 的匹配空间是模型学习出来的，Value 经过多层投影，最终信息影响不止来自某一张注意力图。它解决的是可学习的信息混合问题，代价和可见范围由具体结构决定。
 
-这对长文本建模不够高效。
+**交接：**直觉已经建立。下一讲固定符号，手算一次分数、softmax 和 Value 汇总，并把“未来不可见”写成 mask。
 
-### Subword Tokenization
+## 第 9 讲：Scaled Dot-Product Attention——从公式到数值
 
-现代 LLM 常用 subword tokenization。
+### 张量怎样变成 Query、Key、Value
 
-核心思想：
+令输入表示 $X \in \mathbb{R}^{B \times T \times D}$。线性投影生成 Q、K、V，再将隐藏维度拆成头：
 
-常见词可以作为完整 token，罕见词可以拆成更小的子词。
+~~~math
+Q = XW_Q, \qquad K = XW_K, \qquad V = XW_V
+~~~
 
-例如：
+先以标准 MHA 为例，三个投影矩阵的输出宽度都是 D；将 D 拆成 H 个头，每个头宽度为 $d_h=D/H$。GQA/MQA 中 K/V 投影的输出宽度会按 KV 头数缩小。
 
-```text
-unbelievable
--> ["un", "believ", "able"]
-```
+| 张量 | Shape | 每一维表示什么 |
+| --- | --- | --- |
+| Q、K、V（拆头前） | [B,T,D] | 每个 token 的投影表示 |
+| Q、K、V（拆头后） | [B,H,T,d_h] | 每个头在每个位置的向量 |
+| QK 转置 | [B,H,T,T] | 每个 Query 对每个 Key 的分数 |
+| Softmax 权重 | [B,H,T,T] | 每个 Query 在可见位置上的归一化权重 |
+| 权重乘 V | [B,H,T,d_h] | 每个头聚合后的上下文表示 |
 
-这样兼顾了：
+Query 和 Key 在最后一维做点积，得到 Query-Key 相关分数。缩放因子来自一个简化假设：若各维 Q、K 独立、均值为 0、方差为 1，则点积是 $d_h$ 个乘积之和，方差为 $d_h$；除以 $\sqrt{d_h}$ 后，分数方差约回到 1。这样可减轻维度增大时 softmax 过早变尖锐的问题。真实网络中的分布未必满足这些假设，但这解释了缩放项的设计动机。
 
-1. 词表规模可控。
-2. 序列长度不会像字符级那么长。
-3. 罕见词仍然可以被拆分表示。
-4. 对多语言和代码更灵活。
+~~~math
+\mathrm{Attention}(Q,K,V)
+=
+\mathrm{softmax}
+\left(
+\frac{QK^\top}{\sqrt{d_h}} + M
+\right)V
+~~~
 
-### BPE 的核心直觉
+这里 M 是可选的加性 mask 或 bias。Softmax 沿 Key 位置这一维逐行归一化。对不允许看到的位置填入负无穷，softmax 后其权重为 0；若没有可见位置的某一行被全部屏蔽，softmax 会遇到未定义的数值行为，因此 padding、变长 batch 和 causal mask 的组合必须按具体实现处理。
 
-BPE 是 Byte Pair Encoding。
+### 手算一个 Query 的输出
 
-它的基本思路是：从小单位开始，不断合并最常见的相邻片段。
+取一个 Query $q=(1,0)$，两个 Key $k_1=(1,0)$、$k_2=(0,1)$，两个 Value $v_1=(2,0)$、$v_2=(0,4)$，令 $d_h=2$。
 
-简化过程：
+1. 原始点积是 [1, 0]。
+2. 缩放后分数是 [1/√2, 0] ≈ [0.7071, 0]。
+3. Softmax 权重约为 [0.6698, 0.3302]。
+4. 加权 Value 得到 $0.6698(2,0)+0.3302(0,4)\approx(1.3396,1.3208)$。
 
-1. 初始时把文本拆成字符或字节。
-2. 统计最常见的相邻 pair。
-3. 把这个 pair 合并成新 token。
-4. 重复直到达到目标词表大小。
+每一步都能定位输出变化来自哪里：点积决定相对分数，缩放影响 softmax 的尖锐程度，Value 决定最终被混合的内容。这个小例子只演示定义，不是模型测量。
 
-例如语料中经常出现：
+### 因果 mask 怎样改变可见位置
 
-```text
-l o
-```
+自回归语言模型中，位置 t 预测后续 token 时不能读到未来位置。对长度 4 的序列，Query 行只能看同位置和之前的位置：
 
-就合并为：
-
-```text
-lo
-```
-
-再经常出现：
-
-```text
-lo ve
-```
-
-就合并为：
-
-```text
-love
-```
-
-BPE 的优点：
-
-1. 简单有效。
-2. 常见片段会被压缩成更短 token 序列。
-3. 罕见词可以拆成子词。
-
-局限：
-
-1. 合并基于频率，不一定符合语言学边界。
-2. 对数字、空格、大小写、代码符号的处理依赖具体实现。
-3. 不同语料训练出的 tokenizer 差异很大。
-
-### WordPiece 和 SentencePiece
-
-WordPiece 和 BPE 都能构造子词词表，但词表构造、合并评分和编码规则不同；不能把 WordPiece 概括成“只按最高频 pair 合并”。具体评分取决于实现。BERT 使用 WordPiece 词表，但 WordPiece 不是 BERT 专属算法。
-
-SentencePiece 是直接处理原始文本的子词 tokenizer 工具，提供 BPE 和 Unigram 等模型，不要求先按空格切成词。它常用于多语言模型，但“SentencePiece”指工具及其模型接口，不是单一切分算法。
-
-SentencePiece 可以把空格编码成可见的边界标记（例如 `▁`），使 encode/decode 能处理词间空格；这对没有空格分词的语言也便于统一预处理。
-
-### Byte-Level Tokenization
-
-Byte-level tokenizer 从字节层面保证所有输入都可表示。
-
-优点：
-
-1. 基本不会 OOV。
-2. 可以处理任意 Unicode 字符。
-3. 对代码、emoji、特殊符号更鲁棒。
-
-缺点：
-
-1. 某些语言可能 token 数更多。
-2. 可读性差。
-3. 对 tokenizer 实现细节依赖更强。
-
-### 特殊 Token
-
-大模型 tokenizer 里通常有特殊 token。
-
-常见类型包括：
-
-```text
-BOS: beginning of sequence
-EOS: end of sequence
-PAD: padding
-UNK: unknown
-chat 格式中的 role/header/separator token：可能表示 system、user、assistant 或 tool 消息
-image/audio 等多模态 token：具体形式取决于模型和 tokenizer
-```
-
-特殊 token 的可见拼写不等于其 token id；`system`、`user`、`assistant` 等角色名也不一定各自对应独立特殊 token。具体协议要以模型的 tokenizer 和 chat template 为准。边界 token 会参与消息结构、停止条件、工具路由或多模态输入解析，误配可能改变模型行为。
-
-### 一个最小 BPE 代码例子
-
-下面用 Python 3.13+ 标准库写一个非常简化的 BPE 合并过程。输入是四个各出现一次的英文词；输出逐步打印最高频相邻片段和合并后的序列。它不实现真实 tokenizer 的词频加权、Unicode 处理或 encode/decode，只用于观察合并状态如何变化。
-
-```python
-from collections import Counter
-
-
-def get_pairs(tokens):
-    pairs = Counter()
-    for token_seq in tokens:
-        for a, b in zip(token_seq, token_seq[1:]):
-            pairs[(a, b)] += 1
-    return pairs
-
-
-def merge_pair(tokens, pair):
-    merged = []
-    target = "".join(pair)
-    for token_seq in tokens:
-        new_seq = []
-        i = 0
-        while i < len(token_seq):
-            if i < len(token_seq) - 1 and (token_seq[i], token_seq[i + 1]) == pair:
-                new_seq.append(target)
-                i += 2
-            else:
-                new_seq.append(token_seq[i])
-                i += 1
-        merged.append(new_seq)
-    return merged
-
-
-words = ["low", "lower", "newest", "widest"]
-tokens = [list(word) + ["</w>"] for word in words]
-
-for step in range(5):
-    pairs = get_pairs(tokens)
-    if not pairs:
-        break
-    best_pair, count = pairs.most_common(1)[0]
-    tokens = merge_pair(tokens, best_pair)
-    print(f"step={step}, merge={best_pair}, count={count}, tokens={tokens}")
-```
-
-这个例子展示：BPE 会不断把高频相邻片段合并成更大的 token。
-
-为了保持代码短小，这个 demo 把每个词只当作出现一次，也没有实现真实 tokenizer 的词频、边界标记、Unicode 规范化和编码解码接口。生产 tokenizer 还必须保存 merge table 或等价规则，保证训练、推理和离线计费使用同一套编码结果。
-
-### Tokenizer 如何影响上下文长度
-
-模型的 context window 通常按 token 数计算，而不是按字符数或词数计算。
-
-如果一个模型支持 8K token：
-
-```text
-不是 8K 个汉字
-不是 8K 个英文单词
-而是 8K 个 tokenizer 切出来的 token
-```
-
-同样一句话，不同 tokenizer 可能产生不同 token 数。
-
-这会影响：
-
-1. 能放进上下文的信息量。
-2. attention 计算成本。
-3. KV Cache 显存。
-4. 推理延迟。
-5. 训练 token 数统计。
-
-### 中文、英文和代码的差异
-
-英文中空格提供了天然词边界，很多 tokenizer 会把空格和后面的词一起编码，例如 `" learning"`。
-
-中文没有空格，tokenizer 可能按字、词或子词切分。不同 tokenizer 对中文压缩率差异很大。
-
-代码中有大量符号、缩进、变量名、数字和特殊字符。一个好的代码 tokenizer 需要高效处理：
-
-1. 缩进。
-2. 下划线。
-3. 驼峰命名。
-4. 括号和运算符。
-5. 长变量名。
-6. 数字和字符串。
-
-### Tokenizer 的工程失败模式（第 6 讲）
-
-#### 坑 1：训练和推理 tokenizer 不一致
-
-这会导致 token id 完全错位，模型行为不可预测。
-
-#### 坑 2：特殊 token 没配置好
-
-EOS 错误会导致模型停不下来。PAD 处理错误会污染 loss。chat role token 错误会导致对话格式混乱。
-
-#### 坑 3：tokenizer 对目标语言压缩率差
-
-同样内容占更多 token，会增加成本并减少有效上下文。
-
-#### 坑 4：新增 token 后没有正确 resize embedding
-
-如果给 tokenizer 新增特殊 token，需要同步扩展模型 embedding 矩阵，否则会报错或行为异常。
-
-#### 坑 5：评估 token 成本时用错 tokenizer
-
-不同模型 tokenizer 不同，不能用 A 模型 tokenizer 估算 B 模型成本。
-
-### Tokenizer 的适用边界与代价（第 6 讲）
-
-Subword tokenizer 的优点：
-
-1. 词表大小可控。
-2. 罕见词可拆分。
-3. 序列长度比字符级更短。
-4. 能处理多语言和代码。
-
-缺点：
-
-1. 切分不一定符合语义。
-2. 对不同语言不一定公平。
-3. 数字和符号处理可能不稳定。
-4. tokenizer 一旦选定，后续更换成本很高。
-
-适用场景：
-
-1. 大语言模型预训练。
-2. 多语言模型。
-3. 代码模型。
-4. 对话模型。
-5. 多模态模型中的文本部分。
-
-### Tokenizer 的工程契约
-
-Tokenizer 不是一次性的字符串预处理，而是模型输入空间的一部分。训练、推理、评估、计费和上下文预算都必须使用兼容的 tokenizer、词表、特殊 token 和编码规则。一个模型 checkpoint 如果换了 tokenizer，原有 token id 的含义就不再成立；即使词表大小相同，也不能把它当作无影响替换。
-
-判断 tokenizer 是否适合一个任务，不能只看词表大小。至少要测：
-
-- 同一批中文、英文、代码、数字、URL、emoji 和混合文本的 token 数；
-- encode/decode 是否能保持字节和 Unicode 语义；
-- 特殊 token 是否只在预期边界出现；
-- 训练、推理和离线计费的结果是否一致；
-- 罕见词、长变量名、数字和缩进是否产生异常碎片；
-- 不同语言在相同字符数和相同语义长度下的压缩率。
-
-可以把 token 成本粗略写成：
-
-```math
-C_{\mathrm{token}}
-\approx N_{\mathrm{input}}c_{\mathrm{in}}
-+N_{\mathrm{output}}c_{\mathrm{out}}
-+N_{\mathrm{cached}}c_{\mathrm{cache}}
-```
-
-N 的定义必须绑定同一 tokenizer。若中文文本比英文文本产生更多 token，context window、训练吞吐和服务价格都会受到影响，这不是语言本身的质量判断，而是离散化方案的工程结果。
-
-#### BPE 的统计过程和边界
-
-BPE 从字符或字节片段开始，按语料中的合并规则把高频相邻片段组合起来。它优化的是语料统计压缩，不是语言学意义上的词边界。因此一个常见词可能成为整体 token，一个罕见词可能被拆成多个片段，代码符号也可能按照频率形成看似奇怪的组合。
-
-BPE、WordPiece 和 SentencePiece 不能只靠名称区分。应记录训练语料、空格和边界处理、Unicode 规范化、byte fallback、特殊 token 以及实际的 encode/decode 行为。对于生产系统，merge table 或等价规则也属于模型 artifact，不能在服务端临时替换。
-
-#### tokenization 与能力的因果边界
-
-tokenizer 影响模型看到的序列长度和局部组合，但它不单独决定模型是否理解某种语言。模型参数、训练数据比例、上下文长度、优化预算和下游数据同样重要。一个新 tokenizer 让中文序列变短，可能改善吞吐，却不自动提高中文事实性；一个代码 tokenizer 把缩进和符号切得更合理，仍需通过代码补全和测试验证。
-
-因此，tokenizer 改动应做配对实验：固定模型结构和训练预算，只改变 tokenizer；报告 token 数、训练速度、显存、不同语言切片、数字/代码任务和 round-trip 错误。这样才能区分“输入更紧凑”与“能力真的变好”。
-
-### 容易混淆的 tokenizer 结论（第 6 讲）
-
-1. 误区：token 就是英文单词。
-   纠正：token 可以是词、子词、字符、字节片段或特殊符号。
-
-2. 误区：tokenizer 只是无关紧要的预处理。
-   纠正：tokenizer 决定输入空间，影响成本、上下文长度、多语言和代码能力。
-
-3. 误区：词表越大越好。
-   纠正：词表大可能缩短序列，但会增加 embedding 和输出层参数，也可能影响罕见组合泛化。
-
-4. 误区：训练后可以随便换 tokenizer。
-   纠正：tokenizer 和模型 embedding 强绑定，随便更换会破坏模型输入含义。
-
-### 练习：观察离散化如何改变成本（第 6 讲）
-
-1. 用自己的话解释 token、vocabulary、token id。
-2. 比较 word-level、character-level、subword tokenization 的优缺点。
-3. 手动模拟一次 BPE 合并过程。
-4. 解释为什么中文 tokenizer 压缩率会影响上下文长度。
-5. 思考：如果新增 `<tool>` token，需要改模型哪些部分？
-
-### 本节回顾（第 6 讲）
-
-关键结论：
-
-1. 神经网络不能直接处理字符串，文本必须先变成 token id。
-2. Tokenizer 定义了模型的离散输入空间。
-3. 现代 LLM 通常使用 subword 或 byte-level tokenizer。
-4. BPE 的核心是不断合并高频相邻片段。
-5. Tokenizer 会影响上下文长度、训练成本、推理成本、多语言能力和代码能力。
-6. 特殊 token、chat template、EOS、PAD 等工程细节非常重要。
-7. 训练和推理 tokenizer 必须一致。
-
-关键问题：什么是 token、BPE、WordPiece、SentencePiece，以及 tokenizer 如何影响上下文长度、训练效率和模型能力。
-
-## 第 7 讲：Embedding 与位置编码
-
-### 从离散编号到有序表示
-
-token id 只是词表中的离散编号，编号的大小没有语义。模型需要先通过 embedding 查表得到连续向量，再通过位置机制把顺序注入表示。本节解释 embedding matrix 的形状、训练方式、权重共享，以及绝对位置、相对位置和 RoPE 在信息路径上的区别。
-
-### 为什么编号必须先变成向量
-
-Tokenizer 输出的是 token id：
-
-```text
-[40, 3021, 5780, 6975]
-```
-
-这些 id 只是词表中的编号。
-
-编号大小本身没有语义。例如：
-
-```text
-token id 100 不一定比 token id 50 更“大”或更重要
-```
-
-神经网络需要连续向量作为输入。因此第一步是把每个 token id 查表变成向量。
-
-这张表就是 embedding matrix。
-
-### Token Embedding 是什么
-
-Token embedding 是把离散 token id 映射成连续向量的过程。
-
-假设：
-
-```math
-V=|\mathcal{V}|,\qquad d=d_{\mathrm{model}}
-```
-
-那么 embedding matrix 的形状是：
-
-```math
-[V,d]
-```
-
-每一行对应一个 token 的向量表示。
-
-如果 token id 是 `i`，那么它的 embedding 就是：
-
-```math
-E_i
-```
-
-例如：
-
-```text
-input_ids: [B, T]
-```
-
-```text
-embedding weight: [V, d]
-```
-
-```text
-output embeddings: [B, T, d]
-```
-
-其中：
-
-```text
-B = batch size
-T = sequence length
-d = hidden size
-```
-
-### 为什么不能直接用 token id
-
-token id 是类别编号，不是连续数值。
-
-如果直接把 id 当数字输入，模型会误以为：
-
-```text
-id 100 比 id 50 大
-id 200 和 id 201 更接近
-```
-
-但这些关系通常没有意义。
-
-Embedding 的作用是让模型自己学习每个 token 的向量表示。训练过程中，如果两个 token 在类似上下文中出现，它们的 embedding 可能会逐渐变得相似。
-
-例如：
-
-```text
-king, queen, prince
-```
-
-这些词可能在 embedding 空间中更接近。
-
-注意：不要过度神化 embedding。它不是直接存储“完整语义”，而是模型训练过程中学到的可用表示。
-
-### Embedding 如何训练
-
-Embedding matrix 是模型参数的一部分。
-
-训练时：
-
-1. token id 查表得到 embedding。
-2. embedding 进入 Transformer 层。
-3. 模型输出 logits。
-4. 计算 loss。
-5. 反向传播更新 embedding matrix。
-
-也就是说，embedding 不是人工设计的，而是通过语言模型训练目标学出来的。
-
-### 一个最小 PyTorch 例子
-
-输入是 `input_ids:[2,4]`，输出 embedding 为 `[2,4,768]`；随机初始化仅用于观察查表 shape，不代表训练后的语义空间。依赖 PyTorch 2.12.0，CPU 可运行。
-
-```python
-import torch
-import torch.nn as nn
-
-vocab_size = 10000
-hidden_size = 768
-batch_size = 2
-seq_len = 4
-
-embedding = nn.Embedding(vocab_size, hidden_size)
-
-input_ids = torch.tensor([
-    [40, 3021, 5780, 6975],
-    [10, 20, 30, 40],
-])
-
-outputs = embedding(input_ids)
-
-print(outputs.shape)  # [2, 4, 768]
-```
-
-这个例子说明：embedding 层做的是查表操作，不是复杂神经网络计算。
-
-### 为什么需要位置编码
-
-在没有位置特征、也没有顺序 mask 时，self-attention 对排列是等变的：交换输入 token 后，输出只会按同样方式交换，机制本身无法判断原序列中的先后关系。
-
-如果没有位置信息，Transformer 看到：
-
-```text
-I love you
-```
-
-和：
-
-```text
-you love I
-```
-
-可能很难区分顺序差异。
-
-因为 attention 主要根据 token 内容计算相似度，它本身不会天然知道哪个 token 在第 1 个位置，哪个在第 3 个位置。
-
-所以 Transformer 需要额外注入位置信息。
-
-### 绝对位置编码
-
-最直观的方法是给每个位置一个向量。
-
-假设最大长度是 `max_seq_len`，hidden size 是 `d`，那么 position embedding matrix 形状是：
-
-```math
-[T_{\max},d]
-```
-
-第 `t` 个位置对应：
-
-```math
-P_t
-```
-
-输入表示通常是：
-
-```math
-h_t=E_{x_t}+P_t
-```
-
-优点：
-
-1. 简单。
-2. 容易实现。
-3. 可以学习任务相关的位置模式。
-
-缺点：
-
-1. 对超过训练长度的位置泛化较差。
-2. 位置是绝对编号，不直接表达相对距离。
-
-### 正弦位置编码
-
-Transformer 原论文使用 sinusoidal positional encoding。
-
-它不是学习出来的参数，而是用固定函数生成：
-
-```math
-\mathrm{PE}(p,2i)=\sin\left(\frac{p}{10000^{2i/d}}\right)
-```
-
-```math
-\mathrm{PE}(p,2i+1)=\cos\left(\frac{p}{10000^{2i/d}}\right)
-```
-
-其中 $p$ 是位置编号，$i$ 是维度对编号，$d$ 是 hidden size。
-
-直觉：不同维度用不同频率的正弦和余弦表示位置。
-
-优点：
-
-1. 不增加可学习参数。
-2. 有一定长度外推能力。
-
-缺点：
-
-1. 不一定最适合现代 LLM。
-2. 现代架构也会采用其他位置方案。RoPE 把位置作用到 Q/K；ALiBi 则在 attention logits 中加入与相对距离相关的线性 bias。两者都改变位置信息进入 attention 的路径，细节见 [RoPE 与长上下文](#第-14-讲rope-与长上下文) 和第二册的架构进阶内容。
-
-### 相对位置思想
-
-语言中很多关系依赖相对距离，而不是绝对位置。
-
-例如：
-
-```text
-the cat sat on the mat
-```
-
-模型关心的是 `cat` 和 `sat` 相距多远，而不只是它们分别在第几个位置。
-
-相对位置编码试图让模型更好地感知 token 之间的相对距离。
-
-后面第 14 讲会详细讲 RoPE 和长上下文，这里先建立直觉。
-
-### RoPE 的基本直觉
-
-RoPE 是现代 LLM 常见的位置编码方法。
-
-它不是简单把 position embedding 加到 token embedding 上，而是把位置信息注入到 attention 的 Q 和 K 中。
-
-直觉：
-
-1. 每个位置对应一个旋转角度。
-2. Q 和 K 根据位置进行旋转。
-3. 两个 token 的 attention score 会自然包含相对位置信息。
-
-此处先把 RoPE 看作一种相对位置友好的方法，详细数学放到第 14 讲展开。
-
-### 用 NumPy 理解 Embedding 和位置编码
-
-下面这个 demo 不依赖 PyTorch，只演示两个核心事实：
-
-1. token embedding 本质是按 token id 查表。
-2. 位置编码可以和 token embedding 相加，让同一个 token 在不同位置有不同输入表示。
-
-输入 `input_ids:[4]`、词表大小 `6`、hidden size `4`；输出 token embedding、位置编码和相加后向量均为 `[4,4]`。依赖 NumPy 2.4.6，随机种子固定为 0；运行后应观察同一 id 在位置 0 和 2 的查表向量相同，加位置编码后不同。
-
-```python
-import numpy as np
-
-
-def sinusoidal_position_encoding(seq_len, hidden_size):
-    if isinstance(seq_len, bool) or not isinstance(seq_len, int) or seq_len < 0:
-        raise ValueError("seq_len must be a non-negative integer")
-    if isinstance(hidden_size, bool) or not isinstance(hidden_size, int) or hidden_size <= 0:
-        raise ValueError("hidden_size must be a positive integer")
-    positions = np.arange(seq_len)[:, None]
-    dims = np.arange(hidden_size)[None, :]
-    angle_rates = 1.0 / (10000 ** (2 * (dims // 2) / hidden_size))
-    angles = positions * angle_rates
-
-    pe = np.zeros((seq_len, hidden_size))
-    pe[:, 0::2] = np.sin(angles[:, 0::2])
-    pe[:, 1::2] = np.cos(angles[:, 1::2])
-    return pe
-
-
-vocab_size = 6
-hidden_size = 4
-input_ids = np.array([1, 2, 1, 3])
-
-np.random.seed(0)
-embedding_table = np.random.normal(size=(vocab_size, hidden_size))
-token_embeddings = embedding_table[input_ids]
-position_embeddings = sinusoidal_position_encoding(seq_len=len(input_ids), hidden_size=hidden_size)
-inputs = token_embeddings + position_embeddings
-
-print("token embeddings shape:", token_embeddings.shape)
-print("position embeddings shape:", position_embeddings.shape)
-print("same token id at pos 0 and 2 has same token embedding:")
-print(token_embeddings[0], token_embeddings[2])
-print("after adding position encoding, representations differ:")
-print(inputs[0], inputs[2])
-```
-
-注意 `input_ids[0]` 和 `input_ids[2]` 都是同一个 token id `1`，查到的 token embedding 完全相同；但加上不同位置编码后，它们进入 Transformer 的输入表示不同。
-
-### 输出层和 Embedding 权重共享
-
-语言模型输入时需要把 token id 变成向量。
-
-输出时需要把 hidden state 变回词表 logits。
-
-输出层通常是：
-
-```math
-\ell=hW_{\mathrm{out}}^T
-```
-
-其中 `output_weight` 形状也是：
-
-```math
-[V,d]
-```
-
-很多模型会让输入 embedding matrix 和输出层 weight 共享参数，叫 weight tying。
-
-优点：
-
-1. 减少参数量。
-2. 输入 token 表示和输出 token 分类共享语义空间。
-3. 在语言模型中通常效果不错。
-
-### Embedding 与位置处理的失败模式（第 7 讲）
-
-#### 坑 1：新增 token 后忘记 resize embedding
-
-如果 tokenizer 新增 token，embedding matrix 的行数也要扩展。
-
-#### 坑 2：position embedding 长度不够
-
-如果模型使用绝对位置 embedding，输入超过最大长度会报错或行为异常。
-
-#### 坑 3：错误地认为 embedding 本身已经包含全部上下文语义
-
-初始 token embedding 是静态查表，真正的上下文语义来自 Transformer 层后的 contextual representation。
-
-#### 坑 4：训练和推理位置处理不一致
-
-长上下文扩展、RoPE scaling、position id 处理不一致，会导致推理质量下降。
-
-### Embedding 与位置机制的适用边界（第 7 讲）
-
-Token embedding 的优点：
-
-1. 把离散 token 转成连续向量。
-2. 可训练。
-3. 能学习 token 间统计关系。
-
-缺点：
-
-1. 依赖 tokenizer。
-2. 词表大时参数量大。
-3. 静态 embedding 不包含上下文信息。
-
-位置编码的优点：
-
-1. 让 Transformer 感知顺序。
-2. 支持序列建模。
-3. 相对位置方法有助于长上下文。
-
-缺点：
-
-1. 绝对位置编码外推能力有限。
-2. 不同位置编码方案对长上下文影响很大。
-3. 工程实现细节容易出错。
-
-### Embedding 与位置的 shape 账本
-
-Embedding 的核心不是把 token id 当成一个有大小关系的数字，而是从可训练矩阵中按行查出向量。若词表大小为 V，模型宽度为 d，则：
-
-```math
-E\in\mathbb{R}^{V\times d},\qquad
-X_{\mathrm{token}}=\mathrm{Lookup}(\mathrm{input\_ids},E)
-```
-
-input_ids 的形状为 [B,T] 时，查表结果为 [B,T,d]。这一步通常没有跨位置的信息混合；同一个 token id 在不同上下文和不同位置的初始 embedding 可以相同，经过 attention、MLP 和位置处理后才会形成动态表示。
-
-位置处理解决的是另一类问题：同一组 token 的顺序会改变语义。绝对位置 embedding 可以直接相加，正弦位置编码用固定函数产生向量，RoPE 则把位置注入 Q/K 的旋转。不要把 token embedding、position embedding 和 contextual representation 混为一个概念。
-
-### 从输入向量到输出词表
-
-语言模型输出 logits 时，通常需要一个从 hidden size 到词表大小的线性映射：
-
-```math
-L=HW_{\mathrm{out}}^T,\qquad
-W_{\mathrm{out}}\in\mathbb{R}^{V\times d}
-```
-
-输入 embedding 和输出矩阵可以共享参数，即 weight tying。它能减少参数，并让输入 token 表示与输出分类空间使用同一组向量，但不是所有架构都必须共享。若新增 token，必须同步检查词表、输入 embedding、输出 head、权重共享关系、初始化和 optimizer 参数组。
-
-#### 一次 shape 追踪
-
-对于 [B,T] 的 input_ids，最小账本是：
-
-1. Lookup： [B,T] → [B,T,d]；
-2. 位置处理：仍为 [B,T,d]；
-3. Transformer block：输入输出宽度保持 d；
-4. lm head： [B,T,d] → [B,T,V]；
-5. loss：把每个有效位置的 logits 与右移 label 对齐。
-
-任何一步改变最后一维，都必须有明确的投影或 reshape。把 id 直接转成 float、把 sequence 维和 hidden 维弄反、或让 output head 使用另一套词表，都会使训练信号失去语义。
-
-#### 位置外推不能从 embedding 查表直接推出
-
-绝对位置表通常只为训练长度分配了有限行；输入超过这个范围时，系统要么报错，要么使用额外扩展规则。RoPE 也不是无限长度方案，它解决的是位置注入形式和相对关系，长距离泛化仍取决于频率、训练长度、数据和评估。
-
-位置方案的变更必须绑定 position id、缓存、mask 和 checkpoint 版本。只替换一段位置代码而不复核增量生成，容易出现短文本正常、长文本突然退化的情况。
-
-### 容易混淆的表示概念（第 7 讲）
-
-1. 误区：token id 大小有语义。
-   纠正：token id 只是类别编号，语义来自 embedding 和后续训练。
-
-2. 误区：embedding 是固定词向量，不会训练。
-   纠正：LLM 的 embedding matrix 通常是可训练参数。
-
-3. 误区：Transformer 天然知道顺序。
-   纠正：self-attention 本身不包含顺序，需要位置编码。
-
-4. 误区：同一个 token 在任何上下文里表示都一样。
-   纠正：输入 embedding 一样，但经过 Transformer 后的上下文表示不同。
-
-### 练习：追踪一条表示的 shape（第 7 讲）
-
-1. 假设 `vocab_size=50000`，`hidden_size=4096`，计算 token embedding 参数量。
-2. 写一个 PyTorch `nn.Embedding` 示例，输入 `[B, T]`，输出 `[B, T, d]`。
-3. 解释为什么 token id 不能直接当连续数值输入。
-4. 举例说明为什么顺序对语言理解重要。
-5. 用自己的话解释 token embedding 和 position embedding 的区别。
-
-### 本节回顾（第 7 讲）
-
-关键结论：
-
-1. Token id 是离散编号，不能直接表示语义。
-2. Token embedding 是可训练查表，形状是 `[vocab_size, hidden_size]`。
-3. Embedding 把 token id 变成连续向量。
-4. Self-attention 本身不感知顺序，Transformer 需要位置编码。
-5. 绝对位置编码简单但长度外推有限。
-6. RoPE 等方法把相对位置信息更自然地注入 attention。
-7. 新增 token、扩展上下文和位置处理都是真实工程中的高频坑。
-
-关键问题：为什么 token 需要变成向量，embedding 矩阵如何训练，Transformer 为什么需要位置编码。
-
-## 第 8 讲：Self-Attention 直觉
-
-### 让表示获得上下文
-
-同一个 token 在不同句子中可能承担不同含义。`apple` 可以是水果，也可以是公司；代词的指向也依赖更远处的名词。Self-attention 通过动态的信息路由，让每个位置从其他位置读取与当前问题相关的内容。本节先建立这种路由的直觉，再比较它与 RNN、CNN 的计算取舍。
-
-### 语义为什么依赖上下文
-
-语言理解依赖上下文。
-
-看这个例子：
-
-```text
-The animal didn't cross the street because it was too tired.
-```
-
-这里 `it` 更可能指 `animal`。
-
-再看：
-
-```text
-The animal didn't cross the street because it was too wide.
-```
-
-这里 `it` 更可能指 `street`。
-
-同样是 `it`，含义由上下文决定。
-
-模型要理解一句话，就不能把每个 token 孤立处理。它需要让每个 token 根据其他 token 的信息更新自己。
-
-### RNN 和 CNN 的局限
-
-在 Transformer 之前，序列建模常用 RNN 或 CNN。
-
-RNN 从左到右处理序列：
-
-```text
-x_1 -> x_2 -> x_3 -> ... -> x_T
-```
-
-优点：天然处理顺序。
-
-缺点：
-
-1. 难以并行。
-2. 长距离依赖容易衰减。
-3. 后面的 token 要等前面的 token 处理完。
-
-CNN 用局部窗口处理序列。
-
-优点：可以并行，局部模式建模强。
-
-缺点：
-
-1. 感受野有限。
-2. 长距离交互需要堆很多层。
-3. 对任意两个 token 的直接交互不够灵活。
-
-Self-attention 的核心优势是：每个 token 可以直接和序列中其他 token 建立联系。
-
-### Self-Attention 的信息路由直觉
-
-一句话：
-
-Self-attention 让每个 token 根据当前上下文，决定应该重点关注哪些 token，然后汇总它们的信息来更新自己。
-
-例如句子：
-
-```text
-The cat sat on the mat.
-```
-
-当模型更新 `sat` 的表示时，它可能关注：
-
-1. `cat`：谁坐？
-2. `mat`：坐在哪里？
-3. `on`：动作和位置关系。
-
-不同 token 关注的信息不同。
-
-`cat` 可能更关注 `sat`。
-
-`mat` 可能更关注 `on` 和 `sat`。
-
-这就是 attention 的直觉。
-
-### 为什么叫 Self-Attention
-
-因为 Query、Key、Value 都来自同一个序列本身。
-
-如果输入序列是：
-
-```text
-x_1, x_2, ..., x_T
-```
-
-self-attention 会让序列中的每个位置去关注同一个序列中的其他位置。
-
-它和 encoder-decoder attention 不同。encoder-decoder attention 中，decoder 的 token 会关注 encoder 输出。self-attention 则是“自己看自己”。
-
-### Query、Key、Value 的直觉
-
-可以把 attention 想象成一次信息检索。
-
-每个 token 会产生三种向量：
-
-1. Query：我想找什么信息。
-2. Key：我能提供什么索引。
-3. Value：我真正携带的信息内容。
-
-类比搜索：
-
-```text
-Query = 搜索请求
-Key = 文档索引
-Value = 文档内容
-```
-
-一个 token 的 Query 会和所有 token 的 Key 做匹配，得到注意力权重。然后用这些权重对 Value 做加权求和。
-
-直觉上：
-
-1. Query 和某个 Key 越匹配，就越关注那个 token。
-2. 被关注 token 的 Value 会更多进入当前 token 的新表示。
-
-### 一个例子
-
-句子：
-
-```text
-The bank raised interest rates.
-```
-
-`bank` 可能有多个含义：河岸、银行。
-
-当 `bank` 看上下文时，它会关注：
-
-1. `interest`
-2. `rates`
-3. `raised`
-
-这些 token 提供金融语境，所以 `bank` 的上下文表示会偏向“银行”。
-
-再看：
-
-```text
-The boat reached the bank.
-```
-
-这里 `bank` 会关注：
-
-1. `boat`
-2. `reached`
-
-上下文更像“河岸”。
-
-这说明 self-attention 产生的是上下文相关表示，而不是固定词义。
-
-### Attention 权重是什么
-
-Attention 权重表示：当前 token 在更新自己时，从其他 token 中拿多少信息。
-
-例如对 `sat`：
-
-```text
-The   0.05
-cat   0.40
-sat   0.20
-on    0.10
-the   0.05
-mat   0.20
-```
-
-这不是模型真实一定学到的权重，只是直觉例子。
-
-加权求和后，`sat` 的新表示就融合了 `cat`、`mat` 等上下文信息。
-
-### 为什么 Attention 可以并行
-
-RNN 的问题是第 `t` 个位置依赖第 `t-1` 个位置的隐藏状态，所以难以完全并行。
-
-Self-attention 中，每个 token 的 Q、K、V 都可以一次性算出来。
-
-然后所有 token 两两计算匹配分数。
-
-这使得 Transformer 在训练时可以高效利用 GPU 并行矩阵乘法。
-
-这也是 Transformer 能够 scale 到大模型的重要原因之一。
-
-### Self-Attention 解决了什么问题
-
-它主要解决三个问题：
-
-1. 上下文相关表示：同一个 token 在不同上下文中有不同表示。
-2. 长距离依赖：任意两个 token 可以直接交互。
-3. 并行训练：相比 RNN 更适合 GPU 并行。
-
-例如：
-
-```text
-The book that I borrowed from the library yesterday was fascinating.
-```
-
-`was` 需要和较远的 `book` 对应。self-attention 可以让它们直接交互。
-
-### Self-Attention 的代价
-
-Self-attention 的主要代价来自 token 两两交互。
-
-对单个 head、单条序列，attention score 矩阵大小是：
-
-```math
-[T,T]
-```
-
-矩阵存储量与 `T²` 成正比；若 head dimension 为 `d`，计算 QKᵀ 和 AV 的算术量与 `T²d` 成正比：
-
-```math
-\mathrm{score\ storage}=O(T^2),\qquad
-\mathrm{attention\ compute}=O(T^2d)
-```
-
-批量和多头还会带来相应倍数。优化 kernel 可以避免把完整 score 矩阵写入显存，但不会因此消除标准 dense attention 的 token 两两交互计算。这是长上下文困难的重要原因之一。
-
-后面的 FlashAttention、稀疏 attention、长上下文方法，都在尝试缓解这个问题。
-
-### Causal Self-Attention 的直觉
-
-GPT 是自回归模型，生成第 `t` 个 token 时不能看到未来 token。
-
-所以 GPT 使用 causal self-attention。
-
-也就是说，第 `t` 个位置只能关注：
-
-```math
-1,2,\ldots,t
-```
-
-不能关注：
-
-```math
-t+1,t+2,\ldots
-```
-
-这通过 causal mask 实现。
-
-这里先建立直觉，causal mask 的可见性约束在第 11 讲单独展开。
-
-### Self-Attention 的失败模式（第 8 讲）
-
-#### 坑 1：把 attention 权重当成完整解释
-
-attention 权重能提供一些线索，但不等于模型推理的完整因果解释。
-
-#### 坑 2：忽略 $O(T^2)$ 成本
-
-序列长度翻倍，attention score 矩阵规模约变成 4 倍。长上下文成本会迅速上升。
-
-#### 坑 3：mask 写错
-
-causal mask 写错会导致模型看到未来 token，训练 loss 虚低，推理崩坏。
-
-#### 坑 4：把 self-attention 和 cross-attention 混淆
-
-self-attention 的 Q/K/V 来自同一序列，cross-attention 的 Q 和 K/V 来自不同来源。
-
-### Self-Attention 的适用边界与代价（第 8 讲）
-
-Self-attention 的优点：
-
-1. 能建模长距离依赖。
-2. 每个 token 可以动态选择关注对象。
-3. 训练时并行性强。
-4. 能产生上下文相关表示。
-5. 适合大规模预训练。
-
-缺点：
-
-1. $O(T^2)$ 复杂度高。
-2. 长上下文显存压力大。
-3. attention 权重不等于完全可解释性。
-4. 实现中 mask、shape、数值稳定性容易出错。
-
-适用场景：
-
-1. 语言模型。
-2. 机器翻译。
-3. 代码模型。
-4. 多模态模型。
-5. 长文理解和生成。
-
-### Self-Attention 是信息路由，不是关键词查找
-
-Self-attention 的作用可以分成两步：先根据当前 token 和上下文计算信息相关性，再按相关性汇总 Value，形成新的表示。它让同一个 token 在不同句子中获得不同的上下文表示，也让远距离位置在一层中直接交换信息。
-
-Q、K、V 是有用的工程类比，但不能把它们过度拟人化。Query、Key 和 Value 都是线性投影后的向量；QK 匹配得到的权重只描述这一层某个 head 的信息混合，不是模型全部推理过程，更不是天然的因果解释。残差、MLP、多层叠加和输出解码都会改变最终行为。
-
-#### 和 RNN、CNN 的取舍
-
-RNN 的状态沿时间步传递，顺序建模自然，却难以并行；CNN 可以并行处理局部窗口，但长距离关系需要更深层或更大的感受野。Self-attention 让任意位置直接建立连接，训练时适合矩阵并行，代价是 token 两两交互的时间和空间开销。
-
-因此不能只说 attention “全面优于” RNN/CNN。短序列、流式、资源受限或局部模式任务可能更适合其他结构；在 Transformer 中，attention 也不是免费的全局记忆，它受 context、mask、位置编码和 O(T²) 成本约束。
-
-#### 看一张 attention map 前先问三个问题
-
-第一，这张图来自哪一层、哪一个 head、哪一个输入和哪一种 mask？第二，显示的是 softmax 权重、梯度归因还是其他统计？第三，改变某个 token 后输出是否真的发生因果变化？只有把可视化与反事实或干预实验结合，才能讨论“重要性”；单张 attention map 只能作为观察线索。
-
-#### Causal 与 bidirectional 的边界
-
-Self-attention 这个机制本身不决定能否看未来，mask 才决定可见性。GPT 的 causal self-attention 只允许当前位置访问历史，BERT 的 encoder self-attention 可以使用双向上下文，encoder-decoder 的 cross-attention 还涉及不同序列。讨论 attention 时要同时说清输入来源和 mask，而不能把 self-attention 与 GPT 画等号。
-
-### 容易混淆的 attention 结论（第 8 讲）
-
-1. 误区：attention 就是简单找关键词。
-   纠正：attention 是动态的信息路由机制，不只是关键词匹配。
-
-2. 误区：attention 权重越高说明越重要。
-   纠正：权重有参考价值，但不能直接等同于因果重要性。
-
-3. 误区：self-attention 没有顺序概念。
-   纠正：attention 本身不含顺序，但 Transformer 会通过位置编码注入顺序。
-
-4. 误区：attention 可以免费解决长上下文。
-   纠正：标准 attention 的 $O(T^2)$ 成本是长上下文的核心瓶颈。
-
-### 练习：从信息路由解释 attention（第 8 讲）
-
-1. 用自己的话解释 self-attention。
-2. 举一个例子说明同一个 token 在不同上下文中含义不同。
-3. 用搜索引擎类比解释 Q、K、V。
-4. 比较 RNN 和 self-attention 在长距离依赖上的差异。
-5. 解释为什么标准 attention 的复杂度是 $O(T^2)$。
-
-### 本节回顾（第 8 讲）
-
-关键结论：
-
-1. Self-attention 让每个 token 根据上下文更新自己的表示。
-2. Q、K、V 可以理解为查询、索引和内容。
-3. Attention 权重决定从其他 token 聚合多少信息。
-4. Self-attention 比 RNN 更适合并行训练。
-5. 任意两个 token 可以直接交互，有利于长距离依赖。
-6. 标准 attention 的代价是 $O(T^2)$。
-7. Attention 权重有解释线索，但不是完整因果解释。
-
-关键问题：attention 解决了 RNN 的什么问题，Query、Key、Value 的直觉是什么，attention 为什么可以并行。
-
-## 第 9 讲：Self-Attention 公式推导
-
-### 从直觉到可计算的 attention
-
-上一节把 attention 解释成信息路由，本节把这条路由写成张量运算。我们依次追踪 Q、K、V 的投影、缩放点积、mask、softmax、Value 聚合和输出 shape，再比较 full、causal、local、sparse、linear attention 与 FlashAttention 所改变的约束。
-
-公式本身只说明一次前向计算。要做工程判断，还必须把 batch、head、序列长度、dtype、kernel、prefill/decode 和任务质量放进同一张账本。
-
-### 从输入到 Q、K、V
-
-假设输入 hidden states 是：
-
-```text
-X: [B, T, d_model]
-```
-
-其中：
-
-```math
-B=\mathrm{batch\ size},\qquad T=\mathrm{sequence\ length},\qquad d_{\mathrm{model}}=\mathrm{hidden\ size}
-```
-
-Self-attention 会通过三个线性变换得到 Q、K、V：
-
-```math
-Q=XW_Q
-```
-
-```math
-K=XW_K
-```
-
-```math
-V=XW_V
-```
-
-如果单头 attention 的 head dimension 是 `d_k`，那么：
-
-```math
-W_Q:[d_{\mathrm{model}},d_k],\qquad W_K:[d_{\mathrm{model}},d_k],\qquad W_V:[d_{\mathrm{model}},d_v]
-```
-
-```math
-Q:[B,T,d_k],\qquad K:[B,T,d_k],\qquad V:[B,T,d_v]
-```
-
-通常 `d_k = d_v`。
-
-### Scaled Dot-Product Attention 公式
-
-标准公式：
-
-```math
-\mathrm{Attention}(Q,K,V)=\mathrm{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V
-```
-
-分步骤看：
-
-1. $QK^T$ 计算每个 query 和每个 key 的相似度。
-2. 除以 $\sqrt{d_k}$ 做缩放，避免分数过大。
-3. softmax 把分数变成概率分布。
-4. 用 attention weights 对 V 做加权求和。
-
-### Shape 推导
-
-对单头 attention：
-
-```math
-Q:[B,T,d_k],\qquad K:[B,T,d_k],\qquad V:[B,T,d_v]
-```
-
-计算 attention scores：
-
-```math
-S=QK^T
-```
-
-shape：
-
-```math
-[B,T,d_k]\times[B,d_k,T]\to[B,T,T]
-```
-
-`scores[b, i, j]` 表示第 `i` 个 token 对第 `j` 个 token 的关注分数。
-
-softmax 后：
-
-```math
-A:[B,T,T]
-```
-
-再乘 V：
-
-```math
-[B,T,T]\times[B,T,d_v]\to[B,T,d_v]
-```
-
-输出 shape：
-
-```math
-[B,T,d_v]
-```
-
-### 为什么使用 QK^T
-
-$QK^T$ 是在计算 query 和 key 的匹配程度。
-
-点积越大通常会提高该 key 对应的 softmax 权重，但点积同时受向量方向和范数影响；它不是归一化后的余弦相似度。最终权重还取决于同一 query 下其他 key 的分数。
-
-直觉：
-
-```text
-Query: 我想找什么
-Key:   我有什么索引
-Q · K: 我想找的东西和你的索引匹配程度
-```
-
-### 为什么除以 sqrt(d_k)
-
-如果 $d_k$ 很大，点积 $Q\cdot K$ 的方差通常会随维度增大；这一解释依赖各维近似独立、均值接近 0 且方差受控的假设。
-
-分数太大时，softmax 会变得非常尖锐：
-
-```text
-一个位置概率接近 1，其他位置接近 0
-```
-
-这会导致梯度变小，训练不稳定。
-
-除以 $\sqrt{d_k}$ 可以让 scores 的尺度更稳定。
-
-这就是 scaled dot-product attention 中 “scaled” 的含义。
-
-#### 手算一个两 key 的 attention 输出
-
-取一个 query `q=(1,0)`，两个 key 为 `k_1=(1,0)`、`k_2=(0,1)`，对应的 value 为 `v_1=(2,0)`、`v_2=(0,4)`。这里 `d_k=2`，所以缩放后的分数为：
-
-```math
-qK^T/\sqrt{2}=[1/\sqrt{2},0]\approx[0.7071,0]
-```
-
-对两个分数做 softmax，权重约为 `[0.6698,0.3302]`；加权求和得到：
-
-```math
-0.6698v_1+0.3302v_2\approx(1.3395,1.3208)
-```
-
-这个数值例子只有一个 query 和两个 key，用来核对“分数—归一化权重—value 汇总”三步。真实模型会对 batch、多个 head 和整段序列并行执行同样的数据流。
-
-### Mask 如何加入
-
-对于 causal LM，不能看到未来 token。通常会在 softmax 前对未来位置加一个很大的负数：
-
-```math
-S=S+M
-```
-
-这里 $S$ 是 attention scores，$M$ 是 mask 矩阵。未来位置通常填一个很大的负数，例如 `-1e9`，softmax 后概率会接近 0。
-
-其中未来位置 mask 为：
-
-```text
--inf
-```
-
-softmax 后这些位置概率接近 0。
-
-这保证第 `t` 个位置只能关注 `<= t` 的位置。
-
-### PyTorch shape 对照
-
-下面的 PyTorch 代码使用 CPU 张量，输入 `q/k:[B,T,d_k]`、`v:[B,T,d_v]`，输出为 `[B,T,d_v]` 和 `[B,T,T]` 权重。自定义函数把布尔 `allowed_mask=True` 解释为“允许访问”；示例会检查形状、有限值和全屏蔽行。运行后应看到输出 `[2,4,8]`、权重 `[2,4,4]`，以及未来位置权重为零。
-
-```python
-import math
-import torch
-
-
-def scaled_dot_product_attention(q, k, v, allowed_mask=None):
-    # q, k: [B, T, d_k]
-    # v:    [B, T, d_v]
-    if q.ndim != 3 or k.ndim != 3 or v.ndim != 3:
-        raise ValueError("q, k, and v must have shape [B, T, D]")
-    if q.size(0) != k.size(0) or q.size(0) != v.size(0):
-        raise ValueError("q, k, and v must have the same batch size")
-    if k.size(1) != v.size(1) or q.size(-1) != k.size(-1):
-        raise ValueError("key/value lengths and query/key widths must match")
-    if q.size(1) == 0 or k.size(1) == 0 or q.size(-1) == 0 or v.size(-1) == 0:
-        raise ValueError("sequence lengths and feature widths must be non-zero")
-    if not all(t.is_floating_point() for t in (q, k, v)):
-        raise TypeError("q, k, and v must be floating-point tensors")
-    if len({t.dtype for t in (q, k, v)}) != 1 or len({t.device for t in (q, k, v)}) != 1:
-        raise ValueError("q, k, and v must use the same dtype and device")
-    if not all(torch.isfinite(t).all() for t in (q, k, v)):
-        raise ValueError("q, k, and v must contain only finite values")
-
-    d_k = q.size(-1)
-    scores = q @ k.transpose(-2, -1) / math.sqrt(d_k)  # [B, T, T]
-
-    if allowed_mask is not None:
-        if allowed_mask.dtype != torch.bool:
-            raise TypeError("allowed_mask must be a boolean tensor")
-        if allowed_mask.device != q.device:
-            raise ValueError("allowed_mask must be on the same device as q")
-        try:
-            allowed_mask = torch.broadcast_to(allowed_mask, scores.shape)
-        except RuntimeError as exc:
-            raise ValueError("allowed_mask must broadcast to [B, T_q, T_k]") from exc
-        if not allowed_mask.any(dim=-1).all():
-            raise ValueError("every query row must have at least one allowed key")
-        scores = scores.masked_fill(~allowed_mask, float("-inf"))
-
-    weights = torch.softmax(scores, dim=-1)             # [B, T, T]
-    output = weights @ v                                # [B, T, d_v]
-    return output, weights
-
-
-B, T, d = 2, 4, 8
-q = torch.randn(B, T, d)
-k = torch.randn(B, T, d)
-v = torch.randn(B, T, d)
-
-output, weights = scaled_dot_product_attention(q, k, v)
-print(output.shape)   # [2, 4, 8]
-print(weights.shape)  # [2, 4, 4]
-
-causal = torch.tril(torch.ones(T, T, dtype=torch.bool))
-causal_output, causal_weights = scaled_dot_product_attention(
-    q, k, v, allowed_mask=causal
-)
-assert torch.count_nonzero(torch.triu(causal_weights, diagonal=1)) == 0
-try:
-    scaled_dot_product_attention(q, k, v, allowed_mask=torch.zeros_like(causal))
-except ValueError as exc:
-    print("all-masked row rejected:", exc)
-```
-
-### Causal Mask 代码
-
-```python
-import torch
-
-T = 4
-causal_mask = torch.tril(torch.ones(T, T, dtype=torch.bool))  # [T, T], True = allowed
-print(causal_mask)
-```
-
-这个独立片段只生成可见性矩阵，不依赖前一个代码块中的 `q/k/v`。它可 broadcast 到自定义 attention helper 的 `[B,T,T]` scores；传给 `nn.MultiheadAttention` 时要注意该 API 对布尔 mask 的约定相反，`True` 表示屏蔽。
-
-### 用 NumPy 从零实现 Attention
-
-下面这个 demo 使用 NumPy 2.4.6 和固定随机种子。输入 `q/k/v:[T,d]`，输出 attention 结果和 `[T,T]` 权重；它检查空序列、shape 不匹配和非有限值，并打印 full/causal 权重矩阵供逐行核对。代码是单头、单序列的教学实现。
-
-```python
-import numpy as np
-
-
-def softmax(x, axis=-1):
-    if x.size == 0 or not np.isfinite(x).all():
-        raise ValueError("softmax input must be non-empty and finite")
-    x = x - x.max(axis=axis, keepdims=True)
-    exp_x = np.exp(x)
-    return exp_x / exp_x.sum(axis=axis, keepdims=True)
-
-
-def attention(q, k, v, causal=False):
-    # q, k, v: [T, d]
-    if q.ndim != 2 or k.ndim != 2 or v.ndim != 2:
-        raise ValueError("q, k, and v must have shape [T, D]")
-    if q.shape[0] == 0 or k.shape[0] == 0 or q.shape[1] == 0:
-        raise ValueError("sequence lengths and query/key widths must be non-zero")
-    if q.shape[0] != k.shape[0] or k.shape[0] != v.shape[0]:
-        raise ValueError("this self-attention demo requires equal sequence lengths")
-    if q.shape[1] != k.shape[1] or not all(np.isfinite(t).all() for t in (q, k, v)):
-        raise ValueError("feature widths must match and inputs must be finite")
-    d_k = q.shape[-1]
-    scores = q @ k.T / np.sqrt(d_k)  # [T, T]
-    if not np.isfinite(scores).all():
-        raise ValueError("attention scores overflowed to a non-finite value")
-
-    if causal:
-        mask = np.triu(np.ones_like(scores), k=1).astype(bool)
-        scores = np.where(mask, -1e9, scores)
-
-    weights = softmax(scores, axis=-1)
-    output = weights @ v
-    return output, weights
-
-
-np.random.seed(0)
-T, d = 4, 3
-x = np.random.normal(size=(T, d))
-wq = np.random.normal(size=(d, d))
-wk = np.random.normal(size=(d, d))
-wv = np.random.normal(size=(d, d))
-
-q = x @ wq
-k = x @ wk
-v = x @ wv
-
-full_output, full_weights = attention(q, k, v, causal=False)
-causal_output, causal_weights = attention(q, k, v, causal=True)
-
-print("full attention weights:")
-print(np.round(full_weights, 3))
-print("causal attention weights:")
-print(np.round(causal_weights, 3))
-
-try:
-    attention(q[:0], k[:0], v[:0])
-except ValueError as exc:
-    print("empty sequence rejected:", exc)
-```
-
-观察 `causal attention weights` 的右上角：当前位置不能关注未来 token，所以对应概率接近 0。
-
-### 复杂度分析
-
-标准 full attention 需要计算 `[T, T]` attention matrix。
-
-计算复杂度大致是：
-
-```math
-O(T^2d)
-```
-
-显存复杂度主要来自 attention weights：
-
-```math
-O(T^2)
-```
-
-这就是为什么长上下文很贵。
-
-如果序列长度从 4K 增加到 8K，attention matrix 大小约变成 4 倍。
-
-下面的标准库代码输入四个序列长度，输出每条序列一个 `[T,T]` FP16 score 矩阵的理想化大小。它忽略 batch、head、反向状态和其他激活；例如 `T=8192` 时这一张矩阵是 `128 MiB`，不是整个模型的显存需求。
-
-```python
-for seq_len in [1024, 2048, 4096, 8192]:
-    entries = seq_len * seq_len
-    bytes_fp16 = entries * 2
-    mib = bytes_fp16 / 1024 / 1024
-    print(f"T={seq_len:5d}, attention matrix={entries:12d} elements, fp16={mib:8.1f} MiB")
-```
-
-这个 demo 只估算单个 attention matrix 的存储量。真实训练还会有 batch、head、反向传播中间状态、Q/K/V、MLP 激活等开销，所以长上下文实际显存压力会更大。
-
-### Attention 变体总览
-
-不同 attention 变体本质上都在回答一个问题：
-
-```text
-如何在质量、计算成本、显存、长上下文能力和推理效率之间做 trade-off？
-```
-
-下面先给总览，后续相关章节会展开。
-
-### Full Attention
-
-Full attention 指每个 token 都可以关注所有 token。
-
-在非 causal 场景中：
-
-```text
-第 i 个 token 可以看 1..T 所有位置
-```
-
-优点：
-
-1. 信息交互最充分。
-2. 任意 token 可以直接建立联系。
-3. 表达能力强。
-
-缺点：
-
-1. $O(T^2)$ 成本高。
-2. 长上下文显存压力大。
-
-适用场景：
-
-1. BERT 类 encoder。
-2. 非自回归编码任务。
-3. 序列长度不太长的场景。
-
-### Causal Attention
-
-Causal attention 是 GPT 类模型使用的 attention。
-
-第 `i` 个 token 只能关注：
-
-```math
-1,\ldots,i
-```
-
-优点：
-
-1. 符合自回归生成。
-2. 防止看到未来 token。
-3. 训练目标和推理一致。
-
-缺点：
-
-1. 仍然是 $O(T^2)$。
-2. 生成时逐 token decode，推理延迟高。
-
-适用场景：
-
-1. GPT。
-2. Causal LM。
-3. 文本生成和代码生成。
-
-### Local / Sliding Window Attention
-
-Local attention 让每个 token 只关注附近窗口内的 token。
-
-例如窗口大小是 `w`：
-
-第 $i$ 个 token 只关注 $i-w$ 到 $i+w$。
-
-优点：
-
-1. 复杂度从 $O(T^2)$ 降到约 $O(Tw)$。
-2. 适合很长序列。
-3. 局部依赖建模高效。
-
-缺点：
-
-1. 远距离信息交互受限。
-2. 需要额外机制传递全局信息。
-
-适用场景：
-
-1. 长文建模。
-2. 局部相关性强的任务。
-3. 部分长上下文 LLM。
-
-### Sparse Attention
-
-Sparse attention 只计算部分 token pair 的 attention。
-
-常见稀疏模式：
-
-1. local window。
-2. global token。
-3. block sparse。
-4. strided pattern。
-5. random pattern。
-
-优点：
-
-1. 降低计算和显存。
-2. 可以支持更长上下文。
-3. 设计灵活。
-
-缺点：
-
-1. 稀疏模式设计复杂。
-2. 可能损失全局依赖。
-3. 硬件效率不一定好。
-
-适用场景：
-
-1. 长上下文模型。
-2. 文档建模。
-3. 特定结构化序列任务。
-
-### Linear Attention
-
-Linear attention 试图把 attention 的复杂度从 $O(T^2)$ 降到 $O(T)$。
-
-标准 attention 的瓶颈是：
-
-```math
-\mathrm{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V
-```
-
-linear attention 通常通过 kernel trick 或特征映射，把计算顺序改写，避免显式构造 `[T, T]` attention matrix。
-
-非常粗略地说，它可能把某类 attention 写成：
-
-```math
-\mathrm{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V
-```
-
-近似或改造成：
-
-```math
-\phi(Q)\left(\phi(K)^T V\right)
-```
-
-这样可以先聚合 $K$ 和 $V$，再和 $Q$ 结合。这个式子只是说明“改变计算顺序”的示意，不是所有 linear attention 的统一定义；实际方法通常还需要归一化项，causal 版本还要维护随位置递推的状态。因此，不能只凭这一个式子断言它与 softmax attention 完全等价。
-
-优点：
-
-1. 理论复杂度可接近 $O(T)$。
-2. 更适合长序列。
-3. 某些形式适合流式处理。
-
-缺点：
-
-1. 通常是近似或改变 attention 形式。
-2. 质量可能不如 full attention。
-3. 工程实现和数值稳定性更复杂。
-4. 在现代 GPU 上理论复杂度低不一定实际更快。
-
-适用场景：
-
-1. 超长序列研究。
-2. 流式序列建模。
-3. 对全局精确 attention 要求不高的任务。
-
-### FlashAttention
-
-FlashAttention 不是改变 attention 数学结果，而是改变计算方式。
-
-它仍然计算精确 full attention，但通过 IO-aware 分块计算减少显存读写和中间矩阵存储。
-
-优点：
-
-1. 在相同数值精度和实现假设下，它计算的是与标准 attention 相同的数学结果，差异主要来自浮点舍入，而不是主动近似 attention。
-2. 显存更省。
-3. 速度更快。
-4. 已广泛用于现代 LLM 训练和推理。
-
-缺点：
-
-1. 依赖高效 kernel 实现。
-2. 对硬件和 shape 有要求。
-3. 不改变 $O(T^2)$ 的理论交互规模。
-
-适用场景：
-
-1. 大模型训练。
-2. 长上下文训练。
-3. 高性能推理。
-
-### MQA 和 GQA
-
-MQA 和 GQA 主要优化推理时 KV Cache。
-
-MHA 中每个 query head 都有自己的 K/V head。
-
-MQA 让多个 query head 共享同一组 K/V。
-
-GQA 介于两者之间，让一组 query heads 共享一组 K/V。
-
-优点：
-
-1. 减少 KV Cache 显存。
-2. 提升 decode 阶段吞吐。
-3. 对大模型推理很重要。
-
-缺点：
-
-1. 可能影响模型质量。
-2. 需要在训练时设计好结构。
-
-适用场景：
-
-1. 大模型推理。
-2. 长上下文生成。
-3. 对 KV Cache 显存敏感的服务。
-
-第 10 讲会进一步讲 MHA、MQA、GQA。
-
-### 变体对比表
-
-| 类型 | 核心思想 | 复杂度直觉 | 优点 | 缺点 | 常见场景 |
-| --- | --- | --- | --- | --- | --- |
-| Full Attention | 所有 token 两两交互 | $O(T^2)$ | 表达力强 | 长序列贵 | BERT、encoder |
-| Causal Attention | 只能看过去 | $O(T^2)$ | 适合生成 | decode 慢 | GPT |
-| Local Attention | 只看局部窗口 | $O(Tw)$ | 长序列省 | 全局依赖弱 | 长文 |
-| Sparse Attention | 只算部分连接 | 低于 $O(T^2)$ | 可扩展 | 模式复杂 | 长上下文 |
-| Linear Attention | 避免显式 $T\times T$ 矩阵 | 近似 $O(T)$ | 理论高效 | 质量和稳定性挑战 | 超长序列研究 |
-| FlashAttention | 优化精确 attention 计算 | 交互仍 $O(T^2)$ | 快、省显存 | 依赖 kernel | 现代 LLM |
-| MQA/GQA | 共享 K/V heads | 降 KV cache | 推理省显存 | 可能损质量 | LLM serving |
-
-### Attention 实现的失败模式（第 9 讲）
-
-#### 坑 1：只看理论复杂度，不看硬件效率
-
-Linear attention 理论上更低复杂度，但在 GPU 上不一定比优化良好的 FlashAttention 更快。
-
-#### 坑 2：把 FlashAttention 误解成近似 attention
-
-FlashAttention 的核心是 IO 优化，通常不是通过牺牲 attention 数学结果换速度。
-
-#### 坑 3：长上下文只靠 attention 变体不够
-
-长上下文还涉及位置编码、数据构造、训练长度、KV Cache、评估和检索策略。
-
-#### 坑 4：稀疏模式破坏关键依赖
-
-如果任务需要远距离精确信息交互，local 或 sparse attention 可能漏掉关键 token。
-
-### Scaled Dot-Product Attention 的完整推导
-
-给定
-
-```math
-X\in\mathbb{R}^{B\times T\times d_{\mathrm{model}}}
-```
-
-单头投影产生：
-
-```math
-Q=XW_Q,\qquad K=XW_K,\qquad V=XW_V
-```
-
-若 head dimension 分别为 d_k 和 d_v，则：
-
-```math
-Q,K\in\mathbb{R}^{B\times T\times d_k},
-\qquad
-V\in\mathbb{R}^{B\times T\times d_v}
-```
-
-分数矩阵和输出依次为：
-
-```math
-S=\frac{QK^T}{\sqrt{d_k}}\in\mathbb{R}^{B\times T\times T},
-\qquad
-A=\mathrm{softmax}(S+M),
-\qquad
-Y=AV\in\mathbb{R}^{B\times T\times d_v}
-```
-
-S[b,i,j] 表示位置 i 对位置 j 的匹配分数；M 在允许位置为 0，在禁止位置为负无穷或等价的大负值。mask 必须在 softmax 前加入，否则归一化后的权重和会被破坏。
-
-#### 为什么是 sqrt(d_k)
-
-若 Q 和 K 的各维近似独立、均值为零、方差为一，则点积的方差会随 d_k 增长。分数尺度变大后，softmax 更容易饱和，少数位置接近 1，其他位置接近 0，梯度也更难训练。除以 sqrt(d_k) 是对分数尺度的控制，不是为了改变语义相似度的定义。
-
-#### 从 shape 到显存
-
-attention score 的核心矩阵是 [B,h,T,T]。即便 kernel 不把它完整写回显存，计算仍然具有 token 两两交互的结构。full attention 的理论计算量大致为 O(BhT²d_h)，中间状态和反向传播还会带来额外开销。
-
-local、sparse 和线性 attention 通过改变连接或计算顺序降低某些成本，但可能改变表达能力、精确性或硬件利用率。FlashAttention 主要通过分块和 IO 优化，在相同数学目标下减少中间读写；它与 sparse attention 不是同一类改动。
-
-#### 变体选择要看 workload
-
-选择 attention 变体时应固定质量任务、长度分布、硬件、batch、精度和 kernel 版本，分别测：
-
-- 训练吞吐和峰值显存；
-- prefill 与 decode 延迟；
-- 长距离检索和多跳任务；
-- 数值误差与梯度稳定性；
-- 长短上下文回归；
-- 单位成功任务成本。
-
-理论 O(T) 不保证实际 GPU 更快，精确 full attention 也不意味着所有任务都值得承受其成本。
-
-### 容易混淆的 attention 优化（第 9 讲）
-
-1. 误区：linear attention 一定比 full attention 好。
-   纠正：linear attention 有理论复杂度优势，但质量、稳定性和硬件效率不一定更好。
-
-2. 误区：FlashAttention 改变了 attention 公式。
-   纠正：它主要改变计算方式，不是改变数学定义。
-
-3. 误区：所有 attention 都适合生成模型。
-   纠正：生成模型通常需要 causal 约束，不能看未来。
-
-4. 误区：局部 attention 一定能处理长文。
-   纠正：它省成本，但可能牺牲远距离依赖。
-
-### 练习：从公式推到 shape 和成本（第 9 讲）
-
-1. 推导 $Q:[B,T,d]$ 和 $K:[B,T,d]$ 相乘后 scores 的 shape。
-2. 用 PyTorch 实现 causal scaled dot-product attention。
-3. 解释为什么 attention scores 需要 mask 后再 softmax。
-4. 比较 full attention、local attention、linear attention 的优缺点。
-5. 用自己的话解释 FlashAttention 为什么是系统优化而不是建模近似。
-
-### 本节回顾（第 9 讲）
-
-关键结论：
-
-1. 标准 attention 公式是 $\mathrm{softmax}(QK^T/\sqrt{d_k})V$。
-2. $QK^T$ 计算 token 间匹配分数。
-3. 除以 $\sqrt{d_k}$ 是为了稳定 softmax。
-4. attention weights shape 是 $[B,T,T]$。
-5. 标准 attention 的核心瓶颈是 $O(T^2)$。
-6. Full、causal、local、sparse、linear、FlashAttention、MQA/GQA 都是在不同约束下做 trade-off。
-7. 讨论优化时必须区分“改变 attention 数学结构”和“优化 attention 计算实现”。
-
-关键问题：Q、K、V 如何由输入得到，为什么使用 $QK^T$，为什么除以 $\sqrt{d_k}$。
-
-## 第 10 讲：Multi-Head Attention
-
-### 从单头到多种 K/V 共享方式
-
-单头 attention 只有一套投影和一种信息混合模式，而语言中的指代、句法、局部搭配和长距离依赖并不相同。Multi-Head Attention 让多个子空间并行完成匹配；MHA、MQA 和 GQA 则进一步在表达自由度与 KV Cache 成本之间做选择。本节沿着 shape、参数量和 serving 内存逐层展开。
-
-### 为什么需要多个注意力子空间
-
-单头 attention 可以让每个 token 关注其他 token，但它只有一套 Q/K/V 投影和一套注意力模式。
-
-语言中的关系是多样的：
-
-1. 语法关系。
-2. 指代关系。
-3. 局部搭配。
-4. 长距离依赖。
-5. 位置关系。
-6. 任务格式关系。
-
-单个 attention head 很难同时建模所有关系。
-
-Multi-Head Attention 的核心想法是：让多个 head 在不同子空间里并行做 attention。
-
-### 多头的表示直觉（第 10 讲）
-
-一句话：
-
-Multi-Head Attention 让模型用多组不同的注意力视角观察同一段文本。
-
-比如句子：
-
-```text
-The animal didn't cross the street because it was too tired.
-```
-
-某个 head 可能关注指代关系：
-
-```text
-it -> animal
-```
-
-另一个 head 可能关注局部短语：
-
-```text
-too -> tired
-```
-
-另一个 head 可能关注句法结构。
-
-当然，真实模型中的 head 不一定像人类这样清晰分工，但多头结构提供了这种建模能力。
-
-### Multi-Head Attention 数据流
-
-假设输入：
-
-```text
-X: [B, T, d_model]
-```
-
-有：
-
-```math
-n_{\mathrm{heads}}=h,\qquad d_{\mathrm{head}}=d_h,\qquad d=h\cdot d_h
-```
-
-其中 `d` 表示 `d_model`，`d_h` 表示单个 head 的维度。
-
-通常先用线性层得到 Q、K、V：
-
-```math
-Q=XW_Q,
-\qquad
-K=XW_K,
-\qquad
-V=XW_V
-```
-
-如果投影后仍是 `d_model` 维：
-
-```text
-Q, K, V: [B, T, d_model]
-```
-
-然后 reshape 成多头：
-
-```text
-[B, T, d_model] -> [B, h, T, d_head]
-```
-
-每个 head 独立做 attention：
-
-```math
-H_i=\mathrm{Attention}(Q_i,K_i,V_i)
-```
-
-得到：
-
-```text
-heads: [B, h, T, d_head]
-```
-
-再 concat：
-
-```text
-[B, h, T, d_head] -> [B, T, h * d_head] = [B, T, d_model]
-```
-
-最后经过 output projection：
-
-```math
-O=H_{\mathrm{concat}}W_O
-```
-
-### 公式
-
-Multi-Head Attention 可以写成：
-
-```math
-H_i=\mathrm{Attention}(XW_Q^i,XW_K^i,XW_V^i)
-```
-
-```math
-\mathrm{MHA}(X)=\mathrm{Concat}(H_1,\ldots,H_h)W_O
-```
-
-其中每个 head 有自己的 `W_Q^i, W_K^i, W_V^i`。
-
-### PyTorch 最小实现（第 10 讲）
-
-下面是一个简化版 MHA，只用于理解 shape。输入为 `x:[B,T,d_model]`，可选布尔 `allowed_mask` 中 `True` 表示允许访问；输出仍为 `[B,T,d_model]`。CPU 示例使用 `B=2,T=4,d_model=32,h=4`，预期打印 `[2,4,32]`；不含 RoPE、KV Cache 或生产 kernel。
-
-```python
-import math
-import torch
-import torch.nn as nn
-
-
-class MultiHeadAttention(nn.Module):
-    def __init__(self, d_model, num_heads):
-        super().__init__()
-        if isinstance(d_model, bool) or not isinstance(d_model, int) or d_model <= 0:
-            raise ValueError("d_model must be a positive integer")
-        if isinstance(num_heads, bool) or not isinstance(num_heads, int) or num_heads <= 0:
-            raise ValueError("num_heads must be a positive integer")
-        if d_model % num_heads != 0:
-            raise ValueError("d_model must be divisible by num_heads")
-        self.d_model = d_model
-        self.num_heads = num_heads
-        self.head_dim = d_model // num_heads
-
-        self.q_proj = nn.Linear(d_model, d_model)
-        self.k_proj = nn.Linear(d_model, d_model)
-        self.v_proj = nn.Linear(d_model, d_model)
-        self.out_proj = nn.Linear(d_model, d_model)
-
-    def forward(self, x, allowed_mask=None):
-        # x: [B, T, d_model]
-        if x.ndim != 3 or x.size(-1) != self.d_model or x.size(1) == 0:
-            raise ValueError("x must be non-empty with shape [B, T, d_model]")
-        B, T, _ = x.shape
-
-        q = self.q_proj(x)
-        k = self.k_proj(x)
-        v = self.v_proj(x)
-
-        # [B, T, d_model] -> [B, h, T, head_dim]
-        q = q.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
-        k = k.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
-        v = v.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
-
-        scores = q @ k.transpose(-2, -1) / math.sqrt(self.head_dim)  # [B, h, T, T]
-
-        if allowed_mask is not None:
-            if allowed_mask.dtype != torch.bool or allowed_mask.device != x.device:
-                raise ValueError("allowed_mask must be boolean and on the same device as x")
-            try:
-                allowed_mask = torch.broadcast_to(allowed_mask, scores.shape)
-            except RuntimeError as exc:
-                raise ValueError("allowed_mask must broadcast to [B, h, T, T]") from exc
-            if not allowed_mask.any(dim=-1).all():
-                raise ValueError("every query row must have at least one allowed key")
-            scores = scores.masked_fill(~allowed_mask, float("-inf"))
-
-        weights = torch.softmax(scores, dim=-1)
-        out = weights @ v  # [B, h, T, head_dim]
-
-        # [B, h, T, head_dim] -> [B, T, d_model]
-        out = out.transpose(1, 2).contiguous().view(B, T, self.d_model)
-        return self.out_proj(out)
-
-
-x = torch.randn(2, 4, 32)
-mha = MultiHeadAttention(d_model=32, num_heads=4)
-y = mha(x)
-print(y.shape)  # [2, 4, 32]
-```
-
-### 最小 demo：用断言检查 MHA 的 shape
-
-下面这个 demo 不追求完整工程封装，只用最少代码检查多头拆分、scores、mask、concat 的 shape。在调试 MHA 时，先把这些 shape 断言跑通，很多错误可以在完整训练前暴露。
-
-```python
-import math
-import torch
-
-
-def mini_mha(x, num_heads, causal=False):
-    # x: [B, T, d_model]
-    if x.ndim != 3 or x.size(0) == 0 or x.size(1) == 0 or x.size(2) == 0:
-        raise ValueError("x must have a non-empty [B, T, d_model] shape")
-    batch_size, seq_len, d_model = x.shape
-    if isinstance(num_heads, bool) or not isinstance(num_heads, int) or num_heads <= 0:
-        raise ValueError("num_heads must be a positive integer")
-    if d_model % num_heads != 0:
-        raise ValueError("d_model must be divisible by num_heads")
-    head_dim = d_model // num_heads
-
-    q_proj = torch.nn.Linear(d_model, d_model, bias=False)
-    k_proj = torch.nn.Linear(d_model, d_model, bias=False)
-    v_proj = torch.nn.Linear(d_model, d_model, bias=False)
-    out_proj = torch.nn.Linear(d_model, d_model, bias=False)
-
-    q = q_proj(x).view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)
-    k = k_proj(x).view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)
-    v = v_proj(x).view(batch_size, seq_len, num_heads, head_dim).transpose(1, 2)
-
-    assert q.shape == (batch_size, num_heads, seq_len, head_dim)
-    assert k.shape == (batch_size, num_heads, seq_len, head_dim)
-    assert v.shape == (batch_size, num_heads, seq_len, head_dim)
-
-    scores = q @ k.transpose(-2, -1) / math.sqrt(head_dim)
-    assert scores.shape == (batch_size, num_heads, seq_len, seq_len)
-
-    if causal:
-        mask = torch.tril(torch.ones(seq_len, seq_len, dtype=torch.bool))
-        scores = scores.masked_fill(~mask.view(1, 1, seq_len, seq_len), float("-inf"))
-
-    weights = torch.softmax(scores, dim=-1)
-    out = weights @ v
-    assert out.shape == (batch_size, num_heads, seq_len, head_dim)
-
-    out = out.transpose(1, 2).contiguous().view(batch_size, seq_len, d_model)
-    assert out.shape == (batch_size, seq_len, d_model)
-    return out_proj(out)
-
-
-x = torch.randn(2, 4, 32)
-y = mini_mha(x, num_heads=4, causal=True)
-print(y.shape)
-try:
-    mini_mha(x, num_heads=0)
-except ValueError as exc:
-    print("invalid head count rejected:", exc)
-```
-
-输出应为：
-
-```text
-torch.Size([2, 4, 32])
-```
-
-### 参数量估算
-
-如果忽略 bias，MHA 的主要参数是：
-
-```math
-W_Q\in\mathbb{R}^{d\times d},\qquad
-W_K\in\mathbb{R}^{d\times d},\qquad
-W_V\in\mathbb{R}^{d\times d},\qquad
-W_O\in\mathbb{R}^{d\times d}
-```
-
-其中 `d` 表示 `d_model`。
-
-总参数量约：
-
-```math
-4d^2
-```
-
-例如 `d_model=4096` 时，四个 `[d,d]` 投影矩阵共有 `4×4096²=67,108,864` 个权重；若每个线性层有 bias，还要额外计入约 `4d` 个参数。该数值不随 head 数变化，前提是 `d_model` 固定且投影仍为 `d_model→d_model`。
-
-注意：增加 head 数不一定增加总参数量。如果 `d_model` 固定，`num_heads` 增加时 `head_dim` 通常变小，总投影矩阵仍然是 `[d_model, d_model]`。
-
-head 数影响的是注意力子空间划分方式，而不是简单线性增加参数量。
-
-### head 数越多越好吗
-
-不一定。
-
-更多 head 的潜在好处：
-
-1. 更多注意力子空间。
-2. 更灵活的信息路由。
-3. 可能捕捉更多关系模式。
-
-但也有问题：
-
-1. 如果 `d_model` 固定，head 越多，`head_dim` 越小。
-2. 单个 head 表达能力可能下降。
-3. 过多 head 可能冗余。
-4. 推理和 kernel 实现会受 shape 影响。
-
-现代模型通常会在模型规模、硬件效率、训练稳定性之间选择合适 head 数。
-
-### MHA、MQA、GQA 的区别
-
-#### MHA：Multi-Head Attention
-
-标准 MHA 中，每个 query head 都有自己的 K/V head。
-
-如果有 32 个 query heads：
-
-```text
-Q heads: 32
-K heads: 32
-V heads: 32
-```
-
-优点：表达能力强。
-
-缺点：推理时 KV Cache 大。
-
-#### MQA：Multi-Query Attention
-
-MQA 中，多个 query heads 共享同一组 K/V。
-
-例如：
-
-```text
-Q heads: 32
-K heads: 1
-V heads: 1
-```
-
-优点：
-
-1. KV Cache 显著减少。
-2. decode 阶段更省显存。
-3. 推理吞吐更好。
-
-缺点：
-
-1. K/V 表达能力下降。
-2. 可能影响模型质量。
-
-#### GQA：Grouped-Query Attention
-
-GQA 是 MHA 和 MQA 的折中。
-
-多个 query heads 分组共享 K/V。
-
-例如：
-
-```text
-Q heads: 32
-K/V heads: 8
-```
-
-每 4 个 query heads 共享一组 K/V。
-
-优点：
-
-1. 比 MHA 更省 KV Cache。
-2. 比 MQA 保留更多 K/V 表达能力。
-3. 现代 LLM 常用。
-
-### 为什么 MQA/GQA 对推理重要
-
-自回归生成时，每生成一个 token，都需要保存历史 token 的 K 和 V，这就是 KV Cache。
-
-KV Cache 大小和以下因素相关：
-
-1. 层数。
-2. batch size。
-3. sequence length。
-4. K/V head 数。
-5. head_dim。
-6. 数据类型。
-
-用一个简化的字节数估算，可以写成：
-
-```math
-M_{\mathrm{KV}}\approx 2\cdot L\cdot B\cdot T\cdot n_{\mathrm{kv}}\cdot d_h\cdot b
-```
-
-其中 `2` 表示 K 和 V 两份缓存，`L` 是层数，`B` 是并发序列数，`T` 是每条序列当前缓存长度，`n_{\mathrm{kv}}` 是 K/V head 数，`d_h` 是 head dimension，`b` 是每个标量占用的字节数。MHA 取 `n_{\mathrm{kv}}=n_q`，MQA 取 `n_{\mathrm{kv}}=1`，GQA 则位于两者之间。这个估算忽略了 block 对齐、分页元数据和临时 workspace，但足以说明为什么减少 K/V head 会直接影响 serving 容量。
-
-MHA 中 K/V head 多，KV Cache 大。
-
-MQA/GQA 减少 K/V head 数，因此能显著降低 KV Cache 显存。
-
-这对长上下文和高并发 serving 很关键。
-
-例如，取 `L=32` 层、单条 `T=8192` token 序列、`d_h=128`、BF16（每个元素 2 字节），并假设 32 个 query heads：
-
-| 结构 | `n_kv` | 单序列 K/V 原始缓存估算 |
-| --- | ---: | ---: |
-| MHA | 32 | 4 GiB |
-| GQA | 8 | 1 GiB |
-| MQA | 1 | 128 MiB |
-
-表中仅按前面的公式计算 K 和 V 的元素载荷，`1 GiB=2^30` 字节；它不包括分页对齐、元数据、临时 buffer 或运行时碎片。实际占用须绑定模型配置和 serving 实现。并发序列数为 `B` 时，理想化估算再乘以 `B`。
-
-### MHA/MQA/GQA 对比表
-
-| 类型 | Q heads | K/V heads | 优点 | 缺点 | 常见场景 |
-| --- | --- | --- | --- | --- | --- |
-| MHA | 多个 | 和 Q 一样多 | 表达能力强 | KV Cache 大 | 标准 Transformer |
-| MQA | 多个 | 1 组 | 推理省显存 | 可能损质量 | 极致推理优化 |
-| GQA | 多个 | 少数组 | 质量和效率折中 | 设计更复杂 | 现代 LLM |
-
-### 多头实现与缓存的失败模式（第 10 讲）
-
-#### 坑 1：reshape / transpose 写错
-
-MHA 代码最常见 bug 是 shape 变换错。尤其是 `[B,T,h,d]` 和 `[B,h,T,d]` 混淆。
-
-#### 坑 2：忘记 contiguous
-
-transpose 后 tensor 可能不连续，直接 view 可能报错或行为异常。常见写法是 `.transpose(...).contiguous().view(...)`。
-
-#### 坑 3：mask shape 不匹配
-
-MHA scores shape 是 `[B,h,T,T]`，mask 需要能 broadcast 到这个形状。
-
-#### 坑 4：只看参数量，不看 KV Cache
-
-MHA、MQA、GQA 参数量差异不是唯一重点。推理服务中 KV Cache 显存更关键。
-
-#### 坑 5：把 head 数增加理解为参数必然增加
-
-在 `d_model` 固定时，head 数变化通常不改变 Q/K/V/O 总参数量，只改变每个 head 的维度。
-
-### MHA、MQA 与 GQA 的适用边界（第 10 讲）
-
-MHA 优点：
-
-1. 多个注意力子空间。
-2. 表达能力强。
-3. 适合复杂关系建模。
-
-MHA 缺点：
-
-1. KV Cache 大。
-2. attention 计算仍是 $O(T^2)$。
-3. shape 实现复杂。
-
-MQA/GQA 优点：
-
-1. 降低 KV Cache 显存。
-2. 提升推理吞吐。
-3. 更适合大规模 serving。
-
-MQA/GQA 缺点：
-
-1. 可能损失模型质量。
-2. 需要在模型结构中提前设计。
-3. 不同模型配置差异大。
-
-### Multi-Head、MQA 与 GQA 的同一张账本
-
-Multi-Head Attention 首先把宽度 d_model 划成 h 个子空间，每个 head 计算自己的 attention，再拼接回 d_model。若 d_model=h·d_head，则 shape 变化为：
-
-```math
-[B,T,d]\rightarrow[B,h,T,d_h]
-\rightarrow[B,h,T,T]
-\rightarrow[B,h,T,d_h]
-\rightarrow[B,T,d]
-```
-
-在 d 固定且 Q/K/V/O 都是 d 到 d 的投影时，MHA 的主要参数量约为 4d²；增加 head 数通常改变 head_dim，而不是让参数量线性增加。head 数的价值在于子空间划分和硬件 shape，不能简单理解为“越多越强”。
-
-#### KV head 是 serving 账本
-
-自回归 decode 保存历史 K/V，简化的 KV Cache 字节数为：
-
-```math
-M_{\mathrm{KV}}
-\approx
-2LBTn_{\mathrm{kv}}d_hb
-```
-
-L 是层数，B 是并发序列数，T 是缓存长度，n_kv 是 K/V head 数，d_h 是每个 head 的宽度，b 是每个标量的字节数。MHA 让 n_kv 接近 query head 数，MQA 令其接近 1，GQA 介于两者之间，因此 MQA/GQA 主要改变推理内存和吞吐。
-
-但减少 K/V head 不是免费优化。共享 K/V 可能降低表示自由度，质量影响取决于模型大小、任务、训练方式和是否做了适配。评估时应同时报告长上下文质量、prefill/decode、并发数、峰值显存和输出正确率。
-
-#### shape bug 比公式忘记更常见
-
-MHA 工程中优先检查：
-
-1. [B,T,h,d_h] 与 [B,h,T,d_h] 的 transpose；
-2. transpose 后 view 是否经过 contiguous；
-3. mask 是否能 broadcast 到 [B,h,T,T]；
-4. K/V head 是否按 GQA 分组正确扩展；
-5. 输出 concat 是否回到 [B,T,d_model]；
-6. KV Cache 的 batch、层、位置和 dtype 是否一致。
-
-这些断言应成为单元测试，而不是等到完整模型训练后才发现。
-
-### 容易混淆的多头结论（第 10 讲）
-
-1. 误区：每个 head 一定学到人类可解释的不同功能。
-   纠正：多头提供不同子空间，但具体 head 功能不一定稳定可解释。
-
-2. 误区：head 越多越好。
-   纠正：head 多会降低单 head 维度，可能带来冗余和效率问题。
-
-3. 误区：MQA/GQA 只是训练优化。
-   纠正：它们对推理 KV Cache 和 serving 成本非常关键。
-
-4. 误区：MHA 参数量随 head 数线性增加。
-   纠正：在 `d_model` 固定时通常不是这样。
-
-### 练习：从 head 数追踪缓存成本（第 10 讲）
-
-1. 假设 `d_model=4096`，`num_heads=32`，计算 `head_dim`。
-2. 推导 MHA 中 scores 的 shape。
-3. 估算忽略 bias 时 MHA 的参数量。
-4. 比较 MHA、MQA、GQA 对 KV Cache 的影响。
-5. 修改上面的 PyTorch 代码，加入 causal mask。
-
-### 本节回顾（第 10 讲）
-
-关键结论：
-
-1. Multi-Head Attention 让模型在多个子空间并行做 attention。
-2. 输入 `[B, T, d_model]` 会被拆成 `[B, h, T, d_head]`。
-3. attention scores shape 是 $[B,h,T,T]$。
-4. 在 `d_model` 固定时，head 数变化不一定改变总参数量。
-5. MHA 表达能力强，但 KV Cache 大。
-6. MQA 共享 K/V，最省 KV Cache，但可能损质量。
-7. GQA 是 MHA 和 MQA 的折中，是现代 LLM 常见设计。
-
-关键问题：为什么需要多个 head，multi-head attention 的参数量如何计算，MHA、MQA、GQA 有什么区别。
-
-## 第 11 讲：Causal Mask 与自回归生成
-
-### 把可见性写成训练协议
-
-自回归模型的条件概率要求第 $t$ 个位置只能使用历史信息。由于训练时整段序列已经同时放在输入张量中，未来 token 必须通过 causal mask 显式排除。本节说明 mask 如何进入 softmax 前的 scores，区分它与 padding mask、teacher forcing 的作用，并把训练和增量生成连接起来。
-
-### 为什么未来信息必须被排除
-
-GPT 类模型的训练目标是：
-
-```math
-P(x_t\mid x_{1:t-1})
-```
-
-也就是第 $t$ 个 token 只能依赖前面的 token。
-
-如果训练时第 $t$ 个位置可以看到未来 token，比如 $x_{t+1}$、$x_{t+2}$，那模型就可以作弊。
-
-例如：
-
-```text
-I love machine learning
-```
-
-如果模型在预测 `machine` 时已经能看到后面的 `machine`，loss 会很低，但这不是有效学习。
-
-推理时模型不可能看到未来 token，所以训练时也必须禁止看未来。
-
-### Causal Mask 是什么
-
-Causal mask 是一个下三角 mask。
-
-对于长度为 4 的序列：
-
-```text
-位置: 1 2 3 4
-```
-
-第 1 个 token 只能看第 1 个：
-
-```text
-1 0 0 0
-```
-
-第 2 个 token 可以看第 1、2 个：
-
-```text
-1 1 0 0
-```
-
-第 3 个 token 可以看第 1、2、3 个：
-
-```text
-1 1 1 0
-```
-
-第 4 个 token 可以看第 1、2、3、4 个：
-
-```text
-1 1 1 1
-```
-
-合起来：
-
-```math
-\begin{bmatrix}
-1 & 0 & 0 & 0 \\
-1 & 1 & 0 & 0 \\
-1 & 1 & 1 & 0 \\
-1 & 1 & 1 & 1
-\end{bmatrix}
-```
-
-这就是 causal mask。
-
-### Mask 如何作用在 Attention 上
-
-attention scores shape 是：
-
-```math
-[B,h,T,T]
-```
-
-其中 $S[\ldots,i,j]$ 表示第 $i$ 个位置关注第 $j$ 个位置的分数。
-
-如果 $j>i$，说明第 $i$ 个位置在看未来，需要 mask 掉。
-
-通常做法是在 softmax 前把未来位置加上 `-inf`：
-
-```math
-S_{\mathrm{masked}}=S+M
-```
-
-未来位置：
-
-```text
--inf
-```
-
-softmax 后概率变成 0。
-
-为什么要在 softmax 前 mask？
-
-因为 softmax 会把分数归一化成概率。如果 softmax 后再 mask，概率和不再为 1，还需要重新归一化。
-
-### 最小代码：为什么要在 softmax 前 mask
-
-下面这个 demo 只演示一个位置的 attention scores。核心点是：如果 softmax 后再把未来位置置 0，剩余概率之和就不是 1；正确做法是在 softmax 前把未来位置设成很大的负数。
-
-```python
-import numpy as np
-
-
-def softmax(x):
-    x = x - np.max(x)
-    exp_x = np.exp(x)
-    return exp_x / exp_x.sum()
-
-
-scores = np.array([1.0, 2.0, 3.0, 4.0])
-allowed = np.array([1, 1, 0, 0], dtype=bool)
-
-wrong = softmax(scores)
-wrong[~allowed] = 0.0
-
-masked_scores = np.where(allowed, scores, -1e9)
-right = softmax(masked_scores)
-
-print("softmax then mask:", wrong, "sum=", wrong.sum())
-print("mask then softmax:", right, "sum=", right.sum())
-```
-
-这个例子直接展示了为什么 causal mask 要在 softmax 之前加到 scores 上。
-
-### PyTorch 代码
-
-```python
-import torch
-
-T = 4
-mask = torch.tril(torch.ones(T, T))
-print(mask)
-```
-
-输出：
-
-```text
-tensor([[1., 0., 0., 0.],
-        [1., 1., 0., 0.],
-        [1., 1., 1., 0.],
-        [1., 1., 1., 1.]])
-```
-
-下面的独立 PyTorch 示例输入 `q/k/v:[B,h,T,d]`，输出 `[B,h,T,d]`；`B=1,h=2,T=4,d=8`。它会断言未来位置权重为零，展示完整序列在训练时如何使用下三角可见性矩阵。
-
-```python
-import math
-import torch
-
-
-def causal_attention(q, k, v):
-    # q, k, v: [B, h, T, d]
-    if q.ndim != 4 or k.ndim != 4 or v.ndim != 4:
-        raise ValueError("q, k, and v must have shape [B, h, T, d]")
-    if q.shape[:2] != k.shape[:2] or q.shape[:2] != v.shape[:2]:
-        raise ValueError("q, k, and v must have the same batch and head dimensions")
-    if q.size(-1) != k.size(-1) or q.size(-2) != k.size(-2) or k.size(-2) != v.size(-2):
-        raise ValueError("query/key widths and key/value lengths must match")
-    B, h, T, d = q.shape
-    if T == 0 or d == 0 or v.size(-1) == 0:
-        raise ValueError("sequence length and feature widths must be non-zero")
-    if not all(t.is_floating_point() for t in (q, k, v)):
-        raise TypeError("q, k, and v must be floating-point tensors")
-    if len({t.dtype for t in (q, k, v)}) != 1 or len({t.device for t in (q, k, v)}) != 1:
-        raise ValueError("q, k, and v must use the same dtype and device")
-    if not all(torch.isfinite(t).all() for t in (q, k, v)):
-        raise ValueError("q, k, and v must contain only finite values")
-    scores = q @ k.transpose(-2, -1) / math.sqrt(d)  # [B, h, T, T]
-
-    allowed = torch.tril(torch.ones(T, T, dtype=torch.bool, device=q.device))
-    scores = scores.masked_fill(~allowed.view(1, 1, T, T), float("-inf"))
-
-    weights = torch.softmax(scores, dim=-1)
-    return weights @ v, weights
-
-
-B, h, T, d = 1, 2, 4, 8
-q, k, v = (torch.randn(B, h, T, d) for _ in range(3))
-output, weights = causal_attention(q, k, v)
-assert output.shape == (B, h, T, d)
-assert torch.count_nonzero(torch.triu(weights, diagonal=1)) == 0
-print(output.shape, weights.shape)
-```
-
-### 训练时为什么也要 Mask
-
-训练时我们一次输入完整序列：
-
-```math
-[x_1,x_2,x_3,x_4]
-```
-
-模型并行预测：
-
-```math
-x_2,x_3,x_4
-```
-
-因为整个序列都在输入里，如果不加 causal mask，第 1 个位置可能看到第 2、3、4 个位置。
-
-这会破坏 next-token prediction 的条件概率定义。
-
-训练时使用 causal mask，可以同时做到：
-
-1. 并行计算所有位置。
-2. 保证每个位置不能看未来。
-
-这也是 Transformer 训练高效的关键。
-
-### Teacher Forcing 和 Causal Mask 的关系
-
-训练时使用 teacher forcing：每个位置的历史上下文来自真实 token，而不是模型自己生成的 token。
-
-但 teacher forcing 并不意味着可以看未来。
-
-训练时：
-
-第 $t$ 个位置可以看到真实的 $x_{1:t-1}$。
-
-第 $t$ 个位置不能看到 $x_{t+1:T}$。
-
-Causal mask 保证第二点。
-
-所以：
-
-```text
-teacher forcing 解决训练输入稳定性
-causal mask 解决不能看未来的问题
-```
-
-### 自回归生成过程
-
-推理时没有完整答案，只能一步步生成。
-
-给定 prompt：
-
-```text
-I love
-```
-
-第 1 步：
-
-```math
-P(y_1\mid \mathrm{prompt}=\texttt{I\ love})
-```
-
-假设生成：
-
-```text
-machine
-```
-
-上下文变成：
-
-```text
-I love machine
-```
-
-第 2 步：
-
-```math
-P(y_2\mid \mathrm{context}=\texttt{I\ love\ machine})
-```
-
-继续生成：
-
-```text
-learning
-```
-
-直到生成 EOS 或达到 max tokens。
-
-### Causal LM vs Masked LM
-
-Causal LM：
-
-1. 从左到右建模。
-2. 预测下一个 token。
-3. 不能看未来。
-4. 适合生成。
-5. 典型模型：GPT。
-
-Masked LM：
-
-1. 随机 mask 输入中的某些 token。
-2. 根据双向上下文预测被 mask 的 token。
-3. 可以看左右两边上下文。
-4. 适合理解和表示学习。
-5. 典型模型：BERT。
-
-例子：
-
-```text
-The capital of France is [MASK].
-```
-
-BERT 可以同时看 `[MASK]` 左右上下文。
-
-GPT 生成时只能看左边上下文。
-
-### 为什么 GPT 用 Causal LM
-
-因为 GPT 的目标是生成。
-
-生成天然是从左到右的过程：
-
-```text
-先生成第一个 token，再生成第二个 token，再生成第三个 token
-```
-
-Causal LM 的训练目标和推理过程一致。
-
-BERT 的 masked LM 更适合理解任务，但不天然适合从左到右生成长文本。
-
-### Mask 与增量生成的失败模式（第 11 讲）
-
-#### 坑 1：mask 方向写反
-
-如果把下三角写成上三角，模型可能只能看未来或无法看历史。
-
-#### 坑 2：mask shape broadcast 错误
-
-attention scores 是 `[B,h,T,T]`，mask 需要能正确 broadcast。
-
-#### 坑 3：padding mask 和 causal mask 混淆
-
-causal mask 防止看未来，padding mask 防止看 padding token。两者解决的问题不同，但经常要合并使用。
-
-#### 坑 4：训练时漏掉 causal mask
-
-loss 可能异常低，但推理效果会很差，因为模型训练时作弊了。
-
-#### 坑 5：KV Cache 时 position 和 mask 处理错误
-
-增量推理时只输入新 token，但它要能关注历史 cache。position id 和 mask 处理错会导致生成质量异常。
-
-### Causal Mask 的适用边界（第 11 讲）
-
-Causal mask 的优点：
-
-1. 保证自回归训练目标正确。
-2. 防止信息泄漏。
-3. 允许训练时并行计算所有位置。
-4. 与生成过程一致。
-
-缺点：
-
-1. 只能使用单向上下文。
-2. 不如双向模型适合某些理解任务。
-3. 生成时容易错误累积。
-
-适用场景：
-
-1. GPT 类语言模型。
-2. 文本生成。
-3. 代码生成。
-4. 对话模型。
-5. 自回归多模态生成。
-
-### Causal Mask 是训练协议的一部分
-
-Causal mask 不是生成时才打开的开关。训练时完整序列同时位于输入张量中，正因为未来 token 已经物理存在，才必须通过 mask 保证第 i 个位置只能看到不晚于 i 的位置。
-
-对于长度 T 的序列，允许矩阵是下三角；在 scores 上：
-
-```math
-S_{\mathrm{masked}}=S+M,\qquad
-M_{ij}=
-\begin{cases}
-0,&j\le i;\\
--\infty,&j>i.
-\end{cases}
-```
-
-mask 在 softmax 前应用，才能让禁止位置的归一化权重为零。padding mask 解决无效填充，causal mask 解决未来泄漏，prefix 或 tool mask 则可能描述更复杂的可见性；它们不能互相替代。
-
-#### 用反事实检查 mask
-
-一个可靠的 mask 单元测试不只打印下三角矩阵。可以固定 Q/K/V，只修改未来位置的 Value；如果当前位置输出随未来 Value 改变，说明 mask 没有生效。再把 padding 位置填入极大值，检查有效位置输出是否保持不变。增量 decode 还要检查新 token 能读取历史 cache，却不能读取尚未生成的位置。
-
-#### Teacher forcing 不等于可见未来
-
-teacher forcing 使用真实历史 token 提高训练效率；causal mask 限制当前位置的可见范围。前者解释“历史来自哪里”，后者解释“能看多远”。训练可以并行计算所有位置，同时仍然严格遵守每个位置的条件概率。
-
-#### Causal LM 和 Masked LM
-
-Causal LM 逐步预测右侧 token，训练与生成方向一致；Masked LM 随机遮盖 token 并使用双向上下文，更适合学习表示。两者不是模型大小的差异，而是目标函数和信息可见性的差异。将 BERT 的双向训练直接套到 GPT 生成上，会破坏自回归条件。
-
-#### 增量推理的额外约束
-
-prefill 阶段可以处理整段 prompt；decode 阶段每次只处理新 token，并把历史 K/V 放在 cache 中。此时 position id、cache 长度、可见范围和 batch 中不同序列的 padding 都必须一致。一个训练时正确的 mask，若在增量路径中索引错位，仍会出现只在 serving 阶段暴露的错误。
-
-### 容易混淆的可见性约束（第 11 讲）
-
-1. 误区：训练时有完整序列，所以不需要 causal mask。
-   纠正：正因为完整序列都在输入里，所以必须 mask 未来 token。
-
-2. 误区：causal mask 和 padding mask 是一回事。
-   纠正：causal mask 防未来，padding mask 防无效 padding。
-
-3. 误区：BERT 和 GPT 只是模型大小不同。
-   纠正：它们训练目标和 attention 可见性不同。
-
-4. 误区：causal mask 只在推理时需要。
-   纠正：训练时也必须使用，否则会信息泄漏。
-
-### 练习：验证未来信息确实不可见（第 11 讲）
-
-1. 写出长度为 5 的 causal mask。
-2. 用 PyTorch 生成 `[1,1,T,T]` 形状的 causal mask。
-3. 解释为什么 mask 要在 softmax 前加入。
-4. 比较 causal mask 和 padding mask。
-5. 用自己的话解释 GPT 和 BERT 的训练目标区别。
-
-### 本节回顾（第 11 讲）
-
-关键结论：
-
-1. Causal mask 保证当前位置不能看到未来 token。
-2. 它通常是下三角 mask。
-3. mask 在 softmax 前作用于 attention scores。
-4. 训练时也必须使用 causal mask，防止信息泄漏。
-5. Teacher forcing 和 causal mask 不是一回事。
-6. GPT 是 causal LM，BERT 是 masked LM。
-7. causal mask 是 GPT 类自回归生成模型成立的关键机制。
-
-关键问题：什么是 causal mask，为什么训练时也要 mask 未来 token，causal LM 和 masked LM 有什么区别。
-
-## 第 12 讲：Transformer Block
-
-### 把组件组合成可堆叠的 block
-
-Tokenizer、embedding、attention 和 causal mask 只是数据流中的前几步。真正可以重复堆叠的 decoder-only Transformer block，还需要 MLP、normalization 和 residual connection。本节沿着一次 forward 追踪这些模块的职责、shape 不变量、Pre-LN 与 Post-LN 的差异，以及它们对深层训练和推理成本的影响。
-
-### 单层模块如何形成深层网络
-
-单独一个 attention 层还不是完整 Transformer。
-
-现代 GPT 类模型通常由很多层相同结构的 block 堆叠而成：
-
-```text
-token ids
--> embedding
--> block 1
--> block 2
--> ...
--> block N
--> final norm
--> lm head
--> logits
-```
-
-每个 block 都会进一步加工 token 表示。
-
-### Transformer Block 的核心组成
-
-一个 decoder-only Transformer block 通常包含：
-
-1. Normalization
-2. Causal self-attention
-3. Residual connection
-4. Normalization
-5. MLP / FFN
-6. Residual connection
-
-现代 LLM 多使用 Pre-LN 结构，简化写法：
-
-```math
-x=x+\mathrm{Attention}(\mathrm{Norm}(x))
-```
-
-```math
-x=x+\mathrm{MLP}(\mathrm{Norm}(x))
-```
-
-这两行就是一个 Transformer block 的核心。
-
-### 数据流直觉
-
-输入：
-
-```text
-x: [B, T, d_model]
-```
-
-第一步，self-attention 让每个 token 和上下文交互：
-
-```math
-a=\mathrm{Attention}(\mathrm{Norm}(x))
-```
-
-```math
-x=x+a
-```
-
-第二步，MLP 对每个位置独立做非线性变换：
-
-```math
-m=\mathrm{MLP}(\mathrm{Norm}(x))
-```
-
-```math
-x=x+m
-```
-
-输出仍然是：
-
-```text
-[B, T, d_model]
-```
-
-所以多个 block 可以连续堆叠。
-
-### Attention 的作用
-
-Attention 负责 token 间信息交互。
-
-它回答的问题是：
-
-```text
-当前位置应该从其他位置拿什么信息？
-```
-
-例如在一句话中：
-
-1. 代词关注它指代的名词。
-2. 动词关注主语和宾语。
-3. 代码中的变量使用关注变量定义。
-4. 数学推理中后续步骤关注前提。
-
-Attention 是跨 token 的信息混合。
-
-### MLP 的作用
-
-MLP 也叫 FFN，Feed-Forward Network。
-
-它通常对每个 token 位置独立作用，不直接混合不同 token。
-
-典型结构：
-
-```math
-\mathrm{MLP}(x)=\mathrm{Linear}_2(\mathrm{Activation}(\mathrm{Linear}_1(x)))
-```
-
-形状通常是：
-
-```text
-d_model -> d_ff -> d_model
-```
-
-其中 `d_ff` 通常比 `d_model` 大，例如 4 倍左右。SwiGLU 等门控 FFN 会用两条投影分支逐元素相乘，例如省略 bias 时可写成 `W_down(SiLU(xW_gate) ⊙ xW_value)`；它不等同于普通的两层 GELU FFN。参数量和中间维度的完整讨论见[第二册 Transformer 架构进阶](../../book-02-advanced-100/chapters/02-transformer架构进阶.md)与[百科深度学习组件](../../book-04-llm-encyclopedia/chapters/02-深度学习组件.md)。
-
-MLP 的作用可以理解为：
-
-1. 对每个 token 的表示做非线性变换。
-2. 增加模型容量。
-3. 存储和激活某些特征模式。
-4. 在 attention 混合上下文后进一步加工信息。
-
-Attention 负责“token 之间交流”，MLP 负责“每个 token 内部思考”。
-
-### 残差连接为什么重要
-
-残差连接形式：
-
-```math
-x=x+\mathrm{sublayer}(x)
-```
-
-它的作用：
-
-1. 保留原始信息。
-2. 改善梯度传播。
-3. 让深层网络更容易训练。
-4. 让每层只需要学习对表示的增量修改。
-
-如果没有残差连接，深层 Transformer 训练会困难很多。
-
-直觉：
-
-每一层不是完全重写表示，而是在已有表示上做修正。
-
-### Normalization 的作用
-
-Normalization 用来稳定激活分布和梯度传播。
-
-Transformer 中常见：
-
-1. LayerNorm
-2. RMSNorm
-
-它们通常作用在 hidden dimension 上。
-
-现代 decoder-only LLM 常采用 Pre-Norm block；归一化算子则常见 LayerNorm 或 RMSNorm。Pre-Norm 描述子层与残差的相对位置，RMSNorm 描述归一化公式，二者是不同维度的架构选择。
-
-第 13 讲会详细讲 LayerNorm、RMSNorm 和残差连接，这里先理解它们在 block 中的位置。
-
-### Pre-LN 和 Post-LN
-
-Post-LN 是原始 Transformer 常见形式：
-
-```math
-x=\mathrm{Norm}(x+\mathrm{Attention}(x))
-```
-
-```math
-x=\mathrm{Norm}(x+\mathrm{MLP}(x))
-```
-
-Pre-LN 是现代 LLM 常见形式：
-
-```math
-x=x+\mathrm{Attention}(\mathrm{Norm}(x))
-```
-
-```math
-x=x+\mathrm{MLP}(\mathrm{Norm}(x))
-```
-
-Pre-LN 的优点：
-
-1. 深层训练更稳定。
-2. 梯度更容易沿残差路径传播。
-3. 大模型中更常见。
-
-Post-LN 的问题：
-
-1. 深层模型训练更容易不稳定。
-2. 需要更小心的初始化或训练技巧。
-
-### PyTorch 最小实现（第 12 讲）
-
-下面是一个简化版 decoder-only Transformer block。输入 `x:[B,T,d_model]`，最大长度由 `block_size` 限制，输出 shape 与输入一致；CPU 示例预期输出 `[2,4,32]`。布尔 `attn_mask=True` 表示屏蔽，这里采用 `nn.MultiheadAttention` 的语义。
-
-```python
-import torch
-import torch.nn as nn
-
-
-class SimpleMLP(nn.Module):
-    def __init__(self, d_model, d_ff):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(d_model, d_ff),
-            nn.GELU(),
-            nn.Linear(d_ff, d_model),
-        )
-
-    def forward(self, x):
-        return self.net(x)
-
-
-class TransformerBlock(nn.Module):
-    def __init__(self, d_model, num_heads, d_ff, block_size):
-        super().__init__()
-        if block_size <= 0 or d_ff <= 0 or d_model <= 0 or num_heads <= 0:
-            raise ValueError("block_size, d_model, num_heads, and d_ff must be positive")
-        if d_model % num_heads != 0:
-            raise ValueError("d_model must be divisible by num_heads")
-        self.norm1 = nn.LayerNorm(d_model)
-        self.attn = nn.MultiheadAttention(d_model, num_heads, batch_first=True)
-        self.norm2 = nn.LayerNorm(d_model)
-        self.mlp = SimpleMLP(d_model, d_ff)
-        # Bool True means that the position is not allowed to attend.
-        causal_mask = torch.triu(
-            torch.ones(block_size, block_size, dtype=torch.bool), diagonal=1
-        )
-        self.register_buffer("causal_mask", causal_mask)
-
-    def forward(self, x, attn_mask=None):
-        if x.ndim != 3 or x.size(-1) != self.norm1.normalized_shape[0]:
-            raise ValueError("x must have shape [B, T, d_model]")
-        if x.size(1) == 0 or x.size(1) > self.causal_mask.size(0):
-            raise ValueError("T must be between 1 and block_size")
-        # Pre-LN attention block.
-        h = self.norm1(x)
-        if attn_mask is None:
-            seq_len = x.size(1)
-            attn_mask = self.causal_mask[:seq_len, :seq_len]
-        attn_out, _ = self.attn(h, h, h, attn_mask=attn_mask)
-        x = x + attn_out
-
-        # Pre-LN MLP block.
-        h = self.norm2(x)
-        x = x + self.mlp(h)
-        return x
-
-
-x = torch.randn(2, 4, 32)
-block = TransformerBlock(d_model=32, num_heads=4, d_ff=128, block_size=4)
-y = block(x)
-print(y.shape)  # [2, 4, 32]
-```
-
-注意：这个代码用于理解结构。真实 LLM 会使用更高效的 attention 实现、RoPE、RMSNorm、SwiGLU、KV Cache 等。
-
-### 最小 demo：检查 block 的 shape 和残差约束
-
-下面这个 demo 只验证两个关键点：block 输入输出 shape 必须一致；attention 和 MLP 的输出必须能和残差分支相加。
-输入为 `[B,T,d_model]` 且 `1≤T≤block_size`，输出 shape 不变；代码用断言核对残差两侧的 shape。依赖 PyTorch 2.12.0，CPU 可运行。
-
-```python
-import torch
-import torch.nn as nn
-
-
-class TinyPreLNBlock(nn.Module):
-    def __init__(self, d_model, num_heads, d_ff, block_size):
-        super().__init__()
-        if min(d_model, num_heads, d_ff, block_size) <= 0:
-            raise ValueError("all dimensions and block_size must be positive")
-        if d_model % num_heads != 0:
-            raise ValueError("d_model must be divisible by num_heads")
-        self.norm1 = nn.LayerNorm(d_model)
-        self.attn = nn.MultiheadAttention(d_model, num_heads, batch_first=True)
-        self.norm2 = nn.LayerNorm(d_model)
-        self.mlp = nn.Sequential(
-            nn.Linear(d_model, d_ff),
-            nn.GELU(),
-            nn.Linear(d_ff, d_model),
-        )
-        causal_mask = torch.triu(
-            torch.ones(block_size, block_size, dtype=torch.bool), diagonal=1
-        )
-        self.register_buffer("causal_mask", causal_mask)
-
-    def forward(self, x):
-        # x: [B, T, d_model]
-        if x.ndim != 3 or x.size(1) == 0 or x.size(1) > self.causal_mask.size(0):
-            raise ValueError("x must have shape [B, T, d_model] within block_size")
-        seq_len = x.size(1)
-        mask = self.causal_mask[:seq_len, :seq_len]
-        attn_out, _ = self.attn(
-            self.norm1(x), self.norm1(x), self.norm1(x), attn_mask=mask
-        )
-        assert attn_out.shape == x.shape
-        x = x + attn_out
-
-        mlp_out = self.mlp(self.norm2(x))
-        assert mlp_out.shape == x.shape
-        x = x + mlp_out
-        return x
-
-
-x = torch.randn(2, 4, 32)
-block = TinyPreLNBlock(d_model=32, num_heads=4, d_ff=128, block_size=4)
-y = block(x)
-
-assert y.shape == x.shape
-print(y.shape)
-```
-
-输出应为：
-
-```text
-torch.Size([2, 4, 32])
-```
-
-如果把 MLP 最后一层错误地写成 `nn.Linear(d_ff, 64)`，残差相加就会因为 shape 不一致而失败。这就是 Transformer block 中每个子层最后都要投影回 `d_model` 的原因。
-
-### Decoder-Only Block 和 Encoder Block 的区别
-
-Decoder-only GPT block 使用 causal self-attention。
-
-Encoder-only BERT block 使用 bidirectional self-attention。
-
-Encoder-decoder Transformer 的 decoder block 通常还多一个 cross-attention，用来关注 encoder 输出。
-
-GPT 类模型的 block 通常是：
-
-```text
-causal self-attention + MLP
-```
-
-BERT 类模型的 block 通常是：
-
-```text
-bidirectional self-attention + MLP
-```
-
-Seq2seq decoder block 通常是：
-
-```text
-causal self-attention + cross-attention + MLP
-```
-
-### Transformer Block 的失败模式（第 12 讲）
-
-#### 坑 1：Pre-LN 和 Post-LN 混淆
-
-读论文或代码时要确认 norm 在 residual 之前还是之后，这会影响训练稳定性。
-
-#### 坑 2：残差维度不一致
-
-残差相加要求 shape 一致，所以 attention 和 MLP 输出必须回到 `d_model`。
-
-#### 坑 3：MLP 扩展维度配置错误
-
-`d_ff` 过小会限制容量，过大会增加参数和计算成本。
-
-#### 坑 4：忽略 dropout、bias、activation 差异
-
-不同模型实现细节不同，例如 GeLU、SwiGLU、bias-free Linear、RMSNorm 等。
-
-#### 坑 5：用 PyTorch 内置 MultiheadAttention 直接类比生产 LLM
-
-内置模块适合学习，但生产 LLM 通常有定制 attention、RoPE、FlashAttention 和 KV Cache。
-
-### Transformer Block 的适用边界与代价（第 12 讲）
-
-Transformer block 的优点：
-
-1. attention 和 MLP 分工清晰。
-2. 残差连接支持深层堆叠。
-3. normalization 提升训练稳定性。
-4. 结构统一，容易 scale。
-5. 适合语言、多模态、代码等任务。
-
-缺点：
-
-1. attention 成本随序列长度平方增长。
-2. MLP 参数和计算量大。
-3. 深层训练需要很多稳定性技巧。
-4. 推理时 KV Cache 和显存管理复杂。
-
-适用场景：
-
-1. GPT 类语言模型。
-2. BERT 类理解模型。
-3. 编码器-解码器模型。
-4. 多模态大模型。
-5. 代码模型和 reasoning model。
-
-### Transformer Block 是两种计算的交替
-
-一个 decoder-only block 的核心是：
-
-```math
-x\leftarrow x+\mathrm{Attention}(\mathrm{Norm}_1(x)),
-\qquad
-x\leftarrow x+\mathrm{MLP}(\mathrm{Norm}_2(x))
-```
-
-Attention 负责跨 token 信息混合，MLP 通常对每个位置独立进行非线性变换。把 Attention 说成通信、把 MLP 说成局部特征加工是有帮助的直觉，但二者共同参与表示变换，不能把所有知识机械地归到某一模块。
-
-残差连接让每层学习增量，而不是从零重写表示。它提供信息保留和相对直接的梯度路径；normalization 控制子层输入尺度；堆叠多个 block 后，局部交互和非线性加工反复交替，形成深层上下文表示。
-
-#### Pre-LN、Post-LN 和架构兼容
-
-Post-LN 将 norm 放在残差相加之后，Pre-LN 将 norm 放在子层之前。二者不仅是代码顺序不同，还影响初始化、梯度路径、最终 norm、checkpoint 兼容和深层稳定性。读取一个模型实现时，必须沿 forward 顺序标出 norm、attention、residual 和 MLP，而不能只看类名。
-
-decoder-only、encoder-only 和 encoder-decoder 的 block 也不能混写：
-
-- decoder-only：causal self-attention + MLP；
-- encoder-only：通常是双向 self-attention + MLP；
-- seq2seq decoder：causal self-attention + cross-attention + MLP。
-
-#### 参数与计算的双重账本
-
-MLP 的中间维度 d_ff 常大于 d_model，因此它可能占据大量参数和 FLOPs；attention 的 token 交互和 KV Cache 又决定长序列与 decode 成本。优化一个 block 时，要同时看参数量、训练吞吐、激活显存、prefill、decode 和质量，而不是只看某一个矩阵大小。
-
-block 的 shape 不变量是：输入输出最后一维都为 d_model，残差相加前两条支路必须完全兼容。最小实现的价值正是用断言把这个不变量写出来。
-
-### 容易混淆的 block 结构（第 12 讲）
-
-1. 误区：Transformer block 只有 attention。
-   纠正：MLP、norm、residual 同样重要。
-
-2. 误区：MLP 会混合不同 token 信息。
-   纠正：标准 MLP 通常对每个位置独立作用，不直接跨 token 混合。
-
-3. 误区：Pre-LN 和 Post-LN 只是写法不同。
-   纠正：它们对训练稳定性和梯度传播有重要影响。
-
-4. 误区：每一层都完全重写表示。
-   纠正：残差结构让每层更像在原表示上做增量更新。
-
-### 练习：画出一次 block 的数据流（第 12 讲）
-
-1. 画出 decoder-only Transformer block 的数据流。
-2. 写出 Pre-LN block 的两行核心公式。
-3. 解释 attention 和 MLP 的分工。
-4. 比较 GPT block、BERT block、seq2seq decoder block。
-5. 修改上面的代码，把 GeLU 换成 SiLU，并观察输出 shape 是否变化。
-
-### 本节回顾（第 12 讲）
-
-关键结论：
-
-1. Transformer block 由 attention、MLP、normalization 和 residual connection 组成。
-2. Attention 负责 token 间信息交互。
-3. MLP 负责每个 token 内部的非线性特征加工。
-4. Residual connection 支持深层训练和信息保留。
-5. Modern LLM 通常使用 Pre-LN 结构。
-6. 多个 block 堆叠形成完整 Transformer。
-7. 真实 LLM block 会加入 RMSNorm、SwiGLU、RoPE、FlashAttention、KV Cache 等工程优化。
-
-关键问题：Attention 和 MLP 分别起什么作用，残差连接为什么重要，Pre-LN 和 Post-LN 有什么区别。
-
-## 第 13 讲：LayerNorm、RMSNorm 与残差连接
-
-### 稳定深层表示和梯度路径
-
-深层 Transformer 反复进行信息混合和非线性变换，激活尺度与梯度路径必须受到控制。LayerNorm、RMSNorm 和 residual connection 分别从统计尺度、计算形式和信息路径上解决不同问题。本节比较它们的公式、位置、数值边界和 checkpoint 兼容性。
-
-### 深层堆叠为什么会失稳
-
-深层神经网络训练的一个核心问题是：每一层的输入分布会不断变化，梯度在很多层之间传播也容易不稳定。
-
-Transformer 通常堆叠几十层甚至上百层。如果没有归一化和残差连接，训练会非常困难。
-
-两个关键工具：
-
-1. Normalization：稳定每层输入的数值尺度。
-2. Residual connection：给信息和梯度提供更直接的路径。
-
-### BatchNorm 回顾
-
-BatchNorm 常用于 CNN。
-
-它通常在 batch 维度上统计均值和方差。
-
-简化理解：
-
-```text
-对一个 feature，在一个 batch 内计算 mean 和 variance
-```
-
-然后归一化：
-
-```math
-z=\frac{x-\mu}{\sqrt{\sigma^2+\varepsilon}}
-```
-
-其中 `mu` 是 batch 统计得到的均值，`sigma^2` 是 batch 统计得到的方差。
-
-BatchNorm 的问题：
-
-1. 依赖 batch 统计。
-2. 小 batch 时统计不稳定。
-3. 自回归生成时 batch 和 sequence 形态变化复杂。
-4. 训练和推理统计不一致。
-
-因此 Transformer 语言模型通常不使用 BatchNorm。
-
-### LayerNorm 是什么
-
-LayerNorm 在每个样本内部，对 hidden dimension 做归一化。
-
-对于 hidden vector：
-
-```text
-x: [d_model]
-```
-
-计算：
-
-```math
-\mu=\frac{1}{d}\sum_{i=1}^{d}x_i
-```
-
-```math
-\sigma^2=\frac{1}{d}\sum_{i=1}^{d}(x_i-\mu)^2
-```
-
-```math
-z_i=\frac{x_i-\mu}{\sqrt{\sigma^2+\varepsilon}}
-```
-
-然后加上可学习缩放和平移：
-
-```math
-y_i=\gamma_i z_i+\beta_i
-```
-
-在 Transformer 中，如果输入是：
-
-```text
-[B, T, d_model]
-```
-
-LayerNorm 通常对最后一维 `d_model` 做归一化。
-
-### 为什么 Transformer 用 LayerNorm
-
-LayerNorm 的优点：
-
-1. 不依赖 batch size。
-2. 训练和推理行为一致。
-3. 适合变长序列。
-4. 对自回归生成更友好。
-5. 能稳定每个 token 的 hidden state 尺度。
-
-这使它比 BatchNorm 更适合 NLP 和 Transformer。
-
-### RMSNorm 是什么
-
-RMSNorm 是 LayerNorm 的简化版本。
-
-LayerNorm 做两件事：
-
-1. 减均值。
-2. 除以标准差。
-
-RMSNorm 不减均值，只用 root mean square 归一化：
-
-```math
-\mathrm{rms}=\sqrt{\mathrm{mean}(x^2)+\varepsilon}
-```
-
-```math
-y=\frac{\gamma x}{\mathrm{rms}}
-```
-
-RMSNorm 省略了 mean centering。
-
-优点：
-
-1. 计算更简单。
-2. 参数更少或实现更轻。
-3. 在很多 LLM 中效果很好。
-4. 常用于 LLaMA 系列等现代架构。
-
-### LayerNorm 和 RMSNorm 对比
-
-| 方法 | 是否减均值 | 是否除尺度 | 是否有 beta | 常见场景 |
+| Query 位置 | Key 1 | Key 2 | Key 3 | Key 4 |
 | --- | --- | --- | --- | --- |
-| LayerNorm | 是 | 是 | 通常有 | Transformer、BERT、GPT 早期模型 |
-| RMSNorm | 否 | 是 | 通常无 beta | 现代 LLM，如 LLaMA 风格模型 |
+| 1 | 可见 | 屏蔽 | 屏蔽 | 屏蔽 |
+| 2 | 可见 | 可见 | 屏蔽 | 屏蔽 |
+| 3 | 可见 | 可见 | 可见 | 屏蔽 |
+| 4 | 可见 | 可见 | 可见 | 可见 |
 
-核心区别：
+用 1-based 下标，causal mask 的定义为：
 
-```text
-LayerNorm 标准化均值和方差
-RMSNorm 只标准化向量尺度
-```
+~~~math
+M_{ij} =
+\begin{cases}
+0, & j \le i \\
+-\infty, & j > i
+\end{cases}
+~~~
 
-### 残差连接再理解
+将 mask 加到分数上，再做 softmax，未来位置就不会向当前输出贡献 Value。第 11 讲会解释这种可见性如何和训练标签、逐 token 生成配合。
 
-残差连接：
+### 计算量与实现优化不是同一问题
 
-```math
-x=x+F(x)
-```
+标准全量注意力的主要计算量约为 $O(BT^2D)$，朴素实现还会显式保存 $O(BHT^2)$ 的注意力分数或权重。随着序列长度增长，计算和中间状态都会变贵。
 
-它让每层学习的是增量 `F(x)`，而不是从零生成新表示。
+| 方法 | 改变什么 | 本章范围内的结论 |
+| --- | --- | --- |
+| FlashAttention | 分块计算与数据搬运方式 | 保留精确 attention 数学目标；减少对高带宽显存的中间读写，不是稀疏近似 |
+| Local / Sparse Attention | 哪些位置彼此可见 | 可减少交互数，但改变了注意力连接模式 |
+| Linear Attention 类方法 | 对注意力计算作重构或近似 | 需单独看假设、精度和任务结果，不能只凭名字断言等价 |
 
-为什么重要？
+[FlashAttention 论文](https://arxiv.org/abs/2205.14135)提出 IO-aware 的精确注意力实现。其实际速度和内存收益仍依赖硬件、张量形状、dtype 和 kernel。稀疏或线性注意力的结构选择属于 Transformer 进阶主题，参见[第二册 Transformer 架构进阶](../../book-02-advanced-100/chapters/02-transformer架构进阶.md)。
 
-1. 如果某层暂时没学好，至少可以保留原始输入。
-2. 梯度可以沿残差路径更顺畅传播。
-3. 深层模型更容易训练。
-4. 多层逐步 refinement，而不是每层完全重写。
+**交接：**单个头完成了“算分数—归一化—混合 Value”。下一讲把隐藏维度拆成多个头，再看减少 Key/Value 头数为什么主要影响推理缓存。
 
-### Pre-LN 为什么稳定
+## 第 10 讲：Multi-Head Attention——多个子空间与共享 KV
 
-Pre-LN：
+### 多头做的是并行投影，不是复制同一个判断
 
-```math
-x=x+\mathrm{Attention}(\mathrm{Norm}(x))
-```
+Multi-Head Attention（MHA）用多组投影，让不同头在各自的子空间中计算注意力。每头输出 shape [B,T,d_h]；沿最后一维拼接回 [B,T,D]，再经输出投影得到模块输出。注意力权重本身并不自动对应一个可命名的“语法头”或“事实头”。
 
-```math
-x=x+\mathrm{MLP}(\mathrm{Norm}(x))
-```
+~~~math
+\mathrm{head}_i = \mathrm{Attention}(XW_Q^{(i)}, XW_K^{(i)}, XW_V^{(i)}),
+\qquad
+\mathrm{MHA}(X) = \mathrm{Concat}(\mathrm{head}_1,\ldots,\mathrm{head}_H)W_O
+~~~
 
-因为 Norm 在子层前，子层收到的输入尺度更稳定。
+当隐藏宽度 D 固定时，仅改变 H 并相应改变每头宽度，并不会自动增加 Q/K/V/O 的投影矩阵参数量；参数规模主要由投影的输入、输出宽度决定。实际实现还可能包含 bias 或不同的投影布局。
 
-同时残差路径上有一条相对直接的梯度通路。
+~~~mermaid
+flowchart LR
+    X[输入表示 B×T×D] --> Q[Query heads Hq]
+    X --> K[Key heads Hkv]
+    X --> V[Value heads Hkv]
+    Q --> A[每个 Query 头独立计算注意力]
+    K --> A
+    V --> A
+    A --> C[拼接各头输出]
+    C --> O[输出投影 Wo]
+~~~
 
-这让很深的 Transformer 更容易训练。
+如果有 $H_q$ 个 Query 头，不一定要有同样多的 Key/Value 头。MHA、GQA 和 MQA 的关系是 KV 头数量不同：
 
-Post-LN：
+| 结构 | Query 头数 | Key/Value 头数 | 结构含义 |
+| --- | --- | --- | --- |
+| MHA | $H_q$ | $H_q$ | 每个 Query 头有自己的 K/V 头 |
+| GQA | $H_q$ | $1 < H_{kv} < H_q$ | 一组 Query 头共享一组 K/V |
+| MQA | $H_q$ | 1 | 所有 Query 头共享一组 K/V |
 
-```math
-x=\mathrm{Norm}(x+\mathrm{Attention}(x))
-```
+GQA 是 MHA 与 MQA 之间的结构折中。它减少 KV 表示数量，同时保留多组 Query；具体质量、吞吐和显存收益依赖模型、训练及 serving 实现。[GQA 论文](https://arxiv.org/abs/2305.13245)报告了其研究配置中的质量和速度取舍，不能推出所有模型都获得相同收益。
 
-在一些深层设置中更容易出现梯度传播不稳定；实际稳定性还取决于初始化、深度、学习率和其他训练细节。Pre-LN 也不是所有 Transformer 的统一结构。
+### KV Cache 为什么受 KV 头数影响
 
-### PyTorch 实现 LayerNorm 和 RMSNorm
+逐 token 生成时，早先位置的 Key 和 Value 可以缓存起来，后续步骤复用。单条序列的原始 KV Cache 载荷可按下式估算：
 
-两个片段都用 CPU 上的 float32 输入 `x:[2,4,8]`，输出 shape 保持不变；前者调用官方 LayerNorm，后者展示含可学习 scale 的最小 RMSNorm。依赖 PyTorch 2.12.0。
+~~~math
+\mathrm{KV\ bytes}
+=
+2 \times L \times T \times H_{kv} \times d_h \times b
+~~~
 
-LayerNorm：
+其中 L 是层数，T 是缓存长度，前面的 2 对应 K 与 V，b 是每个元素的字节数。以 L=32、T=8192、d_h=128、b=2 字节为例：
 
-```python
-import torch
-import torch.nn as nn
+| 结构 | H_kv | 单序列原始 KV 载荷 |
+| --- | ---: | ---: |
+| MHA，32 个头 | 32 | 4 GiB |
+| GQA，8 个 KV 头 | 8 | 1 GiB |
+| MQA，1 个 KV 头 | 1 | 128 MiB |
 
-x = torch.randn(2, 4, 8)  # [B, T, d_model]
-ln = nn.LayerNorm(8)
-y = ln(x)
-print(y.shape)  # [2, 4, 8]
-```
+这是公式估算，不含 batch、对齐、量化元数据、分页开销、workspace 或框架额外状态。它只说明在这些固定假设下，KV 头数与缓存载荷成正比。它不代表实际吞吐提升，也不表示 attention 的全部计算量按相同比例下降。更完整的 Cache 布局和生命周期见[第六册 KV Cache 与内存管理](../../book-06-llm-deployment/chapters/03-kv-cache与内存管理.md)和[第二十四册最小 KV Cache 实现](../../book-24-llm-inference-engine/chapters/09-实现kv-cache的最小版本.md)。
 
-手写 RMSNorm：
+**交接：**多个头说明怎样组织一次上下文混合；下一讲把因果可见性放回语言模型目标中，明确训练和生成各自在做什么。
 
-```python
-import math
-import torch
-import torch.nn as nn
+## 第 11 讲：Causal Mask 与自回归生成——训练时并行，生成时逐步
 
+### 标签右移与因果可见性必须同时成立
 
-class RMSNorm(nn.Module):
-    def __init__(self, dim, eps=1e-6):
-        super().__init__()
-        if isinstance(dim, bool) or not isinstance(dim, int) or dim <= 0:
-            raise ValueError("dim must be a positive integer")
-        if not math.isfinite(eps) or eps <= 0:
-            raise ValueError("eps must be finite and positive")
-        self.dim = dim
-        self.eps = eps
-        self.weight = nn.Parameter(torch.ones(dim))
+给定 token 序列 [12, 44, 9, 31]，训练窗口可写成：
 
-    def forward(self, x):
-        # x: [..., dim]
-        if x.ndim == 0 or x.size(-1) != self.dim:
-            raise ValueError("the last input dimension must equal dim")
-        if not x.is_floating_point() or not torch.isfinite(x).all():
-            raise ValueError("x must be a finite floating-point tensor")
-        rms = torch.sqrt(torch.mean(x * x, dim=-1, keepdim=True) + self.eps)
-        return self.weight * x / rms
+~~~text
+input:  [12, 44, 9]
+target: [44,  9, 31]
+~~~
 
+位置 i 的 logits 预测下一个 token $x_{i+1}$，但位置 i 的表示只能读取 $x_1,\ldots,x_i$。目标右移定义“预测谁”，causal mask 定义“预测时能看见什么”；这两个约束各司其职，不能互相替代。
 
-x = torch.randn(2, 4, 8)
-norm = RMSNorm(8)
-y = norm(x)
-print(y.shape)  # [2, 4, 8]
-```
+语言模型的 token 级交叉熵目标可以写成：
 
-### 最小 demo：手写 LayerNorm 和 RMSNorm 对比
+~~~math
+\mathcal{L}
+=
+-\frac{1}{T}
+\sum_{i=1}^{T}
+\log p_\theta(x_{i+1}\mid x_1,\ldots,x_i)
+~~~
 
-下面这个 PyTorch CPU demo 输入一个 float32 向量 `[1,2,3,10]`，输出 LayerNorm/RMSNorm 结果和各自的统计量。它使用总体方差与 `eps=1e-6`，用于核对中心化和尺度归一化的差别，不含可学习仿射参数。
+首个预测位置常通过 BOS 等起始约定处理。训练时一次前向可以并行计算所有位置的 logits，因为 mask 已让每个位置只能看到允许的前缀；并行计算没有泄漏未来目标。
 
-```python
-import torch
+### Teacher Forcing 不等于允许看到未来
 
+Teacher Forcing 是训练时把真实历史 token 作为模型输入。对位置 i，它拿到的是此前的真实前缀，而不是此前模型采样出来的 token；causal mask 仍然限制该位置看不到未来 token。推理时没有真实 target，模型必须从当前分布选择一个 token，把它追加到上下文，再继续计算。
 
-def manual_layer_norm(x, eps=1e-6):
-    mean = x.mean(dim=-1, keepdim=True)
-    var = ((x - mean) ** 2).mean(dim=-1, keepdim=True)
-    return (x - mean) / torch.sqrt(var + eps)
+~~~mermaid
+sequenceDiagram
+    participant X as 已有上下文
+    participant M as Causal Transformer
+    participant P as 下一个 token 分布
+    X->>M: 一次处理提示词各位置
+    M->>P: 取最后位置 logits
+    P->>X: 选择并追加一个 token
+    X->>M: 带新 token 的上下文再次前向
+~~~
 
+提示词阶段通常称为 Prefill，可以对提示词位置并行计算；之后每一步 Decode 只需要产生下一个 token。KV Cache 复用历史 K/V，避免每次都为整段历史重新计算，但它改变的是计算复用方式，不改变“只能基于已有前缀预测下一个 token”的因果协议。具体服务阶段与缓存管理见[第六册推理基础](../../book-06-llm-deployment/chapters/02-推理基础.md)。
 
-def manual_rms_norm(x, eps=1e-6):
-    rms = torch.sqrt((x * x).mean(dim=-1, keepdim=True) + eps)
-    return x / rms
+Causal LM 和 Masked LM 的目标也不同：Causal LM 按顺序预测后续 token，Masked LM 预测输入中被遮盖的 token，允许使用两侧上下文；BERT 是 masked language modeling 的代表性实例。[BERT 论文](https://arxiv.org/abs/1810.04805)介绍了其训练目标。两种训练目标不能只根据是否出现“mask”这个词混为一谈。
 
+**交接：**训练目标规定了模型沿着前缀预测；现在需要一层可以重复堆叠的模块来不断更新上下文表示，这就是 Transformer Block。
 
-x = torch.tensor([[1.0, 2.0, 3.0, 10.0]])
-ln_out = manual_layer_norm(x)
-rms_out = manual_rms_norm(x)
+## 第 12 讲：Transformer Block——Attention 与 MLP 如何组合
 
-print("LayerNorm:", ln_out)
-print("LayerNorm mean:", ln_out.mean(dim=-1))
-print("RMSNorm:", rms_out)
-print("RMSNorm rms:", torch.sqrt((rms_out * rms_out).mean(dim=-1)))
-```
+### 一个 Block 有两种互补计算
 
-输出中最关键的两点：
+Attention 在 token 之间混合信息；MLP 对每个 token 的特征维度做非线性变换。每个 block 先后执行这两种计算，并通过残差支路保持输入输出宽度一致。多层 block 堆叠后，每个位置的表示会逐层融合更复杂的上下文特征。
 
-1. `LayerNorm mean` 接近 0，因为 LayerNorm 做了 mean centering。
-2. `RMSNorm rms` 接近 1，因为 RMSNorm 只控制向量的 RMS 尺度。
+下面以常见的 Pre-LN 写法表示一个 decoder-only block：
 
-对输入 `x=[1,2,3,10]`，使用总体方差和 `eps=0` 手算时，LayerNorm 的均值为 `4`、标准差为 `sqrt(12.5)≈3.5355`，输出约为 `[-0.8485,-0.5657,-0.2828,1.6971]`。RMSNorm 的分母为 `sqrt(28.5)≈5.3385`，不含可学习权重时输出约为 `[0.1873,0.3746,0.5620,1.8732]`。代码中的 `eps=1e-6` 只会对这些四舍五入结果产生极小变化；例子显示 LayerNorm 做中心化，而 RMSNorm 保留均值偏移。
+~~~math
+x' = x + \mathrm{Attention}(\mathrm{Norm}_1(x))
+~~~
 
-### 在 Transformer Block 中的位置
+~~~math
+x_{\mathrm{next}}
+=
+x' + \mathrm{MLP}(\mathrm{Norm}_2(x'))
+~~~
 
-现代 Pre-LN block：
+~~~mermaid
+flowchart TD
+    X[输入 x B×T×D] --> N1[Norm 1]
+    N1 --> A[Causal Self-Attention]
+    A --> R1[与 x 做残差相加]
+    X --> R1
+    R1 --> N2[Norm 2]
+    N2 --> F[逐 token MLP]
+    F --> R2[与前一状态做残差相加]
+    R1 --> R2
+    R2 --> Y[输出 B×T×D]
+~~~
 
-```text
-x = x + attention(norm1(x))
-x = x + mlp(norm2(x))
-```
+逐 token MLP 的典型形式是先把宽度扩展到 $D_{ff}$，经过激活，再投影回 D。它不在 token 轴上混合位置，所以输出仍为 [B,T,D]。原始 Transformer 论文使用了特定的前馈层和 encoder-decoder 结构；现代 decoder-only 模型在激活函数、归一化位置、bias、dropout 和注意力实现上会有不同配置。[原始 Transformer 论文](https://arxiv.org/abs/1706.03762)不应被当成每个现代 GPT 的逐项规格。
 
-如果使用 RMSNorm：
+Decoder-only block 使用因果 self-attention；经典 encoder-decoder Transformer 的 decoder 还可以包含读取 encoder 输出的 cross-attention，GPT 类语言模型通常没有这条 encoder 输出支路。最终的 Transformer 堆叠之外，模型通常还有 final normalization 与语言模型头：从 [B,T,D] 映射为 [B,T,V]。
 
-```text
-x = x + attention(rmsnorm1(x))
-x = x + mlp(rmsnorm2(x))
-```
+**交接：**Block 的结构已经闭合，但“残差为什么有用、Norm 具体归一化什么、Pre-LN 和 Post-LN 差在哪里”仍需要解释。第 13 讲只深入这些稳定性问题，不再重复 Block 结构。
 
-结构不变，只是 norm 类型不同。
+## 第 13 讲：LayerNorm、RMSNorm 与残差——让深层计算保持可训练
 
-### Normalization 与残差的失败模式（第 13 讲）
+### 残差支路保留直接的信息通路
 
-#### 坑 1：BatchNorm 和 LayerNorm 混淆
+残差块输出 $x+F(x)$。若 $F(x)$ 暂时接近零，信息仍可沿 x 这条直接支路传递；求梯度时也多出一条直接路径。这有助于深层优化，但不保证任意深度、初始化或学习率下训练都稳定。
 
-BatchNorm 依赖 batch 统计，LayerNorm 对单个样本 hidden 维度归一化。Transformer 通常用 LayerNorm/RMSNorm。
+~~~math
+\frac{\partial (x+F(x))}{\partial x}
+=
+I + \frac{\partial F(x)}{\partial x}
+~~~
 
-#### 坑 2：归一化维度写错
+Block 采用残差后仍需要控制每层数值尺度。Normalization 会在指定维度上重标定表示，帮助训练过程管理激活统计；它不是“让所有 token 变得一样”，也不会替代良好的数据、初始化和优化设置。
 
-LayerNorm 应该对 hidden dimension 做归一化，而不是对 sequence dimension。
+### LayerNorm 与 RMSNorm 的具体区别
 
-#### 坑 3：eps 太小导致数值不稳定
+LayerNorm 对每个 token 的隐藏维度 D 计算均值和方差，再标准化并应用可学习的缩放与偏移：
 
-归一化里 `eps` 用于防止除零。混合精度训练时 eps 设置也会影响稳定性。
+~~~math
+\mu = \frac{1}{D}\sum_{j=1}^{D}x_j,
+\qquad
+\sigma^2 = \frac{1}{D}\sum_{j=1}^{D}(x_j-\mu)^2
+~~~
 
-#### 坑 4：weight decay 作用到 norm 参数
+~~~math
+\mathrm{LayerNorm}(x)_j
+=
+\gamma_j
+\frac{x_j-\mu}{\sqrt{\sigma^2+\epsilon}}
++\beta_j
+~~~
 
-LayerNorm/RMSNorm 参数通常不做 weight decay，否则可能影响训练稳定性。
+RMSNorm 不减均值，而是按均方根缩放，再应用可学习缩放参数：
 
-#### 坑 5：Pre-LN/Post-LN 改动后直接加载旧 checkpoint
+~~~math
+\mathrm{RMSNorm}(x)_j
+=
+\gamma_j
+\frac{x_j}{\sqrt{\frac{1}{D}\sum_{k=1}^{D}x_k^2+\epsilon}}
+~~~
 
-结构变了，checkpoint 行为不能直接等价。
+以 x=[1,2,3,10] 且暂不应用可学习参数为例，LayerNorm 的均值为 4，标准差约为 3.5355，结果约为 [-0.8485,-0.5657,-0.2828,1.6971]；RMSNorm 的分母约为 5.3385，结果约为 [0.1873,0.3747,0.5620,1.8734]。差别来自是否中心化，而不是两种公式仅有名称不同。[RMSNorm 论文](https://arxiv.org/abs/1910.07467)提出了省略均值项的归一化形式及其实验；不应据此宣称 RMSNorm 在所有模型上都优于 LayerNorm。
 
-### Normalization 与残差的适用边界（第 13 讲）
+### Pre-LN 和 Post-LN 改变了计算顺序
 
-LayerNorm 优点：
+~~~math
+\mathrm{Pre\text{-}LN}: \quad y = x + F(\mathrm{Norm}(x))
+~~~
 
-1. 不依赖 batch size。
-2. 训练和推理一致。
-3. 适合序列模型。
-4. 稳定 hidden state 尺度。
+~~~math
+\mathrm{Post\text{-}LN}: \quad y = \mathrm{Norm}(x + F(x))
+~~~
 
-LayerNorm 缺点：
+两种结构把归一化放在残差分支的不同位置，梯度路径和训练行为因此不同。Pre-LN 常被现代 decoder-only 模型采用，但仅凭这一个差异无法判断训练是否稳定；初始化、深度、学习率、归一化变体和具体实现都可能相关。[On Layer Normalization in the Transformer Architecture](https://arxiv.org/abs/2002.04745)分析了其研究设置下 Pre-LN 与 Post-LN 的梯度路径差异。
 
-1. 计算比 RMSNorm 略复杂。
-2. 对具体实现和数值精度敏感。
+**交接：**深层 block 如何保持数值和梯度路径已经说明。接下来回到 Attention 中的位置：RoPE 并不把位置向量加到输入，而是旋转 Q/K。
 
-RMSNorm 优点：
+## 第 14 讲：RoPE 与长上下文——位置关系不等于长度能力
 
-1. 更简单。
-2. 计算更轻。
-3. 现代 LLM 中表现好。
+### RoPE 怎样让 Q/K 点积感知相对位移
 
-RMSNorm 缺点：
+在二维子空间中，位置 m 对向量的旋转矩阵为：
 
-1. 不减均值，行为和 LayerNorm 不完全相同。
-2. 替换时需要重新训练或充分验证。
-
-残差连接优点：
-
-1. 改善梯度传播。
-2. 支持深层网络。
-3. 保留输入信息。
-
-### Normalization 与残差的数值角色
-
-LayerNorm 在每个 token 的 hidden dimension 上计算均值和方差，不依赖 batch；BatchNorm 使用 batch 统计，更适合许多视觉卷积场景，却会和变长序列、自回归推理以及小 batch 产生不同的工程约束。
-
-对 hidden vector x，LayerNorm 可写成：
-
-```math
-\mu=\frac{1}{d}\sum_i x_i,\qquad
-\sigma^2=\frac{1}{d}\sum_i(x_i-\mu)^2,\qquad
-y_i=\gamma_i\frac{x_i-\mu}{\sqrt{\sigma^2+\varepsilon}}+\beta_i
-```
-
-RMSNorm 不做均值中心化，而是：
-
-```math
-y_i=\gamma_i\frac{x_i}{\sqrt{\frac{1}{d}\sum_i x_i^2+\varepsilon}}
-```
-
-因此 RMSNorm 更轻，但不与 LayerNorm 完全等价。替换 norm 需要重新检查初始化、精度、训练曲线、最终输出和 checkpoint，不能仅凭公式更短就断定更好。
-
-#### 残差路径和 Pre-LN 的组合
-
-Pre-LN 中，子层看到归一化后的输入，残差分支保留未经过子层的表示。深层训练时，这条路径有助于梯度传播；但最终模型仍可能需要 final norm，具体结构取决于架构。改变 norm 位置会改变数值路径，旧 checkpoint 通常不能直接当作同一模型继续使用。
-
-#### 数值与参数组排查
-
-归一化相关故障应检查：
-
-- hidden dimension 是否写对；
-- eps 是否在目标精度下足够稳定；
-- RMS/variance 的累积是否溢出；
-- norm 参数是否被错误 weight decay；
-- 混合精度下前后 cast 是否符合实现；
-- checkpoint 中 norm 参数形状和 dtype 是否一致。
-
-归一化不是“把所有问题标准化”的万能工具。若输入分布、mask 或残差尺度本身错误，norm 可能暂时掩盖问题，却不能修复根因。
-
-### 容易混淆的归一化结论（第 13 讲）
-
-1. 误区：LayerNorm 和 BatchNorm 只是名字不同。
-   纠正：它们统计维度和训练/推理行为不同。
-
-2. 误区：RMSNorm 是 LayerNorm 的完全替代。
-   纠正：RMSNorm 简化了均值中心化，行为不完全相同。
-
-3. 误区：残差连接只是为了让 shape 对齐。
-   纠正：它的核心价值是信息保留和梯度传播。
-
-4. 误区：Pre-LN 和 Post-LN 只影响代码顺序。
-   纠正：它们对深层模型训练稳定性影响很大。
-
-### 练习：手算一层归一化（第 13 讲）
-
-1. 对一个长度为 4 的向量手算 LayerNorm。
-2. 对同一个向量手算 RMSNorm。
-3. 比较 LayerNorm 和 BatchNorm 的统计维度。
-4. 解释为什么 norm 参数通常不做 weight decay。
-5. 写出 Pre-LN Transformer block 的公式。
-
-### 本节回顾（第 13 讲）
-
-关键结论：
-
-1. Transformer 常用 LayerNorm/RMSNorm，而不是 BatchNorm。
-2. LayerNorm 对 hidden dimension 做归一化，不依赖 batch 统计。
-3. RMSNorm 不减均值，只归一化向量尺度。
-4. 残差连接改善信息和梯度传播。
-5. Pre-LN 对深层 LLM 训练更稳定。
-6. 归一化维度、eps、weight decay、checkpoint 兼容性都是工程高频坑。
-
-关键问题：LayerNorm 和 BatchNorm 有什么区别，为什么 Transformer 常用 LayerNorm 或 RMSNorm。
-
-## 第 14 讲：RoPE 与长上下文
-
-### 位置旋转与长度外推
-
-位置机制决定 attention 如何区分顺序和距离。RoPE 把位置通过旋转注入 Q/K，使匹配分数带有相对位置信息；但这并不等于任意长度都能可靠外推。本节从二维旋转推到长上下文的训练、推理、评估和成本问题。
-
-### 为什么位置和长度不能分开讨论
-
-语言模型不仅要知道 token 内容，还要知道 token 的位置。
-
-例如：
-
-```text
-Alice gave Bob a book.
-Bob gave Alice a book.
-```
-
-两句话 token 类似，但位置不同，语义不同。
-
-早期 Transformer 使用绝对位置编码，但现代 LLM 很多使用 RoPE。
-
-RoPE 全称 Rotary Position Embedding，即旋转位置编码。
-
-### 绝对位置编码的问题
-
-绝对位置编码通常给每个位置一个向量：
-
-```text
-position 0 -> p_0
-position 1 -> p_1
-...
-```
-
-然后：
-
-```math
-x=E_{\mathrm{token}}+E_{\mathrm{pos}}
-```
-
-问题：
-
-1. 训练时只见过某个最大长度内的位置。
-2. 推理时超过训练长度，未见过的位置可能表现差。
-3. 绝对编号不直接表达 token 间相对距离。
-4. 长上下文外推能力有限。
-
-例如训练最大长度是 4K，推理直接拉到 32K，模型不一定知道位置 20000 应该如何处理。
-
-### RoPE 的核心直觉
-
-RoPE 的核心思想：
-
-不要简单把位置向量加到 token embedding 上，而是在 attention 中对 Q 和 K 按位置做旋转。
-
-直觉上：
-
-1. 每个位置对应一个旋转角度。
-2. token 在不同位置时，Q/K 会被旋转到不同方向。
-3. 两个 token 的 attention score 会自然携带它们的相对位置关系。
-
-也就是说，RoPE 把位置编码放进了 attention 匹配过程。
-
-### 二维旋转直觉
-
-先看二维向量。
-
-一个向量 `(x_1, x_2)` 旋转角度 `θ` 后：
-
-```math
-x_1'=x_1\cos\theta-x_2\sin\theta
-```
-
-```math
-x_2'=x_1\sin\theta+x_2\cos\theta
-```
-
-RoPE 会把 hidden dimension 两两分组，对每组做类似旋转。
-
-不同位置使用不同角度。
-
-位置索引与每个维度对的旋转相位成正比；旋转本身具有周期性，不能把更大的位置直接解释成几何上更远的方向。
-
-### RoPE 如何作用到 Q 和 K
-
-标准 attention：
-
-```math
-\mathrm{score}(i,j)=q_i\cdot k_j
-```
-
-RoPE 中，先对 `q_i` 和 `k_j` 注入位置旋转：
-
-```math
-q_i'=R_i q_i
-```
-
-```math
-k_j'=R_j k_j
-```
-
-其中 `R_i` 和 `R_j` 表示由位置 `i`、`j` 决定的旋转变换。
-
-然后计算：
-
-```math
-\mathrm{score}(i,j)=q_i'\cdot k_j'
-```
-
-关键性质是：对每个二维维度对，旋转后的点积会依赖位置差。按上面的矩阵约定，`R_i^T R_j=R_{j-i}`，因此它依赖 `j-i`；使用相反的旋转符号约定时，差值符号也会相反。
-
-所以 RoPE 不是显式加一个相对位置 bias，而是通过旋转让 attention score 自然感知相对距离。
-
-### 为什么 RoPE 适合相对位置
-
-在二维旋转中，两个旋转向量的内积与它们旋转角度差有关。
-
-如果 $q$ 在位置 $i$ 旋转，$k$ 在位置 $j$ 旋转，那么它们的匹配关系会受到相对位移 `j-i`（或等价的反号约定）影响。
-
-若第 $r$ 个二维维度对的角速度为 $\omega_r$，位置 $p$ 使用的相位为 $\theta_{p,r}=p\omega_r$。标准 RoPE 选择一组随 $r$ 变化的频率；旋转矩阵满足 $R_{i,r}^{\mathsf T}R_{j,r}=R_{j-i,r}$，所以每一对维度都编码相对位移，但频率不同。
-
-这让模型更容易学习类似：
-
-```text
-关注前一个 token
-关注距离我 10 个 token 的 token
-关注句子开头附近的 token
-```
-
-这类相对位置模式。
-
-### 最小 PyTorch 代码直觉
-
-下面是简化版 RoPE，对最后一维相邻坐标成对旋转。输入 `x:[B,T,d]`、`cos/sin:[1,T,d/2]`，要求 `d` 为正偶数，输出 shape 与输入一致；依赖 PyTorch 2.12.0，CPU 可运行。真实实现还要核对 head 维度布局、缓存、频率和精度。
-
-```python
-import torch
-
-
-def apply_rope(x, cos, sin):
-    # x: [B, T, d], d must be even
-    if x.ndim != 3 or x.size(-1) == 0 or x.size(-1) % 2 != 0:
-        raise ValueError("x must have shape [B, T, d] with positive even d")
-    expected = (1, x.size(1), x.size(-1) // 2)
-    if tuple(cos.shape) != expected or tuple(sin.shape) != expected:
-        raise ValueError("cos and sin must have shape [1, T, d/2]")
-    if cos.device != x.device or sin.device != x.device:
-        raise ValueError("x, cos, and sin must be on the same device")
-    if cos.dtype != x.dtype or sin.dtype != x.dtype:
-        raise ValueError("x, cos, and sin must use the same dtype")
-    if not all(torch.isfinite(t).all() for t in (x, cos, sin)):
-        raise ValueError("x, cos, and sin must contain only finite values")
-    x1 = x[..., 0::2]
-    x2 = x[..., 1::2]
-
-    rotated_x1 = x1 * cos - x2 * sin
-    rotated_x2 = x1 * sin + x2 * cos
-
-    out = torch.empty_like(x)
-    out[..., 0::2] = rotated_x1
-    out[..., 1::2] = rotated_x2
-    return out
-
-
-B, T, d = 2, 4, 8
-x = torch.randn(B, T, d)
-
-# 简化构造 cos/sin: [T, d/2]
-positions = torch.arange(T).float().unsqueeze(1)
-freqs = torch.arange(d // 2).float().unsqueeze(0)
-theta = positions / (10000 ** (2 * freqs / d))
-cos = torch.cos(theta).unsqueeze(0)  # [1, T, d/2]
-sin = torch.sin(theta).unsqueeze(0)  # [1, T, d/2]
-
-y = apply_rope(x, cos, sin)
-print(y.shape)  # [2, 4, 8]
-```
-
-输入 `x` 为 `[B,T,d]`，其中 `d` 必须为偶数；`cos` 和 `sin` 为 `[1,T,d/2]`，输出 shape 与 `x` 相同。这个片段用 `d=8`、`T=4` 只验证相邻维度成对旋转后的 shape；真实模型还要按 head 维度构造频率并核对 Q/K 布局。
-
-### 最小 demo：点积如何随相对位置变化
-
-下面这个 PyTorch CPU demo 用二维向量模拟 RoPE。输入固定为 `q=k=(1,0)`，位置步长 `0.25` 弧度；输出每组 `(i,j)` 的 `j-i` 和旋转后点积，核对相同位移对应相同分数。它不模拟多频率、多 head 或训练。
-
-```python
-import math
-import torch
-
-
-def rotate_2d(x, angle):
-    c = math.cos(angle)
-    s = math.sin(angle)
-    rotation = torch.tensor([[c, -s], [s, c]], dtype=x.dtype)
-    return rotation @ x
-
-
-q = torch.tensor([1.0, 0.0])
-k = torch.tensor([1.0, 0.0])
-base_angle = 0.25
-
-for i, j in [(0, 0), (1, 0), (2, 0), (2, 1)]:
-    q_rot = rotate_2d(q, i * base_angle)
-    k_rot = rotate_2d(k, j * base_angle)
-    score = torch.dot(q_rot, k_rot).item()
-    print(f"i={i}, j={j}, j-i={j-i}, score={score:.4f}")
-```
-
-令 `q=k=(1,0)`、每个位置步长的角度为 `0.25` 弧度时，四组输出依次约为 `1.0000`、`0.9689`、`0.8776`、`0.9689`。最后两组的 `j-i` 都是 `-1`，所以分数相同。该二维例子只验证相对位移性质，不代表多维模型中的完整 attention 分布。
-
-这段代码不是完整 RoPE 实现，只展示一个关键直觉：attention score 不再只取决于 `q` 和 `k` 的内容，也会受到位置差的影响。
-
-### RoPE 和绝对位置编码的区别
-
-绝对位置编码：
-
-```math
-x=E_{\mathrm{token}}+E_{\mathrm{pos}}
-```
-
-RoPE：
-
-```math
-q'=R_p q
-```
-
-```math
-k'=R_p k
-```
-
-其中 `p` 表示当前位置。
-
-核心区别：
-
-1. 绝对位置编码直接加到 hidden states。
-2. RoPE 作用在 attention 的 Q/K 上。
-3. RoPE 通过旋转结构让 attention 分数包含相对位移信息。
-4. RoPE 具有相对位置性质，但这项性质本身不保证超出训练长度后仍能可靠外推。
-
-### 长上下文为什么困难
-
-长上下文不是只把 `max_position_embeddings` 改大。
-
-主要困难包括：
-
-#### 困难 1：Attention 成本
-
-标准 attention 是 $O(T^2)$。
-
-上下文长度从 8K 到 32K，attention matrix 大小约变成 16 倍。
-
-#### 困难 2：KV Cache 显存
-
-自回归推理要缓存历史 K/V。
-
-上下文越长，KV Cache 越大。
-
-长上下文 serving 常常被 KV Cache 显存限制。
-
-#### 困难 3：位置外推
-
-模型训练时没见过特别长的位置，推理时直接外推可能退化。
-
-RoPE 虽然有相对位置性质，但不代表可以无限外推。
-
-#### 困难 4：长程依赖学习
-
-即使上下文能放进去，模型也不一定会有效利用远处信息。
-
-常见问题：
-
-1. lost in the middle。
-2. 只关注开头和结尾。
-3. 无法稳定检索远处细节。
-4. 多跳信息整合困难。
-
-#### 困难 5：训练数据
-
-如果训练数据大多是短序列，模型不会自然学会长上下文行为。
-
-长上下文需要专门数据和训练策略。
-
-### 常见长上下文方法
-
-#### 方法 1：RoPE Scaling
-
-通过调整 RoPE 的频率或位置映射，让模型适配更长上下文。
-
-优点：
-
-1. 工程上相对简单。
-2. 可以扩展已有模型上下文。
-
-缺点：
-
-1. 可能影响短上下文能力。
-2. 外推质量需要评估。
-3. 不解决 attention 和 KV Cache 成本。
-
-#### 方法 2：长上下文继续训练
-
-用更长序列数据继续训练模型。
-
-优点：
-
-1. 模型真正见过长序列。
-2. 长上下文能力更可靠。
-
-缺点：
-
-1. 训练成本高。
-2. 数据构造困难。
-3. 可能影响原有能力。
-
-#### 方法 3：高效 Attention
-
-例如 FlashAttention、sparse attention、local attention 等。
-
-优点：降低显存或计算压力。
-
-缺点：不同方法有不同质量和工程 trade-off。
-
-#### 方法 4：RAG
-
-不把所有信息塞进上下文，而是先检索相关片段。
-
-优点：
-
-1. 成本更可控。
-2. 可处理超大知识库。
-3. 知识更新方便。
-
-缺点：
-
-1. 依赖检索质量。
-2. 检索不到就答不好。
-3. 上下文构造和引用评估复杂。
-
-### 长上下文评估
-
-长上下文不能只看模型支持多少 token。
-
-需要评估：
-
-1. 能否找到远处信息。
-2. 能否整合多个位置的信息。
-3. 中间位置是否容易丢失。
-4. 长文摘要是否忠实。
-5. 长代码仓库理解是否准确。
-6. 推理延迟和显存成本是否可接受。
-
-常见 needle-in-a-haystack 测试有参考价值，但不足以代表真实长上下文能力。
-
-### RoPE 与长上下文的失败模式（第 14 讲）
-
-#### 坑 1：直接改最大长度
-
-只改 config 里的 max length，不代表模型真的会长上下文。
-
-#### 坑 2：只测 needle，不测真实任务
-
-模型能找到一根针，不代表能做长文推理、代码理解或多文档分析。
-
-#### 坑 3：忽略 KV Cache 成本
-
-长上下文推理时，显存可能主要被 KV Cache 占用。
-
-#### 坑 4：RoPE scaling 后不做短上下文回归测试
-
-扩长上下文可能影响原有短上下文任务。
-
-#### 坑 5：训练长度和推理长度差距过大
-
-外推过远时，位置编码和 attention 行为都可能不稳定。
-
-### RoPE 与长上下文的适用边界（第 14 讲）
-
-RoPE 优点：
-
-1. 把位置注入 Q/K，适合 attention。
-2. 具有相对位置性质。
-3. 现代 LLM 中有广泛实践。
-4. 旋转结构可用于设计位置扩展方法；外推效果仍需按训练长度、频率方案和任务评估。
-
-RoPE 缺点：
-
-1. 不是无限长上下文解决方案。
-2. scaling 需要小心评估。
-3. 实现中频率、位置 id、精度容易出错。
-
-长上下文适用场景：
-
-1. 长文问答。
-2. 多文档分析。
-3. 代码仓库理解。
-4. 法律、金融、医学文档处理。
-5. Agent 长任务记忆。
-
-### RoPE 与长上下文是两个相连但不同的问题
-
-RoPE 对 Q、K 的二维分量成对旋转。对位置 p 和角度 θ_p：
-
-```math
-R(\theta_p)
-\begin{bmatrix}x_1\\x_2\end{bmatrix}
+~~~math
+R(m\theta)
 =
 \begin{bmatrix}
-\cos\theta_p&-\sin\theta_p\\
-\sin\theta_p&\cos\theta_p
+\cos(m\theta) & -\sin(m\theta) \\
+\sin(m\theta) & \cos(m\theta)
 \end{bmatrix}
-\begin{bmatrix}x_1\\x_2\end{bmatrix}
-```
+~~~
 
-把 q_i 和 k_j 分别旋转后再做点积，结果会包含角度差，因此具备相对位置性质。这个性质改善了 attention 中的位置表达，但不保证模型在任意更长位置上都能泛化。
+RoPE 对位置 m 的 Query 和位置 n 的 Key 分别旋转。它们的点积可以改写为：
 
-### 长上下文能力的三层区分
+~~~math
+(R(m\theta)q)^\top(R(n\theta)k)
+=
+q^\top R((n-m)\theta)k
+~~~
 
-第一层是**能接收**：tokenizer、runtime、显存和接口允许输入更长序列。第二层是**能定位**：模型能够在不同位置找到相关片段。第三层是**能整合**：模型能把远处多段信息合并成正确判断，并在可接受成本内完成任务。只报告最大长度，无法区分这三层。
+因此点积中出现的是相对位移 n-m。实际 RoPE 会把不同维度对分配给不同频率 $\theta_i$，并在每层 Q/K 的对应维度对上执行旋转；V 不做这项位置旋转。[RoFormer 论文](https://arxiv.org/abs/2104.09864)给出了 RoPE 的构造和相对位置性质。
 
-长上下文扩展要同时检查 attention 计算、KV Cache、position id、训练长度、数据分布、lost in the middle、短上下文回归和真实任务。RoPE scaling、继续训练、稀疏/高效 attention 和 RAG 解决的是不同瓶颈；它们可以组合，也不能互相替代。
+若取二维单位向量 q=k=(1,0)，每个位置步长角为 0.25 弧度，旋转后的点积为 $\cos((n-m)\times0.25)$。不同绝对位置但相同相对距离会得到相同的这一项。这只展示公式性质，不代表完整模型注意力分布，也不意味着把模型位置无限延长后性能不变。
 
-#### 长上下文评估的实验设计
+### 位置表示、最大窗口与有效使用能力是不同问题
 
-至少按长度、信息位置、干扰数量、任务类型和成本切片。needle-in-a-haystack 可以测定位，却不能代表代码修复、多跳推理、长文摘要或证据冲突处理。评估还要记录 P50/P95 延迟、峰值显存、KV Cache、输入输出 token 和单位成功成本。
+位置机制解决“怎样把顺序和距离表示进模型”；上下文窗口表示模型一次可以处理多少 token；有效长上下文能力还取决于训练长度与数据、位置处理、注意力计算、模型是否能找到相关证据，以及任务本身。
 
-如果扩长位置后短文本变差，应报告回归；如果模型能找到远处字符串却无法用它完成推理，应把定位能力和整合能力分开。只有这样，长上下文结论才不会被一个漂亮的最大 token 数替代。
+| 扩展方向 | 主要处理的问题 | 仍需单独验证什么 |
+| --- | --- | --- |
+| RoPE scaling 等位置变换 | 调整超出训练位置范围时的位置映射 | 短上下文回归、远近位置、不同任务效果 |
+| FlashAttention 等 kernel | 减少注意力中间数据搬运开销 | 实际硬件、shape、dtype 下的吞吐和内存 |
+| Local / Sparse Attention | 减少部分 token 间交互 | 被移除的长距离连接是否影响目标任务 |
+| RAG 或外部检索 | 不把所有资料都塞进一次上下文 | 检索召回、证据定位和答案使用是否正确 |
 
-### 容易混淆的长上下文结论（第 14 讲）
+长上下文不是某个位置编码单独带来的属性。模型可能接受很长的输入，却对其中间区域或特定任务表现不稳；[Lost in the Middle](https://arxiv.org/abs/2307.03172)在其研究设置中观察到证据位置会影响长上下文任务表现。它是评测设计应关注的一类现象，不是所有模型和任务上的固定曲线。更深的位置扩展、长上下文 RAG 与评估见[第二册相关章节](../../book-02-advanced-100/chapters/07-长上下文rag与agent.md)。
 
-1. 误区：RoPE 可以无限外推。
-   纠正：RoPE 有相对位置性质，但超出训练长度太多仍可能退化。
+**交接：**本章已分别解释输入、上下文混合、因果训练、深层 block 和位置。最后一讲把这些机制放回同一个小模型，并沿实际 shape 走一遍。
 
-2. 误区：长上下文等于把 max length 改大。
-   纠正：还需要位置编码、训练数据、attention 成本、KV Cache 和评估配套。
+## 第 15 讲：从零实现一个小 GPT——把主线接成程序
 
-3. 误区：needle 测试好就代表长上下文好。
-   纠正：真实任务还需要信息整合、推理和抗干扰能力。
+### 代码要验证什么
 
-4. 误区：RAG 和长上下文互相替代。
-   纠正：它们是互补方案。长上下文处理上下文内信息，RAG 处理外部知识检索。
+下面给出一份完整的字符级 decoder-only GPT 教学脚本。它把字符串映射为字符 ID，用可学习绝对位置 embedding、Pre-LN Transformer Block、因果 self-attention 和交叉熵训练，再逐 token 采样生成。
 
-### 练习：区分位置能力和长度能力（第 14 讲）
+这段代码的目标是让输入、mask、残差和 logits 的 shape 可检查。它不实现 RoPE、GQA、KV Cache、混合精度、FlashAttention、停止 token 或分布式训练，因此不是生产 GPT。运行环境以仓库锁定的 Python 3.13+ 与 PyTorch 2.12.0 为准；脚本没有依赖预训练模型或外部数据，代码中的形状由构造参数决定。正文给出代码预期观察，不声称本轮已运行。
 
-1. 用自己的话解释 RoPE 为什么作用在 Q/K 上。
-2. 写一个简化函数，对二维向量做旋转。
-3. 解释为什么标准 attention 的长上下文成本高。
-4. 比较 RoPE scaling 和长上下文继续训练的优缺点。
-5. 设计一个长上下文评估集，至少包含 3 类任务。
+### 一次前向的 shape 路径
 
-### 本节回顾（第 14 讲）
+| 阶段 | Shape |
+| --- | --- |
+| 字符 ID 输入 | [B,T] |
+| Token 与位置 embedding 相加 | [B,T,D] |
+| 单头 Q/K/V | [B,H,T,d_h] |
+| 注意力分数和权重 | [B,H,T,T] |
+| 每个 block 的输出 | [B,T,D] |
+| 语言模型头 logits | [B,T,V] |
+| 训练目标 | [B,T] |
 
-关键结论：
+### 完整教学脚本
 
-1. RoPE 是旋转位置编码，常用于现代 LLM。
-2. RoPE 通过旋转 Q/K 注入位置信息。
-3. RoPE 的点积结构天然包含相对位置性质。
-4. 长上下文困难不只是位置编码问题。
-5. attention 成本、KV Cache、位置外推、训练数据和评估都很关键。
-6. RoPE scaling、继续训练、高效 attention、RAG 都是常见方向。
-7. 长上下文能力必须用真实任务和成本指标共同评估。
+> **代码状态：静态审阅，未运行。**
 
-关键问题：RoPE 如何把位置信息注入 Q 和 K，长上下文会带来哪些训练和推理问题。
-
-## 第 15 讲：从零实现一个小 GPT
-
-### 把数据流落实为一个可训练模型
-
-前面的概念只有在同一条程序路径中相遇，才会显示它们之间的约束。本节用字符级 tokenizer 构造一个教学版 decoder-only GPT：从 input/label 右移开始，经过 embedding、位置表示、causal attention、Transformer block 和 lm head，最后完成训练与逐 token 生成。它的目的不是达到生产质量，而是让每个 shape、mask 和状态变化都可检查。
-
-### 最小 GPT 的整体结构
-
-一个简化版 GPT 包含：
-
-```text
-token embedding
-position embedding
-N 个 Transformer block
-final LayerNorm
-lm head
-```
-
-数据流：
-
-```text
-input_ids [B,T]
--> token embedding [B,T,d]
--> position embedding [B,T,d]
--> transformer blocks [B,T,d]
--> final norm [B,T,d]
--> lm head [B,T,V]
-```
-
-其中：
-
-```text
-B = batch size
-T = sequence length
-d = hidden size
-V = vocab size
-```
-
-### 为什么从字符级模型开始
-
-为了让代码最小化，我们先用字符级 tokenizer。
-
-也就是把每个字符当作 token。
-
-优点：
-
-1. 不依赖外部 tokenizer。
-2. 代码简单。
-3. 适合理解完整训练流程。
-
-缺点：
-
-1. 序列更长。
-2. 不适合真实大模型。
-3. 语义粒度较细。
-
-这里的目标是理解 GPT 结构，而不是训练出具有实际应用能力的模型。
-
-### 数据构造
-
-给定一段文本：
-
-```text
-hello world
-```
-
-字符级 vocab：
-
-```text
-[' ', 'd', 'e', 'h', 'l', 'o', 'r', 'w']
-```
-
-每个字符映射成 id。
-
-训练时取长度为 `block_size` 的片段：
-
-```text
-input: x_1, x_2, ..., x_T
-```
-
-```text
-label: x_2, x_3, ..., x_{T+1}
-```
-
-这就是 next-token prediction。
-
-### 最小 demo：构造 input 和 label
-
-下面这个 demo 只验证 causal LM 训练数据的右移关系。很多 SFT、预训练和 miniGPT bug，本质都来自 input/label 错位或 mask 错误。
-
-```python
-import torch
-
-
-tokens = torch.tensor([1, 2, 3, 4, 5])
-block_size = 4
-
-x = tokens[:block_size]
-y = tokens[1:block_size + 1]
-
-print("input:", x.tolist())
-print("label:", y.tolist())
-
-assert x.tolist() == [1, 2, 3, 4]
-assert y.tolist() == [2, 3, 4, 5]
-```
-
-输出应为：
-
-```text
-input: [1, 2, 3, 4]
-label: [2, 3, 4, 5]
-```
-
-含义是：模型在位置 1 看到 token `1` 时预测 `2`，在位置 2 看到上下文 `[1, 2]` 时预测 `3`，依此类推。
-
-### 完整最小代码
-
-下面代码定义一个可在 CPU 运行的教学版 miniGPT，依赖 PyTorch 2.12.0。输入 `idx:[B,T]` 和可选同 shape 的整数 `targets`，输出 logits `[B,T,V]` 与交叉熵 loss；要求 token id 在词表范围内、`1≤T≤block_size`。生成路径接收 prompt 和非负 `max_new_tokens`，输出追加 token 的序列。代码末尾含正常路径与空序列边界检查；完整代码不实现 KV Cache。
-
-```python
+~~~python
 import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -4382,36 +494,32 @@ import torch.nn.functional as F
 class CausalSelfAttention(nn.Module):
     def __init__(self, n_embd, n_head, block_size):
         super().__init__()
-        if min(n_embd, n_head, block_size) <= 0:
-            raise ValueError("n_embd, n_head, and block_size must be positive")
         if n_embd % n_head != 0:
             raise ValueError("n_embd must be divisible by n_head")
         self.n_head = n_head
         self.head_dim = n_embd // n_head
-
         self.qkv = nn.Linear(n_embd, 3 * n_embd)
         self.proj = nn.Linear(n_embd, n_embd)
 
-        mask = torch.tril(torch.ones(block_size, block_size, dtype=torch.bool))
-        self.register_buffer("mask", mask.view(1, 1, block_size, block_size))
+        causal = torch.tril(torch.ones(block_size, block_size, dtype=torch.bool))
+        self.register_buffer("causal", causal[None, None, :, :])
 
     def forward(self, x):
-        if x.ndim != 3 or x.size(1) == 0 or x.size(1) > self.mask.size(-1):
-            raise ValueError("x must have shape [B, T, C] within block_size")
-        B, T, C = x.shape
-        qkv = self.qkv(x)  # [B, T, 3C]
-        q, k, v = qkv.split(C, dim=-1)
+        batch_size, seq_len, channels = x.shape
+        qkv = self.qkv(x)
+        q, k, v = qkv.split(channels, dim=-1)
 
-        q = q.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
-        k = k.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
-        v = v.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
+        q = q.view(batch_size, seq_len, self.n_head, self.head_dim).transpose(1, 2)
+        k = k.view(batch_size, seq_len, self.n_head, self.head_dim).transpose(1, 2)
+        v = v.view(batch_size, seq_len, self.n_head, self.head_dim).transpose(1, 2)
 
         scores = q @ k.transpose(-2, -1) / math.sqrt(self.head_dim)
-        scores = scores.masked_fill(~self.mask[:, :, :T, :T], float("-inf"))
-        weights = torch.softmax(scores, dim=-1)
+        allowed = self.causal[:, :, :seq_len, :seq_len]
+        scores = scores.masked_fill(~allowed, float("-inf"))
+        weights = F.softmax(scores, dim=-1)
 
-        out = weights @ v  # [B, h, T, head_dim]
-        out = out.transpose(1, 2).contiguous().view(B, T, C)
+        out = weights @ v
+        out = out.transpose(1, 2).contiguous().view(batch_size, seq_len, channels)
         return self.proj(out)
 
 
@@ -4431,339 +539,140 @@ class MLP(nn.Module):
 class Block(nn.Module):
     def __init__(self, n_embd, n_head, block_size):
         super().__init__()
-        self.ln1 = nn.LayerNorm(n_embd)
+        self.norm1 = nn.LayerNorm(n_embd)
         self.attn = CausalSelfAttention(n_embd, n_head, block_size)
-        self.ln2 = nn.LayerNorm(n_embd)
+        self.norm2 = nn.LayerNorm(n_embd)
         self.mlp = MLP(n_embd)
 
     def forward(self, x):
-        x = x + self.attn(self.ln1(x))
-        x = x + self.mlp(self.ln2(x))
+        x = x + self.attn(self.norm1(x))
+        x = x + self.mlp(self.norm2(x))
         return x
 
 
 class MiniGPT(nn.Module):
-    def __init__(self, vocab_size, block_size, n_layer=2, n_head=4, n_embd=128):
+    def __init__(self, vocab_size, block_size, n_layer=2, n_head=2, n_embd=32):
         super().__init__()
-        if min(vocab_size, block_size, n_layer, n_head, n_embd) <= 0:
-            raise ValueError("vocab_size, block_size, n_layer, n_head, and n_embd must be positive")
-        if n_embd % n_head != 0:
-            raise ValueError("n_embd must be divisible by n_head")
         self.block_size = block_size
         self.vocab_size = vocab_size
         self.token_emb = nn.Embedding(vocab_size, n_embd)
-        self.pos_emb = nn.Embedding(block_size, n_embd)
-        self.blocks = nn.ModuleList([
-            Block(n_embd, n_head, block_size) for _ in range(n_layer)
-        ])
-        self.ln_f = nn.LayerNorm(n_embd)
+        self.position_emb = nn.Embedding(block_size, n_embd)
+        self.blocks = nn.ModuleList(
+            [Block(n_embd, n_head, block_size) for _ in range(n_layer)]
+        )
+        self.norm_f = nn.LayerNorm(n_embd)
         self.lm_head = nn.Linear(n_embd, vocab_size, bias=False)
 
     def forward(self, idx, targets=None):
-        if idx.ndim != 2 or idx.size(0) == 0 or idx.dtype != torch.long:
-            raise ValueError("idx must be a non-empty batch of torch.long token ids")
-        B, T = idx.shape
-        if T == 0 or T > self.block_size:
-            raise ValueError("T must be between 1 and block_size")
+        batch_size, seq_len = idx.shape
+        if seq_len == 0 or seq_len > self.block_size:
+            raise ValueError("sequence length must be in [1, block_size]")
         if idx.min() < 0 or idx.max() >= self.vocab_size:
-            raise ValueError("idx contains a token id outside the vocabulary")
+            raise ValueError("token ID outside vocabulary")
         if targets is not None and targets.shape != idx.shape:
             raise ValueError("targets must have the same shape as idx")
-        if targets is not None:
-            if targets.dtype != torch.long or targets.device != idx.device:
-                raise ValueError("targets must be torch.long and on the same device as idx")
-            if targets.min() < 0 or targets.max() >= self.vocab_size:
-                raise ValueError("targets contain a token id outside the vocabulary")
 
-        pos = torch.arange(0, T, device=idx.device)
-        x = self.token_emb(idx) + self.pos_emb(pos)[None, :, :]
+        positions = torch.arange(seq_len, device=idx.device)
+        x = self.token_emb(idx) + self.position_emb(positions)[None, :, :]
 
         for block in self.blocks:
             x = block(x)
 
-        x = self.ln_f(x)
-        logits = self.lm_head(x)  # [B, T, vocab_size]
-
+        logits = self.lm_head(self.norm_f(x))
         loss = None
         if targets is not None:
             loss = F.cross_entropy(
-                logits.reshape(-1, logits.size(-1)),
+                logits.reshape(-1, self.vocab_size),
                 targets.reshape(-1),
             )
         return logits, loss
 
     @torch.no_grad()
     def generate(self, idx, max_new_tokens):
-        if isinstance(max_new_tokens, bool) or not isinstance(max_new_tokens, int) or max_new_tokens < 0:
-            raise ValueError("max_new_tokens must be a non-negative integer")
-        if idx.ndim != 2 or idx.size(0) == 0 or idx.size(1) == 0 or idx.dtype != torch.long:
-            raise ValueError("idx must be a non-empty batch of torch.long token ids")
-        if idx.min() < 0 or idx.max() >= self.vocab_size:
-            raise ValueError("idx contains a token id outside the vocabulary")
         for _ in range(max_new_tokens):
-            idx_cond = idx[:, -self.block_size:]
-            logits, _ = self(idx_cond)
-            logits = logits[:, -1, :]
-            probs = torch.softmax(logits, dim=-1)
+            context = idx[:, -self.block_size:]
+            logits, _ = self(context)
+            next_logits = logits[:, -1, :]
+            probs = F.softmax(next_logits, dim=-1)
             next_id = torch.multinomial(probs, num_samples=1)
             idx = torch.cat([idx, next_id], dim=1)
         return idx
 
 
 torch.manual_seed(0)
-model = MiniGPT(vocab_size=16, block_size=8, n_layer=2, n_head=4, n_embd=32)
-idx = torch.tensor([[1, 2, 3, 4]], dtype=torch.long)
-targets = torch.tensor([[2, 3, 4, 5]], dtype=torch.long)
-logits, loss = model(idx, targets)
-assert logits.shape == (1, 4, 16) and torch.isfinite(loss)
-print("logits:", logits.shape, "loss finite:", bool(torch.isfinite(loss)))
-print("generated shape:", model.generate(idx[:, :2], max_new_tokens=3).shape)
-try:
-    model(torch.empty((1, 0), dtype=torch.long))
-except ValueError as exc:
-    print("empty sequence rejected:", exc)
-```
 
-### 训练 loop 示例
-
-这是前一代码块的接续示例：请在同一 Python 文件中先定义 `MiniGPT` 并保留 PyTorch imports。输入是重复的字符级文本 `"hello world\n"`，每步采样 `[batch_size,block_size]` 训练片段；输出每 50 步打印 loss，并生成 50 个字符。运行设备为 CPU，随机种子固定；输出只验证端到端数据流，不代表模型泛化能力。
-
-```python
-torch.manual_seed(0)
-text = "hello world\n" * 1000
-chars = sorted(list(set(text)))
+text = "hello transformer\n" * 64
+chars = sorted(set(text))
 stoi = {ch: i for i, ch in enumerate(chars)}
 itos = {i: ch for ch, i in stoi.items()}
-
 data = torch.tensor([stoi[ch] for ch in text], dtype=torch.long)
 
 block_size = 16
-batch_size = 32
+batch_size = 8
 
 
 def get_batch():
-    num_starts = len(data) - block_size
-    if num_starts <= 0:
-        raise ValueError("data must contain more than block_size tokens")
-    ix = torch.randint(0, num_starts, (batch_size,))
-    x = torch.stack([data[i:i + block_size] for i in ix])
-    y = torch.stack([data[i + 1:i + block_size + 1] for i in ix])
+    starts = torch.randint(0, data.numel() - block_size, (batch_size,))
+    x = torch.stack([data[i:i + block_size] for i in starts])
+    y = torch.stack([data[i + 1:i + block_size + 1] for i in starts])
     return x, y
 
 
 model = MiniGPT(vocab_size=len(chars), block_size=block_size)
 optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
 
-for step in range(200):
+for _ in range(100):
     x, y = get_batch()
     logits, loss = model(x, y)
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
 
-    if step % 50 == 0:
-        print(step, loss.item())
+print("logits shape:", tuple(logits.shape))
+print("loss is finite:", bool(torch.isfinite(loss)))
 
-start = torch.tensor([[stoi["h"]]], dtype=torch.long)
 model.eval()
-out = model.generate(start, max_new_tokens=50)[0].tolist()
-print("".join(itos[i] for i in out))
-```
+prompt = torch.tensor([[stoi["h"]]], dtype=torch.long)
+generated = model.generate(prompt, max_new_tokens=40)[0].tolist()
+print("generated:", "".join(itos[token_id] for token_id in generated))
+~~~
 
-### 代码结构解释
+按构造参数，前向 logits 的 shape 应为 [8,16,V]，loss 为标量，生成序列长度应为 41；loss 的具体数值和生成文本取决于随机初始化与采样过程，不能当作固定预期。脚本打印有限性检查结果供运行时观察。训练样本的 x 与 y 右移一位；因果 mask 让每个位置只读当前前缀；生成时每次只取最后位置的 logits。
 
-#### CausalSelfAttention
+### 沿着不变量检查小模型
 
-负责：
+| 若观察到的问题 | 先检查的约束 |
+| --- | --- |
+| loss 形状异常或无法计算 | logits 是 [B,T,V]，target 是 [B,T]，两者位置按 next-token 目标对齐 |
+| 未来 token 影响较早位置 | causal mask 的方向、切片和 softmax 前屏蔽 |
+| 残差相加报维度错误 | Attention 与 MLP 输出是否都回到 D |
+| 输入长度超过支持范围 | position embedding 和 causal mask 是否覆盖当前 T |
+| loss 下降但生成不合理 | 数据量、训练步数、字符级粒度、采样和任务难度 |
 
-1. 生成 Q/K/V。
-2. 拆成多头。
-3. 计算 causal attention。
-4. 合并多头输出。
-5. 做 output projection。
+这段示例每一步重新处理截断后的上下文，没有 KV Cache；字符级 tokenization 也比常见子词词表产生更长序列。它适合验证结构，不代表真实模型质量或推理性能。更多训练实现和数据处理见[第五册模型架构与初始化](../../book-05-llm-training/chapters/04-模型架构与初始化.md)。
 
-#### Block
+## 本部分收束：能从输入一路解释到 logits
 
-负责：
+读完后应能不看正文画出一条完整路径，并为每一步说出它解决的问题：
 
-1. Pre-LN attention。
-2. 残差连接。
-3. Pre-LN MLP。
-4. 残差连接。
+1. Tokenizer 把文本变成离散 ID；词表和特殊 token 是模型输入契约的一部分。
+2. Embedding 把 ID 变为 [B,T,D]；位置机制把顺序或距离纳入计算。
+3. Attention 通过 Q/K 分数、缩放、softmax 和 Value 汇总上下文；causal mask 限制未来可见性。
+4. 多头提供多个投影子空间；KV 头数改变缓存载荷，但不等于全部计算成本。
+5. Attention、MLP、Norm 和残差组成可堆叠 Block；最后映射为 [B,T,V] logits。
+6. 训练把 logits 与右移目标比较并更新参数；生成逐次选择 token 并追加到上下文。
 
-#### MiniGPT
-
-负责：
-
-1. token embedding。
-2. position embedding。
-3. 堆叠多个 block。
-4. final norm。
-5. lm head 输出 logits。
-6. 计算 cross entropy loss。
-7. generate 自回归生成。
-
-### 训练和生成的关系
-
-训练时：
-
-```text
-输入 x，目标 y = x 右移一位
-一次 forward 预测所有位置
-用 cross entropy 训练
-```
-
-生成时：
-
-```text
-输入已有上下文
-取最后一个位置 logits
-采样下一个 token
-拼回上下文
-重复
-```
-
-### miniGPT 的失败模式与生产边界（第 15 讲）
-
-#### 坑 1：input 和 target 没有错位
-
-如果 `x` 和 `y` 一样，模型会学复制当前 token。
-
-#### 坑 2：causal mask 没有裁剪到当前 T
-
-训练或生成时输入长度可能小于 block_size，mask 要使用 `:T, :T`。
-
-#### 坑 3：view 前忘记 contiguous
-
-transpose 后直接 view 可能出错。
-
-#### 坑 4：generate 时忘记截断上下文
-
-如果输入长度超过 block_size，position embedding 会越界。
-
-#### 坑 5：把教学版 miniGPT 当成生产实现
-
-真实 LLM 还需要 RoPE、RMSNorm、SwiGLU、FlashAttention、KV Cache、混合精度、分布式训练等。
-
-### miniGPT：把输入、训练和生成接成一个闭环
-
-字符级 miniGPT 的价值不在于训练出强模型，而在于把本章的契约串起来：字符变成 id，输入和 target 右移，embedding 与 position 形成 [B,T,d]，block 保持宽度，lm head 产生 [B,T,V]，cross entropy 对齐目标，generate 再逐 token 使用最后位置 logits。
-
-完整代码应逐层检查以下不变量：
-
-1. input 的 dtype 是整数，范围在 vocabulary 内；
-2. target 与 input 的时间位置错开一位；
-3. block 内所有残差支路回到 d_model；
-4. causal mask 的当前 T 与输入一致；
-5. logits 的最后一维等于 vocab_size；
-6. loss 的 flatten 顺序与 labels 对齐；
-7. generate 不超过 position 或 cache 的支持长度；
-8. 训练和生成使用同一编码和特殊 token 约定。
-
-### 训练能学会，不等于系统实现正确
-
-在 hello world 这类高度重复的数据上，模型很快降低 loss，并不能证明它能处理新字符串、长上下文或真实代码。应分别做：
-
-- 小数据过拟合：检查模型、loss 和梯度是否连通；
-- 留出字符或模式：检查是否只记住训练文本；
-- 改变 prompt 长度：检查 position 和 mask；
-- greedy 与 sampling 对照：区分模型能力和解码随机性；
-- 生成后重新编码：检查 tokenizer round-trip；
-- 打印每一层 shape 和峰值显存：检查工程实现。
-
-miniGPT 的字符级 tokenizer、学习位置 embedding、全量 attention 和逐步重算上下文都不等于生产 LLM。真实系统还要处理 subword tokenizer、RoPE/RMSNorm/SwiGLU、FlashAttention、KV Cache、混合精度、分布式、checkpoint、数据质量和服务限流。
-
-### 训练与生成的错误归因
-
-若 loss 不下降，先查 input/target、mask、学习率和梯度；若 loss 下降但生成乱码，查数据规模、采样、词表和停止条件；若短文本正常而长文本异常，查位置、block_size 和 cache；若训练生成正常而 serving 异常，查 dtype、batch、KV Cache、模板和版本。
-
-一个最小端到端实验应该保存模型配置、tokenizer、随机种子、训练数据 hash、optimizer/scheduler、步数、评估 prompt、生成参数和输出。没有这些记录，复现一段“我训练出了一个 GPT”的描述没有工程意义。
-
-### 容易混淆的 miniGPT 结论（第 15 讲）
-
-1. 误区：GPT 只是 attention 堆叠。
-   纠正：还包括 embedding、position、MLP、norm、residual、loss 和 generation。
-
-2. 误区：训练和生成用完全相同输入。
-   纠正：训练有 target，生成没有 target，需要逐步采样。
-
-3. 误区：小 GPT 训练出来乱码就是代码错。
-   纠正：也可能是数据太少、训练步数太少、模型太小或字符级任务本身能力有限。
-
-4. 误区：教学代码可以直接扩展成生产大模型。
-   纠正：生产训练需要大量系统、数值稳定性和性能优化。
-
-### 练习：沿着训练和生成路径调试（第 15 讲）
-
-1. 给定 token 序列 `[1,2,3,4,5]`，构造 block_size=4 的 input 和 target。
-2. 修改 `generate`，实现 greedy decoding。
-3. 给 miniGPT 加 dropout。
-4. 把 position embedding 替换成 RoPE 的接口设计。
-5. 打印每一层输出 shape，确认数据流。
-
-### 本节回顾（第 15 讲）
-
-关键结论：
-
-1. GPT 是 decoder-only Transformer。
-2. miniGPT 的核心包括 embedding、causal attention、MLP、norm、residual、lm head。
-3. 训练 label 是 input 右移一位。
-4. loss 是所有 token 位置的 cross entropy。
-5. 生成时逐 token 采样，并把新 token 拼回上下文。
-6. 教学版 miniGPT 能帮助理解结构，但真实 LLM 还需要大量工程优化。
-
-关键问题：GPT 模型核心模块如何组织，输入和 label 如何构造，causal attention 如何实现。
-
-## 本部分综合：从 tokenizer 到可训练、可服务的 Transformer
-
-这一部分的组件不是一串互相独立的定义。tokenizer 决定输入序列；embedding 和位置方案把离散输入变成带位置信息的向量；attention 在 token 之间路由信息；MLP、normalization 和 residual 组成可堆叠的 block；causal mask 定义生成时可见的历史；MHA、MQA/GQA、FlashAttention 和 KV Cache 决定实现的吞吐与内存；miniGPT 把这些对象连接成训练和生成闭环。
-
-### 一次 shape 和状态联合审计
-
-给定输入 [B,T]，先查 tokenizer 输出是否使用了目标词表和特殊 token；embedding 后为 [B,T,d]；每个 block 内 Q/K/V 变为 [B,h,T,d_h]，scores 为 [B,h,T,T]，mask 与 scores 广播兼容；attention 和 MLP 输出必须回到 [B,T,d]；lm head 产生 [B,T,V]；labels 与时间位置右移对齐。推理时还要额外记录 prefill、decode、position id、KV Cache 的层数、K/V head 数和 dtype。
-
-这个账本可以把“模型输出变差”拆成具体事件：
-
-| 现象 | 优先检查 |
-|---|---|
-| 训练 loss 虚低，生成崩坏 | causal mask、label shift、未来泄漏 |
-| 短输入正常，长输入退化 | position、RoPE scaling、训练长度、KV Cache |
-| 训练正常，服务慢或 OOM | prefill/decode、KV head、dtype、kernel、batch |
-| 多语言 token 成本异常 | tokenizer 压缩率、Unicode、特殊 token |
-| attention shape 报错 | transpose、contiguous、mask broadcast、head_dim |
-| 深层训练 NaN | norm、residual、学习率、梯度裁剪、精度 |
-| miniGPT loss 降低但不泛化 | 数据重复、字符级任务、评估切分、解码 |
-
-### 用对照实验区分机制和实现
-
-可以设计四组实验：
-
-1. 正确 tokenizer、mask、label 和 block；
-2. 只替换 tokenizer，观察 token 数和能力；
-3. 只替换位置方案，观察长短上下文；
-4. 只替换 MHA 为 GQA，观察质量、KV Cache 和延迟。
-
-所有组固定训练数据、步数、随机种子和评估 harness。若只看最终 loss，无法知道变化来自输入长度、位置外推还是优化器状态；将 shape、成本和任务结果一起记录，才能形成可信结论。
+若一个模型在训练 loss、生成质量或推理内存上出现问题，可以先沿这条路径定位到具体接口：ID 与 embedding 是否一致、mask 是否正确、shape 是否守恒、位置是否在支持范围、KV 头与缓存预算是否符合目标。更深入的训练目标交给[第三部分](03-训练对齐推理.md)，Serving 和 Cache 交给第六册与第二十四册，长上下文和架构变体交给第二册。
 
 ## 资料入口与证据边界
 
-- [Attention Is All You Need](https://arxiv.org/abs/1706.03762)：Transformer、scaled dot-product attention、multi-head 和位置编码的原始论文入口；论文中的实验设置不等于现代 decoder-only LLM 的完整实现。
-- [BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding](https://arxiv.org/abs/1810.04805)：支持 BERT 使用 WordPiece 词表、双向 encoder 与 masked language modeling 的历史实例；不代表所有 WordPiece tokenizer 的训练算法完全相同。
-- [Neural Machine Translation of Rare Words with Subword Units](https://arxiv.org/abs/1508.07909)：BPE 子词建模论文入口，支持罕见词与子词切分的讨论。
-- [Train Short, Test Long: Attention with Linear Biases](https://arxiv.org/abs/2108.12409)：ALiBi 在 attention 分数中加入距离相关线性偏置的论文入口；其长度泛化结果受模型和实验设置约束。
-- [SentencePiece](https://arxiv.org/abs/1808.06226)：直接从原始文本训练子词模型的论文入口，支持 SentencePiece 的基本边界。
-- [RoFormer: Enhanced Transformer with Rotary Position Embedding](https://arxiv.org/abs/2104.09864)：RoPE 论文入口，支持旋转位置和相对位置性质的机制说明。
-- [Root Mean Square Layer Normalization](https://arxiv.org/abs/1910.07467)：RMSNorm 的提出背景、定义和论文实验；不证明它在所有架构中都优于 LayerNorm。
-- [On Layer Normalization in the Transformer Architecture](https://arxiv.org/abs/2002.04745)：分析 Pre-LN/Post-LN 梯度路径和训练稳定性的研究入口；其结论要限定在论文研究的架构和训练设置内。
-- [FlashAttention](https://arxiv.org/abs/2205.14135)：IO-aware 精确 attention 计算的论文入口，支持“计算实现优化”和“改变稀疏连接”之间的区分。
-- [GQA: Training Generalized Multi-Query Transformer Models](https://arxiv.org/abs/2305.13245)：GQA 论文入口，支持 K/V head 共享与推理效率取舍的讨论。
-- [Lost in the Middle: How Language Models Use Long Contexts](https://arxiv.org/abs/2307.03172)：支持长上下文信息位置可能影响任务表现的研究实例；不能外推为所有模型、数据和任务都具有相同曲线。
-- [PyTorch MultiheadAttention](https://docs.pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html)：官方模块接口和 shape 语义入口；教学模块不能直接代表生产 kernel、缓存和分布式实现。
+- Vaswani 等，[Attention Is All You Need](https://arxiv.org/abs/1706.03762)：scaled dot-product attention、多头结构与原始 Transformer 设计。
+- Sennrich 等，[Neural Machine Translation of Rare Words with Subword Units](https://arxiv.org/abs/1508.07909)：BPE 子词单元与罕见词处理动机。
+- Kudo 与 Richardson，[SentencePiece](https://arxiv.org/abs/1808.06226)：原始文本上的子词模型工具与处理方式。
+- Su 等，[RoFormer](https://arxiv.org/abs/2104.09864)：RoPE 构造和相对位置性质。
+- Zhang 与 Sennrich，[Root Mean Square Layer Normalization](https://arxiv.org/abs/1910.07467)：RMSNorm 形式与论文实验。
+- Dao 等，[FlashAttention](https://arxiv.org/abs/2205.14135)：IO-aware 精确注意力实现。
+- Ainslie 等，[GQA](https://arxiv.org/abs/2305.13245)：Grouped-Query Attention 结构与论文配置下的取舍。
+- Liu 等，[Lost in the Middle](https://arxiv.org/abs/2307.03172)：特定长上下文任务中证据位置效应的研究实例。
 
-这些资料分别支持经典架构、tokenizer、位置编码、attention kernel、GQA 和官方接口。论文结论、框架语义、本章教学代码和目标模型的实测结果属于不同证据层级；涉及长上下文、速度、显存和质量的结论，必须在固定硬件、dtype、batch、kernel、数据和评估任务下复测。
-
-## 本部分小结
-
-Transformer 的能力来自一条完整的数据和计算路径：tokenizer 把字符串离散化，embedding 和位置机制把 id 变成有序向量，attention 让 token 交换信息，MLP 提供位置内的非线性加工，normalization 与 residual 让深层堆叠可训练，causal mask 约束生成，MHA/MQA/GQA 与 FlashAttention 决定实现代价，miniGPT 则把这条路径落实为可以训练和生成的程序。
-
-真正做工程判断时，不能只问“用了哪种 attention”或“支持多少上下文”。还要问 tokenizer 如何计量，mask 是否泄漏，shape 是否一致，位置是否外推，KV Cache 是否能承受并发，训练和 serving 是否使用同一协议，以及任务级质量是否与 token loss 一致。
+这些论文支撑其明确说明的机制和研究设置，不足以证明所有现代模型使用相同配置、所有实现有相同性能，或某个位置机制可以保证任意长度泛化。模型规格、API mask 语义、kernel 性能和长上下文能力应依据目标模型与版本单独核验。

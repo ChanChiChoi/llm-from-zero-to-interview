@@ -224,8 +224,28 @@ q_{\max}
 ~~~
 
 q_i 是存储的整数码，s 是 scale，q_min 和 q_max 是该格式允许的整数范围，
-hat{w}_i 是反量化后的近似值。对于带符号的 4 bit 整数，常见范围接近
-[-8, 7]，但具体编码和是否保留特殊值必须以格式实现为准。
+hat{w}_i 是反量化后的近似值。二进制补码有符号 INT4 的整数码范围是
+[-8, 7]；但许多对称量化器为了让正负两侧幅值相同，会选择 [-7, 7]，把
+-8 留空。两种说法并不矛盾：前者是编码可表示的范围，后者是量化器选择使用
+的码本。实际 artifact 还可能使用非对称范围或特殊的零点，必须以量化配置
+为准。
+
+用四个数手算一次对称量化。取权重
+[-0.9, -0.2, 0.3, 1.1]，使用 [-7, 7]，令最大绝对值映射到 7：
+
+~~~math
+s=\frac{1.1}{7}\approx 0.15714,
+\qquad
+q_i=\operatorname{round}\left(\frac{w_i}{s}\right)
+=[-6,-1,2,7]
+~~~
+
+反量化结果约为 [-0.9429, -0.1571, 0.3143, 1.1000]。例如
+0.3 / 0.15714 ≈ 1.91，四舍五入到 2，再乘回 scale 得到约 0.3143。
+最大值没有被裁剪，但 -0.9 被表示成 -0.9429；这组误差来自有限码点间距，
+不是整数范围溢出。若同一 group 中出现更大的异常值，scale 会变大，普通值
+可选的相邻码点间距也会变粗；裁剪可以恢复普通值分辨率，却会让被裁剪的大值
+产生有意的饱和误差。
 
 最简单的 scale 估计是：
 
@@ -326,32 +346,151 @@ PTQ 的典型链路是：
 
 ### 17.4.2 GPTQ：用误差传播考虑权重重要性
 
-GPTQ 一类方法不是简单地逐元素四舍五入，而是试图在给定校准激活下，让量化
-后的层输出尽量接近原层输出。一个抽象的二次误差目标可以写成：
+逐元素 round-to-nearest（RTN）只看某个权重离哪个量化格点最近，不看这一格
+误差通过当前层输入后会不会显著改变输出。GPTQ 把目标改成校准输入上的层输出
+重建误差。对线性层 Y=WX，令 X 是收集到的输入激活，W_q 是量化矩阵：
 
 ~~~math
-\min_{\hat{W}}
-\left\|
-(W-\hat{W})X
-\right\|_2^2
+\mathcal{L}(W_q)
+=
+\left\|(W-W_q)X\right\|_F^2,
+\qquad
+H\approx 2XX^\top+\lambda I
 ~~~
 
-W 是原始权重，hat{W} 是量化权重，X 是校准激活。更详细的实现会使用近似
-Hessian 或其逆来决定量化顺序和误差补偿。本式只表达“误差要结合输入分布
-衡量”，不是完整复现某个实现的算法。
+这里 H 是这个局部二次重建目标的近似 Hessian，反映输入特征之间的相关性；
+它不是整个语言模型任务损失对所有参数的 Hessian。lambda I 是阻尼项，用来
+避免校准样本不足或数值误差造成矩阵病态。
 
-### 17.4.3 AWQ：保护更重要的权重通道
+每次把一个权重坐标 w_j 量化成 q_j 后，量化误差
+e_j=w_j-q_j 不会被丢在原地。GPTQ 根据逆 Hessian 把它分摊给尚未量化的坐标：
 
-AWQ 的核心直觉是，激活中对输出更重要的通道不应与普通通道同等粗暴地量化。
-它通过激活统计寻找重要性，并对权重或缩放关系做调整。工程上看到 AWQ
-artifact 时，必须继续核对 group size、pack layout 和目标 kernel；论文中的
-量化方法名称不能替代 runtime 兼容性。
+~~~math
+w_F
+\leftarrow
+w_F-
+e_j
+\frac{(H_F^{-1})_{F,j}}{(H_F^{-1})_{j,j}}
+~~~
+
+F 表示尚未量化的输入通道集合。分母把被量化坐标的局部代价归一化，分子则
+告诉算法哪些剩余坐标能以较小的重建损失吸收误差。一个二通道的教学例子：
+
+~~~math
+H^{-1}=
+\begin{bmatrix}
+1 & 0.8\\
+0.8 & 1
+\end{bmatrix},
+\qquad
+w_1=0.62,\quad q_1=0.42,\quad w_2=0.50
+~~~
+
+此时 e_1=0.20，补偿后的第二个权重为
+0.50-0.20\times 0.8/1=0.34。若第二通道与第一通道在校准输入上的关系很弱，
+逆 Hessian 的非对角项接近 0，算法就不会把太多误差分给它。这个例子只演示
+局部更新，不意味着 GPTQ 能让每个样本的输出完全不变。
+
+原论文把 OBQ 的逐权重贪心更新扩展到大模型：所有输出行共享同一列顺序，因为
+输入激活导出的 Hessian 对这些行相同；每次按一块连续列处理，再统一更新剩余
+权重，以提高 GPU 利用率；逆 Hessian 的 Cholesky 重写和对角阻尼则缓解大矩阵
+重复更新中的数值不稳定。原论文的量化设定采用均匀、逐行、非对称量化，并非
+“GPTQ 必然使用某一种 INT4 对称码本”。
+
+证据要和实验条件一起读。原论文使用 128 段、每段 2048 token 的 C4 校准输入，
+在单张 80GB A100 上量化模型；OPT-175B 的整模型量化用时约 4.2 小时。在
+WikiText-2 上，[原论文](https://arxiv.org/html/2210.17323v2)报告 FP16 PPL
+为 8.34、4 bit GPTQ 为 8.37、同设定的 RTN 为 10.54。它说明误差补偿在这组
+模型和校准条件下优于直接舍入，不保证
+任意指令、代码、多语种或目标业务任务都同样退化。GPTQ 仍是 weight-only：
+它压低权重搬运字节，但不自动减少矩阵乘的乘加次数；量化质量和生成速度还
+依赖实际 kernel。
+
+### 17.4.3 AWQ：激活感知的等价通道缩放
+
+AWQ 先问“哪些权重误差会被当前输入放大”。对线性层 Y=XW，权重矩阵 W 的
+某个输入通道若经常乘上较大的激活，该通道的量化误差更容易影响输出。AWQ
+用校准激活的逐通道平均幅值估计这种敏感性，而不是只按权重绝对值挑异常项。
+
+如果 D_s 是输入通道的对角缩放矩阵，未量化时可以做等价变换：
+
+~~~math
+XW=(XD_s^{-1})(D_sW)
+~~~
+
+AWQ 把敏感通道对应的权重放大，再把激活反向缩小；浮点计算仍是同一个线性
+映射，但被量化的 D_sW 中这些权重相对 group scale 更容易获得细粒度表示。
+量化后两侧不再严格抵消，留下的误差由校准数据上的层输出误差来衡量。若缩放
+只照顾显著通道，也可能放大同一 group 内普通通道的误差，所以 AWQ 不会简单
+地把显著通道无限放大。
+
+论文把搜索范围限制为 s=s_X^alpha，其中 s_X 是逐输入通道的平均激活幅值，
+alpha 在 [0,1] 的小网格上搜索；目标是让量化层输出接近原层输出，并可再搜索
+weight clipping。D_s^{-1} 通常可以折入前一个算子，避免推理时多出独立缩放
+操作。部署时目标仍是整组低比特权重；“保留 1% 权重为 FP16”是 AWQ 论文
+讨论重要权重时的动机和对照，不是 AWQ 主方法的必需执行路径。部分综述把
+AWQ 简写成保留 1% 高精度权重，谈具体算法时应以[AWQ 原论文](https://arxiv.org/html/2306.00978v6)
+的等价缩放方法为准。
+
+在 [AWQ 原论文](https://arxiv.org/html/2306.00978v6)中，OPT-6.7B、INT3、
+group size 128、WikiText-2 上 FP16 PPL 为 10.86、RTN 为 23.54、AWQ 为
+11.39；这是算法质量证据，不是任意模型的保证。
+作者还在 PubMed 与 Enron 两个数据切片之间做校准/评测分布互换，报告该设定下
+AWQ 的 PPL 增量为 0.5–0.6、GPTQ 为 2.3–4.9。它支持“该实验中 AWQ 对分布
+变化较不敏感”，不等于 AWQ 无需校准或对所有业务域都更稳。AWQ 与 GPTQ
+artifact 一样，仍要核验 group、scale、pack layout 和后端 kernel。
 
 ### 17.4.4 QAT：让模型在训练时适应噪声
 
-QAT 在训练或微调阶段插入 fake quantization，使模型更新逐渐适应有限精度。
-它可能改善某些分布外任务的质量，但需要训练成本，也仍然需要明确最终 artifact
-使用什么 layout、scale 和计算 kernel。
+QAT 在前向过程中模拟量化和反量化，但可训练参数仍保留高精度副本。一个
+简化的 fake-quant 前向是：
+
+~~~math
+W_{\mathrm{fake}}
+=
+s\cdot\operatorname{clip}
+\left(
+\operatorname{round}\left(\frac{W}{s}\right),
+q_{\min},q_{\max}
+\right)
+~~~
+
+round 本身不可微，训练实现需要用替代梯度或其他近似方式传播更新；不同 QAT
+配方在 scale 学习、剪裁、损失和权重/激活范围上可能不同，不能由“做了 QAT”
+推断成统一算法。PyTorch 的 FakeQuantize 2.14 文档明确把该模块定义为训练时
+模拟 quantize/dequantize；对应公式和观测器状态要与最终导出的 scale 区分。
+
+一个面向 LLM 的代表方案是 LLM-QAT：先从原始模型采样生成文本，再用原模型
+logits 作为软标签训练量化学生模型，避免依赖原始预训练语料；论文同时训练
+weights、activations 和 KV cache 的量化路径。在 LLaMA-7B 的 W4A8KV4 设置中，
+作者报告常识任务平均分从 RTN 的 41.2 提高到 60.7；数字绑定论文的模型、数据
+生成、训练配置和任务集合，且这是一项训练研究，不证明任意 serving kernel
+支持相同格式。QAT 以训练资源换取对量化噪声的适应，最终模型仍需验证 artifact
+布局、scale、目标 kernel、任务切片和回滚兼容性。
+
+### 17.4.5 代表方案解决的是不同层的问题
+
+下面的代表方案不是四个互相替代的“INT4 格式”。RTN 是量化基线，GPTQ 和 AWQ
+主要决定如何生成低比特权重，MARLIN 则决定一类兼容权重如何在 GPU 上执行。
+
+| 方案 | 所在层与要解决的问题 | 关键机制 | 代表性证据 | 代价、限制与后续改进 |
+| --- | --- | --- | --- | --- |
+| RTN | 转换基线；以最低转换复杂度得到低比特权重 | 每个权重独立舍入到最近的量化格点，不补偿层输出误差 | GPTQ 原论文的 OPT-175B WikiText-2 4 bit 行，PPL 为 10.54 | 低 bit 时容易让一串误差叠加。先用固定校准集与任务切片测量是否需要更复杂 PTQ |
+| GPTQ | PTQ 算法；降低校准输入上的线性层输出重建误差 | 用激活统计构造近似 Hessian，逐列量化并以逆 Hessian 补偿剩余权重 | 同一原论文中 OPT-175B 4 bit PPL 为 8.37，FP16 为 8.34；量化耗时约 4.2 小时/单张 80GB A100 | 校准分布、分组、阻尼和数值稳定性会影响结果；weight-only 不减少乘加。可增加目标域校准、任务回归，或在仍不达标时比较 QAT |
+| AWQ | PTQ 算法；利用输入激活保护敏感通道，同时保持硬件友好的全低比特权重 | 等价地缩放权重/输入通道，在小范围搜索 scale 与 clipping，再导出低比特权重 | AWQ 原论文的 OPT-6.7B INT3-g128 WikiText-2 PPL：RTN 23.54、AWQ 11.39、FP16 10.86 | 激活统计与 clipping 仍来自校准集；该论文的分布偏移结果不能推广到所有领域。可用目标 workload 校准并做代码、数字、长上下文和结构化输出切片 |
+| MARLIN | 执行 kernel；解决 W4A16 在批量 decode 下仍要高效读权重和使用 Tensor Core 的问题 | 异步访存、任务调度、流水线、量化专用布局与解码计算 | 作者在 A10 大矩阵层级上报告 batch 16–32 约 3.9×、batch 128 约 1.5× 对 FP16；vLLM 端到端收益因 attention 和 serving 开销更低 | 它不改量化质量；收益受 GPU、矩阵形状、group/pack 布局和 batch 影响。高 batch 进入 compute-bound 后，需评估 W4A8 等激活量化路径及其新增数值误差 |
+
+这些数字分别来自不同论文、模型、校准、评测和 kernel 配置，不能据此给 GPTQ、
+AWQ、MARLIN 排统一名次。MARLIN 的论文使用 GPTQ 生成的 INT4 权重来测 kernel，
+正好说明“权重怎样量化”和“权重怎样执行”可以组合，但两层的贡献需要分开
+报告。AWQ 原论文也把算法和 TinyChat 系统分开：TinyChat 的加速同时来自
+on-the-fly dequant、平台相关 pack 和 kernel fusion，不能把系统速度都归因于
+AWQ 的 scale 搜索。
+
+先用统一任务评测确认量化质量，再检查 manifest 和 runtime 是否读取了兼容布局，
+最后用目标 batch/长度 trace 确认命中预期 kernel。当前 vLLM 文档分别列出量化
+方案和 linear backend 选择入口；支持矩阵会随 release 变化，文档项不能代替
+对实际模型、shape 和硬件的启动日志与 profiler 检查。
 
 所以以下说法都可能同时成立：
 
@@ -578,8 +717,9 @@ Q_{\mathrm{INT4}}
 ~~~
 
 Q_INT4 是全量化候选在一个任务切片上的分数，Q_mixed,l 是只把第 l 层
-恢复到较高精度后的分数。若 Delta_l 较大，说明该层值得进一步检查；它
-不是跨模型通用的固定敏感层名单。
+恢复到较高精度后的分数。解释 Delta_l 时要按指标方向统一口径：准确率类
+指标越高越好，PPL/错误率类指标越低越好。恢复后改善越明显，说明该层值得
+进一步检查；它不是跨模型通用的固定敏感层名单。
 
 如果有多个任务桶，可以写一个加权观察分数：
 
@@ -659,18 +799,22 @@ v 遍历词表，p 可以是 BF16 基线分布，q 可以是 INT4 候选分布�
 
 ### 17.9.4 单位成功任务成本
 
-如果候选路径单次服务成本为 C_serve，质量验证或重试成本为 C_retry，人工
-复核成本为 C_review，最终成功概率为 p_success，可以用一个简化账本表示：
+成本分子和成功率必须使用同一批原始请求作分母。令 C_all 是按候选策略处理
+一个原始请求所产生的期望总成本，已经包含首次推理、所有重试、验证、fallback
+和人工复核；令 p_final 是这批原始请求最终成功的比例，则：
 
 ~~~math
 C_{\mathrm{success}}
 =
-\frac{
-C_{\mathrm{serve}}+C_{\mathrm{retry}}+C_{\mathrm{review}}
-}{
-p_{\mathrm{success}}
-}
+\frac{\mathbb{E}[C_{\mathrm{all\ per\ original\ request}}]}
+{p_{\mathrm{final}}}
 ~~~
+
+例如 100 个原始请求合计花费 120 个成本单位，最终 90 个成功，则单位成功成本
+为 120/90=1.33 个成本单位/成功请求。重试和复核的开销已经计入 120，不能
+再把它们重复加一次；成功率也不能用“成功尝试数 / 所有尝试数”替代原始请求
+成功率。若不同阶段的账单与人工工时不同，应从 trace 分阶段汇总到每个原始
+请求，再除以最终成功比例。
 
 INT4 减少 GPU 显存并不必然减少这个数。如果 JSON 失败让请求重试两次，或者
 代码任务需要人工修复，存储收益可能被质量成本抵消。
@@ -685,20 +829,28 @@ INT4 减少 GPU 显存并不必然减少这个数。如果 JSON 失败让请求�
 N_{\mathrm{active}}
 \le
 \min\left(
-\frac{B_{\mathrm{weight}}}{M_{\mathrm{weight}}},
-\frac{B_{\mathrm{KV}}}{M_{\mathrm{KV,req}}},
+\max\left(
+0,
+\left\lfloor
+\frac{B_{\mathrm{worker}}-M_{\mathrm{weight}}-M_{\mathrm{fixed}}}
+{M_{\mathrm{KV,req}}+M_{\mathrm{workspace,req}}}
+\right\rfloor
+\right),
 N_{\mathrm{scheduler}},
 N_{\mathrm{network}}
 \right)
 ~~~
 
-这里的 B_weight 和 B_KV 是分别留给权重和 KV 的预算，M_KV,req 是一个请求
-在当前长度分布下的 KV 占用，另外两个约束代表调度和网络能力。这个式子
-不是精确容量规划器，而是用来提醒读者：INT4 主要放松第一项。
+这里 B_worker 是分配给单个 worker 的显存预算，M_weight 是常驻权重，M_fixed
+是 runtime、保留余量和固定 workspace；M_KV,req 与 M_workspace,req 是一个
+活跃请求带来的 KV 和增量 workspace 估算，N_scheduler 与 N_network 则是调度
+和网络上限。这个式子是线性近似：真实 workspace 可能随 batch、shape 和 kernel
+变化，KV 也要按请求长度/模型结构计算，最终值应由目标 runtime profile 校正。
 
 如果服务原来受权重显存限制，INT4 释放的空间可以增加 KV 预算；如果服务
 原来受 KV 或网络限制，权重变小可能只让模型更容易加载，在线并发不会同步
-增加。
+增加。权重是 worker 的固定占用，不能写成“权重预算 / 权重大小”来估算请求数；
+只有请求到来时额外增长的 KV 和 workspace 才进入每请求分母。
 
 ### 17.10.2 prefill 和 decode 的瓶颈不同
 
@@ -1104,9 +1256,12 @@ cache schema 相关。回滚时还要处理正在运行的请求、旧 prefix ca
 压测。官方文档可以确认某个 runtime 的配置入口、支持列表或硬件要求，但
 “文档中存在选项”不等于每个模型、每个 shape 和每个 batch 都会走快路径。
 
-GPTQ、AWQ、SmoothQuant、LLM.int8 和 QLoRA 等论文说明量化算法的研究动机
-和实验结果；论文 benchmark 使用的模型、校准数据、硬件和 kernel 不能直接
-外推为你的线上 SLO。模型卡、转换脚本、engine profile 和生产 trace 才能
+本章按层次引用 GPTQ、AWQ、LLM-QAT 和 MARLIN 原论文：前几篇讨论量化权重或
+训练方案，MARLIN 讨论执行 kernel。TACL 综述用于建立 PTQ/QAT、
+weight-only/weight-activation/KV cache 的分类地图，不代替原论文；其中对
+AWQ 的简短描述与 AWQ 原论文的主方法并不完全一致，细节以原论文提出的全低
+比特等价缩放为准。各论文 benchmark 使用的模型、校准数据、硬件和 kernel
+不能直接外推为线上 SLO。模型卡、转换脚本、engine profile 和生产 trace 才能
 共同说明一个具体 artifact 的实际能力。
 
 本章 demo 只计算教学账本，不实现 4 bit nibble pack、scale 解码、CUDA
@@ -1127,6 +1282,10 @@ kernel 或真实模型评测。示例中的 400 GiB、15 GiB 和质量分数都�
 10. [SmoothQuant](https://arxiv.org/abs/2211.10438)：激活异常值平滑和 W8A8 量化的研究背景，不等同于 W4A16。
 11. [LLM.int8()](https://arxiv.org/abs/2208.07339)：大模型混合精度和异常值处理的研究背景。
 12. [QLoRA](https://arxiv.org/abs/2305.14314)：4 bit 基座与低秩微调的研究入口，训练/微调语境不等于 serving kernel 契约。
+13. [A Survey on Model Compression for Large Language Models](https://aclanthology.org/2024.tacl-1.85/)：用作压缩路线和评测指标的分类地图；遇到算法细节或与原论文表述不一致时回到一手论文核对。
+14. [LLM-QAT](https://aclanthology.org/2024.findings-acl.26/)：阅读从教师模型生成校准文本、logits 蒸馏以及权重/激活/KV 联合量化的训练路线；实验结论绑定 LLaMA 模型、数据生成和评测配置。
+15. [MARLIN](https://arxiv.org/abs/2408.11743)：阅读 W4A16 混合精度 kernel 如何用异步加载、调度、流水线和量化布局提高 batched decode；速度数字绑定作者 GPU、层形状、batch 和 vLLM 设置。
+16. [PyTorch FakeQuantize 2.14](https://docs.pytorch.org/docs/2.14/generated/torch.ao.quantization.fake_quantize.FakeQuantize.html)：核对 fake quant 的量化/反量化模拟公式及 observer 状态；API 文档不等同于某个 LLM 的完整 QAT 配方。
 
 阅读这些资料时要区分三类证据：官方文档说明“这个 runtime 当前声称支持
 什么”；论文说明“某种方法在特定实验中得到什么”；生产压测说明“你的

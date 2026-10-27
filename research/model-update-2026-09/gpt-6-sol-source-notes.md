@@ -74,6 +74,8 @@ compaction item 是携带 prior state/reasoning 的 opaque 协议对象，不是
 
 ## GPT-6 Sol 专属 local protocol toy
 
+**历史快照提示（2026-10-27）：**下述脚本按 2026-09-23 核验的 Sol 合同写入 `MAX_INPUT = 922_000` 与价格常量。当前 OpenAI 模型页未单列 maximum input，价格和服务档位也会更新；这些常量只能解释当时教学快照，不能用作 GPT-6 Astra、GPT-6.1 Sol 或当前 GPT-6 Sol 的部署上限/成本。若要复用，先对照目标 model ID 的最新官方文档重新建模并核验。
+
 [`gpt6_sol_contract_audit.py`](code/gpt6_sol_contract_audit.py) 是一个不联网、不调用付费 API、无第三方依赖的协议审计 toy。它把 GPT-6 Sol 的公开服务合同拆成可失败的状态转移：
 
 1. 验证 `standard/pro` 与 `none`--`max` effort 的正交性；`configuration_update` 只能在 standard single-agent 中改变 effort，不能与自动 compaction/truncation 或 standalone compact 混用，相邻 update 被拒绝，显式 compaction 后必须在下一条用户消息前补 fresh update。

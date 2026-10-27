@@ -213,6 +213,8 @@ EP 的收益是让总参数量超过单卡容量，同时每个 token 只激活�
 
 EP 适合 expert 数量大、单个 expert 权重无法在每卡复制、节点内或专用网络能承受 all-to-all 的场景。若 expert 很少、请求并发低或跨节点网络慢，复制部分 expert、使用副本或改变 TP/EP 组合可能比纯 EP 更稳。
 
+算法中的 all-to-all 只是逻辑操作名，工程性能取决于 token batch 和通信 kernel。以 vLLM 当前的 EP 部署路径为例，文档建议 prefill 侧使用偏 high-throughput 的 DeepEP kernel，decode 侧使用偏 low-latency 的 kernel；DP-attention 还会让各 worker 的 prefill/decode 相位不同步。vLLM 的 Expert Parallel Load Balancer（EPLB）收集 forward 期间的 expert load，再周期性重新映射或加入冗余 expert；这样可缓解热 expert，却要额外驻留 expert 权重并挤占 KV 空间。当前文档以 DeepSeek-V3 举例，称每个 EP rank 增加一个冗余 expert 约需 2.4 GB；这是该模型和配置的量级，不是固定开销。评测时不能只用均匀随机路由：要把真实 prompt/生成轨迹的 expert 分布回放，并同时量出 dispatch/combine 时间、冗余权重显存和最慢 rank。 [vLLM Expert Parallel Deployment](https://github.com/vllm-project/vllm/blob/main/docs/serving/expert_parallel_deployment.md)；[DeepEP](https://github.com/deepseek-ai/DeepEP)
+
 ## 6. 多副本服务
 
 多副本的含义不是“多启动几个进程”，而是复制一组可以独立接收请求的执行单元。这个执行单元可能是一张 GPU，也可能是一个由 TP、PP 或 EP 组成的 GPU group。副本内部的 rank 必须协同完成一个请求，副本之间则尽量只通过路由层交换请求和结果。
@@ -541,22 +543,29 @@ TP、PP 或 EP group 中任何一个 rank 失效，都可能使整个执行组�
 
 ```math
 \Sigma_r=(\mathrm{replica},\mathrm{layer\_range},\mathrm{position},
-\mathrm{kv\_blocks},\mathrm{state\_version},\mathrm{rng\_state})
+\mathrm{kv\_blocks},\mathrm{model\_revision},\mathrm{layout},
+\mathrm{rng\_state},\mathrm{stream\_cursor},\mathrm{owner\_epoch})
 ```
 
-只有这些字段与目标 worker 的模型、tokenizer 和协议版本一致时，迁移才是安全的。单纯把“剩余 prompt”重新发送给另一副本可能得到不同结果，也会重新支付 prefill；直接复制显存则受到设备拓扑、dtype、cache layout 和并发写入的限制。
+这不是某个框架的标准数据结构，而是一种检查迁移完整性的状态清单。位置编码参数、KV dtype/layout、adapter、tokenizer/template、stop/grammar 状态、speculative 分支和对外已发 token 的游标，也应绑定到同一请求版本。只转移 KV 张量而丢掉采样 RNG 或输出游标，目标副本可能从不同位置继续；并发复制还可能把同一个 KV block 当作可写状态重复修改。
 
-### 11.1 三种恢复路径
+### 11.1 将迁移实现为所有权交接
 
-1. **重试并重算**：只保留输入和已确认输出，在新副本重新 prefill。实现简单，适合短请求，但长上下文会显著增加 TTFT。
-2. **迁移 cache/state**：转移 block table、KV 或递归 state。延迟较低，但要求源和目标的 layout、位置和版本完全兼容。
-3. **副本内恢复**：只在同一并行组重新拉起 rank。数据移动少，但故障域较大，整组 GPU 仍可能不可用。
+一种可实施的设计是把请求 owner 看成带 epoch 的租约，并按下面的次序交接。epoch/fencing 是工程设计建议，不表示本文所列框架都已经实现相同协议。
 
-生产系统应根据请求类型选择路径：普通问答可以重算，长 RAG 或长周期 Agent 值得投资状态迁移，高风险工具事务则必须先冻结副作用状态，再决定是否重试。无论哪条路径，都要让用户知道是否发生了降级，并保证不会重复提交不可逆写操作。
+| 阶段 | 源/目标副本动作 | 要保持的不变量 |
+| --- | --- | --- |
+| 活跃 | 源副本持有 owner epoch `e`，独占推进 token 和 KV block | 一个请求只能有一个可写 owner；同一 token 不能被重复提交 |
+| 冻结 | 在 token 边界停止调度，等待当前 GPU/NCCL 写入事件完成，再记录位置、block table、采样状态、协议状态和 stream cursor | snapshot 对应一个明确的生成位置且没有在途写入；外部工具调用另按幂等键确认 |
+| 传输 | 目标预留 KV 容量，分块接收 KV/latent state，并校验长度、dtype/layout、版本和 checksum | 未校验完成的部分状态不能进入 attention 或生成路径 |
+| 提交 | coordinator 将 owner epoch 从 `e` 原子提升为 `e+1`；目标确认后继续，源端旧 epoch 被 fence | 源和目标不能同时继续生成，客户端输出不重复、不倒退 |
+| 回退 | 传输/校验失败时撤销目标占用；源健康则恢复 owner，否则在新副本重算已确认前缀 | 不把半份 cache 当作有效状态；重算和工具副作用仍遵循独立恢复语义 |
+
+这个交接方案解释了为什么“把显存复制到另一张卡”不是完整迁移：还要解决并发写入、版本一致、输出提交和唯一 owner。短请求往往选择重算；长 RAG/Agent 请求才可能值得付状态搬运复杂度。支付、写库、发消息等副作用不能靠生成状态复制来保证 exactly-once，仍需按 §10.2 的幂等协议处理。
 
 ### 11.2 拓扑选择的可验证条件
 
-选择 TP、PP、EP 或多副本时，至少用真实拓扑测量四项：跨 GPU 通信时间、单请求延迟、混合长度吞吐和故障恢复时间。理论显存能放下模型不代表 SLO 可满足；同样，GPU 利用率高也可能是 all-to-all 或 PCIe 拥堵造成的假繁忙。上线前应做 rank 故障、网络抖动、cache checksum 错误、请求取消和 batch reorder 演练。
+迁移或副本内恢复都要用真实拓扑测量跨 GPU 通信时间、单请求延迟、混合长度吞吐和恢复时间。理论显存能放下模型不代表 SLO 可满足；GPU 利用率高也可能是 all-to-all 或 PCIe 拥堵造成的假繁忙。上线前应演练 rank 故障、网络抖动、checksum 错误、请求取消和 batch reorder，并确认 owner fencing 与客户端 stream cursor 能阻止重复输出。
 
 ## 12. 并行推理选型流程
 
@@ -582,6 +591,22 @@ TP、PP 或 EP group 中任何一个 rank 失效，都可能使整个执行组�
 | 结果 | TTFT、TPOT、goodput、P99、恢复时间和单位成本 |
 
 选型结论必须附带 workload、硬件拓扑、runtime 版本和测量日期。否则“TP 比 PP 快”只能是脱离条件的句子，无法迁移到另一种模型或集群。
+
+### 12.1 Prefill/Decode 解耦：新增一条资源切分轴
+
+TP、PP、EP 切的是一次模型执行中的权重、层或 expert；Prefill/Decode（P/D）解耦切的是请求生命周期中的两个阶段。Prefill 一次处理完整 prompt，通常更受矩阵计算约束；Decode 每步生成少量 token，通常更受权重/KV 带宽和缓存容量约束。P/D 池可以独立选择卡数、并行布局和副本数，但 Prefill 产出的 KV state 必须交给 Decode 池，状态搬运成为新成本；它与 §9.3 的迁移公式是同一笔账。
+
+| 方案/研究 | 它解决的问题与机制 | 作者报告/当前证据 | 代价、边界和后续改进 |
+| --- | --- | --- | --- |
+| 共置执行 + chunked prefill | 同一执行池服务 P 与 D，减少 cache 跨池搬运；chunked prefill 限制长 prompt 对 decode iteration 的打断 | [vLLM 当前文档](https://github.com/vllm-project/vllm/blob/main/docs/features/disagg_prefill.md)把 disaggregated prefill 标为 experimental，并明确说明该功能本身不提高吞吐；chunked prefill 也能控制 tail ITL | P/D 共用 GPU 和调度资源，P/D 相互干扰仍需靠 chunk/batch 调节；流量小、网络慢或 KV 很大时，共置可能更划算。见[批处理与调度章](06-批处理与调度.md)。 |
+| [DistServe](https://arxiv.org/abs/2401.09670) | 把 P、D 放到不同 GPU 池，按 TTFT/TPOT SLO 分别分配资源和并行度，并按集群带宽放置两池以减少 KV 传输 | 论文在其模型、请求和延迟约束下报告：每 GPU 可服务请求数最高 7.4×，或在给定 goodput 下支持严格 12.6× 的 SLO；超过 90% 请求满足相应约束 | 分离减少 phase interference，却新增 KV transfer 和池间资源碎片；倍率不等同于任意系统吞吐。改进方向是把 P/D 分别测量、联合优化，而非仅增加 decode 卡。 |
+| [Mooncake](https://arxiv.org/abs/2407.00079) | 在 P/D 分离基础上，让 KV cache 成为调度中心，利用 CPU/DRAM/SSD 和 RDMA 做多层 cache，做 cache-aware placement、热点迁移与过载早拒绝 | 作者以 10 个 prefill + 10 个 decode 实例对照 20 个 vLLM 实例，设置 TTFT≤30s、TBT≤0.1s；trace replay 中 Mooncake 约多处理 75% 请求满足 SLO，约 100% 请求满足 TBT，而 vLLM 约 57% | 结果依赖长上下文、prefix reuse、请求 trace、硬件与所设 SLO；cache locality 可能和均衡冲突。后续要记录复用带来的 prefill 节省是否超过远端取数和热点排队成本。 |
+| [TaiChi](https://arxiv.org/abs/2508.01989) | 指出共置和完全解耦分别适合不同 TTFT/TPOT 约束；用 P-heavy/D-heavy 节点、配置滑杆与调度，在两者间形成 hybrid，并把资源从已满足 SLO 的请求转向有违约风险的请求 | 2025 arXiv 论文报告 balanced-SLO 条件下 goodput 比其对照系统最高提升 77% | 这是作者特定系统和 SLO sweep 的结果；引入混合节点能力和 latency-shifting scheduler，状态路由也更复杂。设计上应先按 SLO 位置选架构，再比较配置，不把“解耦”当成默认答案。 |
+| [SmartGen](https://arxiv.org/abs/2607.28150) | 面对 P→D 阶段的 KV 网络瓶颈，先 profile 重要 token 并 proactive 传输，Decode 再并行按需取回缺失项，后台 speculative 传完剩余 cache | 2026 arXiv 作者报告在 GovReport 上 time-to-second-token 最多降低 4.3×；测试包含 L20 GPU 和 25 Gbps RDMA 场景 | 选择误差会改变注意力上下文，按需取数可能拖慢后续 token；结果绑定模型、稀疏选择方法和网络。应一起评估长上下文质量、TTST/TPOT、网络占用和 cache 命中。 |
+
+这些研究数字指标不同：DistServe/Mooncake 报 SLO 下请求吞吐，TaiChi 报 goodput，SmartGen 报第二 token 延迟；不能把倍率排成同一个排行榜。共置和 P/D 解耦的判断至少要先测四件事：P/D 分别的 GPU 时间、KV 传输总量及可隐藏比例、TTFT 与 TPOT 的 SLO 缺口、请求的 KV 目标端预留/释放成本。如果传输时间落在首 token 路径中，先优化 RDMA/层级传输或选择性/混合精度传输；只有这些措施仍不够，才继续增加 P/D 资源。
+
+该方向也把量化引入“网络 payload”而不只是 GPU 显存。2026 年的 [SpectrumKV 预印本](https://arxiv.org/abs/2606.08635)按 token 重要性选择 FP16/INT8/INT4 传输，并用小型部署探测决定是否启用 INT4；作者报告 Qwen2.5-7B 在 INT4 KV 上失稳，而 Mistral-7B 与 Gemma-2-9B 较稳定。在其 50% normalized KV budget、WikiText-2 困惑度设置下，SpectrumKV 的变化为 +1.97%、-0.06%、-0.44%，PDTrim 为 +25.85%、+22.07%、+35.63%。这只是三种模型与该指标下的作者结果，说明传输压缩质量也必须逐模型验证；量化机制见[第七章](07-量化与模型压缩.md)。
 
 ## 13. 最小 Python demo：多 GPU 推理选型的 toy 账本
 
@@ -640,10 +665,25 @@ def estimate(plan):
     )
     total = weights + kv + WORKLOAD["reserve_gib"]
     fits = gpu_feasible and total <= WORKLOAD["gpu_mem_gib"]
-    tp_comm_mib = 0.0
+    tp_collective_payload_mib_per_decode_per_rank = 0.0
     if tp > 1:
-        tp_comm_mib = 2 * MODEL["hidden"] * MODEL["bytes_activation"] * WORKLOAD["active_seq"] / 1024 ** 2
-    pp_comm_mib = (pp - 1) * MODEL["hidden"] * MODEL["bytes_activation"] * WORKLOAD["active_seq"] / 1024 ** 2
+        # 教学假设：每个 decoder block 有两次 hidden-size collective 输入。
+        # 数值按每个 rank 参与 collective 的逻辑 payload 计，不是 fabric 实际收发字节。
+        tp_collective_payload_mib_per_decode_per_rank = (
+            2
+            * MODEL["layers"]
+            * MODEL["hidden"]
+            * MODEL["bytes_activation"]
+            * WORKLOAD["active_seq"]
+            / 1024 ** 2
+        )
+    pp_activation_payload_mib_per_decode = (
+        (pp - 1)
+        * MODEL["hidden"]
+        * MODEL["bytes_activation"]
+        * WORKLOAD["active_seq"]
+        / 1024 ** 2
+    )
     latency_proxy = round(1.0 + 0.06 * (tp - 1) + 0.10 * (pp - 1), 2)
     aggregate_capacity = plan["replicas"] * WORKLOAD["active_seq"] if fits else 0
     return {
@@ -654,8 +694,8 @@ def estimate(plan):
         "total_gib": round(total, 2),
         "gpu_feasible": gpu_feasible,
         "fits": fits,
-        "tp_comm_mib_per_decode": round(tp_comm_mib, 3),
-        "pp_comm_mib_per_decode": round(pp_comm_mib, 3),
+        "tp_collective_payload_mib_per_decode_per_rank": round(tp_collective_payload_mib_per_decode_per_rank, 3),
+        "pp_activation_payload_mib_per_decode": round(pp_activation_payload_mib_per_decode, 3),
         "latency_proxy": latency_proxy,
         "aggregate_active_seq": aggregate_capacity,
     }
@@ -692,10 +732,10 @@ print("route_to=", min(replica_load, key=lambda x: x["score"])["id"])
 一组可能输出：
 
 ```text
-single_gpu {'gpus_per_replica': 1, 'replicas': 8, 'weights_gib': 130.39, 'kv_gib': 30.0, 'total_gib': 168.39, 'gpu_feasible': True, 'fits': False, 'tp_comm_mib_per_decode': 0.0, 'pp_comm_mib_per_decode': 0.0, 'latency_proxy': 1.0, 'aggregate_active_seq': 0}
-tp4_two_replicas {'gpus_per_replica': 4, 'replicas': 2, 'weights_gib': 32.6, 'kv_gib': 7.5, 'total_gib': 48.1, 'gpu_feasible': True, 'fits': True, 'tp_comm_mib_per_decode': 0.75, 'pp_comm_mib_per_decode': 0.0, 'latency_proxy': 1.18, 'aggregate_active_seq': 48}
-tp8_one_replica {'gpus_per_replica': 8, 'replicas': 1, 'weights_gib': 16.3, 'kv_gib': 3.75, 'total_gib': 28.05, 'gpu_feasible': True, 'fits': True, 'tp_comm_mib_per_decode': 0.75, 'pp_comm_mib_per_decode': 0.0, 'latency_proxy': 1.42, 'aggregate_active_seq': 24}
-tp4_pp2_one_replica {'gpus_per_replica': 8, 'replicas': 1, 'weights_gib': 16.3, 'kv_gib': 3.75, 'total_gib': 28.05, 'gpu_feasible': True, 'fits': True, 'tp_comm_mib_per_decode': 0.75, 'pp_comm_mib_per_decode': 0.0, 'latency_proxy': 1.28, 'aggregate_active_seq': 24}
+single_gpu {'gpus_per_replica': 1, 'replicas': 8, 'weights_gib': 130.39, 'kv_gib': 30.0, 'total_gib': 168.39, 'gpu_feasible': True, 'fits': False, 'tp_collective_payload_mib_per_decode_per_rank': 0.0, 'pp_activation_payload_mib_per_decode': 0.0, 'latency_proxy': 1.0, 'aggregate_active_seq': 0}
+tp4_two_replicas {'gpus_per_replica': 4, 'replicas': 2, 'weights_gib': 32.6, 'kv_gib': 7.5, 'total_gib': 48.1, 'gpu_feasible': True, 'fits': True, 'tp_collective_payload_mib_per_decode_per_rank': 60.0, 'pp_activation_payload_mib_per_decode': 0.0, 'latency_proxy': 1.18, 'aggregate_active_seq': 48}
+tp8_one_replica {'gpus_per_replica': 8, 'replicas': 1, 'weights_gib': 16.3, 'kv_gib': 3.75, 'total_gib': 28.05, 'gpu_feasible': True, 'fits': True, 'tp_collective_payload_mib_per_decode_per_rank': 60.0, 'pp_activation_payload_mib_per_decode': 0.0, 'latency_proxy': 1.42, 'aggregate_active_seq': 24}
+tp4_pp2_one_replica {'gpus_per_replica': 8, 'replicas': 1, 'weights_gib': 16.3, 'kv_gib': 3.75, 'total_gib': 28.05, 'gpu_feasible': True, 'fits': True, 'tp_collective_payload_mib_per_decode_per_rank': 60.0, 'pp_activation_payload_mib_per_decode': 0.375, 'latency_proxy': 1.28, 'aggregate_active_seq': 24}
 capacity_choice= tp4_two_replicas
 route_to= replica_1
 ```
@@ -704,8 +744,9 @@ route_to= replica_1
 
 1. 单卡方案虽然副本最多，但 70B FP16 权重和 KV Cache 放不下；gpu_feasible 只表示 GPU 数量够用，fits 还要经过显存账本。
 2. `tp4_two_replicas` 每个副本 4 卡，可在 8 卡机器上放两个副本，toy 容量高于单个 8 卡副本。
-3. `latency_proxy` 是人为构造的通信惩罚示意，不是目标 GPU 的实测延迟。
-4. `route_to` 不按 round-robin，而是按 queued tokens、active sequence、可用槽位和新请求成本做简化路由。
+3. TP4/TP8 的 `tp_collective_payload_mib_per_decode_per_rank=60.0` 按 80 层、每层两次 hidden-size collective、24 个活动序列计算：单个 collective 的输入 payload 为 `24×8192×2` bytes，再乘 `2×80`。这是每 rank 参与 collective 的逻辑输入量，不是链路实际收发字节；后者取决于 TP group 大小、NCCL 算法、拓扑与 overlap。`pp_activation_payload_mib_per_decode=0.375` 是一次 decode iteration 中所有 pipeline stage 边界的逻辑 activation payload 总和；PP2 只有一个边界，因此对应 24 个 hidden vector。
+4. `latency_proxy` 是人为构造的并行度惩罚示意，不是从 payload 推导的延迟，也不是目标 GPU 的实测。
+5. `route_to` 不按 round-robin，而是按 queued tokens、active sequence、可用槽位和新请求成本做简化路由。
 
 ## 14. 一个 8 卡集群的并行部署决策
 
@@ -749,8 +790,15 @@ MoE 模型还要加一笔 expert 账。若每个 token 激活 top-k 个 expert�
 5. [NVIDIA TensorRT-LLM](https://nvidia.github.io/TensorRT-LLM/)：当前官方项目入口，用于核对 TensorRT-LLM 的并行、量化和 serving 实现边界；版本变化可能影响支持矩阵。
 6. [DeepSpeed Inference Tutorial](https://www.deepspeed.ai/tutorials/inference-tutorial/)：核对 DeepSpeed Inference 的 tensor parallel 和 kernel 优化路径；文档示例不等于目标 workload 的 P99。
 7. [vLLM Distributed Inference and Serving](https://docs.vllm.ai/en/stable/serving/parallelism_scaling/)：核对 vLLM 当前 tensor/pipeline parallel serving 配置和多节点注意事项。
-8. [SGLang Prefill-Decode Disaggregation](https://docs.sglang.io/docs/advanced_features/pd_disaggregation)：核对 prefill/decode 分离与状态传递的公开实现入口；具体迁移语义仍需结合版本和部署配置。
+8. [SGLang PD Disaggregation](https://github.com/sgl-project/sglang/blob/main/docs/docs/advanced_features/pd_disaggregation.mdx)：核对当前 Mooncake/NIXL transfer engine、prefill/decode 配置与状态传递入口；具体迁移语义仍需结合版本和部署配置。
 9. [PyTorch Distributed](https://docs.pytorch.org/docs/stable/distributed.html)：核对 process group、collective 和分布式通信的基础接口。
+10. [DistServe: Disaggregating Prefill and Decoding for Goodput-optimized LLM Serving](https://arxiv.org/abs/2401.09670)：P/D 资源与并行规划分离、网络感知放置和 SLO goodput 的研究结果；论文倍率不外推到其他 trace/hardware。
+11. [Mooncake: A KVCache-centric Disaggregated Architecture for LLM Serving](https://arxiv.org/abs/2407.00079)：P/D pools、RDMA KV transfer、CPU/DRAM/SSD cache、cache-aware scheduling 与 early rejection 的联合方案。
+12. [TaiChi: Prefill-Decode Aggregation or Disaggregation?](https://arxiv.org/abs/2508.01989)：比较 aggregation 与 disaggregation 的 SLO 区域，并提出 hybrid latency shifting；arXiv 作者评测范围与 SLO 条件不能省略。
+13. [SmartGen: Seamless Disaggregated LLM Inference with Selective KV Cache Transfer](https://arxiv.org/abs/2607.28150)：选择性 KV 传输的 proactive/on-demand/speculative 三条路径；4.3× 指其 L20/25-Gbps 场景的 TTST，不是全服务吞吐。
+14. [SpectrumKV: Per-Token Mixed-Precision KV Cache Transfer](https://arxiv.org/abs/2606.08635)：按 token 重要性选择 FP16/INT8/INT4 网络表示并做模型探测；是三种 7B—9B 模型上的预印本结果。
+15. [vLLM Parallelism and Scaling](https://docs.vllm.ai/en/stable/serving/parallelism_scaling/) 与 [Expert Parallel Deployment](https://github.com/vllm-project/vllm/blob/main/docs/serving/expert_parallel_deployment.md)：核对当前 TP/PP 和 EPLB 配置、冗余 expert 显存成本；动态文档不是目标 runtime 实测。
+16. [vLLM Disaggregated Prefilling](https://github.com/vllm-project/vllm/blob/main/docs/features/disagg_prefill.md) 与 [DeepEP](https://github.com/deepseek-ai/DeepEP)：核对当前 disaggregated prefill 的实验状态/吞吐说明和 EP 通信 kernel 的当前功能边界。
 
 论文回答“方法为什么这样设计”，官方文档回答“当前组件公开支持什么”，源码和 runtime trace 才能回答“目标版本实际走了哪条路径”。尤其是跨节点 TP、EP all-to-all、KV state 迁移和故障恢复，不能用单机 benchmark 或进程启动成功替代实测。
 
@@ -766,3 +814,6 @@ MoE 模型还要加一笔 expert 账。若每个 token 激活 top-k 个 expert�
 6. LLM 负载均衡要看 token、队列和 KV Cache 成本，而不是只看请求数。
 7. 跨节点推理要谨慎评估通信瓶颈。
 8. 多 GPU 服务必须配合健康检查、故障摘除、重试和降级。
+9. Prefill/Decode 解耦是按请求阶段切资源；它可能降低相互干扰，也新增 KV transfer、路由与目标 KV 预留，不保证普遍提高吞吐。
+10. DistServe、Mooncake、TaiChi、SmartGen 和 SpectrumKV 分别回答 SLO 资源规划、KV-centric 调度、共置/解耦混合、选择性传输和传输精度分配问题；它们的指标与实验设置不可横向混排。
+11. KV state 迁移不仅是张量搬运；要校验版本/layout、输出 cursor 和采样状态，并用唯一 owner/fencing 防止双写或重复生成。示例协议是设计建议，需目标系统验收。

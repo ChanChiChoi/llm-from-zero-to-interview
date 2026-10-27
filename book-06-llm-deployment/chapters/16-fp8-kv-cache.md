@@ -116,9 +116,24 @@ b_q+\frac{b_s+b_m}{n}
 
 ### 3.1 FP8 不是一个唯一精度
 
-FP8 通常至少要区分 exponent/mantissa 分配不同的格式，例如 E4M3 和 E5M2 一类
-编码。不同格式在动态范围和有效精度之间取舍不同；具体特殊值、舍入和硬件支持
-应以目标 GPU、Transformer Engine 或 serving runtime 的文档为准。
+OCP 的 FP8 二进制格式包括 E4M3 和 E5M2。两者都是 1 个符号位，但指数位和尾数位
+分配不同：
+
+| 格式 | 指数字段/尾数字段 | 最大有限绝对值 | 最小 normal | 最小 subnormal | 特殊值与取舍 |
+| --- | --- | ---: | ---: | ---: | --- |
+| E4M3 | 4 / 3 bit | 448 | `2^-6` | `2^-9` | 没有 Inf 编码，只保留 NaN 编码；精度较细、范围较窄 |
+| E5M2 | 5 / 2 bit | 57,344 | `2^-14` | `2^-16` | 有 Inf 和 NaN；范围更大、相邻数间隔更粗 |
+
+这些编码数值来自[OCP OFP8 v1.0](https://www.opencompute.org/documents/ocp-8-bit-floating-point-specification-ofp8-revision-1-0-2023-06-20-pdf)；
+[FP8 Formats for Deep Learning](https://arxiv.org/abs/2209.05433) 解释了 E4M3/E5M2
+为何按范围与精度分工。所以“FP8”本身不能回答溢出后饱和还是变成 NaN、scale 怎么算、数据写 cache 时
+用什么 rounding，也不能证明 attention kernel 原生支持这种格式。OCP v1.0 规定
+了编码和宽格式到 FP8 的舍入/饱和转换，却明确不规定 scale 的选择、表示和维护。
+还要区分 OCP 编码与 FNUZ 变体：例如 ROCm 类型表分别列出 OCP 与 FNUZ，后者的
+特殊值编码规则不同；PyTorch 也分别提供 `fn` 和 `fnuz` dtype。部署时要记录具体
+variant、转换模式和 runtime/backend，而不是只写 `float8`。[ROCm 类型表](https://rocm.docs.amd.com/en/docs-7.2.3/reference/precision-support.html)
+与 [PyTorch dtype 说明](https://docs.pytorch.org/docs/main/tensor_attributes.html)
+可用于确认相应平台的类型名称和支持边界。
 
 对一个 K/V block `G`，可以用抽象量化模型表示：
 
@@ -130,8 +145,17 @@ q_i=Q\left(\frac{x_i}{s_G}\right),
 ~~~
 
 `x_i` 是原始 K 或 V，`s_G` 是该组 scale，`q_i` 是 FP8 payload，`D` 是对应
-FP8 码表的反量化函数。真实系统还要说明 scale 是否是静态、动态、per-tensor、
-per-head、per-channel 或 per-block。
+FP8 码表的反量化函数。这里把 `s_G` 定义为反量化时相乘的 scale；有些 API 保存
+其倒数，字段名不能代替公式。真实系统还要说明 scale 是否是静态、动态、per-tensor、
+per-head、per-channel 或 per-block，以及是否在转换时饱和。
+
+对于反量化 scale `s`，E4M3 的最大有限重构幅值约为 `448s`，最小 subnormal 为
+`2^-9 s`；低于它的输入可能变成零，超过范围的输入则取决于饱和模式。以 E4M3
+的最大有限值 448 为例，若某组最大绝对值为 500，采用 absmax scale 时
+`s=500/448≈1.1161`，该最大值归一化后恰为 448。组内一个 `x=1` 的值会先变成
+`1/s≈0.896`；E4M3 在这个区间最近的码值是 0.875，反量化得到约 `0.875×1.1161
+≈0.9766`。这个算例展示 scale 与尾数格点如何共同决定重构误差；真实框架可能用
+校准数据、不同 group 或预计算 scale，并不一定按每组实时 absmax 处理。
 
 ### 3.2 scale 粒度的取舍
 
@@ -139,7 +163,10 @@ per-head、per-channel 或 per-block。
 普通值只占很小的有效范围。
 
 **Per-layer/head scale** 能适应层和 head 之间的分布差异，元数据仍相对可控；但
-page 和 kernel 要知道每个 layer/head 的索引。
+page 和 kernel 要知道每个 layer/head 的索引。vLLM 文档当前还区分 per-tensor 与
+per-attention-head；在文档快照中，head scale 需要 `llm-compressor` 校准路径且只对
+FlashAttention backend 开放。这里的 per-head scale 不是 KIVI 的 K-per-channel，也
+不能推断其他 runtime 具有相同配置。
 
 **Per-block scale** 让局部范围更紧，通常有更好的重构精度；代价是 scale 读取、
 对齐和 page metadata 增加，block 太小还会影响带宽。
@@ -158,9 +185,27 @@ scale 太小会导致异常值饱和或裁剪，scale 太大会让常见值的�
 metadata 和实现成本。校准集若只有短英文文本，不能证明长代码、数字、工具结果
 和多模态 token 的 scale 足够稳定。
 
+| scale 路径 | 何时确定 | 优点 | 主要代价或失效方式 |
+| --- | --- | --- | --- |
+| 固定默认值 | 运行时始终使用预设值，例如 vLLM 文档中的默认 `1.0` | 不需收集统计量，启动和写入逻辑简单 | 若量级不匹配会频繁饱和或浪费有效范围；只能作为明确记录的 baseline |
+| 离线校准后冻结 | 用代表性样本估计，再固定在模型/runtime 配置中 | 不在每个 token 上求 amax，读写稳定；可以按 attention head 区分 | 请求长度、领域、RoPE、模态或模型版本变化会造成校准漂移 |
+| 当前数据动态 amax | 在每个 tensor/组写入时统计当前最大值并求 scale | 可适应当前输入范围 | reduction 与额外内存流量有成本；如果旧值和新值共享被更新的 scale，必须重编码旧 payload |
+
+NVIDIA Transformer Engine 2.20.2 的 FP8 Current Scaling 文档给出一般 tensor 量化
+机制：计算 amax、把数据缩放到 FP8 范围、按 round-to-nearest-even 转换；该 recipe
+需两次读 tensor（一次求 amax、一次转换）。这是理解动态 scale 代价的例子，不等于
+Transformer Engine 提供同一套 KV-cache runtime。
+
+还要区分“运行前校准”和“生成时更新”：如果一组已写入的 K/V 共用同一个 scale，
+新增 token 导致 scale 改变时，旧 payload 也必须重编码，否则旧字节会按新 scale
+反量化。另一种做法是固定 scale、把未完成的小组暂存在高精度，或按 token/更细的
+单元各存 scale；它们分别付出饱和风险、临时内存或 metadata/kernel 成本。vLLM
+当前文档公开了数据集校准和 per-head 路径；具体版本的计算、保存与加载细节仍须
+按部署 release 核实。
+
 ## 4. K 和 V 为什么不能默认使用同一种策略
 
-### 4.1 K 影响 attention 排序
+### 4.1 K 影响 attention 分数和权重分配
 
 Key 进入 query-key 相似度：
 
@@ -168,12 +213,13 @@ Key 进入 query-key 相似度：
 S_{t,j}=\frac{q_t k_j^{\mathsf{T}}}{\sqrt{D_h}}
 ~~~
 
-量化 K 可能改变不同历史位置的 score 相对大小，进而改变 softmax 后的 attention
-权重。少数高注意力 token、位置边界、数字和检索证据可能对这种变化很敏感。
+量化 K 会扰动 query-key score；即使两个位置的排序没有互换，score 差值变化也会
+改变 softmax 权重。少数高注意力 token、位置边界、数字和检索证据可能对这种变化
+很敏感。
 
-如果 K 的误差主要影响排序，最终输出可能出现“看似流畅，但引用选错位置”的
-失败。长上下文评估要记录 exact retrieval、evidence recall 和 citation support，
-不能只看生成文本的表面相似度。
+因此 K 的误差可能让模型把概率质量从一个证据位置挪到另一个位置，最终出现“看似
+流畅，但引用选错位置”的失败。长上下文评估要记录 exact retrieval、evidence recall
+和 citation support，不能只看生成文本的表面相似度。
 
 ### 4.2 V 影响聚合内容
 
@@ -187,7 +233,27 @@ z_t=\sum_j a_{t,j}v_j
 数字、代码符号、工具参数或引用片段中的细节。K/V 的动态范围和敏感层可能不同，
 因此相同 scale、相同 block 或相同质量阈值不是自然成立的选择。
 
-### 4.3 四组最小消融
+把机制缩成一个两位置的标量例子：假设 query-key logits 是 `[1, 0]`，softmax
+权重约为 `[0.731, 0.269]`。若 K 的量化误差把第一个 logit 从 1 改成 0.7，权重
+变成约 `[0.668, 0.332]`；排序没变，但第一处证据的权重少了约 0.063。若
+`V=[1, 0]`，聚合输出也从 0.731 降到 0.668。反过来，若 K 不变而第一个 V 值
+有 `+0.1` 误差，输出增加约 `0.731×0.1=0.0731`。这是单头两位置的机制推演，
+不是模型准确率预测；它说明 K 误差先改变选择权重，V 误差则按现有权重进入内容。
+
+### 4.3 代表方案各自解决什么问题
+
+KV 量化研究的共同经验不是“K 总比 V 敏感”，而是 K/V 分布、使用方式和在线写入
+约束可能不同，需要实测后再决定分组轴与 scale。以下代表工作针对不同 bit 数和目标：
+
+| 方案 | 要解决的问题与机制 | 作者报告的证据 | 代价、边界与对 FP8 的启示 |
+| --- | --- | --- | --- |
+| [KIVI，2-bit](https://arxiv.org/abs/2402.02750) | 作者在测试模型中发现 K 有少数固定 channel outlier、V 无同样模式；于是 K 沿 channel 量化，V 按 token 量化。K 的一组值跨多个 token，不能直接按生成顺序追加，因此未满组的数据暂留高精度，组满后再量化 | 在指定 Llama、Falcon、Mistral 与任务上，作者报告包含权重的峰值内存最多降低 2.6×、batch 最多扩大 4×、吞吐提高 2.35–3.47× | 这是极低 bit 的非对称方法，要求分组缓冲和专用读写路径；结果不能推成 FP8 必须采用相同轴，但支持先分别诊断 K/V 的理由 |
+| [KVQuant，3-bit](https://arxiv.org/abs/2401.18079) | 处理超长上下文中的 key 通道 outlier 和 RoPE 后通道位置变化；结合 pre-RoPE per-channel K、按层敏感度分配的非均匀码本，以及逐向量 dense/sparse outlier | 作者在指定 LLaMA、Llama 2/3 和 Mistral 模型上报告，3-bit 时 Wikitext-2/C4 perplexity 增量低于 0.1，并给出百万级 context 容量实验 | 需要校准、特殊表示和自定义 CUDA kernel；论文的低 bit、语料和上下文容量不能与通用 FP8 serving 直接比较 |
+| [vLLM FP8 KV 配置](https://docs.vllm.ai/en/latest/features/quantization/quantized_kvcache/) | 当前文档公开 per-tensor 与 per-attention-head scale；head 粒度需校准路径且只支持指定 backend。FlashAttention 3 的 FP8 路径还把 Q 纳入 FP8 attention 计算 | 这是当前公开接口和实现约束，不是独立准确率结论 | per-head 并非 per-channel；不同后端的 Q/K/V 计算路径不同。评测时需固定 backend，否则不能把差异只归因于 cache payload |
+
+这些方案形成的决策顺序是：先识别 K/V 的分布和误差传播，再选精度与量化轴；最后确认在线 append、scale 保存和 attention kernel 能否高效实现。不能只看论文的压缩倍数，也不能从 KIVI 的轴直接推导 FP8 的默认配置。
+
+### 4.4 四组最小消融
 
 至少比较：
 
@@ -220,6 +286,12 @@ allocate
 每个阶段都必须保留 dtype、scale layout、logical position、model revision 和 owner
 信息。只保存低精度 payload 而丢掉 scale，接收端可能得到数值上合法、语义上错误
 的 cache；只复用 page 而忽略 position scheme，则可能把错误的历史位置送入 attention。
+
+scale 是 payload 的解释条件，不是可随意覆盖的统计信息。假设某组 payload 中有
+一个码值 `q`，其反量化值 `D(q)=10`；scale 为 0.1 时原值重构为 1。若新 token
+到来后把整组 scale 改为 0.2，却不重新编码旧 payload，同一个 `q` 就会重构为 2。
+因此一个量化 page 要么保持既有 scale，要么在改 scale 时重编码整组，要么把新 token
+写入另一个独立 scale group。调度器、prefix share 和迁移协议都要遵守这条不变量。
 
 ### 5.2 Prefix cache 的版本和权限
 
@@ -281,9 +353,14 @@ request_or_prefix_owner
 logical_token_range
 layer_head_layout
 dtype
+fp8_variant
+scale_axis_and_shape
 scale_revision
+rounding_and_saturation_mode
 model_revision
 position_scheme
+attention_compute_dtype
+accumulation_dtype
 reference_count
 ~~~
 
@@ -295,7 +372,9 @@ reference_count
 如果显存下降但 TPOT 没改善，检查 dequant、scale load、attention kernel 和通信；
 如果单请求通过而高并发失败，检查 page 分配、batch reorder、抢占恢复和引用计数；
 如果只有 cache hit 请求出错，检查 prefix key、dtype、scale revision 和 position；
-如果长上下文质量下降，做只量化 K/V 的消融并按层/head定位。
+如果长上下文质量下降，做只量化 K/V 的消融并按层/head定位，同时确认 attention
+backend 的累加精度、softmax rescaling 和长 contraction 维度；precision bug 不能
+只用“FP8 误差”归因。
 
 这样排查比直接说“FP8 精度不够”更有效，因为很多线上错误来自状态生命周期或
 版本错配，而不是 payload 本身。
@@ -310,7 +389,8 @@ reference_count
 
 这只是容量层面的结果。若 FP8 让长上下文 citation support 从 0.70 降到 0.45，
 审计问答不能启用它；若普通聊天从 0.98 降到 0.975，且满足质量底线，路由器可能
-允许普通聊天使用 FP8、审计任务使用 BF16。
+允许普通聊天使用 FP8、审计任务使用 BF16。这里的 0.70、0.45、0.98 和 0.975 都是
+虚构的门限演示值，不是论文或生产测量；真实切换必须使用带误差区间的任务切片。
 
 ### 7.2 按任务路由，而不是全流量切换
 
@@ -349,8 +429,9 @@ fallback 和人工处置，并以实际成功任务数校准这个近似。
 
 ### 8.1 短文本通过不代表长上下文通过
 
-KV 误差会随着历史长度和 attention 读取积累。评测至少需要按长度分桶，例如短、
-中、长和接近服务上限的输入；每个桶再分 cache hit/miss、短输出/长输出和 batch。
+长上下文会让更多低精度历史状态参与后续 attention，局部误差也可能经层间计算影响
+下游；退化不一定随 token 数线性累积。评测至少需要按长度分桶，例如短、中、长和
+接近服务上限的输入；每个桶再分 cache hit/miss、短输出/长输出和 batch。
 
 长上下文任务应测：
 
@@ -381,6 +462,32 @@ KV 误差会随着历史长度和 attention 读取积累。评测至少需要按
 任务使用不同 KV pool。混合精度复杂度会增加，但可能比全模型 BF16 更省资源、比
 全模型 FP8 更稳。
 
+### 8.4 一次真实 serving 验证揭示的精度与速度边界
+
+2026 年 4 月，vLLM 团队发布了 Hopper/H100 与 Blackwell/B200 上的 FP8 KV/attention
+验证报告。它特别有价值的地方是同时记录失败原因、kernel 修复和 workload 取舍。
+但要读清实验对象：报告的 `--kv-cache-dtype fp8` 路径在 FlashAttention 3 上还会把
+QK 与 score-value 运算放到 FP8 域；实验统一使用 per-tensor、未校准 scale=1.0，
+因此它不是“只改变 KV 存储、其它计算完全不变”的单因素对照。所有数值都绑定报告
+里的模型、backend、硬件和版本。[报告](https://vllm-project.github.io/2026/04/22/fp8-kvcache.html)
+
+| 报告中的问题 | 固定条件与观测 | 它说明什么 |
+| --- | --- | --- |
+| 128k 检索准确率骤降 | Llama-3.1-8B、H100、FlashAttention 3 的 Needle-in-a-Haystack case：BF16 91%，原 FP8 路径 13%；团队追到长 contraction 维度上的累加精度问题。加入 two-level accumulation，把部分和写入真正的 FP32 register 后恢复到 89% | FP8 出错不一定是 E4M3/KV 失真；QK/PV 累加、softmax 和长归约都属于数值路径。two-level accumulation 有额外寄存器成本，不能只看精度修复 |
+| 单请求 decode 何时变快 | Llama-3.1-8B、H100、单请求：ITL 随输入长度的拟合斜率由 `4.37×10^-5` 降到 `2.37×10^-5 ms/token`，intercept 从 6.44 ms 变为 6.58 ms，拟合 break-even 约 7,010 tokens | 降低每个历史 token 的读/算成本不代表短上下文立刻更快；固定转换开销会形成长度门槛 |
+| 混合 attention 的滑窗层是否都量化 | gpt-oss-20b、H100：旧 v0.10.2 FP8 ITL slope 为 BF16 的 96%、break-even 741,565 tokens；修复后的 v0.19.1 全 FP8 为 80%、跳过 128-token sliding-window 层后为 71%，对应 break-even 22,109 与 7,659 tokens | bounded window 的字节收益会饱和，量化/反量化成本却仍在；按层跳过有时比全模型统一 dtype 更合理 |
+| decode 快是否代表整条请求都快 | Gemma-4-E2B、H100、`head_dim=256`：FP8 ITL slope 为 BF16 的 68%，但长输入 TTFT 拟合二次项约增至 1.6×，与 two-level accumulation 的寄存器压力相关 | prefill 与 decode 的瓶颈不同；必须分别测 TTFT 与 ITL，不能拿 decode 斜率代替端到端 latency |
+
+在另一个并发 8、150 个请求、每个约 20k 输入和 2k 输出的 Llama-3.1-8B 测试中，
+报告的输出吞吐从 450.3 增至 517.5 token/s（+14.9%），median ITL 从 15.18 ms
+降至 12.93 ms。它说明同一硬件预算内的 cache 容量增加还可能让 scheduler 放入更多
+请求；这个比例不能与上表单请求的 ITL slope 混成一个指标。
+
+所以 FP8 发布矩阵至少要分开记录 cache payload bytes/token、attention compute dtype、
+累加路径、prefill TTFT、decode ITL slope、并发吞吐、break-even context 和任务质量。
+模型包含局部滑窗层或使用大 head dimension 时，还应实测按层跳过、不同 backend 和
+两级累加配置的组合。
+
 ## 9. 量化 cache 的 manifest、灰度和回滚
 
 ### 9.1 manifest 字段
@@ -394,15 +501,22 @@ template_hash
 position_scheme
 kv_dtype
 k_dtype / v_dtype
+fp8_variant            e4m3 / e5m2 / platform-specific variant
 scale_scheme
 scale_dtype
+scale_axis_and_shape
 scale_revision
+rounding_mode
+saturation_mode
+attention_compute_dtype
+accumulation_dtype
 page_size
 page_layout
 kernel_revision
 engine_revision
 tested_hardware
 calibration_revision
+calibration_data_revision
 fallback_policy
 cache_schema_version
 ~~~
@@ -433,13 +547,25 @@ OOM、fallback 和成本，不能只看显存下降。
 
 下面的 demo 使用标准库比较 BF16 和 FP8 payload 的教学容量，并模拟普通聊天和
 数字审计两类任务的质量底线。它不会实现真实 FP8 编码或 GPU kernel；代码中的
-`scale_overhead` 只是把 scale、metadata 和对齐作为显式假设，方便读者检查账本。
+`scale_overhead=0.08`、任务分数和质量门限都是教学假设，不是来源报告或生产数据；
+这个参数把 scale、metadata 和对齐作为显式账本项，方便读者检查容量与质量门禁的
+分离。代码只验证这本账和路由条件，不模拟实际 FP8 编码或 GPU kernel。
 
 ~~~python
+import math
 from pprint import pprint
 
 
 def kv_payload_gib(layers, batch, tokens, kv_heads, head_dim, bytes_per_value):
+    dimensions = (layers, batch, tokens, kv_heads, head_dim)
+    if any(isinstance(value, bool) or not isinstance(value, int) or value <= 0
+           for value in dimensions):
+        raise ValueError("dimensions must be positive integers")
+    if (isinstance(bytes_per_value, bool)
+            or not isinstance(bytes_per_value, (int, float))
+            or not math.isfinite(bytes_per_value)
+            or bytes_per_value <= 0):
+        raise ValueError("bytes_per_value must be finite and positive")
     total = 2 * layers * batch * tokens * kv_heads * head_dim * bytes_per_value
     return total / (1024 ** 3)
 
@@ -453,10 +579,31 @@ def quantized_kv_gib(
     payload_bytes,
     scale_overhead,
 ):
+    if (isinstance(scale_overhead, bool)
+            or not isinstance(scale_overhead, (int, float))
+            or not math.isfinite(scale_overhead)
+            or scale_overhead < 0):
+        raise ValueError("scale_overhead must be finite and non-negative")
     payload = kv_payload_gib(
         layers, batch, tokens, kv_heads, head_dim, payload_bytes
     )
     return payload * (1 + scale_overhead)
+
+
+def validate_task_scores(tasks):
+    if not tasks:
+        raise ValueError("tasks must not be empty")
+    for name, row in tasks.items():
+        if not name or "quality" not in row or "floor" not in row:
+            raise ValueError("each task needs a name, quality, and floor")
+        quality = row["quality"]
+        floor = row["floor"]
+        scores = (quality, floor)
+        if any(isinstance(value, bool) or not isinstance(value, (int, float))
+               for value in scores):
+            raise ValueError("quality and floor must be numeric")
+        if not all(math.isfinite(value) and 0 <= value <= 1 for value in scores):
+            raise ValueError("quality and floor must be finite values in [0, 1]")
 
 
 layers = 64
@@ -471,9 +618,11 @@ fp8_gib = quantized_kv_gib(
 )
 
 tasks = {
+    # Synthetic values demonstrate a release gate; they are not benchmark results.
     "chat": {"quality": 0.975, "floor": 0.970},
     "audit": {"quality": 0.890, "floor": 0.950},
 }
+validate_task_scores(tasks)
 quality_failures = [
     name for name, row in tasks.items() if row["quality"] < row["floor"]
 ]
@@ -534,7 +683,8 @@ payload 理论上从 2 字节降到 1 字节，但 scale、metadata、page、对
 
 ### 11.2 误区：K 和 V 使用同一个 scale 最简单
 
-简单不代表合适。K 影响 attention 排序，V 影响内容聚合；不同层/head 的动态范围
+简单不代表合适。K 误差会改动 query-key logits 和 softmax 权重，V 误差进入加权
+内容聚合；不同层/head 的动态范围
 也可能不同。至少做 K-only、V-only 和 K/V 一起量化的消融。
 
 ### 11.3 误区：离线 perplexity 没变，所以线上安全
@@ -568,48 +718,62 @@ dtype、scale、layout、position、模型 revision 或 page schema 任一变化
 本章的公式用于解释容量和 scale 机制，不是任何具体 GPU 的性能保证。资料的用途
 需要分层：
 
-1. vLLM quantized KV cache、automatic prefix caching 和 TensorRT-LLM 文档用于
-   确认当前 runtime 的公开入口；配置可用不等于目标模型、shape 和 GPU 都走快路径。
-2. NVIDIA Transformer Engine FP8 primer 用于理解 FP8 数值和训练/推理相关背景；
-   Transformer Engine 的能力不等于每个 serving engine 的能力。
-3. Hugging Face KV Cache 文档用于确认通用 cache 接口和状态概念；自建 runtime 的
-   page、scale 和迁移布局可能不同。
-4. KIVI、KVQuant 和 PagedAttention 论文用于理解 KV 量化、低比特 cache 和分页
-   管理的研究背景；论文 benchmark 不能直接替代线上长上下文压测。
-5. 本章 Python demo 只计算教学账本，不实现真实 FP8 编码、dequant kernel 或 GPU
-   page allocator。
+1. [OCP OFP8 v1.0](https://www.opencompute.org/documents/ocp-8-bit-floating-point-specification-ofp8-revision-1-0-2023-06-20-pdf)
+   与[FP8 格式原论文](https://arxiv.org/abs/2209.05433)支持编码值、特殊值、舍入和
+   scale 设计背景；格式规范不定义 KV runtime 的 scale 维护。
+   [ROCm FP8 类型表](https://rocm.docs.amd.com/en/docs-7.2.3/reference/precision-support.html)
+   和 [PyTorch dtype 表](https://docs.pytorch.org/docs/main/tensor_attributes.html)
+   则显示 OCP/FNUZ 变体及对应 dtype 名称；实际兼容性仍需按设备和 kernel 核实。
+2. [vLLM Quantized KV Cache](https://docs.vllm.ai/en/latest/features/quantization/quantized_kvcache/)
+   和 [LLM Compressor calibration recipe](https://docs.vllm.ai/projects/llm-compressor/en/latest/examples/quantization_kv_cache/)
+   支持当前公开 scale/calibration/backend 用法；[TensorRT-LLM FP8 guide](https://nvidia.github.io/TensorRT-LLM/performance/performance-tuning-guide/fp8-quantization.html)
+   显示其 KV dtype 与模型量化分别配置。它们都是 rolling docs，需锁定部署 release。
+3. [vLLM 2026 FP8 KV/attention 验证报告](https://vllm-project.github.io/2026/04/22/fp8-kvcache.html)
+   提供 H100/B200、FlashAttention/FlashInfer 上的故障归因和 workload 数据；其结果包含
+   FP8 attention 计算，不能视作只换 KV payload 的纯对照。
+4. [KIVI](https://arxiv.org/abs/2402.02750) 与 [KVQuant](https://arxiv.org/abs/2401.18079)
+   用来比较 K/V 非对称分组、低比特码本、outlier 与流式写入；[PagedAttention](https://arxiv.org/abs/2309.06180)
+   讨论分页管理，[KV Cache serving survey](https://arxiv.org/abs/2607.08057) 帮助
+   区分压缩、迁移、调度与淘汰。它们的论文结果各自绑定模型、task 和实现。
+5. [Transformer Engine 2.20.2 FP8 Current Scaling](https://docs.nvidia.com/deeplearning/transformer-engine/features/low_precision_training/fp8_current_scaling/fp8_current_scaling.html)
+   用来解释一般 tensor amax/scale/cast 与转换成本，不代表该训练库提供了本章所述的
+   serving KV manager。[Hugging Face KV Cache 文档](https://huggingface.co/docs/transformers/en/kv_cache)
+   是通用状态接口参考，不约束其他 runtime 的 page/scale layout。
+6. 本章 Python demo 只计算教学账本与合成质量门禁，不实现 OCP FP8 cast、attention
+   dequant kernel 或 GPU page allocator；其结果不代表 benchmark。
 
 延伸阅读：
 
-1. [vLLM Quantized KV Cache](https://docs.vllm.ai/en/latest/features/quantization/quantized_kvcache.html)：vLLM 当前量化 KV Cache 的官方入口。
-2. [vLLM Quantization](https://docs.vllm.ai/en/latest/features/quantization/)：vLLM 量化能力和实现索引；具体模型支持需看版本。
-3. [vLLM Automatic Prefix Caching](https://docs.vllm.ai/en/latest/features/automatic_prefix_caching.html)：前缀 cache 与 KV 管理的工程边界。
-4. [TensorRT-LLM Quantization](https://nvidia.github.io/TensorRT-LLM/features/quantization.html)：NVIDIA TensorRT-LLM 量化入口。
-5. [TensorRT-LLM Precision](https://nvidia.github.io/TensorRT-LLM/reference/precision.html)：精度类型和 runtime 配置入口。
-6. [NVIDIA Transformer Engine FP8 Primer](https://docs.nvidia.com/deeplearning/transformer-engine/user-guide/examples/fp8_primer.html)：FP8 格式、缩放和训练/推理背景。
-7. [Hugging Face KV Cache](https://huggingface.co/docs/transformers/en/kv_cache)：通用 KV Cache 接口和状态说明。
-8. [KIVI](https://arxiv.org/abs/2402.02750)：低比特 KV Cache 量化研究入口。
-9. [KVQuant](https://arxiv.org/abs/2401.18079)：极长上下文 KV 量化研究入口；论文结果需按目标模型复现。
-10. [PagedAttention](https://arxiv.org/abs/2309.06180)：分页 KV Cache 管理研究背景。
-11. [SmoothQuant](https://arxiv.org/abs/2211.10438)：激活异常值平滑和低精度量化的相邻方法。
-12. [NVIDIA Transformer Engine](https://github.com/NVIDIA/TransformerEngine)：FP8 等低精度训练/计算的软件实现入口。
+1. [OCP OFP8 v1.0](https://www.opencompute.org/documents/ocp-8-bit-floating-point-specification-ofp8-revision-1-0-2023-06-20-pdf)：FP8 二进制格式和转换规则。
+2. [FP8 Formats for Deep Learning](https://arxiv.org/abs/2209.05433)：格式设计动机及不同数值格式的训练/推理研究。
+3. [vLLM Quantized KV Cache](https://docs.vllm.ai/en/latest/features/quantization/quantized_kvcache/) 与 [LLM Compressor KV calibration](https://docs.vllm.ai/projects/llm-compressor/en/latest/examples/quantization_kv_cache/)：公开 scale 和校准接口。
+4. [The State of FP8 KV-Cache and Attention Quantization in vLLM](https://vllm-project.github.io/2026/04/22/fp8-kvcache.html)：H100/FA3、B200/FlashInfer 的质量和速度验证及修复经过。
+5. [TensorRT-LLM FP8 quantization](https://nvidia.github.io/TensorRT-LLM/performance/performance-tuning-guide/fp8-quantization.html)：模型量化与 KV-cache dtype 的独立配置入口。
+6. [Transformer Engine 2.20.2 FP8 Current Scaling](https://docs.nvidia.com/deeplearning/transformer-engine/features/low_precision_training/fp8_current_scaling/fp8_current_scaling.html)：FP8 amax、scale 和 cast 流程示例。
+7. [KIVI](https://arxiv.org/abs/2402.02750) 与 [KVQuant](https://arxiv.org/abs/2401.18079)：K/V 分组、通道 outlier 与超低 bit KV 量化对照。
+8. [PagedAttention](https://arxiv.org/abs/2309.06180) 与 [System-Aware KV Cache Optimization survey](https://arxiv.org/abs/2607.08057)：分页、表示压缩、迁移、调度和淘汰的系统边界。
+9. [Hugging Face KV Cache](https://huggingface.co/docs/transformers/en/kv_cache)：通用 KV cache 生命周期与接口参考。
+10. [SmoothQuant](https://arxiv.org/abs/2211.10438)：相邻的 activation outlier 处理方法；不是 FP8 KV 的直接效果证据。
 
 ## 13. 本章小结
 
-FP8 KV Cache 的本质是用更小的历史状态 payload 换取显存、带宽和调度空间，但它
-把数值误差和状态生命周期引入了 serving 主路径。
+FP8 KV Cache 的本质是用更小的历史状态 payload 换取显存和调度空间，并可能降低
+decode 读取流量；代价是数值误差、转换成本和状态生命周期进入 serving 主路径。
 
 1. 先用 `2LBTH_kvD_hb` 估算 KV 数量级，再把 scale、page、workspace、对齐和余量
    加入实际账本。
-2. FP8 格式、scale 粒度、动态范围、累加和硬件 kernel 必须作为一组配置理解。
-3. K 影响 attention 排序，V 影响内容聚合，不能默认使用相同 scale、精度或回退。
-4. prefix sharing、抢占、swap、迁移、speculative rollback 和取消回收都必须携带
-   dtype、scale、position、page 和 model revision。
-5. 短文本平均分通过不代表长上下文、引用、数字、代码和工具任务没有退化。
-6. 存储、kernel、engine 和任务四层证据要同时记录，理论 payload 减半不等于 TPOT
-   或单位成功成本减半。
-7. 量化发布应支持按任务路由、敏感层高精度和可观察的 fallback，而不是全流量一键
-   切换。
+2. E4M3/E5M2 的指数/尾数和特殊值不同；OCP 格式不定义 scale 规则，实际精度由
+   payload、scale 粒度、转换模式、attention compute 和 accumulation 一起决定。
+3. K 误差会先改变 attention logits/权重，V 误差进入加权输出；KIVI、KVQuant 与
+   serving runtime 展示了不同量化轴、bit 数、校准和 kernel 约束。
+4. 共享 page 的 payload 必须和 scale revision 配对；prefix sharing、抢占、swap、迁移、
+   speculative rollback 和取消回收都要保留 dtype、scale、position、page 和 model revision。
+5. 短文本或 perplexity 通过不代表长上下文引用、数字、代码和工具任务没有退化；长
+   contraction 还可能暴露 kernel 累加精度问题。
+6. 报告容量、TTFT、ITL slope、break-even context、并发吞吐和任务质量；payload 减半
+   不等于 TPOT 或单位成功成本减半。
+7. 量化发布应支持按任务/层路由、敏感 KV 保留高精度和可观察 fallback，依据实测逐步
+   扩大请求范围。
 
 当一个系统能说明“哪些请求使用 FP8、哪些请求保留 BF16、为什么这样分、发生异常
 如何回退、旧 page 如何处理、质量和成本怎样证明”，FP8 KV 才真正从一个 dtype

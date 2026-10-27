@@ -69,6 +69,23 @@
 
 因此在线实验需要同时测任务完成、用户行为、系统资源和安全风险。
 
+### 1.4 现场研究的设计决定结论能走多远
+
+看生成式 AI 的现场研究时，先看谁被随机或分批获得了工具、实际用上了多少、
+结果在哪个单位计算，以及指标是否接近用户最终目标。下面三项研究说明，
+“AI 帮助了用户”不是一个能跨产品复用的单一数字。
+
+| 研究 | treatment 与分配方式 | 主要结果 | 能回答什么 / 不能推出什么 |
+| --- | --- | --- | --- |
+| [Generative AI at Work](https://doi.org/10.1093/qje/qjae044)，QJE 2025 | 5,172 名客服坐席分阶段获得基于 GPT-3 的实时建议；坐席可以忽略或编辑建议 | 每小时解决的客户问题平均增加 15%，不同经验和技能组效果不同；最高技能组的对话质量有小幅下降 | 说明真实工作流中的可用性、长期学习和效应异质性值得测。主体证据来自单一企业的分阶段部署分析，不是一个完整的生产 50:50 随机 A/B；文中约 50 人的先导随机试验缺少对照组数据，不能把主结果说成直接随机试验估计。 |
+| [The Effects of Generative AI on High-Skilled Work](https://doi.org/10.1287/mnsc.2025.00535)，Management Science 2026 | Microsoft、Accenture 和一家 Fortune 100 企业分别开展代码助手随机试验，合计 4,867 名开发者 | 合并分析的任务完成数提升估计为 26.08%，标准误 10.3%；单项试验噪声较大、结果有差异 | 多组织现场试验和合并分析比单一团队更能观察异质性；合并估计仍绑定其代码任务、工具、采用率和分析方案，不是所有开发者或 LLM 产品的通用提升率。 |
+| [Generative AI-enabled clinical decision support](https://doi.org/10.1038/s41591-026-04503-6)，Nature Medicine 2026 | 肯尼亚 16 家基层医疗机构的 103 名临床人员按人员集群随机；9,691 名患者纳入分析 | 14 天治疗失败率为干预组 2.2%、对照组 2.0%；调整后 OR 0.77，95% CI 0.55–1.08，`P=0.13`，主要结局无显著组间差异；临床记录质量等次要指标改善 | 说明评估对象要落在患者结局，并按真实协作流程选择集群单位。研究没有发现与干预相关的严重不良事件，不等于证明系统普遍安全；单一医疗网络和 14 天窗口限制外推。 |
+
+这三项研究分别提醒我们：生产净效应、实际使用者的效果和模型离线能力不是
+同一因果问题；用户行为与团队协作可能改变 treatment 的作用；代理指标改善
+也不保证主要结果改善。在线实验要先说清目标估计量，再决定分流、日志与结局，
+不能从文献中的百分比直接推导本产品的收益。
+
 ## 2. 实验契约：在分流之前确定分母
 
 ### 2.1 样本 schema
@@ -76,21 +93,24 @@
 一次可分析的曝光记录可以抽象为：
 
 ~~~math
-e_i=(u_i,z_i,x_i,y_i,c_i,t_i)
+e_i=(u_i,z_i,d_i,a_i,x_i,y_i,c_i,t_i)
 ~~~
 
 其中：
 
 - u_i 是随机单位，可以是用户、会话、请求、租户或设备；
 - z_i 是 control 或 treatment 分组；
+- d_i 记录 treatment 是否实际送达并展示；
+- a_i 记录用户是否采纳、修改或使用了模型建议；
 - x_i 是输入、场景和可用产品功能；
 - y_i 是主指标观测值，如任务是否完成；
 - c_i 是成本、延迟、错误、安全和人工处理等护栏结果；
 - t_i 是曝光和结果发生的时间。
 
 记录还应保存 model revision、prompt revision、实验配置、用户是否真正看到
-输出、请求是否被重试、是否触发工具和是否被过滤。只有真正曝光给用户的
-请求才能进入主要分析；后台 shadow 请求不能和真实用户结果混为一谈。
+输出、请求是否被重试、是否触发工具和是否被过滤。后台 shadow 请求不能和
+真实用户结果混为一谈；即使没有成功展示，也要保留最初的随机分组和失败原因，
+以便检查 treatment 是否改变了“被观测到”的机会。
 
 ### 2.2 什么算一次曝光
 
@@ -135,6 +155,36 @@ e_i=(u_i,z_i,x_i,y_i,c_i,t_i)
 8. 实验何时结束以及谁负责解释。
 
 这些约定不等于提前保证结果，而是防止看到结果后任意改变分母和目标。
+
+### 2.5 分配、实际送达和实际使用不是一回事
+
+随机分配的对象是 `Z_i`；用户是否真的收到可用功能可记作 `D_i`；用户是否
+采纳建议、点击工具或继续使用可记作 `A_i`。部署决策通常首先关心“给符合条件
+的用户开放新功能，整体结果会怎样”，对应按原始随机分组比较的 intention-to-treat
+(ITT) 效应：
+
+~~~math
+\hat{\tau}_{\mathrm{ITT}}
+=
+\overline{Y}_{Z=1}-\overline{Y}_{Z=0}
+~~~
+
+若 treatment 用户有时没有得到输出，或得到后没有采纳，ITT 会把这些实际部署
+摩擦一起计入“开放功能”的效果。这通常正是上线决策需要的量。相反，直接比较
+“采纳建议的人”和“没采纳的人”会破坏随机化：任务难度、用户经验、信任和响应
+质量都可能同时影响采纳与结果。只保留成功渲染、点击或采纳的样本，还可能把
+treatment 之后的筛选条件放进分母，造成选择偏差。
+
+如果研究问题明确是“实际使用建议的效果”，可以把随机开放权限作为工具变量，
+在相关性、排除限制、单调性等假设成立时估计遵从者局部平均处理效应；它回答的
+是会因权限开放而改变使用行为那群人的效果，不是所有用户的平均收益。分析报告
+应把它列为次要估计，并公开假设。实现上要分别记录 `assigned → routed → generated
+→ displayed → accepted/edited/ignored → outcome`，并把未送达、未展示、空结果、
+人工接管和用户退出作为不同状态，而不是把它们删掉或并成一个“失败”。
+
+[Generative AI at Work](https://doi.org/10.1093/qje/qjae044) 中坐席可以忽略或编辑
+建议，作者因而研究了工具可用、建议采纳和工作结果之间的关系；这类实际使用
+行为正是不能仅凭 treatment 组内的采纳者比较来做因果结论的原因。
 
 ## 3. A/B Test 的基本结构
 
@@ -185,6 +235,14 @@ SRM 告警可能来自：
 SRM 不是“统计上不显著的小问题”，而是实验数据生成过程可能有缺陷的信号。
 在原因没有解释前，业务差异不应被当作可靠 treatment effect。
 
+诊断时先看全体随机分配单位的 control/treatment 数，再检查资格筛选后的分析
+样本、请求路由、生成成功和最终展示各阶段。随后按时间、客户端版本、语言、
+地区、租户、错误类型和重试状态切片：只在触发人群出现的 SRM，可能来自 treatment
+相关的触发条件；首日异常后消失，可能与延迟启动、缓存或事件延迟有关；只在某
+个客户端或语言出现，则要沿对应路由和埋点检查。Microsoft 的 [SRM 分类研究](https://www.microsoft.com/en-us/research/publication/diagnosing-sample-ratio-mismatch-in-online-controlled-experiments-a-taxonomy-and-rules-of-thumb-for-practitioners/)
+把 SRM 当作多种数据质量根因的共同症状，并强调先定位根因再解释业务指标；它不是
+看到比例差异后直接删样本或重新加权的许可。
+
 ### 3.4 实验隔离和干扰
 
 多个实验同时运行时，一个用户可能同时进入模型、prompt、UI 和价格实验。
@@ -193,6 +251,15 @@ SRM 不是“统计上不显著的小问题”，而是实验数据生成过程�
 企业和协作产品还可能存在 interference：一个租户中的用户使用 treatment，
 会影响同租户中 control 用户的文档、流程或协作行为。此时按请求随机会低估
 或扭曲效果，需要按租户、团队或网络关系设计实验。
+
+但“改成租户级或团队级分桶”不会自动消除所有干扰。集群内相关性会降低有效
+样本量；跨租户共享的知识库、缓存、模型更新、配额或 marketplace 供需仍可能
+让 control 受到 treatment 影响。可以先识别干扰路径，再比较个体随机和集群随机
+的估计；网络场景也可用两阶段随机设计估计直接效应和 spillover，适合共享时段
+系统的场景则可评估 switchback 设计，但要控制时间趋势、周期效应和版本残留。
+LinkedIn 的 [Detecting Network Effects](https://www.kdd.org/kdd2017/papers/view/detecting-network-effects-randomizing-over-randomized-experiments)
+通过并行比较个体随机与集群随机实验来检查网络效应，说明实验设计本身可以用于
+发现 SUTVA 假设是否站得住，而不应只在结果分析中默认没有干扰。
 
 ## 4. 主指标：把用户目标变成可观察结果
 
@@ -271,10 +338,10 @@ Agent 更适合看端到端任务成功、人工接管、工具失败、恢复�
 \frac{s_t+s_c}{n_t+n_c}
 ~~~
 
-大样本近似下，比例差的标准误可以写成：
+在“两个比例相等”的零假设下，检验比例差会使用合并比例对应的标准误：
 
 ~~~math
-\mathrm{SE}(\hat{\tau})
+\mathrm{SE}_{0}(\hat{\tau})
 =
 \sqrt{
 \hat p(1-\hat p)
@@ -287,22 +354,32 @@ Agent 更适合看端到端任务成功、人工接管、工具失败、恢复�
 ~~~math
 z
 =
-\frac{\hat{\tau}}{\mathrm{SE}(\hat{\tau})}
+\frac{\hat{\tau}}{\mathrm{SE}_{0}(\hat{\tau})}
 ~~~
 
-95% 近似区间为：
+简单的 Wald 区间则使用未合并的两组方差：
 
 ~~~math
+\mathrm{SE}_{\mathrm{CI}}
+=
+\sqrt{
+\frac{\hat p_t(1-\hat p_t)}{n_t}
++\frac{\hat p_c(1-\hat p_c)}{n_c}
+},
+\qquad
 \mathrm{CI}_{95}
 =
 \left[
-\hat{\tau}-1.96\,\mathrm{SE},
-\hat{\tau}+1.96\,\mathrm{SE}
+\hat{\tau}-1.96\,\mathrm{SE}_{\mathrm{CI}},
+\hat{\tau}+1.96\,\mathrm{SE}_{\mathrm{CI}}
 \right]
 ~~~
 
-下一章会讨论这些近似的条件、功效、样本量和多重检验。当前最重要的是不把
-一个点估计当作确定事实。
+这里的正态近似区间适合大样本教学演示；稀有事件、小样本或比例接近 0/1 时，
+不能机械套用这一公式，下一章会讨论区间、功效和样本量的适用条件。
+
+当前最重要的是不把一个点估计当作确定事实。下一章会继续讨论近似条件、功效、
+样本量、精确区间和多重检验。
 
 ## 5. 护栏指标：提升不能用风险换来
 
@@ -342,6 +419,14 @@ m_{j,\mathrm{treat}}
 有些指标可以进入人工 review，例如少量延迟波动或某个低流量场景的负反馈。
 
 硬约束与软信号的区别应由业务风险和恢复能力决定，而不是由指标名字决定。
+主指标衡量目标收益，guardrail 用来约束不能接受的代价；两者不能随意折算成
+一个允许高点击率抵消隐私泄露的总分。对“最多恶化多少”的护栏，应事先定好
+允许边界并看区间上界；“差异不显著”不等于证明没有伤害。安全事件稀少时，还要
+报告有效分母和零事件上界，见[第七册第八章](08-safety与robustness-eval.md)。
+Microsoft 的 [A Dirty Dozen](https://www.microsoft.com/en-us/research/publication/a-dirty-dozen-twelve-common-metric-interpretation-pitfalls-in-online-controlled-experiments/)
+总结了线上指标移动可能误导实验解读的具体案例，尤其提醒分解指标分子/分母并
+同时检查产品护栏，而不是只追逐局部指标。
+
 报告可以同时给出：
 
 ~~~text
@@ -525,7 +610,11 @@ holdout。
 
 反复查看结果并在偶然变好时停止，会增加假阳性。实验要预先定义观察窗口、
 允许的中途检查方法和停止规则。真正的事故信号可以立即停止，但不能把安全
-停止和追求统计显著混为一谈。
+停止和追求统计显著混为一谈。如果业务需要边运行边看结果，要么使用预先定义的
+group-sequential 设计，要么使用能在可选停止下维持错误率控制的 always-valid
+推断；普通固定终点的 p 值不能因为“每天看一次”就继续有效。[Always Valid Inference](https://arxiv.org/abs/1512.04922)
+展示了把序贯检验作为在线实验接口的方案，但采用它仍需明确预算、停止边界和
+多指标控制，不是任意盯盘后挑一刻停测。
 
 ### 10.3 多指标和多切片
 
@@ -555,7 +644,7 @@ holdout。
 做这种调整，因为它们已经可能受到 treatment 影响。
 
 设 Y_i 是实验期间的结果，X_i 是实验前测量的、和 Y_i 相关的协变量。一个常见
-的调整形式是：
+的调整形式是 CUPED（Controlled-experiment Using Pre-Experiment Data）的核心：
 
 ~~~math
 Y_i^{\mathrm{adj}}
@@ -576,6 +665,13 @@ Y_i-\theta(X_i-\bar X),
 的实验可以使用用户实验前一周的测试通过率作为 X；但不能使用实验期间“是否
 采纳新模型建议”作为 X。后者是 treatment 之后的变量，会把真正的效果从分析
 中扣掉。
+
+[CUPED 原论文](https://exp-platform.com/cuped/)在 Bing 的实验中报告过约 50% 的
+方差下降；这是该平台、指标与协变量条件下的经验，不保证任何新模型实验也有
+相同比例。CUPED 的目标是提高估计精度，不会修复随机分配、曝光日志或结局缺失
+造成的偏差；它也不会把一次未观察到的安全事件变成“零风险”。回归调整可以实现
+类似的精度提升，但必须预先固定变量和分析规则，不能在多个调整版本中挑最显著的
+结果。
 
 实际使用时还要保存协变量的生成时间、版本和缺失规则，并在实验报告中同时给出
 未调整结果和调整结果。调整模型的参数不能只在 treatment 组上拟合，也不应因为
@@ -705,33 +801,59 @@ def assign(user_id, experiment_id="exp_model_v2", treatment_pct=50):
 
 
 def rate(numerator, denominator):
-    return 0.0 if denominator == 0 else numerator / denominator
+    return None if denominator <= 0 else numerator / denominator
+
+
+def rounded(value, digits=3):
+    return None if value is None else round(value, digits)
 
 
 def p95(values):
+    if not values:
+        return None
     ordered = sorted(values)
     index = math.ceil(0.95 * len(ordered)) - 1
     return ordered[index]
 
 
 def two_prop_z(success_t, n_t, success_c, n_c):
+    if n_t <= 0 or n_c <= 0:
+        return None
     p_t = success_t / n_t
     p_c = success_c / n_c
     delta = p_t - p_c
     pooled = (success_t + success_c) / (n_t + n_c)
-    se = math.sqrt(pooled * (1 - pooled) * (1 / n_t + 1 / n_c))
-    z = 0.0 if se == 0 else delta / se
-    ci = (delta - 1.96 * se, delta + 1.96 * se)
-    return p_t, p_c, delta, se, z, ci
+    if pooled in (0, 1):
+        return None
+    se_test = math.sqrt(pooled * (1 - pooled) * (1 / n_t + 1 / n_c))
+    se_ci = math.sqrt(
+        p_t * (1 - p_t) / n_t
+        + p_c * (1 - p_c) / n_c
+    )
+    z = delta / se_test
+    ci = (delta - 1.96 * se_ci, delta + 1.96 * se_ci)
+    return p_t, p_c, delta, se_test, se_ci, z, ci
 
 
 def srm_chi_square(observed, expected_ratio):
     total = sum(observed.values())
+    if total <= 0 or any(ratio <= 0 for ratio in expected_ratio.values()):
+        return None
     chi = 0.0
     for group, ratio in expected_ratio.items():
         expected = total * ratio
         chi += (observed[group] - expected) ** 2 / expected
     return chi
+
+
+def at_most(value, limit):
+    return None if value is None or limit is None else value <= limit
+
+
+def within_increase(treatment, control, allowed_increase):
+    if treatment is None or control is None:
+        return None
+    return treatment <= control + allowed_increase
 
 
 bucket_preview = {
@@ -763,12 +885,33 @@ experiment = {
     },
 }
 
-p_t, p_c, delta, se, z, ci = two_prop_z(
+test_result = two_prop_z(
     experiment["treatment"]["success"],
     experiment["treatment"]["users"],
     experiment["control"]["success"],
     experiment["control"]["users"],
 )
+if test_result is None:
+    primary = {
+        "control_rate": None,
+        "treatment_rate": None,
+        "delta": None,
+        "se_test": None,
+        "se_ci": None,
+        "z": None,
+        "ci95": None,
+    }
+else:
+    p_t, p_c, delta, se_test, se_ci, z, ci = test_result
+    primary = {
+        "control_rate": rounded(p_c),
+        "treatment_rate": rounded(p_t),
+        "delta": rounded(delta),
+        "se_test": rounded(se_test, 4),
+        "se_ci": rounded(se_ci, 4),
+        "z": rounded(z, 3),
+        "ci95": (rounded(ci[0]), rounded(ci[1])),
+    }
 
 observed = {group: data["users"] for group, data in experiment.items()}
 srm_chi = srm_chi_square(observed, {"control": 0.5, "treatment": 0.5})
@@ -777,62 +920,76 @@ summary = {}
 for group, data in experiment.items():
     users = data["users"]
     summary[group] = {
-        "success_rate": round(rate(data["success"], users), 3),
-        "unsafe_rate": round(rate(data["unsafe"], users), 3),
-        "over_refusal_rate": round(rate(data["over_refusal"], users), 3),
-        "error_rate": round(rate(data["errors"], users), 3),
-        "cost_per_success": round(data["cost_usd"] / data["success"], 3),
+        "success_rate": rounded(rate(data["success"], users)),
+        "unsafe_rate": rounded(rate(data["unsafe"], users)),
+        "over_refusal_rate": rounded(rate(data["over_refusal"], users)),
+        "error_rate": rounded(rate(data["errors"], users)),
+        "cost_per_success": rounded(rate(data["cost_usd"], data["success"])),
         "p95_latency_ms": p95(data["latencies"]),
     }
 
-primary = {
-    "control_rate": round(p_c, 3),
-    "treatment_rate": round(p_t, 3),
-    "delta": round(delta, 3),
-    "se": round(se, 4),
-    "z": round(z, 3),
-    "ci95": (round(ci[0], 3), round(ci[1], 3)),
-}
-
 signals = {
-    "srm_valid": srm_chi < 10.83,
-    "primary_supported": primary["delta"] > 0 and abs(primary["z"]) >= 1.96,
-    "latency_within_budget": (
-        summary["treatment"]["p95_latency_ms"]
-        <= summary["control"]["p95_latency_ms"] * 1.25
+    "srm_valid": None if srm_chi is None else srm_chi < 10.83,
+    "primary_supported": (
+        None if primary["ci95"] is None else primary["ci95"][0] > 0
     ),
-    "cost_within_budget": (
-        summary["treatment"]["cost_per_success"]
-        <= summary["control"]["cost_per_success"] * 1.30
+    "latency_within_budget": at_most(
+        summary["treatment"]["p95_latency_ms"],
+        None
+        if summary["control"]["p95_latency_ms"] is None
+        else summary["control"]["p95_latency_ms"] * 1.25,
     ),
-    "unsafe_within_budget": (
-        summary["treatment"]["unsafe_rate"]
-        <= summary["control"]["unsafe_rate"] + 0.002
+    "cost_within_budget": at_most(
+        summary["treatment"]["cost_per_success"],
+        None
+        if summary["control"]["cost_per_success"] is None
+        else summary["control"]["cost_per_success"] * 1.30,
     ),
-    "over_refusal_within_budget": (
-        summary["treatment"]["over_refusal_rate"]
-        <= summary["control"]["over_refusal_rate"] + 0.02
+    "unsafe_within_budget": within_increase(
+        summary["treatment"]["unsafe_rate"],
+        summary["control"]["unsafe_rate"],
+        0.002,
     ),
-    "error_within_budget": (
-        summary["treatment"]["error_rate"]
-        <= summary["control"]["error_rate"] + 0.005
+    "over_refusal_within_budget": within_increase(
+        summary["treatment"]["over_refusal_rate"],
+        summary["control"]["over_refusal_rate"],
+        0.02,
+    ),
+    "error_within_budget": within_increase(
+        summary["treatment"]["error_rate"],
+        summary["control"]["error_rate"],
+        0.005,
     ),
 }
 
 actions = []
-if not signals["srm_valid"]:
+if signals["srm_valid"] is None:
+    actions.append("collect_valid_assignment_counts")
+elif not signals["srm_valid"]:
     actions.append("debug_exposure_and_assignment_logs")
-if not signals["primary_supported"]:
+if signals["primary_supported"] is None:
+    actions.append("collect_valid_primary_outcomes")
+elif not signals["primary_supported"]:
     actions.append("collect_more_samples_or_revisit_primary_metric")
-if not signals["latency_within_budget"]:
+if signals["latency_within_budget"] is None:
+    actions.append("collect_valid_latency_observations")
+elif not signals["latency_within_budget"]:
     actions.append("reduce_tail_latency_or_route_selectively")
-if not signals["cost_within_budget"]:
+if signals["cost_within_budget"] is None:
+    actions.append("collect_valid_success_and_cost_data")
+elif not signals["cost_within_budget"]:
     actions.append("optimize_cost_per_successful_task")
-if not signals["unsafe_within_budget"]:
+if signals["unsafe_within_budget"] is None:
+    actions.append("collect_valid_safety_outcomes")
+elif not signals["unsafe_within_budget"]:
     actions.append("review_safety_regression_before_more_traffic")
-if not signals["over_refusal_within_budget"]:
+if signals["over_refusal_within_budget"] is None:
+    actions.append("collect_valid_benign_outcomes")
+elif not signals["over_refusal_within_budget"]:
     actions.append("review_benign_boundary_and_refusal_behavior")
-if not signals["error_within_budget"]:
+if signals["error_within_budget"] is None:
+    actions.append("collect_valid_error_counts")
+elif not signals["error_within_budget"]:
     actions.append("debug_runtime_and_timeout_regressions")
 
 decision = "continue_with_sliced_report" if not actions else "hold_for_guardrail_review"
@@ -851,7 +1008,7 @@ print("decision=", decision, sep="")
 ~~~text
 bucket_preview={'u001': 'control', 'u006': 'treatment', 'u007': 'treatment', 'u008': 'control', 'u010': 'treatment'}
 summary={'control': {'success_rate': 0.52, 'unsafe_rate': 0.002, 'over_refusal_rate': 0.035, 'error_rate': 0.009, 'cost_per_success': 0.231, 'p95_latency_ms': 1350}, 'treatment': {'success_rate': 0.57, 'unsafe_rate': 0.006, 'over_refusal_rate': 0.07, 'error_rate': 0.011, 'cost_per_success': 0.316, 'p95_latency_ms': 2100}}
-primary={'control_rate': 0.52, 'treatment_rate': 0.57, 'delta': 0.05, 'se': 0.0223, 'z': 2.245, 'ci95': (0.006, 0.094)}
+primary={'control_rate': 0.52, 'treatment_rate': 0.57, 'delta': 0.05, 'se_test': 0.0223, 'se_ci': 0.0222, 'z': 2.245, 'ci95': (0.006, 0.094)}
 srm_chi_square=0.0
 signals={'srm_valid': True, 'primary_supported': True, 'latency_within_budget': False, 'cost_within_budget': False, 'unsafe_within_budget': False, 'over_refusal_within_budget': False, 'error_within_budget': True}
 actions=['reduce_tail_latency_or_route_selectively', 'optimize_cost_per_successful_task', 'review_safety_regression_before_more_traffic', 'review_benign_boundary_and_refusal_behavior']
@@ -865,8 +1022,16 @@ decision=hold_for_guardrail_review
 ### 11.1 代码中的统计边界
 
 demo 的 p95 使用十个 toy 延迟值中的经验分位点，不能替代生产 histogram 或
-更大窗口的分位数估计。两比例 z 检验依赖大样本近似，真实低基线安全事件、
-强聚类用户数据和连续监测需要更合适的区间或分层方法。
+更大窗口的分位数估计。two_prop_z 在零样本或合并比例为 0/1 时返回不可计算，
+各分项的 0/0 也以 None 保留；缺失证据会触发补采数据的 action，而不是当成
+零风险。比例差检验用合并标准误，Wald 区间用未合并标准误；两者都依赖大样本
+近似，真实低基线安全事件、强聚类用户数据和连续监测需要更合适的区间或分层方法。
+
+本 demo 的 `*_within_budget` 护栏只比较点估计和教学阈值，没有做非劣效检验，
+不能据此宣布安全率、误拒率或错误率“已证明不恶化”；`primary_supported` 也没有
+处理多重主指标。真实门禁要把预设边界与单侧区间上界比较，并按随机化单位、事件
+稀有程度和停止设计选方法；低基线风险还要结合零事件上界和离线 / 人工审查，
+参见[第七册第八章](08-safety与robustness-eval.md)。
 
 SRM 为 0 只说明这组示例的用户数量正好按 1:1 分配，不代表曝光日志、用户资格、
 结果事件和 treatment 实际生效都没有问题。
@@ -1007,11 +1172,16 @@ A/B Test 的价值是识别真实净收益和副作用，不是按流程盖章�
 
 1. [Controlled Experiments on the Web](https://ai.stanford.edu/~ronnyk/2009controlledExperimentsOnTheWebSurvey.pdf)：大规模网页在线实验的基础经验。
 2. [Trustworthy Online Controlled Experiments](https://experimentguide.com/)：在线受控实验的实践资料。
-3. [Sample Ratio Mismatch Detection at Scale](https://arxiv.org/abs/2208.07766)：大规模实验中随机化校验和分流比例异常的诊断方法。
-4. [CUPED](https://arxiv.org/abs/1512.04922)：利用实验前数据降低方差的实验方法。
+3. [Ensure A/B Test Quality at Scale with Automated Randomization Validation and Sample Ratio Mismatch Detection](https://arxiv.org/abs/2208.07766)：eBay 的实验平台使用 population stability index 校验随机化，并以序贯分析检测 SRM、降低大规模监控误报。
+4. [CUPED](https://exp-platform.com/cuped/)：利用实验前协变量降低方差的 WSDM 2013 方法；原论文 DOI 为 [10.1145/2433396.2433413](https://doi.org/10.1145/2433396.2433413)。
 5. [Online Controlled Experiments: Lessons from Running A/B/n Tests for 12 Years](https://doi.org/10.1145/2783258.2785464)：大规模在线实验基础设施和长期运行经验。
-6. [Interference in Experiments](https://arxiv.org/abs/1706.07741)：网络和用户间干扰对随机实验的影响。
-7. [Sequential Testing](https://arxiv.org/abs/2102.12352)：连续观测和停止规则的统计背景。
+6. [Detecting Network Effects: Randomizing Over Randomized Experiments](https://www.kdd.org/kdd2017/papers/view/detecting-network-effects-randomizing-over-randomized-experiments)：用个体随机与集群随机实验比较，检查社交网络产品的干扰。
+7. [Always Valid Inference: Bringing Sequential Analysis to A/B Testing](https://arxiv.org/abs/1512.04922)：允许连续监测时仍维持有效性的序贯推断方法；不是固定样本量 p 值的自动替换。
+8. [Diagnosing Sample Ratio Mismatch in Online Controlled Experiments](https://www.microsoft.com/en-us/research/publication/diagnosing-sample-ratio-mismatch-in-online-controlled-experiments-a-taxonomy-and-rules-of-thumb-for-practitioners/)：将 SRM 作为多类数据质量根因的诊断信号。
+9. [A Dirty Dozen: Twelve Common Metric Interpretation Pitfalls](https://www.microsoft.com/en-us/research/publication/a-dirty-dozen-twelve-common-metric-interpretation-pitfalls-in-online-controlled-experiments/)：以线上案例说明指标定义、分子/分母和护栏的误读风险。
+10. [Generative AI at Work](https://doi.org/10.1093/qje/qjae044)：分阶段部署中的客服坐席结果；主样本不是完整的并行随机 A/B，结论限于单一企业和识别设计。
+11. [The Effects of Generative AI on High-Skilled Work](https://doi.org/10.1287/mnsc.2025.00535)：三家企业的代码助手现场随机试验及异质性/合并估计。
+12. [Generative AI-enabled clinical decision support system in primary care](https://doi.org/10.1038/s41591-026-04503-6)：临床工作流集群随机试验，主要患者结局与次要记录质量结果并不相同。
 
 这些资料能说明实验设计、方差降低、分流诊断和干扰问题的来源；当前项目仍
 需要根据用户单位、产品风险、隐私要求和实际流量重新验证。下一章会进一步

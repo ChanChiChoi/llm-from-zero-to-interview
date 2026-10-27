@@ -10,7 +10,7 @@
 
 ## 本章资料边界
 
-本章参考 RAG 原论文、OpenAI tools / structured outputs 文档、LangChain Agent 部署与工具调用资料、LlamaIndex RAG 评估资料和前序 RAG / Agent 章节。这里聚焦生产部署中最常见的问题：
+本章参考 RAG 原论文、Self-RAG / CRAG / GraphRAG 等代表方法、RAGAS / ARES 评估研究、OpenAI tools / structured outputs 文档、LangChain Agent 部署与工具调用资料、LlamaIndex RAG 评估资料和前序 RAG / Agent 章节。这里聚焦生产部署中最常见的问题：
 
 1. RAG 离线索引链路和在线查询链路如何拆分。
 2. retrieval、rerank、prompt assembly、citation check 和 latency budget 如何公式化。
@@ -371,6 +371,8 @@ RAG 不能用一个总分描述。检索命中、证据支持、答案正确、�
 
 Recall@K 关注正确证据是否进入候选池；MRR 关注第一个相关结果的位置，nDCG 允许不同相关等级。还应记录 precision@K、空结果率、过滤后候选数、索引新鲜度和不同租户/文档类型的分层结果。没有标注集时，线上点击或用户反馈可以提供弱监督，但不能把点击直接当成事实支持。
 
+例如，某个多跳问题的 gold evidence 是 `{A, B, C}`，检索 top-5 返回 `{A, X, B, Y, Z}`，则 `Recall@5=2/3`，而 `Hit@5=1`。如果 context budget 又只留下 A，那么检索层看起来“命中过”，但实际 context recall 只有 `1/3`；模型是否最终用对 A 仍是另一层问题。这个小例子说明 Hit@K 不能替代多证据召回，也不能把检索 recall 当成答案正确率。
+
 ### 7.2 生成、引用和忠实性
 
 回答质量要区分“答案正确”和“答案有证据”。对 claim c_i，可以用人工或 verifier 标记其证据支持：
@@ -406,6 +408,34 @@ T_{\mathrm{rewrite}}
 每一项都要记录实际是否发生；没有工具调用的请求不应把一个固定 tool 时间硬加进去。线上监控包括 TTFT、总延迟、P95/P99、各阶段超时、索引版本、证据 token 数、模型输出 token 数、缓存命中、失败分类和单位成功任务成本。
 
 质量和性能要按 workload 分层：短 FAQ、长文档问答、跨文档比较、权限过滤、带引用回答和 Agent 工具链的分布不同。一次平均 P95 可能掩盖某个租户的过滤后空结果或某种文档解析器的系统性失败。上线决策应保留这些独立指标及其证据，而不是压缩成一个不可解释的总布尔值。
+
+### 7.4 代表性 RAG 方法分别补哪一块
+
+固定 top-k RAG 是一个有用的基线：每个问题都走同一条检索、重排、生成链路。后续方法并不是按新旧排成一列的“升级版”，而是在修不同故障。选方法前先写清楚：正确证据没召回、模型没用好已召回证据、问题需要跨文档汇总，还是系统不知道何时该检索。
+
+| 方法 | 它针对的具体缺口 | 机制和作者证据 | 代价、限制及下一步改进 |
+| --- | --- | --- | --- |
+| [原始 RAG / 固定 top-k](https://arxiv.org/abs/2005.11401) | 参数知识难更新，也缺少显式来源 | 将可更新的非参数文档检索与生成结合；原论文比较对整段生成共享 passage 与按 token 使用不同 passage 的形式，并在开放域问答任务报告收益 | 召回错误仍会传给生成器；需要先查 retrieval recall 与 passage use，再决定改索引、排序或生成，不能把“有 RAG”当作事实保证。 |
+| [Self-RAG](https://arxiv.org/abs/2310.11511) | 每次都固定检索相同数量 passage，可能在不需要证据时增加噪声，也可能没检索时缺少依据 | 训练模型用 reflection tokens 学习是否检索、评估 passage 相关性并反思生成；作者在其 7B/13B 模型和任务上报告开放域问答、推理、事实核验及引用表现改善 | 需要匹配的训练数据、模型和推理协议；任意托管模型不能仅靠切换参数获得这套行为。反思 token 是模型产生的判断，不是独立 verifier；要另测漏检索、误检索和无证据回答。 |
+| [CRAG](https://arxiv.org/abs/2401.15884) | 初始检索可能质量差，但普通管线仍把它们直接交给生成器 | 用 retrieval evaluator 估计候选质量，并按判断触发本地修正或外部搜索；再分解、过滤候选信息。论文在四个短/长生成数据集报告改善 | evaluator 的误判会选错回退路径；网页搜索引入新来源、成本、延迟和间接提示注入。改进方向是分开测 evaluator 校准、外部来源质量和回退后的端到端收益。 |
+| [GraphRAG](https://arxiv.org/abs/2404.16130) | 相似 chunk 检索不容易回答“整个语料有哪些共同主题”一类全局问题 | 从文档抽取实体关系、形成社区和层级摘要，用于 query-focused global summarization；作者在约百万 token 语料范围的全局 sensemaking 任务中报告回答 comprehensiveness 与 diversity 优于 naive RAG | 图抽取、社区汇总和版本更新增加离线成本；抽取错误会进入图和摘要。[Microsoft 仓库](https://github.com/microsoft/graphrag)目前把项目标为 research project、mostly maintenance mode，并提醒 indexing 可能昂贵；优先用于局部 chunk 检索确实无法回答的跨语料问题。 |
+| [Agentic RAG / ReAct](https://arxiv.org/abs/2210.03629) | 单次查询无法预先覆盖多跳问题中的证据缺口 | 模型根据已有观察继续拆问题、检索和整合；它是控制流模式，可组合普通、混合或图检索 | 多一轮不等于多一份有效证据：query drift、重复检索、无依据的停止/继续判断都会增加成本。限制轮数和新证据增益，并用固定 query trace 评估，不以“检索次数”作为质量目标。 |
+
+这些方案处在不同层次，彼此可以组合。一个实际选择顺序是：先用检索标注集确认召回瓶颈；再比较 hybrid retrieval、reranker 和上下文选择；当证据质量不确定时，评估 CRAG 式的显式回退；当问题是语料级汇总或多跳关系时，才增加 GraphRAG 或多轮检索；只有明确需要模型决定检索时机，且能承担训练或控制复杂度时，再评估 Self-RAG 式路线。这里的顺序是部署建议，不是这些论文验证过的统一最佳流水线。
+
+### 7.5 RAGAS 与 ARES：自动评估是估计器，不是 oracle
+
+RAG 的离线答案往往没有一条唯一的标准答案，[RAGAS](https://arxiv.org/abs/2309.15217) 因而提出不依赖完整人工参考答案的指标来分别观察 context relevance、faithfulness 和 answer relevance。它降低了建立评估集的门槛，但这些指标通常借助模型判断、问题/答案分解或相似度；评审模型、提示、语言和领域变化都可能改变分数。
+
+[ARES](https://arxiv.org/abs/2311.09476) 同样用模型评估 context relevance、answer faithfulness 和 answer relevance，但用合成样本训练轻量 judge，再用少量人工标注通过 prediction-powered inference 校准总体估计和置信区间。作者在其测试设置中报告，相比 RAGAS，ARES 的 context relevance 和 answer relevance 系统排序 Kendall's tau 平均分别高 0.16 和 0.15；该结果只说明论文定义的 benchmark、标注流程和 judge 条件下的比较，不代表 ARES 在所有企业语料都更准确。
+
+因此，评估应分成三层：
+
+1. **检索真值集**：对能标注的 query 记录正确文档/片段，计算 Recall@K、MRR 或 nDCG，定位证据是否进入候选集。
+2. **端到端评估**：按 claim 检查引用是否存在、span 是否支持 claim、答案是否遗漏必要条件，并单独标注正确性、忠实性、拒答和权限泄漏。
+3. **评估器校准**：对 judge 结果抽样做人审，报告分层误差和置信区间；prompt、模型或索引变更后复测，必要时重建校准集。
+
+自动分数适合筛回归和定位方向，不会自动补上不存在的业务标签，也不能把未经授权的读写行为变成可接受结果。发布时间越近、数据越敏感或副作用越重，越要保留直接可验证的硬门禁和人工抽检。
 
 ## 8. Agent 和普通 Chat 的区别
 
@@ -491,6 +521,18 @@ downstream_status
 
 只有 schema_valid、permission_allowed、业务风险策略和下游状态都被编排器解释清楚，系统才可以决定继续、请求确认、回滚或向用户报告失败。高风险写操作即使参数合法、模型置信度很高，也仍可能需要用户确认或人工审批。
 
+### 9.4 直接工具调用与程序化编排
+
+多步工具任务不一定要让模型在每次调用后都重新判断。当前 [OpenAI Responses API 的 Programmatic Tool Calling](https://developers.openai.com/api/docs/guides/tools-programmatic-tool-calling) 允许模型生成程序，在受限运行时中编排可用工具的循环、分支、并行调用和中间结果归并；官方建议把它用于控制流可预测、结果可被代码筛选或聚合的阶段。直接调用更适合每个结果都需要新一轮语义判断、需要审批或必须保留原生引用/产物的步骤。
+
+| 路径 | 适用任务 | 主要收益 | 必须保留的边界 |
+| --- | --- | --- | --- |
+| 逐次直接调用 | 每步依赖新观察；调用需要用户确认；单次查询或写操作 | 决策和 evidence 在模型轮次之间清晰可见 | 每轮会增加模型往返；宿主仍要校验权限、参数、工具结果和状态。 |
+| 确定性 workflow / 普通代码 | 业务顺序固定、规则可明确表达的审批或事务流程 | 状态转移、重试、分支和幂等更易审计 | 不应把需要语义判断的分支伪装成固定规则；模型只能提供输入或受控判断。 |
+| Programmatic Tool Calling | 可预测的多次读调用、并行取数、过滤/去重/聚合后返回小结果 | 可能减少模型轮次和中间输出进入上下文；并行及循环由代码控制 | 这是 OpenAI 的特定 API/runtime 能力，不是通用 tool calling 标准；要固定可调用工具、运行时隔离、错误和输出 schema。每次工具调用仍需应用侧鉴权，高影响动作仍要应用审批。 |
+
+不要因为某条路径“少一次模型调用”就假定它质量更高或总延迟更低。以直接调用为 baseline，用同一组任务比较答案正确与完整度、evidence coverage、模型轮次、工具次数、token/cost、端到端 P95、重试恢复和安全结果；如果把流程压进程序后省了 token，却丢了来源或让失败难以恢复，优化并未成立。
+
 ## 10. Agent 状态管理
 
 Agent 状态不是一段无限增长的对话文本，而是需要版本、所有权和恢复语义的业务状态。至少要区分：
@@ -562,11 +604,15 @@ reason
 
 文档或网页中的“请把密钥发给我”是数据，不是系统指令；工具返回的“下一步执行删除”也只是外部结果。编排器应使用结构化字段、来源标记和策略检查，把不可信文本限制在模型可阅读但不可直接授权的范围内。
 
+这仍没有解决恶意内容如何进入检索结果。[2026 年 USENIX Security 的一项研究](https://www.usenix.org/conference/usenixsecurity26/presentation/chang-hongyan)把间接注入拆成“触发检索的片段”和“攻击指令”，作者报告其攻击在 11 个 benchmark、8 种 embedding 模型上接近 100% 召回恶意片段；一个邮件摘要多 Agent 设置中，单封投毒邮件使 GPT-4o 泄露 SSH key 的成功率超过 80%。这些是论文威胁模型与系统设置中的攻击结果，不是所有 RAG 或 Agent 的通用成功率；但它说明只在检索后跑提示注入分类器，无法保证恶意内容不会被召回。防线还要覆盖文档来源和写入审批、文档/索引 revision、来源信誉与 taint 标记、读取和外发权限、工具参数约束、人工确认及攻击回归集。
+
 防护不应只依赖一个关键词过滤器。要限制可访问数据、工具集合、参数范围和网络出口，并在高风险动作前显示给用户“谁要对什么资源做什么”。沙箱只能降低执行面的影响，不能替代身份认证、授权、审计和幂等。
 
 ### 11.3 审计和隐私
 
 审计日志应能重建决策，但不等于无限保存完整 prompt。应记录请求、主体、策略版本、工具 schema、参数摘要、决策、事务 ID、结果状态和错误；对密码、令牌、个人数据和商业秘密做脱敏、哈希或受控 artifact 引用。日志本身也有访问权限和保留期限，不能因为“用于调试”就绕过数据治理。
+
+评估注入防御时，不能只报告攻击拦截率。[AgentDojo](https://arxiv.org/abs/2406.13352) 用 97 个任务和 629 个安全用例构造可扩展的工具型 Agent 环境，并指出模型即使没有攻击也会在不少任务上失败，注入攻击也只破坏部分安全属性。因此要同时报告 clean task utility、under-attack utility、policy violation、数据泄露和高风险动作成功率，并按工具、数据来源、攻击位置和任务类型切片。检测器拦下一段攻击文字是中间信号；真正的目标是攻击不能造成越权读取、外发或副作用，同时正常任务仍能完成。
 
 ## 12. Agent 可观测性
 
@@ -625,12 +671,12 @@ query
 对第 `j` 个回答 claim，可以记录：
 
 ```math
-E_j=(c_j,D_j,S_j,P_j,V_j,A_j)
+E_j=(c_j,D_j,S_j,I_j,P_j,V_j,A_j)
 ```
 
 c_j 是第 j 个回答 claim，表示需要被证据或业务规则支持的最小陈述。
 
-其中 `D_j` 是候选文档集合，`S_j` 是实际引用 span，`P_j` 是权限判断，`V_j` 是事实或 schema 验证结果，`A_j` 是是否产生外部动作。只有 `P_j` 和 `V_j` 都通过，claim 才应被标记为 grounded；工具动作还要额外满足幂等、授权和确认条件。
+其中 `D_j` 是候选文档集合，`S_j` 是实际引用 span，`I_j` 是来源 provenance、revision 和 trust/taint 状态，`P_j` 是权限判断，`V_j` 是事实或 schema 验证结果，`A_j` 是是否产生外部动作。记录中的字段不是同义标签：引用 ID 存在不代表 span 支持 claim，span 支持也不代表来源最新、权威或对用户可见。只有引用支持、来源状态和权限都符合该问题策略，claim 才可以进入对应的“有证据支持”评估；工具动作还要额外满足幂等、授权和确认条件。
 
 ### 13.2 一个容易被平均值掩盖的事故
 
@@ -644,7 +690,7 @@ c_j 是第 j 个回答 claim，表示需要被证据或业务规则支持的最�
 
 ## 14. 最小 Python demo：RAG 与工具调用部署诊断
 
-下面的 0 依赖 demo 用 toy 文档和 toy 工具观察几个独立的部署量：租户权限过滤、检索与重排、context budget、引用校验、工具 schema / 权限检查和延迟拆分。它不模拟真实 embedding、ANN 索引或事务提交。
+下面的 0 依赖 demo 用 toy 文档和 toy 工具观察几个独立的部署量：租户权限过滤、检索与重排、上下文预算、引用 ID 检查、工具 schema / 权限检查和延迟拆分。预算用正则词项数作代理，不等于实际模型 tokenizer 的 token 数；引用函数只检查 ID 是否存在，不判断证据是否支持 claim。它不模拟真实 embedding、ANN 索引或事务提交。
 
 ```python
 import re
@@ -705,17 +751,21 @@ def rerank(query, rows):
     return sorted(boosted, key=lambda x: x["rerank_score"], reverse=True)
 
 
-def assemble_context(rows, token_budget=28):
+def word_units(text):
+    return len(re.findall(r"[a-z0-9]+", text.lower()))
+
+
+def assemble_context(rows, unit_budget=28):
     selected, used = [], 0
     for row in rows:
-        n_tokens = len(tokens(row["text"]))
-        if used + n_tokens <= token_budget:
+        n_units = word_units(row["text"])
+        if used + n_units <= unit_budget:
             selected.append(row)
-            used += n_tokens
+            used += n_units
     return selected, used
 
 
-def citation_ok(answer, context):
+def citation_references_valid(answer, context):
     cited = re.findall(r"\[(.*?)\]", answer)
     context_ids = {row["id"] for row in context}
     return bool(cited) and all(cid in context_ids for cid in cited)
@@ -723,7 +773,7 @@ def citation_ok(answer, context):
 
 retrieved = retrieve(QUERY, DOCS, USER)
 reranked = rerank(QUERY, retrieved)
-context, used_tokens = assemble_context(reranked)
+context, used_units = assemble_context(reranked)
 answer = (
     "Yes. A 20 day laptop return is within the 30 day window, "
     "and manager approval is required for devices over $1000. [return_policy]"
@@ -756,16 +806,27 @@ def check_tool(call, user):
 
 
 tool_report = {call["name"]: check_tool(call, USER) for call in CALLS}
+tool_boundary_checks = {
+    "unknown_tool": check_tool({"name": "send_money", "args": {}}, USER),
+    "missing_required": check_tool({"name": "order_lookup", "args": {}}, USER),
+}
 latency_ms = {"rewrite": 20, "retrieve": 35, "rerank": 45, "llm": 420, "tool": 80}
+citation_reference_checks = {
+    "known_id": citation_references_valid("A fact. [return_policy]", context),
+    "unknown_id": citation_references_valid("A fact. [missing_doc]", context),
+    "missing_id": citation_references_valid("A fact without a citation.", context),
+}
 
 print("retrieved_ids=", [row["id"] for row in retrieved])
 print("reranked_ids=", [row["id"] for row in reranked])
-print("context_ids=", [row["id"] for row in context], "used_tokens=", used_tokens)
-print("citation_ok=", citation_ok(answer, context))
+print("context_ids=", [row["id"] for row in context], "used_units=", used_units)
+print("citation_references_valid=", citation_references_valid(answer, context))
+print("citation_reference_checks=", citation_reference_checks)
 print("tool_report=", tool_report)
+print("tool_boundary_checks=", tool_boundary_checks)
 print("latency_total_ms=", sum(latency_ms.values()), "latency_breakdown=", latency_ms)
 diagnostics = {
-    "citation_supported": citation_ok(answer, context),
+    "citation_ids_exist": citation_references_valid(answer, context),
     "read_tool_allowed": tool_report["order_lookup"][0],
     "write_tool_blocked": not tool_report["delete_user"][0],
     "private_doc_excluded": "salary_private" not in [row["id"] for row in retrieved],
@@ -778,19 +839,23 @@ print("diagnostics=", diagnostics)
 ```text
 retrieved_ids= ['return_policy', 'warranty', 'setup_guide']
 reranked_ids= ['return_policy', 'warranty', 'setup_guide']
-context_ids= ['return_policy', 'warranty'] used_tokens= 26
-citation_ok= True
+context_ids= ['return_policy', 'warranty'] used_units= 26
+citation_references_valid= True
+citation_reference_checks= {'known_id': True, 'unknown_id': False, 'missing_id': False}
 tool_report= {'order_lookup': (True, []), 'delete_user': (False, ['permission_denied', 'write_not_allowed'])}
+tool_boundary_checks= {'unknown_tool': (False, ['unknown_tool']), 'missing_required': (False, ['missing_args:order_id'])}
 latency_total_ms= 600 latency_breakdown= {'rewrite': 20, 'retrieve': 35, 'rerank': 45, 'llm': 420, 'tool': 80}
-diagnostics= {'citation_supported': True, 'read_tool_allowed': True, 'write_tool_blocked': True, 'private_doc_excluded': True}
+diagnostics= {'citation_ids_exist': True, 'read_tool_allowed': True, 'write_tool_blocked': True, 'private_doc_excluded': True}
 ```
 
 这段 demo 的关键点是：
 
 1. `salary_private` 因租户权限不匹配，不会进入可检索集合。
-2. context assembly 受 token budget 限制，只保留可放入上下文的证据。
-3. 高风险写工具 `delete_user` 被权限和写操作策略拦截，不能只靠模型自行判断。
+2. context assembly 受 toy word-unit budget 限制，只保留可放入上下文的证据。
+3. 高风险写工具 `delete_user` 被权限和写操作策略拦截；未知工具和缺少 required 参数的调用也被拒绝，不能只靠模型自行判断。
 4. `diagnostics` 分开报告引用、读工具、写工具和私有文档过滤结果，不把它们压缩成一个总开关。
+
+其中 `citation_references_valid` 只验证被引用的 ID 是否出现在上下文，不判断该 span 是否支持具体 claim。后者需要 claim-to-span 的人工标注或经过校准的评审器。`check_tool` 只演示 required 字段、角色和写权限检查，不是完整 JSON Schema 或业务校验，也不会真的执行工具。`latency_ms` 是预设 toy 数值，不是代码测得的调用时间。demo 没有做真实 embedding、ANN、模型判断、事务提交或生产压测，不能证明这些效果或安全性已经在目标系统成立。
 
 ## 15. 一个企业知识助手的端到端发布案例
 
@@ -1078,6 +1143,16 @@ C_{success}=\frac{C}{\max(N_s,1)}
 10. [LlamaIndex Evaluation](https://developers.llamaindex.ai/python/framework/module_guides/evaluating/)：核对 RAG 评估组件和评测思路；评估器本身也需要人工样本和业务指标校准。
 11. [OWASP LLM01: Prompt Injection](https://genai.owasp.org/llmrisk/llm01-prompt-injection/)：提示注入风险、影响和防护背景；防护应落在数据权限、工具策略和执行沙箱，不应只依赖提示文本。
 12. [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：风险治理和可追踪性的通用框架背景。
+13. [Self-RAG](https://arxiv.org/abs/2310.11511)：用 retrieval/critique reflection tokens 训练模型按需检索并反思生成；论文结果绑定其模型、训练数据和任务，不能当作任意模型的开关式能力。
+14. [Corrective RAG / CRAG](https://arxiv.org/abs/2401.15884)：研究 retrieval evaluator 根据候选置信程度触发检索修正或 web search；外部搜索同时带来来源可信度、权限、延迟和提示注入风险。
+15. [From Local to Global: A Graph RAG Approach](https://arxiv.org/abs/2404.16130) 与 [Microsoft GraphRAG 仓库](https://github.com/microsoft/graphrag)：论文聚焦大语料 global sensemaking，仓库披露当前研究项目状态、indexing 成本警告和版本迁移注意事项；论文收益不能外推为所有局部问答的优势。
+16. [RAGAS](https://arxiv.org/abs/2309.15217) 与 [ARES](https://arxiv.org/abs/2311.09476)：比较 reference-free 指标和使用人工校准 / prediction-powered inference 的自动 judge；作者结果绑定原评估任务和标注条件。
+17. [Lost in the Middle](https://arxiv.org/abs/2307.03172)：证据在长上下文中的位置会影响读取表现；论文任务和模型不代表所有当前模型，但提醒要对证据位置做回归切片。
+18. [ReAct](https://arxiv.org/abs/2210.03629)：把 reasoning trace 与环境 action 交错，用于理解 tool-using Agent 的基本控制循环；研究任务不是企业生产事务系统。
+19. [AgentDojo](https://arxiv.org/abs/2406.13352)：包含 97 个任务和 629 个安全用例的可扩展工具型 Agent 注入评测环境；任务集不替代目标系统的权限、工具副作用和正常任务效用测试。
+20. [Overcoming the Retrieval Barrier](https://www.usenix.org/conference/usenixsecurity26/presentation/chang-hongyan)：USENIX Security 2026 研究通过 trigger fragment 提高恶意内容的检索概率；近 100% retrieval 和端到端攻击率只绑定其 benchmark、embedding、系统与威胁模型。
+21. [OpenAI Programmatic Tool Calling](https://developers.openai.com/api/docs/guides/tools-programmatic-tool-calling)：当前 Responses API / Agents API 的特定 runtime 机制与官方选型建议；不是通用 Agent 协议，调用仍要做应用侧权限和高影响动作审批。
+22. [Retrieval-Augmented Generation for Large Language Models: A Survey](https://arxiv.org/abs/2312.10997)：作为 RAG pipeline、retrieval、generation、augmentation 与评估路线的分类地图；综述不能替代原论文和目标系统证据。
 
 论文用于理解检索和表示方法，官方文档用于确认当前 API 或框架边界，目标索引、权限策略、工具下游和业务数据上的回放才用于决定生产行为。尤其是“引用正确”“工具成功”“Agent 完成任务”这类结论，必须定义样本、证据、失败状态和副作用语义，不能用单一平均分替代。
 
@@ -1093,4 +1168,7 @@ C_{success}=\frac{C}{\max(N_s,1)}
 6. Agent 是带工具和状态的多步执行系统。
 7. Tool calling 要有 schema、权限、超时、审计和错误恢复。
 8. Agent 状态不能无限塞进上下文，需要外部存储和 trace。
-9. RAG 与 Agent 的生产风险包括权限、安全、注入、成本和外部依赖失败。
+9. Self-RAG、CRAG、GraphRAG 与 Agentic RAG 解决的故障不同；选型要由证据缺口和查询类型驱动，不能按新旧或名称堆叠。
+10. RAGAS / ARES 等自动评估器是需要校准的估计工具；不能替代检索真值集、claim-to-span 检查、业务切片和硬安全门禁。
+11. 间接提示注入可以从数据源和检索环节进入系统；安全必须同时治理索引写入、读取权限、工具能力、外发动作和审计。
+12. RAG 与 Agent 的生产风险还包括版本漂移、预算超限和外部依赖失败；最终答案分数不能抵消越权或重复副作用。

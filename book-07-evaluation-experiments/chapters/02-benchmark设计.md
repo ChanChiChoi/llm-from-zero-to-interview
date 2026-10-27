@@ -246,8 +246,31 @@ D_{\mathrm{mix}}
 \frac{1}{2}\sum_g|p_g-q_g|
 ~~~
 
-D_mix 越小，说明切片比例越接近目标。但这里的 q_g 应来自当前用户分布，不是
-来自方便收集的样本。
+这里的 g 必须是一组互斥且穷尽的切片，p_g 和 q_g 分别是目标总体与当前
+benchmark 在同一切片上的比例，二者各自加总为 1。若要看任务、语言和风险三个
+维度，应分别计算；也可以构造“任务×语言×风险”的联合切片，但要防止切片过细
+后样本不足。D_mix 衡量的是样本构成差异，不直接衡量模型分数偏差，也不能证明
+样本质量和标注正确。
+
+当 benchmark 为了比较切片而采用分层抽样时，原始平均分估计的是 benchmark
+样本分布 q，而未必是线上目标分布 p。若目标比例 p_g 来自有时间范围的线上统计，
+且每个切片内的抽样能代表该切片，可以先计算各切片分数 \hat Q_g，再按目标比例
+合并：
+
+~~~math
+\hat Q_{\mathrm{target}}
+=
+\sum_g p_g\hat Q_g
+~~~
+
+例如，假设线上目标分布为“普通 FAQ 70%、版本冲突 15%、无答案 10%、权限边界
+5%”，为确保困难切片有足够样本，benchmark 实际按 40%、25%、20%、15% 抽样。
+四类任务的通过率分别是 0.92、0.78、0.60、0.80，则按 benchmark 原始比例平均
+为 0.803，按线上目标比例加权为 0.861；这两个数回答的是不同问题。这里的
+D_mix 为 0.30，说明原始样本构成与目标构成不同。加权只能修正已定义切片之间的
+比例差异；如果切片内部只挑最典型或最难的 bad case，或者目标分布漏掉了一类
+任务，就不能仅靠权重把结果变成无偏线上估计。抽样设计及其不确定性应与结果
+一起报告；更完整的抽样误差和置信区间方法见[第十章](10-统计显著性与实验设计.md)。
 
 ### 4.2 按能力均衡比较模型
 
@@ -268,6 +291,11 @@ D_mix 越小，说明切片比例越接近目标。但这里的 q_g 应来自当
 风险过采样结果：发现困难和危险失败
 切片结果：定位哪些任务受影响
 ~~~
+
+如果还要估计线上平均表现，不能把这份风险集的原始总分当作自然分布结果；
+只能在目标切片比例已知、切片内样本可代表目标任务的前提下按目标比例加权。
+风险题通常是为了覆盖故障类型而有意挑选，未必满足这个代表性前提，应优先
+作为单独的压力测试和失败发现集报告。
 
 ### 4.4 训练、调参和最终测试隔离
 
@@ -326,18 +354,29 @@ N_g\ge m_g
 
 这只是数据规划数字，不应被压缩成无法解释的总开关。
 
-### 5.3 区分度
+### 5.3 模型分数跨度与题目区分度
 
-设 K 个候选模型的分数为 S_k，简单的跨度为：
+设本次候选集合中 K 个模型的总体分数为 S_k，最简单的模型分数跨度为：
 
 ~~~math
-D_{\mathrm{disc}}
+R_{\mathrm{score}}
 =
 \max_k S_k-\min_k S_k
 ~~~
 
-如果所有模型都接近满分或接近零分，D_disc 很小，题库难以支持选择。跨度
-大也不自动意味着题目好：可能有歧义、评分器偏差或某个模型特别不适配。
+它只描述“这组候选模型的总分被拉开多少”，不是心理测量学中的 item
+discrimination（题目区分度）。跨度很小可能因为题目太简单、太难，也可能因为
+模型集合能力相近；跨度很大也可能来自歧义、评分器偏差或某个模型不适配，不能
+只按它挑题或宣称 benchmark 质量高。
+
+题目区分度问的是：在这组作答者中，某道题能否把总体表现较好的模型与总体
+表现较差的模型区分开。常见的粗略 CTT 诊断会比较单题对错与其余题目总分的
+相关；IRT 则通过响应矩阵联合估计模型能力与题目难度/区分参数。它们都依赖
+具体候选模型集合、样本量、拟合假设和题目同一构念等条件。LLM 型号往往彼此
+相关，候选数也可能远小于题目数；近期对 AI benchmark 使用 IRT 的研究指出，
+小规模或能力分布偏斜的模型集合可能让 item-level 和排名推断不稳定。因此，
+这类参数用于发现坏题和形成试跑假设，必须同时保留候选集合、方法、拟合诊断
+与人工审题结果，不应自动把一批题“统计筛选”后就当作唯一有效测试集。([Can We Trust Item Response Theory for AI Evaluation?](https://arxiv.org/abs/2607.15190)，预印本结论仍待独立复核)
 
 还要分析题目级通过率。如果所有样本都由所有模型答对，应该提高难度或换
 构念；如果所有模型都答错，先检查题目、参考答案和工具环境。
@@ -355,6 +394,49 @@ D_{\mathrm{disc}}
 
 这一步是 benchmark 的 pilot，不是为了挑一个最能拉开分数的题库，而是为了
 确认测量对象和评分器确实协同工作。
+
+### 5.5 代表性 benchmark 如何处理设计难点
+
+以下四条路线分别处理“题目够不够难且可判”“规则能否重复执行”“公开题会不会老化”“实现细节会不会翻转排名”。它们各自解决一个测量缺口，不能替代完整 benchmark。
+
+#### 5.5.1 GPQA：难题需要经过验证，不是写得像研究生题就算难
+
+GPQA 的目标不是一般常识测验，而是为“人类如何监督接近专业知识边界的模型”构造难题。论文先收集生物、化学和物理领域专家写的多选题，再经过同领域专家反馈、题目修订、第二位领域专家复核，最后让三名其他领域的高学历验证者在允许使用开放网络、但不允许使用 LLM 的条件下作答。因而它同时测两件事：题目是否足够专业，以及非本领域但能力较强的人能否靠搜索轻易解出。
+
+数字必须按数据子集阅读。作者先形成 546 题的 GPQA Extended；448 题的 GPQA 主集要求至少一名领域专家验证者同意题目答案，且三名非专家中不超过两人答对；198 题的 Diamond 子集进一步要求两名专家都同意，且三名非专家中最多一人答对。Extended 上专家与非专家的原始正确率约为 64.8% 和 34.1%；主集表格中则为 71.9% 和 30.4%，作者明确说明这两个数受题目筛选影响，不能拿来和 Extended 的准确率当作同一总体。论文另根据专家回看答题并确认明显失误的情况，估计约 74% 的题具有专家可确认的客观答案；这是题目客观性估计，不是模型或专家在主集上的原始 accuracy。([GPQA 原论文](https://arxiv.org/abs/2311.12022))
+
+这条路线解决的是“难度和可答性不能只靠作者自评”的问题。代价是专家招募、激励、复核和仲裁成本高，题目范围集中在三个科学大类；专家答错也可能来自题目含糊、局部错误或专家疏忽。借鉴 GPQA 时，应保留题目修订史、各阶段审题意见、筛选前后子集和统计口径；新 benchmark 最好同时发布候选池与最终集的筛选规则，避免把筛选后更高的准确率误说成自然人群能力。
+
+#### 5.5.2 IFEval：把可核验的约束从主观印象中拆出来
+
+IFEval 把“答案至少 400 个词”“必须出现指定关键词”等显式约束变成程序判定。论文构造了 25 类、541 个 prompts；同一条 prompt 可以含一个或多个约束。因此它不仅报告逐条约束是否满足的 instruction-level 分数，也报告一条 prompt 中所有约束都满足才算通过的 prompt-level 分数。一个回答可能满足 5 条约束中的 4 条，在 instruction-level 得到部分通过，但 prompt-level strict 仍是失败。这两个聚合回答不同问题，不能只选分数更高的一个展示。
+
+论文还提供 strict 与 loose 两种规则。loose 会对输出尝试移除 Markdown 强调符号、首行引导语和末行客套语，再检查约束；这样可减少“内容满足但多了格式符号”的假阴性，也可能因删掉首尾内容造成假阳性。作者把 loose 定位为 strict 的补充而非替代。工程上可以沿用这个原则：评分器要有确定的规范化步骤、边界用例和版本号；同时保留逐项约束命中记录，便于发现“单项过了，但组合指令失败”或规则误判。([IFEval 原论文](https://arxiv.org/abs/2311.07911))
+
+IFEval 的优势是判分可重复、失败能定位到具体约束，适合做格式或显式指令的回归集；它的边界也由可形式化范围决定。程序无法仅凭“出现了关键词”判断回答是否真实、有用或完整，跨语言计数、Unicode 规范化和互相冲突的约束仍需单独设计。改进方法是把规则分数与事实、帮助性、安全等质量维度并列报告，而不是把规则通过率叫作整体 instruction-following 能力。
+
+#### 5.5.3 LiveBench：用新鲜题降低静态污染风险，但要固定版本
+
+LiveBench 的论文路线把近期数学竞赛、论文、新闻和数据集转成带客观 ground truth 的任务，并以滚动新增/替换题目应对静态公开题逐渐老化的问题。客观答案也减少了对 LLM judge 或人工偏好评审的依赖。v2 论文描述按月新增或更新题目，并将目标限定为 contamination-limited；“近期发布”只能缩短题目可进入训练语料的窗口，不能证明任何模型都没见过题目，也不能阻止题目公开后进入之后的训练集。([LiveBench v2 论文](https://arxiv.org/abs/2406.19314v2))
+
+论文描述的是方法设计，实际使用时还要看具体发布版。本轮核验到的[项目主页](https://livebench.github.io/)列出的最新快照是 LiveBench-2026-01-08，并说明题目会定期更新、约每六个月完整刷新一次；这与论文中的按月维护描述属于不同时间层的口径。发布方的页面状态会变化，因此报告必须记录快照日期、题目版本、数据截止时间和评分代码版本。为了兼顾新鲜度与纵向可比性，可以把冻结回归集和带日期的新题集分开保存；新题引入时另报覆盖变化，不把滚动版本直接拼成一条无条件可比的长序列。
+
+#### 5.5.4 选项顺序和答案提取：评测实现也是测量协议
+
+《When Benchmarks are Targets》对多选 benchmark 的选项顺序、答案选择/提取方法等细节做系统扰动，在论文的模型与数据设置中观察到排行榜名次最多移动 8 位，并建议考虑 hybrid scoring。它解决的是“分数看起来有小数点，所以协议一定中性”的误解：当模型对不同选项的顺序敏感，或解析器对答案形式处理不同，榜单差异可能来自协议而非能力。([论文 v2](https://arxiv.org/abs/2402.01781v2))
+
+这个结果不能外推为所有 benchmark 都会移动 8 名。对自己的多选集，应先固定主协议，再预注册保持题意不变的扰动，例如选项置换和答案提取方式；比较分数差和排名区间，并逐题检查变化是否集中在特定语言、位置或格式。若扰动改变了任务本身，就不是稳健性审计，而是换了 benchmark。
+
+| 路线 | 首要解决的问题 | 主要代价或遗漏 | 可采用的改进 |
+| --- | --- | --- | --- |
+| GPQA | 题目是否经领域与非领域验证，难度是否真实 | 专家成本高；筛选后子集的分数有选择效应，科学领域覆盖有限 | 保留候选池、审题修订、分集筛选和错误仲裁记录 |
+| IFEval | 显式约束能否以可复现规则判分 | 只测可形式化部分；loose 规则也会产生误判 | 分开报告逐约束/整题与 strict/loose，并补语义质量评估 |
+| LiveBench | 静态公开题老化和主观 judge 的部分风险 | 题目发布后仍可能污染；版本更新改变量尺 | 固定旧版作回归，日期化新题并记录覆盖/评分变化 |
+| 协议扰动审计 | 选项顺序和答案提取是否改变分数/排名 | 扰动结果绑定具体题库、模型和实现 | 固定主协议，预注册语义保持的扰动并报告排名稳定范围 |
+
+这几例分别处理题目验证、规则化判分、新鲜度和协议稳健性。实际设计仍应从
+目标任务和错误代价出发选择组合；HELM 展示多场景覆盖，lm-eval 复现经验展示
+任务执行设置的敏感性，两者补的是覆盖与运行框架问题，不能替代上述题目层审计。
 
 ## 6. 标注、rubric 和判定器
 
@@ -400,6 +482,21 @@ A_{\mathrm{ann}}
 
 类别不平衡时，一致率可能过于乐观，可进一步使用 Cohen kappa 或 Krippendorff
 alpha。低一致性通常说明 rubric 含糊、样本有歧义或任务本来不存在唯一答案。
+
+对两名标注员给出的互斥类别标签，Cohen kappa 可写为：
+
+~~~math
+\kappa
+=
+\frac{p_o-p_e}{1-p_e}
+~~~
+
+p_o 是实际观察到的一致比例，p_e 是按两名标注员各自标签边际分布推算出的
+偶然一致比例。它试图回答“超出边际分布所能解释的那部分一致有多少”，不是
+标注质量的绝对分数；类别极不平衡时，kappa 可能与原始一致率给出不同印象。
+若 p_e=1，公式无定义，应报告样本列联表和原始一致率，不能擅自记为 0。
+两名标注员、名义标签的 kappa 与多标注员或有缺失标注的 alpha 也不是可以互换
+的按钮；要按标注设计选择系数。人工评测与 pairwise 标注的具体流程见[第三章](03-human-eval与pairwise-eval.md)。
 
 仲裁结果也要保存原因和 rubric 版本。否则后续团队只看到一个最终标签，不知道
 争议是如何解决的。
@@ -511,6 +608,24 @@ S
 必须保留 alpha、原始 s_j 和空集合处理。安全事故不能靠增加普通聊天权重
 来掩盖。很多生产系统更适合使用“独立信号加行动建议”，而不是一个复合分数。
 
+### 7.8 分母为零和不可计算结果
+
+每项指标都要同时保存分子、分母和可计算状态。分母为 0 时，数学上没有可估计
+的比例；不应悄悄把 `N/A` 改成 0，否则“没有测到机会”和“测到但全部失败”会
+混在一起：
+
+- `N=0` 时，accuracy 没有样本可评；
+- gold evidence 集合为空时，`Recall@k` 不适用于这条无答案样本，应另测是否正确
+  abstain、是否编造证据；
+- `N_claim=0` 时，evidence support 不可计算，不能因此把沉默或空回答算作完全
+  grounded；
+- `N_unsafe=0` 或 `N_benign=0` 时，ASR 或 over-refusal 没有对应机会样本；
+- pass@k 要求至少生成 k 个候选；若 `n<k`，不能按公式外推。
+
+当有正分母但预测集合为空时，某些通用指标库允许配置 `zero_division` 的处理值。
+这是评分协议的一部分，必须在运行前固定，并同时报告支持样本数；不能在看到
+结果后改成更有利的约定。([scikit-learn classification_report](https://scikit-learn.org/stable/modules/generated/sklearn.metrics.classification_report.html) 提供显式参数示例。)
+
 ## 8. 评测协议：让比较公平
 
 ### 8.1 Prompt 协议
@@ -613,6 +728,10 @@ judge_revision
 runner_commit
 environment
 hardware
+run_id
+sample_selection_seed
+generation_seed_or_unavailable
+candidate_budget
 created_at
 ~~~
 
@@ -657,8 +776,11 @@ Q_{\mathrm{macro}}
 \frac{1}{S}\sum_s q_s
 ~~~
 
-micro 更接近自然流量，macro 更容易看到小切片变化。两者都要保留，尤其是
-安全和中文等不能被大切片淹没的任务。
+这里 n_s 是 benchmark 中切片 s 的样本数，q_s 是该切片的分数。micro 按当前
+benchmark 的样本量加权，并不天然代表自然流量；只有样本构成匹配目标总体，或
+按第 4.1 节使用了有效的目标权重时，才可解释为线上平均表现。macro 对每个切片
+等权，适合观察小切片，但不代表线上暴露比例。两者都可报告，尤其要避免安全和
+中文等关键切片被大切片淹没。
 
 ### 11.2 配对差和置信区间
 
@@ -672,6 +794,10 @@ micro 更接近自然流量，macro 更容易看到小切片变化。两者都�
 
 对 Delta_i 做 bootstrap，使用重采样分位数报告置信区间。若同一用户有多个
 会话，应以用户或会话为 cluster 采样，避免虚假的独立样本量。
+若总体分数由第 4.1 节的分层权重估计，重采样也必须保留分层/聚类设计并固定
+目标权重；若目标比例本身来自有限线上样本，还要把权重估计的不确定性纳入区间，
+或明确将其视为固定输入。把过采样样本直接当成同分布独立样本重采样，会估错
+总体不确定性。
 
 ### 11.3 回归表
 
@@ -766,9 +892,11 @@ M 是模型和 revision，V 是证据来源，P 是 prompt/template，H 是 harn
 
 ## 14. 一个可运行的 Benchmark 设计诊断 demo
 
-下面的 demo 不调用模型，只审计一个候选 benchmark 设计：它检查样本 schema、
-任务/难度/语言/风险覆盖、目标分布偏差、重复样本、污染风险、指标配置和
-可复现 manifest。每个信号独立输出，读者可以看到是哪里需要修改。
+下面的 demo 不调用模型，只审计一个候选 benchmark 设计：它检查最小样本 schema、
+任务/难度/语言/风险覆盖、目标分布偏差、精确重复、一个预先计算的相似度风险
+字段、指标配置和最小可复现 manifest。`train_similarity` 是固定的教学输入，
+脚本没有访问训练语料，也没有计算文本相似度；它只演示如何把上游审计结果映射
+成数据隔离信号。所有比例和阈值都是 toy 设计值，不能当作上线准入标准。
 
 ~~~python
 from pprint import pprint
@@ -910,47 +1038,60 @@ manifest = {
 }
 
 
-def counts_by(key):
+def counts_by(key, rows):
     result = {}
-    for sample in samples:
+    for sample in rows:
         result[sample[key]] = result.get(sample[key], 0) + 1
     return result
 
 
-schema_errors = {
-    sample["id"]: sorted(required_fields - set(sample))
-    for sample in samples
-    if required_fields - set(sample)
-}
-task_counts = counts_by("task")
-difficulty_counts = counts_by("difficulty")
-language_counts = counts_by("language")
-risk_counts = counts_by("risk")
+schema_errors = {}
+valid_samples = []
+for index, sample in enumerate(samples, start=1):
+    if not isinstance(sample, dict):
+        schema_errors[f"row_{index}"] = ["sample must be an object"]
+        continue
+    missing = sorted(required_fields - set(sample))
+    if missing:
+        sample_id = sample.get("id", f"row_{index}")
+        schema_errors[sample_id] = missing
+    else:
+        valid_samples.append(sample)
 
-observed_task_mix = {
-    task: task_counts.get(task, 0) / len(samples)
-    for task in target_task_mix
-}
-mix_distance = 0.5 * sum(
-    abs(target_task_mix[task] - observed_task_mix[task])
-    for task in target_task_mix
-)
+task_counts = counts_by("task", valid_samples)
+difficulty_counts = counts_by("difficulty", valid_samples)
+language_counts = counts_by("language", valid_samples)
+risk_counts = counts_by("risk", valid_samples)
+
+if valid_samples:
+    observed_task_mix = {
+        task: task_counts.get(task, 0) / len(valid_samples)
+        for task in target_task_mix
+    }
+    mix_distance = 0.5 * sum(
+        abs(target_task_mix[task] - observed_task_mix[task])
+        for task in target_task_mix
+    )
+else:
+    observed_task_mix = {task: None for task in target_task_mix}
+    mix_distance = None
 
 seen_inputs = {}
 duplicates = []
-for sample in samples:
-    previous = seen_inputs.setdefault(sample["input"], sample["id"])
-    if previous != sample["id"]:
-        duplicates.append((sample["id"], previous))
+for sample in valid_samples:
+    if sample["input"] in seen_inputs:
+        duplicates.append((sample["id"], seen_inputs[sample["input"]]))
+    else:
+        seen_inputs[sample["input"]] = sample["id"]
 
 leak_flags = [
     (sample["id"], sample["train_similarity"])
-    for sample in samples
+    for sample in valid_samples
     if sample["train_similarity"] >= 0.80
 ]
 
 metric_issues = []
-for sample in samples:
+for sample in valid_samples:
     allowed = required_metrics.get(sample["task"], set())
     if sample["metric"] not in allowed:
         metric_issues.append((sample["id"], sample["task"], sample["metric"]))
@@ -966,41 +1107,51 @@ manifest_required = {
 manifest_missing = sorted(manifest_required - set(manifest))
 
 signals = {
+    "samples_present": bool(samples),
     "schema_ok": not schema_errors,
     "task_coverage_ok": required_tasks <= set(task_counts),
     "difficulty_coverage_ok": required_difficulties <= set(difficulty_counts),
     "risk_coverage_ok": risk_counts.get("high", 0) >= 2,
-    "distribution_distance_ok": mix_distance <= 0.25,
+    "distribution_distance_ok": mix_distance is not None and mix_distance <= 0.25,
     "duplicates_clear": not duplicates,
     "leakage_clear": not leak_flags,
     "metrics_configured": not metric_issues,
     "repro_manifest_complete": not manifest_missing,
 }
 
-actions = []
-if leak_flags:
-    actions.append("remove_leak_flags_from_final_holdout")
-if duplicates:
-    actions.append("deduplicate_inputs")
-if not signals["task_coverage_ok"]:
-    actions.append("add_missing_task_slices")
-if not signals["metrics_configured"]:
-    actions.append("review_metric_task_mapping")
+action_by_signal = {
+    "samples_present": "add_candidate_samples",
+    "schema_ok": "repair_sample_schema",
+    "task_coverage_ok": "add_missing_task_slices",
+    "difficulty_coverage_ok": "add_missing_difficulty_slices",
+    "risk_coverage_ok": "add_high_risk_samples",
+    "distribution_distance_ok": "review_target_sample_mix",
+    "duplicates_clear": "deduplicate_inputs",
+    "leakage_clear": "remove_leak_flags_from_final_holdout",
+    "metrics_configured": "review_metric_task_mapping",
+    "repro_manifest_complete": "complete_run_manifest",
+}
+failed_signals = [name for name, passed in signals.items() if not passed]
+actions = [action_by_signal[name] for name in failed_signals]
 
-recommendation = "revise_before_freeze" if actions else "ready_for_pilot"
+recommendation = "revise_before_freeze" if failed_signals else "ready_for_pilot"
 summary = {
     "task_counts": task_counts,
     "difficulty_counts": difficulty_counts,
     "language_counts": language_counts,
     "risk_counts": risk_counts,
-    "observed_task_mix": {k: round(v, 3) for k, v in observed_task_mix.items()},
-    "mix_distance": round(mix_distance, 3),
+    "observed_task_mix": {
+        k: round(v, 3) if v is not None else None
+        for k, v in observed_task_mix.items()
+    },
+    "mix_distance": round(mix_distance, 3) if mix_distance is not None else None,
     "schema_errors": schema_errors,
     "duplicates": duplicates,
     "leak_flags": leak_flags,
     "metric_issues": metric_issues,
     "manifest_missing": manifest_missing,
     "signals": signals,
+    "failed_signals": failed_signals,
     "actions": actions,
     "recommendation": recommendation,
 }
@@ -1021,7 +1172,8 @@ pprint(summary, sort_dicts=False)
  'leak_flags': [('leak_001', 0.91)],
  'metric_issues': [],
  'manifest_missing': [],
- 'signals': {'schema_ok': True,
+ 'signals': {'samples_present': True,
+             'schema_ok': True,
              'task_coverage_ok': True,
              'difficulty_coverage_ok': True,
              'risk_coverage_ok': True,
@@ -1030,14 +1182,18 @@ pprint(summary, sort_dicts=False)
              'leakage_clear': False,
              'metrics_configured': True,
              'repro_manifest_complete': True},
+ 'failed_signals': ['leakage_clear'],
  'actions': ['remove_leak_flags_from_final_holdout'],
  'recommendation': 'revise_before_freeze'}
 ~~~
 
-这个例子故意留下一个污染风险样本：其他设计项都正常，但 leak_001 与训练/
-公开泄漏文本的相似度过高，所以不能把它放进 final holdout。示例输出保留了
-具体信号和后续动作，读者可以据此定位需要修改的数据，而不是只看到一个无法
-解释的总分。
+这个例子故意留下一个上游标记为高相似度风险的样本：其他设计项都正常，但
+`leak_001` 的教学字段为 `0.91`，超过示例阈值 `0.80`，因此不能放进 final
+holdout。代码只消费这个风险标记，不证明它真与训练数据重合。`mix_distance`
+使用本例 7 条有效样本估得的切片比例，`0.25` 也只是方便演示的阈值。缺字段或
+非对象记录会被单独标记并排除在可计算切片外；空数据会显式失败，不会除以零。
+示例输出保留信号、失败字段和动作；实际数据应在有权访问的语料与明确相似度
+算法上另行审计。
 
 ## 15. 资料、证据边界与延伸阅读
 
@@ -1047,18 +1203,28 @@ bad case 说明目标系统发生了什么。三类证据要分开记录。
 
 1. [HELM](https://crfm.stanford.edu/helm/latest/)：整体评估框架和场景结果。
 2. [HELM paper](https://arxiv.org/abs/2211.09110)：多维评估和指标背景。
-3. [OpenAI Evals](https://github.com/openai/evals)：自定义 eval 和运行框架入口。
+3. [OpenAI Evals repository](https://github.com/openai/evals)：开源 eval 代码的历史实现入口；它和 OpenAI 托管的 Evals dashboard/API 是不同对象。按 2026-10-27 的[官方弃用时间表](https://developers.openai.com/api/docs/deprecations)，托管 Evals 于 2026-10-31 起只读、2026-11-30 计划关闭；官方提供了[迁移到 Promptfoo 的说明](https://developers.openai.com/cookbook/examples/evaluation/moving-from-openai-evals-to-promptfoo)。使用前应重查状态，并让数据集、grader、runner 和结果 artifact 可迁移。
 4. [Hugging Face Evaluate](https://huggingface.co/docs/evaluate/index)：指标和评估脚本入口。
 5. [lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness)：多模型 benchmark runner。
 6. [BIG-bench](https://github.com/google/BIG-bench)：多任务能力探索。
 7. [MMLU](https://arxiv.org/abs/2009.03300)：多学科知识评估。
-8. [IFEval](https://arxiv.org/abs/2311.07911)：可验证指令遵循。
+8. [IFEval](https://arxiv.org/abs/2311.07911)：可验证指令遵循；论文正文报告 25 类约束、541 条 prompt，并区分 prompt/instruction 与 strict/loose 评分口径。
 9. [HumanEval](https://arxiv.org/abs/2107.03374)：代码执行评估。
 10. [SWE-bench](https://arxiv.org/abs/2310.06770)：真实仓库 issue 修复。
 11. [WebArena](https://arxiv.org/abs/2307.13854)：浏览器 Agent 环境。
 12. [RULER](https://arxiv.org/abs/2404.06654)：长上下文合成任务。
 13. [TruthfulQA](https://arxiv.org/abs/2110.08561)：诚实回答和误解测试。
 14. [Judging LLM-as-a-Judge](https://arxiv.org/abs/2306.05685)：judge 偏差和人类偏好。
+15. [GPQA](https://arxiv.org/abs/2311.12022)：专家构造与双层难度验证的科学问答；专家/非专家结果属于论文样本、学科和招募协议。
+16. [LiveBench v2](https://arxiv.org/abs/2406.19314v2)：2025-04-18 修订版将风险表述为 contamination-limited；近期题源和滚动更新降低静态题陈旧风险，但不能证明永久免污染。
+17. [When Benchmarks are Targets](https://arxiv.org/abs/2402.01781)：多选选项顺序与答案提取方法扰动对排行榜的敏感性；名次变化绑定作者评测设置。
+18. [Can We Trust Item Response Theory for AI Evaluation?](https://arxiv.org/abs/2607.15190)：分析 AI benchmark 中小样本、偏斜/聚集模型能力分布对 IRT 参数、排名和题目推断的风险；是预印本方法研究。
+19. [Cohen, A Coefficient of Agreement for Nominal Scales](https://doi.org/10.1177/001316446002000104)：Cohen kappa 的原始方法论文；系数需结合两位标注员设计和标签边际分布解释。
+20. [Office for National Statistics, Sample design and estimation](https://www.ons.gov.uk/methodology/methodologytopicsandstatisticalconcepts/sampledesignandestimation)：官方抽样与加权说明，解释总体估计、样本设计与抽样方差的关系。
+21. [scikit-learn classification_report](https://scikit-learn.org/stable/modules/generated/sklearn.metrics.classification_report.html)：分类指标的工程文档，展示 `zero_division` 需显式定义的实现选择。
+22. [Artstein & Poesio, Inter-Coder Agreement for Computational Linguistics](https://aclanthology.org/J08-4004/)：比较 NLP 标注中常见一致性系数及其设计假设；具体系数应与标注员数量、标签尺度和缺失模式匹配。
+
+本章代表性方法和本轮事实映射见[Benchmark 设计研究笔记](../../research/benchmark-design-depth-review-2026-10-27.md)。
 
 使用这些资料时，先记录原始任务、评分脚本、版本、prompt、环境和访问日期，
 再解释分数。缺少可复现协议的厂商自报数字只能作为比较线索，不能直接当成

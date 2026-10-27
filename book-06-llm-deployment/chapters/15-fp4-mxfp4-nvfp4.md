@@ -36,6 +36,9 @@ scale 元数据、读取和 kernel 复杂度也越高。
 FP4 的动机是让低比特码保留某种浮点式的指数/尾数结构，而不是只使用等距整数
 格点。对动态范围变化较大的权重或激活，非均匀码本可能比等距整数格点更合适；
 但它并不会自动消除量化误差。scale、异常值、累加精度和硬件支持仍决定最终结果。
+常见均匀 INT4 在反量化后是等间距格点；E2M1 则在小幅值区间放得更密、幅值增大后
+间距变宽。它的收益取决于数据分布是否适合这组格点，不能仅凭“浮点”二字推导出
+它比 INT4 更准确。
 
 ### 1.2 “4 bit”只描述 payload
 
@@ -80,6 +83,12 @@ exponent、mantissa、特殊值、舍入方式、subnormal 是否存在以及 sc
 常见讨论会提到 E2M1 一类布局，但即使 payload 布局相同，外部 scale、block 大小
 和累加路径不同，也会产生不同部署行为。
 
+OCP MX 规范中的 E2M1 将 4 bit 分成 1 个符号位、2 个指数位和 1 个尾数位；它能表示
+的非负幅值为 `0、0.5、1、1.5、2、3、4、6`，负值有对应幅值，最大幅值为 6，
+没有 Inf 和 NaN 编码。一个量化值可抽象写成 `x̂ᵢ = s_g cᵢ`：`cᵢ` 从 E2M1
+码本中选择，`s_g` 是该组的 scale。码本决定组内能选哪些数，scale 决定这组数落在
+原张量的哪个范围；两者的舍入误差会叠加。
+
 所以，阅读一份模型卡或 runtime 配置时，不能只看 `fp4` 这个字符串。至少要继续
 追问：
 
@@ -92,22 +101,50 @@ exponent、mantissa、特殊值、舍入方式、subnormal 是否存在以及 sc
 
 ### 2.2 MXFP4：把 scale 组织也纳入格式
 
-MXFP4 通常被放在 microscaling 格式谱系中理解。它的重点不只是使用 4 bit 元素，
-而是规定一组元素共享某种 scale，并让 payload、scale 和 block 组织可以被硬件
-批量处理。不同 profile 或 runtime 可能对 block 长度、scale 编码和布局有具体约定，
-因此“MXFP4”应被理解为一条带有微缩放规则的格式路线，而不是所有 block-scaled
-FP4 实现的通用别名。
+OCP《Microscaling Formats (MX) v1.0》把 MXFP4 定义为 E2M1 元素、每 32 个元素共享
+一个 8 bit E8M0 scale。E8M0 只有指数位、没有尾数位或符号位，因此有限 scale 是
+2 的整数次幂。相比能够表示非 2 的整数次幂的 FP8 scale，这让尺度编码更简单，
+却也会把 scale 本身的可选位置限制在更稀疏的集合里。OCP 将它定义成一种向量格式：
+32 个 4 bit 元素与一个 8 bit scale 合起来为 `32×4+8=136` bit，即忽略补齐和布局
+开销时平均 `4.25 bit/element`。定义以[OCP MX v1.0 规范](https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf)
+为准。
 
-microscaling 的直觉是：把一个大 tensor 切成许多小组，每组用自己的动态范围。它
-比一个全局 scale 更能保留小值，但需要读取更多 scale，并且矩阵乘 kernel 必须知道
-scale 的位置和广播方式。若软件只模拟 payload 而没有模拟真实 scale dtype 和布局，
-得到的误差不能直接代表生产 kernel。
+microscaling 的直觉是：把一个大 tensor 切成小组，每组用自己的动态范围。与整个
+tensor 共享一个 scale 相比，局部 scale 减少了某个大值支配所有小值的机会；代价是
+每组都要存取 scale，矩阵乘 kernel 还要按约定的位置读取并广播它。OCP 规范定义了
+数据类型、block size 和 scale 类型，但没有规定 scale 与 payload 必须如何物理排布；
+具体 checkpoint、packing 和 kernel layout 仍由实现决定。
 
 ### 2.3 NVFP4：硬件路径优先于名字
 
-NVFP4 通常指 NVIDIA 软件和硬件生态中面向 FP4 推理/训练的具体实现路径。它可能
-包含特定的 payload、block scale、全局 scale、累加策略、校准流程和 Tensor Core
-kernel。不同 GPU、驱动、TensorRT-LLM 或 Model Optimizer 版本的支持范围可能不同。
+NVIDIA Transformer Engine 2.20.2 的 [NVFP4 文档](https://docs.nvidia.com/deeplearning/transformer-engine/features/low_precision_training/nvfp4/nvfp4.html)
+给出一种分层表示：E2M1 元素乘以
+每 16 个连续元素共享的 E4M3 block scale，再乘以覆盖整个 tensor 的 FP32 global
+scale：
+
+~~~math
+\hat{x}_i = c_i s_g s_{\mathrm{global}},
+\qquad c_i\in\mathrm{E2M1},\quad i\in B_g,\quad |B_g|=16
+~~~
+
+E4M3 scale 的尾数位让它能表达非 2 的整数次幂的尺度；global scale 则把整张量先
+映射到 E4M3 与 E2M1 可覆盖的范围。这个设计增加了 scale 精度和每组 scale 数量，
+也需要保存 global scale。仅按一维分组计算，忽略 padding 与布局时为
+`4 + 8/16 + 32/N = 4.5 + 32/N bit/element`；这里 `N` 是 tensor 元素数，`32/N`
+来自一个 FP32 global scale 的摊销。
+
+NVFP4 同样不等于一套固定不变的权重 recipe。Transformer Engine 2.20.2 文档说明，
+其训练 recipe 默认对权重使用 16×16 的二维 scaling，对激活和梯度使用一维的
+16-element scaling；其他工具和部署 artifact 可能采用不同 layout。后文的
+`4.5 + 32/N` 只计算一维分组的 scale 账本，不可直接当作所有 NVFP4 checkpoint 的
+文件大小。
+
+还要区分“格式 recipe”和“量化图接口”。[TensorRT 10.x 的量化类型文档](https://docs.nvidia.com/deeplearning/tensorrt/10.x.x/inference-library/work-quantized-types.html)
+在显式 Q/DQ 量化定义中，把 NVFP4 的 block scale 参数写成 FP16、FP32 或 BF16；这与
+Transformer Engine 对紧凑 NVFP4 表示的 E4M3 block scale + FP32 global scale 描述
+处于不同接口层次。不能据 Q/DQ 图中 scale 张量的 dtype 推断 checkpoint 一定按同一
+dtype 存储，也不能仅凭两份文档断言导出时的转换细节；应检查量化 artifact 和构建后的
+engine。
 
 对部署工程师而言，NVFP4 最重要的问题不是“它是不是比 MXFP4 更先进”，而是：
 
@@ -122,24 +159,28 @@ kernel。不同 GPU、驱动、TensorRT-LLM 或 Model Optimizer 版本的支持�
 
 ### 2.4 一张比较表应该写什么
 
-| 维度 | 泛称 FP4 | MXFP4 路线 | NVFP4 路线 |
+| 项目 | E2M1 payload | OCP MXFP4 v1.0 | NVFP4 一维分组 |
 | --- | --- | --- | --- |
-| 讨论重点 | payload 编码和数值集合 | payload 与 microscale/block 组织 | 硬件、kernel、engine 和校准路径 |
-| scale | 可能没有统一约定 | 通常是共享 scale 的格式化组织 | 由具体 NVIDIA profile 和 runtime 定义 |
-| 性能证据 | 需要软件和硬件分别验证 | 需要 block/layout/kernel 验证 | 需要目标 GPU、驱动和 engine 压测 |
-| 主要风险 | 名称过宽，配置不完整 | metadata 与 scale 开销 | 版本支持和 fallback 路径 |
-| 可迁移结论 | 4 bit 不等于 4 倍端到端收益 | block 越细不一定越快 | 原生支持比文件后缀更重要 |
+| 元素码本 | 非负幅值 `0、0.5、1、1.5、2、3、4、6` 及其负值 | E2M1 | E2M1 |
+| 局部 scale | 未由“FP4”泛称规定 | 每 32 个元素一个 E8M0（8 bit） | 每 16 个元素一个 E4M3（8 bit） |
+| 全局 scale | 未由“FP4”泛称规定 | OCP MXFP4 定义中没有 | 每 tensor 一个 FP32 |
+| 名义存储 | 仅 payload 为 4 bit | `4+8/32 = 4.25 bit/element` | `4+8/16+32/N bit/element` |
+| 关键差别 | 只描述标量码本 | E8M0 scale 只有指数、scale 是 2 的幂 | E4M3 block scale 加 FP32 global scale |
+| 仍需查证 | scale、packing、累加和 kernel | 实际 scale 布局、padding、kernel | 目标 recipe 的 1D/2D scaling、布局和 kernel |
 
-这张表的目的不是给三种格式排一个永久名次，而是提醒读者比较同一层次的对象。
+表中的存储位数是便于预算的算术，不是 checkpoint 格式保证。NVFP4 的二维权重
+scaling 会改变 scale 布局；对齐、padding、rowwise/columnwise 副本和未量化模块也会
+改变实际字节数。比较时要先固定 recipe，再算同一层次的对象；不能拿一种格式的
+payload bit 数去和另一种格式的硬件吞吐比较。
 
 ### 2.5 从支持矩阵读出真实边界
 
 支持矩阵是部署决策中很有价值、但也很容易被误读的一类资料。以 NVIDIA Model
-Optimizer 当前公开的 Linux 支持矩阵为例，FP4 被描述为 per-block 的 FP4 权重与
-激活，并标注为 Blackwell 及以后 GPU 的路径；TensorRT-LLM 的精度文档又把 NVFP4
-单独列在 Blackwell 小节中，并给出少数模型示例。这些信息可以证明“该软件版本
-公开声明存在一条支持路径”，不能证明任意模型、任意矩阵形状或任意 KV 配置都能
-走同一条原生 kernel。
+Optimizer 在 2026-10-27 访问的 [Linux 支持矩阵](https://nvidia.github.io/Model-Optimizer/guides/0_support_matrix.html)为例，FP4 被列为 per-block 的 FP4
+权重与激活、Blackwell 及以后 GPU 的路径，部署栏列出 TensorRT 与 TensorRT-LLM。
+这些信息可以证明该文档快照公开声明存在一条支持路径，不能证明任意模型、任意矩阵
+形状或任意 KV 配置都能走同一条原生 kernel。该矩阵是滚动更新页面，应在选定软件
+release 后重新核对。
 
 读矩阵时应把三种问题分开：
 
@@ -183,6 +224,10 @@ block/group scale 是两者之间的工程折中。
 考虑一个 block 中 15 个值落在 `[-1,1]`，另一个值为 `20`。如果 scale 由最大
 绝对值决定，则 `s=20`，普通值会被缩放到 `[-0.05,0.05]`。低比特码本的有限
 等级中，许多普通值可能落到相同或相邻的格点，重构后的相对误差会明显增大。
+用 E2M1 码本可把这个结果算得更具体：`0.9/20=0.045`，离它最近的 E2M1 值是 0，
+所以这个元素重构为 0、绝对误差为 0.9；若它单独使用 `s=0.9`，归一化值为 1，
+则可重构回 0.9。这个计算只说明共享 scale 的影响方向，尚未加入 MX 的 E8M0
+scale 舍入或 NVFP4 的 E4M3/global scale。
 
 可以把误差拆成两个方向：
 
@@ -209,8 +254,37 @@ logits 的敏感路径，它们对任务的影响可能比大多数普通权重�
 在极端值和普通值之间做折中。过度 clipping 可能损失真实的大值，不能只看校准集
 上的平均误差。
 
+另一个可调变量是 scale 格式本身。MXFP4 的 E8M0 scale 以 2 的幂为刻度；NVFP4
+一维 recipe 的 E4M3 scale 可在相邻的 2 的幂之间取值，但需要更多 block scale 和
+tensor-level global scale。因而比较两种格式时，若模型质量不同，不能只归因于
+E2M1 payload：scale 精度、block size 和量化算法都同时变化。
+
 没有一种处理对所有模型都最好。选择应由量化对象、任务、kernel 和显存预算共同
 决定。
+
+### 3.4 为什么适配 INT4 的方法不一定适配 MXFP4/NVFP4
+
+一个自然的想法是先旋转权重或激活以削弱 outlier，再用最邻近格点量化。但旋转
+会改变数值在每个 block 中的分布；block size 较小、scale 又量化到离散格式时，
+“outlier 被摊平”不保证每个 block 的新 scale 更合适。[Egiazarian 等人的
+MR-GPTQ 研究](https://arxiv.org/abs/2509.23202)分析了这个问题：在其标准
+round-to-nearest (RTN) 设置下，旋转有时改善 MXFP4、却可能损害 NVFP4；作者据此把
+Hadamard 旋转缩到 block 内，并与 GPTQ 的二阶误差补偿及格式专属 scale search 结合，
+提出 Micro-Rotated-GPTQ。作者在 Llama 3、Qwen 3 和指定 zero-shot 任务上报告，
+MR-GPTQ 能显著改善 MXFP4；论文摘要把主实验概括为恢复到距 NVFP4 “within 1–2%”。
+这个摘要概括不能当作每个 benchmark 都有同样差距的保证：附录 I 在另一组
+PlatinumBench GPTQ 变体对比中，报告最佳 NVFP4 recovery 为 96.6%，最佳 MXFP4 为
+92.3%，平均差距超过 4 个百分点。两处结果对应不同评测切片与统计口径，说明量化
+方法的收益需要连同任务、模型和汇总方法一起读。
+配套 QuTLASS kernel 在 B200 上报告最高 3.6× layer-wise、2.2× end-to-end 加速；在
+RTX 5090 上报告最高 6× layer-wise、4× end-to-end。它们是论文中特定模型、层、shape、
+baseline 与测试配置下的最高值，不是所有 FP4 负载的预测倍率。
+
+这并不和[统一量化评测](https://arxiv.org/abs/2507.17417)“对 INT4 有效的 rotation
+在 MXFP4/NVFP4 上收益有限”的结论简单冲突：通用旋转与 block-aware 旋转、RTN 与
+GPTQ 误差回填、模型和评测集都不是同一个实验条件。可迁移的结论是先诊断某一格式
+上的 scale 与误差，再选匹配它的校准/补偿方法；不能把“旋转有效”或“GPTQ 有效”
+写成跨格式保证。
 
 ## 4. 量化对象不同，风险传播方式不同
 
@@ -351,6 +425,14 @@ Quantization-aware training 在训练或微调过程中模拟量化误差，让�
 artifact 管理和验证矩阵。选择 PTQ、QAT 或混合方式时，应比较质量收益是否值得
 额外训练、校准和运维成本。
 
+NVIDIA 研究团队的 [NVFP4 预训练报告](https://arxiv.org/abs/2509.25149)说明，低精度
+训练结果依赖一套 recipe，而不只依赖格式名：其 12B hybrid Mamba-Transformer 在
+10T tokens 训练中结合二维权重 scaling、部分路径的 Random Hadamard Transform、
+梯度 stochastic rounding 和少量 BF16 层；作者报告稳定训练阶段的 NVFP4 validation
+loss 相对误差低于 1%，学习率衰减末段略高于 1.5%，大多数下游切片接近 FP8，MBPP+
+有例外。该报告证明的是这套训练方法和模型，不能用来声称任意 NVFP4 checkpoint 的
+PTQ 质量接近 FP8。
+
 ### 6.3 校准集为什么不能只追求平均分
 
 校准集应覆盖普通文本、代码、数学、数字、结构化 JSON、长上下文、多语言、工具
@@ -359,6 +441,34 @@ schema 和多模态 placeholder。若只用短自然语言，scale 可能对数�
 
 校准和测试要隔离，避免通过重复调参记住评测样本。除了任务结果，还可以记录每层
 的饱和比例、零值比例、scale 分布、最大误差和异常 channel，帮助解释质量变化。
+
+### 6.4 固定 scale、补偿误差与学习 scale 是不同方案
+
+PTQ 通常先从权重或校准样本计算每组 scale，再固定 scale 量化；若 scale 估计偏离
+目标请求分布，量化误差会留在权重中。另一条路线是用 GPTQ 一类方法按层补偿权重
+重构误差。MR-GPTQ 的例子说明，低 bit 格式需要把误差补偿步骤与 E2M1 码本、block
+scale 和变换方式一起设计，不能只更换量化器名称。
+
+还可以把 block scale 作为可训练参数。对一组权重 `w`，fake quantization 可写为
+`ŵ = s·Q(w/s)`；前向仍模拟 NVFP4 的低精度表示，反向通过 straight-through
+estimator (STE) 近似穿过离散的 round 操作。scale-only learning 固定权重、只优化
+scale；full parameter scale learning 则同时更新权重和 scale。训练完导出时把学到的
+scale 合并进量化 artifact，推理图不需要额外算子，但优化过程仍要做训练/蒸馏计算，
+所以它不是免训练的校准 PTQ。
+
+NVIDIA Model Optimizer 团队 2026-09-16 的 [scale-learning 说明](https://nvidia.github.io/Model-Optimizer/announcements/20260916-scale-learning.html)
+给出了一个有边界的示例：在 Nemotron 3.5 Lightning 的 `W4A4 routed experts +
+W8A8 attention/Mamba cache` 配置中，PTQ 后用 scale-only QAD 能在部分切片恢复质量：
+
+| 评测（准确率，%） | BF16 reference | PTQ | scale-only learning |
+| --- | ---: | ---: | ---: |
+| GPQA Diamond | 76.45 | 73.30 | 75.00 |
+| SciCode | 32.51 | 33.42 | 35.42 |
+| Tau3 Banking | 9.897 | 7.216 | 7.216 |
+
+同一组结果既显示前两项的变化，也显示 Tau3 Banking 没有比 PTQ 恢复；它不能被概括
+成每个任务都获益。数据是发布方对一个模型与配置的报告，不是 NVFP4 普遍增益。
+Model Optimizer 当前说明还限定该实现只训练 NVFP4 per-block weight scales。
 
 ## 7. 评估：平均质量接近不等于可以上线
 
@@ -442,40 +552,64 @@ N\times0.5
 如果 runtime 还需要 FP16 workspace，峰值显存要再加解包缓冲、激活、通信副本和
 allocator 余量。容量规划使用峰值，不使用模型文件大小替代运行时账本。
 
+再按两个具体一维格式 profile 计算同一矩阵。设 `N=4096×4096=16,777,216`，不需
+padding，FP16 权重为 32 MiB，FP4 payload 本身为 8 MiB：
+
+| 账本 | scale 字节 | 总大小 | 相对 FP16 的理论压缩比 |
+| --- | ---: | ---: | ---: |
+| OCP MXFP4：每 32 个值一个 E8M0 | `N/32 = 524,288`（0.5 MiB） | 8.5 MiB | `32/8.5 ≈ 3.76×` |
+| NVFP4 一维：每 16 个值一个 E4M3，另有 FP32 global scale | `N/16 + 4 = 1,048,580`（约 1 MiB） | 约 9 MiB | 约 `3.56×` |
+
+这两个账本只比较 E2M1 payload 和上述 scale，不含对齐、转置副本、未量化层、
+engine workspace 或 KV。特别是 Transformer Engine 的 NVFP4 二维权重 scale 与一维
+激活 scale 是不同 layout；部署必须直接检查导出的 artifact，而不是把本表当作
+所有 NVFP4 权重的文件大小。
+
 ## 9. 一个可运行的 block 量化教学示例
 
-下面的代码使用一个明确声明的教学 codebook，演示 block size、scale metadata、
+下面的代码使用 E2M1 的离散码值和未量化的 Python 浮点 block scale，演示 block size、scale metadata、
 异常值和存储估算的关系。它不是 MXFP4 或 NVFP4 的硬件实现，也不能用来证明任何
 GPU 的 kernel 性能；它的价值是让读者看到“payload、scale 和 metadata 必须一起算”。
 
 ~~~python
+import math
 from pprint import pprint
 
 
-TEACHING_CODEBOOK = (-2.0, -1.0, -0.5, 0.0, 0.5, 1.0, 2.0, 4.0)
+E2M1_VALUES = (-6.0, -4.0, -3.0, -2.0, -1.5, -1.0, -0.5,
+               0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0)
 
 
-def quantize_blocks(values, block_size, codebook=TEACHING_CODEBOOK):
+def quantize_blocks(values, block_size):
+    if block_size <= 0:
+        raise ValueError("block_size must be positive")
+    if not values:
+        raise ValueError("values must not be empty")
+    if any(not math.isfinite(value) for value in values):
+        raise ValueError("values must be finite")
+
     reconstructed = []
     scales = []
     for start in range(0, len(values), block_size):
         block = values[start : start + block_size]
-        if not block:
-            continue
         scale = max(abs(value) for value in block) or 1.0
         scales.append(scale)
         for value in block:
             normalized = value / scale
-            code = min(codebook, key=lambda code_value: abs(code_value - normalized))
+            code = min(E2M1_VALUES, key=lambda code_value: abs(code_value - normalized))
             reconstructed.append(scale * code)
     return reconstructed, scales
 
 
 def mse(left, right):
+    if not left or len(left) != len(right):
+        raise ValueError("inputs must be non-empty and have equal length")
     return sum((a - b) ** 2 for a, b in zip(left, right)) / len(left)
 
 
 def storage_bytes(element_count, block_size, payload_bits=4, scale_bytes=2, meta_bytes=1):
+    if element_count < 0 or block_size <= 0:
+        raise ValueError("element_count must be non-negative and block_size positive")
     block_count = (element_count + block_size - 1) // block_size
     return element_count * payload_bits / 8 + block_count * (scale_bytes + meta_bytes)
 
@@ -494,23 +628,26 @@ for block_size in (8, 4):
 pprint(results, sort_dicts=False)
 ~~~
 
-这段代码的教学 codebook 只有 8 个值，故意没有声称自己是某个生产 FP4 码表。实际
-运行输出如下：
+这段代码使用 E2M1 可表示值，但 `scale=max(abs(block))` 是未量化浮点数；存储函数
+里的 2-byte scale 和 1-byte metadata 也是通用账本假设。因此它不能模拟 OCP 的
+E8M0 scale 舍入、NVFP4 的 E4M3/global/2D scaling、物理 packing 或 Tensor Core
+运算。实际运行输出如下：
 
 ~~~text
 {8: {'scales': [20.0],
      'mse': 0.28776,
      'storage_bytes': 7.0,
      'restored': [0.0, 0.0, 0.0, 0.0, 20.0, 0.0, 0.0, 0.0]},
-  4: {'scales': [0.9, 20.0],
+ 4: {'scales': [0.9, 20.0],
      'mse': 0.10776,
      'storage_bytes': 10.0,
      'restored': [0.9, 0.9, 0.0, 0.0, 20.0, 0.0, 0.0, 0.0]}}
 ~~~
 
 block 从 8 缩小到 4 后，异常值只影响后一个 block，MSE 下降，但 scale 和 metadata
-数量增加。这个示例没有模拟真正 E2M1、E4M3、E8M0、Tensor Core 或 FP4 packing，
-所以它只能说明 scale 粒度的机制，不能作为格式兼容性或速度报告。
+数量增加。这里使用真正的 E2M1 可表示值，却没有模拟 E4M3/E8M0 scale 量化、
+Tensor Core 或 FP4 packing，所以它只能说明 scale 粒度的机制，不能作为格式兼容性
+或速度报告。
 
 ## 10. 量化 artifact 和回退策略
 
@@ -627,9 +764,10 @@ layout、累加和吞吐。软件模拟应明确标注“教学/离线近似”�
 
 ## 13. 资料与证据边界
 
-本章中的 block scale、误差和存储公式是理解机制的教学模型，不是具体 GPU 格式
-的完整规范。格式码表、scale 编码、block size、累加路径和 kernel 支持必须回到
-对应版本的官方文档、源码或模型 artifact 核对。
+本章的误差分析和存储推演用于解释机制；OCP MXFP4 v1.0 才定义此处列出的 E2M1、
+32-element block 和 E8M0 scale 组合。NVFP4 的 block、global scale、二维权重 recipe
+和布局则按 Transformer Engine 页面所指版本说明。模型 artifact 还需要结合实际
+量化工具、checkpoint 与 engine 检查，不能只凭格式名还原完整 kernel 行为。
 
 资料的可信度和用途可以分开理解：
 
@@ -638,13 +776,28 @@ layout、累加和吞吐。软件模拟应明确标注“教学/离线近似”�
    在任意 GPU 上都走同一 kernel。
 2. Hugging Face Transformers 量化总览和量化选择文档用于确认 Transformers 生态中
    的配置与加载边界；页面是否列出某格式不等于所有 serving engine 都支持。
-3. OCP microscaling 规范用于理解 MX 类格式的标准化背景；本轮访问该 PDF 时受到
-   站点验证限制，因此正文不把无法直接核验的 block 细节写成厂商 profile 的事实，
-   具体 runtime 仍需核对 block、scale 和布局。
-4. GPTQ、AWQ、SmoothQuant 和 FP8 论文用于理解 PTQ、activation outlier、权重重构
+3. [NVIDIA Transformer Engine NVFP4 文档](https://docs.nvidia.com/deeplearning/transformer-engine/features/low_precision_training/nvfp4/nvfp4.html)
+   当前页面标为 2.20.2；其中 1D scaling、global scale 和 2D weight scaling 是该文档
+   所指 recipe，不应自动推广到所有 NVFP4 artifact。
+4. [NVIDIA Model Optimizer 支持矩阵](https://nvidia.github.io/Model-Optimizer/guides/0_support_matrix.html)
+   于 2026-10-27 访问，列出 Linux FP4 per-block weights/activations 与 Blackwell+、
+   TensorRT/TensorRT-LLM 部署路径；它是会滚动变化的软件兼容声明，不是目标 workload
+   的 native-kernel 或性能实测。
+5. [A Comprehensive Evaluation on Quantization Techniques for LLMs](https://arxiv.org/abs/2507.17417)
+   对比粒度、scale precision、旋转和误差补偿；结论绑定作者模型与量化设置。
+   [Bridging the Gap Between Promise and Performance for Microscaling FP4 Quantization](https://arxiv.org/abs/2509.23202)
+   分析 MXFP4/NVFP4 与通用旋转/GPTQ 的适配问题，并提出 MR-GPTQ；其准确率与 kernel
+   结果绑定论文任务、模型、B200/RTX 5090 实现和测量方法。
+6. [Pretraining Large Language Models with NVFP4](https://arxiv.org/abs/2509.25149)
+   报告结合二维权重 scaling、Hadamard transform、stochastic rounding 和选择性高精度
+   层的训练 recipe；它证明的是作者训练设置，不是通用 post-training inference PTQ。
+7. [Scale Learning: Training NVFP4 Block Scales to Recover Accuracy](https://nvidia.github.io/Model-Optimizer/announcements/20260916-scale-learning.html)
+   解释冻结权重只训 scale 与联合更新权重/scale 的区别；数字是 Model Optimizer 团队
+   在 Nemotron 3.5 Lightning 配置上的报告，当前实现范围有限，不能代表所有模型。
+8. GPTQ、AWQ、SmoothQuant 和 FP8 论文用于理解 PTQ、activation outlier、权重重构
    和低精度训练/推理的研究谱系；论文 benchmark 不能替代生产回放。
-5. 本章的 Python 示例使用教学 codebook，不实现 MXFP4 或 NVFP4 的真实硬件路径，
-   也不提供任何性能承诺。
+9. 本章 Python 示例使用 E2M1 码值，但使用未量化浮点 scale 和通用 metadata 账本，
+   不实现 MXFP4/NVFP4 的完整格式或硬件路径，也不提供性能承诺。
 
 延伸阅读：
 
@@ -667,13 +820,16 @@ FP4、MXFP4 和 NVFP4 的共同点是降低低精度 payload 的存储或计算�
 藏在码表、scale、block、metadata、累加、kernel、硬件和 runtime 版本中。
 
 1. FP4 是位宽/浮点编码层面的概念，不是一个唯一实现。
-2. MXFP4 要重点理解 microscaling、block scale 和 metadata；block 越细不一定越快。
-3. NVFP4 要重点核对硬件、kernel、engine、校准和 fallback；文件后缀不能证明实际路径。
-4. 权重、激活、KV、累加和 logits 是不同量化对象，风险传播方式不同。
-5. 异常值会让共享 scale 消耗普通值的有效精度，校准集和敏感层策略决定质量边界。
-6. 端到端部署需要同时通过存储、kernel、engine 和任务四层证据，理论压缩率不等于
+2. MXFP4 v1.0 的 E8M0 scale 每 32 个 E2M1 值共享；NVFP4 一维 recipe 的 E4M3 scale
+   每 16 个值共享并带 FP32 global scale，NVFP4 二维权重 scaling 又有不同存储账本。
+3. Block size、scale 精度和量化误差补偿共同影响质量；MR-GPTQ 与可学习 scale 展示
+   格式专属 PTQ 和训练时恢复两条路线，收益均受论文/发布方设置约束。
+4. NVFP4 要重点核对硬件、kernel、engine、校准和 fallback；文件后缀不能证明实际路径。
+5. 权重、激活、KV、累加和 logits 是不同量化对象，风险传播方式不同。
+6. 异常值会让共享 scale 消耗普通值的有效精度，校准集和敏感层策略决定质量边界。
+7. 端到端部署需要同时通过存储、kernel、engine 和任务四层证据，理论压缩率不等于
    端到端加速或成本下降。
-7. manifest 要记录格式、scale、block、dtype、校准、kernel、engine、硬件和回退，
+8. manifest 要记录格式、scale、block、dtype、校准、kernel、engine、硬件和回退，
    量化才可复现、可诊断、可回滚。
 
 当读者看到“FP4 显存减少、速度提升、质量接近 BF16”时，能够继续追问分母、硬件、

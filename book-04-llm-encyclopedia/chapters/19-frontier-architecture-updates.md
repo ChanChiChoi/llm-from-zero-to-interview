@@ -1,6 +1,47 @@
-# Frontier Architecture 更新：AttnRes、KDA、CSA/HCA 与 mHC
+# 前沿架构与模型更新：注意力、残差与产品接口
 
-> 更新时间：2026-09-22。条目依据 Kimi Linear、Attention Residuals、DeepSeek V4、K2 Horizon 官方论文/模型卡；模型具体版本和实验数字需回到来源核对。
+> 本章内容更新：2026-10-26。开头的架构方法部分用论文说明代表性机制；后续模型条目记录各自来源披露的架构、接口或评测快照。模型字段与价格会变化，按对应来源日期理解，不能从产品接口反推未公开的模型结构。
+
+## 先确定方法改变的是哪一条轴
+
+“长上下文”“深层网络”不是单一问题。输入序列变长，会增加历史状态和 KV 的保存、检索成本；网络变深，会增加各层表示如何传递、混合的问题；扩大残差流，则会增加多路状态之间的稳定性和通信成本。下面这些方法会同时出现在新模型中，但它们作用对象不同，不能因为都被称作“架构创新”就当作互相替换的方案。
+
+| 要诊断的问题 | 直接改变的对象 | 代表路线 | 主要代价或失败边界 |
+|---|---|---|---|
+| 深层网络的历史层输出被固定残差累加，重要表示不容易被单独选择 | 深度轴上的层表示 | DenseFormer、DeepCrossAttention、AttnRes；Block AttnRes 把跨块选择和块内累加结合 | 保存、读取和传输历史层表示；不能因此减少 token 维的 KV cache |
+| 每个新 token 都让显式历史状态随序列增长 | 序列轴上的递归状态 | Gated DeltaNet、KDA；Kimi Linear 再与全局 MLA 混合 | 固定状态会衰减、覆盖或混淆旧信息；精确检索能力不能由“状态大小固定”推出 |
+| 百万级历史的显式 KV 难以完整保存和反复读取 | 压缩后的历史条目与候选集合 | DeepSeek V4 的 CSA/HCA；Qwen3.8-Flash-Next 的 QSA 也采用压缩/索引思路 | 压缩会抹掉块内细节，稀疏选择会漏掉未入选证据；尾部、窗口和索引还要进入缓存账本 |
+| 多条残差流交互时，映射可能放大、衰减或偏用某一路 | 残差流之间的混合矩阵 | Hyper-Connections、mHC；Gated Residual 使用另一种读写门控结构 | 分支激活、矩阵混合、投影与通信增加；双随机约束也不等于整个非线性网络的范数恒定 |
+| 用稀疏路由增加 attention value 路径的容量 | value projection 的专家选择 | K2 Horizon 的 MoVA | 增加 router、dispatch、负载偏斜和通信成本；active 参数不能直接换算实际 serving 速度 |
+| 让短程重复 n-gram 获得独立查表容量 | token embedding 的 n-gram 查表与存储 | Qwen3.8 的 N-gram Embedding | host offload 会把成本转到随机读取和带宽；它不是 RAG、KV cache 或注意力检索 |
+
+本章后续的 Qwen3.8 还包含 QSA（压缩 micro-block 后建立稀疏候选）；它与 CSA/HCA 同属显式历史压缩/筛选问题，但具体 block、训练和 cache 契约以该模型的报告与源码为准。MoVA、N-gram、QSA 的机制和证据见第二十一册第 82、83 章。
+
+### 一个压缩与选择的手算例子
+
+设一个教学用序列有 16 个历史 token。把连续 4 个 token 汇成一个压缩条目，会从 16 个原始位置得到 4 个候选块。若 CSA 风格的索引器只选 top-2，核心注意力读取的是 2 个块；若某条关键定义所在块的分数排在第三位，检索会漏掉它。HCA 风格则可以对更强压缩后的条目做 dense read，避免“稀疏索引没有选中某块”这一类错误，但块内信息在压缩时已经损失。这里的 4 和 2 只是为了手算的教学数字，不是 DeepSeek V4 的模型配置。
+
+这说明压缩误差和索引漏选是两种不同故障：用更大的 top-k 只能缓解后者，不能还原压缩时已丢失的 token 细节；保留近期滑动窗口或未完成压缩的尾部，是针对另一些信息损失路径。DeepSeek V4 报告的 Serving 设计也必须分别管理压缩条目、索引状态、滑动窗口和未完成尾部；具体缓存生命周期见本书第二十一册第 77 章。
+
+### 代表性方案解决了什么，证据能说明到哪里
+
+**深度方向选择有前序研究。** [DenseFormer（NeurIPS 2024）](https://arxiv.org/abs/2402.02622) 用 depth-weighted averaging 聚合当前和历史表示；[DeepCrossAttention（DCA）](https://proceedings.mlr.press/v267/heddes25a.html) 再以输入相关权重和 depth-wise cross-attention 重组历史层输出，并在其语言建模实验中报告相同模型质量可最高快至 3 倍；这个结果属于论文指定模型、训练时长和基线。AttnRes 把先前层表示写成 softmax 加权的深度聚合，并提出 Block AttnRes 以降低保存与跨 pipeline stage 通信的负担。其论文报告 scaling-law 实验，并将方法用于 48B 总参数/3B 激活参数、训练 1.4T tokens 的 Kimi Linear 架构。三类工作的机制与实验条件不同，不能把 DCA 的“最高 3 倍”当作 AttnRes 的速度结论，也不应把 AttnRes 描述为首次提出深度方向的可学习聚合。
+
+**KDA 改的是序列状态更新。** Gated DeltaNet 用有限形状状态承载历史；KDA 将旧状态衰减细化到 key 通道，并用 delta correction 定向擦除/写入。Kimi Linear 论文在 128K 长上下文基准上比较 MLA、GDN-H、Kimi Linear 与 RoPE 变体；作者报告 Kimi Linear 在该组实验的 RULER 为 84.3、RepoQA 为 68.5、平均分为 54.5（MLA 基线平均 52.2），同时 LongBench V2 和 Frames 并非都胜出。它是“混合架构 + 论文训练配置”的模型级结果，不是只替换一个 KDA 算子的消融，更不是所有任务的通用排名。来源：[Kimi Linear 原论文](https://arxiv.org/abs/2510.26692)。
+
+**CSA/HCA 的资源收益是组合结果。** DeepSeek V4 报告称，在 1M token 设置下，V4-Pro 的单 token inference FLOPs 和 KV cache 分别为 V3.2 的 27% 和 10%；V4-Flash 分别为 10% 和 7%。这是 V4 全部注意力、精度、索引与系统设计共同形成的报告值，不能单独归因于 CSA/HCA，也不能等同于长上下文检索准确率。论文还明确指出混合结构会产生不同压缩倍率、滑动窗口、索引维度和未压缩尾部等异构 cache 状态。来源：[DeepSeek V4 技术报告](https://arxiv.org/abs/2606.19348)。
+
+**mHC 延续了 Hyper-Connections 的多流路线。** HC 将一个残差流扩展为多条并行流，并学习它们之间的连接；mHC 把残差混合矩阵约束到双随机矩阵（Birkhoff polytope），用 Sinkhorn 迭代构造近似投影，以控制跨层混合映射。mHC 论文的大规模训练报告称，在 expansion rate `n=4` 的特定设置中增加 6.7% 时间开销；这是论文基础设施和模型下的 wall-time，不是通用 overhead。双随机性约束的是残差流之间的线性混合，不保证注意力、MLP、归一化和优化全过程的激活范数恒定。来源：[Hyper-Connections](https://arxiv.org/abs/2409.19606)、[mHC 原论文](https://arxiv.org/abs/2512.24880)。
+
+### 怎么根据故障选评测，而不是背方法名称
+
+| 观察到的现象 | 应先检查的机制 | 有区分度的测量 |
+|---|---|---|
+| 上下文中明明出现过一个精确名称或定义，模型仍找不到 | 序列记忆或显式 KV 的压缩、索引、位置与 cache 恢复 | 在同 token 位置和同长度下测 exact-match/recall；分别测压缩误差、top-k 候选召回、尾部恢复与 cache bytes |
+| 深层模型的表示/梯度随深度变得不均，增加宽度或上下文无帮助 | 深度方向信息流或残差流混合 | 固定训练 token、参数/FLOPs、初始化与硬件，对比层输出幅度、梯度范数、训练 loss 和通信量 |
+| 多流方案效果不稳定或某一路长期占优 | HC/mHC/GR 的读写与混合行为 | 记录残差流占用、混合矩阵行列和误差、梯度/激活分布及端到端训练开销 |
+
+一组完整比较至少要固定模型规模、训练数据和 token 数、训练算力、精度、序列长度分布、并行拓扑与 Serving 后端；同时报告质量、prefill 吞吐、decode TPOT、峰值显存、cache bytes、通信和失败率。论文、模型卡、kernel microbenchmark 与第三方 API 测量回答的是不同问题，结果应按证据层级和实验协议分开记账。下文的模型条目沿用这个原则：官方模型配置证明公开结构字段，不能代替训练复现或目标硬件 profiling。
 
 ## Attention Residuals / AttnRes
 
@@ -12,7 +53,7 @@
 
 **局限**：保存历史表示和跨 stage 通信有成本；块数、初始化和硬件决定收益。Kimi K3 文章提到 AttnRes，但没有公开 K3 的完整配置。
 
-**相关章节**：第二十一册第 75 章。
+**来源与后续阅读**：[Attention Residuals 原论文](https://arxiv.org/abs/2603.15031)；相关的深度方向研究见 [DeepCrossAttention（ICML 2025）](https://proceedings.mlr.press/v267/heddes25a.html)。完整公式、数值例子和 Block AttnRes 说明见第二十一册第 75 章。
 
 ## Kimi Delta Attention / KDA
 
@@ -24,7 +65,7 @@
 
 **局限**：固定状态会遗忘，远程精确检索可能弱于全注意力，因此 Kimi Linear 使用 KDA 与全局 MLA 混合。论文配置不能直接当作 Kimi K3 全部实现。
 
-**相关章节**：第二十一册第 76 章。
+**来源与后续阅读**：[Kimi Linear 原论文](https://arxiv.org/abs/2510.26692)。完整状态推导、代码演示和与 MLA 的边界见第二十一册第 76 章。
 
 ## CSA / HCA
 
@@ -34,7 +75,7 @@
 
 **工程要点**：不同层的压缩倍率、indexer、滑动窗口和未完成尾部导致异构 KV Cache；1M context 不是有效检索和并发能力的同义词。
 
-**相关章节**：第二十一册第 77 章、第二十四册推理框架专题。
+**来源与后续阅读**：[DeepSeek V4 技术报告](https://arxiv.org/abs/2606.19348)。压缩、稀疏选择、异构 cache 和 Serving 状态的逐步说明见第二十一册第 77 章、第二十四册推理框架专题。
 
 ## mHC
 
@@ -46,7 +87,7 @@
 
 **局限**：引入投影、通信、激活和 kernel 开销；有限步 Sinkhorn 只是近似双随机。
 
-**相关章节**：第二十一册第 78 章。
+**来源与后续阅读**：[Hyper-Connections 原论文](https://arxiv.org/abs/2409.19606)、[mHC 原论文](https://arxiv.org/abs/2512.24880)。双随机约束的推导、Sinkhorn 近似和教学实现见第二十一册第 78 章。
 
 ## GPT-6 Astra：接口能力、预算与运行时边界
 

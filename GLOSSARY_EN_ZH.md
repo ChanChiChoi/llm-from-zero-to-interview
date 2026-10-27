@@ -27,11 +27,37 @@ Unigram Language Model Tokenizer：基于 unigram 子词概率的分词器
 
 Token Fertility：词元密度 / 每参考单位的词元数；分母可为词、码点、字素簇或字节，需注明语料与 tokenizer 口径
 
+Bytes per Byte / BPB：每字节比特数；以相同规范化原文的 UTF-8 字节数归一化语言建模负对数似然，跨 tokenizer 对比时需固定边界标记口径
+
 WordPiece：WordPiece 子词切分方法
 
 SentencePiece：SentencePiece 分词方法 / 工具
 
 Byte-Level Tokenization：字节级 tokenization
+
+Byte-Level BPE：以 256 个字节为基础原子、再按 merge ranks 合并字节串的 BPE；可覆盖任意字节，但 UTF-8 字符可能跨多个 token
+
+Byte Fallback：字节回退；Unicode 子词表未覆盖某个字符时，将该字符展开成 UTF-8 byte tokens；与 Byte-Level BPE 不同
+
+Single-Token Retention Rate / STRR：单 token 保留率；语料中仍以一个 token 编码的词或参考单元比例，需定义分词和归一化规则
+
+Tokenizer Intrinsic Metric：Tokenizer 内在指标；只由 tokenizer 和语料计算的 fertility、tokens/byte、STRR 等，不等价于模型下游表现
+
+Tokenizer Search Procedure：Tokenizer 搜索过程；在固定目标和词表预算下，通过 bottom-up 合并或 top-down pruning 等启发式近似寻找词表与切分方案
+
+Unicode Normalization：Unicode 规范化；把某些等价或兼容字符形式映射到统一序列，需固定规则并明确可逆对象
+
+Tokenizer Fingerprint：Tokenizer 指纹；tokenizer 文件及 normalizer、pre-tokenizer、vocabulary、merge/model、added-token 与 special-token 配置的版本/hash 记录
+
+Chat Template：聊天模板；将结构化消息、工具和多模态内容序列化成模型训练/推理所用 token 序列的版本化程序
+
+Assistant-Only Loss：仅对 assistant 输出计算监督损失；由 token 级 label mask 实现，工具调用输出是否监督按训练目标规定
+
+Label Shift：标签右移；causal LM 由位置 t 的 logits 预测位置 t+1 的 label，模板和 collator 不能重复 shift
+
+Sequence Packing：序列打包；把多个样本放入一个 block 减少 padding，独立样本需保留 attention、position 和 label 边界
+
+Message End / Turn End / Handoff：消息结束、assistant 回合结束、工具交接；是不同的控制事件，token 名称依模型协议而异
 
 Special Token：特殊 token
 
@@ -58,6 +84,18 @@ InfoNCE：对比预测编码损失 / InfoNCE 损失
 CLIP：Contrastive Language-Image Pre-training / 图文对比预训练
 
 CLIP Loss：CLIP 双向图文对比损失
+
+SigLIP：Sigmoid Loss for Language-Image Pre-training / 使用成对 sigmoid 目标的图文预训练方法；不要求 batch 内全局 softmax 归一化，但不会自动修正伪负样本标签。
+
+Sigmoid Pairwise Contrastive Loss：成对 sigmoid 对比损失；对每个图文 logit 与正负标签分别计算 logistic loss，可加 logit scale 和 bias。
+
+BLIP-2：冻结视觉编码器与语言模型、用 Q-Former 查询压缩视觉表示的视觉语言预训练方法。
+
+LLaVA-1.5：使用 CLIP 视觉编码器、MLP projector 和视觉指令数据构造的 VLM 训练基线。
+
+MM1：多模态预训练消融研究；比较视觉 encoder、分辨率、视觉 token 数、connector 与数据 mixture 的影响。
+
+JEST：Joint Example Selection / 联合样本选择；依据样本组合对一个 batch 的可学习性进行选择，而非只给单个样本独立打分。
 
 Logit Scale：logit 缩放系数
 
@@ -199,6 +237,10 @@ Error Attribution：错误归因
 
 Benchmark Contamination：基准污染
 
+Candidate Overlap Rate：评估集候选重叠率；在声明的语料覆盖、匹配规则和阈值下命中的比例，不等于模型记忆率或分数膨胀量。
+
+PaCoST：Paired Confidence Significance Testing；比较原题与语义改写题的配对置信度差，提供 benchmark 级潜在污染信号，不定位具体训练样本。
+
 Memory-Augmented LLM：记忆增强大模型
 
 Weight Tying：权重共享
@@ -303,6 +345,8 @@ Quality Classifier：质量分类器
 
 Quality Filter：质量过滤器
 
+Classifier-Based Quality Filtering / CQF：基于分类器的质量过滤
+
 Filtering False Positive：过滤误删 / 过滤假阳性
 
 Filtering False Negative：过滤漏删 / 过滤假阴性
@@ -331,6 +375,8 @@ Near Duplicate：近重复样本
 
 Near Deduplication：近重复去重
 
+Bloom Filter Fuzzy Deduplication / BFF：Bloom Filter 模糊去重
+
 MinHash：最小哈希
 
 Locality-Sensitive Hashing / LSH：局部敏感哈希
@@ -357,7 +403,21 @@ Chinchilla Scaling：Chinchilla 规模定律
 
 Compute-Optimal Training：计算最优训练
 
+Data-Constrained Scaling：数据受限规模扩展
+
+Inference-Optimal Scaling：推理成本最优规模扩展
+
 Data Mixture：数据配比
+
+DoReMi：Domain Reweighting with Minimax Optimization / 最小最大域重加权
+
+PALOMA：Perplexity Analysis for Language Model Assessment；多域语言模型拟合评测基准，perplexity 衡量语言建模 fit，不替代任务能力评估。
+
+RegMix：Data Mixture as Regression / 将数据配比优化建模为回归
+
+DataComp-LM / DCLM：DataComp for Language Models / 语言模型数据中心 benchmark
+
+FineWeb-Edu：FineWeb 教育文本子集
 
 Data Sampling：数据采样
 
@@ -469,6 +529,10 @@ ZeRO：零冗余优化器
 
 Fully Sharded Data Parallel / FSDP：全分片数据并行
 
+FSDP1：PyTorch wrapper/FlatParameter 路线的早期全分片实现；wrap 边界会影响参数分组、all-gather 窗口与状态字典行为。
+
+FSDP2 / fully_shard：PyTorch per-parameter DTensor 路线；在子模块上自底向上分组，前向/反向 hook 聚齐参数并在之后 reshard，梯度按 shard reduce-scatter。
+
 Tensor Parallelism：张量并行
 
 Pipeline Parallelism：流水线并行
@@ -481,7 +545,9 @@ Reduce-Scatter：归约散射
 
 All-Gather：全收集
 
-Model FLOPs Utilization / MFU：模型 FLOPs 利用率
+Model FLOPs Utilization / MFU：模型 FLOPs 利用率；用观测 token 吞吐对应的模型必需前向/反向 FLOPs 除以聚合峰值算力，通常不计 activation rematerialization；须注明 attention、MoE、dtype、padding 与 token 分母口径。
+
+Hardware FLOPs Utilization / HFU：硬件 FLOPs 利用率；按实际执行 FLOPs 与峰值算力估计设备利用率，可能包含 activation rematerialization，计数受实现/编译器影响，不能仅凭 HFU 高于 MFU 推出训练更快。
 
 Hidden Size：隐藏维度
 
@@ -705,6 +771,30 @@ Adam：Adam 优化器
 
 AdamW：AdamW 优化器
 
+Adafactor：一种自适应优化器；对矩阵参数用行/列统计近似逐元素二阶矩，以降低状态显存；原始 recipe 还包含 relative step、参数尺度与 update clipping 等选择。
+
+Lion：符号动量优化器；用一个动量状态生成逐坐标 sign 更新，省去 Adam 的二阶状态，但学习率和 weight decay 通常需要重新搜索。
+
+Sophia：带裁剪的随机二阶优化器；用 Hutchinson Hessian 对角估计或 Gauss-Newton-Bartlett 估计预条件一阶动量，并按坐标裁剪更新；负/极小曲率估计通过分母下界回退到符号动量更新。
+
+Muon：面向合适二维权重矩阵的动量正交化优化器；使用 Newton-Schulz 等迭代近似动量矩阵的 polar factor，通常与 AdamW 分组处理 embedding、head、norm 等其他参数。
+
+GaLore / Gradient Low-Rank Projection：把梯度投影到周期性更新的低秩子空间，并在该空间维护 optimizer state；保留原参数全量更新，但引入 rank、投影刷新和子空间近似的取舍。
+
+Shampoo：矩阵/张量预条件优化器；维护各维度的梯度协方差并用矩阵逆幂预条件更新，能表达坐标相关性，同时增加状态、矩阵分解和分布式开销。
+
+SOAP：Shampoo with Adam in the Preconditioner eigenbasis；跟踪 Shampoo 协方差特征基，在变换后的基中做 Adam 式更新，再旋回原空间；特征基/统计更新频率影响稳定性和开销。
+
+Polar Factor：极分解因子；若矩阵 $G=U\Sigma V^\top$，其 polar factor 为 $UV^\top$，保留左右奇异方向并移除奇异值尺度；零矩阵没有唯一方向，秩亏矩阵的零奇异子空间也需约定。
+
+Newton-Schulz Iteration：Newton-Schulz 迭代；用矩阵多项式迭代近似矩阵逆平方根或 polar/正交化方向，具体系数、迭代步数和归一化是实现配置。
+
+Optimizer Update RMS：优化器参数更新的 root-mean-square 尺度；Muon 等矩阵更新会随矩阵形状变化，跨算法比较时需明确统计对象和匹配规则。
+
+Warmup-Stable-Decay / WSD：先 warmup、再固定学习率训练主干、最后短程衰减的调度；原始 WSD 可从 stable checkpoint 分出 decay 分支，以便一个长训练主干支持多个预算终点。
+
+WSD-S：WSD 的连续单分支变体；在中间 checkpoint 进行 decay 后恢复较大学习率继续训练，复用 cooldown 计算；稳定性与收益受 checkpoint、loss spike 和目标训练设置影响。
+
 Weight Decay：权重衰减
 
 Decoupled Weight Decay：解耦权重衰减
@@ -713,11 +803,33 @@ Gradient Norm：梯度范数
 
 Gradient Clipping：梯度裁剪
 
+Gradient Spike Score (GSS)：梯度尖峰分数；SPAM 论文用来衡量某坐标梯度相对其训练历史的异常程度；论文的回顾性定义与在线代理 (g_i^2/V_i) 不是同一统计量。
+
+Adam Second-Moment Decoupling：Adam 二阶矩失配；当前梯度平方与 EMA 二阶矩 (v_t) 暂时脱节，可能改变预条件更新及其稳定性；这是特定研究提出的 spike 机制，不是所有 loss spike 的统一解释。
+
+Gradient-Directional Curvature：梯度方向曲率；沿当前梯度方向测量经预条件局部曲率的量；特定 Adam 分析中用于预测更新风险，估计通常需要 Hessian-vector product。
+
+GradientStabilizer：梯度幅值稳定器；根据运行梯度范数统计调整更新幅值、保留当前梯度方向的研究方法；并不验证该方向本身正确。
+
 Global Batch Size：全局批大小
 
 Micro Batch Size：微批大小
 
 Gradient Accumulation：梯度累积
+
+Token-Weighted Gradient Accumulation：按有效目标 token 数加权的梯度累积；用于让变长 micro-batch 的累积梯度与同一窗口的全局 token-mean loss 对齐。
+
+Valid Prediction Target Count：有效预测目标数；必须按模型真实 label shift 和 ignore mask 统计，不能默认等于未移位 label 张量中非 ignore 元素数。
+
+Masked Language Modeling / MLM：掩码语言建模；随机遮挡输入中的 token，并用双向上下文预测被遮挡位置，常见于 encoder-only 预训练。
+
+Span Corruption / Span Denoising：跨度破坏 / 跨度去噪；用 sentinel 替换若干连续 token span，再以被移除 span 为生成目标，T5 是代表性路线。
+
+Mixture-of-Denoisers / MoD：混合去噪目标；UL2 提出的 R/S/X denoiser 组合，覆盖短跨度重建、前缀条件生成和高破坏率长目标重建。
+
+Fill-in-the-Middle / FIM：中间填充；将原文拆为 prefix、suffix、middle 后重排序列，并用自回归目标训练模型根据两侧上下文生成 middle。
+
+FIM Rate：中间填充变换比例；训练数据中被转换成 FIM 格式的样本比例，需与普通 left-to-right 样本比例及专用填空评测一起报告。
 
 Zero Grad：梯度清零
 
@@ -971,9 +1083,9 @@ KV Head：Key/Value 注意力头
 
 KV Head Ratio：KV 头压缩比例 / Query Head 与 KV Head 数量比
 
-Multi-Query Attention / MQA：多查询注意力
+Multi-Query Attention / MQA：多查询注意力；多个 query heads 共享一组 K/V，KV cache 最小，但共享可能带来质量或训练稳定性代价。
 
-Grouped-Query Attention / GQA：分组查询注意力
+Grouped-Query Attention / GQA：分组查询注意力；每组 query heads 共享 K/V，位于 MHA 与 MQA 之间；减少 KV heads 可按比例减少 K/V cache，但整层参数和质量不会按同一比例变化。
 
 Multi-head Latent Attention / MLA：多头潜在注意力 / 多头低秩潜在注意力
 
@@ -999,17 +1111,21 @@ Position-wise FFN：逐位置前馈网络
 
 Gated MLP：门控多层感知机
 
-MoE FFN：混合专家前馈网络
+MoE FFN：混合专家前馈网络；多个 routed experts 由 router 按 token 稀疏激活，可另有每 token 执行的 shared experts；必须区分总参数、active 参数、router 和 shared 路径。
 
 Router：路由器 / MoE 路由器
 
-Top-k Routing：Top-k 专家路由
+Top-k Routing：Top-k 专家路由；token-choice 路由按每个 token 的 router 分数选 k 个 experts；固定 k 不保证每个 expert 收到相同 token 数。
 
-Expert Capacity：专家容量
+Expert Choice Routing：专家选择路由；每个 expert 选固定容量的 top-k tokens，改善 bucket 负载均衡，但每个 token 最终接收的 expert 数可变。
 
-Active Parameters：激活参数量
+Expert Capacity：专家容量；单个 expert 在一次 dispatch 中可接收的 token 上限；超限后可能丢弃、回退或转发，需统计 overflow 和 dropped-token 口径。
 
-Load Balancing：负载均衡
+Active Parameters：激活参数量；一次 token forward 实际使用的参数近似，MoE 中通常计 dense 主干、路由器、shared experts 和被选中的 routed experts；不等于总权重存储或完整 FLOPs。
+
+Load Balancing：负载均衡；控制不同 expert 的 token 分配和设备工作量；batch-wise 均衡不保证每条序列内部均衡，也不等同于 router 数值稳定。
+
+Router Z-Loss：路由器 z 损失；惩罚 router logits 的 log-sum-exp 尺度，帮助缓解指数计算的低精度舍入不稳定；它不直接保证专家负载均匀。
 
 FFN / MoE Gate：FFN / MoE 架构门禁
 
@@ -1019,7 +1135,7 @@ Residual Stream：残差流 / 主隐藏状态通道
 
 Layer Normalization / LayerNorm：层归一化
 
-RMSNorm：均方根归一化
+RMSNorm：均方根归一化；按隐藏维的均方根重缩放，不减去均值；保留尺度归一化但不具备 LayerNorm 的平移不变性。
 
 Norm Placement：归一化位置
 
@@ -1027,7 +1143,13 @@ Pre-LN：前置归一化
 
 Post-LN：后置归一化
 
+Peri-LN：外围归一化；将 LayerNorm 放在注意力和 MLP 子层周边的 Transformer 归一化架构；论文报告了最高 3.2B 参数实验，需与其模型及训练设置绑定。
+
 Residual Scaling：残差缩放
+
+DeepNorm / DeepNet：深层 Transformer 的残差与初始化方案；共同缩放 residual connection 和部分权重初始化以约束深度方向的 model update，原始大规模证据主要来自机器翻译。
+
+μP / Maximal Update Parametrization：最大更新参数化；按网络宽度定义权重与更新的缩放规律，使部分超参数能从较小模型迁移到更宽模型；不是可直接套在任意 checkpoint 上的初始化常数。
 
 Early Update Pressure：早期更新压力
 
@@ -1050,6 +1172,10 @@ ALiBi / Attention with Linear Biases：线性注意力偏置
 Position Interpolation：位置插值
 
 RoPE Scaling：RoPE 缩放
+
+YaRN：RoPE 上下文扩展方法；按波长对不同频率做分段/平滑插值，并配合温度校正与继续训练；论文效率数字只适用于作者比较设置。
+
+LongRoPE：长距离 RoPE 扩展方法；搜索维度相关的非均匀插值因子并分阶段延长上下文，同时单独评估短上下文恢复。
 
 Position ID Audit：位置编号审计
 
@@ -1233,6 +1359,14 @@ TTFT Metric：首 token 延迟指标
 
 TPOT Metric：每输出 token 时间指标
 
+Inter-token Latency / ITL：相邻流式输出事件之间的时间间隔；按事件采样，不等同于每请求平均 TPOT
+
+Request-level TPOT：请求级每输出 token 平均时间；首 token 后的生成时间除以输出 token 间隔数，单 token 请求没有可观测的后续间隔
+
+SLO Goodput：单位时间内满足预先定义服务目标的请求数或 token 数；计数口径、超时/取消处理和 SLO 组合必须明确
+
+Smooth Goodput：平滑的 SLO 达标效用指标；研究方案之一，用于避免硬阈值 goodput 让调度器偏向放弃难以达标请求
+
 E2E Latency Metric：端到端延迟指标
 
 Token Throughput Report：Token 吞吐报告
@@ -1415,7 +1549,7 @@ KV Concurrency Limit：KV 并发限制
 
 Cost Attribution Model：成本归因模型
 
-SLO Error Budget：SLO 错误预算
+SLO Error Budget：SLO 错误预算；在指定窗口和分母下允许未达 SLO 的事件数或比例，计算口径须预先固定；质量和安全硬门槛另行管理，不能把错误预算解释成安全事故额度。
 
 Admission Overload Policy：准入过载策略
 
@@ -1628,6 +1762,10 @@ Pipeline Parallel Bubble：Pipeline Parallel 空泡
 Data Parallel Replica：Data Parallel 副本
 
 Expert Parallel Placement：Expert Parallel 放置
+
+DeepEP：DeepSeek 开源的 Expert Parallel 通信库；提供 MoE token dispatch/combine 的 all-to-all GPU kernel，并区分高吞吐与低延迟路径；安装要求、硬件支持和实验状态应查当前仓库版本。
+
+Expert Parallel Load Balancer / EPLB：Expert Parallel 负载均衡器；根据运行时 token/expert 负载重排 expert 映射或增加冗余 expert；可减少热点 rank，但需要额外权重显存并可能挤占 KV Cache。
 
 Worker Group Size：Worker 组大小
 
@@ -2515,6 +2653,28 @@ Clean Eval Lift：干净评估集提升
 
 Judge-Human Agreement：Judge 与人工一致率
 
+Absolute Human Rating / Outcome-Level Absolute Assessment (OAA)：人工回答级绝对评分；分别给候选输出打分再聚合系统表现，依赖跨评审者量尺与输出抽样的解释条件。
+
+Pairwise Human Evaluation / Outcome-Level Relative Assessment (ORA)：人工回答级成对比较；对同一输入比较两个具体输出，平局和无法判断需分别编码。
+
+System-Level Probabilistic Assessment (SPA)：系统级概率偏好评估；评审者在对两个系统有固定程度接触后，直接估计自己更偏好其中一方的概率。
+
+Elo Rating：Elo 相对评分；根据逐场胜负递归更新玩家评分，便于在线更新，但评分受初始值、更新步长和对局顺序影响。
+
+Bradley--Terry Model：Bradley--Terry 成对比较模型；以两个候选潜在强度之差的 logistic 函数建模胜率，依赖对战图连通与模型假设；标准二元形式不直接表达平局。
+
+Inter-Annotator Agreement / IAA：标注者间一致性；描述多人对同一批单元标签的一致程度，不等于标签事实正确或评价构念有效。
+
+Cohen's Kappa：Cohen kappa；扣除按两位标注者边际分布预期的一致率，解释依赖类别定义和抽样设计；类别严重不平衡时应连同混淆矩阵和原始一致率阅读。
+
+Fleiss' K / Multi-pi：多人标注的一致性系数；常被称为 Fleiss kappa，但其机会一致口径不同于多人推广的 Cohen kappa。
+
+Krippendorff's Alpha：Krippendorff alpha；支持多位标注者、不同样本标注人数、缺失标签和可配置的类别距离；仍须满足并说明相应抽样与依赖假设。
+
+Prompt-Cluster Bootstrap：按 prompt 聚类的 bootstrap；将同一输入下的所有候选/评审结果一起重采样，避免把重复判断误当独立样本。
+
+Approximate Maximum Influence Perturbation / AMIP：近似最大影响扰动；用影响函数近似找出最能改变估计结果的一小组数据点，再通过精确重拟合验证；最坏情况删点分析不是随机抽样置信区间。
+
 Judge Length Bias：Judge 长度偏差
 
 Evaluation Gate：评估上线门禁
@@ -2566,6 +2726,20 @@ False Discovery Rate / FDR：错误发现率
 Bonferroni Correction：Bonferroni 校正
 
 Benjamini-Hochberg Procedure：Benjamini-Hochberg 程序
+
+Estimand：目标估计量；明确要估计的总体/子群、处理、结果、分析单位和时间窗口。
+
+Average Treatment Effect / ATE：平均处理效应；目标总体中 treatment 与 control 潜在结果差的期望。
+
+Paired Bootstrap：配对 bootstrap；以同一题或同一随机单位为整体有放回重采样，并保留新旧结果的对应关系。
+
+Cluster Bootstrap：聚类 bootstrap；按用户、租户等独立 cluster 重采样，并带入该 cluster 的全部观测。
+
+Approximate Randomization Test：近似随机化检验；在配对单位内依零假设交换系统标签，重算指标差以近似检验分布。
+
+Holm Step-Down Procedure：Holm 逐步下降法；按 p 值排序逐步检验以控制 family-wise error rate。
+
+Benjamini-Yekutieli Procedure：Benjamini-Yekutieli 程序；用调和因子修正 BH 阈值，在任意检验依赖下控制 FDR，通常更保守。
 
 Experiment Gate：实验上线门禁
 
@@ -2621,11 +2795,27 @@ Refusal Accuracy：拒答准确率
 
 Attack Success Rate：攻击成功率
 
+StrongREJECT Score：StrongREJECT 回答风险分；结合拒绝标记、回答具体性和说服力，衡量对禁答请求的响应质量；受其 rubric 与 judge 版本约束。
+
+Benign Utility：无攻击任务效用；无攻击输入时 Agent 完成用户任务且满足状态判定的比例。
+
+Utility Under Attack：攻击下任务效用；攻击案例中用户任务仍被正确完成且没有未授权副作用的比例。
+
+Targeted Attack Success Rate：目标攻击成功率；攻击者预先定义的目标动作在有效攻击案例中实现的比例。
+
+MIA Advantage：成员推断优势；在指定阈值下以 TPR−FPR 表示成员推断区分度，依赖 member / non-member 构造与分布。
+
+Zero-Event Upper Bound：零事件上界；n 次独立同分布尝试中观察零次事件时，对真实事件率给出的单侧二项上界；不适用于 0/0 或高度相关的自适应尝试。
+
+False Negative Rate / FNR：假阴性率 / 漏放率；安全评估集中被标为危险或攻击、但未被拦截的样本数除以全部危险/攻击样本数；分母为零时记为不可计算。
+
+False Positive Rate / FPR：假阳性率 / 误拦率；安全评估集中被标为安全、却被拦截的样本数除以全部安全样本数；分母为零时记为不可计算。
+
 Unauthorized Tool Call Rate：未授权工具调用率
 
 Safe Completion Quality：安全替代回答质量
 
-Severity-Weighted Risk：严重度加权风险
+Severity-Weighted Risk：严重度加权风险；若仅对刻意分层的测试集按序数等级加权，应视为加权失败指数；没有部署流量占比和损失函数时不能解释为真实期望伤害。
 
 Safety Gate：安全上线门禁
 
@@ -2726,6 +2916,16 @@ Temperature：温度参数
 Top-k Sampling：Top-k 采样
 
 Top-p Sampling / Nucleus Sampling：Top-p 采样 / 核采样
+
+Locally Typical Sampling：局部典型采样；按 token surprisal 与当前条件熵的距离选候选，不等同于按概率排序。
+
+Min-p Sampling：Min-p 采样；按相对最大 token 概率设保留阈值，质量优势仍需按模型和任务实测。
+
+Grammar-Constrained Decoding：语法约束解码；按 grammar/parser 状态屏蔽会导致非法前缀的 token。
+
+Acceptance Length：接受长度；一次 speculative verification 中被接受的连续 draft 前缀长度，需与 bonus/correction token 的计数口径区分。
+
+Residual Distribution：残差分布；拒绝 draft token 后按正部差值 `max(p-q, 0)` 归一化得到的校正采样分布。
 
 Repetition Penalty：重复惩罚
 
@@ -3025,23 +3225,33 @@ Inference Cost：推理成本
 
 GPU Hour：GPU 小时
 
-Token Cost：token 成本
+Training Energy Consumption：训练能耗；按设备平均功率（kW）乘运行时间（h）得到 kWh，标明读数来自电表、遥测还是 TDP 估算。
+
+Power Usage Effectiveness / PUE：电力使用效率；设施总用电除以 IT 设备用电。若已用设施总表读数，不应再乘 PUE。
+
+Grid Carbon Intensity：电网碳强度；单位供电量对应的 CO₂e，需绑定地点、时间区间和统计来源。
+
+Operational Carbon Emissions：运行期碳排；按运行用电与对应电网碳强度估算，不包含硬件制造等 embodied carbon，除非另行声明。
+
+Token Cost：token 成本；按实际调用或部署口径分摊到输入、缓存输入、输出和多模态 token 的费用，输入/输出及缓存单价可能不同。
 
 Input Token Cost：输入 token 成本
 
 Output Token Cost：输出 token 成本
 
-Cost per Token：每 token 成本
+Cost per Token：每 token 成本；指定同类 workload 和分母后，用模型直接费用除以输入/输出 token 数。应写明模型、缓存计费、模态组成和周期；不能把 GPU 毫秒、图像 patch 或人工分钟直接并入 token 分母。
 
-Cost per Successful Answer：每个成功回答成本
+Cost per Successful Answer：每个成功回答成本；同一批请求的总成本（含失败调用、重试、fallback 和人工处置）除以满足任务契约的成功数。零成功时指标未定义；RAG、结构化抽取和 Agent 必须分别定义成功条件。
 
-Unit Economics：单位经济模型
+Unit Economics：单位经济账；将一个明确业务单位（如成功任务）上的边际成本、固定成本、成功率和收入/价值放在同一周期核算，不能用单次 token 单价代替。
 
-Marginal Cost：边际成本
+Marginal Cost：边际成本；给定模型、容量区间、质量和 SLO 时多服务一个请求增加的成本。跨过 GPU 容量阈值、触发扩容或 fallback 后，边际成本可能阶跃变化。
+
+Break-even Request Volume：请求量盈亏平衡点；令 API 与自托管的固定成本和每请求边际成本相等求得的流量阈值，仅在比较双方达到相同质量、延迟、安全和可用性目标时有决策意义。
 
 Redundancy Factor：冗余系数
 
-Cache Hit Rate：缓存命中率
+Cache Hit Rate：缓存命中率；请求命中率统计命中请求数/请求总数，token 命中率统计复用 token/输入 token。前者不能代替后者，也不能单独证明节省了推理成本。
 
 On-Device Deployment：端侧部署
 
@@ -3101,6 +3311,50 @@ Continuous Batching：连续批处理
 
 In-Flight Batching：飞行中批处理 / 运行中批处理
 
+Iteration-Level Scheduling：迭代级调度；在每次模型执行边界重新决定哪些请求进入下一步，而不是让整组请求共享最长请求的完整生命周期。
+
+Selective Batching：选择性批处理；只对适合合批的模型运算使用 batch，作为 Orca 中配合 iteration-level scheduling 的设计。
+
+Skip-Join Multi-Level Feedback Queue：跳级加入多级反馈队列；FastServe 根据可用的输入长度信息选择新请求初始队列，并允许抢占与 GPU/主机间 KV 状态换入换出，以缓解长任务造成的队头阻塞；实际公平性和交换成本依工作负载而变。
+
+Token-Level Preemption：token 级抢占；在生成 token 的迭代边界暂停一个请求、运行其他请求，需保存并恢复生成状态、KV 与采样状态。
+
+Prefill/Decode Disaggregation：Prefill/Decode 分离；将 prompt prefill 与逐 token decode 放入不同资源池，分别满足 TTFT/TPOT 目标；需权衡 KV/state 传输、路由与资源池利用率。
+
+DistServe：将 Prefill 与 Decode 分到独立 GPU 池，并根据 TTFT/TPOT SLO、并行方案和网络带宽共同规划资源；论文吞吐/延迟倍率绑定作者 workload 与硬件。
+
+Mooncake：以 KV Cache 为中心的 disaggregated serving 架构；结合 Prefill/Decode pools、CPU/DRAM/SSD/RDMA 缓存和 cache-aware scheduler，结果受 trace、SLO 与资源配置约束。
+
+TaiChi：按 TTFT 与 TPOT 的相对严格程度，联合调节 Prefill/Decode 共置、解耦或混合部署的 serving 方案；发表结果需绑定对应 SLO 组合和实验系统。
+
+SmartGen：面向 Prefill→Decode KV 网络传输的选择性传输方案；profile 后主动推送重要 KV，Decode 按需拉取缺失项并后台补齐；KV 选择可能影响质量，指标绑定论文 workload。
+
+SpectrumKV：按 token 重要性为 P/D transfer 选择 FP16/INT8/INT4 KV 表示，并通过部署期 probe 决定是否启用 INT4；精度容忍度具有模型依赖性。
+
+Time to Second Token / TTST：从请求到达或生成启动到第二个输出 token 的时间指标，用于观察阶段间 handoff / KV transfer 对首轮 decode 的影响；起止点必须按评测实现明确。
+
+Request Owner Epoch / Fencing：请求迁移协议中的所有权代数标记；目标取得新 epoch 后旧副本必须被 fence，避免源/目标并发推进同一请求。它是可采用的系统设计模式，不代表所有 serving runtime 都默认实现。
+
+Append-Prefill：追加式预填充；复用已有多轮会话的 KV，只对新增 prompt tokens 做 prefill；需要正确的 cache/session 边界与可用状态。
+
+M/M/1 Queue：M/M/1 单服务台排队模型；泊松到达、指数服务时间和单服务台组成的稳定队列模型，`λ<μ` 时平均系统停留时间为 `1/(μ-λ)`；只用于排队直觉，不是 LLM 服务的容量公式。
+
+RadixAttention：RadixAttention；SGLang 的前缀复用路线，按 token 前缀组织 radix cache，让多个生成调用/分支复用已计算 KV。
+
+Radix Cache：Radix Cache；按 token 前缀组织和检索 KV 状态的树形缓存；命中、eviction、会话隔离和显存驻留共同决定真实收益。
+
+Session-Aware Radix Cache：会话感知 Radix Cache；按应用提供的 session ID 记录可复用 KV 引用并影响淘汰顺序；session ID 不会自动保存或拼接对话，也不保证 KV 永不被淘汰。
+
+Serving Goodput：服务有效吞吐；单位时间内完成且满足指定延迟 SLO 与质量门槛的请求数，必须明确门槛和请求分母。
+
+PyExecutor：TensorRT-LLM 当前 PyTorch 执行路径中的执行循环组件，由 scheduler、model engine 和 decoder 等部件协作处理请求；具体边界随 release 变化。
+
+TurboMind Engine：LMDeploy 的 C++/CUDA 推理后端；是否适用于某模型、量化格式和设备应查该 release 的模型支持矩阵。
+
+Transformers Serve：Transformers 提供的服务 CLI；当前文档将连续批处理服务定位为实验、评估和中等负载的本地/自托管用途，需按版本复核。
+
+Maintenance Mode：维护模式；项目主要接受有限维护工作，部署选型应评估安全更新、模型接入和迁移责任，不等同于既有服务立即不可用。
+
 Inference Performance Incident：推理性能事故
 
 TTFT Regression：首 token 延迟回归 / 首响退化
@@ -3140,6 +3394,26 @@ External Fragmentation：外部碎片
 Prefix Cache：前缀缓存
 
 Prompt Cache：提示词缓存
+
+Cache Salt：缓存盐值；将信任域标识混入 prefix-cache 的 key/hash 链以限制跨域复用，不能替代请求鉴权、加密或删除证明。
+
+Copy-on-Write KV Block：KV block 写时复制；多个分支共享只读前缀，某分支要改写共享尾 block 时先复制或分配私有 block，避免覆盖其他分支状态。
+
+KV Cache Eviction：KV cache 淘汰；在有限驻留预算下删除部分历史 token 或可复用 block。删除活跃 attention 历史会改变可见上下文，需和只淘汰 reusable prefix 区分。
+
+Attention Sink：注意力汇点；流式生成中模型会对少数初始 token 分配较强注意力，即使它们不承载重要语义；StreamingLLM 用 sink token 与近期窗口维持流式稳定性，不等于任意中段信息都可检索。
+
+Heavy-Hitter Token：重击者 token；H₂O 根据累计 attention 分数等代理识别历史中持续重要的 token，并与近期 token 一起保留；重要性代理不等于任务正确性。
+
+KIVI：一种非对称 2-bit KV cache 量化方法；论文对 K cache 按 channel 量化、对 V cache 按 token 量化，并在流式追加时暂留未成组 K 与最近 V 的高精度 residual；机制与质量数字绑定论文模型/任务，不能推断为任意 runtime 已采用。
+
+TurboQuant：面向向量内积近似的在线量化路线；随机正交变换后逐坐标量化，并在论文完整方案中用 QJL 校正残差内积偏差。量化 bit 数、下游任务质量和 serving kernel 性能需分别评估。
+
+Quantized Johnson–Lindenstrauss / QJL：把残差随机投影并编码成符号位，用于估计 query 与压缩 key 的内积；理论上的无偏/失真结论不等于特定模型的任务质量保证。
+
+Active KV-Cache Quantization：GPU 上正在被 Attention 读写的 cache 本身采用低精度表示；可能同时改变 cache 容量、读写 kernel 和 attention 数值路径。
+
+Cold-Page KV-Cache Compression：只在 KV Page 移到 Host/Disk 等冷层时压缩存储，回到 GPU 前恢复为 runtime KV 格式；它优化冷层容量与传输，不能等同于 active GPU cache 降位宽。
 
 FlashAttention：FlashAttention 高效注意力实现
 
@@ -3201,6 +3475,8 @@ BF16：Brain Float 16 位浮点数
 
 FP8：8 位浮点数
 
+E4M3 / E5M2：OCP OFP8 的两种 FP8 编码；E4M3 有 4 指数位/3 尾数位，最大有限值 448、最小 subnormal 为 `2^-9`，没有 Inf 编码；E5M2 有 5/2 位，最大有限值 57,344、最小 subnormal 为 `2^-16`，支持 Inf/NaN。前者精度较细、范围较窄，后者范围较大、相邻码点更稀；硬件/库的 dtype variant、饱和和舍入模式仍需另核。
+
 Mixed Precision Training：混合精度训练
 
 Automatic Mixed Precision / AMP：自动混合精度
@@ -3210,6 +3486,26 @@ Autocast：自动类型转换上下文 / autocast
 GradScaler：梯度缩放器
 
 Loss Scaling：损失缩放
+
+Dynamic Loss Scaling：动态损失缩放；根据梯度是否出现 Inf/NaN 调整 loss scale，溢出时跳过更新并回退 scale，稳定一段时间后再增大 scale。
+
+Subnormal：次正规数；绝对值小于该格式最小正规数、但仍可表示的数；部分硬件或 kernel 可能采用 flush-to-zero，需核对具体执行路径。
+
+FP32 Master Weights：FP32 主权重副本；混合精度训练中额外保留 FP32 参数用于 optimizer 更新，是否存在取决于训练 recipe。
+
+Amax History：最大绝对值历史；记录近期张量或分块的最大绝对值，供延迟缩放等 FP8 recipe 估算下一步 scale。
+
+Delayed Scaling：延迟缩放；使用先前迭代的 amax 历史为当前张量选 scale，以减少每步即时统计开销；可能无法预知突然出现的新尖峰。
+
+MXFP8：微缩放 FP8；按固定小块保存共享 scale 的 FP8 表示，降低单个 scale 覆盖整张张量动态范围的压力，依赖匹配的硬件和 kernel。
+
+NormalFloat 4 / NF4：面向近似零中心正态分布权重的 4-bit 分位数量化编码，常用于 QLoRA 冻结底座存储；不是通用均匀量化，也不代表矩阵乘法全程以 NF4 执行。
+
+Double Quantization：双重量化；再量化 NF4 分块的一级 scale 元数据，以减少量化常量本身的存储开销，不会直接减少激活显存。
+
+Block-Wise Optimizer State Quantization：分块优化器状态量化；每块独立估计量化范围并保存低比特动量状态，更新时通常临时反量化计算；块大小、离群值处理和参数组会影响数值稳定性。
+
+Paged Optimizer：分页优化器；在 QLoRA 论文语境中利用 CUDA Unified Memory 在显存压力下迁移 optimizer pages，降低瞬时显存峰值，但页面迁移可能增加传输与等待。
 
 Unscale Gradients：反缩放梯度
 
@@ -3299,6 +3595,8 @@ Latent Diffusion：潜空间扩散
 
 Diffusion Transformer / DiT：扩散 Transformer
 
+Min-SNR-γ Weighting：最小信噪比加权；按 diffusion timestep 的 SNR 和预测参数化（`x0`、`epsilon`、`v`）重加权去噪 loss，以缓解训练步之间的梯度冲突；权重不能脱离目标参数化解读。
+
 Stable Diffusion：稳定扩散 / Stable Diffusion 文生图系统
 
 VAE Compression Ratio：VAE 压缩比例
@@ -3339,6 +3637,8 @@ Fréchet Video Distance / FVD：弗雷歇视频距离
 
 Video Token Audit：视频 token 审计
 
+Frame Pack：视频帧打包；将不同帧数或分辨率样本按模型定义的时空布局装入训练序列以提高批次利用率，需保留样本边界、attention mask 和时间信息。
+
 Cross-Attention Adapter：交叉注意力适配器
 
 Q-Former：查询 Transformer / Query Transformer
@@ -3355,9 +3655,21 @@ Caption Data：描述文本数据 / Caption 数据
 
 OCR Data：OCR 数据 / 图像文字识别数据
 
+Donut：OCR-free document understanding Transformer / 以图像到文本或 JSON 生成处理文档、避免外部 OCR 错误级联的路线。
+
+Pix2Struct：面向网页截图和文档的视觉解析预训练方法；通过截图到简化结构的目标学习解析，输入 token 成本和证据需求仍须审计。
+
 Audio-Transcript Pair：音频转录对
 
 Automatic Speech Recognition / ASR：自动语音识别
+
+Connectionist Temporal Classification / CTC：连接时序分类；通过 blank 与重复标签折叠，对所有映射到目标文本的单调帧级路径求和，以免人工指定逐帧文本对齐。
+
+Recurrent Neural Network Transducer / RNN-T：循环神经网络转导器；在声学时间与已输出文本前缀构成的格点上预测 blank 或文本 token，支持增量识别。
+
+Attention-based Sequence-to-Sequence ASR：基于注意力的序列到序列语音识别；decoder 对声学 encoder 表示做注意力并自回归生成文本。
+
+RNN-T Lattice：RNN-T 格点；以声学时间步和已生成文本前缀为两轴，联合网络预测 blank 或下一个文本 token。
 
 Text-to-Speech / TTS：文本转语音
 
@@ -3375,9 +3687,21 @@ Audio Codec：音频编解码器
 
 Speech Token：语音 token
 
+Semantic Speech Token：语义语音 token；偏向保留语音内容与可理解信息，可能舍弃部分音色和声学细节。
+
+Acoustic Speech Token：声学语音 token；偏向保留可重建的声音、音色和韵律，也可能编码环境噪声或身份线索。
+
 Codec Language Model：编解码器 token 语言模型
 
 Voice Activity Detection / VAD：语音活动检测
+
+Time to First Audio / TTFA：首音延迟；从明确的请求/输入时间边界到客户端实际开始播放第一段生成音频的时长，必须注明测量端点。
+
+Time to First Audio Chunk / TTFC：首个音频块延迟；模型/Talker 首次产出音频 chunk 的时间，不等同客户端首音播放延迟。
+
+Real-Time Factor / RTF：实时率；处理时间除以对应音频时长，RTF<1 表示平均计算快于播放速度，但不保证首包延迟、chunk 连续性或端到端体验。
+
+Adaptive Rate Interleave Alignment / ARIA：自适应速率交错对齐；Qwen3.5-Omni 用单流和单调约束协调文本 token 与语音 token 的生成速率，具体机制见第二十一册第 93 章。
 
 Word Error Rate / WER：词错误率
 
@@ -3506,6 +3830,12 @@ Negative Value Data：负价值数据
 Active Learning：主动学习
 
 Data Selection：数据选择
+
+Distribution Matching：分布匹配式数据选择
+
+Data Diversification：数据多样性选择
+
+Leverage Score Sampling：杠杆分数采样 / 表示空间多样性选择
 
 Marginal Contribution：边际贡献
 
@@ -5149,6 +5479,16 @@ Cost-Quality Trade-off：成本质量权衡
 
 Regression Suite：回归测试集
 
+Error Analysis：错误分析；把总体分数和失败输出拆成可审阅的样本、症状、能力切片、证据和待验证根因假设；标签或聚类本身不构成根因证明。
+
+Root Cause Hypothesis：根因假设；对失败为何发生提出、可由复现或干预支持/削弱的解释；在验证前必须与症状、错误类型和修复动作分开记录。
+
+Minimum Functionality Test / MFT：最小功能测试；用少量直接样例检查模型是否满足某项明确能力要求。
+
+Invariance Test / INV：不变性测试；对输入做应保持含义的扰动，并检查模型行为是否保持；前提是变换确实保留任务语义。
+
+Directional Expectation Test / DIR：方向性预期测试；改变会影响正确行为的输入条件，并检查模型输出是否沿预先规定的方向改变。
+
 Agent Eval Gate：Agent 评估上线门禁
 
 Agent Safety：Agent 安全
@@ -5214,6 +5554,14 @@ Agent Demo Coverage：Agent demo 覆盖度
 Trace Metric Coverage：执行轨迹指标覆盖度
 
 Evaluation Harness：评估执行框架
+
+Evaluation Contract：评测协议；一次可复核评测所固定的 checkpoint、tokenizer/chat template、任务数据与 split、prompt/few-shot、生成参数、metric/scorer、harness 版本和样本级输出。
+
+HELM / Holistic Evaluation of Language Models：整体语言模型评测；以场景覆盖和多类指标统一组织语言模型评测的研究与工具，论文采用有限的核心场景集合，不代表所有真实任务。
+
+lm-evaluation-harness / lm-eval：开源语言模型评测执行框架；统一封装任务数据、prompt、模型请求、后处理和 metric，便于复核执行；不替使用者选择有代表性的 benchmark。
+
+Contamination Signal：污染信号；训练集重叠扫描、顺序似然或不可泛化表现等方法发现的风险证据，不自动等于训练样本包含关系的直接证明。
 
 Eval Dataset Bucket Coverage：评估数据桶覆盖率
 
@@ -7387,6 +7735,16 @@ Canary Ramp Control：灰度放量控制
 
 AB Experiment Design：A/B 实验设计
 
+Intention-to-Treat (ITT) Effect：意向治疗效应；按最初随机分配比较结果，包含功能未送达或用户未采纳等真实部署摩擦。
+
+Treatment Uptake：处理采纳 / 实际使用；随机分配后的行为，直接比较使用者与未使用者通常会受到选择偏差影响。
+
+Sample Ratio Mismatch (SRM)：样本比例失配；实际观测到的分组比例偏离预设比例，是分配、资格、曝光或日志数据质量问题的警报信号，需诊断根因。
+
+CUPED：使用实验前协变量降低方差的方法；主要提高估计精度，不修复错误随机化或曝光数据偏差。
+
+Interference / Spillover：实验干扰 / 溢出效应；一个单位的 treatment 会改变其他单位结果，违反无干扰假设，可能需要集群或网络实验设计。
+
 Sample Ratio Health：样本比例健康度
 
 Guardrail Metric Control：护栏指标控制
@@ -8093,15 +8451,85 @@ KV Cache Gate：KV Cache 门禁
 
 ## Content Audit Supplement Terms
 
+### Production System Design
+
+Service Level Indicator / SLI：服务等级指标；对用户可见服务行为的明确定义和测量方式，必须写清请求集合、成功条件、测量边界、窗口和排除项。
+
+Service Level Objective / SLO：服务等级目标；对特定 SLI 在给定窗口内要求达到的目标值，不等同于 SLA 合同，也不由单个模型 benchmark 代替。
+
+Idempotency Key：幂等键；标识一次业务意图的稳定键。相同键和相同规范化参数的重试应复用或查询同一结果；相同键携带不同意图应冲突，去重记录的保留期要覆盖恢复窗口。
+
+Transactional Outbox：事务发件箱；在同一数据库事务内写入业务状态和待发送事件，再异步投递。投递通常至少一次，消费者需去重；它避免本地状态与消息记录之间的双写丢失，但不提供端到端分布式 exactly-once。
+
+Commit-Unknown：提交状态未知；外部副作用可能已经提交，但调用方因超时或连接中断没有收到确认。恢复时应使用原操作 id 查询或幂等重放，不能直接生成新操作盲目提交。
+
+Active Job Concurrency：端到端任务并发；当前排队、执行或等待依赖的业务任务数。任务等待工具或人工期间可能仍计入 job 并发，却没有占用模型 runtime 的活跃序列槽。
+
+Model Active Sequence：模型活跃序列；当前驻留推理 runtime、占用执行状态和 KV 资源的序列数。按模型池估算时可用 `A_m≈Σ_j λ_j s_{j,m} τ_{model,j,m}`，其中 `s_{j,m}` 是任务类别 `j` 路由到池 `m` 的平均模型调用数，`τ` 是该池的平均序列槽占用时间；它不同于包含检索、工具和人工等待的端到端任务并发。
+
+Model Runtime Occupancy Time：模型运行时占用时间；一次模型调用从进入推理 runtime 到释放序列槽的时长，不包括任务在检索、工具或人工环节等待的全部端到端时间。
+
+N+1 Capacity Planning：N+1 容量规划；先按目标负载与余量算出 N 个容量副本，再准备至少一个可用故障副本。只有在剩余副本、故障域、路由分布、冷启动和资源约束均经过检查时，`N+1` 才能支持单副本故障假设。
+
+Prefix Token Reuse Rate：前缀 token 复用率；在明确请求集合与观测窗口后，以成功复用的前缀 token 数除以可复用输入 token 数计算；与请求级 cache hit rate 不同，必须按模型、模板和 workload 分层解释。
+
+Blameless Postmortem：无责事故复盘；围绕影响、时间线、技术和组织促成因素、缓解措施与可验证行动项分析事故，不把单人操作当作根因终点；无责不等于没有 owner、决策责任或行动项跟踪。
+
+Full Jitter：全抖动退避；第 k 次重试的等待时间从 0 到指数退避上限间随机采样，用来打散同步重试；仍需总 deadline、重试预算和幂等语义。
+
 Simple Preference Optimization / SimPO：简单偏好优化；一种 reference-free 偏好优化方法，用平均 log probability 差和 margin 直接优化 chosen/rejected。
 
 Reinforcement Learning with Verifiable Rewards / RLVR：可验证奖励强化学习；用程序、规则、答案校验器或环境反馈提供可自动验证奖励的后训练路线。
 
+Extensional Correctness：样例外延正确性；一个答案/假设在 verifier 实际检查的有限输入输出上通过，不自动证明它学到生成这些结果的规则或可泛化到结构等价的新样本。
+
+Isomorphic Perturbation Testing / IPT：同构扰动测试；在保留任务关系的同时重命名对象、变量或标识符，再验证同一规则是否仍成立；用于发现只记住实例标签的 shortcut，变换需先确认保持语义。
+
+Metamorphic Testing：变形测试；当任务没有容易获得的逐样本标准答案时，对输入施加已知语义变换，并检查输出是否满足预期关系；它验证指定的不变量，不证明所有行为正确。
+
+Spurious Reward：伪相关/无信息奖励；与目标正确性弱相关、无关或负相关的训练奖励。它仍可能通过优化动态与底模先验改变模型行为，因此应用于研究归因对照，不应误写成可靠监督信号。
+
+Reward Signal Attribution：奖励信号归因；通过固定底模、数据、优化配置和训练预算，对比真实 verifier 与随机/打乱 reward、SFT/无更新等对照，估计学习提升中有多少来自任务奖励信息；结果只适用于已测配置。
+
 DeepSeek-R1：DeepSeek 公开的 reasoning model 案例，常用于讨论冷启动数据、RLVR、GRPO 类训练、采样和蒸馏的组合。
+
+Identity Preference Optimization / IPO：身份偏好优化；原论文称 Identity-PO，是 Ψ-preference optimization 的 identity-mapping 特例，用有限目标间隔的平方损失拟合偏好；理论动机不等于所有规模和任务上的实测优势。
+
+Kahneman-Tversky Optimization / KTO：卡尼曼—特沃斯基优化；从单条回答的 desirable / undesirable 标签构造偏好目标；原始方法使用 reference policy，不能与 reference-free 的 ORPO/SimPO 混为一谈。
+
+Odds Ratio Preference Optimization / ORPO：优势比偏好优化；把 SFT token loss 与偏好 odds-ratio 项组合为单阶段目标，原始方法不需要独立 reference model。
+
+Group Relative Policy Optimization / GRPO：组相对策略优化；同一 prompt 采样多条 response，以组内 reward 构造相对 advantage，通常省去独立 critic；reward 同组时常见标准化会得到零信号。
+
+Decoupled Clip and Dynamic Sampling Policy Optimization / DAPO：解耦裁剪与动态采样策略优化；一套 reasoning RL recipe，组合 Clip-Higher、dynamic sampling、token-level loss 与 overlong 处理；论文收益不能拆成某一组件的独立效果。
+
+DrGRPO：Get GRPO Done Right；针对 response-length 与 group-standard-deviation normalization 的 policy-gradient weighting 问题，使用固定 generation budget 分母和未除标准差的中心化 reward；其“unbiased”结论依赖论文推导与采样条件。
+
+Group Sequence Policy Optimization / GSPO：组序列策略优化；用序列 token log-ratio 的长度归一化形式作为重要性比率，在 response 级做 clipping/加权；不是 token ratio 的逐项裁剪，也不是普通的整句概率比乘积。
+
+Dynamic Clipping Policy Optimization / DCPO：动态裁剪策略优化；按旧 policy 的 token 概率调整 ratio clipping bounds，并结合跨步平滑 advantage 与 response 内 token-mean loss；公开结果绑定论文数学 RLVR 设置。
+
+Smooth Advantage Standardization / SAS：平滑优势标准化；DCPO 中结合当前 response reward 分布和同 prompt 的累计历史分布以缓和标准化波动；历史统计不能修复错误 verifier。
+
+Only-Token-Mean / OTM：仅 token 均值；先在每条 response 的有效 token 上取均值，再对 response 汇总；与整批 token 共用一个分母的 global token mean 会产生不同的长短回答权重。
+
+Response Utilization Ratio / RUR：响应利用率；DCPO 论文把非零 advantage 的生成 response 数除以总生成 response 数；它不是正确率、有效梯度率或独立任务成功率。
 
 vAttention：一种 LLM serving 动态 KV Cache 显存管理路线；重点是把 KV 管理交给虚拟内存/按需映射机制，而不是改变 attention 数学。
 
 GraphRAG：图增强检索生成；先抽取实体、关系和社区摘要，再结合局部证据与全局图摘要回答问题。
+
+Self-RAG：自反思检索增强生成；训练模型使用 reflection tokens 按需检索、判断 passage 相关性并反思回答；能力依赖训练模型和推理协议，不是任意模型的通用开关。
+
+Corrective RAG / CRAG：纠错式检索增强生成；用 retrieval evaluator 判断候选质量并触发本地修正或外部搜索；评估器误判、搜索来源和额外延迟都需单独治理。
+
+RAGAS：reference-free RAG 评估框架；用自动指标分解观察 context relevance、faithfulness 和 answer relevance；分数受 judge、提示、语言、领域和 metric version 影响。
+
+ARES：RAG 自动评估系统；训练轻量 judge 并用少量人工标注和 prediction-powered inference 校准系统级估计及置信区间；校准集仍需代表目标 query 与文档分布。
+
+AgentDojo：工具型 Agent prompt injection 评估环境；包含正常任务和安全测试样例，用于同时观察 benign utility 与攻击下的安全属性；benchmark 结果不替代目标系统评估。
+
+Retrieval Poisoning / 检索投毒：攻击者将带有目标指令或恶意内容的文档写入可检索语料，并设法让正常 query 召回它；防护要覆盖内容接入、来源/taint、检索与后续工具权限，不能只依赖生成后的过滤器。
 
 Data Contamination：数据污染；训练、调参、提示迭代或系统缓存中提前暴露评估信息，导致评估分数虚高。
 
@@ -8127,6 +8555,16 @@ SimpleQA：短事实问答 benchmark，用于评估模型事实性、校准和�
 
 RULER：长上下文能力 benchmark，覆盖检索、多 needle、多跳、聚合和 QA 等比简单 needle 测试更系统的任务。
 
+NoLiMa：长上下文关联检索 benchmark；通过降低问题与目标证据的词面重叠，检查模型能否用潜在关联定位信息；仍是特定人工构造任务，不代表开放式业务推理。
+
+LongBench：中英文长上下文多任务 benchmark；v1 汇集六类任务，v2 采用高难度多选题测单/多文档、长对话、代码和结构化数据理解；v2 长度以 words 报告，不能直接写成 token 窗口。
+
+LongBench Pro：2026 年发布的长上下文评测预印本，含中英文自然样本、任务/难度/依赖类型和 8K—256K token 长度分层；不是 1M token 评测，也不是已独立复现的普遍结论。
+
+MRCR v2：Google DeepMind 公开的 Multi-Round Coreference Resolution 评测；模型需在重复相似请求的长对话中定位并复现指定轮次。仓库文档提供多 needle 与最高至 8M 的数据生成/评测入口；适合测固定任务复杂度下的超长定位，不覆盖复杂多文档推理，使用时需固定 revision 和工具条件。
+
+有效上下文长度 / Effective Context Length：在指定任务、长度、证据位置/依赖、干扰、模型与评测配置、推理预算和资源阈值下，系统持续满足预先定义质量及运行门槛的最大长度；它是条件化指标，不是脱离任务的模型常数。
+
 FRAMES：面向 RAG factuality 的多跳问答 benchmark，要求模型检索多个来源、整合证据并给出可核验答案。
 
 MMMU：多学科多模态 benchmark，考察模型对图像、专业知识和跨模态推理的综合能力。
@@ -8136,6 +8574,22 @@ MathVista：视觉数学推理 benchmark，覆盖图形、表格、图像和数�
 OCRBench：OCR 相关多模态评测集，用于检查场景文字、文档文字和关键信息抽取能力。
 
 Video-MME：视频多模态理解 benchmark，用于评估视频时序理解、长视频理解和音视频信息整合。
+
+Video-MME-v2：视频理解 benchmark 的递进任务与组级评测方案；相关问题组用于观察多点信息整合、时间动态、跨题一致性、推理连贯性和证据支持，分数仍只代表该评测协议。
+
+Naive Dynamic Resolution：朴素动态分辨率；根据图像尺寸动态展开不同数量视觉 token 的处理路线，视觉预算随图片和 processor 变化，必须以具体模型处理输出为准。
+
+M-RoPE：多模态旋转位置嵌入；将文本、图像和视频的位置信息按多模态结构编码，Qwen2-VL 用于统一不同模态的位置表示。
+
+Efficient Video Sampling / EVS：高效视频采样；推理时识别相邻帧中时间静态的 patch 并剪枝，保留位置身份以压缩重复视觉 token；可能损失静态但任务关键的证据。
+
+Video Compression Commander / VidCom2：视频压缩指挥器；依据帧独特性为不同帧分配视觉 token 压缩预算，减少冗余同时把更多预算留给独特帧；收益依赖模型、任务和剪枝率。
+
+Async Chunk Handoff：异步 chunk 交接；上游 stage 生成部分 token/codec chunk 后，下游即开始处理并与上游重叠；降低首包关键路径的同时要求定义顺序、边界、背压、取消和部分失败。
+
+Real-Time Factor / RTF：实时因子；ASR 中常指处理时间除以音频时长，数值越低通常代表处理越快。
+
+Inverse Real-Time Factor / RTFx：实时因子的倒数，音频时长除以计算时长；数值越高通常代表吞吐越高，报告时需说明与 RTF 的口径差异。
 
 Frontier Model Release Radar：前沿模型发布雷达；用新模型 system card、technical report 和发布说明反推架构、训练、后训练、推理、Agent、多模态、评估和安全治理趋势的方法。
 
@@ -8183,7 +8637,21 @@ Preserve Thinking：保留推理状态；模型特定的状态/协议能力，�
 
 Interleaved Thinking：交错式思考；reasoning 与 tool call、observation、状态更新交替进行。
 
-On-Policy Distillation：在线策略蒸馏；学生按自己的 policy 采样，再由教师/verifier/规则提供蒸馏或强化信号。
+On-Policy Distillation / OPD：在线策略蒸馏；在学生自己访问的状态或生成轨迹上提供教师监督，再更新学生策略。On-policy 描述样本状态的来源，不保证训练数据一直来自当前 checkpoint，也不保证教师反馈正确。
+
+Student-Generated Rollout：学生自生成轨迹；由学生策略采样得到的 token、动作和环境状态序列，是 on-policy distillation 覆盖学生自身错误状态的入口。
+
+Policy Lag：策略滞后；rollout 由旧 student revision 生成，却在新 revision 上继续训练造成的行为策略与当前目标策略差异。旧轨迹可能仍有用，但不能被静默记为当前策略数据。
+
+Sampled Log-Ratio Reward：采样对数概率比信号；对学生采样动作定义为 `log p_teacher - log p_student`。它在固定前缀的学生期望等于负 reverse KL，但单个样本必须乘 score-function 梯度，不能直接当普通监督标签。
+
+Temporal Credit Assignment：时间信用分配；判断某个动作如何因其改变后续状态而承担未来轨迹损失或奖励。局部 conditional KL 只拟合当前前缀的下一 token，sequence-level objective 可通过 return-to-go 把后续信号分给早期动作。
+
+GKD / Generalized Knowledge Distillation：广义知识蒸馏；Agarwal 等人提出的 OPD 形式，拆分学生生成状态的比例与条件分布 divergence；具体 trainer 参数和目标需按版本检查。
+
+MiniLLM：LLM 序列级蒸馏研究；使用学生序列上的 reverse-KL 及 policy-gradient 信用分配，并通过教师混合采样、长度归一化等处理训练退化。
+
+Multi-Rollout On-Policy Distillation / MOPD：多 rollout 在线策略蒸馏；同题生成多条学生轨迹后，将成功与失败 peer 作为 self-teacher 上下文构造额外反馈；需要可靠 verifier 和额外上下文预算。
 
 AgentWorld：Agent 世界模型/环境体系；把模型、工具、环境和任务 verifier 结合起来，不是普通聊天模型名称的同义词。
 
@@ -8199,15 +8667,35 @@ MTP / Multi-Token Prediction：多 token 预测；由模型 head 产生多个未
 
 NEXTN：多 token 候选/推测解码路线的模型或引擎术语；具体接口和含义依模型卡/推理框架文档。
 
-FP4 / MXFP4 / NVFP4：4-bit 浮点及相关 block/hardware-aware 格式；收益依赖 scale、累积精度、硬件和 kernel，不能只按位数比较。
+FP4 / MXFP4 / NVFP4：FP4 是 4-bit 浮点泛称；OCP MXFP4 v1.0 使用 E2M1、每 32 个值共享 E8M0 scale；NVFP4 一维 recipe 使用 E2M1、每 16 个值共享 E4M3 scale 和 per-tensor FP32 global scale。Transformer Engine 的 NVFP4 权重还可用 16×16 二维 scaling，因此 4.25 和 4.5+32/N bits/element 只对应指定的一维账本。实际收益依赖 recipe、累加精度、硬件和 kernel。
 
-FP8 KV Cache：用 FP8 保存 K/V cache；理论上可降低元素存储，但需要评测 scale、长上下文误差和 kernel 支持。
+E2M1：1 个符号位、2 个指数位和 1 个尾数位的 FP4 payload；可表示的非负幅值为 0、0.5、1、1.5、2、3、4、6。它描述标量码本，不单独规定 scale、block、packing 或矩阵乘路径。
 
-Native INT4：模型或推理栈原生支持的 INT4 权重/cache 路线；需要连同 tokenizer、kernel、校准和质量回归验证。
+E8M0：8-bit、只有指数位的 scale 格式；没有尾数位和符号位，有限 scale 为 2 的整数次幂。OCP MXFP4 使用它为每 32 个 E2M1 值提供共享 scale。
+
+MR-GPTQ / Micro-Rotated-GPTQ：为 MXFP4/NVFP4 提出的 block-aware GPTQ 变体；把块内 Hadamard rotation、GPTQ 误差补偿和格式专属 scale search 组合，针对 microscaling 格式上的量化误差设计。论文结果绑定作者模型、任务、kernel 和硬件。
+
+NVFP4 Scale Learning：把 NVFP4 per-block weight scales 作为可训练参数，通过 fake quantization 与 straight-through estimator 优化；scale-only learning 冻结权重，full parameter learning 联合更新权重和 scale。它需要训练/QAD 计算，不是校准-only PTQ。
+
+FP8 KV Cache：用 E4M3/E5M2 等 8-bit 浮点 payload 保存历史 K/V，以较高于低-bit 量化的精度换取较低 cache 字节数。它不规定 scale 轴/校准、QK/PV 运算与累加精度、page layout 或 attention backend；K 误差会改变 score/softmax 权重，V 误差进入加权内容，长上下文和真实 serving 质量需分别验收。
+
+OFP8 / OCP FP8：Open Compute Project 规定的 8-bit 浮点 binary interchange 格式集合，包含 E4M3 与 E5M2，以及从宽格式转换时的舍入/饱和行为；不规定 scale 选择、保存和 KV Cache 应用方案。它应与部分平台提供的 FNUZ 变体区分，不能只凭 E4M3/E5M2 名称假设编码和特殊值完全相同。
+
+FNUZ FP8：Finite、NaN 编码不同于 IEEE 规则、unsigned zero 的 FP8 变体；部分硬件/框架以 `fnuz` 命名相关 dtype。它与 OCP OFP8 不是同一编码，转换与 kernel 兼容性需按平台确认。
+
+Two-Level Accumulation：两级累加；在长 contraction 计算中定期把部分和写入更高精度存储/寄存器以控制累计数值误差。可能改善长上下文 attention 正确性，但增加 register pressure 和 prefill 成本；效果绑定 kernel/hardware 实现。
+
+Native INT4：工程语境中的“原生 INT4”部署称呼，不是统一的量化标准；它本身不规定 PTQ/QAT、对称/非对称码本、group/scale/zero-point 布局、权重与激活精度、KV dtype、累加精度或 kernel ABI。应分别核对 INT4 权重 artifact、INT4 KV cache 与目标 runtime 的执行路径，并验证模型协议、数值结果和任务质量。
+
+MARLIN：面向 W4A16 推理的 GPU 执行 kernel；通过量化权重布局、异步访存、调度和流水线改善特定形状与 batch 下的执行效率。它不是量化算法，也不提高量化权重本身的精度；收益依赖兼容硬件、权重布局和实际 backend。
 
 Harness-Aware Evaluation：带 Harness 条件的 Agent 评测；同时记录模型、harness、环境、预算、工具、上下文和 trace。
 
 Evidence Tier：证据等级；区分官方论文/model card、产品页、厂商自报和待核验传闻。
+
+Claim Ledger：命题账本；把复合说法拆成最小 claim，为每条记录来源、版本、适用范围、支持/反证、未知项和后续核验状态，避免一条结论的证据被借给另一条命题。
+
+Evaluation Card：评测卡；把一次模型评测的模型元数据、benchmark 元数据、运行配置和结果组织成可解释记录，帮助追溯复现性、文档完整度、来源风险和分数可比性；它不独立验证底层分数或模型声明为真。
 
 Policy-Adaptive Safety Classifier：策略自适应安全分类器；把自然语言安全策略映射为安全分，不能替代权限、沙箱和治理。
 
@@ -8225,6 +8713,10 @@ Reasoning/Agent Unit Cost：推理/Agent 单位成本；以成功任务而不是
 
 Attention Residuals / AttnRes：注意力残差；沿网络深度对历史层表示做输入相关加权聚合，不等同于 token self-attention。
 
+DenseFormer：深度加权平均；在 Transformer 层之间加权汇聚当前与历史表示，增加跨深度的信息复用。
+
+DeepCrossAttention / DCA：深度交叉注意力；以输入相关权重组合不同深度的层输出，目标是减少固定残差累加导致的信息稀释。
+
 Block Attention Residuals：分块注意力残差；块内累加、块间对块表示做注意力，以减少深度历史表示的存储和通信。
 
 Kimi Delta Attention / KDA：Kimi Delta Attention；带逐通道衰减和 delta 更新的线性注意力状态机制。
@@ -8237,13 +8729,15 @@ Heavily Compressed Attention / HCA：高度压缩注意力；更激进地压缩 
 
 Manifold-Constrained Hyper-Connections / mHC：流形约束超连接；将残差映射约束到双随机矩阵集合，以改善深层信号传播稳定性。
 
+Hyper-Connections / HC：超连接；把单条残差流扩成多条并学习流间连接，以增加残差表示的混合方式；其稳定性和通信成本需要单独评估。
+
 Doubly Stochastic Matrix：双随机矩阵；元素非负且每行、每列之和均为 1。
 
 Sinkhorn Projection：Sinkhorn 投影；通过交替行归一化和列归一化，把正矩阵近似投影到双随机矩阵集合。
 
 Heterogeneous KV Cache：异构 KV Cache；不同层或路径使用不同压缩倍率、维度、窗口和淘汰策略的缓存系统。
 
-GPT-6 Astra：OpenAI 官方模型页列出的 `gpt-6-astra`；本项目当前仅确认其公开接口、上下文/输入/输出预算、reasoning effort、工具和端点支持。
+GPT-6 Astra：OpenAI 官方模型页列出的 `gpt-6-astra`；当前页面确认 1,050,000 context window 和 128,000 max output，没有单独列 maximum input；922,000 是预留满额输出后的算术余量。其他接口能力以对应日期的官方文档为准。
 
 Configuration update：配置更新；GPT-6 及后续模型可通过追加 input item 调整后续响应的 reasoning effort；它是运行时协议，不是权重更新或训练算法。
 
@@ -8253,9 +8747,9 @@ Deferred tool search：延迟工具搜索；先暴露 namespace/MCP 概览，模
 
 Canonical context：规范上下文；compaction endpoint 返回的、下一轮应直接使用的完整上下文窗口，不是可以任意裁剪的纯摘要字符串。
 
-Maximum Input Tokens：最大输入 token 数；一次请求允许计入输入区域的上限，不能与 context window 或 maximum output 混为一个数字。
+Maximum Input Tokens：最大输入 token 数；只有模型/API 页面明确给出时才是公开的单次输入上限，不能用 context window 减 max output 的算术余量代替。当前 GPT-6 Astra 页面未单独列该字段。
 
-Maximum Output Tokens：最大输出 token 数；一次请求允许生成的输出上限，受上下文总容量、接口和任务预算共同约束。
+Maximum Output Tokens：最大输出 token 数；一次响应允许生成的输出上限，reasoning tokens 与可见输出共同消耗该额度，并受上下文总容量、接口和任务预算约束。
 
 Context Window Budget：上下文窗口预算；把系统消息、用户输入、历史、工具结果、推理状态和输出放进同一个有限 token 账本。
 
@@ -8265,7 +8759,13 @@ Hosted Tool Boundary：托管工具边界；模型提出工具调用，宿主执
 
 Async Tool Calling：异步工具调用；应用执行 function/custom tool 时，模型可先处理独立工作，应用之后用原始 `call_id` 回传结果；不等于 hosted tool 自动异步，也不替代任务状态、幂等和权限管理。
 
-Mid-turn Steering：响应中途 steering；GPT-6 Astra 在 Responses WebSocket 中通过 `response.steer` 接收追加约束并创建 continuation；不会撤销已发送输出、已启动工具或外部副作用。
+Mid-turn Steering：响应中途 steering；GPT-6 Astra 在 Responses WebSocket 中通过 `response.steer` 接收追加约束；`response.steer.accepted` 仅表示排队，随后可能自动创建 continuation。它不会撤销已发送输出、已启动工具或外部副作用，每个 response 的 token/tool limit 单独计算。
+
+Tool Budget：工具预算；面向整项 Agent job 的调用次数、并发、timeout、外部费用、重试/幂等、deadline 与验证预算。单个 response 的 token/tool limit 不能代替 runtime 的 job-level cap。
+
+Cache Write TTL：缓存写入保留时长；当前 GPT-6 Astra 价格页区分 30 分钟和 12 小时写入费率，应与 cache-read tokens、普通未缓存输入和输出分开计量。
+
+Ultrafast Mode：Ultrafast 服务档位；OpenAI API 面向延迟敏感请求的高价档位，速率限制与 Standard/Fast 分开。价格档位本身不是单请求延迟 SLA；Astra 的 data residency 支持范围需按当前官方页面检查。
 
 Response Lineage：响应血缘；由 `previous_response_id`、steering、工具 `call_id` 和 continuation 组成的可追踪响应关系，用于恢复、计费和副作用审计。
 
@@ -8437,7 +8937,7 @@ K2-Horizon-7B-Uno：K2 7B 的官方关联 adapter/论文技术；冻结 AR base�
 
 Psi-Spec：Uno 论文中的并行草稿与 AR rejection verification 路线；目标是在指定采样协议下利用 diffusion draft 提高 decode 并行度，实际接受率和吞吐必须按 base/adapter revision、采样器、硬件和 harness 实测。
 
-MOPD：K2 0.9B 同系列卡片披露的 on-policy distillation 阶段名称，用于缓解领域专家合并后的结构干扰；本项目不把该卡片的流程转写为 36B MoVA 的训练 recipe。
+MOPD（K2-Horizon 报告语境）：K2 0.9B 同系列卡片披露的 on-policy distillation 阶段名称，用于缓解领域专家合并后的结构干扰；本项目不把该卡片的流程转写为 36B MoVA 的训练 recipe。该简称与 Multi-Rollout On-Policy Distillation 论文重名，引用时要写出全称和具体来源。
 
 Value-Routing Dispatch：值路径路由分发；将 token 的 hidden payload 按 MoVA top-k 分配到 value experts 并聚合的运行时过程，需与 FFN MoE dispatch、GQA KV cache 和通信 overlap 分开测量。
 
@@ -8771,6 +9271,14 @@ Harness-aware evaluation：harness 感知评测；将模型 revision、effort、
 
 On-policy distillation：在当前策略分布上采样并用教师能力蒸馏学生的后训练路线；V4 报告中的领域教师合并不能解释为推理时运行多个 MoE experts。
 
+Domain Specialist Model：领域专家模型；后训练阶段针对数学、代码、Agent 或其他领域经 SFT/RL 培养的完整教师 checkpoint。它不同于最终模型 MoE 层内按 token 路由的 FFN expert。
+
+Generative Reward Model / GRM：生成式奖励模型；DeepSeek V4 报告称难验证任务使用 rubric-guided RL 数据，由 GRM 评价策略轨迹，并称 actor network 兼任 GRM。报告没有公开完整评分 schema、校准协议和所有 reward 细节。
+
+Full-Vocabulary Logit Distillation：全词表 logit 蒸馏；在学生访问到的前缀上，计算学生与教师对完整 token 词表的分布差异，而不是仅用一个 sampled token 估计局部 KL。完整求和降低该前缀上的动作采样噪声，但不消除学生状态采样、教师成本或教师质量风险。
+
+Teacher Scheduling for OPD：OPD 教师调度；按需加载分片教师参数、缓存末层 hidden states、按教师索引批处理输出头并异步读写，以控制多教师全词表蒸馏的显存与 I/O。该术语对应 DeepSeek V4 报告披露的训练基础设施设计。
+
 ## 2026-09 GLM-5.1
 
 GLM-5.1：Z.ai 面向 long-horizon agentic engineering 的旗舰模型；Artificial Analysis 有精确条目，DataCurve 当前无精确 Agent 行。本项目将其标为 AA 单榜资料级闭环。
@@ -9079,7 +9587,7 @@ Claude Opus 5.5 Evidence Boundary：Opus 5.5 证据边界；Artificial Analysis 
 
 ## 2026-09 GPT-6 Sol
 
-Reasoning Mode：推理模式；OpenAI Reasoning 文档中 GPT-6 family 的 `standard`/`pro` 执行模式。它选择执行模式，不等于 `reasoning.effort`，也不等于新的模型 checkpoint。
+Reasoning Mode：推理模式；OpenAI Reasoning 文档中 GPT-6 family 的 `standard`/`pro` 执行模式。它选择执行模式，不等于 `reasoning.effort`，Astra 当前公开的 mode/effort 契约按最新 family guide 核验，也不等于新的模型 checkpoint。
 
 Reasoning Effort：推理投入档位；GPT-6 Sol 模型页支持 `none`、`low`、`medium`、`high`、`xhigh`、`max`，默认 `medium`。它是请求/会话控制面，不能作为跨厂商统一的模型等级。
 
@@ -9130,3 +9638,37 @@ Gemini 4 Argon：Google 2026-09 公告的 frontier model；当前以 AA 单榜 +
 Publisher-Reported Result：发布方报告结果；必须绑定任务集、harness、工具、预算、verifier 和分母，不能直接写成裸模型能力。
 
 Cyber Defense Guardrail：网络安全防御护栏；涉及授权范围、沙箱、出站控制、人工审批和漏洞修复 verifier，不能因模型具备漏洞能力而跳过宿主安全控制。
+
+Domain-Adaptive Pretraining / DAPT：领域自适应继续预训练；在预训练底模上继续使用领域无标注文本优化语言模型目标，以适应领域分布；不能单独证明下游工作流正确。
+
+Task-Adaptive Pretraining / TAPT：任务自适应继续预训练；使用与特定下游任务更接近的未标注语料继续预训练；收益取决于语料、底模和任务，需与直接 SFT 对照。
+
+Continued Pretraining / CPT：继续预训练；在已有预训练模型上继续优化预训练语言目标，可用于领域或时间更新；与指令 SFT 的输入输出监督不同。
+
+Reinforcement Learning with Stock Prices / RLSP：基于股价反馈的金融模型适配方案；把新闻后价格变化转成弱标签/市场信号，易受非新闻因素混杂，不等同于干净的专家偏好或可验证因果奖励。
+
+FinBen：金融大模型综合评测基准；NeurIPS 2024 发表版包含 42 个数据集、24 项任务，覆盖信息抽取、文本分析、问答、生成、风险、预测、决策和英语/西班牙语；不代表金融生产安全或所有市场区域。
+
+MedAlign：临床人员编写的 EHR 指令跟随评测集；包含跨专科临床指令和纵向病历，弥补考试型医学 QA 与真实文书工作流之间的差距；数据需遵循研究使用协议。
+
+TIMER：面向纵向电子病历的时间感知指令建模与评测方案；将答案绑定病历时间戳，并控制训练/评估问题在患者时间线中的分布；论文结果仍受单一数据环境、合成指令和公平性评估缺口约束。
+
+## 2026-10 推理性能分析
+
+Arithmetic Intensity：算术强度；指定工作量的 FLOPs 除以指定内存层级实际搬运的字节数，单位为 FLOPs/byte。权重、KV、激活、workspace 和通信流量的取法会改变结果，因此教学估算必须标明分子、分母和层级，不能当作 profiler 实测。
+
+Roofline Ridge Point：Roofline 脊点；计算峰值除以对应内存层级带宽得到的算术强度交叉点。只有运算精度、kernel 与带宽层级匹配时，才能用它做第一层判断；它不包含请求队列和完整服务开销。
+
+Open-loop Load：开放环负载；按预先定义的请求到达过程发送请求，不因响应变慢而主动降低计划到达率。需要同时报告到达间隔、burstiness、客户端排队及丢弃策略；把全部请求在 t=0 同时发出只测有限 cohort，不能代表稳态开放环流量。
+
+Closed-loop Load：闭环负载；固定一定数量的客户端 worker/在途请求，通常在一个请求完成后才发出下一个。系统变慢时实际到达率也可能下降，因此它与固定请求率压力测试回答的问题不同。
+
+Pass^k：重复运行可靠率指标；在 k 次独立运行均成功时计为通过，汇总其概率用于估计相同任务多次尝试都成功的稳定性。它不同于 pass@k（至少一次成功）；运行相关性、采样策略和任务难度分布都会影响解释。
+
+BrowserGym：网页 Agent 实验框架；提供统一观察/动作接口和实验工具，并接入多个既有 benchmark。它不统一各 benchmark 的任务、难度或 grader。
+
+ToolSandbox Milestone / Minefield：ToolSandbox 中的过程事件标记；milestone 表示任务所需的关键动作或状态节点，minefield 表示必须避免的危险/错误状态。两者依赖任务专家定义，不应代替最终状态验证。
+
+METR Time Horizon：METR 任务时间跨度指标；依据低上下文专家完成人类任务的时间刻画任务难度，再拟合 Agent 成功率曲线。它不是 Agent 可自主运行的真实持续时长，也不是通用生产能力保证。
+
+Executable-contract Audit：可执行合同审计；将工具文档/schema 中的前置条件与状态效果对照实现、运行环境和 grader 实际读取字段的检查方法。发现潜在可触达缺陷不等同于 Agent 已触发该缺陷或榜单结果已被改变。

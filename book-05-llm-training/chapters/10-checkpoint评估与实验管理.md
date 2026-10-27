@@ -88,7 +88,7 @@ C_{\mathrm{resume}}=
 ```math
 M_{\mathrm{missing}}=
 \{u\in C_{\mathrm{resume}}\mid
-\neg\operatorname{available}(u)\}
+\neg\mathrm{available}(u)\}
 ```
 
 `M_missing` 为空时，只能说明恢复字段在文件层面齐全；仍需验证分片布局、数值有限性、数据 cursor 和恢复后的一步轨迹。若集合非空，就应明确这是“部分状态 checkpoint”，不能把它直接描述成可无缝恢复训练的版本。
@@ -274,6 +274,10 @@ R_{\mathrm{resume}}=
 
 分布式训练还多一层风险：某个 rank 的 shard 写完，不代表整个 checkpoint 已经可读。发布一个 checkpoint 前，应确认各 rank 的文件、索引和元数据都已落盘，并让读取端能够发现“未完成写入”的状态，而不是把半套 shard 当成最新版本。对象存储上的临时前缀、完成标记或 manifest 都是实现手段；关键是读取者能区分正在写入和完整发布的 artifact。
 
+以 PyTorch 2.14 的 Distributed Checkpoint（DCP）为例，分布式 API 可以让多个 rank 按 state dict 保存和读取状态，并依据加载端的分片布局重新分配张量；这解决的是“分布式状态如何写读和重分片”的问题。DCP 的协调写入流程会在各 rank 数据写完后写入 metadata，并标记 checkpoint 成功；应用仍要决定何时发布自己的版本指针、如何校验 manifest，以及存储后端是否支持所需的可见性和原子性。异步保存返回的 future 要完成后，才能把新版本公布给读取者。异步也有代价：staging 可能复制每个 rank 的 checkpoint 状态，抬高 CPU 或 pinned-memory 峰值；同时排队多个未完成写入会继续增加内存压力。DCP 文档还明确指出，保存的 state dict 不保证跨 PyTorch 版本向后兼容，因此切换训练环境时必须执行真实恢复演练。
+
+以 PyTorch Distributed Checkpoint（DCP）为例，分布式 API 可以让多个 rank 按 state dict 保存和读取状态，并依据加载端的分片布局重新分配张量；这解决的是“分布式状态如何写读和重分片”的问题。应用仍要定义一份 checkpoint 何时算完整：所有 rank 的写入是否成功、索引是否可读、manifest 和校验信息是否齐全、恢复程序是否能解释这些字段。异步保存还要等待写入 future 完成后再发布版本指针。DCP 的 API 成功返回不等价于跨对象存储事务提交，也不等价于跨 PyTorch 版本的永久兼容；这些边界要按使用的 PyTorch 版本和存储后端核对。
+
 因此，说明 checkpoint 恢复时，不能只停留在“调用 `load_state_dict`”。完整流程应先验证 artifact 和版本，再恢复所有训练状态，最后用 loss、学习率、step、token 增量和数据游标做一个短探针；如果某一项偏离，就根据偏差类型定位，而不是盲目继续训练。
 
 ## 5. 为什么不能只看最后一个 checkpoint
@@ -422,16 +426,55 @@ Base model 训练阶段也需要下游 benchmark。
 3. 可能只反映某一类能力。
 4. 分数提升可能没有统计显著性。
 
+### 8.1 Benchmark 分数由一份评测协议产生
+
+一个分数不只由模型权重决定。评测至少要固定模型 checkpoint 与 tokenizer、chat template、benchmark 数据和 split、few-shot 示例及顺序、prompt、生成参数、答案抽取和评分器、评测框架版本。可以把一次评测记成协议对象：
+
+```math
+E=(c,v_{tok},v_{template},D_{task},S_{split},P,F,G,M,H)
+```
+
+这里 `c` 是 checkpoint，`D_task` 和 `S_split` 是任务数据及划分，`P` 是 prompt/few-shot 配置，`F` 是输入格式，`G` 是生成设置，`M` 是 metric/scorer，`H` 是 harness 及其版本。只有关键字段一致，两个分数才是在同一把尺子上测得。实际报告还要保留逐样本输入、模型输出、解析结果和评分，便于重算指标与定位异常。
+
+代表性评测研究和工具分别处理不同层次的问题：
+
+| 方案 | 针对的问题与核心做法 | 证据和限制 | 可继续改进的方向 |
+| --- | --- | --- | --- |
+| HELM | 过去模型评测覆盖的场景不一致，且常只报准确率。HELM 先按场景和指标组织评测，再在固定条件下统一运行；其核心集合覆盖 16 个场景、7 类指标，并发布原始 prompts/completions。 | 论文报告，在其选定的 core scenarios 上，模型平均覆盖率由此前 17.9% 提高到 96.0%。这是 2022 年论文所定义的场景集合和评测设置，不代表覆盖了所有真实用例，也不意味着多指标可无损压成一个总排名。 | 保留共同核心套件以便横向比较，同时增加目标领域、地区/语言和新出现任务的独立切片；分别报告每种指标，避免综合分数掩盖取舍。 |
+| lm-evaluation-harness（lm-eval） | 不同研究把任务实现、提示、答案解析和模型接入散落在不同代码中。lm-eval 用统一接口和 YAML/Python task 把数据、prompt、请求类型、后处理和指标封装起来，目标是可复用地执行各种评测。 | “Lessons from the Trenches”把它定位为非规定 benchmark 的 orchestration library：执行过程更容易复核，但它不会替使用者决定 benchmark 是否有代表性；任务定义和 harness 版本变化仍会改变分数。 | 报告精确 task/version、代码 commit、模型/tokenizer、few-shot 与 generation 参数；保存样本级 outputs，避免只给一个可以被不同实现重新解释的总分。 |
+| Dror et al. 的 NLP 显著性检验指南（ACL 2018） | 同一批题同时交给两个 checkpoint，按题目配对比较，减少题目难度差异对比较的干扰；按任务和 metric 选择 McNemar、bootstrap、随机化等检验，而不是对所有指标套同一个公式。 | 统计检验回答“观察到的差异是否可能由抽样波动造成”，不回答提升是否对业务重要。有限测试题的不确定性也不涵盖训练 seed 方差、prompt 选择或 scorer 偏差。 | 同时报差值、区间和预先声明的最小有意义提升；对多个任务/指标控制多重比较；必要时增加独立训练 seed，而不是只扩大同一测试集。 |
+
+这几类工作不能互相替代：HELM 主要规定“看哪些场景和维度”，lm-eval 主要解决“如何以可复核方式执行任务”，统计检验回答“观察到的差距有多不确定”。它们都不能单独证明某个 benchmark 完整代表了目标用户的真实能力。
+
 对于准确率类指标，样本数为 `n`、观测准确率为 `p` 时，独立同分布的粗略标准误可以写成：
 
 ```math
-\operatorname{SE}(p)\approx
+\mathrm{SE}(p)\approx
 \sqrt{\frac{p(1-p)}{n}}
 ```
 
 它不是所有评测的完整置信区间，尤其不适用于有相关样本、生成式评分或复杂 judge 的场景，但足以提醒我们：几十道题上的几个百分点变化，未必比评测噪声大。更可靠的比较通常保留逐样本结果，使用配对样本分析，并固定 prompt、解码参数、评判模型和随机种子。
 
 这个近似要求 n>0、0<=p<=1，并把样本近似视作独立同分布的伯努利观测；p=0 或 p=1 时标准误公式给出 0，却不代表没有不确定性，尤其当样本量很小或评测集经过筛选时。
+
+比较两个模型时，两个独立准确率的标准误并没有利用“同一道题同时测两个模型”的配对信息。令 `b` 是旧模型答对而新模型答错的样本数，`c` 是旧模型答错而新模型答对的样本数；新模型准确率减旧模型准确率为 `(c-b)/n`，McNemar 检验等配对检验主要看这两类不一致样本，而不是把两组总错误数当成互不相关。例如两模型在 1000 道题上各对 900 题，若 `b=c=30`，整体准确率相同；若 `b=10,c=30`，新模型净多答对 20 题，差值为 2 个百分点，但这是否稳定仍要结合不一致样本数量和检验区间判断。
+
+对连续分数或样本级奖励，可对同一题的 `(score_old, score_new)` 成对重采样，得到差值分布；不能分别独立重采样后再假装两组样本没有对应关系。还有两种不确定性要分开报告：在固定 checkpoint 上重采样测试题，估计题目样本的不确定性；改变训练 seed 或 few-shot 选择重复评测，观察训练和提示选择带来的波动。lm-eval 论文明确把 bootstrap 的题目分布波动与模型/提示随机性区分开。若同时筛查很多 benchmark、domain 和阈值，还会出现多重比较：应先声明主要指标和决策门槛，或对探索性比较做相应校正，避免从一长串结果里只挑显著项。检验选择应参照任务和指标性质，例如 [Dror et al. 的指南](https://aclanthology.org/P18-1128/)及其[常见 NLP 检验附录](https://arxiv.org/abs/1809.01448)；不能把 McNemar 或 paired bootstrap 当成所有生成式评测的通用按钮。
+
+以上配对统计方法是 NLP 评测中的工具，不是自动的“晋级门槛”。评测题目可能同源或重复，judge 评分可能不稳定，重复训练也可能成本很高。至少应公开效应大小和区间、样本/seed 数、主要检验及多重比较策略；在决策上还需把统计差异与实际影响阈值分开。
+
+### 8.2 Benchmark 污染：字符串重叠不是完整答案
+
+当 benchmark 的题干、答案或近似改写出现在训练数据里，模型可能记住评测内容而不是泛化出解决任务的能力。对开放数据，精确匹配和 n-gram overlap 可以筛出明显重复；但 paraphrase、翻译、模板变体或任务级泄漏可能绕过字面匹配。另一方面，一段短重叠也不必然说明模型记住答案，规则会产生误报。因此“没有检出字符串重叠”不能推出“确定无污染”。
+
+有代表性的研究采用了不同定义与访问条件：
+
+| 研究 | 解决什么问题、用了什么证据 | 主要限制 | 实际使用方式 |
+| --- | --- | --- | --- |
+| Oren et al., *Proving Test Set Contamination in Black-Box Language Models*（ICLR 2024） | 当闭源模型训练语料不可见时，比较基准 canonical 顺序与随机打乱顺序的序列似然。若模型显著偏好原始顺序，可在 exchangeability 等前提下按论文方法检测并给出精确假阳性保证；论文报告可检测小到 1.4B 模型、1000 题测试集和语料中少量出现的任务。 | 它检测的是模型行为中与特定记忆机制相符的信号，不是通用“污染证明器”。需要可取得序列似然及可交换题目假设；没检出不能证明训练数据干净，也不适用于所有打分接口。 | 将行为检测作为闭源模型审计的一条证据；记录 benchmark 的排序、可交换性和似然接口条件，并与已知语料扫描分开报告。 |
+| ConStat（NeurIPS 2024） | 把污染操作化为“主要 benchmark 上异常升高、但不能泛化到重述样本、同分布合成样本或同任务参考基准”的表现差距，并相对参考 benchmark 与模型量化该差距。 | 它检验的是表现的非泛化异常，不等同于证明原始样本确实进入训练集；判断依赖参考任务/参考模型的选择与可比性。 | 用重述/新采样/同任务参考集检查提升能否迁移；把结果写成污染风险或非泛化表现证据，不写成二元的“干净/不干净”认证。 |
+
+比较稳妥的做法是多证据并用：训练语料可访问时做精确与近似去重、来源时间核验和切分审计；语料不可访问时使用适合接口的行为检查，并准备新写、受控或隐藏的留出样本；对 flagged 样本回看原始输出和来源。每种方法的覆盖层级不同，必须报告访问权限、阈值、误报/漏报风险和未检查的污染类型。新 benchmark 也会被后续爬取进入训练数据，因此数据版本和评测集版本要一起管理，必要时轮换保留集。
 
 所以 benchmark 要和 validation loss、人工评测、回归测试一起看。
 
@@ -515,7 +558,7 @@ R_{\mathrm{run}}=
 ```math
 M_{\mathrm{repro}}=
 \{u\in U_{\mathrm{repro}}\mid
-\operatorname{missing}(u)\lor\operatorname{unresolvable}(u)\}
+\mathrm{missing}(u)\lor\mathrm{unresolvable}(u)\}
 ```
 
 ```math
@@ -677,7 +720,7 @@ J(c)=
 
 ## 15. 最小可运行的 checkpoint 与实验管理 demo
 
-下面的 demo 用标准库模拟一个小型训练记录。输入是 3 个 checkpoint、一次恢复探针、一个实验记录和两组对照实验；输出 checkpoint 完整性、PPL、domain regression、候选打分、保留存储、恢复连续性、实验记录完整性和对照差异。它不是生产级 checkpoint 管理器，而是把本章的字段和计算口径压缩成一段可运行的最小例子。
+下面的 demo 用标准库模拟一个小型训练记录。输入是 3 个 checkpoint、一次恢复探针、一个实验记录和两组对照实验；输出 checkpoint 完整性、PPL、domain regression、归一化打分、保留存储、恢复连续性、实验记录完整性和对照差异。这里故意保留一个明确的 toy 选择政策：先过稳定性、恢复完整性、安全、回归和领域门槛，再用事先给定的 validation loss 上限归一化，并将所有分量压到 0 到 1 后加权。这个 profile 假设 scaler-enabled FP16 训练，因此把 `scaler` 列为必需状态；若训练采用 BF16 或不使用 scaler，应按 run 配置把它标为 `not_applicable` 或从该 profile 的必需字段中移除。它不是生产级 checkpoint 管理器，也不代表行业通用权重。
 
 ```python
 import math
@@ -693,21 +736,21 @@ checkpoints = [
         "id": "ckpt_1000", "step": 1000, "tokens_b": 52.4, "train_loss": 2.44, "val_loss": 2.31,
         "domain_loss": {"general": 2.20, "code": 2.90, "math": 2.70},
         "bench": {"qa": 0.52, "math": 0.31, "code": 0.28},
-        "safety": 0.95, "regression_failures": 5, "stable": True, "size_gib": 180,
+        "safety": 0.95, "regression_failures": 5, "regression_cases": 100, "stable": True, "size_gib": 180,
         "resume_fields": {name: True for name in required_resume_fields},
     },
     {
         "id": "ckpt_2000", "step": 2000, "tokens_b": 104.9, "train_loss": 2.29, "val_loss": 2.18,
         "domain_loss": {"general": 2.08, "code": 2.74, "math": 2.52},
         "bench": {"qa": 0.56, "math": 0.38, "code": 0.34},
-        "safety": 0.94, "regression_failures": 4, "stable": True, "size_gib": 180,
+        "safety": 0.94, "regression_failures": 4, "regression_cases": 100, "stable": True, "size_gib": 180,
         "resume_fields": {name: True for name in required_resume_fields},
     },
     {
         "id": "ckpt_3000", "step": 3000, "tokens_b": 157.3, "train_loss": 2.20, "val_loss": 2.16,
         "domain_loss": {"general": 2.05, "code": 2.98, "math": 2.41},
         "bench": {"qa": 0.57, "math": 0.40, "code": 0.29},
-        "safety": 0.89, "regression_failures": 11, "stable": False, "size_gib": 180,
+        "safety": 0.89, "regression_failures": 11, "regression_cases": 100, "stable": False, "size_gib": 180,
         "resume_fields": {**{name: True for name in required_resume_fields}, "scaler": False, "data_position": False},
     },
 ]
@@ -735,14 +778,19 @@ run_a = {"data_version": "data_v5", "tokenizer": "tok_v2", "tokens_b": 104.9, "l
 run_b = {"data_version": "data_v5", "tokenizer": "tok_v2", "tokens_b": 104.9, "lr": 2e-4, "batch_tokens": 4_000_000, "seed": 42}
 run_bad = {"data_version": "data_v6", "tokenizer": "tok_v2", "tokens_b": 157.3, "lr": 2e-4, "batch_tokens": 4_000_000, "seed": 42}
 
+if not checkpoints:
+    raise ValueError("at least one checkpoint is required")
 base = checkpoints[0]
-base_val_loss = base["val_loss"]
 storage_budget_gib = 400
 latest_k = 2
 save_interval_steps = 1000
 step_seconds = 8
 checkpoint_write_seconds = 60
 expected_step_tokens_b = 0.05
+val_loss_cap = 4.0
+safety_gate = 0.92
+max_regression_failures = 5
+score_weights = {"val": 0.40, "benchmark": 0.30, "safety": 0.15, "regression": 0.15}
 
 
 def finite_number(name, value, *, positive=False, nonnegative=False):
@@ -784,6 +832,9 @@ def validate_checkpoint(ckpt):
     failures = ckpt.get("regression_failures")
     if isinstance(failures, bool) or not isinstance(failures, int) or failures < 0:
         raise ValueError("regression_failures must be a nonnegative integer")
+    positive_int("regression_cases", ckpt.get("regression_cases"))
+    if failures > ckpt["regression_cases"]:
+        raise ValueError("regression_failures cannot exceed regression_cases")
     probability("safety", ckpt.get("safety"))
     for name in ("domain_loss", "bench", "resume_fields"):
         if not isinstance(ckpt.get(name), dict) or not ckpt[name]:
@@ -816,13 +867,33 @@ for checkpoint in checkpoints:
     validate_checkpoint(checkpoint)
 if len({checkpoint["id"] for checkpoint in checkpoints}) != len(checkpoints):
     raise ValueError("checkpoint ids must be unique")
+for previous, current in zip(checkpoints, checkpoints[1:]):
+    if current["step"] <= previous["step"]:
+        raise ValueError("checkpoints must be ordered by strictly increasing step")
+    if current["tokens_b"] <= previous["tokens_b"]:
+        raise ValueError("consumed tokens must increase with training step")
+benchmark_keys = set(base["bench"])
+for checkpoint in checkpoints:
+    if set(checkpoint["bench"]) != benchmark_keys:
+        raise ValueError("benchmark keys must match across checkpoints")
 validate_resume_probe(resume_probe)
+if resume_probe["checkpoint_id"] not in {ckpt["id"] for ckpt in checkpoints}:
+    raise ValueError("resume probe checkpoint_id must exist")
 positive_int("latest_k", latest_k)
 positive_int("save_interval_steps", save_interval_steps)
 finite_number("storage_budget_gib", storage_budget_gib, positive=True)
 finite_number("step_seconds", step_seconds, positive=True)
 finite_number("checkpoint_write_seconds", checkpoint_write_seconds, nonnegative=True)
 finite_number("expected_step_tokens_b", expected_step_tokens_b, positive=True)
+finite_number("val_loss_cap", val_loss_cap, positive=True)
+probability("safety_gate", safety_gate)
+positive_int("max_regression_failures", max_regression_failures)
+if set(score_weights) != {"val", "benchmark", "safety", "regression"}:
+    raise ValueError("score_weights must define every score component exactly once")
+for name, weight in score_weights.items():
+    finite_number(f"score weight {name}", weight, nonnegative=True)
+if not math.isclose(sum(score_weights.values()), 1.0, rel_tol=0.0, abs_tol=1e-9):
+    raise ValueError("score weights must sum to 1")
 
 
 def missing_fields(ckpt):
@@ -848,43 +919,76 @@ def domain_regressions(ckpt, threshold=0.05):
     ]
 
 
+def score_components(ckpt):
+    # The fixed cap is a project policy chosen before examining the candidates.
+    val_score = max(0.0, min(1.0, 1.0 - ckpt["val_loss"] / val_loss_cap))
+    benchmark_score = mean(ckpt["bench"].values())
+    regression_score = 1.0 - ckpt["regression_failures"] / ckpt["regression_cases"]
+    return {
+        "val": val_score,
+        "benchmark": benchmark_score,
+        "safety": ckpt["safety"],
+        "regression": regression_score,
+    }
+
+
 def score_checkpoint(ckpt):
-    bench_avg = mean(ckpt["bench"].values())
-    domain_penalty = 0.10 * len(domain_regressions(ckpt))
-    regression_penalty = 0.02 * ckpt["regression_failures"]
-    stability_penalty = 0 if ckpt["stable"] else 0.50
-    score = (base_val_loss - ckpt["val_loss"]) + bench_avg + ckpt["safety"]
-    score -= domain_penalty + regression_penalty + stability_penalty
+    components = score_components(ckpt)
+    score = sum(score_weights[name] * value for name, value in components.items())
     return round(score, 4)
 
 def changed_keys(a, b, ignore=("lr",)):
     if not isinstance(a, dict) or not isinstance(b, dict):
         raise ValueError("run configs must be mappings")
-    return [key for key in a if key in b and a[key] != b[key] and key not in ignore]
+    keys = set(a) | set(b)
+    if any(not isinstance(key, str) or not key for key in keys):
+        raise ValueError("run config keys must be nonempty strings")
+    return sorted(
+        key
+        for key in keys
+        if key not in ignore
+        and (key not in a or key not in b or a[key] != b[key])
+    )
 
 completeness = {ckpt["id"]: missing_fields(ckpt) for ckpt in checkpoints}
 ppl = {ckpt["id"]: perplexity(ckpt["val_loss"]) for ckpt in checkpoints}
 domain_report = {ckpt["id"]: domain_regressions(ckpt) for ckpt in checkpoints}
 score_table = [
-    {"id": ckpt["id"], "score": score_checkpoint(ckpt), "stable": ckpt["stable"]}
+    {
+        "id": ckpt["id"],
+        "components": {key: round(value, 4) for key, value in score_components(ckpt).items()},
+        "score": score_checkpoint(ckpt),
+        "stable": ckpt["stable"],
+    }
     for ckpt in checkpoints
 ]
 eligible_checkpoints = [
     ckpt
     for ckpt in checkpoints
-    if not missing_fields(ckpt) and ckpt["stable"]
+    if not missing_fields(ckpt)
+    and ckpt["stable"]
+    and ckpt["safety"] >= safety_gate
+    and ckpt["regression_failures"] <= max_regression_failures
+    and not domain_regressions(ckpt)
 ]
-best = max(eligible_checkpoints, key=score_checkpoint)
+best = max(eligible_checkpoints, key=score_checkpoint) if eligible_checkpoints else None
 
 latest_retained = sorted(checkpoints, key=lambda ckpt: ckpt["step"], reverse=True)[:latest_k]
-retained_ids = sorted({best["id"], *(ckpt["id"] for ckpt in latest_retained)})
+retained_ids = {ckpt["id"] for ckpt in latest_retained}
+if best is not None:
+    retained_ids.add(best["id"])
+retained_ids = sorted(retained_ids)
 retained_storage_gib = sum(ckpt["size_gib"] for ckpt in checkpoints if ckpt["id"] in retained_ids)
 save_overhead = round(checkpoint_write_seconds / (save_interval_steps * step_seconds), 4)
-tokens_per_step_b = (
-    (checkpoints[1]["tokens_b"] - checkpoints[0]["tokens_b"])
-    / (checkpoints[1]["step"] - checkpoints[0]["step"])
-)
-max_lost_tokens_b = round(save_interval_steps * tokens_per_step_b, 1)
+if len(checkpoints) >= 2:
+    tokens_per_step_b = (
+        (checkpoints[1]["tokens_b"] - checkpoints[0]["tokens_b"])
+        / (checkpoints[1]["step"] - checkpoints[0]["step"])
+    )
+    max_lost_tokens_b = round(save_interval_steps * tokens_per_step_b, 1)
+else:
+    tokens_per_step_b = None
+    max_lost_tokens_b = None
 
 loss_jump = abs(resume_probe["loss_after"] - resume_probe["loss_before"]) / resume_probe["loss_before"]
 token_jump = abs(
@@ -902,27 +1006,42 @@ manifest_required = [
     "git_commit", "data_version", "tokenizer_version", "model_config", "train_config",
     "env", "seed", "eval_script", "checkpoint_id", "metrics", "notes",
 ]
-manifest_missing = [name for name in manifest_required if name not in run_manifest]
+
+
+def manifest_value_present(value):
+    if value is None or value == "":
+        return False
+    if isinstance(value, (dict, list, tuple, set)) and not value:
+        return False
+    return True
+
+
+manifest_missing = [
+    name
+    for name in manifest_required
+    if name not in run_manifest or not manifest_value_present(run_manifest[name])
+]
 fair_lr_compare = changed_keys(run_a, run_b) == []
 bad_compare_changed = changed_keys(run_a, run_bad)
 
 diagnostics = {
-    "best_complete": completeness[best["id"]] == [],
-    "best_stable": best["stable"],
+    "best_exists": best is not None,
+    "best_complete": best is not None and completeness[best["id"]] == [],
+    "best_stable": best is not None and best["stable"],
     "resume_continuous": all(resume_diagnostics.values()),
     "storage_under_budget": retained_storage_gib <= storage_budget_gib,
     "manifest_complete": manifest_missing == [],
     "fair_lr_compare": fair_lr_compare,
     "bad_compare_detected": bad_compare_changed == ["data_version", "tokens_b"],
-    "safety_ok": best["safety"] >= 0.92,
-    "regression_ok": best["regression_failures"] <= 5,
+    "safety_ok": best is not None and best["safety"] >= safety_gate,
+    "regression_ok": best is not None and best["regression_failures"] <= max_regression_failures,
 }
 
 print("completeness=", completeness)
 print("ppl=", ppl)
 print("domain_report=", domain_report)
 print("score_table=", score_table)
-print("best_checkpoint=", best["id"])
+print("best_checkpoint=", None if best is None else best["id"])
 print("retained_ids=", retained_ids)
 print("retained_storage_gib=", retained_storage_gib)
 print("save_overhead=", save_overhead)
@@ -940,7 +1059,7 @@ print("diagnostics=", diagnostics)
 completeness= {'ckpt_1000': [], 'ckpt_2000': [], 'ckpt_3000': ['scaler', 'data_position']}
 ppl= {'ckpt_1000': 10.07, 'ckpt_2000': 8.85, 'ckpt_3000': 8.67}
 domain_report= {'ckpt_1000': [], 'ckpt_2000': [], 'ckpt_3000': ['code']}
-score_table= [{'id': 'ckpt_1000', 'score': 1.22, 'stable': True}, {'id': 'ckpt_2000', 'score': 1.4167, 'stable': True}, {'id': 'ckpt_3000', 'score': 0.64, 'stable': False}]
+score_table= [{'id': 'ckpt_1000', 'components': {'val': 0.4225, 'benchmark': 0.37, 'safety': 0.95, 'regression': 0.95}, 'score': 0.565, 'stable': True}, {'id': 'ckpt_2000', 'components': {'val': 0.455, 'benchmark': 0.4267, 'safety': 0.94, 'regression': 0.96}, 'score': 0.595, 'stable': True}, {'id': 'ckpt_3000', 'components': {'val': 0.46, 'benchmark': 0.42, 'safety': 0.89, 'regression': 0.89}, 'score': 0.577, 'stable': False}]
 best_checkpoint= ckpt_2000
 retained_ids= ['ckpt_2000', 'ckpt_3000']
 retained_storage_gib= 360
@@ -950,10 +1069,14 @@ resume_diagnostics= {'loss_continuous': True, 'lr_continuous': True, 'step_conti
 manifest_missing= []
 fair_lr_compare= True
 bad_compare_changed= ['data_version', 'tokens_b']
-diagnostics= {'best_complete': True, 'best_stable': True, 'resume_continuous': True, 'storage_under_budget': True, 'manifest_complete': True, 'fair_lr_compare': True, 'bad_compare_detected': True, 'safety_ok': True, 'regression_ok': True}
+diagnostics= {'best_exists': True, 'best_complete': True, 'best_stable': True, 'resume_continuous': True, 'storage_under_budget': True, 'manifest_complete': True, 'fair_lr_compare': True, 'bad_compare_detected': True, 'safety_ok': True, 'regression_ok': True}
 ```
 
-这个 demo 的关键是把“选哪个 checkpoint”拆成可解释的观察：先列出恢复字段缺失，再把不稳定版本排除在候选之外；随后比较 validation / PPL / domain / benchmark / safety / regression，最后查看实验记录、对照差异和保留存储。输出的每一项都对应正文中的一个问题，读者可以把 toy 数据替换成真实训练日志，而不必依赖一个隐藏的总判断。
+这里 validation loss 用预先固定的 `val_loss_cap=4.0` 映射到 `[0,1]`，benchmark 和 safety 本身处于 `[0,1]`，regression 用失败数除以明确的样本数得到失败率后再转成得分；权重和为 1。先执行硬门槛，再计算加权分，所以较高平均分不能抵消缺状态、训练不稳定、安全失败或明显 domain regression。更换 loss cap、权重或门槛会改变选择结果，故这些配置必须作为实验记录的一部分，不能在看完分数后再挑一组有利权重。
+
+这个 demo 还刻意把几种常见边界显式处理：空 checkpoint 列表、重复/倒序 step、非递增 token 数、benchmark 键集合不一致会报错；无合格候选会返回 `None`；缺失配置字段会作为差异报告，不会被静默漏掉。示例使用三份结构完整的 checkpoint，因此正常路径会选择 `ckpt_2000`；如果把三个 checkpoint 的 `stable` 都设为 `False`，`best_checkpoint` 会返回 `None`，latest 保留策略仍可独立计算。
+
+这个 demo 的作用是把“选哪个 checkpoint”拆成可解释的观察：先列出恢复字段缺失，再按硬门槛筛候选；随后比较 validation / PPL / domain / benchmark / safety / regression，最后查看实验记录、对照差异和保留存储。它只模拟记录与决策，不实现模型训练、分布式 checkpoint、统计检验或生产存储事务。
 
 ## 16. 常见误判与检查路径
 
@@ -1010,18 +1133,46 @@ train loss 降低只说明模型更好地拟合了当前训练目标。数据重
 
 真正成熟的训练记录，应该让一个没有参与原实验的人回答三个问题：这份参数从哪里来，为什么选择它，以及如果恢复或复现失败，缺少哪一段证据。checkpoint、评估和实验管理并不是三个互不相干的后台任务，而是同一个训练结论的三个观察面。
 
-## 18. 资料与进一步阅读
+## 18. 章节练习：把评测分数还原成可核查的证据
+
+### 练习一：固定评测协议
+
+选两个 checkpoint 和一个生成式 benchmark，列出 `E` 中每个字段的实际值：checkpoint revision、tokenizer/chat template、数据与 split、few-shot 样本及顺序、prompt、generation 参数、答案抽取器、metric 和 harness commit。故意只更换 chat template 或 harness 版本重跑一小批样本，保存逐样本 outputs，判断分数变化来自模型还是评测协议。
+
+### 练习二：同题配对比较
+
+构造 100 道题的两个模型结果，分别统计两者都答对、都答错、只有旧模型答对和只有新模型答对的数量。计算准确率差；再说明为什么只知道两个模型各自的准确率无法恢复 discordant-pair 信息，以及 paired bootstrap 或 McNemar 检验可以回答什么、不能回答什么。补充一个实际最小提升阈值，区分统计显著与决策有意义。
+
+### 练习三：区分题目波动、训练 seed 和提示波动
+
+固定一个 checkpoint 做题目 bootstrap；固定题目并更换训练 seed；固定模型并更换 few-shot 顺序。分别记录三类结果分布，说明每一类重采样在估计哪种不确定性，以及为什么只扩大同一个 benchmark 的题目数不能替代多 seed 训练。
+
+### 练习四：污染审计方案
+
+分别为公开训练语料可访问和闭源模型不可访问两种情形，设计一套 contamination audit。至少覆盖精确/近似重叠、时间切分或新写留出题、样本级输出复核，以及 Oren 顺序似然检验或 ConStat 式泛化差距中的一种。列出每种证据的访问条件、误报/漏报方式，并写出为什么审计结论应报告风险层级而不是“绝对干净”。
+
+### 练习五：解释多目标 checkpoint 选择
+
+对照本章 demo 的三个 checkpoint，逐项计算归一化 validation、benchmark、safety 和 regression 分量；先应用稳定性、恢复字段、安全和 domain 门槛，再比较剩余候选。改变 validation loss 的归一化上限或各项权重，观察最佳候选是否变化，并说明这些变化体现了目标偏好，而不是模型事实本身改变。
+
+## 19. 资料与进一步阅读
 
 本章涉及的框架行为优先以官方文档为准，机制和方法论再参考原始论文：
 
 - [PyTorch Saving and Loading a General Checkpoint](https://pytorch.org/tutorials/recipes/recipes/saving_and_loading_a_general_checkpoint.html)：说明如何保存模型、优化器、epoch/step 等恢复状态；具体字段仍需按训练框架补充。
-- [PyTorch Distributed Checkpoint](https://pytorch.org/docs/stable/distributed.checkpoint.html)：说明分布式 checkpoint 的保存、加载和 state-dict 抽象，适合核对 sharded artifact 的接口边界。
-- [PyTorch Reproducibility Notes](https://pytorch.org/docs/stable/notes/randomness.html)：说明随机种子、确定性算法和跨平台复现的限制；官方明确提醒完全复现并非所有环境都能保证。
+- [PyTorch Distributed Checkpoint 2.14](https://docs.pytorch.org/docs/2.14/distributed.checkpoint.html)：说明分布式 checkpoint 的保存、加载和 state-dict 抽象，适合核对 sharded artifact 与 load-time resharding 的接口边界；事务式发布和跨版本兼容仍需应用验证。
+- [Asynchronous Saving with Distributed Checkpoint 2.14](https://docs.pytorch.org/tutorials/recipes/distributed_async_checkpoint_recipe.html)：说明异步 staging/write future 路径以及保存与训练计算重叠时需要等待完成的生命周期。
+- [PyTorch Reproducibility Notes 2.14](https://docs.pytorch.org/docs/2.14/notes/randomness.html)：说明随机种子、确定性算法和跨平台复现的限制；官方明确提醒完全复现并非所有环境都能保证。
 - [Hugging Face Perplexity of fixed-length models](https://huggingface.co/docs/transformers/perplexity)：说明 causal language model 在固定长度窗口下计算 perplexity 时的 token shift、stride 和统计口径。
-- [Hugging Face Transformers Trainer](https://huggingface.co/docs/transformers/main/en/main_classes/trainer)：说明 `save_strategy`、`resume_from_checkpoint`、`load_best_model_at_end` 和 `metric_for_best_model` 等训练管理参数的实际语义。
+- [Hugging Face Transformers Trainer v5.19.0](https://huggingface.co/docs/transformers/v5.19.0/main_classes/trainer)：说明 `save_strategy`、`resume_from_checkpoint`、`load_best_model_at_end` 和 `metric_for_best_model` 等训练管理参数的实际语义；该页提示 v5.20.2 已发布，本章固定到实际打开核验的 v5.19.0 页面，目标环境升级后应再复核。
 - [MLflow Tracking](https://mlflow.org/docs/latest/ml/tracking/)：说明记录参数、指标和 artifacts，以及比较 runs 的实验追踪思路；它是工具实践，不是对任何项目的唯一架构要求。
-- [PyTorch Fully Sharded Data Parallel](https://pytorch.org/docs/stable/fsdp.html)：说明参数、梯度和 optimizer state 在 FSDP 下的分片边界。
+- [PyTorch Fully Sharded Data Parallel 2.14](https://docs.pytorch.org/docs/2.14/fsdp.html)：说明参数、梯度和 optimizer state 在 FSDP 下的分片边界。
 - [ZeRO: Memory Optimizations Toward Training Trillion Parameter Models](https://arxiv.org/abs/1910.02054)：说明 optimizer、gradient 和 parameter 分片如何降低训练内存，论文中的实现和硬件假设不能直接等同于每个 runtime 的 checkpoint 格式。
 - [Attention Is All You Need](https://arxiv.org/abs/1706.03762)：Transformer 的原始论文；本章引用其训练状态和模型配置的背景，不把论文中的实验设置当成现代训练系统的默认配置。
+- [Holistic Evaluation of Language Models（HELM）](https://arxiv.org/abs/2211.09110)：比较统一场景覆盖、多指标评估和原始输出发布；论文中的场景集合是覆盖取舍，不是所有真实任务的全集。
+- [Lessons from the Trenches on Reproducible Evaluation of Language Models](https://arxiv.org/abs/2405.14782)：总结 lm-eval 作为可扩展评测执行框架的设计、prompt/版本记录、原始输出和统计不确定性实践；框架本身不决定 benchmark 是否代表目标能力。
+- [The Hitchhiker's Guide to Testing Statistical Significance in Natural Language Processing](https://aclanthology.org/P18-1128/) 与 [Recommended Statistical Significance Tests for NLP Tasks](https://arxiv.org/abs/1809.01448)：提供 NLP 任务成对统计检验与多重比较的入口；具体方法应按 metric、样本依赖和研究设计选择。
+- [Proving Test Set Contamination in Black-Box Language Models](https://proceedings.iclr.cc/paper_files/paper/2024/hash/46e624c244cff669223d488defd4e835-Abstract-Conference.html)：研究通过 canonical/shuffled benchmark 顺序似然检测闭源模型的污染信号；只在其假设与可访问接口条件下成立。
+- [ConStat: Performance-Based Contamination Detection in Large Language Models](https://proceedings.neurips.cc/paper_files/paper/2024/hash/a7f89793b9e6f8c6568dbbb6ff727b9b-Abstract-Conference.html)：以异常且不能泛化的 benchmark 表现差距定义污染信号；不等价于训练语料中样本包含关系的直接证明。
 
 官方文档适合核对 API 和版本行为，论文适合核对机制与方法来源，实验平台文档适合了解记录方式。至于保存频率、恢复偏差阈值、domain 划分、评估权重和复现容差，都必须结合目标数据、模型规模、硬件和业务风险重新测量。

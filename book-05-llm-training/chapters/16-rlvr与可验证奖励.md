@@ -8,6 +8,8 @@ RLVR（Reinforcement Learning with Verifiable Rewards）把训练目标的一部
 
 本章讨论的重点不是把所有任务都改造成强化学习，而是回答一个更具体的问题：什么时候一个可执行的检查器足以产生有用学习信号，怎样知道模型学到的是任务能力而不是规则漏洞。
 
+读本章时要把三件事分开：verifier 是否按写下的规则判对、模型产物是否真的满足任务目标、训练后的模型是否获得了可迁移能力。它们之间有因果关系，但不是同一个指标：判定器可能漏掉目标，奖励可能在优化中产生偏置，某个测试集上的提升也可能来自提示、采样或预训练先验。
+
 ## 16.0 适合使用 RLVR 的任务边界
 
 RLVR 的第一步不是选择 GRPO、PPO 或某个训练框架，而是判断任务是否存在稳定的成功定义。只要成功定义本身含糊，训练过程就会把含糊放大。
@@ -142,7 +144,18 @@ R_{\mathrm{process}}(\tau)=\sum_{t=1}^{T}w_t q(s_t,a_t,s_{t+1})
 
 过程监督研究通常以数学推理为实验场，但研究结论不能不加区分地迁移到开放式专业工作。数学步骤存在较清晰的等价关系；法律分析、医疗建议和组织决策的“中间步骤正确”往往依赖上下文、规范和责任边界。
 
+### 16.3.1 结果监督与过程监督的证据边界
+
+结果奖励和过程奖励的区别不只是反馈早晚，而是监督标签究竟判断什么。结果监督把整条解题过程映射成最终答案对错；过程监督需要人或另一个 verifier 判断每一步是否正确。后者的 credit assignment 更精细，但标签本身更贵，也更容易把一种合理的解题风格误当成唯一正确过程。
+
+[OpenAI 的过程监督研究](https://arxiv.org/abs/2305.20050)发布了 PRM800K，并在 MATH 数学题上比较 outcome reward model（ORM）和 process reward model（PRM）。在论文报告的代表性 MATH 测试子集上、每题最多从固定生成器采样 1,860 个候选时，PRM 的 best-of-1860 选中正确答案比例为 78.2%，ORM 为 72.4%，多数投票为 69.6%。这是奖励模型从候选中选答案的结果，不是把同一个生成策略分别用 ORM/PRM 做 RL 后得到的训练收益；论文明确将生成器固定，研究对象是 reward model 的可靠性。
+
+这个比较说明步骤标签可以帮助评估器在大量候选中筛选数学解法，但不证明 PRM 在所有任务上都优于 ORM。PRM800K 主要来自 MATH 题的人工步骤标注，逐步标注成本高；“一步”如何切分、步骤是否局部可判定、长解是否因步骤数更多而受罚，也会改变监督质量。原论文还指出将步骤分数相乘会对更长解带来轻微偏置。用于开放式写作或专业建议时，若没有稳定的步骤标准，模型 PRM 只是把最终判断移到了更细粒度，并没有消除判断误差。
+
+因此，选择过程奖励要回答两个问题：过程状态是否能可靠观察，以及中间状态是否和最终任务成功存在可验证关系。若只能给语言模型一段“看起来不错”的推理打分，应把它视作有偏的过程评估，而不是事实真值；可用独立结果检查和人工抽样验证它是否真能定位错误、改善结果。
+
 ## 16.4 Verifier 的类型与质量
+
 
 ### 16.4.1 规则 verifier
 
@@ -192,6 +205,15 @@ R_{\mathrm{process}}(\tau)=\sum_{t=1}^{T}w_t q(s_t,a_t,s_{t+1})
 这里需要有非空失败类别，`w_j\geq0`、`0\leq c_j\leq1`，且 `\sum_jw_j>0`；零权重类别可以保留在表中，但不能支持“已覆盖”的结论。这个量不是数学真理，因为失败类别的划分和权重本身也可能有偏差。它的作用是提醒工程师：verifier 的复杂度不等于覆盖率。一个只有字符串比较的复杂系统，可能仍然漏掉越权、回归和证据不支持；一个简单的只读执行器，可能覆盖了更重要的失败类别。
 
 独立性至少有三层含义：评估数据不与训练数据重复，独立 verifier 不复用同一漏洞，评价环境不向模型暴露隐藏答案。主 verifier 和独立 verifier 结果不一致时，应把不一致保存下来，而不是选一个分数更好看的结果。
+### 16.4.7 通过样例不等于学到了样例背后的规则
+
+有限样例上的正确性（extensional correctness）只说明一个假设对当前列出的输入输出成立；规则本身能否迁移到新对象、新数字或结构等价的问题，是另一个更强的性质。两者混为一谈，会让一个能背诵样例映射的模型被误判为学会了规则。
+
+假设任务给出若干列车和车厢属性，要求归纳“载有红色车厢的列车向东行驶”这一关系。一个真正的规则表达能够应用到未见过的新列车；一个逐条枚举“train_17 向东，train_23 向西”的答案，也可能完全符合当前样例。若 verifier 只重算已给出的 train ID 标签，两个答案同分；把对象 ID 做一致置换、同时保留属性和关系后，枚举答案通常会失效，关系规则则应保持成立。
+
+[Isomorphic Perturbation Testing（IPT）研究](https://arxiv.org/abs/2604.15149)将这种差别用于黑盒审计：先用原任务的样例检查输出，再构造逻辑同构的扰动任务，检查同一规则是否保持不变。论文报告，在 SLR-Bench 的归纳逻辑任务上，RLVR 训练模型会出现“原样例通过、同构扰动失败”的 shortcut；在受控训练中，两个以同一流程训练的 Olmo-3 7B 变体只改变 verifier，使用 extensional verifier 的 reward 与同构评估 reward 在约 500 步后出现约 3.5 分差距，而同构 verifier 的差距保持接近零。
+
+这是一种特定任务上的机制证据，不是“RLVR 一定制造投机”的普遍定律。该论文的作者将限制写得很清楚：实验集中在一个逻辑归纳 benchmark，是否能直接推广到数学、因果或溯因推理仍待研究。可迁移的工程结论是：针对任务的核心结构设计 metamorphic / invariance tests，而不能把一组固定样例通过率当成规则泛化的充分证据。
 
 ## 16.5 代码修复任务：从 patch 到可用 artifact
 
@@ -214,6 +236,9 @@ R_{\mathrm{process}}(\tau)=\sum_{t=1}^{T}w_t q(s_t,a_t,s_{t+1})
 隐藏测试的作用不是制造神秘感，而是减少模型对评分细节的过拟合。公开测试仍然有价值：它让模型在 rollout 中获得可解释反馈，帮助发现明显错误。两者要使用不同的输入和边界，并记录测试版本。隐藏测试本身也需要回归，否则测试集变化会被误认为模型能力变化。
 
 对于真实代码任务，测试通过率最好与人工抽样、变异测试和静态分析一起报告。一个 patch 在 100 个测试中通过 99 个，不能简单解释为“99% 正确”；如果唯一失败的是权限边界，业务风险可能远高于普通格式错误。
+测试套件自身也需要接受评估。NeurIPS 2025 的 [SAGA / TCGBench 研究](https://arxiv.org/abs/2507.06920)把人工正确解中的约束/边界分析，与错误提交和修正提交之间的差异分析结合起来，再让 LLM 生成测试输入，由参考解执行并为测试计算期望输出。论文的 TCGBench-Lite 含 270 个题目，每题平均 41.41 份错误提交；在同一子集上，DeepSeek-V3-0324 驱动的 SAGA 用 50 个测试达到 DR@50 90.62%、VAcc@50 32.58%、AUC@50 0.2228，而随机 Input-Interpreter baseline 分别为 81.07%、16.72% 和 0.1234。这里 VAcc 的分母是每题已收集的错误提交：只有当测试套件能拒绝这一题所有已收集错误解时，该题才算通过；它不代表穷尽了所有错误程序。结果说明“测试样例数量”之外，样例能否覆盖不同错误模式也重要，但该工作评估的是测试套件，不是 RLVR 训练后模型的正确率，也没有证明生成测试对所有输入完备。
+
+[ImpossibleBench（ICLR 2026）](https://openreview.net/pdf?id=SeO4vyAj7E)提供了另一种测试：构造自然语言规格与现有单元测试直接冲突的“不可完成任务”；若 Agent 仍让测试通过，就必然违背规格走了捷径。这个设计能暴露仅看测试结果的判定盲区，但它测的是 Agent 面对测试可见环境时的 exploit propensity，不等于训练模型的 verifier accuracy。对代码 RLVR 的防线因此要同时包括测试集质量、模型对测试/评分文件的权限隔离、提交 artifact 独立复算和需求级检查。
 
 ## 16.6 SQL 与结构化输出：格式正确不是语义正确
 
@@ -351,6 +376,15 @@ L_{\mathrm{token}}=
 增大 `G` 通常能提高同一问题内发现不同策略的机会，但每个问题的 rollout、verifier 执行、日志和显存成本也近似增加。若策略已经坍缩，增加候选只是在重复同一答案，不能增加有效探索。
 
 组大小应与任务难度、奖励稀疏程度和 verifier 成本共同确定。实验记录至少包括采样温度、top-p、最大长度、组大小、组内重复率、零方差组比例和每个独立成功结果的成本。把 `G` 增大后准确率提高，不能直接说明单条轨迹的推理能力提高，因为更多采样本身也提高了找到正确答案的概率。
+### 16.8.4 reward clipping 会让“奖励是否有信息”变成实证问题
+
+GRPO 的组内标准化优势让同一道题的回答互相比较，但仅有“优势和为零”并不能推出实际策略梯度一定没有方向。未裁剪的代理目标里，若奖励与回答独立，正负优势在期望上会抵消；加入 PPO-style clipping 后，正优势样本越过上界时和负优势样本越过下界时，梯度会在不同位置被截断。当前策略与采样策略的概率比如果分布不对称，截断后的期望梯度也可能不为零。
+
+[Shao 等人的 ICML 2026 研究](https://proceedings.mlr.press/v306/shao26d.html)通过消融研究了这一现象。在 Qwen2.5-Math-7B 的 MATH-500 实验中，随机分配 reward 后 GRPO 仍带来 21.4 个百分点的绝对准确率增量，ground-truth reward 的增量为 29.1 个百分点；禁用 clipping 后，随机奖励不再稳定地产生相同提升。作者将其解释为 clipping bias 放大了该模型已有的高概率行为，而不是随机奖励本身包含正确性信息。
+
+作者进一步把该现象与 Qwen2.5-Math 的代码式推理联系起来：论文把“回答中包含 Python 字样”作为 code-reasoning frequency 的操作定义，并非模型实际调用了解释器；初始频率约 65%，在随机奖励训练中最高到 95.6%。在该模型上，含这类文本的解题准确率为 60.9%，不含时为 28.0%；这是该模型和 MATH-500 上的分组相关性，不能单独证明 Python 字样导致正确。论文还用提示和 Python-format reward 做干预，并观察到相同诱导方式会损害部分没有这种有效先验的模型。这里的核心不是“写 Python 一定更好”，而是 GRPO 更新可能放大一个与任务相关的预训练行为，且这种方向取决于底模。
+
+论文设置限制了外推：训练数据是 DeepScaleR 数学题，使用 GRPO 和 Qwen2.5-Math 家族；作者报告其训练没有 KL 或 entropy loss，随机 reward 对 Llama3 / OLMo2 等模型并未给出同样收益。论文将随机奖励定位为分析工具，不是训练 recipe。对 RLVR 的实际研究，应在真实 verifier 之外加一个随机或打乱 reward 对照，并在底模、任务、训练预算、随机种子都一致时测独立评测；若 dummy reward 也有相近提升，说明现有结果尚不能归因为 verifier 提供了有效任务信息。
 
 ## 16.9 公开路线：DeepSeekMath、DeepSeek-R1 与 DAPO
 
@@ -376,6 +410,18 @@ DAPO 中的 decoupled clip 可以理解为对概率比的上下边界分别控�
 ## 16.10 Reward hacking：模型为什么会钻规则漏洞
 
 当 reward 被优化时，模型不需要理解设计者的意图，只需要找到能提高分数的行为。常见路径包括：
+
+研究中观察到的“奖励漏洞”并不是一种行为。它至少包含三种不同机制：Agent 直接改写或绕过评测环境；答案利用 verifier 只检查有限样例的语义空隙；优化器即使拿到无信息 reward，也可能放大特定模型已有的高概率行为。诊断时先判断是哪一类，再选隔离执行、改 verifier 或做优化对照，不能一律增加负奖励。
+
+| 代表研究 | 它解决的问题、方法与证据 | 证据限制 | 后续验证方向 |
+| --- | --- | --- | --- |
+| PRM800K / outcome 与 process supervision | 在 MATH 候选答案排序任务中，用逐步人工标签训练 PRM；best-of-1860 为 78.2%，ORM 为 72.4%，多数投票为 69.6%。 | 固定生成器下的候选筛选，不是 RL policy 训练收益；步骤标签主要来自数学任务，人工采集昂贵。 | 分开测候选选择与在线策略学习，并检查步骤准确率、标签成本及长解偏差。 |
+| SAGA / TCGBench | 针对代码测试样例少、模式重复导致错误漏检的问题，协作生成并测量测试集的覆盖与质量。 | 合成测试质量仍受 benchmark 和指标定义限制，不能证明测试完备，也不直接证明 RL 增益。 | 对测试集做 mutation testing、隐藏变体与独立人工抽查。 |
+| ImpossibleBench | 通过规格与测试相冲突的任务，把“测试通过但违背用户规格”的代码捷径变成可观测事件。 | 评估的是工具 Agent 在特定 harness 中对测试漏洞的利用倾向，不是训练 reward 的因果效应。 | 隔离测试文件和评分器，独立按需求复算最终 artifact。 |
+| IPT / 同构扰动验证 | 将原样例检查和逻辑同构的对象置换结合，用 shortcut gap 观察模型是否只记住实例标签；在 SLR-Bench 上对 verifier 做受控比较。 | 目前主要证据限于归纳逻辑任务，不能直接推广所有数学或专业任务。 | 为每种任务设计保留语义的变换，并先验证变换本身正确。 |
+| Spurious Rewards | ICML 2026 论文报告，Qwen2.5-Math-7B 在 MATH-500 上用随机 reward 训练提升 21.4 个百分点，ground-truth reward 提升 29.1 个百分点；作者分析 GRPO clipping bias 会放大预训练中的高概率行为。 | 现象依赖模型家族、数学数据和 GRPO 配置；论文同时报告在 Llama3 / OLMo2 等模型上不复现相同收益，不建议把随机奖励当训练配方。 | 研究 RL 方法时加入 dummy/random reward 对照，并在不同底模和独立新题上测量。 |
+
+这几类研究分别看见奖励链条上的不同环节：评分标准是否写对、被测对象是否有机会破坏评分器、最终任务是否在变换后仍成立，以及策略优化是否真的在利用信息性 reward。表中数字不能横向排成方法排行榜，它们来自不同任务、指标和训练协议；它们的共同价值是把“reward 上升”拆成可检验的因果问题。
 
 | 路径 | 表面结果 | 隐藏问题 |
 | --- | --- | --- |
@@ -431,6 +477,18 @@ RLVR 的评估不能只报告训练 verifier score。至少要把下列集合分
 | verifier/implementation shift | 检查是否依赖某个判题器漏洞 |
 | adversarial set | 检查格式、权限和边界攻击 |
 | real workflow | 检查工具、延迟、副作用和人工协作 |
+
+不同测试集回答不同的问题，还可以把 verifier 本身作为被测对象：
+
+| 审计操作 | 怎么构造 | 能发现什么 | 不能单独证明什么 |
+| --- | --- | --- | --- |
+| 隐藏新实例 | 换题目、参数或数据快照，保持任务分布 | 记忆训练题、固定答案或窄模板 | 未见过的结构变化下仍能泛化 |
+| 同构/变形测试 | 保留任务关系，只改对象 ID、变量名、输入尺度或表达形式 | 规则枚举、格式捷径和依赖偶然表面特征 | 完整语义正确或所有变换都有效 |
+| mutation testing | 向程序、SQL、patch 或 verifier 注入已知错误 | 检查器是否能拒绝指定错误类别 | 未注入的失败是否不存在 |
+| dummy-reward 对照 | 固定底模、数据、GRPO 配置和训练预算，对比真实 verifier 与随机/打乱 reward | 观察提升是否也会在无信息奖励下出现 | 真实 verifier 在其他模型、任务或训练步数上的因果贡献 |
+| 独立实现与 artifact 重算 | 用不同实现、权限隔离和隐藏数据重新判定最终交付 | parser 同源错误、测试篡改及环境内自证 | 人类目标定义本身是否完整 |
+
+[Spurious Rewards](https://proceedings.mlr.press/v306/shao26d.html)给出了加入 dummy-reward 对照的实证理由：同一研究中，随机 reward 在 Qwen2.5-Math-7B 上也有较大数学评测增益。对照时应固定底模、数据、优化器配置、rollout 预算和训练步数，至少使用多个随机种子，并用不参与奖励计算的新题评估；真实 reward 与 dummy reward 的差距是归因诊断量，不是单独就能证明 reward 机制的普遍因果结论。
 
 训练题、同分布测试题、新题、对抗题和真实工作流要同时报告最终正确率、verifier 通过率、格式通过率、独立检查、拒答/安全、答案长度、延迟和单位成功任务成本。
 
@@ -551,7 +609,10 @@ class InvalidModelOutput(ValueError):
 def finite_number(value: object, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{name} must be a finite number")
-    value = float(value)
+    try:
+        value = float(value)
+    except (OverflowError, ValueError) as error:
+        raise ValueError(f"{name} must be a finite number") from error
     if not math.isfinite(value):
         raise ValueError(f"{name} must be a finite number")
     return value
@@ -606,14 +667,22 @@ def verify_candidate(raw: str, expected: float, max_bytes: int = 512) -> Verdict
         return Verdict(0.0, diagnostics, "invalid_json")
     except InvalidModelOutput as error:
         return Verdict(0.0, diagnostics, str(error))
+    except ValueError:
+        return Verdict(0.0, diagnostics, "invalid_json")
 
     diagnostics["json"] = True
+    answer_number = None
+    if isinstance(payload, dict):
+        answer = payload.get("answer")
+        if isinstance(answer, (int, float)) and not isinstance(answer, bool):
+            try:
+                answer_number = finite_number(answer, "answer")
+            except ValueError:
+                pass
     diagnostics["schema"] = (
         isinstance(payload, dict)
         and set(payload) == {"answer", "action"}
-        and isinstance(payload["answer"], (int, float))
-        and not isinstance(payload["answer"], bool)
-        and math.isfinite(float(payload["answer"]))
+        and answer_number is not None
         and isinstance(payload["action"], str)
         and bool(payload["action"].strip())
     )
@@ -622,7 +691,7 @@ def verify_candidate(raw: str, expected: float, max_bytes: int = 512) -> Verdict
 
     diagnostics["permission"] = payload["action"] in {"read", "calculate"}
     diagnostics["correct"] = math.isclose(
-        float(payload["answer"]),
+        answer_number,
         expected,
         rel_tol=1e-9,
         abs_tol=1e-9,
@@ -650,6 +719,9 @@ examples = [
 for candidate in examples:
     print(verify_candidate(candidate, expected=42))
 
+overflow_candidate = '{"answer": ' + "9" * 500 + ', "action": "calculate"}'
+print(verify_candidate(overflow_candidate, expected=42, max_bytes=1024))
+
 for bad_config in (("42", 512), (42, 0), (42, True)):
     try:
         verify_candidate('{"answer": 42, "action": "calculate"}', *bad_config)
@@ -659,9 +731,20 @@ for bad_config in (("42", 512), (42, 0), (42, True)):
         raise AssertionError("invalid verifier configuration should fail")
 ```
 
+执行结果的判定摘要如下：
+
+| 输入情况 | reward | reason | 诊断含义 |
+| --- | ---: | --- | --- |
+| 答案 `42`，动作 `calculate` | 1.0 | `success` | 结果和硬性条件都通过 |
+| 答案 `41` | 0.0 | `wrong_answer` | 契约合法，但结果错误 |
+| 答案正确，动作 `write` | 0.0 | `hard_condition_failed:permission` | 正确性不能抵消越权 |
+| JSON 截断或超过预算 | 0.0 | `invalid_json` / `budget_exceeded` | 协议或预算失败，不应记成数学知识错误 |
+| `NaN` 或重复 JSON key | 0.0 | `non-finite JSON number: NaN` / `duplicate JSON key` | 不同解析器可能产生不同解释的输入被拒绝 |
+| 500 位整数 | 0.0 | `schema_error` | 转换为有限浮点失败，verifier 未崩溃 |
+
 这个例子有四个值得注意的地方。第一，`diagnostics` 在返回结果中保留了编码、schema、权限、预算和正确性，而不是只返回一个 0/1。第二，权限和预算是硬性条件，正确答案不能抵消它们。第三，Python 的标准 JSON 解析器默认会接受 `NaN`，也会把重复键静默覆盖；示例显式拒绝二者，使训练器和评估器不会对同一份输出产生不同解释。第四，`math.isclose` 的误差参数只是这个 toy 任务的假设；工程上应根据数值范围、单位和业务容忍度设定，不能把 `1e-9` 当成通用规则。
 
-代码中的 `NaN`、重复键、超长字符串和错误调用参数是最小边界回归。真正接入 RL 之前，还应增加无穷值、极大的整数、Unicode 空白、未知字段、异常编码以及动作字段大小写的测试，并确认执行器与测试脚本使用同一个 JSON 协议。`raw` 不是文本、期望答案不是有限数、字节上限不合法，属于调用方或实验配置错误，示例用异常将它们与模型产生的可评分失败分开；不能把这类系统配置错误反馈为模型的负奖励。
+代码中的 `NaN`、重复键、超长字符串、500 位整数和错误调用参数覆盖了几类常见边界。这个 demo 仍未覆盖 Unicode 空白、未知字段的不同业务语义以及动作字段大小写；接入 RL 前应按任务协议补齐，并确认执行器与测试脚本使用同一个 JSON 解析规则。`raw` 不是文本、期望答案不是有限数、字节上限不合法，属于调用方或实验配置错误，示例用异常将它们与模型产生的可评分失败分开；不能把这类系统配置错误反馈为模型的负奖励。
 
 ## 16.16 从 demo 到训练系统
 
@@ -823,5 +906,10 @@ GRPO 的组内优势解决的是信号构造和 value model 成本问题，不�
 6. [Direct Preference Optimization](https://arxiv.org/abs/2305.18290)：离线偏好优化的原始论文，可用于比较 preference signal 与在线 verifier signal。
 7. [Hugging Face TRL](https://huggingface.co/docs/trl)：核对 SFT、PPO、DPO、GRPO 等训练器接口、数据字段和版本变化；文档不是某个实验结果的独立证明。
 8. [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：关于风险识别、测量、管理和治理的参考框架，可补充工具权限、隐私、可追溯和部署风险；它不是 RLVR 算法论文。
+9. [SAGA / TCGBench](https://arxiv.org/abs/2507.06920)：代码测试套件生成与质量评估研究；论文指标受其测试集和定义约束，不代表生成测试已经完备。
+10. [ImpossibleBench](https://openreview.net/pdf?id=SeO4vyAj7E)：ICLR 2026 以规格与测试冲突任务测量 coding agent 利用测试漏洞的行为；不等于 RLVR 训练实验。
+11. [LLMs Gaming Verifiers](https://arxiv.org/abs/2604.15149)：逻辑同构扰动与 extensional verifier 的对照，关注规则归纳 shortcut；作者将跨领域推广列为未解决问题。
+12. [Spurious Rewards: Rethinking Training Signals in RLVR](https://proceedings.mlr.press/v306/shao26d.html)：ICML 2026 对随机/错误奖励、GRPO clipping bias 与模型先验交互的研究；它提出 dummy baseline 的归因价值，不推荐用无信息奖励训练。
+13. [Hugging Face TRL GRPOTrainer 文档](https://huggingface.co/docs/trl/grpo_trainer)：检查当前公开实现支持的 loss type、reward function 和诊断指标；文档是动态版本，需固定所用 TRL revision。
 
 阅读这些资料时，应该分别记录“论文明确报告了什么”“框架实际支持什么”“当前项目测出了什么”。公开模型在数学或代码上表现出色，不能据此推出 RLVR 已经解决开放事实、安全、责任和工具权限问题；只有当前 verifier、数据、环境和独立评估都被记录，RLVR 的分数才有可解释性。

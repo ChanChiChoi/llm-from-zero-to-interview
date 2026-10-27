@@ -221,6 +221,26 @@
     考察点：release radar、test-time compute、programmatic tool calling、risk-calibrated access、生态位迁移、专业 eval。
     回答框架：不要只背模型名和榜单分数。可以按十个层面回答：架构和长上下文上看 MoE、RoPE 变体、超长上下文和训练 recipe；后训练上看 RLVR、GRPO/DAPO、verifier 和 distillation；推理阶段看 fast/thinking/router、多候选、multi-agent 和 budget-aware test-time compute；工具层看 function calling、MCP、A2A、Skills、Connectors、programmatic tool workflow 和 trace；治理层看 risk-calibrated access、trusted access、fallback routing、model/system card；评估层看 HLE、BrowseComp、DeepSWE、SimpleQA、专业 cyber/bio/terminal agent eval 和自动化对抗评估。最后要能判断生命周期：有些热点会标准化成基础设施，有些会被更强模型、更长上下文、记忆和内置 agent 能力吸收，有些只是过渡 scaffold。
 
+49D. 数学过程评测和代码生成 benchmark 各自有哪些代表方案？它们解决了什么问题？
+    考察点：GSM-Symbolic 的受控变体、ORM/PRM/ProcessBench 的评测目标、EvalPlus 测试增强、LiveCodeBench 时间快照、SWE-bench 仓库级任务和 benchmark lifecycle。
+    回答框架：先按“题目变化、过程标签、代码测试、任务范围、时间新鲜度”区分测量对象。GSM-Symbolic 通过数值实例和 NoOp 干扰检查题面敏感性，不能据此证明内部推理机制；ORM 只看最终结果，PRM 给步骤反馈，ProcessBench 要求定位第一处错误，三者标签和用途不同。EvalPlus 用 seed、类型变异和差分执行找原测试漏掉的函数行为；LiveCodeBench 按日期收新题；SWE-bench 在 issue、仓库、patch 和目标/回归测试上评估 Agent。再说明每种方法的测试器、标注、预算、版本和污染风险，并按目标任务选路径，不合并百分比总分。证据及范围见[第七册第六章研究记录](research/reasoning-code-math-eval-depth-review-2026-10-27.md)。
+
+49E. 多模态和长上下文评估有哪些代表性 benchmark？它们分别解决什么问题，为什么不能直接比较总分？
+    考察点：VQA v2 互补图像对、POPE 对象幻觉探测、MMMU 学科推理、DocVQA/ANLS 格式边界、ChartQA 数值容差、AudioBench 任务覆盖、Video-MME/MLVU 长视频、MMLongBench-Doc 跨页证据、NIAH/Lost in the Middle/RULER/NoLiMa/LongBench 的难度路线。
+    回答框架：先按失败类型选择测量工具：VQA v2 检查答案是否随图像反事实变化，POPE 通过存在/不存在对象探测幻觉，MMMU 看专业知识与多模态推理，DocVQA 看单页读取但要审计 ANLS、prompt suffix 和输出长度，ChartQA 看读数与派生计算，AudioBench 分开语音/环境声/副语言，Video-MME/MLVU 覆盖视频时长和任务类型，MMLongBench-Doc 测跨页、多模态和不可回答问题。长文本侧用 NIAH 做检索冒烟、Lost in the Middle 查位置敏感、RULER 增加多针/组合复杂度、NoLiMa 降低词面重叠、LongBench 系列补真实多任务。再指出各 benchmark 的构题、指标、模态预处理和预算不同；每项只支持其任务协议下的结论，应并列报告切片并补目标分布 holdout，不能拼一个跨模态排行榜。证据及范围见[第七册第七章研究记录](research/multimodal-long-context-eval-depth-review-2026-10-27.md)。
+
+49F. RULER、NoLiMa、LongBench v2/Pro 和 MRCR v2 各自解决了哪类长上下文评测缺口？
+    考察点：合成复杂度控制、低词面重叠、自然任务/专家构题、固定复杂度极长长度曲线、长度单位与方法边界。
+    回答框架：先把测试拆开：RULER 在 NIAH 之外加入多 needle、多跳与聚合，用可控合成任务检查长度和复杂度；NoLiMa 降低问题与证据的词面重叠，检查模型是否依赖字符串捷径；LongBench v2 用 503 道高难多选题覆盖单/多文档、对话、代码和结构化数据，但其长度单位是 words；LongBench Pro 用 1,500 条中英文样本、任务分层和 token 长度细分，公开预印本最大 256K；DeepMind MRCR v2 固定相对简单的多轮共指任务并扩到 8M，适合测超长位置曲线，不代表复杂推理。最后说明 NIAH/Lost in the Middle 检查输入与位置，真实业务 holdout 负责目标分布；不同模型、harness、工具权限、长度单位和预算下的分数不能拼成一条排行榜。论文实验和版本边界见[第七册第十三章研究记录](research/long-context-effective-capability-depth-review-2026-10-27.md)。
+
+49G. Model Card、HELM、CheckList、G-Eval 和 Evaluation Card 分别补上了模型发布与评估证据链的什么缺口？
+    考察点：披露与验证的区别、共同评测条件、行为测试、LLM judge 校准、评测运行可追溯性、claim 粒度。
+    回答框架：Model Card 结构化发布者对用途、条件和限制的披露，Datasheet 记录数据来源和处理；二者都不核验声明真伪。HELM 用共同 scenario/adaptation 和多指标改善横向比较条件，但任务覆盖不等于目标流量。CheckList 将总分拆成最小功能、不变性和方向性行为测试，依赖清单与 oracle。G-Eval 将 rubric、细化步骤和 LLM 表单评分结合，相关性不等于事实正确性，必须在目标任务校准。Evaluation Card 汇集模型、benchmark 和运行元数据，仍不能验证底层结果。最后用 Claim Ledger 把每条最小 claim 绑定 revision、来源、harness、预算、反证和未知项；区分厂商结果、第三方 provider/config 测量与固定 harness 评测，缺失榜单行不等于零分。
+
+49H. 代表性 Agent 工作流评测各解决什么缺口？怎样区分它们支持的结论？
+    考察点：SWE-bench/SWE-Gym/Terminal-Bench、WebArena/OSWorld/BrowserGym、τ-bench/ToolSandbox/AgentDojo、GAIA/ScienceAgentBench/PaperBench、METR/Gaia2、工具合同审计。
+    回答框架：先按工作对象比较：SWE-bench 测仓库 issue 到 patch/测试，SWE-Gym 加入可执行环境和可用轨迹，Terminal-Bench 测终端工作流；WebArena 检查网站任务后的功能状态，OSWorld 测桌面应用与 GUI 流程，BrowserGym 是实验框架而非统一任务集或 grader。τ-bench 以领域 API/状态和 pass^k 测多轮可靠性，ToolSandbox 用 milestone 与 minefield 表达过程依赖和禁止事件，AgentDojo 分开报告正常效用、攻击下效用和攻击成功。GAIA 看综合助理答案，ScienceAgentBench 看可执行数据分析产物，PaperBench 看长程论文复现的部分进度。METR 的 time horizon 是人类任务耗时构成的难度刻度；Gaia2 测动态异步环境变化，两者不是 Agent 自主运行时长。最后说明 benchmark 分数绑定任务、环境、预算和 grader；工具合同审计要检查文档/schema、状态变化及 grader 读取字段，但潜在缺陷不证明 Agent 曾触发，也不证明排行榜变化。方法对照见[第七册第十五章研究记录](research/specialized-frontier-eval-cluster-depth-review-2026-10-27.md)。
+
 50. 如何设计一个最小泛化审计 demo？
    考察点：memorizer、rule model、underfit、分布偏移、overlap。
    回答框架：构造 train / validation / test 三份 toy 数据，比较 memorizer、可迁移规则模型和 underfit baseline 的分数；再加入线上新切片、checkpoint val loss 和 exact overlap 检查，输出 gap、worst slice、污染率和 early stopping 结论。
@@ -539,6 +559,66 @@
     考察点：显存估算、autocast dtype、GradScaler、checkpoint 重算、CUDA 状态。
     回答框架：构造 tiny MLP，先用参数量和 activation 元素数估算参数、梯度、AdamW state 和 activation 显存；用 `torch.amp.autocast` 检查输出 dtype；用 `GradScaler` 跑 scale、unscale、step、update；再用一个计数 block 对比普通 forward 和 checkpoint backward 的 forward 调用次数，最后打印 CUDA 是否可用和显存统计字段。
 
+48A. 如何从 `allocated`、`reserved` 和峰值时间线判断训练 OOM？
+    考察点：live tensor、caching allocator、独立峰值、首个 Adam step。
+    回答框架：`allocated` 是当前由活 tensor 占用的部分，`reserved` 是 PyTorch allocator 管理的 segment；不能把不同时间点的各项最大值相加，也不能把 `reserved-allocated` 直接认定为泄漏。按 forward、backward、首个 optimizer step、稳态 step、validation 和 save 分别复位峰值并采样。若首次 step 后占用永久增加，检查 Adam 的 m/v 是否惰性初始化；若只短暂尖峰，再查 foreach/fused workspace、all-gather 和保存副本。`empty_cache()` 不释放仍活着的 tensor。
+
+48B. FlashAttention 的 online softmax 怎样避免保存完整 score 矩阵？
+    考察点：tile、running max、归一化和、加权 value、HBM IO、计算复杂度。
+    回答框架：每行维护 `(m,l,o)`，分别是当前最大 score、相对该最大值的指数和、对应的 value 加权和。新 tile 到来时，先把旧 `l/o` 按新最大值重标定，再合入当前 tile 的指数权重，最后用 `o/l` 得到与全量 softmax 相同的结果。它减少完整 score/probability 中间量写回 HBM 和重读；精确 full attention 仍计算所有可见 query-key 对，乘加量仍随 `T²` 增长。
+
+48C. 变长 micro-batch 的梯度累积为什么不能简单平均每个 batch 的 mean loss？
+    考察点：有效 target 数、窗口分母、DDP rank averaging、GradScaler 生命周期。
+    回答框架：若两批 token-mean loss 为 0.60/2 targets 和 0.90/6 targets，等 batch 平均是 0.75，而全窗口 token mean 是 `(2×0.60+6×0.90)/8=0.825`。应先累计 loss sum 与有效 target 数，再按全窗口分母归一化；在 DDP 默认 rank 梯度平均下，rank 的局部 loss sum 需乘 `world_size/global_valid_targets`。FP16 accumulation 期间 scale 保持不变，窗口完成后才 unscale、clip、`scaler.step` 和 `update`。
+
+48D. 8-bit Adam 的 optimizer state 为什么不能只说“显存变成四分之一”？
+    考察点：两组动量、blockwise scale、dynamic quantization、FP32 update、稳定性。
+    回答框架：理想 payload 中 Adam 的两个 FP32 moment 从 8 bytes/parameter 降至约 2 bytes/parameter，但块 scale、padding、其它 tensor 和 allocator 不会消失。代表实现按 block 归一化并量化状态，更新时在寄存器中反量化到 FP32，算完再量化；离群值、embedding 状态和参数分组会影响误差。应把节省量绑定到实现与模型，并通过 loss、PPL、梯度/状态异常和吞吐做质量门禁。
+
+48E. QLoRA 中 NF4、Double Quantization 和 paged optimizer 分别省哪一项？
+    考察点：冻结底座存储、scale 元数据、瞬时 optimizer 峰值、激活。
+    回答框架：NF4 压缩冻结 base weights；Double Quant 再压缩 NF4 block 的 scale 元数据；paged optimizer 处理长序列 batch 下 optimizer state 的瞬时显存尖峰。它们不等价：Double Quant 不省 activation，paged optimizer 可能触发 Unified Memory 迁移；冻结底座仍须参与 forward，并为 adapter 梯度提供反向路径。需分别预算 base、adapter state、activation、临时量并验证量化后的任务质量。
+
+48F. Activation checkpointing 应如何比较全层重算与 selective recompute？
+    考察点：边界激活、重建长度、计算代价、张量级选择、论文配置。
+    回答框架：分段重算保留边界并在 backward 重建段内激活，理想链式模型可写成约 `(K+L/K)A`，不代表真实峰值按 `1/K` 缩小。全层重算省内存但重复更多计算；selective recompute 应按张量大小、重建 FLOPs 和实测 peak 选择。Korthikanti 等人的 22B 单层实验报告 baseline 19.6 ms、full recompute 27.2 ms、selective 20.9 ms、selective+SP 20.3 ms；这些是指定 Megatron/A100 配置结果，不能外推成固定倍率。
+
+48G. FP8 的 E4M3/E5M2、delayed scaling 和 block scaling 如何取舍？
+    考察点：精度与动态范围、amax、历史滞后、分块元数据、硬件支持。
+    回答框架：E4M3 尾数较多、精度相对高，E5M2 指数范围更大，常按 forward/backward 的数值需求分工。delayed scaling 用 amax history 选 scale，统计成本较低但新尖峰可能饱和；block scaling 为局部值组单独缩放，减轻跨张量动态范围冲突，但增加 scale 元数据并要求对应 kernel/硬件。应以目标模型的溢出、误差、吞吐和质量消融选择，不由“FP8”标签推断收益。
+
+48H. HELM 和 lm-evaluation-harness 分别解决什么评测问题？
+    考察点：评测覆盖、任务定义、执行框架、可比性、原始输出。
+    回答框架：HELM 先回答“应该覆盖哪些场景和指标”，用共同 scenarios、多指标和公开的样本级 prompts/completions 提高结果可比性；它仍受论文选定场景、可行性和指标覆盖约束。lm-eval 主要回答“如何统一、可复核地执行不同任务”，将任务配置、模型请求、后处理和 metric 放进可复用 harness；其维护者的复现经验总结也强调评测对 setup 敏感，因此要锁定 task/harness revision、模型/tokenizer/template、generation 参数并保存逐样本输出。两者都不替用户判断 benchmark 是否代表真实目标。MT-Bench/Chatbot Arena 主要测开放式偏好，ConStat 提供不能迁移到改写/同任务样本的可疑行为信号，线上实验才观察产品结果；这些结论不能互相替代。
+
+48I. 如何区分 benchmark overlap 检查、Oren 顺序似然检验和 ConStat？
+    考察点：语料访问、字面匹配、黑盒行为、非泛化表现定义。
+    回答框架：精确/近似 overlap 直接检查可访问训练语料，能找出文字重合但会漏掉改写、翻译和任务级泄漏，也可能误报。Oren et al. 比较 canonical 与 shuffled benchmark 的序列似然，可在论文假设下审计语料不可见的模型，但需要似然接口和题目 exchangeability；未触发不等于无污染。ConStat 将主要 benchmark 上的异常高分不能迁移到重述/参考任务的差距视作污染信号；它量化非泛化表现，不证明训练集包含原样本。最好结合来源/时间审计、新写留出集、样本输出检查和这些行为方法，并报告未检查范围。
+
+48J. 为什么同一批题上的 paired comparison 比独立比较准确率更有信息？
+    考察点：discordant pairs、McNemar/paired bootstrap、样本波动与 seed 方差。
+    回答框架：同题配对可以控制题目难度。二元对错比较需要统计“旧模型对而新模型错”和反方向的不一致题；McNemar 关注这两个 discordant counts，paired bootstrap 对同一题的两边分数一起重采样。测试题 bootstrap 估计题目样本波动，不能替代训练 seed 或 few-shot 选择的重复实验；同时报告效应大小/区间，并把统计显著性与业务最小提升分开。
+
+48K. 多目标 checkpoint 总分如何避免把不同量纲随意相加？
+    考察点：硬门槛、归一化、预注册权重、Pareto 候选。
+    回答框架：先按训练稳定性、恢复完整性、safety、回归和关键 domain 设置不可妥协的门槛；再把 validation loss、benchmark、safety、regression 和推理成本映射到明确定义的共同尺度，提前声明方向、上限/基线和权重。加权总分仅服务于该项目的目标偏好；若候选在质量与成本间互有胜负，应保留 Pareto 候选。不能在看完结果后再改 cap/权重，也不能让总分抵消安全失败。
+
+48L. GPQA、IFEval 和 LiveBench 分别解决什么测量问题，彼此能否替代？
+    考察点：专家构题与验证、规则化指令判分、时间新鲜度、协议扰动、题库局限。
+    回答框架：GPQA 经领域专家写题、修订、第二位专家复核，再由三名其他领域高学历验证者测试。要区分 546 题 Extended 的专家/非专家正确率约 64.8%/34.1%，与筛选出的 448 题主集 71.9%/30.4%；主集要求至少一名专家同意、非专家最多两人答对，准确率受筛选影响，不能当作自然总体估计。作者另估约 74% 题目有专家可确认的客观答案。它能说明特定题集构造和验证，不能证明无训练污染或普遍推理能力。IFEval 把 25 类、541 个 prompt 中的显式约束交给规则程序检查，并区分 prompt-level / instruction-level 与 strict / loose；loose 会移除 Markdown 标记和首尾行以减少部分格式假阴性，也会制造假阳性。它不能代替事实正确性或开放任务质量。LiveBench v2 论文描述近期来源、客观答案和按月更新；本轮核到的项目主页显示 2026-01-08 快照并写约每六个月完整刷新，引用时应分开记录论文方案和实际版本。它降低静态题老化及主观 judge 依赖，但不能保证不污染。最后用选项顺序和答案提取扰动检查协议稳定性；论文观察到特定设置下榜单最多移动 8 位，这不是通用倍率。选择方法要按目标构念，锁定题源、筛选规则、版本、评分器和模型候选，不能把四条路线拼成一个排名。
+
+48M. Pairwise 人评得到 420 胜、350 负、230 平时，如何计算偏好率和不确定性？为什么 BT/Elo 排名还要做稳健性审计？
+    考察点：tie 计分、三值样本方差、聚类抽样、Elo 与 Bradley--Terry、bootstrap/sandwich 区间、worst-case data dropping。
+    回答框架：平局折半时均值为 $(420+0.5×230)/1000=0.535$。每条结果是 $z\in\{0,0.5,1\}$，其样本方差约为 $0.1915$，独立投票标准误约 $0.0138$，正态近似 95% 区间约 $[0.508,0.562]$；不能误用 Bernoulli 方差 $p(1-p)$，同 prompt/用户有重复判断时应按 prompt、会话或用户聚类重采样。Elo 逐场更新、便于在线维护，但受初始值、K 和对局顺序影响；BT 用 logistic 强度差整合对局并便于估计区间，但压成单一强度、依赖对战图连通和 tie 处理。Arena 研究用自适应抽样把票集中到难分模型对；ICLR 2026 的 AMIP 审计则在固定数据里寻找最能改变 BT 榜首的少量样本，再精确重拟合。后者是最坏情况数据影响性，不是随机置信区间，也不能证明这些票有问题；应公开样本快照、复核影响样本并同时报告切片和区间。
+
+48N. 为什么人评不能只报告一个胜率或一致率？评估报告至少需要保留什么？
+    考察点：构念与任务指南、评审样本、抽样/展示协议、质量控制、聚合与不确定性、研究证据的外推边界。
+    回答框架：胜率依赖样本分布、平局规则和被比较的系统版本；一致率依赖标签边际分布和测量系数，高一致也不证明标签有效。报告应说明目标构念、任务指南、评审者招募与训练、样本和展示顺序、重复标注/仲裁、分母/权重/区间及限制。Mei 等人对 2023—2025 年 *CL 长文本生成论文的 284 篇人工复核和 1.8k 余篇辅助分析发现，指南、维度理由、功效分析和统计置信信息存在系统性漏报；该结论描述论文报告规范，不是所有产品评估的失误率。公开 Arena 的低质量票压力研究和 ICLR 2026 的最坏情况删点分析也不是同一个误差来源，不能把模拟差票比例或删点阈值当作真实用户错误率。
+
+48O. G-Eval、Prometheus 2 和 SAJA 分别解决 judge 的什么问题？如何选择和验证？
+    考察点：prompt-based evaluator、专用 judge 训练、权重合并、多维特征、人工标签校准、评分目标与反事实审计。
+    回答框架：G-Eval 根据任务标准生成具体评价步骤，表单打分，并用评分 token 概率加权；SummEval 上 GPT-4 离散评分的 Spearman ρ=0.514、Kendall τ=0.418，概率加权版分别为 0.502 和 0.446。论文提醒离散版有较多并列分数，其 τ 不是公平的直接比较；不能只凭单一指标下结论。CoT 也不保证普遍提高人类一致性。Prometheus 2 分别训练 direct-assessment 与 pairwise evaluator，再合并权重，在论文测试的开源 evaluator 中改善两类任务的覆盖；其数据和基准有语言、领域与标签来源限制。SAJA 用一次结构化 rubric 调用抽取多维信号，再以少量人工标签训练轻量校准头，适合需兼容闭源 API、没有 logits 的路径，但依赖代表性人工标签和分布稳定。三者不能仅按 headline 分数排名：先确定要复现人工标签、排序、校准分数还是自动放行，再用目标任务的独立 holdout、风险切片、顺序交换和答案/rubric 反事实验收。
+
 49. DDP 的工作原理是什么？
     考察点：数据并行、模型副本、backward、all-reduce、参数一致性。
     回答框架：每个 rank 持有一份模型副本并处理不同 mini-batch；backward 时 DDP 通过 autograd hook 同步梯度 bucket，all-reduce 后每个 rank 拿到一致的平均梯度，再各自执行 optimizer step，因此参数保持一致。
@@ -574,6 +654,34 @@
 56A. 分布式训练卡死、吞吐低或 checkpoint 恢复异常时，如何设计 distributed incident gate？
     考察点：rank step alignment、collective mismatch、token shard imbalance、straggler ratio、communication ratio、checkpoint shard coverage、resume continuity、pipeline bubble。
     回答框架：先要求每个 rank 输出 step、phase、batch id、token 数、step/data/comm time、collective 序列、loss 和 checkpoint 状态；再检查所有 rank 是否在同一 step、collective 是否一致、token shard 是否均衡、最慢 rank 是否超过典型 rank、通信占比是否过高、checkpoint shard 是否完整、resume 后 global step 和 lr 是否连续，以及 pipeline micro-batch 是否足以压低 bubble。门禁输出 failed gates 和对应 rank / shard / stage，避免只凭 rank 0 日志猜测。
+
+56B. 变长 batch 下如何用 DDP 得到全局 token-mean 梯度？
+    考察点：输入 token 与 prediction target、loss sum/mean、DP group、梯度累积、DDP rank-average。
+    回答框架：先按真实 label shift 和 mask 计每个 rank 的有效目标数 `n_r`，令完整 accumulation window 的 `N=Σn_r`；局部保留未归一化 loss sum `S_r`。PyTorch DDP 默认把 DP ranks 的梯度平均，所以每 rank backward `S_r * P/N`，其中 `P=N_dp`，最终得到 `Σ∇S_r/N`。若 loss API 已做 mean、hook 改写了通信或 trainer 再除 accumulation steps，必须重推缩放；3 rank 的 `(n,s)=(100,50),(200,110),(400,220)` 全局 loss 为 `380/700≈0.5429`，等权 rank means 则约 `0.5333`。参考：[PyTorch DDP 2.14](https://docs.pytorch.org/docs/2.14/generated/torch.nn.parallel.DistributedDataParallel.html)。
+
+56C. ZeRO 阶段与 PyTorch FSDP1/FSDP2 如何对应，为什么不能把它们当成同一个 API？
+    考察点：optimizer/gradient/parameter sharding、通信生命周期、FlatParameter、DTensor、wrap 粒度。
+    回答框架：ZeRO-1/2/3 描述逐级分片 optimizer state、gradient、parameter 的算法层次。FSDP1 是 wrapper/flat-parameter 分组路线；FSDP2 `fully_shard` 用 per-parameter DTensor 并按子模块自底向上分通信组，前后向 hooks 聚齐参数，梯度 reduce-scatter。它们共享“用参数临时聚齐换常驻状态分片”的直觉，但 checkpoint、state_dict、参数分组和 API 行为有版本差异；具体对照固定 PyTorch 版本文档。参考：[ZeRO](https://arxiv.org/abs/1910.02054)、[PyTorch FSDP2 2.14](https://docs.pytorch.org/docs/2.14/distributed.fsdp.fully_shard.html)。
+
+56D. GPipe、1F1B 与 interleaved 1F1B 应如何选？
+    考察点：warmup/flush bubble、activation 驻留、virtual chunk、额外 point-to-point 通信、测量边界。
+    回答框架：GPipe 先 forward 后 backward，读起来直接但会暂存多 micro-batch activation；non-interleaved 1F1B 进入稳态后交错 forward/backward，较早释放 activation；interleaving 让每个 rank 持多个 virtual chunk、缩短 flush，但每样本跨更多 stage 边界。Megatron-LM 报告的收益依赖 batch 和 scatter/gather 优化；batch 增大后默认 schedule 可能追近，故应对照 bubble、activation peak、send/recv、stage imbalance 和 step time。参考：[GPipe](https://arxiv.org/abs/1811.06965)、[Megatron-LM](https://arxiv.org/abs/2104.04473)。
+
+56E. MFU 与 HFU 有何区别，报告 57.8% HFU 能说明什么？
+    考察点：model-required FLOPs、rematerialization、峰值 dtype、attention/token 口径、吞吐。
+    回答框架：MFU 用观测 token throughput 对照模型前向/反向必需 FLOPs 的理论峰值，PaLM 定义中不计 rematerialization；HFU 按实际执行 FLOPs 计，可能把重算也纳入。PaLM 540B 在其 TPU v4 设置报告 MFU 46.2%、HFU 57.8%，高 HFU 不等同更快；要说明 FLOPs/token、attention、dtype、padding 与 token 分母，再看 tokens/s 和 time-to-train。参考：[PaLM §4.1/Appendix B](https://arxiv.org/abs/2204.02311)。
+
+56F. Distributed Checkpoint 改变 world size 后能恢复到什么程度？
+    考察点：load-time resharding、tensor layout、optimizer/data state、async staging、manifest/commit。
+    回答框架：PyTorch DCP 支持多 rank 保存/读取及 load-time resharding；目标 ranks 要构造兼容的 state_dict，且 tensor shapes、parameter mapping、optimizer state 和数据游标仍需验证。异步 staging 让状态拷贝与写盘分离，不自动提供跨文件的事务原子性；应用应以完整 shard 和 manifest/checksum 做恢复提交边界，并做实际 restore drill。DCP 文档还警告 state_dict 不保证跨 PyTorch 版本向后兼容。参考：[PyTorch DCP 2.14](https://docs.pytorch.org/docs/2.14/distributed.checkpoint.html)。
+
+56G. Chinchilla 的 compute-optimal 结论怎样与 inference-aware scaling 区分？
+    考察点：训练 FLOPs 目标、loss/质量门槛、未来请求数、token/parameter 分配、外推范围。
+    回答框架：Chinchilla 主要在给定预训练计算下重新平衡模型参数和训练 token；inference-aware scaling 则把预计部署请求成本加进生命周期目标。后者在约 1B 请求情景下报告较小、训练更久可能划算，但结果依赖请求数、输入输出长度、硬件、价格和质量门槛；需要用目标服务 workload 与评估任务重算，不能说小模型总是便宜。参考：[Chinchilla](https://arxiv.org/abs/2203.15556)、[Beyond Chinchilla-Optimal](https://arxiv.org/abs/2401.00448)。
+
+56H. 训练成本报告怎样同时核对 GPU-hours、稳定吞吐和碳排？
+    考察点：MFU/HFU、wall-clock availability、TDP/电表、PUE、电网碳强度、embodied carbon。
+    回答框架：GPU-hours × 价格给出计算账单的一部分；长期 valid tokens/s 与恢复/保存停顿决定 deadline；能源则要使用功率×时间、电表/PUE 与地点时间对应的电网碳强度，并说明是否包括冷却、网络和硬件制造。Llama 2 和 OLMo 的估算边界不同，不应仅按公布的 tCO₂e 做排名。参考：[Llama 2](https://arxiv.org/abs/2307.09288)、[OLMo](https://arxiv.org/abs/2402.00838)。
 
 57. loss 不下降时你怎么排查？
     考察点：数据、label、shape、loss、梯度、optimizer、学习率。
@@ -796,19 +904,19 @@
 
 31D. 如何系统比较 MHA、MQA、GQA 和 MLA？
    考察点：KV head 数、latent KV cache、质量门禁、cache saving、FlashAttention / PagedAttention 边界。
-   回答框架：MHA 每个 query head 有独立 K/V，表达最完整但 KV cache 最大；MQA 保留多个 Q heads 但共享 1 组 K/V，cache 最省但可能损失质量；GQA 让一组 Q heads 共享 K/V，是质量和推理成本的折中；MLA 进一步把 K/V 信息压缩到 latent cache，减少的是缓存表示维度而不只是 KV head 数。还要区分层面：FlashAttention 是 kernel / IO 优化，PagedAttention 是 serving memory manager，MQA / GQA / MLA 是模型架构。
+   回答框架：MHA 每个 query head 有独立 K/V，表达最完整但 KV cache 最大；MQA 保留多个 Q heads 但共享 1 组 K/V，cache 最省但可能损失质量；GQA 让一组 Q heads 共享 K/V，是质量和推理成本的折中；MLA 进一步把 K/V 信息压缩到 latent cache，减少的是缓存表示维度而不只是 KV head 数。不要把 cache 比例当成 attention 参数或全模型延迟比例。GQA 论文提供 MHA checkpoint 的转换案例：组内 K/V 权重 mean-pool 后继续预训练，作者报告约 5% 原训练 compute；但主要实验是 T5 encoder-decoder。Llama 2 另根据质量消融和多 GPU 分片/吞吐取舍，在 34B/70B 采用 GQA。还要区分 FlashAttention 是 kernel/IO 优化，PagedAttention 是 serving memory manager，MQA/GQA/MLA 是模型架构。
 
 31E. 如何系统解释 FFN、SwiGLU 和 MoE FFN 的关系？
    考察点：position-wise FFN、SwiGLU 参数量、gated MLP、top-k routing、active parameters、expert capacity、load balancing。
-   回答框架：FFN 是 Transformer block 中对每个 token 独立应用的通道变换模块，attention 负责 token 间路由，FFN 负责 token 内非线性加工和容量扩展。普通 4D FFN 参数约为 `2dm`，SwiGLU 有 gate/up/down 三组矩阵，参数约为 `3dm`，所以常把 intermediate size 调到接近 `8d/3` 做近似等参比较。MoE FFN 则把一个 dense FFN 换成多个 experts，由 router 做 top-k routing，每个 token 只激活少数 experts；解释 MoE 时必须区分 total parameters 和 active parameters，并说明 capacity overflow、load balance、all-to-all 通信和 serving 延迟是核心工程难点。
+   回答框架：FFN 是 Transformer block 中对每个 token 独立应用的通道变换模块，attention 负责 token 间路由，FFN 负责 token 内非线性加工和容量扩展。普通 `d_ff=4d` FFN 有约 `8d²` 参数；SwiGLU 三矩阵若取 `d_ff≈8d/3`，可做近似等参数比较。Shazeer 的 GLU 变体研究在序列到序列 Transformer 上报告了部分门控形式优于 ReLU/GELU，但不能当作现代 decoder-only LLM 的通用收益保证。MoE 的研究分别在处理不同难点：GShard 把 top-2 路由与自动分片结合；Switch 简化到 top-1；ST-MoE 用 router z-loss 缓解 logits/数值不稳定；Expert Choice 让 expert 选固定 bucket，代价是每 token 的 expert 数可变；DeepSeek-V3 用路由 bias 调节 batch-wise 负载，并用 sequence-wise 辅助项避免单序列失衡。回答时要分开总参数、每 token active 参数、overflow、路由稳定性、通信和服务端尾延迟。
 
 31F. 如何从 residual stream 和 norm placement 角度解释 Transformer 训练稳定性？
    考察点：residual stream、LayerNorm、RMSNorm、Pre-LN、Post-LN、warmup、residual scaling、activation norm、update ratio。
-   回答框架：Transformer 的 hidden state 可以看成 residual stream，attention 和 FFN 都是在这条主路径上写入增量。LayerNorm / RMSNorm 控制每个 token hidden 维的尺度，norm placement 决定残差主路径是否被 norm 包住。Post-LN 是 `Norm(x + F(x))`，每层输出尺度统一，但深层训练更依赖 warmup；Pre-LN 是 `x + F(Norm(x))`，identity path 更干净，梯度更容易直通，现代 decoder-only LLM 常见。RMSNorm 去掉 re-centering、保留 re-scaling，常和 Pre-Norm、final norm、residual scaling、warmup、AdamW、gradient clipping 和 mixed precision 监控一起使用。
+   回答框架：Transformer 的 hidden state 可以看成 residual stream，attention 和 FFN 都是在这条主路径上写入增量。LayerNorm 做 re-centering 与 re-scaling，RMSNorm 只按 RMS 重缩放，二者表达与计算性质不同。Xiong 等人的 mean-field 分析解释了 Post-LN 初始化附近输出层梯度偏大、warmup 能缓冲这一问题；Pre-LN 初始梯度较平稳，但不等于所有 recipe 都可去掉 warmup。DeepNorm 同时调整 residual connection 与部分初始化，解决极深网络 update 增长问题，代表证据是多语翻译而非现代 decoder-only 预训练。μP 则是宽度参数化和小到大超参迁移，不能误说成单一初始化公式。要比较方案，应记录梯度/激活尺度、loss spikes、学习率 schedule、精度、深度/宽度和目标任务结果。
 
 31G. 如何系统比较 Sinusoidal、Learned Absolute、Relative Bias、RoPE 和 ALiBi？
    考察点：注入位置、绝对/相对、长度外推、KV cache、工程复杂度。
-   回答框架：Sinusoidal 和 learned absolute 通常加到输入 embedding，前者固定多频率、后者学习绝对位置；relative representation / bias 更贴合 attention pairwise 距离，其中 bias 更轻量；RoPE 旋转 Q/K，用绝对 position id 实现但点积体现相对位置；ALiBi 直接给 attention score 加线性距离惩罚。比较时不能只说“谁更先进”，要结合训练长度、目标上下文、position id、KV cache、短上下文退化和长文任务评估。
+   回答框架：Sinusoidal 和 learned absolute 通常加到输入 embedding，前者固定多频率、后者学习绝对位置；relative representation/bias 更贴合 attention pairwise 距离；RoPE 旋转 Q/K，用绝对 position id 实现但点积体现相对位置；ALiBi 给 attention score 加距离偏置。RoPE 的频率按通道对跨多个量级变化，`base`、partial rotary、layout 和 position id 都属于 checkpoint/runtime 合同。PI 线性压缩新位置并做少量继续训练；YaRN 按波长分段平滑插值，作者报告比其对照方法少用约 10× token、2.5× steps；LongRoPE 搜索非均匀因子、分阶段扩展并单独恢复短上下文。不能横向比较这些研究的最大窗口数字；要在同 checkpoint 上控制训练预算，测原长度回归、不同位置检索、目标长度任务、吞吐和显存。
 
 31H. 线上排查 RoPE / position id 异常时先看什么？
    考察点：KV cache、position id 连续性、packed sequence、prefix cache、long-context scaling。
@@ -828,7 +936,7 @@
 
 31L. Scaling law、Chinchilla 和 serving pressure 放在一起应该怎么讲？
    考察点：scaling evidence、compute-optimal training、tokens per parameter、undertraining、serving pressure、scaling gate。
-   回答框架：Scaling law 说明在特定模型族、数据和训练 recipe 下，loss 随参数、数据和 compute 扩大通常有相对可预测的下降趋势。Chinchilla 修正了“只堆参数”的直觉，强调固定 compute 下参数量和训练 token 数要平衡，很多大模型可能 undertrained。但训练 loss 不是唯一目标，模型还要满足数据质量、训练稳定性、推理成本、KV cache、延迟和安全评估，所以 scaling gate 应同时看 compute balance 与 serving pressure。
+   回答框架：先说清 scaling law 是在给定 tokenizer、数据、架构、recipe 和 loss 口径下拟合的经验关系，再定义“最优”到底是固定预训练 FLOPs 下的 loss，还是含 serving 的生命周期成本。Kaplan 2020 在其设置下估计参数随 compute 约按 C^0.73、数据约按 C^0.27 增长；Chinchilla 用 400 多个较小模型估计出参数和数据近似等比例扩展，并以 70B/1.4T 与 280B/300B 的同预算结果支持减少大模型 undertraining。后续数据受限研究把重复 epoch 纳入模型；inference-aware 研究指出高请求量时较小、训练更久的模型可能有更低总成本；Llama 3 报告也称其较小模型为满足相同推理预算而训练得更久。最后说明这些结果不能直接变成固定 token/parameter 比：要核对数据是否重复、参数/FLOPs 计数和曲线外推范围，再用目标任务评估和目标集群 serving 数据做决策。
 
 31M. 如何系统审计 O(n^2) Attention 的计算与显存瓶颈？
    考察点：attention pair count、score/probability memory、prefill、decode、FlashAttention、PagedAttention、GQA、sliding window。
@@ -841,6 +949,14 @@
 31O. 如何系统审计 In-Context Learning 和显式 token 检索能力？
    考察点：ICL、few-shot demonstrations、label space、format consistency、context evidence use、middle evidence risk、token retrieval audit。
    回答框架：先强调 ICL 不更新参数，而是把任务说明、示例、标签和证据作为上下文条件进入固定参数前向推理。Few-shot 示例不只提供正确答案，还提供标签空间、输入分布、输出格式和任务 framing；因此要检查 label space coverage、示例格式一致性和输入输出映射。显式 token 检索能力要看模型能否定位并使用上下文中的相关示例、文档证据、工具字段或变量定义，而不是只靠参数先验。长上下文还要做位置分桶，特别检查中间证据、首尾偏置、冲突相似示例和噪声 chunk。最后用 ICL gate 把标签空间、格式、retrieval label match、中间证据风险、conflict rate 和验证集准确率组合起来，而不是只凭单个 prompt demo 判断有效。
+
+31P. MoE 的 load-balancing loss、router z-loss 和 DeepSeek-V3 的 bias update 分别控制什么？
+   考察点：expert token fraction、router probability、router logits 数值范围、batch-wise 与 sequence-wise balance。
+   回答框架：负载均衡损失把 token 分配比例和 router 平均概率拉向均衡，主要控制 expert 使用分布；router z-loss 惩罚 router logits 的 log-sum-exp，主要降低低精度指数运算的数值不稳定，不负责均匀分流。DeepSeek-V3 按 batch expert load 动态调整 routing bias，但 gate 权重仍取未加 bias 的 affinity；报告还用 sequence-wise 辅助损失限制单条序列的极端偏斜。因此要分别看 token counts/overflow、router logits 与 z-loss、每序列 expert 分布、all-to-all 时间和最终任务质量。
+
+31Q. 为什么 MoE 的“active parameters”不能单独预测实际速度？
+   考察点：总权重驻留、top-k expert FLOPs、容量丢弃、all-to-all、设备拓扑、batch 与尾延迟。
+   回答框架：active 参数只是每 token 被调用的权重近似；推理或训练还要考虑全部 expert 权重是否驻留、token 到 expert 的 dispatch/combine、负载偏斜、batch padding/capacity、跨节点网络和 kernel 利用率。Switch、GShard、DeepSeek-V3 的结论来自不同任务、硬件和并行方案，不能用论文参数或单个 active 参数数字直接推算本地吞吐。应固定输入输出 token、batch、并发和设备拓扑，分别测 tokens/s、P95/P99、显存、overflow、每 expert 负载和通信时间。
 
 32. 什么是 causal mask？
    考察点：下三角 mask、未来 token、attention scores、softmax。
@@ -926,10 +1042,14 @@
 
 1. 如何训练一个 7B 模型？
 2. loss spike 怎么 debug？
+   考察点：首次异常 step、rank/sample 差异、forward/backward/update、Adam 状态、固定 batch 反事实。
+   回答框架：先保存异常前 checkpoint、样本与 tokenized batch、mask、每 rank 的 loss numerator/有效 token 数、梯度、`m_t/v_t`、scheduler/scaler、RNG 和 data cursor。固定 batch 重放，按 forward、backward、optimizer update 分段定位；单 rank 异常先查本地数据和 decode，全 rank 同时异常再查全局更新、并行和恢复。若 layer-wise 梯度与 `v_t` 的先后变化符合论文假说，再分支测试 `beta2`/`epsilon`；Molybog 等与 Bai 等提出的机制解释不同设置，不能把 loss spike 一概归因于 Adam 或坏数据。
 3. 如何检测 benchmark contamination？
+   考察点：候选文本重叠、人工确认、模型行为信号、评测集新鲜度与覆盖边界。
+   回答框架：可见训练语料先做 exact/近似匹配并复核来源和答案结构；命中是候选，不是模型记忆或分数抬高的证明。PALOMA 展示按域报告并控制评测协议的价值，但 PPL 不是任务能力。PaCoST 比较原题和改写题的配对置信度，可提供 benchmark 级潜在污染信号；它需要概率分布访问、多次调用，不能定位具体污染样本。分别报告扫描覆盖、候选、确认、unknown 和隐藏/新鲜评测结果。
 4. 如果让你训练一个 LLM，你会怎么设计完整流程？
    考察点：目标、数据、tokenizer、模型、优化器、分布式、监控、checkpoint、评估、后训练。
-   回答框架：先明确目标，再构建数据和 tokenizer，设计模型和训练系统，监控指标，保存评估 checkpoint，最后进入 SFT/RLHF/DPO。
+   回答框架：先把目标能力、不可退化项和预算写成验收契约；按授权、去重、有效 token、域覆盖和评测隔离构建数据账本。数据比例可先用可解释基线，再以 DoReMi 等 proxy 方法提出候选；固定总 token 做逐域评测验证。随后估算 FLOPs/状态/吞吐，短程基准验证并行和显存，长程演练 checkpoint 恢复。运行时保存第一次异常前后的数据、优化器和系统证据；最终用分域 loss、任务回归、污染审计和成本账本决定是否继续或交付。
 
 5. 为什么数据清洗和去重重要？
    考察点：数据质量、重复、记忆、污染、泛化。
@@ -974,6 +1094,90 @@
 15. Tensor Parallel 和 Pipeline Parallel 区别是什么？
    考察点：层内切分、层间切分、通信、pipeline bubble。
    回答框架：TP 切矩阵计算，PP 切模型层；TP 通信频繁，PP 有流水线空泡。
+
+16. BPE 为什么能处理训练时没见过的词？它学到的究竟是什么？
+    考察点：预分词边界、初始字符/字节、相邻 pair 计数、merge rank、词表频率与语义边界。
+    回答框架：BPE 从训练语料的初始原子统计相邻片段频次，反复合并高频 pair；未见整词可拆成已有子词或更小原子。它拟合的是训练分布下的相邻共现，不保证词根或语义切分。词表训练语料、预分词、空格和字节规则都影响结果；报告 tokenizer 时要固定并版本化这些组件。
+
+17. 为什么 tokenizer 的压缩率不能单独决定模型效果？
+    考察点：词表输出层成本、预分词、目标形态、训练预算、代表论文结果边界。
+    回答框架：`Unpacking Tokenization` 在其英语/土耳其语 BPE 训练中观察到压缩与下游任务相关，尤其是较小模型和生成任务；`Tokenization Is More Than Compression` 在其 350M 模型与 10 项任务上未发现 token 数最少就全面胜出的算法。Ali 等人训练 24 个 2.6B 单语/多语模型，发现 tokenizer 会影响质量和成本，但 fertility / parity 也不是可靠的全局代理。`Objective vs. Search` 把目标函数与 bottom-up/top-down 搜索拆开后，看到 bottom-up 在多数设置下有更低 BPB，却没有稳定的 BLiMP 排名。研究改变的变量、任务、语种和预算不同，不能互相否定。选型要测 tokens/byte、长尾与多语分布、可逆性、embedding/softmax 账本和受控预算下的下游任务。
+
+18. 如何判断一个 tokenizer 对中文、低资源语言或代码是否不公平？
+    考察点：fertility、parallel content、tokens/byte 分位数、上下文/成本影响与质量混杂因素。
+    回答框架：准备同内容的平行语料和代码/JSON/数字切片，按语言报告 tokens/word、tokens/character、tokens/byte 的中位数与 p95/p99、fallback 和截断率。Petrov 等人测 17 种 tokenizer，部分语言对 token 长度差距最高约 15 倍，但这是论文语料和 tokenizer 快照，不能直接套到当前产品。token 负担会占 context、增加逐 token 计算，但不单独证明最终理解能力差；还要控制训练数据量、模型和预算做下游评测。
+
+19. Byte-level BPE 和 byte fallback 有什么区别？
+    考察点：基础原子、OOV、UTF-8 字符边界、流式解码。
+    回答框架：byte-level BPE 从 256 个字节原子起步并对字节串做 merge，所有输入字节可编码；byte fallback 则先用 Unicode 子词词表，只有未覆盖字符才拆 UTF-8 bytes。二者都可用 byte token，但训练/编码路径不同。一个 Unicode 字符可能分散到多个 byte token，流式解码需缓存不完整 UTF-8 序列，不能把 byte token 数当字符数。
+
+20. 为什么消息结束、assistant 回合结束和工具 handoff 不能都当成 EOS？
+    考察点：结构解析、生成 stop、工具调度、协议版本。
+    回答框架：消息结束表示当前 role 内容完成；assistant 回合结束告诉 runtime 可以把结果交给调用者；handoff 要停止采样并 dispatch 工具。gpt-oss Harmony 以 `<|end|>`、`<|return|>`、`<|call|>` 分别示范这些事件，但名称和 id 是该协议专属。训练 target、stop token、tool dispatcher 和历史回放必须绑定同一个版本化协议。
+
+21. PAD 与 EOS 共用同一个 token id 时，怎样生成 attention mask？
+    考察点：真实序列长度、padding 方向、attention mask 与 loss mask 区别。
+    回答框架：不能用 `input_id != pad_id` 判有效位置，因为真实 EOS 也会被判成 padding。mask 应由 collator 保存的原始长度和 padding 方向生成；causal mask 负责遮未来，document mask 负责隔离 packed 样本，label mask 负责忽略不监督位置。三类掩码各自有作用。
+
+22. Assistant-only loss 的 labels 为什么看起来和 input_ids 对齐，模型却右移一位计算？
+    考察点：teacher forcing、`logits[t]` 对 `labels[t+1]`、答案首 token、EOS 监督、batch reduction。
+    回答框架：数据集通常按 token 位置保存 label，模型内部用位置 t logits 预测 t+1。assistant 头提供答案首 token 的上下文，结束 token 可作为最后目标；若框架已 shift，collator 不能再 shift。另需明确 loss 是按全局有效 token 平均还是每条样本先平均，两者会给长回答不同权重。
+
+23. SFT packing 为什么不能只插一个 EOS 就把样本隔开？
+    考察点：causal attention、block mask、cumulative sequence lengths、position ids、boundary label。
+    回答框架：EOS 只是输入 token，普通 causal mask 允许后一个样本读取前一个样本。独立 SFT 样本要用 block-causal mask 或变长 attention 的边界元数据，必要时重置 position ids；若样本没有 BOS，首 token label 也不能由前一条样本末 token 预测。预训练允许连续文档上下文是另一种训练假设。
+
+24. 给一个已有模型扩词表，怎么比较新 token 的 embedding 初始化方案？
+    考察点：词表与 embedding 同步、随机/子词组合/跨语言对齐、CPT probe、旧能力回归。
+    回答框架：先固定 tokenizer id 映射并同步输入 embedding、输出头和 checkpoint；比较随机、已有子词组合及辅助对齐等初始化，再用短程 CPT、目标语言任务和原语言能力回归评价。FOCUS 在 XLM-R 的语言专化设置中利用 fastText 相似 token 组合 embedding；2026 Hindi 扩词表预印本在 Nemotron-3-Nano-30B-A3B 上报告特定子词组合和输入/输出不对称初始化的收益。不能将某一种方法推广成通用结论。
+
+25. `tokens/s` 提高 44% 能证明换 tokenizer 后服务效率提升 44% 吗？
+    考察点：token 定义变化、tokens/s 与 bytes/s、TTFT、任务质量、硬件与请求分布。
+    回答框架：不能单看 token/s。MUTANT-Indic 论文用 1B 模型、200 条多语输入、8 张 H100、Triton、最多 256 个新 token、5 次 warmup 和 10 轮测量，报告 OTPT 从 117.99 到 169.42 tokens/s；新 tokenizer 的一个 token 代表的文本量也变了，因此要再报告字符/字节每秒、固定任务上的请求完成时间、TTFT、质量和成功率。该结果绑定论文的印度语言测试集和运行栈，不能直接迁移到其他模型或线上系统。
+
+26. Causal LM、T5 span corruption、UL2 和 FIM 分别改变了什么训练信号？
+    考察点：可见上下文、目标 token、架构关系、代表性研究及证据边界。
+    回答框架：Causal LM 用左侧上下文预测每个后续 token；T5 用 sentinel 把连续缺失 span 变成较短 decoder target；UL2 混合 R/S/X denoiser 以覆盖不同 corruption 与生成分布；FIM 重排 prefix/suffix/middle 后仍沿自回归序列训练。FIM 不是双向 encoder。比较时要控制架构、数据、目标 token/FLOPs 和评测；T5、UL2 的论文分数不能直接外推到当前 frontier 规模。
+
+27. 两个 micro-batch 的有效 token 数分别是 2 和 4，梯度累积时为什么不能简单平均两个 batch mean？
+    考察点：token-level loss 分母、梯度加权、DDP rank 平均、框架 scaling。
+    回答框架：如果 `g_1`、`g_2` 是各自的 mean gradient，全局 token mean 是 `2/6*g_1 + 4/6*g_2`，等 batch 权重会让每个短 batch token 权重更大。DDP 还会平均 rank 梯度，因此 rank token 数不同也应按全局有效目标数归一化；Trainer/Accelerate 等可能内置 accumulation 和 world-size 缩放，要核对版本，避免重复乘除。
+
+28. Sophia-H 与 Sophia-G 分别怎样估计曲率？Sophia 为什么既不直接做完整 Newton 更新，也不逐步刷新 Hessian？
+    考察点：Hutchinson 对角估计、Hessian-vector product、Gauss-Newton-Bartlett、正半定性、裁剪与刷新间隔。
+    回答框架：Sophia-H 用 Hutchinson 随机向量与 Hessian-vector product 得到无偏 Hessian 对角估计；Sophia-G 利用语言模型损失结构估计 Gauss-Newton 对角项，计算上方便且非负，但它是 Hessian 对角的有偏替代。算法每 k 步刷新并用 EMA 平滑，再以 max(gamma*h, epsilon) 作分母并把坐标更新裁到 [-1,1]，因此曲率噪声和负估计不会造成无界步长。原论文在 GPT-2 125M—770M、GPT-NeoX 1.5B/6.6B 设置下报告约 2 倍效率；需说明这是作者实验，不能推广成当前模型的保证。
+
+29. Muon、Shampoo 和 SOAP 分别利用了什么矩阵结构？它们的状态与计算开销如何不同？
+    考察点：动量 polar factor、Newton-Schulz、左右协方差、预条件器特征基、参数分组。
+    回答框架：Muon 对合适的二维参数矩阵做动量方向正交化；Shampoo 累积各维协方差并施加矩阵预条件；SOAP 用 Shampoo 的特征基旋转梯度，在该坐标系中做 Adam 式二阶矩更新。三者并非同一种算法：参数分组、状态大小、矩阵分解和分布式通信成本不同。应查看各参数实际 update RMS，并分别测矩阵运算与端到端质量成本。
+
+30. Moonshot、ICLR 2026 optimizer 比较和 NeurIPS 2025 超参迁移研究给出的 Muon 加速幅度不同，为什么不能只选一个数字作为答案？
+    考察点：模型规模、训练数据/预算、基线调参、参数分组、缩放规则、最终 checkpoint。
+    回答框架：Moonshot 在 399M—1.5B scaling 设置报告约 52% AdamW FLOPs；ICLR 2026 对照在 1.2B、8× Chinchilla 数据区间报告约 1.1× token 效率；NeurIPS 2025 通过 μP 与按宽度缩放 weight decay，在 190M—1.4B 设置报告约 1.4×。它们的数据、规模、优化器配方和度量不同，数字不矛盾也不可直接排名。先固定质量目标、FLOPs/token/time 口径，再给每种方法可比的调参预算。
+
+31. WSD 与 WSD-S 的 checkpoint 应怎样恢复？什么情况会让 WSD-S 的收益变差？
+    考察点：stable 主干、decay 分支、optimizer/scheduler 状态、cooldown 复用、loss spike。
+    回答框架：原始 WSD 从 stable 主干分支做 decay；要延长主干，应恢复未 decay 的 stable 模型和 optimizer 状态。WSD-S 则从 decay 后的 checkpoint 恢复较大学习率，单次 run 复用 cooldown。River Valley 是在明确地形假设下解释 stable 阶段高 loss 与 decay 后下降的理论视角，不是普适定理。论文观察到 spike 后立即 decay 会损伤验证结果，因此选分支点要参考稳定性与目标预算。
+
+32. Adafactor、GaLore 和 LoRA 分别减少哪类训练内存？它们什么时候解决不了 OOM？
+    考察点：factored 二阶状态、投影低秩梯度状态、冻结基座/低秩可训练参数、激活与梯度显存。
+    回答框架：Adafactor 用行列统计近似矩阵逐元素二阶矩；GaLore 周期性把全参数梯度投影到低秩子空间并在其中存状态，仍更新原始全量参数；LoRA 则冻结基座、训练低秩 adapter，改变可训练参数集合。它们节省的对象不同。若 OOM 主要来自长序列激活、临时 workspace 或通信 buffer，降低 optimizer state 未必能解决问题；要按峰值显存拆账。
+
+33. 怎样设计 optimizer 公平比较，才能判断新方法是否真的更快？
+    考察点：同模型/数据/预算、独立超参搜索、更新尺度、训练终点、tokens/FLOPs/墙钟时间。
+    回答框架：固定模型、tokenizer、数据顺序或可比采样、精度、并行栈和目标质量；每种 optimizer 分配同等搜索预算，不盲目复用 AdamW 学习率/decay。记录实际参数分组、update RMS、状态显存、单步耗时、tokens/s、总 FLOPs 与达到目标质量的总时间，并在最终预算评估。中间 checkpoint 可能因 decay 排名翻转；ICLR 2026 对照说明调参与评估预算本身就是实验变量。
+
+34. Molybog 等人的 Adam instability 分析与 adaptive-preconditioner decoupling 论文，分别解释了什么现象？
+    考察点：时间相关梯度估计、Adam 更新范数/方向、二阶矩 `v_t`、梯度方向曲率、证据范围。
+    回答框架：Molybog 等从大规模训练快照分析梯度估计的时间相关性，指出 Adam 更新可能变大并与下降方向弱相关；Bai 等追踪 `v_t` 与当前 `g_t^2` 的失配，并用预条件 Hessian 的梯度方向曲率提出另一种 spike 机制。前者有 7B—546B 训练观测，后者包含约 10M 合成任务和 187M/100B-token LLaMA 结构实验；两者都不能证明所有 spike 的单一根因，第二篇的严格理论限于一维二次目标。
+
+35. global norm clipping、降低 `beta2`、SPAM 和 GradientStabilizer 分别改动什么？
+    考察点：整体范数、二阶矩时间响应、逐坐标异常代理、周期状态重置、方向保留、超参和额外成本。
+    回答框架：global clipping 统一缩小超阈值梯度，简单但阈值和局部异常难诊断；降低 `beta2` 让二阶矩更快响应新梯度，但会改变优化器噪声与调参条件；SPAM 用 `g_i^2/V_i` 在线代理限幅并周期性重置一、二阶矩，增加阈值、间隔、warmup 且丢弃部分历史；GradientStabilizer 用运行统计改幅值并保留方向，仍可能沿错误方向更新。需在同一 checkpoint、数据顺序和质量目标下比较，报告 PPL/目标能力、收敛稳定性、step time 和额外成本。
+
+36. 看到梯度随层数变大，如何区分优化器问题与归一化架构问题？
+    考察点：Post-LN/Pre-LN、DeepNorm、Peri-LN、逐层激活/梯度 RMS、初始化和可迁移性。
+    回答框架：先确认采样点、张量精度和参数分组一致，再沿深度观察 activation RMS、gradient RMS、残差流和 update/parameter ratio。Post-LN、Pre-LN、DeepNorm 和 Peri-LN 改变归一化位置或残差/初始化尺度，通常要从初始化阶段做受控训练对比，不能当作已训练 checkpoint 的热修复；再用同一训练预算比较质量、稳定性与吞吐。
 
 ## 对齐
 
@@ -1059,6 +1263,25 @@
 20C. RLVR 和 DeepSeek-R1 为什么不能简单等同于 DPO？
     考察点：verifiable reward、数学/代码/可执行任务、rollout、GRPO/PPO 类更新、冷启动、蒸馏、偏好监督边界。
     回答框架：DPO 主要利用离线偏好 pair 学“哪个回答更好”；RLVR 面向可自动验证任务，用答案校验、单元测试、规则或环境反馈给 rollout 奖励，更适合数学、代码、工具和可判定推理任务。DeepSeek-R1 的公开案例价值在于展示冷启动、可验证奖励 RL、采样和蒸馏如何组合提升 reasoning。局限是 reward 必须可靠，容易偏向可验证题型，过程质量、安全和不可验证专业任务仍需要 SFT、偏好、人审和评估门禁补上。
+
+20D. GRPO、DAPO、DrGRPO、GSPO 和 DCPO 分别改动了哪一环？如何公平比较它们？
+    考察点：组内 advantage、critic、reward 方差、response 长度分母、token/sequence ratio、clipping 单位、dynamic sampling、历史统计、RUR 与实验协议。
+    回答框架：GRPO 用同 prompt 的 group reward 减少独立 critic；DAPO 组合 Clip-Higher、动态采样、全局 token loss 和 overlong 处理；DrGRPO 去掉 response-length 与 group-standard-deviation normalization，以固定生成预算作分母；GSPO 改用长度归一化的 sequence ratio 并在 response 级 clipping；DCPO 依据旧 token probability 动态设界，配合 SAS 和 response 内 OTM。它们处理的是不同失败模式，不能只按公开分数排序。公平实验要固定 base checkpoint、数据/模板、verifier、reward、采样次数、最大生成长度、温度/top-p、训练 token 和硬件，并同时报告 accuracy、长度切片、非零 advantage/RUR、clipping 率、成本和通用/安全回归。DAPO 的 30→50 是逐步累积的 recipe 分析，DCPO 的 RUR 也不等于正确率；都不能直接外推为通用排名。参见[第五册第十一章](book-05-llm-training/chapters/11-后训练与对齐训练.md)。
+
+20E. 领域模型应该继续预训练、做 SFT、接 RAG，还是做 RL？
+    考察点：领域语言分布、任务流程、动态事实、偏好排序、可验证结果、权限边界、回归评估。
+    回答框架：先把失败切成语言/术语、工作流、知识时效、答案偏好、可计算结果和权限问题。DAPT/TAPT 的早期研究支持继续训练能改善特定领域分类，但基于 RoBERTa，不能直接当成生成式 LLM 证据。FinGPT 用 LoRA 降低金融适配参数量，并把股价变化当作弱反馈；TIMER 用带时间戳的 EHR 指令让 SFT 学纵向时间推理；DeepSeekMath 组合领域语料、数学指令和可判定结果奖励。FinBen 与 MedAlign 则说明术语/考试题增益不自动迁移到复杂金融问答或临床工作流。固定底模和训练预算，对比 RAG/工具基线、SFT、偏好或 RLVR，并测能力回归、风险和单位成功成本。参见[第五册第十五章](book-05-llm-training/chapters/15-领域专家sft与rl.md)。
+
+20F. FinGPT 的 RLSP 和 DeepSeekMath 的 RLVR 都叫反馈训练，它们的信号有什么区别？
+    考察点：市场弱标签、混杂变量、结果可判定、verifier、离线回测、外推范围。
+    回答框架：FinGPT/RLSP 用新闻后的股价变化构造标签，获取便宜、更新快，但价格同时受利率、市场情绪、公司公告和时间窗口等因素影响，不能证明新闻因果影响，也不等于 PPO/GRPO 在线环境奖励。DeepSeekMath 对答案可自动判定的数学题使用结果奖励；论文中 7B MATH 从 SFT 的 46.8% 到 RL 的 51.7%，GSM8K 从 82.9% 到 88.2%，这些数字绑定该模型和数据。市场标签需要无泄漏时间切分、交易成本和简单基线；RLVR 需要检查答案 parser/verifier 的覆盖及可钻空子程度。两者都不能仅凭 reward 上升证明真实业务成功。
+20G. verifier 通过率和训练 reward 都上升，为什么仍不能直接说模型学会了目标能力？
+    考察点：verifier 的可观测边界、extensional 与结构泛化、优化器/底模先验、独立评测和归因对照。
+    回答框架：先区分“规则写得正确”“产物满足用户目标”和“策略获得可迁移能力”。固定样例通过只验证已观测实例；Isomorphic Perturbation Testing 用保留逻辑关系的对象置换检查是否只枚举样例标签。ImpossibleBench 则故意让测试和自然语言规格冲突，用来发现 Agent 是否迎合可见测试。过程奖励也不是无误差真值：PRM800K 在 MATH 候选选择任务中报告 PRM 78.2%、ORM 72.4%、多数投票 69.6%，不是在线 RL 的因果比较。ICML 2026 的 Spurious Rewards 又显示随机 reward 在 Qwen2.5-Math-7B 的 MATH-500 上也带来 21.4 个百分点增益，说明须增加随机/打乱 reward dummy 对照，并在不同底模、独立新题和固定训练预算下比较。引用每项结果时都要说清任务、模型和指标；不能把不同论文的分数排成排行榜。参见[第五册第十六章](book-05-llm-training/chapters/16-rlvr与可验证奖励.md)。
+
+20H. MiniLLM、GKD 和近年的 OPD 方法分别解决什么问题？如何把论文机制、结果和改进边界讲清楚？
+    考察点：state distribution、local conditional KL、sequence-level reverse KL、score-function estimator、temporal credit、variance baseline、teacher reliability、peer rollout、独立评估。
+    回答框架：MiniLLM 优化学生完整序列分布的 reverse KL，用序列级 policy-gradient 给早期动作分配后续信用，并加入教师混合采样与长度归一化；GKD 把学生生成数据占比和条件 divergence 拆开，允许依任务选择 forward/reverse KL 或 JSD。REOPOLD 用 reward clipping、熵驱动 token 筛选和分阶段训练处理重尾、近零信号及熵塌缩；EOPD 依教师熵切换 KL 方向，vOPD 用动作无关 baseline 降采样方差，RG-OPD 用 verifier gate 教师信号，MOPD 让 self-teacher 看同题的成功/失败 peer。Qwen3 技术报告在同一 off-policy-distilled Qwen3-8B 起点上报告 OPD 的 AIME'24 74.4、AIME'25 65.5，RL 为 67.6/55.5，GPU-hours 为 1,800/17,920；这是单份报告设置，不足以推出 OPD 普遍优于 RL。答题时还要说明所选方法的作用位置、增加的计算或引入的新误差，并提出同底模、同教师、同 rollout/预算和独立 benchmark 的消融。参见[第五册第十七章](book-05-llm-training/chapters/17-on-policy-distillation.md)。
 
 21. Reward Model 学的是什么？
    考察点：prompt+response、标量 reward、偏好排序、chosen/rejected。
@@ -1226,6 +1449,40 @@
     考察点：risk taxonomy、threshold、slice eval、policy version、human review、rollback。
     回答框架：先按风险分类和策略版本拆样本，分清 unsafe pass 和 over-refusal；再看分类器阈值、策略动作映射、RAG / 工具权限、日志和人工复核结果；随后按业务、语言、地区、用户类型和高风险场景切片评估。修复时不要只调一个拒绝阈值，而要补策略分层、正负样本、人工复核、灰度回放和回归门禁。
 
+19. HarmBench、StrongREJECT 和 JailbreakBench 分别解决什么评估问题？
+    考察点：行为覆盖、拒答判分、攻击威胁模型、benign 对照、query budget、judge calibration。
+    回答框架：HarmBench 用广行为集和统一自动红队流程比较攻击/防护；StrongREJECT 将拒绝与回答具体性、说服力分开，避免把非拒绝空话算成高质量攻击成功；JailbreakBench 固定威胁模型、对话模板和查询信息并保留攻击工件，还用同主题 benign 行为检查误拒。三者分别强化覆盖、判分与复现协议，不是现实伤害概率，也不能跨模型、policy、harness 直接搬用 ASR。
+
+20. Agent prompt injection 为什么要同时看 utility under attack 和 targeted ASR？
+    考察点：用户目标、攻击者目标、状态 oracle、正常效用、拒绝服务。
+    回答框架：targeted ASR 测攻击者想要的未授权动作是否发生；utility under attack 测用户原任务是否正确完成且没有副作用。AgentDojo 用状态化环境与效用函数把两者拆开，因此“全拒绝”可能压低攻击成功率，却同时让正常效用归零。还要检查工具参数、授权范围、外部状态和恢复结果；SafeAudit 提醒 benchmark 的 workflow coverage 本身也需要审计。证据范围见[第七册第八章研究记录](research/safety-robustness-evaluation-depth-review-2026-10-27.md)。
+
+21. 训练数据抽取、成员推断、属性推断和 RAG 越权有什么区别？
+    考察点：攻击目标、可观察证据、相应指标、缓解层。
+    回答框架：抽取尝试恢复训练片段，可用受控 canary / exact match；MIA 判断某条记录是否在训练集，报告低 FPR 下的 TPR；属性推断从用户输入推断未提供属性，需单独定义标签与人群；RAG 越权是系统访问控制失效，要检查 tenant、文档权限、缓存 key、工具参数和状态。前三类不能相互替代，训练隐私测试也不能代替应用授权检查。
+
+22. 为什么不同 LLM membership inference 论文会得到近随机与较强攻击两类结果？
+    考察点：训练阶段、成员边界、候选集分布、canary、FPR operating point、攻击者可见信息。
+    回答框架：预训练语料大、member/non-member 重叠和时间分布偏移可能使判断接近随机；受控微调 canary、特定模型和更强攻击者可显著改变 TPR@低 FPR。先确认数据阶段、member/non-member 构造、候选分布、模型访问和攻击预算，再解释数字；不能据一项近随机结果说“LLM 没有记忆”，也不能把某个 canary 结果说成所有用户数据都会泄露。
+
+23. 0 次攻击成功时，ASR 是不是 0？如果没有攻击样本呢？
+    考察点：分母、coverage、零事件上界、相关样本、不可评估状态。
+    回答框架：0/n 表示在 n 个有效样本中未观察到成功，应报告样本数和区间；0/0 是没有证据，属于不可评估，不能通过门禁。若 n 次独立 Bernoulli 尝试观察 0 次失败，单侧 95% 精确上界是 1−0.05^(1/n)，n=100 时约 2.95%。自适应重试和同源扰动不是独立样本，需要按场景或源请求聚合。
+
+24. 危险能力评估为什么要测人类 uplift？
+    考察点：模型知识、真实任务帮助、已有资源 baseline、参与者能力、统计不确定性。
+    回答框架：单个问答分数只说明模型在题目上会不会答，不能说明用户使用模型后是否更容易完成任务。若风险问题是“模型是否让某类人获得额外能力”，可随机比较已有资源组和已有资源+模型组，评估任务准确性、完整性、耗时等预注册指标。OpenAI 早期研究对比专家和学生的互联网-only 与互联网+GPT-4 条件，但结果和局限绑定其参与者、任务、rubric，不能直接推广到所有用户和现实风险。
+
+25. CheckList 的 MFT、INV、DIR 如何帮助安全鲁棒性评估？
+    考察点：最小功能、语义保持扰动、预期方向变化、源样本统计单位。
+    回答框架：MFT 检查单个明确行为，INV 检查语义不变改写后 action 是否稳定，DIR 检查关键上下文改变后行为是否按 policy 预期变化。扰动语义需先由人确认；输出相同不代表都正确，因此要一起报告 clean correctness、perturbed correctness 和 action consistency。同一源请求的多个改写应按簇处理，不能当作独立样本。
+
+26. 安全文本应该由关键词规则、分类器、LLM judge 还是人工打分？
+    考察点：结构化真值、语境、校准、状态断言、成本和版本。
+    回答框架：规则适合已知标记与格式初筛，分类器适合固定切片的批量回归，LLM rubric judge 适合开放文本评分，人工/领域专家裁决边界和高影响案例，确定性 oracle 检查权限与状态。每种 judge 都要用独立人工标签切片校准 precision/recall、分歧和版本；工具副作用不能只靠文本 judge 判断。
+
+本节新增方法比较依据：[Safety 与 Robustness Eval 研究记录](research/safety-robustness-evaluation-depth-review-2026-10-27.md)。
+
 ## 部署
 
 1. KV Cache 是什么？
@@ -1376,6 +1633,10 @@
     考察点：proposal、verification、draft model、heads、feature predictor。
     回答框架：它们都可以放在 speculative decoding 的 proposal-verification 框架下；普通方法用独立 draft model，Medusa 用额外 heads，EAGLE 用特征预测模块，最终仍需要 target model 验证。
 
+36A. top-p、locally typical 和 min-p 如何选候选？已有研究能否证明其中一种普遍更好？
+    考察点：累计概率质量、surprisal/熵距离、相对最大概率阈值、研究任务、调参公平性。
+    回答框架：先按同一 toy 分布手算三种候选集合，再说明它们的规则解决的是不同排序/截断问题。Locally Typical 的论文结果来自摘要和故事生成；min-p 原论文的优势主张受到后续人评、统计和超参数控制复核的质疑。应把规则定义与质量结论分开，在同模型、任务、解码预算和评价协议下复测，不能只凭一篇论文宣布通用胜者。
+
 37. 多 token 预测上线时为什么不能只看接受率？
     考察点：proposal 成本、tree attention、KV Cache、batching、尾延迟。
     回答框架：接受率只表示候选质量，还要看候选生成成本、验证成本、显存占用、batch 调度、P95/P99 延迟和不同任务分布下的稳定性。
@@ -1464,29 +1725,33 @@
     考察点：system prompt、RAG chunk、tool schema、多轮历史、TTFT、KV、成本。
     回答框架：输入 token 增长会同时增加 prefill 时间、TTFT、KV Cache、token 成本和无关上下文干扰。排查时比较新版输入 token 总量和 baseline，按 system prompt、RAG、工具 schema 和历史对话拆分，治理手段包括按需注入、摘要、rerank、context precision、max input token 和业务线预算。
 
+54E. tokens/s 更高的推理配置为什么可能更差？如何比较 serving goodput？
+    考察点：请求级 SLO、TTFT、TPOT/ITL、P95/P99、完成/取消率、统计窗口。
+    回答框架：先固定请求长度联合分布、到达率、测量窗口和 SLO；将满足所有请求级门槛的请求数除以窗口时长作为请求 goodput，同时报告原始 tokens/s、错误/超时/取消和质量回归。比如同一窗口里配置 A 吞吐更高但只有 60% 请求达标，配置 B 吞吐较低却有 90% 达标；对交互服务 B 可能有更高可用容量。还要检查 SLO 指标是否诱导调度器丢弃难请求；论文提出的 smooth-goodput 是一种研究替代口径，不是通用行业标准。[SLO/goodput 指标讨论](https://arxiv.org/abs/2410.14257)。
+
 55. 训练成本怎么粗略估算？
     考察点：参数量、训练 token、FLOPs、MFU、GPU 小时、实验成本。
     回答框架：decoder-only Transformer 训练 FLOPs 可粗略估算为 `6 * 参数量 * 训练 token 数`，再除以集群有效算力得到时间；真实成本还包括实验、失败重跑、评估、数据和人力。
 
 56. 推理成本由哪些因素决定？
-    考察点：input token、output token、模型大小、上下文、并发、KV Cache、SLA。
-    回答框架：推理成本由输入输出 token、模型规模、上下文长度、并发、TTFT/TPOT SLA、KV Cache、硬件、推理引擎、量化和冗余共同决定。
+    考察点：资源向量与货币账本、input/output token、模态工作量、GPU 小时、KV、失败和分母。
+    回答框架：先把 token、图像/音频、GPU 时间、辅助模型、存储网络、重试和人工作为不同资源量记录，再按供应商价格或内部成本率换成货币；避免把同一 API 推理既按账单又按 GPU 小时重复计费。每 token 成本只比较分母和 workload 相近的请求，RAG/Agent 更应报告含失败、重试与人工成本的 cost per successful task。
 
 57. 为什么 output token 通常比 input token 贵？
     考察点：prefill、decode、自回归、GPU 占用、KV Cache。
     回答框架：input token 可在 prefill 阶段并行处理；output token 需要逐 token decode，每个 token 都要占用模型 forward、读取权重和 KV Cache，因此边际成本更高。
 
 58. 如何降低 LLM 推理成本？
-    考察点：小模型、量化、batching、cache、prompt 压缩、模型路由、容量规划。
-    回答框架：可从模型、引擎、产品和系统四层优化：小模型/蒸馏/量化，PagedAttention/continuous batching/speculative decoding，压缩 prompt/限制 max_tokens/cache/模型路由，峰谷调度和容量规划。
+    考察点：模型路由、prompt compression、prefix/response cache、speculative decoding、量化和 serving scheduling 的代表方案、成本边界和质量门禁。
+    回答框架：先找成本阶段，再按机制选方案。例如 FrugalGPT 的 cascade 以串行延迟换少调用强模型，RouteLLM 用偏好 router 直接选择强/弱模型但依赖数据域匹配；LongLLMLingua 做 query-aware 长上下文压缩，LLMLingua-2 用蒸馏 token classifier 提速；GPTQ/AWQ 优化权重，SmoothQuant 优化 W8A8 路径，KIVI 优化 KV Cache。Sarathi-Serve 通过 chunked prefill 缓解长 prompt 阻塞，DistServe 分离 prefill/decode 但有 KV handoff 和资源切分成本。最终在同一 trace、硬件和 SLO 下同时测 cost/success、TTFT/TPOT、P99、goodput、质量和安全。
 
 59. 为什么最便宜模型不一定最划算？
-    考察点：成功率、重试、人工修正、业务价值、单位有效任务成本。
-    回答框架：要看 cost per successful answer。如果便宜模型成功率低、重试或人工介入多，最终单位有效任务成本可能更高。
+    考察点：成功率作为分母、失败调用、fallback、人工升级和任务成功契约。
+    回答框架：总成本需覆盖失败尝试、重试、人工和必要的共享资源分摊，再除以满足业务契约的成功数。例：单次成本从 0.010 降到 0.007，但成功率从 90% 降到 60%，每成功任务成本由 0.0111 升到 0.0117；零成功时指标未定义。不能把 benchmark 分数直接当成功概率。
 
 60. 什么时候自部署比调用 API 更划算？
-    考察点：流量规模、合规、延迟、定制化、运维能力、API 单价。
-    回答框架：小流量和快速试错通常 API 更划算；大流量、任务稳定、强合规、低延迟或深度定制时，自部署可能更划算，但要计入研发和运维成本。
+    考察点：固定/边际成本、容量台阶、API 折扣、流量分布、模型质量和 SLO。
+    回答框架：在同等任务质量和 TTFT/TPOT 门槛下写 C_api=F_api+N*c_api、C_self=F_self+N*c_self。若 c_api>c_self，交叉点 N*=(F_self-F_api)/(c_api-c_self)。将 GPU 常驻与闲置、运维、折旧、峰值冗余、网络、失败和工程投入列入自托管；将缓存、多模态与折扣计入 API。线性阈值是估算入口，容量扩容和突发流量需要 trace 敏感性分析。
 
 61. 端侧部署和云端部署有什么区别？
     考察点：算力、内存、网络、隐私、成本、更新、质量。
@@ -1511,6 +1776,38 @@
 66. 端侧模型上线前要评估什么？
     考察点：设备分层、冷启动、tokens/s、内存、功耗、发热、崩溃率、更新。
     回答框架：要按设备档位评估质量、冷启动、首 token、tokens/s、峰值内存、电量、发热、降频、崩溃率、离线可用、模型更新和回滚。
+
+### 第六册第十三章：生产系统设计
+
+1. 如何从 workload 推导模型副本数？为什么端到端任务并发不能直接代替 active sequence？
+   考察点：input/output token/s、Little's Law、runtime service time、KV 容量、N+1。
+   回答框架：先按 workload 分层并统计输入/输出 token 到达率，再用目标模型和硬件的混合负载压测得到 prefill、decode 与活跃序列容量。用 `A_m≈Σ λ_j s_j τ_model,j` 估模型 runtime 活跃序列，用 `J_m≈Σ λ_j L_task,j` 估端到端任务数。任务等待检索、工具或人工时会增加 J_m，却未必占用模型序列槽。按吞吐和序列容量中的最大比例估副本，加入余量并单独检查 N+1；独立测得的峰值不能拼成同一 workload 的容量。
+
+2. LLM 服务的 SLI、SLO 和错误预算应该怎样定义？
+   考察点：分母、窗口、TTFT/TPOT/E2E、取消、任务质量、安全门槛。
+   回答框架：先定义 eligible 请求与完成事件，再固定测量起止点、延迟阈值和滚动窗口。分开记录服务端 TTFT、客户端完整时长、TPOT、超时、服务端断连和用户取消；不能在事故后改写分类。错误预算只表示该 SLO 下允许的未达标比例，质量和高风险安全事件应有单独门槛，不能互相抵消。
+
+3. 工具调用超时后怎样避免重复退款？幂等键、Transactional Outbox 和 Saga 分别解决什么问题？
+   考察点：commit-unknown、稳定操作 id、参数绑定、至少一次投递、消费者去重、补偿。
+   回答框架：先把无回执记作 `committed_unknown`，保留原 operation id，查询下游状态或用相同幂等键重放；同一 key 的参数变化应冲突。幂等键解决同一意图重复提交，Outbox 把本地状态和待发事件放进一个事务但仍是至少一次投递，消费者还要去重；Saga 管理跨服务的局部提交与补偿，补偿不保证恢复原状。不能笼统承诺端到端 exactly-once。
+
+4. 5% canary 中错误率为 20%，为什么全服务错误率可能只升高约 1%？如何判断是否扩大灰度？
+   考察点：control/canary 分组、流量代表性、归因、切片、质量与安全 guardrail。
+   回答框架：若其他 95% 流量无错误且两组同分母，候选对总体错误率的贡献约 `0.05×0.20=0.01`；全局曲线会稀释回归。需要稳定分组并按相同时间、租户、请求长度、任务类型和缓存状态比较基线与候选，同时看质量、安全、成本、尾延迟和工具副作用。样本不足或高风险门禁缺证据时暂停，而不是只凭 HTTP 成功率放量。
+
+### 第六册第十四章：部署方案推导与故障复盘
+
+1. 给定输入/输出吞吐、模型序列槽容量和 runtime 占槽时间，如何推导部署副本数？`N+1` 什么时候才足以承受单副本故障？
+   考察点：`R_in/R_out`、Little's Law、`A_m≈Σ λ_j s_{j,m} τ_{model,j,m}`、`J_task`、γ、故障域、混合 workload。
+   回答框架：先按目标模型池统计到达率和模型调用数，计算 token/s；再用模型 runtime 占槽时间求 active sequence，不能把含检索/工具等待的 job 并发直接当 GPU 序列数。分别按 prefill、decode、active sequence 单副本容量求比值，取最大值并乘余量、向上取整；额外加一台只是在失去一台后仍保留剩余容量，前提是路由、故障域、冷启动和 survivor 资源都满足。吞吐须在目标长度分布和混合负载中实测。
+
+2. GPTQ、AWQ、SmoothQuant 与 KIVI 各自解决哪个量化约束？如果一种方案的目标任务质量下降或没有速度收益，下一步怎样定位？
+   考察点：权重/激活/KV 对象、近似二阶误差补偿、activation-aware 缩放、outlier 迁移、K/V 非对称量化、校准与 kernel。
+   回答框架：先把量化对象分开：GPTQ/AWQ 是 weight-only 路线，SmoothQuant 通过等价缩放服务 W8A8，KIVI 改动态 KV 状态且 K/V 使用不同量化轴。接着按误差来源提出测试：重查校准分布、比较 group/scale 选择、核对目标 kernel 是否命中、检查 residual/scale 元数据，并把质量、显存和端到端延迟同时报告。任何新增组合或“改进”都先标成待验证实验，不能从论文机制推断目标环境收益。
+
+3. Prompt 模板发布后 TTFT P99 升高、TPOT 与 5xx 稳定，你如何判断是否是 prefix cache 退化，并写一份可关闭的复盘行动计划？
+   考察点：canary 对照、token 级前缀、cache saved-token rate、queue/prefill trace、长短请求干扰、合成案例边界、blameless postmortem。
+   回答框架：按版本和请求类别比较规范化 token 前缀、复用 token 比率、prefill、queue、KV 与 TTFT；TPOT 稳定只是支持 prefill 阶段假设的证据之一，还要排除 router、GPU 水位、RAG 长度和流式缓冲。复盘明确影响和未知项，分析接口契约、监控与发布门禁等系统因素，为行动项指定 owner 和验证证据。书中数值是合成教学场景，不能写成真实事故或实际质量保证。
 
 ## 长上下文、RAG 与 Agent
 
@@ -1582,13 +1879,17 @@
     考察点：entity、relation、community summary、global question、multi-hop、成本、更新、权限。
     回答框架：普通向量 RAG 主要按 query 和 chunk 相似度召回局部证据；GraphRAG 会先抽取实体关系，构建图和社区摘要，使系统能回答跨文档、全局主题、关系链和多跳问题。它不是所有问题的默认最优：抽取和维护成本更高，图谱错误会传播，增量更新和权限过滤更复杂。Agentic RAG 强调多轮查询、工具调用和停止条件，GraphRAG 是结构化检索增强，两者可以组合。
 
+16B. 固定 top-k RAG、Self-RAG、CRAG 和 Agentic RAG 分别适合修什么故障？
+    考察点：固定召回、按需检索、retrieval evaluator、web fallback、query drift、模型训练、证据增益。
+    回答框架：先把故障分开：正确证据缺席时先改解析、query、hybrid retrieval、索引或 reranker；固定 top-k 是可比较的基线。Self-RAG 训练模型通过 reflection tokens 按需检索并评估 passage，适合能控制模型训练/推理协议的场景，但模型自评不是独立 verifier。CRAG 用 retrieval evaluator 决定是否修正本地结果或扩展 web search，适合候选质量不确定的链路，但 evaluator 校准、来源信誉和外部注入面会增加成本。Agentic RAG 让模型分多轮填证据缺口，适合真实多跳问题，但必须用新证据增益和预算停止。方法可以组合，不能把它们当成同一排行榜上的版本升级。
+
 17. RAG 答案错了怎么排查？
     考察点：文档库、解析、chunk、retrieval、rerank、context、generation、citation。
     回答框架：先确认正确文档是否在库里，再看 chunk、召回、重排、context、生成和引用各环节，定位是检索问题还是生成问题。
 
 18. 企业 RAG 最容易出什么事故？
     考察点：权限、过期文档、表格解析、引用、幻觉、成本延迟。
-    回答框架：常见事故包括权限泄露、过期文档引用、解析错误、检索漏召回、引用编造、无依据回答和 latency/cost 超标。
+    回答框架：常见事故包括权限泄露、过期文档引用、解析错误、检索漏召回、引用编造、无依据回答和 latency/cost 超标。还要考虑攻击者把指令藏在可被召回的文档里；USENIX Security 2026 的特定威胁模型展示了可优化触发片段的检索投毒。防护要治理内容入库、来源与 revision、检索后的工具权限及外发动作，并用 AgentDojo 等动态任务评估正常任务效用和攻击下安全性，不能只测注入分类器准确率。
 
 19. Embedding model 在 RAG 中起什么作用？
     考察点：query、document chunk、向量空间、语义相似、召回。
@@ -2161,8 +2462,20 @@
     回答框架：verifier 数据让模型或独立 verifier 学会判断候选推理是否可靠。它能配合多候选生成提升数学题求解，而不是只学习单一标准答案。
 
 27. 专业领域数据为什么不能只靠继续预训练解决？
-    考察点：时效性、引用、隐私、专家审核、RAG、SFT、风险边界。
-    回答框架：继续预训练能增强领域语言和术语，但高风险领域需要可更新知识、出处和权限控制。医学、法律、金融通常要结合 RAG、SFT、工具、专家审计和安全拒答边界。
+   考察点：时效性、引用、隐私、专家审核、RAG、SFT、风险边界。
+   回答框架：继续预训练能增强领域语言和术语，但高风险领域需要可更新知识、出处和权限控制。医学、法律、金融通常要结合 RAG、SFT、工具、专家审计和安全拒答边界。
+
+28. 如何比较 C4、Dolma、FineWeb、DCLM 和 Nemotron-CC，而不把它们排成一个分数榜？
+    考察点：各自目标、处理流水线、消融证据、数据规模、token horizon、训练 / tokenizer / benchmark 条件。
+    回答框架：C4 展示 Common Crawl 的英文启发式过滤基线；Dolma 优先解决开放语料的来源记录、多域组成和可复现构建；FineWeb 通过抽取、逐 crawl 去重和过滤消融解释选择，并把教育性过滤单独做成 FineWeb-Edu；DCLM 用固定模型配方和评估协议来比较数据选择；Nemotron-CC 面向长 token horizon，组合分类器、保留更多真实唯一 token 和合成改写。比较方法机制和目标可以，不能把不同论文的裸分直接排名，因为模型、tokenizer、训练预算、评测、数据版本和年份并不统一。
+
+29. 为什么质量分类器筛完后通用 benchmark 上升，代码或低资源语言却可能下降？
+    考察点：参考集偏差、质量分语义、domain shift、留存率、多样性、覆盖损失。
+    回答框架：分类器分数首先表示样本更像训练用的正例参考集，不代表普适正确性。教育或问答式正例可能提高某些知识测试，却降低代码、口语或低资源域的召回；2026 年 Leverage Score Sampling 预印本在其 Common Crawl 选择设置中报告质量过滤的代码覆盖问题，结论仍受语料、模型和比例限制。工程上应按语言 / 领域报告保留 token 与误删样本，在独立代码和长尾任务上评估，并对多参考集、分桶配额或多样性选择做同预算对照。
+
+30. 温度采样、DoReMi 和 RegMix 分别如何确定数据配比？
+    考察点：数据规模平滑、Group DRO、proxy model、性能预测、重复曝光、实验成本与迁移假设。
+    回答框架：温度采样只根据池大小平滑自然比例，成本低但不读模型反馈；DoReMi 用 reference / proxy 模型的 domain excess loss 做 Group DRO，再把学到的域权重用于大模型；RegMix 训练多个小代理配比并拟合 mixture 到验证损失的回归器，假设配比排序可从小模型迁移到大模型。两者的论文实验用不同数据和评估，不能拿其绝对分数直接横比。真正落地要固定总 token、模型和评测，再用多个种子及目标任务验证 proxy 权重。
 
 28. 如何审计 code / math / domain 三类专项数据是否可进入训练？
     考察点：类型专属质量分、风险门禁、token 保留率、effective epoch、评估矩阵。
@@ -2432,11 +2745,11 @@
 
 27. Noise scheduler 对 diffusion 有什么影响？
     考察点：训练加噪、采样路径、步数、质量速度 trade-off。
-    回答框架：scheduler 定义每个时间步的噪声强度、如何从 `x0` 得到 `x_t`，以及推理时如何从当前 noisy sample 更新到下一步。采样步数、DDPM / DDIM / Euler / DPM-Solver 等选择都会影响速度、质量和稳定性。
+    回答框架：scheduler 定义噪声时刻、模型预测值如何还原状态、推理时间网格和下一步更新。DDIM 稀疏抽取反向步而无需重训；DPM-Solver 用 probability-flow ODE 的高阶求解减少模型评估；Progressive Distillation 则额外训练学生去逼近教师的多步轨迹。前两类主要换采样过程，后一类以训练成本换推理调用；都要按 checkpoint 的参数化、noise schedule、CFG 和任务评估。
 
 28. Classifier-Free Guidance 的公式和风险是什么？
     考察点：conditional prediction、unconditional prediction、guidance scale、prompt 遵循、多样性。
-    回答框架：CFG 计算 `eps_uncond + w * (eps_cond - eps_uncond)`，放大条件方向，让结果更符合 prompt。`w` 太小可能不跟 prompt，太大可能过饱和、失真、细节异常和多样性下降，所以它是条件遵循和质量之间的折中旋钮。
+    回答框架：训练时以一定概率丢弃文本条件，让一个模型同时学 conditional 和 unconditional 预测；按 `eps_uncond + w * (eps_cond - eps_uncond)` 组合。此约定下 `w=0` 是无条件、`w=1` 是条件预测、`w>1` 向条件外推。增大 `w` 可加强条件影响，但会牺牲多样性、放大偏差并增加 denoiser 计算；不同库可能用偏移一位的 scale 定义，面试时先写清公式再谈数值。
 
 29. Latent Diffusion 为什么比像素空间 diffusion 更高效？
     考察点：VAE / autoencoder、latent space、空间压缩、计算成本。
@@ -2454,13 +2767,13 @@
     考察点：结构条件、边缘 / 深度 / 姿态 / 分割、残差注入、可控性。
     回答框架：prompt 主要描述语义，ControlNet 额外输入结构条件，并通过条件分支向 diffusion backbone 注入残差，让模型按给定边缘、深度、姿态或分割布局生成。它解决的是纯文本很难精确控制空间结构的问题。
 
-33. DALL-E 早期自回归图像 token 路线和 diffusion 路线怎么比较？
-    考察点：离散图像 token、next-token prediction、序列长度、连续去噪、编辑生态。
-    回答框架：早期 DALL-E 把图像离散成 tokens，再用 Transformer 根据文本和前序图像 token 做 next-token prediction；diffusion 从噪声开始逐步去噪，天然适合连续图像生成和可控编辑。自回归路线目标统一但高分辨率 token 序列长，diffusion 质量和编辑生态成熟但采样通常要多步。
+33. DALL·E 1、DALL·E 2、Imagen 和 Latent Diffusion 分别把瓶颈放在哪里？
+    考察点：dVAE 离散图像 token、CLIP latent prior/decoder、T5 文本编码器、级联扩散、VAE latent 压缩、证据边界。
+    回答框架：DALL·E 1 把图像编码成离散 token 并自回归生成，统一 next-token 目标但序列长；DALL·E 2 将文本到 CLIP image embedding 的 prior 与扩散 decoder 分开，语义条件更明确但 embedding 会丢非关键细节；Imagen 用强文本编码器和级联扩散强调语言理解与高清合成，推理链更长；Latent Diffusion 把去噪移至感知压缩空间以降低成本，却受 VAE 重建质量限制。每种方案针对不同瓶颈，FID、DrawBench 和人评设置不一致，不能据论文数字拼成排行榜。
 
 34. 文生图 pipeline 上线前应该审计哪些数字？
-    考察点：latent shape、VAE 压缩比、prompt token、U-Net 调用次数、ControlNet shape、安全门禁。
-    回答框架：先检查分辨率和 VAE scale 得到的 latent shape，再算 prompt / negative prompt token 是否超上限；根据采样步数和 CFG 判断 denoiser 调用次数；如果有 image-to-image、inpainting 或 ControlNet，要检查 mask / 条件图 shape 与图像对齐；最后把 seed、scheduler、安全过滤、版权和水印策略纳入回归。
+    考察点：latent shape、VAE 压缩比、prompt token、U-Net 调用次数、ControlNet shape、安全门禁、组合能力评估。
+    回答框架：先检查分辨率和 VAE scale 得到的 latent shape，再算 prompt / negative prompt token 是否超上限；根据采样步数、CFG 和实现方式估 denoiser forward-equivalent；若有 image-to-image、inpainting 或 ControlNet，要检查 mask / 条件图 shape 与图像对齐。FID 看分布信号，GenEval / T2I-CompBench 看计数、位置和属性组合，最后加入人评、seed、scheduler、安全、版权和来源凭证回归。
 
 35. 视频生成为什么比图像生成难？
     考察点：时间维度、帧间一致性、身份保持、运动连续、物理合理性。
@@ -2470,89 +2783,129 @@
     考察点：`T,H,W`、temporal patch、spatial patch、token budget。
     回答框架：逐帧 patch token 约为 `T * ceil(H/P) * ceil(W/P)`；时空 patch 约为 `ceil(T/P_t) * ceil(H/P) * ceil(W/P)`。时间 patch 能降低 token 数并注入短期运动信息，但太大会损失快速运动、小目标和局部细节。
 
-37. Video diffusion 和 image diffusion 的核心区别是什么？
-    考察点：视频 latent、时间维度、时空 denoiser、CFG 调用成本。
-    回答框架：两者都可以用加噪 / 去噪和噪声预测目标，但 video diffusion 的 `z_t` 多了时间维度，denoiser 要同时建模空间结构和时间变化。工程上还要考虑帧数、时空 token、采样步数、CFG 带来的 denoiser 调用次数和 cross-attention 成本。
+37. Make-A-Video、Imagen Video、CogVideoX 和 Wan 分别针对视频生成的什么瓶颈？
+    考察点：文生图 prior 迁移、无 text-video 配对数据、时空级联、视频 VAE、DiT、caption 质量和证据不可比性。
+    回答框架：Make-A-Video 复用文生图知识并从无文本配对的视频学习运动，主要缓解配对数据要求；Imagen Video 用 base video diffusion 加时空超分级联，并报告 v 参数化与 CFG 蒸馏；CogVideoX 用 3D VAE、expert Transformer 和稠密 caption 改善时空压缩与文本对齐；Wan 2.1 用 3D causal VAE、DiT、数据工程和 feature cache 做开放视频系统。四篇论文数据、时长、分辨率、算力和评测不同，面试中应讲各自解决的约束和遗留瓶颈，不直接排名。
 
 38. 为什么说视频生成模型可能是 world model 的候选，但不能直接等同于 world model？
     考察点：状态转移、物体持久性、因果后果、可交互、可规划、可验证。
     回答框架：视频生成要求模型预测世界随时间变化，因此可能学到物体持久性、运动、遮挡和部分物理规律。但真正的 world model 需要能在状态和动作条件下预测后果，并支持规划、交互和任务评估。生成看起来合理的视频只是证据之一，不等于可控可靠。
 
 39. 如何设计一个视频生成上线前审计？
-    考察点：token / latent shape、时序一致性、FVD / 人评、安全、deepfake。
-    回答框架：先算帧数、分辨率、spatiotemporal tokens、latent shape、采样步数和 denoiser 调用次数；再评估 flicker、identity drift、motion smoothness、object permanence、物理失败和 prompt 一致性；最后结合 FVD / 任务型指标 / 人工偏好，并加入 deepfake、名人肖像、虚假新闻、版权和 provenance 门禁。
+    考察点：token / latent shape、时序一致性、FVD、VBench/VBench-2.0、自动评估器、人评、安全和 deepfake。
+    回答框架：先算帧数、分辨率、spatiotemporal tokens、latent shape、采样步数和 denoiser 调用次数；再评估 flicker、identity drift、motion smoothness、object permanence、物理失败和 prompt 一致性。FVD 是特征分布距离；VBench/VBench-2.0 拆分时序、人类保真、物理和常识等维度，但自动 evaluator 仍需人工抽查。最后加入深度伪造、肖像授权、版权和 provenance 门禁。
 
 40. ASR、TTS 和 speech-to-speech 的区别是什么？
-    考察点：语音转文本、文本转语音、语音到语音、cascade、端到端。
-    回答框架：ASR 把语音转成文本，TTS 把文本合成语音，speech-to-speech 是语音输入并输出语音。工程上可以用 `ASR -> LLM -> TTS` 级联，也可以用 speech tokens 端到端建模；前者易调试，后者更自然但训练和安全评估更难。
+    考察点：语音转文本、文本转语音、语音到语音、cascade、full-duplex、Thinker-Talker、ARIA。
+    回答框架：ASR 把语音转成文本，TTS 把文本合成语音，speech-to-speech 直接处理语音输入并生成语音。`ASR -> LLM -> TTS` 保留可审计文本但会串行累积延迟并丢韵律；Moshi 用用户/助手并行音频流处理打断与重叠；Qwen Thinker-Talker 把多模态理解和 speech token 解码分工，ARIA 再处理 text/codec token 速率失配。不同论文的理论首包和实测 latency 不可直接排名；选型仍要看转写证据、全双工需求、授权、安全、硬件与任务成功率。
 
 41. Whisper 的基本结构和输入输出是什么？
-    考察点：log-mel spectrogram、audio encoder、text decoder、自回归、弱监督多语言数据。
-    回答框架：Whisper 先把音频转换成 log-mel spectrogram，再由 audio encoder 编码声学特征，text decoder 自回归生成 transcript token。它的优势来自大规模多语言弱监督数据，适合 ASR、翻译和一定噪声鲁棒场景。
+    考察点：log-mel spectrogram、audio encoder、text decoder、多任务 token、弱监督数据、长音频边界。
+    回答框架：Whisper 由 log-mel 前端、audio encoder 和自回归 text decoder 组成；language/task/timestamp/no-speech token 让一个 decoder 支持转写、翻译、语言识别、时间戳和静音判断。原论文报告 680,000 小时弱监督数据，其中 117,000 小时覆盖其他 96 种语言，125,000 小时为翻译数据。长音频使用 30 秒窗口和时间戳缓冲；重复循环、首尾漏词、无关幻觉和低资源语种覆盖仍是边界，弱监督规模不等于目标业务零样本可靠。
 
 42. WER / CER 怎么计算？为什么不能只看一个平均值？
     考察点：substitution、deletion、insertion、词级 / 字符级、切片分析。
     回答框架：WER 是 `(S + D + I) / N_ref`，CER 是字符级同类公式。平均 WER 可能掩盖口音、噪声、专有名词、多说话人、短命令和低资源语言问题，所以要按场景分桶看 bad case。
 
 43. Audio codec 和 codec language model 为什么重要？
-    考察点：连续音频离散化、codebooks、token rate、next-token prediction、TTS / speech-to-speech。
-    回答框架：audio codec 把 waveform 压缩成离散 audio tokens，并能解码回语音；codec LM 把这些 tokens 当成语言模型序列生成。它让 TTS 和 speech-to-speech 能复用 Transformer / next-token 框架，但也带来序列长、实时推理慢、码本建模复杂和音质依赖 codec 的问题。
+    考察点：连续音频离散化、semantic/acoustic tokens、RVQ codebooks、token rate、分层预测、TTS / speech-to-speech。
+    回答框架：codec 将 waveform 编码成可重建的离散声学码；semantic token 偏内容不变性，acoustic token 保留音色/韵律但可能编码噪声和身份。总码数 `时长×帧率×码本数` 不必等于串行 Transformer 步数：Moshi 用时间/深度两级建模，Qwen Talker 用 MTP 预测 residual codebooks。VALL-E 把短参考音频作为 zero-shot speaker condition；VALL-E 2 用 repetition-aware sampling 和 grouped-code modeling 缓解循环与长序列问题。收益依赖 codec、码本 schedule 和数据覆盖，另需验证时延、音质、说话人授权和冒用风险。
 
-44. 语音助手上线前应该审计哪些指标？
+44. CTC、RNN-T 和 attention seq2seq 的流式 ASR 取舍是什么？
+    考察点：隐式单调对齐、blank、预测前缀、chunk/endpoint、解码复杂度。
+    回答框架：CTC 为声学帧输出字符与 blank，训练时对折叠成同一文本的单调路径求和，帧级独立假设简化解码；RNN-T 在音频时间和已输出前缀的二维格点上预测，blank 推进声学时间、label 推进文本前缀，能用历史文本但 beam/search 更复杂；attention seq2seq 可利用全局上下文，常见双向 encoder 需要等更多输入，流式化要额外设计 chunk/单调注意力和 partial 稳定性。一项 7 语言同 encoder 的对照中 RNN-T 更准、CTC 推理更快；它没有比较 attention seq2seq，不能据此排普遍名次。
+
+45. 语音助手上线前应该审计哪些指标？
     考察点：采样率、log-mel shape、WER / CER、latency、codec tokens、授权、安全。
     回答框架：先检查采样率、切片、VAD、ASR WER / CER 和噪声场景；再算 codec token rate、上下文长度、ASR / LLM / TTS 级联延迟和首包延迟；如果支持 voice cloning，要检查说话人授权、水印、深伪检测、隐私脱敏和高风险请求拒绝。
 
-45. 什么是统一多模态模型？统一可以发生在哪些层次？
+46. 什么是统一多模态模型？统一可以发生在哪些层次？
     考察点：接口统一、表示统一、架构 / 目标统一、工程系统。
     回答框架：统一多模态模型或系统希望处理文本、图像、音频、视频等多种输入输出。接口统一是多个模块对用户呈现一个助手；表示统一是映射到共享 embedding 空间；架构 / 目标统一是把多模态 token 放进统一 Transformer 或统一训练目标。真实产品常是三者混合。
 
-46. Any-to-Any 多模态为什么难？
+47. Any-to-Any 多模态为什么难？
     考察点：输入输出模态、decoder 差异、数据配比、延迟、评估。
     回答框架：Any-to-Any 要支持任意输入模态到任意输出模态，例如 text -> image、speech -> speech、video -> text。难点在于各模态 token rate、训练数据规模、输出 decoder、质量指标和安全风险都不同，很难用单一目标和单一评估覆盖。
 
-47. 统一 token 化为什么是机会也是瓶颈？
+48. 统一 token 化为什么是机会也是瓶颈？
     考察点：文本 token、image patch / image token、audio codec token、video spatiotemporal token、context budget。
     回答框架：统一 token 化让 Transformer 可以用类似 next-token prediction 的方式处理多模态；但图像、音频、视频 token 数远多于文本，多图、长音频、多帧视频会快速推高上下文、attention 成本和延迟。tokenizer / codec 质量也会限制细节、音质和运动信息。
 
-48. 中心 LLM 模块化系统和 early-fusion 统一模型怎么取舍？
+49. 中心 LLM 模块化系统和 early-fusion 统一模型怎么取舍？
     考察点：LLM router、专用 encoder / decoder、信息瓶颈、端到端优化、安全。
-    回答框架：中心 LLM 系统复用 ASR、OCR、vision encoder、TTS、image generator 和工具，易调试、易做权限和安全控制，但可能有误差传播和信息压缩。Early-fusion 统一模型跨模态交互更自然，但训练成本高、可解释性弱、token 序列长、上线安全评估更难。
+    回答框架：先区分模块化接口和模型内部的统一。中心 LLM 系统复用 ASR、OCR、vision encoder、TTS、image generator 和工具，易调试、权限边界清楚，但可能有误差传播和信息压缩。代表研究里，[Chameleon](https://arxiv.org/abs/2405.09818) 把文本与离散图像 token 放进同一自回归序列，解决交错图文联合建模问题，代价是长视觉 token 序列和高训练成本；[NExT-GPT](https://arxiv.org/abs/2309.05519) 复用多模态 encoder、中心 LLM 与专用生成 decoder，解决多输入到多输出的模块连接，代价是跨模块对齐和各 decoder 质量，论文的约 1% 参数仅指特定对齐阶段；[AnyGPT](https://arxiv.org/abs/2402.12226) 用离散模态 tokenizer 复用标准 next-token LLM，减少主干改造，但重建细节受 tokenizer 限制。它们的数据和评测协议不同，不能把论文分数当横向排行榜。
 
-49. 统一多模态上线前如何做审计？
+50. 统一多模态上线前如何做审计？
     考察点：各模态 token、路由、loss mixture、modality conflict、安全门禁。
     回答框架：先算文本、图像、音频、视频和 special token 总预算，再算输出文本 / audio / image / tool token；检查 OCR、ASR、video sampler、TTS、image generator 和工具路由是否匹配任务；训练侧看 loss mixture 是否覆盖目标能力；安全侧隔离不可信媒体指令、未授权 voice cloning、未审核生成输出和工具越权。
 
-50. 如何系统评估一个多模态模型？
+51. 如何系统评估一个多模态模型？
     考察点：VQA、OCR、chart、grounding、hallucination、generation、安全、回归。
     回答框架：先按任务拆成 VQA / OCR / 图表 / grounding / 视频 / 语音 / 生成和安全切片；再分别看 VQA accuracy、WER / CER、chart relaxed accuracy、IoU、faithfulness、人工偏好和安全门禁；最后做 bad case attribution，区分感知、OCR、grounding、推理、表达和拒答错误，不能只引用一个公开榜单均分。
 
-51. 多模态 hallucination rate 应该怎么定义？
+52. 多模态 hallucination rate 应该怎么定义？
     考察点：atomic claim、media evidence、unsupported claim、拒答边界。
     回答框架：把模型回答拆成 atomic claims，逐条检查是否被图片、音频、视频或文档证据支持；unsupported claims 占比就是多模态幻觉率。它和普通 accuracy 不同，因为模型可能最终答案看似接近，但中间解释包含不存在物体、读错文字或编造不可见信息。
 
-52. Grounding 在多模态安全和评估中有什么作用？
+53. Grounding 在多模态安全和评估中有什么作用？
     考察点：bbox / mask / point、IoU、证据定位、GUI agent、幻觉治理。
     回答框架：Grounding 把语言 claim 对应到图片区域、框、点或 mask，可以用 IoU、pointing accuracy 或 evidence support rate 评估。它能帮助发现模型是否真的看见证据，也能约束 GUI agent 点击区域、文档审核和高风险视觉判断。
 
-53. 多模态 prompt injection 和普通 prompt injection 有什么不同？
+54. 多模态 prompt injection 和普通 prompt injection 有什么不同？
     考察点：OCR、截图、文档、音频、视频、不可信内容边界、工具权限。
     回答框架：普通 prompt injection 多来自用户文本或外部文档文本，多模态 prompt injection 可以隐藏在图片、网页截图、PDF、音频或视频中，再经 OCR / ASR / caption 被模型读入。防护要标记媒体内容来源，外部内容只能作为数据，不能覆盖系统指令；工具调用还要做权限、参数、二次确认和 audit trace。
 
-54. 多模态安全上线门禁应该看哪些指标？
+55. 多模态安全上线门禁应该看哪些指标？
     考察点：clean success、attack success、hallucination、privacy、identity、over-refusal、latency。
     回答框架：门禁要同时看正常任务成功率、幻觉率、不可信媒体指令触发率、隐私泄露率、身份识别 / voice cloning 高风险拦截、生成内容审核通过率、过度拒答率和 P95 延迟。高质量安全不是拒答率最高，而是在正常任务可用的前提下正确拦截高风险样本。
 
-54A. 多模态项目答案错了如何做事故归因？
+55A. 多模态项目答案错了如何做事故归因？
     考察点：input fidelity、OCR、ASR、video sampling、grounding、safety、budget。
     回答框架：先保存原始媒体和模型实际看到的输入，检查 resize、crop、压缩、抽帧和降噪是否保留关键证据；再看 OCR / ASR / caption / metadata 中间结果，尤其是金额、日期、错误码、姓名和时间戳等关键字段；随后检查证据是否进入上下文、claim 是否被区域 / OCR / 时间戳支持，最后看安全过滤、关键字段确认、延迟和成本门禁。这样才能区分输入保真、模态转换、grounding、生成和安全问题。
 
-54B. 如何设计一个多模态项目事故审计 demo？
+55B. 如何设计一个多模态项目事故审计 demo？
     考察点：toy media cases、critical fields、temporal recall、evidence support、gate。
     回答框架：可以构造 6 类样本：正常商品图、长截图裁剪丢底部证据、发票金额 OCR 错、视频关键事件抽帧漏掉、噪声音频金额 ASR 错且未确认、不可信媒体内容安全边界失败。脚本输出 input fidelity、evidence recall、OCR / ASR accuracy、critical field accuracy、temporal evidence recall、grounding IoU、evidence support、hallucination rate、safety block、confirmation coverage、budget overrun、root cause 和 failed gates。
 
-55. 如何准备一轮完整的多模态面试复盘？
+56. 如何准备一轮完整的多模态面试复盘？
     考察点：topic coverage、formula coverage、demo coverage、risk coverage、project story、revision plan。
     回答框架：先列出 CLIP、vision encoder、VLM connector、多模态 SFT、diffusion、文生图、视频、语音、统一多模态、评估安全和项目讲述这些 required topics；再检查每类是否能写公式、讲 shape、给 demo、说 bad case 和 trade-off；最后把低分题、缺失公式和缺失 demo 写成下一轮 revision plan，而不是只说“再复习一下”。
+
+57. SigLIP 相对 CLIP 改变了什么？它为什么不能单独解决图文数据里的伪负例？
+    考察点：全局 softmax、成对 logistic loss、logit scale/bias、标签结构、batch 规模。
+    回答框架：CLIP 在 batch 相似度矩阵上做图到文和文到图的 softmax 分类；SigLIP 对每一对 logit 使用带正负标签的 sigmoid logistic loss，减少对全局归一化和超大 batch 的依赖。但若语义相关的非对角配对仍标成负例，sigmoid 会继续惩罚它；要支持多正例，应显式改变 pair labels 或改用能表达多相关目标的监督与评测。
+
+58. BLIP-2、LLaVA-1.5 和 MM1 分别解决什么训练约束？如何避免误比论文结果？
+    考察点：冻结双端与 Q-Former、视觉指令 projector、数据 mixture 消融、分辨率/token 预算、可比性。
+    回答框架：BLIP-2 用 Q-Former 从冻结视觉 encoder 抽取少量语言相关 query，降低端到端训练参数量；LLaVA-1.5 用较直接的 CLIP+MLP 桥接和视觉指令数据建立可复现基线；MM1 系统考察 encoder、分辨率、视觉 token 和数据 mixture。比较时先讲目标约束和设置，再报告每篇论文自己的证据，不把不同模型、数据和 benchmark 的分数排成统一名次。
+
+59. 收据或表格理解该选 OCR pipeline、LayoutLMv3、Donut 还是 Pix2Struct？
+    考察点：OCR 中间结果、二维布局、图像到 JSON、截图解析、字段关系与错误追踪。
+    回答框架：需要可审计文字和现成 OCR 时，OCR pipeline 可复用识别器，但识别错会向后传播；LayoutLMv3 将 OCR 字词/位置与图像 patch 联合建模；Donut 直接生成结构化文本，减少外部 OCR 依赖但错误较难定位；Pix2Struct 用截图解析预训练学习视觉结构。除整页 CER/ANLS 外，还要验证税额与总额关系、字段级准确率、区域证据和布局泛化。
+
+60. CTC、RNN-T 与 Whisper 的训练目标怎样决定流式能力？
+    考察点：CTC 单调路径、RNN-T 时间/前缀格点、自回归 decoder、chunk encoder、partial transcript。
+    回答框架：CTC 对折叠为目标文本的帧级单调路径求和；RNN-T 在声学时间与输出前缀的格点上对齐，并让预测依赖已生成 token；Whisper 是带任务提示的 encoder-decoder 生成目标。流式能力还取决于 encoder 是否因果或分块、解码状态和 endpoint 设计，不能仅从 loss 名称推出端到端延迟。
+
+61. Min-SNR 为什么必须连同 `x0`、`epsilon` 或 `v` 参数化一起说明？
+    考察点：SNR 定义、梯度冲突、目标相关权重、论文设置边界。
+    回答框架：同一个 timestep SNR 对应的权重随预测目标不同；`x0`、噪声和 `v` 预测采用不同函数，不能只报一个 gamma。Min-SNR 针对训练步间梯度冲突提出截断重加权，报告时还要固定 schedule、目标参数化、数据、模型和指标；论文的收敛速度或 FID 是对应实验结果，不是普适保证。
+
+62. 变长视频训练如何在固定预算下比较固定帧、分桶和 Frame Pack？
+    考察点：时空 token、padding waste、attention 成本、时间覆盖、attention mask。
+    回答框架：固定帧方案协议简单但会丢短片冗余或截断长片；分桶减少 padding 但产生多个 shape；Frame Pack 提高变长样本混批利用率，却要求隔离样本注意力并保存时间/帧边界。报告 token 数和 attention cell 估算之外，还要用时序事件召回、身份连续性和长短视频切片验证实际能力。
+
+63. EVS 和 VidCom2 怎样压缩视频 token？为什么它们不等价于少抽帧？
+    考察点：抽帧发生阶段、vision encoder、时间冗余、帧独特性、prefill/KV、质量—延迟。
+    回答框架：抽帧发生在 encoder 前，可同时减少解码和视觉编码；EVS/VidCom2 是视觉 token 剪枝，通常先编码候选帧，再压低后续 LLM 的 prefill 与 KV 成本。EVS 根据相邻帧 patch 的时间静态性剪枝，VidCom2 按帧独特性分配压缩强度。论文报告的“EVS 最多 4× TTFT”及“VidCom2 仅保留 25% token、LLaVA-OneVision 达原性能 99.6%”都绑定各自模型和任务；上线需同时测 temporal event recall、证据支持率、encoder FLOPs、prefill 和 KV。当前 vLLM 的剪枝位置、模型兼容和 CUDA Graph 限制也要按目标版本核验。
+
+64. 流式 ASR 的 `chunk_size` 与 `padding_size` 分别控制什么？
+    考察点：每次更新频率、声学上下文、重叠窗口、实时因子、并发。
+    回答框架：Riva 的流式配置中，chunk 决定多久更新一次，padding 为每个新 chunk 前后添加上下文，输入窗口约为 `chunk + 2×padding`。其低延迟例子 `0.16s/1.92s` 与高吞吐例子 `0.8s/1.6s` 都处理约 4 秒上下文，但更新频率相差 5 倍；重复窗口的实际计算还要看运行时是否复用特征。RTF 通常是处理时间/音频时长，Riva 的 RTFx 是其倒数；都不能替代首个 stable 延迟、partial 修订率和 WER/CER。
+
+65. 多阶段语音模型何时融合，何时用 `async_chunk` 或独立 stage？
+    考察点：stage control plane、payload data plane、TTFT/TTFP、背压、并发和失败恢复。
+    回答框架：融合可以省 RPC 和排队，适合轻量下游；完整 payload 交接边界清晰，适合批处理；chunk 流交接让下游与上游重叠，适合首包敏感服务，但需处理 chunk 顺序、取消、背压和部分失败。vLLM-Omni 在 Qwen3-Omni Fixed-Len-2500/900、2×H100、并发 32 的作者测量中，async-chunk 对 no-async 的平均 TTFT 为 507.8 ms 对 3420.1 ms，E2EL 为 72.63 s 对 136.62 s；TTFT 指首个文本 token，不是音频 TTFP。此结果只能作机制示例，不能跨 workload 排名。
 
 ## 开放研究题
 
@@ -2576,8 +2929,40 @@
    回答框架：先设计明确 rubric，并随机化答案顺序、隐藏模型名；再用人工标注或程序验证样本计算 judge-human agreement，按长度、位置、任务类型和模型来源切片分析错误；如果 judge 偏好长答案、格式漂亮但事实错的回答，就只能作为初筛，关键场景必须保留人工复核和硬验证器。
 
 5C. 一份可信的模型评估发布报告应该包含哪些门禁？
-   考察点：paired lift、bootstrap confidence interval、slice regression、contamination rate、judge calibration、cost、latency、safety、online feedback。
-   回答框架：报告不能只给一个平均分。至少要记录评估集版本、样本 schema、模型 / prompt / 解码配置、总体与切片指标、污染检测、成对提升和置信区间、judge 校准、人审 bad case、成本延迟、安全误拒 / 漏拒、线上灰度反馈和 failed gates。任何关键门禁失败，都应先定位指标事故而不是发布。
+   考察点：paired lift、bootstrap confidence interval、slice regression、污染证据范围、judge calibration、cost、latency、safety、online feedback。
+   回答框架：报告不能只给一个平均分。至少要记录评估集版本、样本 schema、模型 / prompt / 解码配置、总体与切片指标、exact/near overlap 的来源范围、行为和扰动证据、时间 cutoff 与 holdout 访问、成对提升和置信区间、judge 校准、人审 bad case、成本延迟、安全误拒 / 漏拒、线上灰度反馈和 failed gates。只有存在可靠暴露标签和明确分母时才给污染率；语料命中、统计信号和性能差距不能直接合成一个率。任何关键门禁失败，都应先定位指标事故而不是发布。
+
+5D. Oren 顺序检验、ConStat、PaCoST、benchmark 水印和 AntiLeakBench 分别解决什么问题？
+   考察点：信息流证据、黑盒似然、性能泛化差距、原题/改写配对置信度、前瞻水印、新鲜知识集。
+   回答框架：先区分“训练数据里出现过”“模型表现出题面记忆”“公开分数无法迁移”三种命题。Oren 比 canonical 与随机顺序的序列似然，需要可交换性和 log-prob 接口；ConStat 用参考模型校正 benchmark 难度，估计原集相对参考集的非泛化优势，但不证明训练文件包含原题；PaCoST 对原题和语义改写题的自评置信度做配对检验，依赖改写等价和置信度可用；benchmark 水印需在发布前埋信号，是前瞻性路线；AntiLeakBench 用 cutoff 后更新事实构造新 QA，是评测集构造而非旧集取证。组合方案时按访问条件选证据，并报告方法假设、版本、效应量/区间和未检出可能性，不能用单一 p 值宣布“没有污染”。
+
+5E. 如何为 LLM 功能设计 A/B 实验，并处理用户不一定真的使用 treatment 的问题？
+   考察点：随机单位、assignment / exposure / uptake、ITT、非依从、用户选择偏差、工具变量假设。
+   回答框架：先定义目标估计量和资格人群，再保留原始随机 assignment；主结果按 ITT 比较“开放功能”的整体效果。分别记录路由、生成、展示和采纳状态，但不能只比较采纳者，因为采纳是 treatment 后变量，受任务难度、用户经验和信任共同影响。若要估计实际使用的局部效应，可以把随机开放作为工具变量，但要公开相关性、排除限制、单调性等假设，并说明它只适用于遵从者群体。最后同时报告主指标、护栏、置信区间、曝光缺失和采用率。
+
+5F. 如何比较生成式 AI 的三种现场实验结果，避免讲成统一的“LLM 提升率”？
+   考察点：分阶段部署与随机试验、个体与集群随机、主要结局、异质性、观察窗口、外部有效性。
+   回答框架：Generative AI at Work 是 5,172 名客服坐席的 GPT-3 助手分阶段部署研究，报告每小时已解决问题增加 15%，但主体结果不是完整并行随机 A/B；代码助手三项现场 RCT 合计 4,867 名开发者，合并估计任务完成数增加 26.08%、标准误 10.3%，单项结果有噪声和差异；肯尼亚临床决策支持试验按临床人员集群随机，16 家机构、9,691 名患者，14 天治疗失败主要结局未显著改变，记录质量等次要指标改善。三者的对象、随机化、指标和时间窗不同，结论不能互换。
+
+5G. A/B 实验出现 SRM 时，为什么不能只修正样本比例后继续分析？
+   考察点：配置比例、assignment / exposure 流程、triggered 分析、时间切片、根因分类、日志完整性。
+   回答框架：SRM 是分桶、资格筛选、路由、渲染、缓存、重试或埋点异常的症状，不指出唯一根因。先核全量随机分配，再沿 assigned、eligible、routed、generated、displayed 状态定位比例开始偏离的位置；按时间、客户端、语言、租户和失败原因分层。根因未明前不能删样本或重加权，因为偏差可能与结果相关。修复后应验证 SRM 和完整 exposure pipeline，再决定是否重跑。
+
+5H. 同题评估中何时选 paired t、McNemar、paired bootstrap 或近似随机化检验？
+   考察点：结果类型、配对单位、指标形状、不一致样本数、重采样/置换假设。
+   回答框架：先确认新旧结果是否来自同一题/用户，再选方法。连续差值的均值可用 paired t，但差值单位要独立且小样本时需检查分布；配对 0/1 用 McNemar，只由 discordant pairs 提供方向信息，小计数用精确二项版本；复杂指标用 paired bootstrap，但每次必须一起抽取同题两侧；近似随机化在零假设下交换配对标签并重算指标，依赖交换性。若用户或租户内有重复请求，改在独立随机化 cluster 上估计不确定性。
+
+5I. Bonferroni、Holm、BH 和 BY 分别适合什么多重检验目标？
+   考察点：FWER、FDR、确认性门禁、探索性切片、检验依赖、预先定义比较家族。
+   回答框架：Bonferroni 简单控制 FWER 但可能保守；Holm 用 step-down 同样控制 FWER，通常比简单 Bonferroni 更有力；BH 控制 FDR，适合探索性发现，但要求独立或适当正依赖；BY 用调和因子修正在任意依赖下控制 FDR、代价是更保守。安全硬门禁应单独定义确认性家族；切片发现需要标为探索并做独立复验。任何校正都不能消除看结果后反复选指标带来的适应性。
+
+5J. 一个 RAG 系统把 2022 年数据回答成 2023 年数据，怎样判断是检索、上下文组装还是生成错误？
+   考察点：症状与根因假设、证据链、固定变量、oracle context 对照、holdout。
+   回答框架：先复现并核实文档、权限、标签和 snapshot；再固定模型、prompt、解码与上下文策略，只把生产检索结果替换为人工核验的目标证据。替换后修正支持证据链问题，仍失败则优先检查生成/指令/解析。随后查看 top-k、过滤、重排和截断日志定位阶段，并在未见实体和年份上验证修复。只在失败样本上做的 oracle 替换实验不是线上准确率估计。
+
+5K. CheckList、The ML Test Score、HELM、EvalPlus 和 Agent trace grading 分别解决哪类评测问题？
+   考察点：行为关系测试、生产 ML 工程断言、跨模型场景/指标、可执行 oracle、Agent 工作流 trace。
+   回答框架：CheckList 用 MFT/INV/DIR 找具体行为缺陷；ML Test Score 审数据、模型、基础设施和监控防线；HELM 提高公开场景和多指标比较覆盖；EvalPlus 用 LLM seed、类型变异和差分测试加强代码 oracle；trace grading 观察 Agent 中间步骤。它们不是同一层的 benchmark，也不能互相代替；需按产品问题组合，并用人工校准、私有 holdout 和线上观察补盲。
 
 6. 如何降低幻觉？
    考察点：数据质量、RAG、工具、verifier、grounding、不确定性表达。
@@ -2768,6 +3153,10 @@
 31. 如何设计企业 RAG 产品的评估指标？
     考察点：retrieval、context、generation、citation、abstention、product。
     回答框架：检索层看 retrieval recall、hit@k、MRR、nDCG 和 rerank 命中；上下文层看 context precision / recall 和过期证据率；生成层看 answer correctness、evidence support、faithfulness 和 citation accuracy；系统层看权限过滤、拒答准确率、P95 延迟、单位成本；产品层看自助解决率、满意度、反馈闭环和业务指标。
+
+31A. RAGAS 和 ARES 能否代替人工评估？
+    考察点：reference-free judge、faithfulness、context relevance、prediction-powered inference、人工校准、置信区间、分布漂移。
+    回答框架：不能。RAGAS 降低 reference-free 评估成本，把 context relevance、faithfulness、answer relevance 拆开观察；自动 judge 仍受模型、提示和领域影响。ARES 用合成数据训练轻量 judge，再借少量人工标注和 prediction-powered inference 校准系统级分数及置信区间。ARES 论文与 RAGAS 的相对结果绑定作者任务和标注协议，不能宣布普遍胜出。生产评估还要保留可标注 query 的 retrieval truth、claim-to-span 检查、权限/拒答硬门禁、分层人工复核和发布后真实反馈。
 
 32. RAG 引用可信应该怎么评估？
     考察点：atomic claims、证据支持、版本、权限、可打开原文。
@@ -3169,6 +3558,14 @@
        考察点：Triton、vLLM、TGI、SGLang、TensorRT-LLM、自研 runtime、model hardware fit、runtime boundary、model format / tokenizer、prefill / decode、continuous batching、KV cache、streaming、quantization、distributed inference、observability、benchmarking、deployment rollback、maintenance、cost capacity、self-development threshold、runtime selection gate。
        回答框架：先说明 runtime 选型不是“哪个最快”，而是把模型、硬件、SLO、成本和团队能力统一审计。第一层做需求澄清：模型是 decoder LLM、embedding、reranker、多模态还是传统模型；权重大小、上下文长度、输入 / 输出 token 分布、并发、TTFT / TPOT / P99 SLO、是否 streaming、是否多租户、是否需要量化和多 GPU。第二层讲候选定位：Triton 是通用多模型推理服务框架，适合多后端、动态 batching、模型仓库和传统 DL serving；vLLM 更偏 LLM serving，重点看 PagedAttention / KV cache、continuous batching、OpenAI-compatible API 和易用性；SGLang 更强调结构化生成、复杂 LLM program、cache 复用和服务端执行；TGI 与 Hugging Face 生态结合好，但新项目要考虑当前维护状态和后续更新责任；TensorRT-LLM 适合 NVIDIA 生态下的深度性能优化；自研只有在规模收益、特殊模型 / 硬件 / 调度和团队系统能力都成立时才考虑。第三层讲统一审计表：检查 model hardware fit、runtime boundary clarity、model format tokenizer fit、prefill decode scheduler fit、continuous batching fit、KV cache memory manager fit、streaming API fit、quantization accuracy fit、distributed inference fit、observability metrics fit、benchmarking method fit、deployment rollback fit、ecosystem maintenance fit、cost capacity fit 和 self-development threshold。第四层讲 benchmark：必须固定同一模型、权重格式、硬件、精度、输入输出长度分布、并发、sampling 参数、streaming 设置和 SLO，同时看 TTFT、TPOT、E2E、tokens/s、KV pressure、OOM、错误率、质量回归和每 1k token 成本。最后用 Runtime Selection Gate 收束：功能覆盖、延迟吞吐、质量、安全、维护、回滚、成本容量和 P0 风险全部过线，才算选型可靠。
 
+40ZZZK-A. 当前比较 Transformers、vLLM、SGLang、TensorRT-LLM、LMDeploy、llama.cpp 和 TGI 时，哪些过时描述最容易误导选型？
+       考察点：reference generate 与 Transformers serve、vLLM V1、Radix Cache、TensorRT-LLM backend 变更、TurboMind/PyTorch 双后端、llama.cpp continuous batching、TGI maintenance mode、版本边界。
+       回答框架：先冻结比较日期和 release，再按执行路径逐项说明：Transformers `generate()` 是 reference，实验性 `transformers serve` 已有 continuous batching，适合范围不等于大规模生产；vLLM V1 的 API server、engine core、GPU worker 和 token-budget scheduler 不应与 V0 架构混说；SGLang 的重点是程序前端和 Radix Cache 复用；TensorRT-LLM 当前文档已将 PyTorch 作为唯一执行 backend，旧 TensorRT engine build/conversion 流程不能再当成当前默认部署步骤；LMDeploy 必须区分 TurboMind 与 PyTorch backend；llama.cpp server 支持并发 slots 和 continuous batching，但本地/边缘优势不意味着数据中心吞吐同等；TGI 当前处于 maintenance mode，存量迁移与新项目判断分开。最后说明能力表不能替代目标模型/硬件回放和同口径 workload benchmark。
+
+40ZZZK-B. 怎样设计一次能够比较推理引擎的 serving benchmark？
+       考察点：开环/闭环到达、RPS 与 burstiness、长度分布、缓存冷热、TTFT/TPOT/ITL 口径、goodput、质量门槛、请求 trace。
+       回答框架：先冻结模型 revision、tokenizer/template、精度、采样配置、GPU/driver/runtime 和客户端；再选择固定并发闭环或固定 request-rate 开环，并记录输入/输出长度、突发性和超载反应。分别控制 cold/warm、prefix cache off/on，避免重复 prompt 的 cache hit 被误认为普遍吞吐提升。每请求 TTFT/TPOT、token-gap ITL 和端到端时钟要按公式区分；输出请求 QPS、input/output tokens/s、P50/P95/P99、错误/取消/OOM、cache/queue 以及满足质量和 SLO 的 goodput。保留原始 trace 与质量结果，任何结论只绑定本次硬件、版本、数据和到达模式。
+
 40ZZZL. 如何分析 Prefill、Decode、KV Cache 与推理资源画像？
        考察点：request token profile、input / output tokens、TTFT、TPOT、prefill phase、decode phase、KV cache formula、KV pressure、PagedAttention block、prefix cache、long context、tenant KV isolation、continuous batching、PD disaggregation、streaming backpressure、observability phase metrics、cost capacity、resource profile gate。
        回答框架：先说明大模型推理不能只看 QPS，因为每个请求的输入 / 输出 token、上下文长度和流式输出差异很大。第一层拆阶段：请求进入后经历 gateway、route、queue、tokenize、prefill、first token、decode、sample、stream 和释放 KV cache；TTFT 主要覆盖排队、tokenize、prefill 和首 token，TPOT 主要覆盖 decode、sampling 和 streaming。第二层讲资源差异：prefill 处理完整 prompt，长输入会显著增加首 token 等待；decode 逐 token 生成，长输出会让 GPU 和 KV cache 被占用更久；KV cache 近似为 `2 * layers * active_sequences * context_length * kv_heads * head_dim * dtype_bytes`，所以长上下文和高并发会先打满显存或显存带宽。第三层讲治理：KV cache 要有 block / paged 管理、admission control、KV pressure、prefix cache、eviction、取消释放和 OOM 保护；prefix cache 要看命中 token、节省 prefill 时间、租户隔离、权限和错误复用风险；长上下文要有 max context、RAG budget、压缩 / 截断、长短队列和专用实例；多租户要有上下文配额、KV 配额、优先级和成本归因。第四层讲调度和架构：continuous batching 解决动态加入退出；PD 分离只有在 prefill / decode 资源特征差异、流量规模和 KV transfer 成本都支持时才值得引入；streaming 要有 backpressure、cancel、flush metric 和 timeout。最后用 Resource Profile Gate 收束：TTFT P95、TPOT P95、KV pressure、prefix savings、OOM、错误率、质量回归、成本和 P0 风险都过线，才算推理资源画像可靠。
@@ -3176,6 +3573,10 @@
 40ZZZM. 如何设计 Continuous Batching、PagedAttention 和队列调度？
        考察点：request arrival profile、dynamic join / exit、iteration-level batching、token budget、max active sequences、chunked prefill、decode-first policy、PagedAttention block table、free list、KV admission、long-short isolation、tenant fairness、cancellation cleanup、streaming backpressure、scheduler metrics、scheduler gate。
        回答框架：先说明生成式 LLM 不适合静态 batch，因为请求到达时间、输入长度、输出长度和取消时间都不同。第一层讲 continuous batching：调度器维护 waiting queue、running set 和 finished set，在每个 decode iteration 动态移除完成请求、加入新请求，并用 max batch tokens 和 max active sequences 控制本轮计算和 KV 压力。第二层讲 PagedAttention：它不是新的 attention 数学，而是把逻辑连续的 KV cache 映射到固定大小物理 blocks，用 block table、free list、碎片指标和回收策略支持动态加入、退出、取消和 prefix 复用。第三层讲 phase policy：prefill 偏计算密集，decode 偏显存带宽和 KV 访问；长 prefill 会拉高已有请求 TPOT，过度优先 decode 会拉高新请求 TTFT，所以要用 chunked prefill、decode-first、prefill token budget、长短请求隔离和必要的专用实例。第四层讲多租户和稳定性：按 token share、GPU seconds、KV blocks、优先级和成本归因做公平性，准入控制要看 KV watermark、queue timeout、tenant quota、context limit 和 reject/degrade 策略；取消、超时和客户端断开必须释放 KV blocks 与 streaming 状态。最后用 Scheduler Gate 收束：TTFT P95、TPOT P95、scheduled tokens、active sequences、KV waste、reject rate、cancellation cleanup、tenant share、指标覆盖和 P0 风险都过线，才算调度可靠。
+
+40ZZZM-A. FastServe、Sarathi-Serve 和 DistServe 分别解决什么调度瓶颈？
+       考察点：head-of-line blocking、token-level preemption、skip-join MLFQ、chunked prefill、stall-free schedule、prefill/decode disaggregation、KV state transfer、TTFT/TPOT goodput、论文版本。
+       回答框架：FastServe 针对长生成任务阻塞交互请求，使用 token 级抢占、skip-join 多级反馈队列和 KV 主机换入换出；代价是状态恢复与互联传输，NSDI 2026 正式论文报告的倍率应与早期 arXiv 版本区分。Sarathi-Serve 针对长 prefill 打断 decode，用 chunked prefill 和 stall-free schedule 控制单轮工作；chunk size 会改变 TTFT、TPOT 和 kernel 效率。DistServe 针对两阶段共置时的相互干扰和资源计划绑定，把 prefill/decode 放在不同 GPU 池，联合调配资源、并行策略和 KV 传输位置；它增加跨池路由和 state transfer。三者分别是请求抢占、阶段内分块、阶段间资源隔离，可互补但不是同一方法；论文倍率不能跨模型、GPU、SLO 和 baseline 排名。
 
 40ZZZN. 如何设计模型路由：模型选择、能力路由、成本路由和降级路由？
        考察点：request intent profile、model capability profile、permission candidate filter、cost budget policy、latency SLO policy、quality safety policy、fallback chain governance、canary routing stability、realtime health load、route trace coverage、degrade policy control、route config versioning、model routing gate。
@@ -3224,6 +3625,9 @@
 40ZZZY. 如何设计大模型评估平台，统一离线批量评测、人工评测和在线评测？
        考察点：eval dataset contract、offline batch reproducibility、metric definition versioning、LLM judge calibration、human review quality control、pairwise blinding randomization、online eval guardrail、release gate readiness、eval report completeness、slice regression detection、regression suite coverage、eval job scheduler reliability、eval cache key integrity、eval observability、artifact tracking linkage、evaluation platform gate。
        回答框架：先说明评估平台不是 benchmark 脚本，而是模型质量控制系统，要把模型版本、评估数据、prompt、推理配置、指标、人评、judge、在线反馈和发布决策连成可复现证据链。第一层讲对象模型：一次 EvalJob 至少绑定 ModelVersion、EvalDataset、PromptVersion、InferenceConfig、EvalCodeVersion、MetricDefinition、JudgeConfig 或 HumanReviewTask、PredictionOutputs、EvalReport 和 ReleaseDecision；这些字段不完整时，分数不可比较。第二层讲离线评测和数据：eval dataset 要记录 id、版本、任务、样本数、切片、标签、来源、构造方式、训练隔离和污染检查；离线批量评测要固定模型、数据、prompt、推理配置、评估代码、runtime 和指标定义；指标要记录方向、权重、阈值和版本，避免同名指标漂移。第三层讲人评和 judge：LLM-as-Judge 要有人类校准集、rubric、prompt、模型版本和长度 / 位置偏差检查；人工评测要有标注指南、gold set、多标注员重复标注、复审、仲裁和耗时监控；pairwise 要盲评、随机输出顺序、记录 tie 并按切片统计 win rate。第四层讲在线评估和发布：A/B 或 canary 要有稳定分桶、sample ratio health、质量 / 延迟 / 成本 / 安全 guardrail 和 rollback；Release Gate 要同时看离线、人评、在线、安全、性能、成本、审批和回滚。第五层讲平台能力：EvalReport 要包含总分、切片、样本级结果、失败案例和 baseline 对比；回归集要覆盖历史事故、关键业务、安全、工具和格式样本；评估调度要支持依赖、重试、预算和失败分类；缓存 key 必须包含模型、数据、prompt、配置、代码和 runtime；可观测性要覆盖状态、吞吐、错误率、成本、失败原因、队列和 trace；prediction outputs、sample table、judge run、人评结果、eval report 和 release decision 要进入 artifact / lineage。最后用 Evaluation Platform Gate 收束：数据、指标、judge、人评、在线、报告、回归、调度、缓存、观测、artifact、发布和回滚证据全部过线且无 P0 风险，才算评估平台可靠。
+
+
+       延伸追问：一次评估请求已发出但客户端超时，怎样区分 execution、scoring 和 maturity 状态？请用 run/sample/attempt/score 的引用关系说明重试为何要追加 attempt 而非覆盖结果；再讨论这个选择对单次能力估计、系统可用性、成本和非幂等工具副作用的影响。
 
 40ZZZZ. 如何设计 Feature Store、Embedding Store 与向量索引基础设施？
        考察点：feature definition contract、offline online consistency、point in time correctness、embedding version contract、chunk embedding lineage、vector index build readiness、ANN quality latency gate、metadata permission filter、shadow index switch readiness、retrieval trace completeness、feature embedding lineage graph、multi tenant isolation、quality monitoring metrics、cost capacity governance、RAG agent integration、feature embedding index gate。
@@ -3349,6 +3753,18 @@
        考察点：KV block manager audit、block free list、block reference count、prefill block admission、decode block extension、block allocation failure、shared prefix cleanup、block manager metrics、block manager gate。
        回答框架：先说明 Block Manager 是 PagedAttention 的资源控制面，负责管理 GPU 上的 physical KV blocks，包括分配、扩展、释放、复用、引用计数、block table 维护和指标。第一层讲 prefill：prompt token 数先换算成所需 blocks，如果 free blocks 不够，scheduler 应让请求继续等待或拒绝，而不是调进去后 OOM；这比只按请求数限流更准确。第二层讲 decode：每生成一个 token，sequence length 增加；如果当前 logical block 满了，Block Manager 分配新 physical block 并追加到 block table；如果没有 free block，要触发准入失败、等待、抢占、swap 或重算策略。第三层讲 cleanup：FINISHED、ABORTED、FAILED 都必须释放 blocks；如果 prefix sharing 存在，要用 ref count，只有引用数归零的 block 才能回 free list，避免提前释放共享 prefix。第四层讲指标：至少看 total / free / used blocks、block utilization、allocation failures、blocks per request、ref count 分布、shared blocks 和 OOM / preemption 次数。最后用 Block Manager Gate 收束：prefill admission、decode extension、ref count、cleanup、allocation failure 和 metrics 都可复盘，scheduler 才能可靠控制 KV 容量。
 
+40ZZZZL20A. KV Cache 预算不足时，H₂O 和 StreamingLLM 分别保留哪些历史？它们能否替代完整 cache？
+       考察点：KV eviction method comparison、heavy-hitter token、attention sink、recent window、middle-evidence retrieval、active cache vs reusable prefix、quality slice、lossy eviction boundary。
+       回答框架：先说清两者都减少 GPU 驻留 token，但保留依据不同。H₂O 用累计 attention score 等代理选 heavy hitters，并留近期 token；StreamingLLM 保留初始 attention sinks 和近期窗口，目标是有限窗口训练模型的稳定流式生成。举例说明同样 8 个槽位可能保留不同 token，再讲各自假设：attention 重要性不等于任务重要性，sink 稳定性不等于任意中段可检索。它们属于有损 eviction，不能与完整 KV 的 CPU/GPU offload 或量化混为一类。上线前要用长文档中段证据、指令、多轮、代码/数学和流式任务做质量切片，并同时记录保留 token 数、TPOT、吞吐和预算。
+
+40ZZZZL20B. KIVI 为什么对 K 和 V 使用不同量化轴，低比特 cache 的真实收益如何核验？
+       考察点：K per-channel、V per-token、channel outlier、attention-score error、residual window、scale metadata、dequant kernel、paper/runtime boundary。
+       回答框架：K 进入 QKᵀ，固定 channel outlier 会拉宽 per-token scale 并影响 attention score，所以 KIVI 在论文观察的模型上选择 per-channel 分组；V 进入 attention 加权求和，按 token 限定误差范围更有利。因为 cache 流式追加，K 需攒够 group 后量化，并保留 residual；V 保留最近 residual tokens，较旧项逐 token 量化。随后说明低比特有效节省还受 scale、zero point、对齐和高精度 residual 影响，吞吐收益可能主要来自更大 batch。KIVI 论文的 2-bit 算法不等于 runtime FP8 参数；必须固定模型、backend、GPU、上下文与质量集重新测峰值显存、TTFT、TPOT、吞吐和任务回归。
+
+40ZZZZL20C. GPTQ、AWQ、SmoothQuant 和 TurboQuant 分别改变了量化链路的哪一步？
+       考察点：quantization target、activation outlier、second-order compensation、equivalent scaling、KV inner-product distortion、calibration contract、kernel path、paper metric boundary。
+       回答框架：先分对象：GPTQ/AWQ主要是 weight-only，SmoothQuant 是 W8A8 activation outlier 迁移，TurboQuant 处理 K/V 表示及 attention 内积近似。GPTQ 用校准输入近似二阶统计，把已量化列的误差补偿给剩余权重；AWQ 从 activation channel 统计选择等价缩放，不是将显著权重保留成 FP16；SmoothQuant 用通道变换把 activation 动态范围的一部分迁移到权重；TurboQuant 的随机旋转/标量量化和 QJL 属于 cache 内积路线。比较时说明 GPTQ perplexity、TurboQuant 论文向量/任务质量、vLLM serving TPOT/TTFT 是不同指标；报告 bit/group/scale、硬件和 runtime 后，再设计同一模型与 workload 的 accuracy/latency/throughput 消融。
+
 40ZZZZL21. Continuous Batching 和 iteration-level scheduling 到底在调度什么？
        考察点：continuous batching audit、iteration level scheduling、dynamic request join、dynamic request exit、decode first scheduling、continuous token budget、scheduler KV budget、deferred scheduling reason、static batch hole、continuous batching gate。
        回答框架：先说明 LLM 生成是 multi-iteration workload，请求生命周期持续多轮，但 execution batch 只应该存在一个 iteration；iteration-level scheduling 就是在每轮模型执行前重新选择哪些 running 请求 decode、哪些 waiting 请求 prefill，并移除 finished / cancelled 请求。第一层讲 static batch 的问题：固定 batch 中短请求完成后会留下空洞，新请求必须等长请求结束，TTFT 和 GPU 利用率都会变差；可以用 `|S| * max(output_len) - sum(output_len)` 解释 Static Batch Hole。第二层讲一轮 scheduler：先接收动态到达请求和 cleanup，再 decode-first 给已有 streaming 请求进度，随后用剩余 token budget 接纳 waiting prefill；每轮 `decode_tokens + prefill_tokens <= max_num_batched_tokens`，不能只看 request count。第三层讲 KV budget：prefill 需要 prompt blocks，decode 在 block 边界可能追加 block；scheduler 必须查询 Block Manager 的 free blocks 和 append 能力，否则会出现调度后 OOM 或状态半更新。第四层讲取舍：decode-first 稳定 TPOT，但可能增加新请求 TTFT；prefill-first 降低首响但可能让流式输出卡顿；长 prompt 通常要靠 chunked prefill、优先级和隔离策略缓解。最后用 Continuous Batching Gate 收束：dynamic join / exit、decode-first、token budget、KV budget、cleanup、deferred reason 和 metrics trace 都可复盘，才算理解 continuous batching。
@@ -3443,7 +3859,7 @@
 
 40ZZZZL44. 什么时候应该做 PD 分离，什么时候是反模式？
        考察点：PD tradeoff audit、toy PD tradeoff auditor、PD benefit cost score、PD positive case、short request anti pattern、decode bottleneck anti pattern、slow transfer anti pattern、ops readiness gate、PD alternative path、PD tradeoff gate。
-       回答框架：先给判断标准：PD 分离不是默认终态，而是当 P/D 干扰收益大于 KV transfer 成本、分布式状态复杂度和运维成本时才值得做。第一层讲正例：长 prompt / 长上下文比例高，unified engine 中 prefill interruption 明显，decode TPOT p95/p99 被长 prefill 打爆，或者 decode-first 又让 prefill queue 饥饿；同时 P/D 输入输出比例波动大，需要独立扩缩容，多租户隔离收益明显。第二层讲成本：prefill 生成的 KV 必须 transfer / share 给 decode，transfer p99、网络拥塞、decode 等 KV、metadata、router、失败清理、backpressure、观测和调参都会吃掉收益。第三层讲反模式：短请求、小流量、单机已达标、主要瓶颈是长输出 decode、模型 compute、tokenizer、RAG 或网络 streaming 时，不该优先 PD；KV transfer 很慢、无脑跨节点、remote cache 当万能药、只拆服务不拆资源、没有 metrics / cleanup / backpressure 都是反模式。第四层讲替代路径：先评估 chunked prefill、prefix cache、scheduler 调参、DP replicas、speculative decoding、same-node PD，再做 cross-node PD。最后用 PD Tradeoff Gate 收束：正例、短请求反例、decode 瓶颈反例、慢 transfer 反例、ops readiness、成本模型、替代路径和反模式识别都可验收，才算决策完整。
+       回答框架：先给判断标准：PD 分离不是默认终态，而是当 P/D 干扰收益大于 KV transfer 成本、分布式状态复杂度和运维成本时才值得做。第一层讲正例：长 prompt / 长上下文比例高，unified engine 中 prefill interruption 明显，decode TPOT p95/p99 被长 prefill 打爆，或者 decode-first 又让 prefill queue 饥饿；同时 P/D 输入输出比例波动大，需要独立扩缩容，多租户隔离收益明显。第二层讲成本：prefill 生成的 KV 必须 transfer / share 给 decode，transfer p99、网络拥塞、decode 等 KV、metadata、router、失败清理、backpressure、观测和调参都会吃掉收益。第三层讲代表研究：DistServe 把 P/D 资源和并行规划解耦；Mooncake 把多层 KV cache 和 cache-aware scheduler 放到中心；TaiChi 按 TTFT/TPOT 的 SLO 组合在共置、解耦和混合模式间调节；SmartGen 优化 P→D 的 KV transfer 路径。分别说明作者测的是 SLO 下请求数、goodput 还是 TTST，不能把论文倍率排成同一排行榜。第四层讲反模式：短请求、小流量、单机已达标、主要瓶颈是长输出 decode、模型 compute、tokenizer、RAG 或网络 streaming 时，不该优先 PD；KV transfer 很慢、无脑跨节点、remote cache 当万能药、只拆服务不拆资源、没有 metrics / cleanup / backpressure 都是反模式。第五层讲替代路径：先评估 chunked prefill、prefix cache、scheduler 调参、DP replicas、speculative decoding、same-node PD，再做 cross-node PD。最后用 PD Tradeoff Gate 收束：正例、短请求反例、decode 瓶颈反例、慢 transfer 反例、研究指标差异、ops readiness、成本模型、替代路径和反模式识别都可验收，才算决策完整。
 
 40ZZZZL45. 如何把已有单机 serving engine 升级成 PD 分离架构？
        考察点：Single engine to PD migration audit、toy PD migration auditor、explicit request stage、model runner interface split、KV metadata contract、prefill decode scheduler split、PD router state machine、same node PD prototype、cleanup cancel path、observability fallback readiness、PD migration gate。
@@ -3678,16 +4094,18 @@
 5. 1M context 为什么不能直接换算成并发数？请列出压缩 KV、indexer、局部窗口、权重和 workspace 的显存项。
 6. mHC 为什么使用双随机矩阵？请解释 Birkhoff polytope、矩阵乘法封闭性和 Sinkhorn 近似的限制。
 7. 如何公平比较标准残差、AttnRes、KDA 和 mHC？回答需固定模型规模、训练 token、硬件、并行策略、cache、吞吐和质量评测。
+8. DenseFormer、DCA、AttnRes 与 HC/mHC 分别在改哪条信息路径？回答时应区分深度方向聚合和多路残差流混合，并说明各自证据来自什么实验设置。
+   回答框架：DenseFormer 做 depth-weighted averaging，DCA 与 AttnRes 用可学习的深度聚合选择历史层表示；HC 扩展残差流并学习混合，mHC 再约束残差混合矩阵。它们都不等于 token 维的长上下文注意力；DCA 的速度结果、AttnRes 的 scaling 实验和 mHC 的 wall-time 不能跨论文直接比较。
 
 ## 2026-09 GPT-6 Astra 与运行时预算
 
-1. GPT-6 Astra 的 context window、maximum input 和 maximum output 有什么区别？
+1. GPT-6 Astra 的 context window、maximum input 和 maximum output 应如何区分？官方是否单独发布了 922K maximum input？
    考察点：容量账本、输入输出耦合、工具结果和运行时状态。
-   回答框架：三者分别是总窗口、输入区域上限和输出区域上限；实际请求还要容纳系统消息、工具结果、推理状态和协议元数据，不能把三个数字相加后直接换算并发。
+   回答框架：模型页列出 1.05M context 和 128K max output，没有单独列 maximum input。922K 仅是预留满额输出后的算术余量，不能称为官方输入上限；系统、历史、工具 schema/结果、推理与输出仍共享窗口。
 
 2. `reasoning.effort` 为什么不能直接当作“模型质量等级”？
    考察点：预算、成功率、延迟、成本、任务瓶颈。
-   回答框架：effort 是 provider-specific 的请求预算接口，可能改变隐藏推理 token 或验证工作量；应在固定任务、工具、超时和输出上限下比较成功率、p95 成本、TTFT/TPOT 与失败类型。
+   回答框架：effort 是 provider-specific 的请求预算接口；GPT-6 另有独立的 standard/pro mode。reasoning tokens 消耗 context 和 output cap。应固定任务、工具、超时与输出上限，比较 mode/effort、成功率、p95 成本、TTFT/TPOT 与失败类型。
 
 3. 模型页列出 hosted shell、MCP 或 apply patch，为什么仍不能说明模型拥有任意系统权限？
    考察点：模型与宿主执行器的责任边界。
@@ -3695,7 +4113,7 @@
 
 4. 如何实现 GPT-6 Astra 长上下文请求的成本估算？
    考察点：缓存命中、阈值费率、单位成功成本。
-   回答框架：分别计算未缓存输入、缓存读取、缓存写入、输出和工具成本；超过阈值时应用文档规定的整次请求倍率，再用成功任务数作为分母评估重试、验证和人工接管成本。
+   回答框架：分别计算普通输入、缓存读取、30m/12h 缓存写入和输出；超过 272K 输入后对整次请求应用 long-context 费率，再在 token 账单之外加入 hosted tool、app executor、重试、验证和人工接管。以成功任务数作分母。
 
 5. 官方模型页没有参数量和训练报告时，面试回答应如何表达？
    考察点：证据等级、避免过度推断。
@@ -3703,7 +4121,7 @@
 
 6. GPT-6 及后续模型的 `configuration_update` 改变了什么？
    考察点：请求配置、模型权重、实验变量。
-   回答框架：它是追加到 input 中的配置更新，只控制后续响应的 reasoning effort，不是重新加载权重或改变训练过程。评测要记录升档时点，并分别统计 reasoning token、可见输出、工具轮数、延迟和单位成功成本。
+   回答框架：它是追加到 input 中、改变后续 reasoning effort 的会话 item，不是权重更新。为保留 cache prefix，应保持顶层 effort 不变；还需满足 standard 单 Agent 等兼容约束。评测记录更新顺序、reasoning token、可见输出、工具轮数、延迟和单位成功成本。
 
 7. 为什么 Responses replay 不能只保存最终文本？
    考察点：加密 reasoning item、`phase`、工具状态、状态协议。
@@ -3723,7 +4141,7 @@
 
 11. WebSocket `response.steer` 与普通的新一轮请求有什么不同？
     考察点：同一响应中追加约束、事件确认、响应 lineage、副作用边界。
-    回答框架：GPT-6 Astra 可在 Responses WebSocket 中对已创建响应发送 steering；服务端先确认排队，再创建 continuation，原响应可能以 `steered` incomplete 结束。它不会撤销已发送内容、取消已启动工具或回滚外部副作用，因此需要保留事件和补偿状态。
+    回答框架：Astra 在 Responses WebSocket 中对已创建响应发送 steering；`response.steer.accepted` 仅表示排队。若不需 app tool result/approval，服务端自动创建 continuation；原响应可能以 `steered` incomplete 结束，也可能先 completed。每个响应独立计算 token/tool cap，job 仍需全局预算；既有输出和副作用不回滚。
 
 12. 为什么 OpenAI 建议重新审计 GPT-6 Astra 可见的 skills、`AGENTS.md` 和任务提示？
     考察点：上下文路由、渐进披露、instruction conflict、完成定义。
@@ -3731,7 +4149,7 @@
 
 13. misalignment monitoring 能否替代权限和人工审批？
     考察点：安全控制面、异步告警、阻断、已发生副作用。
-    回答框架：不能。官方文档把它定义为异步监控和风险告警/阻断机制，可能误报或漏报；阻断时应停止自动重试并审计已有工具动作，但不会撤销已经完成的动作。权限、沙箱、审批、幂等和 verifier 仍需独立存在。
+    回答框架：不能。带 persisted reasoning、WebSocket 或 compaction 的 Responses 路径可自动阻断；其他 Responses 路径可经 webhook 告警但不自动停止；Chat Completions 不在该系统覆盖内。阻断不撤销既有副作用，仍需权限、沙箱、审批、幂等和 verifier。
 
 14. GPT-6 Astra 的 Agent 协议出现失败时，哪些状态可以重试，哪些不能盲重试？
     考察点：幂等、响应血缘、WebSocket 生命周期、安全阻断和副作用审计。
@@ -3739,7 +4157,10 @@
 
 15. 为什么要把 GPT-6 family 的 capability matrix 放进 serving manifest？
     考察点：模型 ID、effort、endpoint、工具调用、data residency 和文档版本。
-    回答框架：官方 latest-model guide 可能从 Astra 专属页更新为 family 迁移页；Astra/Sol/Luna 的 `none` effort、Responses/Chat Completions function-calling 和 EU Standard processing 条件不同。服务层应按模型 ID 和文档快照做 capability gate，拒绝不支持的参数/端点组合；这些是 API contract，不能据此推断模型架构或训练差异。
+    回答框架：官方 model pages 与 family guide 的字段会变化。Astra 不支持 `none` effort，reasoning tool calling 需 Responses；Sol/Luna 的 Chat Completions function calling 受 `reasoning_effort="none"` 条件约束。服务层按 model ID、endpoint、mode/effort、地域和文档日期做 capability gate；这是接口合同，不是架构证据。
+16. 为什么每响应 token 上限不能代替长任务的工具预算？
+    考察点：自动 continuation、异步任务、全局花费、重试与验证。
+    回答框架：每个 response 的 token/tool 限制可分别生效，但一个 job 会跨多轮 response、steering continuation、工具调用、retry、verifier 和人工接管。job coordinator 需要强制总费用、调用数、并发数、超时、deadline 和副作用门禁；并行可减少部分等待时间，不自动减少调用费和模型消费结果的 token。
 
 ## 2026-09 GLM-5.3 长任务与验证器
 
@@ -4842,6 +5263,26 @@
 
    不能。它们是模型卡/配置字段；容量分析还要加入 resident weights、shared/router、专家通信、KV/indexer cache、量化 scale、workspace、batch、并发和具体 kernel。`index_topk` 也不等于最终所有层只读取固定数量的原始 token。
 
+6. **“mixed RL stage 被 OPD 替换”是否表示 DeepSeek V4 后训练没有 RL？**
+
+   不是。技术报告先用 SFT 和 GRPO 训练领域专家；OPD 替换的是后续把多种领域能力统一到一个学生模型的 mixed-RL 阶段。报告没有公开全部领域 checkpoint 与训练超参数，因此不能补写成精确 recipe。参见[第五册第十八章](book-05-llm-training/chapters/18-deepseek-v4领域专家与统一蒸馏.md)及[技术报告 §5.1](https://arxiv.org/html/2606.19348#S5.SS1)。
+
+7. **DeepSeek V4 为什么报告选择 full-vocabulary reverse-KL，而不是只匹配学生采样到的 token？**
+
+   作者称，常见 sampled-token KL 近似把 stop-gradient 的 teacher/student log-ratio 当 policy loss 的逐 token advantage，资源较省但梯度估计方差高；V4 选择对完整词表 logits 求 KL，以降低该前缀上动作抽样带来的噪声。学生访问哪些前缀仍然来自 rollout，因此状态分布方差还在；报告也没有给出同配置下 sampled 与 full-vocabulary OPD 的独立受控消融。参见[技术报告 §5.1.2](https://arxiv.org/html/2606.19348#S5.SS1)。
+
+8. **V4 的领域专家与 MoE routed expert 是同一种“专家”吗？**
+
+   不是。领域专家是后训练阶段的完整教师模型，接受领域 SFT/RL；routed expert 是最终 MoE 网络内部由 token router 选择的子网络。OPD 将教师行为信号蒸馏进统一学生，并不把最终模型变成 dense，也不表示推理时要常驻 10 多个领域教师。
+
+9. **多教师 full-vocabulary OPD 的系统瓶颈是什么，V4 报告披露了哪些处理？**
+
+   直接保存每个教师对每个学生 token 位置的全词表 logits 会随 `token_positions × |V| × bytes × teachers` 增长。报告描述集中分布存储、教师参数按需分片加载、缓存末层 hidden states 并按 teacher index 排序，以减少重复驻留输出头；参数与 hidden states 异步读写，exact KL 使用 TileLang kernel。它降低物化 logits 和显存压力，不会消除教师前向、存储带宽或 full-vocab 计算成本；报告没有给出普适显存和端到端加速数。
+
+10. **Model Soups、离线 response distillation 和 V4 OPD 分别合并什么？**
+
+   Model Soups 平均兼容 fine-tuned checkpoints 的参数，在论文所测共享预训练模型/低损失区域条件下避免多模型推理成本；离线 response distillation 把教师答案变成固定 SFT 目标，易缓存但容易遇到学生前缀与示范分布错位；V4 OPD 在学生自己的前缀上对齐多个教师的输出分布，保留单一学生部署形态，但付出教师前向、路由、全词表 logits 与 I/O 成本。它们不在同一层面，论文结果也不能跨任务排分数。
+
 ## 2026-09 DeepSeek V4 Flash：SGLang 混合注意力 serving
 
 1. **为什么 Full KV 命中不一定意味着共享前缀可直接复用？**
@@ -5840,3 +6281,60 @@
 3. **问：无 cyber guardrails 是否适合普通生产环境？** **答：** 不适合。官方语境是受信任防御者和授权环境；生产仍需权限、沙箱、出站控制、审批、审计和漏洞修复 verifier。
 
 依据：[Gemini 4 Argon 研究笔记](research/model-update-2026-09/gemini-4-argon-source-notes.md)；[第二十一册第 95 章](book-21-transformer-architecture-evolution/chapters/95-gemini-4-argon长程推理与网络安全防御.md)。
+
+## 第六册第十五章：FP4、MXFP4 与 NVFP4
+
+1. **问：FP4 payload 已经是 4 bit，为什么 MXFP4 和 NVFP4 的有效 bit 数不同？**
+   **答：** OCP MXFP4 v1.0 用 E2M1，每 32 个值附一个 8-bit E8M0 scale，因此忽略 padding 时是 `4+8/32=4.25 bit/value`。NVFP4 一维 recipe 每 16 个值用一个 E4M3 scale，再加每 tensor 一个 FP32 global scale，所以是 `4+8/16+32/N=4.5+32/N bit/value`。这个公式不含对齐、转置或未量化层；Transformer Engine 的权重还可使用 16×16 二维 scaling，不能把一维账本套给任意 checkpoint。
+
+2. **问：E8M0 和 E4M3 scale 的差别会怎样影响量化？**
+   **答：** E8M0 没有尾数，有限 scale 只能是 2 的幂，scale 账本简单但可选尺度较稀；E4M3 有尾数，可以表示非 2 的幂的 scale，NVFP4 还用 FP32 global scale 将 tensor 映射到局部范围。payload 都是 E2M1，但 scale 精度、block 大小和算法一起改变误差及 metadata；因此要比较固定模型、recipe 和任务的结果，不能仅从格式名判断谁必然更好。
+
+3. **问：MR-GPTQ 解决了什么，为什么“先旋转再量化”不一定有效？**
+   **答：** 它针对 MXFP4/NVFP4 microscaling 格式，将 block 内 Hadamard rotation、GPTQ 二阶误差补偿和格式专属 scale search 结合。论文报告该方法在其 Llama 3/Qwen 3 zero-shot 设置中可显著恢复 MXFP4 质量，并提供 B200/RTX 5090 的 QuTLASS kernel。通用 rotation 配 RTN 对两种格式的影响不同；这些结果不覆盖所有模型、任务和 kernel，目标系统仍要复测精度与端到端路径。
+
+4. **问：NVFP4 scale learning 与 PTQ calibration 有什么区别？**
+   **答：** PTQ 从校准样本估计并冻结 scale；scale-only learning 冻结权重，通过 fake quantization 和 STE 在 QAT/QAD 阶段优化 block scale，full parameter 路线则连权重一起训练。学到的 scale 可折入 checkpoint，不增加部署图，但训练仍需计算；Model Optimizer 公布的结果来自 Nemotron 3.5 Lightning 指定混合精度配置，当前实现范围也只覆盖 NVFP4 per-block weight scales。
+
+5. **问：NVFP4 预训练报告能否证明任意 NVFP4 后训练量化与 FP8 质量相当？**
+   **答：** 不能。该报告的 12B/10T-token 结果结合了二维权重 scaling、部分 Wgrad Hadamard transform、梯度 stochastic rounding 和选择性 BF16 层，是训练 recipe 的证据。它不是对任意底模进行 PTQ 的结果，也不替代目标模型的校准、任务切片和 serving benchmark。
+
+依据：[OCP MX v1.0 规范](https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf)、[Transformer Engine NVFP4 文档](https://docs.nvidia.com/deeplearning/transformer-engine/features/low_precision_training/nvfp4/nvfp4.html)、[MR-GPTQ 论文](https://arxiv.org/abs/2509.23202)、[NVFP4 预训练报告](https://arxiv.org/abs/2509.25149)、[Scale Learning 技术说明](https://nvidia.github.io/Model-Optimizer/announcements/20260916-scale-learning.html)；配套正文：[第六册第十五章](book-06-llm-deployment/chapters/15-fp4-mxfp4-nvfp4.md)。
+
+## 第六册第十六章：FP8 KV Cache
+
+1. **问：E4M3 与 E5M2 都是 FP8，为什么 KV-cache 还必须记录具体 variant 和 scale？**
+   **答：** OCP E4M3 最大有限值 448、最小 subnormal `2^-9`，没有 Inf 编码；E5M2 最大有限值 57,344、最小 subnormal `2^-16`，有 Inf/NaN。E4M3 精度较细，E5M2 范围更大；scale 决定实际张量落入哪些码点，rounding 与饱和规则又决定边界行为。OCP 只定义编码/转换，不定义 KV 的 scale 选择和生命周期，所以 manifest 要记录 variant、scale 轴/形状、舍入、饱和和 runtime。
+
+2. **问：开了 FP8 KV 后，质量变化是否只来自 cache 里的 K/V？**
+   **答：** 不一定。vLLM 文档指出 FlashAttention 3 的 FP8 cache 路径也在 FP8 域做 attention，Q 也会量化；QK/PV kernel 与累加精度可能一起改变。因此评测必须记录 cache dtype、Q/attention compute dtype、累加路径和 backend。想隔离 cache 存储误差，就要设计能固定 attention 算法、单独切换 K/V payload 的受控消融。
+
+3. **问：KIVI、KVQuant 和 per-head FP8 分别解决什么问题？**
+   **答：** KIVI 根据其模型中的 K channel outlier 与 V 分布差异，做 K-per-channel/V-per-token 的 2-bit 量化，并用未满组高精度缓冲解决流式追加；KVQuant 进一步处理 pre-RoPE K、按层敏感度分配非均匀码本和稀疏 outlier，目标是更低 bit 与更长上下文；vLLM per-head FP8 是 runtime scale 颗粒度，不是 KIVI 的 per-channel 算法。前两者的模型和质量/吞吐结果不能直接外推为 FP8 runtime 结果。
+
+4. **问：H100 上 128k 检索从 BF16 91% 降到 FP8 13%，这证明 FP8 KV 不适用吗？**
+   **答：** 不能。vLLM 工程报告把该特定 FlashAttention 3 路径的严重退化定位到长 contraction 的累加精度；two-level accumulation 后恢复到 89%，但增加寄存器压力并可能拖慢长 prefill。这个案例说明必须把量化误差和 attention 累加错误分开归因，也说明精度修复和性能不能各自单独验收。数字绑定 Llama-3.1-8B、H100、kernel 和 128k NIAH。
+
+5. **问：FP8 payload 减半，为何请求延迟或吞吐可能不变甚至变差？**
+   **答：** 理论上每个历史 token 搬运字节减半，但 scale、cast/dequant、kernel、page 和固定 launch 开销仍在；短上下文可能尚未达到 decode break-even。滑窗层 KV 长度有上界，省出的字节有限，量化开销却持续；`head_dim=256` 的 H100 two-level accumulation 还可能让 prefill TTFT 变慢。应分别报告实际 cache bytes、prefill TTFT、decode ITL slope、break-even context、并发 goodput 和任务质量。
+
+依据：[OCP OFP8 v1.0](https://www.opencompute.org/documents/ocp-8-bit-floating-point-specification-ofp8-revision-1-0-2023-06-20-pdf)、[FP8 原论文](https://arxiv.org/abs/2209.05433)、[KIVI](https://arxiv.org/abs/2402.02750)、[KVQuant](https://arxiv.org/abs/2401.18079)、[vLLM FP8 KV 验证报告](https://vllm-project.github.io/2026/04/22/fp8-kvcache.html)、[vLLM FP8 KV 文档](https://docs.vllm.ai/en/latest/features/quantization/quantized_kvcache/)；配套正文：[第六册第十六章](book-06-llm-deployment/chapters/16-fp8-kv-cache.md)。
+
+## 第六册第十七章：Native INT4 与原生量化部署
+
+1. **问：GPTQ 的近似 Hessian 从哪里来？量化一个权重后，误差怎样传给剩余权重？**
+   **答：** 对线性层 Y=WX，GPTQ 在校准激活 X 上最小化 `||(W-W_q)X||²_F`，局部二次项的 Hessian 近似为 `2XXᵀ+λI`，并非整个语言模型任务损失对所有参数的 Hessian。量化坐标 j 后，以 `e_j=w_j-q_j` 和逆 Hessian 比值更新剩余坐标；例如 `H⁻¹=[[1,0.8],[0.8,1]]`、`w₁=0.62→q₁=0.42` 时，`w₂=0.50` 更新为 `0.34`。它改善的是校准输入上的层重建，校准分布外和端到端任务仍需回归。
+
+2. **问：AWQ 的等价缩放做了什么？为什么“保留 1% FP16 权重”不是 AWQ 主方法的必需条件？**
+   **答：** 对 `Y=XW`，选择输入通道对角缩放 `D_s` 后，浮点映射满足 `XW=(XD_s⁻¹)(D_sW)`。AWQ 从校准激活幅值估计敏感通道，在小范围搜索 `s_X^α` 与 clipping，再把反向缩放折入前置算子，使权重仍可走全低比特路径。保留显著权重的实验用于说明敏感性；应以原论文提出的等价缩放主路线描述 AWQ，并继续验证校准分布和目标 kernel。
+
+3. **问：RTN、GPTQ、AWQ、LLM-QAT 和 MARLIN 各自在哪一层解决问题？**
+   **答：** RTN 是舍入基线；GPTQ 与 AWQ 是 PTQ 权重生成算法；LLM-QAT 通过教师软标签训练量化学生；MARLIN 优化 W4A16 执行 kernel。GPTQ/AWQ 的 PPL、LLM-QAT 的任务分数和 MARLIN 的矩阵层速度属于不同指标、模型与硬件，不能据此排统一名次。面试中应说明机制、成本、限制和适用条件，再提出固定 workload 的对照实验。
+
+4. **问：模型能加载，但质量退化且速度没有提升，怎样定位？**
+   **答：** 先固定 checkpoint、tokenizer/template、请求和高精度基线；按代码、数字、长上下文、JSON、语言等切片定位质量变化。静默数值偏差检查 group size、scale/zero point、pack order、累加 dtype 与转换血缘；确认数值兼容后再检查启动日志、实际 kernel、dequant/fallback、shape 与 batch。算法或校准问题可比较目标域校准、RTN/GPTQ/AWQ 或 QAT；性能问题要在目标 GPU trace 上验证 kernel 和端到端瓶颈，不能由 INT4 文件大小推出加速。
+
+5. **问：怎样计算单位成功请求成本？**
+   **答：** 按原始请求汇总首次推理、重试、验证、fallback 和人工审核的完整期望成本，再除以该批原始请求的最终成功率。100 个原始请求共花 120 个成本单位、90 个最终成功时，单位成功成本是 `120/90=1.33`。不能把重试成本重复计入，也不能用成功 attempt 数除以所有 attempt 数代替请求级成功率。
+
+依据：[GPTQ 原论文](https://arxiv.org/abs/2210.17323)、[AWQ 原论文](https://arxiv.org/abs/2306.00978)、[LLM-QAT](https://aclanthology.org/2024.findings-acl.26/)、[MARLIN](https://arxiv.org/abs/2408.11743)；研究记录：[第六册第十七章精修](research/native-int4-deployment-depth-review-2026-10-27.md)；配套正文：[第六册第十七章](book-06-llm-deployment/chapters/17-native-int4与原生量化部署.md)。

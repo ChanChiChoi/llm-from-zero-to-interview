@@ -247,6 +247,17 @@ S_{\mathrm{abs}}
 几个等级之间做选择，可以报告每个等级的分布、中位数和 bootstrap 区间；若
 团队需要均值来做回归，必须保持 rubric 和标注培训稳定。
 
+问题不止是“序数值能不能求平均”。Ethayarajh 和 Jurafsky 从效用理论分析了
+Likert 评分汇总所隐含的评审者假设，并证明在某些条件下，按平均 Likert 分给
+系统排序会反转真实偏好；他们还提出 system-level probabilistic assessment
+（SPA）来评估故事生成等开放任务。这不是说所有 5 分量表都会反转，也不能推出
+pairwise 在所有任务都更可靠。它提醒我们先定义测量目标：若目标是目标用户的
+选择倾向，应直接收集偏好；若目标是事实正确、证据有效或安全，则仍需独立的
+行为维度和硬门槛，不能把“用户更喜欢”当作正确性的替代量。
+[The Authenticity Gap in Human Evaluation](https://aclanthology.org/2022.emnlp-main.406/)
+给出了这类汇总假设的理论分析；结论应绑定其效用模型和任务，不要推广为所有
+人工评分都无效。
+
 ### 3.6 拒答和无效输出怎么记
 
 拒答不是总是错误。面对证据不足、危险请求或权限外操作，合理拒答可能是正确
@@ -319,24 +330,34 @@ total    = 1000
 
 ### 4.4 不确定性和配对结构
 
-把 tie 折半后，可以用下面的近似标准误描述抽样噪声：
+把 tie 折半后，每条结果的得分是 \(z_i\in\{0,0.5,1\}\)，总体偏好率是这些得分的
+均值。由于单条得分可能是 0.5，不能直接把它当作 Bernoulli 变量，再套
+\(\hat p(1-\hat p)\) 的方差。若暂时假设 \(N\) 条结果相互独立，可以用样本方差估计：
 
 ~~~math
-\mathrm{SE}(\hat p)
+s_z^2
 =
-\sqrt{\frac{\hat p(1-\hat p)}{N}}
+\frac{1}{N-1}\sum_{i=1}^{N}(z_i-\hat p)^2,
+\qquad
+\mathrm{SE}(\hat p)=\frac{s_z}{\sqrt{N}}
 ~~~
 
-近似的 95% 区间为：
+若胜、负、平数量分别为 `W`、`L`、`T`，且 `N=W+L+T`，折半平局均值为
+`p̂=(W+0.5T)/N`。经验总体方差可以改写为
+`p̂(1-p̂)-0.25(T/N)`；样本方差还要乘 `N/(N-1)` 的有限样本修正。因此直接套
+Bernoulli 方差 `p̂(1-p̂)` 会把所有分数假装成 0 或 1，忽略平局的 0.5 得分。
 
-~~~math
-\hat p\pm1.96\,\mathrm{SE}(\hat p)
-~~~
+回到前面的 420 胜、350 负、230 平例子，\(\sum z_i^2=420+0.25\times230=477.5\)，
+所以 \(s_z^2\approx0.1915\)、标准误约为 \(0.0138\)。独立样本正态近似下，95% 区间约为
+\([0.508, 0.562]\)。这个区间只是教学演算：若同一 prompt 被多位评审重复看、同一
+用户贡献多条回答，独立性不成立，区间会偏窄。正式分析应先明确目标抽样单位，
+再按 prompt、用户或会话聚类重采样；有分层或不等抽样概率时，还要保留设计权重。
+对复杂的对战图排名，可以使用 Bradley--Terry 系数的 bootstrap 或稳健 sandwich
+标准误，而不是把所有投票当作独立二元试验。
 
-这是把每个结果近似当作独立的二元观测。实际 human eval 往往有多个评审员
-看同一个 prompt，同一个用户贡献多个样本，或者一个领域切片共享同一份政策
-版本；这些观测并不完全独立。严肃报告应该按 prompt、用户或会话做 cluster
-bootstrap，避免把重复相关样本误认为新的证据。
+近似的 95% 区间可写成 \(\hat p\pm1.96\,\mathrm{SE}(\hat p)\)，但应同时报告胜、负、平数量、
+样本单位和区间算法。上述独立假设下区间下界仅略高于 0.5；换成聚类区间后，
+结论可能改变，因此不能只凭点估计 53.5% 宣布稳定提升。
 
 ### 4.5 让 tie 有清楚的语义
 
@@ -388,6 +409,27 @@ pairwise 只回答“在这个输入下谁相对更好”。相对偏好和绝�
 如果程序正确率不变、绝对完整性提高、pairwise 也提高，证据比较一致；如果
 pairwise 提高但引用准确率下降，说明偏好可能被文风或长度驱动，应回看样本，
 而不是直接宣布新模型更好。
+
+### 5.4 回答级偏好与系统级偏好：SPA 解决哪一层问题
+
+开放式生成还有一个常被忽略的层级差异：评审是在比较两条具体输出，还是在评价
+两个系统长期产生的输出分布？Ethayarajh 与 Jurafsky 把常见方案区分为 outcome-level
+absolute assessment（OAA）、outcome-level relative assessment（ORA）和
+system-level probabilistic assessment（SPA）。
+
+| 协议 | 评审实际回答什么 | 聚合时依赖什么 | 主要风险 |
+| --- | --- | --- | --- |
+| OAA：回答级绝对评分 | 这条输出在指定维度上得几分？ | 不同标注者的分数可以放在同一量尺上；输出样本能代表系统表现 | Likert 刻度不同、缺少共同高低锚点时，平均分未必保留真实偏好，甚至可能反转系统次序 |
+| ORA：回答级成对比较 | 对这条输入，两个输出哪一个更好？ | 根据每场局部判断，用 Bradley--Terry 等模型推回系统相对强度 | 50% 以上的局部胜率并不自动表示用户总体效用更高；少量灾难性失败可能被大量普通胜局淹没 |
+| SPA：系统级概率判断 | 在看过双方一定数量的样本后，我选择 X 而不是 Y 的概率是多少？ | 让标注者直接把多个输出汇总为系统级偏好概率，再汇总不同标注者 | 评审必须能理解规定的曝光量并估计自己的长期选择；曝光样本如何抽取仍会影响结果 |
+
+SPA 的关键变化不是换一种分数，而是把“多个输出怎样汇总成一个系统偏好”的责任
+交给评审者明确表达。该研究在 GPT-3 故事生成上预先列出 5 个预期偏好关系，SPA
+恢复了 5/5；标准 5 点量表只恢复 2/5，尽管每项检验功效约为 1 且显著性水平为
+0.001。标准评分还没有显著区分 Curie 与 Davinci。
+[论文](https://aclanthology.org/2022.emnlp-main.406/) 同时强调：这个结果来自
+特定故事生成任务，不能直接推出 SPA 适合知识问答、安全决策或任何产品评估。
+即便报告用户总体选择概率，正确性和严重风险仍要单独测量。
 
 ## 6. Elo、Bradley--Terry 与 Arena
 
@@ -469,6 +511,13 @@ y_{ij}\log p_{ij}
 需要固定一个参考模型或令所有强度的均值为零。存在大量 tie 时，不能悄悄把
 tie 任意归给一方；可以预先折半作近似，也可以使用显式建模平局的扩展模型。
 
+BT 把每个模型压成一个标量强度，并假设同一对模型的胜率可由强度差的 logistic
+函数解释。这便于在不完整对战图上汇总证据，却会压平任务和用户差异：模型 A
+可能更受普通用户偏好，模型 B 却在专业问题上更可靠；若汇总成一个数，最终答案
+取决于样本里各类用户和任务的比例。遇到这类异质性，应报告分层 BT 结果或加入
+任务/用户效应，并检查不同切片的偏好是否反转。若存在循环偏好，单一标量排名
+也无法完整表示对战关系。
+
 ### 6.4 对战图和可识别性
 
 排名系统需要一张足够连通的比较图。若模型 A 只和 B 比，模型 C 只和 D 比，
@@ -482,13 +531,53 @@ tie 任意归给一方；可以预先折半作近似，也可以使用显式建�
 4. 某个模型是否只在自己擅长的 prompt 上被抽样；
 5. 排名区间是否随着新增对局稳定收敛。
 
-这也是为什么公开 Arena 排名不能简单等同于严格控制变量的实验室 benchmark。
+### 6.5 排名方法的代表方案与证据边界
 
-### 6.5 Arena 的数据含义
+几条常见路线并不是同一算法的不同名字。下表按它们主要解决的评估约束对照：
+
+| 方案/研究 | 要解决的问题与机制 | 研究中观察到什么 | 限制与后续补强 |
+| --- | --- | --- | --- |
+| Elo | 新对局到来时快速更新相对 rating，适合在线维护排行榜 | 公式简单、单场结果即可更新 | 更新顺序、初始分和学习步长会影响路径；分数本身不是能力单位。报告对局量、时间窗和区间，并检查排序对参数/采样的敏感性 |
+| Bradley--Terry 与 Arena 的稳健区间（[Arena 论文](https://arxiv.org/abs/2403.04132)） | 从全量 pairwise 结果估计相对强度，并为系数提供不确定性 | Arena 论文说明 BT 比早期 Elo 分数更适合其统计估计目标，并比较 bootstrap 与 sandwich 区间 | 标量强度、连接对战图和 tie 口径仍是建模假设；按任务、语言、用户分层，并同时给出原始胜负平数据 |
+| MT-Bench / Chatbot Arena 人评对照（[研究](https://arxiv.org/abs/2306.05685)） | 检查开放式回答能否用多轮专家题或真实用户 pairwise 偏好区分系统 | 研究分别构建受控多轮题和众包对战，比较人工、模型 judge 的偏好一致性 | 结果绑定旧模型、特定问题集、标注者群体和一致率定义；需要在目标任务重建人工 gold 和混淆矩阵 |
+| 偏好数据影响性分析（[ICLR 2026 论文](https://proceedings.iclr.cc/paper_files/paper/2026/hash/92d777fb721936613b6444b07c4ffc18-Abstract-Conference.html)） | 用 Approximate Maximum Influence Perturbation 找出少量最能改变 BT 排名的偏好记录，再对删点后的模型精确重拟合 | 在其 57,477 条人类偏好快照中，删除 2 条（0.00348%）即可翻转点估计榜首；若以 bootstrap 区间定义并列名次，翻转所需记录为 29 条（0.0510%） | 这是固定快照上的最坏情况删点，不是随机抽样波动，也不证明记录错误或遭到操纵；方法采用影响函数近似筛选，可能漏掉脆弱情形。应人工复核被识别样本，并把常规区间、最坏情况敏感性和数据质量审计分开报告 |
+
+所以，“人评很多”不自动等于结论稳健。先确定估计对象是平均用户偏好、专家
+有效性还是特定任务能力；再选择标注协议和聚合模型，报告样本分布、对战连通性、
+平局规则、区间与敏感性。不同论文的榜单数字只有在模型、题目、用户、时间窗、
+界面和聚合定义都相近时才能比较。
+
+### 6.6 Arena 的数据含义
 
 Arena 通常让真实用户或志愿评审在两个匿名回答中选择更喜欢的一方。它有机会
 捕获题库难以预先设计的真实问题，也能快速积累大量偏好数据；代价是流量分布、
 用户意图、评审耐心、语言比例和模型可用性都可能随时间变化。
+
+Chatbot Arena 论文针对模型差距较小的对局采用非均匀采样，以减少估计排名所需的
+投票；它还用 bootstrap 和稳健 sandwich 方法估计 BT 系数的不确定性。作者在其
+213,576 条留出数据构造的重放实验中，估计胜率矩阵到 0.2 精度时，自适应采样约需
+4,400 条、随机采样约需 6,800 条。这个节省量属于该数据、抽样规则和模拟设置，
+不是所有评测的固定比例。[论文](https://arxiv.org/abs/2403.04132) 也明确指出，
+其志愿用户偏向模型爱好者/研究者，网页聊天提示不必然代表生产业务提示，且该
+研究聚焦 helpfulness、没有覆盖安全性。
+
+该论文报告截至 2024 年 1 月约有 24 万次投票、9 万多名用户和 100 多种语言；
+其中英语约占 77%，中文约占 5%，这说明题目来源广，但语言覆盖并不均衡。数字
+属于论文当时的快照，不能写成当前平台规模；更不能从“有多种语言”推断每个语种
+都有足够样本支持独立排名。
+
+上述规模、语言比例和抽样细节均来自 [Arena 论文的 2024 年 1 月数据快照](https://arxiv.org/abs/2403.04132)，不是当前平台统计。
+
+样本量和单票质量是两类不同问题。Zhao、Rush 与 Goyal 的 2024 年预印本将
+Arena 的 55K 偏好快照暂时当作“真实排名”，再分别模拟冷漠用户随机投票和针对
+目标模型的定向投票；在他们挑选的 3 个旧模型中，10% 的随机低质量票可让其中
+2 个模型移动 5 位，10% 的定向票也造成了数位变化。这个结果是有明确假设的
+压力测试：初始 55K 投票被当作 gold，目标模型只选了 3 个，而且模型对局频率
+会影响脆弱性，所以它不表示当前平台真的有 10% 坏票。它指出的是一个质量控制
+难题：对开放式问题，单票意见不同可能是偏好差异，不能只凭低一致率删票；可以
+补充评审理由和维度标签、检查用户层行为、做过滤前后敏感性分析，并保留原始
+投票供复查。[预印本](https://arxiv.org/abs/2412.04363)的攻击模拟和真实攻击
+案例也应分开理解。
 
 Arena 排名更接近“在这段时间、这批用户和这套界面中，人们更偏好哪些回答”，
 而不是所有专业任务上的统一能力排序。对于安全、医学、法律、代码执行和权限
@@ -508,6 +597,14 @@ Arena 排名更接近“在这段时间、这批用户和这套界面中，人�
 
 如果规范只说“选择更有帮助的回答”，不同人会把“更长”“更礼貌”“更像自己
 的表达”误认为帮助程度。可观察行为和反例比形容词重要。
+
+rubric 和样本量规则还必须留下可复查的记录。Mei 等人对 2023—2025 年 *CL
+长文本生成论文中的人工评估流程做了 284 篇人工复核，并对另外 1.8k 余篇做
+辅助分析；他们发现，任务指南或评估维度选择理由等关键信息经常没有报告，样本量
+功效分析和统计置信信息尤其少见。该研究测量的是论文报告规范，不能推成产品
+评估团队的失败率；它说明若只留下总体胜率，读者往往无法判断评的是什么、由谁
+评、以及数字应该怎样解释。[ACL 2026 研究](https://aclanthology.org/2026.acl-long.635/)
+据此建议把这些设计项纳入报告，而不是只保存最终分数。
 
 ### 7.2 标注员看到什么
 
@@ -581,6 +678,18 @@ expert_validity：领域标准下哪个回答更正确、更安全
 仲裁不是为了让一致率看起来更高，而是为了识别规范中的歧义、gold 错误和
 真正不存在唯一答案的任务。
 
+Oortwijn 等人的六步流程是：形成研究问题、定义任务与标注指南、对关键概念做
+评审间校准、独立标注、比较标签、再按规则解决分歧。这里“独立”很重要：校准时
+可以讨论样例，但正式数据应先各自提交标签，再做仲裁；如果先让评审协商出共识，
+就不能再把仲裁后的共识率当作独立评审的一致性估计。
+
+分歧复盘可以按来源编码，而不是只记“意见不同”。Oortwijn 等人的仲裁流程将
+任务/指南不清、评审者领域知识不一致、同一评审前后不一致、解释分歧和简单错误
+分开处理：指南缺边界就修订并重标受影响数据；专业知识不足就更换或升级评审；
+偶发误操作可纠正标签；真实价值判断不同则可能应保留多视角，而不是强行制造
+唯一 gold。[其流程](https://aclanthology.org/2021.humeval-1.15/) 面向标注一致性
+目标，不能机械套用到本来就要收集人群偏好的任务。
+
 ## 8. 标注一致性：分歧也是测量信号
 
 ### 8.1 简单一致率
@@ -607,8 +716,20 @@ Cohen kappa 扣除按边际分布推算的随机一致：
 ~~~
 
 `p_o` 是实际一致比例，`p_e` 是由两位评审各自标签分布计算的预期一致比例。
-多于两位评审时，可以考虑 Fleiss kappa；标签是多级、缺失或非完全独立时，
-Krippendorff alpha 更灵活。选择指标要随标签结构说明，不能只报一个数字。
+多于两位评审且每个样本由固定数量的人标注时，可以考虑 Fleiss' K；它常被叫作
+Fleiss kappa，但 Artstein 与 Poesio 指出，该统计量更接近多标注者版 Scott pi，
+并非把 Cohen kappa 直接推广到多人。标签有
+不同数量的评审、存在缺失，或等级之间有可定义的距离时，Krippendorff alpha
+更灵活。缺失结构或评审者/样本之间的聚类仍要单独说明，不能假设换一个系数就
+消除了依赖。选择指标要随标签结构说明，不能只报一个数字。
+
+例如，100 个安全审核样本中，评审甲标出 5 个 unsafe、95 个 safe，评审乙将
+100 个都标为 safe。原始一致率是 95%，但机会一致率为
+$p_e=0.95×1+0.05×0=0.95$，因此 Cohen $\kappa=0$。这是类别极不平衡时 κ 可能
+显得很低的一种情形，不表示 5 个分歧样本可以忽略。报告应同时给混淆矩阵、正类
+比例、原始一致率和机会校正系数；κ/α 衡量的是标注者按特定模型定义的可靠性，
+不证明标签符合事实，也不等于模型答案有效。Artstein 与 Poesio 的[综述](https://aclanthology.org/J08-4004/)
+系统讨论了这些系数的假设与选择边界。
 
 ### 8.3 成对比较的一致性
 
@@ -629,6 +750,14 @@ pairwise 标签包含 new、old、tie 和无法判断。可以先报告完全相
 因此，不能看到低一致率就直接删掉争议样本。先按任务、语言、风险和评审员
 切片，查看分歧集中在哪里；如果分歧恰好集中在政策冲突或证据不足问题，它
 可能是在提醒团队补充任务契约。
+
+同时也不能把“提高一致率”当作唯一目标。Amidei 等人在自动问题生成的人评研究
+中指出，语言质量判断存在难以消除的解释差异；若为了让评审完全一致而过度收紧
+规范，可能把生成目标推向更僵硬、反而不像自然语言的输出。正确动作是判断当前
+评估要估计共识标签还是用户偏好分布：前者应追查可修复的协议问题，后者则可能
+要保留不同人群的判断并报告分层结果。
+[Rethinking the Agreement in Human Evaluation Tasks](https://aclanthology.org/C18-1281/)
+提供了这一反例方向；它针对自动问题生成任务，不构成对所有低一致性的豁免。
 
 ### 8.5 标注员漂移
 
@@ -658,7 +787,13 @@ B_{\mathrm{pos}}
 ~~~
 
 这个指标只有在候选位置近似随机、样本量足够时才有解释力。发现偏移后，可以
-重新随机展示顺序，或者对同一对候选做左右交换，比较交换前后的选择。
+重新随机展示顺序，或者对同一对候选做左右交换，比较交换前后的选择。还应把
+它理解为“左右侧胜出是否不平衡”的描述信号，而不是位置偏差的因果估计：若强
+候选恰好更多出现在左侧，整体左胜率会同时受候选强弱影响。较稳妥的设计是在
+prompt 层随机分派顺序，并抽取一部分相同候选对做反向呈现；分别计算候选身份
+在左/右时的胜率及差值，再按 prompt 聚类给区间。[LLM judge 的位置偏差研究](https://arxiv.org/abs/2406.07791)
+也表明，应同时看重复稳定性、换位一致性和偏好公平性；该结论来自模型评审实验，
+不能直接当作人类位置效应的量级。
 
 ### 9.2 长度和信息密度
 
@@ -705,21 +840,23 @@ B_{\mathrm{len}}
 
 ### 10.1 先确定要检测的差异
 
-如果只想发现 10 个百分点的明显提升，几百个相对独立的样本可能已经有用；
-如果要确认 1 个百分点的小提升，就需要更多样本，而且还要保证 prompt、
-评审员和切片分布没有系统偏移。样本量不能只按“行业惯例”填写。
-
-在把每个结果近似为独立 Bernoulli 观测、目标比例为 `p`、希望误差半径为
-`e`、正态近似分位数为 `z` 时，估计比例的粗略样本量是：
+样本量要按要检测的最小差异、置信水平、检验功效、平局比例和抽样结构规划。
+这里把每个独立 prompt 的偏好分数记作 `z_i\in\{0,0.5,1\}`，比较其总体均值与
+无偏好基线 0.5。一个便于初步预算的正态近似是：
 
 ~~~math
 N
 \approx
-\frac{z^2p(1-p)}{e^2}
+\frac{(z_{1-\alpha/2}\sigma_0+z_{1-\beta}\sigma_1)^2}{\delta^2}
 ~~~
 
-不知道 `p` 时可以取 0.5，因为它给出最保守的方差；95% 区间通常取 `z=1.96`。
-这是规划近似，不适合直接替代分层、聚类或有限总体设计。
+`\delta` 是相对 0.5 的最小重要差异，`\sigma_0` 和 `\sigma_1` 分别是原假设与
+备择假设下 prompt 级分数的标准差；应尽量由 pilot 数据估计。比如要检测 5 个
+百分点差异，双侧 `\alpha=0.05`、功效 80%，并用 `[0,1]` 变量的保守上界
+`\sigma_0=\sigma_1=0.5`，粗算约需 784 个独立 prompt。这个数字不是通用配额：
+若重复评审共享 prompt 或用户，需按聚类设计扩大；若抽样分层或样本权重不等，
+应按实际设计重算。若终点是两个模型对同一题的二元正确/错误率，规划应使用
+配对检验（例如依赖不一致对的 McNemar 设计），不能直接套用偏好均值公式。
 
 ### 10.2 成对样本优先于独立样本
 
@@ -842,6 +979,13 @@ created_at
 
 任何一层缺失，最终数字都可能看起来精确，却无法回答“这个差异从哪里来”。
 
+可复现报告至少要能回答五件事：测量的构念及任务指南是什么；评审者怎样招募、
+筛选和培训；样本如何抽取、回答如何匿名和随机展示；重复标注、低质量票和争议
+如何处理；最后采用什么聚合、权重、区间或功效假设。Mei 等人的 2026 年研究
+在其论文样本中发现，这些报告项有系统性缺漏；因此这五项既是团队内部复核清单，
+也是读者解释研究结果所需的最小上下文。具体清单仍应依任务类型调整，不能把
+单一论文模板当成所有人评的强制标准。
+
 ## 12. 企业客服系统的完整案例
 
 ### 12.1 问题背景
@@ -926,7 +1070,7 @@ gold evidence。旧模型和新模型使用同一 prompt、同一检索结果和
 ## 13. 一个可运行的人工评估诊断 demo
 
 下面的 toy demo 不调用模型，只处理一组已经产生的人工标签。它计算绝对评分、
-成对偏好、任务切片、一致性、位置和长度信号，并把需要调查的事项逐条列出。
+成对偏好及按 prompt 聚合的粗略标准误、任务切片、一致性、位置和长度信号，并把需要调查的事项逐条列出。
 示例故意放入一个高风险 RAG 回退、一个位置偏移和一个分歧样本，读者可以看到
 总体偏好较高时，为什么仍然需要继续调查。
 
@@ -936,6 +1080,7 @@ gold evidence。旧模型和新模型使用同一 prompt、同一检索结果和
 样本量和不确定性区间；不能因为某个布尔信号为 `True` 就跳过人工复核。
 
 ~~~python
+import math
 from pprint import pprint
 
 
@@ -1012,6 +1157,15 @@ for row in pairwise:
     labels_by_item.setdefault(item_id, []).append(row["winner"])
 
 item_scores = {item_id: mean(scores) for item_id, scores in scores_by_item.items()}
+item_level_values = list(item_scores.values())
+item_level_mean = mean(item_level_values)
+if len(item_level_values) > 1:
+    item_level_variance = sum(
+        (score - item_level_mean) ** 2 for score in item_level_values
+    ) / (len(item_level_values) - 1)
+    item_level_se = math.sqrt(item_level_variance / len(item_level_values))
+else:
+    item_level_se = None
 
 slice_scores = {}
 for item_id, score in item_scores.items():
@@ -1072,7 +1226,18 @@ required_rubric_fields = {
 rubric_missing = sorted(required_rubric_fields - set(rubric))
 
 signals = {
-    "rubric_defined": not rubric_missing and rubric["tie_rule"],
+    "rubric_defined": (
+        not rubric_missing
+        and bool(rubric["dimensions"])
+        and len(rubric["dimensions"]) == len(set(rubric["dimensions"]))
+        and len(rubric["priority_order"]) == len(rubric["dimensions"])
+        and set(rubric["priority_order"]) == set(rubric["dimensions"])
+        and rubric["tie_rule"] is True
+        and rubric["anonymized"] is True
+        and rubric["position_randomized"] is True
+        and rubric["min_annotators"] >= 1
+        and rubric["gold_samples"] >= 1
+    ),
     "sample_count_ok": len(items) >= 5,
     "annotator_agreement_ok": agreement_rate >= 0.70,
     "overall_win_rate_ok": win_rate >= 0.53,
@@ -1083,12 +1248,22 @@ signals = {
 }
 
 actions = []
+if not signals["rubric_defined"]:
+    actions.append("complete_or_revise_rubric")
+if not signals["sample_count_ok"]:
+    actions.append("collect_more_demo_items")
 if not signals["annotator_agreement_ok"]:
     actions.append("review_disagreement_cases")
+if not signals["overall_win_rate_ok"]:
+    actions.append("inspect_overall_estimate_and_uncertainty")
 if not signals["high_risk_slice_ok"]:
     actions.append("investigate_high_risk_regressions")
 if not signals["position_bias_ok"]:
     actions.append("rebalance_answer_positions")
+if not signals["length_bias_ok"]:
+    actions.append("audit_length_and_task_mix")
+if not signals["gold_samples_available"]:
+    actions.append("add_calibration_gold_samples")
 
 decision = "revise_evaluation" if actions else "continue_to_report"
 summary = {
@@ -1099,6 +1274,8 @@ summary = {
         "ties": ties,
         "win_rate": round(win_rate, 3),
         "tie_rate": round(ties / total, 3),
+        "item_level_count": len(item_level_values),
+        "item_level_se_iid": round(item_level_se, 3) if item_level_se is not None else None,
     },
     "slice_win_rate": slice_win_rate,
     "item_agreement": round(agreement_rate, 3),
@@ -1125,7 +1302,9 @@ pprint(summary, sort_dicts=False)
               'old_wins': 3,
               'ties': 1,
               'win_rate': 0.708,
-              'tie_rate': 0.083},
+              'tie_rate': 0.083,
+              'item_level_count': 6,
+              'item_level_se_iid': 0.164},
  'slice_win_rate': {'qa': 1.0,
                     'rag': 0.0,
                     'code': 0.75,
@@ -1152,9 +1331,13 @@ pprint(summary, sort_dicts=False)
 ~~~
 
 注意，demo 使用的是教学数据，不是生产质量证明。它的作用是让读者看到一条
-具体的分析链：总体 win rate 为 0.708，绝对评分也提高，但 `rag_001` 在高风险
-切片中回退，一致率只有 0.667，且左侧胜出比例过高。因此后续动作不是把一个
-布尔值写进发布脚本，而是分别复核分歧样本、高风险回退并重新平衡答案位置。
+具体的分析链：总体 win rate 为 0.708，但只有 6 个 prompt；先将每个 prompt 下的
+两位评审得分取平均，再让六个 prompt 等权，iid 标准误已经是 0.164。当前示例
+每题的评审人数相同，因此 prompt 均值与逐票总均值一致；若标注数不等或使用
+分层权重，应先定义目标估计量并调整标准误。绝对评分均值虽提高，`rag_001` 仍在高风险切片中回退，
+评审一致率只有 0.667，且左侧胜出比例过高。这个标准误还没有处理评审员复用、
+用户聚类或切片权重；样本这么少也不适合靠正态近似作发布判断。后续动作应分别
+复核分歧样本、高风险回退并重新平衡答案位置，而不是把点估计阈值写成上线门禁。
 
 ## 14. Human Eval 与 LLM-as-a-Judge
 
@@ -1185,6 +1368,14 @@ LLM judge
 对于 pairwise judge，可以保存人工标签 `y_h`、judge 标签 `y_j` 和不确定状态，
 构造混淆矩阵。对于绝对评分，可以报告等级差、加权一致性和严重错误的漏报率。
 平均相关很高，仍可能掩盖“普通 FAQ 正常、高风险样本全部漏报”的情况。
+
+研究基线只能作为方法证据，不能当作自动 judge 的验收线。Zheng 等人在 MT-Bench
+的受控实验中使用 80 个多轮问题、58 位专家级标注者并收集约 3,000 票；其特定
+协议下 GPT-4 和人类非平局判断一致率为 85%，人类之间为 81%。这说明当时的强模型
+judge 在该任务上接近人工间一致性，不说明 judge 与真实用户偏好一致，更不保证
+目标领域、安全切片或新版本上仍达到同一水平。目标系统仍需独立人工校准样本和
+按风险切片的误差分析。[论文中的设置与结果](https://arxiv.org/abs/2306.05685)
+应连同问题集、模型和是否排除平局一起阅读。
 
 ### 14.3 什么时候必须保留人工
 
@@ -1275,10 +1466,18 @@ pairwise 结果测量的是新系统，不是“同条件下的模型差异”�
 1. [InstructGPT](https://arxiv.org/abs/2203.02155)：展示人类示范、偏好数据和 RLHF 如何用于对齐评估目标。
 2. [Learning to Summarize from Human Feedback](https://arxiv.org/abs/2009.01325)：说明摘要任务中的人类偏好收集与奖励建模。
 3. [HELM](https://crfm.stanford.edu/helm/latest/) 与 [HELM paper](https://arxiv.org/abs/2211.09110)：提供多场景、多指标评估的框架和实验背景。
-4. [MT-Bench and Chatbot Arena](https://arxiv.org/abs/2306.05685)：讨论多轮开放式对话的成对评估与自动评审比较。
-5. [Chatbot Arena](https://arxiv.org/abs/2403.04132)：介绍基于用户偏好的开放平台及其排名数据。
-6. [OpenAI Evals](https://github.com/openai/evals)：提供可扩展评估任务和运行框架入口。
-7. [Hugging Face Evaluate](https://huggingface.co/docs/evaluate/index)：提供指标和评估脚本的实现入口。
+4. [MT-Bench and Chatbot Arena](https://arxiv.org/abs/2306.05685)：讨论多轮开放式对话的人类 pairwise 标注、LLM judge 比较及二者的一致性；具体一致率绑定其问题和投票协议。
+5. [Chatbot Arena](https://arxiv.org/abs/2403.04132)：介绍基于用户偏好的开放平台、BT 排名、区间估计和自适应采样；论文公开数据快照及用户群体有明确时间范围。
+6. [Judging the Judges: A Systematic Study of Position Bias in LLM-as-a-Judge](https://arxiv.org/abs/2406.07791)：用重复与换位实验拆分 judge 的位置稳定性和偏好公平性；只支持所测 judge、任务和题集。
+7. [Best Practices for the Human Evaluation of Automatically Generated Text](https://aclanthology.org/W19-8643/)：综述 NLG 人评中的任务定义、标注和报告实践；覆盖早期生成研究，需结合 LLM 开放任务调整。
+8. [The Authenticity Gap in Human Evaluation](https://aclanthology.org/2022.emnlp-main.406/)：分析 Likert 汇总与偏好排序的隐含假设，并提出 SPA；理论结论绑定作者的效用设定。
+9. [Rethinking the Agreement in Human Evaluation Tasks](https://aclanthology.org/C18-1281/) 与 [Interrater Disagreement Resolution](https://aclanthology.org/2021.humeval-1.15/)：分别讨论自然语言评价中不可消除的分歧，以及将可修复分歧按来源仲裁的流程。
+10. [Inter-Coder Agreement for Computational Linguistics](https://aclanthology.org/J08-4004/)：系统比较 Cohen kappa、Krippendorff alpha 等一致性系数的数学假设和适用条件。
+11. [Illusions of the Gold Standard: A Large-scale Analysis of Human Evaluation Protocols for Long-form Text Generation](https://aclanthology.org/2026.acl-long.635/)：人工审查 284 篇、辅助分析 1.8k 余篇 2023—2025 年 *CL 长文本生成人评论文，总结复现信息的系统性缺漏；结论绑定作者论文样本和报告标准。
+12. [Challenges in Trustworthy Human Evaluation of Chatbots](https://arxiv.org/abs/2412.04363)：以 55K Arena 快照进行随机差票、定向投票和主观题分歧的压力分析；10% 票数模拟变化不能解释为实际坏票率，原快照被假设为真实排序。
+13. [Dropping Just a Handful of Preferences Can Change Top Large Language Model Rankings](https://proceedings.iclr.cc/paper_files/paper/2026/hash/92d777fb721936613b6444b07c4ffc18-Abstract-Conference.html)：ICLR 2026 论文用 AMIP 近似筛出高影响偏好并精确重拟合；结果绑定作者公开平台快照，最坏情况删点不等同于随机抽样置信区间。
+14. [OpenAI Evals](https://github.com/openai/evals)：提供可扩展评估任务和运行框架入口。
+15. [Hugging Face Evaluate](https://huggingface.co/docs/evaluate/index)：提供指标和评估脚本的实现入口。
 
 这些资料的证据类型并不相同：论文给出方法和实验口径，平台文档说明实现入口，
 真实业务的脱敏样本才说明某个产品遇到了什么问题。面对新模型的公开偏好榜单，

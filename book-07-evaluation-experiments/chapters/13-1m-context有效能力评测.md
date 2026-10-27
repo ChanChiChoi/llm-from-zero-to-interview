@@ -297,8 +297,15 @@ RoPE scaling 通过调整频率或位置映射扩展可用范围。YaRN 等方�
 ### 13.6.3 Sliding Window、Sparse Attention 与 Hybrid Attention
 
 滑动窗口和稀疏 attention 可以减少每个 token 需要交互的范围，从而改善长序列的
-计算或显存。代价是远距离证据必须经过跨窗口信息通路；如果通路太弱，模型可能
-能读局部段落，却不能组合相隔很远的证据。
+计算或显存。[Longformer](https://arxiv.org/abs/2004.05150)把局部滑窗与任务相关
+的 global attention 结合；[BigBird](https://arxiv.org/abs/2007.14062)把局部、
+随机和 global token 的稀疏连接组合起来。它们共同回答“怎样不让每个 token 都
+和全序列做两两交互”，但连接图并不相同。
+
+稀疏化的代价是远距离证据必须沿允许的 attention 边传播。纯局部窗口中，跨越很
+远的两段信息要经过多层逐步传递；加入 global 或随机边可以缩短某些路径，却让
+结果依赖具体 mask、层数和训练任务。模型可能读到每个局部段落，却无法在输出时
+把相隔很远的证据放在同一个判断里。
 
 混合注意力可能让部分层使用局部模式、部分层保留全局或稀疏全局 token。评估时
 应问的是“远距离信息经过几跳到达输出”，而不是只看理论复杂度。一个复杂度更低
@@ -338,6 +345,27 @@ KV 量化或状态压缩可以降低存储，但需要测试：
 
 硬件优化的正确结论应是“在某个 workload 上减少了某类资源”，而不是“因此模型
 理解了更长上下文”。
+
+### 13.6.6 代表路线分别解决哪一层瓶颈
+
+把长上下文方法放在一张表里比较时，必须先区分它们改的是位置表示、任务学习，
+还是设备上的计算与状态管理。若一种方法把可接收长度从 32K 扩到 128K，另一种
+方法把单卡峰值显存降低一半，这两个结果回答的不是同一个问题。
+
+| 代表工作 | 主要改动与所解问题 | 论文报告的证据 | 代价、限制与下一步验证 |
+| --- | --- | --- | --- |
+| [Position Interpolation（PI）](https://arxiv.org/abs/2306.15595) | 将超出训练长度的位置映射回已见位置区间，减少直接外推到未见位置导致的极端注意力分数；随后用少量长序列微调适配。 | 在 LLaMA 7B—65B 上从 2,048 扩到 32,768，论文报告最多 1,000 步微调，并评估 passkey、语言建模、长文摘要及短任务保持情况。 | 线性插值会压缩各位置间隔，扩展倍数增加时局部位置分辨率也改变；它没有自动教会模型跨文档取证。要分别复测短程任务、位置分桶和组合证据任务。 |
+| [YaRN](https://arxiv.org/abs/2309.00071) | 不把所有 RoPE 频率维度同等缩放：按波长在保留局部相对位置信号与扩展低频范围之间平滑过渡，并用 attention logit scaling 调整扩展后的注意力分布。 | 作者在其 LLaMA/Llama 2 配置中报告，达到相近扩展目标所需训练 token 约为先前对照方法的 1/10、训练步数约为 1/2.5；论文也公开了 64K/128K 模型。 | 频率边界、扩展比例和微调语料是 recipe 的组成部分，论文效率比不是所有模型的固定倍率。复核目标 checkpoint 的 RoPE 配置、长短任务回归和对应 runtime 实现。 |
+| [LongRoPE](https://arxiv.org/abs/2402.13753) | 搜索不同 RoPE 维度和 token 位置各自适用的非均匀插值；先在 256K 微调，再对扩展模型进行第二次位置插值到 2,048K，并在 8K 重新调整以恢复短上下文表现。 | 作者在 LLaMA 2 与 Mistral 实验中报告非微调时最高 8 倍扩展，以及分阶段扩展到 2,048K；其结果同时报告长文指标和原长度 benchmark。 | “2,048K”依赖分阶段训练、搜索和模型设置，不等于长文推理正确率。要查清模型是否用相同 recipe，并按目标任务测有效长度、短程退化、算力和成本。 |
+| [Ring Attention](https://arxiv.org/abs/2310.01889) | 将序列分块放到多个设备，环形传递 K/V 块，并把通信与块级 attention 计算重叠，解决单设备放不下长序列的问题。 | 论文展示了分布式训练/推理可扩展到随设备数增加的长序列，并测量内存和计算利用率。 | 它改变计算的分布位置，不改变位置编码或长程任务监督；对标准 dense attention，总体两两交互工作仍随序列长度平方增长。需测链路带宽、通信重叠、负载不均、尾延迟和设备故障恢复。 |
+| [FlashAttention](https://arxiv.org/abs/2205.14135) 与 [PagedAttention](https://arxiv.org/abs/2309.06180) | 前者通过分块与在线 softmax 减少 HBM 中间读写；后者按 block 管理 KV cache，减少碎片并支持缓存共享。 | 两者分别提供 attention IO 优化与 serving KV 管理的算法/系统证据。 | 它们缓解计算数据移动或状态分配，不单独提高证据召回、位置鲁棒性或多步推理。要在目标 kernel、长度、batch 和并发上测资源收益，再配合任务评测。 |
+
+这张表也解释了为什么“上下文扩展算法”和“上下文并行”不能互相替代：PI、YaRN
+和 LongRoPE 主要处理位置分布如何延伸；Ring Attention 主要处理长序列如何跨设
+备计算；FlashAttention 与 PagedAttention 处理具体的数据移动和缓存管理。一个系
+统可以同时采用多条路线，但每条路线的收益都要在它负责的层面单独验收。位置方
+法改善了 passkey，并不能证明它改善了冲突归因；KV 占用下降，也不能证明生产
+吞吐按同一比例提高。
 
 ## 13.7 长上下文训练：长度覆盖不等于任务覆盖
 
@@ -544,6 +572,35 @@ change 而没有找到 effect，不能记作完整成功；若答案说“该变
 长上下文评测还要防止答案泄漏。问题不能直接包含证据段落的独特词串，测试集不
 能与训练或公开 benchmark 重复，生成时的 system prompt 和工具权限要固定。否则
 实验测到的可能是模板记忆、数据污染或 harness 的额外帮助。
+
+### 13.9.2 代表 benchmark 分别补上什么证据
+
+长上下文评测不是一个 benchmark 从简单到困难的单行榜单。不同研究改变了不同的
+实验因素：有的把证据位置固定下来检查位置偏差，有的提高干扰或跨段依赖，有的
+扩大真实任务覆盖。先明确它们各自排除了哪一种误判，再决定如何组合。
+
+| 研究或数据集 | 它设计了什么 | 它补上的评测缺口与论文证据 | 仍然不能证明什么 |
+| --- | --- | --- | --- |
+| Needle-in-a-Haystack（NIAH） | 在长干扰文本中放入可精确匹配的单条信息，再改变其位置与上下文长度。 | 成本低、容易复现，适合先发现截断、位置区间丢失、模板错误或模型完全找不到显著标记等问题。 | 单一显著 needle 可能靠词面匹配完成，无法代表实体消歧、多证据合取、冲突解释或引用是否支持结论；高分只能作为冒烟证据。 |
+| [Lost in the Middle](https://arxiv.org/abs/2307.03172) | 在多文档 QA 和 key-value 检索中控制相关信息所在位置，比较开头、中间与结尾。 | 论文发现多个模型会随证据位置变化显著退化，揭示“长度固定、只移动证据”的位置敏感性；这让位置成为单独的实验变量。 | 它主要识别位置效应，不覆盖所有文档任务或百万 token 长度；复现时仍要控制重复、顺序、证据密度与模型模板。 |
+| [RULER](https://arxiv.org/abs/2404.06654) | 可配置长度和任务复杂度；在 NIAH 变体之外加入多 needle、多跳 tracing 与 aggregation，共 13 类任务。 | 作者评测 17 个长上下文模型：很多模型在 vanilla NIAH 接近满分，但随长度和复杂度增加下降；在其 32K 满意度标准下，达到模型自称至少 32K 的模型中只有约一半通过。它把“能找一个针”推进到受控的检索、追踪和聚合。 | 任务是合成的，受模板、needle 格式和任务族影响；“满意”是论文定义的阈值，不是通用产品门槛。它适合控制变量诊断，不能代替目标语料。 |
+| [NoLiMa](https://arxiv.org/abs/2502.05167) | 降低问题与目标证据之间的词面重叠，迫使模型通过潜在关联找到 needle，而非直接复用相同词串。 | 作者评测 12 个声称支持至少 128K 的模型；论文报告 32K 时有 10 个模型跌到各自短上下文基线的一半以下，GPT-4o 从约 99.3% 的短程基线降到 69.7%。它针对普通 needle 的词面捷径。 | 仍是人工构造的关联检索任务，不能覆盖开放式因果分析、长篇写作、生产 RAG 或任意领域分布；数值绑定论文模型与提示。 |
+| [LongBench v1](https://arxiv.org/abs/2308.14508) | 将 21 个中英文数据集统一为六类长文本任务，包括单文档/多文档 QA、摘要、少样本学习、合成任务和代码补全。 | 提供比单一检索 probe 更宽的任务面；原论文报告英文平均 6,711 words、中文平均 13,386 characters，并用不同任务观察长度扩展、位置扩展及检索压缩。 | 平均长度不是百万 token；数据集、指标和任务难度异质，统一 harness 不会让它们变成同一能力，也不适合作为单个总分。报告必须保留任务和语言切片。 |
+| [LongBench v2](https://arxiv.org/abs/2412.15204) | 由近 100 位不同专业背景的受教育参与者协作采集，经过自动与人工难度审查；含 503 道多选题，覆盖单/多文档 QA、长上下文 ICL、对话历史、代码库和结构化数据。 | 试图测现实长任务中的理解与推理，而非只测召回；上下文范围是 8K—2M **words**，作者报告限时 15 分钟的人类专家准确率 53.7%、直接作答最佳模型 50.1%，o1-preview 使用较长推理为 57.7%。 | 长度单位是 words 而不是 tokens，2M words 不能写成 2M-token 窗口；503 题是经过筛选的高难多选集合，分数受模型集合、推理预算和选项格式影响，也不能单独代表业务总体。 |
+| [LongBench Pro](https://arxiv.org/abs/2601.02872) | 含 1,500 条中英文自然长上下文样本、11 个主任务和 25 个次任务，长度 8K—256K tokens；按长度、难度和 full/partial context dependency 分层。题目由模型起草并经专家核验。 | 它同时面向任务多样性与长度分层。2026 年 1 月作者预印本报告评估 46 个模型，并提出长上下文优化、有效长度与跨语言差异等观察。 | 当前公开范围止于 256K，不能证明 1M 表现；它是单版预印本，结论仍需独立复核。模型辅助构题与专家筛选也可能影响样本分布。 |
+| [MRCR v2](https://github.com/google-deepmind/eval_hub/tree/master/eval_hub/mrcr_v2) | 在合成多轮对话里重复相似请求，每次回答不同；要求先数出目标实例再复现对应回答。官方仓库提供多 needle 和多长度版本，文档称可生成到 8M。 | 固定较简单任务复杂度而扩展长度，可观察长度曲线；8-needle 版本降低随机复制某个相关回答就蒙对的机会，仓库估计此种随机噪声约 15%。 | 它刻意把 reasoning 复杂度保持得较低，适合测长程定位/共指，不等于跨文档推理；公开仓库滚动更新，使用时要固定数据、指标、revision，并说明是否给工具。OpenAI MRCR 与 DeepMind MRCR v2 属于相关但不等同的任务实现，分数不可拼接。 |
+
+这些研究形成的是互补的证据梯子，而不是严格难度排名：NIAH 与 Lost in the
+Middle 用于查输入和位置；RULER 与 NoLiMa 用受控任务识别 needle 捷径、长度与
+复杂度效应；LongBench 系列增加多任务和自然样本覆盖；MRCR v2 提供更长长度上的
+固定复杂度曲线。真实系统仍要加目标语料上的多证据、版本冲突、引用归因和不可
+回答样本，并报告同一套 tokenizer、模板、工具权限、推理预算、长度单位、成本
+和置信区间。
+
+VQA、DocVQA、ChartQA 和 AgentBench 可以用于多模态输入或 Agent 行为评估，但它们
+不是文本 1M context 的直接证据。若目标系统的上下文含图像、表格或工具轨迹，应
+把这些任务作为相邻能力单独记账，并额外说明视觉 token、文档解析、工具 scaffold
+和状态环境；不能把它们的分数合并进文本长上下文总分。
 
 ## 13.10 用条件化指标描述有效能力
 
@@ -808,10 +865,27 @@ KV 压缩或专门的低并发队列，但每项优化都有边界。
 时间，导致只需要几百 token 的请求等待。一个实用策略是按输入长度和任务风险分
 桶：短请求进入低延迟池，普通文档问答进入共享池，超长研究任务进入受控异步池。
 
-设短请求服务时间为 s，长请求服务时间为 ρs，到达比例分别为 1-p 和 p。在简单
-先来先服务模型中，长请求会把自己的服务时间传递给后续短请求，短请求的排队延
-迟可能随 pρ 快速上升。实际系统还会受到 batch、GPU kernel 和并行策略影响，但
-这个直觉足以说明为什么平均吞吐不错不能代表交互体验稳定。
+可以用一个刻意简化的 M/G/1 先来先服务队列看清“长请求比例不大，也可能抬高其
+他请求等待时间”的原因。假设到达服从速率为 λ 的 Poisson 过程、只有一个服务
+台、服务时间独立同分布，且系统稳定；Pollaczek–Khinchine 公式给出平均排队时间：
+
+~~~math
+u=\lambda E[S]<1,\qquad
+E[W_q]=\frac{\lambda E[S^2]}{2(1-u)}
+~~~
+
+这里影响排队的不只是平均服务时间 E[S]，还有第二矩 E[S²]。举例：每秒到达 2
+个请求，98% 的服务时间为 0.1 秒，2% 为 10 秒，则 `E[S]=0.298 s`、利用率
+`u=0.596`、`E[S²]=2.0098 s²`，平均排队时间约为 `4.97 s`。若同样每秒 2 个
+请求全部只服务 0.1 秒，则 `u=0.2`，平均排队时间约为 `0.0125 s`。少量长服
+务时间通过增大 `E[S²]` 显著抬高平均等待；这正是混合长短请求会伤害短请求的
+一个机制解释，而不是简单的“长请求占了 2% 队列”。公式假设与推导可见
+[Stanford 的 M/G/1 讲义](https://web.stanford.edu/class/ee384x/EE384X/handouts/H10.pdf)。
+
+这个例子是单服务台 FCFS 理论，不是 GPU 连续批处理的精确预测。实际 serving 会
+因 chunked prefill、continuous batching、请求抢占、prefill/decode 分离、并行
+拓扑和 kernel 而改变服务时间分布；所以它只能说明方差/长尾为何重要，不能拿
+`4.97 s` 作为线上延迟预测。目标系统仍需按长度桶测 queue wait、TTFT 和 P95/P99。
 
 降级顺序也应有明确语义：
 
@@ -957,31 +1031,43 @@ buckets = [
 ]
 
 signals = {
-    "ingest_stable": all(bucket["ingest"] >= 0.99 for bucket in buckets),
+    "ingest_unstable": any(bucket["ingest"] < 0.99 for bucket in buckets),
     "evidence_degrades": (
         buckets[-1]["evidence_recall"]
         < buckets[0]["evidence_recall"] - 0.20
     ),
+    "answer_degrades": buckets[-1]["answer"] < buckets[0]["answer"] - 0.20,
     "citation_degrades": (
         buckets[-1]["citation"] < buckets[0]["citation"] - 0.20
     ),
-    "interactive_slo": buckets[-1]["p95"] <= 20.0,
-    "cost_stable": buckets[-1]["cost"] <= 4.0,
+    "interactive_slo_miss": buckets[-1]["p95"] > 20.0,
+    "cost_budget_miss": buckets[-1]["cost"] > 4.0,
 }
 
 actions = []
-if signals["ingest_stable"] and signals["evidence_degrades"]:
-    actions.append("检查位置训练、证据布局和长文档任务")
-if signals["citation_degrades"]:
-    actions.append("拆分原子主张并复核 citation attribution")
-if not signals["interactive_slo"]:
+if signals["ingest_unstable"]:
+    actions.append("核对 tokenizer、网关与 runtime token trace，修复输入链路后重跑")
+else:
+    if signals["evidence_degrades"]:
+        actions.append("检查位置覆盖、长上下文训练数据与证据布局")
+    if signals["answer_degrades"]:
+        actions.append("按任务切片复核答案判定与多证据组合")
+    if signals["citation_degrades"]:
+        actions.append("逐原子主张复核 citation attribution")
+if signals["interactive_slo_miss"]:
     actions.append("把超长任务转入异步池并复核容量")
-if not signals["cost_stable"]:
-    actions.append("评估 RAG、摘要、缓存和状态压缩")
+if signals["cost_budget_miss"]:
+    actions.append("评估 RAG、摘要、缓存和状态压缩的单位成功成本")
 
-if not signals["interactive_slo"] or not signals["cost_stable"]:
+if signals["ingest_unstable"]:
+    decision = "repair_ingest_then_rerun"
+elif signals["interactive_slo_miss"] or signals["cost_budget_miss"]:
     decision = "route_long_tasks_to_async"
-elif signals["evidence_degrades"] or signals["citation_degrades"]:
+elif (
+    signals["evidence_degrades"]
+    or signals["answer_degrades"]
+    or signals["citation_degrades"]
+):
     decision = "rework_evidence_path"
 else:
     decision = "continue_task_specific_validation"
@@ -994,16 +1080,18 @@ print("decision=", decision, sep="")
 预期输出为：
 
 ~~~text
-signals={'ingest_stable': True, 'evidence_degrades': True, 'citation_degrades': True, 'interactive_slo': False, 'cost_stable': False}
-actions=['检查位置训练、证据布局和长文档任务', '拆分原子主张并复核 citation attribution', '把超长任务转入异步池并复核容量', '评估 RAG、摘要、缓存和状态压缩']
+signals={'ingest_unstable': False, 'evidence_degrades': True, 'answer_degrades': True, 'citation_degrades': True, 'interactive_slo_miss': True, 'cost_budget_miss': True}
+actions=['检查位置覆盖、长上下文训练数据与证据布局', '按任务切片复核答案判定与多证据组合', '逐原子主张复核 citation attribution', '把超长任务转入异步池并复核容量', '评估 RAG、摘要、缓存和状态压缩的单位成功成本']
 decision=route_long_tasks_to_async
 ~~~
 
-这个 demo 的价值是展示诊断路径，而不是自动替工程师做发布决定。输入完整率稳
-定而证据召回下降，说明优先调查有效使用；引用支持率继续下降，说明答案正确
-不能替代证据归因；P95 和成本超出交互预算，则需要改变路由和资源配置。示例中
-的 0.99、20 秒和 4.0 只是教学阈值，不是所有模型、业务或硬件都应采用的发布
-标准。
+这个 demo 的价值是展示诊断路径，而不是自动替工程师做发布决定。输入不稳定时，
+先修复计数或截断链路，暂停对模型检索和推理质量的归因；输入稳定后，证据召回、
+答案和引用支持分别触发独立调查。P95 和成本超出预算时，路由建议可以转异步，
+但不会消除质量问题。这里的决策只选“首要运行路径”，不能理解为发布已通过。
+样例以 32K 和 1M 的首末桶差值触发诊断，没有计算中间桶趋势、抽样不确定性、
+成对显著性或任务切片，因此 `0.20`、`0.99`、20 秒和 4.0 都只是教学阈值，
+不是统计结论或生产发布门槛。
 
 ## 13.18 练习
 
@@ -1136,41 +1224,33 @@ bootstrap 或其他与分析单位匹配的方法。对 P95 和成本，则需�
 
 ### 13.20.1 位置机制与长上下文扩展
 
-- RoFormer / Rotary Position Embedding；
-  https://arxiv.org/abs/2104.09864
-- ALiBi: Train Short, Test Long；
-  https://arxiv.org/abs/2108.12409
-- Position Interpolation；
-  https://arxiv.org/abs/2306.15595
-- YaRN: Efficient Context Window Extension；
-  https://arxiv.org/abs/2309.00071
-- LongRoPE；
-  https://arxiv.org/abs/2402.13753
-- Ring Attention；
-  https://arxiv.org/abs/2310.01889
+- [RoFormer / Rotary Position Embedding](https://arxiv.org/abs/2104.09864)：理解旋转位置表示和相对位置信息的基础。
+- [ALiBi: Train Short, Test Long](https://arxiv.org/abs/2108.12409)：通过 attention bias 探索训练短、测试长；与 RoPE 插值是不同位置路线。
+- [Position Interpolation](https://arxiv.org/abs/2306.15595)：把超长位置映射回训练位置范围，并在 LLaMA 上做低步数扩展实验。
+- [YaRN](https://arxiv.org/abs/2309.00071)：按 RoPE 波长区分插值程度并增加 attention scaling；训练效率数字绑定作者的模型和实验对照。
+- [LongRoPE](https://arxiv.org/abs/2402.13753)：非均匀位置搜索、渐进式 256K→2,048K 扩展和短上下文恢复，结果绑定 LLaMA 2/Mistral 配置。
+- [Longformer](https://arxiv.org/abs/2004.05150) 与 [BigBird](https://arxiv.org/abs/2007.14062)：局部/全局/随机稀疏连接的代表设计；重点是改变 token 交互图，不是 RoPE 外推。
+- [Ring Attention](https://arxiv.org/abs/2310.01889)：把 blockwise attention 分布到多设备并重叠通信与计算；解决设备容量和并行问题。
+- [FlashAttention](https://arxiv.org/abs/2205.14135) 与 [PagedAttention](https://arxiv.org/abs/2309.06180)：分别从 HBM 数据移动和 KV cache block 管理改善工程执行。
 
-这些论文可以支持位置表示、外推、插值和分布式长上下文方法的机制解释。它们不
-能证明“只要采用某个方法，所有任务都能在百万 token 上保持质量”。
+这些来源分别支持位置表示、位置扩展、稀疏交互、分布式计算和缓存管理的机制
+解释。它们不能证明“只要采用某个方法，所有任务都能在百万 token 上保持质量”；
+具体差异和论文边界见 §13.6.6。
 
 ### 13.20.2 长上下文评测
 
-- LongBench；
-  https://arxiv.org/abs/2308.14508
-- Lost in the Middle；
-  https://arxiv.org/abs/2307.03172
-- RULER；
-  https://arxiv.org/abs/2404.06654
-- VQA；
-  https://arxiv.org/abs/1505.00468
-- DocVQA；
-  https://arxiv.org/abs/2007.00398
-- ChartQA；
-  https://arxiv.org/abs/2010.11416
-- AgentBench；
-  https://arxiv.org/abs/2308.03688
+- [Lost in the Middle](https://arxiv.org/abs/2307.03172)：控制证据位置，识别中间位置退化。
+- [LongBench v1](https://arxiv.org/abs/2308.14508) 与 [LongBench v2](https://arxiv.org/abs/2412.15204)：分别提供中英文多任务覆盖，以及高难长文理解/推理题；v2 的长度用 words 报告。
+- [RULER](https://arxiv.org/abs/2404.06654)：可配长度、needle 数、multi-hop tracing 与 aggregation 的合成任务套件。
+- [NoLiMa](https://arxiv.org/abs/2502.05167)：降低问题和证据的词面重叠，检查依赖潜在关联的检索。
+- [LongBench Pro](https://arxiv.org/abs/2601.02872)：中英文自然长文本、多任务、token 长度分桶；截至 2026-10-27 公开的是 2026 年 1 月作者预印本，最大 256K tokens。
+- [Google DeepMind MRCR v2 数据与评测代码](https://github.com/google-deepmind/eval_hub/tree/master/eval_hub/mrcr_v2)：多轮共指和多 needle 的固定复杂度曲线；仓库文档截至本轮检索称可扩展至 8M，使用时要记录数据与代码 revision。
+- [OpenAI MRCR 与 Graphwalks 发布说明](https://openai.com/index/gpt-4-1/)：厂商公开的多轮共指检索与结构化多跳任务入口。发布方结果用于理解任务设计，不作为独立复核。
 
-Needle-in-a-haystack 更适合做输入和位置冒烟检查；LongBench、RULER、Lost in
-the Middle 和真实业务多证据任务观察的能力不同，应并列报告而不是互相替代。
+VQA、DocVQA、ChartQA 和 AgentBench 适合评估多模态/Agent 相邻任务，不是文本
+1M context benchmark。needle 冒烟、位置探针、合成复杂度、自然任务集、供应方自
+建评测和目标业务集各自回答不同问题，不能平均为单一长上下文总分；方法差异与
+长度单位见 §13.9.2。
 
 ### 13.20.3 资源与推理系统
 

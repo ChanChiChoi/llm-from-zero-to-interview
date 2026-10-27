@@ -233,6 +233,26 @@ rope_scaling 的字段只能说明配置存在相关参数，不能独立证明�
 
 “有人发过截图”证明的是截图存在，不证明截图中的模型、日期、分数和条件。
 
+### 14.4.6 代表性研究分别补哪一类缺口
+
+模型发布证据不是靠一篇论文或一张卡片一次解决的。下面这些代表性工作各自修补
+不同环节，不能把它们排成一条“谁的证据等级更高”的直线。
+
+| 工作 | 要解决的问题与机制 | 它带来的证据价值 | 主要限制与后续补证 |
+| --- | --- | --- | --- |
+| [Model Cards for Model Reporting](https://arxiv.org/abs/1810.03993) | 模型发布时缺少用途、评测条件、群体切片和已知限制的统一说明；提出随模型发布的结构化报告 | 让使用者知道作者希望模型用于什么、在哪里测过、哪些场景不适用 | 卡片是披露格式，不验证作者填写是否真实或完整。对 2022 年 Hugging Face 快照中 32,111 份卡片的[后续审计](https://arxiv.org/abs/2402.05160)发现，评估栏只在 15.4% 卡片中填写，限制栏为 17.4%；应把字段与原始评测、版本和独立来源互相链接 |
+| [Datasheets for Datasets](https://arxiv.org/abs/1803.09010) | 数据集来源、组成、采集、处理、推荐用途和限制缺少统一记录；提出面向数据集生命周期的说明书 | 把“模型训练了什么”拆成可追踪的数据来源、许可、覆盖和处理问题 | 数据说明不等于某个模型真的消费了该数据。应继续绑定实际训练清单、数据快照、去重/过滤记录与模型 revision |
+| [HELM](https://arxiv.org/abs/2211.09110) | 公开模型通常在不同场景、适配和指标上各自报分，横向比较缺少共同条件；以场景 × 适配 × 多指标组织评估，并公开 prompts/completions | 原论文覆盖 30 个模型、42 个场景，并把共同核心场景的模型覆盖从此前平均 17.9% 提高到 96%；多指标矩阵能显示准确率、校准、鲁棒、公平、毒性和效率之间的取舍 | 场景集合是广泛但有限的可行子集，不是任一产品的真实流量；统一 harness 也不保证任务代表性。应补目标任务切片、私有 holdout 和线上观测 |
+| [CheckList](https://aclanthology.org/2020.acl-main.442/) | 总准确率掩盖具体行为失败；用能力清单配合最小功能、行为不变性和方向性预期测试构造反例 | 一项商用情感分类器用户研究找出此前未发现且可行动的缺陷；另一项用户研究中，使用 CheckList 的从业者写出约两倍测试并发现近三倍 bug。它把失败落到“哪种输入变化导致哪种行为错误” | 能力清单、扰动有效性和 oracle 质量决定覆盖；它不估计线上错误率。应把关键行为用目标语料复核，并保存失败用例和修复回归 |
+| [G-Eval](https://aclanthology.org/2023.emnlp-main.153/) | 参考答案指标难覆盖开放生成质量；让 LLM 从评价标准生成细化步骤，再用表单式打分，论文还试验评分 token 概率加权 | GPT-4 在论文 SummEval 摘要任务上的人工相关性达到 Spearman ρ=0.514；说明 rubric、步骤和聚合方式会影响 judge 结果 | 结果绑定摘要/对话任务、GPT-4 和人工标签，论文也观察到偏向 LLM 生成文本的风险；相关性不是事实正确率。应在目标任务上做人工校准、顺序交换、答案反事实和独立 holdout |
+| [Evaluation Cards](https://arxiv.org/abs/2606.09809) | benchmark、模型卡、评测运行和公司博客分散，读者难以比较并追到聚合分数来源；提出把 benchmark 元数据、run 数据和 model 元数据组合成记录，并给不同读者解释视图 | 论文从 52 篇工作和 10 次访谈提炼 schema，提出复现性、文档完整度、来源/风险、分数可比性四类信号，并在其监测工具中分析 5,816 个模型、635 个 benchmark、101,843 条结果 | 这是 2026 年 arXiv 预印本和报告层工具，不验证底层模型声明为真；信号质量依赖输入记录与抽取。它补充本章的 Claim Ledger：Evaluation Card 聚合一轮评测的可解释字段，Claim Ledger 追踪单条最小命题及其支持/反证 |
+
+这些路线适合串成一条证据链：Datasheet 说明数据来源，Model Card 说明模型用途与
+限制，HELM 提供共同场景和指标，CheckList 找到具体行为反例，G-Eval 等 judge
+提供开放任务的评分手段，Evaluation Card 组织一次运行的解释字段，Claim Ledger
+最后限定可以写出的句子。任何一环都不能替其余环节证明能力；若最终声明涉及目标
+产品，还要用目标分布的独立 holdout 或线上实验补齐外部效度。
+
 ## 14.5 证据强度的多个维度
 
 来源类别有帮助，但不够。相同类型的资料也可能存在版本、范围和独立性差异。可
@@ -707,39 +727,22 @@ usage、系统版本和价格，因为服务端可能在不改变 model ID 的�
 这句话没有否认结果，而是保留了结果的作用域。未来出现独立复现时，可以在同一
 个 claim ID 下补证据，而不是重写整章。
 
-## 14.17 当前模型名称与待核验清单
+## 14.17 观察项如何进入可复核的 claim
 
-对 GPT-5.5、GPT-5.6 Sol/Terra/Luna、GLM-5.5、DeepSeek-V4-Flash、Qwen3.8-Max
-或其他社区流传名称，第一步是查官方 model ID、模型卡、技术报告、权重和 API
-文档。查不到时，可以记录名称、已访问的官方目录、目前缺少的证据以及未来要
-核对的字段。
+§14.11 负责记录第一次发现的名称和缺失证据；本节处理后续出现新材料时如何更新
+它。先在原观察项下保存新来源、访问日期和版本，再判断它是否回答了原来的问题：
 
-### 14.17.1 观察项记录模板
+1. 只有官方产品页出现新名称时，只能把“产品名称已确认”升级为来源事实；
+2. 出现 API 文档时，可以补接口字段和请求约束，不能顺带确认模型架构；
+3. 出现权重配置、代码或技术报告时，只升级这些材料直接覆盖的结构/方法命题；
+4. 出现 benchmark 结果时，先补任务、harness、effort、工具、预算、分母、判定器
+   和 revision，再决定它是发布方报告、第三方测量还是独立复现；
+5. 某一项仍没有证据时，保留为未知，不把相邻版本、同系列产品或社区别名的资料
+   自动迁移过来。
 
-~~~text
-名称:
-首次发现日期:
-发现来源:
-已访问的官方目录:
-官方 model id:
-模型卡或技术报告:
-权重/配置:
-公开 benchmark:
-独立复现:
-仍缺少的证据:
-当前结论:
-~~~
-
-当前结论可以是“已核验的产品名称”“官方未确认的社区观察项”“同名但版本不明”
-或“已确认模型但架构细节未知”。不要为了填满模型清单而把未知项写成新模型事实。
-
-### 14.17.2 “查不到”与“不存在”
-
-“没有查到”不等于模型一定不存在，可能是内部代号、地区产品、尚未公开、社区
-拼写错误、旧名称映射或页面下线。同样，产品页出现一个名字也不等于公开了架构。
-
-对当前日期的模型清单，必须保留抓取日期。模型目录、价格、上下文和 API 字段都
-会变化，不能把今天的搜索结果写成永久事实。
+若来源证明该名称只是 alias，应把 alias 映射到 canonical model ID，并保留原观察
+记录；若产品名称已核验但架构不公开，结论应拆成两个状态，不能用一个“已确认”
+覆盖整张清单。观察项的字段沿用 §14.11.2，不再复制第二份模板。
 
 ## 14.18 证据更新的回归流程
 
@@ -791,7 +794,13 @@ claims = [
         "scope_complete": True,
         "independent": False,
         "task_tested": False,
-        "unknowns": 0,
+        "unknowns": [],
+        "evidence": [
+            {
+                "source_type": "official_doc",
+                "directly_supports_claim": True,
+            }
+        ],
     },
     {
         "id": "ctx-task",
@@ -800,7 +809,13 @@ claims = [
         "scope_complete": True,
         "independent": True,
         "task_tested": True,
-        "unknowns": 1,
+        "unknowns": ["production traffic"],
+        "evidence": [
+            {
+                "source_type": "independent_eval",
+                "directly_supports_claim": True,
+            }
+        ],
     },
     {
         "id": "architecture",
@@ -809,9 +824,32 @@ claims = [
         "scope_complete": False,
         "independent": False,
         "task_tested": False,
-        "unknowns": 3,
+        "unknowns": ["model revision", "config", "implementation path"],
+        "evidence": [
+            {
+                "source_type": "community_signal",
+                "directly_supports_claim": False,
+            }
+        ],
     },
 ]
+
+architecture_claims = [
+    claim for claim in claims
+    if claim["type"] == "architecture"
+]
+architecture_claims_have_direct_sources = bool(architecture_claims) and all(
+    any(
+        evidence["source_type"] in {
+            "technical_report",
+            "official_config",
+            "official_code",
+        }
+        and evidence["directly_supports_claim"]
+        for evidence in claim["evidence"]
+    )
+    for claim in architecture_claims
+)
 
 signals = {
     "all_scopes_recorded": all(
@@ -823,14 +861,10 @@ signals = {
         and claim["task_tested"]
         for claim in claims
     ),
-    "architecture_claim_is_confirmed": all(
-        not (
-            claim["type"] == "architecture"
-            and claim["source"] == "community_signal"
-        )
-        for claim in claims
+    "architecture_claims_have_direct_sources": architecture_claims_have_direct_sources,
+    "unknowns_field_recorded": all(
+        isinstance(claim["unknowns"], list) for claim in claims
     ),
-    "unknowns_recorded": all(claim["unknowns"] >= 0 for claim in claims),
 }
 
 actions = []
@@ -838,12 +872,12 @@ if not signals["all_scopes_recorded"]:
     actions.append("补齐模型版本、任务、harness、预算和日期")
 if signals["task_claim_has_independent_evidence"]:
     actions.append("保留任务结论，并按任务范围引用")
-if not signals["architecture_claim_is_confirmed"]:
+if not signals["architecture_claims_have_direct_sources"]:
     actions.append("把架构说法降级为观察项，寻找配置或技术报告")
-if signals["unknowns_recorded"]:
+if signals["unknowns_field_recorded"]:
     actions.append("在 claim ledger 中保留未知项")
 
-if not signals["architecture_claim_is_confirmed"]:
+if not signals["architecture_claims_have_direct_sources"]:
     decision = "publish_scoped_task_claim_and_hold_architecture"
 elif signals["task_claim_has_independent_evidence"]:
     decision = "publish_scoped_claim"
@@ -858,7 +892,7 @@ print("decision=", decision, sep="")
 运行输出为：
 
 ~~~text
-signals={'all_scopes_recorded': False, 'task_claim_has_independent_evidence': True, 'architecture_claim_is_confirmed': False, 'unknowns_recorded': True}
+signals={'all_scopes_recorded': False, 'task_claim_has_independent_evidence': True, 'architecture_claims_have_direct_sources': False, 'unknowns_field_recorded': True}
 actions=['补齐模型版本、任务、harness、预算和日期', '保留任务结论，并按任务范围引用', '把架构说法降级为观察项，寻找配置或技术报告', '在 claim ledger 中保留未知项']
 decision=publish_scoped_task_claim_and_hold_architecture
 ~~~
@@ -886,6 +920,8 @@ decision=publish_scoped_task_claim_and_hold_architecture
   https://arxiv.org/abs/1810.03993
 - Datasheets for Datasets；
   https://arxiv.org/abs/1803.09010
+- What's documented in AI? Systematic Analysis of 32K AI Model Cards；
+  https://arxiv.org/abs/2402.05160
 - Hugging Face Model Cards 文档；
   https://huggingface.co/docs/hub/model-cards
 
@@ -899,12 +935,17 @@ decision=publish_scoped_task_claim_and_hold_architecture
 - OpenAI Evals；
   https://github.com/openai/evals
 - CheckList；
-  https://arxiv.org/abs/2005.04118
+  https://aclanthology.org/2020.acl-main.442/
 - G-Eval；
-  https://arxiv.org/abs/2303.16634
+  https://aclanthology.org/2023.emnlp-main.153/
+- Evaluation Cards；
+  https://arxiv.org/abs/2606.09809
+- OpenAI Evals 示例代码；
+  https://github.com/openai/evals
 
-它们可帮助设计多维评估、行为测试、judge 和可复现运行，但每个项目的任务分布
-和判定器仍要单独审计。
+这些论文分别解决场景覆盖、行为测试、自动评分和报告组合问题，项目仓库提供可
+复用实现入口；它们不会替目标团队决定任务代表性，也不自动校准评分器。方法对照
+见 §14.4.6。
 
 ### 14.21.3 长上下文和前沿模型案例
 
@@ -931,7 +972,7 @@ decision=publish_scoped_task_claim_and_hold_architecture
 
 治理资料适合支持风险、记录和责任边界，不是模型排名或架构真实性的证明。
 
-## 14.22 本章小结
+## 14.22 先用证据链限定句子
 
 证据等级不是给模型贴永久标签，而是限定当前句子可以说多强。官方 API 文档适合
 支持字段语义和调用约束；模型卡适合支持公开结构、训练规模或评测条件；论文适
@@ -953,9 +994,22 @@ decision=publish_scoped_task_claim_and_hold_architecture
 越新的模型，越应该明确哪些是事实、哪些是实验、哪些是推断、哪些仍然未知。能
 够准确写出未知，不会削弱技术判断，反而让已经被证据支持的部分更可信。
 
-## Grok 4.7：发布方 benchmark 与榜单结果分账
+### 14.22.1 Grok 4.7：发布方 benchmark 与榜单结果分账
 
-Grok 4.7 的 Artificial Analysis 条目、xAI 发布页 benchmark 和 DataCurve DeepSWE（当前没有精确行）属于三种不同证据。AA 的 Intelligence Index/速度/成本是 provider 配置测量；xAI 的 DeepSWE、CursorBench、Terminal-Bench、Harvey、HealthBench 和 GDPval 绑定发布方 prompt、effort、工具、环境与 verifier；DataCurve 的 Pass@1/4 绑定 `mini-swe-agent` 和自己的任务集。它们不能因为都出现了模型名就互相校准。
+xAI 的[官方发布页](https://x.ai/news/grok-4-7)称 Grok 4.7 使用更大的
+base model、更长的强化学习训练，以及偏向数小时长任务的困难任务混合；发布页还
+称模型针对 Grok Bot harness 做了适配。这些属于发布方方法描述，不披露参数规模
+或完整训练配方，也不能证明不同 Agent harness 都有相同收益。官方 [API 模型页](https://docs.x.ai/developers/models/grok-4.7)
+支持核验 model ID、500K context、输入模态和 effort 等接口合同。
+
+[Artificial Analysis 条目](https://artificialanalysis.ai/models/grok-4-7)展示
+xhigh provider 配置的综合分数、速度和成本；xAI 发布页上的 DeepSWE、CursorBench、
+Terminal-Bench、Harvey、HealthBench 和 GDPval 则是发布方结果，绑定各自 prompt、
+effort、工具、环境与 verifier。DataCurve DeepSWE 页面标注更新于 2026-09-22，
+展示 113 个任务、91 个仓库、5 种语言，但没有 Grok 4.7 的精确配置行；其中可见
+的是 Grok 4.6。缺失行只表示该榜单快照没有测量，不能迁移相邻版本成绩或当成零分。
+完整来源见[研究记录](../../research/model-update-2026-09/grok-4.7-source-notes.md)。
+
 
 评测报告至少要把下列字段作为 manifest 的一部分：
 
@@ -966,9 +1020,13 @@ harness / environment / timeout / retry / verifier
 score / cost / output tokens / agent steps / date
 ```
 
-若某一层缺少精确条目，例如 DataCurve 没有 `mini_swe_agent_grok_4_7_*`，应保留缺失而不是从 Grok 4.6 或邻近模型借分。完整来源和 9 月 22 日快照见 [`grok-4.7-source-notes.md`](../../research/model-update-2026-09/grok-4.7-source-notes.md)。
 
-## 14.23 Claude Opus 5.5：质量、成本与 fallback 的三账
+### 14.22.2 Claude Opus 5.5：质量、成本与 fallback 的三账
+
+Artificial Analysis 的 [Opus 5.5 条目](https://artificialanalysis.ai/models/claude-opus-5-5)
+是带 effort 与 default fallback 的第三方配置记录；Anthropic 的[发布页](https://www.anthropic.com/claude-opus-5-5)
+和 [System Card](https://www.anthropic.com/claude-opus-5-5-system-card)是发布方
+评测资料。引用分数时要分开标明来源和执行条件。
 
 Opus 5.5 的 Artificial Analysis 条目是 `max with fallback`，而 Anthropic 发布页又同时给出 max、xhigh 和 default/medium 的 benchmark/成本描述。评测 manifest 不能只保存一个模型名，应至少拆成：
 
@@ -982,7 +1040,9 @@ Opus 5.5 的 Artificial Analysis 条目是 `max with fallback`，而 Anthropic �
 
 一个公平实验应分别画 quality-cost、quality-steps 和 verified-success-latency 曲线，并报告 token、工具轮次、fallback 次数、失败类别和 artifact verifier。这样才能区分“模型更有效率”“模型更少触发安全路由”和“任务 harness 更宽松”三种解释。
 
-### 14.23.1 System Card 数字也必须带配置
+Anthropic 当前[模型页](https://www.anthropic.com/claude/opus)报告 OSWorld 2.1 partial `81.8%`；上面的 System Card 数字则是 OSWorld 2.0 partial/strict `81.8%/48.7%`。分数相同不代表同一任务集，旧版 strict 也不能迁移到 2.1。应分别保存 benchmark revision 和成功定义；若只写“OSWorld 81.8%”，读者无法判断引用的是哪次实验。
+
+#### 14.22.2.1 System Card 数字也必须带配置
 
 Opus 5.5 的 System Card 把“能力分数”和“安全行为”放进了同一份条件账本。Terminal-Bench 4.0 的 `66.36%` 绑定 xhigh、Claude Code `--bare` 和 5 trials；ProgramBench 的 `91.2%` 绑定 166 个 golden tasks；OSWorld 2.0 的 partial/strict 是 `81.8%/48.7%`，绑定 108 tasks、1080p、最多 500 actions、5 runs，以及超过 100K tokens 后的 server-side compaction。评测报告若只复制分数而丢掉成功定义和上下文策略，就不能复现原 claim。
 
@@ -997,7 +1057,7 @@ raw_score / confidence_interval / actual_model / artifact
 
 多 Agent 的 ProgramBench 同分约 `2.7x` latency improvement 和 DRACO `0.5x` latency budget 下约 `2.8x` speedup 是 derived latency，不是 wall-clock。它们可以作为编排研究证据，但不能替代并发、排队、共享工具、失败恢复和真实墙钟的独立验收。
 
-## 14.24 Claude Fable 5.1：System Card 的条件化评测
+### 14.22.3 Claude Fable 5.1：System Card 的条件化评测
 
 Claude Fable 5.1 的证据至少分成三层：Artificial Analysis 的 provider/configuration 指标、Anthropic System Card 的发布方评测，以及 DataCurve `mini-swe-agent` 的精确 Agent 行。当前 DataCurve 没有 `mini_swe_agent_claude_fable_5_1_*`，所以不能把 Fable 5 的 Pass@1、成本或 steps 借给 Fable 5.1。
 
@@ -1016,3 +1076,11 @@ score / cost / output_tokens / agent_steps / date
 ```
 
 如果无法填出实际执行模型或 safeguards 状态，结果应标为发布方条件证据或 `not_comparable`，而不是进入跨模型排行榜。Fable 5.1 当前适合用于训练“证据分层、fallback 归因和安全开关”的面试题，不足以支持参数、架构、完整训练 recipe 或独立能力结论。
+
+Anthropic 的[发布页](https://www.anthropic.com/claude-fable-and-mythos-5-1)与[System Card](https://www.anthropic.com/claude-fable-5-1-mythos-5-1-system-card)说明 Fable 5.1 和 Mythos 5.1 是同一模型的不同 safeguards 配置；[Artificial Analysis](https://artificialanalysis.ai/models/claude-fable-5-1)提供 max/default-fallback 配置指标。DeepSWE 页面在 2026-09-22 的公开更新中有 Fable 5、没有 Fable 5.1 的精确 Agent 行。上述三个来源各回答不同问题，不得把发布方安全分数、第三方 provider 指标与独立 Agent 行混成一个能力排名。详细字段见[研究记录](../../research/model-update-2026-09/claude-fable-5.1-source-notes.md)。
+
+## 14.23 本章小结
+
+证据等级不是给模型贴永久标签，而是限定当前句子可以说多强。选来源时先问清 claim 类型：接口看官方文档，公开 artifact 看配置/代码，方法看论文或技术报告，指定协议下的行为看评测记录，目标产品结论则需要目标分布上的独立验证或线上观察。
+
+读者最终应能做到：把复合宣传拆成最小命题，为每条命题绑定版本、协议、来源和未知项；比较代表方法分别解决的缺口与限制；在新证据出现时更新同一个 claim，而不是把相邻模型或不同评测条件的分数搬到一起。

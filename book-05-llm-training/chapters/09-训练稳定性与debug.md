@@ -248,6 +248,38 @@ b_t
 
 如果 decode 确认是错误模板、乱码或 label 错位，应修数据管线；只跳过单个 batch 不能修复同源样本。如果 spike 与 scheduler 或 checkpoint 恢复同步出现，应先检查 optimizer/scheduler state。clipping 可以限制一次异常更新，但不能修复错误分母或坏数据。参数已被 NaN 污染时，应从污染前 checkpoint 恢复。
 
+### 9.4.5 代表研究如何解释和处理 loss spike
+
+大模型训练中的 spike 不只有“学习率太大”一种解释。不同研究追踪的是不同机制，适用的参数规模、优化器和诊断量也不同。它们提供的是可以检验的假设，不是看到 spike 后直接套用的通用处方。
+
+| 研究路线 | 机制解释与证据 | 处理思路 | 适用边界 |
+| --- | --- | --- | --- |
+| Adam instability | Molybog 等分析梯度估计随时间的相关结构，指出它可能让 Adam 更新范数放大、更新方向与下降方向变弱相关；研究覆盖 7B、30B、65B、546B，其中较小模型未出现同样的爆炸式 loss divergence | 先核对层内更新分布和矩估计；作者讨论了降低学习率、调小 epsilon、减小 batch 或调整 \(\beta_1/\beta_2\) 等路线 | 降学习率会延长训练；调小 epsilon 与低精度数值风险冲突；减小 batch 损失数据并行效率；改变矩估计常数也会改变正常阶段的历史响应。该理论不能证明所有 spike 都由 Adam 单独造成 |
+| 自适应预条件器失配 | Adam 的二阶矩满足 \(v_t=\beta_2v_{t-1}+(1-\beta_2)g_t^2\)。Bai 等观察到梯度骤降时，\(v_t\) 可能按自身衰减而暂时跟不上随后上升的梯度；预条件后的曲率因此可能持续越过稳定阈值 | 检查逐层梯度、\(v_t\)、更新量和 spike 时序是否吻合；需要时用 Hessian-vector product 近似梯度方向曲率；对照改变 \(\beta_2\) 的固定 checkpoint 重放 | 论文用约 10M 参数、8 层合成推理 Transformer（900k 序列、batch 2048）观察到 7 次 spike；另在 SlimPajama 上训练 187M LLaMA 结构模型、用 100B tokens 报告多次 spike；测试了 \(\beta_2=0.999,0.9,0.85\)，较低值在这些设置中缓解 spike。严格理论是简化目标上的分析，高维非凸结论仍是实验支持 |
+| Spike-aware 优化器 | SPAM 用 Adam 二阶矩构造在线坐标级异常代理，按阈值重缩放梯度；另以固定间隔重置一阶和二阶状态，重置后加入短 warmup | 先验证 spike 是否伴随梯度峰值与动量污染，再评估重置间隔、阈值、warmup、质量和运行成本 | 论文分析用的 GSS 是同一梯度坐标跨训练步的回顾性比值，训练时的 \(g_i^2/v_i\) 是在线代理，二者阈值不能互换；重置会丢弃优化器历史。论文 C4 LLaMA 预训练表报告：60M 的 PPL 为 Adam 34.09、SPAM 30.46；1B 为 16.13 与 14.66。数据量只引用主表会与附录模型配置中的 60M token 计数不一致，故这里不列 token 数。结果绑定论文配方 |
+| GradientStabilizer | 该方法保持梯度方向，利用运行统计稳定梯度幅值；论文报告了 LLM FP16 预训练和 FP4 量化感知训练中的稳定性与学习率范围改善 | 作为更新幅值控制方案，与 clipping、学习率调整和原始优化器做同口径对照 | 稳定幅值无法证明梯度方向正确，也不能代替目标任务质量、吞吐和成本评估 |
+| Global norm clipping（工程基线） | 当整个梯度向量的范数超过阈值时，统一缩小梯度，方向不变 | 先按历史健康 step 的范数分布选择候选阈值，再统计裁剪率、裁剪前后更新量和目标质量 | 全局范数可能掩盖单层或单坐标异常；阈值过低会持续缩小正常更新；裁剪不能清理已经累积进 Adam 矩的历史异常，也不能修复数据或 loss 的错误 |
+
+SPAM 还暴露了阈值方案的典型取舍。论文在 C4 的预训练设置用 \(\Delta T=500\)、重置后 warmup 150 步、在线阈值 \(\theta=5000\)；消融中把重置间隔缩短到 500 步前效果改善，再缩短会退化；阈值太小会把有效梯度也压掉。它说明参数应联合验证，不能把论文里的 500/150/5000 当作通用默认值。
+
+这里还要区分两种 GSS 口径：论文分析时的回顾性指标，是某一坐标当前梯度绝对值除以该坐标跨训练步的历史均值；真实训练不可能预先保留完整历史，于是 SPAM 用 Adam 二阶矩构造在线代理 \(g_i^2/V_i\)，再按 \(\operatorname{sign}(g_i)\sqrt{\theta V_i}\) 限幅。代理用于近似识别，不是原 GSS 的代数等价式；实验阈值只对论文实现的代理有意义。若实现遇到 \(V_i=0\)，该比值未定义，必须由实现明确处理零状态并记录，不能用任意小 epsilon 把它伪造成一个有效 spike 分数。
+
+在自适应预条件器论文的分析中，\(\widehat H_t\) 表示经过 Adam 预条件后的局部曲率矩阵，作者给出可用于预测 spike 的梯度方向曲率量：
+
+~~~math
+\lambda_{\mathrm{grad}}(\widehat H_t)
+=
+\frac{g_t^{\mathsf T}\widehat H_tg_t}{\lVert g_t\rVert_2^2}
+~~~
+
+该量要求 \(g_t\) 有限且 \(\lVert g_t\rVert_2>0\)；零梯度时应记为不可用，而不是加 epsilon 后继续作曲率解释。
+
+在该论文的一维理论中，当这一量持续超过 \(2/\eta\) 时，更新可能进入不稳定区。用一维二次函数看这个边界：\(f(x)=\tfrac12 hx^2\)，梯度下降一步后 \(x_{t+1}=(1-\eta h)x_t\)，所以损失比为 \(f(x_{t+1})/f(x_t)=(1-\eta h)^2\)。若 \(\eta=0.001\)、方向曲率 \(h=2400\)，则 \(\eta h=2.4\)，参数变成 \(-1.4x_t\)，这一步损失约为原来的 \(1.96\) 倍。这个手算只解释阈值直觉；真实 Adam 训练还包含动量、随机 batch 和非凸曲率，不能把该数字当作模型 spike 的预测值。
+
+SPAM 的论文报告在单张 H100 上测量 100 次迭代，LLaMA-60M 平均每步由 Adam 的 0.3666 秒增至 SPAM 的 0.3814 秒，约多 4%；这个测量说明检测与筛选有开销，不能直接外推到其他实现或硬件。对照方案时应逐项改变而非一次性混改：数据重放验证样本假设；单独改 \(\beta_2\) 检验二阶矩响应；clipping、SPAM 和 GradientStabilizer 对照幅值控制；逐层 RMS 若持续随深度偏移，再把 Pre-LN/DeepNorm/Peri-LN 作为下一轮架构实验。所有比较都要固定 checkpoint、batch 顺序、token 预算与评估口径，并记录吞吐和目标能力。
+
+来源：[Adam instability](https://arxiv.org/abs/2304.09871)、[Adaptive Preconditioners Trigger Loss Spikes in Adam](https://arxiv.org/abs/2506.04805v2)、[SPAM](https://arxiv.org/abs/2501.06842v2)、[GradientStabilizer](https://proceedings.mlr.press/v306/huang26bb.html)。
+
 ## 9.5 NaN、Inf 和第一个坏张量
 
 ### 9.5.1 常见原因
@@ -277,7 +309,7 @@ loss scale
 learning rate
 ~~~
 
-torch.autograd.detect_anomaly(check_nan=True) 可以在小规模调试中追踪产生异常梯度的反向节点，但速度开销很大，不应常驻生产训练。clip_grad_norm_ 的 error_if_nonfinite=True 可以把非有限 total norm 直接暴露出来，属于保护和定位手段，不是根因修复。
+PyTorch 的 `torch.autograd.detect_anomaly(check_nan=True)` 会在反向计算生成 NaN 时抛错，并尝试给出对应 forward 操作的 traceback；它会显著拖慢计算，适合缩小后的复现，不应常驻生产训练。`clip_grad_norm_(..., error_if_nonfinite=True)` 能发现全局梯度范数非有限，但不能指出第一个坏张量。前者帮助追踪运算来源，后者提供边界检查，两者都不能替代逐层有限性检查和根因修复。[PyTorch autograd 文档](https://docs.pytorch.org/docs/2.14/autograd.html)；[clip_grad_norm_ 文档](https://docs.pytorch.org/docs/2.14/generated/torch.nn.utils.clip_grad_norm_.html)。
 
 ### 9.5.3 累积窗口中的异常
 
@@ -295,19 +327,18 @@ G_t
 \sqrt{\sum_i\lVert g_{t,i}\rVert_2^2}
 ~~~
 
-给定阈值 c，global norm clipping 为：
+给定阈值 \(c>0\)，且参与统计的梯度都有限时，global norm clipping 为：
 
 ~~~math
 g'_t
 =
-g_t
-\min\left(
-1,
-\frac{c}{G_t+\epsilon}
-\right)
+\begin{cases}
+\frac{c}{G_t}g_t,&G_t>c,\\
+g_t,&G_t\le c
+\end{cases}
 ~~~
 
-它只在 G_t>c 时缩短梯度，不改变梯度方向。clipping 的统计应包括裁剪前范数、裁剪后范数和触发比例。
+它只在 \(G_t>c\) 时缩短梯度，不改变梯度方向；\(G_t=0\) 时直接走原梯度分支，不计算 \(c/G_t\)。clipping 的统计应包括裁剪前范数、裁剪后范数和触发比例。
 
 ### 9.6.2 相对参数更新量
 
@@ -319,7 +350,7 @@ u_t
 \frac{
 \lVert\theta_{t+1}-\theta_t\rVert_2
 }{
-\lVert\theta_t\rVert_2+\epsilon
+\lVert\theta_t\rVert_2
 }
 ~~~
 
@@ -356,6 +387,20 @@ g_{\mathrm{update}}
 
 直接平均每个 micro-batch 的 mean gradient，隐含每个 T_b 相同。debug 要记录 accumulation boundary、每个 T_b、累计梯度和 clipping 时机。
 
+### 9.6.5 深层信号传播也会影响训练稳定性
+
+有些不稳定不是某一步的 batch 或精度故障，而是深层网络中的信号传播从初始化开始就不均衡。此时只在末端调学习率，可能掩盖而非消除问题。至少应对照每层激活 RMS、梯度 RMS、残差流 RMS 和相对参数更新量，并沿深度画出变化，而非只看全局范数。
+
+Pre-LN/Post-LN 的残差计算路径和 DeepNorm 的缩放形式见[第四章的架构说明](04-模型架构与初始化.md)。本节聚焦它们与训练稳定性观测的联系，并补充 Peri-LN 的研究位置。
+
+| 方案 | 试图解决的问题 | 论文证据 | 限制 |
+| --- | --- | --- | --- |
+| Pre-LN | Post-LN 在初始化时靠近输出层的期望参数梯度可能较大；把 LayerNorm 放到子层输入侧，可改善梯度传播并降低对 warmup 的依赖 | Xiong 等用 mean-field 分析并在机器翻译、BERT 设置中验证 | 不保证任意 decoder-only 模型都能移除 warmup；还要看具体深度、初始化、优化器和任务 |
+| DeepNorm / DeepNet | 通过残差分支与初始化的深度相关缩放，控制很深 Transformer 的更新幅值 | DeepNet 报告扩展到 1,000 层，并比较 200 层 3.2B 与 48 层 12B 的多语翻译结果 | 证据来自论文定义的架构、初始化和翻译实验；不能把缩放系数摘出来用于任意现成 checkpoint |
+| Peri-LN | 调整归一化相对注意力和 MLP 子层的位置，以平衡深层网络中的激活与梯度变化 | 论文报告在最高 3.2B 参数的实验中获得更平衡的方差和较稳的梯度 | 与 Pre-LN、DeepNorm 的训练设置并非完全相同；若迁移架构，需重新验证收敛、质量和推理行为 |
+
+这类架构选择通常要在模型初始化和训练 recipe 阶段决定，不能当作训练中途的普通 debug 开关。若已有模型出现随层数单调放大的梯度或激活，先确认记录口径、残差分支和归一化实现，再判断是否需要在下一轮实验中比较架构。来源：[On Layer Normalization in the Transformer Architecture](https://proceedings.mlr.press/v119/xiong20b.html)、[DeepNet](https://arxiv.org/abs/2203.00555)、[Peri-LN](https://proceedings.mlr.press/v267/kim25u.html)。
+
 ## 9.7 数据、token 和 loss mask
 
 ### 9.7.1 常见数据异常
@@ -391,7 +436,7 @@ T_{\mathrm{label}}
 q_{\mathrm{label}}
 =
 \frac{T_{\mathrm{label}}}
-{T_{\mathrm{attn}}+\epsilon}
+{T_{\mathrm{attn}}}
 ~~~
 
 T_label=0 表示没有监督目标，应显式处理；q_label 很低不一定是错误，但需要结合任务和长度分布解释。
@@ -528,6 +573,8 @@ scaler.update()
 
 在 unscale 前 clipping，阈值对应的是 scaled gradient。BF16 通常不需要 FP16 式动态 loss scaling，但仍要检查有限性、累积精度和异常 kernel。
 
+使用 FSDP 时，应调用 FSDP 提供的 `clip_grad_norm_`，让裁剪范数正确计入分片梯度；不要假设对本地参数分片直接求范数就等价于全局范数。[PyTorch FSDP 文档](https://docs.pytorch.org/docs/2.14/fsdp.html)。
+
 ## 9.10 分布式同步错误
 
 ### 9.10.1 控制流与数值差异
@@ -547,6 +594,8 @@ scaler.update()
 - 某个 rank 先出现 NaN。
 
 随机种子不同会导致本地随机路径不同，但不自动等于通信错误；是否要求逐位一致要由训练目标和实现决定。
+
+DDP 的梯度同步依赖各 rank 对 reducer/collective 的协同调用；若各 rank 的参数使用状态或执行顺序不同，可能 hang 或造成同步错误。排查时把每个 rank 的 micro-step、forward/backward 边界、collective 序号和首个异常时间一起记录。[PyTorch DDP 内部机制](https://docs.pytorch.org/docs/2.14/notes/ddp.html)。
 
 ### 9.10.2 逐级缩小
 
@@ -642,9 +691,11 @@ creation step
 
 “目录能打开”是文件可读性证据；“恢复后曲线连续”是行为证据，两者不能混为一谈。
 
+PyTorch Distributed Checkpoint 提供分布式状态保存与加载接口，但“写到临时目录、检查 shard 和 manifest、校验 checksum 后切换版本指针”的原子发布流程属于应用层设计，不能仅凭调用保存 API 就推断已具备事务式提交。[PyTorch Distributed Checkpoint 文档](https://docs.pytorch.org/docs/2.14/distributed.checkpoint.html)。
+
 ## 9.12 最小可运行训练诊断示例
 
-下面的示例只用 Python 标准库。它把 step 日志、batch 元信息、rank loss 和 checkpoint 字段对齐，检测候选 spike、非有限值、梯度异常、坏 batch、rank 差异和恢复缺项。它不模拟真实 autograd 或通信，只展示证据如何落到同一条时间轴上。
+下面的示例只用 Python 标准库。它把 step 日志、batch 元信息、rank loss 和 checkpoint 字段对齐，检测候选 spike、非有限值、梯度异常、候选异常 batch、rank 差异和恢复缺项。它不模拟真实 autograd 或通信，也不把阈值命中直接判成根因；它只展示证据如何落到同一条时间轴上。
 
 ~~~python
 import math
@@ -664,24 +715,29 @@ batches = {
     1: {"id": "batch_001", "max_len": 2048, "valid_ratio": 0.82, "invalid": False},
     2: {"id": "batch_002", "max_len": 2048, "valid_ratio": 0.80, "invalid": False},
     3: {"id": "batch_003", "max_len": 2048, "valid_ratio": 0.79, "invalid": False},
-    4: {"id": "batch_004_bad_mask", "max_len": 8192, "valid_ratio": 0.03, "invalid": False},
+    4: {"id": "batch_004_candidate", "max_len": 8192, "valid_ratio": 0.03, "invalid": False},
     5: {"id": "batch_005", "max_len": 2048, "valid_ratio": 0.78, "invalid": False},
     6: {"id": "batch_006_invalid", "max_len": 2048, "valid_ratio": 0.81, "invalid": True},
 }
 
 rank_losses = {4: [5.8, 5.7, 5.9, 5.8], 6: [2.1, float("nan"), 2.0, 2.1]}
 checkpoint = {
-    "model": True,
-    "optimizer": True,
-    "scheduler": False,
-    "scaler": False,
-    "data_position": False,
+    "step": 3,
+    "fields": {
+        "model": True,
+        "optimizer": True,
+        "scheduler": False,
+        "scaler": False,
+        "rng": False,
+        "data_position": False,
+    },
 }
 
 sequence_limit = 4096
 valid_ratio_min = 0.2
 grad_threshold = 5.0
 spike_ratio = 2.0
+rank_spread_threshold = 0.5
 
 
 def finite(value):
@@ -695,6 +751,12 @@ def finite(value):
 def positive_int(name, value):
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ValueError(f"{name} must be a positive integer")
+    return value
+
+
+def nonnegative_int(name, value):
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{name} must be a nonnegative integer")
     return value
 
 
@@ -718,6 +780,8 @@ def validate_history(records):
             value = record.get(name)
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 raise ValueError(f"{name} must be numeric")
+            if name == "grad_norm" and finite(value) and value < 0.0:
+                raise ValueError("grad_norm must be nonnegative")
         previous_step = step
 
 
@@ -731,34 +795,57 @@ def validate_batch(batch):
 
 
 def validate_rank_losses(losses):
-    if not isinstance(losses, list) or not losses:
-        raise ValueError("rank losses must be nonempty")
+    if not isinstance(losses, list) or len(losses) < 2:
+        raise ValueError("rank losses must include at least two ranks")
     for value in losses:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ValueError("rank losses must be numeric")
 
 
 validate_history(history)
+if not isinstance(batches, dict) or not batches:
+    raise ValueError("batches must be a nonempty mapping")
+for step in batches:
+    positive_int("batch step", step)
+history_steps = {record["step"] for record in history}
+if set(batches) != history_steps:
+    raise ValueError("batch steps must match history steps exactly")
+if not isinstance(rank_losses, dict) or not rank_losses:
+    raise ValueError("rank_losses must be a nonempty mapping")
+for step in rank_losses:
+    positive_int("rank loss step", step)
+    if step not in history_steps:
+        raise ValueError("rank loss step must exist in history")
 for batch in batches.values():
     validate_batch(batch)
 for losses in rank_losses.values():
     validate_rank_losses(losses)
-if not isinstance(checkpoint, dict) or not checkpoint:
-    raise ValueError("checkpoint must be a nonempty mapping")
-if any(not isinstance(present, bool) for present in checkpoint.values()):
-    raise ValueError("checkpoint fields must be booleans")
+if not isinstance(checkpoint, dict) or not isinstance(checkpoint.get("fields"), dict):
+    raise ValueError("checkpoint must include a fields mapping")
+nonnegative_int("checkpoint step", checkpoint.get("step"))
+if checkpoint["step"] > max(history_steps):
+    raise ValueError("checkpoint step must not exceed the latest history step")
+if any(not isinstance(name, str) for name in checkpoint["fields"]):
+    raise ValueError("checkpoint field names must be strings")
+if any(not isinstance(present, bool) for present in checkpoint["fields"].values()):
+    raise ValueError("checkpoint field values must be booleans")
+required_checkpoint_fields = {
+    "model", "optimizer", "scheduler", "scaler", "rng", "data_position"
+}
 sequence_limit = positive_int("sequence_limit", sequence_limit)
 valid_ratio_min = ratio("valid_ratio_min", valid_ratio_min)
 if not finite(grad_threshold) or grad_threshold <= 0.0:
     raise ValueError("grad_threshold must be positive")
 if not finite(spike_ratio) or spike_ratio <= 1.0:
     raise ValueError("spike_ratio must be greater than 1")
+if not finite(rank_spread_threshold) or rank_spread_threshold <= 0.0:
+    raise ValueError("rank_spread_threshold must be positive")
 
 
 spikes = []
 nonfinite = []
 grad_explosions = []
-bad_batches = []
+candidate_batches = []
 rank_mismatches = []
 
 for index, record in enumerate(history):
@@ -791,36 +878,47 @@ for index, record in enumerate(history):
     if batch["invalid"]:
         reasons.append("invalid_value")
     if reasons:
-        bad_batches.append((step, batch["id"], reasons))
+        candidate_batches.append((step, batch["id"], reasons))
 
 for step, losses in rank_losses.items():
     finite_values = [value for value in losses if finite(value)]
     has_nonfinite = len(finite_values) != len(losses)
     spread = max(finite_values) - min(finite_values) if finite_values else float("inf")
-    if has_nonfinite or spread > 0.5:
+    if has_nonfinite or spread > rank_spread_threshold:
         rank_mismatches.append(
             (step, has_nonfinite, round(spread, 3) if finite(spread) else "inf")
         )
 
-missing_checkpoint = [
-    name for name, present in checkpoint.items() if not present
-]
+missing_checkpoint = sorted(
+    required_checkpoint_fields
+    - {name for name, present in checkpoint["fields"].items() if present}
+)
 healthy_steps = [
     item["step"]
     for item in history
     if item["step"] not in nonfinite
     and item["step"] not in [step for step, _ in spikes]
 ]
-rollback_step = max(
-    step for step in healthy_steps
-    if step < min(nonfinite or [10 ** 9])
+last_healthy_step_before_nonfinite = max(
+    (step for step in healthy_steps if step < min(nonfinite or [10 ** 9])),
+    default=None,
+)
+rollback_checkpoint_step = (
+    checkpoint["step"]
+    if not missing_checkpoint
+    and (
+        checkpoint["step"] in healthy_steps
+        or checkpoint["step"] == 0
+    )
+    and checkpoint["step"] <= (last_healthy_step_before_nonfinite or 0)
+    else None
 )
 
 recommendations = []
-if bad_batches:
-    recommendations.append("quarantine_bad_batches")
+if candidate_batches:
+    recommendations.append("inspect_candidate_batches")
 if grad_explosions:
-    recommendations.append("lower_lr_or_enable_clipping")
+    recommendations.append("inspect_update_and_optimizer_state")
 if nonfinite:
     recommendations.append("inspect_dtype_and_loss_scaling")
 if missing_checkpoint:
@@ -832,27 +930,33 @@ diagnostics = {
     "spike_detected": spikes == [(4, 2.66)],
     "nonfinite_detected": nonfinite == [6],
     "grad_explosion_detected": grad_explosions == [(4, 7.5)],
-    "bad_batch_detected": bad_batches[0][1] == "batch_004_bad_mask",
+    "candidate_batches_detected": [step for step, _, _ in candidate_batches] == [4, 6],
     "rank_mismatch_detected": rank_mismatches == [(6, True, 0.1)],
     "checkpoint_gap_detected": missing_checkpoint == [
-        "scheduler", "scaler", "data_position"
+        "data_position", "rng", "scaler", "scheduler"
     ],
-    "rollback_before_nonfinite": rollback_step == 5,
+    "healthy_step_is_not_rollback": (
+        last_healthy_step_before_nonfinite == 5
+        and rollback_checkpoint_step is None
+    ),
 }
 
 print("spikes=", spikes)
 print("nonfinite=", nonfinite)
 print("grad_explosions=", grad_explosions)
-print("bad_batches=", bad_batches)
+print("candidate_batches=", candidate_batches)
 print("rank_mismatches=", rank_mismatches)
 print("missing_checkpoint=", missing_checkpoint)
-print("rollback_step=", rollback_step)
+print("last_healthy_step_before_nonfinite=", last_healthy_step_before_nonfinite)
+print("rollback_checkpoint_step=", rollback_checkpoint_step)
 print("recommendations=", recommendations)
 print("diagnostics=", diagnostics)
 
 assert all(diagnostics.values())
 print("training debug toy: ok")
 ~~~
+
+预期输出包含：step 4 的 loss 比前三个健康 step 的中位数高约 2.66 倍；step 6 出现非有限值；step 4 梯度范数超过示例阈值；step 4 和 step 6 的 batch 都进入候选列表；step 6 rank 间有一个非有限 loss；checkpoint 缺少 scheduler、scaler、RNG 和数据位置。step 5 是异常前最后一个健康训练 step，但示例 checkpoint 不完整，因此 `rollback_checkpoint_step` 为 `None`。这两者不是一个概念：回滚必须指向可完整恢复的 checkpoint，不能仅由健康训练日志推导。
 
 示例的阈值和 batch 都是教学构造。真实项目要把 decode 文本、有效 token、数据来源、dtype、loss scale、rank、collective 位置和 checkpoint id 一并保存；示例只负责展示这些字段如何被组合成候选诊断。
 
@@ -876,30 +980,47 @@ print("training debug toy: ok")
 
 | 资料类型 | 能支持的结论 | 不能自动支持的结论 |
 | --- | --- | --- |
-| PyTorch autograd 文档 | anomaly detection 的调试接口 | 所有 NaN 的根因 |
-| PyTorch clipping 文档 | global norm 与非有限值检查语义 | 通用 clipping threshold |
-| PyTorch AMP 文档 | autocast、unscale、scaler 行为 | 任意模型的数值稳定性 |
-| PyTorch DDP 文档 | 梯度同步与 rank 协作约束 | 目标集群的通信性能 |
-| Distributed Checkpoint 文档 | 分布式保存加载接口 | 恢复后模型质量连续 |
-| 梯度爆炸论文 | 梯度裁剪的机制背景 | 所有 LLM 的固定阈值 |
+| PyTorch 2.14 autograd 文档 | anomaly detection 的调试接口 | 所有 NaN 的根因 |
+| PyTorch 2.14 clipping / FSDP 文档 | 非有限全局范数检查、FSDP 分片梯度裁剪接口 | 通用 clipping threshold 或目标系统性能 |
+| PyTorch 2.14 AMP 文档 | autocast、unscale、scaler 行为 | 任意模型的数值稳定性 |
+| PyTorch 2.14 DDP 文档 | reducer 与 rank 协作约束 | 目标集群的通信性能 |
+| PyTorch 2.14 Distributed Checkpoint 文档 | 分布式保存加载接口 | 应用层原子发布、恢复后模型质量连续 |
+| Adam 稳定性与 spike 论文 | 特定优化器机制假设、实验观测和缓解方案 | 所有模型 spike 的唯一根因 |
+| 归一化与深层 Transformer 论文 | 论文架构和初始化条件下的信号传播证据 | 对现成 checkpoint 的安全热切换 |
 | 混合精度论文 | loss scaling 与 master weight 的方法 | 任意 FP8/FP16 recipe |
 
 推荐阅读：
 
 - PyTorch autograd anomaly detection：
-  https://docs.pytorch.org/docs/stable/autograd.html
+  https://docs.pytorch.org/docs/2.14/autograd.html
 - PyTorch clip_grad_norm_：
-  https://docs.pytorch.org/docs/stable/generated/torch.nn.utils.clip_grad_norm_.html
+  https://docs.pytorch.org/docs/2.14/generated/torch.nn.utils.clip_grad_norm_.html
 - PyTorch automatic mixed precision：
-  https://docs.pytorch.org/docs/stable/amp.html
+  https://docs.pytorch.org/docs/2.14/amp.html
 - PyTorch DistributedDataParallel：
-  https://docs.pytorch.org/docs/stable/notes/ddp.html
+  https://docs.pytorch.org/docs/2.14/notes/ddp.html
+- PyTorch FSDP：
+  https://docs.pytorch.org/docs/2.14/fsdp.html
 - PyTorch Distributed Checkpoint：
-  https://docs.pytorch.org/docs/stable/distributed.checkpoint.html
+  https://docs.pytorch.org/docs/2.14/distributed.checkpoint.html
 - On the difficulty of training Recurrent Neural Networks：
   https://arxiv.org/abs/1211.5063
 - Mixed Precision Training：
   https://arxiv.org/abs/1710.03740
+- A Theory on Adam Instability in Large-Scale Machine Learning：
+  https://arxiv.org/abs/2304.09871
+- Adaptive Preconditioners Trigger Loss Spikes in Adam：
+  https://arxiv.org/abs/2506.04805v2
+- SPAM: Spike-Aware Adam with Momentum Reset for Stable LLM Training：
+  https://arxiv.org/abs/2501.06842v2
+- GradientStabilizer: Fix the Norm, Not the Gradient：
+  https://proceedings.mlr.press/v306/huang26bb.html
+- On Layer Normalization in the Transformer Architecture：
+  https://proceedings.mlr.press/v119/xiong20b.html
+- DeepNet: Scaling Transformers to 1,000 Layers：
+  https://arxiv.org/abs/2203.00555
+- Peri-LN: Revisiting Normalization Layer in Transformer Architecture：
+  https://proceedings.mlr.press/v267/kim25u.html
 
 阈值、warmup 长度、是否跳过异常样本、是否回滚以及恢复后要求逐位一致还是统计一致，都属于目标系统的实验配置。资料可以说明机制和接口，不能替项目做这些选择。
 
@@ -932,6 +1053,18 @@ print("training debug toy: ok")
 ### 练习七：恢复连续性
 
 让 toy optimizer 连续运行 20 step，在第 10 步保存 model、optimizer、scheduler、scaler、RNG 和 data cursor。比较连续运行与恢复运行的第 11 步 loss、学习率、参数和有效 token。
+
+### 练习八：区分两种 Adam loss spike 假设
+
+对照 Molybog 等人的 Adam instability 分析与 Bai 等人的 adaptive-preconditioner decoupling 分析。分别画出你预计会变化的梯度、更新范数、一二阶矩和曲率观测；设计一次固定 checkpoint 重放，指出哪些量需要 Hessian-vector product，哪些量可常规记录，并写出两个研究各自没有证明什么。
+
+### 练习九：比较 spike 缓解方案
+
+为同一个异常前 checkpoint 设计 global norm clipping、降低 \(\beta_2\)、SPAM 和 GradientStabilizer 四组对照。列出每种方案修改的状态或梯度量、额外超参数、可能丢失的信息、运行开销和质量回归指标。解释为什么“loss 恢复”单独不足以选方案。
+
+### 练习十：从层间信号判断是否是架构问题
+
+为 Post-LN、Pre-LN、DeepNorm 和 Peri-LN 画出每层 activation RMS、gradient RMS 与 update/parameter ratio 的采集表。说明哪些比较必须从头初始化训练，哪些曲线现象仍可能由数据或 loss mask 造成，并为下一轮架构实验定义质量、吞吐和稳定性门槛。
 
 ## 9.16 本章小结
 

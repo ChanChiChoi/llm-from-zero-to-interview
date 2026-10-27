@@ -258,6 +258,45 @@ S_{\mathrm{proc},i}
 parser；若来自边界条件，应该改数据和过程监督；若来自算术，可考虑工具或
 verifier，而不是笼统增加训练量。
 
+### 3.8 从静态题集到可控变体：GSM8K、GSM-Symbolic 与 GSM-NoOp
+
+固定题集给出的是某个快照上的答案正确率。它回答“模型在这些题上答对多少”，
+却不能区分模型是学会了题目的关系，还是对固定数字、句式或训练中熟悉的模板
+特别适应。数学评测中的代表性改进，不是简单把题数加大，而是把变化因素单独
+控制住。
+
+| 路线 | 改动了什么 | 能检查什么 | 不能单独证明什么 |
+| --- | --- | --- | --- |
+| GSM8K 固定题集 | 固定应用题、参考答案与评分方式 | 同一快照和提示下的题目级正确率 | 数字变化后是否稳定、题目是否被见过、步骤是否有效 |
+| MATH | 12,500 道竞赛数学题，按七个主题和 1—5 难度标记，提供逐步解答；归一化最终答案后用 exact match | 比 GSM8K 扩展题型与难度，并能按主题/难度切片 | 最终 boxed answer 正确不等于推导每步都有效；题目仍只是竞赛数学分布 |
+| GSM-Symbolic | 用符号模板生成同一关系结构的不同数值实例 | 数字替换后性能分布是否变化，单一固定题集是否掩盖题目方差 | 一次变体失败就证明没有推理能力，或题库一定发生污染 |
+| GSM-NoOp | 在题目中加入看似相关但对运算无关的信息 | 模型是否把无关数值机械套入运算；干扰信息是否改变答案 | 观察到的错误究竟来自何种内部机制 |
+
+[MATH](https://arxiv.org/abs/2103.03874) 以高难度竞赛题扩展了年级应用题的范围，
+每题还提供自然语言与 LaTeX 的逐步解答；其评分会把最终答案归一化后做 exact
+match。这个协议比字符串完全一致宽松，但它仍只验证最终结果。若评估目标是解题
+过程或证明完整性，就要另加关键步骤/claim 检查或形式化 verifier，不能把 MATH
+final-answer accuracy 说成证明正确率。
+
+可以把一题写成模板“`a` 个箱子，每个箱子 `b` 个苹果，另有 `c` 个橘子，问苹果
+总数”。参考关系是 `a × b`。对同一模板生成多组 `a,b,c`，其中只改变 `a,b` 的
+数值属于数值变体；再加一句“橘子有 `c` 个”，但问题仍只问苹果总数，就构成
+NoOp 变体。若模型原题答对、数字替换后失败，先检查数字实例的题目等价性、算术
+范围和题型切片；若只有 NoOp 版本失败，则优先检查无关条件筛选和运算选择。两类
+错误都不能只记成一个“数学能力下降”。
+
+[GSM-Symbolic](https://arxiv.org/abs/2410.05229) 用符号模板比较题目实例，报告
+不同数值实例间存在表现波动；其 GSM-NoOp 实验观察到，加入看似相关但无关的
+信息后，所测模型的表现会下降，论文报告的最大降幅达 65%。这个最大值绑定作者
+测试的模型、提示、题目与解码设置。它支持“结果对特定题面变化敏感”这一行为
+结论，不足以由 benchmark 分数推出模型内部是否进行某种形式的逻辑推理。论文中
+关于模式匹配的解释属于作者提出的假设，应和直接观察到的正确率变化分开。
+
+这种变体评测也会引入新的评测器风险：数字替换后答案可能超出整数范围，新增
+条件可能悄悄改变题目语义，符号模板可能产生自然语言不通顺的样本。因此要保存
+模板版本、生成种子、变量替换、参考解的重算结果和人工抽查；比较时按原题配对
+报告变体差，而不是把两份题目的未配对总分直接相减。
+
 ## 4. Code Eval：让程序在真实约束下执行
 
 ### 4.1 代码任务的成功定义
@@ -367,6 +406,55 @@ test_harness_error
 
 这种分类可以直接映射到生成、测试、沙箱、依赖和题目设计。隐藏测试失败还要
 保存最小失败输入或可脱敏的错误摘要，避免只留一个通过率数字。
+
+### 4.8 代表性代码评测各自测什么
+
+代码 benchmark 不能按名字排成一条“从简单到困难”的单轴。它们改动了任务范围、
+输入新鲜度、测试强度和执行环境，回答的问题也不同。
+
+| 路线 | 一次样本大致经历什么 | 主要贡献 | 典型限制 |
+| --- | --- | --- | --- |
+| HumanEval / MBPP | 根据函数签名、描述或示例生成代码，再运行任务自带测试 | 便于复现函数级代码合成，能用程序行为评分而非文本相似度 | 原始测试有限；通过不等于覆盖了输入域；不代表仓库级修复 |
+| EvalPlus / HumanEval+ | 为函数契约构造有效边界输入，用类型感知变异扩展，再与参考实现差分比较 | 检查原测试遗漏的行为错误，并可能改变模型排名 | 参考实现或输入契约若错会传播为误判；更大测试集仍不是形式证明 |
+| LiveCodeBench | 按发布时间从竞赛平台收集新题，并扩展到代码修复、执行结果预测等任务 | 让题目时间成为评测协议的一部分，也把“生成代码”拆为多个能力 | 题目发布后仍可被后续训练接触；不同快照的题目构成会变 |
+| SWE-bench / Verified | 阅读 issue 和代码仓库，提交 patch，再在容器化环境运行目标测试与回归测试 | 评估 Agent 在仓库上下文中的定位、修改与回归控制 | Issue 可能欠规格，测试可能拒绝合理实现，结果强依赖 Agent harness、预算和镜像 |
+
+[EvalPlus](https://arxiv.org/abs/2305.01210) 把测试不足当成要研究的测量问题：其
+HumanEval+ 用额外生成输入把测试规模扩到原来的 80 倍；论文报告在其模型样本上
+发现此前通过的错误程序，也发现测试不足可能改变模型间排序。其方法可以沿着一
+条具体链理解：先按题目契约准备有效输入，再生成边界 seed，通过类型感知变异扩展
+输入，对候选程序和参考实现做差分执行；若要缩小运行成本，再用覆盖/变异等准则
+压缩测试集。生成器找到了更多输入，不代表这些输入都符合原题契约；参考实现也
+可能有 bug，所以重要失败样本仍需人工检查。80 倍是测试用例数量的变化，不是
+正确性提高 80 倍，也不表示覆盖了全部输入空间。
+
+[LiveCodeBench](https://arxiv.org/abs/2403.07974) 的初版论文快照覆盖 2023 年 5 月
+至 2024 年 5 月发布的 400 道竞赛题，并把自我修复、执行结果预测等作为独立能力
+面向评估。它的优势是可以记录“模型训练截止时间之前/之后出现的题目”；但仅仅
+收录新题不能永久保证无污染，公开题会随着时间进入后续语料。报告必须固定快照、
+题目发布时间、模型训练截止信息和具体任务类型。
+
+SWE-bench Verified 展示了仓库级评分为什么不只是“测试更多”。一个样本从 issue
+文本和指定代码版本开始，模型提交补丁；`FAIL_TO_PASS` 检查目标问题是否被修复，
+`PASS_TO_PASS` 检查原有行为是否回归。两类都通过，才算在该 harness 下成功。
+2024 年的 Verified 版本经人工筛选 500 个样本，93 位有 Python 经验的开发者参与
+审查。随后，OpenAI 在 2026 年 2 月发布的自家审计中表示：在一批常被模型答错的
+样本抽审子集中，测试仍可能拒绝功能上正确的补丁；其污染测试还观察到模型能复现
+原始 gold patch 或题目细节，因此建议前沿模型不再用 Verified 跟踪发布进展，转而
+报告 SWE-bench Pro。[该建议来自 benchmark 使用方之一的官方审计](https://openai.com/index/why-we-no-longer-evaluate-swe-bench-verified/)，
+不是独立社区已经形成的普遍结论；Pro 也不能因此被视为完美或无污染。
+
+### 4.9 按任务选择评测路径
+
+| 想回答的问题 | 合适的主评估 | 还要补什么证据 |
+| --- | --- | --- |
+| 一个小函数是否满足输入输出契约 | HumanEval/MBPP 式函数级测试 | 额外边界输入、契约审查、sandbox 和错误切片 |
+| 函数是否只适配少数公开样例 | EvalPlus 式测试增强/差分执行 | 有效输入审查、参考实现核验、测试覆盖矩阵 |
+| 模型对较新算法题的代码生成是否改善 | 固定日期快照的 LiveCodeBench | 题目时间、模型 cutoff、采样预算与多任务子分 |
+| Agent 能否修改真实仓库且不破坏已有行为 | SWE-bench 类型 issue/patch harness | 固定仓库 commit、镜像、工具、预算、目标测试和回归测试；加入私有业务任务 |
+
+多个 benchmark 可以联合报告，但不能将 HumanEval 的通过率、LiveCodeBench 的
+竞赛题分数和 SWE-bench 的 issue 解决率当成可直接相加的“代码能力总分”。
 
 ## 5. pass@k：多次采样下的成功概率
 
@@ -585,6 +673,39 @@ verifier 结果
 主指标根据业务目标选择；过程和错误指标用于解释，不能把不同分母的结果强行
 压成一个总分。
 
+### 8.4 ORM、PRM 与第一处错误评测的差异
+
+把“过程评估”再拆开，会看到三个不同目标：
+
+| 方法 | 给什么标签/输出 | 实际回答 | 核心代价或风险 |
+| --- | --- | --- | --- |
+| Outcome reward model（ORM） | 一份解答最终对/错或最终状态好/坏 | 这条完整候选最后是否成功 | 错误发生位置不可见；偶然猜中可掩盖错误步骤 |
+| Process reward model（PRM） | 给每个中间推理步骤正确性/分数 | 哪些步骤看起来可继续，用于训练或候选选择 | 步骤边界、替代证明和局部正确性都难标；分数可能在新题型上失准 |
+| 第一处错误定位评测 | 给完整步骤序列，输出最早错误的步骤位置；无错则输出无错误 | verifier 是否能发现错误从哪一步开始 | 标签可能有专家分歧；步骤切分和题目难度会影响结果 |
+
+例如：`2x+1=9`，下一步 `2x=8`，最后写 `x=8/2=3`。Outcome 只报告最终答案
+错误；PRM 可以对三个步骤分别打分；第一错评测则要求指出最后一步是最早的错误。
+这三种标签不能互相替代：最终 0/1 信号适合判断任务是否解决，步骤分适合做
+过程训练或候选排序，第一错位置适合衡量错误定位和可扩展监督能力。
+
+[Let's Verify Step by Step](https://arxiv.org/abs/2305.20050) 比较结果监督与过程监督，
+并发布含 800,000 条步骤级人工反馈标签的 PRM800K；作者报告过程监督在其 MATH
+实验配置下优于结果监督，过程监督模型在一个代表性 MATH 测试子集上解出 78% 的
+问题。该结果说明更密集的步骤反馈在那组训练数据、标注和评估条件下有价值，不能
+推成“任何任务的 PRM 都会优于 ORM”。步骤标注的代价来自标注员必须判断当前推导
+是否成立、是否遗漏条件，以及另一条不同证明是否也合理；仅把参考解逐句切开会
+误把“没有照着参考答案写”当作错误。
+
+[ProcessBench](https://aclanthology.org/2025.acl-long.50/) 把评测目标收窄为第一错
+定位。给定步骤 `s_0,...,s_{L-1}`，标注 `t_i` 是最小的错误步骤索引；若整条过程
+均正确则记 `t_i=-1`。模型预测 `\hat t_i` 后可以报告 exact first-error accuracy，
+也可分开报告“有无错误”判断和错误位置偏差。该基准包含 3,400 个由人类专家标注
+的数学案例；论文报告既有 PRM 在更难数学题上的泛化困难，prompted critic 和作者
+基于 PRM800K 微调的 PRM 在其设置下表现更好。约三成候选样本因标注分歧而被丢弃，
+论文也承认这可能改变难题分布；所以它既是测 verifier 的工具，也是一个需要审查
+标签来源和样本选择的 benchmark。结果不能解释成“critic 普遍胜过 PRM”，更不能
+代替目标系统上的独立校准。
+
 ## 9. Benchmark 设计：让题目测迁移能力
 
 ### 9.1 难度分层
@@ -619,6 +740,23 @@ Reasoning/code/math benchmark 需要检查题面、解析、测试、函数签�
 数学 accuracy 通常以题目为单位；代码 `pass@k` 以题目和候选池为单位；线上
 任务成功可能以用户或会话为单位。多个候选、多个采样和多个用户不能不加说明
 地当成独立样本。置信区间应在实际随机化单位上重采样。
+
+### 9.6 固定回归集与滚动新题并行维护
+
+固定题集提供稳定回归：今天和下个月对同一题目、同一协议运行，比较更容易解释。
+滚动新题提供时间新鲜度：可以减少长时间重复公开同一题带来的暴露，也能反映新的
+题型。但两者有不同分母，不应合并成一个未经解释的总分。可以同时维护：
+
+1. 带不可变版本号的 `frozen_core`，每次发布都跑，用来发现既有回归；
+2. 带题目发布时间和截止日期的 `rolling_fresh`，按周期更新，用来观察近期能力；
+3. 一个与两者隔离的私有 holdout，用于调参结束后的确认性比较。
+
+版本更新时记录新增、删除和改写题目，以及难度、来源和 verifier 变化。若需要跨
+时间比较，先用共同样本或重叠题做校准，再报告新鲜题单独结果；不能直接把两个
+不同快照的总分差解释成模型进步。[LiveCodeBench](https://arxiv.org/abs/2403.07974)
+展示了滚动收题路线，[SWE-bench Verified 后续审计](https://openai.com/index/why-we-no-longer-evaluate-swe-bench-verified/)
+则展示了公开任务在长期使用中可能出现的测试质量和训练暴露问题。具体 contamination
+检测方法见上一章；这里关注的是 benchmark 如何维护生命周期和版本边界。
 
 ## 10. 统一报告和实验协议
 
@@ -714,7 +852,15 @@ judge 认为过程好，但 verifier 失败
 下面的 demo 不调用模型，也不执行外部生成代码。它处理 toy 数学输出、代码
 候选统计和评估元数据，演示答案归一化、greedy 与 self-consistency、entropy、
 过程分、`pass@k`、公开/隐藏测试差距、污染风险以及具体后续动作。示例数据
-故意同时包含一个过程错误、一个弱隐藏测试集和一个污染风险样本。
+故意同时包含一个过程错误、一个隐藏测试覆盖缺口和一个污染风险样本。
+
+`extract_number` 只面向本例的简单数字、分数和百分比，并把输出中的最后一个数字
+当作候选答案；它不支持区间、单位、集合、符号表达式、多个互相矛盾的最终答案或
+复杂 LaTeX。实际评估应要求明确的最终答案字段、按题型选择 parser，并用独立的
+正反例集审计 parser。本 demo 不能作为通用数学评分器。
+
+示例中的 `contamination_risk` 是输入元数据给出的风险标记；没有标记只表示当前
+记录没有已知信号，不等于证明样本从未暴露或训练链路未接触。
 
 ~~~python
 from collections import Counter
@@ -830,6 +976,8 @@ code_tasks = [
         "public_pass": 4,
         "hidden_pass": 3,
         "tests": {"public": 3, "hidden": 8},
+        "required_hidden_slices": ["empty input", "single token", "repeated spaces", "Unicode"],
+        "covered_hidden_slices": ["empty input", "single token", "repeated spaces", "Unicode"],
         "error": "edge_case",
     },
     {
@@ -839,6 +987,8 @@ code_tasks = [
         "public_pass": 3,
         "hidden_pass": 1,
         "tests": {"public": 2, "hidden": 10},
+        "required_hidden_slices": ["duplicate values", "negative values", "no solution", "large input"],
+        "covered_hidden_slices": ["duplicate values", "negative values", "no solution", "large input"],
         "error": "complexity",
     },
     {
@@ -848,6 +998,8 @@ code_tasks = [
         "public_pass": 2,
         "hidden_pass": 0,
         "tests": {"public": 2, "hidden": 6},
+        "required_hidden_slices": ["quoted delimiter", "escaped quote", "empty cell", "multiline cell"],
+        "covered_hidden_slices": ["empty cell"],
         "error": "runtime",
     },
 ]
@@ -856,6 +1008,9 @@ code_reports = []
 for task in code_tasks:
     public_pass_rate = task["public_pass"] / task["n"]
     hidden_pass_rate = task["hidden_pass"] / task["n"]
+    coverage_gaps = sorted(
+        set(task["required_hidden_slices"]) - set(task["covered_hidden_slices"])
+    )
     code_reports.append(
         {
             "id": task["id"],
@@ -865,6 +1020,7 @@ for task in code_tasks:
             "hidden_pass_rate": round(hidden_pass_rate, 3),
             "public_hidden_gap": round(public_pass_rate - hidden_pass_rate, 3),
             "hidden_tests": task["tests"]["hidden"],
+            "hidden_coverage_gaps": coverage_gaps,
             "error": task["error"],
         }
     )
@@ -885,7 +1041,7 @@ contamination_flags = [
 weak_hidden_tests = [
     report["id"]
     for report in code_reports
-    if report["hidden_tests"] < 8
+    if report["hidden_coverage_gaps"]
 ]
 public_hidden_gaps = [
     (report["id"], report["public_hidden_gap"])
@@ -897,22 +1053,29 @@ error_counts = Counter(report["error"] for report in code_reports)
 signals = {
     "answer_accuracy_ok": greedy_accuracy >= 0.60,
     "parse_rate_ok": parse_fail_rate <= 0.05,
-    "self_consistency_not_worse": sc_accuracy >= greedy_accuracy,
     "code_pass1_ok": avg_pass1 >= 0.20,
-    "hidden_tests_sufficient": not weak_hidden_tests,
+    "hidden_coverage_ok": not weak_hidden_tests,
     "process_score_ok": avg_process_score >= 0.70,
-    "contamination_clear": not contamination_flags,
+    "no_contamination_flags": not contamination_flags,
+}
+
+diagnostics = {
+    "self_consistency_accuracy_delta": round(sc_accuracy - greedy_accuracy, 3),
 }
 
 actions = []
+if not signals["answer_accuracy_ok"]:
+    actions.append("inspect_math_accuracy_regressions_by_variant_and_error_type")
+if not signals["parse_rate_ok"]:
+    actions.append("review_final_answer_contract_and_parser_cases")
 if not signals["code_pass1_ok"]:
     actions.append("improve_single_sample_code_reliability")
-if not signals["hidden_tests_sufficient"]:
-    actions.append("expand_weak_hidden_test_slices")
+if not signals["hidden_coverage_ok"]:
+    actions.append("add_tests_for_missing_hidden_behavior_slices")
 if not signals["process_score_ok"]:
     actions.append("review_process_error_annotations")
-if not signals["contamination_clear"]:
-    actions.append("remove_or_rebuild_contaminated_math_items")
+if not signals["no_contamination_flags"]:
+    actions.append("quarantine_and_review_math_contamination_flags")
 
 decision = "revise_eval_before_comparison" if actions else "continue_with_sliced_report"
 summary = {
@@ -930,11 +1093,17 @@ summary = {
         "avg_pass@1": round(avg_pass1, 3),
         "avg_pass@5": round(avg_pass5, 3),
         "weak_hidden_tests": weak_hidden_tests,
+        "hidden_coverage_gaps": {
+            report["id"]: report["hidden_coverage_gaps"]
+            for report in code_reports
+            if report["hidden_coverage_gaps"]
+        },
         "public_hidden_gaps": public_hidden_gaps,
         "error_counts": dict(error_counts),
     },
     "contamination_flags": contamination_flags,
     "signals": signals,
+    "diagnostics": diagnostics,
     "actions": actions,
     "decision": decision,
 }
@@ -942,7 +1111,7 @@ summary = {
 pprint(summary, sort_dicts=False)
 ~~~
 
-实际输出为：
+下面是按源码路径和输入逐项手工核对的预期输出节选；本轮没有执行 demo：
 
 ~~~text
 {'math_summary': {'greedy_accuracy': 0.667,
@@ -951,74 +1120,25 @@ pprint(summary, sort_dicts=False)
                   'avg_answer_entropy': 0.858,
                   'avg_vote_margin': 0.333,
                   'avg_process_score': 0.667},
- 'math_reports': [{'id': 'math_frac',
-                   'greedy_correct': True,
-                   'sc_answer': '2/3',
-                   'sc_correct': True,
-                   'entropy': 0.95,
-                   'vote_margin': 0.4,
-                   'process_score': 0.667,
-                   'parse_failed': False,
-                   'contamination_risk': False},
-                  {'id': 'math_algebra',
-                   'greedy_correct': True,
-                   'sc_answer': '7',
-                   'sc_correct': True,
-                   'entropy': 0.95,
-                   'vote_margin': 0.4,
-                   'process_score': 1.0,
-                   'parse_failed': False,
-                   'contamination_risk': False},
-                  {'id': 'math_distractor',
-                   'greedy_correct': False,
-                   'sc_answer': '20',
-                   'sc_correct': False,
-                   'entropy': 0.673,
-                   'vote_margin': 0.2,
-                   'process_score': 0.333,
-                   'parse_failed': False,
-                   'contamination_risk': True}],
- 'code_reports': [{'id': 'reverse_words',
-                   'pass@1': 0.3,
-                   'pass@5': 0.917,
-                   'public_pass_rate': 0.4,
-                   'hidden_pass_rate': 0.3,
-                   'public_hidden_gap': 0.1,
-                   'hidden_tests': 8,
-                   'error': 'edge_case'},
-                  {'id': 'two_sum',
-                   'pass@1': 0.1,
-                   'pass@5': 0.5,
-                   'public_pass_rate': 0.3,
-                   'hidden_pass_rate': 0.1,
-                   'public_hidden_gap': 0.2,
-                   'hidden_tests': 10,
-                   'error': 'complexity'},
-                  {'id': 'parse_table',
-                   'pass@1': 0.0,
-                   'pass@5': 0.0,
-                   'public_pass_rate': 0.2,
-                   'hidden_pass_rate': 0.0,
-                   'public_hidden_gap': 0.2,
-                   'hidden_tests': 6,
-                   'error': 'runtime'}],
  'code_summary': {'avg_pass@1': 0.133,
                   'avg_pass@5': 0.472,
                   'weak_hidden_tests': ['parse_table'],
+                  'hidden_coverage_gaps': {'parse_table': ['escaped quote',
+                                                           'multiline cell',
+                                                           'quoted delimiter']},
                   'public_hidden_gaps': [('two_sum', 0.2), ('parse_table', 0.2)],
                   'error_counts': {'edge_case': 1, 'complexity': 1, 'runtime': 1}},
- 'contamination_flags': ['math_distractor'],
  'signals': {'answer_accuracy_ok': True,
              'parse_rate_ok': True,
-             'self_consistency_not_worse': True,
              'code_pass1_ok': False,
-             'hidden_tests_sufficient': False,
+             'hidden_coverage_ok': False,
              'process_score_ok': False,
-             'contamination_clear': False},
+             'no_contamination_flags': False},
+ 'diagnostics': {'self_consistency_accuracy_delta': 0.0},
  'actions': ['improve_single_sample_code_reliability',
-             'expand_weak_hidden_test_slices',
+             'add_tests_for_missing_hidden_behavior_slices',
              'review_process_error_annotations',
-             'remove_or_rebuild_contaminated_math_items'],
+             'quarantine_and_review_math_contamination_flags'],
  'decision': 'revise_eval_before_comparison'}
 ~~~
 
@@ -1029,8 +1149,11 @@ pprint(summary, sort_dicts=False)
 
 这个 demo 的重点不是阈值本身，而是读者能看到不同证据如何互相补充：数学总体
 准确率为 0.667，但过程平均分只有 0.667；代码 `pass@5` 高于 `pass@1`，却存在
-公开/隐藏测试缺口；self-consistency 没有改善答案；同时有污染风险题。系统因此
-输出具体动作，而不是把一组互不相同的测量压成一个总分。
+公开/隐藏测试差距和具体的隐藏覆盖缺口；self-consistency 与 greedy 的准确率差为
+0，但它只是诊断项，还要结合额外采样成本判断是否值得；同时有污染风险题。评估
+门禁只由明确的通过条件触发，并为每个失败项给出下一步动作，而不是把不同测量压
+成一个总分。示例阈值是教学输入，不是发布标准；隐藏测试条数只作描述，不参与
+覆盖门禁。
 
 ## 13. 真实项目的评估闭环
 
@@ -1110,6 +1233,19 @@ token、verifier 成本和成功任务成本。
 相似题、异常高分和扰动下降都只是风险证据。需要结合来源、时间、行为和人工
 复核，才能决定样本是否移出最终报告。
 
+### 14.8 把测试条数当成测试覆盖
+
+隐藏测试有 100 条，仍可能都落在同一条常见输入路径；只有 6 条，也可能覆盖了
+关键边界和异常。因此先从任务契约写出必需行为切片，再记录每条测试命中什么、
+哪些错误仍可能通过。测试数量、输入覆盖、分支/变异覆盖和有效判定器是不同信息。
+自动生成的测试还要检查输入是否有效、参考实现是否可信。
+
+### 14.9 把不同 benchmark 分数当成同一量尺
+
+函数合成、竞赛题、数学过程纠错和仓库补丁有不同样本单位、资源预算、判分器和
+失败代价。即使都显示为百分比，也不代表可以直接比较。先说明任务构念和评估协议，
+再比较同一任务、同一快照或经过校准的变化。
+
 ## 15. 练习：从一个分数追到证据
 
 ### 练习一：数学答案归一化
@@ -1137,6 +1273,18 @@ verifier 搜索成本和真实产品是否允许十次尝试。
 设计一个保持难度的数学或代码题变体，写出原题、变体、能力契约、等价性检查、
 污染风险和统计报告方式。
 
+### 练习六：比较代表性数学评测
+
+用同一题型分别设计固定题、数值变体和包含无关条件的变体。写出每个版本的参考
+关系、预期行为、配对统计单位和可能的评测器错误；再解释 GSM-Symbolic 的观察能
+支持什么、不能据此断言什么。
+
+### 练习七：从函数测试走到仓库补丁
+
+比较 HumanEval+、LiveCodeBench 和 SWE-bench Verified 各自修改的评测环节。针对一
+个代码助手任务选择主评测，明确测试、版本、预算和运行环境；说明如果单元测试
+拒绝功能正确实现，或公开任务进入训练语料，应如何发现并更新评测。
+
 ## 16. 资料与证据边界
 
 论文和 benchmark 只在其公布的任务、数据、模型和 harness 条件下支持结论。
@@ -1150,6 +1298,11 @@ HumanEval 的代码通过率不能自动代表大型仓库修复能力，GSM8K �
 5. [APPS](https://arxiv.org/abs/2105.09938)：更开放的代码生成任务与测试评估。
 6. [Let's Verify Step by Step](https://arxiv.org/abs/2305.20050)：过程监督和结果验证的研究背景。
 7. [RULER](https://arxiv.org/abs/2404.06654)：长上下文合成任务和能力退化评估。
+8. [GSM-Symbolic](https://arxiv.org/abs/2410.05229)：符号模板变体与无关信息扰动；结论应绑定论文模型和输入设置。
+9. [ProcessBench](https://aclanthology.org/2025.acl-long.50/)：标注最早错误步骤的数学过程评测；不是最终答案能力的替代指标。
+10. [EvalPlus / HumanEval+](https://papers.neurips.cc/paper_files/paper/2023/hash/43e9d647ccd3e4b7b5baab53f0368686-Abstract-Conference.html)：通过 LLM seed、类型变异和差分执行增强函数级测试。
+11. [LiveCodeBench](https://arxiv.org/abs/2403.07974)：按时间收集竞赛题并覆盖代码生成、修复和执行结果预测。
+12. [SWE-bench Verified 初始设计](https://openai.com/index/introducing-swe-bench-verified/) 与 [2026 后续审计](https://openai.com/index/why-we-no-longer-evaluate-swe-bench-verified/)：对照 issue/patch + fail-to-pass/pass-to-pass 评分与 benchmark 后续失效风险；后者是 OpenAI 官方自身审计。
 
 使用这些资料时，要分开记录论文方法、数据集版本、运行 harness、解码预算、
 测试强度、污染检查和项目实测。资料能说明评估设计的由来，不能替当前系统
