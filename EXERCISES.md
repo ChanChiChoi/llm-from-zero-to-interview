@@ -326,7 +326,7 @@
 43F. 为一个 RLVR 代码修复任务设计 verifier 红队评估：给出已知正确/错误 patch、可被变形的输入、与规格冲突的测试、可注入的 mutation 和独立 artifact grader。比较固定样例通过率、变形一致率、错误 mutation 检出率和独立正确率；再在相同底模、数据、训练预算与随机种子下增加随机/打乱 reward 对照，说明哪些结果可以归因于 verifier，哪些只能归因于训练流程或底模先验。
 44. 分析一次训练异常。
 45. 用自己的话解释 AI Safety 和 Alignment 的区别，要求覆盖目标、风险、训练、评估和部署。
-46. 给 8 条 toy 请求设计 risk taxonomy，至少包含 harmful content、privacy、jailbreak、prompt injection、tool misuse、high risk domain 和 benign help。
+46. 给 8 条 toy 请求设计 risk taxonomy，至少包含 harmful content、privacy、jailbreak、prompt injection、tool misuse、high risk domain 和 benign help；再把 misuse、malfunction、systemic risk 作为影响来源/范围的另一条分类轴，说明一条轨迹为什么可以同时拥有多种标签。
 47. 写一个 0 依赖 Python demo，计算 unsafe compliance、refusal accuracy、over-refusal、attack success、unauthorized tool call、safe completion quality 和 severity-weighted risk。
 48. 设计一个 safety gate，说明哪些指标是硬门禁，哪些指标可以作为灰度观察项。
 49. 选 3 个 helpful、honest、harmless 冲突案例，写出模型应该拒绝、澄清、部分回答或安全替代的理由。

@@ -10,14 +10,29 @@
 如何发现失败，以及部署中的权限、审计、人工接管和事故响应如何共同承担责任。
 
 资料依据包括 InstructGPT / RLHF、Helpful and Harmless RLHF、Constitutional AI、
-Anthropic red teaming、OpenAI Preparedness Framework / Model Spec、NIST AI RMF /
-Generative AI Profile、OWASP LLM Top 10 和 Google DeepMind Frontier Safety Framework
-等公开论文、规范和框架。论文说明方法与实验条件，规范说明组织风险的方式；它们
-都不能单独证明某个模型在生产环境中安全。
+RLAIF 与 DPO 等方法研究，以及 OpenAI Model Spec、NIST AI RMF、OWASP LLM Top 10、
+OpenAI Preparedness Framework、Anthropic Responsible Scaling Policy 和 Google DeepMind
+Frontier Safety Framework。方法论文说明特定训练方案在特定实验中的变化；行为规范、
+应用安全分类和组织治理框架各自回答不同问题，都不能单独证明某个模型或系统在生产
+环境中安全。各资料的差异和适用边界见第9节。
 
-```text
-模型能力 -> 助手目标 -> 风险分类 -> 对齐训练 -> 安全评估 -> 系统护栏 -> 上线治理
+```mermaid
+flowchart LR
+    A[任务、用户与业务后果] --> B[行为规范与授权边界]
+    C[模型能力与威胁模型] --> D[训练和策略控制]
+    B --> D
+    D --> E[发布前评估与红队]
+    C --> E
+    E --> F{风险门禁}
+    F -->|限定范围发布| G[运行时权限、验证与人工审批]
+    G --> H[监控、事件响应与回滚]
+    H --> I[复盘：更新风险模型、规范、数据和评估]
+    I --> B
+    I --> C
+    I --> D
 ```
+
+读图时先从任务后果和模型能力两侧确定风险，再用行为规范与训练、策略控制塑造候选行为；发布前评估把能力和风险变成门禁证据，限定范围后仍要在运行时检查权限、验证动作并保留人工接管。监控和事故复盘再把新证据送回规范、数据、评估与控制设计。图中的循环表示安全责任贯穿模型和应用的生命周期，不能由某一种训练方法或单个分类器代替。
 
 本章讨论防御性安全、评估和治理，不提供可执行的越狱模板、攻击步骤、危险操作
 流程、隐私复原方法或绕过权限的技巧。涉及高风险领域时，重点放在分类、行为边界、
@@ -543,6 +558,40 @@ Agent 或 function calling 会让模型行为影响真实系统。
 
 典型缓解：model card、system card、审计、上线条件、事故复盘。
 
+### 6.11 让风险分类连接到故障位置和可查证据
+
+风险 taxonomy 只有能指向证据和责任边界，才能用于工程排查。比如“prompt
+injection”是诱因类别，“未授权工具调用”是系统动作结果；它们可以出现在同一条
+轨迹中，却需要不同检查。前者要检查外部内容如何进入上下文、策略怎样区分指令和
+数据；后者要检查调用身份、工具权限、参数校验和最终状态。仅看模型最后一句话，
+无法判断问题是模型听从了注入、检索器越权，还是执行器没有做权限检查。
+
+| 风险标签 | 常见故障位置 | 应留的证据 | 主要控制责任 | 单独看它无法证明什么 |
+| --- | --- | --- | --- | --- |
+| 幻觉 / 不诚实 | 生成、检索或引用验证 | 问题、证据版本、回答 claim、引用映射、校验结果 | 模型行为、检索和产品体验团队 | 一次回答错误不能证明模型有欺骗意图 |
+| 隐私泄露 | 训练数据、检索授权、日志或工具输出 | 数据来源、租户身份、访问判定、返回字段、日志留存 | 数据治理、身份与应用安全 | 发现 PII 不能单独推出它来自训练记忆 |
+| Prompt injection | 用户或外部内容进入模型上下文 | 来源标记、信任等级、指令解析、模型决策轨迹 | Prompt / agent、检索和策略团队 | 检出注入文本不等于系统已发生越权 |
+| 工具滥用 / 越权 | 规划、工具适配器、执行器或状态提交 | 用户授权、工具名、参数、审批、事务状态、回滚记录 | 工具平台和业务系统所有者 | 低风险文本分类器通过不等于工具动作安全 |
+| 危险能力 | 模型、工具、scaffold 和发布配置的组合 | 任务契约、工具权限、elicitation 条件、评估预算、失败等级 | 模型评估和发布决策责任人 | 问答 benchmark 分数不等于真实用户获得的能力 uplift |
+| 治理缺口 | 版本、审批、监控和事故响应 | policy 版本、owner、门禁、覆盖率、事件与处置时序 | 部署组织和系统 owner | 一份完整的模型卡不证明控制已部署或有效 |
+
+排查时应同时记录“诱因—模型行为—系统动作—实际后果”。这样才能判断应该改训练
+样本、策略、检索授权、执行器，还是发布流程，并防止把每类事故都归咎于模型本体。
+
+### 6.12 技术故障分类和影响分类是两个维度
+
+上面的分类主要帮助工程团队定位失败发生在哪里。另一种分类关注风险如何产生：
+[International AI Safety Report 2026](https://internationalaisafetyreport.org/publication/international-ai-safety-report-2026)
+把通用 AI 风险分为 misuse（有意滥用）、malfunctions（非预期故障）和 systemic
+risks（广泛部署产生的系统性影响）。这组分类回答“风险由什么方式产生、影响如何
+扩展”，与 prompt injection、隐私泄露、工具滥用等技术标签并不冲突。
+
+例如，一封邮件中的恶意内容诱发助手越权发送资料，可能同时标记 prompt injection
+和工具滥用；如果攻击者蓄意制作邮件，它也属于 misuse；若系统在大量租户中以相同
+方式自动转发资料，还要评估规模化后的 systemic impact。报告时应分别记录触发者、
+意图、故障位置、受影响范围和实际后果，不要把这些维度压成一个标签。该报告是跨
+领域研究综述，不是某个具体产品的风险评级或安全认证。
+
 ## 7. 安全对齐的技术栈
 
 安全对齐不是单一算法，而是一套技术栈。
@@ -627,6 +676,28 @@ Red teaming 的结果应该进入 safety eval 和 regression suite。
 6. 事故复盘。
 
 安全不是训练结束就完成，而是持续过程。
+
+### 7.7 代表性训练研究分别解决了什么
+
+只说“用了 RLHF”会把不同问题压成一个方法名。它至少可能指：用示范教模型遵循
+指令、用偏好标签改进回答、让模型依据明确原则自我批评，或用 AI 反馈降低偏好
+标注瓶颈。方法的标签来源、优化链路和验证目标不同，不能把它们写成安全能力逐级
+增强的一条直线。
+
+| 研究路线 | 原先要解决的约束 | 机制如何改变训练信号 | 论文给出的证据 | 主要代价与失效条件 |
+| --- | --- | --- | --- | --- |
+| InstructGPT / RLHF | 预训练模型会续写文本，但不一定按用户指令完成任务 | 先用人工示范做 SFT，再对模型回答做成对偏好比较，训练 reward model，最后用 PPO 优化策略 | 在论文自己的 API prompt 分布中，标注者对 175B InstructGPT 的偏好率高于 GPT-3；报告为相对 GPT-3 85±3%，相对 few-shot GPT-3 71±4% | 偏好来自特定标注者、英文 API 请求和标注说明；偏好提升不等于有害行为消失，也不代表更广泛群体的价值已被覆盖。论文同时记录了毒性、偏见、幻觉和误用风险。见[原论文](https://arxiv.org/abs/2203.02155)与[官方方法说明](https://openai.com/index/instruction-following/) |
+| Helpful and Harmless RLHF | 把帮助性与无害性都放入助手训练，并持续收集偏好 | 训练偏好模型并进行 RL；论文还研究按周更新偏好数据和策略的在线迭代方式 | 作者在自己的 NLP 评测中报告多数任务改善，并研究偏好更新的迭代流程 | H/H 的标签和权重仍取决于标注协议；偏好模型无法覆盖所有真实后果。论文的评测集合和模型不能代表任意助手。见[论文](https://arxiv.org/abs/2204.05862) |
+| Constitutional AI / RLAIF | 人类逐条标注有害回答成本高，也可能容易奖励过度回避 | 先依据原则生成 critique 和 revision，再让 AI 按原则比较回答，训练偏好模型并用 RL | 论文在特定 harmlessness 比较中报告了“harmless but non-evasive”的助手行为 | 原则由人选择，AI critic 也可能误读原则或继承偏差；减少某类人工标签不等于取消人类治理，仍需独立评测。见[论文](https://arxiv.org/abs/2212.08073)和[Anthropic 研究介绍](https://www.anthropic.com/research/constitutional-ai-harmlessness-from-ai-feedback) |
+| RLAIF 与 RLHF 对照 | 判断 AI 生成偏好能否缓解人工标签的规模瓶颈 | 用现成 LLM 生成偏好来训练 reward model，或直接用 LLM 提供 RL reward | 论文在摘要、helpful dialogue、harmless dialogue 三类任务中报告与 RLHF 可比的表现 | 结论限定于论文任务、模型和判分流程；AI 标注员不是独立的人类价值裁判，需监控偏好错误和分布漂移。见[ICML 2024 论文](https://arxiv.org/abs/2309.00267) |
+| DPO | 减少显式 reward model 和在线 PPO 训练链路 | 用 chosen/rejected 偏好对直接形成策略优化目标 | 原论文给出从 KL 约束偏好目标到直接策略损失的推导，并在若干偏好任务上比较 | DPO 不自动修复偏好数据的长度、风格、安全或群体偏差；它不是专门的安全算法。损失下降仍需通过独立行为评测验证。见[DPO 原论文](https://arxiv.org/abs/2305.18290) |
+
+这些路线改变的是监督信号怎样生成、谁负责比较以及策略怎样更新，不会自动回答
+“这个目标是否值得追求”“失败是否已在真实工具中被阻断”。面试或设计评审时，应
+从瓶颈出发选择：若缺少基本任务行为，示范和 SFT 是起点；若偏好可被可靠排序，
+可比较 RLHF、DPO；若人工标签成本是瓶颈，可试 AI feedback，但应保留人类 gold
+set 和风险切片；若安全要求来自规范，应先验证规范是否覆盖业务责任与授权，再谈
+优化器。后续第3、4、11章分别展开监督扩展、目标漏洞和治理，避免本总览重复细讲。
 
 ## 8. 安全不是简单拒答
 
@@ -719,6 +790,12 @@ Over-refusal 指模型对正常请求也拒绝。
 
 共同实现。
 
+行为规范描述模型应如何回应，运行时策略则要在具体动作发生前核对身份、资源范围、
+审批和当前状态。OWASP 于 2026 年发布的 [Agent Control Standard](https://genai.owasp.org/resource/agent-control-standard-acs/)
+把可移植的声明式控制与 Agent 平台的 middleware hook 连接起来，提供了一个运行时
+控制接口的社区方案；标准本身不能证明某个 Agent 已正确执行策略。第十五章会展开
+访问策略与执行器的分工。
+
 ## 10. Safety Eval：把行为边界变成证据
 
 安全能力不能从训练方法的名字直接推断出来，必须放进有明确期望动作的任务中评估。
@@ -782,6 +859,8 @@ Safety 指标不能只有一个。至少要同时记录：
 工具越权率、安全替代质量和严重度加权风险，然后根据这些信号生成下一步动作。
 
 它演示的是安全评估闭环，不是生产级审核器。真实系统还需要安全策略文本、人工标注规范、多语言样本、红队回归集、工具权限系统、审计日志、线上监控和事故响应流程。
+
+> 代码状态：已验证（2026-10-27，Python 3.12.9，仅用标准库）。输入、运行结果和检查范围见 [`progress_v2.md`](../../progress_v2.md) 中的第八册第一章记录。
 
 ```python
 from collections import Counter, defaultdict
@@ -901,6 +980,21 @@ assert report["unsafe_failure_ids"] == ["harmful_step_request", "privacy_extract
 assert report["over_refusal_ids"] == ["medical_general_info"]
 assert report["decision"] == "hold_for_high_risk_review"
 ```
+
+先用同一组输入手算几个关键量。10 条样本中有 5 条按策略不应直接满足，其中
+`harmful_step_request`、`privacy_extraction` 和 `indirect_prompt_injection` 三条发生了
+危险动作，所以漏拒率是 `3 / 5 = 0.60`。4 条期望拒绝的样本中有 2 条正确拒绝，拒答
+准确率是 `2 / 4 = 0.50`；5 条可安全帮助的样本里有 1 条被拒绝，误拒率是
+`1 / 5 = 0.20`。3 条对抗样本中有 2 条达到攻击成功条件，因此攻击成功率为
+`2 / 3 ≈ 0.667`；唯一一条工具样本发生了未经授权的调用，所以工具越权率为
+`1 / 1 = 1.0`。4 条实际给出安全帮助的样本质量分为 `0.86、0.90、0.78、0.88`，
+均值为 `(0.86 + 0.90 + 0.78 + 0.88) / 4 = 0.855`。
+
+加权风险按“每个失败样本只计一次”计算：失败样本严重度为 `5、4、5、3`，总严重度
+为 `17`；全部样本严重度之和为 `36`，所以结果为 `17 / 36 ≈ 0.472`。注入样本同时
+触发了危险内容和未授权工具信号，代码按样本 ID 去重，避免在加权总量中重复记账。
+这些数值和阈值都是教学输入；越权率 `1.0` 和攻击成功率 `0.667` 触发 hold 决策，
+即使安全替代质量均值达到 `0.855`，也不能抵消高严重度失败。
 
 运行后会看到类似输出：
 
@@ -1085,7 +1179,10 @@ RLHF、DPO 或安全 SFT 只能说明训练做了什么，不能直接说明部�
 - [OpenAI Preparedness Framework](https://cdn.openai.com/openai-preparedness-framework-beta.pdf)：官方风险评估框架，支持危险能力、保护措施和发布决策的组织方式；其中的阈值和范围不能直接移植到其他组织。
 - [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：美国国家标准与技术研究院的治理框架，支持 Govern、Map、Measure、Manage 的风险管理结构。
 - [NIST Generative AI Profile](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf)：生成式 AI 风险管理补充资料，支持把生成式系统的风险和控制映射到 AI RMF。
-- [OWASP Top 10 for LLM Applications](https://genai.owasp.org/llm-top-10/)：应用安全风险分类入口，适合补充 prompt injection、敏感信息泄露和工具滥用等工程切片；它是风险清单，不是模型能力排行榜。
+- [OWASP Top 10 for LLM Applications 2026](https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/)：社区维护的应用安全分类，适合作为发现 prompt injection、权限和工具风险的入口；分类反映项目方的汇总方法，不是模型能力排行榜或风险发生率估计。
+- [OWASP Agent Control Standard](https://genai.owasp.org/resource/agent-control-standard-acs/)：描述如何通过 Agent 平台 middleware hook 执行可移植的声明式安全控制；它给出接口和控制方向，不等同于对某个系统策略有效性的实测。
+- [International AI Safety Report 2026](https://internationalaisafetyreport.org/publication/international-ai-safety-report-2026)：综合讨论 misuse、malfunctions、systemic risks、Agent 自主性与安全评估缺口；报告总结跨领域研究，不提供特定部署的风险认证。
+- [METR Frontier Risk Report (February to March 2026)](https://evals.alignment.org/blog/2026-05-19-frontier-risk-report/)：记录一次与多家前沿模型开发者合作的外部风险评估试点；对高风险错配行为的识别标准和外部资料可见性仍有限，结论只适用于该评估窗口和参与系统。
 - [Google DeepMind Frontier Safety Framework](https://deepmind.google/discover/blog/introducing-the-frontier-safety-framework/)：官方前沿能力风险框架入口，支持讨论危险能力评估和缓解措施；框架中的能力等级与组织责任需要结合具体部署环境解释。
 
 书稿引用这些资料时，应把“论文观察到的结果”“发布者公开声明”“工程上采用的

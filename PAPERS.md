@@ -445,8 +445,15 @@ Red Teaming、Mechanistic Interpretability、SAE、Model Editing、Unlearning、
 15. [Evaluating Frontier Models for Dangerous Capabilities](https://deepmind.google/research/publications/78150/) 与 [OpenAI 生物风险 uplift 评估](https://openai.com/index/building-an-early-warning-system-for-llm-aided-biological-threat-creation/)：一个展示分领域能力评测，一个比较人类在有/无模型辅助时的表现；均应按发布方实验边界解读。
 16. [NIST Generative AI Profile](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf)、[OpenAI Preparedness Framework 更新](https://openai.com/index/updating-our-preparedness-framework/) 与 [OWASP GenAI Security Project](https://owasp.org/projects/top-10-for-large-language-applications)：分别作为风险生命周期、发布方能力/防护治理和应用层威胁分类的流程入口，不是模型安全认证。
 17. [Indirect Prompt Injections: Are We on the Brink of a New AI Security Threat?](https://arxiv.org/abs/2510.05244)：讨论间接注入评测集、攻击强度和指标问题的预印本；作者分析不应当作领域共识。
+18. [International AI Safety Report 2026](https://internationalaisafetyreport.org/publication/international-ai-safety-report-2026)：综合整理 misuse、malfunctions、systemic risks、Agent 自主性与评估缺口；适合建立风险地图，不对具体产品提供安全认证。
+19. [OWASP Top 10 for LLM Applications 2026](https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/) 与 [Agent Control Standard](https://genai.owasp.org/resource/agent-control-standard-acs/)：分别作为应用风险分类和 Agent 运行时 middleware / 声明式控制入口；属于社区安全指导与接口方案，不是控制效果的独立实测。
+20. [METR Frontier Risk Report (February to March 2026)](https://evals.alignment.org/blog/2026-05-19-frontier-risk-report/)：记录一次与多家前沿模型开发者合作的外部风险评估试点；结论绑定该窗口、参与系统和资料访问条件。
+21. [AgentCanary](https://arxiv.org/abs/2606.10484)：以可执行环境中的完整 Agent 轨迹为评测对象，并分开报告 outcome safety、security awareness 与 task utility；按预印本和其模型/框架配置解读。
+22. [Assessing Confidence in Frontier AI Safety Cases](https://arxiv.org/abs/2502.05791)：以 cyber misuse 的 inability argument 讨论 safety case 及信心量化；方法案例有限，不能视为已验证的通用风险认证流程。
 
 本章正文及本轮旧知识承接、方案比较、公式和 demo 复核见[研究记录](research/safety-robustness-evaluation-depth-review-2026-10-27.md)；[第七册第八章](book-07-evaluation-experiments/chapters/08-safety与robustness-eval.md)中的数据和数值均保留对应研究范围。
+
+第八册新方向与书册分工的初步来源评估见[第八册架构扫描记录](research/book-08-ai-safety-alignment-architecture-scan-2026-10-27.md)。
 
 ### 后训练评估与公开基准
 

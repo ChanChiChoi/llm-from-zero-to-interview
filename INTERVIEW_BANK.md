@@ -1481,6 +1481,10 @@
     考察点：结构化真值、语境、校准、状态断言、成本和版本。
     回答框架：规则适合已知标记与格式初筛，分类器适合固定切片的批量回归，LLM rubric judge 适合开放文本评分，人工/领域专家裁决边界和高影响案例，确定性 oracle 检查权限与状态。每种 judge 都要用独立人工标签切片校准 precision/recall、分歧和版本；工具副作用不能只靠文本 judge 判断。
 
+27. 技术故障风险分类与 misuse、malfunction、systemic risk 有什么区别？
+    考察点：风险触发方式、故障位置、受影响范围、多标签记录。
+    回答框架：prompt injection、隐私泄露和工具滥用帮助定位技术故障；misuse、malfunction、systemic risk 分别描述有意滥用、非预期故障和广泛部署后的系统性影响。一次 Agent 事故可同时属于多个维度，报告应保留触发者、意图、故障位置、影响范围和后果。该分类不直接给出某个产品的风险概率或安全认证。
+
 本节新增方法比较依据：[Safety 与 Robustness Eval 研究记录](research/safety-robustness-evaluation-depth-review-2026-10-27.md)。
 
 ## 部署

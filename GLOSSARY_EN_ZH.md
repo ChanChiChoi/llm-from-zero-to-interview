@@ -2789,6 +2789,12 @@ Release Gate：发布门禁
 
 Risk Taxonomy：风险分类体系
 
+Misuse Risk：有意滥用风险；按行为者蓄意利用 AI 系统造成伤害的方式分类。
+
+Malfunction Risk：非预期故障风险；按模型或系统非预期行为、可靠性失效所造成的伤害分类。
+
+Systemic Risk：系统性风险；由 AI 的广泛部署、相互作用或累积影响产生的风险类别，边界依赖具体评估框架。
+
 Unsafe Compliance Rate：不安全服从率 / 漏拒率
 
 Refusal Accuracy：拒答准确率
