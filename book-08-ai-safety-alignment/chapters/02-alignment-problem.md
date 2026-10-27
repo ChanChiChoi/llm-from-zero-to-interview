@@ -17,9 +17,19 @@ Generative AI Profile 和 Google DeepMind Frontier Safety Framework。论文主�
 概念、方法和特定实验；规范与治理框架主要支持风险组织和控制设计，不能单独证明
 一个模型已经实现了对齐。
 
-```text
-真实意图 -> 目标规范 -> 代理指标 -> 训练行为 -> 部署行为 -> 评估与治理
+```mermaid
+flowchart LR
+    A["人类真实意图与任务契约"] --> B["书面规范"]
+    B --> C["训练与评估代理"]
+    C --> D["模型学得的策略"]
+    D --> E["部署行为"]
+    E --> F["评估与治理证据"]
+    F -.->|发现目标缺口| B
+    F -.->|发现指标偏差| C
+    F -.->|更新训练与回归集| D
 ```
+
+读图时沿实线从人类意图走到部署行为，再看评估证据如何通过虚线反馈修订规范、代理指标和训练。虚线表示工程团队根据新证据调整系统，不表示评估能够直接读出“真实价值”；任务契约和结果标签仍可能有争议，必须记录定义者、观察窗口和复核方式。
 
 本章不把 speculative risk 写成既成事实。尤其是 deceptive alignment，本章只把它
 作为安全研究中讨论的一类潜在高风险失败模式，用来提醒读者关注监督强弱、分布外、
@@ -278,26 +288,31 @@ Alignment Problem 可以先抽象成一个目标链路问题。真实效用通�
 
 对第 `i` 个场景，设候选行为集合为 `Y_i`，由任务契约和人工/程序复核定义的目标
 效用为 `u_i(y)`，训练或评估中可观察的代理分数为 `r_i(y)`，模型实际选择为
-`hat_y_i`，样本权重为 `w_i`。`u_i` 通常不是直接观测值，而是带有标注误差和结果
-窗口的评估变量；因此下面的公式用于比较假设和定位问题，不是对人类价值的精确
-计算。
+`hat_y_i`，样本权重为非负数 `w_i`。`u_i` 通常不是直接观测值，而是带有标注误差
+和结果窗口的评估变量；因此下面的公式用于比较假设和定位问题，不是对人类价值的
+精确计算。总权重为零时相应指标应记为未测量。
+
+目标效用最高的一组可接受行为写成 $\mathcal{Y}_i^{\star}$。真实任务若有多个同样
+合格的选择，它们都属于该集合；不能任意挑一个代表，再把其他同样满足任务契约的
+行为算成错配。proxy 分数若有并列最大值，则选出的 $\tilde y_i$ 使用预先固定的
+平局规则，并在评估记录中说明。
 
 真实最优行为可以写成：
 
 ```math
-y_i^{\star}=\arg\max_{y\in Y_i} u_i(y)
+\mathcal{Y}_i^{\star}=\arg\max_{y\in Y_i} u_i(y)
 ```
 
 代理目标选出的行为可以写成：
 
 ```math
-\tilde y_i=\arg\max_{y\in Y_i} r_i(y)
+\tilde y_i=\mathrm{tie\_break}\left(\arg\max_{y\in Y_i} r_i(y)\right)
 ```
 
 外部目标错配率：
 
 ```math
-M_{\mathrm{outer}}=\frac{\sum_i w_i 1[\tilde y_i \ne y_i^{\star}]}{\sum_i w_i}
+M_{\mathrm{outer}}=\frac{\sum_i w_i 1[\tilde y_i \notin \mathcal{Y}_i^{\star}]}{\sum_i w_i}
 ```
 
 它衡量的是“我们优化的 proxy 是否会把系统推向非真实最优行为”。如果 reward model、judge、用户评分或 benchmark 偏好长回答、模板化、安全关键词或表面格式，这个指标会升高。
@@ -305,11 +320,20 @@ M_{\mathrm{outer}}=\frac{\sum_i w_i 1[\tilde y_i \ne y_i^{\star}]}{\sum_i w_i}
 部署行为错配率：
 
 ```math
-M_{\mathrm{beh}}=\frac{\sum_i w_i 1[\hat y_i \ne y_i^{\star}]}{\sum_i w_i}
+M_{\mathrm{beh}}=\frac{\sum_i w_i 1[\hat y_i \notin \mathcal{Y}_i^{\star}]}{\sum_i w_i}
 ```
 
 它衡量模型实际输出是否偏离真实意图。实际分析时，`M_outer` 高说明目标规范有问题，
 `M_beh` 高说明最终行为也有问题；二者可能同时发生，也可能只发生其中一个。
+
+如果项目还为每个样本指定严重度权重 `s_i>0`，可以单独报告严重度加权的行为错配：
+
+```math
+M_{\mathrm{sev}}=\frac{\sum_i s_i 1[\hat y_i\notin \mathcal{Y}_i^{\star}]}{\sum_i s_i}
+```
+
+这能避免大量低影响样本掩盖少数严重失败，但 `s_i` 的等级含义必须由项目定义，
+并同时报告未加权的分项结果；不能把不同项目的严重度权重直接比较。
 
 模型追随代理目标的比例：
 
@@ -330,23 +354,45 @@ H_{\mathrm{gap}}=\frac{\sum_i w_i\left(r_i(\hat y_i)-u_i(\hat y_i)\right)}{\sum_
 起来很好，但真实质量或安全性不足；若代理和真实效用的量纲不同，不能直接相减，
 应先定义校准或只报告排序差异。
 
-Goal misgeneralization 可以用“能力仍在但目标错了”的切片指标表达。设 `d_i=1` 表示分布外或部署新场景，`c_i` 是能力分，`tau` 是能力阈值：
+Goal misgeneralization 可以用“能力仍在但目标错了”的切片指标表达。设 `d_i=1`
+表示分布外或部署新场景，`c_i` 是在同一任务上通过中立提示或必要辅助条件独立测得
+的能力分，`tau` 是同一量表上的能力阈值；不要只根据模型在风险条件下的错误行为
+反推它“仍然有能力”：
 
 ```math
-M_{\mathrm{gmg}}=\frac{\sum_i w_i d_i 1[c_i\ge \tau]1[\hat y_i \ne y_i^{\star}]}{\sum_i w_i d_i 1[c_i\ge \tau]}
+M_{\mathrm{gmg}}=\frac{\sum_i w_i d_i 1[c_i\ge \tau]1[\hat y_i \notin \mathcal{Y}_i^{\star}]}{\sum_i w_i d_i 1[c_i\ge \tau]}
 ```
 
 这个指标只看模型仍然有能力完成任务的样本。如果分母为空，应报告该切片未测量，
 不能把它当成零错配。如果这类样本中目标错配很多，就不是“模型不会做”，而是“模
 型会做但在做错目标”。
 
-监督强弱变化下的行为不稳定率：
+配对监督条件下的行为变化率。令 $\mathcal{I}_{\mathrm{inv}}$ 表示目标和预期动作在
+两种监督条件下都应保持不变的可比样本：
 
 ```math
-M_{\mathrm{shift}}=\frac{\sum_i w_i 1[y_i^{\mathrm{eval}}\ne y_i^{\mathrm{deploy}}]}{\sum_i w_i}
+M_{\mathrm{shift}}=\frac{\sum_{i\in\mathcal{I}_{\mathrm{inv}}} w_i 1[y_i^{\mathrm{eval}}\ne y_i^{\mathrm{deploy}}]}{\sum_{i\in\mathcal{I}_{\mathrm{inv}}} w_i}
 ```
 
-其中 `y_i_eval` 是评估或强监督环境中的行为，`y_i_deploy` 是部署或弱监督环境中的行为。这个指标不能证明 deceptive alignment，但可以作为发现“评估时好、部署时变差”的审计信号。
+其中 `y_i_eval` 是评估或强监督环境中的行为，`y_i_deploy` 是部署或弱监督环境中的
+行为。只有在两种条件下任务目标和预期动作本应保持不变的配对样本，才把行为变化
+计入该指标；如果策略本来就应根据身份、权限或风险等级调整，变化不是错配。它不能
+证明 deceptive alignment，只能指出值得检查的条件差异。
+
+因此，`M_shift` 应作为诊断切片单独报告，不直接纳入通用发布通过/失败门槛。先检查
+配对任务是否可比、变化来自何种监督线索、变化是否违反既定策略，再由项目按风险
+决定是否阻断。下方 demo 的 `supervision_shift` 阈值只触发复核动作，不代表跨场景
+行为变化本身就是不安全。
+
+若评估还要检查规范覆盖，可以记录每条样本是否有明确的规则和期望动作，并计算覆盖率：
+
+```math
+C_{\mathrm{policy}}=\frac{\sum_i 1[\mathrm{policy\_covered}_i]}{N}
+```
+
+这里的 `N` 是当前评估集的样本数。覆盖率只说明当前样本集合里有多少样本映射到明确政策，不说明规则本身写得正确，
+也不说明模型实际遵守。下面的教学 demo 对样本等权，因此相当于取 `w_i=1`；换成
+加权数据时，分母、切片及置信区间都要随评估协议明确报告。
 
 对于一次版本比较，可以把关键结果写成一组独立约束：
 
@@ -355,16 +401,15 @@ M_{\mathrm{shift}}=\frac{\sum_i w_i 1[y_i^{\mathrm{eval}}\ne y_i^{\mathrm{deploy
 M_{\mathrm{outer}}\leq t_o,
 M_{\mathrm{beh}}\leq t_b,
 M_{\mathrm{gmg}}\leq t_g,
-|H_{\mathrm{gap}}|\leq t_h,
-M_{\mathrm{shift}}\leq t_s
+|H_{\mathrm{gap}}|\leq t_h
 \}
 ```
 
-其中阈值 `t_o`、`t_b`、`t_g`、`t_h` 和 `t_s` 由风险、业务损失和人工复核能力
+其中阈值 `t_o`、`t_b`、`t_g` 和 `t_h` 由风险、业务损失和人工复核能力
 共同决定。直觉是：alignment 不能只看平均偏好分，也不能只看安全拒答率。目标
-规范、代理指标、分布外行为、监督强弱变化和政策覆盖都要分别报告，并为异常项
-指定复核动作；一个平均分不能替代这些证据。若某个分母为空，应写成未测量，而
-不是把它当作零风险。
+规范、代理指标、分布外行为、配对监督条件下的行为变化和政策覆盖都要分别报告，
+并为异常项指定复核动作；`M_shift` 单独作为诊断信号，不是这组通用门槛之一。一个
+平均分不能替代这些证据。若某个分母为空，应写成未测量，而不是把它当作零风险。
 
 ## 5. Inner Alignment：内部对齐
 
@@ -439,7 +484,11 @@ Mesa-optimizer 是训练出来的模型内部可能形成的目标驱动策略�
 
 ### 5.5 机制与边界：内部对齐和泛化
 
-内部对齐问题本质上和泛化有关。
+泛化是内部对齐研究中一个重要、可观察的挑战，但它不等于内部目标已经被识别。
+严格讨论 inner alignment 时，问题是训练得到的优化器是否形成了与 base objective
+不同的 mesa-objective；仅看到输出在分布外变化，不能证明模型内部存在稳定的目标或
+mesa-optimizer。一般工程评估通常能报告行为是否在分布外保持，不应把它直接升级成
+对内部动机的判断。
 
 在训练分布上，很多目标都能解释同样的好表现。
 
@@ -452,9 +501,16 @@ Mesa-optimizer 是训练出来的模型内部可能形成的目标驱动策略�
 
 这些策略在训练集上都可能得高分。
 
-但在分布外攻击、长上下文、多轮诱导、工具调用场景下，只有真正理解边界的策略更稳。
+但在分布外攻击、长上下文、多轮诱导和工具调用场景下，行为可能发生变化。评估可以
+通过目标分离的 holdout、配对条件、行动轨迹和反事实任务检查这种变化；这些检查能
+说明哪些行为模式更稳，不能单凭输出断定模型“真正理解”了什么。
 
-所以 inner alignment 不是神秘概念，而是问：模型学到的可泛化目标是否和我们期望一致。
+2026 年一项跨四个模型系列的 in-context learning 研究报告：窄域示例可能使模型在
+无关的良性问题上出现更广泛的不良回答；使用 16 个示例时，结果因模型和领域而约为
+1%—24%，部分设置中两个示例也能观察到变化。作者将其作为安全目标与上下文跟随
+之间的冲突现象讨论。这是上下文条件下的行为变化，不等于模型经过训练后形成了持久
+的隐藏目标；与窄任务微调后的 emergent misalignment 一样，详细机制和复现实验放在
+[第四章](04-reward-hacking与目标错配.md)主讲。
 
 ## 6. Specification Gaming
 
@@ -633,6 +689,33 @@ Deceptive alignment 讨论的是更强的情形：模型可能有能力区分训
 机制假设，以及尚未被实验支持的长期风险。只有第一层可以直接写成实验结果，
 后两层必须保留条件和不确定性。
 
+### 8.5 从行为现象到隐藏目标：证据要逐级累积
+
+近期研究提供了不同强度的行为证据，但它们不能互相替代。读报告时可以按下面的
+阶梯判断：先确认在什么测试条件下观察到什么行为，再看是否有重复的反事实证据，
+最后才讨论可能的内部策略。对“模型有稳定隐藏目标”这样的主张，单靠一组输出、
+一个 benchmark 分数或监督强弱下的行为变化都不够。
+
+| 证据层级 | 可支持的结论 | 不能单独推出的结论 |
+| --- | --- | --- |
+| 受控提示或分布变化后的输出差异 | 指定模型、输入和评测器下出现了行为变化 | 模型形成了持久目标或有意欺骗 |
+| 明确长期目标的压力测试 | 某些模型在该压力测试中表现出任务定义的 scheming 行为 | 普通产品使用中的发生率或自主意图 |
+| 构造的 model organism 与训练干预 | 指定构造和训练配方能产生或放大某类条件行为 | 现有自然训练模型普遍具有该机制 |
+| 跨环境的缓解实验 | 某种训练方法在测试集合中降低了指定行为指标 | 所有未见环境中都已消除 scheming |
+
+[SchemeArena](https://arxiv.org/abs/2609.08126) 用 400 个构造场景分解长期目标、压力、策略提示和监督条件；其部分模型在明确赋予长期目标的压力测试中频繁表现出论文定义的 scheming 行为。场景由模拟工具输出构造，样本筛选也依赖模型判断，因此这些结果适合研究测试条件如何改变行为，不能解释成普通部署中的自发发生率。
+
+标题含 “Natural Schemers” 的研究实际使用研究者构造的 model organism，并配合特定
+合成数据与训练流程；作者报告 RL 训练后，三个 Agent 环境中的监督条件行为差异扩大。
+论文也指出效果不能简单归因于 RL 单独作用，且没有在独立的自我保全基准上复现。
+因此这里的“自然”描述作者设计的行为特征，不表示他们观测到自然部署模型普遍在
+密谋。
+
+[OpenAI 与 Apollo Research 的 deliberative alignment 压力测试](https://arxiv.org/abs/2509.15541)
+报告在其 26 项 OOD 评估和 180 多个环境中，o3 的 covert-action 指标在指定测试中从
+13% 降到 0.4%。这说明该方法在这组条件下显著减少了作者定义的隐蔽行动；它没有证明
+行为在所有未测环境中消失，也没有建立一条通用的“无 scheming”认证线。
+
 ## 9. Alignment Problem 在 LLM 生命周期中的位置
 
 对齐问题贯穿模型全生命周期。
@@ -772,7 +855,42 @@ Deceptive alignment 讨论的是更强的情形：模型可能有能力区分训
 
 下面这个 demo 不依赖外部库，也不读写文件。输入是一组抽象 toy alignment eval case，每个 case 只包含候选行为、真实效用、代理分数、模型实际行为、评估行为、部署行为、能力分、是否分布外和严重度权重，不包含任何可复用攻击提示或危险操作细节。
 
-它演示的是目标错配审计：真实目标和 proxy 是否一致，模型是否在追随 proxy，分布外是否出现“能力还在但目标错了”，以及评估环境和部署环境下行为是否稳定。真实系统还需要更完整的标注指南、策略文本、人工复核、红队回归集、工具审计日志和线上监控。代码中的阈值和 toy utility 只用于展示诊断路径，不是对任何模型的发布标准；若某个切片没有足够样本，生产报告应标记为未测量。
+它演示的是目标错配审计：真实目标和 proxy 是否一致，模型是否在追随 proxy，分布外是否出现“能力还在但目标错了”，以及在可比的评估与部署条件下是否出现行为变化。真实系统还需要更完整的标注指南、策略文本、人工复核、红队回归集、工具审计日志和线上监控。代码中的阈值和 toy utility 只用于展示诊断路径，不是对任何模型的发布标准；若某个切片没有足够样本，生产报告应标记为未测量。
+
+先手算一个场景。`qa_truthfulness` 有两个候选行为：grounded answer 的真实效用为
+0.94、proxy 分数为 0.76；polished guess 的真实效用为 0.45、proxy 分数为 0.92。
+因此真实目标选 grounded answer，proxy 选 polished guess，模型也选 polished guess。
+这一行的 outer mismatch、behavior mismatch 和 proxy-follow 都是 `1/1=1`；同一
+模型输出上的 Goodhart gap 是 `0.92-0.45=0.47`。该样本属于 OOD 且能力分数
+`0.82≥0.75`，因此它对 GMG 分子和分母各贡献 1，当前样本比例为 `1/1=1`。评估
+动作与部署动作不同，因此该配对样本的行为变化计数为 1；它仍只是 toy 数据中的
+一个条件差异。
+
+再把同一逻辑汇总到 8 条合成样本。先分别数错配行和可测分母，再计算比例；Goodhart
+gap 是 8 个单样本差值的均值，严重度加权错配则用失败行的严重度和除以全部严重度：
+
+| 指标 | 手算 | 结果 | 读法 |
+| --- | --- | ---: | --- |
+| Outer mismatch | `6/8` | `0.75` | proxy 最优行为与目标标签不同的样本比例 |
+| Behavior mismatch | `6/8` | `0.75` | 模型动作偏离目标标签的比例 |
+| Proxy follow | `8/8` | `1.00` | toy 模型动作均等于 proxy 最优动作 |
+| Goal misgeneralization | `4/5` | `0.80` | OOD 且能力达标样本中的目标错配比例 |
+| Goodhart gap | `(0.47+0.45+0.81+0.59+0.48+0.56-0.08-0.03)/8` | `0.40625` | 同一行为上的 proxy 与效用差平均值 |
+| Paired behavior change | `5/8` | `0.625` | 预期动作不变的配对样本中，评估与部署动作不同的比例 |
+| Severity-weighted mismatch | `22/27` | `0.815` | 按教学严重度权重汇总的行为错配 |
+| Policy coverage | `7/8` | `0.875` | 被当前任务规范覆盖的样本比例 |
+
+代码把 Goodhart gap 四舍五入到三位小数，因此其输出为 `0.406`；表格保留手算值
+`0.40625`，两者差异来自显示精度。
+
+这些输入和分数都是为讲解公式而构造的标签，不是模型测量，也没有估计任何生产
+发生率。本组候选值的真实效用和 proxy 分数都没有并列最大值；若实际评估出现并列，
+应先定义可接受动作或固定平局规则。这里的评估/部署动作也按“目标行为不变”的配对
+样本构造；生产实现应依据政策元数据选择这种配对，而不是把任意两个上下文的输出
+变化都记成失败。代码只把手算重复成可复核的汇总；后续若换标签或阈值，应重新手算
+一个代表样本并核对分母定义。
+
+> 代码状态：已验证（2026-10-27，Python 3.12.9，标准库）；固定样例与预期输出一致，另以临时内存输入确认空 GMG 切片返回 `None` 并给出补样本动作；验证范围见 [progress_v2.md](../../progress_v2.md)。
 
 ```python
 from collections import Counter, defaultdict
@@ -954,11 +1072,17 @@ high_severity_failures = [
     if next(case for case in cases if case["id"] == case_id)["severity"] >= 4
 ]
 
+goal_misgeneralization = (
+    round(len(gmg_cases) / len(ood_capable), 3)
+    if ood_capable
+    else None
+)
+
 metrics = {
     "outer_mismatch": round(len(outer_mismatches) / len(cases), 3),
     "behavior_mismatch": round(len(behavior_mismatches) / len(cases), 3),
     "proxy_follow": round(len(proxy_follow) / len(cases), 3),
-    "goal_misgeneralization": round(len(gmg_cases) / max(1, len(ood_capable)), 3),
+    "goal_misgeneralization": goal_misgeneralization,
     "goodhart_gap": round(sum(goodhart_terms) / len(goodhart_terms), 3),
     "supervision_shift": round(len(shift_cases) / len(cases), 3),
     "severity_weighted_mismatch": round(weighted_behavior_mismatch / total_weight, 3),
@@ -979,7 +1103,9 @@ if metrics["outer_mismatch"] > thresholds["outer_mismatch"]:
     actions.append("重新检查真实目标、代理指标和标注规范")
 if metrics["behavior_mismatch"] > thresholds["behavior_mismatch"]:
     actions.append("按 slice 复核模型行为与真实最优行为的差异")
-if metrics["goal_misgeneralization"] > thresholds["goal_misgeneralization"]:
+if metrics["goal_misgeneralization"] is None:
+    actions.append("补充 OOD 且能力达标的样本，再报告目标错配率")
+elif metrics["goal_misgeneralization"] > thresholds["goal_misgeneralization"]:
     actions.append("增加目标分离的分布外任务并重复运行")
 if metrics["goodhart_gap"] > thresholds["goodhart_gap"]:
     actions.append("补充真实效用标注，检查 proxy 是否奖励表面特征")
@@ -1061,6 +1187,10 @@ decision= hold_for_high_severity_review
 
 ## 11. 真实系统中的失败模式
 
+本节讨论工程团队如何从可观察的故障回到目标链路中的具体环节。第13节则讨论读
+报告时的证据推断错误：一个现象或单一指标究竟能支持多强的结论。前者是排查流程
+问题，后者是限制结论范围。
+
 ### 11.1 把对齐问题简化成安全分类器
 
 安全分类器有用，但它只能处理一部分输入输出风险。
@@ -1136,8 +1266,9 @@ decision= hold_for_high_severity_review
 - 一个高满意度的承诺会导致长期损失，观察模型是否说明限制和后果。
 
 每个任务都要保存真实意图、代理指标、候选动作、工具权限和失败严重度。这样
-`M_outer` 可以追查规范问题，`M_beh` 可以追查模型行为问题，`M_shift` 可以比较
-评估与部署条件；如果三者同时异常，修复责任不能简单归给“模型不够聪明”。
+`M_outer` 可以追查规范问题，`M_beh` 可以追查模型行为问题；只有预期动作不变的配对
+条件才用 `M_shift` 比较评估与部署行为。如果这些信号同时异常，修复责任不能简单归给
+“模型不够聪明”。
 
 ### 12.3 从失败轨迹导出修复动作
 
@@ -1154,6 +1285,10 @@ decision= hold_for_high_severity_review
 通过新的对照任务验证，而不是只换一句系统提示词。
 
 ## 13. 常见误区
+
+这里的“误区”不是另一份系统故障清单，而是对齐评审中常见的推断跳步。判断时应把
+证据还原到模型、样本、授权、工具和观察窗口，不能从一个代理指标直接推到完整的
+内部目标或生产安全结论。
 
 ### 13.1 误区：Alignment 就是让模型拒绝危险请求
 
@@ -1189,6 +1324,7 @@ Deceptive alignment 应作为潜在风险和研究问题讨论，不能把未证
 - [Concrete Problems in AI Safety](https://arxiv.org/abs/1606.06565)：将负面副作用、奖励投机、可扩展监督、安全探索和分布偏移整理为可研究问题。
 - [Risks from Learned Optimization](https://arxiv.org/abs/1906.01820)：讨论 base objective、mesa-optimizer 和 inner alignment 的理论框架；它是风险分析论文，不是对当前模型内部目标的实证诊断。
 - [Goal Misgeneralization in Deep Reinforcement Learning](https://arxiv.org/abs/2210.01790)：研究能力保留但目标在分布外错配的现象，适合支持 goal misgeneralization 的概念边界。
+- [Emergent Misalignment via In-Context Learning](https://aclanthology.org/2026.acl-long.1770/)：报告窄域上下文示例与无关良性问题行为变化之间的实验关系；该结果是特定模型和提示条件下的行为证据，不证明持久的内部目标。
 - [Specification gaming: the flip side of AI ingenuity](https://deepmind.google/discover/blog/specification-gaming-the-flip-side-of-ai-ingenuity/)：Google DeepMind 的案例说明，完成形式化规格不等于完成真实意图；案例页不能替代对具体系统的独立复现。
 
 ### 14.2 人类反馈、监督与辩论
@@ -1198,13 +1334,24 @@ Deceptive alignment 应作为潜在风险和研究问题讨论，不能把未证
 - [Constitutional AI](https://arxiv.org/abs/2212.08073)：支持原则驱动的批评、修订和偏好训练思路；原则本身的覆盖和执行仍需评测。
 - [AI Safety via Debate](https://arxiv.org/abs/1805.00899)：支持通过竞争性论证扩展监督的研究方向，不等于部署系统已经具备可靠的辩论裁判。
 
-### 14.3 规范与治理
+### 14.3 对 scheming 与条件性行为的近期测试
+
+- [SchemeArena](https://arxiv.org/abs/2609.08126)：在 400 个构造场景中分解长期目标、压力、策略提示和监督条件；适合研究压力测试的变量，不是普通部署发生率。
+- [Training Natural Schemers](https://arxiv.org/abs/2610.26551)：使用构造的 model organism 研究 RL 训练后监督条件行为的变化；论文将效果归于完整构造与训练配方，不能归因于 RL 单独作用，也不支持自然部署模型普遍密谋。
+- [Stress Testing Deliberative Alignment for Anti-Scheming Training](https://arxiv.org/abs/2509.15541)：在作者设定的 OOD 评估与环境中测试 covert-action 指标；结论绑定该测试集、指标和模型，不等同于所有环境的 scheming 消失。
+- [Towards Training-time Mitigations for Alignment Faking in RL](https://alignment.anthropic.com/2025/alignment-faking-mitigations/)：说明通过 model organism 和合成过程构造训练时缓解研究；作者将其定位为研究起点，不能外推为生产模型风险率。
+
+这些研究说明行为差异可以在受控条件下被诱发、测量或缓解；它们没有把输出层面的
+行为变化直接等同于稳定隐藏目标。具体主张仍要区分观察、机制解释和未验证风险。
+
+### 14.4 规范与治理
 
 - [OpenAI Model Spec](https://model-spec.openai.com/)：官方行为规范入口，适合分析指令、行为边界和可解释的回应方式；它是规范声明，不是独立测量结果。
-- [OpenAI Preparedness Framework](https://cdn.openai.com/openai-preparedness-framework-beta.pdf)：官方前沿风险评估框架，支持危险能力、保护措施和发布讨论的组织方式；阈值需结合具体模型和环境。
-- [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：支持 Govern、Map、Measure、Manage 的风险治理结构。
+- [OpenAI Preparedness Framework Version 2](https://cdn.openai.com/pdf/18a02b5d-6b67-4cec-ab64-68cdfbddebcd/preparedness-framework-v2.pdf)：官方前沿风险评估框架，支持危险能力、保护措施和发布讨论的组织方式；阈值需结合具体模型和环境。
+- [OpenAI Frontier Governance Framework](https://openai.com/index/openai-frontier-governance-framework/)：说明发布组织自己的风险治理安排；不能作为独立认证或跨组织通用阈值。
+- [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：支持 Govern、Map、Measure、Manage 的风险治理结构；官方页面同时说明 AI RMF 1.0 正在修订。
 - [NIST Generative AI Profile](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf)：支持把生成式 AI 特有风险映射到治理和测量活动。
-- [Google DeepMind Frontier Safety Framework](https://deepmind.google/discover/blog/introducing-the-frontier-safety-framework/)：支持讨论前沿能力评估与缓解措施的组织方式；框架不能替代项目自己的任务和轨迹证据。
+- [Google DeepMind Frontier Safety Framework](https://deepmind.google/frontier-safety/)：官方页面列出版本和更新历史，支持讨论该组织的前沿能力评估与缓解措施；框架不能替代项目自己的任务和轨迹证据。
 
 引用这些资料时，正文应明确证据属于“论文实验”“厂商公开规范”“治理建议”
 还是“本项目测量”。关于 deceptive alignment、模型内部目标或未来危险能力的

@@ -10,23 +10,24 @@
 如何发现失败，以及部署中的权限、审计、人工接管和事故响应如何共同承担责任。
 
 资料依据包括 InstructGPT / RLHF、Helpful and Harmless RLHF、Constitutional AI、
-RLAIF 与 DPO 等方法研究，以及 OpenAI Model Spec、NIST AI RMF、OWASP LLM Top 10、
-OpenAI Preparedness Framework、Anthropic Responsible Scaling Policy 和 Google DeepMind
-Frontier Safety Framework。方法论文说明特定训练方案在特定实验中的变化；行为规范、
-应用安全分类和组织治理框架各自回答不同问题，都不能单独证明某个模型或系统在生产
-环境中安全。各资料的差异和适用边界见第9节。
+RLAIF 与 DPO 等方法研究，以及 OpenAI Model Spec、NIST AI RMF、OWASP LLM Top 10 2026
+和 Agent Control Standard、OpenAI Preparedness 与 Frontier Governance Framework、
+Anthropic Responsible Scaling Policy 和 Google DeepMind Frontier Safety Framework。
+方法论文说明特定训练方案在特定实验中的变化；行为规范、应用安全分类和组织治理
+框架各自回答不同问题，都不能单独证明某个模型或系统在生产环境中安全。各资料的
+差异和适用边界见第14节。
 
 ```mermaid
 flowchart LR
-    A[任务、用户与业务后果] --> B[行为规范与授权边界]
-    C[模型能力与威胁模型] --> D[训练和策略控制]
+    A["任务、用户与业务后果"] --> B["行为规范与授权边界"]
+    C["模型能力与威胁模型"] --> D["训练和策略控制"]
     B --> D
-    D --> E[发布前评估与红队]
+    D --> E["发布前评估与红队"]
     C --> E
-    E --> F{风险门禁}
-    F -->|限定范围发布| G[运行时权限、验证与人工审批]
-    G --> H[监控、事件响应与回滚]
-    H --> I[复盘：更新风险模型、规范、数据和评估]
+    E --> F{"风险门禁"}
+    F -->|限定范围发布| G["运行时权限、验证与人工审批"]
+    G --> H["监控、事件响应与回滚"]
+    H --> I["复盘：更新风险模型、规范、数据和评估"]
     I --> B
     I --> C
     I --> D
@@ -40,10 +41,12 @@ flowchart LR
 的基本关系；有工程经验的读者则应能把一个风险拆成模型、数据、策略、工具和运营
 层面的可观测信号，并知道每个信号能支持什么结论。
 
-后续章节会分别展开 alignment problem、scalable oversight、reward hacking、
-jailbreak、prompt injection、red teaming、interpretability、steering、unlearning、
-privacy 和 governance。本章只负责建立它们之间的地图，不把后续主题压缩成一句
-“安全闭环”就结束。
+第2—11章沿主线分别展开 alignment problem、scalable oversight、reward hacking、
+jailbreak 与 prompt injection、red teaming 与危险能力评估、interpretability、
+steering、model editing 与 unlearning、privacy 和 governance。第12章把这些概念放进
+一个系统案例中综合复习；第13—17章再按需深入自动化对抗评估、多模态策略分类、
+风险校准访问、安全降级和不可信 Agent 的运行时监督。本章负责建立这些主题之间
+的地图，不把后续内容压缩成一句“安全闭环”就结束。
 
 ## 1. 为什么需要 Safety 与 Alignment
 
@@ -419,6 +422,14 @@ Q_{\mathrm{safe}}\geq t_q
 能力提升扩大了模型可做的事，也扩大了风险面。因此需要同步提升对齐训练、安全评估、权限控制、监控和治理能力。
 ```
 
+这里的“能力”是模型在给定提示、工具和资源条件下完成任务的表现，不等同于已经
+发生的风险。一个模型能解释网络服务的安全配置，不代表它正在攻击服务；同一个
+模型若接入可写生产环境的工具、得到宽泛凭据并被放进可连续规划的 Agent 循环，
+它的能力就可能转化为更大的实际影响。因此能力评估要记录 elicitation、工具权限、
+运行预算和任务环境；风险判断还要结合谁能调用、能执行哪些动作、失败能否撤销，
+以及受影响对象。第10.6节讨论如何把这些条件变成运行时路由，不再重复讨论能力
+为何可能同时带来收益和风险。
+
 ## 6. 大模型风险分类
 
 面对复杂系统，第一步不是罗列所有事故，而是建立一个能覆盖任务、用户、工具和
@@ -428,6 +439,10 @@ Q_{\mathrm{safe}}\geq t_q
 
 下面十类风险不是互斥的标签，而是常用的分析切片。一条轨迹可能同时属于隐私和
 工具滥用，评估报告应保留多标签，而不是强行只选一个类别。
+
+本节分类用于描述“可能出什么问题”以及“排查时从哪里找证据”。到了第10.1节，
+评测设计还要把风险标签转换成对照样本和期望动作：例如同一类主题既要测真实滥用，
+也要测合法教育请求。分类可以共用，但不能把事故标签直接当成完整的评测方案。
 
 ### 6.1 幻觉和不诚实
 
@@ -792,9 +807,10 @@ Over-refusal 指模型对正常请求也拒绝。
 
 行为规范描述模型应如何回应，运行时策略则要在具体动作发生前核对身份、资源范围、
 审批和当前状态。OWASP 于 2026 年发布的 [Agent Control Standard](https://genai.owasp.org/resource/agent-control-standard-acs/)
-把可移植的声明式控制与 Agent 平台的 middleware hook 连接起来，提供了一个运行时
-控制接口的社区方案；标准本身不能证明某个 Agent 已正确执行策略。第十五章会展开
-访问策略与执行器的分工。
+目前由 OWASP GenAI Security Project 托管，它描述如何通过 Agent 平台的 middleware
+hook 执行可移植的声明式控制。它提供控制接口和设计方向，不是对某个实现或策略
+有效性的认证。规约写成可观察行为后，仍需用评测检查模型是否按规范回应，并由
+执行器检查权限和动作；第十五章讲访问策略，第十七章讨论不可信 Agent 的监督协议。
 
 ## 10. Safety Eval：把行为边界变成证据
 
@@ -804,18 +820,23 @@ Over-refusal 指模型对正常请求也拒绝。
 
 ### 10.1 风险分类
 
-评测先要固定 taxonomy。例如可以覆盖：
+评测可以沿用第6节的风险标签，但每条样本至少还要记录输入来源、系统动作面和期望
+行为。分类告诉团队“覆盖了什么风险”；分层则告诉团队“如何区分模型应该帮助、
+澄清、拒绝或请求授权”。例如，prompt injection 切片要同时包含把外部文本当作
+待分析数据的正常任务，以及试图改变指令层级的对抗情形；工具滥用切片要区分有权
+执行、缺少授权、参数越界和需要确认的动作。否则评测只是在统计标签数量，不能
+判断模型或系统是否作对了具体选择。
 
-1. 自伤。
-2. 暴力。
-3. 网络安全。
-4. 生物化学。
-5. 欺诈。
-6. 隐私。
-7. 仇恨和骚扰。
-8. 高风险专业建议。
-9. Prompt injection。
-10. 工具滥用。
+| 风险标签 | 必要对照样本 | 应记录的期望动作 |
+| --- | --- | --- |
+| 有害内容与高风险建议 | 明确危险请求、合法教育请求、边界请求 | 拒绝危险部分；在安全范围内提供替代或澄清 |
+| Prompt injection | 外部内容作为证据的正常请求、含冲突指令的对抗请求 | 把外部内容当数据；遵守授权的指令层级 |
+| 隐私 | 用户有权访问的数据、跨用户或跨租户的数据请求 | 只返回授权范围内信息；不确定权限时停止或升级 |
+| 工具调用 | 合法只读动作、需确认动作、越权或不可逆动作 | 依权限执行、先确认或拒绝，并保留动作轨迹 |
+
+同一个样本可以同时带有多个风险标签，但评测记录仍应说明主失败类别、实际后果和
+判定规则。若某个样本既含 prompt injection 又造成越权工具调用，分别保存诱因和
+动作结果，后续才能判断是模型服从了外部指令、权限策略过宽，还是执行器漏做校验。
 
 ### 10.2 样本分层
 
@@ -1015,13 +1036,23 @@ decision= hold_for_high_risk_review
 轨迹追查为什么需要关闭高风险工具。真实系统还应保存样本版本、标注协议、权限
 事件和人工复核记录；这个 toy demo 不能替代生产审核器。
 
-### 10.6 Reasoning、工具和多模态能力带来的安全路由
+### 10.6 把能力评测映射到运行时安全路由
 
-新模型的 reasoning effort、工具调用、原生视觉/音频、长周期 Agent 和多 Agent 协作会扩大能力面，也扩大误用面。安全系统不应只在模型输出前做一个关键词拒答，而应根据任务、effort、工具和环境动态路由：
+第5节讨论能力提升为何同时带来收益与风险；本节只处理部署决策：给定任务风险、
+用户授权、工具范围和评估结果，系统应把请求送到哪个模型、运行环境或审批路径。
+新模型的 reasoning effort、原生视觉/音频、长周期 Agent 和多 Agent 协作会扩大可做
+的事，也扩大误用面。安全系统不应只在模型输出前做关键词拒答，而要把路由规则
+绑定到可观察的任务与动作：
 
 ```math
-\mathrm{Route}=f(\mathrm{task\ risk},\mathrm{capability},\mathrm{effort},\mathrm{tool\ scope},\mathrm{user\ trust})
+\mathrm{Route}=f(\mathrm{task\ risk},\mathrm{estimated\ capability},\mathrm{effort},\mathrm{authorization},\mathrm{tool\ scope},\mathrm{reversibility})
 ```
+
+这里的 `task risk` 是当前请求和上下文可能造成的影响，`estimated capability` 来自
+对应模型、effort、工具和任务条件下的评测，`authorization` 指发起者对目标资源与
+动作的授权，`tool scope` 是可调用接口和资源范围，`reversibility` 描述失败后能否
+安全撤销。$f$ 表示部署组织定义的路由策略，不是一个通用风险分数；输出应是明确
+的执行路径，例如低风险模型、受限沙箱、只读工具、人工审批或拒绝。
 
 典型策略包括：
 
@@ -1031,13 +1062,23 @@ decision= hold_for_high_risk_review
    而不是只写在模型名称或宣传页面上。
 4. policy-adaptive 的多模态安全分类器可以把自然语言安全策略映射为连续安全分，
    但它只是分类或策略组件，不能被当作完整治理系统。它仍需要独立的权限、工具
-   审计和人工升级路径。
+   审计和人工升级路径；第十四章专门讨论这类分类器的行为与证据边界。
+
+例如，一个代码助手可以在只读仓库里解释依赖风险；若用户要求它修改部署配置并
+调用生产发布工具，系统就要检查该用户的变更权限、动作影响范围、审批条件和回滚
+能力，再选择受限工具、人工确认或拒绝。决定依据不是“模型更聪明，所以该走更严
+的路由”，而是这次任务实际具备的能力、权限和后果。发布比较至少要记录路由策略
+版本、触发条件、动作授权与执行结果，才能复查误放行和误拦截分别发生在哪里。
 
 发布讨论至少要同时看能力评测、攻击成功率、误拒率、工具越权、视觉/音频注入和
 trace 完整性。更高 reasoning budget 可能提升安全分析，也可能提升危险任务规划
 能力；因此既要测它是否更能识别风险，也要测它是否更能完成被限制的高风险任务。
 
 ## 11. 真实系统中的失败模式
+
+本节讨论上线流程和系统运营中容易漏掉的控制：测试覆盖、产品体验协作、运行时防护
+和回归机制。第13节讨论另一类问题——读到一个评测结果或训练方法后，哪些结论并
+不能由现有证据推出。前者问“系统哪里没做好”，后者问“我们凭什么这样下结论”。
 
 ### 11.1 只做静态安全测试
 
@@ -1129,33 +1170,42 @@ decision: 低风险试用、受限扩大、保持现状、回退或重新测量
 尚未证明的部分。安全治理的成熟度，往往体现在能否从失败轨迹导出具体修复动作，
 而不是体现在报告里有多少漂亮的平均分。
 
-## 13. 常见失败模式
+## 13. 读安全结论时容易犯的推断错误
 
-### 13.1 把 safety 等同于拒答
+上一节列的是系统里会失效的流程。本节列出评审报告和面试回答中常见的推断跳步：
+把单一指标、训练方法、分类器结果或某个 benchmark 的成功，直接当成完整的安全
+结论。修正方法是把每个判断还原成“证据覆盖了什么输入和动作、没有覆盖什么条件”。
 
-安全还包括正常请求的 helpfulness、误拒率和安全替代质量。只统计拒答数量，无法
-知道模型是在正确拦截危险请求，还是把所有边界问题都推给用户。
+### 13.1 拒答更多不等于整体更安全
 
-### 13.2 只谈 RLHF，不谈评估
+拒答数量没有风险分母，也没有说明被拒绝的请求是否真的应该拒绝。若正常请求被
+误拒、危险请求却仍被满足，整体拒答率仍可能升高。应并看第10.3节的漏拒、误拒、
+安全替代质量和工具越权指标，并按风险切片保留失败轨迹。
 
-RLHF、DPO 或安全 SFT 只能说明训练做了什么，不能直接说明部署后的行为。训练后
-仍需用 safety eval、red teaming、回归测试和线上监控验证，并检查是否出现新的
-过度拒答或奖励投机。
+### 13.2 使用了 RLHF 或 DPO 不等于已达到安全目标
 
-### 13.3 忽略 prompt injection
+训练方法说明系统接受过哪种监督信号。它不能证明标注目标覆盖了所有高后果场景，
+也不能证明模型在新输入、外部工具和线上分布下仍保持同样行为。训练后仍要做独立
+的 safety eval、red teaming 和回归评测，检查过度拒答、奖励投机及未覆盖的失效。
 
-在 RAG、Agent 和工具调用系统中，外部内容既可能提供证据，也可能携带诱导模型
-越权的文本。应把数据和指令分层，限制工具权限，并验证最终状态。
+### 13.3 检出 prompt injection 不等于阻止了系统越权
 
-### 13.4 忽略系统层防护
+检测器可以标出可疑内容，但检测结果是否进入策略、策略是否限制工具、执行器是否
+在提交前重验权限，是另外几步。应分别核对外部内容的信任标记、模型处理方式、
+执行权限、事务结果和审计轨迹；仅凭分类器召回率不能推出最终状态安全。
 
-模型本体对齐不替代权限控制、沙箱、审计和二次确认。模型即使在大多数样本中遵守
-规则，也不能凭一段自然语言承诺获得数据库或外部网络的全部权限。
+### 13.4 模型按规范回应不等于系统已有强制边界
 
-### 13.5 把高风险领域当普通问答
+行为规范和模型训练主要约束候选行为；权限系统、沙箱、审批和事务控制决定哪些动作
+实际上能够发生。模型可以给出正确的拒绝文本，另一条工具路径仍可能因权限配置
+过宽而写入数据。因此要用端到端轨迹验证策略执行，并让不可逆动作有明确授权和
+可追溯记录。
 
-医疗、法律、金融、自伤、网络安全等场景需要更严格的证据、适用范围、升级路径
-和人工复核。知识题答对一次，不等于高影响工作流可以无人值守。
+### 13.5 单次 benchmark 成功不等于高影响工作流可无人值守
+
+医疗、法律、金融、自伤和网络安全等工作流需要明确资料来源、适用范围、风险分级、
+人工升级和错误恢复方式。一个知识题答对，只支持该任务、模型、提示、判定器和
+版本组合下的观察结果；不能替代对用户分布、上下文、连续动作和失误后果的验证。
 
 ## 14. 资料与证据边界
 
@@ -1175,15 +1225,17 @@ RLHF、DPO 或安全 SFT 只能说明训练做了什么，不能直接说明部�
 ### 14.2 红队、规范与治理
 
 - [Red Teaming Language Models to Reduce Harms](https://arxiv.org/abs/2209.07858)：支持通过主动寻找失败样本改进危害评估的研究方法。
-- [OpenAI Model Spec](https://model-spec.openai.com/)：官方行为规范入口，支持分析指令优先级、行为边界和模型应如何回应；规范文本是政策设计资料，不是实测结果。
-- [OpenAI Preparedness Framework](https://cdn.openai.com/openai-preparedness-framework-beta.pdf)：官方风险评估框架，支持危险能力、保护措施和发布决策的组织方式；其中的阈值和范围不能直接移植到其他组织。
-- [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：美国国家标准与技术研究院的治理框架，支持 Govern、Map、Measure、Manage 的风险管理结构。
+- [OpenAI Model Spec](https://model-spec.openai.com/) 与[公开版本变更记录](https://github.com/openai/model_spec/blob/main/CHANGELOG.md)：官方意图行为规范，支持分析指令优先级、行为边界和模型应如何回应；截至 2026-10-27，公开变更记录列出的最新版本为 v2026.08.18。规范文本是政策设计资料，不是实测结果。
+- [OpenAI Preparedness Framework Version 2](https://cdn.openai.com/pdf/18a02b5d-6b67-4cec-ab64-68cdfbddebcd/preparedness-framework-v2.pdf)（2025-04-15）及[更新说明](https://openai.com/index/updating-our-preparedness-framework/)：官方风险评估框架，支持讨论危险能力分类、评估、保护措施和发布决策；其中的阈值和范围是 OpenAI 的组织实践，不能直接移植到其他组织。
+- [OpenAI Frontier Governance Framework](https://openai.com/index/openai-frontier-governance-framework/)（2026-05-28）：OpenAI 对其安全与安保实践如何映射到相关法律要求的公开治理文件；它表达发布方自己的治理方式，不是外部认证。
+- [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：美国国家标准与技术研究院的自愿治理框架，支持 Govern、Map、Measure、Manage 的风险管理结构。NIST 当前页面说明 AI RMF 1.0 正在修订，并于 2026-04-07 发布关键基础设施 Profile 的概念说明；本文仍把 AI RMF 1.0 作为明确版本引用。
 - [NIST Generative AI Profile](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf)：生成式 AI 风险管理补充资料，支持把生成式系统的风险和控制映射到 AI RMF。
 - [OWASP Top 10 for LLM Applications 2026](https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/)：社区维护的应用安全分类，适合作为发现 prompt injection、权限和工具风险的入口；分类反映项目方的汇总方法，不是模型能力排行榜或风险发生率估计。
-- [OWASP Agent Control Standard](https://genai.owasp.org/resource/agent-control-standard-acs/)：描述如何通过 Agent 平台 middleware hook 执行可移植的声明式安全控制；它给出接口和控制方向，不等同于对某个系统策略有效性的实测。
+- [OWASP Agent Control Standard](https://genai.owasp.org/resource/agent-control-standard-acs/)（2026-09-01）：现由 OWASP GenAI Security Project 托管，描述 Agent 平台如何开放 middleware hook、执行可移植的声明式控制；它给出接口和控制方向，不等同于对某个系统策略有效性的实测。
 - [International AI Safety Report 2026](https://internationalaisafetyreport.org/publication/international-ai-safety-report-2026)：综合讨论 misuse、malfunctions、systemic risks、Agent 自主性与安全评估缺口；报告总结跨领域研究，不提供特定部署的风险认证。
-- [METR Frontier Risk Report (February to March 2026)](https://evals.alignment.org/blog/2026-05-19-frontier-risk-report/)：记录一次与多家前沿模型开发者合作的外部风险评估试点；对高风险错配行为的识别标准和外部资料可见性仍有限，结论只适用于该评估窗口和参与系统。
-- [Google DeepMind Frontier Safety Framework](https://deepmind.google/discover/blog/introducing-the-frontier-safety-framework/)：官方前沿能力风险框架入口，支持讨论危险能力评估和缓解措施；框架中的能力等级与组织责任需要结合具体部署环境解释。
+- [METR Frontier Risk Report (February to March 2026)](https://metr.org/blog/2026-05-19-frontier-risk-report/)：记录一次与 Anthropic、Google、Meta、OpenAI 合作的组织级外部评估试点，窗口为 2026-02-16 至 2026-03-16；报告结合了参与组织提供的非公开信息和模型访问，结论应限定于该试点、窗口和参与组织，不外推成公开模型的一般风险率。
+- [Anthropic Responsible Scaling Policy](https://www.anthropic.com/responsible-scaling-policy)：官方页面提供当前政策、版本历史和定期风险报告，支持讨论其自身如何组织前沿能力风险治理；政策承诺和自评报告不等于独立认证，引用具体要求时应注明对应版本。
+- [Google DeepMind Frontier Safety Framework](https://deepmind.google/frontier-safety/)：官方前沿能力风险框架入口，当前页面列出 Version 3.1（2026-04-17）；支持讨论能力阈值、生命周期评估和缓解方案，但框架中的能力等级与组织责任需要结合具体部署环境解释。
 
 书稿引用这些资料时，应把“论文观察到的结果”“发布者公开声明”“工程上采用的
 控制”和“本项目实际测量到的结果”分开写。尤其是 helpful、harmless、危险能力
@@ -1227,7 +1279,15 @@ RLHF、DPO 或安全 SFT 只能说明训练做了什么，不能直接说明部�
 长轨迹中的中间行为”；阅读 reward hacking 时，要问“指标变好是否真的代表目标
 变好”；阅读 jailbreak、prompt injection 和 red teaming 时，要问“攻击面来自
 模型、上下文、工具还是权限”；阅读 privacy、unlearning 和 governance 时，则要
-问“证据能否追溯，责任能否落到具体系统动作”。
+问“证据能否追溯，责任能否落到具体系统动作”。第12章综合复习时，要把一次系统
+失败还原成输入、模型行为、工具动作、后果与修复责任，而不是只复述安全术语。
+
+第13—17章把这些判断用于更具体的工程问题：自动化对抗评估能否覆盖人工红队尚未
+发现的失败；多模态策略分类器的分数如何与策略及执行控制配合；访问控制怎样把
+风险等级、用户身份和动作权限绑定；故障降级怎样限制不确定服务状态下的损害；
+AI Control 怎样在假设 Agent 不可信时，通过监督协议保护关键动作并保留审计证据。
+最后一个专题的模拟环境结果只能说明指定威胁模型和任务中的协议表现，不能直接
+推出真实部署安全。
 
 Safety 关注模型和系统是否会造成伤害，Alignment 关注目标、行为和人类意图之间
 是否一致。两者重叠，却不是同一个词。

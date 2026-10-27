@@ -1,0 +1,19 @@
+# 第八册第三章 Scalable Oversight 章级扫描
+
+- `date`：2026-10-27。
+- `scope`：逐节复读 `book-08-ai-safety-alignment/chapters/03-scalable-oversight.md`，并对 2025-10 至 2026-10 的可扩展监督、AI judge 校准、Debate 和弱监督评估做定向扫描。此记录属于第八册架构审视，不表示本章已完成正文精修。
+- `chapter_role`：承接第二章的目标错配与监督限制，解释如何借助任务分解、AI critique、debate、原则、verifier、人工升级和校准扩展监督；为红队、模型评估、策略治理及 Agent 轨迹审核提供监督证据基础。
+- `structure_read`：现有主线从传统监督假设与人类瓶颈，进入方法谱系、Iterated Amplification、Debate、Recursive Reward Modeling、Constitutional AI/RLAIF、人类与 AI feedback、自我评估、落地案例、审计 demo、误区和证据边界。结构主题连贯；第四至十节之间有方法分类、方法详讲与 AI feedback 比较的潜在重复，需在全册 map 中保留一个核心主讲位置并缩短交叉介绍。
+- `length_scan`：按去掉 fenced code、标题和 Markdown 表格行后的汉字粗计，十八个二级段约为：§1 473、§2 224、§3 288、§4 1,648、§5 405、§6 386、§7 185、§8 406、§9 158、§10 141、§11 490、§12 188、§13 122、§14 780、§15 196、§16 482、§17 157、§18 222。单篇整体篇幅不能直接用来验收各独立讲次；§5—8 是四个核心方法单元，均远低于核心讲解 1,800 汉字门槛，§4 方法谱系也接近门槛但偏低。后续应决定扩成可学会的连续讲解、合并重组，或将不承担完整主讲的段落缩短并链接到唯一主讲点。统计脚本排除了标题、fenced code 和表格行；正式复核仍需通读排除公式本身、引用和非解释文字。
+- `formula_and_example_scan`：§4.6 已定义人类直接覆盖、覆盖集错误率、AI feedback 错误、verifier 覆盖、过程监督、证据支持、人工升级和成本节省等指标，并强调 gold set 与空分母语义。demo 十个样本的静态手算为：直接覆盖 `2/10=0.20` 且覆盖样本 `2/2` 正确；AI feedback 错误 `3/10=0.30`；verifier 覆盖 `7/10=0.70`；混合监督正确 `9/10=0.90`；过程准确 `28/39≈0.718`；证据支持 `17/24≈0.708`；高风险人审 `4/5=0.80`；成本节省 `1-132/503≈0.738`；严重度加权错误 `5/33≈0.152`。漏审医疗摘要是高风险阻断项，最终决定 hold。需要增加一条样本和总体聚合的手算轨迹。
+- `formula_code_consistency`：§4.6 规定空分母写 N/A，但 §11.5 demo 对 `direct_accuracy_on_covered`、`evidence_support`、`high_risk_audit_coverage` 使用 `max(1, denominator)`，与正文门槛不一致；正式精修时应显式处理空集并为决策保持“未测量”。聚合 AI、verifier 与 debate 时的多数票平票规则也是 toy policy，应说明不能代替风险分级的人审策略。
+- `discovery_scan`：
+  - **新方法并入 §4 或 §9.5**：[Towards Scalable Oversight via Partitioned Human Supervision](https://proceedings.iclr.cc/paper_files/paper/2026/hash/b6f03ce953cf7f07dafa20891d2539e3-Abstract-Conference.html)，ICLR 2026。将专家“能指出某选项不属于本领域、但不能给出完整正确答案”的 complementary label 作为弱监督，并推导 top-1 accuracy 估计器和混合估计器。适合补充人类监督信号谱系；关键限制是多选分类任务、错误选项按规定均匀采样、普通/互补标签同分布等假设，偏好选择 hard negative 会破坏无偏条件，边界含糊时标签本身不可靠。
+  - **更新 §6 Debate 的机制边界**：[Humans Correct Their Judgments Through Debate, but Weaker AI Models Do Not](https://arxiv.org/abs/2610.28539)，arXiv extended version 标注为 NeurIPS 2026 接收论文。论文报告 5 个真人实验（N=507）和 40 多组 LLM 实验；在其任务上 debate 提高人类监督者准确性，但弱模型作为 judge 的收益不稳定，多 judge 投票也未稳定提高 LLM 小组准确率。此证据支持“人类 Debate 与模型 Debate 不能互换”，结果仅适用于论文任务、协议、模型和样本。
+  - **补充 §4.6/§9.4 的 judge 校准边界**：[Limits to scalable evaluation at the frontier](https://proceedings.iclr.cc/paper_files/paper/2025/hash/4264ee4376776907c0b87ed70b959585-Abstract-Conference.html)，ICLR 2025，给出当 judge 不比被评系统准确时，去偏方法至多把所需 gold labels 减半的理论限制，并报告实际节省更有限；[The Geometry of LLM-as-Judge](https://arxiv.org/abs/2606.03043) 是 2026 预印本，在四个 Indic 社群数据集、八种语言和 41 个 judge 上观察到 judge 间一致高于 judge—human 一致，而可验证事实 rubric 上差异减弱。可用来说明 judge 共识不等价于人类校准；后者仍是特定语料、rubric 与预印本证据，不外推为所有语言和任务的普遍常数。
+  - **候选扩充 §5.6 递归路线**：[Scaling Laws For Scalable Oversight](https://proceedings.neurips.cc/paper_files/paper/2025/file/8c3caae2f725c8e2a55ecd600563d172-Paper-Conference.pdf)，NeurIPS 2025，比较 oversight games 的模型能力关系并理论分析 Nested Scalable Oversight。文章把 Mafia、Debate、Backdoor Code、Wargames 等游戏代理用于研究；数值和推演是特定 Elo 与游戏配置下的结果，不是现实部署成功概率。候选是用一段补充“递归监督的量化研究与边界”，不另开章节。
+- `candidate_disposition`：目前四项分别作为 §4/§9 人类弱信号、§6 Debate、§4.6/§9.4 judge 校准、§5.6 nested oversight 的并入候选；不新增章节。与第七册评测方法、第二十册 runtime/harness 重叠处只交叉链接，不重复主讲 judge protocol 和执行权限。
+- `visual_map`：章首与第 4 节已有 `text` 流程表达，没有 Mermaid 图。主要图表机会是监督信号分类和“gold set 校准—AI 扩展—verifier—人审升级—反馈回归”监督闭环；若后续采用 Mermaid，需依新规范加引号标签、规范虚线边并做 GitHub 渲染核验。
+- `code_status`：§11.5 有一个标准库 Python demo，本轮未执行；没有正文状态标记或本轮可追溯的既有验证记录。除未验证外，分母兜底逻辑与正文的 N/A 约定冲突，不能仅标“代码待运行”。
+- `architecture_decision_pending`：第八册全章结构扫描完成后再确定 §§4—10 的拆合及章节依赖。考虑将新证据放入唯一主讲单元，把第十七章（面试题）中的相同概念保持为追问入口。
+- `open_risks`：四个核心方法讲次篇幅偏短；第 4.6 节丰富指标仍需配合手算例子；AI judge 与人类反馈相关内容须合并去重；demo 空分母需修正；正文没有代码状态标记。尚未完成本章精修、配套索引同步和 GitHub 图表渲染。
