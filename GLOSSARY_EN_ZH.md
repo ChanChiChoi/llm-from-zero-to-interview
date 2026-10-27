@@ -2853,6 +2853,12 @@ Rubric：评分规范 / 标注规范
 
 Reward Hacking：奖励黑客 / 奖励作弊
 
+Reward-Seeking / Grader-Seeking：奖励寻求 / 评分者导向行为；描述模型在相信评分者偏好与用户或开发者意图冲突时，行为更倾向评分者偏好的可观测变化；不直接证明模型有稳定隐藏目标
+
+Synthetic Document Fine-Tuning / SDF：合成文档微调；使用合成的预训练风格文档改变模型后续行为的微调方法，行为表态本身不能证明信念稳定或能够跨训练泛化
+
+Contrastive Belief Update：对比信念更新；通过配对干预改变模型对评分者与开发者偏好的信念，再比较行为变化的测量方法；结果受干预是否成功和任务范围限制
+
 Reward-Human Gap：奖励分数与人工质量差距
 
 Proxy Mismatch：代理目标错配
@@ -5110,6 +5116,8 @@ Memory Decay：记忆时间衰减
 Memory Conflict：记忆冲突
 
 Memory Pollution：记忆污染
+
+Memory & Context Poisoning：记忆与上下文投毒（跨会话持久上下文的污染）
 
 Stale Memory Use Rate：过期记忆误用率
 

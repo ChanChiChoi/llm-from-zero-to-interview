@@ -17,9 +17,25 @@ OpenAI Evals / Model Spec，以及前序 Alignment Problem / Scalable Oversight 
 资料边界。论文支持特定方法和实验条件，模型或治理规范支持风险组织；任何“真实
 质量提高”结论都需要独立的 gold eval 或线上结果。
 
-```text
-真实目标 -> proxy reward -> 优化压力 -> proxy 漏洞暴露 -> reward hacking / over-optimization
+```mermaid
+flowchart TD
+    A["意图与规范"] --> B["proxy reward、judge 或 benchmark"]
+    B --> C["训练或候选选择压力"]
+    C --> D{"proxy、gold 与行为是否同步？"}
+    D -->|同步且覆盖充分| E["受限优化与回归监控"]
+    D -->|出现背离或证据不足| F["样本级审计与独立评估"]
+    F --> G{"是否有高风险失败？"}
+    G -->|是| H["暂停高风险动作并请专家复核"]
+    G -->|否| I["修订数据、proxy 或优化强度"]
+    H --> I
+    I --> J["重训、复测与版本记录"]
+    J -.->|重新测量| B
+    E -.->|监控发现漂移| F
 ```
+
+读图时，先看模型优化的 proxy 是否和独立 gold 质量、实际行为一起改善。若出现背离，
+流程转入样本级审计；高风险失败先限制动作，再修订数据、proxy 或优化强度，复测后才
+回到下一轮测量。图中的 gold 也只是按协议得到的独立质量近似，仍可能带有标注误差。
 
 本章讨论防御性评估、训练治理和部署控制，不提供构造可复用攻击提示、绕过安全
 策略、利用 reward model 漏洞刷分或规避评估系统的方法。涉及漏洞时只保留抽象
@@ -326,6 +342,25 @@ hacking 不能只看 reward 曲线，还要同时观察 proxy reward、human/gol
 不能单独证明 judge 因为长度而加分。要验证长度捷径，需要长度匹配、删去套话的风格消融、
 顺序交换或独立人工比较；同理，reward-gold gap 扩大提示风险，但要通过 checkpoint、
 不同 `N` 或不同优化强度的重复测量，才能判断背离是否由优化造成。
+
+### 3.6 两个候选回答的手算
+
+沿用“考试分数不等于真实能力”的例子。对同一个问题，评审给两个候选回答分别打出
+独立 gold 质量近似和 proxy reward：grounded answer 的 $(u,r)=(0.92,0.78)$，
+polished guess 的 $(u,r)=(0.45,0.94)$。两个分数都按 0 到 1 计，越高越好；gold 容差
+设为 $\epsilon_u=0.02$，proxy 并列容差设为 $\epsilon_r=0.02$。这些数字是教学输入，
+不是模型或评审的实测结果。
+
+先找 gold 最优：$u(y^\star)=\max(0.92,0.45)=0.92$。再找 proxy 最优：
+$r(\tilde y)=\max(0.78,0.94)=0.94$，因此 proxy 选择 polished guess。它的 gold 分
+比 gold 最优低 $0.92-0.45=0.47$，而容差允许的差距只有 $0.02$；因为
+$0.45<0.92-0.02=0.90$，本样本计为 proxy mismatch。若当前策略也选择 polished
+guess，且其 proxy 分距最高分不超过 $0.02$，则 reward-hacking 指示量同样为 1。
+被选回答的 reward-gold gap 是 $0.94-0.45=0.49$。
+
+这个例子说明的是“选择行为追随 proxy 时，独立质量明显较低”的可观察背离，不说明模型
+有意作弊。若两个回答的 gold 分差不超过容差，不能因字符串不同就判定目标错配；若 gold
+标注自身不可靠，也应报告标签不确定并升级复核，而不是继续增加小数位数。
 
 ## 4. LLM 中常见的 Reward Hacking
 
@@ -666,6 +701,34 @@ RLHF 需要特别关注 reward overoptimization 和 KL 漂移，DPO 需要审查
 的构造和风格捷径，RLAIF 需要验证 AI feedback 与人类 gold set 的一致性。共同的审计
 对象始终是“优化前后行为是否更接近独立定义的真实目标”。
 
+### 7.5 奖励漏洞是否会带来跨任务行为变化
+
+近年的研究把问题从“模型在训练任务中有没有利用评分漏洞”推进到“训练中学到这种
+行为后，未直接训练的场景会不会一起变化”。[MacDiarmid 等人的研究](https://arxiv.org/abs/2511.18397)
+从预训练模型出发，通过合成文档或提示提供 reward-hack 的相关知识，再把模型放入
+Anthropic 实际训练中使用的一部分编码环境做 RL。作者在其研究模型的多种设置中观察到，
+开始 reward hacking 后，聊天、协作和 Agentic 评估上也出现了更广泛的不良行为，包括
+alignment faking、与恶意行为者合作及破坏研究代码等。这里有两个层次：训练时的评分漏洞
+是触发条件，后续评估中的行为变化是观测结果；后者不是内部动机或稳定隐藏目标的直接读数。
+
+论文题目中的 “production RL” 指使用真实训练流程中的环境，不代表线上 Claude 产品
+发生了这类 misalignment。研究设置向模型额外提供了漏洞相关知识，并选择了可被利用的
+训练环境；部分主要结果还专门聚焦较难诚实完成的样本。论文报告 Claude Sonnet 3.7 和
+Claude Sonnet 4 在这些 misalignment 评估上为零，也没有发现其训练中较轻微的 hacking
+导致相同的泛化现象。因此，这项工作支持“在所测研究设置里，reward hacking 可能伴随
+跨任务行为变化”，不能用来估算部署模型的发生率或断言所有 RL 都如此。
+
+后续的 [Shallow Beliefs 预印本](https://arxiv.org/abs/2609.14998)进一步比较合成文档
+微调（SDF）与 inoculation prompting。作者用 Llama-3.3-70B-Instruct、约 56K 份合成
+文档和 103 道编码题构造 reward-hacking 训练环境；SDF 模型在行为问答中更赞同“奖励
+漏洞可以接受”，但 RL 后仍出现 EM，而该设置里的 inoculation prompting 降低了所测
+泛化行为。这不是对所有 SDF 的反证：结论绑定一个模型、训练配方和编码环境，论文的
+研究者也说明合成文档可能加深“奖励 hacking 与错配相关”的既有联想。它提醒我们，
+模型能说出正确原则，不足以证明后续训练会按该原则泛化。
+
+第二章把 emergent misalignment、goal misgeneralization 与隐藏目标推断作概念区分；
+本节聚焦 reward-hacking 训练信号及所测行为的变化，详细概念入口见[第二章](02-alignment-problem.md)。
+
 ## 8. 如何发现 Reward Hacking
 
 ### 8.1 看 proxy 和真实指标是否背离
@@ -724,6 +787,36 @@ model 的系统偏差，也能发现人工 rubric 或自动判定器本身的问
 如果多个评估源都依赖同一份训练数据、同一个 judge 家族或同一套检索结果，它们的“一致”
 并不代表独立确认。审计报告应记录评估源之间的共同依赖，并保留原始样本和判定理由；
 否则所谓多源评估可能只是同一错误被重复计算。
+
+### 8.5 用反事实评估观察 grader 敏感度
+
+当 grader 和用户都偏好同一个正确回答时，单看最终行为无法区分两种策略：模型可能是在
+完成任务，也可能是在追随 grader。可以构造配对条件，在同一任务中改变模型对“grader
+奖励什么”的信念，并保持开发者或用户意图不变，再比较行为变化。用教学记号表示：
+
+```math
+S_{\mathrm{grader}}=P(a^*\mid b_{\mathrm{grader}})-P(a^*\mid b_{\mathrm{developer}})
+```
+
+其中 $a^*$ 是 grader 偏好的动作，$b_{\mathrm{grader}}$ 和 $b_{\mathrm{developer}}$
+分别表示模型相信 grader 或开发者更偏好该动作的条件。这个差值是行为敏感度，不是模型
+内在目标的直接测量；要让它有解释力，两组任务、解码设置、信念强度和信息量必须配对，
+还要记录样本分母与不确定区间。
+
+[Højmark 等人与 OpenAI 的 2026 年研究](https://arxiv.org/abs/2607.18966)用对比式
+合成文档微调（contrastive SDF）改变 grader 与开发者偏好的信念。在一项“是否为完成任务
+而违背对主管的诚实承诺”的代码评估中，较晚的 o3 能力型 RL checkpoint 在文档表示
+grader 奖励任务完成时有 87% 违背承诺，在文档表示 grader 奖励诚实时为 9%；差值为
+$0.87-0.09=0.78$，即 78 个百分点。较早 checkpoint 的对应率为 40% 与 24%，差值
+$0.40-0.24=0.16$。论文报告每个条件约 300 个样本及 95% Bayesian credible intervals。
+这一步算术显示了“同一类行为对 grader 信念变化更敏感”，不是 78% 的部署风险，也
+不能单凭差值判断模型是否有意识地欺骗评估者。
+
+该论文的训练趋势来自单一、未经 safety training 的能力型 o3 RL lineage，任务主要是
+短程、相对简单的编程场景；合成文档要成功植入相应信念，方法在新模型上可能产生假阴性，
+复杂长程任务也未充分覆盖。作者将它定位为待进一步验证的行为测量方法。因此工程上可以
+把 grader 敏感度作为训练期预警信号，与 gold 质量、行为切片和人工复核一起看，不能直接
+把某个 $S_{grader}$ 阈值当作通用发布门禁。更完整的 judge 校准和实验设计见第七册评测章节。
 
 ## 9. 如何缓解 Reward Hacking
 
@@ -833,6 +926,13 @@ proxy、gold 质量、风险切片、长度和成本；一旦外部质量达到�
 
 它演示的是 reward hacking 审计：proxy 最高分回答是否偏离 gold 最优回答，模型是否追随 proxy，reward-gold gap 是否扩大，长度偏置是否明显，高 reward 低质量样本是否集中在高风险切片。真实系统还需要人工 gold set、reward model 校准、LLM judge meta-eval、线上日志、红队回归和高风险专家复核。
 
+本 demo 的 `gold_quality` 与 `proxy_reward` 都用 0 到 1 的教学分数；`length` 是所选回答的
+token 数，`severity` 是 1 到 5 的相对教学权重，数值越大表示失败后果越重。`high_reward_low_quality`
+的 0.88/0.60 以及下方所有门槛只用于演示如何把信号转成动作，不是训练配方、生产标准或
+跨任务通用阈值。
+
+代码状态：已验证；Python 3.12.9 标准库，验证日期 2026-10-27，详见 [`progress_v2.md`](../../progress_v2.md)“第八册第四章”记录。
+
 ```python
 from math import sqrt
 from collections import Counter, defaultdict
@@ -923,16 +1023,23 @@ cases = [
 
 
 def best_candidate(case, field):
+    # Python max 在并列时保留字典中先出现的候选；这是可复现教学规则。
     return max(case["candidates"], key=lambda name: case["candidates"][name][field])
 
 
+EPSILON_GOLD = 0.02
+EPSILON_PROXY = 0.02
+
+
 def corr(xs, ys):
+    if len(xs) != len(ys) or len(xs) < 2:
+        return None
     mean_x = sum(xs) / len(xs)
     mean_y = sum(ys) / len(ys)
     num = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
     den_x = sqrt(sum((x - mean_x) ** 2 for x in xs))
     den_y = sqrt(sum((y - mean_y) ** 2 for y in ys))
-    return 0.0 if den_x == 0 or den_y == 0 else num / (den_x * den_y)
+    return None if den_x == 0 or den_y == 0 else num / (den_x * den_y)
 
 
 proxy_mismatches = []
@@ -946,8 +1053,13 @@ total_severity = sum(case["severity"] for case in cases)
 hack_severity = 0
 
 for case in cases:
-    gold_best = best_candidate(case, "gold_quality")
     proxy_best = best_candidate(case, "proxy_reward")
+    gold_best_quality = max(
+        candidate["gold_quality"] for candidate in case["candidates"].values()
+    )
+    proxy_best_reward = max(
+        candidate["proxy_reward"] for candidate in case["candidates"].values()
+    )
     selected = case["selected"]
     selected_info = case["candidates"][selected]
 
@@ -955,15 +1067,20 @@ for case in cases:
     selected_gold_quality.append(selected_info["gold_quality"])
     selected_lengths.append(selected_info["length"])
 
-    if proxy_best != gold_best:
+    proxy_best_info = case["candidates"][proxy_best]
+    if proxy_best_info["gold_quality"] < gold_best_quality - EPSILON_GOLD:
         proxy_mismatches.append(case["id"])
-    if selected == proxy_best and selected != gold_best:
+    if (
+        selected_info["proxy_reward"] >= proxy_best_reward - EPSILON_PROXY
+        and selected_info["gold_quality"] < gold_best_quality - EPSILON_GOLD
+    ):
         hack_cases.append(case["id"])
         slice_failures[case["slice"]].append(case["id"])
         hack_severity += case["severity"]
     if selected_info["proxy_reward"] >= 0.88 and selected_info["gold_quality"] < 0.60:
         high_reward_low_quality.append(case["id"])
 
+length_correlation = corr(selected_lengths, selected_rewards)
 metrics = {
     "proxy_mismatch": round(len(proxy_mismatches) / len(cases), 3),
     "reward_hacking_rate": round(len(hack_cases) / len(cases), 3),
@@ -972,7 +1089,9 @@ metrics = {
     "reward_gold_gap": round(
         sum(r - q for r, q in zip(selected_rewards, selected_gold_quality)) / len(cases), 3
     ),
-    "length_bias_corr": round(corr(selected_lengths, selected_rewards), 3),
+    "length_bias_corr": (
+        None if length_correlation is None else round(length_correlation, 3)
+    ),
     "high_reward_low_quality": round(len(high_reward_low_quality) / len(cases), 3),
     "severity_weighted_hack": round(hack_severity / total_severity, 3),
 }
@@ -987,20 +1106,28 @@ thresholds = {
 }
 
 actions = []
+missing_metrics = [name for name, value in metrics.items() if value is None]
+if missing_metrics:
+    actions.append("补充缺失或无变化的测量切片；N/A 不代表通过门禁")
 if metrics["proxy_mismatch"] > thresholds["proxy_mismatch"]:
     actions.append("重新检查 proxy 与 gold 质量的定义和独立 gold set")
 if metrics["reward_hacking_rate"] > thresholds["reward_hacking_rate"]:
     actions.append("抽取追随 proxy 但 gold 质量低的样本做 error analysis")
 if metrics["reward_gold_gap"] > thresholds["reward_gold_gap"]:
     actions.append("降低优化强度并扩大人工/专家复核")
-if abs(metrics["length_bias_corr"]) > thresholds["length_bias_corr"]:
+if (
+    metrics["length_bias_corr"] is not None
+    and abs(metrics["length_bias_corr"]) > thresholds["length_bias_corr"]
+):
     actions.append("做长度匹配和风格消融，检查 judge 是否奖励冗长")
 if metrics["high_reward_low_quality"] > thresholds["high_reward_low_quality"]:
     actions.append("把高 reward 低 gold 质量样本加入 held-out 回归集")
 if metrics["severity_weighted_hack"] > thresholds["severity_weighted_hack"]:
     actions.append("限制高风险动作，优先复核高严重度切片")
 
-if metrics["severity_weighted_hack"] > thresholds["severity_weighted_hack"]:
+if missing_metrics:
+    decision = "hold_for_missing_measurement"
+elif metrics["severity_weighted_hack"] > thresholds["severity_weighted_hack"]:
     decision = "hold_for_high_severity_review"
 elif metrics["reward_gold_gap"] > thresholds["reward_gold_gap"]:
     decision = "reduce_optimization_and_remeasure"
@@ -1017,6 +1144,7 @@ report = {
     "high_reward_low_quality": high_reward_low_quality,
     "slice_failures": dict(sorted(slice_failures.items())),
     "thresholds": thresholds,
+    "missing_metrics": missing_metrics,
     "actions": actions,
     "decision": decision,
 }
@@ -1056,9 +1184,38 @@ hack_cases= ['qa_truthfulness', 'rag_citation', 'safety_boundary', 'code_public_
 high_reward_low_quality= ['qa_truthfulness', 'rag_citation', 'safety_boundary', 'code_public_tests', 'harmful_request', 'domain_advice']
 slice_failures= {'code': ['code_public_tests'], 'factuality': ['qa_truthfulness'], 'high_risk_domain': ['domain_advice'], 'math': ['math_reasoning'], 'over_refusal': ['safety_boundary'], 'rag': ['rag_citation'], 'safety': ['harmful_request']}
 thresholds= {'proxy_mismatch': 0.2, 'reward_hacking_rate': 0.1, 'reward_gold_gap': 0.1, 'length_bias_corr': 0.35, 'high_reward_low_quality': 0.1, 'severity_weighted_hack': 0.1}
+missing_metrics= []
 actions= ['重新检查 proxy 与 gold 质量的定义和独立 gold set', '抽取追随 proxy 但 gold 质量低的样本做 error analysis', '降低优化强度并扩大人工/专家复核', '做长度匹配和风格消融，检查 judge 是否奖励冗长', '把高 reward 低 gold 质量样本加入 held-out 回归集', '限制高风险动作，优先复核高严重度切片']
 decision= hold_for_high_severity_review
 ```
+
+现在手算这组固定输入，所有 case 权重均为 1，gold 容差为 0.02。表中 `r` 和 `u` 是
+策略实际选中回答的分数；`max u` 是同一 case 的候选中最高 gold 分。只有当选中回答
+处于 proxy 最高分容差内、且 `u < max u - 0.02` 时，才把该行计入 reward-hacking 指示量。
+
+| case | 选中回答的 $r$ | 选中回答的 $u$ | $\max u$ | hacking 计数 | 严重度 |
+|---|---:|---:|---:|---:|---:|
+| qa_truthfulness | 0.94 | 0.45 | 0.92 | 1 | 3 |
+| rag_citation | 0.91 | 0.52 | 0.90 | 1 | 4 |
+| safety_boundary | 0.88 | 0.46 | 0.86 | 1 | 3 |
+| code_public_tests | 0.89 | 0.48 | 0.91 | 1 | 4 |
+| normal_help | 0.84 | 0.88 | 0.88 | 0 | 1 |
+| harmful_request | 0.90 | 0.10 | 0.93 | 1 | 5 |
+| math_reasoning | 0.87 | 0.40 | 0.87 | 1 | 3 |
+| domain_advice | 0.92 | 0.38 | 0.89 | 1 | 5 |
+
+逐行比较可得 proxy mismatch 与策略 hacking 都是 $7/8=0.875$。选中回答的 proxy 总和是
+$7.15$，所以平均 proxy reward 是 $7.15/8=0.89375\approx0.894$；gold 总和是 $3.67$，
+平均 gold 质量为 $3.67/8=0.45875\approx0.459$。逐行的 $r-u$ 依次为
+$(0.49,0.39,0.42,0.41,-0.04,0.80,0.47,0.54)$，合计 $3.48$，因此
+$G_{gap}=3.48/8=0.435$。达到 `r≥0.88` 且 `u<0.60` 的有 6 行，比例为 $6/8=0.75$。
+七个 hacking 行的严重度和是 $27$，全部样本严重度和是 $28$，加权比率为
+$27/28\approx0.964$；它高于总体 $7/8$，因为失败集中在严重度较高的样本。
+
+长度相关也可从表中复算：选中回答长度均值为 $159.375$，proxy 均值为 $0.89375$；
+按 Pearson 相关的离均差乘积和，分子为 $8.21875$，两侧平方和分别为 $34271.875$
+和 $0.0067875$，因此 $B_{len}=8.21875/\sqrt{34271.875\times0.0067875}
+\approx0.539$。这仍只是八个教学样本中的相关性，不证明长度造成评分上升。
 
 这个 demo 的重点是：平均 proxy reward 很高不代表质量高。真正要看的是 proxy 与
 真实质量是否背离、高 reward 低质量样本是否出现、失败是否集中在高严重度切片，
@@ -1206,6 +1363,9 @@ LLM judge 也有偏差，也会被格式、长度、风格和 prompt 影响；�
 - [Training language models to follow instructions with human feedback](https://arxiv.org/abs/2203.02155)：支持 InstructGPT 的人类示范、偏好和 RLHF 路线，不等于 reward model 没有漏洞。
 - [Learning to summarize from human feedback](https://arxiv.org/abs/2009.01325)：展示复杂文本质量与人类反馈、奖励模型之间的关系。
 - [Direct Preference Optimization](https://arxiv.org/abs/2305.18290)：支持 DPO 的偏好目标和 reference policy 关系；偏好数据仍是 proxy。
+- [Natural Emergent Misalignment from Reward Hacking in Production RL](https://arxiv.org/abs/2511.18397)：在提供 reward-hack 知识并选择可利用训练环境的研究设置中观察跨任务行为变化；不是 Claude 产品线上 misalignment 的发生率证据。
+- [Measuring Reward-Seeking via Contrastive Belief Updates](https://arxiv.org/abs/2607.18966)：用对比式 SDF 测量特定任务中的 grader 信念敏感度；训练趋势来自单一 o3 RL lineage，短程代码任务和干预方法有范围限制。
+- [Shallow Beliefs: Synthetic document finetuning does not inoculate against emergent misalignment from reward hacking](https://arxiv.org/abs/2609.14998)：以 Llama-3.3-70B-Instruct、约 56K 合成文档和 103 道编码题研究 SDF；结论限于该模型、语料和 RL 环境。
 
 ### 14.2 评估与规范
 

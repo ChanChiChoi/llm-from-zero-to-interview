@@ -272,6 +272,14 @@ InstructGPT、RLHF、DPO、Constitutional AI、RLAIF、KTO、ORPO。
 10. [Spurious Rewards: Rethinking Training Signals in RLVR](https://proceedings.mlr.press/v306/shao26d.html)：ICML 2026 论文研究随机/错误奖励、GRPO clipping bias 与底模先验的交互；Qwen2.5-Math 的结果不能外推到 Llama、OLMo 或非数学任务，作者明确将 spurious reward 定位为分析对照，不是训练建议。
 11. [LLMs Gaming Verifiers: RLVR can Lead to Reward Hacking](https://arxiv.org/abs/2604.15149)：通过 Isomorphic Perturbation Testing 比较实例标签正确与逻辑同构下的规则保持，并做只改变 verifier 的受控训练；当前证据限于 SLR-Bench 归纳逻辑任务。
 12. [ImpossibleBench](https://openreview.net/pdf?id=SeO4vyAj7E) 与 [Rethinking Verification for LLM Code Generation](https://arxiv.org/abs/2507.06920)：前者用规格/测试冲突测量 Agent 对测试漏洞的利用，后者用 SAGA/TCGBench 研究代码测试套件生成和覆盖质量；二者不能代替 RL policy 的独立能力评估。
+13. [Towards Scalable Oversight via Partitioned Human Supervision](https://proceedings.iclr.cc/paper_files/paper/2026/hash/b6f03ce953cf7f07dafa20891d2539e3-Abstract-Conference.html)：研究专家仅排除候选项时的互补标签监督；估计器依赖多选设置、负例抽样和同分布假设，不能直接套到自由文本。
+14. [Humans Correct Their Judgments Through Debate, but Weaker AI Models Do Not](https://arxiv.org/abs/2610.28539)：比较指定任务中的人类和 LLM 辩论裁判；论文报告人类收益较稳定、弱模型收益不稳定，结论绑定其实验协议、模型和样本。
+15. [Limits to scalable evaluation at the frontier](https://proceedings.iclr.cc/paper_files/paper/2025/hash/4264ee4376776907c0b87ed70b959585-Abstract-Conference.html)：分析 judge 去偏可节省 gold label 的理论限制；不能据此推断具体项目的校准集可按固定比例缩减。
+16. [The Geometry of LLM-as-Judge](https://arxiv.org/abs/2606.03043)：2026 年预印本，在指定 Indic 语料、语言与 judge 上比较模型间一致性和人类一致性；共识不等于人类校准。
+17. [Natural Emergent Misalignment from Reward Hacking in Production RL](https://arxiv.org/abs/2511.18397)：在研究模型掌握 reward-hack 知识并进入可利用的真实训练编码环境后，观察到跨任务行为变化；不代表 Claude 产品线上 misalignment 发生率。
+18. [Measuring Reward-Seeking via Contrastive Belief Updates](https://arxiv.org/abs/2607.18966)：用反事实 grader 信念变化比较行为敏感度；趋势证据来自单一 o3 RL lineage 和短程代码任务，方法仍需跨模型与长时程验证。
+19. [Shallow Beliefs: Synthetic document finetuning does not inoculate against emergent misalignment from reward hacking](https://arxiv.org/abs/2609.14998)：在 Llama-3.3-70B-Instruct 与特定 reward-hacking 编码环境中发现 SDF 表达的 inoculating belief 未阻止 EM；结论限于论文训练配方和评估。
+17. [Scaling Laws For Scalable Oversight](https://proceedings.neurips.cc/paper_files/paper/2025/file/8c3caae2f725c8e2a55ecd600563d172-Paper-Conference.pdf)：用 Mafia、Debate、Backdoor Code 和 Wargames 等监督游戏研究 nested oversight；数值绑定论文游戏和 Elo 配置，不表示生产监督成功率。
 13. [TRL GRPOTrainer 文档](https://huggingface.co/docs/trl/grpo_trainer)：核对当前公开 trainer 的 reward function、loss normalization、clipping 与 metrics 字段；文档随版本变化，不能替代论文实验或目标代码 revision 审查。
 
 ### 领域适配与行业任务评估
@@ -372,6 +380,14 @@ ReAct、Toolformer、function calling、MCP、A2A、agent evaluation、coding ag
 11. [AgentDojo](https://arxiv.org/abs/2406.13352) 与 [ToolSandbox](https://arxiv.org/abs/2408.04682)：分别研究 prompt injection 防御及状态化工具使用评估；AgentDojo 首版包含 97 个正常任务和 629 个安全用例，并按环境状态同时评 utility 与 security；测试环境不替代目标系统的权限和副作用审计。
 12. [Overcoming the Retrieval Barrier](https://www.usenix.org/conference/usenixsecurity26/presentation/chang-hongyan)：USENIX Security 2026 的检索增强间接注入研究；报告的 retrieval 与端到端 attack rate 绑定论文 threat model 和系统设置。
 13. [OpenAI Programmatic Tool Calling](https://developers.openai.com/api/docs/guides/tools-programmatic-tool-calling)：特定 Responses / Agents runtime 中用代码编排可预测工具链的官方设计入口；不代表通用 Agent 协议，也不绕过应用侧权限和审批。
+
+#### Prompt Injection 与记忆污染评估
+
+- [OWASP GenAI LLM Top 10 2026](https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/) 与 [OWASP Agentic Top 10 2026](https://genai.owasp.org/download/52117/)：前者列 LLM01 Prompt Injection，后者以 ASI06 单列跨任务 Memory & Context Poisoning；两者是威胁分类，不是产品安全认证。
+- [WASP](https://proceedings.neurips.cc/paper_files/paper/2025/hash/1c9818387f5dd0a0bc151214660f059d-Abstract-Datasets_and_Benchmarks_Track.html)：端到端 Web Agent 注入 benchmark；部分行为妥协和攻击目标完成度分开观察，数字绑定论文任务与 grader。
+- [StepJack](https://arxiv.org/abs/2608.06477)：测试分散在多页面、多步骤的 CUA 间接注入；样例、12 个目标、最多三步和一次完整运行限制不支持通用趋势外推。
+- [INFUSE](https://arxiv.org/abs/2610.20776)：端到端 Agent 工作流的间接注入 benchmark；LLM judge 的 ASR-L 与 artifact heuristic 的 ASR-H 是不同指标，完整网格以 Mini-SWE-Agent 为主且运行于沙箱。
+- [MemSecBench](https://arxiv.org/abs/2607.27080)：以 Write–Execute–Forget 追踪持久化、召回、采纳、副作用及选择性修复；报告的比例属于其 310 个案例、48 个情境和 24 种指定配置。
 
 #### Frontier 工作流 Agent 评测
 

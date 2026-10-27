@@ -268,6 +268,8 @@ partitioned human supervision 方案研究互补标签：专家可能无法写�
 Scalable oversight 可以抽象成“复杂任务的监督信号是否可靠”的度量问题。指标
 必须同时记录覆盖、错误、人工升级、证据支持和成本；单独提高覆盖率，可能只是
 把未经校准的错误扩散得更快。
+第 11.5 节会用同一组十条教学样本，先手算一个高风险错误，再汇总各指标，说明不同
+分母为什么必须分别保留。
 
 设第 `i` 个监督样本为：
 
@@ -634,6 +636,19 @@ Constitutional AI 的思路是：用一组人类写下的原则或规则，让�
 
 这也常被称为 RLAIF：Reinforcement Learning from AI Feedback。
 
+Constitutional AI 是一条具体的原则驱动训练路线，RLAIF 则是更广的“使用 AI feedback
+构造监督或偏好信号”方法家族；两者相关，但不是同义词。原则通常先写成可检查的要求，
+例如“不要把单个案例的结果说成普遍因果结论”“证据不足时说明不确定性”。模型生成
+初稿后，critique 阶段需要指出违反了哪条原则及对应文本，revision 阶段再据此改写。
+偏好阶段比较候选回答时，也应保留选择理由，不能只存一个 winner 标签。这样后续才能
+判断是原则本身冲突、critique 漏检，还是 revision 只改了表面措辞。
+
+举例来说，研究助手读到一项小样本研究后声称“该方法已被证明普遍有效”。原则要求
+区分单项研究和总体结论；critique 应指出“普遍有效”超出样本与实验条件支持范围，
+revision 则把结论改成“该研究在其所测任务中观察到提升，尚需跨模型与场景复现”。
+人类不必逐条重写回答，但仍需抽查 critique 是否找对证据，尤其要覆盖原则冲突和
+模型容易迎合裁判的边界样本。
+
 ### 8.3 它解决哪一类监督瓶颈
 
 相比 RLHF，Constitutional AI 试图减少对大量人工有害样本标注的依赖。
@@ -717,6 +732,19 @@ human principles + human gold labels + AI critique + AI preference + human audit
 
 也就是说，AI feedback 用于扩展规模，人类反馈用于定义方向和校准边界。
 
+落地时可以把混合流程拆成六步：先按任务、风险、长度和语言分层抽取样本；由专家
+建立独立 gold set；再用 AI 生成 critique 或候选标签；用工具检查可程序化的事实、
+引用和状态；把 AI 置信度低、模型间分歧大、发生严重后果或政策覆盖缺失的样本送人审；
+最后在 holdout 与线上漂移切片上复测。专家标签不能被拿去反复调 judge 后再当独立
+验证集，升级样本也要记录分母，否则“人审准确率高”可能只是只审了最容易的案例。
+
+AI judge 的共识不等于人类校准。ICLR 2025 对前沿评估去偏方法的分析指出：当 judge
+本身并不比被评系统更准确时，理论上可节省的 gold labels 有上限，实际收益还可能更低。
+2026 年一项 LLM-as-a-judge 预印本在四个 Indic 社群数据集、八种语言和 41 个 judge
+中观察到 judge 之间的一致性高于 judge 与人类的一致性；在事实可验证的 rubric 下，
+差距有所缩小。它说明共享偏差会让多个 judge 一起同意错误结论；这些结果绑定论文
+语料、语言、rubric 和模型，不是所有多语种任务的普遍常数。
+
 ## 10. Self-Evaluation 和不确定性表达
 
 Scalable oversight 还包括让模型帮助判断自己的输出是否可靠。
@@ -744,6 +772,21 @@ Scalable oversight 还包括让模型帮助判断自己的输出是否可靠。
 2. 在新任务上校准差。
 3. 给出看似合理的自我解释。
 4. 受 prompt 格式影响。
+
+自我评估只有经过外部校准，才适合参与路由。要区分三件事：模型说“我有 80% 把握”，
+相似历史样本里是否约有 80% 正确，以及在当前高风险任务上是否值得自动执行。前者是
+模型输出，第二项是对已发生结果的校准，第三项还要结合失败成本、动作可逆性和人审
+能力。准确率高但严重过度自信的模型，仍可能不适合自动回答。
+
+用一组纯教学数据计算一个置信桶。假设系统在 100 个问题中选择 80 个回答，并把它们
+都标为 0.80 置信；之后专家发现 61 个正确、19 个错误。覆盖率是 `80/100=0.80`，该桶
+的实测准确率是 `61/80=0.7625`，与声明置信度相差约 `0.0375`。这说明模型略微过度
+自信，但不能仅凭一个桶判断全部风险；还要按任务类型、置信区间和错误严重度分层。
+
+如果置信度用于 abstention，可以对多组阈值绘制 risk-coverage 关系：提高阈值通常会
+减少自动回答覆盖，但不保证剩余回答的风险按同一比例下降。阈值必须在未参与调参的
+数据上选择，并在分布变化后重新校准。模型的自然语言自我解释不能作为校准标签本身；
+应使用正确性、独立 verifier 或人工 gold outcome 对照。
 
 ## 11. 真实项目如何落地 Scalable Oversight
 
@@ -802,6 +845,41 @@ Scalable oversight 可以把长 trace 拆成可审核片段。
 
 它演示的是监督闭环审计：人类直接判断覆盖是否不足，AI feedback 是否被 gold set 校准，工具验证覆盖了多少复杂样本，高风险样本是否进入人审，以及混合监督是否真的降低成本但不放大错误。真实系统还需要专家标注规范、完整 trace、评估平台、权限日志、模型版本管理和上线后监控。
 
+这个 toy demo 的自动标签由 AI、可用的 verifier 和 debate 输出组成；平票时沿用 AI 标签，
+这是为了让规则可复现的教学选择，不是推荐的生产策略。`oversight_accuracy` 衡量的是
+人审前的自动组合结果，`human_audit` 只统计高风险样本是否进入审核，并没有把专家更正
+写回自动标签。因此多数票高准确率不能取代人工审计；模型来源相同或共享训练数据时，
+错误可能高度相关，平票和高风险结果应在真实流程中升级。
+
+先手算 `medical_summary` 这一行。它的 gold 是错误（`False`），人工标签为 `True`，
+但人工置信度 `0.70` 低于阈值 `0.75`，所以不算人类直接覆盖。AI 标签为 `True`，且
+verifier/debate 没有结果，自动组合标签仍是 `True`，因此该行组合错误为 `1/1`。它是
+高风险样本却没有人审，使高风险审计覆盖贡献 `0/1`；过程分数为 `2/4=0.50`，claim
+支持率为 `2/4=0.50`，混合成本相对全人工基线的教学节省率为 `1-14/80=0.825`。尽管
+这行成本看似下降，漏审和证据不足仍然阻断扩展。
+
+再汇总十条教学样本。不同指标的分母不同：按样本计数、按步骤计数、按 claim 计数、
+按高风险样本计数、按基线成本比较，不能把这些比例互换。
+
+| 指标 | 手算 | 结果 | 分母含义 |
+| --- | --- | ---: | --- |
+| 人工直接覆盖 | `2/10` | `0.20` | 全部样本 |
+| 覆盖样本人工准确率 | `2/2` | `1.00` | 达到置信阈值的样本 |
+| AI feedback 错误 | `3/10` | `0.30` | 全部有 gold 的样本 |
+| Verifier 覆盖 | `7/10` | `0.70` | 全部样本 |
+| 人审前自动组合准确率 | `9/10` | `0.90` | AI/verifier/debate 组合标签 |
+| 过程步骤准确率 | `28/39` | `0.718` | 有标注的全部中间步骤 |
+| Claim 证据支持率 | `17/24` | `0.708` | 被抽取并评估的 claims |
+| 高风险人工审计覆盖 | `4/5` | `0.80` | 被风险规则标记为高风险的样本 |
+| 成本节省 | `1-132/503` | `0.738` | 同批样本的全人工成本基线 |
+| 严重度加权错误 | `5/33` | `0.152` | 全部样本的严重度权重和 |
+
+上述数值是合成标签，不是实际 judge 或模型测试结果。代码将比例保留三位小数；不能
+仅因自动组合准确率为 `0.90` 就称监督可靠，因为漏审医疗摘要是高影响失败，而且
+claim 证据和过程步骤指标未达到示例阈值。
+
+> 代码状态：已验证（2026-10-27，Python 3.12.9，标准库）；固定样例 assertions 通过，临时空分母输入确认返回 `None` 并触发未测量门槛；范围见 [progress_v2.md](../../progress_v2.md)。
+
 ```python
 from collections import Counter, defaultdict
 
@@ -832,6 +910,10 @@ def majority_label(case):
     return positives > negatives
 
 
+def safe_ratio(numerator, denominator):
+    return round(numerator / denominator, 3) if denominator else None
+
+
 human_threshold = 0.75
 direct_covered = [case for case in cases if case["human_conf"] >= human_threshold]
 verifier_cases = [case for case in cases if case["verifier_label"] is not None]
@@ -858,23 +940,27 @@ for case in cases:
 high_risk_missing_audit = [case["id"] for case in high_risk_cases if not case["human_audit"]]
 
 metrics = {
-    "direct_coverage": round(len(direct_covered) / len(cases), 3),
-    "direct_accuracy_on_covered": round(
-        sum(case["human_label"] == case["gold"] for case in direct_covered) / max(1, len(direct_covered)), 3
+    "direct_coverage": safe_ratio(len(direct_covered), len(cases)),
+    "direct_accuracy_on_covered": safe_ratio(
+        sum(case["human_label"] == case["gold"] for case in direct_covered), len(direct_covered)
     ),
-    "human_direct_error_on_covered": round(
-        sum(case["human_label"] != case["gold"] for case in direct_covered) / max(1, len(direct_covered)), 3
+    "human_direct_error_on_covered": safe_ratio(
+        sum(case["human_label"] != case["gold"] for case in direct_covered), len(direct_covered)
     ),
-    "ai_feedback_error": round(sum(case["ai_label"] != case["gold"] for case in cases) / len(cases), 3),
-    "verifier_coverage": round(len(verifier_cases) / len(cases), 3),
-    "oversight_accuracy": round(sum(oversight_labels[case["id"]] == case["gold"] for case in cases) / len(cases), 3),
-    "process_step_accuracy": round(sum(case["process_ok"] for case in cases) / total_process, 3),
-    "evidence_support": round(sum(case["claims_supported"] for case in cases) / max(1, total_claims), 3),
-    "high_risk_audit_coverage": round(
-        sum(case["human_audit"] for case in high_risk_cases) / max(1, len(high_risk_cases)), 3
+    "ai_feedback_error": safe_ratio(
+        sum(case["ai_label"] != case["gold"] for case in cases), len(cases)
     ),
-    "cost_saving": round(1 - total_mixed_cost / total_human_cost, 3),
-    "severity_weighted_error": round(severity_error / total_severity, 3),
+    "verifier_coverage": safe_ratio(len(verifier_cases), len(cases)),
+    "oversight_accuracy": safe_ratio(
+        sum(oversight_labels[case["id"]] == case["gold"] for case in cases), len(cases)
+    ),
+    "process_step_accuracy": safe_ratio(sum(case["process_ok"] for case in cases), total_process),
+    "evidence_support": safe_ratio(sum(case["claims_supported"] for case in cases), total_claims),
+    "high_risk_audit_coverage": safe_ratio(
+        sum(case["human_audit"] for case in high_risk_cases), len(high_risk_cases)
+    ),
+    "cost_saving": round(1 - total_mixed_cost / total_human_cost, 3) if total_human_cost else None,
+    "severity_weighted_error": safe_ratio(severity_error, total_severity),
 }
 
 thresholds = {
@@ -887,21 +973,45 @@ thresholds = {
 }
 
 actions = []
-if metrics["ai_feedback_error"] > thresholds["ai_feedback_error"]:
+if metrics["ai_feedback_error"] is None:
+    actions.append("样本集为空，AI feedback 错误率未测量")
+elif metrics["ai_feedback_error"] > thresholds["ai_feedback_error"]:
     actions.append("扩大人工 gold set，校准 AI feedback 的错误切片")
-if metrics["process_step_accuracy"] < thresholds["process_step_accuracy"]:
+if metrics["process_step_accuracy"] is None:
+    actions.append("没有可计分的过程步骤，过程准确率记为 N/A 并检查任务适用性")
+elif metrics["process_step_accuracy"] < thresholds["process_step_accuracy"]:
     actions.append("补充中间步骤标注和可执行 verifier")
-if metrics["evidence_support"] < thresholds["evidence_support"]:
+if metrics["evidence_support"] is None:
+    actions.append("当前样本没有 claim，证据支持率记为 N/A 并检查任务适用性")
+elif metrics["evidence_support"] < thresholds["evidence_support"]:
     actions.append("复核 claim 与证据的支持关系，禁止只看流畅度")
-if metrics["high_risk_audit_coverage"] < thresholds["high_risk_audit_coverage"]:
+if metrics["high_risk_audit_coverage"] is None:
+    actions.append("当前批次无已识别的高风险样本，审计覆盖率记为 N/A 并复核风险分层")
+elif metrics["high_risk_audit_coverage"] < thresholds["high_risk_audit_coverage"]:
     actions.append("把未审计的高风险样本转人工或专家复核")
-if metrics["severity_weighted_error"] > thresholds["severity_weighted_error"]:
+if metrics["severity_weighted_error"] is None:
+    actions.append("没有有效严重度权重，严重度加权错误率未测量")
+elif metrics["severity_weighted_error"] > thresholds["severity_weighted_error"]:
     actions.append("按严重度重排监督预算，优先修复高影响错误")
-if metrics["cost_saving"] < thresholds["cost_saving"]:
+if metrics["cost_saving"] is None:
+    actions.append("人工基线成本为零或缺失，成本节省率未测量")
+elif metrics["cost_saving"] < thresholds["cost_saving"]:
     actions.append("比较全人工、混合监督和单位成功成本")
 
-if high_risk_missing_audit or metrics["severity_weighted_error"] > thresholds["severity_weighted_error"]:
+required_metrics = [
+    "ai_feedback_error",
+    "process_step_accuracy",
+    "evidence_support",
+    "cost_saving",
+    "severity_weighted_error",
+]
+if high_risk_missing_audit or (
+    metrics["severity_weighted_error"] is not None
+    and metrics["severity_weighted_error"] > thresholds["severity_weighted_error"]
+):
     decision = "hold_for_high_risk_audit"
+elif any(metrics[key] is None for key in required_metrics):
+    decision = "hold_for_missing_measurement"
 elif metrics["ai_feedback_error"] > thresholds["ai_feedback_error"]:
     decision = "calibrate_feedback_before_expansion"
 elif metrics["process_step_accuracy"] < thresholds["process_step_accuracy"]:
@@ -1122,6 +1232,9 @@ Debate 依赖人类 judge 能判断论点，也可能变成说服力竞赛。辩
 - [AI Safety via Debate](https://arxiv.org/abs/1805.00899)：讨论通过竞争性论证帮助人类监督复杂答案的研究方向；它依赖评委能理解关键反驳。
 - [Iterated Amplification](https://arxiv.org/abs/1810.08575)：支持通过人类与模型助手的递归分解构造更强监督者的研究入口。
 - [Scalable agent alignment via reward modeling](https://arxiv.org/abs/2210.06794)：讨论用递归或分层 reward modeling 监督更复杂 Agent 行为的研究方向；具体实现仍要校准子评估器。
+- [Towards Scalable Oversight via Partitioned Human Supervision](https://proceedings.iclr.cc/paper_files/paper/2026/hash/b6f03ce953cf7f07dafa20891d2539e3-Abstract-Conference.html)：研究专家只提供互补标签时的监督估计；理论依赖多选任务、错误候选抽样和同分布假设，不可直接外推到自由文本。
+- [Scaling Laws For Scalable Oversight](https://proceedings.neurips.cc/paper_files/paper/2025/file/8c3caae2f725c8e2a55ecd600563d172-Paper-Conference.pdf)：用指定 oversight games 分析 nested oversight 的能力关系；数值绑定作者的游戏和 Elo 配置。
+- [Humans Correct Their Judgments Through Debate, but Weaker AI Models Do Not](https://arxiv.org/abs/2610.28539)：报告人类裁判与弱 AI 裁判在指定 debate 任务中的差异；不能据此推广到未测模型或所有辩论协议。
 - [Constitutional AI](https://arxiv.org/abs/2212.08073)：支持原则驱动的 critique、revision 和 AI feedback 流程，不等于 AI feedback 无偏。
 - [Learning to summarize from human feedback](https://arxiv.org/abs/2009.01325)：说明复杂文本质量可以用人类反馈训练代理评估器，但代理奖励需要独立验证。
 
@@ -1129,6 +1242,8 @@ Debate 依赖人类 judge 能判断论点，也可能变成说服力竞赛。辩
 
 - [Let's Verify Step by Step](https://arxiv.org/abs/2305.20050)：支持过程监督和逐步验证在数学推理中的研究入口，不能自动外推到所有 Agent 轨迹。
 - [Weak-to-strong generalization](https://arxiv.org/abs/2312.09390)：讨论弱监督者如何监督更强模型的实验框架；结果依赖任务、监督者和强模型的具体设置。
+- [Limits to scalable evaluation at the frontier](https://proceedings.iclr.cc/paper_files/paper/2025/hash/4264ee4376776907c0b87ed70b959585-Abstract-Conference.html)：分析 judge 去偏需要的 gold labels 及其理论限制；不等于实际项目可以按固定比例减少校准样本。
+- [The Geometry of LLM-as-Judge](https://arxiv.org/abs/2606.03043)：2026 年预印本，比较多语种 judge 间一致性和 judge—human 一致性；结果绑定论文数据集、语言和 rubric。
 - [OpenAI Model Spec](https://model-spec.openai.com/)：官方行为规范入口，支持分析监督目标和行为边界；规范文本不是独立实测结果。
 - [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：支持 Govern、Map、Measure、Manage 的治理结构。
 - [NIST Generative AI Profile](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf)：支持生成式系统的风险、测量和人工监督活动组织。

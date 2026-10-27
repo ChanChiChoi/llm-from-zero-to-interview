@@ -1293,7 +1293,7 @@
 
 23. 如何评估 Reward Model？
    考察点：pairwise accuracy、ranking loss、margin、分领域、人工评估、分布偏移。
-   回答框架：除了验证集排序准确率，还要看分领域、人类一致性、校准和 adversarial 测试。
+   回答框架：除了验证集排序准确率，还要看分领域、人类一致性、校准和 adversarial 测试；也可在配对任务中反事实改变模型对 grader 与开发者偏好的信念，比较行为敏感度，但这个差值是行为证据，不是隐藏目标的直接测量。见[第八册第四章 §8.5](book-08-ai-safety-alignment/chapters/04-reward-hacking与目标错配.md#85-用反事实评估观察-grader-敏感度)。
 
 24. 如何降低 reward hacking？
    考察点：数据质量、KL 约束、holdout、adversarial eval、人工评估。
