@@ -460,6 +460,8 @@ C_{\mathrm{unit\ success}}
 
 下面的代码只演示选择逻辑，不模拟模型 logits。它将“低置信度、连续测试失败、高风险动作”作为教师调用触发条件，并生成一个可复查的 cache key。真实系统还应加入数据脱敏、权限校验和环境 revision。
 
+> **代码状态：已验证（2026-10-26，Python 标准库；解释器小版本未记录）。** 执行输出与正文的触发类别、cache key 变化及非法输入说明一致；未运行训练器或 teacher API。
+
 ~~~python
 from dataclasses import dataclass
 import hashlib

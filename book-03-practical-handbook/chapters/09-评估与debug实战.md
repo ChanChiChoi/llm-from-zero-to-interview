@@ -1,43 +1,58 @@
-# 第 8 章：评估与 Debug 实战
+# 第 9 章：评估与 Debug 实战
 
 训练、微调、推理和 Agent 系统最终都会回到同一个问题：这一次改动究竟改变了什么？如果只有一句“感觉更好了”，团队就无法判断改动是否有效，也无法知道代价来自哪里。模型的输出是随机的，数据会变化，提示词和检索器会变化，线上用户还会不断提出训练集里没有出现过的问题；因此，评估不是项目结束时补上的一张成绩单，而是贯穿数据、训练、推理和发布的测量系统。
 
-本章把容易被压缩成几句经验的话组织成八个相连的诊断步骤：
+本章聚焦离线评估与训练排障：先固定测量对象和数据边界，再检查事实支持、训练状态、微调回归与人工评分。它回答“这次改动在哪些样本上变好或变坏，证据能支持多强的结论”，不把一项总分当作完整答案。
 
-1. 8.1 小型 benchmark：建立可复现的离线测量对象。
-2. 8.2 数据污染与评测泄漏：确认高分没有来自答案已经出现在训练或评测流程中。
-3. 8.3 幻觉与事实性：把“听起来合理”拆成可检查的 claim、证据和拒答行为。
-4. 8.4 训练不收敛的系统调试：从数据、损失、梯度、数值精度到优化器逐层缩小范围。
-5. 8.5 微调后的能力退化：识别灾难性遗忘、任务干扰、格式回归和解码变化。
-6. 8.6 生成质量人工评测：设计标注量表、盲评、多人一致性和统计汇总。
-7. 8.7 Agent 轨迹评估：从最终成败下钻到工具节点，定位首个不可恢复失败。
-8. 8.8 线上 A/B 与灰度实验：把离线结果放进真实流量、成本、延迟和安全约束中。
+六个步骤按诊断顺序推进：
 
-这些步骤互相连接，但不能互相替代。benchmark 能指出哪类样本变差，却不能自动证明没有数据污染；事实性检查能发现 unsupported claim，却不能代替训练稳定性诊断；轨迹评估能定位 Agent 在哪一步偏离约束，却不能替代最终状态检查；线上实验能观察真实用户行为，也不能用少量流量替代高风险安全测试。读者可以把整章看成一条证据链：先定义测量对象和数据边界，再解释单次失败、验证重复性，最后在受控流量中检验收益与代价。
+1. 9.1 建立固定 benchmark 和样本契约。
+2. 9.2 排查训练、评测和近重复造成的信息泄漏。
+3. 9.3 将事实性拆成 claim、证据和拒答判断。
+4. 9.4 从数据、标签、损失、梯度到数值精度排查训练不收敛。
+5. 9.5 比较微调目标收益与其他能力回归。
+6. 9.6 用量表、盲评和分歧复核评估开放式回答。
+
+图中把离线诊断画成分支，是因为相同的总分变化可能来自不同故障：事实支持问题要查 claim 和 evidence，训练不收敛要查数据与梯度，微调退化要比较能力切片，开放式质量问题要校准标注。只有这些失败都回到固定样本和逐条记录上，才形成可比较的离线结论；第十章再把证据推进到轨迹与线上阶段。
+
+```mermaid
+flowchart TD
+    A["固定样本与评分协议"] --> B["检查数据边界与泄漏"]
+    B --> C{"失败信号在哪里？"}
+    C -->|事实或证据| D["claim、来源与拒答评估"]
+    C -->|loss 或梯度| E["训练不收敛排障"]
+    C -->|目标提升伴随退化| F["微调能力回归"]
+    C -->|开放式质量| G["量表、盲评与分歧复核"]
+    D --> H["固定回归集与离线结论"]
+    E --> H
+    F --> H
+    G --> H
+    H --> I["第十章：轨迹与线上验证"]
+```
+
+它们组成同一条离线闭环：先确保比较对象可信，再区分系统错误和测量错误，之后定位失败并验证候选改动。Agent 轨迹回放和线上流量实验属于下一章的系统级评估阶段。
 
 初学者可以先抓住一个循环：
 
 ```text
-固定样本与版本
+固定样本、模型与评分规则
     ↓
-运行模型并保留完整输出
+运行基线和候选并保存逐样本输出
     ↓
-按任务和错误类型统计
+按任务切片统计，再抽取失败样例
     ↓
-抽取失败样例，提出可证伪假设
+提出可证伪假设并只改一个主要变量
     ↓
-只改变一个主要变量并重跑
-    ↓
-在灰度流量中验证真实收益与副作用
+重跑回归集，解释收益、退化与证据边界
 ```
 
-更深入的读者还需要记录 tokenizer、数据快照、模型 revision、随机种子、解码参数、检索版本、工具版本、硬件、精度、评估脚本版本以及样本筛选规则。没有这些条件，两个分数即使看起来不同，也可能没有可比性。
+有经验的读者还要固定 tokenizer、数据快照、模型 revision、随机种子、解码参数、硬件、精度、评估脚本和样本筛选规则。缺少这些条件时，两个分数即使不同，也未必可以作因果比较。
 
-前置知识是[第三册第一章的训练循环](01-pytorch基础实战.md)和[第七章的 RAG 与工具证据链](07-rag与agent项目实战.md)。本章已有的七段 Python 示例可用 Python 3.10+ 标准库分别保存为脚本运行，不需要模型文件或 GPU；输入是代码内的合成记录，输出是统计报告或训练轨迹。它们验证测量机制，不代表真实模型质量或线上发布验收。Agent 轨迹部分补充 trace 结构、失败定位和分层分母，不能只用最终任务成败给整条链路下结论。后续可在[第十三章作品集实战](13-作品集实战.md)中应用这些评估方法。
+前置知识是[第一章的训练循环](01-pytorch基础实战.md)、[第七章的 RAG 证据链](07-rag项目实战.md)和[第八章的 Agent 执行轨迹](08-agent项目实战.md)。本章的 Python 示例使用合成记录验证评分和故障诊断机制，不代表真实模型质量。完成离线分析后，下一章把 Agent 执行轨迹与线上流量放进同一条系统级发布评估链。
 
-## 8.1 小型 benchmark：把“感觉变好”变成可复现测量
+## 9.1 小型 benchmark：把“感觉变好”变成可复现测量
 
-### 8.1.1 先从一个具体场景开始
+### 9.1.1 先从一个具体场景开始
 
 假设一个客服问答模型经过微调后出现了三种现象：短问题回答更快，复杂问题更完整，但用户投诉“有时把退款条件说错了”。如果只抽取一条回答，三种现象都可能被某一个样例掩盖。我们需要一组固定样本，同时测量事实、完整性、格式、拒答和延迟，并能回答“退化发生在哪一类输入”。
 
@@ -76,7 +91,7 @@ z_i=(x_i,y_i,c_i,h_i,m_i,r_i)
 
 这里 \(\theta\) 是模型版本，\(\pi\) 是提示词或模板版本，\(\rho\) 是检索、工具和外部数据版本，\(\sigma\) 是解码与硬件配置。只记录模型名而不记录这些变量，会把多个变化混成一个结论。
 
-### 8.1.2 三类评测集各自解决什么问题
+### 9.1.2 三类评测集各自解决什么问题
 
 公开通用 benchmark 适合观察通用能力和与公开工作对照，例如 MMLU、GSM8K、HumanEval、CMMLU、C-Eval、BIG-bench 等。它们的优点是定义和结果容易交流，缺点是未必覆盖本业务的长尾输入、权限边界和输出协议；公开题目还需要考虑训练数据污染。
 
@@ -86,7 +101,7 @@ z_i=(x_i,y_i,c_i,h_i,m_i,r_i)
 
 三者可以并存：公开集提供外部参照，业务集测量当前任务，回归集守住已知错误。不要用公开集的总分替代业务集，也不要让回归集增长成没有分类和版本管理的“错误垃圾桶”。
 
-### 8.1.3 样本设计：覆盖结构比数量更重要
+### 9.1.3 样本设计：覆盖结构比数量更重要
 
 早期可以从 50--200 条高质量样本开始，但这不是一个普适的充分样本量。小样本适合快速迭代和人工复核，不能支撑非常细的百分点结论。随着系统稳定，应按任务、难度、长度、语言、风险和证据状态分层扩展。
 
@@ -114,7 +129,7 @@ private holdout：不公开、不参与日常调参，用于防止过拟合
 
 如果团队反复查看 test 的失败样例并修改模型，再把同一个 test 分数当作“未见数据”结果，test 已经被逐渐吸收到开发流程中。版本名改变并不能自动恢复独立性。
 
-### 8.1.4 样例 schema：让评分所需信息随数据保存
+### 9.1.4 样例 schema：让评分所需信息随数据保存
 
 一个最小 JSONL 样例可以写成如下形式：
 
@@ -127,7 +142,7 @@ private holdout：不公开、不参与日常调参，用于防止过拟合
 
 `scoring` 不应由评测脚本根据输入猜测。评分方式明确写在样例里，才能知道一个分数是精确匹配、结构化解析、关键词覆盖还是人工判断。RAG 样例还应保存文档版本和片段 ID；否则文档更新后，旧答案可能被错误地当作当前标准。
 
-### 8.1.5 常用评分方法以及它们看不见什么
+### 9.1.5 常用评分方法以及它们看不见什么
 
 选择题、标签分类和严格协议适合 exact match：
 
@@ -159,7 +174,7 @@ s_i^{\mathrm{schema}}=
 
 三个条件不能合成“看起来像 JSON”。例如 `{"age":"十八"}` 可能是合法 JSON，却不符合数值字段约束；`{"name":"张三","age":18,"action":"refund"}` 可能通过 schema，却没有权限执行退款。
 
-### 8.1.6 总体分数、切片分数和不确定性
+### 9.1.6 总体分数、切片分数和不确定性
 
 样例分数记作 \(s_i\in[0,1]\)，微平均分是：
 
@@ -196,7 +211,7 @@ S_{\mathrm{macro}}=\frac{1}{|G|}\sum_{g\in G}S_g
 
 Wilson 式同样要求 \(n>0\)、\(0\le x\le n\)，并且 \(z>0\) 为有限的临界值；\(n=0\) 时区间未定义，不能返回 \([0,0]\) 来制造“没有成功”的错觉。评估报告至少要同时给出样本数、点估计、区间、切片和失败样例。一个 20 条样本的 95% 准确率，与一个 20,000 条样本的 95% 准确率，证据强度并不相同。
 
-### 8.1.7 一个零依赖 benchmark runner
+### 9.1.7 一个零依赖 benchmark runner
 
 下面的实现只使用 Python 标准库，以内存中的样例字典演示模型接口、不同评分器、切片统计和 Wilson 区间。若从 JSONL 读取，应逐行解析后调用同一个 `validate_rows`；本例不包含文件读取。真实项目可以把 `call_model` 替换为本地模型、vLLM、远程 API 或 RAG pipeline；评测主流程不应因此改变。
 
@@ -380,7 +395,7 @@ print(json.dumps(report, ensure_ascii=False, sort_keys=True))
 ```
 运行后四条样例的 `micro_mean` 和 `fully_correct_rate` 都是 1.0，但四次成功的 Wilson 95% 区间约为 `[0.5101, 1.0]`，不能据此宣称系统可靠。JSON 评分器只检查对象和必填键，不验证类型、业务权限或完整 JSON Schema；例如年龄为字符串仍会通过。关键词分数是连续值，而 `fully_correct_rate` 只把完整命中的样例算作成功，两者回答不同问题。示例中的模型调用是确定性占位函数，真实模型应记录每次请求的原始响应、错误码、延迟、输入输出 token 和采样参数；空输出应作为失败记录，不应让整个评测批次丢失。
 
-### 8.1.8 失败样例比总分更能指导改动
+### 9.1.8 失败样例比总分更能指导改动
 
 评估完成后应保存每条样例的输入、上下文、输出、分数、错误标签和运行版本。错误标签最好是互斥主标签加可重复副标签，例如：
 
@@ -408,15 +423,15 @@ scores_and_intervals
 error_labels_and_examples
 ```
 
-### 8.1.9 证据层级与适用范围
+### 9.1.9 证据层级与适用范围
 
 [HELM 论文](https://arxiv.org/abs/2211.09110)把多维度、可复现和透明报告作为语言模型评估的重要原则；[OpenAI Evals](https://github.com/openai/evals) 提供了可扩展的评测组织方式；[lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness) 展示了统一任务接口和标准化运行的工程路径。这些项目能帮助我们理解评测基础设施的组织方式，但它们的任务和评分器不能直接替代某个业务的验收定义。
 
 因此，本节的公式和零依赖代码是教学实现。真正的业务结论必须绑定数据版本、运行配置、样本来源和人工复核结果；一个小 benchmark 可以帮助快速定位问题，却不能单独证明模型已经具备通用可靠性。
 
-## 8.2 数据污染与评测泄漏：先确认分数测的是什么
+## 9.2 数据污染与评测泄漏：先确认分数测的是什么
 
-### 8.2.1 一个看似优秀的结果
+### 9.2.1 一个看似优秀的结果
 
 某模型在一个公开问答集上从 72 分升到 86 分。团队先后做过继续预训练、提示词优化、检索增强和评分器重写。若没有进一步检查，我们无法知道 14 分提升来自模型能力、检索带来的外部答案、评测脚本的宽松处理，还是测试样例已经进入训练语料。
 
@@ -453,7 +468,7 @@ error_labels_and_examples
 
 这些类别的风险不同，但共同特征是评估时模型获得了不应获得的信息，或者评估者利用了测试结果改变了被测系统。
 
-### 8.2.2 文档切分与时间切分
+### 9.2.2 文档切分与时间切分
 
 随机按行切分对独立同分布的简单数据有用，但对文档、用户、订单和会话数据常常不够。应先确定泄漏单元：同一文档、同一客户、同一问题模板、同一事件或同一时间窗口的数据应尽量放在同一分区。
 
@@ -476,7 +491,7 @@ D_{\mathrm{test}}=\{z:t(z)\ge T_2\}
 
 同一个 \(g_i\) 不得出现在多个分区。客服场景中的 `customer_id`、合同场景中的 `contract_id`、代码场景中的 `repository_id` 都可能是这种分组键。
 
-### 8.2.3 近重复检测：从精确哈希到 shingle 相似度
+### 9.2.3 近重复检测：从精确哈希到 shingle 相似度
 
 完全相同的文本可以用规范化后哈希检测。规范化不能删除会改变含义的数字、否定词和单位，只能处理确定的空格、换行和 Unicode 形式。
 
@@ -490,7 +505,7 @@ J(a,b)=\frac{|S(a)\cap S(b)|}{|S(a)\cup S(b)|}
 
 大规模数据可以用 MinHash、LSH 或 embedding 检索降低全量两两比较成本；这些方法可能漏检或误报，因此最后仍需保留原文片段和人工抽样。
 
-### 8.2.4 一个零依赖近重复扫描器
+### 9.2.4 一个零依赖近重复扫描器
 
 下面的程序演示规范化、字符 shingle 和跨分区候选发现。它不是生产级去重器，却足以说明为什么“改了空格”不能被当作新样本，以及为什么结果需要人工确认。
 
@@ -556,7 +571,7 @@ for index, left in enumerate(ROWS):
 ```
 这个示例中的“3”和“三”未必能被同一套规范化规则判断为相同事实；如果业务语料经常出现数字变体，应增加领域规则或使用 token 级比较。不要为了提高召回把所有数字都删除，因为“3 天”和“30 天”会因此产生危险的假相似。
 
-### 8.2.5 训练集未知时如何调查污染
+### 9.2.5 训练集未知时如何调查污染
 
 闭源模型通常不会公开完整训练语料，因此不能从“没有看到训练数据清单”推出“没有污染”。更稳妥的证据分层是：
 
@@ -577,7 +592,7 @@ for index, left in enumerate(ROWS):
 
 单独的 membership inference 结果也不能直接给出“污染比例”。它可能受模型规模、采样方式、温度、重复程度和背景频率影响。调查结论应写成证据与不确定性，而不是把一次统计异常宣布为确定事实。
 
-### 8.2.6 评估程序也需要被测试
+### 9.2.6 评估程序也需要被测试
 
 数据泄漏不只在数据文件里。应给评分器和 runner 增加负向测试：
 
@@ -591,7 +606,7 @@ test 样例不应写入训练缓存、few-shot 缓存或 prompt 日志模板
 
 可以把评估系统看作被测软件，给它做单元测试和审计日志。一个分数只有在“数据来源、执行路径、评分器行为”都清楚时，才有解释价值。
 
-### 8.2.7 评测污染的报告写法
+### 9.2.7 评测污染的报告写法
 
 研究或工程报告至少应说明：
 
@@ -604,13 +619,15 @@ test 样例不应写入训练缓存、few-shot 缓存或 prompt 日志模板
 
 这样即使无法证明“完全没有污染”，读者也能判断证据强度和剩余风险。
 
-### 8.2.8 资料与边界
+近重复扫描只能生成候选，不能直接给污染盖章。人工复核时要同时看题目、答案或解释、来源日期和训练路径：同一模板但不同条件可能是合法重叠，换了实体或表达方式却复用了完整答案则可能被精确匹配漏掉。实际报告应把候选比例与确认重叠比例分开，说明抽查方法和分母；如果 12,000 条样本里扫描器标出 47 个候选，不能把 47 条全当作已污染，也不能因为只确认 3 条就声称其余数据没有问题。
+
+### 9.2.8 资料与边界
 
 [MMLU 论文](https://arxiv.org/abs/2009.03300)和 [BIG-bench 论文](https://arxiv.org/abs/2206.04615)说明了公开 benchmark 的规模化价值，但公开题目也带来训练可见性和复现条件问题。[HELM](https://arxiv.org/abs/2211.09110)强调透明记录和多维度报告。数据污染研究没有一个适用于所有模型、所有数据形态的单一检测器；本节的近重复公式和代码用于建立排查路径，不应被解释为“阈值以上就证明训练污染”。
 
-## 8.3 幻觉与事实性：从流畅文本追溯到可核验 claim
+## 9.3 幻觉与事实性：从流畅文本追溯到可核验 claim
 
-### 8.3.1 “说得像真的”不是事实性
+### 9.3.1 “说得像真的”不是事实性
 
 语言模型的训练目标鼓励它生成在语言和上下文中最可能出现的 token，而不是为每一句话附上经过外部世界验证的证明。因此，语法流畅、语气自信、段落结构完整，都不能单独说明内容为真。
 
@@ -662,7 +679,7 @@ R_{\mathrm{required}}(a\mid Q,E)=
 
 两式分别要求回答 claim 的总权重大于 0、必需事实集的总权重大于 0；缺少相应集合时报告“不适用”。若回答有 claim，但证据不支持其中任何一条，支持率是 0，而不是“不适用”。例如政策要求说明普通和特殊渠道两种到账时间，回答只正确说明普通渠道：其支持率可为 1，等权完整性却只有 1/2；额外捏造“当天到账”会降低支持率。这里的完整性是教学定义，不能当作 FActScore 的原始指标；写清分子、分母和 claim 抽取规则，比背一个指标名更重要。
 
-### 8.3.2 开放世界、闭合证据集与拒答
+### 9.3.2 开放世界、闭合证据集与拒答
 
 “不知道”在不同任务中有不同含义。
 
@@ -692,7 +709,7 @@ U=\Pr(c)U_c-\Pr(h)L_h+\Pr(a)U_a-\Pr(o)L_o
 
 高风险领域通常令 \(L_h\) 很大，于是系统宁可在不确定时请求更多证据；低风险创作任务则可能更重视完成率。阈值应由任务后果决定，不应把一个领域的拒答策略复制到所有领域。
 
-### 8.3.3 事实性评估的四个层次
+### 9.3.3 事实性评估的四个层次
 
 #### 层次一：字符串与结构检查
 
@@ -710,7 +727,7 @@ TruthfulQA 这类任务关注模型是否会复述常见但错误的说法；FAc
 
 同一问题重复采样时，如果答案在关键事实之间来回变化，说明模型的置信表达可能不可靠。SelfCheckGPT 等方法利用多次采样的一致性作为无外部知识时的风险信号，但一致并不等于正确：模型可能稳定地产生同一个错误。多次采样是诊断线索，不是事实证明。
 
-### 8.3.4 一个可解释的 claim 评估表
+### 9.3.4 一个可解释的 claim 评估表
 
 对每个回答建立如下记录：
 
@@ -737,7 +754,7 @@ w_j=w_{\mathrm{base}}(c_j)\cdot w_{\mathrm{risk}}(c_j)
 
 这里同样要求 claim 集合非空且 \(\sum_jw_j>0\)；否则幻觉风险率没有定义。这个权重设计让“低风险细节很多、高风险错误一个”的回答不会被简单平均掩盖。
 
-### 8.3.5 零依赖 claim 支持检查器
+### 9.3.5 零依赖 claim 支持检查器
 
 下面的程序不是自然语言推理模型，只是把人工定义的关键词证据映射成可重复的初筛结果。它的价值在于展示数据结构和失败标签，而不是替代人工或专业审查。
 
@@ -817,7 +834,7 @@ print(json.dumps(report, ensure_ascii=False, indent=2))
 ```
 输出中 r1 的支持率为 1.0，r2 为 0.0：答案说了“当天到账”，但独立的政策证据没有这一条件。`claims` 是人工从答案提取的事实，`evidence` 是人工给出的待查短语；程序既不自动抽取 claim，也不判断短语与 claim 是否语义等价。把政策改成“退款不是当天到账”，r2 仍会误判为支持，这说明字符串存在不等于语义支持。真实实现应保存文档 ID、版本和片段，并对否定、条件、时间和数字做语义判断；无检索结果时也应保留样例，单独标记证据缺失。
 
-### 8.3.6 幻觉的故障归因
+### 9.3.6 幻觉的故障归因
 
 看到错误答案时，不要直接把原因归为“模型幻觉”。至少沿着以下路径复现：
 
@@ -846,15 +863,15 @@ print(json.dumps(report, ensure_ascii=False, indent=2))
 - 正确回答后追加无依据内容：限制输出结构，要求每个外部事实绑定证据，增加 claim-level 检查。
 - 工具未执行却声称完成：让执行器返回不可伪造的状态，并在程序层阻止模型自行生成成功标记。
 
-### 8.3.7 评估工具的证据边界
+### 9.3.7 评估工具的证据边界
 
 [TruthfulQA](https://arxiv.org/abs/2109.07958) 适合观察模型是否会复述常见错误观念，但它不是企业知识库事实性测试；[FActScore](https://arxiv.org/abs/2305.14251)把长文本拆成原子事实并检查支持关系，强调了 claim 粒度的重要性；[SelfCheckGPT](https://arxiv.org/abs/2303.08896)把多次采样不一致作为无外部知识时的风险信号，但不能把一致性当作真值证明。
 
 事实性评估的最终结论应注明：证据来自给定文档还是开放网络，claim 如何抽取，否定和条件如何处理，评估模型是否经过人工校准，以及模型拒答是否算作成功。只有这样，“幻觉率下降”才是可解释的工程结论。
 
-## 8.4 训练不收敛的系统调试：先建立可证伪的假设
+## 9.4 训练不收敛的系统调试：先建立可证伪的假设
 
-### 8.4.1 “loss 不降”不是一个足够精确的症状
+### 9.4.1 “loss 不降”不是一个足够精确的症状
 
 训练日志出现一条水平线，可能意味着标签错了、数据没有变化、学习率太小、梯度被截断、参数没有加入优化器、损失计算错了、padding 处理错了，也可能是模型已经在当前数据上达到极限。相反，loss 下降也不代表训练正确：模型可能只记住了重复样本，验证集可能同步泄漏，生成阶段的 chat template 还可能不匹配。
 
@@ -907,7 +924,7 @@ q_k=\frac{U_k}{P_k},\quad P_k>0
 
 这里的更新量比 \(q_k\) 只在 \(P_k>0\) 时定义；若参数范数为 0，应单独报告“相对更新量不适用”，不要用一个任意的 \(\varepsilon\) 把定义域问题隐藏起来。当 \(G_k\) 接近 0，可能是梯度确实很小，也可能是 loss 没有连接到目标参数；当 \(G_k\) 极大或出现 NaN，常见原因是学习率、数据、精度、非法 logits 或 loss mask；当 \(G_k\) 正常而 \(U_k\) 接近 0，可能是学习率太小、优化器状态异常或参数未被更新。
 
-### 8.4.2 第一层：数据和标签不变量
+### 9.4.2 第一层：数据和标签不变量
 
 在看 GPU 利用率之前，先对一个 batch 做不变量检查：
 
@@ -923,7 +940,7 @@ padding 位置是否使用 ignore index
 
 对于监督微调，最常见的隐蔽错误是 assistant 标签全部被 mask，导致有效 token 数为 0；或者把输入和目标错位，模型在学习预测错误位置。打印一条样本的 token、label、mask 和解码文本，往往比看几百行训练日志更快。
 
-### 8.4.3 第二层：在极小数据上过拟合
+### 9.4.3 第二层：在极小数据上过拟合
 
 选择少量样本，关闭复杂增强和随机采样，固定 batch，观察训练 loss 是否明显下降并且生成结果是否接近训练目标。这个实验不是为了获得泛化能力，而是验证计算图、数据通路和优化器确实连接起来。
 
@@ -937,7 +954,7 @@ padding 位置是否使用 ignore index
 
 小数据过拟合成功后，再逐项恢复真实设置；每恢复一项都运行相同的 smoke test。
 
-### 8.4.4 第三层：损失、梯度和数值精度
+### 9.4.4 第三层：损失、梯度和数值精度
 
 常见训练曲线与可能原因可以这样读：
 
@@ -973,7 +990,7 @@ v_t=\beta_2v_{t-1}+(1-\beta_2)g_t^2
 
 Adam 式中的 \(\epsilon>0\) 是数值稳定项；同时通常要求 \(0\le\beta_1,\beta_2<1\)，学习率 \(\eta>0\)，并保证分母有限。恢复 checkpoint 时若漏掉 optimizer state，虽然模型参数被加载，动量和二阶统计却从头开始，前几步的行为可能明显不同。恢复训练的日志必须记录 global step、scheduler step、optimizer state 和随机状态。
 
-### 8.4.5 一个零依赖的最小训练实验
+### 9.4.5 一个零依赖的最小训练实验
 
 下面用 Python 标准库训练一个二分类线性模型。它不代表 Transformer 的训练机制，却可以验证数据、梯度、学习率和损失曲线的基本关系；如果连这个最小循环都不能稳定下降，就不应先怀疑复杂模型的“能力不足”。
 
@@ -1055,7 +1072,7 @@ print("predictions=", predictions)
 ```
 损失采用 logits 形式的稳定二元交叉熵，避免截断概率后让损失与梯度失配。日志中的 loss 属于本步更新前的参数，而打印的权重和 bias 属于更新后；最终预测单独使用最后一次更新后的参数。运行时应看到平均 loss 从约 0.6931 下降，最后预测为 `[0, 0, 0, 1]`。把 learning_rate 改成非常大的数，可以观察振荡或数值异常；把 DATA 中的 target 全改成同一个值，则可以观察到模型只学到常数基线。这个实验把“训练失败”转成了可以人为制造和观察的现象。
 
-### 8.4.6 真实训练中的定位顺序
+### 9.4.6 真实训练中的定位顺序
 
 当大型训练出现异常，可以按成本从低到高推进：
 
@@ -1080,7 +1097,9 @@ print("predictions=", predictions)
 
 这种记录比“调了很多参数后终于能训”更有价值，因为它能指导下一次相似故障。
 
-### 8.4.7 训练稳定性与泛化不是同一件事
+小样本过拟合测试提供一个有用的分岔点：若有效 label 数为零，先修监督 mask；若 label 存在而 loss 完全不变，检查 logits、梯度和 optimizer 参数组是否连接；若几条样本可以过拟合、扩大后才发散，再看学习率、梯度裁剪、精度和 batch 构成。反过来，能记住 8 条样本不等于训练方案有效，它只说明模型、损失和更新至少在这条最短路径上能够工作；泛化仍要靠独立切分和任务指标判断。
+
+### 9.4.7 训练稳定性与泛化不是同一件事
 
 训练 loss 下降只说明优化目标在当前数据上变小。还应检查：
 
@@ -1090,15 +1109,15 @@ print("predictions=", predictions)
 - 长短输入、不同语言和安全样本的切片；
 - 峰值显存、吞吐、梯度溢出和 checkpoint 可恢复性。
 
-如果训练集和验证集高度近重复，验证 loss 也可能很漂亮；如果训练目标只监督答案而线上要求工具调用，loss 下降也不保证协议正确。训练调试必须和第 8.1、8.2 节的评估、污染检查一起看。
+如果训练集和验证集高度近重复，验证 loss 也可能很漂亮；如果训练目标只监督答案而线上要求工具调用，loss 下降也不保证协议正确。训练调试必须和第 9.1、9.2 节的评估、污染检查一起看。
 
-### 8.4.8 资料与边界
+### 9.4.8 资料与边界
 
 [PyTorch Autograd 文档](https://docs.pytorch.org/docs/stable/notes/autograd.html)说明了梯度记录和计算图行为；[Adam 论文](https://arxiv.org/abs/1412.6980)给出了自适应优化器的基本形式；[Deep Learning](https://www.deeplearningbook.org/)系统讨论了优化、数值和泛化问题。这里的调试顺序是工程方法，不是保证所有训练故障都能一次定位的算法；复杂分布式训练还需要结合通信、内存、数据加载和硬件错误日志。
 
-## 8.5 微调后的能力退化：从目标任务提升到整体能力衡量
+## 9.5 微调后的能力退化：从目标任务提升到整体能力衡量
 
-### 8.5.1 一个模型可以同时变好和变坏
+### 9.5.1 一个模型可以同时变好和变坏
 
 微调完成后，目标任务分数上涨并不意味着模型整体能力上涨。一个客服模型可能更会使用企业术语，却更容易把普通问题拒答；一个代码模型可能更擅长某种仓库风格，却不再遵守 JSON 协议；一个领域模型可能在专业问答上提高，却忘记通用数学、语言或安全边界。
 
@@ -1155,9 +1174,9 @@ latency_and_cost_before -> latency_and_cost_after
 \Delta_{\mathrm{retain}}=S_{\mathrm{retain}}(\theta)-S_{\mathrm{retain}}(\theta_0)
 ```
 
-当 \(\Delta_{\mathrm{target}}>0\) 而 \(\Delta_{\mathrm{retain}}<0\) 时，应报告这两个方向，而不是把它们混成一个平均分。平均分掩盖切片退化的方式，与第 8.1 节中只看 micro average 的问题相同。
+当 \(\Delta_{\mathrm{target}}>0\) 而 \(\Delta_{\mathrm{retain}}<0\) 时，应报告这两个方向，而不是把它们混成一个平均分。平均分掩盖切片退化的方式，与第 9.1 节中只看 micro average 的问题相同。
 
-### 8.5.2 先排除“评估看起来退化”的假象
+### 9.5.2 先排除“评估看起来退化”的假象
 
 微调后分数下降，不一定是遗忘。首先检查以下条件是否保持一致：
 
@@ -1173,7 +1192,7 @@ temperature、top_p、max_tokens 是否一致
 
 例如，模型本身能够生成正确 JSON，但新的 tokenizer 把结束符处理不同，runner 在等待停止符时截断了输出；这应该归入协议或服务回归，而不是直接写成“模型遗忘 JSON”。
 
-### 8.5.3 退化曲线与有效训练预算
+### 9.5.3 退化曲线与有效训练预算
 
 训练步数、学习率和数据重复次数共同决定模型被新分布推动多远。设训练 token 数为 \(T\)，每个样本平均长度为 \(\ell\)，样本重复或 epoch 数为 \(e\)，则粗略关系为：
 
@@ -1191,7 +1210,7 @@ r_{\mathrm{update}}=\frac{\lVert\theta-\theta_0\rVert_2}{\lVert\theta_0\rVert_2}
 
 这个比值只在 \(\lVert\theta_0\rVert_2>0\) 时有定义；若基座参数范数为 0，应报告相对更新量不适用，不能用任意 \(\varepsilon\) 掩盖分母为 0。它不能单独预测质量，但能帮助比较不同微调方案是否施加了相近强度的改变。对 LoRA 等参数高效微调，还应记录 adapter 参数范数、合并前后行为以及目标层集合。
 
-### 8.5.4 解决退化的几条路线
+### 9.5.4 解决退化的几条路线
 
 #### 路线一：混合回放数据
 
@@ -1242,7 +1261,7 @@ Elastic Weight Consolidation 使用参数重要性估计，惩罚关键参数偏
 #### 路线五：路由和分工
 
 如果新任务与通用任务冲突明显，可以使用场景路由、adapter 路由或多个专门模型，而不是要求一个模型在所有目标上用同一组参数达到最优。路由会增加服务复杂度、缓存和评估组合数，但有时比继续扩大单一模型的训练约束更可控。
-### 8.5.5 用一个退化矩阵理解方案取舍
+### 9.5.5 用一个退化矩阵理解方案取舍
 
 假设三种微调方案得到如下结果，分数均归一化到 0--1：
 
@@ -1262,7 +1281,7 @@ U_{\mathrm{deploy}}=w_tS_{\mathrm{target}}+w_gS_{\mathrm{general}}+w_fS_{\mathrm
 
 这里的各项分数应在同一约定的 \([0,1]\) 范围内，\(w_t,w_g,w_f,w_s\ge0\) 且权重和为 1；\(C\) 应是有限的非负成本，\(\lambda_c\ge0\)。这只是决策账本，不是训练目标。权重应由业务风险和用户后果决定；安全和权限类指标往往不适合仅靠加权平均处理。
 
-### 8.5.6 一个零依赖退化分析器
+### 9.5.6 一个零依赖退化分析器
 
 下面的程序输入基座模型和微调模型在不同切片上的结果，计算相对变化、加权效用和最差切片。它不替代人工分析，但能防止只打印一个总平均分。
 
@@ -1363,7 +1382,7 @@ print(json.dumps(report, ensure_ascii=False, indent=2))
 ```
 如果 adapter_large 的加权效用因为目标任务权重较高而排在前面，仍要注意它的通用、格式和安全切片显著下降。代码把变化和约束分开打印，提醒我们“排序最高”不等于“适合使用”。
 
-### 8.5.7 如何区分遗忘、任务干扰和评估协议变化
+### 9.5.7 如何区分遗忘、任务干扰和评估协议变化
 
 可以设计四组对照：
 
@@ -1389,15 +1408,15 @@ print(json.dumps(report, ensure_ascii=False, indent=2))
 
 这些探针不是通用能力的替代品，而是帮助把“分数下降”拆成可解释行为。
 
-### 8.5.8 资料与边界
+### 9.5.8 资料与边界
 
 [EWC 论文](https://arxiv.org/abs/1612.00796)给出了通过参数重要性减轻灾难性遗忘的经典路线；[LoRA 论文](https://arxiv.org/abs/2106.09685)说明了低秩更新如何降低可训练参数量，但参数少不等于没有能力退化；输出锚定、回放和多任务混合的效果依赖数据比例、任务冲突、学习率、目标模块和评估集。
 
 因此，微调方案不能只用“目标分数最高”选择。必须把新能力、旧能力、协议、安全、成本和不同输入切片放在同一份版本化报告里。
 
-## 8.6 生成质量人工评测：把主观判断变成可校准的测量
+## 9.6 生成质量人工评测：把主观判断变成可校准的测量
 
-### 8.6.1 为什么自动指标不够
+### 9.6.1 为什么自动指标不够
 
 开放式生成没有一个对所有任务都适用的唯一参考答案。一个客服回答可能没有逐字复现参考答案，却完整解释了条件；一个 RAG 回答可能文字流畅，但引用并不支持结论；一个安全回答可能拒绝了危险请求，却使用了不必要的强硬措辞。BLEU、ROUGE、字符串匹配或 embedding 相似度都只能观察其中一部分。
 
@@ -1435,7 +1454,7 @@ case_id, answer_a, answer_b, winner, tie_reason, error_tags
 
 A/B 位置必须随机，回答内容应去掉模型名称、版本名和内部提示词。若新模型总在 B 位置，位置偏好会污染结果；若标注员知道产品方期待哪个版本，也会产生预期效应。
 
-### 8.6.2 量表设计：分数必须有行为锚点
+### 9.6.2 量表设计：分数必须有行为锚点
 
 以事实正确性为例，1--5 分可以写成行为定义，而不是抽象形容词：
 
@@ -1461,7 +1480,7 @@ A/B 位置必须随机，回答内容应去掉模型名称、版本名和内部�
 
 量表还要给出正例、反例和边界案例。没有锚点时，标注员会把“3 分”理解成中间情绪，把“4 分”理解成自己满意，分数之间就失去可比性。
 
-### 8.6.3 硬性条件与加权分数要分开
+### 9.6.3 硬性条件与加权分数要分开
 
 安全、关键事实和结构化解析通常不适合简单平均。设维度分数为 \(s_d\)，权重为 \(w_d\)，加权总分为：
 
@@ -1479,7 +1498,7 @@ C_{\mathrm{all}}=\prod_{i\in\mathcal{H}}C_i
 
 这里要求 \(\mathcal{D}\ne\varnothing\)、\(w_d\ge0\)、权重和确实为 1，且每个 \(s_d\) 与 \(\tau_d\) 位于预先约定的评分范围内；\(\mathcal{H}\) 是明确列出的事实、安全、格式等关键维度集合。一个回答即使加权分数很高，只要核心条件不满足，也应被标记为需要修复或限制使用。这里的条件是评测协议中的判断，不是对所有场景都适用的固定数字；阈值应由风险和业务后果确定。
 
-### 8.6.4 标注流程：校准、盲评和复核
+### 9.6.4 标注流程：校准、盲评和复核
 
 #### 第一步：编写标注指南
 
@@ -1497,7 +1516,7 @@ C_{\mathrm{all}}=\prod_{i\in\mathcal{H}}C_i
 
 分歧样本由资深标注员或领域专家仲裁，并保留原始分数、仲裁理由和指南版本。修改指南后，不应把新旧分数直接混在一起；需要重新标注一部分校准集，观察量表变化带来的影响。
 
-### 8.6.5 一致性：不要只看平均分
+### 9.6.5 一致性：不要只看平均分
 
 若两名标注员在 \(n\) 条样本上的类别标签分别为 \(a_i,b_i\)，观测一致率为：
 
@@ -1515,7 +1534,7 @@ Cohen's Kappa 进一步扣除按边际分布计算的偶然一致率 \(p_e\)：
 
 标注一致性低时，先检查量表和样本难度，不要直接把低一致性归咎于标注员。常见原因是：事实需要领域知识、维度定义重叠、正例不足、证据版本不一致、回答 A/B 排序没有随机，或任务本身存在合理多解。
 
-### 8.6.6 样本抽取与统计
+### 9.6.6 样本抽取与统计
 
 人工评测样本应分层抽取，而不是只随机抽取高频简单请求：
 
@@ -1540,7 +1559,7 @@ Cohen's Kappa 进一步扣除按边际分布计算的偶然一致率 \(p_e\)：
 
 这里要求 \(w,l\ge0\) 且 \(w+l>0\)；如果所有比较都是平局，排除平局后的胜率没有定义，应报告“不适用”。当样本很少时，点估计容易被几条样本改变。报告区间比只写“B 胜率 60%”更诚实。
 
-### 8.6.7 LLM-as-Judge 的位置
+### 9.6.7 LLM-as-Judge 的位置
 
 另一个语言模型可以大规模读取回答、参考答案和评分标准，降低人工成本。它适合做初筛、回归、候选错误标签和人工复核排序；它不应无条件替代高风险事实判断、专业审查和最终发布决定。
 
@@ -1558,7 +1577,7 @@ judge_prompt_revision
 
 需要检查 position bias、verbosity bias、self-preference、格式偏好和语言偏好。例如更长的回答可能看起来更完整，却包含更多未经支持的 claim；与被评估模型同源的 judge 可能偏好相似表达。人工小样本应作为校准集，定期比较 judge 与专家判断的分歧。
 
-### 8.6.8 一个零依赖人工评测统计器
+### 9.6.8 一个零依赖人工评测统计器
 
 下面的程序模拟两名标注员的维度评分、关键条件、错误标签和 pairwise 结果。它的重点是把维度、失败条件和相对偏好分开统计。
 
@@ -1726,7 +1745,7 @@ print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
 ```
 输出中 A、B 的 `weighted_mean` 分别为 0.6725、0.94，`condition_failure_rate` 分别为 0.5、0；排除两次平局后 B 胜率为 4/5，即 0.8。均值和失败率按标注记录计算，本例每条回答恰有两名标注员，不能把八条评分记录视为八个独立问题。多人评分数量不均时，应先按回答汇总，再按问题聚合；区间估计也应保留同一问题内的相关性。真实评测还应分开统计解析失败、引用错误、严重安全事件和领域专家否决。不同错误的严重程度不能被一个布尔值完全表达。
 
-### 8.6.9 评测表的最小字段
+### 9.6.9 评测表的最小字段
 
 一份可维护的 absolute rating 表可以包含：
 
@@ -1749,537 +1768,19 @@ timestamp
 
 成对比较还需保存回答顺序的随机种子和原始 A/B 映射，方便排查位置效应。引用评估要保存 evidence span，而不是只保存 URL；工具调用评估要保存工具请求、执行返回和最终叙述三者。
 
-### 8.6.10 资料与边界
+### 9.6.10 资料与边界
 
 [Cohen's Kappa 原始论文 A Coefficient of Agreement for Nominal Scales](https://doi.org/10.1177/001316446002000104)提出了分类判断一致性的一种校正方法；[Krippendorff 关于内容分析一致性的论文](https://doi.org/10.1111/j.1468-2958.2004.tb00738.x)讨论了不同数据类型的一致性；HELM 和 OpenAI Evals 则提供了多维评估与可复现评测基础设施的公开参考。
 
 [Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena](https://arxiv.org/abs/2306.05685)讨论位置、冗长和自我偏好等评审偏差；其人工一致性结论绑定论文的模型、题目和协议，不代表任意 judge 在新业务中都可靠。
 
+OpenAI 的托管 Evals 文档截至 2026-10-28 标注：既有托管服务计划于 2026-10-31 转为只读、2026-11-30 关闭；这是服务时间线，不等于开源评测代码仓库关闭，也不代表评估方法失效。若项目依赖该服务，先核对官方[迁移与下线说明](https://developers.openai.com/api/docs/guides/evals)，并把数据集、grader 与运行记录保留为可迁移工件。
+
 人工评测不是把主观判断伪装成客观真值。量表、标注员、证据来源和仲裁过程都应进入结果记录；任何“模型 B 更好”的结论都应能追溯到具体任务、具体维度和具体失败样例。
 
-## 8.7 Agent 轨迹评估：从最终成败定位首个不可恢复失败
-
-第七章已经让 Agent 把模型请求、工具执行和回执放进一条状态轨迹。评估时不能只检查最后一句答复：两个 Agent 可能都没有完成任务，一个是因为工具暂时超时、随后安全停止；另一个却先越权修改数据，再在最终总结中承认失败。只记“成功/失败”会把这两种完全不同的系统行为压成同一个标签。
-
-Agent 轨迹至少要同时回答三个问题：用户目标有没有达成，过程中的每个动作是否满足当时生效的工具和业务约束，失败最早在何处从可恢复变成不可恢复。这里的“第一处可疑”不必然是根因；一个错误格式的工具提议可能被执行器拒绝并安全恢复。根因分析关注的是最早破坏关键不变量、且后续步骤无法撤销其影响的事件。
-
-以“把订单 741 的收货地址改到新地址”为例，业务规则要求先核验订单归属，再向用户展示新地址并获得明确确认，最后调用更新工具。若轨迹显示模型在确认之前发出 `update_address`，这只是候选动作；若执行器根据缺少确认的回执拒绝执行，外部状态没有变化，Agent 仍可补问。相反，如果执行器返回 `accepted=true`，订单状态已经更新，而轨迹中不存在确认事件，那么第一个不可恢复的策略失败发生在这次已执行的工具调用。后面的“已为您更改”也许是真的，但不能反过来证明动作合规。
-
-一次可审计轨迹应保留任务与会话 ID、目标状态、模型和提示版本、每轮输入/输出、工具名称与参数、工具执行回执、动作前后状态、策略版本、guard 判定、时间戳、停止原因和最终状态。敏感字段需要脱敏；保存原始证据不意味着允许把所有私人内容写入普通日志。重放时还要固定模拟环境、工具版本和外部初始状态，否则相同文本不保证重现相同副作用。
-
-```mermaid
-flowchart LR
-    A["用户目标与初始状态"] --> B["模型节点与工具提议"]
-    B --> C["schema、权限和业务 guard"]
-    C --> D{"执行器回执"}
-    D -->|拒绝且无副作用| E["可恢复：补问、重试或停止"]
-    D -->|已执行并破坏不变量| F["首个不可恢复失败"]
-    D -->|执行成功且合规| G["检查后续状态与最终目标"]
-    E --> H["轨迹评分与回归集"]
-    F --> H
-    G --> H
-```
-
-图里把动作提议、guard 判定、真实执行和最终目标拆成不同节点，是因为它们对应不同责任边界。评测器如果只读取模型输出，就不知道工具是否真的执行；如果只读取外部最终状态，又可能漏掉一个被正确拦截、但频繁发生的高风险提议。可靠报告应把过程诊断和任务结果并排呈现。
-
-| 指标 | 计算对象 | 适合回答的问题 | 不能代替什么 |
-| --- | --- | --- | --- |
-| 任务成功率 | 达到预先定义终态的任务数 / 纳入任务数 | 用户目标是否完成 | 过程是否合规、失败在哪一步 |
-| 工具选择准确率 | 选择正确工具的适用节点 / 需要工具的节点 | 路由是否合适 | 参数是否合法、工具结果是否正确 |
-| 参数契约通过率 | 合法参数调用数 / 已发起工具调用数 | schema 和参数检查是否通过 | 权限、业务状态与副作用安全 |
-| 策略违例率 | 有效违例轨迹数 / 相关策略适用轨迹数 | 安全边界是否被突破 | 对低发生率高后果风险的完整认识 |
-| 失败定位准确率 | 首个关键失败节点被正确标出的样例 / 有金标失败样例数 | 诊断是否找对位置 | 根因类别是否正确、修复是否有效 |
-
-分母必须按适用事件定义。例如，没有任何需要调用工具的任务，工具选择准确率应记为 N/A，而不是 100%；策略从未适用的轨迹也不能进入违例率分母。一个小型标注集可以先有 12 条轨迹：其中 8 条达到目标，任务成功率是 `8/12=66.7%`；10 条工具选择正确，适用节点共 12 个，选择准确率是 `10/12=83.3%`；1 条发生真实越权副作用，策略违例率是 `1/12=8.3%`。这三个数字同时描述系统，不能平均成一个“综合成功分”掩盖安全事件。样本只有 12 条也不足以给低概率风险作稳定估计，必须把逐条事件和不确定性保留下来。
-
-诊断顺序可以从可执行的硬约束开始：schema、权限、金额边界、必需确认、幂等键和外部状态迁移优先用代码核对；再由经过人工校准的评审者分析策略遵循、证据支持和对话质量。自动评审的输入要包含相关轨迹节点和执行回执，不能让 judge 依据最终自然语言猜测是否发生了副作用。系统级汇总再找共因，例如所有失败都发生在某个工具 schema 版本，或长对话的 token 截断让确认状态丢失。
-
-OpenAI 的 Agent Evals 文档把单条 trace 用于调试，并建议在“好”的标准明确后转为固定数据集和重复评测；Agentic CLEAR 研究探索 system、trace、node 多层诊断；Microsoft Research 发布的 AgentRx 以带 guard 条件的约束和逐步证据日志寻找 critical failure step。这些材料说明了可操作的评估方向，不代表其产品接口、论文分数或 115 条失败样例可以直接替代本项目的目标任务和独立复核。
-
-实际改进时，应把一次失败轨迹转成最小回归样例：固定初始状态、预期允许/禁止动作、工具返回和验收条件；只修改一个主要变量，然后重放原失败集和安全回归集。若最终任务成功率提高、但工具授权违例或虚报完成率也提高，改动不能据此放行。修复后仍需检查新数据是否覆盖同类失败、是否引入新路径，最后才把稳定的离线版本送入有护栏的灰度实验。
-
-### 8.7.1 资料与证据边界
-
-- [OpenAI Agent Evals](https://developers.openai.com/api/docs/guides/agent-evals) 区分单条轨迹诊断和固定数据集上的重复评测。
-- [Agentic CLEAR](https://arxiv.org/abs/2605.22608) 是 2026 年研究预印本，报告 system、trace 和 node 层面的诊断方法；其结果受论文中的 benchmark 和评审协议约束。
-- [AgentRx](https://www.microsoft.com/en-us/research/blog/systematic-debugging-for-ai-agents-introducing-the-agentrx-framework/) 是 Microsoft Research 对框架和 115 条人工标注失败轨迹的介绍；发布方报告的定位提升数字不是本地复现结果。
-
-本节数值为合成例子，代码 guard 适合验证结构化约束，LLM judge 适合产生需要复核的语义候选；任何一种都不能单独证明真实系统安全。轨迹中的策略版本、执行器状态和标注协议应跟着结果保存。
-
-## 8.8 线上 A/B 与灰度实验：在真实流量中验证收益和代价
-
-### 8.8.1 离线变好，为什么还要线上实验
-
-离线评估集可以控制输入和参考答案，却不能完整模拟真实用户。线上系统还有多轮上下文、缓存、检索版本、工具失败、网络延迟、用户中途退出、重复追问、成本预算和安全举报。一个新模型在离线问答集上提高 3%，可能因为输出更长而让 P95 延迟增加 40%；也可能因为更积极地调用工具而提高解决率，却增加了错误动作。
-
-A/B 实验把真实流量随机分成对照组和实验组，在相同业务环境中比较预先定义的指标。它不是把一个版本“盖章”为永远正确，而是在一段时间和一组流量条件下估计变化，并持续观察风险。
-
-### 初学者视角：先固定人，再比较模型
-
-如果同一个用户今天使用 A，下一轮又使用 B，他可能会把两种模型的答案混在同一段对话中。对单轮独立请求，这种随机方式有时可以接受；对多轮客服、Agent、个性化推荐和长期留存，应优先使用会话级或用户级分配，让实验单元在实验期间保持稳定。
-
-```text
-Control：旧模型或当前线上版本
-Treatment：新模型、提示词或系统版本
-实验单元：用户、会话、请求或组织
-主指标：希望改善的业务结果
-护栏指标：不能出现不可接受恶化的安全、质量、成本和稳定性指标
-诊断指标：帮助解释变化来自哪里
-```
-
-### 深入视角：A/B 是一个随机化估计问题
-
-令实验单元为 \(u\)，实验名为 \(e\)，哈希函数把它映射到 \(M\) 个桶，Treatment 比例为 \(\rho\)：
-
-```math
-r(u)=\frac{h(e,u)\bmod M}{M},\qquad
-b(u)=\mathbb{1}[r(u)<\rho]
-```
-
-这里要求 \(M\) 是正整数，且 \(0\le\rho\le1\)；在真正比较两组时还应有 \(0<\rho<1\)，否则某一组没有样本。哈希结果和分桶规则必须保持稳定。同一 \(e,u\) 必须得到稳定的 \(b(u)\)。实验名进入哈希键，可以避免同一用户在不同实验中意外共享分桶结果；组织级产品还要考虑同一企业内多个用户互相影响，不能只看个人随机化。
-
-对二值指标，Control 组成功数和样本数为 \((x_A,n_A)\)，Treatment 组为 \((x_B,n_B)\)：
-
-```math
-\hat p_A=\frac{x_A}{n_A},\qquad
-\hat p_B=\frac{x_B}{n_B},\qquad
-\Delta=\hat p_B-\hat p_A
-```
-
-提升量的近似标准误为：
-
-```math
-\mathrm{SE}_{\Delta}=
-\sqrt{\frac{\hat p_A(1-\hat p_A)}{n_A}
-+\frac{\hat p_B(1-\hat p_B)}{n_B}}
-```
-
-这些比例要求 \(n_A,n_B>0\)，并且 \(0\le x_A\le n_A\)、\(0\le x_B\le n_B\)。95% 近似区间为 \(\Delta\pm1.96\mathrm{SE}_{\Delta}\)。检验两组是否来自同一成功率时，常用合并比例：
-
-```math
-\hat p=\frac{x_A+x_B}{n_A+n_B}
-```
-
-```math
-z=\frac{\hat p_B-\hat p_A}
-{\sqrt{\hat p(1-\hat p)(1/n_A+1/n_B)}}
-```
-
-合并比例还要求 \(n_A+n_B>0\)，而 z 统计量的分母必须大于 0；如果两组成功率都处在完全相同的 0 或 1 边界，普通 z 值未定义，应使用适合边界比例的区间或只报告点估计。这些公式依赖独立样本、合理的随机化和足够的近似条件。多轮会话、同一用户多次请求和用户之间的社交影响都会让样本相关，不能机械地把每个请求当成独立观测。
-
-### 8.8.2 先定义主指标、护栏和诊断指标
-
-主指标应在实验开始前确定，例如客服场景的问题解决率、用户明确满意率、人工转接率或有效任务完成率。主指标不能在实验结束后从十几个指标中挑一个看起来最好的数字。
-
-护栏指标观察不应被牺牲的维度：
-
-```text
-安全违规率和高风险错误率
-事实错误或用户投诉率
-请求失败率和工具执行失败率
-P50、P95、P99 延迟以及首 token 延迟
-输入输出 token、单次成本和日预算
-格式解析失败率、过度拒答率
-核心用户群和关键业务场景的退化
-```
-
-诊断指标帮助解释主指标变化：
-
-```text
-平均输出长度
-检索命中与引用覆盖率
-工具调用次数、成功率和重试次数
-二次追问率与会话轮数
-不同 query 长度、语言、渠道和任务类型的切片
-缓存命中率、队列等待和模型服务错误码
-```
-
-一个完整的结论不应只有“解决率提高”，而应说明提高是否伴随更长回答、更高成本、更少人工转接，或者只是某一类简单问题占比改变。
-
-### 8.8.3 实验单元的选择
-
-#### 请求级随机
-
-每个请求独立分配。它实现简单、样本增长快，适合单轮、无状态、结果互不影响的任务。缺点是同一用户或会话会在 A/B 之间切换，无法评价连贯的多轮体验。
-
-#### 会话级随机
-
-同一 session 固定模型。它适合客服、RAG 多轮问答和 Agent 任务，可以测量一次完整会话的解决率、工具成功率和用户是否继续追问。需要稳定保存 session 与实验组映射，跨设备或登录状态变化时要有明确规则。
-
-#### 用户级随机
-
-同一用户在实验周期内固定模型。它适合留存、长期满意度、复购和个性化产品，能减少跨组污染，但需要更长实验周期和更大样本量。
-
-#### 组织级随机
-
-企业客户常有共享知识库、团队策略和预算。如果同一组织内不同用户被分到不同模型，模型结果可能相互影响；对于组织级策略，应考虑按 tenant 或工作空间随机，同时关注组织间规模差异。
-
-选择原则不是“粒度越细越科学”，而是选择能够保持因果链和用户体验稳定的最小实验单元。
-
-### 8.8.4 Sample Ratio Mismatch：先检查分桶是否真的生效
-
-假设计划按 50:50 分组，但实际日志中 Control 有 6,000 条，Treatment 有 4,000 条。直接计算满意率没有意义，因为流量分配、过滤、日志丢失或缓存路由可能已经破坏了随机化。
-
-对 \(k\) 个分组，观测数为 \(o_j\)，期望数为 \(e_j\)，可以计算：
-
-```math
-\chi^2_{\mathrm{SRM}}=\sum_{j=1}^{k}\frac{(o_j-e_j)^2}{e_j}
-```
-
-该式要求每个期望计数 \(e_j>0\)，且总样本数大于 0；如果某个分组的计划比例为 0，卡方统计量不适用。卡方近似还需要足够的期望计数，稀疏分桶应使用适合小样本的方法。计数应对应分配的随机化单元；按用户分桶时，不能直接用受到 treatment 影响的请求数检验原定用户比例。SRM 异常可能来自：
-
-```text
-实验路由条件与统计过滤条件不一致
-某组请求更容易超时或被丢弃
-缓存 key 没有包含实验组
-登录、设备或渠道字段在一组缺失
-重复请求和重试只在一组被计数
-实验配置没有在所有服务实例同步
-日志采集延迟或字段解析错误
-```
-
-SRM 本身不解释业务指标，但它是随机化有效性的前置检查。发现异常时，应先修复或隔离实验数据，而不是继续解释谁更好。
-
-### 8.8.5 样本量、显著性和实际意义
-
-如果基线成功率为 \(p_1\)，希望检测到 \(p_2\)，两组近似等量时，常见的样本量估计如下。这里通常要求 \(0<p_1,p_2<1\)、\(p_1\ne p_2\)，并预先给定显著性水平 \(\alpha\) 与检验功效 \(1-\beta\)：
-
-```math
-n\approx
-\frac{\left(
-z_{1-\alpha/2}\sqrt{2\bar p(1-\bar p)}
-+z_{1-\beta}\sqrt{p_1(1-p_1)+p_2(1-p_2)}
-\right)^2}{(p_2-p_1)^2},
-\qquad
-\bar p=\frac{p_1+p_2}{2}
-```
-
-这里 \(z_q\) 为标准正态分布的第 \(q\) 分位数，\(n\) 是每组样本量。例如 \(p_1=0.77,p_2=0.79,\alpha=0.05\)、功效 0.8 时，取 \(z_{0.975}\approx1.96,z_{0.8}\approx0.842\)，每组约需 6,736 个独立单元（将近似值 6,735.15 向上取整）。预期提升越小，所需样本量按提升量平方的倒数增长。用户反馈有延迟、指标方差很大或用户级随机化时，有效样本量还会进一步下降。
-
-统计显著不等于业务值得。一个 0.1 个百分点的提升可能在百万请求下显著，却无法覆盖新增 token 成本；一个高风险错误率的微小上升可能未达到显著，却仍值得暂停扩量。报告要同时给出点估计、置信区间、样本量、成本和风险后果。
-
-实验期间频繁查看结果并在某个好看的时刻提前结束，会增加假阳性。若业务必须连续监控，应使用预先设计的 sequential testing 或明确的停止规则，不要把普通固定样本检验反复使用。
-
-### 8.8.6 一个零依赖的 A/B 统计 demo
-
-下面的程序演示稳定分桶、SRM、二比例差异、Wilson 区间、延迟和成本护栏。数字是教学数据，不能代表任何真实服务。
-
-> 代码状态：已验证（2026-10-22；Python 3.12.9，无第三方依赖；历史记录中的输入、输出与边界检查适用于此代码）
-
-```python
-import hashlib
-import json
-import math
-
-
-def assign_bucket(unit_id, experiment, treatment_ratio):
-    if not isinstance(unit_id, str) or not unit_id.strip():
-        raise ValueError("unit_id must be a non-empty string")
-    if not isinstance(experiment, str) or not experiment.strip():
-        raise ValueError("experiment must be a non-empty string")
-    if not isinstance(treatment_ratio, (int, float)) or isinstance(treatment_ratio, bool):
-        raise TypeError("treatment_ratio must be numeric")
-    if not math.isfinite(treatment_ratio) or not 0 <= treatment_ratio <= 1:
-        raise ValueError("treatment_ratio must be finite and in [0, 1]")
-    key = f"{experiment}:{unit_id}".encode("utf-8")
-    value = int(hashlib.sha256(key).hexdigest(), 16) % 10000
-    return "treatment" if value / 10000 < treatment_ratio else "control"
-
-
-def normal_cdf(value):
-    if not math.isfinite(value):
-        raise ValueError("normal_cdf input must be finite")
-    return 0.5 * (1.0 + math.erf(value / math.sqrt(2.0)))
-
-
-def two_rate_delta(success_a, total_a, success_b, total_b):
-    for name, successes, total in (
-        ("control", success_a, total_a),
-        ("treatment", success_b, total_b),
-    ):
-        if not isinstance(successes, int) or isinstance(successes, bool):
-            raise TypeError(f"{name} successes must be an integer")
-        if not isinstance(total, int) or isinstance(total, bool):
-            raise TypeError(f"{name} total must be an integer")
-        if total <= 0 or not 0 <= successes <= total:
-            raise ValueError(f"{name} must satisfy total > 0 and 0 <= successes <= total")
-    rate_a = success_a / total_a
-    rate_b = success_b / total_b
-    delta = rate_b - rate_a
-    pooled = (success_a + success_b) / (total_a + total_b)
-    pooled_se = math.sqrt(
-        pooled * (1 - pooled) * (1 / total_a + 1 / total_b)
-    )
-    z_score = delta / pooled_se if pooled_se > 0 else None
-    p_value = (
-        2 * (1 - normal_cdf(abs(z_score)))
-        if z_score is not None else None
-    )
-    unpooled_se = math.sqrt(
-        rate_a * (1 - rate_a) / total_a
-        + rate_b * (1 - rate_b) / total_b
-    )
-    ci95 = (
-        [
-            round(delta - 1.96 * unpooled_se, 4),
-            round(delta + 1.96 * unpooled_se, 4),
-        ]
-        if unpooled_se > 0 else None
-    )
-    return {
-        "control_rate": round(rate_a, 4),
-        "treatment_rate": round(rate_b, 4),
-        "delta": round(delta, 4),
-        "z": round(z_score, 4) if z_score is not None else None,
-        "p_value": round(p_value, 6) if p_value is not None else None,
-        "ci95": ci95,
-    }
-
-
-def wilson(successes, total, z=1.96):
-    if not isinstance(successes, int) or isinstance(successes, bool):
-        raise TypeError("successes must be an integer")
-    if not isinstance(total, int) or isinstance(total, bool):
-        raise TypeError("total must be an integer")
-    if total <= 0:
-        raise ValueError("Wilson interval is undefined when total <= 0")
-    if not 0 <= successes <= total:
-        raise ValueError("successes must satisfy 0 <= successes <= total")
-    if not math.isfinite(z) or z <= 0:
-        raise ValueError("z must be a finite positive number")
-    p_hat = successes / total
-    denominator = 1 + z * z / total
-    center = (p_hat + z * z / (2 * total)) / denominator
-    margin = z * math.sqrt(
-        p_hat * (1 - p_hat) / total + z * z / (4 * total * total)
-    ) / denominator
-    return [round(center - margin, 4), round(center + margin, 4)]
-
-
-def srm(control_count, treatment_count, expected_treatment_ratio=0.5):
-    if not isinstance(control_count, int) or isinstance(control_count, bool):
-        raise TypeError("control_count must be an integer")
-    if not isinstance(treatment_count, int) or isinstance(treatment_count, bool):
-        raise TypeError("treatment_count must be an integer")
-    if control_count < 0 or treatment_count < 0:
-        raise ValueError("group counts cannot be negative")
-    if not isinstance(expected_treatment_ratio, (int, float)) or isinstance(expected_treatment_ratio, bool):
-        raise TypeError("expected_treatment_ratio must be numeric")
-    if not math.isfinite(expected_treatment_ratio) or not 0 < expected_treatment_ratio < 1:
-        raise ValueError("expected_treatment_ratio must be in (0, 1)")
-    total = control_count + treatment_count
-    if total <= 0:
-        raise ValueError("SRM is undefined when total count is zero")
-    expected_treatment = total * expected_treatment_ratio
-    expected_control = total - expected_treatment
-    statistic = (
-        (control_count - expected_control) ** 2 / expected_control
-        + (treatment_count - expected_treatment) ** 2 / expected_treatment
-    )
-    # For one degree of freedom, this is the upper-tail probability.
-    p_value = math.erfc(math.sqrt(statistic / 2))
-    return {
-        "chi_square": round(statistic, 4),
-        "p_value": round(p_value, 6),
-        "no_srm_detected": p_value >= 0.001,
-    }
-
-
-control = {
-    "sessions": 12000,
-    "resolved": 9240,
-    "negative_feedback": 960,
-    "safety_events": 6,
-    "p95_latency_ms": 1800,
-    "avg_cost": 0.0032,
-}
-treatment = {
-    "sessions": 12080,
-    "resolved": 9590,
-    "negative_feedback": 890,
-    "safety_events": 7,
-    "p95_latency_ms": 1950,
-    "avg_cost": 0.0037,
-}
-
-for group_name, group in (("control", control), ("treatment", treatment)):
-    sessions = group["sessions"]
-    if not isinstance(sessions, int) or isinstance(sessions, bool) or sessions <= 0:
-        raise ValueError(f"{group_name} sessions must be a positive integer")
-    for metric in ("resolved", "negative_feedback", "safety_events"):
-        count = group[metric]
-        if not isinstance(count, int) or isinstance(count, bool):
-            raise TypeError(f"{group_name} {metric} must be an integer")
-        if not 0 <= count <= sessions:
-            raise ValueError(f"{group_name} {metric} must be in [0, sessions]")
-    if not math.isfinite(group["p95_latency_ms"]) or group["p95_latency_ms"] <= 0:
-        raise ValueError(f"{group_name} latency must be finite and positive")
-    if not math.isfinite(group["avg_cost"]) or group["avg_cost"] <= 0:
-        raise ValueError(f"{group_name} cost must be finite and positive")
-
-resolution = two_rate_delta(
-    control["resolved"],
-    control["sessions"],
-    treatment["resolved"],
-    treatment["sessions"],
-)
-negative_feedback = two_rate_delta(
-    control["negative_feedback"],
-    control["sessions"],
-    treatment["negative_feedback"],
-    treatment["sessions"],
-)
-
-latency_change = treatment["p95_latency_ms"] / control["p95_latency_ms"] - 1
-cost_change = treatment["avg_cost"] / control["avg_cost"] - 1
-safety_change = (
-    treatment["safety_events"] / treatment["sessions"]
-    - control["safety_events"] / control["sessions"]
-)
-
-conditions = {
-    "srm_ok": srm(control["sessions"], treatment["sessions"])["no_srm_detected"],
-    "resolution_lower_bound_above_1pt": (
-        resolution["ci95"] is not None and resolution["ci95"][0] > 0.01
-    ),
-    "negative_feedback_upper_bound_below_0.1pt": (
-        negative_feedback["ci95"] is not None
-        and negative_feedback["ci95"][1] <= 0.001
-    ),
-    "p95_latency_increase_under_15pct": latency_change <= 0.15,
-    "cost_increase_under_20pct": cost_change <= 0.20,
-    "safety_review_passed": False,
-}
-
-report = {
-    "bucket_examples": {
-        user_id: assign_bucket(user_id, "assistant_v2", 0.5)
-        for user_id in ["u001", "u002", "u003", "u004"]
-    },
-    "srm": srm(control["sessions"], treatment["sessions"]),
-    "resolution": resolution,
-    "negative_feedback": negative_feedback,
-    "pairwise_b_win_ci95": wilson(580, 890),
-    "latency_change": round(latency_change, 4),
-    "cost_change": round(cost_change, 4),
-    "safety_rate_change": round(safety_change, 6),
-    "conditions": conditions,
-    "decision": "expand_to_25_percent" if all(conditions.values()) else "hold_and_investigate",
-}
-print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
-```
-本例把每个会话当作独立分配单元，且每个安全计数代表发生事件的会话数，不是同一会话内的事件总次数。解决率由 0.77 升到约 0.7939，差约 2.39 个百分点；延迟增加约 8.33%，成本增加约 15.63%。安全事件只有 6 与 7 次，点估计差很小也不能证明满足安全非劣效要求，所以 `safety_review_passed` 显式为 False，输出决策为 `hold_and_investigate`。真实放行应事先定义安全容忍界限，结合适合稀疏事件的区间、定向离线测试和人工复核，不能把这个布尔值直接改成 True 来替代证据。
-
-`no_srm_detected` 只表示在预定阈值下没有检出分配比例异常，不证明所有随机化条件成立。`two_rate_delta` 的普通正态区间用于本例成功/失败数充足的指标；稀疏或边界比例应改用专门方法。即使 resolution 的区间为正，如果成本、延迟或安全条件不满足，也不应只凭一个正向数字扩大流量。真实分析还要考虑多重比较、集群随机化、分层协变量、缺失数据和实验周期。
-
-### 8.8.7 日志字段决定实验能否解释
-
-至少保存以下字段：
-
-```text
-request_id
-user_id / session_id / tenant_id
-experiment_name
-assignment_time and bucket
-model_revision
-prompt_revision
-retriever_revision
-tool_revision
-tokenizer and decoding parameters
-input and output token counts
-retrieved document IDs and versions
-tool requests, returns and retries
-latency breakdown
-cost estimate
-error code and timeout
-user feedback and later correction
-timestamp and locale
-```
-
-如果 prompt、检索器和模型同时变化，只记录 model_revision，就无法解释结果。缓存 key 也必须包含会改变输出的实验条件，否则 Control 可能命中 Treatment 产生的缓存。
-
-### 8.8.8 大模型实验的特殊变量
-
-#### 输出随机性
-
-固定或记录 temperature、top_p、max_tokens、seed、停止条件和并行采样策略。不同版本即使使用同一 seed，也不一定产生相同输出，因为 logits、tokenizer 或后端 kernel 可能变化。
-
-#### 多轮状态
-
-会话级分桶后，整个历史仍需保持一致。若摘要器、记忆服务或工具版本独立变化，模型版本的因果解释仍会被污染。
-
-#### 成本和延迟
-
-更长的回答、更多的 reasoning token、更多工具轮次和更低缓存命中率都会提高成本。应分开看首 token 延迟、生成间隔、完整响应时间、队列时间、检索时间和工具时间，而不是只看平均总延迟。
-
-#### 低频高后果事件
-
-安全违规、隐私泄露、错误退款和错误删除可能在小流量里没有发生，但不能据此证明风险为零。上线前应结合离线红队、定向高风险样本、线上分类器、人工抽检和举报通道。
-
-### 8.8.9 灰度、暂停和回退
-
-一个可操作的灰度序列可以是：
-
-```text
-离线回归与安全测试
-内部用户或低风险场景
-1% 受控流量
-5% 低风险全场景
-10%--25% 分层扩量
-更大比例对照
-达到预先定义的收益与风险条件后逐步扩大
-```
-
-每个阶段都应记录进入下一阶段的条件和观察窗口。回退动作要可执行：切回旧模型、按渠道或场景关闭新版本、暂停外部工具、降低输出预算、切换保守提示词、增加人工复核或冻结高风险动作。
-
-触发回退的不应只有一个平均指标。可以包括安全事件、错误率连续异常、P95 延迟、成本突增、关键用户群退化、集中投诉和工具副作用。回退后还要保留实验日志和失败样本，避免只把流量切回旧版本却丢失根因。
-
-### 8.8.10 切片分析：总体提升可能掩盖局部退化
-
-至少按以下维度切片：
-
-```text
-任务类型与业务渠道
-query 长度、上下文长度和语言
-新用户与老用户
-低风险与高风险
-有证据与无证据
-工具成功与工具失败
-低延迟与高延迟
-不同模型路由和缓存状态
-```
-
-如果总体问题解决率提升 2%，但高价值客户下降 3%，总体平均不能直接代表产品体验。对小切片要同时报告样本量和区间，避免把几个异常样本过度解读；对明确的高后果退化，即使样本不大也应进入人工复核。
-
-### 8.8.11 结果报告应包含什么
-
-一份可复查的报告可以按以下顺序组织：
-
-```text
-实验范围、随机化单元和运行时间
-Control / Treatment 的流量与 SRM 检查
-主指标：点估计、置信区间、样本量
-护栏：安全、事实、格式、延迟、成本、错误率
-诊断：长度、工具、检索、缓存和任务切片
-人工抽检：样本来源、盲评结果和严重错误
-异常：日志缺失、协议变化、缓存污染或业务活动
-决策：扩大、保持、暂停、回退或定向路由
-后续：待修复问题和下一轮实验条件
-```
-
-例如，“Treatment 问题解决率提升 2.3%，95% 区间为 1.1%--3.5%；P95 延迟增加 8%，成本增加 12%；高风险切片没有显著改善，长问题提升明显；人工抽检发现多轮对话仍有少量过度解释，因此扩大到 25% 并继续观察”比“B 比 A 好”更接近可执行的工程结论。
-
-### 8.8.12 资料与边界
-
-[Trustworthy Online Controlled Experiments: Five Puzzling Outcomes Explained](https://doi.org/10.1145/2339530.2339653)讨论了线上实验中容易误读的结果和可信度问题；[Microsoft SRM 排查说明](https://www.microsoft.com/en-us/research/articles/diagnosing-sample-ratio-mismatch-in-a-b-testing/)提供了比例异常的诊断入口；[NIST 比例置信区间说明](https://www.itl.nist.gov/div898/handbook/prc/section2/prc241.htm)解释了 Wilson 和精确区间。CUPED 的原始论文 [Improving the sensitivity of online controlled experiments by utilizing pre-experiment data](https://doi.org/10.1145/2433396.2433413)展示了如何用实验前协变量降低方差。不应把一段 Python demo 当作完整统计软件。
-
-A/B 实验的证据范围始终有限：它回答的是某个版本、某组流量、某段时间和某套系统条件下的差异。模型、提示词、检索器、工具、用户群和业务活动改变后，结论需要重新验证。
-
 ## 本章练习与面试迁移
+1. 一个系统四条样例全部正确，能否声明准确率接近 100%？运行 9.1 的 runner，解释点估计与 Wilson 下界为何不同，并把一条 JSON 年龄改成字符串，指出评分器没有检查什么。
+2. 政策要求说明两种渠道，回答只正确覆盖一种。分别计算回答支持率与必需事实完整性；再把证据改为否定句，解释为什么 9.3 的字符串检查会误判。
+3. 在 9.4 中把标签全部改成 0，再恢复标签并把学习率改为 100。比较损失、梯度和最终预测，说明什么证据支持“数据问题”或“更新强度问题”，以及哪些结论不能外推到 Transformer。
 
-1. 一个系统四条样例全部正确，能否声明准确率接近 100%？运行 8.1 的 runner，解释点估计与 Wilson 下界为何不同，并把一条 JSON 年龄改成字符串，指出评分器没有检查什么。
-2. 政策要求说明两种渠道，回答只正确覆盖一种。分别计算回答支持率与必需事实完整性；再把证据改为否定句，解释为什么 8.3 的字符串检查会误判。
-3. 在 8.4 中把标签全部改成 0，再恢复标签并把学习率改为 100。比较损失、梯度和最终预测，说明什么证据支持“数据问题”或“更新强度问题”，以及哪些结论不能外推到 Transformer。
-4. 面试中回答“新模型离线提升了，为什么不扩量”：先明确评估版本和随机化单元，再报告区间、SRM、成本延迟与安全证据；用 8.8 的 6/7 次安全事件说明“没有显著变差”为什么不等于“已经证明安全非劣效”。
-
-本章的共同方法是固定测量协议、保留逐样本证据、用对照排除替代解释，再在风险约束下做决策。总分、训练曲线、人工偏好和线上指标分别观察不同对象，只有明确各自分母与证据范围，才能把一次模型改动解释清楚。
+本章的共同方法是固定测量协议、保留逐样本证据、用对照排除替代解释。训练曲线、事实检查、人工偏好和回归切片观察的是不同对象；只有明确各自分母与证据范围，才能判断离线改动是否值得进入系统级评估。

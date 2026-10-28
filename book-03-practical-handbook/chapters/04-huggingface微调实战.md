@@ -1,20 +1,24 @@
-# 第四部分：Hugging Face 微调实战
+# 第 4 章 Hugging Face 微调实战：从监督目标到行为回归
 
 真实的开源模型不是一个孤立的权重文件。它至少包含模型权重、结构配置、tokenizer、特殊 token 定义，以及与生成相关的配置。微调也不是只调用一个训练接口：输入文本如何渲染、哪些 token 参与 loss、显存中保存什么状态、如何恢复训练、如何证明行为真的变好，都会决定结果。
 
-本章沿着一条完整链路展开：
+本章沿着一条完整链路展开：先确认 checkpoint 和 tokenizer 的身份，再把文本渲染为输入与监督 labels，之后比较全参数、LoRA 和 QLoRA 的训练状态，最后在固定任务上检查行为变化。
 
-```text
-checkpoint 与 tokenizer
-        ↓
-训练文本与监督 labels
-        ↓
-全参数 SFT、LoRA、QLoRA
-        ↓
-保存与恢复
-        ↓
-固定评测集上的行为变化
+```mermaid
+flowchart LR
+    A["checkpoint + config + tokenizer"] --> B["模板渲染与 tokenization"]
+    B --> C["attention mask + assistant labels"]
+    C --> D{"选择训练参数集合"}
+    D -->|"全参数"| E["更新完整模型"]
+    D -->|"LoRA"| F["冻结基座，更新 adapter"]
+    D -->|"QLoRA"| G["量化基座 + adapter"]
+    E --> H["保存权重、配置与训练状态"]
+    F --> H
+    G --> H
+    H --> I["固定评测集：行为、退化与成本"]
 ```
+
+图里的三个训练分支共享同一份数据目标；它们主要改变可训练参数与权重存储方式。若模板或 labels mask 不同，即使 LoRA 配置完全相同，也不是同一个监督实验。
 
 初学者可以把它看成从字符串到模型行为的实践路径；有经验的读者应关注每个边界的契约：token id 范围、序列长度、labels shift、可训练参数集合、量化权重的计算 dtype，以及比较实验中必须保持不变的变量。
 
@@ -329,6 +333,26 @@ prompt 的原文和 token 数。
 
 这些字段让后续的 SFT、LoRA 和评估有共同基线。只保存一张输出截图，无法判断变化来自模型参数、模板、采样参数还是依赖版本。
 
+手算一次生成边界：若 prompt 编码后有 12 个 token，max_new_tokens=8，则最多返回 8 个新 token，总上下文最多到 20 个位置；它不是把 prompt 截成 8 个 token。批量生成时，两条 prompt 长度为 3 和 5，左 padding 到 5 后分别是 \([0,0,a,b,c]\) 和 \([u,v,w,x,y]\)，最后一列都是真实 prompt token，模型才能从同一个张量位置读取下一步 logits。若目标模型使用特殊 position ids 或不采用左 padding，应按其模板与 runtime 约定验证，不能只依据“常见写法”。
+
+首次生成还要检查输入和输出的边界：编码文本是否带 BOS、结束符是否被误当作 prompt、返回序列是否包含输入 token，以及 decode 是否跳过 special tokens。固定一个很短 prompt，打印原始 token ids、mask、position ids 和新增 token ids，再打印解码文本，能够明确每个字符来自输入还是生成。若只看最终字符串，prompt 拼接、padding 和输出截取错误很容易被误认为模型质量差。
+
+若输入有左右 padding，input_ids、attention_mask 和 position_ids 必须指向同一批有效 token。比如真实 prompt 有 3 token，右侧补到长度 5 后有效 mask 是 \([1,1,1,0,0]\)；若把 mask 误写成 \([0,0,1,1,1]\)，模型仍能完成 forward，但它会把 padding 当作内容、屏蔽真实问题。单条输入没有 padding，无法覆盖这类 bug，所以应至少准备长度不同的两条 prompt 做批量测试，并在生成后只对新增 token 解码。
+
+模型加载也要保持三件套一致。固定模型仓库 revision 后，检查 config 中的 vocab size、实际 embedding 行数和 tokenizer 长度；若 tokenizer 新增了 2 个 special tokens，而输入 embedding 仍只有原来的 V 行，越界会直接暴露；若 token id 被静默映射为已有合法值，则语义错位不会报错。第一次生成应先用公开小样本确认接口，再将真实模型的模型卡、许可、revision 和 template 固定在实验 manifest，避免把可加载误当成可复现。
+
+chat template 是模型输入协议的一部分。相同的用户句子若一个模板追加 assistant generation marker，另一个没有，模型面对的最后位置和待生成 role 就可能不同。第一次加载时把消息对象渲染成文本，再编码并查看末尾 token，确认模板不会重复插入 BOS/EOS；推理请求和训练样本使用的模板要一致。若使用自定义模板，还要固定模板文本版本，而不是只记“chat format”。
+
+在多卡或自动设备映射场景，输入需要放到模型的起始设备，模型输出可能落在另一设备或被框架包装。不要从单个参数的 device 推断整张模型都在同一 GPU，也不要把切分后的模型无条件移到 cuda:0。接口测试阶段可以先用单样本、短上下文验证加载与生成，再测批量 padding 和显存峰值；CPU toy 成功只能说明数据处理，不代表目标权重或 CUDA kernel 可运行。
+
+还要固定解码停止规则。假设 prompt 已有 12 token，EOS 在第 3 个新 token 出现，那么输出只含这 3 个 token；若 stop string 在 decode 后判断，可能需要生成超过结束片段再回切文本。评估时应区分模型生成的终止 token、服务端 stop sequence 和 max_new_tokens 截断，并记录各自命中比例。否则同一模型在两套 stopping rules 下会得到不同长度和格式分数。
+
+模型第一次生成的基线要存原始响应和 token ids。若 SFT 后文本变长，可能是模板变化、EOS 学习变化或 max_new_tokens 改动；仅看解码字符串无法判断。对同一 prompt 保存 input ids、生成 ids、停止原因和耗时，后续才能把行为变化和服务变化区分开。
+
+prompt 长度还会占用模型上下文预算。若模型上下文上限为 4096、请求设置 max_new_tokens=1024，输入最多只能占 3072 个位置；当 prompt 已有 3500 token，生成预算与上下文约束冲突，应按模型 API 的截断策略处理并记录，而非期待它生成满 1024 token。预算要在 tokenization 后计算，不能按字符长度估算。
+
+如果首次加载使用 revision 字符串而非固定 commit，模型文件可能在之后更新；复现时要保存实际解析到的 revision 和 tokenizer 文件 hash。模型名相同不保证词表、特殊 token 和配置相同。
+
 ## 4.2 把对话变成监督信号
 
 ### 4.2.1 SFT 学习的是条件分布
@@ -567,6 +591,8 @@ labels = [
 ]
 ```
 这个接口依赖 Transformers 版本和模板中的 generation 标记。运行时应打印 encoded.keys()，确认返回的 mask 真的覆盖回答；不支持 mask 时，应经过验证后使用 offset mapping 或框架提供的 completion-only 方案，不能无声地把整条序列都当成回答。
+
+使用 TRL `SFTTrainer` 时，参数名还会随数据格式选择不同监督范围。当前文档把 `completion_only_loss` 用于 prompt-completion 数据，把 `assistant_only_loss` 用于 conversational 数据；后者依赖 chat template 暴露 assistant generation 区间。二者不是“开哪个都一样”：prompt-completion 的 completion 边界与多轮对话中的 assistant 消息边界并不相同。若数据已预先构造 `labels=-100`，应确认训练器是否直接采用该 labels，避免又应用一套不匹配的 mask。参见 [TRL SFTTrainer 文档](https://huggingface.co/docs/trl/main/sft_trainer) 与 [Transformers chat template 的 assistant mask 说明](https://huggingface.co/docs/transformers/main_classes/tokenizer)。
 
 ### 4.2.5 截断与有效监督 token
 
@@ -908,6 +934,22 @@ labels。
 来源与任务元数据。
 ```
 
+考虑完整序列“用户问：天气？助手答：晴天 EOS”。若模板渲染成 8 个 token，前 4 个是用户条件，后 4 个是 assistant 回答和结束符，则 assistant-only labels 可写为 \([-100,-100,-100,-100,r_1,r_2,r_3,\mathrm{EOS}]\)。input_ids 仍保留全部 8 个 token，causal model 在内部 shift 后用位置 3 的 logits 预测 \(r_1\)。若误把 labels 全部保留，模型还会被要求复现用户输入；若把回答首 token 也 mask，模型就从 \(r_2\) 才开始学习。打印有效 labels 解码出来的文本，是检查监督边界最直接的数值化手段。
+
+若这 4 个回答目标的 token loss 分别为 1、2、1、2，assistant-only 平均 loss 是 \(6/4=1.5\)。若 prompt 的 4 个 token loss 分别是 0.2、0.3、0.2、0.3，却被错误纳入，整体均值变为 \(7/8=0.875\)，数字看起来更低，但回答 token 的监督没有变好。不同 mask 会改变 loss 分母，因此训练曲线必须和有效监督 token 数一起报告。多轮对话还需定义是否监督所有 assistant 消息、拒答标记、工具调用和工具结果；role 名称本身不能决定这些位置是否进入目标。
+
+多轮聊天还要决定哪些 assistant 消息接受监督。一个用户消息后有 assistant 思考、工具调用、工具结果和最终答复时，可能只训练最终答复，也可能训练 assistant 的工具调用格式；工具返回通常来自外部程序，不应无意中作为模型要复述的目标。把角色边界、结束标记和 loss mask 画成时间线，再从 labels 中反解出有效文本，可以检查模型到底在被要求生成什么。
+
+截断会改变监督对象。若 prompt 长 900 token、回答长 200 token，而 max_length=1024，右侧截断会只保留前 124 个回答 token；若回答必须完整 JSON，样本虽然有监督 token，却没有闭合括号和 EOS。可以先把历史压到 800 token、为回答预留 224 token，并统计截断率；超过预算的样本按任务策略裁剪、拆分或丢弃。不同策略需记录，因为它们会改变训练数据分布。
+
+assistant-only loss 与 completion-only loss 的数据契约不同。prompt-completion 记录通常显式给出 prompt 和 completion 边界；多轮 conversational 样本则依赖模板识别每一条 assistant span。若把工具调用也纳入 assistant mask，模型会学习发出 tool call；若只想学习自然语言最终答复，需屏蔽调用内容并确保后续上下文仍正确。边界应按任务设计，不应盲目套用一个默认 trainer 参数。
+
+还要检查空监督 batch。动态截断、过滤和 padding 后，某个 batch 可能全部 labels 都为 ignore_index；mean loss 的分母为零，结果可能无定义或出现 NaN。collator 应计算有效监督 token 数并在训练前拒绝空 batch，训练日志也要报告该计数。否则数据筛选改变后，程序仍能前向，却没有有效目标。
+
+如果一段对话有 prompt 5 token、assistant answer 3 token、EOS 1 token，labels 有效位数应为 4；内部 shift 后，只有 3 个回答 token 的 logits 与 EOS 目标组成 4 个预测项。不同库对模型内部 shift 和 labels 对齐的规定要先核实，不能把“assistant span 的起点”直接当作 logits 索引。最安全的检查是列出每个位置的输入 token、目标 token、loss mask 和预测它的 logits 位置。
+
+labels 中的 ignore_index 只影响 loss，不会从 input_ids 中删除 prompt；attention mask 负责区分有效输入与 padding。这三者应作为不同字段保存，不能把 prompt mask、padding mask 和 loss mask 复用成一个布尔张量。混用时可能让模型看不到用户问题，或把无效 padding 当作回答目标。
+
 ## 4.3 全参数 SFT：监督目标、显存与可恢复训练
 
 ### 4.3.1 全参数训练的含义
@@ -1216,6 +1258,28 @@ loss 下降只证明这组目标被优化了，不证明模型学会了自然语
 ```
 
 学习率过大、数据量小而 epoch 过多、领域风格覆盖通用风格、训练集与验证集重复，都可能让 loss 看起来很好而行为变差。
+
+把显存估算带入一个明确模型规模。若有 7B 个参数，以 BF16 保存权重和梯度各约 2 bytes/parameter，分别需要约 14 GB；Adam 的一阶和二阶状态通常各用 4 bytes，约需 56 GB。仅这四项就约 84 GB，尚未加入 activation、可能的 FP32 master weights、通信 buffer、临时 workspace 和显存碎片。实际框架会因 optimizer、分片、offload 和 fused kernel 改变分布，但这个量级足以说明：权重能放入一张卡，不等于全参数训练能放入同一张卡。
+
+Activation checkpointing 可以少保存中间激活、在反向时重算，降低显存但增加计算；缩小 batch、缩短序列和梯度累积也各有不同影响。梯度累积降低每个 micro-batch 的 activation 峰值，却不会减少模型权重、梯度和 optimizer state。全参数微调还应先跑一个很小 batch，确认 labels、梯度有限、可训练参数数等于预期，再扩展长度和 batch；否则资源不足与目标错位会同时出现，排查困难。
+
+显存账本还可与梯度累积对照。假设每卡 micro-batch=1、序列长 2048、累积 8 次、4 卡数据并行，有效 batch 近似 32 条序列；这不意味着激活同时存下 32 条序列，单次显存峰值仍主要由每卡当前 micro-batch 的前向激活决定。全局有效监督 token 还要按 padding mask 汇总，若各卡有效 token 数不同，简单把每卡 mean loss 再平均会改变样本权重。
+
+全参数更新会为每个可训练参数保存梯度，并通常由 Adam 保存两份状态；而 gradient checkpointing 主要改变 activation 保存/重算，不改变这些参数状态的量级。ZeRO 或 FSDP 可以分片参数、梯度和优化器状态，但会增加通信、初始化和 checkpoint 管理复杂度。第三册的小模型配置适合说明训练流程，不能据此断言同样参数设置能直接用于 7B 生产训练；迁移时先做显存预算、通信 profile 和一小段端到端验证。
+
+显存账本按十进制 GB 估算，实际工具可能按 GiB 显示；7B 的理想 84 GB 约为 78.2 GiB，但这仍未包含 activation 和临时开销。若使用 FP32 master weights，还会额外增加约 28 GB 十进制；若 optimizer 状态分片，单卡占用会下降，但总设备内存和通信量不会凭空消失。报告显存时写明 GB/GiB、峰值还是稳定值、是否含缓存，以及测量的 batch 和序列长度。
+
+训练预算也不应只写 epoch。相同数据集、不同 batch 和 gradient accumulation 会产生不同 update 数；scheduler 可能按 optimizer step、token 或 epoch 推进。一个可复核配置至少报告有效监督 token、全局 batch、update 数、训练 wall-clock、峰值显存和保存策略。若中断后从 checkpoint 恢复，还要恢复 optimizer、scheduler、scaler 和随机状态，区分续训与重新开始微调。
+
+Adam 状态可以快速放大权重之外的内存。7B 参数的两个 FP32 moment 约 \(7\times10^9\cdot8=56\) GB；若权重、梯度分别为 BF16，合计再加约 28 GB，得到约 84 GB 十进制量级。若另存 FP32 master copy，再加约 28 GB。梯度累积不会减少这些逐参数状态，只改变激活峰值；量化优化器状态、分片或 offload 可以改变单卡账本，但会引入量化误差、通信或主机内存开销。
+
+全参数 SFT 的更新范围也应通过参数名和数量审计，而不只看 Trainer 是否开始跑。冻结的词嵌入、输出头或 norm 可能来自模型默认配置；如果 trainable parameters 数明显小于预期，模型可能不是全参数训练。反之，误解冻 embedding 和 lm head 会额外增加显存并改变词表行为。记录可训练参数总数、各模块数量和 optimizer 参数组，能让“全参数”变成可以核查的声明。
+
+学习率与数据规模共同决定遗忘风险。相同学习率下，训练 1 epoch 和重复 10 epoch 的总更新量不同；若 SFT 数据高度集中在某种格式，通用能力可能被覆盖。比较不同 epoch 时固定验证集，追踪目标格式、通用问答和安全切片，并保存 best checkpoint；训练 loss 最低的点未必是最终交付模型。
+
+这个账本还没有计算 activation。序列长度从 2048 增到 4096，会让 self-attention 的朴素 score 元素数增至约 4 倍；激活 checkpointing 可减少保留张量，但会重算前向。实际训练前应以同样的 batch 和序列长度跑 warm-up 迭代，记录 peak allocated 与 peak reserved 两种值，并为 optimizer step、evaluation 和保存留出显存余量。
+
+如果一批有 3 个样本，回答有效 token 数分别是 5、10、20，逐样本先算平均 loss 再平均会使三条回答权重相等；对 35 个有效 token 的 loss 总和除以 35，则长回答占比更高。训练器的默认 reduction 需要和研究目标一致，尤其在动态 padding、梯度累积和分布式训练时，应核实全局分母是样本数还是有效 token 数。
 
 ## 4.4 LoRA：用低秩增量适配基座模型
 
@@ -1608,6 +1672,22 @@ merge 后未做输出回归。
 
 因此训练报告应同时保存 base revision、adapter 配置、可训练参数量、有效训练 token 数和评估结果。
 
+用 \(d_{\mathrm{in}}=d_{\mathrm{out}}=4096\)、rank \(r=8\) 手算一次：原线性矩阵有 \(4096^2=16{,}777{,}216\) 个权重；LoRA 的 A、B 两个矩阵合计 \(4096\cdot8+8\cdot4096=65{,}536\)，约少 256 倍可训练权重。若 \(\alpha=16\)，常见缩放 \(\alpha/r=2\)，低秩分支会按配置缩放后加到冻结基座输出。这个参数量比例适用于单个 4096×4096 矩阵，不代表整模型训练显存缩小 256 倍：前向仍需基座矩阵，激活仍沿完整网络传播，而且目标模块可能远多于一个。
+
+低秩假设是工程上的适配方式，不是“所有任务更新矩阵天然低秩”的定理。rank 增加会扩大增量空间，也增加 adapter 参数、梯度和优化器状态；alpha 与 rank 共同影响更新幅度。比较 rank=4 与 rank=16 时，要固定目标模块、数据、训练 token 数和学习率搜索范围，并看关键切片是否改善。若 rank 增大只提升训练样本而验证行为不变，可能是过拟合或目标数据不足，而不是继续加大 rank 就能解决。
+
+target_modules 也决定 LoRA 实际更新什么。只注入 q_proj 与 v_proj，和注入 q/k/v/o、MLP 上下投影不是同一实验；不同模型命名可能不同，模块选择要通过 named_modules 与可训练参数列表核对。训练前统计 trainable parameters、冻结参数和注入模块名称；训练后保存 base revision、adapter config、tokenizer 与模板。只有这些一起固定，adapter 才能被另一环境正确加载和解释。
+
+一个 2×2 的低秩例子可以直观看到 rank 的限制。若 \(A\in\mathbb{R}^{2\times1}\)、\(B\in\mathbb{R}^{1\times2}\)，乘积 \(BA\)（按实现方向选择对应写法）最多 rank 1，无法表示任意满秩的 2×2 更新；rank=2 才具备表示一般 2×2 矩阵的容量。真实隐藏维通常是几千，rank=8 是强约束而非完整更新。参数节省来自限制可学习增量空间，代价是任务需要的方向可能无法表示。
+
+常见 LoRA 初始化让一支随机、另一支接近零，使训练开始时低秩增量接近零，模型行为从 base 起步；具体初始化和缩放实现可随 PEFT 版本变化。训练前可以比较同一输入下 base 与刚注入 adapter 的 logits，确认初始差异符合该配置的预期；如果一开始就大幅偏离，检查目标层、初始化、dropout 和权重加载。训练后再比较每个模块的 adapter 范数及样本输出，避免只看全局可训练参数占比。
+
+LoRA dropout 是训练时施加在适配分支输入上的正则项，不是推理时的采样温度；eval 模式下应按模块实现关闭随机丢弃。若 adapter 注入时基座输出改变，先检查初始化和 scaling；若训练后 adapter 权重非零但输出没有变化，检查目标层是否在 forward 路径、是否加载了正确 adapter，以及合并时是否把增量重复加了两次。
+
+合并 LoRA 时，数学上将低秩增量加回原权重，能减少推理时额外分支，但会失去动态切换 adapter 的能力。若基座是量化权重，merge 可能需要反量化再写回，造成额外误差或不被当前库支持。保存独立 adapter 能保留可组合性，合并 checkpoint 则更方便普通 serving；应对两种产物使用同一固定 prompt 回归并记录格式。
+
+LoRA 的起始增量通常接近零，因此“刚注入 adapter 后输出应与 base 接近”可以作为数值 sanity check；若配置启用了 dropout 或不同权重初始化，允许的差异要按实现说明。训练时再观察 adapter 范数和目标层梯度，能区分分支未参与计算与任务本身难学。
+
 ## 4.5 QLoRA：量化基座上的低秩训练
 
 ### 4.5.1 QLoRA 在 LoRA 上增加了什么
@@ -1980,6 +2060,30 @@ base revision、adapter 配置和训练 token 数。
 ```
 
 4bit 训练失败可能来自 kernel、驱动、模型结构、dtype 或设备放置，而不一定是 labels 问题；诊断时应先单独验证量化加载，再注入 adapter，再运行一个很小 batch。
+
+理想化地比较 7B 参数权重，FP16/BF16 存储约为 \(7\times10^9\cdot2=14\) GB；4 bit 裸权重约为 \(7\times10^9\cdot0.5=3.5\) GB，理论节省 10.5 GB。真实 QLoRA 还要存量化 scale 等元数据，LoRA adapter、激活和优化器状态也会占显存，因此进程使用量不会只有 3.5 GB。并且 4 bit 是基座权重存储格式，不意味着反向、所有激活和每个 GEMM 都在 4 bit 上执行。
+
+量化误差与 adapter 更新也不是简单互相抵消。冻结的量化矩阵 \(\hat W\) 先近似原权重 \(W\)，训练分支学习额外的低秩 \(\Delta W\)，前向近似为 \(x(\hat W+\Delta W)\)。\(\Delta W\) 的任务目标是适配数据，不是专门拟合 \(W-\hat W\) 的误差；因此即使训练 loss 下降，也不能说量化误差被完全修复。报告中应分开写量化配置、基座质量变化、adapter 变化和目标任务指标。
+
+兼容性故障通常按环境逐层定位：先确认 CUDA/驱动与 bitsandbytes kernel 可加载，再加载冻结量化 base，核对实际量化模块，随后注入 adapter 并检查其可训练参数，最后才进入一个小 batch。若一开始就运行完整 Trainer，OOM、dtype 错误和模块名不匹配会混在一起。设备映射也要与训练策略一致；单进程 device_map 自动放置并不等于可直接用于 DDP/ZeRO 的多卡训练。
+
+量化表示由若干局部块共享 scale 或其他元数据，实际占用会高于每权重恰好 0.5 byte。若每 64 个权重共享一个 scale，光一个 FP16 scale 就额外约 \(2/64=0.03125\) byte/weight，尚未计算零点、块头或对齐；因此“4 bit=0.5 byte/parameter”只是裸权重量级。不同量化格式对分布的表示也不同，NF4、FP4 与整数 int4 不能仅凭位数视为相同精度。
+
+低比特加载还要看哪些层被跳过量化、输入输出头是否保留较高精度、计算累加 dtype 和 kernel 支持。两种实现即便最终都显示“4bit”，数值误差与显存占用也可能不同。可以固定一组 hidden states，比对量化前后线性层输出的最大误差和均方误差，再进行任务级回归；单层差异较小不能单独证明多层模型行为不变，量化误差会沿网络传播。
+
+NF4 的设计利用近似正态的权重分布，将常见取值区域映射得更细；它不是简单把线性整数范围切成 16 个等宽区间。double quantization 再压缩量化常数的存储，降低元数据开销。具体分组大小、量化类型、compute dtype 和跳过的模块共同决定实现，论文中的理论设置与当前库的参数不能只按名称对应。
+
+量化误差可用小矩阵逐项复算：原权重 \([0.1,0.4,0.9,-0.2]\)，若简化为 4-bit 对称均匀量化、范围 \([-1,1]\)，量化步长若为 \(2/15\approx0.1333\)，每个权重会舍入到最近网格点，误差再经输入向量乘法传到输出。NF4 的网格并非这组均匀点，因此本章纯 Python 例只能讲误差传播，不能冒称复现 NF4。真实量化误差应由指定库、模型和硬件测量。
+
+如果 quantization block 有 \(g=64\) 个权重共享一个 scale，7B 参数就约有 \(7\mathrm{B}/64\approx109.4\mathrm{M}\) 个分组；即使每组 scale 只用 FP16，也约占 219 MB 十进制。现实实现会有不同 block size、scale dtype、零点和打包对齐，因此必须测量实际 checkpoint 文件和加载后显存。这个估算只展示元数据为何不可忽略，不是 bitsandbytes 文件大小的精确预测。
+
+QLoRA 还会同时存在多个 dtype：4-bit packed base、较高精度的 adapter 参数、计算激活以及可能更高精度的累加。排查数值问题时逐层打印 dtype 比笼统说“模型是 4bit”更有用。比较同一 base 的 LoRA 与 QLoRA，需要固定 adapter 配置和数据预算，报告质量差、峰值显存及吞吐；低显存本身不是质量改善。
+
+compute dtype 影响的是运算精度和硬件支持，并不自动改变权重的 4-bit 存储形式。加载后确认各模块权重、输入激活和 LoRA 参数的实际 dtype；若用 CPU 运行只通过了配置解析，不能声称 bitsandbytes 量化 kernel 已被验证。
+
+量化配置也应保存完整参数：量化类型、block size、double-quant 开关、compute dtype、跳过的模块、量化库版本和设备。只记录“4-bit QLoRA”无法重建实际数值路径；不同配置的显存与误差都可能变化。
+
+在固定 block size 下，量化比例还会随模型层布局改变：embedding、输出头或少量敏感层可能保持较高精度，量化权重数不再是参数总数乘 0.5 byte。实际的量化模块列表与 checkpoint 文件大小应一起记录。
 
 ## 4.6 评估 SFT 前后的行为变化
 
@@ -2531,6 +2635,14 @@ base/SFT 原始输出与指标。
 ```
 
 这类结论把证据范围和未知范围分开，是书写实验记录时比“微调成功”更可靠的表达。
+
+设 100 条固定评估样本中，SFT 在 70 条上优于 base、在 20 条上更差、10 条平局，则“胜率”若分母包含平局是 70%，若只比较非平局则为 \(70/(70+20)\approx77.8\%\)。两种口径都可以用，但必须注明分母；把平局直接删掉而不披露，会夸大结果。再假设 20 条安全类样本有 2 条从 base 合规变成 SFT 不合规，整体平均分即使上升，也要单独报告这 2 个回归和其严重度。
+
+评估集的分桶需要在看到 SFT 输出之前定义，例如格式、事实性、拒答边界、长输入、少数语言和安全风险。样本少的桶要同时写计数：2/5 与 40/100 的比例相同，证据强度却不同。人工评分应盲化模型身份、使用固定 rubric，并保留评审分歧；LLM judge 可以作为筛查候选，不能代替人工校准和原始输出审查。
+
+成对比较应保留每个 prompt 的 base/SFT 结果，而不仅是两个独立平均值。若一条样本两边都成功，它不应被计为 SFT 的“胜出”；若同一用户任务有多个相关 prompt，统计时还要考虑样本相关，不能把它们全部当成独立用户。报告中至少展示胜出、回归、平局计数和关键类别分母，并让评审者能回到原始输出。
+
+一次 SFT 实验可以用固定 40 条样本做探索性回归：若 overall 由 25/40 提到 29/40，但代码格式桶从 8/10 降到 6/10，且安全桶出现 1 条新违规，结论不能只写“整体提升 10 个百分点”。还要查看变化是否来自样本难度、评分规则或采样方差，并按预先定义的安全护栏处理风险。这个样例的计数只演示报告结构，不代表统计显著性或真实模型效果。
 
 ### 4.6.12 本章资料与证据
 

@@ -8,6 +8,20 @@
 
 本章的 PyTorch 示例按 CPU 环境设计，不要求 CUDA、GPU 或特定硬件；运行前只需安装与代码兼容的 PyTorch 版本。示例中的随机初始化、损失数值和训练输出绑定到代码、版本和随机种子，读者若更换版本或设备，应以形状、梯度关系和趋势为主要核对对象，而不是把每个小数位当成跨环境保证。
 
+先沿着一次参数更新读全章：模型把输入映射为预测，损失把预测差异变成标量，自动微分沿计算图得到梯度，优化器结合梯度和自身状态更新参数，调度器再决定后续更新的步长。回归、分类和语言模型只是这条循环中“输入、输出与损失”的不同选择。
+
+```mermaid
+flowchart LR
+    A["输入与参数"] --> B["前向计算：预测"]
+    B --> C["损失：衡量误差"]
+    C --> D["反向传播：计算梯度"]
+    D --> E["优化器：更新参数"]
+    E --> F["学习率调度与日志"]
+    F --> B
+```
+
+读图时注意，`loss.backward()` 只负责求导并累积梯度，不会自动改变参数；参数更新发生在优化器步骤中。后续各节分别放大图中的一段，并在末尾把它们接回完整训练循环。
+
 ## 1.1 从线性回归开始：一个参数更新到底改变了什么
 
 ### 1.1.1 先把对象和形状写在纸上
@@ -103,6 +117,14 @@ torch.Size([4])
 
 
 这个小例子说明了一个重要的工作习惯：书稿中的示例输出也是可验证的事实，不应凭印象填写。对教学代码来说，输出、形状和梯度都是读者检查推导的锚点。若把学习率改成 \(0.01\)，同一轮更新会得到 \(w=0.35,b=0.12\)；参数数值随学习率改变，梯度本身则由当前批次和当前参数决定。
+
+再用一个更小的批次把“平均梯度”的含义单独算一遍。令输入为 \(x=[1,2]\)，目标为 \(y=[3,5]\)，当前 \(w=b=0\)，损失取两个样本平方误差的平均。预测都是 0，误差是 \([-3,-5]\)，所以 \(\partial L/\partial b=2(-3-5)/2=-8\)，而 \(\partial L/\partial w=2((-3)\cdot1+(-5)\cdot2)/2=-13\)。取学习率 0.1，一步后得到 \(w=1.3,b=0.8\)，新预测是 \([2.1,3.4]\)，损失从 17 降到 1.685。这个结果只说明这组输入上的一步更新朝降低平方误差的方向移动；它不代表模型已经找到最优解，也不保证更大的学习率或另一批数据仍会下降。读者可以把 batch 改为逐样本更新，再比较两次梯度的先后顺序与平均梯度的差异。
+
+这里还隐含了一个选择：把两个样本的误差先相加再求平均，保证批次大小变化时，梯度大致保持同一量级。若使用求和而不是平均，样本数翻倍时梯度也可能翻倍，原来的学习率就不再代表相同的更新尺度。梯度范数因此要和损失归约约定一起解释；看到梯度变大，既可能是模型状态变化，也可能只是有效样本数量或归约方式变了。
+
+所以比较两次训练时，要一并固定 batch 定义和尾批次处理。一个 epoch 的最后一批若只剩 3 条，而其他批次有 32 条，直接对每批 mean loss 再做等权平均，会让尾批次中的每条样本得到更大的 epoch 权重；按样本数汇总则不会。数据采样、梯度累积和日志聚合最好使用同一套有效样本计数。
+
+目标值的单位也会影响损失尺度：把“元”改写为“分”，平方误差会放大一万倍，梯度也随之变化。预处理或目标缩放应记录在模型契约里，推理时再按相反变换还原。
 
 ### 1.1.3 梯度为何要清零
 
@@ -343,7 +365,7 @@ print(logits.shape, predictions.shape)
 torch.Size([2, 3]) torch.Size([2])
 ```
 
-这里有两件独立的事：第一行改变模块模式，第二行关闭 autograd 记录。若代码运行在需要更严格推理优化的场景，还可以研究 `torch.inference_mode()`；它的约束和行为应以目标版本官方文档为准，不能简单理解成“更快的 `no_grad()`”。
+这里有两件独立的事：第一行改变模块模式，第二行关闭 autograd 记录。`torch.inference_mode()` 也是单独的梯度模式，它不会自动调用 `model.eval()`；它比 `no_grad()` 额外关闭 view tracking 和 version counter，但其中创建的 tensor 不能任意转入后续需要 autograd 记录的计算。因此在确认输出只用于推理时再使用，若后续还要把结果接入训练图，应选择 `no_grad()` 或复制到普通 tensor。具体限制以目标版本的 [PyTorch inference_mode 文档](https://docs.pytorch.org/docs/stable/generated/torch.autograd.grad_mode.inference_mode.html) 为准。
 
 ### 1.2.5 MLP 与 Transformer 前馈网络的联系
 
@@ -356,6 +378,18 @@ Transformer block 中的前馈网络（Feed-Forward Network，FFN）通常也采
 与这里的 MLP 相比，主要差别在输入包含序列位置，且实际模型通常使用更大的隐藏维度、残差连接、归一化以及诸如 GELU 或门控激活等组件。数学骨架仍然相同：先把表示投影到较高维空间，在高维空间施加非线性，再投影回模型维度。
 
 这个联系有助于理解“基础实战”与大模型工程并不是两套互不相干的知识。张量形状、logits、损失、自动微分和参数更新，都会原样进入 Transformer；变化的是规模、并行方式和稳定性要求。
+
+一个最小的非线性例子能看出隐藏层增加了什么。考虑输入只取 0 或 1 的四个点，目标是异或：\((0,0)\to0\)、\((0,1)\to1\)、\((1,0)\to1\)、\((1,1)\to0\)。单个线性分类边界无法把两种标签分开。两个隐藏单元可以构造 \(h_1=\mathrm{ReLU}(x_1-x_2)\) 与 \(h_2=\mathrm{ReLU}(x_2-x_1)\)，输出 \(h_1+h_2\) 在四个点上恰好是 0、1、1、0。这里的权重是为展示表达能力而手工指定的，不是训练结果；实际分类器还会把分数映射为 logits，并用标签与损失来更新参数。该例说明“增加层数”本身不够，真正改变函数族的是中间的非线性。
+
+分类实验还要把训练样本与未参与更新的验证样本分开。若在同一批四个 XOR 点上反复调结构，最后报告这四点全部正确，只能证明它们被当前参数拟合；要判断模型是否学到适用于任务分布的规则，需要固定划分、额外样本或明确的合成数据生成机制。小型教学集可以核对前向、梯度和决策边界，但样本很少时，不应把训练准确率写成泛化能力。
+
+评估时也要把“输出分数”和“最终决策”分开。argmax 只在类别成本相同、阈值已经确定时给出一个默认决策；如果漏掉少数类的代价更高，可能需要按验证集选择阈值或使用代价敏感指标。阈值必须在训练外的数据上确定，并保留原始 logits 或概率，方便在业务成本改变时重新决策，而不必重新训练模型。
+
+以刚才 18 比 2 的样本为例，即使把少数类阈值调低，也不能在训练集上反复试到看起来最好再报告同一集的分数。应先确定验证协议，并查看混淆矩阵里的假阳性与假阴性分别增加多少；如果正类判断触发真实操作，阈值还要结合错误代价和人工复核能力。这个过程把模型输出、决策规则和业务后果分成三层，避免把“概率变了”误说成“分类系统一定更好”。
+
+如果验证样本太少，阈值附近的一条记录就可能让 precision 大幅波动；此时要报告计数或区间，不能只保留一个百分比。课程示例关注实现链路，正式任务还需要为阈值和指标预先定义切片。
+
+部署分类器时，阈值和类别映射也应随模型版本保存；只有模型权重而没有标签顺序，输出索引就无法可靠解释。
 
 ## 1.3 交叉熵：为什么训练分类器时直接使用 logits
 
@@ -440,7 +474,13 @@ print([round(value, 4) for value in gradient])
 
 这个推导还揭示了一个尺度性质：所有类别的 logits 同时加上同一个常数，softmax 概率不变，损失也不变。模型真正需要学习的是类别之间的相对分数，而不是一个绝对基准。数值稳定的 log-sum-exp 正是在利用这一平移不变性。
 
+例如 logits 为 \([2,1,0]\)，真实类别是第 0 类。平移最大值 2 后得到 \([0,-1,-2]\)，稳定的 loss 是 \(\ln(1+e^{-1}+e^{-2})\approx0.4076\)。若原始 logits 同时加 1000，概率和 loss 理论上不变；直接计算 \(e^{1002}\) 却可能溢出，先减最大值仍只需计算 \(1,e^{-1},e^{-2}\)。这是数值稳定技巧与数学目标一致、但实际运算路径不同的例子。
+
+batch 内 `reduction="mean"` 的平均对象也必须明确。分类任务通常对样本平均；自回归语言模型的目标则可能是对所有未屏蔽 token 平均。若第一条样本有 10 个有效 token、第二条只有 2 个，把各自 token 平均损失再平均会让两条样本权重相同；把 12 个 token 的损失总和除以 12，则长样本贡献更大。两种目标都可能合理，但在变长数据、padding 和梯度累积时，分子与分母必须按同一约定计算。
+
 如果一个类别的概率已经非常接近 1，它的梯度接近 0；这不是自动微分失效，而是当前样本对该参数方向的局部信号确实很小。多个样本、多个层和参数共享会共同决定最终梯度，不能只凭单个 logit 的变化判断整个模型是否还在学习。
+
+这也解释了为什么训练日志应同时保留平均 loss、样本或 token 分母，以及关键类别的错误数。两个 batch 的 loss 同为 0.4，可能一个包含 8 个样本、另一个包含 800 个；它们的估计稳定性并不相同。把均值、总和和计数一起保存，后续才能重算加权指标，判断变化来自模型、采样比例还是归约口径。
 
 ### 1.3.4 `reduction`、类别权重与无效标签
 
@@ -564,6 +604,14 @@ L=x^2+3x,\qquad
 ```
 
 如果把 \(x\) 同时送入两个分支后再相加，反向传播必须把两个分支的局部导数都保留下来。计算图的“动态”含义是：每次前向运行都可以根据 Python 控制流构造不同的图，而不是先声明一张固定的静态图。
+
+可以用一个只有两步的计算图手算局部导数。令 \(u=wx+b\)、\(v=\mathrm{ReLU}(u)\)、\(L=(v-y)^2\)，并取 \(w=2,x=1,b=0,y=1\)。前向得到 \(u=v=2,L=1\)；从末端开始，\(\partial L/\partial v=2(v-y)=2\)，由于 \(u>0\)，ReLU 的局部导数是 1，所以 \(\partial L/\partial u=2\)；再乘上 \(\partial u/\partial w=x=1\)，得到 \(\partial L/\partial w=2\)，同理 \(\partial L/\partial b=2\)。若学习率为 0.1，更新后 \(w=1.8,b=-0.2\)，新 \(u=1.6\)、损失为 0.36。这里每一步只是“上游梯度乘局部导数”；若 \(u<0\)，ReLU 路径会把这条梯度截为 0，说明梯度能否到达参数取决于前向经过的分支。
+
+再看一个共享参数例子。令 \(z=wx+w\)，取 \(w=1,x=2\)，所以 \(z=3\)；若 \(L=z^2\)，则上游梯度 \(\partial L/\partial z=6\)，而 \(z\) 对 \(w\) 的总导数是 \(x+1=3\)，最终 \(\partial L/\partial w=18\)。如果把两处使用误当成两个独立参数，就会漏掉一个分支的贡献。残差路径、共享 embedding 和输出头都可能复用同一参数，PyTorch 会沿每条路径计算并将贡献累加。排查“梯度为什么比预期大”时，应先检查参数是否共享、loss 是否求和、同一张量是否经过多次调用，再怀疑自动微分本身。
+
+梯度检查也有适用条件。中心有限差分用 \(f(w+\epsilon)-f(w-\epsilon)\) 估计当前斜率；\(\epsilon\) 太小会被浮点舍入主导，太大则测到较大区间的平均变化。ReLU 恰在零点不可导，dropout 每次前向会改变路径，低精度会放大数值噪声。因而检查自定义算子时，应固定随机状态、选取远离折点的简单输入、使用较高精度并报告容差；通过一个标量局部检查只支持该算子的局部梯度正确，不能证明整个模型训练有效。
+
+反向传播之后，框架通常会释放本轮图中为求导保存的中间值；如果需要对同一次前向结果再次求导，必须显式保留图，但这会占用额外内存。多数训练循环应重新做一次前向，而不是长期保留旧图。把训练循环中的图保存在列表里、只为了稍后打印 loss，可能让计算图和激活无法释放；若只需记录数字，应保存标量副本，而不是仍连接计算图的张量。
 
 ### 1.4.2 标量损失与非标量输出
 
@@ -1000,6 +1048,8 @@ BF16 的指数范围接近 FP32，通常更不容易溢出，但尾数精度较�
 
 warmup 并非“越长越安全”。过长会减少高学习率阶段的训练预算，过短又可能无法缓冲初始化、较大批次或混合精度带来的早期不稳定。比较 warmup 实验时，应固定总更新步数，并报告 warmup 占比，而不只报告最终 loss。
 
+例如目标学习率为 0.2、warmup 为 4 次参数更新，按 \(\eta_s=0.2s/4\) 得到前四次更新使用的步长是 0.05、0.10、0.15、0.20。若每两份 micro-batch 才累积出一次参数更新，调度器就应通常在两份数据处理完、优化器执行一次更新后前进一次；若误在每份 micro-batch 后前进，四个 warmup 点会在两次参数更新内消耗完，训练预算轴被缩短一半。这个差异不一定导致程序报错，但它改变了实际优化过程，因此日志里要同时记录调度器和参数更新的计数单位。
+
 ### 1.6.3 常见衰减函数
 
 Step decay 在每隔 \(S\) 步把学习率乘以 \(\gamma\)：
@@ -1184,10 +1234,11 @@ print({
 本章的 API 行为以 PyTorch 官方文档为主，算法部分用经典论文和官方实现文档交叉核对。网页版本会更新，读者复现实验时应记录访问日期、PyTorch 版本、CUDA/CPU 环境和关键默认值。
 
 1. PyTorch, *Autograd mechanics*：<https://docs.pytorch.org/docs/stable/notes/autograd.html>。用于核对计算图、梯度记录、`no_grad` 与 `detach` 的行为。
-2. PyTorch, *CrossEntropyLoss*：<https://docs.pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html>。用于核对 logits、目标形状、`ignore_index`、`reduction` 和概率目标的接口语义。
-3. PyTorch, *torch.logsumexp*：<https://docs.pytorch.org/docs/stable/generated/torch.logsumexp.html>。用于核对稳定 log-sum-exp 运算的 API。
-4. PyTorch, *SGD*、*Adam* 与 *AdamW*：<https://docs.pytorch.org/docs/stable/generated/torch.optim.SGD.html>、<https://docs.pytorch.org/docs/stable/generated/torch.optim.Adam.html>、<https://docs.pytorch.org/docs/stable/generated/torch.optim.AdamW.html>。用于核对实现参数、状态和更新顺序；页面中的默认值不能脱离目标版本使用。
-5. D. P. Kingma and J. Ba, *Adam: A Method for Stochastic Optimization*，arXiv:1412.6980。用于一阶/二阶矩和偏差修正的原始算法表述。
-6. I. Loshchilov and F. Hutter, [*Decoupled Weight Decay Regularization*](https://arxiv.org/abs/1711.05101)，ICLR 2019。用于 AdamW 与 L2 正则解耦的算法动机。
-7. PyTorch, *How to Adjust Learning Rate* 与 scheduler API：<https://docs.pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate>。用于核对 scheduler 的调用顺序、状态和不同调度器的接口。
-8. Hugging Face Transformers, *Optimization and Schedules*：<https://huggingface.co/docs/transformers/main_classes/optimizer_schedules>。用于对照语言模型训练中 warmup、更新步和调度器封装的工程语境；它是框架文档，不等同于某个模型训练结果的独立证据。
+2. PyTorch, *inference_mode*：<https://docs.pytorch.org/docs/stable/generated/torch.autograd.grad_mode.inference_mode.html>。用于核对其相对 `no_grad` 的限制；它不替代 `model.eval()`。
+3. PyTorch, *CrossEntropyLoss*：<https://docs.pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html>。用于核对 logits、目标形状、`ignore_index`、`reduction` 和概率目标的接口语义。
+4. PyTorch, *torch.logsumexp*：<https://docs.pytorch.org/docs/stable/generated/torch.logsumexp.html>。用于核对稳定 log-sum-exp 运算的 API。
+5. PyTorch, *SGD*、*Adam* 与 *AdamW*：<https://docs.pytorch.org/docs/stable/generated/torch.optim.SGD.html>、<https://docs.pytorch.org/docs/stable/generated/torch.optim.Adam.html>、<https://docs.pytorch.org/docs/stable/generated/torch.optim.AdamW.html>。用于核对实现参数、状态和更新顺序；页面中的默认值不能脱离目标版本使用。
+6. D. P. Kingma and J. Ba, *Adam: A Method for Stochastic Optimization*，arXiv:1412.6980。用于一阶/二阶矩和偏差修正的原始算法表述。
+7. I. Loshchilov and F. Hutter, [*Decoupled Weight Decay Regularization*](https://arxiv.org/abs/1711.05101)，ICLR 2019。用于 AdamW 与 L2 正则解耦的算法动机。
+8. PyTorch, *How to Adjust Learning Rate* 与 scheduler API：<https://docs.pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate>。用于核对 scheduler 的调用顺序、状态和不同调度器的接口。
+9. Hugging Face Transformers, *Optimization and Schedules*：<https://huggingface.co/docs/transformers/main_classes/optimizer_schedules>。用于对照语言模型训练中 warmup、更新步和调度器封装的工程语境；它是框架文档，不等同于某个模型训练结果的独立证据。

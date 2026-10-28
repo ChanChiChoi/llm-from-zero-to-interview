@@ -49,6 +49,8 @@ Unicode Normalization：Unicode 规范化；把某些等价或兼容字符形式
 
 Tokenizer Fingerprint：Tokenizer 指纹；tokenizer 文件及 normalizer、pre-tokenizer、vocabulary、merge/model、added-token 与 special-token 配置的版本/hash 记录
 
+In-Place Tokenizer Expansion：原词表延续扩展；在模型生产方控制原 BPE 合并规则时继续学习 merge，并映射旧、新 token 的 embedding；不同于独立重训 tokenizer 后直接替换
+
 Chat Template：聊天模板；将结构化消息、工具和多模态内容序列化成模型训练/推理所用 token 序列的版本化程序
 
 Assistant-Only Loss：仅对 assistant 输出计算监督损失；由 token 级 label mask 实现，工具调用输出是否监督按训练目标规定
@@ -3902,6 +3904,24 @@ Negative Value Data：负价值数据
 Active Learning：主动学习
 
 Data Selection：数据选择
+
+TRAK：一种使用随机投影 after-kernel 信号估计模型预测与训练数据关系的数据归因方法；结果仍绑定模型和任务。
+
+DataInf：面向参数高效微调等设置的高效影响函数近似，用于估计训练样本对目标 loss 或输出的局部影响。
+
+LoGra：利用梯度结构与投影降低大模型影响估值计算成本的方法；吞吐和显存结果依赖论文实现、基线与实验配置。
+
+Predictive Data Selection / PreSelect：用轻量 scorer 预测哪些预训练文本更可能服务目标下游能力的数据筛选路线。
+
+Bilevel Data Selection：双层数据选择；上层学习样本权重或评分，使下层 proxy 模型在加权训练后改善指定验证目标。
+
+Optimizer-induced Data Utility：优化器诱导数据效用；在优化器变换后的参数更新空间中衡量候选数据更新与目标方向的关系。
+
+Prospective Data Valuation：前瞻式数据估值；在尚未加入目标训练时预测候选数据对指定目标的效用，不能代替干预验证。
+
+Dataset Redundancy：数据集冗余；候选数据之间提供相似或重叠信号，使单独按目标对齐估值时高估了联合收益。
+
+Mechanistic Data Attribution：机制级数据归因；研究训练样本对指定可解释模型单元形成的影响，不自动等于对总体能力的来源分解。
 
 Distribution Matching：分布匹配式数据选择
 

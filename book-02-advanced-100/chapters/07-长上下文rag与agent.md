@@ -2321,7 +2321,10 @@ POLICIES = {
     "delete_file": {"kind": "destructive", "roles": {"agent"}, "requires_confirmation": True},
 }
 
-ALLOWED_RESOURCES = {"agent": {"workspace", "drafts"}}
+ALLOWED_RESOURCES = {
+    "user": {"public_docs"},
+    "agent": {"workspace", "drafts"},
+}
 
 
 def decide(request):
@@ -2352,6 +2355,7 @@ def decide(request):
 
 
 requests = [
+    {"tool": "search", "principal": "user", "resource": "public_docs"},
     {"tool": "search", "principal": "agent", "resource": "workspace"},
     {"tool": "send_email", "principal": "agent", "resource": "drafts"},
     {"tool": "delete_file", "principal": "agent", "resource": "workspace",
@@ -2359,18 +2363,19 @@ requests = [
 ]
 
 for request in requests:
-    print(request["tool"], "->", decide(request))
+    print(request["principal"], request["tool"], "->", decide(request))
 ~~~
 
 
-> **代码状态：已验证（2026-10-08；Python 3.12.9；标准库）**
+> **代码状态：已验证（2026-10-28；Python 3.12.9；标准库）**
 
 输出：
 
 ~~~text
-search -> allow
-send_email -> ask:confirmation
-delete_file -> deny:destructive_policy
+user search -> allow
+agent search -> allow
+agent send_email -> ask:confirmation
+agent delete_file -> deny:destructive_policy
 ~~~
 
 

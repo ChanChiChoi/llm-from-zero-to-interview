@@ -20,9 +20,19 @@ Data Attribution 关注归因：模型某个行为、某个错误、某个能力
 
 数据决策可以沿着下面的链路组织：
 
-~~~text
-目标指标 -> 数据单元 -> 弱信号估值 -> 小规模验证 -> 风险成本修正 -> 数据选择 -> 版本审计
-~~~
+```mermaid
+flowchart LR
+    A["定义目标与基线"] --> B["冻结候选数据与版本"]
+    B --> C{"来源、授权、隐私和污染门禁"}
+    C -->|通过| D["计算估值线索"]
+    C -.->|阻断或待审| H["隔离并复核"]
+    D --> E["受控消融或配比干预"]
+    E --> F["多任务、风险和成本评估"]
+    F -->|结果稳定| G["执行数据动作并记录版本"]
+    F -.->|结果不稳或有回归| A
+```
+
+图中的硬门禁先于价值排序；归因线索只用来缩小候选范围，资源动作还要经过受控实验、跨任务评估和版本记录。若结果回归，回到目标与基线重新检查，而不是只调一个分数阈值。
 
 本章不提供训练数据反推、隐私抽取或绕过数据保护的方法。任何估值结果都只是相对于模型、阶段、目标、评估集、预算和风险策略的局部证据；小模型、梯度相似或检索近邻都不能自动升级为严格因果结论。
 
@@ -109,13 +119,13 @@ Data Valuation 问的是“某个数据有多值钱”。
 把训练数据写成样本集合：
 
 ~~~math
-D = {z_i for i = 1..n}
+\mathcal{D} = \{z_i \mid i = 1,\ldots,n\}
 ~~~
 
 z_i 可以是一条预训练文档、一条 SFT 样本、一对 chosen/rejected 偏好样本，也可以是一个数据源中的样本。大模型数据工程里更常见的估值单元是数据源、数据簇、任务池或数据版本：
 
 ~~~math
-C_k = {z_i where c_i = k}
+\mathcal{C}_k = \{z_i \in \mathcal{D} \mid c_i = k\}
 ~~~
 
 c_i 表示样本所属来源、领域、任务或标注批次。估值单元越大，计算越便宜，但结论也越粗；估值单元越小，越容易受到噪声和交互影响。
@@ -123,70 +133,103 @@ c_i 表示样本所属来源、领域、任务或标注批次。估值单元越�
 估值必须先定义目标效用函数：
 
 ~~~math
-U(S) = sum_m(w_m * M_m(S)) - lambda_R * R(S) - lambda_C * C(S)
+U(S) = \sum_{m=1}^{M} w_m M_m(S) - \lambda_R R(S) - \lambda_K K(S)
 ~~~
 
-S 是被选中的数据集合，M_m(S) 是第 m 个目标指标，w_m 是业务权重，R(S) 是隐私、版权、安全和污染风险，C(S) 是采购、清洗、标注、训练和维护成本。这个式子不是要求把所有目标强行加成一个分数，而是明确价值判断依赖哪些目标和惩罚项。
+S 是被选中的数据集合，M_m(S) 是第 m 个目标指标，w_m 是业务权重，R(S) 是隐私、版权、安全和污染风险，K(S) 是采购、清洗、标注、训练和维护成本。权重和单位要由项目目标确定；这个式子不是要求把所有目标强行加成一个分数，而是把价值判断依赖的目标、风险和成本写明。
 
 数据源级加入变化可以写成：
 
 ~~~math
-Delta_add_k = U(S_base union C_k) - U(S_base)
+\Delta^{\mathrm{add}}_k = U(S_{\mathrm{base}} \cup \mathcal{C}_k) - U(S_{\mathrm{base}})
 ~~~
 
 删除变化可以写成：
 
 ~~~math
-Delta_drop_k = U(S_base) - U(S_base without C_k)
+\Delta^{\mathrm{drop}}_k = U(S_{\mathrm{base}}) - U(S_{\mathrm{base}} \setminus \mathcal{C}_k)
 ~~~
 
-Delta_add_k 为正表示在当前基线中加入数据源有净收益，Delta_drop_k 为正表示删除它会损失净效用。两者都依赖基线和配比，不能被解释成数据源永久不变的“价格”。
+正的 $\Delta^{\mathrm{add}}_k$ 表示在当前基线中加入数据源有净收益，正的 $\Delta^{\mathrm{drop}}_k$ 表示删除它会损失净效用。两者都依赖基线和配比，不能被解释成数据源永久不变的“价格”。
 
-Influence functions 关心训练点 z_i 对测试点 z_star 的 loss 变化。为避免把不可计算的 Hessian 逆写成生产承诺，可以用教学化记号表示：
+Influence functions 关心训练点 $z_i$ 对测试点 $z_*$ 的 loss 变化。标准局部推导假设参数接近经验风险的驻点，且 Hessian 可逆；实际实现可能使用阻尼、子空间或其他曲率近似。为避免把 Hessian 逆写成生产承诺，可用下面的教学记号表示：
 
 ~~~math
-I_up(z_i, z_star) = -dot(g_star, H_inv(g_i))
+I_{\mathrm{up}}(z_i,z_*) = -\nabla_\theta L(z_*;\hat\theta)^\top H_{\hat\theta}^{-1}\nabla_\theta L(z_i;\hat\theta)
 ~~~
 
-g_i 是训练点梯度，g_star 是测试点梯度，H_inv 表示经验风险曲率的逆算子。这个式子表达“如果稍微上调训练点权重，测试点 loss 可能如何变化”，不是说真实训练一定满足线性近似。深度非凸模型、优化路径和分布漂移都会削弱它的可靠性。
+这里 $L(z;\theta)$ 是样本损失，$\hat\theta$ 是当前训练得到的参数，$H_{\hat\theta}$ 是训练目标在该点附近的 Hessian 或其带阻尼近似。$I_{\mathrm{up}}$ 近似描述给训练点 $z_i$ 增加极小权重时，测试点 $z_*$ 的损失变化；负值表示局部近似下测试损失下降。这个符号约定不能直接替代完整重训结果。深度非凸模型、优化路径、阻尼和分布漂移都会影响近似。
+
+用一个二维例子看符号。设 $g_i=(1,0)^\top$、$g_*=(1,2)^\top$，并假设局部曲率近似为 $H=\begin{bmatrix}2&0\\0&1\end{bmatrix}$，则 $H^{-1}g_i=(0.5,0)^\top$，所以 $I_{\mathrm{up}}=-[(1,2)\cdot(0.5,0)]=-0.5$。这表示该训练点在这个局部二阶近似下可能降低目标损失 0.5 个损失单位；它不是 50% 的准确率提升，也不是已验证的因果效应。
 
 梯度相似 proxy 可以写成：
 
 ~~~math
-A_i = dot(g_i, g_T) / (norm(g_i) * norm(g_T))
+A_i = \frac{\langle g_i,g_T\rangle}{\|g_i\|_2\,\|g_T\|_2}
 ~~~
 
-g_T 是目标任务、验证集或错误切片的梯度特征。A_i 高说明方向相近，不能单独证明训练样本导致了目标能力，也不能代替隐私、版权和污染检查。
+其中 $g_T$ 是目标任务、验证集或错误切片的梯度特征。$A_i$ 高说明梯度方向相近，只能作为候选排序线索，不能单独证明训练样本导致目标能力，也不能代替隐私、版权和污染检查。
 
-余弦相似度要求 `norm(g_i) > 0` 且 `norm(g_T) > 0`。零梯度可能来自已饱和的样本、被 mask 的目标或尚未产生梯度的计算路径，此时结果应记为 `undefined`，不能把零向量与目标方向相似误报为 0 或 1。类似地，`V_k` 要求 `effective_tokens_k > 0`；某个数据源如果经过过滤后没有有效 token，它没有可解释的单位价值，而不是单位价值为 0。
+余弦相似度要求两个梯度范数都大于 0。零梯度可能来自已饱和的样本、被 mask 的目标或尚未产生梯度的计算路径，此时结果应记为未定义，不能把零向量与目标方向相似误报为 0 或 1。类似地，单位 token 价值要求有效 token 数大于 0；没有有效 token 的数据源没有可解释的单位价值，不应记成 0。
+
+下面用 demo 中的 `math_verified` 数据源手算一次。四个目标权重为数学 0.35、代码 0.25、安全 0.20、通用 0.20；该源对应的指标变化为 0.080、0.010、0.000、0.015，因此加权变化是 $0.35\times0.080+0.25\times0.010+0.20\times0+0.20\times0.015=0.0335$。其梯度与目标梯度的点积为 $0.758$，两个范数分别约为 $0.8768$ 和 $0.9179$，所以余弦相似度约为 $0.942$。
+
+为演示排序，本例使用下式组合相同样本的指标变化、质量、覆盖、梯度相似、风险和成本：
+
+~~~math
+V_i^{\mathrm{proxy}} = \sum_{m=1}^{M} w_m\Delta M_{i,m} + 0.08q_i + 0.05h_i + 0.05A_i - 0.12r_i - 0.04k_i
+~~~
+
+这里 $q_i$、$h_i$、$A_i$、$r_i$ 和 $k_i$ 分别表示质量、覆盖、梯度相似、风险和归一化成本；0.08、0.05 等系数只为演示多维权衡。对 `math_verified` 代入质量 $q_i=0.92$、覆盖 $h_i=0.78$、风险 $r_i=0.03$、成本 $k_i=0.22$ 和 $A_i=0.942$，得到 $0.0335+0.0736+0.0390+0.0471-0.0036-0.0088=0.1808$。该源有 900 个有效 token，换算后约为每千 token $0.1808/900\times1000=0.2009$ 个教学效用单位。分数系数和单位都是合成示例约定，不是价格或行业标准；硬性许可、隐私与污染门禁仍在打分之前执行。
 
 Data Shapley 把数据看成参与者，价值是不同子集中的平均边际贡献：
 
 ~~~math
-phi_i = sum_S(weight(S) * (U(S union {z_i}) - U(S)))
+\phi_i = \sum_{S\subseteq\mathcal{D}\setminus\{z_i\}} \frac{|S|!(n-|S|-1)!}{n!}\left[U(S\cup\{z_i\})-U(S)\right]
 ~~~
 
-其中 S 遍历不包含 z_i 的子集，weight(S) 是按子集大小分配的 Shapley 权重。精确遍历代价随样本数指数增长，大模型通常只在小数据池上近似，或把思想迁移到源级、簇级和任务级。
+其中 $S$ 遍历不包含 $z_i$ 的子集，前面的阶乘分数是按子集大小分配的 Shapley 权重。精确遍历代价随样本数指数增长，大模型通常只在小数据池上近似，或把思想迁移到源级、簇级和任务级。
+
+用三个参与者走完六种加入顺序，可以看见交互如何被分摊。设数学源、代码源和合成模板源是否加入分别用取值为 0 或 1 的 $M$、$C$、$T$ 表示，玩具效用定义为：
+
+~~~math
+U(M,C,T)=0.30M+0.22C-0.06T+0.08MC-0.05T(1-M)
+~~~
+
+数学源的单独收益为 0.30，代码源为 0.22，合成模板源为 -0.06；数学和代码一起出现时额外协同 +0.08；若合成模板先于数学源加入，则额外产生 -0.05 的冲突损失，数学源随后加入时会消除这项损失。例如 $U(0,0,1)=-0.11$，而 $U(1,0,1)=0.24$，所以在合成模板之后加入数学源的边际值是 $0.24-(-0.11)=0.35$。下表逐个记录每个参与者在六种加入顺序中的边际增量：
+
+| 加入顺序 | 数学源边际值 | 代码源边际值 | 合成模板边际值 |
+| --- | ---: | ---: | ---: |
+| 数学 → 代码 → 合成 | 0.30 | 0.30 | -0.06 |
+| 数学 → 合成 → 代码 | 0.30 | 0.30 | -0.06 |
+| 代码 → 数学 → 合成 | 0.38 | 0.22 | -0.06 |
+| 代码 → 合成 → 数学 | 0.43 | 0.22 | -0.11 |
+| 合成 → 数学 → 代码 | 0.35 | 0.30 | -0.11 |
+| 合成 → 代码 → 数学 | 0.43 | 0.22 | -0.11 |
+| 六种顺序取平均 | 0.365 | 0.260 | -0.085 |
+
+数学源在“代码已在场”时还分到一半协同收益，在“合成先到”时则会消除一部分冲突损失；代码与合成也按它们加入时的上下文计算。三个平均边际值相加为 $0.365+0.260-0.085=0.540$，恰好等于三者共同效用 $0.30+0.22-0.06+0.08=0.540$。这说明 Shapley 会把交互分配给参与者，但结果仍取决于这里定义的 utility 和参与者集合。
 
 为了比较不同大小的数据源，可以看单位有效 token 的净价值：
 
 ~~~math
-V_k = (Delta_add_k - lambda_R * Delta_R_k - lambda_C * Delta_C_k) / effective_tokens_k
+V_k^{\mathrm{unit}} = \frac{\Delta_k^{\mathrm{add}}}{T_k^{\mathrm{effective}}}
 ~~~
 
-effective_tokens_k 不是原始 token 数，而是经过质量、重复、污染和可用性处理后的有效 token。这个归一化能帮助比较大小不同的数据源，但不能消除数据之间的互补关系。
+这里 $T_k^{\mathrm{effective}}$ 是经过质量、重复、污染和可用性处理后的有效 token 数。由于风险和成本已经包含在 $U(S)$ 中，单位价值只需把净增益除以有效 token，不能再重复扣一次风险和成本。这个归一化能帮助比较大小不同的数据源，但不能消除数据之间的互补关系。
 
 最终选择可以写成带预算和覆盖约束的问题：
 
 ~~~math
-maximize sum_i(s_i * v_i)
-subject to sum_i(s_i * b_i) <= B
-and Risk(selected) <= tau_R
+\max_{\mathbf{s}\in\{0,1\}^{n}} U(\{z_i\mid s_i=1\})
+\quad\text{subject to}\quad \sum_{i=1}^{n}s_i b_i\leq B,\quad R(\{z_i\mid s_i=1\})\leq\tau_R,\quad \Delta M_m\geq-\epsilon_m\ \forall m
 ~~~
 
-s_i 表示是否选择，v_i 是估计价值，b_i 是 token、标注或训练成本，B 是预算，tau_R 是风险上限。工程上还应加入语言、领域、任务、来源、多样性和最小覆盖约束，否则优化器可能把全部预算集中到单一高分数据。
+其中 $s_i$ 表示是否选择第 $i$ 个候选，$b_i$ 是 token、标注或训练成本，$B$ 是预算，$\tau_R$ 是风险上限，$\epsilon_m$ 是第 $m$ 个指标允许的最大回退量；$\Delta M_m$ 表示所选数据相对固定基线在该指标上的变化。若目标有互补或替代关系，不能把每个数据源的单独分数相加当作真实 $U(S)$；还应按项目需要加入语言、领域、任务、来源、多样性和最小覆盖约束。
 
-如果预算内没有任何正价值且满足约束的候选，选择结果应是空集并触发补充或重新估值，而不是强行填满预算。预算选择也必须说明是固定总 token、固定训练步数还是固定计算量；否则加入数据源后总训练量增加，`Delta_add_k` 可能把“训练得更多”误认为“数据更有价值”。
+在 demo 中，预算为 3,200 tokens，每个目标允许的最大回退量是 0.01。枚举五个未阻断且未待审的正值来源，共检查 $2^5=32$ 个子集；结果选中数学、代码、安全和中文领域四个源，token 数为 $900+760+640+820=3,120$。四个目标的增量分别是数学 0.085、代码 0.080、安全 0.065、通用 0.070，均高于 -0.01；合计 proxy 值为 $0.1808+0.1599+0.1202+0.1288=0.5897$。候选排序也会随口径改变：按绝对 proxy 值，数学源排首位；按每千 token，代码源的 0.2104 高于数学源的 0.2009。这个小池的精确枚举只说明教学目标和约束下的最优组合，不能当作大规模训练数据的最优解。
+
+如果预算内没有任何正价值且满足约束的候选，选择结果应是空集并触发补充或重新估值，而不是强行填满预算。预算选择也必须说明是固定总 token、固定训练步数还是固定计算量；否则加入数据源后总训练量增加，$\Delta^{\mathrm{add}}_k$ 可能把“训练得更多”误认为“数据更有价值”。
 
 ---
 
@@ -268,7 +311,7 @@ s_i 表示是否选择，v_i 是估计价值，b_i 是 token、标注或训练�
 
 ## 8. Influence functions：从预测追溯训练点
 
-Influence functions 的直觉是：如果把某个训练样本权重稍微增加或删除，模型在某个测试点上的 loss 会怎样变化？
+Influence functions 的直觉是：如果把某个训练样本权重稍微增加或删除，模型在某个测试点上的 loss 会怎样变化？前面的局部例子得到 $-0.5$，只说明在给定曲率和梯度下的近似方向；实际排序要固定 checkpoint、目标 loss、参数子集、阻尼和验证样本，并检查高排名样本是否能被小规模 downweight 实验复现。
 
 它可以用于回答：哪些训练样本最影响这个预测？
 
@@ -318,19 +361,15 @@ Data Shapley 的直觉是：一条数据的价值等于它在不同数据子集�
 
 ## 10. 近似方法：从精确估值到可用信号
 
-工程上常见近似包括：
+工程上常见近似可以按它们回答的问题分成三类：
 
-1. 小模型 proxy：用小模型或短训练评估数据价值。
-2. 数据源 ablation：删除或降权整个数据源。
-3. 子集采样：随机采样数据子集训练多个模型。
-4. validation loss 分桶：看不同数据源对验证集 loss 的影响。
-5. embedding 相似度：找和目标任务最相近的数据。
-6. gradient similarity：看训练样本梯度是否与目标任务梯度方向一致。
-7. nearest neighbor attribution：用检索找最相似训练样本。
-8. LLM judge 质量评分：对 SFT、偏好、合成数据做辅助估值。
-9. 人工审计：抽样检查高低分数据。
+| 方法族 | 主要回答 | 可以支持什么 | 单独不能证明什么 |
+| --- | --- | --- | --- |
+| 近邻、embedding、loss、训练动态 | 哪些候选与目标或模型困难样本相近？ | 生成待审候选、分层和补充标注 | 候选造成了行为、可合法使用或对其他任务有净收益 |
+| Influence、梯度相似、TRAK 等归因 | 某个训练点对当前目标输出或 loss 有何局部影响线索？ | 在固定模型、目标和近似下排序诊断样本 | 对完整预训练轨迹的精确因果贡献 |
+| Shapley、子集消融、数据选择器 | 一组候选在特定 utility、预算和对照下是否值得保留？ | 比较指定数据池与目标下的资源动作 | 脱离 utility、模型阶段和评估集的通用“数据价格” |
 
-这些方法没有一个完美。成熟系统通常把多个弱信号组合起来，而不是迷信某一个分数。
+小模型 proxy、随机子集、分桶评估、LLM judge 和人工抽审可以补充这些路线，但应分别报告采样误差、标注噪声、目标依赖和人工成本。多个弱信号可以用来缩小搜索范围，却不能通过简单投票变成因果证明。
 
 ---
 
@@ -478,6 +517,21 @@ Data valuation 直接服务 data mixture。
 
 这比追求单条样本的精确因果归因更现实。
 
+近期研究展示了不同的规模化路线，但实验单位并不相同：
+
+| 方法 | 主要机制与作者实验 | 结果的适用边界 |
+| --- | --- | --- |
+| [TRAK](https://proceedings.mlr.press/v202/park23c.html) | 随机投影后的 after-kernel 归因；作者在图像分类、CLIP、BERT 和 mT5 等设置中比较可扩展性。 | 支持在指定可微模型和任务中计算预测归因，不是完整训练轨迹的因果分解。 |
+| [DataInf](https://arxiv.org/abs/2310.00902) 与 [LoGra](https://arxiv.org/abs/2405.13954) | DataInf 研究 LoRA 微调模型的 influence 近似，实验包含 Llama-2-13B-chat；LoGra 对梯度作投影，在 Llama-3-8B-Instruct 与 1B-token 数据实验中报告相对其可运行基线最高 6,500 倍吞吐和 5 倍显存下降。 | DataInf 面向受限可训练参数的影响估计；LoGra 数字绑定其实现、基线与实验设置，二者都不是对任意全量预训练的同等保证。 |
+| [Mechanistic Data Attribution](https://proceedings.mlr.press/v306/chen26cv.html) | 将 influence 线索用于 Pythia 系列的可解释单元来源追踪；作者报告针对高影响样本做定向增删会改变特定 interpretable heads，随机干预未见同样效果。 | 这是特定模型家族、机制单元和干预设置的因果证据，不等同于数据源对总体能力的通用估值。 |
+| [PreSelect](https://proceedings.mlr.press/v267/shum25a.html) | 用 fastText scorer 选择预测下游能力的预训练数据；作者在 1B/3B 模型实验中报告 30B 选择 token 可超过其 300B vanilla 对照。 | 这是特定数据和目标下的预测式数据选择结果，不等于逐条训练数据归因或可普遍缩小十倍预算。 |
+| [BLISS](https://proceedings.mlr.press/v306/hao26b.html) | 通过小型 proxy 的多步更新训练双层 score model，尝试建模训练过程中数据偏好变化；作者在选定 C4 子集和多种小模型设置中报告结果。 | 1B 配置下报告的 1.7 倍达到同等表现速度绑定论文基线、数据子集和评价任务，不外推为通用预训练收益。 |
+| [OPUS](https://proceedings.mlr.press/v306/wang26gc.html) | 在优化器诱导的更新空间估计候选效用，用于逐步预训练选择；作者报告额外计算开销为 4.7%，并在论文设置中的从头预训练与 mid-training 阶段比较基线。 | 开销与收益绑定论文模型、语料、优化器和实验协议；不证明所有训练栈都能获得相同收益。 |
+| [Convex Dataset Valuation for Post-Training](https://proceedings.mlr.press/v306/zeng26k.html) | 在梯度空间用 kernel mean matching 联合考虑目标任务对齐与候选数据冗余，处理预算受限的后训练数据集选择。 | 面向论文中的后训练设置与预算问题；不能替代许可、隐私和独立安全门禁，也不代表所有预训练配比问题。 |
+| [RISE](https://arxiv.org/abs/2604.16197)（2026 预印本） | 在输出侧 readout 构造 lexical residual 与 semantic projected-error 两类 sketch，分别评估回溯归因和 zero-shot 前瞻估值；作者在 OLMo/Pythia 系列报告索引存储最高压缩 112 倍，并扩展到 32B 模型。 | 尚为预印本，假设、架构适配和论文任务的结果需要独立复核；不能替代目标模型上的干预实验。 |
+
+这些结果的模型、训练阶段、数据量、选择比例和评估协议不同，不能把其倍数排成统一排行榜。它们共同支持的是：可以降低候选筛选或归因近似的成本；最终资源决策仍要回到固定预算下的目标任务实验、风险门禁和切片评估。
+
 ---
 
 ## 18. 机制与边界：数据价值是目标依赖的边际贡献
@@ -506,27 +560,43 @@ Data valuation 直接服务 data mixture。
 
 ### 19.1 最小可运行数据归因与估值 demo
 
-下面这个 demo 不依赖外部库，也不读写文件。输入是一组 toy 数据源，输出包括源级价值排名、目标任务 attribution proxy、token budget 下的数据选择、小规模 Shapley 估值、负价值 / 阻断数据和污染阻断清单。它把零向量相似度、空候选集和零有效 token 的结果保留为 `None`；demo 中的相似度和 Shapley 仅是待验证信号。
+**代码状态：已验证（2026-10-28，Python 3.12.9，标准库；固定合成样本，无外部依赖）。**
 
-它演示的是数据估值工程闭环，不是真实 influence function、生产级 Shapley、完整小模型训练或大规模数据选择系统。真实系统需要接入训练日志、数据版本、评估矩阵、embedding / gradient 特征、消融实验、人工审计和合规风险系统。demo 的 decision 只表示可以继续做小规模数据实验，不等于已经证明某个数据源对最终大模型有严格因果贡献。
+将代码保存为 `data_valuation_demo.py`，运行 `python3 data_valuation_demo.py`。
+
+下面的 demo 不依赖外部库，也不读写文件。输入是七个合成数据源，输出包含目标任务梯度相似度、源级 proxy 价值、每千有效 token 的单位值、硬门禁与软复核分流、固定预算下的精确小规模组合选择，以及三参与者的 Shapley 估值。硬性阻断、软复核和负向效用分开记录；空梯度或零 token 的单位值记为 `None`。
+
+它演示的是小型合成池上的决策口径，不是真实 influence function、生产级 Shapley、完整小模型训练或大规模数据选择系统。示例用枚举得到该 toy pool 中满足预算和各目标不回退超过 0.01 的最高 proxy 总值；这不代表该启发式分数是模型的真实效用，也不代表大规模选择的全局最优。真实系统还需受控训练、独立评估、人工审计和合规系统。
 
 ~~~python
-from itertools import permutations
-from math import sqrt
+from itertools import combinations, permutations
+from math import isfinite, sqrt
 
 
 weights = {"math": 0.35, "code": 0.25, "safety": 0.20, "general": 0.20}
 target_grad = [0.70, 0.55, 0.20, 0.10]
-
 sources = [
     {"id": "math_verified", "tokens": 900, "quality": 0.92, "coverage": 0.78, "risk": 0.03, "cost": 0.22, "license_ok": True, "privacy": False, "contam": False, "grad": [0.82, 0.28, 0.12, 0.06], "delta": {"math": 0.080, "code": 0.010, "safety": 0.000, "general": 0.015}},
     {"id": "code_tests", "tokens": 760, "quality": 0.88, "coverage": 0.71, "risk": 0.04, "cost": 0.18, "license_ok": True, "privacy": False, "contam": False, "grad": [0.34, 0.86, 0.10, 0.04], "delta": {"math": 0.010, "code": 0.070, "safety": 0.000, "general": 0.010}},
     {"id": "safety_boundary", "tokens": 640, "quality": 0.84, "coverage": 0.66, "risk": 0.05, "cost": 0.15, "license_ok": True, "privacy": False, "contam": False, "grad": [0.18, 0.12, 0.88, 0.18], "delta": {"math": -0.005, "code": 0.000, "safety": 0.060, "general": -0.005}},
     {"id": "zh_domain", "tokens": 820, "quality": 0.80, "coverage": 0.73, "risk": 0.06, "cost": 0.12, "license_ok": True, "privacy": False, "contam": False, "grad": [0.40, 0.20, 0.15, 0.80], "delta": {"math": 0.000, "code": 0.000, "safety": 0.005, "general": 0.050}},
     {"id": "synthetic_template", "tokens": 700, "quality": 0.50, "coverage": 0.42, "risk": 0.22, "cost": 0.05, "license_ok": True, "privacy": False, "contam": False, "grad": [0.20, 0.18, 0.10, 0.15], "delta": {"math": 0.020, "code": 0.010, "safety": -0.020, "general": -0.030}},
-    {"id": "old_legal_forum", "tokens": 680, "quality": 0.46, "coverage": 0.35, "risk": 0.36, "cost": 0.08, "license_ok": True, "privacy": False, "contam": False, "grad": [0.08, 0.04, 0.20, 0.34], "delta": {"math": 0.000, "code": 0.000, "safety": -0.030, "general": -0.020}},
+    {"id": "old_legal_forum", "tokens": 680, "quality": 0.46, "coverage": 0.35, "risk": 0.36, "cost": 0.08, "license_ok": True, "privacy": False, "contam": False, "grad": [0.08, 0.04, 0.20, 0.34], "delta": {"math": 0.000, "code": 0.000, "safety": -0.300, "general": -0.200}},
     {"id": "benchmark_leak", "tokens": 520, "quality": 0.90, "coverage": 0.40, "risk": 0.70, "cost": 0.04, "license_ok": True, "privacy": False, "contam": True, "grad": [0.75, 0.25, 0.05, 0.05], "delta": {"math": 0.090, "code": 0.000, "safety": 0.000, "general": 0.000}},
 ]
+
+assert set(weights) == {"math", "code", "safety", "general"}
+assert abs(sum(weights.values()) - 1.0) < 1e-12
+assert all(isfinite(value) and 0.0 <= value <= 1.0 for value in weights.values())
+assert len(target_grad) == 4 and all(isfinite(value) for value in target_grad)
+assert len({source["id"] for source in sources}) == len(sources)
+for source in sources:
+    assert type(source["tokens"]) is int and source["tokens"] > 0
+    assert all(type(source[key]) is bool for key in ("license_ok", "privacy", "contam"))
+    assert all(isfinite(source[key]) and 0.0 <= source[key] <= 1.0 for key in ("quality", "coverage", "risk", "cost"))
+    assert set(source["delta"]) == set(weights)
+    assert all(isfinite(value) and -1.0 <= value <= 1.0 for value in source["delta"].values())
+    assert len(source["grad"]) == len(target_grad) and all(isfinite(value) for value in source["grad"])
 
 
 def dot(a, b):
@@ -542,57 +612,117 @@ def cosine(a, b):
     return dot(a, b) / denominator if denominator else None
 
 
-def weighted_delta(src):
-    return sum(weights[k] * src["delta"].get(k, 0.0) for k in weights)
+def hard_block_reasons(source):
+    reasons = []
+    if not source["license_ok"]:
+        reasons.append("license_or_source")
+    if source["privacy"]:
+        reasons.append("privacy_or_sensitive")
+    if source["contam"]:
+        reasons.append("eval_contamination")
+    return reasons
 
 
-def source_value(src):
-    if not src["license_ok"] or src["privacy"] or src["contam"]:
-        return -1.0
-    grad_sim = cosine(src["grad"], target_grad)
+def review_reasons(source):
+    reasons = []
+    if source["risk"] > 0.30:
+        reasons.append("high_risk")
+    if source["quality"] < 0.48:
+        reasons.append("low_quality")
+    return reasons
+
+
+def weighted_delta(source):
+    return sum(weights[key] * source["delta"][key] for key in weights)
+
+
+def source_value(source):
+    if hard_block_reasons(source):
+        return None
+    grad_sim = cosine(source["grad"], target_grad)
     if grad_sim is None:
         return None
-    raw = (
-        weighted_delta(src)
-        + 0.08 * src["quality"]
-        + 0.05 * src["coverage"]
+    return (
+        weighted_delta(source)
+        + 0.08 * source["quality"]
+        + 0.05 * source["coverage"]
         + 0.05 * grad_sim
-        - 0.12 * src["risk"]
-        - 0.04 * src["cost"]
+        - 0.12 * source["risk"]
+        - 0.04 * source["cost"]
     )
-    if src["risk"] > 0.30 or src["quality"] < 0.48:
-        return -abs(raw)
-    return raw
+
+
+def value_per_token(value, tokens):
+    return value / tokens if value is not None and tokens > 0 else None
 
 
 rows = []
-for src in sources:
+for source in sources:
+    value = source_value(source)
+    grad_sim = cosine(source["grad"], target_grad)
     rows.append({
-        "id": src["id"],
-        "weighted_delta": round(weighted_delta(src), 4),
-        "grad_sim": None if cosine(src["grad"], target_grad) is None else round(cosine(src["grad"], target_grad), 3),
-        "value": None if source_value(src) is None else round(source_value(src), 4),
+        "id": source["id"],
+        "value": value,
+        "grad_sim": grad_sim,
+        "blocked": hard_block_reasons(source),
+        "review": review_reasons(source),
     })
+row_by_id = {row["id"]: row for row in rows}
+source_by_id = {source["id"]: source for source in sources}
+ranked = sorted(rows, key=lambda row: row["value"] if row["value"] is not None else float("-inf"), reverse=True)
+negative_sources = [row["id"] for row in ranked if row["value"] is not None and row["value"] < 0]
+blocked_sources = [(row["id"], row["blocked"]) for row in rows if row["blocked"]]
+review_sources = [(row["id"], row["review"]) for row in rows if row["review"] and not row["blocked"]]
+unit_values = {
+    source["id"]: None if value_per_token(row_by_id[source["id"]]["value"], source["tokens"]) is None
+    else round(value_per_token(row_by_id[source["id"]]["value"], source["tokens"]) * 1000, 4)
+    for source in sources for row in [row_by_id[source["id"]]]
+}
 
-ranked = sorted(
-    rows,
-    key=lambda x: x["value"] if x["value"] is not None else float("-inf"),
-    reverse=True,
-)
-negative = [row["id"] for row in ranked if row["value"] is not None and row["value"] < 0]
+budget = 3200
+metric_floor = {key: -0.01 for key in weights}
 
-budget = 2600
-selected, used_tokens = [], 0
-for row in sorted(
-    (row for row in rows if row["value"] is not None),
-    key=lambda r: r["value"] / next(s["tokens"] for s in sources if s["id"] == r["id"]),
-    reverse=True,
-):
-    src = next(s for s in sources if s["id"] == row["id"])
-    if row["value"] <= 0 or used_tokens + src["tokens"] > budget:
-        continue
-    selected.append(row["id"])
-    used_tokens += src["tokens"]
+
+def metric_delta(subset):
+    return {
+        key: sum(source["delta"][key] for source in subset)
+        for key in weights
+    }
+
+
+def choose_subset(candidates, token_budget):
+    best_ids, best_tokens, best_value = [], 0, 0.0
+    best_key = (0.0, 0, ())
+    for size in range(len(candidates) + 1):
+        for subset in combinations(candidates, size):
+            used = sum(source["tokens"] for source in subset)
+            if used > token_budget:
+                continue
+            deltas = metric_delta(subset)
+            if any(deltas[key] < metric_floor[key] for key in weights):
+                continue
+            total = sum(row_by_id[source["id"]]["value"] for source in subset)
+            ids = tuple(source["id"] for source in subset)
+            candidate_key = (round(total, 12), -used, ids)
+            if candidate_key > best_key:
+                best_key = candidate_key
+                best_ids, best_tokens, best_value = list(ids), used, total
+    selected_sources = [source_by_id[source_id] for source_id in best_ids]
+    return {
+        "ids": best_ids,
+        "tokens": best_tokens,
+        "value": best_value,
+        "metric_delta": metric_delta(selected_sources),
+    }
+
+
+eligible = [
+    source for source in sources
+    if row_by_id[source["id"]]["value"] is not None
+    and row_by_id[source["id"]]["value"] > 0
+    and not row_by_id[source["id"]]["review"]
+]
+selection = choose_subset(eligible, budget)
 
 players = ["math_verified", "code_tests", "synthetic_template"]
 base_gain = {"math_verified": 0.30, "code_tests": 0.22, "synthetic_template": -0.06}
@@ -600,7 +730,7 @@ base_gain = {"math_verified": 0.30, "code_tests": 0.22, "synthetic_template": -0
 
 def utility(subset):
     subset = set(subset)
-    score = sum(base_gain[p] for p in subset)
+    score = sum(base_gain[player] for player in subset)
     if {"math_verified", "code_tests"}.issubset(subset):
         score += 0.08
     if "synthetic_template" in subset and "math_verified" not in subset:
@@ -608,81 +738,100 @@ def utility(subset):
     return score
 
 
-shapley = {p: 0.0 for p in players}
+shapley = {player: 0.0 for player in players}
 orders = list(permutations(players))
 for order in orders:
     prefix = []
-    for p in order:
-        shapley[p] += utility(prefix + [p]) - utility(prefix)
-        prefix.append(p)
-shapley = {k: round(v / len(orders), 4) for k, v in shapley.items()}
+    for player in order:
+        shapley[player] += utility(prefix + [player]) - utility(prefix)
+        prefix.append(player)
+shapley = {key: round(value / len(orders), 4) for key, value in shapley.items()}
 
-report = {
-    "ranked_sources": [(row["id"], row["value"]) for row in ranked],
-    "top_attribution": [
-        (row["id"], row["grad_sim"])
-        for row in sorted(
-            (row for row in rows if row["grad_sim"] is not None),
-            key=lambda x: x["grad_sim"],
-            reverse=True,
-        )[:3]
-    ],
-    "selected_under_budget": selected,
-    "used_tokens": used_tokens,
-    "negative_or_blocked": negative,
-    "shapley_demo": shapley,
-    "total_selected_value": round(sum(row["value"] for row in rows if row["id"] in selected), 4),
-    "blocked_contamination": [src["id"] for src in sources if src["contam"]],
-}
+selected_set = set(selection["ids"])
+selected_delta = selection["metric_delta"]
 checks = {
-    "contamination_isolated": bool(report["blocked_contamination"]),
-    "negative_sources_exposed": bool(report["negative_or_blocked"]),
-    "budget_respected": report["used_tokens"] <= budget,
+    "hard_blocks_not_selected": not (selected_set & {source_id for source_id, _ in blocked_sources}),
+    "review_sources_not_auto_selected": not (selected_set & {source_id for source_id, _ in review_sources}),
+    "negative_sources_exposed": bool(negative_sources),
+    "budget_respected": selection["tokens"] <= budget,
+    "task_floors_met": all(selected_delta[key] >= metric_floor[key] for key in weights),
     "interaction_visible": shapley["math_verified"] > 0.30 and shapley["code_tests"] > 0.20,
+    "empty_pool_returns_empty": choose_subset([], budget)["ids"] == [],
+    "zero_gradient_is_undefined": cosine([0.0] * len(target_grad), target_grad) is None,
+    "zero_token_unit_value_is_undefined": value_per_token(0.5, 0) is None,
 }
-signals = {
-    "top_source": ranked[0]["id"],
-    "top_attribution_source": report["top_attribution"][0][0],
-    "selected_value": report["total_selected_value"],
-    "negative_or_blocked": report["negative_or_blocked"],
+report = {
+    "ranked_sources": [(row["id"], None if row["value"] is None else round(row["value"], 4)) for row in ranked],
+    "value_per_1k_tokens": unit_values,
+    "top_attribution": [
+        (row["id"], round(row["grad_sim"], 3))
+        for row in sorted((row for row in rows if row["grad_sim"] is not None), key=lambda row: row["grad_sim"], reverse=True)[:3]
+    ],
+    "selected_under_budget": selection["ids"],
+    "used_tokens": selection["tokens"],
+    "selected_metric_delta": {key: round(value, 3) for key, value in selected_delta.items()},
+    "selected_value": round(selection["value"], 4),
+    "negative_sources": negative_sources,
+    "review_sources": review_sources,
+    "blocked_sources": blocked_sources,
+    "shapley_demo": shapley,
+    "checks": checks,
 }
-actions = [
-    "exclude_contaminated_sources",
-    "review_negative_value_sources",
+report["signals"] = {
+    "top_source_by_absolute_value": ranked[0]["id"],
+    "top_source_per_1k_tokens": max(unit_values, key=lambda key: unit_values[key] if unit_values[key] is not None else float("-inf")),
+    "selected_value": report["selected_value"],
+    "negative_sources": negative_sources,
+}
+report["actions"] = [
+    "exclude_hard_blocked_sources",
+    "review_soft_hold_and_negative_sources",
     "run_source_level_ablation",
 ]
-decision = "continue_to_source_ablation" if all(checks.values()) else "hold_for_valuation_review"
-report["checks"] = checks
-report["signals"] = signals
-report["actions"] = actions
-report["decision"] = decision
+report["decision"] = "continue_to_source_ablation" if all(checks.values()) else "hold_for_valuation_review"
 
 for key, value in report.items():
     print(f"{key}=", value)
 
-assert report["selected_under_budget"] == ["code_tests", "math_verified", "safety_boundary"]
-assert report["used_tokens"] == 2300
-assert report["negative_or_blocked"] == ["old_legal_forum", "benchmark_leak"]
+license_probe = dict(sources[0], id="license_probe", license_ok=False)
+privacy_probe = dict(sources[0], id="privacy_probe", privacy=True)
+zero_gradient_probe = dict(sources[0], id="zero_gradient_probe", grad=[0.0] * len(target_grad))
+assert report["selected_under_budget"] == ["math_verified", "code_tests", "safety_boundary", "zh_domain"]
+assert report["used_tokens"] == 3120
+assert report["selected_metric_delta"] == {"math": 0.085, "code": 0.08, "safety": 0.065, "general": 0.07}
+assert report["selected_value"] == 0.5897
+assert report["negative_sources"] == ["old_legal_forum"]
+assert report["review_sources"] == [("old_legal_forum", ["high_risk", "low_quality"])]
+assert report["blocked_sources"] == [("benchmark_leak", ["eval_contamination"])]
+assert report["value_per_1k_tokens"]["math_verified"] == 0.2009
+assert report["value_per_1k_tokens"]["code_tests"] == 0.2104
 assert report["shapley_demo"] == {"math_verified": 0.365, "code_tests": 0.26, "synthetic_template": -0.085}
 assert all(checks.values())
 assert report["decision"] == "continue_to_source_ablation"
-assert cosine([0.0, 0.0], [1.0, 0.0]) is None
+assert source_value(license_probe) is None
+assert source_value(privacy_probe) is None
+assert source_value(zero_gradient_probe) is None
+assert value_per_token(0.5, 0) is None
+assert choose_subset([], budget)["ids"] == []
 ~~~
 
-运行后会看到类似输出：
+运行输出：
 
 ~~~text
-ranked_sources= [('math_verified', 0.1808), ('code_tests', 0.1599), ('zh_domain', 0.1288), ('safety_boundary', 0.1202), ('synthetic_template', 0.0782), ('old_legal_forum', -0.0184), ('benchmark_leak', -1.0)]
+ranked_sources= [('math_verified', 0.1808), ('code_tests', 0.1599), ('zh_domain', 0.1288), ('safety_boundary', 0.1202), ('synthetic_template', 0.0782), ('old_legal_forum', -0.0716), ('benchmark_leak', None)]
+value_per_1k_tokens= {'math_verified': 0.2009, 'code_tests': 0.2104, 'safety_boundary': 0.1878, 'zh_domain': 0.1571, 'synthetic_template': 0.1117, 'old_legal_forum': -0.1053, 'benchmark_leak': None}
 top_attribution= [('math_verified', 0.942), ('benchmark_leak', 0.93), ('synthetic_template', 0.922)]
-selected_under_budget= ['code_tests', 'math_verified', 'safety_boundary']
-used_tokens= 2300
-negative_or_blocked= ['old_legal_forum', 'benchmark_leak']
+selected_under_budget= ['math_verified', 'code_tests', 'safety_boundary', 'zh_domain']
+used_tokens= 3120
+selected_metric_delta= {'math': 0.085, 'code': 0.08, 'safety': 0.065, 'general': 0.07}
+selected_value= 0.5897
+negative_sources= ['old_legal_forum']
+review_sources= [('old_legal_forum', ['high_risk', 'low_quality'])]
+blocked_sources= [('benchmark_leak', ['eval_contamination'])]
 shapley_demo= {'math_verified': 0.365, 'code_tests': 0.26, 'synthetic_template': -0.085}
-total_selected_value= 0.4609
-blocked_contamination= ['benchmark_leak']
-checks= {'contamination_isolated': True, 'negative_sources_exposed': True, 'budget_respected': True, 'interaction_visible': True}
-signals= {'top_source': 'math_verified', 'top_attribution_source': 'math_verified', 'selected_value': 0.4609, 'negative_or_blocked': ['old_legal_forum', 'benchmark_leak']}
-actions= ['exclude_contaminated_sources', 'review_negative_value_sources', 'run_source_level_ablation']
+checks= {'hard_blocks_not_selected': True, 'review_sources_not_auto_selected': True, 'negative_sources_exposed': True, 'budget_respected': True, 'task_floors_met': True, 'interaction_visible': True, 'empty_pool_returns_empty': True, 'zero_gradient_is_undefined': True, 'zero_token_unit_value_is_undefined': True}
+signals= {'top_source_by_absolute_value': 'math_verified', 'top_source_per_1k_tokens': 'code_tests', 'selected_value': 0.5897, 'negative_sources': ['old_legal_forum']}
+actions= ['exclude_hard_blocked_sources', 'review_soft_hold_and_negative_sources', 'run_source_level_ablation']
 decision= continue_to_source_ablation
 ~~~
 
@@ -731,10 +880,10 @@ Shapley 思想把数据看作参与者，观察它在不同子集中的平均边
 标注优先级可以写成一个待排序对象：
 
 ~~~math
-P_i = (uncertainty_i, disagreement_i, coverage_gap_i, risk_i, cost_i)
+\mathbf{p}_i = (u_i,d_i,g_i,r_i,c_i)
 ~~~
 
-实际决策应对这个向量做分桶和人工审阅，而不是简单排序一个 P_i。安全、医学、法律和隐私样本需要更高的专家门槛；普通风格样本则可以使用更便宜的标注策略。
+其中 $u_i$ 是模型不确定性，$d_i$ 是模型或标注者分歧，$g_i$ 是目标能力覆盖缺口，$r_i$ 是风险等级，$c_i$ 是预计标注成本。它是一个多维待审向量，不存在脱离任务的自然总排序；实际决策应先分桶，再由风险策略和标注预算决定复核顺序。安全、医学、法律和隐私样本需要更高的专家门槛；普通风格样本可以使用更便宜的标注策略。
 
 ### 20.7 什么时候可以把估值用于资源分配
 
@@ -760,7 +909,7 @@ P_i = (uncertainty_i, disagreement_i, coverage_gap_i, risk_i, cost_i)
 
 ### 21.4 删除源的同时改变了所有变量
 
-删除一个数据源通常会同时改变总 token、训练步数、其他数据比例、去重率和 batch 分布。对照实验应固定能固定的变量，并报告无法固定的变量；否则 Delta_drop 不能归因于源本身。
+删除一个数据源通常会同时改变总 token、训练步数、其他数据比例、去重率和 batch 分布。对照实验应固定能固定的变量，并报告无法固定的变量；否则 $\Delta^{\mathrm{drop}}_k$ 不能归因于源本身。
 
 ### 21.5 只选正向数据，破坏分布和多样性
 
@@ -784,9 +933,17 @@ P_i = (uncertainty_i, disagreement_i, coverage_gap_i, risk_i, cost_i)
 
 数据估值的终点不是输出一个排行榜，而是形成一条可以被复查的决策记录：
 
-~~~text
-目标定义 -> 候选构造 -> 线索估值 -> 干预实验 -> 多维评估 -> 风险成本修正 -> 数据动作 -> 版本回放
-~~~
+```mermaid
+flowchart LR
+    A["定义目标、预算与基线"] --> B["冻结候选集和数据版本"]
+    B --> C["计算归因或估值线索"]
+    C --> D["受控消融、增量或配比实验"]
+    D --> E["评估收益、副作用和风险"]
+    E -->|满足门槛| F["选择保留、扩充或降权"]
+    E -.->|回归或证据不足| G["缩小结论并补充实验"]
+    G -.->|更新目标或候选| A
+    F --> H["记录配置、版本和复查条件"]
+```
 
 目标定义要写清任务、模型阶段、评估集和权重；候选构造要写清数据源、簇和样本边界；线索估值要保存相似检索、梯度、loss 或 Shapley 近似的配置；干预实验要保存基线、随机种子、训练 token 和替代源；多维评估要覆盖收益、副作用、风险和长尾；数据动作要写明保留、扩充、降权、隔离、重洗或删除。
 
@@ -802,11 +959,21 @@ P_i = (uncertainty_i, disagreement_i, coverage_gap_i, risk_i, cost_i)
 
 1. Koh 和 Liang，《Understanding Black-box Predictions via Influence Functions》，<https://arxiv.org/abs/1703.04730>。它是 influence functions 用于训练数据解释的经典公开入口，支持局部影响近似的理论背景，不代表大模型中可以无成本精确求解。
 2. Ghorbani 和 Zou，《Data Shapley: Equitable Valuation of Data for Machine Learning》，<https://arxiv.org/abs/1904.02868>。它给出数据 Shapley 的数据估值框架，支持边际贡献和交互的叙述；实际大模型应用仍需要近似和目标限定。
-3. Pruthi 等，《Estimating Training Data Influence by Tracing Gradient Descent》，<https://arxiv.org/abs/2002.08484>。它提出通过训练轨迹估计数据影响的路线，支持 TracIn 类信号的研究背景。
-4. 《Dataset Cartography: Mapping and Diagnosing Datasets with Training Dynamics》，<https://arxiv.org/abs/2009.10795>。它支持使用训练动态分析数据集区域和疑难样本的思路，不等于异常样本都应删除。
-5. Xie 等，《DoReMi: Optimizing Data Mixtures Speeds Up Language Model Pretraining》，<https://arxiv.org/abs/2305.10429>。它说明数据混合可以通过目标验证损失进行优化，支持数据配比与估值相互影响的叙述。
-6. Xia 等，《LESS: Selecting Influential Data for Targeted Instruction Tuning》，<https://arxiv.org/abs/2402.04333>。它提供目标指令调优中影响数据选择的研究案例，结论仍受目标任务和实验条件约束。
-7. NIST AI Risk Management Framework，<https://www.nist.gov/itl/ai-risk-management-framework>。它提供风险识别、治理、测量和管理的官方框架入口，本章只借用治理结构，不把它改写成数据价值的法律或财务意见。
+3. Jia 等，《Towards Efficient Data Valuation Based on the Shapley Value》，<https://proceedings.mlr.press/v89/jia19a.html>。它研究 Shapley 数据估值的高效近似，支持“精确计算昂贵、近似要说明采样和目标”的讨论；实验不是大模型全量预训练评估。
+4. Pruthi 等，《Estimating Training Data Influence by Tracing Gradient Descent》，<https://arxiv.org/abs/2002.08484>。它提出通过训练轨迹估计数据影响的路线，支持 TracIn 类信号的研究背景。
+5. 《Dataset Cartography: Mapping and Diagnosing Datasets with Training Dynamics》，<https://arxiv.org/abs/2009.10795>。它支持使用训练动态分析数据集区域和疑难样本的思路，不等于异常样本都应删除。
+6. Xie 等，《DoReMi: Optimizing Data Mixtures Speeds Up Language Model Pretraining》，<https://arxiv.org/abs/2305.10429>。它说明数据混合可以通过目标验证损失进行优化，支持数据配比与估值相互影响的叙述。
+7. Xia 等，《LESS: Selecting Influential Data for Targeted Instruction Tuning》，<https://arxiv.org/abs/2402.04333>。它提供目标指令调优中影响数据选择的研究案例，结论仍受目标任务和实验条件约束。
+8. Park 等，《TRAK: Attributing Model Behavior at Scale》，<https://proceedings.mlr.press/v202/park23c.html>。它提出可扩展的 after-kernel 归因，并在论文中的视觉与语言任务验证速度/效果权衡；结论绑定模型和任务。
+9. Kwon 等，《DataInf: Efficiently Estimating Data Influence in LoRA-tuned LLMs and Diffusion Models》，<https://arxiv.org/abs/2310.00902>。ICLR 2024 论文提出适合参数高效微调的 influence 近似，实验包含 Llama-2-13B-chat；不代表全量预训练逐样本估值。
+10. Choe 等，《What is Your Data Worth to GPT? LLM-Scale Data Valuation with Influence Functions》，<https://arxiv.org/abs/2405.13954>。LoGra 以梯度投影降低指定实验中的吞吐与显存成本；作者报告数字绑定 Llama-3-8B-Instruct 和 1B-token 设置。
+11. Shum 等，《Predictive Data Selection: The Data That Predicts Is the Data That Teaches》，<https://proceedings.mlr.press/v267/shum25a.html>。PreSelect 在 1B/3B 模型设置中评估预测式数据筛选；30B 与 300B 对比不是通用预算承诺。
+12. Hao 等，《BLISS: A Lightweight Bilevel Influence Scoring Method for Data Selection in Language Model Pretraining》，<https://proceedings.mlr.press/v306/hao26b.html>。论文用多步 proxy 更新训练双层 score model，并在 410M/1B/2.8B Pythia 和 0.5B LLaMA 设置中验证；1B 配置的 1.7 倍加速不能跨设置外推。
+13. Wang 等，《OPUS: Towards Efficient and Principled Data Selection in Large Language Model Pre-training in Every Iteration》，<https://proceedings.mlr.press/v306/wang26gc.html>。论文在优化器诱导更新空间做动态筛选并报告 4.7% 额外计算开销；应按其模型、优化器、语料与任务理解结果。
+14. Zeng 等，《Convex Dataset Valuation for Post-Training》，<https://proceedings.mlr.press/v306/zeng26k.html>。论文以梯度空间 kernel mean matching 联合目标对齐与数据冗余，研究预算约束下的后训练数据集选择；结论范围是对应后训练实验。
+15. Chen 等，《Mechanistic Data Attribution: Tracing the Training Origins of Interpretable LLM Units》，<https://proceedings.mlr.press/v306/chen26cv.html>。论文在 Pythia 家族研究可解释单元的训练数据来源，并报告定向增删高影响样本相对随机干预的机制变化；不等同于对总体任务能力的全局因果分解。
+16. Ran 等，《Sketching the Readout of Large Language Models for Scalable Data Attribution and Valuation》，<https://arxiv.org/abs/2604.16197>。RISE 2026 arXiv 预印本研究输出层 readout sketch，并报告最高 112 倍索引存储压缩及 32B 参数规模；尚需独立复核。
+17. NIST AI Risk Management Framework，<https://www.nist.gov/itl/ai-risk-management-framework>。它提供风险识别、治理、测量和管理的官方框架入口，本章只借用治理结构，不把它改写成数据价值的法律或财务意见。
 
 读者在迁移这些方法时，应明确论文的模型规模、数据分布、目标指标、采样方式和版本；同时重新检查授权、隐私、污染、长尾覆盖和独立评估。一个可复现的近似结果，仍然只是限定条件下的证据，不是跨任务、跨模型的永久结论。
 

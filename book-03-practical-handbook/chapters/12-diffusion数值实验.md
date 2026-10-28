@@ -1,12 +1,22 @@
-# 第 10 章 Diffusion 数值实验
+# 第 12 章 Diffusion 数值实验
 
 本章把扩散模型的前向加噪和反向去噪写成可复算的小实验。我们跟踪少量标量和向量，确认调度系数、噪声目标与一次反向更新如何对应；它是理解机制的实验台，不是完整文生图系统，也不代表真实图像质量。更完整的生成任务和 pipeline 由第十五册深入。
 
-本章沿用原第 68 讲编号。
+整章围绕两个方向读：训练阶段从干净样本随机选一个噪声强度，让网络估计噪声；生成阶段从噪声出发，反复用预测结果更新到更干净的状态。图中的训练和采样共享同一个 schedule 与噪声预测器，但观测条件不同：训练时知道加入的噪声，采样时只能得到模型预测。
 
-## 第 68 讲：实现 Diffusion 加噪与去噪最小例子
+```mermaid
+flowchart LR
+    A["干净样本 x₀"] --> B["抽时间步 t 与噪声 ε"]
+    B --> C["构造 xₜ"]
+    C --> D["预测器 εθ(xₜ,t)"]
+    D --> E["与真实 ε 比较，训练 loss"]
+    D --> F["采样器更新为 xₜ₋₁"]
+    F -->|"重复直到 t=0"| G["生成样本"]
+```
 
-### 68.1 把生成拆成一条随机过程
+## 12.1 实现 Diffusion 加噪与去噪最小例子
+
+### 12.1.1 把生成拆成一条随机过程
 
 扩散模型的核心不是“画图 API”，而是把难以直接建模的数据分布拆成许多步简单的去噪任务。正向过程从真实数据 x_0 出发逐步加噪，反向过程从近似高斯噪声开始逐步恢复数据。
 
@@ -25,6 +35,21 @@ q(x_t\mid x_{t-1})=\mathcal{N}\left(\sqrt{1-\beta_t}x_{t-1},\beta_tI\right)
 
 标准 DDPM schedule 通常要求每个 \(0<\beta_t<1\)，因此 \(0<\alpha_t<1\)，并按合法的时间步顺序计算 \(\bar{\alpha}_t\)。若 \(\beta_t\) 越界，平方根、后验方差和采样过程都不再满足这里的概率解释。
 
+闭式加噪公式可以从逐步过程推出来。前两步是：
+
+~~~math
+x_1=\sqrt{\alpha_1}x_0+\sqrt{\beta_1}\epsilon_1
+~~~
+
+~~~math
+x_2=\sqrt{\alpha_2}x_1+\sqrt{\beta_2}\epsilon_2
+=\sqrt{\alpha_1\alpha_2}x_0
++\sqrt{\alpha_2\beta_1}\epsilon_1
++\sqrt{\beta_2}\epsilon_2
+~~~
+
+由于 \(\epsilon_1,\epsilon_2\) 是独立标准高斯，后两项仍是均值为 0 的高斯噪声，其方差为 \(\alpha_2\beta_1+\beta_2=1-\alpha_1\alpha_2\)。因此可以把多步噪声合并成一个标准高斯 \(\epsilon\)，得到一般形式。训练时先抽 \(t\) 再一次性构造 \(x_t\)，不必真的从第 1 步循环到第 \(t\) 步；这使每个 batch 中的样本可以独立抽取不同的噪声强度。
+
 可以直接从 x_0 构造任意时刻的 x_t：
 
 ~~~math
@@ -42,7 +67,7 @@ x_t=\sqrt{\bar{\alpha}_t}x_0+\sqrt{1-\bar{\alpha}_t}\epsilon,
 
 随着 t 增大，信号占比下降。schedule 的本质是设计信噪比如何变化，而不是随便生成一串 beta。
 
-### 68.2 为什么通常预测噪声
+### 12.1.2 为什么通常预测噪声
 
 训练时可以采样 x_0、t 和真实噪声 epsilon，再构造 x_t。模型学习：
 
@@ -65,6 +90,23 @@ L_{\mathrm{simple}}=\|\epsilon-\epsilon_\theta(x_t,t)\|_2^2
 \left(x_t-\frac{\beta_t}{\sqrt{1-\bar{\alpha}_t}}\hat{\epsilon}\right)
 ~~~
 
+这个均值可以从真实后验看出来。给定干净样本 \(x_0\) 和当前带噪样本 \(x_t\)，将一步前向分布与累计前向分布相乘并归一化，得到高斯后验：
+
+~~~math
+q(x_{t-1}\mid x_t,x_0)
+=\mathcal{N}(\tilde{\mu}_t,\tilde{\beta}_t I)
+~~~
+
+其均值为：
+
+~~~math
+\tilde{\mu}_t
+=\frac{\sqrt{\bar{\alpha}_{t-1}}\beta_t}{1-\bar{\alpha}_t}x_0
++\frac{\sqrt{\alpha_t}(1-\bar{\alpha}_{t-1})}{1-\bar{\alpha}_t}x_t
+~~~
+
+真实采样时不知道 \(x_0\)，所以模型根据 \(x_t,t\) 预测噪声，再反解一个 \(\hat{x}_0=(x_t-\sqrt{1-\bar{\alpha}_t}\hat{\epsilon})/\sqrt{\bar{\alpha}_t}\) 代入后验均值。化简后就是前面的 \(\mu_\theta\)。这一步说明噪声预测不是最终生成图像；它只是通过 schedule 映射成当前反向转移的均值。
+
 再根据选择的方差注入随机性。后验方差的一种写法为：
 
 ~~~math
@@ -73,7 +115,7 @@ L_{\mathrm{simple}}=\|\epsilon-\epsilon_\theta(x_t,t)\|_2^2
 
 这里取 \(\bar{\alpha}_0=1\)，因此最后一次反向更新 `t=1` 的后验方差为零。若另选固定方差，DDPM 采样算法仍在 `t=1` 使用零随机项。预测 x_0、预测 epsilon 和预测 velocity 是不同参数化，训练目标与采样公式必须匹配。
 
-### 68.3 纯 Python 公式审计
+### 12.1.3 纯 Python 公式审计
 
 > 代码状态：已验证（2026-10-22；Python 3.12.9，标准库教学输入；历史记录中的输入、输出与边界检查适用于此代码）
 
@@ -177,7 +219,7 @@ print("posterior_variance=", round(variance, 6))
 
 这里的 `recover_noise` 直接使用干净 `x0`，是代数一致性检查，不能充当生成时可用的噪声预测器。五步 schedule 的最终累计 alpha 仍约 0.8583，远未达到近似纯噪声；它不是可直接从标准高斯开始生成的训练配置。实验不训练网络，也不证明采样器能恢复目标分布；完整 toy DDPM 需要另训练噪声预测器并比较数据与采样分布。
 
-### 68.4 从二维 toy 到图像系统
+### 12.1.4 从二维 toy 到图像系统
 
 二维点的 MLP 在图像系统中通常会替换成 UNet 或 DiT；输入从 [batch,2] 变成像素或 latent 张量；时间步 embedding 仍然告诉模型当前噪声水平。Latent Diffusion 先使用 VAE 将图片压缩到 latent 空间，再在 latent 上做扩散：
 
@@ -189,7 +231,7 @@ generated latent -> VAE decoder -> image
 
 latent 空间减少空间尺寸和计算量，但 VAE 会带来重建损失。图像生成系统的质量因此同时受数据、VAE、去噪网络、条件编码、采样步数和解码器影响。
 
-### 68.5 文本条件与 classifier-free guidance
+### 12.1.5 文本条件与 classifier-free guidance
 
 有文本条件时，模型变成：
 
@@ -229,7 +271,7 @@ DDIM、DPM-Solver、consistency model 和蒸馏方法主要解决采样步数与
 
 如果评估只在靠前的低噪声时间步测 MSE，模型仍可能在接近纯噪声的高 t 区间失败。训练和诊断可以按时间步分桶比较噪声误差、预测 x0 的误差和采样结果，但这些仍是不同层次的指标。最终任务若关心文字清晰度、主体结构或风格一致性，还要把结果按这些属性单独评估。
 
-### 68.6 生成评估与失败归因
+### 12.1.6 生成评估与失败归因
 
 图像生成评估不能只看 CLIP score。需要至少拆成：
 
@@ -244,8 +286,10 @@ prompt adherence：是否包含要求的主体、属性和关系
 
 FID、Inception Score 和 CLIP score 各有假设，不能互相替代，也不能直接替代人工判断。图像中数字、表格和文字尤其容易出错，若业务依赖这些字段，应使用 OCR 或结构化校验，而不是把一个整体相似度当作可靠性证明。
 
-### 68.7 资料与证据边界
+### 12.1.7 资料与证据边界
 
 扩散基础见 [DDPM](https://arxiv.org/abs/2006.11239)，快速采样见 [DDIM](https://arxiv.org/abs/2010.02502)，latent diffusion 见 [High-Resolution Image Synthesis with Latent Diffusion Models](https://arxiv.org/abs/2112.10752)，DiT 见 [Scalable Diffusion Models with Transformers](https://arxiv.org/abs/2212.09748)，classifier-free guidance 见 [arXiv:2207.12598](https://arxiv.org/abs/2207.12598)。论文中的生成质量、采样步数和数据集结论不能直接转成目标业务的质量或安全保证。
 
-本章的输出需按[第十二章多模态评估与交付](12-多模态评估与交付.md)记录来源、边界和失败；多模态机制的系统主讲见[第十五册](../../book-15-multimodal-generative-models/目录.md)。
+本章的输出需按[第十四章多模态评估与交付](14-多模态评估与交付.md)记录来源、边界和失败；多模态机制的系统主讲见[第十五册](../../book-15-multimodal-generative-models/目录.md)。
+
+实现真实训练或采样器时，还应查看 [Hugging Face Diffusers 的 DDPMScheduler 文档](https://huggingface.co/docs/diffusers/api/schedulers/ddpm)：`epsilon`、`sample` 与 `v_prediction` 对应不同模型输出约定，不能只换模型输出名称而沿用不匹配的反向公式。框架 API 的具体参数和默认值应绑定安装版本；本章手算与标准库 demo 用于解释基础 DDPM，不验证该框架或实际图像 pipeline。

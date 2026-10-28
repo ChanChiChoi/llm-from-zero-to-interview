@@ -713,6 +713,8 @@ E'\in\mathbb{R}^{V'\times d}
 
 近年的词表扩展研究可帮助提出实验假设，但结果不能直接推广到任意语言或模型。FOCUS 在 XLM-R 单语种适配设置中，用辅助 fastText 空间寻找语义相近的共享 token，再组合原模型已有 embedding 来初始化新词；它解决“新 tokenizer 的 id 没有旧 embedding”问题，限制是依赖多语模型、共享 token 和辅助词向量，且论文模型并非现代生成式大模型。2026 年一篇 Hindi 扩词表预印本在 Nemotron-3-Nano-30B-A3B 上加入 25,600 个 Hindi token，使其样本中 fertility 从 1.95 降到 1.25；该文比较 20 多种初始化，报告子词组合与输入/输出不对称方案比 mean-all 更省继续预训练步数，50-step CPT probe 也比 step-zero 初始化 loss 更能预测其设置中的收敛。最佳方案对输入 embedding 与输出头使用不同组合。语种、模型、继续训练数据和评价范围都有限；应在目标模型上比较短程 CPT 收敛速度、目标语言任务和旧语言回归，而不是把某一种初始化写成通用标准。
 
+若模型团队还能控制原 tokenizer 的 BPE 合并表，另一条路线是“延续合并规则”，而不是独立训练新 tokenizer 后做任意词表拼接。Liquid AI 2026 年的 LFM2 案例保留旧合并规则并追加多语言合并，使旧 token 可映射回原 embedding，新 token 可由原 token 序列分解后做初始化；模型随后先训练 embedding，再做全模型继续预训练。报告在 LFM2-8B-A1B 上比较 65K 到 128K 词表，Hindi、Vietnamese、Thai 的 token 数分别约减少 2.4、2.6、4.0 倍；报告的每字符解码加速是把 token 压缩率与参考设备的每 token 吞吐合成的估计，不是所有语言和设备上的端到端保证。扩大词表会增加每步输出层读取，原本切分紧凑的英语、代码等在其设备实验中每字符解码可退化约 9%；Stage 2 还使用了 400B token 的继续预训练。该路线要求掌握原 merge table 与 special-token 配置，证据只来自一个模型家族，不能直接套用于第三方 tokenizer 替换或任意新增 token。[论文方法、评估与限制](https://arxiv.org/html/2607.15232)
+
 ### 3.15.3 旧数据和新词表
 
 旧数据如果保存的是 token id，扩词表或重排词表后不能直接复用；如果保存的是原始文本，可以在新 tokenizer 下重新编码，但要重新计算 token 数、packing、训练步数和评估基线。数据版本应记录 tokenizer hash，避免同一个字段名下混入不同编码空间。
@@ -720,6 +722,8 @@ E'\in\mathbb{R}^{V'\times d}
 ## 3.16 一个最小的数据格式审计器
 
 下面的 toy tokenizer 不复刻真实 BPE，只用有限片段加固定的 256 个 UTF-8 byte fallback token，帮助读者观察不同文本的 token/byte、可逆性、chat template 的角色边界、assistant-only label mask、预训练 packing 和扩词表后的 embedding 行数。它按最长片段匹配，完全没有训练 merge ranks；packing 只返回有效长度 mask，没有构造 causal/document attention mask。真实系统还要处理完整 Unicode 规范化、offset mapping、批量 padding、processor 和模型特定模板。
+
+> **代码状态：已验证（2026-10-28，Python 3.12.9，标准库）。** 提取并执行正文 toy，输出符合 token 计数、mask、packing、embedding 扩展和断言；不模拟真实 tokenizer、attention 或模型训练。
 
 ~~~python
 IGNORE_INDEX = -100
@@ -1108,6 +1112,7 @@ EOS 只能提示边界，不能自动切断 attention。若任务假设文档独
 - [Tokenizer Choice for LLM Training](https://aclanthology.org/2024.findings-naacl.247/)：24 个 2.6B 单语/多语模型的 tokenizer 消融；fertility、parity 和训练成本的结果仅适用于其语种与训练设置。
 - [Objective vs. Search](https://aclanthology.org/2026.emnlp-main.2307/)、[No Single Tokenizer Feature Reliably Predicts Downstream Language Model Performance](https://aclanthology.org/2026.findings-emnlp.96/) 与 [TokLens](https://aclanthology.org/2026.acl-srw.18/)：分别拆开算法目标/搜索过程、跨模型 intrinsic 指标预测力及多语指标相关性；阅读时要分清受控训练和跨模型观察。
 - [MUTANT: A Recipe for Multilingual Tokenizer Design](https://aclanthology.org/2026.acl-long.2146/) 与 [MUTANT 实现仓库](https://github.com/ola-krutrim/MUTANT)：多语语料、预分词和子词/多词训练的工程路线；吞吐数字仅绑定论文 1B 模型和 H100/Triton 测量条件。
+- [In-Place Tokenizer Expansion for Pre-trained LLMs](https://arxiv.org/html/2607.15232)：在模型生产方掌握原 BPE 规则的前提下延续 merge table，并用两阶段适配扩展 LFM2 词表；质量恢复、每字符成本合成和继续训练预算均限于作者的模型与设备设置。
 - [OpenAI tiktoken](https://github.com/openai/tiktoken)：具体 byte-level BPE 实现。
 - [SentencePiece byte fallback options](https://github.com/google/sentencepiece/blob/master/doc/options.md)：Unicode 子词词表缺少字符时的 byte fallback 配置。
 - [OpenAI gpt-oss Harmony response format](https://developers.openai.com/cookbook/articles/openai-harmony)：一个将消息结束、工具交接和 assistant 回合完成分别编码的公开协议实例。
@@ -1153,6 +1158,10 @@ EOS 只能提示边界，不能自动切断 attention。若任务假设文档独
 ### 练习八：比较“更短”是否真的更好
 
 选两种 tokenizer，在同一份多语言、代码和 JSON 原文上统计 token/byte、fertility、p95/p99、fallback 和 BPB。然后分别设计“固定原文字节数”和“固定训练 FLOPs”的小规模训练对照，说明两种预算下模型看到的原始文本量、序列长度与输出层成本怎样变化。写出你会用什么 held-out 任务判断收益，并解释为什么不能只拿每 token perplexity 或总 token 数下结论。
+
+### 练习九：评估原 BPE 合并规则上的词表扩展
+
+假设你控制一个已训练模型的源 tokenizer，考虑沿用旧 merge table 并追加新 token，把词表从 65K 扩至 128K。画出旧 token 映射、新 token 初始化、embedding-only 适配和全模型继续训练的状态链；与重新训练 tokenizer、独立拼接词表相比，分别说明它解决和没有解决的问题。设计目标语种压缩率、原支持语言回归、held-out 任务、训练成本和目标设备每字符延迟的对照，并把论文报告的合成延迟估计与本机实测分开。
 
 ## 3.21 本章小结
 

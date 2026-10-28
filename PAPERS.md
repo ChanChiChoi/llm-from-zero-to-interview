@@ -62,6 +62,8 @@
 25. [Scaling Laws for Optimal Data Mixtures](https://proceedings.neurips.cc/paper_files/paper/2025/hash/bc1d640f841f752c689aae20b31198c1-Abstract-Conference.html)：把混合比例、训练规模与目标评估放进联合实验；最优配比受语料、目标和训练预算约束，不可直接迁移成固定比例。
 26. [Datasets, Documents, and Repetitions](https://proceedings.neurips.cc/paper_files/paper/2025/hash/2aba6ec20299931d46ddeefd5ddcb442-Abstract-Conference.html)：区分数据集规模、文档独立性和重复曝光；作者的 scaling 结论需要连同采样方案与实验数据阅读。
 27. [Explaining and Mitigating Crosslingual Tokenizer Inequities](https://proceedings.neurips.cc/paper_files/paper/2025/hash/5b91cefbfa52340af2f16f249572dc76-Abstract-Conference.html)、[Broken Tokens?](https://proceedings.neurips.cc/paper_files/paper/2025/hash/2b5c5689fae6fa9a4883e73e511d52c8-Abstract-Conference.html) 与 [zip2zip](https://proceedings.neurips.cc/paper_files/paper/2025/hash/def682d57535b9e778508b4b1a911034-Abstract-Conference.html)：分别研究多语 token 成本差异、非规范 tokenization 下的指令跟随，以及自适应推理词表；报告结论受语言、模型训练阶段、任务与实现协议限制，不构成任意改写 tokenizer 的部署建议。
+28. [Rethinking Multilingual Continual Pretraining](https://arxiv.org/abs/2504.04152)：COLM 2025 对三个多语言底模、30 多种语言和 36 种 CPT 配置的比较；双语/代码混合的分类与生成结果有取舍，属于特定语言和模型设置下的实验，不是通用 mixture 配方。
+29. [In-Place Tokenizer Expansion for Pre-trained LLMs](https://arxiv.org/abs/2607.15232)：模型生产方延续原 BPE merge table、迁移 embedding 并分两阶段继续训练的案例；每字符解码收益由压缩率和参考设备的 token 吞吐合成，且原支持语言存在回退，不能视作独立 tokenizer 替换或通用线上速度保证。
 
 ### 架构
 
@@ -126,7 +128,7 @@ Transformer 核心机制入口：
 
 ### 评估与 Debug 的统计和方法
 
-正文入口：[第三册第八章](book-03-practical-handbook/chapters/08-评估与debug实战.md)、[第五册第十章](book-05-llm-training/chapters/10-checkpoint评估与实验管理.md)、[第七册第三章](book-07-evaluation-experiments/chapters/03-human-eval与pairwise-eval.md)、[第七册第四章](book-07-evaluation-experiments/chapters/04-llm-as-a-judge.md)、[第七册第五章](book-07-evaluation-experiments/chapters/05-污染检测与可信评估.md)、[第七册第六章](book-07-evaluation-experiments/chapters/06-reasoning-code-math-eval.md)、[第七册第七章](book-07-evaluation-experiments/chapters/07-多模态与长上下文评估.md)、[第七册第十一章](book-07-evaluation-experiments/chapters/11-error-analysis与回归测试.md)和[第七册第十二章](book-07-evaluation-experiments/chapters/12-评估体系综合设计与工程落地.md)。
+正文入口：[第三册第九章：离线评估与 Debug](book-03-practical-handbook/chapters/09-评估与debug实战.md)、[第三册第十章：Agent 轨迹与线上评估](book-03-practical-handbook/chapters/10-agent轨迹与线上评估实战.md)、[第五册第十章](book-05-llm-training/chapters/10-checkpoint评估与实验管理.md)、[第七册第三章](book-07-evaluation-experiments/chapters/03-human-eval与pairwise-eval.md)、[第七册第四章](book-07-evaluation-experiments/chapters/04-llm-as-a-judge.md)、[第七册第五章](book-07-evaluation-experiments/chapters/05-污染检测与可信评估.md)、[第七册第六章](book-07-evaluation-experiments/chapters/06-reasoning-code-math-eval.md)、[第七册第七章](book-07-evaluation-experiments/chapters/07-多模态与长上下文评估.md)、[第七册第十一章](book-07-evaluation-experiments/chapters/11-error-analysis与回归测试.md)和[第七册第十二章](book-07-evaluation-experiments/chapters/12-评估体系综合设计与工程落地.md)。
 
 1. [Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena](https://arxiv.org/abs/2306.05685)：位置、冗长和自我偏好等评审偏差；结论绑定其题目、模型和人工比较协议。
 2. [Judging the Judges: A Systematic Study of Position Bias in LLM-as-a-Judge](https://arxiv.org/abs/2406.07791)：用候选顺序交换、重复评审和多候选指标分析位置敏感性；v9 报告 15 个 judge、22 类任务和超过 150,000 次评估。偏差随 judge/任务变化，长度影响较弱但不能据此假定为零；交换一致不代表评分正确或目标任务已校准。
@@ -163,6 +165,8 @@ Transformer 核心机制入口：
 28. [SAJA: A Simple Approach to Judge Alignment for LLM-as-a-Judge](https://aclanthology.org/2026.acl-industry.45/)：一次结构化 rubric 调用生成多维特征，用少量人工标签训练校准头；Headline 结果绑定论文模型、基准和样本切分。
 29. [Judging LLM-as-a-Judge: Concerning Rubric Artifacts in LLM-based Automated Text Generation Evaluation](https://aclanthology.org/2026.emnlp-main.2612/) 与[详细预印本](https://arxiv.org/abs/2609.02942)：检查 rubric-only 标签可预测性和答案/标准反事实响应；结果绑定 HealthBench 等特定数据和模型。
 30. 多模态与长上下文 benchmark：[VQA v2](https://arxiv.org/abs/1612.00837)用互补图像对控制语言先验；[POPE](https://arxiv.org/abs/2305.10355)用对象存在性探针评估视觉幻觉；[MMMU](https://arxiv.org/abs/2311.16502)测多学科多模态推理；[DocVQA](https://arxiv.org/abs/2007.00398)和 [2026 ANLS harness 审计](https://aclanthology.org/2026.docinsights-1.6/)展示文档指标与答案格式依赖；[ChartQA](https://arxiv.org/abs/2203.10244)结合真实来源图表、人工与生成问题；[AudioBench](https://arxiv.org/abs/2406.16020)补语音/声音/副语言理解；[Video-MME](https://arxiv.org/abs/2405.21075)、[MLVU](https://arxiv.org/abs/2406.04264)和 [MMLongBench-Doc](https://arxiv.org/abs/2407.01523)覆盖视频时长与跨页多模态证据。每项只支持自己的任务、数据和评分协议，不能合成跨模态总排名。
+
+31. 近期多模态评测：[XModBench](https://proceedings.iclr.cc/paper_files/paper/2026/hash/21071811269c70ac11a3e7869bac747e-Abstract-Conference.html)测文本、图像和音频之间的能力与一致性；[LVOmniBench](https://arxiv.org/abs/2603.19217)测长音视频理解；[WBench](https://arxiv.org/abs/2605.25874)测多轮交互式视频世界模型；[RVG-Bench](https://arxiv.org/abs/2610.32268)测推理驱动的音视频时间定位。结果受各自数据、模型快照和协议限制，不能拼成统一排名。
 
 #### Frontier model claims 与证据报告
 
@@ -283,6 +287,8 @@ Scaling Law、Chinchilla、数据配比、分布式训练、训练稳定性。
 
 InstructGPT、RLHF、DPO、Constitutional AI、RLAIF、KTO、ORPO。
 
+后训练目标的统一视角：[Towards a Unified View of Large Language Model Post-Training](https://arxiv.org/abs/2509.04419)（v2, 2026-01-20）把不同方法拆成稳定掩码、reference-policy 分母、advantage 和似然梯度等选择，并提出 Hybrid Post-Training；实验主要覆盖数学推理与分布外数学套件。适合用来提出受控比较问题，不能把作者算法的结果当成任意任务的默认结论。
+
 建议补读论文线：
 
 1. [InstructGPT](https://arxiv.org/abs/2203.02155)：示范数据、偏好排序和 RLHF 的代表性研究；论文设置不代表所有对齐流程。
@@ -345,6 +351,7 @@ InstructGPT、RLHF、DPO、Constitutional AI、RLAIF、KTO、ORPO。
 11. [RAG over Thinking Traces Can Improve Reasoning Tasks](https://aclanthology.org/2026.emnlp-main.1964/) 与 [FOL-Traces](https://aclanthology.org/2026.findings-eacl.115/)：分别研究思考轨迹检索与程序化核验的一阶逻辑过程评估；任务、语料和模型集合各有边界。
 12. [KisMATH](https://aclanthology.org/2026.tacl-1.59/)：把数学推理轨迹表示为因果 CoT 图并进行结构干预；适合研究特定步骤与答案的关系，不等于普遍的 CoT 忠实性证明。
 13. [Learning from Synthetic Data Improves Multi-hop Reasoning](https://proceedings.iclr.cc/paper_files/paper/2026/hash/9e95016eceae77e945b84554b0f1bb49-Abstract-Conference.html) 与 [Native Reasoning Models](https://proceedings.iclr.cc/paper_files/paper/2026/hash/ccf6d8b4a1fe9d9c8192f00c713872ea-Abstract-Conference.html)：分别研究规则合成数据上的多跳推理训练与从标准 QA 对生成潜在推理轨迹的训练目标；结论需绑定各论文实验协议。
+14. [Test-Time Scaling in Reasoning LLMs: Inference Regimes, Evaluation, and Reproducibility](https://arxiv.org/abs/2608.04001)：2026 年 arXiv 预印本，按计算发生在单条未完成轨迹、完整候选的终局聚合或未完成前缀搜索来分类，并区分精确重放与分布可复现。分类和评估建议作为分析框架使用；其经验结果受论文模型、任务和推理协议限制。
 
 ### 推理优化
 
@@ -643,6 +650,7 @@ Model editing 与 unlearning 补读入口：[EVOKE](https://proceedings.iclr.cc/
 3. [PowLU: An Activation Function for Stable Pre-Training of LLMs](https://arxiv.org/abs/2605.25704)：预印本研究限制 SwiGLU 大正值输入下的增长，并报告 Ling 架构大规模 MoE 训练实验；结论绑定作者配置。
 4. [More Expressive Feedforward Layers: Part I. Token-Adaptive Mixing of Activations](https://arxiv.org/abs/2605.26647)：预印本提出以输入相关门控混合多种激活函数，在 0.12B—2B dense/MoE 设置中评估 MoA；结果不与 PowLU 直接横向排名。
 5. [Taming Curvature: Architecture Warm-Up for Stable Transformer Training](https://arxiv.org/abs/2606.16768)：预印本以预条件曲率在线估计和逐步增加网络深度研究训练稳定性；规模、算法开销与作者实验适用范围需在引用时保留。
+6. [How To Build A Modern Diffusion Language Model](https://arxiv.org/abs/2610.33391) 与 [LLaDA2.0: Scaling Up Diffusion Language Models to 100B](https://arxiv.org/abs/2512.15745)：前者是 2026 年 10 月提交的离散扩散语言模型综述，后者报告由自回归模型转换的 100B block-diffusion 实验；区分综述分类、作者模型结果与独立复现，不把并行去噪直接等同于端到端更快。
 
 ### GPT-6 Astra 官方接口资料
 
@@ -1261,3 +1269,13 @@ arXiv title-field 查询 ti:Qwen3.6 当前返回 0 条，但 all-field 查询有
 4. [Kairos](https://arxiv.org/abs/2609.08755) 与 [HAVEN](https://arxiv.org/abs/2605.19223)：前者提供 10—30 分钟视频的细粒度时间标注案例，后者联合 frame、shot、video 粒度的对齐评测；均为特定数据集/benchmark 的设计，不构成通用长视频配方或目标系统验收。
 
 章节的来源阅读、公式定义、合成案例、指标分母及固定 demo 验证范围见[第九章研究与精修记录](research/book-09-ch09-multimodal-data-refinement-2026-10-28.md)。
+
+### 第九册第十章：Data Attribution 与 Valuation
+
+1. [Influence Functions](https://arxiv.org/abs/1703.04730)、[Data Shapley](https://arxiv.org/abs/1904.02868)、[高效 Shapley 数据估值](https://proceedings.mlr.press/v89/jia19a.html) 与 [TracIn](https://arxiv.org/abs/2002.08484)：用于解释局部影响、平均边际贡献和训练轨迹归因的经典方法；计算近似和结论均依赖模型、效用与目标。
+2. [TRAK](https://proceedings.mlr.press/v202/park23c.html)、[DataInf](https://arxiv.org/abs/2310.00902) 与 [LoGra](https://arxiv.org/abs/2405.13954)：覆盖随机投影 after-kernel 归因及 LoRA/大模型 influence 的可扩展近似；LoGra 的吞吐和显存数字仅对应论文基线、模型和语料设置。
+3. [PreSelect](https://proceedings.mlr.press/v267/shum25a.html)、[BLISS](https://proceedings.mlr.press/v306/hao26b.html) 与 [OPUS](https://proceedings.mlr.press/v306/wang26gc.html)：分别展示预测式筛选、双层 proxy influence 和优化器更新空间中的动态选择；各自模型、语料、阶段、预算和结果不可拼成统一排行榜。
+4. [Convex Dataset Valuation for Post-Training](https://proceedings.mlr.press/v306/zeng26k.html)、[Mechanistic Data Attribution](https://proceedings.mlr.press/v306/chen26cv.html) 与 [RISE](https://arxiv.org/abs/2604.16197)：分别处理预算约束下的数据集价值、可解释单元的训练来源干预和输出层 readout sketch。RISE 为 2026 arXiv 预印本；所有方法都不能替代目标模型干预、授权审查和独立风险评估。
+5. [NIST AI RMF](https://www.nist.gov/itl/ai-risk-management-framework) 提供治理、测量和风险管理的组织框架，不是数据价格、许可或价值的判定依据。
+
+章节的研究范围、公式手算、代码边界与未完成门禁见[第十章研究与精修记录](research/book-09-ch10-data-attribution-valuation-refinement-2026-10-28.md)。

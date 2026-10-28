@@ -722,6 +722,8 @@ J(c)=
 
 下面的 demo 用标准库模拟一个小型训练记录。输入是 3 个 checkpoint、一次恢复探针、一个实验记录和两组对照实验；输出 checkpoint 完整性、PPL、domain regression、归一化打分、保留存储、恢复连续性、实验记录完整性和对照差异。这里故意保留一个明确的 toy 选择政策：先过稳定性、恢复完整性、安全、回归和领域门槛，再用事先给定的 validation loss 上限归一化，并将所有分量压到 0 到 1 后加权。这个 profile 假设 scaler-enabled FP16 训练，因此把 `scaler` 列为必需状态；若训练采用 BF16 或不使用 scaler，应按 run 配置把它标为 `not_applicable` 或从该 profile 的必需字段中移除。它不是生产级 checkpoint 管理器，也不代表行业通用权重。
 
+> **代码状态：已验证（2026-10-26，Python 标准库；解释器小版本未记录）。** 正文记录的输出和 14 类边界检查符合约定；未验证真实训练、DCP、多 GPU 或对象存储。
+
 ```python
 import math
 from statistics import mean

@@ -697,6 +697,8 @@ PyTorch Distributed Checkpoint 提供分布式状态保存与加载接口，但�
 
 下面的示例只用 Python 标准库。它把 step 日志、batch 元信息、rank loss 和 checkpoint 字段对齐，检测候选 spike、非有限值、梯度异常、候选异常 batch、rank 差异和恢复缺项。它不模拟真实 autograd 或通信，也不把阈值命中直接判成根因；它只展示证据如何落到同一条时间轴上。
 
+> **代码状态：已验证（2026-10-26，Python 标准库；解释器小版本未记录）。** 正常路径及六类无效输入符合正文约定。
+
 ~~~python
 import math
 from statistics import median

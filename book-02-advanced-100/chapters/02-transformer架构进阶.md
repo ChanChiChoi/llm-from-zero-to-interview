@@ -12,7 +12,7 @@ Transformer 的关键不在于记住一张组件清单，而在于理解信息�
 4. FFN、门控 MLP 和 MoE 如何提供特征容量与条件计算；
 5. RoPE、ALiBi 和相对位置 bias 如何影响长度泛化；
 6. MHA、MQA、GQA 如何改变 KV Cache 和解码带宽；
-7. encoder-only、decoder-only、encoder-decoder、SSM 与混合架构分别适合什么问题；
+7. encoder-only、decoder-only、encoder-decoder、SSM 与混合架构分别适合什么问题，以及离散扩散怎样改变生成过程；
 8. 模型尺寸、硬件整除、并行方式和真实模型配置如何统一分析。
 
 贯穿各讲的共同对象是一个 token 表示：它先形成 Q/K/V，在位置机制与 mask 约束下读取历史，再经过 residual、norm、MLP 或 expert 更新主干表示，进入下一层，最终影响 logits。后续各讲讨论的不是互不相关的组件，而是这条数据流在计算、状态和并行上的不同接口。
@@ -1332,7 +1332,7 @@ expert 的领域功能不能从路由热图直接命名。比如代码 token 常
 
 运行时的判断也要看 batch 和设备拓扑。短 batch 可能让每个 expert 只有零散 token，dispatch、combine 和调度成本抵消稀疏计算收益；expert id 与 expert-to-rank 映射也必须和 checkpoint 一致。端到端通信时间、capacity overflow 和请求尾延迟属于下一讲的分析对象，不应从“每 token 激活两个 expert”直接推导出推理成本减半。
 
-### 19.7 如何检验 expert 是否形成有用分工
+### 19.6 如何检验 expert 是否形成有用分工
 
 若将一批代码样本路由到 expert 3 的比例从通用文本的 12% 升到 48%，这只是相关性。可以构造 100 对保持程序语义、但替换注释模板和变量名的输入：若路由仍主要跟随代码语义，且屏蔽 expert 3 后代码任务成功率下降、普通对话变化较小，功能分工假设会得到更强支持；若改写模板就让路由比例回到 12%，模型可能主要识别格式而不是算法内容。每种条件都要使用相同问题、长度和采样温度，并对多个 checkpoint 重复。
 
@@ -1476,7 +1476,7 @@ for factor in [1.0, 1.5, 2.0]:
 
 辅助损失的统计对象也必须写明：前述 $\mathcal L_{aux}$ 是 Switch top-1 归一化；top-2 若按 assignment 比例，分母是 $2N$，若按 token 是否命中过 expert 计算，定义不同。报告实现时要列出 router group、top-k、$f/P$ 分母、capacity 舍入和丢弃顺序。阈值也要结合 group size：8 个 assignment 分给 4 个 expert，均值只有 2，某个 expert 收到 4 个的最大/平均比虽为 2，仍可能由小样本波动造成。告警阈值应以目标 workload 的持续分布校准，不能照搬 toy 比例。
 
-### 20.9 top-k 改变 capacity 分母
+### 20.8 top-k 改变 capacity 分母
 
 再看一个 top-2 的组内账本：$N=1024$ 个 token、$E=8$ 个 expert、$c=1.25$。若 capacity 按 assignment 计算，路由总量是 $kN=2048$，平均每 expert 256 个 assignment，乘 capacity factor 后每个 expert 约有 320 个槽位；若照搬 top-1 的 $N/E$ 算法，只会分到 160 个槽位，实际等于把目标容量减半。某些实现会使用不同的舍入、分组或 token-priority 规则，所以公式中的 $N$ 和 $k$ 必须对应代码里的统计口径。
 
@@ -1606,6 +1606,18 @@ print("enc-dec =", encoder_decoder_masks(4, 2))
 假设同一份长度 4096 的 source 需要生成 4 种短格式答案，例如摘要、标题、实体清单和 JSON。Decoder-only 每次都将 source 放入自回归前缀，虽然模型权重和接口统一，但每个请求都要处理这段前缀并维护相应 KV；encoder–decoder 可以把 source states 编码一次再复用于四个 target，节省的部分取决于推理服务是否真的保留并共享这些 states。反过来，若每个 source 只生成一次，encoder states 的额外存储和 cross-attention 路径也会有成本。
 
 公平比较要把“复用”当作系统条件明写：固定源文本和四种输出要求，分别测冷请求与同源热请求；报告 encoder 计算是否命中缓存、缓存字节与生命周期、每个目标 token 的 decode 时间，以及输出语义和格式正确率。若只在冷请求测时延，可能看不到可复用编码的价值；若允许一种架构共享缓存却不允许另一种复用 prompt prefix，也会造成不公平。结构选择最终服务于工作负载，而非对架构名称做抽象排名。
+
+### 21.10 离散扩散改变生成过程，不等于新 backbone
+
+自回归模型按链式分解逐个提交 token：$p(x_{1:T})=\prod_t p(x_t\mid x_{<t})$。离散扩散语言模型则先把一段 token 序列部分或全部破坏，再用去噪网络逐轮恢复被遮挡内容。常见的 absorbing-mask 设定按噪声步 $t$ 以一定概率把 token 替换为 `[MASK]`，模型学习从当前带噪序列预测原 token。它改变了训练目标和采样顺序；底层网络仍可使用 Transformer，因此“扩散”不是与 encoder-only/decoder-only 同一分类轴上的 backbone 名称。
+
+用四个 token 的序列 `把 猫 放 下` 做一个最小例子：若一次前向把“猫”和“下”遮住，模型对这两个原 token 的概率分别为 0.8 和 0.6，那么这两个位置的简化平均重建损失是 $[-\ln(0.8)-\ln(0.6)]/2\approx0.366$ nat/token。这个数只对应固定噪声样本上的 masked-token 交叉熵；完整训练目标通常还要对噪声比例或时间步取期望，并按具体参数化加权，不能把玩具值当成 MDLM 的完整目标。
+
+推理时，模型可以同时估计多个遮挡位置，再依置信度或调度规则逐步提交 token；但普通 absorbing-mask 过程一旦把位置从 `[MASK]` 提交为普通 token，就不能天然回头修改它。若系统允许 remask、token-to-token editing 或反复修订，需要相应的状态转移、训练目标和解码策略支持，不能把“多位置并行预测”直接解释成自动纠错。固定长度遮挡也会带来输出长度问题；block diffusion 通过分块生成或块级状态设计来处理序列长度与历史复用，具体方案仍要看模型和服务实现。
+
+因此成本比较应把每轮的并行宽度和迭代次数一起算。粗略地，$K$ 轮去噪的成本可记为 $K\,C_{\mathrm{forward}}$，自回归生成 $O$ 个 token 则约为 $O\,C_{\mathrm{decode\ step}}$；两项的单步工作量并不相同，还受上下文长度、KV 复用、批量、质量目标和硬件影响。轮数较少或一次预测多个位置，不足以单独证明端到端更快。LLaDA2.0 预印本报告了从自回归模型转换到 100B 总参数 block-diffusion 模型的三阶段训练方案，并进行 SFT/DPO 后训练；这是作者在该模型和评测上的研究报告，不是扩散模型普遍胜出的证明。[LLaDA2.0](https://arxiv.org/abs/2512.15745)。现代离散扩散语言模型的设计综述可参见 2026 年 10 月提交的 survey；其中的结构分类和性能讨论属于综述及其引用研究，仍需回到各原始论文核对。[How To Build A Modern Diffusion Language Model](https://arxiv.org/abs/2610.33391)。
+
+理解训练细节可接到[第 3 章的 tokenizer、语料与预训练目标](03-tokenization数据与预训练进阶.md)，而 block 状态、并行解码和 KV 管理应回到[第 6 章的推理服务成本账本](06-推理部署与服务进阶.md)。
 
 ## 22. State Space Models：压缩历史的序列算子
 
@@ -2174,3 +2186,7 @@ Q/K/V 路由
     https://arxiv.org/abs/2306.15595
 34. Peng et al., YaRN: Efficient Context Window Extension of Large Language Models：RoPE 扩展方案和论文实验范围。
     https://arxiv.org/abs/2309.00071
+35. Kuleshov et al., How To Build A Modern Diffusion Language Model：离散扩散语言模型的 2026 年综述预印本；分类和性能讨论应回到所引原始论文核对。
+    https://arxiv.org/abs/2610.33391
+36. Bie et al., LLaDA2.0: Scaling Up Diffusion Language Models to 100B：从自回归模型转换、block diffusion 与后训练的作者报告；规模和性能结论绑定论文配置。
+    https://arxiv.org/abs/2512.15745
