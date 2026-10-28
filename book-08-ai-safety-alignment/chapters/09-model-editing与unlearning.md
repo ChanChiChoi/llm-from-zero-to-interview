@@ -12,13 +12,13 @@
 
 ### 1.1 模型保存的不是一句话
 
-自回归语言模型接收提示 \(x\)，然后对下一个 token 给出概率分布。一个答案 \(y=(y_1,\ldots,y_T)\) 的概率可以写成：
+自回归语言模型接收提示 $x$，然后对下一个 token 给出概率分布。一个答案 $y=(y_1,\ldots,y_T)$ 的概率可以写成：
 
-$$
+```math
 p_\theta(y\mid x)=\prod_{t=1}^{T}p_\theta(y_t\mid x,y_{<t})
-$$
+```
 
-这里的 \(\theta\) 是模型参数，\(y_{<t}\) 表示第 \(t\) 个 token 之前已经生成的内容。模型并没有一个名为“某公司 CEO”的字段，而是通过多层表示和概率分布，逐步生成一串 token。
+这里的 $\theta$ 是模型参数，$y_{<t}$ 表示第 $t$ 个 token 之前已经生成的内容。模型并没有一个名为“某公司 CEO”的字段，而是通过多层表示和概率分布，逐步生成一串 token。
 
 如果模型把某公司的 CEO 回答成 A，至少可能有几种原因：
 
@@ -71,15 +71,17 @@ RAG 的优势是更新快、来源清楚、可以按用户权限过滤。它的�
 
 微调并不一定是“全局破坏”。通过小学习率、参数高效适配器、保留集约束和版本化实验，可以把漂移控制在可接受范围。但如果需求只有一两个稳定事实，完整微调通常难以解释为什么改变了相邻知识。
 
+微调也不应被简化成“编辑任务一定做不好”。ICLR 2026 的 [LocFT-BF](https://proceedings.iclr.cc/paper_files/paper/2026/hash/74b8ccb5ad21871fd436867df19c35ac-Abstract-Conference.html) 把逐条训练到收敛的 depth-first 流程，与按 epoch、mini-batch 更新的 breadth-first 流程作对照；作者报告，后者在其测试模型和数据上改善了编辑结果，并提出了进一步选择局部调参位置的方法。这提醒我们，比较 editing 方法时应加入合理调参的 fine-tuning baseline。它是特定实验中的方法证据，不能推出所有微调都优于所有编辑器，也不能代替目标模型上的独立评估。
+
 ### 2.3 Model editing：把变化集中到少量知识或行为
 
 Model editing 的典型形式是给出一个编辑请求：
 
-$$
+```math
 e=(x_e,y_e^{old},y_e^{new})
-$$
+```
 
-其中 \(x_e\) 是目标提示，\(y_e^{old}\) 是旧答案，\(y_e^{new}\) 是希望出现的新答案。编辑器产生新参数 \(\theta'\)，希望模型在目标问题上回答 \(y_e^{new}\)，同时在不相关问题上保持原行为。
+其中 $x_e$ 是目标提示，$y_e^{old}$ 是旧答案，$y_e^{new}$ 是希望出现的新答案。编辑器产生新参数 $\theta'$，希望模型在目标问题上回答 $y_e^{new}$，同时在不相关问题上保持原行为。
 
 它最适合研究和处理少量、边界较清楚的改变。它不天然适合动态知识库，也不天然等价于版权或隐私意义上的彻底删除。
 
@@ -117,19 +119,19 @@ Unlearning 的目标可能是删除训练样本影响、降低某类知识记忆
 3. 局部性样本：与目标实体相关，但按要求不应该改变的事实。
 4. 保留样本：用于检查通用能力、语言质量和安全行为。
 
-可以把第 \(i\) 个编辑写成：
+可以把第 $i$ 个编辑写成：
 
-$$
+```math
 e_i=(x_i,y_i^{old},y_i^{new},P_i,L_i,w_i)
-$$
+```
 
-\(P_i\) 是改写集合，\(L_i\) 是局部性集合，\(w_i\) 是风险或重要性权重。没有 \(P_i\) 时，编辑可能只是记住了一个模板；没有 \(L_i\) 时，无法知道副作用的范围。
+$P_i$ 是改写集合，$L_i$ 是局部性集合，$w_i$ 是风险或重要性权重。没有 $P_i$ 时，编辑可能只是记住了一个模板；没有 $L_i$ 时，无法知道副作用的范围。
 
 ### 3.2 编辑的多个目标
 
-用 \(M_\theta\) 表示编辑前模型，\(M_{\theta'}\) 表示编辑后模型。一个教学层面的综合目标可以写成：
+用 $M_\theta$ 表示编辑前模型，$M_{\theta'}$ 表示编辑后模型。一个教学层面的综合目标可以写成：
 
-$$
+```math
 \mathcal L_{edit}(\theta')=
 \mathcal L_{target}+
 \lambda_p\mathcal L_{paraphrase}+
@@ -137,11 +139,11 @@ $$
 \lambda_r\mathcal L_{retain}+
 \lambda_c\mathcal L_{conflict}+
 \lambda_\Delta\lVert\theta'-\theta\rVert^2
-$$
+```
 
-最后一项约束参数变化幅度；\(\lambda\) 决定不同目标的相对重要性。这个公式不是所有编辑器共用的训练损失，而是帮助读者看清：目标正确率只是其中一项。
+最后一项约束参数变化幅度；$\lambda$ 决定不同目标的相对重要性。这个公式不是所有编辑器共用的训练损失，而是帮助读者看清：目标正确率只是其中一项。
 
-如果编辑的是高风险行为，\(\mathcal L_{conflict}\) 还要覆盖安全边界、正常帮助和工具调用。只把“拒答率”设得越高，并不代表系统越安全，因为误拒答和绕过风险也可能同时上升。
+如果编辑的是高风险行为，$\mathcal L_{conflict}$ 还要覆盖安全边界、正常帮助和工具调用。只把“拒答率”设得越高，并不代表系统越安全，因为误拒答和绕过风险也可能同时上升。
 
 ### 3.3 事实编辑和行为编辑不是同一难度
 
@@ -157,17 +159,17 @@ $$
 
 Transformer 的一个前馈模块可以抽象成：
 
-$$
+```math
 h_{l+1}=h_l+W_{out}\,\sigma(W_{in}h_l)
-$$
+```
 
-\(h_l\) 是第 \(l\) 层的隐藏状态，\(W_{in}\) 把状态投影到中间维度，\(\sigma\) 是非线性函数，\(W_{out}\) 再把结果投影回模型维度。
+$h_l$ 是第 $l$ 层的隐藏状态，$W_{in}$ 把状态投影到中间维度，$\sigma$ 是非线性函数，$W_{out}$ 再把结果投影回模型维度。
 
 为了便于理解，可以把：
 
-$$
+```math
 k=W_{in}h_l,\qquad v=W_{out}\sigma(k)
-$$
+```
 
 看成一个“由当前上下文产生 key，再贡献 value”的计算。某些研究把中间层 MLP 解释为储存或调用事实关联的候选位置。
 
@@ -177,13 +179,13 @@ $$
 
 普通相关性只能告诉我们某个激活与答案一起出现。因果定位会把一个输入的激活替换到另一个输入的前向计算中，再观察答案概率变化。
 
-设干预前目标答案概率为 \(p_{base}\)，把候选层的隐藏状态替换为参考运行中的 \(h_l^*\) 后，概率为 \(p_{patch}\)，则可以记录：
+设干预前目标答案概率为 $p_{base}$，把候选层的隐藏状态替换为参考运行中的 $h_l^*$ 后，概率为 $p_{patch}$，则可以记录：
 
-$$
+```math
 \Delta_{causal}=p_{patch}-p_{base}
-$$
+```
 
-如果 \(\Delta_{causal}\) 在多个模板、随机种子和相邻层上都稳定，候选位置就更值得研究。它仍然不是“事实只存在那里”的证明，因为干预可能改变了信息流，而不是准确识别了唯一存储位置。
+如果 $\Delta_{causal}$ 在多个模板、随机种子和相邻层上都稳定，候选位置就更值得研究。它仍然不是“事实只存在那里”的证明，因为干预可能改变了信息流，而不是准确识别了唯一存储位置。
 
 ### 4.3 位置假设的边界
 
@@ -214,31 +216,31 @@ ROME 论文对 GPT 类模型的实验发现，中间层 feed-forward 模块对�
 
 ### 5.2 从约束优化得到 rank-one 更新
 
-设待修改矩阵为 \(W\in\mathbb R^{d_v\times d_k}\)，目标 key 为 \(k_e\in\mathbb R^{d_k}\)，期望 value 为 \(v^*\in\mathbb R^{d_v}\)。最直接的要求是：
+设待修改矩阵为 $W\in\mathbb R^{d_v\times d_k}$，目标 key 为 $k_e\in\mathbb R^{d_k}$，期望 value 为 $v^*\in\mathbb R^{d_v}$。最直接的要求是：
 
-$$
+```math
 W'k_e=v^*
-$$
+```
 
-如果只要求这一条约束，有无数个 \(W'\) 可选。为了尽量不影响其他常见 key，可以用一个协方差矩阵 \(C\) 表示正常 key 的分布，并求：
+如果只要求这一条约束，有无数个 $W'$ 可选。为了尽量不影响其他常见 key，可以用一个协方差矩阵 $C$ 表示正常 key 的分布，并求：
 
-$$
-\min_{W'}\operatorname{Tr}\left((W'-W)C(W'-W)^\top\right)
+```math
+\min_{W'}\mathrm{Tr}\left((W'-W)C(W'-W)^\top\right)
 \quad
 \text{s.t.}\quad W'k_e=v^*
-$$
+```
 
-当 \(C\) 可逆时，一个教学层面的解是：
+当 $C$ 可逆时，一个教学层面的解是：
 
-$$
+```math
 W'=W+
 \frac{(v^*-Wk_e)k_e^\top C^{-1}}
 {k_e^\top C^{-1}k_e}
-$$
+```
 
-分子中的 \(v^*-Wk_e\) 是需要补上的 value 差值；\(k_e^\top C^{-1}\) 决定把修改投影到哪些参数方向；分母是归一化项，避免同一尺度下更新过大。
+分子中的 $v^*-Wk_e$ 是需要补上的 value 差值；$k_e^\top C^{-1}$ 决定把修改投影到哪些参数方向；分母是归一化项，避免同一尺度下更新过大。
 
-如果把 \(C\) 换成单位矩阵，公式会退化为沿 \(k_e\) 方向的简单 rank-one 更新。ROME 使用的协方差思想更接近“在常见输入方向上少动一些”，但实际实现还要处理层选择、目标 token、正则化和数值稳定性。
+如果把 $C$ 换成单位矩阵，公式会退化为沿 $k_e$ 方向的简单 rank-one 更新。ROME 使用的协方差思想更接近“在常见输入方向上少动一些”，但实际实现还要处理层选择、目标 token、正则化和数值稳定性。
 
 ### 5.3 为什么同一个编辑可能在改写问法上生效
 
@@ -285,26 +287,26 @@ MEMIT，即 Mass-Editing Memory in a Transformer，把问题扩展到大规模�
 
 ### 6.2 批量更新的教学抽象
 
-令 \(K=[k_1,\ldots,k_m]\in\mathbb R^{d_k\times m}\) 是多个编辑 key，\(V^*=[v_1^*,\ldots,v_m^*]\in\mathbb R^{d_v\times m}\) 是期望 value。希望：
+令 $K=[k_1,\ldots,k_m]\in\mathbb R^{d_k\times m}$ 是多个编辑 key，$V^*=[v_1^*,\ldots,v_m^*]\in\mathbb R^{d_v\times m}$ 是期望 value。希望：
 
-$$
+```math
 W'K\approx V^*
-$$
+```
 
 一个带正则的批量更新可抽象为：
 
-$$
+```math
 \Delta W=(V^*-WK)K^\top
 (KK^\top+\lambda C)^{-1}
-$$
+```
 
 这里写法中的矩阵结合顺序应理解为：
 
-$$
+```math
 \Delta W=(V^*-WK)K^\top(KK^\top+\lambda C)^{-1}
-$$
+```
 
-\(m\) 是编辑数量，\(\lambda\) 控制正则强度，\(C\) 表示正常 key 的统计结构。正则项让更新不要为了满足少数 key 而过度改变常见方向。
+$m$ 是编辑数量，$\lambda$ 控制正则强度，$C$ 表示正常 key 的统计结构。正则项让更新不要为了满足少数 key 而过度改变常见方向。
 
 MEMIT 的实际方法不是把一条公式机械地套到一个矩阵上，而是把更新分配到多个层，并处理不同层的表示传播。上式的价值在于说明批量编辑的三个难点：
 
@@ -316,24 +318,24 @@ MEMIT 的实际方法不是把一条公式机械地套到一个矩阵上，而�
 
 当两个编辑的 key 很接近，却要求不同的 value，系统会出现冲突。可以用条件数观察数值问题：
 
-$$
+```math
 \kappa(KK^\top+\lambda C)
 =\frac{\sigma_{\max}}{\sigma_{\min}}
-$$
+```
 
-\(\sigma_{\max}\) 和 \(\sigma_{\min}\) 是该矩阵的最大、最小奇异值。条件数很大意味着某些方向几乎无法稳定区分；小的数值误差可能产生很大的权重变化。
+$\sigma_{\max}$ 和 $\sigma_{\min}$ 是该矩阵的最大、最小奇异值。条件数很大意味着某些方向几乎无法稳定区分；小的数值误差可能产生很大的权重变化。
 
 这不是唯一的质量指标。即使矩阵条件数良好，语义上的冲突仍然可能存在。例如“公司 X 的总部在哪里”和“公司 X 的历史总部在哪里”共享实体，却对应不同时间关系。编辑器必须把时间、关系和上下文纳入测试集，而不能只按实体字符串去重。
 
 ### 6.4 顺序编辑的累积效应
 
-如果第 \(t\) 次更新为 \(\Delta W_t\)，连续编辑后的权重是：
+如果第 $t$ 次更新为 $\Delta W_t$，连续编辑后的权重是：
 
-$$
+```math
 W_T=W_0+\sum_{t=1}^{T}\Delta W_t
-$$
+```
 
-这个表达式很简单，却揭示了工程问题：每次更新都很小，并不代表总变化很小。更麻烦的是第 \(t+1\) 次编辑是在已经改变的模型上计算，误差和冲突会逐步累积。
+这个表达式很简单，却揭示了工程问题：每次更新都很小，并不代表总变化很小。更麻烦的是第 $t+1$ 次编辑是在已经改变的模型上计算，误差和冲突会逐步累积。
 
 实际系统应定期做：
 
@@ -355,11 +357,11 @@ MEMIT 适合研究或处理一批边界相对清楚、可以生成改写和 loca
 
 给定单个输入输出对，普通微调会产生梯度：
 
-$$
+```math
 g=\nabla_W\mathcal L(x_e,y_e^{new};W)
-$$
+```
 
-直接使用 \(g\) 可能对目标样本过拟合，也可能修改过多参数。MEND，即 Model Editor Networks with Gradient Decomposition，学习一组小型辅助网络，把普通梯度变换成更适合编辑的更新。
+直接使用 $g$ 可能对目标样本过拟合，也可能修改过多参数。MEND，即 Model Editor Networks with Gradient Decomposition，学习一组小型辅助网络，把普通梯度变换成更适合编辑的更新。
 
 MEND 的关键不是手工找某个事实神经元，而是从许多训练时的编辑任务中学习“什么样的梯度应该怎样变换”。论文摘要描述了利用梯度的低秩分解，使变换参数可控，并在多种模型上研究快速局部编辑。
 
@@ -396,13 +398,13 @@ SERAC，即 Semi-Parametric Editing with a Retrieval-Augmented Counterfactual Mo
 
 可以用下面的教学式表达描述混合输出：
 
-$$
+```math
 p(y\mid x,E)=
 (1-s(x,E))p_{\theta}(y\mid x)
 +s(x,E)p_{\phi}(y\mid x,E)
-$$
+```
 
-\(E\) 是编辑记忆，\(s(x,E)\in[0,1]\) 是相关性分数，\(p_\phi\) 是处理编辑后的模型。论文中的实现包含显式记忆、范围判断和反事实模型；公式只是帮助理解“何时使用编辑”的系统结构。
+$E$ 是编辑记忆，$s(x,E)\in[0,1]$ 是相关性分数，$p_\phi$ 是处理编辑后的模型。论文中的实现包含显式记忆、范围判断和反事实模型；公式只是帮助理解“何时使用编辑”的系统结构。
 
 ### 8.2 SERAC 的优势
 
@@ -478,42 +480,44 @@ $$
 
 ### 10.1 Edit success
 
-令 \(a_i^{target}=1\) 表示第 \(i\) 个编辑的直接目标按新答案回答，反之为 0。加权目标成功率为：
+令 $a_i^{target}=1$ 表示第 $i$ 个编辑的直接目标按新答案回答，反之为 0。加权目标成功率为：
 
-$$
+```math
 S_{target}=
 \frac{\sum_i w_i a_i^{target}}{\sum_i w_i}
-$$
+```
 
-分母是所有编辑的总权重，不是样本条数。使用权重时，重要或高风险编辑对总体分数贡献更大；如果所有 \(w_i=1\)，公式退化为普通平均。
+分母是所有编辑的总权重，不是样本条数。使用权重时，重要或高风险编辑对总体分数贡献更大；如果所有 $w_i=1$，公式退化为普通平均。
 
 目标成功率适合回答“直接目标有没有改到”，但无法回答“改写是否泛化”和“相邻知识有没有被破坏”。
 
 ### 10.2 Paraphrase generalization
 
-设第 \(i\) 个编辑有 \(m_i\) 个改写，\(a_{ij}^{para}=1\) 表示第 \(j\) 个改写也得到新答案，则：
+设第 $i$ 个编辑有 $m_i$ 个改写，$a_{ij}^{para}=1$ 表示第 $j$ 个改写也得到新答案，则：
 
-$$
+```math
 S_{para}=
 \frac{\sum_i w_i
 \left(\frac{1}{m_i}\sum_{j=1}^{m_i}a_{ij}^{para}\right)}
 {\sum_i w_i}
-$$
+```
 
-先在每个编辑内部平均，再按编辑权重平均，避免改写数量多的某个编辑支配总分。\(m_i\) 不能为 0；没有改写样本的编辑应该单独标为“未测量”，而不是当作满分。
+先在每个编辑内部平均，再按编辑权重平均，避免改写数量多的某个编辑支配总分。$m_i$ 不能为 0；没有改写样本的编辑应该单独标为“未测量”，而不是当作满分。
 
 改写不应只做词语替换。至少要覆盖句法变化、上下文变化、代词引用、语言变化和间接询问。对事实编辑，还要区分“同一事实的改写”和“相关但不同的事实”。
 
+直接目标答对也可能掩盖编辑过拟合。ICLR 2025 的 [EVOKE](https://proceedings.iclr.cc/paper_files/paper/2025/hash/c592fc7e6207f82560ed45fece8d6937-Abstract-Conference.html) 将一种现象称为 editing overfit：编辑模型对目标答案赋予过高概率，反而妨碍新知识在复杂、多跳问题中的泛化。NeurIPS 2025 的 [UniEdit](https://proceedings.neurips.cc/paper_files/paper/2025/hash/6cc6c2be42c838827d2f1d12baa05539-Abstract-Datasets_and_Benchmarks_Track.html) 则用 25 个常见领域的知识图谱邻域抽取多跳链，专门扩展 generality 和 locality 测试；它把子图转成自然语言时使用专有 LLM，因此样本构造本身也有覆盖边界。实践中应把关系组合、间接推理和邻近事实 ripple test 加入改写集，且把直接问法与组合推理结果分栏报告。
+
 ### 10.3 Locality 与 specificity
 
-令 \(b_{ik}^{loc}=1\) 表示第 \(i\) 个编辑的第 \(k\) 个局部性样本在编辑前后保持预期行为，\(n_i\) 是局部性样本数：
+令 $b_{ik}^{loc}=1$ 表示第 $i$ 个编辑的第 $k$ 个局部性样本在编辑前后保持预期行为，$n_i$ 是局部性样本数：
 
-$$
+```math
 S_{local}=
 \frac{\sum_i w_i
 \left(\frac{1}{n_i}\sum_{k=1}^{n_i}b_{ik}^{loc}\right)}
 {\sum_i w_i}
-$$
+```
 
 局部性不是“参数变化很小”的同义词。一个很小的参数变化，经过网络放大后仍可能改变许多输出；一个较大的变化，也可能在目标子空间之外保持稳定。要把参数差分、行为差分和因果干预分开记录。
 
@@ -533,23 +537,23 @@ $$
 
 ### 10.5 通用能力保留
 
-设保留任务集上的能力为 \(A_{ret}^{before}\) 和 \(A_{ret}^{after}\)，可以记录：
+设保留任务集上的能力为 $A_{ret}^{before}$ 和 $A_{ret}^{after}$，可以记录：
 
-$$
+```math
 \Delta_{ret}=A_{ret}^{after}-A_{ret}^{before}
-$$
+```
 
-\(\Delta_{ret}<0\) 表示能力下降。不同任务的分数不可直接相加，应先按任务定义归一化，再分别报告数学、代码、事实问答、语言质量和安全边界。
+$\Delta_{ret}<0$ 表示能力下降。不同任务的分数不可直接相加，应先按任务定义归一化，再分别报告数学、代码、事实问答、语言质量和安全边界。
 
 一个综合分数可能掩盖某一项关键退化。例如平均能力只下降 1%，但隐私相关的保留任务下降 20%，对产品来说仍可能不可接受。
 
 ### 10.6 连续编辑和顺序敏感性
 
-对于 \(T\) 次编辑：
+对于 $T$ 次编辑：
 
-$$
+```math
 \theta_T=\theta_0+\sum_{t=1}^{T}\Delta\theta_t
-$$
+```
 
 这只是参数加法的记号，实际模型还会通过非线性改变后续编辑的输入表示。评估时要比较：
 
@@ -563,33 +567,35 @@ $$
 
 ### 10.7 小样本分数的统计边界
 
-对 \(n\) 个等权二元样本，正确率估计为 \(\hat p\)。一个教学层面的标准误差近似是：
+对 $n$ 个等权二元样本，正确率估计为 $\hat p$。一个教学层面的标准误差近似是：
 
-$$
+```math
 SE(\hat p)=\sqrt{\frac{\hat p(1-\hat p)}{n}}
-$$
+```
 
-当样本很少、\(\hat p\) 接近 0 或 1、或样本之间存在同一事实的聚类时，这个近似会失真。改写样本共享同一编辑，不能被当作完全独立的 \(n\) 个证据。更可靠的报告应按编辑分组做 bootstrap 或报告置信区间，而不是只比较两个小数点。
+当样本很少、$\hat p$ 接近 0 或 1、或样本之间存在同一事实的聚类时，这个近似会失真。改写样本共享同一编辑，不能被当作完全独立的 $n$ 个证据。更可靠的报告应按编辑分组做 bootstrap 或报告置信区间，而不是只比较两个小数点。
+
+用第 21 节合成编辑记录可以逐项核对这些指标。四条编辑的权重是 3、2、1、4；直接目标的成功标记是 1、1、0、1，因此 $S_{target}=(3+2+0+4)/(3+2+1+4)=9/10=0.900$。每条编辑先在自己的改写上求平均，得到 $2/3、1、0、2/3$，再按编辑权重平均：$S_{para}=(3×2/3+2×1+1×0+4×2/3)/10=20/30≈0.667$。局部性样例的逐项平均是 $1、2/3、1、2/3$，所以 $S_{local}=(3+4/3+1+8/3)/10=0.800$。保留能力按同一组编辑权重计算，前后均值分别为 $0.883$ 和 $0.851$，故 $\Delta_{ret}=0.851-0.883=-0.032$。前三项和能力退化门槛都满足本例预先设定的 toy 阈值，但有两条目标答对的编辑仍存在局部冲突，而阈值最多允许一条，因此决策应保持 hold。手算保留了“先按编辑求局部比例，再按编辑权重汇总”的分母结构；把所有改写直接混成一池，会改变各编辑的权重。
 
 ## 11. Unlearning 的理想定义
 
 ### 11.1 以重新训练模型作为参照
 
-令完整训练数据为 \(D\)，目标删除集合为 \(F\)，保留集合为 \(R=D\setminus F\)。最清楚的参照模型是：
+令完整训练数据为 $D$，目标删除集合为 $F$，保留集合为 $R=D\setminus F$。最清楚的参照模型是：
 
-$$
+```math
 \theta_{-F}=Train(R;\xi)
-$$
+```
 
-\(\xi\) 表示训练配方、随机种子、数据顺序和优化器设置。unlearning 模型记为 \(\theta_u\)，理想状态不是参数逐元素等于 \(\theta_{-F}\)，而是在明确的审计分布 \(T\) 上表现足够接近：
+$\xi$ 表示训练配方、随机种子、数据顺序和优化器设置。unlearning 模型记为 $\theta_u$，理想状态不是参数逐元素等于 $\theta_{-F}$，而是在明确的审计分布 $T$ 上表现足够接近：
 
-$$
+```math
 \mathbb E_{x\sim T}
 \left[d\left(f_{\theta_u}(x),f_{\theta_{-F}}(x)\right)\right]
 \le \varepsilon
-$$
+```
 
-\(d\) 可以是输出分布的 KL 散度、答案差异、成员推断攻击优势或任务损失差异。不同 \(d\) 测量不同性质，不能把一个小的 \(d\) 写成对所有输入的完全等价。
+$d$ 可以是输出分布的 KL 散度、答案差异、成员推断攻击优势或任务损失差异。不同 $d$ 测量不同性质，不能把一个小的 $d$ 写成对所有输入的完全等价。
 
 ### 11.2 为什么完全遗忘难以证明
 
@@ -636,7 +642,7 @@ WMDP 论文把它作为危险知识评估和 unlearning 研究的公开基准之
 
 ### 13.1 从头重新训练：昂贵但清晰的参考
 
-从 \(D\setminus F\) 重新训练最接近“没有看到 F”的定义。如果资源允许，它是最有解释力的 reference model。
+从 $D\setminus F$ 重新训练最接近“没有看到 F”的定义。如果资源允许，它是最有解释力的 reference model。
 
 它仍有实际限制：
 
@@ -649,28 +655,28 @@ WMDP 论文把它作为危险知识评估和 unlearning 研究的公开基准之
 
 ### 13.2 Gradient ascent 与 retain 约束
 
-对 forget set \(F\)，普通训练损失为：
+对 forget set $F$，普通训练损失为：
 
-$$
+```math
 \mathcal L_F(\theta)=
 -\frac{1}{|F|}\sum_{(x,y)\in F}\log p_\theta(y\mid x)
-$$
+```
 
-如果最小化 \(-\mathcal L_F\)，就会倾向于提高 forget set 上的损失，也就是降低模型对目标答案的拟合。为了保留一般能力，可以加入保留集损失：
+如果最小化 $-\mathcal L_F$，就会倾向于提高 forget set 上的损失，也就是降低模型对目标答案的拟合。为了保留一般能力，可以加入保留集损失：
 
-$$
+```math
 \mathcal L(\theta)=
 \mathcal L_R(\theta)
 -\lambda_F\mathcal L_F(\theta)
-$$
+```
 
-\(\lambda_F\) 越大，遗忘压力越强，但破坏保留能力的风险也可能越高。梯度方向并不知道“目标知识只存在于哪里”，所以在参数共享严重的模型上尤其容易产生能力退化。
+$\lambda_F$ 越大，遗忘压力越强，但破坏保留能力的风险也可能越高。梯度方向并不知道“目标知识只存在于哪里”，所以在参数共享严重的模型上尤其容易产生能力退化。
 
 ### 13.3 用 KL 约束保留行为
 
 一种常见思路是在保留集上让新模型接近原模型：
 
-$$
+```math
 \mathcal L(\theta_u)=
 \mathcal L_R(\theta_u)
 -\lambda_F\mathcal L_F(\theta_u)
@@ -681,9 +687,9 @@ p_{\theta_0}(\cdot\mid x)
 \;\|\;
 p_{\theta_u}(\cdot\mid x)
 \right)
-$$
+```
 
-\(\theta_0\) 是遗忘前模型。KL 项约束的是保留集上的输出分布，而不是所有输入；它能缓解漂移，却不能让忘记集自动消失。
+$\theta_0$ 是遗忘前模型。KL 项约束的是保留集上的输出分布，而不是所有输入；它能缓解漂移，却不能让忘记集自动消失。
 
 ### 13.4 Preference optimization 与“我不知道”
 
@@ -734,6 +740,10 @@ WMDP 论文中的 RMU，即 Representation Misdirection for Unlearning，尝试�
 
 近邻集最能揭示过度遗忘。随机通用集分数不变，不代表与目标相邻的公共知识没有被误伤。
 
+这里还要增加一类上下文效用：用户有权重新提供一段来源明确、可合法处理的文本时，模型能否在当前上下文中总结或做安全变换。[ICML 2026 的 Context-Aware Unlearning 研究](https://proceedings.mlr.press/v306/peng26a.html) 对六种 unlearning 方法的研究报告，遗忘目标和保留集之外，这种“忘记后仍按新上下文使用”的能力也可能下降。它不是要求模型重新从参数中回忆已删除内容，而是测试模型能否使用用户当前提供的材料；测试数据必须经过授权，并与直接泄露测试分开记分。
+
+Forget 与 retain 的边界也可能是不对称的：忘记集需要覆盖同一目标的不同表达，保留集则需要覆盖大量与目标不相干的近邻知识。2026 年 7 月发布的 [SUITE](https://arxiv.org/abs/2607.09236) 是预印本，提出以此方式组织评测与训练数据。它提供了一种数据设计线索，尚不能写成普适基准结论；实践报告应显式列出容易误伤的近邻类目和标注规则。
+
 ### 14.3 改写和多轮攻击
 
 攻击集的目的不是教人绕过系统，而是检验“直接不回答”是否只是表面现象。测试模板可以抽象为：
@@ -759,11 +769,13 @@ Membership inference attack 试图判断某个样本是否出现在训练数据�
 
 所以 MIA 应与复现、改写、保留能力和参考模型比较共同使用。
 
+黑盒输出审计仍可能漏掉内部残留线索。EACL 2026 的[信息分解审计研究](https://aclanthology.org/2026.eacl-long.35/)报告，在其模型和任务设置中，遗忘后的一部分目标信息仍可从内部表征线性解码，并与已知重构攻击敏感性相关。这为白盒审计增加了一个可选维度：比较编辑前后的表示信息，而不只检查可见回答。线性可解码不是已经发生外部泄露的证据，也不代表任意攻击者都能提取这些信息；它只能与输出攻击、数据授权和威胁模型一起解释。
+
 ### 14.5 和 retain-only reference 比较
 
-如果能训练一个只看 \(R\) 的 reference model，就可以比较 unlearned model 与 reference model 的输出分布：
+如果能训练一个只看 $R$ 的 reference model，就可以比较 unlearned model 与 reference model 的输出分布：
 
-$$
+```math
 D_{ref}=
 \frac{1}{|T|}\sum_{x\in T}
 D_{KL}\left(
@@ -771,11 +783,11 @@ p_{\theta_u}(\cdot\mid x)
 \;\|\;
 p_{\theta_{-F}}(\cdot\mid x)
 \right)
-$$
+```
 
-\(T\) 是审计提示集合。低 \(D_{ref}\) 说明在这个集合上更接近 retain-only reference，但它对未覆盖输入仍然没有保证。
+$T$ 是审计提示集合。低 $D_{ref}$ 说明在这个集合上更接近 retain-only reference，但它对未覆盖输入仍然没有保证。
 
-## 15. 三个重要基准告诉了我们什么
+## 15. 四组重要基准和评测数据告诉了我们什么
 
 ### 15.1 CounterFact 与 zsRE：编辑并非字符串替换
 
@@ -821,12 +833,12 @@ MUSE 在 7B 语言模型上研究书籍和新闻数据。其摘要报告，多�
 
 ### 16.1 Forget leakage
 
-设 \(a_i^{leak}=1\) 表示第 \(i\) 个 forget case 仍泄露目标内容，\(w_i\) 是风险权重。直接泄露率为：
+设 $a_i^{leak}=1$ 表示第 $i$ 个 forget case 仍泄露目标内容，$w_i$ 是风险权重。直接泄露率为：
 
-$$
+```math
 R_{forget}=
 \frac{\sum_iw_i a_i^{leak}}{\sum_iw_i}
-$$
+```
 
 数值越低越好。分母说明了评估覆盖的风险总量；如果高风险样本权重更大，少量高风险泄露可能比大量低风险样本更显著。
 
@@ -834,40 +846,40 @@ exact、paraphrase 和 multi-turn 应分别计算，而不是先混在一个标�
 
 ### 16.2 Robust leakage
 
-设第 \(i\) 个目标有 \(q_i\) 个攻击变体，\(r_{ij}=1\) 表示第 \(j\) 个变体仍然泄露：
+设第 $i$ 个目标有 $q_i$ 个攻击变体，$r_{ij}=1$ 表示第 $j$ 个变体仍然泄露：
 
-$$
+```math
 R_{robust}=
 \frac{\sum_iw_i
 \left(\frac{1}{q_i}\sum_{j=1}^{q_i}r_{ij}\right)}
 {\sum_iw_i}
-$$
+```
 
-先在每个目标内部平均，可以避免某个目标因为攻击模板多而支配总体分数。\(q_i=0\) 的目标不应进入这个分母。
+先在每个目标内部平均，可以避免某个目标因为攻击模板多而支配总体分数。$q_i=0$ 的目标不应进入这个分母。
 
 ### 16.3 Retain utility
 
-保留集任务 \(R\) 的能力可以表示为：
+保留集任务 $R$ 的能力可以表示为：
 
-$$
+```math
 A_{retain}=
 \frac{1}{|R|}\sum_{j\in R}s_j
-$$
+```
 
-\(s_j\) 可以是准确率、F1、归一化 log-likelihood 或人工评分，但所有任务必须明确评分尺度。与遗忘前相比的变化为：
+$s_j$ 可以是准确率、F1、归一化 log-likelihood 或人工评分，但所有任务必须明确评分尺度。与遗忘前相比的变化为：
 
-$$
+```math
 \Delta_{retain}=A_{retain}^{after}-A_{retain}^{before}
-$$
+```
 
-如果 \(\Delta_{retain}\) 大幅为负，说明模型可能是通过普遍破坏能力来降低 forget set 分数。
+如果 $\Delta_{retain}$ 大幅为负，说明模型可能是通过普遍破坏能力来降低 forget set 分数。
 
 ### 16.4 参考模型差异
 
-将 \(D_{ref}\) 与泄露率、保留能力并列，可以把“像没见过目标数据”变成一个有限分布上的可检验命题。它仍需要声明：
+将 $D_{ref}$ 与泄露率、保留能力并列，可以把“像没见过目标数据”变成一个有限分布上的可检验命题。它仍需要声明：
 
 1. reference model 的训练种子和配方。
-2. \(T\) 是否包含近邻和多轮提示。
+2. $T$ 是否包含近邻和多轮提示。
 3. 是否控制数据重复和污染。
 4. 输出分布的 tokenization 是否一致。
 
@@ -877,14 +889,18 @@ $$
 
 | 证据项 | 信号 | 目标阈值 | 当前状态 | 下一动作 |
 | --- | --- | --- | --- | --- |
-| 目标编辑 | \(S_{target}\) | 不低于任务要求 | 达标或未达标 | 补充目标样本 |
-| 改写泛化 | \(S_{para}\) | 不低于任务要求 | 达标或未达标 | 扩展表达族 |
-| 局部性 | \(S_{local}\) | 不低于任务要求 | 达标或未达标 | 检查冲突邻域 |
-| exact 泄露 | \(R_{forget}\) | 不高于风险上限 | 达标或未达标 | 扩大攻击集 |
-| 稳健泄露 | \(R_{robust}\) | 不高于风险上限 | 达标或未达标 | 暂停外部暴露 |
-| 保留能力 | \(\Delta_{retain}\) | 不低于退化上限 | 达标或未达标 | 降低更新强度或重训 |
+| 目标编辑 | $S_{target}$ | 不低于任务要求 | 达标或未达标 | 补充目标样本 |
+| 改写泛化 | $S_{para}$ | 不低于任务要求 | 达标或未达标 | 扩展表达族 |
+| 局部性 | $S_{local}$ | 不低于任务要求 | 达标或未达标 | 检查冲突邻域 |
+| exact 泄露 | $R_{forget}$ | 不高于风险上限 | 达标或未达标 | 扩大攻击集 |
+| 稳健泄露 | $R_{robust}$ | 不高于风险上限 | 达标或未达标 | 暂停外部暴露 |
+| 保留能力 | $\Delta_{retain}$ | 不低于退化上限 | 达标或未达标 | 降低更新强度或重训 |
+| 合法上下文效用 | 单独的 contextual utility 切片 | 不低于应用要求 | 达标或未达标 | 检查上下文接口与目标边界 |
+| 表征残留审计 | 目标信息的内部可解码信号 | 按威胁模型设定 | 需复核或已复核 | 扩展白盒审计或限制暴露 |
 
 “当前状态”只说明已测样本和已知攻击下的证据；“下一动作”说明不确定性如何被减少。它不是把复杂证据伪装成一个总开关。
+
+再手算一组遗忘信号：三条合成 forget case 的权重分别为 3、4、5，只有第三条 exact 泄露，因此 $R_{forget}=5/12≈0.417$。若每条目标的 exact、改写、多轮泄露分别取平均，三条的 robust 比例为 $0、1/3、1$，于是 $R_{robust}=(3×0+4×1/3+5×1)/12=19/36≈0.528$。成员推断风险的加权均值由 $0.875$ 降至 $0.497$，变化约为 $-0.378$；保留能力均值约由 $0.844$ 降至 $0.818$，变化约为 $-0.025$。在本例阈值下，成员信号和保留能力通过，但 exact 与 robust 泄露都超出上限，仍必须 hold。这个计算展示为什么不能用某个显著改善的指标抵消仍然存在的泄露。
 
 ## 17. 案例一：企业事实过期，应该编辑还是 RAG
 
@@ -932,6 +948,10 @@ $$
 
 如果参数编辑提高了新事实成功率，却让历史事实全部被改写成当前事实，就应该撤回编辑，保留 RAG 的时间建模。
 
+可以把验收约定做成一组分开的门槛，而不是先压成总分。例如对一个虚构的负责人变更，直接新事实 9/10 条正确，得分为 0.90；历史时点问法 7/8 条正确，得分为 0.875；无关产品关系 19/20 条保持不变，局部性为 0.95；无权限请求 0/5 条泄露内部字段；引用和生效日期同时正确 9/10 次，得分为 0.90。若测试前就登记直接正确率至少 0.90、历史问法至少 0.90、局部性至少 0.95、无权限泄露为零、引用完整率至少 0.95，那么这个候选编辑会因历史问法和引用完整率不足而暂停。0.90 的直接成功并不能抵消这两项失败。
+
+下一步要先读失败样本：历史问法错误可能是时间关系没有表示进编辑范围；引用失败则说明参数编辑不能提供可追溯来源，需继续依赖检索层。若失败来自无权限数据进入提示，应该修复权限过滤，而不是加大参数更新。把每个失败映射到它所属的层，可以避免把 RAG、编辑器和授权逻辑的责任混在一起。
+
 ### 17.4 这个案例的结论
 
 RAG 解决的是外部知识的可更新性；editing 解决的是参数行为的局部修正。二者可以组合，但不能互相冒充。企业事实系统的责任链最终仍然要落在数据源、权限、引用、审计和回滚上。
@@ -952,19 +972,27 @@ RAG 解决的是外部知识的可更新性；editing 解决的是参数行为�
 
 源数据删除、模型 unlearning 和日志保留有不同的生命周期。技术团队不能只处理其中一个对象，然后宣称整项请求已经完成。
 
+血缘定位需要能从数据主体或来源标识追到训练快照、清洗版本、去重结果、adapter、索引和已部署模型。若某个训练语料无法追溯到具体模型版本，团队就无法可靠判断哪些 checkpoint 受影响；这属于治理和版本管理缺口，参数更新本身补不上。处置范围也应记录授权依据、保留义务和例外，而不是把所有关联记录都静默删除。
+
 ### 18.2 小型闭环
 
-一个可审计的闭环可以是：
+下图把删除请求的处置对象和可回滚节点画在一起。实线表示常规处理顺序，带标签虚线表示审计失败后回到额外处置；箭头不意味着源数据清除、模型遗忘和法律义务可以互相替代。
 
-~~~text
-识别请求
-  -> 定位数据谱系和副本
-  -> 停止继续使用目标数据
-  -> 从索引、缓存和待训练队列移除
-  -> 选择重训、局部遗忘或暂时抑制
-  -> 在授权数据上做 forget/retain/攻击评估
-  -> 记录版本、范围、残余风险和后续复核
-~~~
+```mermaid
+flowchart TD
+    A["识别请求并核验身份"] --> B["限定主体、数据范围与模型版本"]
+    B --> C["定位数据血缘、索引和副本"]
+    C --> D{"选择处置对象"}
+    D -->|源数据或检索副本| E["停止使用并清理授权范围内副本"]
+    D -->|模型参数影响| F["选择重训、局部遗忘或临时抑制"]
+    E --> G["在授权样本上检查遗忘、保留和攻击切片"]
+    F --> G
+    G --> H{"证据满足预先约定的门槛？"}
+    H -->|满足| I["记录模型版本、处理范围和残余风险"]
+    H -.->|失败或仍有残留| J["限制暴露、回滚或追加处理"]
+    J --> G
+    I --> K["复核缓存、副本与下游版本"]
+```
 
 其中“选择局部遗忘”需要充分说明它是近似技术。若责任要求高、目标规模大或数据影响无法定位，重新训练或不再部署受影响模型可能比参数补丁更容易解释。
 
@@ -1005,6 +1033,8 @@ WMDP 公开了不包含敏感操作细节的代理题目，适合比较模型在
 ### 19.3 外部控制仍不可省略
 
 危险能力治理不能只依赖模型内部变化。权限、沙箱、网络隔离、工具白名单、人工复核和审计日志是最后的现实责任层。模型编辑或 unlearning 失败时，系统控制应仍能阻止不可逆副作用。
+
+例如，某个公开代理集的分数从 60% 降到 40%，相邻安全科学任务从 90% 降到 88%，这只说明两个给定切片的测量变化。若工具调用测试没有覆盖，不能推断模型在外部执行环境中也无法完成危险任务；若题目被记住或版本间有污染，也不能把下降全归因于遗忘算法。发布门槛应将代理知识、正常邻近能力、模型提示中的行为、工具执行权限和沙箱日志分别报告。若某个高风险动作由工具实现，即时控制仍是工具端拒绝越权请求，并保留可审计的阻断记录。
 
 ## 20. 工程实现：把一次修改变成可回滚的变更
 
@@ -1052,10 +1082,14 @@ owner: team-name
 
 ## 21. 一个最小的编辑与遗忘审计 demo
 
-下面的代码只模拟审计数据，不加载模型，也不修改权重。它把编辑和遗忘分成两套证据，分别记录 thresholds、signals、evidence_status、actions 和 decision。这样可以看见哪个指标未达要求，而不是用一个总布尔值掩盖失败原因。
+下面的代码只模拟审计数据，不加载模型，也不修改权重。它把编辑和遗忘分成两套证据，分别记录阈值、指标、证据状态、后续动作和决策。这样可以看见哪个指标未达要求，而不是用一个总布尔值掩盖失败原因。
+
+代码假设每条布尔标签已由固定评分规则或受训评审者判定；它不会读取模型答案，也不会决定“泄露”标签是否正确。正式比较前，应冻结同一组 prompt、目标范围、模型版本和评审说明，再分别运行编辑前后版本。否则分数变化可能来自样本、标签或 evaluator 更新，而不是参数编辑。权重也必须在查看结果前按风险或业务重要性定义，并保存每条记录的样本 ID 和来源版本。
+
+代码状态：已验证（2026-10-28；Python 3.12.9，标准库）。本例只处理合成审计记录，不调用模型或修改参数。
 
 ~~~python
-def weighted_mean(rows, key):
+def weighted_mean_raw(rows, key):
     if not rows:
         return None
     total_weight = sum(row["weight"] for row in rows)
@@ -1063,10 +1097,12 @@ def weighted_mean(rows, key):
         raise ValueError("total weight must be positive")
     if any(row[key] is None for row in rows):
         return None
-    return round(
-        sum(row[key] * row["weight"] for row in rows) / total_weight,
-        3,
-    )
+    return sum(row[key] * row["weight"] for row in rows) / total_weight
+
+
+def weighted_mean(rows, key):
+    value = weighted_mean_raw(rows, key)
+    return round(value, 3) if value is not None else None
 
 
 def weighted_flag_rate(rows, key):
@@ -1087,7 +1123,7 @@ def weighted_nested_mean(rows, key):
     for row in rows:
         nested = row[key]
         if not nested:
-            return None
+            continue
         values.append(
             {
                 "weight": row["weight"],
@@ -1160,8 +1196,8 @@ editing_signals = {
 }
 editing_signals["retain_delta"] = (
     round(
-        editing_signals["retain_after"]
-        - editing_signals["retain_before"],
+        weighted_mean_raw(edit_cases, "retain_after")
+        - weighted_mean_raw(edit_cases, "retain_before"),
         3,
     )
     if editing_signals["retain_after"] is not None
@@ -1173,6 +1209,9 @@ editing_signals["conflict_cases"] = [
     for row in edit_cases
     if row["target_ok"] and not all(row["locality_ok"])
 ]
+editing_signals["conflict_count"] = (
+    len(editing_signals["conflict_cases"]) if edit_cases else None
+)
 
 editing_thresholds = {
     "target_success": {"operator": ">=", "value": 0.80},
@@ -1200,7 +1239,7 @@ editing_evidence = {
         editing_thresholds["retain_delta"],
     ),
     "conflict_count": compare(
-        len(editing_signals["conflict_cases"]),
+        editing_signals["conflict_count"],
         editing_thresholds["conflict_count"],
     ),
 }
@@ -1284,8 +1323,8 @@ unlearning_signals["robust_leakage"] = weighted_nested_mean(
 )
 unlearning_signals["mia_delta"] = (
     round(
-        unlearning_signals["mia_after"]
-        - unlearning_signals["mia_before"],
+        weighted_mean_raw(forget_cases, "mia_after")
+        - weighted_mean_raw(forget_cases, "mia_before"),
         3,
     )
     if unlearning_signals["mia_after"] is not None
@@ -1294,8 +1333,8 @@ unlearning_signals["mia_delta"] = (
 )
 unlearning_signals["retain_delta"] = (
     round(
-        unlearning_signals["retain_after"]
-        - unlearning_signals["retain_before"],
+        weighted_mean_raw(retain_tasks, "after")
+        - weighted_mean_raw(retain_tasks, "before"),
         3,
     )
     if unlearning_signals["retain_after"] is not None
@@ -1341,7 +1380,7 @@ decision = {
     },
     "unlearning": {
         "scope": "synthetic_audit_only",
-        "status": "hold_for_robust_leakage",
+        "status": "hold_for_leakage_review",
         "evidence": unlearning_evidence,
         "undefined_metrics": unlearning_undefined_metrics,
         "next_actions": unlearning_actions,
@@ -1362,7 +1401,19 @@ print("decision=", decision)
 1. 编辑目标大多成功，但产品事实和政策行为仍有局部冲突。
 2. exact 泄露和成员推断风险有所下降，但 capability proxy 在改写和多轮中仍然泄露。
 
+固定输入的关键输出是：编辑目标成功率 `0.900`、改写泛化 `0.667`、局部性 `0.800`、保留变化 `-0.032`，有 2 条冲突编辑，因此 editing gate 保持 hold。遗忘侧的 exact 泄露率为 `0.417`、改写泄露 `0.750`、多轮泄露 `0.417`、robust 泄露 `0.528`、成员推断变化 `-0.378`、保留能力变化 `-0.025`；exact 和 robust 泄露都未过阈值，所以 unlearning gate 也保持 hold。
+
 程序中的布尔值只描述单个证据项是否达到事先写明的阈值。真正的 decision 仍然保留范围、状态、下一动作和证据明细，避免把实验结果伪装成普遍保证。
+
+读输出时先看 `editing_signals`，再看逐项 `editing_evidence`。程序先对每条编辑内部的改写和 locality 样本求均值，再按编辑权重汇总，所以权重 4 的政策编辑比权重 1 的城市事实影响更大。`conflict_count` 统计目标答对、但至少有一条 locality 样本失败的编辑；如果输入集合为空，这一项会是 `None`，而不是把“没有测量”解释成零冲突。`weighted_nested_mean` 会跳过没有子样本的编辑；若所有编辑都没有可用子样本，结果为 `None`，并由 evidence 门禁拒绝放行。
+
+`weighted_mean_raw` 保留完整精度，阈值比较和前后差值用未舍入均值计算；单项展示值再四舍五入到三位。这样不会因先分别舍入 `before` 和 `after` 而改变差值。若总权重不为正，函数显式抛出 `ValueError`，因为这种输入不满足权重合同，不能拿任意默认值填补。
+
+遗忘指标同样逐项检查。示例中 exact 泄露为 `5/12≈0.417`，三个变体的组内平均后 robust 泄露为 `19/36≈0.528`；成员推断风险下降约 `0.378`，保留能力只下降约 `0.025`。即使后两项达到 toy 门槛，前两项仍超过 `0.10` 与 `0.20` 的上限，所以决策状态是 `hold_for_leakage_review`。阈值只是为演示程序流程而写的合成配置，真实系统必须由风险责任人按数据范围和威胁模型预先制定。
+
+复核边界应覆盖空编辑集、空 forget 集、单个编辑没有改写或 locality 子样本、全零权重以及字段缺失。空集合和全缺测应输出 `None`，不得形成通过结论；字段缺失应尽早暴露输入错误；全零权重应当报错。运行记录只验证了这里列出的合成输入和这些输入边界，既没有训练模型，也没有证明实际删除、隐私风险下降或目标能力消失。
+
+当编辑器或模型版本发生变化时，评估结果应绑定到新版本，并与旧版本使用相同的评测数据切片；若数据切片也改变，应并列报告版本差异，而不是只呈现新的汇总值。高风险泄露仍要保留受控的原始审计证据，普通汇总日志只存样本标识、标签和必要的分数，避免为了验证“不再泄露”再次传播敏感原文。门槛通过也只说明这组预定义输入满足约定，不能覆盖未知提示或未来的下游微调。
 
 ## 22. 常见的错误理解
 
@@ -1412,7 +1463,7 @@ CounterFact、TOFU、WMDP 和 MUSE 各自定义了不同的数据、任务和指
 
 为一个虚构公司的负责人变更建立编辑集。至少写出五个直接问题、五个改写问题、五个同实体不同关系的问题和五个无关保留任务。
 
-然后分别计算 \(S_{target}\)、\(S_{para}\) 和 \(S_{local}\)，说明每个分母代表什么。
+然后分别计算 $S_{target}$、$S_{para}$ 和 $S_{local}$，说明每个分母代表什么。
 
 ### 练习三：比较 ROME 和 SERAC
 
@@ -1447,6 +1498,12 @@ CounterFact、TOFU、WMDP 和 MUSE 各自定义了不同的数据、任务和指
 5. [TOFU: A Task of Fictitious Unlearning for LLMs](https://arxiv.org/abs/2401.06121)：支持虚构作者资料、forget/retain 设计和基线遗忘效果的限制。
 6. [WMDP: Measuring and Reducing Malicious Use With Unlearning](https://arxiv.org/abs/2403.03218)：支持危险知识代理评估、3,668 道公开选择题和 RMU 研究路线。
 7. [MUSE: Machine Unlearning Six-Way Evaluation for Language Models](https://arxiv.org/abs/2407.06460)：支持逐字记忆、知识记忆、隐私、效用、规模和连续请求六个评估维度。
+8. [Uncovering Overfitting in Large Language Model Editing](https://proceedings.iclr.cc/paper_files/paper/2025/hash/c592fc7e6207f82560ed45fece8d6937-Abstract-Conference.html)：提出 EVOKE 并报告目标答案过拟合与复杂、多跳泛化问题；结论绑定论文的编辑方法和任务。
+9. [Fine-tuning Done Right in Model Editing](https://proceedings.iclr.cc/paper_files/paper/2026/hash/74b8ccb5ad21871fd436867df19c35ac-Abstract-Conference.html)：比较逐样本收敛与 mini-batch epoch 流程，作者在其模型和数据中报告 LocFT-BF 结果；不支持对所有微调或编辑器的普遍排序。
+10. [UniEdit: A Unified Knowledge Editing Benchmark for Large Language Models](https://proceedings.neurips.cc/paper_files/paper/2025/hash/6cc6c2be42c838827d2f1d12baa05539-Abstract-Datasets_and_Benchmarks_Track.html)：覆盖 25 个知识领域并以知识图谱邻域构造多跳 ripple tests；自然语言样本由专有 LLM 生成，需考虑数据构造边界。
+11. [Forget to Know, Remember to Use: Context-Aware Unlearning for Large Language Models](https://proceedings.mlr.press/v306/peng26a.html)：在六种方法上测量删除内容被重新放入上下文后的可用性；结论绑定论文设置，提示将上下文效用与参数回忆分开评估。
+12. [Auditing Language Model Unlearning via Information Decomposition](https://aclanthology.org/2026.eacl-long.35/)：提出基于信息分解的内部表征审计，并报告特定设置中的可解码残留与重构攻击关联；可解码不等于外部泄露。
+13. [Forget Narrowly, Retain Broadly: Unlearning as an Asymmetric Generalization Problem](https://arxiv.org/abs/2607.09236)：SUITE 预印本讨论忘记集与保留集的非对称覆盖和边界标注问题；结论尚待后续复核。
 
 论文摘要、论文正文和项目页的证据强度不同。摘要适合核对论文主张和数据规模，正文适合核对公式与实验条件，项目页适合核对代码和数据入口。它们都不能自动推出商业模型的通用效果。
 

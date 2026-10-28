@@ -21,15 +21,18 @@
 
 把模型想成一个单独的文件，会让治理问题看起来比实际简单。一个上线的生成式 AI 系统至少有以下组成部分：
 
-~~~text
-训练数据与许可证
-  -> base model 与 checkpoint
-  -> SFT、偏好优化和安全策略
-  -> tokenizer、chat template 与推理配置
-  -> API、RAG、工具、记忆和权限
-  -> 日志、监控、人工审核与事故响应
-  -> 用户、组织流程和现实世界动作
-~~~
+```mermaid
+flowchart LR
+  A["训练数据与许可证"] --> B["base model 与 checkpoint"]
+  B --> C["SFT、偏好优化与安全策略"]
+  C --> D["tokenizer、chat template 与推理配置"]
+  D --> E["API、RAG、工具、记忆与权限"]
+  E --> F["日志、监控、人工审核与事故响应"]
+  F --> G["用户、组织流程与现实动作"]
+  F -.->|事故和反馈触发复评| A
+```
+
+沿实线可以从数据和模型追到产品动作；带文字的虚线表示事故与运行反馈会触发治理复评。它不表示每次事故都要重新训练模型。
 
 每一层都有自己的责任边界。模型可能在离线测试中表现良好，但 RAG 检索越权；工具调用可能结构正确，但服务端授权错误；模型卡可能披露了限制，但产品文案没有把限制传递给使用者；权限可能配置正确，但调试日志把敏感上下文长期保存。
 
@@ -71,9 +74,9 @@
 
 可以把一条治理声明表示成：
 
-$$
+```math
 q=(c,v,e,s,l,u)
-$$
+```
 
 其中 \(c\) 是 claim，\(v\) 是模型或系统版本，\(e\) 是证据集合，\(s\) 是适用范围，\(l\) 是限制，\(u\) 是最后更新时间。缺少 \(v\) 和 \(s\) 的分数通常不能用于跨版本比较；缺少 \(e\) 的“安全”通常只是没有展开的意见。
 
@@ -145,9 +148,9 @@ Policy 可以规定高风险医疗建议需要专业人士复核，model card �
 
 Policy 的最小可执行单位应包含主体、动作、对象、条件和处置：
 
-$$
+```math
 P=(a,x,r,k,d)
-$$
+```
 
 这里 (a) 是 actor，(x) 是 action，(r) 是 resource，(k) 是 condition，(d) 是 decision。比如“用户可以总结自己上传的文档，但不能让模型把其他租户的文档作为上下文返回”比“保护隐私”更接近可执行 policy。
 
@@ -260,17 +263,18 @@ Policy 不应只有 allow 和 deny 两个按钮。一个更有解释力的响应
 
 治理流程可以按下面的生命周期展开：
 
-~~~text
-定义用途与主体
-  -> 数据、许可和威胁建模
-  -> 训练与模型评估
-  -> 系统组合和安全评估
-  -> 风险处置与发布范围决定
-  -> 灰度、监控和反馈
-  -> 变更、事故、回滚和重新评估
-~~~
+```mermaid
+flowchart LR
+  A["定义用途与主体"] --> B["数据、许可与威胁建模"]
+  B --> C["训练与模型评估"]
+  C --> D["系统组合与安全评估"]
+  D --> E["风险处置与发布范围决定"]
+  E --> F["灰度、监控与反馈"]
+  F --> G["变更、事故、回滚与复评"]
+  G -.->|证据或范围变化| A
+```
 
-重要的是顺序关系。若先承诺产品功能，再临时寻找能够支持发布的指标，评估会被目标反向塑造；若只在上线前写文档，文档会遗漏训练和系统演进过程。
+沿实线从用途定义进入评估和发布，再进入线上监控；带文字的虚线表示证据或产品范围变化后重新审视用途、威胁模型和所需评估。若发布目标先于评估协议确定，指标容易被事后挑选；文档也要记录训练和系统演进过程。
 
 ### 4.4 变更管理
 
@@ -334,9 +338,9 @@ Out-of-scope use 也要具体：
 
 评估表至少包含任务、数据版本、提示模板、解码设置、工具、harness、模型修订、样本数量和不确定性。分数 \(s\) 只有在这些条件相近时才有可比意义：
 
-$$
+```math
 s=f(m,v,D,p,h,\pi,b)
-$$
+```
 
 其中 \(m\) 是模型，\(v\) 是版本，\(D\) 是数据，\(p\) 是 prompt 或协议，\(h\) 是 harness，\(\pi\) 是推理和工具策略，\(b\) 是预算。省略这些变量的排行榜容易制造虚假的跨模型结论。
 
@@ -395,18 +399,28 @@ $$
 
 System card 的开头应画出系统边界：
 
-~~~text
-用户与身份
-  -> API gateway 与租户解析
-  -> policy / risk classifier
-  -> model router
-  -> RAG、memory、tool adapter
-  -> model inference
-  -> output filter / human review
-  -> 外部动作、日志和监控
-~~~
+```mermaid
+flowchart LR
+  U["用户与身份"] --> G["API gateway 与租户解析"]
+  G --> P["policy service 与风险分类"]
+  P --> R["model router"]
+  R --> M["模型推理"]
+  R --> S["RAG 与 memory"]
+  S --> M
+  M --> T["tool adapter"]
+  T --> A["服务端授权与副作用控制"]
+  A --> M
+  M --> O["输出检查与人工审核"]
+  O --> U
+  G --> L["审计日志与监控"]
+  P --> L
+  S --> L
+  T --> L
+  O --> L
+  T -.->|授权失败或状态未知| O
+```
 
-每个箭头都要说明数据流向、信任边界、权限判断和失败后的动作。特别是模型生成的工具参数、检索片段和策略判断都应被视为不可信输入，不能因为它们来自模型就自动获得更高权限。
+图中的服务端授权节点必须独立校验模型生成的工具参数，检索结果和模型策略判断也要保留各自的可信边界。审阅 system card 时，应逐条说明数据流、权限判断、日志字段和失败动作；虚线表示授权失败或状态未知时停止自动动作并交由安全处理路径。
 
 ### 6.2 工具、RAG 和权限
 
@@ -437,10 +451,10 @@ System card 要回答以下问题：
 
 System Card 中的分数不是脱离条件的模型常数。审计一项结论时，至少把它写成：
 
-~~~text
+```text
 claim = (model_snapshot, safeguards, task_set, harness, success_definition,
          numerator/denominator, fallback_policy, metric_clock, uncertainty)
-~~~
+```
 
 Claude Opus 5.5 的 System Card 展示了这些字段为何不能省略：
 
@@ -485,17 +499,17 @@ Claude Opus 5 System Card 的 2026-08-19 changelog 补入跨 surface prompt-inje
 
 将候选路由 \(r\) 的收益和风险写成：
 
-$$
+```math
 U(r\mid x)=Q(r\mid x)-\lambda C(r\mid x)-\mu H(r\mid x)
-$$
+```
 
 其中 \(Q\) 是任务质量，\(C\) 是延迟或成本，\(H\) 是伤害或越权风险，\(\lambda\) 和 \(\mu\) 是当前任务的权重。真正的路由还需要硬性约束：
 
-$$
+```math
 r^*=\arg\max_{r\in\mathcal R}U(r\mid x)
 \quad\text{subject to}\quad
 Auth(r,x)=1,\quad Evidence(r,x)=1,\quad Reversible(r)=1
-$$
+```
 
 这个公式不是要求生产系统计算一个完美的效用，而是提醒我们：高分模型不能绕过授权、证据覆盖和可逆性约束。一个低风险只读路由可能比高能力写入路由更合适。
 
@@ -550,21 +564,21 @@ fallback 必须保留原因。若系统只显示“暂时无法完成”，运�
 
 设 model card 的必填声明集合为 \(M\)，第 \(j\) 项有可追溯证据时 \(c_j=1\)，可以定义：
 
-$$
+```math
 C_{\mathrm{model}}=
 \frac{\sum_{j\in M}w_jc_j}
 {\sum_{j\in M}w_j}
-$$
+```
 
 其中 \(w_j\) 让身份、限制、部署条件等关键项目比普通描述拥有更高权重。文档有文字但没有证据时，\(c_j\) 不应自动算作 1。如果必填声明集合为空，或某条声明尚未完成证据核验，覆盖率应记录为 \(N/A\)，而不是把“没有需要核验的项目”写成满覆盖。覆盖率还应和声明版本、适用范围及最近复核时间绑定；旧版本的完整文档不能自动覆盖新版本的行为。
 
 系统证据覆盖可以写成：
 
-$$
+```math
 C_{\mathrm{evidence}}=
 \frac{\sum_{k\in E}v_k e_k}
 {\sum_{k\in E}v_k}
-$$
+```
 
 其中 \(E\) 是当前发布范围所需的评估和控制集合，\(e_k\) 表示证据是否覆盖对应条件。高风险切片不应被总体样本量掩盖，所以 \(v_k\) 可以按风险和影响加权。当 \(E\) 为空、权重总和为 0，或某个关键条件只有“计划评估”而没有实际结果时，\(C_{\mathrm{evidence}}\) 应标为 \(N/A\) 或 partial，不能把计划当成已覆盖。
 
@@ -572,11 +586,11 @@ $$
 
 对每个风险问题 \(i\)，用 \(p_i\) 表示发生或暴露概率，用 \(I_i\) 表示影响规模，用 \(w_i\) 表示严重度权重，教学上可以写：
 
-$$
+```math
 R_{\mathrm{open}}=
 \frac{\sum_i w_i p_i I_i}
 {\sum_i w_i}
-$$
+```
 
 这不是法律意义的风险定量，也不能由一个测试集精确估计生产概率。它的作用是提醒团队不要只平均所有问题：一次高影响、低频的凭证泄露，可能比很多低影响的格式错误更值得优先处理。如果没有开放风险条目或风险权重总和为 0，\(R_{\mathrm{open}}\) 没有定义；这表示尚未建立可计算的风险清单，不表示风险为零。
 
@@ -584,11 +598,11 @@ $$
 
 设高风险问题集合为 \(H\)，问题 \(i\) 有有效缓解时 \(b_i=1\)，则：
 
-$$
+```math
 C_{\mathrm{mit}}=
 \frac{\sum_{i\in H}w_i b_i}
 {\sum_{i\in H}w_i}
-$$
+```
 
 有效缓解不仅是“写了规则”，还要能在当前系统中执行并被测试。例如，工具写操作的人工确认如果只是前端按钮而不是服务端强制字段，就不能算完整缓解。如果高风险集合为空，或高风险条目的权重总和为 0，\(C_{\mathrm{mit}}\) 应记录为 \(N/A\)；空集合只说明当前没有可审计的高风险条目，不能被解释成缓解覆盖率 100%。
 
@@ -596,7 +610,7 @@ $$
 
 把发布报告写成单个布尔值会丢失原因。更好的记录至少保留：
 
-~~~text
+```text
 thresholds:
   required evidence coverage, risk limits, hard constraints
 signals:
@@ -607,7 +621,7 @@ actions:
   restrict, retest, add mitigation, escalate, rollback
 decision:
   allow scoped rollout, shadow only, hold, or withdraw
-~~~
+```
 
 其中 `supported` 只表示在声明范围内有证据，不表示未来所有输入都安全；`missing` 也不等于失败事实，而是说明当前不能对该范围作强结论。
 
@@ -837,7 +851,7 @@ OpenAI Preparedness Framework、Anthropic Responsible Scaling Policy、Google De
 
 下面的代码使用完全合成的审计记录。它不判断真实模型，也不代表任何机构的发布标准；它演示如何把文档完整度、政策覆盖、评估切片、严重度加权风险、缓解、审批和硬性约束拆成独立信号，并保留每个信号对应的动作。
 
-~~~python
+```python
 from dataclasses import dataclass
 
 
@@ -1071,7 +1085,7 @@ print("failed_thresholds=", failed_thresholds)
 print("failed_constraints=", failed_constraints)
 print("undefined_metrics=", report["undefined_metrics"])
 print("decision=", decision)
-~~~
+```
 
 在这组故意不完整的合成数据中，`privacy_logging_controlled` 为假，未解决的 P1 风险也使 `open_risk` 超过范围，因此结果应是 `hold_and_repair_hard_constraints`。这个结果不是“模型永远不能发布”，而是说明当前发布范围和证据不足以支持更大的自动化范围。
 

@@ -11,9 +11,24 @@ circuit 和算法假设。这个顺序很重要：一张 attention 图可以帮�
 承担因果结论；一个漂亮的 SAE feature 可以帮助定位方向，却不能自动证明模型已经被
 理解。
 
-```text
-行为现象 -> 激活 / 表示 -> 因果干预 -> feature / circuit -> 安全调试或监控
+```mermaid
+flowchart LR
+  A["观察到行为问题"] --> B["归因与表示读出"]
+  B --> C["提出候选 feature / circuit"]
+  C --> D["设计 patch、ablation 与负对照"]
+  D --> E{"在 holdout 中按预测复现？"}
+  E -->|复现| F["形成局部机制假设"]
+  E -->|未复现| G["修订假设与输入切片"]
+  G --> B
+  F --> H["回到行为回归与安全系统"]
+  C -.->|反例与预测冲突| G
+  H -.->|发现新失败| A
 ```
+
+读图时不要把它理解成“看见表示就找到机制”的直线流程。归因和 probing 只能缩小候选，
+干预结果还要接受负对照与 holdout 检查；如果预测未复现，就回到假设和输入切片，而不是
+继续给原解释找例外。通过局部复核后，结果仍须回到帮助性、安全行为和工具权限等外部
+指标中验证，不能把内部 feature 分数直接接成发布门槛。
 
 后文的数学和代码都是教学级 toy example。它们用于说明实验对象、指标和因果解释的
 边界，不代表某个真实模型的测量结果，也不把局部机制证据写成整体安全保证。读者可以
@@ -272,19 +287,19 @@ Circuit 是由多个 feature、neurons、attention heads、MLP 和连接组成�
 ### 4.6 Feature 是方向假设，不是现成的语义标签
 
 在机制分析中，“feature”经常被口语化为“某个概念”，但更准确的说法是：它是一个可被
-描述、定位并通过实验检验的表示方向或激活模式。若 \(h\) 是某层残差流，\(d_k\) 是第
-\(k\) 个候选方向，一个简化的 superposition 表示可以写成：
+描述、定位并通过实验检验的表示方向或激活模式。若 $h$ 是某层残差流，$d_k$ 是第
+$k$ 个候选方向，一个简化的 superposition 表示可以写成：
 
-$$
+```math
 h\approx \sum_{k\in S}a_k d_k+\epsilon
-$$
+```
 
-其中 \(S\) 是当前输入激活的 feature 子集，\(a_k\) 是各方向的幅度，\(\epsilon\) 是无法
+其中 $S$ 是当前输入激活的 feature 子集，$a_k$ 是各方向的幅度，$\epsilon$ 是无法
 由当前字典解释的残差。这个式子不是说真实模型一定使用线性稀疏字典，而是说明为什么
 “一个 neuron 对应一个概念”的假设可能过于简单：多个方向可以共同投影到同一组 neuron，
 同一概念也可能被多个方向分裂表示。
 
-小白可以把 \(d_k\) 想成混合录音中的一条乐器轨道；专家则要继续问：方向是否在不同
+小白可以把 $d_k$ 想成混合录音中的一条乐器轨道；专家则要继续问：方向是否在不同
 上下文中稳定，激活是否只是词形或位置的代理，字典是否遗漏了重要残差，feature 之间
 是否存在互相抑制或组合关系。给 feature 起名只是研究记录，只有跨样本预测和干预结果
 才能提高这个名字的可信度。
@@ -362,14 +377,14 @@ Attention head 的解释要看它对残差流写入了什么信息，以及后�
 
 对一个 attention head，可以把计算先写成：
 
-$$
-A=\operatorname{softmax}\left(\frac{QK^{\mathsf T}}{\sqrt{d_k}}+M\right),
+```math
+A=\mathrm{softmax}\left(\frac{QK^{\mathsf T}}{\sqrt{d_k}}+M\right),
 \qquad
 o=A V W_O
-$$
+```
 
-这里 \(QK^{\mathsf T}\) 决定“哪些位置互相匹配”，通常被称为 QK 侧的路由或匹配
-计算；\(V W_O\) 决定“从被读取位置写回什么内容”，通常被称为 OV 侧的写入计算。
+这里 $QK^{\mathsf T}$ 决定“哪些位置互相匹配”，通常被称为 QK 侧的路由或匹配
+计算；$V W_O$ 决定“从被读取位置写回什么内容”，通常被称为 OV 侧的写入计算。
 因此，即使一张 heatmap 显示某个 head 关注了实体 token，也还要检查 value 向量是否
 真的携带了目标实体、输出投影是否把它写到正确的残差方向，以及后续 unembedding 是否
 把该方向转成目标 token 的 logit。
@@ -441,15 +456,24 @@ Activation patching 更进一步问：
 首先要定义什么叫“恢复”。对于分类任务，可以使用正确类别的 logit margin；对于生成
 任务，可以使用目标序列的对数概率、答案 token 的 rank 或任务级成功率。只观察最终文本
 是否改变会丢失细微效应，也容易受采样噪声影响。设 clean、corrupted 和 patched 的
-目标差值分别为 \(\Delta^+\)、\(\Delta^-\) 和 \(\Delta^{patch}\)，常见的归一化恢复分数是：
+目标差值分别为 $\Delta^+$、$\Delta^-$ 和 $\Delta^{patch}$，常见的归一化恢复分数是：
 
-$$
+```math
 S_{patch}=\frac{\Delta^{patch}-\Delta^-}{\Delta^+-\Delta^-}
-$$
+```
 
 分母接近零时，这个分数没有稳定含义；恢复分数大于 1 也不自动表示实验更好，可能是
 干预带来了 clean run 中没有的额外效应。报告应同时给出原始 logit、绝对变化、样本数、
 置信区间或重复运行范围，并保留未 patch 的 corrupted 对照。
+
+用后文 demo 的同一组输入手算一次：目标答案相对干扰答案的 clean logit margin 是
+$\Delta^+=2.0$，corrupted margin 是 $\Delta^-=-1.0$；把 clean 激活 patch 到
+`layer2_pos3` 后，margin 变为 $\Delta^{patch}=1.4$。分子是
+$1.4-(-1.0)=2.4$，分母是 $2.0-(-1.0)=3.0$，所以
+$S_{patch}=2.4/3.0=0.8$。这只表示这次合成干预恢复了原 margin 差距的 80%；它不表示
+答案正确率提高了 80%，也不证明模型自然运行时一定经过这条路径。代码表中的其他位置
+分别得到 `0.4`、`0.2` 和 `0.7`，因此还要看负对照、搜索范围和未见模板，而不能只报告
+最高的 `0.8`。
 
 其次要设计负对照。可以把激活 patch 到无关位置、使用同层不同样本的激活、打乱对应关系，
 或用均值激活作为替代。若所有替代都提高目标分数，说明实验可能利用了通用偏置，而不是
@@ -507,13 +531,13 @@ Ablation 则更像移除组件看影响。
 
 ### 7.4 必要性、充分性与替代路径
 
-这三个词经常被混在一起。若移除组件 \(c\) 后目标行为明显下降，得到的是“在当前
-上下文和干预强度下，\(c\) 对行为具有必要性证据”。若把某状态注入到 corrupted run
+这三个词经常被混在一起。若移除组件 $c$ 后目标行为明显下降，得到的是“在当前
+上下文和干预强度下，$c$ 对行为具有必要性证据”。若把某状态注入到 corrupted run
 后行为恢复，得到的是“该状态在当前背景下具有一定充分性证据”。二者都不是逻辑上的
 绝对必要或绝对充分，因为模型可能存在冗余电路、条件触发器和可替代路径。
 
-可以用一个简单的二维实验理解：一组实验只移除 \(c\)，另一组只补入候选状态 \(s_c\)，
-再加上移除 \(c\) 后补入 \(s_c\) 的组合实验。若单独移除有效、单独补入有效、组合后仍
+可以用一个简单的二维实验理解：一组实验只移除 $c$，另一组只补入候选状态 $s_c$，
+再加上移除 $c$ 后补入 $s_c$ 的组合实验。若单独移除有效、单独补入有效、组合后仍
 能恢复，机制解释更完整；若组合实验失败，说明上游编码、下游读取或状态兼容性仍有
 遗漏。所有结论都要带着任务、层、位置、模型版本和干预实现方式。
 
@@ -566,6 +590,19 @@ activation x -> encoder -> sparse feature z -> decoder -> reconstructed activati
 ```text
 loss = reconstruction_loss + sparsity_penalty
 ```
+
+实际构造时，研究者先选定 checkpoint、层和 token 位置，再从代表目标任务的数据中抽取
+激活向量 $r$。编码器把 $r$ 映射到较宽的 feature 字典，非线性和稀疏约束决定哪些方向
+被激活；解码器再把这些系数合成为重构向量 $\hat r$。训练是在整批激活上同时权衡
+重构误差与激活稀疏度，不是对每个 feature 逐一贴上语义名称。改变字典宽度、上下文
+分布、层位或稀疏惩罚，都可能改变 feature 的拆分、合并和激活频率，因此解释必须绑定
+训练数据与模型版本。
+
+这个目标函数也揭示了一个关键取舍：把稀疏惩罚调大，通常会压低激活并减少同时出现的
+feature，但也可能丢失重构所需的信息；只追求低重构误差，则可能得到过多同时活跃、难以
+解释的方向。两者都不直接优化“语义正确”或“能控制目标行为”。所以一个 SAE 训练完成
+后，至少还要分别回答三个问题：它保留了多少原激活信息？feature 在不同样本和切片上
+是否稳定、可区分？对候选 feature 做干预时，目标行为和无关行为是否按预期变化？
 
 ### 8.4 它解决前人什么问题
 
@@ -631,6 +668,12 @@ SAE 的训练并不是把神经元逐一翻译成自然语言。它是在一批�
 的流程是：先用自动方法提出候选描述，再用反例搜索检查边界，最后用 feature ablation
 或 steering 验证它是否改变预期行为。
 
+反例最好是“看起来很像、但不该满足解释”的近邻样本，而不是随手挑一个明显无关输入。
+例如候选解释是“代码中的函数调用”，就应同时检查函数定义、普通文本中的同名词、被引用
+的代码和无调用的相似语法。NeurIPS 2025 的工作用相似负例来证伪自动生成的 feature
+解释，并以结构化解释和迭代细化减少过宽描述；它改善的是特定解释流程，仍不能把生成
+出来的文字变成 feature 的语义真值。[论文](https://proceedings.neurips.cc/paper_files/paper/2025/hash/5b6ce2529a79862a2d8ac57ac0e01d90-Abstract-Conference.html)
+
 例如一个 feature 被命名为“拒答”，不能只因为 top examples 中出现拒答句式。还要检查
 它对安全请求、正常否定句、引用他人拒答和工具错误消息的激活差异；若增加该 feature
 只让文本更像拒答，却没有降低高风险任务的 unsafe compliance，标签就不能直接用于安全
@@ -640,62 +683,62 @@ SAE 的训练并不是把神经元逐一翻译成自然语言。它是在一批�
 
 设某层某位置的残差流激活为：
 
-$$
+```math
 r_{\ell,p}\in \mathbb{R}^{d}
-$$
+```
 
-其中 \(\ell\) 表示层，\(p\) 表示 token 位置，\(d\) 是 hidden size。
+其中 $\ell$ 表示层，$p$ 表示 token 位置，$d$ 是 hidden size。
 
 **1. Clean / Corrupted 运行**
 
-设 clean 输入为 \(x^+\)，corrupted 输入为 \(x^-\)。目标 logit 差可以写成：
+设 clean 输入为 $x^+$，corrupted 输入为 $x^-$。目标 logit 差可以写成：
 
-$$
+```math
 \Delta(x)=logit_y(x)-logit_{y'}(x)
-$$
+```
 
-其中 \(y\) 是期望答案，\(y'\) 是干扰答案。
+其中 $y$ 是期望答案，$y'$ 是干扰答案。
 
 **2. Activation patching 恢复分**
 
-把 clean run 的激活 \(r^+_{\ell,p}\) patch 到 corrupted run：
+把 clean run 的激活 $r^+_{\ell,p}$ patch 到 corrupted run：
 
-$$
+```math
 x^-_{\ell,p \leftarrow r^+}
-$$
+```
 
 恢复分：
 
-$$
+```math
 S_{patch}(\ell,p)=
 \frac{\Delta(x^-_{\ell,p \leftarrow r^+})-\Delta(x^-)}
 {\Delta(x^+)-\Delta(x^-)}
-$$
+```
 
-如果 \(S_{patch}\) 接近 1，说明该位置激活能显著恢复目标行为。当
-\(\Delta(x^+)=\Delta(x^-)\) 时，clean 与 corrupted 本来就没有可测的目标差异，分母
-为 0；这时恢复分没有定义，应记录为 \(N/A\)，而不是把它当成 0 分。实际评估还应为
+如果 $S_{patch}$ 接近 1，说明该位置激活能显著恢复目标行为。当
+$\Delta(x^+)=\Delta(x^-)$ 时，clean 与 corrupted 本来就没有可测的目标差异，分母
+为 0；这时恢复分没有定义，应记录为 $N/A$，而不是把它当成 0 分。实际评估还应为
 “分母非常小”设置数值容差，因为极小分母会把测量噪声放大成看似巨大的恢复分。
 
 **3. Ablation 影响分**
 
-把组件 \(c\) 的输出置零或替换为均值，得到 \(x_{abl(c)}\)：
+把组件 $c$ 的输出置零或替换为均值，得到 $x_{abl(c)}$：
 
-$$
+```math
 E_{abl}(c)=\Delta(x)-\Delta(x_{abl(c)})
-$$
+```
 
 它衡量移除组件后目标行为下降多少。需要注意，ablation 可能产生分布外状态。
 
 **4. Path patching 贡献**
 
-如果只 patch 从组件 \(a\) 到组件 \(b\) 的路径，可以得到路径贡献：
+如果只 patch 从组件 $a$ 到组件 $b$ 的路径，可以得到路径贡献：
 
-$$
+```math
 S_{path}(a\to b)=
 \frac{\Delta(x^-_{a\to b \leftarrow clean})-\Delta(x^-)}
 {\Delta(x^+)-\Delta(x^-)}
-$$
+```
 
 这用于区分“单个组件重要”和“某条信息流重要”。
 
@@ -703,69 +746,69 @@ $$
 
 一个简化 Sparse Autoencoder：
 
-$$
+```math
 z=\mathrm{ReLU}(W_{enc}r+b_{enc})
-$$
+```
 
-$$
+```math
 \hat r=W_{dec}z+b_{dec}
-$$
+```
 
 训练目标：
 
-$$
+```math
 L_{SAE}=\|r-\hat r\|_2^2+\lambda \|z\|_1
-$$
+```
 
 第一项要求重构好，第二项要求 feature 激活稀疏。
 
 **6. 重构保真度**
 
-$$
+```math
 F_{rec}=1-\frac{\sum_i \|r_i-\hat r_i\|_2^2}{\sum_i \|r_i-\bar r\|_2^2}
-$$
+```
 
 它类似解释方差比例。分母是原始激活相对于均值基线的总平方误差；如果所有激活几乎相同，
-分母为 0，\(F_{rec}\) 没有定义，应记录为 \(N/A\)。保真度太低时，feature 解释可能只是
+分母为 0，$F_{rec}$ 没有定义，应记录为 $N/A$。保真度太低时，feature 解释可能只是
 漂亮标签，不能可靠代表原模型激活；保真度很高也只说明重构接近，不自动证明每个 feature
 都有清晰语义。
 
 **7. 稀疏度**
 
-设 \(z_{ik}\) 是第 \(i\) 个样本第 \(k\) 个 SAE feature 激活：
+设 $z_{ik}$ 是第 $i$ 个样本第 $k$ 个 SAE feature 激活：
 
-$$
+```math
 K_{active}=\frac{1}{N}\sum_i \sum_k \mathbb{1}[z_{ik}>\epsilon]
-$$
+```
 
 平均激活 feature 太多，解释会变得难以理解；太少则可能重构质量差。
 
 **8. Feature purity**
 
-设 feature \(k\) 激活最高的 top-m 样本中，人工或自动标签为同一概念的比例为：
+设 feature $k$ 激活最高的 top-m 样本中，人工或自动标签为同一概念的比例为：
 
-$$
+```math
 P_k=\max_c \frac{1}{m}\sum_{i\in Top_m(k)} \mathbb{1}[label_i=c]
-$$
+```
 
 这个指标衡量 feature 是否接近 monosemantic。它仍然依赖标签质量，不能替代因果验证。
-如果 top-m 样本不足、标签不完整或标签之间无法可靠比较，\(P_k\) 不应被写成 0，而应
-记录为未定义（\(N/A\)），再补充样本或进行人工复核。即使 \(P_k\) 很高，也只能说明被
+如果 top-m 样本不足、标签不完整或标签之间无法可靠比较，$P_k$ 不应被写成 0，而应
+记录为未定义（$N/A$），再补充样本或进行人工复核。即使 $P_k$ 很高，也只能说明被
 选中的样本集中在一个标签附近，不能证明该 feature 在所有上下文中都只表示这个概念。
 
 **9. Feature-level intervention**
 
-如果将 feature \(k\) 的激活增加 \(\alpha\)：
+如果将 feature $k$ 的激活增加 $\alpha$：
 
-$$
+```math
 r' = r+\alpha d_k
-$$
+```
 
-其中 \(d_k\) 是 SAE decoder 中对应方向。行为变化：
+其中 $d_k$ 是 SAE decoder 中对应方向。行为变化：
 
-$$
+```math
 I_k(\alpha)=\Delta(r')-\Delta(r)
-$$
+```
 
 这可以用于 feature-level steering 或 safety monitor 的候选验证，但必须评估副作用。
 
@@ -773,24 +816,57 @@ $$
 
 这些指标回答的问题不同，不宜合并成一个总布尔量。可以把一项局部机制研究记录为：
 
-$$
+```math
 \mathcal{E}_{mech}=
 (F_{rec},K_{active},P_k,S_{patch},E_{abl})
-$$
+```
 
 其中：
 
-1. \(F_{rec}\) 说明 SAE 是否保留了足够的激活信息。
-2. \(K_{active}\) 说明平均每个样本有多少 feature 被激活。
-3. \(P_k\) 说明某个 feature 的 top 样本是否集中于一个标签。
-4. \(S_{patch}\) 说明指定位置的干预能恢复多少目标行为。
-5. \(E_{abl}\) 说明移除组件后目标行为下降多少。
+1. $F_{rec}$ 说明 SAE 是否保留了足够的激活信息。
+2. $K_{active}$ 说明平均每个样本有多少 feature 被激活。
+3. $P_k$ 说明某个 feature 的 top 样本是否集中于一个标签。
+4. $S_{patch}$ 说明指定位置的干预能恢复多少目标行为。
+5. $E_{abl}$ 说明移除组件后目标行为下降多少。
 
-团队可以为每个信号设定研究用途，例如低 \(F_{rec}\) 触发 SAE 重训，低 \(P_k\) 触发
-反例分析，低 \(S_{patch}\) 触发路径重画，高 \(E_{abl}\) 触发跨切片复验。它们是证据
+团队可以为每个信号设定研究用途，例如低 $F_{rec}$ 触发 SAE 重训，低 $P_k$ 触发
+反例分析，低 $S_{patch}$ 触发路径重画，高 $E_{abl}$ 触发跨切片复验。它们是证据
 和后续动作的记录，不是“解释通过”或“模型安全”的总开关。即使五项都达到研究者
 预先设定的范围，也只能支持某个局部机制假设，仍需检查替代路径、分布外输入和系统
 层面的红队结果。
+
+这个指标向量还要避免被压成一个综合分数。重构保真度回答“字典是否近似还原激活”，
+纯度回答“挑出的高激活样本是否集中于某标签”，patching 和 ablation 回答“指定干预对
+目标行为产生多大变化”；这些问题之间没有可互换的分母。高重构和高纯度可能同时出现，
+但随机方向在某些任务上也可能看起来可解释或可编辑，所以需要与神经元、随机方向和
+未训练基线做匹配对照。
+
+近期基准说明了为什么要分开检查。SAEBench 在 8 类指标、200 多个 SAE 和 8 种架构上
+比较，发现旧 proxy 指标的提升不能稳定推出实际效用提升；MIB 则把 circuit 定位与
+causal-variable 定位分成两条 track，在其四类任务和五个模型上发现 attribution 与 mask
+optimization 更擅长 circuit localization，而 supervised DAS 更擅长 causal-variable
+定位，SAE feature 在后一类任务上未胜过普通 hidden dimensions。
+[SAEBench](https://arxiv.org/abs/2503.09532)、
+[MIB](https://proceedings.mlr.press/v267/mueller25a.html)。一篇 2026 arXiv 预印本
+进一步报告：在有已知真值的合成数据中，SAE 即使达到 71% explained variance，也只恢复
+9% 的真 feature；在其指定真实模型激活和指标上，随机基线与训练 SAE 的 interpretability
+分数为 0.87/0.90，sparse probing 为 0.69/0.72，causal editing 为 0.73/0.72。
+这是一项针对特定设置的反例研究，不等于 SAE 普遍无效；它说明必须用匹配基线和任务级
+效用验证来检验“字典学到了机制”的主张。[SANITY Checks](https://arxiv.org/abs/2602.14111)
+
+把上述指标用后文 demo 的六个合成向量复算。第一条激活 $r_1=(2.0,0.1,0.0)$，重构
+为 $\hat r_1=(1.9,0.2,0.0)$，这一行平方误差是
+$(2.0-1.9)^2+(0.1-0.2)^2+0^2=0.02$；六行误差相加为 $SSE=0.09$。六行激活的均值
+约为 $(0.70,0.70,0.717)$，相对均值的总平方差是 $SST\approx13.028$，故
+$F_{rec}=1-0.09/13.028\approx0.993$。这说明这组重构在该样本上的误差相对均值基线很
+小，并不证明字典找到正确的语义因子。
+
+同一批输入的 active threshold 是 0.5。每行恰有一个 feature 高于阈值，因此
+$K_{active}=6/6=1.0$ 个 feature/样本。对 code_feature，激活最高的前两行标签都是
+code，于是 $P_{code}=2/2=1.0$；这个值只针对 top-2 样本，并不说明其它上下文没有
+反例。最后，patching 的 $S_{patch}=0.8$ 和 refusal_feature 消融下降 1.6 是两种
+不同干预信号，不与 $F_{rec}$ 或 $P_k$ 相加。所有这些数值都由 toy 输入算出，不能作为
+真实模型机制或安全性能的证据。
 
 ## 9. Mechanistic Interpretability 和 Safety
 
@@ -819,6 +895,13 @@ Mechanistic interpretability 试图让我们不只看外部行为，还能理解
 6. 监控危险 feature 激活。
 7. 辅助 red teaming 和 safety eval。
 
+一项 2026 年研究给出了“检测不等于控制”的具体安全例子：作者在 1B 和 8B 模型上使用
+无害的固定语言切换触发器，SAE 特征能很好地区分触发输入，但在其干预实验中，若干
+attention/MLP 特征被消融后通常不能阻止语言切换，激活它们也通常不能诱发切换；部分
+residual-stream 特征才表现出抑制或诱发效应。该论文已被 Findings of EMNLP 2026 接收，
+但实验是受控的英译法/德无害任务，不能外推成真实恶意后门或其它模型上的检测/控制能力。
+[LLM Forensics](https://arxiv.org/abs/2609.07746)
+
 ### 9.3 不能夸大
 
 当前 interpretability 还不能保证：
@@ -845,10 +928,10 @@ Mechanistic interpretability 是理解和治理模型的重要工具，但目前
 第三种用途尤其容易被误解。假设一个 feature monitor 把“是否需要人工复核”标为正类，
 它的漏报率和误报率可以分别写成：
 
-$$
+```math
 FNR=\frac{N(\text{危险且未触发})}{N(\text{危险})},\qquad
 FPR=\frac{N(\text{正常但触发})}{N(\text{正常})}
-$$
+```
 
 监控信号的阈值改变会同时影响两者，不能只展示 feature 激活与某个标签的相关系数。高
 风险动作还需要服务端授权和可回滚执行，即使内部 monitor 漏报，系统也不应因此直接执行
@@ -879,11 +962,11 @@ Progress measures for grokking 这类工作通过分析小型 Transformer 在 mo
 
 ### 10.1 一个可操作的 progress measure
 
-在 modular addition toy task 中，输入可以表示为两个整数 \(a,b\)，目标是预测：
+在 modular addition toy task 中，输入可以表示为两个整数 $a,b$，目标是预测：
 
-$$
+```math
 y=(a+b)\bmod p
-$$
+```
 
 研究者可以跟踪某个候选 Fourier 方向、特定 attention pattern 或输出读出方向在训练
 过程中的变化。如果训练集准确率还没有明显提升，但候选方向的能量、相位一致性或目标
@@ -966,8 +1049,8 @@ Hook 全部层和位置会产生巨大的存储与带宽成本，SAE 训练也�
 逐个 circuit 分析成本高。
 
 成本不仅来自参数数量，还来自需要保存的激活数量、候选层与位置组合、干预重复次数和
-人工解释时间。若模型有 \(L\) 层、序列长度为 \(T\)，对每层每个位置做一次候选 patch，
-最朴素的搜索规模就是 \(O(LT)\)；若再乘上 head、feature、样本和负对照，实验量会快速
+人工解释时间。若模型有 $L$ 层、序列长度为 $T$，对每层每个位置做一次候选 patch，
+最朴素的搜索规模就是 $O(LT)$；若再乘上 head、feature、样本和负对照，实验量会快速
 增长。实际系统通常先用行为切片、梯度或粗粒度激活统计缩小候选范围，再进行精细干预，
 但这种筛选会改变发现分布，必须保留筛选规则和未筛选的抽样复核。
 
@@ -1079,8 +1162,11 @@ Hook 全部层和位置会产生巨大的存储与带宽成本，SAE 训练也�
 回归测试检查修复是否保持。任一层的证据都带有作用域和盲区，组合后仍要保留这些边界。
 
 对安全团队而言，最实际的长期目标不是给每个参数贴上人类标签，而是让高影响行为有
-更短的定位路径、更清楚的反事实证据和更可复核的修复。完整的形式化保证仍是开放研究
-问题。
+更短的定位路径、更清楚的反事实证据和更可复核的修复。2026 年 ICLR 的形式化机制可解释
+性研究已给出输入域鲁棒性、连续干预下的 robust patching 和 circuit minimality 等形式化
+保证，并在视觉模型上做了实验。它说明“保证”可以针对明确定义的输入域和 circuit 性质
+给出，但目前不能据此声称前沿语言模型已获得同等保证，更不能把局部电路性质等同于整个
+模型或部署系统安全。[ICLR 2026 论文](https://proceedings.iclr.cc/paper_files/paper/2026/hash/b5afe13494c825089b1e3944fdaba212-Abstract-Conference.html)
 
 ## 14. 案例：从拒答异常到可验证的机制假设
 
@@ -1142,6 +1228,11 @@ patch 到正常请求后，正常回答概率下降；但把它从正常请求 p
 在一个方向上有局部干预证据，但仍可能携带位置或上下文信息，且不是拒答机制的充分
 解释。无关位置也产生变化，说明需要继续检查残差尺度、层归一化和 patch 的分布外效应。
 
+若对应到前文的 toy margin，clean 为 2.0、corrupted 为 -1.0、候选 patch 后为 1.4，
+恢复分是 $[1.4-(-1.0)]/[2.0-(-1.0)]=2.4/3.0=0.8$。读者应把它解释为该候选位置在
+这个合成上下文中补回了 80% 的 logit-margin 差，而不是“拒答机制解释了 80%”或“安全
+提高了 80%”。如果无关位置也有相近分数，候选机制的特异性就仍然不足。
+
 专家报告还会给出不同切片的结果：正常问题的误拒率是否下降，真正高风险任务的漏拒率
 是否上升，安全替代质量是否变化，工具调用是否被错误抑制，以及 feature monitor 的
 FNR/FPR 是否在语言和长度切片上稳定。机制解释只有回到这些行为指标，才具有工程价值。
@@ -1178,12 +1269,18 @@ monitor 当作线上依据。
 - [Toy Models of Superposition](https://transformer-circuits.pub/2022/toy_model/index.html)：研究 feature 数量超过表示维度时的 superposition toy model；它支持机制假设和可视化直觉，不是大模型 feature 的直接测量。
 - [Towards Monosemanticity: Decomposing Language Models With Dictionary Learning](https://transformer-circuits.pub/2023/monosemantic-features/index.html)：讨论用 dictionary learning 分解语言模型激活的研究结果；应同时关注训练层、激活数据和解释指标。
 - [Scaling Monosemanticity](https://transformer-circuits.pub/2024/scaling-monosemanticity/index.html)：展示更大规模 feature 提取和解释工作；“可提取 feature”仍不等于完整 circuit 或因果安全证明。
+- [SAEBench](https://arxiv.org/abs/2503.09532)：用多类指标比较不同 SAE，并检验 proxy 是否能预测解释性、解耦和任务效用；结论绑定论文的模型、数据和指标。
+- [MIB](https://proceedings.mlr.press/v267/mueller25a.html)：将 circuit localization 与 causal-variable localization 分开评估；其 SAE 结果不能外推成所有任务上的方法排名。
+- [Sanity Checks for Sparse Autoencoders](https://arxiv.org/abs/2602.14111)：随机方向基线和合成 ground truth 的预印本反例；数值只适用于论文的设置、模型、架构和指标。
+- [Revising and Falsifying Sparse Autoencoder Feature Explanations](https://proceedings.neurips.cc/paper_files/paper/2025/hash/5b6ce2529a79862a2d8ac57ac0e01d90-Abstract-Conference.html)：用相似负例检验解释是否过宽；自动生成的解释仍是待反驳假设。
 
 ### 15.3 因果干预、事实关联与工具
 
 - [Locating and Editing Factual Associations in GPT](https://arxiv.org/abs/2202.05262)：提出 ROME 并使用 causal tracing 分析事实关联；编辑效果、泛化和副作用必须在具体模型上重新测量。
 - [Progress Measures for Grokking via Mechanistic Interpretability](https://arxiv.org/abs/2301.05217)：在 modular addition 等 toy setting 中研究内部进展指标；不能直接当作 frontier 能力预警器。
 - [TransformerLens](https://transformerlensorg.github.io/TransformerLens/)：提供 Transformer 内部激活分析和干预的开源工具文档；工具接口和模型支持范围需要按当前版本核对。
+- [LLM Forensics](https://arxiv.org/abs/2609.07746)：在无害语言切换后门中区分 trigger detector 与行为控制 feature；实验不代表恶意后门或生产系统。
+- [Formal Mechanistic Interpretability](https://proceedings.iclr.cc/paper_files/paper/2026/hash/b5afe13494c825089b1e3944fdaba212-Abstract-Conference.html)：形式化输入域鲁棒性、robust patching 和 circuit minimality；论文实验使用视觉模型。
 
 引用这些资料时，应记录论文版本或网页访问时间、模型 checkpoint、层/位置、激活采样、
 干预强度、负对照、指标分母和 holdout 结果。机构博客或产品页面可以说明研究方向和
@@ -1241,7 +1338,12 @@ monitor 当作线上依据。
 
 ## 18. 最小可运行 Mechanistic Interpretability 审计 demo
 
-下面的 demo 不依赖真实模型，只用 toy logit delta、toy 激活和 toy SAE feature 来演示本章核心审计口径。真实项目中要把这些字段替换成模型实际 forward hook、patching 实验和 SAE 训练结果。
+下面的 demo 只依赖 Python 3.12.9 标准库，不连接真实模型；它用 toy logit delta、激活和
+SAE feature 演示本章的审计口径。保存代码块为 Python 文件后，运行 `python3 <文件名>.py`。
+输出应与紧随其后的预期块一致；真实项目要把这些字段替换成模型 forward hook、patching
+实验和 SAE 训练结果，并为模型版本、层位、采样和评估集补充 manifest。
+
+**代码状态：已验证（2026-10-28；Python 3.12.9，标准库）。**
 
 ```python
 from collections import Counter
@@ -1249,7 +1351,8 @@ from collections import Counter
 
 def ratio(num, den):
     """返回比例；没有有效分母时保留 N/A，而不是伪造零证据。"""
-    return round(num / den, 3) if den else None
+    denominator_epsilon = 1e-9
+    return round(num / den, 3) if abs(den) > denominator_epsilon else None
 
 
 def squared_error(a, b):
@@ -1257,8 +1360,23 @@ def squared_error(a, b):
 
 
 def mean_vector(rows):
+    if not rows:
+        return None
     dims = len(rows[0])
+    if dims == 0 or any(len(row) != dims for row in rows):
+        raise ValueError("residual vectors must have the same nonzero dimension")
     return [sum(row[j] for row in rows) / len(rows) for j in range(dims)]
+
+
+def reconstruction_fidelity_score(rows, reconstructions):
+    if not rows or len(rows) != len(reconstructions):
+        return None
+    center = mean_vector(rows)
+    if any(len(row) != len(center) for row in reconstructions):
+        raise ValueError("reconstruction dimensions must match residuals")
+    sse = sum(squared_error(row, rec) for row, rec in zip(rows, reconstructions))
+    sst = sum(squared_error(row, center) for row in rows)
+    return ratio(sst - sse, sst)
 
 
 def recovery_score(clean_delta, corrupt_delta, patched_delta):
@@ -1278,7 +1396,7 @@ patch_scores = {
     name: recovery_score(clean_delta, corrupt_delta, patched)
     for name, patched in patched_deltas.items()
 }
-best_patch = max(patch_scores, key=patch_scores.get)
+best_patch = max(patch_scores, key=patch_scores.get) if patch_scores else None
 
 ablated_deltas = {
     "previous_token_head": 1.5,
@@ -1289,6 +1407,7 @@ ablation_effects = {
     name: round(clean_delta - delta, 3)
     for name, delta in ablated_deltas.items()
 }
+max_ablation_effect = max(ablation_effects.values()) if ablation_effects else None
 
 path_patched_deltas = {
     "refusal_feature_to_output": 1.25,
@@ -1298,6 +1417,7 @@ path_scores = {
     name: recovery_score(clean_delta, corrupt_delta, patched)
     for name, patched in path_patched_deltas.items()
 }
+best_path_score = max(path_scores.values()) if path_scores else None
 
 labels = ["code", "code", "refusal", "refusal", "name", "name"]
 residuals = [
@@ -1325,18 +1445,22 @@ feature_activations = [
     [0.0, 0.1, 2.1],
 ]
 feature_names = ["code_feature", "refusal_feature", "name_feature"]
+if len(labels) != len(feature_activations):
+    raise ValueError("each feature activation row must have one label")
+if any(len(row) != len(feature_names) for row in feature_activations):
+    raise ValueError("feature activation dimensions must match feature names")
 
-mean_residual = mean_vector(residuals)
-sse = sum(squared_error(row, rec) for row, rec in zip(residuals, reconstructions))
-sst = sum(squared_error(row, mean_residual) for row in residuals)
-reconstruction_fidelity = ratio(sst - sse, sst)
+reconstruction_fidelity = reconstruction_fidelity_score(residuals, reconstructions)
 
 active_threshold = 0.5
 active_counts = [
     sum(value > active_threshold for value in row)
     for row in feature_activations
 ]
-avg_active_features = round(sum(active_counts) / len(active_counts), 3)
+avg_active_features = (
+    round(sum(active_counts) / len(active_counts), 3)
+    if active_counts and feature_names else None
+)
 
 purity = {}
 top_k = 2
@@ -1347,8 +1471,18 @@ for feature_idx, feature_name in enumerate(feature_names):
         reverse=True,
     )
     top_labels = [labels[i] for i in ranked[:top_k]]
-    most_common = Counter(top_labels).most_common(1)[0][1]
-    purity[feature_name] = round(most_common / top_k, 3)
+    most_common = Counter(top_labels).most_common(1)
+    purity[feature_name] = (
+        round(most_common[0][1] / top_k, 3)
+        if len(ranked) >= top_k and most_common else None
+    )
+
+valid_purity = list(purity.values())
+min_feature_purity = (
+    min(valid_purity)
+    if valid_purity and all(value is not None for value in valid_purity)
+    else None
+)
 
 feature_interventions = {
     "boost_refusal_feature": {"before": 0.30, "after": 1.10},
@@ -1358,16 +1492,17 @@ intervention_effects = {
     name: round(values["after"] - values["before"], 3)
     for name, values in feature_interventions.items()
 }
+refusal_intervention_effect = intervention_effects.get("boost_refusal_feature")
 
 metrics = {
     "best_patch": best_patch,
-    "best_patch_score": patch_scores[best_patch],
-    "max_ablation_effect": max(ablation_effects.values()),
-    "best_path_score": max(path_scores.values()),
+    "best_patch_score": patch_scores.get(best_patch),
+    "max_ablation_effect": max_ablation_effect,
+    "best_path_score": best_path_score,
     "reconstruction_fidelity": reconstruction_fidelity,
     "avg_active_features": avg_active_features,
-    "min_feature_purity": min(purity.values()),
-    "refusal_intervention_effect": intervention_effects["boost_refusal_feature"],
+    "min_feature_purity": min_feature_purity,
+    "refusal_intervention_effect": refusal_intervention_effect,
 }
 
 thresholds = {
@@ -1418,9 +1553,16 @@ actions = {
     "feature_intervention": "run_behavioral_side_effect_regression",
 }
 
+if undefined_metrics:
+    decision_status = "expand_measurement_before_interpreting_metrics"
+elif not all(evidence_status.values()):
+    decision_status = "review_failed_local_evidence"
+else:
+    decision_status = "collect_holdout_and_behavioral_evidence"
+
 decision = {
     "scope": "local_mechanism_hypothesis",
-    "status": "collect_holdout_and_behavioral_evidence",
+    "status": decision_status,
     "evidence_status": evidence_status,
     "undefined_metrics": undefined_metrics,
     "next_actions": list(actions.values()),

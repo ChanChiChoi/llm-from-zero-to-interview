@@ -115,7 +115,17 @@ Prompt -> Decoding control -> Fine-tuning -> RLHF/DPO -> Activation steering -> 
 6. Model editing 修改局部知识或行为。
 7. System-level control 控制权限、工具和产品边界。
 
-Steering 不是替代其他方法，而是补充工具。
+这条谱系按“作用面”区分方法，不表示这些方法之间有严格的单向演进关系。2026 年的
+AI Steerability 360 工具把控制面归为 input、structural、state 和 output，并用共同的
+pipeline 接口组合方法、定义任务和比较结果。这个分类有助于把 activation steering
+放回更大的控制空间；工具提供的是实现和比较入口，不能证明其中任一方法有效或安全。
+[ACL 2026 的系统演示论文](https://aclanthology.org/2026.acl-demo.43/)描述了该接口和
+工具范围，具体模型兼容性仍需按代码版本确认。
+
+Steering 不是替代其他方法，而是补充工具。对一个实际问题，先确认所需控制面：若问题
+来自证据缺失，检索或数据流程可能比表示干预更直接；若问题是工具能否写入，服务端权限
+比模型倾向更有约束力；若问题是模型在所有请求中持续改变，微调或模型编辑可能更合适。
+先定位控制对象，才能避免把一个方向用来修复它无法改变的故障。
 
 ### 1.5 控制位置决定证据和风险
 
@@ -133,6 +143,13 @@ Steering 不是替代其他方法，而是补充工具。
 同时记录控制对象、作用范围、回滚方式和失败时的最后责任层。一个 activation vector
 即使把输出分数提高，也不能替代服务端授权；一个权限策略即使阻止了副作用，也不能证明
 模型没有潜在危险能力。
+
+可以沿同一目标比较这些旋钮。例如，团队希望助手“有证据时回答、证据不足时说明未知”。
+Prompt 可能只改变模型看见的指令，无法修复检索库里缺失的证据；解码约束可以限制输出
+格式，却未必改善判断；activation steering 可以在单次推理中改变表示倾向，但需要验证
+它是否学到“谨慎语气”而非“引用受证据支持”；微调可以持久改变行为，却要评估更广的
+能力副作用；服务端工具权限则只能阻止越权动作，不能让文本答案自动变得正确。先把故障
+拆成“证据不足、行为倾向、动作授权”三类，再选控制位置，评估指标才会对应真实问题。
 
 因此 steering 的评估不能只比较前后文本。至少要并列记录目标行为、正常任务、拒答边界、
 工具调用、延迟和成本，并把模型控制效果与系统控制效果分开。这样才能知道收益来自
@@ -253,6 +270,15 @@ Representation engineering 常使用高层标签，所以数据构造尤其关�
 方向可能学到“句子更长”“出现某个固定短语”或“来自某个数据集”的方向，而不是目标
 行为本身。专家会在训练外的语义改写、跨领域样本和无关任务上验证这一点。
 
+以“引用是否支持回答”为例，可以为同一个问题准备一对长度相近、语气相近的答案：一条
+准确引用证据并只做证据允许的推断，另一条保留相同格式却加入证据未支持的断言。先用
+一组样本训练只读的线性探针，检查引用支持与否能否在选定层被区分；探针成绩高，只能
+说明这种标签在表示中可读出。第二步才是在隔离副本上加方向，并检查引用句是否真正支持
+对应 claim。第三步用新的问题、不同措辞和另一个文档领域复验。若前两步有效、第三步
+失效，合理结论是方向记住了局部模式；若引用率上升但 unsupported claim 不变，方向可能
+改变了格式或措辞，却没有提高证据忠实度。三个步骤分别回答“能否读出”“能否局部控制”
+和“能否迁移”，不能用其中任意一个替代另两个。
+
 ## 5. Steering Vector 的核心直觉
 
 ### 5.1 表示空间中的方向
@@ -285,7 +311,7 @@ Representation engineering 常使用高层标签，所以数据构造尤其关�
 这里的“正例”和“负例”必须先定义清楚。它们最好在主题、长度、语言、角色和上下文
 结构上尽量匹配，只在目标行为或其可接受表达上有计划地不同；否则差分向量可能学到
 数据集或模板的标记。若一侧没有样本、某个层位的激活缺失，均值和方向就没有定义，
-实验记录应写成 \(N/A\)，不能用零向量假装“没有行为差异”。同一向量还要明确聚合了
+实验记录应写成 $N/A$，不能用零向量假装“没有行为差异”。同一向量还要明确聚合了
 哪个 token 位置、哪种 pooling 和哪些样本切片，因为这些选择会改变它的语义。
 
 ### 5.3 小白例子
@@ -319,6 +345,21 @@ Representation engineering 常使用高层标签，所以数据构造尤其关�
 角色表示，晚层更接近输出读出；不同模型并没有统一层位定律。工程上可以先做 layer
 scan，再用 holdout 固定层位，避免在同一测试集上挑选最佳层和最佳强度。
 
+还要把“持续施加”和“持续改变行为”区分开。自回归生成会让本轮输出进入下一轮上下文；
+模型可能在某些 token 上暂时偏向目标，之后又恢复到原行为。ICML 2026 的 Endogenous
+Steering Resistance 在 SAE latent steering 设置中报告：Llama-3.3-70B 的生成中恢复更
+明显，而较小的 Llama-3 与 Gemma-2 模型中较少出现；作者还找到与该现象相关的 latent
+并做了干预实验。这不是对所有 steering 的结论，但足以说明只检查首 token、某个固定层
+或一轮回答会漏掉时间变化。评估至少要记录逐 token 轨迹、完整回答和多轮延续，并注明
+注入是否每步重复、是否受条件门控以及在哪些生成位置停止。
+
+方向也可能携带与目标共变、却不属于目标的内容，例如样本主题、句式或语气。2026 年
+9 月提交的 Contrastive Covariance Steering 预印本尝试用对比协方差子空间抑制此类共享
+变化；作者在三种模型、四个 steering 域的实验中报告了相对均值差基线的改进，并加入
+多轮对话与人工比较。它提示方向估计可能需要控制混杂因素，但目前属于单篇预印本结果，
+不能据此认定协方差投影在其他模型上更可靠。无论用均值差还是更复杂的估计器，都应保留
+简单差分基线、随机方向和跨模板 holdout，让评估能识别复杂方法带来的实际增量。
+
 ## 6. Contrastive Activation Addition
 
 ### 6.1 来龙去脉
@@ -343,6 +384,14 @@ inference activation = activation + alpha * steering_vector
 ```
 
 其中 `alpha` 控制 steering 强度。
+
+CAA 的关键设计是用多个配对样本而不是单一 prompt 对来估计方向。每一对共享问题或任务，
+但表现目标行为的答案不同；在相同模型、层位和 token 聚合约定下分别提取 residual
+activation，再平均配对差值。这样可减少一条偶然 prompt 决定方向的风险，但不自动消除
+共同模板、标注风格或领域分布造成的混杂。原论文还比较了不同任务和不同 steering 系数，
+因此“该方法在某个切片有效”不能直接改写为“模型获得了持久能力”。具体方法和边界见
+[ACL 2024 CAA 论文](https://aclanthology.org/2024.acl-long.828/)；其评估对象是 Llama 2
+Chat 及作者定义的任务集，不代表其他 checkpoint 或服务实现。
 
 ### 6.3 它解决前人什么问题
 
@@ -372,11 +421,18 @@ inference activation = activation + alpha * steering_vector
 5. 可能只在某些模型或任务上稳定。
 6. 可能被滥用来削弱安全行为。
 
+复现 CAA 时，至少要把“在哪个张量位置读方向”和“在哪些位置加方向”分别写清。原论文
+用成对行为样本的回答位置 residual activations 估计方向，并在推理时把该向量加到 prompt
+之后的生成 token；其他实现可能选择最后一个 prompt token、若干层或部分生成位置。即使
+使用相同的向量，这些注入范围也定义了不同的干预。一个层位的向量维度通常固定于模型
+checkpoint；若更换模型、量化布局或 hook 张量，必须重新检查维度、位置语义和激活尺度，
+不能只因代码能够广播相加就认为实验复现一致。
+
 ### 6.5 从方向发现到安全实验
 
 一个防御性实验应把方向发现和方向使用分开。发现阶段可以在离线模型上比较正负样本，
 但强度和层位一旦在验证集上选择，就应冻结到独立 holdout。使用阶段要扫描一组有限的
-\(\alpha\)，记录目标收益曲线和副作用曲线，而不是只展示让目标指标最高的一个点。
+$\alpha$，记录目标收益曲线和副作用曲线，而不是只展示让目标指标最高的一个点。
 
 还要设置零向量和随机方向对照。若随机方向也能带来相似提升，可能是解码随机性、提示
 模板或评估器偏差；若只在某一固定短语上提升，可能是词形捷径。对于安全 steering，
@@ -449,6 +505,13 @@ compliance、safe completion、over-refusal、工具副作用和人工复核成�
 双用风险也要求控制研究材料的粒度。公开章节可以讨论方向构造、强度扫描、误拒和回归
 指标；内部评估可以在隔离副本保存更细的激活和干预记录；生产接口不应允许用户直接
 提交任意内部向量。这样既能研究安全机制，又不把控制面变成新的绕过入口。
+
+多维评估已经显示，提升一个安全视角可能损害另一个。SteeringSafety 在九种安全视角、
+18 个数据集上比较了多种方法，并在 Gemma-2-2B、Llama-3.1-8B 与 Qwen-2.5-7B 上观察
+到方法、模型和目标视角之间的差异；作者报告了社会行为退化、拒答 steering 影响常识
+道德判断、事实性 steering 改变政治倾向等纠缠现象。这里的数字只描述论文所用模型和
+评测集，但它给出一个重要的设计要求：安全评估要并列测正常安全教育、合理拒答、误拒、
+事实性、社会行为和推理质量，不能把拒答率或某个单一 target score 当作完整安全指标。
 
 ## 8. Steering 的应用
 
@@ -535,6 +598,24 @@ compliance、safe completion、over-refusal、工具副作用和人工复核成�
 5. Jailbreak。
 6. RAG 和 Agent 场景。
 
+鲁棒性测试要逐步改变条件，而不是把一批 prompt 混成一个总平均。ACL 2026 的 SteerEval
+把行为目标分成 language features、sentiment、personality 三类，再按 L1“表达什么”、
+L2“如何表达”和 L3“如何具体落实”递进；论文报告控制效果会随约束变得更细而下降。
+这说明“回答整体更谨慎”与“每个可核验条件都按要求实现”是不同的评估问题。若任务要求
+引用、格式或工具行为，需把抽象目标和可观察的具体约束分开计分，并说明哪些失败来自
+目标未达成、哪些来自实现细节。
+
+可以把稳健性检查组织成三条相互独立的轴：
+
+| 检查轴 | 改变什么 | 要判断什么 |
+| --- | --- | --- |
+| 语义泛化 | 模板、改写、领域、语言和任务粒度 | 方向是否学到目标行为，还是训练样本的词形与表达方式 |
+| 时间稳定 | token 位置、完整回答、多轮上下文和重新调用 | 效果是否中途恢复、累积或污染下一轮状态 |
+| 对抗稳健 | 保持任务意图、改变输入表面形式或上下文来源 | 方向和最佳层位是否仍有效，安全边界是否被削弱 |
+
+每条轴都要保留独立 holdout，报告分层分母和置信区间；不能在同一 holdout 上不断挑选
+层位、方向和阈值，再把挑选后的结果当作独立确认。
+
 ### 9.4 表示指标
 
 检查 steering 是否真的影响目标表示。
@@ -548,133 +629,124 @@ compliance、safe completion、over-refusal、工具副作用和人工复核成�
 
 ### 9.5 关键公式与 steering 评估指标速查
 
-设第 \(\ell\) 层、第 \(p\) 个位置的激活为：
+设第 $\ell$ 层、第 $p$ 个位置的激活为：
 
-$$
+```math
 h_{\ell,p}\in \mathbb{R}^{d}
-$$
-
+```
 **1. 正负样本激活均值**
 
-设正例集合为 \(P\)，负例集合为 \(N\)，某层聚合后的激活为 \(h_i^\ell\)：
+设正例集合为 $P$，负例集合为 $N$，某层聚合后的激活为 $h_i^\ell$：
 
-$$
+```math
 \mu_+^\ell=\frac{1}{|P|}\sum_{i\in P} h_i^\ell
-$$
-
-$$
+```
+```math
 \mu_-^\ell=\frac{1}{|N|}\sum_{i\in N} h_i^\ell
-$$
-
-这里要求 \(|P|>0\)、\(|N|>0\)，并且两组激活的维度、层位和聚合规则一致。若正负样本
+```
+这里要求 $|P|>0$、$|N|>0$，并且两组激活的维度、层位和聚合规则一致。若正负样本
 数量差异很大，还应报告分层后的结果或置信区间；只给出一个总体均值，可能让多数类
-主导方向。对配对任务，\(P\) 和 \(N\) 还应说明是否由同一语义样本的两个版本构成，
+主导方向。对配对任务，$P$ 和 $N$ 还应说明是否由同一语义样本的两个版本构成，
 因为独立抽样和配对抽样支持的因果解释不同。
 
 **2. Steering vector**
 
 最常见的差分方向：
 
-$$
+```math
 v^\ell=\mu_+^\ell-\mu_-^\ell
-$$
-
+```
 归一化后：
 
-$$
+```math
 \bar v^\ell=\frac{v^\ell}{\|v^\ell\|_2+\epsilon}
-$$
-
-这个方向只是一种行为相关表示，不应直接解释为完整机制。这里的 \(\epsilon\) 只能
-防止浮点除零；如果 \(\|v^\ell\|_2\) 本身接近零，说明当前数据没有稳定的差分方向，
-应报告为 \(N/A\) 并回到样本构造或层位选择，而不是把数值噪声放大成控制方向。不同
-层的激活尺度也可能不同，所以 \(\alpha\) 只在固定层位、模型精度和归一化约定下可比。
+```
+这个方向只是一种行为相关表示，不应直接解释为完整机制。这里的 $\epsilon$ 只能
+防止浮点除零；如果 $\|v^\ell\|_2$ 本身接近零，说明当前数据没有稳定的差分方向，
+应报告为 $N/A$ 并回到样本构造或层位选择，而不是把数值噪声放大成控制方向。不同
+层的激活尺度也可能不同，所以 $\alpha$ 只在固定层位、模型精度和归一化约定下可比。
 
 **3. Activation intervention**
 
 推理时在指定层和位置加入 steering：
 
-$$
+```math
 \tilde h_{\ell,p}=h_{\ell,p}+\alpha \bar v^\ell
-$$
-
-其中 \(\alpha\) 是强度系数。真实实验通常要扫描多个 \(\alpha\)，而不是只试一个值。
+```
+其中 $\alpha$ 是强度系数。真实实验通常要扫描多个 $\alpha$，而不是只试一个值。
 
 **4. 表示投影分数**
 
 可以用投影衡量样本是否更接近目标方向：
 
-$$
+```math
 s_i=\frac{\langle h_i^\ell,\bar v^\ell\rangle}{\|h_i^\ell\|_2+\epsilon}
-$$
-
+```
 干预前后投影变化：
 
-$$
+```math
 \Delta s_i=s_i(\tilde h)-s_i(h)
-$$
-
-当 \(\|h_i^\ell\|_2\) 接近 0 时，投影分数的分母会放大噪声，应记为 \(N/A\)。此外，
+```
+当 $\|h_i^\ell\|_2$ 接近 0 时，投影分数的分母会放大噪声，应记为 $N/A$。此外，
 投影增大只说明样本更靠近选定方向，不说明目标行为一定改善；必须把它和独立的行为
 指标配对，否则可能出现“方向信号变强、答案质量变差”的情况。
 
 **5. 目标行为提升**
 
-设 \(q_i^{base}\) 是未干预时目标行为得分，\(q_i(\alpha)\) 是强度为 \(\alpha\) 时的得分：
+设 $q_i^{base}$ 是未干预时目标行为得分，$q_i(\alpha)$ 是强度为 $\alpha$ 时的得分：
 
-$$
+```math
 U_{target}(\alpha)=\frac{1}{M}\sum_i [q_i(\alpha)-q_i^{base}]
-$$
-
-其中 \(q_i\) 必须有固定的评分规则和相同量纲，\(M\) 是实际完成配对评估的样本数，要求
-\(M>0\)。如果某类任务没有有效样本，目标收益应记录为 \(N/A\)，不能因为没有测量就写成
+```
+其中 $q_i$ 必须有固定的评分规则和相同量纲，$M$ 是实际完成配对评估的样本数，要求
+$M>0$。如果某类任务没有有效样本，目标收益应记录为 $N/A$，不能因为没有测量就写成
 零提升。若使用自动评估器，还要在资料中说明其版本、阈值和人工抽检规则。
+
+本节每个指标里的 $M$ 都指该指标自身样本切片上的有效配对数。目标任务、高风险集和
+正常边界集不同，就应分别报告各自分母；符号写成同一个 $M$ 只是简写，不代表可以把
+几类请求混入同一平均值。
 
 **6. 副作用下降**
 
-设 \(g_i^{base}\) 是通用质量、helpfulness 或任务成功得分，\(g_i(\alpha)\) 是干预后得分：
+设 $g_i^{base}$ 是通用质量、helpfulness 或任务成功得分，$g_i(\alpha)$ 是干预后得分：
 
-$$
+```math
 D_{side}(\alpha)=\frac{1}{M}\sum_i \max(0,g_i^{base}-g_i(\alpha))
-$$
-
-这里假设 \(g_i\) 的方向是“越高越好”，并且基线与干预结果在同一任务切片上配对。若
-\(M=0\)，或某个切片的质量分数不可比较，\(D_{side}\) 应为 \(N/A\)。Steering 不能只
+```
+这里假设 $g_i$ 的方向是“越高越好”，并且基线与干预结果在同一任务切片上配对。若
+$M=0$，或某个切片的质量分数不可比较，$D_{side}$ 应为 $N/A$。Steering 不能只
 看目标行为增强，还要看有没有损伤正常能力。
 
 **7. 误拒增量**
 
-设 \(R_{over}^{base}\) 是正常请求误拒率，\(R_{over}(\alpha)\) 是干预后误拒率：
+设 $R_{over}^{base}$ 是正常请求误拒率，$R_{over}(\alpha)$ 是干预后误拒率：
 
-$$
+```math
 \Delta R_{over}(\alpha)=R_{over}(\alpha)-R_{over}^{base}
-$$
-
+```
 安全 steering 很容易把模型推向过度保守，因此这个指标很重要。
 其中每个误拒率都必须给出正常请求的分母；正常请求为空时，增量没有定义。还要把
 “模型拒答”与“策略服务拦截”分开统计，否则不同控制层的变化会被混在一个比例里。
 
 **8. 安全收益**
 
-设 \(R_{unsafe}^{base}\) 是高风险请求漏拒率，\(R_{unsafe}(\alpha)\) 是干预后漏拒率：
+设 $R_{unsafe}^{base}$ 是高风险请求漏拒率，$R_{unsafe}(\alpha)$ 是干预后漏拒率：
 
-$$
+```math
 U_{safe}(\alpha)=R_{unsafe}^{base}-R_{unsafe}(\alpha)
-$$
-
-这里 \(R_{unsafe}\) 表示高风险样本中的漏拒或不安全完成比例，分母应固定为同一批
+```
+这里 $R_{unsafe}$ 表示高风险样本中的漏拒或不安全完成比例，分母应固定为同一批
 预先定义的高风险样本。安全收益为正并不等于风险为零，也不代表安全样本的帮助性没有
-下降；样本为空、标签未完成或评估口径变化时应标为 \(N/A\)。
+下降；样本为空、标签未完成或评估口径变化时应标为 $N/A$。
 
 **9. 强度选择**
 
 可以把目标收益和副作用写成一个简单选择问题：
 
-$$
+```math
 \alpha^*=\arg\max_{\alpha\in A}
 [U_{target}(\alpha)+\lambda_s U_{safe}(\alpha)-\lambda_d D_{side}(\alpha)-\lambda_o \Delta R_{over}(\alpha)]
-$$
-
+```
 这里的权重应由产品、安全和评估目标事先确定，且各项最好先归一化到可比较的量纲；
 不能只按离线分数临时拍。这个目标函数只是选择候选强度的记录工具，不是普遍适用的
 安全定律。若某个高风险信号未定义，不能让优化器把它当作零损失继续选择强度。
@@ -682,26 +754,49 @@ $$
 **10. 把 steering 结果记录成证据向量**
 
 目标收益、安全收益、副作用、误拒和对抗边界回答的是不同问题，不宜合并成一个总布尔
-值。对强度 \(\alpha\)，可以记录：
+值。对强度 $\alpha$，可以记录：
 
-$$
+```math
 \mathcal{E}_{steer}(\alpha)=
 (U_{target},U_{safe},D_{side},\Delta R_{over},R_{jail},\Delta latency,\Delta cost)
-$$
-
-其中 \(R_{jail}\) 表示在预先定义的对抗安全集上的边界失败率，\(\Delta latency\) 和
-\(\Delta cost\) 分别表示相对未干预系统的延迟和单位成本变化。每个信号都应绑定自己的
+```
+其中 $R_{jail}$ 表示在预先定义的对抗安全集上的边界失败率，$\Delta latency$ 和
+$\Delta cost$ 分别表示相对未干预系统的延迟和单位成本变化。每个信号都应绑定自己的
 分母、样本切片、阈值和后续动作：
 
-1. \(U_{target}\) 太小，说明方向没有稳定达到目标，应回到样本构造或层位选择。
-2. \(U_{safe}\) 太小而 \(D_{side}\) 增大，说明控制带来帮助性损失，却没有安全收益。
-3. \(\Delta R_{over}\) 增大，说明需要补充正常边界和安全教育样本。
-4. \(R_{jail}\) 增大，说明高风险动作必须保持受限并重新做红队评估。
+1. $U_{target}$ 太小，说明方向没有稳定达到目标，应回到样本构造或层位选择。
+2. $U_{safe}$ 太小而 $D_{side}$ 增大，说明控制带来帮助性损失，却没有安全收益。
+3. $\Delta R_{over}$ 增大，说明需要补充正常边界和安全教育样本。
+4. $R_{jail}$ 增大，说明高风险动作必须保持受限并重新做红队评估。
 5. 延迟或成本超出任务预算，说明应改为离线分析、低频监控或按场景路由。
 
 即使所有信号暂时落在研究者设定的范围内，结论也只能是“在当前模型、强度、任务分布
 和系统控制下继续验证”。它不说明向量完全可靠，更不说明可以绕过服务端权限、人工确认
 或回滚机制。
+
+### 9.6 一组小样本手算：为什么指标要分开计分
+
+沿用代码示例中的五个抽象 case。它们的 `target_gain`、`safe_gain`、`side_loss` 和
+`over_refusal` 是人为指定的 toy 斜率，只用于演示计算；不是生成文本的观察值，也不是
+真实模型测量。取 `α=0.4`，目标行为提升在五个 case 上平均：
+
+$(0.30 + 0.24 + 0.20 + 0.05 + 0.18) / 5 \times 0.4 = 0.194 \times 0.4 = 0.0776 \approx 0.078$。
+
+安全收益只在两个高风险 case 上计算，避免把正常任务样本放进高风险分母：
+
+$(0.38 + 0.22) / 2 \times 0.4 = 0.30 \times 0.4 = 0.12$。
+
+正常能力损失和误拒增量则只在三个正常请求上计算：
+
+$(0.03 + 0.02 + 0.08) / 3 \times 0.4 = 0.0433 \times 0.4 \approx 0.0173$，
+
+$(0 + 0 + 0.08) / 3 \times 0.4 = 0.0267 \times 0.4 \approx 0.0107$。
+
+若仅为教学演示而设 `λ_s=1.0`、`λ_d=0.8`、`λ_o=1.2`，则综合值为
+$0.0776 + 0.12 - 0.8 \times 0.0173 - 1.2 \times 0.0107 \approx 0.171$。读者可以逐步复算出代码里的
+四个指标。真实实验必须从各自定义的样本切片计算 rates 和 score differences，分母
+不可互借；风险集或正常请求集为空时，该项是 `N/A`，候选强度不能因此自动过门槛。
+综合值只用于预先声明的候选排序，最终还要逐项通过安全与能力门槛，并在独立数据上复验。
 
 ## 10. Steering 和其他方法的关系
 
@@ -821,6 +916,13 @@ Agent，必须在每次工具提交前重新检查 profile 和权限，不能让
 
 在一个数据集上有效，不代表跨任务有效。
 
+输入表面形式也可能改变 steering 效果。2026 年 6 月的对抗稳健性预印本，在五种
+1.5B–30B 模型、四种方向提取方法、三类文本扰动和六个 persona 上观察到若干设定中的
+steerability 下降，以及最佳层位随扰动移动。摘要报告方向稳健性最高下降 64%、最优层位
+最多偏移 17 层；这些数字绑定作者的模型、扰动、打分方式和攻击设置，是风险线索而非
+真实流量故障率或已确立的跨模型定律。工程验证应把原始输入与保持任务意图的改写成对，
+先在干净验证集确定方向和层位，再在独立扰动集检查目标收益、副作用和层位选择是否漂移。
+
 ### 12.3 副作用风险
 
 控制一个行为可能影响其他行为。
@@ -881,6 +983,13 @@ card 可以公布抽象方法、风险和指标；内部材料再保存具体向
 多维控制需要处理方向相关性、冲突目标和强度交互。把 honesty、harmlessness、brevity
 三个方向分别调大，可能得到更短但更保守的答案，也可能让模型回避必要的解释。未来的
 方法需要记录可行区域和副作用曲线，而不是只寻找一个“最佳向量”。
+
+另一条路线是让干预遵守表示几何或反馈状态。ICML 2026 的 Spherical Steering 沿激活
+方向做范数保持旋转，并用置信门控调节强度；作者在其多选题与开放生成任务中报告了
+相对加法基线的结果。ICLR 2026 的 PID Steering 则把固定 steering 看作比例控制器，
+提出积分项累积跨层误差、微分项抑制过冲。两者说明候选控制器可以从固定向量推进到
+状态相关的更新，但其论文中的稳定性和收益只对相应方法、模型和 benchmark 有证据；
+移植到新架构或安全任务后，仍需重新测量目标效应、隐藏状态变化、误拒与失败回退。
 
 ### 13.3 和 SAE 结合
 
@@ -946,7 +1055,7 @@ profile 何时过期，如何响应事故。把向量当作“配置”而不是
 
 ### 14.3 强度扫描和评估
 
-团队冻结一个候选层位，在 \(\alpha=0\)、低、中、高四个强度下执行配对任务。每个强度
+团队冻结一个候选层位，在 $\alpha=0$、低、中、高四个强度下执行配对任务。每个强度
 记录目标收益、引用支持率、正常帮助性、误拒、工具参数正确率、越权尝试率、延迟和成本。
 随机方向、零向量和只改变解码温度的版本作为对照。
 
@@ -988,15 +1097,21 @@ Steering 研究通常在特定模型、层位、数据集和推理实现上成�
 ### 15.1 表示工程与激活控制
 
 - [Representation Engineering: A Top-Down Approach to AI Transparency](https://arxiv.org/abs/2310.01405)：提出从高层行为和表示方向出发的 top-down 方法；结论依赖论文中的模型、任务和表示提取条件。
-- [Activation Addition: Steering Language Models Without Optimization](https://arxiv.org/abs/2308.10248)：研究无需参数更新的激活添加；其强度、层位和行为效果需要在具体模型上重新测量。
-- [Contrastive Activation Addition](https://arxiv.org/abs/2312.07569)：讨论从对比激活差构造控制方向的方法；正负样本分布和评估器会直接影响方向含义。
+- [Steering Language Models With Activation Engineering](https://arxiv.org/abs/2308.10248)：Activation Addition（ActAdd）的研究入口；当前 arXiv 页面标题已更新，方法效果仍需按具体模型重测。
+- [Steering Llama 2 via Contrastive Activation Addition](https://aclanthology.org/2024.acl-long.828/)：CAA 的 ACL 2024 正式论文，说明如何用成对正负样本的 residual-stream 激活差构造方向；数据、层位和行为效果受论文实验范围限制。
 - [Inference-Time Intervention](https://arxiv.org/abs/2306.03341)：研究在推理时干预表示以改善特定行为；它支持局部实验，不替代训练、权限和安全评估。
+- [Contrastive Covariance Subspaces for Activation Steering](https://arxiv.org/abs/2610.14025)：2026-09 arXiv 预印本，尝试通过对比协方差子空间降低目标方向中的共变混杂；三模型、四领域的作者结果尚待独立复现。
+- [Endogenous Resistance to Activation Steering in Language Models](https://proceedings.mlr.press/v306/mckenzie26a.html)：ICML 2026 研究 SAE latent steering 下的生成中抵抗与恢复，提示要测逐 token 和多轮持续性；模型差异明显，不能外推成普遍规律。
+- [Spherical Steering](https://proceedings.mlr.press/v306/you26a.html) 与 [Activation Steering with a Feedback Controller](https://proceedings.iclr.cc/paper_files/paper/2026/hash/fa5617c176e76fee83f3f9947fdf9f3f-Abstract-Conference.html)：分别研究范数保持的几何旋转、输入置信门控和 PID 闭环控制；稳定性主张限于作者的形式化假设与实验配置。
 
 ### 15.2 拒答、事实性与安全边界
 
 - [Refusal in Language Models Is Mediated by a Single Direction](https://arxiv.org/abs/2406.11717)：研究开源模型拒答行为中的方向性现象；“单一方向”是论文作用域内的实验描述，不是所有模型的安全架构定律。
 - [TransformerLens](https://transformerlensorg.github.io/TransformerLens/)：提供激活提取和干预工具；接口、模型支持、hook 语义和版本应按当前文档核对。
-- [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：支持风险治理、测量和管理的组织框架；它不定义某个 steering vector 的效果阈值。
+- [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：支持风险治理、测量和管理的组织框架；它不定义某个 steering vector 的效果阈值。NIST 当前页面说明 AI RMF 1.0 正在修订，实际治理引用应记录采用的版本。
+- [SteeringSafety](https://arxiv.org/abs/2509.13450)：覆盖九种安全视角与 18 个数据集；其多模型结果显示目标行为之间存在纠缠，但只支持对应模型和 benchmark 范围内的判断。
+- [How Controllable Are Large Language Models? A Unified Evaluation across Behavioral Granularities](https://aclanthology.org/2026.acl-long.1443/)：ACL 2026 的 SteerEval 按语言特征、情感和人格，以及 L1–L3 目标粒度评估 controllability；论文报告细粒度约束更难稳定实现。
+- [Adversarial Robustness of Activation Steering in Large Language Models](https://arxiv.org/abs/2606.07696)：2026-06 预印本，对输入扰动下的方向和层位脆弱性提供实验线索；不代表线上攻击成功率。
 
 公开资料中的“增强诚实”“降低有害输出”必须补充模型版本、任务分布、样本分母、强度、
 解码参数、对照、人工/judge 判定、正常边界和工具权限。没有这些条件，单一 improvement
@@ -1052,44 +1167,94 @@ Steering 研究通常在特定模型、层位、数据集和推理实现上成�
 
 要求覆盖：helpfulness、factuality、refusal、over-refusal、latency、jailbreak 和人工审核。
 
+### 练习 6
+
+用第 9.6 节的五个 toy case，分别只保留高风险样本、只保留正常请求和删除一个切片，
+手算 `safe_gain`、`side_drop` 与 `over_refusal_delta`。说明哪些指标变成 `N/A`，以及为什么
+不能用总体平均值填补空分母；再比较固定向量逐 token 注入和只在部分位置门控时需要增加的
+轨迹记录字段。
+
 ## 18. 最小可运行 Steering 审计 demo
 
-下面的 demo 不需要真实模型，只用 toy 激活和 toy 评估表演示 steering 的核心审计流程。真实项目中，`positive_activations`、`negative_activations` 和 `case["activation"]` 应来自模型 forward hook。
+下面的 demo 不需要真实模型，只用 toy 激活和 toy 评估表演示 steering 的核心审计流程。真实项目中，`positive_activations`、`negative_activations` 和 `case["activation"]` 应来自模型 forward hook；各 case 的指标须来自相同任务上的成对输出及已校准的判定器。本例将目标提升按五个 case 计算，安全收益只按高风险切片计算，能力损失和误拒只按正常请求切片计算。代码中的增益字段是合成斜率，不是测量值。
+
+输入分为两组。第一组是三维正负激活样本，程序先分别求均值，再相减并归一化；每条激活
+必须具有相同的非空维度，任一侧没有样本时就没有可用的 steering 方向。第二组是评估
+case，每条记录含有激活、切片标签和四个 toy 增益。`normal` 只表示这里用于计算帮助性
+损失和误拒的正常请求，`high_risk` 只表示安全收益分母；真实审计应使用与任务契约相符的
+多种风险和正常边界切片，而不是把这两个标签当作完整 taxonomy。
+
+程序按预先给定的 `alpha_grid` 计算每个强度的投影变化与行为分数，再检查五项门槛：目标
+提升、安全收益、正常能力损失、误拒增量和表示投影变化。只有所有项都达到示例阈值的
+强度才进入候选集合；若没有一项通过，结果为 `no_candidate_passed_pre_registered_gates`。
+投影只检验隐藏状态朝哪边移动，不能代替输出质量；安全与正常请求的空切片会保留为
+`None`，因此不会被当作零损失或默认通过。
+
+将代码保存为 Python 文件后，运行 `python3 <文件名>.py`。
+
+> **代码状态：已验证（2026-10-28；Python 3.12.9，标准库）。**
 
 ```python
-from math import sqrt
+from math import isfinite, sqrt
+
+
+def validate_vector(vector, name):
+    if not vector:
+        raise ValueError(f"{name} must be a non-empty vector")
+    if any(not isfinite(value) for value in vector):
+        raise ValueError(f"{name} must contain only finite numbers")
+
+
+def validate_pair(a, b):
+    validate_vector(a, "a")
+    validate_vector(b, "b")
+    if len(a) != len(b):
+        raise ValueError("vectors must have the same dimension")
 
 
 def mean_vector(rows):
     if not rows:
         return None
     dims = len(rows[0])
+    if dims == 0:
+        raise ValueError("activation rows must be non-empty vectors")
+    for row in rows:
+        validate_vector(row, "activation row")
+        if len(row) != dims:
+            raise ValueError("activation rows must have the same dimension")
     return [sum(row[j] for row in rows) / len(rows) for j in range(dims)]
 
 
 def subtract(a, b):
     if a is None or b is None:
         return None
+    validate_pair(a, b)
     return [x - y for x, y in zip(a, b)]
 
 
 def add(a, b):
     if a is None or b is None:
         return None
+    validate_pair(a, b)
     return [x + y for x, y in zip(a, b)]
 
 
 def scale(alpha, v):
     if v is None:
         return None
+    if not isfinite(alpha):
+        raise ValueError("alpha must be finite")
+    validate_vector(v, "steering vector")
     return [alpha * x for x in v]
 
 
 def dot(a, b):
+    validate_pair(a, b)
     return sum(x * y for x, y in zip(a, b))
 
 
 def norm(v):
+    validate_vector(v, "vector")
     return sqrt(dot(v, v))
 
 
@@ -1136,6 +1301,7 @@ unit_vector = normalize(steering_vector)
 cases = [
     {
         "id": "factual_qa",
+        "slice": "normal",
         "activation": [0.4, 0.2, 0.4],
         "target_gain": 0.30,
         "safe_gain": 0.00,
@@ -1144,6 +1310,7 @@ cases = [
     },
     {
         "id": "citation_answer",
+        "slice": "normal",
         "activation": [0.5, 0.3, 0.3],
         "target_gain": 0.24,
         "safe_gain": 0.00,
@@ -1152,6 +1319,7 @@ cases = [
     },
     {
         "id": "boundary_safety",
+        "slice": "high_risk",
         "activation": [0.2, 0.0, 0.7],
         "target_gain": 0.20,
         "safe_gain": 0.38,
@@ -1160,6 +1328,7 @@ cases = [
     },
     {
         "id": "normal_help",
+        "slice": "normal",
         "activation": [0.3, 0.1, 0.2],
         "target_gain": 0.05,
         "safe_gain": 0.00,
@@ -1168,6 +1337,7 @@ cases = [
     },
     {
         "id": "tool_caution",
+        "slice": "high_risk",
         "activation": [0.1, 0.2, 0.5],
         "target_gain": 0.18,
         "safe_gain": 0.22,
@@ -1178,6 +1348,8 @@ cases = [
 
 
 def evaluate_alpha(alpha):
+    if not isfinite(alpha):
+        raise ValueError("alpha must be finite")
     if unit_vector is None:
         return {
             "alpha": alpha,
@@ -1190,20 +1362,22 @@ def evaluate_alpha(alpha):
         }
 
     projection_shift = []
-    target_uplift = []
-    safe_gain = []
-    side_drop = []
-    over_delta = []
-
     for case in cases:
         before = projection_score(case["activation"], unit_vector)
         steered = add(case["activation"], scale(alpha, unit_vector))
         after = projection_score(steered, unit_vector)
-        projection_shift.append(after - before)
-        target_uplift.append(alpha * case["target_gain"])
-        safe_gain.append(alpha * case["safe_gain"])
-        side_drop.append(alpha * case["side_loss"])
-        over_delta.append(alpha * case["over_refusal"])
+        projection_shift.append(
+            after - before if before is not None and after is not None else None
+        )
+
+    normal_cases = [case for case in cases if case["slice"] == "normal"]
+    high_risk_cases = [case for case in cases if case["slice"] == "high_risk"]
+
+    def scaled_values(selected_cases, key):
+        return [
+            alpha * case[key] if case.get(key) is not None else None
+            for case in selected_cases
+        ]
 
     def mean_or_none(values):
         if not values or any(value is None for value in values):
@@ -1213,10 +1387,12 @@ def evaluate_alpha(alpha):
     metrics = {
         "alpha": alpha,
         "avg_projection_shift": mean_or_none(projection_shift),
-        "target_uplift": mean_or_none(target_uplift),
-        "safe_gain": mean_or_none(safe_gain),
-        "side_drop": mean_or_none(side_drop),
-        "over_refusal_delta": mean_or_none(over_delta),
+        "target_uplift": mean_or_none(scaled_values(cases, "target_gain")),
+        "safe_gain": mean_or_none(scaled_values(high_risk_cases, "safe_gain")),
+        "side_drop": mean_or_none(scaled_values(normal_cases, "side_loss")),
+        "over_refusal_delta": mean_or_none(
+            scaled_values(normal_cases, "over_refusal")
+        ),
     }
     values = [
         metrics["target_uplift"],
@@ -1240,8 +1416,6 @@ def evaluate_alpha(alpha):
 
 alpha_grid = [0.0, 0.4, 0.8, 1.2]
 scan = [evaluate_alpha(alpha) for alpha in alpha_grid]
-valid_scan = [item for item in scan if item["objective"] is not None]
-best = max(valid_scan, key=lambda item: item["objective"]) if valid_scan else None
 
 thresholds = {
     "target": {"operator": ">=", "value": 0.10},
@@ -1249,14 +1423,6 @@ thresholds = {
     "side_effect": {"operator": "<=", "value": 0.06},
     "over_refusal": {"operator": "<=", "value": 0.05},
     "projection": {"operator": ">=", "value": 0.20},
-}
-
-signals = {
-    "target": best["target_uplift"] if best else None,
-    "safe": best["safe_gain"] if best else None,
-    "side_effect": best["side_drop"] if best else None,
-    "over_refusal": best["over_refusal_delta"] if best else None,
-    "projection": best["avg_projection_shift"] if best else None,
 }
 
 
@@ -1269,6 +1435,35 @@ def meets_threshold(signal, threshold):
         return signal <= threshold["value"]
     raise ValueError(f"unsupported operator: {threshold['operator']}")
 
+
+def candidate_signals(item):
+    return {
+        "target": item["target_uplift"],
+        "safe": item["safe_gain"],
+        "side_effect": item["side_drop"],
+        "over_refusal": item["over_refusal_delta"],
+        "projection": item["avg_projection_shift"],
+    }
+
+
+eligible_scan = [
+    item
+    for item in scan
+    if item["objective"] is not None
+    and all(
+        meets_threshold(candidate_signals(item)[name], threshold)
+        for name, threshold in thresholds.items()
+    )
+]
+best = max(eligible_scan, key=lambda item: item["objective"]) if eligible_scan else None
+
+signals = {
+    "target": best["target_uplift"] if best else None,
+    "safe": best["safe_gain"] if best else None,
+    "side_effect": best["side_drop"] if best else None,
+    "over_refusal": best["over_refusal_delta"] if best else None,
+    "projection": best["avg_projection_shift"] if best else None,
+}
 
 evidence_status = {
     name: meets_threshold(signals[name], threshold)
@@ -1287,7 +1482,11 @@ actions = {
 
 decision = {
     "scope": "offline_profile_only",
-    "status": "hold_for_holdout_and_read_only_shadow",
+    "status": (
+        "hold_for_holdout_and_read_only_shadow"
+        if best
+        else "no_candidate_passed_pre_registered_gates"
+    ),
     "evidence_status": evidence_status,
     "undefined_metrics": undefined_metrics,
     "next_actions": list(actions.values()),
@@ -1314,22 +1513,44 @@ mu_pos= [1.1, 0.8, 0.0]
 mu_neg= [0.1, -0.2, 0.8]
 steering_vector= [1.0, 1.0, -0.8]
 unit_vector= [0.615, 0.615, -0.492]
-scan= [{'alpha': 0.0, 'avg_projection_shift': 0.0, 'target_uplift': 0.0, 'safe_gain': 0.0, 'side_drop': 0.0, 'over_refusal_delta': 0.0, 'objective': 0.0}, {'alpha': 0.4, 'avg_projection_shift': 0.468, 'target_uplift': 0.078, 'safe_gain': 0.048, 'side_drop': 0.018, 'over_refusal_delta': 0.013, 'objective': 0.096}, {'alpha': 0.8, 'avg_projection_shift': 0.671, 'target_uplift': 0.155, 'safe_gain': 0.096, 'side_drop': 0.035, 'over_refusal_delta': 0.026, 'objective': 0.192}, {'alpha': 1.2, 'avg_projection_shift': 0.752, 'target_uplift': 0.233, 'safe_gain': 0.144, 'side_drop': 0.053, 'over_refusal_delta': 0.038, 'objective': 0.289}]
-best= {'alpha': 1.2, 'avg_projection_shift': 0.752, 'target_uplift': 0.233, 'safe_gain': 0.144, 'side_drop': 0.053, 'over_refusal_delta': 0.038, 'objective': 0.289}
+scan= [{'alpha': 0.0, 'avg_projection_shift': 0.0, 'target_uplift': 0.0, 'safe_gain': 0.0, 'side_drop': 0.0, 'over_refusal_delta': 0.0, 'objective': 0.0}, {'alpha': 0.4, 'avg_projection_shift': 0.468, 'target_uplift': 0.078, 'safe_gain': 0.12, 'side_drop': 0.017, 'over_refusal_delta': 0.011, 'objective': 0.171}, {'alpha': 0.8, 'avg_projection_shift': 0.671, 'target_uplift': 0.155, 'safe_gain': 0.24, 'side_drop': 0.035, 'over_refusal_delta': 0.021, 'objective': 0.342}, {'alpha': 1.2, 'avg_projection_shift': 0.752, 'target_uplift': 0.233, 'safe_gain': 0.36, 'side_drop': 0.052, 'over_refusal_delta': 0.032, 'objective': 0.513}]
+best= {'alpha': 1.2, 'avg_projection_shift': 0.752, 'target_uplift': 0.233, 'safe_gain': 0.36, 'side_drop': 0.052, 'over_refusal_delta': 0.032, 'objective': 0.513}
 thresholds= {'target': {'operator': '>=', 'value': 0.1}, 'safe': {'operator': '>=', 'value': 0.08}, 'side_effect': {'operator': '<=', 'value': 0.06}, 'over_refusal': {'operator': '<=', 'value': 0.05}, 'projection': {'operator': '>=', 'value': 0.2}}
-signals= {'target': 0.233, 'safe': 0.144, 'side_effect': 0.053, 'over_refusal': 0.038, 'projection': 0.752}
+signals= {'target': 0.233, 'safe': 0.36, 'side_effect': 0.052, 'over_refusal': 0.032, 'projection': 0.752}
 evidence_status= {'target': True, 'safe': True, 'side_effect': True, 'over_refusal': True, 'projection': True}
 undefined_metrics= []
 actions= {'target': 'replicate_target_gain_on_holdout', 'safe': 'keep_high_risk_scope_restricted_until_red_team_retest', 'side_effect': 'reduce_alpha_or_rebuild_direction', 'over_refusal': 'expand_normal_boundary_and_safe_completion_eval', 'projection': 'inspect_layer_and_position_specificity'}
 decision= {'scope': 'offline_profile_only', 'status': 'hold_for_holdout_and_read_only_shadow', 'evidence_status': {'target': True, 'safe': True, 'side_effect': True, 'over_refusal': True, 'projection': True}, 'undefined_metrics': [], 'next_actions': ['replicate_target_gain_on_holdout', 'keep_high_risk_scope_restricted_until_red_team_retest', 'reduce_alpha_or_rebuild_direction', 'expand_normal_boundary_and_safe_completion_eval', 'inspect_layer_and_position_specificity']}
 ```
 
+这些数值门槛和 case 增益都是教学输入，不能作为产品阈值或实证结论。代码会先要求候选
+逐项通过门槛，再对通过者按 toy objective 排序；由于合成增益被设成随 `α` 线性增加，
+示例中最大强度胜出是输入构造的结果。真实 strength selection 需在冻结的验证集上做，
+再用未参与选择的 holdout 复验。
+
 这个 demo 对应真实项目中的关键点：
 
 1. Steering vector 来自正负行为样本激活差，而不是手写规则。
-2. 强度 \(\alpha\) 要扫描，不能凭直觉选。
+2. 强度 $\alpha$ 要扫描，不能凭直觉选。
 3. 目标收益、安全收益、副作用和误拒增量要同时看。
 4. `decision` 只把当前结果限定为离线 profile 和只读 shadow 的下一步，不代表真实模型可以直接上线。
+
+读输出时先看均值和向量是否与第 5.3 节相同，再对照第 9.6 节复算 `α=0.4` 的五项结果。
+该强度未达到目标收益门槛，因此不会进入候选；`α=0.8` 和 `α=1.2` 达到所有 toy 门槛，
+其中 `1.2` 的目标函数更高，于是出现在 `best`。这一步只展示筛选顺序：若某个切片缺失，
+相关数值会是 `None`，候选就无法过全部门槛；若所有候选都被拒绝，输出会明确写没有候选
+通过。实际项目还应在账本中附上分母、标签规范、模型与数据版本、评估器版本和 holdout
+标识，便于复核排序是否来自真实观测，而非人为设定的 toy slope。
+
+边界处理也刻意保持保守：近零方向返回 `None`，零激活不能生成有效投影；激活维度不一致
+会显式抛出 `ValueError`，不通过 `zip` 静默截断；高风险切片为空时安全收益为 `None`，
+而不是把正常样本当作它的分母。代码没有调用模型、判分器或服务端权限系统，也没有估计
+置信区间、方差或真实成本；它只演示审计账本的输入检查、指标分层与候选筛选。
+
+其中 `avg_projection_shift` 是向量方向上的归一化投影变化，其他四项是任务分数或比例的
+变化；它们回答不同问题，未归一化前不能随意相加。代码将 toy objective 写出来，只为了
+展示候选排序和硬门槛的先后顺序。若真实指标单位或分布不同，权重和阈值都要先由任务契约
+确定，并记录校准依据，不能沿用这里的 `0.8`、`1.2` 或演示阈值。
 
 ## 19. 本章总结
 
@@ -1345,4 +1566,10 @@ Contrastive Activation Addition 是 activation steering 的代表方法之一。
 
 Steering 的价值在于快速、可开关、适合研究和辅助控制；局限在于泛化、副作用、部署复杂度和安全双用风险。
 
-真实系统中，steering 应和对齐训练、安全评估、红队、权限控制、系统监控和治理流程结合，而不是单独承担安全保证。
+判断一个方向时，要分别问它能否读出目标、能否局部改变行为、能否跨任务迁移，以及改变
+能否持续到完整回答和后续轮次。隐藏状态投影、目标收益、安全收益、误拒和正常能力损失
+各有自己的分母与解释范围，不能压成一个安全结论。
+
+闭环或几何感知的 steering、对子空间的混杂控制和多维 benchmark 都提供了新研究方向，
+但每个方法仍需在目标 checkpoint、任务分布和运行时上独立复验。真实系统中，steering
+应和对齐训练、安全评估、红队、权限控制、监控和回滚结合，不能单独承担安全保证。

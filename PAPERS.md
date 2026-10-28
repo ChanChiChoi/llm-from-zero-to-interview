@@ -57,6 +57,8 @@
 20. [Exploring the Limits of Transfer Learning with a Unified Text-to-Text Transformer / T5](https://arxiv.org/abs/1910.10683)：对比 causal/prefix language modeling 与 BERT-style denoising，研究 sentinel span corruption、目标长度及其任务/吞吐影响；配套 [T5 代码](https://github.com/google-research/text-to-text-transfer-transformer) 和 [SeqIO](https://github.com/google/seqio) 可追踪任务预处理。
 21. [UL2: Unifying Language Learning Paradigms](https://arxiv.org/abs/2205.05131)：R/S/X denoiser 混合与 mode switching；聚合提升需绑定原论文模型规模、C4、约 32B token 和多任务评测口径。
 22. [Efficient Training of Language Models to Fill in the Middle](https://arxiv.org/abs/2207.14255)：FIM token 重排、PSM/SPM、训练率与 infilling pass-rate 消融；[HumanEval Infilling repository](https://github.com/openai/human-eval-infilling)提供配套 benchmark 代码（当前已归档）。
+23. [Demystifying Synthetic Data in LLM Pre-training](https://arxiv.org/abs/2510.01631) 与 [Rewriting Scaling Laws for Synthetic Data with Compute and Data Constraints](https://arxiv.org/abs/2610.31867)：前者在大规模实验中比较自然网页、改写文本、教材式生成数据及混合比例，报告约三分之一改写文本在特定大预算设定下可使达到相同验证 loss 的速度提高 5–10 倍；后者把生成成本纳入 scaling-law 估算，最优改写比例随 compute-limited 预算上升。数据类型、生成成本和拟合假设各不相同，不能照搬为通用配方；后者是 2026 年预印本。
+24. [Scaling Laws Revisited: Modeling the Role of Data Quality in Language Model Pretraining](https://proceedings.iclr.cc/paper_files/paper/2026/hash/d0c80a0c294a16190c8904b9809c5fba-Abstract-Conference.html)：把数据质量与噪声、覆盖率作为受控预训练变量研究；适合建立质量消融的实验思路，不是任意语料的通用质量分数。
 
 ### 架构
 
@@ -221,6 +223,11 @@ Transformer 核心机制入口：
 
 上述 DOI 的书目身份已通过 Crossref 核验，出版商落地页本次返回 403；[核验范围与限制](research/evaluation-debug-practical-review-2026-10-22.md)另记。
 
+#### 幻觉、拒答与标签可靠性
+
+1. [Evaluating large language models for accuracy incentivizes hallucinations](https://www.nature.com/articles/s41586-026-10549-w)：分析准确率式评估对拒答与无依据回答的激励，并讨论开放式 rubric；结论应按论文的任务和评估设定理解。
+2. [Rethinking Evaluation for LLM Hallucination Detection: A Desiderata, A New RAG-based Benchmark, New Insights](https://aclanthology.org/2026.acl-long.680/)：提出 TRIVIA+ 长上下文 RAG 幻觉检测数据与标签噪声分析；人工标签和噪声条件的结果不能直接外推到所有检测基准。
+
 ### 训练
 
 Scaling Law、Chinchilla、数据配比、分布式训练、训练稳定性。
@@ -278,6 +285,8 @@ InstructGPT、RLHF、DPO、Constitutional AI、RLAIF、KTO、ORPO。
 16. [The Geometry of LLM-as-Judge](https://arxiv.org/abs/2606.03043)：2026 年预印本，在指定 Indic 语料、语言与 judge 上比较模型间一致性和人类一致性；共识不等于人类校准。
 17. [Natural Emergent Misalignment from Reward Hacking in Production RL](https://arxiv.org/abs/2511.18397)：在研究模型掌握 reward-hack 知识并进入可利用的真实训练编码环境后，观察到跨任务行为变化；不代表 Claude 产品线上 misalignment 发生率。
 18. [Measuring Reward-Seeking via Contrastive Belief Updates](https://arxiv.org/abs/2607.18966)：用反事实 grader 信念变化比较行为敏感度；趋势证据来自单一 o3 RL lineage 和短程代码任务，方法仍需跨模型与长时程验证。
+19. [Large Language Model Post-Training: A Unified View of Off-Policy and On-Policy Learning](https://arxiv.org/abs/2604.07941)：按训练轨迹来源区分外部轨迹与 learner-generated rollout，并用 support expansion、policy reshaping 和 behavioral consolidation 解释方法角色；这是 2026 年综述的概念框架，不是固定的后训练流水线或通用因果结论。
+20. [The Art of Scaling Reinforcement Learning Compute for LLMs](https://proceedings.iclr.cc/paper_files/paper/2026/hash/75ea88aca02640cca54c1231db8cacdd-Abstract-Conference.html)：比较 LLM RL 配方随计算预算扩大的表现，讨论 loss aggregation、normalization、curriculum 和 off-policy 数据对计算效率的影响；结果绑定作者配方和评估任务。
 19. [Shallow Beliefs: Synthetic document finetuning does not inoculate against emergent misalignment from reward hacking](https://arxiv.org/abs/2609.14998)：在 Llama-3.3-70B-Instruct 与特定 reward-hacking 编码环境中发现 SDF 表达的 inoculating belief 未阻止 EM；结论限于论文训练配方和评估。
 17. [Scaling Laws For Scalable Oversight](https://proceedings.neurips.cc/paper_files/paper/2025/file/8c3caae2f725c8e2a55ecd600563d172-Paper-Conference.pdf)：用 Mafia、Debate、Backdoor Code 和 Wargames 等监督游戏研究 nested oversight；数值绑定论文游戏和 Elo 配置，不表示生产监督成功率。
 13. [TRL GRPOTrainer 文档](https://huggingface.co/docs/trl/grpo_trainer)：核对当前公开 trainer 的 reward function、loss normalization、clipping 与 metrics 字段；文档随版本变化，不能替代论文实验或目标代码 revision 审查。
@@ -349,6 +358,7 @@ FlashAttention、PagedAttention、Speculative Decoding、量化论文。
 35. [LLM-QAT](https://aclanthology.org/2024.findings-acl.26/)：代表性的 LLM 量化感知训练路线，以教师自生成文本和 logits 软标签训练量化学生；W4A8KV4 结果绑定论文模型、任务和训练配置，不代表任意 serving runtime 支持相同 artifact。
 36. [MARLIN](https://arxiv.org/abs/2408.11743)：W4A16 的 GPU 执行 kernel 研究，讨论异步访存、任务调度和流水线；它优化执行，不负责量化质量，性能需绑定 GPU、矩阵形状、batch 与权重布局。
 37. [PyTorch FakeQuantize 2.14](https://docs.pytorch.org/docs/2.14/generated/torch.ao.quantization.fake_quantize.FakeQuantize.html)：核对 QAT 前向中的 quantize/dequantize 模拟与 observer 状态；API 文档不等于完整 LLM 训练配方。
+38. [The KV Cache Working Set: Online Capacity Planning for LLM Inference Systems](https://arxiv.org/abs/2609.27746) 与 [UltraQuant: 4-bit KV Caching for Context-Heavy Agents](https://arxiv.org/abs/2606.20474)：分别研究基于服务 trace 和命中率的 KV 工作集容量估计，以及长上下文 Agent 的低位宽缓存；结论受各自 workload、硬件和预印本状态约束。
 15. [I Know What You Asked: Prompt Leakage via KV-Cache Sharing in Multi-Tenant LLM Serving](https://www.ndss-symposium.org/ndss-paper/i-know-what-you-asked-prompt-leakage-via-kv-cache-sharing-in-multi-tenant-llm-serving/)：分析多租户 prefix sharing 的时序侧信道风险；攻击结论绑定论文的系统、观测能力和威胁模型。
 9. [DFlash: Block Diffusion for Flash Speculative Decoding](https://arxiv.org/abs/2602.06036)：target hidden feature 的跨层融合、逐层 K/V 注入、block diffusion draft 与 target verification。
 
@@ -437,10 +447,21 @@ GPU 集群、分布式训练系统、LLM serving engine、调度、KV Cache 管�
 16. 多模态全景综述： [From Specific-MLLMs to Omni-MLLMs](https://aclanthology.org/2025.findings-acl.453/) 用于定位架构、训练阶段、数据集和评测问题；综述负责建立阅读地图，机制和数值结论仍回到对应原论文核对。
 17. 多模态推理预算与视频剪枝： [Qwen2-VL](https://arxiv.org/abs/2409.12191) 以动态分辨率分配视觉 token；[EVS](https://arxiv.org/abs/2510.14624) 删除时间静态 patch；[VidCom2](https://arxiv.org/abs/2505.14454) 按帧独特性分配压缩预算。分别比较预处理/编码后成本、保留位置和质量—延迟曲线，结果只绑定原论文配置。
 18. 多模态 serving、安全与视频评估： [vLLM-Omni](https://arxiv.org/abs/2610.09307) 展示 orchestrator、stage pool、connector 与 chunk handoff；[Video-MME-v2](https://arxiv.org/abs/2604.05015) 评估跨题一致和证据支持；[Image-based Prompt Injection](https://arxiv.org/abs/2603.03637) 研究图像内隐藏指令。系统 benchmark、论文攻击率和模型能力须分开报告。
+19. 交互式视频世界模型评估：[WBench](https://arxiv.org/abs/2605.25874) 以视频质量、场景遵循、交互遵循、一致性和物理合理性五维组织 289 个案例与 1,058 轮交互；初始论文报告不能代表所有模型接口或现实环境中的世界建模能力。
+20. 视频跨模态描述评估：[OmniCapBench](https://arxiv.org/abs/2610.12458) 用 786 段视频和原子化事件检查实体指代、镜头变化、声音事件、时间定位与音画一致性；样本数和发现绑定其数据构造与评测协议。
+21. 扩散模型规模研究：[Scaling Laws for Diffusion Transformers](https://proceedings.iclr.cc/paper_files/paper/2026/hash/880d8999c07a8efc9bbbeb0c38f50765-Abstract-Conference.html) 在指定 FLOPs 区间拟合 DiT 生成质量并做大规模外推；预测点需与直接实验区分，不能当成目标模型的实测结论。
 
 ### Safety 与 Interpretability
 
 Red Teaming、Mechanistic Interpretability、SAE、Model Editing、Unlearning、Privacy。
+
+Mechanistic interpretability 补读入口：[SAEBench](https://arxiv.org/abs/2503.09532) 与 [MIB](https://proceedings.mlr.press/v267/mueller25a.html) 对照 SAE 指标和因果定位任务；[SANITY Checks](https://arxiv.org/abs/2602.14111) 检查随机基线；[Revising and Falsifying SAE Feature Explanations](https://proceedings.neurips.cc/paper_files/paper/2025/hash/5b6ce2529a79862a2d8ac57ac0e01d90-Abstract-Conference.html) 以近邻负例反驳过宽解释；[LLM Forensics](https://arxiv.org/abs/2609.07746) 区分触发检测与行为控制；[Formal Mechanistic Interpretability](https://proceedings.iclr.cc/paper_files/paper/2026/hash/b5afe13494c825089b1e3944fdaba212-Abstract-Conference.html) 在视觉模型中研究形式化 circuit 保证。以上结果均绑定论文自己的模型、数据、指标和任务范围。
+
+Representation engineering 与 activation steering 补读入口：[Representation Engineering](https://arxiv.org/abs/2310.01405)、[Activation Engineering / ActAdd](https://arxiv.org/abs/2308.10248)、[CAA](https://aclanthology.org/2024.acl-long.828/)、[Endogenous Steering Resistance](https://proceedings.mlr.press/v306/mckenzie26a.html)、[Spherical Steering](https://proceedings.mlr.press/v306/you26a.html)、[PID Steering](https://proceedings.iclr.cc/paper_files/paper/2026/hash/fa5617c176e76fee83f3f9947fdf9f3f-Abstract-Conference.html) 与 [SteerEval](https://aclanthology.org/2026.acl-long.1443/)；对安全多视角和输入扰动再读 [SteeringSafety](https://arxiv.org/abs/2509.13450) 与 [Adversarial Robustness of Activation Steering](https://arxiv.org/abs/2606.07696)。这些论文支持方法与限定实验结果，不支持新模型上的上线保证。
+
+Model editing 与 unlearning 补读入口：[EVOKE](https://proceedings.iclr.cc/paper_files/paper/2025/hash/c592fc7e6207f82560ed45fece8d6937-Abstract-Conference.html) 研究编辑过拟合，[LocFT-BF](https://proceedings.iclr.cc/paper_files/paper/2026/hash/74b8ccb5ad21871fd436867df19c35ac-Abstract-Conference.html) 比较 fine-tuning 编辑流程，[UniEdit](https://proceedings.neurips.cc/paper_files/paper/2025/hash/6cc6c2be42c838827d2f1d12baa05539-Abstract-Datasets_and_Benchmarks_Track.html) 加入多领域邻域多跳测试；[Context-Aware Unlearning](https://proceedings.mlr.press/v306/peng26a.html) 检查删除后重新提供上下文时的可用性，[Information Decomposition Audit](https://aclanthology.org/2026.eacl-long.35/) 检查内部表征残留，[SUITE](https://arxiv.org/abs/2607.09236) 讨论 forget/retain 边界的非对称泛化。各结果受论文模型、数据、方法与证据状态约束；SUITE 为预印本。
+
+近期表示方向估计线索：[Contrastive Covariance Subspaces for Activation Steering](https://arxiv.org/abs/2610.14025) 是 2026-09 arXiv 预印本，尝试压制样本中的共变干扰；结果需与均值差、随机方向和同任务 holdout 比较后再判断迁移价值。
 
 建议补读资料线：
 
@@ -456,6 +477,7 @@ Red Teaming、Mechanistic Interpretability、SAE、Model Editing、Unlearning、
 10. [Who Tests the Testers? / SafeAudit](https://aclanthology.org/2026.emnlp-main.73/)：系统枚举工具工作流并审计 benchmark 未覆盖的 agent 安全路径；论文数字绑定其枚举器、环境和预算。
 11. [The Secret Sharer](https://arxiv.org/abs/1802.08232)、[Extracting Training Data from LLMs](https://arxiv.org/abs/2012.07805) 与 [Do Membership Inference Attacks Work on LLMs?](https://arxiv.org/abs/2402.07841)：分别研究罕见 canary 暴露、输出抽取和训练集成员推断；三类证据不可互换。
 12. [Privacy Auditing of LLMs](https://proceedings.iclr.cc/paper_files/paper/2025/hash/e76814a0012a46ade4f997591e86f972-Abstract-Conference.html)、[Beyond Memorization](https://proceedings.iclr.cc/paper_files/paper/2024/hash/9028b8a3ca98f58e373f0c1497a17448-Abstract-Conference.html) 与 [InfoRMIA](https://proceedings.iclr.cc/paper_files/paper/2026/hash/ddf43af256e11499149cf06040c62caa-Abstract-Conference.html)：覆盖 canary 隐私审计、从用户文本推断属性和 token 级记忆信号。
+   Privacy Auditing 的 49.6% TPR@1% FPR 绑定 Qwen2.5-0.5B 和论文威胁模型；InfoRMIA 的成员推断与 token 级定位结果绑定其 benchmark。水印方向再读 [SynthID-Text](https://www.nature.com/articles/s41586-024-08025-4)、Anthropic 对 Claude 水印限制的[官方说明](https://www.anthropic.com/news/claude-text-watermark)，以及 2026 年预印本 [AI Watermark Evidence Fails Forensic Readiness](https://arxiv.org/abs/2607.16010)；产品说明、论文实验和预印本结果分别标注，不外推为普遍作者识别能力。
 13. [BBQ](https://arxiv.org/abs/2110.08193) 与 [CBBQ](https://arxiv.org/abs/2306.16244)：通过信息不足和信息充分的上下文测量 stereotype fallback、忽略证据及中文社会语境；数据集不等于真实决策公平性结论。
 14. [CheckList](https://aclanthology.org/2020.acl-main.442/)：MFT、invariance 和 directional expectation 行为测试设计，可用于构造可核验的 LLM 安全/鲁棒性关系测试。
 15. [Evaluating Frontier Models for Dangerous Capabilities](https://deepmind.google/research/publications/78150/) 与 [OpenAI 生物风险 uplift 评估](https://openai.com/index/building-an-early-warning-system-for-llm-aided-biological-threat-creation/)：一个展示分领域能力评测，一个比较人类在有/无模型辅助时的表现；均应按发布方实验边界解读。
@@ -466,6 +488,10 @@ Red Teaming、Mechanistic Interpretability、SAE、Model Editing、Unlearning、
 20. [METR Frontier Risk Report (February to March 2026)](https://evals.alignment.org/blog/2026-05-19-frontier-risk-report/)：记录一次与多家前沿模型开发者合作的外部风险评估试点；结论绑定该窗口、参与系统和资料访问条件。
 21. [AgentCanary](https://arxiv.org/abs/2606.10484)：以可执行环境中的完整 Agent 轨迹为评测对象，并分开报告 outcome safety、security awareness 与 task utility；按预印本和其模型/框架配置解读。
 22. [Assessing Confidence in Frontier AI Safety Cases](https://arxiv.org/abs/2502.05791)：以 cyber misuse 的 inability argument 讨论 safety case 及信心量化；方法案例有限，不能视为已验证的通用风险认证流程。
+23. [SandboxEscapeBench v3](https://arxiv.org/abs/2603.02277v3)：测量容器到宿主机威胁模型中的 Agent 逃逸能力；其任务包含有意弱点、shell 访问和较少监控，不能外推为受防护生产环境的失陷概率。
+24. [AgentCyberRange](https://arxiv.org/abs/2606.14295)：在多主机企业式靶场中评估 Web 利用及后续阶段，论文包含 15 个 Web 应用和 110 个漏洞；作者明确指出 phishing、Windows domain、cloud IAM、supply-chain 与 social engineering 不在覆盖范围内。
+25. [FUSE: An Evaluating Framework for Dangerous Capabilities of LLMs](https://arxiv.org/abs/2609.02168)：以 Knowledge、Defense、Harm 三条评估管线分别测量领域能力、防御行为和潜在危害；完整验证主要在生物化学领域，cyber 为小规模试点，H 维度跨评审者一致性有限。
+26. [AISI incident report on unsanctioned agent behaviour during cyber testing](https://www.aisi.gov.uk/blog/incident-report-unsanctioned-agent-behaviour-during-cyber-testing) 与[后续评估环境更新](https://www.aisi.gov.uk/blog/building-a-more-secure-environment-for-evaluating-dangerous-capabilities)：记录一项特定评估配置中的越界动作和事后多层网络出口/运行时监控措施，不代表一般 Agent 的发生率。
 
 本章正文及本轮旧知识承接、方案比较、公式和 demo 复核见[研究记录](research/safety-robustness-evaluation-depth-review-2026-10-27.md)；[第七册第八章](book-07-evaluation-experiments/chapters/08-safety与robustness-eval.md)中的数据和数值均保留对应研究范围。
 

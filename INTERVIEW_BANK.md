@@ -1403,7 +1403,7 @@
 
 7. 如何设计一次大模型 red teaming 和危险能力评估？
    考察点：risk taxonomy、搜索强度、capability elicitation、baseline、P0/P1、回归测试、发布门禁。
-   回答框架：先定义风险分类和成功标准，再设计单轮、多轮、RAG、Agent、工具和高风险能力的抽象评估任务；记录模型版本、prompt、工具条件、是否专家辅助和成本。指标上看 taxonomy coverage、failure rate、P0/P1 unresolved、dangerous capability uplift、elicitation gain、autonomy score、regression pass rate 和 release gate，不把高风险细节写进公开报告。
+   回答框架：先定义风险分类、成功标准和目标部署威胁模型，再记录模型版本、提示、工具、预算、baseline、判定器和专家介入。执行时把工具权限、主机隔离和网络出口分层验证，留存 trace、严重度与根因；指标上并列报告 taxonomy coverage、任务/动作分母、P0/P1 unresolved、capability uplift、regression pass rate 和独立发布门槛。空切片记为 N/A 而不是通过；公开报告不暴露可复用的高风险步骤，结论只覆盖实际测试条件。
 
 8. Capability elicitation 为什么会影响危险能力评估结论？
    考察点：自然能力、最大可激发能力、工具、scaffold、专家辅助、低估 / 高估风险。
@@ -1415,19 +1415,19 @@
 
 10. SAE 和 activation patching 如何服务模型安全？
     考察点：superposition、polysemanticity、feature purity、reconstruction fidelity、局部机制证据、安全监控。
-    回答框架：SAE 用稀疏重构把混合激活分解为更可解释的 feature 候选，缓解单个 neuron 多语义问题；activation patching / ablation 用来验证这些 feature 或组件是否对拒答、幻觉、jailbreak 等行为有因果作用。上线使用前要看 reconstruction fidelity、sparsity、feature purity、patch recovery、ablation effect 和副作用，不能把一个 feature 名字直接当作安全保证。
+    回答框架：SAE 用稀疏重构把混合激活分解为更可解释的 feature 候选，缓解单个 neuron 多语义问题，但重构保真度或自动解释分数不等于语义正确，也不等于行为控制。SAEBench 展示 proxy 指标与任务效用可能分离，MIB 分开测 circuit 定位与 causal-variable 定位，SANITY 预印本提示要匹配 neuron / random baseline；解释生成还应以近邻负例检验边界。activation patching / ablation 用来检验局部因果作用；安全应用要进一步观察 holdout 行为、副作用和 trigger detection 与 behavior control 是否一致。所有论文结论绑定各自模型与任务，不能把单个 feature 名字或内部监控分数当作安全保证。
 
 11. Steering 和 representation engineering 能否替代 RLHF 或安全系统？
-    考察点：steering vector、CAA、activation intervention、目标收益、副作用、over-refusal、双用风险。
-    回答框架：不能替代。Steering 更适合局部、可开关的行为控制和研究调试；representation engineering 从高层行为构造内部表示方向，例如 honesty、factuality、refusal。上线前要扫描强度，评估 target uplift、safe gain、side-effect drop、over-refusal delta、jailbreak / prompt injection 回归和 steering gate。真实系统仍需要 RLHF/DPO、安全评估、红队、权限控制、监控和回滚。
+    考察点：steering vector、CAA、activation intervention、目标收益、副作用、over-refusal、持续性、输入稳健性和双用风险。
+    回答框架：不能替代。Steering 更适合局部、可开关的行为控制和研究调试；representation engineering 从高层行为构造内部表示方向，例如 honesty、factuality、refusal。评估时把目标收益按目标集计算、安全收益按高风险集计算、误拒与正常能力损失按正常请求计算；再扫描强度，检查逐 token 恢复、多轮持续性、细粒度约束和输入扰动。SteeringSafety 提醒安全视角之间会互相牵连，SteerEval 提醒抽象控制到具体实现的难度不同。真实系统仍需要独立 holdout、红队、权限控制、监控和回滚；单个 steering 分数不是安全保证。
 
 12. Model editing 和 machine unlearning 分别解决什么问题，如何评估？
     考察点：ROME、MEMIT、MEND、RAG、fine-tuning、forget set、retain set、locality、membership inference、guardrail 边界。
-    回答框架：model editing 是局部修改模型知识或行为，重点看 edit success、改写泛化、specificity / locality、retain drop 和 editing gate；unlearning 是近似移除某些数据、知识或能力影响，重点看 forget leak、改写 / 多轮鲁棒泄露、membership inference 风险下降、retain set 能力保留和 unlearning gate。两者都不能只看一个目标 prompt 成功，guardrail 抑制也不能等同于参数级遗忘。
+    回答框架：model editing 是局部修改模型知识或行为，重点看 edit success、改写泛化、specificity / locality、retain drop 和 editing gate；EVOKE 提醒直接目标可能过拟合，UniEdit 与多跳 ripple tests 帮助检查关系组合，LocFT-BF 则说明要比较合理的 mini-batch fine-tuning baseline，不能把特定论文结果当普遍方法排序。Unlearning 是近似移除某些数据、知识或能力影响，重点看 forget leak、改写 / 多轮鲁棒泄露、membership inference 风险变化、retain set 能力保留和 unlearning gate；还应单独测授权材料重新进入上下文后的 contextual utility，并可按威胁模型增加表征残留审计。MIA 下降、内部线性可解码和实际外部泄露是不同证据；benchmark 分数、拒答和法律删除完成也不能互相替代。
 
 13. 如何设计 LLM privacy、memorization 和 watermarking 的评估治理？
     考察点：PII / secret、training data extraction、memorization、membership inference、RAG 权限、日志脱敏、watermark z-score、误报 / 漏报、privacy gate。
-    回答框架：先按生命周期拆风险：训练数据、微调数据、用户日志、RAG、工具、输出和人工标注。指标上看 PII recall、secret recall、memorization rate、output leak rate、RAG unauthorized retrieval、raw log rate 和 membership advantage，并把它们放进 privacy gate。Watermarking 主要服务内容溯源，要看 generated recall、false positive、改写 / 翻译鲁棒性和质量下降，不能把水印当成隐私保护本身。
+    回答框架：先按生命周期拆风险：训练数据、微调数据、用户日志、RAG、工具、输出和人工标注。指标上看 PII recall、secret recall、memorization rate、output leak rate、RAG unauthorized retrieval、raw log rate 和 membership advantage，并把它们放进 privacy gate。Canary 审计结果要说明插入方式和威胁模型；ICLR 2025 的 Qwen2.5-0.5B TPR@1% FPR 结果绑定论文配置，InfoRMIA 的 token 级信号也绑定论文 benchmark。Watermarking 主要服务内容溯源，要看 generated recall、false positive、改写 / 翻译鲁棒性和质量下降，不能把水印当成隐私保护本身；统计水印与 C2PA 签名声明应分开报告。Anthropic 对 Claude 的水印描述属于厂商自述，2026 年改写取证结果来自预印本，都不能单独成为作者身份判定依据。
 
 14. Model card、system card 和 governance gate 应该如何设计？
     考察点：Datasheets、Model Cards、System Card、intended use、out-of-scope use、risk disclosure、release gate、responsible scaling、approval、monitoring。

@@ -9,9 +9,9 @@
 - `acceptance`：每册形成 `book_contract`、`chapter_map`、`architecture_decisions`、`visual_map` 和 `coverage_map`；书册入口与正文结构一致、各篇能连成该书类型所需的学习/检索/实践路径。逐章审查问题、动机、机制解释、公式/状态、数值例/代码/图表、研究证据、边界、失败模式、链接和配套同步。只有每个核心/辅助讲解单元分别达到 1,800/1,000 字解释性正文下限、教学正文提供可手算数值例或有依据的逐步案例、图表语法与目标平台渲染核验完成、旧知识点去向可追踪且整册阅读路径复读通过后，才通过书册完成门禁；未完成项明确保留。
 - `status`：进行中。第一册五份正文、第二册全部十份正文、第三册全部十一份正文、第四册第一至第十九份正文、第五册第一至第十八份正文、第六册第一至第十八章及第七册第一至第十五章已有本轮研究/精修记录。第五册第三至第七章的 toy Python 代码均只作静态审阅，没有运行，代码运行验收仍是开放项；第五册第八至第十八章和第六册第一至第十七章的标准库教学代码已按各自记录运行；第六册第十八章的价格估算示例已执行并与正文输出 `6.0` 一致。第七册第一至第十四章 demo 均未在本轮执行；第一至第四章依各自记录手算，第五章只核对关键路径，第六章按代码路径静态复读并手算预期摘要，第七章静态复核代码与预期输出并手算 ANLS 示例，第八章静态复核代码并手算预期输出，第九章静态复核代码并手算比例检验与区间，第十章静态复核代码并手算配对检验、精确 p 值及样本量；第十一章复核方法结构、静态审阅样例代码并手算关键输出，均未执行 Python；第十二章静态复核平台血缘和状态模型、手算 demo 输出，未执行 Python；第十三章补充 benchmark/方法对照、手算 M/G/1 队列例子并静态复读 demo，未执行 Python；第十四章补充代表性评测方法比较、检查 Claim Ledger demo 门禁并手算预期输出，未执行 Python；第十五章补充工作流 Agent 评测方法对照，静态复读 demo 并手算预期输出，未执行 Python。此前第四册第十份及之后的旧完成记录不作为本轮覆盖证据，第十至十九份已按当前轮次分别复核并重新登记。
 - `goal_resume`：用户于 2026-10-27 明确要求从第八册及后续书册恢复精修。本轮覆盖第八册至第二十四册，并按书系原范围处理 `book-llm-engineer/` 补充篇；进度持续记入本文件。
-- `architecture_status`：用户更新 `WRITING_SPEC.md` 后，按新版顺序重启第八册。已重读规范、简介、目录、书系定位及相邻书册，并完成册级扫描与骨架决定；详见[第八册书册级架构记录](research/book-08-book-level-architecture-2026-10-27.md)。简介/目录已更新，第 17 章 AI Control 有入口初稿。第 1—5 章均已实际复读并修订正文；第 2—5 章固定样例按记录运行。五章的 GitHub Mermaid/公式目标平台渲染仍待核验，尚未通过完整正文门禁。
-- `next`：第八册第一至第五章均有本轮实质正文改动；第二、三章运行固定样例及空分母边界，第四章运行固定八例和零方差相关边界，第五章运行固定安全样例、十条记忆生命周期样例及空分母边界。第一至第五章 GitHub Mermaid/MathJax 页面渲染仍开放。当前按序进入第六章；旧第六至九章扫描仅作背景，不代表正文完成。之后继续第九册至第二十四册及 `book-llm-engineer/` 补充篇；第一册架构待办保留。
-- `chapter_refinement_next`：第八册简介/目录及第一至第五章已有新版流程下的复读和实质修订。第一章解释性正文 9,896 汉字；第二章 8,514、第三章 9,037、第四章 10,470、第五章 13,418，均按单篇核心讲解单元统计并高于 1,800 字下限。第二至第五章 Python 3.12.9 固定 demo 均已运行；第二、三章覆盖空 OOD/分母，第四章覆盖八例和零方差相关，第五章覆盖 expected 动作不匹配诊断、记忆生命周期和空分母。第五章新增 OWASP 2026 分类、WASP/StepJack/INFUSE 评测证据、MemSecBench 生命周期数据、手算及 Mermaid 闭环，`PAPERS.md`、`GLOSSARY_EN_ZH.md` 和 `EXERCISES.md` 已同步。第一至第五章目标平台 Mermaid/MathJax 渲染及第一章连续复读仍开放，因此均不标记完整门禁通过。第 17 章 AI Control 只有读者入口初稿，第 8 章旧局部修改待按序复核；下一篇是第六章。
+- `architecture_status`：用户更新 `WRITING_SPEC.md` 后，按新版顺序重启第八册。已重读规范、简介、目录、书系定位及相邻书册，并完成册级扫描与骨架决定；详见[第八册书册级架构记录](research/book-08-book-level-architecture-2026-10-27.md)。简介/目录已更新，第 17 章 AI Control 有入口初稿。第 1—10 章均已实际复读并修订正文；第 2—10 章固定 demo 按各章记录运行。第 1—10 章 Mermaid/公式的 GitHub 页面渲染仍待核验，尚未通过完整正文门禁。
+- `next`：第八册第 1—10 章均有本轮实质正文改动；第二、三章运行固定样例及空分母边界，第四章运行固定八例和零方差相关边界，第五章运行固定安全样例、十条记忆生命周期样例及空分母边界，第六章运行 9 条红队记录并覆盖空数据、空 autonomy、空工具和空回归切片；第七章已运行固定输出、全空输入、top-k 不足和近零分母边界；第八章运行固定输出，并覆盖零方向、空高风险切片、零激活和维度错配；第九章运行固定 demo，并覆盖空均值、空嵌套项、零权重和缺字段。第十章正文已实质修订，五个教学单元篇幅达标，Python demo 运行及相关边界通过；第 1—10 章 GitHub Mermaid/MathJax 渲染、章节外链扫描和第八册连续复读仍开放，故完整门禁未通过。按序进入第十一章。之后继续第九册至第二十四册及 `book-llm-engineer/` 补充篇；第一册架构待办保留。
+- `chapter_refinement_next`：第八册简介/目录及第一至第十章已有新版流程下的复读和实质修订。第一章解释性正文 9,896 汉字；第二章 8,514、第三章 9,037、第四章 10,470、第五章 13,418、第六章 14,581、第七章主线 §1—§13 为 10,475；第八章核心讲解单元 §§1–4 为 2,007、§§5–6 为 2,041、§§7–9 为 3,208、§§10–13 为 2,346，第八章辅助单元 §14 为 1,222 字、§18 demo 为 1,061 字。第九章核心单元 §§1–4/§§5–10/§§11–16/§§17–20 分别为 2,574/4,235/3,790/2,167 个汉字；辅助 §21 demo 为 1,108 字。第二至第十章 Python 3.12.9 固定 demo 均已运行；第九章输出与手算一致，另覆盖空均值、全空嵌套、部分空嵌套、未定义阈值、零总权重和缺字段。第九章补充 EVOKE、LocFT-BF、UniEdit、Context-Aware Unlearning、EACL 信息分解审计与 SUITE 预印本；增加编辑与遗忘手算、contextual utility/表示残留评估、企业事实逐项门槛和删除闭环 Mermaid；同步 PAPERS、EXERCISES、INTERVIEW_BANK、GLOSSARY。详见[第九章研究与精修记录](research/book-08-ch09-editing-unlearning-refinement-2026-10-28.md)。第 1—10 章目标平台 Mermaid/MathJax 渲染、外链检查和全册连续复读仍开放，均不标记完整门禁通过。第十章核心单元 §§1–4/§§5–9/§§10–13/§§14–17 分别为 2,690/2,286/2,743/3,521 个汉字，辅助 §18 为 1,407 个汉字；Python 3.12.9 demo 输出与手算一致，并通过 12 项边界断言：10 项指标边界在空权重样本、零总权重、空 precision/recall、空成员组、空均值、零 token、green 数越界、无效 γ 和混入未定义值时返回 None，未定义门禁为 N/A，负权重被拒绝。新增 ICLR 2025 隐私审计、InfoRMIA、SynthID-Text、Claude 水印说明及 2026 水印取证预印本，C2PA 更新至 2.5；同步 PAPERS、EXERCISES、INTERVIEW_BANK、GLOSSARY。完整渲染、HTTP 全量链接扫描与第八册连续复读仍开放，详见第十章研究与精修记录。第 17 章 AI Control 只有读者入口初稿；下一篇是第十一章。
 - `open_risks`：全书量大，按章节推进并逐批记录；未实际核验的代码、公式或配套同步不得标为完成。代码验证以可执行且输出能说明机制为准；优先使用 `.tmp/` 下被 Git 忽略的 CPU-only PyTorch 环境，不安装 CUDA 库，也不为性能或 100% 复现扩大依赖。第五册第三至第七章代码尚未运行，不能标记为运行验证完成；第五册第八至第十八章的 demo 运行不代表 CUDA/GPU、真实训练栈、目标模型或生产 checkpoint 验证。第五册第十章还未验证真实 benchmark 与污染审计；第十一章未运行真实 RL 训练、模型评估或外部公式渲染，官方厂商披露也不能替代算法细节。第五册第十三、十四章的公开论文结论与教学示例均不能外推成目标集群测量、真实成本或生产训练的证据；第十五章研究数字仅绑定公开论文所测模型、语料、指标和任务，未在目标领域/机构做适配训练或临床、金融工作流验收。第十六章未运行 RLVR 训练、独立 benchmark 或真实工具沙箱，论文指标仅绑定公开任务、模型与评测定义。第六册第五至第十章未在目标模型、GPU、集群或线上流量上验收；论文指标、vLLM/SGLang/DeepEP 当前文档和 TensorRT-LLM 文档分别绑定论文 workload、实现或版本，不能推断目标环境兼容、质量或性能。第六册第九章的 RAG/Agent demo 只验证 toy 文档、字符串和预设延迟，不代表目标语料召回、真实模型 grounding、AgentDojo/red-team 或生产工具安全验收；第十章 demo 只验证 token/上下文/KV/路由账本和输入合同，不连接真实视觉/语音/视频模型、processor、runtime 或目标流量；第十八章只核对 OpenAI 官方公开文档并执行 token 费用教学示例，未调用 Astra API、未测真实账号价格/速率/延迟，也未在目标 Agent executor、任务集或线上流量上验收；论文剪枝、语音延迟和 benchmark 数字均绑定作者配置。之后章节的代码/公式/配套同步也应如实记录。已有章节中的 CUDA、GPU 性能、多节点、真实模型/语料和生产 serving 边界仍按各章记录。PDF 构建 dry-run 因环境缺少 Pandoc 未能执行。
 - `chapter6_open_risks`：第六册第一章只运行标准库 toy trace；第三章只验证理论 KV 账本；第四至第十章的 demo 只验证相应教学算法/选型逻辑，其中第九章不连接真实语料、embedding/ANN、模型、Agent runtime 或工具事务；第十章不连接真实 VLM/OCR/ASR/TTS、processor、视频解码器、GPU 或服务 runtime。Orca、FastServe、Sarathi-Serve、DistServe、PPD 与其它论文结果均不能跨模型、GPU、SLO、baseline 或外推到目标部署；Self-RAG、CRAG、GraphRAG、ARES、AgentDojo、retrieval-poisoning、EVS、VidCom2、Video-MME-v2 和 vLLM-Omni 结果均绑定其模型、任务、benchmark、威胁模型或硬件/负载条件；vLLM/SGLang/TensorRT-LLM/TGI/Riva 和厂商 API 等动态文档需按目标 release 重核。第十二章 demo 只验证合成价格、成功率、路由/cache 逻辑和线性延迟账本；不代表目标 API 账单、真实任务成功率、安全证据、GPU 利用率或线上 P95。全册目前没有目标模型、GPU、集群、线上流量或真实 serving benchmark 证据，不声称本地生产容量、成本、质量或安全结果。
 - `chapter7_open_risks`：第七册第一至第五章 demo 均未在本轮执行；前四章按各自记录静态审阅和手算，第五章只核对关键路径。第二章的目标流量比例、层内得分、阈值和相似度输入均为教学假设；第三章的样本量、胜负平、偏差、置信区间和各研究结果均绑定其抽样单位、数据快照、任务与版本；第四章的 judge 结果、人工校准标签、反事实样本与所有论文指标均绑定作者的任务、模型、数据集和评测协议；第五章的 toy corpus、阈值、cutoff、canary 和扰动分数均为教学输入，论文证据绑定相应方法假设、模型、语料、benchmark 版本和实验配置。没有真实用户分布、授权训练语料、专家标签、目标模型 log-prob 或候选模型响应，不能声称目标 benchmark 有代表性、无污染或可靠区分模型，也不能推断目标 judge 已与人工对齐。LiveBench 项目主页、OpenAI Evals 和各厂商/框架文档会变，后续引用需按日期重查。论文数据与榜单扰动只绑定其题目、模型、harness 和版本。
@@ -185,6 +185,21 @@
 - `validation`：完成全章结构复读、定向 primary-source 阅读、篇幅粗诊断和 demo 关键值静态手算；未运行 Python、未做全章链接请求、未渲染公式/Mermaid、未构建 PDF。
 - `open_risks`：讲解单元边界、§9 篇幅、§8/§11/§12/§13 重叠、案例手算、toy 指标解释、空激活及维度校验、公式格式和 GitHub 图表渲染仍待后续精修。
 - `status`：第八章结构与研究扫描完成，正文修改尚未开始；第九章已在后续完成扫描，下一步扫描第十章，并在 coverage map 中确认 SAE 表示干预与模型编辑/unlearning 的主讲边界。
+
+### 第八册第八章 Steering 与 Representation Engineering 资料驱动精修验收（2026-10-28）
+
+- `scope`：依新版 `WRITING_SPEC.md` 重新复读第八章全部 19 节，承接 2026-10-27 结构/研究扫描完成正文修订、公式和例子复核、代码更新及配套同步；原扫描记录保留为历史诊断，不作为正文验收。
+- `changes`：扩展控制面和 Representation Engineering 证据链，解释可读出性、局部控制、迁移和系统安全的不同证明责任；补入生成中恢复、方向混杂、SteeringSafety 多视角、SteerEval 粒度、输入扰动下的层位漂移、Spherical Steering、PID steering 和 AI Steerability 360；修正 CAA 错误论文链接；重构代码输入检查和切片指标分母。详细判断与原始来源见[精修记录](research/book-08-ch08-steering-refinement-2026-10-28.md)。
+- `evidence`：核对 CAA ACL 2024 正式论文、ICML 2026 Endogenous Steering Resistance/Spherical Steering、ICLR 2026 PID Steering、ICML 2026 SteeringSafety、ACL 2026 SteerEval 出版 PDF、Adversarial Robustness 预印本、Contrastive Covariance Steering 预印本及 ACL 2026 AI Steerability 360。所有结果绑定原论文模型、层位、数据、任务和评估口径；SteerEval 以出版 PDF 为准，记录 ACL 摘要中的名称不一致。
+- `length_status`：按连贯讲解单元粗统计解释性汉字数（不含标题、代码、表格、公式、状态标记）：§§1–4 2,007、§§5–6 2,041、§§7–9 3,208、§§10–13 2,346，四个核心单元均 ≥1,800；§14 案例 1,222、§18 demo 1,061，均作为辅助单元 ≥1,000。§15/§16/§17/§19 为资料、误区、练习和总结，不作为独立讲解单元。
+- `example_status`：§5.3 手算均值差 `[1,1,-0.8]`、范数 `sqrt(2.64)≈1.625`、单位方向 `[0.615,0.615,-0.492]` 和施加 `α=0.4` 后的激活 `[0.646,0.446,0.203]`；§9.6 另按目标、高风险和正常请求分别手算四项指标及 toy objective `≈0.171`。示例输入为教学合成值。
+- `code_status`：§18 Python block 已于 2026-10-28 在 Python 3.12.9、标准库环境执行，固定输出与正文预期逐行一致。增加均值向量、向量维度和有限值检查，零方向/零激活和空切片保持 `None`，候选需先过全部独立门槛；边界复核覆盖零方向、空高风险切片、零激活，以及 add/subtract/mean_vector 维度错配。只说明 toy 账本逻辑，不连接模型、评估器或生产服务。
+- `formula_status`：原有 49 对行内公式统一为单 `$`，并新增 7 对 MathJax 行内公式（含 5 组数值代入和 2 处分母记号）；当前共 56 对，14 组 display 数学改为 `math` 围栏；静态检查无 `$$`、`\(...\)` 或 `\operatorname`。GitHub MathJax 渲染未验证。
+- `visual_map`：保留并完善章首控制评估 Mermaid；使用标准 `mermaid` 围栏、带引号节点标签及 `-.->|重新构造并评估|` 带文字虚线箭头。源码语法静态核对；GitHub 页面渲染未验证。
+- `link_status`：将误指向光学论文的 CAA 链接替换为 ACL 正式论文页；本轮新加来源逐一打开 primary source 核对。未对章节所有旧外链执行完整 HTTP 扫描。
+- `sync_status`：同步更新 `PAPERS.md`、`EXERCISES.md`（35EC）、`INTERVIEW_BANK.md` 第 11 题；章节目录入口已有，无需改目录。
+- `open_risks`：论文结果和新提出控制器只在其各自实验范围内成立；无目标模型/运行时、真实流量、授权样本或工具 trace。GitHub Mermaid/MathJax 页面渲染、全章旧外链 HTTP 状态、PDF 和第八册整册连续复读仍未完成。
+- `status`：第八章正文已实质精修并完成声明范围代码、手算和静态格式核验；由于平台渲染、完整外链扫描及整册阅读路径门禁仍开放，不标记章级完成。按序进入第九章 Model Editing 与 Unlearning 精修。
 
 ### 第八册第九章 Model Editing 与 Unlearning 结构和研究扫描（2026-10-27）
 
@@ -1861,7 +1876,7 @@
 - `changes`：更新当前来源和版本信息；重写 §10.1 的评测分类教学、§10.6 的路由变量及工程案例、§13 的推断错误；补充能力评估与实际风险的边界，说明 ACS 的接口范围，更新第一章末尾的阅读问题。Mermaid 节点标签采用引号。
 - `length_status`：第一章作为一篇核心讲解单元；按非标题、非表格、非引用清单、非围栏内容、非状态注释和非练习正文统计为 9,896 个汉字，超过 1,800 字下限。计数不替代人工对解释链和篇幅质量的判断。
 - `formula_status` / `example_status`：将 §10.6 路由公式中的模糊 `user trust` 改为授权范围，并补充各变量定义和策略输出；§10.5 仍保留同一组 10 条 toy case 的完整手算和代码对照。手算关键值沿用已记录结果：unsafe compliance `3/5=0.60`、refusal accuracy `2/4=0.50`、over-refusal `1/5=0.20`、attack success `2/3≈0.667`、unauthorized tool `1/1=1.0`、safe completion quality `3.42/4=0.855`、severity-weighted risk `17/36≈0.472`，全部仅为教学数据。
-- `code_status`：§10.5 唯一 Python demo 的可执行语句、依赖、输入和预期输出未改动，可复用此前 Python 3.12.9 标准库运行记录及 assertions；本轮没有重复执行代码。
+- `code_status`：§10.5 唯一 Python demo 的可执行语句、依赖、输入和预期输出未改动，可复用此前 Python 3.12.9 标准库运行记录及 assertions；本轮没有重复执行代码。根据新版规范，正文状态行已移除维护文件名和工作流引用；仅调整邻近说明，沿用原运行记录。
 - `visual_map`：章首 Mermaid 保持全生命周期图；节点标签已加引号、围栏配对。只读获取的远端 `main` 页面 HTML 将旧版图放入 GitHub 的 Mermaid 客户端渲染容器，但不含最终 SVG，且远端未包含本地修改；所以当前改动的 GitHub 页面渲染未确认。§10.6 路由公式语法已按 `math` 围栏复核，实际页面渲染同样待核。
 - `link_status`：静态检查简介、目录、第一章、第17章及研究记录中的相对链接，未发现断链；本轮浏览核验了所用官方/一手来源，但未做全章外链 HTTP 扫描。
 - `validation`：`git diff --check` 通过；第一章解释性正文机械计数 9,896 汉字；相对链接无断链，代码围栏/数学围栏无未闭合项。未运行测试套件、代码、公式渲染或 PDF 构建；GitHub 页面只读 HTML 检查未能观察客户端最终渲染。
@@ -1891,7 +1906,7 @@
 - `changes`：章首文本目标链改为 Mermaid 反馈图，节点加引号，带文字虚线采用 `-.->|标签|`；为 argmax 并列和多个可接受行为补规则；增加严重度加权错配、policy coverage 公式；把 `M_shift` 限定为目标动作不变的可比配对诊断，不作通用发布门槛；说明 GMG 能力分需在同任务独立测量；修订 inner alignment 与泛化的边界；加入 §8.5 scheming 证据层级；补齐 §10.6 逐样本和八样本手算；更新 Preparedness、NIST、Frontier Governance 和 DeepMind 当前入口。
 - `length_status`：全篇是一个核心讲解单元，排除标题、表格、代码/数学围栏、引用清单、练习及状态标记后机械计数为 **8,514 个汉字**，高于 1,800 字门槛；仍以人工解释链复读为准。
 - `formula_example_status`：QA truthfulness 单行手算：真实行为 grounded answer（`u=0.94,r=0.76`），proxy/model 行为 polished guess（`u=0.45,r=0.92`），outer/behavior/proxy-follow 各 `1/1`，Goodhart gap `0.47`，GMG 当前行 `1/1`。八条样例手算：outer mismatch `6/8=0.75`、behavior mismatch `6/8=0.75`、proxy-follow `8/8=1.0`、GMG `4/5=0.8`、Goodhart gap `3.25/8=0.40625`、配对变化 `5/8=0.625`、严重度加权错配 `22/27≈0.815`、政策覆盖 `7/8=0.875`。均为合成教学标签，非模型测量。
-- `code_status`：§10.6 只改 GMG 空分母报告为 `None` 并增加补样本动作。正文固定样例在 Python 3.12.9、标准库环境运行，原有 assertions 全部通过，输出与预期一致；临时内存输入把 OOD 标记全部关掉，确认指标为 `None` 且补样本动作存在。未新增仓库测试文件，运行范围和局限见研究记录。
+- `code_status`：§10.6 只改 GMG 空分母报告为 `None` 并增加补样本动作。正文固定样例在 Python 3.12.9、标准库环境运行，原有 assertions 全部通过，输出与预期一致；临时内存输入把 OOD 标记全部关掉，确认指标为 `None` 且补样本动作存在。未新增仓库测试文件，运行范围和局限见研究记录。根据新版规范，正文状态行已移除维护文件名和工作流引用；代码验证逻辑未变，沿用原运行记录。
 - `visual_map`：Mermaid 源码语法、节点标签和文字虚线按新版规则静态核对；GitHub 页面尚无包含本地改动的可查看版本，未作目标平台渲染验收。公式结构复读通过，外部 MathJax 页面渲染未验。
 - `link_status`：第二章两条相对链接目标均存在；本轮没有对所有外链做 HTTP 全量扫描。
 - `validation`：`git diff --check` 通过；33 对 Markdown 围栏配对（含 11 个 math、1 个 Python）；解释性汉字机械统计 8,514；手算和运行输出吻合。未运行全章测试套件或构建 PDF。
@@ -1906,7 +1921,7 @@
 - `changes`：章首文本流程改为 Mermaid 监督闭环；扩写人类互补标签、Amplification 与投票区别、recursive reward model 的相关错误风险、debate 评估和近期人类/模型结果；区分 Constitutional AI 与广义 RLAIF；补充 AI judge 校准和 self-evaluation 数值例；澄清 demo 的自动组合 accuracy 与人工 audit 分母不同。
 - `length_status`：第三章作为单篇核心讲解单元，排除标题、表格、围栏、引用、练习和代码状态后机械统计 **9,037 个汉字**，高于 1,800 字门槛。该计数不能替代全文解释链复读。
 - `formula_example_status`：`medical_summary` 单行：AI/自动组合标签 `True` 与 gold `False`，错误 `1/1`；置信度 `0.70<0.75` 未进入人工直接覆盖；高风险审计 `0/1`；过程 `2/4=0.50`、claim 支持 `2/4=0.50`、教学成本节省 `1-14/80=0.825`。全十样本汇总：直接覆盖 `2/10=0.20`、覆盖样本人工准确 `2/2=1`、AI error `3/10=0.30`、verifier coverage `7/10=0.70`、人审前自动组合准确 `9/10=0.90`、过程准确 `28/39≈0.718`、claim 支持 `17/24≈0.708`、高风险审计 `4/5=0.80`、成本节省 `1-132/503≈0.738`、严重度加权错误 `5/33≈0.152`；均为 toy 标签。
-- `code_status`：§11.5 用 `safe_ratio` 将空分母改成 `None`，并使阈值判断区分 N/A；Python 3.12.9 标准库运行固定样例，assertions 通过、输出与正文一致。另用内存输入将 direct-covered、过程步骤、claim、高风险、基线成本和严重度分母同时置空，确认相关指标为 `None`，提示 N/A/适用性检查，并得到 `hold_for_missing_measurement`。没有新增仓库测试文件。
+- `code_status`：§11.5 用 `safe_ratio` 将空分母改成 `None`，并使阈值判断区分 N/A；Python 3.12.9 标准库运行固定样例，assertions 通过、输出与正文一致。另用内存输入将 direct-covered、过程步骤、claim、高风险、基线成本和严重度分母同时置空，确认相关指标为 `None`，提示 N/A/适用性检查，并得到 `hold_for_missing_measurement`。没有新增仓库测试文件。根据新版规范，正文状态行已移除维护文件名和工作流引用；只清理邻近说明，沿用原运行记录。
 - `visual_map`：章首 Mermaid 源码使用标准围栏、加引号节点及 `-.->|标签|`；源码静态复读通过，GitHub 页面渲染仍开放。
 - `link_status`：相对链接到 `progress_v2.md` 存在；全章外链 HTTP 未全扫。
 - `sync_status`：`PAPERS.md` 的对齐论文线增补 5 项：Partitioned Human Supervision、Human Debate、Limits to scalable evaluation、Geometry of LLM-as-Judge 和 Scalable Oversight Scaling Laws；未重复改题库、练习和术语表。
@@ -1922,7 +1937,7 @@
 - `changes`：章首线性 text 链改成 Mermaid 反馈闭环；在 §3.6 补同题两候选手算（gold `0.92/0.45`、proxy `0.78/0.94`、gold 差 `0.47`、reward-gold gap `0.49`）；新增跨任务 EM 证据及 SDF 限制、grader 反事实行为敏感度及来源边界；§9.7 对齐正文容差逻辑，新增八个样本的逐行指标表和汇总手算。
 - `length_status`：本章一个 Markdown 文件承担一篇核心讲解单元；机械统计 10,470 个解释性汉字，高于 1,800 字下限。统计排除标题、围栏、表格、引用清单、练习与代码状态，人工解释链仍按正文职责复读。
 - `formula_example_status`：八样本 proxy mismatch 与 hacking rate 均 `7/8=0.875`；选中 proxy 均值 `7.15/8≈0.894`、gold 均值 `3.67/8≈0.459`、reward-gold gap `3.48/8=0.435`、高奖励低质量 `6/8=0.75`、严重度加权失败 `27/28≈0.964`；Pearson 长度相关 `0.539`。grader 敏感度例中晚期 o3 为 `87%-9%=78` 个百分点，早期为 `40%-24%=16` 个百分点。均为论文所测或合成教学结果，不作全域/生产外推。
-- `code_status`：§9.7 唯一 Python demo 改动后以 Python 3.12.9 标准库运行，固定样例断言通过，输出与正文一致。零方差及少于两个配对样本均传播为 `None`；将选中输出长度改为常数的边界运行确认 `length_bias_corr=None`、`missing_metrics=['length_bias_corr']` 且决定为 `hold_for_missing_measurement`。未增加测试文件或运行测试套件。
+- `code_status`：§9.7 唯一 Python demo 改动后以 Python 3.12.9 标准库运行，固定样例断言通过，输出与正文一致。零方差及少于两个配对样本均传播为 `None`；将选中输出长度改为常数的边界运行确认 `length_bias_corr=None`、`missing_metrics=['length_bias_corr']` 且决定为 `hold_for_missing_measurement`。未增加测试文件或运行测试套件。根据新版规范，正文状态行已移除维护文件名和工作流引用；代码未改，沿用原运行记录。
 - `visual_map`：Mermaid 节点标签加引号，文字虚线为 `-.->|重新测量|` 与 `-.->|监控发现漂移|`；源码围栏配对。GitHub 页面无法展示本地修订版本，目标平台渲染尚未核验。
 - `sync_status`：新研究入口加入 `PAPERS.md`；新增 grader-seeking、SDF 与 Contrastive Belief Update 术语入 `GLOSSARY_EN_ZH.md`；现有 Reward Model 面试题加入反事实 grader 敏感度及本章链接。`EXERCISES.md` 已有 reward hacking 手算/demo 题，本轮不重复新增。
 - `validation`：§1—§16 标题顺序与 33 对 fenced blocks 复核；两条本地相对链接存在；`git diff --check` 通过。固定 demo 和零方差/单样本边界已运行。未运行完整自动测试、外链 HTTP 全扫、GitHub/MathJax 渲染或 PDF 构建。
@@ -1937,10 +1952,89 @@
 - `changes`：章首 text 流改成标准 Mermaid 信任/权限/副作用审计闭环；新增 §6.4 跨会话记忆污染六阶段及邮件助手状态案例；§10.3 补部分行为、verified side effect 与多步 benchmark 的评测边界；统一本章公式为单美元行内公式或 `math` 围栏，修正一处 `operatorname`；新增 §10.5 生命周期条件指标和十条合成样例的逐阶段手算；§16 使 `expected` 字段参与 `exact_action_mismatch` 诊断，加入空分母和记忆轨迹聚合；新增练习6。
 - `length_status`：本章单篇核心讲解单元，排除标题、公式/代码/图示围栏、表格、引用清单、练习和状态标记后机械统计 **13,418 个汉字**，高于 1,800 字下限；解释性篇幅统计不能替代人工复读。
 - `formula_example_status`：记忆样例手算：持久化 `7/10=0.70`；条件召回 `6/7≈0.857`；条件采纳 `4/6≈0.667`；采纳后副作用 `2/4=0.50`；端到端副作用 `2/10=0.20`；选择性修复 `5/7≈0.714`。样例全部是合成教学输入，不是论文复现。既有 expected action toy 样本有 `7/12=0.583` 条逐字标签差异，仅作为人工复核信号，不解释为安全失败率。
-- `code_status`：§16 可执行块改动后，以 Python 3.12.9 标准库从 Markdown 抽取唯一 Python 围栏运行；12 条既有安全 case、10 条记忆轨迹、分阶段聚合及链路约束断言运行通过。输出的期望动作不匹配率 `0.583`；记忆率为 `0.700 / 0.857 / 0.667 / 0.500 / 0.200 / 0.714`；空分母得到 `N/A` 且不会触发数值阈值；主决策为 `hold_high_risk_actions_and_retest`。未新增测试文件或运行测试套件。
+- `code_status`：§16 可执行块改动后，以 Python 3.12.9 标准库从 Markdown 抽取唯一 Python 围栏运行；12 条既有安全 case、10 条记忆轨迹、分阶段聚合及链路约束断言运行通过。输出的期望动作不匹配率 `0.583`；记忆率为 `0.700 / 0.857 / 0.667 / 0.500 / 0.200 / 0.714`；空分母得到 `N/A` 且不会触发数值阈值；主决策为 `hold_high_risk_actions_and_retest`。未新增测试文件或运行测试套件。根据新版规范，已从正文代码状态行移除维护文件名和工作流引用；代码未变化，沿用本次运行记录。
 - `visual_map`：Mermaid 使用标准 `mermaid` 围栏，所有节点标签加引号，带文字虚线使用 `-.->|标签|`；源码围栏配对且静态复核通过。改动尚未出现在 GitHub 页面，最终目标平台 Mermaid 与 MathJax 渲染仍待核。
 - `link_status`：本地相对链接到第二十册第七章，目标文件存在；本轮没有对全章所有外链做 HTTP 扫描。
 - `sync_status`：`PAPERS.md` 新增 OWASP 2026、WASP、StepJack、INFUSE 和 MemSecBench 入口；`GLOSSARY_EN_ZH.md` 增加 Memory & Context Poisoning；`EXERCISES.md` 新增 35EA 生命周期与分母演练。`INTERVIEW_BANK.md` 已有来源、taint 传播与运行时门禁相关题目，本轮不重复添加。
 - `validation`：`git diff --check` 通过；34 个 Markdown 围栏标记成 17 组，均配对；本章无 `$$`、`\(...\)` 或 `\operatorname` 遗留；唯一本地相对链接存在；Python 输出与正文预期块一致。未运行完整测试套件、全章外链 HTTP、GitHub/MathJax 页面渲染或 PDF 构建。
 - `open_risks`：GitHub Mermaid/MathJax 页面渲染、完整外链检查和第八册主阅读路径连续复读仍开放，因此第五章尚未通过完整正文门禁。没有真实模型、memory backend、Agent harness、目标用户流量或生产工具 trace；不得将 toy 指标及论文 benchmark 结果外推为生产风险。
 - `status`：第五章已实际修改正文，固定教学代码已按声明范围运行，研究与配套索引已同步；按序进入第六章。
+
+### 第八册第六章：Red Teaming 与危险能力评估正文精修（2026-10-28）
+
+- `scope`：按当前 `WRITING_SPEC.md` 从头复读第六章并完成本章定向扫描与实质修改；旧第六章扫描仅作研究线索。代码围栏、状态行及紧邻说明未写维护文件名，执行细节记在本文件。
+- `architecture_decisions`：保留单篇教材，连续主线为 Red Teaming 背景/能力范围 → 任务协议和安全执行 → 阈值与跨团队交接 → 统计边界 → 代码助手综合案例。章首改为完整 Mermaid 反馈闭环；§11 改成职责交接，避免重复 §7/§9 的流程。
+- `research_scan`：复核 AISI 2026 incident/security update、SandboxEscapeBench v3、AgentCyberRange v2、FUSE v1，以及 Anthropic RSP 3.0、Google DeepMind FSF 3.1、OpenAI Preparedness v2 和 Frontier Governance Framework。正文纳入评估环境多层控制、一次受限配置中的越界事件及三类 benchmark 的覆盖边界；`10/122` 只描述该 AISI 评估，不外推为一般风险率。逐项来源、证据范围、候选去向见[第六章精修研究记录](research/book-08-ch06-red-teaming-refinement-2026-10-28.md)。
+- `changes`：§8.5 增加工具/主机/网络环境检查表及 AISI 事件复盘；§8.6 比较 FUSE、SandboxEscapeBench 和 AgentCyberRange 的任务与未覆盖范围；§9.4 更新现行框架版本和政策边界；§9.5 重定义危险能力 uplift 的切片并加入工具越权率、空分母处理和与代码一致的九条样例手算表；§11 重写为跨团队证据交接；§12 补搜索强度、任务/动作分母、风险单位和 zero-failure Rule of Three 推导；§13 扩充代码助手案例。
+- `length_status`：整章单篇核心讲解单元解释性正文 **14,581 个汉字**，高于 1,800；§13 若作为独立辅助教学单元，解释性正文 **1,151 个汉字**，高于 1,000。计数不含标题、围栏、表格、引用列表、练习和状态行。
+- `formula_example_status`：用 demo 固定输入手算 `C_tax=9/9=1.0`、`R_find=7/9=0.778`、`R_sev=4/6=0.667`、`G_elic=(0.47+0.18+0.33)/3=0.327`、`U_base=(0.37+0.08+0.40)/3=0.283`、`A_auto=2.8/4=0.700`、`R_tool=2/3=0.667`、`C_reg=3/7=0.429`、`S_red=28/34=0.824`；独立门槛未过且有 1 个 P0，因此 hold。另手算 `p=0.2,m=3` 的至少一次发现概率 `0.488`；将任务级 `10/100` 和动作级 `12/1000` 分开；用 1,000 人、0.02 次/人/季度、0.10 成功概率及 5 个损失单位推演出 10 单位/季度的合成期望损失；100 次零失败的规则三倍上界为约 3%。均为教学输入或说明模型的推导，不是实际模型测量。
+- `code_status`：§17 Python 块可执行语句因未定义指标动作映射而修改，已以 Python 3.12.9 标准库验证。将 Markdown 中唯一 Python 围栏抽取至 `/tmp/codex-book08-ch06-redteam-demo.py`，运行 `python3 /tmp/codex-book08-ch06-redteam-demo.py`；固定 9 条记录的输出与正文预期块逐行一致，主要指标及决策见研究记录。另在内存中将输入改为空 case、无 autonomy、无工具尝试、无 regression case，四种缺测路径均返回扩展评估门禁，不再出现 `KeyError`。无新增仓库测试文件。
+- `visual_map`：章首使用标准 `mermaid` 围栏、加引号节点和 `-.->|标签|` 虚线箭头；静态检查通过。GitHub 页面未包含本地修改，目标平台渲染仍开放。
+- `link_status`：AISI、Anthropic、Google DeepMind、OpenAI 官方页及三篇 arXiv 原文均已打开核对；正文没有本地文件链接；本轮未对所有外链执行 HTTP 全量扫描。
+- `sync_status`：`PAPERS.md` 增加 SandboxEscapeBench、AgentCyberRange、FUSE 和 AISI incident/security update；`EXERCISES.md` 的 red-team demo 练习补充手算与空切片 N/A 要求；`INTERVIEW_BANK.md` 的 Red Teaming 回答补充威胁模型、环境隔离、trace 和缺测边界。术语已有 Red Teaming、Dangerous Capability Evaluation、Capability Elicitation，本轮未重复改 `GLOSSARY_EN_ZH.md`。
+- `validation`：`git diff --check` 通过；Markdown 共 30 对 fenced blocks，18 个 `math`、1 个 `mermaid`，围栏配对；无 `$$`、`\(...\)`、`\operatorname` 遗留；行内美元配对；本章未出现维护文件引用；固定 demo 输出精确匹配，4 种相关空切片均已运行。
+- `open_risks`：GitHub Mermaid/MathJax 目标页面渲染、全章外链检查和第八册连续复读仍开放，本章尚未通过完整正文门禁。没有目标模型、真实 harness、专家标签或生产网络验证；不能把合成指标、benchmark 结果或 AISI 单次评估外推为部署安全结论。
+- `status`：第六章正文已实质修订，固定 demo 及相关空切片已按声明范围验证，配套资料已同步；完整章节门禁仍开放，按顺序继续第七章。
+
+### 第八册第七章：Interpretability 与 Mechanistic Interpretability 正文精修（2026-10-28）
+
+- `scope`：依据更新后的 WRITING_SPEC 从头复读第七章，复用 2026-10-27 章级扫描作为候选线索并回看原始来源；完成正文、公式、图表和 demo 实质修订。旧扫描不作为正文已完成证明。
+- `architecture_decisions`：保留单篇教材，以“行为观察 → 归因/读出 → 候选机制 → 因果干预 → holdout 复核 → 安全行为回归”为主线。SAE 的字典学习、feature 解释和验证属于本章；第八章主讲推理时 steering，第九章主讲持久参数编辑与 unlearning。近邻负例检验纳入 §8.8，SAE benchmark 与随机基线比较纳入 §8.9，触发检测/行为控制差异纳入 §9.2，形式化 circuit 保证纳入 §13.4。CRISP 的持久遗忘算法细节仍交由第九章。
+- `research_scan`：复核 SAEBench（8 类指标、200 多个 SAE、8 种架构；proxy 提升不能稳定预测实践效用）、MIB（两条 track、四类任务、五个模型；attribution/mask optimization 在 circuit localization 较强，supervised DAS 在 causal-variable localization 较强，SAE feature 在该 track 未胜过普通 hidden dimensions）、SANITY 预印本（合成真值中 71% explained variance 对应 9% 真 feature recovery；部分指定随机基线接近训练 SAE）、NeurIPS 2025 近邻负例解释研究、LLM Forensics 2026 无害英译法/德触发器实验，以及 ICLR 2026 视觉模型形式化 circuit 研究。来源和外推限制见[第七章研究与精修记录](research/book-08-ch07-interpretability-refinement-2026-10-28.md)。
+- `changes`：章首 text 链改成标准 Mermaid 证据闭环；§6.5 用 demo 相同输入补 $S_{patch}=(1.4-(-1))/(2-(-1))=0.8$ 手算，并限定为 margin 恢复。扩展 SAE 字典训练、稀疏/重构取舍和数据 manifest；§8.8 加近邻负例证伪解释；§8.9 增 benchmark 对照和六向量的 SSE/SST、$F_{rec}$、平均激活数、top-2 purity 手算；§9 和 §13 增检测与控制、形式化保证的任务边界。将展示公式迁移为单美元行内式与 math 围栏，移除 operatorname；demo 对空输入、空 patch/ablation/path、空 SAE 切片、top-k 不足、维度错误和近零分母显式返回 N/A 或输入错误。
+- `length_status`：按中文解释正文统计，§1—§13 主线 10,475 字，高于 1,800；§8 SAE 主讲 2,772 字；§14 综合案例 1,511 字，高于 1,000 字辅助单元门槛。统计排除标题、围栏、表格和非解释性材料，不替代人工复读。
+- `formula_example_status`：patch 输入 clean margin 2.0、corrupted margin -1.0、patched margin 1.4，分子 2.4、分母 3.0，$S_{patch}=0.8$。六条 SAE toy 向量的第一行 SSE 为 0.02、六行总 SSE 为 0.09、均值约 $(0.70,0.70,0.717)$、SST 约 13.028，因此 $F_{rec}=1-0.09/13.028\\approx0.993$；每行一个激活给 $K_{active}=6/6=1.0$；code feature top-2 同类给 $P_{code}=2/2=1.0$。这些只反映 demo 输入，不证明语义正确、机制完整或安全。
+- `code_status`：§18 唯一 Python 代码块在 Python 3.12.9 标准库运行；输出与正文预期块逐行一致。另运行全空输入，7 个关键指标均为 None，决定为 expand_measurement_before_interpreting_metrics；将 top-k 输入缩至 1 条，purity 为 None 并触发扩展测量；分母 $10^{-12}$ 返回 None。修订语句均已复验；未新增测试文件或运行测试套件。
+- `visual_map`：章首 Mermaid 使用标准 mermaid 围栏、所有节点标签加引号、文字虚线为 `-.->|标签|`；源码结构检查通过。当前修订尚未出现在目标 GitHub 页面，渲染门禁开放。
+- `link_status`：本章新增 SAEBench、MIB、SANITY、NeurIPS、LLM Forensics 与 ICLR 2026 直达来源；本轮打开核读了这些论文的官方 proceedings/arXiv 页面及 Anthropic 官方解释性页面。没有对全章全部外链执行 HTTP 扫描。
+- `sync_status`：PAPERS.md 补充 SAE benchmark、近邻反例、触发控制与形式化 circuit 入口；EXERCISES.md 增加 patch、SAE 指标手算和缺测练习；INTERVIEW_BANK.md 扩写 SAE 指标、随机基线及检测/控制的回答边界。GLOSSARY_EN_ZH.md 已有相关术语，本轮未重复添加。
+- `validation`：固定 demo 输出匹配预期；全空输入、top-k 不足和近零分母边界通过；33 对 Markdown 围栏配对（含 20 个 math、1 个 mermaid、1 个 Python），行内美元配对，旧式公式和 operatorname 均无残留；git diff --check 通过。章节代码状态行与邻近说明没有维护文件名或内部记录位置。
+- `open_risks`：Mermaid/MathJax 目标 GitHub 渲染、全章外链 HTTP 检查和第八册连续复读仍开放；没有在真实模型、checkpoint、训练激活、SAE、产品 harness 或用户流量上复现。SAEBench、MIB、SANITY、LLM Forensics 与 formal MI 数字及结论均绑定来源论文自己的模型、任务、指标和设置。本章尚未通过完整正文门禁。
+- `status`：第七章正文已实质修订，教学手算、固定代码和空切片边界均按声明范围核验，配套索引已同步；完整章节门禁仍开放，下一章按顺序为第八章 steering。
+
+### 第八册第九章：Model Editing 与 Unlearning 正文精修（2026-10-28）
+
+- `scope`：依据更新后的写作规范从头复读第九章，结合原章级扫描中的候选研究方向并核读正式会议/论文页面；旧扫描仅作线索，不作为本轮正文修改或验收证据。
+- `architecture_decisions`：保留 25 节主结构，形成四个连续核心教学单元：任务与机制（§1–§4）、编辑方法与评估（§5–§10）、遗忘定义/方法/评估（§11–§16）、综合案例与可回滚工程（§17–§20）；§21 demo 单列辅助教学。将 §15 从“三个重要基准”更名为“四组重要基准和评测数据”，不新增章节。
+- `research_scan`：[第九章研究与精修记录](research/book-08-ch09-editing-unlearning-refinement-2026-10-28.md)记录来源、范围和外推边界。正文加入 ICLR 2025 EVOKE 的 editing overfit 与多跳泛化问题、ICLR 2026 LocFT-BF 的 mini-batch fine-tuning baseline、NeurIPS 2025 UniEdit 的 25 领域邻域多跳测试、ICML 2026 Context-Aware Unlearning 的授权上下文效用、EACL 2026 表征信息分解审计及 2026-07 SUITE 预印本的 forget/retain 非对称边界。peer-reviewed 结果仍绑定作者模型、数据和协议；SUITE 保持预印本标记。
+- `changes`：统一旧式 display/inline 数学为 `math` 围栏和单美元行内公式，删除 `\operatorname`；§10.2 增直接目标过拟合、多跳与邻域 ripple testing；§10.7 对四条编辑记录手算目标成功率、改写泛化、locality 和 retain delta；§14.2/§14.4 增 contextual utility、forget/retain 边界和表示残留审计；§16.5 增证据矩阵和遗忘指标手算；§17 加按预先门槛逐项决策的企业事实案例；§18 增血缘解释和标准 Mermaid 删除闭环；§19 补能力代理分数边界。§21 demo 修复中间舍入造成的 delta 差异、空嵌套样本和空编辑冲突计数门禁。
+- `length_status`：排除标题、代码/公式/图示围栏、表格、行内公式和非解释性链接后，核心单元 §1–§4 为 **2,574** 汉字、§5–§10 为 **4,235**、§11–§16 为 **3,790**、§17–§20 为 **2,167**，均高于 1,800 字下限；辅助 demo §21 为 **1,108** 汉字，高于 1,000 字下限。机械计数不替代人工复读。
+- `formula_example_status`：编辑例使用权重 `3,2,1,4`：目标成功 `9/10=0.900`，先算每条编辑内改写率再加权得 `0.667`，locality 得 `0.800`，retain 均值 `0.883→0.851`、变化 `-0.032`；两条目标成功编辑仍有局部冲突，超过 toy 门槛。遗忘例用权重 `3,4,5`：exact leakage `5/12=0.417`，逐目标聚合 exact/改写/多轮后的 robust leakage `19/36≈0.528`，MIA 变化 `-0.378`，retain 变化 `-0.025`；MIA 与 retain 达 toy 阈值仍不能抵消 exact/robust 泄露失败。企业案例另按直接、历史、无关局部性、权限和引用五项分别计算并触发两项 hold。
+- `code_status`：§21 唯一 Python 块在 Python 3.12.9 标准库运行，固定输入与正文相符。输出 edit success/paraphrase/locality `0.900/0.667/0.800`、retain delta `-0.032`、冲突数 `2` 并 `hold_for_conflict_review`；unlearning exact/paraphrase/multi-turn/robust leakage `0.417/0.750/0.417/0.528`、MIA delta `-0.378`、retain delta `-0.025`，并 `hold_for_leakage_review`。另检查空编辑/forget/retain 集合、空均值、全空和部分空嵌套、未定义阈值、零总权重及缺字段；N/A 不通过，非法输入显式报错。代码只验证合成记录汇总，不运行模型、修改参数或证明真实删除。
+- `visual_map`：§18 使用标准 Mermaid 围栏；节点标签加引号，带文字虚线采用 `-.->|标签|`。围栏配对和语法静态检查通过，尚未在 GitHub 页面核验渲染。
+- `link_status`：新增 6 篇 2025–2026 primary-source 页面，并在正文、参考资料和研究笔记中标注实验范围。直接打开核对 ICLR、NeurIPS、PMLR、ACL Anthology 与 arXiv 页面；没有对全章既有及新增外链执行 HTTP 全量扫描。本章没有本地相对链接。
+- `sync_status`：`PAPERS.md` 增六项研究入口；`EXERCISES.md` 更新 unlearning demo 维度并新增 35ED 手算/边界练习；`INTERVIEW_BANK.md` 扩展 Q12；`GLOSSARY_EN_ZH.md` 增 Editing Overfit 和 Contextual Utility after Unlearning。
+- `validation`：`git diff --check` 通过；36 个 fenced blocks（math 33、mermaid 1、yaml 1、python 1）均配对；行内美元符号配对；旧式公式和 `\operatorname` 无残留；数学花括号、Mermaid 虚线标签和节点引号静态检查通过；正文未出现维护文件名或“复核记录见”工作流文字。未运行完整测试套件、全章外链 HTTP 扫描、GitHub MathJax/Mermaid 页面渲染或 PDF 构建。
+- `open_risks`：需要实际核验 GitHub Mermaid/MathJax 渲染，逐章 HTTP 扫描并沿第八册主路径连续复读；因此第九章与第八册均未通过完整正文门禁。没有真实 checkpoint、训练谱系、授权生产数据、目标 harness、人工 gold labels 或生产流量证据，不能把论文 benchmark 或合成样例外推为生产删除、隐私或能力结论。
+- `status`：第九章正文已实质修改，研究和索引已同步；demo 与相关边界已按声明范围运行。按顺序继续第十章。
+
+### 第八册第十章：Privacy、Memorization 与 Watermarking 正文精修（2026-10-28）
+
+- `scope`：依据当前 WRITING_SPEC 从头复读第十章正文、代码、引用和目录入口；以此前第五章维护记录中的“扫描结论不能代替实际改稿、代码需按声明范围运行、未完成平台渲染不得标为完整门禁”作为验收提醒。完整章节门禁仍有开放项。
+- `architecture_decisions`：保留单章，主线为隐私对象和数据路径、记忆/抽取/成员推断、PII 与 DP-SGD、RAG/日志治理、统计水印与签名凭证、工程案例和生命周期。第九章负责模型编辑与 unlearning 方法主讲；第十章只在事故响应中交接，不重复其完整评估。增加 §1.3 数据流 Mermaid，不拆分章节。
+- `research_scan`：新增 canary 审计与 InfoRMIA、SynthID-Text、Anthropic 2026 Claude 水印说明、C2PA 2.5、OWASP 2025 LLM Top 10 入口及 arXiv 2607.16010 水印取证预印本。Privacy Auditing 的 49.6% TPR@1% FPR 绑定 Qwen2.5-0.5B 与该论文威胁模型；InfoRMIA 结果绑定其 benchmark；Anthropic 页面为厂商自述；水印取证数字来自特定预印本配置。Nature 摘要通过官方搜索结果读取，正文未将其结果外推到其他模型。来源、候选去向与证据边界见[第十章研究与精修记录](research/book-08-ch10-privacy-memorization-watermarking-refinement-2026-10-28.md)。
+- `changes`：把 `text` 流程改为标准 Mermaid，节点文字加引号，RAG 回流使用 `-.->|标签|`；全文 display math 改为 math 围栏，inline math 改为单美元并移除 `\operatorname`。补 canary 审计和 token 级成员推断边界、DP-SGD 逐样本裁剪手算、MIA 阈值手算、水印长短文 z-score/误报手算；扩展 §§14–17 的 RAG 分母、训练数据事故评估、凭证/水印切片和生命周期责任门禁。§18 明确分母、合成数据边界及未定义状态，缺测显示 N/A，不作为通过。
+- `length_status`：解释性中文正文 §§1–4 为 **2,690** 字、§§5–9 为 **2,286**、§§10–13 为 **2,743**、§§14–17 为 **3,521**；辅助 demo §18 为 **1,407**。计数排除标题、代码、表格、图示和公式本身，均高于核心 1,800 / 辅助 1,000 汉字下限。
+- `formula_example_status`：DP-SGD 用 $g_1=(0.3,0.4)$、$g_2=(3,4)$、$C=1$ 得裁剪梯度 $(0.3,0.4)$、$(0.6,0.8)$；$B=2,\sigma=0.5$ 且一组噪声抽样 $(0.1,-0.2)$ 时得到平均梯度 $(0.5,0.5)$。MIA 阈值 0.60 下 $TPR=3/6=0.5$、$FPR=1/6\approx0.167$、advantage 为 0.333。水印例中 $T=120,G=78,\gamma=0.5$ 得 $z\approx3.286$；$T=18,G=13$ 得 $z\approx1.886$；人工控制 $T=64,G=42$ 正好触发 $z=2.5$ 阈值。RAG 事故合成例分开计算 0/20 越权检索、1/20 输出泄露、18/20 授权效用和 1/40 原始日志，并解释 0/20 的 Rule of Three 上界约 15%。
+- `code_status`：§18 唯一 Python 块在 Python 3.12.9 标准库中执行。输出与手算一致：PII recall/precision 0.5/1.0、secret recall 0.0、memorization 1.0、output leak 0.875、越权 RAG 1.0、raw log 0.875、MIA advantage 0.333；watermark generated recall/FPR 0.5/0.5、robust recall 1.0、平均质量下降 0.025。另通过 12 项边界断言：10 项指标边界覆盖空权重样本、零总权重、空 precision/recall、空成员组、空均值、零 token、green 数越界、无效 γ 和含未定义值的均值，结果为 None；未定义门禁显示 N/A，负权重被拒绝。无真实模型、真实 PII 或生产系统调用。
+- `visual_map`：章内新增 1 个标准 `mermaid` 围栏；节点标签优先加引号，带文字虚线箭头使用 `-.->|标签|`。源码结构检查通过；GitHub 页面目标渲染尚未复核。
+- `link_status`：直接打开核验 ICLR 2025 隐私审计、ICLR 2026 InfoRMIA、C2PA 2.5、OWASP 2025 Top 10、Anthropic 水印说明及 arXiv 2607.16010；Nature 论文通过官方搜索索引读取正式摘要。本轮未对章节所有旧链接做 HTTP 全量扫描。
+- `sync_status`：`PAPERS.md` 补充隐私审计、SynthID-Text、Claude 水印和预印本证据边界；`EXERCISES.md` 的 privacy/watermarking demo 增 DP-SGD、MIA、水印手算和 N/A 边界；`INTERVIEW_BANK.md` 更新隐私/记忆/水印题回答；`GLOSSARY_EN_ZH.md` 增 InfoRMIA。目录已有第十章入口，无需变更。
+- `validation`：`git diff --check` 通过；25 个三反引号围栏配对（23 个 math、1 个 Mermaid、1 个 Python），公式括号和花括号结构计数平衡；旧 `$$`、`\(`、`\)`、`\operatorname` 和波浪线围栏均无残留。代码状态行已标 Python 3.12.9 标准库验证；紧邻状态说明和代码内容没有维护文件名。
+- `open_risks`：GitHub Mermaid/MathJax 页面渲染、全章 HTTP 链接扫描、第八册第 1—10 章连续复读仍开放；第十章因此未通过完整正文门禁。Nature 页面直接访问曾触发身份验证，但期刊搜索结果可见摘要。合成样例、论文 benchmark、产品声明不代表目标模型、真实语料或生产隐私/水印取证结果。
+- `status`：第十章正文已实质修订，配套资料已同步，代码与相关边界已按声明范围验证；完整章节门禁仍开放，按序继续第十一章。
+
+### 第一册：整册架构与正文精修（2026-10-28）
+
+- `scope`：按当前 `WRITING_SPEC.md` 完成第一册整册结构、简介、目录、9 个 Markdown 正文文件及来源索引的修订；保留五部分定位和 38 个原讲次编号，不把本轮缩成局部校对。
+- `book_contract`：本册作为书系主线入口，沿“输入—表示—计算—学习—生成—验证”建立 LLM 工作闭环；专题书负责机制深挖，实战书负责代码项目，本册不扩成百科式词条集。
+- `architecture_decisions`：把原训练、对齐、推理和多模态的长文件拆分为 9 个阅读单元：1–5、6–15、16–18、19–23、24–28、29–30、31–33、34–36、37–38。更新简介、目录、阶段导图和交接说明；旧文件名在活跃本地交叉链接中无残留。详情见[第一册整册精修研究记录](research/book-01-whole-book-refinement-2026-10-28.md)。
+- `research_scan`：基于本册定位扫描并核对 2025–2026 的合成预训练数据、数据质量 scaling、后训练轨迹、RL compute、KV 工作集/压缩、幻觉与标签质量、多模态视频评估、DiT scaling 等研究。候选分别纳入已有讲次或交给专题书；没有证据和主线价值足以支持新增独立讲次。引用和范围已同步进正文与 `PAPERS.md`。
+- `changes`：扩展第 15 讲的 softmax/梯度逐步计算；第 17 讲加入数据质量与合成数据证据；第 19–23 讲连接 off-policy/on-policy 轨迹和 RL 配方；第 25 讲加入 KV 工作集及低比特缓存的 workload 边界；第 28 讲加入 10 题准确率/拒答手算和 TRIVIA+ 标签噪声；第 31、34 讲分别补跨模态视频诊断与 DiT 规模外推边界；第 35 讲保留 CER/WER、流式延迟手算；第 36 讲补 WBench 维度和规模。Mermaid 节点与虚线标签格式统一。
+- `length_status`：按规范逐讲统计 38 讲解释性汉字，排除标题、表格、代码/公式/图示围栏和状态标记，全部超过核心单元 1,800 字下限；最低为第 10 讲 1,833 字。逐讲计数表和方法见研究记录。计数不代替人工阅读。
+- `example_status`：38 讲均保留或补有数值推演/状态案例；代表性复核包括第 15 讲 logits `[0, ln 2, 0]` 的 softmax 与 `p-y`、第 28 讲拒答例 `8/10=0.80` 对比猜测 `9/10=0.90` 且产生 1 个错误断言、第 35 讲 CER `2/6` 与 WER `1/3`。教学数据已注明假设条件。
+- `code_status`：32 个 Python 代码块沿用 2026-10-07 的既有运行记录（解释器和依赖版本见正文状态标记及原始记录）；第 2 章 miniGPT 保持“静态审阅，未运行”。本轮没有修改可执行语句、依赖/API、运行环境或代码结果承诺，因此按新版规范复用验证、不重复运行。
+- `link_status`：新增来源已写入 `PAPERS.md`。第一册简介、目录和章节相对 Markdown 链接目标存在，旧拆分文件路径无残留；未对全部历史外链做 HTTP 全扫。
+- `validation`：完成逐讲计数、讲次序列（38 个、无重复/缺号）、相对链接（无断点）、旧文件名引用、Python 状态（33 块：32 已验证、1 静态审阅）、Mermaid 源码（14 块）和 Markdown 围栏/尾随空白静态检查；`git diff --check` 通过。PDF dry-run 因环境缺少 `pandoc` 停止，未重建。
+- `open_risks`：需在 GitHub 页面检查 Mermaid/公式显示；pandoc 可用后按仓库命令重建 PDF。论文和预印本的结论仍绑定作者模型、语料、评测与硬件；章节复读和计数不能替代真实读者试读。
+- `status`：第一册正文及阅读骨架已整体重组并扩写，配套目录和来源索引已同步；目标平台渲染及 PDF 构建留作本地交付门禁。

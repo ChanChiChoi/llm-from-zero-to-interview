@@ -44,29 +44,32 @@ Watermarking 解决的是另一类问题。它试图在生成内容中留下可�
 
 现代 LLM 应用通常由多个组件组成：
 
-~~~text
-数据源
-  -> 清洗/去重/标注
-  -> 预训练或微调
-  -> 模型与 adapter
-  -> RAG 索引和文档存储
-  -> 对话、工具和长期记忆
-  -> 日志、缓存、评估平台和备份
-~~~
+```mermaid
+flowchart LR
+    A["数据源"] -->|采集与授权| B["清洗、去重与标注"]
+    B -->|训练样本| C["预训练或微调"]
+    C -->|参数与 adapter| D["模型服务"]
+    D -->|生成与检索请求| E["RAG 索引和文档存储"]
+    E -.->|注入已授权上下文| D
+    D -->|会话和工具结果| F["对话与长期记忆"]
+    D -->|事件记录| G["日志、缓存与评估平台"]
+    F -->|留存与备份| G
+```
+
+图中实线表示正常数据流，虚线表示 RAG 上下文回流；每条路径都可能复制敏感数据。读图时从左侧数据源向右追踪：训练把影响写入参数，部署再把参数输出与检索、记忆和日志连接起来。因此，同一片段在不同组件出现时，事故根因和删除动作可能完全不同。模型 checkpoint 不泄露，不能替代检查索引 ACL、工具 trace 和调试缓存；索引权限正确，也不能证明训练数据或日志已清理。
 
 隐私事故可能发生在任意箭头上。一个模型 checkpoint 没有泄露，并不能抵消 RAG 权限错误；RAG 权限正确，也不能抵消日志保存了未经脱敏的上下文。
 
 ### 1.4 隐私风险的基本分解
 
-可以把一个风险事件 \(j\) 的预期损失粗略写成：
+可以把一个风险事件 $j$ 的预期损失粗略写成：
 
-$$
-\operatorname{Risk}_j
-=P(\operatorname{exposure}_j)
+```math
+\mathrm{Risk}_j
+=P(\mathrm{exposure}_j)
 \times
-\operatorname{Impact}_j
-$$
-
+\mathrm{Impact}_j
+```
 这里的概率包含攻击成功、系统误配和内部误用等路径，Impact 可以包含人数、敏感等级、持续时间、可撤回性和合规后果。这个乘法只是风险沟通模型，不是所有组织必须使用的正式风险公式。
 
 它提醒我们：低概率事件如果影响很大，不能因为平均泄露率很低就忽略；高频低影响事件也不能只报一个总数而不看高风险切片。
@@ -190,24 +193,22 @@ PII 不是一个只靠正则表达式就能定义的集合。姓名可能是公�
 
 模型根据：
 
-$$
+```math
 p_\theta(y\mid x)
 =\prod_{t=1}^{T}
 p_\theta(y_t\mid x,y_{<t})
-$$
-
+```
 生成序列。对一个稀有且固定的片段，如果模型对后续 token 的联合概率显著高于普通替代序列，用户就可能观察到异常的续写倾向。
 
 可用长度归一化的 log-likelihood 表示一条候选序列的拟合程度：
 
-$$
+```math
 \ell_\theta(y\mid x)
 =\frac{1}{T}
 \sum_{t=1}^{T}
 \log p_\theta(y_t\mid x,y_{<t})
-$$
-
-这里 \(T\) 是目标序列 token 数。长度归一化只是为了比较不同长度样本，不能直接把高 likelihood 当成“必然来自训练集”。
+```
+这里 $T$ 是目标序列 token 数。长度归一化只是为了比较不同长度样本，不能直接把高 likelihood 当成“必然来自训练集”。
 
 ### 4.2 研究中的 canary
 
@@ -222,6 +223,8 @@ Secret Sharer 工作研究了稀有或唯一序列的非预期记忆，并把可
 5. 输出日志只保存风险标签和受控引用。
 
 canary 评估的优势是可重复，缺点是它不能覆盖真实数据的全部分布。通过合成 canary 只能说明某类管线在该实验下的复现行为。
+
+canary 的设计本身会影响检测能力。ICLR 2025 的隐私审计研究指出，早期审计常用的简单 canary 会导致弱成员攻击和宽松的泄露下界；作者为多类威胁模型设计了更有效的 canary。在其一个 Qwen2.5-0.5B 实验中，新 canary 在 1% FPR 下达到 49.6% TPR，论文对照的旧方法为 4.2% TPR；作者还报告，在自己的设定中可对理论隐私预算为 $\epsilon=4$ 的训练模型给出约 $\epsilon=1$ 的经验审计。这里的模型、数据、攻击能力和 canary 插入方式都绑定该论文，不能把数值直接当成任意 LLM 的隐私预算，也不能用合成审计替代正式 DP 会计。[Privacy Auditing of Large Language Models](https://proceedings.iclr.cc/paper_files/paper/2025/hash/e76814a0012a46ade4f997591e86f972-Abstract-Conference.html)
 
 ### 4.3 重复数据的作用
 
@@ -280,25 +283,24 @@ NER、分类器和 LLM-assisted 审查可以识别姓名、地址、组织和上
 
 ### 6.1 TPR、FPR 和 advantage
 
-设攻击器把样本判定为成员的阈值为 \(\tau\)。真正成员中被判为成员的比例是：
+设攻击器把样本判定为成员的阈值为 $\tau$。真正成员中被判为成员的比例是：
 
-$$
-TPR(\tau)=P(\operatorname{score}\ge\tau\mid \operatorname{member})
-$$
-
+```math
+TPR(\tau)=P(\mathrm{score}\ge\tau\mid \mathrm{member})
+```
 非成员中被误判为成员的比例是：
 
-$$
-FPR(\tau)=P(\operatorname{score}\ge\tau\mid \operatorname{nonmember})
-$$
-
+```math
+FPR(\tau)=P(\mathrm{score}\ge\tau\mid \mathrm{nonmember})
+```
 常见的攻击优势为：
 
-$$
+```math
 Adv(\tau)=TPR(\tau)-FPR(\tau)
-$$
-
+```
 优势越大，说明在这个阈值下成员与非成员更容易被区分。实际报告应给出 ROC/AUC、阈值、样本构造和置信区间，而不是只报一个 advantage。
+
+用 demo 中的六个成员分数和六个非成员分数复算一次。阈值设为 $\tau=0.60$，成员分数中 $0.91,0.83,0.62$ 达到阈值，因此 $TPR=3/6=0.5$；非成员中只有 $0.72$ 达到阈值，因此 $FPR=1/6\approx0.167$。于是 $Adv=0.5-0.167=0.333$。这个结果表示该组玩具样本在当前阈值下有区分信号；六条样本太少，既没有置信区间，也不代表总体攻击成功率。
 
 ### 6.2 为什么成员推断不能单独证明隐私事故
 
@@ -324,47 +326,48 @@ Advantage 较大是风险信号，不等于攻击者已经获得了具体内容�
 
 如果总体 advantage 很低，但高敏切片很高，平均值不能掩盖问题。评估报告要保留切片样本量，避免把小样本的极端结果误解为总体定律。
 
+成员推断方法也不只看整条序列的一个分数。ICLR 2026 的 InfoRMIA 将成员推断写成信息论形式，并在论文 benchmark 上报告优于 RMIA 的结果；它进一步把信号细化到 token 级别，以定位输出中的记忆片段。细粒度定位有助于检查哪些 token 可能承载记忆，但论文 benchmark 上的优势不等于上线攻击或生产泄露的普遍保证；实践中仍要绑定模型、参考分布、攻击接口和目标切片。[Information-Theoretic Membership Inference for Granular Quantification of Memorization](https://proceedings.iclr.cc/paper_files/paper/2026/hash/ddf43af256e11499149cf06040c62caa-Abstract-Conference.html)
+
 ## 7. Differential Privacy 与 DP-SGD
 
 ### 7.1 邻接数据集
 
-差分隐私先定义两个只相差一个样本的数据集 \(D\) 和 \(D'\)。随机算法 \(A\) 对任意输出事件 \(S\) 满足：
+差分隐私先定义两个只相差一个样本的数据集 $D$ 和 $D'$。随机算法 $A$ 对任意输出事件 $S$ 满足：
 
-$$
+```math
 P[A(D)\in S]
 \le
 e^\epsilon P[A(D')\in S]+\delta
-$$
-
-\(\epsilon\) 控制隐私损失的乘法尺度，越小通常代表更强保护；\(\delta\) 是允许的极小失败概率。这里的保证针对明确的算法、相邻关系和隐私预算，不是“模型完全不会输出任何敏感信息”。
+```
+$\epsilon$ 控制隐私损失的乘法尺度，越小通常代表更强保护；$\delta$ 是允许的极小失败概率。这里的保证针对明确的算法、相邻关系和隐私预算，不是“模型完全不会输出任何敏感信息”。
 
 ### 7.2 DP-SGD 的逐样本裁剪
 
-普通 SGD 先把一个 batch 的梯度平均。DP-SGD 需要先计算每个样本梯度 \(g_i\)，再裁剪其范数：
+普通 SGD 先把一个 batch 的梯度平均。DP-SGD 需要先计算每个样本梯度 $g_i$，再裁剪其范数：
 
-$$
+```math
 \bar g_i
 =g_i\min\left(1,\frac{C}{\lVert g_i\rVert_2}\right)
-$$
+```
+$C$ 是裁剪阈值。若 $\lVert g_i\rVert_2\le C$，梯度不变；若超过 $C$，梯度被缩短到范数 $C$。
 
-\(C\) 是裁剪阈值。若 \(\lVert g_i\rVert_2\le C\)，梯度不变；若超过 \(C\)，梯度被缩短到范数 \(C\)。
+用两个二维样本梯度走一遍裁剪。设 $g_1=(0.3,0.4)$，其范数为 $\sqrt{0.3^2+0.4^2}=0.5$；当 $C=1$ 时它不需要改变。设 $g_2=(3,4)$，范数为 $5$，缩放系数为 $C/\lVert g_2\rVert_2=1/5=0.2$，所以裁剪后 $\bar g_2=(0.6,0.8)$。两条裁剪梯度相加为 $(0.9,1.2)$。取 batch size $B=2$、noise multiplier $\sigma=0.5$，噪声每个坐标的标准差是 $\sigma C=0.5$。假设某一次采样恰好得到噪声向量 $(0.1,-0.2)$，那么噪声加入后的和为 $(1.0,1.0)$，平均梯度是 $\tilde g=(0.5,0.5)$。这个噪声值只是一次可能的抽样，不是期望值；它展示裁剪和加噪的顺序，不足以算出最终 $\epsilon$，后者还需要采样率、训练步数和会计方法。
 
 然后加入高斯噪声：
 
-$$
+```math
 \tilde g
 =\frac{1}{B}
 \left(
 \sum_{i=1}^{B}\bar g_i
 +\mathcal N(0,\sigma^2C^2I)
 \right)
-$$
-
-\(B\) 是 batch size，\(\sigma\) 是 noise multiplier，\(I\) 是单位矩阵。噪声尺度与 \(C\) 成正比，因为裁剪后的单个样本贡献被限制在已知范围内。
+```
+$B$ 是 batch size，$\sigma$ 是 noise multiplier，$I$ 是单位矩阵。噪声尺度与 $C$ 成正比，因为裁剪后的单个样本贡献被限制在已知范围内。
 
 ### 7.3 隐私预算是累计量
 
-每一步加入噪声并不意味着每一步都独立拥有一个完整的 \(\epsilon\)。多步训练、抽样率、批大小和噪声系数需要通过隐私会计器组合，得到整个训练过程的预算。
+每一步加入噪声并不意味着每一步都独立拥有一个完整的 $\epsilon$。多步训练、抽样率、批大小和噪声系数需要通过隐私会计器组合，得到整个训练过程的预算。
 
 因此报告 DP 训练时至少要写：
 
@@ -373,7 +376,7 @@ $$
 3. batch size、训练步数和噪声系数。
 4. 梯度裁剪阈值。
 5. 隐私会计方法。
-6. 最终 \((\epsilon,\delta)\) 和模型质量。
+6. 最终 $(\epsilon,\delta)$ 和模型质量。
 
 如果一个用户有多条记录，sample-level DP 不自动等于 user-level DP。隐私主体的定义必须与实际风险主体一致。
 
@@ -494,21 +497,20 @@ Watermarking 和 provenance 都可以帮助回答其中一部分，但它们不�
 
 文本水印在生成时对 token 选择施加微小的统计偏置，让检测器在足够长的文本上发现异常的 token 组合。它通常不要求人类读者能直接看见标记。
 
-一种教学抽象是：第 \(t\) 步根据密钥、上下文和随机状态生成 green-token 集合 \(G_t\)，然后把属于该集合的 token logits 提高：
+一种教学抽象是：第 $t$ 步根据密钥、上下文和随机状态生成 green-token 集合 $G_t$，然后把属于该集合的 token logits 提高：
 
-$$
+```math
 \ell'_t(v)
 =\ell_t(v)
 +\delta I[v\in G_t]
-$$
-
-\(\ell_t(v)\) 是原始 logit，\(\delta\) 是偏置强度，\(I[\cdot]\) 是指示函数。实际水印还要处理 tokenization、上下文依赖、采样器和密钥安全。
+```
+$\ell_t(v)$ 是原始 logit，$\delta$ 是偏置强度，$I[\cdot]$ 是指示函数。实际水印还要处理 tokenization、上下文依赖、采样器和密钥安全。
 
 Kirchenbauer 等人的工作提出了 green-token 选择和统计检验框架，并研究了文本质量、检测效率和鲁棒性。这个论文结果支持“统计水印可以在特定设置下工作”，不支持“所有生成文本都能可靠检测”。
 
 ### 10.3 内容凭证与签名 provenance
 
-C2PA Content Credentials 采用签名的 manifest 和声明链记录内容来源与编辑历史。它更接近“谁在什么条件下声明了什么”，而不是从文本统计特征推断来源。
+C2PA Content Credentials 采用签名的 manifest 和声明链记录内容来源与编辑历史。它更接近“谁在什么条件下声明了什么”，而不是从文本统计特征推断来源。当前 2.5 规范还区分内容凭证、JSON 表示、attestation、soft binding 与安全注意事项；实现时应固定采用的规范版本和验证器，不能把“符合 C2PA”当作签名链可信或声明真实的替代证明。[C2PA Specifications 2.5](https://spec.c2pa.org/specifications/specifications/2.5/index.html)
 
 两者差异如下：
 
@@ -522,7 +524,9 @@ C2PA 凭证可以证明一条签名声明在链上存在，不自动证明内容
 
 ### 10.4 SynthID 的位置
 
-Google DeepMind 的 SynthID 页面把它描述为用于给 AI 生成内容加水印和识别的工具。它是一个官方产品/研究方向信号，可以支持“厂商正在把水印用于生成内容识别”的事实。
+Google DeepMind 的 SynthID 页面把它描述为用于给 AI 生成内容加水印和识别的工具；2024 年的 SynthID-Text 论文使用 tournament sampling，在生成采样时加入信号，并把检测设计为不依赖原生成模型。论文还研究了与 speculative sampling 的组合，并报告其作者模型上的检测评估和近 2,000 万条 Gemini 响应的用户反馈。其方法不是本节 green-token 公式的直接实现：该公式只帮助理解“改变候选 token 的选择统计”这一类水印直觉。论文结果绑定作者模型、阈值和测试语料，不能外推为任意文本都可检测。[Scalable watermarking for identifying large language model outputs](https://www.nature.com/articles/s41586-024-08025-4)
+
+Anthropic 在 2026 年公开说明，Claude 文本水印采用 SynthID-Text 路线的一个版本；该公司将检测结果描述为“Claude 曾参与文本”的可能性信号，而不是判断人类或机器的绝对分类，也不能区分生成与重度编辑。其说明同时指出，短样本、事实选择有限的文本、校对和精确代码会留下较少可用选择，整段重写可能抹去原信号；检测 API 当时处于受限预览。这是厂商对自身产品的说明，不是第三方独立评测。[How Claude's text watermark works](https://www.anthropic.com/news/claude-text-watermark)
 
 它不能支持以下结论：
 
@@ -537,15 +541,14 @@ Google DeepMind 的 SynthID 页面把它描述为用于给 AI 生成内容加水
 
 ### 11.1 z-score 的教学形式
 
-设文本有 \(T\) 个 token，检测到其中 \(G\) 个属于 green set，假设在无水印基线下每个 token 进入 green set 的期望比例为 \(\gamma\)，则可以定义：
+设文本有 $T$ 个 token，检测到其中 $G$ 个属于 green set，假设在无水印基线下每个 token 进入 green set 的期望比例为 $\gamma$，则可以定义：
 
-$$
+```math
 z_{wm}
 =\frac{G-\gamma T}
 {\sqrt{T\gamma(1-\gamma)}}
-$$
-
-分子是观测 green 数与期望值的差，分母是二项分布近似下的标准差。若 \(z_{wm}\) 很大，文本比无水印假设更偏向 green token。
+```
+分子是观测 green 数与期望值的差，分母是二项分布近似下的标准差。若 $z_{wm}$ 很大，文本比无水印假设更偏向 green token。
 
 这个公式有明确的适用边界：
 
@@ -555,30 +558,32 @@ $$
 4. 改写、翻译和拼接会改变统计样本。
 5. 检测阈值影响误报和漏报。
 
-还要求 \(0<\gamma<1\) 且 \(T>0\)。没有 token、没有有效的 green 比例或没有可比的基线
-时，\(z_{wm}\) 没有定义，应记录为 \(N/A\)。所以 z-score 是统计证据，不是来源真相。
+还要求 $0<\gamma<1$ 且 $T>0$。没有 token、没有有效的 green 比例或没有可比的基线
+时，$z_{wm}$ 没有定义，应记录为 $N/A$。所以 z-score 是统计证据，不是来源真相。
+
+用代码中的一条长生成文本复算。它有 $T=120$ 个 token，其中 $G=78$ 个属于 green set，基线比例为 $\gamma=0.5$。无水印假设下期望数是 $\gamma T=60$，方差近似为 $T\gamma(1-\gamma)=30$，标准差为 $\sqrt{30}\approx5.477$。于是 $z_{wm}=(78-60)/5.477\approx3.286$，高于教学阈值 $2.5$。一条短回复有 $T=18,G=13$，期望数为 9、标准差为 $\sqrt{4.5}\approx2.121$，所以 $z_{wm}=4/2.121\approx1.886$，未达到阈值。即使 green 比例只多出 4 个 token，短文本也因为方差较大而没有足够统计证据。
+
+相同阈值还会影响人工文本误报。代码中的一条合成人类控制有 $T=64,G=42$，期望数为 32、标准差为 4，得到 $z_{wm}=10/4=2.5$；由于判定规则是“大于或等于 2.5”，它恰好被检出。若平台把这个边界值改成严格大于，当前例子的误报会变化；因此比较符号、阈值版本和舍入位置都属于评估协议。不能只报告一个 z-score 数字而不报告检测规则。
 
 ### 11.2 检测率、误报率和漏报率
 
 对带水印生成文本，检测召回率为：
 
-$$
+```math
 TPR_{wm}
 =\frac{TP}{TP+FN}
-$$
-
+```
 对人工或无水印文本，误报率为：
 
-$$
+```math
 FPR_{wm}
 =\frac{FP}{FP+TN}
-$$
-
+```
 平台如果把检测器用于处罚，误报率尤其重要。应按语言、文本长度、领域、编辑方式和作者群体切片报告，而不是只给一个总体准确率。
 
 ### 11.3 文本长度的作用
 
-z-score 的分母随 \(T\) 的平方根增长，足够长的文本通常更容易积累统计证据；短文本则很难可靠区分。
+z-score 的分母随 $T$ 的平方根增长，足够长的文本通常更容易积累统计证据；短文本则很难可靠区分。
 
 这带来一个产品边界：不能把一条两句的生成回复和一篇长文使用同一个阈值和解释。短文本检测结果更适合做辅助信号，不适合单独作为处罚依据。
 
@@ -611,6 +616,8 @@ z-score 的分母随 \(T\) 的平方根增长，足够长的文本通常更容�
 
 这些测试是防御评估，不应变成公开的水印规避教程。
 
+2026 年 7 月提交的 arXiv 预印本对 KGW、Unigram 和 MarkLLM 中的 SynthID-Text 配置做了取证准备度评估。作者报告了 846 次有效改写运行：在其测试流程中，所有最初能检测到水印的 KGW 和 Unigram 样本、以及 98.3% 的 SynthID 样本，在意义保持的改写后不再能检出；在改写前，三类配置的漏报率也分别为 70%、83% 和 80%。作者还报告某一 SynthID 配置对改写的人类对照有 5.4% 误报。该工作是预印本，方法、阈值、提示和判定规则均是特定配置；这些数字提示应报告改写条件和不确定区间，不足以证明所有商用水印在真实争议中都无效。[AI Watermark Evidence Fails Forensic Readiness: An Empirical Evaluation](https://arxiv.org/abs/2607.16010)
+
 ### 12.2 短文本和分布变化
 
 新闻、代码、诗歌、表格和多语言文本的 token 分布不同。一个在英语长文上校准的阈值，可能在代码或中文短回答上误报。
@@ -635,110 +642,100 @@ z-score 的分母随 \(T\) 的平方根增长，足够长的文本通常更容�
 
 一次评估事件可以写成：
 
-$$
+```math
 p_i=(x_i,d_i,s_i,r_i,g_i,l_i,w_i)
-$$
+```
+$x_i$ 是提示或系统事件，$d_i$ 是数据来源，$s_i$ 是敏感类型，$r_i$ 表示训练、微调、RAG、工具或日志路径，$g_i$ 是模型或系统输出，$l_i$ 是日志记录状态，$w_i$ 是风险权重。
 
-\(x_i\) 是提示或系统事件，\(d_i\) 是数据来源，\(s_i\) 是敏感类型，\(r_i\) 表示训练、微调、RAG、工具或日志路径，\(g_i\) 是模型或系统输出，\(l_i\) 是日志记录状态，\(w_i\) 是风险权重。
-
-把路径 \(r_i\) 放进数据结构很重要，因为相同的泄露文本可能来自参数、RAG 或日志，修复方式完全不同。
+把路径 $r_i$ 放进数据结构很重要，因为相同的泄露文本可能来自参数、RAG 或日志，修复方式完全不同。
 
 ### 13.2 Memorization exposure
 
-令 \(m_i=1\) 表示授权合成 canary 在评估中达到预先定义的复现标准：
+令 $m_i=1$ 表示授权合成 canary 在评估中达到预先定义的复现标准：
 
-$$
+```math
 R_{mem}
 =\frac{\sum_iw_i I[m_i=1]}{\sum_iw_i}
-$$
-
+```
 该指标只能说明受控 canary 的复现比例。阈值、长度、相似度和解码设置必须写进评估卡。
 
 ### 13.3 PII 检测的 precision 和 recall
 
-令 \(z_i=1\) 表示人工或高可信标注确认样本含 PII，\(\hat z_i=1\) 表示检测器标记为 PII。召回率为：
+令 $z_i=1$ 表示人工或高可信标注确认样本含 PII，$\hat z_i=1$ 表示检测器标记为 PII。召回率为：
 
-$$
+```math
 Recall_{pii}
 =\frac{\sum_i I[z_i=1\land\hat z_i=1]}
 {\sum_i I[z_i=1]}
-$$
-
+```
 精确率为：
 
-$$
+```math
 Precision_{pii}
 =\frac{\sum_i I[z_i=1\land\hat z_i=1]}
 {\sum_i I[\hat z_i=1]}
-$$
-
+```
 召回率低会漏掉真实敏感内容；精确率低会让系统过度阻断。高风险出口通常偏向更高召回，但仍要检查正常任务的误伤。
 
 ### 13.4 输出泄露率
 
-令 \(g_i^{sens}=1\) 表示输出中出现敏感内容，\(b_i=1\) 表示系统成功阻断或脱敏。对敏感事件集合 \(S\)，输出泄露率可以写成：
+令 $g_i^{sens}=1$ 表示输出中出现敏感内容，$b_i=1$ 表示系统成功阻断或脱敏。对敏感事件集合 $S$，输出泄露率可以写成：
 
-$$
+```math
 R_{leak}
 =\frac{\sum_{i\in S}w_i I[g_i^{sens}=1\land b_i=0]}
 {\sum_{i\in S}w_i}
-$$
-
+```
 如果敏感样本有不同严重度，权重应在评估卡中解释；空集合不能被当作零风险，应标记为未测量。
 
 ### 13.5 RAG 越权泄露
 
-令 \(q_i=1\) 表示系统返回了敏感检索内容，\(a_i=0\) 表示用户无权访问：
+令 $q_i=1$ 表示系统返回了敏感检索内容，$a_i=0$ 表示用户无权访问：
 
-$$
+```math
 R_{rag}
 =\frac{\sum_i I[a_i=0\land q_i=1]}
 {\sum_i I[a_i=0]}
-$$
-
+```
 分母是无权访问的测试请求，而不是所有请求。权限过滤正确但生成器仍从旧上下文中输出内容时，还要另算回答泄露率。
 
 ### 13.6 原始日志泄露
 
-令 \(l_i^{raw}=1\) 表示日志保存了未经处理的敏感内容，\(s_i=1\) 表示事件确实含敏感内容：
+令 $l_i^{raw}=1$ 表示日志保存了未经处理的敏感内容，$s_i=1$ 表示事件确实含敏感内容：
 
-$$
+```math
 R_{log}
 =\frac{\sum_iw_iI[l_i^{raw}=1\land s_i=1]}
 {\sum_iw_iI[s_i=1]}
-$$
-
+```
 日志评估要覆盖 prompt、completion、RAG context、tool trace、异常堆栈、调试转储和人工标注平台。
 
 ### 13.7 Membership inference advantage
 
-在阈值 \(\tau\) 下：
+在阈值 $\tau$ 下：
 
-$$
+```math
 Adv_{mia}(\tau)
 =TPR_{mia}(\tau)-FPR_{mia}(\tau)
-$$
-
+```
 它是一个攻击信号，不是隐私预算，也不是内容泄露率。评估结果应附带攻击器、样本切片和置信区间。
 
 ### 13.8 水印 z-score 和质量代价
 
-令生成文本 token 数为 \(T\)，green token 数为 \(G\)，无水印 green 比例为 \(\gamma\)：
+令生成文本 token 数为 $T$，green token 数为 $G$，无水印 green 比例为 $\gamma$：
 
-$$
+```math
 z_{wm}
 =\frac{G-\gamma T}
 {\sqrt{T\gamma(1-\gamma)}}
-$$
+```
+把检测器输出记为 $y_{wm}=I[z_{wm}\ge\tau_{wm}]$。水印质量代价可写成：
 
-把检测器输出记为 \(y_{wm}=I[z_{wm}\ge\tau_{wm}]\)。水印质量代价可写成：
-
-$$
+```math
 D_{qual}
 =Q_{baseline}-Q_{watermarked}
-$$
-
-\(Q\) 可以是任务分数、人工质量或多个归一化指标，但量纲必须一致。水印评估至少要并列报告 \(TPR_{wm}\)、\(FPR_{wm}\)、改写鲁棒性和 \(D_{qual}\)。
+```
+$Q$ 可以是任务分数、人工质量或多个归一化指标，但量纲必须一致。水印评估至少要并列报告 $TPR_{wm}$、$FPR_{wm}$、改写鲁棒性和 $D_{qual}$。
 
 ## 14. 案例一：企业 RAG 的跨租户泄露
 
@@ -782,6 +779,12 @@ $$
 
 只有输出没有泄露，还不够；要同时确认日志、缓存和引用没有泄露。
 
+把这次修复放进一组固定的合成请求，可以看出为什么需要分开记账。假设测试集有 20 条跨租户无权请求和 20 条本租户有权请求；修复后，20 条无权请求都没有检索到敏感片段，但其中 1 条在第二轮追问时从会话缓存中泄露了片段。于是无权检索率为 $0/20=0$，而无权输出泄露率为 $1/20=0.05$。两者不是同一个分子：检索权限过滤已阻断第一次路径，缓存和多轮回答仍有缺口。若 20 条有权请求中有 18 条答对，授权任务成功率是 $18/20=0.90$；若 40 次请求中有 1 条未经处理的敏感日志，原始日志事件率为 $1/40=0.025$。
+
+假设上线门槛预先写为“越权检索 0 次、敏感输出泄露不超过 1%、授权任务成功率至少 95%、原始敏感日志为 0”。这组结果只有检索门槛通过，其余三项都失败；不能用一个总分把它平均成可发布。即使越权检索观察到 0/20，也只说明当前测试集没有命中；用常见的 $3/n$ 近似看，95% 上界仍约为 $3/20=15\%$。这提醒团队要增加多轮、不同身份和边界文档测试，并报告样本量，而不是把零观察写成零风险。
+
+实施时还要固定每条请求的租户身份来源、索引版本、ACL 版本、检索候选数、重排结果、上下文组装 hash、缓存键与策略版本。否则复测时即使输入相同，也可能因索引更新或身份解析差异而不可比。应在日志中保存最少必要的事件标识与判定原因，原文只放在单独受控的取证区；这样既能回放“哪一步把文档带进回答”，也不会为了调查而制造第二份长期敏感副本。修复顺序通常是先停止越权流量、清理可见缓存，再修正索引过滤和身份链，最后通过黑盒回答与存储审计共同复测。
+
 ## 15. 案例二：敏感数据进入微调管线
 
 ### 15.1 发现
@@ -813,6 +816,12 @@ $$
 假设 exact 复现下降，但改写复现没有下降，说明系统可能学会了避开测试模板。假设复现下降但通用客服能力也大幅下降，说明方法可能通过整体破坏实现“遗忘”。
 
 假设模型不再输出手机号，但成员推断 advantage 仍很高，说明模型可能仍保留训练参与信号。不同指标指向不同的修复方向，不能合并成“隐私已经解决”。
+
+评估报告还要把风险结果与保留能力放在同一张决策表里。假设合成测试集中有 10 条可控 canary，旧版本 exact 复现 4 条、改写复现 3 条；重新训练后 exact 复现降到 0 条，改写复现仍有 2 条。另一个成员推断攻击从 0.33 advantage 降到 0.12，普通客服 retain set 的正确率从 98/100 降为 91/100。这些是假设值，只说明决策方法：exact 结果改善不能掩盖改写泄露仍在，MIA 下降不能替代输出检查，能力下降则要求检查是否通过整体损坏模型来获得表面遗忘。
+
+可以在实验前设定四个独立阈值，例如 exact 和改写 canary 复现率均不超过 5%、成员推断 advantage 不超过 0.10、retain set 正确率不低于 95%。在上述小样本里，exact 通过，改写和 MIA 未通过，retain utility 也未通过，因此版本继续保持冻结。样本数只有 10 或 100 时，比例波动很大，正式评估需要扩大样本、保留分层置信区间和独立 holdout；这里的门槛是示例，不是行业统一标准。
+
+事故处理不能只在 checkpoint 上做文章。团队应先登记原始导出、清洗版本、训练 run、adapter、checkpoint、缓存、索引和日志之间的血缘关系，再依次决定停用、重训、遗忘、凭证轮换或用户通知。若原始工单还留在标注平台或异常日志中，重新训练一个模型不会移除这些副本；若下游又把旧数据注入 RAG，新 checkpoint 也无法阻止重新暴露。每个删除动作要有责任人、完成时间、证据引用和复核结果，并区分“已从模型行为中降低风险”与“所有存储副本已删除”这两个不同承诺。
 
 ## 16. 案例三：内容溯源与统计水印
 
@@ -846,6 +855,12 @@ $$
 短回复可能没有足够 token 支持可靠检测；跨平台复制可能丢失凭证；人工重写可能同时改变文字和来源；人工文本偶然出现 green-token 偏差也可能误报。
 
 因此产品文案应使用“检测到与某类生成器一致的信号”或“存在有效来源凭证”，不要写成“已经证明作者是 AI”。
+
+平台可以用一张按长度切片的评估表决定水印信号的用途。假设有 100 篇长生成文本，其中 88 篇被检出；有 200 篇长人工文本，其中 2 篇被误报；另有 50 条短生成回复，只有 10 条被检出。长文本的召回率为 $88/100=0.88$，长人工文本误报率为 $2/200=0.01$，短回复召回率只有 $10/50=0.20$。如果产品要求所有文本都达到 0.80 召回，这个系统明显不适用于短回复；把长文的总体成绩拿来宣传会隐藏长度差异。阈值也应在独立校准集上固定，不能看见待判文本后反复调参。
+
+来源凭证应单独记录另一组结果。假设 100 个平台文件里有 97 个通过签名链验证，3 个因为转存过程丢失 manifest 而无法验证。97/100 只能说明当前文件中有多少保留了可验证声明，不能说明其余 3 个一定不是平台生成，也不能证明 97 个的内容陈述真实。水印是统计信号，C2PA 是可验证的签名声明，两者的证据对象不同；若系统把它们合并成“AI 真实性分数”，就会丢失失败原因和责任边界。
+
+检测结果的界面应给出适用文本长度、模型或凭证版本、分数区间、校准日期和“不确定”状态。若误报会触发处罚，检测器应先产生复核任务而不是自动作出作者身份或学术诚信判定。人工复核需要看到凭证链、平台事件、文本编辑历史和争议方材料；水印分数只作为其中一项证据。还要记录处理何种字符规范化、文本切片和语言切换，确保同一文本重新检测时可以复现结论。
 
 ## 17. 隐私工程的生命周期
 
@@ -896,16 +911,28 @@ $$
 
 事故复盘要回答“泄露从哪里发生”，而不是只问“模型为什么生成了这句话”。如果根因是权限过滤，继续微调模型并不能修复根因。
 
+### 17.6 把生命周期变成可执行门禁
+
+治理流程需要把每个阶段的“负责人、工件、通过条件、失败动作”固定下来。数据负责人交付来源与用途清单，训练负责人交付样本快照、运行配置和隐私会计，评估负责人交付分层结果与未测范围，服务负责人交付授权规则、脱敏策略、日志 TTL 和回滚方案，事故负责人交付处置记录和复测结论。阶段交接时要用同一个模型版本、数据快照和策略版本串起证据；只存一份总的“隐私已审核”勾选框，无法证明具体哪个 artifact 被检查。
+
+一个可执行的发布门禁可以先要求以下硬条件：所有高敏来源具有授权或明确排除理由；样本级或用户级隐私主体与预算一致；敏感输出、越权检索和原始日志均按预设阈值通过；模型卡和系统卡列出剩余风险；高风险问题有负责人和截止日期；回滚与缓存清理已演练。没有观测到泄露、没有样本或没有日志，不应自动视为通过，而要输出“未测”并阻止相应范围发布。阈值必须在看测试结果前冻结，避免团队为了过门禁临时调整分母或切片。
+
+变更也应按影响范围触发复审，而不是每次都重复整套全量测量。单纯改 UI 文案可能只需核查输出声明；替换 embedding 模型或索引 schema 需要重跑 ACL 与检索路径；替换微调数据或训练 recipe 需要重新核算隐私预算和记忆评估；变更日志字段或观测代理则需检查是否新增长期保存的敏感内容。每次复审写出哪些门禁重跑、哪些沿用、为何可以沿用，以及哪类变更会使结论失效。这样的变更矩阵能减少无效重复，也避免把旧版本的安全证据错误搬到新系统上。
+
 ## 18. 一个最小的隐私与水印审计 demo
 
 下面的代码使用合成数据，不包含真实 PII、真实密钥或抽取流程。它分别计算 PII/secret 检测、canary 复现、输出泄露、RAG 越权、原始日志、membership inference 和水印检测信号；最后保存每项证据的状态与下一动作。
 
-~~~python
+代码状态：已验证（2026-10-28；Python 3.12.9；仅使用标准库）。示例输入均为合成数据，可直接运行。
+
+```python
 import math
 
 
 def weighted_rate(rows, flag_key, selector=lambda row: True):
     selected = [row for row in rows if selector(row)]
+    if any(row["weight"] < 0 for row in selected):
+        raise ValueError("weights must be non-negative")
     total_weight = sum(row["weight"] for row in selected)
     if total_weight <= 0:
         return None
@@ -940,20 +967,60 @@ def recall(rows, truth_key, prediction_key):
 
 def compare(signal, rule):
     if signal is None:
-        return False
+        return "N/A"
     if rule["operator"] == ">=":
-        return signal >= rule["value"]
-    if rule["operator"] == "<=":
-        return signal <= rule["value"]
-    if rule["operator"] == "==":
-        return signal == rule["value"]
-    raise ValueError(f"unsupported operator: {rule['operator']}")
+        passed = signal >= rule["value"]
+    elif rule["operator"] == "<=":
+        passed = signal <= rule["value"]
+    elif rule["operator"] == "==":
+        passed = signal == rule["value"]
+    else:
+        raise ValueError(f"unsupported operator: {rule['operator']}")
+    return "PASS" if passed else "FAIL"
 
 
 def mean_or_none(values):
-    if not values:
+    if not values or any(value is None for value in values):
         return None
     return round(sum(values) / len(values), 3)
+
+
+def membership_advantage(member_scores, nonmember_scores, threshold):
+    if not member_scores or not nonmember_scores:
+        return None
+    tpr = mean_or_none([
+        1 if score >= threshold else 0
+        for score in member_scores
+    ])
+    fpr = mean_or_none([
+        1 if score >= threshold else 0
+        for score in nonmember_scores
+    ])
+    if tpr is None or fpr is None:
+        return None
+    return round(tpr - fpr, 3)
+
+
+def watermark_z_score(tokens, green, gamma):
+    valid_counts = (
+        isinstance(tokens, int)
+        and not isinstance(tokens, bool)
+        and isinstance(green, int)
+        and not isinstance(green, bool)
+        and tokens > 0
+        and 0 <= green <= tokens
+    )
+    valid_gamma = (
+        isinstance(gamma, (int, float))
+        and not isinstance(gamma, bool)
+        and math.isfinite(gamma)
+        and 0 < gamma < 1
+    )
+    if not valid_counts or not valid_gamma:
+        return None
+    expected = gamma * tokens
+    variance = tokens * gamma * (1 - gamma)
+    return round((green - expected) / math.sqrt(variance), 3)
 
 
 privacy_cases = [
@@ -1097,20 +1164,10 @@ privacy_signals = {
 member_scores = [0.91, 0.83, 0.62, 0.58, 0.37, 0.31]
 nonmember_scores = [0.72, 0.55, 0.49, 0.33, 0.28, 0.11]
 membership_threshold = 0.60
-member_rates = [
-    1 if score >= membership_threshold else 0
-    for score in member_scores
-]
-nonmember_rates = [
-    1 if score >= membership_threshold else 0
-    for score in nonmember_scores
-]
-member_tpr = mean_or_none(member_rates)
-nonmember_fpr = mean_or_none(nonmember_rates)
-privacy_signals["membership_advantage"] = (
-    round(member_tpr - nonmember_fpr, 3)
-    if member_tpr is not None and nonmember_fpr is not None
-    else None
+privacy_signals["membership_advantage"] = membership_advantage(
+    member_scores,
+    nonmember_scores,
+    membership_threshold,
 )
 
 privacy_thresholds = {
@@ -1190,17 +1247,16 @@ watermark_cases = [
 green_ratio = 0.5
 z_threshold = 2.5
 for row in watermark_cases:
-    expected = green_ratio * row["tokens"]
-    variance = row["tokens"] * green_ratio * (1 - green_ratio)
-    if row["tokens"] <= 0 or not 0 < green_ratio < 1:
-        row["z_score"] = None
-        row["detected"] = False
-    else:
-        row["z_score"] = round(
-            (row["green"] - expected) / math.sqrt(variance),
-            3,
-        )
-        row["detected"] = row["z_score"] >= z_threshold
+    row["z_score"] = watermark_z_score(
+        row["tokens"],
+        row["green"],
+        green_ratio,
+    )
+    row["detected"] = (
+        row["z_score"] >= z_threshold
+        if row["z_score"] is not None
+        else None
+    )
 
 generated = [row for row in watermark_cases if row["generated"]]
 human = [row for row in watermark_cases if not row["generated"]]
@@ -1209,13 +1265,22 @@ robust_generated = [
 ]
 watermark_signals = {
     "generated_recall": mean_or_none(
-        [1 if row["detected"] else 0 for row in generated]
+        [
+            None if row["detected"] is None else int(row["detected"])
+            for row in generated
+        ]
     ),
     "false_positive_rate": mean_or_none(
-        [1 if row["detected"] else 0 for row in human]
+        [
+            None if row["detected"] is None else int(row["detected"])
+            for row in human
+        ]
     ),
     "robust_recall": mean_or_none(
-        [1 if row["detected"] else 0 for row in robust_generated]
+        [
+            None if row["detected"] is None else int(row["detected"])
+            for row in robust_generated
+        ]
     ),
     "average_quality_drop": mean_or_none(
         [row["quality_drop"] for row in generated]
@@ -1244,6 +1309,36 @@ watermark_actions = {
     "average_quality_drop": "compare_sampling_and_language_quality_slices",
 }
 
+boundary_checks = {
+    "empty_weighted_rate": weighted_rate([], "flag"),
+    "zero_weight_rate": weighted_rate(
+        [{"weight": 0, "flag": True}],
+        "flag",
+    ),
+    "empty_precision": precision([], "truth", "prediction"),
+    "empty_recall": recall([], "truth", "prediction"),
+    "empty_membership": membership_advantage([], [0.2], 0.5),
+    "empty_mean": mean_or_none([]),
+    "zero_token_watermark": watermark_z_score(0, 0, 0.5),
+    "green_count_overflow": watermark_z_score(10, 11, 0.5),
+    "invalid_green_ratio": watermark_z_score(10, 4, 0.0),
+    "incomplete_mean": mean_or_none([1.0, None]),
+    "undefined_gate": compare(None, {"operator": "<=", "value": 0.05}),
+}
+try:
+    weighted_rate([{"weight": -1, "flag": True}], "flag")
+except ValueError:
+    boundary_checks["negative_weight"] = "REJECTED"
+else:
+    raise AssertionError("negative weight must be rejected")
+assert all(
+    value is None
+    for name, value in boundary_checks.items()
+    if name not in {"undefined_gate", "negative_weight"}
+)
+assert boundary_checks["undefined_gate"] == "N/A"
+assert boundary_checks["negative_weight"] == "REJECTED"
+
 decision = {
     "privacy": {
         "scope": "synthetic_audit_and_authorized_system_cases",
@@ -1271,10 +1366,25 @@ print("privacy_undefined_metrics=", privacy_undefined_metrics)
 print("watermark_signals=", watermark_signals)
 print("watermark_evidence=", watermark_evidence)
 print("watermark_undefined_metrics=", watermark_undefined_metrics)
+print("boundary_checks=", boundary_checks)
 print("decision=", decision)
-~~~
+```
 
 这个 demo 的失败结果是故意保留的。隐私侧会暴露 PII 检测、canary 复现、输出阻断、RAG 权限、日志和成员推断的独立问题；水印侧会暴露长文本召回不足、人工文本误报和短文本证据不足。
+
+先看隐私侧的分母。四条合成记录带有 PII，其中两条被检测器标出，所以召回率是 $2/4=0.5$；两条被标出的记录都是真阳性，因此精确率是 $2/2=1.0$。secret 样本只有一条且漏检，召回率为 0。记忆率只对训练中的敏感样本计算，权重分别为 3、2、4，三条 canary 都复现，因此是 $(3+2+4)/(3+2+4)=1.0$。输出泄露率的敏感分母权重合计为 16，其中未阻断的敏感输出权重为 14，因此为 $14/16=0.875$。越权 RAG 测试只有一条无权请求且返回了敏感内容，结果为 $1/1=1.0$；原始日志率同样按敏感记录的权重计算，为 $14/16=0.875$。这些比率是按输入权重的加权结果，不能读成自然流量中泄露概率。
+
+成员推断使用六个成员和六个非成员分数，阈值是 0.60。手算得到 $TPR=3/6=0.5$、$FPR=1/6\approx0.167$，advantage 为 $0.333$；代码四舍五入到三位小数，和手算一致。水印部分使用二项近似：四条生成文本中两条达到阈值，所以召回是 0.5；两条人工文本中一条恰好在阈值上，所以误报率是 0.5；被标为鲁棒变体的两条生成文本都检出，鲁棒召回为 1.0；四条生成文本的质量下降均值为 $(0.02+0.01+0.03+0.04)/4=0.025$。其中质量下降是教学分数差，不是经过盲评得到的真实用户体验变化。
+
+这些输出也解释了为什么每个证据要单独存。隐私侧七个门槛全部失败，水印侧召回与误报失败、鲁棒召回与质量差值通过；这个模式要求先修复数据和权限，再调查水印的短文与人工切片，不能因为部分水印门槛通过就说整套系统安全。阈值只是预先约定的本地练习值，不是法定标准或通用发布线；真实项目要按风险主体、误伤成本、基线分布和样本量制定，并在看到最终测试结果前冻结。
+
+边界检查覆盖空列表、零总权重、没有正例、没有成员样本、零 token、green 数超过 token 数、无效基线比例，以及包含未定义值的均值。相应指标返回 `None`，含义是“没有足够定义域计算”，而不是 0；门禁将其标成 `N/A`，避免把没有数据误当作通过。若一个子组里含无效水印样本，本例把整组汇总设为未定义，以免悄悄删掉困难样本后抬高召回。负权重会直接报错，因为它会让风险率失去分母意义。
+
+这个脚本是审计账本的最小骨架，不实现真实 PII 识别器、秘密扫描器、模型查询、canary 攻击器、DP 会计器或生产级 watermark detector。`canary_reproduced`、`output_sensitive` 和 `blocked` 是人工构造的标签，正式流程需要标注规范、双人复核和安全保存原始样本。代码把同一事件的来源路径存进字段，便于把修复责任定位到训练、RAG、输出或日志；但输入数据本身是否完整，仍需独立的覆盖率审计。修改数据、阈值或策略后，必须重新生成同一范围的证据，并保留旧版本以解释门槛变化。
+
+落到真实评估平台时，每行还应带有不可复用的 case ID、模型/adapter 版本、索引快照、策略版本、攻击接口、语言切片和采样时间。原始敏感文本应放在有访问审计和保留期限的独立存储中，普通报表只保留哈希、标签、错误类别和受限引用。否则，审计系统可能为了证明隐私控制而把敏感文本复制到新的低保护日志。对每个未定义值，应记录原因代码，例如 `NO_POSITIVE_CASES`、`NO_UNAUTHORIZED_CASES` 或 `INVALID_TOKEN_COUNTS`，便于区分测试集没有覆盖、计算输入错误和模型真实失败。示例代码用 `None` 表达这些原因的共同结果，生产 schema 可以进一步细分。
+
+加权比例也只适用于相应的治理问题。这里 `weight` 让高风险合成事件在演示账本中贡献更大，但它不自动等于真实人群风险、泄露人数或法律损害。若团队要报告“事件数”，应同时保留未加权计数；若报告风险加权指标，需说明权重由谁制定、依据什么影响等级以及是否在看结果前固定。加权值和原始分子、分母一起展示，才能让复核者判断一个极端权重是否支配了汇总分数。
 
 它还体现了一个重要的记录原则：阈值、信号、证据状态和下一动作应同时保存。一个总的“安全”或“不安全”标签无法告诉工程团队下一步修哪里，也无法让审计者判断哪些范围尚未测量。
 
@@ -1338,7 +1448,7 @@ RAG 可能越权检索、把敏感文档写入日志，或在多轮上下文中�
 
 ### 练习六：DP-SGD 报告卡
 
-给出一个 DP-SGD 训练报告所需的字段，包括隐私主体、邻接关系、采样率、裁剪阈值、噪声系数、步数、会计方法、最终 \((\epsilon,\delta)\)、模型质量和局限。
+给出一个 DP-SGD 训练报告所需的字段，包括隐私主体、邻接关系、采样率、裁剪阈值、噪声系数、步数、会计方法、最终 $(\epsilon,\delta)$、模型质量和局限。
 
 ## 21. 资料与证据边界
 
@@ -1350,6 +1460,8 @@ RAG 可能越权检索、把敏感文档写入日志，或在多轮上下文中�
 2. [The Secret Sharer](https://arxiv.org/abs/1802.08232)：支持用稀有或唯一序列评估非预期记忆，并把可控测试作为早期防线。
 3. [Membership Inference Attacks against Machine Learning Models](https://arxiv.org/abs/1610.05820)：支持成员推断的定义、TPR/FPR 和成员信息泄露风险。
 4. [Deep Learning with Differential Privacy](https://arxiv.org/abs/1607.00133)：支持 DP-SGD 的逐样本梯度裁剪、噪声机制和隐私/质量/工程成本权衡。
+5. [Privacy Auditing of Large Language Models](https://proceedings.iclr.cc/paper_files/paper/2025/hash/e76814a0012a46ade4f997591e86f972-Abstract-Conference.html)：支持更有效 canary 在特定 threat model 下提升经验隐私审计检测能力；Qwen2.5-0.5B 的 TPR/FPR 结果只绑定论文配置。
+6. [Information-Theoretic Membership Inference for Granular Quantification of Memorization](https://proceedings.iclr.cc/paper_files/paper/2026/hash/ddf43af256e11499149cf06040c62caa-Abstract-Conference.html)：提出 InfoRMIA 与 token 级记忆定位，论文的 benchmark 结果不能替代目标模型验证。
 
 这些论文的实验模型、数据和接口条件不能直接替换为今天任意商业 LLM 的生产结论。
 
@@ -1357,8 +1469,11 @@ RAG 可能越权检索、把敏感文档写入日志，或在多轮上下文中�
 
 1. [A Watermark for Large Language Models](https://arxiv.org/abs/2301.10226)：支持 green-token 统计水印、检测统计和质量/鲁棒性讨论。
 2. [On the Reliability of Watermarks for Large Language Models](https://arxiv.org/abs/2306.04634)：支持对人工改写、模型改写和长文混合场景的鲁棒性研究，以及检测依赖文本长度的边界。
-3. [Google DeepMind SynthID](https://deepmind.google/technologies/synthid/)：支持厂商公开的生成内容水印和识别产品信号；产品页不等同于独立评测。
-4. [C2PA Specifications](https://c2pa.org/specifications/specifications/2.2/index.html)：支持 Content Credentials、manifest 和签名来源链的规范入口。
+3. [Scalable watermarking for identifying large language model outputs](https://www.nature.com/articles/s41586-024-08025-4)：介绍 SynthID-Text 的采样水印设计及其论文实验；结果绑定作者的模型、阈值和测试条件。
+4. [Google DeepMind SynthID](https://deepmind.google/technologies/synthid/)：支持厂商公开的生成内容水印和识别产品信号；产品页不等同于独立评测。
+5. [How Claude's text watermark works](https://www.anthropic.com/news/claude-text-watermark)：支持 Anthropic 对 Claude 水印方法和产品限制的公开说明；属于厂商自述，不能替代独立检测器评估。
+6. [AI Watermark Evidence Fails Forensic Readiness: An Empirical Evaluation](https://arxiv.org/abs/2607.16010)：2026 年 7 月 arXiv 预印本，对三种特定配置测试意义保持改写、漏报和误报；仅支持其方法与样本范围内的结果。
+7. [C2PA Specifications 2.5](https://spec.c2pa.org/specifications/specifications/2.5/index.html)：支持 Content Credentials、manifest 和签名来源链的当前规范入口。
 
 统计水印和 C2PA 凭证的证据对象不同。前者是内容统计特征，后者是签名声明和编辑链；不能用其中一个的结果替代另一个。
 
@@ -1366,7 +1481,7 @@ RAG 可能越权检索、把敏感文档写入日志，或在多轮上下文中�
 
 1. [NIST Privacy Framework](https://www.nist.gov/privacy-framework)：支持隐私风险识别、治理和组织流程的框架背景。
 2. [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：支持把隐私、可靠性、安全和治理放进 AI 生命周期的讨论。
-3. [OWASP LLM Top 10](https://owasp.org/www-project-top-10-for-large-language-model-applications/)：支持 LLM 应用中的 Sensitive Information Disclosure 等应用安全风险分类。
+3. [OWASP Top 10 for LLM Applications](https://genai.owasp.org/llm-top-10/)：支持 LLM 应用层风险分类；该页面会随项目更新，使用时应固定所读版本。
 
 治理框架描述的是风险管理和组织实践，不会证明某个模型已经满足特定法域的法律义务。
 

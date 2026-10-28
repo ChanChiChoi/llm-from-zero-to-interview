@@ -878,7 +878,7 @@ verifier/debate 没有结果，自动组合标签仍是 `True`，因此该行组
 仅因自动组合准确率为 `0.90` 就称监督可靠，因为漏审医疗摘要是高影响失败，而且
 claim 证据和过程步骤指标未达到示例阈值。
 
-> 代码状态：已验证（2026-10-27，Python 3.12.9，标准库）；固定样例 assertions 通过，临时空分母输入确认返回 `None` 并触发未测量门槛；范围见 [progress_v2.md](../../progress_v2.md)。
+> **代码状态：已验证（2026-10-27；Python 3.12.9，标准库）。**
 
 ```python
 from collections import Counter, defaultdict

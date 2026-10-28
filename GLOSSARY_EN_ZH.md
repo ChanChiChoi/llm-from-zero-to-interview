@@ -2467,6 +2467,8 @@ Machine Unlearning：机器遗忘 / 机器反学习
 
 LLM Unlearning：大模型遗忘
 
+Contextual Utility after Unlearning：遗忘后的上下文效用；目标内容由用户在当前上下文中重新提供时，模型使用该材料完成授权任务的能力
+
 Forget Set：遗忘集 / 待删除目标集
 
 Retain Set：保留集
@@ -2475,6 +2477,8 @@ Editing Locality：编辑局部性
 
 Edit Success：编辑成功率
 
+Editing Overfit：编辑过拟合；编辑模型对直接目标答案过度增概率，可能削弱多跳或组合问题上的新知识泛化
+
 Unlearning Robustness：遗忘鲁棒性
 
 Membership Inference Risk：成员推断风险
@@ -2482,6 +2486,8 @@ Membership Inference Risk：成员推断风险
 Training Data Extraction：训练数据抽取 / 训练数据复现风险
 
 Membership Inference：成员推断
+
+InfoRMIA / Information-Theoretic Membership Inference：信息论成员推断方法；将成员推断表述为信息论问题，并可用于 token 级记忆信号定位
 
 PII Leakage：个人可识别信息泄露
 
