@@ -13,13 +13,11 @@
 3. 想补齐 LLM 原理、训练、对齐、推理、评估和工程落地体系的学习者。
 4. 想建立大模型研究与工程全局视角，并逐步形成项目作品集的初学者。
 
-## 当前进度
+## 维护记录与研究资料
 
-当前阶段：常态化全书精修与常态化新模型、新知识点更新阶段。
+凡是针对书籍的架构审视、章节审阅、正文或配套资料修改、修改决定、完成状态、遗留问题和后续交接，统一且只写入 [`progress/`](progress/)。这些书籍进度与修改历史不得写入 `research/`、`plan.md`、`README.md` 或正文。
 
-排行榜专题状态：已完成当前 Artificial Analysis 与 DataCurve/DeepSWE 重点模型的资料级闭环。最后收口的 `gemini-4-argon` 已有 Google The Keyword 官方发布资料，并已同步第二十一册第 95 章及研究笔记、题库、练习、术语、论文、项目和知识图谱。参数、完整训练配方、权重、目标硬件 profiling、独立 benchmark 和生产 SLO 仍按证据边界标为待核验；这不影响本轮“资料级闭环”目标完成。全书精修审计见 [`progress_v2.md`](progress_v2.md)，新模型与新知识点更新审计见 [`progress_v3.md`](progress_v3.md) 和 [`research/model-update-2026-09/model-inventory.md`](research/model-update-2026-09/model-inventory.md)。
-
-第一次计划的历史记录见 [`progress.md`](progress.md)；项目总计划见 [`plan.md`](plan.md)；全书精修执行记录见 [`progress_v2.md`](progress_v2.md)；最新模型专题增量与证据审计见 [`progress_v3.md`](progress_v3.md)。
+[`research/`](research/) 只记录联网搜索发现的新知识点及其来源证据，包括来源、版本或日期、证据范围和未核验边界；不记录每册书或每章的精修进度、修改历史和审计日志。项目计划与长期写作要求分别见 [`plan.md`](plan.md) 和 [`WRITING_SPEC.md`](WRITING_SPEC.md)。
 
 ## 书系总览
 
@@ -133,9 +131,8 @@ python3 scripts/build_pdfs.py --dry-run
 | [`AGENTS.md`](AGENTS.md) | 贡献者指南，说明目录结构、文件职责、校验命令和提交要求。 |
 | [`WRITING_SPEC.md`](WRITING_SPEC.md) | 长期写作规范与质量检查。 |
 | [`plan.md`](plan.md) | 项目总纲、总原则、第一次计划、两类常态化计划、审计方法和完成定义。 |
-| [`progress.md`](progress.md) | 第一次计划的全书编写、首轮建设和首轮 QA 记录。 |
-| [`progress_v2.md`](progress_v2.md) | 常态化全书精修、逐章复读、公式/代码修订和全书审计的执行记录。 |
-| [`progress_v3.md`](progress_v3.md) | 以排行榜新进模型为锚点的新模型、新知识点及周边技术更新记录；事实证据保存在 `research/`。 |
+| [`progress/`](progress/) | 所有书籍架构审视、逐章精修、修改历史、状态和交接记录的唯一存放位置。 |
+| [`research/`](research/) | 仅存联网搜索发现的新知识点及其来源证据，不存书籍精修进度或修改历史。 |
 | [`docs/build-pdfs.md`](docs/build-pdfs.md) | PDF 生成说明，包含依赖安装、批量生成、单本生成、字体设置和常见问题。 |
 
 ## 项目结构
@@ -154,9 +151,7 @@ python3 scripts/build_pdfs.py --dry-run
 ├── AGENTS.md
 ├── WRITING_SPEC.md
 ├── plan.md
-├── progress.md
-├── progress_v2.md
-├── progress_v3.md
+├── progress/
 ├── research/
 ├── scripts/
 ├── docs/
@@ -185,7 +180,7 @@ python3 scripts/build_pdfs.py --dry-run
 4. 写下一个容易混淆的点。
 5. 用 2 分钟模拟面试回答一次。
 
-如果目标是面试，建议每周至少做一次 mock interview；首轮编写复盘记在 [`progress.md`](progress.md)，全书精修复盘记在 [`progress_v2.md`](progress_v2.md)，新模型专题复盘记在 [`progress_v3.md`](progress_v3.md)。
+如果目标是面试，建议每周至少做一次 mock interview。书籍精修、配套修改和阶段交接统一记入 [`progress/`](progress/)。
 
 ## 统一写作规范
 
@@ -209,7 +204,7 @@ python3 scripts/build_pdfs.py --dry-run
 2. 对已完成阶段性精修的专题册做总体验收、目录/索引一致性检查和交叉引用收口。
 3. 为适合代码辅助理解的核心知识点补充 demo 级 Python 示例，并验证可运行性。
 4. 对高时效主题做联网校验，修正过时、片面或证据不足的表述。
-5. 同步维护第四册百科、面试题库、练习体系、项目路线、论文路线、术语表、知识图谱；第一次计划记录写入 [`progress.md`](progress.md)，全书精修写入 [`progress_v2.md`](progress_v2.md)，新模型和新知识点更新写入 [`progress_v3.md`](progress_v3.md)。
+5. 同步维护第四册百科、面试题库、练习体系、项目路线、论文路线、术语表和知识图谱；涉及书籍的审阅与修改记录统一写入 [`progress/`](progress/)。
 
 当前排行榜专题已收口；后续模型更新仍只从 Artificial Analysis 与 DataCurve/DeepSWE 发现候选，再按 `WRITING_SPEC.md` 执行增量核验和同步。
 
@@ -225,32 +220,6 @@ python3 scripts/build_pdfs.py --dry-run
 
 如果后续需要用于更正式的开源分发、转载或商业场景，建议补充标准开源协议文件，例如 `LICENSE`。
 
-## 新模型专题更新
+## 联网研究资料
 
-新模型专题的完整时间线、证据边界、失败记录和同步状态以 [`progress_v3.md`](progress_v3.md) 及 [`research/model-update-2026-09/`](research/model-update-2026-09/) 为准。下面只保留当前已落地专题的导航摘要，不在 README 重复维护完整执行日志。
-
-### 2026-10 Gemini 4 Argon 收口
-
-`gemini-4-argon` 由 Artificial Analysis 发现，DataCurve 当前没有精确 Agent 行。Google The Keyword 官方文章确认 1M 输出上限、Fairwind 受限 rollout、coding/enterprise/cyber 场景、发布方评测和分阶段安全措施。对应正式章节为[第二十一册第 95 章](book-21-transformer-architecture-evolution/chapters/95-gemini-4-argon长程推理与网络安全防御.md)，详细来源见[`gemini-4-argon-source-notes.md`](research/model-update-2026-09/gemini-4-argon-source-notes.md)。官方未公开的参数、训练、权重、完整 API 和生产验收不作推断。
-
-本轮已围绕 Artificial Analysis、DeepSWE 与官方资料新增一批 Frontier Model 研究和正式章节：第二十一册第 75-85 章覆盖 Attention Residuals、Kimi Delta Attention、DeepSeek V4 的 CSA/HCA/mHC、Mistral Small 4、Step 3.5 Flash、V4.1-Flash、K2 Horizon、Qwen3.8、GLM-5.3-Flash 和 V4 Flash Vision 的多模态 API/路由账本；第六册第 18 章、第十六册第 20 章和第十七册第 15 章承接 GPT-6、GLM-5.3 与 Kimi K3 的运行时专题。相关模型、论文、模型卡、代码示例、面试题、练习、术语、知识图谱和项目路线已同步，未核验的模型机制继续标注为待核验。
-
-Claude Opus 5 的官方模型目录字段也已加入研究索引：当前确认 `claude-opus-5`、1M context、128K 最大输出、adaptive thinking、平台和价格字段；参数量、训练架构、完整推理机制与独立 benchmark 复现继续保留为待核验项。
-
-Claude Fable 5.1 也已纳入候选盘点：官方页面确认 `claude-fable-5-1`、1M context、128K 输出、adaptive always-on、preserved thinking 和若干 beta 状态协议；长任务优势属于产品页自述，参数、架构、训练方法和独立复现仍标为待核验。
-
-Claude Sonnet 5 已从候选名称升级为官方模型目录字段核验：当前确认 `claude-sonnet-5`、2026-06-30 发布字段、1M context、128K 普通最大输出、300K batch 最大输出、Adaptive thinking、默认 high effort、Fast latency 字段、平台、价格和 2026-01 知识/训练截止字段；参数量、训练架构、完整推理机制和独立 benchmark 复现仍待核验。
-
-同一 Anthropic 官方目录快照还补充 Claude Haiku 4.5：当前确认 `claude-haiku-4-5-20251001`、2025-10-15 发布字段、200K context、64K 最大输出、extended thinking、`fastest` 延迟字段、平台、价格和 cutoff 字段；它未出现在本轮 Artificial Analysis 采集切片中，因此不伪造榜单日期。参数量、训练架构、system card 细节和独立 benchmark 复现仍待核验。
-
-DeepSWE v1.1 评测快照也已归档：页面标注 113 个任务、91 个仓库、5 种语言和统一 `mini-swe-agent` harness，主表记录 Pass@1、区间、平均成本、输出 token 与 Agent steps。快照中的每一行都是模型 revision、effort、工具、verifier、超时/重试和上下文策略的组合结果，不能直接当作基础模型排名；详见 [`deepswe-snapshot-notes.md`](research/model-update-2026-09/deepswe-snapshot-notes.md) 和 [`source-index.md`](research/model-update-2026-09/source-index.md)。
-
-DeepSeek V4.1-Flash 已完成一轮官方资料核验：第二十一册第 81 章讲解 CED、SWA Bounded Replay、CSA2、Hierarchical Sparse Indexer、FP4 main KV、MoE/Engram/mHC/DSpark、原生多模态和 numeric reasoning effort；第四册同步百科条目。模型卡 revision、官方发布页哈希和待核验边界见 [`deepseek-v4.1-flash-source-notes.md`](research/model-update-2026-09/deepseek-v4.1-flash-source-notes.md)。
-
-2026-09-14 的 Artificial Analysis 首页已单独保存为实时快照：约 702 个配置条目、673 个唯一名称、最新日期字段为 2026-09-11，新增 13 个结构 slug/别名。Agnes、Ling、K2 Horizon 3.7B 和 `mbzuai` 仍只作为榜单发现；K2 36B/A4B 后续已由官方资料核验。所有第三方日期、参数或指数都不直接写成官方模型事实；快照见 [`artificial-analysis-2026-09-14-snapshot.md`](research/model-update-2026-09/artificial-analysis-2026-09-14-snapshot.md)。
-
-K2 Horizon MoVA 36B/A4B 已作为当前锚点完成一轮官方资料核验：第二十一册第 82 章讲解 36B/4B active proxy、前 3 层 dense、后 45 层 MoVA + MoE、GQA、路由语义、512K 训练/Serving 账本；同章还说明 K2-Horizon-7B-Uno 是冻结 K2 7B 的 LoRA diffusion adapter 与 `Psi-Spec` 关联技术。K2 候选来自 Artificial Analysis，官方模型卡、配置、实现和部署文档只用于核验；Uno 不作为排行榜新模型。相关来源见 [`k2-horizon-source-notes.md`](research/model-update-2026-09/k2-horizon-source-notes.md)。
-
-后续新模型候选发现入口固定为 Artificial Analysis 与 DataCurve DeepSWE 两个排行榜；其他官方页面、论文、模型卡和代码仓库只能核验已发现候选或扩展锚点周边技术，不能单独把新名称加入模型候选表。
-
-Qwen3.8 已完成一轮内容专题闭环：第二十一册第 83 章与纵向资料同步覆盖 27B、2.4T-A95B、Flash-Next 和基于 A95B 的 Max hosted 边界，以及 GDN/Gated Attention、QSA、Gated Residual、N-gram Embedding、Muon/AdamW 和 thinking protocol。Flash-Next 报告中的 benchmark、loss、速度和稳定性数字仍标为发布方自报；完整生产 kernel、线上 acceptance rate、目标硬件 profiling 和独立复现继续作为待核验项。
+`research/` 用于保存联网搜索发现、并经来源核验的新知识点及证据材料。每条资料应保留可追溯来源和适用边界；它不承担书籍审阅、章节修改、进度状态或执行历史。相关书籍内容是否修改、修改了什么以及还剩哪些工作，只在 [`progress/`](progress/) 中记录。

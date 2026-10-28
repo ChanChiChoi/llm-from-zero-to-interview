@@ -359,6 +359,12 @@
 68. 用 3 分钟回答“为什么 KL penalty 有用但不能根治 reward hacking”。
 69. 写一个 0 依赖 Python tokenizer / 格式事故审计 demo，输入一条 system/user/assistant 多轮样本，输出 token ids、decode 前缀、assistant-only label 覆盖率、prompt loss 泄漏率、PAD loss 泄漏率、EOS 是否参与 label、训练 / 推理 template 是否一致、截断是否丢关键边界、多模态 placeholder 是否匹配和 gate pass 结论。
 
+### Tokenizer 词表扩展：兼容、成本与回归
+
+配套正文：[第五册第三章](book-05-llm-training/chapters/03-tokenizer与数据格式.md)。
+
+1. 假设你控制一个已训练模型的源 tokenizer，考虑沿用旧 BPE merge table 并追加新 token。画出旧 token 映射、新 token 初始化、embedding-only 适配和全模型继续训练的状态链；与重新训练 tokenizer、独立拼接词表相比，分别说明它解决和没有解决的问题。按目标语种、旧支持语言、held-out 任务、继续训练成本和目标设备每字符延迟设计对照，并区分论文的合成延迟估计与本机实测。
+
 ### 训练成本：最优点、扩展效率与能耗账本
 
 配套正文：[第五册第十三章](book-05-llm-training/chapters/13-训练成本与资源规划.md)。
