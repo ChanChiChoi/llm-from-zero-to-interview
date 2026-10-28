@@ -1,10 +1,10 @@
-# 第二章 Web-Scale 数据采集：从可访问页面到可治理语料
+# 第二章 Web-Scale 数据采集：来源、快照与可复核解析
 
 大模型的数据采集常被简化成“写一个爬虫，把网页下载下来”。这个比喻只描述了最早的一步，甚至容易把真正困难的部分遮住：下载成功不代表获得了训练许可，解析出文本不代表保留了原文结构，页面数量增加不代表有效知识增加，公开可见也不代表没有隐私、版权或评估污染风险。
 
-更准确的对象是一个带有来源、权限、时间、结构、风险和处理历史的数据资产。它要能回答：这段文本从哪里来，按照什么规则取得，原始页面是什么版本，解析时丢失了什么，为什么被保留或删除，进入了哪些数据集和模型，以及收到删除或纠错请求后如何定位下游副本。
+更准确的对象是一个带有来源、权限状态、时间、载体和处理历史的数据资产。它要能回答：这段内容来自哪里、何时以什么方式取得、保存的是哪个快照、解析器生成了什么结构化结果，以及后续团队如何从结果回到原始证据。本章聚焦来源登记、合规访问、快照采集、解析和证据交接；清洗与隐私校准见第三章，去重和污染见第四章，配比见第五章，专项代码数据见第六章，版本和删除治理见第十一章，端到端系统见第十二章。
 
-本章从 Web-scale 数据采集的历史动机开始，逐步讲清来源类型、访问和使用边界、Common Crawl 的数据形态、采集与解析 pipeline、质量与安全检查、去重和污染、代码与多语言数据、血缘与删除、线上观测以及一个合成审计案例。所有工程例子都使用公开、授权或合成场景；涉及具体法域的法律结论必须交由组织的法务和隐私团队确认。
+本章从 Web-scale 采集的动机和来源类型开始，讲清访问与使用边界、Common Crawl 的数据形态、采集事件、原始快照和解析工件，并用一个合成案例算出各阶段的成功率。后续质量、风险、重复和分布处理会在交接处说明输入输出，不在这里重讲完整算法。所有工程例子都使用公开、授权或合成场景；涉及具体法域的法律结论必须交由组织的法务和隐私团队确认。
 
 ## 2.1 采集的对象不是网页，而是带证据的数据对象
 
@@ -20,24 +20,23 @@
 4. 进入训练的 token 不是唯一副本，数据还可能存在于 raw lake、解析缓存、去重索引、token shard、评估副本和日志中。
 5. 一条“可以访问”的记录，不能自动推出“可以用于训练、可以商业发布或可以再分发”。
 
-因此，采集项目的第一个交付物不应是 URL 数量，而应是一个可以追溯的 source registry 和一套明确的数据对象 schema。
+因此，采集项目的第一个交付物不应是 URL 数量，而应是一个可审查的 source registry、可复核的采集事件和一套明确的数据对象 schema。数据对象至少区分三个层次：来源记录描述“谁提供、允许什么用途”；采集记录描述“何时、按什么请求取得哪个响应”；解析工件描述“哪个解析器版本从哪个响应中生成了哪些字段”。这三类记录关联起来，才可以定位一次解析错误或用途变化影响了哪些对象。
 
 ### 2.1.2 专家视角：采集是受约束的分布构造
 
-设原始记录为：
+设一次采集得到的原始记录为：
 
 ~~~math
-r_i=(c_i,s_i,t_i,a_i,h_i,m_i),
+r_i=(s_i,u_i,t_i,q_i,b_i,h_i,m_i),
 ~~~
 
-其中 `c_i` 是原始内容，`s_i` 是来源标识，`t_i` 是取得时间，`a_i` 是访问和使用状态，`h_i` 是内容哈希，`m_i` 是 MIME、语言、响应头和其他元数据。后续数据集不是原始记录的简单子集，而是多个处理函数共同作用的结果：
+其中 `s_i` 是来源标识，`u_i` 是请求地址，`t_i` 是取得时间，`q_i` 是请求与响应事件，`b_i` 是原始载荷，`h_i` 是载荷摘要，`m_i` 是 MIME、语言、响应头和其他元数据。授权状态保存在来源及用途审查记录中，不应仅靠原始响应里的一个标记代替。解析工件可写成：
 
 ~~~math
-D_train
-= F(D_raw; policy, parse, quality, privacy, dedup, contamination, version).
+A_i=P_{v}(r_i),
 ~~~
 
-`policy` 决定用途和权限，`parse` 决定如何从载体提取结构，`quality` 描述内容和任务质量，`privacy` 描述个人信息或秘密风险，`dedup` 处理重复，`contamination` 处理评估污染，`version` 把整条链路绑定到一个可回放版本。这个表达式的意义是：数据工程改变了模型最终看到的经验分布，采集阶段的决策会在很久以后表现为能力、风格、幻觉、安全和评估结果。
+`P_v` 表示版本为 `v` 的解析器，`A_i` 必须保留到 `r_i` 的引用和解析警告。质量、隐私、去重、污染及训练配比作用在解析工件之后，分别由本册后续章节展开。这个边界很重要：采集章节可以说明一个样本为何没有形成可用工件，但不应把传输成功率、解析可用率和训练保留率混成一个数。
 
 ## 2.2 为什么大模型需要 Web-scale 数据
 
@@ -122,11 +121,11 @@ The Pile 把多种来源组织为一个公开语料，说明来源多样性、�
 
 用户日志进入训练前至少要明确用途、同意或其他适用依据、脱敏方式、保留期限、人工访问权限、删除流程和数据版本。日志中的“用户没有投诉”不能当作质量标签，“用户说得很像某人”也不能直接保留为训练文本。
 
-### 2.3.7 多语言数据：自然比例通常不是目标比例
+### 2.3.7 多语言数据：采集覆盖不等于语言覆盖
 
-高资源语言在互联网上更容易获得大量文本，低资源语言可能只有少量、翻译生成或质量不均的样本。若直接按抓取量训练，模型会把互联网的资源不平等当作目标分布。
+高资源语言在互联网上更容易获得大量文本，低资源语言可能只有少量、翻译生成或质量不均的样本。采集报告至少要区分“站点覆盖”“识别出的语言”“解析成功的文档”和“最终有效 token”；其中任一层有偏，后面的配比都无法补回未采集或误识别的内容。
 
-语言识别在短文本、混合语言、方言、代码和低资源语言上可能出错。翻译扩充可以增加覆盖，却可能传播翻译腔、事实错误和文化语境损失。最终配比应同时考虑用户分布、任务重要性、资源稀缺度、样本质量和模型容量。
+语言识别在短文本、混合语言、方言、代码和低资源语言上可能出错。FineWeb2 的 COLM 2025 工作用 96 个 Common Crawl 快照构造约 20 TB 语料，覆盖 1,868 个语言—文字系统组合；关键设计消融在 9 种语言进行，比较实验覆盖 14 种。作者也指出，许多低资源组合的样本极少，不能把语料覆盖数当成同等程度的质量或能力验证。这个案例说明快照和语言切片必须可追溯；本章不展开其语言过滤、去重和再平衡方法，这些分别交给第三、第四和第五章。
 
 ## 2.4 访问、许可、robots 和用途不是同一件事
 
@@ -141,7 +140,7 @@ The Pile 把多种来源组织为一个公开语料，说明来源多样性、�
 | Terms of Service 怎么写 | 平台与使用者之间的合同和使用条件 | 具体法律效力需结合适用法域解释 |
 | 内容许可是什么 | 内容作者或权利人授予的使用范围 | 不能自动覆盖页面中的第三方内容或个人信息 |
 
-RFC 9309 标准化了 Robots Exclusion Protocol 的语法和处理方式，但 robots 文件不是万能的授权文件，也不是绕过访问控制的技术指南。工程上应尊重站点声明和访问控制；对于是否可以训练、商业使用、再分发或永久保存，应另行完成许可、隐私和法务审查。
+RFC 9309 标准化了 Robots Exclusion Protocol 的语法和处理方式，并明确其规则不是访问授权。工程上应尊重站点声明和访问控制；对于是否可以训练、商业使用、再分发或永久保存，应另行完成许可、隐私和法务审查。COLM 2025 的一项研究在其 FineWeb-Edu 语料上按 2025 年 1 月可见的 robots 规则回溯过滤；1.5B 模型从头训练 100B token 时，通用知识基准的平均表现没有显著差异，但结构化和对抗性事实任务存在差距。后续 continual pre-training 结果显示，加入特定医学来源的数据在作者的 1.7T token 条件下改善了 PubMedQA 等医学任务。这个结果说明合规与能力取舍可以被实验化，但只适用于论文的语料、模型、过滤定义和评测；它既不是授权判断，也不证明其他模型或领域没有代价。
 
 ### 2.4.2 代码许可证和数据集许可证也要分层
 
@@ -171,7 +170,7 @@ Web 归档通常至少有三类互补信息：
 
 ### 2.5.2 快照选择会改变时间分布
 
-选择单个 crawl 快照会引入时间偏差。选择多个快照可以增加更新覆盖，却可能重复采集同一页面、放大某些站点的更新频率或把已删除内容再次带入数据集。
+选择单个 crawl 快照会引入时间偏差。选择多个快照可以增加更新覆盖，却可能重复采集同一页面、放大某些站点的更新频率或把已删除内容再次带入数据集。Common Crawl 的官方入口会持续更新可用快照；截至 2026-10-28，页面列出 `CC-MAIN-2026-43`。因此记录中应保存具体快照 ID 与使用日期，不能只写“Common Crawl 最新版”。
 
 设某个来源在时间窗口 `T` 内被采集 `n_s(T)` 次，训练中真正使用的 token 数为 `d_s(T)`，则来源权重不仅由页面数量决定，还由更新频率、页面长度、过滤结果和采样策略共同决定：
 
@@ -182,7 +181,7 @@ w_s
 
 报告来源比例时要注明是原始记录比例、过滤后文档比例、token 比例还是训练实际采样比例。否则同一个数据集可以产生几个看似矛盾的“来源占比”。
 
-## 2.6 从来源规划到可回放数据集
+## 2.6 从来源规划到可回溯采集对象
 
 ### 2.6.1 先定义能力目标和排除范围
 
@@ -297,195 +296,61 @@ PDF 可能是可搜索文本、双栏排版、扫描图像或混合文档。不�
 
 过滤器的 precision 和 recall 只能相对于一个标注协议解释。若没有人工样本和负对照，“删除了 70% 模板”并不能证明剩下的 30% 都是正文。
 
-## 2.8 质量、隐私、安全和污染检查
+## 2.8 采集结果如何交给下游处理
 
-### 2.8.1 质量检查的层次
+采集章节交付的是带来源引用的原始对象和解析工件，不是已经“适合训练”的最终样本。一个可用工件至少能回答：原始对象在哪里、来自哪个 source ID、使用哪个快照和解析器版本、正文是否完整、哪些字段缺失、解析时出现什么警告。下游处理应接收这些字段和状态，而不是只接收一段脱离来源的文本。
 
-质量可以拆成几个不同层次，而不是用一个总分替代：
-
-1. 载体质量：状态码、编码、MIME、正文长度和解析完整性。
-2. 语言质量：语言识别、混合语言、乱码和字符分布。
-3. 内容质量：重复、模板、广告、事实来源和时效。
-4. 任务质量：输入输出是否清楚、答案是否可验证、难度是否匹配。
-5. 结构质量：标题、代码、表格、引用和多轮关系是否保留。
-
-网页质量分类器可以作为排序信号，不能取代来源审查和抽样。一个“写得很流畅”的自动生成页面，可能比一段不规范但有价值的调试记录更容易拿到高分，因此需要按任务和领域校准。
-
-### 2.8.2 PII、秘密和恶意内容
-
-扫描可以使用规则、命名实体识别、秘密检测器、分类模型和人工复核的组合。规则对邮箱、电话和常见令牌格式有用，语义模型对间接身份和上下文有帮助，但任何单一检测器都会漏报和误报。
-
-工程动作应与风险类型对应：
-
-| 风险 | 可能动作 | 仍需验证的事项 |
+| 下游问题 | 采集侧交付 | 后续主讲位置 |
 | --- | --- | --- |
-| 明文邮箱或电话 | 删除、掩码、隔离 | 是否可由上下文重新识别 |
-| API key 或 token | 删除并轮换相关凭证 | 是否已进入缓存、日志或版本库 |
-| 医疗或财务信息 | 高敏感隔离、人工复核或不使用 | 法域、用途和保留期限 |
-| 恶意代码或危险指令 | 内容隔离、沙箱分析或不使用 | 是否在训练和评估链路留下副本 |
-| 外部指令注入 | 保留来源标签，避免当作系统指令 | 下游训练格式是否会放大其优先级 |
+| 文本是否有用，隐私或秘密是否需要处置 | 文本、来源类别、MIME、语言候选、解析警告、原始对象引用 | 第三章：过滤、质量、隐私和误删校准 |
+| 是否与其他页面重复，是否接近评估样本 | 原始/规范化 URL、载荷摘要、抓取时间、快照 ID | 第四章：内容去重与评估污染 |
+| 哪些来源和时间段进入训练、各占多少 | 来源、时间、语言候选、可计量的解析输出 | 第五章：数据配比与采样预算 |
+| 代码或媒体结构是否保留 | 仓库/文件/commit 或媒体坐标、格式与解析器版本 | 第六章和第九章：专项及多模态数据 |
+| 许可变化或删除请求影响哪些派生数据 | source ID、原始引用、处理版本、下游对象关系 | 第十一章：版本、治理和删除 |
 
-扫描通过只能说明当前检测器没有命中，不等于证明不存在隐私或安全问题。
+例如，语言识别器给短网页打出 `zh` 并不证明这是中文正文，低质量分类器也不能替代解析器检查。如果抓取阶段已经把双栏论文顺序拼错，第三章再精细的质量分也无法还原原意。相反，正文结构正确并不代表训练用途被授权。各阶段要保留自己的判断和分母，避免一个综合分数掩盖责任边界。
 
-### 2.8.3 评估污染
+## 2.9 采集证据、版本和删除交接
 
-benchmark 题目、答案、模板和近义改写可能出现在网页、代码仓库、教程和论坛。污染检测可以使用 exact match、n-gram、MinHash、embedding 或结构化代码相似度，但相似不自动等于泄漏。
-
-设评估集有 `M` 个样本，`e_j` 与训练集合中最相似样本的相似度为 `sim_max(e_j)`，给定阈值 `tau`，一个污染候选率可以写成：
-
-~~~math
-R_contam
-= (1 / M) * sum(j = 1..M) I[sim_max(e_j) >= tau].
-~~~
-
-这个指标必须附带阈值、相似度方法、人工复核协议、评估版本和训练数据时间范围。命中后可以删除、隔离、改换评估集、降低结论等级或公开污染说明；不能只把数字从报告里删掉。
-
-## 2.9 去重：减少冗余，也减少错误权重
-
-### 2.9.1 URL 去重不是内容去重
-
-不同 URL 可能返回相同内容，同一个 URL 也可能随着时间变化。URL 规范化可以处理大小写、默认端口、追踪参数和尾部斜杠，但过度规范化会把有意义的查询参数或语言版本合并掉。
-
-因此至少要同时记录原始 URL、规范化 URL、响应时间和内容 hash。URL hash 保护日志和 catalog 中的敏感路径，内容 hash 用于判断实际载荷是否相同。
-
-### 2.9.2 exact、near 和结构化去重
-
-Exact dedup 对规范化后的文本计算 hash，便宜而精确；near dedup 使用 MinHash、SimHash、n-gram 或 embedding 发现改写、模板和复制；代码还需要 AST、token 序列或仓库关系等结构化信号。
-
-设解析后 token 数为 `D_before`，完全去重后 token 数为 `D_after`，token 口径的减少率为：
-
-~~~math
-R_removed = 1 - D_after / D_before.
-~~~
-
-减少率越高不一定越好。教程中的重复定义、安全边界和代码模式有时是有意的教学信号；若 near-dedup 把这些独立样本合并，可能损失覆盖。应保留 cluster ID、代表样本选择规则、阈值和分领域统计。
-
-### 2.9.3 去重与记忆风险的关系
-
-重复会提高某些文本的有效采样权重，可能增加训练记忆和评估重叠；但记忆还受模型容量、训练步数、样本稀有度和后训练影响。去重是降低风险的手段，不是“模型不会记住数据”的证明。
-
-## 2.10 配比、时间和语言覆盖
-
-### 2.10.1 原始比例不等于训练比例
-
-来源的原始 token 数会经过过滤、去重、截断、packing 和 sampler 改变。若来源 `i` 经过处理后有 `d_i` 个有效 token，训练配比为：
-
-~~~math
-p_i=\frac{d_i}{\sum_jd_j}.
-~~~
-
-但真正的曝光量还要考虑重复采样和不同阶段的 mixture。报告时要同时给出 raw、processed、sampled 和 consumed 四种口径。
-
-### 2.10.2 温度采样与低资源语言
-
-若语言或来源的有效大小为 `n_i`，可以用温度指数 `alpha` 作为一种采样抽象：
-
-~~~math
-p_i=\frac{n_i^{\alpha}}{\sum_j n_j^{\alpha}}.
-~~~
-
-`alpha = 1` 接近按数据量采样，`alpha < 1` 提高小数据源的相对权重，`alpha = 0` 接近来源级均匀。这个公式只描述采样倾向，不解决低资源数据的事实质量、翻译腔、重复暴露和文化覆盖问题。
-
-### 2.10.3 时间切分和事实新鲜度
-
-网页知识会变化，训练数据的时间窗口也会改变模型对事实的记忆。可以按发布日期、抓取时间和最后更新时间做切片；对更新频繁的资料，应同时保留版本，而不是用最新页面覆盖历史记录。
-
-时间切分还能帮助污染排查：训练数据早于评估集不代表没有泄漏，但训练数据晚于评估集会增加评估被直接看到的可能性。时间是证据的一部分，不是独立性证明。
-
-## 2.11 数据血缘、删除和回放
-
-### 2.11.1 从页面到模型的血缘图
-
-一条网页记录的下游路径可能是：
+一条记录从来源到解析结果的最小关联可以表示为：
 
 ~~~text
-source page / archive record
-  -> raw object
-  -> parsed artifact
-  -> normalized document
-  -> dedup cluster
-  -> filtered dataset version
-  -> token shard
-  -> training manifest
-  -> checkpoint / model release
-  -> evaluation and logs
+source_id + purpose_review
+  -> request_id + snapshot_id + response_event
+  -> raw_object_id + payload_digest
+  -> parsed_artifact_id + parser_revision + warnings
 ~~~
 
-每条边都应有处理版本和 hash。只保存最终 shard 会导致“模型中是否使用过某来源”无法回答，也会让删除请求只能停留在 catalog 标记层面。
+`source_id` 连接来源负责人、许可状态和适用用途；`request_id` 让团队看到失败、重试和响应变化；`raw_object_id` 指向受控原始证据；`parsed_artifact_id` 标明哪个解析器版本产出了当前文本。对长期保留的数据，还应保存采集窗口、保留策略和下游引用。这些字段并不构成完整数据血缘，但它们是第十一章开展版本审计和删除定位的输入。
 
-### 2.11.2 删除请求不是一个文件操作
+收到来源暂停、许可变化或删除请求时，采集侧先阻止新的请求或新的快照进入候选集，并记录处理时间与责任人。然后用 source ID、对象摘要和处理版本列出受影响的 raw/parsed 对象，交给版本治理流程决定如何处置下游数据。删除采集存储中的一份对象只证明该存储位置已处理；它不能单独证明 token shard、训练运行、模型权重、缓存或历史输出也已删除。对已训练模型的处置和结论边界属于第十一章及相应模型治理流程。
 
-收到删除、许可撤回或隐私请求后，工程流程通常要：
+版本标识要能区分“同一原始记录被重新解析”和“来源提供了新快照”。最低限度应分别记录 `snapshot_id`、`raw_digest`、`parser_revision`、`schema_revision` 和 `created_at`。这样同一输入可以复跑解析器作差异比较，而不同输入也不会因 URL 相同就被覆盖。具体的不可变 manifest、删除传播和模型端处理不在本章重复展开。
 
-1. 暂停新训练和新索引继续使用相关来源。
-2. 根据 source ID、content hash、dedup cluster 和处理版本定位副本。
-3. 检查 raw、解析、缓存、token shard、评估集和日志。
-4. 重新生成受影响的数据版本，或记录无法直接重建的范围。
-5. 判断已训练模型需要重训、编辑、unlearning、风险披露还是法律团队给出其他处置。
-6. 用回归评估验证删除或替代数据没有引入新的能力和安全回归。
+## 2.10 采集器与解析器的运行边界
 
-从索引和 catalog 删除只能证明检索路径发生变化，不能直接证明模型权重、缓存和历史输出已经忘记。
+持续运行的采集服务可以分为五个责任明确的组件：source registry 保存来源和用途状态；scheduler 只派发通过准入审查的请求；collector 记录请求、重试和响应；raw store 保存受控原始快照；parser 生成结构化工件及警告。组件间传递对象 ID 和状态，不以无上下文的字符串队列作为唯一接口。
 
-### 2.11.3 可回放版本的最小字段
+下图给出一条采集与解析链。菱形判断是是否允许发出请求；解析异常沿虚线回到原始证据检查。图末的第三至第五章负责候选数据的后续处理，本章不会把它们并入采集器。
 
-~~~text
-dataset_id
-source_snapshot
-processor_revision
-filter_revision
-dedup_revision
-contamination_revision
-mixture_revision
-tokenizer_revision
-manifest_digest
-created_at
-retention_policy
-deletion_status
-~~~
+```mermaid
+flowchart LR
+    S["来源登记：用途、许可与联系人"] --> G{"请求是否通过准入审查？"}
+    G -->|不通过| X["停止请求并记录原因"]
+    G -->|通过| C["采集器：限速、重试与响应事件"]
+    C --> R["原始快照：摘要、时间与响应头"]
+    R --> P["解析器：结构化工件与版本"]
+    P --> A["抽样复核：正文、顺序与警告"]
+    A -->|可交接| H["带来源引用的候选对象"]
+    A -.->|解析异常| I["隔离并回看原始证据"]
+    H --> D["后续清洗、去重与配比"]
+```
 
-版本对象还应保留变更摘要：增加和删除了哪些来源，哪些过滤器改变，语言和领域比例如何变化，风险命中和评估污染如何变化。文件名变化不等于版本可解释，文件名不变也不代表内容没有改变。
+网络状态只描述请求结果，不等同于内容可用。可观测指标至少分开报告总尝试数、按来源和 MIME 分组的最终 2xx URL 比率、受支持格式的解析可用率、被隔离的原因和重试次数。一次 URL 发生三次请求仍然是一条逻辑 URL；若分子按响应次数、分母按 URL 数量，指标就没有解释意义。失败应分类处理：429 或可恢复的 5xx 按策略有限退避，404 记为终态，格式不支持或解析异常进入隔离，权限状态变化则暂停来源而不是自动重试。
 
-## 2.12 真实项目架构：从采集器到数据产品
+## 2.11 工程案例：企业研究助手的公开资料和授权资料混合
 
-### 2.12.1 组件边界
-
-一个持续运行的采集系统可以分成：
-
-1. Source registry：来源、许可证、用途、区域和联系人。
-2. Policy review：权限、隐私、保留和使用范围的审查记录。
-3. Collector：限速、重试、快照、响应和失败事件。
-4. Raw store：原始对象、hash、时间和访问控制。
-5. Parser：HTML、PDF、代码、表格和多模态解析。
-6. Metadata service：语言、领域、版本、结构和 provenance。
-7. Quality and risk services：质量、PII、秘密、安全和污染检查。
-8. Dedup service：exact、near、代码和跨快照去重。
-9. Dataset builder：切片、配比、抽样和 manifest。
-10. Evaluation registry：训练/评估隔离、污染状态和 holdout 访问。
-11. Version registry：不可变 digest、变更摘要和下游引用。
-12. Audit and deletion service：查询、删除、申诉和证据导出。
-
-这些组件之间传递的不只是文本，还要传递状态和原因。比如 parser 发现表格丢失时，dataset builder 不能只看到一个空字符串；删除服务需要知道这个字符串来源于哪个 raw object 和 processor revision。
-
-### 2.12.2 观测指标
-
-采集系统可以记录：
-
-~~~math
-R_fetch = N_successful_responses / N_attempts,
-R_parse = N_usable_artifacts / N_successful_responses.
-~~~
-
-还应按来源、语言、MIME、时间和错误类型分桶观察：状态码、内容类型、正文长度、解析警告、质量分布、PII 命中、重复率、污染候选、处理延迟、存储成本和删除传播时长。平均 fetch rate 可能掩盖某个低资源来源几乎全部解析失败，因此切片分母比总体数字更重要。
-
-### 2.12.3 失败重试和幂等
-
-采集任务会被调度器重试、快照重放或人工重新运行。每个任务需要稳定的 `source_id`、请求或记录 ID、内容 hash 和处理版本，写入应具有幂等性。否则同一页面的重复事件可能被误当作新数据，重复下载也会增加服务压力和成本。
-
-重试还要区分传输失败和内容失败：网络超时可以有限重试，解析器对同一损坏 PDF 连续失败则应进入隔离队列；被策略暂停的来源不应通过调度重试自动恢复。
-
-## 2.13 工程案例：企业研究助手的公开资料和授权资料混合
-
-### 2.13.1 目标和边界
+### 2.11.1 目标和边界
 
 一家企业要构建研究助手，资料来自公开技术文档、已授权的行业报告和内部知识库。助手需要给出带页码或段落位置的引用，不能把内部资料泄露给其他租户，也不能把许可已撤回的报告继续检索出来。
 
@@ -497,7 +362,7 @@ R_parse = N_usable_artifacts / N_successful_responses.
 
 它们可以共享解析器和索引服务，但不能共用一个无差别的 `public = true` 字段。
 
-### 2.13.2 一次解析事故
+### 2.11.2 一次解析事故
 
 某批 PDF 的双栏阅读顺序被解析器颠倒，研究助手把“不得用于生产”的限制条件和上一段的“可以用于生产”拼在了一起。问题不是模型突然变笨，而是 parser artifact 丢失了版面关系。
 
@@ -512,510 +377,354 @@ R_parse = N_usable_artifacts / N_successful_responses.
 
 这个案例说明数据采集的质量问题可能在产品层表现为事实错误、引用缺失或权限事故；如果没有 source、page、processor revision 和 index version，团队只能重新猜测问题发生在哪里。
 
-## 2.14 可运行的合成采集审计示例
+## 2.12 可运行的合成采集与解析审计示例
 
-下面的 demo 不联网、不读取真实网页，也不处理真实凭证。它用合成 HTML 模拟九条记录，展示 policy、解析、PII/秘密、评估污染、质量和 exact dedup 如何分别产生信号。代码没有把所有条件压成一个布尔总开关，而是返回保留样本、拒绝原因、阶段计数、风险信号和后续动作。
+本例只审计从来源准入到 HTML 解析工件的过程，不联网，也不判断真实来源的法律状态。样本中的来源审查、robots 规则和访问方式是三个分开的字段；`robots_allowed` 记录站点抓取偏好，不能单独给出训练授权。9 个候选中，受限来源在发送请求前被拦截；其余 8 个来源各代表一个逻辑 URL。两条 URL 经一次限速重试后取得 200，因此总请求数为 10。
 
-~~~python
+| 逻辑 URL | 请求状态序列 | 最终载体 | 解析结果 |
+| --- | --- | --- | --- |
+| `html_good` | 200 | HTML | 生成工件 |
+| `login_page` | 200 | HTML 登录页 | 不作为正文 |
+| `empty_parse` | 200 | HTML 空正文 | 无可用文本 |
+| `not_found` | 404 | 无载荷 | 获取失败 |
+| `retry_503` | 503 → 200 | HTML | 生成工件 |
+| `pdf_payload` | 200 | PDF | 当前示例未实现 PDF 解析 |
+| `retry_429` | 429 → 200 | HTML | 生成工件 |
+| `html_good_2` | 200 | HTML | 生成工件 |
+| `restricted_forum` | 未请求 | 受限来源 | 来源准入拦截 |
+
+计算时要固定分母。10 次 HTTP 尝试中有 7 次返回 2xx，尝试级成功率为 `7/10=0.700`；8 个已准入的逻辑 URL 中有 7 个最终返回 2xx，URL 级比率为 `7/8=0.875`。7 个成功响应中，6 个是本例支持的 HTML，得到 4 个可交接工件，因此 HTML 解析可用率是 `4/6≈0.667`，准入 URL 到可用工件的端到端比例是 `4/8=0.500`。如果把被来源准入拦截的候选也放进最后一个分母，则候选到工件的比例为 `4/9≈0.444`。这些比例回答不同问题，不能互相替代；尤其重试增加请求尝试次数，却没有增加逻辑 URL 数。
+
+代码使用 Python 标准库 `HTMLParser` 抽取示例中的正文，并为每个工件记录来源、快照、抓取时间、原始载荷摘要和解析器版本。真实系统还需要正确处理编码、压缩、重定向、HTTP 头、完整 HTML 语义和更多文件格式；本例的登录页判断与 HTML 解析都只是教学实现。
+
+代码状态：已验证（2026-10-28，Python 3.12.9，标准库）
+
+```python
 from __future__ import annotations
 
 import hashlib
-import re
 from collections import Counter
+from html.parser import HTMLParser
 
 
 sources = {
-    "tech_blog": {
-        "license": "cc-by",
-        "training_use": True,
-        "robots": "allowed",
-        "access": "public",
+    "public_docs": {
+        "use_allowed": True,
+        "robots_allowed": True,
+        "access_ok": True,
+        "review_status": "approved",
     },
-    "oss_docs": {
-        "license": "apache-2.0",
-        "training_use": True,
-        "robots": "allowed",
-        "access": "public",
+    "licensed_docs": {
+        "use_allowed": True,
+        "robots_allowed": True,
+        "access_ok": True,
+        "review_status": "approved",
     },
-    "science_preprint": {
-        "license": "cc-by",
-        "training_use": True,
-        "robots": "allowed",
-        "access": "public",
-    },
-    "zh_news": {
-        "license": "authorized",
-        "training_use": True,
-        "robots": "allowed",
-        "access": "public",
-    },
-    "private_forum": {
-        "license": "unknown",
-        "training_use": False,
-        "robots": "disallowed",
-        "access": "login_required",
+    "restricted_forum": {
+        "use_allowed": False,
+        "robots_allowed": False,
+        "access_ok": False,
+        "review_status": "blocked",
     },
 }
 
-documents = [
+
+candidates = [
     {
-        "id": "blog_attention",
-        "source_id": "tech_blog",
-        "url": "https://example.invalid/blog/attention",
-        "crawl_time": "2026-06-01T00:00:00Z",
-        "mime": "text/html",
-        "language": "en",
-        "domain": "web_ml",
-        "html": """
-        <html><body><nav>Home Archive</nav><article>
-        Transformer attention uses queries keys and values for language model training.
-        This article explains data quality, deduplication, provenance, and evaluation contamination.
-        </article><footer>Contact</footer></body></html>
-        """,
+        "id": "html_good",
+        "source_id": "public_docs",
+        "url": "https://docs.example.invalid/attention",
+        "snapshot_id": "demo-2026-06",
+        "fetched_at": "2026-06-01T00:00:00Z",
+        "content_type": "text/html",
+        "attempts": [200],
+        "body": "<main><article>Attention uses queries, keys, and values.</article></main>",
     },
     {
-        "id": "oss_vector_db",
-        "source_id": "oss_docs",
-        "url": "https://docs.example.invalid/vector-db",
-        "crawl_time": "2026-06-01T00:05:00Z",
-        "mime": "text/html",
-        "language": "en",
-        "domain": "code_docs",
-        "html": """
-        <main>Open source vector database documentation explains indexes, tests,
-        examples, licenses, failure modes, and reproducible deployment commands.</main>
-        """,
+        "id": "login_page",
+        "source_id": "public_docs",
+        "url": "https://docs.example.invalid/account",
+        "snapshot_id": "demo-2026-06",
+        "fetched_at": "2026-06-01T00:01:00Z",
+        "content_type": "text/html",
+        "attempts": [200],
+        "body": "<main><form><input type='password'>Sign in</form></main>",
     },
     {
-        "id": "blog_attention_copy",
-        "source_id": "tech_blog",
-        "url": "https://mirror.example.invalid/blog/attention-copy",
-        "crawl_time": "2026-06-01T00:10:00Z",
-        "mime": "text/html",
-        "language": "en",
-        "domain": "web_ml",
-        "html": """
-        <html><body><nav>Home Archive</nav><article>
-        Transformer attention uses queries keys and values for language model training.
-        This article explains data quality, deduplication, provenance, and evaluation contamination.
-        </article><footer>Contact</footer></body></html>
-        """,
+        "id": "empty_parse",
+        "source_id": "public_docs",
+        "url": "https://docs.example.invalid/empty",
+        "snapshot_id": "demo-2026-06",
+        "fetched_at": "2026-06-01T00:02:00Z",
+        "content_type": "text/html",
+        "attempts": [200],
+        "body": "<html><head><title>Archive</title></head><body><script>ignored()</script></body></html>",
     },
     {
-        "id": "private_forum",
-        "source_id": "private_forum",
-        "url": "https://forum.example.invalid/private/thread/7",
-        "crawl_time": "2026-06-01T00:15:00Z",
-        "mime": "text/html",
-        "language": "en",
-        "domain": "forum",
-        "html": "<article>Private member discussion with project details.</article>",
+        "id": "not_found",
+        "source_id": "public_docs",
+        "url": "https://docs.example.invalid/missing",
+        "snapshot_id": "demo-2026-06",
+        "fetched_at": "2026-06-01T00:03:00Z",
+        "content_type": "text/html",
+        "attempts": [404],
+        "body": "",
     },
     {
-        "id": "spam_seo",
-        "source_id": "tech_blog",
-        "url": "https://example.invalid/seo/spam",
-        "crawl_time": "2026-06-01T00:20:00Z",
-        "mime": "text/html",
-        "language": "en",
-        "domain": "spam",
-        "html": "<body>Buy now promo promo promo click click click</body>",
+        "id": "retry_503",
+        "source_id": "licensed_docs",
+        "url": "https://reports.example.invalid/method",
+        "snapshot_id": "demo-2026-06",
+        "fetched_at": "2026-06-01T00:04:00Z",
+        "content_type": "text/html",
+        "attempts": [503, 200],
+        "body": "<article>The report defines a reproducible measurement protocol.</article>",
     },
     {
-        "id": "pii_secret",
-        "source_id": "tech_blog",
-        "url": "https://example.invalid/leak",
-        "crawl_time": "2026-06-01T00:25:00Z",
-        "mime": "text/html",
-        "language": "en",
-        "domain": "security",
-        "html": "<article>Contact reader@example.invalid and use DEMO_SECRET_12345678.</article>",
+        "id": "pdf_payload",
+        "source_id": "licensed_docs",
+        "url": "https://reports.example.invalid/table",
+        "snapshot_id": "demo-2026-06",
+        "fetched_at": "2026-06-01T00:05:00Z",
+        "content_type": "application/pdf",
+        "attempts": [200],
+        "body": "synthetic PDF payload",
     },
     {
-        "id": "eval_leak",
-        "source_id": "tech_blog",
-        "url": "https://example.invalid/benchmark/answer",
-        "crawl_time": "2026-06-01T00:30:00Z",
-        "mime": "text/html",
-        "language": "en",
-        "domain": "eval",
-        "html": "<article>Benchmark answer key: GSM8K solution and hidden test answer.</article>",
+        "id": "retry_429",
+        "source_id": "public_docs",
+        "url": "https://docs.example.invalid/retry",
+        "snapshot_id": "demo-2026-06",
+        "fetched_at": "2026-06-01T00:06:00Z",
+        "content_type": "text/html",
+        "attempts": [429, 200],
+        "body": "<article>Retry only after the service backoff window.</article>",
     },
     {
-        "id": "paper_scaling",
-        "source_id": "science_preprint",
-        "url": "https://papers.example.invalid/scaling",
-        "crawl_time": "2026-06-01T00:35:00Z",
-        "mime": "text/html",
-        "language": "en",
-        "domain": "science",
-        "html": """
-        <article>Scaling law experiments compare model size, data tokens, compute budget,
-        validation loss, ablation controls, and reproducible training recipes.</article>
-        """,
+        "id": "html_good_2",
+        "source_id": "licensed_docs",
+        "url": "https://reports.example.invalid/summary",
+        "snapshot_id": "demo-2026-06",
+        "fetched_at": "2026-06-01T00:07:00Z",
+        "content_type": "text/html",
+        "attempts": [200],
+        "body": "<article>Every parsed field points back to its source record.</article>",
     },
     {
-        "id": "zh_data_quality",
-        "source_id": "zh_news",
-        "url": "https://news.example.invalid/data-quality",
-        "crawl_time": "2026-06-01T00:40:00Z",
-        "mime": "text/html",
-        "language": "zh",
-        "domain": "zh_web",
-        "html": """
-        <article>高质量中文语料需要覆盖教育、科技、政策、生活服务和真实问答，
-        同时记录来源、许可、时间、语言、质量分、隐私风险和去重状态。</article>
-        """,
+        "id": "restricted_forum",
+        "source_id": "restricted_forum",
+        "url": "https://forum.example.invalid/member/thread/1",
+        "snapshot_id": "demo-2026-06",
+        "fetched_at": "2026-06-01T00:08:00Z",
+        "content_type": "text/html",
+        "attempts": [],
+        "body": "synthetic content not requested",
     },
 ]
 
-required_meta = [
-    "id",
-    "source_id",
-    "url",
-    "crawl_time",
-    "mime",
-    "language",
-    "domain",
-    "html",
-]
-pii_or_secret = [
-    re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+"),
-    re.compile(r"DEMO_SECRET_[A-Z0-9]{8,}"),
-]
-contamination_terms = ["benchmark answer", "gsm8k solution", "hidden test answer"]
+
+class MainTextParser(HTMLParser):
+    ignored_tags = {"head", "title", "script", "style", "nav", "aside", "footer", "form"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self.ignored_stack: list[str] = []
+        self.has_password_input = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "input" and (dict(attrs).get("type") or "").lower() == "password":
+            self.has_password_input = True
+        if tag in self.ignored_tags:
+            self.ignored_stack.append(tag)
+
+    def handle_endtag(self, tag: str) -> None:
+        if self.ignored_stack:
+            if tag == self.ignored_stack[-1]:
+                self.ignored_stack.pop()
+            return
+
+    def handle_data(self, data: str) -> None:
+        if not self.ignored_stack:
+            text = " ".join(data.split())
+            if text:
+                self.parts.append(text)
 
 
-def strip_html(html: str) -> str:
-    html = re.sub(r"<script.*?</script>|<style.*?</style>", " ", html, flags=re.I | re.S)
-    text = re.sub(r"<[^>]+>", " ", html)
-    return re.sub(r"\s+", " ", text).strip()
-
-
-def tokenize(text: str) -> list[str]:
-    return re.findall(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]", text.lower())
-
-
-def content_hash(text: str) -> str:
-    normalized = " ".join(tokenize(text))
-    return hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:12]
-
-
-def quality_score(text: str) -> float:
-    tokens = tokenize(text)
-    if not tokens:
-        return 0.0
-    unique_ratio = len(set(tokens)) / len(tokens)
-    alpha_ratio = sum(char.isalpha() for char in text) / max(len(text), 1)
-    length_score = min(len(tokens) / 24, 1.0)
-    return round(
-        0.45 * length_score
-        + 0.35 * unique_ratio
-        + 0.20 * min(alpha_ratio / 0.65, 1.0),
-        3,
-    )
-
-
-def policy_allowed(doc: dict) -> bool:
-    source = sources.get(doc.get("source_id"))
-    if source is None:
-        return False
+def eligible_source(source: dict) -> bool:
     return (
-        source["license"] not in {"unknown", "restricted"}
-        and source["training_use"]
-        and source["robots"] == "allowed"
-        and source["access"] == "public"
+        source.get("use_allowed") is True
+        and source.get("robots_allowed") is True
+        and source.get("access_ok") is True
+        and source.get("review_status") == "approved"
     )
 
 
-def has_pii_or_secret(text: str) -> bool:
-    return any(pattern.search(text) for pattern in pii_or_secret)
-
-
-def has_eval_contamination(text: str) -> bool:
-    lower = text.lower()
-    return any(term in lower for term in contamination_terms)
-
-
-def sum_tokens(items: list[dict], field: str) -> dict[str, int]:
-    totals = Counter()
-    for item in items:
-        totals[item[field]] += item["tokens"]
-    return dict(totals)
-
-
-def safe_ratio(numerator: float, denominator: int):
+def ratio(numerator: int, denominator: int) -> float | None:
     return round(numerator / denominator, 3) if denominator else None
 
 
-def audit_collection(items: list[dict]) -> dict:
-    seen_hashes = set()
-    kept = []
-    rejected = {}
-    stage_counts = Counter(raw=len(items))
+def audit_collection(items: list[dict], source_registry: dict) -> dict:
+    eligible = []
+    rejected: dict[str, str] = {}
+    for item in items:
+        source = source_registry.get(item.get("source_id"))
+        if source is None or not eligible_source(source):
+            rejected[item["id"]] = "source_not_eligible"
+        else:
+            eligible.append(item)
 
-    for index, doc in enumerate(items):
-        row_id = doc.get("id", f"row_{index}")
-        missing = [field for field in required_meta if not doc.get(field)]
-        if missing:
-            rejected[row_id] = "missing_metadata"
+    attempts = sum(len(item["attempts"]) for item in eligible)
+    successful_attempts = sum(
+        200 <= status < 300
+        for item in eligible
+        for status in item["attempts"]
+    )
+    final_2xx = 0
+    html_2xx = 0
+    artifacts = []
+
+    for item in eligible:
+        statuses = item["attempts"]
+        if not statuses or not 200 <= statuses[-1] < 300:
+            status = statuses[-1] if statuses else "missing"
+            rejected[item["id"]] = f"http_status_{status}"
+            continue
+        final_2xx += 1
+        if item["content_type"].split(";", 1)[0].strip().lower() != "text/html":
+            rejected[item["id"]] = "unsupported_mime"
+            continue
+        html_2xx += 1
+        parser = MainTextParser()
+        parser.feed(item["body"])
+        text = " ".join(parser.parts)
+        if parser.has_password_input:
+            rejected[item["id"]] = "login_or_auth_template"
+            continue
+        if not text:
+            rejected[item["id"]] = "empty_parse"
             continue
 
-        text = strip_html(doc["html"])
-        doc_hash = content_hash(text)
-        score = quality_score(text)
-
-        if doc["source_id"] not in sources:
-            rejected[row_id] = "unknown_source"
-            continue
-
-        if not policy_allowed(doc):
-            rejected[row_id] = "policy_block"
-            continue
-        stage_counts["policy_pass"] += 1
-
-        if has_pii_or_secret(text):
-            rejected[row_id] = "pii_or_secret"
-            continue
-        stage_counts["pii_pass"] += 1
-
-        if has_eval_contamination(text):
-            rejected[row_id] = "eval_contamination"
-            continue
-        stage_counts["contamination_pass"] += 1
-
-        if score < 0.62:
-            rejected[row_id] = "low_quality"
-            continue
-        stage_counts["quality_pass"] += 1
-
-        if doc_hash in seen_hashes:
-            rejected[row_id] = "exact_duplicate"
-            continue
-        seen_hashes.add(doc_hash)
-        kept.append(
+        raw_digest = hashlib.sha256(item["body"].encode("utf-8")).hexdigest()
+        artifacts.append(
             {
-                **doc,
+                "id": item["id"],
+                "source_id": item["source_id"],
+                "url": item["url"],
+                "snapshot_id": item["snapshot_id"],
+                "fetched_at": item["fetched_at"],
+                "raw_digest": raw_digest,
+                "parser_revision": "main-text-demo/1.0",
                 "text": text,
-                "hash": doc_hash,
-                "tokens": len(tokenize(text)),
-                "quality": score,
             }
         )
-        stage_counts["dedup_pass"] += 1
 
-    # Records without HTML are excluded from the raw-token denominator because
-    # their payload cannot be measured; the missing-metadata rate remains visible.
-    raw_tokens = sum(
-        len(tokenize(strip_html(doc["html"])))
-        for doc in items
-        if doc.get("html")
-    )
-    kept_tokens = sum(doc["tokens"] for doc in kept)
-    language_tokens = sum_tokens(kept, "language")
-    domain_tokens = sum_tokens(kept, "domain")
-    language_mix = {
-        key: safe_ratio(value, kept_tokens)
-        for key, value in sorted(language_tokens.items())
-    }
-    domain_mix = {
-        key: safe_ratio(value, kept_tokens)
-        for key, value in sorted(domain_tokens.items())
-    }
-    denominator = len(items)
-    risk_rates = {
-        "missing_metadata": safe_ratio(
-            sum(reason == "missing_metadata" for reason in rejected.values()),
-            denominator,
-        ),
-        "policy_block": safe_ratio(
-            sum(reason == "policy_block" for reason in rejected.values()), denominator
-        ),
-        "pii_or_secret": safe_ratio(
-            sum(reason == "pii_or_secret" for reason in rejected.values()), denominator
-        ),
-        "eval_contamination": safe_ratio(
-            sum(reason == "eval_contamination" for reason in rejected.values()),
-            denominator,
-        ),
-        "low_quality": safe_ratio(
-            sum(reason == "low_quality" for reason in rejected.values()), denominator
-        ),
-        "exact_duplicate": safe_ratio(
-            sum(reason == "exact_duplicate" for reason in rejected.values()), denominator
-        ),
-        "unknown_source": safe_ratio(
-            sum(reason == "unknown_source" for reason in rejected.values()), denominator
-        ),
-    }
-    signals = {
-        "kept_ids": [doc["id"] for doc in kept],
+    return {
+        "candidate_count": len(items),
+        "eligible_url_count": len(eligible),
+        "attempt_count": attempts,
+        "successful_attempt_count": successful_attempts,
+        "final_2xx_url_count": final_2xx,
+        "html_2xx_count": html_2xx,
+        "artifact_count": len(artifacts),
+        "attempt_2xx_rate": ratio(successful_attempts, attempts),
+        "final_2xx_url_rate": ratio(final_2xx, len(eligible)),
+        "html_parse_usable_rate": ratio(len(artifacts), html_2xx),
+        "eligible_to_artifact_rate": ratio(len(artifacts), len(eligible)),
+        "candidate_to_artifact_rate": ratio(len(artifacts), len(items)),
+        "artifact_ids": [artifact["id"] for artifact in artifacts],
         "rejected": dict(sorted(rejected.items())),
-        "stage_counts": dict(stage_counts),
-        "retention": safe_ratio(kept_tokens, raw_tokens),
-        "language_mix": language_mix,
-        "domain_mix": domain_mix,
-        "average_quality": safe_ratio(
-            sum(doc["quality"] for doc in kept), len(kept)
-        ),
-        "risk_rates": risk_rates,
     }
-    actions = []
-    if not items:
-        actions.append("restore_or_collect_source_records")
-    if not kept:
-        actions.append("restore_nonempty_training_set")
-    if risk_rates["missing_metadata"] is not None and risk_rates["missing_metadata"] > 0:
-        actions.append("repair_missing_metadata")
-    if risk_rates["policy_block"] is not None and risk_rates["policy_block"] > 0:
-        actions.append("review_or_exclude_restricted_sources")
-    if risk_rates["unknown_source"] is not None and risk_rates["unknown_source"] > 0:
-        actions.append("register_or_exclude_unknown_sources")
-    if risk_rates["pii_or_secret"] is not None and risk_rates["pii_or_secret"] > 0:
-        actions.append("scrub_or_isolate_sensitive_records")
-    if risk_rates["eval_contamination"] is not None and risk_rates["eval_contamination"] > 0:
-        actions.append("remove_or_isolate_eval_overlap")
-    if risk_rates["low_quality"] is not None and risk_rates["low_quality"] > 0:
-        actions.append("tune_quality_filter_and_sample_review")
-    if risk_rates["exact_duplicate"] is not None and risk_rates["exact_duplicate"] > 0:
-        actions.append("run_near_dedup_and_keep_cluster_provenance")
-    decision = "hold_for_repair" if actions else "continue_to_manifest"
-    return {"signals": signals, "actions": actions, "decision": decision}
 
 
-report = audit_collection(documents)
-print("signals=", report["signals"])
-print("actions=", report["actions"])
-print("decision=", report["decision"])
+result = audit_collection(candidates, sources)
+print(f"candidate_count={result['candidate_count']}")
+print(f"eligible_url_count={result['eligible_url_count']}")
+print(f"attempt_count={result['attempt_count']}")
+print(f"successful_attempt_count={result['successful_attempt_count']}")
+print(f"attempt_2xx_rate={result['attempt_2xx_rate']}")
+print(f"final_2xx_url_rate={result['final_2xx_url_rate']}")
+print(f"html_parse_usable_rate={result['html_parse_usable_rate']}")
+print(f"eligible_to_artifact_rate={result['eligible_to_artifact_rate']}")
+print(f"candidate_to_artifact_rate={result['candidate_to_artifact_rate']}")
+print(f"artifact_ids={result['artifact_ids']}")
+print(f"rejected={result['rejected']}")
+```
 
-assert report["signals"]["kept_ids"] == [
-    "blog_attention",
-    "oss_vector_db",
-    "paper_scaling",
-    "zh_data_quality",
-]
-assert report["signals"]["rejected"] == {
-    "blog_attention_copy": "exact_duplicate",
-    "eval_leak": "eval_contamination",
-    "private_forum": "policy_block",
-    "pii_secret": "pii_or_secret",
-    "spam_seo": "low_quality",
-}
-assert report["decision"] == "hold_for_repair"
+预期输出如下：
 
-empty_report = audit_collection([])
-assert empty_report["signals"]["retention"] is None
-assert empty_report["signals"]["risk_rates"]["missing_metadata"] is None
+```text
+candidate_count=9
+eligible_url_count=8
+attempt_count=10
+successful_attempt_count=7
+attempt_2xx_rate=0.7
+final_2xx_url_rate=0.875
+html_parse_usable_rate=0.667
+eligible_to_artifact_rate=0.5
+candidate_to_artifact_rate=0.444
+artifact_ids=['html_good', 'retry_503', 'retry_429', 'html_good_2']
+rejected={'empty_parse': 'empty_parse', 'login_page': 'login_or_auth_template', 'not_found': 'http_status_404', 'pdf_payload': 'unsupported_mime', 'restricted_forum': 'source_not_eligible'}
+```
 
-unknown_source = {**documents[0], "id": "unknown_source", "source_id": "not_registered"}
-unknown_report = audit_collection([unknown_source])
-assert unknown_report["signals"]["rejected"] == {
-    "unknown_source": "unknown_source",
-}
-assert "register_or_exclude_unknown_sources" in unknown_report["actions"]
+输出里，采集尝试成功率、最终 URL 响应率和解析可用率使用不同层级的记录。重试 503/429 之后最终取得的页面计为一个成功 URL，但两次 HTTP 尝试都进入请求级分母。登录页虽返回 200，却没有成为正文；PDF 响应也不能因为下载成功就算作解析成功。成功产生的每个 artifact 都保存 `raw_digest`、`snapshot_id` 和 `parser_revision`，所以解析策略变化后可以比较新旧工件，并回到同一个原始输入。
 
-missing_metadata = {
-    "source_id": "tech_blog",
-    "url": "https://example.invalid/missing-metadata",
-    "crawl_time": "2026-06-01T00:45:00Z",
-    "mime": "text/html",
-    "language": "en",
-    "domain": "web_ml",
-}
-missing_report = audit_collection([missing_metadata])
-assert missing_report["signals"]["rejected"] == {
-    "row_0": "missing_metadata",
-}
-assert missing_report["signals"]["retention"] is None
-assert "repair_missing_metadata" in missing_report["actions"]
+代码先运行来源准入，再读取响应事件。`eligible_source` 要求用途审查、robots 状态、访问方式和审查状态分别满足条件；其中 robots 只是准入信息之一，不能替代用途授权。没有通过准入的 `restricted_forum` 在请求发生前就被拒绝，因此它不算一次 HTTP 失败，也不进入已准入 URL 的分母。样本中的 `attempts` 是预先记录的状态序列，不是真正发出的网络请求；`[503, 200]` 和 `[429, 200]` 分别代表一次失败后成功的有限重试。生产调度器还必须执行退避、并发控制和重试上限，不能因为响应状态可重试就持续请求。
 
-filtered_report = audit_collection([documents[3]])
-assert filtered_report["signals"]["retention"] == 0.0
-assert filtered_report["signals"]["risk_rates"]["policy_block"] == 1.0
-assert filtered_report["decision"] == "hold_for_repair"
-~~~
+对每个已准入 URL，代码把最后一次响应作为该逻辑 URL 的最终状态。404 是终态失败；最终状态为 2xx 后，还要检查 `content_type`。这一步把成功下载的 PDF 归入 `unsupported_mime`，因为本例只实现 HTML 解析。只有受支持的 HTML 才增加 `html_2xx_count`，进入 `MainTextParser`；因此 `html_parse_usable_rate` 的分母是 6，而不是全部 8 个 URL、10 次请求或 7 个最终 2xx 响应。
 
-示例输出中的数值会由这组合成文本决定，真实项目不应照搬 `0.62` 这样的阈值。这个 demo 重要的地方有四点：策略拒绝、隐私/秘密、评估污染、低质量和重复是不同原因；缺失元数据不是“没有内容”，而是需要单独修复的数据质量问题；空集合和全量过滤时，比例分母会明确返回 `None` 或 `0.0`，避免把不可计算和确实没有保留样本混为一谈；即使最终保留样本的平均质量不错，只要仍有需要处理的风险，数据版本就不能被描述为“已经没有问题”。
+解析器使用标准库把字符数据收集成可见文本，跳过 `head`、脚本、导航和表单等教学例中不作为正文的节点；遇到密码输入框时另标记为登录/认证模板。这个规则只能覆盖代码明确列出的结构：比如无密码框的自定义登录页、把正文放在非标准脚本中的网页、DOM 中需要执行 JavaScript 才加载的内容，都可能误判或漏判。它也没有选定 `article` 主区域，所以实际使用前还需针对来源模板做标注抽样、测量正文字段召回和误删，而不是把“非空文本”当作解析正确。
 
-## 2.15 如何评估一个采集 pipeline
+工件创建时，摘要由输入载荷字节计算，并同时保存 URL、来源、快照、抓取时间和 `parser_revision`。摘要可用于确认两次解析是否使用相同载荷，但不能证明网页作者、许可证或响应内容的真实性；URL 也可能随时间返回不同版本。若更换解析器，应保留旧工件和新 revision 的关系，抽样比较标题、阅读顺序、表格/代码边界和警告变化，再决定是否让新工件下游流转。
 
-### 2.15.1 采集质量评估
+`ratio` 在分母为零时返回 `None`。空候选列表不会被报告成“解析成功率 0%”或“失败率 0%”；如果全部候选都在来源准入阶段被阻断，最终 URL 比率、HTML 解析率和准入 URL 到工件率都是 `N/A`，同时可以单独报告“候选数大于 0、准入数为 0”。这样可以区分没有请求、请求失败和请求成功但无法解析三种完全不同的系统状态。
 
-采集评估需要对每个阶段设置可解释指标：
+本例只验证来源准入、HTTP 事件口径、HTML 正文抽取和工件追溯，不覆盖真实授权判断、robots 文件抓取、压缩与重定向、PDF/OCR、隐私过滤、去重或实际网页服务。生产解析器还需要按 MIME 分路、资源限制、失败隔离和人工抽样；质量、PII/秘密、去重与污染交由第三、第四章进一步处理。
 
-| 阶段 | 指标例子 | 关键分母 |
-| --- | --- | --- |
-| 获取 | 成功响应率、截断率、重复请求率 | 请求总数或合法请求总数 |
-| 解析 | 可用 artifact 率、字段召回率、警告率 | 成功响应或各 MIME 分组 |
-| 质量 | 高质量 precision、误删率、信息密度 | 人工标注样本或领域切片 |
-| 隐私安全 | 命中率、漏检率、人工复核一致性 | 带标注风险样本和负对照 |
-| 去重 | exact/near 减少率、误合并率 | 文档、token 或 cluster |
-| 污染 | 候选命中率、人工确认率 | 评估样本数 |
-| 血缘 | 可追溯率、删除传播时长 | 数据对象和下游 artifact |
+## 2.13 如何评估采集与解析
 
-一个总体平均值不能替代语言、领域、来源、时间和文件类型切片。例如 HTML 解析率 98% 可能掩盖 PDF 解析率只有 40%，英文过滤误删率很低也可能掩盖低资源语言几乎全部被删。
+采集指标要把逻辑 URL、HTTP 尝试、最终响应、解析工件分开。重试反映服务可达性和采集成本，不应让同一 URL 在 URL 级成功率中被重复计算；解析成功率也要按受支持 MIME 设分母，否则 PDF 未接入解析器会被误报成解析器故障。
 
-### 2.15.2 采集策略的消融
-
-如果过滤版本 B 比版本 A 的下游 benchmark 高，不能立即把收益归因于某个规则。两个版本可能同时改变了总 token、语言比例、重复率、时间窗口和污染程度。
-
-一个基本消融应固定：
-
-1. 模型架构、训练步数和随机种子范围。
-2. 总 token 预算和 tokenizer 版本。
-3. 评估集合和评分程序。
-4. 来源与语言切片的统计口径。
-5. 训练和评估之间的污染检查。
-
-然后比较能力、事实性、拒答、代码、长文、语言覆盖、隐私风险和成本。采集策略的价值是任务条件下的结果，不是过滤规则本身的漂亮数字。
-
-### 2.15.3 数据价值不是单一质量分
-
-可以把某个来源对任务 `t` 的增量价值写成教学用指标：
+记 `N_attempt` 为 HTTP 尝试数，`N_2xx_attempt` 为其中返回 2xx 的尝试数，`N_eligible_url` 为通过来源准入的逻辑 URL 数，`N_final_2xx_url` 为最终响应为 2xx 的 URL 数，`N_supported_2xx` 为成功响应且属于当前支持格式的数量，`N_artifact` 为可交接工件数：
 
 ~~~math
-DeltaV(s, t) = Score(D + s, t) - Score(D, t).
+R_{attempt}=A_{2xx}/A_{all},\quad
+R_{url}=U_{final2xx}/U_{eligible},\quad
+R_{parse}=P_{artifact}/P_{supported2xx}.
 ~~~
 
-`Score` 可以是代码执行成功率、事实支持率、语言任务准确率或安全边界指标。`Delta V` 受模型规模、训练预算、混合比例和随机种子影响，不能直接解释为来源的普适价值。来源贡献还可能存在互补：单独加入某个小数据源没有收益，与高质量通用数据一起训练才有收益。
+它们分别描述一次请求、一个 URL 的最终结果和支持格式的解析产出。若分母为零，应报告 `N/A`，不能把缺少观测当作成功或零失败。
 
-## 2.16 常见失败模式
+| 阶段 | 指标 | 统计分母 | 解释边界 |
+| --- | --- | --- | --- |
+| 来源准入 | 可请求来源数、拦截数、审查状态缺失数 | 候选来源或候选 URL | 不是训练授权率；各用途需分别审查 |
+| 请求尝试 | 2xx 尝试率、重试次数、超时率、429/5xx 数 | HTTP 请求尝试 | 反映请求事件和服务交互 |
+| URL 结果 | 最终 2xx URL 比率、截断 URL 数 | 已准入的逻辑 URL | 每个 URL 只计最终状态一次 |
+| 解析 | 可用工件率、字段召回率、警告率 | 成功且属于受支持 MIME 的响应；召回率用人工标注样本 | 按 MIME、来源和语言切片 |
+| 追溯 | raw 引用完整率、parser revision 完整率 | 输出工件 | 不能用 catalog 中有 URL 代替原始证据 |
 
-### 2.16.1 把 HTTP 200 当作可用内容
+例如本章 demo 的 `7/10` 是请求尝试级 2xx 比率，`7/8` 是已准入 URL 的最终 2xx 比率，而 `4/6` 是支持的 HTML 响应中可用工件的比例。如果把 10 次尝试拿来作 URL 分母，或把全部 9 个候选用作 HTML 解析器分母，数值虽然能算出来，却回答不了所声称的问题。
 
-错误页、登录页、验证码和站点模板都可能返回 200。修复方法是记录内容类型、模板指纹、正文长度、解析警告和样本抽样，并按来源观察。
+所有关键指标还要按来源、MIME、时间快照和语言候选分桶。总体 HTML 可用率为 95% 时，若某个来源、非英语页面或双栏 PDF 几乎全失败，仍然不能交付。字段召回率需要先定义“重要字段”，再用人工检查的样本对照 title、正文段落、代码、表格或页码坐标；仅统计非空文本会把错误阅读顺序也当成成功。
 
-### 2.16.2 把 robots 当成完整授权
+如果后续训练指标变化，不能仅凭采集器的某项分数解释模型增益。需要固定模型、token 预算、评估和统计口径做受控实验；来源价值与数据归因实验放在第十章。本章的验收终点是对象可追溯、请求可解释、解析可抽检，而不是宣称某来源普遍提升模型能力。
 
-robots 是抓取规则的一部分，不等于版权、合同、隐私和训练用途的完整结论。修复方法是把 robots snapshot、ToS、许可证和用途审查分别登记。
+## 2.14 采集阶段常见失败
 
-### 2.16.3 只保存清洗后的文本
+| 失败 | 为什么容易误判 | 处理方式 |
+| --- | --- | --- |
+| 把 HTTP 200 当作正文 | 登录页、验证码和错误模板可能返回 200 | 保存 MIME、状态和载荷摘要；抽样检查正文结构，模板页单独计数 |
+| 把 robots 当作训练授权 | robots 记录的是 crawler 访问偏好，不等于许可、合同和用途审查 | 将 robots snapshot、许可引用、用途状态和访问方式分开登记 |
+| 重试导致 URL 重复计数 | 尝试次数与逻辑 URL 数不同 | 为 URL/job 使用稳定 ID，分别报告尝试级与 URL 级指标 |
+| 只保存解析文本 | 无法复核阅读顺序、字段丢失或 parser regression | 保留受控原始引用、摘要、快照和 parser revision |
+| 静默跳过不支持的格式 | 下载成功掩盖了格式覆盖缺口 | 按 MIME 报告支持状态，将未知格式隔离而非计作解析成功 |
+| 全局指标掩盖切片故障 | 语言、来源和文件格式的结构不同 | 按来源、MIME、快照、语言候选报告错误和抽检结果 |
+| 把采集候选直接当作训练样本 | 后续过滤、隐私、去重和用途判断尚未完成 | 交给第三至第五章处理并保留各阶段账本 |
+| 来源状态变化后继续自动重试 | 网络重试可能绕过人工暂停或用途变更 | 重新检查准入状态；暂停来源时阻止新请求并升级审查 |
 
-没有 raw 坐标、解析版本和 hash，就无法复核误删、删除、污染和模型血缘。修复方法是保留受控原始 artifact 或足以定位原文的证据对象。
+## 2.15 资料与证据边界
 
-### 2.16.4 只做 exact dedup
-
-页面复制、模板改写、代码 fork 和跨快照重复会绕过 exact hash。修复方法是加入 near-dedup、结构化代码相似度和人工误合并检查。
-
-### 2.16.5 用全局阈值处理所有语言和领域
-
-字符分布、文档长度、标点和链接模式在语言与领域间不同。全局阈值会误删低资源语言、短问题和代码。修复方法是按切片校准并报告误删率。
-
-### 2.16.6 过滤器越多越安全
-
-每增加一个过滤器，都会增加误删、分布变化和难以解释的组合效应。过滤器应有目的、版本、正负对照和下游回归；高风险类别可以隔离并人工复核，不要把所有内容都交给一个黑盒分类器。
-
-### 2.16.7 将线上日志直接回灌
-
-线上日志包含最真实的失败，也包含最敏感的个人和业务信息。应先建立用途、同意/授权、脱敏、抽样、保留、删除和访问控制，再把复核后的样本进入版本化数据集。
-
-### 2.16.8 把“数据集发布”当作终点
-
-数据发布后仍会有许可证撤回、网页更新、删除请求、评估污染发现和模型事故。数据集需要生命周期、版本 diff、回滚、下游模型清单和变更通知。
-
-## 2.17 资料与证据边界
-
-### 2.17.1 规模与训练数据研究
+### 2.15.1 规模与训练数据研究
 
 1. [Language Models are Few-Shot Learners（GPT-3）](https://arxiv.org/abs/2005.14165)：支持大规模自回归模型、预训练语料与 few-shot 能力之间的研究背景。
 2. [Training Compute-Optimal Large Language Models（Chinchilla）](https://arxiv.org/abs/2203.15556)：支持模型参数、训练 token 和计算预算共同设计的结论。
@@ -1024,28 +733,30 @@ robots 是抓取规则的一部分，不等于版权、合同、隐私和训练�
 
 这些论文支持各自实验条件下的观察，不提供任意闭源模型的完整配方，也不证明某个来源在所有模型和任务上都有相同边际价值。
 
-### 2.17.2 Web 语料和数据处理
+### 2.15.2 Web 语料和数据处理
 
-1. [Common Crawl Overview](https://commoncrawl.org/overview)：支持公开 Web 归档的来源和使用入口；具体快照字段要以对应版本文档为准。
+1. [Common Crawl Get Started](https://www.commoncrawl.org/get-started)：官方入口列出当前可用 crawl、下载方式，并区分存放原始响应的 WARC、派生元数据的 WAT 和提取纯文本的 WET；不同快照和字段以对应记录文档为准。
 2. [Documenting Large Webtext Corpora: A Case Study on the Colossal Clean Crawled Corpus（C4）](https://arxiv.org/abs/2104.08758)：支持 C4 来源追踪、过滤效果、评估样本混入和数据集文档化讨论。
 3. [The RefinedWeb Dataset for Falcon LLM](https://arxiv.org/abs/2306.01116)：支持网页过滤、去重和开放 Web 数据构造的研究案例。
 4. [The FineWeb Datasets](https://arxiv.org/abs/2406.17557)：支持大规模网页数据处理、质量分析和训练数据研究的较新案例。
 5. [Dolma: an Open Corpus of Three Trillion Tokens](https://arxiv.org/abs/2402.00159)：支持多来源开放语料、构造流程记录和数据处理工具的案例。
 6. [DataComp-LM](https://arxiv.org/abs/2406.11794)：支持通过受控数据选择实验比较训练数据价值的研究方向。
 7. [Deduplicating Training Data Makes Language Models Better](https://arxiv.org/abs/2107.06499)：支持近重复、记忆、训练效率和 train-test overlap 的讨论。
+8. [FineWeb2: One Pipeline to Scale Them All](https://arxiv.org/abs/2506.20920)：COLM 2025 工作用 96 个 Common Crawl 快照构造 20 TB、覆盖 1,868 个语言—文字系统组合的语料；关键处理消融集中在 9 种语言、比较实验覆盖 14 种，不能把覆盖规模等同于每种语言都通过同等评估。
+9. [Can Performant LLMs Be Ethical? Quantifying the Impact of Web Crawling Opt-Outs](https://arxiv.org/abs/2504.06219)：COLM 2025 工作在其 FineWeb-Edu、1.5B 模型、特定 robots 回溯过滤和 token 预算下测量能力差异；结果不构成授权解释或跨模型、领域保证。
 
 这些论文和数据集文档说明作者如何构造、过滤和评估数据，不自动授予读者相同的版权、隐私或商业使用权。真实项目必须根据实际来源、合同和适用法域单独审查。
 
-### 2.17.3 访问、文档与治理
+### 2.15.3 访问、文档与治理
 
-1. [RFC 9309: Robots Exclusion Protocol](https://www.rfc-editor.org/rfc/rfc9309.html)：支持 robots 语法和协议行为，不能替代许可证或法务结论。
+1. [RFC 9309: Robots Exclusion Protocol](https://www.rfc-editor.org/rfc/rfc9309.html)：支持 robots 语法和协议行为；标准明确指出该规则不是访问授权，不能替代许可证或法务结论。
 2. [Datasheets for Datasets](https://arxiv.org/abs/1803.09010)：支持记录数据集动机、组成、收集过程、推荐用途和限制。
 3. [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：支持从生命周期、风险识别和治理角度组织数据管理。
 4. [NIST Generative AI Profile](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf)：支持生成式 AI 的数据来源、隐私、评估和治理风险讨论。
 
 这些资料提供协议、研究方法和治理框架；它们不能替代组织自己的许可证审查、隐私影响评估、秘密扫描、删除流程和安全测试。
 
-## 2.18 思考与实践
+## 2.16 思考与实践
 
 ### 题目一：设计来源登记表
 
@@ -1055,22 +766,20 @@ robots 是抓取规则的一部分，不等于版权、合同、隐私和训练�
 
 解释三种数据形态分别适合什么任务。设计一个解析错误案例，说明为什么只保留 WET 会让问题难以定位。
 
-### 题目三：设计污染实验
+### 题目三：复算采集指标的分母
 
-构造一个包含 benchmark 原题、模板改写和独立相似问题的测试集。选择两种相似度方法，给出人工复核协议，并说明如何报告阈值和误报。
+使用本章 demo 的 9 个候选、8 个已准入 URL 和 10 次 HTTP 尝试，分别计算尝试级 2xx 比率、最终 URL 2xx 比率、HTML 解析可用率和准入 URL 到工件比例。解释为什么 429/503 重试不能让一个 URL 变成两个样本。
 
-### 题目四：设计代码数据流程
+### 题目四：复核版面解析错误
 
-为 coding agent 设计从仓库、commit、依赖、测试到样本的血缘。说明如何处理 fork、许可证、秘密、生成文件和不能运行的项目。
+设计一份包含双栏论文、表格、代码块和脚注的抽样集。标注阅读顺序、字段召回和定位坐标，给出发现解析错误后如何从 artifact 回到 raw 快照、比较 parser revision 并隔离受影响工件。
 
-### 题目五：处理删除请求
+### 题目五：设计来源暂停后的采集处置
 
-假设某个授权来源撤回训练许可。画出 raw、parsed、dedup、token shard、checkpoint、RAG index、cache 和日志之间的路径，说明哪些动作可以直接执行，哪些结论需要重训或额外研究才能得出。
+假设一个来源由“批准”变成“暂停”。说明如何阻止 scheduler 派发新请求、处理排队重试、标记已有快照和解析工件，并把受影响对象交给第十一章的版本与删除流程。区分采集侧已完成的动作和模型侧仍需核验的结论。
 
-## 2.19 结语：采集是分布设计的第一步
+## 2.17 结语：采集是可追溯的数据入口
 
-Web-scale 数据采集的难点不在于把请求发出去，而在于把“可访问的载体”转化为“来源明确、结构可复核、风险可处理、版本可回放的数据对象”。网页提供广覆盖，书籍和论文提供长结构与专业知识，代码提供程序模式，论坛和对话提供真实任务，多语言数据决定服务范围；每种来源都需要自己的许可、解析、质量和隐私判断。
+Web-scale 采集的难点不在于发出更多请求，而在于把来源、用途、请求、响应、原始快照和解析结果连成可核验的证据链。不同来源提供不同结构与上下文；它们是否可以使用、如何解析、如何保留原文定位，都需要分别作出判断。
 
-一个成熟系统会把 source registry、访问边界、raw artifact、解析版本、质量切片、PII/秘密处理、去重、污染、mixture、评估和删除连接起来。它不会用一个平均质量分或一个总布尔值掩盖不同风险，也不会把公开网页、robots 规则和训练授权混成同一个概念。
-
-当数据团队能够回答一段内容从哪里来、为什么保留、进入了哪个版本、改变了哪种分布、发生事故时如何定位以及删除后哪些结论仍未知，Web-scale 采集才真正从“抓取工程”变成了模型能力和系统责任的基础设施。
+本章的交付终点是一个可追溯的候选工件：能说明来源和用途审查状态，能区分 URL 与请求尝试，能定位原始载荷和快照，能报告解析器版本与警告。它还不是训练样本。第三章再校准质量、隐私和过滤，第四章处理重复与污染，第五章设计训练分布；第十一章接手版本、权限和删除治理。把这些阶段的输入输出分清，才能在规模增加时仍然知道数据从何而来、哪里发生了变化，以及证据能支持到哪一步。

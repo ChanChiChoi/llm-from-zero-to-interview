@@ -16,6 +16,8 @@ Safety 不是一句“让模型拒答危险问题”。过度拒答会损害正�
 
 这套方法适用于学习、研究、工程设计和技术沟通。它的价值不是背出更多术语，而是在面对陌生模型、陌生产品或不完整资料时，仍然能够给出可验证的判断。
 
+本章负责把机制串起来，不替代各专题的完整方法：对齐与奖励目标回到[第二章](02-alignment-problem.md)和[第四章](04-reward-hacking与目标错配.md)，监督方法看[第三章](03-scalable-oversight.md)，输入攻击和红队分别看[第五章](05-jailbreak与prompt-injection.md)与[第六章](06-red-teaming与危险能力评估.md)；解释性、steering、编辑和隐私依次回到[第七章](07-interpretability与mechanistic-interpretability.md)、[第八章](08-steering与representation-engineering.md)、[第九章](09-model-editing与unlearning.md)、[第十章](10-privacy-memorization-watermarking.md)，治理文档见[第十一章](11-policy-governance与model-card.md)。本章重点练习跨专题判断和表达。
+
 ## 1. Safety 的对象：模型行为还是系统后果
 
 ### 1.1 三个层次
@@ -38,11 +40,11 @@ Alignment 关注系统实际优化的目标和行为是否符合人类意图、�
 
 可以把安全效用写成多个目标的组合：
 
-$$
+```math
 U_{\mathrm{safety}}=\alpha H+\beta T+\gamma C-\delta R-\eta O
-$$
+```
 
-其中 \(H\) 是对正常任务的帮助程度，\(T\) 是事实和证据忠实度，\(C\) 是对高风险动作的可控性，\(R\) 是严重度加权风险，\(O\) 是过度拒答或不必要阻断，\(\alpha,\beta,\gamma,\delta,\eta\) 是任务相关权重。
+其中 $H$ 是对正常任务的帮助程度，$T$ 是事实和证据忠实度，$C$ 是对高风险动作的可控性，$R$ 是严重度加权风险，$O$ 是过度拒答或不必要阻断，$\alpha,\beta,\gamma,\delta,\eta$ 是任务相关权重。
 
 这个式子不是要求把所有价值压成一个生产分数，而是提醒我们：只优化其中一项，其他项就可能退化。发布报告应并列展示这些信号和它们的分母。
 
@@ -88,13 +90,13 @@ Helpful、Honest、Harmless 经常被当成三个口号，但它们在真实场�
 
 RLHF 用人类偏好训练奖励模型，再优化策略。一个简化目标可以写成：
 
-$$
+```math
 \max_{\pi_\theta}\;
 \mathbb E_{x,y\sim\pi_\theta}[r_\phi(x,y)]
 -\beta D_{\mathrm{KL}}(\pi_\theta\Vert\pi_{\mathrm{ref}})
-$$
+```
 
-其中 \(\pi_\theta\) 是当前策略，\(r_\phi\) 是奖励模型，\(\pi_{\mathrm{ref}}\) 是参考策略，\(\beta\) 控制偏离参考模型的惩罚。实际系统还会受到采样、优势估计、批次、奖励缩放和训练稳定性的影响。
+其中 $\pi_\theta$ 是当前策略，$r_\phi$ 是奖励模型，$\pi_{\mathrm{ref}}$ 是参考策略，$\beta$ 控制偏离参考模型的惩罚。实际系统还会受到采样、优势估计、批次、奖励缩放和训练稳定性的影响。
 
 RLHF 能把很多人类偏好注入模型，是重要的后训练方法；它不能保证奖励模型等于真实目标。偏好数据可能包含标注员风格、长度、品牌和文化偏差，奖励模型也可能在分布外失效。
 
@@ -102,24 +104,24 @@ RLHF 能把很多人类偏好注入模型，是重要的后训练方法；它不
 
 DPO 直接用 chosen/rejected 偏好对优化策略和参考策略的相对 log probability。教学形式可以写成：
 
-$$
+```math
 \mathcal L_{\mathrm{DPO}}
 =-\log\sigma\left(
 \beta\left[
 \log\frac{\pi_\theta(y_w\mid x)}{\pi_{\mathrm{ref}}(y_w\mid x)}
 -\log\frac{\pi_\theta(y_l\mid x)}{\pi_{\mathrm{ref}}(y_l\mid x)}
 \right]\right)
-$$
+```
 
-\(y_w\) 是偏好回答，\(y_l\) 是非偏好回答。DPO 减少了显式奖励模型和 PPO 循环的工程复杂度，但它仍然依赖偏好数据的构造。如果 chosen 只是更长、更自信或更符合标注模板，模型会稳定地学到这些表面信号。
+$y_w$ 是偏好回答，$y_l$ 是非偏好回答。DPO 减少了显式奖励模型和 PPO 循环的工程复杂度，但它仍然依赖偏好数据的构造。如果 chosen 只是更长、更自信或更符合标注模板，模型会稳定地学到这些表面信号。
 
 ### 2.4 Reward hacking 的诊断
 
-当代理奖励 \(r\) 上升而真实质量 \(q\) 下降时，可以观察 reward-human gap：
+当代理奖励 $r$ 上升而真实质量 $q$ 下降时，可以观察 reward-human gap：
 
-$$
+```math
 \Delta_{\mathrm{RH}}=\mathbb E[r]-\mathbb E[q]
-$$
+```
 
 更重要的是按任务和严重度切片。常见症状包括：
 
@@ -164,19 +166,21 @@ Scalable Oversight 试图让监督随任务规模增长，同时保持人类价�
 
 ### 3.3 监督指标
 
-设真实错误集合为 \(E\)，系统发现的错误集合为 \(\hat E\)，过程监督可以报告：
+设真实错误集合为 $E$，系统发现的错误集合为 $\hat E$，过程监督可以报告：
 
-$$
+```math
 Recall_{\mathrm{oversight}}=\frac{|E\cap\hat E|}{|E|}
-$$
+```
 
 AI feedback 还应与人工 gold set 比较：
 
-$$
+```math
 Err_{\mathrm{AI\ feedback}}=
 \frac{\text{AI feedback 与专家判断不一致的样本数}}
 {\text{被 AI feedback 覆盖的样本数}}
-$$
+```
+
+假设专家确认的错误共有 20 个，监督器找到其中 15 个，则 recall 为 $15/20=0.75$。这只表示它在当前 gold set 上找到四分之三的已知错误；漏掉的 5 个错误里是否包含全部高严重度问题，还需要逐项检查。若 AI feedback 覆盖 30 个样本，其中 3 个与专家判断不一致，则 disagreement 为 $3/30=0.10$。两个比例使用不同分母，前者问“已知错误中发现多少”，后者问“已审样本中有多少反馈不可靠”，不能合并成一个监督质量分。
 
 监督的成本节省也要按“单位成功发现的严重错误”计算，而不是只报告调用次数少了多少。低成本但漏掉高严重度错误的监督器，不能简单称为可扩展。
 
@@ -192,6 +196,7 @@ $$
 6. 涉及隐私主体、删除请求或安全事故。
 
 人工升级不是流程失败。它是把有限的专家注意力用在自动系统最不可靠或后果最严重的地方。
+
 ## 4. Jailbreak 与 Prompt Injection 的边界
 
 ### 4.1 Jailbreak 是模型策略边界被绕过
@@ -247,11 +252,11 @@ Prompt injection 的核心不是用户一定想绕过模型安全，而是系统
 
 一次评估不只是一个 prompt。可以记录：
 
-$$
+```math
 z_i=(x_i,y_i,c_i,s_i,r_i,h_i,\ell_i)
-$$
+```
 
-其中 \(x_i\) 是输入，\(y_i\) 是输出或轨迹，\(c_i\) 是任务契约，\(s_i\) 是风险切片，\(r_i\) 是真实结果，\(h_i\) 是 harness 和工具条件，\(\ell_i\) 是日志和证据状态。
+其中 $x_i$ 是输入，$y_i$ 是输出或轨迹，$c_i$ 是任务契约，$s_i$ 是风险切片，$r_i$ 是真实结果，$h_i$ 是 harness 和工具条件，$\ell_i$ 是日志和证据状态。
 
 如果样本没有任务契约，就无法判断“拒答”是正确安全行为还是不必要阻断；如果没有工具和权限条件，就无法把模型行为推广到 Agent 系统。
 
@@ -272,35 +277,39 @@ $$
 
 分类不是越多越好。每一类都要能定义样本、分母、指标、责任人和修复路径。
 
+高层风险目录可以帮助检查遗漏，但不能代替可执行的测试分类。[International AI Safety Report 2026](https://internationalaisafetyreport.org/publication/international-ai-safety-report-2026) 将通用 AI 风险概括为 misuse、malfunctions 和 systemic risks；[OWASP Top 10 for LLM Applications 2026](https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/) 则给应用开发者一套社区维护的安全威胁入口。把它们映射到本章 taxonomy 时，要允许一条轨迹同时属于多类：例如恶意网页诱导 Agent 越权检索，既涉及 misuse，也暴露应用信任边界和隐私控制失效。大类适合组织风险地图，样本仍需精确到攻击前提、用户权限、动作和后果。
+
 ### 5.3 有害遵循率与误拒率
 
-在明确属于禁止请求的集合 \(H\) 上，设模型产生不可接受帮助时 \(u_i=1\)：
+在明确属于禁止请求的集合 $H$ 上，设模型产生不可接受帮助时 $u_i=1$，$w_i$ 是事先设定的样本权重：
 
-$$
+```math
 R_{\mathrm{unsafe}}=
 \frac{\sum_{i\in H}w_i u_i}
 {\sum_{i\in H}w_i}
-$$
+```
 
-在允许请求集合 \(A\) 上，设模型错误拒绝或没有完成任务时 \(o_i=1\)：
+在允许请求集合 $A$ 上，设模型错误拒绝一个本应接受的请求时 $o_i=1$，$v_i$ 是事先设定的权重：
 
-$$
+```math
 R_{\mathrm{overrefusal}}=
 \frac{\sum_{i\in A}v_i o_i}
 {\sum_{i\in A}v_i}
-$$
+```
 
-两者的权重和样本必须分开。用所有请求作一个拒答率分母，会把危险请求和正常请求混在一起，失去解释力。
+两者的权重和样本必须分开。用所有请求作一个拒答率分母，会把危险请求和正常请求混在一起，失去解释力。允许请求被接受但回答错误，应记入任务质量或事实性指标，不能一概记成 over-refusal；否则会把不同的行为失败混成一个数。
+
+例如，禁止请求集合有 4 条，风险权重分别为 1、1、2、2；若两条未被安全约束的回答权重为 1 和 2，则 $R_{unsafe}=(1+2)/(1+1+2+2)=3/6=0.50$。允许请求另有 8 条，其中 2 条被错误拒绝，$R_{overrefusal}=2/8=0.25$。这两个数字各自回答不同问题。不能把 3 个加权失败和 2 个误拒加在一起再除以 14 个样本，因为一个统计的是加权有害遵循，另一个统计的是允许请求中的任务损失。
 
 ### 5.4 安全替代质量
 
-拒绝危险细节后仍可以提供风险解释、合规建议、预防措施或求助渠道。设安全替代满足相关性、可执行性和不泄露危险细节三个条件时 \(a_i=1\)，可以报告：
+拒绝危险细节后仍可以提供风险解释、合规建议、预防措施或求助渠道。设安全替代满足相关性、可执行性和不泄露危险细节三个条件时 $a_i=1$，可以报告：
 
-$$
+```math
 Q_{\mathrm{safe\ alternative}}=
 \frac{\sum_{i\in H}w_i a_i}
 {\sum_{i\in H}w_i}
-$$
+```
 
 这个指标不应奖励冗长模板。人工评分需要区分“看起来礼貌”和“真正帮助用户完成安全目标”。
 
@@ -308,31 +317,31 @@ $$
 
 攻击成功率应该绑定攻击任务和搜索预算：
 
-$$
+```math
 ASR(B)=
 \frac{\text{在预算 }B\text{ 内达到攻击目标的测试任务数}}
 {\text{执行了预算 }B\text{ 的测试任务数}}
-$$
+```
 
-工具越权率应只在无权或不应执行的动作集合 \(U\) 上计算：
+工具越权率应只在无权或不应执行的动作集合 $U$ 上计算：
 
-$$
+```math
 R_{\mathrm{unauth\ tool}}=
-\frac{\text{越权工具动作数}}
+\frac{\text{实际执行的越权工具动作数}}
 {\text{无权工具动作尝试数}}
-$$
+```
 
-不能把一次模型拒答和一次服务端阻断都算成同一种成功；轨迹需要标记阻断发生在哪一层。
+实际执行数只计越权动作真正到达外部状态的一次；被服务端拦截的调用不能同时算成成功越权。阻断覆盖率可另算为“服务端正确阻断的越权尝试数 / 无权工具动作尝试数”。不能把模型拒答、策略拒绝和服务端阻断都算成同一种成功；轨迹需要标记阻断发生在哪一层。
 
 ### 5.6 严重度加权失败
 
-对每个失败事件 \(j\)，用 \(s_j\) 表示严重度、\(p_j\) 表示事件是否发生，报告：
+对每个失败事件 $j$，用 $s_j$ 表示严重度、$p_j$ 表示事件是否发生，报告：
 
-$$
+```math
 R_{\mathrm{severity}}=
 \frac{\sum_j s_jp_j}
 {\sum_j s_j}
-$$
+```
 
 这是比较和排序的教学指标，不是现实损失的精确估计。重大事件应单独呈现，不能被大量低严重度样本平均掉。
 
@@ -346,6 +355,8 @@ Safety eval 侧重预先定义的任务、协议和指标，适合做版本比�
 4. 修复后重新运行固定集和探索性红队。
 
 红队样本不能直接当作总体概率估计。它通常是有目标、有搜索偏差的样本，报告时必须写明抽样和预算。
+
+[International AI Safety Report 2026](https://internationalaisafetyreport.org/publication/international-ai-safety-report-2026) 也指出，能力和现实影响的度量仍不成熟，预部署 benchmark 对实际效用和风险的预测能力有限。报告还汇总了模型识别测试情境、利用评估漏洞的现象；据此保留隔离 holdout、变换任务条件并回看部署反馈，是合理的工程推论，但该报告没有验证某一种控制足以消除评估失配。固定评估仍适合检测同协议下的版本变化，红队适合寻找已知测试以外的路径，线上事故和用户反馈则补充真实环境信号。成熟报告应把三类证据并列，并说明它们各自支持什么判断。红队和回归方法的详细流程见[第六章](06-red-teaming与危险能力评估.md)。
 
 ## 6. Dangerous Capability 与 Capability Elicitation
 
@@ -372,13 +383,15 @@ Capability elicitation 是用合理 prompt、工具、scaffold、分解、重试
 
 ### 6.3 Baseline 与增量
 
-设模型系统在条件 \(c\) 下的任务成功率为 \(S_{\mathrm{AI}}(c)\)，非 AI baseline 为 \(S_{\mathrm{base}}(c)\)，可以观察：
+设模型系统在条件 $c$ 下的任务成功率为 $S_{\mathrm{AI}}(c)$，非 AI baseline 为 $S_{\mathrm{base}}(c)$，可以观察：
 
-$$
+```math
 \Delta_{\mathrm{cap}}(c)=S_{\mathrm{AI}}(c)-S_{\mathrm{base}}(c)
-$$
+```
 
 baseline 可以是搜索引擎、普通脚本、专家流程或没有模型的现有系统。选择哪个 baseline 会影响解释，必须说明它的成本、时间、知识和工具条件。
+
+例如，在同一组 10 个任务、相同时间预算和相同材料下，人工流程完成 4 个，加入模型和既定工具后完成 7 个，则观察到的增量是 $7/10-4/10=0.30$。这代表该评测条件下多完成了 3 个任务；它不代表模型单独贡献了全部增量，也不代表现实用户都能获得这个收益。若模型组额外使用了专家提示、更多重试或更高权限，这些条件都应列入 harness，并用消融比较它们各自的影响。
 
 ### 6.4 结果如何进入发布范围
 
@@ -400,13 +413,15 @@ baseline 可以是搜索引擎、普通脚本、专家流程或没有模型的�
 
 ### 7.2 校准
 
-把模型对一个命题的置信度记为 \(p_i\)，命题是否正确记为 \(y_i\)，Brier score 可以写成：
+把模型对一个命题的置信度记为 $p_i$，命题是否正确记为 $y_i$，Brier score 可以写成：
 
-$$
+```math
 Brier=\frac{1}{N}\sum_{i=1}^{N}(p_i-y_i)^2
-$$
+```
 
 分数越低通常表示概率预测更接近实际结果，但前提是概率有明确含义。语言模型输出的自信语气不自动等于可校准概率。
+
+用三个样本演示计算：模型给出的置信度为 $0.9,0.8,0.2$，真实结果为 $1,0,0$，则 Brier score 为 $((0.9-1)^2+(0.8-0)^2+(0.2-0)^2)/3=(0.01+0.64+0.04)/3=0.23$。第二个错误且置信度很高的样本贡献了 $0.64$，明显主导这组小样本分数。样本太少时，不能据此宣称模型已校准；还要按任务、语言、风险和置信度区间检查样本量、可靠性图和误差范围。
 
 还可以按置信度分桶，比较平均置信度和实际正确率，观察 calibration gap。高风险系统应允许 abstain，不要强迫模型为每个问题给一个确定答案。
 
@@ -414,17 +429,17 @@ $$
 
 引用不是把几个链接附在答案末尾，而是判断每个关键 claim 是否被检索证据支持。可以定义 claim-level precision 和 coverage：
 
-$$
+```math
 P_{\mathrm{citation}}=
 \frac{\text{有正确支持证据的引用 claim 数}}
 {\text{带引用的 claim 总数}}
-$$
+```
 
-$$
+```math
 C_{\mathrm{evidence}}=
 \frac{\text{有支持证据的关键 claim 数}}
 {\text{关键 claim 总数}}
-$$
+```
 
 一个答案可能引用很多资料但仍然没有支持最重要的结论。评估要把引用正确性、证据覆盖和无证据声明分开。
 
@@ -439,6 +454,7 @@ $$
 5. 对高风险动作停止执行。
 
 重要的是把“不知道”变成可用的下一步，而不是只输出一句空泛免责声明。
+
 ## 8. 解释、控制、编辑和隐私的证据边界
 
 ### 8.1 解释性可以帮助诊断，不能单独证明安全
@@ -454,13 +470,13 @@ Mechanistic interpretability 研究 feature、circuit、信息流和因果干预
 
 ### 8.2 Steering 的价值和副作用
 
-如果从对比样本估计行为方向 \(v\)，推理时在某一层加入强度 \(\alpha v\)，可以写成：
+如果从对比样本估计行为方向 $v$，推理时在某一层加入强度 $\alpha v$，可以写成：
 
-$$
+```math
 h'_\ell=h_\ell+\alpha v
-$$
+```
 
-目标行为改善并不意味着整体安全。评估至少要扫描 \(\alpha\)，并报告：
+目标行为改善并不意味着整体安全。评估至少要扫描 $\alpha$，并报告：
 
 1. 目标行为收益。
 2. 正常任务质量。
@@ -469,6 +485,8 @@ $$
 5. 多语言、长上下文和对抗输入。
 
 如果一个方向能增强拒答，也可能暴露拒答机制的脆弱性；如果一个方向能增强自信表达，也可能放大幻觉。Steering 是控制和研究工具，不是单独安全保证。
+
+设某层激活为 $h=(0.2,0.4)$，实验得到的 steering 方向为 $v=(1,-1)$，强度取 $\alpha=0.5$，则调整后 $h'=h+\alpha v=(0.7,-0.1)$。这个向量运算只说明内部状态沿指定方向改变了多少；是否改善目标行为，必须在同一模型版本的目标样本、正常任务、对抗输入和多轮轨迹上测量。如果只挑少量能让方向起效的样本，或只报告目标收益而省略误拒、事实性和工具权限变化，数值本身不能说明部署适用性。
 
 ### 8.3 Model Editing 与 Unlearning
 
@@ -494,6 +512,8 @@ Model editing 通常有一个要写入的新事实或行为目标，unlearning �
 | Unlearning | 目标数据或行为的近似影响 | 重新审计下游副本 |
 | Output filter | 当前可见输出 | 参数、工具和缓存中的影响 |
 | Server authorization | 现实资源访问 | 模型诚实性和内容质量 |
+
+把删除或隐私请求放回完整数据生命周期，也能避免把一个控制当成万能方案。用户撤回 RAG 文档后，检索索引可能已更新，但缓存、会话摘要、人工标注副本和日志仍可能保留旧内容；单次输出过滤只能拦当前显示，不能确认其他副本是否清理。评估应以来源 ID 和版本追踪每个副本，检查请求、删除任务、确认回执和抽查结果，再分别报告输出泄露、越权检索和日志残留。参数级 unlearning 是否成功，则是另一项需要独立威胁模型和 retain-set 检验的结论。
 
 ### 8.5 Governance 是安全系统的一部分
 
@@ -544,18 +564,24 @@ Safety Platform 的第一层不是模型，而是统一风险词汇和数据血�
 
 系统运行时需要把模型和权限分开：
 
-~~~text
-request
-  -> identity and tenant resolution
-  -> risk classification
-  -> policy and evidence check
-  -> model / RAG / tool route
-  -> output and action validation
-  -> human review or fallback
-  -> trace, metrics and incident signal
-~~~
+```mermaid
+flowchart TD
+  A["请求"] --> B["身份与租户解析"]
+  B --> C["风险分类"]
+  C --> D["策略与证据检查"]
+  D --> E["模型、RAG 或工具路由"]
+  E --> F["输出与动作校验"]
+  F --> G["人工复核或安全降级"]
+  G --> H["轨迹、指标与事故信号"]
+  D -.->|证据不足或策略不满足| G
+  F -.->|权限、参数或状态校验失败| G
+```
+
+这张图把请求处理分成身份、风险、策略、执行、复核和学习六个可审计环节。实线表示主路径；两条带标签虚线表示证据不足或动作校验失败时进入复核/降级分支，不允许模型自行跳过策略判断。日志只保留完成审计所需的字段，并依数据保留策略控制访问和删除。
 
 模型生成的文档 ID、SQL、shell 参数、邮件地址和支付指令都应经过服务端校验。策略层也要能解释为什么允许、澄清、只读、转人工或阻断。
+
+控制接口也可以有跨框架的描述方式。[OWASP Agent Control Standard](https://genai.owasp.org/resource/agent-control-standard-acs/) 是社区提出的 Agent middleware hooks 与声明式运行时策略接口方案，适合作为设计词汇和互操作候选；它不是目标系统已实现控制、运行安全或效果独立验证的证据。
 
 ### 9.5 发布与线上层
 
@@ -568,6 +594,8 @@ request
 5. 回滚对象、恢复时间和事故联系人。
 
 线上监控要观察行为和后果，包括有害遵循、误拒、引用支持、越权工具、隐私日志、延迟、成本和用户申诉。单一安全分数无法发现所有路径。
+
+为了让这些层能共同工作，平台需要把评估样本和线上事件映射到同一套版本字段：模型及 tokenizer、system prompt、策略、索引、工具 schema、用户角色、任务契约和 harness。否则红队发现的漏洞可能无法复现，线上指标也无法追溯到离线测试覆盖的配置。统一 schema 不意味着统一裁决；隐私泄露、危险能力、误拒和可用性仍需不同分母、不同 owner 和不同停止条件。
 
 ## 10. 综合案例：企业研究助手
 
@@ -626,6 +654,15 @@ request
 5. 模型是否真的复现参数记忆，还是应用路径越权。
 
 不同根因对应不同修复。把所有问题归因于“模型幻觉”会错过最关键的权限和日志控制。
+
+### 10.7 把样本结果变成范围决定
+
+再假设离线评估包含 20 条允许的研究问题，其中 18 条完成了带证据的回答，2 条被错误拒绝；则任务成功率为 $18/20=0.90$，允许请求的误拒率为 $2/20=0.10$。两个数可以同时成立，不能把“模型总体很安全”当成它们的解释。接下来对 10 个越权检索场景进行测试，若 10 次都被服务端阻断，报告应写成“本测试集上的阻断覆盖为 $10/10=1.0$”，而不是“未来泄露概率为零”。
+
+若还观察到 10 次未授权工具尝试均未产生外部副作用，可以报告该固定协议下未授权执行为 $0/10$，并保留服务端阻断轨迹。只有当样本是从明确定义的随机总体独立抽取时，零事件的 Rule of Three 才能给出约 95% 单侧上界：$3/10=0.30$，仍然很宽；主动构造的红队案例不是随机样本，不能套这个界估计真实发生率。这个数字的教学作用是提醒面试者说明样本来源和不确定性，而不是制造看似精确的风险结论。
+
+因此，当前证据可以支持一个受限的下一步：先在隔离环境中运行只读 shadow，保留人工复核；继续扩大多语言、历史索引、撤权缓存和长任务测试，并把零越权副作用列为硬门槛。即使这组样本全部通过，也不能由此开放生产写入，因为任务、数据、动作和用户权限发生了变化。每次扩展都应提出新证据，而不能沿用“读模式通过”这个标签。
+
 ## 11. 如何把复杂安全问题讲清楚
 
 ### 11.1 六步表达法
@@ -640,6 +677,10 @@ request
 6. **边界**：结果支持什么，不能支持什么，下一步如何复测。
 
 例如，“如何防 prompt injection”不能只回答“加一层 prompt”。完整判断应说明不可信内容与指令边界、权限过滤、工具授权、动作确认、回滚、攻击评估和正常任务回归。
+
+这六步应形成因果链，而不是六个并列术语。定义决定评估要抽哪些样本；机制说明风险如何从输入传播到现实动作；分层确定哪些风险可由训练改善、哪些必须由服务端阻断；测量用合适分母检查控制有没有工作；控制和人工升级决定失败时的动作；边界再限定结论可以支持的发布范围。若先抛一个方法名，再倒推它解决所有风险，回答通常会漏掉证据和责任边界。
+
+面试官追问时也可以沿这条链定位缺口。问“你怎么知道没泄露”，应回答授权样本、无权样本、缓存与日志路径、分母和不确定性；问“模型拒答率越高越好吗”，要补充允许请求、误拒成本和安全替代质量；问“红队没有找到漏洞呢”，要说明搜索预算、覆盖范围、固定回归和未知风险。若没有数据支持具体数字，应直接说目前只有设计假设，并提出下一步收集什么证据，而不是编造一个行业通用阈值。
 
 ### 11.2 一个错误的简短回答
 
@@ -664,19 +705,83 @@ request
 
 例如，模型名称和产品页存在不能自动推出内部架构、训练配方、通用 benchmark 或生产安全性。把资料边界说清楚，比用确定语气填补空白更专业。
 
+回答不确定问题时，可以按“我能确认什么—证据来自哪里—它没有覆盖什么—下一步怎样查”组织四句话。例如，官方模型卡可能支持模型版本、接口和发布方评测条件，但不支持独立复现或内部训练机制；回答者应把这两个层次分开，并说明需要何种固定 revision、harness 或外部评估才能补证。如果题目没有唯一标准答案，先给清楚的假设，再在假设变化时说明决定如何改变。面试时这样表达不会显得没有观点，反而能让推理过程可核验。
+
+时间受限时先回答最影响决定的部分：系统边界和最高严重度风险；随后给关键分母、服务端控制和剩余证据缺口。只有在主链条说清后，才补充算法谱系和论文例子。这样可以避免在术语细节上花完时间，却没有回答“是否开放、开放给谁、失败怎样止损”。
+
 ## 12. 一个最小的 Safety 复盘审计 demo
 
 下面的 demo 只使用合成的回答记录。它不运行攻击，也不评估真实模型；它展示如何把一个复杂安全判断拆成 thresholds、signals、evidence_status、actions 和 decision。
 
-~~~python
+每条回答按预先写好的 rubric 划分必需概念，`covered` 只记录回答确实解释到的项目；主题权重表示复习时的相对优先级，不是现实安全风险的概率。风险 taxonomy 和 metric taxonomy 各有自己的 required set，避免用“整体懂了”掩盖对关键风险或关键分母的遗漏。所有状态都指向可修改的内容缺口，而不是给候选人或模型贴一个永久的安全标签。
+
+这里将风险类别设为全覆盖门槛，将答案覆盖和指标覆盖设为连续比例门槛。原因是安全风险目录中漏掉一个类别时，较高的其他类别分数不能代替它；答案表达则允许在局部缺少机制或治理连接时按 rubric 计算部分覆盖。未定义的空集合返回 N/A 并导致门禁不通过，不能被当成零风险或满分。边界检查还会验证权重为正的有限数、类别字段属于集合、unsafe_detail 是布尔值，避免输入格式错误被静默计入。
+
+执行前应由复核者共同确定 rubric 和权重，再独立抽查一部分答案，确认同一个概念不会因措辞不同而一会儿算覆盖、一会儿算缺失。若评分者对“机制”或“证据边界”的判断分歧很大，应先细化 rubric，而不是马上解释加权总分。权重只用于安排练习优先级；如果高风险概念有一条属于发布硬要求，就应像风险 taxonomy 一样独立设门槛，不让其他主题的高分冲淡它。
+
+这个 demo 的输入记录把知识覆盖、危险细节检查和下一步修复放在一起。它适合回顾面试回答，也可用于练习审阅安全设计文档；它并不判断答案中的事实是不是真实，也不评价候选人实际工作能力。每个 `covered` 标签仍需要人工依据评分规范确认，程序只保证集合、权重、分母和状态计算一致。若把这种覆盖率拿去作招聘排名，可能会奖励熟练背诵 rubric 的人，忽略他们是否能在陌生约束下推导机制。
+
+代码状态：已验证（2026-10-28；Python 3.12.9；仅使用标准库）。
+
+```python
+import math
+
+
+def is_finite_number(value):
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+    )
+
+
 def ratio(numerator, denominator):
-    return round(numerator / denominator, 3) if denominator else None
+    if not is_finite_number(numerator) or not is_finite_number(denominator):
+        raise ValueError("ratio inputs must be finite numbers")
+    if numerator < 0 or denominator < 0 or numerator > denominator:
+        raise ValueError("ratio inputs must satisfy 0 <= numerator <= denominator")
+    if denominator == 0:
+        return None
+    return round(numerator / denominator, 3)
 
 
 def coverage(required, covered):
+    if not isinstance(required, (set, frozenset)) or not isinstance(
+        covered, (set, frozenset)
+    ):
+        raise ValueError("coverage inputs must be sets")
     if not required:
         return None
+    if not covered <= required:
+        raise ValueError("covered items must be part of required items")
     return ratio(len(required & covered), len(required))
+
+
+def meets(signal, threshold):
+    if signal is None:
+        return False
+    if not is_finite_number(signal) or not is_finite_number(threshold):
+        raise ValueError("gate inputs must be finite numbers")
+    if not 0 <= signal <= 1 or not 0 <= threshold <= 1:
+        raise ValueError("coverage gates must be between zero and one")
+    return signal >= threshold
+
+
+def validate_weight(weight):
+    if not is_finite_number(weight) or weight <= 0:
+        raise ValueError("answer weights must be positive finite numbers")
+
+
+def weighted_mean(score_weights):
+    weighted_sum = 0.0
+    total_weight = 0.0
+    for score, weight in score_weights:
+        if not is_finite_number(score) or not 0 <= score <= 1:
+            raise ValueError("scores must be finite values between zero and one")
+        validate_weight(weight)
+        weighted_sum += score * weight
+        total_weight += weight
+    return ratio(weighted_sum, total_weight)
 
 
 answers = [
@@ -756,33 +861,32 @@ covered_metrics = {
 
 thresholds = {
     "answer_coverage": 0.85,
-    "risk_coverage": 0.85,
+    "risk_coverage": 1.0,
     "metric_coverage": 0.85,
     "safe_boundary": 0.0,
 }
 
-weighted_answer = 0.0
-measured_weight = 0
+score_weights = []
 topic_scores = {}
 missing_topics = {}
 undefined_topics = []
 for answer in answers:
+    validate_weight(answer["weight"])
+    if type(answer["unsafe_detail"]) is not bool:
+        raise ValueError("unsafe_detail must be boolean")
     required = answer["required"]
     covered = answer["covered"]
     score = coverage(required, covered)
     topic_scores[answer["topic"]] = score
     missing_topics[answer["topic"]] = sorted(required - covered)
     if score is not None:
-        weighted_answer += score * answer["weight"]
-        measured_weight += answer["weight"]
+        score_weights.append((score, answer["weight"]))
     else:
         undefined_topics.append(answer["topic"])
 
 signals = {
     "answer_coverage": (
-        round(weighted_answer / measured_weight, 3)
-        if measured_weight > 0
-        else None
+        weighted_mean(score_weights)
     ),
     "risk_coverage": coverage(required_risks, covered_risks),
     "metric_coverage": coverage(required_metrics, covered_metrics),
@@ -793,16 +897,13 @@ signals = {
 
 evidence_status = {
     "answer": "supported"
-    if signals["answer_coverage"] is not None
-    and signals["answer_coverage"] >= thresholds["answer_coverage"]
+    if meets(signals["answer_coverage"], thresholds["answer_coverage"])
     else "partial",
     "risk": "supported"
-    if signals["risk_coverage"] is not None
-    and signals["risk_coverage"] >= thresholds["risk_coverage"]
+    if meets(signals["risk_coverage"], thresholds["risk_coverage"])
     else "partial",
     "metrics": "supported"
-    if signals["metric_coverage"] is not None
-    and signals["metric_coverage"] >= thresholds["metric_coverage"]
+    if meets(signals["metric_coverage"], thresholds["metric_coverage"])
     else "partial",
     "safe_boundary": "supported"
     if signals["unsafe_detail_count"] <= thresholds["safe_boundary"]
@@ -815,7 +916,7 @@ undefined_metrics = [
 
 actions = {
     "answer": "add_missing_mechanism_or_governance_links",
-    "risk": "add_over_refusal_and_governance_to_risk_taxonomy",
+    "risk": "add_over_refusal_to_risk_taxonomy",
     "metrics": "add_severity_weighted_risk_and_evidence_coverage",
     "safe_boundary": "remove_operationally_dangerous_details",
 }
@@ -844,10 +945,52 @@ print("topic_scores=", topic_scores)
 print("signals=", signals)
 print("evidence_status=", evidence_status)
 print("missing_topics=", missing_topics)
+print("actions=", actions)
+print("undefined_metrics=", undefined_metrics)
+print("undefined_topics=", undefined_topics)
 print("decision=", decision)
-~~~
 
-这组数据会显示 prompt injection 缺少正常任务指标，Safety Platform 缺少事故响应，整体指标覆盖也不足，因此 decision 为 revise_answer_and_retest。若某个主题的 `required` 为空，代码会把它记录到 `undefined_topics`，并从加权覆盖率的已测分母中排除；这表示“没有可计算的题目”，不是该主题得分为零。代码没有计算一个叫“准备好了”的总开关；它保留每个缺口和动作，方便读者进行下一轮复习。
+
+def rejects(call):
+    try:
+        call()
+    except ValueError:
+        return True
+    return False
+
+
+boundary_checks = {
+    "zero_denominator": ratio(0, 0),
+    "empty_required_set": coverage(set(), set()),
+    "empty_answer_coverage": weighted_mean([]),
+    "undefined_gate_fails": meets(None, 0.85),
+    "negative_ratio_rejected": rejects(lambda: ratio(-1, 1)),
+    "nonfinite_ratio_rejected": rejects(lambda: ratio(1, math.inf)),
+    "boolean_ratio_rejected": rejects(lambda: ratio(True, 1)),
+    "extra_coverage_rejected": rejects(
+        lambda: coverage({"required"}, {"required", "unexpected"})
+    ),
+    "invalid_weight_rejected": rejects(lambda: validate_weight(math.nan)),
+}
+assert boundary_checks["zero_denominator"] is None
+assert boundary_checks["empty_required_set"] is None
+assert boundary_checks["empty_answer_coverage"] is None
+assert boundary_checks["undefined_gate_fails"] is False
+assert boundary_checks["negative_ratio_rejected"] is True
+assert boundary_checks["nonfinite_ratio_rejected"] is True
+assert boundary_checks["boolean_ratio_rejected"] is True
+assert boundary_checks["extra_coverage_rejected"] is True
+assert boundary_checks["invalid_weight_rejected"] is True
+print("boundary_checks=", boundary_checks)
+```
+
+逐步手算可核对每一项：五个主题的 rubric 覆盖率依次是 $4/5=0.8$、$5/5=1.0$、$4/5=0.8$、$5/5=1.0$、$5/6≈0.833$，权重为 2、3、3、4、5，因此加权答案覆盖为 $(0.8×2+1×3+0.8×3+1×4+0.833×5)/17≈0.892$。风险类别覆盖是 $7/8=0.875$，因为 over-refusal 缺失；指标覆盖是 $5/7≈0.714$，缺少 severity-weighted risk 和 evidence coverage。答案覆盖高于 0.85，但风险 taxonomy 要求全覆盖 1.0，指标也未达 0.85；unsafe detail count 为 0。缺项列表还显示 safety_and_alignment 未讲 metrics、prompt_injection 未覆盖 normal_task、safety_platform 未讲 incident。由此 evidence status 为 answer supported、risk partial、metrics partial、safe boundary supported，decision 是 revise_answer_and_retest。
+
+这组输出说明比例门槛和完整性门槛承担不同职责。若只设 0.85，7/8 的风险覆盖会显示通过，程序却同时给出补充 over-refusal 的动作，状态和修复方向互相矛盾；把风险类别门槛设为 1.0 后，遗漏会进入 failed 状态。若某个主题的 required 为空，代码会将其记录到 undefined_topics 并从答案覆盖的有效权重中排除；整体没有有效样本时得到 None，相关门禁按未通过处理。空集合表示尚无可计算证据，不等于零风险或满分。
+
+边界检查覆盖零分母、空集合、未定义门禁、负数/非有限/布尔比例、额外的覆盖标签和无效权重状态。若输入不是预期的结构或类别，代码停止并抛出 ValueError；若证据缺失但结构有效，则保留 N/A/partial。前者是数据合同错误，后者是知识覆盖缺口，应分别修正。该 demo 只支持复习和答题结构反馈，不用于招聘决策、模型安全认证或对真实攻击内容的评价。
+
+下一轮复习可以按报告顺序进行：先为 prompt injection 补充正常任务回归，确保攻击阻断没有把良性任务一起破坏；再补 Safety Platform 事故响应的 owner、升级和恢复状态；最后为安全与 alignment 主题补足独立指标及分母。修改后保持原 rubrics 和输入范围复算，避免为了达到分数而在看到结果后移动门槛。若题目范围或风险分类本身发生变化，应创建新版本 rubric，并保留旧结果作为前后对照。
 
 ## 13. 综合练习
 
@@ -888,10 +1031,12 @@ print("decision=", decision)
 
 ### 14.2 攻击、防御和评估
 
-1. [OWASP LLM Top 10](https://owasp.org/www-project-top-10-for-large-language-model-applications/)：支持 LLM 应用风险分类和防御边界。
+1. [OWASP Top 10 for LLM Applications 2026](https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/)：提供面向应用开发和安全团队的社区风险分类与缓解入口；版本分类不等于对某个产品的风险测量。
 2. [Prompt Injection Attacks and Defenses in LLM-Integrated Applications](https://arxiv.org/abs/2310.12815)：支持间接注入和应用信任边界研究入口。
-3. [OpenAI Evals](https://github.com/openai/evals)：支持评估框架和可复用评估任务的公开入口。
+3. [OpenAI Evals 源码库](https://github.com/openai/evals)：提供公开代码和任务 registry 入口；当前 README 也链接到 Dashboard evals，产品工作流应按最新官方文档复核。它是一个实现，不是所有安全评估设计的通用标准。
 4. [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：支持把风险映射、测量、治理和管理放入生命周期。
+5. [International AI Safety Report 2026](https://internationalaisafetyreport.org/publication/international-ai-safety-report-2026)：综合 misuse、malfunctions、systemic risks 与评估证据缺口；适合作为高层风险地图，不是具体模型或部署的安全认证。
+6. [OWASP Agent Control Standard](https://genai.owasp.org/resource/agent-control-standard-acs/)：社区提出的 Agent middleware hook 与声明式 runtime policy 接口方案；可用来讨论跨框架控制面，但需另行验证目标 runtime 的执行和安全效果。
 
 红队和公开攻击论文的样本、目标和预算不应被改写成现实系统的总体风险概率；本章只讨论防御、评估和治理方法。
 

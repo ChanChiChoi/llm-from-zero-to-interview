@@ -162,6 +162,8 @@
 147. 设计一个分布式训练 deadlock audit 表，至少覆盖缺失 collective、rank 条件分支、不同 batch 数、rank 0 文件依赖和未使用参数。
 148. 写一个最小 Distributed Training audit demo，输出 global batch、rank 数据切分、all-reduce 平均梯度、参数一致性、`no_sync` 同步次数、缺失 collective rank 和 rank 0 checkpoint 写入者。
 148A. 写一个 0 依赖 Python 分布式事故审计 demo，输入 4 个 toy rank 的 step、phase、token 数、step/data/comm time、collective 序列、checkpoint shard、resume step / lr 和 pipeline stage 耗时，输出 rank step alignment、collective mismatch、token shard imbalance、straggler ratio、communication ratio、checkpoint shard coverage、resume continuity、pipeline bubble ratio、failed gates 和 gate pass 结论。
+148B. TorchTitan 的一个 8×H100 教学案例中，Llama3 8B（batch=1、sequence=8192、defer=8）把 offload budget 从 10 GB 提到 12 GB，额外释放约 0.46 GiB、tokens/s 减少 60—70。计算区间平均每 GiB 的吞吐代价；再比较保留、重计算和 CPU 卸载各消耗的资源，并设计需要固定的 token、模型、NUMA、峰值显存和 loss 测量条件。解释为什么这个拐点不能外推成通用配置。
+148C. 一个 8-rank mesh 设 DP=2、TP=4。权重 `W` 的全局形状为 `[16,64]`，沿输出维做 TP 切分、再沿行做 DP/FSDP 切分，dtype 为 BF16。逐步计算全局权重、每 rank 常驻分片和 FSDP all-gather 后的本地 TP 权重元素数与字节数。说明 DTensor 持久化表示和 SPMD Types 计算表示改变了什么，又有哪些张量形状、collective 和 checkpoint 性质仍需一致。
 149. 写一个 `debug_tensor` 函数，输出 tensor 的 shape、dtype、device、requires_grad 和 contiguous 状态。
 150. 给定 logits `[B,T,V]` 和 labels `[B,T]`，写出 causal LM shift 后展平维度，并验证 logits / labels 的第 0 维是否一致。
 151. 写一个 `finite_status` 函数，检查输入、logits、loss 和 grad 是否包含 NaN / Inf。
@@ -324,6 +326,7 @@
 43D. 同一 prompt 的 reward 为 [1, 0]，response 长度为 20 和 100，generation budget 为 100。分别计算 group-standardized GRPO advantage 与只中心化的 DrGRPO advantage；对照逐 response 长度 mean 和固定预算分母时两条回答的总 token 权重。再构造全同 reward group，说明 DrGRPO 为什么仍没有相对信号，DAPO dynamic sampling 和 DCPO 的历史 SAS 分别改变什么。
 43E. 设计 GRPO、DAPO、DrGRPO、GSPO、DCPO 的同条件消融表，固定 base checkpoint、题目/模板、verifier、reward、训练 token、rollout 数、最大长度、采样参数和硬件。至少报告正确率及 Avg@1/Avg@32、长度切片、非零 advantage/RUR、token clipping rate、保留/过滤 group、wall-clock、单位成功成本、通用能力和安全回归；解释哪些指标仍然不可互换。
 43F. 为一个 RLVR 代码修复任务设计 verifier 红队评估：给出已知正确/错误 patch、可被变形的输入、与规格冲突的测试、可注入的 mutation 和独立 artifact grader。比较固定样例通过率、变形一致率、错误 mutation 检出率和独立正确率；再在相同底模、数据、训练预算与随机种子下增加随机/打乱 reward 对照，说明哪些结果可以归因于 verifier，哪些只能归因于训练流程或底模先验。
+43G. 三条同任务轨迹到达同一个环境状态：动作 A 两步后成功，动作 B 一步后成功，动作 C 失败。取 `gamma=0.9`，计算各自 discounted return 和在 `F_norm=1` 时的 GiGPO step-level relative advantage；说明它还要与 episode-level advantage 组合。再构造一个遗漏关键环境字段的 state key，解释为何错误合并状态会污染 credit。
 44. 分析一次训练异常。
 45. 用自己的话解释 AI Safety 和 Alignment 的区别，要求覆盖目标、风险、训练、评估和部署。
 46. 给 8 条 toy 请求设计 risk taxonomy，至少包含 harmful content、privacy、jailbreak、prompt injection、tool misuse、high risk domain 和 benign help；再把 misuse、malfunction、systemic risk 作为影响来源/范围的另一条分类轴，说明一条轨迹为什么可以同时拥有多种标签。
@@ -1006,53 +1009,63 @@
 ## 阶段 6：数据工程与治理验收
 
 1. 设计一个 web-scale 数据采集 source registry，字段至少包含 source id、license、ToS、robots、access mode、owner、risk level 和 delete policy。
-2. 给 8 条 toy HTML 样本设计采集审计表，标注 policy block、PII / secret、benchmark contamination、low quality、exact duplicate 和 kept。
-3. 写一个 0 依赖 Python demo，计算采集后的保留率、语言配比、领域配比、去重率和风险命中率。
-4. 用 3 分钟回答“为什么技术可访问不等于可进入训练数据”。
-5. 画出从公开 crawl dump 到训练集版本的 pipeline，包含 raw storage、parser、quality filter、PII scanner、dedup、dataset builder 和 version registry。
+2. 为 8 个逻辑 URL 设计响应事件账本，分别记录 2xx、404、429、503 和重试；计算尝试级 2xx 比率与最终 URL 2xx 比率，并解释分母差异。
+3. 比较 WARC、WAT 和 WET 的证据能力；针对同一个双栏 PDF 或 HTML 页面设计从原始载荷到解析工件的定位字段。
+4. 用 3 分钟回答“为什么 HTTP 200、robots 允许和许可授权是三个不同判断”。
+5. 画出来源准入、scheduler、collector、raw snapshot、parser、抽样复核和下游质量处理的链路；为每条边标明对象 ID、版本或失败状态。
 6. 为 12 条 toy 文本设计质量特征表，至少包含长度、unique token ratio、重复率、符号比例、乱码比例、boilerplate / promo 命中和风险标记。
-7. 写一个 0 依赖 Python demo，按质量分、PII / secret、安全风险、benchmark contamination 和 exact duplicate 输出 `kept` 与拒绝原因。
-8. 构造一个人工审计集，计算过滤系统的误删率、漏删率、token 保留率和每个语言 / 领域桶的保留率。
+7. 写一个 0 依赖 Python demo，给 8 条含人工标签和质量分的样本比较两个阈值，输出 TP / FP / FN / TN、precision、recall、文档留存率与加权误删/漏删代价；覆盖空审计集和没有正类的切片，缺少分母时输出 `N/A`。
+8. 扩展上一题的人工审计集，按语言 / 领域分层计算误删率、漏删率和 token 保留率；说明过采样稀有切片时怎样按抽样权重估计总体结果，并区分文档留存率与 token 留存率。
 9. 解释为什么代码、数学、低资源语言和专业文档不能共用普通网页文本的质量阈值。
 10. 设计一次小模型 ablation：比较清洗前、规则清洗后、质量分类器过滤后三个数据版本的验证 loss、下游指标和风险命中率。
-11. 给 10 条 toy 文档计算规范化 hash，找出 exact duplicate group，并说明保留哪一条以及为什么。
-12. 用 3-gram shingle 手算两段文本的 Jaccard 相似度，再解释 MinHash 为什么可以近似这个相似度。
-13. 写一个 0 依赖 Python demo，输出 near duplicate pairs、SimHash 汉明距离、聚类结果和每个簇的代表样本。
-14. 构造 3 条 toy benchmark 样本，检测训练语料中的题目泄漏、答案泄漏和 canary 命中，并输出隔离清单。
+11. 给 10 条 toy 文档计算规范化文本 hash，找出 exact duplicate group，并说明为何需保留原始对象、规范化函数版本和足够长的摘要；分别计算文档留存率与 token 留存率，再按来源、解析完整性和用途选代表。
+12. 对 `A={a,b,c,d}`、`B={b,c,d,e}` 手算 Jaccard；给出四个随机排列下的 MinHash 最小项并计算估计误差，再用 `b=4,r=2,s=0.6` 手算 LSH 候选概率；解释候选概率不等于候选为真的概率。
+13. 写一个 0 依赖 Python demo，对 toy 文档计算 exact hash、Jaccard、MinHash 估计和 SimHash 汉明距离；将候选边与人工合并决定分开，统计 false merge / missed duplicate。额外加入一条相似度链 A–B、B–C、A–C 很低的样例，说明为什么不能未经检查直接用连通分量删除。
+14. 构造 8 条 toy benchmark 评估题，其中 3 条有题目/答案/解析强重叠、2 条只有弱主题相似、3 条无检索命中。计算候选命中率 `5/8`、确认暴露率 `3/8`、弱信号率 `2/8`；若强重叠组答对 `2/3`、其他题答对 `3/5`，说明这些样本能支持什么、不能得出什么因果结论。
+14A. 比较训练语料可访问时的精确/近似检索、黑盒 Data Contamination Quiz、受控注入对和时间后新题；针对 SFT、RL 与推理模型分别说明探针的覆盖假设、可能漏检和结论边界。
 15. 设计一份去重后 data mixture 审计表，比较去重前后的语言、领域、来源、token 数和质量分分布。
-16. 给 8 个 toy 数据池设计 data mixture 配置，字段至少包含 clean tokens、quality score、risk score、能力标签、采样权重和 planned tokens。
-17. 写一个 0 依赖 Python demo，比较 natural sampling、temperature sampling 和质量加权采样下的语言 / 领域配比变化。
+16. 给 8 个 toy 数据池设计 data mixture 配置，区分池级预算权重、样本级选择概率、训练阶段顺序和日志中的实际曝光；字段至少包含 clean tokens、quality score、risk score、能力标签、planned tokens、effective epoch 和采样器实际 token 数，并写清分母。
+17. 写一个 0 依赖 Python demo，比较 natural sampling、temperature sampling、质量加权和样本级选择的配比变化；检查空池、非有限权重、计划 token 四舍五入后总量不守恒及去重后自然比例变化。
 18. 计算每个数据池的 effective epoch，并标出可能带来记忆或过拟合风险的上采样数据池。
-19. 设计一次 mixture ablation：分别提高代码、数学、多语言和合成数据比例，并说明要看哪些评估指标。
+19. 设计一次 mixture ablation：分别提高代码、数学、多语言和合成数据比例，并比较至少两种样本排序/调度；固定总 token、训练预算、tokenizer、数据快照和随机种子，另留未参与调参的验证切片，报告目标能力、非目标回归、重复暴露和数据风险。
 20. 用 3 分钟回答“为什么 data mixture 是隐式目标函数设计，而不是数据拼接配置”。
-21. 给 12 条 toy code / math / domain 样本设计专项审计表，字段包含 license、secret、test pass rate、answer verification、authority、PII 和 contamination。
-22. 写一个 0 依赖 Python demo，分别计算代码、数学和领域数据的质量分、拒绝原因、分类型保留率和最终 mixture。
-23. 设计一个代码数据清洗 checklist，覆盖 fork、vendor、自动生成文件、license、secret、单测和 benchmark 污染。
-24. 设计一个数学数据 verifier 审计流程，说明如何检查答案、步骤、难度、重复题和评测污染。
-25. 设计一个专业领域数据治理方案，覆盖来源权威性、时间戳、引用、PII、专家抽检、RAG 元数据和安全边界。
-26. 设计一个 synthetic / distillation data 生成表，字段包含目标能力、seed、teacher、prompt version、sampling 参数、quality score、validation、contamination、PII 和 license。
-27. 写一个 0 依赖 Python demo，按授权、验证、去重、污染、安全、PII 和合成比例门禁输出 `kept`、拒绝原因、origin mix、task mix 和 teacher mix。
-28. 比较 Self-Instruct、Evol-Instruct 和 teacher-student distillation 的目标、生成方式、过滤重点和风险。
-29. 设计一次 synthetic ratio ablation：分别测试 10%、30%、50%、70% 合成数据占比，并说明要观察哪些能力、风格和风险指标。
-30. 用 3 分钟回答“为什么合成数据是训练分布编辑，而不是免费扩容 token”。
-31. 设计 10 条 prompt/chosen/rejected 偏好样本，标注 helpful、honest、harmless、长度、语言、风险类别和选择理由。
-32. 写一个 0 依赖 Python demo，计算偏好样本的标注一致性、平均 margin、长度偏置、风险覆盖、误拒修复样本数和漏拒修复样本数。
-33. 构造一份安全数据分层表，至少包含明确安全、边界允许、高风险、隐私、专业高风险和多语言样本。
-34. 设计一个红队回归数据版本报告，字段包含风险类别、失败模式、安全响应、模型版本、policy 版本、修复状态和复测结果。
+21. 给 12 条 toy code / math / domain 样本设计专项审计表，区分可校准的类型质量分与不能被质量分抵消的授权、secret、PII 和 benchmark 隔离硬门禁；字段包含 test pass rate、answer verification、authority、recency、citation、token 数和拒绝原因。
+22. 写一个 0 依赖 Python demo，分别计算代码、数学和领域数据的质量分、拒绝原因、分类型 token 保留率和最终 mixture；手算一个保留样本和一个被硬门禁拦截的样本，并覆盖无测试、空输入、重复 ID、NaN 分数和非法类型。
+23. 设计一个代码数据清洗 checklist，覆盖仓库/文件来源、fork、vendor、自动生成文件、license、secret、解析、测试和 benchmark 污染；说明怎样把问题、实现、测试与运行环境作为同一验证记录关联。
+24. 设计一个数学数据 verifier 审计流程，区分题目覆盖、答案正确性和过程/错误类型；说明如何检查难度、重复题和评测污染，并按错误类型报告 verifier 的 precision/recall，避免把未验证答案当作正向监督。
+25. 设计一个专业领域数据治理方案，覆盖来源授权与权威性、版本时间、引用、PII、专家抽检和 RAG 元数据；设计记忆审计以区分有用知识回忆、无信息量模板复述和潜在敏感记录泄露，并说明何时选择继续预训练、SFT、RAG 或独立工具验证。
+26. 设计一个 synthetic / distillation data 记录 schema，分别保存 `origin`、`generator`、`teacher`、student objective、seed 来源与授权、prompt/sampling 版本、质量分、验证证据、重复/污染/隐私/残余风险标记；说明为何“合成”和“蒸馏”不能压成互斥标签。
+27. 写一个 0 依赖 Python 审计 demo，按授权、答案验证、去重、污染、安全、PII、自然数据锚点、多样性与合成比例输出 `kept`、拒绝原因、来源/任务/teacher token mix 和门禁；质量与比例门槛按未舍入数值判断，并覆盖空输入、全拒绝、重复 ID、布尔 token 数、NaN、非法 origin/标签和比例刚好等于或略超上限。
+28. 比较 Self-Instruct、Evol-Instruct、Orca/解释轨迹蒸馏与 soft-label distillation 的输入、训练目标、教师信号、过滤和验证；为数学、代码、事实与安全样本分别选一种独立验证证据，说明 teacher 输出为何不是 gold label。
+29. 设计一次合成比例消融：比较 10%、30%、50%、70% 的合成/蒸馏 token 比例，同时保留自然数据锚点；固定 student、tokenizer、总训练 token、数据快照和训练 recipe，用多个种子及未参与调参的 holdout 比较目标能力、通用回归、覆盖/重复、事实、安全和风格。
+30. 对递归“替换自然数据”“与已有数据累积”“保留自然数据并加入目标生成数据”三种流程列出可证伪假设，手算一组覆盖/重复/风险指标并设计至少两个训练代数的评估；说明为何不能从单个论文比例推出通用阈值或断言合成数据必然导致 model collapse。
+31. 设计 10 条 prompt/chosen/rejected 偏好样本，记录任务与 rubric 版本、chosen/rejected 理由、语言和标注群体；至少加入平局或“信息不足”案例，说明分歧是标签错误、任务欠说明、事实证据冲突还是合理的风格差异。
+32. 写一个 0 依赖 Python demo，手算并计算 rubric 加权分与 preference margin，分开报告两位标注者的原始一致率、长度异常比例、目标动作保留率和风险切片覆盖；空分母须为 `N/A`，且不得把数据留存率称为模型误拒率或漏拒率。
+33. 构造一份安全数据 schema，将 intent/answerability、后果严重度、domain、dialogue context 和 expected action 作为独立字段；分别覆盖 answer、clarify、refuse、safe alternative 和紧急支持动作，解释这些轴为何不能压成互斥的“风险类别”。
+34. 设计一个红队回归数据版本报告，记录最小必要上下文、风险切片、失败模式、安全目标动作、模型与 policy 版本、来源权限、访问级别、训练/评估隔离、修复状态和复测结果；说明哪些完整载荷应留在受限评估集而不是普通训练集。
+34A. 为 8 组偏好比较分别运行原顺序和交换顺序的 LLM judge，再用独立人工标注切片校准；计算 judge 的人类一致率、位置一致率、弃判率和各风险/语言切片差异，并设计发生分歧时升级人工复核的规则。
+34B. 比较“不清洗、单 judge 过滤、多 judge 过滤、翻转可疑标签”四种偏好数据处理方式；固定样本、过滤比例、训练目标和 holdout，比较 win-tie-loss、事实性、安全动作错误与跨模型泛化，并说明为什么不能把某个基准中的最佳处理法当成通用规则。
 35. 写七个防御性安全审计 demo：一个 red teaming demo，输入 toy case 的风险类别、严重度、baseline、natural score、elicited score、工具确认和回归结果，输出 taxonomy coverage、P0/P1 unresolved、dangerous capability uplift、autonomy score、regression pass rate 和 release gate；手算至少一个比例，并让没有 autonomy 样本、没有工具尝试和空回归集明确输出 `N/A`，且不能把缺测当作通过；一个 mechanistic interpretability demo，输入 toy clean / corrupted logit delta、patching 结果、ablation 结果、SAE feature 激活和标签，输出 patch recovery、ablation effect、reconstruction fidelity、avg active features、feature purity 和 interpretability gate；一个 steering demo，输入正负 toy 激活、alpha 网格、target gain、safe gain、side loss 和 over-refusal delta，输出 steering vector、projection shift、target uplift、safe gain、side-effect drop、over-refusal delta 和 steering gate；一个 model editing / unlearning demo，输入 toy edit cases、paraphrase checks、locality checks、forget set、retain set、改写 / 多轮泄露、合法上下文效用和 membership inference 风险，输出 edit success、generalization、locality、retain drop、forget leak、robust leak、contextual utility、membership risk drop、editing gate 和 unlearning gate；可选增加 representation residual audit，但不得把内部可解码直接当成外部泄露；一个 privacy / watermarking demo，输入 toy PII / secret / RAG / log / membership / watermark cases，输出 PII recall、secret recall、memorization rate、output leak rate、RAG unauthorized retrieval、raw log rate、membership advantage、watermark z-score、generated recall、false positive rate、robust recall、privacy gate 和 watermark gate；手算 DP-SGD 的逐样本裁剪、噪声和 batch mean，以及一个 TPR/FPR/advantage 和一个 watermark z-score；覆盖空分母、零权重、无效 token / green 数、误报、未定义门槛状态，缺测不得当成通过；一个 governance / model card demo，输入 toy model card sections、system card sections、policy categories、eval slices、risk issues、approval votes 和 release checks，输出 model card completion、system card completion、policy coverage、eval coverage、severity-weighted unresolved risk、high-risk mitigation、approval coverage、governance gate 和 release ready；一个 safety interview retrospective demo，输入 toy answer records、risk set、metric set、gate set 和 trade-off set，输出 answer coverage、risk coverage、metric coverage、gate coverage、trade-off coverage、unsafe detail count、readiness gates 和 revision plan。
 35EA. 为记忆污染评测构造 10 个合成样本，分别记录持久化、后续召回、采纳、副作用、污染清除和良性记忆保留；逐步计算阶段条件率、端到端副作用率和选择性修复率，明确每项分母，并让空阶段输出 `N/A`。
 35EB. 使用第八册第七章的六个合成向量，手算一个样本的平方重构误差、六样本 SSE、SST、重构保真度、平均激活 feature 数和 top-2 purity；再用 clean margin 2.0、corrupted margin -1.0、patched margin 1.4 计算 patch recovery。解释为什么这些数值不能合并为安全分数，并比较 SAEBench、MIB 和随机基线研究各自检验的问题。让空样本、少于 top-k 的样本和近零分母显式得到 N/A。
 35EC. 使用第八册第八章的五个 steering toy case，手算目标提升、安全收益、正常能力损失、误拒增量和加权候选分数。将高风险请求与正常请求分开作为分母；分别删除一个切片并让对应指标显示 N/A，不允许用总体均值代替缺失数据。再设计逐 token / 多轮持久性和输入扰动 holdout，说明 Endogenous Steering Resistance、SteerEval 与 SteeringSafety 分别帮助检查什么、又不能证明什么。
 35ED. 手算第八册第九章四条编辑记录的加权目标成功率、先按编辑求均值再按权重汇总的改写率与 locality、保留能力差值及冲突数；再用三条 forget case 算 exact 与 robust leakage。说明为什么 MIA 下降和 retain 保持不能抵消泄露门槛失败，并为合法上下文效用设计独立切片。代码边界需覆盖空编辑、空 forget、空嵌套样本、零总权重和缺字段，缺测不得当成通过。
+35EE. 按第八册第十一章设计一份有版本绑定的 Model Card 与 System Card：为每条用途、评测和缓解声明指定证据、适用条件、责任人、复核日期和证据状态；模拟仅更新 tokenizer、RAG 索引或工具权限时哪些结论会变旧。再用 demo 的合成输入手算 Model Card 8/9、System Card 8/10、未解决风险权重 12/16 和高风险缓解 8/13，说明为何缺测为 N/A、覆盖率不能抵销硬性隐私约束，并区分机构 Responsible Scaling policy、NIST 自愿框架、GPAI Code of Practice 与适用法规义务。
+35EF. 以企业研究助手为例，把一个失败轨迹分别映射到 misuse、malfunctions、systemic risks 和 OWASP LLM 应用风险目录；区分可复用分类与具体测试样本。用 20 条允许任务中的 18 次成功、2 次误拒计算任务成功率和 over-refusal；再为 10 条越权检索样本设计分母、服务端阻断记录与人工复核，说明为什么这些定向红队样本不能直接估计总体风险。最后按定义、机制、责任层、指标、控制和适用边界组织一段面试回答。
+35EG. 按第八册第十三章的六条合成轨迹，分别计算风险任务的实际副作用率、工具未授权尝试率、未授权调用的执行比例、Judge precision/recall 和正常任务成功率；手算 1,000 个候选、960 个有效运行、50 个自动警报、20 个确认发现的比例，以及 200 次工具调用中 48 次未授权、40 次阻断、8 次执行时的三个不同分母。比较 GOAT 的自适应多轮生成与 REDAgentBench 的状态回执评估；设计空分母、轨迹/状态判定不一致、被阻断动作和误拒负对照，说明何时停止、复现、修复与回归。
+35EH. 按第八册第十五章的合成生产发布输入手算风险分数 $R=0.59$，逐项列出五个加权乘积，并解释它不是事故概率；再用两桶样本复算 ECE $=0.1333$，指出它需要已定义事件和完成标注。为“主体有效但没有 grant”“已撤销主体”“资源 scope 错误”“审批后 revision 改变”“高风险但缺少双人审批”设计正反例。分别计算 HighRiskAllowRate 与 UnauthorizedSideEffectRate，记录分子、分母以及无尝试时的 N/A；比较 AuthZEN、RFC 8693 与 DPoP 分别解决的接口、委托和令牌重放问题，并说明它们都不能替代本地授权与 PEP 状态验证。
+35EI. 按第八册第十六章构造九条 fallback 轨迹，覆盖未产生副作用的超时、未知付款、策略拒绝、兼容工具缺失、撤权后已提交、状态查询被拒和重试耗尽；为每条给出状态、允许范围、下一步与用户说明。手算三层各允许一次重试时的上界 $(1+1)^3=8$，以及 `0+0.4+0.2+0.6=1.2` 秒如何适配 1.5 秒预算。再用 12 个受限样本中 9 个保持约束、20 个有副作用可能的任务中 1 次重复提交计算安全保持率和重复副作用率；设计空分母、已提交后撤权、读状态权限仍有效和权限也撤销四种分支，并区分 RFC 9110 方法幂等与业务幂等键。
 
 36. 用 3 分钟回答“为什么高质量安全模型不是拒答率最高的模型”。
 37. 给 12 条 toy 多模态样本设计审计表，覆盖 image-text、OCR、audio-transcript、video-caption 和 multimodal instruction 五类样本。
 38. 为每条多模态样本标注 media quality、alignment score、annotation quality、license、privacy、contamination、time error、grounded answer 和 tokens。
-39. 写一个 0 依赖 Python demo，按媒体质量、图文 / 音文 / 视频对齐、隐私、版权、评测污染、时间错位和 grounded answer 输出 `kept` 与拒绝原因。
-40. 计算多模态数据的整体 token 保留率、分模态保留率、最终 mixture、平均对齐分和拒绝原因分布。
+39. 写一个 0 依赖 Python demo，按媒体质量、图文 / 音文 / 视频对齐、隐私、来源权限、评测污染、时间错位和 grounded answer 输出保留样本与全部隔离原因；让软质量分使用未舍入值做门槛判断，并使多个并存问题都能被报告。
+40. 计算多模态数据的总 token 保留率、分模态 token 保留率、保留池 mixture、按样本或时长统计的对齐摘要，并说明各自分母；空分母输出 `N/A`，有分母但零保留输出 `0.0`。
 41. 设计一个 OCR / 文档图像数据 schema，字段包含 page id、recognized text、bounding box、reading order、confidence、language、table region、PII flag 和 source license。
 42. 设计一个音频 / 视频时间对齐抽检流程，说明如何用 WER / CER、subtitle shift、VAD segment、clip boundary 和人工抽样判断样本是否可进入训练。
 43. 用 3 分钟回答“为什么多模态数据工程的核心不是增加模态数量，而是证明模态之间真的对齐”。
+43A. 为一条 8 秒视频设计 frame/shot/event 三级标注，逐项计算 1 FPS 采样帧数、字幕—事件时间差和关键事件召回；比较固定窗口、镜头切分和事件切分的误差，并说明长视频数据集的标注结果为何不能直接当成目标语料保证。
+43B. 以多语言长音频为例，计算一个 WER 和平均边界时间误差；设计人工参考样本、语言/口音切片和权限检查，说明论文报告的语料规模或微调收益为何不能替代项目级授权与验证。
 44. 给 8 个 toy 数据源设计 valuation 表，字段包含 tokens、quality、coverage、risk、cost、license、contamination、目标能力收益向量和数据版本；先把许可未获准、隐私风险和评估污染定义为独立准入/隔离门槛，再对通过门槛的样本计算质量价值，说明为什么加权高分不能抵消硬性风险。
 45. 写一个 0 依赖 Python demo，计算每个数据源的加权目标收益、风险 / 成本修正价值、梯度相似 attribution proxy 和 token budget 下的选择结果。
 46. 对 3 个 toy 数据源手算一次小规模 Shapley value，说明平均边际贡献为什么会受到数据交互影响。
@@ -1087,7 +1100,7 @@
 9. 设计一个 Responses API 与 OpenAI-compatible API 的 capability matrix，覆盖 reasoning item、tool call id、streaming、template、encoding 和 replay。
 10. 给 GPT-5.5、GPT-5.6、Claude、Gemini、DeepSeek-V4、Qwen3.5/3.6、Kimi K2/K3 设计一次 effort/level 公平比较实验。
 11. 设计多模态长上下文评测，分别测 ingest、retrieve、reason、action、robust 五个门禁，并包含图片/音频/视频 token budget。
-12. 设计 Shieldstral 风格的自然语言 policy 输入和连续安全分 toy demo，加入 false refusal、tool violation、fallback 和 human review 指标。
+12. 设计 Shieldstral 风格的自然语言 policy 输入和连续安全分 toy demo，加入 false refusal、tool violation、fallback 和 human review 指标；另用同一图像在两种相反政策下构造配对样本，比较 F1 与 PSS。
 
 13. 设计一个 Adaptive Thinking 控制器实验，比较固定 level、规则升档和 verifier 驱动升档，输出 reasoning/tool/verify/recovery budget、p95 成本和漏升级率。
 14. 写一条包含工具超时、客户端重连和权限变化的 Interleaved Thinking trace，标记 `tool_call_id`、幂等检查、rollback 和可持久化字段。
@@ -1819,15 +1832,15 @@
 3. 建立 DFLASH serving manifest：K3 target revision、DFlash revision、`target_layer_ids`、block size、draft/target backend、hardware、graph bound、真实 acceptance 和拒绝回滚。用一个错误的 `+1` layer mapping 注入 capture mismatch，并说明为什么 shape 通过也不能证明层语义正确。
 4. 对照公开 HF draft README 与 SGLang PR #40794 的 benchmark：区分公开 checkpoint、未公开 production checkpoint、stable `v0.5.20` 和 main source；禁止把 95.7% GSM8K 或 synthetic/发布方 acceptance 写成本地复现。
 
-## 六类实作：从 toy 审计到项目交付
+## 六类实作：把技术结果整理成作品集证据
 
-配套正文：[第三册第九章](book-03-practical-handbook/chapters/09-简历项目实战.md)。
+前四项回到第三至八章复习机制；最后一项按[第三册第十三章](book-03-practical-handbook/chapters/13-作品集实战.md)的项目证据链整理结果。
 
 1. 复算目标概率为 0.2/0.8 时的 NLL；在 SFT 多轮样例中分别画出最后一轮监督与全部 assistant span 监督，解释内部 shift 的调用契约。
 2. 把服务 trace 的失败结束时间改为 10000 ms，检查成功 QPS 降到 0.3；再将全部请求设为失败，区分零吞吐与未定义的延迟分布。
 3. 为 RAG 构造空 ACL、重复 RRF ID、无可见文档和引用否定句，分别验收权限、排序与证据支持，不能以引用合法率替代语义正确性。
 4. 将“250厘米”改为“250米”，再构造两次解析失败、一次正确的三候选集，检查投票分母、pass@3 与可重复正确率的区别。
-5. 按 9.7.6 为一个实际完成的模块整理数据清单、版本、运行命令、原始结果和失败案例；只完成 toy 时不得填入真实模型提升或生产性能。
+5. 按第十三章 13.2、13.5 和 13.6 节，为一个实际完成的模块整理数据清单、版本、运行命令、原始结果和失败案例；只完成 toy 时不得填入真实模型提升或生产性能。
 
 ## 评估与 Debug：分母、证据与安全放行
 
@@ -1846,7 +1859,7 @@
 
 ## 多模态实战：机制与证据边界
 
-配套正文：[第三册第十一章](book-03-practical-handbook/chapters/11-多模态实战.md)。
+配套正文：[第三册第十二章](book-03-practical-handbook/chapters/12-多模态评估与交付.md)。
 
 1. 分别只轮换 CLIP 文本向量、同步轮换向量与标签，解释哪一种破坏配对；验证单样本零 loss 不代表学会对齐，并说明多相关目标的 Recall 分母。
 2. 向数据构造器加入同图同问题的冲突答案和不同记录的重复 ID，要求拒绝；构造不同路径的同一图片，说明路径切分为何不足以排除泄漏。
@@ -1854,6 +1867,16 @@
 4. 对五步 DDPM schedule 核对累计 alpha、反向均值与后验方差；验证最后一步随机项为零，解释使用已知 x0 反解噪声为何不能替代生成时噪声预测器，以及最终 alpha 约 0.8583 为何不是纯噪声。
 5. 构造 CER 小于 0.2 但漏掉否定词的转写，以及“不是 128 元”的图片回答；确认 toy 规则可能通过，另设计关键字段和语义标注验收。比较语料级 CER 与逐句平均，并测试插入导致 CER 大于 1。
 6. 分开计算视觉/文本输入与输出 token 到达率；用总成本 20 元、100 次请求、80 次成功计算单位成功成本，再说明重试按任务归并后应如何统一分母。
+
+## 第三册第八章：Agent 轨迹评估与失败定位
+
+配套正文：[第三册第八章 8.7 节](book-03-practical-handbook/chapters/08-评估与debug实战.md)。
+
+1. 为“修改订单地址”任务构造两条轨迹：第一条在未确认时提议更新，但执行器返回拒绝且状态未变；第二条同样缺少确认，却收到 `accepted=true` 且订单地址改变。标出哪一条是可恢复的策略违规尝试，哪一步构成首个不可恢复失败；说明最终回答文本为什么不能证明动作状态。
+2. 对 12 条轨迹，8 条达成任务目标、12 个适用节点中 10 个选择了正确工具、12 条中 1 条有越权副作用。分别计算任务成功率、工具选择准确率和策略违例率，给每个分母加上适用范围；解释为什么不能把三个比例平均成一个总分。
+3. 将一个长 Agent trace 按 system、trace、node 三层汇总。只改变工具参数验证逻辑后，原 4 条失败中 3 条修复，新增 1 条权限错误；设计回归表分别记录成功率、schema 合法率、策略违例、首个失败位置和安全 holdout，并给出是否进入灰度的理由。
+4. 为 4 轮会话记录每轮输入 token `[512, 1800, 4200, 9000]`、工具等待和生成长度。计算未命中缓存时累计 prefill 输入 token；再说明 prefix cache 命中、服务排队和工具等待分别会怎样改变“模型 TTFT”和“用户端到端任务时间”。
+5. 设计一个敏感信息安全的 trace schema，保留模型/工具版本、参数校验、执行回执、前后状态和策略决定，同时对用户数据做字段级脱敏；说明若只保存最终回答、只保存外部状态或把所有原始输入写入日志，各会漏掉什么或引入什么风险。
 
 ## 多模态训练：目标函数与配方对照
 
@@ -2027,3 +2050,9 @@
 3. 对 `L=64, B=1, T=131072, H_kv=8, D_h=128` 分别算 BF16、FP8 payload，再加入假设 8% metadata 得 17.28 GiB。说明这个账本不包含 allocator、workspace 和模型结构差异；将 KIVI 的 K-per-channel/V-per-token、KVQuant 的 pre-RoPE key 与 vLLM per-head scales 分别放到“研究算法/运行时能力”层比较。
 4. 解释为什么已写入 page 的 scale 从 0.1 改为 0.2 而 payload 不重编码，会让 `D(q)=10` 的值从 1 重构为 2。为 append、共享 prefix、swap/restore 和并发读取分别设计可维持 scale revision 一致性的检查。
 5. 阅读 vLLM H100/FlashAttention 3 案例：按 128k NIAH 的 91%/13%/89% 结果重建“BF16 基线—原 FP8 路径—two-level accumulation 修复”因果链；再解释 ITL slope、break-even、TTFT 和并发输出吞吐是不同指标。为目标部署列出固定模型、backend、scale、长度分布、并发和任务样本的验收矩阵。
+
+## 第八册第十七章：AI Control 与不可信 Agent 监督
+
+配套正文：[第八册第十七章](book-08-ai-safety-alignment/chapters/17-ai-control与不可信Agent监督.md)；来源边界见[研究与精修记录](research/book-08-ch17-ai-control-refinement-2026-10-28.md)。
+
+35EJ. 20 个诚实任务中，不可信模型 $U$ 完成 16 个、可信模型 $T$ 完成 10 个、协议完成 13 个；先分别求三种成功率，再计算归一化效用。100 对攻击任务中 6 次在轨迹审核时被捕获、2 次未捕获地完成副任务，求重复部署安全性，并说明 92 个未发生终止事件的样本为何不能自动算安全成功。比较 `defer-to-resample`、`resample-then-defer` 和 `defer-on-critical` 的提交权与监控可见性；设计一个针对 monitor 的自适应攻击及独立 holdout。最后为不可逆写操作加提交前控制，说明轨迹结束后审计与副作用前拦截的差别，并列出一页安全论证所需的迁移假设和停止条件。

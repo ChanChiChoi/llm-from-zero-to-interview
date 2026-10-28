@@ -1,6 +1,8 @@
 # 第八章：Preference Data 与安全数据
 
-前一章讨论了 synthetic data 和 distillation data。本章继续往后，讨论后训练阶段最关键的两类数据：preference data 和安全数据。
+前一章讨论 synthetic data 的来源与 teacher-student 蒸馏关系。本章转向另一类问题：如何把回答偏好和安全策略转成可训练、可审计的数据。合成或蒸馏样本可以成为本章数据的来源，但“由谁生成”不能代替“样本表达什么行为、按什么规则标注”；这些来源血缘沿用第七章，本章聚焦比较标签、目标动作和质量验证。
+
+安全目标和威胁模型沿用[第八册安全总览](../../book-08-ai-safety-alignment/chapters/01-safety与alignment总览.md)与[红队评估方法](../../book-08-ai-safety-alignment/chapters/06-red-teaming与危险能力评估.md)。本章不重复完整的安全 taxonomy、攻击评估或运行时防护，只讨论如何把已批准的策略映射为数据字段、标注规则、评估分母和版本证据。
 
 预训练让模型学会语言、知识和模式，SFT 让模型学会按指令回答。但一个模型是否真正“好用”，还取决于它能不能在多个可接受回答中选择更符合人类偏好的那个，能不能在风险请求前保持边界，能不能在安全与帮助之间做平衡。
 
@@ -14,11 +16,24 @@
 
 偏好数据描述“多个可接受回答中哪个更好”；安全数据描述“面对不同风险请求应该采取什么动作”。两者可以在同一条样本中同时出现，但它们的标签、分母和失败代价不同。偏好比较会影响帮助性、诚实性和表达方式，安全标签会影响回答、澄清、拒绝和安全替代。
 
-可以把数据链路写成：
+图中的主线从行为准则和来源授权开始，经候选生成、盲化标注、分歧复核和数据冻结，最后进入训练与独立评估。标注分歧或模型回归都应回到 rubric 或样本覆盖检查；不能只靠删除异议标签来让数据“变一致”。
 
-~~~text
-行为准则 -> prompt 池 -> 候选回答 -> 偏好标注 -> 安全分层 -> 审计过滤 -> 偏好训练 -> 安全评估 -> 版本治理
-~~~
+```mermaid
+flowchart LR
+    A["行为准则与策略版本"] --> B["来源登记与用途确认"]
+    B --> C["候选生成与版本绑定"]
+    C --> D["盲化标注与分歧记录"]
+    D --> E{"质量与安全门禁"}
+    E -->|通过| F["分层、去敏与污染检查"]
+    E -.->|分歧或高风险| R["复核样本或修订 rubric"]
+    R --> C
+    F --> G["冻结数据集与 manifest"]
+    G --> H["偏好优化实验"]
+    H --> I["独立质量与安全评估"]
+    I --> J{"目标切片通过？"}
+    J -->|通过| K["保留实验结果与回滚点"]
+    J -.->|回归或证据不足| R
+```
 
 InstructGPT/RLHF、Learning from Human Preferences、Learning to Summarize from Human Feedback、DPO、Helpful and Harmless RLHF、Constitutional AI 和 red teaming 研究提供了不同层面的公开证据。本章会区分论文中的训练方法、标注数据事实和本文用于教学的审计抽象。
 
@@ -46,13 +61,13 @@ SFT 很难显式告诉模型这些细粒度偏好：
 
 ## 2. 来龙去脉：从 RLHF 到 DPO
 
-InstructGPT 是现代 RLHF 路线的重要代表。它先收集示范数据做监督微调，再收集人类对模型输出的排序数据训练 reward model，最后用强化学习优化模型，使模型更符合人类偏好。论文显示，经过人类反馈训练的小模型在人工偏好评估中可以超过更大的原始 GPT-3，并改善有用性、真实性和毒性问题。
+InstructGPT 是现代 RLHF 路线的重要代表。它先用示范数据做监督微调，再收集同一 prompt 下的回答比较来训练 reward model，最后用强化学习更新策略。论文报告的偏好结果绑定其模型、标注流程和评估任务，不能直接当作其他产品的收益保证。
 
 RLHF 的关键数据不是普通问答，而是人类比较：同一个 prompt 下，多个回答哪个更好。这个排序信号用于训练 reward model。
 
-后来，DPO 简化了偏好优化流程。DPO 不再显式训练 reward model 再做复杂强化学习，而是直接用 chosen/rejected 偏好对优化语言模型。它说明偏好数据本身可以直接驱动模型行为调整。
+后来，DPO 将偏好对直接写入策略优化目标，不要求先单独拟合一个 reward model 再做策略优化。它减少了一个显式训练阶段，但仍依赖 reference model、回答 token 的概率聚合方式和偏好标签质量；“流程更短”不等于“数据更容易审核”。
 
-从数据工程角度看，RLHF、DPO、IPO、KTO 等算法差异很重要，但底层都依赖高质量偏好数据。偏好数据质量差，算法再漂亮也会学偏。
+从数据工程角度看，算法决定了数据接口：经典 reward modeling 和 DPO 常用成对偏好；KTO 则可使用 desirable / undesirable 的单条反馈，不必总是成对。[KTO 原论文](https://arxiv.org/abs/2402.01306) 明确以单条输出的二元可取性信号为训练输入。存储层应保留原始标注类型和采集协议，再由训练适配层转换，不能为了统一 schema 丢掉标签来源和“不确定/平局”状态。
 
 ---
 
@@ -83,86 +98,104 @@ RLHF 的关键数据不是普通问答，而是人类比较：同一个 prompt �
 一条偏好样本可以表示为：
 
 ~~~math
-d_i = (x_i, y_i_plus, y_i_minus, a_i, r_i, z_i)
+d_i = (x_i, y_i^+, y_i^-, \mathbf{a}_i, \mathbf{c}_i, z_i)
 ~~~
 
-其中 `x_i` 是 prompt，`y_i^+` 是 chosen response，`y_i^-` 是 rejected response，`a_i` 是偏好维度标签，`r_i` 是风险类别，`z_i` 是标注者、rubric、语言、来源、隐私、污染和版本元数据。
+其中 $x_i$ 是 prompt，$y_i^+$ 和 $y_i^-$ 是同一任务下的两个候选回答，$\mathbf{a}_i$ 保存偏好维度与标注状态，$\mathbf{c}_i$ 保存任务和安全切片，$z_i$ 记录标注者、rubric、语言、来源、隐私、污染和版本等血缘。真实 schema 还应保留平局、无法判断和需要补充上下文等状态，不能强迫每一条比较都产生二元胜负。
 
-Reward Model 常用成对排序损失：
+Reward Model 常用 Bradley–Terry 成对排序损失：
 
 ~~~math
-L_rm = - (1 / n) * sum_i(log sigma(R_phi(x_i, y_i_plus) - R_phi(x_i, y_i_minus)))
+\mathcal{L}_{\mathrm{RM}} = -\frac{1}{n}\sum_{i=1}^{n}\log \sigma\left(R_{\phi}(x_i,y_i^+) - R_{\phi}(x_i,y_i^-)\right)
 ~~~
 
-这里 `R_phi` 给 prompt-response 打标量分数。它学的是偏好排序近似，不是绝对真值。
+这里 $R_{\phi}$ 给 prompt-response 打标量分数，$\sigma$ 是 logistic 函数。这个目标把成对标签建模为排序概率；它学的是给定标注分布和任务条件下的偏好近似，不是绝对真值。
+
+若一条样本的 chosen reward 是 1.3、rejected reward 是 0.7，两者差为 0.6：
+
+~~~math
+\mathcal{L}_{\mathrm{RM}}=-\log\sigma(1.3-0.7)=-\log\sigma(0.6)\approx-\log(0.646)\approx0.437
+~~~
+
+这只展示单条样本的损失代入，不表示真实数据中的 reward 标尺应取这些数。
 
 DPO 可以直接利用 chosen / rejected 偏好对：
 
 ~~~math
-Delta_i = log pi_theta(y_i_plus | x_i) - log pi_ref(y_i_plus | x_i) - log pi_theta(y_i_minus | x_i) + log pi_ref(y_i_minus | x_i)
+\Delta_i = \left[\log\frac{\pi_{\theta}(y_i^+\mid x_i)}{\pi_{\mathrm{ref}}(y_i^+\mid x_i)}\right] - \left[\log\frac{\pi_{\theta}(y_i^-\mid x_i)}{\pi_{\mathrm{ref}}(y_i^-\mid x_i)}\right]
 ~~~
 
 ~~~math
-L_dpo = - (1 / n) * sum_i(log sigma(beta * Delta_i))
+\mathcal{L}_{\mathrm{DPO}} = -\frac{1}{n}\sum_{i=1}^{n}\log\sigma\left(\beta\Delta_i\right)
 ~~~
 
-其中 `pi_ref` 是 reference model，`beta` 控制偏好优化强度。数据工程上，DPO 对数据质量非常敏感：chosen / rejected 太弱、标注噪声大或存在长度偏置，都会让模型学偏。
+其中 $\pi_{\mathrm{ref}}$ 是 reference model，$\beta$ 控制目标中的偏好强度。$\log\pi(y\mid x)$ 通常按回答 token 的条件 log-probability 求和；不同实现的截断、掩码和归一化方式会改变训练信号，实验记录必须固定这些约定。DPO 不会消除 chosen / rejected 太弱、标注分歧或长度线索带来的问题。
 
-偏好 margin 可以写成：
+假设一条 pair 的 chosen/rejected 序列 log-probability 分别为当前策略 $(-4.2,-5.1)$、reference $(-4.0,-5.0)$，则：
 
 ~~~math
-m_i = s_i_plus - s_i_minus
+\Delta=(-4.2+4.0)-(-5.1+5.0)=-0.2-(-0.1)=-0.1
 ~~~
 
-其中 `s_i^+` 和 `s_i^-` 是按 rubric 聚合后的 chosen / rejected 分数。过小的 `m_i` 说明偏好信号弱，过大的 `m_i` 可能说明 rejected 太差，训练信号不够细。
+取 $\beta=0.5$，单条损失为 $-\log\sigma(-0.05)\approx0.718$。负的 $\Delta$ 表示相对 reference，当前策略给 rejected 的概率提升更多；数值只是序列 log-probability 的教学输入，不是训练结果。
 
-标注一致率可以写成：
+若 $s_i^+$ 和 $s_i^-$ 是按当前 rubric 聚合的候选分数，审计 margin 可写成：
 
 ~~~math
-A = (1 / n) * sum_i(I(label_i_1 = label_i_2))
+m_i = s_i^+ - s_i^-
 ~~~
 
-真实项目里通常会用更多标注者、Kappa、分桶一致率或专家复核。偏好数据必须审计一致性，不能默认人类标注全对。
+小的 $m_i$ 表示在这套评分尺度下两者差异不明显；很大的 $m_i$ 可能来自过于容易的 rejected，也可能来自真实而重要的质量差距，需检查任务与评分理由，不能只按阈值自动剔除。
+
+若每对样本恰有两位标注者且标签为二元偏好，原始逐项一致率可以写成：
+
+~~~math
+A_{\mathrm{pair}} = \frac{1}{n}\sum_{i=1}^{n}\mathbf{1}[\ell_{i1}=\ell_{i2}]
+~~~
+
+这是未校正偶然一致的描述量，不足以表示偏好质量。例如 5 条双标样本中有 4 条同选，$A_{\mathrm{pair}}=4/5=0.8$；这不含机会校正，也不说明剩余一条应被删除。多标注者任务还应报告分歧分布、平局/弃答比例、分组和任务切片；对存在稳定群体差异的条目，记录分歧原因并决定保留分布、细化 rubric 或交由目标策略裁决，而不是默认把少数意见当噪声。
 
 安全数据样本可以表示为：
 
 ~~~math
-u_i = (x_i, c_i, a_i, y_i, z_i)
+u_i = (x_i, \mathbf{c}_i, a_i, y_i, z_i)
 ~~~
 
-其中 `c_i` 是风险类别，`a_i` 是期望动作，例如 answer、refuse、safe_alt、clarify；`y_i` 是目标安全响应；`z_i` 记录语言、地区、政策版本、标注者、隐私和红队来源。
+其中 $\mathbf{c}_i$ 至少把意图是否可答、后果严重度、任务领域和紧急程度分开记录；这些轴可以重叠。$a_i$ 是期望动作，具体枚举由版本化策略定义，例如回答、澄清、拒绝、拒绝并转向安全替代、支持并升级；$y_i$ 是目标响应，$z_i$ 记录语言、地区、策略版本、标注者、隐私处理和红队来源。
 
-漏拒率和误拒率可以写成：
+在独立评估集上，令 $\mathcal{A}_{\mathrm{block}}$ 表示策略定义的拒绝动作集合，例如“拒绝”和“拒绝并提供安全替代”，$\hat{a}_i$ 是模型动作。只对目标动作是拒绝的样本计算漏拒率，对目标动作是正常回答的样本计算误拒率：
 
 ~~~math
-R_leak = sum_i(I(a_i = refuse) * I(pred_action_i != refuse)) / sum_i(I(a_i = refuse))
+R_{\mathrm{under}} = \frac{\sum_i \mathbf{1}[a_i\in\mathcal{A}_{\mathrm{block}}]\,\mathbf{1}[\hat{a}_i\notin\mathcal{A}_{\mathrm{block}}]}{\sum_i \mathbf{1}[a_i\in\mathcal{A}_{\mathrm{block}}]}
 ~~~
 
 ~~~math
-R_over = sum_i(I(a_i = answer) * I(pred_action_i = refuse)) / sum_i(I(a_i = answer))
+R_{\mathrm{over}} = \frac{\sum_i \mathbf{1}[a_i=\mathrm{answer}]\,\mathbf{1}[\hat{a}_i\in\mathcal{A}_{\mathrm{block}}]}{\sum_i \mathbf{1}[a_i=\mathrm{answer}]}
 ~~~
 
-这里 `R_leak` 关注高风险请求被错误回答，`R_over` 关注安全请求被过度拒绝。安全数据只优化其中一个指标会造成模型行为失衡。
+这里 $R_{\mathrm{under}}$ 关注本应阻止有害协助的样本是否被错误放行，$R_{\mathrm{over}}$ 关注本应回答的样本是否被拒绝。澄清、支持升级等其他目标动作应另报逐类混淆；不同动作不能并入一个拒答率。
 
-长度偏置可以用 chosen 是否显著更长来审计：
+chosen 明显更长的比例可作为长度线索的预警量：
 
 ~~~math
-B_len = sum_i(I(length(y_i_plus) > gamma * length(y_i_minus))) / n
+S_{\mathrm{long}} = \frac{1}{n}\sum_{i=1}^{n}\mathbf{1}[\ell(y_i^+) > \gamma\ell(y_i^-)]
 ~~~
 
-如果 `B_len` 很高，要检查标注者是否把“更长”误当成“更好”。
+其中 $\ell$ 是固定 tokenizer 下的 token 数，$\gamma>1$ 是用于筛查的比例阈值。$S_{\mathrm{long}}$ 只能指出“胜出回答常更长”，不能单独证明长度造成偏好；应在相同任务、风险和事实质量的样本中匹配比较，或用盲化的等价压缩版本复核。
 
-偏好与安全数据的状态不应压缩成一个总开关，可以保留并列指标向量：
+偏好与安全数据的状态不应压缩成一个总分，可以保留并列指标向量：
 
 ~~~math
-C_pref = (A, mean(m), R_leak, R_over, B_len, C_risk)
+\mathbf{v} = (A_{\mathrm{pair}},\,\overline{m},\,R_{\mathrm{under}},\,R_{\mathrm{over}},\,S_{\mathrm{long}},\,C_{\mathrm{target}})
 ~~~
 
-其中 `C_risk` 是安全风险类别覆盖率。preference data 是模型行为价值函数的样本，安全数据是边界行为样本；两者都必须版本化、分桶审计，并把不同错误对应到不同修复动作。
+其中 $C_{\mathrm{target}}$ 是预先声明的目标切片覆盖情况。每个值都要保留自己的定义域、分母、版本和置信范围；这个向量用于定位问题，不代表一条总排行榜。
 
-这些比率都有明确的定义域。`R_leak` 的分母是“应当拒绝”的样本数，`R_over` 的分母是“应当正常回答”的样本数；它们不能把所有安全样本混在一起。若某一类样本数量为零，指标应记为 `undefined` 或 `None`，而不是擅自记成 0。0 表示分母存在且没有发生该错误，`undefined` 表示这次数据中没有足够证据。长度偏置同样需要非空样本集，且应说明统计的是偏好对、回答还是某个风险分桶。
+例如独立测试集中，4 条应阻止危险协助的样本里有 3 条被判成非阻止动作，则 $R_{\mathrm{under}}=3/4=0.75$；5 条目标为正常回答的样本里有 1 条被拒绝，则 $R_{\mathrm{over}}=1/5=0.20$。8 组成对回答里若有 3 组的 chosen 超过 rejected 的 1.5 倍 token 数，则 $S_{\mathrm{long}}=3/8=0.375$，它只是长度线索比例。任何分母为零的项都为 undefined，不能填成通过。
 
-本章后面的审计示例只处理数据集覆盖和标签质量，并没有运行模型、得到 `pred_action`，因此不会把数据覆盖率冒充成 `R_leak` 或 `R_over`。示例会分别报告应拒答与应答样本的保留情况；真正的漏拒率和误拒率，要在独立模型评估集上用模型预测计算。
+这些比率都有明确的定义域。$R_{\mathrm{under}}$ 的分母是目标动作属于拒绝集合的样本数，$R_{\mathrm{over}}$ 的分母是目标动作为回答的样本数；它们不能把所有安全样本混在一起。若某一类样本数量为零，指标应记为 undefined 或 None，而不是擅自记成 0。0 表示分母存在且没有发生该错误；undefined 表示这次数据没有提供该类证据。长度预警也要说明样本单位、tokenizer 和分桶。
+
+本章后面的审计示例只处理数据集覆盖和标签质量，并没有运行模型、得到预测动作，因此不会把数据保留率冒充成 $R_{\mathrm{under}}$ 或 $R_{\mathrm{over}}$。示例按目标动作报告样本保留情况；真正的漏拒和误拒要在独立模型评估集上计算，并同时报告澄清、拒绝并转向等动作的逐类结果。
 
 ---
 
@@ -240,6 +273,12 @@ Harmless 表示回答是否安全、合规、避免助长伤害。它关注危�
 
 标注规范不是一次写完。训练中发现模型偏差后，要回到规范修订，再补数据。
 
+### 分歧不是默认噪声
+
+二元标签会把“哪一个更好”压成一个答案，但分歧可能来自不同原因：prompt 没交代目标、回答风格不同、事实证据有冲突，或标注者确实持有不同但合理的偏好。ICML 2025 的一项研究把偏好分歧归为四大类、十种来源，并报告任务欠说明和回答风格是常见原因；该研究还发现标准 Bradley–Terry reward model 与 LLM judge 未能充分表达这些分歧。它支持增加诊断字段，不意味着每个数据集都应采用相同的群体偏好模型。[Diverging Preferences](https://proceedings.mlr.press/v267/zhang25bx.html)
+
+标注记录应区分“标签错误”与“目标本身有多个合理答案”。可以为每个比较附上 `tie`、`not_comparable`、`needs_context` 等状态，以及分歧原因、标注群体和任务切片。发现分歧后，先检查 rubric 是否缺少目标或优先级；只有在定义明确、证据充分时，才把某一标签判为错误。对稳定的群体差异，应保留分布或明确产品采用的决策规则，不能用总体多数票悄悄抹平差异。
+
 ---
 
 ## 8. 偏好数据的质量问题
@@ -258,6 +297,8 @@ Harmless 表示回答是否安全、合规、避免助长伤害。它关注危�
 10. 数据泄漏：评测集或线上隐私内容混入训练。
 
 因此，偏好数据要做标注一致性评估、分桶审计、模型回归测试和线上观察。
+
+清洗方法也需要按数据和训练配置验证。NeurIPS 2025 的 PrefCleanBench 比较了 13 种方法，并在多种数据集、模型和偏好优化目标上评估泛化；作者报告，多 judge 识别后移除疑似不可靠样本，在所测设置中的 win-tie rate 和平均 reward 优于单 judge 或直接翻转标签。该结果不构成“多 judge 必然更好”的通用规则，但说明清洗策略本身应进入可复现实验：固定筛选比例、训练算法和评估集，再看跨模型、跨任务是否稳定。[PrefCleanBench](https://proceedings.neurips.cc/paper_files/paper/2025/hash/b457a310c34efcaf6322d1bc6503ce16-Abstract-Datasets_and_Benchmarks_Track.html)
 
 ---
 
@@ -282,18 +323,17 @@ Harmless 表示回答是否安全、合规、避免助长伤害。它关注危�
 
 ## 10. 安全数据分层
 
-安全数据最好按风险分层，而不是只分“安全/不安全”。
+安全数据不能只分“安全/不安全”，也不宜把彼此重叠的风险、领域和动作塞进一个单选标签。一个样本可以同时是医学领域、意图不清、后果较高、需要澄清。建议按独立轴保存标签，再由版本化策略映射到目标动作：
 
-可以分为：
+| 标签轴 | 示例取值 | 需要回答的问题 |
+| --- | --- | --- |
+| 意图与可答性 | allowed、disallowed、unclear | 请求的目标和可提供范围是什么？ |
+| 后果严重度 | routine、high impact、urgent | 回答错误或延迟会造成什么后果？ |
+| 领域 | general、medical、legal、financial、privacy、cyber | 是否需要领域专家、时效或法域切片？ |
+| 语境 | education、prevention、operation、fiction、multi-turn | 同一主题处于什么对话目的与状态？ |
+| 目标动作 | answer、clarify、refuse、refuse-and-redirect、support-and-escalate | 这个策略版本要求模型具体做什么？ |
 
-1. 明确安全请求：正常学习、科普、创作、技术帮助。
-2. 敏感但可安全回答：历史、新闻、政策、风险识别、教育性解释。
-3. 高风险请求：可能造成现实伤害、违法、欺骗、隐私侵犯或危险操作。
-4. 边界模糊请求：用户意图不清，需要澄清或给安全版本。
-5. 紧急风险请求：自伤、医疗急症、暴力威胁等需要支持性安全回应。
-6. 专业高风险请求：医学、法律、金融等需要免责声明、建议咨询专业人士和避免确定性结论。
-
-分层的好处是避免模型“一刀切”。它能在风险内容中区分教育、预防、治理和操作性伤害。
+这些是数据设计示例，不构成跨产品通用政策。意图标签说明样本怎样被理解，严重度说明可能后果，领域描述专业上下文，目标动作才说明训练标签；将它们分开，才能定位误拒是来自意图判断、领域覆盖还是动作映射。
 
 ---
 
@@ -346,7 +386,7 @@ Harmless 表示回答是否安全、合规、避免助长伤害。它关注危�
 
 红队数据来自对模型的系统性安全测试。目标是发现模型在边界场景下可能产生的有害输出，然后用这些发现改进模型。
 
-Anthropic 的 red teaming 工作系统讨论了语言模型红队方法、规模行为和经验教训，并释放了红队攻击数据用于分析有害输出模式。这里的重点不是传播攻击方法，而是用系统化评估发现和降低伤害。
+Perez 等人的研究讨论了语言模型红队方法、规模行为和经验教训，并发布研究数据以分析有害输出模式。[Red Teaming Language Models with Language Models](https://arxiv.org/abs/2202.03286) 说明红队发现是评测证据，进入训练前仍要做用途限制、最小化和独立回归设计。这里的重点不是传播攻击方法，而是用系统化评估发现和降低伤害。
 
 红队数据可以包括：
 
@@ -404,12 +444,16 @@ Anthropic 的 red teaming 工作系统讨论了语言模型红队方法、规模
 
 医学、法律、金融等领域需要专门安全数据。
 
+医学样本要区分健康教育、个体化诊断和紧急求助，标注时记录来源日期、适用人群和不能支持的结论；不能把“加一句免责声明”当成安全答案的充分条件。
+
 医学数据要教模型：
 
 1. 区分科普和诊断。
 2. 遇到急症建议及时求助。
 3. 不给确定性治疗方案。
 4. 表达不确定性和个体差异。
+
+法律样本要记录适用法域、时间和资料来源；一般法律信息与针对个人案件的结论应分开标注。具体答案需要依据相应法域的有效资料，不能用一条跨地区通用模板替代。
 
 法律数据要教模型：
 
@@ -418,6 +462,8 @@ Anthropic 的 red teaming 工作系统讨论了语言模型红队方法、规模
 3. 不替代律师判断。
 4. 保留证据和程序边界。
 
+金融样本要区分历史事实、一般教育和个体化投资建议，记录数据时点、风险假设和适用范围，不把历史收益当作未来承诺。
+
 金融数据要教模型：
 
 1. 区分事实、观点和投资建议。
@@ -425,7 +471,7 @@ Anthropic 的 red teaming 工作系统讨论了语言模型红队方法、规模
 3. 避免承诺收益。
 4. 对监管边界保持谨慎。
 
-这些领域的偏好数据最好由专家参与标注和审计。
+这些领域的数据最好由有相应能力的专家参与标注和审计；样本不充分时，目标动作应允许澄清、限定回答或转介，而不是强行产出确定结论。
 
 ---
 
@@ -442,7 +488,7 @@ Anthropic 的 red teaming 工作系统讨论了语言模型红队方法、规模
 5. 跨文化敏感内容。
 6. 多语言拒答风格。
 
-直接翻译英文安全数据是不够的。不同语言的表达、法律环境、文化语境和用户习惯不同，需要本地化审计。
+直接翻译英文安全数据是不够的。不同语言的表达、地区规范、文化语境和用户习惯不同，需要本地化审计。2026 年一项多语言表示研究只检查了两个开源指令模型、十种语言和已发布 benchmark；作者发现模型间的拒答表示和跨语言转移结果并不一致。这类有限设置不能代表所有模型，但足以提醒工程师：英语拒答样本不能替代目标语言的独立覆盖与回归。[Cross-Lingual (Non-)Transfer of the Refusal Direction](https://aclanthology.org/2026.mrl-1.19/)
 
 ---
 
@@ -461,7 +507,11 @@ LLM judge 可以辅助偏好标注和安全审核。它能降低成本，快速�
 5. 多语言能力不均。
 6. 可能偏袒同源模型输出。
 
-合理用法是：LLM judge 做初筛和辅助，关键样本、边界样本、高风险样本由人类或专家审计。
+合理用法是：LLM judge 做初筛、排序建议和理由草拟，关键样本、边界样本、高风险样本由人类或专家审计。成对比较时应随机化候选顺序并交换位置复测；2025 年一项覆盖 15 个 judge、22 项任务和超过 150,000 次评估的研究发现，位置偏差会随 judge、候选回答和任务而变，不能假定对调一次就能完全消除。[Judging the Judges](https://aclanthology.org/2025.ijcnlp-long.18/)
+
+校准集应由独立标注者按固定 rubric 标注，并绑定 judge 模型、提示词、候选顺序和版本。报告人类一致率、逐切片误差和拒绝裁决（abstain）比例；当 judge 不确定或与人工冲突时升级复核。偏好 judge 给出的分数只说明它在该校准协议下的表现，不等于偏好事实，更不能代替安全策略的人工批准。
+
+ICLR 2025 的 Trust or Escalate 提出用人工校准样本设定 judge 的信任阈值，并在低置信时升级到更强 judge 或人工复核；论文的 agreement guarantee 依赖其统计假设、校准流程和评估分布。可迁移的是“允许弃判并按风险升级”的设计思路，不能把论文保证直接套到未校准的安全数据或不同人群上。[Trust or Escalate](https://proceedings.iclr.cc/paper_files/paper/2025/hash/08dabd5345b37fffcbe335bd578b15a0-Abstract-Conference.html)
 
 ---
 
@@ -478,6 +528,8 @@ LLM judge 可以辅助偏好标注和安全审核。它能降低成本，快速�
 5. 审计日志。
 6. 敏感样本隔离。
 
+每条进入训练或评估的数据都应保留用途、来源许可和限制条件的证据，并按照适用制度与产品承诺处理；“公开可见”不自动代表可用于训练。对无法确认来源或超出既定用途的数据，应隔离并升级处理，而不是在清洗后把来源问题当作已经解决。
+
 标注员安全包括：
 
 1. 对高风险内容分级。
@@ -492,7 +544,7 @@ LLM judge 可以辅助偏好标注和安全审核。它能降低成本，快速�
 
 ## 20. Preference data 的评估
 
-评估偏好数据可以看：
+数据集层面的偏好审计可以看：
 
 1. 标注一致性。
 2. 标注者间 agreement。
@@ -501,9 +553,9 @@ LLM judge 可以辅助偏好标注和安全审核。它能降低成本，快速�
 5. 语言和领域覆盖。
 6. 安全类别覆盖。
 7. 标注理由质量。
-8. 模型训练后的 win rate。
-9. 是否引入长度偏置、拒答偏置或迎合偏置。
-10. 人工回归测试。
+8. 不同 rubric、标注群体、语言和任务下的一致与分歧。
+9. 长度、位置、同源 judge 和拒答偏置的配对审计。
+10. 训练后独立评估中的 win-tie-loss、事实性、安全性和人工回归。
 
 注意，偏好训练后模型 win rate 提升不一定代表整体变好。还要看事实性、安全、通用能力、专业能力和产品体验。
 
@@ -511,9 +563,9 @@ LLM judge 可以辅助偏好标注和安全审核。它能降低成本，快速�
 
 ## 21. 安全数据的评估
 
-安全数据评估应同时看漏拒和误拒。
+安全数据集审计先看目标动作与切片是否齐全；模型行为评估则使用隔离的测试集，并同时看漏拒、误拒和其他动作错误。两种工作需要分开报告。
 
-常见指标包括：
+常见模型行为指标包括：
 
 1. 高风险请求拒答率。
 2. 安全请求正常回答率。
@@ -524,15 +576,17 @@ LLM judge 可以辅助偏好标注和安全审核。它能降低成本，快速�
 7. 安全替代建议质量。
 8. 红队回归通过率。
 9. 用户体验影响。
-10. 线上安全事件率。
+10. 线上安全事件率及其抽样、归因和观察窗口。
+
+报告应同时给出各动作、语言、领域、意图和严重度的分母与样本数。线上事件稀少时，事件率的不确定性和漏报机制也要记录；单独给一个拒答率或总安全分数，无法判断系统是恰当拒绝还是大量误拒。
 
 好的安全评估不是只看“拒绝了多少”，而是看“拒绝是否该拒绝，帮助是否安全地帮助”。
 
 ---
 
-## 22. 机制与边界：Preference data 是价值函数样本
+## 22. 机制与边界：Preference data 是条件化的行为偏好样本
 
-从机制上看，preference data 是对人类价值函数的稀疏采样。它不是客观真理，而是标注规范、标注者群体、任务分布、产品定位和社会规范共同作用的结果。
+Preference data 更准确地说，是在特定任务、rubric、标注群体和时间条件下采到的比较判断。它不等于一个所有人共享、可直接恢复的“人类价值函数”。可将目标理解为条件分布 $P(y^+ \succ y^- \mid x,\,r,\,g,\,t)$：同一 prompt 在 rubric $r$、标注群体 $g$ 和时间 $t$ 改变时，偏好分布也可能改变。2025 年一项跨文化研究分析了来自 74 个国家、7,500 多段对话和 21 个 LLM 的数据，报告用户偏好特征会随个体价值观而变化；这是特定研究数据的观察，不是全球用户的统一偏好结论。[Human Preferences for Constructive Interactions](https://arxiv.org/abs/2503.16480)
 
 这带来几个专家级问题：
 
@@ -544,7 +598,7 @@ LLM judge 可以辅助偏好标注和安全审核。它能降低成本，快速�
 6. 不同文化和语言下偏好是否冲突？
 7. 偏好数据是否会随时间过期？
 
-因此，偏好数据不是一次性资产，而是持续更新的模型行为治理系统。
+因此，样本应同时保留行为偏好和安全策略的来源。描述用户或标注群体偏好的数据，不能单独决定高风险策略；拒答边界应绑定经过批准的 policy version，再用数据表达其目标动作。偏好数据也不是一次性资产，而是需要按版本监测分布漂移、分歧变化和回归结果的治理输入。
 
 ---
 
@@ -554,38 +608,56 @@ LLM judge 可以辅助偏好标注和安全审核。它能降低成本，快速�
 
 prompt 池要覆盖真实用户请求、长尾任务、专业领域、多语言、边界案例和红队发现。候选回答可以来自多模型版本、多次采样、人工回答或有授权的 teacher，但每个候选都要绑定版本和生成条件。偏好标注同时记录 chosen/rejected、理由、风险类别、语言、标注者和 rubric。
 
-安全分层把样本分成明确安全、敏感可答、高风险、边界模糊、紧急风险和专业高风险。拒答数据与边界允许数据成对建设：前者降低漏拒，后者降低误拒。红队发现的失败模式进入训练和回归集合时，只保留防御所需的风险标签、最小上下文和安全响应。
+安全分层把意图与可答性、后果严重度、领域、语境和期望动作分开标注。拒答数据与边界允许数据成组建设：前者降低漏拒，后者降低误拒；必要时加入澄清或支持升级样本。红队发现的失败模式进入训练和回归集合时，只保留防御所需的风险标签、最小上下文和安全响应。
 
-质量审计要检查标注一致性、margin、长度偏置、拒答偏置、LLM judge 偏差、隐私、污染和多语言一致性。训练后同时看 win rate、事实性、误拒/漏拒、安全替代质量和人工样例；最终保存标注规范、隐私处理、策略版本、训练版本和评估结果。
+质量审计要检查标注分布与分歧、一致性、margin、长度线索、拒答偏置、LLM judge 偏差、隐私、污染和多语言覆盖。训练后同时看 win-tie-loss、事实性、逐类动作错误、安全替代质量和人工样例；最终保存标注规范、隐私处理、策略版本、训练版本和评估结果。
 
 ### 23.1 最小可运行偏好与安全数据审计 demo
 
-下面这个 demo 不依赖外部库，也不读写文件。输入是一组 toy preference / safety 样本；输出包括保留样本、拒绝原因、按数据类型拆分的保留率与配比、平均偏好 margin、安全动作覆盖、检查信号和后续动作。
+下面这个 demo 不依赖外部库，也不读写文件。输入是一组 toy preference / safety 样本；输出包括进入候选集的样本、被隔离的原因、按数据类型拆分的 token 保留率与配比、目标动作保留率、检查信号和后续动作。代码中的 `slice` 只是本例预先声明的测试切片，不是完备或互斥的安全风险本体；真实数据还应分开保留意图、后果、领域、语境和策略版本。
 
 它演示的是数据治理机制，不是生产级 reward model、DPO trainer、安全分类器、红队平台或隐私系统。真实项目要接入标注平台、专家复核、policy registry、PII 脱敏、红队回归集、人工一致性统计、训练 ablation 和线上安全监控。这里的检查结果只是决定下一轮数据实验的依据，不等于模型已经具备了可部署的安全性。
+
+先手算一条偏好样本。对 `pref_summary_helpful`，rubric 权重为 helpful 0.38、honest 0.32、harmless 0.30：
+
+~~~math
+S_{\mathrm{chosen}}=0.38\times0.92+0.32\times0.88+0.30\times0.95=0.9162
+~~~
+
+~~~math
+S_{\mathrm{rejected}}=0.38\times0.62+0.32\times0.70+0.30\times0.90=0.7296
+~~~
+
+所以 $m=0.9162-0.7296=0.1866$，按三位小数显示为 0.187，高于本例的 0.08 初筛线。这个 margin 只是在合成 rubric 分数上的差值；它既不是真实人类偏好概率，也不能替代安全动作、隐私和污染门禁。
+
+**代码状态：已验证（2026-10-28，Python 3.12.9，标准库；固定合成样本，无外部依赖）。**
+
+将代码保存为 `preference_audit.py`，运行 `python3 preference_audit.py`。
 
 ~~~python
 from collections import Counter, defaultdict
 
 
 samples = [
-    {"id": "pref_summary_helpful", "kind": "preference", "risk": "normal", "lang": "en", "tokens": 760, "chosen": {"helpful": 0.92, "honest": 0.88, "harmless": 0.95, "length": 130, "action": "answer", "safe": True}, "rejected": {"helpful": 0.62, "honest": 0.70, "harmless": 0.90, "length": 90, "action": "answer", "safe": True}, "agreement": 0.86, "pii": False, "contam": False, "rubric": True},
-    {"id": "pref_factual_citation", "kind": "preference", "risk": "normal", "lang": "zh", "tokens": 820, "chosen": {"helpful": 0.84, "honest": 0.94, "harmless": 0.96, "length": 150, "action": "answer", "safe": True}, "rejected": {"helpful": 0.88, "honest": 0.55, "harmless": 0.90, "length": 170, "action": "answer", "safe": True}, "agreement": 0.78, "pii": False, "contam": False, "rubric": True},
-    {"id": "safe_high_risk_refusal", "kind": "safety", "risk": "high_risk", "lang": "en", "tokens": 690, "expected": "refuse", "chosen": {"helpful": 0.66, "honest": 0.90, "harmless": 0.99, "length": 95, "action": "refuse", "safe": True}, "rejected": {"helpful": 0.90, "honest": 0.50, "harmless": 0.10, "length": 220, "action": "unsafe_steps", "safe": False}, "agreement": 0.92, "pii": False, "contam": False, "rubric": True},
-    {"id": "safe_boundary_allowed", "kind": "safety", "risk": "boundary_allowed", "lang": "en", "tokens": 610, "expected": "answer", "chosen": {"helpful": 0.86, "honest": 0.88, "harmless": 0.95, "length": 135, "action": "answer", "safe": True}, "rejected": {"helpful": 0.20, "honest": 0.82, "harmless": 0.97, "length": 45, "action": "refuse", "safe": True}, "agreement": 0.80, "pii": False, "contam": False, "rubric": True},
-    {"id": "safe_professional_boundary", "kind": "safety", "risk": "professional", "lang": "zh", "tokens": 740, "expected": "safe_alt", "chosen": {"helpful": 0.78, "honest": 0.93, "harmless": 0.98, "length": 160, "action": "safe_alt", "safe": True}, "rejected": {"helpful": 0.91, "honest": 0.40, "harmless": 0.45, "length": 170, "action": "definitive_advice", "safe": False}, "agreement": 0.84, "pii": False, "contam": False, "rubric": True},
-    {"id": "safe_privacy_refusal", "kind": "safety", "risk": "privacy", "lang": "en", "tokens": 580, "expected": "refuse", "chosen": {"helpful": 0.62, "honest": 0.90, "harmless": 0.99, "length": 85, "action": "refuse", "safe": True}, "rejected": {"helpful": 0.88, "honest": 0.45, "harmless": 0.20, "length": 210, "action": "private_data", "safe": False}, "agreement": 0.88, "pii": False, "contam": False, "rubric": True},
-    {"id": "pref_low_agreement", "kind": "preference", "risk": "normal", "lang": "en", "tokens": 650, "chosen": {"helpful": 0.78, "honest": 0.78, "harmless": 0.94, "length": 140, "action": "answer", "safe": True}, "rejected": {"helpful": 0.72, "honest": 0.76, "harmless": 0.94, "length": 110, "action": "answer", "safe": True}, "agreement": 0.52, "pii": False, "contam": False, "rubric": True},
-    {"id": "pref_length_bias", "kind": "preference", "risk": "normal", "lang": "en", "tokens": 920, "chosen": {"helpful": 0.70, "honest": 0.70, "harmless": 0.95, "length": 420, "action": "answer", "safe": True}, "rejected": {"helpful": 0.72, "honest": 0.74, "harmless": 0.95, "length": 110, "action": "answer", "safe": True}, "agreement": 0.76, "pii": False, "contam": False, "rubric": True},
-    {"id": "safe_wrong_action", "kind": "safety", "risk": "boundary_allowed", "lang": "zh", "tokens": 560, "expected": "answer", "chosen": {"helpful": 0.25, "honest": 0.82, "harmless": 0.98, "length": 50, "action": "refuse", "safe": True}, "rejected": {"helpful": 0.80, "honest": 0.84, "harmless": 0.94, "length": 130, "action": "answer", "safe": True}, "agreement": 0.82, "pii": False, "contam": False, "rubric": True},
-    {"id": "pref_private_log", "kind": "preference", "risk": "normal", "lang": "en", "tokens": 500, "chosen": {"helpful": 0.85, "honest": 0.85, "harmless": 0.95, "length": 100, "action": "answer", "safe": True}, "rejected": {"helpful": 0.55, "honest": 0.75, "harmless": 0.90, "length": 80, "action": "answer", "safe": True}, "agreement": 0.82, "pii": True, "contam": False, "rubric": True},
-    {"id": "pref_eval_leak", "kind": "preference", "risk": "normal", "lang": "en", "tokens": 540, "chosen": {"helpful": 0.86, "honest": 0.86, "harmless": 0.95, "length": 115, "action": "answer", "safe": True}, "rejected": {"helpful": 0.55, "honest": 0.76, "harmless": 0.90, "length": 90, "action": "answer", "safe": True}, "agreement": 0.82, "pii": False, "contam": True, "rubric": True},
+    {"id": "pref_summary_helpful", "kind": "preference", "slice": "normal", "lang": "en", "tokens": 760, "chosen": {"helpful": 0.92, "honest": 0.88, "harmless": 0.95, "length": 130, "action": "answer", "safe": True}, "rejected": {"helpful": 0.62, "honest": 0.70, "harmless": 0.90, "length": 90, "action": "answer", "safe": True}, "agreement": 0.86, "pii": False, "contam": False, "rubric": True},
+    {"id": "pref_factual_citation", "kind": "preference", "slice": "normal", "lang": "zh", "tokens": 820, "chosen": {"helpful": 0.84, "honest": 0.94, "harmless": 0.96, "length": 150, "action": "answer", "safe": True}, "rejected": {"helpful": 0.88, "honest": 0.55, "harmless": 0.90, "length": 170, "action": "answer", "safe": True}, "agreement": 0.78, "pii": False, "contam": False, "rubric": True},
+    {"id": "safe_high_risk_refusal", "kind": "safety", "slice": "high_risk", "lang": "en", "tokens": 690, "expected": "refuse", "chosen": {"helpful": 0.66, "honest": 0.90, "harmless": 0.99, "length": 95, "action": "refuse", "safe": True}, "rejected": {"helpful": 0.90, "honest": 0.50, "harmless": 0.10, "length": 220, "action": "unsafe_steps", "safe": False}, "agreement": 0.92, "pii": False, "contam": False, "rubric": True},
+    {"id": "safe_boundary_allowed", "kind": "safety", "slice": "boundary_allowed", "lang": "en", "tokens": 610, "expected": "answer", "chosen": {"helpful": 0.86, "honest": 0.88, "harmless": 0.95, "length": 135, "action": "answer", "safe": True}, "rejected": {"helpful": 0.20, "honest": 0.82, "harmless": 0.97, "length": 45, "action": "refuse", "safe": True}, "agreement": 0.80, "pii": False, "contam": False, "rubric": True},
+    {"id": "safe_professional_boundary", "kind": "safety", "slice": "professional", "lang": "zh", "tokens": 740, "expected": "safe_alt", "chosen": {"helpful": 0.78, "honest": 0.93, "harmless": 0.98, "length": 160, "action": "safe_alt", "safe": True}, "rejected": {"helpful": 0.91, "honest": 0.40, "harmless": 0.45, "length": 170, "action": "definitive_advice", "safe": False}, "agreement": 0.84, "pii": False, "contam": False, "rubric": True},
+    {"id": "safe_privacy_refusal", "kind": "safety", "slice": "privacy", "lang": "en", "tokens": 580, "expected": "refuse", "chosen": {"helpful": 0.62, "honest": 0.90, "harmless": 0.99, "length": 85, "action": "refuse", "safe": True}, "rejected": {"helpful": 0.88, "honest": 0.45, "harmless": 0.20, "length": 210, "action": "private_data", "safe": False}, "agreement": 0.88, "pii": False, "contam": False, "rubric": True},
+    {"id": "pref_low_agreement", "kind": "preference", "slice": "normal", "lang": "en", "tokens": 650, "chosen": {"helpful": 0.78, "honest": 0.78, "harmless": 0.94, "length": 140, "action": "answer", "safe": True}, "rejected": {"helpful": 0.72, "honest": 0.76, "harmless": 0.94, "length": 110, "action": "answer", "safe": True}, "agreement": 0.52, "pii": False, "contam": False, "rubric": True},
+    {"id": "pref_length_bias", "kind": "preference", "slice": "normal", "lang": "en", "tokens": 920, "chosen": {"helpful": 0.70, "honest": 0.70, "harmless": 0.95, "length": 420, "action": "answer", "safe": True}, "rejected": {"helpful": 0.72, "honest": 0.74, "harmless": 0.95, "length": 110, "action": "answer", "safe": True}, "agreement": 0.76, "pii": False, "contam": False, "rubric": True},
+    {"id": "safe_wrong_action", "kind": "safety", "slice": "boundary_allowed", "lang": "zh", "tokens": 560, "expected": "answer", "chosen": {"helpful": 0.25, "honest": 0.82, "harmless": 0.98, "length": 50, "action": "refuse", "safe": True}, "rejected": {"helpful": 0.80, "honest": 0.84, "harmless": 0.94, "length": 130, "action": "answer", "safe": True}, "agreement": 0.82, "pii": False, "contam": False, "rubric": True},
+    {"id": "pref_private_log", "kind": "preference", "slice": "normal", "lang": "en", "tokens": 500, "chosen": {"helpful": 0.85, "honest": 0.85, "harmless": 0.95, "length": 100, "action": "answer", "safe": True}, "rejected": {"helpful": 0.55, "honest": 0.75, "harmless": 0.90, "length": 80, "action": "answer", "safe": True}, "agreement": 0.82, "pii": True, "contam": False, "rubric": True},
+    {"id": "pref_eval_leak", "kind": "preference", "slice": "normal", "lang": "en", "tokens": 540, "chosen": {"helpful": 0.86, "honest": 0.86, "harmless": 0.95, "length": 115, "action": "answer", "safe": True}, "rejected": {"helpful": 0.55, "honest": 0.76, "harmless": 0.90, "length": 90, "action": "answer", "safe": True}, "agreement": 0.82, "pii": False, "contam": True, "rubric": True},
+    {"id": "safe_ambiguous_clarify", "kind": "safety", "slice": "ambiguous", "lang": "zh", "tokens": 640, "expected": "clarify", "chosen": {"helpful": 0.80, "honest": 0.90, "harmless": 0.98, "length": 110, "action": "clarify", "safe": True}, "rejected": {"helpful": 0.55, "honest": 0.72, "harmless": 0.90, "length": 130, "action": "answer", "safe": True}, "agreement": 0.88, "pii": False, "contam": False, "rubric": True},
 ]
 
 WEIGHTS = {"helpful": 0.38, "honest": 0.32, "harmless": 0.30}
 MIN_MARGIN = 0.08
 MIN_AGREEMENT = 0.67
-TARGET_RISKS = {"normal", "high_risk", "boundary_allowed", "professional", "privacy"}
+TARGET_SAFETY_SLICES = {"high_risk", "boundary_allowed", "professional", "privacy", "ambiguous"}
+TARGET_ACTIONS = {"answer", "clarify", "refuse", "safe_alt"}
 
 
 def safe_ratio(numerator, denominator):
@@ -600,7 +672,7 @@ def quality(answer):
     return sum(WEIGHTS[k] * answer[k] for k in WEIGHTS)
 
 
-def reject_reason(item):
+def hold_reason(item):
     chosen_q = quality(item["chosen"])
     rejected_q = quality(item["rejected"])
     margin = chosen_q - rejected_q
@@ -623,19 +695,24 @@ def reject_reason(item):
     return None
 
 
-kept, rejected, rows = [], {}, []
+assert round(sum(WEIGHTS.values()), 3) == 1.0
+assert len({item["id"] for item in samples}) == len(samples)
+assert all(0.0 <= answer[key] <= 1.0 for item in samples for answer in (item["chosen"], item["rejected"]) for key in WEIGHTS)
+
+kept, held, rows = [], {}, []
 for item in samples:
     c_q = round(quality(item["chosen"]), 3)
     r_q = round(quality(item["rejected"]), 3)
-    reason = reject_reason(item)
-    rows.append({"id": item["id"], "kind": item["kind"], "risk": item["risk"], "chosen_q": c_q, "rejected_q": r_q, "margin": round(c_q - r_q, 3), "reason": reason or "kept"})
+    reason = hold_reason(item)
+    exact_margin = quality(item["chosen"]) - quality(item["rejected"])
+    rows.append({"id": item["id"], "kind": item["kind"], "slice": item["slice"], "chosen_q": c_q, "rejected_q": r_q, "margin": round(exact_margin, 3), "reason": reason or "candidate"})
     if reason:
-        rejected[item["id"]] = reason
+        held[item["id"]] = reason
     else:
         kept.append(item)
 
 raw_kind_tokens, kept_kind_tokens = defaultdict(int), defaultdict(int)
-risk_tokens_by_kind = defaultdict(lambda: defaultdict(int))
+slice_tokens_by_kind = defaultdict(lambda: defaultdict(int))
 lang_tokens_by_kind = defaultdict(lambda: defaultdict(int))
 raw_action_counts, kept_action_counts = Counter(), Counter()
 margin_by_kind = defaultdict(list)
@@ -646,7 +723,7 @@ for item in samples:
         raw_action_counts[item["expected"]] += 1
 for item in kept:
     kept_kind_tokens[item["kind"]] += item["tokens"]
-    risk_tokens_by_kind[item["kind"]][item["risk"]] += item["tokens"]
+    slice_tokens_by_kind[item["kind"]][item["slice"]] += item["tokens"]
     lang_tokens_by_kind[item["kind"]][item["lang"]] += item["tokens"]
     row = next(row for row in rows if row["id"] == item["id"])
     margin_by_kind[item["kind"]].append(row["margin"])
@@ -657,19 +734,24 @@ for item in kept:
 kept_tokens = sum(item["tokens"] for item in kept)
 raw_tokens = sum(item["tokens"] for item in samples)
 safety_kept = [item for item in kept if item["kind"] == "safety"]
-retained_refusal_targets = [item["id"] for item in safety_kept if item["expected"] == "refuse"]
-retained_answer_targets = [item["id"] for item in safety_kept if item["expected"] == "answer"]
-coverage = safe_ratio(len(set(item["risk"] for item in kept) & TARGET_RISKS), len(TARGET_RISKS))
+retained_ids_by_action = {
+    action: [item["id"] for item in safety_kept if item["expected"] == action]
+    for action in sorted(TARGET_ACTIONS)
+}
+retained_safety_slices = {
+    item["slice"] for item in kept if item["kind"] == "safety"
+}
+coverage = safe_ratio(len(retained_safety_slices & TARGET_SAFETY_SLICES), len(TARGET_SAFETY_SLICES))
 retention_by_kind = {
     kind: safe_ratio(kept_kind_tokens[kind], raw_kind_tokens[kind])
     for kind in sorted(raw_kind_tokens)
 }
-risk_mix_by_kind = {
+slice_mix_by_kind = {
     kind: {
-        risk: safe_ratio(tokens, kept_kind_tokens[kind])
-        for risk, tokens in sorted(buckets.items())
+        slice_name: safe_ratio(tokens, kept_kind_tokens[kind])
+        for slice_name, tokens in sorted(buckets.items())
     }
-    for kind, buckets in sorted(risk_tokens_by_kind.items())
+    for kind, buckets in sorted(slice_tokens_by_kind.items())
 }
 lang_mix_by_kind = {
     kind: {
@@ -678,29 +760,28 @@ lang_mix_by_kind = {
     }
     for kind, buckets in sorted(lang_tokens_by_kind.items())
 }
-safety_action_coverage = {
+retention_by_expected_action = {
     action: safe_ratio(kept_action_counts[action], raw_action_counts[action])
-    for action in sorted({"answer", "refuse", "safe_alt", "clarify"} | set(raw_action_counts))
+    for action in sorted(TARGET_ACTIONS | set(raw_action_counts))
 }
 
 report = {
     "kept_ids": [item["id"] for item in kept],
-    "rejected": dict(sorted(rejected.items())),
-    "reason_counts": dict(sorted(Counter(rejected.values()).items())),
+    "held": dict(sorted(held.items())),
+    "reason_counts": dict(sorted(Counter(held.values()).items())),
     "retention": safe_ratio(kept_tokens, raw_tokens),
     "kind_counts": dict(sorted(kind_counts.items())),
     "retention_by_kind": retention_by_kind,
-    "risk_mix_by_kind": risk_mix_by_kind,
+    "slice_mix_by_kind": slice_mix_by_kind,
     "lang_mix_by_kind": lang_mix_by_kind,
     "avg_margin_by_kind": {
         kind: safe_mean(values) for kind, values in sorted(margin_by_kind.items())
     },
-    "coverage": coverage,
+    "target_safety_slice_coverage": coverage,
     "raw_safety_action_counts": dict(sorted(raw_action_counts.items())),
     "kept_safety_action_counts": dict(sorted(kept_action_counts.items())),
-    "safety_action_coverage": safety_action_coverage,
-    "retained_refusal_targets": retained_refusal_targets,
-    "retained_answer_targets": retained_answer_targets,
+    "retention_by_expected_action": retention_by_expected_action,
+    "retained_ids_by_action": retained_ids_by_action,
     "score_preview": {row["id"]: (row["chosen_q"], row["rejected_q"], row["margin"]) for row in rows},
 }
 
@@ -710,12 +791,10 @@ checks = {
     "contamination_filter_observed": "eval_contamination" in report["reason_counts"],
     "length_bias_review_observed": "length_bias_risk" in report["reason_counts"],
     "wrong_action_review_observed": "wrong_safety_action" in report["reason_counts"],
-    "risk_coverage_complete": report["coverage"] is not None and report["coverage"] >= 1.0,
-    "safety_balance_present": (
-        raw_action_counts["refuse"] > 0
-        and raw_action_counts["answer"] > 0
-        and kept_action_counts["refuse"] > 0
-        and kept_action_counts["answer"] > 0
+    "target_safety_slice_coverage_complete": report["target_safety_slice_coverage"] == 1.0,
+    "target_actions_retained": all(
+        raw_action_counts[action] > 0 and kept_action_counts[action] > 0
+        for action in TARGET_ACTIONS
     ),
     "preference_and_safety_present": kind_counts["preference"] >= 2 and kind_counts["safety"] >= 3,
     "retained_samples_present": bool(kept),
@@ -723,29 +802,25 @@ checks = {
 signals = {
     "retention": report["retention"],
     "avg_margin_by_kind": report["avg_margin_by_kind"],
-    "risk_coverage": report["coverage"],
-    "refusal_target_count": len(retained_refusal_targets),
-    "answer_target_count": len(retained_answer_targets),
-    "safety_action_coverage": report["safety_action_coverage"],
-    "rejected_reason_counts": report["reason_counts"],
+    "target_safety_slice_coverage": report["target_safety_slice_coverage"],
+    "retained_ids_by_action": report["retained_ids_by_action"],
+    "retention_by_expected_action": report["retention_by_expected_action"],
+    "held_reason_counts": report["reason_counts"],
 }
 actions = [
-    "exclude_privacy_and_contamination",
+    "quarantine_privacy_and_contamination",
     "review_agreement_and_length_outliers",
-    "preserve_refusal_and_allowed_pairs",
+    "preserve_refusal_allowed_and_clarify_samples",
 ]
 if not samples:
     actions.append("restore_or_collect_preference_and_safety_records")
 if samples and not kept:
     actions.append("restore_nonempty_auditable_dataset")
-if raw_action_counts["refuse"] == 0:
-    actions.append("add_expected_refusal_samples")
-if raw_action_counts["answer"] == 0:
-    actions.append("add_boundary_allowed_samples")
-if raw_action_counts["refuse"] > 0 and kept_action_counts["refuse"] == 0:
-    actions.append("repair_or_retain_refusal_samples")
-if raw_action_counts["answer"] > 0 and kept_action_counts["answer"] == 0:
-    actions.append("repair_or_retain_boundary_allowed_samples")
+for action in sorted(TARGET_ACTIONS):
+    if raw_action_counts[action] == 0:
+        actions.append(f"add_expected_{action}_samples")
+    elif kept_action_counts[action] == 0:
+        actions.append(f"repair_or_retain_{action}_samples")
 decision = "continue_to_preference_ablation" if all(checks.values()) else "hold_for_data_repair"
 report["checks"] = checks
 report["signals"] = signals
@@ -753,7 +828,8 @@ report["actions"] = actions
 report["decision"] = decision
 
 for key, value in report.items():
-    print(f"{key}=", value)
+    if key != "score_preview":
+        print(f"{key}=", value)
 
 assert report["kept_ids"] == [
     "pref_summary_helpful",
@@ -762,6 +838,7 @@ assert report["kept_ids"] == [
     "safe_boundary_allowed",
     "safe_professional_boundary",
     "safe_privacy_refusal",
+    "safe_ambiguous_clarify",
 ]
 assert report["reason_counts"] == {
     "eval_contamination": 1,
@@ -770,46 +847,58 @@ assert report["reason_counts"] == {
     "privacy_or_pii": 1,
     "wrong_safety_action": 1,
 }
-assert report["retention"] == 0.57
-assert report["kind_counts"] == {"preference": 2, "safety": 4}
-assert report["retention_by_kind"] == {"preference": 0.377, "safety": 0.824}
-assert report["risk_mix_by_kind"] == {
+assert report["retention"] == 0.604
+assert report["kind_counts"] == {"preference": 2, "safety": 5}
+assert report["retention_by_kind"] == {"preference": 0.377, "safety": 0.853}
+assert report["slice_mix_by_kind"] == {
     "preference": {"normal": 1.0},
-    "safety": {"boundary_allowed": 0.233, "high_risk": 0.263, "privacy": 0.221, "professional": 0.282},
+    "safety": {"ambiguous": 0.196, "boundary_allowed": 0.187, "high_risk": 0.212, "privacy": 0.178, "professional": 0.227},
 }
 assert report["lang_mix_by_kind"] == {
     "preference": {"en": 0.481, "zh": 0.519},
-    "safety": {"en": 0.718, "zh": 0.282},
+    "safety": {"en": 0.577, "zh": 0.423},
 }
-assert report["avg_margin_by_kind"] == {"preference": 0.157, "safety": 0.282}
-assert report["safety_action_coverage"] == {"answer": 0.5, "clarify": None, "refuse": 1.0, "safe_alt": 1.0}
-assert report["coverage"] == 1.0
+assert report["avg_margin_by_kind"] == {"preference": 0.158, "safety": 0.261}
+assert report["retention_by_expected_action"] == {"answer": 0.5, "clarify": 1.0, "refuse": 1.0, "safe_alt": 1.0}
+assert report["target_safety_slice_coverage"] == 1.0
+assert report["retained_ids_by_action"] == {
+    "answer": ["safe_boundary_allowed"],
+    "clarify": ["safe_ambiguous_clarify"],
+    "refuse": ["safe_high_risk_refusal", "safe_privacy_refusal"],
+    "safe_alt": ["safe_professional_boundary"],
+}
+assert report["signals"]["avg_margin_by_kind"] == report["avg_margin_by_kind"]
+assert safe_ratio(0, 0) is None
+assert safe_mean([]) is None
+assert report["score_preview"]["pref_summary_helpful"] == (0.916, 0.73, 0.187)
 assert all(checks.values())
 assert report["decision"] == "continue_to_preference_ablation"
 ~~~
 
-运行后会看到类似输出：
+运行输出：
 
 ~~~text
-kept_ids= ['pref_summary_helpful', 'pref_factual_citation', 'safe_high_risk_refusal', 'safe_boundary_allowed', 'safe_professional_boundary', 'safe_privacy_refusal']
-rejected= {'pref_eval_leak': 'eval_contamination', 'pref_length_bias': 'length_bias_risk', 'pref_low_agreement': 'low_labeler_agreement', 'pref_private_log': 'privacy_or_pii', 'safe_wrong_action': 'wrong_safety_action'}
+kept_ids= ['pref_summary_helpful', 'pref_factual_citation', 'safe_high_risk_refusal', 'safe_boundary_allowed', 'safe_professional_boundary', 'safe_privacy_refusal', 'safe_ambiguous_clarify']
+held= {'pref_eval_leak': 'eval_contamination', 'pref_length_bias': 'length_bias_risk', 'pref_low_agreement': 'low_labeler_agreement', 'pref_private_log': 'privacy_or_pii', 'safe_wrong_action': 'wrong_safety_action'}
 reason_counts= {'eval_contamination': 1, 'length_bias_risk': 1, 'low_labeler_agreement': 1, 'privacy_or_pii': 1, 'wrong_safety_action': 1}
-retention= 0.57
-retention_by_kind= {'preference': 0.377, 'safety': 0.824}
-risk_mix_by_kind= {'preference': {'normal': 1.0}, 'safety': {'boundary_allowed': 0.233, 'high_risk': 0.263, 'privacy': 0.221, 'professional': 0.282}}
-lang_mix_by_kind= {'preference': {'en': 0.481, 'zh': 0.519}, 'safety': {'en': 0.718, 'zh': 0.282}}
-avg_margin_by_kind= {'preference': 0.157, 'safety': 0.282}
-safety_action_coverage= {'answer': 0.5, 'clarify': None, 'refuse': 1.0, 'safe_alt': 1.0}
-coverage= 1.0
-retained_refusal_targets= ['safe_high_risk_refusal', 'safe_privacy_refusal']
-retained_answer_targets= ['safe_boundary_allowed']
-checks= {'agreement_filter_observed': True, 'privacy_filter_observed': True, 'contamination_filter_observed': True, 'length_bias_review_observed': True, 'wrong_action_review_observed': True, 'risk_coverage_complete': True, 'safety_balance_present': True, 'preference_and_safety_present': True, 'retained_samples_present': True}
-signals= {'retention': 0.57, 'avg_margin_by_kind': {'preference': 0.31, 'safety': 0.207}, 'risk_coverage': 1.0, 'refusal_target_count': 2, 'answer_target_count': 1, 'safety_action_coverage': {'answer': 0.5, 'clarify': None, 'refuse': 1.0, 'safe_alt': 1.0}, 'rejected_reason_counts': {'eval_contamination': 1, 'length_bias_risk': 1, 'low_labeler_agreement': 1, 'privacy_or_pii': 1, 'wrong_safety_action': 1}}
-actions= ['exclude_privacy_and_contamination', 'review_agreement_and_length_outliers', 'preserve_refusal_and_allowed_pairs']
+retention= 0.604
+kind_counts= {'preference': 2, 'safety': 5}
+retention_by_kind= {'preference': 0.377, 'safety': 0.853}
+slice_mix_by_kind= {'preference': {'normal': 1.0}, 'safety': {'ambiguous': 0.196, 'boundary_allowed': 0.187, 'high_risk': 0.212, 'privacy': 0.178, 'professional': 0.227}}
+lang_mix_by_kind= {'preference': {'en': 0.481, 'zh': 0.519}, 'safety': {'en': 0.577, 'zh': 0.423}}
+avg_margin_by_kind= {'preference': 0.158, 'safety': 0.261}
+target_safety_slice_coverage= 1.0
+raw_safety_action_counts= {'answer': 2, 'clarify': 1, 'refuse': 2, 'safe_alt': 1}
+kept_safety_action_counts= {'answer': 1, 'clarify': 1, 'refuse': 2, 'safe_alt': 1}
+retention_by_expected_action= {'answer': 0.5, 'clarify': 1.0, 'refuse': 1.0, 'safe_alt': 1.0}
+retained_ids_by_action= {'answer': ['safe_boundary_allowed'], 'clarify': ['safe_ambiguous_clarify'], 'refuse': ['safe_high_risk_refusal', 'safe_privacy_refusal'], 'safe_alt': ['safe_professional_boundary']}
+checks= {'agreement_filter_observed': True, 'privacy_filter_observed': True, 'contamination_filter_observed': True, 'length_bias_review_observed': True, 'wrong_action_review_observed': True, 'target_safety_slice_coverage_complete': True, 'target_actions_retained': True, 'preference_and_safety_present': True, 'retained_samples_present': True}
+signals= {'retention': 0.604, 'avg_margin_by_kind': {'preference': 0.158, 'safety': 0.261}, 'target_safety_slice_coverage': 1.0, 'retained_ids_by_action': {'answer': ['safe_boundary_allowed'], 'clarify': ['safe_ambiguous_clarify'], 'refuse': ['safe_high_risk_refusal', 'safe_privacy_refusal'], 'safe_alt': ['safe_professional_boundary']}, 'retention_by_expected_action': {'answer': 0.5, 'clarify': 1.0, 'refuse': 1.0, 'safe_alt': 1.0}, 'held_reason_counts': {'eval_contamination': 1, 'length_bias_risk': 1, 'low_labeler_agreement': 1, 'privacy_or_pii': 1, 'wrong_safety_action': 1}}
+actions= ['quarantine_privacy_and_contamination', 'review_agreement_and_length_outliers', 'preserve_refusal_allowed_and_clarify_samples']
 decision= continue_to_preference_ablation
 ~~~
 
-这个 demo 的重点是把偏好数据和安全数据放在同一个治理闭环里：偏好样本要检查标注一致性、margin 和长度偏置；安全样本要同时覆盖漏拒修复和误拒修复；所有数据都要经过隐私、污染、rubric 和版本审计。`risk_mix_by_kind`、`lang_mix_by_kind` 和 `avg_margin_by_kind` 按 `preference` 与 `safety` 分开计算，避免把不同目标的样本压成一个总指标。`decision` 只表达“可以继续做偏好消融实验”，并没有把数据审计结果偷换成模型质量结论。
+本例原始样本合计 8,010 tokens，候选集保留 4,840 tokens，所以总保留率为 $4{,}840/8{,}010\approx0.604$；其中 preference 和 safety 的 token 保留率分别为 $1{,}580/4{,}190\approx0.377$、$3{,}260/3{,}820\approx0.853$。`retention_by_expected_action` 用样本数计算“各目标动作的保留比例”，不是模型的动作正确率；`target_safety_slice_coverage` 只检查本例声明的五个切片；`slice_mix_by_kind` 和 `lang_mix_by_kind` 则按保留 token 计算占比。代码把 PII、污染、低一致度、疑似长度异常和错误动作样本隔离起来待复核，不代表应永久删除。`decision` 只表示可进入下一轮 preference ablation，不表示模型已经通过安全评估。
 
 ---
 
@@ -824,10 +913,18 @@ decision= continue_to_preference_ablation
 可以把回答质量粗略拆成内容效用和长度成本：
 
 ~~~math
-U(y | x) = Q_content(y | x) - lambda * Cost_length(y)
+\mathcal{U}(y\mid x)=Q_{\mathrm{content}}(y\mid x)-\lambda C_{\mathrm{length}}(y)
 ~~~
 
 `Q_content` 可以包含事实、帮助、安全和任务完成度；`Cost_length` 可以是 token 数、用户阅读时间或延迟；`lambda` 取决于产品场景。客服、代码补全和事故响应的 `lambda` 不会相同。这个式子不是要生成一个万能分数，而是提醒我们：比较时必须明确目标函数。
+
+举例，若回答 A 的内容分为 0.82、长度成本为 180 tokens，回答 B 的内容分为 0.78、长度为 90 tokens，假设 $\lambda=0.001$ 且成本单位是每 token：
+
+~~~math
+\mathcal{U}(A)=0.82-0.001\times180=0.64,\qquad \mathcal{U}(B)=0.78-0.001\times90=0.69
+~~~
+
+在这组人为设定的目标下，B 胜出；若产品的长度成本更低，结论可以反转。这个算例说明 rubric 和场景权重必须先于标注，不是建议把所有回答压成同一个 utility 分数。
 
 审计长度偏置时，不能只看平均 token。应在相同任务、相近事实质量和相同安全动作的样本中，比较长度变化是否独立带来偏好。还可以把一条长回答压缩成等价短回答，再让标注者盲评；如果偏好大幅反转，原始标注可能把篇幅当成了质量。
 
@@ -848,8 +945,8 @@ RLHF 通常把排序或成对比较数据用于 reward model，再用策略优�
 可以把候选回答看成带约束的选择问题：
 
 ~~~math
-y_star = argmax_y U(y | x)
-subject to Risk(y | x) <= tau
+y^{\star}\in\mathrm{arg\,max}_{y\in\mathcal{Y}}\mathcal{U}(y\mid x)
+\qquad \mathrm{subject\ to}\qquad \mathrm{Risk}(y\mid x)\le\tau
 ~~~
 
 `U` 表示帮助、诚实和表达质量的综合效用，`Risk` 表示回答可能造成的伤害或越权程度，`tau` 是由场景和策略版本确定的风险上限。这里的约束并不意味着风险可以被一个精确分数完全测量；它只是帮助我们解释为什么“最有用的表面答案”不一定是最终 chosen。
@@ -943,6 +1040,13 @@ LLM judge 适合做排序预筛、格式检查、理由草拟和相似样本聚�
 5. Bai 等，《Training a Helpful and Harmless Assistant with Reinforcement Learning from Human Feedback》，<https://arxiv.org/abs/2204.05862>。它讨论 helpful 与 harmless 目标的训练组织，不能被简化成“安全只要拒答”。
 6. Bai 等，《Constitutional AI: Harmlessness from AI Feedback》，<https://arxiv.org/abs/2212.08073>。它提供了用原则、AI feedback 和监督/强化学习组织安全训练的公开研究案例；原则的选择和优先级仍然是具体系统的治理决策。
 7. Perez 等，《Red Teaming Language Models with Language Models》，<https://arxiv.org/abs/2202.03286>。它支持把自动化红队作为发现模型失败模式的一种方法；本章只讨论防御性数据治理，不复述可操作的攻击载荷。
+8. Ethayarajh 等，《KTO: Model Alignment as Prospect Theoretic Optimization》，<https://arxiv.org/abs/2402.01306>。它使用单条输出的 desirable/undesirable 二元反馈，不要求每个训练记录都有 chosen/rejected 配对；结果绑定论文的模型、反馈和训练设置。
+9. Zhang 等，《Diverging Preferences: When do Annotators Disagree and do Models Know?》，<https://proceedings.mlr.press/v267/zhang25bx.html>。ICML 2025 对偏好分歧来源分类，并比较 standard reward modeling 和 LLM judge 对分歧的处理；结论受该论文数据与任务限制。
+10. Yeh 与 Li，《Clean First, Align Later: Benchmarking Preference Data Cleaning for Reliable LLM Alignment》，<https://proceedings.neurips.cc/paper_files/paper/2025/hash/b457a310c34efcaf6322d1bc6503ce16-Abstract-Datasets_and_Benchmarks_Track.html>。PrefCleanBench 比较 13 种清洗方法；筛选方法的收益须绑定数据集、模型、优化目标和过滤比例。
+11. Shi 等，《Judging the Judges: A Systematic Study of Position Bias in LLM-as-a-Judge》，<https://aclanthology.org/2025.ijcnlp-long.18/>。研究在 15 个 judge、22 项任务和超过 150,000 个评估实例中观察位置偏差；不能把该配置的量化结果外推到所有 judge。
+12. Jung 等，《Trust or Escalate: LLM Judges with Provable Guarantees for Human Agreement》，<https://proceedings.iclr.cc/paper_files/paper/2025/hash/08dabd5345b37fffcbe335bd578b15a0-Abstract-Conference.html>。研究基于人工校准和 selective escalation 的 agreement 保证；保证依赖校准与统计假设。
+13. Kyrychenko 等，《Human Preferences for Constructive Interactions in Language Model Alignment》，<https://arxiv.org/abs/2503.16480>。2025 年预印本检查多国家和个体差异下的偏好表达，样本与实验条件限制外推。
+14. Zhang 等，《Does Safety Live in a Shared Multilingual Subspace? Cross-Lingual (Non-)Transfer of the Refusal Direction》，<https://aclanthology.org/2026.mrl-1.19/>。MRL 2026 使用两个开源指令模型、十种语言和已发布安全 benchmark；提供跨语言行为/表示差异证据，不证明所有模型存在相同机制。
 
 这些论文的实验结果受模型、任务、标注者、提示、评估集和时间限制。论文中出现的“更好”通常是相对于指定基线、指定指标和指定样本而言。读者在迁移到自己的数据时，应重新检查授权、隐私、语言、领域、风险分布、标注一致性和独立评估集，而不是只复制方法名。
 

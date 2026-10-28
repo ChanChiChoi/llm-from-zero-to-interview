@@ -48,6 +48,8 @@ x_j=d_{s+j},\qquad y_j=d_{s+j+1},\qquad j=0,\ldots,T-1
 
 词表必须是确定的。一个最小实现如下：
 
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；按章节依赖顺序执行，边界记录适用于此代码）
+
 ```python
 from dataclasses import dataclass
 
@@ -94,12 +96,13 @@ print("vocab_size=", len(codec.stoi))
 print("ids=", ids)
 print("roundtrip_ok=", recovered == "hello")
 ```
-
 stoi 是 string-to-integer 映射，itos 是 integer-to-string 映射。排序不是语言学要求，而是为了让同一份文本在不同运行中得到相同的 id。若词表来自训练集，验证集或推理 prompt 中出现训练集没有的字符，encode 必须有明确策略：报错、映射到未知 token，或者先扩展并重新训练词表。把未知字符静默映射到任意已有 id，会让问题变成难以解释的模型噪声。
 
 ### 3.1.3 编码、切分与泄漏
 
 得到 id 序列后，PyTorch embedding 通常要求整数索引，因此数据张量应使用 torch.long：
+
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；按章节依赖顺序执行，边界记录适用于此代码）
 
 ```python
 import torch
@@ -117,7 +120,6 @@ assert int(data.max()) < len(chars)
 print("data_shape=", tuple(data.shape))
 print("data_dtype=", data.dtype)
 ```
-
 最简单的切分方式是按连续位置切开：前 90% 做训练、后 10% 做验证。它适用于一条按时间顺序采集、相邻片段确实代表不同时间阶段的长流文本，但不适用于许多独立文档被简单拼接的语料。若同一篇文档同时出现在两个 split，或者文档的高度相似副本跨 split 分布，验证 loss 会高估泛化能力。
 
 更稳妥的切分单位是文档、用户、时间窗口或其他具有独立性的实体。切分之后再编码或去重，避免通过 token 级随机切分把同一文档的相邻片段分到两边。对于小实验，至少应记录：
@@ -149,6 +151,8 @@ y：e l l o
 
 切片实现是：
 
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；按章节依赖顺序执行，边界记录适用于此代码）
+
 ```python
 def make_example(source, start, block_size):
     if not isinstance(start, int) or isinstance(start, bool):
@@ -176,7 +180,6 @@ print("x=", "".join(x))
 print("y=", "".join(y))
 print("shift_ok=", x[1:] == y[:-1])
 ```
-
 若源序列长度为 \(L\)，有效起点必须满足 \(s+T<L\)，所以合法起点数量是 \(L-T\)，随机采样时使用 `torch.randint(0, L - T, ...)`。`high` 是右开区间；把它写成 (L-T+1) 会允许起点 (s=L-T)，此时标签要访问位置 (L)，已经越界；真正正确的上界就是 (L-T)，并且要求 (L>T)。这个边界在小验证集上尤其容易暴露。
 
 ### 3.1.5 从随机起点构造 batch
@@ -189,6 +192,8 @@ Y\in\mathbb{Z}^{B\times T}
 ```
 
 其中 \(B\) 是 batch size，\(T\) 是 block size。每个样本可以从不同起点开始，但同一条样本内部仍然保持连续顺序。下方代码用 `torch.long` 表示 token id；这也是本章模型前向和交叉熵标签的统一 dtype。
+
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；按章节依赖顺序执行，边界记录适用于此代码）
 
 ```python
 import torch
@@ -241,12 +246,13 @@ print("x_shape=", tuple(xb.shape))
 print("y_shape=", tuple(yb.shape))
 print("shift_ok=", torch.equal(xb[:, 1:], yb[:, :-1]))
 ```
-
 这里的 generator 可以用来把采样随机性从全局随机状态中分离出来。为了复现实验，还要记录 Python、NumPy、PyTorch、CUDA 和 DataLoader worker 的随机状态；只调用一次 torch.manual_seed 并不能保证所有硬件和 kernel 都逐位一致。
 
 ### 3.1.6 Dataset 接口与连续流接口
 
 `get_batch_from_source` 直接从一维 token 流抽样，适合教学和能放入内存的小语料。若希望接入标准 DataLoader，可以把合法起点作为样本索引：
+
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；按章节依赖顺序执行，边界记录适用于此代码）
 
 ```python
 import torch
@@ -296,7 +302,6 @@ print("last_item=", x_last.tolist(), y_last.tolist())
 ```
 
 Dataset.__len__ 返回的是可采样窗口数量，不是原始 token 数。这个差一个 block_size 的关系会影响每个 epoch 的步数和 token 预算。对于超大语料，实际系统可能使用 mmap、流式读取、预先打包的 shard 或按 token 数调度，而不是把全部文本读入一个 Python 列表。
-
 ### 3.1.7 数据管线的局部验证
 
 训练前应先验证局部不变量，而不是等 loss 不下降后再猜原因。最小检查包括：
@@ -311,6 +316,8 @@ Dataset.__len__ 返回的是可采样窗口数量，不是原始 token 数。这
 8. 验证采样是否没有从训练区间借用 token。
 
 下面的零依赖审计把第 4、5、6 项写成可执行契约。它不依赖 PyTorch，因此适合在环境尚未装好深度学习依赖时先运行：
+
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；按章节依赖顺序执行，边界记录适用于此代码）
 
 ```python
 def window_ids(ids, block_size, starts):
@@ -353,7 +360,6 @@ print("window_count=", len(windows))
 print("shift_contract_ok=", all(x[1:] == y[:-1] for x, y in windows))
 print("invalid_start_rejected=", invalid_start_rejected)
 ```
-
 这段检查通过，只能说明窗口构造正确；它没有说明语料代表目标任务，也没有说明 tokenizer 的切分质量。数据契约和数据质量是两个需要分别测量的问题。
 
 
@@ -440,6 +446,8 @@ H_{\mathrm{out}}=H'+\mathrm{FFN}(\mathrm{LN}_2(H'))
 ### 3.2.4 一个完整的最小模型实现
 
 下面的代码把 attention、FFN、block、loss 和生成组合在一起。它使用独立的 max_seq_len，而不是把全局变量藏在类内部；读者可以先运行 shape 检查，再接入 3.1 的 get_batch。
+
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；按章节依赖顺序执行，边界记录适用于此代码）
 
 ```python
 import math
@@ -677,7 +685,6 @@ assert loss.ndim == 0
 print("logits_shape=", tuple(logits.shape))
 print("loss_is_finite=", bool(torch.isfinite(loss)))
 ```
-
 这段代码只实现了一个教学模型：没有 KV Cache、混合精度、分布式并行、权重共享或高效 attention kernel。它的价值是把每个 shape 和每个残差路径暴露出来；在后续换成 fused kernel 后，应保留同样的局部 shape 和数值回归测试。
 
 ### 3.2.5 交叉熵与 token 数量
@@ -721,6 +728,8 @@ L_0\approx\log V
 ```
 
 下面把数据适配器、评估函数和训练循环放在同一个可运行示例中。它需要先运行 3.2.4 的模型定义和 `model = TinyGPT(...)` 初始化；从那一段代码的 `model` 变量继续执行即可。这里的 `get_batch(split)` 是应用层适配器，不是 3.1.5 中直接接收 token 流的低层函数；它必须返回同一设备或可迁移到该设备的 `(input_ids, targets)`，并且 `split` 只能是 `train` 或 `val`。真实项目应把示例中的 `train_tokens` 和 `val_tokens` 换成已经按文档或其他独立实体切分好的 token 流。
+
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；按章节依赖顺序执行，边界记录适用于此代码）
 
 ```python
 import torch
@@ -830,7 +839,6 @@ for step in range(max_steps):
     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
     optimizer.step()
 ```
-
 zero_grad 必须发生在下一次反向传播前，否则梯度会默认累加。梯度裁剪应放在 backward 之后、step 之前；若使用 AMP，则先 scaler.unscale_(optimizer) 再裁剪。model.eval() 只影响 dropout、batch normalization 等模块的行为，不会自动关闭梯度，所以评估还需要 torch.no_grad()。
 
 训练步数、看到的 token 数和更新次数不是同一个量。若每一步使用 \(B\) 条长度为 \(T\) 的样本，忽略丢弃和重复采样，单步 token 数约为：
@@ -920,6 +928,8 @@ top-p 保留排序后的前 \(m\) 个 token。分布很尖时，候选集合可�
 
 实现时要保留第一个使累计概率达到阈值的 token。下面的 helper 支持形状 [..., vocab_size]，不会把 batch 维写死为二维：
 
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；按章节依赖顺序执行，边界记录适用于此代码）
+
 ```python
 import math
 
@@ -1007,12 +1017,13 @@ def sample_next_token(logits, temperature=1.0, top_k=None, top_p=None):
 def greedy_next_token(logits):
     return logits.argmax(dim=-1, keepdim=True)
 ```
-
 这里先做 temperature，再做 top-k/top-p，是一种常见的教学顺序。top-p 的候选集合依赖 softmax 后的相对概率，因此如果先 top-k 再 top-p，top-p 看到的是截断后的分布，结果会和先 top-p 再 top-k 不同。解码器必须固定顺序并在实验记录中写清楚。第 3.3.5 的代码依赖本节已经定义的三个 helper；若要单独复制运行，应把本节完整代码一并复制。
 
 ### 3.3.5 一个可验证的采样实验
 
 下面的实验使用固定 logits，观察熵和保留集合。它依赖上一节的 helper；将两段代码放在同一脚本中运行。
+
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；按章节依赖顺序执行，边界记录适用于此代码）
 
 ```python
 import torch
@@ -1057,7 +1068,6 @@ assert torch.isfinite(exact_top_p_logits[0, :2]).all()
 assert exact_top_p_logits[0, 2].item() == torch.finfo(exact_top_p_logits.dtype).min
 print("sample_shape=", tuple(sampled.shape))
 ```
-
 固定 logits 的实验只能证明过滤函数的局部行为。真实生成还需要观察任务成功率、格式通过率、重复率、长度分布和事实性；“看起来更像训练语料”不是单独可靠的质量指标。
 
 ### 3.3.6 解码失败的归因
@@ -1127,6 +1137,8 @@ L^*_{\mathrm{val}}=\min_{t\in\mathcal{T}}L_{\mathrm{val}}(t)
 
 下面的实现使用临时文件再替换目标文件，减少进程在写入中途退出时留下半个 checkpoint 的概率。它假设 model、optimizer、config 和 tokenizer 元数据只包含可序列化的普通对象。
 
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；按章节依赖顺序执行，边界记录适用于此代码）
+
 ```python
 from pathlib import Path
 
@@ -1175,12 +1187,13 @@ def load_checkpoint(path, model, optimizer=None, map_location="cpu"):
 ```
 
 weights_only=True 的具体支持和默认行为随 PyTorch 版本变化；应以目标版本文档为准。它不是“任何来源都安全”的证明，外部 checkpoint 仍应经过来源、hash、结构和张量 shape 检查。旧版本不支持该参数时，示例中的兼容分支只适合加载可信文件。
-
 ### 3.4.4 step 的定义必须写进代码
 
 本章把 step 定义为“已经完成的 optimizer update 数量”。因此初始模型是 step 0，先评估，再完成一次更新；完成后状态变成 step 1。恢复时从记录的 step 继续，下一轮会重新评估当前状态，然后执行下一次更新。另一种系统可以把 step 定义为“下一次待执行的更新编号”，但保存端和加载端必须使用同一种定义。
 
 下面的循环依赖前文 3.2.4/3.2.6 定义的 `model`、`estimate_loss`、`get_batch`、`optimizer` 和 `device`，以及 3.4.3 定义的 `save_checkpoint`；把它接在这些代码之后即可运行。它显式记录评估/保存 step 和已完成的 optimizer update 数，checkpoint 写入仓库 `.tmp/`：
+
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；按章节依赖顺序执行，边界记录适用于此代码）
 
 ```python
 from pathlib import Path
@@ -1243,7 +1256,6 @@ for step in range(start_step, max_steps + 1):
 print("saved_steps=", saved_steps)
 print("optimizer_updates=", optimizer_updates)
 ```
-
 这个循环会在 step 0 和最后一个 step 做评估。恢复训练时，如果 last.pt 中 step 已经是 max_steps，应直接结束，而不是再做一次更新。重复恢复时还要处理日志去重，否则同一个 step 会在 CSV 中出现两次。
 
 ### 3.4.5 日志和生成样例
@@ -1259,6 +1271,8 @@ step,train_loss,val_loss,best_val_loss,tokens_seen,elapsed_seconds
 日志至少要能回答三个问题：训练进行了多少更新、模型在训练和验证上的变化是什么、某一行指标对应哪一个 checkpoint。生成样例还应记录 prompt、采样配置、随机种子和 checkpoint step；只保存一段没有元数据的文本，无法进行可靠对比。
 
 下面是标准库版本的日志函数：
+
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；按章节依赖顺序执行，边界记录适用于此代码）
 
 ```python
 import csv
@@ -1294,7 +1308,6 @@ init_log(".tmp/mini_char_gpt_log.csv")
 append_log(".tmp/mini_char_gpt_log.csv", 0, 3.46, 3.47, 3.47, 0)
 print(Path(".tmp/mini_char_gpt_log.csv").read_text(encoding="utf-8").strip())
 ```
-
 示例把日志写入仓库中被忽略的 `.tmp/`；真实实验应为不同 run 使用独立目录和明确的保留策略，日志和 checkpoint 不能靠文件名猜测相互对应。
 
 
@@ -1369,6 +1382,8 @@ loss 是平均的局部概率指标；生成样例是一次采样路径。一个
 
 下面的 toy 数据有意包含“训练 loss 继续下降、验证 loss 反弹、生成重复率上升”的阶段。它用于演示如何把多个证据放在一起，不是对真实模型质量的评估器。
 
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；按章节依赖顺序执行，边界记录适用于此代码）
+
 ```python
 import csv
 import math
@@ -1436,7 +1451,6 @@ for step, sample in SAMPLES.items():
         None if rate is None else round(rate, 2),
     )
 ```
-
 这个实验应得到 best step 300、第一处过拟合信号 600，以及末期样例较高的相邻重复率。它没有证明 600 一定是生产意义上的过拟合起点，因为阈值、样本和评估量都由教学代码构造；它展示的是证据组合方式。
 
 ### 3.5.5 从异常现象回到第一分歧点
@@ -1511,6 +1525,8 @@ R_{\mathrm{score}}=\frac{T_b^2}{T_c^2}
 
 下面是 Hugging Face Transformers 的接口示例。它需要安装 `transformers`、网络或本地缓存，不能在没有依赖和模型文件的环境中当作零依赖 demo 执行；代码只展示 tokenizer 接口，不加载模型：
 
+> 代码状态：静态审阅，未运行（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；缺少 Transformers 和 tokenizer 文件）
+
 ```python
 import torch
 from transformers import AutoTokenizer
@@ -1529,18 +1545,18 @@ print("vocab_size=", vocab_size)
 print("roundtrip=", recovered)
 print("input_shape=", tuple(input_ids.shape))
 ```
-
 整数 id 的具体值由 tokenizer 文件决定，不应把某一次运行的 id 列表写成跨版本固定答案。len(tokenizer) 通常比 tokenizer.vocab_size 更适合表示模型当前可用的完整词表，尤其是在添加 special token 之后；具体差异仍应以目标 tokenizer 的实现为准。
 
 ### 3.6.4 special token、padding 与 loss mask
 
 连续 token 流切成固定长度 block 时不需要 padding。不同长度序列组成 batch 时才需要 pad token。下面的两段代码属于同一个 tokenizer 上下文，必须先完成 3.6.3 的加载。若把 EOS 复用为 PAD：
 
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；按章节依赖顺序执行，边界记录适用于此代码）
+
 ```python
 if tokenizer.pad_token is None:
     tokenizer.pad_token = tokenizer.eos_token
 ```
-
 这只解决了“使用哪个 id 填充”的接口问题，不会自动告诉 attention 和 loss 哪些位置有效。带 padding 的 batch 还需要：
 
 ```math
@@ -1591,6 +1607,8 @@ tokenizer 库和版本
 ### 3.6.6 一个零依赖的 BPE 合并演示
 
 下面手动给出 merge 规则，不是完整 BPE trainer；它只用来观察 token 数、右移标签和词表相关参数量。真实 BPE 的 merge 规则应由训练语料统计得到。
+
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；按章节依赖顺序执行，边界记录适用于此代码）
 
 ```python
 TEXT = "low lower lowest low lower transformer transformer low"
@@ -1692,7 +1710,6 @@ print("shift_ok=", all(row_x[1:] == row_y[:-1] for row_x, row_y in zip(x, y)))
 print("char_vocab_params=", vocab_dependent_params(char_vocab_size, d_model))
 print("toy_bpe_vocab_params=", vocab_dependent_params(bpe_vocab_size, d_model))
 ```
-
 这个 toy 实验没有证明手动 merge 规则优于字符级 tokenizer。它只把三个数量关系显式化：合并可以缩短序列，词表大小会改变 embedding/head 参数，next-token 的右移关系并不会因为 tokenizer 类型改变。
 
 ### 3.6.7 BPE 迁移时的验证顺序

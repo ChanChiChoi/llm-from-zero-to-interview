@@ -1,8 +1,8 @@
-# 第十三章：自动化对抗评估：从 GOAT 信号到可复查证据
+# 第十三章：自动化对抗评估：从 GOAT 到可复查证据
 
 固定的安全测试集很重要，但它只能回答“模型在这些已知问题上表现如何”。真实系统还会遇到不同语言、上下文、权限、工具、文件、网页、用户目标和错误恢复路径。攻击者会根据系统的拒答和错误继续改写输入，Agent 还会把外部内容带进下一轮动作。
 
-自动化对抗评估的目标，是在受控环境中自动生成有差异的测试轨迹，观察模型和系统是否越过安全边界，再把可复现的发现沉淀为修复和回归证据。GOAT 这样的名称应当首先按照一方发布资料确认具体项目含义；本章讲的是可以迁移到不同项目的通用机制，不把一个发布名称扩写成所有自动红队方法的同义词。
+自动化对抗评估的目标，是在受控环境中生成有差异的测试轨迹，观察模型和系统是否越过安全边界，再把可复现的发现沉淀为修复和回归证据。GOAT 在这里指 Pavlova 等人在 ICML 2025 发表的 Generative Offensive Agent Tester：一个让攻击模型根据目标模型前一轮回复动态调整策略的多轮红队方法。它是一个具体研究方案，不是自动红队的通用标准。本文先用它解释自适应生成，再把重点放在各种系统都需要的轨迹、环境证据和验收闭环上。[GOAT 论文](https://proceedings.mlr.press/v267/pavlova25a.html)
 
 本章的核心对象不是一条“攻击 prompt”，而是一条包含输入、上下文、权限、工具、环境状态、动作、观察和最终后果的轨迹。对聊天模型，风险可能表现为输出文本；对 RAG 和 Agent，真正需要检查的往往是文档是否越权、工具是否调用、文件是否改变、数据是否离开边界，以及失败后是否能够恢复。
 
@@ -65,21 +65,7 @@
 
 ### 2.2 目标系统的边界
 
-目标系统可以表示为：
-
-~~~text
-attacker input
-  -> context assembly
-  -> model inference
-  -> policy decision
-  -> tool executor
-  -> environment state
-  -> observable trace
-~~~
-
-每个箭头都可能是安全边界。输入可能进入提示模板，文档可能进入上下文，模型可能生成工具参数，policy service 可能判断动作，executor 可能改变状态，日志可能保存结果。
-
-评估记录要说明测试覆盖了哪一个箭头。若只测到模型输出，不能声称工具 executor 也安全；若工具动作被服务端阻断，不能把它等同于模型从未提出越权动作。
+每一层都可能形成安全边界：输入进入上下文，模型提出动作，策略服务授权，执行器调用工具，外部环境留下状态变化，观测器再把证据交给判定器。评估记录要说明覆盖到哪一层。若只测到模型输出，不能声称工具执行器也安全；若服务端阻断了越权动作，也要把“模型提出动作”和“动作实际执行”分开记录。
 
 ### 2.3 目标和非目标
 
@@ -107,21 +93,45 @@ attacker input
 
 一个受控的自动化回合可以写成：
 
-$$
+```math
 x_{t+1}=G(x_t,y_t,f_t)
-$$
+```
 
-$$
+```math
 y_t=M(x_t,\pi,E)
-$$
+```
 
-$$
+```math
 f_t=J(y_t,\Delta E_t,\tau_t)
-$$
+```
 
-其中 \(G\) 是攻击生成器，\(M\) 是目标模型和策略系统，\(\pi\) 是权限与部署配置，\(E\) 是隔离环境，\(J\) 是判定器，\(\Delta E_t\) 是环境状态差异，\(\tau_t\) 是工具和轨迹记录，\(f_t\) 是反馈信号。
+其中 $G$ 是攻击生成器，$M$ 是目标模型和策略系统，$\pi$ 是权限与部署配置，$E$ 是隔离环境，$J$ 是判定器，$\Delta E_t$ 是环境状态差异，$\tau_t$ 是工具和轨迹记录，$f_t$ 是反馈信号。
 
-关键是把环境状态和轨迹放进判定输入。若只把 \(y_t\) 传给 judge，judge 看不到文件修改、网络请求和权限拒绝，就无法判断真实副作用。
+下面的闭环把三类对象分开：生成器只收到最小化后的反馈；目标系统产生文本和动作；隔离环境记录实际后果。判定器同时读取轨迹与环境证据，再决定继续、停止或送修。
+
+```mermaid
+flowchart LR
+    A["风险目标与权限边界"] --> B["攻击生成器"]
+    B --> C["目标模型与策略"]
+    C --> D["工具执行器"]
+    D --> E["隔离环境"]
+    C --> F["文本、动作与工具轨迹"]
+    E --> G["服务回执与状态差异"]
+    F --> H["规则、Judge 与人工复核"]
+    G --> H
+    H -.->|脱敏反馈且预算未耗尽| B
+    H --> I["停止、修复或回归"]
+```
+
+读图时先沿实线看执行路径：一次输入从目标约束进入生成器，再经过目标系统和工具到达环境；文本轨迹与环境回执分别到达判定器。虚线表示评估反馈回到生成器，必须经过脱敏和预算限制。这样既能搜索失败路径，又避免把真实秘密作为搜索提示。
+
+#### GOAT：动态多轮生成的具体实例
+
+GOAT 把攻击目标和若干已知提示策略放入攻击模型的上下文。每轮攻击模型读取目标模型的回复，再选择或组合策略生成下一轮输入；目标模型只看到用户对话，不需要暴露内部权重。论文实验实例化了七种提示攻击，并在 JailbreakBench 的 100 个行为目标上比较多轮攻击方法。其 $\mathrm{ASR}@10$ 指每个目标最多独立运行十段对话，只要其中一段在最多五轮内出现被判为不安全的回复，就计作成功。论文报告 Llama 3.1 8B、Llama 3.1 70B 和 GPT-4o 的相应结果分别为 96%、91% 和 94%。这些数说明在该数据集、目标版本、对话预算和 Judge 口径下，模型驱动的多轮搜索能够找到失败案例；它们不表示现实用户攻击成功率，也不涵盖工具副作用。[ICML 论文与结果](https://proceedings.mlr.press/v267/pavlova25a.html) [论文实验定义](https://arxiv.org/html/2410.01606)
+
+这个例子也说明“自适应”不等于“覆盖充分”：生成器主要沿已有攻击知识和给定目标搜索。评估者仍要补充新的风险假设、语言和模态切片、工具权限场景、正常任务对照，并检查搜索是否只在攻击者和 Judge 共享的盲区中循环。
+
+关键是把环境状态和轨迹放进判定输入。若只把 $y_t$ 传给 judge，judge 看不到文件修改、网络请求和权限拒绝，就无法判断真实副作用。
 
 ### 3.2 四个职责
 
@@ -153,11 +163,11 @@ $$
 
 普通聊天可以把一条样本写成：
 
-$$
+```math
 z=(x,y,p,s)
-$$
+```
 
-其中 \(x\) 是输入，\(y\) 是输出，\(p\) 是策略版本，\(s\) 是风险切片。判定关注是否生成不可接受内容、是否泄露敏感字段、是否提供了安全替代和是否误拒正常任务。
+其中 $x$ 是输入，$y$ 是输出，$p$ 是策略版本，$s$ 是风险切片。判定关注是否生成不可接受内容、是否泄露敏感字段、是否提供了安全替代和是否误拒正常任务。
 
 ### 4.2 RAG 轨迹
 
@@ -176,11 +186,11 @@ RAG 测试还要记录：
 
 Agent 轨迹可以写成：
 
-$$
+```math
 z=(x,\pi,E,a_{1:T},o_{1:T},y,\Delta E)
-$$
+```
 
-\(a_t\) 是第 \(t\) 步动作，\(o_t\) 是工具或环境观察，\(\Delta E\) 是环境状态变化。安全判定需要同时看文本、动作、权限、环境和恢复。
+$a_t$ 是第 $t$ 步动作，$o_t$ 是工具或环境观察，$\Delta E$ 是环境状态变化。安全判定需要同时看文本、动作、权限、环境和恢复。
 
 例如，模型最终回答“我无法执行”，但在前面已经调用了外部发送工具，应该按动作层失败处理。反过来，模型提出了写操作但 executor 在服务端拒绝，应该记录为“模型提出越权、执行层阻断”，而不是简单记成安全成功。
 
@@ -214,9 +224,13 @@ $$
 
 安全边界可能只在某种上下文顺序下失效，因此覆盖率不能只按文本相似度计算。
 
+语言与轮数也应交叉看。MM-ART 研究将多轮对话和多语言攻击放进同一流程，并报告所测模型在部分非英语设置下表现出不同的拒答结果。这支持把语言、轮数和翻译路径分别切片；论文中的模型和数据设置不能据此排列所有模型的语言安全性。[MM-ART 论文](https://arxiv.org/abs/2504.03174)
+
 ### 5.3 协议维度
 
 协议维度包括工具 schema、结构化输出、流式事件、函数参数、文件路径、重试和超时。一个文本上拒绝的模型可能在结构化参数中仍然输出危险值；一个正常调用可能在重试时重复提交外部动作。
+
+对自定义 Agent 工作流，固定通用工具集往往不足以覆盖应用自己的字段和状态约束。EMNLP 2025 的 Agent vs. Agent 研究尝试根据工具集生成工作流任务及评估函数，再用迭代攻击者测试这些任务。它提醒评估者把“任务生成合同”和“结果判定合同”一起审计；论文规模和任务集只支持其试验范围，不代表任意生产工作流都已覆盖。[Agent vs. Agent 论文](https://aclanthology.org/2025.emnlp-industry.62/)
 
 ### 5.4 环境维度
 
@@ -228,14 +242,14 @@ $$
 
 可以把变体质量分解为：
 
-$$
+```math
 Q_{\mathrm{variant}}
 =\rho D_{\mathrm{diversity}}
 +\sigma I_{\mathrm{intent}}
 -\kappa R_{\mathrm{duplicate}}
-$$
+```
 
-\(D_{\mathrm{diversity}}\) 是覆盖差异，\(I_{\mathrm{intent}}\) 是是否仍然属于目标风险，\(R_{\mathrm{duplicate}}\) 是与已有样本的重复程度。这个式子只是生成策略的教学抽象，实际需要人工抽样检查。
+$D_{\mathrm{diversity}}$ 是覆盖差异，$I_{\mathrm{intent}}$ 是是否仍然属于目标风险，$R_{\mathrm{duplicate}}$ 是与已有样本的重复程度。这个式子只是生成策略的教学抽象，实际需要人工抽样检查。
 
 ## 6. 安全环境：测试本身不能制造事故
 
@@ -269,11 +283,11 @@ canary 应是唯一但没有现实价值的合成字符串。它可以帮助检�
 
 每条轨迹开始前保存环境 hash，结束后比较状态差异：
 
-$$
-\Delta E=E_{\mathrm{after}}-E_{\mathrm{before}}
-$$
+```math
+\Delta E=\{(k,E_{\mathrm{before}}[k],E_{\mathrm{after}}[k]):E_{\mathrm{before}}[k]\ne E_{\mathrm{after}}[k]\}
+```
 
-如果状态差异包括文件、数据库、网络请求、权限或日志变化，都应进入判定。恢复操作必须幂等，避免测试重试本身产生更多副作用。
+这里把环境看成带字段的状态映射；若某一侧缺少字段，就用明确的“缺失”值表示。$\Delta E$ 因而是新增、更新和删除字段的清单，不是两个环境状态的数值相减。如果差异包括文件、数据库、网络请求、权限或日志变化，都应进入判定。恢复操作必须幂等，避免测试重试本身产生更多副作用。
 
 ## 7. Judge 与 Scorer：独立性比自动化数量重要
 
@@ -291,19 +305,25 @@ $$
 
 ### 7.2 Judge 的误差
 
-假设真实标签为 \(y_i\)，自动 judge 输出为 \(\hat y_i\)，可以计算：
+假设真实标签为 $y_i$，自动 judge 输出为 $\hat y_i$，可以计算：
 
-$$
+```math
 Precision_J=
 \frac{TP_J}{TP_J+FP_J}
-$$
+```
 
-$$
+```math
 Recall_J=
 \frac{TP_J}{TP_J+FN_J}
-$$
+```
 
-如果 judge 只在自动生成样本上校准，可能在真实事故或长尾语言上失效。人工 gold set、负对照、跨语言样本和不同模型 judge 都要保留。
+其中 $TP_J$ 是自动判定与人工复核都认定为违规的数量，$FP_J$ 是自动判定为违规但人工未确认的数量，$FN_J$ 是自动漏掉而人工确认的数量。若分母为零，precision 或 recall 应记为未定义，而不是 0。比如自动判为违规的 50 条里，经人工确认 20 条，则 $Precision_J=20/50=0.40$；如果人工总共确认 32 条违规，那么 $Recall_J=20/32=0.625$。这两个比例回答不同问题：前者关注警报是否可信，后者关注真实问题是否被漏掉。
+
+这不是纯理论上的差异。2026 年 8 月发布的 REDAgentBench arXiv 预印本在同一批 Agent 轨迹上比较判定证据：六种模型配置的状态判定 ASR 都比仅看轨迹文本的判定高 7.73 至 11.72 个百分点，部分服务副作用没有在对话轨迹中可靠地显示出来。该结果绑定论文中的 1,661 个任务、三个 harness、模拟服务环境、固定 Judge backbone 和判定规则；它说明“看什么证据”会改变报告结果，不是其他系统应预期出现的通用差值。[REDAgentBench 预印本](https://arxiv.org/abs/2608.10669)
+
+同一论文还展示了识别与执行之间的差距。其受控 Qwen-plus 诊断队列有 3,177 次状态确认的违规执行，其中 331 次无法定位到可靠的执行前语句，因此宽口径计算只使用其余 2,846 次。人工标注显示其中 510 次在执行前已经提到适用约束或具体风险：$510/2846=0.1792$，即 17.92%。更严格地要求 Agent 明说动作仍未获授权时，156 次满足条件：$156/2846=0.0548$，即 5.48%。这不是所有任务的违规率，而是该论文定义下“已确认违规执行中，执行前出现风险识别语句的比例”。研究者在选定的历史失败案例上重放策略提示，也报告了显著下降；该干预仍不能代替执行器的权限校验。
+
+因此，测试报告要同时说明：谁做标签、看到了什么证据、分母是否经过筛选、标签怎样定义，以及未能判定的轨迹如何处理。如果 Judge 只在自动生成样本上校准，它还可能在真实事故、长尾语言或不同执行框架上失效。人工 gold set、负对照、跨语言样本和不同模型 Judge 都要保留。
 
 ### 7.3 Judge 被注入
 
@@ -319,7 +339,7 @@ $$
 
 自动化对抗评估至少应按以下维度记录覆盖：
 
-$$
+```math
 \mathbf c=
 (c_{\mathrm{domain}},
 c_{\mathrm{language}},
@@ -328,49 +348,51 @@ c_{\mathrm{turn}},
 c_{\mathrm{tool}},
 c_{\mathrm{permission}},
 c_{\mathrm{policy}})
-$$
+```
 
 一个维度覆盖率高，不代表其他维度也高。报告应显示每个维度的样本量、变体数量、风险簇和未覆盖组合。
 
 ### 8.2 风险簇
 
-设攻击任务被分到风险簇 \(k\)，第 \(k\) 簇的人工确认发现数为 \(u_k\)，样本数为 \(n_k\)：
+设攻击任务被分到风险簇 $k$，第 $k$ 簇的人工确认发现数为 $u_k$，样本数为 $n_k$：
 
-$$
+```math
 r_k=
 \begin{cases}
 \dfrac{u_k}{n_k},&n_k>0\\
 N/A,&n_k=0
 \end{cases}
-$$
+```
 
-如果不同簇的严重度权重为 \(w_k\)，先只在已经有样本的簇上计算归一化的加权结果：
+如果不同簇的严重度权重为 $w_k$，先只在已经有样本的簇上计算归一化的加权结果：
 
-$$
+```math
 R_{\mathrm{weighted,measured}}
 =\frac{\sum_{k\in K_+}w_k r_k}{\sum_{k\in K_+}w_k},
 \qquad
 K_+=\{k:n_k>0\}
-$$
+```
 
-这里的 \(w_k\) 应由严重度和现实暴露预先决定，而不是由生成器产出的样本数量决定。分母只包含 \(K_+\) 的权重，因此这个数表达“已测风险簇中的加权发现率”；如果要说明整体评估覆盖，还要另报：
+这里的 $w_k$ 应由严重度和现实暴露预先决定，而不是由生成器产出的样本数量决定。分母只包含 $K_+$ 的权重，因此这个数表达“已测风险簇中的加权发现率”；如果要说明整体评估覆盖，还要另报：
 
-$$
+```math
 C_{\mathrm{weighted}}
 =\frac{\sum_{k\in K_+}w_k}{\sum_{k\in K}w_k}
-$$
+```
 
-空簇不应把 \(r_k\) 当作 0，也不应悄悄从覆盖报告中消失；它表示该风险簇尚未被测量，应列为 \(N/A\)。当 \(K_+\) 为空时，`R_weighted_measured` 也应为 \(N/A\)。这样可以同时回答“已测部分的结果如何”和“计划风险范围覆盖了多少”，不会用未测量伪装成低风险。
+空簇不应把 $r_k$ 当作 0，也不应悄悄从覆盖报告中消失；它表示该风险簇尚未被测量，应列为 $N/A$。当 $K_+$ 为空时，`R_weighted_measured` 也应为 $N/A$。这样可以同时回答“已测部分的结果如何”和“计划风险范围覆盖了多少”，不会用未测量伪装成低风险。
 
 ### 8.3 攻击成功率的多个分母
 
-假设生成器生成 1,000 条测试，自动 judge 标记 50 条危险，人工确认 20 条。至少有三种不同指标：
+设生成器提出 1,000 个测试任务，其中 960 个在环境中有效完成。Judge 对 50 个任务发出违规警报；本例假设这 50 个警报全部经过人工复核，其中 20 个被确认。由此可以逐步计算：
 
-1. 自动发现率：50 / 1,000。
-2. 人工确认发现率：20 / 1,000。
-3. 自动发现精确率：20 / 50。
+1. **自动警报比例**：$50/1000=5\%$，分母是所有生成任务。
+2. **经确认发现比例**：$20/1000=2\%$，仍以所有生成任务为分母。
+3. **Judge precision**：$20/50=40\%$，只问已发出的 50 个警报里有多少经确认。
 
-它们不能都叫攻击成功率。若只在已经触发工具的 200 条样本上计算越权率，分母也不能写成全部 1,000 条测试。
+这三个数都不能直接叫总体攻击成功率，因为测试任务是定向构造的。再看工具动作：假设 200 次工具调用中，48 次没有授权，其中 40 次被服务端阻断，8 次实际执行；并假设这 8 次分别来自 8 个有效测试任务。则未授权调用比例是 $48/200=24\%$，服务端成功阻断比例是 $40/48=83.33\%$，而有效任务中的违规执行率是 $8/960=0.83\%$。三个结果分别以工具调用、未授权调用和有效任务为单位，回答不同问题；不能互换分母，也不能把被阻断的尝试当成已经发生的副作用。
+
+实际评估还应单独报告无效运行、服务端阻断、未能判定和重复轨迹。只有在固定样本、配置、预算与标签规则下，版本间比较才有解释基础；风险样本构造策略改变时，即使分子相同，分母也可能改变含义。
 
 ### 8.4 高严重度不能被平均隐藏
 
@@ -382,10 +404,10 @@ $$
 
 自动攻击消耗目标模型 token、工具调用、沙箱资源、生成器计算和人工复核时间。可以用：
 
-$$
+```math
 C_{\mathrm{test}}
 =C_{\mathrm{gen}}+C_{\mathrm{target}}+C_{\mathrm{tool}}+C_{\mathrm{review}}
-$$
+```
 
 发布前需要给高风险攻击簇单独预算，不能因为普通样本便宜就无限扩大。预算的记录还包括多轮上限、最大深度、最大文件变化和网络请求数量。
 
@@ -477,11 +499,11 @@ $$
 
 高风险发现率可以写成：
 
-$$
+```math
 R_{\mathrm{critical}}=
 \frac{\text{经人工确认的高严重度发现}}
 {\text{进入高风险攻击集的任务数}}
-$$
+```
 
 这个数只支持当前攻击集、预算、模型、策略和环境范围内的比较。它不是现实世界的安全概率，也不能证明不存在未知风险。
 
@@ -499,7 +521,7 @@ $$
 
 把这些条件保存为：
 
-~~~text
+```text
 thresholds:
   critical findings, side effects, coverage, regression, normal-task limits
 signals:
@@ -510,7 +532,7 @@ actions:
   stop, isolate, retest, restrict, repair, escalate, rollback
 decision:
   scoped rollout, shadow only, hold, or withdraw
-~~~
+```
 
 任何高严重度硬约束未满足时，决定应缩小范围或暂停，而不是用平均攻击成功率覆盖缺口。一个模型在聊天场景的安全结果，不能自动授权它进入高权限 Agent 场景。
 
@@ -538,22 +560,85 @@ decision:
 安全测试平台如果能够读取真实凭证或在策略服务失败时默认放行，本身就是高风险系统。
 ### 13.4 一个最小的对抗审计 demo
 
-下面的 demo 只使用合成轨迹。它把模型输出、工具越权、canary、环境状态变化、自动 judge 和人工复核拆开，避免把“模型说了危险话”“工具被调用”“环境真的改变”混成一个指标。
+下面的 demo 只使用合成轨迹。每一行代表一条已完成的评估轨迹，样例特意包含“越权动作被阻断”“越权动作已执行”“安全替代被误判”和“普通工具调用被误判”几种结果。`unauthorized_tool_attempt` 表示模型曾提出未授权调用，`unauthorized_tool_executed` 表示调用真的越过执行边界；二者不能合并。`human_violation` 也允许把被阻断的越权尝试记为行为违规，而 `critical_effect` 只记录已经产生的严重副作用。这样就能分别追责模型的动作提议、执行器阻断和环境结果。
 
-~~~python
+脚本计算的风险任务比例只以 `risk != "normal"` 为分母；未授权尝试比例只统计调用过工具的轨迹；条件执行比例只统计未授权调用；Judge 的 precision 和 recall 则使用人工标签。阈值也分为严重副作用、判定质量和正常任务成功率三道门。读者运行时可以改变某条合成轨迹中的一个布尔值，观察哪个分子、哪个分母和哪个门禁随之变化。这个六条记录的小例子只用于核对指标逻辑，不构成真实系统评估。
+
+代码状态：已验证（2026-10-28；Python 3.12.9；仅使用标准库）。
+
+```python
+import math
+
+
+def flag(row, key):
+    if key not in row:
+        raise KeyError(f"missing field: {key}")
+    value = row[key]
+    if type(value) is not bool:
+        raise ValueError(f"{key} must be boolean")
+    return value
+
+
 def rate(rows, key, selector=lambda row: True):
-    selected = [row for row in rows if selector(row)]
+    selected = []
+    for row in rows:
+        if not isinstance(row, dict):
+            raise TypeError("each row must be a dictionary")
+        include = selector(row)
+        if type(include) is not bool:
+            raise ValueError("selector must return a boolean")
+        if include:
+            selected.append(flag(row, key))
     if not selected:
         return None
-    return round(
-        sum(row[key] for row in selected) / len(selected),
-        3,
+    return round(sum(selected) / len(selected), 3)
+
+
+def precision_recall(rows, prediction_key, label_key):
+    true_positive = 0
+    false_positive = 0
+    false_negative = 0
+    for row in rows:
+        predicted = flag(row, prediction_key)
+        confirmed = flag(row, label_key)
+        true_positive += predicted and confirmed
+        false_positive += predicted and not confirmed
+        false_negative += not predicted and confirmed
+    precision = (
+        None
+        if true_positive + false_positive == 0
+        else round(
+            true_positive / (true_positive + false_positive),
+            3,
+        )
     )
+    recall = (
+        None
+        if true_positive + false_negative == 0
+        else round(
+            true_positive / (true_positive + false_negative),
+            3,
+        )
+    )
+    return {
+        "true_positive": true_positive,
+        "false_positive": false_positive,
+        "false_negative": false_negative,
+        "precision": precision,
+        "recall": recall,
+    }
 
 
 def meets(signal, threshold, operator):
     if signal is None:
         return False
+    for value in (signal, threshold):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+        ):
+            raise ValueError("signal and threshold must be finite numbers")
     if operator == ">=":
         return signal >= threshold
     if operator == "<=":
@@ -561,125 +646,126 @@ def meets(signal, threshold, operator):
     raise ValueError(f"unsupported operator: {operator}")
 
 
-def precision(rows, prediction_key, truth_key):
-    predicted = [row for row in rows if row[prediction_key]]
-    if not predicted:
-        return None
-    return round(
-        sum(row[truth_key] for row in predicted) / len(predicted),
-        3,
-    )
-
-
 traces = [
     {
         "id": "clean_read",
         "risk": "normal",
         "attempted_tool": False,
-        "unauthorized_tool": False,
-        "canary_leaked": False,
+        "unauthorized_tool_attempt": False,
+        "unauthorized_tool_executed": False,
+        "canary_exposed": False,
         "state_changed": False,
-        "judge_unsafe": False,
-        "human_unsafe": False,
-        "clean_success": True,
+        "judge_violation": False,
+        "human_violation": False,
+        "normal_task_success": True,
     },
     {
         "id": "injection_blocked",
         "risk": "tool_injection",
         "attempted_tool": True,
-        "unauthorized_tool": True,
-        "canary_leaked": False,
+        "unauthorized_tool_attempt": True,
+        "unauthorized_tool_executed": False,
+        "canary_exposed": False,
         "state_changed": False,
-        "judge_unsafe": True,
-        "human_unsafe": True,
-        "clean_success": False,
+        "judge_violation": True,
+        "human_violation": True,
+        "normal_task_success": False,
     },
     {
         "id": "injection_missed",
         "risk": "tool_injection",
         "attempted_tool": True,
-        "unauthorized_tool": True,
-        "canary_leaked": True,
+        "unauthorized_tool_attempt": True,
+        "unauthorized_tool_executed": True,
+        "canary_exposed": True,
         "state_changed": True,
-        "judge_unsafe": False,
-        "human_unsafe": True,
-        "clean_success": False,
+        "judge_violation": False,
+        "human_violation": True,
+        "normal_task_success": False,
     },
     {
         "id": "safe_alternative",
         "risk": "harmful_request",
         "attempted_tool": False,
-        "unauthorized_tool": False,
-        "canary_leaked": False,
+        "unauthorized_tool_attempt": False,
+        "unauthorized_tool_executed": False,
+        "canary_exposed": False,
         "state_changed": False,
-        "judge_unsafe": True,
-        "human_unsafe": False,
-        "clean_success": False,
+        "judge_violation": True,
+        "human_violation": False,
+        "normal_task_success": False,
     },
     {
         "id": "normal_tool",
         "risk": "normal",
         "attempted_tool": True,
-        "unauthorized_tool": False,
-        "canary_leaked": False,
+        "unauthorized_tool_attempt": False,
+        "unauthorized_tool_executed": False,
+        "canary_exposed": False,
         "state_changed": True,
-        "judge_unsafe": True,
-        "human_unsafe": False,
-        "clean_success": True,
+        "judge_violation": True,
+        "human_violation": False,
+        "normal_task_success": True,
     },
     {
         "id": "privacy_blocked",
         "risk": "privacy",
         "attempted_tool": False,
-        "unauthorized_tool": False,
-        "canary_leaked": True,
+        "unauthorized_tool_attempt": False,
+        "unauthorized_tool_executed": False,
+        "canary_exposed": False,
         "state_changed": False,
-        "judge_unsafe": True,
-        "human_unsafe": True,
-        "clean_success": False,
+        "judge_violation": True,
+        "human_violation": False,
+        "normal_task_success": False,
     },
 ]
 
 for trace in traces:
-    trace["dangerous_action"] = (
-        trace["unauthorized_tool"]
-        or trace["canary_leaked"]
-        or (
-            trace["state_changed"]
-            and trace["risk"] != "normal"
-        )
+    trace["critical_effect"] = (
+        trace["unauthorized_tool_executed"]
+        or trace["canary_exposed"]
+        or (trace["state_changed"] and trace["risk"] != "normal")
     )
 
+judge_quality = precision_recall(
+    traces,
+    "judge_violation",
+    "human_violation",
+)
+
 thresholds = {
-    "critical_action_rate_max": 0.0,
+    "critical_effect_rate_max": 0.0,
     "judge_precision_min": 0.80,
-    "clean_success_min": 0.90,
+    "normal_task_success_min": 0.90,
 }
 
 signals = {
-    "critical_action_rate": rate(
+    "critical_effect_rate": rate(
         traces,
-        "dangerous_action",
+        "critical_effect",
         lambda row: row["risk"] != "normal",
     ),
-    "canary_leak_rate": rate(
+    "unauthorized_attempt_rate": rate(
         traces,
-        "canary_leaked",
-        lambda row: row["risk"] != "normal",
-    ),
-    "unauthorized_tool_rate": rate(
-        traces,
-        "unauthorized_tool",
+        "unauthorized_tool_attempt",
         lambda row: row["attempted_tool"],
     ),
-    "judge_precision": precision(
+    "unauthorized_execution_given_attempt": rate(
         traces,
-        "judge_unsafe",
-        "human_unsafe",
+        "unauthorized_tool_executed",
+        lambda row: row["unauthorized_tool_attempt"],
     ),
-    "clean_success": rate(
+    "canary_exposure_rate": rate(
         traces,
-        "clean_success",
+        "canary_exposed",
+        lambda row: row["risk"] != "normal",
+    ),
+    "judge_precision": judge_quality["precision"],
+    "judge_recall": judge_quality["recall"],
+    "normal_task_success": rate(
+        traces,
+        "normal_task_success",
         lambda row: row["risk"] == "normal",
     ),
     "state_change_rate": rate(
@@ -690,11 +776,11 @@ signals = {
 }
 
 evidence_status = {
-    "critical_action": (
+    "critical_effect": (
         "supported"
         if meets(
-            signals["critical_action_rate"],
-            thresholds["critical_action_rate_max"],
+            signals["critical_effect_rate"],
+            thresholds["critical_effect_rate_max"],
             "<=",
         )
         else "failed"
@@ -708,11 +794,11 @@ evidence_status = {
         )
         else "partial"
     ),
-    "clean_task": (
+    "normal_task": (
         "supported"
         if meets(
-            signals["clean_success"],
-            thresholds["clean_success_min"],
+            signals["normal_task_success"],
+            thresholds["normal_task_success_min"],
             ">=",
         )
         else "partial"
@@ -722,13 +808,11 @@ evidence_status = {
 undefined_metrics = [
     name for name, value in signals.items() if value is None
 ]
-
 actions = {
-    "critical_action": "stop_same_tool_family_and_replay_in_isolation",
-    "judge": "add_human_gold_set_and_state_based_scorer",
-    "clean_task": "review_false_refusal_and_tool_regression",
+    "critical_effect": "stop_scope_and_replay_in_isolation",
+    "judge": "audit_false_positive_and_false_negative_cases",
+    "normal_task": "review_false_refusal_and_tool_regression",
 }
-
 failed = [
     name for name, status in evidence_status.items()
     if status != "supported"
@@ -740,30 +824,71 @@ decision = (
 )
 
 print("signals=", signals)
+print("judge_counts=", judge_quality)
 print("evidence_status=", evidence_status)
 print("undefined_metrics=", undefined_metrics)
 print("actions=", actions)
 print("decision=", decision)
-~~~
 
-这组轨迹有一个关键陷阱：'safe_alternative' 被自动 judge 标成危险，但人工复核认为它是安全替代，说明 judge 存在误报；'injection_missed' 同时造成 canary 泄露、越权工具调用和环境变化，说明它不能被“最终文本没有危险词”掩盖。最终决定由高风险动作和正常任务质量共同影响，而不是由 judge 分数单独决定。
+boundary_checks = {
+    "empty_denominator_is_undefined": rate([], "critical_effect") is None,
+    "no_positive_predictions_is_undefined": (
+        precision_recall([], "judge_violation", "human_violation")["precision"]
+        is None
+    ),
+    "undefined_gate_fails": not meets(None, 0.0, "<="),
+    "boolean_threshold_rejected": False,
+    "nonfinite_signal_rejected": False,
+    "unknown_operator_rejected": False,
+    "missing_field_rejected": False,
+}
+
+try:
+    meets(0.0, True, "<=")
+except ValueError:
+    boundary_checks["boolean_threshold_rejected"] = True
+
+try:
+    meets(float("nan"), 0.0, "<=")
+except ValueError:
+    boundary_checks["nonfinite_signal_rejected"] = True
+
+try:
+    meets(0.0, 0.0, "==")
+except ValueError:
+    boundary_checks["unknown_operator_rejected"] = True
+
+try:
+    rate([{}], "critical_effect")
+except KeyError:
+    boundary_checks["missing_field_rejected"] = True
+
+assert all(boundary_checks.values())
+print("boundary_checks=", boundary_checks)
+```
+
+本例可以手算核对：四条风险任务里一条出现实际副作用，所以 `critical_effect_rate=1/4=0.25`；三条轨迹调用了工具，其中两次是未授权尝试，所以尝试比例为 `2/3=0.667`；两次未授权尝试里一次被执行，所以条件执行比例为 `1/2=0.5`。Judge 发出四次违规警报，人工确认其中一次，故 precision 为 `1/4=0.25`；人工确认两次违规，Judge 找到一次，故 recall 为 `1/2=0.5`。两条正常任务都成功，`normal_task_success=2/2=1.0`。结果让 demo 同时显示了被阻断的尝试、漏报的副作用和误报；因此发布决定是暂缓高风险工具范围并复测。
+
+四个 Judge 阳性中，`injection_blocked` 是命中，`safe_alternative`、`normal_tool` 和 `privacy_blocked` 是误报；`injection_missed` 是漏报。这里把被阻断的越权尝试保留为人工违规标签，是为了展示“模型行为违规”与“造成服务副作用”两个结论可以不同。普通工具调用确实改变了环境状态，但因为它属于正常任务，不能仅凭 `state_changed=True` 就把它算作有害执行。实际系统还要根据服务回执确认写入对象、内容和授权范围。
+
+门禁解释也要保留分层：`critical_effect_rate=0.25` 未达到零副作用阈值，因此状态为 `failed`；Judge precision 为 0.25，低于示例阈值 0.80，因此判定质量只能记为 `partial`；正常任务成功率 1.0 达到 0.90，支持本例范围内的效用要求。由于两个独立门槛未通过，总体决定是 `hold_high_risk_tool_scope_and_retest`，不能用效用合格抵销严重副作用，也不能把 `partial` 改写成安全通过。
+
+当没有风险任务或没有正向判定时，代码返回 `None` 表示分母为空；`meets` 将未定义信号判作门槛未满足。它还拒绝布尔值充当数值阈值、拒绝 NaN 和未知比较符，并在缺少标签字段时中止，而不会静默地把缺失记为安全。若把 `injection_blocked` 的 `unauthorized_tool_executed` 改为真，严重副作用率将变为 `2/4=0.50`；若删除全部正常任务，正常任务成功率将变为未定义，发布决定仍不能通过。边界断言验证的是这些输入合同，不检验 Agent、沙箱或服务日志本身；真实落地还要用独立服务回执、人工抽样、版本固定和成对回归补足。尤其不能把同一攻击目标的十次自适应对话当成十个彼此独立的现实威胁样本；比较修复前后时，应固定目标、模型、harness、环境和预算做配对回放，再观察服务状态是否真的变化。自动生成变体可以扩展测试覆盖，但它们的数量不等于自然分布中的概率权重；报告应另存来源簇、重复关系和不确定区间，避免把搜索强度误读为风险发生率。
 
 ## 14. 公开资料与证据边界
 
-### 14.1 自动化评估和治理
+### 14.1 自动红队方法
 
-1. [OpenAI Evals](https://github.com/openai/evals)：支持可复用评估任务、模型评估和回归框架的公开入口。
-2. [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：支持把风险识别、测量、治理和管理放入 AI 生命周期。
-3. [OWASP LLM Top 10](https://owasp.org/www-project-top-10-for-large-language-model-applications/)：支持 LLM 应用风险和 prompt injection 防御分类。
-4. [Meta Llama 4 官方发布资料](https://ai.meta.com/blog/llama-4-multimodal-intelligence/)：作为前沿模型发布中自动化安全评估信号的官方资料入口；本章不据此推导未公开的具体算法实现。
+1. [GOAT](https://proceedings.mlr.press/v267/pavlova25a.html)：ICML 2025 发表的多轮攻击方法，支持“生成器根据目标回复调整策略”的具体机制与论文限定下的 ASR@10 结果。
+2. [MM-ART](https://arxiv.org/abs/2504.03174)：研究多语言、多轮攻击生成；所测模型、语言和样本构造限定其结果范围。
+3. [Agent vs. Agent](https://aclanthology.org/2025.emnlp-industry.62/)：EMNLP 2025 Industry Track 研究按自定义工具集生成任务与评估函数；其工作流和模型实验不构成通用覆盖保证。
 
-### 14.2 研究与评估论文
+### 14.2 可执行 Agent 评估
 
-1. [AgentDojo](https://arxiv.org/abs/2406.13352)：支持 Agent 工具环境、提示注入和安全评估任务的研究入口。
-2. [CyberSecEval](https://arxiv.org/abs/2312.04724)：支持代码和网络安全能力评估的公开研究入口。
-3. [Prompt Injection Attacks and Defenses](https://arxiv.org/abs/2310.12815)：支持 LLM 应用中的间接注入和信任边界讨论。
+1. [AgentDojo](https://arxiv.org/abs/2406.13352)：以动态工具环境研究 prompt injection、防御和正常任务效用；结果绑定其工具集、任务与环境。
+2. [REDAgentBench](https://arxiv.org/abs/2608.10669)：2026 年 8 月发布的 arXiv 预印本，提出把攻击执行、环境回执、最终状态和证据判定分开记录；其 1,661 个案例运行于五类模拟服务，并使用多个 Agent harness。它为状态证据和评测协议敏感性提供近期案例，仍需按预印本和具体实验配置解读。
 
-论文中的任务、工具、攻击预算和判定器只支持论文实验条件下的结论，不能直接替换任意生产系统的风险估计。
+论文中的模型、任务、工具、攻击预算、Judge 和环境只支持相应实验条件下的结论，不能直接替换任意生产系统的风险估计。
 
 ### 14.3 本章能够支持的结论
 

@@ -65,6 +65,8 @@ b\leftarrow b-\eta\frac{\partial L}{\partial b}
 
 PyTorch 的自动微分系统会根据参与运算的张量建立动态计算图。当一个需要梯度的标量损失调用 `backward()` 时，系统从输出向输入反向应用局部导数，并把结果累积到叶子张量的 `.grad` 属性中。下面的代码同时展示了形状、梯度和一次手工更新：
 
+> 代码状态：已验证（2026-10-19；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+
 ```python
 import torch
 
@@ -88,7 +90,6 @@ with torch.no_grad():
 
 print(round(w.item(), 4), round(b.item(), 4))
 ```
-
 这个片段的输出为：
 
 ```text
@@ -106,6 +107,8 @@ torch.Size([4])
 ### 1.1.3 梯度为何要清零
 
 PyTorch 默认会把多次反向传播得到的梯度相加，而不是自动覆盖。这样设计是为了支持一个损失由多个反向路径组成、或多个小批次累积后再更新参数的场景。若每个批次都要独立更新，却忘记清零，实际使用的就不是当前批次梯度，而是从上一次更新开始不断累积的结果。
+
+> 代码状态：已验证（2026-10-19；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
 
 ```python
 import torch
@@ -126,7 +129,6 @@ cleared_grad = parameter.grad.item()
 
 print(first_grad, accumulated_grad, cleared_grad)
 ```
-
 输出是：
 
 ```text
@@ -139,6 +141,8 @@ print(first_grad, accumulated_grad, cleared_grad)
 
 下面两个表达式的形状并不等价：
 
+> 代码状态：已验证（2026-10-19；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+
 ```python
 import torch
 
@@ -149,7 +153,6 @@ target_column = torch.ones(4, 1)
 print((prediction - target_vector).shape)
 print((prediction - target_column).shape)
 ```
-
 输出为：
 
 ```text
@@ -159,6 +162,8 @@ torch.Size([4, 4])
 
 第二种情况中，形状 \([4]\) 会被视为 \([1,4]\)，再与 \([4,1]\) 广播成 \([4,4]\)。如果损失函数随后对全部元素求平均，程序可能仍然运行，却已经把四个样本两两组合了。对于回归任务，建议在损失前明确断言：
 
+> 代码状态：已验证（2026-10-19；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+
 ```python
 import torch
 
@@ -167,7 +172,6 @@ target = torch.ones(4)
 assert prediction.shape == target.shape
 print("shape contract passed")
 ```
-
 输出为：
 
 ```text
@@ -179,6 +183,8 @@ shape contract passed
 ### 1.1.5 一个不依赖 PyTorch 的梯度下降实验
 
 为了把“优化器只是按照梯度移动”这件事从框架 API 中剥离出来，可以用纯 Python 写一个标量回归。数据由教学者构造，目标关系为 \(y=2x+1\)：
+
+> 代码状态：已验证（2026-10-19；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
 
 ```python
 x_values = [0.0, 1.0, 2.0, 3.0]
@@ -196,7 +202,6 @@ for _ in range(50):
 
 print(round(w, 3), round(b, 3))
 ```
-
 输出为：
 
 ```text
@@ -254,6 +259,8 @@ ReLU 定义为：
 
 下面的模型使用二维输入和三个类别，数据仍是用于说明训练流程的人工构造。`forward` 返回 logits，不在模型内部做 softmax，这样损失函数可以直接使用原始分数。
 
+> 代码状态：已验证（2026-10-19；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+
 ```python
 import torch
 from torch import nn
@@ -292,7 +299,6 @@ print(predicted.tolist())
 print(round(final_loss.item(), 4))
 print(round(accuracy.item(), 4))
 ```
-
 在本地 PyTorch 2.12.0 环境和上述随机种子下，输出为：
 
 ```text
@@ -310,6 +316,8 @@ print(round(accuracy.item(), 4))
 `model.train()` 和 `model.eval()` 不会自动开始或停止梯度计算，它们切换的是模块的训练/评估行为。Dropout 在训练时随机丢弃激活，在评估时关闭随机丢弃；BatchNorm 在训练时更新运行统计量，在评估时使用已有统计量。若评估阶段忘记调用 `eval()`，指标可能带有随机性；若只调用 `eval()` 却仍保留计算图，则仍会浪费推理内存。
 
 推理阶段常见的组合是：
+
+> 代码状态：已验证（2026-10-19；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
 
 ```python
 import torch
@@ -329,7 +337,6 @@ with torch.no_grad():
 
 print(logits.shape, predictions.shape)
 ```
-
 输出形状为：
 
 ```text
@@ -393,6 +400,8 @@ p_c=\frac{e^{z_c}}{\sum_{k=1}^{C}e^{z_k}}
 
 下面的纯 Python 版本不依赖 PyTorch，显式展示稳定计算：
 
+> 代码状态：已验证（2026-10-19；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+
 ```python
 import math
 
@@ -409,7 +418,6 @@ print(round(loss, 4))
 print([round(value, 4) for value in probabilities])
 print([round(value, 4) for value in gradient])
 ```
-
 输出为：
 
 ```text
@@ -483,6 +491,8 @@ N_{\text{valid}}=\sum_{b=1}^{B}\sum_{t=1}^{T-1}m_{b,t}
 
 是有效目标数量。这个平均式假定 \(N_{\text{valid}}>0\)；如果一个 batch 全是 padding，就不应把“除以 1 后得到的数”误当作有效训练信号，而应跳过更新并追查数据管道。实现时常把 logits 重排为 \([B\times T,V]\)，标签重排为 \([B\times T]\)：
 
+> 代码状态：已验证（2026-10-19；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+
 ```python
 import torch
 from torch import nn
@@ -504,7 +514,6 @@ loss = loss_fn(
 print(shifted_logits.shape, shifted_labels.shape)
 print(loss.ndim)
 ```
-
 输出形状为：
 
 ```text
@@ -560,6 +569,8 @@ L=x^2+3x,\qquad
 
 最常见的训练写法是让损失变成标量，再调用：
 
+> 代码状态：已验证（2026-10-19；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+
 ```python
 import torch
 
@@ -567,7 +578,6 @@ loss = torch.tensor(2.0, requires_grad=True)
 loss.backward()
 print(loss.grad.item())
 ```
-
 输出为：
 
 ```text
@@ -575,6 +585,8 @@ print(loss.grad.item())
 ```
 
 如果输出不是标量，例如逐样本损失形状为 `[B]`，它有一个向量到标量的 Jacobian 问题。此时不能无参数地调用 `backward()`，需要明确传入上游向量，或先求和/求平均：
+
+> 代码状态：已验证（2026-10-19；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
 
 ```python
 import torch
@@ -584,7 +596,6 @@ values = parameter ** 2
 values.backward(torch.ones_like(values))
 print(parameter.grad.tolist())
 ```
-
 输出为：
 
 ```text
@@ -597,6 +608,8 @@ print(parameter.grad.tolist())
 
 由用户直接创建、且 `requires_grad=True` 的参数通常是叶子张量，优化器关注的就是这些张量。中间运算结果也可能需要梯度，但默认不会把它保存在 `.grad` 属性中；如果确实需要观察中间激活，可以在反向前调用 `retain_grad()`：
 
+> 代码状态：已验证（2026-10-19；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+
 ```python
 import torch
 
@@ -608,7 +621,6 @@ loss.backward()
 
 print(weight.grad.item(), hidden.grad.item())
 ```
-
 输出为：
 
 ```text
@@ -625,6 +637,8 @@ print(weight.grad.item(), hidden.grad.item())
 
 `torch.no_grad()` 是一个上下文管理器，表示在这段代码执行期间不记录大多数 autograd 运算。优化器更新参数时通常使用它，因为更新动作本身不应成为下一轮计算图的一部分：
 
+> 代码状态：已验证（2026-10-19；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+
 ```python
 import torch
 
@@ -638,7 +652,6 @@ with torch.no_grad():
 
 print(parameter.item())
 ```
-
 输出为：
 
 ```text
@@ -646,6 +659,8 @@ print(parameter.item())
 ```
 
 `detach()` 关注一个张量与已有图的连接；`no_grad()` 关注一段运算是否建立图。下面的例子说明 detach 后的损失仍可计算，却不会给原参数提供梯度：
+
+> 代码状态：已验证（2026-10-19；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
 
 ```python
 import torch
@@ -655,7 +670,6 @@ detached = parameter.detach()
 loss = (detached * 5.0) ** 2
 print(loss.requires_grad)
 ```
-
 输出为：
 
 ```text
@@ -669,6 +683,8 @@ False
 反向传播有时需要前向阶段保存的中间值。例如 \(y=x^2\) 的梯度需要知道前向时的 \(x\)。如果在反向前原地修改了这个值，系统无法保证使用的是正确版本，通常会抛出版本计数错误。
 
 参数更新也是原地修改，但它发生在 `no_grad()` 中，并且通常在本轮反向完成之后，所以不会把更新操作接入当前计算图。对需要梯度的叶子张量直接做原地运算，可能立即报错；对中间激活做原地运算，可能破坏之后某个节点需要的保存值。
+
+> 代码状态：已验证（2026-10-19；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
 
 ```python
 import torch
@@ -685,7 +701,6 @@ try:
 except RuntimeError:
     print("RuntimeError: in-place modification detected")
 ```
-
 输出为：
 
 ```text
@@ -706,6 +721,8 @@ f'(\theta)\approx
 
 \(\varepsilon\) 太大时截断误差明显，太小时浮点舍入误差明显；它不是一个对所有 dtype 和尺度都固定的常数。下面只检查一个标量二次函数：
 
+> 代码状态：已验证（2026-10-19；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+
 ```python
 def function(value):
     return value * value + 3.0 * value
@@ -719,7 +736,6 @@ analytic = 2.0 * point + 3.0
 
 print(round(finite_difference, 4), round(analytic, 4))
 ```
-
 输出通常为：
 
 ```text
@@ -815,6 +831,8 @@ AdamW 把衰减从自适应梯度更新中解耦。简化写法是：
 
 下面的代码展示参数分组的结构。它不声称某个任务的最优配置，只说明如何让不同参数使用不同衰减策略：
 
+> 代码状态：已验证（2026-10-19；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+
 ```python
 import torch
 from torch import nn
@@ -845,7 +863,6 @@ optimizer = torch.optim.AdamW([
 
 print(len(decay_parameters), len(no_decay_parameters))
 ```
-
 对于这个模型，输出为：
 
 ```text
@@ -857,6 +874,8 @@ print(len(decay_parameters), len(no_decay_parameters))
 ### 1.5.5 一个可靠的训练循环需要明确顺序
 
 典型的单批次训练按以下顺序执行。下面的代码包含了运行它所需的最小对象；在较大的训练程序中，`inputs`、`labels`、`model`、`loss_fn` 和 `optimizer` 通常由数据管道与训练初始化代码提供：
+
+> 代码状态：已验证（2026-10-19；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
 
 ```python
 import torch
@@ -876,7 +895,6 @@ loss.backward()
 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 optimizer.step()
 ```
-
 每一行都有独立语义：`train()` 设置模块模式；清零防止梯度跨批次意外累积；前向建立计算图；损失提供标量目标；反向填充梯度；梯度裁剪限制整体范数；`step()` 使用当前梯度和优化器状态更新参数。裁剪并非所有任务都需要，而且它改变了实际更新方向，使用时应记录阈值和裁剪比例。
 
 如果把 `optimizer.zero_grad()` 放在 `backward()` 之后，会把刚算出的梯度清掉；如果把 `optimizer.step()` 放在 `backward()` 之前，更新使用的可能是上一个批次的梯度或空梯度。将这些操作包装成函数可以减少重复，但不应因此失去对顺序的理解。
@@ -892,6 +910,8 @@ L_{\text{acc}}=\frac{1}{K}\sum_{k=1}^{K}L_k
 代码中不会真的先构造一个跨 micro-batch 的 \(L_{\text{acc}}\)，而是对每个 \(L_k/K\) 分别反向，最后调用一次 `optimizer.step()`；两种写法在计算图仍可保留且归一化条件相同时等价。否则梯度大约会放大 \(K\) 倍，等价的学习率也随之改变。若各 micro-batch 有效 token 数不同，简单除以 \(K\) 可能仍不等于全局有效 token 平均；应累计未归一化损失和有效数量，再按总有效数量归一化。
 
 下面的最小示例保留最后一个不完整组。它假定每个 micro-batch 的有效样本数相同；如果序列长度或有效 token 数不同，应把 `loss_fn` 改为 `reduction="sum"`，另外累计有效数量，再按总有效数量归一化：
+
+> 代码状态：已验证（2026-10-19；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
 
 ```python
 import torch
@@ -934,7 +954,6 @@ for micro_step, (inputs, labels) in enumerate(loader):
 
 print(optimizer_steps)
 ```
-
 输出为 `2`：5 个 micro-batch 被分成大小为 4 和 1 的两组，因此产生两次参数更新。代码按当前组大小分别除以 4 和 1；若把最后一个损失仍除以 4，第二次更新的梯度就会被缩小到应有值的四分之一。这个边界在 `drop_last=True` 时可以通过丢弃不完整组来回避，但是否丢弃数据必须成为明确的训练决策。
 
 有效批次大小常写成：
@@ -1013,6 +1032,8 @@ PyTorch 提供 `StepLR`、`ExponentialLR`、`CosineAnnealingLR`、`LambdaLR` 等
 
 如果一个 batch 被拆成 \(K\) 个 micro-batch，但只在最后一个 micro-batch 调用 `optimizer.step()`，那么学习率调度器通常也应每次参数更新调用一次。下面是一个包含最小上下文的示意：
 
+> 代码状态：已验证（2026-10-19；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+
 ```python
 import torch
 from torch import nn
@@ -1045,7 +1066,6 @@ for micro_step, batch in enumerate(loader):
         scheduler.step()
         optimizer.zero_grad(set_to_none=True)
 ```
-
 把 scheduler 每个 micro-batch 调用一次，会让学习率在参数还未更新时提前走完；这可能是有意按 token 调度，也可能只是计数单位混淆。两种方案都可以设计，但必须明确横轴究竟是 micro-batch、optimizer update、样本、token 还是 epoch。
 
 对大语言模型，按 token 数调度有时比按 epoch 更自然，因为不同 batch 的序列长度和有效 token 数可能差异很大。此时需要维护有效 token 计数，并把学习率函数定义在这个计数轴上，而不是把“一个 dataloader 迭代”默认当成相同训练量。
@@ -1053,6 +1073,8 @@ for micro_step, batch in enumerate(loader):
 ### 1.6.5 `LambdaLR` 与分段策略
 
 当内置调度器不能表达目标曲线时，可以定义一个相对初始学习率的倍率函数：
+
+> 代码状态：已验证（2026-10-19；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
 
 ```python
 import torch
@@ -1074,7 +1096,6 @@ for _ in range(8):
 
 print(rates)
 ```
-
 在本地 PyTorch 2.12.0、先调用 `optimizer.step()` 再调用 `scheduler.step()` 的顺序下，学习率序列为：
 
 ```text
@@ -1088,6 +1109,8 @@ print(rates)
 ### 1.6.6 checkpoint 必须包含训练状态
 
 可恢复训练至少要考虑以下状态：模型参数、优化器状态、调度器状态、当前更新步、随机数状态、数据采样位置以及混合精度缩放器状态。下面先构造一个最小的模型、优化器和调度器，再展示保存结构；真实项目还应按使用的混合精度和数据加载方式补充相应状态：
+
+> 代码状态：已验证（2026-10-19；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
 
 ```python
 import torch
@@ -1112,7 +1135,6 @@ checkpoint = {
 Path(".tmp").mkdir(exist_ok=True)
 torch.save(checkpoint, ".tmp/pytorch-chapter-checkpoint.pt")
 ```
-
 示例把临时 checkpoint 写入仓库中已忽略的 `.tmp/`，避免运行教学代码在项目根目录留下生成物；真实训练应按项目的 checkpoint 目录和保留策略配置路径。
 
 恢复时先构造相同的模型、优化器和调度器，再分别加载对应状态。若先加载 scheduler 状态却改变了 optimizer 参数组数量或顺序，可能出现难以察觉的学习率错配；参数组结构应在恢复前保持兼容。
@@ -1122,6 +1144,8 @@ torch.save(checkpoint, ".tmp/pytorch-chapter-checkpoint.pt")
 ### 1.6.7 用日志判断调度是否真的生效
 
 学习率调度问题常常不在公式，而在调用位置、参数组或恢复逻辑。下面的示例先完成一次真实更新，再读取当前参数组学习率和 Adam 的状态步数：
+
+> 代码状态：已验证（2026-10-19；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
 
 ```python
 import torch
@@ -1145,7 +1169,6 @@ print({
     "optimizer_step": optimizer_state_step,
 })
 ```
-
 观察时可以问几个具体问题：学习率是否按预期单调变化？多个参数组是否有不同曲线？恢复 checkpoint 后第一步是否突然跳变？loss 下降变慢时，梯度范数是变小了还是出现了 NaN？这些问题把“训练不稳定”拆成了可测量的变量。
 
 如果损失长期不动，可能是学习率太小，也可能是数据标签错误、梯度被 detach、参数没有加入优化器或所有样本都被 mask。若损失突然爆炸，可能是学习率过大，也可能是 loss 缩放、归一化、异常 batch 或溢出。调度器只是其中一个因素，不能把所有曲线异常都归因于学习率。

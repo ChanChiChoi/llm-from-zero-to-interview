@@ -24,15 +24,15 @@ Fallback routing 的目标不是让每一次请求都“看起来成功”，而
 
 可以把一个待恢复请求写成：
 
-~~~math
+```math
 q=(i,s,a,h,r,b,v),
-~~~
+```
 
 其中 `i` 是 request/action ID，`s` 是当前状态，`a` 是动作与参数摘要，`h` 是错误和历史事件，`r` 是风险与权限信息，`b` 是剩余预算，`v` 是模型、工具、政策和资源版本。路由器计算：
 
-~~~math
+```math
 p=\rho(q),
-~~~
+```
 
 `p` 不是“哪个模型更强”的单一答案，而是一个包含下一路径、能力范围、用户可见状态、重试预算和审计原因的决定。
 
@@ -40,16 +40,27 @@ p=\rho(q),
 
 一个包含外部动作的请求可以使用以下状态：
 
-~~~text
-created -> not_started -> running -> waiting_tool -> awaiting_confirmation -> committed
-   |         |              |                 |
-   |         |              |                 +--> failed / cancelled
-   |         |              +--> unknown
-   |         +--> failed / cancelled / unknown
-   +--> cancelled
-
-unknown -> query_external_state -> committed / failed / human_review
-~~~
+```mermaid
+flowchart LR
+    Created["已创建"] --> NotStarted["未开始"]
+    Created -.->|用户取消| Cancelled["已取消"]
+    NotStarted --> Running["执行中"]
+    NotStarted -.->|确定失败| Failed["确定失败"]
+    NotStarted -.->|取消| Cancelled
+    Running --> WaitingTool["等待工具"]
+    Running -.->|明确失败且无副作用| Failed
+    Running -.->|提交结果未知| Unknown["状态未知"]
+    Running -.->|取消但可能已有副作用| Unknown
+    WaitingTool --> AwaitingConfirmation["等待确认"]
+    WaitingTool -.->|回执丢失或超时| Unknown
+    AwaitingConfirmation --> Committed["已提交"]
+    AwaitingConfirmation -.->|审批拒绝或取消| Cancelled
+    Unknown --> Query["查询外部状态"]
+    Query -->|确认已提交| Committed
+    Query -->|确认未提交| Failed
+    Query -.->|仍无法确认| Unknown
+    Query -.->|长期无法查询| HumanReview["人工复核"]
+```
 
 `unknown` 不是 `failed`。它表示客户端不知道外部系统是否完成，必须先查询、对账或交给人工。只有当外部契约明确说明没有提交，或者状态查询返回确定失败，系统才可以进入安全重试路径。`committed` 也不等于“模型输出了工具参数”：它表示执行器或外部系统已经确认提交；如果只有模型生成了一个 tool call，而执行器没有接收或提交，该动作仍不能标成 `committed`。
 
@@ -61,11 +72,11 @@ unknown -> query_external_state -> committed / failed / human_review
 
 如果主路径只有只读权限，fallback 不能切换到拥有写权限的后端；如果当前任务禁止外发，备用模型也不能因为支持外发工具而获得外发权限。可以把权限范围写成：
 
-~~~math
+```math
 \mathrm{Scope}_{t+1}\subseteq\mathrm{Scope}_{t},
 \qquad
 \mathrm{Privilege}_{t+1}\leq\mathrm{Privilege}_{t}.
-~~~
+```
 
 这描述的是降级路径的安全方向，不要求每次都减少计算能力。一个同权限的副本可以保持相同 scope；一个只读路径则收窄 action。
 
@@ -127,22 +138,22 @@ tokenizer、chat template、structured output、tool schema、流式事件、媒
 
 一个生产路由器可以拆成以下组件：
 
-~~~text
-request + action ledger + policy context
-                 |
-                 v
-          state resolver
-                 |
-       error classifier / risk check
-                 |
-         fallback policy engine
-          /       |        \
-    retry   adapter   restricted / human
-          \       |        /
-              executor
-                 |
-        external state + audit trace
-~~~
+```mermaid
+flowchart TD
+    Input["请求、动作账本与策略上下文"] --> Resolver["状态解析器"]
+    Resolver --> Classifier["错误分类、风险与授权检查"]
+    Classifier --> Policy["Fallback policy engine"]
+    Policy --> Decision{"下一条路径"}
+    Decision -->|无副作用且预算充足| Retry["有限重试"]
+    Decision -->|协议与权限兼容| Adapter["后端适配器"]
+    Decision -->|可通过缩小能力继续| Restricted["只读或信息路径"]
+    Decision -.->|状态未知或风险过高| Human["异步、人工或拒绝"]
+    Retry --> Executor["执行前重验与 executor"]
+    Adapter --> Executor
+    Restricted --> Executor
+    Executor --> State["外部状态与审计轨迹"]
+    Human --> UserState["用户可见状态"]
+```
 
 ### 16.4.1 state resolver
 
@@ -156,10 +167,10 @@ request + action ledger + policy context
 
 路由策略根据错误、风险、预算、权限和后端能力决定下一路径：
 
-~~~math
+```math
 \mathrm{route}
 =\rho(\mathrm{error},\mathrm{risk},\mathrm{state},\mathrm{budget},\mathrm{capability}).
-~~~
+```
 
 它要同时返回 `route`、`allowed_scope`、`retry_budget`、`user_message` 和 `reason_code`，方便后续执行和审计。
 
@@ -173,13 +184,15 @@ adapter 负责将消息、token、工具 schema、流式事件和媒体输入转
 
 适用于无副作用的 transient error。重试次数、总时间和退避策略要有上限：
 
-~~~math
+令 $t_j^{\mathrm{backoff}}$ 为第 $j$ 次尝试前的等待时间，$t_j^{\mathrm{attempt}}$ 为该次执行时间，$n$ 为尝试次数，$B_T$ 为此请求可用的重试时间预算。
+
+```math
 T_{\mathrm{retry\ budget}}
 =\sum_{j=1}^{n}(t_j^{\mathrm{backoff}}+t_j^{\mathrm{attempt}})
 \leq B_T.
-~~~
+```
 
-指数退避可以减少高峰争抢，但不能把用户等待时间无限延长。超过预算后进入排队、备用路径或明确失败。
+例如，第一次尝试前不等待，模型调用耗时 `0.4 秒`；中间退避 `0.2 秒`，第二次调用耗时 `0.6 秒`，总计 `0+0.4+0.2+0.6=1.2 秒`，低于 `B_T=1.5 秒`。若下一次需要 `0.4 秒` 退避和 `0.6 秒` 调用，累计将达到 `2.2 秒`，高于预算，路由器应停止重试。指数退避可以减少高峰争抢，但不能把用户等待时间无限延长；超过预算后进入排队、备用路径或明确失败。
 
 ### 16.5.2 同权限兼容后端
 
@@ -201,14 +214,14 @@ T_{\mathrm{retry\ budget}}
 
 ### 16.6.1 为什么无限重试会放大风险
 
-每次重试都可能增加费用、延迟、日志复制、上下文暴露和副作用机会。多个组件各自重试时，总尝试次数可能呈乘法增长。假设路由器重试 `n_r` 次、模型客户端重试 `n_m` 次、工具客户端重试 `n_t` 次，最坏尝试数近似为：
+每次重试都可能增加费用、延迟、日志复制、上下文暴露和副作用机会。多个组件各自重试时，总尝试次数可能呈乘法增长。假设路由器、模型客户端和工具客户端分别允许 `n_r`、`n_m`、`n_t` 次重试，而且每次上层重试都可能重新触发下游调用，则嵌套路径的尝试上界为：
 
-~~~math
+```math
 N_{\mathrm{attempts}}
-\leq n_r n_m n_t.
-~~~
+\leq (n_r+1)(n_m+1)(n_t+1).
+```
 
-这只是上界，但它提醒我们必须统一预算和责任，不能每一层都以为自己只重试了一次。
+如果三层各自允许一次重试，上界就是 `2×2×2=8` 次尝试，而不是三次。这个乘积只适用于这种嵌套重试结构；实际预算应按调用图和提交边界计算，并由统一路由策略设置总上限。
 
 ### 16.6.2 预算维度
 
@@ -233,7 +246,7 @@ N_{\mathrm{attempts}}
 
 每个外部动作至少需要：
 
-~~~json
+```json
 {
   "action_id": "action-synthetic-17",
   "idempotency_key": "idem-synthetic-17",
@@ -245,7 +258,7 @@ N_{\mathrm{attempts}}
   "principal_revision": "principal-9",
   "created_at": "2026-08-11T10:00:00Z"
 }
-~~~
+```
 
 `status=unknown` 时，fallback router 的下一动作是查询，而不是生成新的付款请求。状态查询要使用稳定的 action ID 和幂等键，不能依赖模型记忆。
 
@@ -272,6 +285,8 @@ N_{\mathrm{attempts}}
 - 失败后是否有补偿或撤销接口。
 
 没有这些契约时，高风险动作应进入人工或明确拒绝，而不是由路由器猜测。
+
+HTTP 方法的幂等语义也不是对所有请求的重试许可：RFC 9110 将 PUT、DELETE 和安全方法定义为幂等方法，并指出非幂等方法只有在客户端能确认原请求未应用，或应用语义本身幂等时，才适合自动重试。付款等业务操作还要依赖具体服务的幂等键和状态查询契约，不能只看 HTTP 方法名。[RFC 9110 §9.2.2](https://www.rfc-editor.org/rfc/rfc9110#section-9.2.2)
 
 ## 16.8 协议与后端适配
 
@@ -322,16 +337,16 @@ adapter 需要验证：
 
 可以标记：
 
-~~~math
+```math
 \mathrm{evidence\_status}
 \in\{\mathrm{complete},\mathrm{partial},\mathrm{failed},\mathrm{unknown}\}.
-~~~
+```
 
 当状态为 `partial` 或 `unknown` 时，低风险摘要可以继续，但写入、外发、删除和发布不能把它当作完整证据。摘要要带来源范围、生成版本和未覆盖范围。
 
 ### 16.9.3 分块不是免费等价
 
-将一个请求分成 (k) 个片段可能需要 (k) 次分类、检索或模型调用，增加延迟和成本；片段边界还可能破坏跨段关系。合并结果时不能简单把局部“安全”拼成全局安全。要为分块策略建立任务级回归集和边界样本。
+将一个请求分成 $k$ 个片段可能需要 $k$ 次分类、检索或模型调用，增加延迟和成本；片段边界还可能破坏跨段关系。合并结果时不能简单把局部“安全”拼成全局安全。要为分块策略建立任务级回归集和边界样本。
 
 ## 16.10 安全降级等级与用户沟通
 
@@ -395,23 +410,25 @@ adapter 需要验证：
 
 设 `S_p` 是主路径拒绝或限制的样本集合，`S_f` 是其 fallback 结果。可以观察：
 
-~~~math
+```math
 \mathrm{SafetyPreservation}
 =\frac{\#\{x\in S_p:\mathrm{fallback}(x)\text{仍遵守原约束}\}}
 {|S_p|}.
-~~~
+```
 
 它不是“主模型和备用模型输出相似率”。主路径拒绝的请求在 fallback 仍然拒绝或进一步收窄，才算保持安全约束。当 `|S_p|=0` 时，这个指标应报告为 `N/A`，表示本轮没有可评价的主路径限制样本，而不是报告 0 或 1。
 
 ### 16.12.3 重复副作用率
 
-~~~math
+```math
 \mathrm{DuplicateSideEffectRate}
 =\frac{\#\text{因 fallback 重复提交的外部动作}}
 {\#\text{可能产生外部副作用的 fallback 任务}}.
-~~~
+```
 
 分子要通过外部状态或 action ledger 确认，而不是只数模型调用次数。一个模型可能调用两次但 executor 用幂等键只提交一次；也可能只调用一次却因重试中间件提交两次。当没有任何可能产生副作用的 fallback 任务时，重复副作用率也应报告为 `N/A`，不能把“没有样本”误读为“风险为零”。
+
+用一组合成回放手算：12 个主路径拒绝或限制的样本中，fallback 有 9 个仍遵守原约束，则安全保持率为 $9/12=0.75$；20 个可能产生外部副作用的 fallback 任务中，1 个重复提交，则重复副作用率为 $1/20=0.05$。两个指标使用不同样本集；若本轮没有符合分母条件的样本，对应结果应为 `N/A`。
 
 ### 16.12.4 任务帮助性和误解率
 
@@ -444,7 +461,7 @@ adapter 需要验证：
 
 路由回滚要同时恢复：
 
-~~~text
+```text
 fallback policy revision
 backend allowlist
 adapter / tokenizer revision
@@ -453,30 +470,36 @@ retry and timeout budget
 data-region and retention policy
 user-facing status schema
 audit schema
-~~~
+```
 
 如果新路由已经产生了人工工单、草稿或未确认动作，回滚还要规定这些状态由哪个版本继续处理，不能简单换回一个旧 URL。
 
 ## 16.14 成本、延迟与安全的联合目标
 
-降级路径不是越快越好。可以把一次请求的简化效用写成：
+降级路径不是越快越好。设 $V_{\mathrm{helpful}}$ 为任务帮助性价值；$C_{\mathrm{latency}}$、$C_{\mathrm{compute}}$、$C_{\mathrm{human}}$ 和 $C_{\mathrm{risk}}$ 分别是时延、计算、人工和风险成本，并把它们换算到同一教学效用单位，可以写成：
 
-~~~math
+```math
 U
 =V_{\mathrm{helpful}}
  -C_{\mathrm{latency}}
  -C_{\mathrm{compute}}
  -C_{\mathrm{human}}
  -C_{\mathrm{risk}}.
-~~~
+```
 
-小模型可能降低 compute cost，却增加误拒或错误动作的 `C_risk`；人工路径增加延迟和人工成本，却可能降低不可逆副作用。权重应按动作和用户价值切片，而不是用一个全局平均效用掩盖高风险尾部。
+小模型可能降低 compute cost，却增加误拒或错误动作的 `C_risk`；人工路径增加延迟和人工成本，却可能降低不可逆副作用。权重应按动作和用户价值切片，而不是用一个全局平均效用掩盖高风险尾部。例如，若某条路径的帮助性价值为 8，时延成本为 1，计算成本为 1，人工成本为 0，风险成本为 2，则合成效用是 $8-1-1-0-2=4$。这些数值只是同单位教学量表；即使效用为正，缺少授权或外部状态不明仍必须阻止副作用。
 
 ## 16.15 一个可运行的 fallback 状态审计 demo
 
 下面的代码使用合成状态，演示路由器先判断动作是否已经发生，再决定有限重试、查询状态、停止或转信息路径。它不会调用真实 provider，也不会执行真实付款。
 
-~~~python
+`Event` 是恢复时读到的一条服务端记录：`action_id` 用来关联同一次业务动作；`state` 和 `side_effect_possible` 描述外部提交的确定程度；`authorized` 表示原业务动作当前是否还允许；`retries` 与 `backend_supports_tool` 表示当前重试预算和备用后端能力。`original_scope` 记录原路径范围，`status_query_available` 与 `status_query_authorized` 单独描述是否可以查询既有动作，避免把“不能再付款”误当成“不能查这笔付款”。函数返回的 `decision`、`actions` 和 `allowed_scope` 可用于路由与审计。
+
+九条输入覆盖了普通超时、付款状态未知、策略拒绝、备用后端不支持工具、查询不可用、提交后撤权、撤权后仍可查询、查询权限也被撤销，以及重试预算耗尽。路由顺序先处理已提交和未知副作用，再检查新动作授权；这样恢复已有事实不会错误地重新授权新的写操作。
+
+代码状态：已验证（2026-10-28；Python 3.12.9，标准库）。
+
+```python
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -566,29 +589,62 @@ events = [
     Event("committed_after_revoke", "a-6", "committed", "timeout", False, True, 0, True, "write"),
     Event("unknown_after_revoke_query_allowed", "a-7", "unknown", "timeout", False, True, 0, True, "write", True, True),
     Event("unknown_after_revoke_query_blocked", "a-8", "unknown", "timeout", False, True, 0, True, "write", True, False),
+    Event("retry_exhausted", "a-9", "running", "timeout", True, False, 1, True, "write"),
 ]
 
-
+expected = {
+    "plain_timeout": ("retry", ("retry_once_without_privilege_change",), "read_only"),
+    "payment_unknown": ("recover_state", ("query_external_action_status",), "read_only"),
+    "policy_denial": ("deny", ("stop_and_preserve_denial",), "none"),
+    "no_tool_backend": ("informational", ("switch_to_informational_path",), "read_only"),
+    "unknown_without_query": ("unknown", ("preserve_unknown_and_handoff",), "none"),
+    "committed_after_revoke": ("finish", ("report_committed_without_replay",), "none"),
+    "unknown_after_revoke_query_allowed": ("recover_state", ("query_external_action_status",), "read_only"),
+    "unknown_after_revoke_query_blocked": ("unknown", ("preserve_unknown_and_handoff",), "none"),
+    "retry_exhausted": ("human", ("handoff_to_human",), "read_only"),
+}
+outcomes = {}
 for item in events:
-    print(item.name, route(item))
-~~~
+    result = route(item)
+    assert result["scope_preserved"]
+    outcomes[item.name] = (
+        result["decision"],
+        tuple(result["actions"]),
+        result["allowed_scope"],
+    )
+    print(
+        item.name,
+        result["decision"],
+        ",".join(result["actions"]),
+        result["allowed_scope"],
+        f"scope_preserved={result['scope_preserved']}",
+    )
+assert outcomes == expected
+```
 
-预期的核心决定是：
+预期输出为：
 
-~~~text
-plain_timeout retry retry_once_without_privilege_change
-payment_unknown recover_state query_external_action_status
-policy_denial deny stop_and_preserve_denial
-no_tool_backend informational switch_to_informational_path
-unknown_without_query unknown preserve_unknown_and_handoff
-committed_after_revoke finish report_committed_without_replay
-unknown_after_revoke_query_allowed recover_state query_external_action_status
-unknown_after_revoke_query_blocked unknown preserve_unknown_and_handoff
-~~~
+```text
+plain_timeout retry retry_once_without_privilege_change read_only scope_preserved=True
+payment_unknown recover_state query_external_action_status read_only scope_preserved=True
+policy_denial deny stop_and_preserve_denial none scope_preserved=True
+no_tool_backend informational switch_to_informational_path read_only scope_preserved=True
+unknown_without_query unknown preserve_unknown_and_handoff none scope_preserved=True
+committed_after_revoke finish report_committed_without_replay none scope_preserved=True
+unknown_after_revoke_query_allowed recover_state query_external_action_status read_only scope_preserved=True
+unknown_after_revoke_query_blocked unknown preserve_unknown_and_handoff none scope_preserved=True
+retry_exhausted human handoff_to_human read_only scope_preserved=True
+```
 
-实际打印还会包含 `action_id`、`original_scope`、`allowed_scope` 和 `scope_preserved`。这里的 `scope_preserved=True` 只表示允许范围没有超过事件记录的原始范围，并不代表真实工具已经安全；生产系统还要把查询结果、幂等键、版本、参数 digest 和 executor 状态接入同一条 trace。特别要注意：`committed_after_revoke` 仍然报告已经提交的事实，但不允许因为当前授权失效而把历史动作改写成“未执行”；后续查询、退款或补偿动作要重新做权限检查。
+每行依次列出事件名、决定、下一步、允许范围和范围不扩大的断言。`scope_preserved=True` 只表示允许范围没有超过事件记录的原始范围，并不代表真实工具已经安全；生产系统还要把查询结果、幂等键、版本、参数 digest 和 executor 状态接入同一条 trace。特别要注意：`committed_after_revoke` 仍然报告已经提交的事实，但不允许因为当前授权失效而把历史动作改写成“未执行”；后续查询、退款或补偿动作要重新做权限检查。
 
 这里把两种权限明确分开：`authorized` 表示原业务动作当前是否仍被允许，`status_query_authorized` 表示系统是否有权进行只读状态查询。前者撤销后，系统不能重试付款或执行补偿；后者若仍有效，系统可以查询已有 action 的最终状态，但不能因此恢复原来的写权限。若连状态查询也不被允许，路由器只能保留 `unknown` 并转人工或等待具有权限的内部流程。对于 `committed_after_revoke`，`allowed_scope=none` 表示没有新的外部动作；它不否认历史上已经发生的提交，也不等于用户一定可以看到全部业务细节。
+
+各行输出体现不同的恢复条件。`plain_timeout` 没有外部副作用可能且仍有预算，所以允许一次同权限重试；`retry_exhausted` 已达到重试上限，转人工而不继续打 provider。`payment_unknown` 和 `unknown_after_revoke_query_allowed` 只查询原 action ID，不创建新的付款动作；当业务写权限已撤销但状态查询仍被单独授权时，这条只读恢复路径仍可用。`unknown_without_query` 与 `unknown_after_revoke_query_blocked` 没有获准的状态查询，结果保持未知并交接，不能猜测“失败”后重新提交。
+
+`policy_denial` 保留拒绝决定，备用模型不参与绕过；`no_tool_backend` 将请求收窄到信息路径。`committed_after_revoke` 记录已提交且不重放，因为授权撤销影响后续动作，不应抹掉审计中的历史事实。程序对每条记录断言允许范围不超过输入范围，并用完整预期映射核对决定、后续动作和 scope；这些断言只覆盖 toy 策略的确定性分支，不测试并发租约、远程状态查询、幂等存储或真实权限撤销。
+
+这个 scope 只用 `none < read_only < write` 表示能力等级，便于演示“降级不能扩大权限”，并不包含租户、资源、数据区域、有效期、工具 schema 或用途限制。真实策略应比较完整授权对象及其版本，不能只比较一个等级字段。代码里的状态查询结果同样来自输入记录，不是远程服务实测；它验证的是决策分支如何遵守给定事实，不能证明账本事实及时或准确。接入生产 executor 时，还要在读取状态与提交动作之间处理权限撤销、并发重试和租约过期，并依赖持久幂等记录避免两个 worker 同时提交。
 
 ## 16.16 常见失败模式
 
@@ -646,7 +702,7 @@ unknown_after_revoke_query_blocked unknown preserve_unknown_and_handoff
 
 1. [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：支持把 fallback、监控、事故和治理放入生命周期。
 2. [NIST Generative AI Profile](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf)：支持生成式 AI 的风险、数据、测量和治理边界。
-3. [OWASP Top 10 for LLM Applications](https://owasp.org/www-project-top-10-for-large-language-model-applications/)：支持提示注入、敏感数据和工具集成风险。
+3. [OWASP Top 10 for LLM Applications 2026](https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/)：提供提示注入、敏感数据和工具集成风险分类；属于社区风险指南，不证明具体 fallback 路由已经安全。
 
 这些资料支持风险管理和应用防护语言，不证明一个 fallback 路由已经保持所有安全性质。安全保持率、重复副作用和状态一致性必须用本地工具契约和故障注入验证。
 
@@ -695,7 +751,9 @@ Fallback routing 的本质是：当原路径不可用时，系统要在已知状
 
 ## 16.20 Claude Opus 5.5：能力分级与透明 fallback
 
-Anthropic 发布页把 Opus 5.5 的网络安全、生物和蒸馏防护描述为能力相关的路由策略：普通软件生命周期中的 bug 修复可以继续，更多高风险 cyber 任务可能转到 Opus 4.8；生物研究需要 Life Sciences Verification Program；preserved thinking 被用于 anti-distillation。这个案例说明 fallback 不是“模型失败后再重试一次”，而是安全策略选择了另一条能力、权限和审计边界不同的执行路径。
+下面将 Opus 5.5、Fable/Mythos 5.1 和 Sonnet 5.5 的公开材料作为一组路由案例。它们分别展示按风险类别切换实际模型、同权重模型采用不同 safeguards，以及多阶段分类器触发类别化 fallback。比较时要固定风险类别、控制动作、实际执行模型和评测条件；这些是特定发布版本的例子，不是所有 provider 的通用策略。
+
+Anthropic 发布页和 System Card 把 Opus 5.5 的网络安全、生物和蒸馏防护描述为能力相关的路由策略：普通软件生命周期中的 bug 修复可以继续，更多高风险 cyber 任务可能转到 Opus 4.8；生物研究需要 Life Sciences Verification Program；preserved thinking 被用于 anti-distillation。这个案例说明 fallback 不是“模型失败后再重试一次”，而是安全策略选择了另一条能力、权限和审计边界不同的执行路径。[发布页](https://www.anthropic.com/claude-opus-5-5)、[System Card](https://www.anthropic.com/claude-opus-5-5-system-card)
 
 安全路由的最小记录应包含：原始模型与 revision、风险分类、触发规则、目标模型、工具 allowlist、网络/数据区域、thinking 状态、缓存是否复用、重试次数、外部副作用和最终 verifier。若用户只看到一个成功答案，却不知道任务由 fallback 模型完成，评测和责任归因都会失真。
 
@@ -709,11 +767,11 @@ System Card 给出的 RSP 结论是 CB-1、未达到 CB-2；autonomy threat mode
 
 Cyber 证据更需要防止误读：在关闭 cyber safeguards 的评测中，ExploitBench 完整 ACE 为 `301/410 = 73.4%`，CyScenarioBench 为 `67.6%`，ExploitGym 2 小时/6 小时为 `289/869`、`300/869`。生产请求可能经过拒答、工具限制或 fallback，所以这些数字不能用来估算线上越权率。相反，Gray Swan IPI 在 k=1/10/15 为 `0.1%/0.7%/1.0%`，约 18% rollout fallback 到 Opus 4.8；1,310 个 fallback rollout 无成功攻击。报告时要同时写 attack success、fallback 覆盖率和实际模型。
 
-安全路由的类型也不是统一的“重试”：biology/CB -> Opus 5，cyber -> Opus 4.8，窄范围 frontier LLM kernel/AI R&D -> Opus 5；conventional weapons/high-yield explosives 与 distillation/hidden reasoning extraction 没有 fallback，其他 provider 可能不同。系统必须先做风险分类和状态确认，再决定是否降级，并把 `original_model`、`actual_model`、safeguard 状态、工具权限、外部副作用和 verifier 写入审计轨迹。
+安全路由的类型也不是统一的“重试”：biology/CB -> Opus 5，cyber -> Opus 4.8，窄范围 frontier LLM kernel/AI R&D -> Opus 5；conventional weapons/high-yield explosives 与 distillation/hidden reasoning extraction 没有 fallback，其他 provider 可能不同。系统必须先做风险分类和状态确认，再决定是否降级，并把 `original_model`、`actual_model`、safeguard 状态、工具权限、外部副作用和 verifier 写入审计轨迹。以上模型类别和路由条件仅反映该版本发布方披露，详见[Opus 5.5 System Card](https://www.anthropic.com/claude-opus-5-5-system-card)。
 
 ## 16.21 Claude Fable 5.1：共享权重与不同 safeguards
 
-Fable 5.1 的 System Card 给出一个清晰的安全路由案例：Claude Fable 5.1 与 Claude Mythos 5.1 共享相同模型权重，但属于不同 safeguards/访问计划。Fable 面向一般使用并限制部分高风险双用途生物与网络安全任务；Mythos 面向受信任访问。这里的变化发生在策略、分类器、工具权限和 fallback 层，不能被写成两个架构不同的模型。
+Fable 5.1 的 System Card 给出一个清晰的安全路由案例：Claude Fable 5.1 与 Claude Mythos 5.1 共享相同模型权重，但属于不同 safeguards/访问计划。Fable 面向一般使用并限制部分高风险双用途生物与网络安全任务；Mythos 面向受信任访问。这里的变化发生在策略、分类器、工具权限和 fallback 层，不能被写成两个架构不同的模型。[Fable 5.1 / Mythos 5.1 System Card](https://www.anthropic.com/claude-fable-5-1-mythos-5-1-system-card)
 
 System Card 对 Mythos 5.1 的 RSP 判断为 CB-1、未达 CB-2；autonomy threat model 1 适用但整体风险为 low，threat model 2 未达阈值。网络安全和 prompt-injection 评测中还存在 helpful-only、关闭 safeguards、fallback 到其他 Claude 版本等条件。Gray Swan IPI、Shade、browser-use、permission-hook bypass 与 sandbox 事件必须绑定 `safeguard_state`、`actual_model`、`fallback_reason`、工具 allowlist、执行环境和 verifier，不能把发布方条件结果当作 Fable 生产路径的普遍安全率。
 
@@ -729,7 +787,7 @@ System Card 对 Mythos 5.1 的 RSP 判断为 CB-1、未达 CB-2；autonomy threa
 
 ## 16.22 Claude Sonnet 5.5：多阶段 cyber gate 与类别化 fallback
 
-Sonnet 5.5 的 System Card 把 cyber safeguards 描述为三阶段链：读取模型内部 activation 的 probe、运行在 Sonnet 5.5 上的轻量 classifier、以及结合 probe verdict 决定是否阻断的独立 LLM classifier。它不是一个统一的“危险请求检测器”；生物风险、武器、模型蒸馏/推理提取和窄范围 frontier-LLM 开发各有不同的 block/fallback policy。
+Sonnet 5.5 的 System Card 把 cyber safeguards 描述为三阶段链：读取模型内部 activation 的 probe、运行在 Sonnet 5.5 上的轻量 classifier、以及结合 probe verdict 决定是否阻断的独立 LLM classifier。它不是一个统一的“危险请求检测器”；生物风险、武器、模型蒸馏/推理提取和窄范围 frontier-LLM 开发各有不同的 block/fallback policy。[Sonnet 5.5 System Card](https://www.anthropic.com/claude-sonnet-5-5-system-card)
 
 | 类别 | 发布方报告的动作 | 不能忽略的审计字段 |
 |---|---|---|
@@ -745,4 +803,14 @@ HTTP 200 不一定代表模型接受任务：拒答是 `stop_reason=refusal`，�
 
 System Card 还称 Sonnet 5.5 达到 CB-1 与 Autonomy-1 阈值、未达 CB-2/Autonomy-2，Autonomy-1 风险评估为 low。这是发布方 RSP 风险判断，不是无风险证明。`Terminal-Bench 4.0 70.6%` 绑定 66 tasks、Claude Code `--bare`、max effort、五次试验、无外网及 fallback；`OSWorld 2.1 80.1% partial / 43.5% strict` 则绑定 108 个 GUI 任务、500-action cap、五次运行和 100K 后服务端 compaction。评测中的实际 fallback、指标分母和评分定义都应进入 benchmark manifest。
 
-本专题的完整接口迁移与证据账本见[第二十册第 24 章](../../book-20-agent-harness-runtime/chapters/24-claude-sonnet-5.5-thinking-state与安全路由.md)及[研究笔记](../../research/model-update-2026-09/claude-sonnet-5.5-source-notes.md)。本轮没有调用真实 API 或独立复现安全评测。
+本专题的接口迁移与证据账本见[第二十册第 24 章](../../book-20-agent-harness-runtime/chapters/24-claude-sonnet-5.5-thinking-state与安全路由.md)及[Sonnet 5.5 System Card 研究笔记](../../research/model-update-2026-09/claude-sonnet-5.5-source-notes.md)。本章引用的评测数字是发布方在各自条件下报告的结果；本地没有目标 API、运行时 harness 或独立 benchmark 的验证证据，因此这些数字不能解释为本地路由或生产环境的安全率。
+
+把三张 System Card 放在一起，能看见路由决定与测量的对应关系：
+
+| 案例 | 发布方披露的控制差异 | 复核时要保留的字段 |
+| --- | --- | --- |
+| Opus 5.5 | 按 cyber、生物、窄范围 AI R&D 等类别使用不同 fallback 目标或拒绝 | 风险类别、目标模型、safeguard 状态、actual model、工具权限 |
+| Fable / Mythos 5.1 | 共享模型权重，但 safeguards 和访问计划不同 | model/configuration、访问计划、分类器、fallback 与实际执行模型 |
+| Sonnet 5.5 | cyber 路径有多阶段 gate，其他类别有独立阻断或 fallback 规则 | probe/classifier 状态、stop category、surface、fallback 是否启用及 actual model |
+
+这组资料说明的是发布方公开的控制合同与评测条件，不代表任一版本在本地 harness 或生产环境中的实测结果；系统评估仍需回放自身的工具状态、权限和副作用。

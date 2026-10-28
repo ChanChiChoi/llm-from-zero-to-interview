@@ -1431,11 +1431,11 @@
 
 14. Model card、system card 和 governance gate 应该如何设计？
     考察点：Datasheets、Model Cards、System Card、intended use、out-of-scope use、risk disclosure、release gate、responsible scaling、approval、monitoring。
-    回答框架：model card 记录模型本身的用途、训练数据概要、评估、限制、风险和缓解；system card 记录完整系统，包括 RAG、工具、权限、policy layer、guardrail、监控和事故响应。governance gate 要把 model card 完整度、system card 完整度、policy 覆盖、评估切片覆盖、P0/P1 风险、审批覆盖、监控和回滚准备度转成发布前硬门禁。文档不是宣传材料，必须和真实系统一致并随版本更新。
+    回答框架：model card 记录模型制品、预期/不适用用途、数据与训练披露、评测条件、限制和缓解；system card 记录 RAG、工具、权限、policy、日志、监控及事故响应组成的系统版本。每项声明应绑定证据、任务条件、责任人和复核日期，模型、tokenizer、policy 或 RAG 变化后判断哪些结论已过期。governance gate 将字段完整度、切片覆盖、未解决风险、审批和回滚准备度转为独立门槛；缺测不得当成通过，硬性隐私/授权失败不能被平均覆盖率抵销。再区分发布方 Responsible Scaling policy、NIST 自愿风险框架、GPAI Code of Practice 与具有适用范围的法规义务；它们的版本、责任主体和法律地位不同，不能互相替代。文档不是宣传材料，必须和真实系统一致并随版本更新。
 
 15. Safety 综合面试题应该如何组织回答？
     考察点：定义目标、risk taxonomy、failure mode、mitigation、eval metrics、red teaming、release gate、trade-off、safe boundary。
-    回答框架：先定义目标和风险边界，再列 risk taxonomy；随后分析失败模式，说明训练和系统缓解；再给评估指标和红队方案，最后落到上线门禁、监控、回滚和残余风险。回答中必须避免可复用攻击步骤，并同时覆盖 harmful compliance、over-refusal、privacy、tool misuse、dangerous capability 和 governance。
+    回答框架：沿“定义—机制—责任层—测量—控制—结论边界”说明因果链；风险图可先用 misuse、malfunctions、systemic risks 组织，再细化 harmful compliance、over-refusal、privacy、prompt injection、tool misuse 和 dangerous capability。分别给允许请求与禁止请求的分母，区分固定回归、定向红队与线上事故证据；Agent 场景还要交代自适应多轮生成的攻击预算、harness 和判定证据。GOAT 说明攻击策略可随目标回复变化；REDAgentBench 则显示仅看轨迹文本可能遗漏已执行的服务副作用。再说明模型训练、服务端权限、人工复核和组织治理各负责哪一段。发布结论绑定版本、用户、数据、工具和评估范围；没有数据时明确标作设计假设。避免提供可复用攻击步骤。参考第八册第十二、十三章、[GOAT](https://proceedings.mlr.press/v267/pavlova25a.html)、[REDAgentBench](https://arxiv.org/abs/2608.10669) 及 [International AI Safety Report 2026](https://internationalaisafetyreport.org/publication/international-ai-safety-report-2026) 的评估证据边界。
 
 16. 如何设计大模型安全合规事故审计表？
     考察点：policy action、unsafe pass、over-refusal、PII、permission、tool confirmation、log、training consent、DPA、incident response。
@@ -1484,6 +1484,10 @@
 27. 技术故障风险分类与 misuse、malfunction、systemic risk 有什么区别？
     考察点：风险触发方式、故障位置、受影响范围、多标签记录。
     回答框架：prompt injection、隐私泄露和工具滥用帮助定位技术故障；misuse、malfunction、systemic risk 分别描述有意滥用、非预期故障和广泛部署后的系统性影响。一次 Agent 事故可同时属于多个维度，报告应保留触发者、意图、故障位置、影响范围和后果。该分类不直接给出某个产品的风险概率或安全认证。
+
+28. 如何评估一个面向不可信 Agent 的 AI Control 协议？
+    考察点：U/T 基线、微协议执行细节、诚实效用、攻击分母、协议知情红队、提交前控制与迁移假设。
+    回答框架：先冻结模型、工具、权限、轨迹可见性和主/副任务判定，再分别测 $U$、$T$ 与协议的诚实成功率，以及攻击轨迹的审核捕获和未捕获副任务。区分最低可疑分候选直接提交的 `defer-to-resample` 与只收集线索、最终由可信执行方提交的 `resample-then-defer`；对不可逆动作可用 `defer-on-critical` 加执行器审批。红队应知道协议并尝试针对监控器，协议冻结后留独立 holdout。报告原始分母、效用/安全门槛、审计时点、外部副作用、补偿结果和成本；事后发现不等于提交前阻止，benchmark 分数也不等于部署安全保证。
 
 本节新增方法比较依据：[Safety 与 Robustness Eval 研究记录](research/safety-robustness-evaluation-depth-review-2026-10-27.md)。
 
@@ -2363,19 +2367,19 @@
 
 1. 如何从零构建 web-scale 预训练数据采集 pipeline？
    考察点：source registry、license / ToS / robots、raw storage、parser、quality filter、PII scanner、dedup、versioning。
-   回答框架：先定义模型目标和数据需求，再建立合法数据源 registry；采集后保留原始数据、来源、hash 和时间，随后做解析、正文抽取、语言 / 领域识别、质量过滤、PII / 密钥 / 安全扫描、污染检测、去重、配比和版本审计。
+   回答框架：先定义用途与排除范围，分别审查许可、站点条款、robots 偏好和访问方式；scheduler 只派发通过准入审查的来源。collector 记录 request ID、状态、重试、时间、快照与载荷摘要；parser 输出结构、坐标、警告和版本，并保留回到 raw object 的引用。报告要分开计算请求尝试、最终 URL 响应和解析可用率，再把候选工件交给质量、隐私、去重、配比和版本治理流程。
 
 2. 为什么 web-scale 数据采集不是简单写爬虫？
    考察点：合法来源、访问边界、版权、隐私、数据质量、评估污染、可追溯。
-   回答框架：技术可访问不等于可训练；采集系统要证明数据来源、许可、访问策略、质量、风险和版本都可审计，否则只是拿到文本而不是构建训练数据。
+   回答框架：HTTP 200 只能说明请求返回成功，不能证明内容是正文、用途已获准或解析保留了原结构。采集要把来源准入、请求事件、原始快照和解析工件关联起来；重试次数与逻辑 URL 分开统计，解析异常可以回到同一原始输入复核。质量、风险和训练分布还需由后续阶段分别校准。
 
 3. source registry 应该记录哪些字段？
-   考察点：source id、source type、license、ToS、robots、access mode、risk level、owner、crawl version、delete policy。
-   回答框架：registry 要能回答“这个数据能不能用、从哪里来、什么时候进来的、进入了哪个版本、未来如何删除或回溯”。
+   考察点：稳定 source ID、来源类型与负责人、许可和 ToS 引用、用途范围、robots 快照及检查时间、访问方式、区域/保留限制、审查状态、采集窗口、删除联系人和处理版本。
+   回答框架：registry 应分别保存用途审查、站点抓取偏好和技术访问方式；robots 不等于训练授权。字段要能说明来源是否可请求、允许何种用途、谁负责复核，并通过 snapshot ID、raw digest 和 parser revision 支持重放与交接。
 
 4. 如何解释 robots、ToS、license 和 provenance 的关系？
    考察点：访问策略、网站条款、使用许可、样本级血缘。
-   回答框架：robots 和访问控制约束采集行为，ToS 和 license 约束使用方式，provenance 保证后续审计、删除、污染排查和模型版本追踪。
+   回答框架：robots 是站点向 crawler 表达的路径访问偏好，RFC 9309 明确它本身不是访问授权；技术访问、合同条款、版权许可和适用用途要分别审查。provenance 记录某次请求和解析结果来自哪个来源快照及处理版本，帮助之后审计或定位影响范围，但不能补足缺失的许可。
 
 5. Web 数据进入训练前要做哪些风险扫描？
    考察点：低质量、重复、PII、密钥、毒性、有害内容、benchmark contamination、版权风险。
@@ -2383,11 +2387,11 @@
 
 6. 如何设计训练数据的质量评分？
    考察点：长度、unique ratio、语言 / 领域、重复率、乱码、boilerplate、PPL、质量分类器。
-   回答框架：先按语言、领域和来源分桶，再融合规则特征、统计特征和模型分数；质量分不能单独决定去留，还要叠加隐私、安全、污染、去重和人工抽检门禁。
+   回答框架：先定义目标任务和人工标签协议，按语言、领域、来源与长度分桶，再用规则、统计特征和模型分数形成排序。质量分类器首先反映样本对特定正例参考集的接近程度，不等于普适真值；要检查排序、分数分布与切片留存。隐私、秘密和安全风险是独立动作门禁，不能被质量分抵消；重复与污染也要单独核验。
 
 7. 数据过滤中的误删和漏删分别是什么？
    考察点：false positive、false negative、人工审计集、阈值校准、覆盖率。
-   回答框架：过滤系统的误删是好数据被删掉，漏删是坏数据进入训练；阈值不能只追求保留率，要在人工审计集上看误删率、漏删率和不同语言 / 领域桶的覆盖损失。
+   回答框架：先声明正类定义。若“合格样本”是正类、“保留”是正预测，则误删为 FN，漏删为 FP。用同一组人工审计记录比较阈值时，分别算 precision、recall、误删率、漏删率和各自分母，再按任务代价解释取舍；低资源或风险切片的代价可不同，硬性隐私/秘密门禁不能用加权分数放行。
 
 8. 为什么困惑度过滤不能用一个全局阈值？
    考察点：语言差异、代码 / 数学 / 专业文本、参考模型偏差、桶内校准。
@@ -2399,15 +2403,15 @@
 
 10. 如何验证清洗过滤真的提升了训练数据？
     考察点：token 保留率、质量分分布、风险命中率、语言 / 领域配比、小模型 ablation、人工审计。
-    回答框架：不能只看删了多少，要比较过滤前后的质量分、重复率、PII / secret / 污染命中率和分桶覆盖；最终用抽样人工审计和小模型预实验确认过滤策略没有牺牲关键能力。
+    回答框架：不能只看删了多少，要比较文档/token 留存率、分桶覆盖、人工误删/漏删、质量分和独立风险信号。固定模型配方、训练 token 预算与评估集，用多个种子比较原数据、规则过滤和质量排序，再测语言、领域、事实、安全与成本；小模型结果只能筛出明显退化，仍需目标模型复验。
 
 11. exact dedup 和 near dedup 的区别是什么？
     考察点：规范化 hash、Jaccard、MinHash、SimHash、转载 / 改写 / 模板差异。
-    回答框架：exact dedup 用规范化文本 hash 找完全重复，便宜且可解释；near dedup 处理轻微改写、转载、镜像、代码 fork 和模板差异，需要 n-gram、MinHash/LSH、SimHash 或 embedding 辅助，并用抽样审计控制误删。
+    回答框架：exact dedup 用带版本的规范化文本 hash 找完全相同载荷；near dedup 用 shingle/Jaccard、MinHash/LSH、SimHash 或 embedding 召回部分重叠与改写候选。先区别候选召回、人工/规则确认和保留策略，再按代码、短文本、语言和来源切片审 false merge 与 missed duplicate；相似度或连通簇本身不是删除授权，文档和 token 留存也要分别报告。
 
 12. MinHash 和 LSH 在大规模去重里分别解决什么问题？
     考察点：shingle 集合、Jaccard 估计、signature、候选召回、避免全量两两比较。
-    回答框架：MinHash 把文档 shingle 集合压成签名，用签名相同率估计 Jaccard；LSH 把相似签名放进候选桶，减少比较量。LSH 只负责召回，最终仍要计算相似度和做保留策略。
+    回答框架：MinHash 的随机排列满足签名最小值相同概率等于 Jaccard，多个分量的相同率给出有方差的估计；LSH 将签名分成 band，让相似对象更可能共享候选桶，从而减少全量两两比较。例：`A={a,b,c,d}`、`B={b,c,d,e}` 的 Jaccard 是 `3/5=0.6`；若四个排列中 3 个最小值相同，估计为 `3/4=0.75`。`b=4,r=2` 时 `s=0.6` 的候选概率约 `1-(1-0.6^2)^4=0.832`，这不是候选为真的概率。精算和人工复核仍决定是否合并。
 
 13. SimHash 和 MinHash 怎么选？
     考察点：汉明距离、网页近重复、Jaccard、短文本、代码 / 多语言、参数审计。
@@ -2415,15 +2419,15 @@
 
 14. benchmark contamination 应该怎么检测？
     考察点：train-eval overlap、题目 / 答案 / 解析、代码签名、near duplicate、embedding 检索、时间切分。
-    回答框架：把评测集题目、选项、答案、解析、函数签名和测试样例作为 query，在训练语料中做 exact、n-gram、MinHash/LSH、embedding 和人工审计；高风险命中要隔离或在评测报告中标注。
+    回答框架：先明确审的是预训练、SFT、RL、数据生成还是评测反馈，再把题目、选项、答案、解析、函数签名和测试样例作为 query，在固定训练快照中做 exact、n-gram、MinHash/LSH、代码/语义候选和人工复核。分开报候选率、确认暴露率、字段、证据级别和覆盖；候选不等于已确认暴露，暴露也不等于已量化分数影响。只有黑盒时，DCQ、似然或置信度探针只能作为间接信号，后训练可能掩盖它们；辅以控制注入、时间后新题和独立复测，不能把未命中写成“无污染”。
 
 15. canary 在数据工程里有什么用？
     考察点：受控合成字符串、记忆风险、出现次数、隐私边界、禁止真实敏感信息。
-    回答框架：canary 是受控探针，用合成罕见字符串评估模型记忆和泄漏风险；它不能使用真实用户隐私或真实凭据，目标是验证去重、隐私过滤和训练策略是否降低复述风险。
+    回答框架：canary 是受控探针，用合成罕见字符串并固定出现次数、上下文、训练版本、提示、解码和查询次数，记录精确/部分复现。比如固定条件下 20 次查询有 3 次精确复现，观测率是 `3/20=0.15`；它只描述这项模型和探针实验，不能外推真实数据总体泄露率。绝不把真实用户隐私或凭证用作 canary。
 
 16. 去重为什么不是越彻底越好？
     考察点：data mixture、常见表达、代码 API、数学题型、多样性、误删。
-    回答框架：去重是在控制不合理重复和记忆风险，不是消灭所有相似内容。过度去重会削弱常见模式、代码 API 用法、数学题型和用户意图多样性，因此要按来源、质量、语言和目标能力做保留或降权。
+    回答框架：去重是在控制重复频率，不是把相似表达清零。过度去重会损失常见模式、API、题型、多语言表述与低频但有价值的样本；2025–2026 年研究还显示，重复使用已过滤语料有时优于更大的单轮语料，频率/长度感知保留也可能优于 keep-one，但都绑定论文数据和 recipe。实际应比较 keep-one、频次上限、降权/重采样，在固定训练预算下报告分布变化、有效 exposure 和目标评测。
 
 17. 什么是 data mixture，为什么它不是简单拼数据？
     考察点：训练分布、隐式目标函数、来源 / 语言 / 领域 / 能力维度、token budget。
@@ -2477,61 +2481,69 @@
     考察点：参考集偏差、质量分语义、domain shift、留存率、多样性、覆盖损失。
     回答框架：分类器分数首先表示样本更像训练用的正例参考集，不代表普适正确性。教育或问答式正例可能提高某些知识测试，却降低代码、口语或低资源域的召回；2026 年 Leverage Score Sampling 预印本在其 Common Crawl 选择设置中报告质量过滤的代码覆盖问题，结论仍受语料、模型和比例限制。工程上应按语言 / 领域报告保留 token 与误删样本，在独立代码和长尾任务上评估，并对多参考集、分桶配额或多样性选择做同预算对照。
 
-30. 温度采样、DoReMi 和 RegMix 分别如何确定数据配比？
-    考察点：数据规模平滑、Group DRO、proxy model、性能预测、重复曝光、实验成本与迁移假设。
-    回答框架：温度采样只根据池大小平滑自然比例，成本低但不读模型反馈；DoReMi 用 reference / proxy 模型的 domain excess loss 做 Group DRO，再把学到的域权重用于大模型；RegMix 训练多个小代理配比并拟合 mixture 到验证损失的回归器，假设配比排序可从小模型迁移到大模型。两者的论文实验用不同数据和评估，不能拿其绝对分数直接横比。真正落地要固定总 token、模型和评测，再用多个种子及目标任务验证 proxy 权重。
+30. 温度采样、DoReMi、RegMix、FastMix 和 SampleMix 分别调整什么？
+    考察点：池级配比、代理损失、函数拟合、在线反馈、样本级权重、重复曝光与迁移边界。
+    回答框架：温度采样按池大小平滑自然比例；DoReMi/GRAPE 从代理模型损失或目标权重求域级权重；RegMix 与 Data Mixing Laws 用不同配比的代理训练拟合配比到验证表现的关系；FastMix 根据留出反馈在线更新权重；SampleMix 对文档级质量与多样性做全局样本选择，不先固定领域比例。它们的优化对象和实验条件不同，不能按论文分数直接排名。项目需固定数据快照、总 token、tokenizer 和评测，用独立验证切片、多种子和目标能力/回归指标重新验收。
 
 28. 如何审计 code / math / domain 三类专项数据是否可进入训练？
-    考察点：类型专属质量分、风险门禁、token 保留率、effective epoch、评估矩阵。
-    回答框架：代码看 license、secret、测试和去重；数学看答案、过程、verifier 和污染；领域看权威性、时效、引用、PII 和专家审计。最后统计分类型保留率、采样权重和训练 / 评估副作用。
+    考察点：类型专属质量分与独立硬门禁、问题覆盖和答案验证、领域记忆风险、训练路径、token 保留率及评估矩阵。
+    回答框架：先按用途固定版本内的类型质量分和阈值，再独立执行授权、secret、PII 与评测污染门禁；高分不能抵消硬门禁失败。代码保留来源/license、解析、测试和运行环境；数学分别审题目覆盖、答案正确、过程完整及错误类别，按切片核验 verifier 的误报/漏报；领域数据检查来源、时效、引用、PII 和专家抽检，并区分知识回忆、模板复述与潜在敏感记录记忆。最后用同预算对照选择继续预训练、SFT、RAG 或工具+独立验证器，统计分类型 token 保留率、重复曝光、目标收益和非目标回归。
 
 29. synthetic data 和 distillation data 有什么区别？
-    考察点：生成来源、teacher-student、规则生成、LLM 生成、训练目标。
-    回答框架：synthetic data 强调数据由规则、程序、模拟器或模型生成；distillation data 强调 teacher 输出被 student 学习。两者可以重叠，例如 teacher 生成的指令回答既是合成数据也是蒸馏数据。
+    考察点：生成来源、teacher-student 关系、规则生成、LLM 生成、训练目标与数据 schema。
+    回答框架：synthetic 描述样本如何产生，distillation 描述 student 学习 teacher 行为信号的关系。规则生成题可以是 synthetic 而非 distillation；teacher 生成并供 student 学习的答案可能同时具备两种属性。记录时分别保留 `origin`、`generator`、`teacher` 和 student objective，避免互斥标签丢失来源和监督关系。
 
 30. Self-Instruct 的核心不是“让模型多生成”，而是什么？
-    考察点：seed task、instruction generation、filtering、dedup、diversity、evaluation。
-    回答框架：Self-Instruct 的关键是自举生成后过滤无效、重复和相似样本，再通过训练评估验证收益。生成数量不是核心，质量控制和任务覆盖才是核心。
+    考察点：seed task、instruction generation、filtering、dedup、diversity、evaluation 与论文边界。
+    回答框架：Self-Instruct 从 seed 指令扩展任务和回答，再过滤无效、重复或相似样本，并在论文设定中验证指令微调收益。它证明一条生成—过滤—训练评估路线可行，不证明生成量越大越好；项目还要检查目标任务覆盖、独立正确性证据、授权和真实 holdout。
 
 31. Evol-Instruct 为什么有用，风险是什么？
-    考察点：复杂指令、约束增加、多步骤任务、伪复杂、约束冲突。
-    回答框架：Evol-Instruct 用改写和演化提高指令复杂度，补普通合成指令偏简单的问题；但复杂不等于高质量，需要检查指令是否可回答、约束是否一致、答案是否满足要求。
+    考察点：复杂指令、约束增加、多步骤任务、伪复杂、约束冲突与答案验证。
+    回答框架：Evol-Instruct 通过改写和演化补充更复杂的指令样本；复杂度本身不是质量标签。应检查指令是否可回答、约束是否一致、答案是否逐项满足约束，并在独立任务切片上确认 student 学到的是能力而非固定模板。
 
 32. 如何建设一个合成数据生成与审计 pipeline？
-    考察点：目标能力、seed、teacher 授权、prompt registry、sampling、验证、去重、污染、安全、配比、ablation。
-    回答框架：先定义要补的能力和 seed 分布，再选择授权 teacher 或规则生成，记录 prompt / sampling 参数；生成后做格式、质量、正确性、安全、PII、污染和去重审计，控制 synthetic ratio，并用小模型 ablation 验证收益和副作用。
+    考察点：目标能力与 seed、授权、generator/teacher 版本、prompt/sampling、任务验证、硬门禁、token 配比、留出集和训练消融。
+    回答框架：先定义要补的能力和 seed 来源，再选获准 teacher、规则、程序或模拟器，并记录版本和参数。生成后按任务验证答案或行为，执行授权、PII、安全、污染和去重硬门禁；质量分与多样性只作可审计软信号，不能抵消硬门禁。按未舍入 token 数计算比例并保留自然数据锚点，用固定 student、tokenizer、预算、recipe 和独立 holdout 做多种子消融；没有跨任务通用比例。
 
 33. 蒸馏数据为什么不能直接当 gold label？
-    考察点：teacher hallucination、teacher bias、授权、验证、student 容量、评估。
-    回答框架：teacher 只是更强或更稳定的生成器，不是真值来源。它的输出要经过正确性验证、授权检查、污染隔离和人工抽检，否则 student 会继承错误、偏差和风格。
+    考察点：teacher hallucination/bias、hard answer 与 soft distribution、授权、独立验证和 student 目标。
+    回答框架：teacher 输出表达的是教师行为，不自动是真值。hard answer 要按数学、代码、事实、工具或安全任务接入独立 verifier；soft distribution 蒸馏的是 teacher 的分布，也仍受 teacher 偏差与覆盖限制。还要审计使用授权、PII、污染和人工抽样，并在独立 holdout 上验证 student 的收益与回归。
 
 34. model collapse 和合成数据有什么关系？
-    考察点：generated data recursion、自然数据锚点、长尾丢失、同质化、比例门禁。
-    回答框架：如果模型生成数据逐代替代自然数据，生成器偏差和错误会被放大，长尾信息会被压缩。防范方法是保留高质量自然数据、控制合成比例、做多样性审计、验证和真实分布评估。
+    考察点：递归替换与累积流程、模型/数据代数、长尾与多样性、自然数据锚点及证据边界。
+    回答框架：要先说明训练工作流。递归地用新一代合成数据替换原数据，在部分研究设定中会造成分布或语言多样性下降；把合成数据与既有数据累积的结果可能不同，仍需看数据维护方式、任务和模型。不能说任何合成数据都导致 collapse，也不能据一项研究保证累积流程无退化。项目应追踪生成代数、来源和重复，保留获准的真实数据/独立 holdout，并跨代评估覆盖、质量、风险与目标能力，而不是套一个通用比例阈值。
 
 35. preference data 和普通 SFT 数据有什么不同？
-    考察点：prompt/chosen/rejected、比较信号、helpful / honest / harmless、reward model、DPO。
-    回答框架：SFT 给单个理想回答，preference data 给多个回答之间的相对偏好。它适合训练 reward model 或 DPO，让模型学会在多个可行回答中选择更符合行为准则的输出。
+    考察点：prompt/chosen/rejected、比较信号、条件偏好分布、reward model、DPO、标签来源。
+    回答框架：SFT 给一个示范，preference data 给同一任务下回答之间的相对比较。比较标签受 rubric、标注群体和任务分布影响，不是所有用户共享的绝对价值函数；reward modeling 和 DPO 常用成对偏好，KTO 可使用单条 desirable/undesirable 反馈，数据 schema 应保留原始标签形态。
 
 36. 如何审计 chosen / rejected 偏好数据质量？
-    考察点：标注一致性、preference margin、rejected 难度、长度偏置、rubric、隐私和污染。
-    回答框架：先检查 prompt 分布和 rubric，再看标注者一致率、chosen/rejected 分差、rejected 是否太弱、chosen 是否更安全真实、是否存在长回答偏置、PII 和 benchmark contamination。
+    考察点：标注分布与分歧原因、preference margin、rejected 难度、长度线索、rubric、隐私和污染。
+    回答框架：先检查 prompt 和 rubric，再分开看明确标签错误与任务欠说明、事实冲突、风格或群体偏好差异；记录 tie/弃判，不把原始一致率当成质量总分。长度异常是筛查信号，需匹配任务和质量复核；PII 与评测污染独立隔离，清洗规则需固定比例、训练配置并在独立 holdout 比较。
 
 37. 安全数据为什么不能只有拒答样本？
-    考察点：over-refusal、boundary allowed、安全可答、误拒修复、helpfulness。
-    回答框架：只有拒答会让模型看到风险关键词就拒绝，损害正常教育、防御和专业科普场景。安全数据要同时包含高风险拒答、边界允许、安全替代建议和误拒修复样本。
+    考察点：over-refusal、意图与可答性、后果严重度、领域、语境、澄清、拒绝和安全转向。
+    回答框架：只有拒答会教出关键词触发的粗粒度策略，伤害正常教育、防御和专业常识任务。应把意图、后果、领域、对话语境和目标动作分开标注，并同时保留可答、澄清、拒绝、安全替代和紧急支持样本；这些类别由版本化策略定义，不是所有应用通用的风险 taxonomy。
 
 38. 如何同时衡量误拒和漏拒？
-    考察点：over-refusal rate、unsafe leak rate、高风险请求、安全请求、双指标门禁。
-    回答框架：在高风险样本上看应拒未拒的漏拒率，在安全可答样本上看误拒率。上线不能只优化拒答率，要同时约束漏拒、误拒、拒答质量和正常帮助能力。
+    考察点：目标动作集合、各自分母、拒绝并转向、澄清动作、空分母。
+    回答框架：在独立测试集上，按策略定义的拒绝动作集合计算应阻止却放行的漏拒率，按目标为正常回答的样本计算误拒率；澄清、支持升级等动作另报逐类混淆。无样本时记 N/A。数据集的目标动作保留率只说明质检后还留下多少标签，不能冒充模型错误率。
 
 39. 红队数据应该如何进入训练数据治理？
-    考察点：failure mode、risk label、安全响应、回归测试、防御性使用、避免传播细节。
-    回答框架：红队发现要转成风险类别、失败模式、安全响应和回归集，用于补安全训练和上线门禁；进入训练时保留必要上下文和安全标签，不传播可操作风险细节。
+    考察点：最小必要上下文、失败模式、目标动作、授权、访问级别、训练/评估隔离、回归。
+    回答框架：红队发现转成风险切片、失败模式、安全目标动作和固定版本的回归记录；训练样本只保留解释和修复行为所需的最少上下文，完整高风险载荷留在受限评估集。记录来源用途、policy/model 版本、访问范围和复测证据，不把红队数据直接当成总体流量分布。
 
 40. LLM judge 能否替代偏好标注？
-    考察点：成本、初筛、偏差、长度偏好、同源模型偏袒、高风险复核。
-    回答框架：LLM judge 可做初筛、辅助解释和低风险批量标注，但不能无审计替代人类。边界样本、高风险、专业领域和关键评测需要人工或专家复核。
+    考察点：位置偏差、同源偏袒、校准样本、人类一致率、弃判与升级、高风险复核。
+    回答框架：LLM judge 可做初筛和排序建议，但要绑定模型、rubric、prompt 与版本；pairwise 候选顺序随机并交换复测，再用独立人评切片校准位置/风格偏差和弃判比例。低置信或高风险样本应升级人工，不能把单个 judge 分数当成偏好真值或安全批准。
+
+40A. 为什么标注分歧不能一律当作噪声？
+    考察点：任务欠说明、事实证据、响应风格、标注群体、tie/弃判、策略裁决。
+    回答框架：分歧可能来自标签错误，也可能说明 prompt 没定义目标、候选在事实或风格上各有取舍，或群体偏好确有差异。先记录分歧原因并复查 rubric；对可由证据判定的错误再纠正，对合理偏好分布则保留或按明确产品规则聚合。安全边界不能只靠多数偏好决定。
+
+40B. 如何验证偏好数据清洗方法？
+    考察点：filter/flip/no-clean、筛选比例、judge 数量、训练目标、跨数据集泛化。
+    回答框架：冻结数据快照、清洗比例、backbone、训练算法和独立评估集，比较不清洗、单/multi-judge 过滤和标签翻转；同时看 win-tie-loss、事实与安全切片，必要时跨模型/数据集复验。论文 benchmark 中有效的清洗策略只是候选，不能直接作为所有任务的生产规则。
 
 41. 多模态数据和纯文本数据治理最大的区别是什么？
     考察点：媒体质量、跨模态对齐、时间戳、隐私、版权、评测污染、任务配比。
@@ -2547,11 +2559,11 @@
 
 44. 语音转录数据应该如何做质量审计？
     考察点：WER / CER、采样率、噪声、VAD、时间戳、多语言、口音、隐私。
-    回答框架：音频侧看清晰度、噪声、采样率和切片，文本侧看转录准确率、WER / CER 和语言覆盖；同时检查 transcript 和音频时间对齐、说话人隐私、评测污染和授权来源。
+    回答框架：音频侧看清晰度、噪声、采样率和切片，文本侧看转录准确率、WER / CER 和语言覆盖；同时检查 transcript 和音频时间对齐、说话人隐私、评测污染和授权来源。EuroSpeech 的论文级长音频对齐与作者报告收益只能说明其语料和协议下的观察，迁移时还要复核目标语言、参考转录和许可。
 
 45. 视频文本数据为什么特别强调 temporal alignment？
     考察点：字幕延迟、片段切分、镜头、事件时间范围、视频标题泛化、版权。
-    回答框架：视频是时间序列，caption 或字幕必须对应具体片段和事件。字幕错位、标题泛化到整段视频或片段切分不当，会让模型把错误画面、声音和文本绑定在一起。
+    回答框架：视频是时间序列，caption 或字幕必须对应具体片段和事件。字幕错位、标题泛化到整段视频或片段切分不当，会让模型把错误画面、声音和文本绑定在一起。Kairos 用长视频细粒度时间标注，HAVEN 联结 frame/shot/video 多层对齐；它们提示数据设计需显式保留粒度，但其 benchmark 不能替代目标视频切片验收。
 
 46. 多模态指令数据如何避免视觉幻觉和无依据回答？
     考察点：grounded answer、证据支持、OCR / 视频证据、unsupported claim、人工抽检。
@@ -4065,9 +4077,9 @@
    考察点：KV/state cache、prefill/decode、并发预算。
    回答框架：1M 是能力或接口上限；显式 KV 仍随 token 增长，混合架构还要加 state、metadata 和 global layer，实际并发受 GPU memory、权重、workspace 和调度约束。
 
-10. 如何评估 Shieldstral 或 risk-calibrated access？
-    考察点：安全分类器、effort/tool 分层、fallback/trusted access。
-    回答框架：按风险、effort、工具权限、多模态输入和 harness 切片测攻击成功率、误拒、越权、fallback 和人工接管；分类器不是权限系统的替代品。
+10. 如何把安全分类器信号与 risk-calibrated access 决策结合评估？
+    考察点：分类器召回/误拒/PSS、主体与资源 scope、PDP/PEP、revision 竞态、授权指标分母。
+    回答框架：先按政策、模态、语言和动作切片检查分类器召回、误拒与校准；同一图像跨政策的配对测试可检查边界适应，但分类器输出只是证据或风险信号，不能授予权限。服务端还要验证主体、grant、资源/动作范围、证据、审批和当前版本，由 PDP 决定、PEP 在执行前及真实副作用边界强制检查。回归集应覆盖撤权、scope 错误、审批后 revision 变化和策略服务故障；分别报告 HighRiskAllowRate 与 UnauthorizedSideEffectRate，空分母记为 N/A。Risk score 是排序启发式；只有事件定义和代表性标签支持校准时，预测分数才可讨论为概率。参见[第八册第十四章](book-08-ai-safety-alignment/chapters/14-shieldstral策略自适应多模态安全分类器.md)与[第十五章](book-08-ai-safety-alignment/chapters/15-risk-calibrated-access.md)。
 
 11. Adaptive Thinking 和固定 thinking level 有什么不同？
     考察点：预算控制器、verifier、无进展检测、p99 成本。
@@ -4082,8 +4094,8 @@
     回答框架：folding 压缩轨迹，workspace 保存文件、diff 和 artifact；摘要必须引用 source/hash，外部副作用要有回执，不能用更长 prompt 替代可验证状态。
 
 14. 安全 fallback 为什么不能只换一个小模型？
-    考察点：权限收缩、状态兼容、幂等、用户告知和审计。
-    回答框架：fallback 是风险控制面，可能切换只读工具、人工审核或拒答；要记录触发原因、权限变化、状态检查、重复副作用和最终结果。
+    考察点：动作状态解析、权限不扩大、有限重试、幂等和状态查询、后端协议兼容、用户状态沟通。
+    回答框架：先查动作账本和外部状态，再分类错误。无副作用且预算未耗尽时才有限重试；状态未知时先查询，已提交的动作不重放；策略拒绝或撤权不能换模型绕过。兼容后端还要保留同一主体、数据区域、scope、schema 和授权版本，或明确收窄到只读/信息路径。分别用安全保持率、真实重复副作用率、正常任务完成率和误解率评估，空分母记 N/A。参见[第八册第十六章](book-08-ai-safety-alignment/chapters/16-fallback-routing与安全降级.md)。
 
 15. p-RoPE、Gated Attention 和 CSA/HCA 分别改变了什么？
     考察点：位置策略、路径门控、压缩注意力、模型卡证据边界。

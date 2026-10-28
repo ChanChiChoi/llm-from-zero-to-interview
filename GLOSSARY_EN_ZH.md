@@ -329,6 +329,12 @@ Answer Verification：答案验证
 
 Process Supervision：过程监督
 
+Problem Coverage：题目覆盖
+
+Solver–Verifier Gap：求解—验证差距
+
+Answer Error Type：答案错误类型
+
 Domain Authority：领域权威性
 
 Recency：时效性
@@ -385,7 +391,13 @@ SimHash：相似哈希
 
 Jaccard Similarity：Jaccard 相似度
 
+Containment Ratio：包含率；重叠 shingles 数除以较小一侧的 shingles 数，可发现短片段被长文包含的候选，但不表示整篇内容可互换。
+
 Hamming Distance：汉明距离
+
+False Merge Rate：错误合并率；人工标签为非重复的 pair 中被系统合并的比例。
+
+Missed Duplicate Rate：漏合并率；人工标签为重复的 pair 中未被系统合并的比例。若只复核检索器已召回的候选，不能代表检索器全库漏检率。
 
 Train-Eval Overlap：训练集与评估集重叠
 
@@ -415,6 +427,10 @@ PALOMA：Perplexity Analysis for Language Model Assessment；多域语言模型�
 
 RegMix：Data Mixture as Regression / 将数据配比优化建模为回归
 
+SampleMix：跨数据域的文档级质量与多样性评分及全局样本选择方法；论文结果绑定其语料和训练配置。
+
+Mixture Scaling Law：数据配比—训练规模—验证表现关系的经验拟合；外推受训练数据、目标损失和预算条件限制。
+
 DataComp-LM / DCLM：DataComp for Language Models / 语言模型数据中心 benchmark
 
 FineWeb-Edu：FineWeb 教育文本子集
@@ -440,6 +456,8 @@ Curriculum Schedule：课程式训练调度 / 阶段式采样计划
 Data Quality：数据质量
 
 Synthetic Data：合成数据
+
+Synthetic Data Lineage：合成数据血缘；记录 seed、generator/teacher、prompt 与 sampling 版本、授权、验证器、过滤决定和训练数据版本的关联信息。
 
 Validation Loss：验证损失
 
@@ -533,11 +551,15 @@ FSDP1：PyTorch wrapper/FlatParameter 路线的早期全分片实现；wrap 边�
 
 FSDP2 / fully_shard：PyTorch per-parameter DTensor 路线；在子模块上自底向上分组，前向/反向 hook 聚齐参数并在之后 reshard，梯度按 shard reduce-scatter。
 
+SPMD Types：TorchTitan 中用于局部计算区域的 SPMD 类型注解与检查；描述 rank 间数据是否相同/变化及反向归约语义。它可与 FSDP2 的 DTensor 持久化分片表示配合；具体支持以目标 PyTorch/TorchTitan 版本为准。
+
 Tensor Parallelism：张量并行
 
 Pipeline Parallelism：流水线并行
 
 Activation Checkpointing：激活检查点 / 激活重计算
+
+Activation Offloading：激活卸载；将反向计算稍后才需要的前向张量移出 GPU HBM（常见去向为 CPU pinned memory），在需要前异步预取；以主机内存和 PCIe/互连带宽换显存，收益取决于拷贝能否被计算覆盖。
 
 All-Reduce：全归约
 
@@ -2445,11 +2467,13 @@ Prompt Registry：提示词登记表 / Prompt 版本登记系统
 
 Teacher Authorization：教师模型输出授权
 
-Synthetic Ratio：合成数据占比
+Synthetic Ratio：合成数据占比；应声明按样本数还是 token 数计量、分母数据版本与保留规则；不能单独预测训练收益或 model collapse。
+
+Residual Risk Rate：残余风险标记率；保留样本中仍带有待复核风险标记的比例，不是发生伤害的概率；分母为空时为 N/A。
 
 Generated Data Recursion：生成数据递归训练
 
-Model Collapse：模型坍缩 / 模型退化
+Model Collapse：模型坍缩 / 模型退化；递归合成训练可能造成分布或多样性退化，证据取决于替换/累积工作流、数据、模型和任务，不能视作所有合成数据的必然结果。
 
 Catastrophic Forgetting：灾难性遗忘
 
@@ -2560,6 +2584,10 @@ Policy Gradient：策略梯度
 Baseline：基线
 
 Preference Data：偏好数据
+
+Preference Disagreement：偏好分歧；不同标注者对同一回答比较给出不同判断，可能源于任务欠说明、事实证据、风格或群体偏好差异，不应自动视为随机标签噪声
+
+Annotation Abstention：标注弃判；标注者因平局、缺少上下文或证据不足而不强行给出胜负标签
 
 Chosen Response：被选择回答 / 偏好回答
 
@@ -2775,6 +2803,10 @@ Unsafe Leak：不安全泄漏 / 漏拒
 
 Safety Data：安全数据
 
+Expected Action Retention Rate：目标动作保留率；数据质检后仍保留的某类目标动作样本数除以质检前该类样本数，不代表模型动作正确率或安全通过率
+
+Target Slice Coverage：目标切片覆盖率；保留数据中出现的预先声明切片数除以目标切片总数，不等于总体分布代表性
+
 Boundary Allowed Data：边界允许数据
 
 Safety Refusal Data：安全拒答数据
@@ -2795,11 +2827,11 @@ Release Gate：发布门禁
 
 Risk Taxonomy：风险分类体系
 
-Misuse Risk：有意滥用风险；按行为者蓄意利用 AI 系统造成伤害的方式分类。
+Misuse Risk：有意滥用风险；行为者蓄意利用 AI 系统能力造成伤害；可与应用权限失效或系统级影响同时出现。
 
-Malfunction Risk：非预期故障风险；按模型或系统非预期行为、可靠性失效所造成的伤害分类。
+Malfunction Risk：非预期故障风险；模型或系统未按预期工作、生成错误或采取意外动作而导致的伤害。
 
-Systemic Risk：系统性风险；由 AI 的广泛部署、相互作用或累积影响产生的风险类别，边界依赖具体评估框架。
+Systemic Risk：系统性风险；由 AI 的广泛部署、相互作用或对社会技术系统的累积影响产生，不等同于单模型单次输出的失败率，边界依赖具体框架。
 
 Unsafe Compliance Rate：不安全服从率 / 漏拒率
 
@@ -2846,6 +2878,18 @@ System Card Completion：系统卡完整度
 Risk Disclosure：风险披露
 
 Responsible Scaling：负责任扩展 / 负责任规模化
+
+OWASP Top 10 for LLM Applications 2026：OWASP 2026 年 LLM 应用十大风险指南；社区维护的开发与安全检查分类，不是目标应用的独立渗透测试或安全认证。
+
+OpenAI Frontier Governance Framework：OpenAI 前沿治理框架；描述该机构如何组织前沿系统的治理承诺，不是通用法律标准或独立安全认证。
+
+Tracked Capability Level / TCL：跟踪能力等级；Google DeepMind Frontier Safety Framework 用于跟踪特定前沿能力风险的分类与评估概念，需按框架版本和定义解读。
+
+GPAI Code of Practice：通用人工智能模型行为准则；欧盟 AI Act 下可供相关提供者自愿采用的合规工具，含模型文档表格；它与法规本身及其强制义务具有不同法律地位。
+
+Model Documentation Form：模型文档表格；GPAI Code of Practice 透明度章节提供的模型资料整理格式，不代表填报内容已被独立验证。
+
+EU AI Act Article 50 Transparency Obligations：欧盟 AI Act 第 50 条透明义务；对特定 AI 系统及生成内容标记规定透明要求，须结合角色、系统类型和适用时间判断。
 
 Release Decision Record：发布决策记录
 
@@ -3800,6 +3844,16 @@ Weak Multimodal Question：多模态薄弱题
 Multimodal Revision Plan：多模态复习修正计划
 
 Temporal Alignment：时间对齐 / 时序对齐
+
+Audio Boundary Error：音频边界误差；预测词段或说话轮次边界与参考边界的时间差，必须注明边界单位、时间单位、样本分母和尾部统计
+
+Video Event Alignment Error：视频事件对齐误差；字幕、caption 或事件描述时间戳与参考事件区间的偏差，平均误差不能代替超阈值比例或事件召回
+
+Frame Sampling Rate：帧采样率；视频处理阶段每秒选取的帧数，需与原始帧率、片段端点规则、时间戳和关键事件召回一起说明
+
+Hierarchical Temporal Annotation：分层时间标注；在 frame、shot、clip/video 等粒度绑定文本或事件的标注结构，粒度必须对应任务和评估协议
+
+Multimodal Token Retention：多模态 token 保留率；质量处理后保留的 token 数除以处理前 token 数，必须与按样本数计算的保留率区分
 
 Video Caption：视频描述文本
 
@@ -8521,6 +8575,8 @@ Odds Ratio Preference Optimization / ORPO：优势比偏好优化；把 SFT toke
 
 Group Relative Policy Optimization / GRPO：组相对策略优化；同一 prompt 采样多条 response，以组内 reward 构造相对 advantage，通常省去独立 critic；reward 同组时常见标准化会得到零信号。
 
+Group-in-Group Policy Optimization / GiGPO：组中组策略优化；在 episode-level 轨迹组 advantage 上，进一步按多条已采样轨迹中的重复 environment state 建 step-level action group，用局部折扣回报比较同状态动作；依赖相同任务/初始状态和可比较的状态标识。
+
 Decoupled Clip and Dynamic Sampling Policy Optimization / DAPO：解耦裁剪与动态采样策略优化；一套 reasoning RL recipe，组合 Clip-Higher、dynamic sampling、token-level loss 与 overlong 处理；论文收益不能拆成某一组件的独立效果。
 
 DrGRPO：Get GRPO Done Right；针对 response-length 与 group-standard-deviation normalization 的 policy-gradient weighting 问题，使用固定 generation budget 分母和未除标准差的中心化 reward；其“unbiased”结论依赖论文推导与采样条件。
@@ -8617,9 +8673,21 @@ Programmatic Tool Calling：程序化工具调用；把确定性工具链、批�
 
 Multi-Agent Test-Time Compute：多 Agent 推理时计算；用多个 Agent 或 worker 并行探索、执行和验证，再聚合结果的高预算推理形态。
 
-Risk-Calibrated Access：风险校准访问；按用户、任务、数据敏感度、工具风险和模型能力分层开放模型或 Agent 能力。
+Risk-Calibrated Access：风险校准访问；服务端依据主体、资源、动作与范围、风险、证据、授权状态和版本，在有边界与时效的条件下决定是否允许、复核或拒绝动作。模型置信度或推理强度不能自行授予权限。
 
-Fallback Routing：回退路由；当风险、置信度、权限、成本或系统状态不满足要求时，将请求切换到更保守模型、只读模式、人工审核、拒答或降级流程。
+Policy Decision Point (PDP)：策略决策点；根据可信主体、动作、资源和上下文评估策略并返回授权决定的组件。
+
+Policy Enforcement Point (PEP)：策略执行点；在资源或工具前强制执行授权决定，并核对范围、时效、参数和当前状态的组件。
+
+AuthZEN Authorization API：AuthZEN 授权 API；用于策略执行点与策略决策点交换授权请求和决定的互操作接口，不定义组织内部的策略语言或授权规则。
+
+DPoP (Demonstrating Proof of Possession)：持有证明；OAuth 发送方约束机制之一，用密钥持有证明降低访问令牌被盗后的重放风险，本身不授予业务权限。
+
+Fallback Routing：回退路由；先读取动作状态并分类失败，再在原授权约束内选择有限重试、兼容后端、只读/人工路径或拒绝。权限拒绝不能通过换模型绕过；外部动作状态未知时先查询，不能盲目重放。
+
+Safety Preservation Rate：安全约束保持率；在主路径限制或拒绝的样本中，fallback 仍遵守原约束的比例；分母为空时记为 N/A。
+
+Duplicate Side-Effect Rate：重复副作用率；因 fallback 导致的重复外部提交数除以可能产生副作用的 fallback 任务数，依据执行器/外部状态计算，不按模型调用次数替代；分母为空时记为 N/A。
 
 Skill / MCP Lifecycle：Skill / MCP 生命周期；用于判断 Skill、MCP、Connector、Plugin、Workflow 等生态技术是处于新兴、抢占生态位、标准化、被模型能力吸收，还是过渡/退潮阶段。
 
@@ -8627,7 +8695,9 @@ MetaP：Meta 在 Llama 4 发布中提到的训练稳定性相关技术信号；�
 
 iRoPE：Meta 在 Llama 4 发布中提到的 RoPE 相关位置编码信号；在本项目中作为超长上下文和位置编码观察项处理。
 
-GOAT：Meta 在 Llama 4 发布中提到的自动化对抗评估信号；在本项目中作为自动 red teaming / safety eval 观察项处理。
+GOAT（Generative Offensive Agent Tester）：Pavlova 等人在 ICML 2025 发表的多轮自适应红队方法；攻击模型根据目标模型的回复调整下一轮策略。论文指标绑定其 JailbreakBench、对话预算与 Judge 配置，不是自动红队的统一标准。
+
+REDAgentBench：面向工具型 Agent 的可执行红队评估预印本；用隔离服务回执和最终状态差异核验副作用，并研究 harness、证据视图和 Judge 规则对结果的影响。数据与结论绑定论文中的模拟服务、模型配置和判定协议。
 
 Specialized Frontier Eval Cluster：前沿专业评估簇；面向 cyber、bio、terminal agent、automation agent、long-running coding agent 等高价值或高风险切片的新 benchmark 集合。
 
@@ -8718,6 +8788,7 @@ Claim Ledger：命题账本；把复合说法拆成最小 claim，为每条记�
 Evaluation Card：评测卡；把一次模型评测的模型元数据、benchmark 元数据、运行配置和结果组织成可解释记录，帮助追溯复现性、文档完整度、来源风险和分数可比性；它不独立验证底层分数或模型声明为真。
 
 Policy-Adaptive Safety Classifier：策略自适应安全分类器；把自然语言安全策略映射为安全分，不能替代权限、沙箱和治理。
+Policy Shift Score (PSS)：政策翻转分；按同一图像和风险类别配对政策相反的样本，只有模型在两种政策下都预测正确才算该翻转对通过；用于观察策略边界遵循，不能替代分类、校准和端到端动作评估。
 
 Gated Attention：门控显式注意力；用 token、通道或层级 gate 控制显式 attention 路径与递归/局部路径的组合，具体参数化依模型而定。
 
@@ -9692,3 +9763,27 @@ ToolSandbox Milestone / Minefield：ToolSandbox 中的过程事件标记；miles
 METR Time Horizon：METR 任务时间跨度指标；依据低上下文专家完成人类任务的时间刻画任务难度，再拟合 Agent 成功率曲线。它不是 Agent 可自主运行的真实持续时长，也不是通用生产能力保证。
 
 Executable-contract Audit：可执行合同审计；将工具文档/schema 中的前置条件与状态效果对照实现、运行环境和 grader 实际读取字段的检查方法。发现潜在可触达缺陷不等同于 Agent 已触发该缺陷或榜单结果已被改变。
+
+## 2026-10 AI Control 与运行时监督
+
+AI Control：AI 控制；研究在模型行为不可靠、受到攻击或被假设会规避监督时，如何通过监控、可信替换、人工审核、权限与执行边界限制部署后果。它是一种评测和控制框架，不是模型意图判断或安全保证。
+
+Untrusted Model / U：不可信执行模型；控制评测中不把模型善意当作保护层的压力测试对象。符号 U 表示威胁假设，不证明具体模型有欺骗意图。
+
+Trusted Model / T：可信监督模型；AI Control 设定中被假定不会故意造成伤害的监督或替代模型。可信标签不替代具体版本、任务范围、工具权限和评测证据。
+
+AI Control Protocol：AI 控制协议；规定执行模型提出候选动作后，监控器、可信模型、人工审核、授权服务和执行器分别如何观察、升级、替换、批准或停止动作的流程。
+
+Defer-to-Trusted：转交可信模型；可疑候选不直接提交，由可信模型产生替代动作；替代动作仍须经过权限和执行器门禁。
+
+Defer-to-Resample：转交重采样；发现可疑候选后让同一执行模型继续生成候选，并可能按监控分数选择一个提交。若选择最低可疑分候选，可能形成 best-of-N 规避风险。
+
+Resample-then-Defer：重采样后转交；额外候选用于收集攻击线索，但最终动作交给可信模型生成，不能与直接提交低可疑分候选的协议混称。
+
+Defer-on-Critical：关键动作转交；即便监控器没有报告可疑，对不可逆或高影响动作也要求可信方重新生成、人工批准或执行器二次授权。
+
+Monitor Red Teaming：监控器红队评估；让攻击方知道或逐步推断监控器、协议和阈值，专门寻找 monitor-targeted prompt injection、轨迹拆分及监督盲点，并在冻结协议后用独立样本复测。
+
+Safety–Usefulness Pareto Frontier：安全性—效用 Pareto 前沿；比较控制协议的安全与正常任务效用，若另一协议两项都不低且至少一项更高，则被支配。成本、延迟和人工容量仍应单独记录。
+
+AI Control Safety Case：AI 控制安全论证；把具体部署安全主张连接到红队能力、控制效果、环境迁移假设、剩余风险、止损与重新评估证据的结构化说明；示例框架不是认证标准。

@@ -60,6 +60,8 @@ u_2E=E_{2,:}
 
 下面用一个小矩阵验证两种写法的结果一致：
 
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+
 ```python
 import torch
 from torch import nn
@@ -80,7 +82,6 @@ print("lookup_shape=", tuple(lookup.shape))
 print("one_hot_shape=", tuple(one_hot.shape))
 print("outputs_close=", torch.allclose(lookup, matmul))
 ```
-
 输出的关键不变量是：
 
 ```text
@@ -109,6 +110,8 @@ N_{\mathrm{token}}=100000\times4096=409{,}600{,}000
 
 下面观察哪些行收到梯度：
 
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+
 ```python
 import torch
 from torch import nn
@@ -124,7 +127,6 @@ used_rows = [i for i, value in enumerate(row_norms) if value > 0]
 print("used_rows=", used_rows)
 print("unused_row_0_norm=", round(row_norms[0].item(), 6))
 ```
-
 在没有额外正则项、且只计算这一个 batch 损失时，used_rows 应包含 1、4、7，未出现的行没有这次损失的直接梯度。若使用权重衰减、共享输出头或其他正则项，未出现行仍可能被更新；“未被索引访问”和“最终参数绝对不变”是两个不同命题。
 
 ### 2.1.4 padding_idx、attention mask 和 loss mask
@@ -138,6 +140,8 @@ print("unused_row_0_norm=", round(row_norms[0].item(), 6))
 
 如果 0 是 padding token，可以写：
 
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+
 ```python
 from torch import nn
 
@@ -149,7 +153,6 @@ token_embedding = nn.Embedding(
     padding_idx=0,
 )
 ```
-
 padding_idx 作用在 embedding 参数这一层：该行在常规反向传播中不累积梯度，并通常被初始化为零。它不负责修改 attention 的可见性，也不负责改变 labels。三个机制的职责如下：
 
 | 机制 | 解决的问题 | 作用位置 |
@@ -186,6 +189,8 @@ P\in\mathbb{R}^{T_{\max}\times D}
 它有 \(T_{\max}D\) 个位置参数，超过 \(T_{\max}\) 时不能直接索引。position_offset 可以让增量推理从历史长度开始取位置，但不能突破位置表的最大长度。
 
 ### 2.1.6 Learned positional embedding 的实现
+
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
 
 ```python
 import torch
@@ -238,7 +243,6 @@ print("hidden_shape=", tuple(hidden.shape))
 print("offset_hidden_shape=", tuple(offset_hidden.shape))
 print("position_table_shape=", tuple(module.position.weight.shape))
 ```
-
 输出形状为：
 
 ```text
@@ -262,6 +266,8 @@ PE_{p,2i+1}=\cos\left(\frac{p}{10000^{2i/D}}\right)
 ```
 
 它可以在运行时计算更长的位置，但“可计算”不等于“模型在更长位置上保持同样质量”。频率范围、训练长度、数值精度和任务分布都会影响外推。
+
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
 
 ```python
 import math
@@ -293,7 +299,6 @@ encoding = sinusoidal_position_encoding(seq_len=4, d_model=8)
 print("encoding_shape=", tuple(encoding.shape))
 print("position_zero=", encoding[0].tolist())
 ```
-
 位置 0 的偶数维为 0，奇数维为 1，这是由该公式直接得到的，不是训练结果。固定 encoding 与 token states 相加后，整体 shape 仍是 \([B,T,D]\)。
 
 ### 2.1.8 输出头与 token embedding 权重共享
@@ -312,6 +317,8 @@ W_{\mathrm{out}}=E^\top
 
 这样输入 embedding 和输出分类空间使用同一组参数，减少一份 \(VD\) 参数，并施加一种表示空间约束。它不是 nn.Embedding 的默认行为；共享时必须让两个计算路径真正引用同一个 Parameter，而不是复制数值后各自注册。
 
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+
 ```python
 import torch
 from torch import nn
@@ -326,7 +333,6 @@ logits = hidden @ embedding.weight.transpose(0, 1) + output_bias
 print("logits_shape=", tuple(logits.shape))
 print("tied_parameter_count=", embedding.weight.numel() + output_bias.numel())
 ```
-
 共享输入输出权重会让输入侧和输出侧梯度相加到同一个参数上；这也是它与“初始化相同的两份矩阵”在训练语义上的区别。是否共享取决于模型架构和 tokenizer 设计，不能由参数量估算反推。
 
 ### 2.1.9 左右 padding 与增量位置
@@ -358,6 +364,8 @@ padding:    [0, 0, 12, 35, 98, 77]
 ### 2.1.10 Embedding 输入的最小审计
 
 对输入模块，最有价值的检查不是只看程序是否返回一个 Tensor，而是检查以下不变量：
+
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
 
 ```python
 import torch
@@ -404,7 +412,6 @@ assert module.token.weight.grad[0].abs().sum().item() == 0.0
 assert module.position.weight.grad is not None
 print("embedding_contract_ok=True")
 ```
-
 ```text
 embedding_contract_ok=True
 ```
@@ -479,6 +486,8 @@ O_{b,a,:}=\sum_{c=1}^{T_k}A_{b,a,c}V_{b,c,:}
 
 下面的实现把布尔 mask 定义为 keep mask：True 表示允许 query 读取该 key，False 表示屏蔽。函数只处理 shape 可广播到 scores 的 mask；它不替调用者验证 query 是否至少有一个可见 key。
 
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+
 ```python
 import math
 import torch
@@ -519,7 +528,6 @@ assert torch.allclose(
 print("output_shape=", tuple(output.shape))
 print("weights_shape=", tuple(weights.shape))
 ```
-
 这个例子只使用 self-attention 的 \(T_q=T_k=4\)，但函数本身也支持 \(T_q\ne T_k\)。注意 torch.softmax 的最后一维是 key 维；如果在 query 维归一化，权重就不再表示“一个 query 如何分配对各 key 的注意力”。
 
 ### 2.2.4 mask 应在 softmax 前应用
@@ -539,6 +547,8 @@ A_{b,a,c}\approx0\quad (M_{b,a,c}=0)
 PyTorch 提供 torch.nn.functional.scaled_dot_product_attention。它可能选择普通、memory-efficient 或 Flash 风格的后端，具体 kernel 取决于设备、dtype、输入形状和版本。数学目标仍是缩放点积注意力，但中间张量是否显式物化不能从 API 名字推断。
 
 布尔 mask 的语义必须核对目标接口：SDPA 的布尔 attn_mask 中 True 表示参与 attention，False 表示屏蔽；float mask 则作为 additive bias 加到 attention score 上。手写函数若采用同样的 keep 语义，可以做数值对照：
+
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
 
 ```python
 import math
@@ -581,7 +591,6 @@ print("manual_matches_official=", torch.allclose(
     manual, official, atol=1e-6
 ))
 ```
-
 这段代码把对照所需的手写函数一并放入围栏，因此可以单独复制运行。两种实现都使用相同的 keep-mask 语义；差异只应来自数值误差和 PyTorch 选择的 attention kernel。
 
 ## 2.3 Multi-Head Attention：把一个相似度空间拆成多个子空间
@@ -640,6 +649,8 @@ D=H d_h
 transpose 通常只改变 stride，不保证新视图在物理内存中连续。合并前调用 contiguous 再 view，或者直接使用 reshape，是为了明确处理这一点。
 
 ### 2.3.3 一个可读的 MultiHeadAttention 实现
+
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
 
 ```python
 import math
@@ -729,7 +740,6 @@ print("output_shape=", tuple(output.shape))
 print("weights_shape=", tuple(weights.shape))
 print("row_sum_shape=", tuple(weights.sum(dim=-1).shape))
 ```
-
 输出形状为：
 
 ```text
@@ -787,6 +797,8 @@ O(BTD^2)
 ### 2.3.6 针对实现的局部测试
 
 下面的测试包含一个紧凑的 `MultiHeadAttention` 实现，因此可以独立运行。它保留 2.3.3 的 shape、keep-mask 和输出契约，省略 dropout 以便测试结果确定。
+
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
 
 ```python
 import math
@@ -854,7 +866,6 @@ assert torch.allclose(
 assert weights.masked_select(future).abs().max().item() < 1e-6
 print("mha_contract_ok=True")
 ```
-
 这个测试没有证明模型训练有效，但能把 shape、归一化、因果方向和输出接口四个问题从端到端 loss 中隔离出来。若某一项失败，先修复局部契约，再讨论模型质量。
 
 ## 2.4 Attention Mask：把可见性写成明确的协议
@@ -902,6 +913,8 @@ M^{\mathrm{causal}}_{i,j}\land M^{\mathrm{pad}}_{b,j}
 
 只要广播规则成立，mask 不必物理复制到每个 batch 和 head。过早 expand 可能制造很大的逻辑视图或中间张量；优先保留最小广播形状，交给 kernel 处理。
 
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+
 ```python
 import torch
 
@@ -933,7 +946,6 @@ print("padding_shape=", tuple(padding.shape))
 print("combined_shape=", tuple(combined.shape))
 print("masked_shape=", tuple(masked_scores.shape))
 ```
-
 输出的 shape 依次是 \([2,4,5,5]\)、\([1,1,5,5]\)、\([2,1,1,5]\)、\([2,1,5,5]\)、\([2,4,5,5]\)。
 
 ### 2.4.3 keep mask、block mask 和 additive mask
@@ -962,6 +974,8 @@ PyTorch 的不同 attention 接口并不自动共享布尔 mask 约定：
 
 因此，一个 keep causal mask：
 
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+
 ```python
 import torch
 
@@ -972,12 +986,13 @@ block_causal = ~keep_causal
 print("keep_true_count=", int(keep_causal.sum()))
 print("block_true_count=", int(block_causal.sum()))
 ```
-
 传给官方模块前还要核对 dtype、device 和 batch/head 广播规则。尤其不要因为两个接口都叫 attn_mask，就默认 True 的语义一致。
 
 ### 2.4.5 全 mask 行是一个独立异常状态
 
 如果某个 query 的所有 key 都被屏蔽，softmax 没有合法的概率分布。可能的结果包括 NaN、全零或由特定 kernel 产生的其他边界值。常见原因是 padding 与 causal mask 组合错误、首个有效 query 被屏蔽、key length 为零，或外部过滤器把所有候选都删掉。
+
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
 
 ```python
 import torch
@@ -993,10 +1008,11 @@ visible_count = keep_mask.sum(dim=-1)
 bad_rows = visible_count == 0
 print("bad_rows=", bad_rows.tolist())
 ```
-
 系统应先决定空候选的语义：跳过该 query、返回显式错误、使用安全 sentinel key，还是让上层重新规划。把全 mask 行默默交给 softmax，会把数据错误变成 NaN，增加归因难度。
 
 ### 2.4.6 在 softmax 前应用 mask 的完整函数
+
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
 
 ```python
 import torch
@@ -1030,7 +1046,6 @@ weights = torch.softmax(masked, dim=-1)
 print("masked_shape=", tuple(masked.shape))
 print("row_sums=", weights.sum(dim=-1).tolist())
 ```
-
 这里显式广播后再检查每个 query 是否有可见 key，因此既支持
 `[1,1,T_q,T_k]` 的 causal mask，也支持 `[B,1,1,T_k]` 的 padding-key mask。
 这个检查只确认每个 query 有一个 key；它不确认该 key 是语义上正确的 key。mask 的正确性仍需用确定性样例验证。
@@ -1125,6 +1140,8 @@ LayerNorm 通常沿最后一个 hidden 维度归一化。对一个 token 向量 
 
 ### 2.5.5 一个 Pre-LN decoder block
 
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+
 ```python
 import math
 import torch
@@ -1218,7 +1235,6 @@ assert weights.shape == (2, 4, 5, 5)
 print("block_output_shape=", tuple(y.shape))
 print("block_weights_shape=", tuple(weights.shape))
 ```
-
 这个 block 尚未包含 RoPE、KV Cache 或 RMSNorm；组合新组件时要逐层替换，并保留这些 shape 断言。由于它用于 decoder，调用时必须传入因果 keep mask（并按需与 padding mask 组合）；省略 mask 会让未来位置可见，因此实现会明确报错。
 
 ### 2.5.6 残差连接的梯度路径
@@ -1349,6 +1365,8 @@ R_p^\top R_q=R_{q-p}
 
 ### 2.6.4 cos/sin cache 与 offset
 
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+
 ```python
 import torch
 from torch import nn
@@ -1399,12 +1417,13 @@ cos, sin = rope(seq_len=6, offset=4, dtype=torch.float32)
 print("cos_shape=", tuple(cos.shape))
 print("sin_shape=", tuple(sin.shape))
 ```
-
 register_buffer 让缓存随模块迁移到设备，但不把它们当作可训练 Parameter。persistent=False 表示它们不进入 state_dict；恢复模型时需要用同样配置重新构造。是否采用 persistent=False 是 checkpoint 设计选择，不能据此断言所有实现都一样。
 
 ### 2.6.5 应用到 q 和 k，不应用到 v
 
 假设 q、k 形状为 \([B,H,T,d_h]\)，cos、sin 为 \([T,d_h/2]\)。先把缓存扩成 \([1,1,T,d_h/2]\)，再对偶奇维旋转：
+
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
 
 ```python
 import torch
@@ -1438,12 +1457,13 @@ rotated = apply_rope(q, cos, sin)
 assert torch.equal(rotated, q)
 print("rotated_shape=", tuple(rotated.shape))
 ```
-
 在 sin 为 0、cos 为 1 的特例下，输出应与输入完全相同；这是一个简单但有价值的实现测试。RoPE 作用在 q、k，是因为位置要改变 query-key 匹配；v 表示被汇聚的内容，通常不做同样的旋转。具体架构若旋转 v，必须以该架构的定义为准，不能把常见实现写成数学必然性。
 
 ### 2.6.6 把 RoPE 接入 attention
 
 下面的示例把 `RotaryEmbedding` 和 `apply_rope` 的最小定义一并放入围栏，可以单独运行。生产实现还应根据目标模型的旋转布局、缓存策略和 dtype 约定补充更严格的接口检查。
+
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
 
 ```python
 import math
@@ -1573,7 +1593,6 @@ assert weights.shape == (2, 4, 6, 6)
 print("output_shape=", tuple(output.shape))
 print("weights_shape=", tuple(weights.shape))
 ```
-
 增量推理时，若 KV Cache 已包含 past_len 个位置，新 q/k 的 position_offset 应从 past_len 开始。offset 只改变 cos/sin 的切片，不改变 q/k 的局部 shape；同时 attention mask 的 key length 也要与“历史缓存加新 token”的长度一致。只给 RoPE 传 offset、却仍用长度为 1 的局部 mask，是另一个独立的 shape 错误。
 
 ### 2.6.7 位置布局和工程边界
@@ -1615,6 +1634,8 @@ w_j\frac{x_j}{r(x)}
 
 归一化的平方、求均值和开方容易受到低精度舍入影响。常见工程实现先用 FP32 计算平方均值，再把结果转换回输入 dtype：
 
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+
 ```python
 import torch
 from torch import nn
@@ -1643,7 +1664,6 @@ rms = torch.sqrt(y[0, 0].pow(2).mean())
 print("output_shape=", tuple(y.shape))
 print("first_token_rms=", round(rms.item(), 5))
 ```
-
 如果 weight 初始为 1 且 eps 很小，输出 token 的 RMS 会接近 1；它不保证 token 的均值接近 0，这正是它与 LayerNorm 的一个可观察差别。
 
 ### 2.7.3 SwiGLU 的门控结构
@@ -1702,6 +1722,8 @@ H_{\mathrm{ff}}\approx\frac{8D}{3}
 
 ### 2.7.5 SwiGLU 实现
 
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+
 ```python
 import torch
 import torch.nn.functional as F
@@ -1738,7 +1760,6 @@ print("hidden_dim=", hidden_dim)
 print("output_shape=", tuple(y.shape))
 print("parameter_count=", sum(p.numel() for p in mlp.parameters()))
 ```
-
 输入输出都保持 \([B,T,D]\)。当 \(D=12\)、multiple_of=8 时，向上取整后的 hidden_dim 是 32；不带 bias 的参数量是 \(3\times12\times32=1152\)。
 
 ### 2.7.6 现代 decoder block 的组合
@@ -1754,6 +1775,8 @@ Z=Y+\mathrm{SwiGLU}(\mathrm{RMSNorm}(Y))
 ```
 
 下面组合前面三个组件。为便于读者复制验证，围栏中包含这四个组件的最小实现；它们沿用前文已经解释过的公式，但示例不依赖前文代码块的执行状态：
+
+> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
 
 ```python
 import math
@@ -1917,7 +1940,6 @@ print("block_shape=", tuple(y.shape))
 print("weights_shape=", tuple(weights.shape))
 print("ffn_hidden_dim=", block.hidden_dim)
 ```
-
 这个 block 仍然缺少完整模型的 token embedding、输出头、KV Cache 和训练 loss；它是结构实验，不应被称为一个可直接部署的语言模型。
 
 ### 2.7.7 组件级证据和整机级结论

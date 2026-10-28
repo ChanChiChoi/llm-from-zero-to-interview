@@ -12,13 +12,22 @@
 
 data mixture 不是若干文件的简单拼接，而是把数据池、采样概率、训练顺序和重复次数连成一个分布。数据先经过清洗、去重和污染隔离，再根据来源、语言、领域、质量、风险和能力标签进入采样器。采样器最终决定优化器在不同数据上的更新频率。
 
-可以把这条链路写成：
+可以把配比设计看作一条带反馈的决策链：
 
-~~~text
-数据池 -> 清洗去重后的 token -> 质量/风险/能力标签 -> 采样概率 -> 训练预算 -> 评估矩阵 -> ablation -> 版本记录
-~~~
+```mermaid
+flowchart TD
+    A["能力目标、约束与训练预算"] --> B["建立清洗和去重后的数据池"]
+    B --> C["选择池级权重、样本策略与顺序"]
+    C --> D["计算计划 token 和重复暴露"]
+    D --> E["训练并记录实际采样计数"]
+    E --> F["评估目标能力、回归与风险"]
+    F --> G["写入版本化 mixture 决策"]
+    G -.->|根据证据调整| C
+```
 
-本章会分别讨论通用文本、代码、数学、多语言、专业领域和合成数据的角色，也会解释静态与动态配比、温度采样、effective epoch、能力覆盖、风险约束和配比实验。Chinchilla、T5/mT5、Gopher、RefinedWeb、FineWeb、Dolma、DataComp-LM、Llama 系列公开报告以及 phi-1 提供了不同层面的证据，但这些资料不能被拼成一个适用于所有模型的固定比例。真实配比还受模型目标、tokenizer、许可证、安全约束、训练预算和评估方法共同限制。
+图中应区分配置权重和训练日志中的实际计数：采样器会受文档长度、打包、过滤和分布式 worker 影响。第五章负责把已经筛选的数据池转成可审计的训练分布；质量阈值和去重见[第三章](03-清洗过滤与质量评分.md)与[第四章](04-去重与污染检测.md)，代码、数学和领域样本的专属契约见[第六章](06-code-math-domain-data.md)，生成数据、偏好/安全数据和多模态数据分别见[第七章](07-synthetic-data与distillation-data.md)、[第八章](08-preference-data与安全数据.md)和[第九章](09-多模态语音视频数据.md)。
+
+本章讨论通用文本、代码、数学、多语言、专业领域和合成数据如何进入 mixture，也解释池级权重、样本级选择、训练顺序、重复暴露和实验方法。Chinchilla、T5/mT5、Gopher、FineWeb、Dolma、DataComp-LM、Llama 系列公开报告以及 phi-1 提供了不同层面的背景，但它们不能拼成一个适用于所有模型的固定比例。真实配比还受模型目标、tokenizer、许可证、安全约束、训练预算和评估方法共同限制。
 
 ---
 
@@ -69,6 +78,8 @@ data mixture 不只是“网页占多少”。它至少包含以下维度：
 
 同一份数据在不同维度上可能有不同标签。例如一份 Python 教程同时属于代码、英文、教育、技术文档、高质量结构化文本。配比系统最好支持多标签，而不是把数据硬塞进一个单一类别。
 
+工程上还要把三种控制分开。**池级配比** `p_k` 决定每个来源或领域拿到多少 token 预算；**样本级选择**决定一个池内哪些文档更容易进入训练，或是否跨池按样本全局抽样；**训练顺序/调度**决定这些样本在何时、以什么阶段权重出现。相同的 `p_k` 可以对应不同的样本集合和训练轨迹，不能把它们都称为“比例”。最终应同时记录计划权重和训练日志里的实际 token 暴露。
+
 ---
 
 ## 4. 为什么配比会影响能力？
@@ -85,39 +96,39 @@ data mixture 不只是“网页占多少”。它至少包含以下维度：
 
 ### 4.1 关键公式与审计指标
 
-设清洗、去重和污染隔离后的数据池集合为：
+设清洗、去重并完成所需污染隔离后的数据池集合为：
 
 ~~~math
 P = {P_1, P_2, ..., P_K}
 ~~~
 
-每个数据池 `P_k` 有 token 数 `n_k`、质量分 `q_k`、风险分 `r_k` 和能力标签向量：
+每个数据池 `P_k` 有正的有效 token 数 `n_k`、质量代理分 `q_k`、风险代理分 `r_k` 和能力覆盖代理向量：
 
 ~~~math
 a_k = (a_k_general, a_k_code, a_k_math, a_k_multi, a_k_safety)
 ~~~
 
-最简单的自然配比是按清洗后 token 数采样：
+最简单的自然配比是按目标 tokenizer 计算的清洗后 token 数采样：
 
 ~~~math
 p_k_nat = n_k / sum_j(n_j)
 ~~~
 
-多语言和多领域常用平滑采样。用 `0 <= alpha <= 1` 表示平滑强度，可以写成：
+多语言和多领域常用平滑采样。用 `0 <= alpha <= 1` 表示幂次平滑，可以写成：
 
 ~~~math
 p_k(alpha) = n_k^alpha / sum_j(n_j^alpha)
 ~~~
 
-其中 `alpha=1` 接近自然规模采样，`alpha=0` 接近均匀采样。不同系统也会把 `alpha` 表示成温度的倒数；无论记号如何变化，核心都是降低大池的支配程度、提高小池被看见的机会。
+其中 `alpha=1` 是自然规模采样，`alpha=0` 对所有非空池给出均匀权重。不同系统对 temperature 的定义可能相反；比较配置时要记录完整公式和最终概率，不能只比较名为 temperature 的参数。
 
-如果还要考虑质量、目标能力和风险，可以定义目标能力权重 `v_m`，数据池效用为：
+如果还要考虑质量、目标能力和风险，可以定义目标能力权重 `v_m`，数据池的能力覆盖代理效用为：
 
 ~~~math
 u_k = sum_m(v_m * a_km)
 ~~~
 
-一个可解释的采样分数可以写成：
+下面的可解释采样分数只是教学用的启发式；`q_k`、`r_k` 和能力覆盖代理需要先固定量纲与标注口径，它不是普遍最优算法：
 
 ~~~math
 s_k = n_k^alpha * exp(beta*q_k + gamma*u_k - lambda*r_k)
@@ -135,13 +146,15 @@ p_k = s_k / sum_j(s_j)
 b_k = B * p_k
 ~~~
 
-effective epoch 用于衡量小数据池被重复使用的程度：
+effective epoch（有效训练轮数）用于估计小数据池被重复使用的程度：
 
 ~~~math
 e_k = b_k / n_k
 ~~~
 
-如果 `e_k` 过高，说明该数据池被重复上采样，可能带来记忆、过拟合或污染风险。
+这里的 `e_k` 是计划 token 暴露量除以去重后池大小，允许是小数；它不是样本级训练次数的精确日志。若 `e_k` 较高，应继续查实际重复、样本多样性、相邻池重叠和目标评估，不应套一个跨任务通用的最大 epoch。
+
+用三个合成数据池手算一次。通用文本有 `800,000` token，代码和数学各有 `100,000` token。自然配比是 `0.80/0.10/0.10`。若取 `alpha=0.5`，未归一化权重为 `sqrt(800,000)≈894.4`、`sqrt(100,000)≈316.2`、`sqrt(100,000)≈316.2`；总权重约 `1,526.8`，归一化后约为 `0.586/0.207/0.207`。在 `B=1,000,000` 个计划 token 下，分配约为 `585,800/207,100/207,100` token；对应有效 epoch 约为 `0.73/2.07/2.07`。这只说明平滑怎样改变曝光，不证明代码和数学的最优权重应为 `0.207`。
 
 这些式子有一个容易被忽略的定义域：参与采样的池必须有正的有效 token 数，即 `n_k > 0`，并且所有池的分数之和必须大于零。空池应标记为“待补充”或从当前版本排除，不能用 `0` 参与 `n_k^alpha` 后再把结果当成正常概率；尤其当 `alpha = 0` 时，`0^0` 本身就没有可直接采用的工程含义。类似地，`e_k = b_k / n_k` 在 `n_k = 0` 时不可计算。数据表应分别记录“未登记”“已登记但为空”和“有 token 但未被采样”，这三种状态不能混在一个零值里。
 
@@ -157,7 +170,7 @@ A_m(p) = sum_k(p_k * a_km)
 U(p) = sum_m(v_m * A_m(p)) - lambda_r * sum_k(p_k * r_k) - lambda_e * sum_k(max(0, e_k - e_max))
 ~~~
 
-这里第一项鼓励目标能力覆盖，第二项惩罚风险，第三项惩罚过度重复小数据池。
+这里第一项鼓励目标能力覆盖代理，第二项惩罚风险，第三项惩罚超过项目阈值的重复暴露。`e_max` 是项目策略，不是由公式自动得出的通用安全上限。
 
 配比相对 baseline 的漂移可以用 KL divergence 监控：
 
@@ -165,7 +178,7 @@ U(p) = sum_m(v_m * A_m(p)) - lambda_r * sum_k(p_k * r_k) - lambda_e * sum_k(max(
 D_KL(p || p0) = sum_k(p_k * log(p_k / p0_k))
 ~~~
 
-它不是越小越好，而是帮助审计“这次 mixture 改动到底有多大”。
+当 `p_k>0` 的位置有 `p_{0,k}=0` 时，该散度为无穷；实际计算还要对零权重池采用一致的支持集口径。它不是越小越好，而是帮助审计“这次 mixture 改动到底有多大”。
 
 这些量不宜被压缩成一个神秘的总分，更适合保留为并列的配比检查向量：
 
@@ -173,7 +186,9 @@ D_KL(p || p0) = sum_k(p_k * log(p_k / p0_k))
 C_mix(p) = (min_m(A_m(p)), max_k(e_k), sum_k(p_k * r_k), D_KL(p || p0))
 ~~~
 
-向量的四个分量分别描述最低能力覆盖、最大重复暴露、加权风险和相对 baseline 的分布漂移。它们可以对应不同的行动：某个能力覆盖不足时增加相关数据或重新定义目标；effective epoch 过高时扩充数据或降低采样权重；风险超限时回到清洗、授权和隔离环节；分布漂移过大时增加对照实验。公式的作用是让讨论可审计，真实结论仍要依靠 ablation、小模型预实验、多维评估和更大规模复验。
+向量的四个分量分别描述最低能力覆盖代理、最大重复暴露、加权风险和相对 baseline 的分布漂移。它们对应不同的行动：覆盖代理不足时增加相关数据或重新定义目标；重复暴露较高时检查重复样本、扩充数据或降低采样权重；风险超限时回到清洗、授权和隔离环节；漂移较大时增加对照实验。
+
+这里的 `A_m(p)` 是池标签按计划权重相加得到的覆盖代理，不是模型能力的预测值。跨域迁移、共享样本、模型容量、训练顺序和优化状态会使真实收益偏离线性加和。2025 年的 Data Mixing Laws 与 NeurIPS 2025 的 mixture scaling-law 研究改用小规模训练结果拟合“配比—验证损失”关系，再在指定预算和目标上预测；NeurIPS 研究覆盖 7 个 SlimPajama 文本域、LLM 规模约 186M–7B，并报告跨域/规模外推结果。作者同时指出其研究假设固定配比、来源可持续供数，并预测通用验证损失；稀缺语料重复、动态调度和具体下游任务仍需另行验证。[Data Mixing Laws](https://proceedings.iclr.cc/paper_files/paper/2025/hash/cc84bfabe6389d8883fc2071c848f62a-Abstract-Conference.html)；[Scaling Laws for Optimal Data Mixtures](https://proceedings.neurips.cc/paper_files/paper/2025/hash/bc1d640f841f752c689aae20b31198c1-Abstract-Conference.html)
 
 ---
 
@@ -302,6 +317,8 @@ C_mix(p) = (min_m(A_m(p)), max_k(e_k), sum_k(p_k * r_k), D_KL(p || p0))
 
 还要注意，低资源语言的数据质量过滤不能直接套用英语规则。否则会因为语言识别误差、字符分布差异、短文本特征不同而误删大量有效数据。
 
+语言比例和跨语言迁移也不能混为一谈。He 等人在 ACL 2025 的实验训练了 100 多个模型，覆盖 23 种语言和 5 个语系；其语言家族 scaling law 在该设置中发现，家族验证损失主要随本家族采样比例变化，并报告从 85M 模型拟合的比例可迁移到 1.2B。ATLAS（2026 预印本）则汇总 774 次、10M–8B 模型规模的多语言实验，测量 1,444 对语言间的迁移/干扰关系。两类结果提示：语言分组有助于估算，具体语言之间仍可能存在互助或竞争，需用目标语言和目标模型重新验证；它们都不提供通用语言配比表。[Scaling Laws for Multilingual Language Models](https://aclanthology.org/2025.findings-acl.221/)；[ATLAS](https://arxiv.org/abs/2510.22037)
+
 ---
 
 ## 10. 专业领域数据的配比
@@ -376,6 +393,18 @@ SFT 的数据更偏指令、问答、对话、工具调用和格式规范。这�
 
 安全数据不能简单按自然分布采样。需要覆盖风险类别、拒答边界、合规场景、误拒问题和多语言安全表达。
 
+这些阶段不能共用一个没有单位的“配比”。预训练常按 token 或序列采样，SFT 可以按任务、轮次或 token 统计，偏好训练中的样本还包含成对比较，安全训练要同时看风险类别覆盖和允许请求误拒。每个阶段都应写清采样单位、分母、损失和验收指标；第八章负责偏好/安全标签的构造，本章只交代它们如何进入阶段级训练配方。
+
+| 训练阶段 | 常见采样单位 | 必须报告的分母 | 配比实验的主要观察项 |
+| --- | --- | --- | --- |
+| 预训练 | packed token 或序列 | 计划 token、实际非 padding token、去重后池大小 | 通用与分域验证 loss、语言/领域切片、重复暴露 |
+| 继续预训练 | token 或序列 | 目标域 token、通用回放 token、阶段总预算 | 领域收益、通用能力保留、遗忘和过拟合 |
+| SFT | 对话、样本、目标 token 或任务类别 | 各任务样本数与目标 token 数 | 指令任务覆盖、格式/工具成功、长尾任务回归 |
+| 偏好训练 | chosen/rejected pair 或比较样本 | 有效 pair 数、去重 pair 数及对应 token | 偏好目标、帮助性/安全切片、标签冲突 |
+| 安全训练 | 风险类别、允许/拒绝样本或轨迹 | 每类有效请求、误拒样本与可执行轨迹 | 风险覆盖、拒答边界、误拒和工具副作用 |
+
+这些分母不能互换：一个长对话可能包含多个轮次和远多于短样本的 token；一个偏好 pair 也不是两个独立普通样本。汇报 mixture 时，应同时给配置权重和训练日志中的实际计数，并说明 loss 是按 token、样本还是 pair 聚合。否则“某类占 20%”无法被复现或与另一阶段比较。
+
 ---
 
 ## 13. 静态配比 vs 动态配比
@@ -391,9 +420,9 @@ SFT 的数据更偏指令、问答、对话、工具调用和格式规范。这�
 3. 后期增加高质量、低噪声和目标能力数据。
 4. 对 loss 下降慢或评估薄弱的数据域增加采样。
 
-动态配比更像 curriculum learning，但也更难评估。因为最终效果来自配比、顺序、学习率、数据质量和训练阶段共同作用。
+动态配比更像 curriculum learning，但也更难评估。写成 `p_{k,t}` 可表示训练阶段 `t` 中数据池 `k` 的计划权重；同一组阶段平均比例，若顺序不同，也会产生不同优化轨迹。最终效果来自配比、顺序、学习率、数据质量和训练阶段共同作用。
 
-静态配比通常适合建立可复现的第一版基线，动态配比则适合已经有稳定评估和训练监控的系统。动态策略增加了实验变量：最终效果同时受到数据种类、出现顺序、学习率、训练阶段和调度规则影响，因此必须保存每个阶段的采样日志。
+静态配比通常适合建立可复现的第一版基线，动态配比则适合已经有稳定评估和训练监控的系统。动态策略增加了实验变量：最终效果同时受到数据种类、出现顺序、学习率、训练阶段和调度规则影响，因此必须保存每阶段计划权重及采样器实际计数。若在线策略根据验证集变化调权，还要保留独立评估集，避免把反复调参后的验证收益误当成泛化证据。
 
 ---
 
@@ -405,7 +434,7 @@ SFT 的数据更偏指令、问答、对话、工具调用和格式规范。这�
 
 直观做法是：对每种语言的 token 占比做平滑，降低大语言的优势，提高小语言的采样概率。
 
-温度越高，分布通常越接近均匀；温度越低，越接近原始分布。不同系统的温度定义可能互为倒数，所以比较实验时必须同时记录公式、参数和最终概率，而不能只记录一个叫作 temperature 的数字。真正需要观察的是高资源语言与低资源语言之间的覆盖、重复暴露和验证损失折中。
+若按 `p_i ∝ n_i^{1/τ}` 定义温度 `τ`，那么 `τ=1` 保持自然分布，`τ` 增大时分布趋于均匀。比如两种语言各有 `900` 和 `100` 个有效 token，取 `τ=2` 后权重为 `sqrt(900)=30` 和 `sqrt(100)=10`，归一化采样率为 `0.75/0.25`；这比自然分布的 `0.90/0.10` 给小语种更多曝光，但不等于各占一半。也有系统把 temperature 定义成幂指数或倒数，因此必须记录公式、参数和最终概率，而不能只记一个名为 temperature 的数字。真正需要观察的是覆盖、重复暴露和各语言验证损失的折中。
 
 这种思想也可以用于领域配比：对小而高价值的数据源上采样，对大而低价值的数据源下采样。
 
@@ -415,52 +444,46 @@ SFT 的数据更偏指令、问答、对话、工具调用和格式规范。这�
 
 data mixture 不能只靠直觉，必须通过实验闭环。
 
-典型流程：
+2026 年 EACL 的综述把方法分成启发式、算法优化和函数拟合等离线方法，以及在线 min-max、在线 mixing law 等在线方法。这个分类能帮助选工具，但每类方法优化的对象、训练成本和反馈信号不同：[Rethinking Data Mixture](https://aclanthology.org/2026.findings-eacl.15/)。
 
-1. 定义目标能力：通用问答、代码、数学、多语言、专业领域、安全等。
-2. 建立候选数据池：每个池有来源、质量分、语言、领域、去重状态和许可证信息。
-3. 设计 baseline mixture：基于经验和目标设初始比例。
-4. 做小规模训练：使用较小模型和较少 token 快速验证趋势。
-5. 做 ablation：单独提高或降低某类数据比例。
-6. 建立评估矩阵：不要只看一个 benchmark。
-7. 分析 trade-off：某项能力提升是否损害其他能力。
-8. 固化版本：记录 mixture 配置、采样权重、数据版本和训练结果。
-9. 放大验证：在更大模型或更多 token 上验证是否保持趋势。
+| 方法族 | 主要输入和优化对象 | 代表思路 | 主要边界 |
+| --- | --- | --- | --- |
+| 固定启发式 | 池大小、质量或人工目标 | 自然比例、temperature smoothing | 成本低，但不直接观测目标模型损失 |
+| 代理模型/鲁棒权重 | 各域相对 proxy 或目标损失 | DoReMi 用 Group DRO 学域权重；GRAPE 同时处理多来源和多目标 | 代理模型、目标切片和损失定义决定学到什么 |
+| 回归与 mixing law | 不同配比下的验证损失 | RegMix、Data Mixing Laws、mixture scaling law | 需要设计代理训练点；拟合外推必须在未见配比和规模上核验 |
+| 梯度/在线优化 | 当前模型参数和留出验证反馈 | FastMix 联合更新 proxy 模型与来源权重 | 反馈循环会增加调参自由度，需保留独立验收集 |
+| 样本级全局选择 | 文档质量与多样性分数、token 预算 | SampleMix 跨域给样本分配权重，不先固定领域比例 | 可能改变来源分布；评分器和超参数要针对新语料再校准 |
 
-配比实验最难的是外推。小模型上的最佳配比不一定适用于大模型；短训练上的最佳配比不一定适用于长训练。因此需要多尺度实验，而不是一次 ablation 就决定最终配比。
+这些方法选择的对象不完全相同：temperature 直接平滑池大小；DoReMi/GRAPE 通过 proxy loss 调整域权重；RegMix 与 mixing law 拟合配比到模型损失的映射；FastMix 用验证反馈直接迭代权重；SampleMix 调整样本被选中的概率。它们产生的最终比例可以相似，但不代表机制或证据等价。
+
+SampleMix 的论文在 SlimPajama 上训练 1B 参数 LLaMA、使用 100B token，并排除了 GitHub 域；作者报告在其八项任务和 perplexity 设置中，达到基线平均准确率所需训练步数约为基线的 `1/1.9`，同时明确指出最佳超参数依赖数据集。它展示样本级质量/多样性筛选的候选价值，不是对所有数据池的采样收益保证。[SampleMix](https://aclanthology.org/2025.findings-emnlp.741/)
+
+无论使用哪种方法，都要先固定目标能力、数据快照、tokenizer、总 token、训练 recipe 和评估口径；先用自然比例或现有 recipe 建 baseline，再做少量可解释的对照、检查不同种子和切片，最后在未参与调参的留出集和更大规模上复验。小模型上的最佳配比不一定适用于大模型，短训练上的最佳配比也不一定适用于长训练；不要只凭一次 ablation 决定最终配方。
 
 ---
 
 ## 16. 评估矩阵：配比优化看什么指标？
 
-一个配比方案不能只看平均分。它应该看多维指标：
+一个配比方案不能只看平均分，可以用四组互补指标核对：
 
-1. 通用语言 loss。
-2. 各来源 validation loss。
-3. 下游 benchmark。
-4. 代码能力。
-5. 数学能力。
-6. 多语言能力。
-7. 专业领域能力。
-8. 安全评估。
-9. 幻觉和事实性。
-10. 输出风格。
-11. 记忆和污染风险。
-12. 人工评测和产品样例。
+| 检查组 | 例子 | 需要保留的分母或切片 |
+| --- | --- | --- |
+| 训练拟合 | 通用语言 loss、各来源 held-out loss | 各池验证 token 数和 tokenizer 版本 |
+| 目标能力 | 代码、数学、多语言和专业任务 | 任务数、语言/领域切片、难度区间 |
+| 非目标回归 | 通用问答、安全、事实性、输出风格和人工样例 | 同一评测版本及前后模型配对 |
+| 数据风险 | 记忆、污染、隐私、许可和重复暴露 | 候选/确认定义、唯一样本数和实际采样 token |
 
-例如，提高代码比例后，HumanEval 类指标可能提升，但多语言聊天能力下降。提高数学合成数据后，GSM 类指标可能提升，但模型回答变得模板化。提高论坛数据后，聊天自然度提升，但安全风险上升。
-
-因此配比优化本质是多目标优化，而不是单指标爬山。
+提高代码比例后，HumanEval 类指标可能提升，但多语言聊天能力下降；提高数学合成数据后，GSM 类指标可能提升，但模型回答变得模板化；提高论坛数据后，聊天自然度可能提升，而安全风险也可能上升。不同单位的 loss、任务分数和风险率不能直接混成一个平均值。报告要说明采用题目宏平均、token 加权还是产品目标权重，保留最差切片和区间，并在对照间固定训练 token、优化器、学习率计划、tokenizer 和数据版本。否则观察到的是一组因素的组合变化，不是纯配比效应。完整统计检验和 benchmark 设计由第七册主讲。
 
 ---
 
 ## 17. 数据上采样和过拟合
 
-当某类数据很重要但规模小，团队常会对它上采样。比如低资源语言、数学题、代码解释、专业文档。
+当某类数据很重要但规模小，团队常会对它上采样。比如低资源语言、数学题、代码解释、专业文档。对目标池的计划重复因子可写成 `r_k = B p_k / n_k`：总预算为 `B`，该池分到 `p_k B` token，唯一池大小为 `n_k`。例如目标池有 `20M` 个去重 token，预算 `B=500M`、目标比例 `p_k=0.20`，则它计划提供 `100M` token，`r_k=100M/20M=5`；其余 `400M` token 可来自持续有新样本的通用池。这个数是平均重复暴露估计，不会说明每条样本被抽到几次。
 
-上采样能提高模型 exposure，但也带来过拟合和记忆风险。
+上采样能提高模型 exposure，但也带来过拟合和记忆风险。2026 年一篇预印本报告了超过 2,000 次、101M–805M 参数的训练实验，覆盖德语、法语、斯瓦希里语、数学、科学论文、Wikipedia 与质量过滤子集；在其混合训练条件下，某些预算的最优目标池重复因子达到 15–20。作者的解释是通用池持续提供新 token，改变了单一有限数据集反复训练时的正则化条件。这个数不能变成项目上限：最优重复随数据池规模、模型规模、预算和验证目标变化，且该研究尚为预印本。[Scaling Laws for Mixture Pretraining Under Data Constraints](https://arxiv.org/abs/2605.12715)
 
-如果一个小数据池被重复训练太多次，模型可能记住具体样本，而不是学到泛化规律。尤其是题库、隐私文本、专业文档和代码数据，更要谨慎。
+如果一个小数据池被重复训练太多次，模型可能记住具体样本，而不是学到泛化规律。尤其是题库、隐私文本、专业文档和代码数据，更要谨慎；把唯一 token、实际采样次数、近重复簇和目标域验证损失放在一起看，比单独设置一个经验 epoch 上限更可解释。
 
 缓解方法包括：
 
@@ -491,7 +514,9 @@ data mixture 不能只靠直觉，必须通过实验闭环。
 
 比如某个领域数据很稀缺，如果用普通规则过滤，可能被误删很多；为了保留这个领域，团队可能降低某些过滤阈值，同时加强人工审计。又比如某个来源规模巨大且重复率高，去重后占比下降，需要重新计算采样权重。
 
-因此，data mixture 不是简单地在最后拼接文件，而是和数据清洗、质量评分、去重、污染检测共同设计。
+因此，data mixture 不是简单地在最后拼接文件，而是和数据清洗、质量评分、去重、污染检测共同设计。清洗和去重会改变每个池的唯一 token 数；重新采样又会改变训练曝光。每次数据快照变化后，都要重新计算自然比例、计划比例、有效重复因子和风险切片，不能把旧采样权重直接贴到新数据版本上。
+
+例如，某一版本中网页池有 `600,000` 个 token，代码池有 `400,000` 个，按自然 token 数采样就是 `60%/40%`。如果网页去重后只剩 `300,000` 个唯一 token，代码池仍有 `400,000` 个，那么新快照的自然比例变为 `300,000/700,000≈42.9%` 和 `400,000/700,000≈57.1%`。若总预算为 `1,000,000` token，计划曝光约为 `428,600/571,400`；代码看起来“占比增加”，即使团队没有手工提高它的目标权重。若目标配比固定，则权重不变但代码池的有效重复因子会改变。两种情形都要求重算，并与 sampler 实际日志中的 token 计数核对。
 
 成熟的数据表通常会保存：source、language、domain、quality score、dedup cluster、safety label、license、token count、sampling weight。训练时 sampler 根据这些字段动态采样。
 
@@ -499,23 +524,17 @@ data mixture 不能只靠直觉，必须通过实验闭环。
 
 ## 20. 机制与边界：Data mixture 是隐式目标函数设计
 
-从机制上看，data mixture 实际上是在设计隐式目标函数。
+从机制上看，data mixture 会改变优化器反复看到的样本分布。设池 `k` 的采样率为 `p_k`、样本来自分布 `D_k`，next-token 训练的期望目标可写成：
 
-预训练通常形式上只有一个 next-token prediction loss，但这个 loss 是在 mixture 分布上求期望。改变 mixture，就改变了优化目标。
+~~~math
+L(theta; p) = sum_k(p_k * E_{x~D_k}[-log P_theta(x)])
+~~~
 
-如果把代码采样权重加倍，优化器会更频繁地沿着代码样本梯度更新。如果把数学数据放到训练后期，模型后期参数会更受数学分布影响。如果把低质量网页下采样，模型对这些风格的拟合会减少。
+改变 `p_k` 会改变当前参数 `theta` 处的期望梯度。用一个单参数方向做教学手算：假设 web 池在该方向的平均梯度是 `1`，代码池是 `-2`。若 `p_web=0.8, p_code=0.2`，混合梯度为 `0.8*1+0.2*(-2)=0.4`；若把代码提高到 `0.4`、web 降到 `0.6`，混合梯度变为 `0.6*1+0.4*(-2)=-0.2`。更新方向已经改变，但这组假设梯度不能预测最终 benchmark，也不是实测模型结果；真实训练中梯度随参数、顺序、学习率和数据交互持续变化。
 
-因此，配比不是数据团队的外围工作，而是训练目标、模型能力和产品定位之间的接口。
+这也解释了为什么能力标签的线性覆盖不能替代训练实验。NeurIPS 2025 的受控实验用合成传记数据与网页混合，观察到在特定模型容量或混合比例附近，记忆行为会出现阈值式变化；该结果只支持“配比效果可能非线性”的机制案例，不说明真实语料都存在相同相变。[Data Mixing Can Induce Phase Transitions in Knowledge Acquisition](https://proceedings.neurips.cc/paper_files/paper/2025/hash/eee7ae5cf0c4356c2aeca400771791aa-Abstract-Conference.html)
 
-专家级 trade-off 包括：
-
-1. 多样性 vs 高质量。
-2. 通用能力 vs 专项能力。
-3. 高资源语言 vs 低资源语言。
-4. 自然数据 vs 合成数据。
-5. 预训练吸收 vs 后训练适配。
-6. 短期 benchmark 提升 vs 长期泛化。
-7. 上采样能力短板 vs 记忆和污染风险。
+因此，配比是训练目标、模型能力和产品定位之间的接口。需要同时权衡多样性与质量、通用与专项能力、高低资源语言、自然与合成数据、短期基准收益与泛化，以及能力短板补充和重复暴露风险；这些取舍应通过分层实验和风险门禁说明，而不能被一个总分掩盖。
 
 ---
 
@@ -536,6 +555,10 @@ data mixture 不能只靠直觉，必须通过实验闭环。
 下面这个 demo 不依赖外部库，也不读写文件。输入是一组 toy 数据池，每个池有清洗后 token 数、质量分、风险分和能力标签；输出包括自然配比、目标采样配比、计划采样 token、effective epoch、上采样倍数、能力覆盖、平均质量、风险、并列检查信号、后续动作和结论。
 
 它演示的是配比审计机制，不是生产级 sampler。真实训练还需要和 tokenizer 统计、数据版本、分布式采样器、训练曲线、验证 loss、下游评估和安全审计联动。
+
+目标能力权重、各能力覆盖门槛、风险阈值和 `MAX_EPOCH` 都是合成的教学策略，用来展示审计分支；能力标签是 toy proxy，不能当作实测能力、论文结论或通用配方。
+
+代码状态：已验证（2026-10-28；Python 3.12.9，标准库）
 
 ~~~python
 import math
@@ -564,18 +587,71 @@ MAX_EPOCH = 2.5
 def validate_pools(items):
     if not items:
         raise ValueError("at least one non-empty data pool is required")
-    names = [item["name"] for item in items]
+    names = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError("each data pool must be a mapping")
+        name = item.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("each data pool needs a non-empty name")
+        names.append(name)
+        tokens = item.get("tokens")
+        if isinstance(tokens, bool) or not isinstance(tokens, int) or tokens <= 0:
+            raise ValueError("data pools must have positive integer token counts")
+        for key in ("quality", "risk"):
+            value = item.get(key)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or not 0 <= value <= 1
+            ):
+                raise ValueError(f"{key} must be a finite value in [0, 1]")
+        cap = item.get("cap")
+        if not isinstance(cap, dict) or set(cap) != set(target):
+            raise ValueError("capability labels must match the target dimensions")
+        for value in cap.values():
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or not 0 <= value <= 1
+            ):
+                raise ValueError("capability values must be finite values in [0, 1]")
     if len(names) != len(set(names)):
         raise ValueError("data pool names must be unique")
-    if any(item["tokens"] <= 0 for item in items):
-        raise ValueError("data pools must have positive token counts")
 
 
 def normalize(weights):
+    if not isinstance(weights, dict) or not weights:
+        raise ValueError("cannot normalize an empty or zero-sum mixture")
+    for value in weights.values():
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value < 0
+        ):
+            raise ValueError("mixture weights must be finite and non-negative")
     total = sum(weights.values())
-    if not weights or total <= 0:
+    if not math.isfinite(total) or total <= 0:
         raise ValueError("cannot normalize an empty or zero-sum mixture")
     return {k: v / total for k, v in weights.items()}
+
+
+def allocate_tokens(budget, weights):
+    if isinstance(budget, bool) or not isinstance(budget, int) or budget <= 0:
+        raise ValueError("token budget must be a positive integer")
+    quotas = {name: budget * weight for name, weight in weights.items()}
+    allocation = {name: math.floor(quota) for name, quota in quotas.items()}
+    remainder = budget - sum(allocation.values())
+    order = sorted(
+        weights,
+        key=lambda name: (-(quotas[name] - allocation[name]), name),
+    )
+    for name in order[:remainder]:
+        allocation[name] += 1
+    return allocation
 
 
 def utility(pool):
@@ -600,11 +676,12 @@ for p in pools:
         )
     )
 mixture = normalize(scores)
+token_plan = allocate_tokens(BUDGET, mixture)
 
 plan = {}
 for p in pools:
     name = p["name"]
-    planned = round(BUDGET * mixture[name])
+    planned = token_plan[name]
     plan[name] = {
         "mix": round(mixture[name], 3),
         "raw_mix": round(raw_mix[name], 3),
@@ -620,7 +697,7 @@ ability = {
 risk = round(sum(mixture[p["name"]] * p["risk"] for p in pools), 3)
 avg_quality = round(sum(mixture[p["name"]] * p["quality"] for p in pools), 3)
 up_sampling = {
-    name: round(plan[name]["mix"] / max(plan[name]["raw_mix"], 1e-9), 2)
+    name: round(mixture[name] / raw_mix[name], 2)
     for name in sorted(plan)
 }
 watchlist = sorted(
@@ -659,6 +736,7 @@ decision = "continue_to_ablation" if not actions else "hold_for_repair"
 print("raw_mix=", {k: round(raw_mix[k], 3) for k in sorted(raw_mix)})
 print("target_mix=", {k: plan[k]["mix"] for k in sorted(plan)})
 print("planned_tokens=", {k: plan[k]["planned_tokens"] for k in sorted(plan)})
+print("planned_total=", sum(row["planned_tokens"] for row in plan.values()))
 print("effective_epoch=", {k: plan[k]["effective_epoch"] for k in sorted(plan)})
 print("upsampling=", up_sampling)
 print("raw_ability=", raw_ability)
@@ -671,6 +749,7 @@ print("actions=", actions)
 print("decision=", decision)
 
 assert round(sum(mixture.values()), 6) == 1.0
+assert sum(token_plan.values()) == BUDGET
 assert watchlist == []
 assert ability == {"general": 0.591, "code": 0.218, "math": 0.285, "multilingual": 0.256, "safety": 0.212}
 assert avg_quality == 0.823
@@ -691,6 +770,18 @@ except ValueError as error:
     assert "positive" in str(error)
 else:
     raise AssertionError("zero-token pool must be rejected")
+try:
+    validate_pools([pools[0], {**pools[0]}])
+except ValueError as error:
+    assert "unique" in str(error)
+else:
+    raise AssertionError("duplicate pool names must be rejected")
+try:
+    normalize({"bad": float("nan")})
+except ValueError as error:
+    assert "finite" in str(error)
+else:
+    raise AssertionError("non-finite mixture weights must be rejected")
 ~~~
 
 运行后会看到类似输出：
@@ -699,8 +790,9 @@ else:
 raw_mix= {'books_reference': 0.138, 'code_docs': 0.092, 'domain_science': 0.046, 'general_web': 0.575, 'math_reasoning': 0.034, 'safety_data': 0.011, 'synthetic_reasoning': 0.023, 'zh_multilingual': 0.08}
 target_mix= {'books_reference': 0.174, 'code_docs': 0.133, 'domain_science': 0.078, 'general_web': 0.351, 'math_reasoning': 0.072, 'safety_data': 0.032, 'synthetic_reasoning': 0.049, 'zh_multilingual': 0.11}
 planned_tokens= {'books_reference': 34896, 'code_docs': 26671, 'domain_science': 15534, 'general_web': 70245, 'math_reasoning': 14412, 'safety_data': 6421, 'synthetic_reasoning': 9755, 'zh_multilingual': 22066}
+planned_total= 200000
 effective_epoch= {'books_reference': 0.291, 'code_docs': 0.333, 'domain_science': 0.388, 'general_web': 0.14, 'math_reasoning': 0.48, 'safety_data': 0.642, 'synthetic_reasoning': 0.488, 'zh_multilingual': 0.315}
-upsampling= {'books_reference': 1.26, 'code_docs': 1.45, 'domain_science': 1.7, 'general_web': 0.61, 'math_reasoning': 2.12, 'safety_data': 2.91, 'synthetic_reasoning': 2.13, 'zh_multilingual': 1.38}
+upsampling= {'books_reference': 1.26, 'code_docs': 1.45, 'domain_science': 1.69, 'general_web': 0.61, 'math_reasoning': 2.09, 'safety_data': 2.79, 'synthetic_reasoning': 2.12, 'zh_multilingual': 1.37}
 raw_ability= {'general': 0.693, 'code': 0.176, 'math': 0.206, 'multilingual': 0.261, 'safety': 0.218}
 target_ability= {'general': 0.591, 'code': 0.218, 'math': 0.285, 'multilingual': 0.256, 'safety': 0.212}
 avg_quality= 0.823 risk= 0.045
@@ -783,6 +875,12 @@ SFT 能调整行为和格式，但很难补齐预训练阶段缺失的大规模�
 4. [The RefinedWeb Dataset for Falcon LLM](https://arxiv.org/abs/2306.01116)、[The FineWeb Datasets](https://arxiv.org/abs/2406.17557) 和 [Dolma](https://arxiv.org/abs/2402.00159)：展示开放网页和多来源语料的过滤、去重、质量处理与训练实验，支持“数据构造会改变训练结果”的论点。
 5. [DataComp-LM](https://arxiv.org/abs/2406.11794)：提供受控数据选择实验框架，支持比较数据过滤、去重和 mixture 的影响，但实验结果不能脱离模型规模和预算外推。
 6. [Textbooks Are All You Need（phi-1）](https://arxiv.org/abs/2306.11644)：展示 textbook-quality 与合成练习数据对小型代码模型的影响；它支持质量和目标配比的重要性，不证明合成数据在任何任务中都应占高比例。
+7. [Data Mixing Laws: Optimizing Data Mixtures by Predicting Language Modeling Performance](https://proceedings.iclr.cc/paper_files/paper/2025/hash/cc84bfabe6389d8883fc2071c848f62a-Abstract-Conference.html) 与 [Scaling Laws for Optimal Data Mixtures](https://proceedings.neurips.cc/paper_files/paper/2025/hash/bc1d640f841f752c689aae20b31198c1-Abstract-Conference.html)：研究以小规模实验拟合配比和验证表现的关系；模型、语料、固定配比假设、预算和目标损失限制了外推范围。
+8. [Rethinking Data Mixture for Large Language Models: A Comprehensive Survey and New Perspectives](https://aclanthology.org/2026.findings-eacl.15/)：整理启发式、代理优化、函数拟合和在线方法；分类用于建立方法地图，不代表同一数据/预算上的直接比较。
+9. [SampleMix](https://aclanthology.org/2025.findings-emnlp.741/)：EMNLP 2025 Findings 研究跨领域文档级质量/多样性选择；报告绑定 SlimPajama、1B LLaMA、100B token 和论文任务集，不能视为普遍的训练步数收益。
+10. [Scaling Laws for Multilingual Language Models](https://aclanthology.org/2025.findings-acl.221/) 与 [ATLAS](https://arxiv.org/abs/2510.22037)：分别提供特定语系比例拟合实验和更广的跨语言迁移/干扰分析；不能据此推出跨语言通用比例表。
+11. [Scaling Laws for Mixture Pretraining Under Data Constraints](https://arxiv.org/abs/2605.12715)：2026 年预印本研究有限数据重复暴露与混合池训练；报告的最优重复因子只适用于其模型、数据、预算和验证目标，不能当作通用 epoch 上限。
+12. [Data Mixing Can Induce Phase Transitions in Knowledge Acquisition](https://proceedings.neurips.cc/paper_files/paper/2025/hash/eee7ae5cf0c4356c2aeca400771791aa-Abstract-Conference.html)：合成传记和网页混合的受控任务显示特定记忆行为可能呈阈值变化；不证明真实语料普遍存在同一相变。
 
 这些论文属于公开研究证据，能够支持机制、实验设置和条件化结论；模型卡、产品页和内部数据配方则需要单独标注版本与证据等级。本文给出的效用函数、能力标签和 demo 是教学抽象，不是上述论文公布的统一训练配方。实际项目还必须补充 tokenizer 统计、许可证审计、数据版本、污染检查、训练曲线和独立评估。
 
