@@ -17,7 +17,7 @@
 
 凡是针对书籍的架构审视、章节审阅、正文或配套资料修改、修改决定、完成状态、遗留问题和后续交接，统一且只写入 [`progress/`](progress/)。这些书籍进度与修改历史不得写入 `research/`、`plan.md`、`README.md` 或正文。
 
-[`research/`](research/) 只记录联网搜索发现的新知识点及其来源证据，包括来源、版本或日期、证据范围和未核验边界；不记录每册书或每章的精修进度、修改历史和审计日志。项目计划与长期写作要求分别见 [`plan.md`](plan.md) 和 [`WRITING_SPEC.md`](WRITING_SPEC.md)。
+[`research/`](research/) 只记录联网搜索发现的新知识点及其来源证据，包括来源、版本或日期、证据范围和未核验边界；不记录每册书或每章的精修进度、修改历史和审计日志。项目计划与长期写作规范总纲分别见 [`plan.md`](plan.md) 和 [`写作规范/总纲.md`](写作规范/总纲.md)；根目录 [`WRITING_SPEC.md`](WRITING_SPEC.md) 保留为兼容入口。
 
 ## 书系总览
 
@@ -73,7 +73,7 @@
 
 推荐基础阅读顺序：
 
-1. [`WRITING_SPEC.md`](WRITING_SPEC.md)：了解项目目标、书系定位和完整写作规范。
+1. [`写作规范/总纲.md`](写作规范/总纲.md)：了解规范结构；按任务继续阅读相应细则模块。
 2. [`plan.md`](plan.md)：了解第一次计划、常态化全书精修和新模型更新的总计划与文件分工。
 3. [`ROADMAP.md`](ROADMAP.md)：选择 3 个月、6 个月或 12 个月学习路线。
 4. [`book-01-core-30/目录.md`](book-01-core-30/目录.md)：从核心 38 讲建立主干知识。
@@ -129,7 +129,8 @@ python3 scripts/build_pdfs.py --dry-run
 | [`GLOSSARY_EN_ZH.md`](GLOSSARY_EN_ZH.md) | 中英文术语表，方便读论文和英文面试。 |
 | [`ENGLISH_INTERVIEW_TEMPLATES.md`](ENGLISH_INTERVIEW_TEMPLATES.md) | 英文面试表达模板。 |
 | [`AGENTS.md`](AGENTS.md) | 贡献者指南，说明目录结构、文件职责、校验命令和提交要求。 |
-| [`WRITING_SPEC.md`](WRITING_SPEC.md) | 长期写作规范与质量检查。 |
+| [`写作规范/总纲.md`](写作规范/总纲.md) | 长期写作规范总索引、恢复规则和模块导航。 |
+| [`写作规范/`](写作规范/) | 按主题拆分的完整写作细则；总纲按任务指引读取。 |
 | [`plan.md`](plan.md) | 项目总纲、总原则、第一次计划、两类常态化计划、审计方法和完成定义。 |
 | [`progress/`](progress/) | 所有书籍架构审视、逐章精修、修改历史、状态和交接记录的唯一存放位置。 |
 | [`research/`](research/) | 仅存联网搜索发现的新知识点及其来源证据，不存书籍精修进度或修改历史。 |
@@ -150,6 +151,13 @@ python3 scripts/build_pdfs.py --dry-run
 ├── GLOSSARY_EN_ZH.md
 ├── AGENTS.md
 ├── WRITING_SPEC.md
+├── 写作规范/
+│   ├── 总纲.md
+│   ├── 01-书册定位与全书架构.md
+│   ├── 02-章节诊断与正文教学.md
+│   ├── 03-研究与证据管理.md
+│   ├── 04-图表公式代码与引用.md
+│   └── 05-维护同步与完成门禁.md
 ├── plan.md
 ├── progress/
 ├── research/
@@ -184,7 +192,7 @@ python3 scripts/build_pdfs.py --dry-run
 
 ## 统一写作规范
 
-今后所有章节写作、扩写、题库、练习和项目路线更新必须遵循 [`WRITING_SPEC.md`](WRITING_SPEC.md)。
+今后所有章节写作、扩写、题库、练习和项目路线更新必须遵循 [`写作规范/总纲.md`](写作规范/总纲.md) 及其指向的完整细则模块。
 
 ## 写作原则
 
@@ -206,7 +214,7 @@ python3 scripts/build_pdfs.py --dry-run
 4. 对高时效主题做联网校验，修正过时、片面或证据不足的表述。
 5. 同步维护第四册百科、面试题库、练习体系、项目路线、论文路线、术语表和知识图谱；涉及书籍的审阅与修改记录统一写入 [`progress/`](progress/)。
 
-当前排行榜专题已收口；后续模型更新仍只从 Artificial Analysis 与 DataCurve/DeepSWE 发现候选，再按 `WRITING_SPEC.md` 执行增量核验和同步。
+当前排行榜专题已收口；后续模型更新仍只从 Artificial Analysis 与 DataCurve/DeepSWE 发现候选，再按写作规范总纲及相关模块执行增量核验和同步。
 
 ## 适用边界
 
