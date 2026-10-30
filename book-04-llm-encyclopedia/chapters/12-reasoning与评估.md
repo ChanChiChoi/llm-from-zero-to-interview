@@ -4,6 +4,24 @@
 
 初学者可以先把 reasoning 理解为“把一个难题拆成若干可检查的步骤，并在得到反馈后继续或修正”。专家还需要追问：中间步骤是否真的影响了结论，验证器是否被长度和格式欺骗，额外计算是否换来了足够的正确率，评估集是否被污染，线上高风险切片是否退化。下面的公式会说明变量和分母，代码示例只验证局部机制，论文结果会保留其任务和模型范围。
 
+本章是概念和指标的速查入口；推理模型、CoT、验证器、搜索和测试时计算的完整讲解见第十六册，评估设计与统计工程见第七册：
+
+| 条目 | 完整主讲 |
+| --- | --- |
+| 12.1–12.2 推理对象、CoT 与状态 | [第十六册第 1 章：Reasoning 总览](../../book-16-reasoning-models/chapters/01-reasoning总览.md)、[第 2 章：Chain of Thought](../../book-16-reasoning-models/chapters/02-chain-of-thought.md)、[第 15 章：Preserve Thinking 与推理状态](../../book-16-reasoning-models/chapters/15-preserve-thinking与推理状态.md) |
+| 12.3 采样与 Self-Consistency | [第十六册第 3 章](../../book-16-reasoning-models/chapters/03-self-consistency与采样.md)、[第二册第 8 章：Reasoning 与 Test-Time Compute](../../book-02-advanced-100/chapters/08-reasoning与test-time-compute.md) |
+| 12.4–12.5 Verifier 与过程监督 | [第十六册第 4 章：Verifier 与 Reward Model](../../book-16-reasoning-models/chapters/04-verifier与reward-model.md)、[第 5 章：Process Supervision](../../book-16-reasoning-models/chapters/05-process-supervision.md)、[第五册第 16 章：RLVR 与可验证奖励](../../book-05-llm-training/chapters/16-rlvr与可验证奖励.md) |
+| 12.6 Search Reasoning | [第十六册第 6 章：Search 与 Tree of Thought](../../book-16-reasoning-models/chapters/06-search与tree-of-thought.md) |
+| 12.7 Test-Time Compute | [第十六册第 7 章：Test-Time Compute Scaling](../../book-16-reasoning-models/chapters/07-test-time-compute-scaling.md)、[第 13 章：Reasoning Effort 与推理预算](../../book-16-reasoning-models/chapters/13-reasoning-effort与推理预算.md)、[第 18 章：Adaptive Thinking 与动态预算](../../book-16-reasoning-models/chapters/18-adaptive-thinking与动态预算.md) |
+| 12.8 数学推理训练 | [第十六册第 8 章](../../book-16-reasoning-models/chapters/08-数学推理训练.md)、[第五册第 16 章](../../book-05-llm-training/chapters/16-rlvr与可验证奖励.md)、[第七册第 6 章：Reasoning、Code 与 Math Eval](../../book-07-evaluation-experiments/chapters/06-reasoning-code-math-eval.md) |
+| 12.9 Code Reasoning | [第十六册第 9 章：代码推理与执行反馈](../../book-16-reasoning-models/chapters/09-代码推理与执行反馈.md)、[第七册第 6 章](../../book-07-evaluation-experiments/chapters/06-reasoning-code-math-eval.md)、[第十七册第 7 章：Code Agent](../../book-17-agent-tool-use/chapters/07-code-agent.md) |
+| 12.10 评估样本与统计比较 | [第十六册第 10 章：Reasoning 评估](../../book-16-reasoning-models/chapters/10-reasoning评估.md)、[第七册第 10 章：统计显著性与实验设计](../../book-07-evaluation-experiments/chapters/10-统计显著性与实验设计.md)、[第 12 章：评估体系综合设计](../../book-07-evaluation-experiments/chapters/12-评估体系综合设计与工程落地.md) |
+| 12.11 Benchmark 与污染 | [第七册第 2 章：Benchmark 设计](../../book-07-evaluation-experiments/chapters/02-benchmark设计.md)、[第 5 章：污染检测与可信评估](../../book-07-evaluation-experiments/chapters/05-污染检测与可信评估.md)、[第 14 章：Frontier 模型证据等级](../../book-07-evaluation-experiments/chapters/14-frontier模型证据等级.md) |
+| 12.12 Human Evaluation 与 Judge | [第七册第 3 章：Human Eval 与 Pairwise Eval](../../book-07-evaluation-experiments/chapters/03-human-eval与pairwise-eval.md)、[第 4 章：LLM-as-a-Judge](../../book-07-evaluation-experiments/chapters/04-llm-as-a-judge.md) |
+| 12.13 Factuality、Robustness 与 Calibration | [第七册第 8 章：Safety 与 Robustness Eval](../../book-07-evaluation-experiments/chapters/08-safety与robustness-eval.md)、[第七册第 6 章](../../book-07-evaluation-experiments/chapters/06-reasoning-code-math-eval.md) |
+| 12.14 Reasoning Safety | [第十六册第 11 章：Reasoning 安全与局限](../../book-16-reasoning-models/chapters/11-reasoning安全与局限.md)、[第十七册第 11 章：Agent 安全](../../book-17-agent-tool-use/chapters/11-agent安全.md)、[第二十二册第 13 章：工具安全](../../book-22-tool-protocol-ecosystem/chapters/13-工具安全越权注入数据泄露和危险动作.md) |
+| 12.15 Evaluation Pipeline 与发布 | [第七册第 12 章](../../book-07-evaluation-experiments/chapters/12-评估体系综合设计与工程落地.md)、[第二十册第 10 章：Evaluation Harness](../../book-20-agent-harness-runtime/chapters/10-evaluation-harness.md)、[第 19 章：Harness-Aware Evaluation](../../book-20-agent-harness-runtime/chapters/19-harness-aware-evaluation.md) |
+
 ~~~text
 一个可验证的推理请求：
 
@@ -61,7 +79,7 @@ s_{t+1}=T(s_t,a_t,o_{t+1}),
 
 ### CoT 的作用
 
-Chain-of-Thought（CoT）提示通过示例或指令让模型生成中间推理步骤。Wei 等人的 [CoT prompting 论文](https://arxiv.org/abs/2201.11903) 在多步算术、常识和符号推理任务上展示了这种提示方式的实验收益。该结果支持“在某些任务和模型上，中间步骤能提供额外计算与结构”，不支持“所有可见推理都忠实呈现内部过程”。
+Chain-of-Thought（CoT）提示通过示例或指令让模型生成中间推理步骤。Wei 等人的 [CoT prompting 论文](https://arxiv.org/abs/2201.11903v6) 在多步算术、常识和符号推理任务上展示了这种提示方式的实验收益。该结果支持“在某些任务和模型上，中间步骤能提供额外计算与结构”，不支持“所有可见推理都忠实呈现内部过程”。
 
 少样本 CoT 将带步骤的示例放入上下文；零样本 CoT 只改变提示方式。两者都可能受到示例质量、题目格式、模型版本和上下文预算影响。示例中的跳步、错误或错误的答案格式会被模型复制，因此 CoT 示例也需要像训练数据一样审核。
 
@@ -115,7 +133,7 @@ Self-consistency 常先采样多条推理路径，再抽取和聚合最终答案
 \sum_{k=1}^{K}\mathbf{1}[a_i^{(k)}=a].
 ~~~
 
-Self-consistency 论文 [arXiv:2203.11171](https://arxiv.org/abs/2203.11171) 研究了通过多条采样路径聚合答案的思路。多数投票在候选错误相互独立、正确答案有较大概率出现时更有帮助；如果模型系统性误读题意，多个候选会一致错。因而应同时报告单次准确率、候选中至少一条正确的比例、聚合后准确率和平均候选成本。
+Self-consistency 论文 [arXiv:2203.11171v4](https://arxiv.org/abs/2203.11171v4) 研究了通过多条采样路径聚合答案的思路。多数投票在候选错误相互独立、正确答案有较大概率出现时更有帮助；如果模型系统性误读题意，多个候选会一致错。因而应同时报告单次准确率、候选中至少一条正确的比例、聚合后准确率和平均候选成本。
 
 ~~~python
 from collections import Counter
@@ -133,8 +151,9 @@ assert majority_vote(["42", "42.0", "42"])[0] == "42"
 assert majority_vote(["a", "b", "b"])[1] == 2 / 3
 print(majority_vote(["42", "42", "41"]))
 ~~~
+代码状态：静态审阅，未运行（2026-10-30）；依赖 Python 3.8+ 标准库，保存为 `demo.py` 后运行 `python3 demo.py`。预期输出：`('42', 0.6666666666666666)`。
 
-这个示例把 42.0 当成不同字符串，说明标准化应在投票前完成；代码只展示聚合，不判断答案是否真实正确。
+这个示例把 42.0 当成不同字符串，说明标准化应在投票前完成；代码只展示聚合，不判断答案是否真实正确。若票数并列，当前实现按候选首次出现顺序打破平局；实际系统应把平局策略作为配置记录。
 
 ### 加权投票和失败边界
 
@@ -169,20 +188,20 @@ j^\star=\mathrm{arg\,max}_{j}s_{ij}.
 重排效果由生成候选覆盖和验证器排序共同决定。若正确答案没有生成，验证器无法凭空创造它；若 hard negative 得分过高，增加候选反而可能增加错误完成。
 
 ### Pairwise Accuracy 与选择准确率
-这里要求候选对集合 P 非空，并预先约定平局如何计分。相对排序指标不能在没有有效候选对时输出 0 来冒充评估结果。
+平局记分需在评估前约定；没有有效候选对时应报告 N/A，不能输出 0 冒充评估结果。
 
-Pairwise accuracy 测量验证器是否给更优候选更高分：
+Pairwise accuracy 测量验证器是否给参考标注中更优的候选 a 高于候选 b 的分数。候选对集合 P 必须非空，并保留优劣方向：
 
 ~~~math
 A_{\mathrm{pair}}
 =\frac{1}{|\mathcal{P}|}
-\sum_{(a,b)\in\mathcal{P}}\mathbf{1}[s_a>s_b].
+\sum_{(a,b)\in\mathcal{P}}\left(\mathbf{1}[s_a>s_b]+\frac{1}{2}\mathbf{1}[s_a=s_b]\right).
 ~~~
 
-它衡量相对排序，不等于从一组候选中选中正确答案的 top-1 accuracy。评估器还应报告 hard negative、长度切片、格式切片和真正的下游任务成功率。
+这里将平局计为半个正确排序；如采用其他规则，应在评估前固定并说明。它衡量相对排序，不等于从一组候选中选中正确答案的 top-1 accuracy。评估器还应报告 hard negative、长度切片、格式切片和真正的下游任务成功率。
 
 ### 校准
-ECE 和 Brier score 都要求 N>0；分桶应覆盖每个样本且互不重叠。没有校准样本时应报告 N/A，而不是把空集合当作完美校准。
+ECE 和 Brier score 都要求 N>0。二分类置信度和标签应位于 [0,1]；ECE 分桶数 B 为正整数，分桶应覆盖每个样本且互不重叠，空桶不参与加权。没有校准样本时应报告 N/A，而不是把空集合当作完美校准。
 
 如果验证器输出 p_i，系统可能用阈值决定自动通过、拒答或转人工。把预测分数分成 B 个桶，ECE 可写成：
 
@@ -199,7 +218,7 @@ S_b 是第 b 个分桶，Acc 是实际正确率，Conf 是平均预测置信度�
 =\frac{1}{N}\sum_{i=1}^{N}(p_i-y_i)^2,
 ~~~
 
-其中 y_i 是真实标签。Guo 等人的 [On Calibration of Modern Neural Networks](https://arxiv.org/abs/1706.04599) 讨论了现代神经网络的校准和温度缩放；在 Agent 或高风险推理中，校准集必须独立于验证器训练集，并按任务和风险切片检查。
+其中 y_i∈{0,1} 是真实标签；多分类时应使用按类别概率向量定义的 Brier score，而不能把类别 ID 直接代入这个标量公式。Guo 等人的 [On Calibration of Modern Neural Networks](https://arxiv.org/abs/1706.04599v2) 讨论了现代神经网络的校准和温度缩放；在 Agent 或高风险推理中，校准集必须独立于验证器训练集，并按任务和风险切片检查。
 
 ### Reward Model Bias 与 Hard Negative
 
@@ -214,7 +233,7 @@ Outcome Reward Model（ORM）只看最终答案，标注便宜，适合有明确
 过程监督不能自动带来完整可解释性。一个步骤可能形式上正确但与目标无关，也可能最终答案正确但中间过程不可靠。评估必须同时保留最终答案标签、步骤标签、第一处错误、验证器结果和标注来源。
 
 ### 步骤标签与第一处错误
-如果所有步骤都正确，第一处错误位置应记录为不存在；如果步骤标签缺失或步骤数为零，应从步骤准确率分母中排除并报告覆盖率。
+如果所有步骤都正确，第一处错误位置应记录为不存在；如果步骤标签缺失或步骤数为零，应从步骤准确率分母中排除并报告覆盖率；有效步骤总数为零时，步骤准确率应为 N/A。
 
 设第 i 个样本被切成 M_i 个步骤，q_ij=1 表示第 j 步正确，第一处错误位置为：
 
@@ -225,7 +244,7 @@ j_i^{\mathrm{err}}
 
 若所有步骤正确，可以将 j_i^err 标记为不存在。第一处错误比平均步骤分数更有诊断价值：后续步骤可能只是错误前提的连锁反应，修复或搜索回退应优先发生在第一处错误处。
 
-步骤准确率为：
+有效步骤总数必须大于零，否则步骤准确率为 N/A。步骤准确率为：
 
 ~~~math
 A_{\mathrm{step}}
@@ -250,7 +269,7 @@ C_{\mathrm{label}}
 =\sum_i\sum_j(1-a_{ij})c_{ij},
 ~~~
 
-其中 `a_ij` 必须是 0/1 覆盖标记，`c_ij` 是该步骤人工切分、判断、复核和仲裁的有限非负成本；步骤数为零的样本不进入这个分母，并应单独报告覆盖率。提高自动覆盖率不等于提高标签质量，自动规则仍需要抽样审计。
+其中 `a_ij` 必须是 0/1 覆盖标记，`c_ij` 是该步骤人工切分、判断、复核和仲裁的有限非负成本；步骤数为零的样本不进入分母，并应单独报告覆盖率。有效步骤总数为零时覆盖率为 N/A。提高自动覆盖率不等于提高标签质量，自动规则仍需要抽样审计。
 
 ### PRM 剪枝
 
@@ -283,7 +302,7 @@ s_{t+1}=T(s_t,a_t).
 
 ### Beam Search
 
-Beam search 按层展开候选，每层保留分数最高的 K 个状态：
+Beam width K 必须为正整数；frontier 为空时应明确终止或回退，不能把空候选集伪装成评分 0。Beam search 按层展开候选，每层保留分数最高的 K 个状态：
 
 ~~~math
 F_{t+1}
@@ -302,7 +321,7 @@ Best-first search 在全局 frontier 中取当前分数最高的节点，而不�
 ### Tree of Thoughts 与 MCTS
 对已访问节点要求访问次数和父节点访问次数均为正，探索常数非负；未访问节点必须走单独的扩展分支，不能直接计算 UCT。
 
-Tree of Thoughts 论文 [arXiv:2305.10601](https://arxiv.org/abs/2305.10601) 将中间想法组织成可搜索的树，并通过评估与回溯探索多条路径。MCTS 则在选择、扩展、模拟和回传之间反复分配预算。UCT 常用的选择分数可写成：
+Tree of Thoughts 论文 [arXiv:2305.10601v2](https://arxiv.org/abs/2305.10601v2) 将中间想法组织成可搜索的树，并通过评估与回溯探索多条路径。MCTS 则在选择、扩展、模拟和回传之间反复分配预算。UCT 常用的选择分数可写成：
 
 ~~~math
 \mathrm{UCT}(v)
@@ -326,7 +345,7 @@ W_v 是节点累计价值，N_v 是访问次数，N_parent 是父节点访问次
 b=(K,L,D,V,U,T),
 ~~~
 
-其中 K 是候选数，L 是单候选长度，D 是搜索深度，V 是 verifier 调用次数，U 是工具调用次数，T 是 token 或总计算预算。这样比笼统说“让模型多思考”更容易做成本归因。
+其中 K 是候选数，L 是单候选 token 上限，D 是搜索深度，V 是 verifier 调用次数，U 是工具调用次数，T 是总 token 预算；这些预算均非负，计数项使用整数。FLOPs、墙钟时间和工具费用用各自单位单独记录，不能和 token 数直接相加。这样比笼统说“让模型多思考”更容易做成本归因。
 
 ### 自适应路由
 
@@ -390,20 +409,20 @@ Benchmark contamination 指评估题或近重复题泄漏到训练数据，导�
 代码 Agent 的推理不能只看生成文本。更完整的链路是：理解需求、定位接口、生成补丁、运行公开测试、读取错误、修复、运行隐藏测试并检查安全边界。执行反馈是环境观察，不等于自然语言提示；它必须被结构化为退出码、测试结果、日志摘要和资源状态。
 
 ### pass@k 与 pass@1
-该估计要求 n 为正整数，k 为整数且 0≤k≤n；当没有候选或 k 超出候选数时，结果不应静默补默认值。通过测试的候选数 c 也必须满足 0≤c≤n。
+该估计要求 n 为正整数，k 为正整数且 1≤k≤n；当没有候选或 k 超出候选数时，结果不应静默补默认值。通过测试的候选数 c 也必须满足 0≤c≤n。
 
-HumanEval 论文 [arXiv:2107.03374](https://arxiv.org/abs/2107.03374) 讨论了代码生成评估中的 pass@k。若生成 n 个候选，其中 c 个通过测试，常用无偏估计为：
+HumanEval 论文 [arXiv:2107.03374v2](https://arxiv.org/abs/2107.03374v2) 讨论了代码生成评估中的 pass@k。若从同一策略独立生成 n 个候选，其中 c 个通过测试，常用无偏估计为：
 
 ~~~math
 \mathrm{pass@}k
 =1-\frac{\binom{n-c}{k}}{\binom{n}{k}}.
 ~~~
 
-要求 0 <= k <= n。它回答“候选集合中至少找到一个通过测试解的潜力”，不是一次调用默认成功率。生产系统还应报告 pass@1、隐藏测试、执行时间、资源占用和单位正确成本。
+要求 1 <= k <= n。该估计把候选视为同一策略下的独立抽样结果，目标是估计从该策略中取 k 个候选至少有一个通过的概率；当 `n-c<k` 时组合数按 0 处理。它回答“候选集合中至少找到一个通过测试解的潜力”，不是一次调用默认成功率。生产系统还应报告 pass@1、隐藏测试、执行时间、资源占用和单位正确成本。
 
 ### 公开测试、隐藏测试与修复
 
-公开测试可以提供快速反馈，隐藏测试更接近未见样本，但隐藏测试弱或覆盖不足时，二者都不能证明完全正确。定义公开测试准确率 A_pub、隐藏测试准确率 A_hid，差距为：
+公开测试可以提供快速反馈，隐藏测试更接近未见样本，但隐藏测试弱或覆盖不足时，二者都不能证明完全正确。两类测试都必须有非空且独立定义的样本集。定义公开测试准确率 A_pub、隐藏测试准确率 A_hid，差距为：
 
 ~~~math
 \Delta_{\mathrm{pub-hid}}=A_{\mathrm{pub}}-A_{\mathrm{hid}}.
@@ -429,7 +448,7 @@ e_i=(x_i,y_i^\star,V_i,P_i,z_i,q_i,g_i,r_i,b_i),
 
 ### 变体与鲁棒性下降
 
-对原题和变体分别测得 A_orig、A_var，可以定义鲁棒性下降：
+在同一评分规则、非空评估集上对原题和变体分别测得 A_orig、A_var，可以定义鲁棒性下降：
 
 ~~~math
 D_{\mathrm{robust}}=A_{\mathrm{orig}}-A_{\mathrm{var}}.
@@ -439,7 +458,7 @@ D_{\mathrm{robust}}=A_{\mathrm{orig}}-A_{\mathrm{var}}.
 
 ### Paired Lift
 
-在同一批样本上比较新旧系统逐题正确性，配对提升为：
+N 必须是两种配置都有有效结果且具备参考答案的配对样本数，并且 N>0；否则配对提升为 N/A。在同一批样本上比较新旧系统逐题正确性，配对提升为：
 
 ~~~math
 \Delta_{\mathrm{pair}}
@@ -466,7 +485,7 @@ q_{0.975}(\Delta^{(b)})
 \right].
 ~~~
 
-重采样对象应是同一道题的新旧结果对，而不是独立打散两套结果。区间跨过 0 时，不能把一个点估计写成确定提升；样本本身不代表目标流量时，窄区间也不能解决外推问题。
+重采样对象应是同一道题的新旧结果对，而不是独立打散两套结果；样本对数量 N 必须大于零。区间跨过 0 时，不能把一个点估计写成确定提升；样本本身不代表目标流量时，窄区间也不能解决外推问题。
 
 ~~~python
 from random import Random
@@ -490,15 +509,16 @@ def _validate_pairs(base, candidate):
         for value in (*base, *candidate)
     ):
         raise ValueError("paired correctness values must be 0 or 1")
+    return base, candidate
 
 
 def paired_lift(base, candidate):
-    _validate_pairs(base, candidate)
+    base, candidate = _validate_pairs(base, candidate)
     return sum(new - old for old, new in zip(base, candidate)) / len(base)
 
 
 def bootstrap_lift(base, candidate, rounds=1000, seed=7):
-    _validate_pairs(base, candidate)
+    base, candidate = _validate_pairs(base, candidate)
     if isinstance(rounds, bool) or not isinstance(rounds, Integral) or rounds < 1:
         raise ValueError("rounds must be positive")
     rng = Random(seed)
@@ -521,7 +541,8 @@ lift, interval = bootstrap_lift(
     rounds=200,
 )
 assert lift == 0.2
-assert interval[0] <= lift <= interval[1]
+assert len(interval) == 2
+assert interval[0] <= interval[1]
 try:
     bootstrap_lift([1, 0], [1], rounds=20)
 except ValueError:
@@ -540,16 +561,17 @@ except ValueError:
     print("invalid paired input rejected")
 else:
     raise AssertionError("invalid paired input was accepted")
-print("lift=", lift, "interval=", interval)
+print("paired lift=", lift, "| interval ordered=", interval[0] <= interval[1])
 ~~~
+代码状态：静态审阅，未运行（2026-10-30）；依赖 Python 3.8+ 标准库，保存为 `demo.py` 后运行 `python3 demo.py`。预期输出依次为 `unpaired bootstrap input rejected`、`invalid bootstrap rounds rejected`、`invalid paired input rejected` 和 `paired lift= 0.2 | interval ordered= True`。
 
-这是小样本教学实现，分位点插值、区间类型和随机种子处理都可以有不同选择；生产评估还要考虑分层、聚类和多重比较。
+这是小样本教学实现，采用排序后 `floor(q × rounds)` 作为分位点索引；其他库可能使用插值或不同端点规则。固定随机种子便于复核同一实现，但不代表生产评估；生产方案还要考虑分层、聚类和多重比较。
 
 ## 12.11 Benchmark、污染与多维评估
 
 ### Benchmark 能说明什么
 
-Benchmark 提供相同数据和指标下的比较入口，但它只测量任务、提示、模型、采样预算和评分脚本定义的行为。HELM（[Stanford CRFM HELM](https://crfm.stanford.edu/helm/latest/)）强调从准确性、鲁棒性、偏差、毒性和效率等多维度评估；它的价值在于保留维度，而不是给出一个万能总分。
+Benchmark 提供相同数据和指标下的比较入口，但它只测量任务、提示、模型、采样预算和评分脚本定义的行为。HELM 原始论文（[Holistic Evaluation of Language Models](https://arxiv.org/abs/2211.09110v2)）在可行时对核心场景报告准确性、校准、鲁棒性、公平性、偏差、毒性和效率七类指标；其覆盖受可行性限制，价值在于显露多维取舍，不是给出万能总分。项目的[当前评估入口](https://crfm.stanford.edu/helm/latest/)可能随版本更新。
 
 SWE-bench 论文 [arXiv:2310.06770](https://arxiv.org/abs/2310.06770) 用真实软件仓库 issue 评估代码 Agent；其结果仍受仓库、测试、环境、补丁和执行策略影响。公开 benchmark 适合建立共同语言，业务结论还需要私有、干净、时间隔离和线上任务集。
 
@@ -561,11 +583,11 @@ SWE-bench 论文 [arXiv:2310.06770](https://arxiv.org/abs/2310.06770) 用真实�
 \Delta_s=A_s^{\mathrm{new}}-A_s^{\mathrm{base}}.
 ~~~
 
-Delta_s < 0 只说明方向上退化；是否阻止发布还要结合样本量、置信区间、流量和严重度。高风险约束不应被其他低风险切片的提升抵消。
+Delta_s < 0 只说明方向上退化；空切片应记为 N/A。是否阻止发布还要结合样本量、置信区间、流量和严重度。高风险约束不应被其他低风险切片的提升抵消。
 
 ### Clean Eval Lift
 
-评估集应区分开发集、公开 benchmark、污染可疑集、干净集、变体集和线上样本。只有在去除近重复、训练时间重叠和调参泄漏后仍然存在的提升，才更接近泛化证据。模型卡或产品页中的自报分数要和独立复现、目标版本和成本条件分开记录。
+评估集应区分开发集、公开 benchmark、污染可疑集、干净集、变体集和线上样本。只有在去除近重复、训练时间重叠和调参泄漏后仍然存在的提升，才更接近泛化证据。评分规则也要明确如何处理拒答、部分正确和错误代价：若拒答一概计错，准确率式目标可能让猜测比表达不确定更有利。2026 年一项理论分析和有限 SimpleQA 实验研究了这种激励；它不证明所有准确率评估都会诱发幻觉。模型卡或产品页中的自报分数要和独立复现、目标版本和成本条件分开记录。
 
 ## 12.12 Human Evaluation 与 LLM-as-a-Judge
 
@@ -577,7 +599,7 @@ Delta_s < 0 只说明方向上退化；是否阻止发布还要结合样本量�
 
 ### LLM-as-a-Judge
 
-LLM judge 可以规模化进行 rubric 打分、两两偏好和错误分类，但会受到答案长度、顺序、格式、模型同源性和提示设计影响。MT-Bench/Chatbot Arena 论文 [arXiv:2306.05685](https://arxiv.org/abs/2306.05685) 讨论了 LLM judge 的使用和偏差，不能被解读为所有 judge 在所有领域都可靠。
+LLM judge 可以规模化进行 rubric 打分、两两偏好和错误分类，但会受到答案长度、顺序、格式、评审模型对自身输出的偏好和提示设计影响。MT-Bench/Chatbot Arena 论文 [arXiv:2306.05685v4](https://arxiv.org/abs/2306.05685v4) 讨论了 LLM judge 的使用和偏差，不能被解读为所有 judge 在所有领域都可靠。
 
 降低偏差的措施包括随机化候选顺序、隐藏模型身份、控制答案长度、使用明确 rubric、独立人工校准、多个 judge 交叉和高风险样本人工复核。judge 自身必须被评估，不能把它的分数直接当作发布真值。
 
@@ -684,12 +706,15 @@ R=F(M,H,E,B,D).
 
 本章主要资料按证据类型分层：
 
-- CoT 与 self-consistency 分别参见 [CoT Prompting](https://arxiv.org/abs/2201.11903) 和 [Self-Consistency](https://arxiv.org/abs/2203.11171)。它们说明特定任务上的提示和采样现象，不证明可见推理忠实或所有模型都同样受益。
-- 候选验证和过程监督可参见 [Training Verifiers](https://arxiv.org/abs/2110.14168) 与 [Let's Verify Step by Step](https://arxiv.org/abs/2305.20050)。论文结论受数据、步骤标签、模型和验证器设置限制。
-- 搜索推理可参见 [Tree of Thoughts](https://arxiv.org/abs/2305.10601)；搜索收益取决于状态、动作、评分器和预算，不能由算法名称直接推出。
-- 代码生成评估可参见 [HumanEval](https://arxiv.org/abs/2107.03374)，pass@k 不能替代隐藏测试、pass@1 和生产执行成本。
-- 多维模型评估可参见 [HELM](https://crfm.stanford.edu/helm/latest/)；LLM judge 的偏差可参见 [MT-Bench/Chatbot Arena](https://arxiv.org/abs/2306.05685)。
-- 校准基础可参见 [On Calibration of Modern Neural Networks](https://arxiv.org/abs/1706.04599)；代码评估工具链可参考 [lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness)，实现版本和任务配置仍需固定。
+- CoT 与 self-consistency 分别参见 [CoT Prompting](https://arxiv.org/abs/2201.11903v6) 和 [Self-Consistency](https://arxiv.org/abs/2203.11171v4)。它们说明特定任务上的提示和采样现象，不证明可见推理忠实或所有模型都同样受益。
+- 候选验证和过程监督可参见 [Training Verifiers](https://arxiv.org/abs/2110.14168v2) 与 [Let's Verify Step by Step](https://arxiv.org/abs/2305.20050v1)。论文结论受数据、步骤标签、模型和验证器设置限制。
+- 搜索推理可参见 [Tree of Thoughts](https://arxiv.org/abs/2305.10601v2)；搜索收益取决于状态、动作、评分器和预算，不能由算法名称直接推出。
+- 代码生成评估可参见 [HumanEval](https://arxiv.org/abs/2107.03374v2)，pass@k 不能替代隐藏测试、pass@1 和生产执行成本。
+- 多维模型评估可参见 [HELM 原始论文](https://arxiv.org/abs/2211.09110v2)及[当前项目入口](https://crfm.stanford.edu/helm/latest/)；LLM judge 的偏差可参见 [MT-Bench/Chatbot Arena](https://arxiv.org/abs/2306.05685v4)。
+- 校准基础可参见 [On Calibration of Modern Neural Networks](https://arxiv.org/abs/1706.04599v2)；代码评估工具链可参考 [lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness)，实现版本和任务配置仍需固定。
+- 测试时计算的预算分配可参见 Snell 等人的 [Scaling LLM Test-Time Compute Optimally](https://arxiv.org/abs/2408.03314)；收益对论文中的数学任务、模型和预算设置敏感。Hariri 等人的 [Test-Time Scaling in Reasoning LLMs](https://arxiv.org/abs/2608.04001v2) 按计算发生在未完成轨迹、完整候选聚合或前缀搜索中分类，并讨论系统级评估与复现；该预印本提供分析框架，不是方法效果排名。
+- Kalai 等人关于[准确率式评估与幻觉激励](https://doi.org/10.1038/s41586-026-10549-w)的理论分析和 SimpleQA 实验支持检查 abstention 与错误惩罚如何进入 rubric；结论受其设定约束，不等于准确率指标普遍导致幻觉。
+- CoT 轨迹评估可参见 [FACT-E](https://aclanthology.org/2026.findings-acl.1014/)，它以受控扰动估计步骤间忠实性，并与轨迹到答案的一致性合看；方法增加模型调用，结论不证明所有可见轨迹忠实或直接观测到内部状态。
 
 论文、benchmark、官方 model card、产品页、模型输出和目标系统实测的可信度用途不同。论文适合说明方法和实验条件，benchmark 适合定义共同测量，官方材料适合说明某版本公开声明；业务结论必须由独立、干净、成对、分层、成本受控的评估支持。
 

@@ -6,6 +6,28 @@
 
 本章将这些概念放入同一条可验证的系统链路中。初学者可以先沿着“材料 -> 证据 -> 状态 -> 动作 -> 结果”的故事理解整体；有经验的读者可以进一步检查每个公式的变量、每个协议对象的边界、每次重试的副作用和每个评估指标的分母。论文用于说明方法最初的研究结论，协议和官方文档用于说明接口语义，代码示例只验证可复现的小规模数量关系，生产系统的吞吐、可靠性和安全性仍必须用目标环境实测。
 
+本章是百科速查入口；长上下文评估、RAG 证据链、Agent 规划与执行、Harness 和协议实现的完整讲解见下表：
+
+| 条目 | 完整主讲 |
+| --- | --- |
+| 11.1 长上下文与位置利用 | [第二册第七部分：长上下文、RAG 与 Agent](../../book-02-advanced-100/chapters/07-长上下文rag与agent.md)、[第七册第 7 章：多模态与长上下文评估](../../book-07-evaluation-experiments/chapters/07-多模态与长上下文评估.md)、[第 13 章：1M Context 有效能力评测](../../book-07-evaluation-experiments/chapters/13-1m-context有效能力评测.md) |
+| 11.2 上下文预算、压缩与排序 | [第二十册第 7 章：上下文管理与记忆压缩](../../book-20-agent-harness-runtime/chapters/07-上下文管理与记忆压缩.md)、[第 18 章：Context Folding](../../book-20-agent-harness-runtime/chapters/18-context-folding上下文折叠.md) |
+| 11.3–11.6 RAG、检索、证据与引用 | [第二册第七部分](../../book-02-advanced-100/chapters/07-长上下文rag与agent.md)、[第十七册第 6 章：Agentic RAG](../../book-17-agent-tool-use/chapters/06-agentic-rag.md)、[第七册第 12 章：评估体系综合设计](../../book-07-evaluation-experiments/chapters/12-评估体系综合设计与工程落地.md) |
+| 11.7–11.8 Agent 状态、循环与规划 | [第十七册第 1 章：Agent 总览](../../book-17-agent-tool-use/chapters/01-agent总览.md)、[第 3 章：ReAct 与 Plan-Act-Observe](../../book-17-agent-tool-use/chapters/03-react与plan-act-observe.md)、[第 4 章：Planning 与 Task Decomposition](../../book-17-agent-tool-use/chapters/04-planning与task-decomposition.md)、[第二十册第 2 章：Agent Runtime 架构](../../book-20-agent-harness-runtime/chapters/02-agent-runtime架构.md) |
+| 11.9–11.10 工具契约、重试与副作用 | [第十七册第 2 章：Tool Use 与 Function Calling](../../book-17-agent-tool-use/chapters/02-tool-use与function-calling.md)、[第二十二册第 3 章：Tool Schema](../../book-22-tool-protocol-ecosystem/chapters/03-tool-schema-json-schema与参数约束.md)、[第 7 章：失败、重试与人工接管](../../book-22-tool-protocol-ecosystem/chapters/07-工具调用失败重试降级和人工接管.md)、[第 11 章：Tool Executor 与幂等](../../book-22-tool-protocol-ecosystem/chapters/11-tool-executor同步异步超时和幂等.md) |
+| 11.11–11.12 MCP | [第二十二册第 18 章：MCP 基本概念](../../book-22-tool-protocol-ecosystem/chapters/18-mcp基本概念client-server-tools-resources-prompts.md)、[第 21 章：Resources](../../book-22-tool-protocol-ecosystem/chapters/21-mcp-resources文件数据库网页和上下文资源暴露.md)、[第 22 章：Prompts](../../book-22-tool-protocol-ecosystem/chapters/22-mcp-prompts可复用提示模板和工作流封装.md)、[第 23 章：权限与沙箱](../../book-22-tool-protocol-ecosystem/chapters/23-mcp权限安全和本地沙箱.md)、[第二十册第 14 章：MCP/A2A 与 Harness 集成](../../book-20-agent-harness-runtime/chapters/14-mcp-a2a与harness集成.md) |
+| 11.13 A2A | [第二十二册第 26 章：Agent Card](../../book-22-tool-protocol-ecosystem/chapters/26-agent-card能力声明和服务发现.md)、[第 27 章：任务委派](../../book-22-tool-protocol-ecosystem/chapters/27-agent间任务委派状态同步和结果返回.md)、[第 28 章：消息与上下文边界](../../book-22-tool-protocol-ecosystem/chapters/28-multi-agent协作中的消息格式和上下文边界.md)、[第 29 章：A2A 与 MCP 分工](../../book-22-tool-protocol-ecosystem/chapters/29-a2a与mcp的分工agent-to-agent-vs-agent-to-tool.md)、[第 30 章：身份、权限与信任](../../book-22-tool-protocol-ecosystem/chapters/30-跨agent权限身份审计和信任模型.md)、[第二十册第 14 章](../../book-20-agent-harness-runtime/chapters/14-mcp-a2a与harness集成.md) |
+| 11.14 Memory | [第十七册第 5 章：Memory 系统](../../book-17-agent-tool-use/chapters/05-memory系统.md)、[第二十册第 7 章](../../book-20-agent-harness-runtime/chapters/07-上下文管理与记忆压缩.md) |
+| 11.15 Code Agent | [第十七册第 7 章：Code Agent](../../book-17-agent-tool-use/chapters/07-code-agent.md)、[第二十册第 3 章：Coding Agent 工作流](../../book-20-agent-harness-runtime/chapters/03-coding-agent工作流.md)、[第 5 章：文件与代码编辑](../../book-20-agent-harness-runtime/chapters/05-文件系统与代码编辑.md)、[第 6 章：终端与命令安全](../../book-20-agent-harness-runtime/chapters/06-终端执行与命令安全.md)、[第 8 章：权限与安全沙箱](../../book-20-agent-harness-runtime/chapters/08-权限模型与安全沙箱.md) |
+| 11.16 Browser 与 Computer Use | [第十七册第 8 章：Browser 与 Computer Use Agent](../../book-17-agent-tool-use/chapters/08-browser与computer-use-agent.md) |
+| 11.17 Multi-Agent | [第十七册第 9、14 章：Multi-Agent 与 Agent Swarm](../../book-17-agent-tool-use/chapters/09-multi-agent.md)、[第二十二册第 31 章：多 Agent 失败模式](../../book-22-tool-protocol-ecosystem/chapters/31-多agent系统的失败模式循环冲突幻觉传播.md) |
+| 11.18 RAG、工具、Agent 与 Memory 的组合 | [第二十二册第 43 章：工具调用和 RAG/Agent/Memory 的组合](../../book-22-tool-protocol-ecosystem/chapters/43-工具调用和rag-agent-memory的组合.md) |
+| 11.19 Trace、Replay 与可观测性 | [第二十册第 9 章：Trace、日志与回放](../../book-20-agent-harness-runtime/chapters/09-trace日志回放与可观测性.md)、[第二十二册第 14 章：工具日志、Trace、Replay 和审计](../../book-22-tool-protocol-ecosystem/chapters/14-工具日志trace-replay和审计.md) |
+| 11.20 评估 | [第十七册第 10 章：Agent 评估](../../book-17-agent-tool-use/chapters/10-agent评估.md)、[第七册第 12 章](../../book-07-evaluation-experiments/chapters/12-评估体系综合设计与工程落地.md)、[第二十二册第 8 章：工具调用评估](../../book-22-tool-protocol-ecosystem/chapters/08-工具调用评估调用准确率参数正确率和任务成功率.md)、[第 45 章：Tool-use Eval Benchmark](../../book-22-tool-protocol-ecosystem/chapters/45-tool-use-eval-benchmark设计.md) |
+| 11.21 安全与提示注入 | [第十七册第 11 章：Agent 安全](../../book-17-agent-tool-use/chapters/11-agent安全.md)、[第二十册第 8 章：权限模型与安全沙箱](../../book-20-agent-harness-runtime/chapters/08-权限模型与安全沙箱.md)、[第二十二册第 13 章：工具安全](../../book-22-tool-protocol-ecosystem/chapters/13-工具安全越权注入数据泄露和危险动作.md)、[第 41 章：工具协议中的提示注入防御](../../book-22-tool-protocol-ecosystem/chapters/41-工具协议中的prompt-injection防御.md) |
+| 11.22 成本、延迟与可靠性 | [第二十二册第 44 章：工具调用成本、延迟与并发](../../book-22-tool-protocol-ecosystem/chapters/44-工具调用成本延迟和并发控制.md)、[第二十册第 17 章：长任务 Agent 与 Checkpoint](../../book-20-agent-harness-runtime/chapters/17-long-running-agent与checkpoint.md) |
+| 11.23–11.25 端到端设计与综合 | [第十七册第 10、11 章：评估与安全](../../book-17-agent-tool-use/chapters/10-agent评估.md)、[第二十册第 15 章：Agent Harness 系统设计](../../book-20-agent-harness-runtime/chapters/15-agent-harness系统设计.md)、[第二十二册第 16 章：企业工具平台系统设计](../../book-22-tool-protocol-ecosystem/chapters/16-企业工具平台系统设计.md) |
+
 ~~~text
 一次带知识和工具的任务：
 
@@ -39,7 +61,7 @@ n_{\mathrm{in}}
 =n_{\mathrm{sys}}+n_{\mathrm{hist}}+n_{\mathrm{evi}}+n_{\mathrm{tool}}+n_{\mathrm{user}}+n_{\mathrm{format}}.
 ~~~
 
-其中 `n_format` 包括 XML、JSON、角色标记和引用标签等模板开销。实际可用的证据预算不是 `L`，而是扣除输出、固定指令和安全策略后的剩余量：
+为避免重复计数，这些组成项应按最终输入序列中的 token 位置互斥归类；例如，当前轮新加入的检索片段记入 `n_evi`，而先前检索内容若已成为历史消息，就计入 `n_hist`。`n_format` 包括 XML、JSON、角色标记和引用标签等模板开销。实际可用的证据预算不是 `L`，而是扣除输出、固定指令和安全策略后的剩余量：
 
 ~~~math
 B_{\mathrm{evidence}}
@@ -50,7 +72,7 @@ B_{\mathrm{evidence}}
 
 ### 注意力代价与 KV cache
 
-标准自注意力需要让序列中的 token 互相比较。若序列长度为 `n`，隐藏维度为 `d`，单层注意力中形成注意力分数的矩阵规模近似为 `n x n`，因此朴素实现的时间和中间显存压力会随 `n^2` 增长。FlashAttention 等实现通过分块和更好的内存访问减少了中间矩阵的读写，但没有把所有长序列任务的总成本变成常数。
+标准自注意力需要让序列中的 token 互相比较。若序列长度为 `n`，隐藏维度为 `d`，单头注意力分数矩阵约有 `n x n` 个元素，注意力计算量随 `O(n^2 d)` 增长；若实现物化整张分数矩阵，其中间激活显存随 `O(n^2)` 增长。FlashAttention 等实现通过分块和更好的内存访问减少了中间矩阵的读写，但没有把所有长序列任务的总成本变成常数。
 
 自回归生成时，已经处理过的 key 和 value 通常会放入 KV cache。设层数为 `N_layer`，每层每个 token 的 key/value 头维度总和为 `2H_kv`，元素字节数为 `b`，batch 为 `B`，当前序列长度为 `S`，则一个粗略的 KV cache 估算为：
 
@@ -60,7 +82,7 @@ M_{\mathrm{KV}}
 B\times S\times N_{\mathrm{layer}}\times 2H_{\mathrm{kv}}\times b.
 ~~~
 
-`H_kv` 取决于注意力头数、每个头的维度以及是否使用 multi-query attention 或 grouped-query attention；不同实现可能把张量按页、块或其他布局保存。这个公式适合判断“长度翻倍为什么会明显增加显存”，不应当替代目标推理引擎的 profile。
+令 `H_kv=n_kv_heads*d_head`，即每层每个 token 的全部 key 头或全部 value 头各自占用的元素数；不同注意力头配置会改变它。实现可能把张量按页、块或其他布局保存。这个公式适合判断“长度翻倍为什么会明显增加显存”，不应当替代目标推理引擎的 profile。
 
 ### 位置表示和长度外推
 
@@ -72,18 +94,18 @@ Transformer 的注意力本身并不知道 token 的先后顺序，因此需要�
 
 长文本研究中反复出现一种现象：证据放在输入开头或结尾时，模型往往比证据放在中间时更容易回答正确。Liu 等人在 *Lost in the Middle: How Language Models Use Long Contexts* 中用多种长上下文任务测量了这种位置敏感性，论文入口见 [arXiv:2307.03172](https://arxiv.org/abs/2307.03172)。这并不意味着所有模型、所有任务都以同样幅度退化，而是说明“窗口足够大”与“证据可以被稳定利用”是两个可分离的实验问题。
 
-可以把一条证据在位置 `p` 的使用概率记为 `u(p)`。一个最简单的有效上下文分数是对任务所需证据集合 `E` 的加权平均：
+可以把一条证据位于位置 `p` 时被正确使用的概率记为 `u(p)`，并用 `p_e` 表示证据 `e` 在输入中的位置。一个最简单的有效上下文分数是对任务所需证据集合 `E` 的加权平均：
 
 ~~~math
 U_{\mathrm{context}}
-=\frac{\sum_{e\in E}w_e\,u(e)}{\sum_{e\in E}w_e},
+=\frac{\sum_{e\in E}w_e\,u(p_e)}{\sum_{e\in E}w_e},
 ~~~
 
-其中 `w_e` 表示证据对任务的重要程度，要求证据集合非空、权重有限且总和大于零。这个量不是通用 benchmark 的标准定义，而是帮助工程团队区分容量和使用效果的教学模型。实际测量时，可以固定问题和噪声，只改变 needle 的位置，分别记录检索率、答案正确率和引用正确率。
+其中 `w_e` 表示证据对任务的重要程度，要求证据集合非空、每个权重有限且非负，并且权重总和大于零。这个量不是通用 benchmark 的标准定义，而是帮助工程团队区分容量和使用效果的教学模型。实际测量时，可以固定问题和噪声，只改变 needle 的位置，分别记录检索率、答案正确率和引用正确率。
 
-### 一个可运行的位置敏感性实验
+### 一个位置敏感性测试计划
 
-下面的代码不调用模型，只构造一个可重复的测试计划。它把证据放到序列的不同位置，并输出相对位置；真正的 `answer()` 应由目标模型或目标系统提供。这样做的价值是先固定实验设计，避免看到某一次回答后临时改变样本。
+下面的代码不调用模型，只构造一个可重复的测试计划。这里每个列表项是抽象的位置槽位，`noise` 也是占位值，不代表目标 tokenizer 的一个真实 token；代码只检查证据起始位置如何随比例变化。真实实验必须使用目标 tokenizer 计算长度，并将多 token 的证据记作起止 span，再由目标模型或目标系统给出答案。这样做的价值是先固定实验设计，避免看到某一次回答后临时改变样本。
 
 ~~~python
 import math
@@ -130,6 +152,7 @@ for invalid in (
         raise AssertionError("invalid needle case was accepted")
 print([(p, position) for p, (_, position) in zip(fractions, cases)])
 ~~~
+代码状态：静态审阅，未运行（2026-10-30）；依赖 Python 3.8+ 标准库，保存为 `demo.py` 后运行 `python3 demo.py`。预期输出：`[(0.0, 0), (0.25, 25), (0.5, 50), (0.75, 75), (1.0, 100)]`。
 
 初学者可以把它理解成“同一句话换五个位置”；进阶实验还应加入多条相互干扰的 needle、不同文档格式、不同问题类型、不同输出长度和多次随机采样。最终报告应同时保留请求 token、实际输出 token、位置、答案、引用和延迟，否则无法判断错误来自位置利用还是生成截断。
 
@@ -297,8 +320,9 @@ for invalid_constant in (0, float("nan"), True):
         pass
     else:
         raise AssertionError("invalid RRF constant was accepted")
-print(fused)
+print([item for item, _ in fused])
 ~~~
+代码状态：静态审阅，未运行（2026-10-30）；依赖 Python 3.8+ 标准库，保存为 `demo.py` 后运行 `python3 demo.py`。预期输出：依次为 `duplicate ranking item rejected` 和 `['B', 'A', 'D', 'C']`。
 
 ## 11.5 证据状态、Agentic RAG 与答案支持
 
@@ -341,11 +365,11 @@ print(fused)
 
 ~~~math
 P(\mathrm{success})
-\approx
-P(R)\times P(C\mid R)\times P(G\mid C)\times P(A\mid G),
+=
+P(R)\times P(C\mid R)\times P(G\mid R,C)\times P(A\mid R,C,G),
 ~~~
 
-其中 `R` 表示正确证据被召回，`C` 表示证据正确进入上下文，`G` 表示生成内容忠实，`A` 表示答案满足业务协议。这个乘法不是独立性假设下的严格系统概率，只是说明每一层的损失都会压低最终成功率。
+其中 `R` 表示正确证据被召回，`C` 表示证据正确进入上下文，`G` 表示生成内容忠实，`A` 表示答案满足业务协议。这是按阶段顺序写出的条件概率链式分解，不要求阶段相互独立；若只用 `P(G|C)`、`P(A|G)` 这样的局部条件近似，就还需额外假设前序状态不会继续影响后续概率。
 
 ### 拒答是 RAG 的正常输出
 
@@ -414,7 +438,7 @@ READY -> THINKING -> ACTION_VALIDATION -> EXECUTING -> OBSERVING
 
 Harness 是包围模型的运行控制层，负责上下文拼装、工具注册、权限决策、状态持久化、重试、超时、日志和恢复。它决定模型能看到什么、能调用什么、一次任务可以消耗多少资源。一个能力更强的模型，如果被没有预算和恢复语义的 harness 包围，仍可能形成不可靠系统。
 
-Anthropic 的工程文章 [Building effective agents](https://www.anthropic.com/engineering/building-effective-agents) 区分了预定义 workflow 与更开放的 agent loop，并强调应根据任务需要选择复杂度。文章是工程经验而非跨模型定理；它的价值在于提醒我们先判断任务是否真的需要动态决策。
+Anthropic 的工程文章 [Building effective agents](https://www.anthropic.com/engineering/building-effective-agents) 区分了预定义 workflow 与更开放的 agent loop，并强调应根据任务需要选择复杂度。该页面提示其 2024 年描述的工具生态已有变化；这里仅借用 workflow/agent 的架构区分，不把它作为当前框架或产品接口说明。文章是工程经验而非跨模型定理；它的价值在于提醒我们先判断任务是否真的需要动态决策。
 
 ## 11.8 规划、分解与 Workflow-Agent 边界
 
@@ -508,6 +532,7 @@ except ValueError:
 else:
     raise AssertionError("inconsistent schema was accepted")
 ~~~
+代码状态：静态审阅，未运行（2026-10-30）；依赖 Python 3.8+ 标准库，保存为 `demo.py` 后运行 `python3 demo.py`。预期输出依次为 `invalid tool arguments rejected`、`malformed JSON rejected`、`inconsistent schema rejected`。
 代码只是 schema 的最小模拟。生产执行器应使用目标语言的正式 JSON Schema 校验器，并把解析失败、类型错误、业务拒绝和权限拒绝分成不同错误类别。
 
 ## 11.10 工具执行：副作用、幂等与未知状态
@@ -589,6 +614,7 @@ else:
     raise AssertionError("non-finite retry delay was accepted")
 print(retry_delays(5, 1, 4, budget=5))
 ~~~
+代码状态：静态审阅，未运行（2026-10-30）；依赖 Python 3.8+ 标准库，保存为 `demo.py` 后运行 `python3 demo.py`。预期输出依次为 `retry budget enforced`、`non-finite retry delay rejected`、`[1, 2, 4, 4, 4]`；`budget` 计算初始调用后的重试等待次数。
 
 ### 结果投影与不可信输出
 
@@ -598,23 +624,23 @@ print(retry_delays(5, 1, 4, budget=5))
 
 ### MCP 解决的连接问题
 
-Model Context Protocol（MCP）试图标准化 AI 应用与外部服务器之间的上下文和能力连接。官方规范 [2025-06-18 版本](https://modelcontextprotocol.io/specification/2025-06-18) 将 Host、Client、Server 以及初始化、能力协商、工具、资源、Prompt 等对象放在明确的协议边界内。规范页面会随版本演进，工程实现必须绑定具体版本，不能只写“MCP 兼容”。
+Model Context Protocol（MCP）用于标准化 AI 应用与外部服务器之间的上下文和能力连接。按截至 2026-10-30 的官方 [2026-07-28 规范](https://modelcontextprotocol.io/specification/2026-07-28)，协议以 JSON-RPC 2.0 表达自包含的无状态请求，并按请求协商能力；规范页面会随版本演进，工程实现必须绑定具体版本，不能只写“MCP 兼容”。
 
 初学者可以把 MCP 看成“让不同应用用统一方式发现和调用外部能力”的协议；它不是 Agent 自己的规划算法，也不是权限系统的替代品。Host 仍然拥有用户交互和整体策略，Client 负责与某个 Server 建立连接，Server 暴露能力并执行自身逻辑。不同实现可能把多个 Server 接入同一 Host，但每条连接的能力和信任边界都应单独管理。
 
 ### Tools、Resources 和 Prompts
 
-Tool 表示可被调用的动作，通常有名称、描述、输入 schema 和结果；Resource 表示可读取的上下文资源，使用 URI 和元数据定位；Prompt 表示可发现、可参数化的提示模板。三者的语义不能互换：读取一个资源不应隐含修改动作，把一个有副作用的操作包装成普通资源会误导调用方。
+Tool 表示可被调用的动作，通常有名称、描述、输入 schema 和结果；Resource 表示可读取的上下文资源，使用 URI 和元数据定位；Prompt 表示可发现、可参数化的提示模板。2026-07-28 规范概览列出 Server 可提供 Tools、Resources、Prompts，Client 可提供 Elicitation；Tasks、Skills over MCP 和 MCP Apps 列作可选扩展，需要双方显式支持。三者的语义不能互换：读取一个资源不应隐含修改动作，把一个有副作用的操作包装成普通资源会误导调用方。
 
-MCP 解决了“能力如何发现、消息如何表达和连接如何协商”的一部分问题，但 Host 仍需执行用户授权、租户隔离、输出投影、工具预算和危险动作确认。Server 的描述字段也不能被当作可信指令，来自外部内容的文本仍然要经过数据与指令分离。
+MCP 解决了“能力如何发现、消息如何表达和请求能力如何协商”的一部分问题，但 Host 仍需执行用户授权、租户隔离、输出投影、工具预算和危险动作确认。当前规范要求用户对数据暴露和工具动作有明确控制；协议本身不能替宿主实施这些安全原则。Server 的描述字段也不能被当作可信指令，来自外部内容的文本仍然要经过数据与指令分离。
 
-### 生命周期与能力协商
+### 请求生命周期与能力协商
 
-连接初始化通常需要协商协议版本和双方能力。版本协商成功不代表每一个扩展都可用；调用方应根据声明的 capability 决定是否发送对应消息，并对未知字段保持兼容。生命周期事件、连接关闭、取消和错误都应进入 trace，否则断线后的半完成任务无法恢复。
+2026-07-28 规范概览采用自包含无状态请求和逐请求能力协商，因此不应把 2025-06-18 的连接初始化模型当作现行契约。调用方仍须确认特定请求依赖的能力或可选扩展已协商；不同版本并存时，应由版本适配层处理差异。进度、取消和错误应进入 trace，否则超时后的半完成任务无法恢复。
 
 ### MCP 的工程评估
 
-评估 MCP 集成时，不能只测试“工具能否调用”。还要检查 Server 身份和版本、工具 schema 稳定性、Resource URI 访问范围、Prompt 参数校验、Roots 或沙箱边界、结果大小、连接超时、取消语义和跨 Server 数据流。协议层面通过不等于业务层面安全，业务系统必须在自己的执行器中再次校验权限和副作用。
+评估 MCP 集成时，不能只测试“工具能否调用”。还要检查 Server 身份和规范版本、工具 schema 稳定性、Resource URI 访问范围、Prompt 参数校验、所用版本是否提供 Roots 等本地边界能力、结果大小、超时、取消语义和跨 Server 数据流；不要把旧版 Roots 描述当作所有实现都有的核心能力。协议层面通过不等于业务层面安全，业务系统必须在自己的执行器中再次校验权限和副作用。
 
 ## 11.12 MCP 资源、提示与安全生命周期
 
@@ -638,13 +664,13 @@ MCP 解决了“能力如何发现、消息如何表达和连接如何协商”�
 
 ### A2A 解决的对象不同
 
-Agent2Agent（A2A）协议关注 Agent 之间发现、委派任务、交换消息和产物。当前规范入口为 [a2a-protocol.org/latest/specification](https://a2a-protocol.org/latest/specification/)。A2A 的具体版本和字段可能继续演进，生产系统要固定版本并记录协议适配层。
+Agent2Agent（A2A）协议关注 Agent 之间发现、委派任务、交换消息和产物。截至 2026-10-30，项目 release 记录列出规范补丁版本 1.0.1；[v1.0.1 规范](https://a2a-protocol.org/v1.0.1/specification/)说明在线协商使用 Major.Minor，因此请求中的协议版本仍为 `1.0`，而不是 `1.0.1`。从 v0.3 迁移到 v1.0 涉及破坏性结构变化，例如 Part 和流事件不再使用内嵌 `kind` 判别字段，枚举值也改变；适配器必须固定并显式处理版本，不能只写“A2A 兼容”。变更摘要见[官方 v1.0 迁移说明](https://a2a-protocol.org/latest/whats-new-v1/)和[项目 release 记录](https://github.com/a2aproject/A2A/releases)。
 
 MCP 更接近“一个运行时如何连接外部工具和资源”，A2A 更接近“一个 Agent 如何把任务交给另一个 Agent”。前者的核心对象是 Server capability 和工具/资源，后者的核心对象是 Agent Card、Task、Message、Part、Artifact 和任务状态。一个系统可以用 A2A 委派任务，再由被委派 Agent 通过 MCP 调用工具；两种协议不是互相替代。
 
 ### Agent Card 与发现
 
-Agent Card 描述 Agent 的身份、能力、接口、输入输出类型和认证信息。发现到一个 Card 只说明对方宣称具备某项能力，不说明当前租户已授权，也不说明对方真的能完成具体任务。Card 应有版本、过期和缓存策略；路由决策应记录选择依据和当时看到的 Card 版本。
+Agent Card 描述 Agent 的身份、能力、接口、输入输出类型和认证信息；v1.0 的每个 `AgentInterface` 声明 transport binding 与 `protocolVersion`，HTTP 客户端还需按约定发送 `A2A-Version`。发现到一个 Card 只说明对方宣称具备某项能力，不说明当前租户已授权，也不说明对方真的能完成具体任务。Card 应有版本、过期和缓存策略；路由决策应记录选择依据和当时看到的 Card 版本。
 
 ### Task、Message 与 Artifact
 
@@ -652,7 +678,7 @@ Task 表示一个可持续跟踪的委派工作，通常拥有状态、上下文
 
 ### 任务状态与幂等
 
-跨 Agent 请求同样可能超时和重复。委派任务需要唯一 ID、调用方身份、截止时间、取消语义、重试策略和最终状态。`submitted`、`working`、`completed`、`failed`、`canceled` 等状态的含义必须和产物是否已经生成区分开。下游报告 `completed` 时，上游仍应校验产物 schema、权限和证据，而不是只相信状态字符串。
+跨 Agent 请求同样可能超时和重复。委派任务需要唯一 ID、调用方身份、截止时间、取消语义、重试策略和最终状态。线上的状态枚举随协议版本变化：v0.3 使用 `submitted`、`working` 等小写值，v1.0 使用 `TASK_STATE_SUBMITTED`、`TASK_STATE_WORKING`、`TASK_STATE_COMPLETED`、`TASK_STATE_FAILED`、`TASK_STATE_CANCELED` 等值，不能把一种版本的枚举直接发给另一版本。协议状态仍不等于业务产物已验收；上游应校验产物 schema、权限和证据，而不是只相信完成状态字符串。
 
 ### 跨 Agent 的权限衰减
 
@@ -690,7 +716,7 @@ Code Agent 不只是生成代码，还要定位文件、理解依赖、编辑内
 
 ### 文件路径约束
 
-文件工具应把工作区根目录规范化，并检查目标路径是否仍然位于根目录内。仅用字符串前缀判断有漏洞，例如 `/workspace/project2` 也可能以 `/workspace/project` 开头；符号链接和 `..` 更会绕过简单检查。
+文件工具应把工作区根目录规范化，并检查目标路径是否仍然位于根目录内。仅用字符串前缀判断有漏洞，例如 `/workspace/project2` 也可能以 `/workspace/project` 开头；路径遍历还会利用 `..` 或绝对路径访问根目录以外的文件，[OWASP 的路径遍历说明](https://community.owasp.org/attacks/Path_Traversal)给出了这类边界。符号链接和 `..` 更会绕过简单检查。
 
 ~~~python
 from pathlib import Path
@@ -713,6 +739,7 @@ try:
 except ValueError:
     print("path traversal rejected")
 ~~~
+代码状态：静态审阅，未运行（2026-10-30）；依赖 Python 3.8+ 标准库，保存为 `demo.py` 后运行 `python3 demo.py`。预期输出：`path traversal rejected`。
 
 这段代码只演示路径语义，生产系统还要处理根目录不存在、符号链接创建竞态、挂载点、Windows 路径、文件权限和并发编辑。读取工具也应有大小上限、分页和截断标记，避免把整个二进制文件或秘密配置送入上下文。
 
@@ -868,7 +895,7 @@ LLM-as-a-Judge 可以降低人工成本，但会受到长度、格式、模型�
 
 ### SSRF、路径和数据外发
 
-浏览器或 HTTP 工具要限制目标域名、解析后的 IP、内网地址、重定向和响应大小；文件工具要做路径包含检查和根目录隔离；数据库工具要限制语句类型、表和行范围；外发工具要检查收件人、附件和敏感标签。安全日志要记录“为什么允许”或“为什么阻断”，否则只能看到失败结果，看不到策略是否工作。
+浏览器或 HTTP 工具要限制目标域名、解析后的 IP、内网地址、重定向和响应大小。OWASP 的 [SSRF 防护指南](https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html)建议在目标可知时使用显式 allowlist、限制重定向，并结合网络层出站控制；若业务需要任意公网目标，还须处理 DNS 解析到私网地址的情况。文件工具要做规范化路径包含检查和根目录隔离；数据库工具要限制语句类型、表和行范围；外发工具要检查收件人、附件和敏感标签。安全日志要记录“为什么允许”或“为什么阻断”，否则只能看到失败结果，看不到策略是否工作。
 
 ### 安全评估
 
@@ -935,8 +962,8 @@ T_{\mathrm{e2e}}
 - RAG 的总体方法见 Lewis 等人的 [Retrieval-Augmented Generation](https://arxiv.org/abs/2005.11401)，密集检索的经典路线见 [DPR](https://arxiv.org/abs/2004.04906)。论文说明研究方法和实验范围，不保证目标企业语料上的效果。
 - 长上下文位置利用见 [Lost in the Middle](https://arxiv.org/abs/2307.03172)。它支持进行位置敏感性测试，不应被解读为所有模型都有同一条退化曲线。
 - Agent 循环和工具使用的研究入口包括 [ReAct](https://arxiv.org/abs/2210.03629) 与 [Toolformer](https://arxiv.org/abs/2302.04761)。研究中的工具集合、训练方式和任务分布与生产系统不同。
-- Agent 工程组织方式可参考 Anthropic 的 [Building effective agents](https://www.anthropic.com/engineering/building-effective-agents)；它是公开工程经验，适合帮助选择 workflow 与 agent 的边界。
-- 工具协议的对象和生命周期以 [MCP 2025-06-18 规范](https://modelcontextprotocol.io/specification/2025-06-18)为准；跨 Agent 协作以 [A2A 规范](https://a2a-protocol.org/latest/specification/)为准，并在实现中固定版本。
+- Agent 工程组织方式可参考 Anthropic 的 [Building effective agents](https://www.anthropic.com/engineering/building-effective-agents)；页面注明其 2024 年工具生态描述已有变化，本章只使用 workflow 与 agent 的架构区分，不把它当作当前产品接口指南。
+- MCP 的版本语义以截至 2026-10-30 的[官方 2026-07-28 规范](https://modelcontextprotocol.io/specification/2026-07-28)为准。A2A 以[官方 v1.0.1 规范](https://a2a-protocol.org/v1.0.1/specification/)和[v1.0 迁移说明](https://a2a-protocol.org/latest/whats-new-v1/)为准；请求协商的 wire version 是 `1.0`，实现仍须固定兼容版本。
 - 代码 Agent 的公开评测可参考 [SWE-bench 论文](https://arxiv.org/abs/2310.06770)，评测系统与目标代码库、测试质量和补丁策略之间仍有差异。
 - 评测维度可参考 [HELM](https://crfm.stanford.edu/helm/latest/)，可观测性术语可参考 [OpenTelemetry observability primer](https://opentelemetry.io/docs/concepts/observability-primer/)，风险治理可参考 [NIST AI RMF](https://www.nist.gov/itl/ai-risk-management-framework)。这些资料提供框架和术语，不替代具体系统的安全审查。
 

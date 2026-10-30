@@ -1,6 +1,6 @@
 # 推理时计算、实时交互与评估激励：来源证据
 
-记录日期：2026-10-28；补充日期：2026-10-29
+记录日期：2026-10-28；补充日期：2026-10-29、2026-10-30
 
 本记录只保存联网发现的知识点及其证据。来源内容的具体适用范围、与书册的映射、正文修改状态和后续安排记录在 progress/。
 
@@ -136,6 +136,21 @@
   - 来源支持：摘要描述 Native Reasoning Training 使用普通问答对生成潜在推理轨迹，并将轨迹作为潜变量优化；作者在 Llama、Mistral 系列上报告与 verifier-free 基线的比较。
   - 证据等级：source-backed（同行评审论文摘要中的方法与作者实验主张）。
   - 适用边界：结果受论文模型、数据和训练配方约束；“latent reasoning”不是对隐藏内部状态的直接读取，不证明所有不可验证任务都可仅凭自生成轨迹可靠学习。
+
+## 11. 推理与评估基础来源
+
+以下来源于 2026-10-30 复核；除特别标明的章节外，实际阅读限于 arXiv 摘要，结论按论文任务与模型设置限定。
+
+- Jason Wei et al., “Chain-of-Thought Prompting Elicits Reasoning in Large Language Models,” arXiv:2201.11903v6，[论文页](https://arxiv.org/abs/2201.11903)。摘要报告在三种大模型的算术、常识和符号推理任务中使用少样本 CoT 后性能提升。证据说明这些实验任务上的结果，不证明可见步骤忠实，也不保证其他模型或任务稳定受益。
+- Karl Cobbe et al., “Training Verifiers to Solve Math Word Problems,” arXiv:2110.14168v2，[论文页](https://arxiv.org/abs/2110.14168)。摘要描述 GSM8K 及通过 verifier 为多条候选排序的测试时选择，并报告论文设置下的收益。结果受数据集、模型和 verifier 训练条件约束。
+- Qiying Yu et al., “DAPO: An Open-Source LLM Reinforcement Learning System at Scale,” arXiv v2 revised 2025-05-20，[固定版本](https://arxiv.org/abs/2503.14476v2)。实际阅读范围为 arXiv 书目元数据与摘要；来源支持作者开放训练代码和数据，并报告 Qwen2.5-32B base 在 AIME 2024 上达到 50 分。该结果属于完整数据、系统、采样与算法配方，不能归因给单个组件或外推至其他任务。
+- Zichen Liu et al., “Understanding R1-Zero-Like Training: A Critical Perspective,” arXiv v2 revised 2025-10-06，[固定版本](https://arxiv.org/abs/2503.20783v2)。实际阅读范围为 arXiv 书目元数据与摘要；作者分析 GRPO 的回答长度偏差，并提出 Dr.GRPO，报告其在特定 7B 数学设置下达到 AIME 2024 43.3%。结果受底模、奖励、预算、任务和 loss 实现限制，“unbiased”应按论文推导假设理解。
+- Hunter Lightman et al., “Let’s Verify Step by Step,” arXiv:2305.20050v1，[论文页](https://arxiv.org/abs/2305.20050)。摘要报告该研究在 MATH 基准上比较 outcome/process supervision，并发布 800,000 条步骤级人工反馈标签 PRM800K。不能外推为所有任务上的过程监督必然优于结果监督。
+- Shunyu Yao et al., “Tree of Thoughts: Deliberate Problem Solving with Large Language Models,” arXiv:2305.10601v2，[论文页](https://arxiv.org/abs/2305.10601)。摘要描述以 thought 为单位进行分支探索、回看和回溯；实验覆盖 Game of 24、Creative Writing、Mini Crosswords 等特定任务。效果不由 ToT 名称本身保证。
+- Mark Chen et al., “Evaluating Large Language Models Trained on Code,” arXiv:2107.03374v2，[论文 HTML](https://arxiv.org/html/2107.03374)。阅读 §2.1 与 Appendix A：pass@k 以每题生成 n≥k 个候选、统计通过测试数 c，并用 `1−C(n−c,k)/C(n,k)` 估计从 k 个候选中至少找到一个通过解的成功率；作者说明直接经验频率可能有较高方差。估计依赖候选采样和测试 oracle，pass@k 不等于系统无选择器时的 pass@1。
+- Chuan Guo et al., “On Calibration of Modern Neural Networks,” arXiv:1706.04599v2，[论文 HTML](https://arxiv.org/html/1706.04599)。阅读 ECE 定义与摘要：ECE 以分桶内准确率和平均置信度差的加权和近似校准误差；论文还研究分类器温度缩放。论文数据来自图像/文档分类任务，不能据此声称 LLM verifier 在目标任务上已校准。
+- Percy Liang et al., “Holistic Evaluation of Language Models,” arXiv:2211.09110v2，[论文页](https://arxiv.org/abs/2211.09110)。摘要列出 accuracy、calibration、robustness、fairness、bias、toxicity、efficiency 七项指标，并说明核心场景覆盖同时受可行性和代表性限制。该来源支持多指标评估设计，不提供适用于任意产品的统一得分或完整覆盖保证。
+- Lianmin Zheng et al., “Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena,” arXiv:2306.05685v4，[论文 HTML](https://arxiv.org/html/2306.05685)。阅读摘要、位置偏差与冗长偏差部分：论文在其模型、提示和开放式对话数据上分析 position、verbosity、自我增强等偏差，并研究 judge 与人类偏好的一致性。实验不能证明当前 judge 或任意领域具有相同偏差幅度或普遍一致率。
 
 ## 生命周期
 

@@ -48,7 +48,19 @@
 
 ### Prompt injection 与 jailbreak 的术语和缓解
 
-- **来源**：[OWASP LLM01:2025 Prompt Injection](https://genai.owasp.org/llmrisk/llm01-prompt-injection/)，当前页面明确标记为 LLM01:2025。
+- **来源**：[OWASP LLM01:2025 Prompt Injection](https://genai.owasp.org/llmrisk/llm01-prompt-injection/)，页面固定标记为 LLM01:2025，是历史版本依据。
 - **阅读范围**：定义、jailbreak 关系、direct / indirect injection 分类以及 Prevention and Mitigation Strategies 页面部分。
-- **支持的事实**：页面将 jailbreak 视作 prompt injection 的一种；direct / indirect 是按输入来自用户还是外部网站/文件作的工程分类；页面指出 RAG 和微调不能完全缓解，并建议限制模型行为、校验输出格式、最小权限等措施。
+- **支持的事实**：2025 页面将 jailbreak 视作 prompt injection 的一种；页面建议限制模型行为、校验输出格式、最小权限等措施。
 - **证据边界**：OWASP 页面是威胁分类和防御建议，不证明某种单一缓解策略可消除风险，也不是目标应用通过安全验收的证据。有效测试应在应用实际信任边界、权限与副作用条件下完成。
+
+- **来源**：[OWASP GenAI LLM Top 10 2026](https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/)，官方资源页标注 2026-08-03；配套 PDF 标为 Version 2026。访问与阅读日期：2026-10-30。
+- **阅读范围**：PDF 目录、What's New in the 2026 Top 10、LLM01:2026 Prompt Injection 定义与 direct / indirect prompt injection 小节。
+- **支持的事实**：2026 版保留 LLM01:2026 Prompt Injection，并将以违反模型安全协议为目标的 jailbreak 明确归为 direct prompt injection 的子类；注入来源范围扩及用户输入、检索内容、工具输出、多模态内容和持久记忆。其目录把模型作为应用组件的风险与自主行动中的 Agent 风险关联到单独的 Agentic Top 10。
+- **证据边界**：这是社区制定的分类与缓解指南。PDF 的版本历史仍显示 release date 待补，故发布日期依据官网资源页而非 PDF 元数据；清单内容不构成攻击频率的独立测量、完整风险清单或系统验收证明。
+
+### Image-based prompt injection（2026）
+
+- **来源**：[Nagaraja et al., “Image-based Prompt Injection: Hijacking Multimodal LLMs through Visually Embedded Adversarial Instructions,” arXiv:2603.03637](https://arxiv.org/abs/2603.03637)，2026-03-04。
+- **阅读范围**：arXiv 摘要、引言、实验设置与字体/背景配置结果（§§I、IV-A、IV-C）。论文说明使用 COCO 图像、GPT-4-turbo、单张图像且无附加文字上下文；每种配置对图像重复查询五次。读取全页 HTML 的实验设计和相应结果表。
+- **来源支持的事实**：作者测试 12 种提示策略及多种嵌入配置；在所测设置中，包含 object-aware prefix 的一种全局区域着色方案报告最高 64% 攻击成功率。论文展示图像中嵌入的指令可影响目标模型输出。
+- **证据等级与边界**：source-backed。64% 是特定数据集、模型、攻击模板、嵌入配置和重复查询协议下的结果，不是其他模型或真实产品部署的攻击成功率，也不表示该风险在自然流量中的发生率。预印本和论文实验用于证明一种可行攻击路径，不证明所有视觉模型都同样脆弱。

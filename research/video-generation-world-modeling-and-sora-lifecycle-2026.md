@@ -1,6 +1,6 @@
 # 视频生成、交互式世界建模与 Sora 生命周期来源
 
-核验日期：2026-10-29。
+核验日期：2026-10-30。
 
 本记录只保存联网核验得到的技术事实及证据范围，不记录章节审阅、正文改动或工作进度。
 
@@ -37,20 +37,20 @@
 - **阅读范围：** 研究说明摘要与“Turning visual data into patches”开头。
 - **支持事实：** 页面将当时 Sora 描述为文本条件的图像/视频扩散模型，联合处理不同持续时间、分辨率和纵横比，并说明其表示使用时空 patch。报告聚焦统一视觉表示和能力/限制的定性评估；页面明确表示不包括模型和实现细节。
 - **证据边界：** 该页面支持 2024 年公开的研究范围和作者陈述，不披露 tokenizer、完整架构、数据配方或训练规模，不能据此推断这些内部细节，也不代表后续服务状态。
-- **来源二：** OpenAI Help Center，[What to know about the Sora discontinuation](https://help.openai.com/en/articles/20001152-what-to-know-about-the-sora-discontinuation)，访问日 2026-10-29。
+- **来源二：** OpenAI Help Center，[What to know about the Sora discontinuation](https://help.openai.com/en/articles/20001152-what-to-know-about-the-sora-discontinuation)，访问日 2026-10-30。
 - **支持事实：** 官方说明 Sora 网页与应用于 2026-04-26 停止，Sora API 于 2026-09-24 停止。
 - **证据边界：** 这是官方服务生命周期信息，不是模型能力或研究结果；它与 2024 年技术报告所述研究机制属于不同时间和证据类型。
 
 ## WBench
 
-- **来源：** Ying et al., [WBench: A Comprehensive Multi-turn Benchmark for Interactive Video World Model Evaluation](https://arxiv.org/html/2605.25874)，arXiv:2605.25874v1，2026-05-25。
+- **来源：** Ying et al., [WBench: A Comprehensive Multi-turn Benchmark for Interactive Video World Model Evaluation](https://arxiv.org/html/2605.25874v1)，arXiv:2605.25874v1，2026-05-25。
 - **阅读范围：** 摘要、§3 数据集构造与统计、§4 评估套件、§5 实验与人类偏好对齐。
 - **支持事实：** 论文按视频质量、场景遵循、交互遵循、一致性和物理符合度五维组织评估；报告 289 个测试案例、1,058 轮交互，覆盖导航、主体动作、事件编辑、视角切换四类交互。其评估包括 22 个自动子指标，结合专用视觉模型与多模态模型；作者报告这些指标经过人工判断校验，并在 20 个模型上进行了实验。
 - **证据边界：** 以上数据、自动评分器、人类校验和模型结果属于论文的 benchmark、接口和协议。指标与案例不能穷尽交互式世界建模，也不能单独证明现实环境中的因果或物理理解。
 
 ## World-in-Context
 
-- **来源：** Chen et al., [World-in-Context: Interactive Video World Modeling with In-Context Conditioning](https://arxiv.org/html/2610.33169)，arXiv:2610.33169v1，2026-10-23。
+- **来源：** Chen et al., [World-in-Context: Interactive Video World Modeling with In-Context Conditioning](https://arxiv.org/html/2610.33169v1)，arXiv:2610.33169v1，2026-10-23。
 - **阅读范围：** 摘要、§4 控制表示与训练、§5 实验、§6 适用性。
 - **支持事实：** 预印本把视角模式、角色动作和摄像机运动编码为共享上下文内的显式控制 token，并提出 Interaction-Transport RoPE（IT-RoPE）用累计控制变化表示跨片段时间关系。作者报告其 5B 模型在 WBench navigation score 为 81.5，与 22B EchoWM 的 81.6 接近；并报告 perspective-switching success 为 93.8%，对比其所测 5B baselines 的 18.8%。
 - **证据边界：** 这是 arXiv v1 预印本，数字为作者在其模型、WBench 版本、评估任务和协议下报告的结果，不能视为跨模型通用排名或独立复现。结构设计示例不证明视频生成模型普遍具备世界建模能力。

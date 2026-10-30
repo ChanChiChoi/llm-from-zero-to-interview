@@ -52,3 +52,21 @@
 ## 生命周期
 
 解码策略、重复控制与多路径聚合：active。论文机制可用于教学；具体 API 和源码行为须绑定所用版本，效果须在目标任务、明确预算和评估口径下验证。Transformers v5.17.0 与 vLLM v0.32.0 的 assisted/speculative 接口事实绑定各自固定文档。
+
+## 固定版本来源复核（2026-10-30）
+
+### Transformers v5.20.0
+
+- [Generation API](https://huggingface.co/docs/transformers/v5.20.0/en/main_classes/text_generation)，访问日期 2026-10-30。实际阅读 GenerationConfig 的 generation length、stop strings、temperature、top-k/top-p、min-p、top-h、typical-p、epsilon/eta cutoff、repetition penalty、length penalty 与 logits renormalization 参数说明。`top_h` 按概率排序，保留使归一化候选熵不高于原分布熵一定比例的最短前缀；epsilon 是绝对概率阈值，eta 在绝对阈值与熵相关阈值间取满足条件的候选。证据等级：source-backed（固定版官方 API 文档）。边界：只描述 v5.20.0 所公开的接口，不支持这些过滤器在不同任务上更优的质量结论，也不能外推到其他 runtime。
+- [固定版源码 `logits_process.py`](https://github.com/huggingface/transformers/blob/v5.20.0/src/transformers/generation/logits_process.py)，访问日期 2026-10-30。`RepetitionPenaltyLogitsProcessor` 对每个已出现 token 至多处理一次；decoder-only 默认把 prompt token 纳入惩罚历史；系数大于 1 时，正 logit 除以系数、负 logit 乘以系数；`prompt_ignore_length` 可排除输入前缀。证据等级：source-backed（固定 tag 实现）。边界：不代表 Transformers 其他版本或其他框架。
+- [Assisted decoding 文档](https://huggingface.co/docs/transformers/v5.20.0/assisted_decoding)，访问日期 2026-10-30。阅读 speculative assistant model、prompt lookup、self-speculative、MTP、UAD 和 static ensemble verification 段落。文档说明同 tokenizer assistant 路线、prompt lookup 的前缀匹配提案、MTP 对 checkpoint 专用预测层的依赖、UAD 的重编码对齐，以及 static ensemble verification 会把验证分布改成目标与草稿的混合分布。证据等级：source-backed（固定版官方指南）。边界：接口可用性不等于模型 pair 可兼容、批处理支持、目标 workload 加速或质量收益；混合验证的输出分布不等于原 target 分布。
+
+### 停止、惩罚与延迟口径
+
+- [OpenAI API Advanced Usage](https://developers.openai.com/api/docs/guides/advanced-usage#frequency-and-presence-penalties)，访问日期 2026-10-30。当前文档把 Chat Completions 与 Legacy Completions 的 presence/frequency penalty 公开为 logits 加法：`mu[j] - c[j] * alpha_frequency - 1(c[j] > 0) * alpha_presence`。证据等级：source-backed（单一供应商公开接口说明）。边界：不能推广为相同命名参数的跨供应商共识；取值、模型支持和 API 生命周期需另查。
+- [OpenAI Completions create reference](https://developers.openai.com/api/reference/resources/completions/methods/create)，访问日期 2026-10-30。接口说明返回文本不包含匹配 stop sequence，并注明 stop 支持与模型有关。证据等级：source-backed（指定 API 参考页）。边界：不能外推至其他 API 的 stop 返回与终止语义。
+- [vLLM v0.32.0 benchmark CLI](https://docs.vllm.ai/en/v0.32.0/benchmarking/cli/)，访问日期 2026-10-30。`vllm bench serve` 的 TTFT 为请求发送至首个流式输出的客户端侧时间；ITL 是连续流式输出事件间隔；请求级 TPOT 为 `(E2E latency - TTFT)/(output token count - 1)`。标准逐 token 流中 ITL 通常接近 TPOT；推测解码若一个流事件含多个 token，两者的采样单位和聚合权重不同。证据等级：source-backed（版本化 benchmark 测量定义）。边界：这是 vLLM benchmark 的客户端口径，非全行业统一名称或某模型性能保证。
+
+### GNMT beam length normalization
+
+- Wu et al., [Google's Neural Machine Translation System, arXiv:1609.08144v2 §7 Eq. (14)](https://arxiv.org/html/1609.08144v2#S7)，访问日期 2026-10-30。论文公开 `lp(Y)=((5+|Y|)^alpha)/(6^alpha)`，并将其用于 beam hypothesis 分数；同一分数还包含 coverage penalty。证据等级：source-backed（固定版本原论文）。边界：该公式是 GNMT 的翻译实现，不是通用 beam-search 标准；原实验的长度惩罚与 coverage 参数在特定机器翻译验证集上选择。

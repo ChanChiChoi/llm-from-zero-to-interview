@@ -14,9 +14,9 @@
 
 - 来源：[Mistral Large 4 发布公告](https://mistral.ai/news/mistral-large-4/)（2026-10-06）；[模型文档](https://docs.mistral.ai/models/mistral-large-4)；[权重发布公告](https://mistral.ai/it/news/mistral-large-4-oss/)（页面于本次检索时已发布）。
 - 阅读位置：发布公告的模型规模、训练与待发布说明；模型文档顶部规格；权重发布公告的模型版本说明。
-- 支持事实：模型文档快照列出 1.05T 总参数、52B active 参数、1.6B 视觉编码器、1M context 和 public preview；Mistral 后续公告称已发布经过额外 RL 的权重版本。Mistral 2026-10-21 与 NVIDIA 的公告则称约 1T 总参数、49B active，和先前的 52B 数字不同。
+- 支持事实：模型文档快照列出 1.05T 总参数、52B active 参数、1.6B 视觉编码器、1M context 和 public preview；Mistral 后续公告称已发布经过额外 RL 的权重版本。NVIDIA 官方模型页将 49B 说明为每 token 使用的专家参数，并将约 52B 计入 embeddings 与输出层，因此 49B/52B 应先按统计口径解读。来源：[Mistral/NVIDIA 公告](https://mistral.ai/news/mistral-nvidia-ai-for-industrial-engineering/)，[NVIDIA 模型页](https://docs.api.nvidia.com/nim/reference/mistralai-mistral-large-4-1t-a52b)。
 - 证据等级：发布方公告、官方模型文档和官方权重入口。
-- 边界：参数数字存在版本/快照差异；正式写入时须固定权重 revision 并读取对应 config/model card，不能把预览版与后续权重版本的数据合并。发布方 benchmark 不代表独立复现。
+- 边界：Mistral 文档与 NVIDIA 页面采用不同字段口径，预览服务与后续开放权重也可能不是同一 artifact；正式写入时须固定 revision 并读取对应 config/model card，不能把不同交付物的数据拼在一起。发布方 benchmark 不代表独立复现。
 
 ## GPT-6.1 Terra
 
@@ -28,8 +28,16 @@
 
 ## Claude Haiku 5.5
 
-- 来源：[Anthropic Model System Cards](https://www.anthropic.com/system-cards)，页面在 2026-10 将 Claude Haiku 5.5 列为新系统卡。
-- 阅读位置：模型与日期列表；本轮无法读取链接的系统卡全文。
-- 支持事实：仅确认官方索引存在该名称及 October 2026 日期。
-- 证据等级：官方索引页面。
-- 边界：当前资料不足以支持架构、能力或评测结论；正文纳入前需实际阅读系统卡及发布资料。
+- 来源：[Anthropic Transparency Hub](https://www.anthropic.com/transparency) 中 Claude Haiku 5.5 系统卡摘要；[Claude Haiku 5.5 发布页](https://www.anthropic.com/claude-haiku-5-5)，Anthropic，2026-10。
+- 阅读位置：Transparency Hub 的 Haiku 5.5 系统卡摘要及发布页产品介绍。系统卡 PDF 本轮因文件过大无法读取，未把全文视为已核验。
+- 支持事实：官方摘要列出文本和图像输入，并概述预训练与后训练；摘要没有披露确切层结构、参数规模或完整训练配方。
+- 证据等级：官方系统卡摘要与官方发布页；PDF 全文未读。
+- 边界：发布定位和摘要能支持的输入/训练概述不能代替完整系统卡，也不支持架构或独立性能结论。
+
+## GPT-6.1 Terra
+
+- 来源：[Introducing GPT-6.1 Terra](https://openai.com/index/introducing-gpt-6-1-terra/) 与[官方 API 模型页](https://developers.openai.com/api/docs/models/gpt-6.1-terra)，OpenAI，2026-10-26。
+- 阅读位置：发布页的 visual reasoning/computer-use 说明；API 模型页的 model ID、上下文与最大输出字段。
+- 支持事实：发布页强调视觉推理和电脑操作；API 文档列出 1,050,000-token context window 与 128K maximum output tokens。
+- 证据等级：官方发布说明与 API 文档。
+- 边界：两页均未披露内部架构、参数量或完整训练配方；接口能力和上下文字段不构成架构证据。

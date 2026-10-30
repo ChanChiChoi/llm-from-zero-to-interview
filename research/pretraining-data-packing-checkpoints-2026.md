@@ -56,6 +56,26 @@
   - 证据等级：source-backed（特定模型、prompt 分布、训练流程和人类偏好实验）。
   - 适用边界：这不是所有任务、用户群体或后训练方法的普遍排名，也不能据此声称微调后必然更正确或安全。
 
+## 隐私框架与数据保护
+
+- NIST, [Privacy Framework](https://www.nist.gov/privacy-framework)，页面核验日期 2026-10-30。
+  - 实际阅读范围：官方页面的 About、版本入口及 Privacy Framework 1.1 Initial Public Draft 状态说明。
+  - 来源支持：NIST 将 Privacy Framework 描述为与利益相关方合作制定的自愿工具，用于组织层面的隐私风险识别与管理；当前页面同时提供 v1.0 资料与 v1.1 初始公开草案入口。
+  - 证据等级：source-backed（NIST 官方框架说明）。
+  - 适用边界：该框架是自愿风险管理资源，不是特定数据采集行为的法律授权、合规认证或法律意见；v1.1 链接所标状态为 initial public draft，应与正式发布版本区分。
+
+- NIST, [SP 800-122: Guide to Protecting the Confidentiality of Personally Identifiable Information](https://csrc.nist.gov/pubs/sp/800/122/final)，2010-04-06。
+  - 实际阅读范围：CSRC 官方出版页的标题、摘要、出版日期和适用对象说明。
+  - 来源支持：该指南面向美国联邦机构，给出按上下文识别 PII、评估保密影响并选择防护措施的建议；NIST 鼓励机构按自身要求调整建议。
+  - 证据等级：source-backed（NIST 官方指南目录与摘要）。
+  - 适用边界：这是面向联邦机构的 2010 年指南，不构成跨法域的 PII 法律定义或针对任何具体训练集的合规判定。
+
+- U.S. Copyright Office, [Copyright and Artificial Intelligence](https://copyright.gov/ai/)，页面核验日期 2026-10-30。
+  - 实际阅读范围：官方页面关于 Report Part 3: Generative AI Training 的状态说明。
+  - 来源支持：页面称该 Office 于 2025-05-09 发布训练主题 Part 3 的预发布版本，并将最终版本列为 forthcoming。
+  - 证据等级：source-backed（美国版权局官方项目状态页）。
+  - 适用边界：该报告讨论美国版权法与政策，页面显示的是预发布状态；不能作为其他法域的规则或具体语料的训练授权。
+
 ## 生命周期
 
 预训练目标、packing 边界和 checkpoint 教学事实：active。具体数据来源、许可条件、采样配比、attention 边界、分布式状态格式与评估协议均取决于项目配置；论文中的量化结果不可脱离其模型、数据和任务外推。

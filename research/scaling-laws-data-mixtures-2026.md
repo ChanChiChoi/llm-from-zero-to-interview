@@ -80,6 +80,14 @@
   - 证据等级：source-backed（ICLR 2026 同行评审论文的官方摘要）。
   - 适用边界：摘要中的模型、语料和干预集合有限；不能据此得出所有清洗操作都会改变指数、任意数据集的质量排序，或跨任务通用的 token/parameter 比例。
 
+## 合成数据反馈与模型坍缩
+
+- Gerstgrasser et al., “Is Model Collapse Inevitable? Breaking the Curse of Recursion by Accumulating Real and Synthetic Data,” arXiv:2404.01413v2，[论文](https://arxiv.org/abs/2404.01413v2)，2024-04-29。
+  - 实际阅读范围：arXiv v2 摘要；本条未复核论文全文和附录。
+  - 来源支持：作者比较以每代合成数据替换原始真实数据、以及把后续合成数据与原始真实数据累积的预训练流程；摘要报告，替换设置呈现模型坍缩，而累积设置在所测语言模型规模、架构和超参数范围内避免坍缩。摘要还指出，作者在线性模型框架中证明累积时测试误差有与迭代次数无关的有限上界。
+  - 证据等级：preprint / source-backed（arXiv v2 摘要所述的作者实验与理论结论）。
+  - 适用边界：不能由此推出任意合成数据比例、过滤器、生成代数或下游任务都安全；“避免坍缩”绑定论文的累积定义、实验范围和线性理论假设。
+
 ## 重复数据与 benchmark 污染
 
 - Lee et al., “Deduplicating Training Data Makes Language Models Better,” ACL 2022，[论文](https://aclanthology.org/2022.acl-long.577/)。

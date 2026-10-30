@@ -2,15 +2,18 @@
 
 ## 阅读边界
 
-语言模型不会直接读取“字”或“词”。它先把字符串变成一个离散符号序列，再把每个符号映射成整数 id，最后通过 embedding 变成向量。这个过程通常被叫作 tokenization，但它不是一个无关紧要的预处理步骤。词表大小、切分规则、特殊 token、对话模板和解码方式共同定义了模型的输入输出协议，也决定了同一段文本要消耗多少上下文、训练多少步和多少显存。
+语言模型不会直接读取“字”或“词”。它先把字符串变成一个离散符号序列，再把每个符号映射成整数 id，最后通过 embedding 变成向量。这个过程通常被叫作 tokenization，但它不是一个无关紧要的预处理步骤。词表大小、切分规则、特殊 token、对话模板和解码方式共同定义了模型的输入输出协议，也决定了同一段文本要消耗多少上下文、训练多少步和多少显存。本章所说的 NLP 聚焦于语言模型的文本表示和输入接口，不覆盖分类、序列标注、句法分析等完整任务谱系。
 
-本章不把 tokenizer 当作词典速查表，而是沿着一条完整链路展开：
+本章把各主题组织成一条端到端链路，作为百科速查入口；完整训练与数据格式实践见第五册对应主讲章节。
 
 ~~~text
-原始字符串
- -> 规范化与边界处理
- -> token 序列
- -> token id
+结构化消息（可选）
+ -> chat template 序列化（可选）
+ -> 文本规范化
+ -> pre-tokenization 预切分
+ -> BPE / WordPiece / Unigram 等子词模型
+ -> token 与 token id
+ -> post-processing（按协议添加特殊 token）
  -> embedding
  -> Transformer
  -> 生成 token id
@@ -18,9 +21,16 @@
  -> 可读字符串
 ~~~
 
-全章分为十二个独立主题。每个主题都同时说明初学者容易混淆的直觉、工程上需要记录的变量、算法或公式、最小实验、失败边界和资料来源。关于 tokenizer 数据工程的完整实践，可以继续阅读[第五册第三章：Tokenizer 与数据格式](../../book-05-llm-training/chapters/03-tokenizer与数据格式.md)；关于 tokenization 在预训练和长上下文中的影响，可以阅读[第二册第三章：Tokenization 与预训练进阶](../../book-02-advanced-100/chapters/03-tokenization数据与预训练进阶.md)。
+3.1—3.11 是按数据流组织的支持型速查条目，不是十一篇独立教程；需要完整推导、工程流程和练习时，按问题进入下表的主讲章节。关于 tokenization 在预训练和长上下文中的影响，还可阅读[第二册第三章：Tokenization 与预训练进阶](../../book-02-advanced-100/chapters/03-tokenization数据与预训练进阶.md)。
 
-本章中的 token 文本是教学示例，不代表某个具体模型的真实词表。不同 tokenizer 即使使用同一个算法名称，也可能因为规范化、字节映射、merge 顺序和特殊 token 配置不同而产生完全不同的结果。
+| 查询主题 | 完整主讲入口 |
+| --- | --- |
+| 词表训练、BPE、WordPiece、Unigram、字节覆盖和多语言 token 效率 | [第五册第三章：Tokenizer 与数据格式](../../book-05-llm-training/chapters/03-tokenizer与数据格式.md)、[第二册第三章：Tokenization 与预训练进阶](../../book-02-advanced-100/chapters/03-tokenization数据与预训练进阶.md) |
+| Special token、EOS/PAD、chat template、label mask 和工具调用格式 | [第五册第三章：Tokenizer 与数据格式](../../book-05-llm-training/chapters/03-tokenizer与数据格式.md) |
+| 预训练目标、有效预测 token 和损失口径 | [本册第 06 章：预训练与数据](06-预训练与数据.md)、[第五册第三章：Tokenizer 与数据格式](../../book-05-llm-training/chapters/03-tokenizer与数据格式.md) |
+| 交叉熵、perplexity 和共同计数单位 | [本册第 01 章：数学与机器学习](01-数学与机器学习.md#交叉熵-cross-entropy)、[第五册第三章：Tokenizer 与数据格式](../../book-05-llm-training/chapters/03-tokenizer与数据格式.md) |
+
+本章中的 token 文本是教学示例，不代表某个具体模型的真实词表。不同 tokenizer 即使使用同一个算法名称，也可能因为规范化、预切分、字节映射、merge 顺序和特殊 token 配置不同而产生完全不同的结果。图中的阶段是帮助定位差异的概念分层；具体库可能合并步骤，也可能由模板直接返回 token id。
 
 ## 3.1 Token 是模型与字符串之间的接口
 
@@ -132,7 +142,9 @@ def padding_report(lengths):
 print(padding_report([4, 5, 9]))
 ~~~
 
-输出中的 waste_ratio 约为 0.333333。这个数字只反映三个长度的 batch 组织方式，不代表某个 tokenizer 的效率；要比较 tokenizer，必须先在同一语料和同一 normalization 规则下得到 lengths。
+手算时，有效 token 数为 `4+5+9=18`，定长 batch 的槽位数为 `3×9=27`，所以 waste 为 `1-18/27=1/3≈0.333333`，平均长度为 `18/3=6`。输出中的 waste_ratio 约为 0.333333。这个数字只反映三个长度的 batch 组织方式，不代表某个 tokenizer 的效率；要比较 tokenizer，必须先在同一语料和同一 normalization 规则下得到 lengths。
+
+代码状态：静态审阅，未运行（2026-10-30）；仅依赖 Python 3 标准库，保存为 `demo.py` 后运行 `python3 demo.py`。预期字段为 `samples=3`、`valid_tokens=18`、`padded_tokens=27`、`waste_ratio≈0.333333`、`mean_length=6.0`。
 
 ### 初学者最容易犯的错
 
@@ -208,6 +220,12 @@ special token 的字面字符串
 
 ## 3.3 BPE：从基础符号逐步合并
 
+### BPE 在完整 tokenizer 流程中的位置
+
+BPE 不是直接对任意原始字符串反复合并字符。以 Hugging Face Tokenizers 的概念管线为例，输入先经过 normalizer，再由 pre-tokenizer 切成若干片段；BPE 模型在这些片段内应用学习到的 merge 规则并查出 token id，post-processor 则可按任务格式加入额外特殊 token。预切分方式会限制哪些相邻符号能参与同一次合并，因此即使词表和 BPE 名称相同，normalizer、pre-tokenizer 或 post-processor 不同也可能改变最终编码。
+
+例如，某个配置先用空白和标点预切分，再把数字逐位切开；输入 `Call 911!` 会得到 `Call`、`9`、`1`、`1`、`!` 这些预切分片段。它们还不是最终 token id，只是后续子词模型的输入。实际模型是否保留这些边界，由它自己的 tokenizer 文件和配置决定。[Hugging Face Tokenizers 管线文档](https://huggingface.co/docs/tokenizers/python/latest/pipeline.html)说明了 normalizer、pre-tokenizer、model、post-processor 的职责及其组合方式。
+
 ### BPE 的基本思想
 
 Byte Pair Encoding 最初是一种压缩思想，在语言模型 tokenizer 中通常从字符或字节基础单元开始，通过统计相邻 pair 的频率，反复合并最常出现的 pair。合并过程产生词表和 merge 顺序。
@@ -255,7 +273,7 @@ BPE 依据训练语料的共现频率，频繁出现的语言、格式和领域�
 
 ### 一个教学版 BPE merge
 
-下面的代码只实现“统计 pair 并合并”的核心，不包含 Unicode 规范化、byte mapping、边界标记或高效增量计数。它的价值是让合并规则可手算。
+下面的代码只实现“统计 pair 并合并”的核心，不包含 Unicode 规范化、byte mapping、预切分、边界标记或高效增量计数。它的价值是让合并规则可手算。对 `abab` 和 `aba`，`ab` 共出现 3 次，`ba` 共出现 2 次，因此这一轮选择 `ab`，结果分别为 `[ab, ab]` 和 `[ab, a]`。真实训练还需要完整语料、候选边界和确定的并列处理规则。
 
 ~~~python
 from collections import Counter
@@ -285,7 +303,7 @@ def merge_pair(sequence, pair, merged):
     return result
 
 
-data = [list("low"), list("lower"), list("low")]
+data = [list("abab"), list("aba")]
 counts = pair_counts(data)
 if not counts:
     raise ValueError("at least one adjacent pair is required")
@@ -295,7 +313,9 @@ print(pair, frequency)
 print(data)
 ~~~
 
-输出会显示最高频 pair 及合并后的序列。真实 tokenizer 还要定义同频 pair 的 tie-break、跨词边界规则和重复合并的高效实现；教学代码没有这些保证。
+预期输出为 `('a', 'b') 3`，随后是 `[['ab', 'ab'], ['ab', 'a']]`。真实 tokenizer 还要定义同频 pair 的 tie-break、跨词边界规则和重复合并的高效实现；教学代码没有这些保证。
+
+代码状态：静态审阅，未运行（2026-10-30）；仅依赖 Python 3 标准库，保存为 `demo.py` 后运行 `python3 demo.py`。预期输出为 `('a', 'b') 3` 和 `[['ab', 'ab'], ['ab', 'a']]`。
 
 ## 3.4 WordPiece、Unigram LM 与 SentencePiece
 
@@ -364,7 +384,9 @@ for text in ("\u00e9", "e\u0301", "\u4e2d"):
     print(len(text), len(text.encode("utf-8")), len(normalized))
 ~~~
 
-输出分别为 `(1,2,1)`、`(2,3,1)`、`(1,3,1)`。前两者通常呈现同一带重音字母，但未经规范化的码点数和字节数不同；不能据此断言目标 tokenizer 的 token 数也相同。若 fertility 按字素簇计数，需要另用符合 [Unicode UAX #29](https://unicode.org/reports/tr29/) 的实现并固定版本。
+三行输出依次是 `1 2 1`、`2 3 1`、`1 3 1`。前两者通常呈现同一带重音字母，但未经规范化的码点数和字节数不同；不能据此断言目标 tokenizer 的 token 数也相同。若 fertility 按字素簇计数，需要另用符合 [Unicode UAX #29](https://unicode.org/reports/tr29/) 的实现并固定版本。
+
+代码状态：静态审阅，未运行（2026-10-30）；仅依赖 Python 3 标准库，保存为 `demo.py` 后运行 `python3 demo.py`。三行预期输出依次为 `1 2 1`、`2 3 1`、`1 3 1`；这里只计码点、UTF-8 字节和 NFC 后码点，不计字素簇或 tokenizer token。
 
 ### Character-level
 
@@ -472,7 +494,7 @@ PAD 与 EOS 共用 ID 时，不能直接把所有等于 pad_id 的 labels 都改
 
 ### special token 的字面冲突
 
-若一个特殊字符串既可作为普通用户文本出现，又被 tokenizer 当作控制 token，系统必须定义转义、普通文本编码或拒绝规则。否则用户输入可能意外改变角色边界或工具调用结构。特殊 token 本身不保证不可伪造；需要验证用户文本是否能被编码为控制 ID。即使这条通道被阻止，普通自然语言 prompt injection 仍需独立防护。
+若一个特殊字符串既可作为普通用户文本出现，又被 tokenizer 当作控制 token，系统必须定义转义、普通文本编码或拒绝规则。否则用户输入可能意外改变角色边界或工具调用结构。特殊 token 本身不保证不可伪造；需要验证用户文本是否能被编码为控制 ID。当前 Transformers 主线文档在 `apply_chat_template` 中提供 `sanitize_control_tokens` 选项：开启后，消息、工具和文档内容中的控制 token 字面文本按普通文本编码，模板本身写入的控制 token 仍保留；该参数和默认值属于特定库接口，使用时要记录 Transformers 版本，不能据此推断其他序列化链路也有同样保护。即使控制 token 这条通道被阻止，普通自然语言 prompt injection 仍需独立防护。[当前 Transformers tokenizer API 文档](https://huggingface.co/docs/transformers/main_classes/tokenizer#transformers.PreTrainedTokenizerBase.apply_chat_template)
 
 ### 特殊符号的最小测试
 
@@ -759,7 +781,9 @@ print(
 )
 ~~~
 
-这个审计结构检查长度、整数值域和 padding 标签，不判断模型回答质量，也不验证 id 是否小于模型词表大小。这里固定 ignore_index=-100；负数 -99 不是合法类别。`valid_labels` 是尚未 causal shift 的数量，不等于最终损失分母；空序列或 shift 后没有目标仍需要训练器拒绝。真实项目还应保存 tokenizer 文件哈希、版本、模板版本和 decode 回环结果。
+这个审计结构检查长度、整数值域和 padding 标签，不判断模型回答质量，也不验证 id 是否小于模型词表大小。这里固定 ignore_index=-100；负数 -99 不是合法类别。`valid_labels` 是尚未 causal shift 的数量，不等于最终损失分母；空序列或 shift 后没有目标仍需要训练器拒绝。真实项目还应保存 tokenizer 文件哈希、版本、模板版本和 decode 回环结果。按当前输入手算，`raw_chars=2`、`normalized_chars=2`、`special_positions=[]`、`valid_labels=1`。
+
+代码状态：静态审阅，未运行（2026-10-30）；仅依赖 Python 3 标准库，保存为 `demo.py` 后运行 `python3 demo.py`。预期返回 `raw_chars=2`、`normalized_chars=2`、`special_positions=[]`、`valid_labels=1`，其余字段与输入 token 和 id 列表一致；代码不验证词表上界或模型语义。
 
 ## 3.11 Tokenization 对训练目标和评估的影响
 
@@ -806,6 +830,8 @@ for token_count in (2, 4):
 
 两行 PPL 为 7.389056 和 2.718282，但 BPB 都为 0.721348。这些数字不来自真实 tokenizer 或模型。即使 tokenizer 相同，[固定窗口 PPL 评估](https://huggingface.co/docs/transformers/main/en/perplexity)也要固定上下文长度、stride、文档边界和目标计数，不能把可用历史更多造成的改善归因为模型改变。
 
+代码状态：静态审阅，未运行（2026-10-30）；仅依赖 Python 3 标准库，保存为 `demo.py` 后运行 `python3 demo.py`。预期两行输出为 `7.389056 0.721348` 与 `2.718282 0.721348`；数值只验证相同总 NLL、不同 token 数的构造关系。
+
 ### 评估样本的污染
 
 tokenizer 训练本身通常不需要标签，但它仍可能从目标评估文本中学习到切分统计。更严重的污染发生在模型预训练语料包含评估答案或原文。评估时应记录 tokenizer 版本和模型训练数据边界，避免把“词表看过某种字符串”与“模型学会任务答案”混为一谈。
@@ -822,12 +848,16 @@ tokenizer 训练本身通常不需要标签，但它仍可能从目标评估文�
 
 - [Neural Machine Translation of Rare Words with Subword Units](https://arxiv.org/abs/1508.07909)：BPE 子词分割。
 - [Subword Regularization](https://arxiv.org/abs/1804.10959)：Unigram 与子词采样。
+- [Which Pieces Does Unigram Tokenization Really Need?](https://arxiv.org/abs/2512.12641)：Unigram 训练和推断实现选择的近期预印本，供进阶阅读。
+- [Formalizing BPE Tokenization](https://arxiv.org/abs/2309.08715)：BPE 的形式化语义及不同 tokenizer 实现的关系。
 - [SentencePiece](https://arxiv.org/abs/1808.06226)：从原始文本训练子词模型。
 - [BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding](https://arxiv.org/abs/1810.04805)：WordPiece 在 BERT 中的应用背景。
 - [Language Models are Unsupervised Multitask Learners](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf)：GPT-2 byte-level BPE 背景。
 - [Attention Is All You Need](https://arxiv.org/abs/1706.03762)：token 序列进入 Transformer 的基础架构。
 - [Hugging Face Tokenizers 文档](https://huggingface.co/docs/tokenizers/index)：训练、编码、解码和 tokenizer 组件。
+- [Hugging Face Tokenizers 管线](https://huggingface.co/docs/tokenizers/python/latest/pipeline.html)：normalizer、pre-tokenizer、子词模型和 post-processor 的分工。
 - [Transformers Chat Templates](https://huggingface.co/docs/transformers/main/en/chat_templating)：消息到模型输入的模板接口。
+- [Transformers tokenizer API](https://huggingface.co/docs/transformers/main_classes/tokenizer#transformers.PreTrainedTokenizerBase.apply_chat_template)：包括当前主线文档中的控制 token 清理参数；具体发布版本须另行核对。
 - [Transformers tokenizer 基础](https://huggingface.co/docs/transformers/main/en/tokenizer_summary)：不同 tokenizer 家族的说明。
 - [Unicode Standard Annex #29](https://unicode.org/reports/tr29/)：Unicode 文本边界和组合字符。
 

@@ -538,6 +538,8 @@ World Size：分布式训练总进程数
 
 Process Group：进程组 / 通信进程组
 
+Collective Order：集合通信顺序；同一通信组内各 rank 必须遵循兼容的 collective 顺序，否则可能挂起或得到错误结果。
+
 Data Parallelism：数据并行
 
 Distributed Data Parallel / DDP：分布式数据并行
@@ -552,6 +554,14 @@ torchrun：PyTorch 分布式启动命令
 
 Rank 0 Checkpoint：rank 0 检查点保存
 
+Distributed Checkpoint / DCP：PyTorch 分布式检查点 API；支持多 rank 保存/加载及按目标并行拓扑重新分片，但随机数状态、数据游标等应用状态仍须显式纳入 checkpoint。
+
+Kubernetes Device Plugin：向 kubelet 注册 GPU、NIC 等节点设备并协助将其分配到容器的扩展接口；设备资源上报本身不提供训练任务的 gang 调度或公平队列。
+
+Kueue Admission：Kubernetes 工作负载队列和配额准入；可在受支持配置下检查 topology-aware scheduling 条件，但不替代 kube-scheduler 的 Pod-to-node placement。
+
+Dominant Resource Fairness / DRF：面向多种资源的公平分配机制，以租户在各资源维度的最大归一化份额作为 dominant share；计算 dominant share 本身并不等同于完整 DRF 调度。
+
 DDP no_sync：DDP 跳过梯度同步上下文
 
 ZeRO：零冗余优化器
@@ -561,6 +571,10 @@ Fully Sharded Data Parallel / FSDP：全分片数据并行
 FSDP1：PyTorch wrapper/FlatParameter 路线的早期全分片实现；wrap 边界会影响参数分组、all-gather 窗口与状态字典行为。
 
 FSDP2 / fully_shard：PyTorch per-parameter DTensor 路线；在子模块上自底向上分组，前向/反向 hook 聚齐参数并在之后 reshard，梯度按 shard reduce-scatter。
+
+OpenTelemetry Span Event：附加在 trace span 上、记录一次带时间的事件；不等同于平台独立的 job / deployment event stream。
+
+OpenTelemetry LogRecord Event：由 OpenTelemetry 日志数据模型表示的事件记录，可通过 EventName 标明事件类型。
 
 SPMD Types：TorchTitan 中用于局部计算区域的 SPMD 类型注解与检查；描述 rank 间数据是否相同/变化及反向归约语义。它可与 FSDP2 的 DTensor 持久化分片表示配合；具体支持以目标 PyTorch/TorchTitan 版本为准。
 
@@ -3008,6 +3022,10 @@ Locally Typical Sampling：局部典型采样；按 token surprisal 与当前条
 
 Min-p Sampling：Min-p 采样；按相对最大 token 概率设保留阈值，质量优势仍需按模型和任务实测。
 
+Top-h Sampling：Top-h 熵预算采样；在按概率排序的候选前缀中，保留重归一化熵不超过完整分布熵 `h∈(0,1)` 倍的最短前缀；具体参数行为依赖 runtime 版本。
+
+Epsilon / Eta Cutoff：Epsilon / Eta 概率截断；前者按绝对 token 概率阈值过滤，后者结合绝对阈值与基于分布熵的阈值；接口和阈值语义依赖实现版本。
+
 Grammar-Constrained Decoding：语法约束解码；按 grammar/parser 状态屏蔽会导致非法前缀的 token。
 
 Acceptance Length：接受长度；一次 speculative verification 中被接受的连续 draft 前缀长度，需与 bonus/correction token 的计数口径区分。
@@ -3076,7 +3094,7 @@ Hybrid Verifier：混合验证器
 
 Verifier Reranking：验证器重排序
 
-Verifier Pairwise Accuracy：验证器成对排序准确率
+Verifier Pairwise Accuracy：验证器成对排序准确率；候选对按参考标注确定优劣方向，预测分数平局计半分（若采用其他规则需预先约定）；它衡量排序，不等于候选集合 top-1 选择准确率。
 
 Reasoning Hard Negative：推理困难负样本
 
@@ -4030,6 +4048,8 @@ Vector Index：向量索引
 
 Hybrid Retrieval：混合检索
 
+Reciprocal Rank Fusion / RRF：倒数排名融合；将多个排序列表中同一条目的排名倒数分数相加，常见形式为 `Σ 1/(k + rank)`；融合分数不等于相关概率。
+
 BM25：BM25 关键词检索算法
 
 Query Rewrite：查询改写
@@ -4055,6 +4075,8 @@ Multi-Round Retrieval：多轮检索
 Evidence State：证据状态
 
 Evidence Gap：证据缺口
+
+Evidence Span：证据片段；来源材料中能够支持某个断言的最小相关文本范围，并应保留文档标识、位置或链接等定位信息。
 
 Query Drift：查询漂移
 
@@ -4103,6 +4125,10 @@ Mean Reciprocal Rank / MRR：平均倒数排名
 Normalized Discounted Cumulative Gain / nDCG：归一化折损累计增益
 
 Agent：智能体
+
+Model Context Protocol / MCP：模型上下文协议；用于 AI 应用与外部服务器之间发现并交互工具、资源等能力的协议，具体能力和消息合同应按采用的规范版本核对。
+
+Agent2Agent / A2A：智能体间互操作协议；用于 Agent 发现、任务委派、消息交换与产物传递，具体字段和状态合同应按采用的协议版本核对。
 
 Agent Harness：智能体运行控制框架
 
@@ -5870,7 +5896,7 @@ Honest：诚实
 
 Harmless：无害
 
-Jailbreak：越狱攻击（诱导模型绕开安全限制；OWASP LLM01:2025 将其归为 prompt injection 的一种）
+Jailbreak：越狱攻击（诱导模型绕开安全限制；OWASP LLM01:2026 将其归为 direct prompt injection 的一种）
 
 Prompt Injection：提示注入（输入改变模型预期行为的风险；应在应用侧落实权限和副作用校验）
 
@@ -8660,6 +8686,8 @@ Metamorphic Testing：变形测试；当任务没有容易获得的逐样本标�
 
 Spurious Reward：伪相关/无信息奖励；与目标正确性弱相关、无关或负相关的训练奖励。它仍可能通过优化动态与底模先验改变模型行为，因此应用于研究归因对照，不应误写成可靠监督信号。
 
+Diversity Quality Optimization / DQO：多样性与质量联合优化；对同一提示采样的一组回答取语义 embedding，以核相似矩阵行列式作为组多样性信号，并与质量 reward 联合优化；结果依赖 embedding、kernel、任务和采样设置。
+
 Reward Signal Attribution：奖励信号归因；通过固定底模、数据、优化配置和训练预算，对比真实 verifier 与随机/打乱 reward、SFT/无更新等对照，估计学习提升中有多少来自任务奖励信息；结果只适用于已测配置。
 
 DeepSeek-R1：DeepSeek 公开的 reasoning model 案例，常用于讨论冷启动数据、RLVR、GRPO 类训练、采样和蒸馏的组合。
@@ -9861,7 +9889,9 @@ Open-loop Load：开放环负载；按预先定义的请求到达过程发送请
 
 Closed-loop Load：闭环负载；固定一定数量的客户端 worker/在途请求，通常在一个请求完成后才发出下一个。系统变慢时实际到达率也可能下降，因此它与固定请求率压力测试回答的问题不同。
 
-Pass^k：重复运行可靠率指标；在 k 次独立运行均成功时计为通过，汇总其概率用于估计相同任务多次尝试都成功的稳定性。它不同于 pass@k（至少一次成功）；运行相关性、采样策略和任务难度分布都会影响解释。
+Pass@k：多候选生成评估指标；若从 n 个候选中观察到 c 个通过，可用 $1-\binom{n-c}{k}/\binom{n}{k}$ 估计随机 k 个候选中至少一个通过的概率，要求 $1\leq k\leq n$。需报告候选数、采样配置和 verifier；它不等于用户一次请求的成功率。
+
+Pass^k：重复运行可靠率指标；在 k 次独立运行均成功时计为通过，汇总其概率用于估计相同任务多次尝试都成功的稳定性。它不同于 Pass@k（至少一次成功）；运行相关性、采样策略和任务难度分布都会影响解释。
 
 BrowserGym：网页 Agent 实验框架；提供统一观察/动作接口和实验工具，并接入多个既有 benchmark。它不统一各 benchmark 的任务、难度或 grader。
 

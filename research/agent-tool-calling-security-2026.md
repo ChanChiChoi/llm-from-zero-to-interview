@@ -43,3 +43,25 @@
 - **OpenTelemetry GenAI spans**：[语义约定页面](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-spans.md)，`main` 分支动态页面，访问日期 2026-10-30；阅读工具参数/结果属性与 buffered content capture 部分。
 - **来源支持的事实**：GenAI 工具参数和结果字段可能包含敏感信息；完整系统指令、用户消息和模型输出通常既敏感又较大，当前约定建议默认不采集内容，按明确配置选择采集或存外部并在 span 记录引用。
 - **证据边界**：语义约定处于持续演进状态，且不会自动实施脱敏、访问控制、留存或合规保障。实现时还须固定具体语义约定和 SDK 版本。
+
+## MCP、A2A 与网络/文件边界
+
+- **Model Context Protocol 规范**：[2026-07-28 官方规范](https://modelcontextprotocol.io/specification/2026-07-28)，访问日期 2026-10-30；阅读概览、安全与生命周期说明。
+- **来源支持的事实**：该版本将协议消息定义为 JSON-RPC 2.0；概览描述自包含、无状态请求和按请求进行能力协商。Server 可提供 Tools、Resources、Prompts，Client 可提供 Elicitation；Tasks、Skills over MCP、MCP Apps 列为可选扩展。规范安全原则要求 Host 给用户提供数据暴露与工具动作的控制，但规范本身不能替实现落实这些控制。
+- **证据边界**：上述结论绑定 2026-07-28 规范快照；不能据此推断更早/更新版或某个 SDK 的支持情况。Roots 等旧版或可选能力须按目标版本和实现分别确认。
+
+- **Agent2Agent (A2A)**：[v1.0.1 规范](https://a2a-protocol.org/v1.0.1/specification/)、[v1.0 迁移说明](https://a2a-protocol.org/latest/whats-new-v1/) 和[项目 release 记录](https://github.com/a2aproject/A2A/releases)，访问日期 2026-10-30。
+- **来源支持的事实**：项目 release 记录列出 v1.0.1；规范的协议版本协商使用 Major.Minor，因此该补丁版的 wire protocol version 是 `1.0`。v1.0 迁移资料记录了结构变化，包括移除 Part/流事件中的内嵌 `kind` 判别字段以及更新枚举值；v1.0 AgentInterface 声明 transport binding 与 `protocolVersion`，HTTP 请求使用 `A2A-Version`。
+- **证据边界**：迁移摘要与规范绑定 A2A 版本；接入时需锁定实际实现版本并做兼容测试。Agent Card 声明能力不代表调用方拥有业务授权，也不证明目标任务可被完成。
+
+- **OWASP SSRF Prevention Cheat Sheet**：[官方指南](https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html)，访问日期 2026-10-30；阅读目标 allowlist、重定向、DNS 与网络层控制建议。
+- **来源支持的事实**：对已知受信目标优先采用 allowlist；限制或禁用自动重定向，避免绕过目标校验；除应用层验证外，使用网络层出站规则形成纵深防御。若确需访问任意公网目标，还需处理解析到私有/特殊地址的情况。
+- **证据边界**：具体网络地址、云元数据端点、DNS 行为和代理链依部署环境而异；单次字符串校验不等于连接目标已被安全约束。
+
+- **OWASP Path Traversal**：[社区攻击说明](https://community.owasp.org/attacks/Path_Traversal)，访问日期 2026-10-30；阅读相对路径片段和绝对路径示例。
+- **来源支持的事实**：路径穿越可利用 `../` 等相对路径片段，也可通过绝对路径绕过预期目录约束；因此仅过滤某个固定字符串不足以确保文件访问被限制在根目录内。
+- **证据边界**：具体路径规范化、符号链接、大小写和竞态行为取决于操作系统与文件 API；应用还需要在实际打开目标时落实目录边界。
+
+- **Anthropic, Building effective agents**：[工程文章](https://www.anthropic.com/engineering/building-effective-agents)，发布于 2024-12-19，访问日期 2026-10-30。
+- **来源支持的事实**：文章现有页面提示，2024 年描述的 tooling landscape 已发生变化；其 workflow 与更开放的 agent loop 区分仍可用于架构讨论。
+- **证据边界**：该文章是特定时期的工程经验，不是当前框架 API 或跨模型的普遍定律。

@@ -164,6 +164,7 @@
 148A. 写一个 0 依赖 Python 分布式事故审计 demo，输入 4 个 toy rank 的 step、phase、token 数、step/data/comm time、collective 序列、checkpoint shard、resume step / lr 和 pipeline stage 耗时，输出 rank step alignment、collective mismatch、token shard imbalance、straggler ratio、communication ratio、checkpoint shard coverage、resume continuity、pipeline bubble ratio、failed gates 和 gate pass 结论。
 148B. TorchTitan 的一个 8×H100 教学案例中，Llama3 8B（batch=1、sequence=8192、defer=8）把 offload budget 从 10 GB 提到 12 GB，额外释放约 0.46 GiB、tokens/s 减少 60—70。计算区间平均每 GiB 的吞吐代价；再比较保留、重计算和 CPU 卸载各消耗的资源，并设计需要固定的 token、模型、NUMA、峰值显存和 loss 测量条件。解释为什么这个拐点不能外推成通用配置。
 148C. 一个 8-rank mesh 设 DP=2、TP=4。权重 `W` 的全局形状为 `[16,64]`，沿输出维做 TP 切分、再沿行做 DP/FSDP 切分，dtype 为 BF16。逐步计算全局权重、每 rank 常驻分片和 FSDP all-gather 后的本地 TP 权重元素数与字节数。说明 DTensor 持久化表示和 SPMD Types 计算表示改变了什么，又有哪些张量形状、collective 和 checkpoint 性质仍需一致。
+148D. 画出 Kubernetes GPU 资源从 device plugin 注册、kubelet 发布 extended resource、Kueue 队列/配额准入到 kube-scheduler 选择节点的边界；说明 topology-aware admission 检查了什么，以及它没有接管哪一步。
 149. 写一个 `debug_tensor` 函数，输出 tensor 的 shape、dtype、device、requires_grad 和 contiguous 状态。
 150. 给定 logits `[B,T,V]` 和 labels `[B,T]`，写出 causal LM shift 后展平维度，并验证 logits / labels 的第 0 维是否一致。
 151. 写一个 `finite_status` 函数，检查输入、logits、loss 和 grad 是否包含 NaN / Inf。
@@ -1983,15 +1984,18 @@
 4. 对奖励组 `[0,0,0,0]`、`[1,1,1,1]`、`[0,0,1,1]` 执行 DAPO 过滤；核对最后一组优势并解释保留组成功率为何不能代表题池成功率。对 token ratio 2/0.5 比较逐 token clip 与 GSPO 几何平均。
 5. 为 RLAIF judge、规则 verifier 和教师软分布分别写出反馈类型与可用目标；核对固定历史下 CE-H=forward KL，解释为何成败标签不能直接作为 token 分布。设计安全可答集合为空时的报告，以及工具轨迹的脱敏与权限边界。
 6. 对同一模型、同一数学题池比较 GRPO、DAPO、DrGRPO、GSPO 与 DCPO：先列出每种方法修改的是 advantage、ratio 粒度、clip bounds、采样还是 loss denominator；再实现一个固定预算/逐 response token mean 对照，计算非零 advantage 率与正确率。论文中的 DAPO progressive ablation、DrGRPO AIME24 分数和 DCPO RUR 必须保留各自模型、数据、模板和统计口径，不能拼成统一排行榜。
+7. 阅读 [on-policy preference candidates 研究](https://proceedings.iclr.cc/paper_files/paper/2026/file/0dc678bae2ad5d8fdfcd3d0c9f75705d-Paper-Conference.pdf)，设计静态候选与当前 policy 候选的受控比较：固定 prompt、标注器、训练预算与评估集，分别记录候选质量和组内多样性；讨论论文的“偏好注入/偏好微调”阶段假设何时可检验，为什么不能直接变成所有模型共用的训练日程。
+8. 阅读 [DQO 论文](https://proceedings.iclr.cc/paper_files/paper/2026/file/cfeb1fa78c5fb06be27c0980aa8ee581-Paper-Conference.pdf)。对三条单位向量组 A=`[(1,0,0),(-1,0,0),(0,1,0)]` 和组 B=`[(1,0,0),(0,1,0),(0,0,1)]`，用点积构造 Gram 矩阵，计算两组的平均两两欧氏距离与行列式。解释为什么组 A 的平均距离更大却有零体积，并说明 DQO 还要怎样与质量 reward、embedding 和 KL 取舍。
+9. 阅读 [RLVR 标注噪声研究 v2](https://arxiv.org/abs/2603.16140v2) 与本节伪相关奖励论文，设计 clean annotation、经人工复核的真实错误 annotation、随机 reward 三类对照。为“抽查 20 条中 8 条标签其实正确”给出适当的不确定性表述，并固定模型、任务、训练预算、独立测试集和重复种子，避免把伪相关奖励观察解释成算法能容忍错误标签。
 
 ## 推理与解码百科：分布、预算与延迟
 
 配套正文：[第四册推理与解码](book-04-llm-encyclopedia/chapters/08-推理与解码.md)。
 
 1. 对 logits `[2,1]` 分别取 temperature 0.5、1、2，核对第一 token 概率；再用 `[1e308,-1e308]` 与温度 `1e308` 验证先缩放和先相减的差异。
-2. 对权重 `[1e308,1e308,0]` 取 top-p=0.75，说明为什么要先按最大权重缩放；比较 p=1、零概率尾项和全候选被 mask 时的处理契约。
+2. 对权重 `[1e308,1e308,0]` 取 top-p=0.75，说明为什么要先按最大权重缩放；比较 p=1、零概率尾项和全候选被 mask 时的处理契约。再对 `[0.7,0.2,0.1]` 比较 top-p=0.8 与 top-h=0.5 的保留集合，按重归一化后的熵手算两者为何不同。
 3. 用 target `[0.5,0.3,0.2]`、draft `[0.4,0.4,0.2]` 计算接受质量、拒绝概率、残差分布并恢复 target；说明 q=0 提议为何非法、p=q 时残差未定义。
-4. 用上下文 4096、输入 3800、保留 32、请求 800 核对有效输出 264；设计空输出、时间原点不一致和单 token 时 TTFT/TPOT 的报告。
+4. 用上下文 4096、输入 3800、保留 32、请求 800 核对有效输出 264；设计空输出、时间原点不一致和单 token 时 TTFT/TPOT 的报告。再设一个流式输出事件携带多个 token，比较 event-level ITL 与 request-level TPOT 的分母。
 5. 比较 MHA/GQA 的 KV 字节量，列出滑动窗口、混合层和前缀共享为何不能直接套用单一公式；为 best-of-N 独立候选、相关候选和选择器误判分别设计报告。
 
 ## 推理优化与部署百科：资源、协议与回滚
@@ -2002,7 +2006,8 @@
 2. 对 running sequence 数和 waiting prefill token 分别设预算，复现长请求先到与短请求先到的调度差异；设计 aging、优先级和 P99 公平性指标。
 3. 计算 GQA 相对 MHA 的 KV 节省，再列出 prefix cache 指纹中的模型、模板、adapter、位置配置、媒体和租户条件；解释命中率为何不等于 TTFT 收益。
 4. 用对称 INT4 教学量化计算 scale 和 MSE，说明校准分布、kernel、KV 精度和真实任务回归为何不能由 toy MSE 推断。
-5. 为一次已开始 streaming 的工具调用设计 fallback、幂等键、取消和回滚流程；列出 startup/liveness/readiness、trace/metrics、drain 和 canary 的证据字段。
+5. 为一次已开始 streaming 的工具调用设计 fallback、幂等键、取消和回滚流程；区分 WHATWG SSE 帧字段与 API 自定义 error/finish event，并列出 startup/liveness/readiness、trace/metrics、drain 和 canary 的证据字段。说明镜像拉取失败为何不能由容器内 probe 报告。
+6. 给请求设 160 ms deadline，路由与排队已耗去 120 ms，预计 prefill 还需 50 ms；判断是否准入并列出可接受的降级。再比较远端 KV 的网络、反序列化、设备拷贝分别耗时 8/2/1 ms，与重算 prefill 的 6 ms、20 ms 两种情况；说明延迟账本为何还需要队列、并发争用、p99 和缓存版本/租户隔离证据。
 
 ## 第六册第十章：多模态部署
 

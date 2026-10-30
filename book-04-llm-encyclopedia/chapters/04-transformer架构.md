@@ -4,7 +4,7 @@
 
 Transformer 不是一个单独的 attention 公式，而是一套把离散 token 变成上下文表示、再变成下一个 token 概率的架构。它由 embedding、位置表示、Q/K/V 投影、mask、attention、MLP、归一化、残差、输出头和训练目标共同组成。理解架构时，不能只记住“Q 看 K，V 被加权”，还要追踪每一个张量的形状、每一条信息路径和每一种成本。
 
-本章沿着 decoder-only Transformer 的数据流展开，同时对照 encoder-only、encoder-decoder、稀疏 attention、线性 attention、递归状态架构和 MoE。全章分为十三个独立主题：
+本章沿着 decoder-only Transformer 的数据流绘制架构地图，同时对照 encoder-only、encoder-decoder、稀疏 attention、线性 attention、递归状态架构和 MoE。4.1—4.13 是按问题组织的百科支持型速查入口，不替代完整推导；完整学习时可沿下表进入对应主讲章节：
 
 ~~~text
 token id
@@ -18,7 +18,19 @@ token id
  -> prefill / decode / KV cache
 ~~~
 
-每个主题都从初学者直觉、专家变量、公式、工程例子和失败边界讲起。需要先学习组件实现的读者，可以阅读[第一册第二章：Transformer 核心](../../book-01-core-30/chapters/02-transformer核心.md)；需要追踪架构演进和真实模型配置的读者，可以继续阅读[第二十一册：Transformer 架构演进](../../book-21-transformer-architecture-evolution/目录.md)。本章中所有复杂度和数字示例都是推导或教学构造，不能替代目标模型、目标硬件上的实测。
+| 查询主题 | 完整主讲入口 |
+| --- | --- |
+| Transformer 主干、Q/K/V 与 attention 信息路由 | [第一册第 02 章：Transformer 核心](../../book-01-core-30/chapters/02-transformer核心.md)、[第二十一册第 02 章：Self-Attention](../../book-21-transformer-architecture-evolution/chapters/02-self-attention的信息路由本质.md)、[第 03 章：Q/K/V 与 Attention Head](../../book-21-transformer-architecture-evolution/chapters/03-qkv-attention-head与表示子空间.md) |
+| Decoder-only、Encoder-only、Encoder-decoder 与 Cross-Attention | [第一册第 02 章：Transformer 核心](../../book-01-core-30/chapters/02-transformer核心.md)、[第二十一册第 51 章：GPT、Decoder-only 与 ICL](../../book-21-transformer-architecture-evolution/chapters/51-GPT-decoder-only-scaling-ICL.md) |
+| Sinusoidal、RoPE、ALiBi 与位置外推 | [第二十一册第 07 章：Position Encoding 总览](../../book-21-transformer-architecture-evolution/chapters/07-position-encoding总览-sinusoidal-learned-relative-rope-alibi.md)、[第 18 章：RoPE 与长上下文位置外推](../../book-21-transformer-architecture-evolution/chapters/18-RoPE与长上下文位置外推.md) |
+| Causal mask、Prefix LM 与双向可见性 | [第二十一册第 08 章：注意力模式](../../book-21-transformer-architecture-evolution/chapters/08-causal-mask-prefix-lm-bidirectional-attention与注意力模式.md) |
+| MHA、MQA、GQA、MLA 与 KV Cache | [第二十一册第 04 章：KV head 共享与 MLA](../../book-21-transformer-architecture-evolution/chapters/04-mha-mqa-gqa-mla的演进与trade-off.md)、[第 11 章：KV Cache 与长上下文推理](../../book-21-transformer-architecture-evolution/chapters/11-kv-cache长上下文推理和显存增长问题.md) |
+| Full、Local、Sparse、Linear Attention 与 FlashAttention | [第二十一册第 10 章：Attention 复杂度](../../book-21-transformer-architecture-evolution/chapters/10-o-n2-attention的计算与显存瓶颈.md)、[第 19 章：滑动窗口和稀疏注意力](../../book-21-transformer-architecture-evolution/chapters/19-Sliding-Window与稀疏注意力.md)、[第 20 章：FlashAttention 与 PagedAttention](../../book-21-transformer-architecture-evolution/chapters/20-FlashAttention与PagedAttention.md)、[第 24 章：Linear Attention](../../book-21-transformer-architecture-evolution/chapters/24-Linear-Attention基本思想与核技巧.md) |
+| FFN、残差、Norm 与 MoE | [第二十一册第 05 章：FFN 与 MoE-FFN](../../book-21-transformer-architecture-evolution/chapters/05-ffn-swiglu-gated-mlp与moe-ffn.md)、[第 06 章：残差与归一化](../../book-21-transformer-architecture-evolution/chapters/06-residual-layernorm-rmsnorm-prenorm与训练稳定性.md)、[第 21 章：MoE 路线](../../book-21-transformer-architecture-evolution/chapters/21-MoE路线Switch-GShard-Mixtral-DeepSeek.md)、[第 22 章：Dense 与 MoE 取舍](../../book-21-transformer-architecture-evolution/chapters/22-Dense与MoE训练服务trade-off.md) |
+| 递归状态、Gated DeltaNet、KDA 与 NoPE | [第二十一册第 62 章：Gated DeltaNet](../../book-21-transformer-architecture-evolution/chapters/62-gated-deltanet门控线性注意力.md)、[第 64 章：NoPE](../../book-21-transformer-architecture-evolution/chapters/64-nope与隐式顺序.md)、[第 76 章：Kimi Delta Attention](../../book-21-transformer-architecture-evolution/chapters/76-kda从delta规则到线性注意力.md) |
+| 长上下文的信息利用与成本 | [第二十一册第 11 章：KV Cache 与长上下文推理](../../book-21-transformer-architecture-evolution/chapters/11-kv-cache长上下文推理和显存增长问题.md)、[第二十四册第 09 章：KV Cache 最小实现](../../book-24-llm-inference-engine/chapters/09-实现kv-cache的最小版本.md)、[第 35 章：Prefill 与 Decode 资源画像](../../book-24-llm-inference-engine/chapters/35-prefill和decode的资源画像为什么不同.md) |
+
+本章中所有复杂度和数字示例都是推导或教学构造，不能替代目标模型、目标硬件上的实测。
 
 ## 4.1 Transformer 解决了什么问题
 
@@ -138,6 +150,8 @@ k_s=R(\theta_s)k.
 
 在同一二维频率下，θ_p=pω、θ_s=sω，因此 q_p 与 k_s 的点积等于 qᵀR((s-p)ω)k。它依赖相对位置相位和内容，不是仅由距离决定。RoPE 通常作用于 Q 和 K，而不是把一个位置向量直接加到 embedding 上。base、旋转维度、频率和 position offset 都是 checkpoint 契约的一部分。
 
+可用二维例子核对相对位移。令 q=(1,0)、k=(0,1)、ω=π/2，取 p=1、s=2，则 q_p=R(π/2)q=(0,1)，k_s=R(π)k=(0,-1)，所以 q_pᵀk_s=-1。相对式也给出 qᵀR((s-p)ω)k=qᵀR(π/2)k=-1。这个例子只核对旋转和点积关系，不代表训练中实际学到的向量。
+
 ### RoPE scaling 与外推
 
 训练长度为 T_train 时，直接把推理位置扩大到远高于 T_train，可能导致旋转相位分布偏离训练范围。位置插值、频率调整、分段 scaling 和长上下文继续训练都试图缓解这一问题，但各有短上下文、长上下文、数值和实现代价。
@@ -214,7 +228,7 @@ Q 的形状是 [B,H,T_q,d_h]，K/V 的形状是 [B,H,T_k,d_h]。QK^T 的结果�
 
 ### 计算与存储复杂度
 
-对长度 T 的 full attention，score 矩阵含 T^2 个位置对。若忽略 batch 和常数，计算和中间存储的关键项分别近似为：
+对长度 T 的 full attention，单个 head 的 score 矩阵含 T^2 个位置对。以下先按单个 head 计，计算和中间存储的关键项分别近似为：
 
 ~~~math
 \mathrm{cost}_{\mathrm{score}}=O(T^2d_h),
@@ -224,6 +238,8 @@ Q 的形状是 [B,H,T_q,d_h]，K/V 的形状是 [B,H,T_k,d_h]。QK^T 的结果�
 
 实际 kernel 可能不显式存完整 score 矩阵，但数学依赖关系仍然存在；FlashAttention 减少 IO 和中间存储，不会把精确 full attention 的连接数变成线性。
 
+多头 attention 的 score 计算项需乘 head 数 H，即 O(H T^2 d_h)；因为 d=H d_h，也可写成 O(T^2 d)。若完整物化 score，存储项是 O(H T^2)；融合 kernel 可避免保存完整矩阵，但不会省掉 full attention 对可见 query-key 对的计算。
+
 ### 一个可手算的 attention 例子
 
 设一个 query 对三个 key 的未归一化 score 为 [1, 0, -1]，softmax 权重为：
@@ -232,7 +248,7 @@ Q 的形状是 [B,H,T_q,d_h]，K/V 的形状是 [B,H,T_k,d_h]。QK^T 的结果�
 p_i=\frac{\exp(s_i)}{\exp(1)+\exp(0)+\exp(-1)}.
 ~~~
 
-若三个 value 是标量 [10, 0, 4]，输出就是 p_1×10+p_2×0+p_3×4。这个例子只展示“score 决定权重、value 决定内容”，不能据此解释真实模型的语义。
+若三个 value 是标量 [10, 0, 4]，指数分别约为 2.7183、1 和 0.3679，分母约为 4.0862，因此权重约为 `[0.6652, 0.2447, 0.0900]`。加权输出为 `0.6652×10+0.2447×0+0.0900×4≈7.0125`。这个例子只展示“score 决定权重、value 决定内容”，不能据此解释真实模型的语义。
 
 ## 4.4 Causal Mask、Padding Mask 与信息边界
 
@@ -296,11 +312,13 @@ for row in causal_mask(3):
     print(row)
 ~~~
 
-预期三行表示每个位置能看到自己和之前的位置。这个布尔矩阵没有 batch、head、padding 和 dtype 语义，不能直接当作高性能 attention mask 使用。
+预期输出为 `[True, False, False]`、`[True, True, False]`、`[True, True, True]`，每一行分别表示该 query 可见的 key。这个布尔矩阵没有 batch、head、padding 和 dtype 语义，不能直接当作高性能 attention mask 使用。
+
+代码状态：静态审阅，未运行（2026-10-30）；仅依赖 Python 3 标准库，保存为 `demo.py` 后运行 `python3 demo.py`。预期输出为上述 3×3 下三角布尔矩阵。
 
 ### 缓存 query 要按绝对位置对齐
 
-缓存已有 P 个位置，再处理 Q 个新位置时，第 i 个新 query 的绝对位置为 P+i，允许读取的 key 满足 j≤P+i。不能简单对 `[Q,P+Q]` 做左上角下三角。例如 P=2、Q=1 时，正确行是 `[True,True,True]`，而不是 `[True,False,False]`。PyTorch SDPA 的非方形 `is_causal=True` 采用左上对齐，因此此处使用显式 mask。
+缓存已有 P 个位置，再处理 Q 个新位置时，第 i 个新 query 的绝对位置为 P+i，允许读取的 key 满足 j≤P+i。不能简单对 `[Q,P+Q]` 做左上角下三角。例如 P=2、Q=1 时，正确行是 `[True,True,True]`，而不是 `[True,False,False]`。PyTorch 2.12 SDPA 对非方形 `is_causal=True` 使用左上对齐的 causal bias，因此这里按 query/key 绝对位置构造显式布尔 mask，并令 `is_causal=False`；该接口不允许同时传入 `attn_mask` 和 `is_causal=True`。
 
 下面用 CPU float64、单 head、无位置编码或 dropout 演示 attention 局部机制；它不是完整 Transformer。三种检查分别验证未来隔离、逐位置缓存与全量对齐、padding key 隔离。
 
@@ -345,6 +363,8 @@ print("cache_max_error=", round(error, 12))
 ~~~
 
 输出隔离检查为 True，最大误差舍入到 12 位小数为 0。这里缓存的是预先生成的 K/V 切片，只验证 attention 的位置与读取语义；真实模型还须验证逐层投影、RoPE、position id、adapter 和请求状态，不能从这段代码推导生产缓存正确。
+
+代码状态：静态审阅，未运行（2026-10-30）；需要 PyTorch 2.12，示例固定 CPU `float64`，不依赖 CUDA；保存为 `demo.py` 后运行 `python3 demo.py`。预期输出为 `future_and_padding_isolated= True`、`cache_max_error= 0.0`。这仅是小张量 mask 与缓存对齐检查，不代表 GPU fused kernel 的逐位相等。
 
 ## 4.5 MHA、MQA、GQA 与 MLA：改变 K/V 的共享关系
 
@@ -393,6 +413,8 @@ M_{\mathrm{KV}}
 ~~~
 
 前面的 2 是 K 和 V 两份。GQA 把 H_kv 降低，可以直接减少这部分显存；它并不减少 query 投影的所有计算，也不自动减少 MLP 或输出层成本。
+
+例如 `L=2`、`B=1`、`T=4`、`d_h=2`、BF16 每元素 `b=2` 字节。MHA 的 `H_kv=4` 时 cache 为 `2×2×1×4×4×2×2=256` 字节；GQA 设 `H_kv=2` 时为 128 字节；MQA 设 `H_kv=1` 时为 64 字节。这个账本只反映 K/V 元素数，未包含量化 scale、对齐或分配器开销。
 
 ### MLA 与低维 latent cache
 
@@ -474,7 +496,9 @@ def kv_cache_bytes(
 print(kv_cache_bytes(32, 4, 8192, 8, 128, 2) / 1024**3)
 ~~~
 
-输出为 4.0 GiB，已经包含 batch=4 的四条等长序列。这个结果只计算这些序列的 K/V 元素，不包括 allocator、workspace、权重、激活、分页碎片或 batch 之外的其他请求；它的作用是建立量级直觉。公式假设所有层都保存等长、相同宽度的 K/V；MLA、混合状态和分层滑窗模型应分别统计，量化还需计入 scale 等元数据。
+手算元素总数为 `2×32×4×8192×8×128=2,147,483,648` 个，乘以 2 字节得到 `4,294,967,296` 字节，即 `4.0 GiB`。输出已经包含 batch=4 的四条等长序列。这个结果只计算这些序列的 K/V 元素，不包括 allocator、workspace、权重、激活、分页碎片或 batch 之外的其他请求；它的作用是建立量级直觉。公式假设所有层都保存等长、相同宽度的 K/V；MLA、混合状态和分层滑窗模型应分别统计，量化还需计入 scale 等元数据。
+
+代码状态：静态审阅，未运行（2026-10-30）；仅依赖 Python 3 标准库，保存为 `demo.py` 后运行 `python3 demo.py`。预期输出为 `4.0`，单位按正文解释为 GiB；函数只计算 K/V 张量字节数。
 
 ## 4.7 Full、Local、Sparse、Linear 与 FlashAttention
 
@@ -484,7 +508,7 @@ Full attention 允许每个 query 访问所有可见 key，信息路径最直接
 
 ### Local 或 sliding-window attention
 
-Local attention 只让 query 访问邻近窗口。若窗口宽度为 w，理论连接数从 T² 降到约 Tw。它适合局部语法、音频帧或长文档的局部关联，但远端信息需要通过层间传播、全局 token、摘要或外部检索才能到达。
+Local attention 只让 query 访问邻近窗口。若窗口宽度为 w，理论连接数从 T² 降到约 Tw。对长度 8 的因果序列，full attention 有 `1+2+…+8=36` 个可见 query-key 对；若每个 query 最多看当前位置和前 2 个位置（`w=3`），局部模式有 `1+2+6×3=21` 对。它适合局部语法、音频帧或长文档的局部关联，但远端信息需要通过层间传播、全局 token、摘要或外部检索才能到达。
 
 窗口并不自动等价于“长上下文理解”。若一个证据和问题距离超过所有可达路径，模型可能无法直接整合它。
 
@@ -510,7 +534,9 @@ Linear attention 试图利用特征映射或计算重排，把显式的 QK^T 连
 
 ### FlashAttention
 
-FlashAttention 是 exact attention 的 IO-aware 实现。它通过 tiling、在线 softmax 和分块重计算，减少 HBM 与片上存储之间的往返和中间矩阵写入。它改变的是计算组织，而不是把 attention 连接模式变成稀疏或把 softmax 近似成另一种函数。
+FlashAttention 是 exact attention 的 IO-aware 实现。它通过 tiling、在线 softmax 和分块重计算，减少 HBM 与片上存储之间的往返和中间矩阵写入。dense 核心计算仍对应同一个 full softmax attention 算子；“exact”指算法目标相同，不代表不同浮点累加顺序会逐位相同。低精度路径和 block-sparse 扩展还要分别说明其数值误差或连接集合。
+
+实现路线随硬件继续演进：FlashAttention-1 以 tiling 和重计算降低 IO，FlashAttention-2 调整序列并行与 warp 工作分配，FlashAttention-3 面向 Hopper 重叠异步搬运和计算并研究 FP8，FlashAttention-4 则针对 Blackwell 的异步 MMA、片上存储和 softmax 瓶颈协同设计 kernel。后两者的论文结果绑定对应 GPU、dtype、shape 和实现；不应把某一代在某张卡上的 speedup 写成所有平台的保证。
 
 因此要区分：
 
@@ -690,6 +716,8 @@ for _ in range(2):
 
 本例输出2.5和2.75，只说明给定标量下的纠正过程，不覆盖向量 key 干扰、训练、并行 chunk kernel 或实际模型性能。
 
+代码状态：静态审阅，未运行（2026-10-30）；仅依赖 Python 3 标准库，保存为 `demo.py` 后运行 `python3 demo.py`。预期两行输出依次为 `2.5`、`2.75`，只对应正文给定的标量输入。
+
 ### KDA、Gated DeltaNet 与混合注意力
 
 近期架构把 gated delta state、局部或全局 attention、MLA 等组合起来，目标通常是在表达能力、长序列效率和 cache 体积之间寻找折中。Kimi Linear 论文中的 Kimi Delta Attention 是一个具体实例；Gated DeltaNet 则代表另一类门控递归状态设计。阅读这些模型时，应逐层记录：
@@ -705,6 +733,8 @@ prefill 和 decode 的更新顺序
 ~~~
 
 “cache 更小”不等于“信息容量相同”；递归状态可能更适合流式和长序列，也可能在精确引用、随机访问或复杂多跳任务上出现不同错误。
+
+2026 年的 Gated DeltaNet-2 将 key 侧的逐通道 erase gate 与 value 侧的逐通道 write gate 分开。原论文给出的退化关系是：erase 与 write 绑定为同一标量时回到 KDA；channel-wise decay 也退化为标量时进一步回到 Gated DeltaNet。论文分别评估纯递归模型和加入 sliding-window attention 的混合模型，因此 hybrid 的实验收益不能全部归因于状态更新本身。[Gated DeltaNet-2 原论文](https://arxiv.org/abs/2605.22791v1)
 
 ### NoPE 的含义
 
@@ -740,7 +770,7 @@ P_{\mathrm{active}}
 =P_{\mathrm{shared}}+kP_e+P_r.
 ~~~
 
-P_active 不是模型实际延迟的完整公式。路由、token dispatch、跨设备通信、expert 负载不均衡、KV cache、kernel 和权重加载都会影响服务成本。
+P_active 不是模型实际延迟的完整公式。路由、token dispatch、跨设备通信、expert 负载不均衡、KV cache、kernel 和权重加载都会影响服务成本。例如共享参数为 2B、4 个 expert 各为 1B、router 等其他参数为 0.1B、每 token 激活 k=2 个 expert 时，`P_total=2+4×1+0.1=6.1B`，`P_active=2+2×1+0.1=4.1B`。减少 active 参数不意味着部署可以不保存其余 expert 权重。
 
 ### Router 与负载均衡
 
@@ -822,7 +852,9 @@ def attention_shapes(batch, tokens, model_dim, query_heads, kv_heads):
 print(attention_shapes(2, 16, 64, 8, 2))
 ~~~
 
-这个片段只验证 MHA/GQA 的形状关系，不执行 attention。它也没有验证 kernel 是否真的按照 group_size 复制或广播 K/V，真实实现仍需数值对齐测试。
+预期返回的形状为 `hidden=(2,16,64)`、`q=(2,8,16,8)`、`k=v=(2,2,16,8)`、`group_size=4`。这个片段只验证 MHA/GQA 的形状关系，不执行 attention。它也没有验证 kernel 是否真的按照 group_size 复制或广播 K/V，真实实现仍需数值对齐测试。
+
+代码状态：静态审阅，未运行（2026-10-30）；仅依赖 Python 3 标准库，保存为 `demo.py` 后运行 `python3 demo.py`。预期 shape 字典如上；代码检查维度可整除关系，不验证实际 attention 数值或 kernel 行为。
 
 ### 资料与证据边界
 
@@ -839,7 +871,10 @@ print(attention_shapes(2, 16, 64, 8, 2))
 - [Lost in the Middle](https://arxiv.org/abs/2307.03172)：长上下文位置偏差。
 - [Retentive Network](https://arxiv.org/abs/2307.08621)：递归状态与并行/递归形式。
 - [Gated Delta Networks](https://arxiv.org/abs/2412.06464)：门控 delta state。
+- [Gated DeltaNet-2](https://arxiv.org/abs/2605.22791v1)：分离逐通道擦除门与写入门的递归状态更新。
 - [Kimi Linear](https://arxiv.org/abs/2510.26692)：Kimi Delta Attention 与混合长序列架构。
+- [DeepSeek-V2](https://arxiv.org/abs/2405.04434)：Multi-head Latent Attention 的低秩 KV 联合压缩。
+- [FlashAttention-3](https://arxiv.org/abs/2407.08608) 与 [FlashAttention-4](https://arxiv.org/abs/2603.05451)：面向 Hopper/Blackwell 的 attention kernel 演进。
 - [PyTorch scaled dot product attention](https://docs.pytorch.org/docs/2.12/generated/torch.nn.functional.scaled_dot_product_attention.html)：官方 attention 接口。
 - [PyTorch MultiheadAttention](https://docs.pytorch.org/docs/2.12/generated/torch.nn.MultiheadAttention.html)：官方多头接口。
 
@@ -864,4 +899,4 @@ token id
 
 进一步比较架构时，还要回答三个问题：历史信息是通过完整 KV、压缩 cache 还是递归 state 保存的；信息连接是 full、local、sparse、linear 还是混合的；总参数、每 token 激活参数、显存、通信和质量如何共同决定成本。Transformer 的名字只是入口，真正需要理解的是信息从哪里来、沿什么路径传播、在哪里被截断，以及这些路径在目标任务和目标硬件上是否得到证据支持。
 
-配套验收见[Transformer 信息路径与状态练习](../../EXERCISES.md#transformer-百科信息路径与状态验收)；下一章见[大语言模型基础](05-大语言模型基础.md)。
+配套验收见[Transformer 信息路径与状态练习](../../EXERCISES.md#阶段-2transformer-验收)；下一章见[大语言模型基础](05-大语言模型基础.md)。
