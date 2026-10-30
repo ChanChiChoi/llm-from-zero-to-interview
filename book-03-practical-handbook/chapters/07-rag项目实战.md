@@ -4,7 +4,7 @@
 
 本章沿着一个知识问答请求推进：先把原始文档转成带版本和权限的片段，再将查询映射到候选证据，必要时重新排序，最后生成带引用的回答并分层评估。每一步都保留中间对象，使错误可以回溯到解析、召回、排序、上下文构造、生成或引用校验，而不是统一归结为“模型幻觉”。
 
-这里先完成有界的文档检索链，不把向量 RAG 包装成适合所有问题的结构。若目标是跨文档实体关系、多跳关联或整批资料的全局摘要，可评估 GraphRAG 一类图结构路线；它会增加实体/关系抽取、社区摘要、索引构建成本和新的事实错误面。微软[当前仓库说明](https://github.com/microsoft/graphrag)将 GraphRAG 描述为研究项目，并提醒索引可能昂贵；本册不把它设为默认方案，相关方法入口见[第十七册 Agentic RAG 章节](../../book-17-agent-tool-use/chapters/06-agentic-rag.md)。
+这里先完成有界的文档检索链，不把向量 RAG 包装成适合所有问题的结构。若目标是跨文档实体关系、多跳关联或整批资料的全局摘要，可评估 GraphRAG 一类图结构路线。微软[官方索引方法说明](https://github.com/microsoft/graphrag/blob/main/docs/index/methods.md)把它称为研究 RAG 索引方法的平台：标准流程用语言模型抽取实体和关系、汇总实体与关系，并生成社区报告；文档还把标准流程与成本较低但图更嘈杂的 FastGraphRAG 作了区分。相较只建向量索引，这些额外生成阶段也需要检查抽取和摘要是否保真，因此本册不把 GraphRAG 设为默认方案。相关方法入口见[第十七册 Agentic RAG 章节](../../book-17-agent-tool-use/chapters/06-agentic-rag.md)。
 
 ```mermaid
 flowchart LR
@@ -68,7 +68,7 @@ embedding_model：生成向量的模型和 revision。
 
 第一版可以从纯文本开始：
 
-> 代码状态：已验证（2026-10-21；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；标准库教学块的运行与边界记录适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-30）
 
 ```python
 documents = [
@@ -92,7 +92,7 @@ PDF、DOCX、HTML、扫描件和数据库记录需要不同的解析器。解析
 
 清洗可以处理重复空格、无意义页眉、页脚和控制字符，但不能随意删除数字、否定词、单位和标题。下面是一个保守的文本规范化示例：
 
-> 代码状态：已验证（2026-10-21；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；标准库教学块的运行与边界记录适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-30）
 
 ```python
 import re
@@ -142,7 +142,7 @@ M
 
 一个基础切分函数如下：
 
-> 代码状态：已验证（2026-10-21；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；标准库教学块的运行与边界记录适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-30）
 
 ```python
 def chunk_text(text, chunk_size=120, overlap=24):
@@ -235,9 +235,9 @@ I_K
 
 ### 7.1.5 Sentence Transformers 和 FAISS 接口
 
-有外部依赖时，可以使用 Sentence Transformers 编码：
+有外部依赖时，可以使用 Sentence Transformers 编码。本节接口按 Sentence Transformers 6.2.0 的官方文档整理，FAISS 示例按 faiss-cpu 1.15.1 的接口整理；仓库 `uv.lock` 没有锁定这两项依赖，因此下列片段不是经过联调的完整环境。项目落地时还要一起锁定 Python、PyTorch、Transformers、NumPy、Sentence Transformers、FAISS 及平台 wheel，并在目标环境验证。模型 revision 固定到所示 Hub commit；检索任务使用 `encode_document` 和 `encode_query`，模型若定义了不同的 query/document prompt，需按其模型卡和评测结果确认输入约定。
 
-> 代码状态：静态审阅，未运行（2026-10-21；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；缺少 NumPy/FAISS/Sentence Transformers 或模型文件）
+> 代码状态：静态审阅，未运行（2026-10-30）
 
 ```python
 # Requires numpy, sentence-transformers, and the selected model files.
@@ -249,9 +249,12 @@ chunks = [
     {"text": "工作满一年后，每年有 10 天带薪年假。"},
     {"text": "单笔超过 5000 元需要额外审批。"},
 ]
-embed_model = SentenceTransformer("BAAI/bge-small-zh-v1.5")
+embed_model = SentenceTransformer(
+    "BAAI/bge-small-zh-v1.5",
+    revision="7999e1d3359715c523056ef9478215996d62a620",
+)
 texts = [row["text"] for row in chunks]
-embeddings = embed_model.encode(
+embeddings = embed_model.encode_document(
     texts,
     normalize_embeddings=True,
     convert_to_numpy=True,
@@ -262,7 +265,7 @@ print("embedding_shape=", embeddings.shape)
 
 如果使用 FAISS 的 inner-product 索引：
 
-> 代码状态：静态审阅，未运行（2026-10-21；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；缺少 NumPy/FAISS/Sentence Transformers 或模型文件）
+> 代码状态：静态审阅，未运行（2026-10-30）
 
 ```python
 # Requires numpy, faiss-cpu (or a compatible FAISS build), sentence-transformers,
@@ -276,8 +279,11 @@ texts = [
     "工作满一年后，每年有 10 天带薪年假。",
     "单笔超过 5000 元需要额外审批。",
 ]
-embed_model = SentenceTransformer("BAAI/bge-small-zh-v1.5")
-embeddings = embed_model.encode(
+embed_model = SentenceTransformer(
+    "BAAI/bge-small-zh-v1.5",
+    revision="7999e1d3359715c523056ef9478215996d62a620",
+)
+embeddings = embed_model.encode_document(
     texts,
     normalize_embeddings=True,
     convert_to_numpy=True,
@@ -285,7 +291,7 @@ embeddings = embed_model.encode(
 dimension = embeddings.shape[1]
 index = faiss.IndexFlatIP(dimension)
 index.add(embeddings)
-query_vector = embed_model.encode(
+query_vector = embed_model.encode_query(
     ["员工年假有多少天？"],
     normalize_embeddings=True,
     convert_to_numpy=True,
@@ -299,7 +305,7 @@ scores, indices = index.search(query_vector, k)
 
 为了在没有模型权重的环境中验证数据流，下面用字符 unigram 和 bigram 构造稀疏字典向量。它不是语义 embedding，只能帮助理解归一化、点积、top-k 和来源保留。
 
-> 代码状态：已验证（2026-10-21；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；标准库教学块的运行与边界记录适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-30）
 
 ```python
 from math import sqrt
@@ -404,13 +410,15 @@ print("top_ids=", [row["chunk_id"] for row in retrieved])
 print("top_scores=", [row["score"] for row in retrieved])
 print("prompt_has_source=", "policy_001" in prompt)
 ```
-这个 demo 的 toy 输出不能证明稀疏字符特征能替代中文 embedding。真实评估需要加入同义改写、否定、条件、跨段证据和权限过滤。
+这个 demo 的 toy 输出不能证明稀疏字符特征能替代中文 embedding，也不是 BM25 的实现。关键词检索（例如 BM25）更容易保留错误码、产品名、条款号和阈值等精确词项；稠密检索更关注查询与文档的语义相近。若单一路线漏掉了另一类问题，可以并行召回后做混合排序。两种检索器的原始分数往往不在同一尺度，常见做法是先归一化再融合，或按各自名次使用倒数排名融合（Reciprocal Rank Fusion，RRF）；完整机制和分数例子见[第二册《长上下文 RAG 与 Agent》](../../book-02-advanced-100/chapters/07-长上下文rag与agent.md)，RRF 的定义也可参阅[Elasticsearch 官方说明](https://www.elastic.co/docs/reference/elasticsearch/rest-apis/reciprocal-rank-fusion)。
+
+落到这个项目时，两个召回分支应使用同一用户的租户、权限和有效版本范围，并用稳定的 `chunk_id` 合并和去重。评测集要分开包含精确编号、同义改写、否定、数值条件和跨段证据问题；比较 Recall@k、排序指标、最终答案支持率、延迟和上下文 token 数。混合召回可能补上单一路线漏掉的候选，但会增加索引与维护成本，也不保证最终答案更正确。
 
 ### 7.1.7 查询改写与过滤
 
 用户问题不一定是适合检索的完整句子。可以先抽取实体、时间、产品和约束，再构造检索查询。查询改写不能擅自改变用户意图，例如“是否必须”不能被改成“怎么申请”。
 
-检索过滤可以在向量搜索前或后执行：
+检索过滤可以在向量搜索前或后执行，具体取决于索引是否支持元数据过滤；安全边界要落在可信的数据访问层：
 
 ```text
 租户过滤：只看当前租户文档。
@@ -420,7 +428,7 @@ print("prompt_has_source=", "policy_001" in prompt)
 时间过滤：排除已失效的制度。
 ```
 
-权限过滤不是 prompt 里的文字约束，而是索引查询条件或数据访问层的条件。先召回无权文档、再依赖模型不引用它，仍然可能导致数据泄露。
+有原生过滤时，优先把租户、ACL 和有效版本条件下推到每个召回器。若只能在召回后过滤，必须在可信检索层完成，并且在过滤前不得把无权文档的文本、元数据或分数交给 reranker、生成模型、外部服务、用户或常规 trace；过滤后候选数不足时，只能在相同授权范围内补召回。权限过滤不是 prompt 里的文字约束，也不能靠“模型会不会引用”来决定。
 
 ### 7.1.8 上下文预算
 
@@ -440,7 +448,7 @@ L_{\mathrm{ctx}}
 
 如果只把 top-k 数字固定为 5，无法保证每个问题的文本长度都可控。可以按 token 预算动态选取：
 
-> 代码状态：已验证（2026-10-21；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；标准库教学块的运行与边界记录适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-30）
 
 ```python
 def select_by_budget(rows, budget):
@@ -491,8 +499,12 @@ print("used_tokens=", used)
 
 - Retrieval-Augmented Generation：<https://arxiv.org/abs/2005.11401>
 - Sentence-BERT：<https://arxiv.org/abs/1908.10084>
-- Sentence Transformers semantic search：<https://sbert.net/examples/sentence_transformer/applications/semantic-search/>
-- FAISS 文档：<https://github.com/facebookresearch/faiss/wiki>
+- Sentence Transformers embedding 与 query/document API：<https://www.sbert.net/docs/sentence_transformer/usage/usage.html>
+- Sentence Transformers 6.2.0 发布记录：<https://pypi.org/project/sentence-transformers/>
+- BGE small-zh-v1.5 固定模型 revision：<https://huggingface.co/BAAI/bge-small-zh-v1.5/commit/7999e1d3359715c523056ef9478215996d62a620>
+- FAISS 内积与余弦相似度：<https://github.com/facebookresearch/faiss/wiki/MetricType-and-distances>
+- FAISS 索引精确性对照：<https://github.com/facebookresearch/faiss/wiki/Faiss-indexes>
+- faiss-cpu 1.15.1 安装说明：<https://github.com/facebookresearch/faiss/blob/main/INSTALL.md>
 - MTEB：<https://arxiv.org/abs/2210.07316>
 - BEIR：<https://arxiv.org/abs/2104.08663>
 
@@ -567,7 +579,7 @@ s_i=u^\top e_i
 r_i=g_{\psi}([q;c_i])
 ```
 
-候选文本和 query 会共享注意力上下文，通常更容易识别否定、数字条件和短语关系，但每个 pair 都要运行模型。若候选数为 \(K\)，粗略延迟账本是：
+候选文本和 query 会共享注意力上下文，可以在打分时共同处理两侧 token；这不保证特定领域中的否定、数字条件或例外一定排序正确，每个 pair 都要运行模型。若候选数为 \(K\)，粗略延迟账本是：
 
 ```math
 T_{\mathrm{rag}}
@@ -587,14 +599,17 @@ batching、GPU、候选长度和 cross-encoder 的最大输入长度都会改变
 
 Sentence Transformers 的 CrossEncoder 可以这样使用：
 
-> 代码状态：静态审阅，未运行（2026-10-21；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；缺少 NumPy/FAISS/Sentence Transformers 或模型文件）
+> 代码状态：静态审阅，未运行（2026-10-30）
 
 ```python
 # Requires sentence-transformers and the selected model files.
 from sentence_transformers import CrossEncoder
 
 
-reranker = CrossEncoder("BAAI/bge-reranker-base")
+reranker = CrossEncoder(
+    "BAAI/bge-reranker-base",
+    revision="2cfc18c9415c912f9d8155881c133215df768a70",
+)
 pairs = [
     ["单笔超过 5000 元的报销需要谁审批？", "报销需要提交发票和行程单。"],
     ["单笔超过 5000 元的报销需要谁审批？", "超过 5000 元需要部门负责人额外审批。"],
@@ -604,11 +619,15 @@ print("scores=", scores)
 ```
 这是外部依赖示例，输入是两个 query-candidate pair，输出是对应的两个分数。具体数值随模型文件和版本变化；分数可能是 logits 或经过变换的相关性分数，不应跨模型比较绝对值。应使用同一模型、同一版本、同一候选集观察排序变化。
 
+这类分数首先是排序信号，不自动等于“证据充分概率”。若实现只取 top-M，可以用稳定的候选预算进入下一阶段；若想按分数阈值直接丢弃候选，就需要在独立验证集上检查该阈值对 gold 保留率和 coverage 的影响。pair 输入还受模型最大长度限制，较长的 chunk 可能在 tokenizer 截断时丢掉末尾的例外或数字；应记录 query、chunk 的 token 长度和截断状态，至少用含长条款、表格脚注和条件后置的样例检查最终模型实际看到的文本。单个 pair 的耗时也不能代表并发服务的延迟，实测时应分开报告 batch、吞吐、单请求分位数与队列时间。
+
+如果一个问题需要“期限、地区例外、当前状态”三块证据，逐 pair 评分可能把同一政策的三个近重复 chunk 都排到最前面。重排后仍要由 context builder 做去重、来源多样性和 gold coverage 检查；不能因为某个 chunk 的 rerank score 最高，就让它挤掉回答所需的另两项条件。对于这种多证据 query，应同时看完整 gold 集是否进入最终上下文，而不只检查首个相关片段的排名。
+
 ### 7.2.3 无依赖精排 demo
 
 下面用词项和条件匹配模拟 cross-encoder 的精排行为：
 
-> 代码状态：已验证（2026-10-21；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；标准库教学块的运行与边界记录适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-30）
 
 ```python
 QUERY = "单笔超过 5000 元的报销需要谁审批？"
@@ -667,6 +686,10 @@ rerank 候选数量；
 
 不要只看 reranker 的分数提升。一个排序指标的提升，如果被额外延迟和上下文噪声抵消，就不一定带来端到端收益。
 
+实际对比时要把“候选找没找齐”和“候选排得好不好”分开量。假设固定 200 个 query，第一阶段 top-40 中 176 个包含 gold，候选召回率是 \(176/200=88\%\)；rerank 后送给生成器的 top-5 中有 150 个包含 gold，端到端 top-5 命中率是 \(150/200=75\%\)，条件重排保留率则是 \(150/176\approx85.2\%\)。这三个比例对应不同分母，不能把 85.2% 写成系统 Recall@5。若第一阶段候选召回本来只有 60%，重排模型就没有机会修复其余 40% 的漏召回；若候选召回很高但 top-5 保留率低，才更应检查 reranker 的训练样本、截断位置和排序目标。
+
+为隔离 reranker 的作用，先冻结一批由同一文档快照和同一召回器产生的候选，比较排序前后的 MRR/NDCG、最终 context 和答案支持率；再单独比较完整检索链，报告召回器和 reranker 的组合效果。训练、调参和测试 query 要按用户问题或来源文档隔离，不能把同一事实段落的改写一边用于 hard-negative 训练、一边放进测试。负例应覆盖业务中的边界差异，例如“单笔超过 5000”与“单笔不超过 5000”、已生效版本与旧版、适用地区与例外地区；如果标注只说“主题相关”，模型可能把主题相近但条件冲突的片段排在前面。
+
 ### 7.2.5 失败模式
 
 ```text
@@ -691,8 +714,9 @@ rerank 候选数量；
 
 ### 7.2.6 资料与证据边界
 
-- Cross-Encoder 文档：<https://sbert.net/docs/cross_encoder/usage/usage.html>
-- Sentence Transformers Retrieve and Rerank：<https://sbert.net/examples/sentence_transformer/applications/retrieve_rerank/README.html>
+- CrossEncoder API 文档：<https://www.sbert.net/docs/package_reference/cross_encoder/model.html>
+- Sentence Transformers Retrieve and Rerank：<https://www.sbert.net/examples/sentence_transformer/applications/retrieve_rerank/README.html>
+- BGE reranker-base 固定模型 revision：<https://huggingface.co/BAAI/bge-reranker-base/commit/2cfc18c9415c912f9d8155881c133215df768a70>
 - ColBERT：<https://arxiv.org/abs/2004.12832>
 - MonoBERT：<https://arxiv.org/abs/1910.14424>
 - BEIR：<https://arxiv.org/abs/2104.08663>
@@ -765,7 +789,7 @@ G_{\mathrm{cite}}
 
 引用编号应在本次回答的候选集合内重新分配：
 
-> 代码状态：已验证（2026-10-21；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；标准库教学块的运行与边界记录适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-30）
 
 ```python
 def add_reference_ids(rows):
@@ -801,7 +825,7 @@ print("reference_ids=", [row["ref_id"] for row in references])
 
 把检索片段包装成数据区域：
 
-> 代码状态：已验证（2026-10-21；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；标准库教学块的运行与边界记录适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-30）
 
 ```python
 def build_cited_prompt(query, references):
@@ -816,7 +840,7 @@ def build_cited_prompt(query, references):
         f"问题：{query}\n答案："
     )
 ```
-prompt 只能提高遵守概率，不能保证模型逐 claim 标注，也不能证明引用支持。后处理、人工抽查和独立评估仍然需要存在。
+prompt 只能提高遵守概率，不能保证模型逐 claim 标注，也不能证明引用支持。检索到的网页、附件或用户文档还可能带有试图改变模型行为的恶意指令；把资料放进分隔区有助于说明它是数据，但不是安全边界。应将检索内容视为不可信输入，并把权限检查、可用工具范围和下游输出校验放在模型之外；提示注入及分层防护背景见[OpenAI 官方说明](https://openai.com/safety/prompt-injections/)。后处理、人工抽查和独立评估仍然需要存在。
 
 ### 7.3.3 结构化答案协议
 
@@ -850,7 +874,7 @@ I_{\mathrm{ids\_in\_range}}
 
 下面的函数只判断编号合法性与是否完全没有引用：
 
-> 代码状态：已验证（2026-10-21；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；标准库教学块的运行与边界记录适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-30）
 
 ```python
 import re
@@ -899,7 +923,7 @@ Level 3：人工或独立评审确认引用足以支持 claim，且没有冲突�
 
 一个自动化的 claim/evidence 记录可以这样保存：
 
-> 代码状态：已验证（2026-10-21；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；标准库教学块的运行与边界记录适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-30）
 
 ```python
 claim_record = {
@@ -981,12 +1005,15 @@ chunk 太小：
 - AttributionBench：<https://aclanthology.org/2024.findings-acl.886/>
 - OpenAI structured outputs：<https://developers.openai.com/api/docs/guides/structured-outputs>
 - OpenAI file search：<https://developers.openai.com/api/docs/guides/tools-file-search>
+- OpenAI prompt injection 说明：<https://openai.com/safety/prompt-injections/>
 
 论文支持检索增强、事实性和自反思检索的研究背景，官方文档支持结构化输出与文件检索接口；引用支持率和拒答阈值必须在目标数据上进行人工或独立评审。
 
 把答案拆成四个原子 claim，可以看清“句子有引用”为什么仍不够。假设回答说：“员工每年有 10 天年假（claim 1）；未休额度可结转 5 天（claim 2）；离职时可折现（claim 3）；申请需提前 3 天（claim 4）。”检索到的版本 2025-A 只支持前两项，而当前生效版本 2026-B 将结转上限改为 3 天，并未规定折现或提前申请。若回答把同一个旧文档编号贴在整句话后，引用编号合法，但 claim 2 已过期，claim 3 和 4 没有支持。更可靠的答案结构是逐项存储 claim、source_id、doc_version、页码/条款、有效时间和支持判定；冲突时先按业务定义选择当前有效版本，不能把“相似度更高”当作制度生效依据。
 
 可以用小样本做一次支持率账本：人工把一份回答拆成 10 个可核查主张，其中 7 个被当前版本证据蕴含，1 个证据矛盾，2 个没有证据，则严格支持率是 \(7/10=70\%\)，不是“带引用的句子数/句子总数”。若只检查 5 个 claim，且全都支持，报告应写成 5/5 已检查样本，并说明抽样规则；不能把未审的 5 个默认算作支持。支持判断也要区分三种关系：来源确实含有这句话、来源在语义上蕴含该 claim、来源与答案处于同一有效时间和权限范围。三者缺一，引用都可能造成错误安全感。
+
+审核时先把复合句拆成可独立判断的原子主张，再给每项保存“支持、矛盾、证据不足”之一及其依据。比如系统回答“这笔 6,200 元的单笔报销需要部门负责人审批”，不能只引用写有“单笔超过 5,000 元”的条款：还要确认 6,200 元确实对应同一笔交易、币种和统计范围相同、条款版本在该请求时有效，并且用户有权读取这条制度。若 6,200 元是两笔不同交易的合计，单笔阈值并没有被证明满足。数值或逻辑推导型答案应保留输入证据和计算步骤，不能只因最后结果合理就把引用判为支持。
 
 一个可审计的 citation map 可以给每个 claim 保存稳定证据位置，而不是只给模型一个可变的数组下标：
 
@@ -1002,6 +1029,10 @@ support: entailed
 ```
 
 给用户展示时可以把稳定键转成 `[1]`，但内部记录应保留 source_id 和版本。文档重切块后，旧的 `chunk_17` 可能已经指向另一段；如果只保存数组位置，重建索引就会让历史回答的引用漂移。系统应能从 request_id 找回当时的文档快照或内容哈希，并清楚区分“当前检索结果”和“当时作答时使用的证据”。
+
+追溯历史证据也不等于重新授权访问。文档撤回、ACL 改变或保留期限结束后，审计人员可能需要确认某次回答当时依据了哪个版本，但普通用户不应因此继续看到已无权访问的原文。系统要把“内部审计需要留证”和“当前请求可以展示来源”分开判断：引用链接在展示前重新检查访问权；历史快照只保存在受限审计存储中；若法律或业务规则要求删除，则要清楚记录证据对象不可再取回，而不是让一个陈旧 `source_uri` 假装仍然可读。
+
+对不能直接逐字引用的结论，答案还要区分“来源原文明确写出”“根据多个来源推算”和“根据上下文作出的解释”。例如两份来源分别给出税前金额和税率，系统可以展示计算过程，但不能把计算出来的数额伪装成某一份文档的原句。评审 rubric 应把来源蕴含、推导正确性和表达是否保留条件分开打分；若关键推导无法复算，就应降低确定性或拒答。
 
 ## 7.4 RAG 评估：把检索、答案和引用分别测量
 
@@ -1037,7 +1068,7 @@ support: entailed
 
 ### 7.4.1 评估样本契约
 
-> 代码状态：已验证（2026-10-21；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；标准库教学块的运行与边界记录适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-30）
 
 ```python
 EVAL_SET = [
@@ -1114,7 +1145,7 @@ print("eval_count=", len(EVAL_SET))
 
 对应的无依赖实现：
 
-> 代码状态：已验证（2026-10-21；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；标准库教学块的运行与边界记录适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-30）
 
 ```python
 def hit_at_k(rows, gold_ids, k):
@@ -1266,7 +1297,7 @@ false refusal rate：有充分证据却拒答的比例。
 
 ### 7.4.7 无依赖的分层评估 demo
 
-> 代码状态：已验证（2026-10-21；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；标准库教学块的运行与边界记录适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-30）
 
 ```python
 import re
@@ -1346,7 +1377,7 @@ print(
 print("error_counts=", dict(Counter(case["error_type"] for case in CASES)))
 print("case_count=", len(CASES))
 ```
-这个 demo 中 q2 同时存在证据集合错误和答案关键词错误，q3 则演示了正确拒答不参与召回指标。真实系统应保存更多字段来区分“gold 没进候选”和“gold 进了候选但没有被引用”。
+这个 demo 中 q2 的 gold 不在可用证据集合里，答案也没覆盖关键词；`classify` 按检查顺序只返回第一处分歧，而 `keyword_score` 仍单独记录答案缺口。q3 演示正确拒答不参与召回指标。真实系统应保存各层原始结果，以区分“gold 没进候选”和“gold 进了候选但没有被引用”。
 
 ### 7.4.8 评估报告与成本
 
@@ -1359,8 +1390,10 @@ Hit@1/3/5、Recall@k、MRR；
 answer correctness、faithfulness、citation support、abstention；
 TTFT、生成延迟、检索延迟、token 数和错误率；
 权限泄露、格式错误、重试和人工复核成本；
-失败样本原文、检索结果、最终 prompt 和 trace。
+失败样本对应的 request_id、错误阶段、文档快照和候选 chunk 标识；原文、完整检索结果、最终 prompt 与答案只进入经授权、脱敏且隔离的离线评估材料。
 ```
+
+生产 trace 默认保存可定位链路的元数据，例如模型/索引 revision、文档版本标识、候选 chunk ID、阶段状态、延迟和 token 数；不要默认写入完整用户问题、检索正文、prompt 或答案。它们可能包含个人信息、商业资料或访问受限内容。若排障确实需要原文，应显式启用并抽样，先按策略脱敏，再放入单独的加密存储，限制访问角色并设置保留期限；观测平台本身不会替系统完成这些控制。[OpenTelemetry GenAI 语义约定](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-spans.md)也提醒输入、输出和系统指令可能含敏感内容，并建议默认不采集完整内容。
 
 单位成功任务成本可以写成：
 
@@ -1391,5 +1424,7 @@ C_{\mathrm{success}}
 小评测集的比例不稳定。比如 20 题中 12 题答对，增加或减少一题就会改变 5 个百分点；如果题目全部来自同一种政策，80% 不能外推到财务、HR、采购和多语言请求。把数据按时间版本、问题类型、证据是否冲突、权限、表格/扫描件、需要计算与否分层，分别报告每个切片的分子和分母。随机抽取的总体指标可回答平均表现，定向构造的压力样例则用于检查具体风险，两者不能互相替代。
 
 自动 judge 也属于被评估对象。先用人工标注的一小批样本校准 judge：给它正确但措辞不同的答案、含有引用却不被引用支持的答案、以及证据正确但答案遗漏条件的答案，检查它是否按 rubric 区分。若两位人工标注者本身分歧很大，应先修订 rubric；若 judge 的判断只和答案流畅度相关，则它不能代替正确性标注。新模型、提示词或评分标准变化时，对同一批固定样本重跑 judge 并保留原始理由和版本，避免把评分器漂移误认为 RAG 改进。
+
+比较两个版本时最好对同一批 query 做成对差分，并保留每题的旧/新候选、答案与判定变化。例如 100 题中，版本 B 有 8 题从错变对、3 题从对变错、89 题不变，净正确数只增加 5；只报 B 的总体准确率会隐藏那 3 个回归。ACL 越权、旧版本误引用和证据不足仍作答属于高风险切片，即使样本很少也要报告分子、分母和失败案例，不能让它们被大批简单查找题的平均值淹没。评估集或判定 rubric 变化时，要同时记录新旧口径，不能把口径变更造成的分数差异当作系统改进。
 
 本章的交付终点是“答案主张—当前证据—权限范围—评估结果”能够逐项对应。第八章会把检索能力作为 Agent 可调用的只读证据服务，再处理工具提议、授权和外部状态变化；检索到的内容可以支持决策，但不会自动授予执行权限。

@@ -17,7 +17,7 @@
 
 凡是针对书籍的架构审视、章节审阅、正文或配套资料修改、修改决定、完成状态、遗留问题和后续交接，统一且只写入 [`progress/`](progress/)。这些书籍进度与修改历史不得写入 `research/`、`plan.md`、`README.md` 或正文。
 
-[`research/`](research/) 只记录联网搜索发现的新知识点及其来源证据，包括来源、版本或日期、证据范围和未核验边界；不记录每册书或每章的精修进度、修改历史和审计日志。项目计划与长期写作规范总纲分别见 [`plan.md`](plan.md) 和 [`写作规范/总纲.md`](写作规范/总纲.md)；根目录 [`WRITING_SPEC.md`](WRITING_SPEC.md) 保留为兼容入口。
+[`research/`](research/) 只记录联网搜索发现的新知识点及其来源证据，包括来源、版本或日期、证据范围和未核验边界；不记录每册书或每章的精修进度、修改历史和审计日志。项目计划与长期写作规范总纲分别见 [`plan.md`](plan.md) 和 [`写作规范/总纲.md`](写作规范/总纲.md)。
 
 ## 书系总览
 
@@ -150,7 +150,6 @@ python3 scripts/build_pdfs.py --dry-run
 ├── 信息源收录.md
 ├── GLOSSARY_EN_ZH.md
 ├── AGENTS.md
-├── WRITING_SPEC.md
 ├── 写作规范/
 │   ├── 总纲.md
 │   ├── 01-书册定位与全书架构.md

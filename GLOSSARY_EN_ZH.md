@@ -27,6 +27,12 @@ Unigram Language Model Tokenizer：基于 unigram 子词概率的分词器
 
 Token Fertility：词元密度 / 每参考单位的词元数；分母可为词、码点、字素簇或字节，需注明语料与 tokenizer 口径
 
+Token Premium：token 溢价 / 同一或平行内容相对基准 tokenizer 多出的 token 成本；需固定文本对齐、基准 tokenizer 和聚合分母，不等同于 token fertility 或下游能力差距
+
+Noncanonical Tokenization：非规范切分；同一字符序列采用训练时未见的 token 边界或 token 序列表示；模型鲁棒性结论受训练阶段、模型和任务限制
+
+Hypertoken / Dynamic Token：超词元 / 动态 token；在输入上下文中将多个 token 合并成动态表示的研究机制，需配套动态 embedding/unembedding 与模型适配；序列变短本身不保证端到端提速
+
 Bytes per Byte / BPB：每字节比特数；以相同规范化原文的 UTF-8 字节数归一化语言建模负对数似然，跨 tokenizer 对比时需固定边界标记口径
 
 WordPiece：WordPiece 子词切分方法
@@ -88,6 +94,7 @@ CLIP：Contrastive Language-Image Pre-training / 图文对比预训练
 CLIP Loss：CLIP 双向图文对比损失
 
 SigLIP：Sigmoid Loss for Language-Image Pre-training / 使用成对 sigmoid 目标的图文预训练方法；不要求 batch 内全局 softmax 归一化，但不会自动修正伪负样本标签。
+SigLIP 2：SigLIP 的多语言图文编码器系列；论文将 sigmoid 图文目标与 captioning、自蒸馏、masked prediction、数据筛选等训练方法组合，结果不能归因于损失函数单项。
 
 Sigmoid Pairwise Contrastive Loss：成对 sigmoid 对比损失；对每个图文 logit 与正负标签分别计算 logistic loss，可加 logit scale 和 bias。
 
@@ -411,7 +418,9 @@ Benchmark Contamination：基准污染
 
 Data Packing：数据打包
 
-Scaling Law：规模定律
+Scaling Law：规模定律；给定架构、数据、训练配方和损失口径下，对规模变量与模型损失关系的经验拟合。
+
+Quality-Aware Scaling Law：质量感知规模定律；把依具体任务和数据扰动操作化的质量变量加入 scaling-law 拟合；质量定义和指数不能直接当作普遍常数。
 
 Chinchilla Scaling：Chinchilla 规模定律
 
@@ -827,6 +836,8 @@ Gradient Norm：梯度范数
 
 Gradient Clipping：梯度裁剪
 
+AdaGC：Adaptive Gradient Clipping / 自适应梯度裁剪；按张量以历史裁剪范数 EMA 设定动态阈值的研究方法，训练效果绑定论文的模型、数据和并行配置。
+
 Gradient Spike Score (GSS)：梯度尖峰分数；SPAM 论文用来衡量某坐标梯度相对其训练历史的异常程度；论文的回顾性定义与在线代理 (g_i^2/V_i) 不是同一统计量。
 
 Adam Second-Moment Decoupling：Adam 二阶矩失配；当前梯度平方与 EMA 二阶矩 (v_t) 暂时脱节，可能改变预条件更新及其稳定性；这是特定研究提出的 spike 机制，不是所有 loss spike 的统一解释。
@@ -993,6 +1004,14 @@ Conditional Entropy：条件熵
 
 Mutual Information / MI：互信息
 
+Expected Information Gain / EIG：预期信息增益；实验结果分布下，观测结果带来的平均假设熵减少量；实际计算依赖候选假设、结果概率模型和实验设计，不等同于工程任务的收益/成本评分。
+
+Retrieval Practice：检索练习 / 提取练习；先尝试从记忆中提取已学内容，再核对缺口；效果取决于材料、反馈、延迟和测试任务。
+
+Distributed Practice / Spaced Practice：分散练习 / 间隔练习；把练习安排在不同时间而非集中重复；间隔效果会随最终保持时长与任务变化，不代表存在统一的最佳日历。
+
+Transfer Gap：迁移差距；同一评分尺度下熟悉题与难度匹配变体题的得分差；它提示表面线索依赖，不能单独定位根因或证明没有迁移。
+
 Cross Entropy：交叉熵
 
 Cross-Entropy Loss：交叉熵损失
@@ -1049,7 +1068,7 @@ Hyena：基于隐式长卷积的长序列建模架构
 
 Hybrid Architecture：混合架构，如 Attention + SSM + Convolution
 
-FlashAttention：FlashAttention 高效注意力实现
+FlashAttention：用 IO-aware tiling、online softmax 与必要重算减少 attention 中间矩阵 HBM 读写的实现；dense 核心保留完整 attention 配对，仍有二次 pair 计算。FP8 低精度和 block-sparse 变体分别需说明数值误差与连接图。
 
 Attention Complexity：注意力复杂度
 
@@ -2517,6 +2536,10 @@ InfoRMIA / Information-Theoretic Membership Inference：信息论成员推断方
 
 PII Leakage：个人可识别信息泄露
 
+De-identification：去标识化；处理数据以降低身份披露风险，仍需评估辅助信息导致的再识别风险
+
+Pseudonymization：假名化；以假名替代直接标识符，数据仍可能通过映射或辅助信息关联到主体，不等于匿名化
+
 Secret Leakage：密钥泄露
 
 Differential Privacy / DP：差分隐私
@@ -3019,6 +3042,8 @@ Visible Explanation：可见解释
 
 CoT Faithfulness：思维链忠实性
 
+FACT-E：Faithfulness And Consistency Tandem Estimation；以受控扰动评估步骤间忠实性，并与 CoT 到答案的一致性合看；结论受论文任务、模型和多次调用成本限制。
+
 CoT Step Accuracy：思维链步骤准确率
 
 CoT Regression：思维链回归样本
@@ -3099,6 +3124,8 @@ Search Audit：搜索审计
 
 Test-Time Compute Scaling：推理时计算扩展
 
+Latent Recurrent-Depth Reasoning：潜在空间循环深度推理；重复计算块迭代隐状态以增加测试时计算，不要求按相同幅度增加可见推理 token；现有规模化证据属于特定概念验证模型。
+
 Compute Budget Vector：计算预算向量
 
 Adaptive Compute：自适应计算
@@ -3114,6 +3141,8 @@ P95 Latency：P95 延迟
 Wasted High Compute：高预算浪费
 
 TTC Audit：推理时计算审计
+
+TRACE：An Evidence-Grounded Benchmark for Safety Evaluation of Large Reasoning Models；分别评估输入、推理轨迹和最终回复的安全性并标注判断证据；覆盖范围受其语言、风险类型和模型集合限制。
 
 Math Reasoning Training：数学推理训练
 
@@ -3182,6 +3211,8 @@ Overconfident Error：过度自信错误
 Unsafe Compliance Rate：高风险不当服从率
 
 Hidden CoT Exposure：隐藏思维链暴露
+
+Reasoning-Trace Exposure：推理轨迹暴露；接口未直接展示原始轨迹时，用户仍可能获得可用于迁移的推理文本；文本相似不等于已证明恢复完整内部状态。
 
 Tool Misuse：工具误用
 
@@ -3393,6 +3424,12 @@ TaiChi：按 TTFT 与 TPOT 的相对严格程度，联合调节 Prefill/Decode �
 
 SmartGen：面向 Prefill→Decode KV 网络传输的选择性传输方案；profile 后主动推送重要 KV，Decode 按需拉取缺失项并后台补齐；KV 选择可能影响质量，指标绑定论文 workload。
 
+KVSET：基于 LRU stack distance 分析 serving trace 中 prefix-cache 工作集容量的工具；估计结果依赖请求轨迹、缓存策略和目标命中率。
+
+Tessera：检索驱动的 context-unit KV 复用与在线管理方案；协调检索需求、缓存驻留、请求路由和缺失状态重算；当前预印本仅支持 RoPE 全注意力等有限配置。
+
+UltraQuant：面向上下文密集型 Agent serving 的 4-bit KV 路线；FP4 KV 与硬件原生解量化路径的效果绑定模型、GPU、kernel 和请求负载。
+
 SpectrumKV：按 token 重要性为 P/D transfer 选择 FP16/INT8/INT4 KV 表示，并通过部署期 probe 决定是否启用 INT4；精度容忍度具有模型依赖性。
 
 Time to Second Token / TTST：从请求到达或生成启动到第二个输出 token 的时间指标，用于观察阶段间 handoff / KV transfer 对首轮 decode 的影响；起止点必须按评测实现明确。
@@ -3479,13 +3516,13 @@ Active KV-Cache Quantization：GPU 上正在被 Attention 读写的 cache 本身
 
 Cold-Page KV-Cache Compression：只在 KV Page 移到 Host/Disk 等冷层时压缩存储，回到 GPU 前恢复为 runtime KV 格式；它优化冷层容量与传输，不能等同于 active GPU cache 降位宽。
 
-FlashAttention：FlashAttention 高效注意力实现
+FlashAttention：用 IO-aware tiling、online softmax 与必要重算减少 attention 中间矩阵 HBM 读写的实现；dense 核心保留完整 attention 配对，仍有二次 pair 计算。FP8 低精度和 block-sparse 变体分别需说明数值误差与连接图。
 
 IO-Aware Optimization：IO 感知优化
 
 Tiling / Blocking：分块计算
 
-Online Softmax：在线 softmax
+Online Softmax：在线 softmax；按 block 维护并合并最大值、指数和与加权输出，使完整 softmax 可分块求值而无需物化整行概率矩阵
 
 High Bandwidth Memory / HBM：高带宽显存
 
@@ -3521,9 +3558,9 @@ Group-Wise Quantization：分组量化
 
 Mixed-Precision Quantization：混合精度量化
 
-GPTQ：GPTQ 后训练量化方法
+GPTQ：一种 layer-wise PTQ 方法；利用校准输入形成近似二阶敏感度，按序量化权重并向未量化权重补偿部分误差。结果受校准分布、量化粒度与实现影响。
 
-Activation-Aware Weight Quantization / AWQ：激活感知权重量化
+Activation-Aware Weight Quantization / AWQ：激活感知权重量化；根据校准激活识别敏感通道，并用权重通道与输入通道的等价缩放降低权重量化误差；它仍是 weight-only 方法。
 
 Calibration Data：校准数据
 
@@ -3595,6 +3632,8 @@ INT4：4 位整数
 
 Weight-Only Quantization：仅权重量化
 
+W4A16：4-bit weight、16-bit activation 的精度组合记法；不单独规定 scale/packing、累加精度、输出 dtype 或目标 kernel。
+
 Multimodal Learning：多模态学习
 
 Vision-Language Model / VLM：视觉语言模型
@@ -3604,6 +3643,8 @@ Vision Encoder：视觉编码器
 Image Encoder：图像编码器
 
 Vision Tower：视觉塔
+
+Vision Transformer / ViT：视觉 Transformer；把图像划分为 patch 并作为 token 序列输入 Transformer 的视觉编码器架构；patch 大小与位置编码由具体模型决定。
 
 Multimodal Data：多模态数据
 
@@ -3657,6 +3698,8 @@ Guidance Scale：引导强度
 
 Latent Diffusion：潜空间扩散
 
+Variational Autoencoder / VAE：变分自编码器；将输入编码到潜空间表示并从中重构的概率生成模型；latent diffusion 的实际压缩方式与压缩比取决于具体实现。
+
 Diffusion Transformer / DiT：扩散 Transformer
 
 Min-SNR-γ Weighting：最小信噪比加权；按 diffusion timestep 的 SNR 和预测参数化（`x0`、`epsilon`、`v`）重加权去噪 loss，以缓解训练步之间的梯度冲突；权重不能脱离目标参数化解读。
@@ -3677,13 +3720,25 @@ Inpainting：局部重绘
 
 DALL-E：DALL-E 文生图系列
 
+Normalizing Flow：正规化流；用可逆映射将简单分布变换为数据分布，并用可计算的 Jacobian 行列式追踪密度；精确 likelihood 不等于人类偏好或图像质量。
+
+Flow Matching：流匹配；通过回归选定概率路径上的目标向量场来训练连续生成模型。路径选择决定方法行为，扩散路径可以属于其路径族；它不是所有 Normalizing Flow 的同义词。
+
+Rectified Flow：整流流；一类让噪声与数据之间的生成轨迹趋向直线路径的流生成方法；是具体方法路线，不代表所有 Flow Matching 都采用同一目标或推理步数。
+
 Autoregressive Image Tokens：自回归图像 token
 
 Video Generation：视频生成
 
 Spatiotemporal Patch：时空 patch
 
+Tubelet：时空块；覆盖连续若干帧的一组空间 patch，常作为视频 Transformer 的输入单元；时间跨度和空间尺寸是模型配置，不是通用 token 数。
+
 Video Diffusion：视频扩散模型 / 视频 diffusion
+
+Temporal Super-Resolution：时间超分辨率；从稀疏关键帧或低帧率表示补出中间帧以提高帧率；局部时间窗口可能影响全片运动一致性。
+
+Space-Time U-Net：时空 U-Net；在网络中同时下采样、处理和上采样空间与时间维度，Lumiere 用它一次建模一个片段的完整时长；这不等于无限时长或任意多镜头生成。
 
 Temporal Consistency：时序一致性
 
@@ -3691,13 +3746,15 @@ Identity Drift：身份漂移
 
 Flickering：画面闪烁 / 帧间闪烁
 
-World Model：世界模型
+World Model：世界模型；依据观察历史与明确动作预测后续状态或观察的模型。只生成视觉上合理的视频不足以证明它具备可交互、可检验的状态转移能力。
 
 Physics Consistency：物理一致性
 
 Video Generation Evaluation：视频生成评估
 
 Fréchet Video Distance / FVD：弗雷歇视频距离
+
+WBench：多轮交互式视频世界模型 benchmark；2026 年论文使用 289 个案例、1,058 轮交互和五类评估维度，结果受论文数据、接口和评分协议限制。
 
 Video Token Audit：视频 token 审计
 
@@ -3727,9 +3784,9 @@ Audio-Transcript Pair：音频转录对
 
 Automatic Speech Recognition / ASR：自动语音识别
 
-Connectionist Temporal Classification / CTC：连接时序分类；通过 blank 与重复标签折叠，对所有映射到目标文本的单调帧级路径求和，以免人工指定逐帧文本对齐。
+Connectionist Temporal Classification / CTC：连接时序分类；通过 blank 与重复标签折叠，对所有映射到目标文本的单调帧级路径求和，以免人工指定逐帧文本对齐。CTC 目标本身不保证流式；还需因果/分块 encoder、lookahead 与输出提交策略。
 
-Recurrent Neural Network Transducer / RNN-T：循环神经网络转导器；在声学时间与已输出文本前缀构成的格点上预测 blank 或文本 token，支持增量识别。
+Recurrent Neural Network Transducer / RNN-T：循环神经网络转导器；在声学时间与已输出文本前缀构成的格点上预测 blank 或文本 token，结构可支持增量输出；实际流式能力仍取决于 encoder、分块、lookahead 和 endpoint 策略。
 
 Attention-based Sequence-to-Sequence ASR：基于注意力的序列到序列语音识别；decoder 对声学 encoder 表示做注意力并自回归生成文本。
 
@@ -3737,9 +3794,15 @@ RNN-T Lattice：RNN-T 格点；以声学时间步和已生成文本前缀为两�
 
 Text-to-Speech / TTS：文本转语音
 
+Prosody：韵律；语音中的时长、停顿、重音、音高走向和能量变化，不能用说话人音色相似度单独代表。
+
 Speech-to-Speech：语音到语音
 
 Waveform：波形
+
+Short-Time Fourier Transform / STFT：短时傅里叶变换；按重叠或不重叠窗口把波形映射为局部时频表示；帧数取决于窗口、帧移和 padding 约定。
+
+Neural Codec：神经编解码器；用学习到的表示将音频编码为离散 code/token 并由 decoder 重建；码率、分层结构和 token rate 依实现而定。
 
 Log-Mel Spectrogram：对数梅尔频谱图
 
@@ -3767,9 +3830,13 @@ Real-Time Factor / RTF：实时率；处理时间除以对应音频时长，RTF<
 
 Adaptive Rate Interleave Alignment / ARIA：自适应速率交错对齐；Qwen3.5-Omni 用单流和单调约束协调文本 token 与语音 token 的生成速率，具体机制见第二十一册第 93 章。
 
-Word Error Rate / WER：词错误率
+Word Error Rate / WER：词错误率；固定文本规范化与分词后，按语料汇总 `(S + D + I) / N_ref`。逐句宏平均不等于汇总分数；插入可能令 WER 大于 1，空参考需单独报告。
 
-Character Error Rate / CER：字符错误率
+Character Error Rate / CER：字符错误率；按明确的 Unicode 规范化和字符计数单位汇总替换、删除、插入数，再除以参考字符数。不同规范化/单位会改变结果；插入可能令 CER 大于 1，空参考需单独报告。
+
+Utterance Error Rate / UER：话语错误率；mu-bench 中由 LLM judge 按任务 rubric 判断话语是否含语义重大字段错误的基准专用度量，依赖 judge、rubric、normalizer 和数据集，不是 WER/CER 的通用替代。
+
+LP-TTS-Bench：Long-Prompt Zero-Shot TTS benchmark；评估长参考语音条件下的说话人韵律复现，并将 timing、prominence、intonation 与音色相似度、可懂度分开；结论受其双语说话人和评测协议限制。
 
 Mean Opinion Score / MOS：平均主观意见分
 
@@ -3815,9 +3882,13 @@ Chart Relaxed Accuracy：图表问答宽松准确率
 
 Grounding IoU：视觉定位交并比
 
+Temporal Grounding / 视频时间定位：根据自然语言查询在视频时间轴上预测事件区间；temporal IoU 用预测区间与 gold 区间的交并时长之比，样本级 IoU 的均值可称 mIoU。查询可以直接描述画面，也可以要求先推断因果、指代或相对顺序再定位。
+
 Multimodal Hallucination Rate：多模态幻觉率
 
 POPE / Polling-based Object Probing Evaluation：基于轮询的对象探查评估 / 多模态对象幻觉评测协议
+
+HallusionBench：视觉语言模型图像上下文推理诊断集；用视觉依赖、视觉补充及相关问题探查语言幻觉与视觉误读，结果只适用于其样本和协议。
 
 CLIPScore：CLIP 分数 / 无参考图文一致性指标
 
@@ -5197,6 +5268,12 @@ Memory Conflict：记忆冲突
 
 Memory Pollution：记忆污染
 
+Preference-Conditioned Memory Write Control：偏好条件化记忆写入控制；按交互情境选择是否写入或更新记忆，并可根据用户反馈修订写入政策；效果须分别检查有用信息保留、无关信息写入和存储规模。
+
+Over-Personalization：过度个性化；记忆与当前任务无关却被套用、重复提及，或为迎合用户而改变回答；是否适用须结合当前请求与预期。
+
+Intent Legitimation：意图正当化；个人记忆使模型把有害请求误判为善意意图的风险现象；PS-Bench 的结果绑定其测试框架和模型配置，不代表所有记忆系统的普遍风险率。
+
 Memory & Context Poisoning：记忆与上下文投毒（跨会话持久上下文的污染）
 
 Stale Memory Use Rate：过期记忆误用率
@@ -5767,7 +5844,7 @@ Budget Overrun Rate：预算超限率
 
 Stop Correctness：停止条件正确率
 
-Hallucination：幻觉
+Hallucination：幻觉（按错误断言、证据不忠实或把无依据推断当成事实操作化；应与指令/安全失败分开记）
 
 Factuality：事实性
 
@@ -5775,7 +5852,7 @@ Benchmark：基准测试
 
 Human Evaluation：人工评估
 
-LLM-as-a-Judge：用大模型作评审
+LLM-as-a-Judge：用大模型作评审（按固定 rubric 评分，需在目标任务上用人评或程序校验校准）
 
 Verifier：验证器
 
@@ -5793,11 +5870,11 @@ Honest：诚实
 
 Harmless：无害
 
-Jailbreak：越狱攻击
+Jailbreak：越狱攻击（诱导模型绕开安全限制；OWASP LLM01:2025 将其归为 prompt injection 的一种）
 
-Prompt Injection：提示注入
+Prompt Injection：提示注入（输入改变模型预期行为的风险；应在应用侧落实权限和副作用校验）
 
-Indirect Prompt Injection：间接提示注入
+Indirect Prompt Injection：间接提示注入（网页、文件或工具返回等外部内容改变模型行为）
 
 Instruction Hierarchy：指令层级
 
@@ -8657,6 +8734,16 @@ LongBench：中英文长上下文多任务 benchmark；v1 汇集六类任务，v
 
 LongBench Pro：2026 年发布的长上下文评测预印本，含中英文自然样本、任务/难度/依赖类型和 8K—256K token 长度分层；不是 1M token 评测，也不是已独立复现的普遍结论。
 
+LongHarness Bench：长上下文 harness 评测基准；在多类检索与跨文档任务中比较模型—harness 组合的质量和成本，结果受预印本任务、模型及 harness 配置限制，不能直接排名所有 harness。
+
+Memora：长周期个性化 Agent 记忆基准，评估数周至数月对话中的回忆、推理、推荐及过期记忆误用；结果绑定其样本与系统设置。
+
+Mem2ActBench：任务型 Agent 的长期记忆行动基准，检查历史信息能否支撑后续工具选择和参数填写；不等同于一般记忆召回分数。
+
+OP-Bench：记忆增强对话的过度个性化基准，覆盖无关使用、重复提及和迎合式个性化；不能替代隐私授权、删除或工具动作安全审计。
+
+PS-Bench：个性化安全基准，研究良性个人记忆是否会使模型将有害请求解释为善意；其攻击成功率变化只适用于论文评测配置。
+
 MRCR v2：Google DeepMind 公开的 Multi-Round Coreference Resolution 评测；模型需在重复相似请求的长对话中定位并复现指定轮次。仓库文档提供多 needle 与最高至 8M 的数据生成/评测入口；适合测固定任务复杂度下的超长定位，不覆盖复杂多文档推理，使用时需固定 revision 和工具条件。
 
 有效上下文长度 / Effective Context Length：在指定任务、长度、证据位置/依赖、干扰、模型与评测配置、推理预算和资源阈值下，系统持续满足预先定义质量及运行门槛的最大长度；它是条件化指标，不是脱离任务的模型常数。
@@ -9807,3 +9894,21 @@ Monitor Red Teaming：监控器红队评估；让攻击方知道或逐步推断�
 Safety–Usefulness Pareto Frontier：安全性—效用 Pareto 前沿；比较控制协议的安全与正常任务效用，若另一协议两项都不低且至少一项更高，则被支配。成本、延迟和人工容量仍应单独记录。
 
 AI Control Safety Case：AI 控制安全论证；把具体部署安全主张连接到红队能力、控制效果、环境迁移假设、剩余风险、止损与重新评估证据的结构化说明；示例框架不是认证标准。
+
+## 2026-10 Transformer 架构研究更新
+
+SpanNorm：SpanNorm 归一化/残差方案；保留 PreNorm 的直接残差路径，并在残差输出端采用 PostNorm 式归一化与配套缩放。ICML 2026 作者报告的理论和 dense/MoE 实验属于其论文设置，不是默认训练规范。
+
+PowLU：Power Linear Unit；用 rational-power 激活限制 SwiGLU 大正值区间的增长。Ling 的 7.9B 与 124B MoE 结果绑定各自训练 token 与精度设置，不代表跨架构的稳定性保证。
+
+Mixture of Activations / MoA：token-adaptive 激活混合；以输入相关门控组合多种激活函数，并共享线性投影。论文摘要报告 0.12B—2B dense/MoE 预训练结果；不等同于所有 FFN 都需要动态激活路由。
+
+Log-Linear Attention：对数线性注意力；以 Fenwick-tree 多尺度区间状态将固定状态扩展为对数增长的历史表示。论文给出的特定算法具有 $O(T\log T)$ 计算形式；状态维度、kernel 常数和质量边界仍需单独核对。
+
+Gated DeltaNet-2：将 key 侧擦除门 $b_t$ 与 value 侧写入门 $w_t$ 分开的 delta 状态更新；作者报告的质量和检索结果绑定 1.3B 模型、100B FineWeb-Edu token 及具体 recurrent/hybrid 评测。
+
+Discrete Diffusion Language Model / dLLM：离散扩散语言模型；对离散 token 序列施加噪声，并训练网络迭代恢复或生成。扩散目标不唯一决定 encoder-only、encoder–decoder 或其它 backbone；能否重改已提交 token 取决于状态转移和采样设计。
+
+Block Diffusion Language Model / BDLM：块扩散语言模型；以 token block 组织扩散训练或生成，以协调块内并行与块间顺序。block size、缓存复用和序列长度行为由具体模型与服务实现决定。
+
+Masked Diffusion Language Model / MDLM：掩码扩散语言模型；前向过程将部分离散 token 替换为 mask 状态，模型按噪声条件恢复原 token。固定噪声样本的交叉熵不等于完整训练目标；后者通常还涉及噪声步期望和参数化权重。

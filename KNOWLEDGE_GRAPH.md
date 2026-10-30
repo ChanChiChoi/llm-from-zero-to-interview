@@ -79,11 +79,23 @@ AI Safety -> Alignment -> Alignment Problem -> HHH -> Risk Taxonomy -> Safety Po
 
 ### 多模态链
 
+CLIP -> Symmetric Batch Softmax -> Zero-Shot Classification -> Image-Text Retrieval
+SigLIP -> Pairwise Sigmoid Loss -> Image-Text Retrieval
+SigLIP 2 -> Multilingual / Dense-Feature Training Recipe -> Image-Text Retrieval and Localization
+
 Multimodal Data -> Image-Text Alignment -> OCR/ASR/Video Temporal Alignment -> Vision Encoder -> Patch Embedding -> CLS/Patch Tokens -> Vision Encoder Shape Audit -> Visual Token Budget -> Multimodal Context Budget -> CLIP -> CLIP Loss -> Zero-Shot Classification -> Image-Text Retrieval -> VLM Connector -> VLM Connector Audit -> Image Placeholder -> Visual Token Compression -> Assistant-Only Multimodal Loss -> Chat Template -> Multimodal SFT Data Audit -> Multimodal Task Coverage -> Evidence Support Rate -> Missing Refusal Rate -> Multimodal Instruction Tuning -> Diffusion Model -> DDPM -> Forward Diffusion -> Reverse Denoising -> Noise Scheduler -> Noise Prediction Loss -> Classifier-Free Guidance -> Latent Diffusion -> Stable Diffusion -> VAE Compression Ratio -> Text-to-Image Pipeline Audit -> Negative Prompt -> ControlNet -> Image-to-Image -> Inpainting -> DALL-E -> Autoregressive Image Tokens -> Video Generation -> Spatiotemporal Patch -> Video Diffusion -> Temporal Consistency -> Identity Drift -> Flickering -> World Model -> Physics Consistency -> Video Generation Evaluation -> FVD -> Video Token Audit -> Audio Generation -> Waveform -> Log-Mel Spectrogram -> ASR -> Whisper -> WER -> CER -> TTS -> Vocoder -> Voice Cloning -> Audio Codec -> Speech Token -> Codec Language Model -> Speech-to-Speech -> VAD -> MOS -> Audio Token Audit -> Unified Multimodal Model -> Unified Tokenization -> Any-to-Any Multimodal Model -> Early-Fusion Multimodal Transformer -> Center-LLM Multimodal System -> Multimodal Router -> Multimodal Loss Mixture -> Modality Conflict -> Unified Multimodal Audit -> Multimodal Evaluation -> Multimodal Incident -> Input Fidelity Rate -> Multimodal Evidence Recall -> OCR Critical Field Accuracy -> ASR Critical Field Accuracy -> Temporal Evidence Recall -> VQA Accuracy -> Chart Relaxed Accuracy -> Grounding IoU -> Multimodal Hallucination Rate -> Multimodal Prompt Injection -> Biometric Identity Safety -> Content Provenance -> Multimodal Safety Audit -> Multimodal Incident Gate -> Multimodal Interview Readiness -> Multimodal Interview Rubric -> Multimodal Formula Coverage -> Multimodal Demo Coverage -> Weak Multimodal Question -> Multimodal Revision Plan -> Multimodal Reasoning -> Multimodal Cost Audit -> Multimodal Product -> Input Quality Pass Rate -> Multimodal Evidence Support Rate -> OCR Quality Score -> ASR Quality Score -> Generation Adoption Rate -> Media Safety Pass Rate -> Privacy Pass Rate -> Copyright Pass Rate -> Multimodal Product Gate -> Multimodal Safety
+
+### 语音识别与生成链
+
+ASR -> CTC -> RNN-T -> Attention-based Encoder-Decoder -> Whisper -> Forced Alignment -> WER -> CER -> Business Critical Field Error -> UER -> Streaming Window -> Stable Partial Transcript -> End-to-End Speech Dialogue -> Speech Token Budget -> Codec Rate -> TTS -> Speaker Similarity -> Prosody -> Timing/Prominence/Intonation -> LP-TTS-Bench -> Voice Cloning Authorization -> Client TTFA -> Barge-In Recovery
 
 ### 评估链
 
 Benchmark -> Metrics -> Evaluation Metric Incident -> Aggregate Score Trap -> Evaluation Slicing -> Slice Regression -> Clean Eval Lift -> Human Eval -> LLM-as-a-Judge -> Judge-Human Agreement -> Judge Length Bias -> Paired Evaluation -> Bootstrap Confidence Interval -> Contamination Detection -> Error Analysis -> Regression Test -> Online Evaluation -> Cost-Quality Trade-off -> Evaluation Gate
+
+Online Experimentation -> Randomization Unit -> Stable Bucket Assignment -> Sample Ratio Mismatch -> Exposure Completeness -> Primary Metric -> Guardrail Metric -> CUPED -> Sequential Inference -> Canary Ramp -> Rollback Readiness -> Online Experiment Gate
+
+Long-Form Audio-Video Understanding -> LVOmniBench -> Long-Range Cross-Modal Memory -> Reasoning-Driven Audio-Visual Temporal Grounding -> RVG-Bench -> Temporal IoU -> mIoU / Recall@IoU -> Audio Modality Ablation -> Human Boundary Validation
 
 ### 数据工程链
 

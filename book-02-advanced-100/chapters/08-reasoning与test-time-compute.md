@@ -199,6 +199,8 @@ R_{\mathrm{lucky}}
 
 2026 年 TACL 论文 [KisMATH](https://aclanthology.org/2026.tacl-1.59/) 把一批数学 CoT 表示成因果依赖图，并在 1,671 道来自 MATH500、GSM8K 和 AIME 的问题及 15 个开源模型上做图对齐干预。作者报告部分推理节点会因干预而影响最终答案，这给“改步骤、看答案是否变化”提供了更结构化的研究范例。它的结论仍受数学题、自动抽取的图结构和特定开源模型约束；不能据此说所有用户可见 CoT 都忠实，也不能把干预敏感直接当作充分的忠实性证明。
 
+2026 年 ACL Findings 的 FACT-E 将轨迹质量拆成“步骤间忠实性”和“CoT 到答案的一致性”，并提出用受控扰动评估前者、同时检查轨迹是否支持正确答案。作者在 GSM8K、MATH 与 CommonsenseQA 的候选轨迹筛选和示例选择实验中报告收益；标准版本需要多次调用模型，成本高于简单提示。因此它是特定模型与任务下的事后筛选方法，不是能直接读取或证明模型内部因果过程的通用测量器。[FACT-E](https://aclanthology.org/2026.findings-acl.1014/)
+
 ### 87.6 过程监督与产品输出
 
 CoT 可以作为训练样本，也可以只作为运行时工作区。若用于训练，应区分：
@@ -222,6 +224,8 @@ CoT 可以作为训练样本，也可以只作为运行时工作区。若用于�
 
 
 完整内部推理可能包含错误假设、敏感策略和攻击者可利用的细节。隐藏内部轨迹并不意味着放弃可审计性；可以保存版本化的工具调用、验证结果、关键中间状态哈希和用户可读依据。
+
+隐藏原始轨迹也不能自动证明接口没有暴露可用于学习的推理信号。2026 年 EMNLP Findings 的一项研究在其开源模型实验中发现，接口层隐藏文字不足以阻止提示交互产生有用、与内部轨迹相似的用户可见文本；但论文用相似度和下游效用评估，不能证明这些文本等同于完整或忠实的内部状态，研究范围也不覆盖所有闭源服务。产品应把轨迹隔离、面向用户的摘要和行为监测视为不同控制层，并在授权模型与受控数据上评估暴露风险，不把用户可见解释当作内部状态的可靠副本。[Hidden Thoughts Are Not Secret](https://aclanthology.org/2026.findings-emnlp.2303/)
 
 ### 87.7 一个 CoT 过程审计器
 
@@ -329,7 +333,7 @@ print("intervention_rate=", "N/A" if intervention_rate is None else intervention
 ~~~
 
 
-> **代码状态：已验证（2026-10-08；Python 3.12.9；标准库）**
+> **代码状态：静态审阅，未运行（2026-10-29）**
 
 输出：
 
@@ -675,7 +679,7 @@ print("weighted_accuracy=", "N/A" if not cases else round(weighted_hits / len(ca
 ~~~
 
 
-> **代码状态：已验证（2026-10-08；Python 3.12.9；标准库）**
+> **代码状态：静态审阅，未运行（2026-10-29）**
 
 输出：
 
@@ -1053,7 +1057,7 @@ print("first_error_indices=", first_errors)
 ~~~
 
 
-> **代码状态：已验证（2026-10-08；Python 3.12.9；标准库）**
+> **代码状态：静态审阅，未运行（2026-10-29）**
 
 输出：
 
@@ -1463,7 +1467,7 @@ print("mcts=", root_mcts())
 ~~~
 
 
-> **代码状态：已验证（2026-10-08；Python 3.12.9；标准库）**
+> **代码状态：静态审阅，未运行（2026-10-29）**
 
 输出：
 
@@ -1571,7 +1575,7 @@ C(m,x)\le B_C,\ T(m,x)\le B_T
 
 #### 从前缀树看预算花在何处
 
-预算表说明系统总共能花多少计算，但同样重要的是：计算作用在一条未完成轨迹、多个完整候选，还是尚未完成的分支上。一个 2026 年 8 月的 arXiv 预印本把推理时扩展按这一点分成三类；这是一种分析分类，不是效果排名或必须互斥的实现清单。
+预算表说明系统总共能花多少计算，但同样重要的是：计算作用在一条未完成轨迹、多个完整候选，还是尚未完成的分支上。一个 2026 年 8 月的 arXiv 预印本把推理时扩展按这一点分成三类；这是一种分析分类，不是效果排名或必须互斥的实现清单。[来源](https://arxiv.org/abs/2608.04001)
 
 | 计算结构 | 计算发生的位置 | 典型方法 | 主要代价或失败条件 |
 | --- | --- | --- | --- |
@@ -1580,6 +1584,8 @@ C(m,x)\le B_C,\ T(m,x)\le B_T
 | 未完成前缀搜索 | 在候选完成前，对部分状态评分、扩展或剪枝 | Tree-of-Thought、beam search、MCTS | 评分偏差可能提前删掉正确分支，搜索成本随分支增长 |
 
 这些结构可以组合，例如先在未完成前缀上搜索，再对完成的候选做终局聚合。读者比较两种推理策略时，除了 token、节点和墙钟时间，还要问选择发生在生成前、生成中还是生成后，候选是否能在完成前互相影响，以及停止规则是否改变总成本。这样才能分清“多写一条轨迹”和“把计算移到更有希望的分支”是不同的预算决策。
+
+还有一条不同的架构轴：循环深度模型可以在潜在状态中重复执行同一计算块，把额外计算花在更多状态迭代上，而不是生成更多可见 token。NeurIPS 2025 的 recurrent-depth 研究以 3.5B 参数、800B 训练 token 的单个概念验证模型展示了这一路线，并在其数学与代码基准上报告随测试时计算增加而改善；作者也将结果定位为概念验证，不能据此推断它已普遍优于 token 生成、搜索或验证策略。[Scaling up Test-Time Compute with Latent Reasoning](https://proceedings.neurips.cc/paper_files/paper/2025/hash/3b01972cf31e6fa0fe29e4b8b5c2a0a1-Abstract-Conference.html)。这类方法的预算账本应明确记录循环步数、实际计算量、延迟和任务质量，避免只用输出 token 衡量测试时投入。
 
 ### 91.3 候选覆盖不等于最终正确
 
@@ -1795,7 +1801,7 @@ print("cost_saved=", round(reports["fixed_high"]["total_cost"] - reports["adapti
 ~~~
 
 
-> **代码状态：已验证（2026-10-08；Python 3.12.9；标准库）**
+> **代码状态：静态审阅，未运行（2026-10-29）**
 
 输出：
 
@@ -2118,7 +2124,7 @@ print("preference_pairs=", pairs)
 ~~~
 
 
-> **代码状态：已验证（2026-10-08；Python 3.12.9；标准库）**
+> **代码状态：静态审阅，未运行（2026-10-29）**
 
 输出：
 
@@ -2391,7 +2397,7 @@ for attempt, source in enumerate(candidates, 1):
 ~~~
 
 
-> **代码状态：已验证（2026-10-08；Python 3.12.9；标准库）**
+> **代码状态：静态审阅，未运行（2026-10-29）**
 
 输出：
 
@@ -2688,7 +2694,7 @@ print("source=", dict(source_counts))
 ~~~
 
 
-> **代码状态：已验证（2026-10-08；Python 3.12.9；标准库）**
+> **代码状态：静态审阅，未运行（2026-10-29）**
 
 输出：
 
@@ -2765,6 +2771,8 @@ Reasoning Model 往往会使用更多输出 token、更多候选或更多工具�
 至少建立三层测试集。
 
 第一层是公开基准，用于与已有研究沟通。数学可参考 GSM8K、MATH 和 Minerva，代码可参考 HumanEval 一类函数级任务。第二层是改写与反事实集合，例如替换数字、打乱无关条件、改变单位、改写语言和插入干扰信息。第三层是目标系统集合，来自真实但脱敏的任务、工具协议、代码仓库或业务约束。
+
+Reasoning safety 还应把输入 prompt、中间推理轨迹和最终回复分别标注，并记录支持安全判断的文本证据；只判最终回复可能漏掉“过程不安全、结尾拒答”的情况。EMNLP 2026 的 TRACE 在中英文、九类风险和四个推理模型构成的基准中比较 18 个 guardrail，报告轨迹安全判断比 prompt 或最终回复更难，证据定位也仍不稳定。它提供的是特定基准上的测量结果，不等于所有模型或产品的风险率；其语言与模型覆盖范围也有限。[TRACE](https://aclanthology.org/2026.emnlp-main.1174/)
 
 结果正确和过程可接受需要组成一个二维账本。假设 100 道题中，最终答案正确 80 道，过程检查通过 68 道，两者同时成立 62 道。于是“答案对但过程失败”有 18 道，“过程合格但答案错”有 6 道，两者都失败 14 道。若只报最终 80%，会把依赖偶然抵消错误的答案和可靠求解混在一起；若只报过程通过率 68%，又会把写得合规但算错的轨迹当成成功。数学证明或代码修改对这两类失败的代价不同，因此应把四格分布与最终任务效用、人工复核率和运行成本一起报告。
 
@@ -3057,7 +3065,7 @@ print("solved_cost=", "N/A" if selected == 0 else round(total_cost / selected, 4
 ~~~
 
 
-> **代码状态：已验证（2026-10-08；Python 3.12.9；标准库）**
+> **代码状态：静态审阅，未运行（2026-10-29）**
 
 输出：
 
@@ -3102,6 +3110,7 @@ tokenizer 与模板版本
 - [Let’s Verify Step by Step](https://arxiv.org/abs/2305.20050)：过程监督和步骤级验证研究。
 - [Evaluating Large Language Models Trained on Code](https://arxiv.org/abs/2107.03374)：代码任务与多候选评估。
 - [FOL-Traces: Verified First-Order Logic Reasoning Traces at Scale](https://aclanthology.org/2026.findings-eacl.115/)：提供程序化核验的一阶逻辑轨迹和步骤诊断任务；作者报告的模型分数绑定其逻辑数据、任务构造和模型集合。
+- [TRACE: An Evidence-Grounded Benchmark for Safety Evaluation of Large Reasoning Models](https://aclanthology.org/2026.emnlp-main.1174/)：将 prompt、推理轨迹和最终回复分开评估，并标注支持判断的证据；覆盖范围限于其语言、风险类型和模型集合。
 
 这些资料提供了任务和指标的研究起点。公开 benchmark 的分数不能替代目标系统的能力剖面；尤其是工具权限、长上下文、隐私、安全和成本约束，通常需要自行构造测试集和运行协议。
 
@@ -3213,9 +3222,10 @@ R_{\mathrm{invalid}}
 
 ### 96.5 一个最小的端到端控制器
 
-下面的代码不调用模型，而是用固定候选模拟三种路径：简单任务直接回答，数学任务使用候选和验证器，数据任务执行确定性规则。重点是控制器如何统一记录路线、验证状态和成本。
+下面的代码不调用模型，而是用固定候选模拟三种路径：简单任务直接回答，数学任务使用候选和验证器，数据任务执行确定性规则。重点是控制器如何统一记录路线、验证状态和成本。验证状态区分 `passed`、`failed`、`unverified` 和 `not_required`；固定问候语不需要事实验证，不能因为它返回了答案就计为“已验证”。
 
 ~~~python
+from collections import Counter
 from dataclasses import dataclass
 import math
 
@@ -3225,7 +3235,7 @@ class Result:
     task_id: str
     route: str
     answer: object
-    verified: bool
+    verification_status: str
     cost: float
     note: str
 
@@ -3289,7 +3299,14 @@ def validate_inventory_rows(rows):
 def solve_direct(task):
     if "direct_answer" not in task:
         raise ValueError("direct task needs direct_answer")
-    return Result(task["id"], "direct", task["direct_answer"], True, 1.0, "short path")
+    return Result(
+        task["id"],
+        "direct",
+        task["direct_answer"],
+        "not_required",
+        1.0,
+        "fixed greeting; no factual claim to verify",
+    )
 
 
 def solve_math(task):
@@ -3305,11 +3322,11 @@ def solve_math(task):
             task["id"],
             "self_consistency+verifier",
             chosen["answer"],
-            True,
+            "passed",
             4.0,
             f"checked {len(candidates)} candidates",
         )
-    return Result(task["id"], "math_fallback", None, False, 4.0, "no verified candidate")
+    return Result(task["id"], "math_fallback", None, "failed", 4.0, "no verified candidate")
 
 
 def solve_inventory(task):
@@ -3326,12 +3343,15 @@ def solve_inventory(task):
         net[sku] = shipped - returned
         if returned < 0 or returned > shipped:
             invalid.append(sku)
-    verified = bool(rows) and not invalid
+    if not rows:
+        verification_status = "unverified"
+    else:
+        verification_status = "failed" if invalid else "passed"
     if not rows:
         note = "no inventory rows"
     else:
-        note = "all invariants passed" if verified else f"invalid rows: {invalid}"
-    return Result(task["id"], "execute+invariant", net, verified, 2.5, note)
+        note = "all invariants passed" if verification_status == "passed" else f"invalid rows: {invalid}"
+    return Result(task["id"], "execute+invariant", net, verification_status, 2.5, note)
 
 
 tasks = [
@@ -3365,26 +3385,34 @@ results = [
 
 for result in results:
     print(result)
-verified_rate = "N/A" if not results else round(sum(row.verified for row in results) / len(results), 3)
-print("verified_rate=", verified_rate)
+status_counts = Counter(row.verification_status for row in results)
+checked = [row for row in results if row.verification_status in {"passed", "failed"}]
+pass_rate = (
+    "N/A"
+    if not checked
+    else round(sum(row.verification_status == "passed" for row in checked) / len(checked), 3)
+)
+print("verification_status_counts=", dict(status_counts))
+print("verification_pass_rate_among_checked=", pass_rate)
 print("total_cost=", round(sum(row.cost for row in results), 2))
 ~~~
 
 
-> **代码状态：已验证（2026-10-08；Python 3.12.9；标准库）**
+> **代码状态：静态审阅，未运行（2026-10-29）**
 
 输出：
 
 ~~~text
-Result(task_id='greeting', route='direct', answer='hello', verified=True, cost=1.0, note='short path')
-Result(task_id='equation', route='self_consistency+verifier', answer=42, verified=True, cost=4.0, note='checked 3 candidates')
-Result(task_id='inventory', route='execute+invariant', answer={'A': 8, 'B': -2}, verified=False, cost=2.5, note="invalid rows: ['B']")
-verified_rate= 0.667
+Result(task_id='greeting', route='direct', answer='hello', verification_status='not_required', cost=1.0, note='fixed greeting; no factual claim to verify')
+Result(task_id='equation', route='self_consistency+verifier', answer=42, verification_status='passed', cost=4.0, note='checked 3 candidates')
+Result(task_id='inventory', route='execute+invariant', answer={'A': 8, 'B': -2}, verification_status='failed', cost=2.5, note="invalid rows: ['B']")
+verification_status_counts= {'not_required': 1, 'passed': 1, 'failed': 1}
+verification_pass_rate_among_checked= 0.5
 total_cost= 7.5
 ~~~
 
 
-这个案例中，库存程序仍然计算出了 B 的净值 -2，但 `verified=False`，因为退货大于发货。计算结果和业务结论被分开保存，使用者可以看到异常，而不是把一个数值当成已经确认的事实。若任务要求写回库存系统，控制器还应在写入前增加权限检查、幂等键和人工确认；本例只完成读取和分析。
+这个案例中，库存程序仍然计算出了 B 的净值 -2，但验证状态为 `failed`，因为退货大于发货。问候语的 `not_required` 不进入已检查样本的通过率分母；方程通过、库存规则未通过，因此本例已检查任务的验证通过率为 1/2。计算结果和业务结论被分开保存，使用者可以看到异常，而不是把一个数值当成已经确认的事实。若任务要求写回库存系统，控制器还应在写入前增加权限检查、幂等键和人工确认；本例只完成读取和分析。
 
 ### 96.6 从实验到发布的比较方法
 

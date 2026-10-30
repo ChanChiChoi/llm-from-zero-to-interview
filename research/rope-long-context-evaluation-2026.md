@@ -18,6 +18,7 @@
 - Yang 等人的 100-LongBench 发表于 Findings of ACL 2025。论文指出不同长上下文 benchmark 可能有合成内容、单样本固定长度和基座知识与长上下文能力混杂等局限，并提出可控长度和基准能力对照设计。来源：[ACL Anthology 页面](https://aclanthology.org/2025.findings-acl.903/)及[论文 PDF](https://aclanthology.org/2025.findings-acl.903.pdf)，阅读摘要、引言、§3.2 LongScore 指标和比较结果。证据等级：同行评审 benchmark 论文及作者提出的评估方案。边界：这是作者对现有 benchmark 的分析和其方案，不代表所有研究都采用同一指标或完整解决评测效度。
 - Liu 等人的 LongSocialBench 发表于 EMNLP 2026。论文使用完整线上讨论线程和回复树，重点测试结构化社会讨论证据，不只测试长段文本检索。来源：[ACL Anthology 页面](https://aclanthology.org/2026.emnlp-main.896/)，阅读摘要和评测设计摘要。证据等级：同行评审的任务专项 benchmark。边界：Hacker News、Stack Exchange 与 Reddit 讨论树是特定任务，不代表一般文档理解能力。
 - Zhang 等人的《Positional Failures in Long-Context LLMs》于 2026-05-22 提交 arXiv。论文提出在推理评测中同时控制任务位置、填充内容和上下文长度，并报告其九个模型、指定推理任务下的位置与填充交互。来源：[arXiv HTML](https://arxiv.org/html/2605.23170)，阅读摘要、引言、评测设计和结果部分。本轮只以 arXiv 页面为来源，未核验其同行评审版本。证据等级：预印本中的评测方案和模型/任务实验。边界：其模型、prompt/filler、样本数、任务和配置限定结果；不把其数值外推成现有模型的通用中段失败率。
+- Du et al., “SagaScale: A Realistic, Scalable, and High-Quality Long-Context Benchmark Built from Full-Length Novels,” arXiv:2601.09723v1（2025-12-27），[arXiv 摘要](https://arxiv.org/abs/2601.09723)。实际阅读摘要和版本信息。作者报告这是英中双语长篇小说 benchmark，平均上下文分别超过 250K 和 320K token，并以 12 个模型比较 Naïve RAG、Agentic RAG 与 full-context 三种方案；在其评测中，直接提供全文有时优于检索方案，Agentic RAG 可缓解 Naïve RAG 的检索瓶颈。证据等级：preprint / source-backed（预印本摘要中的 benchmark 设计和作者实验结论）。边界：具体结果绑定小说语料、问题构造、被测模型及其版本；不能推导为长上下文普遍优于 RAG，或 Agentic RAG 普遍优于 Naïve RAG。
 
 ## 未验证边界
 

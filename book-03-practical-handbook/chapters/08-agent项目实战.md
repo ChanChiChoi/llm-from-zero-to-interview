@@ -85,7 +85,9 @@ f_{\mathrm{name}_j}(\mathrm{arguments}_j)
 
 工具 schema 描述名称、用途、参数类型、必填字段和额外字段策略：
 
-> 代码状态：已验证（2026-10-21；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；标准库教学块的运行与边界记录适用于此代码）
+先区分应用内部注册表与发送给模型的 API schema。下面的 TOOLS 简化成内部目录，省略 provider 外层字段（例如 OpenAI 的 type/function 包装与 strict 设置）；接入具体 API 时要转换到对应 request shape，不能把这个 Python 对象直接当通用 schema。
+
+> 代码状态：静态审阅，未运行（2026-10-30）
 
 ```python
 TOOLS = [
@@ -116,13 +118,13 @@ TOOLS = [
 ]
 print("tool_names=", [tool["name"] for tool in TOOLS])
 ```
-严格 schema 的一个重要细节是：如果对象不允许额外属性，就要把 additionalProperties 明确设置为 false；可选字段不能用“缺失或任意类型”模糊表达，而应根据目标 API 的要求显式表示允许的类型和 null。
+严格 schema 的一个重要细节是：如果对象不允许额外属性，就要把 additionalProperties 明确设置为 false。以 OpenAI function calling 的 strict mode 为例，properties 中的字段都必须列入 required；业务上可选的字段要显式允许 null，不能简单省略。其他 API 或非 strict 模式的约束可能不同，发送前应按目标接口的 schema 规则复核；[OpenAI Function Calling 文档](https://developers.openai.com/api/docs/guides/function-calling)给出了 strict mode 的具体要求。无论 schema 多严格，它都只约束形状，不能替代业务范围、对象归属和授权检查。
 
 ### 8.1.2 安全计算器
 
 不要把模型生成的字符串直接交给 Python eval。教学版计算器可以用 AST 白名单：
 
-> 代码状态：已验证（2026-10-21；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；标准库教学块的运行与边界记录适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-30）
 
 ```python
 import ast
@@ -183,7 +185,7 @@ print("calculator_rejected=", calculator("__import__('os')"))
 
 工具 schema 和可执行函数必须分别保存：
 
-> 代码状态：已验证（2026-10-21；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；标准库教学块的运行与边界记录适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-30）
 
 ```python
 TOOLS = [
@@ -291,10 +293,12 @@ final 解析失败 → 重试或返回可解释的协议错误。
 
 模型一次返回多个调用时：
 
-> 代码状态：已验证（2026-10-21；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；标准库教学块的运行与边界记录适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-30）
 
 ```python
 def execute_registered(name, arguments):
+    if not isinstance(name, str) or not isinstance(arguments, dict):
+        return {"ok": False, "error": "invalid_call"}
     if name == "calculator" and set(arguments) == {"expression"}:
         return {"ok": True, "result": str(128 * 256)}
     if name == "search_docs" and set(arguments) == {"query"}:
@@ -328,7 +332,7 @@ print("output_ids=", [item["tool_call_id"] for item in outputs])
 
 ### 8.1.6 Tool Calling 审计 demo
 
-> 代码状态：已验证（2026-10-21；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；标准库教学块的运行与边界记录适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-30）
 
 ```python
 def mock_decision(query):
@@ -373,13 +377,15 @@ def run_tool_calls(query):
         if not isinstance(call_id, str) or not call_id or call_id in seen_ids:
             raise ValueError("tool call ids must be unique non-empty strings")
         seen_ids.add(call_id)
-        result = execute_registered(call["name"], call["arguments"])
+        result = execute_registered(call.get("name"), call.get("arguments"))
         results.append({"tool_call_id": call_id, **result})
     trace.append({"kind": "tool_results", "payload": results})
     return trace
 
 
 def execute_registered(name, arguments):
+    if not isinstance(name, str) or not isinstance(arguments, dict):
+        return {"ok": False, "error": "invalid_call"}
     if name == "calculator" and set(arguments) == {"expression"}:
         return {"ok": True, "result": "32768"}
     if name == "search_docs" and set(arguments) == {"query"}:
@@ -395,6 +401,8 @@ for query in ("帮我计算 128 * 256", "员工年假有多少天？", "你好")
         "ids=", [item["tool_call_id"] for item in trace[1]["payload"]],
     )
 ```
+本例用合成查询把完整提议放进内存 trace 以便看清协议关联。生产 trace 可默认记录 request/call id、工具名、schema 与策略版本、判定、结果状态和耗时；用户原文及工具原始内容只应进入经授权、脱敏且隔离的离线诊断材料。
+
 ### 8.1.7 工具结果不是无条件真值
 
 工具可能返回：
@@ -426,7 +434,7 @@ schema 通过了，业务范围却不合法；
 
 - OpenAI Function Calling：<https://developers.openai.com/api/docs/guides/function-calling>
 - OpenAI Responses tools：<https://developers.openai.com/api/docs/guides/tools>
-- Anthropic tool use：<https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview>
+- Anthropic tool use：<https://platform.claude.com/docs/en/agents-and-tools/tool-use/how-tool-use-works>
 - Transformers chat templates：<https://huggingface.co/docs/transformers/main/en/chat_templating>
 - JSON Schema：<https://json-schema.org/specification>
 
@@ -439,6 +447,12 @@ schema 也不等于业务规则。`amount` 是 number 只能排除字符串，�
 并行调用只适用于相互独立的工作。查询年假制度和读取用户自己的部门信息可能并行；先读取订单余额、再按余额决定退款金额则有数据依赖，必须按顺序执行。若一次并行发起 8 个查询而工具预算是 5，执行器应在调度前拒绝或限制并发，而不是让模型的 `tool_calls` 数量直接变成资源消耗。为每个调用设置超时、并发上限和最大响应字节数，防止一个宽泛查询拖垮整轮任务。
 
 还要区分“没有执行”“明确失败”和“结果未知”。schema 不通过属于没有执行；业务系统返回余额不足属于明确失败；写请求已送达、客户端等待超时属于未知状态。对只读查询可按退避策略重试，对写操作则先用幂等键查询动作状态，或交给人工确认。模型收到 timeout 后不能把它改写成“操作失败”，更不能自行再次扣款；它只能报告系统当前无法确认状态。正文中的工具结果属于观察证据，不会因为模型随后复述就变成更强的事实。
+
+把金额比较完整走一遍。假设当前用户有权读取的制度版本规定单笔报销超过 5,000 元需要审批，待判断金额为 6,000 元。先算差额：\(6{,}000-5{,}000=1{,}000\) 元；差额大于 0，所以 `6000 > 5000` 为真。计算器只证明数值条件成立；最终结论还必须引用当前制度版本，并确认这份制度对当前用户可见。若阈值是“达到 5,000 元”而不是“超过 5,000 元”，边界条件会不同，必须按原文规则选择 `>=` 或 `>`。
+
+可以把一次 Tool Calling 持久化成一条有序事件轨迹：`request_received` 固定 request_id、调用用户、租户和任务目标；`tool_proposed` 保存 tool_call_id、工具名和规范化参数摘要；`validation_decision` 保存 schema 版本、权限范围和允许/拒绝原因；只有获准的提议才进入 `execution_started`，结束时记录工具回执和明确状态。模型收到执行器回执后，再决定总结、补问或停止。schema 拒绝意味着没有副作用；执行器报告 timeout 时则可能处于 unknown，不能把它补写成失败或成功。最终答案必须从对应回执和证据中取事实，模型复述不能改变事件状态。
+
+批量调用还要保存调用关联和依赖。若两次只读查询互不依赖，可以同时调度，但网络返回顺序可能与模型给出的顺序不同，因此要按 tool_call_id 归还结果，不能靠数组位置配对。调度器应先检查本轮调用数量、并发、截止时间和响应大小预算。若第二个动作依赖第一个动作读出的余额或对象版本，就应串行，并在产生副作用前重新检查业务状态；否则第一次读取之后的状态变化可能使已确认参数过期。并行只是执行优化，不改变工具之间的因果关系。
 
 ## 8.2 ReAct 与状态循环：让多步任务可停止、可恢复
 
@@ -511,7 +525,7 @@ E(a_k)
 
 推荐把 scratchpad 拆成事件，而不是只拼接长字符串：
 
-> 代码状态：已验证（2026-10-21；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；标准库教学块的运行与边界记录适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-30）
 
 ```python
 state = {
@@ -548,7 +562,7 @@ Action Input: 报销金额审批规则
 
 解析器示例：
 
-> 代码状态：已验证（2026-10-21；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；标准库教学块的运行与边界记录适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-30）
 
 ```python
 import re
@@ -619,7 +633,7 @@ final_answer；
 
 下面的 mock policy 先检索，再比较金额，最后输出答案；系统自己执行工具并生成 observation。
 
-> 代码状态：已验证（2026-10-21；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；标准库教学块的运行与边界记录适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-30）
 
 ```python
 import ast
@@ -768,9 +782,17 @@ ReAct：
 
 把循环展开成一次有界轨迹。任务要求判断 6000 元报销是否需要额外审批，Agent 先用 `search_docs` 找到当前制度，再用白名单计算器比较 6000 与 5000，最后给出带条款引用的回答。假设三次模型调用分别读入 700、900、1,050 token，输出 120、45、80 token，则模型总输入为 2,650 token，输出为 245 token；两次工具分别耗时 90 ms 和 2 ms，模型调用耗时 420、580、360 ms，整轮约 1.452 秒。三次请求的输入长度逐步增加，是因为早先的用户问题、工具观察和当前状态会重复进入后续 prompt；若只报告最后一次请求的 1,050 token，就低估了任务累计输入。
 
-这条示例轨迹还要检查每步是否有进展：第一次工具返回当前制度版本，第二次把阈值比较结果写回状态，第三次只总结已验证内容。若搜索无结果，应直接进入拒答或改写查询，不应再让模型重复同一查询四次；若数字比较工具失败，回答可以说明计算未完成，但不能把它当作 `False`。预算可以设为最多 4 次模型决策、3 次工具调用、5 秒总时限和 6,000 个累计 token，触及任一上限都以 `budget_exhausted` 结束并保留部分结果。预算是执行器强制的硬约束，prompt 中提醒模型“不要多调用”并不构成限制。
+这条示例轨迹还要检查每步是否有进展：第一次工具返回当前制度版本，第二次把阈值比较结果写回状态，第三次只总结已验证内容。输入 token 累计为 \(700+900+1{,}050=2{,}650\)，输出累计为 \(120+45+80=245\)。模型调用耗时合计 \(420+580+360=1{,}360\) ms，工具耗时合计 \(90+2=92\) ms，所以总耗时约 \(1{,}452\) ms，即 \(1.452\) 秒。若搜索无结果，应直接进入拒答或改写查询，不应再让模型重复同一查询四次；若数字比较工具失败，回答可以说明计算未完成，但不能把它当作 `False`。预算可以设为最多 4 次模型决策、3 次工具调用、5 秒总时限和 6,000 个累计 token，触及任一上限都以 `budget_exhausted` 结束并保留部分结果。预算是执行器强制的硬约束，prompt 中提醒模型“不要多调用”并不构成限制。
 
 日志应面向可观察事件，而不是要求保存每段隐藏推理。一个可复放 trace 记录目标、状态摘要、模型版本、工具提议、校验结果、执行开始/结束、回执、错误和终止原因；需要解释某个决策时，只保存必要的结构化理由或判定代码。这样既可以定位“选错工具”“参数错”“工具返回错”“停止太早”各自在哪一步发生，也不把不可验证的自由文本思路当成系统状态。ReAct 原论文研究的是交错的行动与观察轨迹；现代 API 或 SDK 的 trace 格式属于具体实现，不能仅凭轨迹可见就断定策略正确。[ReAct 论文](https://arxiv.org/abs/2210.03629)支持 action/observation 这一组织方式，目标 Agent 的成功率和成本仍需用本地任务集验证。
+
+长任务需要保存“当前状态”，而不是把全部对话当作状态本身。可持久化字段包括原始目标及其版本、已确认事实和来源、待回答问题、最近一次工具提议、外部执行状态、累计预算与停止原因。新一轮模型输入由这些有来源的字段构成：例如“制度版本 P-17 的单笔阈值为 5,000 元”属于带版本的观察，“需要审批”则是根据金额比较得到的结论。用户补充信息时，只更新受影响的问题和预算；已经收到成功回执的副作用不能因为重新规划而被当作尚未发生。
+
+循环的“进展”也应有可检查定义。若一次观察补齐了缺失字段、关闭一个子目标、改变了受信任的外部状态，或让证据从不足变为充分，才算朝目标前进。模型再次发出相同工具和规范化参数、拿到相同结果后继续重复，通常没有新增信息；执行器可用动作指纹、观察摘要和无进展计数检测这类循环，再允许有限次有理由的查询改写。对于前例，`search_docs` 命中有效制度是第一次进展，比较器返回真并绑定该制度阈值是第二次；如果检索返回空集合，连续重复同一查询并不会积累证据。
+
+终止状态要保留任务完成度和副作用确定性。`final` 表示目标条件有证据支持；`refused` 表示权限或安全策略阻断；`tool_error` 表示某个工具明确失败；`unknown` 表示执行可能已经发生但回执不确定；`budget_exhausted` 表示系统有意停止并留下部分结果。用户看到的文本要如实表达这些差别。即使本地业务动作已有成功回执，如果后续引用校验或业务后置条件没有通过，整项任务仍可处于 partial 或 failed，不能把工具级 success 自动提升为目标级 success。
+
+服务重启或用户断线后，恢复逻辑要先读取持久化状态和最近回执，再判断接下来是补模型观察、查询外部状态还是结束任务。一次只读 `search_docs` 失败通常可以在剩余 deadline 内重试；一个写操作已经提交但响应丢失时，要用原有幂等键查询结果，不能生成新键再执行一次。如果工具已完成而模型尚未消费回执，可以把原 call/result 事件接回轨迹，并区分“执行器已完成”与“Agent 已观察”两个状态。没有可靠状态查询能力的外部写服务遇到 timeout 时，应保留 `unknown` 并交由人工处理。这样 ReAct 的“可恢复”才是恢复真实任务状态，而不是简单地把整段 prompt 再发给模型。
 
 ## 8.3 Agent 安全与执行验证：把副作用留在程序控制面
 
@@ -868,7 +890,7 @@ user A 只能读 tenant A；
 
 系统应把这些内容标记为 data，不让它们直接修改工具集合、系统策略、用户角色或审批状态。一个安全 prompt 可以提醒模型：
 
-> 代码状态：已验证（2026-10-21；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；标准库教学块的运行与边界记录适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-30）
 
 ```python
 def build_data_prompt(user_query, external_content):
@@ -903,7 +925,7 @@ SQL 是否只读；
 
 以邮件为例：
 
-> 代码状态：已验证（2026-10-21；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；标准库教学块的运行与边界记录适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-30）
 
 ```python
 def validate_email(arguments):
@@ -926,23 +948,28 @@ print(validate_email({"to": "attacker@example.com", "body": "通知"}))
 ```
 ### 8.3.4 高风险动作确认
 
-确认请求必须绑定动作摘要，而不是一个可以被替换参数的裸 token：
+确认请求必须让用户看见并确认关键动作字段，并由服务端把确认绑定到同一笔动作；不能把可替换参数的裸 token 当作授权。一次确认应绑定用户/租户、工具、规范化参数、策略版本、有效期和一次性状态。服务端可生成不可预测的 approval_id 并保存待确认记录：
 
 ```math
-\mathrm{approval\_key}
+\mathrm{approval\_record}[\mathrm{approval\_id}]
 =
-H(\mathrm{user\_id},
+(\mathrm{user\_id},
+\mathrm{tenant\_id},
 \mathrm{tool},
-\mathrm{canonical\_arguments},
-\mathrm{expires\_at})
+H(\mathrm{canonical\_arguments}),
+\mathrm{policy\_version},
+\mathrm{expires\_at},
+\mathrm{pending})
 ```
+
+这里的随机 id 只是服务端记录的索引，不是单独可转让的授权凭证；确认身份、动作摘要和当前业务条件仍由服务端验证。执行前应在共享的事务状态中原子地检查并消费该确认，避免重放或并发重复执行。这个模式符合 [OWASP Transaction Authorization 指南](https://cheatsheetseries.owasp.org/cheatsheets/Transaction_Authorization_Cheat_Sheet.html) 关于服务端生成并绑定交易数据、限时、每笔唯一及执行前检查的建议。
 
 确认时重新验证：
 
 ```text
 用户身份仍然有效；
+租户、资源归属和角色仍然匹配；
 参数规范化后的摘要没有变化；
-角色和资源权限没有变化；
 审批没有过期或被撤销；
 当前风险策略仍允许执行；
 动作没有已经成功执行。
@@ -989,7 +1016,7 @@ tool_call_id、工具名和规范化参数摘要；
 最终回答和用户确认；
 ```
 
-但日志本身也可能包含敏感信息。密码、令牌、身份证号、薪资、完整邮件正文和私有文档应做字段级脱敏，日志读取也需要权限。
+但日志本身也可能包含敏感信息。密码、令牌、身份证号、薪资、完整邮件正文和私有文档应做字段级脱敏，日志读取也需要权限。默认保存足以关联事件的标识、摘要、决定和状态；只有在授权、隔离并限定保留期的诊断流程中才采集必要原文。字段分级、脱敏、访问控制和留存应结合具体系统制定，可参照 [OWASP Logging Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html) 和 [OpenTelemetry GenAI spans](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-spans.md)；后者是持续演进的约定，不提供自动脱敏保证。
 
 ### 8.3.7 沙箱与网络边界
 
@@ -1008,7 +1035,7 @@ tool_call_id、工具名和规范化参数摘要；
 
 ### 8.3.8 无依赖安全 guard demo
 
-> 代码状态：已验证（2026-10-21；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；标准库教学块的运行与边界记录适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-30）
 
 ```python
 import json
@@ -1035,9 +1062,14 @@ TOOLS = {
 
 def redact(value):
     if isinstance(value, dict):
-        sensitive = {"password", "token", "salary", "ssn", "secret"}
+        sensitive = {
+            "password", "token", "salary", "ssn", "secret",
+            "to", "recipient", "email", "subject", "body", "query",
+        }
         return {
-            key: "<redacted>" if key in sensitive else redact(item)
+            key: "<redacted>"
+            if str(key).casefold() in sensitive
+            else redact(item)
             for key, item in value.items()
         }
     if isinstance(value, list):
@@ -1119,7 +1151,8 @@ class Guard:
         event["decision"] = "executed"
         event["result"] = redact(result)
         self.audit.append(event)
-        return {"ok": True, "result": redact(result)}
+        # The caller receives authorized data; the audit copy is redacted.
+        return {"ok": True, "result": result}
 
 
 guard = Guard(role="user", max_calls=1)
@@ -1132,13 +1165,12 @@ print("high_risk=", admin.dispatch(
     "send_email",
     {"to": "boss@company.com", "subject": "x", "body": "draft"},
 ))
-print(
-    "redacted_result=",
-    admin.dispatch("lookup_employee", {"employee_id": "E02"}),
-)
+employee_result = admin.dispatch("lookup_employee", {"employee_id": "E02"})
+print("authorized_salary=", employee_result["result"]["salary"])
+print("audit_salary=", admin.audit[-1]["result"]["salary"])
 print("decisions=", [event["decision"] for event in guard.audit])
 ```
-这个 demo 的执行器结果是教学占位；重点在决策顺序、未知工具拒绝、角色检查、重复/预算和高风险确认路径。
+这个 demo 的执行器结果是教学占位；重点在决策顺序、未知工具拒绝、角色检查、重复/预算和高风险确认路径。调用方得到的是角色允许的业务结果，审计副本则对参数和结果字段脱敏；生产脱敏规则还要按工具字段维护，并处理自由文本中的敏感内容，不能依赖这个小型字段名单。该 guard 只演示固定工具目录里的角色门槛，没有实现租户/对象授权、服务端审批记录、持久幂等或沙箱，不代表可直接上线的安全边界。
 
 ### 8.3.9 安全评估集
 
@@ -1184,11 +1216,13 @@ R_{\mathrm{duplicate}}
 
 理想目标不是把所有请求都拒绝，而是在允许任务与高风险动作之间保持可解释边界。
 
+公开评测可以帮助构造覆盖面，但不能替代目标系统验收。[AgentDojo](https://arxiv.org/abs/2406.13352)专门构造工具返回不可信内容下的提示注入任务；[ToolSandbox](https://arxiv.org/abs/2408.04682)则让工具调用依赖可变状态，并用必须发生与禁止发生的轨迹事件评估多步任务。它们提醒我们同时检查任务是否完成、顺序是否正确、不可完成时是否停止，以及攻击是否造成越权动作；论文中的分数只属于各自数据、工具、模型和评估设置，不能直接当作本地 Agent 的安全率。
+
 用退款动作检查这些边界是否互相独立。模型提出“给订单 O-17 退款 120 元”，执行器依次核对用户是否拥有该订单、订单状态是否允许退款、可退余额是否至少 120 元、当前角色是否有权限、金额是否低于自动处理上限，以及是否存在同一个 idempotency_key 的既有动作。若自动额度上限为 150 元且条件全部通过，仍要按业务要求取得与规范化参数绑定的用户确认；确认后执行器记录订单、金额、政策版本、确认时间和外部返回的退款流水号。这里 120 与 150 是教学假设，真实上限由业务规则定义。
 
 若外部接口在受理退款后没有返回响应，系统不能把超时当作“未退款”。应把动作状态置为 `unknown`，使用同一幂等键查询交易状态；查到成功就记录回执，查到明确未受理才按规则重试，始终无法确认时转人工处理。若外部服务不支持幂等键或状态查询，就不能假设本地日志能阻止重复副作用，应缩小自动化范围或增加人工确认。补偿动作也不是回滚的同义词：已发出的邮件不能撤回，错误退款可能需要新的冲正交易，且冲正本身也必须受控。
 
-安全评估要把攻击尝试和真实执行分开记录。例如固定 40 条直接或间接提示注入测试，40 条都被拒绝，只能报告“这组 40 条样本中未观察到未授权执行”；它不能证明其他输入不会越权。还应保留攻击类别、工具集合、角色、数据源和防护版本，并对新工具、新 prompt、新模型和权限变化重复相同回归集。若为了降低拒答而放宽规则，必须同时观察未授权执行、错误对象访问、重复副作用和未知状态覆盖率，不能只看任务成功率。
+安全评估要把攻击尝试和真实执行分开记录。例如固定 40 条直接或间接提示注入测试，40 条都被拒绝，则这批样本的未授权执行率为 \(0/40=0\%\)，只能报告“这组 40 条样本中未观察到未授权执行”；它不能证明其他输入不会越权。还应保留攻击类别、工具集合、角色、数据源和防护版本，并对新工具、新 prompt、新模型和权限变化重复相同回归集。若为了降低拒答而放宽规则，必须同时观察未授权执行、错误对象访问、重复副作用和未知状态覆盖率，不能只看任务成功率。
 
 ### 8.3.10 失败模式与资料
 
@@ -1231,6 +1265,8 @@ R_{\mathrm{duplicate}}
 
 它不自动发邮件、不修改制度、不提交报销，因此把高风险副作用留在本章 8.3 的控制面之外。
 
+任务契约还要固定身份、资源与允许动作的来源。`user.role` 和 `tenant` 应由认证与授权服务注入，不能让用户文本或模型自行声明；制度检索只能返回该身份可见的当前版本，金额计算也只接受白名单表达式。由于本例承诺只读，用户若要求“直接提交报销”或“替我发邮件”，系统应返回超出本助手权限的状态，必要时交给单独审批流程。每次请求应记录采用的授权策略和制度快照时间，避免在多轮任务中把撤权前得到的资料当成撤权后的可见证据。
+
 ### 8.4.2 端到端事件
 
 一次“6000 元报销是否需要审批”的请求可以记录为：
@@ -1251,9 +1287,11 @@ request_received
 
 每个事件都带 request_id、model_revision、doc_version 和 elapsed_ms。这样答案错误时，可以区分是制度没有召回、金额没有比较、引用失效还是模型生成错误。
 
+事件还应携带 parent_event_id 或 tool_call_id，把一次请求里的检索候选、计算结果和最终 claim 串成有向链；只保存时间戳而没有因果关联，仍无法还原先后依赖。access_filter 拒绝时记录策略版本和拒绝类别，并在后续阶段停止，不把“无可见文档”传给生成器猜答案。检索超时、空候选、版本冲突、reranker 错误、计算器失败和引用映射失败都要有不同状态码，便于第九章按 first failure stage 归因。原文可以在隔离存储中按授权保留，普通运行 trace 只放稳定 ID、版本、摘要和状态。
+
 ### 8.4.3 最小状态对象
 
-> 代码状态：已验证（2026-10-21；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；标准库教学块的运行与边界记录适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-30）
 
 ```python
 case = {
@@ -1315,6 +1353,8 @@ print("citation_count=", len(case["answer"]["citations"]))
 
 任何一项失败，都不能只看最终文本“像是对的”就判定任务完成。
 
+验收样例还要卡住业务边界值。若制度原文是“超过 5,000 元”，输入 5,000 元时差额为 \(5{,}000-5{,}000=0\)，比较 `> 0` 为假；输入 5,001 元时差额为 \(5{,}001-5{,}000=1\) 元，比较为真。若原文写的是“达到 5,000 元”，同一个边界样本就应走 `>=`。这种样例能同时检查检索到的条款语义、比较器运算符、模型对结果的引用和最终措辞；只有计算正确而条款版本错误，也必须判定失败。
+
 ### 8.4.5 RAG 与 Agent 的七个接口如何互相约束
 
 ```text
@@ -1342,6 +1382,14 @@ RAG 和 Agent 的工程闭环不是“模型回答得更像人”，而是从证
 | answer → citation map | claim 与 evidence id | 可追溯引用 | claim 与版本、段落对应 |
 
 用 10 条固定样例做验收时，可以有 6 条充分证据并正确回答、2 条资料不足并正确拒答、1 条越权查询被阻断、1 条版本冲突转人工。这里回答覆盖率是 6/10=60%，在可回答样例中的正确率是 6/6=100%，资料不足拒答率是 2/2=100%，越权执行数是 0/1。不能把最后一个 0/1 写成“权限风险为零”，也不能因为 100% 正确就忽略仅有 6 个回答样本。报告还应保留每个 request_id 的 first failure stage 和实际 trace，让第九章的离线诊断、第十章的线上追踪可以沿同一标识继续检查。
+
+这些比率回答不同问题，应分别报告，不能相加或合成一个总分。6/10 衡量总体回答覆盖，6/6 只描述系统选择回答的样例，2/2 检查资料不足时是否正确停下，0/1 只代表一个越权尝试未执行；尤其 1 个安全样本不能支持对总体风险的精确估计。出现 `version_conflict` 时应在样例标签中保留该状态，不能把转人工记成普通拒答。报告中的 first failure stage 指从流程起点遇到的第一个不满足条件的阶段；若 ACL 已拒绝，后续检索、工具和引用指标应标为未执行，而不是补成零分。
+
+“当前版本”还需要一个明确的时间语义。检索时保存生效日期、doc_version、ACL 策略版本和请求时间；如果整轮处理固定读取同一快照，最终答案就说明它对应的版本和时点。若业务要求回答返回时仍是最新制度，则在发出回答前重新检查版本与权限；发现文档更新或用户被撤权时，应重取证据或停止输出。这个检查能处理“检索时允许、回答时已失效”的时间竞争，避免引用正确但当前已不可见或不再生效的条款。
+
+固定回归集应为每条样例同时保存角色/租户、制度版本、关键证据片段、预期终态和禁止事件。样本至少切分边界金额、失效版本、无召回、越权对象、工具超时和提示注入等类别，并分别报告每一类的回答支持率、拒答、调用状态和安全结果。first failure stage 应由轨迹中的第一个缺失前置条件确定；这样修改 parser、权限层或检索器时，能看出真实改善发生在哪一层，而不是只比较一个混合总分。
+
+面向调用方的最终对象也应使用可判定的 status，例如 `answered`、`insufficient_evidence`、`access_denied`、`version_conflict`、`tool_error` 或 `unknown`，并附上允许公开的原因类别和版本字段。只有 `answered` 状态能带业务结论；其他状态可以返回下一步建议，却不能携带猜测出的阈值或“已处理”承诺。这样客户端可以按状态提示补充材料、重新授权或联系人工，也能避免仅凭空字符串或 HTTP 200 把失败误判为成功。
 
 ### 8.4.6 最终资料索引
 

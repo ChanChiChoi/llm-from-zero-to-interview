@@ -40,6 +40,8 @@ V=\mathrm{vocab\_size}
 
 可复现记录还应包含仓库 revision、Transformers/PyTorch 版本、dtype、设备，以及是否执行了远程自定义代码。一个随时间变化的默认分支名称，不足以标识一个固定模型。
 
+本章的 Hugging Face 接口示例按 Transformers v5.17.0、PEFT v0.18.0 和 TRL v1.14.1 的文档核对；这组文档版本不等于一份已经联调验证的依赖锁。代码中的 `sshleifer/tiny-gpt2` 固定到 commit `5f91d94bd9cd7190a9f3216ff93cd1dd95f2c7be`，QLoRA 示例的 `Qwen/Qwen2.5-0.5B` 固定到 commit `b937cc073b55e980e6f21d5f8b7a77818efcf0eb`；加载 tokenizer 和模型时使用同一个 revision。两份固定快照分别见 [tiny-gpt2 文件树](https://huggingface.co/sshleifer/tiny-gpt2/tree/5f91d94bd9cd7190a9f3216ff93cd1dd95f2c7be) 和 [Qwen2.5-0.5B 文件树](https://huggingface.co/Qwen/Qwen2.5-0.5B/tree/b937cc073b55e980e6f21d5f8b7a77818efcf0eb)。
+
 ### 4.1.2 Causal LM 的 forward 形状
 
 给定序列 \(x_0,\ldots,x_{T-1}\)，自回归语言模型分解联合概率：
@@ -71,7 +73,7 @@ Z=f_\theta(X)\in\mathbb{R}^{B\times T\times V}
 
 许多 Hugging Face CausalLM 类在接收等长 labels 后会在内部完成 shift。自己写 loss 时要确认这一点；手动错位后再交给会再次错位的模型，会让目标错一位。
 
-> 代码状态：静态审阅，未运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；缺少外部训练/API 依赖、模型权重或 CUDA）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import torch
@@ -79,8 +81,15 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 model_name = "sshleifer/tiny-gpt2"
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForCausalLM.from_pretrained(model_name)
+model_revision = "5f91d94bd9cd7190a9f3216ff93cd1dd95f2c7be"
+tokenizer = AutoTokenizer.from_pretrained(
+    model_name,
+    revision=model_revision,
+)
+model = AutoModelForCausalLM.from_pretrained(
+    model_name,
+    revision=model_revision,
+)
 
 if tokenizer.pad_token is None:
     tokenizer.pad_token = tokenizer.eos_token
@@ -102,7 +111,7 @@ print("logits_shape=", tuple(outputs.logits.shape))
 
 tokenizer 的编码结果通常包含 input_ids 和 attention_mask：
 
-> 代码状态：静态审阅，未独立运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；语法检查通过，片段依赖章节上下文）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 encoded = tokenizer("A small language model.", return_tensors="pt")
@@ -142,7 +151,7 @@ p_T(v)
 
 温度只改变已有分布的尖锐程度，不会增加模型知识。top-k 保留最高的 k 个候选，top-p 保留累计概率达到 p 的最小候选集合。
 
-> 代码状态：静态审阅，未独立运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；语法检查通过，片段依赖章节上下文）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 prompt = "The capital of France is"
@@ -179,7 +188,7 @@ inference_mode()：不构建反向图，减少推理开销。
 
 小模型可以手动放到设备：
 
-> 代码状态：静态审阅，未独立运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；语法检查通过，片段依赖章节上下文）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -197,20 +206,21 @@ with torch.inference_mode():
 ```
 大模型常使用 Accelerate 的自动放置：
 
-> 代码状态：静态审阅，未运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；缺少外部训练/API 依赖、模型权重或 CUDA）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
-    torch_dtype="auto",
+    revision=model_revision,
+    dtype="auto",
     device_map="auto",
 )
 ```
-使用 device_map="auto" 后不要无条件再调用 model.to("cuda")，因为模型可能被分布到多张 GPU、CPU 或 offload 目录。新版文档可能推荐 dtype 参数，较多稳定版本仍使用 torch_dtype；应以本地版本签名为准。
+使用 `device_map="auto"` 后不要无条件再调用 `model.to("cuda")`，因为模型可能被分布到多张 GPU、CPU 或 offload 目录。这里按 Transformers v5.17.0 的 `dtype` 参数书写；在其他版本中应查对应版本签名，不要把不同版本的参数名混在同一份复现实验里。
 
 批量生成时通常使用左侧 padding：
 
-> 代码状态：静态审阅，未独立运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；语法检查通过，片段依赖章节上下文）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 tokenizer.padding_side = "left"
@@ -237,7 +247,7 @@ decoder-only 生成通常从批次最后一个位置继续。左补齐能让每�
 
 没有 torch 或无法下载模型时，可以先验证 shape、padding 和生成长度。下面不模拟语言能力，只模拟接口契约：
 
-> 代码状态：已验证（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；对应 toy 实验或 CPU collator 契约检查）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 class Shape:
@@ -247,10 +257,11 @@ class Shape:
 
 class ToyTokenizer:
     def __init__(self):
-        self.tokens = ["<pad>", "<eos>", "Hello", "my", "name", "is", "I", "am", "toy"]
+        self.tokens = ["<pad>", "<eos>", "<unk>", "Hello", "my", "name", "is", "I", "am", "toy"]
         self.ids = {token: i for i, token in enumerate(self.tokens)}
         self.pad_token_id = 0
         self.eos_token_id = 1
+        self.unk_token_id = 2
         self.padding_side = "left"
 
     def __len__(self):
@@ -260,7 +271,7 @@ class ToyTokenizer:
         if isinstance(texts, str):
             texts = [texts]
         rows = [
-            [self.ids.get(piece, self.eos_token_id) for piece in text.split()]
+            [self.ids.get(piece, self.unk_token_id) for piece in text.split()]
             for text in texts
         ]
         if padding:
@@ -387,7 +398,7 @@ p_\theta(\mathrm{response}\mid\mathrm{prompt})
 
 传统 instruction/input/output 数据可以写成：
 
-> 代码状态：静态审阅，未独立运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；语法检查通过，片段依赖章节上下文）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 example = {
@@ -398,7 +409,7 @@ example = {
 ```
 现代聊天数据常写成 messages：
 
-> 代码状态：静态审阅，未独立运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；语法检查通过，片段依赖章节上下文）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 messages = [
@@ -416,7 +427,7 @@ messages = [
 
 一个简单模板可以这样渲染：
 
-> 代码状态：静态审阅，未独立运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；语法检查通过，片段依赖章节上下文）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 def format_instruction(example):
@@ -440,7 +451,7 @@ def format_instruction(example):
 ```
 推理时必须复用同一套边界：
 
-> 代码状态：静态审阅，未独立运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；语法检查通过，片段依赖章节上下文）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 def build_prompt(instruction, extra_input=""):
@@ -460,7 +471,7 @@ def build_prompt(instruction, extra_input=""):
 ```
 聊天模型应优先使用自己的 tokenizer 提供的 chat template：
 
-> 代码状态：静态审阅，未独立运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；语法检查通过，片段依赖章节上下文）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 prompt_messages = [
@@ -498,7 +509,7 @@ x_t,&m_t=1
 \end{cases}
 ```
 
-PyTorch 的交叉熵默认把 -100 当作 ignore_index。prompt token 仍然保留在 input_ids 中，作为回答的上下文；它们只是不会成为监督目标。
+PyTorch 的交叉熵默认把 -100 当作 `ignore_index`。prompt token 仍然保留在 `input_ids` 中，作为回答的上下文；它们只是不会成为监督目标。参见 [PyTorch 2.14.0 CrossEntropyLoss 文档](https://docs.pytorch.org/docs/2.14/generated/torch.nn.CrossEntropyLoss.html)。
 
 若模型内部负责 causal shift，labels 与 input_ids 等长，位置 \(t-1\) 的 logits 预测 labels 位置 \(t\)。令 \(S=\sum_{t=1}^{T-1}m_t\) 为这个序列中真正参与监督的回答 token 数。下面的 assistant-only 目标只在 \(S>0\) 时有定义；一个被截断到只剩 prompt 的样本不应进入 loss 的平均：
 
@@ -520,7 +531,7 @@ m_t\log p_\theta(x_t\mid x_{<t})
 
 对简单文本模板，可以用 fast tokenizer 的字符偏移定位 prompt 结束位置：
 
-> 代码状态：静态审阅，未独立运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；语法检查通过，片段依赖章节上下文）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 def tokenize_sft_example(example, tokenizer, max_length=512):
@@ -548,8 +559,9 @@ def tokenize_sft_example(example, tokenizer, max_length=512):
         encoded["input_ids"],
         encoded["offset_mapping"],
     ):
+        # Token boundaries cannot be split; mask any token that overlaps the prompt.
         labels.append(
-            -100 if end <= prompt_end else token_id
+            -100 if start < prompt_end else token_id
         )
     if not labels or not any(label != -100 for label in labels):
         raise ValueError(
@@ -561,11 +573,11 @@ def tokenize_sft_example(example, tokenizer, max_length=512):
         "labels": labels,
     }
 ```
-不能默认把 tokenize(prompt) 得到的 token 数当作完整序列的切分点。BPE 或 byte-level tokenizer 可能在边界处合并片段，两个独立 tokenize 的边界不一定相同。offset mapping 描述 token 覆盖的字符区间，通常更可靠；但它要求 fast tokenizer，特殊 token 的 offset 仍需实际检查。
+不能默认把 tokenize(prompt) 得到的 token 数当作完整序列的切分点。BPE 或 byte-level tokenizer 可能在边界处合并片段，两个独立 tokenize 的边界不一定相同。offset mapping 描述 token 覆盖的字符区间，通常更可靠；但它要求 fast tokenizer，特殊 token 的 offset 仍需实际检查。若 token 横跨 prompt 与 response 的分界，tokenizer 无法把它拆成半个 token；这里保守地把整个边界 token mask 掉，避免把 prompt 字符纳入目标，代价是可能少监督回答开头的一小段。截断后仍须检查至少有一个回答 token 留在监督区。
 
 聊天模板可以尝试使用 assistant mask：
 
-> 代码状态：静态审阅，未独立运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；语法检查通过，片段依赖章节上下文）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 encoded = tokenizer.apply_chat_template(
@@ -590,9 +602,9 @@ labels = [
     for token_id, flag in zip(input_ids, assistant_mask)
 ]
 ```
-这个接口依赖 Transformers 版本和模板中的 generation 标记。运行时应打印 encoded.keys()，确认返回的 mask 真的覆盖回答；不支持 mask 时，应经过验证后使用 offset mapping 或框架提供的 completion-only 方案，不能无声地把整条序列都当成回答。
+这个接口依赖 Transformers 版本和模板中的 `{% generation %}` 标记。Transformers v5.17.0 文档规定，只有支持该标记的 chat template 才能返回 assistant mask；运行时应打印 `encoded.keys()`，确认返回的 mask 真的覆盖回答。不支持 mask 时，应经过验证后使用 offset mapping 或框架提供的 completion-only 方案，不能无声地把整条序列都当成回答。参见 [Transformers v5.17.0 tokenizer 文档](https://huggingface.co/docs/transformers/v5.17.0/main_classes/tokenizer)。
 
-使用 TRL `SFTTrainer` 时，参数名还会随数据格式选择不同监督范围。当前文档把 `completion_only_loss` 用于 prompt-completion 数据，把 `assistant_only_loss` 用于 conversational 数据；后者依赖 chat template 暴露 assistant generation 区间。二者不是“开哪个都一样”：prompt-completion 的 completion 边界与多轮对话中的 assistant 消息边界并不相同。若数据已预先构造 `labels=-100`，应确认训练器是否直接采用该 labels，避免又应用一套不匹配的 mask。参见 [TRL SFTTrainer 文档](https://huggingface.co/docs/trl/main/sft_trainer) 与 [Transformers chat template 的 assistant mask 说明](https://huggingface.co/docs/transformers/main_classes/tokenizer)。
+使用 TRL `SFTTrainer` 时，参数名还会随数据格式选择不同监督范围。TRL v1.14.1 把 `completion_only_loss` 用于 prompt-completion 数据，把 `assistant_only_loss` 用于 conversational 数据；后者依赖 chat template 暴露 assistant generation 区间。二者不是“开哪个都一样”：prompt-completion 的 completion 边界与多轮对话中的 assistant 消息边界并不相同。若数据已预先构造 `labels=-100`，该版本会直接采用这些 labels；仍要核对 mask 是否与预期监督范围一致。参见 [TRL v1.14.1 SFTTrainer 文档](https://huggingface.co/docs/trl/v1.14.1/sft_trainer)。
 
 ### 4.2.5 截断与有效监督 token
 
@@ -615,7 +627,7 @@ n_{\mathrm{sup}}
 
 样本至少要满足 \(n_{\mathrm{sup}}>0\)。如果任务要求完整 JSON、代码或回答，还要检查 EOS 是否存在、结构是否被截断。
 
-> 代码状态：静态审阅，未独立运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；语法检查通过，片段依赖章节上下文）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 def has_supervision(feature):
@@ -643,7 +655,9 @@ Y：labels，padding 使用 -100。
 
 最小 collator：
 
-> 代码状态：已验证（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；对应 toy 实验或 CPU collator 契约检查）
+本实现固定使用右侧 padding，符合下面 `pad_sequence` 的输出方式。上一节生成示例中的左侧 padding 服务于 decoder-only 批量生成，两种场景的 padding 契约不能混用。
+
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import torch
@@ -655,6 +669,8 @@ class SFTDataCollator:
         self.label_pad_token_id = label_pad_token_id
         if tokenizer.pad_token_id is None:
             raise ValueError("SFT padding requires tokenizer.pad_token_id")
+        if tokenizer.padding_side != "right":
+            raise ValueError("this collator requires right-side padding")
         if label_pad_token_id != -100:
             raise ValueError("this chapter uses -100 as the loss ignore index")
 
@@ -673,8 +689,14 @@ class SFTDataCollator:
                 raise ValueError(
                     f"feature {index} has empty or misaligned sequence fields"
                 )
-            if any(value < 0 for value in item["input_ids"]):
-                raise ValueError(f"feature {index} contains a negative token id")
+            vocab_size = len(self.tokenizer)
+            if any(
+                value < 0 or value >= vocab_size
+                for value in item["input_ids"]
+            ):
+                raise ValueError(
+                    f"feature {index} contains an input id outside the tokenizer vocabulary"
+                )
             if any(value not in {0, 1} for value in item["attention_mask"]):
                 raise ValueError(f"feature {index} has a non-binary attention mask")
             if any(
@@ -682,6 +704,14 @@ class SFTDataCollator:
                 for value in item["labels"]
             ):
                 raise ValueError(f"feature {index} has an invalid label value")
+            if any(
+                value >= vocab_size
+                for value in item["labels"]
+                if value != self.label_pad_token_id
+            ):
+                raise ValueError(
+                    f"feature {index} contains a target id outside the tokenizer vocabulary"
+                )
             if not any(value != self.label_pad_token_id for value in item["labels"]):
                 raise ValueError(
                     f"feature {index} has no supervised token after truncation"
@@ -727,7 +757,7 @@ class SFTDataCollator:
 ```
 训练前做断言：
 
-> 代码状态：已验证（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；对应 toy 实验或 CPU collator 契约检查）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 assert batch["input_ids"].shape == batch["attention_mask"].shape
@@ -743,7 +773,7 @@ for mask_row, label_row in zip(
         if mask_value == 0:
             assert label_value == -100
 ```
-这种检查能在梯度计算前发现字段错位，比训练数小时后猜测 loss 异常原因更可靠。
+这种检查能在梯度计算前发现字段错位，比训练数小时后猜测 loss 异常原因更可靠。实际训练还要确认模型输入 embedding 行数覆盖 tokenizer 的全部 token id；collator 只知道 tokenizer 词表，不能替代模型侧检查。
 
 ### 4.2.7 数据质量、去重与分组划分
 
@@ -760,7 +790,7 @@ SFT 清洗至少应覆盖：
 
 把同一文档切成相邻片段后随机拆分，会让验证集与训练集高度相似。更可靠的方式是按文档、来源、用户或任务族分组。每条记录应保存元数据：
 
-> 代码状态：静态审阅，未独立运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；语法检查通过，片段依赖章节上下文）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 record = {
@@ -778,7 +808,7 @@ record = {
 
 下面的程序模拟模板、mask、截断、去重和 padding：
 
-> 代码状态：已验证（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；对应 toy 实验或 CPU collator 契约检查）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import re
@@ -1003,7 +1033,7 @@ collator → forward → masked loss → backward
 
 小模型配置：
 
-> 代码状态：静态审阅，未运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；缺少外部训练/API 依赖、模型权重或 CUDA）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import torch
@@ -1029,7 +1059,7 @@ training_args = TrainingArguments(
 ```
 旧版 Transformers 可能使用 evaluation_strategy，新版 Trainer 也可能用 processing_class 保存 tokenizer，而旧版使用 tokenizer 参数。版本差异应通过本地签名确认。
 
-> 代码状态：静态审阅，未运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；缺少外部训练/API 依赖、模型权重或 CUDA）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 from transformers import Trainer
@@ -1073,7 +1103,7 @@ N_{\mathrm{token,step}}
 
 gradient checkpointing 用重新计算换激活显存：
 
-> 代码状态：静态审阅，未独立运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；语法检查通过，片段依赖章节上下文）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 model.config.use_cache = False
@@ -1090,7 +1120,7 @@ KV cache 为逐 token 推理优化，通常不应与训练 checkpointing 同时�
 
 只加载权重可以继续推理，却不一定能恢复原优化轨迹：
 
-> 代码状态：静态审阅，未独立运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；语法检查通过，片段依赖章节上下文）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 trainer.train(
@@ -1103,7 +1133,7 @@ trainer.train(
 
 这个循环同样依赖已经构造好的 `model`、`train_dataset` 和 `data_collator`。它展示训练状态如何流动；真实任务还要先确认数据集非空，并为保存、恢复和评估定义明确的目录与策略。
 
-> 代码状态：静态审阅，未独立运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；语法检查通过，片段依赖章节上下文）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import torch
@@ -1138,13 +1168,13 @@ for epoch in range(3):
         if step % 10 == 0:
             print("epoch=", epoch, "step=", step, "loss=", loss.item())
 ```
-生产训练还要加入梯度裁剪、混合精度、异常 loss 检查、评估和 checkpoint 保存。理解这段底层循环，可以在 Trainer 的默认行为不符合预期时逐层定位。
+这段示例已经做梯度裁剪和非有限 loss 检查。更完整的训练流程还需按实验目标配置混合精度、学习率 scheduler、周期性评估、checkpoint 保存与恢复，并确认梯度累积时 loss 和有效 token 分母的约定。理解底层状态流，可以在 Trainer 的默认行为不符合预期时逐层定位。
 
 ### 4.3.6 纯 Python 的 masked loss 更新实验
 
 下面用 bigram logits 代替 Transformer，只验证目标 token 的梯度和全参数更新：
 
-> 代码状态：已验证（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；对应 toy 实验或 CPU collator 契约检查）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import math
@@ -1303,6 +1333,8 @@ W_0x
 \frac{\alpha}{r}BAx
 ```
 
+LoRA 的参数化来自原始论文；论文报告的效果与效率结论绑定其中的模型、任务和实验配置，不能直接推广成任意任务的保证。参见 [LoRA 原论文](https://arxiv.org/abs/2106.09685)。
+
 其中 \(d_{\mathrm{in}}>0\)、\(d_{\mathrm{out}}>0\)、\(r\) 是正整数；当 \(r\ll\min(d_{\mathrm{in}},d_{\mathrm{out}})\) 时，才把它称为低秩增量。缩放因子 \(\alpha\) 可以为零，但这会让 adapter 在该层没有有效增量，通常不是有意义的训练配置。这里的矩阵维度为：
 
 ```math
@@ -1327,6 +1359,8 @@ LoRA 的低秩假设不是“所有任务变化都天然低秩”，而是一个
 
 ### 4.4.2 初始化与超参数
 
+PEFT v0.18.0 的默认初始化将 B 置零，因此尚未训练的 LoRA 分支是 no-op；其他初始化方式可能改变这一性质。常规 LoRA 缩放为 \(\alpha/r\)，启用 Rank-Stabilized LoRA 后改为 \(\alpha/\sqrt{r}\)。这些行为由配置和库版本决定，不能只凭“LoRA”名称推定。参见 [PEFT v0.18.0 LoRA 配置文档](https://huggingface.co/docs/peft/v0.18.0/package_reference/lora)。
+
 常见初始化让增量分支在训练开始时接近零，使新模型行为接近基座模型：
 
 ```text
@@ -1348,7 +1382,7 @@ bias：是否训练偏置。
 
 target_modules 不能靠模型名称猜。先打印模块名：
 
-> 代码状态：静态审阅，未独立运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；语法检查通过，片段依赖章节上下文）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 for name, module in model.named_modules():
@@ -1358,13 +1392,13 @@ for name, module in model.named_modules():
     ]):
         print(name, type(module).__name__)
 ```
-Llama、Qwen、Mistral 类模型通常有 q_proj、k_proj、v_proj、o_proj，MLP 中还可能有 gate_proj、up_proj、down_proj。GPT-2 常见 c_attn 和 c_proj，其中 Conv1D 的权重布局与普通 Linear 不同，fan_in_fan_out 配置可能需要打开。
+Llama、Qwen、Mistral 类模型通常有 q_proj、k_proj、v_proj、o_proj，MLP 中还可能有 gate_proj、up_proj、down_proj。GPT-2 常见 `c_attn` 和 `c_proj`，其中 Conv1D 的权重布局为 `(fan_in, fan_out)`，PEFT 的 `fan_in_fan_out=True` 用于适配此布局；普通 `Linear` 通常不需要该选项。参见 [PEFT v0.18.0 LoRA 配置文档](https://huggingface.co/docs/peft/v0.18.0/package_reference/lora)。
 
 ### 4.4.3 用 PEFT 注入 adapter
 
 GPT-2 类结构的示例：
 
-> 代码状态：静态审阅，未运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；缺少外部训练/API 依赖、模型权重或 CUDA）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 from peft import LoraConfig, TaskType, get_peft_model
@@ -1385,7 +1419,7 @@ model.print_trainable_parameters()
 ```
 Llama、Qwen 或 Mistral 类结构可以从更保守的 attention 配置开始：
 
-> 代码状态：静态审阅，未独立运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；语法检查通过，片段依赖章节上下文）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 lora_config = LoraConfig(
@@ -1401,7 +1435,7 @@ lora_config = LoraConfig(
 
 注入后必须检查参数集合：
 
-> 代码状态：静态审阅，未独立运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；语法检查通过，片段依赖章节上下文）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 total_params = 0
@@ -1435,7 +1469,7 @@ LoRA 只改变 \(\Theta_{\mathrm{train}}\)，不改变 input_ids、attention_mas
 
 可以复用 4.2 的 collator 和预处理，只替换模型包装和训练参数：
 
-> 代码状态：静态审阅，未运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；缺少外部训练/API 依赖、模型权重或 CUDA）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 from transformers import Trainer, TrainingArguments
@@ -1470,7 +1504,7 @@ LoRA 常使用比全参数 SFT 更大的学习率作为起点，但这只是搜�
 
 adapter 文件通常只保存低秩参数和配置，不包含完整基座：
 
-> 代码状态：静态审阅，未独立运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；语法检查通过，片段依赖章节上下文）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 adapter_dir = "outputs/lora_tiny/adapter"
@@ -1479,7 +1513,7 @@ tokenizer.save_pretrained(adapter_dir)
 ```
 推理时先加载训练时相同的 base model，再加载 adapter：
 
-> 代码状态：静态审阅，未运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；缺少外部训练/API 依赖、模型权重或 CUDA）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import torch
@@ -1488,10 +1522,14 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 base_name = "sshleifer/tiny-gpt2"
+base_revision = "5f91d94bd9cd7190a9f3216ff93cd1dd95f2c7be"
 adapter_dir = "outputs/lora_tiny/adapter"
 
 tokenizer = AutoTokenizer.from_pretrained(adapter_dir)
-base_model = AutoModelForCausalLM.from_pretrained(base_name)
+base_model = AutoModelForCausalLM.from_pretrained(
+    base_name,
+    revision=base_revision,
+)
 model = PeftModel.from_pretrained(base_model, adapter_dir)
 model.eval()
 
@@ -1508,7 +1546,7 @@ print(tokenizer.decode(output_ids[0], skip_special_tokens=True))
 ```
 如果部署链路不需要动态切换 adapter，可以合并权重：
 
-> 代码状态：静态审阅，未独立运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；语法检查通过，片段依赖章节上下文）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 merged_model = model.merge_and_unload()
@@ -1545,7 +1583,7 @@ N_{\mathrm{LoRA}}
 
 下面冻结 W，只更新 A、B，用均方误差验证低秩分支能够降低目标误差：
 
-> 代码状态：已验证（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；对应 toy 实验或 CPU collator 契约检查）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import random
@@ -1672,21 +1710,21 @@ merge 后未做输出回归。
 
 因此训练报告应同时保存 base revision、adapter 配置、可训练参数量、有效训练 token 数和评估结果。
 
+低秩适配的后续研究也探索限制优化器状态。ICLR 2026 的 LoFT 摘要描述了将 Adam 一阶、二阶矩投影到低秩子空间，并报告其配置下缩小了低秩适配器与全参数微调的效果差距；这些结果绑定论文的模型、任务和训练预算，不能据此推断常规 LoRA 在一般任务上都会落后。参见 [LoFT 官方论文摘要](https://proceedings.iclr.cc/paper_files/paper/2026/hash/7428310c0f97f1c6bb2ef1be99c1ec2a-Abstract-Conference.html)。
+
 用 \(d_{\mathrm{in}}=d_{\mathrm{out}}=4096\)、rank \(r=8\) 手算一次：原线性矩阵有 \(4096^2=16{,}777{,}216\) 个权重；LoRA 的 A、B 两个矩阵合计 \(4096\cdot8+8\cdot4096=65{,}536\)，约少 256 倍可训练权重。若 \(\alpha=16\)，常见缩放 \(\alpha/r=2\)，低秩分支会按配置缩放后加到冻结基座输出。这个参数量比例适用于单个 4096×4096 矩阵，不代表整模型训练显存缩小 256 倍：前向仍需基座矩阵，激活仍沿完整网络传播，而且目标模块可能远多于一个。
 
 低秩假设是工程上的适配方式，不是“所有任务更新矩阵天然低秩”的定理。rank 增加会扩大增量空间，也增加 adapter 参数、梯度和优化器状态；alpha 与 rank 共同影响更新幅度。比较 rank=4 与 rank=16 时，要固定目标模块、数据、训练 token 数和学习率搜索范围，并看关键切片是否改善。若 rank 增大只提升训练样本而验证行为不变，可能是过拟合或目标数据不足，而不是继续加大 rank 就能解决。
 
 target_modules 也决定 LoRA 实际更新什么。只注入 q_proj 与 v_proj，和注入 q/k/v/o、MLP 上下投影不是同一实验；不同模型命名可能不同，模块选择要通过 named_modules 与可训练参数列表核对。训练前统计 trainable parameters、冻结参数和注入模块名称；训练后保存 base revision、adapter config、tokenizer 与模板。只有这些一起固定，adapter 才能被另一环境正确加载和解释。
 
-一个 2×2 的低秩例子可以直观看到 rank 的限制。若 \(A\in\mathbb{R}^{2\times1}\)、\(B\in\mathbb{R}^{1\times2}\)，乘积 \(BA\)（按实现方向选择对应写法）最多 rank 1，无法表示任意满秩的 2×2 更新；rank=2 才具备表示一般 2×2 矩阵的容量。真实隐藏维通常是几千，rank=8 是强约束而非完整更新。参数节省来自限制可学习增量空间，代价是任务需要的方向可能无法表示。
+按前面定义，若 \(d_{\mathrm{in}}=d_{\mathrm{out}}=2\) 且 rank 为 1，则 \(A\in\mathbb{R}^{1\times2}\)、\(B\in\mathbb{R}^{2\times1}\)，所以 \(BA\in\mathbb{R}^{2\times2}\)，且 \(\operatorname{rank}(BA)\leq1\)。它无法表示满秩的 2×2 更新。rank=2 时，A 和 B 都是 2×2，乘积可以表示任意 2×2 矩阵；但因子共需 8 个参数，而直接学习该矩阵只需 4 个，因此这个小例子没有参数节省。真实层宽通常是几千，rank=8 才体现低秩约束带来的参数节省；代价是任务需要的更新方向可能无法表示。
 
-常见 LoRA 初始化让一支随机、另一支接近零，使训练开始时低秩增量接近零，模型行为从 base 起步；具体初始化和缩放实现可随 PEFT 版本变化。训练前可以比较同一输入下 base 与刚注入 adapter 的 logits，确认初始差异符合该配置的预期；如果一开始就大幅偏离，检查目标层、初始化、dropout 和权重加载。训练后再比较每个模块的 adapter 范数及样本输出，避免只看全局可训练参数占比。
+在使用默认初始化时，初始增量为零或接近零，因此可比较同一输入下 base 与刚注入 adapter 的 logits，确认初始差异符合所选配置的预期；如果一开始就大幅偏离，检查目标层、初始化、dropout 和权重加载。训练后再比较每个模块的 adapter 范数及样本输出，避免只看全局可训练参数占比。
 
 LoRA dropout 是训练时施加在适配分支输入上的正则项，不是推理时的采样温度；eval 模式下应按模块实现关闭随机丢弃。若 adapter 注入时基座输出改变，先检查初始化和 scaling；若训练后 adapter 权重非零但输出没有变化，检查目标层是否在 forward 路径、是否加载了正确 adapter，以及合并时是否把增量重复加了两次。
 
 合并 LoRA 时，数学上将低秩增量加回原权重，能减少推理时额外分支，但会失去动态切换 adapter 的能力。若基座是量化权重，merge 可能需要反量化再写回，造成额外误差或不被当前库支持。保存独立 adapter 能保留可组合性，合并 checkpoint 则更方便普通 serving；应对两种产物使用同一固定 prompt 回归并记录格式。
-
-LoRA 的起始增量通常接近零，因此“刚注入 adapter 后输出应与 base 接近”可以作为数值 sanity check；若配置启用了 dropout 或不同权重初始化，允许的差异要按实现说明。训练时再观察 adapter 范数和目标层梯度，能区分分支未参与计算与任务本身难学。
 
 ## 4.5 QLoRA：量化基座上的低秩训练
 
@@ -1714,11 +1752,11 @@ QLoRA 的显存收益来自：
 
 ### 4.5.2 NF4、double quant 与 compute dtype
 
-QLoRA 论文提出的 NF4 适合近似正态分布的权重。它是权重表示方式，不是“模型理解能力的量化单位”。double quantization 则进一步压缩量化所需的 scale 等元数据。QLoRA 还讨论了 paged optimizer，用来缓解训练过程中显存峰值。
+QLoRA 论文提出的 NF4 适合近似正态分布的权重。它是权重表示方式，不是“模型理解能力的量化单位”。double quantization 则进一步压缩量化所需的 scale 等元数据。QLoRA 还讨论了 paged optimizer，用来缓解训练过程中显存峰值。参见 [QLoRA 原论文](https://arxiv.org/abs/2305.14314) 和 [Transformers v5.17.0 bitsandbytes 文档](https://huggingface.co/docs/transformers/v5.17.0/quantization/bitsandbytes)。
 
 常见配置：
 
-> 代码状态：静态审阅，未运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；缺少外部训练/API 依赖、模型权重或 CUDA）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import torch
@@ -1742,33 +1780,33 @@ compute dtype 决定许多计算阶段使用 fp16 或 bf16，不是量化存储�
 
 ### 4.5.3 加载量化基座并准备训练
 
-> 代码状态：静态审阅，未运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；缺少外部训练/API 依赖、模型权重或 CUDA）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 
 model_name = "Qwen/Qwen2.5-0.5B"
+model_revision = "b937cc073b55e980e6f21d5f8b7a77818efcf0eb"
 tokenizer = AutoTokenizer.from_pretrained(
     model_name,
-    trust_remote_code=True,
+    revision=model_revision,
 )
 if tokenizer.pad_token is None:
     tokenizer.pad_token = tokenizer.eos_token
 
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
+    revision=model_revision,
     quantization_config=bnb_config,
-    device_map="auto",
-    trust_remote_code=True,
 )
 model.config.pad_token_id = tokenizer.pad_token_id
 ```
-trust_remote_code 会允许执行仓库中的自定义 Python 模型实现。只有在来源可信、revision 固定并且代码经过审查时才应打开；生产环境可以使用已经审核的本地副本。
+该示例固定到 Qwen2.5-0.5B 的公开快照；对应模型卡使用 Transformers `AutoTokenizer` 和 `AutoModelForCausalLM` 加载，没有打开 `trust_remote_code`。这是单 GPU 训练示例，因此省略 `device_map`，让训练框架管理设备放置。Transformers v5.17.0 的 bitsandbytes 指南明确指出 `device_map="auto"` 只应用于推理；多卡训练应改用所选训练框架支持的并行配置。参见 [Qwen2.5-0.5B 模型卡](https://huggingface.co/Qwen/Qwen2.5-0.5B/tree/b937cc073b55e980e6f21d5f8b7a77818efcf0eb) 和 [bitsandbytes 微调说明](https://huggingface.co/docs/transformers/v5.17.0/quantization/bitsandbytes#finetuning)。
 
 PEFT 提供量化训练准备函数：
 
-> 代码状态：静态审阅，未运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；缺少外部训练/API 依赖、模型权重或 CUDA）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 from peft import prepare_model_for_kbit_training
@@ -1779,7 +1817,7 @@ model.config.use_cache = False
 ```
 它会处理适合 k-bit 训练的若干精度和梯度设置。随后注入 LoRA：
 
-> 代码状态：静态审阅，未运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；缺少外部训练/API 依赖、模型权重或 CUDA）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 from peft import LoraConfig, TaskType, get_peft_model
@@ -1813,7 +1851,7 @@ labels：prompt/padding 为 -100，assistant 为真实 token id。
 
 训练参数示例：
 
-> 代码状态：静态审阅，未运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；缺少外部训练/API 依赖、模型权重或 CUDA）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 from transformers import TrainingArguments
@@ -1839,7 +1877,7 @@ training_args = TrainingArguments(
 ```
 然后复用 Trainer：
 
-> 代码状态：静态审阅，未运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；缺少外部训练/API 依赖、模型权重或 CUDA）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 from transformers import Trainer
@@ -1858,7 +1896,7 @@ model.save_pretrained("outputs/qlora_model/adapter")
 tokenizer.save_pretrained("outputs/qlora_model/adapter")
 ```
 
-device_map="auto" 更适合单进程自动放置；多卡分布式训练时要遵循训练框架的并行策略，不要把自动切分和数据并行的设备管理混在一起。
+上面的 QLoRA 训练示例不设置 `device_map`，由单 GPU 训练进程负责设备放置。若模型需要多卡训练，应使用训练框架明确支持的并行策略；`device_map="auto"` 留给推理加载，不能当作 DDP 或 ZeRO 的训练分片配置。
 ### 4.5.5 显存的量级理解
 
 只看冻结基座权重时，理想化估算为：
@@ -1883,7 +1921,7 @@ QLoRA 降低的是冻结基座的存储和训练状态，不会消除长序列�
 
 推理时可以继续以 4bit 加载 base，再挂载 adapter：
 
-> 代码状态：静态审阅，未运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；缺少外部训练/API 依赖、模型权重或 CUDA）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 from peft import PeftModel
@@ -1891,9 +1929,9 @@ from peft import PeftModel
 
 base_model = AutoModelForCausalLM.from_pretrained(
     model_name,
+    revision=model_revision,
     quantization_config=bnb_config,
     device_map="auto",
-    trust_remote_code=True,
 )
 model = PeftModel.from_pretrained(
     base_model,
@@ -1907,7 +1945,7 @@ model.eval()
 
 下面用均匀量化模拟冻结基座和 LoRA。它不是 NF4 实现，只用于展示量化误差与可训练分支的关系：
 
-> 代码状态：已验证（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；对应 toy 实验或 CPU collator 契约检查）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import random
@@ -2152,7 +2190,7 @@ base 与 SFT 应尽量使用相同 tokenizer 和模板。LoRA/QLoRA 的 SFT 模�
 
 样本元数据可以这样记录：
 
-> 代码状态：静态审阅，未独立运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；语法检查通过，片段依赖章节上下文）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 eval_item = {
@@ -2177,7 +2215,7 @@ N=\sum_{c\in\mathcal{C}}N_c
 
 评估时必须只比较新生成的 token：
 
-> 代码状态：静态审阅，未独立运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；语法检查通过，片段依赖章节上下文）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import torch
@@ -2209,7 +2247,7 @@ def generate_new_text(model, tokenizer, prompt, max_new_tokens=128):
 
 对于明确格式，可以使用解析器：
 
-> 代码状态：静态审阅，未独立运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；语法检查通过，片段依赖章节上下文）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import json
@@ -2240,7 +2278,7 @@ A_{\mathrm{fmt}}
 
 关键词或检查点命中率只能作为粗粒度辅助：
 
-> 代码状态：静态审阅，未独立运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；语法检查通过，片段依赖章节上下文）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 def keyword_score(output, expected_points):
@@ -2352,13 +2390,13 @@ JSON 是否能解析。
 
 ### 4.6.8 自动化 base/SFT 对比脚本
 
-下面的骨架使用 Alpaca 风格模板，实际聊天模型应把 build_prompt 换成目标 tokenizer 的 chat template：
+下面的骨架使用 Alpaca 风格模板，实际聊天模型应把 `build_prompt` 换成目标 tokenizer 的 chat template：
 
 它假设 `sft_dir` 是已经保存好的全参数 SFT 目录；如果实际产物是 LoRA/QLoRA adapter，应先用训练时相同的 base model 挂载 adapter，不能把 adapter 目录当成完整 CausalLM 加载。
 
-示例中的 `sshleifer/tiny-gpt2` 只适合验证加载、生成和结果落盘的接口流程；它不能支持任何任务质量或微调收益结论。真实评估应替换成固定 revision 的目标 base/SFT 模型，并使用独立、分桶且经过审查的评估集。
+示例中的 `sshleifer/tiny-gpt2` 固定到 `5f91d94bd9cd7190a9f3216ff93cd1dd95f2c7be`，只适合验证加载、生成和结果落盘的接口流程；它不能支持任何任务质量或微调收益结论。真实评估应替换成固定 revision 的目标 base/SFT 模型，并使用独立、分桶且经过审查的评估集。`sft_dir` 是本地训练产物，其训练 base revision、tokenizer 和文件 hash 应随评估报告保存。
 
-> 代码状态：静态审阅，未运行（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；缺少外部训练/API 依赖、模型权重或 CUDA）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import json
@@ -2416,10 +2454,17 @@ def keyword_score(output, points):
 def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     base_name = "sshleifer/tiny-gpt2"
+    base_revision = "5f91d94bd9cd7190a9f3216ff93cd1dd95f2c7be"
     sft_dir = "outputs/full_sft_tiny/final"
 
-    base_tokenizer = AutoTokenizer.from_pretrained(base_name)
-    base_model = AutoModelForCausalLM.from_pretrained(base_name).to(device)
+    base_tokenizer = AutoTokenizer.from_pretrained(
+        base_name,
+        revision=base_revision,
+    )
+    base_model = AutoModelForCausalLM.from_pretrained(
+        base_name,
+        revision=base_revision,
+    ).to(device)
     sft_tokenizer = AutoTokenizer.from_pretrained(sft_dir)
     sft_model = AutoModelForCausalLM.from_pretrained(sft_dir).to(device)
 
@@ -2490,7 +2535,7 @@ if __name__ == "__main__":
 
 下面的程序模拟已经生成的 base/SFT 输出，展示格式通过率、检查点、胜出样本和回归样本：
 
-> 代码状态：已验证（2026-10-20；Python 3.12.9，PyTorch 2.12.0+cpu（仅记录过的 toy/collator 实验）；对应 toy 实验或 CPU collator 契约检查）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import json
@@ -2648,15 +2693,19 @@ base/SFT 原始输出与指标。
 
 本章关于接口行为的依据优先采用官方文档，关于 LoRA 和 QLoRA 机制的依据采用原始论文。文档参数会随版本变化，复现实验时仍需记录本地版本和模型 revision。
 
-- Transformers 模型加载与保存：<https://huggingface.co/docs/transformers/main/en/main_classes/model>
-- Transformers 文本生成：<https://huggingface.co/docs/transformers/main/en/main_classes/text_generation>
-- Transformers 聊天模板：<https://huggingface.co/docs/transformers/main/en/chat_templating>
-- Transformers Trainer：<https://huggingface.co/docs/transformers/main/en/main_classes/trainer>
-- PEFT LoRA API：<https://huggingface.co/docs/peft/main/en/package_reference/lora>
-- bitsandbytes 量化：<https://huggingface.co/docs/transformers/main/en/quantization/bitsandbytes>
-- TRL SFTTrainer：<https://huggingface.co/docs/trl/main/en/sft_trainer>
-- PyTorch CrossEntropyLoss：<https://docs.pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html>
+- Transformers v5.17.0 模型加载与保存：<https://huggingface.co/docs/transformers/v5.17.0/main_classes/model>
+- Transformers v5.17.0 文本生成：<https://huggingface.co/docs/transformers/v5.17.0/main_classes/text_generation>
+- Transformers v5.17.0 tokenizer 与 chat template：<https://huggingface.co/docs/transformers/v5.17.0/main_classes/tokenizer>
+- Transformers v5.17.0 Trainer：<https://huggingface.co/docs/transformers/v5.17.0/main_classes/trainer>
+- PEFT v0.18.0 LoRA API：<https://huggingface.co/docs/peft/v0.18.0/package_reference/lora>
+- PEFT v0.18.0 量化训练准备：<https://huggingface.co/docs/peft/v0.18.0/developer_guides/quantization>
+- Transformers v5.17.0 bitsandbytes 量化：<https://huggingface.co/docs/transformers/v5.17.0/quantization/bitsandbytes>
+- TRL v1.14.1 SFTTrainer：<https://huggingface.co/docs/trl/v1.14.1/sft_trainer>
+- PyTorch v2.14.0 CrossEntropyLoss：<https://docs.pytorch.org/docs/2.14/generated/torch.nn.CrossEntropyLoss.html>
+- tiny-gpt2 固定 revision 文件树：<https://huggingface.co/sshleifer/tiny-gpt2/tree/5f91d94bd9cd7190a9f3216ff93cd1dd95f2c7be>
+- Qwen2.5-0.5B 固定 revision 文件树：<https://huggingface.co/Qwen/Qwen2.5-0.5B/tree/b937cc073b55e980e6f21d5f8b7a77818efcf0eb>
 - LoRA 原论文：<https://arxiv.org/abs/2106.09685>
 - QLoRA 原论文：<https://arxiv.org/abs/2305.14314>
+- LoFT 官方论文摘要：<https://proceedings.iclr.cc/paper_files/paper/2026/hash/7428310c0f97f1c6bb2ef1be99c1ec2a-Abstract-Conference.html>
 
 官方文档适合确认 API、参数和版本说明；论文适合确认低秩适配、NF4、double quantization 和量化基座训练的原始定义；博客、二手教程和模型卡可以补充实践经验，但不应在没有核对原始来源时被当作普遍规律。

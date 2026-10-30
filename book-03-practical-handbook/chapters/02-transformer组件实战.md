@@ -2,20 +2,20 @@
 
 Transformer 的实现并不是把几个类名拼在一起。一个输入 token 经过 embedding、位置处理、注意力、归一化和前馈网络，期间会反复改变张量的维度组织；任何一个维度的误读，都可能让程序继续运行，却让模型学习到另一种函数。
 
-本章把这些组件放在同一条数据路径中讲解。先从离散 token id 进入连续表示开始，再逐步建立 scaled dot-product attention、multi-head attention、mask、Transformer block、RoPE、RMSNorm 和 SwiGLU。每个主题都给出数学对象、PyTorch 中的 shape、可运行的最小实现和边界条件。代码采用教学构造，示例输出只说明形状或不变量，不代表任何真实模型的能力指标。
+本章把这些组件放在同一条数据路径中讲解。先从离散 token id 进入连续表示开始，再逐步建立 scaled dot-product attention、multi-head attention、mask、Transformer block、RoPE、RMSNorm 和 SwiGLU。各组件按主题说明数学对象、PyTorch 中的 shape 和适用边界；适合用代码核对的主题附可独立运行的最小实现。代码采用教学构造，示例输出只说明形状或不变量，不代表任何真实模型的能力指标。
 
 资料分成三类。Transformer 和 RoPE 的公式来自论文；张量操作和模块行为以 PyTorch 官方文档为准；模块组合、断言和诊断实验是教学实现。论文中的结构描述、框架的接口语义和某个目标系统的实测性能不能互相替代。
 
-整章先用一条 shape 路径作地图。每个 token id 经 embedding 变成 (D) 维向量，位置机制作用于表示或 Q/K，注意力在序列维交换信息，前馈层逐 token 变换通道，残差连接让各子层返回同一个 ([B,T,D]) 接口。图中的“现代 block”是本章逐步拼出的教学结构，不代表所有模型使用完全相同的组件顺序。
+整章先用一条代表性的 Pre-RMSNorm decoder block 形状路径作地图。token id 经 embedding 变成 [B,T,D]；若使用加性位置表示，在这里加入；若使用 RoPE，则在 Q/K 投影后旋转。注意力在序列维交换信息，前馈层逐 token 变换通道，两个残差相加都回到同一个 [B,T,D] 接口。图中选择 RMSNorm、RoPE、SwiGLU 组合，不代表所有模型共享相同的位置机制或组件顺序。
 
 ```mermaid
 flowchart LR
-    A["token ids [B,T]"] --> B["Embedding + 位置"]
-    B --> C["Q、K、V 投影"]
-    C --> D["Mask + 多头 Attention"]
-    D --> E["残差与归一化"]
-    E --> F["FFN：RMSNorm + SwiGLU"]
-    F --> G["残差与归一化"]
+    A["token ids [B,T]"] --> B["Token embedding + 可选加性位置"]
+    B --> C["RMSNorm + Q、K、V 投影"]
+    C --> D["可选 RoPE（作用于 Q/K）+ Mask + 多头 Attention"]
+    D --> E["残差相加"]
+    E --> F["RMSNorm + FFN（SwiGLU）"]
+    F --> G["残差相加"]
     G --> H["hidden states [B,T,D]"]
 ```
 
@@ -75,7 +75,7 @@ u_2E=E_{2,:}
 
 下面用一个小矩阵验证两种写法的结果一致：
 
-> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import torch
@@ -125,7 +125,7 @@ N_{\mathrm{token}}=100000\times4096=409{,}600{,}000
 
 下面观察哪些行收到梯度：
 
-> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import torch
@@ -155,7 +155,7 @@ print("unused_row_0_norm=", round(row_norms[0].item(), 6))
 
 如果 0 是 padding token，可以写：
 
-> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 from torch import nn
@@ -168,7 +168,7 @@ token_embedding = nn.Embedding(
     padding_idx=0,
 )
 ```
-padding_idx 作用在 embedding 参数这一层：该行在常规反向传播中不累积梯度，并通常被初始化为零。它不负责修改 attention 的可见性，也不负责改变 labels。三个机制的职责如下：
+padding_idx 作用在 embedding 参数这一层：该行在常规反向传播中不累积梯度；新建的 PyTorch embedding 通常将该行初始化为零。它不负责修改 attention 的可见性，也不负责改变 labels；具体接口行为见 [PyTorch 2.12 Embedding 文档](https://docs.pytorch.org/docs/2.12/generated/torch.nn.Embedding.html)。三个机制的职责如下：
 
 | 机制 | 解决的问题 | 作用位置 |
 | --- | --- | --- |
@@ -205,7 +205,7 @@ P\in\mathbb{R}^{T_{\max}\times D}
 
 ### 2.1.6 Learned positional embedding 的实现
 
-> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import torch
@@ -270,7 +270,7 @@ position_table_shape= (16, 8)
 
 ### 2.1.7 Sinusoidal encoding 是固定函数
 
-Transformer 原论文给出了一种不增加可训练位置参数的编码。对位置 \(p\)、维度索引 \(i\) 和模型维度 \(D\)：
+[Transformer 原论文](https://arxiv.org/abs/1706.03762)给出了一种不增加可训练位置参数的编码。对位置 \(p\)、维度索引 \(i\) 和模型维度 \(D\)：
 
 ```math
 PE_{p,2i}=\sin\left(\frac{p}{10000^{2i/D}}\right)
@@ -282,7 +282,7 @@ PE_{p,2i+1}=\cos\left(\frac{p}{10000^{2i/D}}\right)
 
 它可以在运行时计算更长的位置，但“可计算”不等于“模型在更长位置上保持同样质量”。频率范围、训练长度、数值精度和任务分布都会影响外推。
 
-> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import math
@@ -332,7 +332,7 @@ W_{\mathrm{out}}=E^\top
 
 这样输入 embedding 和输出分类空间使用同一组参数，减少一份 \(VD\) 参数，并施加一种表示空间约束。它不是 nn.Embedding 的默认行为；共享时必须让两个计算路径真正引用同一个 Parameter，而不是复制数值后各自注册。
 
-> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import torch
@@ -380,7 +380,7 @@ padding:    [0, 0, 12, 35, 98, 77]
 
 对输入模块，最有价值的检查不是只看程序是否返回一个 Tensor，而是检查以下不变量：
 
-> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import torch
@@ -501,13 +501,13 @@ O_{b,a,:}=\sum_{c=1}^{T_k}A_{b,a,c}V_{b,c,:}
 \mathrm{Var}\left(\frac{q^\top k}{\sqrt{d_k}}\right)\approx 1
 ```
 
-这不是所有训练状态下的精确统计定律，而是说明 softmax logits 随维度放大的原因。归一化层、初始化和相关性会改变真实分布，但缩放仍是标准 attention 定义的一部分。
+这不是所有训练状态下的精确统计定律，而是说明 softmax logits 随维度放大的原因。归一化层、初始化和相关性会改变真实分布，但缩放仍是 [Transformer 原论文](https://arxiv.org/abs/1706.03762)采用的标准 attention 定义。
 
 ### 2.2.3 手写 attention，并把 mask 语义写进函数
 
 下面的实现把布尔 mask 定义为 keep mask：True 表示允许 query 读取该 key，False 表示屏蔽。函数只处理 shape 可广播到 scores 的 mask；它不替调用者验证 query 是否至少有一个可见 key。
 
-> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import math
@@ -565,13 +565,13 @@ A_{b,a,c}\approx0\quad (M_{b,a,c}=0)
 
 ### 2.2.5 与 PyTorch SDPA 的边界
 
-PyTorch 提供 `torch.nn.functional.scaled_dot_product_attention`。它可能选择数学实现、memory-efficient、Flash 或其他支持的后端，具体 kernel 取决于设备、dtype、输入形状和版本。数学目标仍是缩放点积注意力，但中间张量是否显式物化不能从 API 名字推断。不同融合实现的浮点运算顺序可能不同，因此对照时应使用合理容差，不能要求每个元素逐位相等。
+PyTorch 提供 `torch.nn.functional.scaled_dot_product_attention`。它可能选择数学实现、memory-efficient、Flash 或其他支持的后端，具体 kernel 取决于设备、dtype、输入形状和版本；可用 [PyTorch 2.12 SDPA 文档](https://docs.pytorch.org/docs/2.12/generated/torch.nn.functional.scaled_dot_product_attention.html)核对该版本的接口与后端说明。数学目标仍是缩放点积注意力，但中间张量是否显式物化不能从 API 名字推断。不同融合实现的浮点运算顺序可能不同，因此对照时应使用合理容差，不能要求每个元素逐位相等。
 
 布尔 mask 的语义必须核对目标接口：SDPA 的布尔 `attn_mask` 中 True 表示参与 attention，False 表示屏蔽；这与 `MultiheadAttention.key_padding_mask` 的 True 表示屏蔽相反。float mask 则作为 additive bias 加到 attention score 上。若传入 `is_causal=True`，不能同时传 `attn_mask`；需要同时表达 causal 和 padding 约束时，应按目标接口支持的方式合成 mask。
 
 还有两个容易被模块封装遮住的细节。第一，SDPA 会严格按照传入的 `dropout_p` 应用 dropout，不会读取外层模块的 `training` 状态；模型进入 eval 时，调用方应显式传入 0.0。第二，想固定使用某个 fused backend 时要按当前 PyTorch 文档检查其输入限制；“函数调用成功”本身不证明实际走了预期 kernel。下面的数值对照使用 `dropout_p=0.0`，因此比较的是无 dropout 的 attention：
 
-> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import math
@@ -658,7 +658,7 @@ D=H d_h
 
 不同 head 可以在不同参数子空间中学习局部关系、长距离关系或其他统计模式。这是结构上的可能性，不代表每个 head 都能被人类稳定地赋予一个语义标签；是否出现可解释的 head，需要通过激活、消融和下游任务实验验证。
 
-标准实现通常用三个 \(D\to D\) 的线性层一次性产生 Q、K、V，再重新组织最后一维，而不是为每个 head 单独创建 Python 模块。只要 \(D\) 固定，改变 \(H\) 会改变每个 head 的维度和计算组织，但不会自动把四个投影矩阵的参数量乘以 \(H\)。
+标准实现通常用三个 \(D\to D\) 的线性层一次性产生 Q、K、V，再重新组织最后一维，而不是为每个 head 单独创建 Python 模块；这与 [Transformer 原论文](https://arxiv.org/abs/1706.03762)中的多头结构一致。只要 \(D\) 固定，改变 \(H\) 会改变每个 head 的维度和计算组织，但不会自动把四个投影矩阵的参数量乘以 \(H\)。
 
 ### 2.3.2 shape 账本
 
@@ -689,7 +689,7 @@ transpose 通常只改变 stride，不保证新视图在物理内存中连续。
 
 ### 2.3.3 一个可读的 MultiHeadAttention 实现
 
-> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import math
@@ -837,13 +837,13 @@ O(BTD^2)
 
 cross-attention 更能检验是否把形状想清楚。若两个 decoder query 读取五个 encoder token，则 scores 的末两维是 \([2,5]\)，整体可为 \([B,H,2,5]\)；每个 query 得到五个权重，再汇聚对应的五个 value。mask 的 key 维必须是 5，而不是 query 长度 2。任何强行把所有张量 reshape 成 \([B,H,T,T]\) 的实现，都只适用于 self-attention 的特例，遇到图像 patch、音频帧或 encoder-decoder 输入时会失败。
 
-多头结构提供多个可学习的投影空间，但没有硬性规定第 1 个 head 必须看语法、第 2 个必须看长距离依赖。若要判断某个 head 对模型是否有作用，可以固定输入做 head ablation、观察任务指标和输出变化，并控制随机性；只可视化某一层的注意力热图不能证明这个 head 是模型决策的唯一原因。分组查询注意力（GQA）会让多个 query head 共享较少的 key/value head，是参数和 KV cache 组织上的另一种架构；它改变 Q 与 KV 的 head 数契约，不能直接套用这里假设 Q/K/V head 数相同的实现。
+多头结构提供多个可学习的投影空间，但没有硬性规定第 1 个 head 必须看语法、第 2 个必须看长距离依赖。若要判断某个 head 对模型是否有作用，可以固定输入做 head ablation、观察任务指标和输出变化，并控制随机性；只可视化某一层的注意力热图不能证明这个 head 是模型决策的唯一原因。分组查询注意力（GQA）会让多个 query head 共享较少的 key/value head，是参数和 KV cache 组织上的另一种架构；它改变 Q 与 KV 的 head 数契约，不能直接套用这里假设 Q/K/V head 数相同的实现。本书第 6 章进一步用 cache shape 和容量例子说明 GQA/MQA 的影响，见[推理优化实战](06-推理优化实战.md)。
 
 ### 2.3.6 针对实现的局部测试
 
 下面的测试包含一个紧凑的 `MultiHeadAttention` 实现，因此可以独立运行。它保留 2.3.3 的 shape、keep-mask 和输出契约，省略 dropout 以便测试结果确定。
 
-> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import math
@@ -970,7 +970,7 @@ M^{\mathrm{causal}}_{i,j}\land M^{\mathrm{pad}}_{b,j}
 
 只要广播规则成立，mask 不必物理复制到每个 batch 和 head。过早 expand 可能制造很大的逻辑视图或中间张量；优先保留最小广播形状，交给 kernel 处理。
 
-> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import torch
@@ -1021,7 +1021,7 @@ print("masked_shape=", tuple(masked_scores.shape))
 
 ### 2.4.4 PyTorch 不同接口的布尔语义
 
-PyTorch 的不同 attention 接口并不自动共享布尔 mask 约定：
+PyTorch 的不同 attention 接口并不自动共享布尔 mask 约定；以下对照对应 [PyTorch 2.12 SDPA](https://docs.pytorch.org/docs/2.12/generated/torch.nn.functional.scaled_dot_product_attention.html) 与 [MultiheadAttention](https://docs.pytorch.org/docs/2.12/generated/torch.nn.MultiheadAttention.html) 文档：
 
 | 接口 | 参数 | bool True 的含义 |
 | --- | --- | --- |
@@ -1031,7 +1031,7 @@ PyTorch 的不同 attention 接口并不自动共享布尔 mask 约定：
 
 因此，一个 keep causal mask：
 
-> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import torch
@@ -1049,7 +1049,7 @@ print("block_true_count=", int(block_causal.sum()))
 
 如果某个 query 的所有 key 都被屏蔽，softmax 没有合法的概率分布。可能的结果包括 NaN、全零或由特定 kernel 产生的其他边界值。常见原因是 padding 与 causal mask 组合错误、首个有效 query 被屏蔽、key length 为零，或外部过滤器把所有候选都删掉。
 
-> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import torch
@@ -1069,7 +1069,7 @@ print("bad_rows=", bad_rows.tolist())
 
 ### 2.4.6 在 softmax 前应用 mask 的完整函数
 
-> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import torch
@@ -1132,11 +1132,10 @@ print("row_sums=", weights.sum(dim=-1).tolist())
 
 推理时 mask 的 key 轴会包含缓存历史。已有 4 个 key、当前追加 1 个 query 时，score 的末两维是 \([1,5]\)，该 query 可访问历史 4 个 key 和自己；如果误用局部的 \([1,1]\) mask，某些广播会失败，另一些实现则可能错误地只看最后一个 token。调试要同时打印 query 长度、cache 长度、key 总长度和 mask shape，确认允许集合与生成协议一致。
 
+若任务允许双向读取，例如 encoder 输入，causal mask 不适用；若任务是 decoder 前缀补全，prompt token 可以双向或按指定模式互看，而生成部分必须因果可见。因而“Transformer 都用下三角 mask”是错误概括。正确 mask 由训练目标决定：自回归预测禁止看到未来目标，双向编码任务通常允许互相读取，prefix-LM 则要分段规定可见集合。实现前先把任务的可见性写成小矩阵，能避免照搬另一种模型的 mask。
 padding 的 key mask 与 query 是否有效要分别表达。右 padding 序列 \([a,b,\text{pad}]\) 中，真实 query 可以屏蔽第三列；padding query 自己仍会对前两列计算输出，除非另有机制跳过它。训练时通常由 loss mask 排除 padding 目标，推理或下游 pooling 则还要避免把 padding hidden state 纳入汇总。把 key mask 扩成对称矩阵，或错误屏蔽整个 padding 行，都可能改变有效 token 的输出。
 
 若任务允许双向读取，例如 encoder 输入，causal mask 不适用；若任务是 decoder 前缀补全，prompt token 可以双向或按指定模式互看，而生成部分必须因果可见。因而“Transformer 都用下三角 mask”是错误概括。正确 mask 由训练目标决定：自回归预测禁止看到未来目标，双向编码任务通常允许互相读取，prefix-LM 则要分段规定可见集合。实现前先把任务的可见性写成小矩阵，能避免照搬另一种模型的 mask。
-
-padding 的 key mask 与 query 是否有效要分别表达。右 padding 序列 \([a,b,\text{pad}]\) 中，真实 query 可以屏蔽第三列；padding query 自己仍会对前两列计算输出，除非另有机制跳过它。训练时通常由 loss mask 排除 padding 目标，推理或下游 pooling 则还要避免把 padding hidden state 纳入汇总。把 key mask 扩成对称矩阵，或错误屏蔽整个 padding 行，都可能改变有效 token 的输出。
 
 若 batch 内每条序列长度相同且没有无效位置，通常只需广播一份 causal mask；不要为每个样本复制完整矩阵。反之，若使用不同长度、prefix 目标或 packed segments，广播本身不会自动表达这些差异，需要把每条样本的边界纳入 mask。检查 mask 时同时观察其 dtype、device、广播形状和 True/False 语义，避免数据搬运或隐式转换掩盖问题。
 
@@ -1199,7 +1198,7 @@ Z=Y+\mathrm{FFN}(\mathrm{LN}(Y))
 
 ### 2.5.4 LayerNorm、Dropout 与训练模式
 
-LayerNorm 通常沿最后一个 hidden 维度归一化。对一个 token 向量 \(x\in\mathbb{R}^{D}\)：
+本章使用 `LayerNorm(D)`，因此统计量沿每个 token 的最后一个 hidden 维计算；PyTorch 2.12 将方差定义为有偏估计（`correction=0`），并在训练和评估时都使用当前输入的统计量，见 [LayerNorm 文档](https://docs.pytorch.org/docs/2.12/generated/torch.nn.LayerNorm.html)。对一个 token 向量 \(x\in\mathbb{R}^{D}\)：
 
 ```math
 \mu=\frac{1}{D}\sum_{j=1}^{D}x_j,\qquad
@@ -1211,11 +1210,11 @@ LayerNorm 通常沿最后一个 hidden 维度归一化。对一个 token 向量 
 \gamma_j\frac{x_j-\mu}{\sqrt{\sigma^2+\epsilon}}+\beta_j
 ```
 
-它不跨 batch 估计统计量，因此输入可以是 \([B,T,D]\)，每个 token 的最后一维独立处理。Dropout 在训练模式下随机置零并做尺度补偿，在评估模式下通常表现为恒等映射。检查 attention mask 或残差等价性时要调用 eval 或将 dropout 设为 0，否则随机性会污染对照。
+它不跨 batch 估计统计量，因此输入可以是 \([B,T,D]\)，每个 token 的最后一维独立处理。Dropout 在训练模式下随机置零并做尺度补偿，在评估模式下表现为恒等映射；这是 [PyTorch 2.12 Dropout 文档](https://docs.pytorch.org/docs/2.12/generated/torch.nn.Dropout.html)描述的模块行为。检查 attention mask 或残差等价性时要调用 eval 或将 dropout 设为 0，否则随机性会污染对照。
 
 ### 2.5.5 一个 Pre-LN decoder block
 
-> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import math
@@ -1392,8 +1391,6 @@ Pre-LN 与 Post-LN 的选择也影响 block 外部如何比较激活。Pre-LN �
 
 归一化层不会替代 residual。LayerNorm 的参数对每个 hidden 通道可学习，且通常对单个 token 的 \(D\) 维统计；Residual 则把子层输入与输出相加，要求形状相同。把 LayerNorm 放到错误的轴上，例如让它跨时间维计算，模型仍可能返回合法张量，但一个 token 的表示会依赖 batch 中其他位置的 padding 长度。最小检查要使用同一 token、不同 batch padding 情况，确认其归一化结果不被无关的填充位置改变。
 
-归一化层不会替代 residual。LayerNorm 的参数对每个 hidden 通道可学习，且通常对单个 token 的 \(D\) 维统计；Residual 则把子层输入与输出相加，要求形状相同。把 LayerNorm 放到错误的轴上，例如让它跨时间维计算，模型仍可能返回合法张量，但一个 token 的表示会依赖 batch 中其他位置的 padding 长度。最小检查要使用同一 token、不同 batch padding 情况，确认其归一化结果不被无关的填充位置改变。
-
 因此，单测可以固定两种输入：只改变另一位置的 token，观察当前 token 在 attention 后是否允许变化；随后单独调用 FFN，确认其不会直接读取另一个位置。两个小测试分别验证跨位置和逐位置职责，避免把整层数值变化误当成某个子模块行为。
 
 ## 2.6 RoPE：把位置关系写进 q、k 的几何变换
@@ -1440,25 +1437,33 @@ RoPE 把 head_dim 的维度按 \((0,1),(2,3),\ldots\) 两两分组。对位置 \
 
 ### 2.6.3 位置旋转如何产生相对距离
 
-设 \(R_p\) 是位置 \(p\) 对每个二维平面施加的旋转。旋转矩阵满足正交性和复合关系：
+设 \(R_p\) 是位置 \(p\) 对每个二维平面施加的旋转，并用 \(\mathbf{q}\)、\(\mathbf{k}\) 表示 query 和 key 向量。旋转矩阵满足正交性和复合关系：
 
 ```math
-R_p^\top R_q=R_{q-p}
+R_p^\top R_r=R_{r-p}
 ```
 
 于是：
 
 ```math
-(R_p q)^\top(R_q k)
-=q^\top R_p^\top R_q k
-=q^\top R_{q-p}k
+(R_p \mathbf{q})^\top(R_r \mathbf{k})
+=\mathbf{q}^\top R_p^\top R_r \mathbf{k}
+=\mathbf{q}^\top R_{r-p}\mathbf{k}
 ```
 
-内积中出现了 \(q-p\)，也就是两个位置的相对距离。这个推导说明 RoPE 具有相对位置结构；它不等于证明模型在任意长度、任意任务上都会保持性能，训练长度和频率外推仍然需要实验。
+内积中出现了 \(r-p\)，也就是两个位置的相对距离；这一构造见 [RoFormer 原论文](https://arxiv.org/abs/2104.09864)。这个推导说明 RoPE 具有相对位置结构；它不等于证明模型在任意长度、任意任务上都会保持性能，训练长度和频率外推仍然需要实验。
+
+这个推导还说明一个有用的局部不变量：若把参与比较的两个位置同时平移 \(c\)，旋转差仍然是 \(r-p\)：
+
+```math
+(R_{p+c}\mathbf{q})^{\top}(R_{r+c}\mathbf{k})=\mathbf{q}^{\top}R_{r-p}\mathbf{k}
+```
+
+例如比较位置 \((0,1)\) 与 \((4,5)\)，两组位置差都为 1；对固定的 \(\mathbf{q}\)、\(\mathbf{k}\) 和同一组频率，它们产生相同的相对旋转项。这个关系可用于检查 RoPE offset：只给当前 query 加偏移、却没有让 cache key 保留原来的逻辑位置，会改变实际距离。它只说明固定向量的 RoPE 内积性质，不保证整个模型在改变 padding、mask、窗口边界或其他位置机制后保持输出不变。
 
 ### 2.6.4 cos/sin cache 与 offset
 
-> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import torch
@@ -1516,7 +1521,7 @@ register_buffer 让缓存随模块迁移到设备，但不把它们当作可训�
 
 假设 q、k 形状为 \([B,H,T,d_h]\)，cos、sin 为 \([T,d_h/2]\)。先把缓存扩成 \([1,1,T,d_h/2]\)，再对偶奇维旋转：
 
-> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import torch
@@ -1556,7 +1561,7 @@ print("rotated_shape=", tuple(rotated.shape))
 
 下面的示例把 `RotaryEmbedding` 和 `apply_rope` 的最小定义一并放入围栏，可以单独运行。生产实现还应根据目标模型的旋转布局、缓存策略和 dtype 约定补充更严格的接口检查。
 
-> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import math
@@ -1704,13 +1709,9 @@ RoPE cache 需要覆盖实际位置。把训练长度从 4K 直接推到 32K，�
 
 批量解码时还要区分物理 cache slot 与逻辑位置。两条 prompt 长度分别为 3 和 5，若为了 batching 左侧补齐到 5 列，短 prompt 的两个 pad slot 是否占用 cache 位置、有效 token 从哪个 position id 开始，取决于模型和 runtime 的协议。对 RoPE 来说，传错位置通常不会引起 shape error，只会让 q/k 以错误相位相乘。最小测试要覆盖不同长度样本、左/右 padding 和追加 token，并把位置编号与 cache slot 一起打印。
 
-二维旋转需要两两配对 head 维。若 \(d_h\) 是偶数，维度可以组成 \(d_h/2\) 个二维平面；若维度为奇数，就有一维无法按该构造配对，常见实现会直接要求偶数维。偶奇交错布局和“前半维配后半维”布局都能实现旋转，但索引、cos/sin 排列和 rotate-half 函数必须配套。将一套布局的权重加载到另一套实现时，即使所有 shape 一样，逐元素结果也可能语义错误。
+RoPE 实现还要固定维度配对布局：本章代码采用偶奇维交错配对，另一些实现把前半维与后半维配对。两种布局都可表达二维旋转，但索引和 cos/sin 缓存必须一致；shape 相同不能证明旋转语义相同。
 
 高低频通道还解释了为什么只测短序列不够。短距离内，很多频率变化都很小，位置错误可能不易被发现；距离增大后，高频相位快速变化，偏移一位就会改变方向；低频通道变化慢，提供更长距离的相对变化尺度。可以选取多个位置差 \(1,8,64\)，记录 RoPE 后 q·k 的变化趋势，检查代码确实使用了 position id；但这种合成向量检查只验证旋转公式，不能替代长文档检索任务上的质量评估。
-
-二维旋转需要两两配对 head 维。若 \(d_h\) 是偶数，维度可以组成 \(d_h/2\) 个二维平面；若维度为奇数，就有一维无法按该构造配对，常见实现会直接要求偶数维。偶奇交错布局和“前半维配后半维”布局都能实现旋转，但索引、cos/sin 排列和 rotate-half 函数必须配套。将一套布局的权重加载到另一套实现时，即使所有 shape 一样，逐元素结果也可能语义错误。
-
-不同位置频率承担不同尺度的相位变化：高频通道随位置增加转得更快，低频通道变化更慢。训练长度之外，快速旋转维度可能累积明显相位偏移，慢速维度则决定模型能否保留粗粒度远距关系。RoPE scaling 方法尝试重新安排这些频率或位置映射，但方法名称相同也可能有不同公式和实现版本；应记录模型配置里的 scaling 类型与参数，并在目标任务上按距离区间评测，而不是只证明更长 position id 可以通过代码检查。
 
 保存 RoPE cache 时还要明确它是否持久化在 checkpoint。若 cache 不保存，恢复时需由相同的 head_dim、base、频率缩放配置和最大位置重新构造；若配置变化却复用旧 cache，值虽然 shape 一致也已不对应当前模型。记录模型 revision 和 RoPE 参数比单独保存一张 cos/sin 表更能解释复现实验。
 
@@ -1730,7 +1731,7 @@ RoPE cache 需要覆盖实际位置。把训练长度从 4K 直接推到 32K，�
 \gamma_j\frac{x_j-\mu}{\sqrt{\sigma^2+\epsilon}}+\beta_j
 ```
 
-RMSNorm 不做中心化，只计算 root mean square：
+RMSNorm 不做中心化，只计算 root mean square；这一设计及其动机见 [RMSNorm 原论文](https://arxiv.org/abs/1910.07467)：
 
 ```math
 r(x)=\sqrt{\frac{1}{D}\sum_{j=1}^{D}x_j^2+\epsilon}
@@ -1747,7 +1748,7 @@ w_j\frac{x_j}{r(x)}
 
 归一化的平方、求均值和开方容易受到低精度舍入影响。常见工程实现先用 FP32 计算平方均值，再把结果转换回输入 dtype：
 
-> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import torch
@@ -1787,7 +1788,7 @@ print("first_token_rms=", round(rms.item(), 5))
 Y=W_2\phi(XW_1+b_1)+b_2
 ```
 
-SwiGLU 使用两条上投影分支：
+SwiGLU 使用两条上投影分支；GLU 变体在 Transformer 前馈层中的形式与实验背景见 [Shazeer 的原论文](https://arxiv.org/abs/2002.05202)：
 
 ```math
 G=\mathrm{SiLU}(XW_g),\qquad
@@ -1835,7 +1836,7 @@ H_{\mathrm{ff}}\approx\frac{8D}{3}
 
 ### 2.7.5 SwiGLU 实现
 
-> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import torch
@@ -1887,9 +1888,9 @@ Y=X+\mathrm{Attn}(\mathrm{RMSNorm}(X))
 Z=Y+\mathrm{SwiGLU}(\mathrm{RMSNorm}(Y))
 ```
 
-下面组合前面三个组件。为便于读者复制验证，围栏中包含这四个组件的最小实现；它们沿用前文已经解释过的公式，但示例不依赖前文代码块的执行状态：
+下面组合前面三个组件，结构可在 [LLaMA 论文](https://arxiv.org/abs/2302.13971)中找到公开实例。为便于读者复制核对，围栏中包含这四个组件的最小实现；它们沿用前文已经解释过的公式，但示例不依赖前文代码块的执行状态。本例将 dropout 仅用于 SwiGLU 输出，不包含 attention dropout，也不是完整的训练配置：
 
-> 代码状态：已验证（2026-10-20；.tmp/llm-book-cpu-check，Python 3.12.9，PyTorch 2.12.0+cpu；历史记录中的输入、输出与边界检查适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-29）
 
 ```python
 import math
@@ -2116,13 +2117,8 @@ RMSNorm 与 LayerNorm 的差别也会沿残差流传递。LayerNorm 能减去每
 
 RMSNorm 的归约精度也应与输入 dtype 分开看。对低精度的长向量，先在 BF16 中平方再求和可能损失小量或产生误差；实现常把输入临时转为 FP32，完成平方均值和开方后再转换回原 dtype。这个策略增加少量转换开销，却能提高统计量稳定性。比较两个 kernel 时，既要对照相同输入下的最大绝对误差，也要看目标硬件上的吞吐，不能只凭算子名字断定哪个更快。
 
-SwiGLU 的三矩阵参数账本还不包含 bias、激活中间值和临时 buffer。训练时要为 gate、up 分支保存反向所需中间量；推理时即使没有反向存储，宽 FFN 仍可能是主要的矩阵计算来源。因此优化判断要看实际 profile：若显存来自激活，改投影参数量未必有用；若计算受 FFN GEMM 限制，attention 的高效 kernel 也未必改善整体 token latency。一个 block 的结构图帮助定位候选瓶颈，最终需要同一 batch、dtype 和序列长度下的测量。
+参数计数不包含 SwiGLU 的 gate、up 中间激活和临时 buffer。训练时这些值可能需要为反向传播保留；推理时宽 FFN 也可能成为矩阵计算热点。是否优化 FFN、attention kernel 或中间激活，应根据同一 batch、dtype 和序列长度下的实测 profile 判断，不能只从参数量推断瓶颈。
 
-当输入向量接近全零时，epsilon 是避免除零的必要稳定项。若 \(x=[0,0]\)、\(\epsilon=10^{-6}\)，RMS 分母为 \(10^{-3}\)，输出仍为有限的零向量；若实现误删 epsilon，分母成为 0，可能出现 NaN。epsilon 的大小还会影响低幅度激活的有效缩放，不能把某个库的默认值当成所有模型都一样。低精度下常把平方与归约提升到 FP32，再转回激活 dtype；对照不同实现时要分别检查有限值、误差和输出 dtype。
-
-RMSNorm 的归约精度也应与输入 dtype 分开看。对低精度的长向量，先在 BF16 中平方再求和可能损失小量或产生误差；实现常把输入临时转为 FP32，完成平方均值和开方后再转换回原 dtype。这个策略增加少量转换开销，却能提高统计量稳定性。比较两个 kernel 时，既要对照相同输入下的最大绝对误差，也要看目标硬件上的吞吐，不能只凭算子名字断定哪个更快。
-
-SwiGLU 的三矩阵参数账本还不包含 bias、激活中间值和临时 buffer。训练时要为 gate、up 分支保存反向所需中间量；推理时即使没有反向存储，宽 FFN 仍可能是主要的矩阵计算来源。因此优化判断要看实际 profile：若显存来自激活，改投影参数量未必有用；若计算受 FFN GEMM 限制，attention 的高效 kernel 也未必改善整体 token latency。一个 block 的结构图帮助定位候选瓶颈，最终需要同一 batch、dtype 和序列长度下的测量。
 
 由此可把本节数值例用于代码 review：先用非零向量对照 LayerNorm 与 RMSNorm，再用零向量检查 epsilon，然后用正负输入检查 SwiGLU 的门控连续性，最后核对参数数和 block shape。四个例子分别覆盖统计定义、数值边界、激活关系和张量接口；只测随机正态输入一次，可能碰不到这些错误。
 
@@ -2131,10 +2127,10 @@ SwiGLU 的三矩阵参数账本还不包含 bias、激活中间值和临时 buff
 本章的 API 行为以目标版本的 PyTorch 官方文档为准，架构公式和历史背景以原始论文为准。复现实验应记录 PyTorch 版本、设备、dtype、是否启用 dropout、attention 后端以及 tokenizer 的 padding 配置。
 
 1. Vaswani 等，Attention Is All You Need：<https://arxiv.org/abs/1706.03762>。Transformer、scaled dot-product attention、multi-head attention 和 sinusoidal encoding。
-2. PyTorch nn.Embedding：<https://docs.pytorch.org/docs/stable/generated/torch.nn.Embedding.html>。查表、padding_idx 和索引输入。
-3. PyTorch scaled_dot_product_attention：<https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html>。SDPA、布尔/浮点 mask 和 causal 参数。
-4. PyTorch MultiheadAttention：<https://docs.pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html>。官方 MHA 的输入、输出和 mask 语义。
-5. PyTorch LayerNorm 与 Dropout：<https://docs.pytorch.org/docs/stable/generated/torch.nn.LayerNorm.html>、<https://docs.pytorch.org/docs/stable/generated/torch.nn.Dropout.html>。核对归一化维度和训练/评估模式行为。
+2. PyTorch 2.12 nn.Embedding：<https://docs.pytorch.org/docs/2.12/generated/torch.nn.Embedding.html>。查表、padding_idx 和索引输入。
+3. PyTorch 2.12 scaled_dot_product_attention：<https://docs.pytorch.org/docs/2.12/generated/torch.nn.functional.scaled_dot_product_attention.html>。SDPA、布尔/浮点 mask 和 causal 参数。
+4. PyTorch 2.12 MultiheadAttention：<https://docs.pytorch.org/docs/2.12/generated/torch.nn.MultiheadAttention.html>。官方 MHA 的输入、输出和 mask 语义。
+5. PyTorch 2.12 LayerNorm 与 Dropout：<https://docs.pytorch.org/docs/2.12/generated/torch.nn.LayerNorm.html>、<https://docs.pytorch.org/docs/2.12/generated/torch.nn.Dropout.html>。核对归一化维度和训练/评估模式行为。
 6. Su 等，RoFormer: Enhanced Transformer with Rotary Position Embedding：<https://arxiv.org/abs/2104.09864>。RoPE 的旋转构造和相对位置性质。
 7. Zhang 与 Sennrich，Root Mean Square Layer Normalization：<https://arxiv.org/abs/1910.07467>。RMSNorm。
 8. Shazeer，GLU Variants Improve Transformer：<https://arxiv.org/abs/2002.05202>。GLU 变体与 SwiGLU。

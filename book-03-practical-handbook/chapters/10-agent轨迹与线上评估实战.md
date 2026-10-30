@@ -24,7 +24,7 @@ Agent 轨迹至少要同时回答三个问题：用户目标有没有达成，�
 
 以“把订单 741 的收货地址改到新地址”为例，业务规则要求先核验订单归属，再向用户展示新地址并获得明确确认，最后调用更新工具。若轨迹显示模型在确认之前发出 `update_address`，这只是候选动作；若执行器根据缺少确认的回执拒绝执行，外部状态没有变化，Agent 仍可补问。相反，如果执行器返回 `accepted=true`，订单状态已经更新，而轨迹中不存在确认事件，那么第一个不可恢复的策略失败发生在这次已执行的工具调用。后面的“已为您更改”也许是真的，但不能反过来证明动作合规。
 
-一次可审计轨迹应保留任务与会话 ID、目标状态、模型和提示版本、每轮输入/输出、工具名称与参数、工具执行回执、动作前后状态、策略版本、guard 判定、时间戳、停止原因和最终状态。
+一次可审计轨迹应保留伪名化任务与会话 ID、目标状态、模型和提示版本、每轮事件关系、工具名称与参数契约、工具执行回执、动作前后状态摘要、策略版本、guard 判定、时间戳、停止原因和最终状态。完整提示词、生成内容、检索文本和敏感工具参数不要默认写入普通 trace；优先保存脱敏摘要、必要统计及受控证据库引用。若排障确需原文，应在单独授权、访问控制和留存期限下保存，并由 trace 指向该证据。[OpenTelemetry GenAI 语义约定](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-spans.md)也提醒，输入输出、系统指令和工具参数/结果可能含敏感内容且体积较大，默认建议不记录。
 
 离线重放要把外部副作用关在可控边界内：用固定状态快照和模拟工具回执重建决策路径，写操作默认改为记录意图而不触碰真实系统，并为可重复请求设置幂等键。网络波动、异步任务和随机生成未必能逐字复现，所以重放的验收对象应是状态迁移、权限检查和恢复分支；它能验证执行协议，却不能单独证明线上故障概率或模型输出分布。
 
@@ -32,7 +32,7 @@ Agent 轨迹至少要同时回答三个问题：用户目标有没有达成，�
 
 例如 20 条需确认后才能改地址的任务中，模型有 4 次在确认前提议更新；执行器拦截其中 3 次，另 1 次实际修改成功但缺少确认。可以分别报告提前提议率 4/20=20%、拦截率 3/4=75% 和未授权副作用率 1/20=5%。不能把被拦截的 3 次从模型行为分析中抹去，也不能把它们计作已经发生的外部副作用。样本量只有 20 时，这些比例只用于定位和回归，不足以证明低频安全风险已经受控。
 
-敏感字段需要脱敏，原始证据应按访问策略保管；调试样例能使用合成值时，不要把真实个人信息复制进回归集。
+回归集优先使用合成值；确需真实证据时，按最小权限与期限保管，避免把原始个人信息复制到普通日志或长期样例集。
 
 ```mermaid
 flowchart LR
@@ -61,15 +61,16 @@ flowchart LR
 
 诊断顺序可以从可执行的硬约束开始：schema、权限、金额边界、必需确认、幂等键和外部状态迁移优先用代码核对；再由经过人工校准的评审者分析策略遵循、证据支持和对话质量。自动评审的输入要包含相关轨迹节点和执行回执，不能让 judge 依据最终自然语言猜测是否发生了副作用。系统级汇总再找共因，例如所有失败都发生在某个工具 schema 版本，或长对话的 token 截断让确认状态丢失。
 
-OpenAI 的 Agent Evals 文档把单条 trace 用于调试，并建议在“好”的标准明确后转为固定数据集和重复评测；Agentic CLEAR 研究探索 system、trace、node 多层诊断；Microsoft Research 发布的 AgentRx 以带 guard 条件的约束和逐步证据日志寻找 critical failure step。这些材料说明了可操作的评估方向，不代表其产品接口、论文分数或 115 条失败样例可以直接替代本项目的目标任务和独立复核。
+OpenAI 的 [Agent Evals 文档](https://developers.openai.com/api/docs/guides/agent-evals)把单条 trace 用于调试，并建议在“好”的标准明确后转为固定数据集和重复评测；[Agentic CLEAR](https://aclanthology.org/2026.acl-demo.74/)探索 system、trace、node 多层诊断；Microsoft Research 发布的 [AgentRx](https://www.microsoft.com/en-us/research/blog/systematic-debugging-for-ai-agents-introducing-the-agentrx-framework/)以带 guard 条件的约束和逐步证据日志寻找 critical failure step。这些材料说明了可操作的评估方向，不代表其产品接口、论文分数或 115 条失败样例可以直接替代本项目的目标任务和独立复核。
 
 实际改进时，应把一次失败轨迹转成最小回归样例：固定初始状态、预期允许/禁止动作、工具返回和验收条件；只修改一个主要变量，然后重放原失败集和安全回归集。若最终任务成功率提高、但工具授权违例或虚报完成率也提高，改动不能据此放行。修复后仍需检查新数据是否覆盖同类失败、是否引入新路径，最后才把稳定的离线版本送入有护栏的灰度实验。
 
 ### 10.1.1 资料与证据边界
 
-- [OpenAI Agent Evals](https://developers.openai.com/api/docs/guides/agent-evals) 区分单条轨迹诊断和固定数据集上的重复评测。
-- [Agentic CLEAR](https://arxiv.org/abs/2605.22608) 是 2026 年研究预印本，报告 system、trace 和 node 层面的诊断方法；其结果受论文中的 benchmark 和评审协议约束。
+- [OpenAI Agent Evals](https://developers.openai.com/api/docs/guides/agent-evals) 建议先用单条 trace 定位工作流问题，再转向固定数据集和重复评测。截至 2026-10-30，OpenAI 另列明旧 Evals 平台中的既有 evals 将于 2026-10-31 起只读，dashboard/API 计划于 2026-11-30 关闭；平台接口是动态产品入口，接入前须复核[官方迁移时间表](https://developers.openai.com/api/docs/deprecations)。
+- [Agentic CLEAR](https://aclanthology.org/2026.acl-demo.74/) 已发表于 ACL 2026 System Demonstrations，提出 system、trace 和 node 三层诊断；论文在四个 benchmark、七种 agent 设置和数万次模型调用上报告了与人工错误标注的对齐及任务成功预测能力，结论受其数据、模型和评审协议约束。
 - [AgentRx](https://www.microsoft.com/en-us/research/blog/systematic-debugging-for-ai-agents-introducing-the-agentrx-framework/) 是 Microsoft Research 对框架和 115 条人工标注失败轨迹的介绍；发布方报告的定位提升数字不是本地复现结果。
+- [OpenTelemetry GenAI spans](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-spans.md) 将完整输入、输出及工具内容列为可能敏感且体积较大的数据，并建议默认不记录；该页面是动态开发中规范，部署时须固定采用的版本。
 
 本节数值为合成例子，代码 guard 适合验证结构化约束，LLM judge 适合产生需要复核的语义候选；任何一种都不能单独证明真实系统安全。轨迹中的策略版本、执行器状态和标注协议应跟着结果保存。
 
@@ -193,7 +194,7 @@ P50、P95、P99 延迟以及首 token 延迟
 \chi^2_{\mathrm{SRM}}=\sum_{j=1}^{k}\frac{(o_j-e_j)^2}{e_j}
 ```
 
-该式要求每个期望计数 \(e_j>0\)，且总样本数大于 0；如果某个分组的计划比例为 0，卡方统计量不适用。卡方近似还需要足够的期望计数，稀疏分桶应使用适合小样本的方法。计数应对应分配的随机化单元；按用户分桶时，不能直接用受到 treatment 影响的请求数检验原定用户比例。SRM 异常可能来自：
+该式要求每个期望计数 \(e_j>0\)，且总样本数大于 0；如果某个分组的计划比例为 0，卡方统计量不适用。卡方近似还需要足够的期望计数，稀疏分桶应使用适合小样本的方法；原假设下将统计量与自由度为 \(k-1\) 的卡方分布比较。计数应对应分配的随机化单元；按用户分桶时，不能直接用受到 treatment 影响的请求数检验原定用户比例。SRM 异常可能来自：
 
 ```text
 实验路由条件与统计过滤条件不一致
@@ -223,6 +224,15 @@ z_{1-\alpha/2}\sqrt{2\bar p(1-\bar p)}
 
 这里 \(z_q\) 为标准正态分布的第 \(q\) 分位数，\(n\) 是每组样本量。例如 \(p_1=0.77,p_2=0.79,\alpha=0.05\)、功效 0.8 时，取 \(z_{0.975}\approx1.96,z_{0.8}\approx0.842\)，每组约需 6,736 个独立单元（将近似值 6,735.15 向上取整）。预期提升越小，所需样本量按提升量平方的倒数增长。用户反馈有延迟、指标方差很大或用户级随机化时，有效样本量还会进一步下降。
 
+若存在可靠的实验前协变量，还可以用 CUPED（Controlled-experiment Using Pre-Experiment Data）调整结果、降低方差。对随机化单元 \(i\)，令 \(Y_i\) 为实验期指标、\(X_i\) 为实验开始前测得的协变量、\(\theta\) 为协变量系数、\(\bar X\) 为其均值：
+
+```math
+Y_i^*=Y_i-\theta(X_i-\bar X),\qquad
+\theta=\frac{\mathrm{Cov}(X,Y)}{\mathrm{Var}(X)}
+```
+
+在单协变量的线性近似中，若 \(X\) 与 \(Y\) 的相关系数为 \(r=0.6\)，最优线性调整后的方差比例约为 \(1-r^2=0.64\)，即这个假设例子中方差约降低 36%。实际收益取决于实验前指标的预测力、缺失情况和随机化单位；CUPED 降低测量噪声，不能修复分桶错误或结果日志缺失。[原始 CUPED 论文](https://exp-platform.com/cuped/)报告的线上收益绑定其具体实验条件。
+
 统计显著不等于业务值得。一个 0.1 个百分点的提升可能在百万请求下显著，却无法覆盖新增 token 成本；一个高风险错误率的微小上升可能未达到显著，却仍值得暂停扩量。报告要同时给出点估计、置信区间、样本量、成本和风险后果。
 
 实验期间频繁查看结果并在某个好看的时刻提前结束，会增加假阳性。若业务必须连续监控，应使用预先设计的 sequential testing 或明确的停止规则，不要把普通固定样本检验反复使用。
@@ -231,7 +241,7 @@ z_{1-\alpha/2}\sqrt{2\bar p(1-\bar p)}
 
 下面的程序演示稳定分桶、SRM、二比例差异、Wilson 区间、延迟和成本护栏。数字是教学数据，不能代表任何真实服务。
 
-> 代码状态：已验证（2026-10-22；Python 3.12.9，无第三方依赖；历史记录中的输入、输出与边界检查适用于此代码）
+> 代码状态：静态审阅，未运行（2026-10-30）
 
 ```python
 import hashlib
@@ -426,7 +436,8 @@ report = {
     "srm": srm(control["sessions"], treatment["sessions"]),
     "resolution": resolution,
     "negative_feedback": negative_feedback,
-    "pairwise_b_win_ci95": wilson(580, 890),
+    "control_safety_ci95": wilson(control["safety_events"], control["sessions"]),
+    "treatment_safety_ci95": wilson(treatment["safety_events"], treatment["sessions"]),
     "latency_change": round(latency_change, 4),
     "cost_change": round(cost_change, 4),
     "safety_rate_change": round(safety_change, 6),
@@ -435,9 +446,13 @@ report = {
 }
 print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
 ```
-本例把每个会话当作独立分配单元，且每个安全计数代表发生事件的会话数，不是同一会话内的事件总次数。解决率由 0.77 升到约 0.7939，差约 2.39 个百分点；延迟增加约 8.33%，成本增加约 15.63%。安全事件只有 6 与 7 次，点估计差很小也不能证明满足安全非劣效要求，所以 `safety_review_passed` 显式为 False，输出决策为 `hold_and_investigate`。真实放行应事先定义安全容忍界限，结合适合稀疏事件的区间、定向离线测试和人工复核，不能把这个布尔值直接改成 True 来替代证据。
+本例把每个会话当作随机化单元，每个安全计数代表至少发生一次事件的会话数。50:50 分流时，两组期望数都是 12,040；实际为 12,000 和 12,080，故 \(\chi^2=2\times40^2/12{,}040\approx0.266\)，没有触发代码预设的 \(p<0.001\) SRM 阈值。解决率分别为 \(9{,}240/12{,}000=77.00\%\) 和 \(9{,}590/12{,}080\approx79.39\%\)，提升约 2.39 个百分点；按未合并标准误计算的 95% 区间约为 1.34 至 3.43 个百分点，超过示例中的 1 个百分点门槛。负反馈率从 8.00% 降到约 7.37%，其区间上界也低于预设的 0.10 个百分点非劣界限。P95 延迟增加约 8.33%，成本增加约 15.63%。
 
-`no_srm_detected` 只表示在预定阈值下没有检出分配比例异常，不证明所有随机化条件成立。`two_rate_delta` 的普通正态区间用于本例成功/失败数充足的指标；稀疏或边界比例应改用专门方法。即使 resolution 的区间为正，如果成本、延迟或安全条件不满足，也不应只凭一个正向数字扩大流量。真实分析还要考虑多重比较、集群随机化、分层协变量、缺失数据和实验周期。
+安全事件分别是 \(6/12{,}000=0.050\%\) 和 \(7/12{,}080\approx0.058\%\)；代码输出两组 Wilson 区间，但这些稀疏事件仍不足以证明已满足安全非劣效要求。因此 `safety_review_passed` 显式为 False，最终决策是 `hold_and_investigate`。真实放行应预先定义安全容忍界限，并结合适合稀疏事件的区间、定向离线测试和人工复核；不能把布尔值直接改成 True 来替代证据。
+
+`no_srm_detected` 只表示在本 demo 预设的 \(p<0.001\) 阈值下没有检出分配比例异常；该阈值是教学设置，不是通用标准，也不证明所有随机化条件成立。`two_rate_delta` 的普通正态区间用于本例成功/失败数充足的指标；稀疏或边界比例应改用专门方法。即使 resolution 的区间为正，如果成本、延迟或安全条件不满足，也不应只凭一个正向数字扩大流量。真实分析还要考虑多重比较、集群随机化、分层协变量、缺失数据和实验周期。
+
+组别各自的 Wilson 区间只描述各组比例；正式安全非劣效检验还应围绕预先设定的组间风险差界限构造不确定区间，或使用适合稀疏计数的方法。两组比例区间是否重叠不能替代这项检验。
 
 ### 10.2.7 日志字段决定实验能否解释
 
@@ -445,9 +460,11 @@ print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
 
 ```text
 request_id
-user_id / session_id / tenant_id
+pseudonymous_randomization_unit_id
+randomization_unit_type (request / session / user / tenant)
 experiment_name
-assignment_time and bucket
+eligibility, assignment_time and bucket
+first_exposure_time and actual version
 model_revision
 prompt_revision
 retriever_revision
@@ -462,6 +479,8 @@ error code and timeout
 user feedback and later correction
 timestamp and locale
 ```
+
+关联 ID 应使用受控的伪名，身份映射留在隔离的业务系统中。主分析按随机分配单元保留分母（intention-to-treat，按分配分析）；实际曝光另记事件，用于解释未曝光或路由异常，不能在看过 Treatment 结果后只删除未按预期曝光的样本。主指标和曝光规则均应在实验开始前确定。
 
 如果 prompt、检索器和模型同时变化，只记录 model_revision，就无法解释结果。缓存 key 也必须包含会改变输出的实验条件，否则 Control 可能命中 Treatment 产生的缓存。
 
@@ -534,17 +553,21 @@ Control / Treatment 的流量与 SRM 检查
 后续：待修复问题和下一轮实验条件
 ```
 
-例如，“Treatment 问题解决率提升 2.3%，95% 区间为 1.1%--3.5%；P95 延迟增加 8%，成本增加 12%；高风险切片没有显著改善，长问题提升明显；人工抽检发现多轮对话仍有少量过度解释，因此扩大到 25% 并继续观察”比“B 比 A 好”更接近可执行的工程结论。
+例如，“Treatment 问题解决率提升 2.3%，95% 区间为 1.1%--3.5%；P95 延迟增加 8%，成本增加 12%；高风险切片没有显著改善，长问题提升明显；人工抽检发现多轮对话仍有少量过度解释，因此扩大到 25% 并继续观察”比“B 比 A 好”更接近可执行的工程结论。示例报告中的“扩大”仍须满足预先定义的高风险护栏，不能仅凭总体区间作决定。
 
 ### 10.2.12 资料与边界
 
-[Trustworthy Online Controlled Experiments: Five Puzzling Outcomes Explained](https://doi.org/10.1145/2339530.2339653)讨论了线上实验中容易误读的结果和可信度问题；[Microsoft SRM 排查说明](https://www.microsoft.com/en-us/research/articles/diagnosing-sample-ratio-mismatch-in-a-b-testing/)提供了比例异常的诊断入口；[NIST 比例置信区间说明](https://www.itl.nist.gov/div898/handbook/prc/section2/prc241.htm)解释了 Wilson 和精确区间。CUPED 的原始论文 [Improving the sensitivity of online controlled experiments by utilizing pre-experiment data](https://doi.org/10.1145/2433396.2433413)展示了如何用实验前协变量降低方差。不应把一段 Python demo 当作完整统计软件。
+[Trustworthy Online Controlled Experiments: Five Puzzling Outcomes Explained](https://exp-platform.com/puzzling-outcomes/)讨论了线上实验中容易误读的结果和可信度问题；[Microsoft SRM 排查说明](https://www.microsoft.com/en-us/research/articles/diagnosing-sample-ratio-mismatch-in-a-b-testing/)提供了比例异常的诊断入口；[NIST 比例置信区间说明](https://www.itl.nist.gov/div898/handbook/prc/section2/prc241.htm)解释了 Wilson 和精确区间。CUPED 的原始论文 [Improving the sensitivity of online controlled experiments by utilizing pre-experiment data](https://exp-platform.com/cuped/)展示了如何用实验前协变量降低方差；连续监测可参考 [Always Valid Inference](https://arxiv.org/abs/1512.04922) 中与停止过程匹配的推断方法。不应把一段 Python demo 当作完整统计软件。
 
-A/B 实验的证据范围始终有限：它回答的是某个版本、某组流量、某段时间和某套系统条件下的差异。模型、提示词、检索器、工具、用户群和业务活动改变后，结论需要重新验证。
+A/B 实验的证据范围始终有限：它回答的是某个版本、某组流量、某段时间和某套系统条件下的差异。模型、提示词、检索器、工具、用户群和业务活动改变后，结论需要重新验证。连续查看结果时，应使用与停止规则相匹配的序贯推断方法，不能把固定样本检验反复套用。
 
 
 ## 本章练习与面试迁移
 
-4. 面试中回答“新模型离线提升了，为什么不扩量”：先明确评估版本和随机化单元，再报告区间、SRM、成本延迟与安全证据；用 10.2 的 6/7 次安全事件说明“没有显著变差”为什么不等于“已经证明安全非劣效”。
+1. 用 10.1 的订单地址轨迹分别标注模型提议、guard 判定、工具执行和状态变化；指出哪一处是首个不可恢复失败，并计算 20 条任务中的提前提议率、拦截率和真实副作用率。
 
-把 Agent 轨迹中的“模型提出了什么”和“系统实际执行了什么”分开计数，再用同一组样本设计 Control/Treatment、风险护栏和回退条件。样本数不足以证明安全时，应明确保留风险，不把“未观察到事故”写成“系统安全”。
+2. 按 10.2.6 的样例数据手算 Control 与 Treatment 的解决率差、95% 区间、P95 延迟和成本变化；说明为何即使总体收益过线，6/7 个安全事件仍使示例决策保持暂停。
+
+3. 将 50:50 分流的 12,000/12,080 个会话代入 10.2.4，计算 SRM 统计量并列出应优先检查的分桶、曝光和日志环节。
+
+回答“新模型离线提升了，为什么不扩量”时，先明确评估版本和随机化单元，再报告区间、SRM、成本延迟与安全证据。样本数不足以证明安全时，应明确保留风险，不把“未观察到事故”写成“系统安全”。

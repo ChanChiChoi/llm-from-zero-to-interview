@@ -1238,7 +1238,7 @@ print({
 3. PyTorch, *CrossEntropyLoss*：<https://docs.pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html>。用于核对 logits、目标形状、`ignore_index`、`reduction` 和概率目标的接口语义。
 4. PyTorch, *torch.logsumexp*：<https://docs.pytorch.org/docs/stable/generated/torch.logsumexp.html>。用于核对稳定 log-sum-exp 运算的 API。
 5. PyTorch, *SGD*、*Adam* 与 *AdamW*：<https://docs.pytorch.org/docs/stable/generated/torch.optim.SGD.html>、<https://docs.pytorch.org/docs/stable/generated/torch.optim.Adam.html>、<https://docs.pytorch.org/docs/stable/generated/torch.optim.AdamW.html>。用于核对实现参数、状态和更新顺序；页面中的默认值不能脱离目标版本使用。
-6. D. P. Kingma and J. Ba, *Adam: A Method for Stochastic Optimization*，arXiv:1412.6980。用于一阶/二阶矩和偏差修正的原始算法表述。
+6. D. P. Kingma and J. Ba, [*Adam: A Method for Stochastic Optimization*](https://arxiv.org/abs/1412.6980)。用于一阶/二阶矩和偏差修正的原始算法表述。
 7. I. Loshchilov and F. Hutter, [*Decoupled Weight Decay Regularization*](https://arxiv.org/abs/1711.05101)，ICLR 2019。用于 AdamW 与 L2 正则解耦的算法动机。
 8. PyTorch, *How to Adjust Learning Rate* 与 scheduler API：<https://docs.pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate>。用于核对 scheduler 的调用顺序、状态和不同调度器的接口。
 9. Hugging Face Transformers, *Optimization and Schedules*：<https://huggingface.co/docs/transformers/main_classes/optimizer_schedules>。用于对照语言模型训练中 warmup、更新步和调度器封装的工程语境；它是框架文档，不等同于某个模型训练结果的独立证据。

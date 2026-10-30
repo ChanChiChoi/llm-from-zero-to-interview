@@ -282,7 +282,7 @@
 4. 列出数据清洗中至少 5 个要处理的问题。
 5. 解释为什么 checkpoint 要保存 optimizer state。
 6. 用自己的话解释 base model 和 instruct model 的区别。
-7. 用自己的话解释 scaling law。
+7. 对照基础 scaling law 与加入数据质量变量 Q 的拟合形式；用[论文](https://proceedings.iclr.cc/paper_files/paper/2026/hash/d0c80a0c294a16190c8904b9809c5fba-Abstract-Conference.html)的一组指数计算 Q 从 1 变到 0.8 时数据项如何变化，并说明为何 Q 和指数不能直接推广成通用语料质量分数。
 8. 解释为什么固定 compute 下不能只增大模型参数量。
 9. 设计一个数据 mixture ablation 实验。
 10. 列出 5 种低质量数据对模型的负面影响。
@@ -364,6 +364,7 @@
 配套正文：[第五册第三章](book-05-llm-training/chapters/03-tokenizer与数据格式.md)。
 
 1. 假设你控制一个已训练模型的源 tokenizer，考虑沿用旧 BPE merge table 并追加新 token。画出旧 token 映射、新 token 初始化、embedding-only 适配和全模型继续训练的状态链；与重新训练 tokenizer、独立拼接词表相比，分别说明它解决和没有解决的问题。按目标语种、旧支持语言、held-out 任务、继续训练成本和目标设备每字符延迟设计对照，并区分论文的合成延迟估计与本机实测。
+2. 比较跨语言 tokenizer 的 token fertility 与同内容 token count：定义两者分母和对齐条件，设计“固定 token 预算”和“固定字符/字节预算”两组实验，并说明各自能支持什么成本判断、不能单独证明什么模型能力结论。
 
 ### 训练成本：最优点、扩展效率与能耗账本
 
@@ -424,13 +425,15 @@
 14. 说明 PagedAttention 为什么适合高并发 LLM serving。
 15. 写出标准 attention 需要显式构造的两个大矩阵。
 16. 解释为什么 `[T, T]` attention matrix 在长上下文下很贵。
-17. 用自己的话解释 IO-aware optimization。
-18. 比较 FlashAttention、sparse attention、linear attention。
-19. 说明 FlashAttention 在 prefill 和 decode 阶段的作用差异。
-20. 估算 7B 模型 FP16、INT8、INT4 权重显存。
+17. 取 `B=1`、32 个 heads、`T=8192`、FP16，逐步算出单个 scores 矩阵与 scores+probabilities 的显存；说明 GiB 口径和未计算的张量。
+18. 对 scores `[0, ln 2, ln 4]`、values `[1,3,5]`，按两个 block 手算 online softmax 的 `m`、`l`、`u` 和最终输出，并与一次性 softmax 对照。
+19. 比较 dense FlashAttention、block-sparse 与常见线性化 attention：各自是否改变 dense attention 配对/算子，计算和存储如何变化，需怎样评估误差。
+19A. 说明“exact attention”不等于 bitwise 相同，并解释 FP8 与 block-sparse 路径各自需要报告的误差或连接图边界。
+19B. 说明 prefill 与 decode 的 query 形状、历史 KV 访问、TTFT/TPOT 关注点为何不同；解释为何不能保证 FlashAttention 在两阶段都有相同的端到端收益。
+20. 假设 7B 参数、INT4 payload、group size 为 64 且每组保存一个 FP16 scale，分别估算 FP16/INT8/INT4 权重 payload 和 INT4 scale 元数据；统一用 GB 与 GiB 表示，并列出仍未计入的成本。
 21. 解释 weight-only quantization 为什么常用于 LLM 推理。
 22. 比较 PTQ 和 QAT。
-23. 用自己的话解释 GPTQ 和 AWQ 的区别。
+23. 对照 GPTQ 的校准输入/近似二阶误差补偿与 AWQ 的激活敏感通道/等价缩放，说明两者量化时改变了什么、校准分布如何进入方法，以及为什么不能仅凭论文结果判断哪个模型或 kernel 更好。
 24. 设计一个量化模型上线前的质量和性能评估清单。
 25. 解释连续分配 KV Cache 为什么会产生内部碎片和外部碎片。
 26. 用操作系统分页类比解释 PagedAttention。
@@ -471,9 +474,9 @@
 55. 写出量化和反量化公式，并说明 scale 与 zero-point 的作用。
 56. 比较 per-tensor、per-channel 和 group-wise quantization。
 57. 解释为什么 LLM 推理中常见 weight-only quantization。
-58. 比较 PTQ 和 QAT 的成本、质量和适用场景。
-59. 用自己的话解释 GPTQ 如何利用校准激活做误差补偿。
-60. 用自己的话解释 AWQ 为什么要保护激活敏感的重要权重。
+58. 比较 PTQ 和 QAT 的成本、质量和适用场景，并说明 fake quantization 如何让浮点训练模拟量化误差、又为什么不能保证目标 runtime 一定有匹配 kernel。
+59. 用小型线性层例子解释 GPTQ 如何根据校准输入形成近似二阶敏感度，并在逐步量化时补偿剩余权重。
+60. 用线性层输入/权重通道缩放说明 AWQ 如何在未量化时保持函数等价、量化后改变敏感通道相对 scale 的位置；解释它为什么仍属于 weight-only 方法。
 61. 设计一个 INT4 量化模型上线前的评估 checklist。
 62. 分析为什么量化后 perplexity 变化很小，但 JSON 输出稳定性可能变差。
 63. 列出 INT4 模型显存降低但速度没有提升的 5 个可能原因。
@@ -499,6 +502,7 @@
 80C. 比较 Orca、FastServe、Sarathi-Serve 和 DistServe：把它们分别映射到 iteration 级重排、长请求抢占、prefill 分块、prefill/decode 资源隔离；针对每种方法写出问题、核心状态、资源代价、失败边界和一项可以证伪其收益的 trace/benchmark。
 80D. 单服务台的平均服务率为 10 req/s。用 Little 定律和 M/M/1 直觉模型分别估算到达率 5 req/s 与 9 req/s 时的平均系统在途请求数和平均停留时间；说明为什么这组数不能直接作为异构 LLM serving 集群容量预测，并设计需要采集的多资源 trace。
 80E. 为共置 + chunked prefill、DistServe、Mooncake、TaiChi 和 SmartGen 设计一组可证伪的 P/D serving 对照：固定模型 revision、真实输入/输出长度和 prefix reuse trace、GPU/网络、并发及 TTFT/TPOT SLO，分别记录 P/D 算力分配、KV payload、transfer overlap、destination KV reservation、TTST、TPOT、goodput 和成本。再解释 SpectrumKV 的 PPL 与这些延迟指标为什么不能合成一个排行榜，并列出会让 P/D 解耦退化为反模式的网络或 workload 条件。
+80F. 为 RAG/Agent memory 设计一套跨请求 KV 复用方案，对比普通 prefix cache 与 Tessera 式检索驱动 context-unit reuse。说明 token/position/context 依赖、租户授权域、缓存键、共享/驱逐/撤销生命周期和缺失状态的重算策略；用一组请求 trace 估算不同命中率目标下的工作集容量，并定义 TTFT、缓存容量、复用错误和答案质量的联合验收指标。
 81. 用 `6 * P * T` 估算 7B 模型训练 1T token 的训练 FLOPs。
 82. 解释为什么真实训练成本不等于 final run 成本。
 83. 设计一个推理成本估算表，包含 input token、output token、KV Cache、GPU 小时和系统 overhead。
@@ -699,9 +703,11 @@
 1. 精读 10 篇论文。
 2. 完成一个项目讲稿。
 3. 完成 3 次 mock interview。
-4. 能回答开放研究题。
-5. 给出 5 个不同类型的幻觉例子。
-6. 设计一个事实性评估集，说明数据来源和评分方式。
+4. 从开放研究题中任选一个，写出可证伪的研究卡片：问题定义、假设、基线、反事实/消融、指标及分母、成本预算、停止条件和结论边界。
+4A. 按第一册第 30 讲构造一组 baseline/candidate 配对结果，手算总体与切片成功率、无依据断言率、单位成功成本和 P95 延迟变化；应用预先设定的质量、风险、成本门槛，若有门槛未过，写出最小区分实验和回退条件。
+4B. 为“数学推理准确率下降”写一份任务契约和假设表，固定数据、模型 revision、prompt 与 harness；设计至少三个逐项控制变量的区分实验，报告题目配对差及不确定性，并验证改写题与原题的题意和难度是否相当。用 3 条加权 claim 手算证据支持率、证据不足率与矛盾率；说明这些诊断信号分别能支持什么结论、不能证明什么。
+5. 给出 5 个不同类型的幻觉例子，区分事实错误、证据不忠实、引用归因错误、推理错误和工具结果编造；再举一项应单独归类的指令或安全行为失败。
+6. 设计一个事实性评估集，说明数据来源、可回答/不可回答样本、断言级事实正确率、证据支持率、拒答质量和各指标分母。
 6A. 写一个 0 依赖评估指标事故审计 demo，输入 toy baseline / candidate 评估样本、切片、污染标记、人工偏好、judge 偏好、输出长度、成本、延迟、线上反馈和安全状态，输出 paired lift、bootstrap CI、slice regression、clean eval lift、judge-human agreement、judge length bias、cost ratio、latency delta、failed gates 和 gate pass。
 6B. 做一张模型发布 benchmark 审计表，至少覆盖 MMLU / MMLU-Pro、GPQA、AIME、HLE、HumanEval、LiveCodeBench、SWE-bench、SWE-Lancer、DeepSWE、WebArena、OSWorld、GAIA、tau-bench、BrowseComp、LongBench、RULER、FRAMES、SimpleQA、TruthfulQA、MMMU、MathVista、OCRBench 和 Video-MME；每行写清数据规模、主要能力、评分方式、仿写样例、污染风险、适用场景和不能代表什么。
 6C. 做一次 frontier release radar 复盘：任选一个近期模型发布报告，按架构、预训练、后训练、test-time compute、serving、Agent/tool、多模态、评估、安全治理、产品工程和技术生命周期 11 个维度提取新知识；至少写出 3 个已稳定进入主干的知识点、3 个 P1 观察项、3 个可能被模型能力吸收或淘汰的过渡技术，并说明应同步到哪本书、哪道面试题和哪个术语条目。
@@ -714,17 +720,19 @@
 6J. 为一个声明支持 1M context 的研究助手设计一套评测证据链。分别说明 NIAH、Lost in the Middle、RULER、NoLiMa、LongBench v1/v2、LongBench Pro 和 MRCR v2 各自补上什么缺口、使用什么长度单位、最容易误读的结论是什么；组合成“输入/位置冒烟 → 受控复杂度 → 自然任务覆盖 → 1M 目标语料”的评测矩阵。固定 tokenizer、模板、工具权限、推理预算和文档来源，设计至少一个冲突归因与一个不可回答对照；按任务和长度报告正确率、证据召回、引用支持、P95、单位成功成本与不确定性，并指出哪些结果仍不能支持“模型有效使用任意 1M 输入”。
 6K. 选择一个刚发布的 frontier model claim，先拆成模型身份、架构/接口、任务能力和产品效果等最小命题，再比较 Model Card、Datasheet、HELM、CheckList、G-Eval 与 Evaluation Card 分别解决什么问题。为每种方法写出输入、操作机制、它能支持的结论、作者结果或证据、主要限制及下一步补证；再用 Claim Ledger 记录来源、revision、harness、预算、独立性和未知项。最后选一项厂商 benchmark、一项第三方 provider/config 测量和一项固定 harness 的独立评测，说明为何缺失榜单行不等于零分，也不能借用相邻模型的结果。
 6L. 为一个要自动处理真实工作流的 Agent 设计评测组合，比较 SWE-bench、SWE-Gym、Terminal-Bench 2.0、WebArena、OSWorld、BrowserGym、τ-bench、ToolSandbox、AgentDojo、GAIA、ScienceAgentBench、PaperBench、METR 和 Gaia2。每种选用的方法都写清任务对象、机制、判定器、作者证据、限制和下一步补证；明确区分 benchmark、实验框架、训练资源、难度标尺与动态环境。再设计工具合同审计，验证工具前置条件、状态变化和 grader 实际读取字段，并说明为什么“潜在缺陷”不能直接推出 Agent 曾触发或榜单结论已改变。
+ 6M. 为一个长上下文 Agent 设计质量—成本与持久记忆评测：固定同一模型、任务输入、权限和预算，比较至少两个 harness，逐任务报告质量、调用/token 成本和延迟；再分别用 AdaMem、Memora、Mem2ActBench、OP-Bench 与 PS-Bench 的问题设计记忆写入、过期/撤回、工具参数落地、过度个性化和安全意图判断对照。纳入无记忆、相关记忆、无关记忆、过期记忆及撤回后残留等样本，明确哪些结果只能说明对应 benchmark 条件，不能合并成单一记忆分数或泛化为产品安全结论。
+6N. 为 reasoning 系统设计质量与轨迹安全的配对评估：固定模型 revision、题目切分、提示、解码配置和总预算，对照 direct 与 CoT 路径；分别报告最终答案、步骤/答案一致性、额外验证成本，并用受控过程扰动检查轨迹筛选是否能区分过程可靠性与答案正确性。安全集将 prompt、中间轨迹和最终回复分开标注，要求给出支持判定的证据片段；用 FACT-E、KisMATH 与 TRACE 作为不同评估设计参照，不能合并成单一分数。只使用有授权的开源模型和合成或脱敏数据，不尝试获取闭源服务的内部推理；报告语种、模型覆盖和未验证边界。
 7. 解释 benchmark contamination 为什么会误导模型比较。
 7A. 用英文术语 data contamination、benchmark leakage 和 train-test leakage 分别写一个 LLM 评估风险例子，并说明如何用 exact match、near duplicate、canary、时间切分和私有动态集降低风险。
 7B. 为同一个公开 benchmark 比较语料 exact/near overlap 检查、Oren 顺序似然检验、ConStat、PaCoST、发布前 benchmark watermark 和 AntiLeakBench 式新鲜知识集。逐项写明它直接检验的命题、所需数据/API、核心假设、能支持的结论、失败条件和补证手段；再为“只有文本生成 API”“有 token log-prob 但无训练语料”“即将发布新 benchmark”三种条件选方案。区分数据重合、行为记忆信号与分数不泛化，不把异质结果合成一个污染率。
 8. 写 3 个防御性 jailbreak / prompt injection 抽象测试样本，只记录风险类别、期望策略动作和评估指标，不写可复用攻击提示词。
 9. 设计一个包含 helpfulness、honesty、harmlessness 的评估表。
 10. 用自己的话回答“如何判断模型是否真的具备推理能力”。
-11. 设计一个多模态模型的研究 roadmap。
+11. 为一个明确任务比较级联系统、共享推理模型和原生/统一模态路线；设计只替换一项关键模态证据的反事实样本，并列出接口失败、证据定位、任务成功、token 预算、延迟和风险指标，说明哪些实现细节仍需按模型核验。
 12. 给定 3 个分辨率和 2 个 patch size，手算每张图片进入 VLM 后的视觉 token 数，并说明对 OCR、图表和延迟的影响。
 13. 写一个 0 依赖 Python demo，输入文本 token、图片分辨率、视频帧数、音频时长和上下文上限，输出多模态总 token、over budget 样本和审计门禁。
 14. 用 3 分钟回答“为什么多模态模型设计必须先算视觉 token 和上下文预算，而不是只比较模型榜单分数”。
-15. 给 3 对 toy image/text embedding 手写 CLIP 相似度矩阵、image-to-text loss、text-to-image loss 和平均 loss。
+15. 给 3 对 toy image/text embedding 手写 CLIP 相似度矩阵、image-to-text loss、text-to-image loss 和平均 loss；再设 SigLIP 单 pair 的缩放 logit 为 `1`、bias 为 `0`，计算正负标签损失，并解释 full-pair 归一化为什么影响 loss 尺度、sigmoid 为什么不会自动消除伪负例。
 16. 写一个 0 依赖 Python demo，计算 CLIP 风格的 L2 normalize、`N x N` 相似度矩阵、Recall@1、MRR 和 zero-shot prompt ensemble 预测。
 17. 固定一组 toy logits，分别用 3 个 temperature 计算 softmax 置信度，并解释 `logit_scale` 为什么会影响训练梯度和检索排序置信度。
 18. 用 3 分钟回答“CLIP 为什么能做 zero-shot 分类，但不能等价于视觉问答模型”。
@@ -732,14 +740,21 @@
 20. 写一个 0 依赖 Python demo，输入分辨率、patch size、vision hidden size 和 LLM hidden size，输出 patch tokens、attention cell、projector 参数量和 over-budget 标记。
 21. 对比 CNN residual block 和 ViT patch embedding 的直觉，说明为什么 CNN 更有局部归纳偏置，而 ViT 更容易和 LLM 架构统一。
 22. 构造一个 OCR / 图表 bad case，说明该如何选择高分辨率、切图、patch size 或外部 OCR 工具。
-23. 写一个 0 依赖 VLM connector / prompt shape demo，检查 `[B,N_v,d_v] -> [B,N_v,d_l]` projector shape、`<image>` 占位符数量、多图 token budget、resampler 压缩、cross-attention cell 数和 assistant-only label 数。
+23. 写一个 0 依赖 VLM connector / prompt shape demo，检查 `[B,N_v,d_v] -> [B,N_v,d_l]` projector shape、`<image>` 占位符数量、多图 token budget、resampler 压缩、cross-attention cell 数和 assistant-only label 数；输出中分别注明“维度投影、序列压缩、语言模型读取位置”，不要把它们当互斥架构类型。
+23A. 用 BLIP-2 论文示例的视觉表示 shape `257×1024` 和 32 个输出 query，手算送往 LLM 的序列缩短倍数、减少的位置数与比例；再用助手回答目标概率 `0.8`、`0.5` 计算两 token 的 NLL 求和与 token 平均，并说明这些数值能支持什么、不能推出整体推理成本或通用训练目标的什么结论。
+23B. 对一项视觉问答任务取 `Content=0.90`、`Evidence=0.25`、`Relation=0.80`、`Format=1.00`，权重分别为 `0.30/0.40/0.20/0.10`，手算 TaskScore 并解释为何仍须报告分项；为对象是否存在和图像上下文推理分别设计一个 POPE 式或 HallusionBench 式诊断问题，写出各自覆盖范围与局限。
 24. 写一个 0 依赖多模态 SFT 数据审计 demo，检查 placeholder、assistant-only label 数、任务覆盖、evidence support、missing refusal、上下文预算和拒绝进入训练的坏样本。
-25. 写一个 0 依赖 diffusion 加噪 / 去噪审计 demo，手算 `alpha_bar`、`x_t`、noise MSE、`x0_hat`、DDPM reverse mean、CFG 和 latent cost ratio。
+25. 写一个 0 依赖 diffusion 加噪 / 去噪审计 demo；使用 `β=[0.1,0.2]`、`x0=(1,0)`、`ε=(0,1)`、预测噪声 `εθ=(0.2,0.6)`，核对 `alpha_bar`、`x_t`、noise MSE、`x0_hat` 与 DDPM reverse mean；用 `ε_uncond=0.2`、`ε_cond=0.5` 同时计算论文 CFG 参数 `w=2` 和差分系数约定 `s=1+w=3`，并注明这不意味着任意库的 `guidance_scale` 都采用相同映射；再以 `512×512×3 → 64×64×4` 手算 latent 标量数比例，并说明它不等于端到端算力比例。
 26. 写一个 0 依赖文生图 pipeline 审计 demo，输入 prompt、negative prompt、分辨率、VAE scale、采样步数、CFG scale、ControlNet 条件通道数和 DALL-E image token 网格，输出 latent shape、压缩比、U-Net 调用次数、cross-attention cells、image-to-image 起始步、自回归图像 token 数和 gate pass。
-27. 写一个 0 依赖视频 token / 时序一致性审计 demo，输入帧数、分辨率、spatial patch、temporal patch、latent 压缩倍数、采样步数、CFG scale 和 toy object trace，输出 framewise tokens、spatiotemporal tokens、latent shape、denoiser calls、cross-attention cells、flicker、identity stability、motion smoothness、object permanence、world rollout MAE 和 gate pass。
-28. 写一个 0 依赖音频 token / WER / codec 审计 demo，输入采样率、音频时长、window / hop、mel bins、reference / hypothesis、codec 帧率、codebooks、级联延迟和说话人授权状态，输出采样点数、log-mel shape、WER、CER、codec token 数、压缩比、TTS token 数、级联延迟和 gate pass。
+26A. 区分可逆 Normalizing Flow、扩散模型与 Flow Matching。取噪声端 `x0=0`、数据端 `x1=4`，沿 `x_t=(1-t)x0+t*x1` 在 `t=0.25` 手算状态和目标速度；若模型预测 `3.5`，计算单样本平方速度误差，并解释该例为何不代表所有 Flow Matching 路径、精确似然或生产采样步数。再读 Pyramidal Flow Matching，画出空间金字塔阶段、单个 DiT 和自回归时间历史之间的关系。
+27. 写一个 0 依赖视频 token / 多轮世界状态审计 demo，输入帧数、分辨率、spatial/temporal patch、latent 压缩倍数、采样步数、CFG scale、初始 scene state、view mode、action trace、camera trace 和多轮生成记录；输出 raw/framewise tokens、latent shape、denoiser calls、动作与镜头遵循、主体/背景/空间跨轮一致性、遮挡后状态、toy physics check、world rollout error 和 gate pass。另比较时空分解 U-Net、空间/时间级联、全片 Space-Time U-Net 与 latent DiT 在显存、序列成本和全局一致性上的取舍。说明每个分数的分母与评估模型，并限制结论在 toy 数据、论文配置与对应交互协议内。
+28. 写一个 0 依赖音频前端 / WER / codec 审计 demo，输入采样率、音频时长、window / hop、center 与 padding 约定、mel bins、文本规范化和分词规则、reference / hypothesis、codec 帧率、codebooks、各 stage 时间、chunk overlap 与说话人授权状态；输出采样点数、明确口径下的 STFT 帧数和 log-mel shape、语料汇总 WER/CER 与逐句宏平均、空参考样本数、codec token 数、压缩比、TTFC、客户端 TTFA、打断后静音时间和 gate pass。
+28A. 手算 CTC 路径 `b, o, blank, o, k` 与 `b, o, o, k` 分别折叠成什么文本，再画出一个 RNN-T 中 blank 推进声学时间、label 推进文本前缀的格点；据此比较 CTC、RNN-T 与 attention encoder-decoder 的等待来源。给出相同 encoder、数据和硬件下应报告的 chunk、lookahead、partial revision、WER/CER 与首个稳定转写延迟，并说明单有 CTC/RNN-T 目标不能保证流式。可用 Qwen3-ASR 的动态 1—8 秒 attention window 作为单一实现案例，但不得推广为所有 AED 的属性。
+28B. 为 10 条虚构业务语音建立双轨评估：逐词对齐后汇总 WER，再用明确 rubric 标记关键字段是否会改变业务操作，计算任务特定的 UER；构造一个 reference-guided normalizer 把错误金额改成参考值的反例，检查它如何改变评分。随后设计人工抽检和分 locale 切片，并说明 mu-bench 的 judge 一致性结果只适用于其数据、rubric 与 normalizer 设定。
+28C. 构造一段说话人参考音频和两段合成结果，分别评估 speaker embedding 相似度与 timing、prominence、intonation；手算 `[4,6]` 帧持续时间在速度系数 `r=1.5` 下如何变为 `[3,4]`，解释 MOS 或音色相似度高为何不能证明韵律被复制。阅读 LP-TTS-Bench 的 prompt-duration 结果时，把约 10 分钟附近的观察限定在论文基准与其参考系统，不把它当成通用 prompt 长度建议。
 29. 写一个 0 依赖统一多模态样本审计 demo，输入文本 token、图片分辨率、音频时长、视频帧数、输出模态、上下文上限、loss weights 和安全标记，输出各模态 token、输入 / 输出总 token、attention cells、路由模块、loss mixture、风险标记和 gate pass。
 30. 写一个 0 依赖多模态评估与安全审计 demo，输入 toy VQA、OCR / ASR、图表、grounding、claim support 和安全样本，输出 VQA accuracy、WER / CER、chart relaxed accuracy、IoU、hallucination rate、policy accuracy、risk counts、latency gate 和 gate pass。
+30A. 设计两个互补的音视频评测切片：一个考察 10—90 分钟视频中的长程记忆与跨模态理解，一个用间接意图查询定位事件。手算 gold 区间 `[10,20]` 秒与预测 `[14,24]` 秒的 temporal IoU：交集为 6 秒、并集为 14 秒；再说明怎样在多样本上汇总 mIoU 和 Recall@IoU。为 RVG 式任务增加音频必要性、查询唯一性、目标泄漏检查和人类验证；对比模型结果时固定帧采样、音频输入、提示、API/checkpoint、时间戳协议和模型版本。解释长视频记忆与推理型定位是不同能力，不能用一个 benchmark 分数互相替代。
 31. 写一个 0 依赖多模态面试复盘 demo，输入 mock interview 回答记录、required topics、required formulas、required demos、risk set 和 trade-off set，输出 topic coverage、formula coverage、demo coverage、risk coverage、weak questions、missing formulas、revision plan 和 interview ready。
 32. 写一个 0 依赖 reasoning 成本 / 正确率审计 demo，输入 toy reasoning 题、候选答案、verifier 分数、步骤正确标签和 token 成本，输出 greedy accuracy、self-consistency accuracy、verifier accuracy、pass@k、process step accuracy、cost per verified correct 和 gate pass。
 33. 写一个 0 依赖 CoT 质量 / 成本审计 demo，输入 toy 题、direct 答案、CoT 答案、步骤正确标签、是否含 unsupported step、token 成本和可见解释边界，输出 direct accuracy、CoT accuracy、routed accuracy、step accuracy、CoT regression、unsupported step、cost per routed correct 和 gate pass。
@@ -764,6 +779,7 @@
 47. 做一次 45 分钟完整模拟面试：自我介绍、项目、基础、系统、开放题各一轮。
 48. 写一个 0 依赖事故排查复盘 demo，输入 toy incident 记录，输出 evidence coverage、repro rate、root cause rate、priority、postmortem completeness、needs rework 和 debug gate。
 49. 用 3 分钟讲一次大模型项目异常排查经历，必须覆盖背景、现象、影响范围、证据链、最小复现、baseline、根因、修复、回滚和复盘沉淀。
+50. 选一个第一册核心知识点，设计一次无资料检索、一次难度匹配的变体检索、一个最小实现和一个反例；在短延迟与长延迟下记录结果和错误类型，手算 mastery/transfer score，并说明这些自评分数的 rubric、证据边界及下一次复习动作。
 
 ## 阶段 5B：产品化与商业化验收
 
@@ -1876,7 +1892,7 @@
 
 ## 第三册第十章：Agent 轨迹与线上实验
 
-配套正文：[第三册第十章 10.1 节](book-03-practical-handbook/chapters/10-agent轨迹与线上评估实战.md)。
+配套正文：[第三册第十章 10.1 轨迹回放](book-03-practical-handbook/chapters/10-agent轨迹与线上评估实战.md)、[10.2 线上 A/B](book-03-practical-handbook/chapters/10-agent轨迹与线上评估实战.md)。
 
 1. 为“修改订单地址”任务构造两条轨迹：第一条在未确认时提议更新，但执行器返回拒绝且状态未变；第二条同样缺少确认，却收到 `accepted=true` 且订单地址改变。标出哪一条是可恢复的策略违规尝试，哪一步构成首个不可恢复失败；说明最终回答文本为什么不能证明动作状态。
 2. 对 12 条轨迹，8 条达成任务目标、12 个适用节点中 10 个选择了正确工具、12 条中 1 条有越权副作用。分别计算任务成功率、工具选择准确率和策略违例率，给每个分母加上适用范围；解释为什么不能把三个比例平均成一个总分。
@@ -1884,6 +1900,7 @@
 4. 为 4 轮会话记录每轮输入 token `[512, 1800, 4200, 9000]`、工具等待和生成长度。计算未命中缓存时累计 prefill 输入 token；再说明 prefix cache 命中、服务排队和工具等待分别会怎样改变“模型 TTFT”和“用户端到端任务时间”。
 5. 设计一个敏感信息安全的 trace schema，保留模型/工具版本、参数校验、执行回执、前后状态和策略决定，同时对用户数据做字段级脱敏；说明若只保存最终回答、只保存外部状态或把所有原始输入写入日志，各会漏掉什么或引入什么风险。
 6. 计划按 50:50 分桶，实际随机化单元计数为 Control 6,000、Treatment 4,000。手算 SRM 的卡方统计量，并说明为何应先停下业务效果解读，检查分配、过滤和日志分母；随后列出一个线上扩量前必须满足的质量/安全护栏和回退条件。
+7. 对实验前指标 \(X\) 与实验期结果 \(Y\) 的相关系数 \(r=0.6\)，用 \(1-r^2\) 估算单协变量 CUPED 调整后的方差比例；再说明该调整为什么不能修复 SRM、分配偏差或 treatment 后曝光缺失。
 
 ## 多模态训练：目标函数与配方对照
 
@@ -2145,3 +2162,10 @@
 3. 将 `benchmark_leak`、`old_legal_forum` 和空梯度样本分别判定为硬阻断、软复核/负向效用或未定义 attribution；说明为何高相似分数不能解除污染门禁，且高风险不应被编码成一个负分后再排序。
 4. 在 `3,200` token 预算和每项指标最大回退 `0.01` 下，手算 exact toy selection 的组合、token 总量、各目标变化和 proxy 总值。随后把代码源换成合成模板源，比较固定 token、固定训练步数两种口径下反事实结论可能如何变化。
 5. 设计一个从小模型 proxy 到目标模型的验证计划：固定数据快照、总 token、优化阶段、随机种子和替代源；对 PreSelect、梯度归因或 source-level ablation 选一项设定目标/邻近/通用/安全/长尾切片、最小效应与置信区间，并列出授权、污染、风险及结果不稳定时的停止门槛。
+
+## 第二册第二章：Transformer 架构进阶
+
+1. 对 $T=8192$ 的前缀，计算 Log-Linear Attention 的 $\log_2 T$ 树深；解释为什么对数个状态槽不等于固定数量的标量或固定字节成本，并分别列出与 full attention、单一递归状态相比的记忆收益和实现代价。
+2. 用同一组随机键值检索样本比较 Gated DeltaNet 与 Gated DeltaNet-2：分别记录 key 侧擦除门和 value 侧写入门，固定参数量、训练 token、状态大小和评测长度；把 recurrent 与 sliding-window hybrid 结果分开汇报。
+3. 画出 masked diffusion 与 AR 的训练/推理状态变化，再为 encoder-only 和 encoder–decoder 去噪网络标出每轮重复计算的组件；说明扩散目标为何不能单独决定 backbone，也不能单凭并行位置数判断端到端速度。
+4. 比较 PowLU 与 MoA 的目标问题、激活机制、作者实验规模、训练 token/基线及未验证边界；解释为什么不同训练协议下的两个结果不能排成一张胜负榜。

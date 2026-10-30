@@ -121,6 +121,10 @@
    考察点：token 粒度、平均 token NLL、验证集和截断方式。
    回答框架：PPL 是平均 token NLL 的指数，tokenizer 不同会改变 token 数和 token 难度；只有 tokenizer、语料、上下文截断和 loss 口径一致时，PPL 才更可比。
 
+27A. 跨语言 tokenizer 的 token fertility 与同内容 token count 分别测量什么？
+   考察点：词边界、平行文本、压缩成本、下游任务和因果边界。
+   回答框架：fertility 通常是 token/word，依赖语言分词规则；同内容 token count 在平行文本上对齐内容、直接比较表示长度，但仍受译文和对齐质量影响。前者或后者都只是表示/成本指标，不直接证明语言模型能力差异。The Token Tax 在 AfriMMLU 上观察到 fertility 与准确率相关，但训练数据可用量和质量也共同变化，不能据此断言 tokenizer 的单独因果效应。
+
 28. KL 散度为什么不是普通距离？
    考察点：非对称、方向含义、support mismatch。
    回答框架：KL 非负但不对称，`KL(p||q)` 和 `KL(q||p)` 优化偏好不同；如果 `p` 有概率而 `q` 给 0，KL 会发散，所以它不是普通几何距离。
@@ -149,9 +153,9 @@
    考察点：micro batch、gradient accumulation、data parallel、梯度噪声。
    回答框架：`global_batch = micro_batch * accumulation_steps * data_parallel_size`；它影响梯度噪声、更新步数、吞吐和 learning rate 设置。
 
-35. Gradient clipping 的公式直觉是什么，为什么它不能根治 loss spike？
-   考察点：global norm、缩放系数、根因排查。
-   回答框架：如果梯度范数超过阈值，就按比例缩小所有梯度，使全局范数不超过阈值；它只能限制异常更新，不能修复错误数据、loss mask、过大学习率或 optimizer state 恢复错误。
+35. Gradient clipping 的公式直觉是什么，为什么它不能根治 loss spike？逐张量裁剪改变了什么？
+   考察点：global norm、缩放系数、根因排查、张量级尺度。
+   回答框架：若全局梯度范数超过阈值，就按比例缩小整组梯度；它限制异常更新，但不修复错误数据、loss mask、过大学习率或 optimizer state 恢复错误。AdaGC 等方法改用逐张量历史范数设阈值；ICML 论文的 spike score 和模型结果受其训练配置限制，不能推成通用稳定性保证。
 
 36. Hessian 和曲率直觉如何解释学习率敏感性？
    考察点：二阶近似、高曲率方向、震荡。
@@ -207,7 +211,7 @@
 
 49. Benchmark contamination 和普通过拟合有什么关系？
    考察点：训练-评估重叠、公开题库、prompt 迭代、泛化虚高。
-   回答框架：contamination 是评估信息泄漏导致的特殊过拟合。模型或团队可能见过题目、答案、相似模板或通过反复调参用穿测试集，因此 benchmark 分数不能直接等同真实泛化。
+   回答框架：模型训练语料包含测试题或其近似版本，是 data contamination；团队反复查看测试分数来调 prompt、阈值或候选方案，则是评测开发泄漏。两者都可能让公开分数过于乐观，但证据链不同。要固定 benchmark 版本、保留最终 holdout、隔离调参过程，并报告可查语料范围和未知暴露路径；不能把一个污染检测器未命中说成“无污染”。
 
 49A. Data contamination、benchmark leakage 和 train-test leakage 怎么区分？
     考察点：术语边界、训练数据、评估集、开发流程、近重复、动态私有集。
@@ -565,7 +569,7 @@
 
 48B. FlashAttention 的 online softmax 怎样避免保存完整 score 矩阵？
     考察点：tile、running max、归一化和、加权 value、HBM IO、计算复杂度。
-    回答框架：每行维护 `(m,l,o)`，分别是当前最大 score、相对该最大值的指数和、对应的 value 加权和。新 tile 到来时，先把旧 `l/o` 按新最大值重标定，再合入当前 tile 的指数权重，最后用 `o/l` 得到与全量 softmax 相同的结果。它减少完整 score/probability 中间量写回 HBM 和重读；精确 full attention 仍计算所有可见 query-key 对，乘加量仍随 `T²` 增长。
+    回答框架：每行维护 `(m,l,o)`，分别是当前最大 score、相对该最大值的指数和、对应的 value 加权和。新 tile 到来时，先把旧 `l/o` 按新最大值重标定，再合入当前 tile 的指数权重，最后用 `o/l` 得到与全量 softmax 相同的数学结果。dense 核心保留所有符合 mask 的 query-key 配对，乘加量仍随 `T²` 增长，并省掉完整 score/probability 矩阵的 HBM 写回；浮点次序会有舍入差异，FP8 等低精度路径需单独核对误差。
 
 48C. 变长 micro-batch 的梯度累积为什么不能简单平均每个 batch 的 mean loss？
     考察点：有效 target 数、窗口分母、DDP rank averaging、GradScaler 生命周期。
@@ -872,7 +876,7 @@
 
 27. FlashAttention 和 sparse attention 的区别是什么？
    考察点：系统优化 vs 结构稀疏。
-   回答框架：FlashAttention 优化精确 attention 的 IO 和 kernel，sparse attention 改变连接模式只算部分 token pair。
+   回答框架：dense FlashAttention 通过 tiling/online softmax 减少 IO 和中间矩阵，保持完整 attention 配对；block-sparse 只计算指定连接，改变了相对 dense attention 的图。稀疏模式可对自己的 mask 精确求值，但通常不等价于全连接结果；FP8 等低精度还要独立报告数值误差。
 
 28. 为什么需要 Multi-Head Attention？
    考察点：多个子空间、不同关系模式、信息路由。
@@ -940,7 +944,7 @@
 
 31M. 如何系统审计 O(n^2) Attention 的计算与显存瓶颈？
    考察点：attention pair count、score/probability memory、prefill、decode、FlashAttention、PagedAttention、GQA、sliding window。
-   回答框架：先写出 `S` 和 `A` 的 shape 是 `[B,H,T_q,T_k]`，full self-attention 中 `T_q=T_k=T`，所以 pair count 是 `BHT^2`，QK^T 和 AV 都随 `T^2` 增长。训练和 prefill 都可能有平方级成本；decode 单步是 `T_q=1,T_k=t`，单步线性但会受 KV cache 和内存带宽限制。显存上要估算单个 score tensor 和 score+prob tensor 的大小，并说明 causal mask 只降常数、不改阶数。FlashAttention 是 exact attention 的 kernel / IO 优化，不是线性 attention；PagedAttention 是 serving KV cache memory manager；GQA / MQA 是模型结构层面的 KV head 压缩。最后用 attention cost gate 同时看 pair count、prefill FLOPs、score memory、window ratio、质量风险和上线 SLO。
+   回答框架：先写 `S/A` 的 shape 为 `[B,H,T_q,T_k]`；full self-attention 的 pair count 是 `BHT^2`，`QK^T` 与 `AV` 的主要计算量均随 `T^2` 增长。Decode 单步通常 `T_q=1,T_k=t`，注意力工作量对当前历史长度近似线性，但会读取历史 KV。估算朴素中间矩阵时，需说明实现是否同时物化 score 与 probability；causal mask 改变有效配对，不一定改变 naive tensor 的分配形状。dense FlashAttention 减少 HBM IO 和二次中间存储，逐行统计量随 `T` 增长，但不减少 dense pair 数；浮点顺序、FP8 路径与 block-sparse 连接图分别记录数值或算子边界。PagedAttention 管理 serving KV cache，GQA/MQA 改变模型 KV-head 结构。最后按目标 GPU、dtype、shape、mask、服务负载和 SLO 设计 profiling。
 
 31N. 如何系统审计 KV Cache、长上下文推理和显存增长？
    考察点：KV cache formula、per-token cache、prefill/decode、decode bandwidth、MQA/GQA/MLA、PagedAttention、prefix sharing、cache gate。
@@ -1046,7 +1050,7 @@
    回答框架：先保存异常前 checkpoint、样本与 tokenized batch、mask、每 rank 的 loss numerator/有效 token 数、梯度、`m_t/v_t`、scheduler/scaler、RNG 和 data cursor。固定 batch 重放，按 forward、backward、optimizer update 分段定位；单 rank 异常先查本地数据和 decode，全 rank 同时异常再查全局更新、并行和恢复。若 layer-wise 梯度与 `v_t` 的先后变化符合论文假说，再分支测试 `beta2`/`epsilon`；Molybog 等与 Bai 等提出的机制解释不同设置，不能把 loss spike 一概归因于 Adam 或坏数据。
 3. 如何检测 benchmark contamination？
    考察点：候选文本重叠、人工确认、模型行为信号、评测集新鲜度与覆盖边界。
-   回答框架：可见训练语料先做 exact/近似匹配并复核来源和答案结构；命中是候选，不是模型记忆或分数抬高的证明。PALOMA 展示按域报告并控制评测协议的价值，但 PPL 不是任务能力。PaCoST 比较原题和改写题的配对置信度，可提供 benchmark 级潜在污染信号；它需要概率分布访问、多次调用，不能定位具体污染样本。分别报告扫描覆盖、候选、确认、unknown 和隐藏/新鲜评测结果。
+   回答框架：可见训练语料先做 exact、n-gram 和近似匹配，候选须核对来源和答案结构；语义相似本身不证明模型训练时见过，也不证明记住答案。Oren 等人的黑盒顺序似然检验依赖可交换题集及似然访问；未检出不能证明无污染。PaCoST 比较原题和改写题的配对置信度，可提供 benchmark 级潜在污染信号，但不能定位具体训练样本。时间切分、私有 holdout 和数据血缘可补足不同环节，也各有前提。分别报告扫描覆盖、候选、确认、unknown、调参暴露和保留集结果；PALOMA 的 PPL 不是下游任务能力分数。
 4. 如果让你训练一个 LLM，你会怎么设计完整流程？
    考察点：目标、数据、tokenizer、模型、优化器、分布式、监控、checkpoint、评估、后训练。
    回答框架：先把目标能力、不可退化项和预算写成验收契约；按授权、去重、有效 token、域覆盖和评测隔离构建数据账本。数据比例可先用可解释基线，再以 DoReMi 等 proxy 方法提出候选；固定总 token 做逐域评测验证。随后估算 FLOPs/状态/吞吐，短程基准验证并行和显存，长程演练 checkpoint 恢复。运行时保存第一次异常前后的数据、优化器和系统证据；最终用分域 loss、任务回归、污染审计和成本账本决定是否继续或交付。
@@ -1063,9 +1067,9 @@
    考察点：预训练、指令微调、对齐、聊天能力。
    回答框架：base model 学文本续写，instruct model 经过后训练，更会遵循用户意图和安全规范。
 
-8. 什么是 scaling law？
-   考察点：参数量、数据量、计算量、loss、资源规划。
-   回答框架：scaling law 描述模型性能随规模变量变化的规律，常用于训练预算和模型规模规划。
+8. 什么是 scaling law？数据质量变量如何进入拟合？
+   考察点：参数量、数据量、计算量、loss、资源规划、质量变量的操作定义。
+   回答框架：scaling law 是给定架构、数据、训练配方和指标下的经验拟合，可帮助规划预算。质量感知扩展会加入按具体任务/扰动实验操作化的 Q；[ICLR 2026 的一项研究](https://proceedings.iclr.cc/paper_files/paper/2026/hash/d0c80a0c294a16190c8904b9809c5fba-Abstract-Conference.html)报告 NMT 与 CLM 的拟合指数不同，因此 Q 与拟合参数不能当作任意语料的统一分数或普遍常数。
 
 9. Chinchilla scaling law 的核心启发是什么？
    考察点：compute-optimal、参数量、训练 token 数。
@@ -1531,31 +1535,31 @@
 
 10. FlashAttention 解决了什么问题？
    考察点：attention matrix、HBM IO、tiling、online softmax、显存。
-   回答框架：避免显式物化 `T*T` scores/probabilities，减少 HBM 读写和中间存储。
+   回答框架：dense 核心按 tile 计算并用 online softmax 合并归一化，避免把完整 `T*T` scores/probabilities 写入 HBM；主要 dense attention 计算量仍随 `T^2` 增长。
 
 11. FlashAttention 是近似 attention 吗？
    考察点：exact attention、softmax、attention pattern、sparse/linear 对比。
-   回答框架：不是，它仍计算标准 softmax attention，只改变计算顺序和内存访问。
+   回答框架：dense 核心在同一 mask/语义下计算标准 softmax attention，只改变分块顺序和内存访问；浮点结果不保证 bitwise 相同，FP8 低精度和 block-sparse 变体需单独说明。
 
 12. 为什么 FlashAttention 更快？
    考察点：IO-aware、SRAM 复用、fused kernel、memory bandwidth。
-   回答框架：通过 tiling 和融合计算减少 HBM 读写，提高片上内存复用。
+   回答框架：若 attention IO 是目标 shape 的瓶颈，tiling 和融合可减少 HBM 往返、提高片上复用；最终收益依赖 GPU、dtype、shape、kernel 支持及其他算子/调度开销。
 
 13. FlashAttention 和 KV Cache 的关系是什么？
    考察点：prefill、decode、attention IO、历史 K/V。
    回答框架：FlashAttention 优化 attention kernel，KV Cache 避免 decode 重算历史 K/V；两者解决不同瓶颈。
 
 14. 量化是什么？
-   考察点：低精度、显存、带宽、数值误差、kernel。
-   回答框架：用 INT8/INT4 等低精度表示权重或激活，降低显存和带宽，但可能影响质量且依赖硬件支持。
+   考察点：量化对象、payload、scale/zero-point、误差、kernel。
+   回答框架：量化用低位宽码本近似表示指定张量；它能降低理想 payload，并可能降低搬运成本，但元数据、计算路径和任务质量要单独核对。权重存储位宽也不等于 activation、累加或输出位宽。
 
 15. INT8 和 INT4 有什么区别？
    考察点：参数字节数、显存、质量损失、速度、硬件。
-   回答框架：INT4 更省显存但误差更大，INT8 更稳；实际速度取决于 kernel 和系统瓶颈。
+   回答框架：在相同码本和粒度假设下，INT4 payload 更小，INT8 有更多可用等级、通常对应更细的量化步长；模型质量不作无条件排序。实际显存要计 scale/packing，实际速度取决于硬件、kernel 和系统瓶颈。
 
 16. GPTQ 和 AWQ 的直觉是什么？
    考察点：PTQ、二阶信息、activation-aware、校准数据。
-   回答框架：GPTQ 用近似二阶信息补偿量化误差，AWQ 用激活信息保护重要权重。
+   回答框架：GPTQ 根据校准输入形成近似二阶敏感度，逐步量化并把误差补偿到剩余权重；AWQ 用激活统计找敏感通道，通过等价通道缩放降低其权重量化误差。二者都不能脱离校准分布、group size、模型和 kernel 比较。
 
 17. 量化后如何评估？
     考察点：perplexity、benchmark、业务评估、TTFT、TPOT、P95/P99。
@@ -1651,19 +1655,19 @@
 
 38. PTQ 和 QAT 有什么区别？
     考察点：训练后量化、量化感知训练、校准、fake quantization、低 bit。
-    回答框架：PTQ 在训练后用校准数据量化，成本低但低 bit 风险大；QAT 在训练或微调中模拟量化误差，让模型适应低精度，成本更高但质量更稳。
+    回答框架：PTQ 在训练后依据量化范围/校准数据转换权重或激活，成本较低；QAT 在训练/微调前向中用 fake quantization 模拟舍入与截断，可能缓解量化退化，但训练成本更高且目标 backend 仍须支持导出格式和 kernel。
 
 39. 为什么 LLM 推理常用 weight-only quantization？
     考察点：权重显存、显存带宽、decode、激活量化风险、kernel。
-    回答框架：decode 阶段频繁读取权重，weight-only 能降低权重显存和带宽，同时保留激活为 FP16/BF16，减少激活量化导致的质量风险。
+    回答框架：当权重常驻容量或权重搬运是瓶颈时，低位宽权重可降权重 payload，并可在保留 FP16/BF16 activation 的 W4A16 等路径中运行；是否加速取决于解包/反量化开销、kernel、batch 和系统瓶颈。
 
 40. GPTQ 的直觉是什么？
     考察点：PTQ、校准激活、近似二阶信息、误差补偿、线性层输出。
-    回答框架：GPTQ 利用校准激活和近似二阶信息，按顺序量化权重并补偿误差，目标是让量化后线性层输出接近原输出。
+    回答框架：GPTQ 利用校准层输入构造近似 Hessian/inverse-Hessian 信息，评估权重改动对层重建误差的影响；按列/块逐步量化，并把误差补偿到尚未量化的权重，使目标层输出尽量接近原模型。
 
 41. AWQ 的直觉是什么？
     考察点：activation-aware、重要权重、outlier、通道保护。
-    回答框架：AWQ 认为与大激活相乘、对输出影响大的权重更重要，因此利用激活统计保护重要权重或通道，降低量化误差。
+    回答框架：AWQ 用校准激活统计识别敏感通道，搜索权重通道放大、输入通道反向缩放的等价变换，再量化权重以改善敏感通道的刻度位置；这不是把相关权重永久保留成 FP16，也不意味着 activation 本身被量化。
 
 42. INT4 模型一定比 FP16 快吗？
     考察点：显存、带宽、kernel、反量化、硬件支持、瓶颈分析。
@@ -2664,8 +2668,8 @@
    回答框架：图像 encoder 和文本 encoder 分别输出 embedding，归一化后计算 `N x N` 图文相似度矩阵；对角线是真实配对，非对角线是 batch 内负样本；训练目标让正确图文对相似度高、错误配对相似度低，从而支持检索和 zero-shot 分类。
 
 2. VLM 如何把图像接入 LLM？
-   考察点：vision encoder、visual tokens、projector / connector、LLM hidden size、chat template、assistant-only loss。
-   回答框架：先用 ViT 或 CLIP vision encoder 提取视觉 token，再用 connector 把 `[B,N,d_v]` 映射到 LLM hidden size `[B,N,d_l]`，然后与文本 token embedding 拼接或插入，通过多模态指令微调让模型学会基于视觉证据回答。
+   考察点：vision encoder、visual tokens、维度投影、序列压缩、prefix/cross-attention、chat template、SFT loss mask。
+   回答框架：视觉编码器先输出 `[B,N,d_v]` 特征；线性层或 MLP 可将最后一维投影到 LLM 隐藏维 `d_l`，但通常不改变 `N`。Q-Former 或 Perceiver Resampler 可把 `N` 个视觉位置汇成较短的 `M` 个 query/latent 表示；之后语言模型可通过前缀拼接读取视觉 token，也可在指定层用 cross-attention 读取。维度对齐、token 压缩和读取位置是可组合的不同设计轴，例如 LLaVA、BLIP-2、Flamingo 各自组合不同。视觉指令 SFT 常用 assistant-only mask，但这不是所有 VLM 预训练目标的通用规则。
 
 3. Diffusion Model 的基本原理是什么？
    考察点：前向加噪、反向去噪、噪声预测、条件控制、latent diffusion。
@@ -2717,7 +2721,7 @@
 
 15. LLaVA、Flamingo 和 BLIP-2 的 VLM 架构差异是什么？
     考察点：projector 拼接、gated cross-attention、Perceiver Resampler、Q-Former、冻结策略。
-    回答框架：LLaVA 路线通常用 vision encoder 提取 visual tokens，再用 projector 映射到 LLM hidden size 并拼进主序列；Flamingo 路线用 resampler 压缩视觉特征，并在 LLM 层中插入视觉 cross-attention；BLIP-2 用 Q-Former 的 learnable queries 查询冻结 vision encoder，再把少量 query 输出接到冻结或部分冻结的 LLM。三者核心 trade-off 是实现简单性、视觉 token 成本、融合深度和训练复杂度。
+    回答框架：先说明比较维度并不互斥：projector 处理特征维度，query/resampler 处理视觉序列长度，prefix 或 cross-attention 决定语言模型如何读取。LLaVA 原论文用可训练矩阵投影视觉特征，并将结果作为视觉 token 接入语言序列；BLIP-2 用 Q-Former 从冻结视觉特征中抽取 query，在论文示例中把 257 个视觉位置变成 32 个输出位置；Flamingo 把 Perceiver Resampler 与插入语言模型层间的 gated cross-attention 组合。比较时分别讨论训练参数、LLM 侧 token 数、细节瓶颈和架构改造，不能只按“压缩率”推断总延迟或效果。
 
 16. 为什么 VLM 的 `<image>` 占位符数量必须和图片数量一致？
     考察点：chat template、visual token 插入位置、多图引用、batch collator、label mask。
@@ -2725,7 +2729,7 @@
 
 17. VLM 为什么常用 assistant-only loss mask？
     考察点：next-token loss、user/system mask、visual tokens、label shift、多模态 SFT。
-    回答框架：VLM 的生成训练通常仍是 next-token prediction，但只希望模型学习 assistant 回答，而不是复述用户问题、system prompt 或 `<image>` 控制 token。做法是把 assistant answer 的 mask 设为 1，其他位置设为 0；有效 label 数应该等于回答 token 数，这能检查数据 collator 和 label shift 是否正确。
+    回答框架：自回归对话 SFT 常把助手回答 token 作为目标，把用户问题、视觉条件和 padding 屏蔽；这样训练器优化回答生成，而不是复述输入。若两个正确目标 token 的概率为 `0.8` 和 `0.5`，求和 NLL 为 `-ln(0.8)-ln(0.5)=0.916` nat，按目标 token 平均为 `0.458` nat/token。有效 label 数应与协议指定的目标位置一致；助手角色标记和结束 token 是否纳入也要按模板核对。该做法是常见 SFT 目标，不是所有多模态预训练/微调任务的标准答案。
 
 18. 多图 VLM 输入如何做 token budget 审计？
     考察点：图片数、visual tokens、resampler、context limit、attention 二次成本。
@@ -2749,7 +2753,7 @@
 
 23. 多模态 SFT 中如何控制视觉幻觉？
     考察点：evidence support、资料不足拒答、grounding、claim-level 检查、bad case。
-    回答框架：数据侧要保证回答被视觉证据支持，加入 grounding、OCR、计数、图表和资料不足拒答样本；训练侧保证 assistant-only loss mask 正确；评估侧按 claim 检查图片证据，统计 unsupported answer rate、missing refusal rate 和 hallucination bad case，而不是只看回答是否流畅。
+    回答框架：把语言先验、视觉可读性不足和训练/评分目标当作待区分的错误假设，不能由单个错误断言其根因。数据侧加入 grounding、OCR、计数、图表和资料不足样本；训练侧核对目标 mask；评估侧按 claim 检查图像证据并报告 unsupported answer rate、missing refusal rate 和错误切片。POPE 用对象存在的轮询式是/否任务诊断对象幻觉；HallusionBench 用图像上下文与编辑图像问题诊断模型是否跟随图像，二者的结论都绑定各自样本和协议（[POPE](https://arxiv.org/abs/2305.10355)；[HallusionBench](https://arxiv.org/abs/2310.14566)）。
 
 24. 多模态 SFT 为什么要保留拒答和资料不足样本？
     考察点：blurry image、遮挡、小字、不可见信息、高风险场景、over-refusal。
@@ -2757,23 +2761,27 @@
 
 25. DDPM 的 forward diffusion 公式怎么写？
     考察点：`beta_t`、`alpha_t`、`alpha_bar_t`、闭式加噪、噪声强度。
-    回答框架：先定义 `alpha_t=1-beta_t` 和累计信号保留 `alpha_bar_t=prod alpha_s`；然后 `x_t=sqrt(alpha_bar_t) x0 + sqrt(1-alpha_bar_t) epsilon`。这说明任意时间步的 noisy sample 都能由干净样本和标准高斯噪声直接构造，训练时不必逐步加噪。
+    回答框架：先写一步转移 `q(x_t|x_{t-1})=N(sqrt(alpha_t)x_{t-1}, beta_t I)`，其中 `alpha_t=1-beta_t`，再定义 `alpha_bar_t=prod_{s=1}^t alpha_s`，得到闭式 `x_t=sqrt(alpha_bar_t)x0+sqrt(1-alpha_bar_t)epsilon`。例如 `beta=[0.1,0.2]` 时 `alpha_bar_2=0.72`；取 `x0=(1,0)`、`epsilon=(0,1)`，则 `x2≈(0.8485,0.5292)`。训练可随机抽时间步构造该样本，不必逐步执行整条前向链。
 
 26. Diffusion 为什么常训练模型预测噪声？
     考察点：监督信号、MSE、`x0_hat`、score 关系。
-    回答框架：训练时加入的噪声 `epsilon` 是已知的，所以可以用 MSE 训练 `epsilon_theta(x_t,t,c)` 预测噪声。预测噪声后能估计干净样本 `x0`，也能构造 DDPM 反向均值；从 score-based 视角看，噪声预测和 score 只是参数化方式不同。
+    回答框架：训练时加入的噪声 `epsilon` 已知，可监督 `epsilon_theta(x_t,t,c)`；常见简化目标是噪声平方误差。预测后用 `x0_hat=(x_t-sqrt(1-alpha_bar_t)*epsilon_theta)/sqrt(alpha_bar_t)`，并可形成固定方差 DDPM 的反向均值 `mu_theta=(x_t-beta_t/sqrt(1-alpha_bar_t)*epsilon_theta)/sqrt(alpha_t)`。以上面的 `x2` 为例，预测噪声 `(0.2,0.6)` 对真实 `(0,1)` 的两维平均 MSE 为 `0.10`，对应 `x0_hat≈(0.8753,0.2494)`。实际目标可按 timestep 加权，模型也可预测 `x0` 或 velocity；损失下降不自动保证目标 sampler 质量。
 
 27. Noise scheduler 对 diffusion 有什么影响？
     考察点：训练加噪、采样路径、步数、质量速度 trade-off。
-    回答框架：scheduler 定义噪声时刻、模型预测值如何还原状态、推理时间网格和下一步更新。DDIM 稀疏抽取反向步而无需重训；DPM-Solver 用 probability-flow ODE 的高阶求解减少模型评估；Progressive Distillation 则额外训练学生去逼近教师的多步轨迹。前两类主要换采样过程，后一类以训练成本换推理调用；都要按 checkpoint 的参数化、noise schedule、CFG 和任务评估。
+    回答框架：scheduler 决定训练/推理噪声时间表、输出参数化的还原方式和每步状态更新。DDIM 保留 DDPM 训练目标而改用非马尔可夫采样路径；DPM-Solver 把采样写成扩散 ODE 并使用专用高阶求解器，这两类不需为 sampler 额外重训。Progressive Distillation 则训练学生逼近教师多步轨迹，以训练成本换较少推理调用。三者的少步质量和真实延迟仍取决于 checkpoint、schedule、CFG、设备和评估任务。
+
+27A. Flow Matching 与 Normalizing Flow、Diffusion 是什么关系？
+    考察点：可逆密度变换、连续向量场、概率路径、训练目标与 ODE 采样。
+    回答框架：Normalizing Flow 常用可逆变换和 Jacobian 计算密度；Flow Matching 则训练连续向量场去拟合选定概率路径的目标速度。扩散路径可以是 Flow Matching 的路径之一，但路径、模型输出和数值采样器仍须配套。取 `x0=0`、`x1=4`、`t=0.25` 的直线路径时，`x_t=1`、目标速度为 `4`；预测 `3.5` 的平方误差为 `0.25`。这个单样本例子不能证明精确 likelihood、一步采样或更快的生产延迟。Pyramidal Flow Matching 展示了其与 DiT 和自回归视频时间金字塔的具体组合，结论绑定 ICLR 2025 论文配置。
 
 28. Classifier-Free Guidance 的公式和风险是什么？
     考察点：conditional prediction、unconditional prediction、guidance scale、prompt 遵循、多样性。
-    回答框架：训练时以一定概率丢弃文本条件，让一个模型同时学 conditional 和 unconditional 预测；按 `eps_uncond + w * (eps_cond - eps_uncond)` 组合。此约定下 `w=0` 是无条件、`w=1` 是条件预测、`w>1` 向条件外推。增大 `w` 可加强条件影响，但会牺牲多样性、放大偏差并增加 denoiser 计算；不同库可能用偏移一位的 scale 定义，面试时先写清公式再谈数值。
+    回答框架：训练时随机丢弃条件，让同一网络能给出条件和空条件预测。Ho–Salimans 论文写作 `(1+w)eps_cond-w*eps_uncond`，`w=0` 返回条件预测；若把乘在预测差上的系数记为 `s`，同一式可写成 `eps_uncond+s*(eps_cond-eps_uncond)`，且 `s=1+w`。若 `eps_uncond=0.2`、`eps_cond=0.5`，论文 `w=2` 与差分系数 `s=3` 都得到 `1.1`。软件参数名 `guidance_scale` 不保证就是论文 `w`；例如 [Diffusers v0.35.1 的经典 Stable Diffusion pipeline](https://github.com/huggingface/diffusers/blob/v0.35.1/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion.py) 以 `guidance_scale=1` 表示不启用 CFG。讲解或复现时应检查具体版本的公式和无 guidance 基线。指导用于质量/多样性取舍，不保证越大越正确；每步需要两条预测分支，合并 batch 不消除两组计算。
 
 29. Latent Diffusion 为什么比像素空间 diffusion 更高效？
     考察点：VAE / autoencoder、latent space、空间压缩、计算成本。
-    回答框架：像素空间维度高，直接去噪成本大。Latent diffusion 先把图像压缩到低分辨率 latent，在 latent 中完成多步去噪，最后再解码回图像；如果空间压缩倍数是 `f`，spatial cell 数大约降到 `1/f^2`，因此更适合高分辨率生成。
+    回答框架：像素空间张量很大，直接去噪成本高；latent diffusion 先编码、在压缩表示中多步去噪，再解码图像。举例设 `f=8`、4 个 latent 通道，`512×512×3` 变为 `64×64×4`：元素数从 `786,432` 降到 `16,384`，少 48 倍，空间位置少 64 倍。这个标量数比不等于端到端 FLOPs 或延迟比；VAE 质量、主干宽度和任务细节都会影响收益。
 
 30. Stable Diffusion 的 pipeline 如何拆解？
     考察点：VAE、text encoder、U-Net / DiT、scheduler、latent denoising。
@@ -2781,7 +2789,7 @@
 
 31. Negative prompt 在 CFG 里到底怎么起作用？
     考察点：正条件、负条件、guidance scale、软约束、风险。
-    回答框架：negative prompt 通常作为负条件参与 `eps_neg + w * (eps_pos - eps_neg)` 的方向计算，让模型远离负条件语义。它不是硬约束，只是改变去噪方向；`w` 太小 prompt 遵循弱，太大可能过饱和、失真和多样性下降。
+    回答框架：negative prompt 通常作为负条件参与 `eps_neg + s * (eps_pos - eps_neg)` 的方向计算，让模型远离该条件表达的语义。这里的 `s` 是差分系数记法；具体 API 的 `guidance_scale` 与原论文参数如何对应，应按版本检查公式。负条件不是硬约束，只是改变去噪方向。过大的 scale 可能产生过曝/失真并降低多样性，具体效果取决于 checkpoint 和 sampler。
 
 32. ControlNet 和普通 prompt 控制有什么区别？
     考察点：结构条件、边缘 / 深度 / 姿态 / 分割、残差注入、可控性。
@@ -2803,41 +2811,41 @@
     考察点：`T,H,W`、temporal patch、spatial patch、token budget。
     回答框架：逐帧 patch token 约为 `T * ceil(H/P) * ceil(W/P)`；时空 patch 约为 `ceil(T/P_t) * ceil(H/P) * ceil(W/P)`。时间 patch 能降低 token 数并注入短期运动信息，但太大会损失快速运动、小目标和局部细节。
 
-37. Make-A-Video、Imagen Video、CogVideoX 和 Wan 分别针对视频生成的什么瓶颈？
-    考察点：文生图 prior 迁移、无 text-video 配对数据、时空级联、视频 VAE、DiT、caption 质量和证据不可比性。
-    回答框架：Make-A-Video 复用文生图知识并从无文本配对的视频学习运动，主要缓解配对数据要求；Imagen Video 用 base video diffusion 加时空超分级联，并报告 v 参数化与 CFG 蒸馏；CogVideoX 用 3D VAE、expert Transformer 和稠密 caption 改善时空压缩与文本对齐；Wan 2.1 用 3D causal VAE、DiT、数据工程和 feature cache 做开放视频系统。四篇论文数据、时长、分辨率、算力和评测不同，面试中应讲各自解决的约束和遗留瓶颈，不直接排名。
+37. Video Diffusion Models、Make-A-Video、Imagen Video、Lumiere 和 CogVideoX 怎样处理时空建模与生成成本？
+    考察点：空间/时间分解、图像先验迁移、无配对视频运动学习、时空级联、全片时空 U-Net、视频 VAE、DiT 和证据不可比性。
+    回答框架：Video Diffusion Models 用空间/时间分解的 3D U-Net 和时间注意力扩展图像扩散；Make-A-Video 迁移文生图先验、从无文本配对视频学习运动并采用插帧/超分辨率；Imagen Video 用 base model 加空间/时间超分辨率级联；Lumiere 用 Space-Time U-Net 一次处理完整时长以减少时间级联窗口造成的全局一致性问题，但高分辨率空间超分辨率仍受显存限制；CogVideoX 用 3D 因果 VAE 压缩时空 latent 并交给 expert Transformer。以上是论文中的具体方案与作者分析，各自的数据、分辨率、时长、算力和评测不同，不能据此直接排名。
 
 38. 为什么说视频生成模型可能是 world model 的候选，但不能直接等同于 world model？
     考察点：状态转移、物体持久性、因果后果、可交互、可规划、可验证。
-    回答框架：视频生成要求模型预测世界随时间变化，因此可能学到物体持久性、运动、遮挡和部分物理规律。但真正的 world model 需要能在状态和动作条件下预测后果，并支持规划、交互和任务评估。生成看起来合理的视频只是证据之一，不等于可控可靠。
+    回答框架：视频生成会学习时空外观与运动统计，因此是 world model 的候选，但判断关键是模型能否根据可观测状态和明确动作预测后果，并在多轮交互、遮挡恢复、反事实动作和长时滚动中保持一致。World-in-Context 这类预印本把视角、角色动作和摄像机控制显式表示并在 WBench 上评估；这是一个具体研究路线，不等于视频模型普遍具备可规划的物理世界模型（[论文](https://arxiv.org/abs/2610.33169)）。
 
 39. 如何设计一个视频生成上线前审计？
     考察点：token / latent shape、时序一致性、FVD、VBench/VBench-2.0、自动评估器、人评、安全和 deepfake。
-    回答框架：先算帧数、分辨率、spatiotemporal tokens、latent shape、采样步数和 denoiser 调用次数；再评估 flicker、identity drift、motion smoothness、object permanence、物理失败和 prompt 一致性。FVD 是特征分布距离；VBench/VBench-2.0 拆分时序、人类保真、物理和常识等维度，但自动 evaluator 仍需人工抽查。最后加入深度伪造、肖像授权、版权和 provenance 门禁。
+    回答框架：先算帧数、分辨率、spatiotemporal tokens、latent shape、采样步数和 denoiser 调用次数；再切片评估 flicker、identity drift、动作遵循、遮挡后状态、跨轮一致、物理失败和 prompt 对齐。FVD 提供特征分布比较，VBench/VBench-2.0 拆分多项视频质量和内容维度；WBench 则以 5 个维度、289 个案例和 1,058 轮交互测多轮视频世界模型，并报告 22 个自动子指标经人工判断校验。它们分别服务于具体数据与协议，不能互相替代，也不能直接证明现实物理理解。最后加入深度伪造、肖像授权、版权和 provenance 门禁。
 
 40. ASR、TTS 和 speech-to-speech 的区别是什么？
     考察点：语音转文本、文本转语音、语音到语音、cascade、full-duplex、Thinker-Talker、ARIA。
-    回答框架：ASR 把语音转成文本，TTS 把文本合成语音，speech-to-speech 直接处理语音输入并生成语音。`ASR -> LLM -> TTS` 保留可审计文本但会串行累积延迟并丢韵律；Moshi 用用户/助手并行音频流处理打断与重叠；Qwen Thinker-Talker 把多模态理解和 speech token 解码分工，ARIA 再处理 text/codec token 速率失配。不同论文的理论首包和实测 latency 不可直接排名；选型仍要看转写证据、全双工需求、授权、安全、硬件与任务成功率。
+    回答框架：ASR 把语音转成文本，TTS 把文本合成语音，speech-to-speech 直接处理语音输入并生成语音。`ASR -> LLM -> TTS` 保留可审计文本，但会传播转写错误；若各模块串行等待，也会叠加延迟并丢失部分韵律。Moshi 论文展示用户/助手并行音频流，可表达打断与重叠（[论文](https://arxiv.org/html/2410.00037)）；Qwen Thinker-Talker 分工处理多模态理解和 speech token 解码，ARIA 协调 text/codec token 速率（见[第二十一册专题](book-21-transformer-architecture-evolution/chapters/93-qwen3.5-omni-aria-aut-timestamp与流式语音.md)）。这些是具体架构例子；不同论文的理论首包和实测 latency 不可直接排名。选型还要看转写证据、全双工需求、授权、安全、硬件与任务成功率。
 
 41. Whisper 的基本结构和输入输出是什么？
     考察点：log-mel spectrogram、audio encoder、text decoder、多任务 token、弱监督数据、长音频边界。
-    回答框架：Whisper 由 log-mel 前端、audio encoder 和自回归 text decoder 组成；language/task/timestamp/no-speech token 让一个 decoder 支持转写、翻译、语言识别、时间戳和静音判断。原论文报告 680,000 小时弱监督数据，其中 117,000 小时覆盖其他 96 种语言，125,000 小时为翻译数据。长音频使用 30 秒窗口和时间戳缓冲；重复循环、首尾漏词、无关幻觉和低资源语种覆盖仍是边界，弱监督规模不等于目标业务零样本可靠。
+    回答框架：Whisper 使用 log-Mel 前端、audio encoder 和自回归 text decoder；language/task/timestamp/no-speech token 让一个 decoder 支持转写、翻译、语言识别、时间戳和静音判断。论文给出 16 kHz、80 通道 log-Mel、25 ms 窗口和 10 ms 帧移；报告训练数据约 680,000 小时，其中提到其他 96 种语言约 117,000 小时及约 125,000 小时跨语言到英语翻译数据，不能假定这些描述维度互斥后相加。长音频按 30 秒窗口处理，时间戳滑窗和解码回退等策略也影响结果。所有数字和能力都限定于论文模型与协议，不能替代目标业务验证。
 
 42. WER / CER 怎么计算？为什么不能只看一个平均值？
     考察点：substitution、deletion、insertion、词级 / 字符级、切片分析。
-    回答框架：WER 是 `(S + D + I) / N_ref`，CER 是字符级同类公式。平均 WER 可能掩盖口音、噪声、专有名词、多说话人、短命令和低资源语言问题，所以要按场景分桶看 bad case。
+    回答框架：固定大小写、标点、数字展开、Unicode 规范化和分词规则后，语料级 WER/CER 用汇总的 `(S + D + I) / N_ref` 计算；若先算逐句分数再平均，短句和长句权重不同，结果不等价。插入可使分数大于 1，空参考没有分母，应单独报告。平均分仍会掩盖口音、噪声、专有名词、多说话人、短命令和低资源语言问题，因此还要按场景切片并检查 bad case。业务型评估可补充关键字段错误率或 benchmark-specific UER，但 judge、rubric 和文本 normalizer 可能改变结论；mu-bench 报告的人工一致性数据只绑定其五种 locale、虚构银行对话与评审设置。
 
 43. Audio codec 和 codec language model 为什么重要？
     考察点：连续音频离散化、semantic/acoustic tokens、RVQ codebooks、token rate、分层预测、TTS / speech-to-speech。
-    回答框架：codec 将 waveform 编码成可重建的离散声学码；semantic token 偏内容不变性，acoustic token 保留音色/韵律但可能编码噪声和身份。总码数 `时长×帧率×码本数` 不必等于串行 Transformer 步数：Moshi 用时间/深度两级建模，Qwen Talker 用 MTP 预测 residual codebooks。VALL-E 把短参考音频作为 zero-shot speaker condition；VALL-E 2 用 repetition-aware sampling 和 grouped-code modeling 缓解循环与长序列问题。收益依赖 codec、码本 schedule 和数据覆盖，另需验证时延、音质、说话人授权和冒用风险。
+    回答框架：codec 将 waveform 编码成可重建的离散声学码；semantic token 偏内容不变性，acoustic token 保留音色/韵律但可能编码噪声和身份。总码数 `时长×帧率×码本数` 不必等于串行 Transformer 步数：Moshi 用时间/深度两级建模，Qwen Talker 用 MTP 预测 residual codebooks。Qwen3-TTS 报告中的 25 Hz 单码本路线与 12.5 Hz 多码本路线展示了不同的声学质量和解码组织选择；其 0.6B first-packet latency 是报告设置下的首包，不等同客户端实际首音 TTFA。VALL-E 把短参考音频作为 zero-shot speaker condition；VALL-E 2 论文以 repetition-aware sampling 和 grouped-code modeling 缓解特定设置下的循环与长序列问题，其主观结果绑定 LibriSpeech/VCTK 和评测协议，不能泛化为所有语音场景都达到人类水平。收益还依赖 codec、码本 schedule 和数据覆盖，需验证时延、音质、说话人授权和冒用风险。
 
 44. CTC、RNN-T 和 attention seq2seq 的流式 ASR 取舍是什么？
     考察点：隐式单调对齐、blank、预测前缀、chunk/endpoint、解码复杂度。
-    回答框架：CTC 为声学帧输出字符与 blank，训练时对折叠成同一文本的单调路径求和，帧级独立假设简化解码；RNN-T 在音频时间和已输出前缀的二维格点上预测，blank 推进声学时间、label 推进文本前缀，能用历史文本但 beam/search 更复杂；attention seq2seq 可利用全局上下文，常见双向 encoder 需要等更多输入，流式化要额外设计 chunk/单调注意力和 partial 稳定性。一项 7 语言同 encoder 的对照中 RNN-T 更准、CTC 推理更快；它没有比较 attention seq2seq，不能据此排普遍名次。
+    回答框架：CTC 对能折叠成同一文本的单调 blank/label 路径求和；RNN-T 在声学时间与已生成前缀的格点预测 blank 或 label，前者推进时间、后者推进文本，因而可利用已输出历史。attention seq2seq 可使用更丰富上下文，但完整输入或双向编码器会增加等待；流式化需要分块/单调注意力和 partial 稳定策略。原始 CTC 论文使用双向 LSTM，说明 CTC loss 本身不保证流式；CTC/RNN-T 都需要因果或分块 encoder、限定 lookahead 和 endpoint/提交策略。比较速度或准确率时要固定 encoder、数据、解码器和硬件；此处不引用无法追溯设置的跨语言排名（[CTC 原论文](https://www.cs.toronto.edu/~graves/icml_2006.pdf)；[RNN-T 原论文](https://arxiv.org/abs/1211.3711)）。
 
 45. 语音助手上线前应该审计哪些指标？
     考察点：采样率、log-mel shape、WER / CER、latency、codec tokens、授权、安全。
-    回答框架：先检查采样率、切片、VAD、ASR WER / CER 和噪声场景；再算 codec token rate、上下文长度、ASR / LLM / TTS 级联延迟和首包延迟；如果支持 voice cloning，要检查说话人授权、水印、深伪检测、隐私脱敏和高风险请求拒绝。
+    回答框架：先检查采样率、重采样、切片、VAD、文本规范化、WER/CER 和噪声/口音/数字/专名切片；对金额、日期、姓名和确认码另报关键字段错误与业务失败，必要时报告有明确 rubric 的 UER，并审计参考引导 normalizer 是否把错误改写成正确答案。再算 codec token rate、上下文长度、端到端首音与任务完成的 p50/p95/p99。流式系统需区分模型产出首个音频块与客户端实际播出首音，并测 endpoint、打断到停止旧音频的时间及迟到 chunk 是否被丢弃。若支持 voice cloning，还要把说话人相似度与 timing、prominence、intonation 等韵律指标分开，并检查授权、隐私、冒用风险和高风险操作确认。
 
 46. 什么是统一多模态模型？统一可以发生在哪些层次？
     考察点：接口统一、表示统一、架构 / 目标统一、工程系统。
@@ -2861,7 +2869,7 @@
 
 51. 如何系统评估一个多模态模型？
     考察点：VQA、OCR、chart、grounding、hallucination、generation、安全、回归。
-    回答框架：先按任务拆成 VQA / OCR / 图表 / grounding / 视频 / 语音 / 生成和安全切片；再分别看 VQA accuracy、WER / CER、chart relaxed accuracy、IoU、faithfulness、人工偏好和安全门禁；最后做 bad case attribution，区分感知、OCR、grounding、推理、表达和拒答错误，不能只引用一个公开榜单均分。
+    回答框架：先按任务拆成 VQA / OCR / 图表 / grounding / 视频 / 语音 / 生成和安全切片；再分别看 VQA accuracy、WER / CER、chart relaxed accuracy、IoU、faithfulness、人工偏好和安全门禁；最后做 bad case attribution，区分感知、OCR、grounding、推理、表达和拒答错误，不能只引用一个公开榜单均分。长音视频记忆（如 LVOmniBench）与意图驱动的音视频时间定位（如 RVG-Bench）测量不同能力；报告分数时要固定模型快照、帧/音频输入、提示和评分协议，不能互作代理或拼成统一排名。
 
 52. 多模态 hallucination rate 应该怎么定义？
     考察点：atomic claim、media evidence、unsupported claim、拒答边界。
@@ -2893,7 +2901,7 @@
 
 57. SigLIP 相对 CLIP 改变了什么？它为什么不能单独解决图文数据里的伪负例？
     考察点：全局 softmax、成对 logistic loss、logit scale/bias、标签结构、batch 规模。
-    回答框架：CLIP 在 batch 相似度矩阵上做图到文和文到图的 softmax 分类；SigLIP 对每一对 logit 使用带正负标签的 sigmoid logistic loss，减少对全局归一化和超大 batch 的依赖。但若语义相关的非对角配对仍标成负例，sigmoid 会继续惩罚它；要支持多正例，应显式改变 pair labels 或改用能表达多相关目标的监督与评测。
+    回答框架：CLIP 对 batch 相似度矩阵做图到文和文到图的 softmax 分类；SigLIP 对图文组合使用带标签的 sigmoid logistic loss，取消全局 softmax 分母，但全量配方仍可能处理 `B²` 个 pair。原始 SigLIP 实现按 batch 行数归一化，不能随意换成 pair 平均后再比较 loss 尺度。若语义相关的组合仍标成负例，sigmoid 仍会惩罚它；支持多正例需要显式调整标签或采样目标。SigLIP 2 又加入 captioning、自蒸馏、masked prediction 和多语言/数据筛选等配方，因此它的结果不能单归因于 sigmoid loss。
 
 58. BLIP-2、LLaVA-1.5 和 MM1 分别解决什么训练约束？如何避免误比论文结果？
     考察点：冻结双端与 Q-Former、视觉指令 projector、数据 mixture 消融、分辨率/token 预算、可比性。
@@ -2905,7 +2913,7 @@
 
 60. CTC、RNN-T 与 Whisper 的训练目标怎样决定流式能力？
     考察点：CTC 单调路径、RNN-T 时间/前缀格点、自回归 decoder、chunk encoder、partial transcript。
-    回答框架：CTC 对折叠为目标文本的帧级单调路径求和；RNN-T 在声学时间与输出前缀的格点上对齐，并让预测依赖已生成 token；Whisper 是带任务提示的 encoder-decoder 生成目标。流式能力还取决于 encoder 是否因果或分块、解码状态和 endpoint 设计，不能仅从 loss 名称推出端到端延迟。
+    回答框架：CTC 对折叠为目标文本的帧级单调路径求和；RNN-T 在声学时间与输出前缀的格点上对齐，并让预测依赖已生成 token；Whisper 是带任务提示的 encoder-decoder 生成目标。流式能力还取决于 encoder 是否因果或分块、解码状态和 endpoint 设计，不能仅从 loss 名称推出端到端延迟。Qwen3-ASR 报告中的动态 1—8 秒 attention window 和 streaming/offline 支持属于其 AuT encoder-decoder 实现，不能由此推出 AED 架构天然流式。
 
 61. Min-SNR 为什么必须连同 `x0`、`epsilon` 或 `v` 参数化一起说明？
     考察点：SNR 定义、梯度冲突、目标相关权重、论文设置边界。
@@ -2930,15 +2938,21 @@
 ## 开放研究题
 
 1. 如何判断模型是否真的具备推理能力？
+   考察点：操作性定义、语义等价改写、组合泛化、干扰反事实、预算和污染。
+   回答框架：先定义要测的“推理迁移”，再构造难度配平的原题与改写/新组合题；固定模型、提示和预算，比较 direct、CoT、search/verifier，并报告准确率差、配对不确定性、成本和失败切片。CoT 文本本身不是内部推理忠实性的证据。
 2. 如何设计下一代多模态模型？
+   考察点：具体任务、模态证据、对齐、数据、架构、推理成本和反事实。
+   回答框架：先选一个可测任务，再比较级联系统、共享推理模型与原生/统一模态路线的接口、信息损失、故障隔离和成本；构造只改变关键图像、音频或视频证据的反事实，分别报告证据定位、任务成功、token 预算与延迟。不能把“支持多模态”或“统一表示”当成任务成功的证据；具体模型内部路线还需按其公开资料核验。
 3. 如何平衡 safety 和 helpfulness？
+   考察点：风险分层、严重度、不安全服从、过度拒答、安全替代和应用权限。
+   回答框架：把高风险、正常可答、需澄清和缺证据请求分层；共同测不安全服从、误拒、替代帮助和事实错误，并在隔离工具环境中测真实权限边界。单一拒答率不能代表安全与帮助的平衡。
 4. 大模型为什么会幻觉？
    考察点：next-token prediction、数据错误、知识过时、prompt 不足、解码、缺少验证。
    回答框架：语言建模目标不是事实验证，模型会生成高概率文本而不保证真实。
 
 5. 如何评估一个 LLM？
    考察点：benchmark、human eval、LLM judge、事实性、安全、污染检测。
-   回答框架：多维度评估知识、推理、代码、长上下文、指令遵循、事实性和安全，结合自动和人工评估。
+   回答框架：先定义输入分布、目标指标、硬约束、失败和证据，再固定数据快照、模型 revision、prompt 与 harness；组合任务基准、切片、独立 holdout 和真实工作流，并报告题目配对不确定性、成本、延迟与风险。污染检测或扰动差距是特定协议下的信号，既不能单独证明训练数据包含原题，也不能把“未检出”解释成无污染。
 
 5A. Benchmark 总分提升但线上效果变差，如何排查评估指标事故？
    考察点：aggregate score trap、slice regression、clean eval lift、contamination、online feedback、cost latency。
@@ -2990,7 +3004,7 @@
 
 7. Jailbreak 和 prompt injection 有什么区别？如何设计防护评估？
    考察点：用户提示、外部内容、instruction hierarchy、RAG、工具、数据外泄、未授权工具调用、误拒。
-   回答框架：jailbreak 主要是当前用户直接诱导模型绕过安全策略，prompt injection 是不可信内容污染应用指令边界，尤其出现在 RAG、网页、邮件、工具返回和 Agent 场景。防御要做指令层级、不可信内容标记、权限隔离、工具参数校验、二次确认和审计；评估不能只看 attack success，还要看 data leakage rate、unauthorized tool call rate、attack task success、clean task success、over-refusal 和 prompt injection gate。
+   回答框架：jailbreak 是试图诱导模型绕开安全限制的攻击，OWASP 将其视为 prompt injection 的一种；direct/indirect 说明输入来自用户还是网页、文件、工具等外部来源，两个维度可重叠。防御要在应用侧落实不可信内容边界、最小权限、工具参数校验、必要确认和审计；评估同时看泄露、未授权调用、安全任务成功、正常任务成功和 over-refusal，不能只看模型是否说了拒绝词。
 
 8. 如何判断模型是否真的具备推理能力？
    考察点：泛化、扰动、组合测试、CoT、verifier、污染。
@@ -3045,8 +3059,12 @@
    回答框架：先记录评测集版本、样本 schema、prompt、解码参数、候选数、verifier / tool 使用和随机种子；再报告最终答案准确率、切片准确率、过程步骤准确率、第一处错误定位、original / variant 鲁棒性、污染率和失败样本；然后用 paired evaluation 比较 baseline 与 candidate，并给出 bootstrap confidence interval 或其他统计不确定性；最后报告 token、候选数、verifier 调用、工具调用、延迟、cost per correct 和上线门禁。只报一个 benchmark 平均分不够。
 
 21. 如何设计 reasoning 安全与局限的上线前审计？
-   考察点：伪推理、过度自信、hidden CoT、工具误用、高风险人审、过度拒答、严重度加权风险。
-   回答框架：先定义 reasoning safety 样本 schema，记录风险域、期望安全动作、推理过程是否支持答案、置信度、工具动作、权限判定、人工审核和严重度；再统计 pseudo reasoning rate、overconfident error rate、unsafe compliance rate、tool misuse rate、hidden CoT exposure rate、high-risk review coverage、over-refusal rate 和 severity-weighted risk；最后设置 safety gate。高风险不当服从、工具越权、隐藏 CoT 暴露或人审覆盖不过线时，即使 reasoning benchmark 提升，也不能直接上线。
+   考察点：伪推理、过度自信、prompt/trace/final 分层安全判断、证据定位、hidden CoT、工具误用、高风险人审、过度拒答、严重度加权风险。
+   回答框架：先定义 reasoning safety 样本 schema，把 prompt、中间推理轨迹和最终回复分开标注，并记录风险域、期望安全动作、支持判断的证据片段、置信度、工具动作、权限判定、人工审核和严重度；再统计 pseudo reasoning rate、overconfident error rate、unsafe compliance rate、tool misuse rate、hidden CoT exposure rate、evidence attribution accuracy、high-risk review coverage、over-refusal rate 和 severity-weighted risk。TRACE 等基准可提供分层评估范例，但其语种、模型和风险覆盖有限；最后设置 safety gate。高风险不当服从、工具越权、隐藏 CoT 暴露或人审覆盖不过线时，即使 reasoning benchmark 提升，也不能直接上线。
+
+22. 候选系统的任务成功率上升，但无依据断言、单位成功成本和 P95 延迟也上升，如何决定是否发布？
+   考察点：配对样本、质量与风险分离、成功成本、预注册门槛、失败切片、回退。
+   回答框架：先确认同一批问题和固定配置，再列出 baseline/candidate 的成对结果、成功率分母及不确定性；把无依据断言作为独立风险门槛，不用平均质量抵销；按总成本/成功数计算单位成功成本，并单独报告 P95 延迟。若质量只达到点估计而区间未过门、或任一硬风险/服务门槛失败，就不发布；先复核失败样本并做最小区分实验，同时保留版本化回退。
 
 ## 产品化、商业化与落地
 
@@ -6358,3 +6376,17 @@
    **答：** 按原始请求汇总首次推理、重试、验证、fallback 和人工审核的完整期望成本，再除以该批原始请求的最终成功率。100 个原始请求共花 120 个成本单位、90 个最终成功时，单位成功成本是 `120/90=1.33`。不能把重试成本重复计入，也不能用成功 attempt 数除以所有 attempt 数代替请求级成功率。
 
 依据：[GPTQ 原论文](https://arxiv.org/abs/2210.17323)、[AWQ 原论文](https://arxiv.org/abs/2306.00978)、[LLM-QAT](https://aclanthology.org/2024.findings-acl.26/)、[MARLIN](https://arxiv.org/abs/2408.11743)；研究记录：[第六册第十七章精修](research/native-int4-deployment-depth-review-2026-10-27.md)；配套正文：[第六册第十七章](book-06-llm-deployment/chapters/17-native-int4与原生量化部署.md)。
+
+## 第二册第二章：Transformer 架构面试补充
+
+1. **问：Log-Linear Attention 怎样在单一递归状态和 full attention 之间增加记忆容量？**
+   **答：** 它用 Fenwick tree 将历史分成不同尺度的区间，并保留随长度对数增长的状态；论文给出的特定算法具有 $O(T\log T)$ 计算和 $O(\log T)$ 状态/解码成本。代价是区间内算法与反向传播更复杂，远处信息仍按层级压缩。论文的 Mamba-2/Gated DeltaNet 结果来自约 700M—800M 模型和特定任务，不能说成普遍优于 Transformer 或已证明线上加速。
+
+2. **问：Gated DeltaNet-2 为什么把擦除和写入拆成两个门？**
+   **答：** 单一标量会同时决定旧 key/read 方向中哪些关联应被擦除，以及新 value 中哪些维度应写入；$b_t$ 与 $w_t$ 分开后，两种决策可逐通道独立控制。论文在 1.3B 参数、100B FineWeb-Edu token 设置中测试 recurrent 与 sliding-window hybrid 变体；结果要按各自模型、任务和显式 attention 组件解释。
+
+3. **问：离散扩散语言模型是否必须采用一种特定 Transformer backbone？**
+   **答：** 不必。扩散描述离散序列的扰动目标和迭代采样；网络可以采用 encoder-only，也可以采用 encoder–decoder 等结构。架构会影响每轮去噪的重复计算，输出速度还受迭代数、block size、质量、硬件和 sampler 影响，因此需要端到端同质量对照。
+
+4. **问：PowLU 与 MoA 都在改 FFN 激活，能否直接比较谁更好？**
+   **答：** 不能只凭论文中的模型分数排名。PowLU 针对大正值 SwiGLU 增长与训练尖峰，MoA 研究输入自适应的激活混合；两者的机制、模型规模、训练 token 和基线不同。应匹配预算和数据，分开测训练稳定性、验证 loss、下游质量、激活/梯度异常值与 kernel 成本。

@@ -140,7 +140,7 @@ P_{\mathrm{vocab}}\approx 2Vd
 
 代码场景还要关注换行、缩进、下划线、camelCase、括号、运算符和字符串边界。对 Python，空格和换行可能直接决定语法；对 C++，模板符号、作用域和预处理指令会影响补全；对 JavaScript，标识符与符号密集度较高。把所有空白压缩掉再训练，可能让自然语言更紧凑，却破坏代码可执行性。
 
-跨语言的 token 成本也不只是“训练数据里这种语言够不够多”。NeurIPS 2025 的研究比较了约 7,000 个覆盖 97 种语言的单语 tokenizer，发现词表大小和预分词策略都会影响 token premium；单纯扩大词表并不能保证消除差异。这个结果支持按语言测 fertility 和上下文成本，但实验中的单语 tokenizer 不能直接给出多语共享词表的通用配方。多语言数据比例与迁移另在第 38 讲讨论。[Explaining and Mitigating Crosslingual Tokenizer Inequities](https://proceedings.neurips.cc/paper_files/paper/2025/hash/5b91cefbfa52340af2f16f249572dc76-Abstract-Conference.html)。
+跨语言 tokenizer 的成本差异也不只是“某种语言在训练数据里够不够多”。NeurIPS 2025 的研究比较了约 7,000 个覆盖 97 种语言的单语 tokenizer。由于不同语言的“词”边界并不总能对齐，作者在平行文本上比较同一内容被编码出的 token 数，而不是把 token/word 当作跨语言通用公平分数。实验显示词表大小和预分词策略都会改变 token 成本；扩大词表本身不能保证消除差异，按语言选择词表规模和 SuperBPE 在其单语实验中降低了 token 数及语言间波动。这些结果支持把表示成本纳入测量，但没有验证共享多语言词表的普遍方案，也没有直接测下游语言模型质量。多语言采样和迁移另在第 38 讲讨论。[Explaining and Mitigating Crosslingual Tokenizer Inequities](https://proceedings.neurips.cc/paper_files/paper/2025/hash/5b91cefbfa52340af2f16f249572dc76-Abstract-Conference.html)。
 
 ### 26.8 一个可检查 BPE 合并过程的最小实现
 
@@ -213,7 +213,7 @@ print(corpus)
 ~~~
 
 
-> **代码状态：已验证（2026-10-07；Python 3.12.9；标准库）**
+> **代码状态：静态审阅，未运行（2026-10-29）**
 
 该语料共有 8 个词实例；第一轮中 pair `("l", "o")` 的加权计数是 8。读者可以改动频次或加入新词，观察合并顺序如何变化。工业 tokenizer 还要处理词边界、特殊 token、规范化和高效编码，但这个例子能说明一个容易被忽略的事实：词表不是人工列出的词典，而是训练语料统计和预设边界共同产生的结果。
 
@@ -360,7 +360,7 @@ for domain, values in lengths.items():
 ~~~
 
 
-> **代码状态：已验证（2026-10-07；Python 3.12.9；标准库）**
+> **代码状态：静态审阅，未运行（2026-10-29）**
 
 这个统计器的价值不在于 toy tokenizer 的数值，而在于把“词表好不好”改写成按语言、领域、长度和协议逐项测量的问题。`corpus fertility` 是总 token 数除以总字符数；`empty` 桶展示了全空文本时分母为零，结果保留 `None`，不会把分母替换成 1 后制造一个看似正常的比例。生产报告还应给出 P50/P95 长度、置信区间或分层抽样方案；七条演示记录只用来验证统计口径。
 
@@ -370,9 +370,11 @@ chat template 常和 tokenizer 一起发布，但两者职责不同。tokenizer 
 
 审计一个模型时，应保存 tokenizer 版本、特殊 token 表、template 版本和一组 golden examples。只验证普通文本编码而不验证完整对话模板，无法排除角色串位、重复 BOS、错误 EOS 或工具结果被当作用户文本等问题。
 
-近期研究也在检验模型是否必须始终接收 tokenizer 的规范切分。NeurIPS 2025 的一项实验发现，部分指令微调模型能处理训练中未见的非规范切分，字符级切分还改善了其特定字符串操作任务；作者同时观察到这种鲁棒性依赖后训练阶段，基础模型的表现不同。这说明模型可能学到超越 token 边界的部分模式，却不意味着部署端可以随意改分词：特殊 id、模板、解码和缓存协议仍须一起验证。[Broken Tokens?](https://proceedings.neurips.cc/paper_files/paper/2025/hash/2b5c5689fae6fa9a4883e73e511d52c8-Abstract-Conference.html)。
+近期研究也在检验模型是否必须始终接收 tokenizer 的规范切分。NeurIPS 2025 的 Broken Tokens? 在其 20 个基准上构造未见过的非规范 token 序列；指令微调模型在抽样切分下最高保留 93.4% 的原聚合表现，在字符级切分下最高保留 90.8%。字符切分还让特定字符串操作和代码理解任务最高提升 15%，右对齐数字分组让特定大整数运算提升超过 33%。这些是论文模型和任务上的结果，作者观察到鲁棒性依赖指令微调阶段；它们说明部分模式可跨切分保留，却不证明生产端能安全改动 tokenizer、特殊 id、模板、解码或缓存协议。[Broken Tokens?](https://proceedings.neurips.cc/paper_files/paper/2025/hash/2b5c5689fae6fa9a4883e73e511d52c8-Abstract-Conference.html)。
 
-另一条更主动的路线是 zip2zip：它在推理时根据上下文形成动态 token，并通过额外 uptraining 配套动态 embedding/unembedding。论文报告的 token 减少幅度绑定其模型和评测设置；对现有服务而言，新增词表状态、分块一致性和缓存兼容都是待解决的接口问题，因此这里把它作为研究方向，而非默认替代方案。[zip2zip](https://proceedings.neurips.cc/paper_files/paper/2025/hash/def682d57535b9e778508b4b1a911034-Abstract-Conference.html)。
+zip2zip 把压缩从固定词表延伸到推理时动态合并：LZW 根据当前上下文形成 hypertoken，并配套动态 embedding/unembedding；论文用 PEFT 对已有模型做约 10 GPU 小时的 uptraining，在其设置中把输入和输出序列缩短 15%—40%。论文还在特定模型、上下文、生成长度和硬件上报告最高约 40% 的端到端延迟改善；token 变少本身不保证同样的端到端提速，因为词表操作、输出投影、内核和请求形态都会改变成本。[zip2zip](https://proceedings.neurips.cc/paper_files/paper/2025/hash/def682d57535b9e778508b4b1a911034-Abstract-Conference.html)。
+
+2026 年的 zip2zip++ 预印本继续改善动态词表的 embedding 几何和合并过程，但并未在所有能力上追回未压缩模型。作者在四个指令模型上用 1B 微调数据做 8,000 步 LoRA、最大合并长度设为 4；以 Phi-3.5-mini 为例，GSM8K 从 zip2zip 的 0.36 提升到 0.68，未压缩模型为 0.75；HumanEval pass@1 从 0.26 提升到 0.32，未压缩模型为 0.58；IFEval 仍为 0.32，低于未压缩模型的 0.38。14B 设置中的代码和指令结果也仍有回退。它目前是小范围预印本证据，应理解为压缩与质量折中的研究进展，而非可以直接替换现有 tokenizer 的生产方案。[zip2zip++](https://arxiv.org/abs/2610.13605)。
 
 最终验收要把文本、token id、模型输入、流式输出和停止条件放在同一次回归中。若 encode/decode 正常但角色串位，优先查 template；若只有 chunk 边界异常，查增量 tokenizer/detokenizer；若 id 和输入一致而答案变化，再检查模型或解码配置。这样的分层检查让协议问题能定位到具体接口。
 
@@ -520,7 +522,7 @@ for record in records:
 ~~~
 
 
-> **代码状态：已验证（2026-10-07；Python 3.12.9；标准库）**
+> **代码状态：静态审阅，未运行（2026-10-29）**
 
 运行方式为 Python 3.12 标准库直接执行；两条构造记录中，短文本且许可未知的第一条会因多个硬门槛被拒绝，第二条仅在该示例白名单策略下通过。生产系统中应把 `keep=False` 拆成具体原因，不能让一个综合布尔值掩盖“短文本”“疑似密钥”“来源不可追溯”和“许可未获准”之间完全不同的处理路径。白名单是项目输入，不表示这些许可在所有地区、用途或产品中都自动适用。
 
@@ -631,7 +633,7 @@ for i in range(len(documents)):
 ~~~
 
 
-> **代码状态：已验证（2026-10-07；Python 3.12.9；标准库）**
+> **代码状态：静态审阅，未运行（2026-10-29）**
 
 三个样本两两比较会输出相似度；若把 `width` 改为大于所有样本长度，分数为 `None`，因为空集合之间的相似度在这里没有可用的判定意义。这个实现只是候选生成器，不足以承担生产去重。它没有处理词序变化、代码语法、跨语言改写或模板公共部分；它的意义是让 Jaccard 阈值、样本长度和误删风险可以被实际观察。
 
@@ -815,7 +817,7 @@ for temperature in [1.0, 2.0, 4.0]:
 ~~~
 
 
-> **代码状态：已验证（2026-10-07；Python 3.12.9；标准库）**
+> **代码状态：静态审阅，未运行（2026-10-29）**
 
 当温度升高时，低资源桶的比例会上升，但 exposure 也可能迅速变大。采样策略的正确评价不是“低资源语言占比是否上升”，而是“它是否在目标任务上带来收益，且没有用重复和高资源退化换来这个收益”。
 
@@ -825,7 +827,9 @@ for temperature in [1.0, 2.0, 4.0]:
 
 手算温度采样能看清“比例变平”为什么会增加重复。三个桶原始占比为 `[0.80,0.15,0.05]`，取温度指数 `α=0.5`，未归一化权重为 `[√0.80,√0.15,√0.05]≈[0.894,0.387,0.224]`，归一化后约为 `[0.594,0.257,0.149]`。若可用量分别是 800、150、50 单位，总预算 1000，则计划曝光约为 `594/800=0.74`、`257/150=1.71`、`149/50=2.98` 次。低资源桶从 5% 升到约 15%，同时被重复近三遍；是否值得要看 fresh 验证和其他桶的退化。
 
-2025 年 NeurIPS 的两项工作分别研究了按目标域拟合 mixture scaling law，以及在特定训练配方中重复高质量筛选数据的收益。它们使“多轮重复必然有害”和“原始数据量越大越好”都不再是可靠默认，但结果绑定各自数据、模型规模与 recipe；不能直接把作者的配比搬到新项目。[Scaling Laws for Optimal Data Mixtures](https://proceedings.neurips.cc/paper_files/paper/2025/hash/bc1d640f841f752c689aae20b31198c1-Abstract-Conference.html)、[Datasets, Documents, and Repetitions](https://proceedings.neurips.cc/paper_files/paper/2025/hash/2aba6ec20299931d46ddeefd5ddcb442-Abstract-Conference.html)。
+2025 年 NeurIPS 的 Scaling Laws for Optimal Data Mixtures 用若干小规模实验拟合目标域 loss 与模型规模 $N$、训练 token $D$ 和领域权重向量 $h$ 的关系；$h_j$ 表示第 $j$ 个领域的训练占比，非负且总和为 1。随后为指定目标和预算优化 $h$。它在 LLM、神经机器翻译和视觉模型设置中做验证，LLM 实验最大约 7B 参数、150B token；这是一种把目标与预算写进 mixture 选择的方法，不是可脱离语料和预训练目标使用的通用比例。其拟合假设不含数据重复，也不直接预测下游任务能力。
+
+另一项 NeurIPS 2025 研究发现，在作者的训练 recipe 中，经过激进过滤的 DCLM-baseline（RefinedWeb 中按 FastText 选出的前 10%）重复训练最多 10 个 epoch，可以在 1B、3B、7B 和 12.6B 模型设置中胜过只训练一轮、数据集大约大十倍的 RefinedWeb。这个结果依赖重复次数与 recipe 的配合，例如作者随重复次数增加权重衰减，近似按重复次数平方根调整；论文也明确指出不能据此宣布 DCLM 在所有目标上都优于 RefinedWeb。两项工作共同说明应把目标域、有效文档覆盖和重复曝光纳入小规模校准，而不是照抄一个数据比例。[Scaling Laws for Optimal Data Mixtures](https://proceedings.neurips.cc/paper_files/paper/2025/hash/bc1d640f841f752c689aae20b31198c1-Abstract-Conference.html)、[Datasets, Documents, and Repetitions](https://proceedings.neurips.cc/paper_files/paper/2025/hash/2aba6ec20299931d46ddeefd5ddcb442-Abstract-Conference.html)。
 
 若采用课程学习，可比较“前 70% 基础网页与代码、后 30% 困难数学”与全程固定混合。前者数学提高时，先检查同一 learning-rate schedule 下的分桶 loss、fresh 数学题和基础能力回放；不能把后段低学习率的作用误认成课程效果。预先写好停止条件：例如连续三个评估周期目标域收益低于 0.5 个百分点、重复曝光超过 3 次且通用域退化超过容忍值时，暂停加权并检查样本质量。阈值应由项目目标设定，这组数只作演示。
 
@@ -924,7 +928,7 @@ print("accepted:", [item["id"] for item in accepted])
 ~~~
 
 
-> **代码状态：已验证（2026-10-07；Python 3.12.9；标准库）**
+> **代码状态：静态审阅，未运行（2026-10-29）**
 
 真实系统的 `answer_verified` 不能由同一个生成模型自报。它应来自执行器、独立证明器、检索来源、规则检查或人工标注；对不同任务，应记录验证器的覆盖率和误判率。
 
@@ -944,7 +948,7 @@ print("accepted:", [item["id"] for item in accepted])
 
 ### 31.10 生成难度要落在学生可学习的范围
 
-EMNLP 2025 的大规模研究在其预训练设置中比较自然网页、改写合成文本、教材式合成及其混合：单独使用改写数据并未普遍快于自然文本；约三分之一改写数据与三分之二自然文本的某些设置能更快达到相同验证损失，而教材式数据单独训练在若干下游域上损失较高。作者也发现合适比例依赖模型规模和数据预算。这里应把结论读作“类型和混合方式会改变结果”，不能抽取成固定的 1/3 配方。[Demystifying Synthetic Data in LLM Pre-training](https://arxiv.org/abs/2510.01631)。
+EMNLP 2025 的正式论文在其预训练设置中比较自然网页、改写合成文本、教材式合成及其混合；研究覆盖 1,000 多个模型变体和超过 100,000 GPU 小时。较大数据预算下，约三分之一改写文本加三分之二自然网页文本，在特定对照中可快约 5—10 倍达到相同验证 loss；单独使用改写文本并未普遍更快，教材式文本单独训练在若干下游域也有退化。结果来自论文特定的改写方式、单轮训练、模型和预算，不能把 1/3 当成通用比例，也不能外推到所有合成数据类型。[Demystifying Synthetic Data in LLM Pre-training](https://aclanthology.org/2025.emnlp-main.544/)。
 
 样本正确也不代表目标学生能从中学到东西。teacher 生成的证明或工具轨迹若远超学生已有能力，可能只增加难以拟合的 token；过于简单、模板化的样本又可能只教会格式。可按难度分层做小规模训练，比较各层在 fresh 任务上的增益，并保留基础数据回放，观察收益和遗忘。生成量、正确率和学习价值是三种不同统计，不能互相替代。
 
@@ -1087,7 +1091,7 @@ for scale in large:
 ~~~
 
 
-> **代码状态：已验证（2026-10-07；Python 3.12.9；标准库）**
+> **代码状态：静态审阅，未运行（2026-10-29）**
 
 使用 Python 3.12 标准库直接运行，代码输入正的 `scale` 及有限的曲线参数，输出构造曲线上的 loss 数值；例如 `predicted_loss(1)=4.0`，`predicted_loss(64)` 约为 `2.202`。负尺度、非有限参数和无法表示的幂运算会被拒绝。这个实验没有拟合真实模型，它只说明：小规模曲线可以非常平滑，但大规模阶段若数据、架构或训练 recipe 发生系统变化，真实结果会整体偏离。正确做法是把中等规模结果回填模型，而不是把外推误差归因于“Scaling Law 完全无效”。
 
@@ -1223,7 +1227,7 @@ print("loss=", round(loss.item(), 4), "ppl=", round(ppl, 4))
 ~~~
 
 
-> **代码状态：已验证（2026-10-07；Python 3.12.9；PyTorch 2.12.0+cpu、NumPy 2.4.6）**
+> **代码状态：静态审阅，未运行（2026-10-29）**
 
 在固定随机种子的示例中，函数返回有限 loss 和 `exp(loss)`；具体浮点末位依赖 PyTorch 版本。`shift_logits` 与 `shift_labels` 的错位是语言模型 loss 中最常见的实现细节之一。若把同一位置的 logits 与同一位置的 input 当作目标，就会改变任务定义；若 padding 没有设为 ignore index，短样本会被无效位置污染。该示例没有实现序列级加权、分布式 reduction 或模型训练评估。
 
@@ -1379,7 +1383,7 @@ print("loss=", round(loss, 4), "preclip_grad_norm=", round(grad_norm, 4))
 ~~~
 
 
-> **代码状态：已验证（2026-10-07；Python 3.12.9；PyTorch 2.12.0+cpu、NumPy 2.4.6）**
+> **代码状态：静态审阅，未运行（2026-10-29）**
 
 这里使用单卡 eager 模式、无 AMP 的 PyTorch 标量 loss；调用方须提供有限 batch，并在该函数报错后保留异常现场。AMP 中必须先把 scaled gradient unscale，再裁剪。生产训练还要避免在异常后无条件执行 optimizer.step，并保证最后一个健康 checkpoint 不被覆盖。
 
@@ -1483,7 +1487,7 @@ for dtype in [torch.float16, torch.bfloat16, torch.float32]:
 ~~~
 
 
-> **代码状态：已验证（2026-10-07；Python 3.12.9；PyTorch 2.12.0+cpu、NumPy 2.4.6）**
+> **代码状态：静态审阅，未运行（2026-10-29）**
 
 这个实验能直观看到 FP16 更早达到有限值上限，而 BF16 的范围更接近 FP32；同时 BF16 的 `eps` 更大，说明它的有效精度更粗。具体硬件上的吞吐和 kernel 行为仍要用真实设备测量。
 
@@ -1627,7 +1631,7 @@ with tempfile.TemporaryDirectory() as directory:
 ~~~
 
 
-> **代码状态：已验证（2026-10-07；Python 3.12.9；PyTorch 2.12.0+cpu、NumPy 2.4.6）**
+> **代码状态：静态审阅，未运行（2026-10-29）**
 
 预期输出为 `restored: 1 {'shard': 2, 'offset': 16} parameters= True`。这里的 `weights_only=False` 会反序列化 checkpoint 中的 Python 对象，只能用于可信文件；不可信权重应优先采用受限加载或张量专用格式。生产系统还要保存 CUDA RNG、GradScaler、分布式分片、版本和 manifest；训练状态文件不能因为扩展名是 `.pt` 就被当作可信输入。
 
@@ -1677,7 +1681,7 @@ with tempfile.TemporaryDirectory() as directory:
 
 时间切分不是万能方法：网页会被转载，题目会被改写，模型可能见过同一知识的其他表达。因此报告中要说明训练数据截止时间、来源范围、污染检测方法和 fresh eval 的构造方式。
 
-算法生成任务是另一种补充。ICLR 2026 的 BeyondBench 用程序生成数学和组合问题，并以确定性解答校验；论文列出 44 类任务和 117 种变化形式，覆盖不同难度。它能降低固定题面被记住的风险，却不测百科知识、开放写作或真实产品流程，生成规则本身也定义了被测能力。因此它适合作为 contamination-resistant 的能力切片，不能证明一个模型“总体无污染”。[BeyondBench](https://proceedings.iclr.cc/paper_files/paper/2026/hash/22b4e30a7a660b17f1fb58ab49671e77-Abstract-Conference.html)。
+算法生成任务是另一种补充。ICLR 2026 的 BeyondBench 用程序生成数学和组合问题，并以确定性解答校验；论文列出 44 类任务和 117 种变化形式，生成空间超过 $10^{15}$ 个实例，并在三折设置中评测 101 个模型。它能降低固定题面被记住的风险，但测量对象仍限于这些算法和数学题族；论文还使用单一 prompt，不覆盖百科知识、开放写作或真实产品流程。生成规则、提示与 verifier 共同定义被测能力，因此它只能作为污染风险较低的一类能力切片，不能证明一个模型“总体无污染”。[BeyondBench](https://proceedings.iclr.cc/paper_files/paper/2026/hash/22b4e30a7a660b17f1fb58ab49671e77-Abstract-Conference.html)。
 
 ### 37.3 生成式评估的协议
 
@@ -1768,7 +1772,7 @@ print("selected:", selected["name"])
 ~~~
 
 
-> **代码状态：已验证（2026-10-07；Python 3.12.9；标准库）**
+> **代码状态：静态审阅，未运行（2026-10-29）**
 
 预期输出为 `eligible: ['a', 'b']` 和 `selected: b`。这段代码展示的是决策顺序，不是通用权重。不同产品可以把代码通过率、语言一致性、延迟或偏好指标放在目标函数中，但规则应在看结果之前确定，避免事后只挑最有利的 checkpoint。
 
@@ -1786,7 +1790,7 @@ print("selected:", selected["name"])
 
 两个模型都答错 20 题，一个可能是知识过时，另一个可能是输出格式解析失败；准确率相同，修复方案不同。按主题、语言、长度、证据位置、错误严重度和失败阶段切片，并保留人工复核样本，才能把模型能力、harness、评测器与数据疑点区分开。自动 judge 也应报告版本、评分规则、位置偏差和抽检结果。
 
-污染检测没有一个能作最终裁决的分数。Exact match 会漏掉改写，语义相似会把共同知识或标准题型误报，成员推断依赖可区分性等假设。2025 年关于检测方法的研究指出，部分方法在其设定下可能接近随机表现；未找到重叠只能记为“当前检测未命中”，不能写成“已证明无污染”。[Does Data Contamination Detection Work (Well) for LLMs?](https://aclanthology.org/2025.findings-naacl.291/)。
+污染检测没有一个能作最终裁决的分数。Exact match 会漏掉改写，语义相似会把共同知识或标准题型误报，成员推断依赖可区分性等假设。NAACL 2025 Findings 的综述整理了 50 篇研究和 8 类检测假设，并在三个直接的 instance-level 成员推断假设上做实证检验；这些方法在论文使用的若干预训练语料上接近随机猜测，较高分也可能反映训练集与测试集的领域差异。这个结果只挑战所测假设和数据条件，不是对所有污染检测方法的否定；未找到重叠仍只能记为“当前检测未命中”，不能写成“已证明无污染”。[Does Data Contamination Detection Work (Well) for LLMs?](https://aclanthology.org/2025.findings-naacl.291/)。
 
 ### 37.10 用独立评估控制 checkpoint 选择偏差
 
@@ -1843,9 +1847,9 @@ q_i=\frac{p_i^\alpha}{\sum_jp_j^\alpha}
 
 ### 38.6 tokenizer 的语言公平性
 
-多语言评估应把 tokenizer fertility 作为成本维度。若中文每字符一个 token，而英文每数个字符一个 token，那么相同 context window 中两种语言可表达的内容不同；在训练 token 预算相同的情况下，不同语言获得的字符量也不同。
+多语言评估要先分清两个量。Token fertility 通常是每个参考词对应的 token 数，受“词”的分词规则影响，适合在分母定义固定的语料或任务里比较；跨语言时，词边界未必能公平对齐。同一内容的 token 成本则在平行文本或其他对齐样本上直接比较 token 数，避免把某一种语言的词切分当作通用分母，但仍受翻译长度和对齐质量影响，也只测压缩效率，不测模型能力。NeurIPS 2025 的 tokenizer 研究采用同内容的 token-count 比较；The Token Tax 则在其 AfriMMLU 评估中使用 fertility，并报告它与准确率相关。两者回答的问题不同，不能把一个指标换算成另一个。
 
-这不意味着必须让所有语言的 token 数完全相等，而是要识别这种差异对训练暴露、推理成本、长上下文和 benchmark 结果的影响，并在采样和系统容量中体现。
+这不意味着必须让所有语言的 token 数完全相等，而是要识别表示差异对训练暴露、推理成本、长上下文和 benchmark 结果的影响，并把每个指标的分母和对齐方式一并报告。
 
 ### 38.7 多语言评估组合
 
@@ -1915,7 +1919,7 @@ for temperature in [1.0, 2.0, 5.0]:
 ~~~
 
 
-> **代码状态：已验证（2026-10-07；Python 3.12.9；标准库）**
+> **代码状态：静态审阅，未运行（2026-10-29）**
 
 温度 `T=1` 对应原始数据比例；温度增大时，斯瓦希里语等低资源语言获得更高比例，但曝光倍数也可能变大。计划表可以用来提前发现重复风险，模型最终是否受益仍需由原生 fresh 评估和人工质量验证回答。
 
@@ -1923,7 +1927,7 @@ for temperature in [1.0, 2.0, 5.0]:
 
 设两个语言桶各有 100 万原生字符，A 平均每 4 个字符编码成 1 token，B 平均每个字符占 1 token，则相同字符量分别需要 25 万和 100 万 token。若训练预算按 token 相等，B 获得的字符覆盖只有 A 的四分之一；若固定字符量，B 则消耗四倍 token。这个账本说明 token 级采样公平不等于内容覆盖公平，但它本身不证明哪种语言能力更强。
 
-2025 年 *The Token Tax* 在 16 种非洲语言、约 9,000 道多选题和若干模型上报告 token fertility 与准确率的相关关系，并讨论 token 膨胀的计算成本。研究范围绑定其语言、模型和题型，相关不证明 tokenizer 是能力差异的唯一原因；语料质量、预训练量、迁移和评估覆盖也可能共同影响结果。[The Token Tax](https://arxiv.org/abs/2509.05486)。
+AfricaNLP 2026 的正式论文 *The Token Tax* 在 AfriMMLU 上评估 10 个 LLM、5 个学科和 16 种非洲语言，发现 token fertility 与准确率呈负相关。作者指出 fertility 也与训练数据可用量和质量等因素共同变化，因此不能把相关关系解释为 tokenizer 导致的因果效应。论文的成本推算还假设 attention 计算近似随序列长度平方增长；它适用于说明长序列成本机制，不代表每种模型或工作负载的端到端延迟都按同一比例变化。[The Token Tax](https://aclanthology.org/2026.africanlp-main.10/)。
 
 长上下文评估也受 fertility 影响。假设两种语言各有 3,000 个字符，A 每字符平均 0.25 token，B 每字符 1 token，则分别约需 750 和 3,000 token。在 2,048-token 窗口里，A 的文本能全部进入，B 只能容纳约 `2048/3000=68.3%`；如果答案依赖末尾证据，差距可能来自截断而非推理能力。评估应同时报告按字符对齐的内容量和按 token 约束的计算量。
 
@@ -2036,7 +2040,7 @@ for k in [1, 5, 10]:
 ~~~
 
 
-> **代码状态：已验证（2026-10-07；Python 3.12.9；标准库）**
+> **代码状态：静态审阅，未运行（2026-10-29）**
 
 这个实现只用于展示公式。生产评估需要隔离执行环境、限制资源、固定依赖，并防止候选代码访问不应访问的文件或网络。
 

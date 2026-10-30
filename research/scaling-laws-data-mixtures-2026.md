@@ -26,11 +26,23 @@
   - 证据等级：source-backed（论文给出的代理优化方法和其 The Pile/GLaM 实验结果）。
   - 适用边界：不是通用数据比例或生产增益保证；结论受代理模型、域划分、模型、数据集和评测任务限制。
 
-- Kang et al., “Demystifying Synthetic Data in LLM Pre-training: A Systematic Study of Scaling Laws, Benefits, and Pitfalls,” arXiv:2510.01631 v1，提交日期 2025-10-02，[论文](https://arxiv.org/abs/2510.01631)，[v1 正文](https://arxiv.org/html/2510.01631v1)。
-  - 实际阅读范围：摘要、§4 实验结果、§5 合成数据比例分析及实验设置。
-  - 来源支持：研究报告超过 1,000 个模型变体和超过 100,000 GPU 小时；在较大数据预算下，约 1/3 改写文本与 2/3 自然网页文本相较自然网页基线，可快约 5–10 倍达到相同验证 loss。单独使用改写文本并未更快；单独使用教材式生成文本在多个下游域、尤其小预算下表现更差。
-  - 证据等级：source-backed（该研究统一训练和评测设置中的模型/数据实验）。
-  - 适用边界：结果依赖其改写方法、生成文本类型、模型规模、数据预算和目标域；不能将约 1/3 或 5–10 倍当成通用配方。改写、教材、程序生成题等合成数据不可视为同一类。
+- “Scaling Laws for Optimal Data Mixtures,” NeurIPS 2025，[会议论文摘要](https://proceedings.neurips.cc/paper_files/paper/2025/hash/bc1d640f841f752c689aae20b31198c1-Abstract-Conference.html)，[论文 PDF](https://proceedings.neurips.cc/paper_files/paper/2025/file/bc1d640f841f752c689aae20b31198c1-Paper-Conference.pdf)。
+  - 实际阅读范围：摘要、引言、§§1–2、4–6 及限制讨论。
+  - 来源支持：方法拟合目标域 loss 与模型规模、训练 token 和领域权重向量的关系，再为指定目标和预算优化 mixture；实验覆盖 LLM（最大约 7B 参数、150B token）、神经机器翻译和视觉模型。
+  - 证据等级：source-backed（论文实验与拟合范围内的结果）。
+  - 适用边界：目标主要是预训练/通用 loss，方法假设不重复数据；拟合权重不直接等于下游任务能力最优比例，也不是跨语料通用配方。
+
+- “Datasets, Documents, and Repetitions: The Practicalities of Unequal Data Quality,” NeurIPS 2025，[会议论文摘要](https://proceedings.neurips.cc/paper_files/paper/2025/hash/2aba6ec20299931d46ddeefd5ddcb442-Abstract-Conference.html)，[论文 PDF](https://proceedings.neurips.cc/paper_files/paper/2025/file/2aba6ec20299931d46ddeefd5ddcb442-Paper-Conference.pdf)。
+  - 实际阅读范围：摘要及 §3–4 的数据构造、重复实验、权重衰减设置和结果。
+  - 来源支持：在作者设置中，按 FastText 从 RefinedWeb 选出的 top-10% DCLM-baseline 数据最多重复 10 个 epoch；在 1B、3B、7B、12.6B 模型对照中，可胜过单轮训练的约十倍规模 RefinedWeb 数据。随重复次数调整权重衰减（近似按重复次数平方根变化）是该收益的重要 recipe 条件。
+  - 证据等级：source-backed（论文给定语料、模型规模、预算和训练配方中的比较）。
+  - 适用边界：论文没有证明 DCLM-baseline 总体优于 RefinedWeb；收益取决于目标 token/参数预算、过滤方法、重复次数和优化 recipe，不可推广为普遍重复策略。
+
+- Kang et al., “Demystifying Synthetic Data in LLM Pre-training: A Systematic Study of Scaling Laws, Benefits, and Pitfalls,” EMNLP 2025，[ACL Anthology 正式论文](https://aclanthology.org/2025.emnlp-main.544/)，[PDF](https://aclanthology.org/2025.emnlp-main.544.pdf)；arXiv:2510.01631 v1 为早期版本。
+  - 实际阅读范围：正式论文摘要、§4.1.3、§5 的结果和限制；核对模型、token 预算、单轮训练及合成数据类型。
+  - 来源支持：研究覆盖 1,000 多个模型变体和超过 100,000 GPU 小时；在其较大数据预算的实验中，约 1/3 改写文本与 2/3 自然网页文本的混合，可在特定对照中约快 5–10 倍达到相同验证 loss。单独使用改写数据没有显示同等加速；教材式合成数据单独使用在部分下游域退化。
+  - 证据等级：source-backed（EMNLP 正式论文所报告的实验和拟合）。
+  - 适用边界：结果依赖具体改写方法、模型规模、预算、任务及单轮训练流程；不能将比例或训练加速当作通用配方，其他合成数据类型也不可等同处理。
 
 - Roberts et al., “Rewriting Scaling Laws for Synthetic Data with Compute and Data Constraints,” arXiv:2610.31867 v1，提交日期 2026-10-22，[预印本](https://arxiv.org/abs/2610.31867)。
   - 实际阅读范围：摘要与计算受限、数据受限两种设定的说明。
@@ -38,11 +50,35 @@
   - 证据等级：preprint / source-backed（预印本中的实验、拟合和外推，不是同行评审后的定论）。
   - 适用边界：比例是该模型与数据约束下的估计；数据受限设定使用不同假设。数十倍 FLOPs 的 scaling forecast 属外推，不能当作已验证的生产训练结论。
 
-- Subramanyam et al., “Scaling Laws Revisited: Modeling the Role of Data Quality in Language Model Pretraining,” ICLR 2026，[会议论文摘要](https://proceedings.iclr.cc/paper_files/paper/2026/hash/d0c80a0c294a16190c8904b9809c5fba-Abstract-Conference.html)。
-  - 实际阅读范围：ICLR 官方摘要。
-  - 来源支持：论文引入质量参数 $Q$ 并扩展 loss scaling 形式；用机器翻译和自回归建模中的人工控制噪声实验检验该形式，并报告外样本评估。
-  - 证据等级：source-backed（会议论文摘要及其陈述的实验）。
-  - 适用边界：质量估计依赖其 corruption/deficiency 定义和噪声设置；不等同于任意语料可直接使用的通用质量分，也不证明清洗总能降低模型规模需求。
+- Subramanyam et al., “Scaling Laws Revisited: Modeling the Role of Data Quality in Language Model Pretraining,” ICLR 2026，[会议论文摘要](https://proceedings.iclr.cc/paper_files/paper/2026/hash/d0c80a0c294a16190c8904b9809c5fba-Abstract-Conference.html)，arXiv:2510.03313 v2（2026-02-23），[HTML 正文](https://arxiv.org/html/2510.03313v2)。
+  - 实际阅读范围：ICLR 官方摘要；arXiv v2 HTML 的摘要、§3 数据质量度量、§4.2 质量感知 scaling law、§5 的实验设置与结果，重点核对 §5.5、表 2—3 及质量估计边界。
+  - 来源支持：作者定义无量纲 $Q\in(0,1]$，用 corruption rate proxy 或 deficiency measure 估计，并提出 $L(N,D,Q)=A/N^\alpha+B/(D^\beta Q^\gamma)+E$。研究在 Paracrawl v8 机器翻译和 C4 因果语言建模上控制合成噪声与数据质量；Huber 拟合报告 NMT 的 $\hat\gamma\approx0.173$、CLM 的 $\hat\gamma\approx0.401$，并报告其未见数据评估符合相似的拟合形式。
+  - 证据等级：source-backed（ICLR 2026 论文、明确的任务/数据、合成扰动设置和作者拟合实验）。
+  - 适用边界：$Q$ 及 $\gamma$ 绑定论文的质量操作化、噪声机制、模型和数据规模；估计值不能视为普遍常数，也不提供任意语料的通用排序分数。作者关于 moderate corruption 的观察限于其受控任务，不能推出所有清洗都能减少模型规模需求。
+
+## 固定数据下的重复训练与集成
+
+- Kim et al., “Pre-training under infinite compute,” ICLR 2026，[官方会议摘要](https://proceedings.iclr.cc/paper_files/paper/2026/hash/79682ef54677a2cb3dfb8383b372037f-Abstract-Conference.html)。
+  - 实际阅读范围：ICLR 官方论文页摘要；未在本记录中复核全文表格。
+  - 来源支持：研究固定可用文本、计算较充足的预训练设定；摘要称单纯增加 epoch 和参数的既有数据受限方法会过拟合，而正则化、参数扩展和独立模型集成可改善拟合的 loss 渐近值。作者报告其联合干预在 200M token 数据设定下以较少数据得到更低渐近 loss，并将集成蒸馏到较小 student。
+  - 证据等级：source-backed（ICLR 2026 同行评审论文的官方摘要）。
+  - 适用边界：这里只记录摘要能够支持的方向性结论；渐近值、下游增益和蒸馏保留比例均属于作者指定模型、语料、训练方案和外推，不能当作任意数据受限训练的配方。
+
+## 生成式评估的 Scaling Law
+
+- Schaeffer et al., “Pretraining Scaling Laws for Generative Evaluations of Language Models,” ICLR 2026，[官方会议摘要](https://proceedings.iclr.cc/paper_files/paper/2026/hash/55d7fbeddfd9bb6dace146cc4fa02ff0-Abstract-Conference.html)。
+  - 实际阅读范围：ICLR 官方论文页摘要；未在本记录中复核全文推导和实验表格。
+  - 来源支持：作者研究用预训练计算量、参数量与 token 数、以及 gold solution likelihood 拟合生成任务 pass@k 的三类 scaling law。摘要明确指出 $k$ 会改变拟合参数和预测性，因此计算预算外还须固定每题尝试次数和 verifier 口径。
+  - 证据等级：source-backed（ICLR 2026 同行评审论文的官方摘要）。
+  - 适用边界：该项工作针对论文中的生成式任务、pass@k 定义与模型规模范围；不能由摘要推断某个 k 在其他任务上最优，也不能将拟合参数跨 benchmark 迁移。
+
+## 数据质量干预与 Scaling Law
+
+- Ardalani et al., “How Text Quality Interventions Reshape Neural Scaling Laws for LLMs: Empirical Study,” ICLR 2026，[官方会议摘要](https://proceedings.iclr.cc/paper_files/paper/2026/hash/6544c0b53cc1ea51d0c7086b536830a8-Abstract-Conference.html)。
+  - 实际阅读范围：ICLR 官方论文页摘要；未在本记录中复核全文实验协议。
+  - 来源支持：摘要列出的干预包括去重、启发式过滤和 LLM 引导改写；作者报告用 23 组 QualityPajama 数据训练超过 2,000 个、100M—8B 参数的模型，观察干预会改变拟合系数和指数，且质量排序与 token/parameter 比例依资源设定而变。
+  - 证据等级：source-backed（ICLR 2026 同行评审论文的官方摘要）。
+  - 适用边界：摘要中的模型、语料和干预集合有限；不能据此得出所有清洗操作都会改变指数、任意数据集的质量排序，或跨任务通用的 token/parameter 比例。
 
 ## 重复数据与 benchmark 污染
 
