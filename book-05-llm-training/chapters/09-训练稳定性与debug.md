@@ -120,7 +120,7 @@ L_t
 -\frac{1}{T_t}
 \sum_{j=1}^{n_t}
 m_j
-\log p_\theta(y_j\mid x_{<j})
+\log p_\theta(y_j\mid x_{1,\ldots,j-1})
 ~~~
 
 当 T_t=0 时，这个平均值没有定义。工程上应记录并跳过空监督 batch，不能把它默认为 loss=0，因为这会伪造一条正常曲线。
@@ -131,16 +131,18 @@ m_j
 
 可以用一个指示量把不同信号投影到 step 轴：
 
+先把当前 loss 相对健康窗口的倍数记为 \(r_t\)，把参与比较且数据与聚合口径可比的 rank loss spread 记为 \(\Delta_{\mathrm{rank},t}\)；二者的具体定义分别在 9.4.2 和 9.10.3 给出。若 spike 窗口没有有限且大于零的基线，或 rank loss 含非有限值、rank 数据不可比，相应指标记为不可用，不得把“不可用”当作“未异常”，并从本步最大值计算中略去。
+
 ~~~math
 a_t
 =
 \max
 \left\{
-\mathbf{1}[\neg\operatorname{finite}(L_t)],
-\mathbf{1}[\neg\operatorname{finite}(G_t)],
+\mathbf{1}[\neg\mathrm{isfinite}(L_t)],
+\mathbf{1}[\neg\mathrm{isfinite}(G_t)],
 \mathbf{1}[T_t=0],
-\mathbf{1}[r_t\ge\tau_{\mathrm{spike}}],
-\mathbf{1}[\Delta_{\mathrm{rank},t}>\tau_{\mathrm{rank}}]
+\mathbf{1}[\mathrm{defined}(r_t)\land r_t\ge\tau_{\mathrm{spike}}],
+\mathbf{1}[\mathrm{defined}(\Delta_{\mathrm{rank},t})\land\Delta_{\mathrm{rank},t}>\tau_{\mathrm{rank}}]
 \right\}
 ~~~
 
@@ -221,7 +223,7 @@ forward 已经出现 NaN，优先看输入、mask、logits 和算子；forward �
 ~~~math
 b_t
 =
-\operatorname{median}(L_{t-k},\ldots,L_{t-1}),
+\mathrm{median}(L_{t-k},\ldots,L_{t-1}),
 \qquad
 r_t
 =
@@ -256,27 +258,36 @@ b_t
 | --- | --- | --- | --- |
 | Adam instability | Molybog 等分析梯度估计随时间的相关结构，指出它可能让 Adam 更新范数放大、更新方向与下降方向变弱相关；研究覆盖 7B、30B、65B、546B，其中较小模型未出现同样的爆炸式 loss divergence | 先核对层内更新分布和矩估计；作者讨论了降低学习率、调小 epsilon、减小 batch 或调整 \(\beta_1/\beta_2\) 等路线 | 降学习率会延长训练；调小 epsilon 与低精度数值风险冲突；减小 batch 损失数据并行效率；改变矩估计常数也会改变正常阶段的历史响应。该理论不能证明所有 spike 都由 Adam 单独造成 |
 | 自适应预条件器失配 | Adam 的二阶矩满足 \(v_t=\beta_2v_{t-1}+(1-\beta_2)g_t^2\)。Bai 等观察到梯度骤降时，\(v_t\) 可能按自身衰减而暂时跟不上随后上升的梯度；预条件后的曲率因此可能持续越过稳定阈值 | 检查逐层梯度、\(v_t\)、更新量和 spike 时序是否吻合；需要时用 Hessian-vector product 近似梯度方向曲率；对照改变 \(\beta_2\) 的固定 checkpoint 重放 | 论文用约 10M 参数、8 层合成推理 Transformer（900k 序列、batch 2048）观察到 7 次 spike；另在 SlimPajama 上训练 187M LLaMA 结构模型、用 100B tokens 报告多次 spike；测试了 \(\beta_2=0.999,0.9,0.85\)，较低值在这些设置中缓解 spike。严格理论是简化目标上的分析，高维非凸结论仍是实验支持 |
-| Spike-aware 优化器 | SPAM 用 Adam 二阶矩构造在线坐标级异常代理，按阈值重缩放梯度；另以固定间隔重置一阶和二阶状态，重置后加入短 warmup | 先验证 spike 是否伴随梯度峰值与动量污染，再评估重置间隔、阈值、warmup、质量和运行成本 | 论文分析用的 GSS 是同一梯度坐标跨训练步的回顾性比值，训练时的 \(g_i^2/v_i\) 是在线代理，二者阈值不能互换；重置会丢弃优化器历史。论文 C4 LLaMA 预训练表报告：60M 的 PPL 为 Adam 34.09、SPAM 30.46；1B 为 16.13 与 14.66。数据量只引用主表会与附录模型配置中的 60M token 计数不一致，故这里不列 token 数。结果绑定论文配方 |
+| Spike-aware 优化器 | SPAM 用 Adam 二阶矩构造在线坐标级异常代理，按阈值重缩放梯度；另以固定间隔重置一阶和二阶状态，重置后加入短 warmup | 先验证 spike 是否伴随梯度峰值与动量污染，再评估重置间隔、阈值、warmup、质量和运行成本 | 论文分析用的 GSS 是同一梯度坐标跨训练步的回顾性比值，训练时的 \(g_i^2/v_i\) 是在线代理，二者阈值不能互换；重置会丢弃优化器历史。PPL 和训练 token 配置见下文，结果绑定论文配方 |
 | GradientStabilizer | 该方法保持梯度方向，利用运行统计稳定梯度幅值；论文报告了 LLM FP16 预训练和 FP4 量化感知训练中的稳定性与学习率范围改善 | 作为更新幅值控制方案，与 clipping、学习率调整和原始优化器做同口径对照 | 稳定幅值无法证明梯度方向正确，也不能代替目标任务质量、吞吐和成本评估 |
 | Global norm clipping（工程基线） | 当整个梯度向量的范数超过阈值时，统一缩小梯度，方向不变 | 先按历史健康 step 的范数分布选择候选阈值，再统计裁剪率、裁剪前后更新量和目标质量 | 全局范数可能掩盖单层或单坐标异常；阈值过低会持续缩小正常更新；裁剪不能清理已经累积进 Adam 矩的历史异常，也不能修复数据或 loss 的错误 |
+| 逐张量自适应裁剪（AdaGC） | 每个参数张量按历史裁剪梯度范数的 EMA 设置动态上界，论文默认前 100 步用全局裁剪 warmup | 比较逐张量裁剪率、更新量、通信归约范围和同口径目标质量；不要只观察全局范数 | 其 spike score、并行布局与模型结果绑定论文设置；不同 DP/TP/PP 下局部范数归约范围可能不同，不能视作全局裁剪的逐张量等价实现 |
 
-SPAM 还暴露了阈值方案的典型取舍。论文在 C4 的预训练设置用 \(\Delta T=500\)、重置后 warmup 150 步、在线阈值 \(\theta=5000\)；消融中把重置间隔缩短到 500 步前效果改善，再缩短会退化；阈值太小会把有效梯度也压掉。它说明参数应联合验证，不能把论文里的 500/150/5000 当作通用默认值。
+AdaGC 的作者把 spike score 定义为 loss 序列中偏离前 1,000 个观测的滚动均值至少 10 个标准差的比例；表 7 在 Llama-2 7B（9,000 steps）、Mixtral 8×1B（36,000 steps）和 ERNIE 10B-A1.4B（21,000 steps）报告的分数为 0，而 GlobalGC 分别为 0.0333%、0.0144% 和 0.0100%。这个“0”只表示没有命中该论文的统计阈值，不代表没有任何训练异常；论文报告的下游准确率增量也绑定相应 benchmark 和训练配置。[AdaGC（ICML 2026）](https://proceedings.mlr.press/v306/wang26dg.html)。
 
-这里还要区分两种 GSS 口径：论文分析时的回顾性指标，是某一坐标当前梯度绝对值除以该坐标跨训练步的历史均值；真实训练不可能预先保留完整历史，于是 SPAM 用 Adam 二阶矩构造在线代理 \(g_i^2/V_i\)，再按 \(\operatorname{sign}(g_i)\sqrt{\theta V_i}\) 限幅。代理用于近似识别，不是原 GSS 的代数等价式；实验阈值只对论文实现的代理有意义。若实现遇到 \(V_i=0\)，该比值未定义，必须由实现明确处理零状态并记录，不能用任意小 epsilon 把它伪造成一个有效 spike 分数。
+SPAM 还暴露了阈值方案的典型取舍。论文在 C4 的常规预训练设置用 \(\Delta T=500\)、重置后 warmup 150 步、在线阈值 \(\theta=5000\)；消融在 LLaMA-130M 上发现，把间隔从 2500 缩短到 500 时验证困惑度改善，继续缩短则开始退化；阈值太小会把有效梯度也压掉。它说明参数应联合验证，不能把论文里的 500/150/5000 当作通用默认值。
 
-在自适应预条件器论文的分析中，\(\widehat H_t\) 表示经过 Adam 预条件后的局部曲率矩阵，作者给出可用于预测 spike 的梯度方向曲率量：
+论文主表报告的 C4 预训练困惑度为：LLaMA-60M 上 Adam 34.09、SPAM 30.46；LLaMA-1B 上分别为 16.13 和 14.66。60M 参数模型的训练 token 数在论文内部不一致：主表列 1.1B，附录 D 表 7 列 1.3B。因此这些困惑度只能按论文作者报告引用，不能把 token 预算写成已统一的比较条件。
+
+这里还要区分两种 GSS 口径：论文分析时的回顾性指标，是某一坐标当前梯度绝对值除以该坐标跨训练步的历史均值；真实训练不可能预先保留完整历史，于是 SPAM 用 Adam 二阶矩构造在线代理 \(g_i^2/V_i\)，再按 \(\mathrm{sign}(g_i)\sqrt{\theta V_i}\) 限幅。代理用于近似识别，不是原 GSS 的代数等价式；实验阈值只对论文实现的代理有意义。若实现遇到 \(V_i=0\)，该比值未定义，必须由实现明确处理零状态并记录，不能用任意小 epsilon 把它伪造成一个有效 spike 分数。
+
+在 Bai 等人的分析里，需要区分严格的单步条件和便于实际监控的代理。对固定学习率的普通梯度下降，严格条件使用沿本次参数更新路径计算的加权平均 Hessian \(\bar H_t\)：
 
 ~~~math
-\lambda_{\mathrm{grad}}(\widehat H_t)
+\bar H_t
 =
-\frac{g_t^{\mathsf T}\widehat H_tg_t}{\lVert g_t\rVert_2^2}
+2\int_0^1(1-s)\nabla^2L(\theta_t-s\eta g_t)\,\mathrm{d}s,
+\qquad
+\lambda_{\mathrm{grad}}(\bar H_t)
+=
+\frac{g_t^{\mathsf T}\bar H_tg_t}{\lVert g_t\rVert_2^2}
 ~~~
 
-该量要求 \(g_t\) 有限且 \(\lVert g_t\rVert_2>0\)；零梯度时应记为不可用，而不是加 epsilon 后继续作曲率解释。
+当 \(g_t\) 有限且 \(\lVert g_t\rVert_2>0\) 时，这一普通梯度下降步的 loss 增加当且仅当 \(\lambda_{\mathrm{grad}}(\bar H_t)>2/\eta\)。真实网络中无法沿整段更新路径求出 \(\bar H_t\)，论文因此在小学习率近似下使用当前步的 Hessian 方向曲率；对 Adam，再用二阶矩预条件后的 \(\widehat H_t\) 作实际监控代理。这个代理可以用 Hessian-vector product 估计，但需要额外二阶信息或迭代计算，不是普通训练日志中免费得到的指标，也不与严格路径平均条件等价。
 
-在该论文的一维理论中，当这一量持续超过 \(2/\eta\) 时，更新可能进入不稳定区。用一维二次函数看这个边界：\(f(x)=\tfrac12 hx^2\)，梯度下降一步后 \(x_{t+1}=(1-\eta h)x_t\)，所以损失比为 \(f(x_{t+1})/f(x_t)=(1-\eta h)^2\)。若 \(\eta=0.001\)、方向曲率 \(h=2400\)，则 \(\eta h=2.4\)，参数变成 \(-1.4x_t\)，这一步损失约为原来的 \(1.96\) 倍。这个手算只解释阈值直觉；真实 Adam 训练还包含动量、随机 batch 和非凸曲率，不能把该数字当作模型 spike 的预测值。
+普通梯度下降的固定二次函数提供一个可复算直觉：\(f(x)=\tfrac12hx^2\)，一步后 \(x_{t+1}=(1-\eta h)x_t\)，损失比为 \(f(x_{t+1})/f(x_t)=(1-\eta h)^2\)。若 \(\eta=0.001\)、\(h=2400\)，则 \(\eta h=2.4\)，参数变成 \(-1.4x_t\)，这一步损失约为原来的 \(1.96\) 倍。这里 \(h\) 是常数曲率，方向曲率条件恰好退化为 \(h>2/\eta\)；它只解释阈值直觉，不是 Adam 训练中 spike 大小或时刻的预测值。
 
-SPAM 的论文报告在单张 H100 上测量 100 次迭代，LLaMA-60M 平均每步由 Adam 的 0.3666 秒增至 SPAM 的 0.3814 秒，约多 4%；这个测量说明检测与筛选有开销，不能直接外推到其他实现或硬件。对照方案时应逐项改变而非一次性混改：数据重放验证样本假设；单独改 \(\beta_2\) 检验二阶矩响应；clipping、SPAM 和 GradientStabilizer 对照幅值控制；逐层 RMS 若持续随深度偏移，再把 Pre-LN/DeepNorm/Peri-LN 作为下一轮架构实验。所有比较都要固定 checkpoint、batch 顺序、token 预算与评估口径，并记录吞吐和目标能力。
+SPAM 的论文报告在单张 H100 上测量 100 次迭代，LLaMA-60M 平均每步由 Adam 的 0.3666 秒增至 SPAM 的 0.3814 秒，约多 4%；这个测量说明检测与筛选有开销，不能直接外推到其他实现或硬件。对照方案时应逐项改变而非一次性混改：数据重放验证样本假设；单独改 \(\beta_2\) 检验二阶矩响应；global clipping、AdaGC、SPAM 和 GradientStabilizer 分别对照整体范数、张量历史阈值、逐坐标代理与运行统计幅值控制；逐层 RMS 若持续随深度偏移，再把 Pre-LN/DeepNorm/Peri-LN 作为下一轮架构实验。所有比较都要固定 checkpoint、batch 顺序、token 预算与评估口径，并记录吞吐和目标能力。
 
 来源：[Adam instability](https://arxiv.org/abs/2304.09871)、[Adaptive Preconditioners Trigger Loss Spikes in Adam](https://arxiv.org/abs/2506.04805v2)、[SPAM](https://arxiv.org/abs/2501.06842v2)、[GradientStabilizer](https://proceedings.mlr.press/v306/huang26bb.html)。
 
@@ -309,7 +320,7 @@ loss scale
 learning rate
 ~~~
 
-PyTorch 的 `torch.autograd.detect_anomaly(check_nan=True)` 会在反向计算生成 NaN 时抛错，并尝试给出对应 forward 操作的 traceback；它会显著拖慢计算，适合缩小后的复现，不应常驻生产训练。`clip_grad_norm_(..., error_if_nonfinite=True)` 能发现全局梯度范数非有限，但不能指出第一个坏张量。前者帮助追踪运算来源，后者提供边界检查，两者都不能替代逐层有限性检查和根因修复。[PyTorch autograd 文档](https://docs.pytorch.org/docs/2.14/autograd.html)；[clip_grad_norm_ 文档](https://docs.pytorch.org/docs/2.14/generated/torch.nn.utils.clip_grad_norm_.html)。
+PyTorch 2.15 的 `torch.autograd.detect_anomaly(check_nan=True)` 会在反向计算生成 NaN 时抛错，并尝试给出对应 forward 操作的 traceback；它会显著拖慢计算，适合缩小后的复现，不应常驻生产训练。它不会替你定位 forward 中最早出现的非有限张量，也不以 `check_nan` 检查 Inf。`clip_grad_norm_(..., error_if_nonfinite=True)` 则在总梯度范数为 NaN 或 Inf 时抛错，但不能指出第一个坏张量。两者分别提供反向 traceback 与全局范数边界检查，都不能替代逐层有限性检查和根因修复。[PyTorch 2.15 autograd 文档](https://docs.pytorch.org/docs/2.15/autograd.html)；[PyTorch 2.15 `clip_grad_norm_` 文档](https://docs.pytorch.org/docs/2.15/generated/torch.nn.utils.clip_grad_norm_.html)。
 
 ### 9.5.3 累积窗口中的异常
 
@@ -387,6 +398,8 @@ g_{\mathrm{update}}
 
 直接平均每个 micro-batch 的 mean gradient，隐含每个 T_b 相同。debug 要记录 accumulation boundary、每个 T_b、累计梯度和 clipping 时机。
 
+可以用一个标量坐标手算分母差异。假设第一个 micro-batch 有 \(T_1=100\) 个有效 token，未归一化梯度和 \(G_1=200\)；第二个有 \(T_2=300\)，梯度和 \(G_2=300\)。正确的 token mean 为 \((200+300)/(100+300)=1.25\)。两个局部 mean 分别是 \(2\) 和 \(1\)，若直接等权平均会得到 \(1.5\)，比目标梯度大 \(20\%\)。这个例子只展示分母问题；实际向量梯度要先按各自有效 token 数加权累加，再在整个 accumulation window 上归一化，最后才按策略做 global clipping。
+
 ### 9.6.5 深层信号传播也会影响训练稳定性
 
 有些不稳定不是某一步的 batch 或精度故障，而是深层网络中的信号传播从初始化开始就不均衡。此时只在末端调学习率，可能掩盖而非消除问题。至少应对照每层激活 RMS、梯度 RMS、残差流 RMS 和相对参数更新量，并沿深度画出变化，而非只看全局范数。
@@ -443,6 +456,8 @@ T_label=0 表示没有监督目标，应显式处理；q_label 很低不一定�
 
 q_label 的定义要求 T_attn>0，且 label mask 是 attention mask 的子集；空样本或所有 attention 都被 mask 时该比例未定义。若 label 位落在 a_j=0 的位置，问题不是“比例偏低”，而是数据格式或 mask 协议已经不一致。
 
+例如，一个教学 batch 有 \(T_{\mathrm{attn}}=1024\) 个可见 token，而 \(T_{\mathrm{label}}=10\)，则 \(q_{\mathrm{label}}=10/1024\approx0.98\%\)。这个数值本身不能判定错误：长 prompt、极短回答或特殊目标都可能产生较低比例。若任务预期回答约 200 个 token，下一步应 decode assistant/user span 并核对 label mask；若十个有效标签落在 user prompt、回答区全部被忽略，则有具体证据支持模板或 mask 错误。修正后还要核对有效 token 分母和对应 loss numerator，不能只比较平均 loss 是否变小。
+
 ### 9.7.3 逐样本 decode
 
 异常 batch 至少保存：
@@ -498,7 +513,7 @@ AdamW 的简化更新为：
 - scheduler 是否按 optimizer step 前进；
 - checkpoint 恢复后 state 是否连续。
 
-这条简化式使用 0<=beta_1,beta_2<1、epsilon>0、eta_t>=0，并把 decoupled decay 写成一阶近似的更新形式。实际框架对 decay 的精确施加顺序、foreach/fused kernel 和参数组排除规则仍需以其实现为准；NaN 的 m/v 或无效 learning rate 不会由该公式自行恢复。
+这条简化式使用 \(0\le\beta_1,\beta_2<1\)、\(\epsilon>0\)、\(\eta_t\ge0\)，并把标准 AdamW 的 decoupled decay 写成单步参数更新项。实际框架的 epsilon 位置、foreach/fused kernel 和参数组排除规则仍需以其实现为准；NaN 的 m/v 或无效 learning rate 不会由该公式自行恢复。
 
 ### 9.8.1 学习率过大
 
@@ -573,7 +588,9 @@ scaler.update()
 
 在 unscale 前 clipping，阈值对应的是 scaled gradient。BF16 通常不需要 FP16 式动态 loss scaling，但仍要检查有限性、累积精度和异常 kernel。
 
-使用 FSDP 时，应调用 FSDP 提供的 `clip_grad_norm_`，让裁剪范数正确计入分片梯度；不要假设对本地参数分片直接求范数就等价于全局范数。[PyTorch FSDP 文档](https://docs.pytorch.org/docs/2.14/fsdp.html)。
+使用 FSDP 时，应调用 FSDP 提供的 `clip_grad_norm_`，让裁剪范数正确计入分片梯度；不要假设对本地参数分片直接求范数就等价于全局范数。[PyTorch 2.15 FSDP 文档](https://docs.pytorch.org/docs/2.15/fsdp.html)。
+
+这些检查要沿同一更新边界串起来：保存 loss numerator 与有效 token 分母，记录 unscale 前后的范数，再对齐裁剪结果、optimizer state 和参数相对更新量。若梯度有限但更新异常，应继续检查 Adam 矩、参数组学习率和 decay；若 unscale 后已非有限，则优先回看 forward、loss scale 与触发 overflow 的 batch。只保留最终 total norm 会丢掉这个先后关系，也无法区分少数层的异常与整批梯度同步放大。
 
 ## 9.10 分布式同步错误
 
@@ -595,7 +612,7 @@ scaler.update()
 
 随机种子不同会导致本地随机路径不同，但不自动等于通信错误；是否要求逐位一致要由训练目标和实现决定。
 
-DDP 的梯度同步依赖各 rank 对 reducer/collective 的协同调用；若各 rank 的参数使用状态或执行顺序不同，可能 hang 或造成同步错误。排查时把每个 rank 的 micro-step、forward/backward 边界、collective 序号和首个异常时间一起记录。[PyTorch DDP 内部机制](https://docs.pytorch.org/docs/2.14/notes/ddp.html)。
+DDP 的构造、forward 和输出反向传播都可能是跨 rank 同步点；各进程的参数注册顺序也必须一致。若 rank 走了不同控制流或不同步调用 collective，可能 hang 或造成同步错误。排查时把每个 rank 的 micro-step、forward/backward 边界、collective 序号和首个异常时间一起记录。[PyTorch 2.15 DistributedDataParallel 文档](https://docs.pytorch.org/docs/2.15/generated/torch.nn.parallel.DistributedDataParallel.html)。
 
 ### 9.10.2 逐级缩小
 
@@ -614,6 +631,10 @@ finite flags
 ~~~
 
 若一个 rank 先 NaN，其他 rank 的 hang 可能只是等待 collective；必须找出第一个坏 rank，而不是只看主进程最后一行。
+
+PyTorch 2.15 文档还提供 `TORCH_DIST_NAN_CHECK=1`：它会在任意 backend 的 `torch.distributed` collective 输入缓冲区（发送侧）检查 NaN，由 backend-agnostic 的 ProcessGroup hooks 驱动。它能帮助确认非有限值是否已进入 collective，但只检查 NaN，不替代 Inf 检查，也不会指出 NaN 最初由哪个 forward/backward 算子产生；若 collective 顺序不一致或 rank 已提前退出，它也不能单独解释 hang。应把它与 rank 本地 finite flag、第一坏张量记录和 collective 序号并用。[PyTorch 2.15 debugging environment variables](https://docs.pytorch.org/docs/2.15/debugging_environment_variables.html)。
+
+例如，rank 2 在 step 80 的 backward 后出现 NaN，rank 0 随后停在 all-reduce。若发送 buffer 已含 NaN，这个开关能提示 collective 边界上的值；若坏值还留在本地、尚未进入 collective，它不能替代各 rank 的阶段检查。接着比较每个 rank 的最后完成 collective、当前序号、数据游标和退出状态：只有 rank 2 未到达下一次调用而其他 rank 已等待时，才支持“单 rank 先失败导致等待”的假设；若各 rank 都仍运行但 collective 序号不同，应优先核对分支条件与调用顺序。不能把所有 hang 都归为 NaN。
 
 ### 9.10.3 全局加权 loss
 
@@ -674,6 +695,10 @@ C_{\mathrm{resume}}
 
 硬件或 kernel 不同可能无法逐位一致，但差异应被量化。至少要比较有效 token、loss 窗口、参数范数、scheduler 和 checkpoint step。
 
+例如，一个教学配置每个 optimizer step 消耗 480,000 个有效 label token；连续运行到 step 500 时累计应为 \(500\times480{,}000=240{,}000{,}000\) 个有效 token。若恢复后 model 和 optimizer 都显示 step 500，但 data cursor 相当于 245M token，就有 5M token 的重放或跳过偏差。按 step 调度的 learning rate 可能表面连续，按 token 调度的进度却已经错位；因此要分别对照 optimizer step、真实有效 token 和 data cursor，不能只看一个 global step。
+
+数据加载器还有“已发出”和“已消费”的边界。多 worker 预取时，sampler 可能已经派发后续样本，但这些样本未必进入已完成的 optimizer step；若 checkpoint 保存的是派发位置而不是已提交的消费位置，恢复时就可能跳过尚未训练的样本。实现应把已提交 cursor 和 worker 的临时队列位置分开，并在一个 accumulation window 成功更新后推进提交点；这是应用的数据协议，不能由模型权重或 checkpoint 文件格式自动推断。
+
 ### 9.11.3 checkpoint 完整性
 
 分布式 checkpoint 应先写临时目录，完成 shard、manifest、大小和 checksum 校验后再发布版本指针。manifest 至少包含：
@@ -691,13 +716,13 @@ creation step
 
 “目录能打开”是文件可读性证据；“恢复后曲线连续”是行为证据，两者不能混为一谈。
 
-PyTorch Distributed Checkpoint 提供分布式状态保存与加载接口，但“写到临时目录、检查 shard 和 manifest、校验 checksum 后切换版本指针”的原子发布流程属于应用层设计，不能仅凭调用保存 API 就推断已具备事务式提交。[PyTorch Distributed Checkpoint 文档](https://docs.pytorch.org/docs/2.14/distributed.checkpoint.html)。
+PyTorch Distributed Checkpoint 提供分布式状态保存与加载接口，但“写到临时目录、检查 shard 和 manifest、校验 checksum 后切换版本指针”的原子发布流程属于应用层设计，不能仅凭调用保存 API 就推断已具备事务式提交。[PyTorch 2.15 Distributed Checkpoint 文档](https://docs.pytorch.org/docs/2.15/distributed.checkpoint.html)。
 
 ## 9.12 最小可运行训练诊断示例
 
 下面的示例只用 Python 标准库。它把 step 日志、batch 元信息、rank loss 和 checkpoint 字段对齐，检测候选 spike、非有限值、梯度异常、候选异常 batch、rank 差异和恢复缺项。它不模拟真实 autograd 或通信，也不把阈值命中直接判成根因；它只展示证据如何落到同一条时间轴上。
 
-> **代码状态：已验证（2026-10-26，Python 标准库；解释器小版本未记录）。** 正常路径及六类无效输入符合正文约定。
+> **代码状态：静态审阅，未运行（2026-11-02）。**
 
 ~~~python
 import math
@@ -962,6 +987,14 @@ print("training debug toy: ok")
 
 示例的阈值和 batch 都是教学构造。真实项目要把 decode 文本、有效 token、数据来源、dtype、loss scale、rank、collective 位置和 checkpoint id 一并保存；示例只负责展示这些字段如何被组合成候选诊断。
 
+可以把样例输入逐步代入，避免把输出标签误当成根因。step 4 前最近三个有限 loss 是 2.40、2.18、2.05，中位数为 2.18；5.80/2.18≈2.66，所以超过示例的 2 倍 spike 阈值。该步 grad norm 为 7.5，也超过 5.0；batch 长度 8192 超过 4096，valid ratio 0.03 低于 0.2。四条证据让 step 4 成为优先复查对象，却不能单凭它们断言是长样本、低监督率或优化器造成 spike。
+
+step 6 的 loss 是 NaN、grad norm 是 Inf，因此进入 nonfinite 列表。其 rank loss 中一个为 NaN；代码只用剩余有限值计算 2.1、2.0、2.1 的 0.1 spread，同时用 has_nonfinite 标记该 rank 组异常。这个 spread 不是全 rank 都有限时的普通差值，定位时应先检查非有限 rank 和 collective 位置。最后，checkpoint 虽位于 step 3，却缺少 scheduler、scaler、RNG 和 data position；step 5 是异常前最后一个健康 step，不等于存在可完整恢复到 step 5 的 checkpoint，因此示例拒绝给出 rollback step。
+
+这个例子固定了字段间的对应关系：历史日志用 step 索引，batch 元信息必须覆盖同一组 step，rank loss 可以包含非有限数但须保留有限性标记，checkpoint 字段用于判断训练状态是否连续。推荐动作只指出下一次应收集哪类证据；要确认根因仍需固定 checkpoint 重放、decode 异常 batch，并逐项改变一个实验变量。代码不模拟 autograd、collective、真实 optimizer update 或 checkpoint 文件，也不依据 toy 阈值自动跳过 batch 或执行回滚。
+
+若排查发现 step 3 是最近一个完整 checkpoint、step 5 只是最后健康日志，就应把两者分别保存为“可恢复状态”和“训练观测”。可以从更早且完整的 checkpoint 正常续训；若只能从 step 3 的模型权重重启并清空 optimizer 或 scheduler，则那是一个显式的新实验分支，必须记录丢弃了哪些状态、重放了哪些 token，不能标为无缝 resume。保留原失败现场，后续比较才不会把状态重置效果误归因到数据或梯度修复。
+
 ## 9.13 把排查结果写成可复盘记录
 
 一次高质量 debug 至少包含：
@@ -976,17 +1009,22 @@ print("training debug toy: ok")
 
 “把 lr 调小后恢复了”不是完整结论。完整结论应该说明：在哪个 step 发现什么证据，哪一个假设被哪一个对照支持，修复改变了什么，以及修复后是否保持了训练目标和质量口径。
 
+一条可复盘记录可以先写成：“假设 H：step 640 的 loss spike 由 rank 2 的 assistant label mask 为空触发；预测：rank 2 的有效 label token 为零、其余 rank 正常；对照：固定 step 620 checkpoint 和相同 batch 顺序，逐 rank decode 并记录 loss numerator/token denominator；判据：mask 修正后 numerator、分母和同口径 validation 一致，且只修 mask、不改 LR；回归：继续固定 token 预算，比较训练/验证 loss、目标能力、吞吐与恢复连续性。”若预测没有出现，就回到候选列表，而不是把修复后变好的曲线当作假设成立的证明。
+
+复盘验收还要把根因修复与风险缓解分开。临时降低学习率或缩短序列若让 spike 消失，只能说明新设置改变了症状；要支持根因判断，还应检查预测信号是否消失、同一异常 batch 重放是否稳定、同一有效 token 与目标切片上的质量是否过门槛，以及 checkpoint restore drill 是否保持状态和游标连续。记录代码 revision、data manifest、配置和运行命令，才能重放相同证据链。若质量或吞吐回退超过门槛，应回滚该实验分支，而不是再叠加一种干预。
+
 ## 9.14 资料边界与延伸阅读
 
 本章把框架文档用于确认 API 行为，把原始论文用于确认机制，把 toy 示例用于固定日志和诊断口径。它们不能替代目标模型、数据、硬件和分布式配置的实测。
 
 | 资料类型 | 能支持的结论 | 不能自动支持的结论 |
 | --- | --- | --- |
-| PyTorch 2.14 autograd 文档 | anomaly detection 的调试接口 | 所有 NaN 的根因 |
-| PyTorch 2.14 clipping / FSDP 文档 | 非有限全局范数检查、FSDP 分片梯度裁剪接口 | 通用 clipping threshold 或目标系统性能 |
-| PyTorch 2.14 AMP 文档 | autocast、unscale、scaler 行为 | 任意模型的数值稳定性 |
-| PyTorch 2.14 DDP 文档 | reducer 与 rank 协作约束 | 目标集群的通信性能 |
-| PyTorch 2.14 Distributed Checkpoint 文档 | 分布式保存加载接口 | 应用层原子发布、恢复后模型质量连续 |
+| PyTorch 2.15 autograd 文档 | anomaly detection 的调试接口 | 所有 NaN 的根因 |
+| PyTorch 2.15 clipping / FSDP 文档 | 非有限全局范数检查、FSDP 分片梯度裁剪接口 | 通用 clipping threshold 或目标系统性能 |
+| PyTorch 2.15 AMP 文档 | autocast、unscale、scaler 行为 | 任意模型的数值稳定性 |
+| PyTorch 2.15 DDP 文档 | 同步点、参数注册顺序与 rank 协作约束 | 目标集群的通信性能 |
+| PyTorch 2.15 debugging environment variables | collective 发送缓冲区 NaN 检查的接口和范围 | 第一个坏张量、Inf 检查或 collective 顺序根因 |
+| PyTorch 2.15 Distributed Checkpoint 文档 | 分布式保存加载接口 | 应用层原子发布、恢复后模型质量连续 |
 | Adam 稳定性与 spike 论文 | 特定优化器机制假设、实验观测和缓解方案 | 所有模型 spike 的唯一根因 |
 | 归一化与深层 Transformer 论文 | 论文架构和初始化条件下的信号传播证据 | 对现成 checkpoint 的安全热切换 |
 | 混合精度论文 | loss scaling 与 master weight 的方法 | 任意 FP8/FP16 recipe |
@@ -994,17 +1032,19 @@ print("training debug toy: ok")
 推荐阅读：
 
 - PyTorch autograd anomaly detection：
-  https://docs.pytorch.org/docs/2.14/autograd.html
+  https://docs.pytorch.org/docs/2.15/autograd.html
 - PyTorch clip_grad_norm_：
-  https://docs.pytorch.org/docs/2.14/generated/torch.nn.utils.clip_grad_norm_.html
+  https://docs.pytorch.org/docs/2.15/generated/torch.nn.utils.clip_grad_norm_.html
 - PyTorch automatic mixed precision：
-  https://docs.pytorch.org/docs/2.14/amp.html
+  https://docs.pytorch.org/docs/2.15/amp.html
 - PyTorch DistributedDataParallel：
-  https://docs.pytorch.org/docs/2.14/notes/ddp.html
+  https://docs.pytorch.org/docs/2.15/generated/torch.nn.parallel.DistributedDataParallel.html
 - PyTorch FSDP：
-  https://docs.pytorch.org/docs/2.14/fsdp.html
+  https://docs.pytorch.org/docs/2.15/fsdp.html
+- PyTorch debugging environment variables：
+  https://docs.pytorch.org/docs/2.15/debugging_environment_variables.html
 - PyTorch Distributed Checkpoint：
-  https://docs.pytorch.org/docs/2.14/distributed.checkpoint.html
+  https://docs.pytorch.org/docs/2.15/distributed.checkpoint.html
 - On the difficulty of training Recurrent Neural Networks：
   https://arxiv.org/abs/1211.5063
 - Mixed Precision Training：
@@ -1076,4 +1116,4 @@ Loss spike 需要和 batch、mask、grad norm、学习率、warmup 和恢复状�
 
 分布式异常要区分 collective 控制流和 rank 数据/数值差异，checkpoint 问题要区分文件可读性与恢复后轨迹连续性。一次可靠的修复必须能够被最小复现、反事实对照和同口径回归验证。
 
-下一章进入 checkpoint 评估与实验管理，继续说明如何从训练过程中选择版本、组织实验和保存可以被复核的模型证据。
+下一章进入[checkpoint 评估与实验管理](10-checkpoint评估与实验管理.md)，继续说明如何从训练过程中选择版本、组织实验和保存可以被复核的模型证据。

@@ -446,7 +446,7 @@ GPT-6 family 在标准单 Agent 会话中支持 `configuration_update`。例如�
 }
 ```
 
-它只改变后续响应的 effort；request-level `reasoning.effort` 仍可保持原值。effective effort 会一直延续到后续响应，直到另一条 update 覆盖。更新项必须随 `previous_response_id` 或完整 history replay 保留在原位置，两个相邻 update 会被拒绝。它不能和自动 compaction/automatic truncation 组合；独立 `/responses/compact` 也拒绝含 update 的历史；显式 compact 后要在下一条用户消息之前重新放置所需 update。该 item 可放入 Responses 请求或 WebSocket `response.create`。
+它只改变后续响应的 effort；request-level `reasoning.effort` 仍可保持原值。effective effort 会一直延续到后续响应，直到另一条 update 覆盖。更新项必须随 `previous_response_id` 或完整 history replay 保留在原位置。它不能和自动 compaction/automatic truncation 组合；独立 `/responses/compact` 也拒绝含 update 的历史；显式 compact 后要在下一条用户消息之前重新放置所需 update。该 item 可放入 Responses 请求或 WebSocket `response.create`。
 
 有个监控陷阱：官方文档说明响应的 `reasoning.effort` 字段仍反映 request-level setting，不代表 `configuration_update` 选出的 effective effort。trace 应同时保存请求级值、按历史 item 还原的当前值和 token usage。保持 request-level 设置不变、只追加 update，可以保留原 prompt prefix，利于 prompt-cache 复用；这不保证服务端一定 cache hit。
 
@@ -467,7 +467,7 @@ Artificial Analysis 的 `GPT-6 Sol (max)` 是一个配置级第三方测量；Da
 
 ### 18.21.3 用 toy 验证配置更新的失败路径
 
-配套 [`gpt6_sol_contract_audit.py`](../../research/model-update-2026-09/code/gpt6_sol_contract_audit.py) 将 `configuration_update` 当作历史 item，而不是普通的请求参数：相邻 update、`pro`/multi-agent、automatic compaction/truncation 和 standalone compact 都拒绝；显式 compaction 后必须在下一条用户消息前重新插入 update。脚本同时检查 reasoning/output/context 的 `incomplete`、272K whole-request pricing 和 verifier/幂等门禁。运行结果为 `ok=true`、`network_called=false`，证据等级仅为 `local_protocol_toy`。
+`configuration_update` 应作为历史 item 保存，而不是当作覆盖历史状态的普通请求参数。当前指南明确说明它不能与 automatic compaction/truncation 或 standalone `/responses/compact` 混用；若在 Responses 请求中显式 compact，压缩后须在下一条用户消息之前重新声明已变更的设置。指南没有把相邻 update 列为拒绝条件。toy validator 只有在逐项映射到已发布合同后才能说明该合同；它的输出不能替代真实 API 验收，也不能给未文档化的排列补造拒绝规则。
 
 ## 18.22 GPT-6 Luna：family runtime 与 sibling budget
 

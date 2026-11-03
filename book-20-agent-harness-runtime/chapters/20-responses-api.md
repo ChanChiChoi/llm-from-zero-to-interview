@@ -322,7 +322,7 @@ tool_registry_hash, call_id, permission, executor_receipt
 compaction_id, cache_state, artifact_digest, verifier_result
 ```
 
-GPT-6 family 的 `configuration_update` 还需要记录在原始历史位置；相邻 update 会被拒绝，且不能与自动 compaction/truncation 或独立 `/responses/compact` 同用。显式 compact 后，下一条用户消息前要重新插入 update。effective effort 会持续到下一个覆盖项；响应中的 `reasoning.effort` 仍是 request-level 值，因此不能拿它当实际生效档位。更新项适用于 Responses 与 WebSocket `response.create`，并以保留原 prompt prefix、利于缓存复用为设计动机；缓存命中仍须看实际 usage，而非从协议设计推定。
+GPT-6 family 的 `configuration_update` 还需要记录在原始历史位置；它不能与自动 compaction/truncation 或独立 `/responses/compact` 同用。显式 compact 后，下一条用户消息前要重新插入 update。effective effort 会持续到下一个覆盖项；响应中的 `reasoning.effort` 仍是 request-level 值，因此不能拿它当实际生效档位。当前指南没有将相邻 update 列作拒绝条件。更新项适用于 Responses 与 WebSocket `response.create`，并以保留原 prompt prefix、利于缓存复用为设计动机；缓存命中仍须看实际 usage，而非从协议设计推定。
 
 ### 20.27.2 面试中的一句话
 

@@ -12,6 +12,10 @@ kernel。它们都可能被宣传为 4 bit 模型，但启动路径、显存账�
 中的 native、pre-quantized、W4A16、AWQ INT4 或 INT4 weight-only 时，仍然
 需要回到具体 manifest 和执行路径核对。
 
+通用的量化对象、校准和质量框架见[第 7 章](07-量化与模型压缩.md)，推理引擎
+和公开兼容性入口见[第 5 章](05-推理引擎.md)；FP4 权重格式见[第 15 章](15-fp4-mxfp4-nvfp4.md)，FP8 KV 状态见[第 16 章](16-fp8-kv-cache.md)。
+本章沿 INT4 权重 artifact 的生成、读取和发布展开，不把这些对象合成一个“低精度开关”。
+
 对初学者来说，可以把它想成把一套大型书籍压缩成小盒子：盒子占地变小，只
 说明存储更省；如果阅读器每次都要先把整套书还原成原尺寸，阅读速度未必更快；
 如果压缩时还改变了页码索引，引用和跳转也可能出错。对专家来说，需要同时
@@ -213,9 +217,9 @@ INT4 把 M_weight 变小，只改变这个分式的一个组成部分。
 ~~~math
 q_i
 =
-\operatorname{clip}
+\mathrm{clip}
 \left(
-\operatorname{round}\left(\frac{w_i}{s}\right),
+\mathrm{round}\left(\frac{w_i}{s}\right),
 q_{\min},
 q_{\max}
 \right),
@@ -236,7 +240,7 @@ hat{w}_i 是反量化后的近似值。二进制补码有符号 INT4 的整数�
 ~~~math
 s=\frac{1.1}{7}\approx 0.15714,
 \qquad
-q_i=\operatorname{round}\left(\frac{w_i}{s}\right)
+q_i=\mathrm{round}\left(\frac{w_i}{s}\right)
 =[-6,-1,2,7]
 ~~~
 
@@ -265,9 +269,9 @@ s
 ~~~math
 q_i
 =
-\operatorname{clip}
+\mathrm{clip}
 \left(
-\operatorname{round}\left(\frac{w_i}{s}\right)+z,
+\mathrm{round}\left(\frac{w_i}{s}\right)+z,
 q_{\min},
 q_{\max}
 \right),
@@ -448,22 +452,24 @@ QAT 在前向过程中模拟量化和反量化，但可训练参数仍保留高�
 ~~~math
 W_{\mathrm{fake}}
 =
-s\cdot\operatorname{clip}
+s\cdot\mathrm{clip}
 \left(
-\operatorname{round}\left(\frac{W}{s}\right),
+\mathrm{round}\left(\frac{W}{s}\right),
 q_{\min},q_{\max}
 \right)
 ~~~
 
 round 本身不可微，训练实现需要用替代梯度或其他近似方式传播更新；不同 QAT
 配方在 scale 学习、剪裁、损失和权重/激活范围上可能不同，不能由“做了 QAT”
-推断成统一算法。PyTorch 的 FakeQuantize 2.14 文档明确把该模块定义为训练时
+推断成统一算法。PyTorch 2.15 的 [FakeQuantize 文档](https://docs.pytorch.org/docs/2.15/generated/torch.ao.quantization.fake_quantize.FakeQuantize.html)
+明确把该模块定义为训练时
 模拟 quantize/dequantize；对应公式和观测器状态要与最终导出的 scale 区分。
 
 一个面向 LLM 的代表方案是 LLM-QAT：先从原始模型采样生成文本，再用原模型
 logits 作为软标签训练量化学生模型，避免依赖原始预训练语料；论文同时训练
-weights、activations 和 KV cache 的量化路径。在 LLaMA-7B 的 W4A8KV4 设置中，
-作者报告常识任务平均分从 RTN 的 41.2 提高到 60.7；数字绑定论文的模型、数据
+weights、activations 和 KV cache 的量化路径。在 LLaMA-7B 的 W4A8KV4（W-A-KV=4-8-4）设置中，
+[论文表 1](https://aclanthology.org/2024.findings-acl.26/)报告七项常识推理任务平均分：
+RTN 为 41.2，LLM-QAT 为 63.0，原始 16-16-16 基线为 66.2。数字绑定论文的模型、数据
 生成、训练配置和任务集合，且这是一项训练研究，不证明任意 serving kernel
 支持相同格式。QAT 以训练资源换取对量化噪声的适应，最终模型仍需验证 artifact
 布局、scale、目标 kernel、任务切片和回滚兼容性。
@@ -475,10 +481,10 @@ weights、activations 和 KV cache 的量化路径。在 LLaMA-7B 的 W4A8KV4 �
 
 | 方案 | 所在层与要解决的问题 | 关键机制 | 代表性证据 | 代价、限制与后续改进 |
 | --- | --- | --- | --- | --- |
-| RTN | 转换基线；以最低转换复杂度得到低比特权重 | 每个权重独立舍入到最近的量化格点，不补偿层输出误差 | GPTQ 原论文的 OPT-175B WikiText-2 4 bit 行，PPL 为 10.54 | 低 bit 时容易让一串误差叠加。先用固定校准集与任务切片测量是否需要更复杂 PTQ |
-| GPTQ | PTQ 算法；降低校准输入上的线性层输出重建误差 | 用激活统计构造近似 Hessian，逐列量化并以逆 Hessian 补偿剩余权重 | 同一原论文中 OPT-175B 4 bit PPL 为 8.37，FP16 为 8.34；量化耗时约 4.2 小时/单张 80GB A100 | 校准分布、分组、阻尼和数值稳定性会影响结果；weight-only 不减少乘加。可增加目标域校准、任务回归，或在仍不达标时比较 QAT |
-| AWQ | PTQ 算法；利用输入激活保护敏感通道，同时保持硬件友好的全低比特权重 | 等价地缩放权重/输入通道，在小范围搜索 scale 与 clipping，再导出低比特权重 | AWQ 原论文的 OPT-6.7B INT3-g128 WikiText-2 PPL：RTN 23.54、AWQ 11.39、FP16 10.86 | 激活统计与 clipping 仍来自校准集；该论文的分布偏移结果不能推广到所有领域。可用目标 workload 校准并做代码、数字、长上下文和结构化输出切片 |
-| MARLIN | 执行 kernel；解决 W4A16 在批量 decode 下仍要高效读权重和使用 Tensor Core 的问题 | 异步访存、任务调度、流水线、量化专用布局与解码计算 | 作者在 A10 大矩阵层级上报告 batch 16–32 约 3.9×、batch 128 约 1.5× 对 FP16；vLLM 端到端收益因 attention 和 serving 开销更低 | 它不改量化质量；收益受 GPU、矩阵形状、group/pack 布局和 batch 影响。高 batch 进入 compute-bound 后，需评估 W4A8 等激活量化路径及其新增数值误差 |
+| RTN | 转换基线；以最低转换复杂度得到低比特权重 | 每个权重独立舍入到最近的量化格点，不补偿层输出误差 | [GPTQ 原论文](https://arxiv.org/html/2210.17323v2)的 OPT-175B WikiText-2 4 bit 行，PPL 为 10.54 | 低 bit 时容易让一串误差叠加。先用固定校准集与任务切片测量是否需要更复杂 PTQ |
+| GPTQ | PTQ 算法；降低校准输入上的线性层输出重建误差 | 用激活统计构造近似 Hessian，逐列量化并以逆 Hessian 补偿剩余权重 | [同一原论文](https://arxiv.org/html/2210.17323v2)中 OPT-175B 4 bit PPL 为 8.37，FP16 为 8.34；量化耗时约 4.2 小时/单张 80GB A100 | 校准分布、分组、阻尼和数值稳定性会影响结果；weight-only 不减少乘加。可增加目标域校准、任务回归，或在仍不达标时比较 QAT |
+| AWQ | PTQ 算法；利用输入激活保护敏感通道，同时保持硬件友好的全低比特权重 | 等价地缩放权重/输入通道，在小范围搜索 scale 与 clipping，再导出低比特权重 | [AWQ 原论文](https://arxiv.org/html/2306.00978v6)的 OPT-6.7B INT3-g128 WikiText-2 PPL：RTN 23.54、AWQ 11.39、FP16 10.86 | 激活统计与 clipping 仍来自校准集；该论文的分布偏移结果不能推广到所有领域。可用目标 workload 校准并做代码、数字、长上下文和结构化输出切片 |
+| MARLIN | 执行 kernel；解决 W4A16 在批量 decode 下仍要高效读权重和使用 Tensor Core 的问题 | 异步访存、任务调度、流水线、量化专用布局与解码计算 | [MARLIN 原论文](https://arxiv.org/abs/2408.11743)：作者在 A10 大矩阵层级报告 batch 16–32 约 3.9×、batch 128 约 1.5× 对 FP16；vLLM 端到端收益因 attention 和 serving 开销更低 | 它不改量化质量；收益受 GPU、矩阵形状、group/pack 布局和 batch 影响。高 batch 进入 compute-bound 后，需评估 W4A8 等激活量化路径及其新增数值误差 |
 
 这些数字分别来自不同论文、模型、校准、评测和 kernel 配置，不能据此给 GPTQ、
 AWQ、MARLIN 排统一名次。MARLIN 的论文使用 GPTQ 生成的 INT4 权重来测 kernel，
@@ -488,9 +494,13 @@ on-the-fly dequant、平台相关 pack 和 kernel fusion，不能把系统速度
 AWQ 的 scale 搜索。
 
 先用统一任务评测确认量化质量，再检查 manifest 和 runtime 是否读取了兼容布局，
-最后用目标 batch/长度 trace 确认命中预期 kernel。当前 vLLM 文档分别列出量化
-方案和 linear backend 选择入口；支持矩阵会随 release 变化，文档项不能代替
-对实际模型、shape 和硬件的启动日志与 profiler 检查。
+最后用目标 batch/长度 trace 确认命中预期 kernel。[vLLM v0.32.0 文档](https://docs.vllm.ai/en/v0.32.0/features/quantization/)
+把 LLM Compressor INT4 W4A16、TorchAO 等列作格式入口，并分别列出 linear backend
+选择与硬件兼容表；该版本的表本身也提示支持矩阵会变化。作为另一份有版本边界的
+例子，[torchao 0.17](https://docs.pytorch.org/ao/stable/workflows/inference.html)将
+INT4 weight-only 定义为按 group 量化，并列出 32、64、128、256 等 group size；同一
+配置还区分实现版本和 pack format。这些文档能说明公开接口与候选支持面，不能证明
+某个 artifact、模块 shape 和 batch 命中融合 kernel，仍要看目标启动日志与 profiler。
 
 所以以下说法都可能同时成立：
 
@@ -528,7 +538,8 @@ tensor_parallel_degree
 tokenizer_revision
 chat_template_hash
 adapter_revision
-cache_schema_version
+weight_artifact_schema_version
+kv_cache_schema_version
 known_fallbacks
 ~~~
 
@@ -569,6 +580,23 @@ base checkpoint
 第一层通过，不能推导出后两层通过。实际系统应在启动后用固定输入比较若干
 golden logits 和结构化输出，再用真实 workload 做性能测试。
 
+group_size 是影响数值解释和空间开销的字段，不只是一个方便调速的旋钮。假设
+一个合成张量有 256 个 INT4 权重，payload 恰为 `256×4/8=128` 字节；scale 用
+FP16 存储，不含 zero point、对齐和其他 metadata。G=128 时有两个 scale，核心
+存储量是 `128+2×2=132` 字节；G=64 时有四个 scale，是 `128+4×2=136` 字节，
+比前者多 `4/132≈3.03%`。两份文件的权重 shape 可以完全相同，scale 数量和每个
+scale 所覆盖的元素却不同。如果运行时按 G=128 解释 G=64 的产物，loader 即使
+接受字节和 shape，也可能把 scale 分配给错误的权重区间。显式核对 schema 可以
+在启动时拒绝这种误读；而 G=64 是否有更好的质量，仍要用相同校准集和任务切片
+测量，不能由多了两个 scale 推断。
+
+scale 分组相同也不代表 packed byte 的解释相同。前面的第一组量化值
+`[-7,-4,2,5]` 转成 4-bit 二进制补码 nibble 后是 `[9,C,2,5]`。若规定先到的值放
+低 nibble，前两个值组成 `C9`；若先到的值放高 nibble，则是 `9C`。两者都占一个
+字节，文件长度和 tensor shape 无法暴露顺序错误。因而 manifest 既要记录 group
+轴和 scale dtype，也要固定 nibble 次序、字节端序及最后一个不满组的 padding
+规则；loader 可以解析，不等于 kernel 会按同一语义还原原值。
+
 ## 17.6 从 packed weight 到矩阵乘：执行路径的差异
 
 ### 17.6.1 路径 A：先解包，再用高精度 GEMM
@@ -595,7 +623,7 @@ weight 和 scale，再完成必要的解包和乘法，累加可以使用更高�
 ~~~math
 Y
 \approx
-\operatorname{GEMM}
+\mathrm{GEMM}
 \left(
 X_{\mathrm{FP16/BF16}},
 D(Q(W_{\mathrm{INT4}}),S)
@@ -605,6 +633,11 @@ D(Q(W_{\mathrm{INT4}}),S)
 X 是 16 bit 激活，Q(W) 是 packed INT4 权重，D 表示依照 scale 和 zero point
 解码，acc 表示累加 dtype。它仍然不是 W4A4：只有权重使用 4 bit，激活和
 累加的精度更高。
+
+[TensorRT-LLM 1.0.0 的数值精度说明](https://nvidia.github.io/TensorRT-LLM/1.0.0/reference/precision.html)
+也把 W4A16/W8A16 描述为在线性层中按需反量化权重。这个固定版本文档能说明
+一种公开执行路径；实际模型是否命中对应 kernel，仍取决于该 release 的模型支持、
+shape 和构建出的 engine，不能只从 W4A16 标签推出性能。
 
 ### 17.6.3 W4A8 和更低精度激活
 
@@ -658,7 +691,7 @@ b_{\mathrm{avg}}
 一个简单的约束是：
 
 ~~~math
-\operatorname{shard\_size}
+\mathrm{shard\_size}
 \bmod G
 =0
 ~~~
@@ -680,8 +713,32 @@ activation 当 BF16，另一边按 FP8 scale 解码，模型可能在通信层�
 
 pack order、endian、矩阵转置、scale 的索引顺序和 padding 规则实际上构成
 量化 kernel 的 ABI。更换 engine 版本时，即使模型参数和 group size 没有变，
-也可能需要重新转换 artifact。一个安全的做法是把转换版本和 kernel 版本都
-作为 cache schema 和发布版本的一部分。
+也可能需要重新转换 artifact。转换版本和权重 kernel 版本应进入 weight artifact
+schema 与发布 manifest；KV page 的 schema 是另一份契约，不能用来替代权重布局版本。
+
+用八个合成权重走一遍 group、scale 与打包。采用对称码本 [-7,7]，group size=4：
+第一组 [-1,-0.5,0.25,0.75] 的最大绝对值是 1，因此 scale=1/7；逐项舍入得到
+q=[-7,-4,2,5]，反量化约为 [-1,-0.5714,0.2857,0.7143]。第二组
+[-1.4,-0.6,0.2,1.4] 的 scale=0.2，q=[-7,-3,1,7]，在这个刻意挑选的例子中
+可以精确重构。它说明两组即使使用同一整数码本，也必须连同各自 scale 一起读取。
+
+再假设该 artifact 使用有符号 4-bit 二进制补码，并规定每字节的低 nibble 先放第一个
+数。-7、-4、2、5 的 4-bit 编码分别是 9、C、2、5，所以第一组 payload bytes 为
+`C9 52`；第二组 [-7,-3,1,7] 则为 `D9 71`。若转换器约定高 nibble 优先，字节内容
+会变成另一种次序，而模型张量 shape 仍可能合法。这些字节只是本例声明的编码规则，
+不能拿来猜 GPTQ、AWQ 或某个 engine 的真实 pack order；artifact manifest 必须明确写出。
+
+scale 元数据也要进入账本。G=128 时，INT4 payload 为 `128×4/8=64 bytes`；若每组另存
+一个 2-byte scale，则总计 66 bytes，即 `66/128=0.515625 byte/weight`。对 BF16 的
+2 bytes/weight 而言，这相当于约 25.78% 的权重存储，压缩倍数约 3.88，而非正好 4。
+这里还没有计入 zero point、对齐或高精度保留层。把 G 降至 4 会增加局部适应性，但每组
+scale 的相对成本剧增；这也是 group size 必须和误差、内存及 kernel 一起选择的原因。
+
+同一组值还能检查 tensor parallel 分片：8 个值、G=4 时，两组边界在索引 4；按 4 个值
+切成两片可让每个 group 留在一个 shard。如果在索引 2 切分，第一组的 scale 会同时解释
+两张卡上的权重，运行时要复制、传递或重新分组，不能仅凭 shard shape 正常就当兼容。
+真实系统还要考虑矩阵转置、padding、tile 和 scale 的连续布局；这个小例子只把必须检查的
+边界显式化，最终仍以目标 kernel 的 ABI 和启动测试为准。
 
 ## 17.8 校准数据决定量化误差落在哪里
 
@@ -783,6 +840,16 @@ v 遍历词表，p 可以是 BF16 基线分布，q 可以是 INT4 候选分布�
 数”，工具参数准确率不能把没有发起工具调用的普通聊天混进分母。量化后
 如果模型更早停止，平均输出长度变短不能直接当成性能提升。
 
+聚合结果还会被样本比例掩盖。假设离线集有 1,000 个工具型代码修改请求，其中
+900 个低风险任务和 100 个高风险任务；两组使用同一个验收事件：补丁编译通过、
+测试通过、工具参数与预期一致且没有重复副作用。候选模型在低风险组成功率为
+0.99，在高风险组为 0.70，则成功数分别是 `900×0.99=891` 和 `100×0.70=70`，
+全体为 `961/1000=0.961`。若只看 0.95 的总体门槛，它会通过；但高风险切片
+只有 0.70，远低于同一门槛。发布决策因此要同时要求总体门槛与每个预先定义的
+高风险切片门槛。这里可以合并，是因为两组采用同一个二元端到端验收事件；如果
+一个桶报告编译率、另一个桶报告主观帮助度，就必须分别呈现，不能把不同指标
+拼成一个加权分数。
+
 ### 17.9.3 质量失败和 fallback 要分开
 
 一条请求失败可能来自五个不同地方：
@@ -869,9 +936,10 @@ prefill 一次处理较长输入，矩阵乘占比通常较高；decode 每步�
 ### 17.10.3 “最低卡数”与生产卡数不是一回事
 
 假设每张卡为 80 GiB，只允许使用 85%，可用预算为 68 GiB。上一节的工作
-负载用 450 GiB BF16 时，容量下界为 7 张；但实际可能因为 TP degree、拓扑
-和冗余选择 8 张。INT4 工作负载为 165 GiB，容量下界为 3 张；实际可能
-选择 4 张以满足拓扑和故障恢复。
+负载用 450 GiB BF16 时，容量下界为 7 张；若 runtime 只支持 4 或 8 路 TP，
+可选择 8 张。INT4 工作负载为 165 GiB，容量下界为 3 张；若同样受 TP degree
+约束，可选择 4 张。这个 4 卡部署只说明拓扑取整，不包含 N+1 副本或滚动发布
+所需的备用容量；故障余量要按副本和可用性目标另算。
 
 所以容量报告要同时写：
 
@@ -978,6 +1046,14 @@ draft 和 target 不必使用完全相同的权重精度，但 hidden state、to
 如果所有回退都记成“INT4 failed”，团队会错误地重做量化；如果所有回退
 都静默发生，团队又会把一个混合路径当成 native benchmark。
 
+可以把覆盖率分母定义成“请求中所有目标线性层都走 native kernel 的请求数”。
+固定一段 100 条请求的 trace，若 88 条全程命中、8 条因 shape 回退、4 条因
+某个模块无 kernel 回退，则完整 native 请求覆盖率是 `88/100=88%`；同一批
+请求中另有 96 条通过质量验收，质量成功率则是 `96/100=96%`。两个数字有同一
+请求分母，却回答不同问题：前者说明执行路径，后者说明任务结果。若只有回退
+请求质量下降，才进一步按请求配对检查；不能因为两者同批测量，就把 12% 的
+回退直接称作 4% 质量损失的原因。
+
 ### 17.12.3 观测字段
 
 一次请求的 trace 至少应能关联：
@@ -1043,28 +1119,72 @@ quality_slice
 可以把发布版本表示为：
 
 ~~~math
-R
+R_{\mathrm{release}}
 =
 (
 r_{\mathrm{model}},
 r_{\mathrm{quant}},
+r_{\mathrm{weight\_artifact\_schema}},
 r_{\mathrm{kernel}},
 r_{\mathrm{engine}},
 r_{\mathrm{tokenizer}},
 r_{\mathrm{template}},
-r_{\mathrm{cache}}
+r_{\mathrm{kv\_cache\_schema}}
 )
 ~~~
 
-R 中的任何一项变化都要经过兼容性判断。旧 INT4 page、prefix cache 或
+发布版本中的任何一项变化都要经过兼容性判断。权重格式 schema 描述 packed
+INT4 如何读取，KV schema 描述缓存 page 如何序列化；两者不能共用一个含糊的版本号。
+旧 INT4 page、prefix cache 或
 speculative 临时状态不能因为模型名字相同就直接复用。无法证明兼容时，清理
 并重算通常比静默迁移更可靠。
+
+用一个合成升级追踪这些版本。旧 worker 的字段为 base=`m42`、quant=`awq-g128-r7`、
+weight schema=`pack-A`、kernel=`marlin-r3`、engine=`vLLM-0.32`、tokenizer=`t12`、
+template=`h5`、adapter=`none`、KV schema=`page-v3`。新 worker 将量化转换升级为
+`awq-g64-r8`，并使用 `pack-B`。虽然 base revision、tokenizer 和 template 没变，
+实际权重值和打包布局都变了，因此它不能把旧 worker 的权重 buffer 当成新 artifact；
+也不能仅凭 KV tensor shape 相同就复用 prefix page。新权重会改变前缀计算出的 hidden
+states，进而改变 K/V 数值。灰度初期为新 artifact 建立独立 KV namespace，让新 worker
+重新 prefill；只有完成同版本 logits、cache 数值和任务回归，才讨论跨版本共享。
+
+再看只升级 engine 的情况。若权重 artifact、kernel、位置编码、KV 序列化格式和 page
+布局都未变，仍需先检查 engine 的 cache reader 能否解释旧 page；兼容表通过后，可用固定
+prefix 比较旧 worker 解码和新 worker 恢复的 K/V、下一 token logits 及结构化结果。只要
+其中任一字段未知，就先拒绝跨 worker cache hit 并重算。这一流程把“能读取文件”与
+“计算状态可互换”分成两道门，也避免把新旧 runtime 的数值差异归咎于 INT4 算法。
+
+speculative decoding 还需要记录 draft 与 target 的配对版本。若 BF16 target 对 4 个候选
+token 接受 3 个，接受率是 `3/4=0.75`；INT4 target 接受 2 个，变成 `2/4=0.50`。这只是
+提示候选路径发生变化的诊断量，不足以说明最终分布或任务质量变差；还要在相同 prompt、
+采样参数和停止规则下比对最终输出、任务通过率、拒绝后 KV 回收和真实 TPOT。若只记录
+“每次 draft 提出 4 个 token”，就会漏掉接受路径改变后 target 额外计算的代价。
+
+因此 canary 的一条可审计记录至少要把请求路由、weight artifact revision、实际 kernel、
+cache namespace、draft/target revision、接受数、回退原因和最终任务结果关联起来。新旧路径
+并行期间，失败请求要保留原始 prompt、外部工具提交状态和可安全重放的输入；回滚只停止
+新 INT4 admission 并收敛在途请求，不能清掉已提交副作用，也不能让新旧 cache key 再次碰撞。
+这些是发布设计的合成演练，不代表某个 runtime 自动提供了跨量化版本的 cache 迁移能力。
+
+可把灰度的执行和质量分别落到一段固定 trace：若 500 个候选请求中有 486 个请求
+的全部目标线性层命中 native kernel，请求级覆盖率为 `486/500=97.2%`；若其中
+487 个最终通过任务验收，质量成功率是 `487/500=97.4%`。即使覆盖率低于团队门槛，
+也应按 `fallback_reason` 先定位 shape、模块或硬件原因，不能直接回滚量化参数；
+反过来，质量过线也不能掩盖 kernel 覆盖门槛。每个数字都保留完整请求分母，失败
+样本绑定 artifact、kernel 和 cache namespace 后，才有足够上下文决定停流、修复
+兼容或更换候选版本。
 
 ## 17.14 一个可运行的容量与质量诊断 demo
 
 下面的程序使用标准库建立一个教学账本。它不实现真正的 INT4 pack、CUDA
 kernel 或模型评测，只把权重压缩、其他显存、卡数和任务质量分开列出。这样
 读者可以先验证算术，再把实际 profiler 和回归结果替换进来。
+
+输入是 BF16/INT4 权重空间、KV/workspace/通信/runtime 公共开销、单卡容量与可用比例、
+各任务的验收分数和门槛，以及一个用于演示分支的 native kernel 覆盖率。输出把
+总显存账、权重相关空间减少比例、容量卡数下界、失败任务和发布动作分开显示。程序只
+使用 Python 标准库；可复制为 `native_int4_gate.py`，用 `python3 native_int4_gate.py` 查看
+账本。**代码状态：静态审阅，未运行（2026-11-02）。**
 
 ~~~python
 from math import ceil
@@ -1134,7 +1254,7 @@ report = {
 pprint(report, sort_dicts=False)
 ~~~
 
-一组可复现输出如下：
+下面是按代码逐步手算的预期输出，未执行程序：
 
 ~~~text
 {'diagnostics': {'bf16_total_gib': 450.0,
@@ -1149,10 +1269,51 @@ pprint(report, sort_dicts=False)
  'recommendation': 'selective_int4_rollout'}
 ~~~
 
-这里的 int4_weight_reduction 只是权重相关空间的减少比例，不是整台机器
-的显存减少比例。bf16_min_cards 和 int4_min_cards 是按 85% 可用显存得到
-的容量下界，不代表 runtime 支持的并行度。代码任务的质量失败也没有被聊天
-任务的通过结果抵消，因此建议是选择性灰度，而不是全流量切换。
+先看容量账：400 GiB BF16 权重的理想 INT4 payload 为 `400×4/16=100 GiB`，再加
+15 GiB scale、metadata 和未量化层，权重相关空间为 115 GiB。公共项为
+`20+16+8+6=50 GiB`，所以 worker 总账分别是 450 与 165 GiB。每张 80 GiB 卡只用
+85%，即 `80×0.85=68 GiB`；因此 `ceil(450/68)=7`，`ceil(165/68)=3`。权重相关空间
+的减少率为 `1-115/400=0.7125`，代码按三位小数显示 0.713。这个比例不是整机显存
+的减少率，卡数也只是容量下界，尚未应用并行度约束。
+
+再逐桶看质量：聊天的 `0.975≥0.970`，通过；代码 JSON 的 `0.965<0.970`，未通过，
+于是 `code_json` 进入失败列表。示例把 `native_kernel_ratio=0.98` 作为合成 trace 输入，
+它高于 0.95 门槛，不触发 kernel 检查动作；但 INT4 卡数下界 3 小于拓扑门槛 4，
+因此加入 `check_topology_before_scaling_down`。这些分数、门槛、scale/metadata 开销和
+kernel 覆盖率都是合成值；若真实 profiler 没有覆盖率数据，就不能把 0.98 当成测量结果。
+
+修改 `common_memory` 会同时改变两种路径的总账；改某个 task 的 `quality` 或 `floor`，
+只会改变该切片的失败标记。若 kernel 覆盖率低于 0.95，还会追加检查回退的动作；若卡数
+下界达到 4，就不再触发拓扑复核。代码没有输入验证，不读取模型、manifest 或请求 trace，
+也不实现 nibble pack、CUDA kernel、长上下文 KV 峰值和端到端质量测量，所以它回答的只是
+“给定这些数字，门禁分支怎样走”，不能替代真实部署验收。
+
+这里的 int4_weight_reduction 只是权重相关空间的减少比例，不是整台机器的显存减少比例。
+bf16_min_cards 和 int4_min_cards 是按 85% 可用显存得到的容量下界，不代表 runtime 支持
+的并行度。代码任务的质量失败也没有被聊天任务的通过结果抵消，因此建议是选择性灰度，
+而不是全流量切换。
+
+还可以逐项改变一个门槛，检查分支是否按预期独立工作。把合成的 `code_json`
+质量从 0.965 改为 0.972 后，它达到 0.970 门槛，失败列表会变空；若同时把
+`native_kernel_ratio` 改为 0.90，它低于 0.95，动作列表仍会加入
+`inspect_kernel_fallback`。INT4 卡数下界仍为 3，所以拓扑复核动作也保留，最终
+仍是 `selective_int4_rollout`。这说明质量通过不能覆盖执行路径或拓扑风险。相反，
+把质量设为恰好 0.970 时，代码用 `< floor` 判断，所以该项通过；覆盖率恰好
+0.95 不触发 `< 0.95` 分支。真正部署前应由业务明确门槛是否使用严格大于、等于
+是否接受，并给浮点读数保留合理精度，避免显示舍入把边界样本误判。
+
+门槛的显示精度也可能遮住样本级差别。假设某切片有 2,000 条请求，成功 1,940 条
+是 `1940/2000=0.9700`，刚好过线；少一个成功请求则是 `1939/2000=0.9695`，低于
+0.970。若报告只显示三位小数，后者可能显示成 0.970；评测程序应比较未舍入的
+成功数与分母，并把样本量和置信区间另行报告。这个示例不在 demo 代码中，
+它说明算术门禁之外仍需考虑抽样不确定性，不能把一次小样本刚过线解释为稳定质量。
+
+还可以单独观察容量门槛。只把 `common_memory` 中的 KV 从 20 GiB 改为 60 GiB，
+INT4 总账便从 165 GiB 增到 205 GiB；`205/68≈3.015`，向上取整后卡数下界从
+3 变为 4，`int4_min_cards < 4` 不再成立，拓扑复核动作会消失。代码质量仍低于
+门槛时，`retain_high_precision_for:code_json` 仍然保留。这个演算说明容量结果会
+随 KV 预算变化，而质量门禁独立存在；它也提醒读者，释放权重空间可能被更大的
+活动 KV 需求占用，不能把容量余量直接算成可售并发。
 
 ## 17.15 一个企业代码助手的完整取舍
 
@@ -1165,13 +1326,21 @@ pprint(report, sort_dicts=False)
 - 长上下文 RAG 需要保留引用证据；
 - 发布时要能在滚动升级期间回退。
 
-高精度版本的 400 GiB 权重会让容量下界接近 7 张卡，实际可能选择 8 卡
-tensor parallel。INT4 artifact 的权重相关空间为 115 GiB，连同公共开销
-约 165 GiB，容量下界为 3 张卡，实际可能选择 4 卡。INT4 释放出的空间
-可以提高 KV 预算或减少单 worker 的 GPU 数，但它没有自动证明代码质量。
+高精度版本的 400 GiB 权重会让容量下界接近 7 张卡，若 TP 配置要求 4 的倍数，
+可以选择 8 卡。INT4 artifact 的权重相关空间为 115 GiB，连同公共开销约 165 GiB，
+容量下界为 3 张卡；若同样受 TP degree 约束，可以选择 4 卡。这个选择没有包含
+N+1 备用副本或滚动升级容量，必须另外核算。INT4 释放出的空间可以提高 KV 预算
+或减少单 worker 的 GPU 数，但它没有自动证明代码质量。
 
-离线回放发现普通聊天质量为 0.975，代码 JSON 合法率为 0.965，而代码
-切片最低要求为 0.970。此时有三种合理路径：
+为便于复算，假设同一组 1,000 条离线请求中有 800 条普通聊天、200 条代码/工具任务，
+并把两桶都按同一个“端到端任务验收”二元事件计数：聊天成功率 0.975，代码/工具成功率
+0.965，各自门槛都是 0.970。加权总成功率为 `(800×0.975+200×0.965)/1000=0.973`，
+高于总体 0.970 门槛，但代码/工具桶仍未通过自己的门槛。这个例子只有在两桶使用同一种
+成功事件时才可合并；实际评测若一个是 chat helpfulness、另一个是 JSON 合法率，就不能
+直接平均。应先定义可比的任务成功事件，再把 JSON schema、编译、单元测试和工具参数等
+硬门槛单列报告。
+
+此时有三种合理路径：
 
 1. 把所有请求留在 BF16，优先保证质量，接受更高硬件成本；
 2. 只让低风险聊天使用 INT4，代码和工具请求使用高精度路径；
@@ -1181,6 +1350,57 @@ tensor parallel。INT4 artifact 的权重相关空间为 115 GiB，连同公共�
 覆盖、容量计算、发布测试和回滚复杂度。如果恢复 output head、MoE router
 或 tool-sensitive projection 后代码切片恢复到要求以上，额外复杂度可能
 值得；如果质量仍然不稳，第二条路径更容易解释和维护。
+
+把选择变成可执行流程时，先为每个路径生成独立 manifest：BF16 基线和 INT4 候选分别
+记录 base revision、量化算法、group/scale、pack schema、excluded modules、kernel、engine、
+tokenizer、template 与 KV namespace。相同 prompt 要分别通过两条路径执行，固定采样、
+停止条件和最大输出长度；同一请求的配对结果才能帮助区分模型变化与请求分布变化。
+若模板、adapter 或模型 revision 同时改变，先冻结这些变量，再单独判断 INT4 影响。
+
+路由应在生成前根据有版本的任务分类结果作出，而不是看到模型输出失败后才补救。未能
+明确分类的代码、工具 JSON、金融数字和含外部副作用任务默认走已通过的高精度路径；
+低风险聊天才进入 INT4 canary。影子流量可以核对分类器漏判率和请求长度分布，但影子结果
+不证明用户可见的流式延迟；canary 则需要检查工具执行和取消路径，避免错误候选提交不可逆
+副作用。按任务路由也会同时保留两套模型驻留或增加切换成本，必须把它放进显存与单位成功
+成本账本，而不是只比较单份权重大小。
+
+层恢复方案则要先从失败样本定位敏感模块，再一次恢复一个变量并重新导出 artifact。比如
+先恢复 output head，重跑同一代码/JSON 请求；若低于门槛，再单独检查 router 或投影层，避免
+把多个改动叠在一起后无法归因。每次变化都提升量化 artifact revision，并为候选建立新的
+prefix/KV namespace；确认 cache 的生产模型、position 和序列化 schema 完全匹配后，才允许
+复用既有状态。质量恢复但 kernel 回退、峰值显存增大时，候选仍未通过部署门禁。
+
+这个案例的发布决定可以按状态推进：离线配对 replay 通过后进入 shadow，核对真实流量的
+长度、语言和分类器分布；低风险 canary 期间同时设置质量、OOM、P99、成本和 kernel 覆盖率
+门槛；所有目标切片通过后才扩大比例。任一硬门槛失败，停止新的 INT4 admission，把在途请求
+排空或安全取消，隔离新旧 cache namespace，再切回整套已验证版本。对外部工具先检查提交
+日志和幂等键，已发生的副作用不能依靠模型回滚撤销。
+
+最后要用实际 GPU 时间、重试、验证和人工复核计算单位成功成本。若 INT4 减少卡数但带来
+更多编译失败、重试或人工修复，成本未必下降；若只让低风险聊天走 INT4，则要把路由误判
+率和双版本常驻成本计入。只有容量、质量、执行路径、恢复和成本使用同一请求 cohort 得到
+可追踪证据，才能说明选择性 INT4 对这类代码助手有收益。
+
+路由误判可以先用小数字暴露其风险。假设一批 1,000 条请求里 200 条属于高风险代码或
+工具任务，分类器漏掉其中 5%，则预期有 `200×0.05=10` 条高风险请求进入 INT4；若这类
+请求在 INT4 下的端到端失败率假设为 30%，期望约 `10×0.30=3` 条失败。比例只是规划
+演练的合成输入，不是分类器或模型的实测值；真实决策应分别测漏判率和候选路径的切片
+失败率。涉及写入、付款或外部提交时，生成后再看输出无法撤销已经发生的副作用，因此
+不确定分类应预先走安全路径，并在工具提交前单独检查权限和幂等状态。
+
+容量也要按两套版本仍同时服务来算。沿用前面的每卡 68 GiB 可用空间，并假设 BF16 与
+INT4 各用独立 worker 池，公共开销仍分别为 50 GiB：BF16 的 `ceil(450/68)=7` 张，若
+TP 取 4 的倍数就按 8 张配置；INT4 的 `ceil(165/68)=3` 张，按同样规则要 4 张。两个
+池并存时，仅基础拓扑就是 12 张卡，未含 N+1 与滚动发布余量。单看 INT4 worker 的
+4 卡配置会低估混合路由服务的资源；上线账本还需加入各池的利用率、KV 峰值、待机
+副本和流量分配，再比较节省的容量是否覆盖双版本及验证成本。
+
+版本切换还要尊重会话边界。若长对话已经在 BF16 worker 上累积了 KV，新请求路由到
+INT4 worker 时，不能把旧 page 当成可通用的上下文；要么继续把该会话固定在 BF16，
+要么在安全边界重新 prefill 并建立新的 cache namespace。一次 16K 输入的重新 prefill
+会占用额外时间和显存，所以调度策略需要把“新会话用新版本”和“在途会话维持原版本”
+分开计账。对代码修改或工具写入，更不应在一次执行中途换模型版本，否则前半段的计划、
+工具状态和后半段生成不再属于同一套已验收协议。
 
 上线时应分别观察：
 
@@ -1270,22 +1490,22 @@ kernel 或真实模型评测。示例中的 400 GiB、15 GiB 和质量分数都�
 
 延伸阅读：
 
-1. [TensorRT-LLM Quantization](https://nvidia.github.io/TensorRT-LLM/features/quantization.html)：NVIDIA TensorRT-LLM 的量化入口和 runtime 配置说明。
+1. [TensorRT-LLM 1.0.0 Numerical Precision](https://nvidia.github.io/TensorRT-LLM/1.0.0/reference/precision.html)：固定版本的 W4A16、GPTQ/AWQ group scaling 和模型支持示例；不据此推断其他 release 的矩阵。
 2. [TensorRT-LLM GitHub](https://github.com/NVIDIA/TensorRT-LLM)：量化 kernel、engine 和版本实现的源码入口。
 3. [NVIDIA Model Optimizer](https://github.com/NVIDIA/Model-Optimizer)：NVIDIA 模型优化、量化和导出工具入口。
-4. [vLLM Quantization](https://docs.vllm.ai/en/latest/features/quantization/)：vLLM 当前量化能力索引，具体支持需按版本和模型核对。
-5. [PyTorch AO Documentation](https://docs.pytorch.org/ao/stable/)：PyTorch 原生量化工具和配置的官方入口，具体 API 需按当前版本核对。
-6. [Transformers bitsandbytes Quantization](https://huggingface.co/docs/transformers/en/quantization/bitsandbytes)：Hugging Face Transformers 中 4 bit 加载和量化接口的说明。
+4. [vLLM v0.32.0 Quantization](https://docs.vllm.ai/en/v0.32.0/features/quantization/)：固定版本的量化入口、linear backend 和硬件表；具体支持仍需按模型与 shape 核对。
+5. [torchao 0.17 Quantized Inference](https://docs.pytorch.org/ao/stable/workflows/inference.html)：官方列出的 INT4 weight-only group size、配置和执行类别；页面基准条件绑定其说明的模型与软件版本，部署时须核对目标 backend。
+6. [Transformers bitsandbytes Quantization](https://huggingface.co/docs/transformers/en/quantization/bitsandbytes)：动态文档，访问日期为 2026-11-02；介绍 Transformers 中 4 bit 加载接口，使用时锁定实际 Transformers/bitsandbytes 版本。
 7. [llama.cpp](https://github.com/ggml-org/llama.cpp)：另一类本地推理 runtime 的量化格式和实现入口，不能与 GPU engine 的 pack layout 直接混用。
-8. [AWQ](https://arxiv.org/abs/2306.00978)：激活感知权重量化研究，关注重要权重通道和低 bit 推理。
-9. [GPTQ](https://arxiv.org/abs/2210.17323)：基于近似二阶信息的后训练权重量化研究。
+8. [AWQ v6](https://arxiv.org/html/2306.00978v6)：激活感知权重量化研究，关注重要权重通道和等价缩放。
+9. [GPTQ v2](https://arxiv.org/html/2210.17323v2)：基于近似二阶信息的后训练权重量化研究。
 10. [SmoothQuant](https://arxiv.org/abs/2211.10438)：激活异常值平滑和 W8A8 量化的研究背景，不等同于 W4A16。
 11. [LLM.int8()](https://arxiv.org/abs/2208.07339)：大模型混合精度和异常值处理的研究背景。
 12. [QLoRA](https://arxiv.org/abs/2305.14314)：4 bit 基座与低秩微调的研究入口，训练/微调语境不等于 serving kernel 契约。
 13. [A Survey on Model Compression for Large Language Models](https://aclanthology.org/2024.tacl-1.85/)：用作压缩路线和评测指标的分类地图；遇到算法细节或与原论文表述不一致时回到一手论文核对。
 14. [LLM-QAT](https://aclanthology.org/2024.findings-acl.26/)：阅读从教师模型生成校准文本、logits 蒸馏以及权重/激活/KV 联合量化的训练路线；实验结论绑定 LLaMA 模型、数据生成和评测配置。
 15. [MARLIN](https://arxiv.org/abs/2408.11743)：阅读 W4A16 混合精度 kernel 如何用异步加载、调度、流水线和量化布局提高 batched decode；速度数字绑定作者 GPU、层形状、batch 和 vLLM 设置。
-16. [PyTorch FakeQuantize 2.14](https://docs.pytorch.org/docs/2.14/generated/torch.ao.quantization.fake_quantize.FakeQuantize.html)：核对 fake quant 的量化/反量化模拟公式及 observer 状态；API 文档不等同于某个 LLM 的完整 QAT 配方。
+16. [PyTorch FakeQuantize 2.15](https://docs.pytorch.org/docs/2.15/generated/torch.ao.quantization.fake_quantize.FakeQuantize.html)：核对 fake quant 的量化/反量化模拟公式及 observer 状态；API 文档不等同于某个 LLM 的完整 QAT 配方。
 
 阅读这些资料时要区分三类证据：官方文档说明“这个 runtime 当前声称支持
 什么”；论文说明“某种方法在特定实验中得到什么”；生产压测说明“你的

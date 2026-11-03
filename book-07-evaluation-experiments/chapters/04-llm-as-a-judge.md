@@ -438,6 +438,35 @@ B_{\mathrm{pos}}
 一致。若 A 原始在左、交换后变成右，分析时不能直接比较字母 A/B，而要映射回
 真实模型身份。
 
+若只检查“是否偏向第一位”的单向指标，可能把偏向第二位误读成偏差消失；跨任务
+汇总时，相反方向也可能互相抵消。可以再统计同一对回答在两种展示顺序下是否都选
+同一个位置：
+
+~~~math
+B_{\mathrm{slot}}
+=
+\frac{N_{\mathrm{same}}}{N_{\mathrm{valid}}}
+~~~
+
+其中，`N_same` 统计两种顺序都选择同一展示位置的配对数；`N_valid` 只计两次调用
+均为有效非平局判断的配对。
+例如，合成的 100 个有效交换对中，25 对两次都选第一位，12 对两次都选第二位，
+则 $B_{\mathrm{slot}}=(25+12)/100=0.37$。Yagubyan 在 GroundLM 2026 的重复
+评审实验中也观察到这种情况：GPT-5.4-mini 的第一展示位胜率为 33.5%，但 33.9% 的
+配对判断无论如何交换回答，都会选同一个展示位置；五个 judge 的该比例为
+21.1%–46.0%。结果来自 29 个近似质量匹配的问题和指定模型、提示，不是所有
+judge 的偏差率估计。[The Coin Flip Judge?](https://aclanthology.org/2026.groundlm-1.64/)
+
+候选答案顺序并非唯一的位置变量。rubric 评分会把分数档位列成选项，多维评分还会
+按顺序列出评价维度；这两种顺序也可能改变结果。Xu 等人在六个开源 judge 和四个
+数据集上分别置换分数档位与评价维度，观察到模型对靠前或靠后档位的偏好并不一致，
+维度顺序也会改变分数；仅改变 rubric 顺序，在其设置中有 15%–41% 的 prompt
+更换了排名第一的候选。按推理预算匹配时，少量随机顺序聚合在多数设置中已接近精确
+平衡置换；相关性收益主要出现在原有档位偏差较强的 judge 上，并非每个 judge 都
+会改善。因此，审计时要固定回答，分别置换分数档位和维度顺序，记录分数、排序、
+人工一致度与额外调用成本；A/B 答案换序无法替代这两项检查。结果只覆盖论文中的
+模型和四类文本评测数据。[Am I More Pointwise or Pairwise?](https://aclanthology.org/2026.findings-emnlp.1444/)
+
 ### 7.2 Verbosity bias
 
 judge 可能认为更长、更详细的回答更努力。长答案也可能包含更多无关内容、
@@ -452,12 +481,24 @@ B_{\mathrm{len}}
 这个比例高不一定证明存在偏见，因为复杂问题确实可能需要长答案。应按任务
 长度、语言和难度切片，或构造内容质量相近但长度不同的对照样本。
 
+被比较的协议本身也会影响干扰敏感性。Tripathi 等人在 MT-Bench 的受控改写中，
+对四个开源 judge 加入自信语气、冗长或迎合表达后，成对偏好（pairwise）平均约有
+35.2% 翻转，逐条绝对评分（pointwise / absolute scoring）约有 9.3% 翻转；
+IFEval-TweakSet 的同质量回答对也显示 pairwise 判定较少选择平局。这里的翻转衡量
+的是相对基线对风格干扰的敏感程度，不是 judge 相对人工标签的错误率。绝对评分仍
+需对齐目标量尺，pairwise 也仍适用于直接收集相对偏好；应按目标任务选协议，并在
+目标数据上做干扰测试。
+[Pairwise or Pointwise?](https://arxiv.org/abs/2504.14716)
+
 ### 7.3 Self-preference 和家族偏见
 
 一个 judge 可能偏爱与自身训练分布、对齐风格或输出习惯相似的回答。使用同一
 模型家族互评时，这种偏好尤其值得警惕。控制方法包括人工 gold set、不同家族
 judge 交叉评估、匿名化模型身份和报告 disagreement，而不是假设更强 judge
-天然没有偏见。
+天然没有偏见。若合成数据生成器与 judge 同源、存在继承关系或属于同一家族，
+生成偏好还可能传给学生模型，使 judge 后续偏爱相关模型的回答；这一数据血缘
+路径称为 preference leakage，详见[第 5 章 §3.7](05-污染检测与可信评估.md#37-评估器相关的偏好泄漏)。
+[Preference Leakage，ICLR 2026](https://openreview.net/forum?id=grIvSXVJ65)
 
 ### 7.4 Reference 和 authority bias
 
@@ -465,6 +506,17 @@ judge 交叉评估、匿名化模型身份和报告 disagreement，而不是假�
 自身记忆补全事实。回答使用自信语气、专业术语或漂亮格式，也可能诱发 authority
 bias。解决办法不是永远提供或永远隐藏 reference，而是根据任务定义必须事实、
 允许表达和证据范围。
+
+RAG 中的引用标记、来源标题和证据块既可能是无关的呈现线索，也可能是任务所需
+的可追溯性证据；判断标准应由 rubric 决定。TraceJudgeBench 的受控诊断中，
+GPT-5.5 在一个经人工验证的软质量差设置里，普通提示有 50.5% 的判断偏向较差的
+引用式候选；明确要求忽略引用式呈现线索的提示（论文称 anti-citation prompt），
+把这一比例降到 0%，但某些提示强度也会把已由人工确认的中等质量差判成 Tie。清晰
+正确性冲突上的准确率仍至少为 93%。
+这说明“偏差变少”还不足以证明测量更好：应分别检查等价回答上的错误偏好、
+真实质量差上的判别力，以及不同目标关系下 Tie 的含义。该结果来自特定的 RAG/
+Agent 诊断数据和模型，不是通用 judge 效果结论。
+[Debiasing as a Measurement Intervention](https://aclanthology.org/2026.findings-emnlp.1880/)
 
 ### 7.5 语言和格式偏见
 
@@ -534,6 +586,28 @@ judge 的通用失败率；作者也没有识别出完整因果机制。[EMNLP 2
 每条 gold 样本至少保存人工标签、理由、争议状态、专家审阅者和 rubric revision。
 如果人工本身不一致，gold 不能伪装成绝对真理；可以保存共识、允许标签集合
 或“需要复核”。
+
+长回答或 Agent 轨迹还需要按单条 rubric 标注，而不只保存整份回答的总分。
+RuVerBench 为 Deep Research 和 Agentic Coding 构造了 2,458 条“输出—rubric”核验
+样本；两组标注者独立判断后再仲裁，整体一致率为 90.4%，Cohen κ 为 0.808。
+其平均输出长度分别约为 7.1K 和 49.4K tokens，且 judge 在不同领域和 rubric
+类别上的可靠性并不相同，Agentic Coding 中的工具与规则核验尤其值得分开检查。
+论文把“把局部证据当作完整满足”和“给 rubric 擅自增加条件”列为常见错误类型。
+这些结果只覆盖两个 benchmark 领域；它们支持的是逐项留证、按类别报告和保留
+人工仲裁的设计，不能外推成所有 Agent judge 的统一错误率。
+[RuVerBench](https://aclanthology.org/2026.emnlp-main.2192/)
+
+若目标是把文本 rubric 分数映射到人工使用的量尺，还需要区分“判分稳定”与“分数
+含义一致”。Hong 等人提出的 RULERS 把这件事拆成三个步骤：先将人工 rubric 固定
+为任务级维度、逐项清单、分数锚点和证据规则；再让 judge 给出带文本证据的结构化
+判断，并按规则核验引用证据；最后仅用独立的人工校准集学习模型信号到人工分数边界
+的映射，在保留集上报告结果。论文在四个文本评分 benchmark 和四种冻结模型上测试，
+多数而非全部组合的 QWK 更高，rubric 等义改写下的分数分布也更稳定；将同一后处理
+校准套在若干基线模型上，不能稳定得到全部收益，说明输入 rubric 和中间评分信号仍
+重要。其主实验使用 200 条人工校准样本，但样本量和收益都不能直接外推。RULERS
+面向任务级文本评分，仍依赖源 rubric 和校准标签；新领域或新分数量尺需要重新检查，
+不能据此替代 Agent 轨迹逐条核验或高风险专家复核。
+[From Rubrics to Reliable Scores](https://aclanthology.org/2026.emnlp-main.566/)
 
 ### 8.2 校准集、开发集和保留集
 
@@ -685,6 +759,13 @@ bootstrap，得到 win rate、切片均值和校准指标的区间。若同一�
 共享同一个模型、prompt 和样本，不能简单把 5 次结果当成 5 个独立样本。它们
 适合估计 judge 的随机波动，不等于新增人工证据。
 
+在前述 GroundLM 2026 实验中，六个指定 judge 对相同输入的 pairwise 判断平均有
+11%–14% 会在重复调用时翻转；作者估计，约 11 次调用才能在该数据上以 95% 概率
+复现 50 次调用的多数标签，且困难样本需要更多调用。样本刻意选取了质量接近的
+回答，并且只有 29 个问题；该数字不能当成所有任务的固定采样次数。实际次数应
+在目标任务的校准集上按预算和不确定性选定，同时把高波动样本标为待判或升级。
+[The Coin Flip Judge?](https://aclanthology.org/2026.groundlm-1.64/)
+
 ### 9.4 置信度的实际校准
 
 把 judge 的 confidence 分成 low、medium、high 后，在 gold set 上分别计算真实
@@ -711,6 +792,17 @@ bootstrap，得到 win rate、切片均值和校准指标的区间。若同一�
 解释成长度完全无关，也不等于自然流量中的长度偏差已被排除。因此，“长答案常
 获胜”只能作为偏差线索；应同时构造内容质量相当、仅长度不同的配对样本，并
 按任务切片。[位置偏差研究](https://arxiv.org/abs/2406.07791)
+
+若评估目标是模型排序，还应把 pairwise 指标按人工 gold 的质量差分层。Brocai 与
+Becker 的 2026 年预印本基于 Bradley–Terry 几何指出：接近并列的样本更容易出现
+判断翻转，但一次翻转对总体排序的影响较小；质量差距较大的比较更能区分排序，
+而全局一致率、位置偏差和非传递性指标会把每一对等权计入。作者在两份英语教育
+语料（教师评估的可读性文本与学生作文）上发现，全局代理指标与人类 gold 排序
+的相关较弱，信号主要来自远差距样本。因此，除报告交换/一致性统计外，还应在
+有人类排序依据时按差距分位数报告错误，并直接检查人类与 judge 的排名相关。
+这项分析目前是预印本，语料仅为两类教育文本，不足以推出代码、问答或 leaderboard
+任务中的同一效应；它也不意味着近似并列的模型没有业务价值。
+[Pair Difficulty Matters](https://arxiv.org/abs/2609.37577)
 
 ## 10. 多 Judge 组合与分歧路由
 
@@ -814,7 +906,7 @@ judge 的关键不是“读起来像政策”，而是声明级证据对齐。
 由 judge 初筛；政策冲突、法律后果和高风险结论应由领域专家复核。三层结果
 分别保存，不能用 judge 的一项 faithfulness 分数代替整个 RAG 链路。
 
-## 12. 一个可运行的 Judge 诊断 demo
+## 12. 一个 Judge 诊断 demo
 
 下面的 demo 不调用模型，而是处理一组 toy judge 结果。它检查 rubric 必需字段、
 汇总上游解析有效率、比较 judge 与人工标签、计算顺序交换稳定性、位置和长度
@@ -830,6 +922,8 @@ judge 的关键不是“读起来像政策”，而是声明级证据对齐。
 规范化的记录，`valid` 表示该次输出已通过 schema 校验；demo 统计它的有效率，
 并检查 rubric 契约中的必需字段。生产解析器还要单独拒绝缺字段、非法枚举和
 未知样本 ID。
+
+代码状态：静态审阅，未运行（2026-11-03）。
 
 ~~~python
 from pprint import pprint
@@ -1276,6 +1370,13 @@ judge 是否改变行为。一个只在自然样本上表现好的 judge，可�
 14. [Hugging Face Evaluate](https://huggingface.co/docs/evaluate/index)：提供指标和评估脚本入口。
 15. [LangSmith evaluation types](https://docs.langchain.com/langsmith/evaluation-types)：展示 offline/online 评估与 LLM、代码、组合等 evaluator 的工程接口，文档不证明任何 judge 已对齐目标人工标签。
 16. [OpenAI Graders API reference](https://developers.openai.com/api/reference/resources/graders)：当前 grader API 的实现入口；接口会变化，产品文档不等于模型评测质量证据。
+17. [Pairwise or Pointwise? Evaluating Feedback Protocols for Bias in LLM-Based Evaluation](https://arxiv.org/abs/2504.14716)：在 IFEval-TweakSet 和 MT-Bench 的指定 judge 与风格扰动设置中比较 pairwise 和 absolute scoring；偏好翻转率不是人工准确率。
+18. [Can LLM-as-a-Judge Reliably Verify Rubrics in Agentic Scenarios? / RuVerBench](https://aclanthology.org/2026.emnlp-main.2192/)：在人类逐项标注的 Deep Research 与 Agentic Coding rubric 样本上测试 rubric verification；结果受两个领域、rubric 类别和论文模型快照限制。
+19. [Debiasing as a Measurement Intervention: Calibrated Ties and Resolution Loss in LLM-as-a-Judge Evaluation](https://aclanthology.org/2026.findings-emnlp.1880/)：以 TraceJudgeBench 诊断 citation-like 呈现偏差和去偏后的判别力损失；结果绑定其受控 RAG/Agent 数据与模型。
+20. [The Coin Flip Judge? Reliability and Bias in LLM-as-a-Judge Evaluation](https://aclanthology.org/2026.groundlm-1.64/)：GroundLM 2026 对重复调用、顺序交换和 judge 波动的分析；主要样本为 29 个近似质量匹配的问题，重复次数估计不是通用建议。
+21. [Pair Difficulty Matters: Rethinking Pairwise LLM-as-a-Judge Evaluation and Consistency](https://arxiv.org/abs/2609.37577)：预印本分析 pairwise 一致性与按 rank-gap 条件化的排序指标；实验只覆盖两类英语教育文本语料。
+22. [Am I More Pointwise or Pairwise? Revealing Position Bias in Rubric-Based LLM-as-a-Judge](https://aclanthology.org/2026.findings-emnlp.1444/)：检查分数档位位置和多维标准排列对 rubric judge 的影响；结果绑定六个开源模型、四个文本数据集和其顺序置换设置。
+23. [From Rubrics to Reliable Scores: Evidence-Grounded Text Evaluation with LLM Judges](https://aclanthology.org/2026.emnlp-main.566/)：RULERS 将任务级 rubric 锁定、证据核验和人工分数量尺校准串成推理时协议；结果受四个文本 benchmark、人工校准集与冻结模型设置限制。
 
 使用这些资料时，要把论文结论、框架实现和项目实测分开。一个 judge 在论文
 中的平均一致率，不等于它在当前企业文档、当前语言和当前安全切片上的一致率；

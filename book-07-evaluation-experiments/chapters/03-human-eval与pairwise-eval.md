@@ -632,6 +632,15 @@ expert_validity：领域标准下哪个回答更正确、更安全
 发现其中存在未经证据支持的结论；产品需要解决的是信任和表达的冲突，而不是
 删除其中一个标签。
 
+目标用户也不是同质群体。评估前应说清结果要代表哪类人、哪些地区和语言、什么
+使用场景；当群体差异会影响决策时，保留分组结果，并按预先定义的目标人群比例
+计算总体量。HUMAINE（ICLR 2026）在美国和英国招募 23,404 名参与者，按人口
+组收集多轮对话偏好，并用分层 Bradley--Terry--Davidson 模型及人口普查比例作
+后分层。作者报告模型排序随年龄组变化；开放式对话中的 Trust、Ethics & Safety
+标签有 65% 为平局，提示这种宽泛对话未必能充分触发安全判断。该研究限于美英
+人群、短多轮文本互动和其模型快照；它说明总体偏好依赖人群与任务，不能作为
+全球用户排序或安全结论。[HUMAINE 论文](https://proceedings.iclr.cc/paper_files/paper/2026/hash/9c1bcfe6edf7e47d83d2e99492d851e4-Abstract-Conference.html)
+
 ### 7.4 校准样本与反馈闭环
 
 开始正式标注前，先让所有评审独立完成一小批带参考解释的样本。讨论分歧后，
@@ -823,6 +832,13 @@ B_{\mathrm{len}}
 分配合适评审，分别报告切片结果，并检查翻译、术语和文化语境是否改变了
 任务难度。
 
+多语评估还要把“自然”拆成可观察维度，并为目标语言和地区本地化题目与锚点。
+2025 年 MENLO 预印本构建了覆盖 47 种语言变体的 6,423 组回答比较，包含流畅度、
+语气、本地化语气和本地化事实性四类维度；提示与指南经过翻译和本地化，每组
+至少由三位评审标注，作者报告总体 Krippendorff $\alpha=0.84$。这是该数据集和
+标注流程下的可靠性结果，不表示不同语言的分数天然可比，也不证明这四个维度
+适用于所有多语任务。[MENLO 预印本](https://arxiv.org/abs/2509.26601)
+
 ### 9.5 安全与拒答偏见
 
 评审可能把“敢于回答”误认为有帮助，也可能把所有拒答都认为安全。规范要给
@@ -881,6 +897,14 @@ N
 如果为了发现高风险问题而过采样某个切片，样本中的原始比例就不是 `p_g`；
 要么用已知流量比例加权，要么把结果明确称为风险切片表现，不能直接当线上
 平均偏好。
+
+例如，假设评测样本中 A、B 两组分别占 80% 和 20%，新模型在两组的偏好分数
+分别为 0.60 和 0.40，则样本原始均值是
+`0.8×0.60+0.2×0.40=0.56`。若目标用户实际由 A 组占 30%、B 组占 70%，按目标
+比例加权后是 `0.3×0.60+0.7×0.40=0.46`，方向会反转。这里的数字是教学假设，
+偏好分数按平局折半。加权修正的是已知组间比例差异，不能修复组内选择偏差；
+报告仍应给出各组样本量、偏好率和不确定性。若“目标用户”没有可辩护的总体
+定义，就分别报告群体结果，不要把某个样本构成的平均值说成普遍用户偏好。
 
 ### 10.4 人工评估的成本账本
 
@@ -1067,7 +1091,7 @@ gold evidence。旧模型和新模型使用同一 prompt、同一检索结果和
 这种结论比“新版胜率超过 50%，所以发布”更接近实际工程决策，因为它同时说明
 收益在哪里、证据缺什么、风险如何处理。
 
-## 13. 一个可运行的人工评估诊断 demo
+## 13. 一个用于人工评估诊断的 demo
 
 下面的 toy demo 不调用模型，只处理一组已经产生的人工标签。它计算绝对评分、
 成对偏好及按 prompt 聚合的粗略标准误、任务切片、一致性、位置和长度信号，并把需要调查的事项逐条列出。
@@ -1078,6 +1102,8 @@ gold evidence。旧模型和新模型使用同一 prompt、同一检索结果和
 演示阈值，不是跨任务通用的一致性标准、发布标准或统计显著性阈值。真实项目应
 根据风险等级、样本设计、聚类结构和历史基线预先确定判定规则，并同时报告原始
 样本量和不确定性区间；不能因为某个布尔信号为 `True` 就跳过人工复核。
+
+> 代码状态：静态审阅，未运行（2026-11-03）。
 
 ~~~python
 import math
@@ -1294,7 +1320,7 @@ summary = {
 pprint(summary, sort_dicts=False)
 ~~~
 
-输出为：
+手算预期输出（静态审阅，未运行）：
 
 ~~~text
 {'rating_summary': {'old': 3.167, 'new': 3.75, 'delta': 0.583},
@@ -1476,8 +1502,10 @@ pairwise 结果测量的是新系统，不是“同条件下的模型差异”�
 11. [Illusions of the Gold Standard: A Large-scale Analysis of Human Evaluation Protocols for Long-form Text Generation](https://aclanthology.org/2026.acl-long.635/)：人工审查 284 篇、辅助分析 1.8k 余篇 2023—2025 年 *CL 长文本生成人评论文，总结复现信息的系统性缺漏；结论绑定作者论文样本和报告标准。
 12. [Challenges in Trustworthy Human Evaluation of Chatbots](https://arxiv.org/abs/2412.04363)：以 55K Arena 快照进行随机差票、定向投票和主观题分歧的压力分析；10% 票数模拟变化不能解释为实际坏票率，原快照被假设为真实排序。
 13. [Dropping Just a Handful of Preferences Can Change Top Large Language Model Rankings](https://proceedings.iclr.cc/paper_files/paper/2026/hash/92d777fb721936613b6444b07c4ffc18-Abstract-Conference.html)：ICLR 2026 论文用 AMIP 近似筛出高影响偏好并精确重拟合；结果绑定作者公开平台快照，最坏情况删点不等同于随机抽样置信区间。
-14. [OpenAI Evals](https://github.com/openai/evals)：提供可扩展评估任务和运行框架入口。
-15. [Hugging Face Evaluate](https://huggingface.co/docs/evaluate/index)：提供指标和评估脚本的实现入口。
+14. [Unpacking Human Preference for LLMs: Demographically Aware Evaluation with the HUMAINE Framework](https://proceedings.iclr.cc/paper_files/paper/2026/hash/9c1bcfe6edf7e47d83d2e99492d851e4-Abstract-Conference.html)：用美英人口分层样本、分层 BTD 和人口普查后分层展示群体偏好差异；其短多轮文本和地区边界限制了外推范围。
+15. [MENLO: From Preferences to Proficiency](https://arxiv.org/abs/2509.26601)：以本地化提示、rubric 和多语评审测量 47 种语言变体中的本地语言质量；数据集与预印本结论绑定其四类维度和任务设计。
+16. [OpenAI Evals](https://github.com/openai/evals)：提供可扩展评估任务和运行框架入口。
+17. [Hugging Face Evaluate](https://huggingface.co/docs/evaluate/index)：提供指标和评估脚本的实现入口。
 
 这些资料的证据类型并不相同：论文给出方法和实验口径，平台文档说明实现入口，
 真实业务的脱敏样本才说明某个产品遇到了什么问题。面对新模型的公开偏好榜单，

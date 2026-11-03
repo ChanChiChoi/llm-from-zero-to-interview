@@ -37,3 +37,10 @@
 - **阅读位置**：prompt injection 定义、外部来源恶意指令示例、分层防护说明。
 - **来源支持的事实**：第三方内容可能把恶意指令混入模型上下文，意图误导模型偏离用户任务；来源以此说明 prompt injection 风险，并描述多层防护。
 - **证据等级与边界**：source-backed（官方安全材料）；该说明不提供适用于所有 RAG 堆栈的检测率，不表示模型提示或文档隔离能单独阻断攻击。
+
+## GraphRAG 仓库当前维护状态
+
+- **来源与版本**：[Microsoft GraphRAG 官方仓库 README](https://github.com/microsoft/graphrag)，`main` 分支，访问日期 2026-11-02。
+- **阅读位置**：README 的项目定位、Repository Guidance、indexing 成本提示和版本迁移说明。
+- **来源支持的事实**：仓库说明该项目是探索图结构增强问答的 research project，当前处于 largely in maintenance mode，不计划接受新功能 PR 或实现新功能，仍会按需要处理 bug 与依赖更新；README 另提醒 indexing 可能成本较高，建议先小规模试验，并指出示例代码不是正式支持的 Microsoft 产品。
+- **证据等级与边界**：source-backed（项目官方仓库动态页面）；结论绑定 2026-11-02 访问时的 `main` README，不代表未来支持策略或每个版本的维护周期。论文关于 global sensemaking 的结果仍限于论文语料、任务和对照方法，仓库维护状态不改变论文实验结论。

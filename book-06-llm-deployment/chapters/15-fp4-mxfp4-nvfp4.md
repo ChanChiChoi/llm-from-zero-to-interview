@@ -15,6 +15,11 @@ INT4 已经证明低比特权重可以显著降低存储，但整数刻度在激
 kernel、runtime、评估和发布 manifest。涉及具体硬件时，正文会明确区分官方资料
 披露、软件模拟和目标 workload 实测，避免把某个版本的结果写成永久规律。
 
+第七章建立适用于多种压缩方法的通用评估框架；本章集中看 FP4 权重和激活的格式与
+执行路径。KV Cache 的 FP8 精度由[第十六章](16-fp8-kv-cache.md)主讲，原生 INT4
+artifact 由[第十七章](17-native-int4与原生量化部署.md)主讲。训练论文只用于解释 recipe 对低精度
+稳定性的影响，不替代第五册的量化训练主线。
+
 ## 1. 为什么低比特浮点会成为一个独立问题
 
 ### 1.1 从 FP16、BF16 到 INT4
@@ -85,9 +90,11 @@ exponent、mantissa、特殊值、舍入方式、subnormal 是否存在以及 sc
 
 OCP MX 规范中的 E2M1 将 4 bit 分成 1 个符号位、2 个指数位和 1 个尾数位；它能表示
 的非负幅值为 `0、0.5、1、1.5、2、3、4、6`，负值有对应幅值，最大幅值为 6，
-没有 Inf 和 NaN 编码。一个量化值可抽象写成 `x̂ᵢ = s_g cᵢ`：`cᵢ` 从 E2M1
-码本中选择，`s_g` 是该组的 scale。码本决定组内能选哪些数，scale 决定这组数落在
-原张量的哪个范围；两者的舍入误差会叠加。
+没有 Inf 和 NaN 编码，并支持 subnormal。规范要求转换至少支持 roundTiesToEven，
+超出范围时支持饱和到最大幅值。一个量化值可抽象写成 `x̂ᵢ = s_g cᵢ`：`cᵢ` 从
+E2M1 码本中选择，`s_g` 是该组的 scale。码本决定组内能选哪些数，scale 决定这组
+数落在原张量的哪个范围；两者的舍入误差会叠加。[OCP MX v1.0](https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf)
+还规定了转换约定，代码中仅选最近码值不等于完整实现该规范的舍入。
 
 所以，阅读一份模型卡或 runtime 配置时，不能只看 `fp4` 这个字符串。至少要继续
 追问：
@@ -176,7 +183,7 @@ payload bit 数去和另一种格式的硬件吞吐比较。
 ### 2.5 从支持矩阵读出真实边界
 
 支持矩阵是部署决策中很有价值、但也很容易被误读的一类资料。以 NVIDIA Model
-Optimizer 在 2026-10-27 访问的 [Linux 支持矩阵](https://nvidia.github.io/Model-Optimizer/guides/0_support_matrix.html)为例，FP4 被列为 per-block 的 FP4
+Optimizer 在 2026-11-02 访问的 [Linux 支持矩阵](https://nvidia.github.io/Model-Optimizer/guides/0_support_matrix.html)为例，FP4 被列为 per-block 的 FP4
 权重与激活、Blackwell 及以后 GPU 的路径，部署栏列出 TensorRT 与 TensorRT-LLM。
 这些信息可以证明该文档快照公开声明存在一条支持路径，不能证明任意模型、任意矩阵
 形状或任意 KV 配置都能走同一条原生 kernel。该矩阵是滚动更新页面，应在选定软件
@@ -221,13 +228,12 @@ block/group scale 是两者之间的工程折中。
 
 ### 3.2 异常值为什么会消耗小值的精度
 
-考虑一个 block 中 15 个值落在 `[-1,1]`，另一个值为 `20`。如果 scale 由最大
-绝对值决定，则 `s=20`，普通值会被缩放到 `[-0.05,0.05]`。低比特码本的有限
-等级中，许多普通值可能落到相同或相邻的格点，重构后的相对误差会明显增大。
-用 E2M1 码本可把这个结果算得更具体：`0.9/20=0.045`，离它最近的 E2M1 值是 0，
-所以这个元素重构为 0、绝对误差为 0.9；若它单独使用 `s=0.9`，归一化值为 1，
-则可重构回 0.9。这个计算只说明共享 scale 的影响方向，尚未加入 MX 的 E8M0
-scale 舍入或 NVFP4 的 E4M3/global scale。
+考虑一个 block 中 15 个值落在 `[-1,1]`，另一个值为 `20`。用 E2M1 的最大幅值 6
+做简化对称缩放时，令 `s=20/6≈3.33`。普通值落到较小的归一化范围；例如
+`0.9/3.33≈0.27`，最近的 E2M1 码值是 0.5，重构约为 `3.33×0.5≈1.67`，绝对
+误差约 0.77。若 `0.9` 单独位于一个 block，`s=0.9/6=0.15`，归一化值为 6，
+可重构回 0.9。这个例子展示共享 scale 如何让大 outlier 挤压小值精度；它没有加入
+MX 的 E8M0 scale 舍入、NVFP4 的 E4M3/global scale 或舍入边界。
 
 可以把误差拆成两个方向：
 
@@ -279,6 +285,41 @@ PlatinumBench GPTQ 变体对比中，报告最佳 NVFP4 recovery 为 96.6%，最
 配套 QuTLASS kernel 在 B200 上报告最高 3.6× layer-wise、2.2× end-to-end 加速；在
 RTX 5090 上报告最高 6× layer-wise、4× end-to-end。它们是论文中特定模型、层、shape、
 baseline 与测试配置下的最高值，不是所有 FP4 负载的预测倍率。
+
+针对 NVFP4 近饱和值误差的 Four Over Six（4/6）把 scale 选择细化到每个 1×16 block：
+分别计算把 block 最大值映射到 6 与 4 的候选，再按重构误差选一个。映射到 4 会放弃
+±6 端点，却把 E2M1 的 `3` 放到 block 最大值的 75% 处；映射到 6 保留完整范围，因此
+不宜把所有 block 固定映射到 4。论文的 `[10,20,30,40]` 算例中，映射到 6 的候选重构
+为 `[9.75,19.5,26,39]`，MSE 为 `17.3125/4≈4.33`；映射到 4 时 scale 为 10，归一化
+码值 `[1,2,3,4]` 都可表示，重构误差为 0。这是候选选择机制的单 block 手算，不是模型
+质量或部署收益。论文实验认为按 MSE 选取整体表现较好；Transformer Engine 2.20.2 的
+接口默认误差度量却是 MAE，且默认未启用 4/6，两者设置不可混写。该版本文档列出的主要
+支持目标是 RL 和后训练量化，带 RHT 的预训练组合尚未实现；其 API 还为 4/6 默认使用 E4M3
+global scale 上界 256。以上均是版本化 recipe 声明，不证明其他 runtime 或目标模型的兼容
+和效果。[Four Over Six 论文（arXiv v1）](https://arxiv.org/abs/2512.02010v1)，[Transformer Engine 2.20.2 Common API](https://docs.nvidia.com/deeplearning/transformer-engine/api/common.html)。
+
+另一个针对 E8M0 尺度间隔的路线是 Overflow-Aware Scaling（OAS）与 Macro Block
+Scaling（MBS）。这篇 2026 年 1 月的 arXiv v1 在 1×16 局部块上把最大值映射到更靠近
+E2M1 饱和端的范围。例如归一化最大值从 3.3 加倍到 6.6，最近码由 3 变成 6，两者
+相对误差都是 `0.3/3.3≈9.1%`；较小值同时获得约两倍的归一化动态范围，有机会从
+零码变成非零码。这是论文中归一化值的教学计算，不证明目标 artifact 的 scale 选择
+已经正确。
+
+MBS 再将 8 个连续的 1×16 子块合成 1×128 macro block，为该 macro block 增加一个
+8-bit mantissa 因子；局部 E8M0 scale 继续承载 2 的幂指数。例如 `α_max=3.3` 时，
+论文示意 scale 为 `6/3.3≈1.82=2^0×1.82`，可将指数部分并入局部 E8M0，并额外
+存储 mantissa。只按 E2M1 payload、每 16 值一个 E8M0 和每 128 值一个 8-bit mantissa
+估算，为 `4+8/16+8/128=4.5625 bit/value`，仍未计布局与 padding。OAS 和 MBS
+处理 scale 映射/精度，与 MR-GPTQ 的旋转加误差补偿不同；静态 MBS 计算较省，动态
+查表的精度更高但作者实现更慢。
+
+作者在 Llama 3.1-8B-Instruct 与 Qwen3-8B 六项任务的平均分分别报告 MBS-H 为
+66.50 和 70.84，NVFP4 为 67.02 和 71.48，差值是 0.52 和 0.64 个百分点。其方法
+同时量化权重与激活，使用 vLLM/LM Evaluation Harness、direct-cast 而未校准或重训；
+性能测量使用 CUTLASS 4.3.0、Blackwell SM100，作者报告不同 shape 的 prefill GEMM
+平均开销为 6.2%。这是特定实现和评测的结果，不等于标准 OCP MXFP4 的通用收益、
+目标 runtime 已支持或目标 workload 的端到端质量/速度保证。[OAS/MBS 论文（arXiv v1）](https://arxiv.org/abs/2603.08713)。复测时仍须固定同一模型、
+任务、运行时和 kernel。
 
 这并不和[统一量化评测](https://arxiv.org/abs/2507.17417)“对 INT4 有效的 rotation
 在 MXFP4/NVFP4 上收益有限”的结论简单冲突：通用旋转与 block-aware 旋转、RTN 与
@@ -565,11 +606,39 @@ engine workspace 或 KV。特别是 Transformer Engine 的 NVFP4 二维权重 sc
 激活 scale 是不同 layout；部署必须直接检查导出的 artifact，而不是把本表当作
 所有 NVFP4 权重的文件大小。
 
-## 9. 一个可运行的 block 量化教学示例
+## 9. 一个 block 量化教学示例
 
 下面的代码使用 E2M1 的离散码值和未量化的 Python 浮点 block scale，演示 block size、scale metadata、
 异常值和存储估算的关系。它不是 MXFP4 或 NVFP4 的硬件实现，也不能用来证明任何
 GPU 的 kernel 性能；它的价值是让读者看到“payload、scale 和 metadata 必须一起算”。
+代码状态：**静态审阅，未运行（2026-11-02）**。仅依赖 Python 标准库；保存为
+`fp4_block_demo.py` 后可用 `python3 fp4_block_demo.py` 运行。本例按 E2M1 最大幅值 6
+设置 `scale=max(abs(block))/6`，并手算下方预期输出。Python `min` 遇到等距码值时按
+tuple 顺序取第一个，不实现 OCP 的 ties-to-even；本例输入没有等距情形。
+
+读代码时可把它看作三个彼此分开的操作。`quantize_blocks` 先检查输入是否非空、有限，
+再按 `block_size` 切片；每片用自己的最大绝对值除以 6，得到浮点 scale。这样本例中
+`20` 所在 block 的归一化最大幅值就是 6，而含 `0.9` 的独立 block 也能把最大值放到
+6。遇到全零 block 时，`or 1.0` 避免除以零，不改变重构结果。随后每个归一化值都在
+E2M1 教学码表中找绝对距离最近的值，再乘回 scale；这个步骤模拟“码本选择 + 反量化”，
+并没有执行 FP4 位打包或 runtime 的量化 kernel。
+
+scale 由绝对值最大项决定，因此正负值共享以零为中心的对称刻度；示例没有 zero point，
+也不展示非对称整数码、饱和统计或随机舍入。它说明的是 E2M1 码本配共享 scale 的局部
+行为，不能拿来替代 INT4 affine quantization 的零点推导。
+
+`mse` 对输入与重构结果逐元素求平方差，再除以元素总数。它能比较本例两个 block size
+对同一组输入的局部重构误差，但每个元素被同等计权；它没有层敏感度、校准分布、模型
+输出或任务准确率信息。`storage_bytes` 则把 payload 与每个 block 的 scale 和 metadata
+分开计账，block 数用向上取整，适用于尾块不满的逻辑估算。这里的 2-byte scale 和
+1-byte metadata 是示例参数，不是 MXFP4 或 NVFP4 的真实 scale layout。
+
+还可以不执行程序而沿边界分支检查其含义：`block_size` 为零或负数时会被拒绝，空向量
+以及含 NaN/无穷的量化输入也会报错；`mse` 拒绝长度不等或空输入；若元素数不能被
+block size 整除，最后一片仍单独使用自己的最大绝对值，存储估算则把最后一个 scale
+算入。这样的静态追踪有助于读者知道示例明确处理了什么，但不能证明运行环境、语法或
+第三方调用方式已经执行验证。代码标签与正文都保持“静态审阅，未运行”，边界结论不
+应改写成测试通过。
 
 ~~~python
 import math
@@ -592,7 +661,7 @@ def quantize_blocks(values, block_size):
     scales = []
     for start in range(0, len(values), block_size):
         block = values[start : start + block_size]
-        scale = max(abs(value) for value in block) or 1.0
+        scale = (max(abs(value) for value in block) / 6.0) or 1.0
         scales.append(scale)
         for value in block:
             normalized = value / scale
@@ -628,26 +697,44 @@ for block_size in (8, 4):
 pprint(results, sort_dicts=False)
 ~~~
 
-这段代码使用 E2M1 可表示值，但 `scale=max(abs(block))` 是未量化浮点数；存储函数
+这段代码使用 E2M1 可表示值，但 scale 是未量化浮点数；存储函数
 里的 2-byte scale 和 1-byte metadata 也是通用账本假设。因此它不能模拟 OCP 的
 E8M0 scale 舍入、NVFP4 的 E4M3/global/2D scaling、物理 packing 或 Tensor Core
-运算。实际运行输出如下：
+运算。下面是按代码和码值逐项手算的预期结果，**未执行**：
 
 ~~~text
-{8: {'scales': [20.0],
-     'mse': 0.28776,
+{8: {'scales': [3.3333333333333335],
+     'mse': 0.25998,
      'storage_bytes': 7.0,
-     'restored': [0.0, 0.0, 0.0, 0.0, 20.0, 0.0, 0.0, 0.0]},
- 4: {'scales': [0.9, 20.0],
+     'restored': [1.6666666666666667, 0.0, 0.0, 0.0, 20.0, 0.0, 0.0, 0.0]},
+ 4: {'scales': [0.15, 3.3333333333333335],
      'mse': 0.10776,
      'storage_bytes': 10.0,
      'restored': [0.9, 0.9, 0.0, 0.0, 20.0, 0.0, 0.0, 0.0]}}
 ~~~
 
-block 从 8 缩小到 4 后，异常值只影响后一个 block，MSE 下降，但 scale 和 metadata
-数量增加。这里使用真正的 E2M1 可表示值，却没有模拟 E4M3/E8M0 scale 量化、
+手算时，block size 取 8，`s=20/6≈3.3333`，归一化值约为
+`[0.27,0.24,0.006,-0.003,6,0.21,-0.18,0.012]`。最近码为
+`[0.5,0,0,0,6,0,0,0]`，乘回 scale 后，第一个 0.9 被重构为约 1.6667，20 保持
+不变，其余落到 0。平方误差和约为 `2.0799`，除以 8 得 MSE `0.25998`。
+
+block size 取 4 时，前一块 `s=0.9/6=0.15`，归一化后约为
+`[6,5.333,0.133,-0.067]`，对应码值 `[6,6,0,0]`，重构为 `[0.9,0.9,0,0]`，
+平方误差和是 `0.0105`。后一块仍以 20 为最大值，最近码重构为 `[20,0,0,0]`，
+平方误差和为 `0.8516`。合计 `0.8621/8=0.1077625`，按代码保留五位小数为
+`0.10776`。存储账本中 8 个元素的 payload 为 `8×4/8=4 bytes`；一个 block
+额外 `2+1=3 bytes`，故分别是 7 bytes 和 `4+2×3=10 bytes`。
+
+block 从 8 缩小到 4 后，异常值只影响后一个 block，MSE 从约 `0.25998` 降为
+`0.10776`，但 scale 和 metadata 数量增加。这里使用真正的 E2M1 可表示值，却没有模拟 E4M3/E8M0 scale 量化、
 Tensor Core 或 FP4 packing，所以它只能说明 scale 粒度的机制，不能作为格式兼容性
-或速度报告。
+或速度报告。读者可先看同一向量的两组输出，再改变纸面上的 block 划分推演：block
+越小，某个极端值影响的元素越少；但每个小块都多一份 scale 和 metadata，内存读取及
+kernel 对 scale 的处理也更频繁。因而本例中的 MSE 改善不等于真实文件一定更小、kernel
+一定更快或语言模型质量一定更好。真实比较还要固定 block 方向和布局，核对 scale 的
+量化与舍入规则，并把重构误差、模型任务回归和目标硬件 profile 分别测量。由于本例
+代码本轮未执行，展示值是依据输入、码表和上述公式手算的预期值；读者运行时应把实际
+输出与中间 scale、码值、重构值和存储账本逐项对照，而不是只看最终 MSE。
 
 ## 10. 量化 artifact 和回退策略
 
@@ -677,6 +764,20 @@ fallback_modules
 kernel、engine 和服务端 dtype；只替换权重文件，可能导致 scale 被错误解释、算子
 走慢路径，或者健康检查通过但输出质量异常。
 
+这些字段不是为了堆一份长配置，而是把量化张量和消费它的算子绑定起来。`model_revision`
+与 `tokenizer_revision` 锁定输入输出语义；`payload_dtype`、`scale_dtype`、`block_size`
+和实现所用的 scale 方向/布局共同决定反量化结果；`accumulate_dtype` 记录矩阵乘的
+求和精度；`quantized_modules` 与 `excluded_modules` 说明模型里哪些层真正走低精度。
+校准数据 revision、量化工具和配置也要能定位，否则同名 checkpoint 可能来自不同数据
+分布或不同 scale 搜索。若 artifact 没有显式保存某些字段，manifest 仍应记录其来源或
+说明未知，不能根据文件名补猜。
+
+发布时可以把 manifest 中的模型、量化器、kernel、engine、硬件与测试 workload 视为一
+组兼容性指纹。任何一项变更都可能影响行为：换 engine 会改变算子选择，换 scale packing
+会改变加载解释，换 GPU 可能改变 native kernel 覆盖。部署探针应从 checkpoint 的张量
+dtype、shape 和 scale layout 开始，接着核对 engine build 日志和实际 kernel dispatch；
+“加载成功”只说明解析路径走完，不说明每层都按预期 dtype 计算。
+
 ### 10.2 为什么需要高精度回退
 
 输出 head、router、位置相关投影、数字敏感层和某些 attention projection 可能对低
@@ -687,12 +788,38 @@ kernel、engine 和服务端 dtype；只替换权重文件，可能导致 scale 
 错误、长上下文切片退化、kernel 不支持、峰值显存异常或 P99 进入慢路径。回退本身
 增加成本，所以要在 trace 中记录触发原因和回退后的任务结果。
 
+回退可以发生在两个层次。静态回退是在导出或 engine build 时把已知敏感层排除在 FP4
+之外，artifact 的模块清单随之固定；动态回退则在运行时依据 shape、设备能力或质量门
+禁选择另一条路径。前者更容易复现，但无法适应请求差异；后者灵活，却需要验证状态切换、
+额外显存和并发下的资源峰值。若一个原本驻留低精度的模块改走 BF16，权重常驻字节和临时
+转换 buffer 都可能增加，进而挤压 KV 或 active sequence 预算。因此要把回退的质量收益与
+容量、延迟、成本代价放在同一个发布账本中。
+
+质量回退最好带有明确的错误码和边界：例如只有某个长上下文 slice 低于既定门槛时才转到
+高精度副本，工具参数错误则先检查协议和校准，而不是无条件扩大整模型精度。若所有失败都
+回退，系统会掩盖 artifact 缺陷并把风险转成不可预测的高峰成本；若回退被禁止，低精度
+路径在暂时质量不达标时又可能持续返回错误结果。每类触发器都应有 owner、恢复条件和
+回滚演练，trace 记录候选配置、触发指标、目标副本、额外延迟与最终结果。
+
 ### 10.3 Fallback 不能静默发生
 
 如果目标 GPU 不支持某个 FP4 算子，runtime 可能回退到 FP8/BF16；这对功能是好事，
 对性能报告却是关键信息。服务应该暴露实际 kernel、fallback 比例、加载时间和 dtype
 路径。否则模型文件名写着 NVFP4，用户却实际得到一条混合慢路径，最终只能从 P99
 异常中猜原因。
+
+观察时应把离线声明与线上命中分开：兼容矩阵说明软件公开支持哪些条件，engine 构建日志
+说明某个版本接受了哪些张量，运行时 profile 才能说明本次 shape 实际派发到什么 kernel。
+即使 profile 显示所有 matmul 都命中低精度路径，质量门禁仍需独立检查格式合法率、数字和
+代码任务、长上下文检索、工具参数、引用支持及安全关键样本。反过来，平均质量通过也不
+能掩盖少数 fallback 层的尾延迟或峰值显存增加。
+
+因此可把慢路径排查串成一条可复现链：先按请求 ID 取得模型 revision 与 manifest，再定位
+对应层、输入 shape、执行 dtype、kernel 名称和 fallback reason；复算该路径的权重/scale
+字节与临时 workspace，随后在相同请求回放中核对 TTFT、TPOT、质量切片和并发影响。若只
+更新了一个 runtime 版本，先做 build/load/dispatch probe；若 scale layout 也变化，则必须
+重新验证反量化数值与任务结果。这样可以区分格式不兼容、kernel 未命中和 workload 本身
+受其他瓶颈约束，而不是把任何慢速都归因于 FP4。
 
 ## 11. 四位量化部署的验证矩阵
 
@@ -712,6 +839,18 @@ kernel、engine 和服务端 dtype；只替换权重文件，可能导致 scale 
 分布和采样参数，记录显存、加载、TTFT、TPOT、P99、吞吐、格式合法率、质量切片、
 安全和 fallback。这样才知道收益来自哪一种量化对象。
 
+矩阵的行应按假设逐步增加量化对象，而不是一次改动权重、激活、KV 和累加，再把总变化
+归给 FP4。例如 A→B 主要检验权重路径，B→C 检验激活路径，随后才扩大到 KV 或累加；第
+十六章会详细分析 FP8 KV 的状态与 scale，那里需要另设对照组。每一轮都要固定同一批输入，
+采用成对回放并覆盖短/长 prompt、不同输出长度、数字、代码、结构化输出、工具调用和多
+模态入口。否则流量构成变化可能看起来像量化造成了质量或延迟变化。
+
+开始测量前还应先确认 artifact 语义和执行路径：记录 scale/layout，校验量化层清单，在
+代表性 shape 上观察 kernel dispatch 和 fallback。然后分别跑存储容量、算子 profile 和
+端到端任务回归。单层 GEMM 的改善只能支持该算子/shape 的判断；端到端结果还取决于
+prefill/decode 占比、排队、KV 和未量化层。报告应保留每个样本的模型版本、prompt hash、
+任务标签与请求 trace，使质量波动和 P99 退化可以回放。
+
 ### 11.2 哪些结论可以写，哪些不能写
 
 | 已观察到的证据 | 可以写出的结论 | 不能直接推出 |
@@ -724,6 +863,18 @@ kernel、engine 和服务端 dtype；只替换权重文件，可能导致 scale 
 
 工程判断必须保持在证据支持的范围内。尤其是闭源硬件格式和未来 runtime，官方
 文档可以说明“支持某路径”，却不能替代目标任务的质量和性能测量。
+
+读这张表时要沿证据层次作结论。若只有文件字节数下降，下一步应问 scale、padding 和未
+量化层是否都计入；再看峰值显存是否下降，才可判断是否释放了更多 KV 或并发空间。若某个
+shape 的 kernel 变快但端到端延迟没变，应把时间拆成排队、prefill、decode、同步和回退，
+确认该算子是否原本就是瓶颈。若平均质量接近基线但工具参数或长上下文切片变差，应按
+失败类型保留该配置的局部高精度路径或停止发布，而不是用平均分抵消关键错误。
+
+一个可复核的上线结论应同时给出“适用工作区间”和“停止条件”：列出验证过的模型/engine
+revision、GPU、shape、batch 与请求分布，报告质量和性能的样本量与分位数，并明确超出
+验证范围的 fallback 策略。通过压缩文件账本、执行 profile、质量切片与峰值容量门禁之后，
+才可以说这个配置在这些条件下通过；它仍不能证明其他 runtime、任务、硬件或未来版本也
+会有相同行为。
 
 ## 12. 常见误区与排查路径
 
@@ -780,7 +931,7 @@ layout、累加和吞吐。软件模拟应明确标注“教学/离线近似”�
    当前页面标为 2.20.2；其中 1D scaling、global scale 和 2D weight scaling 是该文档
    所指 recipe，不应自动推广到所有 NVFP4 artifact。
 4. [NVIDIA Model Optimizer 支持矩阵](https://nvidia.github.io/Model-Optimizer/guides/0_support_matrix.html)
-   于 2026-10-27 访问，列出 Linux FP4 per-block weights/activations 与 Blackwell+、
+   于 2026-11-02 访问，列出 Linux FP4 per-block weights/activations 与 Blackwell+、
    TensorRT/TensorRT-LLM 部署路径；它是会滚动变化的软件兼容声明，不是目标 workload
    的 native-kernel 或性能实测。
 5. [A Comprehensive Evaluation on Quantization Techniques for LLMs](https://arxiv.org/abs/2507.17417)
@@ -813,6 +964,7 @@ layout、累加和吞吐。软件模拟应明确标注“教学/离线近似”�
 10. [AWQ](https://arxiv.org/abs/2306.00978)：activation-aware weight quantization 研究入口。
 11. [SmoothQuant](https://arxiv.org/abs/2211.10438)：通过平滑激活异常值进行 W8A8 量化的研究入口。
 12. [FP8-LM](https://arxiv.org/abs/2310.18313)：低精度浮点训练和推理的研究背景；不等同于 FP4 部署证明。
+13. [Four Over Six](https://arxiv.org/abs/2512.02010v1) 与 [Transformer Engine 2.20.2 Common API](https://docs.nvidia.com/deeplearning/transformer-engine/api/common.html)：核对 NVFP4 双 scale 候选、误差度量和当前 recipe 边界；论文结果与接口默认值分别理解。
 
 ## 14. 本章小结
 

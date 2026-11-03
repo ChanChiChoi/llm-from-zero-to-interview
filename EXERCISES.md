@@ -70,6 +70,7 @@
 62. 用 3 个 seed 的 toy prediction 计算 bias^2、variance、noise 和 expected error。
 63. 构造一个 distribution shift 切片，让验证集 accuracy 为 1.0、线上切片 accuracy 明显下降，并解释原因。
 64. 设计一个训练-评估 exact overlap 检查，输出 overlap 样本和 overlap rate。
+64A. 给定 4 个模型在 8 道二元题上的响应矩阵（可构造一组能力相近的模型），计算每题通过率和模型总分；说明为什么小且能力范围窄的模型池可能使 IRT 区分参数不稳定，提出至少两项拟合或模拟诊断，并设计一个独立 holdout 避免按参数筛题后又用同题报告成绩。
 65. 写出 Bayes rule，并用一个“RAG 强证据提高答案可靠性后验”的例子解释 prior、likelihood、evidence 和 posterior。
 66. 比较 MLE 和 MAP，说明为什么零均值高斯先验会带来类似 L2 正则的目标。
 67. 用 0 依赖 Python 写一个 Beta-Bernoulli 更新 demo，输入成功 / 失败次数，输出 posterior mean 和 MAP。
@@ -197,6 +198,7 @@
 178. 构造两个模型在同一批 100 道题上的 paired outcomes，统计两边都对/都错和各自独有正确的样本数；说明为何独立准确率看不出 discordant pairs，并比较 McNemar、paired bootstrap 与多训练 seed 分别估计什么。
 179. 分别为可访问训练语料的开源模型和不可访问语料的闭源模型设计 benchmark contamination 审计；组合 overlap scan、新写/隐藏留出集、样本输出检查以及 Oren 顺序似然检验或 ConStat 泛化差距，列出访问条件、误报与漏报边界。
 180. 用固定 loss cap 和权重实现多指标 checkpoint 选择 demo：先应用 stability、resume completeness、safety 与 domain 硬门槛，再归一化 validation、benchmark、safety 和 regression 分量；测试无合格候选、权重和不为 1、配置字段缺失及 benchmark 键不一致。
+181. 给定每 step 的有效 token 数、保存间隔、保存耗时和 step 时间，手算最大故障回退量与串行保存开销；再用重叠的 latest/best/milestone ID 集合核算唯一存储，并计算两项 checkpoint 恢复探针偏差。
 
 ## 阶段 2：Transformer 验收
 
@@ -285,7 +287,7 @@
 6. 用自己的话解释 base model 和 instruct model 的区别。
 7. 对照基础 scaling law 与加入数据质量变量 Q 的拟合形式；用[论文](https://proceedings.iclr.cc/paper_files/paper/2026/hash/d0c80a0c294a16190c8904b9809c5fba-Abstract-Conference.html)的一组指数计算 Q 从 1 变到 0.8 时数据项如何变化，并说明为何 Q 和指数不能直接推广成通用语料质量分数。
 8. 解释为什么固定 compute 下不能只增大模型参数量。
-9. 设计一个数据 mixture ablation 实验。
+9. 设计一个数据 mixture ablation 实验：固定模型、tokenizer、总 token 预算和训练设置，分别报告通用与目标领域指标、有效 token 曝光和重复倍数；若使用加权总分，手算说明它是否掩盖某一领域的回归，并预留未参与配比选择的评估切片。
 10. 列出 5 种低质量数据对模型的负面影响。
 11. 解释 benchmark contamination 为什么会让评估失真。
 12. 列出训练显存的 5 个主要组成部分。
@@ -372,10 +374,10 @@
 配套正文：[第五册第十三章](book-05-llm-training/chapters/13-训练成本与资源规划.md)。
 
 1. 对照 Kaplan、Chinchilla 和 inference-aware scaling 的优化目标、代表性方法和限制；给定服务请求量，列出选择模型规模前仍需采集的质量、长度、硬件和价格变量。
-2. 某训练作业需要 `1T` 有效 token，deadline 60 天、非训练时间 20%，单卡长期吞吐 4,000 token/s，128 卡扩展效率 0.55。复算所需吞吐、集群吞吐和剩余裕量；再说明将 GPU 数翻倍时应实测哪些通信与收敛指标。
+2. 某训练作业需要 `1T` 有效 token，deadline 60 天、非主循环时间 20%，单卡主循环吞吐 4,000 token/s，128 卡扩展效率 0.55。分别计算所需主循环吞吐和当前集群主循环吞吐，再换算墙钟吞吐；说明若输入本身已是含暂停的墙钟吞吐，为何不能再乘一次可用率。再说明将 GPU 数翻倍时应实测哪些通信与收敛指标。
 3. 计算 0.4 kW 平均设备功率、100,000 GPU-hours、PUE 1.2、电网碳强度 0.5 kgCO₂e/kWh 的设施用电与运行排放；分别列出 TDP、设施电表、PUE、电网因子和 embodied carbon 口径。
 4. 从一个大规模训练案例中分别记录 MFU/吞吐、长程故障次数、自动恢复比例和有效时间率；说明为何单步 benchmark 不足以证明数周训练的可用率。
-5. 比较 1 小时与 4 小时 checkpoint 间隔的平均丢失窗口、写入开销和恢复窗口；列出要从目标集群测量的保存时长、带宽、故障分布与数据游标状态。
+5. 假设 128 张卡每周发生 2 次故障、同步 checkpoint 每次暂停 3 分钟。按 168 小时运行窗口分别计算 1 小时和 4 小时 checkpoint 间隔的保存 GPU-hours 与平均回滚 GPU-hours，并比较平方根近似得到的候选间隔；说明异步保存或成簇故障会怎样改变假设。列出要从目标集群测量的保存时长、带宽、故障分布与数据游标状态。
 
 ### On-Policy Distillation：目标、时间信用与行业证据
 
@@ -383,9 +385,10 @@
 
 1. 令学生分布为 `p_S=(0.5,0.5)`、教师分布为 `p_T=(0.8,0.2)`。计算两个动作的 `log p_T-log p_S`、学生期望、reverse KL 以及以动作无关 baseline 校正后的优势；说明为什么逐样本 `-r` 不能直接当监督标签，且教师偏好不等于任务真值。
 2. 对照 MiniLLM 与 GKD：画出状态来源、监督目标和梯度路径，指出哪个方法显式处理未来 token 对早期动作的信用，哪个方法把学生 rollout 比例与条件 divergence 分开；列出一项公平比较必须固定的变量。
-3. 读 Qwen3 Technical Report 表 21，计算 RL 与 OPD 的 AIME'24、AIME'25、LiveCodeBench v5 分差，以及 GPU-hours 比例。分别写一条“数据直接支持的结论”和一条“不能从该表推出的结论”，再设计多 seed 的同起点复现协议。
-4. 为 REOPOLD、EOPD、vOPD、RG-OPD、MOPD 设计故障到机制诊断表：每个方法对应一个待解决症状、改变的数学/采样环节、作者报告的证据、可能的新偏差或成本，以及一个能证伪该方法有效性的消融。
+3. 读 Qwen3 Technical Report 表 21，计算 RL 与 OPD 的 AIME'24、AIME'25、LiveCodeBench v5 分差，以及 GPU-hours 比例。分别写一条“数据直接支持的结论”和一条“不能从该表推出的结论”，再设计多 seed 的同起点复现协议。最后区分 OPRD 的隐藏表示目标、OPTD 的层间 log-prob 变化目标，以及 TF-OPD 的共享底模专家二阶矩/最小二乘合并；说明哪一种不等同于当前学生策略反复在线采样更新。
+4. 为 REOPOLD、EOPD、vOPD、RG-OPD 和成功/失败 peer 多 rollout 路线设计故障到机制诊断表：每种方法对应一个待解决症状、改变的数学/采样环节、作者报告的证据、可能的新偏差或成本，以及一个能证伪该方法有效性的消融。另加一组答案标记、答案正确性、正确后停止率与答案后过度生成率，说明如何发现“解出来但没有停下”。
 5. 依据 TRL DistillationTrainer/GKDTrainer 动态文档做版本化实现审计，记录 rollout 来源、`lmbda`/`beta` 的代码语义、loss 方向与 reduction、teacher/student tokenizer、生成和 teacher compute、tool token mask。没有实际运行时不得填造性能数值。
+6. 设计一个 OPD 与 offline KD 的 20 题配对评估，并用“两者皆成功、仅 OPD 成功、仅 offline KD 成功、两者皆失败”四格表计算成功率差。说明为什么差异配对数决定不确定性、应报告何种配对区间/检验，以及模型、采样预算、verifier、成功条件和停止条件怎样保持一致。
 
 ### 训练系统综合设计与故障诊断
 
@@ -393,7 +396,7 @@
 
 1. 设计一个 7B 训练账本，明确目标、数据版本、有效 token、模型、优化器、并行拓扑、评测协议、风险状态和证据。让一个配置故意缺失评估或污染状态，说明审计为什么应失败。
 2. 对照默认 mixture 与 DoReMi 风格 proxy mixture。固定总 token、模型和评测；记录域权重变化、代理成本、逐域 loss、下游任务和误差范围，并说明 proxy 权重为何不能代替许可、质量和污染门禁。
-3. 为一条 loss spike 设计可证伪排查：从异常前 checkpoint 重放固定 batch，区分数据/mask、数值/kernel、optimizer state 和恢复游标；分别列出能支持与不能支持的结论。
+3. 为一条 loss spike 设计可证伪排查：从异常前 checkpoint 重放固定 batch，区分数据/mask、数值/kernel、optimizer state 和恢复游标；再比较 Adam 更新异常、`v_t` 失配与 LM-head 输出量化误差三种机制各自需要的信号。说明怎样用相同 hidden states 的 BF16/FP32 logits RMS 与分布 KL 检查迟发 spike 假说，以及小模型过训练论文为何不能直接给 7B 生产训练开处方。
 4. 对一个 benchmark 同时做语料近似匹配、PaCoST 类改写题置信度检查和一组新鲜隐藏题。分开记录覆盖率、候选命中、人工确认、行为信号和新题结果，解释为什么它们不能折成一个污染率。
 
 ### 领域专家 SFT 与 RL：适配信号、行业证据与评估
@@ -405,6 +408,7 @@
 3. 为纵向医疗记录设计 Recent-Events、Timeline-Extremes 和 Full-Timeline 三种训练切分；固定底模、样本数与 token budget，按病人隔离训练和测试，报告 correctness、completeness、关键事件召回、时间窗错误和亚群指标。
 4. 评审一条“新闻后股价上涨，因此新闻情感为正”的标签链。画出新闻、市场事件、价格窗口、交易成本和输出标签之间可能的混杂，设计时间切分、行业/市场基线、负控制以及专家标签对照。
 5. 依据 FinBen 或 MedAlign 做一页评测计划：区分基准覆盖、模型能力、训练收益和部署安全；列出任务分桶、来源版本、时间/实体泄漏检查、自动 verifier、专家抽检及未覆盖项。
+6. 对照 FINDAP/Llama-Fin 与生成式 ICD 编码预印本：分别画出 CPT+IT/偏好对齐和 SFT/样本级 F1-GRPO 的训练链，列出底模、评测任务、作者报告的改进及其证据边界；说明为什么 13/17 新金融任务和 MIMIC 上的代码集合 F1 不能互相比较，也不能直接推出生产领域能力。
 
 ## 阶段 4：部署与系统验收
 
@@ -504,6 +508,9 @@
 80D. 单服务台的平均服务率为 10 req/s。用 Little 定律和 M/M/1 直觉模型分别估算到达率 5 req/s 与 9 req/s 时的平均系统在途请求数和平均停留时间；说明为什么这组数不能直接作为异构 LLM serving 集群容量预测，并设计需要采集的多资源 trace。
 80E. 为共置 + chunked prefill、DistServe、Mooncake、TaiChi 和 SmartGen 设计一组可证伪的 P/D serving 对照：固定模型 revision、真实输入/输出长度和 prefix reuse trace、GPU/网络、并发及 TTFT/TPOT SLO，分别记录 P/D 算力分配、KV payload、transfer overlap、destination KV reservation、TTST、TPOT、goodput 和成本。再解释 SpectrumKV 的 PPL 与这些延迟指标为什么不能合成一个排行榜，并列出会让 P/D 解耦退化为反模式的网络或 workload 条件。
 80F. 为 RAG/Agent memory 设计一套跨请求 KV 复用方案，对比普通 prefix cache 与 Tessera 式检索驱动 context-unit reuse。说明 token/position/context 依赖、租户授权域、缓存键、共享/驱逐/撤销生命周期和缺失状态的重算策略；用一组请求 trace 估算不同命中率目标下的工作集容量，并定义 TTFT、缓存容量、复用错误和答案质量的联合验收指标。
+80G. 为一个固定模型 artifact 选择两种推理 runtime，制作 weight、kernel、cache、protocol、quality 五层兼容矩阵。每格标记通过、已知降级、未知或失败，并设计覆盖短/长上下文、schema、工具、取消与多租户 cache 的回放集；给出逐层失败定位顺序和阻断条件。
+80H. 建立一个引擎候选清单，区分文档支持、固定版本源码/接口证据、目标硬件本地测量和生产 SLO 验收；先用硬门槛淘汰不合格配置，再对剩余候选做权重敏感性分析。解释为何维护状态、未测试协议或未知质量不能被高 output TPS 的加权分数抵消。
+80I. 为一组包含短 prompt、长 prompt 与活动 decode 的固定请求 trace，对照固定 token budget、chunked prefill、LAPS 式长短队列和 P-PAS 式压力自适应预算。逐轮手算 `1,024` token budget 下 6 个 decode token、900-token 长 prompt 与 256-token 短 prompt 的准入；再说明将长 prompt 限为 512-token chunk 后的剩余预算。定义可观测的压力信号，比较 TTFT、TPOT P99、长请求最大等待、goodput、KV 水位与 kernel/调度开销；列出哪些条件会让分队列或缩小预算退化，并解释为何预印本中的改善倍率不能横向排名。
 81. 用 `6 * P * T` 估算 7B 模型训练 1T token 的训练 FLOPs。
 82. 解释为什么真实训练成本不等于 final run 成本。
 83. 设计一个推理成本估算表，包含 input token、output token、KV Cache、GPU 小时和系统 overhead。
@@ -716,13 +723,14 @@
 6E. 为一个新发布的科学问答助手设计 benchmark，比较 GPQA 式专家构题、IFEval 式可程序核验约束、LiveBench 式滚动新题和选项/评分协议扰动审计；说明每种设计验证什么、不能证明什么、需要保存哪些版本字段，以及如何把固定回归集与新鲜题集同时维护。
 6F. 对一组 1,000 个 pairwise 评审（新模型胜 420、旧模型胜 350、平局 230）计算折半平局偏好率、单条得分方差和独立样本近似区间；比较错误地套用 Bernoulli 方差会得到什么；再按目标最小差异规划样本量，并设计 prompt/user 聚类 bootstrap。最后说明 Arena 的自适应对战抽样、Elo/Bradley--Terry 聚合、MT-Bench 专家偏好和 ICLR 2026 最坏情况删点审计各自解决什么问题、不能支持什么结论；再对照 Zhao 等人基于旧 Arena 快照注入随机/定向低质量票的压力测试，说明模拟比例不等于真实坏票率，并列出人评报告需保留的抽样、评审、质量控制和不确定性字段。
 6G. 为同一个客服问答任务比较 G-Eval、Prometheus 2 和 SAJA：分别画出一次样本从输入、评分到汇总的路径，指出它们依赖 token 概率、专用 evaluator 训练数据或人工校准标签中的哪些资源；分别选择标签一致、模型排序、绝对分数校准或自动放行指标。再设计一组仅改变答案事实、仅反转 rubric 的反事实样本，并用独立 holdout 检查候选方法在目标数据上的边界；解释论文 headline score 为什么不能直接横向排名。
-6H. 为同一个评估计划比较 GSM8K、GSM-Symbolic/GSM-NoOp、ORM/PRM/ProcessBench、EvalPlus、LiveCodeBench 和 SWE-bench Verified：每条路线说明测量对象、关键操作、论文或官方报告支持的结论、作者设置中的限制，以及针对该限制的下一步补证。为一项数学任务和一项代码助手任务各选一条主路径，设计固定回归集、滚动新题和独立 holdout 的分工；说明为何这些分数不能合成一个总分。
+6H. 为同一个评估计划比较 GSM8K、GSM-Symbolic/GSM-NoOp、ORM/PRM/ProcessBench、EvalPlus、LiveCodeBench、SWE-bench Verified、SWE-Bench Pro 与 Pro V2：每条路线说明测量对象、关键操作、论文或官方报告支持的结论、作者设置中的限制，以及针对该限制的下一步补证。区分过程步骤准确率与 CoT 的参数/反事实忠实性探针各自能支持什么。对照 2026 年 Verified/Pro 审计与 Pro V2 修订，固定 benchmark 版本、split、harness 和测试政策。为一项数学任务和一项代码助手任务各选一条主路径，设计固定回归集、滚动新题和独立 holdout 的分工；说明为何这些分数不能合成一个总分。
 6I. 为一个“多页合同 + 图表附件 + 会议录音”的助手设计评估组合。比较 DocVQA/ANLS、MMLongBench-Doc、ChartQA、AudioBench、Video-MME/MLVU，以及 NIAH、Lost in the Middle、RULER、NoLiMa、LongBench v2 各自能测的失败；选出主任务基准和补充探针，写出各自的样本构造、指标、答案/证据格式、提示与预处理版本、一个重要限制，以及针对该限制的私有对照。最后说明为什么不能把这些分数平均成一个“多模态长上下文总分”。
 6J. 为一个声明支持 1M context 的研究助手设计一套评测证据链。分别说明 NIAH、Lost in the Middle、RULER、NoLiMa、LongBench v1/v2、LongBench Pro 和 MRCR v2 各自补上什么缺口、使用什么长度单位、最容易误读的结论是什么；组合成“输入/位置冒烟 → 受控复杂度 → 自然任务覆盖 → 1M 目标语料”的评测矩阵。固定 tokenizer、模板、工具权限、推理预算和文档来源，设计至少一个冲突归因与一个不可回答对照；按任务和长度报告正确率、证据召回、引用支持、P95、单位成功成本与不确定性，并指出哪些结果仍不能支持“模型有效使用任意 1M 输入”。
 6K. 选择一个刚发布的 frontier model claim，先拆成模型身份、架构/接口、任务能力和产品效果等最小命题，再比较 Model Card、Datasheet、HELM、CheckList、G-Eval 与 Evaluation Card 分别解决什么问题。为每种方法写出输入、操作机制、它能支持的结论、作者结果或证据、主要限制及下一步补证；再用 Claim Ledger 记录来源、revision、harness、预算、独立性和未知项。最后选一项厂商 benchmark、一项第三方 provider/config 测量和一项固定 harness 的独立评测，说明为何缺失榜单行不等于零分，也不能借用相邻模型的结果。
 6L. 为一个要自动处理真实工作流的 Agent 设计评测组合，比较 SWE-bench、SWE-Gym、Terminal-Bench 2.0、WebArena、OSWorld、BrowserGym、τ-bench、ToolSandbox、AgentDojo、GAIA、ScienceAgentBench、PaperBench、METR 和 Gaia2。每种选用的方法都写清任务对象、机制、判定器、作者证据、限制和下一步补证；明确区分 benchmark、实验框架、训练资源、难度标尺与动态环境。再设计工具合同审计，验证工具前置条件、状态变化和 grader 实际读取字段，并说明为什么“潜在缺陷”不能直接推出 Agent 曾触发或榜单结论已改变。
  6M. 为一个长上下文 Agent 设计质量—成本与持久记忆评测：固定同一模型、任务输入、权限和预算，比较至少两个 harness，逐任务报告质量、调用/token 成本和延迟；再分别用 AdaMem、Memora、Mem2ActBench、OP-Bench 与 PS-Bench 的问题设计记忆写入、过期/撤回、工具参数落地、过度个性化和安全意图判断对照。纳入无记忆、相关记忆、无关记忆、过期记忆及撤回后残留等样本，明确哪些结果只能说明对应 benchmark 条件，不能合并成单一记忆分数或泛化为产品安全结论。
 6N. 为 reasoning 系统设计质量与轨迹安全的配对评估：固定模型 revision、题目切分、提示、解码配置和总预算，对照 direct 与 CoT 路径；分别报告最终答案、步骤/答案一致性、额外验证成本，并用受控过程扰动检查轨迹筛选是否能区分过程可靠性与答案正确性。安全集将 prompt、中间轨迹和最终回复分开标注，要求给出支持判定的证据片段；用 FACT-E、KisMATH 与 TRACE 作为不同评估设计参照，不能合并成单一分数。只使用有授权的开源模型和合成或脱敏数据，不尝试获取闭源服务的内部推理；报告语种、模型覆盖和未验证边界。
+6O. 一项偏好评估过采样了 A 组和 B 组：样本占比分别为 80%/20%，新模型在组内的折半平局偏好率分别为 0.60/0.40；目标用户比例则为 30%/70%。计算原始均值与后分层结果，解释为什么结论会反转；再说明还需报告哪些组内样本量、不确定性和安全指标，以及后分层不能修复什么偏差。
 7. 解释 benchmark contamination 为什么会误导模型比较。
 7A. 用英文术语 data contamination、benchmark leakage 和 train-test leakage 分别写一个 LLM 评估风险例子，并说明如何用 exact match、near duplicate、canary、时间切分和私有动态集降低风险。
 7B. 为同一个公开 benchmark 比较语料 exact/near overlap 检查、Oren 顺序似然检验、ConStat、PaCoST、发布前 benchmark watermark 和 AntiLeakBench 式新鲜知识集。逐项写明它直接检验的命题、所需数据/API、核心假设、能支持的结论、失败条件和补证手段；再为“只有文本生成 API”“有 token log-prob 但无训练语料”“即将发布新 benchmark”三种条件选方案。区分数据重合、行为记忆信号与分数不泛化，不把异质结果合成一个污染率。
@@ -1139,6 +1147,8 @@
 24. 对照 RTN、GPTQ、AWQ、LLM-QAT 和 MARLIN：逐个写出问题、机制、实验指标/设置、主要代价和适用边界。明确区分量化算法、训练方法、artifact 和执行 kernel；为“质量退化”“加载成功但数值错误”“质量通过但速度未提升”分别设计下一轮定位实验。
 25. 100 个原始请求合计花费 120 个成本单位、最终 90 个成功，计算单位成功成本；设计 trace 字段分别记录首次推理、验证、重试、fallback 和人工审核成本，说明怎样避免分子重复计算，以及怎样避免把每次 attempt 当成独立请求。
 
+26. 比较 active GPU KV quantization、NVFP4 cold-page compression 和 TriAttention retention：分别说明它们改变的是 active 数值表示、冷层存储表示还是保留的 token 集；画出 GPU→Host/Disk→GPU 生命周期，并根据 TensorRT-LLM 访问日文档列出 KVCM/backend/GPU/calibration 条件。设计同一模型上的质量、容量、TTFT、TPOT 和 cache 恢复回归，区分官方文档能力与目标部署实测。
+
 ## 2026-09 Frontier Architecture Updates
 
 1. 手算三层 Full AttnRes 的 softmax 权重，并实现 Block AttnRes 的 partial sum。
@@ -1224,7 +1234,7 @@
 2. 为开源权重入口建立 revision、许可证、参数、硬件和 tokenizer 的核验清单；在资料缺失时输出 `待核验` 而不是推断。
 3. 复现 benchmark 图片前，补齐任务集、采样、硬件、输出预算和统计区间字段，说明为什么发布页摘要不能替代独立复现。
 
-## 2026-09 GPT-6 Astra 与运行时预算验收
+## 2026-11 GPT-6 Astra 与运行时预算验收
 
 1. 给定 context window 为 1,050,000、max output 为 128,000，说明为什么官方没有单列的 922,000 maximum input；将 922,000 标为预留满额输出后的算术余量，并画出输入、reasoning、工具状态和输出预算。
 2. 用零依赖 Python 实现 GPT-6 Astra 的 token 费用估算，分别计量普通输入、缓存读取、30 分钟/12 小时缓存写入和输出；覆盖恰好 272K 与超过 272K、Standard/Batch/Flex/Fast/Ultrafast，并在 token 费用之外单列工具、重试和验证器成本。
@@ -1237,8 +1247,8 @@
 9. 根据 Async tool calling 文档实现一个零依赖 toy job registry，覆盖原始 `call_id`、唯一 task handle、重复结果、超时、失败重试和最新 response lineage；输出“工具已完成”和“模型已消费结果”两个独立状态。
 10. 根据 Mid-turn steering 文档画出 WebSocket 事件状态机，覆盖 `response.steer.accepted`、`incomplete_details.reason=steered`、自动 continuation、已发送输出和已启动副作用；为不可回滚动作设计补偿门禁。
 11. 将一份过长且互相冲突的 skill/`AGENTS.md` 说明重构为最小路由器与渐进披露目录，比较无关上下文 token、工具选择、停止原因、压缩次数和任务成功率；把误报/漏报的安全监控单独统计。
-12. 扩展 [`gpt6_agent_protocol_demo.py`](research/model-update-2026-09/code/gpt6_agent_protocol_demo.py) 的负向测试：重复 task handle/call ID、错误 call ID、pending job 消费、重复 steering、旧 WebSocket steering 在新连接上的误重放，以及 `misalignment_policy_violation` 后的自动 retry；输出副作用保留和人工补偿所需的审计字段。
-13. 对比 2026-09-21 Astra 专属 guide 与 2026-09-23 GPT-6 family guide，制作 capability matrix：`none` effort、Responses/Chat Completions function calling、EU data residency、unsupported parameters 和 cache-preserving `configuration_update`；说明为什么文档路由变化不能直接当作模型 revision。
+12. 为 tool job、steering、断线恢复与安全阻断设计本地 toy 状态机，覆盖重复 task handle/call ID、错误 call ID、pending job 消费、steering 失败和 `misalignment_policy_violation` 后停止自动 retry；标明 toy 不调用真实 API，也不能证明服务端事件调度。
+13. 按 2026-11-02 当前官方页面制作 capability matrix：`none` effort、Responses/Chat Completions function calling、EU data residency、Fast/Ultrafast 资格、价格和 cache-preserving `configuration_update`；对每个字段记录 model ID、来源链接与访问日期，不能把文档路由变化直接当作模型 revision。
 
 ## 2026-09 Kimi K3 发布证据与 Harness 验收
 
@@ -1504,7 +1514,7 @@
 4. 写 stateless Responses replay toy：模拟 `function_call`、`apply_patch`、并行工具、工具回执、失败重试和宿主持久化；注入 `previous_response_id`、`conversation`、`background`、`store` 等不支持字段，验证 capability probe、静默忽略检测、权限和幂等门禁。
 5. 对 `low/high/max` 固定任务、工具、revision 和 verifier，报告 reasoning/visible output、TTFT、TPOT、工具轮数、失败类型、Pass@1、成本和 steps；说明 effort 行不是三个 checkpoint，并把 DataCurve 数字与本地 toy 结果分栏。
 
-## 2026-10 DeepSeek V4 后训练：多教师全词表 OPD
+## 2026-11 DeepSeek-V4 后训练：多教师全词表 OPD
 
 配套正文：[第五册第十八章](book-05-llm-training/chapters/18-deepseek-v4领域专家与统一蒸馏.md)。
 
@@ -1513,6 +1523,7 @@
 3. 按 `token_positions × vocabulary_size × bytes_per_logit × teacher_count` 估计 BF16 logits 缓冲。对 8,192 个 token 位置、100,000 词表项和 10 个教师计算 GiB；再设计一个只保留 teacher hidden states、按教师索引加载输出头的调度流程，列出它省下与仍保留的成本。
 4. 比较 Model Soups、固定教师答案的离线 SFT、GKD、MiniLLM 与 V4 报告中的 full-vocabulary multi-teacher OPD。分别说明它们合并的是参数、token 序列还是条件分布；为一项公平消融固定底模、学生 rollout、训练 token、教师前向预算、数据、评测集与随机种子。
 5. 审核“V4 用 OPD 取代 mixed RL，所以 V4 后训练没有 RL”这句话。画出领域 SFT/GRPO 专家与后续 OPD 的顺序，再列出 GRM、verifier、rubric 和独立评估中仍未由公开报告说明的字段。
+6. 根据报告建立 `effort × context_policy × task` 评估矩阵，覆盖 Non-think、Think High、Think Max，以及工具调用轨迹跨用户轮次保留、普通对话新轮次清除和 user-message 模拟工具调用的边界。固定任务与工具环境，记录答案正确、正确后停止、轨迹 token、工具错误、TTFT 和单位成功成本；把报告作者披露与本地验证结果分列。
 
 ## 2026-09 DeepSeek V4 Flash SGLang：分支缓存与 kernel 证据审计
 
@@ -1691,7 +1702,7 @@
 
 1. 为 `gpt-6-sol` 建立 source-aware manifest，记录 AA `max` 配置、DataCurve 精确行缺失、model page、Reasoning、Agents、Tools、Compaction 页面和快照哈希；禁止迁移 GPT-6 Astra/GPT-5.6 的 Agent 分数。
 2. 用零依赖代码计算 `1,050,000` context、`922,000` maximum input、`128,000` maximum output 的预算，加入 reasoning tokens、工具 schema、工具结果、历史 output 和可见文本；覆盖 `incomplete` 与 25K reasoning/output reserve。
-3. 模拟 `standard/pro` mode 与 `none`--`max` effort 的正交矩阵，插入合法 `configuration_update`、相邻 update、自动 compaction 和 automatic truncation，输出接受/拒绝原因；另验证 update 只改变 effective effort 并持续到覆盖、response 中的 `reasoning.effort` 仍是 request-level 值、稳定 prompt prefix digest 不变。将 prefix 保留标记为 cache-friendly 设计，不得声称 toy 验证了真实 cache hit。
+3. 模拟 `standard/pro` mode 与 `none`--`max` effort 的正交矩阵，覆盖合法 `configuration_update`、重复更新、自动 compaction 和 automatic truncation；只对官方明确列出的不兼容组合输出拒绝原因，对指南未说明的排列标为未知，不把 toy validator 假设写成 API 合同。另验证 update 只改变 effective effort 并持续到覆盖、response 中的 `reasoning.effort` 仍是 request-level 值、稳定 prompt prefix digest 不变。将 prefix 保留标记为 cache-friendly 设计，不得声称 toy 验证了真实 cache hit。
 4. 构造 Responses item replay：保留 reasoning summary、encrypted/opaque item、tool call/result、permission、executor receipt、compaction item 和 artifact verifier；分别删除、重排或重复 item，检查恢复、重复副作用和 lineage。
 5. 设计 Agents API、Agents SDK、Responses API ownership 对照，分别记录谁保存 session/history、谁运行 loop、谁做 approval、谁执行工具、谁负责 sandbox 和 verifier。
 6. 模拟 tool search 的 namespace、`defer_loading`、schema hash、search call、loaded tool、permission deny 和 cache prefix；比较全量 schema 与按需加载的 token、延迟、错误和复用。
@@ -1787,7 +1798,7 @@
 4. 设计 Thinker-Talker 首包 trace：AuT chunk、Thinker TTFT、Talker 首 speech chunk、MTP residual codes、codec decode、网络 packet、播放器首播、并发和取消恢复各自计时。为 Plus/Flash 保留独立部署资源字段，不能直接排名。
 5. 从 Model Studio 文档提取 `qwen3.5-omni-plus`、`stream=True`、Plus/Flash custom voice 与 snapshot 限制，建立 API contract manifest；明确不能由示例推断内部架构，也不发起未经授权的真实 API 请求。
 
-研究笔记：[`qwen3.5-omni-source-notes.md`](research/model-update-2026-09/qwen3.5-omni-source-notes.md)。
+研究笔记：[`speech-recognition-generation-and-realtime-2026.md`](research/speech-recognition-generation-and-realtime-2026.md)。
 
 ## 2026-09 Qwen3.6-27B：混合递归状态的树验证与指标审计
 
@@ -1913,6 +1924,9 @@
 4. 目标字符为 `book` 时写最短 CTC 路径；按 `T=160,U=20` 估算 RNN-T 格点。再给出支持低延迟 partial transcript 的 encoder/endpoint 约束，说明它们不由 loss 名称自动保证。
 5. 令 `γ=5`，计算 `SNR=100` 和 `0.1` 时 `x0`、`epsilon`、`v` 三种 Min-SNR 权重，并把论文收敛/FID 数字绑定回目标参数化、schedule 和实验设置。
 6. 对 8 帧 `224×224` 和 16 帧 `448×448`、patch `16` 计算 patch tokens 与全注意力 score cell 比值；设计固定帧、按桶与 Frame Pack 的等 token 预算对照，并加入时序事件召回评测。
+7. 按 Qwen3-VL 报告的 S0—S3 配方说明为什么训练先从 merger 对齐，再逐步解冻并增加上下文长度；指出必须用哪些纯文本、OCR 和视频切片监控能力交换，不照搬作者 token budget。
+8. 设离散 speech codec 为 `12.5` frame/s、每帧 4 个码本，估算 2 秒语音的 frame 数和 code 数；比较主码本自回归、残差码本预测、波形 decoder 与连续 flow-matching 路线的训练目标及质量/延迟评估。
+9. 用 `x_noise=2`、`x_data=-1`、`t=0.4` 手算直线路径的 `x_t` 和目标速度；解释为什么向量场训练误差不能单独证明采样步数、生成质量或端到端速度。
 
 ## 数学百科：定义域与反例
 
@@ -1983,7 +1997,7 @@
 3. 用 SimPO 平均 log probability -0.4/-0.7、β=2、γ=0.2 核对损失约 0.513015；将长度和 log probability 总和同时翻倍，说明长度平均为什么没有直接惩罚总长度。
 4. 对奖励组 `[0,0,0,0]`、`[1,1,1,1]`、`[0,0,1,1]` 执行 DAPO 过滤；核对最后一组优势并解释保留组成功率为何不能代表题池成功率。对 token ratio 2/0.5 比较逐 token clip 与 GSPO 几何平均。
 5. 为 RLAIF judge、规则 verifier 和教师软分布分别写出反馈类型与可用目标；核对固定历史下 CE-H=forward KL，解释为何成败标签不能直接作为 token 分布。设计安全可答集合为空时的报告，以及工具轨迹的脱敏与权限边界。
-6. 对同一模型、同一数学题池比较 GRPO、DAPO、DrGRPO、GSPO 与 DCPO：先列出每种方法修改的是 advantage、ratio 粒度、clip bounds、采样还是 loss denominator；再实现一个固定预算/逐 response token mean 对照，计算非零 advantage 率与正确率。论文中的 DAPO progressive ablation、DrGRPO AIME24 分数和 DCPO RUR 必须保留各自模型、数据、模板和统计口径，不能拼成统一排行榜。
+6. 对同一模型、同一数学题池比较 GRPO、DAPO、DrGRPO、GSPO 与 DCPO：先列出每种方法修改的是 advantage、ratio 粒度、clip bounds、采样还是 loss denominator；再实现一个固定预算/逐 response token mean 对照，计算非零 advantage 率与正确率。另设 GSPO 的 10-token/90-token 两条回答 sequence surrogate 为 0.2/0.8，分别计算 response 等权的 0.5 与 token 加权的 0.74，说明长度归一化 ratio 不决定外层 reduction；再把 reward 为 `[1,0]` 的同 prompt group 分到两个 rank，比较先跨 rank 求 advantage 与 rank-local 求均值/标准差的结果。论文中的 DAPO progressive ablation、DrGRPO AIME24 分数和 DCPO RUR 必须保留各自模型、数据、模板和统计口径，不能拼成统一排行榜。
 7. 阅读 [on-policy preference candidates 研究](https://proceedings.iclr.cc/paper_files/paper/2026/file/0dc678bae2ad5d8fdfcd3d0c9f75705d-Paper-Conference.pdf)，设计静态候选与当前 policy 候选的受控比较：固定 prompt、标注器、训练预算与评估集，分别记录候选质量和组内多样性；讨论论文的“偏好注入/偏好微调”阶段假设何时可检验，为什么不能直接变成所有模型共用的训练日程。
 8. 阅读 [DQO 论文](https://proceedings.iclr.cc/paper_files/paper/2026/file/cfeb1fa78c5fb06be27c0980aa8ee581-Paper-Conference.pdf)。对三条单位向量组 A=`[(1,0,0),(-1,0,0),(0,1,0)]` 和组 B=`[(1,0,0),(0,1,0),(0,0,1)]`，用点积构造 Gram 矩阵，计算两组的平均两两欧氏距离与行列式。解释为什么组 A 的平均距离更大却有零体积，并说明 DQO 还要怎样与质量 reward、embedding 和 KL 取舍。
 9. 阅读 [RLVR 标注噪声研究 v2](https://arxiv.org/abs/2603.16140v2) 与本节伪相关奖励论文，设计 clean annotation、经人工复核的真实错误 annotation、随机 reward 三类对照。为“抽查 20 条中 8 条标签其实正确”给出适当的不确定性表述，并固定模型、任务、训练预算、独立测试集和重复种子，避免把伪相关奖励观察解释成算法能容忍错误标签。
@@ -2009,6 +2023,25 @@
 5. 为一次已开始 streaming 的工具调用设计 fallback、幂等键、取消和回滚流程；区分 WHATWG SSE 帧字段与 API 自定义 error/finish event，并列出 startup/liveness/readiness、trace/metrics、drain 和 canary 的证据字段。说明镜像拉取失败为何不能由容器内 probe 报告。
 6. 给请求设 160 ms deadline，路由与排队已耗去 120 ms，预计 prefill 还需 50 ms；判断是否准入并列出可接受的降级。再比较远端 KV 的网络、反序列化、设备拷贝分别耗时 8/2/1 ms，与重算 prefill 的 6 ms、20 ms 两种情况；说明延迟账本为何还需要队列、并发争用、p99 和缓存版本/租户隔离证据。
 
+## 第六册第四章：解码策略与生成控制
+
+配套正文：[第六册第四章](book-06-llm-deployment/chapters/04-解码策略与生成控制.md)。以下例子里的请求数、延迟和成本均为教学假设，不代表模型或服务测量值。
+
+1. 对 logits `[2, 1, 0]` 计算 temperature=1 与 2 的 softmax；分别在 temperature 之前和之后执行 top-p=0.85，核对候选集合为何不同。再用并列的 top-k 阈值 logits 设计 tie-break 回归，说明固定 seed 为什么不能代替候选集合记录。
+2. 对原 logits `[2.0, 1.5, 1.2]` 和历史计数 `A:2, B:1`，使用 presence=0.4、frequency=0.3 逐项计算调整 logits 和 softmax；再按 repetition penalty r=1.5 的正负号规则计算另一个候选。说明 prompt 是否计入历史、token ID 切分和字段准确率怎样影响参数选择。
+3. 为 `lookup_policy` / `create_draft` 工具构造枚举 grammar；分别给出词法非法、schema 合法但金额超限、当前用户无权调用和工具超时的样本。为每阶段写清分母与 finish state，并说明 120 ms schema 首编译在 100 个串行请求、每次生成 600 ms 时如何摊销；缓存键和执行前授权要记录哪些版本。
+4. 把 stop 字符串 `#DONE` 拆成两个流式 chunk，设计只发送安全前缀的 buffer trace；另用 `max_new_tokens=8/9` 比较一个假设 9-token JSON 工具对象的 `length` 与 complete 状态。分别定义 EOS、stop、length、cancel 和 timeout 在 trace 及客户端响应中的映射。
+5. 每轮提出 4 个 draft token，各位置在前序接受条件成立时的条件接受率为 0.8。计算 draft 前缀的联合接受概率与含 bonus token 的期望提交数；再假设 target 验证耗时 5 ms、draft 耗时 3 ms，说明为什么不能把提交 token 数直接称为 speedup。设计 exact sampling、greedy equality、relaxed acceptance 与不同请求接受长度的 batch correctness 对照。
+6. 对 100 个固定请求比较 low/high reasoning effort：记录正确率、可见/推理 token（仅在接口提供时）、P95、incomplete、工具成本与单位成功成本。分别计算整体单位成功成本和新增成功的边际成本，并说明 provider 未公开 thought-token 使用量时哪些结论不可作。
+
+## 第六册第九章：RAG 与 Agent 部署
+
+配套正文：[第六册第九章](book-06-llm-deployment/chapters/09-rag与agent部署.md)。下列索引构建、负载和灰度数字是教学假设，不代表线上测量。
+
+1. 一次批构建含 2,400 个文档 revision，其中 18 个因关键表格缺失被隔离；低风险发布门槛是 99.5%，另有一份退款规则属于零漏检高风险文档。分别计算通过率并决定是否切换。构建快照从 source watermark 8,000 开始，期间产生 14 个增量事件但只有 13 个已索引；写出可切流条件、隔离回放和删除 tombstone 规则。
+2. embedding 服务常态处理 18,000 token/s，单实例持续能力为 24,000 token/s；双版本迁移额外产生 18,000 token/s，持续 60 秒。计算队列增长和迁移结束后的理想排空时间，再说明应如何错峰、限速或扩容。设计 shadow、双查和切换阶段的版本字段及 ACL / 删除同步条件。
+3. 合成 canary 有 2,000 个请求，18 个超过 1.2 秒，性能门槛为不高于 0.5%，同时有 1 次无权文档进入 prompt。计算性能超限数量并给出发布决定。若候选索引上线后新增 2 份文档并撤回 1 份旧文档，设计回滚顺序，保证旧 alias 不复活撤回内容。
+
 ## 第六册第十章：多模态部署
 
 配套正文：[第六册第十章](book-06-llm-deployment/chapters/10-多模态部署.md)。
@@ -2018,6 +2051,8 @@
 3. 计算 Riva 两种窗口：低延迟 `chunk=0.16s, padding=1.92s` 与高吞吐 `chunk=0.8s, padding=1.6s`。比较模型窗口时长、更新间隔和在“每个窗口均完整重算”假设下的输入覆盖率；再列出 runtime feature reuse、GPU 并发、WER/CER、首个 stable 延迟需要记录的实测项。
 4. 给客服语音助手设计级联 ASR→LLM→TTS 和原生 speech/omni 两条方案。固定一组否定词、数字、打断和工具写操作样本，定义首个 stable、首包音频、打断残留、转写证据、工具副作用和单位成功成本门禁；解释语音模型是否原生不能替代服务端权限校验。
 5. 为 Thinker→Talker→Code2Wav 比较融合、完整 payload handoff 和 async chunk handoff。设计含背压、乱序 chunk、取消、下游崩溃、重试和客户端断开的状态表；把 TTFT（文本首 token）、TTFP（音频首包）与 E2EL 分开测量。
+6. 按每页 CPU 解码 120 ms、vision encoder GPU 18 ms、LLM prefill GPU 8 ms，计算 12 页/秒常态与 2.5 倍峰值下的 CPU core-seconds/s、GPU-seconds/s 和 70% 利用率所需资源。求出单 GPU 的稳态页吞吐及峰值持续 60 秒时的积压；再解释为何总平均余量不能替代实时语音的独立队列预算。
+7. 对 10 张发票、每张 3 个字段，模型给出 29 个字段值，其中 27 个正确，另有 3 个参考字段漏检，计算 precision、recall 和 F1。再假设 100 份端到端请求里 5 份超时，分别说明字段指标的有效分母、任务完成率的分母以及只在成功样本上评分会造成的偏差。
 
 ## 第六册第十一章：监控、评估与安全
 
@@ -2027,20 +2062,22 @@
 2. 对 100 条安全样本、20 条攻击样本分别给出 TP/FP/FN/TN，计算 block rate、FPR、FNR 和 ASR，明确每个指标的样本集合与分母。将攻击集缩为 1 条且零次成功，按 95% 单侧零事件上界 1-0.05^(1/n) 计算结果；讨论攻击样本相关或分布不代表真实攻击时，这个区间能说明什么、不能说明什么。
 3. 同一组 200 个请求运行 baseline 与 candidate，按请求 ID 配对计算质量分差，并用请求级 bootstrap 报告区间。构造 25% candidate 请求没有评分的例子，同时报告评分覆盖率、已评分回答均值和失败/拒答处理方式；说明只比较成功评分样本会如何改变结论。
 4. 为开放式客服、RAG 企业问答和工具型 Agent 分别选择 HELM、MT-Bench/Chatbot Arena、RAGAS/ARES、HarmBench 或 AgentDojo 中的适用方法。每项写明方法解决的问题、判分机制、关键限制，以及在目标系统中增加的切片、人工校准、工具副作用或线上回放。
+5. 根据一项 2026 年 AgentDojo 审计的四格比例（安全且完成 67.2%、安全但未完成 21.7%、不安全但完成 3.8%、不安全且被劫持 7.3%），分别计算 ASR 与任务完成率，并说明边际指标如何隐藏“安全但未完成”。再设计一组联合发布门禁，列出正常任务效用、危险动作和不确定性需要怎样同时报告；注明该预印本评测范围不能当作生产发生率。
 
 ## 第六册第十二章：成本优化
 
 配套正文：[第六册第十二章](book-06-llm-deployment/chapters/12-成本优化.md)。
 
-1. 为一个含文本 RAG、图片理解、GPU 推理、重试和人工复核的请求列资源向量；分别按 API 和自托管两种口径换算成本，指出哪些账目不能相加或重复计费。再用单次成本 0.010→0.007、成功率 0.90→0.60 计算每成功任务成本变化，并说明零成功时分母的语义。
+1. 为一个含文本 RAG、图片理解、GPU 推理、缓存读写、不可见 reasoning token、重试和人工复核的请求列资源向量；分别按 API 和自托管两种口径换算成本，指出缓存与 reasoning 子集如何映射到 input/output 总量，哪些账目不能相加或重复计费。再用单次成本 0.010→0.007、成功率 0.90→0.60 计算每成功任务成本变化，并说明零成功时分母的语义。
 2. API 固定月费 0、边际 0.0024 美元/请求；自托管固定月费 48,000 美元、边际 0.0008 美元/请求。求交叉点，计算 20M 与 40M 请求的成本；随后把自托管边际成本上调到 0.0018、固定成本加上 20% 冗余，重算阈值并说明真实 trace 中还应改变哪些假设。
-3. 对同一组 1,000 条带成功标签的请求设计 FrugalGPT cascade 和 RouteLLM preference router。画出每种方案一次请求的模型调用轨迹，写出期望调用成本与串行延迟来源，并构造一个 Arena 偏好数据与企业任务不匹配的测试切片，定义 fallback 和安全路由门槛。
+3. 对同一组 1,000 条带成功标签的请求设计 FrugalGPT cascade 和 RouteLLM preference router。画出每种方案一次请求的模型调用轨迹，写出期望调用成本与串行延迟来源，并构造一个 Arena 偏好数据与企业任务不匹配的测试切片，定义 fallback 和安全路由门槛。再参考 [Dynamic LLM Routers are Often Misguided](https://arxiv.org/abs/2610.02762v1)，比较按实际输出长度计费和按模型平均成本计费的影响，加入匹配成本的随机路由基线、难度切片和来源内评估；说明该预印本结论受单轮英文 benchmark 限制。
 4. 对一份长 RAG 文档分别选 LLMLingua、LongLLMLingua 或 LLMLingua-2，说明每种压缩机制要保留的证据、条件、否定和引用。用每百万输入 token 2 美元、10,000→6,000 token、压缩成本 0.0015 美元、恢复成本 0.002 美元计算净节省；再求恢复成本达到多少时压缩不再回本。
 5. Prefix cache 与 response cache 各列出命中率分母、资源收益、版本/权限 key 和失效风险。若完整模型路径成本 0.01 美元、查找 0.0001 美元、维护摊销 0.0002 美元，求纯货币回本命中率；另列出哪些安全/新鲜度条件即使通过回本计算也必须绕过缓存。
 6. Draft 每轮提出 K=4 个候选且各位置条件接受率为 0.8，计算 speculative sampling 的期望输出 token 数，解释为什么它不是加速比。比较独立 draft、MTP、EAGLE 与 n-gram/suffix 的候选来源、额外资源和分布保证。
 7. 给权重显存受限、activation W8A8 受限和长上下文 KV 受限三个场景，分别比较 GPTQ、AWQ、SmoothQuant、KIVI 的目标张量、误差处理和 runtime 依赖。再设计目标任务质量切片与有效 bit/scale/峰值显存/吞吐报告。
 8. 对 μ=10 请求/秒的 M/M/1 队列，分别计算 λ=8 与 9.5 时的利用率和平均排队时延，并解释它不能直接当作 LLM 容量公式。对 4 个副本、观测指标为目标 1.8 倍的 HPA 控制环算出建议副本数，并补充 queue age、待处理 token、KV 和冷启动指标。
 9. Agent 首次带入 1,000 token，每步追加 400 token，连续 6 步都重发完整历史，计算累计输入 token；与每步固定 1,000-token 摘要比较，并把摘要生成成本、失败恢复和工具提交状态加入生命周期成本。
+10. 假设一个 10,000-token 前缀共用于 4 次 API 请求，首次写入费率为普通输入的 1.25 倍，之后 3 次缓存读取各为普通输入的 0.10 倍。计算与 4 次未缓存调用相比的等价账单节省率；再列出 `cache_write`、`cached_tokens`、普通输入及 rate limit 的核对项，并说明这个供应商账单结果为何不能直接代表本地 prefix KV cache 的 GPU 节省。
 
 ## 第六册第十三章：生产系统设计
 
@@ -2067,18 +2104,47 @@
 
 1. 用 E2M1 码本 `0、±0.5、±1、±1.5、±2、±3、±4、±6` 量化数值 `0.9`。分别令共享 scale 为 20 和 0.9，算出归一化值、最近码值、重构值和绝对误差；再解释为何真实 MXFP4/NVFP4 还要计入 scale 自身的量化。
 2. 对 `N=4096×4096` 个参数，分别计算 FP16、OCP MXFP4、NVFP4 一维分组的 payload、scale 字节、理论压缩比和有效 bits/element。列出 padding、rowwise/columnwise layout、二维权重 scaling、未量化层与 workspace 会怎样改变 artifact 或峰值显存。
-3. 比较 RTN、通用 rotation、MR-GPTQ 与 NVFP4 scale learning：各自处理哪一种误差，核心步骤是什么，代表性结果绑定什么模型/任务/硬件，在哪些条件下不能推广？据此为目标 workload 设计一个先诊断 scale error、再选择补偿方法的消融矩阵。
+3. 比较 RTN、通用 rotation、MR-GPTQ、OAS/MBS、NVFP4 Four Over Six（4/6）与 scale learning：各自处理哪一种误差，核心步骤是什么，代表性结果绑定什么模型/任务/硬件，在哪些条件下不能推广？手算 OAS 的 `3.3→6.6` 饱和映射、MBS 的 `1×128` 宏块 scale bit 数，以及 `[10,20,30,40]` 在 4/6 两种映射下的重构误差；再为目标 workload 设计先诊断 scale error、后选择补偿方法的消融矩阵。
 4. 对同一模型建立 BF16、FP4-weight-only、FP4-weight+activation、NVFP4-W4A4 与高精度回退组，固定模型 revision、校准集、kernel、engine 和请求分布；分别记录 scale/saturation、准确率切片、格式合法率、峰值显存、TTFT、TPOT 和 fallback，说明每类结果能支持什么结论。
 
 ## 第六册第十六章：FP8 KV Cache
 
-配套正文：[第六册第十六章](book-06-llm-deployment/chapters/16-fp8-kv-cache.md)；研究来源见[精修记录](research/fp8-kv-cache-depth-review-2026-10-27.md)。
+配套正文：[第六册第十六章](book-06-llm-deployment/chapters/16-fp8-kv-cache.md)；来源证据见[KV Cache 研究记录](research/kv-cache-capacity-paging-and-compression-2026.md)。
 
 1. 用 OCP E4M3/E5M2 的 max finite、最小 normal/subnormal 和特殊值字段，计算一组输入最大值 500、`s=500/448` 时，`x=1` 如何映射到 E4M3 的 0.875 并重构为约 0.9766。再计算 `448s` 的上溢边界和 `2^-9s` 的下溢边界；说明 OCP 格式规范为什么不能单独决定 runtime scale。
 2. 对两位置 logits `[1,0]` 计算 softmax；把第一项改为 0.7，重算概率并说明排序未变时输出如何变化。再令 `V=[1,0]`，分别计算 K 误差和 `V_1 += 0.1` 对输出的影响。指出该标量例子不等于模型级准确率预测。
-3. 对 `L=64, B=1, T=131072, H_kv=8, D_h=128` 分别算 BF16、FP8 payload，再加入假设 8% metadata 得 17.28 GiB。说明这个账本不包含 allocator、workspace 和模型结构差异；将 KIVI 的 K-per-channel/V-per-token、KVQuant 的 pre-RoPE key 与 vLLM per-head scales 分别放到“研究算法/运行时能力”层比较。
+3. 对 `L=64, B=1, T=131072, H_kv=8, D_h=128` 分别算 BF16、FP8 payload，再加入假设 8% metadata 得 17.28 GiB；计算实际节省率并解释为何不是恰好 50%。若可用 KV pool 为 40 GiB、请求均为 32,768 token，求 BF16 与 FP8 的理想最大请求数，并说明池碎片、workspace 和长度分布会怎样改变结果。再将 KIVI 的 K-per-channel/V-per-token、KVQuant 的 pre-RoPE key 与 vLLM per-head scales 分别放到“研究算法/运行时能力”层比较。
 4. 解释为什么已写入 page 的 scale 从 0.1 改为 0.2 而 payload 不重编码，会让 `D(q)=10` 的值从 1 重构为 2。为 append、共享 prefix、swap/restore 和并发读取分别设计可维持 scale revision 一致性的检查。
-5. 阅读 vLLM H100/FlashAttention 3 案例：按 128k NIAH 的 91%/13%/89% 结果重建“BF16 基线—原 FP8 路径—two-level accumulation 修复”因果链；再解释 ITL slope、break-even、TTFT 和并发输出吞吐是不同指标。为目标部署列出固定模型、backend、scale、长度分布、并发和任务样本的验收矩阵。
+5. 阅读 vLLM H100/FlashAttention 3 案例：按 128k NIAH 的 91%/13%/89% 结果重建“BF16 基线—原 FP8 路径—two-level accumulation 修复”因果链；用报告给出的 slope 和 intercept 手算约 7,000-token ITL break-even，再解释 ITL slope、break-even、TTFT 和并发输出吞吐是不同指标。为目标部署列出固定模型、backend、scale、长度分布、并发和任务样本的验收矩阵。
+
+## 第六册第十七章：Native INT4 与原生量化部署
+
+配套正文：[第六册第十七章](book-06-llm-deployment/chapters/17-native-int4与原生量化部署.md)；方法来源和证据边界见[权重量化研究笔记](research/weight-quantization-formats-and-ptq-2026.md)。
+
+1. 假设 BF16 权重 400 GiB，INT4 payload 为 BF16 权重的四分之一，另有 15 GiB scale/metadata/保留层；两种方案都需要 KV 20 GiB、workspace 16 GiB、通信 8 GiB、runtime 6 GiB。计算各自 worker 总账；在 80 GiB 卡且可用率 85% 时求容量下界，解释为什么 7/3 张不等于生产 TP 卡数，也没有包含 N+1。
+2. 对两组四元素权重 `[-1,-0.5,0.25,0.75]` 和 `[-1.4,-0.6,0.2,1.4]`，使用对称 `[-7,7]` INT4 算 scale、量化码和反量化值。假设有符号二进制补码、每字节低 nibble 先存第一个数，手算 payload bytes；再对 256 个权重比较 G=128 与 G=64、FP16 scale 时的 payload+scale 字节数，说明 group_size 同时影响空间和数值解释。最后把 8 元素向量按 4 元素切 shard 和按 2 元素切 shard 对比，说明后一种为什么会拆开量化 group。
+3. 对照 RTN、GPTQ、AWQ、LLM-QAT 与 MARLIN：分别标出它们解决的是权重转换、误差补偿、校准敏感性、训练适配还是 kernel 执行问题。核对 GPTQ/LLM-QAT 的示例质量数字和 MARLIN 的 per-layer/端到端口径，说明为什么不能把不同模型、指标、数据与硬件的倍率排成同一名次。
+4. 设 1,000 条同口径回放包含 800 条聊天（验收率 0.975）与 200 条代码/工具任务（0.965），并明确两桶都用同一个端到端二元任务验收事件，门槛均为 0.970。求总体验收率，并说明总体通过为何仍不能让代码桶进入 INT4 canary；再说明若两桶一个报 JSON 合法率、一个报主观帮助度，为何不可直接平均。设计一次量化 artifact schema 升级：列出应隔离的 weight/KV 版本、cache 复用条件、shadow/canary 观测字段和停止/回滚动作。
+
+## 第七册第四章：LLM-as-a-Judge
+
+配套正文：[第七册第四章](book-07-evaluation-experiments/chapters/04-llm-as-a-judge.md)。
+
+1. 有 100 个回答对都各评两次：25 对两次都选择第一展示位，12 对两次都选择第二展示位，其余 63 对两次都选同一回答。假设没有平局，计算总体 first-slot 胜率、$B_{\mathrm{pos}}$ 和 $B_{\mathrm{slot}}$。说明为什么总体位置偏移幅度不能代替“同一位置锁定”比例，也不能证明与人工答案一致。
+2. 一个合成审计集包含 120 对内容等价但引用呈现不同的回答。普通 prompt 下，较差引用式候选获胜 48 对、平局 36 对、另一候选获胜 36 对；反引用 prompt 下三类结果为 0、104、16。另有 100 对由人工确认存在中等质量差的回答，普通 prompt 为较优候选获胜 82、较差候选获胜 8、平局 10；反引用 prompt 为 44、0、56。分别计算引用偏好翻转与中等差距判别率、平局率的变化；解释为什么不能只用“较差引用胜率归零”宣布 judge 改进。
+3. 为 70 条 Deep Research 与 30 条 Agentic Coding rubric 核验记录 confusion matrix。Deep Research 有 50 条人工满足、20 条不满足；judge 对这两类分别判对 45 条和 16 条。Agentic Coding 有 20 条满足、10 条不满足；judge 对两类分别判对 14 条和 7 条。计算每个领域的 sensitivity、specificity、balanced accuracy，以及总体 accuracy。说明为何还应按 rubric 类别检查工具、规则和证据链错误，并保留无法判断与仲裁字段。
+
+4. 为 24 个问题各准备 3 条固定候选回答及人工评分，设计 rubric 顺序审计：固定回答和分数锚点，比较固定顺序重复 3 次与 3 种随机分数档位顺序；再单独交换两个评价维度的顺序。记录逐条分数变化、每题排名第一的候选是否改变、与人工标签的相关性和额外调用量，并将调试样本与保留集分开。解释为何随机置换可能压低位置偏差，却不保证 judge-human agreement 一定提高。
+
+## 第七册第五章：污染检测与可信评估
+
+配套正文：[第七册第五章](book-07-evaluation-experiments/chapters/05-污染检测与可信评估.md)。
+
+1. 对两组相邻二词 shingle `{旅行报销·需要, 需要·发票, 发票·和, 和·主管签字}` 与 `{旅行报销·需要, 需要·发票, 发票·与, 与·主管签字}` 计算 Jaccard；若示例阈值为 0.30，说明它能否直接证明训练污染，并分别写出“训练快照确认命中”和“只在公开网页找到”的处理结论。
+2. 设计一轮 DCQ：说明如何生成词级变体、用 BDQ 检查选项偏好、用 BCQ 轮换原文位置。若四个扰动选项中一个位置在 100 次回答里仅被选择 12 次，解释其为何成为位置校正候选；指出此协议测到的记忆信号和不能证明的训练来源。
+3. 参考模型在 `D_ref` 的分数是 `[0.40, 0.50, 0.60, 0.80, 1.00]`，目标模型得 0.80；参考模型在 `D` 的分数是 `[0.30, 0.45, 0.60, 0.75, 0.90]`，目标模型得 0.90。按正文的经验分位数示例计算 ConStat 的 `q`、预期分数和 `δ`，再列出让该差值只能作为风险信号的三项检查。
+4. 对一个经历 benchmark 污染 SFT 与短程 GRPO 的推理模型，分别规划 Self-Critique、LaRA、DCQ 和私有时间切分集能提供的证据。说明各方法的接口条件、为何既有研究可能得到不同的检测结果，以及报告“未检出”时仍须保留哪些未知项。
+5. 数据生成器 G 产出学生 S 的合成训练样本，judge J 与 G 属于同一模型家族。设计一个评估审计，区分 preference leakage、候选位置偏差和真实回答质量差；列出要记录的生成器/judge/学生关系字段、人工对照和独立 holdout。
 
 ## 第八册第十七章：AI Control 与不可信 Agent 监督
 
@@ -2174,3 +2240,40 @@
 2. 用同一组随机键值检索样本比较 Gated DeltaNet 与 Gated DeltaNet-2：分别记录 key 侧擦除门和 value 侧写入门，固定参数量、训练 token、状态大小和评测长度；把 recurrent 与 sliding-window hybrid 结果分开汇报。
 3. 画出 masked diffusion 与 AR 的训练/推理状态变化，再为 encoder-only 和 encoder–decoder 去噪网络标出每轮重复计算的组件；说明扩散目标为何不能单独决定 backbone，也不能单凭并行位置数判断端到端速度。
 4. 比较 PowLU 与 MoA 的目标问题、激活机制、作者实验规模、训练 token/基线及未验证边界；解释为什么不同训练协议下的两个结果不能排成一张胜负榜。
+
+## 第五册第六章：优化器与学习率策略
+
+配套正文：[第五册第六章](book-05-llm-training/chapters/06-优化器与学习率策略.md)。
+
+1. 对两个 micro-batch 梯度 $g_1=(3,0)$、$g_2=(-2,4)$，在最大范数 2 下分别计算“先累积再全局裁剪”和“逐 micro-batch 裁剪再累积”的结果。说明方向为何不同，以及 FP16 下裁剪前为什么需要 unscale。
+2. 假设 AdamW 达到某验证目标时消耗 900B token、吞吐为每小时 9B token；新优化器消耗 750B token、吞吐为每小时 6.25B token。计算两者的达标墙钟时间、token efficiency 比例，并求新优化器要快于 AdamW 时最多能消耗多少 token。
+3. WSD 稳定主干训练到 100B token，并分别从 60B、80B checkpoint 分出 10B-token decay 分支。计算主干与分支合计的训练 token 成本，区分两个候选模型的终点 token 和实际计算消耗；说明继续稳定训练时应从哪个 checkpoint 恢复。
+4. 两个数据并行 rank 分别有 3 个和 1 个有效目标，局部 token-mean 梯度为 1 和 3。计算全局 token-mean 梯度与等权 rank-mean 的差异，并解释变长 batch 下 loss 分母及 all-reduce 约定如何影响所谓 batch scaling。
+
+## 第五册第七章：分布式训练
+
+配套正文：[第五册第七章](book-05-llm-training/chapters/07-分布式训练.md)。
+
+1. 令输入 `X=[1,2]`，用两个 TP rank 按输出列切 `W0=[[1,0],[2,1]]`、`W1=[[0,1],[1,-1]]`，手算各自输出并拼接；再将 `[5,2,2,-1]` 按输入维拆成两片，对 `W0=[[1,0],[0,1]]` 和 `W1=[[0,1],[1,-1]]` 分别计算部分结果并 reduce-sum。解释为何 column parallel 的拼接与 row parallel 的求和不能互换。
+2. 对 8 个 pipeline stage、20 个 micro-batch，假设教学输入 `F=4 ms`、`B=7 ms`、`W=2 ms`、重叠 chunk `F&B=8 ms`。结合 [Zero Bubble Pipeline Parallelism](https://arxiv.org/abs/2401.10241) 对 backward 拆分的机制说明，再按 [DeepSeek-V3 技术报告 Table 2](https://arxiv.org/abs/2412.19437) 的口径分别算 1F1B、ZB1P 和 DualPipe 的 bubble 项；同时比较 `1×` 与 `2×` 参数副本、`PP` 与 `PP+1` 激活计数。说明 `F&B` 是显式输入，结果不是实际集群 benchmark，也不能忽略 DualPipe 的通信重叠和额外参数内存。
+3. 一个 12 元素参数向量在 DP=4 checkpoint 中按连续三元素分片，随后改为 DP=3。列出旧/新 rank 各自的全局索引区间，说明参数、一阶/二阶状态怎样按逻辑位置映射；再给出数据集快照和全局样本游标，指出 [PyTorch DCP 2.15](https://docs.pytorch.org/docs/2.15/distributed.checkpoint.html) 的 load-time resharding 能解决哪些张量布局问题、不能替应用保证哪些 data cursor、manifest、RNG 和逐位复现语义。最后比较这种“从 checkpoint 恢复”与 [DynaTrain](https://arxiv.org/abs/2605.18815) 所研究的在线布局切换，并为预印本数字写出证据边界。
+4. 构造一个 rank 2 在 step 80 进入 all-reduce 前因数据加载异常退出、其他 rank 仍等待的 hang。为 [PyTorch 2.15 flight recorder](https://pytorch.org/blog/pytorch-2-15-release-blog/) 设计事后诊断清单：收集每个 rank 的 host、step/micro-step、最后完成 collective、group、序号、data cursor、OOM/异常和最近 checkpoint；说明如何区分慢 rank、collective 顺序不一致和进程已退出，并解释为何加长 timeout 不是修复。
+
+## 第五册第八章：显存优化与数值精度
+
+配套正文：[第五册第八章](book-05-llm-training/chapters/08-显存优化与数值精度.md)。
+
+1. 对 7B 个 BF16 参数，分别用十进制 GB 和二进制 GiB 计算权重字节数；解释为什么 14e9 bytes 约为 13.04 GiB，并指出把它记成 14 GiB 是高估还是低估、相对差多少。
+2. 某 step 结束时 allocated=56 GiB、reserved=67 GiB，而设备进程统计接近 79 GiB。列出哪些差额可由 allocator cache 解释、哪些可能来自 PyTorch 外部分配；说明为什么不能据此直接断言泄漏或碎片，以及快照中看不到哪些分配。
+3. 对 32 层模型分别取 4、8、16 个 checkpoint segment，按本章理想关系计算激活 proxy；再对照 [OOMB v4](https://arxiv.org/abs/2602.02108v4) 的 4M context 报告，列出其系统级机制、作者报告的显存增长和延迟/互连边界。说明为什么不能把论文数字归给普通 checkpoint API。
+4. 比较 [FP4 All the Way v2](https://arxiv.org/abs/2505.19115v2)、[Quartet v4](https://arxiv.org/abs/2505.14669v4) 和 QLoRA NF4：分别记录量化对象、舍入/scale recipe、实验硬件和实测范围；把模拟 FP4 的速度估算、局部 kernel 测量和冻结底座存储压缩分开评价。
+
+## 第五册第九章：训练稳定性与调试
+
+配套正文：[第五册第九章](book-05-llm-training/chapters/09-训练稳定性与debug.md)。
+
+1. 给定健康 loss `[2.40, 2.18, 2.05]` 和当前 loss `5.80`，计算中位数基线与 spike ratio；再说明若基线为 0、窗口无健康值或当前 loss 非有限，应如何标记，不要用 epsilon 伪造 ratio。
+2. 某 batch 有 1,024 个 attention token 和 10 个 label token；计算有效监督比例。两个 micro-batch 的有效 token 数与未归一化梯度分别是 `(100, 200)` 和 `(300, 300)`，计算 token-mean 梯度，与简单平均两个局部 mean 对照，并说明 decode 哪些 span 能判断 mask 是否错位。
+3. 设计一个 rank 2 在 collective 前产生 NaN、rank 0 仍等待的最小日志表。说明 PyTorch 2.15 的 `TORCH_DIST_NAN_CHECK=1` 检查什么、适用哪些 backend，以及它不能检查 Inf、定位上游算子或诊断 collective 顺序错误的边界。
+4. 一个训练配置每个 optimizer step 消耗 480,000 个有效 label token。step 500 checkpoint 的 data cursor 相当于 245M token，而累计量应是多少？计算偏差，并分别检查 optimizer/scheduler step、真实有效 token、RNG 和 data cursor，解释为什么 checkpoint 文件可读不等于恢复连续。
+5. 为同一个异常前 checkpoint 设计 global norm clipping、AdaGC、降低 \(\beta_2\)、SPAM 和 GradientStabilizer 五组对照。比较整体范数、逐张量历史阈值、二阶矩响应、逐坐标 spike 代理和运行统计幅值分别改变什么，并记录超参数、状态丢失、吞吐及目标质量。

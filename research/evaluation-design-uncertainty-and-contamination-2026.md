@@ -1,6 +1,6 @@
 # 开放技术问题评测设计、不确定性与污染检测来源
 
-核验日期：2026-10-29。
+核验日期：2026-11-03。
 
 本记录只保存联网核验得到的技术事实、来源版本、阅读位置和证据边界；不记录章节审阅、正文修改或工作进度。
 
@@ -28,9 +28,9 @@
 ## 原题与扰动题污染信号
 
 - **来源：** Golchin and Surdeanu, [Data Contamination Quiz: A Tool to Detect and Estimate Contamination in Large Language Models](https://aclanthology.org/2025.tacl-1.37/)，TACL 2025，13:809–830。
-- **阅读范围：** ACL Anthology 摘要和论文 §1 引言中 DCQ 构造说明。
-- **支持事实：** DCQ 对每个原始样本构造三个词级扰动版本并加入“均非原文”选项，形成选择题；作者把模型从选项中识别原文的行为作为特定数据分区的污染检测信号，并讨论位置偏差。
-- **证据边界：** 该方法检测的是其协议下的行为信号，不提供模型训练文件的来源证明；扰动是否保留题意、难度和答案需要逐项检查，原题/变体性能差也可能由难度变化造成。未观察到信号不能证明未污染。
+- **阅读范围：** ACL Anthology 元数据和摘要；正式 PDF 的引言、选项构造与位置偏差处理部分（BDQ/BCQ）。
+- **支持事实：** DCQ 为每条抽样原始题构造词级变体与“以上皆非”选项，要求模型识别原始措辞；BDQ 用不含原文的扰动选项估计不受欢迎的位置，BCQ 将原文放入这些位置并轮换，给出位置校正后的检测范围。论文报告方法只需黑盒输入/输出，不需要训练数据或权重/logits。
+- **证据边界：** 该方法检测的是特定问答协议下的逐字暴露/记忆信号，不提供模型训练文件的来源证明。论文承认记忆与污染不同，但在该方法中把前者作为后者的检测代理；扰动语义、难度、答案和提示必须逐项检查。评估时检索/上下文暴露也可能影响识别。未观察到信号不能证明未污染。
 
 ## 推理模型中检测信号的脆弱性
 
@@ -38,6 +38,25 @@
 - **阅读范围：** ICLR 官方会议摘要；本次未据摘要外推未读的实现细节。
 - **支持事实：** 作者报告，在其 base model 经 benchmark 污染 SFT 后的实验中，短程 GRPO 可显著隐藏多数检测方法使用的污染信号；对 advanced reasoning model 的特定 CoT 污染场景，多数检测器结果接近随机猜测。
 - **证据边界：** 结论限于论文构造的模型、训练流程、污染方式和检测器，不证明所有 RL 或所有推理模型都会抹除污染信号。它说明“没有检测到”不能视作“没有污染”的一般充分证据。
+
+## RL 后训练的专用检测信号
+
+- **来源：** Tao et al., [Detecting Data Contamination from Reinforcement Learning Post-training for Large Language Models](https://proceedings.iclr.cc/paper_files/paper/2026/hash/ab003a4f85ecb1b7b1514ff539dc7395-Abstract-Conference.html)，ICLR 2026；[正式论文 PDF](https://openreview.net/pdf?id=EjiJmiA6ea)。
+- **阅读范围：** ICLR 官方摘要、正式论文摘要及结论摘录。
+- **支持事实：** Self-Critique 以 token-level entropy 探测 RL 后训练后可能出现的窄化推理路径/策略塌缩，并引入 RL-MIA 模拟 RL 阶段污染；作者在其多模型、多任务设置中报告最高 30% 的 AUC 提升。
+- **证据边界：** 该检测信号依赖论文所构造的 RL 污染和模型；“最高 30%”沿用作者摘要措辞，不改写为百分点或普遍提升。不能与其他训练阶段、污染方式和测试集上的检测器分数横向排名。
+
+- **来源：** Gwak et al., [LaRA: Layer-wise Representation Analysis for Detecting Data Contamination in RL Post-Training](https://aclanthology.org/2026.findings-emnlp.690/)，Findings of EMNLP 2026。
+- **阅读范围：** ACL Anthology 元数据和摘要。
+- **支持事实：** LaRA 分析 RL 后训练模型的逐层表示，引入扰动敏感性、方向塌缩和局部表示刚性三类度量，并报告在所测 RL 推理模型上优于输出层基线。
+- **证据边界：** 摘要支持方法组成与作者报告的比较结论；本次未复核全文实验表和限制。方法依赖访问内部层表示，不适用于只有文本输出接口的模型；结论限于论文模型、污染构造与比较基线。
+
+## 合成数据生成器与评估器的偏好泄漏
+
+- **来源：** Li et al., [Preference Leakage: A Contamination Problem in LLM-as-a-judge](https://openreview.net/forum?id=grIvSXVJ65)，ICLR 2026 正式论文。
+- **阅读范围：** 论文摘要、§1、生成器/评估器关系分类、§6 结论及真实排行榜范围讨论。
+- **支持事实：** 论文定义生成器与 judge 的三种关系：同一模型、继承关系和同一模型家族；实验报告相关 judge 对由生成器相关的学生模型存在偏好，且偏差在部分题型/主观维度更难发现。
+- **证据边界：** 论文指出公开 leaderboard 可追溯的学生—教师配对有限，扩大真实排行榜覆盖能提升外部有效性；结论绑定论文模型、合成数据、任务与 judge，不能断言所有同家族评估都产生偏好。
 
 ## 成员推断假设与生成式评测边界
 
@@ -59,6 +78,10 @@
 - **证据边界：** 这是访问日的托管平台时间表，可能变更；它不表示开源 `openai/evals` GitHub 仓库或评测方法本身关闭。依赖该托管服务的项目应在迁移时再次查看官方时间表。
 
 - **Agent 工作流指南（2026-10-30）**：[Evaluate agent workflows](https://developers.openai.com/api/docs/guides/agent-evals)建议先用单条 trace grading 排查工具选择、handoff、instruction/safety policy 等工作流问题；“good”标准明确后再转为 datasets 和 eval runs 做重复比较。该指南属于动态产品文档，页面中的 dashboard、grader 和 Agent Builder 路径不能当作稳定 API 契约。
+
+### 2026-11-03 时间表复核
+
+- 于 2026-11-03 再读 OpenAI 官方 [Working with evals](https://developers.openai.com/api/docs/guides/evals) 与 [Deprecations](https://developers.openai.com/api/docs/deprecations)。指南仍称 Evals 对现有用户于 2026-10-31 转为只读，平台计划于 2026-11-30 关闭，并建议新建或迭代评测考虑 Datasets。这里记录的是官方页面当前公布的生命周期时间表；未通过账户登录验证具体项目的可写状态。依赖该托管平台的文档应在迁移时再核对官方时间表。
 
 ## 尚未解决的证据问题
 

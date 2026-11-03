@@ -69,3 +69,10 @@
 ## 生命周期
 
 PyTorch 2.15.0 的发布日期是截至检索日的状态；Hugging Face Model Cards、MLflow `latest`、TRL `main`、vLLM `latest` 与 OpenTelemetry 属性页面属于动态资料。后续引用必须固定实际安装/部署版本，并复核字段语义、默认值和敏感数据处理配置。
+
+## OpenTelemetry GenAI 内容采集默认值复核（2026-11-02）
+
+- **来源与版本**：[OpenTelemetry GenAI semantic conventions: spans](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-spans.md)，`main` 分支动态规范，访问日期 2026-11-02。
+- **阅读位置**：Full (buffered) content §（全文内容敏感性）、Content capture configuration（显式启用与默认 `NO_CONTENT`）、Uploading content to external storage（外部引用与 hook）。
+- **来源支持的事实**：当前规范认为系统指令、用户消息和模型输出通常敏感且体积较大，建议 instrumentation 默认不采集；内容采集须显式 opt-in。规范允许实现把内容上传到外部存储并发出引用，但不规定 URI、布局、保留期限、访问控制或读取方式；外部存储和引用安全由应用实现负责。
+- **证据等级与边界**：source-backed（OpenTelemetry 动态语义约定，访问时为 `main`）；规范和各 SDK 支持情况持续变化。默认值建议不等于 SDK 一定遵循，需按固定 SDK/规范版本检查实际配置；该约定不自动脱敏、删除或授权访问。

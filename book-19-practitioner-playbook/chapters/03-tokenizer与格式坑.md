@@ -6,6 +6,8 @@
 
 本章把格式处理看成一条有契约的数据流：消息经过模板渲染成为序列，tokenizer 把序列映射为 token ID，collator 生成 attention mask 和 labels，损失函数只在规定位置监督，推理侧再用同一协议解析角色、工具和停止边界。读者将看到 special token、BOS/EOS/PAD、assistant-only loss、chat template、截断、中文/代码/数学 tokenization、多模态占位符和工具调用如何在同一条链上相互影响。
 
+本章以故障复现、观测与修复为主；训练侧字段契约、SFT/偏好/工具/多模态样本结构及 tokenizer 扩展流程见[第五册第三章](../../book-05-llm-training/chapters/03-tokenizer与数据格式.md)。Tokenizer 算法和指标比较见[第二册第三章](../../book-02-advanced-100/chapters/03-tokenization数据与预训练进阶.md)。
+
 ## 3.1 先建立序列协议
 
 一个聊天模型请求至少包含四种不同对象：

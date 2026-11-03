@@ -4,7 +4,7 @@
 
 语言模型不会直接读取“字”或“词”。它先把字符串变成一个离散符号序列，再把每个符号映射成整数 id，最后通过 embedding 变成向量。这个过程通常被叫作 tokenization，但它不是一个无关紧要的预处理步骤。词表大小、切分规则、特殊 token、对话模板和解码方式共同定义了模型的输入输出协议，也决定了同一段文本要消耗多少上下文、训练多少步和多少显存。本章所说的 NLP 聚焦于语言模型的文本表示和输入接口，不覆盖分类、序列标注、句法分析等完整任务谱系。
 
-本章把各主题组织成一条端到端链路，作为百科速查入口；完整训练与数据格式实践见第五册对应主讲章节。
+本章把各主题组织成一条端到端链路，作为百科速查入口；词表算法与 tokenizer 评测由第二册深讲，训练序列化和监督协议由第五册主讲，格式故障排查由第十九册主讲。
 
 ~~~text
 结构化消息（可选）
@@ -25,8 +25,9 @@
 
 | 查询主题 | 完整主讲入口 |
 | --- | --- |
-| 词表训练、BPE、WordPiece、Unigram、字节覆盖和多语言 token 效率 | [第五册第三章：Tokenizer 与数据格式](../../book-05-llm-training/chapters/03-tokenizer与数据格式.md)、[第二册第三章：Tokenization 与预训练进阶](../../book-02-advanced-100/chapters/03-tokenization数据与预训练进阶.md) |
+| 词表训练、BPE、WordPiece、Unigram、字节覆盖和 tokenizer 评测 | [第二册第三章：Tokenization 与预训练进阶](../../book-02-advanced-100/chapters/03-tokenization数据与预训练进阶.md)；训练预算账本见[第五册第三章](../../book-05-llm-training/chapters/03-tokenizer与数据格式.md) |
 | Special token、EOS/PAD、chat template、label mask 和工具调用格式 | [第五册第三章：Tokenizer 与数据格式](../../book-05-llm-training/chapters/03-tokenizer与数据格式.md) |
+| Tokenizer、模板与监督格式的故障定位 | [第十九册第三章：Tokenizer 与格式坑](../../book-19-practitioner-playbook/chapters/03-tokenizer与格式坑.md) |
 | 预训练目标、有效预测 token 和损失口径 | [本册第 06 章：预训练与数据](06-预训练与数据.md)、[第五册第三章：Tokenizer 与数据格式](../../book-05-llm-training/chapters/03-tokenizer与数据格式.md) |
 | 交叉熵、perplexity 和共同计数单位 | [本册第 01 章：数学与机器学习](01-数学与机器学习.md#交叉熵-cross-entropy)、[第五册第三章：Tokenizer 与数据格式](../../book-05-llm-training/chapters/03-tokenizer与数据格式.md) |
 

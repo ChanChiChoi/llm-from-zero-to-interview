@@ -92,6 +92,47 @@
   - 证据等级：source-backed（厂商报告和模型卡的公开说明）。
   - 适用边界：这些是特定模型版本的公开训练与模型卡描述，不是完整可复现训练配方，也不支持推断未披露的超参数、数据或运行时行为。当前模型卡明确说明 V3.2-Speciale 面向深度推理且不支持 tool calling；该限制只适用于该变体，不可外推到 DeepSeek-V3.2 一般模型或其他工具运行时。
 
+## 2026-11-02 补充来源
+
+### GRPO 系列的 reduction、采样与 clipping 变体
+
+- Yu et al., “DAPO: An Open-Source LLM Reinforcement Learning System at Scale,” arXiv:2503.14476v2，[论文 HTML](https://arxiv.org/html/2503.14476)。实际阅读摘要、引言、方法和 Table 1。
+  - 来源支持：DAPO 将 Clip-Higher、动态采样、token-level loss 和 overlong 处理组合进大规模 reasoning RL recipe。作者在 Qwen2.5-32B base、AIME24 Avg@32 设置的 progressive ablation 中报告 naive GRPO 30 分，逐步加入组件后达到 50；分数序列为 30、36、38、41、42、50。
+  - 证据等级：source-backed（arXiv 论文指定实验和作者报告）。
+  - 边界：这是逐步累加 recipe 的分析，不能视作各组件互相独立的随机化因果估计；分数绑定模型、题集、32 次采样、temperature=1、top-p=0.7 和论文实现。
+
+- Zheng et al., “Group Sequence Policy Optimization,” arXiv:2507.18071v2，[论文 HTML](https://arxiv.org/html/2507.18071)。实际阅读摘要、定义、方法和主要实验设置。
+  - 来源支持：GSPO 以序列似然的几何平均构造 sequence-level importance ratio，并在 sequence level clipping；作者在 Qwen3 系列及 MoE RL 设置报告训练稳定性、效率和性能结果。
+  - 证据等级：source-backed（预印本中的定义和指定实验）。
+  - 边界：报告收益依赖作者的模型、reward、长度分布和基础设施；整条序列被共同裁剪会改变 token 信用分配，不能将 GSPO 等同于逐 token GRPO，也不能外推为所有长输出任务的优势。
+
+- Liu et al., “Understanding R1-Zero-Like Training: A Critical Perspective,” arXiv:2503.20783v2，[论文 HTML](https://arxiv.org/html/2503.20783)。实际阅读摘要、§§2–3 和 AIME24 训练设置。
+  - 来源支持：论文提出 DrGRPO，针对 response-length mean 与 group-standard-deviation normalization；loss 取消每回答长度分母和组标准差缩放，并以固定 generation budget 为共同分母。作者报告 Qwen2.5-Math-7B、MATH level 3–5、Qwen-Math template 设置下的 AIME24 结果为 43.3%，约 27 小时、8 张 A100。
+  - 证据等级：source-backed（预印本中的方法和作者报告）。
+  - 边界：“unbiased”对应论文给出的 policy-gradient 推导及其采样假设；实验结果绑定模型、训练集、模板和硬件，未证明任何任务下均优于带长度归一化方法。
+
+- Yang et al., “DCPO: Dynamic Clipping Policy Optimization,” arXiv:2509.02333v2，[论文 HTML](https://arxiv.org/html/2509.02333)。实际阅读方法、RUR 定义和主要表格。
+  - 来源支持：该论文的 DCPO 全称为 Dynamic Clipping Policy Optimization，按旧 token 概率构造动态 clipping，并加入 advantage 平滑及 response 内 token mean。作者在四个 Qwen 系列设置、400 个训练 step 上报告 GRPO、GSPO、DCPO 的平均 Response Utilization Ratio 分别为 43.8%、45.6%、71.8%；其 Qwen2.5-Math-7B AIME24 Avg@1/32 报告 46.7/38.8。
+  - 证据等级：source-backed（预印本的机制定义和指定实验）。
+  - 边界：RUR 是论文定义的非零 advantage 回答占比，不是正确率、正向梯度占比或最终能力指标；数字受模型、模板、任务和训练配置限制。
+
+### 同名缩写与较新的研究候选
+
+- “Distribution-Centric Policy Optimization for LLM Reasoning,” arXiv:2601.12730v1，[论文 HTML](https://arxiv.org/html/2601.12730v1)。实际阅读摘要和方法概述。
+  - 来源支持：该论文也使用 DCPO 缩写，但全称为 Distribution-Centric Policy Optimization，讨论 entropy/distribution-level exploration 与策略分布调节，不是 Dynamic Clipping Policy Optimization 的 token-level clipping 方法。
+  - 证据等级：source-backed（不同论文的标题、目标和方法定义）。
+  - 边界：同名缩写不能作为方法同一性的证据；引用和方法表需写全称及年份。
+
+- Min et al., “Orchestrating Tokens and Sequences: Dynamic Hybrid Policy Optimization for RLVR,” arXiv:2601.05607v1，[论文 HTML](https://arxiv.org/html/2601.05607v1)，版本日期 2026-01-09。实际阅读摘要、引言、方法与实验概述。
+  - 来源支持：DHPO 在 clipped surrogate 中混合 token-level 与 sequence-level importance ratio，提供 averaged 与 entropy-guided mixing，并对两个分支分别 clipping；作者报告 Qwen3 dense/MoE 数学推理实验优于其 GRPO/GSPO baseline。
+  - 证据等级：source-backed（早期预印本中的方法与作者实验报告）。
+  - 边界：目前是论文作者在所列模型、数学 benchmark 和 SimpleRL 配置下的结果；不支持跨任务或独立实现的通用排序。
+
+- Jia et al., “Group Adaptive Clipping Policy Optimization,” arXiv:2609.00444v1，[论文 HTML](https://arxiv.org/html/2609.00444v1)，版本日期 2026-08-31。实际阅读摘要、引言、方法概述与实验结果段。
+  - 来源支持：GAPO 根据组内 rollout 的 advantage 调整 clipping 边界，保留 PPO/GSPO surrogate 而不改 reward shaping；作者报告其在 Qwen 与 Llama 模型的部分数学和代码 benchmark 上改善 Pass@1/Pass@k。
+  - 证据等级：source-backed（早期预印本中的方法和作者实验报告）。
+  - 边界：收益依赖作者定义的 base-pass-rate、模型、任务和训练协议；尚不能据此认定 advantage-adaptive clipping 是通用默认配置。
+
 ## 生命周期
 
 三阶段 PPO-style RLHF、pairwise RM 目标、PPO clipping 与 DPO 关系，以及偏好候选来源、DQO、RLVR 标注噪声和 DeepSeek-V3.2 公开方案：active。反馈质量、候选生成分布、RM 校准、PPO 采样/优势估计、KL 归约、verifier 与偏好冲突依模型、任务、标注协议和实现分别核验。

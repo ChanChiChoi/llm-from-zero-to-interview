@@ -227,7 +227,7 @@
 
 49D. 数学过程评测和代码生成 benchmark 各自有哪些代表方案？它们解决了什么问题？
     考察点：GSM-Symbolic 的受控变体、ORM/PRM/ProcessBench 的评测目标、EvalPlus 测试增强、LiveCodeBench 时间快照、SWE-bench 仓库级任务和 benchmark lifecycle。
-    回答框架：先按“题目变化、过程标签、代码测试、任务范围、时间新鲜度”区分测量对象。GSM-Symbolic 通过数值实例和 NoOp 干扰检查题面敏感性，不能据此证明内部推理机制；ORM 只看最终结果，PRM 给步骤反馈，ProcessBench 要求定位第一处错误，三者标签和用途不同。EvalPlus 用 seed、类型变异和差分执行找原测试漏掉的函数行为；LiveCodeBench 按日期收新题；SWE-bench 在 issue、仓库、patch 和目标/回归测试上评估 Agent。再说明每种方法的测试器、标注、预算、版本和污染风险，并按目标任务选路径，不合并百分比总分。证据及范围见[第七册第六章研究记录](research/reasoning-code-math-eval-depth-review-2026-10-27.md)。
+    回答框架：先按“题目变化、过程标签、代码测试、任务范围、时间新鲜度”区分测量对象。GSM-Symbolic 通过数值实例和 NoOp 干扰检查题面敏感性，不能据此证明内部推理机制；ORM 只看最终结果，PRM 给步骤反馈，ProcessBench 要求定位第一处错误，三者标签和用途不同。EvalPlus 用 seed、类型变异和差分执行找原测试漏掉的函数行为；LiveCodeBench 按日期收新题；SWE-bench 在 issue、仓库、patch 和目标/回归测试上评估 Agent。再说明每种方法的测试器、标注、预算、版本和污染风险，并按目标任务选路径，不合并百分比总分；解释 Verified 推荐为何在 2026 年 7 月被撤回，以及 Pro V2 的修订仍需独立核验。证据及范围见[第七册第六章研究记录](research/reasoning-code-math-eval-depth-review-2026-11-03.md)。
 
 49E. 多模态和长上下文评估有哪些代表性 benchmark？它们分别解决什么问题，为什么不能直接比较总分？
     考察点：VQA v2 互补图像对、POPE 对象幻觉探测、MMMU 学科推理、DocVQA/ANLS 格式边界、ChartQA 数值容差、AudioBench 任务覆盖、Video-MME/MLVU 长视频、MMLongBench-Doc 跨页证据、NIAH/Lost in the Middle/RULER/NoLiMa/LongBench 的难度路线。
@@ -549,7 +549,7 @@
 
 45. 训练显存通常由哪些部分组成？
     考察点：参数、梯度、optimizer state、activation、temporary buffer。
-    回答框架：训练显存粗略由参数、梯度、优化器状态、前向激活和临时 workspace / kernel buffer 组成。大模型里 AdamW 的一阶矩和二阶矩、长序列激活经常比参数本身更容易造成 OOM。
+    回答框架：训练显存峰值由权重、梯度、optimizer state、仍存活的激活、显式 attention 中间结果、通信 buffer、kernel workspace 和 allocator 暂存块共同构成。外部库、CUDA context 等还会使设备读数高于 PyTorch 统计。各项要对齐到同一 rank 和同一时刻，不能把不同时间点的分项最大值相加。
 
 46. 为什么 AdamW optimizer state 会成为显存大头？
     考察点：一阶矩、二阶矩、FP32 state、参数规模。
@@ -557,7 +557,7 @@
 
 47. 训练 OOM 时你会按什么顺序排查？
     考察点：batch、sequence length、precision、activation、optimizer state、泄漏。
-    回答框架：先区分 OOM 出现在训练、验证还是保存 checkpoint；再缩小 batch size 和 sequence length 判断是否由 activation 引起；随后检查 AMP / BF16、gradient accumulation、checkpointing、optimizer state、是否缓存带图 tensor、验证是否关闭梯度，以及 `memory_allocated` / `memory_reserved` / peak memory 变化。
+    回答框架：先记录 OOM 阶段、shape、有效 token、dtype、rank 和第一次超限的分配；再比较 PyTorch 的 allocated、reserved、peak 与设备进程读数。nvidia-smi 会计入 allocator 缓存块，但其读数不等于 memory_reserved，还可能包含 CUDA context、NCCL 或自定义分配。allocated 本身触顶时先找活 tensor 和生命周期；reserved 高而 allocated 低时看 snapshot 的 block/segment 与外部内存。之后再依 OOM 阶段检查 micro-batch、attention 中间量、optimizer 首步、evaluation 缓存、checkpoint copy 与 gradient checkpointing 的取舍。
 
 48. 如何设计一个最小 AMP memory audit demo？
     考察点：显存估算、autocast dtype、GradScaler、checkpoint 重算、CUDA 状态。
@@ -565,7 +565,7 @@
 
 48A. 如何从 `allocated`、`reserved` 和峰值时间线判断训练 OOM？
     考察点：live tensor、caching allocator、独立峰值、首个 Adam step。
-    回答框架：`allocated` 是当前由活 tensor 占用的部分，`reserved` 是 PyTorch allocator 管理的 segment；不能把不同时间点的各项最大值相加，也不能把 `reserved-allocated` 直接认定为泄漏。按 forward、backward、首个 optimizer step、稳态 step、validation 和 save 分别复位峰值并采样。若首次 step 后占用永久增加，检查 Adam 的 m/v 是否惰性初始化；若只短暂尖峰，再查 foreach/fused workspace、all-gather 和保存副本。`empty_cache()` 不释放仍活着的 tensor。
+    回答框架：`allocated` 是当前由活 tensor 占用的部分，`reserved` 是 PyTorch allocator 管理的 segment；不能把不同时间点的各项最大值相加，也不能把 `reserved-allocated` 直接认定为泄漏。nvidia-smi 的进程/设备读数可能还包括 CUDA context、NCCL 和自定义分配，不是 reserved 的别名。按 forward、backward、首个 optimizer step、稳态 step、validation 和 save 分别复位峰值并采样。若首次 step 后占用永久增加，检查 Adam 的 m/v 是否惰性初始化；若只短暂尖峰，再查 foreach/fused workspace、all-gather 和保存副本。`empty_cache()` 不释放仍活着的 tensor。
 
 48B. FlashAttention 的 online softmax 怎样避免保存完整 score 矩阵？
     考察点：tile、running max、归一化和、加权 value、HBM IO、计算复杂度。
@@ -578,6 +578,14 @@
 48D. 8-bit Adam 的 optimizer state 为什么不能只说“显存变成四分之一”？
     考察点：两组动量、blockwise scale、dynamic quantization、FP32 update、稳定性。
     回答框架：理想 payload 中 Adam 的两个 FP32 moment 从 8 bytes/parameter 降至约 2 bytes/parameter，但块 scale、padding、其它 tensor 和 allocator 不会消失。代表实现按 block 归一化并量化状态，更新时在寄存器中反量化到 FP32，算完再量化；离群值、embedding 状态和参数分组会影响误差。应把节省量绑定到实现与模型，并通过 loss、PPL、梯度/状态异常和吞吐做质量门禁。
+
+48E. 全量 FP4 训练与 QLoRA 的 NF4 有什么区别？
+    考察点：低比特权重存储、训练矩阵乘、冻结底座、scale、舍入和硬件。
+    回答框架：QLoRA 的 NF4 主要压缩冻结底座权重，训练的是 LoRA adapter；全量 FP4 训练则把指定格式带入前向、反向或更新的矩阵乘路径，并需规定 block scale、舍入与累加方式。FP4 All the Way 在 Gaudi2 上的运行是 FP4 模拟，速度数字属于估计；Quartet 的局部 RTX 5090 kernel 测量也不等于端到端训练提速。回答时要分开存储字节、算术路径、质量实验和硬件性能证据。
+
+48F. 为什么 OOMB 的百万 token 显存报告不能直接套到普通 activation checkpointing？
+    考察点：系统级协同、chunk-recurrent 调度、分页状态、CPU offload、稀疏注意力和互连。
+    回答框架：OOMB 将 chunk-recurrent 执行、激活重算、分页 KV 管理、异步 CPU offload 与 attention 路径共同设计；作者的 Qwen2.5-7B 单 H200、4M context 结果依赖具体实现和 workload。普通 checkpoint API 只控制部分前向中间值的保存与重算，不自带分页管理或 CPU offload。还要说明 OOMB 的串行 chunk 延迟、稀疏 attention 近似和 CPU-GPU 带宽边界。
 
 48E. QLoRA 中 NF4、Double Quantization 和 paged optimizer 分别省哪一项？
     考察点：冻结底座存储、scale 元数据、瞬时 optimizer 峰值、激活。
@@ -597,7 +605,7 @@
 
 48I. 如何区分 benchmark overlap 检查、Oren 顺序似然检验和 ConStat？
     考察点：语料访问、字面匹配、黑盒行为、非泛化表现定义。
-    回答框架：精确/近似 overlap 直接检查可访问训练语料，能找出文字重合但会漏掉改写、翻译和任务级泄漏，也可能误报。Oren et al. 比较 canonical 与 shuffled benchmark 的序列似然，可在论文假设下审计语料不可见的模型，但需要似然接口和题目 exchangeability；未触发不等于无污染。ConStat 将主要 benchmark 上的异常高分不能迁移到重述/参考任务的差距视作污染信号；它量化非泛化表现，不证明训练集包含原样本。最好结合来源/时间审计、新写留出集、样本输出检查和这些行为方法，并报告未检查范围。
+    回答框架：精确/近似 overlap 直接检查可访问训练语料，能找出文字重合但会漏掉改写、翻译和任务级泄漏，也可能误报。Oren et al. 比较 canonical 与 shuffled benchmark 的序列似然，可在论文假设下审计语料不可见的模型，但需要似然接口和题目 exchangeability；未触发不等于无污染。ConStat 将主要 benchmark 上的异常高分不能迁移到重述/参考任务的差距视作污染信号；它量化非泛化表现，不证明训练集包含原样本。DCQ 用原题和词级扰动让黑盒模型识别原始措辞，并通过 BDQ/BCQ 校正选项位置；它是逐字记忆信号，不直接定位训练来源。RL 后训练检测也依阶段而变：Self-Critique 和 LaRA 分别使用 token 熵及逐层表示信号，后者需要内部状态；ICLR 2026 的另一项研究发现特定短程 GRPO 可掩盖多种检测特征。它们的污染构造和接口不同，不能做跨论文排行榜。若合成数据生成器与 judge 同源、继承或同家族，还要审计 preference leakage，这不是 exact overlap。最后结合来源/时间审计、新写 holdout、样本输出检查和方法各自的边界报告未检查范围；详细路线见[第七册第五章](book-07-evaluation-experiments/chapters/05-污染检测与可信评估.md)及[研究记录](research/evaluation-design-uncertainty-and-contamination-2026.md)。
 
 48J. 为什么同一批题上的 paired comparison 比独立比较准确率更有信息？
     考察点：discordant pairs、McNemar/paired bootstrap、样本波动与 seed 方差。
@@ -609,7 +617,7 @@
 
 48L. GPQA、IFEval 和 LiveBench 分别解决什么测量问题，彼此能否替代？
     考察点：专家构题与验证、规则化指令判分、时间新鲜度、协议扰动、题库局限。
-    回答框架：GPQA 经领域专家写题、修订、第二位专家复核，再由三名其他领域高学历验证者测试。要区分 546 题 Extended 的专家/非专家正确率约 64.8%/34.1%，与筛选出的 448 题主集 71.9%/30.4%；主集要求至少一名专家同意、非专家最多两人答对，准确率受筛选影响，不能当作自然总体估计。作者另估约 74% 题目有专家可确认的客观答案。它能说明特定题集构造和验证，不能证明无训练污染或普遍推理能力。IFEval 把 25 类、541 个 prompt 中的显式约束交给规则程序检查，并区分 prompt-level / instruction-level 与 strict / loose；loose 会移除 Markdown 标记和首尾行以减少部分格式假阴性，也会制造假阳性。它不能代替事实正确性或开放任务质量。LiveBench v2 论文描述近期来源、客观答案和按月更新；本轮核到的项目主页显示 2026-01-08 快照并写约每六个月完整刷新，引用时应分开记录论文方案和实际版本。它降低静态题老化及主观 judge 依赖，但不能保证不污染。最后用选项顺序和答案提取扰动检查协议稳定性；论文观察到特定设置下榜单最多移动 8 位，这不是通用倍率。选择方法要按目标构念，锁定题源、筛选规则、版本、评分器和模型候选，不能把四条路线拼成一个排名。
+    回答框架：GPQA 经领域专家写题、修订、第二位专家复核，再由三名其他领域高学历验证者测试。要区分 546 题 Extended 的专家/非专家正确率约 64.8%/34.1%，与筛选出的 448 题主集 71.9%/30.4%；主集要求至少一名专家同意、非专家最多两人答对，准确率受筛选影响，不能当作自然总体估计。作者报告专家原始正确率约 65%；排除专家事后明确确认的疏忽后，调整估计约为 74%，不是“74% 的题目客观”占比。它能说明特定题集构造和验证，不能证明无训练污染或普遍推理能力。IFEval 把 25 类、541 个 prompt 中的显式约束交给规则程序检查，并区分 prompt-level / instruction-level 与 strict / loose；loose 会移除 Markdown 标记和首尾行以减少部分格式假阴性，也会制造假阳性。它不能代替事实正确性或开放任务质量。LiveBench v2 论文描述近期来源、客观答案和按月更新；截至 2026-11-03 核到的项目主页仍列出 2026-01-08 快照并写约每六个月完整刷新，引用时应分开记录论文方案和实际版本。它降低静态题老化及主观 judge 依赖，但不能保证不污染。IRT 可提供题目级诊断，但 2026 年预印本发现模型池较小或能力分布偏斜、聚集时，题目参数和排名可能不稳定；需要检查拟合与模拟，不能把 IRT 筛题结果当作唯一有效集（来源见[研究笔记](research/benchmark-design-protocols-2026-11-03.md)）。最后用选项顺序和答案提取扰动检查协议稳定性；论文观察到特定设置下榜单最多移动 8 位，这不是通用倍率。选择方法要按目标构念，锁定题源、筛选规则、版本、评分器和模型候选，不能把四条路线拼成一个排名。
 
 48M. Pairwise 人评得到 420 胜、350 负、230 平时，如何计算偏好率和不确定性？为什么 BT/Elo 排名还要做稳健性审计？
     考察点：tie 计分、三值样本方差、聚类抽样、Elo 与 Bradley--Terry、bootstrap/sandwich 区间、worst-case data dropping。
@@ -657,7 +665,7 @@
 
 56A. 分布式训练卡死、吞吐低或 checkpoint 恢复异常时，如何设计 distributed incident gate？
     考察点：rank step alignment、collective mismatch、token shard imbalance、straggler ratio、communication ratio、checkpoint shard coverage、resume continuity、pipeline bubble。
-    回答框架：先要求每个 rank 输出 step、phase、batch id、token 数、step/data/comm time、collective 序列、loss 和 checkpoint 状态；再检查所有 rank 是否在同一 step、collective 是否一致、token shard 是否均衡、最慢 rank 是否超过典型 rank、通信占比是否过高、checkpoint shard 是否完整、resume 后 global step 和 lr 是否连续，以及 pipeline micro-batch 是否足以压低 bubble。门禁输出 failed gates 和对应 rank / shard / stage，避免只凭 rank 0 日志猜测。
+    回答框架：先要求每个 rank 输出 step、phase、batch id、token 数、step/data/comm time、collective 序列、loss 和 checkpoint 状态；再检查所有 rank 是否在同一 step、collective 是否一致、token shard 是否均衡、最慢 rank 是否超过典型 rank、通信占比是否过高、checkpoint shard 是否完整、resume 后 global step 和 lr 是否连续，以及 pipeline micro-batch 是否足以压低 bubble。PyTorch 2.15 NCCL 路径可结合 flight recorder 事后记录定位 hang，但要固定版本并逐 rank 对齐证据。门禁输出 failed gates 和对应 rank / shard / stage，避免只凭 rank 0 日志猜测。
 
 56B. 变长 batch 下如何用 DDP 得到全局 token-mean 梯度？
     考察点：输入 token 与 prediction target、loss sum/mean、DP group、梯度累积、DDP rank-average。
@@ -665,11 +673,11 @@
 
 56C. ZeRO 阶段与 PyTorch FSDP1/FSDP2 如何对应，为什么不能把它们当成同一个 API？
     考察点：optimizer/gradient/parameter sharding、通信生命周期、FlatParameter、DTensor、wrap 粒度。
-    回答框架：ZeRO-1/2/3 描述逐级分片 optimizer state、gradient、parameter 的算法层次。FSDP1 是 wrapper/flat-parameter 分组路线；FSDP2 `fully_shard` 用 per-parameter DTensor 并按子模块自底向上分通信组，前后向 hooks 聚齐参数，梯度 reduce-scatter。它们共享“用参数临时聚齐换常驻状态分片”的直觉，但 checkpoint、state_dict、参数分组和 API 行为有版本差异；具体对照固定 PyTorch 版本文档。参考：[ZeRO](https://arxiv.org/abs/1910.02054)、[PyTorch FSDP2 2.14](https://docs.pytorch.org/docs/2.14/distributed.fsdp.fully_shard.html)。
+    回答框架：ZeRO-1/2/3 描述逐级分片 optimizer state、gradient、parameter 的算法层次。FSDP1 是 wrapper/flat-parameter 分组路线；FSDP2 `fully_shard` 用 per-parameter DTensor 并按子模块自底向上分通信组，前后向 hooks 聚齐参数，梯度 reduce-scatter。它们共享“用参数临时聚齐换常驻状态分片”的直觉，但 checkpoint、state_dict、参数分组和 API 行为有版本差异；具体对照固定 PyTorch 版本文档。参考：[ZeRO](https://arxiv.org/abs/1910.02054)、[PyTorch FSDP2 2.15](https://docs.pytorch.org/docs/2.15/distributed.fsdp.fully_shard.html)。
 
 56D. GPipe、1F1B 与 interleaved 1F1B 应如何选？
     考察点：warmup/flush bubble、activation 驻留、virtual chunk、额外 point-to-point 通信、测量边界。
-    回答框架：GPipe 先 forward 后 backward，读起来直接但会暂存多 micro-batch activation；non-interleaved 1F1B 进入稳态后交错 forward/backward，较早释放 activation；interleaving 让每个 rank 持多个 virtual chunk、缩短 flush，但每样本跨更多 stage 边界。Megatron-LM 报告的收益依赖 batch 和 scatter/gather 优化；batch 增大后默认 schedule 可能追近，故应对照 bubble、activation peak、send/recv、stage imbalance 和 step time。参考：[GPipe](https://arxiv.org/abs/1811.06965)、[Megatron-LM](https://arxiv.org/abs/2104.04473)。
+    回答框架：GPipe 先 forward 后 backward，读起来直接但会暂存多 micro-batch activation；non-interleaved 1F1B 进入稳态后交错 forward/backward，较早释放 activation；interleaving 让每个 rank 持多个 virtual chunk、缩短 flush，但每样本跨更多 stage 边界。ZeroBubble 把 backward 拆成输入梯度与参数梯度并重新排程，以便利用部分空档，但收益受内存和调度约束。DeepSeek-V3 报告中的 DualPipe 进一步为跨节点 MoE all-to-all 与 PP send/recv 重排 forward/backward chunk，并采用双向调度；论文表将参数副本计为 2×、激活计为 PP+1，且结果绑定其系统配置。比较时应对照 bubble、activation peak、通信、stage imbalance 和 step time。参考：[GPipe](https://arxiv.org/abs/1811.06965)、[Megatron-LM](https://arxiv.org/abs/2104.04473)、[ZeroBubble](https://arxiv.org/abs/2401.10241)、[DeepSeek-V3 §3.2](https://arxiv.org/abs/2412.19437)。
 
 56E. MFU 与 HFU 有何区别，报告 57.8% HFU 能说明什么？
     考察点：model-required FLOPs、rematerialization、峰值 dtype、attention/token 口径、吞吐。
@@ -677,7 +685,7 @@
 
 56F. Distributed Checkpoint 改变 world size 后能恢复到什么程度？
     考察点：load-time resharding、tensor layout、optimizer/data state、async staging、manifest/commit。
-    回答框架：PyTorch DCP 支持多 rank 保存/读取及 load-time resharding；目标 ranks 要构造兼容的 state_dict，且 tensor shapes、parameter mapping、optimizer state 和数据游标仍需验证。异步 staging 让状态拷贝与写盘分离，不自动提供跨文件的事务原子性；应用应以完整 shard 和 manifest/checksum 做恢复提交边界，并做实际 restore drill。DCP 文档还警告 state_dict 不保证跨 PyTorch 版本向后兼容。参考：[PyTorch DCP 2.14](https://docs.pytorch.org/docs/2.14/distributed.checkpoint.html)。
+    回答框架：PyTorch DCP 支持多 rank 保存/读取及 load-time resharding；目标 ranks 要构造兼容的 state_dict，且 tensor shapes、parameter mapping、optimizer state 和数据游标仍需验证。异步 staging 让状态拷贝与写盘分离，不自动提供跨文件的事务原子性；应用应以完整 shard 和 manifest/checksum 做恢复提交边界，并做实际 restore drill。DCP 文档还警告 state_dict 不保证跨 PyTorch 版本向后兼容。参考：[PyTorch DCP 2.15](https://docs.pytorch.org/docs/2.15/distributed.checkpoint.html)。
 
 56G. Chinchilla 的 compute-optimal 结论怎样与 inference-aware scaling 区分？
     考察点：训练 FLOPs 目标、loss/质量门槛、未来请求数、token/parameter 分配、外推范围。
@@ -685,7 +693,7 @@
 
 56H. 训练成本报告怎样同时核对 GPU-hours、稳定吞吐和碳排？
     考察点：MFU/HFU、wall-clock availability、TDP/电表、PUE、电网碳强度、embodied carbon。
-    回答框架：GPU-hours × 价格给出计算账单的一部分；长期 valid tokens/s 与恢复/保存停顿决定 deadline；能源则要使用功率×时间、电表/PUE 与地点时间对应的电网碳强度，并说明是否包括冷却、网络和硬件制造。Llama 2 和 OLMo 的估算边界不同，不应仅按公布的 tCO₂e 做排名。参考：[Llama 2](https://arxiv.org/abs/2307.09288)、[OLMo](https://arxiv.org/abs/2402.00838)。
+    回答框架：GPU-hours × 价格给出计算账单的一部分；deadline 先区分主循环吞吐 `R_active` 与含暂停的墙钟吞吐 `R_wall`，同口径下 `R_wall=R_active×a`，不能把 availability 重复计算。能源则要使用功率×时间、电表/PUE 与地点时间对应的电网碳强度，并说明是否包括冷却、网络和硬件制造。Llama 2 和 OLMo 的估算边界不同，不应仅按公布的 tCO₂e 做排名。参考：[Llama 2](https://arxiv.org/abs/2307.09288)、[OLMo](https://arxiv.org/abs/2402.00838)。
 
 57. loss 不下降时你怎么排查？
     考察点：数据、label、shape、loss、梯度、optimizer、学习率。
@@ -962,6 +970,10 @@
    考察点：总权重驻留、top-k expert FLOPs、容量丢弃、all-to-all、设备拓扑、batch 与尾延迟。
    回答框架：active 参数只是每 token 被调用的权重近似；推理或训练还要考虑全部 expert 权重是否驻留、token 到 expert 的 dispatch/combine、负载偏斜、batch padding/capacity、跨节点网络和 kernel 利用率。Switch、GShard、DeepSeek-V3 的结论来自不同任务、硬件和并行方案，不能用论文参数或单个 active 参数数字直接推算本地吞吐。应固定输入输出 token、batch、并发和设备拓扑，分别测 tokens/s、P95/P99、显存、overflow、每 expert 负载和通信时间。
 
+31R. 为什么 active KV payload 和 prefix-cache working set 不能用同一个容量数字？
+   考察点：活动请求状态、可复用前缀、trace、淘汰策略、coverage、分页槽位和租户隔离。
+   回答框架：active KV 保存当前请求继续生成所需的状态，先按活跃请求的真实上下文和每 token 字节数估算，再加 block 尾槽与元数据；prefix working set 则按请求 trace、前缀重合、LRU 等策略和目标 coverage 估算未来复用所需的驻留量。两者的时间范围、淘汰语义和分母不同；KVSET 的 request coverage 也不等同于普通 request hit rate。多租户场景还要先确定授权命名空间，不能为了扩大 hit rate 取消 cache salt 或权限边界。
+
 32. 什么是 causal mask？
    考察点：下三角 mask、未来 token、attention scores、softmax。
    回答框架：causal mask 防止当前位置看到未来 token，通常在 softmax 前把未来位置置为 `-inf`。
@@ -1047,7 +1059,7 @@
 1. 如何训练一个 7B 模型？
 2. loss spike 怎么 debug？
    考察点：首次异常 step、rank/sample 差异、forward/backward/update、Adam 状态、固定 batch 反事实。
-   回答框架：先保存异常前 checkpoint、样本与 tokenized batch、mask、每 rank 的 loss numerator/有效 token 数、梯度、`m_t/v_t`、scheduler/scaler、RNG 和 data cursor。固定 batch 重放，按 forward、backward、optimizer update 分段定位；单 rank 异常先查本地数据和 decode，全 rank 同时异常再查全局更新、并行和恢复。若 layer-wise 梯度与 `v_t` 的先后变化符合论文假说，再分支测试 `beta2`/`epsilon`；Molybog 等与 Bai 等提出的机制解释不同设置，不能把 loss spike 一概归因于 Adam 或坏数据。
+   回答框架：先保存异常前 checkpoint、样本与 tokenized batch、mask、每 rank 的 loss numerator/有效 token 数、梯度、`m_t/v_t`、scheduler/scaler、RNG 和 data cursor。固定 batch 重放，按 forward、backward、optimizer update 分段定位；单 rank 异常先查本地数据和 decode，全 rank 同时异常再查全局更新、并行和恢复。若 layer-wise 梯度与 `v_t` 的先后变化符合论文假说，再分支测试 `beta2`/`epsilon`。若训练长期平稳后出现迟发 spike，且输出 logits 均值/尺度持续增长，可在同一 hidden states 上比较 BF16 与 FP32 输出头的 logits RMS 误差和 softmax KL；这是 2026 年小模型长程过训练预印本提出的诊断路径，不是通用根因或默认修复。Molybog、Bai 与有限精度论文对应不同机制，不能把 loss spike 一概归因于 Adam、数值精度或坏数据。
 3. 如何检测 benchmark contamination？
    考察点：候选文本重叠、人工确认、模型行为信号、评测集新鲜度与覆盖边界。
    回答框架：可见训练语料先做 exact、n-gram 和近似匹配，候选须核对来源和答案结构；语义相似本身不证明模型训练时见过，也不证明记住答案。Oren 等人的黑盒顺序似然检验依赖可交换题集及似然访问；未检出不能证明无污染。PaCoST 比较原题和改写题的配对置信度，可提供 benchmark 级潜在污染信号，但不能定位具体训练样本。时间切分、私有 holdout 和数据血缘可补足不同环节，也各有前提。分别报告扫描覆盖、候选、确认、unknown、调参暴露和保留集结果；PALOMA 的 PPL 不是下游任务能力分数。
@@ -1171,13 +1183,13 @@
     考察点：同模型/数据/预算、独立超参搜索、更新尺度、训练终点、tokens/FLOPs/墙钟时间。
     回答框架：固定模型、tokenizer、数据顺序或可比采样、精度、并行栈和目标质量；每种 optimizer 分配同等搜索预算，不盲目复用 AdamW 学习率/decay。记录实际参数分组、update RMS、状态显存、单步耗时、tokens/s、总 FLOPs 与达到目标质量的总时间，并在最终预算评估。中间 checkpoint 可能因 decay 排名翻转；ICLR 2026 对照说明调参与评估预算本身就是实验变量。
 
-34. Molybog 等人的 Adam instability 分析与 adaptive-preconditioner decoupling 论文，分别解释了什么现象？
-    考察点：时间相关梯度估计、Adam 更新范数/方向、二阶矩 `v_t`、梯度方向曲率、证据范围。
-    回答框架：Molybog 等从大规模训练快照分析梯度估计的时间相关性，指出 Adam 更新可能变大并与下降方向弱相关；Bai 等追踪 `v_t` 与当前 `g_t^2` 的失配，并用预条件 Hessian 的梯度方向曲率提出另一种 spike 机制。前者有 7B—546B 训练观测，后者包含约 10M 合成任务和 187M/100B-token LLaMA 结构实验；两者都不能证明所有 spike 的单一根因，第二篇的严格理论限于一维二次目标。
+34. Molybog、Bai 与输出头有限精度研究，分别解释了什么 loss spike 机制？
+    考察点：时间相关梯度估计、Adam 更新范数/方向、二阶矩 `v_t`、输出 logits 均值漂移、BF16 量化误差与研究规模边界。
+    回答框架：Molybog 等从大规模训练快照分析梯度估计的时间相关性，指出 Adam 更新可能变大并与下降方向弱相关；Bai 等追踪 `v_t` 与当前 `g_t^2` 的失配，并用预条件 Hessian 的梯度方向曲率提出另一种 spike 机制；Chen 等提出 Adam 输出头坐标预条件可导致均值漂移，有限精度在大 logit 幅值下丢失类别差值，可能形成迟发 time-bomb spike。前者有 7B—546B 训练观测，Bai 等包含约 10M 合成任务和 187M/100B-token LLaMA 结构实验；有限精度主对照为 28M 模型、16B tokens、peak LR 0.1 和约 28 倍 Chinchilla token 预算。三者是不同假说；有限精度结果对自然的大模型生产训练是否迁移仍未知，不能当成普遍根因或直接处方。
 
-35. global norm clipping、降低 `beta2`、SPAM 和 GradientStabilizer 分别改动什么？
-    考察点：整体范数、二阶矩时间响应、逐坐标异常代理、周期状态重置、方向保留、超参和额外成本。
-    回答框架：global clipping 统一缩小超阈值梯度，简单但阈值和局部异常难诊断；降低 `beta2` 让二阶矩更快响应新梯度，但会改变优化器噪声与调参条件；SPAM 用 `g_i^2/V_i` 在线代理限幅并周期性重置一、二阶矩，增加阈值、间隔、warmup 且丢弃部分历史；GradientStabilizer 用运行统计改幅值并保留方向，仍可能沿错误方向更新。需在同一 checkpoint、数据顺序和质量目标下比较，报告 PPL/目标能力、收敛稳定性、step time 和额外成本。
+35. global norm clipping、AdaGC、降低 `beta2`、SPAM 和 GradientStabilizer 分别改动什么？
+    考察点：整体范数、逐张量历史阈值、二阶矩时间响应、逐坐标异常代理、周期状态重置、方向保留、超参和额外成本。
+    回答框架：global clipping 统一缩小超阈值梯度，简单但阈值和局部异常难诊断；AdaGC 为每个参数张量用历史裁剪范数 EMA 设动态阈值，论文的 spike score 和并行归约范围受实验定义约束；降低 `beta2` 让二阶矩更快响应新梯度，但会改变优化器噪声与调参条件；SPAM 用 `g_i^2/V_i` 在线代理限幅并周期性重置一、二阶矩，增加阈值、间隔、warmup 且丢弃部分历史；GradientStabilizer 用运行统计改幅值并保留方向，仍可能沿错误方向更新。需在同一 checkpoint、数据顺序和质量目标下比较，报告 PPL/目标能力、收敛稳定性、step time 和额外成本。
 
 36. 看到梯度随层数变大，如何区分优化器问题与归一化架构问题？
     考察点：Post-LN/Pre-LN、DeepNorm、Peri-LN、逐层激活/梯度 RMS、初始化和可迁移性。
@@ -1268,24 +1280,24 @@
     考察点：verifiable reward、数学/代码/可执行任务、rollout、GRPO/PPO 类更新、冷启动、蒸馏、偏好监督边界。
     回答框架：DPO 主要利用离线偏好 pair 学“哪个回答更好”；RLVR 面向可自动验证任务，用答案校验、单元测试、规则或环境反馈给 rollout 奖励，更适合数学、代码、工具和可判定推理任务。DeepSeek-R1 的公开案例价值在于展示冷启动、可验证奖励 RL、采样和蒸馏如何组合提升 reasoning。局限是 reward 必须可靠，容易偏向可验证题型，过程质量、安全和不可验证专业任务仍需要 SFT、偏好、人审和评估门禁补上。
 
-20D. GRPO、DAPO、DrGRPO、GSPO 和 DCPO 分别改动了哪一环？如何公平比较它们？
+20D. GRPO、DAPO、DrGRPO、GSPO 和 DCPO 分别改动了哪一环？DHPO/GAPO 应如何定位，怎样公平比较这些方法？
     考察点：组内 advantage、critic、reward 方差、response 长度分母、token/sequence ratio、clipping 单位、dynamic sampling、历史统计、RUR 与实验协议。
-    回答框架：GRPO 用同 prompt 的 group reward 减少独立 critic；DAPO 组合 Clip-Higher、动态采样、全局 token loss 和 overlong 处理；DrGRPO 去掉 response-length 与 group-standard-deviation normalization，以固定生成预算作分母；GSPO 改用长度归一化的 sequence ratio 并在 response 级 clipping；DCPO 依据旧 token probability 动态设界，配合 SAS 和 response 内 OTM。它们处理的是不同失败模式，不能只按公开分数排序。公平实验要固定 base checkpoint、数据/模板、verifier、reward、采样次数、最大生成长度、温度/top-p、训练 token 和硬件，并同时报告 accuracy、长度切片、非零 advantage/RUR、clipping 率、成本和通用/安全回归。DAPO 的 30→50 是逐步累积的 recipe 分析，DCPO 的 RUR 也不等于正确率；都不能直接外推为通用排名。参见[第五册第十一章](book-05-llm-training/chapters/11-后训练与对齐训练.md)。
+    回答框架：GRPO 用同 prompt 的 group reward 减少独立 critic；DAPO 组合 Clip-Higher、动态采样、全局 token loss 和 overlong 处理；DrGRPO 去掉 response-length 与 group-standard-deviation normalization，以固定生成预算作分母；GSPO 改用长度归一化的 sequence ratio 并在 response 级 clipping；DCPO 依据旧 token probability 动态设界，配合 SAS 和 response 内 OTM。DHPO 与 GAPO 分别探索 token/sequence ratio 混合和按 group advantage 自适应 clipping，目前是早期预印本候选，不能当作默认基线。它们处理的是不同失败模式，不能只按公开分数排序。公平实验要固定 base checkpoint、数据/模板、verifier、reward、采样次数、最大生成长度、温度/top-p、训练 token 和硬件，并同时报告 accuracy、长度切片、非零 advantage/RUR、clipping 率、成本和通用/安全回归。DAPO 的 30→50 是逐步累积的 recipe 分析，DCPO 的 RUR 也不等于正确率；都不能直接外推为通用排名。参见[第五册第十一章](book-05-llm-training/chapters/11-后训练与对齐训练.md)。
 
 20E. 领域模型应该继续预训练、做 SFT、接 RAG，还是做 RL？
     考察点：领域语言分布、任务流程、动态事实、偏好排序、可验证结果、权限边界、回归评估。
-    回答框架：先把失败切成语言/术语、工作流、知识时效、答案偏好、可计算结果和权限问题。DAPT/TAPT 的早期研究支持继续训练能改善特定领域分类，但基于 RoBERTa，不能直接当成生成式 LLM 证据。FinGPT 用 LoRA 降低金融适配参数量，并把股价变化当作弱反馈；TIMER 用带时间戳的 EHR 指令让 SFT 学纵向时间推理；DeepSeekMath 组合领域语料、数学指令和可判定结果奖励。FinBen 与 MedAlign 则说明术语/考试题增益不自动迁移到复杂金融问答或临床工作流。固定底模和训练预算，对比 RAG/工具基线、SFT、偏好或 RLVR，并测能力回归、风险和单位成功成本。参见[第五册第十五章](book-05-llm-training/chapters/15-领域专家sft与rl.md)。
+    回答框架：先把失败切成语言/术语、工作流、知识时效、答案偏好、可计算结果和权限问题。DAPT/TAPT 的早期研究支持继续训练能改善特定领域分类，但基于 RoBERTa，不能直接当成生成式 LLM 证据。FinGPT 把股价变化当作弱反馈，且同一预印本对不同实验配置报告了不同 LoRA 参数量；TIMER 用带时间戳的 EHR 指令让 SFT 学纵向时间推理；FINDAP 在一个 Llama 3 8B 配方中联合 CPT+IT 后做过程/结果偏好对齐，13/17 新任务改善不能外推为跨家族结论；2026 年 ICD 编码预印本展示 SFT 教格式、样本级 F1-GRPO 改善特定代码集合预测，但只覆盖两种 Qwen 底模和 MIMIC 数据。DeepSeekMath 的可判定奖励也只支持数学设置。FinBen 与 MedAlign 说明术语/考试题增益不自动迁移到复杂金融问答或临床工作流。固定底模和训练预算，对比 RAG/工具基线、SFT、偏好或 RLVR，并测能力回归、风险和单位成功成本。参见[第五册第十五章](book-05-llm-training/chapters/15-领域专家sft与rl.md)及[研究证据记录](research/domain-specific-post-training-2026.md)。
 
 20F. FinGPT 的 RLSP 和 DeepSeekMath 的 RLVR 都叫反馈训练，它们的信号有什么区别？
     考察点：市场弱标签、混杂变量、结果可判定、verifier、离线回测、外推范围。
     回答框架：FinGPT/RLSP 用新闻后的股价变化构造标签，获取便宜、更新快，但价格同时受利率、市场情绪、公司公告和时间窗口等因素影响，不能证明新闻因果影响，也不等于 PPO/GRPO 在线环境奖励。DeepSeekMath 对答案可自动判定的数学题使用结果奖励；论文中 7B MATH 从 SFT 的 46.8% 到 RL 的 51.7%，GSM8K 从 82.9% 到 88.2%，这些数字绑定该模型和数据。市场标签需要无泄漏时间切分、交易成本和简单基线；RLVR 需要检查答案 parser/verifier 的覆盖及可钻空子程度。两者都不能仅凭 reward 上升证明真实业务成功。
 20G. verifier 通过率和训练 reward 都上升，为什么仍不能直接说模型学会了目标能力？
     考察点：verifier 的可观测边界、extensional 与结构泛化、优化器/底模先验、独立评测和归因对照。
-    回答框架：先区分“规则写得正确”“产物满足用户目标”和“策略获得可迁移能力”。固定样例通过只验证已观测实例；Isomorphic Perturbation Testing 用保留逻辑关系的对象置换检查是否只枚举样例标签。ImpossibleBench 则故意让测试和自然语言规格冲突，用来发现 Agent 是否迎合可见测试。过程奖励也不是无误差真值：PRM800K 在 MATH 候选选择任务中报告 PRM 78.2%、ORM 72.4%、多数投票 69.6%，不是在线 RL 的因果比较。ICML 2026 的 Spurious Rewards 又显示随机 reward 在 Qwen2.5-Math-7B 的 MATH-500 上也带来 21.4 个百分点增益，说明须增加随机/打乱 reward dummy 对照，并在不同底模、独立新题和固定训练预算下比较。引用每项结果时都要说清任务、模型和指标；不能把不同论文的分数排成排行榜。参见[第五册第十六章](book-05-llm-training/chapters/16-rlvr与可验证奖励.md)。
+    回答框架：先区分“规则写得正确”“产物满足用户目标”和“策略获得可迁移能力”。固定样例通过只验证已观测实例；Isomorphic Perturbation Testing 用保留逻辑关系的对象置换检查是否只枚举样例标签。ImpossibleBench 则故意让测试和自然语言规格冲突，用来发现 Agent 是否迎合可见测试；论文报告 GPT-5 在 full-scaffold ONEOFF-SWEBENCH 的通过率为 76%，在 minimal-scaffold ONEOFF-LIVECODEBENCH 为 2.9%，两套设置不同，不能当作模型通用排名，也不是 RLVR 训练效应。过程奖励也不是无误差真值：PRM800K 在 MATH 候选选择任务中报告 PRM 78.2%、ORM 72.4%、多数投票 69.6%，不是在线 RL 的因果比较。ICML 2026 的 Spurious Rewards 又显示随机 reward 在 Qwen2.5-Math-7B 的 MATH-500 上也带来 21.4 个百分点增益，说明须增加随机/打乱 reward dummy 对照，并在不同底模、独立新题和固定训练预算下比较。引用每项结果时都要说清任务、模型和指标；不能把不同论文的分数排成排行榜。参见[第五册第十六章](book-05-llm-training/chapters/16-rlvr与可验证奖励.md)。
 
 20H. MiniLLM、GKD 和近年的 OPD 方法分别解决什么问题？如何把论文机制、结果和改进边界讲清楚？
     考察点：state distribution、local conditional KL、sequence-level reverse KL、score-function estimator、temporal credit、variance baseline、teacher reliability、peer rollout、独立评估。
-    回答框架：MiniLLM 优化学生完整序列分布的 reverse KL，用序列级 policy-gradient 给早期动作分配后续信用，并加入教师混合采样与长度归一化；GKD 把学生生成数据占比和条件 divergence 拆开，允许依任务选择 forward/reverse KL 或 JSD。REOPOLD 用 reward clipping、熵驱动 token 筛选和分阶段训练处理重尾、近零信号及熵塌缩；EOPD 依教师熵切换 KL 方向，vOPD 用动作无关 baseline 降采样方差，RG-OPD 用 verifier gate 教师信号，MOPD 让 self-teacher 看同题的成功/失败 peer。Qwen3 技术报告在同一 off-policy-distilled Qwen3-8B 起点上报告 OPD 的 AIME'24 74.4、AIME'25 65.5，RL 为 67.6/55.5，GPU-hours 为 1,800/17,920；这是单份报告设置，不足以推出 OPD 普遍优于 RL。答题时还要说明所选方法的作用位置、增加的计算或引入的新误差，并提出同底模、同教师、同 rollout/预算和独立 benchmark 的消融。参见[第五册第十七章](book-05-llm-training/chapters/17-on-policy-distillation.md)。
+    回答框架：MiniLLM 优化学生完整序列分布的 reverse KL，用序列级 policy-gradient 给早期动作分配后续信用，并加入教师混合采样与长度归一化；GKD 把学生生成数据占比和条件 divergence 拆开，允许依任务选择 forward/reverse KL 或 JSD。REOPOLD 用 reward clipping、熵驱动 token 筛选和分阶段训练处理重尾、近零信号及熵塌缩；EOPD 依教师熵切换 KL 方向，vOPD 用动作无关 baseline 降采样方差，RG-OPD 用 verifier gate 教师信号；成功/失败 peer 多 rollout 路线让 self-teacher 看同题的 peer 证据，引用时写论文全名，避免与 Multi-Teacher OPD 的 MOPD 缩写冲突。还要区分三个新目标：OPRD 在学生 rollout 上对齐隐藏表示，OPTD 对齐层间 log-prob 变化，TF-OPD 用共享底模专家 rollout 的二阶矩做无梯度最小二乘合并，后者不等同于当前学生严格 on-policy 更新。Qwen3 技术报告在同一 off-policy-distilled Qwen3-8B 起点上报告 OPD 的 AIME'24 74.4、AIME'25 65.5，RL 为 67.6/55.5，GPU-hours 为 1,800/17,920；这是单份报告设置，不足以推出 OPD 普遍优于 RL。小规模研究还提示要分开测解题、答案正确和停止/收束：思考模式的学生有时到达正确答案后仍继续生成，该发现受原论文设置限制。答题时说明方法作用位置、成本或新误差，并提出同底模、同教师、同 rollout/预算和独立 benchmark 的消融。参见[第五册第十七章](book-05-llm-training/chapters/17-on-policy-distillation.md)。
 
 21. Reward Model 学的是什么？
    考察点：prompt+response、标量 reward、偏好排序、chosen/rejected。
@@ -1649,6 +1661,26 @@
     考察点：累计概率质量、surprisal/熵距离、相对最大概率阈值、研究任务、调参公平性。
     回答框架：先按同一 toy 分布手算三种候选集合，再说明它们的规则解决的是不同排序/截断问题。Locally Typical 的论文结果来自摘要和故事生成；min-p 原论文的优势主张受到后续人评、统计和超参数控制复核的质疑。应把规则定义与质量结论分开，在同模型、任务、解码预算和评价协议下复测，不能只凭一篇论文宣布通用胜者。
 
+36B. 为什么 processor 顺序和 top-k 并列规则也要进入解码配置？
+    考察点：temperature/top-p 非交换、grammar mask、空候选、tie-break、seed 的作用范围。
+    回答框架：对 `[2,1,0]` 分别用 T=1 和 T=2 做 top-p=0.85，说明候选集合会因温度改变；再给第 k 位并列的 logits，比较不同 tie-break 的 token 身份。记录 processor 顺序、并列策略、runtime revision 和候选摘要；seed 只能约束可重复的随机选择，不能替代这些前置条件。
+
+36C. strict structured output 是否意味着工具调用安全且业务正确？
+    考察点：JSON parse、schema、语义、refusal/incomplete、授权、版本化 grammar 与执行器。
+    回答框架：strict 只对指定 API 支持的 schema 子集承诺结构符合，不证明事实、金额、引用或权限。将 parse/schema/semantic/auth/execution 分开计分；generation trace 记录 schema hash，工具提交前按当前身份和策略重新授权。refusal、incomplete、编译失败和无合法 token 不进入普通 schema 成功分母。
+
+36D. 服务如何区分 EOS、stop string、length 与取消？
+    考察点：finish reason、跨 chunk stop、增量缓冲、max token、终态映射。
+    回答框架：EOS 是模型 token；stop 是服务协议，可能跨 token/chunk；length 是硬上限，不能把像 JSON 的前缀当作完整对象；cancel/timeout 是外部或运行时中止。维护 stop 前缀缓冲并定义 stop 文本是否发送，trace 保留原始 provider/runtime reason，再映射到内部状态。
+
+36E. speculative decoding 的“接受”如何定义，batch 下如何验收？
+    考察点：target 分布精确采样、greedy 等价、relaxed/typical acceptance、ragged 前缀、position/KV 对齐。
+    回答框架：rejection sampling 在算法假设下保持 target sampling 分布；greedy 检查 token 一致，relaxed/typical/tree 接受不能因此声称精确分布等价。batch 中请求接受长度不同，要检查 position IDs、mask 和 KV 回滚；同时看目标分布/greedy 正确性、接受长度、验证成本、显存、TPOT 与任务成功。
+
+36F. reasoning effort 与 temperature 分别控制什么，怎样比较成本？
+    考察点：runtime 档位、随机性、thought-token 可见性、输出上限、P95、单位成功成本。
+    回答框架：temperature 调整下一 token 分布，effort/thinking level 是 provider/model 相关的运行时控制面，不代表固定 token 数或跨 provider 等价。固定模型、prompt、工具、测试集和输出 cap，对照正确率、usage 可见字段、P95、incomplete 与成本；分别报告总成本/成功数和增量成功成本。
+
 37. 多 token 预测上线时为什么不能只看接受率？
     考察点：proposal 成本、tree attention、KV Cache、batching、尾延迟。
     回答框架：接受率只表示候选质量，还要看候选生成成本、验证成本、显存占用、batch 调度、P95/P99 延迟和不同任务分布下的稳定性。
@@ -1757,6 +1789,10 @@
     考察点：模型路由、prompt compression、prefix/response cache、speculative decoding、量化和 serving scheduling 的代表方案、成本边界和质量门禁。
     回答框架：先找成本阶段，再按机制选方案。例如 FrugalGPT 的 cascade 以串行延迟换少调用强模型，RouteLLM 用偏好 router 直接选择强/弱模型但依赖数据域匹配；LongLLMLingua 做 query-aware 长上下文压缩，LLMLingua-2 用蒸馏 token classifier 提速；GPTQ/AWQ 优化权重，SmoothQuant 优化 W8A8 路径，KIVI 优化 KV Cache。Sarathi-Serve 通过 chunked prefill 缓解长 prompt 阻塞，DistServe 分离 prefill/decode 但有 KV handoff 和资源切分成本。最终在同一 trace、硬件和 SLO 下同时测 cost/success、TTFT/TPOT、P99、goodput、质量和安全。
 
+58A. 路由器的总成本/准确率曲线看起来很好，为什么仍可能伤害最难的任务？
+    考察点：难度分层、实际输出长度偏差、来源泄漏、匹配成本随机基线、预印本边界。
+    回答框架：总 Pareto 指标可能更奖励升级“中等难题”或短输出，而最难题即使用强模型也常失败，因而被模型平均成本掩盖；来自不同数据集的来源特征也可能让路由器学会识别数据集，而不是判断问题难度。应加入匹配成本的随机模型选择基线、easy/medium/hard 切片、来源内表现和输出长度敏感性分析，并按任务设置质量底线。[Dynamic LLM Routers are Often Misguided](https://arxiv.org/abs/2610.02762v1) 在单轮英文 benchmark 中报告了这类现象，不足以证明所有生产路由器无效。
+
 59. 为什么最便宜模型不一定最划算？
     考察点：成功率作为分母、失败调用、fallback、人工升级和任务成功契约。
     回答框架：总成本需覆盖失败尝试、重试、人工和必要的共享资源分摊，再除以满足业务契约的成功数。例：单次成本从 0.010 降到 0.007，但成功率从 90% 降到 60%，每成功任务成本由 0.0111 升到 0.0117；零成功时指标未定义。不能把 benchmark 分数直接当成功概率。
@@ -1788,6 +1824,12 @@
 66. 端侧模型上线前要评估什么？
     考察点：设备分层、冷启动、tokens/s、内存、功耗、发热、崩溃率、更新。
     回答框架：要按设备档位评估质量、冷启动、首 token、tokens/s、峰值内存、电量、发热、降频、崩溃率、离线可用、模型更新和回滚。
+
+### 第六册第十一章：监控、评估与安全
+
+1. Agent 红队评测中 ASR 为 0，能否据此说系统安全？如何把任务效用、样本量和发布动作放进同一判断？
+   考察点：攻击成功定义、分母、单侧零事件上界、任务完成、工具副作用、样本代表性、灰度硬门槛。
+   回答框架：先说明 `0/n` 只是该测试集的点估计；若 `n=1`，单侧 95% 上界仍为 95%，即使 `n=299` 且零事件，上界约为 0.997%，也依赖独立且代表目标威胁分布的样本。继续把每条攻击轨迹按“攻击成功/失败 × 用户任务完成/未完成”分成四格，避免把安全但无法完成任务当成有用的防御，也避免把危险动作已完成隐藏在正常效用里。最后核验服务端授权、工具提交状态和审计 trace，预先定义安全、任务成功、质量与延迟门槛；任一高风险门槛失败就暂停或回滚，不能用更好的吞吐抵消。研究实例的比例受[该 arXiv v1 预印本](https://arxiv.org/abs/2610.23254)中的小型 Agent、静态注入和 AgentDojo 任务约束。
 
 ### 第六册第十三章：生产系统设计
 
@@ -2293,7 +2335,7 @@
 
 110. 自动评估、人工评估和 LLM judge 如何组合？
      考察点：程序化验收、rubric、judge bias、开放任务。
-     回答框架：可执行任务优先程序化验收，例如测试、页面状态或文件检查；开放任务用人工 rubric；LLM judge 可做辅助分类、完整性和证据检查，但不能作为唯一裁判，尤其不能替代安全审计和工具验证。
+     回答框架：可执行任务优先程序化验收，例如测试、页面状态或文件检查；开放任务用人工 rubric；LLM judge 可做辅助分类、逐项完整性和证据检查，但不能作为唯一裁判。用独立人工 gold 按任务、风险和 rubric 类别校准；pairwise 评审应交换候选顺序，并用重复调用估计评审自身波动，这些重复调用不是新增独立人工证据。若用于系统排序，可再按人评质量差距切片；对 RAG 引用去偏，还要检查是否把真实质量差判成 Tie。高风险样本须保留人工复核和工具验证。若汇总用户偏好，先定义目标人群、地区、语言和使用场景；对过采样群体按预设目标比例后分层，同时报告组内结果和不确定性。
 
 111. Agent 成本和延迟为什么必须进评估报告？
      考察点：token、工具调用、重试、人工审阅、P95、单位成功成本。
@@ -2539,7 +2581,7 @@
 
 40. LLM judge 能否替代偏好标注？
     考察点：位置偏差、同源偏袒、校准样本、人类一致率、弃判与升级、高风险复核。
-    回答框架：LLM judge 可做初筛和排序建议，但要绑定模型、rubric、prompt 与版本；pairwise 候选顺序随机并交换复测，再用独立人评切片校准位置/风格偏差和弃判比例。低置信或高风险样本应升级人工，不能把单个 judge 分数当成偏好真值或安全批准。
+    回答框架：LLM judge 可做初筛和排序建议，但要绑定模型、rubric、prompt 与版本；pairwise 候选顺序随机并交换复测，再用独立人评切片校准位置/风格偏差和弃判比例。Rubric 评分还要分别检查分数档位顺序和多维标准顺序；减少位置偏差不保证人类一致度必然提高。若目标是映射到人工分数量尺，可锁定任务 rubric、核查文本证据，再仅用校准集拟合映射并在保留集评估。低置信或高风险样本应升级人工，不能把单个 judge 分数当成偏好真值或安全批准。
 
 40A. 为什么标注分歧不能一律当作噪声？
     考察点：任务欠说明、事实证据、响应风格、标注群体、tie/弃判、策略裁决。
@@ -3598,7 +3640,7 @@
 
 40ZZZK-A. 当前比较 Transformers、vLLM、SGLang、TensorRT-LLM、LMDeploy、llama.cpp 和 TGI 时，哪些过时描述最容易误导选型？
        考察点：reference generate 与 Transformers serve、vLLM V1、Radix Cache、TensorRT-LLM backend 变更、TurboMind/PyTorch 双后端、llama.cpp continuous batching、TGI maintenance mode、版本边界。
-       回答框架：先冻结比较日期和 release，再按执行路径逐项说明：Transformers `generate()` 是 reference，实验性 `transformers serve` 已有 continuous batching，适合范围不等于大规模生产；vLLM V1 的 API server、engine core、GPU worker 和 token-budget scheduler 不应与 V0 架构混说；SGLang 的重点是程序前端和 Radix Cache 复用；TensorRT-LLM 当前文档已将 PyTorch 作为唯一执行 backend，旧 TensorRT engine build/conversion 流程不能再当成当前默认部署步骤；LMDeploy 必须区分 TurboMind 与 PyTorch backend；llama.cpp server 支持并发 slots 和 continuous batching，但本地/边缘优势不意味着数据中心吞吐同等；TGI 当前处于 maintenance mode，存量迁移与新项目判断分开。最后说明能力表不能替代目标模型/硬件回放和同口径 workload benchmark。
+       回答框架：先冻结比较日期和 release，再按执行路径逐项说明：Transformers `generate()` 是 reference；v5.22.1 `transformers serve` 指南将其定位为轻量本地/自托管、中等负载服务，列出 continuous batching，并建议大规模生产评估 vLLM/SGLang，指南没有称其为 experimental；vLLM v0.32.0 V1 的 API server、engine core、GPU worker 和 token-budget scheduler 不应与 V0 架构混说；SGLang 的重点是程序前端和 Radix Cache 复用；截至 2026-10-26 的 TensorRT-LLM 迁移页说明 PyTorch 是唯一执行 backend，旧 TensorRT engine build/conversion 流程不能再当成当前默认部署步骤；LMDeploy 必须区分 TurboMind 与 PyTorch backend；llama.cpp `master` server 文档支持并发 slots 和 continuous batching，但本地/边缘优势不意味着数据中心吞吐同等；TGI 官方文档截至 2026-11-02 显示其处于 maintenance mode，存量迁移与新项目判断分开。最后说明能力表不能替代目标模型/硬件回放和同口径 workload benchmark。
 
 40ZZZK-B. 怎样设计一次能够比较推理引擎的 serving benchmark？
        考察点：开环/闭环到达、RPS 与 burstiness、长度分布、缓存冷热、TTFT/TPOT/ITL 口径、goodput、质量门槛、请求 trace。
@@ -3615,6 +3657,10 @@
 40ZZZM-A. FastServe、Sarathi-Serve 和 DistServe 分别解决什么调度瓶颈？
        考察点：head-of-line blocking、token-level preemption、skip-join MLFQ、chunked prefill、stall-free schedule、prefill/decode disaggregation、KV state transfer、TTFT/TPOT goodput、论文版本。
        回答框架：FastServe 针对长生成任务阻塞交互请求，使用 token 级抢占、skip-join 多级反馈队列和 KV 主机换入换出；代价是状态恢复与互联传输，NSDI 2026 正式论文报告的倍率应与早期 arXiv 版本区分。Sarathi-Serve 针对长 prefill 打断 decode，用 chunked prefill 和 stall-free schedule 控制单轮工作；chunk size 会改变 TTFT、TPOT 和 kernel 效率。DistServe 针对两阶段共置时的相互干扰和资源计划绑定，把 prefill/decode 放在不同 GPU 池，联合调配资源、并行策略和 KV 传输位置；它增加跨池路由和 state transfer。三者分别是请求抢占、阶段内分块、阶段间资源隔离，可互补但不是同一方法；论文倍率不能跨模型、GPU、SLO 和 baseline 排名。
+
+40ZZZM-B. P/D 分离后，为什么长 prompt 仍可能拖慢短 prompt？固定 token budget 又为什么不一定适合所有负载？
+       考察点：prefill-pool 内部干扰、LAPS 双队列、P-PAS 压力自适应预算、长短公平、TTFT/TPOT、预印本证据边界。
+       回答框架：先划清两个层次：DistServe 将 prefill 与 decode 拆池，减少阶段间争用；长 prompt 与短 prompt 仍可能共享 prefill pool，因此阶段内长度异质性依然存在。LAPS 预印本按长短 prompt 分队列，并为短请求组织 length-aware batch；代价是长队列可能积压、阈值和 batch-wait window 需要按 trace 调整。P-PAS 预印本研究 max batched tokens 的压力依赖：较大预算在低压时可能让 prefill 更有效，较小预算在高 prefill/decode 并发时可能减少对 decode 的干扰；它不是公平性算法，也不提供适用于所有模型/GPU 的固定阈值。最后设计固定到达 trace 的回放，逐个改变 P/D 池、队列边界和 token budget，同时看短请求 TTFT、长请求最大等待、TPOT P99、goodput、KV 与执行开销；两个预印本的不同指标和配置不能横向排名。
 
 40ZZZN. 如何设计模型路由：模型选择、能力路由、成本路由和降级路由？
        考察点：request intent profile、model capability profile、permission candidate filter、cost budget policy、latency SLO policy、quality safety policy、fallback chain governance、canary routing stability、realtime health load、route trace coverage、degrade policy control、route config versioning、model routing gate。
@@ -3802,6 +3848,14 @@
 40ZZZZL20C. GPTQ、AWQ、SmoothQuant 和 TurboQuant 分别改变了量化链路的哪一步？
        考察点：quantization target、activation outlier、second-order compensation、equivalent scaling、KV inner-product distortion、calibration contract、kernel path、paper metric boundary。
        回答框架：先分对象：GPTQ/AWQ主要是 weight-only，SmoothQuant 是 W8A8 activation outlier 迁移，TurboQuant 处理 K/V 表示及 attention 内积近似。GPTQ 用校准输入近似二阶统计，把已量化列的误差补偿给剩余权重；AWQ 从 activation channel 统计选择等价缩放，不是将显著权重保留成 FP16；SmoothQuant 用通道变换把 activation 动态范围的一部分迁移到权重；TurboQuant 的随机旋转/标量量化和 QJL 属于 cache 内积路线。比较时说明 GPTQ perplexity、TurboQuant 论文向量/任务质量、vLLM serving TPOT/TTFT 是不同指标；报告 bit/group/scale、硬件和 runtime 后，再设计同一模型与 workload 的 accuracy/latency/throughput 消融。
+
+40ZZZZL20D. SliderQuant 和 AAAC 相对 GPTQ/AWQ 改变了 PTQ 的哪一部分，论文能否证明 runtime 已支持？
+       考察点：layer sensitivity、inter/intra-layer sliding quantization、adaptive scalar codebooks、activation-weighted reconstruction、selection metadata、conference/workshop boundary、artifact/kernel compatibility。
+       回答框架：GPTQ/AWQ主要围绕固定低比特格点调整误差补偿或激活敏感缩放；SliderQuant按作者报告的首末层及浅/深层敏感性设计层间滑窗，并增量量化层内窗口，来源为[ICLR 2026 官方论文页](https://proceedings.iclr.cc/paper_files/paper/2026/hash/b08ac1692309611b6f1adce96e96816f-Abstract-Conference.html)。AAAC每层学习两个标量 codebook，让组按 activation-weighted reconstruction error 选表；当选择组与 scale 组大小相同，可把选择位放入正 scale 未使用的符号位，分组不一致时可能出现额外 metadata，来源为[AAAC 预印本](https://arxiv.org/html/2605.08692v2)。AAAC 属于 ICML 2026 AdaptFM workshop 论文。两种方法改变的是量化组织或重建格点，不自动提供目标 runtime 的格式解析、kernel 或生产性能证据；部署前仍需同一模型和任务检查质量、artifact 布局、scale、模块覆盖、目标 kernel 与延迟。
+
+40ZZZZL20E. Active KV 量化、cold-page NVFP4 和 TriAttention 分别改变 KV 的什么？
+       考察点：active cache dtype、cold-tier representation、token retention、attention-visible state、offload/onboard lifecycle、calibration and backend requirements。
+       回答框架：active KV 量化直接改变 GPU 上正在读写的 cache 表示和 attention 数值路径；TensorRT-LLM cold-page NVFP4 只在 Page 移到 Host/Disk 时编码，回到 GPU 前恢复 runtime KV dtype；TriAttention周期性选择并物理压紧生成 KV token，减少保留的历史项而不是降低每项位宽。访问日官方文档列出的路径有 backend、KVCM V2、GPU compute capability 及 cold-page 的 Host/Disk cache、TriAttention 的离线 calibration 等条件，详见[TensorRT-LLM KV Cache Compression](https://nvidia.github.io/TensorRT-LLM/features/kv-cache-compression.html)。回答要把这三类机制分开，并用同一请求集测任务质量、active/cold 容量、TTFT、TPOT、cache 恢复和适用结构；官方接口存在不代表目标部署已经验证。
 
 40ZZZZL21. Continuous Batching 和 iteration-level scheduling 到底在调度什么？
        考察点：continuous batching audit、iteration level scheduling、dynamic request join、dynamic request exit、decode first scheduling、continuous token budget、scheduler KV budget、deferred scheduling reason、static batch hole、continuous batching gate。
@@ -4135,7 +4189,7 @@
 8. DenseFormer、DCA、AttnRes 与 HC/mHC 分别在改哪条信息路径？回答时应区分深度方向聚合和多路残差流混合，并说明各自证据来自什么实验设置。
    回答框架：DenseFormer 做 depth-weighted averaging，DCA 与 AttnRes 用可学习的深度聚合选择历史层表示；HC 扩展残差流并学习混合，mHC 再约束残差混合矩阵。它们都不等于 token 维的长上下文注意力；DCA 的速度结果、AttnRes 的 scaling 实验和 mHC 的 wall-time 不能跨论文直接比较。
 
-## 2026-09 GPT-6 Astra 与运行时预算
+## 2026-11 GPT-6 Astra 与运行时预算
 
 1. GPT-6 Astra 的 context window、maximum input 和 maximum output 应如何区分？官方是否单独发布了 922K maximum input？
    考察点：容量账本、输入输出耦合、工具结果和运行时状态。
@@ -4199,6 +4253,14 @@
 16. 为什么每响应 token 上限不能代替长任务的工具预算？
     考察点：自动 continuation、异步任务、全局花费、重试与验证。
     回答框架：每个 response 的 token/tool 限制可分别生效，但一个 job 会跨多轮 response、steering continuation、工具调用、retry、verifier 和人工接管。job coordinator 需要强制总费用、调用数、并发数、超时、deadline 和副作用门禁；并行可减少部分等待时间，不自动减少调用费和模型消费结果的 token。
+
+17. Standard、未缓存输入 272,000 与 272,001 token，输出固定 10,000 token，费用如何变化？
+    考察点：边界条件、整次请求费率、输入/输出单价。
+    回答框架：272,000 时约 $3.22（$2.72 输入+$0.50 输出）；272,001 时整次请求切到长上下文费率，约 $6.19002（$5.44002 输入+$0.75 输出）。不能只对超过门槛的 1 token 加价；该算例未计缓存类别、工具调用、地域附加费和合同折扣。
+
+18. Async tool calling、Background mode 和 mid-turn steering 分别异步处理什么？
+    考察点：response ID、tool `call_id`/task handle、steering ID 和状态所有权。
+    回答框架：async tool calling 由应用运行 function/custom tool，需登记唯一 task handle 并用原 call ID 回传结果；Background mode 让兼容的 Responses 生成任务在后台运行并由应用轮询 response 状态，需按当前文档核验模型资格；steering 通过同一 WebSocket 给运行中的 Responses 追加输入，accepted 只代表排队，后续是否自动 continuation 取决于是否需要应用工具结果或审批。三者不能共用一个 job ID 或互相替代。
 
 ## 2026-09 GLM-5.3 长任务与验证器
 
@@ -5303,11 +5365,11 @@
 
 6. **“mixed RL stage 被 OPD 替换”是否表示 DeepSeek V4 后训练没有 RL？**
 
-   不是。技术报告先用 SFT 和 GRPO 训练领域专家；OPD 替换的是后续把多种领域能力统一到一个学生模型的 mixed-RL 阶段。报告没有公开全部领域 checkpoint 与训练超参数，因此不能补写成精确 recipe。参见[第五册第十八章](book-05-llm-training/chapters/18-deepseek-v4领域专家与统一蒸馏.md)及[技术报告 §5.1](https://arxiv.org/html/2606.19348#S5.SS1)。
+   不是。技术报告先用 SFT 和 GRPO 训练领域专家；OPD 替换的是后续把多种领域能力统一到一个学生模型的 mixed-RL 阶段。报告没有公开全部领域 checkpoint 与训练超参数，因此不能补写成精确 recipe。参见[第五册第十八章](book-05-llm-training/chapters/18-deepseek-v4领域专家与统一蒸馏.md)及[技术报告 §5.1](https://arxiv.org/html/2606.19348v1#S5.SS1)。
 
 7. **DeepSeek V4 为什么报告选择 full-vocabulary reverse-KL，而不是只匹配学生采样到的 token？**
 
-   作者称，常见 sampled-token KL 近似把 stop-gradient 的 teacher/student log-ratio 当 policy loss 的逐 token advantage，资源较省但梯度估计方差高；V4 选择对完整词表 logits 求 KL，以降低该前缀上动作抽样带来的噪声。学生访问哪些前缀仍然来自 rollout，因此状态分布方差还在；报告也没有给出同配置下 sampled 与 full-vocabulary OPD 的独立受控消融。参见[技术报告 §5.1.2](https://arxiv.org/html/2606.19348#S5.SS1)。
+   作者称，常见 sampled-token KL 近似把 stop-gradient 的 teacher/student log-ratio 当 policy loss 的逐 token advantage，资源较省但梯度估计方差高；V4 选择对完整词表 logits 求 KL，以降低该前缀上动作抽样带来的噪声。学生访问哪些前缀仍然来自 rollout，因此状态分布方差还在；报告也没有给出同配置下 sampled 与 full-vocabulary OPD 的独立受控消融。参见[技术报告 §5.1.2](https://arxiv.org/html/2606.19348v1#S5.SS1)。
 
 8. **V4 的领域专家与 MoE routed expert 是同一种“专家”吗？**
 
@@ -5320,6 +5382,10 @@
 10. **Model Soups、离线 response distillation 和 V4 OPD 分别合并什么？**
 
    Model Soups 平均兼容 fine-tuned checkpoints 的参数，在论文所测共享预训练模型/低损失区域条件下避免多模型推理成本；离线 response distillation 把教师答案变成固定 SFT 目标，易缓存但容易遇到学生前缀与示范分布错位；V4 OPD 在学生自己的前缀上对齐多个教师的输出分布，保留单一学生部署形态，但付出教师前向、路由、全词表 logits 与 I/O 成本。它们不在同一层面，论文结果也不能跨任务排分数。
+
+11. **V4 的 reasoning effort 与 interleaved thinking 对 OPD 轨迹有什么影响？**
+
+   报告称 Non-think、Think High 和 Think Max 使用不同 RL 配置、长度惩罚和上下文窗口；Think Max 还加专门 system prompt。工具调用场景会跨用户消息保留思考轨迹，一般对话则在新用户消息后丢弃前轮思考内容，模拟工具调用的 user-message 框架可能不触发工具路径。做轨迹对齐时要把 effort、prompt、context policy、tool schema 和模型 revision 记入状态契约，并单独测回答质量、停止行为、工具错误和成本；这些是 V4 报告披露与作者说明，不代表通用默认实现。参见[技术报告 §5.1.1](https://arxiv.org/html/2606.19348v1#S5.SS1)。
 
 ## 2026-09 DeepSeek V4 Flash：SGLang 混合注意力 serving
 
@@ -5717,6 +5783,10 @@
 
    **答：** 官方 README 当前说明 vLLM 主要支持 Thinker，Instruct 音频输出仍在实现推进中。模型加载、音频预处理、Talker 多码本、Code2Wav、streaming、取消恢复和目标硬件 acceptance 是不同 gate。
 
+8. **Q：Qwen3-Omni Talker 的语音生成训练怎样从基础映射走到音色控制？**
+
+   **答：** 技术报告描述先用带多模态上下文的语音样本建立到 codec 输出的映射，再以高质量数据 continual pretraining、长上下文训练、多语言偏好对 DPO，最后做 speaker fine-tuning。Talker 的第一码本按帧自回归生成，MTP 预测残差码本，Code2Wav 把 codec 帧解码成 waveform。该顺序是发布方披露的模型方案；评估还要拆开可懂度、音色、韵律、音质和首包端点，不能由训练 loss 或 12.5 Hz token rate 单独判定实时质量。
+
 ## 2026-09 K2 Horizon 3.7B：dense 对照、训练阶段与 revision
 
 1. **Q：K2 Horizon 3.7B 是 K2 Horizon MoVA 36B/A4B 的缩小版吗？**
@@ -5776,6 +5846,10 @@
 8. **问：如何公平报告 Qwen3-VL 的 Agent 能力？**
 
    **答：** 绑定模型 variant/revision、reasoning 配置、工具 schema、权限、任务集、环境、超时、重试、verifier 和统计方法。AA Intelligence Index、论文自报 benchmark、未来 DataCurve 行和本地 GUI/tool 实验分开记账；当前 DataCurve 没有精确 Qwen3-VL 行，不迁移其他 Qwen 结果。
+
+9. **问：Qwen3-VL 的 S0—S3 阶段为什么逐渐增加可训练范围和上下文？**
+
+   **答：** 报告先用 S0 冻结视觉 encoder 与 LLM、只训练 merger 做基础对齐，再在 S1 全参数多模态训练，S2 增加到 32K 并调整长视频/文本数据，S3 用 262K 做长视频和长文档适配。它把桥接、能力混合和长度课程分开观察；这些 token 预算与阶段是 Qwen3-VL 的作者配置。新项目还需固定评测集检查纯文本保持、OCR/grounding 和长视频证据召回，不能把四个阶段照搬成通用配方。
 
 ## 2026-09 Qwen3.7 Plus：交互式混合 Agent 与托管合同
 
@@ -5929,7 +6003,7 @@
    **答：** OpenAI Reasoning 文档把 GPT-6 family 的 mode 分成 `standard/pro`，mode 选择执行模式；effort 的 `none`--`max` 控制模式内投入多少推理。两者正交，不能把 `pro` 当成新的 checkpoint 或把 effort 当成跨厂商统一等级。
 
 3. **问：`configuration_update` 是否会在会话中切换模型？**
-   **答：** 不会。它是 Responses input item，用于改变后续 effort。必须随 `previous_response_id` 或完整 replay 保留在原位置；两个相邻 update 会被拒绝，且不能和自动 compaction/truncation 组合。它改变 test-time compute policy，不改变权重。
+   **答：** 不会。它是 Responses input item，用于改变后续 effort。必须随 `previous_response_id` 或完整 replay 保留在原位置；不能与自动 compaction/truncation 组合。当前指南没有把相邻 update 列为拒绝条件，因此不要把这一点写成 API 合同。它改变 test-time compute policy，不改变权重。
 
 4. **问：GPT-6 Sol 的 function calling 为什么优先用 Responses API？**
    **答：** 官方模型页明确 Responses 用于 built-in tools 和 function calling；Chat Completions 对 GPT-6 Sol 只有在 `reasoning_effort=none` 时支持 function calling。迁移时必须同时检查 endpoint、typed response items、tool result、call id、权限和 replay 语义，不能只替换 model ID。
@@ -5950,7 +6024,7 @@
     **答：** AA 指标是第三方 provider/configuration 测量；DataCurve 当前没有精确 `mini_swe_agent_gpt_6_sol_*` 行。不同模型、effort、provider、harness、任务、工具和 verifier 未固定，迁移会把系统结果伪装成裸模型能力。同一原则也适用于 AA `GPT-5.5 Instant` 与 OpenAI `chat-latest`：官方只称后者是动态 Instant alias、未披露其当前 snapshot，没有依据将两者视作同一个评测对象。
 
 10. **问：为什么 `configuration_update` 不能简单当作下一次请求的 `reasoning.effort` 参数？**
-    **答：** 它是会话中的 typed input item，必须位于下一条用户消息之前并随 `previous_response_id` 或手工 replay 保留；相邻 update、自动 compaction/truncation 和 standalone compact 都有拒绝边界。若需显式压缩，可在 `/responses` 使用 `compaction_trigger`，再于下一条 user message 前重新插入 update。effective effort 会持续到下一次覆盖，但 response 的 `reasoning.effort` 仍报告 request-level setting；观测时要回放 update history。保持原请求配置并追加 update 可保留 prompt prefix、利于缓存复用，但不等于 cache hit。
+    **答：** 它是会话中的 typed input item，必须位于下一条用户消息之前并随 `previous_response_id` 或手工 replay 保留；自动 compaction/truncation 与 standalone compact 不能和含配置更新的历史混用。若需显式压缩，可在 `/responses` 使用 `compaction_trigger`，再于下一条 user message 前重新插入 update。effective effort 会持续到下一次覆盖，但 response 的 `reasoning.effort` 仍报告 request-level setting；观测时要回放 update history。保持原请求配置并追加 update 可保留 prompt prefix、利于缓存复用，但不等于 cache hit。当前指南没有将相邻 update 列作拒绝条件。
 
 11. **问：GPT-6 Sol 的 `permission=allow` 是否等于任务成功？**
     **答：** 不等于。allow 只表示宿主允许 executor 尝试副作用；还要有 call/result lineage、idempotency receipt、artifact digest 和独立 verifier。toy 中重复 key 只返回 duplicate，不重复执行，verifier 失败仍是失败。
@@ -6320,6 +6394,19 @@
 
 依据：[Gemini 4 Argon 研究笔记](research/model-update-2026-09/gemini-4-argon-source-notes.md)；[第二十一册第 95 章](book-21-transformer-architecture-evolution/chapters/95-gemini-4-argon长程推理与网络安全防御.md)。
 
+## 第六册第九章：RAG 与 Agent 部署
+
+1. **问：上线新的 embedding / index revision，怎样保证可比较、可切换并可回滚？**
+   **答：** 将 source snapshot、parser/chunker、embedding query/document contract、ACL schema、index revision、retrieval profile、prompt 和 policy 绑定到 manifest。先构建独立索引并校验数量、权限、删除 tombstone 和抽样 query，再以同一 query、主体和 source snapshot 做 shadow 比较；随后按低风险租户灰度。切换时同步 query encoder 与 index revision，保留回滚窗口。若旧版未收到最新 ACL 撤销或删除事件，不得直接回切，应先应用安全增量或关闭相关读取路径。
+
+2. **问：一个 RAG canary 有 2,000 个请求，其中 18 个超过 1.2 秒，SLO 上限为 0.5%；同时有一次无权文档进入模型上下文，能否继续扩量？**
+   **答：** 不能。延迟超限为 `18/2,000=0.9%`，高于 0.5%；门槛最多允许 10 个超限请求，实际多 8 个。越权进入 prompt 是独立硬门禁，一次就应阻断相关路径。应冻结扩量，保留 request trace 和 revision，定位排队、分片、过滤或缓存键问题；修复后重新回放权限切片并重新灰度，不能由总体质量均值抵消泄露。
+
+3. **问：工具请求超时后，为什么不能创建新的业务请求重试？**
+   **答：** 下游可能已经提交，只是回执丢失。保持原 request ID 与幂等键，把状态记为 `committed_unknown`，先查询同一事务；确认已提交才补记成功，确认未提交后再按下游合同重试，仍未知则保持处理中或转人工。幂等键防止重复副作用，但不替代身份、资源授权和参数校验。
+
+依据：[第六册第九章](book-06-llm-deployment/chapters/09-rag与agent部署.md)、[第三册 RAG 项目实战](book-03-practical-handbook/chapters/07-rag项目实战.md)、[第十七册工具调用](book-17-agent-tool-use/chapters/02-tool-use与function-calling.md)。
+
 ## 第六册第十五章：FP4、MXFP4 与 NVFP4
 
 1. **问：FP4 payload 已经是 4 bit，为什么 MXFP4 和 NVFP4 的有效 bit 数不同？**
@@ -6337,7 +6424,13 @@
 5. **问：NVFP4 预训练报告能否证明任意 NVFP4 后训练量化与 FP8 质量相当？**
    **答：** 不能。该报告的 12B/10T-token 结果结合了二维权重 scaling、部分 Wgrad Hadamard transform、梯度 stochastic rounding 和选择性 BF16 层，是训练 recipe 的证据。它不是对任意底模进行 PTQ 的结果，也不替代目标模型的校准、任务切片和 serving benchmark。
 
-依据：[OCP MX v1.0 规范](https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf)、[Transformer Engine NVFP4 文档](https://docs.nvidia.com/deeplearning/transformer-engine/features/low_precision_training/nvfp4/nvfp4.html)、[MR-GPTQ 论文](https://arxiv.org/abs/2509.23202)、[NVFP4 预训练报告](https://arxiv.org/abs/2509.25149)、[Scale Learning 技术说明](https://nvidia.github.io/Model-Optimizer/announcements/20260916-scale-learning.html)；配套正文：[第六册第十五章](book-06-llm-deployment/chapters/15-fp4-mxfp4-nvfp4.md)。
+6. **问：OAS/MBS 如何缩小 MXFP4 与 NVFP4 的质量差距，代价是什么？**
+   **答：** OAS 调整 E8M0 的量化映射，让最大值接近 E2M1 饱和区，同时为小值扩大归一化范围；MBS 在 1×16 局部 scale 上叠加 1×128 宏块 mantissa，优先补偿 outlier。作者在特定模型的六项任务中报告 MBS-H 平均分接近 NVFP4，并在 Blackwell SM100/CUTLASS 4.3.0 上报告平均 6.2% prefill GEMM 开销。论文用 direct-cast 且没有校准或重训，这是研究设置，不能当作 OCP 默认 MXFP4、其他 runtime 或目标 workload 的保证。
+
+7. **问：NVFP4 的 Four Over Six（4/6）为什么要同时试两种 scale，误差指标会影响什么？**
+   **答：** 它对每个 1×16 block 分别计算把最大值映射到 6 和 4 的候选，再按重构误差选取；映射到 4 可提高部分近最大值的表示精度，但会舍弃 ±6 端点，所以不能固定所有 block 使用 4。论文报告 MSE 选择整体较好；Transformer Engine 2.20.2 API 默认关闭 4/6，启用后默认误差指标是 MAE，并默认采用 E4M3 global scale 上界 256。官方文档列出的主要支持目标是 RL 和 PTQ，含 RHT 的预训练组合尚未实现。实验时需分别记录算法、误差度量、scale bound、软件版本、模型任务和硬件；论文结果不能直接归到框架默认路径。
+
+依据：[OCP MX v1.0 规范](https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf)、[Transformer Engine NVFP4 文档](https://docs.nvidia.com/deeplearning/transformer-engine/features/low_precision_training/nvfp4/nvfp4.html)、[MR-GPTQ 论文](https://arxiv.org/abs/2509.23202)、[Four Over Six 论文 v1](https://arxiv.org/abs/2512.02010v1)、[Transformer Engine 2.20.2 Common API](https://docs.nvidia.com/deeplearning/transformer-engine/api/common.html)、[OAS/MBS 论文](https://arxiv.org/abs/2603.08713)、[NVFP4 预训练报告](https://arxiv.org/abs/2509.25149)、[Scale Learning 技术说明](https://nvidia.github.io/Model-Optimizer/announcements/20260916-scale-learning.html)；配套正文：[第六册第十五章](book-06-llm-deployment/chapters/15-fp4-mxfp4-nvfp4.md)。
 
 ## 第六册第十六章：FP8 KV Cache
 
@@ -6354,9 +6447,12 @@
    **答：** 不能。vLLM 工程报告把该特定 FlashAttention 3 路径的严重退化定位到长 contraction 的累加精度；two-level accumulation 后恢复到 89%，但增加寄存器压力并可能拖慢长 prefill。这个案例说明必须把量化误差和 attention 累加错误分开归因，也说明精度修复和性能不能各自单独验收。数字绑定 Llama-3.1-8B、H100、kernel 和 128k NIAH。
 
 5. **问：FP8 payload 减半，为何请求延迟或吞吐可能不变甚至变差？**
-   **答：** 理论上每个历史 token 搬运字节减半，但 scale、cast/dequant、kernel、page 和固定 launch 开销仍在；短上下文可能尚未达到 decode break-even。滑窗层 KV 长度有上界，省出的字节有限，量化开销却持续；`head_dim=256` 的 H100 two-level accumulation 还可能让 prefill TTFT 变慢。应分别报告实际 cache bytes、prefill TTFT、decode ITL slope、break-even context、并发 goodput 和任务质量。
+   **答：** 理论上每个历史 token 搬运字节减半，但 scale、cast/dequant、kernel、page 和固定 launch 开销仍在；短上下文可能尚未达到 decode break-even。该报告对 Llama-3.1-8B/H100 的拟合斜率和截距手算约 7,000-token break-even，表中未舍入拟合值约 7,010 token；这不是其它模型或 backend 的阈值。滑窗层 KV 长度有上界，省出的字节有限，量化开销却持续；`head_dim=256` 的 H100 two-level accumulation 还可能让 prefill TTFT 变慢。应分别报告实际 cache bytes、prefill TTFT、decode ITL slope、break-even context、并发 goodput 和任务质量。
 
-依据：[OCP OFP8 v1.0](https://www.opencompute.org/documents/ocp-8-bit-floating-point-specification-ofp8-revision-1-0-2023-06-20-pdf)、[FP8 原论文](https://arxiv.org/abs/2209.05433)、[KIVI](https://arxiv.org/abs/2402.02750)、[KVQuant](https://arxiv.org/abs/2401.18079)、[vLLM FP8 KV 验证报告](https://vllm-project.github.io/2026/04/22/fp8-kvcache.html)、[vLLM FP8 KV 文档](https://docs.vllm.ai/en/latest/features/quantization/quantized_kvcache/)；配套正文：[第六册第十六章](book-06-llm-deployment/chapters/16-fp8-kv-cache.md)。
+6. **问：共享 prefix page 在 decode 追加新 token 时，能否直接更新已有 FP8 scale？**
+   **答：** 不能在仍有读者的共享 page 上静默改写。scale 是 payload 的解释条件；更新后旧码会按新 scale 还原成不同数值。应让封存 page 保持不可变，并用独立 tail、暂存未闭合量化组或 copy-on-write 处理追加；swap/restore、取消和 speculative rejection 也要同步维护 scale revision、page 引用和临时状态。具体采用哪种策略属于 runtime 实现，必须结合目标 backend 检查。
+
+依据：[OCP OFP8 v1.0](https://www.opencompute.org/documents/ocp-8-bit-floating-point-specification-ofp8-revision-1-0-2023-06-20-pdf)、[FP8 原论文](https://arxiv.org/abs/2209.05433)、[KIVI](https://arxiv.org/abs/2402.02750)、[KVQuant](https://arxiv.org/abs/2401.18079)、[vLLM FP8 KV 验证报告](https://vllm-project.github.io/2026/04/22/fp8-kvcache.html)、[vLLM v0.32.0 FP8 KV 文档](https://docs.vllm.ai/en/v0.32.0/features/quantization/quantized_kvcache/)；配套正文：[第六册第十六章](book-06-llm-deployment/chapters/16-fp8-kv-cache.md)。
 
 ## 第六册第十七章：Native INT4 与原生量化部署
 
@@ -6375,7 +6471,13 @@
 5. **问：怎样计算单位成功请求成本？**
    **答：** 按原始请求汇总首次推理、重试、验证、fallback 和人工审核的完整期望成本，再除以该批原始请求的最终成功率。100 个原始请求共花 120 个成本单位、90 个最终成功时，单位成功成本是 `120/90=1.33`。不能把重试成本重复计入，也不能用成功 attempt 数除以所有 attempt 数代替请求级成功率。
 
-依据：[GPTQ 原论文](https://arxiv.org/abs/2210.17323)、[AWQ 原论文](https://arxiv.org/abs/2306.00978)、[LLM-QAT](https://aclanthology.org/2024.findings-acl.26/)、[MARLIN](https://arxiv.org/abs/2408.11743)；研究记录：[第六册第十七章精修](research/native-int4-deployment-depth-review-2026-10-27.md)；配套正文：[第六册第十七章](book-06-llm-deployment/chapters/17-native-int4与原生量化部署.md)。
+6. **问：weight artifact schema 与 KV cache schema 为什么要分开版本化？什么时候可以跨 worker 复用 prefix page？**
+   **答：** packed weight 的 group、scale、zero point、pack order 和 kernel ABI 属于权重 artifact 的解释契约；KV page 则绑定生成它的模型语义、位置配置、cache dtype、scale 与序列化格式。两者 shape 相同并不足以兼容。新 INT4 artifact 即使不改 tokenizer，也可能改变 hidden state 和 K/V 数值；先隔离 namespace，用固定 prefix 比较恢复后的 K/V、logits 和结构化输出。只有 producer 语义与 page reader/schema 均通过兼容验证后，才可讨论跨 worker 复用。
+
+7. **问：整体验收率过线，为什么高风险切片仍可能阻止发布？**
+   **答：** 只有切片使用同一个二元端到端成功事件时，整体比例才可由相同分母加权。1,000 个请求中 900 个低风险任务成功率 0.99、100 个高风险任务为 0.70，总体是 `(900×0.99+100×0.70)/1000=0.961`；总体门槛 0.95 虽然通过，高风险门槛仍失败。若切片分别使用编译率、JSON 合法率或主观帮助度，就应分开报告，不能合成一个平均值。发布门禁应同时约束总体和预先定义的关键切片。
+
+依据：[GPTQ 原论文 v2](https://arxiv.org/html/2210.17323v2)、[AWQ 原论文 v6](https://arxiv.org/html/2306.00978v6)、[LLM-QAT](https://aclanthology.org/2024.findings-acl.26/)、[MARLIN](https://arxiv.org/abs/2408.11743)、[TensorRT-LLM 1.0.0 数值精度文档](https://nvidia.github.io/TensorRT-LLM/1.0.0/reference/precision.html)；研究记录：[权重量化研究笔记](research/weight-quantization-formats-and-ptq-2026.md)；配套正文：[第六册第十七章](book-06-llm-deployment/chapters/17-native-int4与原生量化部署.md)。
 
 ## 第二册第二章：Transformer 架构面试补充
 

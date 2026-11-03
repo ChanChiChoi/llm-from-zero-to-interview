@@ -65,3 +65,22 @@
 - **Anthropic, Building effective agents**：[工程文章](https://www.anthropic.com/engineering/building-effective-agents)，发布于 2024-12-19，访问日期 2026-10-30。
 - **来源支持的事实**：文章现有页面提示，2024 年描述的 tooling landscape 已发生变化；其 workflow 与更开放的 agent loop 区分仍可用于架构讨论。
 - **证据边界**：该文章是特定时期的工程经验，不是当前框架 API 或跨模型的普遍定律。
+
+## Programmatic Tool Calling 当前 API 边界
+
+- **来源与版本**：[OpenAI Programmatic Tool Calling 官方文档](https://developers.openai.com/api/docs/guides/tools-programmatic-tool-calling)，访问日期 2026-11-02；阅读 tool 类型、路由、runtime、选择建议、Responses API 和 Agents API 部分。
+- **来源支持的事实**：文档描述模型生成 JavaScript，在新建的隔离 V8 runtime 中协调已启用工具，可使用循环、条件和并发并处理中间结果；Responses API 通过 `programmatic_tool_calling` 工具启用，并用 `allowed_callers` 选择工具可由模型直接调用、程序调用或两种方式调用。Agents API 管理 Agent loop 并默认启用该能力。官方建议在控制流可预测且代码能返回较小结构化结果时使用；单次调用、需要模型依据每个新结果作语义判断、审批敏感写操作或需保留原生引用/产物的阶段更适合直接调用。当前文档说明该生成程序 runtime 不提供 Node.js、包安装、直接网络、通用文件系统、子进程或跨执行持久 JavaScript 状态。
+- **证据等级与边界**：source-backed（官方动态 API 文档）；接口与默认行为绑定访问日和指定 API，需按目标模型、工具类型和 API 版本复核。程序 runtime 的隔离不会自动改变工具实际运行的宿主环境，也不替应用侧执行身份校验、权限、审批、幂等或数据保留控制。
+
+## 间接注入的检索可达性研究
+
+- **来源与版本**：[Chang et al., “Overcoming the Retrieval Barrier: Indirect Prompt Injection in the Wild for LLM Systems”](https://www.usenix.org/conference/usenixsecurity26/presentation/chang-hongyan)，USENIX Security 2026，访问日期 2026-11-02；阅读官方会议页面摘要与威胁/结果范围。
+- **来源支持的事实**：作者将恶意内容拆成保证触发检索的 trigger fragment 与承载攻击目标的 attack fragment；论文页面报告其黑盒方法在 11 个 benchmark、8 种 embedding 模型上近乎 100% 检索到攻击内容。在一个自然查询触发的邮件摘要多 Agent 设置中，单封投毒邮件使 GPT-4o 外泄 SSH key 的成功率超过 80%；页面还称所测防御不足以阻止恶意文本被检索。
+- **证据等级与边界**：source-backed（USENIX 会议论文页面）；检索率和端到端成功率分别受其 benchmark、embedding、系统、提示、任务及威胁模型限制，不代表所有 RAG/Agent 的一般攻击概率、所有防御失效率或真实流量事件率。
+
+## ASR 与任务效用的联合评估
+
+- **来源与版本**：[Zarif et al., “Ignored, Not Refused: What Low Prompt-Injection Success Rates Hide in Small Tool-Using Agents”](https://arxiv.org/abs/2610.23254)，arXiv:2610.23254v1，2026-10-16；访问日期 2026-11-02。
+- **阅读位置**：摘要、§3 Study Design、§4.1–4.3 Results、§5 Discussion/Conclusion、Limitations，以及 Appendix D 的人工校验和 benchmark agreement。
+- **来源支持的事实**：作者审计 11 个 2–14B 开放权重工具 Agent 在 InjecAgent 与 AgentDojo 的约 33,000 条轨迹，并用一个 LLM judge 对失败攻击做行为分类。论文报告失败攻击多数被忽略而非明确拒答；提示词允许工具输出中的外部指令时，在 InjecAgent 上的汇总 ASR 明显升高。作者提出 Attack–Task Outcome Matrix（ATOM），在其 16,273 条 AgentDojo 轨迹上分别报告安全且完成 67.2%、安全但未完成 21.7%、不安全但完成 3.8%、不安全且被劫持 7.3%；因此该审计中的 ASR 为 11.1%，任务完成率为 71.0%，两个边际量会掩盖 21.7% 安全但未完成的轨迹。
+- **证据等级与边界**：source-backed（arXiv v1 预印本）。行为主结果来自一个 LLM judge；两位作者对跨模型和设置分层抽取的 150 条轨迹（两 benchmark 各 75 条）做人审，四类分组与 judge 的一致率为 96%，Cohen's kappa 为 0.835，仍不是对全部 33,000 条轨迹的人工复核。任务完成只在 AgentDojo 测量，策略提示条件只在 InjecAgent 测量其 ASR。研究使用静态注入的合成单 Agent benchmark、小型开放权重 Agent 和特定工具脚手架；作者明确未验证自适应/白盒攻击、多 Agent 系统或线上部署。以上比例不代表生产发生率或一般 Agent 水平，只支持把攻击结果与正常任务效用、无效动作和样本边界联合报告。

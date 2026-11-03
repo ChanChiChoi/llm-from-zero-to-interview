@@ -6,11 +6,23 @@ GPT-6.1 Sol -> Artificial Analysis canonical -> OpenAI model contract -> reasoni
 
 ### 语言模型链
 
-Tokenization -> Special Token -> Chat Template -> Assistant-Only Label Mask -> EOS Coverage -> Embedding -> Transformer -> Transformer Backbone -> Residual Stream -> Norm Placement -> Pre-LN -> Post-LN -> RMSNorm -> Residual Scaling -> Early Update Pressure -> Normalization Stability Gate -> Position Encoding -> Sinusoidal Position Encoding -> Learned Absolute Position Embedding -> Relative Position Representation -> Relative Position Bias -> RoPE -> ALiBi -> Position Interpolation -> RoPE Scaling -> Position ID Audit -> Position Encoding Gate -> Attention Mask -> Loss Mask -> Bidirectional Attention -> Prefix LM -> Packed Sequence Mask -> Block-Diagonal Causal Mask -> Sliding Window Attention -> Mask Visibility Audit -> Mask Gate -> Parallel Path Length -> Attention Pair Count -> Quadratic Attention Cost -> Attention Score Memory -> Prefill Attention Cost -> Decode Attention Cost -> Attention Cost Gate -> Training FLOPs Estimate -> Compute-Optimal Training -> Tokens per Parameter -> Undertrained Model -> Serving Pressure -> Scaling Gate -> Position-wise FFN -> SwiGLU -> Gated MLP -> MoE FFN -> Top-k Routing -> Expert Capacity -> Active Parameters -> FFN / MoE Gate -> Architecture Selection Gate -> In-Context Learning -> Label Space Coverage -> Demonstration Format Consistency -> Context Evidence Use -> Middle Evidence Risk -> Token Retrieval Audit -> Retrieval Label Match -> ICL Conflict Rate -> ICL Gate -> Route Score -> Training Parallelism -> Content Routing -> Scaling Evidence -> Ecosystem Readiness -> Deployment Pressure -> Attention-SSM Hybrid Readiness -> Next-Token Prediction -> Cross Entropy -> Pretraining -> SFT -> RLHF/DPO -> Chat Model
+Tokenization -> Special Token -> Chat Template -> Assistant-Only Label Mask -> EOS Coverage -> Embedding -> Transformer -> Transformer Backbone -> Residual Stream -> Norm Placement -> Pre-LN -> Post-LN -> RMSNorm -> Residual Scaling -> Early Update Pressure -> Normalization Stability Gate -> Position Encoding -> Sinusoidal Position Encoding -> Learned Absolute Position Embedding -> Relative Position Representation -> Relative Position Bias -> RoPE -> ALiBi -> Position Interpolation -> RoPE Scaling -> Position ID Audit -> Position Encoding Gate -> Attention Mask -> Loss Mask -> Bidirectional Attention -> Prefix LM -> Packed Sequence Mask -> Block-Diagonal Causal Mask -> Sliding Window Attention -> Mask Visibility Audit -> Mask Gate -> Parallel Path Length -> Attention Pair Count -> Quadratic Attention Cost -> Attention Score Memory -> Prefill Attention Cost -> Decode Attention Cost -> Attention Cost Gate -> Training FLOPs Estimate -> Training-Loop Throughput -> Wall-Clock Availability -> Wall-Clock Throughput -> Time-to-Train -> Compute-Optimal Training -> Tokens per Parameter -> Undertrained Model -> Serving Pressure -> Scaling Gate -> Position-wise FFN -> SwiGLU -> Gated MLP -> MoE FFN -> Top-k Routing -> Expert Capacity -> Active Parameters -> FFN / MoE Gate -> Architecture Selection Gate -> In-Context Learning -> Label Space Coverage -> Demonstration Format Consistency -> Context Evidence Use -> Middle Evidence Risk -> Token Retrieval Audit -> Retrieval Label Match -> ICL Conflict Rate -> ICL Gate -> Route Score -> Training Parallelism -> Content Routing -> Scaling Evidence -> Ecosystem Readiness -> Deployment Pressure -> Attention-SSM Hybrid Readiness -> Next-Token Prediction -> Cross Entropy -> Pretraining -> SFT -> RLHF/DPO -> Chat Model
 
 ### 推理优化链
 
 Self-Attention -> Attention Routing Audit -> Route Hit Rate -> Future Leak Rate -> Softmax Row Sum Check -> Scale Stability -> Interpretation Boundary -> QK Circuit -> OV Circuit -> Head Subspace Audit -> Head Redundancy Rate -> KV Head Ratio -> Multi-head Latent Attention -> Latent KV Cache -> KV Cache Saving Rate -> Attention Architecture Gate -> Causal Mask -> KV Cache -> KV Cache Budget -> KV Cache Per Token -> Decode Bandwidth Pressure -> Paged KV Block -> KV Cache Gate -> Prefill/Decode -> Continuous Batching -> Request Scheduling -> TTFT Regression -> TPOT Regression -> KV Pressure -> Prompt Cost Drift -> Cache Effectiveness -> Serving Gate -> Quantization -> Speculative Decoding -> Serving System
+
+压缩与量化决策子链：瓶颈定位（weights / activations / active KV / cold pages / retained tokens）-> 选择数值表示或模型结构路径 -> GPTQ / AWQ / SmoothQuant / SliderQuant / AAAC / InnerQ / QAT / distillation / pruning -> effective bits 与 scale/metadata -> artifact layout -> runtime parser + kernel + cache lifecycle -> 分桶质量 + peak memory + TTFT/TPOT -> rollout / rollback gate
+
+Native INT4：weight_artifact_schema（group/scale/zero-point/pack/kernel ABI）与 kv_cache_schema（producer model/position/scale/page serialization）分开版本化 -> 分别验证数值解释与 cache reader -> namespace 隔离和固定 prefix 回放 -> 只有模型语义与 page 格式都兼容时才复用 prefix KV。
+
+FP4 scale 误差支链：E2M1 payload + E8M0 scale -> block overflow / small-value underflow -> OAS (Overflow-Aware Scaling) -> MBS (1×128 macro scale mantissa + 1×16 local scale) -> quality / GEMM overhead gate；NVFP4 近饱和值误差 -> Four Over Six（每个 1×16 block 比较 map-to-4/map-to-6 候选）-> 按 MAE/MSE 选择 -> 当前 recipe / workload 验收 gate；平行补偿路线：block rotation + GPTQ (MR-GPTQ)，NVFP4 per-block trainable scales (scale learning)。论文和框架的模型、任务、版本与 kernel 结果均保留各自证据边界。
+
+解码采样控制子链（候选处理顺序由 runtime 契约决定）：History-Conditioned Logits -> Temperature Scaling -> Top-k / Top-p / Min-p / Locally Typical Candidate Set -> Grammar Mask -> Empty-Set Handling -> Renormalized Distribution -> Greedy or Sampling -> EOS / Stop / Max Output -> Finish Reason -> Quality / Format / Cost Gate
+
+Beam 与推测解码子链：Beam Search -> Length Normalization / Early Stopping -> Sequence Ranking；Draft Proposal -> Target Verification -> Exact Sampling / Greedy Equality / Relaxed Acceptance -> Batch Ragged-State Alignment -> KV Commit or Rollback -> Throughput / Correctness Gate
+
+Reasoning Budget 子链：Provider / Model Revision -> Reasoning Effort or Thinking Level -> Thought and Visible Output Usage -> Max-Output Boundary -> Incomplete / Complete State -> Quality / P95 / Unit-Success-Cost Evaluation
 
 ### Reasoning 系统链
 
@@ -69,6 +81,10 @@ Math Interview Readiness -> Formula Coverage -> Formula Accuracy -> Intuition Cl
 
 PyTorch Tensor -> Tensor Shape -> Dtype -> Device -> Broadcasting -> Tensor Stride -> Contiguous Tensor -> View vs Reshape -> Matmul -> Einsum -> Tensor Mask -> LM Loss Flatten -> Tensor Shape Audit -> Autograd -> Dynamic Computation Graph -> Requires Grad -> Leaf Tensor -> Backward -> Vector-Jacobian Product -> Grad Accumulation -> Zero Grad -> Detach -> No Grad -> In-place Operation Risk -> Autograd Audit -> nn.Module -> Parameter -> Module Registration -> Submodule -> ModuleList -> ModuleDict -> Buffer -> state_dict -> load_state_dict -> train/eval Mode -> Module Hook -> Module Audit -> Dataset/DataLoader -> Map-style Dataset -> IterableDataset -> Collate Function -> Dynamic Padding -> Ignore Index -> Sampler -> Batch Sampler -> DistributedSampler -> DataLoader Worker -> Pin Memory -> Padding Waste -> Data Pipeline Audit -> Training Loop -> Training Step -> Raw Loss -> Scaled Loss -> Optimizer Step -> Scheduler Step -> Evaluation Loop -> Checkpoint Resume -> Non-Finite Loss -> Training Stability -> Loss Spike Audit -> Effective Label Tokens -> LR Continuity -> Rank Loss Skew -> Training Stability Gate -> Training Loop Audit -> Mixed Precision -> FP16 -> BF16 -> Autocast -> GradScaler -> Loss Scaling -> Activation Memory -> Activation Checkpointing -> CUDA Memory Stats -> OOM Audit -> Distributed Training -> Rank/World Size -> Process Group -> DDP -> All-Reduce -> Gradient Synchronization -> Global Batch Size -> DDP no_sync -> FSDP -> Distributed Training Audit -> Rank Step Alignment -> Collective Mismatch -> Token Shard Imbalance -> Straggler Ratio -> Communication Ratio -> Checkpoint Shard Coverage -> Resume Continuity -> Pipeline Bubble Ratio -> Distributed Incident Gate -> Debug/Profiling -> Debug Tensor Metadata -> Finite Check -> Gradient Debug -> Forward Hook Debug -> Anomaly Detection -> CUDA Synchronize Timing -> torch.profiler -> DataLoader Bottleneck -> Debug/Profiling Audit -> Transformer Components -> Token Embedding -> LM Head Weight Tying -> RMSNorm -> Causal Mask -> Scaled Dot-Product Attention -> Multi-Head Self-Attention -> SwiGLU MLP -> Pre-Norm Decoder Block -> RoPE -> KV Cache -> Transformer Component Audit -> PyTorch Engineering Interview Readiness -> Engineering Interview Gate -> Revision Plan
 
+### 第十章：Checkpoint、评估与实验管理
+
+Training Experiment Management -> Checkpoint State Completeness -> Precision-Conditional Resume State -> Save Interval/RPO -> Artifact Storage Budget -> Unique Artifact ID Union -> DCP Staging Completion -> DCP Storage Completion -> Manifest Publication -> Resume Continuity Probe -> Effective-Token Validation Loss -> Per-Domain Loss -> Evaluation Contract -> Benchmark Contamination Audit -> Paired Comparison -> Regression Rate -> Run Manifest Lineage -> Reproducibility Coverage -> Controlled Experiment -> Checkpoint Hard Gates -> Normalized Multi-Objective Score -> Retention Decision
+
 ### 对齐链
 
 Human Intent -> Safety Policy -> Proxy Objective -> Instruction Data -> SFT -> Preference Data -> Reward Model -> RLHF/DPO -> Reward Hacking Audit -> Scalable Oversight -> AI Feedback -> Verifier -> Human Audit -> Outer Alignment Check -> Inner Alignment Check -> Goal Misgeneralization Eval -> Model Behavior Evaluation -> Alignment Gate
@@ -85,13 +101,24 @@ SigLIP 2 -> Multilingual / Dense-Feature Training Recipe -> Image-Text Retrieval
 
 Multimodal Data -> Image-Text Alignment -> OCR/ASR/Video Temporal Alignment -> Vision Encoder -> Patch Embedding -> CLS/Patch Tokens -> Vision Encoder Shape Audit -> Visual Token Budget -> Multimodal Context Budget -> CLIP -> CLIP Loss -> Zero-Shot Classification -> Image-Text Retrieval -> VLM Connector -> VLM Connector Audit -> Image Placeholder -> Visual Token Compression -> Assistant-Only Multimodal Loss -> Chat Template -> Multimodal SFT Data Audit -> Multimodal Task Coverage -> Evidence Support Rate -> Missing Refusal Rate -> Multimodal Instruction Tuning -> Diffusion Model -> DDPM -> Forward Diffusion -> Reverse Denoising -> Noise Scheduler -> Noise Prediction Loss -> Classifier-Free Guidance -> Latent Diffusion -> Stable Diffusion -> VAE Compression Ratio -> Text-to-Image Pipeline Audit -> Negative Prompt -> ControlNet -> Image-to-Image -> Inpainting -> DALL-E -> Autoregressive Image Tokens -> Video Generation -> Spatiotemporal Patch -> Video Diffusion -> Temporal Consistency -> Identity Drift -> Flickering -> World Model -> Physics Consistency -> Video Generation Evaluation -> FVD -> Video Token Audit -> Audio Generation -> Waveform -> Log-Mel Spectrogram -> ASR -> Whisper -> WER -> CER -> TTS -> Vocoder -> Voice Cloning -> Audio Codec -> Speech Token -> Codec Language Model -> Speech-to-Speech -> VAD -> MOS -> Audio Token Audit -> Unified Multimodal Model -> Unified Tokenization -> Any-to-Any Multimodal Model -> Early-Fusion Multimodal Transformer -> Center-LLM Multimodal System -> Multimodal Router -> Multimodal Loss Mixture -> Modality Conflict -> Unified Multimodal Audit -> Multimodal Evaluation -> Multimodal Incident -> Input Fidelity Rate -> Multimodal Evidence Recall -> OCR Critical Field Accuracy -> ASR Critical Field Accuracy -> Temporal Evidence Recall -> VQA Accuracy -> Chart Relaxed Accuracy -> Grounding IoU -> Multimodal Hallucination Rate -> Multimodal Prompt Injection -> Biometric Identity Safety -> Content Provenance -> Multimodal Safety Audit -> Multimodal Incident Gate -> Multimodal Interview Readiness -> Multimodal Interview Rubric -> Multimodal Formula Coverage -> Multimodal Demo Coverage -> Weak Multimodal Question -> Multimodal Revision Plan -> Multimodal Reasoning -> Multimodal Cost Audit -> Multimodal Product -> Input Quality Pass Rate -> Multimodal Evidence Support Rate -> OCR Quality Score -> ASR Quality Score -> Generation Adoption Rate -> Media Safety Pass Rate -> Privacy Pass Rate -> Copyright Pass Rate -> Multimodal Product Gate -> Multimodal Safety
 
+连续生成目标 -> Diffusion 的噪声/数据/速度参数化；Flow Matching -> 选定概率路径 -> 目标向量场 -> ODE 数值求解器 -> 分开评估训练目标与采样步数/质量/延迟
+Pyramidal Flow Matching -> 空间金字塔阶段 + DiT + 自回归时间历史 -> 视频生成的论文方案 -> 效率和质量结论限定在作者配置
+
 ### 语音识别与生成链
 
 ASR -> CTC -> RNN-T -> Attention-based Encoder-Decoder -> Whisper -> Forced Alignment -> WER -> CER -> Business Critical Field Error -> UER -> Streaming Window -> Stable Partial Transcript -> End-to-End Speech Dialogue -> Speech Token Budget -> Codec Rate -> TTS -> Speaker Similarity -> Prosody -> Timing/Prominence/Intonation -> LP-TTS-Bench -> Voice Cloning Authorization -> Client TTFA -> Barge-In Recovery
 
 ### 评估链
 
-Benchmark -> Metrics -> Evaluation Metric Incident -> Aggregate Score Trap -> Evaluation Slicing -> Slice Regression -> Clean Eval Lift -> Human Eval -> LLM-as-a-Judge -> Judge-Human Agreement -> Judge Length Bias -> Paired Evaluation -> Bootstrap Confidence Interval -> Contamination Detection -> Error Analysis -> Regression Test -> Online Evaluation -> Cost-Quality Trade-off -> Evaluation Gate
+Benchmark -> Metrics -> Evaluation Metric Incident -> Aggregate Score Trap -> Evaluation Slicing -> Slice Regression -> Clean Eval Lift -> Human Eval -> LLM-as-a-Judge -> Rubric Specification Lock -> Evidence-Grounded Scoring -> Human-Scale Score Calibration -> Rubric Score-Option Position Bias -> Rubric Criterion-Order Bias -> Rubric Verification -> Judge-Human Agreement -> Judge Repeatability -> Position Swap Audit -> Pair Difficulty Conditioning -> Debiasing Resolution Loss -> Judge Length Bias -> Paired Evaluation -> Bootstrap Confidence Interval -> Contamination Detection -> Error Analysis -> Regression Test -> Online Evaluation -> Cost-Quality Trade-off -> Evaluation Gate
+
+Contamination Audit -> Threat Model -> Data Lineage -> Training / SFT / RL / Prompt / RAG Exposure -> Exact Hash Match -> Near-Duplicate Candidate -> Manual Threshold Calibration -> Time Split -> Canary Probe -> Perturbation Stability -> DCQ Verbatim-Exposure Signal -> ConStat Non-Transfer Advantage -> RL-Stage Detector -> Private Holdout -> Residual Risk Report -> Trusted Evaluation Gate
+
+Synthetic Data Generator -> Synthetic Data Lineage -> Student Model -> Judge Relationship Audit -> Same Model / Inheritance / Same Family -> Preference Leakage Risk -> Human Gold Set -> Cross-Family Judge Comparison -> LLM Judge Independence Gate
+
+Human Preference Evaluation -> Target Population -> Sampling Frame -> User / Language / Task Stratification -> Post-stratification -> Group-specific Preference Heterogeneity -> Population-weighted Preference Estimate -> Preference Report
+
+Benchmark Response Matrix -> Item Response Theory (IRT) -> Model-Pool Size and Capability-Distribution Diagnostics -> Item-Parameter / Rank-Recovery Simulation -> Benchmark Selection Gate
 
 Online Experimentation -> Randomization Unit -> Stable Bucket Assignment -> Sample Ratio Mismatch -> Exposure Completeness -> Primary Metric -> Guardrail Metric -> CUPED -> Sequential Inference -> Canary Ramp -> Rollback Readiness -> Online Experiment Gate
 
@@ -129,11 +156,11 @@ AI Infra training platform system design subchain: Training Platform Security Ga
 
 AI Infra inference platform overview subchain: Training Platform Design Gate -> Inference Platform Overview Audit -> Request Lifecycle Coverage -> SLO Metric Contract -> Model Registry Readiness -> Model Router Policy Fit -> Runtime Prefill Decode Fit -> Continuous Batching Readiness -> KV Cache Capacity Governance -> Autoscaling Warm Pool Fit -> Release Rollback Control -> Rate Limit Degrade Protection -> Safety Governance Fit -> Cost Attribution Optimization -> Observability Trace Coverage -> Multi Model Governance -> Developer API Self Service -> Inference Platform Gate -> Inference Platform
 
-AI Infra model serving runtime selection subchain: Inference Platform Gate -> Model Serving Runtime Selection Audit -> Model Hardware Fit -> Runtime Boundary Clarity -> Model Format Tokenizer Fit -> Prefill Decode Scheduler Fit -> Continuous Batching Fit -> KV Cache Memory Manager Fit -> Streaming API Fit -> Quantization Accuracy Fit -> Distributed Inference Fit -> Observability Metrics Fit -> Benchmarking Method Fit -> Deployment Rollback Fit -> Ecosystem Maintenance Fit -> Cost Capacity Fit -> Self Development Threshold -> Runtime Selection Gate -> Inference Platform
+AI Infra model serving runtime selection subchain: Inference Platform Gate -> Model Serving Runtime Selection Audit -> Model Hardware Fit -> Runtime Boundary Clarity -> Runtime Capability Matrix -> Model Protocol Fit (Weight / Kernel / Cache / Protocol / Quality) -> Model Format Tokenizer Fit -> Prefill Decode Scheduler Fit -> Continuous Batching Fit -> KV Cache Memory Manager Fit -> Streaming API Fit -> Quantization Accuracy Fit -> Distributed Inference Fit -> Compatibility Replay Gate -> Observability Metrics Fit -> Benchmarking Method Fit -> Deployment Rollback Fit -> Ecosystem Maintenance Fit -> Cost Capacity Fit -> Self Development Threshold -> Runtime Selection Gate -> Inference Platform
 
-AI Infra inference resource profile subchain: Runtime Selection Gate -> Prefill Decode KV Resource Profile Audit -> Request Token Profile -> Prefill Phase Accounting -> Decode Phase Accounting -> TTFT TPOT Contract -> KV Cache Formula Fit -> KV Capacity Admission -> Paged Block Management -> Prefix Cache Reuse -> Long Context Policy -> Tenant KV Isolation -> Continuous Batching Policy -> PD Disaggregation Fit -> Streaming Backpressure Fit -> Observability Phase Metrics -> Cost Capacity Model -> Resource Profile Gate -> Inference Platform
+AI Infra inference resource profile subchain: Runtime Selection Gate -> Prefill Decode KV Resource Profile Audit -> Request Token Profile -> Prefill Phase Accounting -> Decode Phase Accounting -> TTFT TPOT Contract -> KV Cache Formula Fit -> KV Capacity Admission -> Paged Block Management -> Prefix Cache Reuse -> KV Cache Working Set -> Long Context Policy -> Tenant KV Isolation -> Continuous Batching Policy -> PD Disaggregation Fit -> Streaming Backpressure Fit -> Observability Phase Metrics -> Cost Capacity Model -> Resource Profile Gate -> Inference Platform
 
-AI Infra inference scheduling subchain: Resource Profile Gate -> Inference Scheduling Audit -> Request Arrival Profile -> Continuous Batching Core -> Token Budget Policy -> Prefill Decode Balance -> Paged KV Block Management -> Scheduler KV Admission -> Long Short Isolation -> Tenant Priority Fairness -> Cancellation Cleanup -> Streaming Backpressure Fit -> Scheduler Observability Metrics -> Scheduler Gate -> Inference Platform
+AI Infra inference scheduling subchain: Resource Profile Gate -> Inference Scheduling Audit -> Request Arrival Profile -> Continuous Batching Core -> Token Budget Policy -> Scheduling Pressure -> Adaptive Prefill Budget (P-PAS) -> Prefill Decode Balance -> Length-Aware Prefill Queues (LAPS) -> Paged KV Block Management -> Scheduler KV Admission -> Long Short Isolation -> Tenant Priority Fairness -> Cancellation Cleanup -> Streaming Backpressure Fit -> Scheduler Observability Metrics -> Scheduler Gate -> Inference Platform
 
 AI Infra model routing subchain: Scheduler Gate -> Model Routing Audit -> Request Intent Profile -> Model Capability Profile -> Permission Candidate Filter -> Cost Budget Policy -> Latency SLO Policy -> Quality Safety Policy -> Fallback Chain Governance -> Canary Routing Stability -> Realtime Health Load -> Route Trace Coverage -> Degrade Policy Control -> Route Config Versioning -> Model Routing Gate -> Inference Platform
 
@@ -227,6 +254,8 @@ vLLM scheduler flow subchain: Continuous Batching Gate -> vLLM Scheduler Flow Au
 
 vLLM memory management subchain: Request Flow Gate -> vLLM Memory Management Audit -> GPU Memory Breakdown -> KV Page Size -> Prefix Cache Hash -> Cached Free Block -> Prefix Cache Hit Rate -> LRU Cache Eviction -> Preemption Recompute Path -> Hybrid KV Cache Group -> Memory Management Gate -> vLLM Worker Executor
 
+FP8 KV deployment subchain: KV Cache Capacity Estimate -> FP8 Format Variant -> Scale Granularity -> K/V Error Asymmetry -> Quantized Page Scale Revision -> Prefix Share / Swap / Speculative Rollback -> Attention Accumulation Precision -> ITL Break-Even -> Task-Sliced Quality Rollback -> FP8 KV Release Gate
+
 vLLM worker executor subchain: Memory Management Gate -> vLLM Executor Architecture Audit -> Engine Core Dispatch Loop -> Executor Dispatch Layer -> Worker Rank Mapping -> Model Runner Metadata Gate -> Tensor Parallel Merge -> CPU Process Budget -> Worker Failure Recovery -> Executor Architecture Gate -> Prefix Caching Audit
 
 Prefix caching subchain: Executor Architecture Gate -> Prefix Caching Audit -> Full Block Prefix Reuse -> Parent Hash Chain -> Extra Hash Isolation -> Cache Salt Isolation -> Cached Free Touch -> Prefix Saved Prefill Tokens -> Prefix Cache Eviction -> Prefix Cache Gate -> Serving Parallelism Audit
@@ -309,6 +338,8 @@ Inference engine interview readiness subchain: Capacity SLO Fault Drill Gate -> 
 
 Practitioner Playbook -> Problem Boundary -> Evidence Collection -> Minimal Reproduction -> Baseline Comparison -> Data Check -> Data Incident -> Duplicate Rate -> Contamination Rate -> Mixture Shift -> Lineage Coverage -> Data Incident Gate -> Tokenizer Check -> Tokenizer Format Incident -> Chat Template Drift -> Assistant-Only Label Mask -> Prompt Loss Leak -> PAD Loss Leak -> EOS Coverage -> Format Gate -> Training Stability -> Loss Spike Audit -> Non-Finite Loss Rate -> Effective Label Tokens -> LR Continuity -> Rank Loss Skew -> Training Stability Gate -> Distributed Incident -> Rank Step Alignment -> Collective Mismatch -> Token Shard Imbalance -> Straggler Ratio -> Communication Ratio -> Checkpoint Shard Coverage -> Resume Continuity -> Pipeline Bubble Ratio -> Distributed Incident Gate -> Post-Training Incident -> Evaluation Metric Incident -> Aggregate Score Trap -> Slice Regression -> Clean Eval Lift -> Judge-Human Agreement -> Evaluation Gate -> Inference Performance Incident -> TTFT Regression -> TPOT Regression -> KV Pressure -> Prompt Cost Drift -> Cache Effectiveness -> Serving Gate -> RAG Incident -> Retrieval Miss -> Context Drop -> Unsupported Claim Rate -> Permission Leak Rate -> RAG Freshness Gate -> RAG Incident Gate -> Agent Incident -> Plan Feasibility Rate -> False Completion Rate -> Tool Result Injection Block Rate -> Agent Incident Gate -> Multimodal Incident -> Input Fidelity Rate -> Multimodal Evidence Recall -> Temporal Evidence Recall -> Multimodal Incident Gate -> Safety Compliance Incident -> Unsafe Pass Rate -> Safety Compliance Gate -> Project Collaboration Incident -> Objective Clarity Rate -> Metric Tree Coverage -> Baseline Coverage -> Experiment Reproducibility Rate -> Version Trace Coverage -> RACI Coverage -> Change Control Coverage -> Risk Escalation Coverage -> Project Collaboration Gate -> Experiment Retrospective -> Hypothesis Coverage -> Slice Analysis Coverage -> Badcase Taxonomy Coverage -> Evidence Coverage -> Timeline Coverage -> Impact Quantification Rate -> Root Cause Rate -> Prevention Coverage -> Action Item Closure -> Regression Verification Rate -> Change Failure Rate -> Retrospective Gate -> Log Check -> Trace Check -> Version Diff -> Root Cause Analysis -> Fix Priority -> Rollback Plan -> Regression Test -> Postmortem Completeness -> Debug Gate -> Incident Triage Audit -> Practitioner Interview Readiness -> Practitioner Interview Rubric -> Project Evidence Score -> STAR Reflection Score -> Trade-off Depth -> Expert Follow-up Readiness -> Weak Practitioner Question -> Practitioner Revision Plan -> Practitioner Interview Gate
 
+Training stability methods subchain: Training Stability -> First Anomaly -> Adam Update Correlation -> Adaptive Preconditioner Curvature -> Global Norm Clipping -> AdaGC Per-Tensor Threshold -> SPAM Online Proxy and Momentum Reset -> GradientStabilizer Magnitude Stabilization -> Fixed Checkpoint Replay -> Quality/Throughput/Resume Regression
+
 ### 研究链
 
 Paper Reading -> Hypothesis -> Baseline -> Experiment -> Ablation -> Error Analysis -> Reproduction Report -> New Research Idea
@@ -325,11 +356,19 @@ Transformer Depth -> 标准残差 -> Attention Residuals -> Block AttnRes -> 深
 
 Post-Training -> 领域专家培养 -> GRPO -> on-policy distillation -> 统一模型能力
 
+DeepSeek-V4 Report v1 -> Domain SFT/GRPO Specialists + GRM + Reasoning Effort Modes -> Student Rollout State Contract (effort / context policy / tool schema) -> Multi-Teacher Reverse KL -> Full-Vocabulary Logit Distillation -> Hidden-State Cache / Teacher-Head Scheduling -> Unified Student; paper-disclosed pipeline, not an independently reproduced causal result
+
+Domain Adaptation -> 任务缺口 -> 样本契约（evidence / revision / calculation / action / escalation） -> SFT / preference / verifiable reward -> 分布与回归评估 -> 硬门禁与发布审计
+
+Post-Training Feedback -> SFT / Preference Pair / Rule Verifier -> Offline Preference: DPO/IPO/KTO/ORPO/SimPO | Online RL: PPO/GRPO -> Advantage -> Ratio and Clipping Unit -> Loss Reduction -> Length / Verifier / Policy Drift Audit -> External Accuracy and Safety Regression; DAPO recipe / DrGRPO / GSPO / DCPO; DHPO / GAPO early-preprint candidates; RUR != accuracy
+
+RLVR Task Contract -> Correctness / Format / Permission / Budget -> Verifier Soundness / Completeness / Coverage -> Reward Mapping -> GRPO Group Advantage -> Ratio Clipping -> Sequence Mean vs Token Mean -> Sandbox / Replay -> Contamination Audit -> IPT / ImpossibleBench -> Independent Transfer Evaluation -> Cost per Successful Task
+
 每条边都要区分“公开模型/论文披露”与“本项目教学抽象”；不能由排行榜名称反推内部机制。
 
 ### GPT-6 Astra 运行时预算分支
 
-GPT-6 Astra -> Context Window -> Maximum Input / Maximum Output -> Reasoning Effort -> Configuration Update -> Reasoning Item / Phase Replay -> Prompt Cache Prefix -> Deferred Tool Search -> Async Function/Custom Tool -> Response Lineage / call_id -> WebSocket Mid-turn Steering -> Compaction Canonical Context -> Skills / AGENTS.md Progressive Disclosure -> Tool Host -> Sandbox Policy -> Misalignment Monitoring -> Permission Trace -> Token Cost Threshold -> Unit Success Cost -> Long-Context Evaluation
+GPT-6 Astra -> Context Window -> Maximum Input / Maximum Output -> Reasoning Mode / Effort -> Configuration Update -> Reasoning Item / Phase Replay -> Prompt Cache Prefix -> Deferred Tool Search -> Async Function/Custom Tool -> task_handle / call_id -> Background Response Mode (model-specific eligibility) -> WebSocket Mid-turn Steering -> Response Lineage -> Compaction Canonical Context -> Skills / AGENTS.md Progressive Disclosure -> Tool Host -> Sandbox Policy -> Misalignment Monitoring -> Permission Trace -> 272K Whole-Request Price Threshold -> Unit Success Cost -> Long-Context Evaluation
 
 该分支描述 OpenAI 官方模型页、模型指南、运行时文档和开发者博客已公开的接口、容量、状态、提示词路由和安全控制关系；模型架构、参数规模和训练方法仍属于待核验信息。`phase` 的现行专节以 GPT-5.5/GPT-5.4 为示例，不把它单独连接成 GPT-6 专属能力。
 
@@ -441,6 +480,12 @@ DeepSeek V4.1-Flash -> DeepSeek-ViT -> 2D-RoPE + 3x3 Pixel-Unshuffle -> MLP Proj
 DeepSeek V4.1-Flash -> 45T Multimodal Pretraining Tokens -> 64K Sparse Attention Training -> 34T Context Extension Data -> 1M Context Evaluation
 
 DeepSeek V4.1-Flash -> SFT -> RL -> On-Policy Distillation -> Agent Task/Environment/Rollout Data Pipeline -> Verifier/Harness Evaluation
+
+On-Policy Distillation -> Output-Distribution/Logit Matching -> Sampled Log-Ratio or Dense Conditional KL/JSD
+On-Policy Distillation -> On-Policy Representation Distillation (OPRD) -> Hidden-State Alignment on Student Rollouts -> Architecture/Tokenizer Bridge Limits
+On-Policy Distillation -> On-Policy Transition Distillation (OPTD) -> Layerwise Log-Probability Increments -> Depthwise Prediction Consistency
+Shared-Base Specialist Checkpoints -> Training-Free OPD (TF-OPD) -> Specialist-Rollout Second Moments -> Layerwise Least-Squares Merge; rollout source differs from strict current-student OPD
+OPD Capability Evaluation -> Answer Marking -> Answer Correctness -> Correct-Answer Stopping/Closure -> Overgeneration and Budget Audit
 
 DeepSeek V4.1-Flash -> Numeric Reasoning Effort (1-100) -> Token/Latency/Quality Budget -> Tool Calls/Timeout/Unit Success Cost
 
@@ -1216,6 +1261,7 @@ Artificial Analysis `claude-opus-5` + DataCurve `mini_swe_agent_claude_opus_5_*`
 2026-08-19 System Card changelog -> Cowork harness mismatch discovered -> rerun old model baselines -> remove unsupported thinking-disabled condition
 Saturated ART -> indirect prompt injection benchmark + adaptive red-team + live bounty -> attacker budget/scenario/version ledger
 IPI / Shade / bounty -> attempt-level ASR + scenario-level ASR -> preserve separate numerators, denominators, confidence/noise
+AgentDojo ASR + task completion -> Attack–Task Outcome Matrix (ATOM) -> preserve safe-but-incomplete and unsafe-but-complete outcomes -> do not claim safety from low ASR alone; 2026 arXiv v1 proportions bind its static benchmark
 untrusted tool result -> input-side prompt-injection probe -> model context boundary
 candidate dangerous tool call -> action-side classifier -> outbound action gate -> Auto mode = product/system result, not bare-model robustness
 System Card RSP -> Opus 5 assessed CB-1 / not CB-2 -> publisher risk assessment + ASL-3 controls -> not independent guarantee or zero risk
@@ -1293,6 +1339,28 @@ Admission audit -> 8/11 families support reference replay -> 480 execution check
 Qwen3.7-Max -> extra setter / benchmark comparator -> not the VHD-Play-trained checkpoint -> do not transfer Qwen3.6 GRPO gains or call VHD-Play Max's internal recipe
 Qwen3.7 blog Task×Harness×Verifier -> separate disclosed method -> VHD-Play paper does not explicitly claim equivalence -> keep linkage thematic, not implementation attribution
 
+### 分布式训练系统链
+
+有效 prediction-target 分母 -> rank / process-group 映射 -> DDP 梯度同步 -> collective 布局 -> ZeRO/FSDP 状态分片 -> TP 矩阵切分 -> PP schedule 与 bubble -> SP/CP 序列分布 -> EP token dispatch/combine -> hierarchical DP 拓扑 -> activation recomputation -> communication/compute overlap -> shard checkpoint 与 manifest -> load-time resharding -> sampler/RNG 恢复语义 -> per-rank timeline -> collective hang 诊断 -> distributed incident gate
+
+研究分支：跨节点 MoE all-to-all -> DualPipe 双向流水线重叠（DeepSeek-V3 作者报告配置）; checkpoint restart -> online parallelism switching（DynaTrain 预印本，尚非通用 runtime 保证）
+
+### 训练显存与数值精度链
+
+训练显存预算 -> 权重/梯度/optimizer state -> live activation 与 attention 中间量 -> allocated/reserved 与设备进程读数 -> allocator 快照可见边界 -> 峰值测量 -> 激活检查点 -> selective recomputation -> FlashAttention IO 变化 -> ZeRO/FSDP transient gather -> CPU/NVMe offload -> OOM 阶段诊断
+
+精度选择 -> FP16/BF16 动态范围与舍入 -> FP16 loss scaling -> effective-batch 梯度尺度一致 -> FP8 scale/amax -> MXFP4/NVFP4 数值格式 -> 全量 FP4 训练 recipe -> QLoRA NF4 冻结底座存储边界 -> 硬件原生支持与 kernel 测量 -> 质量/速度/峰值联合验收
+
+长上下文显存系统 -> OOMB -> chunk-recurrent 调度 -> 在线激活重算 -> paged KV 管理 -> 异步 CPU offload -> dense/sparse attention 分支 -> 延迟与互连带宽边界
+
+### 训练稳定性与恢复证据链
+
+first bad step -> fixed-batch replay + checkpoint/RNG/data-cursor audit -> data/mask/rank/kernel/optimizer branches -> Adam update norm and `v_t`/`g_t^2` mismatch -> LM-head coordinate preconditioning -> output-embedding/logit mean drift -> BF16 spacing grows with magnitude -> same-hidden-state FP32 logits RMS / softmax KL -> evidence-bounded mitigation + domain regression gate
+
+PyTorch DCP 2.15 -> rank-local shard save/load + load-time reshard -> no cross-version `state_dict` compatibility guarantee -> real-state resume drill
+
+TierCheck preprint -> local/peer differential state + remote base checkpoint -> global commit marker/watermark -> software/node/rack failure-specific recovery -> benchmark on target topology/storage before adopting author-reported latency
+
 ### Claude Sonnet 5.5：Thinking State、API contract 与发布方安全评估
 
 Claude Sonnet 5.5 -> Artificial Analysis `max + Default Fallback` -> third-party config measurement; DataCurve exact Agent row absent -> no score transfer
@@ -1307,3 +1375,14 @@ CoT controllability -> weak publisher evidence about monitorability -> visible-v
 ### Gemini 4 Argon
 
 Artificial Analysis `gemini-4-argon` -> Google The Keyword official announcement -> 1M output limit + Fairwind restricted rollout -> coding/enterprise/cyber workflows -> publisher-reported DeepSWE 77.9 / AutomationBench 51.3 / LVBench 91.7 / CWE-bench v1 68 -> safety controls and indirect prompt-injection defense -> no public model card/weights/full recipe/API probe -> no exact DataCurve row -> no metric transfer
+
+### 推理服务成本与路由评估
+
+request resource vector -> provider usage/bill or self-hosted GPU/CPU/storage allocation -> do not double-count cache/reasoning subsets -> total cost / successful task count
+provider prompt cache -> cache read/write usage categories + model/retention-specific rates -> invoice accounting; local prefix KV cache -> prefill reuse + GPU memory occupancy -> physical compute accounting
+router aggregate cost/accuracy -> matched-cost random routing baseline + difficulty slices + within-source evaluation -> expose difficulty blindness, output-length reversal and source leakage
+cost optimization gate -> unit-success cost + quality floor + TTFT/TPOT/P95 + safety evidence -> any hard gate fails -> pause or roll back
+
+### 数学与代码评估
+
+GSM8K 固定题集 -> GSM-Symbolic 数值变体 -> GSM-NoOp 无关条件 -> 配对扰动差；Outcome reward model -> Process reward model -> ProcessBench 第一处错误定位 -> 可见 CoT 忠实性探针；HumanEval/MBPP -> EvalPlus 测试增强 -> LiveCodeBench 时间快照 -> SWE-bench Verified -> SWE-Bench Pro -> Pro 审计撤回旧推荐 -> Pro V2 版本修订 -> 绑定任务质量 / 污染 / split / harness / verifier / 预算

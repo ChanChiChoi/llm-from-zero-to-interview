@@ -105,3 +105,26 @@
 - 来源支持：Transformers 文档要求长于 30 秒的音频不截断，将完整 log-Mel 特征交给 Whisper 自定义 `generate()` 并开启 `return_timestamps=True`；长音频由基于时间戳的顺序解码及压缩率、平均 log probability、温度回退等启发式处理。v5.17.0 与当前 pipeline 源码都把对 seq2seq 模型使用通用 `chunk_length_s` 标为实验性；针对 Whisper，源码建议用模型自己的 `generate()` 长音频路径。pipeline 时间戳返回形状为 `text` 与可选 `chunks`，每项含 `text` 和 `timestamp`；Whisper 词级时间戳由 cross-attention 权重结合动态时间规整（DTW）近似得到，不是独立强制对齐器的精确词边界。`openai-whisper` 的 20250625 是核对日可见的官方发布版本；模型仓库 revision `973afd2` 于 2024-02-29 提交 tokenizer merge 更新。
 - 证据等级：source-backed（版本化官方文档、官方仓库固定 release 与模型仓库提交记录；current pipeline `main` 源码按访问日读取）。
 - 边界：v5.17.0 文档和 tagged pipeline 源码用于固定示例 API；`main` pipeline 源码是动态页面，未来行为应以目标安装版本复查。Whisper revision 只固定模型仓库文件，不能替代 Transformers、PyTorch、音频解码器或硬件版本锁定。未据此推断准确率、时间戳精度或实时性能。
+
+## 2026-11-02 流式语音结构与服务测量
+
+### Qwen3.5-Omni 的 ARIA
+
+- 来源：[Qwen3.5-Omni Technical Report](https://arxiv.org/html/2604.15804)，arXiv:2604.15804v2（2026-04-21）。访问日期 2026-11-02；阅读摘要与 §2.5 “Designs for Streaming and Concurrency” 中的 “Streaming Generation with ARIA”。
+- 来源支持：作者将流式语音合成的不稳定/不自然与文本和语音 tokenizer 的编码效率差异联系起来，并提出 ARIA 动态对齐文本/语音单元；§2.5 说明 ARIA 将 Qwen3-Omni 的双通道生成改写为受单调交织约束的单一 text/speech stream，目标是降低两条生成轨道的同步开销并适配增量解码。报告将其 TTFT（Thinker 首文本 token）、TTFC（Talker 首音频 chunk）与 Overall Latency（首个可播放包关键路径）分别定义；理论延迟数据使用作者内部 vLLM、`torch.compile` 和 MTP/codec decoder CUDA Graph 设置。
+- 证据等级：source-backed（作者报告的结构说明与测量定义）。
+- 边界：tokenizer 编码效率差异是作者对该类流式问题的解释和模型动机，不是对所有 TTS 的因果证明；性能口径受 Qwen3.5-Omni、内部 serving、并发和加速配置限制，不能据理论首包推断客户端网络 TTFA。
+
+### vLLM-Omni 多阶段语音 serving
+
+- 来源：[vLLM-Omni Technical Report](https://arxiv.org/html/2610.09307)，arXiv:2610.09307v1（2026-10-07）。访问日期 2026-11-02；阅读 §2 的 orchestration/stage/connector 职责、§5.1 测量口径、Figure 9/Table 6 与 TTS Table 8。
+- 来源支持：报告把 Thinker → Talker → Code2Wav 组织为多阶段服务，异步 chunk 路径允许下游读取部分 codec 输出；作者区分 Thinker 首文本 token TTFT 与听者首音频包 TTFP。在 Qwen3-Omni Fixed-Len-2500/900、两张 H100、并发 32 的 Table 6 中，async-chunk/no-async-chunk 的均值分别为 TTFT 507.8/3420.1 ms、E2EL 72.63/136.62 s、audio RTF 0.630/0.927。TTS Table 8 在 NVIDIA H200、Seed-TTS English texts 条件下报告 Qwen3-TTS CustomVoice 并发 8 吞吐 81.1/111.6 audio-s/s；默认双 GPU 与融合单 GPU profile 的并发 1 中位 TTFP 为 21.5/15.3 ms。
+- 证据等级：source-backed（预印本架构、指标定义和指定 runtime recipe 的实验）。
+- 边界：报告的 H100/H200 硬件、nightly freeze、固定文本/输出长度、并发、profile 和版本提交均影响结果；TTFT 不等于 TTFP，论文吞吐也不能外推到其他 TTS、网络或质量门槛。数值未本地复现。
+
+### NVIDIA Riva 流式 chunk/padding 示例
+
+- 来源：[Building and Deploying ASR Pipelines](https://docs.nvidia.com/deeplearning/riva/user-guide/docs/public/asr/asr-pipeline-configuration.html)，NVIDIA Riva 动态官方文档。访问日期 2026-11-02；阅读 Conformer `StreamingRecognize` 低延迟和高吞吐配置段。
+- 来源支持：当前页面为低延迟流式配置列出 `chunk_size=0.16`、`padding_size=1.92`；高吞吐流式配置列出 `chunk_size=0.8`、`padding_size=1.6`。低延迟示例还包含相应 tokenizer、verbalizer、decoder 与 endpointing 参数，故该组合不是独立模型常数。
+- 证据等级：source-backed（访问日 NVIDIA 官方配置文档）。
+- 边界：配置绑定 Riva 的 Conformer 流式 API 与文档所述 pipeline；把 `chunk+2×padding` 当作输入窗口只是在左右 padding 对称时的估算，不能直接推出 GPU 工作量、并发或目标识别质量。动态页面在未来部署前应按目标 Riva 版本复查。

@@ -339,21 +339,33 @@ M_{\mathrm{GPU}}
 +M_{\mathrm{runtime}}.
 ~~~
 
-M_weights 是权重和常驻模型 buffer，M_KV 是活跃请求状态，M_activation 是当前 prefill/decode 的中间激活，M_workspace 是 kernel 临时空间，M_communication 是 TP/PP/NCCL 等通信 buffer，其余项包含 block table、scale、allocator 和 runtime 自身开销。
+M_weights 是权重和常驻模型 buffer，M_KV 是已写入的 K/V 数值载荷，M_activation 是当前 prefill/decode 的中间激活，M_workspace 是 kernel 临时空间，M_communication 是 TP/PP/NCCL 等通信 buffer；metadata、fragmentation 和 runtime 分别计入元数据、未使用槽位和框架自身开销。这里把载荷与分配池分开：活跃 token 需要的字节只是池里的一部分，不能直接等同于 GPU 已为 cache 保留的全部显存。
 
-如果 GPU 总容量为 M_total，可供动态 cache 使用的预算不能简单写成 M_total-M_weights，更合理的形式是：
+如果 GPU 总容量为 M_total，先算动态 KV 池可以占用的毛预算：
 
 ~~~math
-M_{\mathrm{KV,budget}}
+M_{\mathrm{KV,pool}}
 =M_{\mathrm{total}}
 -M_{\mathrm{weights}}
 -M_{\mathrm{activation}}
 -M_{\mathrm{workspace}}
 -M_{\mathrm{communication}}
+-M_{\mathrm{runtime,outside\ pool}}
+-M_{\mathrm{metadata,outside\ pool}}
 -M_{\mathrm{headroom}}.
 ~~~
 
-M_headroom 用于吸收长度突发、临时分配、编译 kernel、驱动和监控误差。把所有剩余显存都分给 KV Cache，通常会把偶发 prefill 或长请求变成 OOM。
+M_runtime,outside pool 指不由 KV 池承担的运行时常驻分配；若 block table、scale 或 allocator 元数据也在池外申请，就应在计算 M_KV,pool 前一并扣除。反之，若这些开销从池内支付，则毛预算不能全部用来存 token 载荷：
+
+~~~math
+M_{\mathrm{KV,payload}}
+\leq
+M_{\mathrm{KV,pool}}
+-M_{\mathrm{metadata,in\ pool}}
+-M_{\mathrm{fragmentation}}.
+~~~
+
+这里的 fragmentation 包括已分配 block 的尾部空槽；它不是另一份可以回收给 token 的载荷。M_headroom 用于吸收长度突发、临时分配、编译 kernel、驱动和监控误差。把所有剩余显存都分给 KV Cache，通常会把偶发 prefill 或长请求变成 OOM。估算时要标清每项由池内还是池外承担，避免既在总账扣一次、又在池预算里重复扣。
 
 ### 3.7.2 统一最大长度为什么会浪费
 
@@ -377,6 +389,10 @@ M_{\mathrm{KV,rank}}
 ~~~
 
 但只有在 head 可分片、layout 和实现确实如此时才能除以 r。一些架构的 K/V、latent 或通信状态会复制；pipeline parallel 则按层分配，不是把所有 cache 简单平均。容量报告必须注明“单卡显存”还是“整机总显存”，并给出每 rank 的实际读数。
+
+把窗口和分片代入同一账本，可以看出“架构状态”和“设备放置”是两次不同的缩放。假设一个教学模型有 32 层、H_kv=8、D_h=128、BF16，单请求上下文为 8,192 token，若 32 层都保存全历史 GQA cache，则约为 1 GiB。再假设其中 12 层是 global attention，另外 20 层在模型定义中只保留最近 4,096 token，则有效的 layer-token 数为 `12×8192+20×4096=180224`，而全历史基线是 `32×8192=262144`；相除为 0.6875，因此理论 payload 约 0.6875 GiB。若 TP=4 且 8 个 KV heads 均匀分给 4 个 rank，理想每 rank 约 0.1719 GiB；实际是否分片、复制或另存状态，仍须查 layout 和设备读数。这个例子假定模型本身支持这些窗口，不是在服务端把任意 checkpoint 的历史截短；它也未计 pool rounding、通信和 workspace。
+
+落地时应按模型配置逐层列出 full-attention、windowed attention 和递归 state 三类，再把各层贡献相加；不能先用一个全局 `H_kv` 和统一最大长度替代混合结构。得到整机的理论状态后，再按实现检查每个 TP rank 的真实布局；如果分片不均或存在复制，容量门槛由最紧张的 rank 决定，而不是用各卡平均值掩盖单卡先 OOM。这样，模型结构、请求长度和并行布局才能落在同一份可核对的账本里。
 
 ## 3.8 PagedAttention：逻辑连续，物理分散
 
@@ -422,6 +438,16 @@ W_{\mathrm{tail}}
 ~~~
 
 W_tail 是 token 槽位口径的内部浪费；还要加 block table、对齐、scale 和 allocator 元数据。block 越小，尾部浪费通常越小，但 table 更大、映射和 kernel 调度开销可能更高；block 越大，元数据更少，却可能浪费更多尾部空间。不存在脱离 workload 的万能 block size。
+
+用三条当前长度分别为 680、3,360、1,420 token 的请求手算，设 S_block=128。第一条需要 ceil(680/128)=6 个 block，即 768 个槽位，尾部空 88；第二条需要 27 个 block、3,456 个槽位，尾部空 96；第三条需要 12 个 block、1,536 个槽位，尾部空 116。合计 45 个 block、5,760 个槽位，真实载荷为 5,460 token，因而尾部浪费 300 个槽位，约占载荷的 5.49%。同一组请求若预留 1,024、4,096、2,048 个槽位，则多占 1,708 个槽位；分页把这组假设中的空槽减少 1,408 个，但没有把它变成零。
+
+block size 会改变这一折中。仍用相同长度，S_block=64 时分别分配 11、53、23 个 block，共 87 个 block 和 5,568 个槽位，尾部浪费 108；S_block=128 时为 45 个 block、浪费 300；S_block=256 时为 23 个 block、5,888 个槽位，浪费 428。较小 block 在这个例子里减少了尾部空槽，却让 block table 条目数从 23 增到 87。该计数不含 table 字节、kernel 查表开销或并发分配成本，因此只能说明方向，不能据此宣布 64-token block 的运行性能更好。
+
+把槽位换成显存，才能判断这组差异对服务预算有多大影响。沿用 L=32、H_kv=8、D_h=128、BF16 的 GQA 教学配置，每个 token 的 K/V payload 是 128 KiB。128-token block 方案的 300 个尾部槽位占 37.5 MiB；静态预留的 1,708 个空槽位占 213.5 MiB，二者相差 176 MiB。这个差额只比较 token 槽位，不含 block table、scale、对齐和 allocator 开销。小 block 让 payload 更贴近当前长度，却也提高 block 数和分配/查表频率；因此应把“少浪费了多少 cache 字节”和“kernel 与调度多做了什么工作”作为两类测量结果，不能只用内部碎片比例选 block size。
+
+同一假设下，64-token block 的 108 个尾部槽位是 13.5 MiB，256-token block 的 428 个尾部槽位是 53.5 MiB；中间的 128-token 方案是 37.5 MiB。对应 block 数却分别为 87、45 和 23。这个换算只描述三条请求的尾部 payload，并不代表 table metadata 同比例变化，也不包含并发扩缩和 kernel 查表成本。Paged allocator 缓解了必须找到大段连续空间的外部碎片问题，但页池固定大小、空闲块是否仍驻留 GPU、尾块何时回收都由具体实现决定；读者应分别看槽位浪费、物理池占用和分配失败，不能把“总空闲字节够”当作分配一定成功。
+
+逻辑 block 数也不总等于需要新申请的物理 block 数。设 `S_block=4`、某请求已写 6 个 token，逻辑上占两个 block；再追加一个 token，`ceil(7/4)` 仍为 2，独占的尾 block 不需扩容。但若第二个 block 还被另一分支共享，写入前必须 copy-on-write：申请一个新物理 block，把已有的 `p4,p5` 复制过去，再写 `p6`。因此 scheduler 的分配预算除了序列长度，还要看共享引用和尾块是否可写；只按 `ceil(T/S_block)` 的差值做 admission 会漏掉分叉写入所需空间。
 
 ### 3.8.3 地址换算与 copy-on-write 轨迹
 
@@ -476,7 +502,7 @@ copy-on-write 的关键不是“复制整条 cache”，而是只隔离将被改
 | 代价与限制 | kernel 要支持分页布局；table 查找、映射、调度和 block size 有成本 | 依赖 CUDA VMM 的粒度与映射行为；页粒度、分配延迟和回收时机仍需优化 |
 | 更适合评估的问题 | 现有 runtime 是否围绕 block pool、prefix sharing 和多请求调度构建 | 目标 CUDA 栈能否提供所需 VMM 能力，连续 kernel 复用是否抵消映射成本 |
 
-[PagedAttention 原论文](https://arxiv.org/abs/2309.06180)报告 vLLM 在其模型和 workload 上、保持相近延迟时相对 FasterTransformer/Orca 的吞吐提升为 2–4 倍；[vAttention 原论文](https://arxiv.org/abs/2405.04437)在 Yi-6B、Llama-3-8B、Yi-34B 和 1–2 张 A100 的评估中，报告原版 FlashAttention kernel 路线相对 vLLM 最高 1.97 倍吞吐，并报告相对 paged FlashInfer kernel 最高 1.45 倍 TTFT 加速。两项 vAttention 数据本身也用了不同的 kernel 对照，三组 baseline、硬件和 workload 不能拼成直接排名，也不能推导任意新硬件上的胜负。vAttention 论文还专门处理 CUDA 页粒度和分配调用延迟；所以“借操作系统虚拟内存就没有显存管理问题”也不是成立的结论。选择时应测同一模型、同一长度分布、同一延迟目标下的 TTFT、TPOT、吞吐、KV 浪费、CPU 调度开销和失败恢复路径。
+[PagedAttention 原论文](https://arxiv.org/abs/2309.06180v1)在其模型和 workload 上报告 vLLM 相对 FasterTransformer/Orca、保持相近延迟时的吞吐提升为 2–4 倍；这是该论文配置下的系统结果。[ASPLOS ’25 的 vAttention 论文 v3](https://arxiv.org/abs/2405.04437v3)评测 Yi-6B、Llama-3-8B、Yi-34B 和 1–2 张 A100，并以 vLLM v0.2.7 为共同框架。使用 FlashAttention-2 的非分页 kernel 加 vAttention 时，论文报告 decode throughput 相对 vLLM 最高 1.99 倍；长上下文端到端吞吐相对分页 FlashAttention-2 和 FlashInfer kernel 分别最高 1.18 倍、1.23 倍。1.99 倍这一对照同时改变了 attention kernel，不能把它解释为单独由虚拟内存分配带来的收益；其余数字也只适用于论文模型、硬件、请求长度和软件设置，不构成新硬件上的胜负预测。vAttention 论文还专门处理 CUDA 页粒度和分配调用延迟；所以“借操作系统虚拟内存就没有显存管理问题”也不成立。比较时应在同一模型、长度分布、延迟目标和硬件上测 TTFT、TPOT、吞吐、KV 浪费、CPU 调度开销及失败恢复路径。
 
 ## 3.9 KV Cache 量化：减少字节不等于没有代价
 
@@ -492,6 +518,10 @@ copy-on-write 的关键不是“复制整条 cache”，而是只隔离将被改
 
 这里要求 `M_old>0`、`b_old>0` 和 `b_new>0`，且两边的 token 数、shape 和状态范围确实相同。例如 FP16/BF16 到 INT8，数据部分理论上约减半；到 FP8 也常是 1 byte 数据部分。但 scale、zero point、对齐和 kernel workspace 会让实际比例偏离，某些 runtime 还会在计算前把 cache 转回更高精度。
 
+用一组明确的假设把“数据减半”换成池占用：若 BF16 payload 是 1 GiB，候选 INT8 payload 是 512 MiB，scale 需要 40 MiB、残留区和对齐合计再占 24 MiB，则新路径共需 576 MiB，即 0.5625 GiB；相对 1 GiB payload 少 448 MiB，节省约 43.75%，不是 50%。这些 scale 和残留数字只是教学输入，且为简化比较暂不计 BF16 基线的 metadata；真实对照要使用目标 runtime 对整池的实际分配口径。
+
+scale 粒度本身也有可见的计数差异。仍假设 32 层、每层 8 个 KV heads，若一个 K 或 V head 各用一个 scale group，每层有 `2×8=16` 个组；若每个 head-channel 独立成组，且 `D_h=128`，则每层变为 `2×8×128=2048` 个组，数量扩大 128 倍。scale 是否按 token、block 或整个运行期复用会进一步改变元数据总字节和更新成本；这个计数只比较组数，不代表某个框架确实采用该 layout。核对配置时要读明白 scale 的轴、每组覆盖多少 cache 元素，以及新 token 到来后何时重定标。
+
 ### 3.9.2 量化和反量化
 
 一种常见的对称或仿射量化可以写成：
@@ -505,9 +535,17 @@ x 是原始 K/V 值，q 是低精度整数，`s>0` 是 scale，z 是 zero point�
 
 粒度越细，通常越能跟踪局部分布，metadata 和读取 scale 的开销也越大；粒度越粗，管理简单，但异常值可能占据动态范围，使大部分值量化误差变大。K 和 V 的误差影响也不完全相同：K 参与 attention score，误差会改变权重分布；V 参与加权聚合，误差会改变输出内容。
 
+把公式代入一个合成的四值向量，可以看出 scale 如何决定误差。令 $x=[-1,0.01,0.5,2]$，使用对称 INT8 范围 $[-127,127]$ 和 $z=0$。按最大绝对值选 scale，$s=2/127\approx0.01575$；除以 s 并四舍五入后，量化整数为 $q=[-64,1,32,127]$。反量化得到约 $[-1.008,0.01575,0.504,2]$，绝对误差约为 $[0.008,0.00575,0.004,0]$。最大值 2 占满整个表示范围，所以很小的 0.01 也只能落到相邻量化格点；如果这一组里没有 2，按更小最大值重新定标，0.01 可使用更多有效刻度。
+
+这只是说明 scale 的合成算例，不是某个 runtime 的具体 kernel 或精度测量。实际 cache 选择量化轴时，必须考虑一个 scale 覆盖多少层、head、channel、token 或 block，以及这些 scale 在 decode 时是否能直接被 attention kernel 消费。分组缩小了异常值对其他值的影响，却会增加 scale 元数据和读取次数；把 scale 做得很细也可能让解量化访存、对齐或融合方式成为新瓶颈。因此应把“量化后的有效载荷字节”“scale/残留/对齐总字节”和“读取路径的实际耗时”分开记账。
+
+再用一组值对照整组定标与分组定标。设合成向量为 `[0.01, 0.02, 0.03, 1.0]`，整组共享 `s=1/127` 时，整数约为 `[1,3,4,127]`，反量化前三个值约为 `[0.00787,0.02362,0.03150]`；其中 0.01 的绝对误差约 0.00213。若把前三个小值作为一组、1.0 单独一组，前组 `s=0.03/127`，量化为 `[42,85,127]`，反量化约为 `[0.00992,0.02008,0.03]`，这三个值的误差都约为 0.00008。分组改善了小值精度，但多保存了一份 scale；真实实现还要算 scale 的精度、存储粒度和对齐，且不能假设所有 group 都能独立地按当前样本最大值定标。
+
+量化误差如何传到输出，也可用一轮两值 attention 看清。假设 attention 权重为 `[0.75,0.25]`，V 为 `[0.2,1.0]`，加权结果是 `0.75×0.2+0.25×1.0=0.4`。若反量化后 V 变成 `[0.3,0.9]`，结果为 `0.45`，本轮输出偏差是 `0.05`。这只隔离了 V 的误差传播；K 的误差会先改变 QK 分数和 softmax 权重，所以不能用这一个例子替代对完整注意力路径的质量评估。
+
 ### 3.9.3 KIVI：K 与 V 为什么沿不同维度量化
 
-“把所有 cache 元素都转成 2 bit”会忽略 K、V 在 attention 中的作用不同。K 进入 `QK^T`，量化误差会改变 softmax 前后的注意力分布；V 进入按注意力权重加权的求和，误差沿着被选中 token 的 value 影响输出。因此，KIVI 先观察 cache 分布和 attention 输出误差，再分别选择量化轴：在其研究的模型中，K 的固定 channel 有较大 outlier，按 channel 分组可把 outlier 的动态范围限制在对应 channel；V 没有同样明显的 channel outlier，按 token 量化则把误差限制在单个 token，避免少数重要 token 被其他 token 拉宽量化范围。[KIVI 原论文](https://arxiv.org/abs/2402.02750) 的分析是在指定模型、层和任务上得到，不是对所有 Transformer 的统计定律。
+“把所有 cache 元素都转成 2 bit”会忽略 K、V 在 attention 中的作用不同。K 进入 `QK^T`，量化误差会改变 softmax 前后的注意力分布；V 进入按注意力权重加权的求和，误差沿着被选中 token 的 value 影响输出。因此，KIVI 先观察 cache 分布和 attention 输出误差，再分别选择量化轴：在其研究的模型中，K 的固定 channel 有较大 outlier，按 channel 分组可把 outlier 的动态范围限制在对应 channel；V 没有同样明显的 channel outlier，按 token 量化则把误差限制在单个 token，避免少数重要 token 被其他 token 拉宽量化范围。[KIVI 原论文 v2](https://arxiv.org/abs/2402.02750v2) 的分析是在指定模型、层和任务上得到，不是对所有 Transformer 的统计定律。
 
 KV 是逐 token 到达的流式状态，按 channel 量化 K 还带来实现问题：同一 channel 的一组 token 没收齐之前，scale 和 zero point 不稳定。KIVI 的状态因此分成“已量化组”和高精度 residual。用缩小的教学参数 `G=2`、`R=4` 追踪 6 个 token：K 的 token 1–2 已形成一组并量化，token 3–6 暂留高精度；V 的 token 1–2 已按 token 量化，最近的 token 3–6 暂留高精度。第 7 个 token 到来时，K 先把已满的 4-token residual 按 G 分组量化，再将 token 7 放入新的高精度 residual；V 则将 token 7 入队，把最旧的 token 3 逐 token 量化，继续保留最新 4 个 token。这里的 G、R 仅为看懂状态变化的玩具数值；论文实验使用的 group size 为 32、residual length 为 128。
 
@@ -518,7 +556,9 @@ KV 是逐 token 到达的流式状态，按 channel 量化 K 还带来实现问�
 
 这条路径要实现分组元数据管理、非对齐边界处理，以及和矩阵乘法融合的反量化 kernel；压缩比例不只是 `2/16`。还要加 scale/zero point、残留区、对齐、临时 workspace，并确认读取时的 kernel 是否直接消费低比特数据。KIVI 的系统实验以 Llama-2-7B、单张 A100 80GB 和 ShareGPT 合成 workload 为例，输入/输出平均长度约 161/338 token，并逐渐增大 batch 到 OOM；[论文报告](https://arxiv.org/abs/2402.02750)在相近峰值显存下 batch size 最多增至 4 倍、吞吐提高 2.35–3.47 倍。这里的吞吐收益包含低比特 cache 腾出容量后扩大 batch 的系统效应，不能当成单请求 kernel 提速，更不能把 2-bit 数据宽度直接解释为所有目标模型 cache 可缩小到八分之一或性能必然更快。
 
-当前 runtime 的量化合同还可能与 KIVI 算法不同。例如 vLLM v0.25.0 文档描述 FP8 KV cache 的 per-tensor 和 per-attention-head scale 路径，并说明 head-wise 路径需要特定 backend 和校准流程；这类文档能说明该版本公开支持什么，不等于实现了 KIVI 的 2-bit、K per-channel/V per-token 方案。[vLLM Quantized KV Cache 文档](https://docs.vllm.ai/en/v0.25.0/features/quantization/quantized_kvcache/) 应按实际部署版本重新确认。
+当前 runtime 的量化合同还可能与 KIVI 算法不同。vLLM v0.32.0 的 [Quantized KV Cache 文档](https://docs.vllm.ai/en/v0.32.0/features/quantization/quantized_kvcache/)列出 per-tensor 和 per-attention-head FP8 scale；该版本页面说明 per-head 路径只适用于 Flash Attention backend，并需要 llm-compressor 校准。没有校准时页面列出的 scale 默认值为 1.0。它描述的是该版本公开的 FP8 路径，不等于实现了 KIVI 的 2-bit、K per-channel/V per-token 方案；具体可用配置仍需按目标版本、模型和 backend 核对。
+
+更低位宽也不自动等于更高 serving 性能。UltraQuant v3 研究 context-heavy Agent 的 4-bit KV，并把分组尺度与 AMD CDNA4 的 scaled-MFMA 执行路径结合；作者在 MiniMax M2.5、Qwen3-235B、2×MI355X、TP=2 和并发 6–48 的 SLO 评估中报告，相对 BF16 的 TTFT-qualified goodput 分别为 2.71× 与 4.38×。这些是特定模型、硬件、SLO 与 trace 下的论文结果，不能外推到其他 GPU 或短上下文低压力服务；论文也指出容量未被压满时，相对 FP8 的优势未必出现。[UltraQuant v3](https://arxiv.org/abs/2606.20474v3)
 
 ### 3.9.4 量化评估不能只看显存
 
@@ -533,6 +573,8 @@ KV 是逐 token 到达的流式状态，按 channel 量化 K 还带来实现问�
 | 工程 | 硬件支持、转换流程、checkpoint/runtime 兼容 |
 
 短 prompt 的质量回归通过，不代表长上下文 cache 量化没有误差；单请求跑得快，也不代表高并发下反量化 kernel 没有成为瓶颈。KIVI 等论文提供了 KV 量化方法和实验依据，vLLM 等 runtime 文档提供具体实现参数，二者都不能替代目标模型的独立回放。
+
+一次有解释力的对照至少固定模型 revision、tokenizer/template、prompt 集、采样参数和 workload 到达方式，再按短、中、长上下文分桶比较 BF16 与候选 cache 格式。先在单请求下检查任务结果和长位置证据召回，区分数值误差是否改变答案；再用相同并发和长度 trace 记录 payload、scale/残留/对齐后的池占用、TTFT、TPOT/ITL、峰值和失败率。若质量只在长上下文下降，应回查 scale 粒度与离群值；若质量稳定而吞吐变差，应检查反量化和 kernel 路径；若单请求正常而并发 OOM，则回到完整池预算，而不是把“INT8 理论减半”当作运行时容量结论。
 
 ## 3.10 Prefix Cache：复用什么，隔离什么
 
@@ -561,7 +603,9 @@ R_{\mathrm{prefix}}
 
 同样的自然语言文本，如果模板多了一个 generation marker，最终 token id 就可能改变；同样的 token 前缀，如果来自不同租户，也不应在没有明确隔离策略时共享物理页。缓存命中率应同时报告 request hit rate、reused token rate 和实际节省的 prefill 时间。
 
-这里要区分“业务上完整的复用命名空间”和“某个 runtime 实际参与哈希的字段”。vLLM 当前设计文档描述的 v1 做法是：每个 KV block 的 hash 同时依赖块内 token 和前序 block 的 hash；多模态输入还要把图像等 frontend hash 纳入 extra hash。文档也说明可用每请求 `cache_salt` 把不同信任域隔离到不同 hash 链，降低通过命中延迟推测他人前缀的风险。[vLLM Prefix Caching 设计文档](https://docs.vllm.ai/en/latest/design/prefix_caching/)；[NDSS 2025 的 prompt leakage 研究](https://www.ndss-symposium.org/ndss-paper/i-know-what-you-asked-prompt-leakage-via-kv-cache-sharing-in-multi-tenant-llm-serving/) 在特定多租户框架上展示了 cache sharing 的时序侧信道。salt 是 cache reuse namespace 的隔离措施，不是数据加密、删除证明或所有侧信道的完整安全边界；部署还需让盐值由受信任的租户/会话策略产生，并检查请求鉴权、日志和缓存生命周期。
+这里要区分“业务上完整的复用命名空间”和“某个 runtime 实际参与哈希的字段”。vLLM v0.32.0 的 [v1 Prefix Caching 设计文档](https://docs.vllm.ai/en/v0.32.0/design/prefix_caching/)说明，block hash 由前序 block hash、当前 block token 和 extra hash 组成；extra hash 可包含 LoRA ID、多模态输入 hash 和 cache salt，且该版本只缓存完整 block。每请求的 cache_salt 被加入首个 block 的 hash，使只有 salt 相同的请求才能沿该 hash 链复用；文档把它作为降低时序推断风险的隔离措施。[NDSS 2025 的 prompt leakage 研究](https://www.ndss-symposium.org/ndss-paper/i-know-what-you-asked-prompt-leakage-via-kv-cache-sharing-in-multi-tenant-llm-serving/)在其多租户框架和攻击假设下展示了基于 cache sharing 的 prompt 侧信道。salt 不是数据加密、删除证明或所有侧信道的完整安全边界；部署还需让盐值由受信任的租户/会话策略产生，并检查请求鉴权、日志和缓存生命周期。
+
+普通 prefix cache 需要从开头连续匹配相同 token 与位置状态；RAG 文档块即使在不同请求中重复，只要前面的 prompt 不同，通常也不能命中同一前缀。Tessera v1 探索另一种实验性路径：按检索到的 context unit 寻找可复用 KV，将请求路由到持有该状态的节点，对本地、远端和缺失状态分别处理，并在缺失时重算。它处理的是非前缀上下文复用，不是给普通 prefix cache 换一个哈希键；论文范围限于其 RoPE 全注意力、逐 token KV 和 RAG/Agent trace，hybrid attention、MLA 与在线撤销语义没有在该评估中覆盖。[Tessera 原论文 v1](https://arxiv.org/abs/2609.32999v1)
 
 ### 3.10.3 从首个请求到缓存淘汰的状态轨迹
 
@@ -574,7 +618,7 @@ R_{\mathrm{prefix}}
 | B 到达 | 用 token 和 prefix 链查找连续 full-block 命中 | 仍可复用 | 命中 8 token，两个块 active ref 增至 1；只需 prefill `x,y` suffix | 因已被 B 使用而不能淘汰 |
 | B 完成并遇到内存压力 | 释放 B 的引用，调度器需要新 block 时运行淘汰策略 | 可恢复为 reusable ref=0 | 没有 active 请求继续引用 | 按策略失效 hash 并归还物理 block |
 
-这个轨迹说明 prefix cache 是“有引用生命周期的已计算状态”，不是只查一个哈希就自动省掉整条请求。命中 full blocks 后，scheduler 仍要为 suffix 做 prefill，decode 仍逐 token 增长；按请求计的 hit 也不能代替 reused-token 数。若 B 的 token 在第一个 block 之后就分叉，不能把不匹配的后续 block 当作命中；若 cache salt 或其他 namespace 字段不同，即使 token 相同也应发生 miss。该轨迹刻意忽略调度并发、partial block、量化 scale 和多模态 payload，只展示 [vLLM v1 设计文档](https://docs.vllm.ai/en/latest/design/prefix_caching/) 描述的 block hash、active ref 和 cached-free 淘汰关系。
+这个轨迹说明 prefix cache 是“有引用生命周期的已计算状态”，不是只查一个哈希就自动省掉整条请求。命中 full blocks 后，scheduler 仍要为 suffix 做 prefill，decode 仍逐 token 增长；按请求计的 hit 也不能代替 reused-token 数。若 B 的 token 在第一个 block 之后就分叉，不能把不匹配的后续 block 当作命中；若 cache salt 或其他 namespace 字段不同，即使 token 相同也应发生 miss。该轨迹刻意忽略调度并发、partial block、量化 scale 和多模态 payload，只展示 [vLLM v0.32.0 Prefix Caching 设计文档](https://docs.vllm.ai/en/v0.32.0/design/prefix_caching/)描述的 block hash、active ref 和 cached-free 淘汰关系。
 
 ### 3.10.4 失效和回收
 
@@ -582,14 +626,14 @@ R_{\mathrm{prefix}}
 
 ### 3.10.5 vLLM 与 TensorRT-LLM 的复用管理差异
 
-相同的“复用 prefix”能力可以落成不同的数据结构和淘汰策略。vLLM v1 当前设计文档说明它用 parent hash + block token + extra hash 标识 block，只把 full blocks 放入缓存，并在 block 对象上维护引用数和 free queue；TensorRT-LLM 当前 KV Cache System 文档描述 radix tree 搜索、优先级 LRU，并可把 GPU 淘汰的状态复制到 secondary memory 保持可复用。后者文档也注明当前实现只淘汰 radix-tree leaf，对 limited-attention layers 并不理想。[TensorRT-LLM KV Cache System](https://nvidia.github.io/TensorRT-LLM/features/kvcache.html)
+相同的“复用 prefix”能力可以落成不同的数据结构和淘汰策略。vLLM v0.32.0 的 v1 设计文档说明它用 parent hash、block token 和 extra hash 标识 block，只缓存 full blocks，并在 block 对象上维护引用数和 free queue；TensorRT-LLM 的 [KV Cache System 页面](https://nvidia.github.io/TensorRT-LLM/features/kvcache.html)（2026-11-02 访问）描述 radix tree 搜索、优先级 LRU，以及把 GPU 淘汰的状态复制到 secondary memory 后继续复用。该页面在访问时还提示其“仅淘汰 radix-tree leaf”的 caveat，并称这对 limited-attention layers 不理想；页面同时介绍多个 cache manager，但该 caveat 没有在此处绑定到明确的 manager/release，因此部署时不能把它外推到所有 TensorRT-LLM 版本或模式。
 
 | 设计选择 | vLLM v1 文档 | TensorRT-LLM 文档 | 读者应核验的影响 |
 | --- | --- | --- | --- |
 | 查找结构 | block hash 链，包含前序 block | radix search tree | 最长前缀查询和树/哈希维护成本不同 |
 | 复用命名 | block token、parent hash、extra hash；支持多模态 hash 与 cache salt | 依赖 prompt/block reuse 配置与模型支持 | 模型、adapter、多模态输入和租户命名空间要怎样隔离 |
 | 驻留策略 | cached-free block 进入 free queue，压力时按 LRU 失效 | prioritized LRU，可将 primary block offload 到 secondary memory | 热前缀保留、CPU/host memory 和数据传输成本 |
-| 公开限制 | 只缓存 full blocks；版本/序列化算法影响跨环境确定性 | 当前文档说明只淘汰叶节点，有限窗口 attention 下有适配限制 | 结论必须绑定实际 runtime release、模型结构和配置 |
+| 公开限制 | v0.32.0 文档只缓存 full blocks；hash 细节和序列化算法需按部署版本核对 | 访问日页面提示 leaf-only eviction 等 caveat，但未在该处绑定具体 manager/release | 结论必须绑定实际 runtime release、模型结构和配置 |
 
 该对照只说明公开文档中的实现差异，并不是同一模型上的性能排名。上线前应把 reuse hit token、prefill 节省、GPU/host block 水位、淘汰、迁移字节、延迟和跨租户隔离用同一 trace 测量。
 
@@ -616,11 +660,19 @@ R_{\mathrm{prefix}}
 可以分别记录：
 
 ~~~math
-M_{\mathrm{cache,total}}
-=M_{\mathrm{active}}+M_{\mathrm{reusable}}+M_{\mathrm{metadata}}.
+M_{\mathrm{KV,pool,allocated}}
+=M_{\mathrm{active,payload}}
++M_{\mathrm{reusable,payload}}
++M_{\mathrm{tail,unused}}
++M_{\mathrm{free,allocated}}
++M_{\mathrm{metadata}}.
 ~~~
 
-这里每一项都应是同一时间点、同一 GPU 或同一资源域内的非负字节数。若监控只报告一个总量，却没有说明 active、reusable 和 metadata 的观测边界，就无法决定是淘汰前缀还是减少活跃请求。当显存水位升高时，优先淘汰可重算的 reusable prefix；如果 active cache 也不足，系统应选择排队、拒绝、降级或有明确成本的 offload，而不是静默删除仍在生成请求的历史。
+这里按物理 block 只计一次：正在被请求引用的共享 block 归入 active；不再被活动请求引用、但仍能命中的 block 归入 reusable；已映射进预分配池、尚未使用的 block 归入 free。一个已分配 block 的尾部空槽进入 tail,unused，scale、block table 和 allocator 结构进入 metadata。若 runtime 按需向 CUDA 申请内存、没有预分配空闲 block，则 free,allocated 可为零；若它预先保留整池显存，空闲 block 仍占用 GPU，不能从“当前 token 载荷”里消失。监控若把活跃 token、可重用 block、空闲 block 和池外 allocator 读数混作一个百分比，就无法决定应淘汰前缀还是减少活跃请求。
+
+活跃请求 cache 是当前生成正确性所需的运行状态；可复用 prefix cache 是未来请求可能使用的性能优化。前者优先保证语义和请求隔离，后者可以按 LRU、成本收益和显存水位淘汰。共享物理 block 即使同时能被新请求命中，也只按 active 物理页计一次；释放一条请求的引用，并不代表该页可以直接回收，仍要看其他引用和缓存保留策略。
+
+跨请求 reusable cache 的容量不能用当前 active token 总数替代。前者取决于请求 trace、前缀重合、时间间隔、淘汰策略和希望保留的命中覆盖率。KVSET 论文把页级 LRU 前缀访问 trace 转为 stack distance，用 Mattson stack 算法和 Fenwick tree 一次估算多个容量点；它问的是“为让多少比例的请求保留其理论可命中前缀，需要多少存储”，而不是“此刻并发请求的 KV payload 有多少”。论文的一个内部 coding-agent trace 包含 24,000 个请求，作者报告约 1 TiB 可满足 95% request coverage、约 5 TiB 可满足 99%，而 99.9% 在已观察 trace 中没有显示收敛；这里的 coverage 指请求保留其无限 cache 下理论 hit rate 的比例，不是普通请求命中率。这组容量只说明该 trace 的尾部成本，绑定其模型、SGLang/Mooncake、H20、FP8 KV 和 LRU 设置，不能作为其他服务的容量建议；KVSET 当前也只分析 full-attention 状态和 LRU 策略。[KVSET 原论文 v1](https://arxiv.org/abs/2609.27746v1)。
 
 ### 3.11.3 H₂O 与 StreamingLLM：有限预算保留哪些 token
 
@@ -640,7 +692,9 @@ H₂O 的论文将累计 attention score 作为 heavy-hitter 代理，并与 rec
 
 ### 3.11.4 1M context 的现实边界
 
-接口接受 1M token、模型训练过长上下文、runtime 能分配 1M cache、模型能在中间位置找回证据，是四个不同命题。即使每个 token 的 cache 成本很小，单请求也可能占用大量显存；如果模型有多层 global attention，窗口策略也不会自动帮它保存全部能力。容量、有效检索、跨段推理和单位成功成本应分别测量，不能把 context window 的宣传上限当作可承载并发。
+接口接受 1M token、模型训练过长上下文、runtime 能分配 1M cache、模型能在中间位置找回证据，是四个不同命题。用一个 full-attention 教学配置看容量：若 L=32、H_kv=8、D_h=128、BF16 每值 2 bytes，则每 token 的 K/V payload 为 $2\times32\times8\times128\times2=131072$ bytes，即 128 KiB。1,000,000 个 token 因而需要 131,072,000,000 bytes，除以 $2^{30}$ 约为 122.1 GiB；若说的是 1 Mi token（1,048,576 个）则恰为 128 GiB。这里仅算一条活跃请求的 full-KV 数值载荷，不含权重、激活、scale、block 尾槽、共享缓存、通信和 headroom；并发请求还要把各自状态相加。
+
+即使每个 token 的 cache 成本看起来不大，单请求也可能占用大量显存；如果模型有多层 global attention，窗口策略也不会自动帮它保存全部能力。容量、有效检索、跨段推理和单位成功成本应分别测量，不能把 context window 的宣传上限当作可承载并发。
 
 ## 3.12 OOM 排查：从数字到账本
 
@@ -667,7 +721,7 @@ prefill OOM、decode 过程中 OOM 和模型加载 OOM 的原因不同：
 4. 分开查看权重、activation、workspace、通信和 cache 的峰值时间。
 5. 检查完成、取消、超时和异常路径是否释放 block/reference。
 6. 检查是否存在 static max-length reserve、padding、长请求和 prefix cache 占用。
-7. 在降低并发、缩短输入、降低输出、切换 GQA/量化或增大 block 预算后逐项复现。
+7. 在降低并发、缩短输入、降低输出、换用已按 GQA 训练且通过质量回归的模型/权重、启用已验证的量化配置或调高 KV block pool 限额后逐项复现。
 
 每次只改变一项，才能知道是哪个变量使问题消失。若直接把最大上下文砍半，服务可能暂时不 OOM，却没有说明真正的预算缺口来自 cache、workspace 还是泄漏。
 
@@ -681,9 +735,15 @@ cache 排查中常见三种分母：
 
 例如“cache 使用率 80%”必须说明是 M_active/M_KV_budget，还是 runtime pool 的已分配 block 数；如果把可复用 prefix、空闲但已分配 block 和活跃状态放在一个分子里，运维决策会失真。
 
+沿用前面的三条请求长度和 GQA 教学配置，可以把 OOM 从“权重加载成功”推到实际预算。三个请求共 5,460 个 active token，单 token payload 为 128 KiB，因此精确载荷约 0.667 GiB；按 128-token block 分配后是 5,760 个槽位，约 0.703 GiB。再假设一张 12 GiB GPU 上，权重占 8.5 GiB、prefill 峰值激活 1.0 GiB、workspace 0.8 GiB、通信 0.4 GiB、池外 runtime 0.3 GiB，并保留 0.6 GiB headroom，则 KV 毛池只有 $12-8.5-1.0-0.8-0.4-0.3-0.6=0.4$ GiB。权重虽然能加载，当前这批 cache 连尾部槽位都放不下；根因是剩余预算，而不是 block table 的地址映射本身。
+
+若 admission 把同时活跃的状态压到 3,000 token，单条序列按 128 槽位向上取整为 3,072 槽，载荷约 384 MiB（0.375 GiB），才低于这个 0.4 GiB 的毛池。池内还剩约 25.6 MiB，需要覆盖 metadata、scale 和其他内部碎片，因此这只是“开始有可能放下”的门槛，并非通过容量验收。若 OOM 集中在长 prompt prefill，应同时查 activation peak；若只发生在 decode 后段，再看 cache 增长、block 可用数和释放延迟。改变并发、上下文、模型 artifact 或 cache dtype 时应一次只改一个变量并记录请求 trace，才能判断哪项措施真正缓解了峰值。
+
+这里的 3,000 token 是单条序列的教学输入；如果它是多条请求的合计，必须逐请求取整。比如把 3,000 token 分成 1、1、2,998 三条，block size 为 128 时分别占 1、1、24 个 block，共 3,328 个槽位，而不是单序列的 3,072 个。按每槽 128 KiB 计算需要 0.40625 GiB，已经高于 0.4 GiB 毛池。这个例子说明 admission 应依据每条请求的长度和 block 分配状态，不能只按 active token 总和估算容量。
+
 ## 3.13 一个零依赖的 KV Cache 内存审计 demo
 
-下面的 demo 用三条不同长度请求比较 MHA、GQA 和 MQA 的理论 cache，模拟静态最大长度预留与分页 block 分配的差异，并估算 INT8 数据部分的理想空间变化。它不实现真实 attention，也不模拟 GPU allocator；输出中的 diagnostics 是对教学假设的解释，不是线上发布结论。
+下面的 demo 用三条不同长度请求比较 MHA、GQA 和 MQA 的理论 cache，模拟静态最大长度预留与分页 block 分配的差异，并估算 INT8 数据部分的理想空间变化。它不实现真实 attention，也不模拟 GPU allocator；输出中的 diagnostics 是对教学假设的解释，不是线上发布结论。代码状态：静态审阅，未运行（2026-11-02）。
 
 ~~~python
 import math
@@ -700,6 +760,7 @@ layers = 32
 query_heads = 32
 head_dim = 128
 bytes_bf16 = 2
+bytes_int8 = 1
 block_size = 128
 gpu_budget_gib = 9.3
 weight_gib = 7.5
@@ -759,7 +820,7 @@ def validate_batch(items, block_size_value):
 
 
 def validate_configuration():
-    for name, value in (("layers", layers), ("query_heads", query_heads), ("head_dim", head_dim), ("bytes_bf16", bytes_bf16)):
+    for name, value in (("layers", layers), ("query_heads", query_heads), ("head_dim", head_dim), ("bytes_bf16", bytes_bf16), ("bytes_int8", bytes_int8)):
         positive_int(value, name)
     finite_nonnegative(gpu_budget_gib, "gpu_budget_gib")
     finite_nonnegative(weight_gib, "weight_gib")
@@ -842,7 +903,7 @@ print("last_block_waste_tokens={}".format(last_block_waste_tokens))
 print("reserved_waste_tokens={}".format(reserved_waste_tokens))
 print("reserved_memory_gqa_gib={}".format(reserved_memory_gqa))
 print("paged_memory_gqa_gib={}".format(paged_memory_gqa))
-print("int8_gqa_gib={}".format(round(active_memory_gqa / 2, 3)))
+print("int8_gqa_gib={}".format(round(gib(kv_bytes(active_tokens, kv_head_options["GQA"], dtype_bytes=bytes_int8)), 3)))
 print("fixed_memory_gib={}".format(fixed_memory_gib))
 print("diagnostics={}".format(diagnostics))
 
@@ -866,7 +927,7 @@ expect_contract_error("duplicate request id", lambda items: items[1].update(id=i
 expect_contract_error("empty batch", lambda items: items.clear())
 ~~~
 
-按这组教学参数运行，关键输出为：
+代码没有运行。以下数值按参数、公式和控制流静态推导，作为预期输出：
 
 ~~~text
 active_tokens=5460
@@ -879,7 +940,7 @@ last_block_waste_tokens=300
 reserved_waste_tokens=1708
 reserved_memory_gqa_gib=0.875
 paged_memory_gqa_gib=0.703
-int8_gqa_gib=0.334
+int8_gqa_gib=0.333
 fixed_memory_gib=8.5
 diagnostics={'gqa_reduces_mha': True, 'mqa_reduces_gqa': True, 'paged_rounding_overhead_positive': True, 'paged_plan_fits_budget': True, 'static_reserve_exceeds_budget': True}
 zero block size: block_size must be a positive integer
@@ -890,37 +951,41 @@ duplicate request id: request ids must be unique
 empty batch: requests must be a non-empty list
 ~~~
 
-这里有三个值得注意的细节：分页仍然产生 300 个 token 槽位的尾部浪费，但比静态最大长度预留少；GQA 把理论 cache 从 MHA 的 2.666 GiB 降到 0.667 GiB；在固定权重和 workspace 后，分页方案落在教学预算内，而静态预留超出预算。真实 allocator 还需要加 table、对齐、scale、通信和 headroom，所以不能把 `paged_plan_fits_budget=True` 直接当成真实 GPU 一定不 OOM。
+这里有三个值得注意的细节：分页仍然产生 300 个 token 槽位的尾部浪费，但比静态最大长度预留少；GQA 把理论 cache 从 MHA 的 2.666 GiB 降到 0.667 GiB；按未舍入载荷直接以 1 byte/value 计算，INT8 结果为 0.333 GiB。若先把 BF16 结果 0.667 舍入到三位再除以 2，就会错误地得到 0.334。示例里分页方案落在教学预算内，而静态预留超出预算；但其 `fixed_memory_gib` 只含权重和一个假设 workspace，未模拟 activation、通信、运行时元数据、分配池和 headroom。真实 allocator 还需要加 table、对齐、scale、通信和 headroom，所以不能把 `paged_plan_fits_budget=True` 直接当成真实 GPU 一定不 OOM。
+
+这些布尔量回答的是“按脚本中的简化账本，哪条方案超过给定预算”，不是 runtime 的内存查询结果；若把 activation、通信或 pool headroom 加入账本，判断可能变化。列出的异常输入输出也是静态推演的预期文本，没有执行来确认 Python 解释器结果。读者可沿公式手算三条请求的 token 和 block 数，检查 `diagnostics` 各布尔条件，再把真实 workload 的长度分布替换进模型；不要把演示输出复制成硬件容量结论。
 
 ## 3.14 常见误解与边界
 
+本节是速查卡，各答案的完整机制与推演见链接的主讲段落。
+
 ### 3.14.1 KV Cache 让 attention 变成常数时间
 
-不是。它让历史 K/V 的投影不必每步重算，但新 query 仍要访问历史上下文。只有在模型本身使用局部窗口、压缩 latent 或递归 state 时，历史访问模式才可能发生结构性变化；这也意味着不能再套用同一个 full-KV 公式。
+不是。它让历史 K/V 的投影不必每步重算，但新 query 仍要访问历史上下文。只有在模型本身使用局部窗口、压缩 latent 或递归 state 时，历史访问模式才可能发生结构性变化；这也意味着不能再套用同一个 full-KV 公式。见 [§3.4](#34-kv-cache-为什么加速又为什么仍会变慢)。
 
 ### 3.14.2 剩余显存都可以给 KV Cache
 
-不是。prefill 的激活、attention workspace、通信 buffer、allocator 元数据和突发请求都需要空间。生产服务还需要 headroom，避免在编译、采样、监控或长度突发时把 cache pool 推到不可恢复的 OOM。
+不是。prefill 的激活、attention workspace、通信 buffer、allocator 元数据和突发请求都需要空间。生产服务还需要 headroom，避免在编译、采样、监控或长度突发时把 cache pool 推到不可恢复的 OOM。见 [§3.7](#37-显存账本cache-只是其中一项)。
 
 ### 3.14.3 PagedAttention 消除了碎片和浪费
 
-不完全是。它减少连续预留造成的外部碎片，并把增长控制到 block 粒度，但最后一个 block 仍可能有内部浪费，block table 和映射访问也有成本。block size 需要根据长度分布和 kernel 实测选择。
+不完全是。它减少连续预留造成的外部碎片，并把增长控制到 block 粒度，但最后一个 block 仍可能有内部浪费，block table 和映射访问也有成本。block size 需要根据长度分布和 kernel 实测选择。见 [§3.8](#38-pagedattention逻辑连续物理分散)。
 
 ### 3.14.4 GQA 可以在部署配置里打开
 
-通常不行。GQA 是模型架构和训练权重的一部分，runtime 可以识别已有的 num_key_value_heads，但不能无损地把一个 MHA checkpoint 改成 GQA。任何转换都需要权重处理、兼容的 attention 实现和质量回归。
+通常不行。GQA 是模型架构和训练权重的一部分，runtime 可以识别已有的 num_key_value_heads，但不能无损地把一个 MHA checkpoint 改成 GQA。任何转换都需要权重处理、兼容的 attention 实现和质量回归。见 [§3.5](#35-mhamqagqakv-head-数的取舍)。
 
 ### 3.14.5 MLA 只是 H_kv 更小的 GQA
 
-不是。MLA 通过 latent 和位置相关状态改变 cache 表示方式；它的显存和 kernel 需要使用自己的 layout 计算。用标准 2*L*H_kv*D_h*b 公式估算 MLA，可能得到方向完全错误的结论。
+不是。MLA 通过 latent 和位置相关状态改变 cache 表示方式；它的显存和 kernel 需要使用自己的 layout 计算。用标准 2*L*H_kv*D_h*b 公式估算 MLA，可能得到方向完全错误的结论。见 [§3.6](#36-mla滑动窗口与递归-state不都是同一种-cache)。
 
 ### 3.14.6 INT8 KV Cache 一定省一半显存且没有质量代价
 
-不是。数据部分的理想比例接近一半，但 scale、metadata、对齐和临时转换会减少实际收益；K/V 的误差还可能改变 attention 分布和长上下文质量。量化必须在代表性长度、任务和并发下单独评估。
+不是。数据部分的理想比例接近一半，但 scale、metadata、对齐和临时转换会减少实际收益；K/V 的误差还可能改变 attention 分布和长上下文质量。量化必须在代表性长度、任务和并发下单独评估。见 [§3.9](#39-kv-cache-量化减少字节不等于没有代价)。
 
 ### 3.14.7 Prefix cache 命中就能跨用户共享
 
-不是。共享必须服从模型版本、模板、位置配置和租户权限。可复用的公共规则与含有用户私密历史的 prefix 不是同一类 cache；即使 token 完全相同，也不能绕过访问控制。
+不是。共享必须服从模型版本、模板、位置配置和租户权限。可复用的公共规则与含有用户私密历史的 prefix 不是同一类 cache；即使 token 完全相同，也不能绕过访问控制。见 [§3.10](#310-prefix-cache复用什么隔离什么) 和 [§3.11.2](#3112-active-cache-与-reusable-cache)。
 
 ## 3.15 一个长上下文多租户服务的 cache 设计
 
@@ -962,6 +1027,10 @@ prefix_token_hash
 
 如果两个租户的 system 文本碰巧相同，也不能仅凭 token hash 就允许共享；还要判断该 prefix 是否包含租户策略、检索结果或其他可推断信息。prefix 命中指标还要记录复用 token 数和节省的 prefill 时间，不能只记录命中请求数。
 
+把隔离选择换算成容量代价也能帮助评审。沿用上面的 GQA 教学配置，一个可共享公共模板若有 1,024 token，其 BF16 K/V 载荷为 $1,024\times131,072=134,217,728$ bytes，即 128 MiB，尚未计 block 尾槽和元数据。若四个租户各自使用不同的 cache salt，跨租户的同一模板不能复用，理论上要为每个信任域保留一份；相对单份共享，最多多出约 384 MiB 模板载荷。这个算术只展示隔离策略的空间成本，不表示应当取消隔离：是否允许共享应先由数据权限和威胁模型决定，再由容量规划承接其代价。
+
+容量策略也要落到信任域的监控与 admission 上。一种待验证的设计是为每个租户记录 active blocks、reusable blocks、命中 token 和 eviction bytes，并设定可回收 cache 水位；当共享池压力升高时先淘汰无活动引用的 reusable blocks，再按租户并发配额延迟新请求。这样能解释显存被谁占用、哪类请求被延后，以及隔离带来的 prefix miss 是否集中在某一租户。配额值和淘汰顺序须由业务优先级、SLO 与请求 trace 决定，本例没有给出通用阈值。
+
 最后决定超预算时的动作。可以按优先级淘汰可复用 prefix、限制新请求进入、把长请求放入单独队列、降低最大输出或将可重算状态 offload；不能直接删除活跃请求的历史。每种降级都要在质量和用户契约中有对应语义：截断可能丢证据，摘要可能引入错误，offload 可能增加延迟，拒绝则要返回可重试的明确原因。对 1M context，也要分别测单请求 cache、并发容量、证据检索、跨段推理和单位成功成本；接口可接受的长度不是这些指标的替代物。
 
 这个设计过程把四个层次分开了：公式给出状态数量级，分页决定动态分配，prefix cache 决定可复用计算，权限和生命周期决定哪些状态可以被复用或淘汰。部署评审真正需要的是这些层次之间的证据链，而不是把“KV Cache”“PagedAttention”和“长上下文”合并成一个笼统的加速结论。
@@ -970,23 +1039,24 @@ prefix_token_hash
 
 以下资料按“原始研究、官方实现文档、当前项目测量”分层使用。论文给出方法和实验条件，官方文档描述接口与实现，当前集群压测才决定实际收益。
 
-1. [Hugging Face Transformers: KV Cache](https://huggingface.co/docs/transformers/main/en/kv_cache)：核对 DynamicCache、cache position 和生成过程中的 cache 接口；不代表所有 runtime 使用同一数据布局。
-2. [Efficient Memory Management for Large Language Model Serving with PagedAttention](https://arxiv.org/abs/2309.06180)：PagedAttention 原始论文，说明分页式 KV 管理、共享和 serving 吞吐实验。
-3. [vAttention: Dynamic Memory Management for Serving LLMs without PagedAttention](https://arxiv.org/abs/2405.04437)：比较用户态 block table 与 CUDA 虚拟内存映射路线；论文的 kernel、GPU 和 workload 结果不能与其他论文直接排名。
-4. [vLLM Paged Attention Design](https://docs.vllm.ai/en/latest/design/paged_attention.html)：核对 vLLM 当前 paged attention 的设计文档；实现细节会随版本变化。
-5. [vLLM Automatic Prefix Caching Design](https://docs.vllm.ai/en/latest/design/prefix_caching/) 与 [功能说明](https://docs.vllm.ai/en/latest/features/automatic_prefix_caching/)：核对 block hash、引用、淘汰、多模态 extra hash 与 cache salt；命中率和安全策略仍需项目自测。
-6. [vLLM Quantized KV Cache v0.25.0](https://docs.vllm.ai/en/v0.25.0/features/quantization/quantized_kvcache/)：核对该版本公开的 FP8 cache scale、校准和 backend 选项；不能据此推断支持 KIVI 的 2-bit 格式。
-7. [TensorRT-LLM KV Cache System](https://nvidia.github.io/TensorRT-LLM/features/kvcache.html)：核对 block reuse、优先级淘汰、offload 和 KV event 的当前公开说明；支持项随 manager、模型和 release 变化。
+1. [Hugging Face Transformers v5.17.0: KV Cache](https://huggingface.co/docs/transformers/v5.17.0/en/kv_cache)：核对 DynamicCache、cache position 和生成过程中的 cache 接口；不代表所有 runtime 使用同一数据布局。
+2. [Efficient Memory Management for Large Language Model Serving with PagedAttention](https://arxiv.org/abs/2309.06180v1)：PagedAttention 原始论文，说明分页式 KV 管理、共享和 serving 吞吐实验。
+3. [vAttention: Dynamic Memory Management for Serving LLMs without PagedAttention, ASPLOS ’25](https://arxiv.org/abs/2405.04437v3)：比较用户态 block table 与 CUDA 虚拟内存映射路线；其 1.99×、1.18× 和 1.23× 结果分别绑定不同 kernel 对照、模型、GPU 和 workload。
+4. [vLLM v0.32.0 Paged Attention Design](https://docs.vllm.ai/en/v0.32.0/design/paged_attention/)：该页明确说明它是基于原论文的历史文档，不描述当前 vLLM 代码实现；这里只用来理解论文机制。
+5. [vLLM v0.32.0 Automatic Prefix Caching Design](https://docs.vllm.ai/en/v0.32.0/design/prefix_caching/)：核对 block hash、full-block 缓存、多模态 extra hash、引用/淘汰和 cache salt；安全收益仍需结合实际信任域设计。
+6. [vLLM v0.32.0 Quantized KV Cache](https://docs.vllm.ai/en/v0.32.0/features/quantization/quantized_kvcache/)：核对该版本公开的 FP8 cache scale、校准和 backend 选项；不能据此推断支持 KIVI 的 2-bit 格式。
+7. [TensorRT-LLM KV Cache System](https://nvidia.github.io/TensorRT-LLM/features/kvcache.html)：访问日期 2026-11-02；页面描述 block reuse、优先级淘汰和 offload，并提醒若干当前实现限制；页面随 release 与 manager 演进。
 8. [Multi-Query Attention](https://arxiv.org/abs/1911.02150)：MQA 原始论文，说明共享 K/V 的动机与质量/效率取舍。
 9. [GQA: Training Generalized Multi-Query Transformer Models](https://arxiv.org/abs/2305.13245)：GQA 原始论文，说明从 MHA 到较少 K/V head 的方法和实验。
 10. [DeepSeek-V2: A Strong Mixture-of-Experts Language Model](https://arxiv.org/abs/2405.04434)：MLA 公开设计的重要技术报告；MLA cache 不能直接套用标准 MHA/GQA 公式。
-11. [KIVI: A Tuning-Free Asymmetric 2bit Quantization for KV Cache](https://arxiv.org/abs/2402.02750)：K per-channel、V per-token、residual window 和论文评测；具体质量与吞吐绑定模型、任务和 A100 配置。
-12. [H₂O: Heavy-Hitter Oracle for Efficient Generative Inference](https://arxiv.org/abs/2306.14048) 与 [StreamingLLM](https://arxiv.org/abs/2309.17453)：分别研究累计 attention heavy hitters + recent tokens，以及 attention sinks + recent window；两者解决的问题和保留假设不同。
+11. [KIVI: A Tuning-Free Asymmetric 2bit Quantization for KV Cache, v2](https://arxiv.org/abs/2402.02750v2)：K per-channel、V per-token、residual window 和论文评测；具体质量与吞吐绑定模型、任务和 A100 配置。
+12. [H₂O: Heavy-Hitter Oracle for Efficient Generative Inference, v2](https://arxiv.org/abs/2306.14048v2) 与 [StreamingLLM, v2](https://arxiv.org/abs/2309.17453v2)：分别研究累计 attention heavy hitters + recent tokens，以及 attention sinks + recent window；两者解决的问题和保留假设不同。
 13. [I Know What You Asked: Prompt Leakage via KV-Cache Sharing in Multi-Tenant LLM Serving](https://www.ndss-symposium.org/ndss-paper/i-know-what-you-asked-prompt-leakage-via-kv-cache-sharing-in-multi-tenant-llm-serving/)：多租户 KV sharing 的时序侧信道研究；攻击结果绑定论文中的系统和威胁模型。
-14. [Towards Efficient LLM Serving: A Survey on System-Aware KV Cache Optimization](https://arxiv.org/abs/2607.08057)：用作执行/调度、内存层级、表示压缩和保留策略的研究地图；具体机制回到对应原论文核验。
-15. [Mamba: Linear-Time Sequence Modeling with Selective State Spaces](https://arxiv.org/abs/2312.00752)：递归 state 取代 full attention history 的原始研究之一。
-16. [Transformers are SSMs: Generalized Models and Efficient Algorithms Through Structured State Space Duality](https://arxiv.org/abs/2405.21060)：Mamba-2 及 SSM/attention 关系的研究资料，用于理解非 full-KV 状态的边界。
-17. [Hugging Face Chat Templates](https://huggingface.co/docs/transformers/main/en/chat_templating)：核对模板和特殊 token 对最终前缀 token 序列的影响。
+14. [The KV Cache Working Set: Online Capacity Planning for LLM Inference Systems, v1](https://arxiv.org/abs/2609.27746v1)：KVSET 对页级 LRU prefix trace 的工作集容量分析；论文内部 trace 的覆盖率和容量数字不能外推。
+15. [Towards Efficient LLM Serving: A Survey on System-Aware KV Cache Optimization](https://arxiv.org/abs/2607.08057)：用作执行/调度、内存层级、表示压缩和保留策略的研究地图；具体机制回到对应原论文核验。
+16. [Mamba: Linear-Time Sequence Modeling with Selective State Spaces](https://arxiv.org/abs/2312.00752)：递归 state 取代 full attention history 的原始研究之一。
+17. [Transformers are SSMs: Generalized Models and Efficient Algorithms Through Structured State Space Duality](https://arxiv.org/abs/2405.21060)：Mamba-2 及 SSM/attention 关系的研究资料，用于理解非 full-KV 状态的边界。
+18. [Hugging Face Chat Templates v5.17.0](https://huggingface.co/docs/transformers/v5.17.0/en/chat_templating)：核对模板和特殊 token 对最终前缀 token 序列的影响。
 
 对于新发布模型，资料可信度应按顺序判断：官方技术报告或模型卡是否明确写出 attention/state layout；公开代码是否与报告一致；目标 runtime 是否真正支持该 layout；最后才是当前硬件上的 cache bytes、TPOT 和质量实测。社区帖子或模型名称中的“超长上下文”“线性 attention”不能单独证明部署内存恒定。
 

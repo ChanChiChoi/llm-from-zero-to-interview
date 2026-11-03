@@ -1,12 +1,14 @@
 # 第 17 章 On-Policy Distillation：让学生在自己的分布上学会教师的行为
 
+## 一、从分布错位到教师监督契约
+
 知识蒸馏常被描述成“让小模型模仿大模型”。这句话只说对了一半。教师在干净问题上生成的答案，通常属于教师自己的状态分布；学生上线时会使用自己的 token、自己的错误和自己的工具动作，走到一条不同的轨迹上。如果训练数据只包含教师走过的路径，学生一旦偏离示范，就可能不知道如何恢复。
 
 On-policy distillation（OPD）把学生自己的 rollout 放回训练环路：学生先按照当前策略生成状态或轨迹，教师再在这些状态上提供概率分布、下一步动作、批注、候选答案或验证结果。学生学习的对象不再只是“教师从理想起点如何作答”，还包括“自己已经走错时，如何回到可验证的正确路径”。
 
 这并不意味着教师永远正确，也不意味着 on-policy 天然优于离线蒸馏。学生可能走到教师不熟悉的状态，教师可能给出高置信度的错误建议，token 级监督可能在长轨迹后段变得不可靠，教师调用还会带来巨大的推理和数据安全成本。因此，OPD 的核心问题是状态分布、教师信号和独立验证三者如何对齐。
 
-## 17.0 先理解离线蒸馏为什么会失效
+### 17.0 先理解离线蒸馏为什么会失效
 
 设输入为 x，教师策略为 pi_T，学生策略为 pi_S。普通的离线蒸馏通常从教师或人工数据中得到前缀 s 和目标 a_T，然后最小化学生在这些固定状态上的损失：
 
@@ -33,7 +35,7 @@ P(\text{at least one error by }T)
 
 学生自生成的错误状态可能包括：选错文件、误解接口、重复调用工具、把空结果当成事实、在测试失败后继续重复同一 patch，或者在数学推导中使用了不成立的假设。教师只提供一条从干净输入开始的最终答案，不能直接教会学生处理这些状态。
 
-## 17.1 OPD 解决什么，不能解决什么
+### 17.1 OPD 解决什么，不能解决什么
 
 on-policy 的“on”指的是监督状态由当前学生策略产生，而不是指所有教师数据都必须在线生成。一个实际系统可以混合三种来源：
 
@@ -53,7 +55,7 @@ OPD 主要减少 d_T 与 d_S 的状态分布差异。它不自动解决教师错
 
 只有第三个问题在独立评估中成立，前两个训练现象才有能力意义。
 
-## 17.2 一条样本的状态契约
+### 17.2 一条样本的状态契约
 
 OPD 的样本不是孤立的 prompt 和 answer，而是一个带环境上下文的状态转移记录。可以把一个训练单元写成：
 
@@ -80,9 +82,9 @@ x 是任务输入，s_t 是学生在第 t 步看到的状态，a_t 是学生采�
 
 缺少版本信息时，旧建议可能被误用于新环境；缺少失败状态时，学生只能学习教师的最终答案；缺少资源信息时，训练中看似有效的策略可能在线上完全不可用。
 
-## 17.3 蒸馏目标的层次
+### 17.3 蒸馏目标的层次
 
-### 17.3.1 Token-level 目标
+#### 17.3.1 Token-level 目标
 
 如果学生和教师使用同一词表，教师可以在学生访问的状态上输出完整的 token 分布 p_T，学生分布为 p_S。标准的温度蒸馏交叉熵可以写成：
 
@@ -99,7 +101,7 @@ m_t 是有效监督 mask，Z=\sum_t m_t 是归一化分母，V 是词表，T 是
 
 温度较高时，教师低概率 token 的相对关系更容易被学生看到；温度较低时，监督更接近硬标签，教师的最高概率动作更突出。温度不是“越大越有知识”的开关，过高会把不确定性和错误一同扩散给学生。
 
-### 17.3.2 Reverse-KL 与 sampled token 信号
+#### 17.3.2 Reverse-KL 与 sampled token 信号
 
 OPD 文献中常出现 student-to-teacher 的 reverse KL：
 
@@ -122,7 +124,7 @@ reverse KL 要求在学生赋予正概率的动作上教师也有正概率；否
 
 reverse KL 往往倾向于追逐教师的高概率 mode；当教师分布本身有多个合理答案或高熵时，学生可能过早收缩到单一表达。forward KL 更关心覆盖教师支持的多种可能性，但可能让学生保留更多低质量模式。选择哪一种，应该结合任务、教师熵、verifier 和独立多样性评估。
 
-### 17.3.3 序列、动作和 artifact 目标
+#### 17.3.3 序列、动作和 artifact 目标
 
 教师不一定要输出每个 token 的 logits。可用的目标还包括：
 
@@ -137,7 +139,7 @@ reverse KL 往往倾向于追逐教师的高概率 mode；当教师分布本身�
 
 代码 Agent 更需要“下一步查看哪个文件”“测试失败属于哪类”“是否撤销 patch”；数学任务可以蒸馏最终可验证答案和关键中间式；敏感任务不应为了提高 token loss，就无条件复制隐藏思维链、用户数据或工具凭证。
 
-## 17.4 On-policy 训练循环
+### 17.4 On-policy 训练循环
 
 一个最小的循环是：
 
@@ -156,7 +158,7 @@ student rollout -> collect states and observations
 
 学生 rollout 应保留完整失败上下文。只保存教师修复后的最终 patch，会让训练集看起来很干净，却无法训练恢复行为；只保存错误文本而不保存工具返回，又会让学生无法区分代码错误、环境错误和权限拒绝。
 
-## 17.5 教师信号的可靠性
+### 17.5 教师信号的可靠性
 
 教师输出不是标签真理。一个强教师也可能在开放事实任务中产生幻觉，在陌生代码仓库中误判依赖，在学生偏离太远时给出低质量 token 分布。可靠性至少要从四个维度评价：
 
@@ -180,7 +182,7 @@ m_t 表示基本有效 mask，q_T 是教师置信或校准质量，q_V 是 verif
 
 如果教师的隐藏 reasoning 含敏感信息或未验证假设，不应无条件蒸馏完整思维链。更可审计的目标是最终可验证 artifact、工具 schema、证据引用、错误类别、安全拒答和结构化修复动作。需要展示推理时，也应区分用于训练的内部信号和可对外输出的解释。
 
-## 17.6 一个代码 Agent 的 on-policy 例子
+### 17.6 一个代码 Agent 的 on-policy 例子
 
 设学生接到 issue 后经历以下状态：
 
@@ -209,7 +211,7 @@ s_4: 生成修复，公开和隐藏测试通过
 
 教师如果直接重写整个答案，可能降低短期 loss，却隐藏了错误定位过程。局部建议更接近恢复训练，但也可能不够完整；两种目标可以按状态阶段混合，而不是全程使用同一种粒度。
 
-## 17.7 教师调用策略与成本
+### 17.7 教师调用策略与成本
 
 教师调用昂贵时，不能只比较学生参数量。设每个任务平均产生 n 个学生状态，每次教师调用成本为 c_T，学生状态采样和执行成本为 c_S，教师触发比例为 p_T，单位任务成本可粗略写成：
 
@@ -236,9 +238,11 @@ C_{\mathrm{success}}
 
 `P_success` 是独立任务上的真正成功率，要求 `0<P_success\leq1`；`C_task` 要在相同货币、时间窗口和分摊口径下计量。若独立评估没有任何成功任务，单位成功成本没有定义，不能用 `epsilon` 伪造一个极大但看似可比较的数字。应报告零成功、样本数和置信区间，再先解决成功定义或能力问题。若 OPD 让学生成功率从 0.45 提高到 0.55，但教师调用量增加三倍，单位成功成本可能上升；若训练后线上可以少调用教师、少重试且延迟下降，收益才更可信。
 
+例如，取一组**假设值**：学生每个任务的基础成本 `c_S=1` 个成本单位，平均产生 `n=4` 个状态，教师触发比例 `p_T=0.25`，每次调用成本 `c_T=2`。则选择性调用的任务成本为 `C_task=1+4×0.25×2=3` 个单位。若同一口径下的假设成功率为 `0.60`，单位成功成本是 `3/0.60=5`。若另一种假设策略对每个状态都调用教师，成本为 `1+4×1×2=9`；若其假设成功率为 `0.75`，单位成功成本为 `9/0.75=12`。这些数只演示公式，既不是测量结果，也不是公平的策略比较；实际对比必须使用同一任务集合、成功定义和成本窗口。
+
 触发策略可以比较四个条件：所有状态调用教师、只在困难状态调用、复用离线缓存、完全不用教师。每个条件都按任务难度、错误类型、学生长度和工具状态分桶，否则平均值会掩盖教师只在简单题上有效的事实。
 
-## 17.8 教师缓存、版本与隐私
+### 17.8 教师缓存、版本与隐私
 
 教师结果可以缓存，但相同文本不代表相同状态。代码仓库、依赖、工具 schema、数据快照和权限域改变后，旧建议可能已经失效。
 
@@ -261,7 +265,9 @@ sampling_configuration
 
 恢复训练时还要保存建议的来源、适用状态和验证结果。学生重启后不能把旧 workspace 的建议当成新 workspace 的事实；否则 cache 会把环境漂移隐藏起来。
 
-## 17.9 OPD 的数学视角：从 KL 到 token reward
+## 二、从采样估计到稳定策略更新
+
+### 17.9 OPD 的数学视角：从 KL 到 token reward
 
 “教师与学生的 log-probability 差”可以有两种不同用法：一是构造反向 KL 的期望目标，二是把采样到的差值当作 policy-gradient 更新的权重。两者在数学上相连，但实现时不能把后者简化成对单个差值直接做梯度下降。
 
@@ -290,7 +296,7 @@ D_{\mathrm{KL}}(p_S\|p_T\mid s_t)
 
 ~~~math
 \widehat{\mathcal{L}}_{t}^{\mathrm{PG}}
-=-\operatorname{sg}(r_t-b_t)\log p_S(a_t\mid s_t)
+=-\mathrm{sg}(r_t-b_t)\log p_S(a_t\mid s_t)
 ~~~
 
 `sg` 表示本次更新把括号内的 sampled 信号当常数；`b_t` 是不依赖当前采样动作的 baseline。若加入 `m_t` 或权重 `w_t`，还要说明它们由什么信息计算、是否依赖动作以及是否截断/归一化。实际 batch loss 可将右侧按有效 token 数归一化。反向传播穿过 `log p_S(a_t|s_t)`，不能把采样到的 `-r_t` 当成普通监督标签直接最小化；那样会遗漏 score-function 项，甚至把更新方向弄反。
@@ -319,7 +325,7 @@ D_{\mathrm{KL}}(p_S\|p_T\mid s_t)
 
 当 teacher/student tokenizer 不同，`p_T(v)` 与 `p_S(v)` 没有同一个词表索引，不能直接做 token-level KL。可选办法是使用共享 tokenizer、把教师输出转换为文本序列、在字符/词片段边界上对齐，或退回到动作、artifact 和 verifier 级别的目标。把不同 tokenizer 的 logits 按数组下标相乘，是数值上能运行但语义上错误的实现。
 
-## 17.10 为什么长轨迹后段的教师信号更危险
+### 17.10 为什么长轨迹后段的教师信号更危险
 
 学生越往后生成，前缀越可能偏离教师支持区域。教师仍然可以给出一个概率分布，但这个分布未必是在“教师会到达的状态”上校准过的。长轨迹后段的低质量信号可能造成负迁移：学生本来有一个正确但不同的路径，却被教师的高概率 mode 强行拉走。
 
@@ -343,15 +349,15 @@ delta 是允许的偏离范围，q_T 是教师置信或校准分数，q_V 是 ve
 
 2026 年的公开预印本中，位置偏差研究报告了前段 token 与后段 token 的监督质量差异，并提出用累计差异给 token 加权的 IW-OPD 思路。这个方向与工程直觉一致，但具体提升幅度依赖模型、任务、长度和教师配置，不能把一个预印本的 benchmark 增益当作普遍定律。
 
-## 17.11 稳定 OPD 的几种思路
+### 17.11 稳定 OPD 的几种思路
 
-### 17.11.1 可信区域与信赖域
+#### 17.11.1 可信区域与信赖域
 
 当 student 和 teacher 分布差距很大时，教师在 student-generated token 上的梯度估计可能成为异常值。TrOPD 一类工作把 OPD 限制在教师信号较可靠的区域，对 outlier 使用裁剪、mask 或 forward-KL 等替代，并使用教师前缀进行 off-policy 引导。它的核心思想不是“所有学生状态都强行模仿”，而是让探索逐渐回到教师能够可靠指导的区域。
 
 这类方法的取舍是：过滤太少，训练容易发散或负迁移；过滤太多，学生只学习熟悉的简单区域，on-policy 的价值下降。需要同时报告被过滤的状态比例、过滤前后成功率和状态分布变化。
 
-### 17.11.2 置信度与熵
+#### 17.11.2 置信度与熵
 
 教师熵高时，教师可能认为多个 token 都合理。只选择最高概率 token 会过早收缩多样性；在高熵位置使用更覆盖性的目标，可能比强行做 mode-seeking 模仿更稳。
 
@@ -363,15 +369,15 @@ H_T(s_t)=-\sum_{v}p_T(v\mid s_t)\log p_T(v\mid s_t)
 
 Entropy-Aware OPD 一类研究讨论了在教师高熵位置混合 forward KL、在低熵位置保持更精确模仿的思路。实践中应观察学生熵、pass@k、多样性和最终正确率；只看 top-1 对齐下降，可能错过学生已经丢失了合理候选的事实。
 
-### 17.11.3 奖励裁剪、动态采样与基线
+#### 17.11.3 奖励裁剪、动态采样与基线
 
 REOPOLD 把教师-学生 likelihood ratio 看作 token reward，并通过混合式 reward clipping、基于熵的动态采样和探索到精炼的训练策略稳定 OPD。vOPD 则从控制变量角度处理单样本估计的方差，尝试利用已经计算的 KL 信息构造 token baseline。
 
 这些方法都说明一个共同问题：OPD 不只是一个交叉熵损失，而是带有 on-policy 采样、估计方差和策略更新性质的训练过程。稳定化方法要记录梯度范数、被裁剪 token 比例、教师熵、student/teacher KL 和独立任务结果，不能只报告蒸馏 loss。
 
-## 17.12 多 rollout 与 verifier 的结合
+### 17.12 多 rollout 与 verifier 的结合
 
-如果同一个输入采样多个学生 rollout，只对每条轨迹独立蒸馏，可能浪费了组内成功和失败的对比信息。MOPD 一类研究让教师同时看到同一问题的成功和失败 peer rollout，再构造更有区分度的教师信号。
+如果同一个输入采样多个学生 rollout，只对每条轨迹独立蒸馏，可能浪费组内成功和失败的对比信息。论文 [Multi-Rollout On-Policy Distillation via Peer Successes and Failures](https://arxiv.org/abs/2605.12652) 让教师同时看到同一问题的成功和失败 peer rollout，再构造更有区分度的教师信号；本章称它为“成功/失败 peer 多 rollout 路线”。不要只写裸缩写 MOPD：该缩写也被用于 Multi-Teacher On-Policy Distillation，二者的教师组织方式不同，引用时应写出全名和来源。
 
 设同一任务的学生轨迹为 tau_1,...,tau_G，每条有 verifier 结果 v_i。教师信号可以条件化在成功集合和失败集合上：
 
@@ -385,7 +391,9 @@ u_i=\mathrm{Teacher}(s_i,
 
 Reward-Gated OPD 则把 verifier 反馈用于决定哪些教师 logits 可以被信任：正确且被独立验证的轨迹可以提高教师监督权重，未验证或相互冲突的信号降低权重。这个思路把稀疏结果奖励和密集 token 监督连接起来，但也把 verifier 的偏差带进蒸馏系统，必须做独立评估。
 
-## 17.13 数据和环境的安全边界
+## 三、把教师信号接入可控训练系统
+
+### 17.13 数据和环境的安全边界
 
 教师看到的是学生当前状态，可能包含用户代码、个人资料、未提交凭证、工具返回和跨租户信息。把整条 workspace 直接发送给外部教师 API，会产生数据出境、日志留存和权限扩散风险。
 
@@ -404,7 +412,7 @@ Reward-Gated OPD 则把 verifier 反馈用于决定哪些教师 logits 可以被
 
 对隐藏 reasoning 的处理要尤其谨慎。训练可以使用内部 token 信号，但不应把包含隐私、未验证假设或第三方机密的完整思维链无条件写入学生数据。可优先蒸馏最终 artifact、证据引用、错误类别、安全拒答和结构化动作。
 
-## 17.14 评估：学生是否真的学会恢复
+### 17.14 评估：学生是否真的学会恢复
 
 OPD 最容易被错误评估成“学生和教师越来越像”。但目标不是最大化风格相似度，而是让学生在自己的部署分布中完成更多任务、少走弯路并且少依赖教师。
 
@@ -433,7 +441,7 @@ OPD 最容易被错误评估成“学生和教师越来越像”。但目标不�
 
 如果学生在教师提供建议的 replay 数据上变好，但在新工具版本和新错误类型上不变，说明它可能只记住了教师格式。平均 token KL 下降也不等于任务成功率提高，需要按错误类型、序列位置和环境状态切片。
 
-## 17.15 成本收益的计算
+### 17.15 成本收益的计算
 
 学生 rollout、教师推理、验证和存储构成 OPD 的总成本：
 
@@ -456,11 +464,13 @@ C_{\mathrm{unit\ success}}
 
 该量要求 `N_success>0`，成功要由独立任务结果、权限、预算和必要人工复核共同定义。零成功时应报告“单位成功成本未定义”和失败类别，而不是零成本或任意平滑值。教师调用降低一次错误恢复的步数，可能提高一次任务的教师成本却降低总成本；反过来，学生在训练中依赖大量教师建议，线上没有教师时可能退化。成本分析必须在和部署相同的教师可用性、工具版本和重试预算下进行。
 
-## 17.16 一个轻量的教师调用选择 demo
+把公式里的数字完整走一遍：假设某评估窗口内训练成本为 `C_training=1,200`、独立评估成本为 `C_evaluation=80`、运行成本为 `C_operations=720` 个相同成本单位，独立任务共成功 `N_success=400` 次，则总成本为 `1,200+80+720=2,000`，单位成功成本为 `2,000/400=5` 个单位/成功。这里必须确保三类成本采用同一窗口和计价方式；§17.7 的教师触发账本是单任务局部模型，若教师费用已计入训练或运行账目，就不能再次叠加。
+
+### 17.16 一个轻量的教师调用选择 demo
 
 下面的代码只演示选择逻辑，不模拟模型 logits。它将“低置信度、连续测试失败、高风险动作”作为教师调用触发条件，并生成一个可复查的 cache key。真实系统还应加入数据脱敏、权限校验和环境 revision。
 
-> **代码状态：已验证（2026-10-26，Python 标准库；解释器小版本未记录）。** 执行输出与正文的触发类别、cache key 变化及非法输入说明一致；未运行训练器或 teacher API。
+> **代码状态：静态审阅，未运行（2026-11-02，Python 标准库）。** 按代码检查可预期其触发类别、cache key 变化及非法输入处理；本轮没有执行代码、训练器或 teacher API。
 
 ~~~python
 from dataclasses import dataclass
@@ -675,7 +685,7 @@ print("cache_identity_changes_on_action_risk_and_failures: True")
 
 这个 demo 有四个边界。第一，`confidence` 已被限制在 `[0,1]`，但它只是触发特征，不是权限判断；真正的 write 动作仍要由执行器拒绝或要求独立授权。第二，cache key 同时绑定工作区、学生/教师、tokenizer/template、环境、verifier、权限域、采样版本以及触发决策依赖的动作/风险/失败字段，避免同一文本对应不同状态时错误复用建议。第三，SHA-256 摘要只用于稳定标识，不是匿名化；低熵字段仍可能被猜测，缓存索引也要受访问控制。第四，缓存 payload 必须是有限 JSON；`NaN`、超大置信整数、缺失版本和非法状态会在进入教师调用前失败。缓存命中仍不能绕过最新的安全检查、数据删除请求或人工审批。
 
-## 17.17 常见失败与排查
+### 17.17 常见失败与排查
 
 | 现象 | 可能原因 | 优先修复方向 |
 | --- | --- | --- |
@@ -690,7 +700,7 @@ print("cache_identity_changes_on_action_risk_and_failures: True")
 
 排查时不要只读蒸馏 loss。应抽取正常、低置信、失败、超时、拒绝和高成本轨迹，重放教师和 verifier，再按状态位置和错误类别分桶。OPD 的主要价值在错误恢复，恰恰最容易被平均 token 指标掩盖。
 
-## 17.18 训练阶段如何组合
+### 17.18 训练阶段如何组合
 
 在实际项目中，OPD 通常不是第一步。一个相对清晰的阶段组合是：
 
@@ -703,7 +713,7 @@ print("cache_identity_changes_on_action_risk_and_failures: True")
 
 每一阶段都要保存学生 rollout 分布。若 on-policy 阶段 reward 上升，但状态越来越短、拒答越来越多、探索熵越来越低，可能是模型学会了避开困难状态，而不是学会恢复。若教师调用减少但独立成功率同步下降，也不能把“少调用”解释成蒸馏成功。
 
-## 17.19 学习目标的冲突
+### 17.19 学习目标的冲突
 
 教师 imitation、任务 outcome、工具安全、长度和部署成本可能指向不同方向。例如教师喜欢完整解释，线上要求短答案；教师建议尝试多个工具，线上权限只允许一个只读查询；学生的独特解法能通过 verifier，但与教师高概率 mode 不同。
 
@@ -719,9 +729,9 @@ g(\tau)=
 
 对于高风险动作，g_safety 不是可以与其他分量平均的普通指标。执行器拒绝越权动作，训练日志记录它；教师信号只能帮助学生学会在允许范围内选择动作。
 
-## 17.20 代表性研究分别解决了什么
+### 17.20 代表性研究分别解决了什么
 
-截至 2026 年 10 月，OPD 已不再是一个单独 loss 名称，而是一条从状态采样、教师反馈、支持集选择到梯度更新的设计链。近年的方法分别针对序列分布错位、反向 KL 的 mode collapse、后段 token 失真、学生与教师严重失配、单样本梯度方差、教师错误信号和多次尝试之间的信息浪费；这些是不同故障，修复部位也不同。
+截至 2026-11-02，OPD 已不再是一个单独 loss 名称，而是一条从状态采样、教师反馈、支持集选择到梯度更新的设计链。近年的方法分别针对序列分布错位、反向 KL 的 mode collapse、后段 token 失真、学生与教师严重失配、单样本梯度方差、教师错误信号和多次尝试之间的信息浪费；这些是不同故障，修复部位也不同。
 
 先用统一的问题轴读这些论文，再比较各自结果：
 
@@ -746,13 +756,16 @@ g(\tau)=
 | [TrOPD](https://arxiv.org/abs/2606.01249) | 按 teacher/student 概率差把学生 token 分为信赖区和 outlier：前者用 sampled reverse-KL，后者用 top-k forward-KL；再用教师前缀作 off-policy guidance。 | 论文统一设置为 200 步、学习率 `5e-6`、prompt batch 128、每题 4 rollouts、最大生成 8,096 token；作者报告对比其 OPD 实现时数学平均高 3.06、通用任务高 2.63 个百分点。 | 信赖区阈值不保证教师答案正确；top-k 和教师前缀会改变计算/数据路径，并引入更多 teacher compute。报告中许多 baseline 是作者重实现，不能视为所有框架下的直接横向比较。 |
 | [vOPD](https://arxiv.org/abs/2605.07865) | 把 sampled log-ratio 看成 policy-gradient reward，用不依赖当前 sampled token 的 detached baseline `−KL` 降方差；top-k 只近似 baseline，不删除目标动作支持。 | 在 Qwen3/Olmo-3 系列、六个数学与科学基准上，作者报告相对基础 OPD 平均准确率最多约 +3 个百分点；对比其 full-vocabulary 变体，报告最高 57.7% wall-clock 缩短。 | baseline 只处理局部估计的方差，不自动给更早动作分配未来 token 的信用，也不证明任务正确率。要区分 top-k baseline 与 top-k loss：前者可保持期望梯度，后者会改目标并可能有偏。 |
 | [RG-OPD](https://arxiv.org/abs/2607.04037) | 用任务 verifier 的 outcome 信号 gate 教师 logits：教师偏好只有在任务结果支持时才强化，减少高概率错误教师建议抑制正确学生路径。 | 在 Qwen2.5 1.5B/14B 的 reasoning 与 coding 生成基准上报告 1K/8K 长度设置；论文的 TSD-KD 数字部分取自另一论文，作者明确不纳入自己的平均排名。 | verifier 的错误会直接进入蒸馏 gate，二值 outcome 难以定位哪一步正确；论文结果不能替代 verifier red-team，也不应把 borrowed baseline 当同设置复现。 |
-| [MOPD：Multi-Rollout On-Policy Distillation](https://arxiv.org/abs/2605.12652) | 让 self-teacher 同时看同题的 peer 成功与失败轨迹，把 rollout 组里的正反证据用于构造更有区分度的监督；主要消除“每条 rollout 单独蒸馏、组内信息闲置”的问题。 | Qwen3-4B 的 AIME'24 mean@8 从 base 16.89、SDPO 7.29 提高到 28.54；LiveCodeBench-v6 mean@8 从 base 28.80、SDPO 48.84 提高到 57.01。作者的消融中，“2 successful + 1 failed” 在部分指标上优于只看成功或更多轨迹。 | 需要有成功/失败标签、多个 rollout 和额外 teacher context；论文报告 LCB 每步时间比 SDPO 高 9.1%，QA-Chemistry 高 33.3%。57% 的 Qwen3-4B LCB 提示没有成功 rollout，说明极难题上 peer context 也拿不到正例；结果仍是作者设定下的 preprint 证据。 |
+| [Multi-Rollout On-Policy Distillation via Peer Successes and Failures](https://arxiv.org/abs/2605.12652) | 让 self-teacher 同时看同题的 peer 成功与失败轨迹，把 rollout 组里的正反证据用于构造更有区分度的监督；本章称其为成功/失败 peer 多 rollout 路线。 | Qwen3-4B 的 AIME'24 mean@8 从 base 16.89、SDPO 7.29 提高到 28.54；LiveCodeBench-v6 mean@8 从 base 28.80、SDPO 48.84 提高到 57.01。作者的消融中，“2 successful + 1 failed” 在部分指标上优于只看成功或更多轨迹。 | 需要有成功/失败标签、多个 rollout 和额外 teacher context；论文报告 LCB 每步时间比 SDPO 高 9.1%，QA-Chemistry 高 33.3%。57% 的 Qwen3-4B LCB 提示没有成功 rollout，说明极难题上 peer context 也拿不到正例；结果仍是作者设定下的 preprint 证据。 |
+| [OPRD：On-Policy Representation Distillation](https://arxiv.org/abs/2606.06021v4) | 在同一学生 rollout 上对齐选定层的隐藏表示，以逐样本、逐层的确定性信号补充只对齐输出分布的目标；OPRD-Bridge 用冻结的投影桥处理层数/宽度差异和跨 tokenizer 对齐。 | 作者在数学推理设置报告 AIME24、AIME25、AIMO 上缩小学生与教师差距，并称其配置相对 top-k 输出目标训练快 1.44 倍、显存最多降低 54%。 | 主要证据是长 CoT 数学实验；报告中的 code、agent、开放对话迁移仍是未来方向。速度和显存数字绑定论文模型、实现与比较配置，跨架构桥接也不是免校准的通用接口。 |
+| [On-Policy Transition Distillation（OPTD）](https://arxiv.org/abs/2610.28048v1) | 在学生 rollout 上对齐层间 log-prob 预测增量，监督对象是深度方向的预测转变，不是 OPRD 的隐藏表示。 | 预印本报告三种 backbone、八个数学/代码/指令基准；一个三领域设置中总体分数由 OPD 的 37.89 提高到 OPTD 的 39.57，教师—学生能力差距恢复比例由 74.9% 到 89.2%。 | 结果是作者在特定数据、teacher routing、预算与评测口径下的预印本对照；层间一致性与回答正确率的诊断关联不能单独证明因果机制，更不能外推到所有学生规模。 |
+| [Training-Free On-Policy Distillation（TF-OPD）](https://arxiv.org/abs/2610.22236v2) | 对共享同一底模的专家模型，用专家 rollout 输入的二阶矩逐层解最小二乘融合，不做梯度更新。它是相邻的无梯度合并路线，不等同于让当前学生策略在线采样并反复更新的严格 OPD。 | 作者在 Olmo-3.1-7B 数学/代码专家实验中报告七项基准平均值 61.1，高于数学专家 59.8 和代码专家 53.6；主设置使用数百条经筛选的专家 rollout。 | 主结果依赖共享底模和专家 rollout；论文测试学生 rollout 的变体，但去除循环样本后未报告超过专家 rollout 的增益。小规模竞赛集与精度敏感性限制外推，不能把“training-free”理解成不需要数据筛选或验证。 |
 
-从改进路径看，先确定故障发生在哪一段：信号方差过大时才考虑 vOPD baseline 或 reward clipping；教师在学生状态上不可靠时考虑信赖区或 verifier gate；后段监督变差时评估位置权重；高熵位置失去多条解题路径时测试 EOPD；多条尝试之间信息闲置时评估 MOPD。这个对应关系是基于方法机制提出的诊断顺序，不是论文证明了一个通用组合配方。每次只改一个机制，并固定底模、教师、prompt、验证器、采样预算和评测，才能判断是教师信号、状态覆盖还是更新公式带来变化。
+从改进路径看，先确定故障发生在哪一段：信号方差过大时才考虑 vOPD baseline 或 reward clipping；教师在学生状态上不可靠时考虑信赖区或 verifier gate；后段监督变差时评估位置权重；高熵位置失去多条解题路径时测试 EOPD；多条尝试之间信息闲置时评估成功/失败 peer 多 rollout 路线。输出目标如果受词表瓶颈限制，可比较 OPRD 的隐藏表示目标；想增加深度方向的预测监督，可研究 OPTD；若已有同底模专家 checkpoint、希望避免梯度训练，则可评估 TF-OPD，但它的 rollout 来源与严格 OPD 不同。这个对应关系是基于方法机制提出的诊断顺序，不是论文证明了一个通用组合配方。每次只改一个机制，并固定底模、教师、prompt、验证器、采样预算和评测，才能判断是教师信号、状态覆盖还是更新公式带来变化。
 
 读这些论文时，要把公开方法主张、论文实测和工程推断分开。尤其不要把“teacher KL 降低”写成任务正确率提高，也不要把训练后教师调用减少写成学生已经会恢复；最终仍要看独立任务成功、安全、调用成本和多 seed 波动。
 
-### 17.20.1 厂商技术报告、工程文章与训练器文档
+#### 17.20.1 厂商技术报告、工程文章与训练器文档
 
 论文对照说明了研究者改了哪一种学习信号，公开技术报告和工程实现还补上了两个不同问题：一条训练流水线在模型开发中如何分阶段使用 OPD，以及研究目标落入代码后会变成哪些采样、显存和接口选择。技术报告提供作者自己的系统结果，工程文章提供某个实现视角，框架文档描述接口；它们都不能代替独立复现。
 
@@ -770,17 +783,19 @@ Thinking Machines Lab 的工程文章展示了另一种使用方式：在领域 
 
 | 工程接口/材料 | 文档描述的实现选择 | 读者应检查的限制 |
 | --- | --- | --- |
-| [TRL DistillationTrainer](https://huggingface.co/docs/trl/main/distillation_trainer) | 当前 `main` 文档描述学生自生成、对完整 next-token 分布做分块 JSD；支持 vLLM 生成，异步版本可经 HTTP 访问教师。 | 文档可变；当前 `main` 标为需要从源码安装，并指向稳定版 v1.16.0。实现目标不等于论文效果，需固定 TRL、Transformers、vLLM revision 和 tokenizer/template 后核对 loss、生成与梯度。 |
-| [TRL GKDTrainer](https://huggingface.co/docs/trl/gkd_trainer) | 文档把 `lmbda` 映射为学生生成数据比例，把 `beta` 映射为 Generalized JSD 混合系数，并保留序列 KD 选项。 | 当前文档路径位于 `trl.experimental.gkd`；API 字段语义会变化。不要把参数名与论文符号直接等同，需检查安装版本的配置、loss reduction 和数据采样代码。 |
+| [TRL DistillationTrainer](https://huggingface.co/docs/trl/en/distillation_trainer) | 当前动态文档描述学生自生成、可选 vLLM 生成、分块 Jensen–Shannon divergence（JSD）以匹配完整 next-token 分布；异步对应实现把生成与训练解耦，并可通过 HTTP 使用远端 teacher。 | 文档会随 TRL 更新，页面语义不是某个固定安装版本的保证。应固定实际 TRL/Transformers/vLLM revision，再检查生成、教师分布计算、loss reduction 和梯度路径。 |
+| [TRL GKDTrainer](https://huggingface.co/docs/trl/en/gkd_trainer) | 当前动态文档将 `lmbda` 定义为学生自生成数据比例，`seq_kd` 控制教师序列级数据，`beta` 控制 generalized JSD 中 forward-KL 与 reverse/inverse-KL 近似的插值；接口位于 `trl.experimental.gkd`。 | 参数名和文档会变化；`beta` 的方向、loss reduction、数据采样及 tokenizer/template 必须按安装版本的配置与源码核实，不能从字段名直接推断目标函数。 |
 | [Microsoft LMOps MiniLLM 实现](https://github.com/microsoft/LMOps/tree/main/minillm) | 官方仓库包含训练脚本、教师混合采样、模型并行及数据处理；README 标注示例实验使用 16×32 V100，且针对 MiniLLM 修改了 Transformers。 | 这是复现实验代码入口，不是现代训练栈的开箱即用 recipe；需核对依赖版本、数据处理、硬件规模和论文中的 checkpoint 选择条件。 |
 
 把框架配置映射回算法时，最少记录五项：rollout 由谁生成、哪些前缀被训练、teacher logits 或 log-prob 以什么粒度读取、loss 的词表/序列归一化方式、训练吞吐中是否计入生成与教师服务。若训练器只输出一个总 loss，仍需额外记录成功率、恢复率、教师调用与失败状态覆盖，否则无法判断优化了的是能力、模仿分布，还是更容易的状态子集。
 
-## 17.21 常见误区与诊断路径
+## 四、验证迁移能力并解释失败边界
+
+### 17.21 常见误区与诊断路径
 
 OPD 的损失下降很容易被误读成“学生已经学会了教师的能力”。真正需要追踪的是状态分布、教师信号、任务结果和线上约束之间是否形成了因果链。下面几个误区经常同时出现，诊断时应逐一拆开，而不是用一个平均蒸馏 loss 作结论。
 
-### 17.21.1 学生生成状态不等于训练始终是 on-policy
+#### 17.21.1 学生生成状态不等于训练始终是 on-policy
 
 “on-policy”描述的是状态或动作由当前行为策略产生，而不是数据集只要包含学生文本就永远是 on-policy。学生 checkpoint 更新后，旧 rollout 仍然来自旧策略；如果把它们长期重复训练，状态分布就会逐渐变成 replay 分布。于是，一个名义上的 OPD 管线实际上可能混合了当前策略、旧学生策略和教师示范三种来源。
 
@@ -799,7 +814,7 @@ alpha_k 是各版本 rollout 的混合权重。若当前策略与旧策略差距
 
 一个实用的诊断顺序是：先按 policy revision 绘制状态访问比例，再比较当前学生在这些状态上的 log-probability，最后观察旧样本和新样本对梯度范数、成功率及恢复率的贡献。如果旧 rollout 占比不断增加而独立恢复率下降，问题可能是 replay 过期，而不是教师能力不足。
 
-### 17.21.2 OPD 与 RL 有联系，但优化对象不同
+#### 17.21.2 OPD 与 RL 有联系，但优化对象不同
 
 在学生采样到 a_t 后，教师与学生的 log-probability 差可以作为 token-level shaped signal。它的期望与负的 reverse KL 相关，因此可以放进策略梯度或其他在线更新中。但这个信号只说明“教师认为该动作相对可能”，不等于外部环境确认了任务成功。
 
@@ -823,7 +838,7 @@ alpha_k 是各版本 rollout 的混合权重。若当前策略与旧策略差距
 
 这里的 beta 和 lambda 不是越大越好。教师项过强，学生会追逐教师的表达 mode；任务项没有独立 verifier 时，结果可能被错误奖励放大；约束项如果只是可被抵消的软惩罚，就不能承担权限控制。是否称为“蒸馏”“策略优化”或“两者混合”，应由实际梯度、采样和奖励定义决定，而不是由训练器的名称决定。
 
-### 17.21.3 更强的教师不一定在学生状态上更有用
+#### 17.21.3 更强的教师不一定在学生状态上更有用
 
 教师在标准 benchmark 上更强，只说明它在那个任务分布、提示格式和资源预算下取得了更好的结果。学生可能把状态带到教师很少见的区域，例如损坏的代码工作区、缺少字段的工具响应、版本不匹配的依赖或已经执行过一次危险动作的环境。此时教师的总体能力排名不能替代对该状态分布的覆盖测试。
 
@@ -831,7 +846,7 @@ alpha_k 是各版本 rollout 的混合权重。若当前策略与旧策略差距
 
 教师信号的选择也要考虑学生的学习能力。完整 logits、长篇批注和复杂工具计划并不一定比一个明确的错误类别或下一步动作更好。可以做分层目标：先蒸馏结构化动作和安全协议，再加入局部 token 分布；对高不确定状态允许教师拒答或请求额外证据。这样做的依据是可验证性和可执行性，而不是教师回答的长度。
 
-### 17.21.4 教师调用减少不等于蒸馏成功
+#### 17.21.4 教师调用减少不等于蒸馏成功
 
 训练后教师触发率下降可能有三种完全不同的解释：学生学会了在困难状态中恢复；触发器变得过窄，困难状态没有再被识别；学生通过早早拒答、缩短轨迹或避免工具动作来逃避风险。三者的教师调用曲线可能相同，但任务结果和安全后果相反。
 
@@ -845,11 +860,13 @@ P(\mathrm{recover}\mid \mathrm{failure\ state},\mathrm{teacher\ available}).
 
 这个条件概率只在评测中存在至少一个被定义的 failure state，且“教师可用/不可用”的分组、预算、权限和任务版本可比时才有意义。若失败状态样本为零，或教师因系统故障而非策略实验不可用，应报告分母和未知状态，而不是把条件恢复率解释成学生能力差异。
 
-### 17.21.5 如何证明 OPD 带来了能力，而不是风格相似度
+#### 17.21.5 如何证明 OPD 带来了能力，而不是风格相似度
 
 教师 replay 上的 token loss、KL 和输出相似度只能证明学生更像教师。能力主张至少要比较四组对象：固定教师轨迹上的 offline KD、学生自生成状态上的 OPD、没有蒸馏的学生基线，以及教师本身。所有条件应尽量固定任务、提示、工具、模型预算和评估环境，只改变数据分布或蒸馏方法。
 
 测试不能只使用训练中出现过的错误。应分别加入新的题面、从未见过的错误类别、工具失败、长轨迹后段、权限撤销、依赖版本变化和不允许的动作。对代码任务，尤其要构造“第一次 patch 失败、第二次可以恢复”的成对场景；对 RAG 任务，要更换文档版本并检查引用是否仍然支持结论；对数学任务，要检查不同等价表达而不是只比较字符串。
+
+还要把“答对”和“知道何时停下”拆成不同结果。一项小规模研究将 Qwen3-8B 蒸馏到 4B、1.7B、0.6B 学生，发现其 thinking-mode 设置下解题能力有所迁移，但较小学生的停止/收束能力没有同样迁移：有些样本已经给出正确答案，仍继续生成。这个结论只适用于论文的模型、模式和评测设计，不能据此断言 OPD 普遍不会教会停止。评测至少分别统计答案标记率、答案正确率，以及“正确答案后恰当结束”的比例和答案后过度生成率；否则只看最终答案是否出现，会漏掉不停止造成的格式、预算或安全风险。[研究来源](https://arxiv.org/abs/2609.37326v1)
 
 结果报告应同时包含首次成功率、错误后的恢复率、恢复步数、隐藏测试通过率、unsafe-action rate、教师调用数、学生 token、延迟和单位成功成本。可以用配对任务估计 OPD 与 offline KD 的成功率差异：
 
@@ -859,9 +876,11 @@ P(\mathrm{recover}\mid \mathrm{failure\ state},\mathrm{teacher\ available}).
 -\hat P_{\mathrm{offline}}(\mathrm{success}).
 ~~~
 
+用 20 个完全配对的合成任务演示分母：假设 OPD 与 offline KD 都成功 9 题，只有 OPD 成功 5 题，只有 offline KD 成功 2 题，两者都失败 4 题。于是 OPD 成功 `9+5=14` 题，即 `14/20=70%`；offline KD 成功 `9+2=11` 题，即 `11/20=55%`；差值为 `70%-55%=15` 个百分点。这个玩具样本只演示计数，不支持显著性结论；正式分析应利用配对结构报告区间，并可用 McNemar 检验或按任务成对重采样估计不确定性。`5` 对 `2` 的不一致配对数尤其重要，单独比较两个百分比会丢掉这项信息。
+
 这个差异还应按错误类型和轨迹位置给出置信区间或重采样范围。只报告一个总体均值，会把 OPD 真正改善的恢复样本和它造成负迁移的长尾样本混在一起。
 
-### 17.21.6 tokenizer 不一致时，数值对齐可能掩盖语义错误
+#### 17.21.6 tokenizer 不一致时，数值对齐可能掩盖语义错误
 
 token-level KL 的前提是教师和学生在同一状态上使用可对应的动作空间。若两者 tokenizer 不同，教师词表中的第 1234 个 token 与学生词表中的第 1234 个 token 没有语义上的对应关系；按数组下标相乘虽然不会触发 shape error，却是在优化错误目标。
 
@@ -871,13 +890,13 @@ token-level KL 的前提是教师和学生在同一状态上使用可对应的�
 
 最后，任何 tokenizer 迁移都要用语义任务验证：格式是否可解析、工具动作是否有效、引用是否落在正确 span、数学表达是否等价。数值训练正常只说明张量计算完成，不能证明教师和学生学习的是同一个行为。
 
-## 17.22 小结
+### 17.22 小结
 
 On-policy distillation 的价值在于让教师看到学生真正会访问的状态，并在这些状态上提供可以验证、可以约束、适合学生能力的指导。它针对的是离线示范与部署轨迹之间的分布差异，不是对教师正确性、探索质量、安全权限或任务泛化的自动保证。
 
 一套可解释的 OPD 系统应分开记录学生状态分布、教师版本与信号粒度、tokenizer 和协议、verifier、过滤和权重、工具环境、缓存、教师成本、恢复成功率以及独立任务结果。长轨迹后段、学生与教师分布偏离、高熵 token 和教师高置信错误，是需要单独抽样的风险区域。
 
-2023 年 MiniLLM 与 GKD 建立了序列级和条件分布两条学生状态蒸馏路线；Qwen3 技术报告展示了 off-policy 初始化与 on-policy logits 对齐的组合流水线。2026 年 REOPOLD、TrOPD、位置偏差、熵感知、vOPD、RG-OPD、MOPD 和 TOP-D 分别处理稳定性、可信监督和 rollout 组内信息。论文结果、厂商报告、工程文章和框架文档各有证据边界；不能压缩成“用了 OPD 就能把大模型能力传给小模型”的新闻结论。
+2023 年 MiniLLM 与 GKD 建立了序列级和条件分布两条学生状态蒸馏路线；Qwen3 技术报告展示了 off-policy 初始化与 on-policy logits 对齐的组合流水线。2026 年 REOPOLD、TrOPD、位置偏差、熵感知、vOPD、RG-OPD 和成功/失败 peer 多 rollout 路线分别处理估计稳定性、可信监督和组内信息；OPRD、OPTD 与 TF-OPD 又把监督目标分别扩展到隐藏表示、层间预测变化和共享底模专家的无梯度合并。它们的 rollout 来源、更新方式和证据成熟度并不相同。评估还要把答案正确性与停止/收束能力分开。论文结果、厂商报告、工程文章和框架文档各有证据边界；不能压缩成“用了 OPD 就能把大模型能力传给小模型”的新闻结论。
 
 ## 17.23 资料与进一步阅读
 
@@ -900,13 +919,17 @@ On-policy distillation 的价值在于让教师看到学生真正会访问的状
 10. [Reward-Gated On-Policy Distillation / RG-OPD](https://arxiv.org/abs/2607.04037)：用 verifier outcome gate 教师信号，并讨论结果监督和密集 logits 的互补。
 11. [Multi-Rollout On-Policy Distillation via Peer Successes and Failures](https://arxiv.org/abs/2605.12652)：同题成功/失败 peer 如何改变 self-teacher 信号及额外调用开销。
 12. [Trust Region Policy Distillation / TOP-D](https://arxiv.org/abs/2607.04751)：动态 proximal teacher 路线。
+13. [OPRD: On-Policy Representation Distillation](https://arxiv.org/abs/2606.06021v4)：在学生 rollout 上对齐隐藏表示；OPRD-Bridge 探索跨架构与跨 tokenizer 迁移。当前证据以数学推理为主，code/agent/开放对话外推仍待验证。
+14. [On-Policy Transition Distillation](https://arxiv.org/abs/2610.28048v1)：对齐学生 rollout 上层间 log-prob 预测增量；预印本结果需绑定论文的模型、数据、预算与评测协议。
+15. [Training-Free On-Policy Distillation](https://arxiv.org/abs/2610.22236v2)：共享底模专家的层级最小二乘合并路线；注意其主要设置使用专家 rollout，不等同于当前学生 on-policy 训练。
+16. [Solving Without Stopping: On-Policy Distillation at Small Scale](https://arxiv.org/abs/2609.37326v1)：将解题、答案标记和停止分开评估；结果限于论文的小模型与 thinking-mode 设置。
 
 ### 综述、工程文章与框架文档
 
-13. [A Survey of On-Policy Distillation for Large Language Models](https://arxiv.org/abs/2604.00626)：使用 2026-10-21 修订的 v5 建立 student state、teacher feedback、policy update 的分类地图；页面标注 Work in Progress，应按在写综述阅读。
-14. [A Formula-Driven Survey and Research Agenda for On-Policy Distillation](https://arxiv.org/abs/2606.22793)：以采样动作权重、时间信用和词表质量路由拆解估计器；GAE-OPD、CR-OPD 在该文中是待研究议程，不是已验证的通用方案。
-15. [Thinking Machines Lab：On-Policy Distillation](https://thinkingmachines.ai/blog/on-policy-distillation/)：工程团队解释逐 token reverse-KL、rollout 与教师 log-prob 路径，并报告其 Qwen3-8B 行为恢复/效率实验；内部评测、模型和预算只支持该文自身结论。
-16. [TRL DistillationTrainer 文档](https://huggingface.co/docs/trl/main/distillation_trainer) 与 [GKDTrainer 文档](https://huggingface.co/docs/trl/gkd_trainer)：查看当前接口中的学生 rollout、chunked JSD、vLLM/HTTP teacher、`lmbda` 和 `beta` 语义；动态文档需固定版本后再复现。
+17. [A Survey of On-Policy Distillation for Large Language Models](https://arxiv.org/abs/2604.00626)：使用 2026-10-21 修订的 v5 建立 student state、teacher feedback、policy update 的分类地图；页面标注 Work in Progress，应按在写综述阅读。
+18. [A Formula-Driven Survey and Research Agenda for On-Policy Distillation](https://arxiv.org/abs/2606.22793)：以采样动作权重、时间信用和词表质量路由拆解估计器；GAE-OPD、CR-OPD 在该文中是待研究议程，不是已验证的通用方案。
+19. [Thinking Machines Lab：On-Policy Distillation](https://thinkingmachines.ai/blog/on-policy-distillation/)：工程团队解释逐 token reverse-KL、rollout 与教师 log-prob 路径，并报告其 Qwen3-8B 行为恢复/效率实验；内部评测、模型和预算只支持该文自身结论。
+20. [TRL DistillationTrainer 文档](https://huggingface.co/docs/trl/en/distillation_trainer) 与 [GKDTrainer 文档](https://huggingface.co/docs/trl/en/gkd_trainer)：查看当前接口中的学生 rollout、chunked JSD、vLLM/HTTP teacher、`lmbda`、`seq_kd` 和 `beta` 语义；动态文档需对照固定安装版本和源码后再复现。
 
 阅读这些资料时，应分别记录论文明确报告的训练设置、方法假设、数据范围和结果指标。教师与学生的分布、verifier 的独立性、tokenizer 的兼容性、隐私边界和线上成本，任何一项没有落到当前系统的实测证据上，都不能被一句“蒸馏成功”掩盖。
 
@@ -914,6 +937,6 @@ On-policy distillation 的价值在于让教师看到学生真正会访问的状
 
 1. 令 `p_S=(0.5,0.5)`、`p_T=(0.8,0.2)`。分别计算两个动作的 sampled log-ratio、其学生期望、`D_KL(p_S||p_T)` 以及使用 `b=E[r]` 后的优势。解释为什么一次采样的 `-r` 不是独立的监督 loss，并说明教师偏好仍不能替代任务正确性验证。
 2. 给一个长度为 3 的学生 rollout，构造“当前位置 conditional KL”与“序列级 reverse-KL return-to-go”两种更新信号。指出第一个动作怎样改变后续状态，以及局部目标为什么看不到完整的时间信用。
-3. 设计一个同条件比较表，对照 MiniLLM、GKD、REOPOLD、EOPD 和 MOPD。每种方法写清问题、反馈/支持集、更新估计器、论文证据、成本或失败条件；说明为何这些公开数字不能直接排名。
+3. 设计一个同条件比较表，对照 MiniLLM、GKD、REOPOLD、EOPD 和成功/失败 peer 多 rollout 路线。每种方法写清问题、反馈/支持集、更新估计器、论文证据、成本或失败条件；说明为何这些公开数字不能直接排名，并避免将 peer-rollout 论文与 Multi-Teacher OPD 混称。
 4. 根据 Qwen3 表 21 计算 OPD 与 RL 在 AIME'24、AIME'25、LiveCodeBench v5 和 GPU-hours 上的差值。写出两条结论：一条由报告数字直接支持，另一条当前证据还不能支持。然后设计一个复现方案，至少控制起始 checkpoint、teacher、rollout 数、生成长度、GPU-hours、随机种子和独立评测。
 5. 阅读 TRL DistillationTrainer 与 GKDTrainer 文档，制作“论文中的符号—框架配置—代码实现”映射，检查 rollout 源、JSD/KL 方向、loss reduction、tool-token mask、版本与生成成本。用固定版本运行一个小规模配置后，分别报告训练损失、任务成功、恢复率和生成/教师时间；未实际运行时只提交审计表，不填写模拟结果。

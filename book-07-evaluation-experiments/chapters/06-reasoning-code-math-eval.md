@@ -418,6 +418,7 @@ test_harness_error
 | EvalPlus / HumanEval+ | 为函数契约构造有效边界输入，用类型感知变异扩展，再与参考实现差分比较 | 检查原测试遗漏的行为错误，并可能改变模型排名 | 参考实现或输入契约若错会传播为误判；更大测试集仍不是形式证明 |
 | LiveCodeBench | 按发布时间从竞赛平台收集新题，并扩展到代码修复、执行结果预测等任务 | 让题目时间成为评测协议的一部分，也把“生成代码”拆为多个能力 | 题目发布后仍可被后续训练接触；不同快照的题目构成会变 |
 | SWE-bench / Verified | 阅读 issue 和代码仓库，提交 patch，再在容器化环境运行目标测试与回归测试 | 评估 Agent 在仓库上下文中的定位、修改与回归控制 | Issue 可能欠规格，测试可能拒绝合理实现，结果强依赖 Agent harness、预算和镜像 |
+| [SWE-Bench Pro](https://arxiv.org/abs/2509.16941) / [Pro V2](https://arxiv.org/abs/2610.24206) | 面向较长的软件工程任务，从仓库状态和需求生成 patch，再按固定测试与执行协议判定 | 提供公开、留出和商业任务划分；V2 将任务质量审查、盲解复核和 verifier 加固纳入版本维护 | 原始 Pro、Pro V2 和其他同名变体不能混为同一快照；维护方的修订报告不是独立效度证明，分数仍依赖 split、harness 和预算 |
 
 [EvalPlus](https://arxiv.org/abs/2305.01210) 把测试不足当成要研究的测量问题：其
 HumanEval+ 用额外生成输入把测试规模扩到原来的 80 倍；论文报告在其模型样本上
@@ -438,11 +439,27 @@ SWE-bench Verified 展示了仓库级评分为什么不只是“测试更多”�
 文本和指定代码版本开始，模型提交补丁；`FAIL_TO_PASS` 检查目标问题是否被修复，
 `PASS_TO_PASS` 检查原有行为是否回归。两类都通过，才算在该 harness 下成功。
 2024 年的 Verified 版本经人工筛选 500 个样本，93 位有 Python 经验的开发者参与
-审查。随后，OpenAI 在 2026 年 2 月发布的自家审计中表示：在一批常被模型答错的
-样本抽审子集中，测试仍可能拒绝功能上正确的补丁；其污染测试还观察到模型能复现
-原始 gold patch 或题目细节，因此建议前沿模型不再用 Verified 跟踪发布进展，转而
-报告 SWE-bench Pro。[该建议来自 benchmark 使用方之一的官方审计](https://openai.com/index/why-we-no-longer-evaluate-swe-bench-verified/)，
-不是独立社区已经形成的普遍结论；Pro 也不能因此被视为完美或无污染。
+审查。
+
+这类仓库评测还需要持续检查任务和 verifier。OpenAI 在 2026 年 2 月对 Verified 的
+审计中发现部分测试可能拒绝功能正确的补丁，并报告了题目或 gold patch 暴露风险，
+因此当时建议前沿模型改报 SWE-Bench Pro；这只是一个评测使用方的审计结论，不代表
+形成了社区共识。2026 年 7 月，OpenAI 再审计 Pro 的公开 731 题集，估计约三成任务
+存在题目质量问题，并明确撤回此前推荐。这个比例是该审计流程和任务集下的估计，
+不应推广到所有版本或所有代码 benchmark。
+
+作为后续维护案例，Scale AI 的 2026 年 10 月 Pro V2 预印本报告对原 731 个公开
+任务修复或剔除了 480 个，发布 642 题的修订公开集和一个 51 题 Hard 切片；作者称
+修订要求由另一位工程师盲解复核，并加固 verifier 和重评分环境。这是基准维护方
+报告的修订流程，尚不能当作独立验证。另有一份 2026 年 9 月的
+[SWE-Bench Pro Verified 预印本](https://arxiv.org/abs/2609.08149)提出反作弊与任务
+修订的另一种变体；它与 Pro V2 不是同一数据集，不能合并分数或把其结果当成 Pro V2
+的独立复现。Pro、Pro V2 与 Pro Verified 的 split、harness 和测试策略不同，不能
+仅凭“更新版”或“Verified”标签推断无污染或无测量误差。
+[OpenAI 对 Verified 的初次审计](https://openai.com/index/why-we-no-longer-evaluate-swe-bench-verified/)、
+[对 Pro 的后续审计](https://openai.com/index/separating-signal-from-noise-coding-evaluations/)
+和 [SWE-Bench Pro V2 预印本](https://arxiv.org/abs/2610.24206)对应不同时间点与来源
+立场，读者应按确切版本审查。
 
 ### 4.9 按任务选择评测路径
 
@@ -472,7 +489,7 @@ SWE-bench Verified 展示了仓库级评分为什么不只是“测试更多”�
 至少一个正确的无偏估计常写成：
 
 ~~~math
-\widehat{\operatorname{pass@}k}
+\widehat{\mathrm{pass@}k}
 =
 1-
 \frac{\binom{n-c}{k}}{\binom{n}{k}}
@@ -486,7 +503,7 @@ SWE-bench Verified 展示了仓库级评分为什么不只是“测试更多”�
 假设 `n=10`、`c=2`：
 
 ~~~math
-\operatorname{pass@1}
+\mathrm{pass@1}
 =
 1-\frac{\binom{8}{1}}{\binom{10}{1}}
 =0.2
@@ -495,7 +512,7 @@ SWE-bench Verified 展示了仓库级评分为什么不只是“测试更多”�
 而 `k=5` 时：
 
 ~~~math
-\operatorname{pass@5}
+\mathrm{pass@5}
 =
 1-\frac{\binom{8}{5}}{\binom{10}{5}}
 \approx0.778
@@ -544,12 +561,14 @@ Self-consistency 对同一道题采样多条推理路径，抽取并归一化每
 ~~~math
 \hat a_{\mathrm{sc}}
 =
-\operatorname{mode}
+\mathrm{mode}
 (\hat a^{(1)},\ldots,\hat a^{(K)})
 ~~~
 
 例如五条路径得到 `42,42,40,42,41`，最终投票为 42。它既可以是推理时策略，
-也可以是评估工具，用来观察单次输出的稳定性。
+也可以是评估工具，用来观察单次输出的稳定性。若前两名票数相同，应预先规定
+并列处理方式（例如交给独立 verifier，或将结果记为未决）；不能依赖库函数的隐式
+顺序规则，否则候选排列可能改变最终答案。
 
 ### 6.2 为什么可能有效
 
@@ -575,10 +594,13 @@ M_{\mathrm{vote}}
 p_{\mathrm{top1}}-p_{\mathrm{top2}}
 ~~~
 
-熵高、margin 小通常表示不稳定，但低熵也不保证正确：模型可能非常一致地
-复现一个错误答案。应同时查看 gold correctness、题目难度和污染风险。
-本章 demo 使用自然对数，因此熵的单位是 nat；换用以 2 为底的对数时，数值会变成
-bit，但不会改变同一组样本中“更稳定”或“更不稳定”的排序。
+沿用五条路径的例子，`p(42)=3/5`，`p(40)=p(41)=1/5`，因此
+`H=-(3/5)ln(3/5)-2(1/5)ln(1/5)≈0.950 nat`，而
+`M_vote=3/5-1/5=0.4`。若 gold 是 41，多数答案仍然错误。熵高、margin 小通常
+表示不稳定，但低熵也不保证正确：模型可能非常一致地复现一个错误答案；因此还要
+查看 gold correctness、题目难度和污染风险。本章 demo 使用自然对数，因此熵的单位
+是 nat；换用以 2 为底的对数时，数值会变成 bit，但不会改变同一组样本中“更稳定”
+或“更不稳定”的排序。
 
 ### 6.4 评估预算
 
@@ -653,7 +675,13 @@ Process 适合多步数学、证明、规划、多工具调用和教学解释。
 推理，也容易被语言流畅度影响。
 
 因此 process label 应尽量针对关键状态和可验证 claim，而不是评价一段文字
-“看起来像不像好推理”。
+“看起来像不像好推理”。可见步骤只能作为待检查的过程证据，不能直接当作内部计算
+的读数。EMNLP 2025 的 [FUR](https://aclanthology.org/2025.emnlp-main.504/) 通过
+参数干预，检查移除某一步相关信息后模型答案是否改变；NeurIPS 2025 的
+[thinking-draft 研究](https://proceedings.neurips.cc/paper_files/paper/2025/hash/cbd25a91123291348cc8407a38b75080-Abstract-Conference.html)
+则用反事实干预衡量步骤对后续草稿及草稿结论对最终答案的影响。两者提出了可操作
+的忠实性探针，但结论绑定各自测过的模型和任务，并不证明自然语言轨迹能完整还原
+模型的内部推理。
 
 ### 8.3 组合方式
 
@@ -733,7 +761,7 @@ verifier 结果
 
 Reasoning/code/math benchmark 需要检查题面、解析、测试、函数签名、verifier、
 答案格式和示例输出，而不是只检查题目文本。具体污染路径和时间/近重复方法
-见上一章；本章只需把污染信号作为最终报告的一部分。
+见[上一章《污染检测与可信评估》](05-污染检测与可信评估.md)；本章只需把污染信号作为最终报告的一部分。
 
 ### 9.5 题目、候选和用户的统计单位
 
@@ -754,9 +782,9 @@ Reasoning/code/math benchmark 需要检查题面、解析、测试、函数签�
 版本更新时记录新增、删除和改写题目，以及难度、来源和 verifier 变化。若需要跨
 时间比较，先用共同样本或重叠题做校准，再报告新鲜题单独结果；不能直接把两个
 不同快照的总分差解释成模型进步。[LiveCodeBench](https://arxiv.org/abs/2403.07974)
-展示了滚动收题路线，[SWE-bench Verified 后续审计](https://openai.com/index/why-we-no-longer-evaluate-swe-bench-verified/)
-则展示了公开任务在长期使用中可能出现的测试质量和训练暴露问题。具体 contamination
-检测方法见上一章；这里关注的是 benchmark 如何维护生命周期和版本边界。
+展示了滚动收题路线；第 4.8 节中的 SWE-bench Verified/Pro 审计与 Pro V2 修订则
+展示了新版本也要继续检查题目质量、泄漏和 verifier。具体 contamination 检测方法
+见上一章；这里关注的是 benchmark 如何维护生命周期和版本边界。
 
 ## 10. 统一报告和实验协议
 
@@ -847,20 +875,23 @@ judge 认为过程好，但 verifier 失败
 每次评估都应抽样复核“模型失败”和“评估器失败”的边界，否则会训练系统
 去修复不存在的问题。
 
-## 12. 一个可运行的 Reasoning/Code/Math 诊断 demo
+## 12. 一个 Reasoning/Code/Math 诊断 demo
 
 下面的 demo 不调用模型，也不执行外部生成代码。它处理 toy 数学输出、代码
 候选统计和评估元数据，演示答案归一化、greedy 与 self-consistency、entropy、
 过程分、`pass@k`、公开/隐藏测试差距、污染风险以及具体后续动作。示例数据
 故意同时包含一个过程错误、一个隐藏测试覆盖缺口和一个污染风险样本。
 
-`extract_number` 只面向本例的简单数字、分数和百分比，并把输出中的最后一个数字
-当作候选答案；它不支持区间、单位、集合、符号表达式、多个互相矛盾的最终答案或
-复杂 LaTeX。实际评估应要求明确的最终答案字段、按题型选择 parser，并用独立的
-正反例集审计 parser。本 demo 不能作为通用数学评分器。
+`extract_number` 只面向本例的简单数字、分数和百分比；当前实现先找全文最后一个
+分数，其次找百分比，最后才找普通数值，所以遇到“先出现分数、后给出小数答案”这类
+混合输出时会按类型优先级误抽取。它也不支持区间、单位、集合、符号表达式、多个互相
+矛盾的最终答案或复杂 LaTeX。实际评估应要求明确的最终答案字段，按题型选择 parser，
+并用独立的正反例集审计 parser。本 demo 不能作为通用数学评分器。
 
 示例中的 `contamination_risk` 是输入元数据给出的风险标记；没有标记只表示当前
 记录没有已知信号，不等于证明样本从未暴露或训练链路未接触。
+
+代码状态：静态审阅，未运行（2026-11-03）
 
 ~~~python
 from collections import Counter
@@ -1302,7 +1333,11 @@ HumanEval 的代码通过率不能自动代表大型仓库修复能力，GSM8K �
 9. [ProcessBench](https://aclanthology.org/2025.acl-long.50/)：标注最早错误步骤的数学过程评测；不是最终答案能力的替代指标。
 10. [EvalPlus / HumanEval+](https://papers.neurips.cc/paper_files/paper/2023/hash/43e9d647ccd3e4b7b5baab53f0368686-Abstract-Conference.html)：通过 LLM seed、类型变异和差分执行增强函数级测试。
 11. [LiveCodeBench](https://arxiv.org/abs/2403.07974)：按时间收集竞赛题并覆盖代码生成、修复和执行结果预测。
-12. [SWE-bench Verified 初始设计](https://openai.com/index/introducing-swe-bench-verified/) 与 [2026 后续审计](https://openai.com/index/why-we-no-longer-evaluate-swe-bench-verified/)：对照 issue/patch + fail-to-pass/pass-to-pass 评分与 benchmark 后续失效风险；后者是 OpenAI 官方自身审计。
+12. [SWE-bench Verified 初始设计](https://openai.com/index/introducing-swe-bench-verified/) 与 [2026 年 2 月审计](https://openai.com/index/why-we-no-longer-evaluate-swe-bench-verified/)：对照 issue/patch + fail-to-pass/pass-to-pass 评分与 benchmark 失效风险；审计是 OpenAI 自身报告。
+13. [SWE-Bench Pro](https://arxiv.org/abs/2509.16941)、[2026 年 7 月对 Pro 的审计](https://openai.com/index/separating-signal-from-noise-coding-evaluations/)与 [SWE-Bench Pro V2](https://arxiv.org/abs/2610.24206)：对照基准发布方设计、使用方审计和维护方修订；版本、split 与 harness 必须分别记录。
+14. [Measuring Chain of Thought Faithfulness by Unlearning Reasoning Steps](https://aclanthology.org/2025.emnlp-main.504/)：通过参数干预测量步骤信息与模型答案的关系；指标是特定意义下的 parametric faithfulness，不是对所有内部推理的直接观测。
+15. [Measuring the Faithfulness of Thinking Drafts in Large Reasoning Models](https://proceedings.neurips.cc/paper_files/paper/2025/hash/cbd25a91123291348cc8407a38b75080-Abstract-Conference.html)：用反事实干预评估步骤对草稿及草稿对答案的影响；结论限于论文测试的模型和任务。
+16. [SWE-Bench Pro Verified](https://arxiv.org/abs/2609.08149)：另一项包含答案泄漏防护和任务修订的预印本方案；其结果需绑定该论文的 baseline、模型和环境，不与 Pro V2 混为一谈。
 
 使用这些资料时，要分开记录论文方法、数据集版本、运行 harness、解码预算、
 测试强度、污染检查和项目实测。资料能说明评估设计的由来，不能替当前系统

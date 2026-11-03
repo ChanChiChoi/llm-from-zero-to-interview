@@ -6,6 +6,8 @@
 
 一个贯穿全部分的判断是：token 数、参数量、validation loss、benchmark 分数和产品成功率分别描述不同层面的事实。它们可能相关，却不能相互替代。真正可靠的预训练结论必须把数据分布、训练 recipe、评估协议和硬件条件一起写清楚。
 
+切分算法、词表工程和 tokenizer 评测指标在本章深讲；训练样本怎样序列化为 chat template、labels、packing 边界和可回归的版本协议，见[第五册第三章](../../book-05-llm-training/chapters/03-tokenizer与数据格式.md)。实际格式故障的症状与排查顺序见[第十九册第三章](../../book-19-practitioner-playbook/chapters/03-tokenizer与格式坑.md)。
+
 整部分按一次预训练决策的因果顺序阅读：
 
 ```mermaid

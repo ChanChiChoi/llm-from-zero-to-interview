@@ -76,12 +76,14 @@ E_evidence=(E_ckpt,E_eval,E_repro,E_compare,E_safety)
 
 随机状态也不是装饰字段。数据 shuffle、dropout、采样和某些 CUDA kernel 都可能读取随机数；恢复 Python、NumPy、CPU、CUDA 以及分布式 sampler 的状态，才能缩小恢复前后的随机差异。它仍然不保证跨硬件、跨 kernel 或跨版本 bit-level 一致，这个边界应当在实验记录中说清楚。
 
-恢复训练所需字段可以写成一个集合：
+恢复训练所需字段取决于训练配置。先定义不随精度方案变化的状态集合，再把精度专属状态单独加入：
 
 ```math
-C_{\mathrm{resume}}=
-\{model,opt,sched,scaler,rng,data,step,tok,config,tokenizer\}
+C_{\mathrm{base}}=
+\{model,opt,sched,rng,data,step,tok,config,tokenizer\}
 ```
+
+若训练确实启用了 FP16 loss scaler，则令 `C_precision={scaler}`；若使用 BF16 或其他不含 scaler 的配置，则 `C_precision=\varnothing`。完整恢复集合为 `C_resume=C_base\cup C_precision`。这样 manifest 中的精度、checkpoint 字段和恢复脚本必须使用同一份训练配置解释，不能把“这个字段常见”误写成所有任务都必需。
 
 恢复时要把缺失或版本不匹配的字段显式列出来。设 `available(u)` 表示当前 checkpoint 的字段 `u` 存在、版本匹配且能被训练脚本读取，则缺失集合为：
 
@@ -148,6 +150,8 @@ R_{\mathrm{save}}=
 
 这里把每 step 的 token 数近似成常数；变长 batch 或动态 packing 时，更准确的做法是对故障窗口内实际消费的 token 求和。`f` 越小，容错越好，但 `R_save` 和存储压力越高。
 
+用一个构造账本把三个量连起来：假设每步消费 2,000,000 个有效 token，每 500 步保存一次，则一次故障最多回退约 `500×2,000,000=1,000,000,000` 个 token，即 1B。若训练共 12,000 步，保存次数约为 `ceil(12,000/500)=24` 次；每次保存占用 120 秒、平均 step 用时 4 秒，则串行保存开销近似为 `120/(500×4)=0.06`，即 6%。这些是便于比较策略的假设输入；异步保存会改变前台停顿时间，但不会消除 staging、I/O 和未完成写入的资源成本。
+
 这些量的有效域是 S>=0、f 为正整数、B_tok>=0、C_save>=0、T_step>0。训练尚未执行任何 step 时不应报告平均保存开销；若异步保存还未提交 manifest，已发起的写入也不能被计入可恢复版本数。
 
 这里 `C_save` 是一次保存占用的墙钟时间，`T_step` 是一个训练 step 的平均时间；若保存与计算完全串行，`R_save` 近似表示保存带来的时间占比。异步写盘可以降低前台阻塞，但会增加显存/主机内存中的待写队列和“最新 checkpoint 尚未真正落盘”的窗口，因此还要记录发布状态，而不能只看保存函数返回。
@@ -166,7 +170,7 @@ R_{\mathrm{save}}=
 
 因此要区分两类 checkpoint：
 
-1. 训练恢复 checkpoint：包含 optimizer、scheduler、scaler 等完整状态。
+1. 训练恢复 checkpoint：包含 optimizer、scheduler，以及该精度方案实际使用的 scaler 等状态。
 2. 推理/评估 checkpoint：只包含模型权重、config 和 tokenizer。
 
 训练恢复 checkpoint 更大，但能继续训练。
@@ -193,18 +197,18 @@ P(b_w+b_g+b_m+b_v+b_{\mathrm{master}})
 +M_{\mathrm{meta}}
 ```
 
-保留策略的总存储可以写成：
+保留策略应按唯一 artifact ID 求和，避免同一个 checkpoint 同时属于 latest、best 和 milestone 时被重复计费。令 `U_latest`、`U_best`、`U_mile` 分别表示三个角色引用的 artifact ID 集合，则：
 
 ```math
 M_{\mathrm{retain}}=
-K_{\mathrm{latest}}M_{\mathrm{resume}}
-+K_{\mathrm{best}}M_{\mathrm{eval}}
-+K_{\mathrm{mile}}M_{\mathrm{eval}}
+\sum_{c\in U_{\mathrm{latest}}\cup U_{\mathrm{best}}\cup U_{\mathrm{mile}}}M(c)
 ```
 
-这里 `latest` 偏容错，`best` 偏下游使用，`mile` 偏实验复盘。真实项目还要考虑 sharded checkpoint 合并、对象存储带宽和跨节点读取失败。
+这里 `M(c)` 是 artifact `c` 实际占用的存储，`latest` 偏容错，`best` 偏下游使用，`mile` 偏实验复盘。若 best 另存了一份独立的推理权重，它有自己的 ID 和大小，应另行计入；若它只是指向某个已有训练 checkpoint，则不能算两次。真实项目还要考虑 sharded checkpoint 合并、对象存储带宽和跨节点读取失败。
 
 上式只是容量预算，不应被误读为精确的文件大小。压缩、稀疏格式、共享参数、元数据、索引、对齐填充和分片副本都会改变实际占用；优化器状态的 dtype 也可能与模型权重不同。工程上最好分别测量“写入前的逻辑大小”“对象存储实际大小”和“加载时的临时峰值”，因为 OOM 可能发生在恢复合并阶段，而不是发生在最终 artifact 的静态大小上。
+
+例如，构造一个 7B 参数模型，若评估权重按每参数 2 bytes 存储，则逻辑权重约为 `7×10^9×2=14×10^9` bytes；按 `1 GiB=2^30` bytes 换算约为 `13.04 GiB`，还未计入 tokenizer、索引和元数据。若仅为粗略规划而假设恢复状态每参数合计 16 bytes，则为 `112×10^9/2^30≈104.31 GiB`。这里的 16 bytes 是一个明确的 AdamW 状态账本假设，不是所有框架和精度都遵循的常数。按 ID 计保留量时，若 latest 为 `{c2,c3}`、best 为 `{c2}`、milestone 为 `{c1,c2}`，三个 artifact 各占 180 GiB，则唯一集合 `{c1,c2,c3}` 共 `3×180=540 GiB`；`c2` 虽有三个角色，仍只计一次。后面的 toy demo 给每份 checkpoint 设 180 GiB，是独立的构造输入，不是由前述简化参数账本推导出的文件测量值。
 
 ## 4. 训练恢复和容错
 
@@ -274,9 +278,9 @@ R_{\mathrm{resume}}=
 
 分布式训练还多一层风险：某个 rank 的 shard 写完，不代表整个 checkpoint 已经可读。发布一个 checkpoint 前，应确认各 rank 的文件、索引和元数据都已落盘，并让读取端能够发现“未完成写入”的状态，而不是把半套 shard 当成最新版本。对象存储上的临时前缀、完成标记或 manifest 都是实现手段；关键是读取者能区分正在写入和完整发布的 artifact。
 
-以 PyTorch 2.14 的 Distributed Checkpoint（DCP）为例，分布式 API 可以让多个 rank 按 state dict 保存和读取状态，并依据加载端的分片布局重新分配张量；这解决的是“分布式状态如何写读和重分片”的问题。DCP 的协调写入流程会在各 rank 数据写完后写入 metadata，并标记 checkpoint 成功；应用仍要决定何时发布自己的版本指针、如何校验 manifest，以及存储后端是否支持所需的可见性和原子性。异步保存返回的 future 要完成后，才能把新版本公布给读取者。异步也有代价：staging 可能复制每个 rank 的 checkpoint 状态，抬高 CPU 或 pinned-memory 峰值；同时排队多个未完成写入会继续增加内存压力。DCP 文档还明确指出，保存的 state dict 不保证跨 PyTorch 版本向后兼容，因此切换训练环境时必须执行真实恢复演练。
+以 PyTorch 2.15 的 Distributed Checkpoint（DCP）为例，分布式保存/读取接口处理各 rank 的本地分片和状态字典；应用仍要为自己的训练数据游标、配置 manifest 和版本发布定义完整性条件。`async_save` 把状态先 staging 到默认的 CPU 存储，再由后台线程执行保存；返回结果区分本地 staging 完成与 checkpoint 存储写入完成。前者意味着训练状态已有一份可继续写入的快照，后者才表示本次保存完成，应用应在后者成功后再把版本指针发布给读取者。异步 staging 会占用 CPU 或 pinned memory，多个未完成的写入会增加排队状态和内存压力；因此要同时记录 staging 与写入完成状态，并限制在途保存数。PyTorch 2.15 文档还明确说明，DCP 保存的 state dict 不保证跨 PyTorch 版本向后兼容。DCP 管理自己的保存/读取流程，但不会替应用提交对象存储事务或保证自定义 manifest 的原子发布；这些边界要按具体后端和版本进行恢复演练。[PyTorch 2.15 DCP 文档](https://docs.pytorch.org/docs/2.15/distributed.checkpoint.html)；[异步保存教程](https://docs.pytorch.org/tutorials/recipes/distributed_async_checkpoint_recipe.html)。
 
-以 PyTorch Distributed Checkpoint（DCP）为例，分布式 API 可以让多个 rank 按 state dict 保存和读取状态，并依据加载端的分片布局重新分配张量；这解决的是“分布式状态如何写读和重分片”的问题。应用仍要定义一份 checkpoint 何时算完整：所有 rank 的写入是否成功、索引是否可读、manifest 和校验信息是否齐全、恢复程序是否能解释这些字段。异步保存还要等待写入 future 完成后再发布版本指针。DCP 的 API 成功返回不等价于跨对象存储事务提交，也不等价于跨 PyTorch 版本的永久兼容；这些边界要按使用的 PyTorch 版本和存储后端核对。
+可以用一组数值输入理解恢复探针。设中断前 `L^- = 2.00`、`η^- = 3×10^{-4}`、`s^- = 10,000`、`T^- = 50.000B`；恢复后第一步记录 `L^+ = 2.04`、相同学习率、`s^+ = 10,001`、`T^+ = 50.004B`，本步按 batch 预期消费 0.004B（4M）token。则 `δ_L=|2.04−2.00|/2.00=0.02`，学习率偏差为 0，step 偏差为 `|(10,001−10,000)−1|=0`，token 偏差为 `|(0.004−0.004)|/0.004=0`。若本项目预先设定 `τ_L=0.03`，这组观测通过这些探针；阈值只是本例的决策设置，不是通用常数。若实际 token 增量只有 0.0035B，则 `δ_tok=|0.0035−0.004|/0.004=0.125`，即 12.5%，应先检查 batch 计数和数据游标，而不是把它当作普通浮点噪声。
 
 因此，说明 checkpoint 恢复时，不能只停留在“调用 `load_state_dict`”。完整流程应先验证 artifact 和版本，再恢复所有训练状态，最后用 loss、学习率、step、token 增量和数据游标做一个短探针；如果某一项偏离，就根据偏差类型定位，而不是盲目继续训练。
 
@@ -322,7 +326,7 @@ perplexity = exp(loss)
 L_{\mathrm{val}}=
 -
 \frac{
-\sum_i\sum_t m_{i,t}\log p_{\theta}(x_{i,t}\mid x_{i,<t})
+\sum_i\sum_t m_{i,t}\log p_{\theta}(x_{i,t}\mid x_{i,1,\ldots,t-1})
 }{
 \sum_i\sum_t m_{i,t}
 }
@@ -334,6 +338,10 @@ L_{\mathrm{val}}=
 PPL=
 \exp(L_{\mathrm{val}})
 ```
+
+手算一个只有两个有效目标 token 的构造例。若模型给真实 token 的概率分别为 `1/2` 和 `1/4`，mask 为 `[1,1,0]`（第三个位置不计入），则有效 token 平均交叉熵为 `L=−(ln(1/2)+ln(1/4))/2=(ln 2+ln 4)/2≈(0.6931+1.3863)/2=1.0397` nat。于是 `PPL=exp(1.0397)=√8≈2.83`。分母是 2 个有效目标，不是 3 个位置；这个小例只说明定义中的计算，不能拿来比较不同 tokenizer 或数据分布。
+
+固定长度模型还要明确 stride（滑动窗口步长）。设最大上下文为 4，待评估序列为 `x1,…,x7`，使用 stride=2 的窗口 `[x1,x2,x3,x4]`、`[x3,x4,x5,x6]`、`[x5,x6,x7]`。第一窗计分 `x2,x3,x4` 三个目标；第二窗把重叠前缀 `x3,x4` 的 label mask 掉，只计新目标 `x5,x6`；第三窗 mask 掉 `x5,x6`，只计 `x7`。最终共计 `3+2+1=6` 个目标且每个只出现一次。若改成互不重叠的 4-token 窗口，第二窗开头 `x5` 没有左侧上下文，常见因果计分方式会漏掉它，只剩 5 个目标。stride 改变上下文与被计分 token 的组合，因此两条 PPL 曲线只有在窗口、mask 和分母口径一致时才可比较；固定长度模型的具体示例见[官方 PPL 说明](https://huggingface.co/docs/transformers/perplexity)。
 
 loss 越低，perplexity 越低，说明模型对验证集 token 的预测越好。这里的“更好”只针对给定 tokenizer、给定数据分布和给定预测目标；它不是对模型全部能力的排序。
 
@@ -380,7 +388,7 @@ domain 划分也要保持稳定。若一次实验把“代码注释”放进 gen
 L_k=
 -
 \frac{
-\sum_{(i,t)\in D_k}m_{i,t}\log p_{\theta}(x_{i,t}\mid x_{i,<t})
+\sum_{(i,t)\in D_k}m_{i,t}\log p_{\theta}(x_{i,t}\mid x_{i,1,\ldots,t-1})
 }{
 \sum_{(i,t)\in D_k}m_{i,t}
 }
@@ -402,6 +410,8 @@ L_k^{new}-L_k^{old}>\tau_k
 这类 domain regression。
 
 每个 domain 的有效 token 分母都必须大于 0，权重满足 w_k>=0 且 sum_k w_k=1。空 domain 应从本次聚合中排除并记录为未评估，而不是以零 loss 参与平均；否则只改变切分或过滤规则就能人为降低总 loss。
+
+例如 general domain 有 80 个有效 token、平均 loss 为 2.0；code domain 有 20 个有效 token、平均 loss 为 3.0。按有效 token 聚合得到 `L_all=(80×2.0+20×3.0)/(80+20)=220/100=2.2`，权重分别为 0.8 和 0.2。若错误地把两个 domain 均值等权平均，会得到 2.5；那回答的是“每个 domain 权重相同”的另一个问题，不是这 100 个 token 的整体平均。选择哪一种聚合必须在实验间保持一致并写明。
 
 per-domain loss 的价值在于把“平均变好”拆成多个可解释的变化。它还会提醒我们检查 domain 的采样比例和有效 token 数：如果某个 domain 很小，均值波动可能很大；如果 domain 定义或 tokenizer 发生变化，跨版本的数值也不能直接排成一条曲线。
 
@@ -512,6 +522,8 @@ R_{\mathrm{reg,w}}=
 }
 ```
 
+例如旧模型在 80 道题上答对，新模型把其中 4 道改错，则 `R_reg=4/80=5%`。若新模型还在旧模型原先答错的题中新增答对 10 道，这 10 道不会抵消上述回归率；应同时报告新增正确数或总准确率，避免一个方向的变化掩盖另一个方向。
+
 常见回归维度：
 
 1. 格式遵循。
@@ -544,6 +556,8 @@ R_reg 的分母要求至少存在一个旧模型答对的样本；加权版本�
 
 这些字段还应尽量有可验证的引用：数据和 checkpoint 保存内容摘要或哈希，代码保存 commit 与未提交 diff，环境保存依赖锁文件和 CUDA/驱动信息，评估保存脚本、prompt、解码参数和逐样本结果。没有这些记录，实验也许能够再次运行，却很难确认运行的是同一个实验。
 
+指标本身也需要一条可追溯的血缘。每条记录应能连回 `run_id → checkpoint_id → eval_run_id`，并保存指标名、单位、样本集合或数据切分、聚合方式和计算脚本版本。只保留“accuracy=0.84”会丢掉它是哪个 checkpoint、哪一批题、哪种答案解析器算出来的；只保留哈希而无法取回原 artifact，也不能支持复核。实际管理中可以把大对象放在 artifact store，把轻量元数据放入数据库，但它们的引用关系和访问权限必须保持可解析。
+
 实验记录可以抽象为：
 
 ```math
@@ -565,6 +579,8 @@ M_{\mathrm{repro}}=
 C_{\mathrm{repro}}=
 1-\frac{|M_{\mathrm{repro}}|}{|U_{\mathrm{repro}}|}
 ```
+
+假设本次审计要求六项：代码 commit、数据版本、tokenizer、训练配置、checkpoint manifest 和评估脚本；其中数据版本与评估脚本无法解析，则 `|U_repro|=6`、`|M_repro|=2`，覆盖率为 `1−2/6=2/3≈66.7%`。这个比例只描述记录字段是否找得到，不能解释成“有 66.7% 概率复现成功”；缺失的数据版本还可能使整个因果比较失去依据。
 
 `C_repro` 只是记录覆盖率：它等于 1，仍不等于重新运行后每个数字都相同。真正做复现时，还要比较原实验与复现实验的指标偏差。例如对第 `j` 个指标，可以写成：
 
@@ -645,6 +661,8 @@ final_v2
 2. **轨迹级复现**：loss、学习率、吞吐和 token 进度在容差内相近，适合定位恢复和训练稳定性问题。
 3. **结论级复现**：关键评估结论、排序或业务决策保持一致，适合大规模分布式训练的实际对比。
 
+例如原实验验证 loss 为 2.300，复跑为 2.318，绝对差 `Δ_loss=0.018`；tokens/s 从 100,000 降到 96,000，下降 `4,000/100,000=4%`。若事先设定 loss 容差 0.03、吞吐容差 5%，这两个指标都在本例容差内，但只能说达到这些指标的轨迹级要求。它仍不能证明权重逐字节相同；如果目标只是结论级复现，还要核对主要 benchmark 的差值区间和选择决策是否稳定。
+
 不要承诺所有大规模分布式训练都能逐 bit 复现；但也不能用这个困难掩盖缺少数据版本、评估脚本或 checkpoint manifest 的记录问题。应当在实验开始前写清楚本次实验追求哪一种复现强度。
 
 ## 13. 实验对比的基本原则
@@ -685,6 +703,8 @@ D_{\mathrm{diff}}=
 
 所以，比较两个实验时，最重要的不是把结果表格做得很大，而是先写清楚反事实问题：如果只改变 `V`，结果是否仍然发生同样方向的变化？对照越接近这个问题，结论越有解释力。
 
+例如想只比较学习率，令 `V={lr}`。Run A 与 Run B 都使用 `data_v5`、`tok_v2`、104.9B consumed tokens、4M tokens/batch 和 seed 42，只有 `lr` 从 `3e-4` 变成 `2e-4`，因此已列关键条件中 `D_diff=∅`。若拿 Run A 与一个使用 `data_v6` 且训练到 157.3B tokens 的 Run C 比较，则 `D_diff` 至少包含 `data_version`，训练量差为 `|157.3−104.9|=52.4B` tokens；即使 Run C 分数更高，也不能把差异归因于学习率。差异清单不会自动消除混杂，但能把结论范围限制在真实做过的对照上。
+
 ## 14. Checkpoint 选择流程
 
 一个实用选择流程：
@@ -716,13 +736,23 @@ J(c)=
 
 总分只是方便排序的工具，不应替代约束和人工判断。比如一个模型即使总分最高，只要它在必须遵守的格式或安全场景上明显退化，就不应因为其他分数高而掩盖问题。实践中可以先排除不可接受的候选，再在剩余版本中比较总分；也可以保留 Pareto 前沿，把“更低成本但略低分”和“更高能力但更贵”的候选交给业务目标决定。
 
+归一化的方向和尺度也要在看候选结果前固定。validation loss 越低越好，所以示例用 `1−loss/cap`；当 loss 达到或超过 cap，得分被截为 0。这不表示两个很差的 checkpoint 一样好，只表示这项指标在当前选择政策中不再区分它们，必要时应降低 cap、改用分段映射，或把 loss 设为资格门槛。benchmark 的算术平均是 macro-average：每个任务权重相同，题数多的任务不会自动占更大权重；如果项目按用户流量、风险或任务频率加权，权重必须有事先定义的依据，并把逐任务分数一起保留，避免平均值遮住单项退化。safety、regression 和成本分量也要说明“越高越好”还是“越低越好”、转换函数及分母。例如回归分数 `1−失败数/样本数` 依赖固定的回归集；样本集增删后，分数变化可能来自测量集合而非模型本身。
+
+硬门槛和软目标承担不同职责。硬门槛代表项目不可接受的条件，例如恢复字段缺失、稳定性检查失败、安全评测低于预注册阈值，或某个核心领域超过回归上限；它们不能被其他高分抵消。门槛应在看候选排名前登记，说明失败如何判定、评测集是哪一版，以及阈值是绝对值还是相对基线。通过门槛后，加权分数才用于表达可交换的偏好。若团队在观察结果后才把门槛改到刚好排除某个候选，就已经把选择数据用于制定政策，分数不再是预先声明的决策规则；这时应把它标成探索性选择，另用新的保留集或后续运行确认。
+
+本例的权重表故意只含 validation、benchmark、safety 和 regression，没有推理延迟或成本输入，所以 demo 的 `best` 只代表这四项政策下的排序，不等于已选出可部署版本。若两个版本都过硬门槛，而 A 的质量分为 0.82、延迟得分为 0.60，B 的质量分为 0.78、延迟得分为 0.90，则 A 质量更好、B 延迟更好，任一者都没有在这两个维度上同时不差且至少一项更好；二者都在 Pareto 前沿。交互式产品可能偏向 B，离线批处理可能偏向 A，必须把目标服务、流量、硬件、batch 和延迟分位数写进成本测量条件。可以把延迟按预先约定的 SLO cap 转成 0 到 1 的分数加入政策，也可以先保留 Pareto 候选，由明确的部署约束作最后选择；不要在缺少测量值时假造一个“综合成本分”。即使选定成本归一化，也应保留原始毫秒、吞吐和成本字段供复核。
+
+最后，排序精度和展示精度要分开。程序应使用未舍入的分数比较候选，报表再把各分量和总分显示到约定的小数位；如果全精度得分仍相同，就预先规定稳定的平分处理，例如依次比较硬门槛余量、推理成本，最后按 checkpoint step 或 ID 排序。不能因把总分四舍五入到三四位后产生表面平局，就让容器遍历顺序、文件名偶然决定结果。下面的 demo 明确约定全精度总分相同时取较早 step；由于输入检查保证 step 唯一，这个规则足以确定唯一候选。真实项目可以用不同的平分规则，但须把政策版本、分量、权重、阈值、原始指标和 tie-break 一起保存，才能在更换评测集或部署目标后重算，而不把旧排序误当成 checkpoint 的固有属性。
+
 这比“最后一个 checkpoint”稳健很多。
+
+用 demo 的固定权重手算一次选择。`ckpt_2000` 的 validation loss 为 2.18，预设上限为 4.0，故归一化 validation 分量为 `1−2.18/4=0.455`；三个 benchmark 的均值为 `(0.56+0.38+0.34)/3≈0.4267`；safety 得分为 0.94，100 个回归样本中失败 4 个，故 regression 得分为 `1−4/100=0.96`。按权重 0.40、0.30、0.15、0.15，加权值为 `0.40×0.455+0.30×0.4267+0.15×0.94+0.15×0.96≈0.595`。`ckpt_1000` 同法约为 0.565；`ckpt_3000` 的 validation loss 虽更低（2.16），却因 `stable=False`、安全分数低于 0.92 门槛、回归失败 11 次超过上限 5，且 code domain 触发回归而被硬门槛排除。此 toy policy 因而在合格候选中选择 `ckpt_2000`；改变 cap、权重或门槛会改变政策偏好，不会改变 checkpoint 本身的数据。
 
 ## 15. 最小可运行的 checkpoint 与实验管理 demo
 
-下面的 demo 用标准库模拟一个小型训练记录。输入是 3 个 checkpoint、一次恢复探针、一个实验记录和两组对照实验；输出 checkpoint 完整性、PPL、domain regression、归一化打分、保留存储、恢复连续性、实验记录完整性和对照差异。这里故意保留一个明确的 toy 选择政策：先过稳定性、恢复完整性、安全、回归和领域门槛，再用事先给定的 validation loss 上限归一化，并将所有分量压到 0 到 1 后加权。这个 profile 假设 scaler-enabled FP16 训练，因此把 `scaler` 列为必需状态；若训练采用 BF16 或不使用 scaler，应按 run 配置把它标为 `not_applicable` 或从该 profile 的必需字段中移除。它不是生产级 checkpoint 管理器，也不代表行业通用权重。
+下面的 demo 用标准库模拟一个小型训练记录。输入是 3 个 checkpoint、一次恢复探针、一个实验记录和两组对照实验；输出 checkpoint 完整性、PPL、domain regression、归一化打分、保留存储、恢复连续性、实验记录完整性和对照差异。这里故意保留一个明确的 toy 选择政策：先过稳定性、恢复完整性、安全、回归和领域门槛，再用事先给定的 validation loss 上限归一化，并将所有分量压到 0 到 1 后加权。这个 fixture 假设 scaler-enabled FP16 训练，因此把 `scaler` 列为必需状态；本例的 run manifest 也使用 FP16 配置。如果训练采用 BF16 或不使用 scaler，应按该 run 的训练配置把它标为 `not_applicable`，不能继续套用本例的必需字段集合。它不是生产级 checkpoint 管理器，也不代表行业通用权重。
 
-> **代码状态：已验证（2026-10-26，Python 标准库；解释器小版本未记录）。** 正文记录的输出和 14 类边界检查符合约定；未验证真实训练、DCP、多 GPU 或对象存储。
+> **代码状态：已验证（2026-11-02，Python 3.12.9，标准库；本例主路径输出与下方一致）。** 未验证真实训练、DCP、多 GPU 或对象存储；输入边界分支本轮静态审阅，未逐项执行。
 
 ```python
 import math
@@ -771,7 +801,7 @@ resume_probe = {
 
 run_manifest = {
     "git_commit": "abc1234", "data_version": "data_v5", "tokenizer_version": "tok_v2",
-    "model_config": "7b_gqa_rope", "train_config": "lr3e-4_bs4m_bf16_fsdp",
+    "model_config": "7b_gqa_rope", "train_config": "lr3e-4_bs4m_fp16_fsdp",
     "env": "64xa100_cuda12", "seed": 42, "eval_script": "eval_v3.py",
     "checkpoint_id": "ckpt_2000", "metrics": {"val_loss": 2.18}, "notes": "lr sweep winner",
 }
@@ -937,7 +967,7 @@ def score_components(ckpt):
 def score_checkpoint(ckpt):
     components = score_components(ckpt)
     score = sum(score_weights[name] * value for name, value in components.items())
-    return round(score, 4)
+    return score
 
 def changed_keys(a, b, ignore=("lr",)):
     if not isinstance(a, dict) or not isinstance(b, dict):
@@ -959,7 +989,7 @@ score_table = [
     {
         "id": ckpt["id"],
         "components": {key: round(value, 4) for key, value in score_components(ckpt).items()},
-        "score": score_checkpoint(ckpt),
+        "score": round(score_checkpoint(ckpt), 4),
         "stable": ckpt["stable"],
     }
     for ckpt in checkpoints
@@ -973,7 +1003,11 @@ eligible_checkpoints = [
     and ckpt["regression_failures"] <= max_regression_failures
     and not domain_regressions(ckpt)
 ]
-best = max(eligible_checkpoints, key=score_checkpoint) if eligible_checkpoints else None
+best = (
+    max(eligible_checkpoints, key=lambda ckpt: (score_checkpoint(ckpt), -ckpt["step"]))
+    if eligible_checkpoints
+    else None
+)
 
 latest_retained = sorted(checkpoints, key=lambda ckpt: ckpt["step"], reverse=True)[:latest_k]
 retained_ids = {ckpt["id"] for ckpt in latest_retained}
@@ -1055,7 +1089,7 @@ print("bad_compare_changed=", bad_compare_changed)
 print("diagnostics=", diagnostics)
 ```
 
-期望输出：
+示例输出（本例 toy 输入在 Python 3.12.9 标准库下的实际执行输出；不代表训练实测）：
 
 ```text
 completeness= {'ckpt_1000': [], 'ckpt_2000': [], 'ckpt_3000': ['scaler', 'data_position']}
@@ -1074,9 +1108,11 @@ bad_compare_changed= ['data_version', 'tokens_b']
 diagnostics= {'best_exists': True, 'best_complete': True, 'best_stable': True, 'resume_continuous': True, 'storage_under_budget': True, 'manifest_complete': True, 'fair_lr_compare': True, 'bad_compare_detected': True, 'safety_ok': True, 'regression_ok': True}
 ```
 
-这里 validation loss 用预先固定的 `val_loss_cap=4.0` 映射到 `[0,1]`，benchmark 和 safety 本身处于 `[0,1]`，regression 用失败数除以明确的样本数得到失败率后再转成得分；权重和为 1。先执行硬门槛，再计算加权分，所以较高平均分不能抵消缺状态、训练不稳定、安全失败或明显 domain regression。更换 loss cap、权重或门槛会改变选择结果，故这些配置必须作为实验记录的一部分，不能在看完分数后再挑一组有利权重。
+这里 validation loss 用预先固定的 `val_loss_cap=4.0` 映射到 `[0,1]`，benchmark 和 safety 本身处于 `[0,1]`，regression 用失败数除以明确的样本数得到失败率后再转成得分；权重和为 1。先执行硬门槛，再计算加权分，所以较高平均分不能抵消缺状态、训练不稳定、安全失败或明显 domain regression。更换 loss cap、权重或门槛会改变选择结果，故这些配置必须作为实验记录的一部分，不能在看完分数后再挑一组有利权重。代码按 checkpoint ID 对 latest 与 best 做集合去重，当前输入中保留 `ckpt_2000` 和 `ckpt_3000` 两个唯一 artifact，因此存储量为 `2×180=360 GiB`；若 best 是独立导出的权重文件，则需要给它独立 ID 和 `size_gib` 账目。
 
 这个 demo 还刻意把几种常见边界显式处理：空 checkpoint 列表、重复/倒序 step、非递增 token 数、benchmark 键集合不一致会报错；无合格候选会返回 `None`；缺失配置字段会作为差异报告，不会被静默漏掉。示例使用三份结构完整的 checkpoint，因此正常路径会选择 `ckpt_2000`；如果把三个 checkpoint 的 `stable` 都设为 `False`，`best_checkpoint` 会返回 `None`，latest 保留策略仍可独立计算。
+
+还可以把几项输出对回手算账本：`save_overhead=0.0075` 即 `60/(1000×8)=0.75%`；相邻 checkpoint 相差 52.5B token、1000 step，因此每步约 0.0525B token，按 1000-step 间隔的最大回退量是 52.5B。保留策略取最近两个 checkpoint `{ckpt_2000, ckpt_3000}`，best 又指向 `ckpt_2000`，集合去重后仍是两个文件，故 `2×180=360 GiB`。这些结果来自代码中的合成输入，用来核对公式和分支，不能解释为一次训练实测。
 
 这个 demo 的作用是把“选哪个 checkpoint”拆成可解释的观察：先列出恢复字段缺失，再按硬门槛筛候选；随后比较 validation / PPL / domain / benchmark / safety / regression，最后查看实验记录、对照差异和保留存储。它只模拟记录与决策，不实现模型训练、分布式 checkpoint、统计检验或生产存储事务。
 
@@ -1089,6 +1125,8 @@ diagnostics= {'best_exists': True, 'best_complete': True, 'best_stable': True, '
 推理加载成功只证明当前代码能够读取一组参数。训练恢复还要证明 optimizer 的动量、scheduler 的位置、精度状态、随机状态、数据 cursor 和分片元数据都被正确解释。少了 optimizer 动量，下一次更新就不是原轨迹上的更新；少了 data state，训练可能重复或跳过样本；少了 tokenizer 版本，输入和标签的 token 边界也可能改变。
 
 检查时先读 manifest，再检查文件哈希、参数形状、dtype、分片索引和版本引用，最后用 loss、学习率、step、token 增量和数据游标做短程恢复探针。字段齐全只是文件层面的条件；探针偏离时，应该根据偏差类型回到 scheduler、数据管道或 optimizer 状态，而不是把异常归咎于“随机性”。
+
+例如断点记录 `shard=17, packed_seq_cursor=8400`，并约定 cursor 指向下一个待读 sequence。恢复后完成一个由 600 个 packed sequence 组成的更新，下一次记录应到 `cursor=9000`。如果 consumed-token 计数增加了 50M，但 cursor 仍停在 8400，日志表面上步数和 token 数可能连续，数据管道却可能重复消费这 600 个 sequence。由于 packing 后每条序列的有效 token 数不同，不能用 50M 反推准确的 sequence cursor；恢复验证必须同时比较两种状态。
 
 ### 16.2 把最后一个 checkpoint 误当成最佳版本
 
@@ -1123,7 +1161,7 @@ train loss 降低只说明模型更好地拟合了当前训练目标。数据重
 本章核心结论：
 
 1. Checkpoint 是训练容错、评估和版本管理的核心产物。
-2. 恢复训练需要 model、optimizer、scheduler、scaler、随机状态和数据状态。
+2. 恢复训练需要 model、optimizer、scheduler、随机状态和数据状态，并按精度配置保存 scaler 等专属状态。
 3. 保存频率要在容错、评估和存储成本之间平衡。
 4. 不能默认最后一个 checkpoint 最好。
 5. Validation loss 是基础指标，但不是完整能力评估。
@@ -1161,14 +1199,14 @@ train loss 降低只说明模型更好地拟合了当前训练目标。数据重
 
 本章涉及的框架行为优先以官方文档为准，机制和方法论再参考原始论文：
 
-- [PyTorch Saving and Loading a General Checkpoint](https://pytorch.org/tutorials/recipes/recipes/saving_and_loading_a_general_checkpoint.html)：说明如何保存模型、优化器、epoch/step 等恢复状态；具体字段仍需按训练框架补充。
-- [PyTorch Distributed Checkpoint 2.14](https://docs.pytorch.org/docs/2.14/distributed.checkpoint.html)：说明分布式 checkpoint 的保存、加载和 state-dict 抽象，适合核对 sharded artifact 与 load-time resharding 的接口边界；事务式发布和跨版本兼容仍需应用验证。
-- [Asynchronous Saving with Distributed Checkpoint 2.14](https://docs.pytorch.org/tutorials/recipes/distributed_async_checkpoint_recipe.html)：说明异步 staging/write future 路径以及保存与训练计算重叠时需要等待完成的生命周期。
-- [PyTorch Reproducibility Notes 2.14](https://docs.pytorch.org/docs/2.14/notes/randomness.html)：说明随机种子、确定性算法和跨平台复现的限制；官方明确提醒完全复现并非所有环境都能保证。
+- [PyTorch Saving and Loading a General Checkpoint 2.15](https://docs.pytorch.org/tutorials/recipes/recipes/saving_and_loading_a_general_checkpoint.html)：说明如何组织模型、优化器、epoch/step 等 checkpoint 状态；具体恢复字段仍需按训练框架补充。
+- [PyTorch Distributed Checkpoint 2.15](https://docs.pytorch.org/docs/2.15/distributed.checkpoint.html)：说明分布式 checkpoint 的保存、加载、state-dict 和 async completion 接口；该版本明确不保证已保存 state dict 跨 PyTorch 版本向后兼容。
+- [Asynchronous Saving with Distributed Checkpoint 2.15](https://docs.pytorch.org/tutorials/recipes/distributed_async_checkpoint_recipe.html)：区分 staging 与 upload 的完成状态，并说明 CPU/pinned-memory staging 与限制在途 checkpoint 的工程代价。
+- [PyTorch Reproducibility Notes 2.15](https://docs.pytorch.org/docs/2.15/notes/randomness.html)：说明随机种子、确定性算法和跨平台复现的限制；官方明确提醒完全复现并非所有环境都能保证。
 - [Hugging Face Perplexity of fixed-length models](https://huggingface.co/docs/transformers/perplexity)：说明 causal language model 在固定长度窗口下计算 perplexity 时的 token shift、stride 和统计口径。
-- [Hugging Face Transformers Trainer v5.19.0](https://huggingface.co/docs/transformers/v5.19.0/main_classes/trainer)：说明 `save_strategy`、`resume_from_checkpoint`、`load_best_model_at_end` 和 `metric_for_best_model` 等训练管理参数的实际语义；该页提示 v5.20.2 已发布，本章固定到实际打开核验的 v5.19.0 页面，目标环境升级后应再复核。
+- [Hugging Face Transformers Trainer 当前文档](https://huggingface.co/docs/transformers/main/main_classes/trainer)（访问日期：2026-11-02；页面当日显示最新稳定版 v5.22.1）：用于核对 `resume_from_checkpoint`、保存策略和 best-model 配置；文档路径会随发布变化，具体训练必须按环境锁定的 Transformers 版本复核。
 - [MLflow Tracking](https://mlflow.org/docs/latest/ml/tracking/)：说明记录参数、指标和 artifacts，以及比较 runs 的实验追踪思路；它是工具实践，不是对任何项目的唯一架构要求。
-- [PyTorch Fully Sharded Data Parallel 2.14](https://docs.pytorch.org/docs/2.14/fsdp.html)：说明参数、梯度和 optimizer state 在 FSDP 下的分片边界。
+- [PyTorch Fully Sharded Data Parallel 2.15](https://docs.pytorch.org/docs/2.15/fsdp.html)：说明参数、梯度和 optimizer state 在 FSDP 下的分片边界；具体 state-dict 形式仍应以采用的保存接口为准。
 - [ZeRO: Memory Optimizations Toward Training Trillion Parameter Models](https://arxiv.org/abs/1910.02054)：说明 optimizer、gradient 和 parameter 分片如何降低训练内存，论文中的实现和硬件假设不能直接等同于每个 runtime 的 checkpoint 格式。
 - [Attention Is All You Need](https://arxiv.org/abs/1706.03762)：Transformer 的原始论文；本章引用其训练状态和模型配置的背景，不把论文中的实验设置当成现代训练系统的默认配置。
 - [Holistic Evaluation of Language Models（HELM）](https://arxiv.org/abs/2211.09110)：比较统一场景覆盖、多指标评估和原始输出发布；论文中的场景集合是覆盖取舍，不是所有真实任务的全集。
