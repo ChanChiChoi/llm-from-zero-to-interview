@@ -1130,7 +1130,7 @@ Serving 扩展固定 vLLM `v0.30.0` 和 SGLang `v0.5.20`：分别追踪 QSA acti
 
 ### 项目：Claude Opus 5.5 Long-Horizon Efficiency and Safety Lab
 
-构建一个不调用真实付费 API 的 evidence-aware Agent 审计器，输入模型/revision、effort、fallback policy、工具、权限、cache、task budget、token、tool calls、retry、actual model 和 verifier receipt，输出 verified success、quality-cost curve、token efficiency、fallback transparency、side-effect safety、unknown-state handling 和 failed gates。配套的 [`claude_opus55_protocol_audit.py`](research/model-update-2026-09/code/claude_opus55_protocol_audit.py) 是标准库 `local_protocol_toy`，只验证教学协议和失败分类，不替代真实 API、模型质量或生产 SLO。实验覆盖：
+构建一个不调用真实付费 API 的 evidence-aware Agent 审计器，输入模型/revision、effort、fallback policy、工具、权限、cache、task budget、token、tool calls、retry、actual model 和 verifier receipt，输出 verified success、quality-cost curve、token efficiency、fallback transparency、side-effect safety、unknown-state handling 和 failed gates。实现时使用标准库和合成轨迹，按 API 合同检查协议边界，但必须明确 toy 结果不替代真实 API、模型质量或生产 SLO。实验覆盖：
 
 1. Opus 5.5 的 `max with fallback` 与 medium/default 成本曲线不可直接比较；
 2. 少工具调用但缺少测试的错误优化；

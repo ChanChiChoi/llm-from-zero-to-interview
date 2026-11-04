@@ -35,21 +35,21 @@
 ## 推理模型中检测信号的脆弱性
 
 - **来源：** Wang et al., [On The Fragility of Benchmark Contamination Detection in Reasoning Models](https://proceedings.iclr.cc/paper_files/paper/2026/hash/a3860475ddbfb8c644c43f0dcd266b66-Abstract-Conference.html)，ICLR 2026；arXiv v2 于 2026-03-02 更新并标记为已接收。
-- **阅读范围：** ICLR 官方会议摘要；本次未据摘要外推未读的实现细节。
-- **支持事实：** 作者报告，在其 base model 经 benchmark 污染 SFT 后的实验中，短程 GRPO 可显著隐藏多数检测方法使用的污染信号；对 advanced reasoning model 的特定 CoT 污染场景，多数检测器结果接近随机猜测。
-- **证据边界：** 结论限于论文构造的模型、训练流程、污染方式和检测器，不证明所有 RL 或所有推理模型都会抹除污染信号。它说明“没有检测到”不能视作“没有污染”的一般充分证据。
+- **阅读范围：** ICLR 官方摘要和正式 PDF 摘要、引言、GRPO 步数实验描述、结果图表说明与 Table 2；未整理完整附录及全部消融。
+- **支持事实：** 作者报告 base model 经 benchmark 污染 SFT 后，继续用 10K 条 DeepMath-103K 问题做一轮（156 步）GRPO 时，多种检测器 AUROC 随步数下降；图注指出部分 reference-free 方法在该设置下接近随机猜测。论文还构造 advanced reasoning model 的末阶段 CoT 污染场景，多数检测器接近随机。
+- **证据边界：** 主要步数结果以 Qwen2.5-7B-Instruct 为 base model，并使用论文指定的模型、benchmark、训练数据及污染构造；其他模型见附录。结论不证明所有 RL 或所有推理模型都会抹除污染信号。它说明“没有检测到”不能视作“没有污染”的一般充分证据。
 
 ## RL 后训练的专用检测信号
 
 - **来源：** Tao et al., [Detecting Data Contamination from Reinforcement Learning Post-training for Large Language Models](https://proceedings.iclr.cc/paper_files/paper/2026/hash/ab003a4f85ecb1b7b1514ff539dc7395-Abstract-Conference.html)，ICLR 2026；[正式论文 PDF](https://openreview.net/pdf?id=EjiJmiA6ea)。
-- **阅读范围：** ICLR 官方摘要、正式论文摘要及结论摘录。
-- **支持事实：** Self-Critique 以 token-level entropy 探测 RL 后训练后可能出现的窄化推理路径/策略塌缩，并引入 RL-MIA 模拟 RL 阶段污染；作者在其多模型、多任务设置中报告最高 30% 的 AUC 提升。
-- **证据边界：** 该检测信号依赖论文所构造的 RL 污染和模型；“最高 30%”沿用作者摘要措辞，不改写为百分点或普遍提升。不能与其他训练阶段、污染方式和测试集上的检测器分数横向排名。
+- **阅读范围：** ICLR 官方摘要和正式 PDF 摘要、方法 §§3—4、RL-MIA 实验设置 §5.1 及主结果 §5.3/Table 2；未整理所有附录消融。
+- **支持事实：** Self-Critique 以 self-critique 提问比较两段回答的 token-level entropy 序列，探测 RL 后训练中窄化的高奖励推理路径；RL-MIA 用 AIME 2024/2025 和两类合成逻辑任务构造受控成员/非成员样本。在四类任务平均的主表中，Qwen2.5-7B-Instruct 的 AUC 为 `0.70`、DeepSeek-Math-7B-Instruct 为 `0.64`，作者分别标注比最佳非本方法基线高 `19%`；摘要报告跨实验最高 AUC 提升 `30%`。
+- **证据边界：** 上述主表数字绑定两个 7B 模型、四类数学/逻辑任务和论文的受控 RL 污染流程；最高 `30%` 沿用作者摘要措辞，不改写为百分点或普遍提升。AUC `0.50` 是随机排序基准，不能与其他训练阶段、污染方式和测试集上的检测器分数横向排名。
 
 - **来源：** Gwak et al., [LaRA: Layer-wise Representation Analysis for Detecting Data Contamination in RL Post-Training](https://aclanthology.org/2026.findings-emnlp.690/)，Findings of EMNLP 2026。
-- **阅读范围：** ACL Anthology 元数据和摘要。
-- **支持事实：** LaRA 分析 RL 后训练模型的逐层表示，引入扰动敏感性、方向塌缩和局部表示刚性三类度量，并报告在所测 RL 推理模型上优于输出层基线。
-- **证据边界：** 摘要支持方法组成与作者报告的比较结论；本次未复核全文实验表和限制。方法依赖访问内部层表示，不适用于只有文本输出接口的模型；结论限于论文模型、污染构造与比较基线。
+- **阅读范围：** ACL Anthology 元数据、正式论文 PDF 摘要和引言、§3 问题设定/受控污染集构造/三项度量定义；未据此整理全文消融或所有结果表。
+- **支持事实：** LaRA 分析 RL 后训练模型的逐层表示，引入表示变化幅度、方向塌缩和语义变体下的表示稳定性指标。作者对三种开源 RL 推理模型分别构造每组 30 个已知训练题成员样本和 30 个 AIME 2026 非成员样本，并报告组合表示信号优于输出层基线；论文摘要报告最高 `+9.6%` AUC 和 `3.5×` TPR@FPR=5% 的提升。
+- **证据边界：** 结果绑定论文模型、数学题、成员/非成员构造和基线；未据摘要及 §3 外推到其他任务或 API 模型。方法直接读取逐层隐藏状态，普通文本输出接口不能直接提供该信号；未复核的其他消融和结果不写入正文。
 
 ## 合成数据生成器与评估器的偏好泄漏
 

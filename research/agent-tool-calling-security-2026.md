@@ -1,6 +1,6 @@
 # Agent 工具调用、安全确认与评测：来源证据
 
-检索与阅读日期：2026-10-30。本文只记录公开资料支持的接口约束、授权建议和评测构造；产品接口与仓库文档为动态页面时，以访问日期和具体 API 模式限定适用范围。
+创建于 2026-10-30；最后更新于 2026-11-03。本文只记录公开资料支持的接口约束、授权建议和评测构造；产品接口与仓库文档为动态页面时，以访问日期和具体 API 模式限定适用范围。
 
 ## 工具协议与 schema
 
@@ -84,3 +84,17 @@
 - **阅读位置**：摘要、§3 Study Design、§4.1–4.3 Results、§5 Discussion/Conclusion、Limitations，以及 Appendix D 的人工校验和 benchmark agreement。
 - **来源支持的事实**：作者审计 11 个 2–14B 开放权重工具 Agent 在 InjecAgent 与 AgentDojo 的约 33,000 条轨迹，并用一个 LLM judge 对失败攻击做行为分类。论文报告失败攻击多数被忽略而非明确拒答；提示词允许工具输出中的外部指令时，在 InjecAgent 上的汇总 ASR 明显升高。作者提出 Attack–Task Outcome Matrix（ATOM），在其 16,273 条 AgentDojo 轨迹上分别报告安全且完成 67.2%、安全但未完成 21.7%、不安全但完成 3.8%、不安全且被劫持 7.3%；因此该审计中的 ASR 为 11.1%，任务完成率为 71.0%，两个边际量会掩盖 21.7% 安全但未完成的轨迹。
 - **证据等级与边界**：source-backed（arXiv v1 预印本）。行为主结果来自一个 LLM judge；两位作者对跨模型和设置分层抽取的 150 条轨迹（两 benchmark 各 75 条）做人审，四类分组与 judge 的一致率为 96%，Cohen's kappa 为 0.835，仍不是对全部 33,000 条轨迹的人工复核。任务完成只在 AgentDojo 测量，策略提示条件只在 InjecAgent 测量其 ASR。研究使用静态注入的合成单 Agent benchmark、小型开放权重 Agent 和特定工具脚手架；作者明确未验证自适应/白盒攻击、多 Agent 系统或线上部署。以上比例不代表生产发生率或一般 Agent 水平，只支持把攻击结果与正常任务效用、无效动作和样本边界联合报告。
+
+## 跨会话记忆写入面与 MPBench
+
+- **来源与版本**：[Dash et al., “From Untrusted Input to Trusted Memory: A Systematic Study of Memory Poisoning Attacks in LLM Agents”](https://arxiv.org/abs/2606.04329)，arXiv:2606.04329v2，v1 提交于 2026-06-03，v2 修订于 2026-06-18；访问日期 2026-11-03。
+- **阅读位置**：摘要、§§1–4.5、§5 讨论/限制，以及附录 A 的漏洞与攻击路径概述。
+- **来源支持的事实**：论文将长期记忆写入分为 explicit instruction-executed、system prompt-driven、compaction-driven 和 experience-to-procedure 四条通道；以 MPBench 对 OpenClaw 和 HERMES 两种 Agent 系统评估，实验使用 GPT-OSS-120B、默认系统提示和记忆写入配置。数据集含 3,240 个攻击样例和 2,997 个良性样例，覆盖六类攻击和七个领域。作者报告平均写入 ASR 50.46%、记忆写入成功后的检索影响率 RSR 41.05%；RSR 的分母是写入成功子集，不是所有输入。两种 Agent 的平均 ASR/RSR差别明显，且其记忆写入、自动检索与压缩策略不同。
+- **证据等级与边界**：source-backed（arXiv v2 预印本）。作者明确限制包括只测试一个模型、两个 Agent 系统，以及部分场景把外部内容作为带标签的上下文块而未完整模拟真实工具检索链。数字不是其他记忆架构或线上部署的事故率；LLM judge 判定语义写入/召回影响的准确度也不能视为无误。该研究支持区分单轮输入过滤与长期记忆写入/召回门禁，不支持对所有 Agent 的泛化风险结论。
+
+## CounterSteer：模型内部注入缓解及参数来源边界
+
+- **来源与版本**：[Russinovich, “CounterSteer: Suppressing Indirect Prompt Injection with Activation Steering”](https://arxiv.org/abs/2609.36570)，arXiv:2609.36570v1，提交于 2026-09-29；Microsoft Research 页面同于 2026-09 发布；访问日期 2026-11-03。
+- **阅读位置**：摘要、§§II–V 的 threat model/评估，§VI mechanism，§VII limitations 和结论。
+- **来源支持的事实**：该工作提出逐模型拟合残差流方向并在 prefill 时对 tool-result token 做常驻激活干预。作者在五个开源权重模型（8B–106B）上报告指定 holdout attack success 从 0.21–1.00 降到 0.00–0.17；AgentDojo compromise rate 从 0.10–0.49 降到 0.006–0.079，benign utility 依模型和判定器而异。该工作把 tool hijack、parameter manipulation 和 delegated authority 分开；针对参数污染的 best-of-24 query search 在 18 个开发样本中仍击穿 13 个样本，作者据此提出参数来源控制作为互补层。
+- **证据等级与边界**：source-backed（单作者 arXiv v1 预印本及作者所属机构页面）。方法需要白盒 serving、可标记 tool-result spans 和逐模型拟合；论文自己报告效用成本、模型/攻击面不完整与仍未测试的自适应范围。具体数值绑定其任务、基线、模型和判分口径，不证明第三方 API、用户消息、任意 RAG 或生产系统可复现同等效果。它支持“模型侧缓解不能替代服务端参数来源和授权检查”，不是已验证的通用防火墙。

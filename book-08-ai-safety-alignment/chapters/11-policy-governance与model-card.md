@@ -15,6 +15,8 @@
 
 这也是初学者和专家阅读同一份 model card 时应该看到的两层内容。初学者需要知道“我能不能把它用于这件事”；专家还需要知道“这个结论由什么样本、什么版本、什么 harness、什么权限和什么统计范围支持”。
 
+本章承接[第十章《Privacy、Memorization 与 Watermarking》](10-privacy-memorization-watermarking.md)对参数记忆、RAG/日志泄露和内容来源信号的区分，把这些不同证据分别放入模型与系统治理记录；隐私指标或水印结果不能单独证明整个系统安全。
+
 ## 1. 治理究竟在治理什么
 
 ### 1.1 从模型权重到社会影响
@@ -334,7 +336,9 @@ Out-of-scope use 也要具体：
 
 “数据来自互联网”不是足够的治理说明。它既没有说明许可，也没有说明时间、重复、个人信息和数据处理。
 
-截至 2026-10-28，欧盟《人工智能法案》为通用目的 AI 模型供应商设置了技术文档、版权政策和训练内容公开摘要等义务，自 2025-08-02 起适用。欧盟 GPAI Code of Practice 是帮助履行相关义务的自愿工具；其 Transparency 章节提供 Model Documentation Form，Safety and Security 章节适用于承担系统性风险义务的模型供应商。这个表格是特定法规路径的文档接口，不能与所有组织都适用的通用 model card 混为一谈；团队仍需按供应商角色、模型分类、市场范围和适用日期逐项确认。可查阅欧盟委员会的 [GPAI obligations](https://digital-strategy.ec.europa.eu/en/factpages/general-purpose-ai-obligations-under-ai-act) 与 [GPAI Code of Practice](https://digital-strategy.ec.europa.eu/en/policies/contents-code-gpai)。
+截至 2026-11-03，欧盟《人工智能法案》对通用目的 AI 模型供应商的技术文档、下游提供者文档、版权政策和训练内容公开摘要义务已自 2025-08-02 起适用。委员会另将完整执法起点定为 2026-08-02；在 2025-08-02 前已投放市场的模型，相关供应商最迟须于 2027-08-02 前履行义务。适用日期、执法日期和旧模型过渡期是三个不同判断，不能合并成一句“法规已生效”。
+
+GPAI Code of Practice 是自愿的合规工具，Transparency 章节的 Model Documentation Form 面向特定法规文档义务；Safety and Security 章节针对系统性风险模型的附加要求。符合条件的开放模型可能适用部分文档义务例外，但系统性风险模型不因此免除附加责任，版权政策和训练摘要也需单独核对。这里的法定模型文档不等同于所有组织通用的 model card 模板；团队仍需按供应商角色、模型分类、市场范围和适用日期确认。可查阅欧盟委员会的 [GPAI obligations](https://digital-strategy.ec.europa.eu/en/factpages/general-purpose-ai-obligations-under-ai-act)、[GPAI provider guidelines](https://digital-strategy.ec.europa.eu/en/policies/guidelines-gpai-providers) 与 [GPAI Code of Practice](https://digital-strategy.ec.europa.eu/en/policies/contents-code-gpai)。
 
 ### 5.4 Evaluation：指标必须带条件
 
@@ -473,6 +477,8 @@ Claude Opus 5.5 的 System Card 展示了这些字段为何不能省略：
 
 本案例依据 Anthropic 的 [Claude Opus 5.5 System Card](https://www.anthropic.com/claude-opus-5-5-system-card)。评测记录应同时保留原始 numerator/denominator、snapshot、权限与 safeguard 配置、fallback 轨迹、任务环境、verifier 和计时定义。官方 System Card 能证明发布方在这些条件下报告了什么；它本身不等于独立复现，也不自动覆盖不同产品路由或生产环境。
 
+还要保留发布材料自己的版本标记：System Card 将这组 `81.8%/48.7%` 结果放在 OSWorld 2.0 小节，Anthropic 的[发布页](https://www.anthropic.com/claude-opus-5-5)则把 `81.8%` partial 标为 OSWorld 2.1。相同的 partial 分数不能证明任务文件和运行协议相同；`48.7%` strict 只属于 System Card 所述配置。没有逐项核对任务版本和 harness 时，不应把它与其他 OSWorld 版本的数字横向排名。
+
 ### 6.5 System Card 的版本更新也属于评测证据：Claude Opus 5
 
 Claude Opus 5 System Card 的 2026-08-19 changelog 补入跨 surface prompt-injection bug-bounty 结果，并因发现 Cowork browser harness 不一致而重跑模型基线。修订后的比较统一使用 Cowork harness；该产品不能关闭 thinking，因此不再报告“thinking disabled”条件。这不是模型升级，而是测量协议的修正：harness 变化时应重跑旧基线，不能只更新新模型分数。
@@ -488,7 +494,7 @@ Claude Opus 5 System Card 的 2026-08-19 changelog 补入跨 surface prompt-inje
 
 ## 7. 访问边界：把治理决定交给系统执行
 
-治理流程会决定哪些用户、任务、数据和动作进入发布范围。系统需要把这份范围声明映射到服务端身份、策略、工具和审计规则；模型的自我判断不能作为授权凭据。第十五章完整讨论 risk-calibrated access 的请求状态、策略决策点与访问评估，本节只说明治理文档需要保存哪些接口。
+治理流程会决定哪些用户、任务、数据和动作进入发布范围。系统需要把这份范围声明映射到服务端身份、策略、工具和审计规则；模型的自我判断不能作为授权凭据。[第十五章《Risk-Calibrated Access》](15-risk-calibrated-access.md)完整讨论请求状态、策略决策点与访问评估，本节只说明治理文档需要保存哪些接口。
 
 ### 7.1 质量、成本和风险的候选比较
 
@@ -513,7 +519,7 @@ Claude Opus 5 System Card 的 2026-08-19 changelog 补入跨 surface prompt-inje
 
 评估证据缺失、策略服务不可用或授权状态不明时，系统可以暂停动作、切到只读建议、请求补充信息或转人工。备用模型不能扩大原有权限，也不能绕过拒绝。事件记录应保留触发原因、实际使用的模型与策略版本、动作是否已提交、影响范围和恢复责任人。
 
-第十六章详细说明错误分类、状态账本、幂等、回滚和安全降级路径。此处的治理要求是：发布文件明确哪些条件触发降级、谁批准恢复、是否需要更新 model card / system card，以及降级后的数据和动作边界。
+[第十六章《Fallback Routing 与安全降级》](16-fallback-routing与安全降级.md)详细说明错误分类、状态账本、幂等、回滚和安全降级路径。此处的治理要求是：发布文件明确哪些条件触发降级、谁批准恢复、是否需要更新 model card / system card，以及降级后的数据和动作边界。
 
 ## 8. 发布决定：从指标到范围
 
@@ -539,7 +545,7 @@ C_{\mathrm{model}}=\frac{\sum_{j\in M}c_j}{|M|}
 C_{\mathrm{evidence}}=\frac{\sum_{k\in E}e_k}{|E|}
 ```
 
-其中 E 是当前发布范围要求的评估切片，e_k 表示切片已经有可复核结果。7 个固定切片若只有核心质量、安全、RAG 权限和工具动作 4 项完成，则 C_evidence=4/7≈0.571。空集合为 N/A；只有计划、没有运行结果的评估不计入分子。总体覆盖率不能掩盖高风险切片，因此门禁还要列出关键条件的逐项状态。
+其中 E 是当前发布范围要求的评估切片，e_k 表示切片已经有可复核结果。7 个固定切片若只有核心质量、安全、RAG 权限和工具动作 4 项完成，则 C_evidence=4/7≈0.571。空集合为 N/A；只有计划、没有运行结果的评估不计入分子。总体覆盖率不能掩盖高风险切片，因此门禁还要列出关键条件的逐项状态。阈值比较应使用未舍入的比例，报告展示时才按约定精度舍入；若先把 0.7996 舍入成 0.800 再与 0.80 比较，就会把未达门槛的信号误判为通过。
 
 ### 8.3 未关闭风险权重
 
@@ -593,6 +599,8 @@ demo 的三条 P0/P1 风险权重合计 5+4+4=13，其中两条已有有效缓�
 
 阶段推进还应有可操作的停止与回退条件。例如，只读 RAG 灰度通过后，开放写入工具仍是新的风险组合，必须单独验收服务端授权、确认状态、幂等、撤销和事故恢复。若监控显示越权检索、日志泄露或误操作达到预设阈值，应停止扩大并退回上一个已批准配置；若仅有质量下降，则可先切换到只读或人工辅助，再确认问题来自模型、索引、策略还是工具。发布决定记录目标范围、停止阈值和恢复人，才能把“逐步发布”变成真实的治理控制。
 
+每次扩大范围都要把旧配置与新增条件分开记录：用户从内部员工扩大到客户，或动作从只读变为写入，都会引入新的身份、数据和副作用路径。应保留旧制品、分母和失败样例，按变更影响复测切片；无法复测时维持原批准范围或退回上一级。这样才能判断旧证据还支持哪些结论，而不会把“文档字段齐全”误当成“新系统已经安全”。
+
 ## 9. Responsible Scaling：能力增长与控制增长
 
 ### 9.1 核心思想
@@ -625,7 +633,7 @@ Responsible Scaling 的核心不是一句“越强越不能发布”，而是：
 
 ### 9.3 不同机构框架的证据边界
 
-这些框架的版本、受众和责任基础不同。以下是截至 2026-10-28 可从发布方材料确认的快照：
+这些框架的版本、受众和责任基础不同。以下是截至 2026-11-03 可从发布方材料确认的快照：
 
 | 框架 | 当前公开版本或日期 | 主要对象 | 阅读边界 |
 | --- | --- | --- | --- |
@@ -665,7 +673,9 @@ Responsible Scaling 的核心不是一句“越强越不能发布”，而是：
 
 “公开得越多越透明”不是普遍规律。过度公开可复用攻击路径可能增加风险；过度隐藏又会让用户无法判断是否适合使用。关键是让不同读者获得完成其责任所需的最小充分信息。
 
-法规版本也是 system card 的部署条件。欧盟 AI Act 第 50 条的内容透明义务自 2026-08-02 起适用；欧盟委员会的透明度 Code of Practice 提供一种自愿的符合路径，底层法定义务仍需按具体角色和内容类型判断。其范围与水印、内容凭证的技术证据不同；本册第十章讨论水印和 provenance 信号，不能将它们当成作者身份或真实性证明。适用状态应以[第 50 条 FAQ](https://digital-strategy.ec.europa.eu/en/faqs/transparency-obligations-under-article-50-ai-act)及[透明度 Code of Practice](https://digital-strategy.ec.europa.eu/en/policies/code-practice-ai-generated-content)的现行页面为准。
+截至 2026-11-03，欧盟委员会已发布 Article 50 最终透明义务指南；相关义务自 2026-08-02 起适用。法规按责任主体区分系统提供者与部署者：提供者在适用条件下须说明用户正在与 AI 交互，并为生成或操纵的合成内容提供机器可读标记和可检测性；部署者另需处理情绪识别/生物特征分类告知、深度伪造披露，以及没有实质人工审查或编辑控制的特定公共利益文本标注。面向用户的标签与机器可读标记不是同一义务，后者也不证明内容真实。
+
+过渡期只覆盖 2026-08-02 前已投放市场的系统的 Article 50(2) 标记与检测义务，截止 2026-12-02；它不延后 Article 50 的其他义务。透明度 Code of Practice 是自愿工具，委员会与 AI Board 已认可它作为一种适当合规方式；未签署者仍须以其他适当方式证明合规。上述日期和角色只适用于欧盟这一路径，不应外推成所有组织的通用 model card 要求。适用状态应以欧盟委员会的[Article 50 最终指南](https://digital-strategy.ec.europa.eu/en/library/guidelines-transparency-obligations-providers-and-deployers-ai-systems)、[第 50 条 FAQ](https://digital-strategy.ec.europa.eu/en/faqs/transparency-obligations-under-article-50-ai-act)及[透明度 Code of Practice](https://digital-strategy.ec.europa.eu/en/policies/code-practice-ai-generated-content)为准。
 
 
 ## 11. 组织审计与事故响应
@@ -726,6 +736,18 @@ Responsible Scaling 的核心不是一句“越强越不能发布”，而是：
 
 跟踪表、产品页和社区讨论可能使用简称、内部代号或尚未核验的候选名称。评审时先记录发布方、来源链接、检索日期、可核验的 canonical model ID、公开 artifact 和证据类型；无法确认的字段标记为未知或观察项，不由名称本身推断参数、能力或模型卡存在。发布方公开一项产品功能，也不能自动证明内部架构、训练配方或独立评测结论。
 
+审阅时把原句拆成不同类型的 claim，而不是一次性判“真/假”。“API 接受最多 1M 输入 token”是接口上限；“能跨百万 token 找到证据”是具体任务能力；“复杂 Agent”是系统级工作流主张；“最强”则是需要限定比较对象和统计条件的相对结论。接口上限查 API 文档，具体能力查模型评测，Agent 工作流查 System Card；“最强”还须固定比较对象、版本、协议和时间。不能让同一个 token 上限替其他声明背书。
+
+然后为每个任务写可复核的评测合同：固定模型修订、提示模板、effort、工具和 harness，定义成功判据、尝试次数、失败样例及时间/成本。长上下文至少要区分输入上限、目标信息位置、干扰项、跨段整合与检索引用；Agent 任务还要记录读写权限、重试、子 Agent、人工介入和外部副作用。若发布方只提供某个高分，却没有这些条件，卡片应把它标成发布方自报的窄范围结果，并说明缺少哪些证据。
+
+最终声明可以写成：“版本 M3 的 API 接受不超过 1M 输入 token；在固定的 120 项中文/英文长文检索集和只读 harness 上，引用核验达到 X/Y。该结果不表示所有百万 token 文档均可检索，也未评估工具写入和持续 Agent 任务。”其中 X/Y 应来自真实评估；教学材料不得把示例数写成产品实测。只读试点的放行也只覆盖已测数据与权限。若 tokenizer、索引或工具范围变化，应判断模型级声明是否仍有效，同时重测系统级组合，不静默继承旧结论。
+
+可以用一组仅供讲解的合成结果说明总体分数为何不够：把 120 个检索任务按目标位置分成开头、中段和末尾三组，各 40 个；假设分别通过 38、28、36 个，则总体为 $(38+28+36)/120=102/120=0.85$，中段却只有 $28/40=0.70$。总体 85% 看起来尚可，但它不能支持“各位置都可靠”的说法；每组只有 40 个样本，也不能据此断言真实语料上的稳定率。模型卡应并列报告切片、任务和 verifier，并把这组数据标为教学输入；真实能力声明需来自冻结数据、明确配置和可复核结果。
+
+评审记录可以把每条声明拆成 `claim / artifact / evidence / conditions / owner / status` 六列。“API 上限”应链接版本化接口合同；“评测成功率”应链接不可变数据集和 verifier；“可安全用于 Agent”则要有工具权限、外部动作和回滚证据。若证据只支持更窄的范围，就把用途句子收窄，而不是用免责声明覆盖差距。对未公开的训练数据或内部 safeguards，可标注“资料未公开”，同时给出这对部署判断造成的限制；未知不是零风险，也不自动否定其他有证据的声明。
+
+发布后还要监测 claim 是否过期。模型别名可能指向新 snapshot，API 默认 effort 可能变化，产品又可能增加工具或记忆；即便首页文案不变，原有证据链也可能断开。文档负责人应保存旧版卡片、触发更新的变更记录和新旧声明对照，让用户看到适用范围为何变化。这样审阅者既能避免把宣传词当成事实，也能保留真正有用的能力声明，而不必把所有公开能力一概写成“未经验证”。
+
 ### 12.2 案例二：企业 RAG 的文档与系统不一致
 
 一个企业助手的 system card 写着“所有检索结果按租户权限过滤，敏感上下文不进入长期日志”。事故调查发现，检索服务按相似度返回候选，再由模型判断是否可见；调试模式还保存了完整上下文。
@@ -741,6 +763,16 @@ Responsible Scaling 的核心不是一句“越强越不能发布”，而是：
 
 修复完成后，不应直接宣布“系统安全”。更准确的说法是：在当前租户 schema、权限服务、日志配置和评估切片下，已降低已知越权路径；其他工具和新索引仍需单独复测。
 
+调查时先沿一条具体请求画数据流：可信网关解析用户与租户，检索服务生成候选，ACL 过滤候选，重排器选择片段，模型读取上下文，输出层筛查答案，日志服务决定留存字段。若租户 A 的请求在过滤前就把租户 B 的片段送进模型，模型最后没有复述也不能证明访问控制正确；若片段只进入调试日志，则这是另一条泄露路径。需要分别记录“未授权检索”“进入模型上下文”“最终输出”“日志/缓存留存”，不能只用最终回答作为唯一 oracle。
+
+可以用一条合成追踪复盘：请求携带租户 A 的有效身份；向量索引返回文档 B-17；权限决策记录却使用过期 policy revision；模型输出了 B-17 的一句摘要，日志又保留原文。这个轨迹至少包含检索 ACL、策略版本、输出泄露和日志最小化四个控制点。审计表为每个点保存 request ID、文档 ID、主体/租户、策略 revision、decision、模型上下文摘要或哈希、实际副作用及日志访问者；避免为了审计而复制整段敏感原文。
+
+修复后要让测试覆盖正向与反向：有权租户仍能检索自己的文档；无权租户在检索前就被过滤；权限撤销后缓存和多轮记忆失效；重排、摘要、引用生成、异常堆栈和人工标注副本都不把旧内容带回。还需分别验证日志字段与删除流程，并检查评估集是否覆盖租户切换和并发缓存键。只有相关门禁、失败分母和恢复责任人都写清，才能批准当前配置范围；索引 schema 或 ACL 策略变化时，旧的 system card 结论要标为 stale 并复测。
+
+例如，使用 20 条合成的跨租户无权请求检查检索前阻断，再用另一组 20 条检查答案和日志是否出现目标租户的受限内容。若第一组是 `0/20` 越权检索、第二组 `0/20` 输出泄露，这只表示当前样本内没有观察到失败；两组分母不能合并成“0% 风险”，也不能代替对缓存撤权和异常路径的测试。另用 20 条有权任务检查可用性，若 18 条完成，任务成功率为 `18/20=0.90`，它与越权指标回答不同问题。结果要记录任务来源、policy revision、身份模拟方式和判定器，避免把人工构造的红队样本误读为真实流量发生率。
+
+若事故追踪显示检索前过滤缺失，应先修复检索与缓存边界，而不是先增加模型拒答训练。模型可能看到已经越权返回的文档，也可能完全没有复述；这两种情况下，数据已经越过了授权边界。日志若保留原文，还需单独执行日志访问审计、留存清理和副本检查。只有确定哪一层拥有状态、哪一层阻断动作，才能选对责任人和复测条件。
+
 ### 12.3 案例三：强模型的分层访问
 
 一个模型在代码修复、长周期规划和工具调用上明显增强。产品团队希望所有用户默认使用完整 Agent 能力，安全团队担心凭证、网络和文件系统副作用。
@@ -753,6 +785,16 @@ Responsible Scaling 的核心不是一句“越强越不能发布”，而是：
 4. 生产写操作必须经过服务端审批、幂等检查、人工确认和回滚。
 
 这里的“强模型”没有被简单地全开或全关，而是根据能力、用户、环境、动作和证据分配。若某层评估显示越权率、凭证泄露或长周期失败超过约束，系统可以 fallback 到更低权限层，同时保留原因和复测任务。
+
+分层的关键不是给用户贴一个永久的“可信”标签，而是把授权绑定到具体主体、项目、资源、动作、期限和环境。沙箱测试权限不能自动继承成生产网络权限；一个项目的只读授权也不能扩展到其他租户。模型可以提出“下一步需要写文件”或“需要访问网络”的建议，但策略服务应重新检查当前 grant、资源范围和风险审批，不能把模型生成的解释当成访问凭据。
+
+每一级都应有进入条件和退出条件。默认只读层记录身份、数据边界和普通质量/隐私切片；沙箱层还要约束文件系统、网络、执行时长、调用预算和产物检查；受控网络层要说明域名 allowlist、只读/写入工具差别和请求留痕；生产写入层则需逐动作校验、幂等键、必要的双人审批、提交前确认、回滚对象及事故负责人。评测不仅要看工具参数格式，还要确认拒绝、撤权、超时和部分成功时外部状态如何变化。
+
+例如，可信项目申请把沙箱中的代码修复提升为生产仓库写入时，审批对象应包含具体仓库分支、允许的文件路径、提交方式、过期时间和回滚点。发布证据要覆盖被允许的改动、越界路径、重复提交和中断恢复；任何关键字段变化都会使原批准失效或进入复核。若系统不能证明当前授权或外部状态，安全默认可以退回只读建议并转人工，而不是自动寻找另一个拥有更大权限的模型继续执行。这样，能力增长触发的是受控升级和证据更新，不是无条件开放。
+
+逐步核对一次升级请求，可以看到治理记录如何落到执行路径：项目负责人提交用途和资源范围；安全与数据责任人确认威胁模型及允许输入；平台服务核对用户的即时 grant 与过期时间；策略引擎把任务限制到指定仓库和分支；执行器在提交前展示差异并要求用户确认；提交后由独立检查器验证产物，再写入可追溯回执。如果任何状态查不到、grant 被撤销、产物超出路径或回执丢失，执行器停在提交前或进入人工恢复，不能根据模型声称“已通过”继续推进。
+
+分层权限还需检查越权升级和降级的副作用。只读模型超时后，路由器不能自动换成权限更高的 Agent；同一用户跨项目工作时，缓存和 memory 不能沿用前一项目的 grant；审核人也不能用一个永久角色审批未来所有变更。每次升级都应绑定审批人、当前制品、策略版本和到期时间。复测通过后只开放这一个范围，后续申请仍需要独立证据。这样分层访问才是可以撤回、审计和解释的决策，而不是按模型强弱写成静态白名单。
 
 ## 13. 治理中的核心取舍
 
@@ -826,11 +868,13 @@ Responsible Scaling 的核心不是一句“越强越不能发布”，而是：
 
 运行时先验证输入合同，再计算独立信号。布尔比例有明确样本才定义；集合覆盖以 required 为分母；未解决风险以未解决条目权重除以全部条目权重；高风险缓解只在 P0/P1 子集中汇总。比如五个风险条目的权重总和为 $5+4+2+1+4=16$，其中未解决项权重为 $5+4+2+1=12$，所以 unresolved signal 是 $12/16=0.75$。这一步保留风险数量级的教学关系，但没有生产流量、损失函数和发生概率，不能把 0.75 读作 75% 的事故概率。
 
-决策分两层执行。第一层检查每个比例是否达到事先设定的阈值，形成 failed thresholds 和对应修复动作；第二层检查不可被均值抵销的硬约束，例如 P0 是否清零、日志是否受控、工具授权是否在服务端实施、回滚制品是否可用。代码先检查硬约束，因此即使审批覆盖恰好达到 0.80，隐私日志仍失控时结果仍为 hold。实际组织应由适当责任人确定硬约束，不能照抄示例阈值。
+决策分两层执行。第一层检查每个比例是否达到事先设定的阈值，形成 failed thresholds 和对应修复动作；第二层检查不可被均值抵销的硬约束，例如 P0 是否清零、日志是否受控、工具授权是否在服务端实施、回滚制品是否可用。最终决策优先处理硬约束，因此即使审批覆盖恰好达到 0.80，隐私日志仍失控时结果仍为 hold。实际组织应由适当责任人确定硬约束，不能照抄示例阈值。
+
+审批覆盖率只是比例信号，不能代替必需角色的签字。这个合成范围把列出的模型、安全、隐私、平台和产品负责人都设为必需审批人；只要其中一人未批准，即使其余审批使覆盖率达到数值阈值，硬门禁仍失败。真实系统应按任务风险预先确定必需角色和替代审批路径，并保留变更记录。
 
 未定义值与错误输入采用不同处理：空切片、零分母或缺测产生 None，并在门禁中按未通过处理；负权重、无穷权重、错误类型和不支持的比较符则是数据合同错误，应停止计算并修正来源。这样的区分可避免把没有证据的指标伪装成 0 分，也防止程序悄悄接受不可解释的数据。边界断言覆盖这些状态，帮助读者确认系统会在证据不足时保守停下。
 
-代码状态：已验证（2026-10-28；Python 3.12.9；仅使用标准库）。
+代码状态：静态审阅，未运行（2026-11-03）。
 
 ```python
 import math
@@ -847,11 +891,13 @@ def is_finite_number(value):
 
 def ratio(values):
     values = list(values)
-    if not values or any(value is None for value in values):
+    if not values:
         return None
-    if any(type(value) is not bool for value in values):
+    if any(value is not None and type(value) is not bool for value in values):
         raise ValueError("ratio values must be booleans or None")
-    return round(sum(values) / len(values), 3)
+    if any(value is None for value in values):
+        return None
+    return sum(values) / len(values)
 
 
 def weighted_ratio(numerator, denominator):
@@ -861,7 +907,7 @@ def weighted_ratio(numerator, denominator):
         raise ValueError("ratio weights must satisfy 0 <= numerator <= denominator")
     if denominator == 0:
         return None
-    return round(numerator / denominator, 3)
+    return numerator / denominator
 
 
 def set_coverage(required, covered):
@@ -871,7 +917,7 @@ def set_coverage(required, covered):
         raise ValueError("coverage inputs must be sets")
     if not required:
         return None
-    return round(len(required & covered) / len(required), 3)
+    return len(required & covered) / len(required)
 
 
 def meets(signal, threshold):
@@ -1019,6 +1065,7 @@ hard_constraints = {
         for issue in risk_issues
     ),
     "privacy_logging_controlled": False,
+    "all_required_scope_approvals_present": all(approvals.values()),
     "tool_authorization_server_side": True,
     "rollback_artifact_available": True,
 }
@@ -1096,7 +1143,11 @@ report = {
     "decision": decision,
 }
 
-print("signals=", signals)
+display_signals = {
+    name: None if value is None else round(value, 3)
+    for name, value in signals.items()
+}
+print("signals=", display_signals)
 print("evidence_status=", evidence_status)
 print("failed_thresholds=", failed_thresholds)
 print("failed_constraints=", failed_constraints)
@@ -1123,6 +1174,9 @@ boundary_checks = {
     "negative_weight_rejected": rejects(lambda: weighted_ratio(-1, 1)),
     "nonfinite_weight_rejected": rejects(lambda: weighted_ratio(1, math.inf)),
     "non_boolean_signal_rejected": rejects(lambda: ratio([1])),
+    "invalid_value_with_missing_rejected": rejects(
+        lambda: ratio([True, None, 1])
+    ),
 }
 assert boundary_checks["empty_ratio"] is None
 assert boundary_checks["missing_ratio"] is None
@@ -1132,12 +1186,13 @@ assert boundary_checks["undefined_gate"] is False
 assert boundary_checks["negative_weight_rejected"] is True
 assert boundary_checks["nonfinite_weight_rejected"] is True
 assert boundary_checks["non_boolean_signal_rejected"] is True
+assert boundary_checks["invalid_value_with_missing_rejected"] is True
 print("boundary_checks=", boundary_checks)
 ```
 
-在这组故意不完整的合成数据中，privacy_logging_controlled 为假，未解决的 P1 风险也使 open_risk 超过范围，因此最终决定为 hold_and_repair_hard_constraints。该决定说明当前发布范围和证据不足以支持更大的自动化范围。
+在这组故意不完整的合成数据中，privacy_logging_controlled 和 all_required_scope_approvals_present 为假，未解决的 P1 风险也使 open_risk 超过范围，因此最终决定为 hold_and_repair_hard_constraints。审批覆盖比例虽然达到数值阈值，但必需的隐私负责人尚未批准，独立硬门禁仍会阻断发布。该决定说明当前发布范围和证据不足以支持更大的自动化范围。
 
-固定输入的实际输出与手算一致：七个信号依次为 0.889、0.800、0.667、0.571、0.750、0.615、0.800；六个比例门槛未过，审批门槛通过，隐私日志硬性约束失败。边界检查中空比例、缺测比例、零权重分母和空 policy 集返回 None；未定义信号不通过门禁；负数、非有限权重和非布尔比例输入被拒绝。
+固定输入的静态预期输出与手算一致：七个信号依次为 0.889、0.800、0.667、0.571、0.750、0.615、0.800；六个比例门槛未过，审批覆盖率门槛通过，但必需审批人未全部签字，且隐私日志硬性约束失败，因此发布决定仍为 hold。边界检查中空比例、缺测比例、零权重分母和空 policy 集返回 None；未定义信号不通过门禁；负数、非有限权重、非布尔比例，以及与缺测同时出现的错误类型均应被拒绝。以上输出是手算与静态阅读结果，不是本轮程序运行结果。
 
 代码把 threshold、signal、evidence_status、actions 与发布 decision 分开保存。若以后改成只读范围、完成日志修复并补测多语言和长周期任务，应生成一份新版本审计记录并保留旧结果，以便追溯发布范围变化。
 
@@ -1221,7 +1276,7 @@ print("boundary_checks=", boundary_checks)
 
 1. [OpenAI Preparedness Framework v2](https://openai.com/index/updating-our-preparedness-framework/)：2025-04-15 发布的机构严重风险能力评估和 safeguard 框架。
 2. [OpenAI Frontier Governance Framework](https://openai.com/index/openai-frontier-governance-framework/)：2026-05-28 发布，说明 OpenAI 如何整理其关于加州 TFAIA 与欧盟 GPAI Code of Practice 的公开治理承诺。
-3. [Anthropic Responsible Scaling Policy](https://www.anthropic.com/responsible-scaling-policy)：截至 2026-10-28，公开政策页列出 Version 3.4（2026-07-08 生效）和 2026 年风险报告。
+3. [Anthropic Responsible Scaling Policy](https://www.anthropic.com/responsible-scaling-policy)：截至 2026-11-03，公开政策页列出 Version 3.4（2026-07-08 生效）和 2026 年风险报告。
 4. [Google DeepMind Frontier Safety Framework](https://deepmind.google/frontier-safety/)：页面列出 Version 3.1（2026-04-17）及此前版本，介绍其 capability thresholds 与 Tracked Capability Levels。
 
 这些资料来自各机构自身发布，支持“发布方公开了什么政策、版本和流程”的判断。它们不等于独立评测、统一行业标准或对所有部署环境适用的法律结论；引用具体阈值时应绑定所读版本。
@@ -1262,4 +1317,4 @@ Model card 让模型的能力、用途、限制、数据和评估可被理解；
 
 前沿模型的能力增长会改变治理问题的规模。更长上下文、更强推理、更多工具、更持久记忆和多 Agent 协作都可能增加任务价值，也可能扩大错误的现实影响。Risk-calibrated access 和 fallback routing 提供了一种中间路径：按用户、任务、数据、动作和证据分层，而不是把全部能力平均开放或全部关闭。
 
-高质量的发布记录不是一句“可以上线”，而是一份可追溯的范围声明：哪些条件已测量，哪些风险仍然开放，哪些控制在工作，哪些用户可以获得什么能力，以及下一个变化或事故发生时谁会重新判断。这样，治理文档才真正成为工程系统的一部分，而不是发布结束后才补上的附件。
+高质量的发布记录不是一句“可以上线”，而是一份可追溯的范围声明：哪些条件已测量，哪些风险仍然开放，哪些控制在工作，哪些用户可以获得什么能力，以及下一个变化或事故发生时谁会重新判断。这样，治理文档才真正成为工程系统的一部分，而不是发布结束后才补上的附件。下一章[《系统化判断与综合复习》](12-safety系统化判断与综合复习.md)会把行为、隐私、治理与控制证据放进综合案例，检验读者能否给出有范围的发布判断。

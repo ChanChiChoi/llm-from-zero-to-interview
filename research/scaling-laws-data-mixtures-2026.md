@@ -1,6 +1,6 @@
 # Scaling law、数据配比与合成数据：来源证据
 
-记录日期：2026-10-28
+记录日期：2026-10-28；本次补充核验：2026-11-03
 
 本记录保存联网核验到的研究结论、来源版本与适用边界；书内审阅决定和修改过程记录在 `progress/`。
 
@@ -28,9 +28,9 @@
 
 - “Scaling Laws for Optimal Data Mixtures,” NeurIPS 2025，[会议论文摘要](https://proceedings.neurips.cc/paper_files/paper/2025/hash/bc1d640f841f752c689aae20b31198c1-Abstract-Conference.html)，[论文 PDF](https://proceedings.neurips.cc/paper_files/paper/2025/file/bc1d640f841f752c689aae20b31198c1-Paper-Conference.pdf)。
   - 实际阅读范围：摘要、引言、§§1–2、4–6 及限制讨论。
-  - 来源支持：方法拟合目标域 loss 与模型规模、训练 token 和领域权重向量的关系，再为指定目标和预算优化 mixture；实验覆盖 LLM（最大约 7B 参数、150B token）、神经机器翻译和视觉模型。
+  - 来源支持：方法拟合目标域 loss 与模型规模、训练 token 和领域权重向量的关系，再为指定目标和预算优化 mixture。LLM 主实验使用 7 个 SlimPajama 文本域，模型规模为 186M–7B；选权重的 7B 验证训练使用 150B token。论文还单独测试原生多模态和视觉模型。
   - 证据等级：source-backed（论文实验与拟合范围内的结果）。
-  - 适用边界：目标主要是预训练/通用 loss，方法假设不重复数据；拟合权重不直接等于下游任务能力最优比例，也不是跨语料通用配方。
+  - 适用边界：论文假设各域有持续的新数据（以不重复、近似无限的数据流建模）且训练全程使用固定 mixture。目标是指定域或域集合上的 loss，而非直接优化任意下游能力；稀缺池重复、动态调度和其他语料不在该结论的直接保证范围。
 
 - “Datasets, Documents, and Repetitions: The Practicalities of Unequal Data Quality,” NeurIPS 2025，[会议论文摘要](https://proceedings.neurips.cc/paper_files/paper/2025/hash/2aba6ec20299931d46ddeefd5ddcb442-Abstract-Conference.html)，[论文 PDF](https://proceedings.neurips.cc/paper_files/paper/2025/file/2aba6ec20299931d46ddeefd5ddcb442-Paper-Conference.pdf)。
   - 实际阅读范围：摘要及 §3–4 的数据构造、重复实验、权重衰减设置和结果。
@@ -44,17 +44,89 @@
   - 证据等级：source-backed（EMNLP 正式论文所报告的实验和拟合）。
   - 适用边界：结果依赖具体改写方法、模型规模、预算、任务及单轮训练流程；不能将比例或训练加速当作通用配方，其他合成数据类型也不可等同处理。
 
-- Roberts et al., “Rewriting Scaling Laws for Synthetic Data with Compute and Data Constraints,” arXiv:2610.31867 v1，提交日期 2026-10-22，[预印本](https://arxiv.org/abs/2610.31867)。
-  - 实际阅读范围：摘要与计算受限、数据受限两种设定的说明。
-  - 来源支持：在其 compute-limited 设定中，将改写生成计算计入预算的拟合估计显示，改写比例从 $3\times10^{18}$ FLOPs 时低于 10%，升至 $10^{22}$ FLOPs 时约 32%。
-  - 证据等级：preprint / source-backed（预印本中的实验、拟合和外推，不是同行评审后的定论）。
-  - 适用边界：比例是该模型与数据约束下的估计；数据受限设定使用不同假设。数十倍 FLOPs 的 scaling forecast 属外推，不能当作已验证的生产训练结论。
+- Roberts et al., “Rewriting Scaling Laws for Synthetic Data with Compute and Data Constraints,” arXiv:2610.31867 v1，提交日期 2026-10-22，[固定版本预印本](https://arxiv.org/abs/2610.31867v1)，[HTML 正文](https://arxiv.org/html/2610.31867v1)。
+  - 实际阅读范围：摘要；§2.1 rewriting scaling law 与生成成本；§§3.1–3.2 compute-limited 实验设置和结果；§5 limitations；附录 L.1 的计算成本假设及其摊销说明。
+  - 来源支持：作者将生成重写的 FLOPs 纳入目标训练预算，在 FineWeb-Edu/FinePhrase、SmolLM2-1.7B rewriter 的 compute-limited 设定中，拟合估计的最优比例从 $3\times10^{18}$ FLOPs 时低于 10% 增至 $10^{22}$ FLOPs 时约 32%。对最后预算，作者测试了 $R\in\{0,0.32,0.5,1.0\}$ 的 Paloma 对照，其中 $R=0.32$ 的 BPB 最低；该 run 在 16 个 Paloma 来源中的 10 个低于 rewriter。论文也研究有限 5B-token seed set 和 bootstrapped rewriter 的 data-limited 设定，假设与 compute-limited 情景不同。
+  - 证据等级：preprint / source-backed（指定 arXiv v1 的实验、拟合与一次高预算验证；非同行评审后的定论或独立复现）。
+  - 适用边界：比例和 33 倍 FLOPs 预测绑定 FineWeb-Edu/FinePhrase、重写风格、模型、Paloma 指标与拟合；只测试一个外部 rewriter，compute 近似按每个重写 token $4N_r$ FLOPs 计，也假设改写长度与来源相同。作者未计入 rewriter 预训练成本，并将其视为跨实验摊销。不能把拟合比例当作完整项目成本或通用数据配方。
 
 - Subramanyam et al., “Scaling Laws Revisited: Modeling the Role of Data Quality in Language Model Pretraining,” ICLR 2026，[会议论文摘要](https://proceedings.iclr.cc/paper_files/paper/2026/hash/d0c80a0c294a16190c8904b9809c5fba-Abstract-Conference.html)，arXiv:2510.03313 v2（2026-02-23），[HTML 正文](https://arxiv.org/html/2510.03313v2)。
   - 实际阅读范围：ICLR 官方摘要；arXiv v2 HTML 的摘要、§3 数据质量度量、§4.2 质量感知 scaling law、§5 的实验设置与结果，重点核对 §5.5、表 2—3 及质量估计边界。
   - 来源支持：作者定义无量纲 $Q\in(0,1]$，用 corruption rate proxy 或 deficiency measure 估计，并提出 $L(N,D,Q)=A/N^\alpha+B/(D^\beta Q^\gamma)+E$。研究在 Paracrawl v8 机器翻译和 C4 因果语言建模上控制合成噪声与数据质量；Huber 拟合报告 NMT 的 $\hat\gamma\approx0.173$、CLM 的 $\hat\gamma\approx0.401$，并报告其未见数据评估符合相似的拟合形式。
   - 证据等级：source-backed（ICLR 2026 论文、明确的任务/数据、合成扰动设置和作者拟合实验）。
   - 适用边界：$Q$ 及 $\gamma$ 绑定论文的质量操作化、噪声机制、模型和数据规模；估计值不能视为普遍常数，也不提供任意语料的通用排序分数。作者关于 moderate corruption 的观察限于其受控任务，不能推出所有清洗都能减少模型规模需求。
+
+## 数据配比实验与样本排序
+
+- Ye et al., “Data Mixing Laws: Optimizing Data Mixtures by Predicting Language Modeling Performance,” ICLR 2025，[官方会议论文页](https://proceedings.iclr.cc/paper_files/paper/2025/hash/cc84bfabe6389d8883fc2071c848f62a-Abstract-Conference.html)，[正式论文 PDF](https://proceedings.iclr.cc/paper_files/paper/2025/file/cc84bfabe6389d8883fc2071c848f62a-Paper-Conference.pdf)。
+  - 实际阅读范围：摘要、§§2–5、附录 B 的限制讨论及跨模型规模/训练步数的 mixture 排名分析。
+  - 来源支持：以不同来源比例训练小模型并拟合验证损失，再嵌套使用训练步数、模型规模的 scaling laws 预测目标设定；作者报告 RedPajama 上 1B 参数、100B token 的优化 mixture 达到默认 mixture 多训练 48% 步数的相近表现。
+  - 证据等级：source-backed（ICLR 2025 正式论文报告的实验、拟合与外推）。
+  - 适用边界：实验使用预定义开放数据域，作者指出 mixture 排名会随模型规模和训练步数变化，嵌套预测也有误差累积；对领域的定义和一般理论仍有限。动态 mixture 是继续预训练实验显示的可能方向，不是已验证的跨任务最优调度。48% 是论文指定设置下的比较，不能作为普遍训练节省比例。
+
+- Liu et al., “RegMix: Data Mixture as Regression for Language Model Pre-training,” arXiv:2407.01492 v2，2025-01-23，[论文 HTML](https://arxiv.org/html/2407.01492)。
+  - 实际阅读范围：摘要、引言、§3 的 proxy 与回归方法、限制附录的 rank-invariance 假设。
+  - 来源支持：作者用 512 个 1M 参数 proxy 模型、每个训练 1B token，拟合未见配比的预期表现；随后在 64 个 1B 参数/25B token 候选中验证预测配比。论文报告另有最高至 7B 模型、100B token 的实验。其方法把配比选择建模为回归而非直接求解析 scaling law。
+  - 证据等级：preprint / source-backed（指定 arXiv 版本的论文方法和作者实验报告）。
+  - 适用边界：核心 rank-invariance 假设要求 mixture 相对排名可从较小规模与较短训练迁移；论文也单列了 domain、tokenizer、规模和无限数据假设等限制。实验配置和论文自报结果不能作为其他语料的训练步数收益保证。
+
+- Fan et al., “GRAPE: Optimize Data Mixture for Group Robust Multi-target Adaptive Pretraining,” NeurIPS 2025，[官方会议论文页](https://papers.nips.cc/paper_files/paper/2025/hash/e7bba023351f8262c22e3328e42645ec-Abstract-Conference.html)。
+  - 实际阅读范围：NeurIPS 正式论文页摘要。
+  - 来源支持：GRAPE 将来源域权重和目标任务权重放入交替的 min-max 过程；内层按 group DRO 提高当前改善较慢的任务权重，外层再优化来源域权重。摘要报告在 ClimbLab、SlimPajama 的推理任务，以及 8 个低资源语言目标上的实验。
+  - 证据等级：source-backed（NeurIPS 2025 正式会议页所示方法与作者摘要结论；本次未复核全文表格）。
+  - 适用边界：摘要未提供足以横向比较的统一训练预算与评测条件；结果绑定论文目标任务、数据、域划分和训练设置，不能据此推断跨项目收益。
+
+- Yen et al., “Data Mixture Optimization: A Multi-fidelity Multi-scale Bayesian Framework,” NeurIPS 2025，[官方会议论文页](https://proceedings.neurips.cc/paper_files/paper/2025/hash/8e49d32f4668a41b013fbc1ed929c007-Abstract-Conference.html)。
+  - 实际阅读范围：NeurIPS 正式论文页摘要。
+  - 来源支持：作者将 mixture、模型规模和训练步数作为序贯多保真贝叶斯优化的决策变量，并使用基于 472 次 SlimPajama 训练运行的数据混合模拟器评估方案；摘要报告 20M–1B 模型范围及相对两种搜索基线的 2.6×、3.3× speedup。
+  - 证据等级：source-backed（正式会议摘要中的研究设计与作者报告结果；本次未复核全文中 speedup 的完整定义）。
+  - 适用边界：speedup 绑定该模拟器、搜索基线和作者评估流程，不能解释为任意真实训练项目的墙钟时间节省或通用最优搜索法。
+
+- Tan et al., “Fast Data Mixture Optimization via Gradient Descent,” ICLR 2026，[官方会议论文页](https://proceedings.iclr.cc/paper_files/paper/2026/hash/01d845baaa31b1043e5f280592d57dc4-Abstract-Conference.html)。
+  - 实际阅读范围：ICLR 2026 正式会议页摘要。
+  - 来源支持：FastMix 用单个 proxy model，把 mixture 选择改写为双层优化，并在统一来源采样下将配比系数对应到 per-source loss weights；方法交替进行按当前配比训练和根据 validation feedback 更新权重。摘要分别报告预训练与 SFT 的作者实验结果。
+  - 证据等级：source-backed（正式会议摘要中的方法和作者结果；本次未复核全文实验协议）。
+  - 适用边界：权重和收益仍受 proxy、validation feedback、来源定义及论文预训练/SFT 任务限制；验证反馈被反复用于选择时，独立验收集仍不可省略。
+
+- Xi et al., “SampleMix: A Sample-wise Pre-training Data Mixing Strategy by Coordinating Data Quality and Diversity,” Findings of EMNLP 2025，[ACL Anthology 正式论文页](https://aclanthology.org/2025.findings-emnlp.741/)，[正式论文 PDF](https://aclanthology.org/2025.findings-emnlp.741.pdf)。
+  - 实际阅读范围：正式论文摘要、§§2–4、§7 limitations 和附录的训练配置。
+  - 来源支持：论文为文档打质量与多样性分数，再按样本权重在跨域数据中采样；主要 mixture 对照基于 SlimPajama、1B 参数 LLaMA、100B token，并排除 GitHub 域后重新归一化基线权重。作者在 8 项下游任务及 Pile/xP3 perplexity 设置上报告，用少 1.4–2.1 倍训练步数达到基线表现；平均基线准确率约在 100k steps 达到，作者称约 1.9 倍更快。另有 8B 与中文 Wanjuan 对照。
+  - 证据等级：source-backed（Findings 2025 正式论文的实验与作者报告结果）。
+  - 适用边界：效果和超参数依赖评分器、SlimPajama/中文 Wanjuan 数据和评估任务；作者明确提示新数据集需重新调参，且代码混合未作为其验证结论的一部分。作者步数收益不是独立复现结果。
+
+- Dai et al., “Demystifying Data Organization for Enhanced LLM Training,” ACL 2026，[ACL Anthology 正式论文页](https://aclanthology.org/2026.acl-long.1262/)，[论文 PDF](https://aclanthology.org/2026.acl-long.1262.pdf)，DOI: 10.18653/v1/2026.acl-long.1262。
+  - 实际阅读范围：正式论文摘要、§§2–5、Limitations 和附录 C 的数据、模型、训练设置。
+  - 来源支持：论文区分 Data Scoring、Data Selection 与 Data Organization；排序阶段复用样本级分数但不改变数据集规模，归纳 Boundary Sharpening、Cyclic Scheduling、Curriculum Continuity、Local Diversity 四项指导，并提出 STR、SAW。一般预训练实验覆盖 FineWeb-Edu、QuRatedPajama 和 160M–1.7B 模型；SFT 实验使用 Qwen3-1.7B-Base，并在 DeepMath-103K、OpenCodeInstruct 上评估数学和代码任务。作者限制段明确指出，策略效果依赖既有样本分数的质量及其与训练目标的相关性。
+  - 证据等级：source-backed（ACL 2026 正式论文的实验和限制说明）。
+  - 适用边界：实验仅覆盖论文选定的语言数据、模型、样本评分和评测任务；不能外推为其他语料、分数或多模态训练中的通用排序收益。正文结果须保留作者设置条件，且不代表本地复现。
+
+## 多语言比例与跨语言迁移
+
+- He et al., “Scaling Laws for Multilingual Language Models,” Findings of ACL 2025，[ACL Anthology 正式论文页](https://aclanthology.org/2025.findings-acl.221/)，[arXiv 正文](https://arxiv.org/html/2410.12883)。
+  - 实际阅读范围：论文摘要和实验设置概述。
+  - 来源支持：论文报告训练超过 100 个 decoder-only 模型，覆盖 23 种语言、5 个语系；模型规模包括 85M、397M、810M 和 1.2B。作者提出并在该实验中检验以语系采样比例拟合跨语言 loss 的 scaling law，并报告 85M 拟合的最优比例可迁移至 1.2B 模型。
+  - 证据等级：source-backed（Findings of ACL 2025 正式论文摘要与作者实验报告）。
+  - 适用边界：假设以语系为组的 loss 对本组比例有可建模关系；结论绑定该 CommonCrawl 数据、语种/语系划分、tokenizer、模型和训练设置，不代表个别语言间没有迁移或干扰。
+
+- Longpre et al., “ATLAS: Adaptive Transfer Scaling Laws for Multilingual Pretraining, Finetuning, and Decoding the Curse of Multilinguality,” arXiv:2510.22037 v2，2026-02-25，[论文 HTML](https://arxiv.org/html/2510.22037)。
+  - 实际阅读范围：摘要、§§2–6 与实验规模/迁移矩阵说明。
+  - 来源支持：作者报告 774 次多语言训练实验，模型规模覆盖 10M–8B 参数，使用 400 多种训练语言并评估 48 种语言；迁移矩阵报告 38×38=1,444 个有方向的源语言—目标语言组合。
+  - 证据等级：preprint / source-backed（arXiv v2 作者实验及拟合结果）。
+  - 适用边界：结果来自 MADLAD-400、论文列出的词表和预训练/微调路径；迁移矩阵体现方向性和语种交互，但不提供项目通用比例，也不替代目标语言验证。
+
+## 有限池混合重复与非线性阈值
+
+- Sedova et al., “Scaling Laws for Mixture Pretraining Under Data Constraints,” arXiv:2605.12715 v2，2026-05-15，[论文 HTML](https://arxiv.org/html/2605.12715)。
+  - 实际阅读范围：摘要、§§1–4、模型和实验设置，以及 limitation 段。
+  - 来源支持：作者报告超过 2,000 次、101M–805M 参数训练运行，覆盖德语/法语/斯瓦希里语、数学、科学论文、Wikipedia 和质量过滤子集。混合训练中，通用池继续提供新 token 时，目标池在若干作者设置中的最优重复因子可达到 15–20；最优值随池大小、预算和模型规模变化。
+  - 证据等级：preprint / source-backed（arXiv v2 论文中的实测与拟合；不是同行评审结论或独立复现）。
+  - 适用边界：不是通用重复上限；受模型、特定有限目标池、generic pool、训练预算和 target loss 限制。文中将通用数据的新样本流解释为改变重复训练条件，不能外推为所有重复都安全。
+
+- Gu et al., “Data Mixing Can Induce Phase Transitions in Knowledge Acquisition,” NeurIPS 2025，[官方会议论文页](https://proceedings.neurips.cc/paper_files/paper/2025/hash/eee7ae5cf0c4356c2aeca400771791aa-Abstract-Conference.html)。
+  - 实际阅读范围：NeurIPS 正式论文页摘要。
+  - 来源支持：论文摘要报告在合成传记与网页数据的受控混合实验中，模型规模或混合比例变化可对应知识记忆的阈值式变化，并给出容量分配解释。
+  - 证据等级：source-backed（NeurIPS 2025 正式论文摘要；本次未复核全文公式与实验表格）。
+  - 适用边界：只支持所测合成传记/网页任务中的非线性案例；不证明真实训练语料存在相同临界点或通用相变规律。
 
 ## 固定数据下的重复训练与集成
 
@@ -87,6 +159,12 @@
   - 来源支持：作者比较以每代合成数据替换原始真实数据、以及把后续合成数据与原始真实数据累积的预训练流程；摘要报告，替换设置呈现模型坍缩，而累积设置在所测语言模型规模、架构和超参数范围内避免坍缩。摘要还指出，作者在线性模型框架中证明累积时测试误差有与迭代次数无关的有限上界。
   - 证据等级：preprint / source-backed（arXiv v2 摘要所述的作者实验与理论结论）。
   - 适用边界：不能由此推出任意合成数据比例、过滤器、生成代数或下游任务都安全；“避免坍缩”绑定论文的累积定义、实验范围和线性理论假设。
+
+- Shumailov et al., [“AI models collapse when trained on recursively generated data”](https://www.nature.com/articles/s41586-024-07566-y)，Nature 631, 755–759 (2024)；[作者更正](https://www.nature.com/articles/s41586-025-08905-3)，2025-03-21。
+  - 实际阅读范围：正式论文摘要和 Nature 页面所示研究结论；核对作者更正的正式页面。未在本记录中重做论文实验或复核全部附录。
+  - 来源支持：作者研究递归使用生成模型输出训练后续生成模型的设置，报告原始分布尾部在不加区分使用生成内容时逐代消失，并将该现象称为 model collapse；论文涉及语言模型及其他生成模型的实验和理论分析。作者更正仅把理论直觉段中的符号条件从 `α_i = γ_i = 0` 改为 `β_i = γ_i = 0`，已更新论文 HTML/PDF。
+  - 证据等级：source-backed（同行评审 Nature 论文及正式作者更正；本记录只核读摘要和可访问的页面要点）。
+  - 适用边界：结论不表示任意比例、类型或质量的合成数据都会导致坍缩；需区分论文中的递归使用条件与混合真实/合成数据的流程，并避免把单篇研究外推为所有合成训练的普遍规律。
 
 ## 重复数据与 benchmark 污染
 

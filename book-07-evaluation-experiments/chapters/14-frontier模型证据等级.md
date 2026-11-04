@@ -341,6 +341,25 @@ E(c)=
 这同样是审计信号，不是科学质量分数。缺少一个决定性条件，可能比缺少三个无关
 字段更严重，因此实际报告还要列出缺失字段名称。
 
+### 14.6.3 用一组假设输入手算三种审计信号
+
+假设团队正在审阅一条“模型能在指定代码任务中可靠修复缺陷”的 claim。为便于
+展示，团队给可追溯性、命题贴合度、条件完整性、独立性和可复现性五个维度各记
+一个 0—1 的内部值，且暂时等权：1.0、0.8、0.5、0.3、0.4。代入内部证据分数的定义式：
+$E(c)=(1.0+0.8+0.5+0.3+0.4)/5=3.0/5=0.60$。这里 $0.60$ 只是这组审阅者
+定义下的汇总提示，不表示 claim 有 60% 概率为真；若改权重或评分规则，分数也会
+变化。报告应保留各维度原值、评分定义和打分人，不能只留下总分。
+
+再把复合 claim 拆成四个子命题，示例权重为 `1、1、2、2`，其中前三项有贴合的
+来源，最后一项尚无证据。于是总权重为 $1+1+2+2=6$，已支持权重为
+$1+1+2=4$，覆盖率是 $4/6\approx0.667$。最后一项权重较高，意味着最重要的一个
+命题仍缺证；只报告 66.7% 会掩盖这个事实，所以还要逐项列出未支持内容。
+
+若八个必需条件中只记录了六个，条件完整率为 $q/r=6/8=0.75$。例如缺失的两项
+是 verifier 版本和重试策略时，它们可能直接改变“修复成功”的判定。三种计算的
+输入都是教学假设值，比例没有单位；每项各自回答一个审计问题，不能相加、平均
+成概率或替代对原始记录的阅读。
+
 ## 14.7 从来源到结论的工作流
 
 ### 14.7.1 第一步：收集原始来源
@@ -524,12 +543,18 @@ E(c)=
 
 先对齐条件，再判断是否真的冲突。不能把两个不同实验条件的数字强行平均。
 
-## 14.11 未确认名称与前沿模型观察项
+## 14.11 新名称、别名与前沿模型观察项
 
-对 GPT-5.5、GPT-5.6 Sol/Terra/Luna、GLM-5.5、DeepSeek-V4-Flash、Qwen3.8-Max
-或其他社区流传名称，第一步是查官方 model ID、模型卡、技术报告、权重和 API
-文档。查不到时，可以记录名称、已访问的官方目录、目前缺少的证据以及未来要
-核对的字段。
+遇到新发布名称、版本后缀、服务档位或社区别名时，先确认它究竟是公开模型名、
+API model ID、一个运行配置，还是未核实的转述。依次查官方发布页、model ID、
+模型卡、技术报告、权重配置和 API 文档，并记录实际访问的目录与日期。某名称
+已在官方发布页或 API 文档中出现，只能确认相应来源所支持的产品或接口事实；参数、
+架构、训练方法和一般能力仍需各自的证据。
+
+查不到时，记录查询过的页面、查询日期、缺少的材料和待核对字段，标为观察项。
+一个官方确认的产品名可以与“模型架构未知”同时成立；社区别名也可能指向已知
+model ID，但只有映射证据出现后才应合并。不要把查询未命中写成模型不存在，也
+不要把名称确认扩展成架构或能力确认。
 
 ### 14.11.1 “查不到”与“不存在”
 
@@ -779,11 +804,13 @@ context”可以拆成输入接口、tokenizer/runtime、长位置训练和有�
 若新资料只否定了一个推断，不应连带删除同一段中仍由论文支持的事实；若一个数字
 没有版本口径，应保留冲突记录而不是擅自取平均。
 
-## 14.19 最小可运行的 Claim Ledger 审计 Demo
+## 14.19 Claim Ledger 审计 Demo
 
 下面的程序用一组教学 claim 展示如何把“来源、作用域、独立复现和未知项”拆成
 信号。它不是自动决定事实真伪，也不把证据分数当概率；它的作用是发现一条句子
 是否跨越了当前证据能支持的范围。
+
+> 代码状态：静态审阅，未运行（2026-11-03）。下方输出按代码分支手工推演，不是运行记录。
 
 ~~~python
 claims = [
@@ -889,7 +916,7 @@ print("actions=", actions, sep="")
 print("decision=", decision, sep="")
 ~~~
 
-运行输出为：
+按代码逻辑逐步推演，预期输出为：
 
 ~~~text
 signals={'all_scopes_recorded': False, 'task_claim_has_independent_evidence': True, 'architecture_claims_have_direct_sources': False, 'unknowns_field_recorded': True}
@@ -900,6 +927,49 @@ decision=publish_scoped_task_claim_and_hold_architecture
 这里的结果表达了一个重要取舍：有独立任务证据时，可以发布受作用域限制的任务
 结论；社区架构线索没有得到确认，不能因为同一个模型还有一条强证据就顺便升级。
 一条 claim 的证据强度不能传递给另一条不同命题。
+
+### 14.19.1 沿输入逐项追踪信号和动作
+
+先看三条输入。`ctx-interface` 的来源是官方文档，作用域字段完整，而且该来源直接
+支持“接口接受某个字段”这一命题；它没有任务测试，也没有独立来源。`ctx-task` 的
+来源类型为独立评测，作用域完整，`independent` 与 `task_tested` 都为真，但它把
+“production traffic”留在未知列表中。因此可以保留这条任务评测范围内的观察，却
+不能把它写成生产流量上的结论。第三条 `architecture` 只有社区线索，作用域不完整，
+并且明确缺少 revision、config 和实现路径。
+
+`architecture_claims` 过滤后只剩第三条记录。接着，代码要求架构证据的来源类型
+必须属于 `technical_report`、`official_config` 或 `official_code`，并且直接支持该
+命题。当前记录的来源是 `community_signal`，所以内部的 `any(...)` 为假，最终
+`architecture_claims_have_direct_sources` 也是假。这个判断只检查演示数据所填的
+字段；它不能替读者验证链接内容，也无法判断技术报告是否真的完整。
+
+四个信号逐项得到：所有 claim 都填写 `scope_complete` 吗？不是，架构记录为假，
+所以 `all_scopes_recorded=False`。任务 claim 有独立来源并通过任务测试吗？第二条
+满足，所以该信号为真。架构 claim 有允许类型的直接材料吗？没有，所以为假。三条
+记录是否都有 `unknowns` 列表？是，第一条的空列表也算字段已登记，故该信号为真。
+注意，最后一项只检查数据结构是否存在，不评价未知项写得是否充分。
+
+动作列表按代码顺序追加。作用域不全，先要求补模型版本、任务、harness、预算和
+日期；任务证据独立且已测，追加保留受任务范围限制的结论；架构证据不足，追加将
+架构说法降为观察项并寻找配置或技术报告；未知项列已登记，最后追加在 ledger 中
+保留未知项。因此输出包含四条动作，顺序由四个 `if` 的书写顺序决定，不代表风险
+严重度排序。
+
+最终分支先检查架构直接来源。该值为假，程序选择
+`publish_scoped_task_claim_and_hold_architecture`；它不会因架构 claim 暂缓而丢弃
+任务 claim，也不会让任务 claim 反过来替架构背书。若把演示输入里的社区来源改成
+符合条件的官方配置，才会进入后续分支；但“来源类别符合”仍不等于正文判断正确。
+
+手工核对的边界同样重要：`scope_complete` 是作者预先填入的布尔值，不会逐字段
+检查 scope；没有置信区间、样本量、复现差异和来源冲突处理逻辑，也没有真实模型
+调用。这个 toy 只演示怎样把判断拆成可审阅的规则。实际项目还须人工读源材料、核
+对输入条件并检查测试记录；未运行本代码，以上输出仅是基于可见语句的静态推演。
+
+最后看决策顺序：第一分支优先拦住没有直接架构材料的 claim；只有该条件通过，才
+会继续检查任务 claim 是否有独立证据。若输入根本没有架构 claim，`bool(...)` 会使
+架构信号为假，程序仍可依据任务证据作出范围受限的决定。这个优先级是示例作者
+写入的策略，未通过统计或安全验证。正式 ledger 应另加字段类型校验、缺失值处理、
+审阅者签名和历史版本，避免把布尔值填错或覆盖旧记录后误认为证据已升级。
 
 ## 14.20 什么时候应该主动写“未知”
 
@@ -996,18 +1066,21 @@ decision=publish_scoped_task_claim_and_hold_architecture
 
 ### 14.22.1 Grok 4.7：发布方 benchmark 与榜单结果分账
 
-xAI 的[官方发布页](https://x.ai/news/grok-4-7)称 Grok 4.7 使用更大的
+Grok 4.7 的[官方发布页](https://x.ai/news/grok-4-7)称该版本使用更大的
 base model、更长的强化学习训练，以及偏向数小时长任务的困难任务混合；发布页还
 称模型针对 Grok Bot harness 做了适配。这些属于发布方方法描述，不披露参数规模
 或完整训练配方，也不能证明不同 Agent harness 都有相同收益。官方 [API 模型页](https://docs.x.ai/developers/models/grok-4.7)
 支持核验 model ID、500K context、输入模态和 effort 等接口合同。
 
 [Artificial Analysis 条目](https://artificialanalysis.ai/models/grok-4-7)展示
-xhigh provider 配置的综合分数、速度和成本；xAI 发布页上的 DeepSWE、CursorBench、
-Terminal-Bench、Harvey、HealthBench 和 GDPval 则是发布方结果，绑定各自 prompt、
-effort、工具、环境与 verifier。DataCurve DeepSWE 页面标注更新于 2026-09-22，
-展示 113 个任务、91 个仓库、5 种语言，但没有 Grok 4.7 的精确配置行；其中可见
-的是 Grok 4.6。缺失行只表示该榜单快照没有测量，不能迁移相邻版本成绩或当成零分。
+xhigh provider 配置的综合分数、速度和成本；发布页报告的 CursorBench 4.0 为
+`46.3%`、DeepSWE v1.1 为 `71.0%`（脚注注明 high effort），Terminal-Bench 4.0 为
+`37.6%`。这些是发布方 benchmark 结果；原页面未逐项披露所有 prompt、工具、环境
+和 verifier 字段，引用时应保留已披露条件，并把缺失字段记为未知。
+[DataCurve DeepSWE v1.1](https://deepswe.datacurve.ai/)
+当前页面标注 113 个任务、更新于 2026-09-22，并说明参测模型统一使用
+`mini-swe-agent`；页面可见 Grok 4.6 配置，没有 Grok 4.7 的精确配置行。这只说明
+当前可见快照未列出该行，不能迁移相邻版本成绩，也不能把缺失当成零分或失败。
 完整来源见[研究记录](../../research/model-update-2026-09/grok-4.7-source-notes.md)。
 
 
@@ -1036,11 +1109,15 @@ Opus 5.5 的 Artificial Analysis 条目是 `max with fallback`，而 Anthropic �
 | Harness 账 | tools、permissions、sandbox、task/environment、retry、verifier | 裸模型能力 |
 | 成本账 | input、cache read/write、output、tool、retry、fallback、wall clock | 只看 token 单价 |
 
-发布方报告的 Terminal-Bench、FrontierCode、CursorBench、OSWorld、AutomationBench 和 WANDR 应保留为发布方/harness 结果；DataCurve 当前没有 `mini_swe_agent_claude_opus_5_5_*` 精确行，不能迁移 Opus 5 或 Fable 5.1 的 Agent 结果。若安全干预导致 cyber 或 biology 任务交给其他 Claude，最终结果应另记 `actual_model` 和 `fallback_reason`。
+发布方报告的 Terminal-Bench、FrontierCode、CursorBench、OSWorld、AutomationBench 和 WANDR 应保留为发布方/harness 结果；[DataCurve DeepSWE v1.1 当前快照](https://deepswe.datacurve.ai/)没有 `mini_swe_agent_claude_opus_5_5_*` 精确行，不能迁移 Opus 5 或 Fable 5.1 的 Agent 结果。若安全干预导致 cyber 任务交给 Opus 4.8，或 biology / frontier LLM development 任务交给 Opus 5，最终结果应另记 `actual_model` 和 `fallback_reason`。
 
 一个公平实验应分别画 quality-cost、quality-steps 和 verified-success-latency 曲线，并报告 token、工具轮次、fallback 次数、失败类别和 artifact verifier。这样才能区分“模型更有效率”“模型更少触发安全路由”和“任务 harness 更宽松”三种解释。
 
-Anthropic 当前[模型页](https://www.anthropic.com/claude/opus)报告 OSWorld 2.1 partial `81.8%`；上面的 System Card 数字则是 OSWorld 2.0 partial/strict `81.8%/48.7%`。分数相同不代表同一任务集，旧版 strict 也不能迁移到 2.1。应分别保存 benchmark revision 和成功定义；若只写“OSWorld 81.8%”，读者无法判断引用的是哪次实验。
+Anthropic 当前[Opus 5.5 发布页](https://www.anthropic.com/claude-opus-5-5)把
+`81.8%` partial 标为 OSWorld 2.1；System Card 则把 `81.8%/48.7%` partial/strict
+标为 OSWorld 2.0。两处应分别保留来源、版本标签和成功定义；相同的 partial 数字
+本身不能确认使用了同一任务修订，System Card 的 strict 分数也不能移植到 2.1。
+若只写“OSWorld 81.8%”，读者无法判断引用的是哪一次实验。
 
 #### 14.22.2.1 System Card 数字也必须带配置
 
@@ -1059,11 +1136,11 @@ raw_score / confidence_interval / actual_model / artifact
 
 ### 14.22.3 Claude Fable 5.1：System Card 的条件化评测
 
-Claude Fable 5.1 的证据至少分成三层：Artificial Analysis 的 provider/configuration 指标、Anthropic System Card 的发布方评测，以及 DataCurve `mini-swe-agent` 的精确 Agent 行。当前 DataCurve 没有 `mini_swe_agent_claude_fable_5_1_*`，所以不能把 Fable 5 的 Pass@1、成本或 steps 借给 Fable 5.1。
+Claude Fable 5.1 的证据至少分成三层：Artificial Analysis 的 provider/configuration 指标、Anthropic System Card 的发布方评测，以及 DataCurve `mini-swe-agent` 的精确 Agent 行。[DataCurve DeepSWE v1.1 当前快照](https://deepswe.datacurve.ai/)显示 Fable 5 配置，但没有 `mini_swe_agent_claude_fable_5_1_*` 精确行，所以不能把 Fable 5 的 Pass@1、成本或 steps 借给 Fable 5.1。
 
 System Card 正文报告了 Terminal-Bench 4.0 `55.8%`、Terminal-Bench-Science 0.1 `52.6%`、CursorBench `73.4%`、OSWorld partial/strict `77.9%/41.7%`、GDPval-AA v2 `1853`、AutomationBench `31.4%` 和 ProgramBench `87.6%`。这些结果仍需要记录 benchmark revision、snapshot、effort、工具、任务环境、fallback、safeguards、试验次数和成功判定；OSWorld 的 partial 与 strict 不是同一个分母，不能只挑更高的数字。
 
-安全评测还揭示了一个常被忽略的变量：Fable 5.1 与 Mythos 5.1 共享模型权重，但服务配置的 safeguards 不同，且部分 cyber、biology 和 prompt-injection 结果来自 Mythos、helpful-only 或关闭 safeguards 的配置。Gray Swan IPI、Shade coding、browser-use、permission-hook bypass 和 sandbox vulnerability 应分别保存 `safeguard_state`、`actual_model`、`fallback_reason`、工具权限和 verifier。发布方结果可以支持“在该条件下观察到某行为”，不能直接支持“Fable 裸模型在生产中具有该分数/风险”。
+安全评测还揭示了一个常被忽略的变量：发布页称 Fable 5.1 与 Mythos 5.1 是同一模型的不同 safeguards 配置；它支持对服务策略的区分，但不应被扩写成未公开的权重或训练细节。部分 cyber、biology 和 prompt-injection 结果来自 Mythos、helpful-only 或关闭 safeguards 的配置。Gray Swan IPI、Shade coding、browser-use、permission-hook bypass 和 sandbox vulnerability 应分别保存 `safeguard_state`、`actual_model`、`fallback_reason`、工具权限和 verifier。发布方结果可以支持“在该条件下观察到某行为”，不能直接支持“Fable 裸模型在生产中具有该分数/风险”。
 
 因此评测 manifest 至少要拆成：
 

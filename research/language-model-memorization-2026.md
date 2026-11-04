@@ -1,6 +1,6 @@
 # 语言模型记忆与训练数据提取：来源证据
 
-记录日期：2026-10-28
+记录日期：2026-11-03
 
 本记录只保存通过原始论文核验的知识点及其适用边界。书册定位、内容取舍和正文修改记录在 `progress/`。
 
@@ -19,6 +19,14 @@
   - 来源支持：论文对 GPT-Neo 125M—6B 模型及 The Pile 数据的设定中，使用训练样本前缀作条件、以能否逐字生成后续片段衡量 extractability；作者报告模型容量、重复次数和给定上下文长度增加时，所测 extractability 增长。论文的跨模型族复制实验指出，数据重复与训练集特性之间的关系比单一 GPT-Neo 系列更复杂。
   - 证据等级：source-backed（论文定义、训练集抽样方法及指定模型/数据实验）。
   - 适用边界：该测量给模型提供训练文本前缀，是对 extractability 的定向测试，不是实际用户请求中的泄露频率；结果绑定 2022 年模型、The Pile、解码方法和论文采样。不得外推为所有现代模型的记忆率或隐私风险定量值。
+
+### 合成 canary 与 exposure
+
+- Nicholas Carlini et al., “The Secret Sharer: Evaluating and Testing Unintended Memorization in Neural Networks,” USENIX Security 2019，[官方论文页](https://www.usenix.org/conference/usenixsecurity19/presentation/carlini) 与 [正式论文 PDF](https://www.usenix.org/system/files/sec19-carlini.pdf)。
+  - **阅读范围：** USENIX 摘要；正式 PDF 的 canary 定义与 exposure 指标（§4.2—§4.3）、canary 构造/插入方法（§5）和记忆实验（§6—§8）。
+  - **支持事实：** 论文用带随机填充值的合成序列作 canary，明确格式与可能值的搜索空间，再按模型给同格式候选序列的概率/困惑度排序。exposure 定义为 `log2(|R|) - log2(rank)`，其中 `R` 是随机填充值空间，`rank` 是实际插入 canary 的排序名次；通过变化 canary 插入次数和训练条件测量模型对稀有序列的偏好。作者还将该方法用于 Smart Compose 及语言模型记忆研究。
+  - **证据等级：** source-backed（论文指标、受控插入方法和指定模型实验）。
+  - **适用边界：** exposure 的绝对值依赖格式与候选随机空间大小，不是归一化概率；它与固定提示下重复查询的精确命中率定义不同，不能互换或跨不同候选空间直接比较。论文结果不构成现代模型或真实用户数据的一般泄露率。
 
 ## 生命周期
 

@@ -98,15 +98,15 @@ RLHF 的关键数据不是普通问答，而是人类比较：同一个 prompt �
 一条偏好样本可以表示为：
 
 ~~~math
-d_i = (x_i, y_i^+, y_i^-, \mathbf{a}_i, \mathbf{c}_i, z_i)
+d_{i} = (x_{i}, y_{i}^{+}, y_{i}^{-}, \mathbf{a}_{i}, \mathbf{c}_{i}, z_{i})
 ~~~
 
-其中 $x_i$ 是 prompt，$y_i^+$ 和 $y_i^-$ 是同一任务下的两个候选回答，$\mathbf{a}_i$ 保存偏好维度与标注状态，$\mathbf{c}_i$ 保存任务和安全切片，$z_i$ 记录标注者、rubric、语言、来源、隐私、污染和版本等血缘。真实 schema 还应保留平局、无法判断和需要补充上下文等状态，不能强迫每一条比较都产生二元胜负。
+其中 $x_{i}$ 是 prompt，$y_{i}^{+}$ 和 $y_{i}^{-}$ 是同一任务下的两个候选回答，$\mathbf{a}_{i}$ 保存偏好维度与标注状态，$\mathbf{c}_{i}$ 保存任务和安全切片，$z_{i}$ 记录标注者、rubric、语言、来源、隐私、污染和版本等血缘。真实 schema 还应保留平局、无法判断和需要补充上下文等状态，不能强迫每一条比较都产生二元胜负。
 
 Reward Model 常用 Bradley–Terry 成对排序损失：
 
 ~~~math
-\mathcal{L}_{\mathrm{RM}} = -\frac{1}{n}\sum_{i=1}^{n}\log \sigma\left(R_{\phi}(x_i,y_i^+) - R_{\phi}(x_i,y_i^-)\right)
+\mathcal{L}_{\mathrm{RM}} = -\frac{1}{n}\sum_{i=1}^{n}\log \sigma\left(R_{\phi}(x_{i},y_{i}^{+}) - R_{\phi}(x_{i},y_{i}^{-})\right)
 ~~~
 
 这里 $R_{\phi}$ 给 prompt-response 打标量分数，$\sigma$ 是 logistic 函数。这个目标把成对标签建模为排序概率；它学的是给定标注分布和任务条件下的偏好近似，不是绝对真值。
@@ -122,11 +122,11 @@ Reward Model 常用 Bradley–Terry 成对排序损失：
 DPO 可以直接利用 chosen / rejected 偏好对：
 
 ~~~math
-\Delta_i = \left[\log\frac{\pi_{\theta}(y_i^+\mid x_i)}{\pi_{\mathrm{ref}}(y_i^+\mid x_i)}\right] - \left[\log\frac{\pi_{\theta}(y_i^-\mid x_i)}{\pi_{\mathrm{ref}}(y_i^-\mid x_i)}\right]
+\Delta_{i} = \left[\log\frac{\pi_{\theta}(y_{i}^{+}\mid x_{i})}{\pi_{\mathrm{ref}}(y_{i}^{+}\mid x_{i})}\right] - \left[\log\frac{\pi_{\theta}(y_{i}^{-}\mid x_{i})}{\pi_{\mathrm{ref}}(y_{i}^{-}\mid x_{i})}\right]
 ~~~
 
 ~~~math
-\mathcal{L}_{\mathrm{DPO}} = -\frac{1}{n}\sum_{i=1}^{n}\log\sigma\left(\beta\Delta_i\right)
+\mathcal{L}_{\mathrm{DPO}} = -\frac{1}{n}\sum_{i=1}^{n}\log\sigma\left(\beta\Delta_{i}\right)
 ~~~
 
 其中 $\pi_{\mathrm{ref}}$ 是 reference model，$\beta$ 控制目标中的偏好强度。$\log\pi(y\mid x)$ 通常按回答 token 的条件 log-probability 求和；不同实现的截断、掩码和归一化方式会改变训练信号，实验记录必须固定这些约定。DPO 不会消除 chosen / rejected 太弱、标注分歧或长度线索带来的问题。
@@ -139,13 +139,13 @@ DPO 可以直接利用 chosen / rejected 偏好对：
 
 取 $\beta=0.5$，单条损失为 $-\log\sigma(-0.05)\approx0.718$。负的 $\Delta$ 表示相对 reference，当前策略给 rejected 的概率提升更多；数值只是序列 log-probability 的教学输入，不是训练结果。
 
-若 $s_i^+$ 和 $s_i^-$ 是按当前 rubric 聚合的候选分数，审计 margin 可写成：
+若 $s_{i}^{+}$ 和 $s_{i}^{-}$ 是按当前 rubric 聚合的候选分数，审计 margin 可写成：
 
 ~~~math
-m_i = s_i^+ - s_i^-
+m_{i} = s_{i}^{+} - s_{i}^{-}
 ~~~
 
-小的 $m_i$ 表示在这套评分尺度下两者差异不明显；很大的 $m_i$ 可能来自过于容易的 rejected，也可能来自真实而重要的质量差距，需检查任务与评分理由，不能只按阈值自动剔除。
+小的 $m_{i}$ 表示在这套评分尺度下两者差异不明显；很大的 $m_{i}$ 可能来自过于容易的 rejected，也可能来自真实而重要的质量差距，需检查任务与评分理由，不能只按阈值自动剔除。
 
 若每对样本恰有两位标注者且标签为二元偏好，原始逐项一致率可以写成：
 
@@ -158,19 +158,19 @@ A_{\mathrm{pair}} = \frac{1}{n}\sum_{i=1}^{n}\mathbf{1}[\ell_{i1}=\ell_{i2}]
 安全数据样本可以表示为：
 
 ~~~math
-u_i = (x_i, \mathbf{c}_i, a_i, y_i, z_i)
+u_{i} = (x_{i}, \mathbf{c}_{i}, a_{i}, y_{i}, z_{i})
 ~~~
 
-其中 $\mathbf{c}_i$ 至少把意图是否可答、后果严重度、任务领域和紧急程度分开记录；这些轴可以重叠。$a_i$ 是期望动作，具体枚举由版本化策略定义，例如回答、澄清、拒绝、拒绝并转向安全替代、支持并升级；$y_i$ 是目标响应，$z_i$ 记录语言、地区、策略版本、标注者、隐私处理和红队来源。
+其中 $\mathbf{c}_{i}$ 至少把意图是否可答、后果严重度、任务领域和紧急程度分开记录；这些轴可以重叠。$a_{i}$ 是期望动作，具体枚举由版本化策略定义，例如回答、澄清、拒绝、拒绝并转向安全替代、支持并升级；$y_{i}$ 是目标响应，$z_{i}$ 记录语言、地区、策略版本、标注者、隐私处理和红队来源。
 
-在独立评估集上，令 $\mathcal{A}_{\mathrm{block}}$ 表示策略定义的拒绝动作集合，例如“拒绝”和“拒绝并提供安全替代”，$\hat{a}_i$ 是模型动作。只对目标动作是拒绝的样本计算漏拒率，对目标动作是正常回答的样本计算误拒率：
+在独立评估集上，令 $\mathcal{A}_{\mathrm{block}}$ 表示策略定义的拒绝动作集合，例如“拒绝”和“拒绝并提供安全替代”，$\hat{a}_{i}$ 是模型动作。只对目标动作是拒绝的样本计算漏拒率，对目标动作是正常回答的样本计算误拒率：
 
 ~~~math
-R_{\mathrm{under}} = \frac{\sum_i \mathbf{1}[a_i\in\mathcal{A}_{\mathrm{block}}]\,\mathbf{1}[\hat{a}_i\notin\mathcal{A}_{\mathrm{block}}]}{\sum_i \mathbf{1}[a_i\in\mathcal{A}_{\mathrm{block}}]}
+R_{\mathrm{under}} = \frac{\sum_{i} \mathbf{1}[a_{i}\in\mathcal{A}_{\mathrm{block}}]\,\mathbf{1}[\hat{a}_{i}\notin\mathcal{A}_{\mathrm{block}}]}{\sum_{i} \mathbf{1}[a_{i}\in\mathcal{A}_{\mathrm{block}}]}
 ~~~
 
 ~~~math
-R_{\mathrm{over}} = \frac{\sum_i \mathbf{1}[a_i=\mathrm{answer}]\,\mathbf{1}[\hat{a}_i\in\mathcal{A}_{\mathrm{block}}]}{\sum_i \mathbf{1}[a_i=\mathrm{answer}]}
+R_{\mathrm{over}} = \frac{\sum_{i} \mathbf{1}[a_{i}=\mathrm{answer}]\,\mathbf{1}[\hat{a}_{i}\in\mathcal{A}_{\mathrm{block}}]}{\sum_{i} \mathbf{1}[a_{i}=\mathrm{answer}]}
 ~~~
 
 这里 $R_{\mathrm{under}}$ 关注本应阻止有害协助的样本是否被错误放行，$R_{\mathrm{over}}$ 关注本应回答的样本是否被拒绝。澄清、支持升级等其他目标动作应另报逐类混淆；不同动作不能并入一个拒答率。
@@ -178,7 +178,7 @@ R_{\mathrm{over}} = \frac{\sum_i \mathbf{1}[a_i=\mathrm{answer}]\,\mathbf{1}[\ha
 chosen 明显更长的比例可作为长度线索的预警量：
 
 ~~~math
-S_{\mathrm{long}} = \frac{1}{n}\sum_{i=1}^{n}\mathbf{1}[\ell(y_i^+) > \gamma\ell(y_i^-)]
+S_{\mathrm{long}} = \frac{1}{n}\sum_{i=1}^{n}\mathbf{1}[\ell(y_{i}^{+}) > \gamma\ell(y_{i}^{-})]
 ~~~
 
 其中 $\ell$ 是固定 tokenizer 下的 token 数，$\gamma>1$ 是用于筛查的比例阈值。$S_{\mathrm{long}}$ 只能指出“胜出回答常更长”，不能单独证明长度造成偏好；应在相同任务、风险和事实质量的样本中匹配比较，或用盲化的等价压缩版本复核。
@@ -191,7 +191,7 @@ S_{\mathrm{long}} = \frac{1}{n}\sum_{i=1}^{n}\mathbf{1}[\ell(y_i^+) > \gamma\ell
 
 其中 $C_{\mathrm{target}}$ 是预先声明的目标切片覆盖情况。每个值都要保留自己的定义域、分母、版本和置信范围；这个向量用于定位问题，不代表一条总排行榜。
 
-例如独立测试集中，4 条应阻止危险协助的样本里有 3 条被判成非阻止动作，则 $R_{\mathrm{under}}=3/4=0.75$；5 条目标为正常回答的样本里有 1 条被拒绝，则 $R_{\mathrm{over}}=1/5=0.20$。8 组成对回答里若有 3 组的 chosen 超过 rejected 的 1.5 倍 token 数，则 $S_{\mathrm{long}}=3/8=0.375$，它只是长度线索比例。任何分母为零的项都为 undefined，不能填成通过。
+这些安全动作比率的数值例子见 §21；其中的分母为零项仍须记为 undefined，不能填成通过。
 
 这些比率都有明确的定义域。$R_{\mathrm{under}}$ 的分母是目标动作属于拒绝集合的样本数，$R_{\mathrm{over}}$ 的分母是目标动作为回答的样本数；它们不能把所有安全样本混在一起。若某一类样本数量为零，指标应记为 undefined 或 None，而不是擅自记成 0。0 表示分母存在且没有发生该错误；undefined 表示这次数据没有提供该类证据。长度预警也要说明样本单位、tokenizer 和分桶。
 
@@ -298,7 +298,7 @@ Harmless 表示回答是否安全、合规、避免助长伤害。它关注危�
 
 因此，偏好数据要做标注一致性评估、分桶审计、模型回归测试和线上观察。
 
-清洗方法也需要按数据和训练配置验证。NeurIPS 2025 的 PrefCleanBench 比较了 13 种方法，并在多种数据集、模型和偏好优化目标上评估泛化；作者报告，多 judge 识别后移除疑似不可靠样本，在所测设置中的 win-tie rate 和平均 reward 优于单 judge 或直接翻转标签。该结果不构成“多 judge 必然更好”的通用规则，但说明清洗策略本身应进入可复现实验：固定筛选比例、训练算法和评估集，再看跨模型、跨任务是否稳定。[PrefCleanBench](https://proceedings.neurips.cc/paper_files/paper/2025/hash/b457a310c34efcaf6322d1bc6503ce16-Abstract-Datasets_and_Benchmarks_Track.html)
+清洗方法也需要按数据和训练配置验证。NeurIPS 2025 的 PrefCleanBench 比较了 13 种方法，主对照以 Llama 3 8B 和 DPO 评估 Anthropic-HH、UltraFeedback、PKU-SafeRLHF 与 HelpSteer2，再扩展到其他模型和优化目标。作者报告，多 judge 识别后移除疑似不可靠样本，在这些实验中的 win-tie rate 和平均 reward 优于单 judge 或直接翻转标签。该结果不构成“多 judge 必然更好”的通用规则，但说明清洗策略本身应进入可复现实验：固定筛选比例、训练算法和评估集，再看跨模型、跨任务是否稳定。[PrefCleanBench](https://proceedings.neurips.cc/paper_files/paper/2025/hash/b457a310c34efcaf6322d1bc6503ce16-Abstract-Datasets_and_Benchmarks_Track.html)
 
 ---
 
@@ -488,7 +488,9 @@ Perez 等人的研究讨论了语言模型红队方法、规模行为和经验�
 5. 跨文化敏感内容。
 6. 多语言拒答风格。
 
-直接翻译英文安全数据是不够的。不同语言的表达、地区规范、文化语境和用户习惯不同，需要本地化审计。2026 年一项多语言表示研究只检查了两个开源指令模型、十种语言和已发布 benchmark；作者发现模型间的拒答表示和跨语言转移结果并不一致。这类有限设置不能代表所有模型，但足以提醒工程师：英语拒答样本不能替代目标语言的独立覆盖与回归。[Cross-Lingual (Non-)Transfer of the Refusal Direction](https://aclanthology.org/2026.mrl-1.19/)
+逐句翻译英文安全数据不能自动代表目标语言的表达、地区规范和用户语境，需用本地语言样本审计。多语言偏好数据也要把 rubric 的语言维度说清。2025 年的 Menlo 预印本以英文模板为基础，再由母语者翻译和本地化到 47 种语言变体，并按地区选择评审员；数据包含 6,423 组成对回答、81,014 条人工标注，按流利度、语气、本地化语气和本地事实性等维度评分。作者承认，逐语言独立撰写提示可能更贴近本地话语结构；该数据研究的是语言质量，不是安全策略或普遍偏好。[MENLO](https://arxiv.org/abs/2509.26601)
+
+多语言拒答机制也不能从英语评估直接推断。MRL 2026 在两个开放指令模型、十种语言和已发布 benchmark 上比较拒答方向，并干预英语方向。论文预注册的主判据要求消融与添加英语方向都使拒答率改变至少 20 个百分点；主分析中，没有任何一个模型—层设置让任一非英语语言同时满足两项条件。但这不等于“完全没有迁移”：在 Qwen2.5-7B 的中层，消融英语方向使六种其他语言的拒答率下降 47.9–59.7 个百分点，添加方向却几乎不起作用；在 Llama-3.2-3B 的指定层，添加方向会让八种其他语言对良性请求增加 32–92 个百分点的拒答。作者的敏感性分析在 Qwen 中层有六种语言满足两项条件，仍少于预注册的七种门槛。结果受模型、层、阈值和干预限制，且论文未对因果干预加入匹配的非安全方向控制；它既不能证明存在通用共享拒答机制，也不能证明安全机制必然碎片化。对数据工程的启示是：按目标语言检查允许、澄清、拒绝和误拒行为，并把这一建议视为针对该研究边界的工程推论，而非训练数据翻译必然失败的普遍定律。[Cross-Lingual (Non-)Transfer of the Refusal Direction](https://aclanthology.org/2026.mrl-1.19/)
 
 ---
 
@@ -559,6 +561,8 @@ ICLR 2025 的 Trust or Escalate 提出用人工校准样本设定 judge 的信�
 
 注意，偏好训练后模型 win rate 提升不一定代表整体变好。还要看事实性、安全、通用能力、专业能力和产品体验。
 
+评估数据还要说明它代表哪类用户，以及评审维度是否足以区分回答。ICLR 2026 的 HUMAINE 收集美国和英国 23,404 名参与者对 28 个模型的 119,890 条多维判断，并按 22 个群体分层；在其开放式对话评估中，“信任、伦理与安全”维度的平局率为 65%，而总体胜者维度为 10%。这说明同一组回答在不同维度上的区分度可能不同，平局应作为有意义的标注结果保留。HUMAINE 是特定人群和任务下的模型评估数据集，不是通用训练偏好配方，也不能代表其他地区或目标用户。[HUMAINE](https://proceedings.iclr.cc/paper_files/paper/2026/hash/9c1bcfe6edf7e47d83d2e99492d851e4-Abstract-Conference.html)
+
 ---
 
 ## 21. 安全数据的评估
@@ -582,11 +586,13 @@ ICLR 2025 的 Trust or Escalate 提出用人工校准样本设定 judge 的信�
 
 好的安全评估不是只看“拒绝了多少”，而是看“拒绝是否该拒绝，帮助是否安全地帮助”。
 
+例如，假设独立测试集有 4 条目标动作为拒绝的样本，其中 3 条被模型误判为非阻止动作，则漏拒率为 $3/4=0.75$；另有 5 条目标动作为正常回答的样本，其中 1 条被模型拒绝，则误拒率为 $1/5=0.20$。若评估集还含有目标动作为澄清或转介的样本，应另行列出这些动作的混淆结果，不能并入上述两个分母。此处数字是教学假设，不是模型测评结果。
+
 ---
 
 ## 22. 机制与边界：Preference data 是条件化的行为偏好样本
 
-Preference data 更准确地说，是在特定任务、rubric、标注群体和时间条件下采到的比较判断。它不等于一个所有人共享、可直接恢复的“人类价值函数”。可将目标理解为条件分布 $P(y^+ \succ y^- \mid x,\,r,\,g,\,t)$：同一 prompt 在 rubric $r$、标注群体 $g$ 和时间 $t$ 改变时，偏好分布也可能改变。2025 年一项跨文化研究分析了来自 74 个国家、7,500 多段对话和 21 个 LLM 的数据，报告用户偏好特征会随个体价值观而变化；这是特定研究数据的观察，不是全球用户的统一偏好结论。[Human Preferences for Constructive Interactions](https://arxiv.org/abs/2503.16480)
+Preference data 更准确地说，是在特定任务、rubric、标注群体和时间条件下采到的比较判断。它不等于一个所有人共享、可直接恢复的“人类价值函数”。可将目标理解为条件分布 $P(y^{+} \succ y^{-} \mid x,\,r,\,g,\,t)$：同一 prompt 在 rubric $r$、标注群体 $g$ 和时间 $t$ 改变时，偏好分布也可能改变。2025 年一项跨文化研究分析了来自 74 个国家、7,500 多段对话和 21 个 LLM 的数据，报告用户偏好特征会随个体价值观而变化；这是特定研究数据的观察，不是全球用户的统一偏好结论。[Human Preferences for Constructive Interactions](https://arxiv.org/abs/2503.16480)
 
 这带来几个专家级问题：
 
@@ -612,7 +618,7 @@ prompt 池要覆盖真实用户请求、长尾任务、专业领域、多语言�
 
 质量审计要检查标注分布与分歧、一致性、margin、长度线索、拒答偏置、LLM judge 偏差、隐私、污染和多语言覆盖。训练后同时看 win-tie-loss、事实性、逐类动作错误、安全替代质量和人工样例；最终保存标注规范、隐私处理、策略版本、训练版本和评估结果。
 
-### 23.1 最小可运行偏好与安全数据审计 demo
+### 23.1 偏好与安全数据审计示例
 
 下面这个 demo 不依赖外部库，也不读写文件。输入是一组 toy preference / safety 样本；输出包括进入候选集的样本、被隔离的原因、按数据类型拆分的 token 保留率与配比、目标动作保留率、检查信号和后续动作。代码中的 `slice` 只是本例预先声明的测试切片，不是完备或互斥的安全风险本体；真实数据还应分开保留意图、后果、领域、语境和策略版本。
 
@@ -630,7 +636,7 @@ S_{\mathrm{rejected}}=0.38\times0.62+0.32\times0.70+0.30\times0.90=0.7296
 
 所以 $m=0.9162-0.7296=0.1866$，按三位小数显示为 0.187，高于本例的 0.08 初筛线。这个 margin 只是在合成 rubric 分数上的差值；它既不是真实人类偏好概率，也不能替代安全动作、隐私和污染门禁。
 
-**代码状态：已验证（2026-10-28，Python 3.12.9，标准库；固定合成样本，无外部依赖）。**
+**代码状态：静态审阅，未运行（2026-11-03；仅使用 Python 标准库；本轮未确认运行环境版本）。**
 
 将代码保存为 `preference_audit.py`，运行 `python3 preference_audit.py`。
 
@@ -875,28 +881,7 @@ assert all(checks.values())
 assert report["decision"] == "continue_to_preference_ablation"
 ~~~
 
-运行输出：
-
-~~~text
-kept_ids= ['pref_summary_helpful', 'pref_factual_citation', 'safe_high_risk_refusal', 'safe_boundary_allowed', 'safe_professional_boundary', 'safe_privacy_refusal', 'safe_ambiguous_clarify']
-held= {'pref_eval_leak': 'eval_contamination', 'pref_length_bias': 'length_bias_risk', 'pref_low_agreement': 'low_labeler_agreement', 'pref_private_log': 'privacy_or_pii', 'safe_wrong_action': 'wrong_safety_action'}
-reason_counts= {'eval_contamination': 1, 'length_bias_risk': 1, 'low_labeler_agreement': 1, 'privacy_or_pii': 1, 'wrong_safety_action': 1}
-retention= 0.604
-kind_counts= {'preference': 2, 'safety': 5}
-retention_by_kind= {'preference': 0.377, 'safety': 0.853}
-slice_mix_by_kind= {'preference': {'normal': 1.0}, 'safety': {'ambiguous': 0.196, 'boundary_allowed': 0.187, 'high_risk': 0.212, 'privacy': 0.178, 'professional': 0.227}}
-lang_mix_by_kind= {'preference': {'en': 0.481, 'zh': 0.519}, 'safety': {'en': 0.577, 'zh': 0.423}}
-avg_margin_by_kind= {'preference': 0.158, 'safety': 0.261}
-target_safety_slice_coverage= 1.0
-raw_safety_action_counts= {'answer': 2, 'clarify': 1, 'refuse': 2, 'safe_alt': 1}
-kept_safety_action_counts= {'answer': 1, 'clarify': 1, 'refuse': 2, 'safe_alt': 1}
-retention_by_expected_action= {'answer': 0.5, 'clarify': 1.0, 'refuse': 1.0, 'safe_alt': 1.0}
-retained_ids_by_action= {'answer': ['safe_boundary_allowed'], 'clarify': ['safe_ambiguous_clarify'], 'refuse': ['safe_high_risk_refusal', 'safe_privacy_refusal'], 'safe_alt': ['safe_professional_boundary']}
-checks= {'agreement_filter_observed': True, 'privacy_filter_observed': True, 'contamination_filter_observed': True, 'length_bias_review_observed': True, 'wrong_action_review_observed': True, 'target_safety_slice_coverage_complete': True, 'target_actions_retained': True, 'preference_and_safety_present': True, 'retained_samples_present': True}
-signals= {'retention': 0.604, 'avg_margin_by_kind': {'preference': 0.158, 'safety': 0.261}, 'target_safety_slice_coverage': 1.0, 'retained_ids_by_action': {'answer': ['safe_boundary_allowed'], 'clarify': ['safe_ambiguous_clarify'], 'refuse': ['safe_high_risk_refusal', 'safe_privacy_refusal'], 'safe_alt': ['safe_professional_boundary']}, 'retention_by_expected_action': {'answer': 0.5, 'clarify': 1.0, 'refuse': 1.0, 'safe_alt': 1.0}, 'held_reason_counts': {'eval_contamination': 1, 'length_bias_risk': 1, 'low_labeler_agreement': 1, 'privacy_or_pii': 1, 'wrong_safety_action': 1}}
-actions= ['quarantine_privacy_and_contamination', 'review_agreement_and_length_outliers', 'preserve_refusal_allowed_and_clarify_samples']
-decision= continue_to_preference_ablation
-~~~
+静态预期（按合成输入和门禁条件逐项推演，**不是运行输出**）：保留 7 条、隔离 5 条，五种隔离原因各 1 条；四种目标动作在保留集都有样本，本例声明的检查条件预计通过，`decision` 预计为 `continue_to_preference_ablation`。这里的 `length_bias_risk` 只由“margin 低于 0.08 且 chosen 长度超过 rejected 的 2.5 倍”这一联合条件触发，不是完整的长度偏置检测器。
 
 本例原始样本合计 8,010 tokens，候选集保留 4,840 tokens，所以总保留率为 $4{,}840/8{,}010\approx0.604$；其中 preference 和 safety 的 token 保留率分别为 $1{,}580/4{,}190\approx0.377$、$3{,}260/3{,}820\approx0.853$。`retention_by_expected_action` 用样本数计算“各目标动作的保留比例”，不是模型的动作正确率；`target_safety_slice_coverage` 只检查本例声明的五个切片；`slice_mix_by_kind` 和 `lang_mix_by_kind` 则按保留 token 计算占比。代码把 PII、污染、低一致度、疑似长度异常和错误动作样本隔离起来待复核，不代表应永久删除。`decision` 只表示可进入下一轮 preference ablation，不表示模型已经通过安全评估。
 
@@ -1047,6 +1032,8 @@ LLM judge 适合做排序预筛、格式检查、理由草拟和相似样本聚�
 12. Jung 等，《Trust or Escalate: LLM Judges with Provable Guarantees for Human Agreement》，<https://proceedings.iclr.cc/paper_files/paper/2025/hash/08dabd5345b37fffcbe335bd578b15a0-Abstract-Conference.html>。研究基于人工校准和 selective escalation 的 agreement 保证；保证依赖校准与统计假设。
 13. Kyrychenko 等，《Human Preferences for Constructive Interactions in Language Model Alignment》，<https://arxiv.org/abs/2503.16480>。2025 年预印本检查多国家和个体差异下的偏好表达，样本与实验条件限制外推。
 14. Zhang 等，《Does Safety Live in a Shared Multilingual Subspace? Cross-Lingual (Non-)Transfer of the Refusal Direction》，<https://aclanthology.org/2026.mrl-1.19/>。MRL 2026 使用两个开源指令模型、十种语言和已发布安全 benchmark；提供跨语言行为/表示差异证据，不证明所有模型存在相同机制。
+15. Petrova 等，《Unpacking Human Preference for LLMs: Demographically Aware Evaluation with the HUMAINE Framework》，<https://proceedings.iclr.cc/paper_files/paper/2026/hash/9c1bcfe6edf7e47d83d2e99492d851e4-Abstract-Conference.html>。ICLR 2026 的美国/英国人口分层对话评估；偏好差异和 tie 率受该人群、对话及评审维度限制，不是通用训练数据分布。
+16. Whitehouse 等，《MENLO: From Preferences to Proficiency — Evaluating and Modeling Native-like Quality Across 47 Languages》，<https://arxiv.org/abs/2509.26601>。2025 年预印本提供本地化多语回答质量 rubric 和人工比较数据；提示从英文模板翻译、本地化而来，作者承认每种语言独立撰写可能更贴近本地话语结构。
 
 这些论文的实验结果受模型、任务、标注者、提示、评估集和时间限制。论文中出现的“更好”通常是相对于指定基线、指定指标和指定样本而言。读者在迁移到自己的数据时，应重新检查授权、隐私、语言、领域、风险分布、标注一致性和独立评估集，而不是只复制方法名。
 

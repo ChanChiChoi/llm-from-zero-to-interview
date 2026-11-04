@@ -411,7 +411,7 @@ Opus 5.5 的官方 API contract 还给出一个重要迁移约束：adaptive thi
 
 因此 reasoning evaluator 应把请求验证和响应解析也纳入测试：旧客户端若按位置取第一个 text block、把 `any` 当成通用强制工具，或在消息前缀变化后盲目重放 thinking block，都会在模型分数不变时产生线上回归。官方模型页还要求将同步 128K 输出、带 beta header 的 Batch 300K、always-on thinking、默认 medium 和 cache 账本分别处理。资料依据：[Claude Opus 5.5 model page](https://platform.claude.com/docs/en/models/opus-5-5/overview.md) 与 [What's new](https://platform.claude.com/docs/en/models/opus-5-5/whats-new-opus-5-5.md)。
 
-对应的教学实现见 [`claude_opus55_protocol_audit.py`](../../research/model-update-2026-09/code/claude_opus55_protocol_audit.py)：脚本按 `block.type` 解析 thinking/tool/result/compaction，检查 producer 与 prefix binding，并用负例验证 disabled thinking、手工 budget、forced tool choice、旧 computer tool 和错误进度块会被拒绝。输出仅是 `local_protocol_toy`，不等于 Anthropic 服务端行为或模型 reasoning 质量。
+相应的 API 状态合同见[第二十册第 24 章](../../book-20-agent-harness-runtime/chapters/24-claude-sonnet-5.5-thinking-state与安全路由.md)：回放时按 `block.type` 解析 thinking/tool/result/compaction，保留 producer 与 prefix binding；用 API 文档判断 disabled thinking、手工 budget、forced tool choice、旧 computer tool 和错误进度块的兼容性。字段检查只说明应用侧回放是否满足所声明的合同，不证明服务端内部行为或模型 reasoning 质量。
 
 资料边界：Opus 5.5 当前有 Artificial Analysis 精确条目和 Anthropic 官方 API contract、发布页/System Card 入口，但 DataCurve 没有精确 Agent 行，参数、架构、完整训练 recipe、adaptive thinking 内部实现和独立复现仍未确认。
 

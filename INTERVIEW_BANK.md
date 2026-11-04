@@ -227,23 +227,23 @@
 
 49D. 数学过程评测和代码生成 benchmark 各自有哪些代表方案？它们解决了什么问题？
     考察点：GSM-Symbolic 的受控变体、ORM/PRM/ProcessBench 的评测目标、EvalPlus 测试增强、LiveCodeBench 时间快照、SWE-bench 仓库级任务和 benchmark lifecycle。
-    回答框架：先按“题目变化、过程标签、代码测试、任务范围、时间新鲜度”区分测量对象。GSM-Symbolic 通过数值实例和 NoOp 干扰检查题面敏感性，不能据此证明内部推理机制；ORM 只看最终结果，PRM 给步骤反馈，ProcessBench 要求定位第一处错误，三者标签和用途不同。EvalPlus 用 seed、类型变异和差分执行找原测试漏掉的函数行为；LiveCodeBench 按日期收新题；SWE-bench 在 issue、仓库、patch 和目标/回归测试上评估 Agent。再说明每种方法的测试器、标注、预算、版本和污染风险，并按目标任务选路径，不合并百分比总分；解释 Verified 推荐为何在 2026 年 7 月被撤回，以及 Pro V2 的修订仍需独立核验。证据及范围见[第七册第六章研究记录](research/reasoning-code-math-eval-depth-review-2026-11-03.md)。
+    回答框架：先按“题目变化、过程标签、代码测试、任务范围、时间新鲜度”区分测量对象。GSM-Symbolic 通过数值实例和 NoOp 干扰检查题面敏感性，不能据此证明内部推理机制；ORM 只看最终结果，PRM 给步骤反馈，ProcessBench 要求定位第一处错误。CoT 参数/反事实忠实性探针又是不同的诊断量，不是对内部推理的直接读取。EvalPlus 用 seed、类型变异和差分执行找原测试漏掉的函数行为；LiveCodeBench 按日期收新题；SWE-bench 在 issue、仓库、patch 和目标/回归测试上评估 Agent。再说明每种方法的测试器、标注、预算、版本和污染风险，并按目标任务选路径，不合并百分比总分；解释 Verified 推荐为何在 2026 年 7 月被撤回，以及 Pro V2 的修订仍需独立核验。证据及范围见[第七册第六章研究记录](research/reasoning-code-math-eval-depth-review-2026-11-03.md)。
 
 49E. 多模态和长上下文评估有哪些代表性 benchmark？它们分别解决什么问题，为什么不能直接比较总分？
-    考察点：VQA v2 互补图像对、POPE 对象幻觉探测、MMMU 学科推理、DocVQA/ANLS 格式边界、ChartQA 数值容差、AudioBench 任务覆盖、Video-MME/MLVU 长视频、MMLongBench-Doc 跨页证据、NIAH/Lost in the Middle/RULER/NoLiMa/LongBench 的难度路线。
-    回答框架：先按失败类型选择测量工具：VQA v2 检查答案是否随图像反事实变化，POPE 通过存在/不存在对象探测幻觉，MMMU 看专业知识与多模态推理，DocVQA 看单页读取但要审计 ANLS、prompt suffix 和输出长度，ChartQA 看读数与派生计算，AudioBench 分开语音/环境声/副语言，Video-MME/MLVU 覆盖视频时长和任务类型，MMLongBench-Doc 测跨页、多模态和不可回答问题。长文本侧用 NIAH 做检索冒烟、Lost in the Middle 查位置敏感、RULER 增加多针/组合复杂度、NoLiMa 降低词面重叠、LongBench 系列补真实多任务。再指出各 benchmark 的构题、指标、模态预处理和预算不同；每项只支持其任务协议下的结论，应并列报告切片并补目标分布 holdout，不能拼一个跨模态排行榜。证据及范围见[第七册第七章研究记录](research/multimodal-long-context-eval-depth-review-2026-10-27.md)。
+    考察点：VQA v2 互补图像对、POPE 对象幻觉探测、MMMU 学科推理、DocVQA/ANLS 格式边界、ChartQA 数值容差、AudioBench 任务覆盖、Video-MME/MLVU/LVOmniBench 长视频、LongShOTBench 开放式 rubric 与 verifier 人工校准、MMLongBench-Doc 跨页证据、NIAH/Lost in the Middle/RULER/NoLiMa/LongBench 的难度路线。
+    回答框架：先按失败类型选择测量工具：VQA v2 检查答案是否随图像反事实变化，POPE 通过存在/不存在对象探测幻觉，MMMU 看专业知识与多模态推理，DocVQA 看单页读取但要审计 ANLS、prompt suffix 和输出长度，ChartQA 看读数与派生计算，AudioBench 分开语音/环境声/副语言，Video-MME/MLVU 覆盖视频时长和任务类型，LVOmniBench 提供长音视频多选诊断，LongShOTBench 则以单轮/多轮开放题和逐标准项 rubric 检查跨模态推理；其 verifier 与人工的一致性只支持论文抽样子集，多轮上下文使用理想前轮回答。MMLongBench-Doc 测跨页、多模态和不可回答问题。长文本侧用 NIAH 做检索冒烟、Lost in the Middle 查位置敏感、RULER 增加多针/组合复杂度、NoLiMa 降低词面重叠、LongBench 系列补真实多任务。再指出各 benchmark 的构题、指标、模态预处理和预算不同；每项只支持其任务协议下的结论，应并列报告切片并补目标分布 holdout，不能拼一个跨模态排行榜。来源与范围见[第七册第七章正文](book-07-evaluation-experiments/chapters/07-多模态与长上下文评估.md)和[本次新增的多模态协议记录](research/multimodal-longcontext-evaluation-protocols-2026-11-03.md)。
 
-49F. RULER、NoLiMa、LongBench v2/Pro 和 MRCR v2 各自解决了哪类长上下文评测缺口？
-    考察点：合成复杂度控制、低词面重叠、自然任务/专家构题、固定复杂度极长长度曲线、长度单位与方法边界。
-    回答框架：先把测试拆开：RULER 在 NIAH 之外加入多 needle、多跳与聚合，用可控合成任务检查长度和复杂度；NoLiMa 降低问题与证据的词面重叠，检查模型是否依赖字符串捷径；LongBench v2 用 503 道高难多选题覆盖单/多文档、对话、代码和结构化数据，但其长度单位是 words；LongBench Pro 用 1,500 条中英文样本、任务分层和 token 长度细分，公开预印本最大 256K；DeepMind MRCR v2 固定相对简单的多轮共指任务并扩到 8M，适合测超长位置曲线，不代表复杂推理。最后说明 NIAH/Lost in the Middle 检查输入与位置，真实业务 holdout 负责目标分布；不同模型、harness、工具权限、长度单位和预算下的分数不能拼成一条排行榜。论文实验和版本边界见[第七册第十三章研究记录](research/long-context-effective-capability-depth-review-2026-10-27.md)。
+49F. RULER、NoLiMa、LongBench v2/Pro、MRCR v2 和 LongHarness 各自解决了哪类长上下文评测缺口？
+    考察点：合成复杂度控制、低词面重叠、自然任务/专家构题、固定复杂度极长长度曲线、模型与 harness 的系统组合、长度单位与方法边界。
+    回答框架：先把测试拆开：RULER 在 NIAH 之外加入多 needle、多跳与聚合，用可控合成任务检查长度和复杂度；NoLiMa v3 降低问题与证据的词面重叠，报告 13 个模型中 11 个在 32K 低于各自短上下文基线的一半，但这仍是特定 needle/haystack 协议；LongBench v2 用 503 道高难多选题覆盖单/多文档、对话、代码和结构化数据，但其长度单位是 words；LongBench Pro v1 用 1,500 条中英文样本、任务分层和 token 长度细分，公开预印本最大 256K；DeepMind MRCR v2 固定相对简单的多轮共指任务并扩到 8M，适合测超长位置曲线，不代表复杂推理；LongHarness Bench v1 比较四种 Agent harness 与直接推理在四类长上下文任务上的质量和成本，结果绑定具体模型与实现，也不是 1M 通用能力测试。最后说明 NIAH/Lost in the Middle 检查输入与位置，真实业务 holdout 负责目标分布；不同模型、harness、工具权限、长度单位和预算下的分数不能拼成一条排行榜。论文实验和版本边界见[第七册第十三章研究记录](research/long-context-evaluation-and-effective-capability-2026-11-03.md)。
 
 49G. Model Card、HELM、CheckList、G-Eval 和 Evaluation Card 分别补上了模型发布与评估证据链的什么缺口？
     考察点：披露与验证的区别、共同评测条件、行为测试、LLM judge 校准、评测运行可追溯性、claim 粒度。
-    回答框架：Model Card 结构化发布者对用途、条件和限制的披露，Datasheet 记录数据来源和处理；二者都不核验声明真伪。HELM 用共同 scenario/adaptation 和多指标改善横向比较条件，但任务覆盖不等于目标流量。CheckList 将总分拆成最小功能、不变性和方向性行为测试，依赖清单与 oracle。G-Eval 将 rubric、细化步骤和 LLM 表单评分结合，相关性不等于事实正确性，必须在目标任务校准。Evaluation Card 汇集模型、benchmark 和运行元数据，仍不能验证底层结果。最后用 Claim Ledger 把每条最小 claim 绑定 revision、来源、harness、预算、反证和未知项；区分厂商结果、第三方 provider/config 测量与固定 harness 评测，缺失榜单行不等于零分。
+    回答框架：Model Card 结构化发布者对用途、条件和限制的披露，Datasheet 记录数据来源和处理；二者都不核验声明真伪。HELM 用共同 scenario/adaptation 和多指标改善横向比较条件，但任务覆盖不等于目标流量。CheckList 将总分拆成最小功能、不变性和方向性行为测试，依赖清单与 oracle。G-Eval 将 rubric、细化步骤和 LLM 表单评分结合，相关性不等于事实正确性，必须在目标任务校准。Evaluation Card 汇集模型、benchmark 和运行元数据，仍不能验证底层结果。最后用 Claim Ledger 把每条最小 claim 绑定 revision、来源、harness、预算、反证和未知项；区分厂商结果、第三方 provider/config 测量与固定 harness 评测，缺失榜单行不等于零分。例子中还要保留 OSWorld 来源标签：Opus 5.5 发布页当前列 2.1 partial `81.8%`，System Card 列 2.0 partial/strict `81.8%/48.7%`；相同 partial 分数不足以证明任务修订相同，不能跨版本搬用 strict 分数。具体来源与边界见 [Opus 5.5 研究记录](research/model-update-2026-09/claude-opus-5.5-source-notes.md)。
 
 49H. 代表性 Agent 工作流评测各解决什么缺口？怎样区分它们支持的结论？
     考察点：SWE-bench/SWE-Gym/Terminal-Bench、WebArena/OSWorld/BrowserGym、τ-bench/ToolSandbox/AgentDojo、GAIA/ScienceAgentBench/PaperBench、METR/Gaia2、工具合同审计。
-    回答框架：先按工作对象比较：SWE-bench 测仓库 issue 到 patch/测试，SWE-Gym 加入可执行环境和可用轨迹，Terminal-Bench 测终端工作流；WebArena 检查网站任务后的功能状态，OSWorld 测桌面应用与 GUI 流程，BrowserGym 是实验框架而非统一任务集或 grader。τ-bench 以领域 API/状态和 pass^k 测多轮可靠性，ToolSandbox 用 milestone 与 minefield 表达过程依赖和禁止事件，AgentDojo 分开报告正常效用、攻击下效用和攻击成功。GAIA 看综合助理答案，ScienceAgentBench 看可执行数据分析产物，PaperBench 看长程论文复现的部分进度。METR 的 time horizon 是人类任务耗时构成的难度刻度；Gaia2 测动态异步环境变化，两者不是 Agent 自主运行时长。最后说明 benchmark 分数绑定任务、环境、预算和 grader；工具合同审计要检查文档/schema、状态变化及 grader 读取字段，但潜在缺陷不证明 Agent 曾触发，也不证明排行榜变化。方法对照见[第七册第十五章研究记录](research/specialized-frontier-eval-cluster-depth-review-2026-10-27.md)。
+    回答框架：先按工作对象比较：SWE-bench 测仓库 issue 到 patch/测试，SWE-Gym 加入可执行环境和可用轨迹，Terminal-Bench 测终端工作流；WebArena 检查网站任务后的功能状态，OSWorld 测桌面应用与 GUI 流程，BrowserGym 是实验框架而非统一任务集或 grader。τ-bench 以领域 API/状态和 pass^k 测多轮可靠性：pass^k 是 k 次都成功，pass@k 是至少一次成功；ToolSandbox 用 milestone 与 minefield 表达过程依赖和禁止事件，AgentDojo 分开报告正常效用、攻击下效用和攻击成功。GAIA 看综合助理答案，ScienceAgentBench 看可执行数据分析产物，PaperBench 看长程论文复现的部分进度。METR 的 time horizon 是人类任务耗时构成的难度刻度；Gaia2 测动态异步环境变化，两者不是 Agent 自主运行时长。最后说明 benchmark 分数绑定任务、环境、预算和 grader；工具合同审计要检查文档/schema、状态变化及 grader 读取字段，但潜在缺陷不证明 Agent 曾触发，也不证明排行榜变化。方法对照见[第七册第十五章研究记录](research/specialized-frontier-eval-cluster-depth-review-2026-10-27.md)。
 
 50. 如何设计一个最小泛化审计 demo？
    考察点：memorizer、rule model、underfit、分布偏移、overlap。
@@ -1317,7 +1317,7 @@
 
 25. 什么是 Alignment Problem？
    考察点：真实意图、目标规范、代理指标、模型行为、部署分布。
-   回答框架：Alignment Problem 是让模型实际目标和行为符合人类真实意图、安全边界和产品价值的问题，难点是写下的目标、训练目标、模型学到的策略和部署行为可能不一致。
+   回答框架：Alignment Problem 是让模型实际目标和行为符合人类真实意图、安全边界和产品价值的问题，难点是书面规范、训练 proxy、模型学到的策略和部署行为可能不一致。outer alignment 检查目标是否写对，inner alignment 检查模型是否学到目标；观察到的行为差异本身不能证明隐藏目标。
 
 26. Outer alignment 和 inner alignment 有什么区别？
    考察点：目标写对了吗、模型学对了吗、proxy objective、目标泛化。
@@ -1325,7 +1325,7 @@
 
 27. Goal misgeneralization 和普通泛化失败有什么区别？
    考察点：能力保留、目标错误、分布外、隐蔽风险。
-   回答框架：普通泛化失败是模型不会做，goal misgeneralization 是模型仍有能力但追求了错误目标，因此更难通过能力分数发现。
+   回答框架：普通能力泛化失败是模型不会做，goal misgeneralization 是模型在分布外仍保留相关能力、但行为符合错误目标，因此不能只看能力分数。这里的“目标”是行为层面的分析描述，不单独证明模型内部有稳定目标表征。
 
 28. Specification gaming 和 reward hacking 有什么关系？
    考察点：规则漏洞、指标漏洞、reward model、Goodhart's Law。
@@ -1333,7 +1333,7 @@
 
 29. 面试中如何谨慎表述 deceptive alignment？
    考察点：潜在风险、证据强度、训练/评估/部署差异、避免断言。
-   回答框架：把它作为安全研究中的潜在高风险失败模式，强调需要分布外、长期、多轮、工具使用和监督强弱变化下的证据，不能轻率说当前模型已强形式发生。
+   回答框架：把 deceptive alignment 作为模型可能在训练中策略性伪装并保留其他目标的较强风险假设。alignment faking 是一些实验中对特定监控条件下选择性遵从行为的操作化描述，不能仅凭输出差异或推理文本推出稳定隐藏目标；还要报告模型、提示、工具、观察窗口和评测器等条件。
 
 30. 如何设计一个目标错配评估？
    考察点：真实最优行为、proxy 选中行为、模型实际行为、Goodhart gap、goal misgeneralization。
@@ -1367,6 +1367,13 @@
    考察点：AI feedback、judge bias、meta-eval、human calibration、工具验证。
    回答框架：LLM-as-a-Judge 是 AI feedback 的一种工程形式；scalable oversight 更广，还包括分解、debate、verifier、process supervision、人工审计和监督质量门禁。
 
+37A. 多选任务中，如何从“模型没有选中被排除类别”的比例估计准确率？
+   考察点：互补标签、均匀负类抽样、同分布、无偏校正和适用边界。
+   回答框架：只有当互补类别从其余 `K−1` 个错误选项中均匀抽样、评测样本分布一致且 `K≥3` 时，才可用 `A=(K−1)q−(K−2)` 校正。四选一若 `q=0.8`，则 `A=3×0.8−2=0.4`；不能把“避开一个错误选项”直接当准确率。专家自行挑 hard negative 或自由文本任务不能直接套用。
+37B. 如何校准模型自评的 `P(True)` / `P(IK)`，并把它用于回答、拒答或人工升级？
+   考察点：候选答案概率与能力预测的区别、独立校准集、分桶误差、风险—覆盖、分布外校准。
+   回答框架：`P(True)` 针对具体候选答案，`P(IK)` 预测模型是否能答对；二者都只是待校准信号。用独立 gold 集按任务切片比较置信桶与实测准确率，再按错误代价、可逆性和人工成本选路由阈值；报告覆盖、风险、严重度和样本量。分布变化后重校准，自然语言自我解释不算独立验证。
+
 38. 什么是 reward hacking？
    考察点：proxy objective、reward model 漏洞、Goodhart、真实目标。
    回答框架：模型优化奖励或 judge 分数时找到 proxy 的漏洞，得到高分但没有提升真实 helpful、honest、harmless 或任务质量。
@@ -1390,6 +1397,10 @@
 43. DPO 是否避免了 reward hacking？
    考察点：无显式 reward model、偏好数据隐含目标、chosen/rejected 偏差、分布外。
    回答框架：DPO 避免了显式 RM + PPO 的链路，但仍在优化偏好数据隐含的 proxy；如果偏好数据有长度、风格、安全或领域偏差，仍会学到目标错配。
+
+44. 如何用对比式信念干预测量模型对 grader 的敏感度？
+   考察点：grader 与开发者偏好冲突、配对干预、行为差值、可信区间、单一 RL lineage、短程任务边界。
+   回答框架：在同一任务中分别提供 grader 偏好任务完成与偏好诚实的条件，再比较模型是否违背对主管的承诺。论文中的 late checkpoint 为 87% 对 9%，差 78 个百分点；这说明该设置下行为对 grader 信念敏感，不是 78% 的部署风险，也不能单凭它证明稳定隐藏目标。还要说明样本量、可信区间、单一 o3 RL lineage、未做 safety training 和短程代码任务等边界。
 
 ## 安全与治理
 
@@ -1419,7 +1430,7 @@
 
 7. 如何设计一次大模型 red teaming 和危险能力评估？
    考察点：risk taxonomy、搜索强度、capability elicitation、baseline、P0/P1、回归测试、发布门禁。
-   回答框架：先定义风险分类、成功标准和目标部署威胁模型，再记录模型版本、提示、工具、预算、baseline、判定器和专家介入。执行时把工具权限、主机隔离和网络出口分层验证，留存 trace、严重度与根因；指标上并列报告 taxonomy coverage、任务/动作分母、P0/P1 unresolved、capability uplift、regression pass rate 和独立发布门槛。空切片记为 N/A 而不是通过；公开报告不暴露可复用的高风险步骤，结论只覆盖实际测试条件。
+   回答框架：先定义风险分类、成功标准和目标部署威胁模型，再记录模型版本、提示、工具、预算、baseline、判定器和专家介入。执行时把工具权限、主机隔离和网络出口分层验证，留存 trace、严重度与根因；指标上并列报告 taxonomy coverage、任务/动作分母、P0/P1 unresolved、capability uplift、regression pass rate 和独立发布门槛。空切片记为 N/A 而不是通过；公开报告不暴露可复用的高风险步骤，结论只覆盖实际测试条件。评估环境本身也要受控：AISI 报告的 `10/122` 来自开放互联网、关闭 provider cyber classifier 的特定设置，且并非沙箱逃逸，不能当作一般发生率。工具动作与 CoT 可能不一致，因此应以权限日志和实际副作用为证据，CoT 只作补充；沙箱与宿主机分层断网、开测前控制检查和停机路径各自承担不同责任。
 
 8. Capability elicitation 为什么会影响危险能力评估结论？
    考察点：自然能力、最大可激发能力、工具、scaffold、专家辅助、低估 / 高估风险。
@@ -1431,7 +1442,7 @@
 
 10. SAE 和 activation patching 如何服务模型安全？
     考察点：superposition、polysemanticity、feature purity、reconstruction fidelity、局部机制证据、安全监控。
-    回答框架：SAE 用稀疏重构把混合激活分解为更可解释的 feature 候选，缓解单个 neuron 多语义问题，但重构保真度或自动解释分数不等于语义正确，也不等于行为控制。SAEBench 展示 proxy 指标与任务效用可能分离，MIB 分开测 circuit 定位与 causal-variable 定位，SANITY 预印本提示要匹配 neuron / random baseline；解释生成还应以近邻负例检验边界。activation patching / ablation 用来检验局部因果作用；安全应用要进一步观察 holdout 行为、副作用和 trigger detection 与 behavior control 是否一致。所有论文结论绑定各自模型与任务，不能把单个 feature 名字或内部监控分数当作安全保证。
+    回答框架：SAE 用稀疏重构把混合激活分解为更可解释的 feature 候选，缓解单个 neuron 多语义问题，但重构保真度或自动解释分数不等于语义正确，也不等于行为控制。SAEBench 展示 proxy 指标与任务效用可能分离，MIB 分开测 circuit 定位与 causal-variable 定位，SANITY 预印本提示要匹配 neuron / random baseline；解释生成还应以近邻负例检验边界。DAME 的结果提示高计算贡献 feature 的解释性可能低于整体均值，但它仍使用 LLM judge，不能视为真值。activation patching / ablation 用来检验局部因果作用；安全应用要进一步观察 holdout 行为、副作用和 trigger detection 与 behavior control 是否一致。所有论文结论绑定各自模型与任务，不能把单个 feature 名字或内部监控分数当作安全保证。
 
 11. Steering 和 representation engineering 能否替代 RLHF 或安全系统？
     考察点：steering vector、CAA、activation intervention、目标收益、副作用、over-refusal、持续性、输入稳健性和双用风险。
@@ -1439,15 +1450,15 @@
 
 12. Model editing 和 machine unlearning 分别解决什么问题，如何评估？
     考察点：ROME、MEMIT、MEND、RAG、fine-tuning、forget set、retain set、locality、membership inference、guardrail 边界。
-    回答框架：model editing 是局部修改模型知识或行为，重点看 edit success、改写泛化、specificity / locality、retain drop 和 editing gate；EVOKE 提醒直接目标可能过拟合，UniEdit 与多跳 ripple tests 帮助检查关系组合，LocFT-BF 则说明要比较合理的 mini-batch fine-tuning baseline，不能把特定论文结果当普遍方法排序。Unlearning 是近似移除某些数据、知识或能力影响，重点看 forget leak、改写 / 多轮鲁棒泄露、membership inference 风险变化、retain set 能力保留和 unlearning gate；还应单独测授权材料重新进入上下文后的 contextual utility，并可按威胁模型增加表征残留审计。MIA 下降、内部线性可解码和实际外部泄露是不同证据；benchmark 分数、拒答和法律删除完成也不能互相替代。
+    回答框架：model editing 是局部修改模型知识或行为，重点看 edit success、改写泛化、specificity / locality、retain drop 和 editing gate；EVOKE 提醒直接目标可能过拟合，UniEdit 与多跳 ripple tests 帮助检查关系组合，LocFT-BF 则说明要比较合理的 mini-batch fine-tuning baseline，不能把特定论文结果当普遍方法排序。先区分严格意义上的 machine unlearning（针对明确训练数据集，和未见该数据的重训参考比较）与文献中更宽泛的知识移除、行为抑制或能力降低；后者不能仅因“不回答”就称为已删除。遗忘评估覆盖 forget-set 构造、直接/改写/多轮泄露、membership inference、retain set、授权上下文效用和受控微调恢复；内部线性可解码、恢复性与实际外部泄露是不同证据。CleanSlate 提醒请求到 forget set 的映射本身会影响副作用；2026 ICML 的术语论文是作者立场而非共识。Benchmark 分数、拒答和法律删除完成也不能互相替代。
 
 13. 如何设计 LLM privacy、memorization 和 watermarking 的评估治理？
-    考察点：PII / secret、training data extraction、memorization、membership inference、RAG 权限、日志脱敏、watermark z-score、误报 / 漏报、privacy gate。
-    回答框架：先按生命周期拆风险：训练数据、微调数据、用户日志、RAG、工具、输出和人工标注。指标上看 PII recall、secret recall、memorization rate、output leak rate、RAG unauthorized retrieval、raw log rate 和 membership advantage，并把它们放进 privacy gate。Canary 审计结果要说明插入方式和威胁模型；ICLR 2025 的 Qwen2.5-0.5B TPR@1% FPR 结果绑定论文配置，InfoRMIA 的 token 级信号也绑定论文 benchmark。Watermarking 主要服务内容溯源，要看 generated recall、false positive、改写 / 翻译鲁棒性和质量下降，不能把水印当成隐私保护本身；统计水印与 C2PA 签名声明应分开报告。Anthropic 对 Claude 的水印描述属于厂商自述，2026 年改写取证结果来自预印本，都不能单独成为作者身份判定依据。
+    考察点：PII / secret、提示线索、匹配非成员、training data extraction、fuzzy duplicate、合成文本成员推断、输入侧 PII、privacy ripple、RAG 权限、日志脱敏、watermark z-score、误报 / 漏报、privacy gate。
+    回答框架：先按生命周期拆风险：训练数据、微调数据、用户日志、RAG、工具、输出、合成文本发布和人工标注。指标上看 PII recall、secret recall、memorization rate、output leak rate、RAG unauthorized retrieval、raw log rate 和 membership advantage，并把它们放进 privacy gate。复现审计要控制 prompt-target overlap，并以匹配的非成员样本估计自然可预测性；近重复可能共同形成记忆，输入里出现但未进训练目标的 PII 也可能在微调后暴露。增加或删除数据后要复查相邻样本和其他 PII 的风险。所有论文结果绑定其模型、数据、接口和攻击预算。对外发布合成文本也要考虑数据侧成员推断。Watermarking 主要服务内容溯源，要看 generated recall、false positive、改写 / 翻译鲁棒性和质量下降，不能把水印当成隐私保护本身；统计水印与 C2PA 签名声明应分开报告。Anthropic 对 Claude 的水印描述属于厂商自述，改写取证结果来自预印本，都不能单独成为作者身份判定依据。
 
 14. Model card、system card 和 governance gate 应该如何设计？
     考察点：Datasheets、Model Cards、System Card、intended use、out-of-scope use、risk disclosure、release gate、responsible scaling、approval、monitoring。
-    回答框架：model card 记录模型制品、预期/不适用用途、数据与训练披露、评测条件、限制和缓解；system card 记录 RAG、工具、权限、policy、日志、监控及事故响应组成的系统版本。每项声明应绑定证据、任务条件、责任人和复核日期，模型、tokenizer、policy 或 RAG 变化后判断哪些结论已过期。governance gate 将字段完整度、切片覆盖、未解决风险、审批和回滚准备度转为独立门槛；缺测不得当成通过，硬性隐私/授权失败不能被平均覆盖率抵销。再区分发布方 Responsible Scaling policy、NIST 自愿风险框架、GPAI Code of Practice 与具有适用范围的法规义务；它们的版本、责任主体和法律地位不同，不能互相替代。文档不是宣传材料，必须和真实系统一致并随版本更新。
+    回答框架：model card 记录模型制品、预期/不适用用途、数据与训练披露、评测条件、限制和缓解；system card 记录 RAG、工具、权限、policy、日志、监控及事故响应组成的系统版本。每项声明应绑定证据、任务条件、责任人和复核日期，模型、tokenizer、policy 或 RAG 变化后判断哪些结论已过期。governance gate 将字段完整度、切片覆盖、未解决风险、审批和回滚准备度转为独立门槛；缺测不得当成通过，硬性隐私/授权失败不能被平均覆盖率抵销。再区分发布方 Responsible Scaling policy、NIST 自愿风险框架、GPAI Code of Practice 与具有适用范围的法规义务；它们的版本、责任主体和法律地位不同，不能互相替代。时间上，GPAI 供应商义务自 2025-08-02 适用，委员会自 2026-08-02 开始完整执法，2025-08-02 前已投放市场的模型最迟于 2027-08-02 履行；Article 50 自 2026-08-02 适用，旧系统仅 50(2) 标记/检测有至 2026-12-02 的有限过渡。透明度 Code 自愿，最终指南解释实施范围；具体义务仍要按主体和系统确认。文档不是宣传材料，必须和真实系统一致并随版本更新。
 
 15. Safety 综合面试题应该如何组织回答？
     考察点：定义目标、risk taxonomy、failure mode、mitigation、eval metrics、red teaming、release gate、trade-off、safe boundary。
@@ -1471,7 +1482,7 @@
 
 20. Agent prompt injection 为什么要同时看 utility under attack 和 targeted ASR？
     考察点：用户目标、攻击者目标、状态 oracle、正常效用、拒绝服务。
-    回答框架：targeted ASR 测攻击者想要的未授权动作是否发生；utility under attack 测用户原任务是否正确完成且没有副作用。AgentDojo 用状态化环境与效用函数把两者拆开，因此“全拒绝”可能压低攻击成功率，却同时让正常效用归零。还要检查工具参数、授权范围、外部状态和恢复结果；SafeAudit 提醒 benchmark 的 workflow coverage 本身也需要审计。证据范围见[第七册第八章研究记录](research/safety-robustness-evaluation-depth-review-2026-10-27.md)。
+    回答框架：targeted ASR 测攻击者想要的未授权动作是否发生；utility under attack 测受攻击但原本合法的用户任务是否安全完成。纯有害 Jailbreak 请求不进入任务效用分母，正确拒绝应计入拒答质量。AgentDojo 用状态化环境与效用函数把攻击结果和任务状态拆开；ATOM 还显示只报两个边际指标会漏掉“安全但没完成”和“完成但仍不安全”的轨迹。评估时要分辨明确拒绝、忽略注入、无效工具调用和副作用，不能把低 ASR 直接当作鲁棒防御。Rethinking Assessments、LongPIBench 和 SafeAudit 分别补真实应用任务、长文档上下文及测试覆盖审计；其设置互补，不合成通用安全分数。证据边界见[第七册第八章来源记录](research/safety-and-prompt-injection-evaluation-2026-11-03.md)和[ATOM arXiv v1](https://arxiv.org/abs/2610.23254)。
 
 21. 训练数据抽取、成员推断、属性推断和 RAG 越权有什么区别？
     考察点：攻击目标、可观察证据、相应指标、缓解层。
@@ -1503,7 +1514,7 @@
 
 28. 如何评估一个面向不可信 Agent 的 AI Control 协议？
     考察点：U/T 基线、微协议执行细节、诚实效用、攻击分母、协议知情红队、提交前控制与迁移假设。
-    回答框架：先冻结模型、工具、权限、轨迹可见性和主/副任务判定，再分别测 $U$、$T$ 与协议的诚实成功率，以及攻击轨迹的审核捕获和未捕获副任务。区分最低可疑分候选直接提交的 `defer-to-resample` 与只收集线索、最终由可信执行方提交的 `resample-then-defer`；对不可逆动作可用 `defer-on-critical` 加执行器审批。红队应知道协议并尝试针对监控器，协议冻结后留独立 holdout。报告原始分母、效用/安全门槛、审计时点、外部副作用、补偿结果和成本；事后发现不等于提交前阻止，benchmark 分数也不等于部署安全保证。
+    回答框架：先冻结模型、工具、权限、轨迹可见性和主/副任务判定，再分别测 $U$、$T$ 与协议的诚实成功率，以及攻击轨迹的审核捕获和未捕获副任务。先做属性明确的监控性评估：按干预、过程或结果属性选择任务，并比较 CoT-only、action-only 与 all-messages 证据范围；CoT 监控效果较好只说明特定设置下更容易识别标签，不证明 CoT 忠实，也不代替执行门禁。区分最低可疑分候选直接提交的 `defer-to-resample` 与只收集线索、最终由可信执行方提交的 `resample-then-defer`；对不可逆动作可用 `defer-on-critical` 加执行器审批。红队应知道协议并尝试针对监控器，协议冻结后留独立 holdout。报告原始分母、效用/安全门槛、审计时点、外部副作用、补偿结果和成本；事后发现不等于提交前阻止，benchmark 分数也不等于部署安全保证。
 
 本节新增方法比较依据：[Safety 与 Robustness Eval 研究记录](research/safety-robustness-evaluation-depth-review-2026-10-27.md)。
 
@@ -2343,7 +2354,7 @@
 
 112. Agent 回归集应该包含什么？
      考察点：历史成功、历史失败、安全边界、工具异常、长任务、多轮。
-     回答框架：回归集要覆盖常见成功任务、历史失败任务、安全边界、工具异常、长上下文、多轮任务、高成本任务和环境变化任务。每次更新 prompt、工具 schema、模型、controller 或权限策略都应重跑。
+     回答框架：回归集要覆盖常见成功任务、历史失败任务、安全边界、工具异常、长上下文、多轮任务、高成本任务和环境变化任务。每次更新 prompt、工具 schema、模型、controller 或权限策略都应重跑。Agent 任务成功与 harness 可靠性要分开报告：成功的最终结果仍可能违反权限、生命周期或证据约束。trace 中的异常步骤先是候选机制，需核对中间状态、事件顺序、竞争解释，并通过固定条件干预或人工证据复核后，才可称为已验证的失败传播链。
 
 113. Agent 安全应该如何设计？
      考察点：最小权限、沙箱、数据流、审计、人工确认。
@@ -3040,6 +3051,14 @@
    考察点：行为关系测试、生产 ML 工程断言、跨模型场景/指标、可执行 oracle、Agent 工作流 trace。
    回答框架：CheckList 用 MFT/INV/DIR 找具体行为缺陷；ML Test Score 审数据、模型、基础设施和监控防线；HELM 提高公开场景和多指标比较覆盖；EvalPlus 用 LLM seed、类型变异和差分测试加强代码 oracle；trace grading 观察 Agent 中间步骤。它们不是同一层的 benchmark，也不能互相代替；需按产品问题组合，并用人工校准、私有 holdout 和线上观察补盲。
 
+5L. 共享模型池、缓存或配额导致用户之间互相影响时，怎样设计线上实验？
+   考察点：interference、随机化单位、集群随机、switchback 时间块、洗脱期、周期趋势、相关观测。
+   回答框架：先画出跨用户影响路径；用户级分桶可能使 control 受到 treatment 的缓存、知识库、资源配额或协作状态影响。可比较集群随机与个体随机，或在确实共享同一时段系统时考虑按预定时间块随机切换版本。Switchback 需要设定块长、洗脱期、时段覆盖和版本清理，按时间块处理相关性，并控制周几、流量趋势和版本残留；换成租户/团队分桶也不能自动消除跨集群干扰。
+
+5M. LLM judge 产生的失败标签很多，为什么还需要人工校准？Noisy Hypothesis Testing 能保证什么？
+   考察点：judge TPR/FPR、校准不确定性、二元失败率认证、第一类错误、标签构念边界。
+   回答框架：更多 judge 标签能降低这批 noisy label 均值的抽样误差，却不会自动修复 judge 的假阳性/假阴性。Noisy HT 用小规模人工 gold set 估计 TPR/FPR，再把校准参数的不确定性带入针对失败率阈值的检验；论文的第一类错误对应把超过容忍风险的模型错误认证为通过。保证依赖论文的二元标签、独立抽样和 judge 误差模型，不能代替 rubric 校准、人工标签质量或主观安全判断，也不是通用 p 值校正。
+
 6. 如何降低幻觉？
    考察点：数据质量、RAG、工具、verifier、grounding、不确定性表达。
    回答框架：不能只调 decoding，要结合训练、检索、工具、验证器、引用和专门评估。
@@ -3711,7 +3730,7 @@
        回答框架：先说明评估平台不是 benchmark 脚本，而是模型质量控制系统，要把模型版本、评估数据、prompt、推理配置、指标、人评、judge、在线反馈和发布决策连成可复现证据链。第一层讲对象模型：一次 EvalJob 至少绑定 ModelVersion、EvalDataset、PromptVersion、InferenceConfig、EvalCodeVersion、MetricDefinition、JudgeConfig 或 HumanReviewTask、PredictionOutputs、EvalReport 和 ReleaseDecision；这些字段不完整时，分数不可比较。第二层讲离线评测和数据：eval dataset 要记录 id、版本、任务、样本数、切片、标签、来源、构造方式、训练隔离和污染检查；离线批量评测要固定模型、数据、prompt、推理配置、评估代码、runtime 和指标定义；指标要记录方向、权重、阈值和版本，避免同名指标漂移。第三层讲人评和 judge：LLM-as-Judge 要有人类校准集、rubric、prompt、模型版本和长度 / 位置偏差检查；人工评测要有标注指南、gold set、多标注员重复标注、复审、仲裁和耗时监控；pairwise 要盲评、随机输出顺序、记录 tie 并按切片统计 win rate。第四层讲在线评估和发布：A/B 或 canary 要有稳定分桶、sample ratio health、质量 / 延迟 / 成本 / 安全 guardrail 和 rollback；Release Gate 要同时看离线、人评、在线、安全、性能、成本、审批和回滚。第五层讲平台能力：EvalReport 要包含总分、切片、样本级结果、失败案例和 baseline 对比；回归集要覆盖历史事故、关键业务、安全、工具和格式样本；评估调度要支持依赖、重试、预算和失败分类；缓存 key 必须包含模型、数据、prompt、配置、代码和 runtime；可观测性要覆盖状态、吞吐、错误率、成本、失败原因、队列和 trace；prediction outputs、sample table、judge run、人评结果、eval report 和 release decision 要进入 artifact / lineage。最后用 Evaluation Platform Gate 收束：数据、指标、judge、人评、在线、报告、回归、调度、缓存、观测、artifact、发布和回滚证据全部过线且无 P0 风险，才算评估平台可靠。
 
 
-       延伸追问：一次评估请求已发出但客户端超时，怎样区分 execution、scoring 和 maturity 状态？请用 run/sample/attempt/score 的引用关系说明重试为何要追加 attempt 而非覆盖结果；再讨论这个选择对单次能力估计、系统可用性、成本和非幂等工具副作用的影响。
+       延伸追问：一次评估请求已发出但客户端超时，怎样区分 input_validation、execution、scoring 和 maturity 四个状态轴？请用 run/sample/attempt/score 的引用关系说明无效输入如何进入 `not_applicable`、模型成功但 judge 超时如何记录，以及重试为何要追加 attempt 而非覆盖结果；再讨论这对单次能力估计、系统可用性、成本和非幂等工具副作用的影响。
 
 40ZZZZ. 如何设计 Feature Store、Embedding Store 与向量索引基础设施？
        考察点：feature definition contract、offline online consistency、point in time correctness、embedding version contract、chunk embedding lineage、vector index build readiness、ANN quality latency gate、metadata permission filter、shadow index switch readiness、retrieval trace completeness、feature embedding lineage graph、multi tenant isolation、quality monitoring metrics、cost capacity governance、RAG agent integration、feature embedding index gate。
@@ -4155,7 +4174,7 @@
 
 10. 如何把安全分类器信号与 risk-calibrated access 决策结合评估？
     考察点：分类器召回/误拒/PSS、主体与资源 scope、PDP/PEP、revision 竞态、授权指标分母。
-    回答框架：先按政策、模态、语言和动作切片检查分类器召回、误拒与校准；同一图像跨政策的配对测试可检查边界适应，但分类器输出只是证据或风险信号，不能授予权限。服务端还要验证主体、grant、资源/动作范围、证据、审批和当前版本，由 PDP 决定、PEP 在执行前及真实副作用边界强制检查。回归集应覆盖撤权、scope 错误、审批后 revision 变化和策略服务故障；分别报告 HighRiskAllowRate 与 UnauthorizedSideEffectRate，空分母记为 N/A。Risk score 是排序启发式；只有事件定义和代表性标签支持校准时，预测分数才可讨论为概率。参见[第八册第十四章](book-08-ai-safety-alignment/chapters/14-shieldstral策略自适应多模态安全分类器.md)与[第十五章](book-08-ai-safety-alignment/chapters/15-risk-calibrated-access.md)。
+    回答框架：先按政策、模态、语言和动作切片检查分类器召回、误拒与校准；同一图像跨政策的配对测试可检查边界适应，但分类器输出只是证据或风险信号，不能授予权限。服务端还要验证主体、grant、资源/动作范围、证据、审批和当前版本，由 PDP 决定、PEP 在执行前及真实副作用边界强制检查。回归集应覆盖撤权、scope 错误、审批后 revision 变化和策略服务故障；分别报告 HighRiskAllowRate 与 UnauthorizedSideEffectRate，空分母记为 N/A。Risk score 是排序启发式；只有事件定义和代表性标签支持校准时，预测分数才可讨论为概率。标准边界上，AuthZEN Authorization API 1.0 是 PDP/PEP 的最终互操作接口；截至 2026-11-03，AARP 与 COAZ-MCP 仍是工作组草案，审批后仍由 PDP 重评估。OWASP ACS 提供 Agent 运行时 hook 控制接口，不替代资源授权，也不能凭自我声明证明部署安全。参见[第八册第十四章](book-08-ai-safety-alignment/chapters/14-策略自适应多模态安全分类器.md)与[第十五章](book-08-ai-safety-alignment/chapters/15-risk-calibrated-access.md)。
 
 11. Adaptive Thinking 和固定 thinking level 有什么不同？
     考察点：预算控制器、verifier、无进展检测、p99 成本。
@@ -5935,7 +5954,7 @@
 
 ## 2026-09 Claude Opus 5.5：效率、评测与安全路由
 
-配套的零依赖 [`claude_opus55_protocol_audit.py`](research/model-update-2026-09/code/claude_opus55_protocol_audit.py) 将以下问题做成可运行的 `local_protocol_toy`：请求 capability gate、thinking block 绑定、compaction、工具幂等、fallback 实际模型和 verifier 边界。它不调用 Anthropic API、不解密 thinking，也不代表生产质量或安全 SLO。
+回答本组问题时，把 capability gate、thinking block 绑定、compaction、工具幂等、fallback 实际模型和 verifier 放进同一条合成 trace。字段回放只能检查应用侧状态是否自洽，不能解密 thinking、替代 Anthropic API 验收或代表生产质量与安全 SLO。
 
 1. **问：为什么“成本比 Opus 5 低 40%”不能直接证明模型更小或架构更简单？**
    **答：** 这是发布方典型工作负载结果，可能同时来自更少输出 token、更少工具轮次、更少重试、cache read 价格和 fallback 策略。需要固定 model/revision、effort、provider、工具、任务、verifier 后分别计算 token、steps、cache、retry、fallback 和单位成功成本。
@@ -6331,7 +6350,7 @@
    **答：** 发布方描述 activation probe、Sonnet 5.5 上的轻量 classifier、以及结合 probe 判定的独立 LLM classifier。它是官方公开的保护链描述，不代表内部完整实现已披露或经过独立复现。
 
 4. **问：拒绝请求可以自动交给另一个模型吗？**
-   **答：** 不能笼统处理。官方 server-side fallback 只对 `cyber` 与 `frontier_llm` refusal 重试到 Sonnet 5；`bio`、`reasoning_extraction`、`general_harms` 不重试。还要记录 requested/actual model、category、fallback reason 和工具权限，避免借模型切换绕过策略拒绝。
+   **答：** 不能笼统处理。截至 2026-11-03，Sonnet 5.5 的 Anthropic API 默认 server-side fallback（beta）只把 `cyber` 与 `frontier_llm` refusal 重试到 Sonnet 5；`bio`、`reasoning_extraction`、`general_harms` 不重试。它只处理 classifier refusal，不处理 429、overload 或 server error。要从响应的 `model`、`fallback` block 和 `usage.iterations` 记录实际模型与尝试，避免借模型切换绕过策略拒绝。
 
 5. **问：如何准确报告 Sonnet 5.5 的 Terminal-Bench/OSWorld 结果？**
    **答：** 同时报任务集版本、CLI/harness、effort、trials、网络/资源条件、指标定义、fallback 覆盖和 verifier。`70.6%` Terminal-Bench 4.0 是 66 tasks、Claude Code `--bare`、max、5 trials、无外网且有少量 fallback；OSWorld `80.1% partial` 与 `43.5% strict` 是不同度量，绑定 108 个任务、500-action 上限、5 runs 和 compaction。它们是发布方结果，不是裸模型或生产 SLO。

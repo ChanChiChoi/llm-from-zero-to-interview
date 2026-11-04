@@ -10,6 +10,8 @@
 在新任务和新模板上泛化，以及是否会扩大安全暴露面。只有把这些问题分别回答，steering
 才是工程证据，而不是一个看起来有效的 prompt 或单次 demo。
 
+[第七章《Interpretability 与 Mechanistic Interpretability》](07-interpretability与mechanistic-interpretability.md)讨论怎样从表示线索建立局部机制证据；本章继续研究主动改变表示或激活后的行为收益、副作用和安全影响。找到可解释方向并不证明它能稳定控制行为。
+
 ```mermaid
 flowchart TD
     A["行为目标与配对样本"] --> B["提取指定层激活"]
@@ -212,7 +214,7 @@ Representation Engineering 关注模型内部高层表示。
 
 它不是从单个 neuron 或 circuit 逐底层拆解，而是从高层行为出发，寻找模型内部是否存在可监控、可干预的表示方向。
 
-这就是为什么它常被称为 top-down approach。
+这就是为什么它常被称为 top-down approach。[Representation Engineering 原始论文](https://arxiv.org/abs/2310.01405)
 
 Mechanistic interpretability 更像：
 
@@ -351,7 +353,7 @@ Steering Resistance 在 SAE latent steering 设置中报告：Llama-3.3-70B 的�
 明显，而较小的 Llama-3 与 Gemma-2 模型中较少出现；作者还找到与该现象相关的 latent
 并做了干预实验。这不是对所有 steering 的结论，但足以说明只检查首 token、某个固定层
 或一轮回答会漏掉时间变化。评估至少要记录逐 token 轨迹、完整回答和多轮延续，并注明
-注入是否每步重复、是否受条件门控以及在哪些生成位置停止。
+注入是否每步重复、是否受条件门控以及在哪些生成位置停止。[ICML 2026 论文](https://proceedings.mlr.press/v306/mckenzie26a.html)
 
 方向也可能携带与目标共变、却不属于目标的内容，例如样本主题、句式或语气。2026 年
 9 月提交的 Contrastive Covariance Steering 预印本尝试用对比协方差子空间抑制此类共享
@@ -359,6 +361,7 @@ Steering Resistance 在 SAE latent steering 设置中报告：Llama-3.3-70B 的�
 多轮对话与人工比较。它提示方向估计可能需要控制混杂因素，但目前属于单篇预印本结果，
 不能据此认定协方差投影在其他模型上更可靠。无论用均值差还是更复杂的估计器，都应保留
 简单差分基线、随机方向和跨模板 holdout，让评估能识别复杂方法带来的实际增量。
+[Contrastive Covariance Steering 预印本](https://arxiv.org/abs/2610.14025)
 
 ## 6. Contrastive Activation Addition
 
@@ -447,7 +450,7 @@ $\alpha$，记录目标收益曲线和副作用曲线，而不是只展示让目
 
 ### 7.1 发现的意义
 
-一些研究观察到，在多个开源 chat model 中，拒答行为可能和 residual stream 中某个方向高度相关。
+一些研究观察到，在多个开源 chat model 中，拒答行为可能和 residual stream 中某个方向高度相关；一项覆盖 13 个开源 chat model、最大到 72B 参数的研究报告了这一特定发现。[论文](https://arxiv.org/abs/2406.11717)
 
 高层理解：
 
@@ -511,7 +514,7 @@ compliance、safe completion、over-refusal、工具副作用和人工复核成�
 到方法、模型和目标视角之间的差异；作者报告了社会行为退化、拒答 steering 影响常识
 道德判断、事实性 steering 改变政治倾向等纠缠现象。这里的数字只描述论文所用模型和
 评测集，但它给出一个重要的设计要求：安全评估要并列测正常安全教育、合理拒答、误拒、
-事实性、社会行为和推理质量，不能把拒答率或某个单一 target score 当作完整安全指标。
+事实性、社会行为和推理质量，不能把拒答率或某个单一 target score 当作完整安全指标。[SteeringSafety](https://arxiv.org/abs/2509.13450)
 
 ## 8. Steering 的应用
 
@@ -603,7 +606,7 @@ compliance、safe completion、over-refusal、工具副作用和人工复核成�
 L2“如何表达”和 L3“如何具体落实”递进；论文报告控制效果会随约束变得更细而下降。
 这说明“回答整体更谨慎”与“每个可核验条件都按要求实现”是不同的评估问题。若任务要求
 引用、格式或工具行为，需把抽象目标和可观察的具体约束分开计分，并说明哪些失败来自
-目标未达成、哪些来自实现细节。
+目标未达成、哪些来自实现细节。[SteerEval](https://aclanthology.org/2026.acl-long.1443/)
 
 可以把稳健性检查组织成三条相互独立的轴：
 
@@ -922,6 +925,7 @@ steerability 下降，以及最佳层位随扰动移动。摘要报告方向稳�
 最多偏移 17 层；这些数字绑定作者的模型、扰动、打分方式和攻击设置，是风险线索而非
 真实流量故障率或已确立的跨模型定律。工程验证应把原始输入与保持任务意图的改写成对，
 先在干净验证集确定方向和层位，再在独立扰动集检查目标收益、副作用和层位选择是否漂移。
+[对抗稳健性预印本](https://arxiv.org/abs/2606.07696)
 
 ### 12.3 副作用风险
 
@@ -990,6 +994,8 @@ card 可以公布抽象方法、风险和指标；内部材料再保存具体向
 提出积分项累积跨层误差、微分项抑制过冲。两者说明候选控制器可以从固定向量推进到
 状态相关的更新，但其论文中的稳定性和收益只对相应方法、模型和 benchmark 有证据；
 移植到新架构或安全任务后，仍需重新测量目标效应、隐藏状态变化、误拒与失败回退。
+[Spherical Steering](https://proceedings.mlr.press/v306/you26a.html)、
+[PID Steering](https://proceedings.iclr.cc/paper_files/paper/2026/hash/fa5617c176e76fee83f3f9947fdf9f3f-Abstract-Conference.html)
 
 ### 13.3 和 SAE 结合
 
@@ -1174,7 +1180,7 @@ Steering 研究通常在特定模型、层位、数据集和推理实现上成�
 不能用总体平均值填补空分母；再比较固定向量逐 token 注入和只在部分位置门控时需要增加的
 轨迹记录字段。
 
-## 18. 最小可运行 Steering 审计 demo
+## 18. Steering 审计 toy demo
 
 下面的 demo 不需要真实模型，只用 toy 激活和 toy 评估表演示 steering 的核心审计流程。真实项目中，`positive_activations`、`negative_activations` 和 `case["activation"]` 应来自模型 forward hook；各 case 的指标须来自相同任务上的成对输出及已校准的判定器。本例将目标提升按五个 case 计算，安全收益只按高风险切片计算，能力损失和误拒只按正常请求切片计算。代码中的增益字段是合成斜率，不是测量值。
 
@@ -1190,9 +1196,9 @@ case，每条记录含有激活、切片标签和四个 toy 增益。`normal` �
 投影只检验隐藏状态朝哪边移动，不能代替输出质量；安全与正常请求的空切片会保留为
 `None`，因此不会被当作零损失或默认通过。
 
-将代码保存为 Python 文件后，运行 `python3 <文件名>.py`。
+将代码保存为 Python 文件后，可用 `python3 <文件名>.py` 按本例输入复核输出。
 
-> **代码状态：已验证（2026-10-28；Python 3.12.9，标准库）。**
+> **代码状态：静态审阅，未运行（2026-11-03）。**
 
 ```python
 from math import isfinite, sqrt
@@ -1506,7 +1512,7 @@ print("actions=", actions)
 print("decision=", decision)
 ```
 
-预期输出：
+静态预期输出（根据固定输入手算，未运行）：
 
 ```text
 mu_pos= [1.1, 0.8, 0.0]
@@ -1573,3 +1579,5 @@ Steering 的价值在于快速、可开关、适合研究和辅助控制；局�
 闭环或几何感知的 steering、对子空间的混杂控制和多维 benchmark 都提供了新研究方向，
 但每个方法仍需在目标 checkpoint、任务分布和运行时上独立复验。真实系统中，steering
 应和对齐训练、安全评估、红队、权限控制、监控和回滚结合，不能单独承担安全保证。
+
+如果问题从单次推理中的激活干预转为持久修改模型知识、行为或训练影响，可继续阅读[第九章《Model Editing 与 Unlearning》](09-model-editing与unlearning.md)。两者的修改对象、持久性和评估目标不同，不能用相同的输出变化相互证明。

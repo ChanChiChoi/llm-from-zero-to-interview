@@ -16,12 +16,12 @@ prompt、检索、工具、协议和安全策略变化时及时发现退化。
 
 ```mermaid
 flowchart LR
-    A[总体指标与用户影响] --> B[样本级版本差异]
-    B --> C[症状、能力、严重度]
-    C --> D[竞争性根因假设]
-    D --> E[固定条件做干预]
-    E --> F[未见变体复验]
-    F --> G[回归集与线上观察]
+    A["总体指标与用户影响"] --> B["样本级版本差异"]
+    B --> C["症状、能力、严重度"]
+    C --> D["竞争性根因假设"]
+    D --> E["固定条件做干预"]
+    E --> F["未见变体复验"]
+    F --> G["回归集与线上观察"]
     G -->|发现新失败| B
 ```
 
@@ -33,15 +33,22 @@ flowchart LR
 
 ### 1.1 小白视角：总体分数为什么会骗人
 
-假设旧版本在 1,000 个样本上正确 820 个，新版本正确 840 个。表面上看，新
-版本提升了 2 个百分点。现在把样本按场景拆开：
+假设旧版本在 100,000 个样本上正确 82,000 个，新版本正确 84,000 个。表面上看，
+新版本提升了 2 个百分点。为了看清总体分数由哪些场景组成，先列出每层样本数和
+正确率：
 
-| 场景 | 旧版本 | 新版本 | 变化 |
-| --- | ---: | ---: | ---: |
-| 普通问答 | 0.84 | 0.90 | +0.06 |
-| 中文法律问答 | 0.78 | 0.70 | -0.08 |
-| 代码补全 | 0.62 | 0.68 | +0.06 |
-| 数学证明 | 0.75 | 0.70 | -0.05 |
+| 场景 | 样本数 | 旧版本 | 新版本 | 变化 |
+| --- | ---: | ---: | ---: | ---: |
+| 普通问答 | 70,050 | 0.84 | 0.90 | +0.06 |
+| 中文法律问答 | 25,350 | 0.78 | 0.70 | -0.08 |
+| 代码补全 | 500 | 0.62 | 0.68 | +0.06 |
+| 数学证明 | 4,100 | 0.75 | 0.70 | -0.05 |
+
+按样本数加权，旧版正确数为 `58,842+19,773+310+3,075=82,000`，所以总体正确率
+为 82.0%；新版正确数为 `63,045+17,745+340+2,870=84,000`，总体为 84.0%。总分
+上升是因为占 70.05% 的普通问答与代码补全改善，足以盖过法律和数学场景的下降。
+如果真实用户的法律和数学任务占比更高，应该用目标用户权重重新汇总，而不能把
+这组评估集的总体提升直接当作产品收益。
 
 如果普通问答占了绝大多数样本，总分仍然会升高；如果产品的核心用户主要使用
 法律问答和数学证明，总体数字就没有代表真实价值。它不是统计计算错了，而是
@@ -378,6 +385,12 @@ Cohen's kappa 可写为：
 Kappa 受类别不平衡影响很大。高一致率不一定代表标注质量好，尤其当 99% 样本
 都是“无错误”；应同时报告混淆矩阵、每类召回、严重度分层和人工抽样结果。
 
+例如 10 条样本中，两位标注员对 4 条都判为“有错误”、对 4 条都判为“无错误”，
+另有两条各自只判一条为错误。观察一致率为 `p_o=8/10=0.8`；两人的正负边际都是
+各 50%，因此偶然一致率 `p_e=0.5×0.5+0.5×0.5=0.5`。于是
+`κ=(0.8−0.5)/(1−0.5)=0.6`。这说明 80% 原始一致不等于 80% 的机会校正一致；若
+错误标签非常稀少，同样的原始一致率可能对应不同的 κ。
+
 ### 4.5 分歧不是噪声桶
 
 judge 与人工、两个 judge 或程序判定器之间的分歧，可能揭示：
@@ -415,7 +428,7 @@ judge 与人工、两个 judge 或程序判定器之间的分歧，可能揭示�
 `v_i`，余弦相似度为：
 
 ~~~math
-\operatorname{cos}(v_i,v_j)
+\cos(v_i,v_j)
 =\frac{v_i^{\top}v_j}{\|v_i\|_2\|v_j\|_2}
 ~~~
 
@@ -430,6 +443,10 @@ input + model_output + reference_or_expected_behavior
 聚类后应抽样阅读每个簇，检查簇内一致性、簇间差异和高严重度样本是否被小簇
 吞掉。聚类算法的轮廓系数或主题标签不能替代人工确认；一个“格式错误”簇里
 可能同时含 JSON 解析失败、Markdown 渲染失败和字段语义错误。
+
+例如 `v_1=(1,0)`、`v_2=(0.8,0.6)` 时，点积为 `0.8`，两个向量的范数均为 1，
+所以余弦相似度是 `0.8`。这说明两段分析文本在嵌入空间的方向较接近，不说明它们
+有相同根因；还要读 trace 并检查可区分的修复路径。
 
 ### 5.3 LLM 辅助归因
 
@@ -562,6 +579,15 @@ Five Whys 适合把直接现象继续追问到流程或数据原因。比如财�
 一个 trace 可以在多个维度同时失败。回归集应固定模型 revision、reasoning effort、
 工具、harness、上下文策略和运行环境，否则版本变化无法归因。
 
+近期的 harness 评测也把完整任务结果和 harness 是否遵守自身约束分开看。
+[Trial by Trace v1](https://arxiv.org/html/2610.32285v1) 把 Agent 任务表现与 harness
+可靠性分层评分，并用证据链把轨迹中“出现了某个可疑步骤”和“该步骤造成了后续
+失败”分开；候选链路仍需进一步核验。[Harness-Bench v2](https://arxiv.org/html/2605.27922v2)
+则在共享任务环境、预算和评分协议下比较模型—harness 配置，检查最终产物并保留
+执行轨迹。其当前[摘要页](https://arxiv.org/abs/2605.27922)与版本化正文中的任务/运行
+数量不一致，因此这里只用其设计说明完整配置的评估边界，不引用那些数量或排名。
+两项都是特定任务和实现上的预印本，不能替目标产品确认根因或推出通用 harness 排名。
+
 ### 6.7 把根因假设变成可区分的实验
 
 以“问题问 A 公司 2023 年营收，系统却回答 2022 年数字”为例。仅凭最终答案，
@@ -583,8 +609,11 @@ Five Whys 适合把直接现象继续追问到流程或数据原因。比如财�
 31 条能够给出正确年份，19 条仍失败。这表示在这组被挑出的失败 trace 中，31 条
 可以被“提供目标证据”这一干预救回；它不是线上准确率提高 62%，也不证明生产
 检索器单独造成了全部错误。抽样对象本来就是失败样本，oracle context 也不等于
-真实检索分布。下一步要检查目标文档在实际检索链路中何处丢失，并在独立 holdout
-和新流量切片上验证候选修复。
+真实检索分布。若把这组已失败样本作为条件分母，干预前 `p_0=50/50=1.00`，干预后
+`p_1=19/50=0.38`，所以条件失败率变化 `Δ_fail=0.38−1.00=−0.62`。这个 62 个
+百分点只描述被挑出的失败 trace 在 oracle 证据条件下的变化，不是线上总体错误率
+或检索器的因果收益。下一步要检查目标文档在实际检索链路中何处丢失，并在独立
+holdout 和新流量切片上验证候选修复。
 
 这类实验用于调试具体系统，不自动构成对总体因果效应的估计。一次只改变一个
 组件有助于定位；若多个组件必须同时改变，应使用成组变更对照或分阶段 ablation，
@@ -706,6 +735,15 @@ fresh exploration   检查新的未知失败
 
 退休 case 要保留历史记录和退休原因，而不是物理删除后让趋势失去解释。
 
+这类维护也适用于从错误簇扩展出的 benchmark。Akhtar 等人的 2026 年研究
+[When AI Benchmarks Plateau](https://arxiv.org/abs/2602.16763v4) 覆盖 60 个语言模型 benchmark、
+按 14 项属性分析，报告近半数 benchmark 在其饱和定义下已显饱和，并发现饱和与
+benchmark 年龄相关；这是一项观察性分析，不证明年龄导致饱和。研究样本中，
+仅把测试集设为私有没有显示与专家策划相同的饱和缓解关系，但这不等于保密对降低
+直接泄漏风险无效。实际回归/benchmark 生命周期应持续检查题目是否过时、训练或调参
+是否反复接触，以及新切片是否仍能区分版本；该研究数值只适用于其样本和 accuracy
+型 benchmark，不能外推到 pass@k、Elo 或 judge 评估。
+
 ### 7.8 覆盖率的边界
 
 设近期关键能力集合为 `C_recent`，回归集覆盖的能力集合为 `C_suite`，可以定义
@@ -733,13 +771,15 @@ C_{\mathrm{suite}}
 | [The ML Test Score](https://doi.org/10.1109/BigData.2017.8258038) | 将生产 ML 的数据、模型、基础设施和监控问题转成 28 条可执行断言与 readiness rubric；论文称这些检查来自生产系统经验，并访谈了 36 个系统的维护者 | 审视数据血缘、重要切片、训练/服务偏差、回滚和质量监控等容易被“模型答对率”遮住的工程防线 | 2017 年面向传统生产 ML 系统，不规定开放式 LLM 回答的语义 oracle、Agent 轨迹或现代模型 judge 校准；适合作为系统检查框架，不是 LLM 质量 benchmark |
 | [HELM](https://arxiv.org/abs/2211.09110) | 原论文用 16 个核心场景和 7 类指标建立共同评测矩阵，并公开原始 prompts/completions，针对结果不可比和单指标遮蔽 trade-off 的问题 | 提供较宽的能力/风险基线，发现固定回归集没覆盖的能力类别；适合 benchmark 层的比较与探索 | 广泛基准回答“哪些公开场景有差异”，不回答某个私有 RAG/Agent 的哪条 trace 为什么失败；场景选择受覆盖和可行性限制，不能代替产品回归样例 |
 | [EvalPlus / HumanEval+](https://papers.neurips.cc/paper_files/paper/2023/hash/43e9d647ccd3e4b7b5baab53f0368686-Abstract-Conference.html) | 原始代码 benchmark 的手工测试可能太少；先由 LLM 构造结构有效的 seed，再按类型变异扩展输入，并用差分执行检查候选程序。论文把 HumanEval 每题平均测试从 9.6 个扩到 774.8 个；作者也报告原始 canonical solutions 中超过 10% 有缺陷 | 对代码、结构化输出或可执行任务加强 oracle；应同时审查题目契约和 reference implementation | oracle 自身可能错，输入生成也可能漏掉未覆盖路径；更多测试提高了被发现缺陷的机会，却不能证明程序对所有合法输入都正确。论文数字绑定 HumanEval 及作者评估设置 |
-| [OpenAI Trace Grading](https://developers.openai.com/api/docs/guides/trace-grading) | 只评最终答案看不到 Agent 在路由、工具调用、交接和中间状态哪一步出错；把端到端 trace 按结构化标准打分 | 在工具型 Agent 的错误分析中，用 trace 找出候选失败阶段，再将已确认行为转成稳定回归 case | 官方产品文档说明了工作流入口，不构成独立效能研究；trace 解释和模型 grader 仍需人工校准。工具/API 生命周期会变化，实施时需核对当前文档 |
+| [Harness-Bench v2](https://arxiv.org/html/2605.27922v2) 与 [Trial by Trace v1](https://arxiv.org/html/2610.32285v1) | Harness-Bench 在共享任务条件下比较完整模型—harness 配置，用最终产物检查和轨迹分析观察交付差异；Trial by Trace 把任务结果与 harness 约束分层评分，并要求用证据区分候选机制和已核验的失败传播链 | 评估工具型 Agent 时分别报告最终交付、harness 约束和轨迹线索；只有经干预或证据链核验的机制才能升级为根因结论 | 两者都是特定任务和实现上的预印本。Harness-Bench 当前 arXiv 摘要与 v2 正文的数量信息不一致，本文不采用其数量或排名；单一 benchmark 也不能给生产系统提供通用因果归因 |
+| [OpenAI Trace Grading](https://developers.openai.com/api/docs/guides/trace-grading) | 官方文档把 trace grading 定义为对 Agent 端到端 trace 的结构化评分或标签，并说明 trace evals 可用于比较变化、发现回归和确认改进 | 在工具型 Agent 的错误分析中，用 trace 找出候选失败阶段，再将已确认行为转成稳定回归 case | 这是产品工作流说明，不是独立效能研究，也不证明 grader 本身有效或根因已确认；使用时需独立校准，并按当前文档核对接口 |
 
 一个实际组合可以是：HELM 或目标 benchmark 发现“哪些能力切片变了”；CheckList
-把切片细化为可控行为关系；trace 回放定位应用链路阶段；ML Test Score 审查数据和
-服务防线；EvalPlus 一类方法只在可执行契约明确的任务上增强 oracle。最后，每个
-经过确认、重要且可稳定判定的失败才进入产品 regression suite。这个组合仍需要
-未见变体、线上观察和人工抽检来发现已知方法没有覆盖的错误。
+把切片细化为可控行为关系；trace 回放和 Trial by Trace 一类方法提供失败阶段与
+机制链线索；ML Test Score 审查数据和服务防线；EvalPlus 一类方法只在可执行契约
+明确的任务上增强 oracle。最后，每个经过确认、重要且可稳定判定的失败才进入产品
+regression suite。这个组合仍需要未见变体、线上观察和人工抽检来发现已知方法没有
+覆盖的错误。
 
 ## 8. 版本对比：看样本级变化
 
@@ -810,6 +850,8 @@ R_{\mathrm{fix}}
 
 下面的函数只负责样本级对齐和分类，不负责决定版本是否可以发布。把统计、风险
 和后续动作留在调用方，能避免一个函数把复杂决策压成一个布尔值。
+
+**代码状态：代码片段，静态审阅，未运行（2026-11-03）。**
 
 ~~~python
 from collections import Counter, defaultdict
@@ -1005,13 +1047,15 @@ root cause hypothesis
 线上反馈不是天然的事实标签。用户可能因为延迟、风格或 UI 点踩，也可能根本
 不知道答案是否正确；要结合任务状态、证据和人工抽检。
 
-## 11. 可运行的版本回归审计案例
+## 11. 版本回归审计案例
 
 下面的 toy 数据表示 10 个对齐后的 case。它故意包含两个修复、四个回归、两个
 高严重度隐私/安全回归，以及 regression suite 对 reasoning 和 tool 能力覆盖不足
 的情况。代码输出的是诊断信号和后续动作，不把所有信息压成一个总开关。
 
 ### 11.1 版本和错误数据
+
+**代码状态：静态审阅，未运行（2026-11-03）；本节三个 Python 代码块按 11.1→11.3 顺序组成一个示例。**
 
 ~~~python
 from collections import Counter, defaultdict
@@ -1064,6 +1108,8 @@ root_hypothesis_map = {
 
 ### 11.2 统计版本象限和错误簇
 
+**代码状态：同属 §11 示例，静态审阅，未运行（2026-11-03）。**
+
 ~~~python
 buckets = Counter()
 regressions = []
@@ -1109,6 +1155,8 @@ root_hypothesis_counts = Counter(
 ~~~
 
 ### 11.3 覆盖和后续动作
+
+**代码状态：同属 §11 示例，静态审阅，未运行（2026-11-03）。**
 
 ~~~python
 recent_capabilities = {
@@ -1190,6 +1238,8 @@ print("decision=", decision, sep="")
 这组数据的版本象限应为：稳定正确 1、修复 2、回归 4、仍未解决 3。新版本的
 四个回归中有安全、隐私和引用问题；回归集只覆盖近期六种能力中的四种，缺少
 reasoning 和 tool。即便修复数为 2，也不能用修复数量抵消高严重度回归。
+代码中的 `new_failures` 指“新版本当前未通过的样本”，因此包含四个回归和三个
+仍未解决的旧失败；只有 `regressions` 列表表示相对旧版本新引入的退化。
 
 按代码逐项手算得到的关键输出如下；这是对示例数据的静态推导，不是本轮执行
 Python 的结果：
@@ -1198,21 +1248,51 @@ Python 的结果：
 version_buckets={'fixed': 2, 'regressed': 4, 'stable_wrong': 3, 'stable_correct': 1}
 regressions=['json_schema', 'safety_refusal', 'citation', 'privacy']
 fixes=['rag_finance', 'tool_call']
+error_counts={'formatting': 1, 'safety': 1, 'reasoning': 1,
+              'citation_error': 1, 'retrieval_miss': 1,
+              'privacy': 1, 'edge_case': 1}
+priority={'privacy': 3.5, 'citation_error': 3.2, 'safety': 3.0,
+          'retrieval_miss': 2.8, 'formatting': 2.7,
+          'edge_case': 2.4, 'reasoning': 2.0}
 root_hypothesis_counts={'prompt_schema': 1, 'policy_boundary': 2,
                         'reasoning_data': 1, 'rag_grounding': 1,
                         'rag_retrieval': 1, 'code_tests': 1}
 suite_coverage={'coverage': 0.667, 'missing': ['reasoning', 'tool']}
+signals={'high_severity_regression': True, 'safety_regression': True,
+         'suite_coverage': 0.667, 'missing_capabilities': ['reasoning', 'tool'],
+         'fix_count': 2, 'regression_count': 4}
+actions=['review_high_severity_cases', 'restore_safety_and_privacy_behavior',
+         'add_reasoning_and_tool_regression_cases',
+         'retest_after_fix_before_broader_traffic']
 decision='hold_for_high_severity_review'
 ~~~
 
-`root_hypothesis_counts` 来自 `error` 标签到候选根因的静态映射，代码没有读取
-trace，也没有执行任何干预。因此这些数量只是待调查假设的计数，不能称为已验证
-根因数。示例中的 `0.80` 覆盖阈值和 hold 决策规则也是教学策略输入，不是通用的
-发布标准。
+读这份审计时可以按四个层次走。第一层是版本象限：四个布尔状态先回答新版本
+相对旧版修复了什么、退化了什么。稳定正确 1、修复 2、回归 4、仍未解决 3，
+恰好覆盖 10 个对齐样本；因此未加权的 `R_fix=2/10=0.20`、`R_reg=4/10=0.40`。
+这里没有置信区间，也没有用户或任务权重，数值只描述这 10 条示例记录。
 
-错误簇优先级把频次、严重度和可修复性放在一起，帮助安排工作顺序；它不代表
-隐私问题的风险可以被格式问题抵消。正确的后续动作是先复核高严重度 case，恢复
-安全和隐私行为，补齐回归覆盖，再在独立样本上确认修复没有造成新的退化。
+第二层是失败分类。`error_counts` 统计新版本所有未通过的 7 条记录，包括 4 条
+回归和 3 条旧版也失败的未解决样本。优先级按“当前失败频次 × 平均严重度 × 平均
+可修复性”排序：privacy 为 `1×5×0.7=3.5`，citation_error 为 `1×4×0.8=3.2`，
+safety 为 `1×5×0.6=3.0`。因为这里每类只出现一条，乘积只是演示排序方式；它没有
+按线上曝光率加权，也不能用格式问题的修复收益抵消隐私、安全事件。
+
+第三层是根因线索与覆盖。`root_hypothesis_counts` 由预先写好的映射表把错误标签
+转换为候选假设；计数 `policy_boundary=2` 只表示 safety 和 privacy 两条记录被映射
+到同一候选方向，不表示两条 trace 已证明由同一政策缺陷造成。回归集覆盖率的
+分子是 `{rag, schema, safety, privacy}` 四种目标能力，分母是近期目标集合六种能力，
+所以 `4/6≈0.667`，缺 reasoning 与 tool。这个集合覆盖率既不说明每类样本足够，
+也不说明任务分布代表性。
+
+第四层才是动作与门禁。三条高严重度回归触发复核，安全或隐私回归触发恢复行为，
+低于示例覆盖阈值 0.80 会要求补 reasoning/tool case；修复数不多于回归数则要求
+修复后再测，最后输出 hold。阈值和字符串动作都属于预先给定的教学策略，项目应
+按风险、抽样单位和审批流程制定自己的门槛。若样本来自同一用户、租户或同一任务
+模板，统计区间还要按正确的聚类单位计算；严重事件则无论平均比例如何，都应进入
+单独复核。执行修复后，还应在未参与调参的样本或预先留出的变体上复验，确认目标
+错误簇确实下降且没有引入新回归；只有候选假设经可区分的实验和复验获得支持，才能
+升级为已验证根因。
 
 ## 12. 生产闭环中的常见坑
 
@@ -1382,12 +1462,16 @@ RAG、Agent 或多模态产品的根因。特别是 LLM judge 生成的解释、
 5. [The ML Test Score](https://doi.org/10.1109/BigData.2017.8258038)：机器学习系统测试维度和工程检查思路的 IEEE 正式出版记录。
 6. [EvalPlus / HumanEval+](https://papers.neurips.cc/paper_files/paper/2023/hash/43e9d647ccd3e4b7b5baab53f0368686-Abstract-Conference.html)：代码生成 benchmark 的 seed 输入、类型变异、程序契约和差分 oracle。
 7. [OpenAI Trace Grading](https://developers.openai.com/api/docs/guides/trace-grading)：面向 Agent 工作流的 trace 级结构化评分产品文档，使用时核对平台版本并独立校准 grader。
-8. [pytest Documentation](https://docs.pytest.org/en/stable/how-to/usage.html)：软件回归测试运行与组织的基础工具文档。
-9. [NIST Engineering Statistics Handbook](https://www.itl.nist.gov/div898/handbook/)：抽样、统计分析和不确定性方法的参考资料。
-10. [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：风险识别、测量、管理和治理的官方框架。
+8. [Harness-Bench v2](https://arxiv.org/html/2605.27922v2)：在共享任务条件下比较模型—harness 配置，以最终产物 oracle 和执行 trace 分析交付差异；摘要页与版本化正文的数量信息不一致，本章不采用规模和排名数字。
+9. [Trial by Trace v1](https://arxiv.org/html/2610.32285v1)：Agent harness 可靠性和失败归因预印本；区分任务表现、harness 标准与需证据核验的机制传播链。
+10. [pytest Documentation](https://docs.pytest.org/en/stable/how-to/usage.html)：软件回归测试运行与组织的基础工具文档。
+11. [NIST Engineering Statistics Handbook](https://www.itl.nist.gov/div898/handbook/)：抽样、统计分析和不确定性方法的参考资料。
+12. [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：风险识别、测量、管理和治理的官方框架。
+13. [When AI Benchmarks Plateau: A Systematic Study of Benchmark Saturation](https://arxiv.org/abs/2602.16763)：对 60 个语言模型 benchmark 的观察性饱和分析；样本规模与结论边界不能外推成所有评测的生命周期规律。
 
 其中，CheckList 更接近行为测试，Google ML Test Score 补生产系统质量防线，HELM
-补跨模型场景与指标覆盖，EvalPlus 补有明确程序契约任务的测试 oracle，trace grading
+补跨模型场景与指标覆盖，EvalPlus 补有明确程序契约任务的测试 oracle，Harness-Bench
+与 Trial by Trace 展示任务交付、harness 约束和归因证据的不同层级，trace grading
 补 Agent 执行轨迹的观察入口。它们不能合并成同一个质量分数；pytest 只解决测试
 运行，不等于模型质量判断；NIST 框架提供风险治理语言，也不能替代具体业务错误
 oracle。资料用途、论文条件和工具版本需要在正文之外继续维护。

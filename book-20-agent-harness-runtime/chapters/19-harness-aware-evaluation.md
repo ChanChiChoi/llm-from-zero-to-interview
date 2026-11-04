@@ -401,7 +401,7 @@ Anthropic 对 Opus 5.5 的长任务描述强调更少的工具调用、步骤和
 
 Opus 5.5 的官方 API 文档把 harness 的状态账本再推进了一层：thinking block 与生成模型和 conversation 前缀绑定，tool-call 之间的进度默认可能以空的 thinking block 返回，按需 compaction 会产生签名摘要，fast mode 则在同一模型上切换更快推理配置。评测 trace 至少保存 `model_id`、`thinking_binding`、`prefix_hash`、`compaction_digest`、`tool_schema_version`、`speed`、`usage.speed` 和错误/拒答字段；否则无法重放一次“模型能力下降”到底是状态丢失、工具契约不兼容、上下文压缩还是限流。
 
-可运行的最小状态回放见 [`claude_opus55_protocol_audit.py`](../../research/model-update-2026-09/code/claude_opus55_protocol_audit.py)。它用签名摘要、prefix hash、工具调用/结果 lineage、compaction replacement 和幂等 ledger 检查“重放是否重复副作用”；同时把 fallback 的实际模型与原始模型分账。该 demo 不调用真实 API，不解密 opaque thinking，也不证明线上 harness 的 SLO。
+回放检查至少应把 model/prefix/account binding、工具调用与结果的 lineage、compaction replacement 和 action ledger 放进同一条合成 trace；可以核对字段是否一致、重放是否沿用 action ID，以及实际服务模型是否与原始模型分账。按本章 §19.7 的 trace contract 和第二十四章 §24.3 的状态绑定逐步检查即可。opaque thinking 不需要解密；字段 hash 也不能证明服务端签名或线上 harness 正确，最终安全性仍要看外部状态和 executor 事件。第八册 §16.15 的示例聚焦 fallback 状态和权限，不覆盖这些 Claude thinking block 绑定。
 
 同样不能把模型级 refusal 当作 harness 级完成。官方契约允许 HTTP 200 搭配 `stop_reason: "refusal"` 和 policy category，fallback 触发后要把实际执行模型和最终 artifact 分开计分。来源：[What's new](https://platform.claude.com/docs/en/models/opus-5-5/whats-new-opus-5-5.md)、[Fast mode](https://platform.claude.com/docs/en/build-with-claude/fast-mode)。
 

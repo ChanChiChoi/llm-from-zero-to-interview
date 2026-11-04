@@ -14,6 +14,8 @@ Watermarking 解决的是另一类问题。它试图在生成内容中留下可�
 
 每条线最后都要回到同一个工程问题：证据覆盖了什么，不能证明什么，发现风险后下一步怎么做。
 
+[第九章《Model Editing 与 Unlearning》](09-model-editing与unlearning.md)讨论怎样修改局部参数行为，以及怎样评估减少指定训练数据影响；本章进一步检查具体片段复现、成员推断、个人信息泄露、应用数据路径和内容来源信号。遗忘是隐私治理的一种技术路线，不能替代检索、日志、权限和内容溯源的独立审计。
+
 ## 1. 隐私问题为什么不能只看模型参数
 
 ### 1.1 传统软件的隐私对象
@@ -161,6 +163,8 @@ Membership inference 关注另一个问题：给定一个数据记录，能否�
 
 三者可能同时发生，也可能只有其中一种发生。一个模型可能不复现原文，却仍然表现出成员信号；也可能复现公共文本，但无法证明它来自特定训练集。
 
+隐私暴露面还可能是已发布的合成文本，而不是模型查询接口。ICML 2025 的 The Canary’s Echo 在 Mistral-7B 微调生成 SST-2、AG News 和 SNLI 合成文本的设置中，构造只访问合成样本的成员推断，并报告数据侧攻击高于随机猜测。作者还发现，为模型黑盒审计制作的分布外 canary 不一定适用于合成数据发布；在该实验中，给 canary 加入符合任务分布的前缀和高困惑度后缀，才更容易在生成语料中留下可检测信号。这说明“发布的是合成文本”不自动等于隐私安全；结论绑定其模型、任务、LoRA 配置和攻击方法，不能外推为所有合成语料都能反推出训练记录。[The Canary’s Echo: Auditing Privacy Risks of LLM-Generated Synthetic Text](https://proceedings.mlr.press/v267/meeus25a.html)
+
 ### 3.3 PII leakage
 
 PII leakage 关注个人可识别信息是否通过模型或应用暴露。它包括：
@@ -172,6 +176,8 @@ PII leakage 关注个人可识别信息是否通过模型或应用暴露。它�
 5. 在日志、调试转储和人工标注平台中保存原始内容。
 
 PII 不是一个只靠正则表达式就能定义的集合。姓名可能是公开信息，也可能在特定机构和上下文中成为敏感信息；地址、病历和职位组合后的风险也可能高于单个字段。
+
+还要区分模型从参数中复现信息，和模型根据提示里的线索补全信息。ACL 2026 的 Cue-Resistant Memorization（CRM）研究用训练前缀与目标之间的词面重叠控制提示线索；在其基于 mC4 训练的 MGPT2/MGPT3 模型、32 种语言和既定黑盒探测中，低线索条件下的重建命中率接近零，八种成员推断方法的 AUROC 大多处于 0.50—0.60。这个结果限制在论文的模型、训练阶段、提示和 PII 类型，不证明真实系统没有隐私风险；它说明一次高线索续写不能单独当成参数记忆证据。审计应记录提示与目标的重叠、使用低线索提示，并以匹配的非成员样本校准误报。[Do LLMs Really Memorize Personally Identifiable Information? Revisiting PII Leakage with a Cue-Controlled Memorization Framework](https://aclanthology.org/2026.acl-long.1560/)
 
 ### 3.4 Inference 与 re-identification
 
@@ -210,6 +216,10 @@ p_\theta(y_t\mid x,y_{<t})
 ```
 这里 $T$ 是目标序列 token 数。长度归一化只是为了比较不同长度样本，不能直接把高 likelihood 当成“必然来自训练集”。
 
+把候选序列称为“可提取的训练记忆”，还需要和匹配的非训练样本比较。2026 年 9 月更新的 arXiv 预印本提出用 conformal test 或单文档 census 从匹配非成员的生成分数校准误报阈值；作者报告，在 Wikipedia 上测试 OLMo 2 32B 时，模型生成非训练集 10-token 后缀的频率约为训练集后缀的 24%。短片段容易被语言规律自然续写，因此只看成员文本能否出现会把可预测性误记成记忆。该框架仍是预印本结果，校准质量取决于成员/非成员分布是否匹配；报告时要固定控制集、提示、解码、近重复判定和查询预算。[Extractable Memorization From First Principles](https://arxiv.org/abs/2607.12649)
+
+用一组小样本可以看出匹配对照改变了什么。假设固定提示长度、解码方式和查询预算后，20 个训练成员候选中有 6 个达到预先定义的复现标准，20 个匹配非成员中有 2 个复现；两侧命中率分别为 $6/20=0.30$ 和 $2/20=0.10$，差值 $0.20$ 只是这组教学数据上的成员超额信号，不是泄露概率或显著性结论。若高线索提示下变成成员 $16/20$、非成员 $15/20$，原始命中都很高，但两组只差 $0.05$，提示给出的模式足以解释大部分复现。正式审计还需先在独立控制集上校准阈值、报告不确定区间，并说明近重复匹配与查询预算；小样本中的单条命中不能证明来自目标训练记录。
+
 ### 4.2 研究中的 canary
 
 Secret Sharer 工作研究了稀有或唯一序列的非预期记忆，并把可控的秘密序列作为评估对象。工程上也可以在授权的合成数据中植入唯一 canary，用于检测训练管线是否会过度记忆。
@@ -238,6 +248,8 @@ canary 的设计本身会影响检测能力。ICLR 2025 的隐私审计研究指
 
 去重降低记忆风险，但不能简单地“重复越少越好”。过度去重可能损失不同语境中的有价值样本，也可能把本来不同的版本误合并。去重策略需要保留来源、相似度阈值和误合并抽样。
 
+记忆还可能由近似重复共同构成。Nature Communications 2026 将这种现象称为 mosaic memory：在四个模型和人工 canary 的控制实验中，替换 token、插入噪声或重排 n-gram 的 fuzzy duplicate 仍能影响 canary 的成员推断；其中替换约 10% token 的序列，在作者的 exact-duplicate-equivalent 指标中保留了约 0.60—0.65 的影响。研究还在已做文档级去重的 SlimPajama 语料中找到近似重复。该系数来自指定模型和合成 canary，不是现实 PII 的泄露率；它提醒审计不能把精确去重当作记忆风险已消失的证明。[The Mosaic Memory of Large Language Models](https://www.nature.com/articles/s41467-026-68603-0)
+
 ### 4.4 微调的过拟合路径
 
 小规模 SFT 数据尤其容易形成强记忆。若一条内部工单被重复训练多轮，模型可能学到具体句子，而不是抽象的客服行为。
@@ -249,6 +261,8 @@ canary 的设计本身会影响检测能力。ICLR 2025 的隐私审计研究指
 3. 监控训练集与保留集的 loss 差异。
 4. 训练后使用合成探针和授权数据做复现评估。
 5. 对高敏样本采用不进入参数的 RAG 或专门的隐私隔离服务。
+
+敏感信息即使只出现在输入、没有进入训练目标，也可能在下游任务微调后变得可复现。EACL 2026 的研究在合成多语言数据和德国临床文本上测试输入侧 PII；在 German Discharge Summary 数据集的一个 Llama 3.2 1B 设置中，作者用增强 true-prefix attack 的 cross-memorization 结果比较 PII 出现频次与提取次数，报告 $R^2=0.237$。这表示该设置下的频次只能解释有限的提取差异；语言、上下文和任务类型也会影响结果。结论绑定论文的模型、数据、seed 和攻击配置，不意味着频次不重要；它说明只按重复次数排序风险会漏掉输入中与目标无关的敏感字段，测试还应分层检查字段类型、语言、提示前缀和任务。[Unintended Memorization of Sensitive Information in Fine-Tuned Language Models](https://aclanthology.org/2026.eacl-long.304/)
 
 ## 5. PII scrub 为什么必要但不充分
 
@@ -510,7 +524,7 @@ Kirchenbauer 等人的工作提出了 green-token 选择和统计检验框架，
 
 ### 10.3 内容凭证与签名 provenance
 
-C2PA Content Credentials 采用签名的 manifest 和声明链记录内容来源与编辑历史。它更接近“谁在什么条件下声明了什么”，而不是从文本统计特征推断来源。当前 2.5 规范还区分内容凭证、JSON 表示、attestation、soft binding 与安全注意事项；实现时应固定采用的规范版本和验证器，不能把“符合 C2PA”当作签名链可信或声明真实的替代证明。[C2PA Specifications 2.5](https://spec.c2pa.org/specifications/specifications/2.5/index.html)
+C2PA Content Credentials 采用签名的 manifest 和声明链记录内容来源与编辑历史。它更接近“谁在什么条件下声明了什么”，而不是从文本统计特征推断来源。2026 年 10 月发布的 2.5 规范还区分内容凭证、JSON 表示、attestation、soft binding 与安全注意事项，并扩展文件格式和验证要求；实现时应固定采用的规范版本和验证器，不能把“符合 C2PA”当作签名链可信或声明真实的替代证明。[C2PA Technical Specification 2.5](https://spec.c2pa.org/specifications/specifications/2.5/specs/C2PA_Specification.html)
 
 两者差异如下：
 
@@ -616,7 +630,7 @@ z-score 的分母随 $T$ 的平方根增长，足够长的文本通常更容易�
 
 这些测试是防御评估，不应变成公开的水印规避教程。
 
-2026 年 7 月提交的 arXiv 预印本对 KGW、Unigram 和 MarkLLM 中的 SynthID-Text 配置做了取证准备度评估。作者报告了 846 次有效改写运行：在其测试流程中，所有最初能检测到水印的 KGW 和 Unigram 样本、以及 98.3% 的 SynthID 样本，在意义保持的改写后不再能检出；在改写前，三类配置的漏报率也分别为 70%、83% 和 80%。作者还报告某一 SynthID 配置对改写的人类对照有 5.4% 误报。该工作是预印本，方法、阈值、提示和判定规则均是特定配置；这些数字提示应报告改写条件和不确定区间，不足以证明所有商用水印在真实争议中都无效。[AI Watermark Evidence Fails Forensic Readiness: An Empirical Evaluation](https://arxiv.org/abs/2607.16010)
+2026 年 7 月提交的 arXiv 预印本对 KGW、Unigram 和 MarkLLM 中的 SynthID-Text 配置做了取证准备度评估。作者报告了跨每种方法 15 个提示共 846 次有效改写运行：在其测试流程中，所有最初能检测到水印的 KGW 和 Unigram 样本、以及 98.3% 的 SynthID 样本，在意义保持的改写后不再能检出；在改写前，三类配置的漏报率也分别为 70%、83% 和 80%。作者还报告某一 SynthID 配置对改写的人类对照有 5.4% 误报。该工作是预印本，方法、阈值、提示和判定规则均是特定配置；这些数字提示应报告改写条件和不确定区间，不足以证明所有商用水印在真实争议中都无效。[AI Watermark Evidence Fails Forensic Readiness: An Empirical Evaluation](https://arxiv.org/abs/2607.16010)
 
 ### 12.2 短文本和分布变化
 
@@ -737,6 +751,12 @@ D_{qual}
 ```
 $Q$ 可以是任务分数、人工质量或多个归一化指标，但量纲必须一致。水印评估至少要并列报告 $TPR_{wm}$、$FPR_{wm}$、改写鲁棒性和 $D_{qual}$。
 
+实际使用这些式子前，先把事件单位和统计分母写进评估卡。一次文档级事件、一次生成请求和一个 PII 字段不是同一个样本；把它们混在一张总表里，会使“命中 3 次”无法说明是 3 份文档、3 次重试还是同一字段的重复输出。权重 $w_i$ 也不能只在公式里出现：要记录制定者、取值范围、风险分级依据和冻结时间，同时保留未加权分子、分母，方便看出少量高权重样本是否支配结果。对同一组数据，PII precision/recall、输出泄露率、越权检索率和原始日志率分别使用不同正例或授权条件，不能把它们直接平均成一个隐私分数。
+
+例如，教学审计集有 10 条经人工确认的 PII 记录，检测器正确标出 8 条，另外误标 4 条非 PII 记录，则 recall 是 $8/10=0.80$，precision 是 $8/(8+4)=0.667$。另有 5 条无权 RAG 请求，其中 1 条返回敏感片段，越权检索率是 $1/5=0.20$；8 条敏感日志事件中有 2 条保留原文，原始日志率是 $2/8=0.25$。这三个分数的总体分母不同，前两个是检测器质量和访问控制结果，最后一个是存储控制结果；不能用 precision 较高抵销一次实际越权，也不能把没有无权请求的测试集写成 $0/0=0$。
+
+门禁应先逐项判定定义域，再判定阈值。空成员集、空无权请求集、没有被检出的水印阳性样本，都应标成未测或 N/A 并触发补测，而不是当成通过。若指标有置信区间，门槛需针对区间或预先声明的单侧界限执行；阈值应在揭示 holdout 结果前冻结。研究探索集可以用于改攻击器和找失效模式，最终门禁则使用独立保留集，避免同一批结果既挑阈值又证明阈值有效。
+
 ## 14. 案例一：企业 RAG 的跨租户泄露
 
 ### 14.1 事故
@@ -785,6 +805,8 @@ $Q$ 可以是任务分数、人工质量或多个归一化指标，但量纲必�
 
 实施时还要固定每条请求的租户身份来源、索引版本、ACL 版本、检索候选数、重排结果、上下文组装 hash、缓存键与策略版本。否则复测时即使输入相同，也可能因索引更新或身份解析差异而不可比。应在日志中保存最少必要的事件标识与判定原因，原文只放在单独受控的取证区；这样既能回放“哪一步把文档带进回答”，也不会为了调查而制造第二份长期敏感副本。修复顺序通常是先停止越权流量、清理可见缓存，再修正索引过滤和身份链，最后通过黑盒回答与存储审计共同复测。
 
+回归时还要验证权限状态变化后旧状态不会复用。可以让同一合成身份先有权读取文档，再撤销权限，并复用同一会话、缓存键和索引快照发起追问；预期是服务端在检索前重新判权，撤权后的文档不再进入上下文，已有缓存也按租户和 ACL 版本失效。若只从新会话测试，可能完全看不到旧缓存残留。事件日志至少要保留身份解析结果、撤权时间、缓存命中或失效原因、文档 ID 和策略版本，使失败能定位到权限、缓存或生成阶段。
+
 ## 15. 案例二：敏感数据进入微调管线
 
 ### 15.1 发现
@@ -821,7 +843,11 @@ $Q$ 可以是任务分数、人工质量或多个归一化指标，但量纲必�
 
 可以在实验前设定四个独立阈值，例如 exact 和改写 canary 复现率均不超过 5%、成员推断 advantage 不超过 0.10、retain set 正确率不低于 95%。在上述小样本里，exact 通过，改写和 MIA 未通过，retain utility 也未通过，因此版本继续保持冻结。样本数只有 10 或 100 时，比例波动很大，正式评估需要扩大样本、保留分层置信区间和独立 holdout；这里的门槛是示例，不是行业统一标准。
 
+遗忘一个目标也不保证其他敏感样本的风险保持不变。ACL Findings 2025 在 GPT-2 XL、Llama 3 8B 和 Gemma 2B 的受控训练/重训实验中观察到，后续 PII 训练可能让先前记录变得更可提取；移除部分已提取 PII 后重新微调，也可能让另一批 PII 越过原来的提取阈值。作者将前一种现象称为 assisted memorization，并报告其在特定连续训练设置中出现。这个结果不表示每次增加或删除数据都会造成旁路泄露，但发布门禁应同时复查目标 forget set、近似记录和早期训练数据，不能只测被请求删除的那条记录。[Privacy Ripple Effects from Adding or Removing Personal Information in Language Model Training](https://aclanthology.org/2025.findings-acl.959/)
+
 事故处理不能只在 checkpoint 上做文章。团队应先登记原始导出、清洗版本、训练 run、adapter、checkpoint、缓存、索引和日志之间的血缘关系，再依次决定停用、重训、遗忘、凭证轮换或用户通知。若原始工单还留在标注平台或异常日志中，重新训练一个模型不会移除这些副本；若下游又把旧数据注入 RAG，新 checkpoint 也无法阻止重新暴露。每个删除动作要有责任人、完成时间、证据引用和复核结果，并区分“已从模型行为中降低风险”与“所有存储副本已删除”这两个不同承诺。
+
+要把复测结果变成可审查的结论，还需保存旧版与新版的共同输入、数据快照、解码预算和标注规则，并用不参与修复调参的 holdout 重测。若旧版只在训练中见过的样本上变差，新版却在近重复或输入侧 PII 上改善不了，不能只报告总抽取率的下降。对任何“已删除”表述，都要分别给出目标记录的行为检查、相似记录的旁路检查、retain utility、日志与缓存副本清理证据；这些结果支持的承诺不同，不能由单个模型分数替代。
 
 ## 16. 案例三：内容溯源与统计水印
 
@@ -861,6 +887,10 @@ $Q$ 可以是任务分数、人工质量或多个归一化指标，但量纲必�
 来源凭证应单独记录另一组结果。假设 100 个平台文件里有 97 个通过签名链验证，3 个因为转存过程丢失 manifest 而无法验证。97/100 只能说明当前文件中有多少保留了可验证声明，不能说明其余 3 个一定不是平台生成，也不能证明 97 个的内容陈述真实。水印是统计信号，C2PA 是可验证的签名声明，两者的证据对象不同；若系统把它们合并成“AI 真实性分数”，就会丢失失败原因和责任边界。
 
 检测结果的界面应给出适用文本长度、模型或凭证版本、分数区间、校准日期和“不确定”状态。若误报会触发处罚，检测器应先产生复核任务而不是自动作出作者身份或学术诚信判定。人工复核需要看到凭证链、平台事件、文本编辑历史和争议方材料；水印分数只作为其中一项证据。还要记录处理何种字符规范化、文本切片和语言切换，确保同一文本重新检测时可以复现结论。
+
+水印未检出也要按失效类型解释：输入太短时证据量不足；文本经过翻译或改写时统计信号可能被破坏；生成器版本或检测器版本不匹配时阈值校准可能失效；签名 manifest 缺失则只说明当前文件没有可验证凭证，不说明它一定不是平台内容。反过来，水印命中可以与某一生成过程一致，却不证明具体作者、唯一生成器或内容真实。产品策略应为每种结果预置“可验证”“辅助信号”“证据不足”和“需人工复核”等状态，避免把二元标签用在证据并不支持的情形。
+
+每次验证还应保留文件 hash、manifest 与签名状态、信任列表快照、验证器版本和失败码；这样复查者能区分文件内容变化、信任状态变化与凭证丢失，避免把所有验证失败都解释成“未使用 AI”。
 
 ## 17. 隐私工程的生命周期
 
@@ -919,11 +949,13 @@ $Q$ 可以是任务分数、人工质量或多个归一化指标，但量纲必�
 
 变更也应按影响范围触发复审，而不是每次都重复整套全量测量。单纯改 UI 文案可能只需核查输出声明；替换 embedding 模型或索引 schema 需要重跑 ACL 与检索路径；替换微调数据或训练 recipe 需要重新核算隐私预算和记忆评估；变更日志字段或观测代理则需检查是否新增长期保存的敏感内容。每次复审写出哪些门禁重跑、哪些沿用、为何可以沿用，以及哪类变更会使结论失效。这样的变更矩阵能减少无效重复，也避免把旧版本的安全证据错误搬到新系统上。
 
+例如，某客服模型只替换 SFT adapter，但继续使用同一数据快照和服务端 ACL。复审时应重跑训练记忆、PII、retain utility 与版本绑定的输出测试；ACL 单元测试可沿用的前提是服务代码、策略版本和索引 schema 均未改变，并且有可复核的旧运行记录。若部署同时换了缓存键或 RAG 索引，就必须把跨租户、撤权和多轮缓存测试加入重跑范围。这样记录“变更—受影响证据—复测结果”的链条，才能说明门禁覆盖的是新版本，而不是只复用了旧模型的通过状态。
+
 ## 18. 一个最小的隐私与水印审计 demo
 
 下面的代码使用合成数据，不包含真实 PII、真实密钥或抽取流程。它分别计算 PII/secret 检测、canary 复现、输出泄露、RAG 越权、原始日志、membership inference 和水印检测信号；最后保存每项证据的状态与下一动作。
 
-代码状态：已验证（2026-10-28；Python 3.12.9；仅使用标准库）。示例输入均为合成数据，可直接运行。
+代码状态：静态审阅，未运行（2026-11-03）。本轮未执行代码；示例输入为合成数据，运行环境和实际输出仍待验证。门槛比较使用未舍入的信号值，三位小数只用于展示；审计输出同时保留展示值和门槛实际使用的原值，避免舍入改变临界判断。
 
 ```python
 import math
@@ -940,7 +972,7 @@ def weighted_rate(rows, flag_key, selector=lambda row: True):
         row["weight"] * (1 if row[flag_key] else 0)
         for row in selected
     )
-    return round(score / total_weight, 3)
+    return score / total_weight
 
 
 def precision(rows, truth_key, prediction_key):
@@ -951,7 +983,7 @@ def precision(rows, truth_key, prediction_key):
         row[truth_key] and row[prediction_key]
         for row in rows
     )
-    return round(true_positive / len(predicted), 3)
+    return true_positive / len(predicted)
 
 
 def recall(rows, truth_key, prediction_key):
@@ -962,7 +994,14 @@ def recall(rows, truth_key, prediction_key):
         row[truth_key] and row[prediction_key]
         for row in rows
     )
-    return round(true_positive / len(actual), 3)
+    return true_positive / len(actual)
+
+
+def display_metrics(metrics):
+    return {
+        name: round(value, 3) if isinstance(value, float) else value
+        for name, value in metrics.items()
+    }
 
 
 def compare(signal, rule):
@@ -982,7 +1021,7 @@ def compare(signal, rule):
 def mean_or_none(values):
     if not values or any(value is None for value in values):
         return None
-    return round(sum(values) / len(values), 3)
+    return sum(values) / len(values)
 
 
 def membership_advantage(member_scores, nonmember_scores, threshold):
@@ -998,7 +1037,7 @@ def membership_advantage(member_scores, nonmember_scores, threshold):
     ])
     if tpr is None or fpr is None:
         return None
-    return round(tpr - fpr, 3)
+    return tpr - fpr
 
 
 def watermark_z_score(tokens, green, gamma):
@@ -1020,7 +1059,7 @@ def watermark_z_score(tokens, green, gamma):
         return None
     expected = gamma * tokens
     variance = tokens * gamma * (1 - gamma)
-    return round((green - expected) / math.sqrt(variance), 3)
+    return (green - expected) / math.sqrt(variance)
 
 
 privacy_cases = [
@@ -1343,7 +1382,8 @@ decision = {
     "privacy": {
         "scope": "synthetic_audit_and_authorized_system_cases",
         "status": "hold_sensitive_scope_for_permission_and_logging_repair",
-        "signals": privacy_signals,
+        "signals": display_metrics(privacy_signals),
+        "gate_values": privacy_signals,
         "thresholds": privacy_thresholds,
         "evidence_status": privacy_evidence,
         "undefined_metrics": privacy_undefined_metrics,
@@ -1352,7 +1392,8 @@ decision = {
     "watermark": {
         "scope": "toy_token_statistics",
         "status": "hold_for_false_positive_and_short_text_review",
-        "signals": watermark_signals,
+        "signals": display_metrics(watermark_signals),
+        "gate_values": watermark_signals,
         "thresholds": watermark_thresholds,
         "evidence_status": watermark_evidence,
         "undefined_metrics": watermark_undefined_metrics,
@@ -1360,10 +1401,10 @@ decision = {
     },
 }
 
-print("privacy_signals=", privacy_signals)
+print("privacy_signals=", display_metrics(privacy_signals))
 print("privacy_evidence=", privacy_evidence)
 print("privacy_undefined_metrics=", privacy_undefined_metrics)
-print("watermark_signals=", watermark_signals)
+print("watermark_signals=", display_metrics(watermark_signals))
 print("watermark_evidence=", watermark_evidence)
 print("watermark_undefined_metrics=", watermark_undefined_metrics)
 print("boundary_checks=", boundary_checks)
@@ -1462,6 +1503,12 @@ RAG 可能越权检索、把敏感文档写入日志，或在多轮上下文中�
 4. [Deep Learning with Differential Privacy](https://arxiv.org/abs/1607.00133)：支持 DP-SGD 的逐样本梯度裁剪、噪声机制和隐私/质量/工程成本权衡。
 5. [Privacy Auditing of Large Language Models](https://proceedings.iclr.cc/paper_files/paper/2025/hash/e76814a0012a46ade4f997591e86f972-Abstract-Conference.html)：支持更有效 canary 在特定 threat model 下提升经验隐私审计检测能力；Qwen2.5-0.5B 的 TPR/FPR 结果只绑定论文配置。
 6. [Information-Theoretic Membership Inference for Granular Quantification of Memorization](https://proceedings.iclr.cc/paper_files/paper/2026/hash/ddf43af256e11499149cf06040c62caa-Abstract-Conference.html)：提出 InfoRMIA 与 token 级记忆定位，论文的 benchmark 结果不能替代目标模型验证。
+7. [Do LLMs Really Memorize Personally Identifiable Information?](https://aclanthology.org/2026.acl-long.1560/)：提出提示线索控制的 CRM 评估；结果绑定在 mC4 训练的 MGPT 模型、PII 类型和黑盒探测，不能解释为所有 LLM 均无隐私记忆。
+8. [Extractable Memorization From First Principles](https://arxiv.org/abs/2607.12649)：2026 年 9 月更新的预印本提出匹配非成员校准与查询预算条件；结论依赖控制集匹配，不能把短字符串命中直接等同于训练记忆。
+9. [The Mosaic Memory of Large Language Models](https://www.nature.com/articles/s41467-026-68603-0)：以人工 canary 和四个模型测量 fuzzy duplicate 对记忆的贡献，并在 SlimPajama 检查近重复；exact-duplicate-equivalent 系数不是现实语料泄露率。
+10. [Unintended Memorization of Sensitive Information in Fine-Tuned Language Models](https://aclanthology.org/2026.eacl-long.304/)：研究只出现在微调输入、未出现在目标中的敏感 PII；结果绑定作者的数据、模型和 true-prefix 攻击配置。
+11. [Privacy Ripple Effects from Adding or Removing Personal Information in Language Model Training](https://aclanthology.org/2025.findings-acl.959/)：在指定模型和连续训练/删除设置中观察 assisted memorization 及删除后其他 PII 变得可提取；不外推为所有数据更新的必然结果。
+12. [The Canary’s Echo: Auditing Privacy Risks of LLM-Generated Synthetic Text](https://proceedings.mlr.press/v267/meeus25a.html)：研究只观察生成合成文本的成员推断攻击，并比较可用于模型审计与合成语料审计的 canary；结果绑定 Mistral-7B、LoRA 和三个分类数据集。
 
 这些论文的实验模型、数据和接口条件不能直接替换为今天任意商业 LLM 的生产结论。
 
@@ -1473,7 +1520,7 @@ RAG 可能越权检索、把敏感文档写入日志，或在多轮上下文中�
 4. [Google DeepMind SynthID](https://deepmind.google/technologies/synthid/)：支持厂商公开的生成内容水印和识别产品信号；产品页不等同于独立评测。
 5. [How Claude's text watermark works](https://www.anthropic.com/news/claude-text-watermark)：支持 Anthropic 对 Claude 水印方法和产品限制的公开说明；属于厂商自述，不能替代独立检测器评估。
 6. [AI Watermark Evidence Fails Forensic Readiness: An Empirical Evaluation](https://arxiv.org/abs/2607.16010)：2026 年 7 月 arXiv 预印本，对三种特定配置测试意义保持改写、漏报和误报；仅支持其方法与样本范围内的结果。
-7. [C2PA Specifications 2.5](https://spec.c2pa.org/specifications/specifications/2.5/index.html)：支持 Content Credentials、manifest 和签名来源链的当前规范入口。
+7. [C2PA Technical Specification 2.5](https://spec.c2pa.org/specifications/specifications/2.5/specs/C2PA_Specification.html)：支持 Content Credentials、manifest、签名来源链和 2026 年 10 月版本变化的官方规范。
 
 统计水印和 C2PA 凭证的证据对象不同。前者是内容统计特征，后者是签名声明和编辑链；不能用其中一个的结果替代另一个。
 
@@ -1513,4 +1560,4 @@ PII scrub 降低数据源风险，DP-SGD 以隐私预算限制单样本影响，
 
 统计水印在生成 token 中加入可检测信号，C2PA 通过签名 manifest 记录来源和编辑声明。水印、内容凭证和平台日志可以组合，但不能把来源信号写成真实性证明，更不能把它们当成训练数据隐私保护。
 
-高质量隐私工程的结果不是一个“安全”总标签，而是一组带范围的 signals、thresholds、evidence_status、actions 和 decision：哪些数据被测过，哪条路径仍有泄露，哪个阈值未满足，下一步如何修复，以及哪些结论仍然不能宣称。
+高质量隐私工程的结果不是一个“安全”总标签，而是一组带范围的 signals、thresholds、evidence_status、actions 和 decision：哪些数据被测过，哪条路径仍有泄露，哪个阈值未满足，下一步如何修复，以及哪些结论仍然不能宣称。下一章[《Policy、Governance 与 Model Card》](11-policy-governance与model-card.md)会把本章得到的隐私、记忆和内容来源证据纳入治理记录与发布说明；这些技术信号本身不能替代组织级风险判断。

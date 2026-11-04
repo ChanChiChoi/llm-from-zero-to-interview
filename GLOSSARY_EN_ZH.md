@@ -580,6 +580,10 @@ OpenTelemetry Span Event：附加在 trace span 上、记录一次带时间的�
 
 OpenTelemetry LogRecord Event：由 OpenTelemetry 日志数据模型表示的事件记录，可通过 EventName 标明事件类型。
 
+GenAI Evaluation Result Event：OpenTelemetry GenAI 语义约定中的 `gen_ai.evaluation.result` 事件草案，用于关联评价名称、分数、解释和被评响应；当前约定状态为 Development，事件字段不提供 ground truth 或评分器有效性。
+
+Evaluation Attempt State Vector：评估 attempt 的状态向量；将 `input_validation`、`execution`、`scoring` 和 `maturity` 分开记录，使无效输入、模型调用失败、评分器故障和观察窗口未结束可以独立表达，避免压成单一 `completed` 状态。
+
 SPMD Types：TorchTitan 中用于局部计算区域的 SPMD 类型注解与检查；描述 rank 间数据是否相同/变化及反向归约语义。它可与 FSDP2 的 DTensor 持久化分片表示配合；具体支持以目标 PyTorch/TorchTitan 版本为准。
 
 Tensor Parallelism：张量并行
@@ -670,7 +674,7 @@ Epistemic Uncertainty：认知不确定性 / 模型知识不确定性
 
 Confidence：置信度
 
-Expected Calibration Error / ECE：期望校准误差
+Expected Calibration Error / ECE：期望校准误差；按置信度分桶后，以样本权重汇总各桶平均置信度与实际准确率的绝对差。结果依赖分桶方式，不表示严重度或单个样本风险。
 
 Brier Score：Brier 分数 / 概率预测均方误差
 
@@ -2536,13 +2540,15 @@ MEMIT / Mass-Editing Memory in a Transformer：Transformer 记忆批量编辑
 
 MEND / Model Editor Networks with Gradient Decomposition：基于梯度分解的模型编辑网络
 
-Machine Unlearning：机器遗忘 / 机器反学习
+Machine Unlearning：机器遗忘 / 机器反学习；严格用法指针对明确训练数据集的影响移除，并与未见该数据的重训参考模型比较；文献有更宽泛用法，需说明实际目标
 
-LLM Unlearning：大模型遗忘
+LLM Unlearning：大模型遗忘；需注明是训练数据删除、知识移除、行为抑制还是能力降低，不能只凭拒答称为数据遗忘
 
 Contextual Utility after Unlearning：遗忘后的上下文效用；目标内容由用户在当前上下文中重新提供时，模型使用该材料完成授权任务的能力
 
 Forget Set：遗忘集 / 待删除目标集
+
+Forget Set Curation：遗忘集构造；把请求映射为具体文档、片段和近重复，并检查非目标邻域损伤
 
 Retain Set：保留集
 
@@ -2554,6 +2560,8 @@ Editing Overfit：编辑过拟合；编辑模型对直接目标答案过度增�
 
 Unlearning Robustness：遗忘鲁棒性
 
+Relearning Recovery Test：遗忘后恢复性测试；在固定数据来源与更新预算下检查后续微调能否恢复目标行为，结果不等同于外部泄露
+
 Membership Inference Risk：成员推断风险
 
 Training Data Extraction：训练数据抽取 / 训练数据复现风险
@@ -2561,6 +2569,16 @@ Training Data Extraction：训练数据抽取 / 训练数据复现风险
 Membership Inference：成员推断
 
 InfoRMIA / Information-Theoretic Membership Inference：信息论成员推断方法；将成员推断表述为信息论问题，并可用于 token 级记忆信号定位
+
+Cue-Resistant Memorization (CRM)：提示线索抗性记忆评估；按提示与目标的词面重叠分层测量重建，低线索结果用于减少把模式补全误判成训练记忆的风险
+
+Matched Non-Member Control：匹配非成员对照；从与训练成员相匹配的非训练样本估计自然可预测性基线，校准效果取决于成员与对照分布的匹配质量
+
+Mosaic Memory：马赛克式记忆；多个近似重复片段可共同影响模型对参考序列的记忆信号；论文的 exact-duplicate-equivalent 系数不等于现实泄露率
+
+Assisted Memorization：辅助记忆；训练中后续出现的相似信息可能使先前记录在后续检查点变得可提取；目前结论受论文模型和训练设置限制
+
+Synthetic-Text Membership Inference：合成文本成员推断；仅利用已发布的模型生成文本判断候选样本是否参与训练，攻击能力受生成流程、数据分布和 canary 设计影响
 
 PII Leakage：个人可识别信息泄露
 
@@ -2686,9 +2704,13 @@ Objective Specification：目标规范
 
 Specification Gaming：目标规范漏洞利用 / 规则钻空子
 
-Goal Misgeneralization：目标误泛化
+Goal Misgeneralization：目标误泛化；分布外仍保留相关能力、行为却符合错误目标的泛化失败。这里的“目标”是行为层面的分析概念，不单独证明模型内部存在稳定目标表征。
 
-Deceptive Alignment：欺骗性对齐 / 伪装式对齐
+Deceptive Alignment：欺骗性对齐 / 伪装式对齐；关于模型在训练或评估中策略性表现符合目标、条件变化后追求其他目标的较强风险假设；单次条件行为变化不能证明该假设。
+
+Alignment Faking：对齐伪装；实验中观察到模型按训练或监控线索选择性遵从的行为模式；需绑定具体实验条件，不能单独证明模型有持久隐藏目标。
+
+Model Organism of Misalignment：错配模型体；研究者构造来表现某类错配行为的模型，用于测试机制或缓解方案；不能据此估计自然出现概率。
 
 Goodhart Gap：古德哈特缺口 / 代理目标缺口
 
@@ -2696,15 +2718,27 @@ Alignment Gate：对齐上线门禁
 
 Scalable Oversight：可扩展监督
 
+Complementary Label：互补标签；指出一个多选项中的错误类别，但不提供正确答案的弱监督信号；其估计用途依赖明确的类别抽样协议。
+
+Partitioned Human Supervision：分区式人类监督；将多选任务按类别随机路由给不同领域专家，由专家判断其负责类别是否适用，再用互补标签估计总体准确率；均匀错误类别抽样和同分布等条件不满足时不能直接使用该估计器。
+
+P(True)：答案正确概率自评；模型对一个具体候选答案判断其正确的概率信号，需按任务和格式校准，不是事实真值。
+
+P(IK)：我知道概率；模型在未指定具体候选答案时预测自己能否答对的概率；论文中的新任务结果显示其校准仍可能失准。
+
 Human Feedback：人类反馈
 
 AI Feedback：AI 反馈
 
+Reinforcement Learning from AI Feedback / RLAIF：基于 AI 反馈的强化学习；由 AI judge 生成偏好或奖励信号再用于优化，仍需人工原则、独立校准和高风险审查。
+
 Debate：辩论式监督
 
-Iterated Amplification：迭代放大 / 递归放大监督
+Iterated Amplification：迭代放大 / 递归放大监督；人类协调当前模型的多个副本处理较易子问题，形成更强监督者，再训练模型模仿该结果。
 
-Recursive Reward Modeling：递归奖励建模
+Recursive Reward Modeling：递归奖励建模；较窄任务上训练的评估器辅助人类评价更复杂代理的结果，再逐层扩展奖励监督。
+
+Reward-Result Gap：奖励—结果差距；奖励模型所表达的目标与策略实际表现或行为所暗示的目标出现偏离，可能来自奖励设计、优化、探索或分布变化等因素。
 
 Oversight Gate：监督质量门禁
 
@@ -2786,6 +2820,8 @@ Standard Error / SE：标准误
 
 Confidence Interval / CI：置信区间
 
+Prediction Interval：预测区间；描述未来一次观测或未来一组重复运行统计量的可能范围，估计对象不同于针对固定总体参数的置信区间。
+
 p-value：p 值
 
 Null Hypothesis：零假设
@@ -2827,6 +2863,8 @@ Bonferroni Correction：Bonferroni 校正
 Benjamini-Hochberg Procedure：Benjamini-Hochberg 程序
 
 Estimand：目标估计量；明确要估计的总体/子群、处理、结果、分析单位和时间窗口。
+
+Noisy Hypothesis Testing / Noisy HT：噪声假设检验；在特定二元失败率认证框架中，用人工校准标签估计 judge 的 TPR/FPR，并把校准不确定性纳入检验阈值，以控制规定假设下的第一类错误；不是任意 judge 的通用校正。
 
 Average Treatment Effect / ATE：平均处理效应；目标总体中 treatment 与 control 潜在结果差的期望。
 
@@ -2883,6 +2921,12 @@ Red Teaming：红队测试
 Dangerous Capability Evaluation：危险能力评估
 
 Capability Elicitation：能力激发
+
+Evaluation Awareness：评测意识；模型识别当前交互处于评测、审计或测试情境，并可能据此改变行为；评测中的行为不一定能直接外推到常规部署。
+
+Simulation Awareness：模拟环境意识；模型识别工具、目标或环境是模拟构造的能力，属于评测意识的一个具体情形；识别结果可能改变模型行为，也会限制全模拟评估对真实部署的外部有效性。
+
+Evaluation Containment：评测环境遏制；通过沙箱、主机网络出口、最小权限、前置配置验证、运行时监控和停机路径限制评测动作的外部影响；某一层成立不等于整体遏制成立。
 
 Red Team Regression Suite：红队回归测试集
 
@@ -2950,11 +2994,13 @@ OpenAI Frontier Governance Framework：OpenAI 前沿治理框架；描述该机�
 
 Tracked Capability Level / TCL：跟踪能力等级；Google DeepMind Frontier Safety Framework 用于跟踪特定前沿能力风险的分类与评估概念，需按框架版本和定义解读。
 
-GPAI Code of Practice：通用人工智能模型行为准则；欧盟 AI Act 下可供相关提供者自愿采用的合规工具，含模型文档表格；它与法规本身及其强制义务具有不同法律地位。
+GPAI Code of Practice：通用人工智能模型行为准则；欧盟 AI Act 下可供相关提供者自愿采用的合规工具，透明度章节含模型文档表格，Safety and Security 章节面向系统性风险模型；它与法规本身及其强制义务具有不同法律地位。
 
 Model Documentation Form：模型文档表格；GPAI Code of Practice 透明度章节提供的模型资料整理格式，不代表填报内容已被独立验证。
 
-EU AI Act Article 50 Transparency Obligations：欧盟 AI Act 第 50 条透明义务；对特定 AI 系统及生成内容标记规定透明要求，须结合角色、系统类型和适用时间判断。
+EU AI Act Article 50 Transparency Obligations：欧盟 AI Act 第 50 条透明义务；自 2026-08-02 起适用，分别涉及提供者的人机交互告知/机器可读内容标记，以及部署者的生物特征告知、深度伪造和特定公共利益文本披露；须按角色、系统类型和法定例外判断。旧系统的 Article 50(2) 有限标记过渡不延后其他义务。
+
+Article 50 Transparency Guidelines：欧盟委员会 2026 年发布的第 50 条实施指南，说明适用主体、生成内容、例外和合规示例；用于解释法规范围，不是独立认证或通用 Model Card 标准。
 
 Release Decision Record：发布决策记录
 
@@ -3000,6 +3046,8 @@ Causal Tracing：因果追踪
 
 Sparse Autoencoder / SAE：稀疏自编码器
 
+Gated Sparse Autoencoder / Gated SAE：门控稀疏自编码器
+
 Superposition：叠加表示
 
 Polysemanticity：多语义性
@@ -3007,6 +3055,10 @@ Polysemanticity：多语义性
 Monosemanticity：单语义性
 
 Feature Purity：特征纯度
+
+Feature Dominance：特征计算贡献占比；具体定义依论文指标而定
+
+Dominance-Aware Monosemanticity Evaluation / DAME：优势特征感知的单义性评估；按特征计算贡献分层评估解释，不是真值证明
 
 Reconstruction Fidelity：重构保真度
 
@@ -3027,6 +3079,10 @@ Contrastive Activation Addition / CAA：对比激活加法
 Projection Shift：投影变化
 
 Steering Gate：Steering 上线门禁
+
+Endogenous Steering Resistance / ESR：内生引导抵抗；推理时 steering 仍持续施加，但模型在生成过程中部分恢复到原行为的现象；证据绑定具体模型与干预设置
+
+Behavioral Granularity：行为约束粒度；从“表达什么”到“如何表达”再到“如何具体落实”的任务规格层次，控制性须按各层分别评估
 
 Speculative Decoding：推测解码
 
@@ -5338,6 +5394,10 @@ Memory Conflict：记忆冲突
 
 Memory Pollution：记忆污染
 
+Memory Poisoning：记忆投毒；不可信内容经显式写入、自动筛选、上下文压缩或经验转流程等通道进入跨会话持久记忆，之后被召回并影响回答或动作。写入、召回、采纳、副作用和选择性修复是不同评估阶段，不能共用一个成功率。
+
+Memory Write Channel：记忆写入通道；触发记忆候选并决定其内容进入持久存储的路径。写入来源与模型推断、压缩和程序化经验等机制决定不同的校验责任。
+
 Preference-Conditioned Memory Write Control：偏好条件化记忆写入控制；按交互情境选择是否写入或更新记忆，并可根据用户反馈修订写入政策；效果须分别检查有用信息保留、无关信息写入和存储规模。
 
 Over-Personalization：过度个性化；记忆与当前任务无关却被套用、重复提及，或为迎合用户而改变回答；是否适用须结合当前请求与预期。
@@ -5724,6 +5784,12 @@ Error Analysis：错误分析；把总体分数和失败输出拆成可审阅的
 
 Root Cause Hypothesis：根因假设；对失败为何发生提出、可由复现或干预支持/削弱的解释；在验证前必须与症状、错误类型和修复动作分开记录。
 
+Harness Reliability：Harness 可靠性；Agent 外围的上下文、工具、权限、状态、执行、恢复和观测机制是否按约束工作；任务成功不代表这些机制全部可靠。
+
+Candidate Mechanism Link：候选机制关联；trace 中观察到的步骤与后续失败之间可能存在的关系，尚未通过时间顺序、中间证据、替代解释或干预验证。
+
+Validated Failure Propagation：已核验的失败传播链；用可追溯证据确认一个具体机制如何触发后续失败的链路，只对已核验的 run、环境和条件负责。
+
 Minimum Functionality Test / MFT：最小功能测试；用少量直接样例检查模型是否满足某项明确能力要求。
 
 Invariance Test / INV：不变性测试；对输入做应保持含义的扰动，并检查模型行为是否保持；前提是变换确实保留任务语义。
@@ -5797,6 +5863,14 @@ Trace Metric Coverage：执行轨迹指标覆盖度
 Evaluation Harness：评估执行框架
 
 Evaluation Contract：评测协议；一次可复核评测所固定的 checkpoint、tokenizer/chat template、任务数据与 split、prompt/few-shot、生成参数、metric/scorer、harness 版本和样本级输出。
+
+Task Contract：任务契约；固定一次评测的输入、初始环境、允许动作、成功判据、预算、harness 与风险/副作用约束；不同任务契约下的结果不能只凭名称或总分直接等同。
+
+Macro-Averaged Success Rate：宏平均成功率；先分别计算每个非空切片的成功率，再对切片等权平均；回答“典型切片平均表现如何”，不表示目标流量下的总体率。
+
+Micro-Averaged Success Rate：合并样本成功率；把切片的成功数与分母先分别求和再相除，切片权重由评测样本数决定；只有样本抽样代表目标分布或经过适当加权时，才可解释为目标总体率。
+
+pass^k：同一任务重复 k 次均成功的估计，衡量重复交互时的可靠性；pass@k 表示 k 次中至少一次成功，常用于估计采样发现解的机会。两者问题不同，需固定任务、独立试次和成功判据。
 
 HELM / Holistic Evaluation of Language Models：整体语言模型评测；以场景覆盖和多类指标统一组织语言模型评测的研究与工具，论文采用有限的核心场景集合，不代表所有真实任务。
 
@@ -6619,6 +6693,8 @@ Trace Replay Coverage：Trace 回放覆盖率
 Cost Latency Regression Control：成本延迟回归控制
 
 Benchmark Slice Coverage：Benchmark 切片覆盖率
+
+Benchmark Meta-audit：Benchmark 元审计；评估现有基准测试遗漏了哪些风险行为或工具工作流，属于测试集覆盖证据，不等于目标系统的安全性或生产风险率。
 
 Regression Gate Readiness：回归门禁就绪率
 
@@ -8020,6 +8096,20 @@ CUPED：使用实验前协变量降低方差的方法；主要提高估计精度
 
 Interference / Spillover：实验干扰 / 溢出效应；一个单位的 treatment 会改变其他单位结果，违反无干扰假设，可能需要集群或网络实验设计。
 
+Stable Unit Treatment Value Assumption (SUTVA)：稳定单位处理值假设；每个单位的结果不受其他单位 treatment 分配影响，且 treatment 版本定义明确；网络、团队和共享资源场景需检查该假设。
+
+Group Sequential Design：组序贯设计；预先规定若干中期查看时点和相应决策边界，以控制多次查看后的整体错误率。
+
+Always-Valid Inference：始终有效推断；在预先声明的方法假设下，允许按规则连续查看并在数据依赖的停止时点作有效推断；不使任意分析和任意停止自动有效。
+
+Adaptive Allocation：自适应分配；根据已观测信息动态改变未来随机单位进入各组的概率；需记录分配概率和策略状态，并采用与分配机制相匹配的推断方法。
+
+Switchback Design：切换式实验设计；按预定时间块将同一系统随机切换到不同处理版本，适用于共享流量/资源难以同时拆分的场景；需要处理时段趋势、周期、洗脱期与版本残留。
+
+Carryover Effect：处理残留效应；当前时间块的结果仍受到先前处理状态影响的时间性干扰，switchback 设计需预先估计或控制其持续窗口。
+
+Ratio Metric：比例指标；以分子总和除以分母总和，或先计算单位级比例再聚合；二者对应不同权重和目标量，报告须说明聚合层级与分母定义。
+
 Sample Ratio Health：样本比例健康度
 
 Guardrail Metric Control：护栏指标控制
@@ -8876,6 +8966,8 @@ Video-MME：视频多模态理解 benchmark，用于评估视频时序理解、�
 
 Video-MME-v2：视频理解 benchmark 的递进任务与组级评测方案；相关问题组用于观察多点信息整合、时间动态、跨题一致性、推理连贯性和证据支持，分数仍只代表该评测协议。
 
+LongShOTBench：长视频全模态推理 benchmark；用意图驱动的单轮/多轮开放题和逐标准项 rubric 评估视频、语音、非语音音频及跨模态推理，并以人工核验子集检查 LLM verifier；其结果受构题来源、语言、默认帧采样、单次生成和理想前轮上下文协议限制。
+
 Naive Dynamic Resolution：朴素动态分辨率；根据图像尺寸动态展开不同数量视觉 token 的处理路线，视觉预算随图片和 processor 变化，必须以具体模型处理输出为准。
 
 M-RoPE：多模态旋转位置嵌入；将文本、图像和视频的位置信息按多模态结构编码，Qwen2-VL 用于统一不同模态的位置表示。
@@ -8904,6 +8996,12 @@ Policy Enforcement Point (PEP)：策略执行点；在资源或工具前强制�
 
 AuthZEN Authorization API：AuthZEN 授权 API；用于策略执行点与策略决策点交换授权请求和决定的互操作接口，不定义组织内部的策略语言或授权规则。
 
+AuthZEN Access Request and Approval Profile (AARP)：AuthZEN 访问请求与审批配置文件；截至 2026-11-03 为工作组草案，用于表示可补齐前置条件的拒绝、异步申请和审批后的重新评估。审批是新授权判断的输入，不是绕过 PDP 的许可。
+
+COAZ / COAZ-MCP：将具体操作的信息模型映射为 AuthZEN 授权请求的框架及 MCP 绑定；截至 2026-11-03 为工作组草案，参数映射不替代服务端身份和资源校验。
+
+OWASP Agent Control Standard (ACS)：OWASP Agent 控制标准；以运行时 hook 接入 Guardian，对 Agent 动作实施控制并提供审计接口。其运行时合同不等同于组织授权策略；截至 2026-11-03，v0.1.4 的符合性声明尚无独立验证方或登记册。
+
 DPoP (Demonstrating Proof of Possession)：持有证明；OAuth 发送方约束机制之一，用密钥持有证明降低访问令牌被盗后的重放风险，本身不授予业务权限。
 
 Fallback Routing：回退路由；先读取动作状态并分类失败，再在原授权约束内选择有限重试、兼容后端、只读/人工路径或拒绝。权限拒绝不能通过换模型绕过；外部动作状态未知时先查询，不能盲目重放。
@@ -8922,7 +9020,9 @@ GOAT（Generative Offensive Agent Tester）：Pavlova 等人在 ICML 2025 发表
 
 REDAgentBench：面向工具型 Agent 的可执行红队评估预印本；用隔离服务回执和最终状态差异核验副作用，并研究 harness、证据视图和 Judge 规则对结果的影响。数据与结论绑定论文中的模拟服务、模型配置和判定协议。
 
-Specialized Frontier Eval Cluster：前沿专业评估簇；面向 cyber、bio、terminal agent、automation agent、long-running coding agent 等高价值或高风险切片的新 benchmark 集合。
+Recognition–Execution Gap (REG)：识别—执行差距；REDAgentBench 对状态确认的有害执行作操作化分析，检查 Agent 是否在执行前的文本中已明确提到适用规则、前置条件或具体风险。该标签不直接证明模型内部认知、稳定意图或其他模型/任务中的普遍现象。
+
+Specialized Frontier Eval Cluster：前沿专业评估簇；围绕软件、终端、浏览器、工具、科学研究、安全和长周期工作流组织的任务簇评测设计。它不是单一 benchmark 或通用能力分数；结果绑定任务、环境、harness、预算、判定器与风险条件。
 
 KDA / Kimi Delta Attention：Kimi 系列公开的递归/门控注意力路线；通过状态、衰减和门控表示历史，不能简单等同于“没有位置”。
 
@@ -9797,7 +9897,7 @@ Sonnet 5.5 Thinking Block Binding：Sonnet 5.5 思考块绑定；thinking block 
 
 Progress-update Thinking Block：进度更新 thinking 块；Sonnet 5.5 工具间较长的进度文本可能以 `thinking` 类型返回；默认 display 下内容可能为空，UI 若只渲染 `text` 会静默。
 
-Category-specific Fallback：类别化 fallback；安全 refusal 是否可重试取决于分类类别。Sonnet 5.5 官方 server-side fallback 覆盖 cyber/frontier_llm，不覆盖 bio/reasoning_extraction/general_harms；必须记录实际执行模型。
+Category-specific Fallback：类别化 fallback；安全 refusal 是否可重试取决于模型、分类类别和调用 surface。截至 2026-11-03，Sonnet 5.5 的 Anthropic API 默认 server-side fallback（beta）将 cyber/frontier_llm 路由到 Sonnet 5，不重试 bio/reasoning_extraction/general_harms；它不处理 429、overload 或 server error。应从响应 model、fallback block 和 usage.iterations 记录实际执行路径；参见[官方说明](https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback)。
 
 Actual-model Attribution：实际模型归因；benchmark/request manifest 同时记录 requested model、fallback reason 与实际 served model，避免将 fallback 后的混合系统结果误标为单一裸模型成绩。
 
@@ -10026,6 +10126,8 @@ Untrusted Model / U：不可信执行模型；控制评测中不把模型善意�
 Trusted Model / T：可信监督模型；AI Control 设定中被假定不会故意造成伤害的监督或替代模型。可信标签不替代具体版本、任务范围、工具权限和评测证据。
 
 AI Control Protocol：AI 控制协议；规定执行模型提出候选动作后，监控器、可信模型、人工审核、授权服务和执行器分别如何观察、升级、替换、批准或停止动作的流程。
+
+Monitorability：可监控性；针对一个明确行为属性，监控器能否从指定的可观察证据中预测它。它同时取决于轨迹是否包含相关信号和监控器能否提取信号；CoT 可监控不等于 CoT 忠实呈现内部推理，也不等于动作已获授权或会在提交前被拦截。
 
 Defer-to-Trusted：转交可信模型；可疑候选不直接提交，由可信模型产生替代动作；替代动作仍须经过权限和执行器门禁。
 

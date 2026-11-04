@@ -947,7 +947,7 @@ M 是模型和 revision，V 是证据来源，P 是 prompt/template，H 是 harn
 
 下面的 demo 不调用模型，只审计一个候选 benchmark 设计：它检查最小样本 schema、
 任务/难度/语言/风险覆盖、目标分布偏差、精确重复、一个预先计算的相似度风险
-字段、指标配置和最小可复现 manifest。`train_similarity` 是固定的教学输入，
+字段、任务—指标映射及各任务声明的必需指标覆盖、最小可复现 manifest。`train_similarity` 是固定的教学输入，
 脚本没有访问训练语料，也没有计算文本相似度；它只演示如何把上游审计结果映射
 成数据隔离信号。所有比例和阈值都是 toy 设计值，不能当作上线准入标准。
 
@@ -1151,6 +1151,15 @@ for sample in valid_samples:
     if sample["metric"] not in allowed:
         metric_issues.append((sample["id"], sample["task"], sample["metric"]))
 
+metric_coverage_gaps = {}
+for task, required in required_metrics.items():
+    observed = {
+        sample["metric"] for sample in valid_samples if sample["task"] == task
+    }
+    missing = sorted(required - observed)
+    if missing:
+        metric_coverage_gaps[task] = missing
+
 manifest_required = {
     "benchmark_version",
     "dataset_hash",
@@ -1170,7 +1179,7 @@ signals = {
     "distribution_distance_ok": mix_distance is not None and mix_distance <= 0.25,
     "duplicates_clear": not duplicates,
     "leakage_clear": not leak_flags,
-    "metrics_configured": not metric_issues,
+    "metrics_configured": not metric_issues and not metric_coverage_gaps,
     "repro_manifest_complete": not manifest_missing,
 }
 
@@ -1183,7 +1192,7 @@ action_by_signal = {
     "distribution_distance_ok": "review_target_sample_mix",
     "duplicates_clear": "deduplicate_inputs",
     "leakage_clear": "remove_leak_flags_from_final_holdout",
-    "metrics_configured": "review_metric_task_mapping",
+    "metrics_configured": "add_missing_metric_coverage",
     "repro_manifest_complete": "complete_run_manifest",
 }
 failed_signals = [name for name, passed in signals.items() if not passed]
@@ -1204,6 +1213,7 @@ summary = {
     "duplicates": duplicates,
     "leak_flags": leak_flags,
     "metric_issues": metric_issues,
+    "metric_coverage_gaps": metric_coverage_gaps,
     "manifest_missing": manifest_missing,
     "signals": signals,
     "failed_signals": failed_signals,
@@ -1226,6 +1236,7 @@ pprint(summary, sort_dicts=False)
  'duplicates': [],
  'leak_flags': [('leak_001', 0.91)],
  'metric_issues': [],
+ 'metric_coverage_gaps': {'rag': ['citation']},
  'manifest_missing': [],
  'signals': {'samples_present': True,
              'schema_ok': True,
@@ -1235,16 +1246,17 @@ pprint(summary, sort_dicts=False)
              'distribution_distance_ok': True,
              'duplicates_clear': True,
              'leakage_clear': False,
-             'metrics_configured': True,
+             'metrics_configured': False,
              'repro_manifest_complete': True},
- 'failed_signals': ['leakage_clear'],
- 'actions': ['remove_leak_flags_from_final_holdout'],
+ 'failed_signals': ['leakage_clear', 'metrics_configured'],
+ 'actions': ['remove_leak_flags_from_final_holdout', 'add_missing_metric_coverage'],
  'recommendation': 'revise_before_freeze'}
 ~~~
 
-这个例子故意留下一个上游标记为高相似度风险的样本：其他设计项都正常，但
-`leak_001` 的教学字段为 `0.91`，超过示例阈值 `0.80`，因此不能放进 final
-holdout。代码只消费这个风险标记，不证明它真与训练数据重合。`mix_distance`
+这个例子故意留下两个待修项。`leak_001` 的教学相似度字段为 `0.91`，超过示例
+阈值 `0.80`，因此不能放进 final holdout；代码只消费这个上游风险标记，不证明它
+真与训练数据重合。样本还没有覆盖 RAG 任务声明的 `citation` 指标，所以
+`metric_coverage_gaps` 会将它列出，并要求补齐指标覆盖。`mix_distance`
 使用本例 7 条有效样本估得的切片比例，`0.25` 也只是方便演示的阈值。缺字段或
 非对象记录会被单独标记并排除在可计算切片外；空数据会显式失败，不会除以零。
 示例输出保留信号、失败字段和动作；实际数据应在有权访问的语料与明确相似度

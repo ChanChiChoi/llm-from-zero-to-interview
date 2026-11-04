@@ -5,6 +5,8 @@
 什么”进一步追问为“哪些内部状态参与了计算”“改变哪个状态会改变结果”，以及“这个
 解释在新输入和新模型版本上是否仍然成立”。
 
+[第六章《Red Teaming 与危险能力评估》](06-red-teaming与危险能力评估.md)建立了对外部行为、任务条件和系统动作的评估证据；本章继续追问这些行为可能由哪些内部表示与计算路径参与，但解释结果不能取代外部行为验证或运行时控制。
+
 本章从四种证据逐层展开：输入归因提供线索，表示分析检查信息是否可被读出，因果干预
 检验某个组件是否真正影响行为，机制逆向则尝试把多个组件组织成可检验的 feature、
 circuit 和算法假设。这个顺序很重要：一张 attention 图可以帮助提出假设，却不能直接
@@ -356,7 +358,11 @@ Attention 权重不一定等于因果解释。
 3. Previous token head：关注前一个 token。
 4. Syntax-related head：关注语法相关位置。
 
-这些名字帮助我们建立直觉，但不能把每个 head 都简单贴标签。
+这些名字帮助我们建立直觉，但不能把每个 head 都简单贴标签。Induction head 的研究
+展示了某些头如何利用重复上下文延续模式；GPT-2 Small 的间接宾语识别（IOI）电路研究
+则分析了实体信息如何传至输出位置。这些命名都绑定特定模型、任务和分析路径，不能直接
+推广成每个模型都有一组固定功能头。[Transformer Circuits](https://transformer-circuits.pub/2021/framework/index.html)、
+[IOI circuit study](https://arxiv.org/abs/2211.00593)
 
 ### 5.3 机制与边界
 
@@ -405,6 +411,14 @@ Induction head、name mover head 和 previous-token head 是有用的研究命�
 目标结构；如果它仍然把信息写向预测位置，且对打乱重复关系的负对照不再产生同样效应，
 这个功能假设才更有说服力。不同随机种子、不同样本模板和不同模型 checkpoint 的复现
 也很重要，因为 head 的编号和功能可能随训练阶段或模型规模改变。
+
+用一组一维 toy 数值看 QK 与 OV 的分工。假设两个来源位置的缩放后注意力分数是
+$[0,\ln 3]$，softmax 权重就是 $[0.25,0.75]$；对应的 value 标量是 $[2,10]$，
+加权结果为 $0.25\times2+0.75\times10=8$。再假设输出投影在所关注方向上的系数为
+$0.5$，写回残差流的该方向分量为 $8\times0.5=4$。若第二个 value 被置为 0，
+其余输入不变，则写回值变为 $0.25\times2\times0.5=0.25$，与原来相差 $3.75$。
+这些是手造的计算值，只展示权重、内容和投影如何共同决定写入；“注意了 75%”并不表示
+来源 token 对最终答案贡献了 75%，因为残差相加、后续层和 unembedding 仍会改变结果。
 
 ## 6. Activation Patching
 
@@ -622,6 +636,16 @@ SAE 试图在更高维 feature 空间中找到更干净的概念方向。
 普通 SAE 中，稀疏惩罚可能导致 feature activation 被系统性低估，也就是 shrinkage。
 
 Gated SAE 的思路是把“是否使用某个方向”和“这个方向的幅度是多少”分开处理，从而减少稀疏惩罚带来的副作用。
+
+2026 年的一篇 arXiv v3 预印本提出 sign-aware gated SAE（SA-GSAE），让一个字典方向
+可以通过双侧门控表示正、负两种激活，针对反向概念被拆成两个非负 feature 的问题。在
+Pythia-1B 和 SmolLM3-3B 的三个中层 hook point、三种随机种子共六个设置中，半宽版本在
+固定 $L_0=64$ 时，其 dead-feature 比例比双宽 Gated SAE 低 0.35—0.82（即 35—82 个
+百分点）；作者同时报告重构 $R^2$ 差距在六个设置中不超过 0.025。研究范围尚未覆盖
+指令微调模型或参数量超过 3B 的模型，也发现全宽配置在一个 residual-stream 设置出现
+重构崩塌，因此这只是特定模型和
+配置上的架构证据，不表示新 feature 更符合人类语义或能用于安全监控。
+[SA-GSAE 论文](https://arxiv.org/abs/2605.28149v3)
 
 这体现了后来者的改进方向：
 
@@ -841,18 +865,29 @@ I_k(\alpha)=\Delta(r')-\Delta(r)
 但随机方向在某些任务上也可能看起来可解释或可编辑，所以需要与神经元、随机方向和
 未训练基线做匹配对照。
 
-近期基准说明了为什么要分开检查。SAEBench 在 8 类指标、200 多个 SAE 和 8 种架构上
-比较，发现旧 proxy 指标的提升不能稳定推出实际效用提升；MIB 则把 circuit 定位与
-causal-variable 定位分成两条 track，在其四类任务和五个模型上发现 attribution 与 mask
-optimization 更擅长 circuit localization，而 supervised DAS 更擅长 causal-variable
-定位，SAE feature 在后一类任务上未胜过普通 hidden dimensions。
+近期基准说明了为什么要分开检查。SAEBench 在 8 类指标、200 多个 SAE 和 7 种架构上
+比较，发现稀疏度—重构保真度等 proxy 指标的排名不能稳定推出下游任务表现；MIB 则把
+circuit 定位与 causal-variable 定位分成两条 track，在其四类任务和五个模型上发现
+attribution 与 mask optimization 更擅长 circuit localization，而 supervised DAS 更
+擅长 causal-variable 定位，SAE feature 在后一类任务上未胜过普通 hidden dimensions。
 [SAEBench](https://arxiv.org/abs/2503.09532)、
 [MIB](https://proceedings.mlr.press/v267/mueller25a.html)。一篇 2026 arXiv 预印本
-进一步报告：在有已知真值的合成数据中，SAE 即使达到 71% explained variance，也只恢复
-9% 的真 feature；在其指定真实模型激活和指标上，随机基线与训练 SAE 的 interpretability
-分数为 0.87/0.90，sparse probing 为 0.69/0.72，causal editing 为 0.73/0.72。
-这是一项针对特定设置的反例研究，不等于 SAE 普遍无效；它说明必须用匹配基线和任务级
-效用验证来检验“字典学到了机制”的主张。[SANITY Checks](https://arxiv.org/abs/2602.14111)
+进一步报告：在具有独立、重尾真 feature 的合成设置中，BatchTopK SAE 解释方差为 71%，
+但只恢复 3,200 个真 feature 中的 297 个（约 9%）；JumpReLU 在同一分析中恢复约 7%。
+在论文选定的真实模型激活和评估任务上，随机基线与训练 SAE 的 interpretability 分数
+分别为 0.87/0.90，sparse probing 为 0.69/0.72，causal editing 为 0.73/0.72。作者
+明确指出合成设定假定 feature 激活相互独立，且评估没有覆盖 transcoder / crosscoder；
+这些结果提醒研究者做匹配基线检查，不构成 SAE 普遍无效的结论。
+[SANITY Checks](https://arxiv.org/abs/2602.14111v1)
+
+2026 年 NeurIPS 接收的一项 SAE 评估研究进一步提醒：只看 top-activating examples 或
+全字典平均分，可能漏掉对模型计算贡献最大的 feature。作者在 600 多个 SAE、7 个家族和
+28,000 多个 feature 上用 dominance-aware monosemanticity evaluation（DAME）分层抽样；
+按平均计算贡献划分的最高四分位（Q1），LLM judge 的 perfect-ranking accuracy 平均为
+61.8%，其余三个四分位为 64.1%，且 65.2% 的 SAE 出现 Q1 分数更低。这个结果支持在
+解释性审计中检查 feature 的计算贡献分层，但 DAME 仍依赖 LLM judge；论文的主要模型
+范围为 70M—2.7B，不能当作前沿模型上的普遍规律。
+[Rethinking SAE Evaluation](https://arxiv.org/abs/2610.30474v2)
 
 把上述指标用后文 demo 的六个合成向量复算。第一条激活 $r_1=(2.0,0.1,0.0)$，重构
 为 $\hat r_1=(1.9,0.2,0.0)$，这一行平方误差是
@@ -895,12 +930,12 @@ Mechanistic interpretability 试图让我们不只看外部行为，还能理解
 6. 监控危险 feature 激活。
 7. 辅助 red teaming 和 safety eval。
 
-一项 2026 年研究给出了“检测不等于控制”的具体安全例子：作者在 1B 和 8B 模型上使用
-无害的固定语言切换触发器，SAE 特征能很好地区分触发输入，但在其干预实验中，若干
-attention/MLP 特征被消融后通常不能阻止语言切换，激活它们也通常不能诱发切换；部分
-residual-stream 特征才表现出抑制或诱发效应。该论文已被 Findings of EMNLP 2026 接收，
-但实验是受控的英译法/德无害任务，不能外推成真实恶意后门或其它模型上的检测/控制能力。
-[LLM Forensics](https://arxiv.org/abs/2609.07746)
+Findings of EMNLP 2026 的一篇论文给出“检测不等于控制”的具体安全例子：作者在 1B 和
+8B 模型上使用无害的固定语言切换触发器，SAE 特征能很好地区分触发输入；但在其干预
+实验中，attention/MLP 特征被消融后通常不能阻止语言切换，激活它们也通常不能诱发切换，
+只有部分 residual-stream 特征表现出抑制或诱发效应。实验是受控的英译法/德任务，不能
+外推成真实恶意后门或其它模型上的检测/控制能力。
+[LLM Forensics](https://aclanthology.org/2026.findings-emnlp.2418/)
 
 ### 9.3 不能夸大
 
@@ -967,6 +1002,14 @@ Progress measures for grokking 这类工作通过分析小型 Transformer 在 mo
 ```math
 y=(a+b)\bmod p
 ```
+
+例如取 $p=7$、$a=4$、$b=5$，目标答案是 $(4+5)\bmod7=2$。再构造一条仅用于
+说明的训练轨迹：候选 Fourier 方向的归一化读出值在三个 checkpoint 上依次为
+$0.15,0.35,0.68$，而留出集准确率依次为 $50\%,50\%,75\%$。在这组假设数据里，
+内部读出从第一个到第二个 checkpoint 上升了 $0.20$，任务准确率暂时没有变化；它展示
+了内部连续量可能先变化的情形，不是论文测得的数值，也没有证明预警效果。要把它称为
+progress measure，还必须在多个种子和未参与选择的 checkpoint 上确认它能预测后续
+泛化，而不是只追踪训练集拟合。
 
 研究者可以跟踪某个候选 Fourier 方向、特定 attention pattern 或输出读出方向在训练
 过程中的变化。如果训练集准确率还没有明显提升，但候选方向的能量、相位一致性或目标
@@ -1269,9 +1312,12 @@ monitor 当作线上依据。
 - [Toy Models of Superposition](https://transformer-circuits.pub/2022/toy_model/index.html)：研究 feature 数量超过表示维度时的 superposition toy model；它支持机制假设和可视化直觉，不是大模型 feature 的直接测量。
 - [Towards Monosemanticity: Decomposing Language Models With Dictionary Learning](https://transformer-circuits.pub/2023/monosemantic-features/index.html)：讨论用 dictionary learning 分解语言模型激活的研究结果；应同时关注训练层、激活数据和解释指标。
 - [Scaling Monosemanticity](https://transformer-circuits.pub/2024/scaling-monosemanticity/index.html)：展示更大规模 feature 提取和解释工作；“可提取 feature”仍不等于完整 circuit 或因果安全证明。
+- [Improving Sparse Decomposition of Language Model Activations with Gated Sparse Autoencoders](https://proceedings.neurips.cc/paper_files/paper/2024/file/01772a8b0420baec00c4d59fe2fbace6-Paper-Conference.pdf)：通过把“选方向”和“估计幅度”分开处理，研究 L1 shrinkage；结论限于论文所测模型和超参数。
 - [SAEBench](https://arxiv.org/abs/2503.09532)：用多类指标比较不同 SAE，并检验 proxy 是否能预测解释性、解耦和任务效用；结论绑定论文的模型、数据和指标。
+- [Rethinking SAE Evaluation: An Atomic Interpretable Unit Framework Reveals Hidden Polysemanticity and Redundancy](https://arxiv.org/abs/2610.30474v2)：NeurIPS 2026 接收论文提出 DAME 与 dominance-aware 抽样；LLM judge 分数仍是 proxy，主要模型范围有限。
+- [Sign-Aware Gated Sparse Autoencoders: Modeling Anticorrelated Features with Bi-Jump-ReLU Activations](https://arxiv.org/abs/2605.28149v3)：预印本探索双侧 feature 表示，证据限于 Pythia-1B 和 SmolLM3-3B 的六个设置。
 - [MIB](https://proceedings.mlr.press/v267/mueller25a.html)：将 circuit localization 与 causal-variable localization 分开评估；其 SAE 结果不能外推成所有任务上的方法排名。
-- [Sanity Checks for Sparse Autoencoders](https://arxiv.org/abs/2602.14111)：随机方向基线和合成 ground truth 的预印本反例；数值只适用于论文的设置、模型、架构和指标。
+- [Sanity Checks for Sparse Autoencoders](https://arxiv.org/abs/2602.14111v1)：随机方向基线和合成 ground truth 的预印本反例；数值只适用于论文的设置、模型、架构和指标。
 - [Revising and Falsifying Sparse Autoencoder Feature Explanations](https://proceedings.neurips.cc/paper_files/paper/2025/hash/5b6ce2529a79862a2d8ac57ac0e01d90-Abstract-Conference.html)：用相似负例检验解释是否过宽；自动生成的解释仍是待反驳假设。
 
 ### 15.3 因果干预、事实关联与工具
@@ -1279,7 +1325,7 @@ monitor 当作线上依据。
 - [Locating and Editing Factual Associations in GPT](https://arxiv.org/abs/2202.05262)：提出 ROME 并使用 causal tracing 分析事实关联；编辑效果、泛化和副作用必须在具体模型上重新测量。
 - [Progress Measures for Grokking via Mechanistic Interpretability](https://arxiv.org/abs/2301.05217)：在 modular addition 等 toy setting 中研究内部进展指标；不能直接当作 frontier 能力预警器。
 - [TransformerLens](https://transformerlensorg.github.io/TransformerLens/)：提供 Transformer 内部激活分析和干预的开源工具文档；工具接口和模型支持范围需要按当前版本核对。
-- [LLM Forensics](https://arxiv.org/abs/2609.07746)：在无害语言切换后门中区分 trigger detector 与行为控制 feature；实验不代表恶意后门或生产系统。
+- [LLM Forensics](https://aclanthology.org/2026.findings-emnlp.2418/)：Findings of EMNLP 2026 在无害语言切换触发器中区分 trigger detector 与行为控制 feature；实验不代表真实恶意后门或生产系统。
 - [Formal Mechanistic Interpretability](https://proceedings.iclr.cc/paper_files/paper/2026/hash/b5afe13494c825089b1e3944fdaba212-Abstract-Conference.html)：形式化输入域鲁棒性、robust patching 和 circuit minimality；论文实验使用视觉模型。
 
 引用这些资料时，应记录论文版本或网页访问时间、模型 checkpoint、层/位置、激活采样、
@@ -1336,14 +1382,15 @@ monitor 当作线上依据。
 
 讨论 SAE 在 safety 中的一个可能应用和一个风险。
 
-## 18. 最小可运行 Mechanistic Interpretability 审计 demo
+## 18. Mechanistic Interpretability 审计 toy demo
 
-下面的 demo 只依赖 Python 3.12.9 标准库，不连接真实模型；它用 toy logit delta、激活和
-SAE feature 演示本章的审计口径。保存代码块为 Python 文件后，运行 `python3 <文件名>.py`。
-输出应与紧随其后的预期块一致；真实项目要把这些字段替换成模型 forward hook、patching
-实验和 SAE 训练结果，并为模型版本、层位、采样和评估集补充 manifest。
+下面的 demo 只使用 Python 标准库，不连接真实模型；它用 toy logit margin、激活和 SAE
+feature 演示如何把不同证据分开记录。下方输出是按固定输入静态推导的预期结果，本轮没有
+执行代码；读者若自行保存运行，可用结果核对计算。真实项目需要把这些字段替换成实际模型
+的 forward hook、patching 实验和 SAE 训练结果，并为模型版本、层位、采样和评估集补充
+manifest。
 
-**代码状态：已验证（2026-10-28；Python 3.12.9，标准库）。**
+**代码状态：静态审阅，未运行（2026-11-03）。**
 
 ```python
 from collections import Counter
@@ -1396,7 +1443,13 @@ patch_scores = {
     name: recovery_score(clean_delta, corrupt_delta, patched)
     for name, patched in patched_deltas.items()
 }
-best_patch = max(patch_scores, key=patch_scores.get) if patch_scores else None
+valid_patch_scores = {
+    name: score for name, score in patch_scores.items() if score is not None
+}
+best_patch = (
+    max(valid_patch_scores, key=valid_patch_scores.get)
+    if valid_patch_scores else None
+)
 
 ablated_deltas = {
     "previous_token_head": 1.5,
@@ -1417,7 +1470,8 @@ path_scores = {
     name: recovery_score(clean_delta, corrupt_delta, patched)
     for name, patched in path_patched_deltas.items()
 }
-best_path_score = max(path_scores.values()) if path_scores else None
+valid_path_scores = [score for score in path_scores.values() if score is not None]
+best_path_score = max(valid_path_scores) if valid_path_scores else None
 
 labels = ["code", "code", "refusal", "refusal", "name", "name"]
 residuals = [
@@ -1555,17 +1609,21 @@ actions = {
 
 if undefined_metrics:
     decision_status = "expand_measurement_before_interpreting_metrics"
+    next_actions = [actions[name] for name in undefined_metrics]
 elif not all(evidence_status.values()):
     decision_status = "review_failed_local_evidence"
+    failed_metrics = [name for name, passed in evidence_status.items() if not passed]
+    next_actions = [actions[name] for name in failed_metrics]
 else:
     decision_status = "collect_holdout_and_behavioral_evidence"
+    next_actions = ["replicate_selected_mechanism_on_holdout", "run_behavioral_side_effect_regression"]
 
 decision = {
     "scope": "local_mechanism_hypothesis",
     "status": decision_status,
     "evidence_status": evidence_status,
     "undefined_metrics": undefined_metrics,
-    "next_actions": list(actions.values()),
+    "next_actions": next_actions,
 }
 
 print("patch_scores=", patch_scores)
@@ -1581,7 +1639,7 @@ print("actions=", actions)
 print("decision=", decision)
 ```
 
-预期输出：
+静态预期输出（按代码中的合成输入手算，未执行）：
 
 ```text
 patch_scores= {'layer1_pos3': 0.4, 'layer2_pos1': 0.2, 'layer2_pos3': 0.8, 'layer3_pos3': 0.7}
@@ -1594,16 +1652,57 @@ signals= {'patch_causal': 0.8, 'ablation_effect': 1.6, 'path_patch': 0.75, 'reco
 evidence_status= {'patch_causal': True, 'ablation_effect': True, 'path_patch': True, 'reconstruction': True, 'sparsity': True, 'purity': True, 'feature_intervention': True}
 undefined_metrics= []
 actions= {'patch_causal': 'replicate_patch_on_holdout', 'ablation_effect': 'test_component_redundancy', 'path_patch': 'check_upstream_and_downstream_paths', 'reconstruction': 'review_sae_dictionary_fidelity', 'sparsity': 'inspect_feature_activation_distribution', 'purity': 'search_feature_counterexamples', 'feature_intervention': 'run_behavioral_side_effect_regression'}
-decision= {'scope': 'local_mechanism_hypothesis', 'status': 'collect_holdout_and_behavioral_evidence', 'evidence_status': {'patch_causal': True, 'ablation_effect': True, 'path_patch': True, 'reconstruction': True, 'sparsity': True, 'purity': True, 'feature_intervention': True}, 'undefined_metrics': [], 'next_actions': ['replicate_patch_on_holdout', 'test_component_redundancy', 'check_upstream_and_downstream_paths', 'review_sae_dictionary_fidelity', 'inspect_feature_activation_distribution', 'search_feature_counterexamples', 'run_behavioral_side_effect_regression']}
+decision= {'scope': 'local_mechanism_hypothesis', 'status': 'collect_holdout_and_behavioral_evidence', 'evidence_status': {'patch_causal': True, 'ablation_effect': True, 'path_patch': True, 'reconstruction': True, 'sparsity': True, 'purity': True, 'feature_intervention': True}, 'undefined_metrics': [], 'next_actions': ['replicate_selected_mechanism_on_holdout', 'run_behavioral_side_effect_regression']}
 ```
+
+先看 patch 指标。clean margin 为 $2.0$、corrupted margin 为 $-1.0$，两者相差
+$3.0$。`layer2_pos3` 的 patched margin 为 $1.4$，相对 corrupted 的提升为 $2.4$，
+所以恢复分是 $2.4/3.0=0.8$；其他三个位置依次是 $0.4,0.2,0.7$。代码只在有定义的
+候选中挑最高值；如果所有位置的分母都接近零，分数会是 `None`，不会尝试把 `None` 和
+数字排序。ablation 的最大 margin 下降为 $2.0-0.4=1.6$，path patch 的最高恢复分为
+$(1.25-(-1))/(2-(-1))=0.75$。这些值只描述固定 toy margin 上的干预，不是准确率提升。
+
+再看 SAE 输入。六行激活与重构的平方误差逐行相加为 $SSE=0.09$；激活均值约为
+$(0.70,0.70,0.717)$，相对均值的总平方差是 $SST\approx13.028$，因此
+$F_{rec}=1-0.09/13.028\approx0.993$。阈值 $0.5$ 下每行恰有一个 feature 激活，
+平均激活数是 $1.0$。每个 feature 的 top-2 标签在这个小样本里恰好相同，因此 toy
+purity 都是 $1.0$；这只是合成数据按构造得到的局部比例，不能声称真实 feature 单义，
+也不能代替近邻负例、不同激活强度、随机方向和计算贡献分层检查。
+
+代码中的阈值都是为了演示后续分流而设的 toy 值，不是 SAEBench、MIB 或任何安全标准的
+门槛。即使所有 signal 都超过这些示例值，状态仍然只是“收集 holdout 和行为回归”；它
+不表示“解释通过”，更不能直接成为线上发布条件。若关键指标没有有效分母，代码会要求补
+测；若有指标未达到示例阈值，则只安排对应项目的局部复核。真实报告还要分别检查正常帮助
+性、风险漏报、误报和工具副作用，并绑定模型 revision、hook 定义、样本切片和干预实现。
+
+还可以手动检查缺测分支。若 clean 与 corrupted margin 都是 $1.0$，patched margin 是
+$1.2$，恢复分的分母为 $1.0-1.0=0$，`ratio` 会返回 `None`。若 residual 向量都为
+同一个常量，均值基线的 $SST=0$，重构保真度也应显示未定义；若只有一行 feature 激活而
+`top_k=2`，purity 同样是 `None`。代码会把这些名称放入 `undefined_metrics`，将状态
+导向补充测量，而不是按零分处理或当作通过。`ratio` 先把比例四舍五入到三位，因此教学
+阈值附近的分支可能受舍入影响；真实分析应保留未舍入结果，同时报告样本数和不确定区间，
+不要把演示脚本中的阈值直接用作研究或发布标准。
+
+失败分支也可以静态推演：假设只有 purity 是 $0.8$，低于示例阈值 $0.9$，状态会变成
+`review_failed_local_evidence`，下一步只指向 `search_feature_counterexamples`；它不会
+因为一个标签就删除 feature，也不会自动接管模型输出。若同时有未定义项，代码先走
+`expand_measurement_before_interpreting_metrics`，优先补齐分母。这里的 `decision` 是
+研究流程的下一步索引，不是把七种量压缩成“机制通过”总分；每项仍需单独查看其适用问题、
+输入切片和负对照。
+
+将玩具输入替换为真实轨迹时，要先固定模型 revision、提示模板和 tokenizer，并确认
+clean / corrupted 对只改变待检验因素、仍表达同一任务。若目标是多词答案，须说明 margin
+是针对哪个 token、序列对数概率还是任务指标；多个 prompt 应按模板和风险切片分别汇总，
+并保留 holdout，而不是把 token 级记录混成一个总平均。这个示例没有实现这些数据采集和
+不确定性计算，它们需要由实际实验方案补齐。
 
 这个 demo 的重点不是数值本身，而是机制可解释性报告应该同时包含：
 
 1. 行为指标：clean / corrupted 的 logit delta。
 2. 因果证据：patching、ablation、path patching。
 3. 表示分解质量：SAE reconstruction fidelity 和 sparsity。
-4. 可解释性质量：feature purity。
-5. 安全使用边界：feature intervention 有效果，但仍然只说明局部机制有证据，不能证明模型整体安全。
+4. 可解释性质量：feature purity，以及对近邻反例、计算贡献和随机基线的检查。
+5. 安全使用边界：feature intervention 有效果只说明局部机制假设有证据，不能证明模型整体安全。
 6. 决策范围：当前结果只支持在 holdout 和行为回归中继续验证，不能直接改变生产策略或工具权限。
 
 ## 19. 本章总结
@@ -1623,3 +1722,5 @@ Sparse Autoencoder 试图从激活空间中分解出更稀疏、更可解释的 
 Mechanistic interpretability 对 safety 有潜在价值，可以帮助理解幻觉、拒答、jailbreak、steering 和危险能力，但目前仍不能单独提供安全保证。
 
 理解这章可以抓住一条方法谱系：从输入归因，到表示分析，到因果干预，再到机制逆向和安全治理。
+
+如果研究目标从解释内部机制转向推理时主动改变模型行为，可继续阅读[第八章《Steering 与 Representation Engineering》](08-steering与representation-engineering.md)。机制证据可以帮助提出干预假设，但 steering 的目标效果、副作用、泛化和系统安全仍须分别验证。

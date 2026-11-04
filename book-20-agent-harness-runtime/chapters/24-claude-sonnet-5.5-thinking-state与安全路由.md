@@ -54,13 +54,13 @@ System Card 报告 cyber safeguard 有三阶段：内部 activation probe、轻�
 
 | 风险类别 | 报告中的处理 |
 |---|---|
-| Cyber misuse | 阻断；多数接口可以 fallback 到 Sonnet 5，API 需显式 opt in |
-| Chemical / biological | 阻断，无 fallback |
+| Cyber misuse | 阻断；产品路径可能 fallback 到 Sonnet 5；API 的 `fallbacks="default"` 目前为 beta |
+| Chemical / biological | 阻断；API default 不自动重试 `bio` refusal |
 | 窄范围 AI/frontier-LLM development | 部分请求可能 fallback 到 Sonnet 5 |
-| 常规武器/高当量爆炸物 | 阻断，无 fallback |
-| Distillation / reasoning extraction | 阻断，无 fallback |
+| 常规武器/高当量爆炸物 | 卡片披露为阻断；API default 对无推荐 fallback 的拒绝保留原响应 |
+| Distillation / reasoning extraction | 卡片披露为阻断；API default 不自动重试 `reasoning_extraction` refusal |
 
-API refusal 仍是正常 HTTP 200 响应，`stop_reason=refusal`，并用 `stop_details.category` 表达类别。官方 server-side fallback 仅对 cyber 与 frontier-LLM 类拒绝重试；不能将所有拒绝都交给更大模型，否则可能绕过原策略。审计 trace 应保存 `requested_model`、`actual_model`、分类器结果、fallback reason、工具权限、执行副作用和独立 verifier。
+API refusal 仍是正常 HTTP 200 响应，`stop_reason=refusal`，并用 `stop_details.category` 表达类别。截至 2026-11-03，Anthropic 的 server-side fallback 文档说明：Claude API 与 Google Cloud Anthropic-managed surface 可用 beta `fallbacks="default"`；Sonnet 5.5 的默认推荐目标是将 `cyber` 与 `frontier_llm` 拒绝交给 Sonnet 5，而 `bio`、`reasoning_extraction` 和 `general_harms` 不自动重试。应用也可指定 permitted target 集合中的 fallback 模型；这属于应用自己的路由策略，不能把它当成绕过拒绝的通用重试。默认路由目标按请求模型和类别决定，实际 served model 应从顶层 `model`、`fallback` content block 和 `usage.iterations` 核对；API 不会因请求模型的 429、overload 或 server error 触发这条安全 fallback。其他产品和 provider 的路由行为要分别查证。审计 trace 应保存 `requested_model`、`actual_model`、分类器结果、fallback reason、工具权限、执行副作用和独立 verifier。详见[官方 Refusals and fallback 文档](https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback)及[迁移指南](https://platform.claude.com/docs/en/models/sonnet-5-5/migration-guide)。
 
 ## 24.6 System Card 数字必须绑定 harness
 

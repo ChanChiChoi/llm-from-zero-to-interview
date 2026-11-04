@@ -214,7 +214,7 @@ G-Eval 的概率加权不是把模型自报的 `confidence` 当成人类正确�
 预先允许的评分 token 概率。若评分集合为 $S=\{1,2,3,4,5\}$，则：
 
 ~~~math
-\operatorname{score}=\sum_{k=1}^{5}p(s_k)\,s_k
+\mathrm{score}=\sum_{k=1}^{5}p(s_k)\,s_k
 ~~~
 
 例如，若 `p(1)=p(2)=p(5)=0`、`p(3)=0.6`、`p(4)=0.4`，期望分数为

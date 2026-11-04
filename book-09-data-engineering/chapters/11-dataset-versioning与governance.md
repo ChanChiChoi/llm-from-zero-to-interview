@@ -14,7 +14,7 @@
 
 数据版本和治理解决的是同一个可复查问题：一次训练究竟使用了哪些对象、哪些处理规则、哪些权限和哪些责任判断。版本号只解决“这是什么时候的快照”，治理还要解决“谁可以看、为什么可以用、如何删除、出了问题如何证明处理过”。
 
-本章沿着不可变快照、manifest、lineage、schema 演进、权限分级、删除请求、datasheet、model card 输入、审计指标和训练复现记录展开。Datasheets、Model Cards、W3C PROV、DVC、OpenLineage、Hugging Face Dataset Cards、NIST AI RMF 和 GDPR Article 17 作为公开资料入口，放在章末区分研究框架、工程文档和法律原文。
+本章沿着不可变快照、manifest、lineage、schema 演进、权限分级、删除请求、datasheet、model card 输入、审计指标和训练复现记录展开。Datasheets、Model Cards、Croissant、W3C PROV、DVC、OpenLineage、Hugging Face Dataset Cards、NIST AI RMF 和 GDPR Article 17 作为公开资料入口，放在章末区分研究框架、机器可读元数据、工程文档和法律原文。
 
 一条治理链路可以写成：
 
@@ -168,79 +168,88 @@ Lineage 要回答：这条样本来自哪里，经过哪些处理，为什么被
 
 字段还要有稳定的语义边界。`quality_score` 是某个模型在某个版本、某个分数范围和某个数据切分上产生的结果；它不是脱离上下文的客观质量。若评分模型更新，应生成新的 `quality_score_version` 或处理版本，并在统计报告中说明分数不可直接和旧版本比较。类似地，`access_level` 描述当前访问策略，不代表原始内容天然公开；`deletion_status` 描述处理状态，也不应被解释成法律结论。
 
+Croissant 1.1 提供了一种可选的机器可读数据集元数据格式：除文件和记录结构外，还能在数据集、文件、记录集或字段层表达来源关系，并借助 PROV-O 标注派生、生成活动和责任主体；其规范也给出使用条件的结构化表示方式。它适合与内部 schema 和 manifest 对照，但元数据写入本身不会验证字段是否真实、授权判断是否正确，也不会替使用系统执行访问控制。团队应把格式版本和解释器一并固定，避免把“能表示”误读为“已证明”或“已强制执行”。[Croissant 1.1 规范](https://docs.mlcommons.org/croissant/docs/croissant-spec-1.1.html)
+
 ### 5.1 关键公式与治理指标
 
-一个数据版本可以抽象为：
+以下公式用于说明治理对象和检查口径，不把任何单一覆盖率当成法规阈值或发布结论。一个数据版本可以抽象为：
 
 ~~~math
-V_t = (D_t, M_t, P_t, S_t, A_t)
+V_{t} = (D_{t}, M_{t}, P_{t}, S_{t}, A_{t})
 ~~~
 
-D_t 是数据快照，M_t 是 manifest，P_t 是处理 pipeline 和配置版本，S_t 是 schema 版本，A_t 是审计记录。训练日志必须引用这个整体，而不是只记录一个会被原地修改的数据目录名。
+$D_{t}$ 是数据快照，$M_{t}$ 是 manifest，$P_{t}$ 是处理 pipeline 和配置版本，$S_{t}$ 是 schema 版本，$A_{t}$ 是审计记录。训练日志必须引用这个整体，而不是只记录一个会被原地修改的数据目录名。
 
 Manifest 可以写成 shard 清单：
 
 ~~~math
-M_t = {(h_j, n_j, b_j, c_j) for j = 1..K_t}
+M_{t} = \{(h_{j}, n_{j}, b_{j}, c_{j}) \mid j = 1, \ldots, K_{t}\}
 ~~~
 
-h_j 是 shard 的内容 hash 或 checksum，n_j 是样本数，b_j 是 token 数或字节数，c_j 是来源、语言、license、质量和风险统计。checksum 只能证明当前字节内容与记录一致，不能证明内容本身合法或质量合格。
+$h_{j}$ 是 shard 的内容 hash 或 checksum，$n_{j}$ 是样本数，$b_{j}$ 是按固定 tokenizer 和计数口径得到的 token 数，$c_{j}$ 是来源、语言、license、质量和风险统计。字节大小应另设字段，不能与 token 数共用同一列。checksum 只能在读取时与实际内容重新计算并比较后，支持“字节与记录一致”这一判断；它不能证明内容本身合法或质量合格。
 
 样本级 lineage 可以写成有序处理路径：
 
 ~~~math
-L_i = (s_i, o_i, p_i1, p_i2, ..., p_im, v_i)
+L_{i} = (s_{i}, o_{i}, p_{i,1}, p_{i,2}, \ldots, p_{i,m}, v_{i})
 ~~~
 
-s_i 是 source id，o_i 是原始对象 hash，p_ij 是第 j 个处理步骤，例如 parse、quality、PII scan、dedup 和 contamination scan，v_i 是样本进入的数据版本。lineage 同时支持“从样本追来源”和“从来源追模型版本”。
+$s_{i}$ 是 source id，$o_{i}$ 是原始对象 hash，$p_{i,j}$ 是第 $j$ 个处理步骤，例如 parse、quality、PII scan、dedup 和 contamination scan，$v_{i}$ 是样本进入的数据版本。lineage 同时支持“从样本追来源”和“从来源追模型版本”。
 
 lineage 覆盖率可以写成：
 
 ~~~math
-C_lineage = complete_lineage_samples / total_samples
+C_{\mathrm{lineage}, t} = \frac{N_{\mathrm{complete}, t}}{N_{\mathrm{sample}, t}}
 ~~~
 
-license 记录完整率可以写成：
+$N_{\mathrm{complete},t}$ 是拥有约定完整 lineage 的样本数，$N_{\mathrm{sample},t}$ 是该版本纳入统计的样本总数。license 记录完整率使用同一分母：
 
 ~~~math
-C_license = samples_with_license_record / total_samples
+C_{\mathrm{license}, t} = \frac{N_{\mathrm{license-recorded}, t}}{N_{\mathrm{sample}, t}}
 ~~~
 
-这两个分数只衡量记录是否存在，不代表记录内容一定正确。抽样时还要检查来源、许可文本、处理动作和实际样本是否相互匹配。
+$N_{\mathrm{license-recorded},t}$ 是存在 license 记录的样本数。这两个分数只衡量记录覆盖，不代表记录内容一定正确。抽样时还要检查来源、许可文本、处理动作和实际样本是否相互匹配。
 
-删除请求的执行时延可以写成：
+删除请求应分别记录目标隔离和处理闭合的时间。下式只对达到对应状态的请求有定义：
 
 ~~~math
-T_delete_r = t_closed_r - t_received_r
+T_{\mathrm{isolate}, r} = t_{\mathrm{isolated}, r} - t_{\mathrm{received}, r},\qquad
+T_{\mathrm{close}, r} = t_{\mathrm{closed}, r} - t_{\mathrm{received}, r}
 ~~~
 
-如果请求 r 对应的来源、hash、用户或 license 状态无法映射到版本和 shard，就不能声称删除机制可靠。还要记录待处理、已隔离、已从未来版本排除和已完成回放等状态，避免把“从当前目录消失”误当成删除完成。
+各时间戳需使用同一时区和单位。如果请求 $r$ 对应的来源、hash、用户或 license 状态无法映射到版本和 shard，就不能声称删除机制可靠。还要记录待处理、已隔离、已从未来候选中排除和已完成各适用对象回放等不同状态；尚未闭合的请求没有 $T_{\mathrm{close},r}$，不能把已隔离所花时间当成完整处理时延。
 
-访问阻断率可以写成：
+访问审计要把策略要求拒绝的请求与策略允许的请求分开计算。高风险数据不等于所有访问都未授权，因此拒绝率的分母应是按当前策略应拒绝的请求：
 
 ~~~math
-R_blocked = denied_or_invalid_attempts / all_high_risk_attempts
+R_{\mathrm{block}} = \frac{N_{\mathrm{blocked}}}{N_{\mathrm{unauthorized}}},\qquad
+R_{\mathrm{allow}} = \frac{N_{\mathrm{authorized-success}}}{N_{\mathrm{authorized-attempt}}},\qquad
+R_{\mathrm{log}} = \frac{N_{\mathrm{logged}}}{N_{\mathrm{decisions}}}
 ~~~
 
-这个指标不是越低越好：高风险数据的访问尝试应该被阻断，而正常授权访问不应被无故拒绝。因此要同时报告授权成功率、未授权阻断率和审计日志完整率。
+其中 $N_{\mathrm{blocked}}$ 是被阻断的未授权请求数，$N_{\mathrm{unauthorized}}$ 是按该策略判定为未授权的请求数；$N_{\mathrm{authorized-success}}$ 与 $N_{\mathrm{authorized-attempt}}$ 分别是授权请求中成功数与总数；$N_{\mathrm{logged}}$ 是有审计记录的访问决策数，$N_{\mathrm{decisions}}$ 是全部访问决策数。三项依次衡量未授权请求阻断、授权请求成功和访问决策留痕；都要注明策略版本、主体范围和时间窗。不能只报其中一项，也不能把“高风险”直接当作“必须拒绝”。
 
 数据文档完整率可以写成：
 
 ~~~math
-C_doc = completed_required_sections / required_sections
+C_{\mathrm{doc}, t} = \frac{N_{\mathrm{completed-sections}, t}}{N_{\mathrm{required-sections}, t}}
 ~~~
+
+$N_{\mathrm{completed-sections},t}$ 是已完成的必填章节数，$N_{\mathrm{required-sections},t}$ 是该版本实际要求的章节数；不适用项要记录理由，不能静默从分母移除。
 
 最终不要把这些指标压成一个治理总开关，而应保留并列状态向量：
 
 ~~~math
-C_gov = (M_manifest, L_lineage, L_license, A_access, D_delete, D_doc)
+G_{t} = \left(I_{\mathrm{manifest}, t}, C_{\mathrm{lineage}, t}, C_{\mathrm{license}, t}, (R_{\mathrm{block}}, R_{\mathrm{allow}}, R_{\mathrm{log}}), S_{\mathrm{delete}, t}, C_{\mathrm{doc}, t}\right)
 ~~~
 
-每个分量都应有责任人、版本、分母、例外记录和下一步动作。一个数据版本可以在 manifest 完整但删除链路不完整，也可以 lineage 完整但 license 尚未确认；并列状态比一个 True/False 更能支持处置。
+其中 $I_{\mathrm{manifest},t}$ 表示清单字段齐备且读取时校验通过，$S_{\mathrm{delete},t}$ 保留各请求的状态集合，其他分量保留对应比例或指标。每项都应有责任人、版本、分母、例外记录和下一步动作。一个版本可以 manifest 完整但删除链路未闭合，也可以 lineage 完整但 license 尚未确认；并列状态比一个 True/False 更能支持处置。
 
-公式中的分母尤其重要。假设一个版本有 100 万条样本，其中 99 万条来自低风险公开来源，1 万条来自需要逐条核验的高风险来源。总体 `C_license=0.99` 看起来很高，但如果那 1 万条全部没有授权记录，发布判断仍然不能只看总体比例。实践中应同时报告总体值、按来源/语言/风险桶分层的值，以及高风险桶的最差值。
+可以用一组假设审计值把这些分母走一遍。一个版本含 1,000 条样本，其中 960 条具备完整 lineage，因此 $C_{\mathrm{lineage}}=960/1{,}000=0.96$；920 条有 license 记录，因此总体 $C_{\mathrm{license}}=920/1{,}000=0.92$。若其中 50 条来自高风险来源，只有 40 条有记录，则该桶覆盖率是 $40/50=0.80$，总体值不能掩盖这项缺口。另有 8 次按策略应拒绝的请求，系统拦住 7 次，则 $R_{\mathrm{block}}=7/8=0.875$；100 次授权请求成功 96 次，则 $R_{\mathrm{allow}}=96/100=0.96$。108 次决策全部写入审计记录时，$R_{\mathrm{log}}=108/108=1.00$。六个必填文档章节完成五个，则 $C_{\mathrm{doc}}=5/6\approx0.833$。
 
-这些指标还要区分“没有对象”和“对象存在但没有通过”。如果版本没有样本，`C_lineage`、`C_license` 和按样本计算的风险率都应记为 `undefined`，而不是 0 或 1；如果版本有样本但所有对象都缺少记录，覆盖率才是 `0.0`。同样，没有删除请求时不能说“删除全部完成”，只能说当前没有待处理请求；有请求但目标无法解析，则应单独记录为未解析。
+同一组假设中，一个删除请求 09:00 登记、09:20 阻止进入新的训练候选，但派生对象和历史运行尚未核查，因此 $T_{\mathrm{isolate}}=20$ 分钟，而 $T_{\mathrm{close}}$ 仍未定义。状态向量必须保留“已有隔离证据、完整回放未闭合”；不能将各比例平均成一个通过分数。以上数值只是示例输入，真实阈值由用途、风险和责任人决定。
+
+这些指标还要区分“没有对象”和“对象存在但没有通过”。如果版本没有样本，$C_{\mathrm{lineage}}$、$C_{\mathrm{license}}$ 和按样本计算的风险率都应记为 undefined，而不是 0 或 1；如果版本有样本但所有对象都缺少记录，覆盖率才是 0.0。分母为零时，访问拒绝率、授权成功率、日志覆盖率和文档完整率也应记为 undefined。没有删除请求时只能说“当前没有待处理请求”，不能说“所有删除已完成”；有请求但目标无法解析，则应单独记录为未解析。
 
 这些指标也不能只在训练结束后计算。训练入口需要在读取 manifest 时核验快照 hash、schema 版本和删除状态；数据流水线在生成 shard 时记录 lineage 和 license；发布流程再把训练实际引用与已批准版本进行比对。指标一旦脱离这些状态转换，就会变成事后填表，无法阻止错误数据继续流入。
 
@@ -298,7 +307,7 @@ Manifest 是训练可复现的关键。如果没有 manifest，只知道“用�
 manifest 还承担供应链清单的作用。它不只告诉训练器去哪里读取文件，也让审计者知道某个版本由哪些对象组成、统计是否合理、哪些风险被声明。可以先做一个手算：如果三个 shard 的 token 数分别是 `1,130`、`820` 和 `1,040`，则版本总量应为：
 
 ~~~math
-N_{mathrm{token}} = 1130 + 820 + 1040 = 2990
+N_{\mathrm{token}} = 1130 + 820 + 1040 = 2990
 ~~~
 
 如果训练日志声称读取了 3,200 token，至少有一个引用、统计口径或计数器不一致。这个简单的总量检查不能证明数据合法，却能及时发现 shard 漏读、重复读取或 manifest 与实际文件不匹配。
@@ -364,9 +373,29 @@ manifest 的统计也有口径边界。`token_count` 可能是 tokenizer A 的 t
 
 因此，删除请求需要 lineage、source_id、hash、索引和版本记录支持。
 
+如果请求已经进入模型训练，数据侧的定位和隔离只能说明哪些输入对象受影响，并不能证明模型参数中不再保留其影响。模型编辑、遗忘方法及其评测边界由[第八册第九章《Model Editing 与 Unlearning》](../../book-08-ai-safety-alignment/chapters/09-model-editing与unlearning.md)完整讨论；本章只负责把受影响的数据版本、运行和派生对象交接给该层判断。
+
 一个可靠的处理流程可以从请求登记开始。系统先给请求分配稳定的 request id，保存接收时间、请求范围、验证状态和负责团队；随后通过 source、对象 hash、用户标识或其他允许的索引寻找命中对象；命中后建立受影响版本和派生对象清单，并把对象标记为不可进入新快照。每个阶段都应有明确状态，例如 `received`、`targeted`、`isolated`、`replayed`、`exception`，而不是只写一个最终日期。
 
 删除的难点通常在派生关系。原始文档可能已经被切成样本、合并到 shard、写入检索索引、生成 embedding，甚至参与过合成数据或偏好数据。系统至少要知道哪些派生对象可以直接定位、哪些只能通过重建得到、哪些历史训练运行受影响。对无法逐个定位的对象，应把重建或重新导出作为动作，并记录旧对象何时停止使用。
+
+下面的流程把未来训练候选、已生成的派生对象和历史训练运行分成三条影响路径。只完成第一条，最多说明后续版本不再采入；请求范围是否完整处理，还要看派生对象与历史运行的回放结果。
+
+~~~mermaid
+flowchart LR
+    A["删除请求"] --> B["按 source、hash 或允许的 ID 定位"]
+    B -->|无命中| U["目标未解析，保留异常"]
+    B -->|命中| C["建立受影响对象清单"]
+    C --> D["排除未来训练候选"]
+    D --> E["生成新快照与 manifest"]
+    C --> F["回放 shard、索引、缓存等派生对象"]
+    C --> G["标记受影响的训练运行与发布物"]
+    F --> H["记录完成项、未决项与例外"]
+    G --> I["评估重训或模型层处理"]
+    E --> H
+    H --> J["责任人复核并记录请求状态"]
+    I --> J
+~~~
 
 还要区分“未来不再使用”和“历史影响已经消除”。把样本从下一个版本排除，是一个有价值的控制动作，但它不等于旧版本、缓存和模型参数已经不再包含相关影响。工程文档应分别报告这两个状态，避免向请求方或内部决策者给出超出证据的结论。是否需要模型重训或其他补救，需要结合适用规则和产品风险进行专门判断。
 
@@ -394,6 +423,8 @@ manifest 的统计也有口径边界。`token_count` 可能是 tokenizer A 的 t
 审计可以分成三种互补的工作。自动校验适合检查 hash、字段类型、枚举值、数量守恒和状态转换；抽样复核适合判断 license 文本、PII 标签、质量标签和处理结果是否真的相符；面向事件的回放适合验证一个来源、删除请求或权限工单能否沿 lineage 找到所有受影响对象。只有自动校验，容易把错误输入当成正确事实；只有人工抽样，又无法覆盖大规模数据。
 
 审计报告要保存范围和分母。例如“PII 检测通过”需要说明检测覆盖的是全部样本、某个 shard，还是只抽样了 10,000 条；“删除完成”需要说明请求命中了多少对象、哪些派生层已经处理、哪些仍在例外队列。没有范围的通过语句无法被复核，也无法比较两个版本的风险变化。
+
+例如，本轮从一个高风险来源抽查 40 条记录，其中 36 条有授权记录，则覆盖率为 $36/40=0.90$；再人工核对这 36 份记录，只有 32 份与实际来源及允许用途相符，则抽样匹配率为 $32/36\approx0.889$。前一个数只说明“字段存在”，后一个数才检查“字段是否支持当前判断”。如果只报 90% 覆盖率，读者会看不到其中仍有 4 条缺记录、另有 4 条记录与对象不匹配。
 
 审计本身也可能失败。任务被中断、重试产生重复事件、日志写入和数据写入不在同一个事务中，都会制造“日志说完成、对象实际未更新”的分离状态。生产系统要为审计事件提供幂等键、运行状态、失败重试记录和最终一致性检查；对关键动作，还要从结果存储反向抽查，而不是只相信执行端返回值。
 
@@ -474,10 +505,10 @@ Model card 也不是法律合规证书。它可以提高透明度，帮助用户
 可以把一次运行的可复现引用写成：
 
 ~~~math
-R = (V_{mathrm{code}}, V_{mathrm{data}}, V_{mathrm{tokenizer}}, V_{mathrm{config}}, V_{mathrm{eval}}, E_{mathrm{env}})
+R = (V_{\mathrm{code}}, V_{\mathrm{data}}, V_{\mathrm{tokenizer}}, V_{\mathrm{config}}, V_{\mathrm{eval}}, E_{\mathrm{env}})
 ~~~
 
-其中前五项是版本化对象，`E_env` 是依赖、硬件和运行环境摘要。这个表达式不是要求所有系统都使用同一工具，而是提醒读者：只保存 checkpoint 文件，无法说明 checkpoint 是在什么输入和环境上产生的。
+其中前五项是版本化对象，$E_{\mathrm{env}}$ 是依赖、硬件和运行环境摘要。这个表达式不是要求所有系统都使用同一工具，而是提醒读者：只保存 checkpoint 文件，无法说明 checkpoint 是在什么输入和环境上产生的。
 
 ---
 
@@ -552,7 +583,7 @@ schema 演进至少有三种变化。加一个有明确默认值的可选字段�
 
 还要防止指标被“优化”成好看的数字。把难以处理的样本从分母中排除，会提高覆盖率；把所有请求一律拒绝，会提高高风险阻断率，却让授权任务无法运行；把文档字段填入默认文本，会提高完整率，却没有增加事实证据。因此指标应与样本抽查、异常队列和失败动作配套，并保留原始分母和排除理由。
 
-一个简单的分层例子是：总体 license 记录完整率为 99%，但高风险来源完整率只有 80%。发布决策应优先关注后一个数字，因为风险不是按样本平均分配的。实际系统可以为不同风险桶设置不同阈值，也可以要求高风险桶必须逐项确认，而不是依赖总体平均值。指标是观察仪表盘，最终动作仍需要结合版本用途和责任边界。
+一个分层例子是：1,000 条样本中 990 条有 license 记录，总体覆盖率为 $990/1{,}000=0.99$；其中 50 条来自高风险来源，只有 40 条有记录，该桶覆盖率是 $40/50=0.80$。发布决策不能用 99% 的总体值掩盖高风险桶尚缺 10 条记录。系统可以按风险桶设定不同门槛，或要求高风险桶逐项确认；阈值依据版本用途和责任边界确定，指标本身不是发布许可。
 
 ---
 
@@ -588,18 +619,20 @@ schema 演进至少有三种变化。加一个有明确默认值的可选字段�
 
 它演示的是治理机制，不是真实 DVC、对象存储、权限系统、合规系统或生产数据平台。真实系统需要接入对象存储版本、数据目录、权限服务、审计日志、删除工单、dataset card / datasheet 文档和训练日志。demo 的 decision 只表示当前版本下一步应做什么，不把一组检查压成“治理完成”的绝对结论。
 
+> 代码状态：静态审阅，未运行（2026-11-03；Python 版本未确认）。
+
 ~~~python
 import hashlib
 from collections import Counter, defaultdict
 
 
 samples = [
-    {"id": "s1", "source": "web_blog", "shard": "shard-a", "tokens": 520, "license": "permissive", "pii": False, "contam": False, "access": "public", "lineage": ["crawl", "parse", "quality", "dedup"], "deleted": False},
-    {"id": "s2", "source": "math_docs", "shard": "shard-a", "tokens": 610, "license": "permissive", "pii": False, "contam": False, "access": "public", "lineage": ["crawl", "parse", "quality", "dedup"], "deleted": False},
-    {"id": "s3", "source": "user_forum", "shard": "shard-b", "tokens": 430, "license": "review", "pii": True, "contam": False, "access": "restricted", "lineage": ["crawl", "parse", "quality"], "deleted": False},
-    {"id": "s4", "source": "benchmark_site", "shard": "shard-b", "tokens": 390, "license": "blocked", "pii": False, "contam": True, "access": "quarantine", "lineage": ["crawl", "parse", "quality", "contam_scan"], "deleted": False},
-    {"id": "s5", "source": "code_repo", "shard": "shard-c", "tokens": 740, "license": "permissive", "pii": False, "contam": False, "access": "internal", "lineage": ["crawl", "parse", "secret_scan", "dedup"], "deleted": False},
-    {"id": "s6", "source": "old_vendor", "shard": "shard-c", "tokens": 300, "license": "expired", "pii": False, "contam": False, "access": "blocked", "lineage": ["import", "quality"], "deleted": True},
+    {"id": "s1", "source": "web_blog", "shard": "shard-a", "tokens": 520, "license": "permissive", "pii": False, "contam": False, "access": "public", "lineage": ["crawl", "parse", "quality", "dedup"], "excluded_from_training_candidates": False},
+    {"id": "s2", "source": "math_docs", "shard": "shard-a", "tokens": 610, "license": "permissive", "pii": False, "contam": False, "access": "public", "lineage": ["crawl", "parse", "quality", "dedup"], "excluded_from_training_candidates": False},
+    {"id": "s3", "source": "user_forum", "shard": "shard-b", "tokens": 430, "license": "review", "pii": True, "contam": False, "access": "restricted", "lineage": ["crawl", "parse", "quality"], "excluded_from_training_candidates": False},
+    {"id": "s4", "source": "benchmark_site", "shard": "shard-b", "tokens": 390, "license": "blocked", "pii": False, "contam": True, "access": "quarantine", "lineage": ["crawl", "parse", "quality", "contam_scan"], "excluded_from_training_candidates": False},
+    {"id": "s5", "source": "code_repo", "shard": "shard-c", "tokens": 740, "license": "permissive", "pii": False, "contam": False, "access": "internal", "lineage": ["crawl", "parse", "secret_scan", "dedup"], "excluded_from_training_candidates": False},
+    {"id": "s6", "source": "old_vendor", "shard": "shard-c", "tokens": 300, "license": "expired", "pii": False, "contam": False, "access": "blocked", "lineage": ["import", "quality"], "excluded_from_training_candidates": True},
 ]
 
 required_lineage = {"crawl", "parse", "quality"}
@@ -636,9 +669,9 @@ for item in samples:
 manifest = []
 for shard, rows in sorted(shards.items()):
     joined = ";".join(sample_hash(row) for row in sorted(rows, key=lambda x: x["id"]))
-    manifest.append({"shard": shard, "sample_count": len(rows), "tokens": sum(row["tokens"] for row in rows), "checksum": digest(joined)})
+    manifest.append({"shard": shard, "sample_count": len(rows), "tokens": sum(row["tokens"] for row in rows), "toy_fingerprint": digest(joined)})
 
-eligible = [item for item in samples if item["license"] == "permissive" and not item["pii"] and not item["contam"] and not item["deleted"]]
+eligible = [item for item in samples if item["license"] == "permissive" and not item["pii"] and not item["contam"] and not item["excluded_from_training_candidates"]]
 license_counts = Counter(item["license"] for item in samples)
 lineage_ok = [item["id"] for item in samples if required_lineage.issubset(set(item["lineage"]))]
 lineage_coverage = safe_ratio(len(lineage_ok), len(samples))
@@ -675,18 +708,18 @@ for req in deletion_requests:
     hits = deletion_hits[request_id]
     if not hits:
         deletion_status[request_id] = "unresolved_target"
-    elif all(item["deleted"] for item in samples if item["id"] in hits):
-        deletion_status[request_id] = "completed"
+    elif all(item["excluded_from_training_candidates"] for item in samples if item["id"] in hits):
+        deletion_status[request_id] = "excluded_from_training_candidates_only"
     else:
         deletion_status[request_id] = "needs_isolation"
 
 checks = {
-    "manifest_checksums": all(row["checksum"] for row in manifest),
+    "manifest_toy_fingerprints_present": all(row["toy_fingerprint"] for row in manifest),
     "lineage_minimum": report["lineage_coverage"] is not None and report["lineage_coverage"] >= 0.65,
     "training_eligibility": set(report["eligible_ids"]) == {"s1", "s2", "s5"},
     "access_controls": len(blocked_access) == 2,
     "deletion_targets_resolved": bool(deletion_hits) and all(bool(hits) for hits in deletion_hits.values()),
-    "deletion_completed": bool(deletion_status) and all(status == "completed" for status in deletion_status.values()),
+    "deletion_targets_excluded_from_candidates": bool(deletion_status) and all(status == "excluded_from_training_candidates_only" for status in deletion_status.values()),
     "datasheet_documented": datasheet_completion is not None and datasheet_completion >= 0.80,
     "model_card_inputs": model_card_ready,
 }
@@ -706,8 +739,10 @@ if signals["lineage_missing_ids"]:
     actions.append("repair_lineage_before_claiming_full_reproducibility")
 if signals["unresolved_deletion_requests"]:
     actions.append("resolve_deletion_request_targets")
-if not checks["deletion_completed"]:
-    actions.append("replay_deletion_across_affected_objects")
+if any(status == "needs_isolation" for status in deletion_status.values()):
+    actions.append("isolate_targets_from_new_training_candidates")
+if any(status == "excluded_from_training_candidates_only" for status in deletion_status.values()):
+    actions.append("verify_deletion_across_derived_objects_and_historical_runs")
 if signals["missing_datasheet_fields"]:
     actions.append("complete_datasheet_maintenance_section")
 if signals["missing_model_card_inputs"]:
@@ -729,19 +764,21 @@ assert report["lineage_missing"] == ["s5", "s6"]
 assert report["blocked_access"] == [("contractor", "s5", "internal"), ("researcher", "s4", "quarantine")]
 assert report["deletion_hits"] == {"del-001": ["s6"], "del-002": []}
 assert report["datasheet_completion"] == 0.833
-assert report["deletion_status"] == {"del-001": "completed", "del-002": "unresolved_target"}
+assert report["deletion_status"] == {"del-001": "excluded_from_training_candidates_only", "del-002": "unresolved_target"}
 assert report["checks"]["deletion_targets_resolved"] is False
+assert report["checks"]["deletion_targets_excluded_from_candidates"] is False
+assert report["checks"]["manifest_toy_fingerprints_present"] is True
 assert report["checks"]["model_card_inputs"] is False
 assert report["decision"] == "hold_for_governance_repair"
 assert safe_ratio(0, 0) is None
 assert safe_ratio(0, 10) == 0.0
 ~~~
 
-运行后会看到类似输出：
+固定输入下的静态预期如下；短指纹以占位符表示，本轮没有执行代码或重新计算指纹：
 
 ~~~text
 dataset_version= data-v2026-06-06.1
-manifest= [{'shard': 'shard-a', 'sample_count': 2, 'tokens': 1130, 'checksum': '8ee90eff217c'}, {'shard': 'shard-b', 'sample_count': 2, 'tokens': 820, 'checksum': '83cc9bdbbafe'}, {'shard': 'shard-c', 'sample_count': 2, 'tokens': 1040, 'checksum': 'b5bf80f8852a'}]
+manifest= [{'shard': 'shard-a', 'sample_count': 2, 'tokens': 1130, 'toy_fingerprint': '<12 位示例指纹>'}, {'shard': 'shard-b', 'sample_count': 2, 'tokens': 820, 'toy_fingerprint': '<12 位示例指纹>'}, {'shard': 'shard-c', 'sample_count': 2, 'tokens': 1040, 'toy_fingerprint': '<12 位示例指纹>'}]
 eligible_ids= ['s1', 's2', 's5']
 license_counts= {'blocked': 1, 'expired': 1, 'permissive': 3, 'review': 1}
 lineage_coverage= 0.667
@@ -750,14 +787,18 @@ blocked_access= [('contractor', 's5', 'internal'), ('researcher', 's4', 'quarant
 deletion_hits= {'del-001': ['s6'], 'del-002': []}
 datasheet_completion= 0.833
 model_card_ready= False
-deletion_status= {'del-001': 'completed', 'del-002': 'unresolved_target'}
-checks= {'manifest_checksums': True, 'lineage_minimum': True, 'training_eligibility': True, 'access_controls': True, 'deletion_targets_resolved': False, 'deletion_completed': False, 'datasheet_documented': True, 'model_card_inputs': False}
-signals= {'lineage_missing_ids': ['s5', 's6'], 'unresolved_deletion_requests': ['del-002'], 'deletion_status': {'del-001': 'completed', 'del-002': 'unresolved_target'}, 'missing_datasheet_fields': ['maintenance'], 'missing_model_card_inputs': ['deletion_policy']}
-actions= ['repair_lineage_before_claiming_full_reproducibility', 'resolve_deletion_request_targets', 'replay_deletion_across_affected_objects', 'complete_datasheet_maintenance_section', 'document_deletion_policy_in_model_card_inputs']
+deletion_status= {'del-001': 'excluded_from_training_candidates_only', 'del-002': 'unresolved_target'}
+checks= {'manifest_toy_fingerprints_present': True, 'lineage_minimum': True, 'training_eligibility': True, 'access_controls': True, 'deletion_targets_resolved': False, 'deletion_targets_excluded_from_candidates': False, 'datasheet_documented': True, 'model_card_inputs': False}
+signals= {'lineage_missing_ids': ['s5', 's6'], 'unresolved_deletion_requests': ['del-002'], 'deletion_status': {'del-001': 'excluded_from_training_candidates_only', 'del-002': 'unresolved_target'}, 'missing_datasheet_fields': ['maintenance'], 'missing_model_card_inputs': ['deletion_policy']}
+actions= ['repair_lineage_before_claiming_full_reproducibility', 'resolve_deletion_request_targets', 'verify_deletion_across_derived_objects_and_historical_runs', 'complete_datasheet_maintenance_section', 'document_deletion_policy_in_model_card_inputs']
 decision= hold_for_governance_repair
 ~~~
 
-这个 demo 的重点是把几个经常被混为一谈的问题拆开。`eligible_ids` 只说明样本满足当前训练集筛选条件；`checks` 描述已经核验的事实，`signals` 保留缺失对象和未完成事项，`actions` 把缺口翻译成可执行的修复工作，`decision` 才表示当前版本是否可以进入下一步。样本 s6 已经从训练候选中排除，但请求 del-002 没有找到对应对象，所以系统不能把“当前候选集没有它”解释成“删除请求已经完成”。同样，datasheet 的维护字段和 model card 的删除策略事实尚未补齐，版本应停留在治理修复阶段，而不是被一个总布尔值掩盖。
+`digest` 只保留 SHA-256 的前 12 个十六进制字符；`sample_hash` 也只覆盖 id、source、tokens、license 和 access 五个字段。这里的 `toy_fingerprint` 只是示范字段，不是对 shard 全部字节的完整性校验；`manifest_toy_fingerprints_present` 只检查字段非空，不会重算并比较内容。生产系统必须对规范化内容或实际 shard 字节生成完整 digest，并在读取时校验。示例 manifest 是治理输入 ledger 的清单，因此包含已标记为不进入训练候选的 s6；`eligible_ids` 才是当前候选集合。生产系统应把训练快照 manifest 与删除/tombstone 事件分开记录。
+
+这个 demo 的重点是把几个经常被混为一谈的问题拆开。`eligible_ids` 只说明样本满足当前训练集筛选条件；`checks` 描述代码实际检查过的事实，`signals` 保留缺失对象和未完成事项，`actions` 把缺口翻译成下一步操作，`decision` 才表示当前版本是否可以进入下一步。s6 只被标记为排除当前训练候选，代码没有检查派生对象、缓存、历史快照或模型训练记录，所以状态是 `excluded_from_training_candidates_only`，不能称为“删除完成”。请求 del-002 没有找到目标，仍需解析；datasheet 的维护字段和 model card 的删除策略事实也尚未补齐，因此版本应停留在治理修复阶段。
+
+可以手工核对 demo 的两个比例：s1—s4 满足 `required_lineage`，s5 缺 `quality`、s6 缺 `crawl` 和 `parse`，所以覆盖率为 $4/6\approx0.667$；datasheet 六项中五项完成，因此完成率为 $5/6\approx0.833$。虽然这两个门槛检查为真，缺 lineage 的样本中仍包括当前候选 s5；动作列表因此要求先补 lineage。比例过线只表示过了这一项规则，不等于版本整体可以发布。
 
 ---
 
@@ -831,6 +872,10 @@ datasheet、dataset card 和 model card 不是同一份文档的不同标题。�
 
 当发生新的删除请求时，闭环应该支持一次受控回放：根据请求找到对象和受影响版本，阻止它进入新快照，重新生成受影响的 manifest 和统计，标记哪些训练运行和派生索引受到影响，再由责任人决定是否重训或采用其他模型层面的措施。回放的产物不仅是“删掉了某个文件”，还应包含命中的对象数量、未解析请求、处理时间、例外原因和新的版本引用。这样下一次审计才能判断动作是否覆盖了真实影响范围。
 
+例如，假设请求命中 3 个样本，lineage 映射到 2 个 shard、1 个向量索引和 1 个缓存；新版本必须先排除 3 个样本，再重建两个 shard 并更新对应统计。若旧训练运行 `run-7` 仍引用父版本，它仍是受影响历史运行，不能因为新版本已排除样本就改写旧记录。审计清单可以逐项核对 `3 个样本 → 2 个 shard → 1 个索引 + 1 个缓存 → 1 个旧运行`；任何一个对象未回放或无法定位，都留在未闭合状态并交给负责人处理。
+
+若检索只找到了 2 个样本，第三个目标应进入“部分命中/待解析”队列，不能按已找到的对象数把请求缩小为 2 个。每个阶段分别记录发现数、完成数、异常数和时间戳；只有预先定义的目标范围都被覆盖，且例外已由负责人判定后，才允许把请求标成闭合。这样能让超时、部分回放和真实完成在审计报表里保持可区分。
+
 当模型行为出现回归时，闭环也应该反向工作。先比较模型运行引用的数据版本和前一版本的 manifest，再沿 lineage 找到新增、删除或规则改变的来源，按语言、领域、风险和采样桶切分评测，最后把结论写回数据版本和 model card。若只在模型层面盲目调学习率，可能把一个数据治理问题变成更难解释的训练变化。
 
 工程上可以把一次可回放运行概括为：
@@ -852,7 +897,7 @@ source snapshot
 
 本章使用的资料承担不同角色，不能把它们混写成同一种权威。Gebru 等人的 Datasheets for Datasets 是数据集文档化的研究框架，强调动机、组成、采集、处理、用途和限制；Mitchell 等人的 Model Cards for Model Reporting 是模型发布文档框架，强调模型用途、评估、限制和风险。它们回答“应该说明哪些问题”，不替代组织对具体数据的事实核验。
 
-W3C PROV 提供描述实体、活动和责任主体之间关系的通用血缘模型，适合作为 lineage 语义参考；DVC 和 OpenLineage 的官方文档则更接近工程实现，分别帮助理解数据/实验版本管理和跨系统运行事件。它们能说明一种工具如何建模、记录或传递信息，但不能自动证明某个项目已经完成授权审查、隐私评估或删除义务。
+W3C PROV 提供描述实体、活动和责任主体之间关系的通用血缘模型，适合作为 lineage 语义参考；Croissant 1.1 可以用 PROV-O 在数据集、文件、记录集或字段层表达机器可读 provenance，也提供使用条件的表示入口。DVC 和 OpenLineage 的官方文档则更接近工程实现，分别帮助理解数据/实验版本管理和跨系统运行事件。它们能说明一种格式或工具如何表示、建模或传递信息，但不能自动证明元数据正确、授权已确认、访问策略已执行或删除义务已履行。
 
 Hugging Face Dataset Cards 体现了开放数据集常见的说明字段和发布习惯，NIST AI RMF 提供风险管理的组织化语言。两者适合帮助团队设计文档和风险流程，但仍需结合数据来源、使用目的、主体关系和产品部署环境判断。公开平台上的卡片是发布者提供的声明，阅读时要区分“作者自述”“可验证的统计”“独立评测”和“法律结论”。
 
@@ -865,11 +910,12 @@ GDPR Article 17 常被称为删除权的法律资料入口，但它包含适用�
 下面的入口用于继续核对原始定义和版本变化：
 
 1. [Datasheets for Datasets](https://arxiv.org/abs/1803.09010) 和 [Model Cards for Model Reporting](https://arxiv.org/abs/1810.03993)：研究论文，分别对应数据集说明和模型报告框架。
-2. [W3C PROV Overview](https://www.w3.org/TR/prov-overview/)：标准族概览，用于理解实体、活动和责任主体之间的 provenance 关系。
-3. [DVC Documentation](https://dvc.org/doc) 与 [OpenLineage Documentation](https://openlineage.io/docs/)：工程工具文档，用于对照数据/实验版本和跨系统运行事件的实现方式。
-4. [Hugging Face Dataset Cards](https://huggingface.co/docs/hub/datasets-cards)：开放数据集发布文档的字段和维护方式示例。
-5. [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：风险管理框架，不是某个项目的自动合规证明。
-6. [GDPR Article 17](https://eur-lex.europa.eu/eli/reg/2016/679/art_17/oj)：法律原文入口，具体适用范围、例外和补救措施仍需结合实际法域判断。
+2. [Croissant 1.1 规范](https://docs.mlcommons.org/croissant/docs/croissant-spec-1.1.html)：机器可读数据集元数据规范；其 provenance 与 usage-condition 表示能力不等于内容核验或策略强制执行。
+3. [W3C PROV Overview](https://www.w3.org/TR/prov-overview/)：标准族概览，用于理解实体、活动和责任主体之间的 provenance 关系。
+4. [DVC Documentation](https://dvc.org/doc) 与 [OpenLineage Documentation](https://openlineage.io/docs/)：工程工具文档，用于对照数据/实验版本和跨系统运行事件的实现方式。
+5. [Hugging Face Dataset Cards](https://huggingface.co/docs/hub/datasets-cards)：开放数据集发布文档的字段和维护方式示例。
+6. [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：自愿使用的风险管理框架，不是某个项目的自动合规证明。
+7. [GDPR Article 17](https://eur-lex.europa.eu/eli/reg/2016/679/art_17/oj)：法律原文入口，具体适用范围、例外和补救措施仍需结合实际法域判断。
 
 阅读这些入口时，应优先查看原论文、标准原文和官方文档的发布日期与版本；第三方文章适合帮助定位问题，但不应单独支撑本章关于工具能力、法律义务或项目事实的确定结论。
 

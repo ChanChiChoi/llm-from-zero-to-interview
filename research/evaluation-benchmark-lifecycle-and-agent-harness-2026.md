@@ -1,6 +1,6 @@
 # Benchmark 生命周期、评测器偏差与 Agent Harness 评估来源
 
-核验日期：2026-11-02。本记录只保存联网核验到的知识点、来源版本、阅读范围和证据边界；书册定位、候选去向和修改进度见 `progress/book-07-evaluation-experiments/architecture-audit.md`。
+核验日期：2026-11-02；补充核验：2026-11-03。本记录只保存联网核验到的知识点、来源版本、阅读范围和证据边界；书册定位、候选去向和修改进度见 `progress/book-07-evaluation-experiments/architecture-audit.md`。
 
 ## Benchmark 饱和与生命周期
 
@@ -41,3 +41,33 @@
 - **阅读范围：** Stanford 作者机构页面摘要。
 - **来源支持的事实：** 页面介绍一个多智能体合作、冲突和说服的动态博弈环境，并使用 Bayesian Plackett–Luce 模型估计玩家相对技能与不确定性。
 - **证据边界：** 页面将其标为工作论文；摘要描述的是一个特定游戏环境和排名方案，不能证明动态博弈能普遍解决污染或饱和，也不能替代具有外部效度的专业任务评估。
+
+## 2026-11-03 补充核验：Agent trace 评分与 Harness-Bench 版本信息
+
+### OpenAI Trace Grading 官方文档
+
+- **来源与核验日期：** [OpenAI API Trace grading documentation](https://developers.openai.com/api/docs/guides/trace-grading)，2026-11-03 访问页面并阅读定义与使用流程段落。
+- **来源支持的事实：** 文档将 trace grading 定义为对 Agent 端到端决策、工具调用和推理步骤组成的 trace 赋予结构化分数或标签；trace evals 使用这类评分在多条样本上比较变更、发现回归和检查改进。页面介绍了检查 trace、创建 grader、批量评分和配置 run 的产品工作流。
+- **证据边界：** 这是供应商产品文档，不是独立效能研究；它说明可用的工作流入口，不证明 grader 对某任务有效、标注正确或解释了失败根因。工具生命周期和 dashboard 行为可能变化，应使用时按当前文档核验。
+
+### Harness-Bench arXiv 摘要与版本化正文数量不一致
+
+- **来源与版本：** [arXiv abstract page](https://arxiv.org/abs/2605.27922) 显示版本 v2 最后修订于 2026-10-15；另核读固定的 [v2 HTML full text](https://arxiv.org/html/2605.27922v2)。
+- **来源支持的定性方法：** v2 正文描述在共享任务输入、初始环境和协议下比较原生 model–harness 配置，以任务特定 oracle 检查最终产物，并保留轨迹和资源记录；研究报告的是完整配置和选定任务下的结果，适合说明 harness 与模型的配置交互。
+- **来源分歧：** 2026-11-03 访问时，arXiv abstract 页面摘要写 106 tasks 和 5,194 trajectories；固定 v2 HTML 正文则写 300 tasks、274 个 general 与 26 个 multimodal tasks、1,408 个评分模块、7 个 harness，以及 general/multimodal 配置数不同。版本化正文还写每个 task–model–harness 配置只运行一次。摘要与固定版本正文的任务/运行规模无法从这两个页面相互解释。
+- **证据边界与处理：** 在数量差异得到来源侧澄清前，精确规模、配置数和结果排名标为 needs-verification。本书只保留设计层面的定性启示，不引用这些数量或排名，也不把完整配置差异归因于单一 harness 功能或基础模型。
+
+## 2026-11-03 补充核验：评估平台文档与 GenAI 评价事件
+
+### MLflow Tracking、GenAI evaluation datasets 与回归测试
+
+- **来源与核验日期：** MLflow 官方 [Tracking](https://mlflow.org/docs/latest/tracking/)、[Evaluation Datasets](https://mlflow.org/docs/latest/genai/datasets/)、[Evaluation Datasets SDK Guide](https://mlflow.org/docs/latest/genai/datasets/sdk-guide/)、[Regression Testing and CI/CD](https://mlflow.org/docs/latest/genai/eval-monitor/regression-testing/) 文档，2026-11-03 访问；链接使用 latest，未固定具体软件 release。
+- **阅读范围：** Tracking runs/metadata/artifacts 概览；GenAI dataset 输入、expectations、source/provenance、SQL backend 要求；pytest 标记回归用例、scorer/evaluate 调用及 CI 记录流程。
+- **来源支持的事实：** Tracking 提供记录运行参数、代码版本、指标和输出文件的 API/UI；GenAI evaluation datasets 可从已有 traces、手工样例或 DataFrame 构建，包含 inputs、可选 expectations、来源和记录血缘；文档当前要求 Evaluation Datasets 使用 SQL backend。回归测试指南把固定失败模式写成 pytest 行为测试，用 scorer 断言并将测试运行及 trace 关联到 MLflow run。
+- **证据边界：** 这些是动态产品/工程文档，说明工具支持的对象与工作流，不证明记录的数据、scorer、样本或实验结论有效。`latest` 文档不等于任何部署版本均有相同能力；应用时需核对目标 release、server backend、权限和数据治理条件。
+
+### OpenTelemetry GenAI evaluation result 事件
+
+- **来源与版本：** 原 [OpenTelemetry GenAI events 页面](https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-events/) 已标记迁移且不再维护；迁移目标为 OpenTelemetry [GenAI semantic conventions repository](https://github.com/open-telemetry/semantic-conventions-genai)，本次实际阅读 [gen-ai-events.md](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-events.md)，分支为 `main`，核验日期 2026-11-03。
+- **来源支持的事实：** 当前文档定义 `gen_ai.evaluation.result` 事件，用于记录对 GenAI 输出进行质量、准确性或其他属性评价的结果；定义 `gen_ai.evaluation.name`、`gen_ai.evaluation.score.label`、`gen_ai.evaluation.score.value`、`gen_ai.evaluation.explanation`，并建议在 span ID 不可用时用 `gen_ai.response.id` 关联被评价输出。
+- **证据边界：** 仓库将语义规范标为 Development，字段要求和实现支持仍会变化；遥测字段只帮助关联评分结果，不定义正确性、gold label 或 grader 效度。事件还可能包含内容或评价解释，接入前须单独做敏感数据与留存控制。

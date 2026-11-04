@@ -87,7 +87,7 @@ Distillation data 强调 teacher-student 关系：teacher 为 student 提供回�
 训练数据可以按生成来源与 teacher 关系分别打标签：
 
 ~~~math
-o_i \in \{\mathrm{natural},\mathrm{generated}\},\quad d_i \in \{0,1\}
+o_{i} \in \{\mathrm{natural},\mathrm{generated}\},\quad d_{i} \in \{0,1\}
 ~~~
 
 `o_i` 表示原始来源类别，`d_i=1` 表示样本携带 teacher 到 student 的蒸馏关系；合成集与蒸馏集可以重叠，不能默认互斥。
@@ -95,7 +95,7 @@ o_i \in \{\mathrm{natural},\mathrm{generated}\},\quad d_i \in \{0,1\}
 一条合成或蒸馏样本可以表示为：
 
 ~~~math
-s_i = (x_i, y_i, a_i, t_i, p_i, q_i, r_i, z_i)
+s_{i} = (x_{i}, y_{i}, a_{i}, t_{i}, p_{i}, q_{i}, r_{i}, z_{i})
 ~~~
 
 其中 `x_i` 是指令或上下文，`y_i` 是生成答案或轨迹，`a_i` 是目标能力标签，`t_i` 是 teacher / generator 标识，`p_i` 是 prompt 和采样参数版本，`q_i` 是质量分，`r_i` 是风险分，`z_i` 是授权、验证、去重、污染和版本元数据。
@@ -103,7 +103,7 @@ s_i = (x_i, y_i, a_i, t_i, p_i, q_i, r_i, z_i)
 如果是普通 SFT 合成样本，目标仍是条件语言建模：
 
 ~~~math
-L_{\mathrm{sft}} = -\frac{1}{N_{\mathrm{tok}}}\sum_{i=1}^{m} w_i \sum_{j=1}^{L_i}\log p_{\theta}(y_{i,j} \mid x_i, y_{i,1:j-1})
+L_{\mathrm{sft}} = -\frac{1}{N_{\mathrm{tok}}}\sum_{i=1}^{m} w_{i} \sum_{j=1}^{L_{i}}\log p_{\theta}(y_{i,j} \mid x_{i}, y_{i,1:j-1})
 ~~~
 
 其中 `m` 是样本数，`L_i` 是第 `i` 个目标回答实际参与 loss 的 token 数，`w_i≥0` 是样本权重；`N_tok=Σ_i(w_iL_i)` 是加权目标 token 分母，必须大于零。若使用不同的 loss mask，应按实际参与 loss 的 token 重算 `L_i` 和分母。`w_i` 不应只由 teacher 分数决定，还要考虑任务覆盖、独立验证、重复和风险。这里使用自然对数。比如 `w=1`、3 个目标 token 的条件概率分别为 `0.5、0.25、0.8`，则 `L_sft=-(ln 0.5+ln 0.25+ln 0.8)/3≈0.768`。这是一个 token 级教学计算，不代表生成样本质量。
@@ -111,7 +111,7 @@ L_{\mathrm{sft}} = -\frac{1}{N_{\mathrm{tok}}}\sum_{i=1}^{m} w_i \sum_{j=1}^{L_i
 如果 teacher 提供 soft distribution，蒸馏损失常写成 KL 形式：
 
 ~~~math
-L_{\mathrm{kd}} = \frac{\tau^2}{N_{\mathrm{ctx}}}\sum_{i=1}^{N_{\mathrm{ctx}}} D_{\mathrm{KL}}\left(p_{T,\tau}(\cdot \mid c_i)\parallel p_{S,\tau}(\cdot \mid c_i)\right)
+L_{\mathrm{kd}} = \frac{\tau^2}{N_{\mathrm{ctx}}}\sum_{i=1}^{N_{\mathrm{ctx}}} D_{\mathrm{KL}}\left(p_{T,\tau}(\cdot \mid c_{i})\parallel p_{S,\tau}(\cdot \mid c_{i})\right)
 ~~~
 
 其中 `p_T_tau` 和 `p_S_tau` 是温度 `tau` 下 teacher、student 对词表的概率分布，`c_i` 是上下文，`N_ctx` 是有效蒸馏上下文数；实现也可能按 token 或 batch 采用其他 reduction，比较前要核对分母。如果只有 teacher 的 hard answer，则使用交叉熵监督，不再计算完整软分布 KL。以一个上下文、`tau=2` 为例，若温度后的分布分别为 `p_T=(0.8,0.2)`、`p_S=(0.6,0.4)`，则 `KL=0.8 ln(0.8/0.6)+0.2 ln(0.2/0.4)≈0.0915`，温度缩放后 `L_kd=4×0.0915≈0.366`。
@@ -119,7 +119,7 @@ L_{\mathrm{kd}} = \frac{\tau^2}{N_{\mathrm{ctx}}}\sum_{i=1}^{N_{\mathrm{ctx}}} D
 合成样本质量分可以写成可审计的加权形式：
 
 ~~~math
-q_i = w_v V_i + w_e E_i + w_d D_i + w_s S_i - \lambda_h H_i - \lambda_u U_i - \lambda_c C_i
+q_{i} = w_{v} V_{i} + w_{e} E_{i} + w_{d} D_{i} + w_{s} S_{i} - \lambda_{h} H_{i} - \lambda_{u} U_{i} - \lambda_{c} C_{i}
 ~~~
 
 其中各特征先按固定规则或标注映射到 `[0,1]`，权重与惩罚系数非负，并在同一任务和数据版本内固定；`V_i` 是正确性证据，`E_i` 是引用、测试或执行支持，`D_i` 是覆盖/多样性贡献，`S_i` 是内容安全质量，`H_i` 是幻觉风险，`U_i` 是近重复或模板化风险，`C_i` 是评测污染风险。`q_i` 是可审计代理分，不是概率；授权、PII、污染等硬门禁必须单独执行，不能用高分抵消。比如设权重为 `0.35、0.20、0.20、0.25`，惩罚系数 `lambda_h=0.20、lambda_u=0.20、lambda_c=0.30`，样本特征 `V=0.95、E=0.90、D=0.70、S=1、H=0.05、U=0.10、C=0`，则 `q=0.35×0.95+0.20×0.90+0.20×0.70+0.25×1−0.20×0.05−0.20×0.10−0.30×0=0.8725≈0.873`。这个手算只说明代理分怎样得到，不是准入或授权结论。
@@ -127,7 +127,7 @@ q_i = w_v V_i + w_e E_i + w_d D_i + w_s S_i - \lambda_h H_i - \lambda_u U_i - \l
 合成数据样本的状态不宜压缩成一个准入开关，可以保留并列的检查量：
 
 ~~~math
-\mathrm{checks}_i = (quality\_ok_i, authorized_i, verified_i, dedup\_ok_i, safe_i, contamination\_clear_i, privacy\_clear_i)
+\mathrm{checks}_{i} = (\mathrm{quality\_ok}_{i}, \mathrm{authorized}_{i}, \mathrm{verified}_{i}, \mathrm{dedup\_ok}_{i}, \mathrm{safe}_{i}, \mathrm{contamination\_clear}_{i}, \mathrm{privacy\_clear}_{i})
 ~~~
 
 这里 `authorized_i` 表示 teacher 输出或生成规则的使用授权成立；`verified_i` 表示答案、代码、引用、安全边界或工具参数通过验证；`contamination_clear_i` 表示没有命中评测污染。不同失败原因对应隔离、重生成、人工复核、脱敏或删除等不同动作。
@@ -135,10 +135,10 @@ q_i = w_v V_i + w_e E_i + w_d D_i + w_s S_i - \lambda_h H_i - \lambda_u U_i - \l
 合成和蒸馏样本合并后、在保留训练集合中的 token 占比为：
 
 ~~~math
-R_{\mathrm{gen}} = \frac{\sum_{i \in G}(keep_i T_i)}{\sum_i(keep_i T_i)},\quad G = D_{\mathrm{syn}} \cup D_{\mathrm{distill}}
+R_{\mathrm{gen}} = \frac{\sum_{i \in G}(\mathrm{keep}_{i} T_{i})}{\sum_{i}(\mathrm{keep}_{i} T_{i})},\quad G = D_{\mathrm{syn}} \cup D_{\mathrm{distill}}
 ~~~
 
-其中 `T_i` 是 token 数，`keep_i` 表示样本保留；`G` 是合成与蒸馏样本的并集，因此重叠记录只计一次。`R_gen` 高时应审计质量、重复、覆盖与风险，不能单独推断会发生 model collapse。
+其中 `T_i` 是 token 数，`keep_i` 只能取 0 或 1，表示样本是否保留；`G` 是合成与蒸馏样本的并集，因此重叠记录只计一次。`R_gen` 高时应审计质量、重复、覆盖与风险，不能单独推断会发生 model collapse。
 
 这些比例的定义域必须写清楚：只有保留集合中的 token 总数大于零时，`R_gen` 才有定义；只有目标标签集合非空且存在保留样本时，`C_cover` 才有定义；pairwise `R_dup` 至少需要两条可比较样本，上游逐条重复标记率则至少需要一条审计样本。没有保留样本时应记录为 `undefined`，而不是把“没有可测分母”写成占比或覆盖率 `0`。如果原始数据存在但经过过滤后一个样本也没有，token 保留率可以是 `0`，同时应触发补充或恢复数据的动作。
 
@@ -151,15 +151,15 @@ C_{\mathrm{cover}} = \frac{|A_{\mathrm{target}} \cap A_{\mathrm{kept}}|}{|A_{\ma
 若按固定顺序逐条与前序样本比较，同质化或近重复率可以写成：
 
 ~~~math
-R_{\mathrm{dup}} = \frac{1}{n-1}\sum_{i=2}^{n} I\left(\max_{1 \leq j < i}(\mathrm{sim}(s_i,s_j)) > \tau_{\mathrm{sim}}\right), \quad n>1
+R_{\mathrm{dup}} = \frac{1}{n-1}\sum_{i=2}^{n} I\left(\max_{1 \leq j < i}(\mathrm{sim}(s_{i},s_{j})) > \tau_{\mathrm{sim}}\right), \quad n>1
 ~~~
 
-这里 `I(条件)` 在条件成立时取 1，否则取 0；先按固定顺序比较每个样本与此前样本，第一条没有前序比较对象，所以分母是 `n-1`。相似度方法、阈值 `tau_sim` 和候选复核策略都要记录。若上游只提供逐条 `duplicate` 标记，可另报标记率。对本章 demo 的 12 条原始样本，1 条命中标记，因此上游标记率是 `1/12≈0.083`；demo 只执行该标记门禁，不自行计算语义相似度，也不把标记率伪装成 pairwise 相似度估计。
+这里的 `n` 是本次审计纳入比较的样本数；`I(条件)` 在条件成立时取 1，否则取 0。按固定顺序比较每个样本与此前样本，第一条没有前序比较对象，所以分母是 `n-1`。相似度方法、阈值 `tau_sim` 和候选复核策略都要记录。若上游只提供逐条 `duplicate` 标记，可另报标记率。对本章 demo 的 12 条原始样本，1 条命中标记，因此上游标记率是 `1/12≈0.083`；demo 只执行该标记门禁，不自行计算语义相似度，也不把标记率伪装成 pairwise 相似度估计。
 
 保留样本上的残余风险标记率可以写成：
 
 ~~~math
-R_{\mathrm{risk}} = \frac{1}{|S_{\mathrm{kept}}|}\sum_{i\in S_{\mathrm{kept}}} I(r_i=1)
+R_{\mathrm{risk}} = \frac{1}{|S_{\mathrm{kept}}|}\sum_{i\in S_{\mathrm{kept}}} I(r_{i}=1)
 ~~~
 
 其中 `r_i∈{0,1}` 表示样本是否带有硬门禁后仍需人工判断或补充证据的残余风险标记。它不是风险概率，也不表示风险面面俱到；没有保留样本时该指标未定义。demo 为六条保留记录提供该字段，手算为 `0/6=0`。
@@ -300,7 +300,7 @@ student 通过监督微调或偏好训练学习这些数据。
 
 工程上必须确认 teacher 输出的使用授权和合规边界。
 
-teacher 参数更大或通用 benchmark 更高，并不保证它在目标语言和目标任务上生成的训练样本更好。2026 年一篇多语言合成数据预印本比较了 10 个 teacher、6 种语言、超过 140 万条 SFT 样本和 240 个 student；在该研究设置中，prompt 多样性、回答长度和流畅度比参数规模更能预测所测 student 表现。这里的 Polyglot Score 和结果只适用于论文语种、生成方式和评估任务，不能直接据此选定其他项目的 teacher。[Polyglot Teachers](https://arxiv.org/abs/2604.11290)
+teacher 参数更大或通用 benchmark 更高，并不保证它在目标语言和目标任务上生成的训练样本更好。2026 年 arXiv v3 预印本提出 Polyglot Score，将生成数据的内在指标与 student 下游表现结合；实验覆盖 10 个 teacher、6 种语言、超过 140 万条 SFT 样本和 240 个 student。作者报告，在其回归设置中，参数规模及多语言 benchmark 均未显著预测 PG-Score；其内在质量指标的前四个主成分解释了 93.3% 的指标方差，使用这些主成分预测 student 表现的线性模型在留出数据上的 $R^2=0.664$。这说明在该多语言 SFT 设置中，prompt 多样性、回答长度和流畅度等数据特征能提供有用的 teacher 筛选信号；它不证明这些特征普遍优于模型规模，也不保证迁移到其他语言、生成方法或评测集。[Polyglot Teachers（v3）](https://arxiv.org/abs/2604.11290v3)
 
 ---
 
@@ -356,6 +356,8 @@ teacher 参数更大或通用 benchmark 更高，并不保证它在目标语言�
 7. 领域问答：专家审计和权威资料对照。
 
 如果验证缺失，合成数据很容易把 hallucination 包装成训练信号。
+
+例如，一批教学假设的 40 道整数算术题分别经过答案检查和过程抽检：独立计算器确认 34 道答案正确；在这 34 道中，逐步复核只有 29 道推导有效。答案正确率是 34/40=0.85，有效过程占全部候选的 29/40=0.725；另外 5 道虽碰巧得到正确答案，却不能作为过程监督正例，6 道答案错误则隔离或重生成。若训练目标只要求最终答案，可另行评估答案标签；若要教模型生成可靠步骤，必须把过程通过率单独作为门槛。这里的计数是假设值，用来展示不同验证器回答不同问题。
 
 工具使用数据的研究提供了直接的训练对照：EMNLP 2024 的 Quality Matters 用人工定义的正确性条件和模型辅助评估检查两个工具 benchmark，并报告经过验证的数据即使数量较少，也优于未验证数据训练出的模型。这个结果支持“先验证再计量”的流程，但指标和收益绑定该论文的 benchmark、teacher 和训练配置。[Quality Matters](https://aclanthology.org/2024.emnlp-main.285/)
 
@@ -464,6 +466,8 @@ SFT 是合成指令数据最常用的阶段。instruction-response、multi-turn 
 
 可以先用小规模 ablation 探测多个比例，再固定数据版本、总训练 token 和训练配方比较目标指标、自然数据能力、覆盖、重复及安全风险。EMNLP 2025 的约 30% 重写文本结果只是该论文模型和预算下的经验结论，不应当作默认比例；不同生成类型和训练阶段要重新测量。
 
+重写生成本身也要占算力预算。2026 年 arXiv v1 预印本将重写比例与生成 FLOPs 一起纳入 scaling-law 拟合，分别讨论自然数据充足的 compute-limited 和自然数据有限的 data-limited 设置。在其 FineWeb-Edu/FinePhrase 实验中，模型估计的 compute-optimal 重写比例随预算增加：从 $3\times10^{18}$ FLOPs 下低于 10%，升至 $10^{22}$ FLOPs 下约 32%；后一个预算的 Paloma 对照只测试 $R\in\{0,0.32,0.5,1.0\}$，其中 $R=0.32$ 的 BPB 最低，并在 16 个来源中的 10 个低于重写模型。该结论依赖其数据、模型、目标指标与拟合/外推；作者把重写模型训练成本视为跨实验摊销而未计入，因此不能直接当成完整项目的成本配方。[Rewriting Scaling Laws for Synthetic Data with Compute and Data Constraints（arXiv v1）](https://arxiv.org/abs/2610.31867v1)
+
 ---
 
 ## 17. 机制与边界：合成数据是分布编辑
@@ -509,7 +513,9 @@ seed 可以来自获准使用的任务、公开数据、专家模板或人工设
 
 它演示的是合成数据治理机制，不是生产级合规审查、LLM judge、数学 verifier、代码沙箱、安全分类器或版权系统。真实系统要接入授权审查、teacher 版本管理、prompt registry、测试执行、检索证据、人工抽样、污染检测和训练 ablation。
 
-代码状态：已验证（2026-10-28；Python 3.12.9，标准库）
+代码状态：静态审阅，未运行（2026-11-03；Python 3.12.9，标准库）
+
+运行方法：将下面的代码保存为 audit_synthetic_data.py，在 Python 3.12.9 环境中运行 python audit_synthetic_data.py；只使用标准库。代码会打印审计摘要并执行固定输入与边界断言。
 
 ~~~python
 from collections import Counter, defaultdict
@@ -825,26 +831,7 @@ assert rejects(samples, ValueError, max_syn_ratio=float("nan"))
 assert rejects(samples, ValueError, target_tags=set())
 ~~~
 
-运行后会看到类似输出：
-
-~~~text
-kept_ids= ['seed_user_math', 'seed_user_domain', 'syn_math_verified', 'distill_tool_trace', 'syn_code_tests', 'syn_safety_refusal']
-rejected= {'distill_unauthorized': 'unauthorized_teacher', 'real_user_private': 'privacy_or_pii', 'syn_benchmark_leak': 'eval_contamination', 'syn_code_duplicate': 'near_duplicate', 'syn_math_wrong': 'unverified_output', 'syn_unsafe_answer': 'unsafe_or_policy_fail'}
-reason_counts= {'eval_contamination': 1, 'near_duplicate': 1, 'privacy_or_pii': 1, 'unauthorized_teacher': 1, 'unsafe_or_policy_fail': 1, 'unverified_output': 1}
-retention= 0.546
-origin_mix= {'natural': 0.355, 'synthetic': 0.645}
-task_mix= {'code': 0.197, 'domain': 0.263, 'math': 0.228, 'safety': 0.14, 'tool': 0.171}
-teacher_mix= {'human_or_seed': 0.355, 'owned_teacher': 0.368, 'policy_template': 0.14, 'rule_solver': 0.136}
-distillation_token_ratio= 0.171
-synthetic_like_ratio= 0.645
-diversity_coverage= 1.0
-duplicate_flag_rate= 0.083
-risk_rate= 0.0
-checks= {'authorized_only': True, 'verified_only': True, 'contamination_clear': True, 'duplicate_clear': True, 'safe_only': True, 'privacy_clear': True, 'diversity_ok': True, 'synthetic_ratio_ok': True, 'natural_anchor_present': True, 'residual_risk_clear': True}
-signals= {'unauthorized_sample_kept': False, 'unverified_sample_kept': False, 'contaminated_sample_kept': False, 'duplicate_sample_kept': False, 'unsafe_sample_kept': False, 'private_sample_kept': False, 'diversity_gap': False, 'synthetic_ratio_too_high': False, 'natural_anchor_missing': False, 'residual_risk_needs_review': False, 'no_retained_tokens': False}
-actions= []
-decision= continue_to_ablation
-~~~
+本轮没有运行代码。按固定输入静态复算，预期保留 6 条、拒绝 6 条；原始 token 为 8,350，保留 token 为 4,560，保留率为 $4,560/8,350\approx0.546$；合成/蒸馏并集占 $2,940/4,560\approx0.645$，蒸馏标签占 $780/4,560\approx0.171$，目标标签覆盖为 $10/10=1.0$，重复标记率为 $1/12\approx0.083$。最终动作列表为空，决策为 continue_to_ablation。这些是手算预期，不是执行输出；完整打印内容仍可按上面的运行方法复核。
 
 这个 demo 的重点是：合成数据进入训练前必须被当成可审计数据产品，而不是 teacher 随手生成的文本。它要能证明授权成立、错误被验证拦截、污染被隔离、PII 被过滤、近重复标记没有进入保留集，并且合成 / 蒸馏 token 没有压过自然数据锚点。配比门槛使用未舍入的整数比精确比较；例如 `7204/10000` 显示到三位小数是 `0.72`，但真实比例 `0.7204` 仍超过 `0.72` 上限。`safe_ratio(0, 0)` 返回 `None`，表示没有可解释的分母；空输入的保留率和覆盖率均为 `None`，有输入但全被拒绝时保留率为 `0.0`、保留集指标为 `None`，两种情况都暂停后续实验。
 
@@ -922,7 +909,8 @@ teacher 也会 hallucinate，也有偏差。生成数据必须验证。
 8. [Quality Matters: Evaluating Synthetic Data for Tool-Using LLMs](https://aclanthology.org/2024.emnlp-main.285/)：人工正确性条件和模型辅助审查的工具数据质量研究；较少的已验证数据优于较多未验证数据的结果绑定论文所测两个 benchmark 和训练设置。
 9. [Demystifying Synthetic Data in LLM Pre-training](https://aclanthology.org/2025.emnlp-main.544/)：比较自然网页、重写文本、教材式合成数据和混合训练；报告的比例与验证损失变化绑定其模型规模、数据类型和预算。
 10. [On the Diversity of Synthetic Data and its Impact on Training Large Language Models](https://arxiv.org/abs/2410.15226)：预印本研究 topic/prompt 多样性、每个主题的生成次数和合成比例；结果绑定其 350M/1.4B 模型及语料。
-11. [Polyglot Teachers](https://arxiv.org/abs/2604.11290)：2026 年多语言 teacher 选择预印本，比较生成数据指标与 student 结果；样本语言、prompt 和 teacher 构成限定其结论。
+11. [Polyglot Teachers（arXiv v3）](https://arxiv.org/abs/2604.11290v3)：2026 年多语言 teacher 选择预印本，比较生成数据内在指标与 student 结果；六种语言、生成方法和评估设置限制其结论。
+12. [Rewriting Scaling Laws for Synthetic Data with Compute and Data Constraints（arXiv v1）](https://arxiv.org/abs/2610.31867v1)：将重写生成计算纳入 pretraining scaling-law 估计；最优比例依赖 seed、rewriter、预算和目标，且未计入 rewriter 预训练成本。
 
 这些论文支持合成指令、复杂解释、工具数据筛选、预训练 mixture 与 teacher-student 蒸馏的特定实验事实；它们不能替代授权文件、隐私审计、领域专家验证、污染检查或目标系统评估。本文的质量函数、检查向量和 demo 是教学抽象，不能被误读为某个模型的公开训练配方。
 

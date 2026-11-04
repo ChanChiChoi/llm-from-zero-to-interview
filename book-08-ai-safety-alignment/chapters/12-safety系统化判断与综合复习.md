@@ -1,6 +1,6 @@
 # 第十二章：安全的系统化判断与综合复习
 
-前面十一章分别讨论了 alignment、监督、奖励错配、越狱、红队、解释性、steering、model editing、隐私和治理。真正困难的地方，是把这些知识放回同一个系统问题里：
+[第一章《Safety 与 Alignment 总览》](01-safety与alignment总览.md)搭建全书地图；第 2—11 章分别讨论 alignment、监督、奖励错配、越狱、红队、解释性、steering、model editing、隐私和治理。真正困难的地方，是把这些知识放回同一个系统问题里：
 
 > 一个模型在什么条件下可以帮助人完成任务？当它不确定、被攻击、接触私有数据或拥有工具时，系统如何发现风险、限制动作、保留证据并持续修复？
 
@@ -122,6 +122,8 @@ $y_w$ 是偏好回答，$y_l$ 是非偏好回答。DPO 减少了显式奖励模�
 ```math
 \Delta_{\mathrm{RH}}=\mathbb E[r]-\mathbb E[q]
 ```
+
+这个差值只有在奖励分数 $r$ 和真实质量 $q$ 已映射到可比较尺度时才有解释力。若一个是奖励模型的 logit，另一个是人工五分制评分，不能直接相减；应先做有依据的尺度校准，或分别观察两者随任务和优化强度变化的趋势。
 
 更重要的是按任务和严重度切片。常见症状包括：
 
@@ -356,7 +358,7 @@ Safety eval 侧重预先定义的任务、协议和指标，适合做版本比�
 
 红队样本不能直接当作总体概率估计。它通常是有目标、有搜索偏差的样本，报告时必须写明抽样和预算。
 
-[International AI Safety Report 2026](https://internationalaisafetyreport.org/publication/international-ai-safety-report-2026) 也指出，能力和现实影响的度量仍不成熟，预部署 benchmark 对实际效用和风险的预测能力有限。报告还汇总了模型识别测试情境、利用评估漏洞的现象；据此保留隔离 holdout、变换任务条件并回看部署反馈，是合理的工程推论，但该报告没有验证某一种控制足以消除评估失配。固定评估仍适合检测同协议下的版本变化，红队适合寻找已知测试以外的路径，线上事故和用户反馈则补充真实环境信号。成熟报告应把三类证据并列，并说明它们各自支持什么判断。红队和回归方法的详细流程见[第六章](06-red-teaming与危险能力评估.md)。
+[International AI Safety Report 2026](https://internationalaisafetyreport.org/publication/international-ai-safety-report-2026) 也指出，能力和现实影响的度量仍不成熟，预部署 benchmark 对实际效用和风险的预测能力有限。报告还汇总了模型识别测试情境、利用评估漏洞的现象；据此保留隔离 holdout、变换任务条件并回看部署反馈，是合理的工程推论，但该报告没有验证某一种控制足以消除评估失配。固定评估仍适合检测同协议下的版本变化，红队适合寻找已知测试以外的路径，线上事故和用户反馈则补充真实环境信号。成熟报告应把三类证据并列，并说明它们各自支持什么判断。红队和回归方法的详细流程见[第六章](06-red-teaming与危险能力评估.md)；自动攻击生成和多轮轨迹探索见[第十三章《自动化对抗评估》](13-自动化对抗评估.md)。
 
 ## 6. Dangerous Capability 与 Capability Elicitation
 
@@ -641,7 +643,7 @@ flowchart TD
 
 默认用户只能检索公共和本租户只读资料；研究负责人可以访问受限资料，但仍不能绕过字段权限；工单 Agent 只能创建草稿并需要审批；生产写操作由独立服务端和人工确认执行。
 
-如果长周期研究任务的状态出现冲突，系统暂停并保存 checkpoint，而不是继续猜测。若引用服务暂时不可用，fallback 到没有引用的回答是不安全的；更合理的是说明证据服务不可用或只允许用户重新尝试。
+如果长周期研究任务的状态出现冲突，系统暂停并保存 checkpoint，而不是继续猜测。若引用服务暂时不可用，fallback 到没有引用的回答是不安全的；更合理的是说明证据服务不可用或只允许用户重新尝试。请求级授权和访问状态的详细判断见[第十五章《Risk-Calibrated Access》](15-risk-calibrated-access.md)，失败分类、状态账本与恢复路径见[第十六章《Fallback Routing 与安全降级》](16-fallback-routing与安全降级.md)。
 
 ### 10.6 事故复盘
 
@@ -709,6 +711,8 @@ flowchart TD
 
 时间受限时先回答最影响决定的部分：系统边界和最高严重度风险；随后给关键分母、服务端控制和剩余证据缺口。只有在主链条说清后，才补充算法谱系和论文例子。这样可以避免在术语细节上花完时间，却没有回答“是否开放、开放给谁、失败怎样止损”。
 
+例如，在一个合成的企业助手评审中，固定模型版本、只读权限和检索配置后，40 条越权请求有 38 条被检索层拒绝，另 2 条命中了撤权后的旧缓存。此时应报告本协议下的阻断覆盖为 $38/40=0.95$，说明两次失败来自缓存撤权路径，并暂缓扩大数据范围；修复后把这两条失败模式加入回归，再补测正常请求误拒。这样的记录把分母、失败机制、当前决定和复测条件连在一起，也避免把 95% 的单次覆盖率改写成“系统已安全”。
+
 ## 12. 一个最小的 Safety 复盘审计 demo
 
 下面的 demo 只使用合成的回答记录。它不运行攻击，也不评估真实模型；它展示如何把一个复杂安全判断拆成 thresholds、signals、evidence_status、actions 和 decision。
@@ -721,7 +725,7 @@ flowchart TD
 
 这个 demo 的输入记录把知识覆盖、危险细节检查和下一步修复放在一起。它适合回顾面试回答，也可用于练习审阅安全设计文档；它并不判断答案中的事实是不是真实，也不评价候选人实际工作能力。每个 `covered` 标签仍需要人工依据评分规范确认，程序只保证集合、权重、分母和状态计算一致。若把这种覆盖率拿去作招聘排名，可能会奖励熟练背诵 rubric 的人，忽略他们是否能在陌生约束下推导机制。
 
-代码状态：已验证（2026-10-28；Python 3.12.9；仅使用标准库）。
+代码状态：静态审阅，未运行（2026-11-03）。
 
 ```python
 import math
@@ -742,7 +746,7 @@ def ratio(numerator, denominator):
         raise ValueError("ratio inputs must satisfy 0 <= numerator <= denominator")
     if denominator == 0:
         return None
-    return round(numerator / denominator, 3)
+    return numerator / denominator
 
 
 def coverage(required, covered):
@@ -765,6 +769,12 @@ def meets(signal, threshold):
     if not 0 <= signal <= 1 or not 0 <= threshold <= 1:
         raise ValueError("coverage gates must be between zero and one")
     return signal >= threshold
+
+
+def answer_gate(signal, undefined_topics, threshold):
+    if undefined_topics:
+        return False
+    return meets(signal, threshold)
 
 
 def validate_weight(weight):
@@ -897,7 +907,11 @@ signals = {
 
 evidence_status = {
     "answer": "supported"
-    if meets(signals["answer_coverage"], thresholds["answer_coverage"])
+    if answer_gate(
+        signals["answer_coverage"],
+        undefined_topics,
+        thresholds["answer_coverage"],
+    )
     else "partial",
     "risk": "supported"
     if meets(signals["risk_coverage"], thresholds["risk_coverage"])
@@ -941,8 +955,16 @@ report = {
     "decision": decision,
 }
 
-print("topic_scores=", topic_scores)
-print("signals=", signals)
+display_topic_scores = {
+    name: None if value is None else round(value, 3)
+    for name, value in topic_scores.items()
+}
+display_signals = {
+    name: None if value is None else round(value, 3)
+    for name, value in signals.items()
+}
+print("topic_scores=", display_topic_scores)
+print("signals=", display_signals)
 print("evidence_status=", evidence_status)
 print("missing_topics=", missing_topics)
 print("actions=", actions)
@@ -964,6 +986,8 @@ boundary_checks = {
     "empty_required_set": coverage(set(), set()),
     "empty_answer_coverage": weighted_mean([]),
     "undefined_gate_fails": meets(None, 0.85),
+    "undefined_topic_fails_answer_gate": answer_gate(1.0, ["empty"], 0.85),
+    "below_threshold_not_rounded_up": not meets(0.8496, 0.85),
     "negative_ratio_rejected": rejects(lambda: ratio(-1, 1)),
     "nonfinite_ratio_rejected": rejects(lambda: ratio(1, math.inf)),
     "boolean_ratio_rejected": rejects(lambda: ratio(True, 1)),
@@ -976,6 +1000,8 @@ assert boundary_checks["zero_denominator"] is None
 assert boundary_checks["empty_required_set"] is None
 assert boundary_checks["empty_answer_coverage"] is None
 assert boundary_checks["undefined_gate_fails"] is False
+assert boundary_checks["undefined_topic_fails_answer_gate"] is False
+assert boundary_checks["below_threshold_not_rounded_up"] is True
 assert boundary_checks["negative_ratio_rejected"] is True
 assert boundary_checks["nonfinite_ratio_rejected"] is True
 assert boundary_checks["boolean_ratio_rejected"] is True
@@ -984,11 +1010,11 @@ assert boundary_checks["invalid_weight_rejected"] is True
 print("boundary_checks=", boundary_checks)
 ```
 
-逐步手算可核对每一项：五个主题的 rubric 覆盖率依次是 $4/5=0.8$、$5/5=1.0$、$4/5=0.8$、$5/5=1.0$、$5/6≈0.833$，权重为 2、3、3、4、5，因此加权答案覆盖为 $(0.8×2+1×3+0.8×3+1×4+0.833×5)/17≈0.892$。风险类别覆盖是 $7/8=0.875$，因为 over-refusal 缺失；指标覆盖是 $5/7≈0.714$，缺少 severity-weighted risk 和 evidence coverage。答案覆盖高于 0.85，但风险 taxonomy 要求全覆盖 1.0，指标也未达 0.85；unsafe detail count 为 0。缺项列表还显示 safety_and_alignment 未讲 metrics、prompt_injection 未覆盖 normal_task、safety_platform 未讲 incident。由此 evidence status 为 answer supported、risk partial、metrics partial、safe boundary supported，decision 是 revise_answer_and_retest。
+逐步手算可核对每一项：五个主题的 rubric 覆盖率依次是 $4/5=0.8$、$5/5=1.0$、$4/5=0.8$、$5/5=1.0$、$5/6≈0.833$，权重为 2、3、3、4、5，因此加权答案覆盖为 $(0.8×2+1×3+0.8×3+1×4+(5/6)×5)/17≈0.892157≈0.892$。风险类别覆盖是 $7/8=0.875$，因为 over-refusal 缺失；指标覆盖是 $5/7≈0.714$，缺少 severity-weighted risk 和 evidence coverage。答案覆盖高于 0.85，但风险 taxonomy 要求全覆盖 1.0，指标也未达 0.85；unsafe detail count 为 0。缺项列表还显示 safety_and_alignment 未讲 metrics、prompt_injection 未覆盖 normal_task、safety_platform 未讲 incident。由此 evidence status 为 answer supported、risk partial、metrics partial、safe boundary supported，decision 是 revise_answer_and_retest。
 
-这组输出说明比例门槛和完整性门槛承担不同职责。若只设 0.85，7/8 的风险覆盖会显示通过，程序却同时给出补充 over-refusal 的动作，状态和修复方向互相矛盾；把风险类别门槛设为 1.0 后，遗漏会进入 failed 状态。若某个主题的 required 为空，代码会将其记录到 undefined_topics 并从答案覆盖的有效权重中排除；整体没有有效样本时得到 None，相关门禁按未通过处理。空集合表示尚无可计算证据，不等于零风险或满分。
+这组输出说明比例门槛和完整性门槛承担不同职责。若只设 0.85，7/8 的风险覆盖会显示通过，程序却同时给出补充 over-refusal 的动作，状态和修复方向互相矛盾；把风险类别门槛设为 1.0 后，遗漏会使该项状态保持 partial，并让综合决策进入复核。若某个主题的 required 为空，代码会将其记录到 undefined_topics 并从答案覆盖的有效权重中排除，同时让答案完整性门禁失败；整体没有有效样本时也得到 None，门禁按未通过处理。阈值使用未舍入比例判定，显示值才舍入到三位，避免 0.8496 被展示成 0.850 后误过 0.85 门槛。空集合表示尚无可计算证据，不等于零风险或满分。
 
-边界检查覆盖零分母、空集合、未定义门禁、负数/非有限/布尔比例、额外的覆盖标签和无效权重状态。若输入不是预期的结构或类别，代码停止并抛出 ValueError；若证据缺失但结构有效，则保留 N/A/partial。前者是数据合同错误，后者是知识覆盖缺口，应分别修正。该 demo 只支持复习和答题结构反馈，不用于招聘决策、模型安全认证或对真实攻击内容的评价。
+边界检查覆盖零分母、空集合、未定义门禁、接近阈值的精度、负数/非有限/布尔比例、额外的覆盖标签和无效权重状态。已列出的类型与范围错误会抛出 ValueError；这个短例没有实现通用字典 schema 检查，缺字段等结构错误仍需调用方显式处理。若证据缺失但结构有效，则保留 N/A/partial。数据合同错误和知识覆盖缺口应分别修正。该 demo 只支持复习和答题结构反馈，不用于招聘决策、模型安全认证或对真实攻击内容的评价。
 
 下一轮复习可以按报告顺序进行：先为 prompt injection 补充正常任务回归，确保攻击阻断没有把良性任务一起破坏；再补 Safety Platform 事故响应的 owner、升级和恢复状态；最后为安全与 alignment 主题补足独立指标及分母。修改后保持原 rubrics 和输入范围复算，避免为了达到分数而在看到结果后移动门槛。若题目范围或风险分类本身发生变化，应创建新版本 rubric，并保留旧结果作为前后对照。
 

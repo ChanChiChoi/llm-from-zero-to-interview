@@ -882,6 +882,9 @@ judge 认为过程好，但 verifier 失败
 过程分、`pass@k`、公开/隐藏测试差距、污染风险以及具体后续动作。示例数据
 故意同时包含一个过程错误、一个隐藏测试覆盖缺口和一个污染风险样本。
 
+本 demo 将解析后的数值统一格式化为三位小数，再用同一标签完成 gold 比较和
+self-consistency 投票归并。因此 `2/3`、`0.6666667` 与 `66.7%` 在本例都归入
+`0.667`。这是为演示设置的量化规则，不是所有数学题的通用等价标准。
 `extract_number` 只面向本例的简单数字、分数和百分比；当前实现先找全文最后一个
 分数，其次找百分比，最后才找普通数值，所以遇到“先出现分数、后给出小数答案”这类
 混合输出时会按类型优先级误抽取。它也不支持区间、单位、集合、符号表达式、多个互相
@@ -924,21 +927,17 @@ def extract_number(text):
     return None
 
 
-def equivalent(pred, gold, tolerance=1e-3):
-    pred_value = extract_number(pred)
-    gold_value = extract_number(gold)
-    if pred_value is None or gold_value is None:
-        return False
-    return abs(float(pred_value - gold_value)) <= tolerance
+def equivalent(pred, gold):
+    pred_label = canonical(pred)
+    gold_label = canonical(gold)
+    return pred_label != "unparsed" and pred_label == gold_label
 
 
 def canonical(text):
     value = extract_number(text)
     if value is None:
         return "unparsed"
-    if value.denominator == 1:
-        return str(value.numerator)
-    return f"{value.numerator}/{value.denominator}"
+    return f"{float(value):.3f}"
 
 
 def entropy(labels):
@@ -1148,8 +1147,8 @@ pprint(summary, sort_dicts=False)
 {'math_summary': {'greedy_accuracy': 0.667,
                   'self_consistency_accuracy': 0.667,
                   'parse_fail_rate': 0.0,
-                  'avg_answer_entropy': 0.858,
-                  'avg_vote_margin': 0.333,
+                  'avg_answer_entropy': 0.708,
+                  'avg_vote_margin': 0.4,
                   'avg_process_score': 0.667},
  'code_summary': {'avg_pass@1': 0.133,
                   'avg_pass@5': 0.472,
@@ -1157,7 +1156,7 @@ pprint(summary, sort_dicts=False)
                   'hidden_coverage_gaps': {'parse_table': ['escaped quote',
                                                            'multiline cell',
                                                            'quoted delimiter']},
-                  'public_hidden_gaps': [('two_sum', 0.2), ('parse_table', 0.2)],
+                  'public_hidden_gaps': [('parse_table', 0.2)],
                   'error_counts': {'edge_case': 1, 'complexity': 1, 'runtime': 1}},
  'signals': {'answer_accuracy_ok': True,
              'parse_rate_ok': True,
@@ -1176,7 +1175,10 @@ pprint(summary, sort_dicts=False)
 这里的 `public_hidden_gap` 是同一批 `n` 个候选在公开测试与隐藏测试上的通过率差，
 不是两套测试的题目数量差。若公开测试和隐藏测试并不作用于同一批候选，或者两套
 测试的契约不同，就不能把这个差值直接解释成泛化下降，应该保存候选与测试切片
-的联合结果后再分析。
+的联合结果后再分析。代码还直接用二进制浮点数与 `0.20` 比较，因此 `two_sum` 的
+`0.3-0.1` 可能表示为略小于 `0.20`，不会进入 `public_hidden_gaps`；当前手算输出
+只列 `parse_table`。实际门禁可按整数通过数比较，或显式设置舍入和容差，避免边界值
+受浮点表示影响。
 
 这个 demo 的重点不是阈值本身，而是读者能看到不同证据如何互相补充：数学总体
 准确率为 0.667，但过程平均分只有 0.667；代码 `pass@5` 高于 `pass@1`，却存在

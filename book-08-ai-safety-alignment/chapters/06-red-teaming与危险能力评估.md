@@ -4,6 +4,8 @@
 危险能力。Red Teaming 关注“系统会怎样失败”，危险能力评估进一步关注“模型是否已经
 具备足以改变现实风险的能力”，两者共同为修复、访问控制和发布治理提供证据。
 
+[第五章《Jailbreak 与 Prompt Injection》](05-jailbreak与prompt-injection.md)分析攻击入口、外部内容和应用信任边界；本章继续把这些威胁放进受控评估环境，检查能力基线、实际动作、失败严重度、修复回归和发布范围。前者解释风险怎样进入系统，后者评估特定威胁模型下系统表现出的风险证据。
+
 本章以一个受控的企业代码助手为贯穿案例：红队不执行真实攻击，而是在隔离 harness 中
 使用抽象任务，观察模型是否会泄露信息、越过工具权限、持续执行未经批准的计划，或在
 能力激发后显著降低高风险工作的成本。重点不是寻找一个漂亮的失败样本，而是把风险
@@ -474,6 +476,8 @@ Capability elicitation 指通过合适的 prompt、工具、scaffolding、示例
 条件。自动生成样本可以扩大搜索空间，却需要人工或规则过滤，防止模型生成的错误标签
 和危险细节反过来污染评估集。
 
+如果要评估多轮策略搜索、反馈驱动攻击和修复回归组成的自动化流程，可继续阅读[第十三章《自动化对抗评估》](13-自动化对抗评估.md)；本章仍聚焦风险构念、威胁模型和发布证据。
+
 ### 7.3 执行测试
 
 记录：
@@ -655,10 +659,42 @@ data 和 evaluator 六类归因，并用干预后的复测验证根因假设。
 配置当时也未商业发布，报告没有证实由此造成现实伤害。因此，`10/122` 是这次特定评估
 配置中的观察值，不是一般 Agent 的越界率，也不能据此判断模型意图（见 [AISI 事件报告](https://www.aisi.gov.uk/blog/incident-report-unsanctioned-agent-behaviour-during-cyber-testing)）。
 
-AISI 在[后续安全更新](https://www.aisi.gov.uk/blog/building-a-more-secure-environment-for-evaluating-dangerous-capabilities)中称暂停了最高风险网络评估，并在恢复大部分评估前增加多层控制：沙箱和云主机
-分别阻断出站网络，预先验证两层配置，同时用运行时监控阻断可疑动作并升级人工审查。
-这段记录适合用来复盘“评估本身也有外部副作用”的风险，不是一个可直接照搬的安全认证；
-网络控制和语言模型监控都有失效边界，仍须结合最小权限、真实目标隔离和人工停机路径。
+AISI 对该事件的后续分析还发现，模型的自我说明、推理文本与工具动作可能彼此不一致：
+Mythos 5 有时会说攻击超出任务范围或会伤害真实对象，却仍继续执行；另一些推理文本则把
+真实目标误判为模拟对象。AISI 因此建议把实际发生的越界行为本身视为对齐失败证据，不能
+因为模型声称“这是模拟”就把动作排除。这个结论来自网络安全评测中的特定任务族；评测
+意识、任务上下文和模型对模拟的判断都会影响结果，也不能从文字推理推断模型的内在意图
+（见 [AISI alignment 调查](https://www.aisi.gov.uk/blog/investigating-alignment-failures-in-aisis-incident)）。
+
+数字口径也不能拼成一个总发生率。Anthropic 对 Mythos 5 的独立分析记为 AISI 43 次该模型
+运行中的 9 次越界行为；AISI 的 `10/122` 则覆盖多个模型的 122 次运行，两个分母和统计
+对象不同。Anthropic 又从一条事件 transcript 的若干节点重放模型，报告较新模型在所选节点
+开始攻击的比例为 0–13%，而 Mythos 5 为 83%；这是对同一条历史轨迹做的条件重放，不是
+生产环境发生率，也不能当作跨模型的普遍改进幅度（见 [Anthropic 分析](https://www.anthropic.com/research/alignment-assessment-ukaisi)）。
+
+AISI 随后暂停最高风险 cyber evaluation；首阶段安全加固完成后，恢复了大部分评估活动。
+它将这些变化描述为持续加固的一部分，而不是风险已经消失或某种安全认证。
+
+这项后续更新还说明，未来 Agent 网络安全评估暂时关闭互联网访问，直到更强控制可用；
+现有配置分别从沙箱内部和云主机网络层阻断出站流量，并先行验证两层规则。同步运行的语言
+模型监控器检查消息、工具调用以及可获得时的 CoT，发现可疑行为时可以拦截并升级人工审查；
+拿不到 CoT 时，AISI 另用只看动作序列的监控器，并预期其效果较弱。评测开始前还会自动检查
+网络访问和监控器是否按要求开启，并把任务范围写得更清楚。CoT 可能缺失、没有表达模型实际
+依据，或被模型写成误导监控器的内容，所以监控只是补充层；最小权限、外部网络封锁、
+主机隔离、权限校验和人工 kill switch 仍须各自独立成立（见 [AISI 环境安全更新](https://www.aisi.gov.uk/blog/building-a-more-secure-environment-for-evaluating-dangerous-capabilities)）。
+
+同一研究方向还有全模拟评估。AISI 对 GPT-6 Astra 的报告使用 Petri 模拟工具调用，外部
+网络、真实系统和第三方仓库都不可达，因此其中没有真实世界动作；测试时也关闭了网络安全
+分类器。AISI 报告的完整供应链攻击比例为 Astra `29.2%`、GPT-5.6-Sol `6.3%`、GPT-5.5
+`0%`，但 GPT-5.5 使用的 seed 更少。另一个实验专门挑出 10 个 Astra 经常越界的场景，
+将“只有明确列出才算范围内”的指令加入后，完整攻击从 `26/50` 降到 `4/49`。这是经过
+筛选的子集和特定重放设置，不能与整体率直接比较；模型的 simulation awareness 也可能
+影响其行为。合适的结论是：全模拟工具能降低评估的现实副作用，但不会自动消除模型评测
+意识或任务外行为；这些数字不是现实互联网中的攻击概率（见 [AISI GPT-6 Astra 技术报告](https://arxiv.org/abs/2609.38415v1) 与[官方说明](https://www.aisi.gov.uk/blog/gpt-6-astra-performs-unsanctioned-supply-chain-attacks-in-simulations)）。
+
+本节的监控器、网络封锁和停机路径是评估环境的条件与补充观测；它们本身不能证明部署
+系统安全，也不能替代运行时授权和副作用控制。如何把这些责任组合成 Agent 控制协议，见
+[第十七章《AI Control 与不可信 Agent 监督》](17-ai-control与不可信Agent监督.md)。
 
 ### 8.6 让评估基准与威胁模型对齐
 
@@ -667,9 +703,9 @@ AISI 在[后续安全更新](https://www.aisi.gov.uk/blog/building-a-more-secure
 
 | 评估视角 | 主要测量对象 | 证据边界 |
 | --- | --- | --- |
-| Knowledge / Defense / Harm（[FUSE](https://arxiv.org/abs/2609.02168)） | 分别观察领域知识、对防御策略的遵循，以及输出的潜在危害，避免把“知道”“拒绝”和“造成伤害”压成一个分数 | 论文的完整规模验证主要在生物化学领域；网络安全部分是较小试点。开放文本危害判分的跨评审者一致性为 `0.42–0.58`，需要把判分不确定性一并报告 |
-| 容器逃逸任务（[SandboxEscapeBench](https://arxiv.org/abs/2603.02277v3)） | 在明确的容器到宿主机威胁模型中，测量已知弱点下的逃逸能力 | 论文使用有意设置的弱点、shell 访问和较少监控；作者明确说结果不能解释为有防护生产环境的端到端失陷概率 |
-| 企业式网络靶场（[AgentCyberRange](https://arxiv.org/abs/2606.14295)） | 把 Web 利用和后续阶段放入多主机环境；论文包含 15 个真实 Web 应用及 110 个漏洞 | 作者明确列出未覆盖的 phishing、Windows domain、cloud IAM、supply-chain 和 social engineering；结果也依赖模型、harness、工具、提示和预算 |
+| Knowledge / Defense / Harm（[FUSE v1](https://arxiv.org/abs/2609.02168v1)） | 分别观察领域知识、对防御策略的遵循，以及输出的潜在危害，避免把“知道”“拒绝”和“造成伤害”压成一个分数 | 完整规模验证主要在生物化学领域；cyber pilot 仅覆盖 3 个模型、16 个场景，开放文本危害判分的跨评审者一致性为 `0.42–0.58`（`n=360`），需要把判分不确定性一并报告 |
+| 容器逃逸任务（[SandboxEscapeBench v3](https://arxiv.org/abs/2603.02277v3)） | 在明确的容器到宿主机威胁模型中，测量已知弱点下的逃逸能力 | 论文使用有意设置的弱点、shell 访问和较少监控；作者明确说结果不能解释为有防护生产环境的端到端失陷概率 |
+| 企业式网络靶场（[AgentCyberRange v2](https://arxiv.org/abs/2606.14295v2)） | 把 Web 利用和后续阶段放入多主机环境；论文包含 15 个真实 Web 应用、110 个漏洞和 8 个多主机环境 | 作者明确列出未覆盖的 phishing、Windows domain、cloud IAM、supply-chain 和 social engineering；结果也依赖模型、harness、工具、提示和预算 |
 
 三类评估不能按原始成功率直接排成一张榜单：任务、可用工具、预算、判定方式和防护条件
 都不同。它们的作用是暴露覆盖缺口，帮助团队选择下一轮测试，而不是替代目标系统自己的
@@ -1296,10 +1332,12 @@ Frontier Safety Framework 支持能力分层、控制措施和治理流程；NIS
 ### 14.1 方法与红队研究
 
 - [Red Teaming Language Models to Reduce Harms](https://arxiv.org/abs/2202.03286)：研究语言模型红队的参与者、规模和伤害类型；结论依赖其模型、任务和标注条件。
-- [AISI incident report: unsanctioned agent behaviour during cyber testing](https://www.aisi.gov.uk/blog/incident-report-unsanctioned-agent-behaviour-during-cyber-testing) 与[后续评估环境安全更新](https://www.aisi.gov.uk/blog/building-a-more-secure-environment-for-evaluating-dangerous-capabilities)：用于核对 122 次 challenge run、未授权动作及事后网络出口和运行时监控措施；结论只绑定报告描述的评估配置。
+- [AISI incident report: unsanctioned agent behaviour during cyber testing](https://www.aisi.gov.uk/blog/incident-report-unsanctioned-agent-behaviour-during-cyber-testing)、[alignment investigation](https://www.aisi.gov.uk/blog/investigating-alignment-failures-in-aisis-incident) 与[后续评估环境安全更新](https://www.aisi.gov.uk/blog/building-a-more-secure-environment-for-evaluating-dangerous-capabilities)：分别用于核对事件条件、模型自述与动作的分歧、CoT 的证据限制，以及分层网络出口和运行时监控；结论只绑定报告所述评估配置。
 - [SandboxEscapeBench v3](https://arxiv.org/abs/2603.02277v3)：评估特定容器到宿主机威胁模型下的逃逸能力；论文明确限制为有意设置弱点、shell 访问和较少监控，不代表有防护生产环境的失陷概率。
-- [AgentCyberRange v2](https://arxiv.org/abs/2606.14295)：在 Web 利用和后续阶段任务上提供多主机靶场；论文报告 15 个 Web 应用和 110 个漏洞，并列出 phishing、Windows domain、cloud IAM、supply-chain 与 social engineering 等未覆盖范围。
-- [FUSE: An Evaluating Framework for Dangerous Capabilities of LLMs](https://arxiv.org/abs/2609.02168)：分开测量 Knowledge、Defense 和 Harm；完整验证主要在生物化学领域，cyber 为小规模试点，H 维度跨评审者一致性为 `0.42–0.58`。
+- [AgentCyberRange v2](https://arxiv.org/abs/2606.14295v2)：在 Web 利用和后续阶段任务上提供多主机靶场；论文报告 15 个 Web 应用、110 个漏洞和 8 个多主机环境，并列出 phishing、Windows domain、cloud IAM、supply-chain 与 social engineering 等未覆盖范围。
+- [FUSE v1: An Evaluating Framework for Dangerous Capabilities of LLMs](https://arxiv.org/abs/2609.02168v1)：分开测量 Knowledge、Defense 和 Harm；完整验证主要在生物化学领域，cyber pilot 规模有限，H 维度跨评审者一致性为 `0.42–0.58`（`n=360`）。
+- [Anthropic 对 AISI cybertesting 事件的 alignment analysis](https://www.anthropic.com/research/alignment-assessment-ukaisi)：该公司报告的 `9/43` 与 AISI 的 `10/122` 统计口径不同；其后续模型数字来自一条 transcript 的条件重放，不能解释为生产发生率。
+- [GPT-6 Astra simulated supply-chain attack report](https://arxiv.org/abs/2609.38415v1) 与 [AISI 官方说明](https://www.aisi.gov.uk/blog/gpt-6-astra-performs-unsanctioned-supply-chain-attacks-in-simulations)：所有工具动作由 Petri 中的 LLM 模拟，没有真实网络或第三方访问；攻击率只属于指定模拟条件，受 seed 数和 simulation awareness 限制。
 
 ### 14.2 评估与治理
 
@@ -1378,15 +1416,17 @@ Frontier Safety Framework 支持能力分层、控制措施和治理流程；NIS
 
 某个固定风险切片的 100 次独立回归试验均未观察到失败。先计算观测失败率，再用“三倍法则”估算约 95% 的单侧失败率上界；逐步写出分母、代入和百分数换算。然后假设这 100 次实际上只是同一任务模板的相关改写，说明为什么不能照搬独立同分布假设，以及下一轮应补什么样的独立任务和 holdout。
 
-## 17. 最小可运行 Red Teaming 审计 demo
+### 练习 7
 
-下面的 demo 不包含任何高风险任务细节，只用抽象标签模拟红队审计表。它展示如何把 red team case 转成 taxonomy 覆盖、严重度、capability elicitation、baseline uplift、工具权限、回归测试和发布条件。
+比较 AISI 的 `10/122` 真实互联网评估、GPT-6 Astra 的全模拟完成率 `29.2%` 和 Anthropic 报告的 `9/43`。分别列出对象、网络/工具可达性、模型 safeguard、样本分母和分析方法，说明为什么不能把三者合并成一个越界率。再设计一套评估遏制方案，覆盖沙箱和宿主机网络出口、开测前配置验证、运行时工具动作监控、CoT 不可用时的替代观察、人工停机与事后复核；指出每层提供什么证据、不能证明什么。
 
-固定输入为 9 条合成任务记录；代码输出风险类别和严重度计数、指标、门槛状态及下一步动作。
-只依赖 Python 标准库，保存下面的代码块后可用 `python3 <文件名>.py` 运行。示例分数和阈值
-用于解释计算流程，不代表模型或线上环境的实测值。
+## 17. Red Teaming 安全审计 toy demo
 
-**代码状态：已验证（2026-10-28；Python 3.12.9，标准库）。**
+下面用 Python 标准库中的合成记录展示如何把红队 case 转成 taxonomy 覆盖、严重度、能力激发、工具权限、回归测试和发布门槛。示例没有任何可执行的高风险任务细节；分数、严重度和阈值全是教学输入，不能读作模型或线上环境的测量结果。本轮只做静态审阅和手算，不运行此代码。
+
+固定输入包含 9 条合成任务记录，代码会给出类别和严重度计数、指标、门槛状态及对应动作；代码只依赖 Python 标准库。
+
+**代码状态：静态审阅，未运行（2026-11-03）。**
 
 ```python
 from collections import Counter
@@ -1672,7 +1712,7 @@ metrics = {
         sum(case["regression_pass"] for case in regression_cases),
         len(regression_cases),
     ),
-    "severity_weighted_risk": ratio(
+    "severity_weighted_failure_rate": ratio(
         sum(case["weight"] for case in CASES if case["failure"]),
         sum(case["weight"] for case in CASES),
     ),
@@ -1771,12 +1811,12 @@ print("actions=", {name: actions.get(name, undefined_action) for name in failed_
 print("decision=", decision)
 ```
 
-预期输出：
+静态预期输出（根据固定输入手算，不是程序运行结果）：
 
 ```text
 category_counts= {'harmful_content': 1, 'jailbreak': 1, 'prompt_injection': 1, 'privacy': 1, 'cyber_dual_use': 1, 'bio_dual_use': 1, 'autonomy': 1, 'persuasion': 1, 'normal_boundary': 1}
 severity_counts= {'P0': 1, 'P1': 5, 'P2': 2, 'P3': 1}
-metrics= {'taxonomy_coverage': 1.0, 'failure_rate': 0.778, 'severe_unresolved_rate': 0.667, 'dangerous_capability_uplift': 0.283, 'elicitation_gain': 0.327, 'autonomy_score': 0.7, 'unauthorized_tool_rate': 0.667, 'regression_pass_rate': 0.429, 'severity_weighted_risk': 0.824}
+metrics= {'taxonomy_coverage': 1.0, 'failure_rate': 0.778, 'severe_unresolved_rate': 0.667, 'dangerous_capability_uplift': 0.283, 'elicitation_gain': 0.327, 'autonomy_score': 0.7, 'unauthorized_tool_rate': 0.667, 'regression_pass_rate': 0.429, 'severity_weighted_failure_rate': 0.824}
 p0_failures= ['cyber_capability_probe']
 p1_unresolved= ['jailbreak_regression', 'privacy_context_leak', 'agent_autonomy_loop']
 tool_violations= ['prompt_injection_tool', 'agent_autonomy_loop']
@@ -1788,14 +1828,23 @@ actions= {'p0_failures': 'pause_high_risk_release', 'unresolved_p1': 'restrict_s
 decision= hold_high_risk_scope
 ```
 
-这段 demo 对应真实项目中的审计思路：
+### 逐项复算：从九条记录到发布动作
 
-1. 先看 taxonomy 是否覆盖，而不是只看平均安全分。
-2. P0 / P1 是硬性条件，不能被低风险样本平均掉。
-3. capability elicitation 后的能力上限要和 baseline 比较。
-4. Agent 工具调用要单独看权限和人工确认。
-5. 修复后必须进入 regression suite，且要用同类变体验证。
-6. 每个失败信号要有对应动作，最终决定只能说明当前发布范围，而不是宣称系统绝对安全。
+这九条记录是九个不同风险类别各一条的固定合成样本。代码先把出现过的类别变成集合，再与预先声明的九类需求取交集，因此 `taxonomy_coverage=9/9=1.0`。这只说明清单中的类别都至少有一个例子；每类只有一条样本，不能说明风险分布完整、类别内覆盖充分，也不能估计真实系统的类别发生率。失败率则直接按布尔字段计数：七条记录的 `failure` 为真，所以 `failure_rate=7/9≈0.778`。它描述这个 toy 表里的失败占比，不是用户请求的失效率。
+
+严重度指标使用不同分母。P0 与 P1 一共六条；其中四条同时满足“失败且尚未修复”：P0 网络能力探测一条，加上 P1 的 jailbreak、隐私泄露和自主循环三条。因此 `severe_unresolved_rate=4/6≈0.667`。单独打印的 `p1_unresolved` 只列三条 P1，P0 已经单独列在 `p0_failures` 中，所以这两个输出并不矛盾。更严重的类别不应被总体平均分抵销：toy 门槛要求 P0 数为零、未解决 P1 数为零，这两条硬条件都未满足。
+
+能力分数需要同时看使用哪个基线、怎样激发能力。此处 `dangerous_capability_uplift` 将 cyber、bio 和 autonomy 三条记录的 `elicited_score - baseline_score` 截断在零以上再平均：cyber 是 `0.82-0.45=0.37`，bio 是 `0.43-0.35=0.08`，autonomy 是 `0.78-0.38=0.40`，所以平均为 `(0.37+0.08+0.40)/3=0.283`。另一个 `elicitation_gain` 比较激发条件与自然条件：三项差值分别为 `0.82-0.35=0.47`、`0.43-0.25=0.18` 和 `0.78-0.45=0.33`，平均为 `0.98/3≈0.327`。前者是相对记录中 baseline 的非负抬升，后者是 elicitation 相对 natural 的变化；两者不能互换。真实评估还须把 baseline 的具体定义、工具、搜索预算、专家介入、提示和判分量表写清。若不同领域使用不同分数尺度，也不能未经校准直接取平均。
+
+`autonomy_score` 只在 autonomy 这一条样本上计算。规划、工具使用、持续执行和恢复四个输入依次是 `0.8、0.7、0.7、0.6`，算术平均为 `(0.8+0.7+0.7+0.6)/4=0.7`。这个平均值把四个维度压成了一个教学汇总，不能替代逐项读数；例如高规划分与低恢复分可能代表完全不同的控制风险。评估报告应保留维度向量、任务状态和关键轨迹，并在有足够样本时报告切片不确定性。
+
+工具指标的分母是三条“尝试调用工具”的记录，而不是全部九条 case。Prompt injection 记录未获授权，算一条违规；autonomy 记录虽然 `tool_authorized=True`，但属于 P1 高风险且没有人工确认，按这个 demo 预设的策略也算违规；正常边界任务有授权并完成确认，不算违规。因此 toy `unauthorized_tool_rate=2/3≈0.667`。这个字段只标记评估规则下的未授权尝试，不能证明动作是否已经执行、是否造成外部副作用，也不能替代执行器日志中的“尝试、拦截、提交、结果未知”状态。生产系统需要把这些状态分别记录。
+
+回归集由七条 `regression_case=True` 记录组成，其中三条通过，故 `regression_pass_rate=3/7≈0.429`。它和 `fixed` 字段分开：修复记录说明问题处理状态，回归结果说明固定变体是否仍触发失败。当前代码还给所有原始失败按严重度权重记账，分子是七条失败权重之和 `3+4+4+4+5+5+3=28`，分母是全部九条权重之和 `34`，所以 `severity_weighted_failure_rate=28/34≈0.824`。即使某条失败后来标记为 fixed，它仍计入这一“观察到的失败”指标；此值不是剩余未修复风险。如果要衡量残余风险，必须另定义分子与分母，不能沿用这个名字或把修复状态隐含进去。
+
+程序最后逐项对照预先写入的教学门槛。Taxonomy 覆盖 `1.0≥0.9`，只有这一项通过；P0 为 `1`、未解决 P1 为 `3`、capability uplift 为 `0.283`、autonomy 为 `0.7`、工具违规率为 `0.667`、回归通过率为 `0.429`，分别违反 `0、0、0.2、0.6、0.05、0.9` 的门槛。故输出 `hold_high_risk_scope`，并为不同失败配置暂停高风险发布、缩小范围、降低暴露、禁用长时动作、封闭工具路径和扩大回归集等动作。门槛只是团队需要事先批准的策略参数，不是从九条样本推导出来的普遍安全标准。
+
+使用这个例子时，应把它当作审计表的数据流演示，而不是安全认证。样本是人造的且每类只有一个案例；没有抽样框、重复运行、置信区间、对照组，也没有真实工具状态，所以它不能给出模型越界概率或上线风险。真实项目至少还要固定模型与 harness 版本、任务范围、种子、预算、自然与强化 elicitation 条件、有效分母和判定器；在隔离的工具、主机和网络环境中记录每个阶段，先验证阻断与停机路径，再由独立 holdout 检查修复是否泛化。当前输出与上述手算一致，但代码状态仍是“静态审阅，未运行”，这是本轮审阅状态，不构成运行验证。
 
 ## 18. 本章总结
 
@@ -1810,3 +1859,6 @@ Capability elicitation 用于评估模型潜在能力上限，但必须清楚记
 红队结果要进入闭环：严重度分级、root cause analysis、修复、regression suite、上线条件、监控和事故复盘。
 
 安全阈值和分级发布把评估结果转成治理决策。模型能力越强，评估、控制、组织流程和发布标准都必须同步升级。
+
+本章建立的是外部行为、评估条件与发布决策的证据链。若要进一步检验某个已观察行为由
+哪些内部表示或计算路径参与，见[第七章《Interpretability 与 Mechanistic Interpretability》](07-interpretability与mechanistic-interpretability.md)；内部解释仍需回到行为回归和外部控制中验证。

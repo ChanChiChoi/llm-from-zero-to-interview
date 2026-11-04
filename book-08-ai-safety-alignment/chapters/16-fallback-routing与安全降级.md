@@ -6,6 +6,8 @@ Fallback routing 的目标不是让每一次请求都“看起来成功”，而
 
 本章把 fallback 视为一个有状态的恢复系统。路由器首先读取请求和外部动作的状态，再判断错误类型、权限、风险、预算、数据范围和候选后端能力，最后选择同路径重试、兼容后端、受限工具、只读信息、人工接管或拒绝。模型只是候选执行组件，不能决定自己的 fallback 权限。
 
+本章承接[第十五章《Risk-Calibrated Access》](15-risk-calibrated-access.md)：授权决定先限定主体、资源和动作范围；后续路由只能依据真实状态恢复，不能借故障扩大权限或重发动作。
+
 ## 16.1 “失败”不是一种状态
 
 ### 16.1.1 小白视角：付款超时和模型超时完全不同
@@ -489,7 +491,7 @@ U
 
 小模型可能降低 compute cost，却增加误拒或错误动作的 `C_risk`；人工路径增加延迟和人工成本，却可能降低不可逆副作用。权重应按动作和用户价值切片，而不是用一个全局平均效用掩盖高风险尾部。例如，若某条路径的帮助性价值为 8，时延成本为 1，计算成本为 1，人工成本为 0，风险成本为 2，则合成效用是 $8-1-1-0-2=4$。这些数值只是同单位教学量表；即使效用为正，缺少授权或外部状态不明仍必须阻止副作用。
 
-## 16.15 一个可运行的 fallback 状态审计 demo
+## 16.15 一个 fallback 状态审计示例
 
 下面的代码使用合成状态，演示路由器先判断动作是否已经发生，再决定有限重试、查询状态、停止或转信息路径。它不会调用真实 provider，也不会执行真实付款。
 
@@ -497,7 +499,7 @@ U
 
 九条输入覆盖了普通超时、付款状态未知、策略拒绝、备用后端不支持工具、查询不可用、提交后撤权、撤权后仍可查询、查询权限也被撤销，以及重试预算耗尽。路由顺序先处理已提交和未知副作用，再检查新动作授权；这样恢复已有事实不会错误地重新授权新的写操作。
 
-代码状态：已验证（2026-10-28；Python 3.12.9，标准库）。
+代码状态：静态审阅，未运行（2026-11-03；声明环境 Python 3.12.9，标准库）。
 
 ```python
 from __future__ import annotations
@@ -648,45 +650,47 @@ retry_exhausted human handoff_to_human read_only scope_preserved=True
 
 ## 16.16 常见失败模式
 
+排查 fallback 时，要把症状、事件顺序和外部状态放在同一条 trace 中。下面每一种失效都可能让表面上的“恢复成功”掩盖重复副作用、越权或错误归因；诊断时先定位是哪一个约束被破坏，再决定该收窄、查询、转人工还是停止。
+
 ### 16.16.1 所有错误都重试
 
-无限重试会放大成本和副作用。应先分类错误、查询状态、检查权限，再使用统一预算；未知状态不能直接重放。
+无限重试会放大成本和副作用。检查每次 attempt 的错误类别、等待时间和剩余总预算；若 429、超时和参数错误都落入同一个重试分支，说明分类器过粗。应按可恢复条件设置次数和 deadline，并在未知状态时停止重放。
 
 ### 16.16.2 换模型绕过拒绝
 
-安全拒绝、权限撤销和审批过期属于策略结果，不是模型质量故障。备用模型必须继承主体、资源、动作和范围约束，合法替代只能是信息、澄清、人工或拒绝。
+安全拒绝、权限撤销和审批过期属于策略结果，不是模型质量故障。trace 应保留 refusal category、policy revision 和权限变更；不能把拒答误记成 provider error。备用模型必须继承主体、资源、动作和范围约束，合法替代只能是信息、澄清、人工或拒绝。
 
 ### 16.16.3 把 tool call 转成普通文本
 
-不支持结构化工具的后端输出一段“请调用某工具”的文本，executor 若自行解析，就失去了 schema、来源和权限边界。应转只读、草稿、人工或拒绝。
+不支持结构化工具的后端输出一段“请调用某工具”的文本，executor 若自行解析，就失去了 schema、来源和权限边界。可从 trace 检查是否出现未登记的 tool name、缺少 call ID 或参数校验绕过；应转只读、草稿、人工或拒绝，不能把普通文本当成已授权动作。
 
 ### 16.16.4 忽略半成功
 
-客户端只看到超时，不代表外部动作没有发生。每个工具要有 action ID、状态查询和幂等键；没有状态查询能力时，高风险动作不应自动重试。
+客户端只看到超时，不代表外部动作没有发生。检查 action ID、提交回执、幂等键和状态查询结果是否能关联到同一业务动作；仅有 provider 的 timeout 日志不够。没有状态查询能力时，高风险动作应保持 unknown，不应自动重试。
 
 ### 16.16.5 静默截断上下文
 
-截断可能丢掉取消、权限和安全约束。应显式报告证据状态，改为检索、摘要、分批或信息路径，并向用户说明未覆盖范围。
+截断可能丢掉取消、权限和安全约束。仅看 token 数量不能证明关键信息仍在；要保留来源范围、摘要版本、被丢弃区间和证据完整性状态。必要时改为检索、分批或信息路径，并向用户说明未覆盖范围。
 
 ### 16.16.6 备用后端使用更大权限
 
-备用模型为了“保证成功”而连接更宽的数据或工具，等于把故障变成权限升级。后端 allowlist、数据区域和工具范围要由服务端固定，路由器只能收窄能力。
+备用模型为了“保证成功”而连接更宽的数据或工具，等于把故障变成权限升级。执行前比较主体、资源、动作、租户、数据区域、有效期和工具范围，不能只比较模型名或一个粗粒度权限等级；allowlist 要由服务端固定，路由器只能收窄能力。任一能力字段缺失时应判为不兼容并停止该路由，而不是把缺省值解释成允许。
 
 ### 16.16.7 主备同时提交
 
-并行竞速可以降低延迟，却可能让两个后端都调用外部工具。高副作用动作应先选出一个执行者，或由 executor 使用全局 action ID 和幂等键保证只提交一次。
+并行竞速可以降低延迟，却可能让两个后端都调用外部工具。检查每个 worker 的执行租约、提交者身份和 fencing/version 字段；高副作用动作应先选出一个执行者，并由 executor 用持久 action ID 和幂等记录约束并发提交。
 
 ### 16.16.8 用户不知道降级
 
-用户以为“已完成”而实际上只是生成草稿，会重复提交或产生业务错误。状态说明要区分完成、待确认、未知、未验证和拒绝。
+用户以为“已完成”而实际上只是生成草稿，会重复提交或产生业务错误。对照用户界面状态与 executor/外部回执：只有模型文本变成“完成”而没有提交事件，就是状态映射缺口。说明要区分完成、待确认、未知、未验证和拒绝，同时给出用户可执行的下一步。
 
 ### 16.16.9 只有最终文本，没有状态 trace
 
-自然语言 judge 可能认为“我无法付款”足够安全，却看不到付款已经提交。评估必须检查工具日志、外部状态、文件 diff、权限事件和 action ledger。
+自然语言 judge 可能认为“我无法付款”足够安全，却看不到付款已经提交。评估要按 request ID 连接模型输出、工具日志、外部状态、文件 diff、权限事件和 action ledger；缺少其中任何关键事件时，结论应记为不可判定，而不是安全成功。可用只读授权查询外部状态；若执行器没有可查回执，就保留 `unknown`，并把可观测性缺口作为单独故障处理。
 
 ### 16.16.10 fallback 自己没有回归集
 
-主模型的安全测试不覆盖路由器、adapter、重试、状态恢复和用户沟通。每个新路径都要加入专门的故障注入、反事实和回放样本。
+主模型的安全测试不覆盖路由器、adapter、重试、状态恢复和用户沟通。回归集合应覆盖拒绝、429、超时、未知副作用、撤权、证据截断和备用端不兼容，并记录每项的分母、预期状态和实际副作用；模型升级不能代替这些系统路径的回归。样本还应核对 fallback refusal、工具直调、流式 partial output、重复 attempt 和人工接管；策略、adapter 或服务端路由配置变化后，要在同一批事件上比较 served model、外部状态和错误分布，不能只比较总体成功率。
 
 ## 16.17 资料与证据边界
 
@@ -703,6 +707,8 @@ retry_exhausted human handoff_to_human read_only scope_preserved=True
 1. [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：支持把 fallback、监控、事故和治理放入生命周期。
 2. [NIST Generative AI Profile](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf)：支持生成式 AI 的风险、数据、测量和治理边界。
 3. [OWASP Top 10 for LLM Applications 2026](https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/)：提供提示注入、敏感数据和工具集成风险分类；属于社区风险指南，不证明具体 fallback 路由已经安全。
+4. [Anthropic Claude Opus 5.5 发布页](https://www.anthropic.com/claude-opus-5-5)、[Fable 5.1 / Mythos 5.1 发布页](https://www.anthropic.com/claude-fable-and-mythos-5-1)与[Sonnet 5.5 System Card](https://www.anthropic.com/claude-sonnet-5-5-system-card)：支持相应版本公开披露的风险类别、控制和评测条件，不证明其他 provider 或版本采用同一路由。
+5. [Anthropic Refusals and fallback](https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback)与[Sonnet 5.5 migration guide](https://platform.claude.com/docs/en/models/sonnet-5-5/migration-guide)：支持当前 API 的拒绝字段、类别化 fallback、目标模型可观测字段和平台范围；这些接口及推荐目标会随文档版本变化。
 
 这些资料支持风险管理和应用防护语言，不证明一个 fallback 路由已经保持所有安全性质。安全保持率、重复副作用和状态一致性必须用本地工具契约和故障注入验证。
 
@@ -749,15 +755,17 @@ Fallback routing 的本质是：当原路径不可用时，系统要在已知状
 
 一个成熟的降级系统会保存 request ID、action ID、幂等键、错误分类、模型和工具版本、策略版本、权限范围、状态变化和用户可见语义。它允许低风险任务继续，也能在高风险动作无法确认时停下来。路由器并不负责把所有失败隐藏掉，它负责把失败变成可解释、可恢复、可审计且不会扩大伤害的有限服务。
 
+更广泛的 Agent 控制、监控与不可信输入监督在[第十七章《AI Control 与不可信 Agent 监督》](17-ai-control与不可信Agent监督.md)继续展开。
+
 ## 16.20 Claude Opus 5.5：能力分级与透明 fallback
 
-下面将 Opus 5.5、Fable/Mythos 5.1 和 Sonnet 5.5 的公开材料作为一组路由案例。它们分别展示按风险类别切换实际模型、同权重模型采用不同 safeguards，以及多阶段分类器触发类别化 fallback。比较时要固定风险类别、控制动作、实际执行模型和评测条件；这些是特定发布版本的例子，不是所有 provider 的通用策略。
+下面将 Opus 5.5、Fable/Mythos 5.1 和 Sonnet 5.5 的公开材料作为一组路由案例。它们分别展示按风险类别切换实际模型、同模型采用不同 safeguards，以及多阶段分类器触发类别化 fallback。比较时要固定风险类别、控制动作、实际执行模型和评测条件；这些是特定发布版本的例子，不是所有 provider 的通用策略。
 
 Anthropic 发布页和 System Card 把 Opus 5.5 的网络安全、生物和蒸馏防护描述为能力相关的路由策略：普通软件生命周期中的 bug 修复可以继续，更多高风险 cyber 任务可能转到 Opus 4.8；生物研究需要 Life Sciences Verification Program；preserved thinking 被用于 anti-distillation。这个案例说明 fallback 不是“模型失败后再重试一次”，而是安全策略选择了另一条能力、权限和审计边界不同的执行路径。[发布页](https://www.anthropic.com/claude-opus-5-5)、[System Card](https://www.anthropic.com/claude-opus-5-5-system-card)
 
 安全路由的最小记录应包含：原始模型与 revision、风险分类、触发规则、目标模型、工具 allowlist、网络/数据区域、thinking 状态、缓存是否复用、重试次数、外部副作用和最终 verifier。若用户只看到一个成功答案，却不知道任务由 fallback 模型完成，评测和责任归因都会失真。
 
-可以用零依赖 [`claude_opus55_protocol_audit.py`](../../research/model-update-2026-09/code/claude_opus55_protocol_audit.py) 做最小回放：它把 `original_model`、风险类别、`actual_model`、重试资格、工具幂等键和 verifier 结果分开记录，并覆盖拒答与 fallback 两条路径。该脚本是 `local_protocol_toy`，不能替代真实 safeguard、provider 路由或生产安全评测。
+本章 §16.15 的状态审计示例可用来练习把原始请求、动作状态、允许范围和下一步写进同一条 trace；它没有模拟 Anthropic 的真实 safeguard 或 API 路由，也不能替代 provider 评测。
 
 发布方称 Opus 5.5 在 prompt injection、越界 sandbox 和模拟环境误判等行为上有改进，但这不等于 Agent harness 已安全。宿主仍需做权限门禁、工具结果 provenance、外部状态查询、幂等和人工升级；模型级拒答率不能替代执行器级安全保持率。
 
@@ -767,7 +775,7 @@ System Card 给出的 RSP 结论是 CB-1、未达到 CB-2；autonomy threat mode
 
 Cyber 证据更需要防止误读：在关闭 cyber safeguards 的评测中，ExploitBench 完整 ACE 为 `301/410 = 73.4%`，CyScenarioBench 为 `67.6%`，ExploitGym 2 小时/6 小时为 `289/869`、`300/869`。生产请求可能经过拒答、工具限制或 fallback，所以这些数字不能用来估算线上越权率。相反，Gray Swan IPI 在 k=1/10/15 为 `0.1%/0.7%/1.0%`，约 18% rollout fallback 到 Opus 4.8；1,310 个 fallback rollout 无成功攻击。报告时要同时写 attack success、fallback 覆盖率和实际模型。
 
-安全路由的类型也不是统一的“重试”：biology/CB -> Opus 5，cyber -> Opus 4.8，窄范围 frontier LLM kernel/AI R&D -> Opus 5；conventional weapons/high-yield explosives 与 distillation/hidden reasoning extraction 没有 fallback，其他 provider 可能不同。系统必须先做风险分类和状态确认，再决定是否降级，并把 `original_model`、`actual_model`、safeguard 状态、工具权限、外部副作用和 verifier 写入审计轨迹。以上模型类别和路由条件仅反映该版本发布方披露，详见[Opus 5.5 System Card](https://www.anthropic.com/claude-opus-5-5-system-card)。
+这组映射描述 System Card 在启用生产 safeguards 的评测中，干预请求由哪个模型完成：cyber 由 Opus 4.8 完成，biology 与 frontier-LLM development 由 Opus 5 完成；这不等于所有产品/API 请求的固定路由。对 conventional weapons、high-yield explosives 与 reasoning extraction，卡片记录的是拒绝或无 fallback 的评测路径。当前 API 的默认路由按模型和类别配置，具体 served model 应从响应核对；不能把某张卡片上的评测 fallback 表当成跨 surface 的永久路由清单。路由前仍要检查外部动作状态，并记录 `original_model`、`actual_model`、safeguard 状态、工具权限、副作用和 verifier。详见[Opus 5.5 System Card](https://www.anthropic.com/claude-opus-5-5-system-card)与[Anthropic Refusals and fallback](https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback)。
 
 ## 16.21 Claude Fable 5.1：共享权重与不同 safeguards
 
@@ -785,25 +793,25 @@ System Card 对 Mythos 5.1 的 RSP 判断为 CB-1、未达 CB-2；autonomy threa
 
 这也解释了为什么“安全模型更强”不能只用拒答率表达：系统安全取决于模型能力、分类器、权限、执行器、状态恢复和最终验证的组合。降级可以收窄能力与权限，但不能借换模型绕过原策略拒绝，也不能把已提交或未知状态的外部动作重新提交。
 
-## 16.22 Claude Sonnet 5.5：多阶段 cyber gate 与类别化 fallback
+## 16.22 Claude Sonnet 5.5：三阶段 cyber safeguard 与 API fallback
 
-Sonnet 5.5 的 System Card 把 cyber safeguards 描述为三阶段链：读取模型内部 activation 的 probe、运行在 Sonnet 5.5 上的轻量 classifier、以及结合 probe verdict 决定是否阻断的独立 LLM classifier。它不是一个统一的“危险请求检测器”；生物风险、武器、模型蒸馏/推理提取和窄范围 frontier-LLM 开发各有不同的 block/fallback policy。[Sonnet 5.5 System Card](https://www.anthropic.com/claude-sonnet-5-5-system-card)
+Sonnet 5.5 的 System Card 把 cyber safeguard 描述为三阶段链：读取模型内部 activation 的 probe、运行在 Sonnet 5.5 上的轻量 classifier、以及结合 probe verdict 决定是否 block 的独立 LLM classifier。它不是一个统一的“危险请求检测器”；生物风险、常规武器、模型蒸馏/推理提取和窄范围 frontier-LLM 开发各有不同的 block/fallback policy。[Sonnet 5.5 System Card](https://www.anthropic.com/claude-sonnet-5-5-system-card)
 
-| 类别 | 发布方报告的动作 | 不能忽略的审计字段 |
+| 类别 | System Card、产品页或 API default 所披露的动作 | 不能忽略的审计字段 |
 |---|---|---|
-| Cyber misuse | 多数产品可 fallback 到 Sonnet 5；API 开发者需 opt in | `actual_model`、classifier/probe、是否触发 fallback、工具与网络权限 |
-| Chemical / biological | classifier block，无 fallback | refusal category、所处产品/API surface |
+| Cyber misuse | 产品路径可转 Sonnet 5；当前 API 的默认 server-side fallback 也按推荐目标转 Sonnet 5 | `actual_model`、classifier/probe、是否触发 fallback、工具与网络权限 |
+| Chemical / biological | System Card 记为 block；API default 不把 `bio` refusal 自动重试 | refusal category、所处产品/API surface |
 | 窄范围 frontier-LLM development | 部分 ML accelerator kernel 等场景可 block/fallback 到 Sonnet 5 | 触发策略和目标模型；不能扩大解释为禁止一般 AI/ML 开发 |
-| Conventional weapons / high-yield explosives | block，无 fallback | 拒绝不可借另一个模型绕过 |
-| Distillation / reasoning extraction | block，无 fallback | 请求类别、输出类型；不能误作普通服务异常 |
+| Conventional weapons / high-yield explosives | 卡片披露为 block；API default 对没有推荐 fallback 的 refusal 保留拒绝 | 拒绝不可借另一个模型绕过 |
+| Distillation / reasoning extraction | 卡片披露为 block；API default 对 `reasoning_extraction` 不自动重试 | 请求类别、输出类型；不能误作普通服务异常 |
 
-HTTP 200 不一定代表模型接受任务：拒答是 `stop_reason=refusal`，并由 `stop_details.category` 指明策略类别。官方 server-side fallback 仅覆盖 `cyber` 与 `frontier_llm`，不覆盖 `bio`、`reasoning_extraction`、`general_harms`。路由器应按类别选择拒绝、有限降级或人工处理，而不是一律重试。
+模型层的 safeguards 与 API 层的 fallback 是两份合同。API 文档截至 2026-11-03 说明，Claude API 与 Google Cloud Anthropic-managed surface 的 `fallbacks="default"` server-side fallback 仍处于 beta；Sonnet 5.5 的默认重试类别是 `cyber` 和 `frontier_llm`，目标为 Sonnet 5。`bio`、`reasoning_extraction` 和 `general_harms` 没有该默认重试；其他 surface 的内建路径不能从此推断。API 也允许应用显式指定最多三个、且属于该请求模型 permitted target 的 fallback 模型；这是应用配置路径，不等于 Anthropic 的类别推荐，不能用来绕过安全拒绝。API refusal 是成功返回的 `stop_reason="refusal"`，类别见 `stop_details.category`；fallback 后响应的顶层 `model`、`fallback` content block 和 `usage.iterations` 用于识别实际执行模型和每次尝试。只有安全分类器拒绝会触发默认 fallback，429、overload 或 server error 会原样返回，不能误当成同一套 retry。流式输出若中途 refusal，先前的部分内容也应视为不完整并丢弃。具体行为见[Refusals and fallback](https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback)和[Sonnet 5.5 migration guide](https://platform.claude.com/docs/en/models/sonnet-5-5/migration-guide)。
 
 发布方的 IPI 与 coding Shade 结果还说明 overall attack-success rate 会混合不同实际模型。Sonnet 5.5 的 IPI k=1/10/15 为 `0.4%/2.7%/3.4%`，其中一部分请求因 cyber classifier 转到 Sonnet 5；coding Shade 中同样有 25% 请求由 fallback 模型作答。报告时需同时保存 attempted request、fallback rate、fallback model 的结果和原模型结果，不要将其标成 Sonnet 5.5 裸模型安全分数。
 
 System Card 还称 Sonnet 5.5 达到 CB-1 与 Autonomy-1 阈值、未达 CB-2/Autonomy-2，Autonomy-1 风险评估为 low。这是发布方 RSP 风险判断，不是无风险证明。`Terminal-Bench 4.0 70.6%` 绑定 66 tasks、Claude Code `--bare`、max effort、五次试验、无外网及 fallback；`OSWorld 2.1 80.1% partial / 43.5% strict` 则绑定 108 个 GUI 任务、500-action cap、五次运行和 100K 后服务端 compaction。评测中的实际 fallback、指标分母和评分定义都应进入 benchmark manifest。
 
-本专题的接口迁移与证据账本见[第二十册第 24 章](../../book-20-agent-harness-runtime/chapters/24-claude-sonnet-5.5-thinking-state与安全路由.md)及[Sonnet 5.5 System Card 研究笔记](../../research/model-update-2026-09/claude-sonnet-5.5-source-notes.md)。本章引用的评测数字是发布方在各自条件下报告的结果；本地没有目标 API、运行时 harness 或独立 benchmark 的验证证据，因此这些数字不能解释为本地路由或生产环境的安全率。
+本专题的接口迁移与 trace 字段见[第二十册第 24 章](../../book-20-agent-harness-runtime/chapters/24-claude-sonnet-5.5-thinking-state与安全路由.md)及[Sonnet 5.5 System Card 与 API 合同研究笔记](../../research/model-update-2026-09/claude-sonnet-5.5-source-notes.md)。本章引用的评测数字是发布方在各自条件下报告的结果；本地没有目标 API、运行时 harness 或独立 benchmark 的验证证据，因此这些数字不能解释为本地路由或生产环境的安全率。
 
 把三张 System Card 放在一起，能看见路由决定与测量的对应关系：
 

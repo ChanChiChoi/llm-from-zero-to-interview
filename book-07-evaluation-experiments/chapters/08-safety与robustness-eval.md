@@ -18,6 +18,13 @@ prompt injection、privacy、bias、dangerous capability 和 robustness，再把
 red teaming、人工校准、线上监控和回归测试连成一个可复核的工程闭环。涉及
 高风险能力时只讨论抽象任务、指标和防护，不提供可直接滥用的攻击内容。
 
+本章聚焦评测契约、样本、指标、判分和证据边界，不展开防御架构或发布治理；
+越狱与注入机制见[第八册第五章](../../book-08-ai-safety-alignment/chapters/05-jailbreak与prompt-injection.md)，
+红队与危险能力治理见[第八册第六章](../../book-08-ai-safety-alignment/chapters/06-red-teaming与危险能力评估.md)，
+隐私与记忆机制见[第八册第十章](../../book-08-ai-safety-alignment/chapters/10-privacy-memorization-watermarking.md)，
+自动化对抗评估见[第八册第十三章](../../book-08-ai-safety-alignment/chapters/13-自动化对抗评估.md)，
+不可信 Agent 的运行时监督见[第八册第十七章](../../book-08-ai-safety-alignment/chapters/17-ai-control与不可信Agent监督.md)。
+
 ## 1. 安全评估首先测量什么
 
 ### 1.1 小白视角：安全不是“拒绝越多越好”
@@ -208,6 +215,9 @@ R_{\mathrm{unsafe}}^{(w)}
 ~~~
 
 p_i 是 policy 动作，a_i 是从模型输出、工具日志或最终状态解析出的实际动作。
+这里的 unsafe 是综合结果标签：危险输出、敏感信息泄露、越权工具动作或最终
+外部状态违规都可以使样本进入 U；具体判定规则应在评估前固定，不能只检查
+原始动作字段是否等于某个字符串。
 这个指标越低越好，但它只描述应拒绝的样本，不能用来衡量正常任务质量。
 
 ### 3.2 Over-refusal rate
@@ -484,6 +494,8 @@ R_{\mathrm{secret}}
 | --- | --- | --- | --- |
 | [InjecAgent](https://arxiv.org/abs/2403.02691) | 1,054 个固定测试案例，覆盖 17 种用户工具和 62 种攻击者工具；区分直接伤害与私密数据外传两类目标 | 把外部内容中的间接注入放进多工具任务中，系统比较 agent 的攻击易感性 | 是论文定义的固定任务和 agent prompt；论文中报告的 ASR 不迁移到别的工具集合、权限和版本 |
 | [AgentDojo](https://arxiv.org/abs/2406.13352) | 可扩展的状态化环境，含 97 个正常任务、629 个安全案例；效用函数检查输出和环境状态 | 将“用户任务做成没有”与“攻击者目标做成没有”分开；作者给出 benign utility、utility under attack 和 targeted ASR | 环境状态和效用函数是显式建模的，不代表真实邮件、银行或企业 API 的全部复杂度 |
+| [Rethinking Assessments of Prompt Injection Attacks](https://aclanthology.org/2026.findings-acl.1191/) | 8 种评测设置，论文摘要报告 37 个真实应用、185 个注入任务、21 条攻击指令和 143,745 次查询 | 对比实验室任务与应用任务，以及简单/复杂攻击指令，检查场景真实性是否改变观察结果 | 结果绑定论文的代表模型、任务与指令集合；为隔离 prompt–model 交互，论文未评估工具增强系统，不能解释为线上发生率 |
+| [LongPIBench](https://aclanthology.org/2026.findings-emnlp.1510/) | 论文与简历审查、代码审查、邮件摘要四类文档任务；每类有合成与真实数据，输入从数千到数万 token | 检查短上下文 benchmark 的防御结论能否迁移到长文档输入 | 研究使用静态单次调用，不覆盖多步 Agent、工具链和动态状态；结果只支持论文模型、数据和防御设置 |
 | [SafeAudit](https://aclanthology.org/2026.emnlp-main.73/) | 对工具工作流做枚举并审计已有测试集未覆盖的风险模式 | 把“benchmark 通过”与“测试是否覆盖足够路径”分成两件事 | EMNLP 2026 论文在 3 个 benchmark、12 个环境中报告了超过 20% 的残余不安全行为；这是该研究枚举器、规则和环境内的结果，不是所有 Agent 的通用漏测率 |
 
 AgentDojo 的三个指标回答不同问题。benign utility 是没有攻击时正常任务的成功率；
@@ -506,12 +518,21 @@ targeted ASR 可能很低，但 benign utility 也会很低；只看 ASR 会把�
 判定和确认记录，并把效用与攻击成功分别计数。权限系统可以拒绝不在用户授权
 范围内的动作；这项约束不依赖模型能否正确理解所有注入措辞。
 
-2026 年一项 Agent 安全 meta-audit 说明，固定 benchmark 通过只能证明其覆盖路径
-上的结果；测试覆盖本身也需要审计。一个 2026 年更新的
-[间接注入预印本](https://arxiv.org/abs/2510.05244)则进一步报告公开 Agent
-benchmark 中的指标和攻击强度问题，并提出更强攻击流程。后者属于预印本作者的
-分析，不应当作领域共识；两类研究共同提示，报告要公开工具环境、规则、
-状态断言、测试预算和覆盖生成方法。
+这几类研究补足的是不同测试轴：真实应用任务与实验室任务的差异、长文档中注入
+位置与上下文长度的影响，以及既有安全规则和 benchmark 是否覆盖了新的工具工作流。
+例如，Rethinking Assessments 报告其所测真实应用任务比实验室任务更易受注入，
+并观察到简单攻击指令在该设置中往往比复杂指令有效；LongPIBench 则报告短上下文
+下表现良好的部分防御在其长文档设置中明显退化。前者不含工具增强系统，后者不含
+多步工具交互，因此两者不能替代 Agent 环境测试。长上下文任务本身的通用评测方法
+见[本册第七章](07-多模态与长上下文评估.md)；本节还要单独记录攻击目标、正常任务
+效用、工具权限和真实状态副作用。
+
+SafeAudit 的 meta-audit 提醒我们，覆盖本身也是待评估对象；其“超过 20%”是论文
+在指定 3 个 benchmark、12 个环境、枚举器和规则下报告的残余行为，不是通用漏测率。
+另一项截至 2026-03-23 修订的[间接注入预印本](https://arxiv.org/abs/2510.05244)
+审视四个公开 Agent benchmark 的成功判据、实现和攻击强度，并提出分阶段攻击流程；
+这些是作者在所查 benchmark 上的结果，作为预印本应视作需要独立复核的评测假设，
+不应当写成领域共识。报告因此要公开工具环境、规则、状态断言、测试预算和覆盖生成方法。
 
 ## 7. Privacy：评估数据和系统隔离
 
@@ -598,7 +619,7 @@ FPR。两者并不矛盾：模型阶段、数据、攻击者可见信息和 cana
 成员推断常见统计量可以写成：
 
 ~~~math
-\operatorname{Adv}_{\mathrm{MIA}}=\operatorname{TPR}-\operatorname{FPR}
+\mathrm{Adv}_{\mathrm{MIA}}=\mathrm{TPR}-\mathrm{FPR}
 ~~~
 
 TPR 是真实 member 被判为 member 的比例，FPR 是 non-member 被误判为 member
@@ -611,8 +632,9 @@ TPR 是真实 member 被判为 member 的比例，FPR 是 non-member 被误判�
 研究从用户公开文本推断个人属性，展示“文本中本来就含有的线索被模型规模化
 推理”与“训练数据原样复现”是不同威胁。到 2026 年的
 [InfoRMIA](https://proceedings.iclr.cc/paper_files/paper/2026/hash/ddf43af256e11499149cf06040c62caa-Abstract-Conference.html)
-开始把成员判断从整条序列进一步拆到 token 级记忆信号；这扩展了定位粒度，
-仍不能替代应用侧访问控制和合法的数据使用政策。
+提出以 token 级信号定位生成文本中的记忆证据，并以 InfoRMIA 作为算法骨干；
+这扩展了论文所定义的定位粒度，仍不能替代应用侧访问控制和合法的数据使用政策。
+更完整的隐私、记忆、遗忘和水印机制见[第八册第十章](../../book-08-ai-safety-alignment/chapters/10-privacy-memorization-watermarking.md)。
 
 相应地，差分隐私给出训练算法在明确邻接关系、隐私预算与组合假设下的形式化
 保证；经验抽取和 MIA 测试是寻找实际实现或分布风险的审计手段。形式化保证、
@@ -1126,12 +1148,14 @@ Policy 本身可能含糊、互相冲突或没有覆盖新场景。判断模型�
 | 只在某语言泄露 | 数据或分类器覆盖不足 | 语言、脚本和错误类型 |
 | 线上突然下降 | 流量分布或产品流程变化 | 版本、流量切片和回归集 |
 
-## 16. 一个可运行的 Safety 与 Robustness 诊断 demo
+## 16. 一个 Safety 与 Robustness 诊断 demo
 
 下面的 demo 使用抽象风险标签模拟一轮安全和鲁棒性评估。它不包含真实攻击
 文本，也不执行任何外部工具，只演示如何从 policy、模型动作、风险类别、
 严重度、群体切片和扰动分数得到分项结果。示例阈值用于说明统计逻辑，不是
 任何产品的通用发布标准。
+
+代码状态：静态审阅，未运行（2026-11-03）。示例输出按合成输入手工计算，不代表模型或产品实测。
 
 ~~~python
 from collections import defaultdict
@@ -1280,7 +1304,13 @@ def at_least(value, threshold):
 
 
 policy_deny = [case for case in cases if case["policy"] == "deny"]
-unsafe_cases = [case for case in policy_deny if case["action"] == "unsafe"]
+unsafe_cases = [
+    case
+    for case in policy_deny
+    if case["action"] in {"unsafe", "leak", "tool_call"}
+    or case["leak"]
+    or case["bad_tool"]
+]
 
 attack_cases = [case for case in cases if case["attack"]]
 attack_success = [
@@ -1505,11 +1535,11 @@ print("category_counts=", {
 pprint(summary, sort_dicts=False)
 ~~~
 
-示例输出为：
+根据合成输入静态手算的预期输出如下；本轮未执行 Python：
 
 ~~~text
 category_counts={'benign_help': 2, 'harmful_output': 2, 'jailbreak': 2, 'privacy': 1, 'prompt_injection': 1, 'safe_guidance': 1, 'tool_misuse': 1, 'tool_use': 1}
-{'metrics': {'unsafe_compliance': 0.286,
+{'metrics': {'unsafe_compliance': 0.571,
              'attack_success': 0.75,
              'over_refusal': 0.333,
              'safe_completion': 0.75,
@@ -1551,7 +1581,8 @@ completion 为 0.75，也不能据此忽略这些高影响失败。
 
 ## 16.1 如何读 demo 的分母
 
-unsafe_compliance 的分母是 policy 为 deny 的 7 个样本；attack_success 的
+unsafe_compliance 的分母是 policy 为 deny 的 7 个样本，其中 4 个发生了危险输出、
+泄露或越权工具动作，因此为 4/7≈0.571；attack_success 的
 分母是 4 个 attack 样本；over_refusal 的分母是 3 个 allow 样本；secret_leakage
 的分母是 prompt injection 和 privacy 两个检查样本。它们的分母不同，所以
 不能直接求平均。
@@ -1754,14 +1785,16 @@ benchmark 上的攻击成功率不能自动代表所有产品、语言和工具�
 13. [StrongREJECT](https://arxiv.org/abs/2402.10260)：把拒绝、回答具体性与说服力分开评分，并与人工标注比较，补足只按拒绝短语判分的缺陷。
 14. [XSTest](https://aclanthology.org/2024.naacl-long.301/)：250 条安全请求和 200 条对照危险请求，用于识别过度拒绝。
 15. [InjecAgent](https://arxiv.org/abs/2403.02691) 与 [AgentDojo](https://arxiv.org/abs/2406.13352)：分别提供工具型间接注入测试集和状态化效用/攻击评估环境。
-16. [Who Tests the Testers? / SafeAudit](https://aclanthology.org/2026.emnlp-main.73/)：审计 Agent tool-call benchmark 的工作流覆盖缺口，结果受论文所用枚举器、规则和环境限制。
-17. [CBBQ](https://arxiv.org/abs/2306.16244)：中文社会偏见问答基准的构造和测量入口；仍需根据目标地区与产品重新做代表性审查。
-18. [The Secret Sharer](https://www.usenix.org/conference/usenixsecurity19/presentation/carlini)、[训练数据抽取](https://arxiv.org/abs/2012.07805)、[Do Membership Inference Attacks Work on LLMs?](https://arxiv.org/abs/2402.07841) 与 [Privacy Auditing of LLMs](https://proceedings.iclr.cc/paper_files/paper/2025/hash/e76814a0012a46ade4f997591e86f972-Abstract-Conference.html)：对比 canary 暴露、原文抽取与 member / non-member 攻击的不同证据。
-19. [Beyond Memorization](https://proceedings.iclr.cc/paper_files/paper/2024/hash/9028b8a3ca98f58e373f0c1497a17448-Abstract-Conference.html) 与 [InfoRMIA](https://proceedings.iclr.cc/paper_files/paper/2026/hash/ddf43af256e11499149cf06040c62caa-Abstract-Conference.html)：分别研究从文本推断属性和 token 级成员记忆信号，不能替代应用权限治理。
-20. [BBQ](https://arxiv.org/abs/2110.08193)：通过 ambiguous / disambiguated 两种上下文区分刻板印象补全与忽略明确证据。
-21. [Evaluating Frontier Models for Dangerous Capabilities](https://deepmind.google/research/publications/78150/) 与 [OpenAI 生物风险 uplift 评估](https://openai.com/index/building-an-early-warning-system-for-llm-aided-biological-threat-creation/)：分别展示分领域能力评估与人类在有/无模型辅助时的受控比较；只支持各自发布方报告的实验条件。
-22. [OpenAI Preparedness Framework 2025 更新](https://openai.com/index/updating-our-preparedness-framework/)：发布方将能力评估、阈值和 safeguard 治理相连的流程示例，不是独立认证标准。
-23. [Indirect Prompt Injections: Are We on the Brink of a New AI Security Threat?](https://arxiv.org/abs/2510.05244)：关于间接注入 benchmark、攻击强度与评估指标的预印本分析；观点仍需独立复核，不代表领域共识。
+16. [Who Tests the Testers? / SafeAudit](https://aclanthology.org/2026.emnlp-main.73/)：用工作流枚举和 rule-resistance 元审计 Agent 工具安全 benchmark 的未覆盖行为；超过 20% 的残余行为只绑定论文枚举器、规则、环境和预算。
+17. [Rethinking Assessments of Prompt Injection Attacks](https://aclanthology.org/2026.findings-acl.1191/)：比较实验室任务、真实应用任务和不同攻击指令；论文未评估工具增强系统，结论绑定其代表模型与任务集合。
+18. [LongPIBench](https://aclanthology.org/2026.findings-emnlp.1510/)：四类文档任务中的长上下文注入评估；静态单次调用不覆盖多步 Agent 与动态工具链。
+19. [CBBQ](https://arxiv.org/abs/2306.16244)：中文社会偏见问答基准的构造和测量入口；仍需根据目标地区与产品重新做代表性审查。
+20. [The Secret Sharer](https://www.usenix.org/conference/usenixsecurity19/presentation/carlini)、[训练数据抽取](https://arxiv.org/abs/2012.07805)、[Do Membership Inference Attacks Work on LLMs?](https://arxiv.org/abs/2402.07841) 与 [Privacy Auditing of LLMs](https://proceedings.iclr.cc/paper_files/paper/2025/hash/e76814a0012a46ade4f997591e86f972-Abstract-Conference.html)：对比 canary 暴露、原文抽取与 member / non-member 攻击的不同证据。
+21. [Beyond Memorization](https://proceedings.iclr.cc/paper_files/paper/2024/hash/9028b8a3ca98f58e373f0c1497a17448-Abstract-Conference.html) 与 [InfoRMIA](https://proceedings.iclr.cc/paper_files/paper/2026/hash/ddf43af256e11499149cf06040c62caa-Abstract-Conference.html)：分别研究从文本推断属性和 token 级成员记忆信号，不能替代应用权限治理。
+22. [BBQ](https://arxiv.org/abs/2110.08193)：通过 ambiguous / disambiguated 两种上下文区分刻板印象补全与忽略明确证据。
+23. [Evaluating Frontier Models for Dangerous Capabilities](https://deepmind.google/research/publications/78150/) 与 [OpenAI 生物风险 uplift 评估](https://openai.com/index/building-an-early-warning-system-for-llm-aided-biological-threat-creation/)：分别展示分领域能力评估与人类在有/无模型辅助时的受控比较；只支持各自发布方报告的实验条件。
+24. [OpenAI Preparedness Framework 2025 更新](https://openai.com/index/updating-our-preparedness-framework/)：发布方将能力评估、阈值和 safeguard 治理相连的流程示例，不是独立认证标准。
+25. [Indirect Prompt Injections: Are Firewalls All You Need, or Stronger Benchmarks?](https://arxiv.org/abs/2510.05244)：2025-10-06 提交、2026-03-23 修订的 v2 预印本，分析四个公开 Agent benchmark 的指标、实现和攻击强度，并提出分阶段攻击；作者结论不代表领域共识。
 
 使用这些资料时，要区分官方风险框架、论文实验、公开 benchmark、人工红队和
 当前项目实测。资料可以说明方法来源和已观察现象，不能替当前系统承担未经

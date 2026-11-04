@@ -6,7 +6,7 @@
 
 但它们也有共同风险：采集难、清洗难、授权难、污染风险高、质量判断成本高、过度上采样容易记忆和过拟合。
 
-本章围绕代码、数学和专业领域数据的共同工程难题展开：它们对目标能力的边际价值很高，却往往规模有限、结构复杂、授权要求严格，也更容易因为题库、答案、私有信息和重复样本而失去训练或评估价值。讨论始终停留在数据治理、质量控制、授权合规、安全评估和污染检测层面，不把漏洞利用、凭据提取、真实隐私复原或专业决策建议当作训练方法。
+本章围绕代码、数学和专业领域数据的共同工程难题展开：它们在某些目标和实验设置中可能带来专项价值，但收益取决于样本结构、授权、验证质量、训练预算与目标评估；供给也可能受规模、重复、时效和专家审查成本限制。题库答案、私有信息和重复样本还可能损害训练或评估价值。讨论始终停留在数据治理、质量控制、授权合规、安全评估和污染检测层面，不把漏洞利用、凭据提取、真实隐私复原或专业决策建议当作训练方法。
 
 ## 0. 为什么专项数据需要独立治理
 
@@ -34,7 +34,7 @@ flowchart TD
 
 ## 1. 先建立直觉：为什么这三类数据值得单独讲？
 
-通用 web 数据像大海，覆盖广但质量不均。代码、数学和专业领域数据更像高浓度营养液。它们规模未必最大，但会强烈影响模型的某些核心能力。
+通用 web 数据覆盖广但质量不均。代码、数学和专业领域数据可以被看作目标更集中的数据池；在适当的模型、训练预算和任务评估下，它们可能改变对应能力表现，但数据类别本身不保证收益。
 
 代码数据让模型学习形式语言、抽象接口、变量绑定、长程依赖、测试驱动和机器可执行逻辑。数学数据让模型学习约束、步骤、推理链、答案校验和符号结构。专业领域数据让模型学习术语、概念体系、规范表达、领域证据和行业场景。
 
@@ -48,9 +48,9 @@ flowchart TD
 
 但很快大家发现：通用语言能力不等于所有能力。模型能写文章，不代表会写正确代码；能解释概念，不代表能做多步数学；能给出医疗术语，不代表能在高风险专业场景中可靠。
 
-Codex 的出现强化了代码数据的重要性。`Evaluating Large Language Models Trained on Code` 介绍了在公开 GitHub 代码上微调的 Codex，并用 HumanEval 评估从 docstring 合成程序的功能正确性。结果显示，代码数据和代码专项评估可以显著改变模型能力。
+Codex 研究把代码生成的功能评估带入了大模型讨论。`Evaluating Large Language Models Trained on Code` 报告了在公开 GitHub 代码上训练的 Codex，并用 HumanEval 检查模型能否从 docstring 合成通过测试的程序；结论只对应论文的模型、数据与评估设置，不能单独证明某个代码数据池会普遍提升能力。[Codex 与 HumanEval 论文](https://arxiv.org/abs/2107.03374)
 
-GSM8K 则提醒大家数学推理需要高质量问题和验证机制。`Training Verifiers to Solve Math Word Problems` 提出 GSM8K，并展示训练 verifier 对候选解排序可以改善数学 word problem 表现。这说明数学能力不只是背题，而涉及生成、验证和选择。
+GSM8K 则提醒大家数学推理需要高质量问题和验证机制。`Training Verifiers to Solve Math Word Problems` 提出 GSM8K，并在论文设定中研究训练 verifier 对候选解排序的作用；这说明相关流程可以把生成、验证和选择拆开评估，不意味着 verifier 对任意数学数据都可靠。[GSM8K 与 verifier 论文](https://arxiv.org/abs/2110.14168)
 
 专业领域模型的发展也说明：通用语料覆盖不到的行业知识、术语和规范，需要专门的数据治理。医学、法律、金融等领域尤其不能只靠 web 噪声训练，因为错误回答可能带来现实风险。
 
@@ -62,13 +62,13 @@ GSM8K 则提醒大家数学推理需要高质量问题和验证机制。`Trainin
 
 共同特征包括：
 
-1. 高价值：对特定能力提升明显。
-2. 高稀缺：高质量数据远少于普通网页。
-3. 高结构：代码有语法树，数学有步骤和公式，领域文本有术语和规范。
-4. 高污染风险：很多 benchmark、题库、参考答案和标准文档公开可见。
-5. 高合规要求：代码有 license，领域数据有隐私、版权和行业监管。
-6. 高评估成本：需要功能测试、答案验证、专家审核或领域 benchmark。
-7. 高过拟合风险：小数据池被上采样后容易记忆。
+1. 目标相关价值：专项数据可能改善对应任务，但收益必须用目标相关、未泄漏的评估切片确认。
+2. 供给受限：授权、结构完整、答案可信或经过专家检查的样本，可能比原始文件更难获得。
+3. 结构明确：代码有语法和依赖，数学有题目、步骤和公式，领域文本有来源、术语和时效。
+4. 污染风险突出：benchmark、题库、参考答案和标准文档可能公开可见，需检查来源与重叠。
+5. 治理要求不同：代码要检查 license 和 secret；领域数据还可能涉及隐私、版权和行业规则。
+6. 验证成本随目标变化：代码可用测试，数学可用答案或过程核验，专业数据可能需要专家审核。
+7. 重复暴露需监测：小数据池被频繁采样时，记忆和过拟合风险可能上升，实际影响仍要测量。
 
 因此，这三类数据不能按普通网页处理。
 
@@ -77,26 +77,26 @@ GSM8K 则提醒大家数学推理需要高质量问题和验证机制。`Trainin
 设专项数据池由代码、数学和领域数据组成：
 
 ~~~math
-D_spec = D_code union D_math union D_domain
+\mathcal{D}_{\mathrm{spec}} = \mathcal{D}_{\mathrm{code}} \cup \mathcal{D}_{\mathrm{math}} \cup \mathcal{D}_{\mathrm{domain}}
 ~~~
 
 每个样本可以表示为：
 
 ~~~math
-x_i = (m_i, T_i, q_i, r_i, z_i)
+x_{i} = (m_{i}, T_{i}, q_{i}, r_{i}, z_{i})
 ~~~
 
-其中 `m_i` 是数据类型，取值为 code、math 或 domain；`T_i` 是 token 数；`q_i` 是质量分；`r_i` 是风险分；`z_i` 是来源、许可证、时间戳、去重簇、污染标记等元数据。
+其中 $m_{i}$ 是数据类型，取值为 code、math 或 domain；$T_{i}$ 是 token 数；$q_{i}$ 是质量分；$r_{i}$ 是风险分；$z_{i}$ 是来源、许可证、时间戳、去重簇、污染标记等元数据。
 
-下面的 `q` 分数是教学用的可解释代理。连续特征和布尔标签按 `[0,1]` 编码，权重非负，并且要在同一数据版本、同一用途下固定；有惩罚项的公式输出可以小于 `0`，所以 `q` 不是概率。代码、数学和领域分数的构造项不同，阈值也要分别校准；不能把不同类型的 `q=0.8` 当作可横向比较的质量等级。授权、secret、PII 和基准隔离仍是独立门禁，不应只靠扣分抵消。
+下面的 $q$ 分数是教学用的可解释代理。连续特征和布尔标签按 $[0,1]$ 编码，权重非负，并且要在同一数据版本、同一用途下固定；有惩罚项的公式输出可以小于 $0$，所以 $q$ 不是概率。代码、数学和领域分数的构造项不同，阈值也要分别校准；不能把不同类型的 $q=0.8$ 当作可横向比较的质量等级。授权、secret、PII 和基准隔离仍是独立门禁，不应只靠扣分抵消。
 
 代码数据常见的功能测试通过率为：
 
 ~~~math
-R_test_i =
+R_{\mathrm{test},i} =
 \begin{cases}
-n_pass_i / n_test_i, & n_test_i > 0 \\
-undefined, & n_test_i = 0
+\frac{n_{\mathrm{pass},i}}{n_{\mathrm{test},i}}, & n_{\mathrm{test},i} > 0 \\
+\mathrm{undefined}, & n_{\mathrm{test},i} = 0
 \end{cases}
 ~~~
 
@@ -105,63 +105,63 @@ undefined, & n_test_i = 0
 一个可解释的代码样本质量分可以写成：
 
 ~~~math
-q_code_i = w_p * I_parse_i + w_t * R_test_i + w_d * d_i - lambda_g * g_i - lambda_u * u_i
+q_{\mathrm{code},i} = w_{p} I_{\mathrm{parse},i} + w_{t} R_{\mathrm{test},i} + w_{d} d_{i} - \lambda_{g} g_{i} - \lambda_{u} u_{i}
 ~~~
 
-其中 `I_parse` 表示语法或解析检查是否通过，`d_i` 是文档 / 注释 / 测试配套分，`g_i` 是生成文件、vendor、bundle 等低价值标记，`u_i` 是重复或 fork 风险。
+其中 $I_{\mathrm{parse},i}$ 表示语法或解析检查是否通过，$d_{i}$ 是文档 / 注释 / 测试配套分，$g_{i}$ 是生成文件、vendor、bundle 等低价值标记，$u_{i}$ 是重复或 fork 风险；这些特征和非负权重在本教学例中按 $[0,1]$ 解释。
 
 数学样本可以同时看答案验证和过程质量：
 
 ~~~math
-q_math_i = w_a * I_ans_i + w_s * s_i + w_h * h_i - lambda_c * c_i
+q_{\mathrm{math},i} = w_{a} I_{\mathrm{ans},i} + w_{s} s_{i} + w_{h} h_{i} - \lambda_{c} c_{i}
 ~~~
 
-其中 `I_ans` 表示答案可验证，`s_i` 是过程完整性分，`h_i` 是难度或覆盖价值，`c_i` 是 benchmark / 题库污染风险。
+其中 $I_{\mathrm{ans},i}$ 表示答案通过指定验证，$s_{i}$ 是过程完整性分，$h_{i}$ 是难度或覆盖价值，$c_{i}$ 是 benchmark / 题库污染风险；答案验证通过不自动说明推理步骤正确。后面的 demo 将污染作为独立硬门禁，因此不在 `score` 中对 $c_{i}$ 二次扣分；若项目选择把风险纳入软分数，应明确权重并避免与硬门禁重复计罚。
 
 领域样本更强调权威性、时效性、引用和隐私风险：
 
 ~~~math
-q_domain_i = w_A * A_i + w_R * recency_i + w_C * I_cite_i - lambda_P * P_i - lambda_S * stale_i - lambda_V * V_i
+q_{\mathrm{domain},i} = w_{A} A_{i} + w_{R} \mathrm{recency}_{i} + w_{C} I_{\mathrm{cite},i} - \lambda_{P} P_{i} - \lambda_{S} \mathrm{stale}_{i} - \lambda_{V} V_{i}
 ~~~
 
-其中 `A_i` 是来源权威性，`recency_i` 是时效性，`I_cite` 表示是否保留出处或引用，`P_i` 是 PII 风险，`stale_i` 是过期风险，`V_i` 是高风险建议或未经验证观点风险。
+其中 $A_{i}$ 是来源权威性，$\mathrm{recency}_{i}$ 是时效性，$I_{\mathrm{cite},i}$ 表示是否保留出处，$P_{i}$ 是 PII 风险，$\mathrm{stale}_{i}$ 是过期风险，$V_{i}$ 是高风险建议或未经验证观点风险。保留引用字段只证明可追溯入口存在，不能代替核对引用是否支持具体陈述、来源是否适用于当前地域与版本；这些要单独审查。
 
 专项数据的状态不应被压缩成一个不可解释的总开关。可以保留一组并列的状态量：
 
 ~~~math
-checks_i = (quality_ok_i, license_ok_i, secret_clear_i, contamination_clear_i, privacy_clear_i, verified_i)
+\mathbf{c}_{i} = (c_{i,\mathrm{quality}}, c_{i,\mathrm{license}}, c_{i,\mathrm{secret}}, c_{i,\mathrm{contamination}}, c_{i,\mathrm{privacy}}, c_{i,\mathrm{verified}})
 ~~~
 
-这里不同类型的数据使用不同质量阈值 `tau_m` 和验证字段。代码要重视 license、secret、测试和 fork；数学要重视答案、过程和题库污染；领域数据要重视来源、时间、PII、引用和专家审计。某项检查失败时，动作可能是删除、隔离、脱敏、人工复核或改放到专门数据池，而不必把所有情况混成同一个标签。
+这里不同类型的数据使用不同质量阈值 $\tau_{m}$ 和验证字段；向量分量取 0 或 1，表示质量、license、secret、污染、隐私与验证门禁是否通过。质量分量按对应类型的 $\tau_{m}$ 判定，其余是独立门禁；`verified` 表示记录通过该任务规定的验证步骤，不意味着事实永远正确。代码要重视 license、secret、测试和 fork；数学要重视答案、过程和题库污染；领域数据要重视来源、时间、PII、引用和专家审计。某项检查失败时，动作可能是删除、隔离、脱敏、人工复核或改放到专门数据池，而不必把所有情况混成同一个标签。
 
 按类型计算 token 保留率：
 
 ~~~math
-R_keep(m) = sum_{i:m_i=m}(keep_i * T_i) / sum_{i:m_i=m}(T_i)
+R_{\mathrm{keep}}(m) = \frac{\sum_{i:m_{i}=m} k_{i} T_{i}}{\sum_{i:m_{i}=m} T_{i}}
 ~~~
 
 按类型计算风险命中率：
 
 ~~~math
-R_risk(m) = sum_{i:m_i=m}(I(r_i > 0)) / sum_i(I(m_i = m))
+R_{\mathrm{risk}}(m) = \frac{\sum_{i:m_{i}=m} \mathbf{1}\{r_{i} > 0\}}{\sum_{i} \mathbf{1}\{m_{i} = m\}}
 ~~~
 
-`R_keep(m)` 的分母是该类型的原始 token 数，`R_risk(m)` 的分母是该类型的样本数，两者不能互换。如果某类型没有样本，或者该类型没有可计量的 token，结果应记为 `undefined`，而不是写成 `0`；`0` 表示确实存在分母但没有保留或没有命中，`undefined` 表示当前没有可解释的测量对象。
+$k_{i}$ 表示样本是否保留，取值为 0 或 1；$\mathbf{1}\{\cdot\}$ 是条件成立时取 1、否则取 0 的指示量。$R_{\mathrm{keep}}(m)$ 的分母是该类型的原始 token 数，$R_{\mathrm{risk}}(m)$ 的分母是该类型的样本数，两者不能互换。如果某类型没有样本，或者该类型没有可计量的 token，结果应记为 `undefined`，而不是写成 0；0 表示确实存在分母但没有保留或没有命中，`undefined` 表示当前没有可解释的测量对象。
 
-如果专项数据计划采样 token 数为 `b_m`，清洗后可用 token 数为 `N_m`，则 effective epoch 为：
+如果采样器按 token 均匀抽取，$b_{m}$ 是某训练计划从类型 $m$ 取用的 token 预算，$N_{m}$ 是同一 tokenizer 和预处理口径下该类型清洗后可用的 token 数，则近似 effective epoch 为：
 
 ~~~math
-e_m = b_m / N_m
+e_{m} = \frac{b_{m}}{N_{m}}
 ~~~
 
-只有 `N_m > 0` 时，`e_m` 才有定义。空数据池不能因为采样器给了一个名义权重就被当成可训练数据。
+只有 $N_{m}>0$ 时，$e_{m}$ 才有定义；空数据池不能因为采样器给了一个名义权重就被当成可训练数据。如果实际按文档或序列采样，就要统一成相同的抽样单位后再比较。
 
-对于代码、数学、专业文档和合成推理数据，`e_m` 过高通常意味着更高的记忆和污染风险，需要降权、扩充数据、增强去重或重新设计采样策略。
+在上述假设下，$e_{m}$ 是平均 token 重复暴露的代理，不是模型记忆率或污染概率。代码、数学、专业文档和合成推理池若出现较高暴露，应增加记忆/污染评估并检查是否需要降权、扩池或去重；不能由这个比例本身断定模型已记忆或数据已泄漏。
 
 专项数据的整体状态也应保留为可解释的向量：
 
 ~~~math
-C_spec(m) = (R_keep(m), R_risk(m), e_m)
+\mathbf{C}_{\mathrm{spec}}(m) = (R_{\mathrm{keep}}(m), R_{\mathrm{risk}}(m), e_{m})
 ~~~
 
 它分别反映有效 token 保留、风险命中和重复暴露。代码、数学和领域数据不是“多多益善”，而是要用类型专属质量指标、风险指标和评估矩阵共同判断；这些数值只能说明数据处理状态，不能单独证明模型能力或专业可靠性。
@@ -279,6 +279,10 @@ HumanEval 这类评估强调 functional correctness，即代码是否通过测�
 
 NeurIPS 2025 的 rStar-Coder 展示了一种更完整的专项数据流水线：作者构造 418K 道竞赛级问题、580K 条长解题轨迹，并为问题生成不同难度的输入/输出测试；测试生成和标签确认被拆成多步，再通过互相验证来筛选。训练与评估报告绑定 Qwen 1.5B–14B 模型和论文指定代码 benchmark。这个案例支持“问题、解答、测试和验证回执应作为关联数据保留”，不证明同一生成流程能直接迁移到任意语言、仓库或生产代码任务。[rStar-Coder](https://proceedings.neurips.cc/paper_files/paper/2025/hash/54e847e1dffc87a8063844b149148557-Abstract-Conference.html)
 
+可以用一个合成的小任务看清“测试通过”究竟支持什么结论。假设函数的契约是：删除重复值，但保留每个值第一次出现的顺序。四条测试分别是空列表输出空列表、单元素列表保持不变、`[3, 1, 3, 2]` 输出 `[3, 1, 2]`，以及 `[7, 7]` 输出 `[7]`。如果某个候选实现把值去重后排序，它会通过空列表、单元素和重复值测试，却在顺序测试上输出 `[1, 2, 3]`；因此通过率是 `3/4=0.75`。这组输入把“去重”和“保序”两个要求分开，读者可手算预期结果，也能看到测试失败信息如何指出契约缺口。这个数字是教学例子，不是 benchmark 结果。
+
+工程记录还应把测试和代码绑定到相同版本：保存需求文本、代码 revision、测试输入与断言、语言运行时、依赖版本和执行回执。语法树解析通过只说明代码可解析；有限测试通过只说明这些输入在指定环境中满足断言。它不证明未覆盖分支正确、依赖安全、许可证允许训练，也不证明没有 secret。若测试只检查“集合相等”，排序实现也可能通过，说明测试本身必须表达调用方真正要求的顺序语义。数据审核因而要分别保留解析、功能、覆盖、来源许可和敏感信息检查，不把一个绿色的测试状态当作所有门禁都通过。
+
 ---
 
 ## 9. 代码数据的风险
@@ -294,9 +298,9 @@ NeurIPS 2025 的 rStar-Coder 展示了一种更完整的专项数据流水线：
 
 对代码数据的正确态度不是“全收”，而是“来源治理 + license 策略 + secrets 过滤 + 去重 + benchmark 隔离 + 功能评估”。
 
-授权语料的规模也有具体研究案例。NeurIPS 2025 的 Common Pile v0.1 汇集 30 个来源、约 8 TB 公有领域或开放许可文本，其中包括代码；作者用该语料训练 7B 模型，并发布语料构建代码、训练 mixture 和 checkpoint。它说明许可来源可以进入大规模研究训练，但不能推导某个仓库或文件天然获准，也不能替代项目逐来源的授权审查。[The Common Pile v0.1](https://proceedings.neurips.cc/paper_files/paper/2025/hash/52acc050138d6f40dad6f12f91a4ce22-Abstract-Datasets_and_Benchmarks_Track.html)
+授权语料的规模也有具体研究案例。NeurIPS 2025 的 Common Pile v0.1 汇集 30 个来源、约 8 TB 公有领域或开放许可文本，其中包括代码；论文按 Open Knowledge Foundation Open Definition 2.1 定义开放许可范围，并用语料分别训练了 7B 的 Comma v0.1-1T 和 Comma v0.1-2T，训练量为 1T 与 2T token。它说明在论文明确的许可标准下可以构建大规模研究语料，但不能推导某个仓库或文件自动符合另一项目的用途、地域或再分发条件，也不能替代项目逐来源的授权审查。[The Common Pile v0.1](https://proceedings.neurips.cc/paper_files/paper/2025/hash/52acc050138d6f40dad6f12f91a4ce22-Abstract-Datasets_and_Benchmarks_Track.html)
 
-评估集也要覆盖“实现新想法”，而不只是复现公开题库。NeurIPS 2025 的 ResearchCodeBench 将 2024—2025 年机器学习论文中的新方法转成可执行实现任务，并研究错误类型和污染问题。它是代码能力评测案例，不是训练数据质量证明；项目仍要固定论文/题目版本、运行环境和测试，并保留未进入数据构造与调参的 holdout。[ResearchCodeBench](https://proceedings.neurips.cc/paper_files/paper/2025/hash/cd0d0a873cc3e601c76f46dccc3d4c5f-Abstract-Datasets_and-Benchmarks_Track.html)
+评估集也要覆盖“实现新想法”，而不只是复现公开题库。NeurIPS 2025 的 ResearchCodeBench 从 20 篇 2024—2025 年机器学习论文构造 212 个带测试的实现任务，并在 32 个模型上评估；其中 109 题的 HARD 子集上，论文报告最佳模型通过率为 33%，且有 43 题没有模型通过。这个结果只说明指定 benchmark、任务与 harness 下的难度，不是训练数据质量证明；项目仍要固定论文/题目版本、运行环境和测试，并保留未进入数据构造与调参的 holdout。[ResearchCodeBench](https://proceedings.neurips.cc/paper_files/paper/2025/hash/cd0d0a873cc3e601c76f46dccc3d4c5f-Abstract-Datasets_and-Benchmarks_Track.html)
 
 ---
 
@@ -372,11 +376,15 @@ final-answer 数据便宜，但教不会模型完整过程。rationale 数据更
 
 GSM8K/verifier 的思路说明：生成多个候选解，再用 verifier 选择更可信答案，是数学推理中的重要范式。对数据工程来说，这意味着不仅要收集“正确解”，还要构造“正确/错误候选 + 判断标签”的数据。
 
-近期研究把“题目覆盖”和“解答可信”拆成了两个可独立审计的维度。Findings EMNLP 2025 的 FLAMES 比较了十种数学合成策略；在其固定生成预算下，扩大题目覆盖有时比只保留高可靠解答更有效，但这不意味着把错误答案当作正向监督。工程上可以保留有价值的问题覆盖，同时把解答状态标为 verified、unverified 或 negative verifier example，避免把“题目值得保留”误当成“答案可训练”。[FLAMES](https://aclanthology.org/2025.findings-emnlp.1346/)
+近期研究把“题目覆盖”和“解答可信”拆成了两个可独立审计的维度。Findings EMNLP 2025 的 FLAMES 比较十种数学合成策略；在论文固定的生成预算、模型和任务下，保留更广的问题覆盖优于只保留解答可靠的题目。它不意味着把错误答案当作正向监督。工程上可以分别标记题目是否有效、解答是否 verified、过程是否完整；答案错误的记录只有在目标明确是 verifier 训练且标签可信时，才可作为负例，不能混入正向解题监督。[FLAMES](https://aclanthology.org/2025.findings-emnlp.1346/)
 
 EMNLP 2025 Industry Track 的 More Data or Better Data? 在统一训练流水线中比较开源数据集与合成方案，作者报告结构更清晰的数据或更强 teacher 蒸馏有时比单纯扩大数据量更有效；该结论仍受其模型、流水线和数学任务限制。[More Data or Better Data?](https://aclanthology.org/2025.emnlp-industry.43/)
 
-EMNLP 2026 的 MathDebugger 把错误检测拆成“判断是否错”和“识别错在哪里”：其数据包含正确/错误问题及带类型标签的答案，作者在 14 个模型和 3 个 process reward model 上报告了求解能力与验证能力之间的差距。对训练数据的含义是：verifier 不能只用最终答案正确率验收，还要按错误类别检查召回和误报；这些 benchmark 结果不证明任何 verifier 在本地数据上已可靠。[MathDebugger](https://aclanthology.org/2026.emnlp-main.608/)
+EMNLP 2026 的 MathDebugger 把错误检测拆成“题目是否成立”“答案是否正确”和“错误属于哪一类”。基准包含 2,000 道正确题、2,000 道按四类错误均衡构造的问题，以及 2,000 条标注答案（其中 610 条答案有错，覆盖三类错误）；每条都标记正确性和错误类型。论文评估 14 个语言模型（6 个闭源、8 个开源，1.5B—72B）和 3 个 process reward model，报告细粒度错误分类仍有明显差距。对数据工程的含义是：verifier 不能只看最终答案正确率，还要按问题错误、答案错误和错误类别检查召回与误报；基准结果不证明项目自己的 verifier 已可靠。[MathDebugger](https://aclanthology.org/2026.emnlp-main.608/)
+
+小规模人工标注切片能说明为什么要分类型报告。假设 12 条合成样本中有 4 条题目本身不成立、4 条题目成立但解答错误、4 条题目和解答都正确。某 verifier 分别识别出 3/4 条问题错误、2/4 条错误解答，并正确接受 3/4 条完整正确样本，则总准确率是 `(3+2+3)/12=8/12≈0.667`；问题错误召回率为 `3/4=0.75`，错误解答召回率只有 `2/4=0.50`，对正确样本的误拒率为 `1/4=0.25`。单一准确率会遮住 verifier 特别容易漏掉哪一类。这里的 12 条和结果都是教学假设，不是模型实验；真实审计应按错误类别提供分母、混淆矩阵和人工仲裁，并使用与训练来源隔离的验证集。
+
+可以用一个小算式把这些标签分开。合成问题“计算 `2/3 + 1/4`”的正确过程是先化为同分母：`2/3=8/12`、`1/4=3/12`，所以 `8/12+3/12=11/12`。只输出 `11/12` 的记录可以通过答案检查，但若任务要求过程监督，它仍缺少中间步骤；输出 `3/7` 的记录则答案错误，不能作为正向解题示范，却可能在标签经核验后成为 verifier 的负例。再看过程：若回答写“`2/3+1/4=11/12`”，最终值正确，但它没有给出共同分母和化简依据；结果标签与过程完整度应分列，不能互相代替。
 
 ---
 
@@ -394,6 +402,10 @@ EMNLP 2026 的 MathDebugger 把错误检测拆成“判断是否错”和“识�
 6. 合成数据生成时意外复现 benchmark 结构。
 
 数学污染比普通问答更难，因为“改数字版”和“同题型变体”很常见。不是所有相似题都必须删除，但评测集原题、答案和解析必须严格隔离。
+
+污染审查也要按来源关系分层。若该题连同题解就是保留作独立评测的公开 benchmark 原题，应隔离原题、答案和解析；一个只改了数字但沿用同一罕见叙述的版本要进入人工复核队列；另一份有独立来源、只考察同一分数加法技能的新题，不应仅因数学主题相同就删除。可追溯字段包括原始来源、版本/日期、题干与答案指纹、匹配类型、评测用途和处置理由。这样才能区分真实泄漏证据、近似重复候选和正常的课程覆盖，并避免为了降低相似度而误删整类数学能力。
+
+匹配策略也应按证据强弱分层：规范化后完全相同的题干和答案可以作为强重叠信号；题干改写但罕见条件、数字关系和解答轨迹同时相近时，先做人工复核；只共享公式、定理或常见题型则是弱信号，不能单独触发删除。冻结评测集时记录其版本和公开时间，再把近重复检查限定在预先声明的比较字段；如果只查最终答案，许多独立题都会因结果相同而误命中。分层决策留下可复核的阈值和计数，既保护 holdout，也避免以模糊的“数学相似”替代来源证据。
 
 ---
 
@@ -443,6 +455,12 @@ EMNLP 2026 的 MathDebugger 把错误检测拆成“判断是否错”和“识�
 7. 术语标准化：同义词、缩写、别名、跨语言术语。
 8. 风险标签：高风险建议、诊断、投资、法律结论等要单独标注。
 
+下面用一条完全虚构的“指南 A”记录说明字段如何影响去向；它不是医学、法律或金融建议。记录写明发布机构 `机构甲`、适用地域 `地区 X`、版本 `2.1`、发布日期 `2025-01-01`、生效区间、替代版本、原文 URI、引用章节、许可范围、PII 扫描结果、专家复核人和下次复核日期。每个字段解决不同问题：发布机构标明来源主体，适用地域限定内容范围；版本和生效日期判断内容在查询时是否仍有效；原文和章节定位让问答可以逐句核对；许可字段限定可训练、可检索或仅可内部访问；PII 及复核字段记录隐私和专业核验状态。单有一条 URL 或“官方来源”标签，不能证明引用支持当前答案，也不能证明它适合所有法域。
+
+如果指南只获准内部检索、版本会更新且回答必须指出依据，就应优先保留版本、权限和引用并进入受控 RAG；若某些术语与背景知识稳定、授权允许模型训练，再评估经筛选的继续预训练样本。经专家复核、任务标签清楚的问答格式可候选进入 SFT；需要数值计算或按流程操作的部分应使用经授权的工具与独立规则校验。若来源版本未知、权限范围不明、敏感内容未处理或专家意见有分歧，记录应保持隔离或待复核，不能靠高质量分抵消。以上分流是示例决策方法，具体项目仍要依据授权、用途和风险制度确定。
+
+版本更新时不应直接覆盖旧文件。应保留新旧版本的来源标识、内容校验值、发布日期、生效/失效日期、替代关系及各自允许用途，再把检索索引切换到与查询时间和适用地域相符的版本。旧版本仍可能用于“某一历史日期当时有哪些文本”这类回溯问题，但不能被检索器误当成当前版本。若两个权威来源在同一适用范围内互相冲突，系统应返回两条带版本的证据并进入专家处理，而不是把冲突压成一个平均质量分；这个做法让引用、版本选择和责任人都可以事后复核。
+
 专业数据不能只追求数量。低质量专业数据会让模型学到危险的自信表达。
 
 ---
@@ -455,7 +473,7 @@ EMNLP 2026 的 MathDebugger 把错误检测拆成“判断是否错”和“识�
 
 医学模型不能只学“给建议”，还要学会表达不确定性、建议就医、识别高风险症状和避免越权诊断。
 
-医学数据的记忆审计还要区分“记住有用知识”和“复现敏感记录”。2025 年一篇 arXiv 预印本分别研究医学语料继续预训练、公开 benchmark 微调和真实临床记录微调，并将作者观察到的记忆现象分为有益的指南/参考资料回忆、无信息量的模板复述和可能泄露的敏感内容。它支持把临床 PII、重复模板和知识性回忆分开监控；该研究的样本、模型和实验设计不能代表所有医疗语料的记忆发生率。[Memorization in Large Language Models in Medicine](https://arxiv.org/abs/2509.08604)
+医学数据的记忆审计还要区分“记住有用知识”和“复现敏感记录”。2026 年发表于 *Nature Communications* 的研究分别考察医学语料继续预训练、公开 benchmark 微调和真实临床记录微调；临床案例使用耶鲁纽黑文医疗系统的 13,000 份住院记录。作者把观察到的记忆现象分为有益的指南/参考资料回忆、无信息量的模板复述和可能包含敏感临床内容的有害记忆。它支持把临床 PII、重复模板和知识性回忆分开监控；样本、模型、提示和训练设置有限，不能代表所有医疗语料的记忆发生率，也不能据此判断某个具体数据集安全。[Memorization in large language models in medicine](https://pmc.ncbi.nlm.nih.gov/articles/PMC13434820/)
 
 ### 18.2 法律数据
 
@@ -562,13 +580,13 @@ RAG 适合提供动态知识、私有知识和需要引用的内容。它不一�
 
 评估矩阵也必须按类型拆开。代码看编译、功能正确性、测试通过率、依赖和安全；数学看答案正确率、过程质量、改写题和难度切片；领域数据看事实性、引用、时效、拒答边界和专家评分。最终版本应同时记录过滤规则、采样权重、授权信息、评估结果、专家抽检和数据变更血缘。
 
-### 23.1 最小可运行专项数据审计 demo
+### 23.1 专项数据审计示例
 
 下面这个 demo 不依赖外部库，也不读写文件。输入是一组 toy code / math / domain 样本；输出包括保留样本、拒绝原因、分类型 token 保留率、最终 mixture、质量分预览、并列检查信号、后续动作和结论。示例会把“没有测试证据”与“测试失败”分开；它的质量分和阈值仍然只是教学抽象。
 
-它演示的是专项数据治理机制，不是生产级 license scanner、secret scanner、医学 / 法律 / 金融审核器或数学 verifier。真实系统需要接入许可证审查、secret 扫描器、测试执行器、CAS / verifier、专家审计、权限系统和数据版本管理。
+它演示的是专项数据治理机制，不是生产级 license scanner、secret scanner、医学 / 法律 / 金融审核器或数学 verifier。真实系统需要接入许可证审查、secret 扫描器、测试执行器、CAS / verifier、专家审计、权限系统和数据版本管理。读者可将代码保存为 `specialized_data_audit.py`，在 Python 3.12.9 中使用标准库运行：`python3 specialized_data_audit.py`；依赖仅为 `math` 和 `collections`。
 
-代码状态：已验证（2026-10-28；Python 3.12.9，标准库）
+代码状态：静态审阅，未运行（2026-11-03；Python 3.12.9，标准库 `math`、`collections`）
 
 ~~~python
 import math
@@ -851,23 +869,7 @@ else:
     raise AssertionError("invalid sample kinds must be rejected")
 ~~~
 
-运行后会看到类似输出：
-
-~~~text
-kept_ids= ['code_api_doc', 'math_word_verified', 'math_proof_note', 'domain_med_guideline', 'domain_fin_report']
-rejected= {'code_eval_solution': 'eval_contamination', 'code_secret_config': 'license_or_secret', 'code_vendor_bundle': 'license_or_secret', 'domain_forum_advice': 'low_quality', 'domain_private_case': 'privacy_or_sensitive', 'math_benchmark_leak': 'eval_contamination', 'math_wrong_steps': 'unverified_answer'}
-reason_counts= {'eval_contamination': 2, 'license_or_secret': 2, 'low_quality': 1, 'privacy_or_sensitive': 1, 'unverified_answer': 1}
-retention= 0.459
-kind_retention= {'code': 0.269, 'domain': 0.621, 'math': 0.568}
-mixture= {'code': 0.251, 'domain': 0.485, 'math': 0.264}
-score_preview= {'code_api_doc': 0.87, 'code_secret_config': 0.8, 'code_eval_solution': 0.84, 'code_vendor_bundle': -0.06, 'math_word_verified': 0.901, 'math_wrong_steps': 0.2, 'math_benchmark_leak': 0.892, 'math_proof_note': 0.899, 'domain_med_guideline': 0.796, 'domain_forum_advice': 0.133, 'domain_fin_report': 0.762, 'domain_private_case': 0.636}
-checks= {'code_has_tests': True, 'math_verified': True, 'domain_no_pii': True, 'contamination_blocked': True, 'secret_blocked': True, 'coverage': True}
-signals= {'missing_code_tests': False, 'unverified_math_kept': False, 'pii_kept': False, 'contamination_not_blocked': False, 'secret_or_license_not_blocked': False, 'kind_coverage_gap': False, 'no_retained_tokens': False}
-actions= []
-decision= continue_to_mixture_ablation
-~~~
-
-这个 demo 的重点是把三类专项数据的质量逻辑分开：代码看 license、secret、污染和测试；数学看答案验证、过程质量和题库污染；领域数据看权威性、时效、引用和 PII。`safe_div(0, 0)` 返回 `None`，表示没有测试证据；如果样本存在但所有 token 都被过滤，`retention` 才是 `0.0`，并且会触发恢复或补充专项数据的动作。主示例中的每类都有保留样本，所以 `mixture` 可计算；空类型或空保留集合不能被伪装成正常的零比例。
+阅读输出时，先核对 `kept_ids` 与 `rejected` 是否按类型门禁分流，再看 `reason_counts` 是否保留拒绝原因；`retention` 和 `kind_retention` 分别汇总总体与分类型 token 保留率，`mixture` 表示保留 token 内的类型占比。`score_preview` 只是教学代理分，必须与 `checks`、`signals` 和 `actions` 并读，不能用高分覆盖 secret、PII 或污染失败。`safe_div(0, 0)` 按设计返回 `None`，表示没有测试证据；如果样本存在但所有 token 都被过滤，保留率才是 `0.0`，并会触发补充数据动作。代码中的断言描述作者预期的关系，本轮没有运行，因此输出和断言结果仍待动态核对。
 
 ---
 
@@ -939,13 +941,13 @@ decision= continue_to_mixture_ablation
 4. [The Stack: 3 TB of Permissively Licensed Source Code](https://arxiv.org/abs/2211.15533) 与 [StarCoder](https://arxiv.org/abs/2305.06161)：提供开放代码数据构造、许可过滤和代码模型训练的公开案例；具体授权解释仍需回到项目版本和法律审查。
 5. [GitHub secret scanning 官方文档](https://docs.github.com/en/code-security/secret-scanning/introduction/about-secret-scanning)：说明 secrets 检测的治理背景；它不是训练数据中所有凭据、隐私或高风险内容的完整检测证明。
 6. [Large Language Models Encode Clinical Knowledge（Med-PaLM）](https://arxiv.org/abs/2212.13138)、[PubMedQA](https://arxiv.org/abs/1909.06146) 和 [LegalBench](https://arxiv.org/abs/2308.11462)：提供医学、医学问答和法律能力评估入口；这些 benchmark 不能替代临床、法律或金融场景的专家审核、时效检查和责任边界。
-7. [rStar-Coder: Scaling Competitive Coding with a Large-scale Verified Dataset](https://proceedings.neurips.cc/paper_files/paper/2025/hash/54e847e1dffc87a8063844b149148557-Abstract-Conference.html)：提供问题、长解答、生成测试和相互验证关联的数据构造案例；规模和训练结果绑定论文的 Qwen 模型与代码评测。
-8. [The Common Pile v0.1](https://proceedings.neurips.cc/paper_files/paper/2025/hash/52acc050138d6f40dad6f12f91a4ce22-Abstract-Datasets_and_Benchmarks_Track.html)：开放许可及公有领域语料构造案例；来源许可不能替代具体项目的版本级审查。
-9. [ResearchCodeBench](https://proceedings.neurips.cc/paper_files/paper/2025/hash/cd0d0a873cc3e601c76f46dccc3d4c5f-Abstract-Datasets_and_Benchmarks_Track.html)：近期研究实现任务的评估案例，用来讨论代码 benchmark 与训练数据质量证明的边界。
+7. [rStar-Coder: Scaling Competitive Code Reasoning with a Large-Scale Verified Dataset](https://proceedings.neurips.cc/paper_files/paper/2025/hash/54e847e1dffc87a8063844b149148557-Abstract-Conference.html)：提供问题、长解答、生成测试和相互验证关联的数据构造案例；规模和训练结果绑定论文的 Qwen 模型与代码评测。
+8. [The Common Pile v0.1](https://proceedings.neurips.cc/paper_files/paper/2025/hash/52acc050138d6f40dad6f12f91a4ce22-Abstract-Datasets_and_Benchmarks_Track.html)：按其 Open Definition 2.1 准则构建开放语料，并训练两个 7B、1T/2T token 模型；该来源准则不能替代具体项目的用途与授权审查。
+9. [ResearchCodeBench](https://proceedings.neurips.cc/paper_files/paper/2025/hash/cd0d0a873cc3e601c76f46dccc3d4c5f-Abstract-Datasets_and_Benchmarks_Track.html)：20 篇论文形成的 212 个研究实现任务评估；HARD 子集结果绑定模型、任务与测试环境，不是训练数据质量证明。
 10. [FLAMES](https://aclanthology.org/2025.findings-emnlp.1346/)：比较数学合成策略中的问题覆盖和解答可靠性；结论绑定论文生成预算、模型和数学任务。
 11. [More Data or Better Data?](https://aclanthology.org/2025.emnlp-industry.43/)：统一数学数据流水线中的开源数据与合成数据比较；效果取决于论文设定的模型、训练流程和任务。
-12. [MathDebugger](https://aclanthology.org/2026.emnlp-main.608/)：按错误类型评估数学求解与验证；benchmark 结果不证明项目自己的 verifier 已校准。
-13. [Memorization in Large Language Models in Medicine](https://arxiv.org/abs/2509.08604)：医学数据适应设置中的记忆研究预印本；报告不构成不同语料、模型或训练方式的通用记忆率。
+12. [MathDebugger](https://aclanthology.org/2026.emnlp-main.608/)：按题目与答案错误类型评估数学数据核验和模型验证能力；基准结果不证明项目自己的 verifier 已校准。
+13. [Memorization in large language models in medicine](https://pmc.ncbi.nlm.nih.gov/articles/PMC13434820/)：*Nature Communications* 2026 研究，覆盖医学继续预训练、benchmark 和 13,000 份临床记录微调；记忆发现绑定论文数据、模型与指标，不构成通用记忆率。
 
 这些论文和官方文档分别支持代码功能评估、数学验证、代码数据构造、秘密治理、专业 benchmark 和领域记忆审计的特定事实。本文的质量函数、检查向量和 demo 是教学抽象，不是任何论文公布的统一数据配方；对于 FinGPT、企业知识库和经授权真实业务数据，还必须补充具体 revision、授权文件、脱敏记录、数据血缘和专家审计。
 

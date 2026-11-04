@@ -71,7 +71,7 @@ Statistical Learning -> True Risk -> Empirical Risk -> ERM -> Generalization Gap
 
 Bayesian Thinking -> Prior -> Likelihood -> Evidence -> Posterior -> Bayesian Update -> MAP -> Aleatoric Uncertainty -> Epistemic Uncertainty -> Confidence -> Calibration -> ECE -> Brier Score -> Selective Prediction -> Abstention -> Human Review
 
-Reinforcement Learning Math -> MDP -> State -> Action -> Policy -> Reward -> Return -> Value Function -> Q Function -> Advantage -> Policy Gradient -> PPO Ratio -> Clipped Surrogate Objective -> RLHF KL Penalty -> Reward Model Pairwise Loss -> DPO Loss -> Reward Hacking Audit
+Reinforcement Learning Math -> MDP -> State -> Action -> Policy -> Reward -> Return -> Value Function -> Q Function -> Advantage -> Policy Gradient -> PPO Ratio -> Clipped Surrogate Objective -> RLHF KL Penalty -> Reward Model Pairwise Loss -> DPO Loss -> Reward Hacking Audit -> Reward-Seeking -> Contrastive Belief Update -> Grader-Sensitivity Evaluation -> Human/Gold Review
 
 Evaluation Statistics -> Sample Mean -> Sample Variance -> Standard Error -> Confidence Interval -> Hypothesis Test -> p-value -> Paired Evaluation -> Bootstrap -> McNemar Test -> Sample Size -> Statistical Power -> Multiple Comparisons -> Bonferroni Correction -> Benjamini-Hochberg -> Experiment Gate
 
@@ -87,11 +87,25 @@ Training Experiment Management -> Checkpoint State Completeness -> Precision-Con
 
 ### 对齐链
 
-Human Intent -> Safety Policy -> Proxy Objective -> Instruction Data -> SFT -> Preference Data -> Reward Model -> RLHF/DPO -> Reward Hacking Audit -> Scalable Oversight -> AI Feedback -> Verifier -> Human Audit -> Outer Alignment Check -> Inner Alignment Check -> Goal Misgeneralization Eval -> Model Behavior Evaluation -> Alignment Gate
+Human Intent -> Safety Policy -> Proxy Objective -> Instruction Data -> SFT -> Preference Data -> Reward Model -> RLHF/DPO -> Reward Hacking Audit -> Reward-Seeking -> Contrastive Belief Update -> Grader-Sensitivity Evaluation -> Scalable Oversight -> AI Feedback -> Verifier -> Human Audit -> Outer Alignment Check -> Inner Alignment Check -> Goal Misgeneralization Eval -> Model Behavior Evaluation -> Alignment Gate
+Scalable Oversight -> Partitioned Human Supervision -> Complementary Label -> Uniform Wrong-Option Sampling -> Top-1 Accuracy Estimator
+Scalable Oversight -> Self-Evaluation -> P(True) -> P(IK) -> Calibration -> Expected Calibration Error -> Risk-Coverage -> Abstention -> Human Review
+
+Oversight-Conditional Behavior -> Alignment Faking (experiment-specific behavior label) -> Evidence Boundary: Behavior Difference Does Not Prove Stable Hidden Goal
+Model Organism of Misalignment -> Constructed Threat Model -> Mechanism / Mitigation Test -> No Deployment-Prevalence Inference
+Goal Misgeneralization -> OOD Capability Retained + Behavior Matches an Unintended Goal -> Behavior-Level Analysis -> No Stable Internal-Goal Claim Without Additional Evidence
 
 ### 安全治理链
 
-AI Safety -> Alignment -> Alignment Problem -> HHH -> Risk Taxonomy -> Safety Policy -> Instruction Hierarchy -> Untrusted Content Boundary -> Jailbreak Eval -> Prompt Injection Eval -> Prompt Injection Gate -> Reward Hacking Gate -> Scalable Oversight -> Oversight Gate -> Safety Evaluation -> Red Teaming -> Capability Elicitation -> Dangerous Capability Eval -> Red Team Regression Suite -> Red Team Gate -> Mechanistic Interpretability -> Activation Patching -> Sparse Autoencoder -> Interpretability Gate -> Representation Engineering -> Steering Vector -> Activation Steering -> Steering Gate -> Model Editing -> Knowledge Editing -> Editing Gate -> Machine Unlearning -> Forget Set -> Retain Set -> Unlearning Gate -> Data Privacy -> Memorization -> Training Data Extraction Eval -> Membership Inference -> PII Leakage Eval -> Privacy Gate -> Privacy Governance -> Data Minimization Rate -> PII Redaction Coverage -> Sensitive Data Block Rate -> Permission Isolation -> Log Redaction Coverage -> Training Consent Coverage -> Retention Compliance Rate -> Deletion SLA Pass Rate -> External Transfer Approval Coverage -> Audit Coverage -> DPA Ready -> Incident Response Ready -> Privacy Governance Gate -> Safety Compliance Incident -> Unsafe Pass Rate -> Safety Compliance Gate -> Watermarking -> Watermark Detection -> Content Credentials -> Watermark Gate -> Model Card -> System Card -> Risk Disclosure -> Responsible Scaling -> Model Governance -> Governance Gate -> Safety Gate -> Release Gate -> Guardrail -> Tool Safety -> Audit Log -> Incident Response -> Safety Interview Readiness -> Safety Interview Rubric
+Training Data Extraction Eval -> Cue-Resistant Memorization -> Low-Cue Prompt -> Matched Non-Member Control -> Extractable Memorization Calibration
+Memorization -> Fuzzy Duplicate Audit -> Mosaic Memory -> Assisted Memorization -> Privacy Ripple Review
+Synthetic Data Release -> Synthetic-Text Membership Inference -> Privacy Gate
+
+AI Safety -> Alignment -> Alignment Problem -> HHH -> Risk Taxonomy -> Safety Policy -> Instruction Hierarchy -> Untrusted Content Boundary -> Jailbreak Eval -> Prompt Injection Eval -> Prompt Injection Gate -> Reward Hacking Gate -> Scalable Oversight -> Partitioned Human Supervision -> Complementary Label -> Uniform Wrong-Option Sampling -> Top-1 Accuracy Estimator -> Oversight Gate -> Safety Evaluation -> Red Teaming -> Capability Elicitation -> Dangerous Capability Eval -> Red Team Regression Suite -> Red Team Gate -> Mechanistic Interpretability -> Activation Patching -> Sparse Autoencoder -> SAE Feature Evaluation -> Feature Dominance -> DAME -> Interpretability Gate -> Representation Engineering -> Steering Vector -> Activation Steering -> Endogenous Steering Resistance -> Behavioral Granularity -> Steering Robustness Eval -> Steering Gate -> Model Editing -> Knowledge Editing -> Editing Gate -> Machine Unlearning -> Dataset-Defined Unlearning -> Knowledge Suppression -> Behavior Suppression -> Capability Reduction -> Forget Set Curation -> Forget Set -> Retain Set -> Contextual Utility -> Relearning Recovery Eval -> Unlearning Gate -> Data Privacy -> Memorization -> Training Data Extraction Eval -> Membership Inference -> PII Leakage Eval -> Privacy Gate -> Privacy Governance -> Data Minimization Rate -> PII Redaction Coverage -> Sensitive Data Block Rate -> Permission Isolation -> Log Redaction Coverage -> Training Consent Coverage -> Retention Compliance Rate -> Deletion SLA Pass Rate -> External Transfer Approval Coverage -> Audit Coverage -> DPA Ready -> Incident Response Ready -> Privacy Governance Gate -> Safety Compliance Incident -> Unsafe Pass Rate -> Safety Compliance Gate -> Watermarking -> Watermark Detection -> Content Credentials -> Watermark Gate -> Model Card -> System Card -> Risk Disclosure -> Responsible Scaling -> Model Governance -> Governance Gate -> Safety Gate -> Release Gate -> Guardrail -> Tool Safety -> Audit Log -> Incident Response -> Safety Interview Readiness -> Safety Interview Rubric
+Automated Agent Red Teaming -> GOAT (Adaptive Multi-turn Generation) -> AgentDojo (Stateful Tool Environment) -> REDAgentBench (Trajectory / Service Receipt / Final State Evidence) -> Recognition–Execution Gap (REG) -> Action-Time Policy Reminder -> Permission Gate and Independent State Verification
+Policy-Adaptive Multimodal Safety Classifier -> Shieldstral (text/image yes-no score) -> SafeEditBench (policy-conditioned safe/unsafe image pairs) -> PolicyShiftBench (same-image policy flip -> PSS group macro-average) -> SafeVision (image policy adherence + explanation) -> SingGuard (dynamic rules + cross-modal joint risk) -> Calibrated Risk Signal -> Independent Authorization and Executor Gate -> AuthZEN Authorization API 1.0 (PDP/PEP request-decision exchange) -> AARP Working Group Draft (approval prerequisite -> fresh PDP evaluation) -> COAZ-MCP Working Group Draft (MCP operation mapping -> AuthZEN request) -> OWASP ACS (runtime hooks and Guardian control; distinct from authorization policy)
+EU GPAI Model Provider Duties -> Technical/Downstream Documentation + Copyright Policy + Training Summary -> GPAI Code of Practice (Voluntary Compliance Tool)
+AI Act Article 50 -> Provider Interaction Notice + Machine-Readable Marking -> Deployer Disclosure/Labeling -> Role, System Scope, Effective Date and Narrow Transition
 
 ### 多模态链
 
@@ -110,7 +124,9 @@ ASR -> CTC -> RNN-T -> Attention-based Encoder-Decoder -> Whisper -> Forced Alig
 
 ### 评估链
 
-Benchmark -> Metrics -> Evaluation Metric Incident -> Aggregate Score Trap -> Evaluation Slicing -> Slice Regression -> Clean Eval Lift -> Human Eval -> LLM-as-a-Judge -> Rubric Specification Lock -> Evidence-Grounded Scoring -> Human-Scale Score Calibration -> Rubric Score-Option Position Bias -> Rubric Criterion-Order Bias -> Rubric Verification -> Judge-Human Agreement -> Judge Repeatability -> Position Swap Audit -> Pair Difficulty Conditioning -> Debiasing Resolution Loss -> Judge Length Bias -> Paired Evaluation -> Bootstrap Confidence Interval -> Contamination Detection -> Error Analysis -> Regression Test -> Online Evaluation -> Cost-Quality Trade-off -> Evaluation Gate
+Benchmark -> Metrics -> Evaluation Metric Incident -> Aggregate Score Trap -> Evaluation Slicing -> Slice Regression -> Clean Eval Lift -> Human Eval -> LLM-as-a-Judge -> Rubric Specification Lock -> Evidence-Grounded Scoring -> Human-Scale Score Calibration -> Rubric Score-Option Position Bias -> Rubric Criterion-Order Bias -> Rubric Verification -> Judge-Human Agreement -> Judge Repeatability -> Position Swap Audit -> Pair Difficulty Conditioning -> Debiasing Resolution Loss -> Judge Length Bias -> Paired Evaluation -> Bootstrap Confidence Interval -> Contamination Detection -> Error Analysis -> Sample-Level Version Diff -> Error Taxonomy -> Root-Cause Hypothesis -> Fixed-Condition Intervention -> Held-Out Variant Validation -> Harness Reliability vs Task Success -> Trace Evidence Chain -> Regression Suite -> Benchmark Lifecycle / Saturation -> Fresh Exploration -> Online Evaluation -> Cost-Quality Trade-off -> Evaluation Gate
+
+Long-Context Effective-Capability Evaluation -> Input Integrity -> NIAH -> Lost in the Middle -> RULER / NoLiMa -> LongBench v1/v2/Pro -> MRCR v2 -> LongHarness Bench (Model–Harness Quality / Cost) -> Task × Length × Budget Slices -> Evidence Recall / Answer Accuracy / Citation Support / P95 / Unit Success Cost -> Target-Distribution Holdout -> Effective-Length Claim Boundary
 
 Contamination Audit -> Threat Model -> Data Lineage -> Training / SFT / RL / Prompt / RAG Exposure -> Exact Hash Match -> Near-Duplicate Candidate -> Manual Threshold Calibration -> Time Split -> Canary Probe -> Perturbation Stability -> DCQ Verbatim-Exposure Signal -> ConStat Non-Transfer Advantage -> RL-Stage Detector -> Private Holdout -> Residual Risk Report -> Trusted Evaluation Gate
 
@@ -120,9 +136,11 @@ Human Preference Evaluation -> Target Population -> Sampling Frame -> User / Lan
 
 Benchmark Response Matrix -> Item Response Theory (IRT) -> Model-Pool Size and Capability-Distribution Diagnostics -> Item-Parameter / Rank-Recovery Simulation -> Benchmark Selection Gate
 
-Online Experimentation -> Randomization Unit -> Stable Bucket Assignment -> Sample Ratio Mismatch -> Exposure Completeness -> Primary Metric -> Guardrail Metric -> CUPED -> Sequential Inference -> Canary Ramp -> Rollback Readiness -> Online Experiment Gate
+Online Experimentation -> Randomization Unit -> Interference Assessment -> Stable Bucket Assignment -> Exposure Completeness -> Sample Ratio Mismatch -> Intention-to-Treat Effect -> Primary Metric -> Guardrail Metric -> Ratio Metric Definition -> CUPED -> Cluster-Aware Inference -> Delayed Outcome Window -> Sequential Inference -> Group Sequential Design -> Canary Ramp -> Rollback Readiness -> Online Experiment Gate
 
-Long-Form Audio-Video Understanding -> LVOmniBench -> Long-Range Cross-Modal Memory -> Reasoning-Driven Audio-Visual Temporal Grounding -> RVG-Bench -> Temporal IoU -> mIoU / Recall@IoU -> Audio Modality Ablation -> Human Boundary Validation
+Statistical Inference -> Estimand -> Analysis Unit -> Paired Structure -> Item-Sampling vs Run-to-Run Variation -> McNemar / Paired Bootstrap / Cluster Bootstrap -> Effect Size -> Confidence Interval vs Prediction Interval -> MDE / Power -> Sample-Size Plan -> Multiple-Comparison Family -> CUPED -> Factorial Interaction -> Replication Manifest -> Judge-Label Calibration -> Noisy Hypothesis Testing -> Independent Confirmation
+
+Long-Form Audio-Video Understanding -> LVOmniBench (long-video MCQ) / LongShOTBench (open QA + criterion rubric) -> Long-Range Cross-Modal Memory -> Open-Ended Single/Multi-Turn QA -> LLM Verifier / Human Calibration -> Reasoning-Driven Audio-Visual Temporal Grounding -> RVG-Bench -> Temporal IoU -> mIoU / Recall@IoU -> Audio Modality Ablation -> Human Boundary Validation
 
 ### 数据工程链
 
@@ -1262,6 +1280,11 @@ Artificial Analysis `claude-opus-5` + DataCurve `mini_swe_agent_claude_opus_5_*`
 Saturated ART -> indirect prompt injection benchmark + adaptive red-team + live bounty -> attacker budget/scenario/version ledger
 IPI / Shade / bounty -> attempt-level ASR + scenario-level ASR -> preserve separate numerators, denominators, confidence/noise
 AgentDojo ASR + task completion -> Attack–Task Outcome Matrix (ATOM) -> preserve safe-but-incomplete and unsafe-but-complete outcomes -> do not claim safety from low ASR alone; 2026 arXiv v1 proportions bind its static benchmark
+Prompt Injection Eval -> Rethinking Assessments (application vs. lab task) -> LongPIBench (long-document single-call context) -> AgentDojo (stateful tool workflow and utility) -> SafeAudit (benchmark coverage meta-audit) -> report attack success, normal utility, external state effects, context condition and coverage budget as separate evidence
+RAG indirect injection -> retrieval reachability × influence after retrieval -> preserve retrieval, policy violation, and external side effect as separate stages; USENIX Security 2026 measurements bind paper corpora and systems
+Memory poisoning -> explicit write / policy-filtered write / compaction / experience-to-procedure -> persistence -> recall -> adoption -> side effect -> selective repair; MPBench rates bind one model and two Agent memory configurations
+Tool argument provenance -> schema validity is not authorization -> bind sensitive arguments to user-confirmed or ACL-filtered sources -> server-side policy gate
+CounterSteer -> model-specific activation intervention on tool-result spans -> holdout/adaptive/utility checks -> parameter-source and authorization controls remain separate system duties
 untrusted tool result -> input-side prompt-injection probe -> model context boundary
 candidate dangerous tool call -> action-side classifier -> outbound action gate -> Auto mode = product/system result, not bare-model robustness
 System Card RSP -> Opus 5 assessed CB-1 / not CB-2 -> publisher risk assessment + ASL-3 controls -> not independent guarantee or zero risk
@@ -1368,9 +1391,9 @@ Claude Sonnet 5.5 -> Artificial Analysis `max + Default Fallback` -> third-party
 thinking block -> model binding + prefix binding + account binding -> exact replay/drop/error behavior -> not UI text or durable memory
 forced `tool_choice=any/tool` -> unsupported -> strict schema / Structured Outputs alternative -> validate host executor separately
 Cyber misuse -> activation probe + lightweight classifier + second LLM classifier -> refusal/fallback routing -> `requested_model` != `actual_model`
-refusal category -> cyber/frontier_llm may fallback -> bio/reasoning_extraction/general_harms do not -> no blanket retry
+refusal category -> cyber/frontier_llm may fallback -> bio/reasoning_extraction/general_harms do not -> transport/overload errors use separate recovery -> audit `model`/fallback block/iterations
 Terminal-Bench 4.0 / OSWorld 2.1 -> task/harness/effort/safeguard/fallback/verifier -> publisher-reported evaluation -> not AA/DataCurve or independent reproduction
-CoT controllability -> weak publisher evidence about monitorability -> visible-vs-hidden reasoning changes monitor result -> not proof of faithful CoT or universal honesty
+Monitorability -> intervention/process/outcome-property + CoT-only/action-only/all-messages -> trajectory signal × monitor extraction -> property-specific score (non-intervention $g\text{-mean}^2=TPR×TNR$) -> not CoT faithfulness, authorization or pre-commit execution control
 
 ### Gemini 4 Argon
 
@@ -1386,3 +1409,29 @@ cost optimization gate -> unit-success cost + quality floor + TTFT/TPOT/P95 + sa
 ### 数学与代码评估
 
 GSM8K 固定题集 -> GSM-Symbolic 数值变体 -> GSM-NoOp 无关条件 -> 配对扰动差；Outcome reward model -> Process reward model -> ProcessBench 第一处错误定位 -> 可见 CoT 忠实性探针；HumanEval/MBPP -> EvalPlus 测试增强 -> LiveCodeBench 时间快照 -> SWE-bench Verified -> SWE-Bench Pro -> Pro 审计撤回旧推荐 -> Pro V2 版本修订 -> 绑定任务质量 / 污染 / split / harness / verifier / 预算
+
+### Frontier Model claim 与证据链
+
+公开模型名 -> canonical model ID / revision -> 最小 claim -> 来源类型与原文上下文 -> task / prompt / effort / tools / harness / budget / verifier -> publisher-reported result / third-party provider configuration / independent evaluation -> scope-limited conclusion -> unknowns and next evidence
+
+Model Card / System Card -> structured disclosure -> source-backed facts and stated limitations -> not independent validation; HELM -> shared scenarios + adaptations + multiple metrics -> better comparison conditions -> not target-traffic representativeness; CheckList -> minimum functionality / invariance / directional expectation -> behavioral counterexamples -> depends on checklist and oracle; G-Eval -> rubric + steps + LLM scoring -> task-specific judge signal -> needs human calibration; Evaluation Card -> model + benchmark + run metadata -> traceable evaluation record -> does not validate score truth; Claim Ledger -> minimum claims + evidence/contradiction + conditions + unknowns -> defensible wording
+
+Internal evidence score / weighted claim coverage / condition completeness -> documented synthetic inputs and explicit scoring rules -> audit prompts only -> not probability of truth; missing exact DataCurve row -> current leaderboard snapshot has no row -> not zero or neighboring-model evidence; Opus 5.5 OSWorld -> Anthropic release page 2.1 partial 81.8% vs System Card 2.0 partial/strict 81.8%/48.7% -> preserve source labels and success definitions -> do not transfer scores across revisions
+
+### 评估系统与结果状态
+
+Eval Goal -> Task Contract -> versioned Benchmark / Golden Set / Regression Suite -> matched Measurement and Judge -> Eval Run -> Sample -> Attempt -> Score Evidence -> Slice Report -> Release Gate -> Regression Feedback
+
+Attempt State Vector -> input_validation (unchecked / valid / invalid_data) + execution (queued / running / succeeded / failed / cancelled / unknown_outcome) + scoring (not_started / scored / evaluator_error / not_applicable) + maturity (pending / final / not_applicable); invalid input -> scoring not_applicable; execution succeeded + evaluator_error -> retain model output and judge failure separately; execution succeeded + maturity pending -> await the declared observation window
+
+Client Timeout with Unknown Remote Outcome -> preserve original Attempt -> reconcile trace / idempotency key / side effect -> append retry Attempt only under declared retry policy -> count every attempt for availability and cost -> define whether task score uses one attempt, fixed-k success, or best-of-k
+
+Specialized Frontier Eval Cluster -> domain/task slice -> task contract (input + initial environment + allowed actions + success predicate + budget + harness + risk constraints) -> versioned environment/reset -> observed action/state trajectory -> stage-level metrics plus task-level joint completion -> partial success / recoverable failure / dangerous failure -> confidence and cost slices -> paired version comparison; hard-severity safety violations remain independent release gates
+
+Benchmark/task source -> exact revision and task distribution -> harness/model/environment/budget record -> grader/verifier and state field audit -> sample-level outcomes and trace -> macro / pooled micro / target-traffic weighted estimate -> scope-limited release claim; no cross-benchmark total without a declared common construct and weighting rule
+
+τ-bench pass^k -> all k matched task trials succeed -> consistency/reliability under repeated interaction; pass@k -> at least one of k trials succeeds -> solution discovery with sampling; keep task, simulator, policy, and trial conditions attached
+
+MLflow Tracking -> Run Params / Code Version / Metrics / Artifacts; GenAI Evaluation Dataset -> Trace or Curated Example + Inputs / Expectations / Lineage; Regression Testing -> Scorer + Known Failure Set + CI Gate. OpenTelemetry `gen_ai.evaluation.result` -> response-linked score telemetry -> Development convention only, not ground truth or grader validation.
+
+Red Teaming -> Dangerous Capability Evaluation -> Evaluation Awareness -> Simulation Awareness -> Evaluation Containment -> Sandboxed Tool Access -> Host Network Egress Control -> Runtime Action Monitor -> Human Stop Condition -> Incident Review -> Regression Evidence -> Scope-Limited Release Gate

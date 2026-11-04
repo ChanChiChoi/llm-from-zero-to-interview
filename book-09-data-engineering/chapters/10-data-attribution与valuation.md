@@ -49,9 +49,9 @@ flowchart LR
 5. 如果只能再标注 10 万条数据，应该标哪类？
 6. 如果要删掉 20% 低价值数据，删哪里损失最小？
 
-没有 attribution 和 valuation，团队只能靠经验拍脑袋。数据工程就会停留在“收更多、洗更干净、试试看”的阶段。
+没有归因和估值线索，团队往往只能凭经验排优先级，无法说明下一轮数据实验要验证什么。
 
-有了归因和估值，团队可以更科学地做数据选择、数据采购、质量修复、配比优化和问题定位。
+归因和估值可以缩小候选范围、组织对照实验，并把质量修复、配比调整和问题定位变成可复查的决策；它们不会自动替代实验，也不会把估值分数变成数据价格。
 
 ---
 
@@ -119,56 +119,56 @@ Data Valuation 问的是“某个数据有多值钱”。
 把训练数据写成样本集合：
 
 ~~~math
-\mathcal{D} = \{z_i \mid i = 1,\ldots,n\}
+\mathcal{D} = \{z_{i} \mid i = 1,\ldots,n\}
 ~~~
 
-z_i 可以是一条预训练文档、一条 SFT 样本、一对 chosen/rejected 偏好样本，也可以是一个数据源中的样本。大模型数据工程里更常见的估值单元是数据源、数据簇、任务池或数据版本：
+$z_{i}$ 可以是一条预训练文档、一条 SFT 样本、一对 chosen/rejected 偏好样本，也可以是一个数据源中的样本。大模型数据工程里更常见的估值单元是数据源、数据簇、任务池或数据版本：
 
 ~~~math
-\mathcal{C}_k = \{z_i \in \mathcal{D} \mid c_i = k\}
+\mathcal{C}_{k} = \{z_{i} \in \mathcal{D} \mid c_{i} = k\}
 ~~~
 
-c_i 表示样本所属来源、领域、任务或标注批次。估值单元越大，计算越便宜，但结论也越粗；估值单元越小，越容易受到噪声和交互影响。
+$c_{i}$ 表示样本所属来源、领域、任务或标注批次。估值单元越大，计算越便宜，但结论也越粗；估值单元越小，越容易受到噪声和交互影响。
 
 估值必须先定义目标效用函数：
 
 ~~~math
-U(S) = \sum_{m=1}^{M} w_m M_m(S) - \lambda_R R(S) - \lambda_K K(S)
+U(S) = \sum_{m=1}^{M} w_{m} M_{m}(S) - \lambda_{R} R(S) - \lambda_{K} K(S)
 ~~~
 
-S 是被选中的数据集合，M_m(S) 是第 m 个目标指标，w_m 是业务权重，R(S) 是隐私、版权、安全和污染风险，K(S) 是采购、清洗、标注、训练和维护成本。权重和单位要由项目目标确定；这个式子不是要求把所有目标强行加成一个分数，而是把价值判断依赖的目标、风险和成本写明。
+$S$ 是被选中的数据集合，$M_{m}(S)$ 是第 $m$ 个目标指标，$w_{m}$ 是业务权重，$R(S)$ 是隐私、版权、安全和污染风险，$K(S)$ 是采购、清洗、标注、训练和维护成本。组合前要先约定指标方向、尺度和成本单位；若一个指标是准确率、另一个是货币成本，未说明缩放就直接加权会让系数失去可解释性。权重由项目目标决定；这个式子不是要求把所有目标强行合并，而是把价值判断依赖的目标、风险和成本写明。
 
 数据源级加入变化可以写成：
 
 ~~~math
-\Delta^{\mathrm{add}}_k = U(S_{\mathrm{base}} \cup \mathcal{C}_k) - U(S_{\mathrm{base}})
+\Delta^{\mathrm{add}}_{k} = U(S_{\mathrm{base}} \cup \mathcal{C}_{k}) - U(S_{\mathrm{base}})
 ~~~
 
 删除变化可以写成：
 
 ~~~math
-\Delta^{\mathrm{drop}}_k = U(S_{\mathrm{base}}) - U(S_{\mathrm{base}} \setminus \mathcal{C}_k)
+\Delta^{\mathrm{drop}}_{k} = U(S_{\mathrm{base}}) - U(S_{\mathrm{base}} \setminus \mathcal{C}_{k})
 ~~~
 
-正的 $\Delta^{\mathrm{add}}_k$ 表示在当前基线中加入数据源有净收益，正的 $\Delta^{\mathrm{drop}}_k$ 表示删除它会损失净效用。两者都依赖基线和配比，不能被解释成数据源永久不变的“价格”。
+计算加入变化时，$S_{\mathrm{base}}$ 不含候选源 $\mathcal{C}_{k}$；计算删除变化时，$S_{\mathrm{base}}$ 是当前包含该源的方案。正的 $\Delta^{\mathrm{add}}_{k}$ 表示在当前基线中加入数据源有净收益，正的 $\Delta^{\mathrm{drop}}_{k}$ 表示从当前方案删除它会损失净效用。两者参考的方案不同，且都依赖配比和其余数据，不能被解释成数据源永久不变的“价格”。
 
-Influence functions 关心训练点 $z_i$ 对测试点 $z_*$ 的 loss 变化。标准局部推导假设参数接近经验风险的驻点，且 Hessian 可逆；实际实现可能使用阻尼、子空间或其他曲率近似。为避免把 Hessian 逆写成生产承诺，可用下面的教学记号表示：
+Influence functions 关心训练点 $z_{i}$ 对测试点 $z_{*}$ 的 loss 变化。标准局部推导假设参数接近经验风险的驻点，且 Hessian 可逆；实际实现可能使用阻尼、子空间或其他曲率近似。为避免把 Hessian 逆写成生产承诺，可用下面的教学记号表示：
 
 ~~~math
-I_{\mathrm{up}}(z_i,z_*) = -\nabla_\theta L(z_*;\hat\theta)^\top H_{\hat\theta}^{-1}\nabla_\theta L(z_i;\hat\theta)
+I_{\mathrm{up}}(z_{i},z_{*}) = -\nabla_{\theta} L(z_{*};\hat\theta)^\top H_{\hat\theta}^{-1}\nabla_{\theta} L(z_{i};\hat\theta)
 ~~~
 
-这里 $L(z;\theta)$ 是样本损失，$\hat\theta$ 是当前训练得到的参数，$H_{\hat\theta}$ 是训练目标在该点附近的 Hessian 或其带阻尼近似。$I_{\mathrm{up}}$ 近似描述给训练点 $z_i$ 增加极小权重时，测试点 $z_*$ 的损失变化；负值表示局部近似下测试损失下降。这个符号约定不能直接替代完整重训结果。深度非凸模型、优化路径、阻尼和分布漂移都会影响近似。
+这里 $L(z;\theta)$ 是样本损失，$\hat\theta$ 是当前训练得到的参数，$H_{\hat\theta}$ 是训练目标在该点附近的 Hessian 或其带阻尼近似。$I_{\mathrm{up}}$ 近似描述给训练点 $z_{i}$ 增加极小权重时，测试点 $z_{*}$ 的损失变化；负值表示局部近似下测试损失下降。这个符号约定不能直接替代完整重训结果。深度非凸模型、优化路径、阻尼和分布漂移都会影响近似。
 
-用一个二维例子看符号。设 $g_i=(1,0)^\top$、$g_*=(1,2)^\top$，并假设局部曲率近似为 $H=\begin{bmatrix}2&0\\0&1\end{bmatrix}$，则 $H^{-1}g_i=(0.5,0)^\top$，所以 $I_{\mathrm{up}}=-[(1,2)\cdot(0.5,0)]=-0.5$。这表示该训练点在这个局部二阶近似下可能降低目标损失 0.5 个损失单位；它不是 50% 的准确率提升，也不是已验证的因果效应。
+用一个二维例子看符号。设 $g_{i}=(1,0)^\top$、$g_{*}=(1,2)^\top$，并假设局部曲率近似为 $H=\begin{bmatrix}2&0\\0&1\end{bmatrix}$，则 $H^{-1}g_{i}=(0.5,0)^\top$，所以 $I_{\mathrm{up}}=-[(1,2)\cdot(0.5,0)]=-0.5$。这是把训练点权重向上微调时的局部方向导数；若实际只增加一个很小的权重 $\varepsilon$，局部损失变化约为 $-0.5\varepsilon$。它不是无条件的 0.5 个损失单位下降，更不是 50% 的准确率提升或已验证的因果效应。
 
 梯度相似 proxy 可以写成：
 
 ~~~math
-A_i = \frac{\langle g_i,g_T\rangle}{\|g_i\|_2\,\|g_T\|_2}
+A_{i} = \frac{\langle g_{i},g_{T}\rangle}{\|g_{i}\|_{2}\,\|g_{T}\|_{2}}
 ~~~
 
-其中 $g_T$ 是目标任务、验证集或错误切片的梯度特征。$A_i$ 高说明梯度方向相近，只能作为候选排序线索，不能单独证明训练样本导致目标能力，也不能代替隐私、版权和污染检查。
+其中 $g_{T}$ 是目标任务、验证集或错误切片的梯度特征。$A_{i}$ 高说明梯度方向相近，只能作为候选排序线索，不能单独证明训练样本导致目标能力，也不能代替隐私、版权和污染检查。
 
 余弦相似度要求两个梯度范数都大于 0。零梯度可能来自已饱和的样本、被 mask 的目标或尚未产生梯度的计算路径，此时结果应记为未定义，不能把零向量与目标方向相似误报为 0 或 1。类似地，单位 token 价值要求有效 token 数大于 0；没有有效 token 的数据源没有可解释的单位价值，不应记成 0。
 
@@ -177,18 +177,18 @@ A_i = \frac{\langle g_i,g_T\rangle}{\|g_i\|_2\,\|g_T\|_2}
 为演示排序，本例使用下式组合相同样本的指标变化、质量、覆盖、梯度相似、风险和成本：
 
 ~~~math
-V_i^{\mathrm{proxy}} = \sum_{m=1}^{M} w_m\Delta M_{i,m} + 0.08q_i + 0.05h_i + 0.05A_i - 0.12r_i - 0.04k_i
+V_{i}^{\mathrm{proxy}} = \sum_{m=1}^{M} w_{m}\Delta M_{i,m} + 0.08q_{i} + 0.05h_{i} + 0.05A_{i} - 0.12r_{i} - 0.04k_{i}
 ~~~
 
-这里 $q_i$、$h_i$、$A_i$、$r_i$ 和 $k_i$ 分别表示质量、覆盖、梯度相似、风险和归一化成本；0.08、0.05 等系数只为演示多维权衡。对 `math_verified` 代入质量 $q_i=0.92$、覆盖 $h_i=0.78$、风险 $r_i=0.03$、成本 $k_i=0.22$ 和 $A_i=0.942$，得到 $0.0335+0.0736+0.0390+0.0471-0.0036-0.0088=0.1808$。该源有 900 个有效 token，换算后约为每千 token $0.1808/900\times1000=0.2009$ 个教学效用单位。分数系数和单位都是合成示例约定，不是价格或行业标准；硬性许可、隐私与污染门禁仍在打分之前执行。
+这里 $q_{i}$、$h_{i}$、$A_{i}$、$r_{i}$ 和 $k_{i}$ 分别表示质量、覆盖、梯度相似、风险和归一化成本；0.08、0.05 等系数只为演示多维权衡。对 `math_verified` 代入质量 $q_{i}=0.92$、覆盖 $h_{i}=0.78$、风险 $r_{i}=0.03$、成本 $k_{i}=0.22$ 和 $A_{i}=0.942$，得到 $0.0335+0.0736+0.0390+0.0471-0.0036-0.0088=0.1808$。该源有 900 个有效 token，换算后约为每千 token $0.1808/900\times1000=0.2009$ 个教学效用单位。分数系数和单位都是合成示例约定，不是价格或行业标准；硬性许可、隐私与污染门禁仍在打分之前执行。
 
 Data Shapley 把数据看成参与者，价值是不同子集中的平均边际贡献：
 
 ~~~math
-\phi_i = \sum_{S\subseteq\mathcal{D}\setminus\{z_i\}} \frac{|S|!(n-|S|-1)!}{n!}\left[U(S\cup\{z_i\})-U(S)\right]
+\phi_{i} = \sum_{S\subseteq\mathcal{D}\setminus\{z_{i}\}} \frac{|S|!(n-|S|-1)!}{n!}\left[U(S\cup\{z_{i}\})-U(S)\right]
 ~~~
 
-其中 $S$ 遍历不包含 $z_i$ 的子集，前面的阶乘分数是按子集大小分配的 Shapley 权重。精确遍历代价随样本数指数增长，大模型通常只在小数据池上近似，或把思想迁移到源级、簇级和任务级。
+其中 $S$ 遍历不包含 $z_{i}$ 的子集，前面的阶乘分数是按子集大小分配的 Shapley 权重。精确遍历代价随样本数指数增长，大模型通常只在小数据池上近似，或把思想迁移到源级、簇级和任务级。
 
 用三个参与者走完六种加入顺序，可以看见交互如何被分摊。设数学源、代码源和合成模板源是否加入分别用取值为 0 或 1 的 $M$、$C$、$T$ 表示，玩具效用定义为：
 
@@ -213,23 +213,23 @@ U(M,C,T)=0.30M+0.22C-0.06T+0.08MC-0.05T(1-M)
 为了比较不同大小的数据源，可以看单位有效 token 的净价值：
 
 ~~~math
-V_k^{\mathrm{unit}} = \frac{\Delta_k^{\mathrm{add}}}{T_k^{\mathrm{effective}}}
+V_{k}^{\mathrm{unit}} = \frac{\Delta_{k}^{\mathrm{add}}}{T_{k}^{\mathrm{effective}}}
 ~~~
 
-这里 $T_k^{\mathrm{effective}}$ 是经过质量、重复、污染和可用性处理后的有效 token 数。由于风险和成本已经包含在 $U(S)$ 中，单位价值只需把净增益除以有效 token，不能再重复扣一次风险和成本。这个归一化能帮助比较大小不同的数据源，但不能消除数据之间的互补关系。
+这里 $T_{k}^{\mathrm{effective}}$ 是经过质量、重复、污染和可用性处理后的有效 token 数。由于风险和成本已经包含在 $U(S)$ 中，单位价值只需把净增益除以有效 token，不能再重复扣一次风险和成本。这个归一化能帮助比较大小不同的数据源，但不能消除数据之间的互补关系。
 
 最终选择可以写成带预算和覆盖约束的问题：
 
 ~~~math
-\max_{\mathbf{s}\in\{0,1\}^{n}} U(\{z_i\mid s_i=1\})
-\quad\text{subject to}\quad \sum_{i=1}^{n}s_i b_i\leq B,\quad R(\{z_i\mid s_i=1\})\leq\tau_R,\quad \Delta M_m\geq-\epsilon_m\ \forall m
+\max_{\mathbf{s}\in\{0,1\}^{n}} U(\{z_{i}\mid s_{i}=1\})
+\quad\text{subject to}\quad \sum_{i=1}^{n}s_{i} b_{i}\leq B,\quad R(\{z_{i}\mid s_{i}=1\})\leq\tau_{R},\quad \Delta M_{m}\geq-\epsilon_{m}\ \forall m
 ~~~
 
-其中 $s_i$ 表示是否选择第 $i$ 个候选，$b_i$ 是 token、标注或训练成本，$B$ 是预算，$\tau_R$ 是风险上限，$\epsilon_m$ 是第 $m$ 个指标允许的最大回退量；$\Delta M_m$ 表示所选数据相对固定基线在该指标上的变化。若目标有互补或替代关系，不能把每个数据源的单独分数相加当作真实 $U(S)$；还应按项目需要加入语言、领域、任务、来源、多样性和最小覆盖约束。
+其中 $s_{i}$ 表示是否选择第 $i$ 个候选，$b_{i}$ 是 token、标注或训练成本，$B$ 是预算，$\tau_{R}$ 是风险上限，$\epsilon_{m}$ 是第 $m$ 个指标允许的最大回退量；$\Delta M_{m}$ 表示所选数据相对固定基线在该指标上的变化。若目标有互补或替代关系，不能把每个数据源的单独分数相加当作真实 $U(S)$；还应按项目需要加入语言、领域、任务、来源、多样性和最小覆盖约束。
 
 在 demo 中，预算为 3,200 tokens，每个目标允许的最大回退量是 0.01。枚举五个未阻断且未待审的正值来源，共检查 $2^5=32$ 个子集；结果选中数学、代码、安全和中文领域四个源，token 数为 $900+760+640+820=3,120$。四个目标的增量分别是数学 0.085、代码 0.080、安全 0.065、通用 0.070，均高于 -0.01；合计 proxy 值为 $0.1808+0.1599+0.1202+0.1288=0.5897$。候选排序也会随口径改变：按绝对 proxy 值，数学源排首位；按每千 token，代码源的 0.2104 高于数学源的 0.2009。这个小池的精确枚举只说明教学目标和约束下的最优组合，不能当作大规模训练数据的最优解。
 
-如果预算内没有任何正价值且满足约束的候选，选择结果应是空集并触发补充或重新估值，而不是强行填满预算。预算选择也必须说明是固定总 token、固定训练步数还是固定计算量；否则加入数据源后总训练量增加，$\Delta^{\mathrm{add}}_k$ 可能把“训练得更多”误认为“数据更有价值”。
+如果预算内没有任何正价值且满足约束的候选，选择结果应是空集并触发补充或重新估值，而不是强行填满预算。预算选择也必须说明是固定总 token、固定训练步数还是固定计算量；否则加入数据源后总训练量增加，$\Delta^{\mathrm{add}}_{k}$ 可能把“训练得更多”误认为“数据更有价值”。
 
 ---
 
@@ -239,10 +239,10 @@ V_k^{\mathrm{unit}} = \frac{\Delta_k^{\mathrm{add}}}{T_k^{\mathrm{effective}}}
 
 做法是：
 
-1. 设定 baseline 数据配比。
-2. 删除或降低某个数据源。
-3. 训练模型或小模型。
-4. 比较 validation loss、benchmark、安全指标和人工评测。
+1. 固定 baseline 数据快照、配比、训练阶段和目标评估切片。
+2. 构造加入、删除或降采样某个数据源的对照；尽量固定总 token、训练步数、计算量和优化器，无法固定的差异要单独报告。
+3. 用相同训练配置运行对照，关键决策尽量覆盖多个随机种子，避免把一次训练波动当成数据源效应。
+4. 比较 validation loss、目标任务、安全指标和人工评测，并同时查看长尾切片与副作用。
 
 例如，想知道代码数据是否有价值，可以训练两个小模型：一个包含代码，一个不包含代码。再比较代码 benchmark、通用问答、多语言和安全表现。
 
@@ -259,7 +259,7 @@ V_k^{\mathrm{unit}} = \frac{\Delta_k^{\mathrm{add}}}{T_k^{\mathrm{effective}}}
 3. 小模型结论不一定外推到大模型。
 4. 删除一个数据源会改变整体配比，混入其他变量。
 
-数据消融是最可靠但最贵的方法，通常用于关键数据源和最终决策。
+在对照条件明确时，源级消融比相似度或梯度分数更接近直接干预证据，但它仍可能受训练随机性、替代数据和预算变化影响。它成本较高，适合用于少量关键数据源和最终决策；一次未控制的删源实验并不会自动证明因果贡献。
 
 ---
 
@@ -522,13 +522,13 @@ Data valuation 直接服务 data mixture。
 | 方法 | 主要机制与作者实验 | 结果的适用边界 |
 | --- | --- | --- |
 | [TRAK](https://proceedings.mlr.press/v202/park23c.html) | 随机投影后的 after-kernel 归因；作者在图像分类、CLIP、BERT 和 mT5 等设置中比较可扩展性。 | 支持在指定可微模型和任务中计算预测归因，不是完整训练轨迹的因果分解。 |
-| [DataInf](https://arxiv.org/abs/2310.00902) 与 [LoGra](https://arxiv.org/abs/2405.13954) | DataInf 研究 LoRA 微调模型的 influence 近似，实验包含 Llama-2-13B-chat；LoGra 对梯度作投影，在 Llama-3-8B-Instruct 与 1B-token 数据实验中报告相对其可运行基线最高 6,500 倍吞吐和 5 倍显存下降。 | DataInf 面向受限可训练参数的影响估计；LoGra 数字绑定其实现、基线与实验设置，二者都不是对任意全量预训练的同等保证。 |
+| [DataInf](https://arxiv.org/abs/2310.00902v3) 与 [LoGra](https://arxiv.org/abs/2405.13954v1) | DataInf 研究 LoRA 微调模型的 influence 近似，实验包含 Llama-2-13B-chat；LoGra 对梯度作投影，在 Llama-3-8B-Instruct 与 1B-token 数据实验中，相对 EK-FAC influence 基线报告最高 6,500 倍吞吐和 5 倍显存下降，其中吞吐结果使用固定批量并重叠磁盘读取与计算；对应设置还需存储 3.5 TB 投影梯度。 | DataInf 面向受限可训练参数的影响估计；LoGra 数字绑定其实现、EK-FAC 基线、模型和数据设置，存储开销是这项吞吐/显存权衡的一部分；二者都不是对任意全量预训练的同等保证。 |
 | [Mechanistic Data Attribution](https://proceedings.mlr.press/v306/chen26cv.html) | 将 influence 线索用于 Pythia 系列的可解释单元来源追踪；作者报告针对高影响样本做定向增删会改变特定 interpretable heads，随机干预未见同样效果。 | 这是特定模型家族、机制单元和干预设置的因果证据，不等同于数据源对总体能力的通用估值。 |
-| [PreSelect](https://proceedings.mlr.press/v267/shum25a.html) | 用 fastText scorer 选择预测下游能力的预训练数据；作者在 1B/3B 模型实验中报告 30B 选择 token 可超过其 300B vanilla 对照。 | 这是特定数据和目标下的预测式数据选择结果，不等于逐条训练数据归因或可普遍缩小十倍预算。 |
-| [BLISS](https://proceedings.mlr.press/v306/hao26b.html) | 通过小型 proxy 的多步更新训练双层 score model，尝试建模训练过程中数据偏好变化；作者在选定 C4 子集和多种小模型设置中报告结果。 | 1B 配置下报告的 1.7 倍达到同等表现速度绑定论文基线、数据子集和评价任务，不外推为通用预训练收益。 |
+| [PreSelect](https://proceedings.mlr.press/v267/shum25a.html) | 用 fastText scorer 选择预训练数据；作者在 1B/3B 模型实验中报告，30B 选择 token 可超过其 300B vanilla 对照。 | 作者的筛选动机依赖文本领域与目标任务对齐；结果不等于逐条训练数据归因或可普遍缩小十倍预算。 |
+| [BLISS](https://proceedings.mlr.press/v306/hao26b.html) | 不依赖外部预训练 oracle，以小型 proxy 多步更新训练双层 score model，尝试建模训练过程中数据偏好变化；作者在选定 C4 子集和多种小模型设置中报告结果。 | 1B 配置下报告的 1.7 倍达到同等表现速度绑定论文基线、数据子集和评价任务，不外推为通用预训练收益。 |
 | [OPUS](https://proceedings.mlr.press/v306/wang26gc.html) | 在优化器诱导的更新空间估计候选效用，用于逐步预训练选择；作者报告额外计算开销为 4.7%，并在论文设置中的从头预训练与 mid-training 阶段比较基线。 | 开销与收益绑定论文模型、语料、优化器和实验协议；不证明所有训练栈都能获得相同收益。 |
 | [Convex Dataset Valuation for Post-Training](https://proceedings.mlr.press/v306/zeng26k.html) | 在梯度空间用 kernel mean matching 联合考虑目标任务对齐与候选数据冗余，处理预算受限的后训练数据集选择。 | 面向论文中的后训练设置与预算问题；不能替代许可、隐私和独立安全门禁，也不代表所有预训练配比问题。 |
-| [RISE](https://arxiv.org/abs/2604.16197)（2026 预印本） | 在输出侧 readout 构造 lexical residual 与 semantic projected-error 两类 sketch，分别评估回溯归因和 zero-shot 前瞻估值；作者在 OLMo/Pythia 系列报告索引存储最高压缩 112 倍，并扩展到 32B 模型。 | 尚为预印本，假设、架构适配和论文任务的结果需要独立复核；不能替代目标模型上的干预实验。 |
+| [RISE](https://arxiv.org/abs/2604.16197v2)（arXiv v2，2026-07-19） | 在输出层 readout 构造 lexical residual 与 semantic projected-error 两类 sketch，分别支持回溯归因和 zero-shot 前瞻估值；作者在 Pythia（14M–6.9B）和 OLMo（1B–32B）的三类任务中评估，并在 Pythia-1B 的索引对照中报告相对 RapidIn 最高 112 倍压缩；在 OLMo-3-32B 上，RapidIn 与 ZO-Inf 基线因内存限制无法运行。 | 这是 arXiv 预印本及其公开模型、任务和硬件设置下的结果；读出层梯度集中假设和 sketch 排名稳定性仍需在目标模型上核验，不能替代目标训练干预。 |
 
 这些结果的模型、训练阶段、数据量、选择比例和评估协议不同，不能把其倍数排成统一排行榜。它们共同支持的是：可以降低候选筛选或归因近似的成本；最终资源决策仍要回到固定预算下的目标任务实验、风险门禁和切片评估。
 
@@ -558,9 +558,9 @@ Data valuation 直接服务 data mixture。
 
 最后把采购、清洗、标注、授权、隐私、训练和维护成本放进同一份决策记录，形成保留、扩充、上采样、降权、隔离、重洗或删除等动作。每次动作都要绑定数据版本、实验配置、评估矩阵和理由，下一次回放时才能区分真实收益与随机波动。
 
-### 19.1 最小可运行数据归因与估值 demo
+### 19.1 最小可执行数据归因与估值 demo
 
-**代码状态：已验证（2026-10-28，Python 3.12.9，标准库；固定合成样本，无外部依赖）。**
+**代码状态：静态审阅，未运行（2026-11-03；标准库代码；本轮未确认 Python 运行环境版本）。**
 
 将代码保存为 `data_valuation_demo.py`，运行 `python3 data_valuation_demo.py`。
 
@@ -815,7 +815,7 @@ assert value_per_token(0.5, 0) is None
 assert choose_subset([], budget)["ids"] == []
 ~~~
 
-运行输出：
+固定合成输入下的静态预期（以下数值由代码逻辑和输入逐项手算，未运行代码）：
 
 ~~~text
 ranked_sources= [('math_verified', 0.1808), ('code_tests', 0.1599), ('zh_domain', 0.1288), ('safety_boundary', 0.1202), ('synthetic_template', 0.0782), ('old_legal_forum', -0.0716), ('benchmark_leak', None)]
@@ -880,10 +880,10 @@ Shapley 思想把数据看作参与者，观察它在不同子集中的平均边
 标注优先级可以写成一个待排序对象：
 
 ~~~math
-\mathbf{p}_i = (u_i,d_i,g_i,r_i,c_i)
+\mathbf{p}_{i} = (u_{i},d_{i},g_{i},r_{i},c_{i})
 ~~~
 
-其中 $u_i$ 是模型不确定性，$d_i$ 是模型或标注者分歧，$g_i$ 是目标能力覆盖缺口，$r_i$ 是风险等级，$c_i$ 是预计标注成本。它是一个多维待审向量，不存在脱离任务的自然总排序；实际决策应先分桶，再由风险策略和标注预算决定复核顺序。安全、医学、法律和隐私样本需要更高的专家门槛；普通风格样本可以使用更便宜的标注策略。
+其中 $u_{i}$ 是模型不确定性，$d_{i}$ 是模型或标注者分歧，$g_{i}$ 是目标能力覆盖缺口，$r_{i}$ 是风险等级，$c_{i}$ 是预计标注成本。它是一个多维待审向量，不存在脱离任务的自然总排序；实际决策应先分桶，再由风险策略和标注预算决定复核顺序。安全、医学、法律和隐私样本需要更高的专家门槛；普通风格样本可以使用更便宜的标注策略。
 
 ### 20.7 什么时候可以把估值用于资源分配
 
@@ -909,7 +909,7 @@ Shapley 思想把数据看作参与者，观察它在不同子集中的平均边
 
 ### 21.4 删除源的同时改变了所有变量
 
-删除一个数据源通常会同时改变总 token、训练步数、其他数据比例、去重率和 batch 分布。对照实验应固定能固定的变量，并报告无法固定的变量；否则 $\Delta^{\mathrm{drop}}_k$ 不能归因于源本身。
+删除一个数据源通常会同时改变总 token、训练步数、其他数据比例、去重率和 batch 分布。对照实验应固定能固定的变量，并报告无法固定的变量；否则 $\Delta^{\mathrm{drop}}_{k}$ 不能归因于源本身。
 
 ### 21.5 只选正向数据，破坏分布和多样性
 
@@ -965,14 +965,14 @@ flowchart LR
 6. Xie 等，《DoReMi: Optimizing Data Mixtures Speeds Up Language Model Pretraining》，<https://arxiv.org/abs/2305.10429>。它说明数据混合可以通过目标验证损失进行优化，支持数据配比与估值相互影响的叙述。
 7. Xia 等，《LESS: Selecting Influential Data for Targeted Instruction Tuning》，<https://arxiv.org/abs/2402.04333>。它提供目标指令调优中影响数据选择的研究案例，结论仍受目标任务和实验条件约束。
 8. Park 等，《TRAK: Attributing Model Behavior at Scale》，<https://proceedings.mlr.press/v202/park23c.html>。它提出可扩展的 after-kernel 归因，并在论文中的视觉与语言任务验证速度/效果权衡；结论绑定模型和任务。
-9. Kwon 等，《DataInf: Efficiently Estimating Data Influence in LoRA-tuned LLMs and Diffusion Models》，<https://arxiv.org/abs/2310.00902>。ICLR 2024 论文提出适合参数高效微调的 influence 近似，实验包含 Llama-2-13B-chat；不代表全量预训练逐样本估值。
-10. Choe 等，《What is Your Data Worth to GPT? LLM-Scale Data Valuation with Influence Functions》，<https://arxiv.org/abs/2405.13954>。LoGra 以梯度投影降低指定实验中的吞吐与显存成本；作者报告数字绑定 Llama-3-8B-Instruct 和 1B-token 设置。
+9. Kwon 等，《DataInf: Efficiently Estimating Data Influence in LoRA-tuned LLMs and Diffusion Models》，<https://arxiv.org/abs/2310.00902v3>。ICLR 2024 论文提出适合参数高效微调的 influence 近似，实验包含 Llama-2-13B-chat；不代表全量预训练逐样本估值。
+10. Choe 等，《What is Your Data Worth to GPT? LLM-Scale Data Valuation with Influence Functions》，<https://arxiv.org/abs/2405.13954v1>。LoGra 以梯度投影降低指定实验中的吞吐与显存成本；作者报告数字绑定 Llama-3-8B-Instruct、1B-token 数据和 EK-FAC 基线，最高吞吐结果还利用了磁盘读取与计算重叠，并伴随投影梯度存储开销。
 11. Shum 等，《Predictive Data Selection: The Data That Predicts Is the Data That Teaches》，<https://proceedings.mlr.press/v267/shum25a.html>。PreSelect 在 1B/3B 模型设置中评估预测式数据筛选；30B 与 300B 对比不是通用预算承诺。
 12. Hao 等，《BLISS: A Lightweight Bilevel Influence Scoring Method for Data Selection in Language Model Pretraining》，<https://proceedings.mlr.press/v306/hao26b.html>。论文用多步 proxy 更新训练双层 score model，并在 410M/1B/2.8B Pythia 和 0.5B LLaMA 设置中验证；1B 配置的 1.7 倍加速不能跨设置外推。
 13. Wang 等，《OPUS: Towards Efficient and Principled Data Selection in Large Language Model Pre-training in Every Iteration》，<https://proceedings.mlr.press/v306/wang26gc.html>。论文在优化器诱导更新空间做动态筛选并报告 4.7% 额外计算开销；应按其模型、优化器、语料与任务理解结果。
 14. Zeng 等，《Convex Dataset Valuation for Post-Training》，<https://proceedings.mlr.press/v306/zeng26k.html>。论文以梯度空间 kernel mean matching 联合目标对齐与数据冗余，研究预算约束下的后训练数据集选择；结论范围是对应后训练实验。
 15. Chen 等，《Mechanistic Data Attribution: Tracing the Training Origins of Interpretable LLM Units》，<https://proceedings.mlr.press/v306/chen26cv.html>。论文在 Pythia 家族研究可解释单元的训练数据来源，并报告定向增删高影响样本相对随机干预的机制变化；不等同于对总体任务能力的全局因果分解。
-16. Ran 等，《Sketching the Readout of Large Language Models for Scalable Data Attribution and Valuation》，<https://arxiv.org/abs/2604.16197>。RISE 2026 arXiv 预印本研究输出层 readout sketch，并报告最高 112 倍索引存储压缩及 32B 参数规模；尚需独立复核。
+16. Ran 等，《Sketching the Readout of Large Language Models for Scalable Data Attribution and Valuation》，<https://arxiv.org/abs/2604.16197v2>。RISE v2 于 2026-07-19 更新，研究输出层 readout sketch，并在 Pythia/OLMo 系列和三类任务中报告结果；相对 RapidIn 的最高 112 倍索引存储压缩来自 Pythia-1B 对照，32B 可运行性与 RapidIn、ZO-Inf 的内存限制也绑定论文设置，仍需独立复核。
 17. NIST AI Risk Management Framework，<https://www.nist.gov/itl/ai-risk-management-framework>。它提供风险识别、治理、测量和管理的官方框架入口，本章只借用治理结构，不把它改写成数据价值的法律或财务意见。
 
 读者在迁移这些方法时，应明确论文的模型规模、数据分布、目标指标、采样方式和版本；同时重新检查授权、隐私、污染、长尾覆盖和独立评估。一个可复现的近似结果，仍然只是限定条件下的证据，不是跨任务、跨模型的永久结论。
