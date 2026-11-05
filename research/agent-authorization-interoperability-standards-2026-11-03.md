@@ -20,7 +20,7 @@
 
 - COAZ（Compatible with OpenID AuthZEN）框架把具体协议/接口的信息模型映射为 AuthZEN Authorization API 请求。COAZ-MCP 是面向 Model Context Protocol（MCP）的绑定；草案描述如何从 MCP 操作及 tool schema 的映射数据构造 AuthZEN 请求并在 PEP 侧执行决定。
 - OpenID Foundation 于 2026-06-15 将 COAZ / MCP 授权 profile 列为 Working Group Draft；工作组规格页将 COAZ Framework 1.0、COAZ-MCP Binding 1.0 标为草案。
-- 来源：[AuthZEN 工作组草案公告](https://openid.net/openid-foundation-advances-authorization-for-the-agent-era-with-new-authzen-working-group-drafts/)；[COAZ Framework 1.0 Draft 1](https://openid.github.io/authzen/authzen-coaz-framework-1_0.html)；[COAZ-MCP Binding 1.0 Draft 1](https://openid.github.io/authzen/authzen-coaz-mcp-binding-1_0)；[AuthZEN 工作组规格状态](https://openid.net/wg/authzen/specifications/)。
+- 来源：[AuthZEN 工作组草案公告](https://openid.net/openid-foundation-advances-authorization-for-the-agent-era-with-new-authzen-working-group-drafts/)；[COAZ Framework 1.0 Draft 1](https://openid.github.io/authzen/authzen-coaz-framework-1_0.html)；[COAZ-MCP Binding 1.0 Draft 1](https://openid.github.io/authzen/authzen-coaz-mcp-binding-1_0.html)；[AuthZEN 工作组规格状态](https://openid.net/wg/authzen/specifications/)。
 - 证据边界：协议映射草案不授予业务权限。主体身份、资源 scope、参数真实性和执行点仍由部署方的信任与策略边界负责。
 
 ## OWASP Agent Control Standard（ACS）

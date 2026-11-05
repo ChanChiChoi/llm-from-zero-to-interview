@@ -1,6 +1,6 @@
 # Agent 工具调用、安全确认与评测：来源证据
 
-创建于 2026-10-30；最后更新于 2026-11-03。本文只记录公开资料支持的接口约束、授权建议和评测构造；产品接口与仓库文档为动态页面时，以访问日期和具体 API 模式限定适用范围。
+创建于 2026-10-30；最后更新于 2026-11-05。本文只记录公开资料支持的接口约束、授权建议和评测构造；产品接口与仓库文档为动态页面时，以访问日期和具体 API 模式限定适用范围。
 
 ## 工具协议与 schema
 
@@ -98,3 +98,17 @@
 - **阅读位置**：摘要、§§II–V 的 threat model/评估，§VI mechanism，§VII limitations 和结论。
 - **来源支持的事实**：该工作提出逐模型拟合残差流方向并在 prefill 时对 tool-result token 做常驻激活干预。作者在五个开源权重模型（8B–106B）上报告指定 holdout attack success 从 0.21–1.00 降到 0.00–0.17；AgentDojo compromise rate 从 0.10–0.49 降到 0.006–0.079，benign utility 依模型和判定器而异。该工作把 tool hijack、parameter manipulation 和 delegated authority 分开；针对参数污染的 best-of-24 query search 在 18 个开发样本中仍击穿 13 个样本，作者据此提出参数来源控制作为互补层。
 - **证据等级与边界**：source-backed（单作者 arXiv v1 预印本及作者所属机构页面）。方法需要白盒 serving、可标记 tool-result spans 和逐模型拟合；论文自己报告效用成本、模型/攻击面不完整与仍未测试的自适应范围。具体数值绑定其任务、基线、模型和判分口径，不证明第三方 API、用户消息、任意 RAG 或生产系统可复现同等效果。它支持“模型侧缓解不能替代服务端参数来源和授权检查”，不是已验证的通用防火墙。
+
+## 重试语义与执行隔离配置
+
+- **RFC 9110 §9.2.2 幂等方法**：[RFC Editor 正式文本](https://www.rfc-editor.org/rfc/rfc9110#section-9.2.2)，访问日期 2026-11-05；阅读幂等定义、通信失败时的重试理由及对非幂等请求的 SHOULD NOT 限制。
+- **来源支持的事实**：HTTP 幂等性描述重复相同请求对服务器预期效果的关系；客户端在无法读取响应的通信失败后可以安全重试幂等请求，但不应自动重试非幂等请求，除非能确认请求语义实际幂等或确认原请求未生效。
+- **证据边界**：RFC 定义 HTTP 方法语义，不为工单、付款、通知等业务动作自动提供幂等键、结果查询、去重保留时间或补偿机制；应用需另设操作合同。
+
+- **AWS SDK retry behavior**：[官方文档](https://docs.aws.amazon.com/sdkref/latest/guide/feature-retry-behavior.html)，访问日期 2026-11-05；阅读错误分类、退避公式、worked examples 与 full-jitter 说明。
+- **来源支持的事实**：该页描述 AWS SDK 的一种按 transient/throttling 分类的退避实现，延迟公式为均匀随机乘数乘以 min(cap, base_delay × 2^retry)，并提供 retry quota 限制重试流量。页面注明其所述 2026 新行为当前需设置 AWS_NEW_RETRIES_2026=true opt in，且 SDK 与服务可能有各自支持和默认值。
+- **证据等级与边界**：source-backed（动态官方 SDK 文档）；公式可作一种 full-jitter 教学形式，不能外推为其他 SDK、Agent 工具或自建 executor 的默认策略。请求是否允许重试仍取决于错误类型和动作的幂等语义。
+
+- **Kubernetes Pod Security Standards**：[官方文档](https://kubernetes.io/docs/concepts/security/pod-security-standards/)，访问日期 2026-11-05；当前导航指向 Kubernetes v1.37，页面标注 2026-10-16 更新；阅读三档策略总览及 Restricted policy 的说明和相关字段约束。
+- **来源支持的事实**：文档定义 Privileged、Baseline 和 Restricted 三种累积策略；Restricted 面向采用当前 Pod hardening practices 的安全关键应用和较低信任用户，限制特权容器、HostPath、特权提升、root 身份及 Linux capabilities 等 Pod 字段。
+- **证据等级与边界**：source-backed（Kubernetes 官方配置标准）；Pod policy 约束 Kubernetes 对 Pod 配置的接受范围，不是任意代码逃逸、内核漏洞、多租户数据隔离或微虚拟机比较的实测证明。关于更强隔离技术的选择仍需依据部署威胁模型判断。

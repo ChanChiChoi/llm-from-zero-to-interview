@@ -1,10 +1,33 @@
 # 第二章：设计 ChatGPT 服务：从一条消息到可恢复的响应
 
-ChatGPT 类服务表面上是一个聊天页面，底层却是一条持续运行的交互系统。用户发送一句话之后，系统要确认身份，恢复会话状态，决定哪些历史仍然有用，检查输入风险，选择模型，安排 GPU 推理，增量传输输出，处理断线和取消，保存最终结果，并把这次交互变成可以评估和改进的证据。
+ChatGPT 类服务表面上是一个聊天页面，底层却是一条持续运行的交互系统。用户发送一句话之后，系统要确认身份，恢复会话状态，决定哪些历史仍然有用，检查输入风险，选择模型，安排 GPU（Graphics Processing Unit，图形处理器）推理，增量传输输出，处理断线和取消，保存最终结果，并把这次交互变成可以评估和改进的证据。
 
-如果只画出“客户端 -> 后端 -> 模型 API”，真正困难的部分都没有被回答。一个完整的设计必须说明：同一条消息为什么可能有多个回答分支；客户端断线后怎样避免重复生成或重复扣费；用户点击停止时工具调用是否已经产生副作用；模型版本变化后旧会话如何复现；流式输出已经发出一半时安全策略如何生效；以及服务返回成功但用户任务失败时，系统如何知道自己做错了。
+如果只画出“客户端 -> 后端 -> 模型 API（Application Programming Interface，应用程序编程接口）”，真正困难的部分都没有被回答。一个完整的设计必须说明：同一条消息为什么可能有多个回答分支；客户端断线后怎样避免重复生成或重复扣费；用户点击停止时工具调用是否已经产生副作用；模型版本变化后旧会话如何复现；流式输出已经发出一半时安全策略如何生效；以及服务返回成功但用户任务失败时，系统如何知道自己做错了。
 
 本章以一个面向个人和企业用户的文本聊天服务“白鹭”为贯穿案例。第一版只做多轮文本对话、流式生成、历史管理、重新生成、反馈和基础安全；联网搜索、文件问答、语音和工具调用会在架构上留下接口，但不假设它们已经实现。这样既能讲清 ChatGPT 服务自身的核心问题，也能看出以后扩展 Agent 或多模态能力时会增加什么代价。
+
+本章沿着[第一章《系统设计方法论》](01-系统设计方法论.md)的需求、负载、容量、组件和取舍路线，把一条用户消息从入口走到保存、恢复和评估。
+
+先用一张图确定这次设计的组件边界和状态责任：
+
+~~~mermaid
+flowchart LR
+  U["客户端"] -->|"消息与幂等键"| G["API 网关：鉴权、配额"]
+  G -->|"创建响应"| O["编排器：执行状态、事件序号"]
+  O -->|"读取分支和摘要"| S["会话与上下文存储"]
+  O -->|"当前输入"| A["安全与准入控制"]
+  S -->|"授权历史与来源"| A
+  A -->|"风险标签"| R["模型路由器"]
+  R -->|"选择健康模型"| I["推理服务：处理输入、逐步生成"]
+  I -->|"增量文本、用量"| O
+  O -->|"服务器事件流"| U
+  O -->|"正文、用量、保存状态"| P["持久化服务"]
+  P -->|"保存成功或失败"| O
+  U -->|"取消或重连游标"| G
+  O -->|"响应标识、追踪标识、版本"| M["指标、分布式追踪、评估"]
+~~~
+
+按图从左到右读一条消息：网关负责身份和准入，编排器创建 response_id、推进执行状态并给事件编号，存储提供用户有权限访问的会话分支，路由器选择模型，推理服务产出增量，编排器把事件发给客户端并请求持久化。执行状态由编排器维护，持久化状态以持久化服务确认结果为准；两组状态都通过 response_id 对齐。取消和重连重新进入网关，但不能因此创建第二个响应。图中的事件名和状态均为白鹭的教学设计。
 
 ## 2.0 先区分三种 ChatGPT 类产品
 
@@ -12,11 +35,11 @@ ChatGPT 类服务表面上是一个聊天页面，底层却是一条持续运行
 
 ### 2.0.1 面向个人用户的聊天产品
 
-个人产品关注多轮体验、首 token 延迟、会话历史、重新生成、内容安全、滥用防护和单位请求成本。用户可能同时打开多个设备，可能删除会话，也可能要求导出数据。服务要处理大量短请求和少量超长对话的混合流量。
+个人产品关注多轮体验、首 token 延迟（token 是模型分词器切分出的文本单元）、会话历史、重新生成、内容安全、滥用防护和单位请求成本。用户可能同时打开多个设备，可能删除会话，也可能要求导出数据。服务要处理大量短请求和少量超长对话的混合流量。
 
 ### 2.0.2 面向开发者的模型 API
 
-API 产品更强调 API key、租户隔离、计费、配额、幂等、版本兼容、错误码和 SLA。调用方可能使用自己的重试逻辑，因此服务端必须清楚说明流式事件、超时和部分响应的语义。一个人类聊天界面可以把失败显示为“请重试”，开发者 API 则需要让程序知道是否可以安全重试。
+API 产品更强调 API key、租户隔离、计费、配额、幂等、版本兼容、错误码和 SLA（Service-Level Agreement，服务级别协议，即服务方与调用方约定的服务指标和责任）。调用方可能使用自己的重试逻辑，因此服务端必须清楚说明流式事件、超时和部分响应的语义。一个人类聊天界面可以把失败显示为“请重试”，开发者 API 则需要让程序知道是否可以安全重试。
 
 ### 2.0.3 企业内部助手
 
@@ -32,12 +55,12 @@ API 产品更强调 API key、租户隔离、计费、配额、幂等、版本�
 | --- | --- |
 | 用户 | 已认证的个人用户或企业租户成员 |
 | 核心动作 | 创建会话、发送消息、流式接收、停止、重新生成、删除、反馈 |
-| 输出 | 文本增量、完成状态、用量和响应标识 |
+| 输出 | 文本增量、执行状态、持久化状态、用量和响应标识 |
 | 会话 | 支持多轮消息和回答分支 |
 | 模型 | 至少一个主模型和一个降级模型 |
 | 数据 | 对话可查询、可删除、可导出；日志分层保存 |
 | 安全 | 输入、上下文、输出和滥用行为都有控制 |
-| 版本 | 模型、prompt、策略和 tokenizer 可追踪 |
+| 版本 | 模型、prompt（发送给模型的输入与指令）、策略和 tokenizer（分词器）可追踪 |
 | 不做的事 | 第一版不让模型直接执行不可逆业务动作 |
 
 这个契约不是产品说明书的全部，而是系统设计的边界。它提前回答了几个容易被遗漏的问题：
@@ -73,21 +96,18 @@ API 产品更强调 API key、租户隔离、计费、配额、幂等、版本�
 6. 最终答案是否能在历史中找到。
 7. 失败时，用户是否知道哪些内容已经完成。
 
-这几个阶段对应不同的系统指标和协议状态。TTFT 只描述首 token，不描述请求是否被接受；流式吞吐只描述生成速度，不描述网络缓冲；完整响应时间也不能说明答案已经持久化。
+这几个阶段对应不同的系统指标和协议状态。首 token 延迟（Time to First Token，TTFT）只描述请求接受后到第一个输出 token 的时间，不描述请求是否被接受；每输出 token 时间（Time per Output Token，TPOT）描述生成阶段的平均 token 间隔，具体口径要说明是否排除首 token 及网络发送；流式吞吐只描述生成速度，不描述网络缓冲；完整响应时间也不能说明答案已经持久化。
 
-白鹭可以把一次响应的用户可见状态设计成：
+白鹭把“执行进度”和“持久化结果”作为两个独立字段返回。执行状态回答模型这次请求进行到哪一步；持久化状态回答生成正文能否在刷新后恢复。这样“模型已经完成但数据库尚未保存”有明确表达，界面可以显示保存中或保存失败并提供受控恢复，而不会把保存重试误做成再次调用模型。
 
 ~~~text
-accepted
-  -> waiting
-  -> streaming
-  -> completed
-       \-> saved
-  -> canceled
-  -> failed
+execution_state: created -> queued -> generating -> completed | canceled | failed
+
+persistence_state: pending -> saved
+                      \-> persist_failed -> pending (受控重试)
 ~~~
 
-saved 不是 completed 的同义词。模型已经完成生成，但数据库写入失败时，用户可能看到了答案，却在刷新后找不到它。系统应决定这是“响应完成但保存失败”，还是把保存视为完成契约的一部分。
+completed 是生成执行的终态，saved 是持久化状态；两者不是一条状态链上的相邻状态。例如 execution_state=completed 且 persistence_state=persist_failed 表示用户可能已经看见完整答案，但刷新后暂时无法恢复。产品可以把“已生成”和“已保存”分别展示，也可以让最终完成事件等待保存成功；无论选哪一种，API 查询都应返回这两个字段。
 
 ### 2.2.1 指标的分解
 
@@ -122,6 +142,8 @@ T_{\mathrm{persist}}
 - T_persist 是保存消息、用量和状态的时间。
 
 TTFT 通常止于 first_decode，而用户刷新后能否看到答案还取决于 T_persist。将这两个时间混成一个“接口耗时”，会让故障定位变得困难。
+
+用一条串行关键路径做手算：假设准入 0.12 秒、排队 0.35 秒、上下文读取 0.18 秒、prefill 0.85 秒、首个 decode 0.20 秒、剩余 decode 1.50 秒、最终保存 0.10 秒。则首 token 延迟为 0.12+0.35+0.18+0.85+0.20=1.70 秒；若保存发生在生成之后，端到端完成时间为 1.70+1.50+0.10=3.30 秒。这些是便于复算的教学假设，不是服务性能数据。若上下文读取、审核或持久化与其他工作并行，应按依赖图的关键路径计时，不能把并行阶段的耗时一律相加。
 
 ### 2.2.2 质量也属于产品协议
 
@@ -185,7 +207,7 @@ parent_node_id 很重要。用户对同一个问题点击重新生成时，新�
 - model_version。
 - prompt_version。
 - decoding 参数。
-- 状态和 finish_reason。
+- 执行状态、持久化状态和 finish_reason（生成停止原因）。执行状态描述生命周期，持久化状态描述正文能否恢复，finish_reason 描述模型为何停止；三者不能塞进同一个状态字段。
 - 输入、输出和缓存 token。
 - TTFT、TPOT、总耗时。
 - 安全审核结果。
@@ -220,25 +242,22 @@ user_1
 
 ### 2.3.6 状态转移和不变量
 
-响应状态可以设计为：
+响应可以用两组状态表示：
 
 ~~~text
-created -> queued -> generating -> completed
-                         |          |
-                         v          v
-                      canceled    persist_failed
-                         |
-                         v
-                      refunded_or_billed
+execution_state: created -> queued -> generating -> completed | canceled | failed
+
+persistence_state: pending -> saved
+                      \-> persist_failed --重试--> pending
 ~~~
 
 实际项目中的状态名称可以不同，但应满足几个不变量：
 
-1. completed、canceled 和 failed 互斥。
-2. 一个 response_id 只能有一个最终状态。
-3. 增量事件序号不能回退。
-4. 已经确认执行的计费不能因为客户端重连而重复。
-5. response 终态后不能再写入新的正文增量。
+1. 一个 response_id 的执行状态只能落在一个终态：completed、canceled 或 failed。
+2. 持久化状态独立演进；completed + persist_failed 是合法组合，保存重试成功后可以变为 completed + saved。
+3. finish_reason 是完成原因元数据，例如 stop、length 或 content_filter，不是执行状态；具体枚举由模型接口和产品策略决定。
+4. 增量事件序号不能回退，执行终态后不能再写入新的正文增量。
+5. 已经确认执行的计费不能因为客户端重连而重复。
 6. 删除请求不能让客户端继续读取已撤销的会话。
 
 ## 2.4 API 设计：把自然语言请求变成可重放命令
@@ -301,6 +320,8 @@ POST /v1/responses/{response_id}/cancel
 - cancel_pending：系统已收到请求，但底层 GPU 仍在安全停止。
 - too_late：副作用或最终写入已经发生，无法撤回。
 
+cancel_pending 是取消命令的受理结果，不是执行终态；此时可以记录 cancel_requested=true，但 execution_state 仍为 generating。只有模型和发送路径都停止后，才把执行状态改为 canceled。若执行已经完成或不可逆副作用已经发生，返回 too_late 并保留原执行状态。
+
 对纯文本生成，too_late 通常只意味着无法节省剩余计算；对未来的工具调用，too_late 可能意味着需要人工补偿。因此取消 API 不能只返回 HTTP 200。
 
 ### 2.4.4 反馈和删除
@@ -309,7 +330,7 @@ POST /v1/responses/{response_id}/cancel
 
 导出接口同样需要定义数据范围：是否包含失败响应、被删除分支、反馈、用量和安全记录。数据访问权限不能由前端决定。
 
-### 2.4.5 错误分类
+### 2.4.5 错误与结束原因分类
 
 错误至少分为：
 
@@ -320,7 +341,8 @@ POST /v1/responses/{response_id}/cancel
 | 配额错误 | 余额、并发或频率超限 | 等待、升级或减少请求 |
 | 暂时故障 | 模型池、网络或依赖超时 | 仅在幂等时重试 |
 | 安全拒绝 | 请求或输出触发策略 | 不自动重试同一输入 |
-| 终止状态 | canceled、length、content_filter | 展示部分结果和原因 |
+| 执行终态 | canceled、failed | 解释请求被取消或执行失败；completed 是成功结束，不属于错误 |
+| 完成原因 finish_reason | stop、length、content_filter 等 | 说明正常停止、达到长度限制或被策略截断；按模型与产品接口归一化 |
 | 持久化故障 | 生成成功但保存失败 | 允许受控恢复或重新保存 |
 
 错误码应该让 SDK 能做正确动作。把所有失败都返回“请重试”，会让客户端在安全拒绝和服务过载时不断制造新负载。
@@ -339,7 +361,7 @@ POST /v1/responses/{response_id}/cancel
 
 服务端根据 conversation_id 和 client_message_id 判断消息是否已经创建。若客户端因网络超时再次提交同一个幂等键，返回原 response_id 和当前状态。
 
-同一个会话可以由多个设备并发写入。简单策略是使用版本号或 optimistic concurrency control：
+同一个会话可以由多个设备并发写入。简单策略是使用版本号或乐观并发控制（optimistic concurrency control，OCC）：
 
 ~~~math
 write\_allowed
@@ -351,6 +373,8 @@ version_{\mathrm{server}}
 
 版本不一致时，服务端返回冲突，让客户端重新读取会话，而不是静默覆盖另一台设备刚写入的消息。
 
+例如手机和浏览器都基于会话版本 12 编辑。浏览器先提交成功，服务端版本变成 13；手机仍提交 version_client=12 时，比较 12≠13，服务端拒绝覆盖并返回冲突。手机读取版本 13 后，让用户确认如何合并新消息，再以新版本提交。版本号本身不是锁，它只是让并发覆盖可观察、可恢复。
+
 ### 2.5.3 输入安全和配额
 
 在进入模型前，系统检查滥用风险、敏感输入、频率和 token 预算。输入审核可以产生风险标签，不一定立即拒绝；不同风险等级决定是否允许普通模型、是否需要更强模型、是否禁止流式或要求人工处理。
@@ -359,19 +383,19 @@ version_{\mathrm{server}}
 
 ### 2.5.4 读取和裁剪上下文
 
-会话服务读取当前分支、最近消息、摘要和必要的记忆。Context Manager 计算 token 长度，并在预算不足时按优先级裁剪。
+会话服务读取当前分支、最近消息、摘要和必要的记忆。上下文管理器（Context Manager）计算 token 长度，并在预算不足时按优先级裁剪。
 
 裁剪顺序不能只按时间。系统 prompt、当前用户问题和安全策略通常不能被随意删除；旧闲聊可以摘要或丢弃；带有明确来源的业务事实可以保留引用；过期或权限变化的记忆应先失效。
 
 ### 2.5.5 路由和模型准备
 
-Model Router 根据用户套餐、任务类型、输入长度、延迟预算、质量要求、成本、模型健康和灰度配置选择模型。路由决策要写入 response 元数据，否则之后无法解释为什么同一个问题走了不同模型。
+模型路由器（Model Router）根据用户套餐、任务类型、输入长度、延迟预算、质量要求、成本、模型健康和灰度配置选择模型。路由决策要写入 response 元数据，否则之后无法解释为什么同一个问题走了不同模型。
 
 如果模型实例尚未 warm，系统要在准入阶段决定是等待加载、路由到其他副本，还是返回异步受理。把模型加载时间藏在普通请求的超时里，会造成严重尾延迟。
 
 ### 2.5.6 推理与事件
 
-推理服务接收结构化 prompt，进入 prefill 和 decode。每个增量事件包含 response_id、序号、增量内容或控制状态。编排器不应根据“收到空字符串”猜测完成，必须使用明确的终止事件。
+推理服务接收结构化 prompt，先用 prefill（预填充）处理输入上下文，再用 decode（解码）逐步生成输出 token。每个增量事件包含 response_id、序号、增量内容或控制状态。编排器不应根据“收到空字符串”猜测完成，必须使用明确的终止事件。
 
 如果模型产生 finish_reason=length，服务端要告诉客户端回答被最大输出截断；如果是 safety 或 content_filter，则应区分安全策略终止和普通长度终止。
 
@@ -387,7 +411,7 @@ Model Router 根据用户套餐、任务类型、输入长度、延迟预算、�
 4. 完成、取消或失败时保存最终正文、用量和状态。
 5. 详细 trace 和反馈事件异步写入。
 
-这样避免每个 token 都产生数据库写放大，同时保证用户消息不会因模型失败而丢失。
+生成结束后，执行状态先进入 completed、canceled 或 failed，持久化状态仍为 pending；正文和用量写入成功后才改为 saved。若写入失败则记为 persist_failed，并通过 response_id 暴露恢复入口。若短期缓冲仍保留完整正文，可以重试保存；若缓冲也已丢失，就明确显示“生成过但未能保存”，不要静默地再次调用模型并制造第二份答案。这样避免每个 token 都产生数据库写放大，同时保证用户消息不会因模型失败而丢失。
 
 ## 2.6 上下文管理：不是把历史全部复制给模型
 
@@ -428,6 +452,8 @@ B_{\mathrm{evidence}}
 ~~~
 
 每个 B 都是 token 数，而不是字符数。不同 tokenizer、语言和代码内容的字符/token 比例不同，不能用固定字符截断代替实际计数。
+
+例如上下文窗口假设为 32,768 token，预留输出 4,096、系统指令 2,048、工具定义 1,024 和安全余量 1,024，则可用于对话及证据的输入预算为 32,768-4,096-2,048-1,024-1,024=24,576 token。可以将其暂分为当前问题 1,024、最近原文 8,192、摘要 4,096、长期记忆 2,048、检索证据 9,216 token，五项相加正好 24,576。实际分配要按任务变化；若新检索证据需要 2,000 token，而预算已满，应先按策略减少低优先级的旧原文或记忆，并保留用户问题、安全规则和来源标记。数字是预算示例，不代表某模型的固定窗口配置。
 
 ### 2.6.2 三种历史策略
 
@@ -501,35 +527,43 @@ Context Manager 应给不同内容加来源和信任标签，并在 prompt 结�
 
 ### 2.7.1 SSE 的适用边界
 
-Server-Sent Events 使用 HTTP 长连接和 text/event-stream，适合服务端向客户端单向推送文本事件。WHATWG 规范定义了事件流格式和重连相关机制，客户端可以根据事件 ID 请求从某个位置继续。
+Server-Sent Events（SSE，服务器推送事件）使用 HTTP 长连接和 text/event-stream，适合服务端向客户端单向推送文本事件。WHATWG HTML 标准定义了事件流格式和重连相关机制；只有服务端给事件写入 id 字段并保留对应事件时，客户端才有可用游标请求补发。标准提供传输游标，不负责替应用保存或重放事件。
 
 SSE 对普通文本聊天很合适，因为主要方向是服务端发送 token；它的限制是交互语义以服务端推送为主，客户端到服务端的控制仍通常通过普通 HTTP 请求完成。
 
 ### 2.7.2 WebSocket 的适用边界
 
-WebSocket 提供持久的双向通信，适合语音、实时协作、客户端频繁发送控制事件或多个方向的状态同步。RFC 6455 定义了 WebSocket 协议，但协议层并没有替你定义 token 序号、模型状态、计费和安全策略，这些仍要由应用层设计。
+WebSocket 是 RFC 6455 定义的持久双向通信协议，适合语音、实时协作、客户端频繁发送控制事件或多个方向的状态同步。协议层并没有替你定义 token 序号、模型状态、计费和安全策略，这些仍要由应用层设计。
 
 不要因为 WebSocket 更“实时”就默认它更适合文本聊天。连接管理、代理兼容、水平扩展和状态路由都可能更复杂。
 
 ### 2.7.3 事件模型
 
-白鹭可以定义如下事件：
+白鹭可以定义如下事件。这里的 event 和 id 是 SSE 传输字段，JSON 中的 sequence 是应用层序号；事件 ID 将响应标识与序号组成，服务端可据此定位重放位置：
 
 ~~~text
+id: r-1:0
 event: response.created
 data: {"response_id":"r-1","sequence":0}
 
+id: r-1:1
 event: response.output_text.delta
 data: {"response_id":"r-1","sequence":1,"delta":"你好"}
 
+id: r-1:2
 event: response.output_text.delta
 data: {"response_id":"r-1","sequence":2,"delta":"，"}
 
-event: response.completed
-data: {"response_id":"r-1","sequence":3,"usage":{"input_tokens":80,"output_tokens":24}}
+id: r-1:3
+event: response.execution.completed
+data: {"response_id":"r-1","sequence":3,"execution_state":"completed","persistence_state":"pending","finish_reason":"stop","usage":{"input_tokens":80,"output_tokens":24}}
+
+id: r-1:4
+event: response.persistence.saved
+data: {"response_id":"r-1","sequence":4,"execution_state":"completed","persistence_state":"saved"}
 ~~~
 
-这里的事件名称是本书的设计例子。每个事件至少要有 response_id 和单调递增 sequence。客户端可以丢弃重复 sequence，拒绝倒退事件，并在完成事件之后停止接收正文。
+这里的事件名称是本书为白鹭设计的应用层协议，不是厂商 API 的固定契约。当前 OpenAI Responses API 文档也展示了语义化事件类型和 sequence_number 字段，可作为产品接口的例子；实际事件名和字段以其在线文档为准。每个白鹭事件至少要有 response_id 和单调递增 sequence。客户端可以丢弃重复 sequence、拒绝倒退事件，并在执行完成后停止接收正文；持久化事件仍可继续到达。事件 ID 和 sequence 应保持一一对应，避免传输游标与业务序号不一致。
 
 ### 2.7.4 心跳和代理缓冲
 
@@ -571,7 +605,7 @@ token 增量的传输顺序不能被多线程异步发送打乱。推理服务�
 
 ### 2.8.3 重连与 Last-Event-ID
 
-如果客户端保存了最后收到的 sequence，重连时可以携带 last_event_id 或自定义 cursor。服务端从事件日志或 response 缓冲中补发缺失事件。
+如果客户端保存了最后收到的 SSE id，原生 EventSource 重连时会按标准发送 Last-Event-ID 请求头；其他客户端也可以在重连 API 中提交同一游标或自定义 cursor。服务端校验游标属于该 response_id 后，从事件日志或 response 缓冲中补发缺失事件。WHATWG 定义的是事件 ID 和重连请求的传递方式，事件保留期限、鉴权和补发策略仍由应用决定。
 
 这要求服务端暂存增量事件一段时间。若只保留最终全文而没有序列化增量，就不能精确恢复中间事件；可以退化为发送当前完整文本快照，但客户端必须知道这是 snapshot，而不是新的增量。
 
@@ -616,24 +650,22 @@ ChatGPT 服务通常不会永远只有一个模型。路由系统把产品策略
 
 ### 2.9.2 路由目标
 
-一个简化的路由目标可以写为：
+直接从原始质量分、美元成本、毫秒延迟和风险概率中相减没有意义，因为量纲和范围不同。先把四项映射到产品定义的 0 到 1 分数：质量分越高越好，成本、延迟和风险分越高代表代价越大；先过滤不健康模型、低于质量底线或超过风险上限的候选，再比较效用：
 
 ~~~math
 m^\*
 =
-\arg\max_{m\in\mathcal{M}}
+\arg\max_{m\in\mathcal{M}_{\mathrm{eligible}}}
 \left[
-Q(m,x)
--
-\alpha C(m,x)
--
-\beta T(m,x)
--
-\gamma R(m,x)
+0.45\widetilde{Q}(m,x)
+-0.25\widetilde{C}(m,x)
+-0.20\widetilde{T}(m,x)
+-0.10\widetilde{R}(m,x)
 \right]
 ~~~
 
-Q 是任务质量效用，C 是成本，T 是延迟，R 是风险。α、β、γ 由业务决定。这个公式表达取舍，不要求系统每次都精确估计所有项。
+公式中的 m 是候选模型，x 是本次请求及其上下文特征，eligible 表示通过健康、质量底线和风险上限过滤后的候选集合。
+这些权重只是教学假设，必须由具体产品的成功标准和代价校准。假设模型 A 的归一化分数为质量 0.92、成本 0.70、延迟 0.50、风险 0.02，则效用为 0.45×0.92-0.25×0.70-0.20×0.50-0.10×0.02=0.137。模型 B 的分数为 0.84、0.30、0.25、0.05，效用为 0.45×0.84-0.25×0.30-0.20×0.25-0.10×0.05=0.248。若质量底线是 0.80、风险上限是 0.10 且两者都健康可用，B 会因更低的成本和延迟胜出；若任务要求质量至少 0.90，B 会先被过滤掉，A 才有资格参与选择。数值和门槛都是产品假设，不是模型实测。
 
 模型选择还要考虑容量。如果一个模型质量最高但队列已经很长，等待它可能降低任务成功率；路由到满足质量底线的健康模型，可能使整体体验更好。
 
@@ -650,7 +682,7 @@ Q 是任务质量效用，C 是成本，T 是延迟，R 是风险。α、β、γ
 7. usage 统计。
 8. 实例健康与资源回收。
 
-长短请求混部会带来队列和 KV Cache 冲突。可以按输入长度、优先级、是否流式和预计输出长度建立队列，也可以使用连续批处理动态加入和退出。
+长短请求混部会带来队列和 KV Cache（Key-Value Cache，键值缓存）冲突。它在解码过程中保存注意力计算复用的键和值，减少每步重复处理历史 token 的开销，但会占用显存；具体布局和管理策略见[第四章《设计推理平台》](04-设计推理平台.md)。可以按输入长度、优先级、是否流式和预计输出长度建立队列，也可以使用连续批处理动态加入和退出。
 
 ### 2.9.4 模型版本和会话一致性
 
@@ -666,7 +698,7 @@ Q 是任务质量效用，C 是成本，T 是延迟，R 是风险。α、β、γ
 
 ### 2.9.5 Prefix cache 与上下文复用
 
-很多请求共享相同的 system prompt、工具描述或会话前缀。Prefix cache 可以减少重复 prefill，但缓存键必须绑定模型、tokenizer、prompt 版本、权限范围和实际前缀内容。
+很多请求共享相同的 system prompt、工具描述或会话前缀。前缀缓存（prefix cache）可以复用相同前缀的 prefill 结果，但缓存键必须绑定模型、tokenizer、prompt 版本、权限范围和实际前缀内容；路由与缓存的更完整取舍见[第十三章《设计模型路由与缓存系统》](13-设计模型路由与缓存系统.md)。
 
 会话分支中的共享前缀可以复用；用户私有历史不能跨用户复用。缓存命中不应绕过最新安全策略或会话删除。
 
@@ -705,7 +737,7 @@ Q 是任务质量效用，C 是成本，T 是延迟，R 是风险。α、β、γ
 
 ### 2.10.4 PII 和数据泄露
 
-PII 检测可以识别身份证号、电话、邮箱、地址等模式，但规则和模型都可能漏报或误报。日志、反馈、训练候选和客服排障工具应采用不同的脱敏策略。
+个人可识别信息（Personally Identifiable Information，PII）检测可以识别身份证号、电话、邮箱、地址等模式，但规则和模型都可能漏报或误报。日志、反馈、训练候选和客服排障工具应采用不同的脱敏策略。
 
 输出中的个人信息不一定都是违规的。用户要求查看自己的手机号，与系统把另一个人的手机号拼进回答，风险不同。安全策略要结合身份、数据来源和任务，而不是看到任何数字就全部替换。
 
@@ -717,7 +749,7 @@ PII 检测可以识别身份证号、电话、邮箱、地址等模式，但规�
 
 ### 2.10.6 安全资料的边界
 
-OWASP 的 LLM 应用风险资料可以帮助建立威胁词汇和检查面，但它不是某个产品已经安全的证明。安全策略仍需要在自己的模型、用户、数据、工具和损失模型上验证。
+OWASP GenAI Security Project 的 2026 Top 10 提供社区整理的 LLM 应用风险词汇和检查入口，但它不是某个产品已经安全的证明，也不能代替系统自己的威胁建模。安全策略仍需要在自己的模型、用户、数据、工具和损失模型上验证。
 
 ## 2.11 数据存储和删除
 
@@ -853,6 +885,8 @@ N_{\mathrm{successful\ tasks}}
 }
 ~~~
 
+带具体单价、用量、重试和成功数的手算例子见 2.16.1；该例把 100 次尝试的总成本除以其中 70 个成功任务，得到每个成功任务约 0.0143 美元。
+
 这里要求评估窗口内至少有一个被判定为成功的任务；若分母为 0，结果应标记为“没有成功证据”，而不是返回 0。还要说明 `C_inference`、`C_storage`、`C_safety` 和 `C_review` 的统计窗口，以及重试和人工接管是否已经包含在这些项中，避免把同一笔费用重复计入。当模型路由、小模型重试和人工接管改变时，这个指标比单独的每 token 价格更能反映真实经济性。
 
 ## 2.13 监控：把“回答不好”变成可定位问题
@@ -866,12 +900,12 @@ N_{\mathrm{successful\ tasks}}
 - 请求率、并发连接数和租户分布。
 - 输入校验失败率。
 - 幂等命中率。
-- 接受、排队、流式、完成、取消和失败数量。
+- 接受、排队、流式、执行完成、取消和失败数量；另按 persistence_state 统计 saved、pending 与 persist_failed。
 - SSE/WebSocket 连接时长。
 - 重连成功率和重复事件率。
 - 客户端断开率。
 
-如果 completed 数量下降但 HTTP 错误没有上升，可能是流式连接或持久化问题；如果 response.created 正常但 first_token 下降，可能是模型队列问题。
+如果执行完成数量下降但 HTTP 错误没有上升，可能是流式连接问题；若执行完成正常而 persist_failed 上升，则应检查数据库和保存队列；如果 response.created 正常但 first_token 下降，可能是模型队列问题。
 
 ### 2.13.2 模型指标
 
@@ -886,7 +920,7 @@ N_{\mathrm{successful\ tasks}}
 - finish_reason 分布。
 - 各模型版本的错误和质量。
 
-TPOT 可以定义为生成阶段每个输出 token 的平均时间，但要说明是否排除首 token、是否包含网络发送，以及如何处理短输出。
+TPOT（Time per Output Token，每输出 token 时间）可以定义为生成阶段每个输出 token 的平均时间，但要说明是否排除首 token、是否包含网络发送，以及如何处理短输出。TTFT 是请求接受后直到首个输出 token 的时间；P95 表示 95% 请求的测量值不超过该值，P99 同理。报告百分位时还要说明窗口、请求分母和失败请求的计法。
 
 ### 2.13.3 质量和安全指标
 
@@ -901,7 +935,7 @@ TPOT 可以定义为生成阶段每个输出 token 的平均时间，但要说�
 ~~~math
 C_{\mathrm{day}}
 =
-C_{\mathrm{GPU}}
+C_{\mathrm{model}}
 +
 C_{\mathrm{storage}}
 +
@@ -912,7 +946,9 @@ C_{\mathrm{moderation}}
 C_{\mathrm{observability}}
 ~~~
 
-模型路由和重试会改变 GPU 成本；日志保留和流式连接会改变存储与网络成本。成本告警应结合任务成功率，不能仅因 GPU 利用率升高就判断异常。
+这里的 C_model 按部署方式计入自有模型池的 GPU 折旧、能耗和运维成本，或外部模型 API 的实际账单，避免把外部调用费用漏出日账本。
+
+模型路由和重试会改变 GPU 成本或外部 API 账单；日志保留和流式连接会改变存储与网络成本。成本告警应结合任务成功率，不能仅因 GPU 利用率升高就判断异常。
 
 ### 2.13.5 追踪字段和隐私
 
@@ -945,6 +981,8 @@ ChatGPT 服务的高可用不仅是模型多副本，还包括状态、连接、
 - 对无历史的新会话继续服务。
 - 限制新请求而不是让所有请求无限等待。
 
+若正文已生成但保存仍失败，应返回 execution_state=completed、persistence_state=persist_failed，并保留受控的保存重试或查询入口。只有在产品明确接受“暂时不可恢复”时才让生成继续流出；若数据保证要求成功结果必须可恢复，就应在最终完成事件前等待保存，并把额外写入时延计入服务目标。
+
 ### 2.14.3 安全服务不可用
 
 输入审核不可用时，高风险请求应停止或进入备用审核；低风险请求可以使用保守规则或延迟。输出审核不可用时，是否允许流式展示取决于风险等级。
@@ -953,7 +991,7 @@ ChatGPT 服务的高可用不仅是模型多副本，还包括状态、连接、
 
 ### 2.14.4 流式网关故障
 
-如果模型已经生成但网关断开，response 状态仍应由服务端保存。客户端重连可以通过 response_id 查询最终状态或补发事件。
+如果模型已经生成但网关断开，执行状态和持久化状态仍由服务端分别保存。客户端重连可以通过 response_id 查询最终状态或补发事件，即使当前是 completed + persistence_state=pending 也不应误报为失败。
 
 如果网关重试导致新的模型请求，幂等键必须阻止重复生成。否则一次网络故障会变成两次 GPU 消耗和两个不同答案。
 
@@ -973,15 +1011,15 @@ ChatGPT 服务的高可用不仅是模型多副本，还包括状态、连接、
 
 ## 2.15 容量估算：从 DAU 到模型池
 
-下面使用一个教学规模，不把结果当成部署结论：
+下面使用一个教学规模，不把结果当成部署结论。DAU（Daily Active Users，日活跃用户）是一天内至少活跃一次的去重用户数；QPS（Queries per Second，每秒请求数）在这里按进入聊天服务的请求计，不代表数据库查询率。假设请求量均匀分摊到一天来估算平均值，再用峰值系数近似繁忙时段：
 
 - DAU 为 1,000,000。
 - 每个用户每天 10 次响应请求。
 - 每日入口请求为 10,000,000。
 - 平均入口 QPS 为 115.7。
 - 峰值系数为 10，入口峰值约 1,157 QPS。
-- 每次请求平均输入 1,000 token，输出 500 token。
-- 平均每个请求触发 1.2 次生成模型调用。
+- 每次生成模型调用平均输入 1,000 token，输出 500 token。
+- 每个入口请求平均触发 1.2 次生成模型调用，包含重试或额外生成轮次的平均影响。
 
 平均入口 QPS：
 
@@ -1031,7 +1069,7 @@ R_{\mathrm{token}}
 
 ### 2.15.1 并发连接
 
-若平均响应停留时间为 4 秒：
+用 Little 定律“平均在途调用数=到达率×平均停留时间”，若模型调用平均停留 4 秒（包括队列等待和生成）：
 
 ~~~math
 L_{\mathrm{model}}
@@ -1044,7 +1082,7 @@ Q_{\mathrm{model}}\times4
 
 ### 2.15.2 存储量
 
-假设每个请求的消息、元数据和审核结果平均占 10KB，未计算副本：
+假设每个入口请求的消息、元数据和审核结果平均占 10 KB（十进制，约 10,000 字节），未计算副本：
 
 ~~~math
 S_{\mathrm{day}}
@@ -1091,6 +1129,10 @@ C_{\mathrm{storage}}
 +
 C_{\mathrm{network}}
 ~~~
+
+举一个纯教学的计费例子，假设输入单价为每千 token 0.003 美元、输出单价为每千 token 0.012 美元，一次调用处理 1,000 个输入 token 和 500 个输出 token，则模型用量费为 1,000/1,000×0.003+500/1,000×0.012=0.009 美元。再假设缓存未命中、安全、存储、网络和人工复核等费用合计为 0.001 美元，则每次尝试成本是 0.010 美元。若一个评估窗口内 100 次尝试（重试也计入）总支出为 1.00 美元，其中 70 个任务成功，则单位成功任务成本为 1.00/70≈0.0143 美元。单价是方便手算的假设值，不是厂商当前报价；若失败尝试或人工处理被漏记，这个指标会被低估。
+
+若某一天模型执行、存储、网络、安全审核和可观测性支出分别假设为 30、4、3、2、1 美元，则 C_day=30+4+3+2+1=40 美元/天。这个日账本与前面的单请求成本例子使用不同的聚合口径，但都需避免把同一项重复计入。
 
 如果部署自有 GPU，模型成本可以按 GPU 秒、模型池占用和能耗分摊；如果调用外部 API，则按输入、输出、缓存和失败调用结算。两种模式都要记录内部 token 和 response_id。
 
@@ -1161,7 +1203,7 @@ C_{\mathrm{network}}
 
 已生成的错误回答不会因为回滚自动消失。系统需要标记受影响版本，重新评估相关样本，并在必要时通知用户。
 
-## 2.18 完整案例：白鹭企业版的一次真实请求
+## 2.18 完整案例：白鹭企业版的一次请求链路
 
 假设白鹭企业版新增“根据内部对话历史帮助员工起草项目周报”，但第一版仍不允许自动发布周报。
 
@@ -1204,7 +1246,7 @@ C_{\mathrm{network}}
 
 ### 2.19.1 网关在生成中断开
 
-模型服务仍在生成，网关连接断开。编排器收到连接关闭事件，进入 grace period；如果客户端在短时间内重连，则从最后 sequence 补发；如果超过时间，发送 cancel，保存已生成片段和 canceled 状态。
+模型服务仍在生成，网关连接断开。编排器收到连接关闭事件，进入 grace period；如果客户端在短时间内重连，则从最后 sequence 补发；如果超过时间，发送 cancel，保存已生成片段，并记录 execution_state=canceled、persistence_state=saved。部分正文已可靠保存，并不代表模型完整生成；取消也不代表这段正文没有保存。
 
 如果网关盲目重试创建响应，就会产生两个 response_id。幂等键和原始 client_message_id 应阻止这种情况。
 
@@ -1236,7 +1278,7 @@ C_{\mathrm{network}}
 
 ### 2.20.4 同步保存还是异步保存
 
-同步保存提高刷新后的确定性，但会增加尾延迟；异步保存降低主链路压力，但需要处理生成成功、保存失败和用户断线之间的差异。第一版可以同步写消息元数据、异步写详细正文和 trace，但必须向用户明确最终保存状态。
+同步保存提高刷新后的确定性，但会增加尾延迟；异步保存降低主链路压力，但需要处理生成成功、保存失败和用户断线之间的差异。第一版可以同步写消息元数据、异步写详细正文和 trace，但必须向用户明确最终保存状态，并分别展示执行状态与持久化状态。取消后可以是 canceled + saved；正常生成也可能暂时是 completed + pending。
 
 ### 2.20.5 一个模型还是模型分层
 
@@ -1270,13 +1312,13 @@ C_{\mathrm{network}}
 
 ## 2.22 本章资料与证据边界
 
-1. OpenAI Cookbook，How to stream completions。该官方 Cookbook 示例用于说明流式请求的工程交互方式；示例代码不是本书设计的强制 API 契约。链接：[https://developers.openai.com/cookbook/examples/how_to_stream_completions](https://developers.openai.com/cookbook/examples/how_to_stream_completions)。
-2. OpenAI API Reference，Streaming。该官方入口用于核对产品 API 的流式主题，但本次自动化请求返回 403，因此本章不把页面中无法独立核验的字段写成确定事实。链接：[https://platform.openai.com/docs/api-reference/streaming](https://platform.openai.com/docs/api-reference/streaming)。
-3. WHATWG，Server-sent events。规范定义事件流的媒体类型、事件字段和重连相关行为，是 SSE 协议事实的主要来源。链接：[https://html.spec.whatwg.org/multipage/server-sent-events.html](https://html.spec.whatwg.org/multipage/server-sent-events.html)。
+1. OpenAI API 文档，Streaming API responses。当前指南描述通过 HTTP SSE 流式返回，并给出 Responses 与 Chat Completions 的接口例子；这些是一个厂商的当前接口，不是所有聊天服务都必须采用的协议。链接：[https://developers.openai.com/api/docs/guides/streaming-responses](https://developers.openai.com/api/docs/guides/streaming-responses)。
+2. OpenAI API Reference，Responses streaming events。用于核对当前事件名称、字段及 sequence_number 示例；接口目录会变化，本章的白鹭事件仍是自行设计的抽象。链接：[https://developers.openai.com/api/reference/resources/responses/streaming-events](https://developers.openai.com/api/reference/resources/responses/streaming-events)。
+3. WHATWG，Server-sent events。HTML Living Standard 定义事件流格式、id 字段和 Last-Event-ID 重连行为；它不规定应用如何保存或重放事件。链接：[https://html.spec.whatwg.org/multipage/server-sent-events.html](https://html.spec.whatwg.org/multipage/server-sent-events.html)。
 4. IETF RFC 6455，The WebSocket Protocol。RFC 定义 WebSocket 协议本身；token 事件、状态、计费和安全仍属于应用层设计。链接：[https://www.rfc-editor.org/rfc/rfc6455](https://www.rfc-editor.org/rfc/rfc6455)。
-5. OWASP，Top 10 for Large Language Model Applications。该资料提供 LLM 应用常见风险和安全词汇，不能替代针对具体模型、数据和工具的安全评估。链接：[https://owasp.org/www-project-top-10-for-large-language-model-applications/](https://owasp.org/www-project-top-10-for-large-language-model-applications/)。
-6. OpenTelemetry，Observability primer。上一章已说明 traces、metrics、logs 的来源；本章将其扩展到 response、sequence、token 和版本字段。链接：[https://opentelemetry.io/docs/concepts/observability-primer/](https://opentelemetry.io/docs/concepts/observability-primer/)。
-7. NIST，Artificial Intelligence Risk Management Framework。上一章已说明 Govern、Map、Measure、Manage 的治理边界；本章将其落到聊天数据、模型版本和安全事件。链接：[https://www.nist.gov/itl/ai-risk-management-framework](https://www.nist.gov/itl/ai-risk-management-framework)。
+5. OWASP GenAI Security Project，OWASP GenAI LLM Top 10 2026。该社区指南归纳 LLM 应用风险和缓解方向，可作为威胁建模入口，不是具体服务的安全评估或安全证明。链接：[https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/](https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/)。
+6. OpenTelemetry，Observability primer。本章借用其中的 metrics、span、trace 和 logs 概念组织 response、sequence、token 和版本字段，不将其视为强制实现标准。链接：[https://opentelemetry.io/docs/concepts/observability-primer/](https://opentelemetry.io/docs/concepts/observability-primer/)。
+7. NIST，Artificial Intelligence Risk Management Framework 1.0。该自愿采用的框架于 2023 年发布；NIST 页面显示 1.0 正在修订。上一章已说明 Govern、Map、Measure、Manage 的治理边界；本章将其作为风险组织方式，落到聊天数据、模型版本和安全事件，不将它当成法规清单。链接：[https://www.nist.gov/itl/ai-risk-management-framework](https://www.nist.gov/itl/ai-risk-management-framework)。
 
 资料使用时要区分：
 
@@ -1289,6 +1331,6 @@ C_{\mathrm{network}}
 
 ChatGPT 服务不是一个把文本转发给模型的接口，而是一条有状态、可流式、可取消、可重连、可计费、可审计的交互系统。
 
-会话层要用消息、响应和分支表达真实历史；API 层要定义幂等、错误和终态；上下文层要在 token 预算内组织最近消息、摘要和记忆；模型层要处理路由、版本、队列、prefill、decode、KV Cache 和长短请求隔离；流式层要定义事件序号、心跳、重连和取消；数据层要处理缓存、删除、导出和训练授权；安全层要覆盖输入、上下文、输出、PII 和滥用；评估和观测层要把协议成功、任务成功、质量、安全和成本分别记录。
+会话层要用消息、响应和分支表达真实历史；API 层要定义幂等、错误、执行终态和独立的持久化结果；上下文层要在 token 预算内组织最近消息、摘要和记忆；模型层要处理路由、版本、队列、prefill、decode、KV Cache 和长短请求隔离；流式层要定义事件序号、心跳、重连和取消；数据层要处理缓存、删除、导出和训练授权；安全层要覆盖输入、上下文、输出、PII 和滥用；评估和观测层要把协议成功、任务成功、质量、安全和成本分别记录。
 
 真正成熟的设计，不是让模型永远回答，而是让用户知道响应处于什么状态，让系统知道每个 token 属于哪一次响应，让重试不会制造重复动作，让删除能传播到派生数据，让模型升级可以回放和回滚。后续章节会把其中的训练、推理、RAG、Agent 和评估子系统分别展开。

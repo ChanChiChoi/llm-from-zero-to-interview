@@ -16,6 +16,8 @@
 
 后面的设计会从这些问题出发。读者可以先把 Agent 理解为“受控的工作流解释器”，再逐步看到模型的自主性应该放在哪些位置，以及哪些决策必须留在平台代码中。
 
+本章聚焦系统设计中的任务契约、状态、授权、执行和恢复。模型侧的工具使用、行动循环和计划拆解可延伸阅读[第十七册第二章](../../book-17-agent-tool-use/chapters/02-tool-use与function-calling.md)、[第三章](../../book-17-agent-tool-use/chapters/03-react与plan-act-observe.md)和[第四章](../../book-17-agent-tool-use/chapters/04-planning与task-decomposition.md)；runtime、权限沙箱、trace/replay 和长任务 checkpoint 的实现边界见[第二十册第二章](../../book-20-agent-harness-runtime/chapters/02-agent-runtime架构.md)、[第八章](../../book-20-agent-harness-runtime/chapters/08-权限模型与安全沙箱.md)、[第九章](../../book-20-agent-harness-runtime/chapters/09-trace日志回放与可观测性.md)和[第十七章](../../book-20-agent-harness-runtime/chapters/17-long-running-agent与checkpoint.md)；企业工具协议的完整系统设计见[第二十二册第十六章](../../book-22-tool-protocol-ecosystem/chapters/16-企业工具平台系统设计.md)。
+
 ## 6.0 Agent 到底增加了什么
 
 ### 6.0.1 从生成文字到改变状态
@@ -195,6 +197,8 @@ Agent 请求则把外部动作放进循环：
 
 Model Context Protocol 等工具协议约定了客户端、服务器、工具、资源和提示模板之间的交互方式，降低了每个 Agent 都为工具发现和调用编写一套适配器的成本。协议可以描述工具名称、输入结构、返回结果和传输过程，这对生态互操作很有价值。
 
+MCP 的具体能力和消息边界应按使用的规范版本判断；例如 2026-07-28 版本定义了标准化的工具与资源交互，但协议兼容仍不等于业务授权。[MCP 规范](https://modelcontextprotocol.io/specification/2026-07-28)提供版本化的协议合同；本书的[MCP 基本概念](../../book-22-tool-protocol-ecosystem/chapters/18-mcp基本概念client-server-tools-resources-prompts.md)和[企业 MCP 工具平台设计](../../book-22-tool-protocol-ecosystem/chapters/48-设计一个企业mcp工具平台.md)继续展开协议与平台责任的分工。
+
 但协议本身不等于授权。一个 MCP server 能够声明“这里有删除文件工具”，不代表当前用户、当前租户或当前任务就有权执行它。协议层解决的是“如何发现和调用”，平台层仍然要解决：
 
 - 这个服务器是否可信？
@@ -214,7 +218,7 @@ Model Context Protocol 等工具协议约定了客户端、服务器、工具、
 
 ### 6.3.3 Agent 间协议的边界
 
-当多个 Agent 互相委托任务时，接收方不能只相信上游 Agent 传来的“用户已经授权”。委托请求要携带可验证的主体、原始任务范围、有效期和允许动作；接收方仍然根据自己的资源和策略重新授权。
+当多个 Agent 互相委托任务时，接收方不能只相信上游 Agent 传来的“用户已经授权”。委托请求要携带可验证的主体、原始任务范围、有效期和允许动作；接收方仍然根据自己的资源和策略重新授权。A2A 规范提供 Agent 间任务交换与能力声明的协议合同，但 Agent Card 或委托消息本身不代表业务权限已经通过校验。[A2A v1.0.1 规范](https://a2a-protocol.org/v1.0.1/specification/)；跨 Agent 身份与信任模型见[第二十二册第三十章](../../book-22-tool-protocol-ecosystem/chapters/30-跨agent权限身份审计和信任模型.md)。
 
 委托链可以抽象为：
 
@@ -231,6 +235,8 @@ P_{\mathrm{policy}}
 ~~~
 
 其中 P_effective 是最终可用权限，P_caller 是调用者已有权限，P_delegated 是委托方明确授予的范围，P_resource 是资源本身的访问限制，P_policy 是平台策略。交集模型的含义是委托只能缩小权限，不能把上游没有的权限凭空传递下去。
+
+这个交集是架构上的权限收敛模型。只有先把各层规则映射到同一种授权项，例如“主体、动作、资源、环境、条件”的元组，交集才有可计算的含义；若身份或资源命名空间不同，需要先做显式映射，不能直接拿权限字符串求交。举例来说，调用者、委托范围和目标资源都允许“读取 payment/east 指标”和“在 payment/internal 创建工单”，而任务策略当前只允许前者，则有效集合只有指标读取。审批完成后也要重新评估；审批是一个条件事件，不会自动把旧策略决定改成允许。
 
 ## 6.4 权限：模型不能替用户授权
 
@@ -278,6 +284,8 @@ P_{\mathrm{policy}}
 
 PDP 的返回不能只有一个字符串。至少要有策略版本、命中的规则、资源范围、过期时间和需要的后续动作。这样审计人员才能解释为什么一次调用被允许或被拒绝。
 
+OpenID Foundation 的 AuthZEN Authorization API 1.0 为 PDP 与 PEP 交换授权请求和决定提供了标准接口，但不统一各组织内部的策略语言和风险阈值；AuthZEN 的访问申请/审批配置文件及 COAZ-MCP 绑定在 2026-11-03 仍是工作组草案，不能当作已普遍部署的互操作合同。[AuthZEN 1.0](https://openid.net/specs/authorization-api-1_0.html)、[AARP 草案](https://openid.github.io/authzen/authzen-access-request-approval-profile-1_0.html)、[COAZ-MCP 草案](https://openid.github.io/authzen/authzen-coaz-mcp-binding-1_0.html)。企业工具权限模型另见[第二十二册第十二章](../../book-22-tool-protocol-ecosystem/chapters/12-工具权限模型用户权限租户权限和工具权限.md)。
+
 ### 6.4.4 最小权限和短期凭证
 
 不要把用户的长期 API key 放进系统提示，也不要让一个通用 Agent 使用拥有全公司权限的服务账号。更合理的做法是：
@@ -294,17 +302,29 @@ PDP 的返回不能只有一个字符串。至少要有策略版本、命中的�
 
 ### 6.5.1 任务状态与步骤状态
 
-任务层可以有：
+任务层可以有以下状态转换：
 
-~~~text
-created -> planning -> running -> waiting_approval
-                         |             |
-                         v             v
-                      paused <----- approved
-                         |
-                         v
-                 succeeded / failed / cancelled
+~~~mermaid
+stateDiagram-v2
+    [*] --> created
+    created --> planning
+    planning --> running
+    planning --> failed: no feasible plan
+    running --> waiting_approval: high-impact step
+    waiting_approval --> running: approved and reauthorized
+    waiting_approval --> planning: rejected and safe alternative exists
+    waiting_approval --> failed: rejected with no safe alternative
+    waiting_approval --> paused: approval expired or unavailable
+    waiting_approval --> cancelled: user cancels
+    running --> paused: dependency unavailable
+    paused --> planning: resume and revalidate
+    paused --> cancelled: user cancels
+    running --> succeeded: goal verified
+    running --> failed: permanent error
+    running --> cancelled: cancellation accepted
 ~~~
+
+“approved”不是任务状态，而是绑定到具体步骤、参数摘要和有效期的审批事件。收到批准后，任务回到 running，但执行器仍须重新检查当前身份、资源范围和策略；如果参数或目标环境变化，旧审批失效。paused 表示可恢复的等待，恢复时需要重新规划或复核未完成步骤，不能把它当作仍在执行的 running。
 
 每一个步骤还应有自己的状态，例如 proposed、authorized、started、succeeded、failed、unknown 和 compensated。任务成功不代表每个中间步骤都没有重试；一个动作返回 unknown 也不能被错误地记成 failed 后随意重做。
 
@@ -322,7 +342,7 @@ created -> planning -> running -> waiting_approval
 
 ### 6.5.3 Plan、Act、Observe、Update
 
-经典 Agent 研究常把循环描述为 plan、act、observe、update。这个抽象很有用，但生产系统还要插入平台动作：
+ReAct 等经典 Agent 研究常把循环描述为 plan、act、observe、update。[ReAct 原始论文](https://arxiv.org/abs/2210.03629)研究了推理与行动交错的轨迹；这个抽象很有用，但生产系统还要插入平台动作：
 
 1. Plan：模型提出计划或下一步候选。
 2. Validate：解析 schema，检查约束和预算。
@@ -466,17 +486,15 @@ schema 校验只能发现“字段不合法”，不能发现“给生产服务�
 
 ### 6.8.3 重试预算
 
-指数退避可以写成：
+带 full jitter 的指数退避可以写成：
 
 ~~~math
 t_k
-=
-\min(t_{\max},\ t_0 \cdot 2^k)
-+
-\epsilon_k
+\sim
+\mathrm{Uniform}\left(0,\ \min(t_{\max},\ t_0 \cdot 2^k)\right)
 ~~~
 
-其中 t_k 是第 k 次重试前的等待时间，t_0 是初始等待，t_max 是上限，epsilon_k 是抖动。公式只描述等待节奏，不代表“所有失败都应该重试”。重试次数还应受任务预算、下游限流和错误类型约束。
+其中 t_k 是第 k 次重试前的等待时间，t_0 是初始等待基数，t_max 是等待上限；Uniform 表示从给定范围随机取一个等待时间。以 t_0=0.2 秒、t_max=0.8 秒为例，前三次等待的取值范围依次为 0–0.2、0–0.4、0–0.8 秒。若某次抽样得到 0.14、0.31、0.62 秒，三次累计等待为 1.07 秒。这个数值只演示退避过程；只有可安全重试的瞬时错误才进入重试，写操作的 unknown 结果不能照此自动重发。AWS SDK 官方文档也采用 full-jitter 退避形式，但具体默认值和启用方式绑定 SDK 版本与配置，不构成所有工具的统一默认值。[AWS SDK retry behavior](https://docs.aws.amazon.com/sdkref/latest/guide/feature-retry-behavior.html)。重试次数还要受任务预算、下游限流和错误类型约束。
 
 ### 6.8.4 熔断和降级
 
@@ -501,6 +519,8 @@ t_k
 
 跨 Agent、网络和第三方业务系统时，端到端 exactly-once 通常无法凭一句配置实现。平台应明确“哪一段”提供什么语义。
 
+HTTP 语义也要求客户端谨慎重试非幂等请求：除非能确认操作本身幂等或原请求尚未生效，否则不应自动重发。[RFC 9110 §9.2.2](https://www.rfc-editor.org/rfc/rfc9110#section-9.2.2)；应用级工单、支付和通知还需各自定义幂等键和结果查询。
+
 ### 6.9.2 幂等键
 
 每个有副作用的步骤生成稳定的 idempotency_key：
@@ -512,9 +532,11 @@ H(\mathrm{tenant\_id},\mathrm{task\_id},\mathrm{step\_id},
 \mathrm{tool\_version},\mathrm{canonical\_input})
 ~~~
 
-同一任务步骤、同一工具版本和同一规范化输入得到同一个键。下游服务以这个键保存第一次成功结果；后续重复请求返回原结果，而不是再次创建资源。
+H 表示确定性散列函数；canonical_input 是按稳定字段顺序和业务规则规范化后的参数，不是未经处理的模型输出。同一任务步骤、同一工具版本和同一规范化输入得到同一个键。下游服务以这个键保存第一次成功结果；后续重复请求返回原结果，而不是再次创建资源。
 
 键不能只使用模型生成的自然语言，因为同一意图可能有不同表达；也不能把随机请求 ID 作为唯一键，否则重试无法识别为同一动作。
+
+例如，task-91 的 step-3 在工具版本 2.1 下创建 payment 项目的 P2 工单，规范化后的项目、优先级和证据引用保持不变，则网络重试仍用同一个键；如果环境改成 production 或优先级改成 P1，规范化输入已变，必须生成新的动作摘要并重新走授权与审批。哈希值本身不需要人工手算，关键是相同输入稳定映射到相同键、不同动作不会误用旧键。
 
 ### 6.9.3 发送前、发送中、发送后
 
@@ -563,6 +585,8 @@ H(\mathrm{tenant\_id},\mathrm{task\_id},\mathrm{step\_id},
 4. 资源：CPU、内存、磁盘、进程数、执行时间和输出大小。
 
 容器是包装方式，不自动等于强隔离。是否需要虚拟机、微虚拟机或专用执行节点，要根据代码来源、租户隔离要求和攻击模型决定。
+
+如果执行器部署在 Kubernetes，可把 Pod Security Standards 的 Restricted policy 作为 Pod 配置基线，例如限制特权容器、HostPath 和能力提升；该策略约束 Pod 配置，不单独证明不可信代码在多租户场景中获得了充分隔离。因此，是否使用微虚拟机或专用节点仍是根据威胁模型作出的架构决定。[Kubernetes Pod Security Standards](https://kubernetes.io/docs/concepts/security/pod-security-standards/)。
 
 ### 6.10.3 秘密不进入模型上下文
 
@@ -657,13 +681,17 @@ Agent 会读取网页、邮件、工单、代码注释、日志和文档。这�
 正确处理方式不是让模型判断这句话“听起来像不像恶意”，而是同时做几件事：
 
 1. 把正文标记为不可信外部数据。
-2. 过滤或标注其中的操作性语言。
+2. 保留内容来源和不可信标记，让模型知道这是观察数据；不要把语义过滤当作能够删尽恶意指令的安全边界。
 3. 保持工具权限不变。
 4. 对外发和清理动作要求额外授权。
 5. 对可能包含秘密的数据执行 DLP 检查。
 6. 将触发记录写入安全审计。
 
 即使模型最终没有被诱导，平台也应能说明它看到了什么、尝试了什么、哪些动作被策略阻止。
+
+OWASP Agentic Applications Top 10 2026 将目标劫持、工具误用、身份与权限滥用、记忆/上下文污染等列为 Agent 风险类别，可作为威胁建模入口；它是社区风险分类和缓解指引，不是某个实现已安全的证明。[OWASP Agentic Top 10 2026](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/)。
+
+模型侧的 prompt injection 机制与红队方法由[第八册第五、六章](../../book-08-ai-safety-alignment/chapters/05-jailbreak与prompt-injection.md)和[第十七册第十一章](../../book-17-agent-tool-use/chapters/11-agent安全.md)主讲；本章把重点放在数据来源标记、权限执行和副作用控制。
 
 ### 6.12.3 工具输出不是更高优先级的指令
 
@@ -741,12 +769,14 @@ Q_{\mathrm{task}} \cdot N_{\mathrm{tool}} \cdot N_{\mathrm{retry}}
 B_{\mathrm{risk}}
 =
 \sum_{i=1}^{n}
-w_{\mathrm{tool}(i)}
+w_{\mathrm{action}(i)}
 \cdot
 \mathbf{1}[\mathrm{action}_i\ \mathrm{executed}]
 ~~~
 
-其中 w_tool(i) 是第 i 个动作的风险权重。它不能替代权限和审批，但可以防止一个任务连续执行大量中风险动作。预算接近上限时，应优先保存证据并停止，而不是为了生成更完整的总结继续调用工具。
+其中 w_action(i) 是第 i 个动作实例的风险积分，应能反映操作、资源类别和环境，而不只是工具名。它不能替代权限和审批，但可以防止一个任务连续执行大量中风险动作。预算接近上限时，应优先保存证据并停止，而不是为了生成更完整的总结继续调用工具。
+
+例如，教学策略把只读 metrics.query 和 release.list 的权重都设为 0.05，把 ticket.create 设为 0.40，把 service.restart 设为 1.00，并把单任务上限设为 0.70。两次读取加一次工单创建合计 0.50，低于上限；若再加入一次重启，累计值为 1.50，执行器应在发出动作前停止。权重是本例中的风险积分，不是事故概率；即使积分未超限，某个动作仍可能因权限或审批规则而被拒绝。
 
 ### 6.13.3 循环检测
 
@@ -805,6 +835,36 @@ w_{\mathrm{tool}(i)}
 
 一次青梧请求可以经过以下步骤：
 
+~~~mermaid
+flowchart LR
+  subgraph CP["控制平面"]
+    cfg["版本化 Agent、工具、策略与预算"]
+  end
+  subgraph DP["数据平面：任务执行"]
+    user["用户请求"] --> gateway["Gateway：身份与租户"]
+    gateway --> task["Task Service：状态与配置快照"]
+    task --> orch["Orchestrator"]
+    orch --> model["Model Gateway"]
+    model --> validator["候选动作：schema、资源、预算校验"]
+    validator --> pdp{"PDP：允许、拒绝或审批"}
+    pdp -->|拒绝| state["State Store：任务状态与事件"]
+    pdp -->|允许| executor["PEP / Tool Executor"]
+    pdp -->|需审批| approval["Approval Service：动作摘要与有效期"]
+    approval -->|记录审批事件| state
+    approval -->|批准后重新授权| pdp
+    executor --> tools["协议适配器、业务工具或隔离沙箱"]
+    tools --> observation["标准化 Observation"]
+    observation --> state
+    state --> orch
+    state --> result["Result Service：结果与证据"]
+    state --> audit["审计、Trace 与评估"]
+  end
+  cfg -.-> task
+  cfg -.-> validator
+~~~
+
+图中实线表示一次任务内的请求、决定和状态流，虚线表示控制平面向任务提供版本化配置。审批结果回到策略决策点重新检查；模型输出没有直达工具执行器的路径。
+
 1. API Gateway 验证身份并创建 request_id。
 2. Task Service 保存原始目标、约束和配置快照。
 3. Orchestrator 读取允许的工具集合，生成粗粒度计划。
@@ -837,6 +897,8 @@ w_{\mathrm{tool}(i)}
 
 可以使用 OpenTelemetry 等通用追踪语义把模型、工具、数据库和审批服务串在一起。标准能帮助统一 trace 的表示，但不会自动解决敏感数据脱敏和访问权限。
 
+OpenTelemetry 的 trace 模型将一次请求表示为有父子关系的 spans，适合关联模型调用、工具调用和审批等待等阶段；具体 GenAI 属性仍随语义约定版本演进，接入时应锁定版本并另行制定脱敏与留存策略。[OpenTelemetry traces](https://opentelemetry.io/docs/concepts/signals/traces/)。
+
 ### 6.15.2 审计日志与调试日志分开
 
 调试日志可以为排查问题保存较多上下文；审计日志要面向责任追踪，强调谁、何时、以什么策略、对什么资源执行了什么动作。两者保留期限、访问权限和脱敏规则不一定相同。
@@ -865,7 +927,9 @@ C_{\mathrm{success}}
 {N_{\mathrm{successful\ tasks}}}
 ~~~
 
-分母是完成业务目标的任务数，不是所有请求数；只有评估窗口内至少有一个成功任务时，这个式子才有定义。当 $N_{\mathrm{successful\ tasks}}=0$ 时，应记录为“没有成功证据”，不能用 1 代替分母。还要明确工具重试、人工接管和任务失败成本是否已经包含在各项中，避免重复计入。一个系统把失败任务做得很便宜，但需要大量人工重做，单位成功成本仍然可能很高。
+各 C 项是同一个评估窗口内按同一币种计量的累计成本，分别包含模型、工具调用、存储和人工成本；分母是该窗口内完成业务目标的任务数，不是所有请求数。只有分母大于零时，这个式子才有定义。当 $N_{\mathrm{successful\ tasks}}=0$ 时，应记录为“没有成功证据”，不能用 1 代替分母。还要明确工具重试、人工接管和任务失败成本是否已经包含在各项中，避免重复计入。一个系统把失败任务做得很便宜，但需要大量人工重做，单位成功成本仍然可能很高。
+
+例如，在一个评估窗口内处理 500 个任务，其中 400 个通过外部状态和业务规则验收；模型调用花费 320 元，工具 80 元，存储 20 元，人工复核 180 元，总成本为 600 元。单位成功任务成本为 600÷400=1.50 元。这里的成本按同一个窗口汇总，失败任务消耗也留在分子中；如果人工复核费用已计入其他成本项，就不能再次加进分子。指标用于比较同一成功定义和时间窗口下的方案，不能只比较单次模型价格。
 
 ## 6.16 怎样评估一个 Agent
 
@@ -884,11 +948,11 @@ C_{\mathrm{success}}
 
 ### 6.16.2 任务成功的分解
 
-可以把一次任务成功近似分解为：
+把任务成功定义为上述五个环节都通过时，可以用链式法则分解：
 
 ~~~math
 P(S)
-\approx
+=
 P(G)
 \cdot
 P(T \mid G)
@@ -900,17 +964,19 @@ P(E \mid A)
 P(R \mid E)
 ~~~
 
-其中 G 表示目标理解正确，T 表示工具选择正确，A 表示参数和授权正确，E 表示执行成功，R 表示结果被正确解释并交付。这个分解不是严格独立假设，但有助于把“Agent 不好用”定位到具体环节。
+其中 G 表示目标理解正确，T 表示工具选择正确，A 表示参数和授权正确，E 表示执行成功，R 表示结果被正确解释并交付；S 定义为这五个环节全部通过。这里使用的是条件概率，不要求各环节独立。
+
+假设同一评估集按前序环节已通过的样本逐层统计，五个条件通过率分别为 0.95、0.90、0.98、0.99 和 0.96，则整体成功率为 0.95×0.90×0.98×0.99×0.96≈0.796，即约 79.6%。若每项来自不同数据集或不同版本，这个乘积就只是近似诊断，不能当作线上成功率预测。
 
 ### 6.16.3 Benchmark 能说明什么
 
-ReAct 论文研究了推理和行动交错的轨迹，并在特定问答和交互环境中报告结果。它说明这种提示和轨迹组织有研究价值，不说明任何企业工具接入后都能达到同样成功率。
+ReAct 论文研究了推理和行动交错的轨迹，并在特定问答和交互环境中报告结果。它说明这种提示和轨迹组织有研究价值，不说明任何企业工具接入后都能达到同样成功率。[原始论文](https://arxiv.org/abs/2210.03629)。
 
-Toolformer 研究了模型自行学习何时调用 API、传什么参数和使用返回结果。它是工具使用学习的研究证据，不是生产权限协议。
+Toolformer 研究了模型自行学习何时调用 API、传什么参数和使用返回结果。它是工具使用学习的研究证据，不是生产权限协议。[原始论文](https://arxiv.org/abs/2302.04761)。
 
-AgentBench、WebArena 和 SWE-bench 把 Agent 放入多轮、网页或代码环境中测量，能暴露长程规划、指令遵循、环境交互和真实代码修改的困难。它们的任务集合、环境、评分器和版本都限定了结论范围。
+AgentBench、WebArena 和 SWE-bench 把 Agent 放入多轮、网页或代码环境中测量，能暴露长程规划、指令遵循、环境交互和真实代码修改的困难。[AgentBench](https://arxiv.org/abs/2308.03688)、[WebArena](https://arxiv.org/abs/2307.13854)和[SWE-bench](https://arxiv.org/abs/2310.06770)各自的任务集合、环境、评分器和版本都限定了结论范围。
 
-τ-bench 等面向工具调用和用户交互的评测，提醒我们把政策约束、工具结果和用户回合一起纳入评估。benchmark 分数可以用于模型或策略的相对比较，但不能替代企业自己的任务集、权限测试和事故演练。
+τ-bench 等面向工具调用和用户交互的评测，提醒我们把政策约束、工具结果和用户回合一起纳入评估。[τ-bench](https://arxiv.org/abs/2406.12045)的成绩仍绑定其环境和评分规则；benchmark 分数可以用于受控比较，但不能替代企业自己的任务集、权限测试和事故演练。统计设计、人工评审和错误分析的完整方法见[第七册第十二章](../../book-07-evaluation-experiments/chapters/12-评估体系综合设计与工程落地.md)。
 
 ### 6.16.4 企业评估集怎么建
 
@@ -939,6 +1005,8 @@ AgentBench、WebArena 和 SWE-bench 把 Agent 放入多轮、网页或代码环�
 ### 6.17.1 一个具体估算
 
 假设青梧峰值接收 20 个任务每秒。平均每个任务有 5 次模型调用、4 次只读工具调用和 0.3 次写工具调用；由于超时和模型重试，内部放大因子取 1.15。
+
+这里的 1.15 表示每个基础调用平均产生 1.15 个实际调用，即相对没有重试时多约 15% 的调用量，不是“重试 1.15 次”。这个均值适合初步估算，仍要用高峰窗口、P95/P99 步数和按错误类型分开的重试率校准。
 
 教学估算为：
 
@@ -1009,6 +1077,8 @@ Q_{\mathrm{write}}
 模型先提出 metrics.query_error_rate，参数包括 service=payment、region=east 和时间窗口。执行器确认这是生产只读查询，权限服务允许。
 
 结果显示错误率从基线 0.8% 升到 18.4%，样本量和时间窗口满足查询器的最小要求。确定性规则把它标记为“异常候选”，但没有直接宣称根因。
+
+把这组数字当作教学样例，假设查询窗口含 3,000 个请求，且 0.8% 基线可用于同口径比较，则基线对应约 24 个错误，18.4% 对应约 552 个错误，增加约 528 个；18.4%÷0.8%=23，说明本窗口错误率约为基线的 23 倍。分母、采样规则和时间窗必须一致，这个比值仍只表明异常强度，不证明后续发布就是根因。
 
 下一步模型选择 release.list，查询同一服务和时间范围附近的发布。结果发现 08:57 有一次支付网关配置变更。平台把发布记录和指标结果分别保存为证据，并把时间范围写入 observation。
 
@@ -1092,6 +1162,10 @@ Agent 平台的发布可以分阶段：
 
 每个阶段都要保存实际轨迹和失败样本。不能因为 demo 能完成一条任务，就直接打开所有写工具。
 
+灰度门槛必须由业务定义。举例来说，某团队假设先用 100 个脱敏任务评估，要求目标完成率至少 90%、未授权高风险动作执行数为 0、P95 时延不超过 10 分钟；若观测到 93 个任务完成、0 次未授权执行、P95 为 8.4 分钟，才满足这一组教学门槛。若出现 1 次未授权执行，即使完成率仍是 93%，也应停止扩大范围并查明边界失效。这里的阈值是示例决策，不是行业通用标准。
+
+发布观察还应按租户、任务类型和写工具分层，避免总体平均掩盖某个高风险路径的退化。unknown 写操作要单独计数，不能并入普通失败率；若确认成本、重复副作用或人工接管突然上升，即使总完成率达标也要暂停扩量。对照实验需固定成功定义、配置快照和时间窗，否则前后数字不能解释为同一能力的变化。
+
 ### 6.20.2 工具和策略的兼容性
 
 修改工具 schema、权限策略、提示模板、模型路由或停止规则，都可能改变任务行为。发布记录应关联：
@@ -1105,9 +1179,13 @@ Agent 平台的发布可以分阶段：
 
 如果线上发现异常，回滚要能恢复到这一组一致的配置，而不是只把模型版本改回去。
 
+长任务可能跨越多个版本。假设任务等待审批时使用工具 schema v2，发布后由 v3 worker 接手；若 v3 改变了 priority 字段的含义，即使参数 JSON 仍能通过 schema，动作语义也可能变化。任务应固定原配置快照，并让 worker 明确声明可处理的版本范围。若旧版本已不能安全执行，就生成迁移事件并逐字段核验，或暂停任务、重新规划并让用户确认新的动作摘要；不能静默地把旧参数解释成新含义。
+
 ### 6.20.3 失败时保留状态
 
 回滚平台代码不等于回滚外部副作用。发布前要知道当前是否有长任务、等待审批和 unknown 写操作；变更期间禁止旧 worker 和新 worker 同时以不兼容的 schema 执行同一任务。对已经产生的工单、消息或配置修改，要按照各自的补偿方案处理。
+
+例如，旧 worker 调用 ticket.create 后崩溃，尚未把成功结果写入本地事件流；回滚不能删除这次尝试或把步骤改回 proposed。平台应先按幂等键查询下游，并追加“已确认成功”或“结果仍未知”的核对事件，再决定是否恢复其他步骤。这样回滚改变的是后续执行配置，不会抹掉已经发生的副作用和审计事实。
 
 ## 6.21 资料和证据边界
 
@@ -1122,7 +1200,10 @@ Agent 领域的资料类型差异很大，读者应把它们放在正确的位�
 | WebArena | 网页环境中的交互能力测量 | 任意网页、任意浏览器的安全性 |
 | SWE-bench | 真实 GitHub issue 驱动的代码修改评估 | 生产发布安全和代码正确性的全部证明 |
 | τ-bench | 工具、用户和业务政策交互的评估思路 | 所有行业政策的完备覆盖 |
-| OWASP Prompt Injection | Prompt Injection 等风险分类与防御方向 | 某实现已经安全 |
+| OWASP Agentic Top 10 2026 | Agent 目标劫持、工具误用、身份/权限滥用等风险分类 | 某实现已经安全 |
+| RFC 9110 §9.2.2 | HTTP 方法幂等语义及非幂等请求重试的约束 | 应用业务动作已经具备幂等键或结果查询 |
+| AWS SDK retry 文档 | 一种按错误分类、使用 full jitter 和 retry quota 的 SDK 实现 | 所有工具的默认重试行为或写操作可安全重放 |
+| Kubernetes Pod Security Standards | Pod 级安全配置基线 | 任意不可信代码或多租户执行已充分隔离 |
 | NIST AI RMF 与 GenAI Profile | 风险管理、治理和测量的框架 | 自动生成具体权限策略 |
 | MCP 规范 | 工具和资源交互的协议约定 | 工具服务器可信、调用已授权 |
 | OpenTelemetry 文档 | trace 等可观测性信号的通用表达 | 日志天然合规或不会泄密 |
@@ -1131,19 +1212,20 @@ Agent 领域的资料类型差异很大，读者应把它们放在正确的位�
 
 本章引用的资料入口：
 
-- ReAct: https://arxiv.org/abs/2210.03629
-- Toolformer: https://arxiv.org/abs/2302.04761
-- MRKL Systems: https://arxiv.org/abs/2205.00445
-- AgentBench: https://arxiv.org/abs/2308.03688
-- WebArena: https://arxiv.org/abs/2307.13854
-- SWE-bench: https://arxiv.org/abs/2310.06770
-- τ-bench: https://arxiv.org/abs/2406.12045
-- OWASP Prompt Injection: https://genai.owasp.org/llmrisk/llm01-prompt-injection/
-- NIST AI Risk Management Framework: https://www.nist.gov/itl/ai-risk-management-framework
-- NIST AI 600-1 Generative AI Profile: https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf
-- Model Context Protocol specification: https://modelcontextprotocol.io/specification/2025-06-18
-- OpenTelemetry traces: https://opentelemetry.io/docs/concepts/signals/traces/
-- Kubernetes Pod Security Standards: https://kubernetes.io/docs/concepts/security/pod-security-standards/
+- [ReAct](https://arxiv.org/abs/2210.03629)
+- [Toolformer](https://arxiv.org/abs/2302.04761)
+- [MRKL Systems](https://arxiv.org/abs/2205.00445)
+- [AgentBench](https://arxiv.org/abs/2308.03688)、[WebArena](https://arxiv.org/abs/2307.13854)、[SWE-bench](https://arxiv.org/abs/2310.06770) 与 [τ-bench](https://arxiv.org/abs/2406.12045)
+- [OWASP Top 10 for Agentic Applications 2026](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/) 与 [OWASP GenAI LLM Top 10 2026](https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/)
+- [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)
+- [NIST AI 600-1 Generative AI Profile](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf)
+- [Model Context Protocol specification 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28)
+- [Agent2Agent specification v1.0.1](https://a2a-protocol.org/v1.0.1/specification/)
+- [OpenID AuthZEN Authorization API 1.0](https://openid.net/specs/authorization-api-1_0.html)、[COAZ-MCP Working Group Draft](https://openid.github.io/authzen/authzen-coaz-mcp-binding-1_0.html)
+- [RFC 9110 §9.2.2 Idempotent Methods](https://www.rfc-editor.org/rfc/rfc9110#section-9.2.2)
+- [AWS SDK retry behavior](https://docs.aws.amazon.com/sdkref/latest/guide/feature-retry-behavior.html)
+- [OpenTelemetry traces](https://opentelemetry.io/docs/concepts/signals/traces/)
+- [Kubernetes Pod Security Standards](https://kubernetes.io/docs/concepts/security/pod-security-standards/)
 
 ## 6.22 读者练习：从约束推回设计
 

@@ -22,10 +22,10 @@
 
 ## LLM-as-Judge 评分几何
 
-- **来源与版本：** Sourabrata Mukherjee 等，*The Geometry of LLM-as-Judge: Why Inter-LLM Consensus Is Not Human Alignment*，arXiv `2606.03043v2`，2026-09-02 修订。[arXiv 摘要](https://arxiv.org/abs/2606.03043)；[v2 PDF](https://arxiv.org/pdf/2606.03043)。
+- **来源与版本：** Sourabrata Mukherjee、Hamna Abid、Kalika Bali、Sunayana Sitaram，*The Geometry of LLM-as-Judge: Why Inter-LLM Consensus Is Not Human Alignment*，Findings of EMNLP 2026，pp. 36237–36266。[ACL Anthology 正式会议页](https://aclanthology.org/2026.findings-emnlp.1696/)；[arXiv v2](https://arxiv.org/abs/2606.03043v2) 于 2026-09-02 修订。
 - **实际阅读位置：** 摘要；PDF §4 实验设置；§6 结论及 Limitation 段；附录数据集、人类参考和 judge roster 说明。
 - **来源支持的事实：** 研究使用两个社区构建的 Indic benchmark，覆盖四个领域、八种语言及 42 个 distinct LLM judges（15 个基础模型、27 个微调/偏好优化/few-shot/校准变体）。主观 rubric 上，judge-judge agreement 与 human-human agreement 相近，但 judge 仅达到 58%—66% 的人类一致程度；一个可验证 rubric 的差距大部分缩小。
-- **证据等级：** verified，arXiv 预印本 v2 的原文和 PDF。
+- **证据等级：** source-backed（Findings of EMNLP 2026 正式会议摘要页和 arXiv v2 正文/附录）。
 - **适用边界：** “几何”是对观测评分协方差、得分分布和人类参照关系的诊断抽象，不是模型内部机制解释，也非因果证明。客观区间只依赖一个可验证 rubric；community-health 人类标注合并 15 位标注者且无个体 ID，无法构建人际一致基线；人类参考覆盖不均、语言切片样本规模有限，结果绑定论文数据、rubric、语言和 judge roster。
 
 ## 前沿评估 judge 去偏的标签上限

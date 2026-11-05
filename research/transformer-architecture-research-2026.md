@@ -32,6 +32,14 @@
 - 证据等级：原始预印本摘要；未核对正文实验表。
 - 边界：正文只采用摘要能够支持的机制、模型范围和作者报告，不扩写未读到的门控细节、benchmark 数字或计算开销；MoA 与 PowLU 的任务和规模不同，不作横向排名。
 
+## 稀疏专家负载均衡
+
+- 来源：[DeepSeek-V3 Technical Report](https://arxiv.org/html/2412.19437v2)，arXiv v2（2025-02-18）。
+- 阅读位置：§2.2 的 DeepSeekMoE 与辅助损失说明；模型规模和激活参数说明。
+- 支持事实：报告的 DeepSeek-V3 有 671B 总参数、每个 token 激活约 37B 参数。作者采用无辅助损失的负载均衡策略，通过按 batch 专家负载更新路由 bias 来调节专家使用，同时保留 sequence-wise auxiliary loss 以降低单序列内部的极端失衡风险。
+- 证据等级：原始技术报告的模型与训练方案说明；参数和策略为作者披露。
+- 边界：参数规模、路由配置和训练报告属于 DeepSeek-V3 特定模型与数据、集群设置；不证明辅助损失在其他 MoE 中无用，也不说明 bias 更新可脱离 capacity、expert placement 或 token dropping 单独保证均衡。本记录不将作者方案转写成通用默认配方。
+
 ## 递归状态与混合注意力
 
 - 来源：[Log-Linear Attention](https://arxiv.org/html/2506.04761v3)，arXiv v3（2026-03-01）。
@@ -77,3 +85,45 @@
 - 支持事实：mHC 将多流残差映射约束在双随机矩阵集合，并使用有限轮 Sinkhorn-Knopp 迭代近似投影。论文报告在 `n=4` 的特定大规模训练设置下增加 6.7% wall-time。
 - 证据等级：原始预印本的方法说明和作者实验。
 - 边界：6.7% 属于论文的模型、基础设施和实现；双随机约束只作用于残差流线性映射，不保证整个非线性网络的范数恒定，也不代表通用开销。
+
+## 架构论文线：注意力压缩、递归状态与混合设计
+
+### Multi-head Latent Attention
+
+- 来源：[DeepSeek-V2: A Strong, Economical, and Efficient Mixture-of-Experts Language Model](https://arxiv.org/html/2405.04434v5)，arXiv v5（2024-06-19）。
+- 阅读位置：摘要、§2.1.2—§2.1.4、附录 D.1—D.2；缓存比较的整体系统数字见摘要。
+- 支持事实：MLA 将 key/value 联合投影到低秩 latent $c_t^{KV}$，推理时缓存该 latent 与解耦 RoPE key；论文给出的缓存量为 $(d_c+d_h^R)l$。在 DeepSeek-V2 配置中 $d_c=4d_h$、$d_h^R=d_h/2$，相当于 2.25 个 GQA 组。附录 D.2 报告小模型与大模型两组 MLA 变体的 KV 缓存分别是对应 MHA 变体的约 14% 与 4%，并在四项 hard benchmarks 上得分更高。
+- 证据等级：原始技术报告的机制说明及作者控制的两尺度比较。
+- 边界：各尺度变体的激活参数不同，结果只覆盖所列模型、token 预算和基准；摘要中相对 DeepSeek 67B 的 93.3% KV-cache 降幅是完整系统对比，不能作为 MLA 的单独因果效应或任意 serving 加速保证。
+
+### Structured State Space Duality / Mamba-2
+
+- 来源：[Transformers are SSMs: Generalized Models and Efficient Algorithms Through Structured State Space Duality](https://arxiv.org/html/2405.21060)，ICML 2024 论文。
+- 阅读位置：摘要、§3.2—§3.4、§5.1—§5.3 和 §6 的 SSD 及分块算法说明。
+- 支持事实：论文将状态大小为 $N$ 的结构化状态空间序列变换表示为 $N$-semiseparable 矩阵，并证明特定 structured masked attention 与特定 SSM 存在对偶表示；同一运算可采用递归线性形式或矩阵二次形式。作者报告 Mamba-2 核心层在其实现和比较设置中比 Mamba-1 快 2—8 倍。
+- 证据等级：同行评审论文中的形式化、算法与作者效率实验。
+- 边界：对偶关系针对明确的结构化子类，不等于标准 softmax attention 与所有 SSM 等价；2—8 倍是论文核心层结果，不代表完整模型训练、不同 GPU 或生产 serving 的加速比。
+
+### Jamba 的层间混合
+
+- 来源：[Jamba: A Hybrid Transformer-Mamba Language Model](https://arxiv.org/html/2403.19887v2)，arXiv v2（2024-07-03）。
+- 阅读位置：摘要、混合层比例实验和纯 Attention/Mamba 对照表（§4 实验）。
+- 支持事实：模型交错使用 Transformer 与 Mamba 层，并在部分层加入 MoE。作者在 1.3B 参数、250B 训练 token 下比较 1:3 与 1:7 的 Attention:Mamba 比例，报告性能差别不大并选择 1:7 进行较大规模实验；7B、50B token 的一个对照中，混合模型优于该论文里的纯 attention 与纯 Mamba 变体。
+- 证据等级：原始预印本的架构说明和作者实验。
+- 边界：层比例结论受模型规模、数据、训练预算和实现限制；不是可移植的固定最优比例。
+
+### Native Sparse Attention
+
+- 来源：[Native Sparse Attention: Hardware-Aligned and Natively Trainable Sparse Attention](https://arxiv.org/html/2502.11089v2)，arXiv v2（2025-02-27）。
+- 阅读位置：方法概述、长上下文评估、§5.1 训练速度、§5.2 解码速度。
+- 支持事实：NSA 使用压缩 token、选择 token 与局部窗口组成层级稀疏路径，同时设计原生训练与硬件对齐算子。作者在 8×A100 设置中报告 64K 序列下训练前向最高 9.0×、反向最高 6.0×速度提升；解码最高 11.6×是其基于 KV 访问量给出的最高报告，论文也报告对应延迟优势。效率配置包括 GQA group 4、16 个 group 内 heads、$d_k=192$、$d_v=128$。
+- 证据等级：原始预印本的方法、指定任务实验和作者 GPU/kernel 测量。
+- 边界：速度与模型、8×A100、Triton 实现、基线与长度相关；LongBench 基线统一激活 token 预算，论文还排除部分子集。合成检索或单一长度结果不能推出一般长文档能力或其他 runtime 的收益。
+
+### Gated Delta Networks 与 Mamba-3
+
+- 来源：[Gated Delta Networks: Improving Mamba2 with Delta Rule](https://arxiv.org/abs/2412.06464)，arXiv 预印本（2024-12-09）；[Mamba-3: Improved Sequence Modeling using State Space Principles](https://arxiv.org/abs/2603.15569)，arXiv 预印本（2026-03-16）。
+- 阅读位置：Gated Delta Networks 摘要及 §4 的真实世界回忆和长上下文结果；Mamba-3 摘要、§§3.1—3.3、§§4.1—4.4 与表 4—7。
+- 支持事实：Gated DeltaNet 将自适应遗忘门与 delta residual 写入结合，并提出分块并行训练；论文指出纯递归模型在真实回忆任务上仍与 Transformer 有差距。Mamba-3 组合指数梯形离散化、复值状态和 MIMO；作者在 1.5B 语言模型评估中报告相对 Gated DeltaNet 平均下游准确率 +0.6 个百分点，MIMO 版本再 +1.2 个百分点。在 440M、FineWeb-Edu、2× Chinchilla token 预算的 state-size 曲线上，作者报告 Mamba-3 用约一半状态维度达到相近 perplexity；kernel 对照使用单张 H100、batch 128 和论文指定 DSL。
+- 证据等级：原始预印本的算法说明、任务实验和作者 kernel 对照。
+- 边界：不同论文的模型、数据和 harness 不同，不横向合并分数；Mamba-3 的真实数据检索切片对半结构化/非结构化抽取仍有弱项，状态维数 proxy 不等于目标服务的延迟；H100 kernel 对照不等同于生产 P99。

@@ -6,6 +6,8 @@
 
 因此，生产 RAG 不是“embedding 加向量库加 prompt”。本章沿着企业知识系统“澄明”的一次建设展开。澄明为多个部门提供制度、产品文档、工单、代码和实时业务资料的问答。我们先定义什么叫有证据的回答，再从离线索引链路和在线问答链路逐层设计，最后用一次权限泄漏和更新延迟故障复盘完整系统。
 
+本章聚焦系统边界、数据流、权限、新鲜度、证据和工程取舍。书系分工上，[第二册第七章](../../book-02-advanced-100/chapters/07-长上下文rag与agent.md)讲检索与长上下文机制，[第三册第七章](../../book-03-practical-handbook/chapters/07-rag项目实战.md)讲项目实现；数据版本和治理见[第九册第十一章](../../book-09-data-engineering/chapters/11-dataset-versioning与governance.md)及[第十二章](../../book-09-data-engineering/chapters/12-数据工程综合设计与故障诊断.md)。评估方法见[第七册第五章](../../book-07-evaluation-experiments/chapters/05-污染检测与可信评估.md)、[第八章](../../book-07-evaluation-experiments/chapters/08-safety与robustness-eval.md)和[第十二章](../../book-07-evaluation-experiments/chapters/12-评估体系综合设计与工程落地.md)；提示注入威胁与防御见[第八册第五章](../../book-08-ai-safety-alignment/chapters/05-jailbreak与prompt-injection.md)。
+
 ## 5.0 先建立正确直觉：RAG 是证据链，不是外挂记忆
 
 ### 给初学者：把 RAG 想成开卷考试
@@ -166,6 +168,8 @@ T_{\mathrm{visibility}}
 
 其中每项都可能成为瓶颈。监控应按 source_system、文档类型和优先级切片，而不是只公布一个“索引更新成功率”。
 
+例如，假设同一份制度依次经过 connector 1 分钟、解析 2 分钟、chunk 1 分钟、embedding 3 分钟、索引构建 2 分钟和可见切换 4 分钟，则发布到可检索需要 $1+2+1+3+2+4=13$ 分钟，满足 15 分钟目标。这个加法适用于上述串行依赖；有并行分支时应按该文档版本实际经历的关键路径计算，并从源端发布时间量到线上可检索时间。
+
 ## 5.3 文档解析：检索质量从原始结构开始
 
 ### 5.3.1 为什么 PDF 抽文本不够
@@ -210,7 +214,7 @@ metadata:
   acl_ref: acl-884
 ~~~
 
-这段 YAML 是教学示例。真实系统还需要保存原始坐标、页码、表格单元格关系和解析置信度。中间表示比直接把所有内容拼成字符串更适合后续切分、引用和回溯。
+这段 YAML 是教学用的数据结构示意，不是可直接部署的配置，也不是完整 schema。真实系统还需要保存原始坐标、页码、表格单元格关系和解析置信度。中间表示比直接把所有内容拼成字符串更适合后续切分、引用和回溯。
 
 ### 5.3.3 OCR 和版面理解
 
@@ -320,7 +324,7 @@ Embedding 模型把文本映射为向量，使语义相近的 query 和文档在
 {\lVert q\rVert_2\lVert d\rVert_2}
 ~~~
 
-如果向量已归一化，内积可以近似余弦相似度。这个分数是模型空间里的相似度，不是“这段证据一定能回答问题”的概率。
+如果查询向量和文档向量都已归一化，内积在忽略浮点舍入误差时就等于余弦相似度。这个分数是模型空间里的相似度，不是“这段证据一定能回答问题”的概率。
 
 ### 5.5.2 模型选择
 
@@ -375,21 +379,26 @@ FAISS 等项目和论文提供了算法与实现参考，但最终参数要由�
 
 ### 5.6.2 一个简单的融合模型
 
-设 dense 检索归一化得分为 s_dense，lexical 检索得分为 s_lexical，融合权重为 alpha：
+设 dense 检索列表为 $L_d$、lexical 检索列表为 $L_l$，文档在列表中的名次分别为 $r_d(d)$ 和 $r_l(d)$。一种明确的分数融合方式是先把名次映射成列表内的相对百分位，再加权：
+
+~~~math
+p_m(d)
+=
+\begin{cases}
+\dfrac{|L_m|-r_m(d)+1}{|L_m|}, & d\in L_m \\
+0, & d\notin L_m
+\end{cases}
+~~~
 
 ~~~math
 s_{\mathrm{hybrid}}(d)
 =
-\alpha
-\cdot
-z(s_{\mathrm{dense}}(d))
+\alpha p_d(d)
 +
-(1-\alpha)
-\cdot
-z(s_{\mathrm{lexical}}(d))
+(1-\alpha)p_l(d)
 ~~~
 
-z 表示在候选集合内做归一化。不同检索器的原始分数不能直接相加，否则一个分数尺度更大的检索器会无意中支配结果。
+$p_m$ 是指定候选列表中的相对名次，不是相关性概率；$\alpha$ 应在保留的标注 query 集上选择，并在独立数据上检查。百分位映射仍可能把两个检索器的名次差异看得过于相似，所以它只是可解释的基线，不能证明分数已被校准。
 
 除了分数融合，还可以使用 reciprocal rank fusion：
 
@@ -398,10 +407,21 @@ s_{\mathrm{RRF}}(d)
 =
 \sum_{m}
 \frac{1}
-{k+r_m(d)}
+{k_{\mathrm{RRF}}+r_m(d)}
 ~~~
 
-r_m(d) 是文档 d 在第 m 个检索器中的排名，k 是平滑常数。RRF 不需要让不同检索器的分数可比，适合快速建立稳健 baseline。
+$r_m(d)$ 是文档 $d$ 在第 $m$ 个检索器中的名次；不在某个检索器候选列表中的文档，该列表不贡献分数。$k_{\mathrm{RRF}}$ 是平滑常数。RRF 不要求不同检索器的原始分数可比，是常见的 rank-fusion baseline；它的参数和收益仍要在目标数据上验证。[原始 RRF 论文](https://doi.org/10.1145/1571941.1572114)介绍了这种倒数排名求和方法。
+
+用 $k_{\mathrm{RRF}}=60$ 做一轮可复算的候选融合：dense 排名为 $A,B,C$，lexical 排名为 $B,D,A$。于是：
+
+~~~text
+A: 1/61 + 1/63 = 0.03227
+B: 1/62 + 1/61 = 0.03252
+C: 1/63        = 0.01587
+D: 1/62        = 0.01613
+~~~
+
+融合顺序为 $B,A,D,C$。这个小例子说明两个检索器都靠前的 $B$ 会超过各自在单个列表占优的 $A$；分值只是排序工具，不能解释为答案正确概率。
 
 ### 5.6.3 Query 分流
 
@@ -461,6 +481,8 @@ r_m(d) 是文档 d 在第 m 个检索器中的排名，k 是平滑常数。RRF �
 ~~~
 
 权限越严格，检索空间越小；但安全不能通过扩大权限来换 Recall。应通过更好的 chunk、query、索引和权限感知召回来解决。
+
+例如，某用户有权查看的 gold evidence 共 3 个，系统原始 top 20 里有 8 个无权限 chunk；经过 ACL 和版本过滤后仍召回其中 2 个 gold chunk，则该用户的 permitted Recall@20 为 $2/3\approx0.667$。这不是全局语料上的 Recall；分母只包含该用户在该时刻确实可以访问的标注证据。
 
 ### 5.7.4 引用链接必须再次鉴权
 
@@ -573,6 +595,8 @@ w_d\,red(d,S)
 
 其中 S 是选择的证据集合，B 还要扣除 system prompt、用户问题、对话历史和输出预算。这个目标是把“相关、可信、少重复、不能超预算”写成可讨论的约束，并不意味着生产系统一定要使用一个精确的整数规划求解器。
 
+假设可用总上下文是 16,000 token，给 system prompt 与历史留 2,000，当前 query 留 500，输出预留 2,000，另留 500 作为安全余量，则证据预算为 $16{,}000-2{,}000-500-2{,}000-500=11{,}000$ token。候选中，当前政策正文占 4,800 token，例外条款占 3,200 token，审批流程占 2,100 token；一段重复正文占 2,700 token，一份过期政策占 4,000 token。先去掉重复和过期材料，再选前三项，共 $4{,}800+3{,}200+2{,}100=10{,}100$ token，覆盖问题的三个条件，留下 900 token。剩余预算不必为了填满而塞入弱相关证据。
+
 ### 5.10.3 证据排序和新鲜度
 
 排序可以考虑：
@@ -666,6 +690,8 @@ OUTPUT CONTRACT
 
 如果可核查 claim 数为 0，support ratio 未定义，应报告“没有可评估 claim”并单列该样本；不能把空答案默认为全支持或全不支持。如果答案说“所有员工都可以在出差前七天申请，每次上限 5 万元”，需要分别核对主体范围、时间条件和金额上限。只因为引用来自同一份制度，不代表它支持这三个部分。
 
+例如，回答包含三条原子 claim：“正式员工可在出差前 7 天申请”，引用段落确实支持；“每次上限为 5 万元”，段落只写 3 万元；“审批在 2 个工作日内完成”，段落写的是 5 个工作日。按严格口径，只有第一条完整得到支持，support ratio 为 $1/3\approx33.3\%$；第二条在金额上冲突，第三条在时间上冲突。若另报“部分支持”，必须预先定义标注规则，不能把部分支持悄悄算成完整支持。FORCEBENCH 提供了一种更细的压力测试：固定引用段落，只改变声明的关系、语气、范围、时间或数字强度，检查评估器是否仍把过强声明判为受支持；其结果绑定 198 对样本和论文中的 judge，适合作为诊断协议，不是通用发生率。[论文](https://arxiv.org/abs/2605.28044)
+
 ### 5.12.3 引用粒度
 
 引用可指向：
@@ -741,31 +767,41 @@ w_5\,s_{\mathrm{stale}}
 
 这不是一个未经验证的“真实概率”，而是风险分解。阈值需要通过标注集校准，并按业务类型分别设置。
 
+为使分数可解释，$s_{\mathrm{retrieval}}$、$s_{\mathrm{rerank}}$ 和 $s_{\mathrm{support}}$ 取 $[0,1]$，值越大表示信号越好；$s_{\mathrm{conflict}}$ 与 $s_{\mathrm{stale}}$ 也取 $[0,1]$，值越大表示风险越高。所有权重非负且 $\sum_i w_i=1$。例如取 $w=(0.20,0.20,0.35,0.15,0.10)$，信号为 $(0.80,0.70,0.60,0.20,0.10)$，则
+
+~~~text
+R_answer = 0.20×(1−0.80) + 0.20×(1−0.70) + 0.35×(1−0.60)
+           + 0.15×0.20 + 0.10×0.10
+         = 0.28
+~~~
+
+0.28 是这组假设权重下的归一化风险分数，不是 28% 的错误概率；权重和阈值需要用有代表性的人工标注样本校准。
+
 ## 5.14 评估：从检索指标走到业务答案
 
 ### 5.14.1 检索层
 
-检索评估需要 query、gold evidence 和权限条件。常用指标包括：
+检索评估需要 query、gold evidence、用户身份、权限版本和文档时间范围。对每个可回答 query $q$，令 $G_q$ 为在该权限快照下有效且可访问的 gold evidence 集合，$R_q^k$ 为执行同一权限和版本过滤后返回的 top-$k$ 结果。gold 的计分单位要预先固定；若多个 chunk 是同一证据的等价副本，应标成一个候选组，避免把找回每个副本都当成必要条件。计算前把 top-$k$ 结果映射到这些 evidence unit；候选组中任意一个成员命中，就将该 unit 计为命中一次。宏平均 Recall@k 定义为：
 
 ~~~math
 \mathrm{Recall@k}
 =
-\frac{
-\#\{\mathrm{queries\ with\ gold\ evidence\ in\ top\ }k\}
-}{
-\#\{\mathrm{queries\ with\ evaluable\ gold\ evidence}\}
-}
+\frac{1}{|Q_{\mathrm{valid}}|}
+\sum_{q\in Q_{\mathrm{valid}}}
+\frac{|G_q\cap R_q^k|}{|G_q|}
 ~~~
 
 ~~~math
-\mathrm{MRR}
+\mathrm{MRR@k}
 =
 \frac{1}{|Q_{\mathrm{valid}}|}
 \sum_{q\in Q_{\mathrm{valid}}}
-\frac{1}{\mathrm{rank}_q}
+\mathrm{RR@k}(q)
 ~~~
 
-这里的 $Q_{\mathrm{valid}}$ 只包含存在可判定 gold evidence 且评估协议允许计算 rank 的 query；无答案问题、没有标注证据的问题和无法判断的样本应单独报告，不能把它们的 MRR 或 Recall 机械记为 0。还可以观察 nDCG、precision@k、permitted Recall@k 和空结果率。gold evidence 不一定只有一个 chunk，应允许多个等价证据和适用范围。
+其中 $Q_{\mathrm{valid}}$ 包含有可判定、可访问 gold evidence 的所有可回答 query；检索没有命中时仍留在分母中，Recall 和 RR 记 0。$\mathrm{RR@k}(q)$ 是 top-$k$ 中第一个 gold evidence 名次的倒数，若没有命中则为 0。若 $Q_{\mathrm{valid}}$ 为空，指标未定义，应报告没有可评估 query。无答案问题、用户无权访问任何答案证据的问题、缺标注和无法判断的样本，应单独评估拒答或标注质量，不与这些可回答 query 混算。
+
+手算一个三 query 集合：$q_1$ 的 $G_1=\{A,B\}$，top-3 为 $[X,A,Y]$，Recall 为 $1/2$、RR 为 $1/2$；$q_2$ 的 $G_2=\{C\}$，top-3 为 $[C,D,E]$，Recall 和 RR 都是 1；$q_3$ 的 $G_3=\{F\}$，top-3 为 $[H,I,J]$，二者都是 0。于是宏平均 Recall@3 为 $(1/2+1+0)/3=0.5$，MRR@3 也为 0.5；Hit@3 则是 $2/3$。另有一条无答案 query 时，它进入拒答评估，不把 $Q_{\mathrm{valid}}$ 的分母改成 4。还可以观察 nDCG、precision@k 和空结果率，但要明确各自的 relevance 标签与分母。
 
 ### 5.14.2 Rerank 和上下文层
 
@@ -793,6 +829,8 @@ Rerank 评估要看正确证据是否进入前部，而 Context Builder 评估�
 - 安全和越权行为。
 
 LLM judge 可以扩展评估规模，但要校准人工样本、检查 judge 偏差，并保留原始证据供复核。RAGAS、ARES 等研究和工具可以提供方法参考，不能代替领域标注。
+
+安全评估要区分“检索到什么”和“模型随后做了什么”。RAG-Safety-Bench 用非 RAG、检索到包含危险请求答案的 oracle 文档、检索到相关但不含具体答案的文档、以及随机安全文档四种条件隔离文档因素；论文报告覆盖五个开源模型，因此适合借鉴为控制实验，不代表其他模型或生产语料上的安全率。[ACL 论文](https://aclanthology.org/2026.emnlp-main.2246/)。对间接 prompt injection，还应从自然用户 query 和受污染语料开始，分别记录恶意 chunk 进入 top-k 的比例、在其进入后发生的越权动作率、正常任务效用和副作用。USENIX Security 2026 的研究表明检索本身可被攻击者针对，但其实验主要覆盖 embedding 检索，不能直接推成 hybrid、reranker 或所有索引都同样易受攻击。[论文页面](https://www.usenix.org/conference/usenixsecurity26/presentation/chang-hongyan)
 
 ### 5.14.4 端到端任务集
 
@@ -959,7 +997,7 @@ H(
 
 ### 5.17.2 间接注入和跨文档污染
 
-用户问题可能是安全的，但检索到的网页、issue 或上传文档带有恶意指令。多跳检索还可能把一个文档中的指令带到下一次查询。系统应限制：
+用户问题可能是安全的，但检索到的网页、issue 或上传文档带有恶意指令。多跳检索还可能把一个文档中的指令带到下一次查询。安全测试要从自然 query 出发检查恶意内容能否被召回，再分别检查模型是否服从以及工具是否执行；直接把攻击文本预先放进 prompt 只能测试后两段，不能代表检索阶段的覆盖。USENIX Security 2026 的论文使用“检索触发片段”和“攻击片段”分别影响召回与后续指令，并在其所测的 embedding 检索设置中报告结果；论文没有覆盖 hybrid 检索和 reranker，也不保证攻击跨 embedding 架构迁移。[研究范围见论文](https://www.usenix.org/conference/usenixsecurity26/presentation/chang-hongyan)。系统应限制：
 
 - 模型可使用的检索工具和过滤条件。
 - query rewrite 是否能修改租户和权限。
@@ -1027,9 +1065,11 @@ T_{\mathrm{citation}}
 
 如果需要同时调用实时 API，还要增加工具查询和数据校验时间。优化时不要只看生成模型：query rewrite 可能放大模型调用，rerank 可能占据 P99，权限服务可能成为串行瓶颈。
 
+例如，一条请求 trace 中身份校验 40 ms、query 处理 25 ms、检索 80 ms、过滤 30 ms、rerank 120 ms、context 45 ms、生成 1,500 ms、引用检查 60 ms，则串行关键路径为 $40+25+80+30+120+45+1500+60=1{,}900$ ms。这个数是该请求的阶段耗时之和；线上 P95 应从完整请求 trace 直接统计，不能把各独立阶段的 P95 相加来当作端到端 P95，因为并行、相关性和尾部共现会改变分布。
+
 ### 5.18.3 单位成功查询成本
 
-设离线摊销成本为 C_offline，在线检索、rerank、生成、存储和失败重试成本之和为 C_online，成功回答或成功业务任务数为 N_success：
+设离线摊销成本为 $C_{\mathrm{offline}}$，$C_{\mathrm{online}}$ 包含评估窗口内所有在线检索、rerank、生成、存储和失败重试的实际费用，$N_{\mathrm{success}}$ 是按固定成功判据通过的查询数：
 
 ~~~math
 C_{\mathrm{successful\_query}}
@@ -1038,14 +1078,12 @@ C_{\mathrm{successful\_query}}
 C_{\mathrm{offline}}
 +
 C_{\mathrm{online}}
-+
-C_{\mathrm{retry}}
 }{
 N_{\mathrm{success}}
 }
 ~~~
 
-只有在评估窗口内至少有一个成功查询时，这个式子才有定义；当 $N_{\mathrm{success}}=0$ 时，应记录为“没有成功证据”，而不是把分母替换成 1。还要明确离线摊销、在线重试和人工处理是否已经包含在各成本项中，避免重复计费。缓存可以降低在线成本，但如果命中的是过期或无权限结果，单位成功查询数应该把这些错误计入质量损失，不能只看账单下降。
+例如，一个月摊销的索引成本为 1,200 元，在线实际成本为 2,800 元（其中已经包含失败重试），按固定答案质量标准成功的查询为 8,000 次，则单位成功查询成本为 $(1{,}200+2{,}800)/8{,}000=0.5$ 元。$N_{\mathrm{success}}=0$ 时报告“没有成功查询”，不把分母替换为 1。若业务还要计算“成功解决问题成本”，应另定义业务成功 rubric 和指标名，不能在不同 cohort 间把成功答案数与业务任务完成数混作同一分母；人工处理费用也要明确是否计入。缓存可以降低在线成本，但如果命中的是过期或无权限结果，单位成功查询数应该把这些错误计入质量损失，不能只看账单下降。
 
 ### 5.18.4 优化顺序
 
@@ -1088,20 +1126,46 @@ N_{\mathrm{success}}
 
 ### 5.19.3 问答平面
 
-问答平面处理：
+图 5-1 将离线索引、在线问答和配置治理放到一张数据流图里。虚线表示控制或反馈关系，不是用户请求的串行延迟；查询只从通过校验并登记为可见的索引版本读取证据。
 
-~~~text
-request
-  -> identity
-  -> query policy
-  -> rewrite or classify
-  -> hybrid retrieve
-  -> permission filter
-  -> rerank
-  -> context builder
-  -> generator
-  -> citation verifier
-  -> answer and feedback
+~~~mermaid
+flowchart LR
+  subgraph CP["控制平面"]
+    Config["schema、模型与权限策略"]
+    Registry["索引版本、可见水位与回滚"]
+    Eval["质量评估与发布门禁"]
+  end
+
+  subgraph IP["索引平面（离线）"]
+    Source["文档源"] --> Snapshot["版本快照"]
+    Snapshot --> Parse["解析与结构化切块"]
+    Parse --> Embed["Embedding 与元数据"]
+    Embed --> Build["向量、倒排与过滤索引"]
+    Build --> Check["完整性与质量校验"]
+    Check --> Visible["已发布的可见索引"]
+  end
+
+  subgraph QP["问答平面（在线）"]
+    User["用户请求"] --> Auth["身份与权限快照"]
+    Auth --> Query["查询分类与改写"]
+    Query --> Retrieve["混合检索"]
+    Retrieve --> Filter["ACL、版本与撤销复核"]
+    Filter --> Rerank["重排与去重"]
+    Rerank --> Context["证据包与 token 预算"]
+    Context --> Generate["生成"]
+    Generate --> Verify["引用与输出校验"]
+    Verify --> Answer["回答与引用"]
+    Verify --> Trace["请求 trace 与反馈"]
+  end
+
+  Visible --> Retrieve
+  Config -.-> Parse
+  Config -.-> Embed
+  Config -.-> Filter
+  Registry -.-> Visible
+  Registry -.-> Retrieve
+  Trace --> Eval
+  Eval -.-> Config
 ~~~
 
 查询平面不应直接读取任意对象存储路径，也不应绕过权限服务。所有证据都要带 document version、ACL snapshot 和 content digest。
@@ -1197,7 +1261,7 @@ M_{\mathrm{raw\_vector}}
 
 ### 5.20.6 故障三：制度更新延迟
 
-新制度已在 Wiki 发布 20 分钟，但问答仍返回旧版本。时间线如下：
+一次故障复盘中，新制度发布 23 分钟后仍未进入可检索索引。各串行阶段耗时如下：
 
 ~~~text
 source published
@@ -1208,7 +1272,7 @@ source published
   + 12 min waiting for nightly visibility switch
 ~~~
 
-最后一项违反了 15 分钟目标。团队把可见索引切换从夜间批处理改成按制度优先级的增量 watermarked publish，并为“已发布但未可检索”增加状态和告警。旧版本仍保留用于历史答案，但当前 query 按 effective_at 和 visible watermark 过滤。
+合计为 $1+2+5+3+12=23$ 分钟，比 15 分钟目标多 8 分钟。前四项已用 11 分钟，可见切换最多只剩 4 分钟预算，实际等待 12 分钟，单是这一阶段就超出 8 分钟。团队把可见索引切换从夜间批处理改成按制度优先级的增量 watermarked publish，并为“已发布但未可检索”增加状态和告警。旧版本仍保留用于历史答案，但当前 query 按 effective_at 和 visible watermark 过滤。
 
 ### 5.20.7 故障四：文档注入触发工具调用
 
@@ -1296,7 +1360,15 @@ system prompt 1200 token，用户与历史 1800 token，输出预留 1200 token�
 
 12. Jeff Johnson 等，Billion-scale similarity search with GPUs，arXiv:1702.08734。论文用于理解大规模向量相似度检索和 FAISS 相关设计；索引的实际召回、更新和过滤能力依赖具体实现。链接：[https://arxiv.org/abs/1702.08734](https://arxiv.org/abs/1702.08734)。
 
-13. OWASP，Top 10 for Large Language Model Applications。资料用于核对 prompt injection、敏感信息泄漏和不安全输出处理等风险类别；它是安全风险框架，不是某个 RAG 实现的安全认证。链接：[https://owasp.org/www-project-top-10-for-large-language-model-applications/](https://owasp.org/www-project-top-10-for-large-language-model-applications/)。
+13. OWASP，GenAI Security Project: Top 10 for LLM Applications 2026。该项目用于核对 prompt injection 等应用层威胁类别；它是风险分类，不是某个 RAG 实现的安全认证。链接：[https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/](https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/)。
+
+14. Gordon V. Cormack、Charles L. A. Clarke 和 Stefan Büttcher，Reciprocal Rank Fusion outperforms Condorcet and individual rank learning methods，SIGIR 2009。论文介绍基于多检索器名次的倒数和融合；其基准结果不保证在任意语料或端到端 RAG 任务上提升。链接：[https://doi.org/10.1145/1571941.1572114](https://doi.org/10.1145/1571941.1572114)。
+
+15. Pin Qian 等，Relevant Is Not Warranted: Evidence-Force Calibration for Cited RAG，arXiv:2605.28044。FORCEBENCH 固定引用段落并构造声明强度对照，用于诊断 citation support 评估；198 对样本和四个 judge 不代表一般 RAG 的发生率。链接：[https://arxiv.org/abs/2605.28044](https://arxiv.org/abs/2605.28044)。
+
+16. Adithiyan Rajan Indira Saravanan 和 Kathleen C. Fraser，RAG-Safety-Bench: Reliable Evaluation of Retrieval-Augmented LLM Safety，EMNLP 2026。benchmark 以四种文档条件分离检索文档因素，论文测试五个开源模型；结论绑定其模型与测试集。链接：[https://aclanthology.org/2026.emnlp-main.2246/](https://aclanthology.org/2026.emnlp-main.2246/)。
+
+17. Hongyan Chang 等，Overcoming the Retrieval Barrier: Indirect Prompt Injection in the Wild for LLM Systems，USENIX Security 2026。论文研究自然 query、外部语料中的检索增强间接注入；其 retrieval 结果和端到端攻击依赖论文威胁模型，且未覆盖所有 hybrid/reranker 系统。链接：[https://www.usenix.org/conference/usenixsecurity26/presentation/chang-hongyan](https://www.usenix.org/conference/usenixsecurity26/presentation/chang-hongyan)。
 
 资料的证据边界需要明确：
 

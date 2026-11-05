@@ -167,7 +167,7 @@ OpenID Foundation 的 AuthZEN Authorization API 1.0 于 2026 年 1 月成为 Fin
 
 它解决的是组件之间如何交换请求和结果，不替组织定义策略语言、风险阈值或哪些 Agent 动作应获准。接入时，租户范围、资源 revision、证据 ID 和审批上下文需要按部署合同传递并由服务端校验；“能按标准问 PDP”并不代表 PEP 已在正确位置执行，也不代表授权模型本身正确。
 
-截至 2026-11-03，AuthZEN 工作组还列有 Access Request and Approval Profile（AARP）与 COAZ / COAZ-MCP 工作组草案。AARP 把“当前尚不能允许、但可先补审批等前置条件”的情况表示为待处理访问请求；完成前置条件后，PEP 仍要携带当前资源和上下文重新询问 PDP。批准记录是新评估的输入，不是可绕过策略的通行证。COAZ 框架和 MCP 绑定则把具体操作及其参数映射到 AuthZEN 的 subject、action、resource、context 请求；它们仍是工作组草案，MCP 字段映射和协议细节留给第二十二册展开。[AARP 1.0 工作组草案](https://openid.github.io/authzen/authzen-access-request-approval-profile-1_0.html)、[COAZ-MCP 工作组草案](https://openid.github.io/authzen/authzen-coaz-mcp-binding-1_0)、[AuthZEN 规范状态](https://openid.net/wg/authzen/specifications/)
+截至 2026-11-03，AuthZEN 工作组还列有 Access Request and Approval Profile（AARP）与 COAZ / COAZ-MCP 工作组草案。AARP 把“当前尚不能允许、但可先补审批等前置条件”的情况表示为待处理访问请求；完成前置条件后，PEP 仍要携带当前资源和上下文重新询问 PDP。批准记录是新评估的输入，不是可绕过策略的通行证。COAZ 框架和 MCP 绑定则把具体操作及其参数映射到 AuthZEN 的 subject、action、resource、context 请求；它们仍是工作组草案，MCP 字段映射和协议细节留给第二十二册展开。[AARP 1.0 工作组草案](https://openid.github.io/authzen/authzen-access-request-approval-profile-1_0.html)、[COAZ-MCP 工作组草案](https://openid.github.io/authzen/authzen-coaz-mcp-binding-1_0.html)、[AuthZEN 规范状态](https://openid.net/wg/authzen/specifications/)
 
 授权接口之外，还有运行时拦截接口。OWASP Agent Control Standard（ACS）将 Agent 平台的生命周期 hook 与外部 Guardian 决策连起来，定义运行时的拦截和控制合同；截至 2026-11-03，其文档站列出的发布为 v0.1.4、规范版本为 v0.1.0。它和 AuthZEN 处理的问题不同：ACS 说明怎样在 Agent 执行路径上接入控制，不能替代主体、资源、动作和当前状态的授权判断。ACS 同一版本的符合性页面说明其符合声明尚无独立验证方或登记册，因此不能把接口规范或自我声明当作部署安全证据；具体 hook、适配器和运行时实现交第二十册。[ACS 规范状态](https://owaspacs.org/)、[Instrument 规范](https://owaspacs.org/docs/spec/instrument/specification/)、[符合性配置文件与验证边界](https://owaspacs.org/docs/spec/conformance/)
 
@@ -960,7 +960,7 @@ allow_canary 也不是“发布完成”的同义词：它只允许审批绑定�
 3. [OAuth 2.0 Token Exchange, RFC 8693](https://www.rfc-editor.org/rfc/rfc8693)：说明委托与冒充等令牌交换语义；不独自定义部署信任模型或 token proof-of-possession 要求。
 4. [OAuth 2.0 DPoP, RFC 9449](https://www.rfc-editor.org/rfc/rfc9449)：提供 sender-constrained token 的标准机制，目标是降低令牌泄露后的重放风险，不等于业务授权。
 5. [Cedar Authorization](https://docs.cedarpolicy.com/auth/authorization.html) 与 [Policy Validation](https://docs.cedarpolicy.com/policies/validation.html)：以一种具体策略引擎说明 principal/action/resource/context、默认拒绝及策略与请求 schema 验证；不代表所有 PDP 的算法或故障语义。
-6. [AuthZEN Access Request and Approval Profile 1.0](https://openid.github.io/authzen/authzen-access-request-approval-profile-1_0.html) 与 [COAZ-MCP Binding 1.0](https://openid.github.io/authzen/authzen-coaz-mcp-binding-1_0)：截至 2026-11-03 均列为工作组草案。AARP 描述可审批拒绝、异步请求和重新评估；COAZ-MCP 把 MCP 操作映射为 AuthZEN 请求。草案状态不等于最终互操作性或实现证明。
+6. [AuthZEN Access Request and Approval Profile 1.0](https://openid.github.io/authzen/authzen-access-request-approval-profile-1_0.html) 与 [COAZ-MCP Binding 1.0](https://openid.github.io/authzen/authzen-coaz-mcp-binding-1_0.html)：截至 2026-11-03 均列为工作组草案。AARP 描述可审批拒绝、异步请求和重新评估；COAZ-MCP 把 MCP 操作映射为 AuthZEN 请求。草案状态不等于最终互操作性或实现证明。
 7. [OWASP Agent Control Standard](https://owaspacs.org/docs/spec/instrument/specification/) 与[符合性配置文件说明](https://owaspacs.org/docs/spec/conformance/)：截至 2026-11-03，站点列出发布 v0.1.4 / 规范版本 v0.1.0，覆盖 Agent 运行时 hook 和 Guardian 决策合同；同一版本没有独立符合性验证方或登记册。它是运行时控制接口参考，不定义组织授权策略，也不证明具体部署安全。
 
 这些资料提供接口、令牌或授权模型的具体参考，不证明任何特定 Agent 实现已经正确，也不替代代码审计、撤销时延和状态测试。AuthZEN AARP、COAZ 和 COAZ-MCP 仍处于工作组草案阶段；ACS 的版本与符合性验证边界按 2026-11-03 官方页面记录。协议适配和 Agent 生命周期 hook 的具体落地分别延伸到第二十二册和第二十册。

@@ -1,6 +1,6 @@
 # 语音识别、音频生成与实时对话来源
 
-检索与阅读日期：2026-10-29；论文版本页面复核：2026-10-30。
+检索与阅读日期：2026-10-29；论文版本页面复核：2026-10-30；Emformer 论文补充核阅：2026-11-05。
 
 本记录只存放联网核验得到的技术事实及其证据范围，不记录章节审阅、修改决定或任务进度。
 
@@ -26,6 +26,14 @@
 - 阅读范围：摘要、§2.1–2.6（prediction/transcription network、输出分布、forward-backward、训练与测试）。
 - 来源支持：方法引入 null/blank 输出；含 blank 的对齐路径在移除 blank 后映射到输出序列，并在这些可能路径上求和。模型由转录网络与预测网络构成，可联合依赖输入表示和输出前缀；作者实验是 TIMIT 音素识别。
 - 边界：论文提出一般序列转导目标，不构成现代 ASR 运行时延迟或跨模型准确率排名证据。是否能低延迟输出，还要看输入网络是否可增量计算、可见未来上下文、解码与 endpoint 设计。
+
+### Emformer
+
+- 来源：[Emformer: Efficient Memory Transformer Based Acoustic Model For Low Latency Streaming Speech Recognition](https://arxiv.org/abs/2010.10759v4)，arXiv:2010.10759v4，2020-12-30。
+- 阅读范围：摘要、§2.2（记忆库与左上下文 Key/Value 缓存）、§3.2 的算法延迟及 hybrid/transducer 结果。
+- 来源支持：模型把长程历史压缩到增强 memory bank，缓存左上下文注意力的 Key/Value，并用并行分块训练支持低延迟流式模型。作者在 LibriSpeech 报告平均算法延迟约 960 ms 时，test-clean/test-other WER 分别为 2.50%/5.62%；80 ms 设置分别为 3.01%/7.09%。
+- 证据等级：source-backed（论文架构、LibriSpeech 数据、作者报告的算法延迟和 WER）。
+- 边界：延迟与 WER 对应论文的模型、解码器、数据切分和测量口径；不证明普通话电话、口音/噪声切片、专名或订单字段准确率，也不等于客户端端到端首声延迟。
 
 ## 音频 codec 与生成
 

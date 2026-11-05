@@ -26,10 +26,10 @@
 
 ## 混合检索的倒数排名融合
 
-- **来源与版本**：[Elasticsearch Reciprocal Rank Fusion reference](https://www.elastic.co/docs/reference/elasticsearch/rest-apis/reciprocal-rank-fusion)，官方在线文档，访问日期 2026-10-30。
-- **阅读位置**：公式、检索器组合示例、BM25 与向量检索示例。
-- **来源支持的事实**：RRF 可把不同检索器的候选排名合成一个列表，不要求各自原始相关性分数处于相同尺度；Elasticsearch 页面给出其 API 参数和应用示例。
-- **证据等级与边界**：source-backed（官方产品文档）；Elastic API 支持范围和默认参数依产品版本，不能当作 RRF 的通用实现规范或证明混合检索总会提升端到端答案。dense/sparse 的完整教学机制在第二册 RAG 章节。
+- **来源与版本**：Gordon V. Cormack、Charles L. A. Clarke、Stefan Büttcher，*Reciprocal Rank Fusion outperforms Condorcet and individual rank learning methods*，SIGIR 2009，DOI：[10.1145/1571941.1572114](https://doi.org/10.1145/1571941.1572114)；[Elasticsearch Reciprocal Rank Fusion reference](https://www.elastic.co/docs/reference/elasticsearch/rest-apis/reciprocal-rank-fusion)，官方在线文档访问日期 2026-11-05。
+- **阅读位置**：原论文的 RRF 分数聚合方法；Elastic 文档的公式、窗口和 rank constant 参数说明。
+- **来源支持的事实**：RRF 把多个检索器中的名次按倒数项相加，降低候选在任一列表中的名次越靠后时的贡献；该分数融合使用排名而非原始相关性分数，因此不要求 BM25 与向量相似度处于同一量纲。
+- **证据等级与边界**：source-backed（原始论文与官方实现文档）。论文标题中的基准比较只针对其数据、任务和对照方法；不能据此保证目标 RAG 的检索或最终答案质量都会提升。产品参数及实现以相应版本文档为准。
 
 ## 检索内容与提示注入
 
@@ -37,6 +37,27 @@
 - **阅读位置**：prompt injection 定义、外部来源恶意指令示例、分层防护说明。
 - **来源支持的事实**：第三方内容可能把恶意指令混入模型上下文，意图误导模型偏离用户任务；来源以此说明 prompt injection 风险，并描述多层防护。
 - **证据等级与边界**：source-backed（官方安全材料）；该说明不提供适用于所有 RAG 堆栈的检测率，不表示模型提示或文档隔离能单独阻断攻击。
+
+## 引用证据强度与声明校准（FORCEBENCH）
+
+- **来源与版本**：Pin Qian 等，*Relevant Is Not Warranted: Evidence-Force Calibration for Cited RAG*，arXiv:2605.28044 v1，提交日期 2026-05-27：[论文页面](https://arxiv.org/abs/2605.28044)。
+- **阅读位置**：摘要中的任务构造、force axes、固定 198 对 locality-filtered 样本和 judge 对比结果。
+- **来源支持的事实**：FORCEBENCH 固定被引用段落，并为同一段落配对一个证据强度匹配的 claim 与一个局部增强语气/强度的 claim；测试维度包括 relation、modality、scope、temporal validity 和 numeric specificity。论文报告的四个模型 judge 中，通用支持提示仍有较高 monotonicity violation；显式 warrant-strength 提示降低但没有消除该错误。
+- **证据等级与边界**：source-backed（预印本摘要与论文）。198 对样本是诊断性压力测试，不估计真实系统中引用夸大声明的总体比例；结果绑定所测 judge、提示和文本任务，不能推成所有评估器的固定表现。
+
+## RAG 安全控制条件（RAG-Safety-Bench）
+
+- **来源与版本**：Adithiyan Rajan Indira Saravanan、Kathleen C. Fraser，*RAG-Safety-Bench: Reliable Evaluation of Retrieval-Augmented LLM Safety*，EMNLP 2026，[ACL Anthology](https://aclanthology.org/2026.emnlp-main.2246/)。
+- **阅读位置**：ACL Anthology 论文摘要和元数据。
+- **来源支持的事实**：benchmark 使用四个条件隔离 RAG 文档因素：非 RAG；包含有害请求答案的 oracle 文档；与请求相关但不含具体答案的文档；随机安全文档。论文报告五个开源 LLM 的结果。以固定文档条件比较，可以在该 benchmark 中减少 retriever quality 对模型安全效应判断的混淆。
+- **证据等级与边界**：source-backed（ACL 正式会议论文元数据和摘要）；实验只覆盖该论文的五个模型、提示、文档条件和任务，不提供其他模型、私有企业语料或生产部署的安全保证，也不替代对实际 retriever 的测试。
+
+## 检索增强间接提示注入（USENIX Security 2026）
+
+- **来源与版本**：Hongyan Chang、Ergute Bao、Xinjian Luo、Ting Yu，*Overcoming the Retrieval Barrier: Indirect Prompt Injection in the Wild for LLM Systems*，35th USENIX Security Symposium 2026，[论文页与 PDF](https://www.usenix.org/conference/usenixsecurity26/presentation/chang-hongyan)。
+- **阅读位置**：论文摘要、攻击构造、自然 query / 外部语料实验及讨论和限制部分。
+- **来源支持的事实**：论文将恶意内容拆成用于提高检索命中概率的 trigger fragment 和编码后续目标的 attack fragment；报告了其 embedding retrieval 设置和 RAG/Agent 端到端攻击实验。该工作说明检索阶段需要作为独立安全边界测试，不能只在已构造的 prompt 上测试模型是否拒绝。
+- **证据等级与边界**：source-backed（USENIX Security 2026 论文）。检索实验主要针对 embedding-based retrieval，没有完整评估 hybrid retrieval 或 reranker 组合；跨 embedding 架构迁移也不由实验保证。摘要中的攻击率和成本只适用于论文威胁模型、语料、query、embedding 服务与系统设置，不能当作任意 RAG 的风险率。
 
 ## GraphRAG 仓库当前维护状态
 

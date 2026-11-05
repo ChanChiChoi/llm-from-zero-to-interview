@@ -46,6 +46,9 @@
 11. Hagmann, Meier & Riezler, [Towards Inferential Reproducibility of Machine Learning Research v7](https://arxiv.org/abs/2302.04054v7)：以线性混合效应模型、GLRT 和方差分量分析处理训练/超参变化及数据属性；方法示例受其研究设计约束。
 12. Du, [When +1% Is Not Enough: A Paired Bootstrap Protocol for Evaluating Small Improvements](https://arxiv.org/abs/2511.19794)：单作者预印本，在 CIFAR-10、CIFAR-10N 和 AG News 的合成小增益设置中演示 paired multi-seed、BCa 区间和 sign-flip 检验；结果不是 LLM 评估证据或普遍判定协议。
 13. [Statistical Multicriteria Evaluation of LLM-Generated Text](https://arxiv.org/abs/2506.18082)：提出 GSD-front 处理不同测量尺度的文本质量指标；结论绑定论文的续写任务、解码策略和评分协议，适合作为专门延伸方法。
+14. [NIST/SEMATECH Confidence Limits for the Mean](https://itl.nist.gov/div898/handbook/eda/section3/eda352.htm)：给出总体方差未知时基于 t 分布的均值区间及覆盖率解释；配对比较需先构造差值，且小样本依赖分布假设。
+15. Lakens, [Equivalence Tests: A Practical Primer](https://doi.org/10.1177/1948550617697177)：解释 TOST、预设等效界限及常见的 90% 区间判据；不显著本身不支持等效。
+16. Hanley & Lippman-Hand, [If Nothing Goes Wrong, Is Everything All Right? Interpreting Zero Numerators](https://jhanley.biostat.mcgill.ca/c607/ch08/zero_numerator.pdf)：推导零事件时的一侧 95% 上界与 rule of three；近似基于独立二项试验，不能处理聚类和漏检。
 
 ## 核心方向
 
@@ -120,6 +123,12 @@ Transformer 核心机制入口：
 15. [Tensor Programs V / μTransfer](https://arxiv.org/abs/2203.03466)：通过 μP 参数化把部分宽度超参数从小模型迁移到大模型；不是单一初始化公式。
 16. [Expert Choice Routing](https://arxiv.org/abs/2202.09368)：让 expert 选择固定容量的 token bucket，缓解 token-choice 的专家负载不均，同时允许不同 token 激活不同数量的 expert。
 17. [DeepSeek-V3 Technical Report](https://arxiv.org/abs/2412.19437)：报告按专家负载调整 routing bias 的 auxiliary-loss-free batch balancing，并保留 sequence-wise 辅助损失防止单序列失衡；结果绑定其 MoE 与集群共设计。
+18. [DeepSeek-V2](https://arxiv.org/abs/2405.04434v5)：MLA 联合压缩 KV、通过解耦 RoPE 保留位置键；附录包含 MLA/MHA 对照。缓存降幅和质量结果绑定论文模型规模、token 预算和 benchmark。
+19. [Transformers are SSMs / Mamba-2](https://arxiv.org/abs/2405.21060)：SSD 将特定结构化 SSM 与 structured masked attention 联系起来；核心层加速不代表整模型或 serving 的通用收益。
+20. [Gated Delta Networks](https://arxiv.org/abs/2412.06464)：门控遗忘与 delta-rule 状态写入，并行训练及长上下文回忆边界。
+21. [Mamba-3](https://arxiv.org/abs/2603.15569)：指数梯形离散化、复值状态与 MIMO；质量和 kernel 数据绑定作者模型、训练配方、任务与硬件。
+22. [Jamba](https://arxiv.org/abs/2403.19887v2)：Transformer/Mamba 层间混合及部分 MoE；1:3 与 1:7 比较不是通用最优比例。
+23. [Native Sparse Attention](https://arxiv.org/abs/2502.11089v2)：层级稀疏 token 选择、原生训练和硬件对齐；64K 速度结果绑定论文的 8×A100、kernel、配置与基线。
 
 - [Multi-Layer Scheduling for MoE-Based LLM Reasoning](https://arxiv.org/abs/2602.21626)：研究请求级、引擎级和 expert 级的分层调度；作者报告的 TTFT/TPOT 变化绑定论文 workload、模型、集群和服务实现，不能由 router token 计数直接推出。
 
@@ -144,6 +153,7 @@ Transformer 核心机制入口：
 13. [Retrieval Augmented Generation or Long-Context LLMs? v2](https://arxiv.org/abs/2407.16833v2) 与 [Long Context vs. RAG for LLMs v1](https://arxiv.org/abs/2501.01880v1)：比较长上下文和检索路线；结论随模型、检索方式、问题类型、数据过滤和预算变化，论文报告不能作为跨语料排名。
 14. [Self-RAG](https://arxiv.org/abs/2310.11511) 与 [Corrective RAG / CRAG](https://arxiv.org/abs/2401.15884)：比较模型内 learned retrieval / reflection 与外部 retrieval evaluator / fallback；前者依赖相应模型训练，后者依赖 evaluator 校准及可信的外部搜索。
 15. [From Local to Global: A Graph RAG Approach](https://arxiv.org/abs/2404.16130) 与 [RAPTOR](https://arxiv.org/abs/2401.18059)：分别用实体关系图/社区摘要处理全局语料问题、用递归聚类摘要树支持不同抽象层次的检索；索引构建、更新和原文定位成本不同，不替代精确 chunk 检索。
+16. Cormack, Clarke 与 Büttcher，[Reciprocal Rank Fusion outperforms Condorcet and individual rank learning methods](https://doi.org/10.1145/1571941.1572114)：2009 年 SIGIR 论文的倒数排名融合方法；RRF 分数聚合不依赖原始检索器分数的共同尺度，具体参数和端到端收益仍需目标语料评估。
 
 ### 评估与 Debug 的统计和方法
 
@@ -185,7 +195,7 @@ Transformer 核心机制入口：
 29. [Judging LLM-as-a-Judge: Concerning Rubric Artifacts in LLM-based Automated Text Generation Evaluation](https://aclanthology.org/2026.emnlp-main.2612/) 与[详细预印本](https://arxiv.org/abs/2609.02942)：检查 rubric-only 标签可预测性和答案/标准反事实响应；结果绑定 HealthBench 等特定数据和模型。
 30. 多模态与长上下文 benchmark：[VQA v2](https://arxiv.org/abs/1612.00837)用互补图像对控制语言先验；[POPE](https://arxiv.org/abs/2305.10355)用对象存在性探针评估视觉幻觉；[MMMU](https://arxiv.org/abs/2311.16502)测多学科多模态推理；[DocVQA](https://arxiv.org/abs/2007.00398)和 [2026 ANLS harness 审计](https://aclanthology.org/2026.docinsights-1.6/)展示文档指标与答案格式依赖；[ChartQA](https://arxiv.org/abs/2203.10244)结合真实来源图表、人工与生成问题；[AudioBench](https://arxiv.org/abs/2406.16020)补语音/声音/副语言理解；[Video-MME](https://arxiv.org/abs/2405.21075)、[MLVU](https://arxiv.org/abs/2406.04264)和 [MMLongBench-Doc](https://arxiv.org/abs/2407.01523)覆盖视频时长与跨页多模态证据。每项只支持自己的任务、数据和评分协议，不能合成跨模态总排名。
 
-31. 近期多模态评测：[XModBench](https://proceedings.iclr.cc/paper_files/papers/2026/hash/21071811269c70ac11a3e7869bac747e-Abstract-Conference.html)测文本、图像和音频之间的能力与一致性；[LVOmniBench](https://arxiv.org/abs/2603.19217)测长音视频理解；[LongShOTBench v2](https://arxiv.org/abs/2512.16978v2)以长视频单轮/多轮开放题和逐标准项 rubric 评估全模态推理，并在人工审阅子集上报告 verifier 一致性；[WBench v1](https://arxiv.org/abs/2605.25874v1)测多轮交互式视频世界模型；[RVG-Bench](https://arxiv.org/abs/2610.32268)测推理驱动的音视频时间定位；[VHELM](https://arxiv.org/abs/2410.07112v2)以九个方面组织视觉语言模型评估。结果受各自数据、模型快照和协议限制，不能拼成统一排名。
+31. 近期多模态评测：[MME-Unify](https://proceedings.iclr.cc/paper_files/papers/2026/hash/d8308c2c45cf95bfebb736be377f0982-Abstract-Conference.html)评估统一模型的理解、生成与协作任务；[WorldSense](https://proceedings.iclr.cc/paper_files/papers/2026/hash/55dc32df563a35bfebb736be377f098d-Abstract-Conference.html)评估同步视频、音频与文本理解；[XModBench](https://proceedings.iclr.cc/paper_files/papers/2026/hash/21071811269c70ac11a3e7869bac747e-Abstract-Conference.html)测文本、图像和音频之间的能力与一致性；[LVOmniBench](https://arxiv.org/abs/2603.19217)测长音视频理解；[LongShOTBench v2](https://arxiv.org/abs/2512.16978v2)以长视频单轮/多轮开放题和逐标准项 rubric 评估全模态推理，并在人工审阅子集上报告 verifier 一致性；[WBench v1](https://arxiv.org/abs/2605.25874v1)测多轮交互式视频世界模型；[RVG-Bench](https://arxiv.org/abs/2610.32268)测推理驱动的音视频时间定位；[VHELM](https://arxiv.org/abs/2410.07112v2)以九个方面组织视觉语言模型评估。结果受各自数据、模型快照和协议限制，不能拼成统一排名。
 32. [Unpacking Human Preference for LLMs: Demographically Aware Evaluation with the HUMAINE Framework](https://proceedings.iclr.cc/paper_files/paper/2026/hash/9c1bcfe6edf7e47d83d2e99492d851e4-Abstract-Conference.html)：以美国和英国分层样本、分层 Bradley--Terry--Davidson 模型和人口普查后分层估计人群偏好；作者报告年龄组偏好差异，结论不外推至其他地区或任务。
 33. [MENLO: From Preferences to Proficiency](https://arxiv.org/abs/2509.26601)：用本地化提示和四类质量 rubric 收集 47 种语言变体的人类标注；其一致性结果绑定该预印本的数据、维度和标注方案。
 34. [Pairwise or Pointwise? Evaluating Feedback Protocols for Bias in LLM-Based Evaluation](https://arxiv.org/abs/2504.14716)：在所测 LLM judge、指令遵循设置和三类风格干扰下，pairwise 判定比单条评分更易受干扰；结果不表示人类 pairwise 评审有相同偏差。
@@ -265,6 +275,7 @@ Transformer 核心机制入口：
 3. [MLflow Tracking](https://mlflow.org/docs/latest/tracking/)、[GenAI Evaluation Datasets](https://mlflow.org/docs/latest/genai/datasets/) 与 [Regression Testing](https://mlflow.org/docs/latest/genai/eval-monitor/regression-testing/)：官方文档分别展示 run 参数/代码版本/指标/artifact 追踪、从 trace 或人工样例建立带 inputs/expectations/来源血缘的数据集，以及通过 pytest/scorer 接入 CI 回归门禁。当前 dataset 文档要求 SQL backend；latest 文档和接口随 release 变化。对象与工作流本身不保证样本代表性、评分器有效或实验结论成立。
 4. [OpenTelemetry GenAI evaluation event](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-events.md)：当前草案定义 `gen_ai.evaluation.result` 及评价名称、分数标签/数值、解释和 response ID 等字段，便于把评价结果关联到生成响应。仓库当前标记为 Development；遥测 schema 不提供 ground truth 或 grader 效度，prompt、输出和工具参数也可能含敏感信息。
 5. [OpenAI Evaluation Best Practices](https://developers.openai.com/api/docs/guides/evaluation-best-practices)、[Working with evals](https://developers.openai.com/api/docs/guides/evals) 和 [Trace grading](https://developers.openai.com/api/docs/guides/trace-grading)：用于核对供应商的 dataset、grader、run 和 agent trace 工作流。2026-11-03 核对时，官方页面仍列出既有 Evals 于 2026-10-31 转为只读、2026-11-30 计划关闭；前一日期已过，实际账户状态未登录验证。功能时间线需按页面和账户重查，不能把具体 API 当成稳定架构边界。
+6. [Inspect AI Tasks](https://inspect.aisi.org.uk/tasks)、[Scoring Policy](https://inspect.aisi.org.uk/scoring-policy.html) 与 [Scoring](https://inspect.aisi.org.uk/scoring.html)：UK AI Security Institute 的开源评估框架将 dataset、solver、scorer 组合成任务，并将模型答错、裁判无结论和评分运行异常分开记录；这些是当前框架文档中的接口语义，不是通用生产架构或评分器效度保证。
 
 本章各类 benchmark lifecycle、harness 与 trace 方法的证据边界见[Benchmark 生命周期与 Agent Harness 评估来源](research/evaluation-benchmark-lifecycle-and-agent-harness-2026.md)及[Agent 轨迹诊断与线上评估来源](research/agent-trace-diagnosis-and-online-evaluation-2026.md)；具体平台接口以本节所链接的官方文档为准。
 
@@ -358,7 +369,7 @@ InstructGPT、RLHF、DPO、Constitutional AI、RLAIF、KTO、ORPO。
 13. [Towards Scalable Oversight via Partitioned Human Supervision](https://proceedings.iclr.cc/paper_files/paper/2026/hash/b6f03ce953cf7f07dafa20891d2539e3-Abstract-Conference.html)：从其余错误类别中均匀抽取互补标签，估计多选 top-1 accuracy；非均匀 hard-negative 选择破坏无偏假设，不可直接套到自由文本。
 14. [Humans Correct Their Judgments Through Debate, but Weaker AI Models Do Not](https://arxiv.org/abs/2610.28539)：arXiv v1（扩展版录用 NeurIPS 2026）包含 5 个人类实验、排除后 507 条判断和 40 多组 LLM 实验；主张由作者编写、未由领域专家核验，任务不含长时程推理，模型能力差距及先验诱导也有限。
 15. [Limits to scalable evaluation at the frontier](https://proceedings.iclr.cc/paper_files/paper/2025/hash/4264ee4376776907c0b87ed70b959585-Abstract-Conference.html)：当 judge 不比被评模型更准确时，理论上最多将 gold label 需求减半，经验节省更少；不能据此推断具体项目可以按固定比例缩减校准集。
-16. [The Geometry of LLM-as-Judge: Why Inter-LLM Consensus Is Not Human Alignment](https://arxiv.org/abs/2606.03043)：arXiv v2（2026-09-02），分析两个 Indic benchmark、四个领域、八种语言和 42 个 judge；主观 rubric 只达到人类一致程度的 58%—66%，单一可验证 rubric 的差距大多缩小。结果是评分几何诊断，不是内部机制解释。
+16. [The Geometry of LLM-as-Judge: Why Inter-LLM Consensus Is Not Human Alignment](https://aclanthology.org/2026.findings-emnlp.1696/)：Findings of EMNLP 2026；分析两个 Indic benchmark、四个领域、八种语言和 42 个 judge；主观 rubric 的 judge–human 一致程度为人类参照的 58%—66%，单一可验证 rubric 的差距大多缩小。结果是评分几何诊断，不是内部机制解释。
 17. [Is On-Policy Data always the Best Choice for Direct Preference Optimization-Based LM Alignment?](https://proceedings.iclr.cc/paper_files/paper/2026/file/0dc678bae2ad5d8fdfcd3d0c9f75705d-Paper-Conference.pdf)：ICLR 2026 比较不同模型和对齐阶段中的静态/on-policy 偏好候选；阶段假设与数据选择结果绑定论文设置。
 18. [Post-training Large Language Models for Diverse High-Quality Responses](https://proceedings.iclr.cc/paper_files/paper/2026/file/cfeb1fa78c5fb06be27c0980aa8ee581-Paper-Conference.pdf)：ICLR 2026 DQO 研究用 DPP 相似矩阵联合建模回答质量与语义多样性；结果依赖其 embedding、采样和评估设置。
 19. [Noisy Data is Destructive to Reinforcement Learning with Verifiable Rewards](https://arxiv.org/abs/2603.16140v2)：2026 年 arXiv v2 预印本，研究数学和 Text2SQL 中错误标注对指定 RLVR 配方的影响；结论尚不代表所有任务或算法。
@@ -443,7 +454,7 @@ FlashAttention、PagedAttention、Speculative Decoding、量化论文。
 18. [TurboQuant: Online Vector Quantization with Near-optimal Distortion Rate](https://arxiv.org/abs/2504.19874) 与 [Google Research 技术说明](https://research.google/blog/turboquant-redefining-ai-efficiency-with-extreme-compression/)：阅读理论失真、长上下文质量和 H100 attention-logit microbenchmark，并区分作者论文结果与服务指标。
 19. [vLLM TurboQuant accuracy/performance study](https://vllm.ai/blog/2026-05-11-turboquant)：固定 vLLM 0.20.2 commit、模型、H100 数量和 retrieval/reasoning/serving workload，观察低 bit cache 的准确率—容量—TPOT 权衡；不可和论文向量 microbenchmark 混比。
 20. [OCP Microscaling Formats MX v1.0](https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf) 与 [NVIDIA Transformer Engine NVFP4](https://docs.nvidia.com/deeplearning/transformer-engine/features/low_precision_training/nvfp4/nvfp4.html)：核对 MXFP4 的 E2M1/32-value E8M0 block scale 与 NVFP4 的 E2M1/16-value E4M3 scale/FP32 tensor scale。
-21. 比较 [DistServe v3](https://arxiv.org/abs/2401.09670v3)、[Mooncake v3](https://arxiv.org/abs/2407.00079v3) 与 [TaiChi v1](https://arxiv.org/abs/2508.01989v1)：分别关注 P/D 资源解耦、KV-centric 调度/分层缓存、以及按 TTFT/TPOT SLO 在共置和解耦间自适应；请求吞吐、goodput、trace 和 SLO 指标不可混排。
+21. 比较 [DistServe v3](https://arxiv.org/abs/2401.09670v3)、[Mooncake v5（2026-10-08）](https://arxiv.org/abs/2407.00079v5) 与 [TaiChi v1](https://arxiv.org/abs/2508.01989v1)：分别关注 P/D 资源解耦、KV-centric 调度/分层缓存、以及按 TTFT/TPOT SLO 在共置和解耦间自适应；请求吞吐、goodput、trace 和 SLO 指标不可混排。
 22. [SmartGen v1](https://arxiv.org/abs/2607.28150v1) 与 [SpectrumKV v1](https://arxiv.org/abs/2606.08635v1)：研究 P/D 阶段 KV 网络传输的选择性传输与 per-token mixed precision；TTST、KV 预算和困惑度分别绑定各论文模型、网卡和 workload。
 23. [DeepEP](https://github.com/deepseek-ai/DeepEP) 与 [vLLM Expert Parallel Load Balancer](https://github.com/vllm-project/vllm/blob/main/docs/serving/expert_parallel_deployment.md)：理解 EP dispatch/combine 通信 kernel、prefill/decode throughput-latency 路线、expert 重映射与冗余专家的显存代价；vLLM 主分支文档为动态页面（访问于 2026-11-02），不是目标集群性能报告。
 24. [vLLM Disaggregated Prefilling](https://github.com/vllm-project/vllm/blob/main/docs/features/disagg_prefill.md) 与 [SGLang PD Disaggregation](https://docs.sglang.io/docs/advanced_features/pd_disaggregation)（官方动态文档，访问于 2026-11-02）：核对当前 connector、KV handoff 与版本边界；vLLM 当前文档标注 experimental，并说明 disaggregated prefill 本身不保证吞吐提升。
@@ -470,6 +481,8 @@ FlashAttention、PagedAttention、Speculative Decoding、量化论文。
 41. [InnerQ arXiv v2](https://arxiv.org/abs/2602.23200v2)：核对 inner-dimension KV 分组、fused dequantize-GEMV 和 Jetson 单层 microbenchmark；作者结果不是端到端 serving 性能保证。
 42. [TensorRT-LLM KV Cache Compression](https://nvidia.github.io/TensorRT-LLM/features/kv-cache-compression.html)：访问日 2026-11-02 的动态官方文档，区分 NVFP4 cold-page 编码与 TriAttention token retention，并核对当时公开的 backend、KVCM、GPU 和 calibration 条件。
 43. [Four Over Six: More Accurate NVFP4 Quantization with Adaptive Block Scaling（arXiv v1）](https://arxiv.org/abs/2512.02010v1) 与 [Transformer Engine 2.20.2 Common API](https://docs.nvidia.com/deeplearning/transformer-engine/api/common.html)：分别核对逐 block map-to-4/map-to-6 误差选择的论文方法与当前框架 recipe 默认值；论文 MSE 结果不能直接当作 API 默认 MAE 路径的质量或性能保证。
+
+同一调度主线还可补读 [SLOWeave（arXiv:2609.07883）](https://arxiv.org/abs/2609.07883) 与 [Kairos: Towards Load-Aware Prefill Deflection for Disaggregated LLM Serving（arXiv:2607.02043）](https://arxiv.org/abs/2607.02043)：前者研究按活跃 decode deadline 自适应选择 prefill chunk，逐轮安全结论依赖 decode-only iteration 可行且成本预测准确；后者研究在 TTFT/TBT 约束下把 prefill 转派到有余量的 decode 节点，实测绑定 vLLM 0.18.1、A100、DeepSeek-V2-Lite 与特定 trace。二者是研究候选，不构成通用 SLA 或容量保证。
 
 当前实现与测量入口：[vLLM Production Metrics](https://docs.vllm.ai/en/latest/usage/metrics/)、[vLLM Serving Benchmark 指标](https://github.com/vllm-project/vllm/blob/main/docs/benchmarking/cli.md)、[GuideLLM Goodput](https://vllm-project.github.io/guidellm/stable/reference/guidellm/schemas/benchmark/goodput/) 与 [NVIDIA Triton Speculative Decoding](https://docs.nvidia.com/deeplearning/triton-inference-server/user-guide/docs/llm_features/speculative_decoding_by_backend_type.html)。它们分别说明版本化运行指标、客户端 ITL/TPOT 测量点、SLO 过滤后的 goodput 和特定后端推测解码；不能将滚动文档当作跨框架统一接口。
 
@@ -513,12 +526,15 @@ ReAct、Toolformer、function calling、MCP、A2A、agent evaluation、coding ag
 16. [OpenAI Programmatic Tool Calling](https://developers.openai.com/api/docs/guides/tools-programmatic-tool-calling)：特定 Responses / Agents runtime 中用代码编排可预测工具链的官方设计入口；不代表通用 Agent 协议，也不绕过应用侧权限和审批。
 17. [From Untrusted Input to Trusted Memory](https://arxiv.org/abs/2606.04329)：arXiv v2 预印本区分四种长期记忆写入通道，并分开测写入与后续召回；结果只适用于 GPT-OSS-120B、OpenClaw/HERMES 默认记忆配置和论文样例。
 18. [CounterSteer: Suppressing Indirect Prompt Injection with Activation Steering](https://arxiv.org/abs/2609.36570)：2026-09 arXiv v1 的逐模型激活干预研究；指定开源模型和攻击设置下报告抑制效果，同时显示参数污染、白盒部署与效用成本边界。
+19. [AWS SDK retry behavior](https://docs.aws.amazon.com/sdkref/latest/guide/feature-retry-behavior.html)：官方文档给出一种按错误分类、使用 full jitter 和 retry quota 的实现；其 2026 新行为需按文档 opt in，SDK 支持与默认值不等于通用重试合同。
+20. [Kubernetes Pod Security Standards](https://kubernetes.io/docs/concepts/security/pod-security-standards/)：Pod 级 Privileged/Baseline/Restricted 配置标准；不能单独证明不可信代码的强隔离或多租户安全。
 
 #### 长上下文、RAG 与长期记忆
 
 - [LongBench Pro v1](https://arxiv.org/abs/2601.02872v1)：以自然产生的双语长文样本扩展长上下文评估；阅读时检查长度、任务类型和证据位置分布，不能据此替代目标语料。
 - [LongHarness Bench v1](https://arxiv.org/abs/2609.38137v1)：评测长上下文 harness 在多条件检索与跨文档推理任务中的质量—成本差异；结果绑定预印本任务、模型与 harness 配置，不能泛化为 harness 排名。
 - [Relevant Is Not Warranted: Evidence-Force Calibration for Cited RAG](https://arxiv.org/abs/2605.28044)：FORCEBENCH 用对比证据检查引用是否足以支持声明的具体范围和强度；报告值绑定 198 对样本与四个 judge。
+- [RAG-Safety-Bench: Reliable Evaluation of Retrieval-Augmented LLM Safety](https://aclanthology.org/2026.emnlp-main.2246/)：用非 RAG、答案包含文档、相关但不含答案文档和随机安全文档四种条件分离检索文档影响；论文测试五个开源模型，不能外推为所有模型或生产语料的安全率。
 - [From Recall to Forgetting: Benchmarking Long-Term Memory for Personalized Agents](https://aclanthology.org/2026.findings-acl.1337/) 与 [Mem2ActBench](https://aclanthology.org/2026.acl-long.370/)：分别研究长期个性化记忆的更新/遗忘和任务型 Agent 中的记忆行动使用；任务合同不同，不合并为单一记忆能力分数。
 - [AdaMem](https://aclanthology.org/2026.emnlp-industry.189/)、[OP-Bench](https://aclanthology.org/2026.emnlp-main.1168/) 与 [PS-Bench](https://aclanthology.org/2026.acl-long.1260/)：分别研究偏好条件化的选择性记忆写入、无关/重复/迎合式过度个性化，以及个人记忆导致的 intent legitimation；实验范围限于论文中的 persona、样本、模型和评测协议。
 - [Agent Memory: Characterization and System Implications of Stateful Long-Horizon Workloads](https://arxiv.org/abs/2606.06448)：按构建、检索和生成路径研究状态化长期记忆的系统成本；论文 workload 与代表系统范围限制其外推。
@@ -538,8 +554,8 @@ ReAct、Toolformer、function calling、MCP、A2A、agent evaluation、coding ag
 
 - [SWE-bench](https://arxiv.org/abs/2310.06770) 将仓库 issue、patch 与测试连接；[SWE-Gym](https://arxiv.org/abs/2412.21139) 增加可执行环境和可用轨迹；[Terminal-Bench 2.0](https://arxiv.org/abs/2601.11868) 则测试终端工作流。三者的任务合同和训练/测试边界不同。
 - [WebArena](https://arxiv.org/abs/2307.13854) 检查可复现网站任务的功能状态；[OSWorld](https://arxiv.org/abs/2404.07972) 检查真实桌面应用与跨应用流程；[BrowserGym](https://arxiv.org/abs/2412.05467) 提供统一实验接口，不会统一各任务集的评分含义。
-- [τ-bench](https://arxiv.org/abs/2406.12045)、[ToolSandbox](https://arxiv.org/abs/2408.04682) 和 [AgentDojo](https://arxiv.org/abs/2406.13352) 分别突出多轮业务状态/pass^k、milestone 与禁止事件、以及注入下效用和安全结果。
-- [GAIA](https://arxiv.org/abs/2311.12983)、[ScienceAgentBench](https://arxiv.org/abs/2410.05080) 和 [PaperBench](https://arxiv.org/abs/2504.01848) 从综合问答、可执行数据分析推进到论文实验复现；答案正确、产物可运行和复现进度是不同判定对象。
+- [τ-bench](https://arxiv.org/abs/2406.12045)、[τ²-Bench](https://arxiv.org/abs/2506.07982)、[ToolSandbox](https://arxiv.org/abs/2408.04682) 和 [AgentDojo](https://arxiv.org/abs/2406.13352) 分别突出多轮业务状态/pass^k、双控制对话及用户模拟器可靠性、milestone 与禁止事件、以及注入下效用和安全结果；结果受各自状态环境、模拟器和任务构造限制。
+- [GAIA](https://arxiv.org/abs/2311.12983)、[ScienceAgentBench](https://arxiv.org/abs/2410.05080) 和 [PaperBench](https://arxiv.org/abs/2504.01848) 从综合问答、可执行数据分析推进到论文实验复现；答案正确、产物可运行和复现进度是不同判定对象。[RE-Bench](https://arxiv.org/abs/2411.15114) 比较指定研究工程任务与不同时间预算下的人类尝试，[AIRS-Bench v3](https://arxiv.org/abs/2602.06855v3) 覆盖机器学习研究流程中的 20 个任务；[The AI Scientist](https://doi.org/10.1038/s41586-026-10265-5) 是受限端到端稿件案例。任务、scaffold、预算、评分者和验证方式不可合成总体自动化率。
 - [METR time horizon](https://metr.org/time-horizons/) 及其[方法论文](https://arxiv.org/abs/2503.14499)用人类任务时间拟合指定模型—scaffold 配置的成功曲线；[Gaia2](https://arxiv.org/abs/2602.11964)测异步动态环境下的适应。两者不应合成“Agent 能连续运行多久”。
 - [Executable-contract audit](https://arxiv.org/abs/2609.37315) 审计工具实现、状态变化和 grader 读取字段；这是评测合同审计方法，不是 benchmark。预印本中的潜在缺陷不等于 Agent 已触发或榜单已变化。
 
@@ -571,12 +587,12 @@ Checkpoint 恢复设计可补读 [TierCheck](https://arxiv.org/abs/2605.17821)�
 2. 扩散与连续生成： [DDPM](https://arxiv.org/abs/2006.11239)、[Imagen](https://arxiv.org/abs/2205.11487)、[Latent Diffusion](https://arxiv.org/abs/2112.10752)、[DiT](https://arxiv.org/abs/2212.09748)、[Flow Matching](https://arxiv.org/abs/2210.02747)、[Rectified Flow](https://arxiv.org/abs/2209.03003) 与 [SDXL](https://arxiv.org/abs/2307.01952)；区分可逆密度模型、连续向量场训练目标与扩散采样路径，避免把同名的 flow 术语混为一类。
 3. 采样与条件控制： [Classifier-Free Guidance](https://arxiv.org/abs/2207.12598)、[DDIM](https://arxiv.org/abs/2010.02502)、[DPM-Solver](https://arxiv.org/abs/2206.00927)、[Progressive Distillation](https://arxiv.org/abs/2202.00512) 和[扩散噪声 schedule 分析](https://arxiv.org/abs/2305.08891)；区分无需重训的采样器与需要额外训练的蒸馏。
 4. 图像编辑： [SDEdit](https://arxiv.org/abs/2108.01073)、[InstructPix2Pix](https://arxiv.org/abs/2211.09800) 与 [ControlNet](https://arxiv.org/abs/2302.05543)；分别核对加噪重绘、语言指令编辑和空间条件控制。
-5. 生成评估： [FID](https://arxiv.org/abs/1706.08500)、[The Role of ImageNet Classes in FID](https://arxiv.org/abs/2203.06026)、[CMMD / Rethinking FID](https://arxiv.org/abs/2401.09603)、[FVD](https://arxiv.org/abs/1812.01717)、[Beyond FVD](https://arxiv.org/abs/2410.05203)、[GenEval](https://arxiv.org/abs/2310.11513)、[T2I-CompBench](https://arxiv.org/abs/2307.06350)、[VBench](https://arxiv.org/abs/2311.17982) 与 [VBench-2.0](https://arxiv.org/abs/2503.21755)。指标依赖特征提取器和数据设定，不替代条件遵循、任务正确性和安全评估。
+5. 生成评估： [FID](https://arxiv.org/abs/1706.08500)、[The Role of ImageNet Classes in FID](https://arxiv.org/abs/2203.06026)、[CMMD / Rethinking FID](https://arxiv.org/abs/2401.09603)、[FVD](https://arxiv.org/abs/1812.01717)、[Beyond FVD](https://arxiv.org/abs/2410.05203)、[GenEval](https://arxiv.org/abs/2310.11513)、[T2I-CompBench](https://arxiv.org/abs/2307.06350)、[VBench](https://arxiv.org/abs/2311.17982)、[VBench-2.0](https://arxiv.org/abs/2503.21755)、[PVBench](https://arxiv.org/abs/2610.26711) 与 [KeyFrame-Compass](https://arxiv.org/abs/2607.14202)。指标依赖特征提取器、提示集和评估协议，不替代条件遵循、任务正确性和安全评估。
 6. 视频生成： [Video Diffusion Models](https://arxiv.org/abs/2204.03458)、[Make-A-Video](https://arxiv.org/abs/2209.14792)、[Imagen Video](https://arxiv.org/abs/2210.02303)、[Lumiere](https://arxiv.org/abs/2401.12945)、[CogVideoX](https://arxiv.org/abs/2408.06072)、[Wan 2.1](https://arxiv.org/abs/2503.20314) 与 [Pyramidal Flow Matching](https://arxiv.org/abs/2410.05954)；Sora 的公开视频表示与系统边界见[OpenAI 2024 技术报告](https://openai.com/index/video-generation-models-as-world-simulators/)和 [Sora 2 System Card](https://openai.com/index/sora-2-system-card/)，不据此推断未披露内部架构。OpenAI Help Center 记录 Sora 网页/应用已于 2026-04-26 停止，API 已于 2026-09-24 停止（[停止服务说明](https://help.openai.com/en/articles/20001152-what-to-know-about-the-sora-discontinuation)）。
 7. 自回归图像生成： [DALL·E（dVAE + 自回归 Transformer）](https://arxiv.org/abs/2102.12092) 与 [DALL·E 2（unCLIP 两阶段）](https://arxiv.org/abs/2204.06125)；论文中的模型规模、codebook 与数据配比是各自实验选择，不是通用超参数。
-7. 语音模型方法与评估： [SpeechLM 综述（ACL 2025）](https://aclanthology.org/2025.acl-long.682/)、[离散语音 token 综述](https://arxiv.org/abs/2502.06490)、[CTC/RNN-T 流式对照](https://arxiv.org/abs/2011.04785)、[Qwen3-ASR 技术报告 v2](https://arxiv.org/abs/2601.21337v2) 与 [mu-bench v1](https://arxiv.org/abs/2609.32082v1)；用来建立架构、tokenizer、监督目标和业务关键字段评测地图。Qwen3-ASR 的流式窗口绑定该实现，mu-bench 的 UER 绑定其 judge、rubric 与五种 locale，不把模型报告或单一基准外推成通用结论。
+7. 语音模型方法与评估： [SpeechLM 综述（ACL 2025）](https://aclanthology.org/2025.acl-long.682/)、[离散语音 token 综述](https://arxiv.org/abs/2502.06490)、[CTC/RNN-T 流式对照](https://arxiv.org/abs/2011.04785)、[Emformer](https://arxiv.org/abs/2010.10759v4)、[Qwen3-ASR 技术报告 v2](https://arxiv.org/abs/2601.21337v2) 与 [mu-bench v1](https://arxiv.org/abs/2609.32082v1)；用来建立架构、tokenizer、监督目标和业务关键字段评测地图。Emformer 的延迟/WER 数值绑定 LibriSpeech 和论文配置；Qwen3-ASR 的流式窗口绑定该实现，mu-bench 的 UER 绑定其 judge、rubric 与五种 locale，不把模型报告或单一基准外推成通用结论。
 8. 语音合成演进： [Tacotron 2](https://arxiv.org/abs/1712.05884)、[FastSpeech](https://arxiv.org/abs/1905.09263)、[FastSpeech 2](https://arxiv.org/abs/2006.04558)、[VITS](https://proceedings.mlr.press/v139/kim21f.html)、[VALL-E](https://arxiv.org/abs/2301.02111)、[VALL-E 2](https://arxiv.org/abs/2406.05370)、[Qwen3-TTS 技术报告 v1](https://arxiv.org/abs/2601.15621v1) 与 [LP-TTS-Bench v1](https://arxiv.org/abs/2610.19774v1)；比较 Mel+vocoder、自回归/非自回归、显式韵律条件、变分端到端和 codec LM，并把音色与韵律作为不同评估维度。论文中的 first-packet latency 和长 prompt 收益绑定各自模型、评测协议与测量端点。
-9. 流式对话语音： [Moshi](https://arxiv.org/abs/2410.00037) 比较并行用户/助手音频流与文本辅助生成；Qwen3-Omni/Qwen3.5-Omni 的 Thinker-Talker、MTP/Code2Wav 和 ARIA 见各自技术专题。论文延迟数字需绑定各自硬件、并发、首包定义与测量边界。
+9. 流式对话语音： [Moshi](https://arxiv.org/abs/2410.00037v1) 比较并行用户/助手音频流与文本辅助生成；[InteractionBench v1](https://arxiv.org/abs/2611.02430v1) 将轮次时机、口语任务、耳语/音量和长对话事实一致性放入同一实时评测框架；Qwen3-Omni/Qwen3.5-Omni 的 Thinker-Talker、MTP/Code2Wav 和 ARIA 见各自技术专题。Moshi 延迟数字绑定论文配置；InteractionBench 结果受合成英语、协议/提示差异、网络端点和阈值定义限制，不能直接给生产系统排名或 SLA。
 10. 多模态评估与文档： [CLIPScore](https://arxiv.org/abs/2104.08718)、[MME](https://arxiv.org/abs/2306.13394)、[MMBench](https://arxiv.org/abs/2307.06281)、[MMMU](https://arxiv.org/abs/2311.16502)、[POPE](https://arxiv.org/abs/2305.10355)、[HallusionBench](https://arxiv.org/abs/2310.14566)、[MagiC](https://arxiv.org/abs/2507.07297) 的 grounded reasoning 与步骤级评测，以及 [LayoutLMv3](https://arxiv.org/abs/2204.08387)；[VGR](https://arxiv.org/abs/2506.11991)展示推理中按需回看局部视觉特征的路线。分数和方法收益绑定各自任务集、模型、prompt、解析规则和版本，不概括整体产品能力。
 11. 统一多模态路线： [Chameleon](https://arxiv.org/abs/2405.09818)、[NExT-GPT](https://arxiv.org/abs/2309.05519) 与 [AnyGPT](https://arxiv.org/abs/2402.12226)；分别观察早期融合序列、LLM 中枢连接专用 encoder/decoder、离散多模态 token 的结构和数据约束。
 12. 多模态标准与安全： [VQA 官方评估协议](https://visualqa.org/evaluation.html)、[ITU-T P.800.2 MOS 报告建议](https://www.itu.int/itu-t/recommendations/rec.aspx?id=12973) 和 [C2PA 2.5 技术规范](https://spec.c2pa.org/specifications/specifications/2.5/specs/C2PA_Specification.html)；可验证来源凭证不能单独证明媒体事实真实。
@@ -585,10 +601,12 @@ Checkpoint 恢复设计可补读 [TierCheck](https://arxiv.org/abs/2605.17821)�
 15. OCR、ASR、视频和扩散训练对照： [Donut](https://arxiv.org/abs/2111.15664) 与 [Pix2Struct](https://arxiv.org/abs/2210.03347) 对照 OCR-free 结构化生成和 screenshot parsing；[CTC](https://www.cs.toronto.edu/~graves/icml_2006.pdf) 与 [RNN-T](https://arxiv.org/abs/1211.3711) 对照单调路径求和和时间—前缀格点；[Min-SNR](https://arxiv.org/abs/2303.09556) 分析 diffusion timestep 梯度冲突及目标相关权重；[CogVideoX](https://arxiv.org/abs/2408.06072) 报告变长视频 frame pack 与时空训练设计。具体收益应绑定论文配置，不外推为所有数据或模型的保证。
 16. 多模态全景综述： [From Specific-MLLMs to Omni-MLLMs](https://aclanthology.org/2025.findings-acl.453/) 用于定位架构、训练阶段、数据集和评测问题；综述负责建立阅读地图，机制和数值结论仍回到对应原论文核对。
 17. 多模态推理预算与视频剪枝： [Qwen2-VL](https://arxiv.org/abs/2409.12191) 以动态分辨率分配视觉 token；[EVS](https://arxiv.org/abs/2510.14624) 删除时间静态 patch；[VidCom2](https://arxiv.org/abs/2505.14454) 按帧独特性分配压缩预算。分别比较预处理/编码后成本、保留位置和质量—延迟曲线，结果只绑定原论文配置。
-18. 多模态 serving、安全与视频评估： [vLLM-Omni](https://arxiv.org/abs/2610.09307) 展示 orchestrator、stage pool、connector 与 chunk handoff；[Video-MME-v2](https://arxiv.org/abs/2604.05015) 评估跨题一致和证据支持；[Image-based Prompt Injection](https://arxiv.org/abs/2603.03637) 研究图像内隐藏指令。系统 benchmark、论文攻击率和模型能力须分开报告。
+18. 多模态 serving、安全与视频评估： [vLLM-Omni](https://arxiv.org/abs/2610.09307) 展示 orchestrator、stage pool、connector 与 chunk handoff；[Video-MME-v2](https://arxiv.org/abs/2604.05015) 评估跨题一致和证据支持；[Image-based Prompt Injection](https://arxiv.org/abs/2603.03637) 研究图像内隐藏指令；[MMPIBench](https://arxiv.org/abs/2609.09404) 在固定模型、框架和 mock 工具协议下记录攻击尝试、部分执行与完成；[OWASP LLM01:2025](https://genai.owasp.org/llmrisk/llm01-prompt-injection/) 总结间接/多模态注入风险与纵深缓解建议。MMPIBench 的 attempted 汇总包含不同执行结果，样本格多为单次运行，不能当作企业攻击率或安全认证；OWASP 建议也不证明具体系统已经安全。系统 benchmark、论文攻击率和模型能力须分开报告。
 19. 交互式视频世界模型评估：[WBench v1](https://arxiv.org/abs/2605.25874v1) 以五个维度组织 289 个案例与 1,058 轮交互；[World-in-Context v1](https://arxiv.org/abs/2610.33169v1) 是 2026-10 的预印本，显式联合编码视角、动作和摄像机控制，并在 WBench 上评估。两者结果均绑定各自数据、模型接口和评分协议，不能代表所有模型或现实环境中的世界建模能力。
 20. 视频跨模态描述评估：[OmniCapBench](https://arxiv.org/abs/2610.12458) 用 786 段视频和原子化事件检查实体指代、镜头变化、声音事件、时间定位与音画一致性；样本数和发现绑定其数据构造与评测协议。
 21. 扩散模型规模研究：[Scaling Laws for Diffusion Transformers](https://proceedings.iclr.cc/paper_files/paper/2026/hash/880d8999c07a8efc9bbbeb0c38f50765-Abstract-Conference.html) 在指定 FLOPs 区间拟合 DiT 生成质量并做大规模外推；预测点需与直接实验区分，不能当成目标模型的实测结论。
+22. [PureDocBench v2](https://arxiv.org/html/2605.07492v2)：用 1,475 个来源可追溯页面构造 Clean、Digital、Real 三种配对图像并评估 58 个模型；Real 轨道相对 Clean 的平均分差属于该数据、模型和指标设置，不能当作企业文档准确率。HTML 生成内容对手写材料覆盖有限，沿用指标仍有局限。
+23. [OWASP File Upload Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/File_Upload_Cheat_Sheet.html)：文件名和请求 Content-Type 可由上传者控制，签名检查单独使用不足以保证安全；解码/重新编码仍需依赖受维护解析器和资源、格式、执行环境限制。官方指南提供纵深防御建议，不是具体部署的安全证明。
 
 - [XModBench](https://proceedings.iclr.cc/paper_files/paper/2026/hash/21071811269c70ac11a3e7869bac747e-Abstract-Conference.html)：以三模态任务检查 omni-language model 的跨模态一致性与模态偏差；它补充任务切片，不证明模型内部形成了模态不变表示。
 - [LVOmniBench](https://arxiv.org/abs/2603.19217)：评估 10—90 分钟长音视频中的记忆、时间定位和跨模态理解；275 个视频与 1,014 组问答以及作者报告的模型分数只代表该数据、模型快照和协议。
@@ -619,7 +637,7 @@ Red Teaming、Mechanistic Interpretability、SAE、Model Editing、Unlearning、
 - [Towards Scalable Oversight via Partitioned Human Supervision](https://proceedings.iclr.cc/paper_files/paper/2026/hash/b6f03ce953cf7f07dafa20891d2539e3-Abstract-Conference.html)：ICLR 2026 以均匀随机抽取的错误类别互补标签估计多选 top-1 准确率；非均匀 hard-negative 选择会破坏无偏假设，方法不直接适用于自由文本。
 - [Scaling Laws For Scalable Oversight](https://proceedings.neurips.cc/paper_files/paper/2025/file/8c3caae2f725c8e2a55ecd600563d172-Paper-Conference.pdf)：NeurIPS 2025 在 Mafia、Debate、Backdoor Code、Wargames 等监督博弈中拟合能力关系；结果是特定模拟任务与 Elo 配置下的研究，不是生产监督成功率。
 - [Humans Correct Their Judgments Through Debate, but Weaker AI Models Do Not](https://arxiv.org/abs/2610.28539)：arXiv v1（2026-10-20；扩展版录用 NeurIPS 2026）含 5 个人类实验（排除后 507 条判断）和 40 多组 LLM 实验；主张由作者编写且未由领域专家核验，任务不含多步/长时程推理，模型能力差距和先验诱导存在限制。
-- [The Geometry of LLM-as-Judge: Why Inter-LLM Consensus Is Not Human Alignment](https://arxiv.org/abs/2606.03043)：arXiv v2（2026-09-02）分析两个 Indic benchmark、四个领域、八种语言和 42 个 judge（15 个基础模型、27 个变体）；主观 rubric 达到人类一致程度的 58%—66%，唯一可验证 rubric 的差距大多缩小。几何是评分协方差诊断，不是内部机制解释；人类参考和 rubric 覆盖亦有限。
+- [The Geometry of LLM-as-Judge: Why Inter-LLM Consensus Is Not Human Alignment](https://aclanthology.org/2026.findings-emnlp.1696/)：Findings of EMNLP 2026 以两个 Indic benchmark、四个领域、八种语言和 42 个 judge 比较 judge–judge 与 judge–human 一致性；主观 rubric 上 judge 仅达到人类参照的 58%—66%，一个可验证 rubric 的差距大多缩小。几何是评分关系诊断，不是内部机制解释；评估范围有限。
 - [Limits to Scalable Evaluation at the Frontier](https://proceedings.iclr.cc/paper_files/paper/2025/hash/4264ee4376776907c0b87ed70b959585-Abstract-Conference.html)：ICLR 2025 指出当 judge 不比被评模型更准确时，去偏方法理论上最多将 gold label 需求减半，经验节省更少；这不是具体项目可直接采用的校准折扣。
 
 #### 自动化对抗评估
@@ -630,6 +648,7 @@ Red Teaming、Mechanistic Interpretability、SAE、Model Editing、Unlearning、
 - [Assessing Automated Prompt Injection Attacks in Agentic Environments](https://arxiv.org/abs/2606.10525)：arXiv v1 在 AgentDojo 中比较 GCG 与 TAP；报告绑定 80 个任务配对、四个领域、三种目标模型和具体搜索预算，跨模型迁移有限。
 - [AgentDyn](https://arxiv.org/abs/2602.03117)：arXiv v3 的动态开放任务 benchmark，加入动态规划与有用第三方指令，讨论攻击阻断和过度防御的取舍；结论受其手工任务与参测防御范围限制。
 - [REDAgentBench](https://arxiv.org/abs/2608.10669)：2026-08 arXiv 预印本，以隔离服务回执和最终状态验证 Agent 副作用；1,661 个案例覆盖五类模拟服务，并比较 harness 与证据视图对报告 ASR 的影响。仍应按预印本及其具体模型、环境和判定配置解读。
+- [ANGLER / REEF](https://arxiv.org/abs/2610.41272)：2026-10 arXiv v1 以 verifier 反馈改进 Web Agent 红队候选；20.36% 对 15.24% 的 ASR 及 BSR 变化绑定 9 个合成、可重置网站、8 个 VLM agent 配置、指定 harness 和每站点 rollout 预算，不代表生产攻击率。
 
 Mechanistic interpretability 补读入口：[SAEBench](https://arxiv.org/abs/2503.09532) 与 [MIB](https://proceedings.mlr.press/v267/mueller25a.html) 对照 SAE 指标和因果定位任务；[SANITY Checks](https://arxiv.org/abs/2602.14111v1) 检查随机基线；[Revising and Falsifying SAE Feature Explanations](https://proceedings.neurips.cc/paper_files/paper/2025/hash/5b6ce2529a79862a2d8ac57ac0e01d90-Abstract-Conference.html) 以近邻负例反驳过宽解释；[Gated SAE](https://proceedings.neurips.cc/paper_files/paper/2024/file/01772a8b0420baec00c4d59fe2fbace6-Paper-Conference.pdf) 缓解 L1 shrinkage；[LLM Forensics](https://aclanthology.org/2026.findings-emnlp.2418/) 区分触发检测与行为控制；[Rethinking SAE Evaluation](https://arxiv.org/abs/2610.30474v2) 用 DAME 检查高贡献 feature 的单义性；[SA-GSAE](https://arxiv.org/abs/2605.28149v3) 探索双侧门控的 SAE 表示；[Formal Mechanistic Interpretability](https://proceedings.iclr.cc/paper_files/paper/2026/hash/b5afe13494c825089b1e3944fdaba212-Abstract-Conference.html) 在视觉模型中研究形式化 circuit 保证。以上结果均绑定论文自己的模型、数据、指标和任务范围。
 
@@ -1289,7 +1308,7 @@ arXiv title-field 查询 ti:Qwen3.6 当前返回 0 条，但 all-field 查询有
 5. [OWASP Top 10 for Agentic Applications 2026](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/) 的 ASI03 Identity and Privilege Abuse：用于识别继承身份、凭证泄漏和权限扩展等风险类别，不是实现标准或某个部署安全性的证据。
 6. [Zanzibar: Google’s Consistent, Global Authorization System](https://www.usenix.org/conference/atc19/presentation/pang)：大规模关系授权与一致性系统的公开研究案例；不是 Agent 权限标准。
 7. [Cedar Authorization](https://docs.cedarpolicy.com/auth/authorization.html) 与 [Policy Validation](https://docs.cedarpolicy.com/policies/validation.html)：具体展示 principal/action/resource/context、默认拒绝及策略 schema 校验；实现行为仅适用于 Cedar，不能推广为所有 PDP 的共同语义。
-8. [AuthZEN Access Request and Approval Profile 1.0](https://openid.github.io/authzen/authzen-access-request-approval-profile-1_0.html)、[COAZ Framework 1.0](https://openid.github.io/authzen/authzen-coaz-framework-1_0.html) 与 [COAZ-MCP Binding 1.0](https://openid.github.io/authzen/authzen-coaz-mcp-binding-1_0)：OpenID Foundation 截至 2026-11-03 将其列为工作组草案。AARP 描述可审批拒绝、异步补齐前置条件和重新评估；COAZ 系列把具体操作映射为 AuthZEN 请求。不得写成 Final Specification 或已验证的部署互操作性。
+8. [AuthZEN Access Request and Approval Profile 1.0](https://openid.github.io/authzen/authzen-access-request-approval-profile-1_0.html)、[COAZ Framework 1.0](https://openid.github.io/authzen/authzen-coaz-framework-1_0.html) 与 [COAZ-MCP Binding 1.0](https://openid.github.io/authzen/authzen-coaz-mcp-binding-1_0.html)：OpenID Foundation 截至 2026-11-03 将其列为工作组草案。AARP 描述可审批拒绝、异步补齐前置条件和重新评估；COAZ 系列把具体操作映射为 AuthZEN 请求。不得写成 Final Specification 或已验证的部署互操作性。
 9. [OWASP Agent Control Standard（ACS）Instrument 规范](https://owaspacs.org/docs/spec/instrument/specification/) 与[符合性配置文件](https://owaspacs.org/docs/spec/conformance/)：官方站截至 2026-11-03 列出发布 v0.1.4、规范版本 v0.1.0，描述 Agent 生命周期 hook 与 Guardian 控制合同；v0.1.4 符合声明没有独立验证方或登记册。它提供运行时控制接口参考，不定义组织授权策略或证明部署安全。
 
 上述来源支持本章的身份、授权接口、关系建模和风险分类边界，不提供可直接复制的组织策略，也不证明实际 PEP、executor、撤销传播或生产状态已经通过验证。AuthZEN 扩展仍为工作组草案；ACS 版本及验证状态以 2026-11-03 官方页面为准。
@@ -1451,3 +1470,31 @@ arXiv title-field 查询 ti:Qwen3.6 当前返回 0 条，但 all-field 查询有
 3. [DebugLM v2](https://arxiv.org/abs/2603.17884v2)：学习式训练来源标签的研究路线，实验范围限于两种 8B 基础模型、五个特定数据集和标签匹配协议；不等价于对象级 lineage 或因果归因。
 
 章节审阅、篇幅、数值例子、代码/公式/图表和未关闭门禁见[第十二章审计记录](progress/book-09-data-engineering/chapter-12-audit.md)；来源版本、阅读范围和证据边界见[回归诊断与来源追踪研究记录](research/data-engineering-regression-and-provenance-2026-11-03.md)。
+
+## 第十一册第十一章：设计数据标注平台
+
+1. [Datasheets for Datasets](https://arxiv.org/abs/1803.09010) 与 [Data Statements for NLP](https://aclanthology.org/Q18-1041/)：分别提出数据集说明和 NLP 数据声明的描述维度；它们是研究/文档实践框架，不是数据事实、授权或合规证明。
+2. [Diverging Preferences: When do Annotators Disagree and do Models Know?](https://proceedings.mlr.press/v267/zhang25bx.html)：ICML 2025 分析偏好分歧的来源及其对 reward modeling 和 LLM judge 的影响；结论受论文任务与标注协议约束，不给出跨项目分歧比例。
+3. [W3C PROV Overview](https://www.w3.org/TR/prov-overview/) 与 [Croissant 1.1 规范](https://docs.mlcommons.org/croissant/docs/croissant-spec-1.1.html)：分别提供实体/活动/执行者的来源模型及机器可读元数据表示；字段可表达来源和用途，但不证明字段真实或策略已执行。
+4. [NIST Privacy Framework 1.0](https://www.nist.gov/privacy-framework/privacy-framework) 与 [1.1 更新页](https://www.nist.gov/privacy-framework/new-projects/privacy-framework-version-11)：自愿风险管理框架入口；截至 2026-11-05，1.1 最终版页面仍标为 coming soon，现有 IPD 属草案。
+5. [Cohen's kappa](https://scikit-learn.org/stable/modules/generated/sklearn.metrics.cohen_kappa_score.html) 与 [Active Learning Literature Survey](https://burrsettles.com/pub/settles.activelearning.pdf)：统计实现和样本选择的研究入门；函数及策略都不替项目选择抽样单位、标签语义、代表性或验收阈值。
+6. [Presidio 官方文档](https://presidio.dataprivacystack.org/) 与 [Data Cascades in High-Stakes AI](https://research.google/pubs/everyone-wants-to-do-the-model-work-not-the-data-work-data-cascades-in-high-stakes-ai/)：分别作为 PII 识别工具和高风险 AI 数据级联研究入口；工具检测不构成无 PII 保证，研究结论也不能直接变成平台 SLA。
+
+## 第十一册第十二章：设计安全审核系统
+
+1. [NIST AI 100-2e2025](https://csrc.nist.gov/pubs/ai/100/2/e2025/final)：AI 对抗性机器学习攻击分类与术语参考，按系统类型、生命周期、攻击目标和能力组织；不替组织设定风险容忍度或证明具体控制有效。
+2. [OWASP GenAI LLM Top 10 2026](https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/) 与 [OWASP Top 10 for Agentic Applications 2026](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/)：分别作为 LLM 应用与 Agent 系统风险分类入口；均为社区指南，不是系统安全认证或通用阈值。
+3. [OWASP GenAI Red Teaming Manual 1.0](https://genai.owasp.org/resource/genai-red-teaming-manual-version-1-0/)：资源页摘要介绍计划、侦察、攻击面映射、利用、持久化、影响评估、报告和修复八阶段流程；详细 PDF 未能核阅，未据此归纳操作细节。
+4. [The Devil is in the Context: Nine Dimensions of Prompt Injection Attacks](https://arxiv.org/abs/2611.04672)：2026-11-03 提交的预印本，将攻击与用户授权任务和系统上下文共同分类，并分析九个选定 benchmark 的组合覆盖；分类法可扩展，覆盖数字只绑定作者的选集与标注方案。
+
+章节扫描、修改、篇幅、示例、代码/公式/图表和遗留门禁见[第十二章审计记录](progress/book-11-system-design-interview/chapter-12-audit.md)；来源版本、阅读范围和证据边界见[安全审核系统与对抗评估证据](research/safety-review-system-evidence-2026-11-05.md)。
+
+## 第十一册第十三章：设计模型路由与缓存系统
+
+1. [FrugalGPT](https://arxiv.org/abs/2305.05176)、[RouteLLM](https://arxiv.org/abs/2406.18665) 与 [RouterBench](https://arxiv.org/abs/2403.12031)：分别作为级联/路由方案及质量—成本评估入口；论文实验不能直接外推到当前模型、中文合同任务或生产账单。
+2. [Dynamic LLM Routers are Often Misguided（arXiv v1）](https://arxiv.org/abs/2610.02762v1)：作者在六个商业 router、14 种设置和单轮英文 benchmark 上报告匹配成本结果，并指出成本—准确率目标可能鼓励难度、长度或来源偏置；结论限于其候选模型与评测协议。
+3. [vCache: Verified Semantic Prompt Caching](https://proceedings.iclr.cc/paper_files/paper/2026/hash/9559cd2116de7a8f5672eac3fcd232cc-Abstract-Conference.html) 与 [Surplus（arXiv v1）](https://arxiv.org/abs/2611.02498v1)：分别研究逐缓存项阈值和跨相似问题簇的风险预算；错误界限依赖论文反馈信号，serving 数值绑定其查询流、配置和硬件。
+4. [NDSS 2025 多租户 KV-cache 提示泄漏研究](https://www.ndss-symposium.org/ndss-paper/i-know-what-you-asked-prompt-leakage-via-kv-cache-sharing-in-multi-tenant-llm-serving/) 与 [vLLM 安全文档](https://docs.vllm.ai/en/latest/usage/security/)：分别描述论文威胁模型下的侧信道，以及 vLLM 对同进程租户共享、`cache_salt` 缓解范围和隔离边界的当前说明；不替代目标部署的威胁建模。
+5. [vLLM Automatic Prefix Caching](https://docs.vllm.ai/en/latest/features/automatic_prefix_caching/)：文档说明共享前缀可复用 KV、跳过对应 prefill，但不会减少 decode；端到端收益依赖共享前缀和输出负载。
+
+章节扫描、修改、篇幅、示例、代码/公式/图表和遗留门禁见[第十三章审计记录](progress/book-11-system-design-interview/chapter-13-audit.md)；来源版本、阅读范围和证据边界见[在线推理成本与路由来源记录](research/llm-inference-cost-and-routing-2026.md)。
