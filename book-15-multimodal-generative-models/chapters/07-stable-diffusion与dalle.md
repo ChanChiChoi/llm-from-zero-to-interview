@@ -53,9 +53,10 @@ prompt
 | 资料类型 | 能支持的内容 | 不能直接支持的内容 |
 | --- | --- | --- |
 | Latent Diffusion 原始论文 | latent diffusion、VAE、条件 cross-attention 的研究路线 | 任意 Stable Diffusion 版本的全部实现 |
-| DALL·E 与 DALL·E 2 论文 | 公开论文中的离散 token、CLIP latent prior 和 decoder | 后续闭源产品的私有结构 |
-| ControlNet 原始论文 | 结构条件分支的设计和实验 | 任意控制模型的兼容性 |
-| Diffusers 官方文档 | 某版本 pipeline、scheduler 和参数 API | API 默认值就是最佳质量 |
+| DALL·E、DALL·E 2 和 SDXL 论文 | 公开论文中的离散 token、CLIP latent prior/decoder 和 SDXL 设计 | 后续闭源产品的私有结构或所有 checkpoint 的组件 |
+| ControlNet 原始论文 | 冻结主干、zero convolution 与结构条件分支的研究设计 | 任意控制模型的兼容性 |
+| Diffusers v0.35.1 官方文档 | 指定版本的 pipeline、scheduler、img2img、inpainting、ControlNet 和 LoRA 接口 | API 默认值就是最佳质量，也不代表其他版本行为 |
+| Stable Diffusion 3 论文 | 论文设置下的 rectified-flow 与 MM-DiT 设计 | Stable Diffusion 全系列或产品内部结构 |
 | 开源 Stable Diffusion 仓库 | 特定 commit 的代码和配置 | 当前所有社区 checkpoint 的行为 |
 | T2I-CompBench、GenEval、CLIPScore 等论文 | 公开评估任务和指标背景 | 一个指标等于人类整体偏好 |
 | 本章 demo | shape、token、调用次数和预算算术 | 真实图像质量、版权安全和 prompt 理解 |
@@ -141,6 +142,8 @@ x\sim p_\theta(x\mid c,C,x_{\mathrm{in}},m).
 
 因此本章使用“Stable Diffusion 类系统”描述公开的 latent diffusion pipeline，涉及具体参数时会说明那是示例配置，不把它当作所有版本的固定事实。
 
+一个具体的后续路线是 Stable Diffusion 3 论文提出的 rectified-flow Transformer：MM-DiT 为文本和图像 token 使用分开的参数，并让两种 token 双向交换信息。论文将这些设计与其文本理解、文字生成和人类偏好实验联系起来；这是论文配置下的架构与实验结论，不是所有 Stable Diffusion pipeline 或同名产品的通用描述。[SD3 论文 v1](https://arxiv.org/abs/2403.03206v1)
+
 ## 2. Stable Diffusion 类系统的模块责任
 
 ### 2.1 总体数据流
@@ -200,6 +203,8 @@ VAE 的责任是把像素表示转换成便于扩散的连续状态，并尽量�
 - 颜色范围和归一化会影响 decoder；
 - decoder 会引入重建误差；
 - 换 VAE 可能改变 denoiser 看到的 latent 分布。
+
+latent diffusion 的核心动机正是先通过感知压缩降低扩散状态的空间规模，再在该表示上做条件生成；压缩带来的细节损失也因此成为系统边界。[Latent Diffusion 论文 v2](https://arxiv.org/abs/2112.10752v2)
 
 ### 2.3 latent scaling 是接口的一部分
 
@@ -366,31 +371,37 @@ V=E_c W_V.
 cross-attention 为：
 
 ~~~math
-\operatorname{Attn}(H_z,E_c)
+\mathrm{Attn}(H_z,E_c)
 =
-\operatorname{softmax}
+\mathrm{softmax}
 \left(
 \frac{QK^\top}{\sqrt{d_h}}
 \right)V.
 ~~~
 
-latent token 数为 N_z，文本 token 数为 N_c，单层注意力 score 的 cell 数近似为：
+设一次请求的样本批量为 B，采样步数为 K，采用 cross-attention 的层数为 L；第 ℓ 层有 H_{a,\ell} 个 head 和 N_{z,\ell} 个 latent query，第 j 个条件分支包含 N_{c,j} 个文本 token。每个分支、每层、每个 head 都会形成 N_{z,\ell}×N_{c,j} 个逻辑 score 位置，因此累计逻辑 score-cell 数可估为：
 
 ~~~math
-C_{\mathrm{cross}}
-\propto
-N_zN_c.
+C_{\mathrm{score}}
+=
+B K
+\sum_{\ell=1}^{L}
+H_{a,\ell}N_{z,\ell}
+\sum_{j\in\mathcal{B}}N_{c,j}.
 ~~~
 
-如果每个采样步有 L 个 cross-attention 层、采样步数为 K，则粗略交互量为：
+如果只想看一个 head、一个 layer 在完整 latent 网格上的累计数，则：
 
 ~~~math
-C_{\mathrm{total}}
-\propto
-K L N_zN_c.
+C_{\mathrm{score}}^{(1\ head,\ell)}
+=
+B K N_{z,\ell}
+\sum_{j\in\mathcal{B}}N_{c,j}.
 ~~~
 
-这解释了为什么高分辨率、长 prompt、多层 cross-attention 和多步采样会共同推高成本。
+无 CFG 时，分支集合 \mathcal{B} 通常只含正向条件；经典 CFG 会同时计算正向和负向（或空）条件。把两路条件沿 batch 维拼在一次 U-Net 调用中可以减少函数调用次数，但不能省掉两路条件对应的计算。公式假设每步都执行所列条件分支；不同层 query 网格、head 数不同时按层求和。这个逻辑 cell 计数也不是峰值显存或 FLOPs：融合注意力可以不显式保存完整 score 矩阵，比较实现时应说明计数覆盖了哪些层和分支。
+
+Latent Diffusion 论文把 cross-attention 作为接入文本等条件的通用机制之一；上式把这一关系展开为 score 张量的逻辑计数。[Latent Diffusion 论文 v2](https://arxiv.org/abs/2112.10752v2)
 
 ### 4.2 cross-attention 不是词到像素的硬对齐
 
@@ -401,6 +412,8 @@ K L N_zN_c.
 ### 4.3 长 prompt、截断和权重
 
 prompt 经过 tokenizer 后会有最大长度。超出部分可能被截断，也可能被分段编码，具体行为取决于实现。某些工具还提供 token weighting 或 prompt embedding 拼接，但这不是所有 checkpoint 的通用语义。
+
+SDXL 是“文本条件不一定只有一路”的具体例子。Diffusers v0.35.1 的 SDXL pipeline 文档列出两个冻结文本编码器和两个 tokenizer：CLIP ViT-L/14 与 CLIP ViT-bigG/14；第二路还提供 pooled prompt embedding。该说明绑定 SDXL pipeline 的公开接口，不意味着一般 Stable Diffusion 都有双编码器。[SDXL 论文 v1](https://arxiv.org/abs/2307.01952v1)；[Diffusers v0.35.1 SDXL pipeline](https://huggingface.co/docs/diffusers/v0.35.1/en/api/pipelines/stable_diffusion/stable_diffusion_xl)
 
 工程上要记录：
 
@@ -468,7 +481,7 @@ s
 - s=1 等于正条件预测；
 - s>1 放大从负条件到正条件的方向。
 
-某些库的参数名和内部约定不同，不能只看变量名。CFG 通常使每个采样步至少需要正负两次 denoiser 计算；实现也可以把两种条件拼成一个 batch 来提高硬件利用率，但数学上的 forward 数仍应如实记录。
+某些库的参数名和内部约定不同，不能只看变量名。CFG 通常使每个采样步至少需要正负两次 denoiser 计算；实现也可以把两种条件拼成一个 batch 来提高硬件利用率，但数学上的 forward 数仍应如实记录。[Classifier-Free Guidance 论文 v1](https://arxiv.org/abs/2207.12598v1)；[Diffusers v0.35.1 Stable Diffusion 固定源码](https://github.com/huggingface/diffusers/blob/v0.35.1/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion.py)
 
 ### 5.4 guidance scale 的折中
 
@@ -545,6 +558,8 @@ z_t
 
 然后从这个中间状态开始反向采样。denoising strength 通常决定 t 或时间步起点，但不同 pipeline 的参数映射可能不同。
 
+做一个可复算的离散索引例子：假设总步数为 30、strength 为 0.55，本文的教学映射先算活动步数 $\min(\lfloor30\times0.55\rfloor,30)=16$，再算起始索引 $\max(30-16,0)=14$。这里的 14 是教学用列表索引，不是 scheduler 的真实 timestep。Diffusers v0.35.1 文档说明 strength 在 0 到 1 之间、越高加噪越多且 strength=1 会走满设定步数；具体 timestep 列表仍由 pipeline 和 scheduler 决定。[Diffusers v0.35.1 img2img API](https://huggingface.co/docs/diffusers/v0.35.1/api/pipelines/stable_diffusion/img2img)
+
 强度低：
 
 - 原图结构和颜色保留较多；
@@ -572,6 +587,8 @@ m\odot z_t^{\mathrm{new}}
 ~~~
 
 真实实现可能在像素空间、latent 空间或不同时间步混合，也可能对边界做额外处理。必须先确认 mask 的 0/1 语义，否则会把保留区域和重绘区域反过来。
+
+以两个 latent 位置手算：取 $m=[1,0]$、新生成状态 $z_t^{\mathrm{new}}=[0.9,0.3]$、原图在同一噪声时间步的状态 $z_t^{\mathrm{orig}}=[0.4,0.8]$，逐位置混合得到 $z_t^{\mathrm{mix}}=[0.9,0.8]$。第二个位置被保留。这里的 $z_t^{\mathrm{orig}}$ 是按同一个 $t$ 加噪后的原图 latent，不是干净的 $z_0$；真实 pipeline 的 mask 下采样、像素/latent 混合和边界策略各有实现差异。[Diffusers v0.35.1 inpainting 文档](https://huggingface.co/docs/diffusers/v0.35.1/en/using-diffusers/inpaint)
 
 Inpainting 的难点包括：
 
@@ -621,6 +638,8 @@ h_l^{\mathrm{base}}
 
 lambda_l 是控制强度或层级系数。真实实现还包含零初始化、复制 block、卷积和多尺度特征等细节，不能用一个加法式子替代完整代码。
 
+一个二维玩具例子能看出控制强度的作用：若 $h^{\mathrm{base}}=[0.2,0.8]$、$r(C)=[-0.2,0.4]$、$\lambda=0.5$，则 $h^{\mathrm{out}}=[0.2,0.8]+0.5\times[-0.2,0.4]=[0.1,1.0]$。这只是逐元素残差加法的示例，不是 ControlNet 的实测输出。原始 ControlNet 将预训练主干冻结，并在可训练分支与主干间使用零初始化卷积；训练开始时零卷积输出为零，从而让控制支路起步时不改变原有主干输出，之后再学习注入控制特征。[ControlNet 论文 v1](https://arxiv.org/abs/2302.05543v1)
+
 ### 8.3 结构条件的预处理契约
 
 ControlNet 的条件图不是任意图片。要记录：
@@ -660,7 +679,9 @@ W+\frac{\alpha}{r}BA,
 
 其中 A、B 是低秩矩阵，r 是 rank，alpha 是缩放系数。训练时只更新 A、B 或少量相关参数。
 
-若原矩阵 $W\in\mathbb{R}^{d_{out}\times d_{in}}$，一个常见约定是 $A\in\mathbb{R}^{r\times d_{in}}$、$B\in\mathbb{R}^{d_{out}\times r}$，并要求 $1\leq r\leq\min(d_{in},d_{out})$。在这个约定下，LoRA 新增的可训练参数量为 $r(d_{in}+d_{out})$；alpha 只改变更新的缩放，不改变参数量。不同库可能交换 A/B 的命名，因此计算参数量时要以实际矩阵 shape 为准。
+若原矩阵 $W\in\mathbb{R}^{d_{out}\times d_{in}}$，一个常见约定是 $A\in\mathbb{R}^{r\times d_{in}}$、$B\in\mathbb{R}^{d_{out}\times r}$，并要求 $1\leq r\leq\min(d_{in},d_{out})$。在这个约定下，LoRA 新增的可训练参数量为 $r(d_{in}+d_{out})$；alpha 只改变更新的缩放，不改变参数量。不同库可能交换 A/B 的命名，因此计算参数量时要以实际矩阵 shape 为准。低秩更新的核心形式是冻结 $W$ 并训练分解矩阵 $A,B$；矩阵方向和缩放需按具体实现定义。[LoRA 原论文 v2](https://arxiv.org/abs/2106.09685v2)
+
+取一个纯教学矩阵 $d_{\mathrm{in}}=d_{\mathrm{out}}=4096$、rank $r=8$，则 LoRA 参数量是 $8\times(4096+4096)=65{,}536$；完整矩阵有 $4096\times4096=16{,}777{,}216$ 个参数，前者占 $65{,}536/16{,}777{,}216=0.00390625$，即 $0.390625\%$。这个比例只比较一个权重矩阵的可训练更新参数，不代表整次训练显存或算力按相同比例下降。
 
 在 diffusion 系统中，LoRA 可能插入 text encoder、denoiser attention、projection 或其他模块。插入位置决定它更可能改变语言条件、风格、角色特征还是局部结构。
 
@@ -674,6 +695,8 @@ LoRA 不需要复制和更新全部 base model 参数，通常降低：
 - 多风格部署成本。
 
 但计算不一定按参数比例下降。训练仍要执行完整或大部分 denoiser forward，激活和 VAE 成本仍然存在。
+
+DreamBooth 与 LoRA 处在不同概念层次。DreamBooth 是用少量主体图像、唯一标识词和 prior-preservation 等设计做 subject-driven 个性化微调的方法；LoRA 是表示权重更新的一种低秩参数化，可以作为 DreamBooth 微调时的更新路径。Diffusers v0.35.1 将 DreamBooth 与 DreamBooth-LoRA 分列为训练脚本，说明二者可以组合，而不是同一层面的互斥算法。[DreamBooth 论文 v1](https://arxiv.org/abs/2208.12242v1)；[Diffusers v0.35.1 training overview](https://huggingface.co/docs/diffusers/v0.35.1/en/training/overview)
 
 ### 9.3 过拟合和身份风险
 
@@ -721,6 +744,7 @@ p_\theta(y_m\mid u,y_{<m}).
 ~~~
 
 优点是与语言模型训练形式统一，文本和图像 token 可以放进同一自回归框架；代价是高分辨率会带来很长的图像 token 序列，生成延迟和 tokenizer 质量都很关键。
+[早期 DALL·E 论文 v2](https://arxiv.org/abs/2102.12092v2)
 
 ### 10.2 token 成本的手算
 
@@ -758,16 +782,16 @@ text
 ~~~math
 z_{\mathrm{img}}
 \sim
-p_\theta(z_{\mathrm{img}}\mid z_{\mathrm{text}}),
+P_\theta(z_{\mathrm{img}}\mid y),
 ~~~
 
 ~~~math
 x
 \sim
-p_\psi(x\mid z_{\mathrm{img}},z_{\mathrm{text}}).
+P_\psi(x\mid z_{\mathrm{img}},y).
 ~~~
 
-第一阶段 prior 预测图像语义 embedding，第二阶段 decoder 根据图像 embedding 和相关条件生成图片。它和 Stable Diffusion 的主要区别不只是“一个用了 CLIP、一个用了 VAE”，而是条件在系统中的位置不同：
+这里 y 是 caption；论文还允许 prior 使用由 y 确定的 CLIP text embedding，decoder 也可选用 caption 条件。第一阶段 prior 预测 CLIP image embedding，第二阶段 decoder 根据该 image embedding（以及可选的 caption 条件）生成图片。论文报告保留 decoder 的文本条件路径，但发现它对其研究的某些能力帮助有限。它和 Stable Diffusion 的主要区别不只是“一个用了 CLIP、一个用了 VAE”，而是条件在系统中的位置不同：[DALL·E 2 论文 v1](https://arxiv.org/abs/2204.06125v1)
 
 - Stable Diffusion 类系统通常直接用 text encoder hidden states 条件化 latent denoiser；
 - DALL·E 2 的公开论文路线先预测 CLIP image representation，再由 decoder 生成图片。
@@ -777,6 +801,8 @@ p_\psi(x\mid z_{\mathrm{img}},z_{\mathrm{text}}).
 ### 10.4 产品名称不能替代公开结构
 
 对于后续 DALL·E 产品或闭源文生图服务，公开名称不能自动证明其内部是早期自回归路线、DALL·E 2 的 prior-decoder 路线、latent diffusion、DiT、flow matching，还是混合架构。书稿只能引用公开论文、官方说明或可复现实现，不能从产品输出反推全部内部组件。
+
+OpenAI 的 DALL·E 3 System Card（2023-10-03）提供了一个产品编排层的例子：它描述 ChatGPT/GPT-4 会把用户较模糊的图像请求扩写成发送给 DALL·E 3 的详细 prompt，并记录风险评估与缓解工作。该系统卡支持关于公开产品集成和安全流程的说明；不应把它当作 text encoder、denoiser 或 latent 表示的完整架构披露。[OpenAI DALL·E 3 System Card](https://openai.com/index/dall-e-3-system-card/)
 
 ### 10.5 两类路线的工程比较
 
@@ -820,19 +846,20 @@ FID 在特征空间中比较真实图像和生成图像的均值与协方差。�
 =
 \|\mu_r-\mu_g\|_2^2
 +
-\operatorname{Tr}
+\mathrm{Tr}
 \left(
 \Sigma_r+\Sigma_g
--
-2(\Sigma_r\Sigma_g)^{1/2}
+-2\left(\Sigma_r^{1/2}\Sigma_g\Sigma_r^{1/2}\right)^{1/2}
 \right).
 ~~~
 
-它可以衡量某种总体分布距离，但不直接回答“图片是否遵循这个 prompt”。一个模型可能有不错的 FID，却漏掉 prompt 中的第二个对象。
+用一维高斯做一个可复算的玩具例子：设真实特征均值 $mu_r=1$、生成特征均值 $mu_g=2$，方差分别为 $Sigma_r=4$ 和 $Sigma_g=1$。均值项为 $(1-2)^2=1$；协方差项为 $4+1-2\sqrt{2\times1\times2}=5-4=1$；所以这个一维例子的 FID 为 2。它只演示公式如何代入，不是图像集评测分数；真实 FID 使用高维图像特征与样本估计。
+
+其中均值和协方差来自所选图像特征表示。FID 是指定特征提取器、预处理和样本集合上的总体分布距离，不直接回答“图片是否遵循这个 prompt”；样本量与实现口径也要固定。一个模型可能有不错的 FID，却漏掉 prompt 中的第二个对象。[Heusel et al., FID 原论文 v6](https://arxiv.org/abs/1706.08500v6)
 
 ### 11.3 CLIPScore 与语义对齐
 
-CLIPScore 类指标使用图像和文本 embedding 的相似度作为参考无关的语义对齐代理。它适合提供一个切片信号，但有局限：
+CLIPScore 原论文研究的是图像描述评估；在文生图中把图像和 prompt embedding 的相似度用作参考无关的语义对齐代理时，应把它看成迁移来的切片信号，而非已经覆盖整体文生图质量的指标。它有这些局限：
 
 - 对数量和空间关系不敏感；
 - 可能偏好常见语义；
@@ -840,7 +867,7 @@ CLIPScore 类指标使用图像和文本 embedding 的相似度作为参考无�
 - 不等于人类整体审美；
 - 会受到 CLIP 模型和 prompt 表达影响。
 
-因此 CLIPScore 适合和组合关系、人工偏好、文字识别及安全评估并列使用。
+因此 CLIPScore 适合和组合关系、人工偏好、文字识别及安全评估并列使用。[CLIPScore 原论文 v3](https://arxiv.org/abs/2104.08718v3)
 
 ### 11.4 组合关系与 prompt benchmark
 
@@ -851,7 +878,7 @@ CLIPScore 类指标使用图像和文本 embedding 的相似度作为参考无�
 - 画面中有两只鸟；
 - 文字出现在招牌上。
 
-GenEval、T2I-CompBench 等公开研究可以作为组合、属性和关系评估的入口，但具体 benchmark 的覆盖、图像分布和判定器有边界。目标业务应建立自己的 prompt suite，并记录每个 claim 的成功事件。
+GenEval、T2I-CompBench 等公开研究可以作为组合、属性和关系评估的入口，但具体 benchmark 的覆盖、图像分布和判定器有边界。GenEval 以对象为中心检查数量、颜色、位置和属性绑定；T2I-CompBench 分析属性绑定、对象关系和复杂组合。它们应作为覆盖不同问题的评测入口，而非单一总分的通用能力证明。目标业务应建立自己的 prompt suite，并记录每个 claim 的成功事件。[GenEval v1](https://arxiv.org/abs/2310.11513v1)；[T2I-CompBench 会议版 v2](https://arxiv.org/abs/2307.06350v2)
 
 ### 11.5 文字专项评估
 
@@ -894,6 +921,8 @@ C_{\mathrm{per\ success}}
 
 要求成功事件分母大于零；评估窗口内没有一个满足业务目标的结果时，单位成功任务成本未定义，不能用零或无穷大掩盖“尚无成功证据”。如果任务要求“生成含正确文字的海报”，只有通过文字和版式检查的样本才能进入成功分母。只以“返回一张图片”计成功，会使成本数字失真。
 
+例如三次合成请求分别花费 0.02、0.03、0.05 美元，其中两张通过既定文字与版式 rubric，则总成本是 0.10 美元，成功数是 2，单位成功任务成本为 $0.10/2=0.05$ 美元。失败请求仍计入总成本，只是不进入成功数分母；这些金额仅为教学输入，不是任何服务报价。
+
 ## 12. 安全、版权与 provenance
 
 ### 12.1 内容安全是独立系统层
@@ -918,7 +947,7 @@ LoRA、文本 embedding 和 prompt 组合可以放大这种风险。训练和部
 
 ### 12.3 Provenance 不等于质量证明
 
-水印、metadata 或生成标记可以帮助追踪来源，但它们不能证明图片内容真实，也不能证明没有被后处理。反过来，缺少 metadata 也不一定证明图片不是生成的。provenance、内容质量和安全判断是三个不同问题。
+水印、metadata 或生成标记可以帮助追踪来源，但它们不能证明图片内容真实，也不能证明没有被后处理。以 C2PA 2.5 为例，manifest 将签名 claim、provenance assertions 和内容绑定在可验证单元中；验证可检查 claim 与资产的关联、格式和篡改状态，但规范不判断 assertions 所述内容本身是否真实。由于 C2PA 是 opt-in 机制，缺少凭证也不能单独证明图片不是生成的。provenance、内容质量和安全判断是三个不同问题。[C2PA 技术规范 2.5 §§1.1–1.3](https://spec.c2pa.org/specifications/specifications/2.5/specs/C2PA_Specification.html)
 
 ## 13. 贯穿案例：一张可控的机器人海报
 
@@ -963,15 +992,17 @@ z\in
 \mathbb{R}^{1\times4\times96\times64}.
 ~~~
 
-latent 空间位置为 6144。若每步 CFG 需要正负两次 denoiser，30 步约有：
+latent 空间位置为 6144。若每步 CFG 需要正负两条条件分支，30 步的逐分支 denoiser forward-equivalents 为：
 
 ~~~math
-N_{\mathrm{denoiser}}
+N_{\mathrm{denoiser\_forward\_equiv}}
 =
 30\times2=60.
 ~~~
 
-如果每层 cross-attention 的 latent token 数为 6144、文本条件长度为 77，则单层单步 score cell 约为：
+这 60 计的是每个采样步的正向、负向分支各一次；实现可以把两路拼入一个 batch 后只调用 U-Net 30 次，也可以分别调用 60 次，所以它不等于函数调用数。
+
+若某一层、某一个 head 的 cross-attention query 网格有 6144 个位置，文本条件长度为 77，则这一分支在单层单步的逻辑 score-cell 数为：
 
 ~~~math
 C_{\mathrm{step}}
@@ -981,7 +1012,7 @@ C_{\mathrm{step}}
 473088.
 ~~~
 
-这不是 FLOPs 的完整值，却能说明分辨率、文本长度和采样步数如何共同进入预算。
+若正、负条件各有 77 个 token，则同一 head、layer、step 两分支共 946,176 个逻辑 score cells，30 步累计为 28,385,280。它只计这一个 query 网格下的一个 head 和一个 layer；完整逻辑计数还要乘实际 head/layer 并累加各层 query 网格。逻辑 cell 数不等于 FLOPs 或峰值显存，融合注意力实现可能不会显式存下整张 score 矩阵。
 
 ### 13.4 失败诊断
 
@@ -1011,17 +1042,18 @@ C_{\mathrm{step}}
 - latent shape；
 - latent 空间与像素空间比例；
 - positive/negative text condition shape；
-- CFG 造成的 denoiser 调用量；
-- cross-attention 的累计 cell 数；
-- image-to-image 的示例噪声时间步；
+- CFG 造成的逐分支 denoiser forward-equivalents；
+- 一个 full-resolution latent query 网格、单个 head/layer 的 cross-attention 逻辑 score-cell 数；
+- image-to-image 的教学活动步数和列表起始索引；
 - ControlNet 条件 shape；
 - 离散 image token 路线的序列成本。
 
-其中 tokenizer 只是按空格和逗号切分的教学替代，不代表真实 tokenizer。ControlNet shape 也只是示意输入，真实 pipeline 可能在预处理后使用不同空间尺寸。
+其中 tokenizer 只是按空格和逗号切分的教学替代，不代表真实 tokenizer。latent shape 使用整数 ceiling 计算 ceil(H/scale)，作为便于预算估算的教学约定，不是任意 VAE 的输出契约。尺寸、shape 元素要求正整数；denoising strength 和 guidance scale 要求有限实数，避免 Python 把 bool 静默当作数值。CFG 开关采用经典 Stable Diffusion pipeline 的 guidance_scale>1 约定；分支合 batch 时一次函数调用仍会处理两路条件。cross-attention 数只覆盖每个样本的 full-resolution latent 网格，不乘 head/layer 数，因而报告字段明确按 per-full-resolution-head-layer 命名；逻辑 score cells 不能当作峰值显存或 FLOPs。img2img 起始索引也是教学列表映射，真实 scheduler timesteps 由版本与 pipeline 决定。[Diffusers v0.35.1 text-to-image pipeline](https://huggingface.co/docs/diffusers/v0.35.1/api/pipelines/stable_diffusion/text2img)；[img2img API](https://huggingface.co/docs/diffusers/v0.35.1/api/pipelines/stable_diffusion/img2img)
+
+状态：已验证（2026-11-12；Python 3.12.9；仅 Python 标准库；CPU）。
 
 ~~~python
 import math
-from math import ceil
 
 
 def simple_tokenize(text):
@@ -1040,6 +1072,15 @@ def require_nonnegative_int(value, name):
         raise ValueError(f"{name} must be a non-negative integer")
 
 
+def is_finite_real(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
 def latent_shape(batch, height, width, vae_scale, latent_channels):
     for value, name in (
         (batch, "batch"),
@@ -1049,17 +1090,20 @@ def latent_shape(batch, height, width, vae_scale, latent_channels):
         (latent_channels, "latent_channels"),
     ):
         require_positive_int(value, name)
+    # Teaching convention only; this is not a generic VAE shape guarantee.
     return (
         batch,
         latent_channels,
-        ceil(height / vae_scale),
-        ceil(width / vae_scale),
+        (height + vae_scale - 1) // vae_scale,
+        (width + vae_scale - 1) // vae_scale,
     )
 
 
 def elem_count(shape):
-    if not shape or any(dim <= 0 for dim in shape):
-        raise ValueError("shape dimensions must be positive")
+    if not isinstance(shape, (list, tuple)) or not shape:
+        raise ValueError("shape must be a non-empty list or tuple")
+    for dim in shape:
+        require_positive_int(dim, "shape dimension")
     total = 1
     for dim in shape:
         total *= dim
@@ -1084,12 +1128,12 @@ def audit_text_to_image_pipeline(config):
     require_nonnegative_int(config["special_tokens"], "special_tokens")
     if config["max_text_tokens"] < config["special_tokens"]:
         raise ValueError("max_text_tokens must include special tokens")
-    if not math.isfinite(config["denoising_strength"]):
-        raise ValueError("denoising_strength must be finite")
+    if not is_finite_real(config["denoising_strength"]):
+        raise ValueError("denoising_strength must be a finite real number")
     if not 0.0 <= config["denoising_strength"] <= 1.0:
         raise ValueError("denoising_strength must be in [0, 1]")
-    if not math.isfinite(config["guidance_scale"]):
-        raise ValueError("guidance_scale must be finite")
+    if not is_finite_real(config["guidance_scale"]):
+        raise ValueError("guidance_scale must be a finite real number")
     if config["guidance_scale"] < 0.0:
         raise ValueError("guidance_scale must be non-negative")
     prompt_tokens = simple_tokenize(config["prompt"])
@@ -1120,18 +1164,28 @@ def audit_text_to_image_pipeline(config):
     latent_elements = elem_count(z_shape)
 
     cfg_enabled = config["guidance_scale"] > 1.0
-    denoiser_calls = config["steps"] * (2 if cfg_enabled else 1)
+    denoiser_forward_equivalents = (
+        config["steps"] * (2 if cfg_enabled else 1)
+    )
     condition_tokens_per_step = (
         text_tokens + negative_text_tokens
         if cfg_enabled
         else text_tokens
     )
-    cross_attention_cells = (
-        config["steps"] * latent_spatial_cells * condition_tokens_per_step
+    cross_attention_score_cells_per_fullres_head_layer = (
+        config["batch"]
+        * config["steps"]
+        * latent_spatial_cells
+        * condition_tokens_per_step
     )
 
-    img2img_noise_step = int(
-        round(config["steps"] * config["denoising_strength"])
+    img2img_active_steps = min(
+        int(config["steps"] * config["denoising_strength"]),
+        config["steps"],
+    )
+    img2img_start_index = max(
+        config["steps"] - img2img_active_steps,
+        0,
     )
     control_shape = (
         config["batch"],
@@ -1169,9 +1223,12 @@ def audit_text_to_image_pipeline(config):
             latent_elements / pixel_elements,
             6,
         ),
-        "denoiser_calls": denoiser_calls,
-        "cross_attention_cells": cross_attention_cells,
-        "img2img_noise_step": img2img_noise_step,
+        "denoiser_forward_equivalents": denoiser_forward_equivalents,
+        "cross_attention_score_cells_per_fullres_head_layer": (
+            cross_attention_score_cells_per_fullres_head_layer
+        ),
+        "img2img_active_steps": img2img_active_steps,
+        "img2img_start_index": img2img_start_index,
         "control_shape": control_shape,
         "dalle_total_tokens": dalle_total_tokens,
         "dalle_image_token_ratio": round(
@@ -1187,23 +1244,28 @@ def audit_text_to_image_pipeline(config):
         "latent_width_matches": (
             z_shape[3] * config["vae_scale"] >= config["width"]
         ),
-        "cfg_doubles_denoiser_calls": (
-            denoiser_calls == config["steps"] * 2
+        "denoiser_forward_equivalents_match_cfg_branches": (
+            denoiser_forward_equivalents
+            == config["steps"] * (2 if cfg_enabled else 1)
         ),
         "cross_attention_counts_conditions": (
-            cross_attention_cells
-            == config["steps"]
+            cross_attention_score_cells_per_fullres_head_layer
+            == config["batch"]
+            * config["steps"]
             * latent_spatial_cells
-            * (text_tokens + negative_text_tokens)
+            * condition_tokens_per_step
+        ),
+        "img2img_start_index_in_range": (
+            0 <= img2img_start_index <= config["steps"]
+        ),
+        "img2img_active_steps_in_range": (
+            0 <= img2img_active_steps <= config["steps"]
         ),
         "latent_ratio_small": report["element_ratio"] < 0.05,
         "control_batch_matches": (
             control_shape[0] == config["batch"]
         ),
         "dalle_image_tokens_1024": dalle_image_tokens == 1024,
-        "img2img_step_in_range": (
-            0 <= img2img_noise_step <= config["steps"]
-        ),
     }
     report["checks"] = checks
     return report
@@ -1276,6 +1338,26 @@ boundary_checks = {
     "empty_shape_rejected": expects_value_error(
         lambda: elem_count(())
     ),
+    "non_integer_latent_height_rejected": expects_value_error(
+        lambda: latent_shape(1, 512.0, 512, 8, 4)
+    ),
+    "boolean_shape_dimension_rejected": expects_value_error(
+        lambda: elem_count((True, 2))
+    ),
+    "boolean_guidance_scale_rejected": expects_value_error(
+        lambda: audit_text_to_image_pipeline(
+            {**config, "guidance_scale": True}
+        )
+    ),
+    "boolean_denoising_strength_rejected": expects_value_error(
+        lambda: audit_text_to_image_pipeline(
+            {**config, "denoising_strength": True}
+        )
+    ),
+    "huge_integer_ceil_exact": (
+        latent_shape(1, 10**500, 512, 8, 4)[2]
+        == (10**500 + 7) // 8
+    ),
 }
 assert all(report["checks"].values())
 assert all(boundary_checks.values())
@@ -1286,7 +1368,7 @@ print(
 )
 ~~~
 
-预期输出为：
+实际运行输出为：
 
 ~~~text
 prompt_token_count=14
@@ -1297,24 +1379,25 @@ latent_shape=(1, 4, 64, 64)
 latent_spatial_cells=4096
 spatial_ratio=0.015625
 element_ratio=0.020833
-denoiser_calls=60
-cross_attention_cells=2949120
-img2img_noise_step=16
+denoiser_forward_equivalents=60
+cross_attention_score_cells_per_fullres_head_layer=2949120
+img2img_active_steps=16
+img2img_start_index=14
 control_shape=(1, 1, 512, 512)
 dalle_total_tokens=1040
 dalle_image_token_ratio=64.0
-checks={'latent_height_matches': True, 'latent_width_matches': True, 'cfg_doubles_denoiser_calls': True, 'cross_attention_counts_conditions': True, 'latent_ratio_small': True, 'control_batch_matches': True, 'dalle_image_tokens_1024': True, 'img2img_step_in_range': True}
-boundary_checks={'zero_steps_rejected': True, 'invalid_strength_rejected': True, 'negative_guidance_rejected': True, 'non_finite_guidance_rejected': True, 'non_finite_strength_rejected': True, 'zero_latent_channels_rejected': True, 'non_string_prompt_rejected': True, 'empty_shape_rejected': True}
+checks={'latent_height_matches': True, 'latent_width_matches': True, 'denoiser_forward_equivalents_match_cfg_branches': True, 'cross_attention_counts_conditions': True, 'img2img_start_index_in_range': True, 'img2img_active_steps_in_range': True, 'latent_ratio_small': True, 'control_batch_matches': True, 'dalle_image_tokens_1024': True}
+boundary_checks={'zero_steps_rejected': True, 'invalid_strength_rejected': True, 'negative_guidance_rejected': True, 'non_finite_guidance_rejected': True, 'non_finite_strength_rejected': True, 'zero_latent_channels_rejected': True, 'non_string_prompt_rejected': True, 'empty_shape_rejected': True, 'non_integer_latent_height_rejected': True, 'boolean_shape_dimension_rejected': True, 'boolean_guidance_scale_rejected': True, 'boolean_denoising_strength_rejected': True, 'huge_integer_ceil_exact': True}
 all_checks_passed=True
 ~~~
 
 这个结果只证明示例配置在形状和算术上自洽：
 
 - 512×512、scale=8 时得到 4×64×64 的 latent；
-- 30 步、正负条件各一次时有 60 次 denoiser 调用；
-- CFG 开启时，cross-attention cell 数同时计入正向和负向条件；
+- 30 步、正负条件各一次时有 60 个逐分支 denoiser forward-equivalents；具体函数调用数取决于是否把分支拼成 batch；
+- CFG 开启时，逻辑 score-cell 数同时计入正向和负向条件，但这里只计一个 full-resolution query 网格、一个 head 和一个 layer；
 - 32×32 的离散图像 token 网格有 1024 个 image tokens；
-- image-to-image 的噪声步仍需由目标 scheduler 的真实映射解释。
+- 30×0.55 的教学映射得到 16 个活动步、列表起始索引 14；真实 timestep 仍需由目标 scheduler 的映射解释。
 
 它不证明 prompt 一定被遵循，也不证明 ControlNet 真能保持姿态，更不证明生成内容安全。
 
@@ -1339,16 +1422,20 @@ all_checks_passed=True
 
 ## 16. 资料入口与证据边界
 
-1. Rombach et al., High-Resolution Image Synthesis with Latent Diffusion Models：<https://arxiv.org/abs/2112.10752>。支持 latent diffusion、VAE 压缩和条件 cross-attention 的公开研究路线。
-2. Ramesh et al., Zero-Shot Text-to-Image Generation，早期 DALL·E：<https://arxiv.org/abs/2102.12092>。支持离散 image token 和自回归文生图路线。
-3. Ramesh et al., Hierarchical Text-Conditional Image Generation with CLIP Latents，DALL·E 2：<https://arxiv.org/abs/2204.06125>。支持 text-to-CLIP-image-latent prior 与 diffusion decoder 的公开路线。
-4. Zhang et al., Adding Conditional Control to Text-to-Image Diffusion Models，ControlNet：<https://arxiv.org/abs/2302.05543>。支持结构条件分支和残差控制的研究背景。
-5. Peebles and Xie, Scalable Diffusion Models with Transformers：<https://arxiv.org/abs/2212.09748>。支持 DiT 作为 denoiser 主干的研究路线。
-6. CompVis/stable-diffusion 官方开源仓库：<https://github.com/CompVis/stable-diffusion>。支持特定仓库版本的实现和配置核对，不代表所有社区 checkpoint。
-7. Hugging Face Diffusers Stable Diffusion pipeline 文档：<https://huggingface.co/docs/diffusers/api/pipelines/stable_diffusion/overview>。支持特定版本 pipeline API 的组件和参数入口。
-8. Hessel et al., CLIPScore：<https://arxiv.org/abs/2104.08718>。支持图文相似度作为评估代理的研究背景，不等于完整人类偏好。
-9. Huang et al., T2I-CompBench：<https://arxiv.org/abs/2303.13467>。支持组合属性和关系评估的公开 benchmark 入口。
-10. Ghosh et al., GenEval：<https://arxiv.org/abs/2310.11513>。支持对象、属性和关系组合评估的研究背景。
+1. Rombach et al., High-Resolution Image Synthesis with Latent Diffusion Models v2：<https://arxiv.org/abs/2112.10752v2>。支持 latent diffusion、VAE 压缩和条件 cross-attention 的公开研究路线。
+2. Ramesh et al., Zero-Shot Text-to-Image Generation，早期 DALL·E v2：<https://arxiv.org/abs/2102.12092v2>。支持离散 image token 和自回归文生图路线。
+3. Ramesh et al., Hierarchical Text-Conditional Image Generation with CLIP Latents，DALL·E 2 v1：<https://arxiv.org/abs/2204.06125v1>。支持 caption-conditioned CLIP-image prior 与以 image embedding、可选 caption 条件生成图像的 diffusion decoder。
+4. Zhang et al., Adding Conditional Control to Text-to-Image Diffusion Models，ControlNet v1：<https://arxiv.org/abs/2302.05543v1>。支持冻结主干、zero convolution 和空间结构条件分支的论文设计。
+5. Podell et al., SDXL v1：<https://arxiv.org/abs/2307.01952v1>；Diffusers v0.35.1 SDXL pipeline：<https://huggingface.co/docs/diffusers/v0.35.1/en/api/pipelines/stable_diffusion/stable_diffusion_xl>。分别支持论文中的第二文本编码器路线和该固定版本公开接口。
+6. Esser et al., Scaling Rectified Flow Transformers for High-Resolution Image Synthesis v1（Stable Diffusion 3 / MM-DiT）：<https://arxiv.org/abs/2403.03206v1>。支持该论文的 rectified-flow Transformer 及分开模态权重、双向 token 信息流；实验结论绑定论文设置。
+7. Peebles and Xie, Scalable Diffusion Models with Transformers v2：<https://arxiv.org/abs/2212.09748v2>。支持 DiT 作为 denoiser 主干的研究路线。
+8. Hu et al., LoRA v2：<https://arxiv.org/abs/2106.09685v2>；Ruiz et al., DreamBooth v1：<https://arxiv.org/abs/2208.12242v1>；Diffusers v0.35.1 training overview：<https://huggingface.co/docs/diffusers/v0.35.1/en/training/overview>；LoRA loader API：<https://huggingface.co/docs/diffusers/v0.35.1/api/loaders/lora>。论文支持低秩参数更新和主体驱动微调两种不同概念；官方文档支持固定版本的 DreamBooth/LoRA 训练与加载接口。
+9. Hugging Face Diffusers v0.35.1：Stable Diffusion text-to-image pipeline <https://huggingface.co/docs/diffusers/v0.35.1/api/pipelines/stable_diffusion/text2img>、img2img <https://huggingface.co/docs/diffusers/v0.35.1/api/pipelines/stable_diffusion/img2img>、inpainting <https://huggingface.co/docs/diffusers/v0.35.1/en/using-diffusers/inpaint>、ControlNet <https://huggingface.co/docs/diffusers/v0.35.1/en/using-diffusers/controlnet>。只支持对应版本的公开接口和示例行为。
+10. OpenAI, DALL·E 3 System Card（2023-10-03）：<https://openai.com/index/dall-e-3-system-card/>；[System Card PDF](https://cdn.openai.com/papers/DALL_E_3_System_Card.pdf)。支持公开产品集成和安全评估描述，不是完整模型架构文档。
+11. Heusel et al., FID 原论文 v6：<https://arxiv.org/abs/1706.08500v6>；Hessel et al., CLIPScore v3：<https://arxiv.org/abs/2104.08718v3>。CLIPScore 原研究对象是图像描述评估；迁移用于文生图时应视为图文兼容代理。
+12. Huang et al., T2I-CompBench 会议版 v2：<https://arxiv.org/abs/2307.06350v2>；Ghosh et al., GenEval v1：<https://arxiv.org/abs/2310.11513v1>。分别提供组合属性/关系与对象级 prompt 对齐评估入口，具体分数绑定各自评估器和协议；T2I-CompBench++ 是后续不同版本，不在此处混称。
+13. Ho and Salimans, Classifier-Free Diffusion Guidance v1：<https://arxiv.org/abs/2207.12598v1>。支持 CFG 的论文公式及训练条件丢弃机制；实现参数映射仍需按具体 pipeline 版本核对。
+14. C2PA Technical Specification 2.5：<https://spec.c2pa.org/specifications/specifications/2.5/specs/C2PA_Specification.html>。§1.2–1.3 支持签名声明、内容绑定和防篡改验证的范围，并明确该规范不判断 provenance assertions 的价值或真实性。
 
 原始论文支持方法与论文实验，官方文档支持版本化 API，仓库支持特定 commit，指标论文支持评估设计。本章的 pipeline demo 只支持 shape、token 和成本算术，不能证明真实图像质量、prompt 遵循、版权合规或安全效果。
 

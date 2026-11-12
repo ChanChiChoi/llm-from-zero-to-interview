@@ -18,7 +18,7 @@
 
 ## 风险管理框架与机构政策
 
-- NIST [AI RMF 页面](https://www.nist.gov/itl/ai-risk-management-framework) 当前说明 AI RMF 1.0 正在修订；NIST [Generative AI Profile](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf) 于 2024-07-26 发布。NIST 将 RMF 定位为自愿风险管理框架，不是模型发布认证或适用所有司法辖区的法规。
+- NIST [AI RMF 页面](https://www.nist.gov/itl/ai-risk-management-framework) 当前说明 AI RMF 1.0 正在修订；NIST [Generative AI Profile](https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence) 于 2024-07-26 发布。NIST 将 RMF 定位为自愿风险管理框架，不是模型发布认证或适用所有司法辖区的法规。
 - OpenAI 的 [Preparedness Framework v2](https://openai.com/index/updating-our-preparedness-framework/) 于 2025-04-15 发布；[Frontier Governance Framework](https://openai.com/index/openai-frontier-governance-framework/) 于 2026-05-28 发布。两者是该机构不同用途的公开治理材料。
 - Anthropic 当前 [Responsible Scaling Policy 页面](https://www.anthropic.com/responsible-scaling-policy) 列出 Version 3.4（2026-07-08 生效）及 2026 年风险报告；Google DeepMind [Frontier Safety Framework 页面](https://deepmind.google/frontier-safety/)列出 Version 3.1（2026-04-17）。它们支持发布方公开了哪些流程、版本和承诺，不是独立评测、统一行业标准或对其他部署环境的保证。
 

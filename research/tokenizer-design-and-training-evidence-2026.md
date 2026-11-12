@@ -58,6 +58,14 @@
 - 证据边界：仅覆盖所述 LFM2 家族、可控的 continued-BPE 构造、训练阶段和指定设备；合成 per-character speedup 不是所有设备上的直接端到端测量，不能外推到第三方 tokenizer 替换。论文还报告了原支持语言回归和不同数据混合的消融，部署/质量结论应连同该范围读取。
 
 
+## Tokenizer 选择对逐语言语言建模指标的影响
+
+- 来源：Meister、Altıntaş 与 Bosselut，[Language-Specific Effects of Tokenizer Choice in Multilingual Language Models](https://arxiv.org/abs/2610.12144v1)，arXiv v1，2026-10-08。
+- 实际阅读范围：摘要与引言；§2.1–2.3 的训练和评估设置；§3–5 的逐语言 BPB 结果与设计消融；§8 limitations。
+- 来源支持：作者比较 54 个 tokenizer 与对应语言模型，在同一 decoder-only nanochat d24 架构、约 1.27B 参数、同一模型训练配方和约 9.2B token 预算下评估 31 个训练语言；主要结果以 FLORES+ 的逐语言 bits-per-byte（BPB）报告。论文的主 tokenizer panel 大多每个 tokenizer 只有一次训练；固定 token step 预算时，各 tokenizer 因压缩率不同而见到的底层训练字节数也不同。54 个 tokenizer 间的逐语言 BPB spread 与语言模型训练数据占比负相关（Spearman rho=-0.52，p=0.003）；在排除无空格分词语言、按 tokenizer family 聚合等替代分析下方向仍存在。
+- 证据等级：preprint / source-backed（论文 v1 的指定架构、数据、token 预算与评测）。
+- 适用边界：这是 BPB 等语言建模结果，不直接证明下游任务能力差异；单一模型架构、训练 recipe 和约 128K vocabulary 限定外推范围。训练数据占比与书写系统在其 31 语言样本中混杂，观察到的相关性不证明低数据占比会造成 tokenizer 敏感性。BPB 跨语言也受 UTF-8 字节长度影响，作者并报告 bits-per-sentence 对照。
+
 ## 跨研究比较与未解决问题
 
 “No Single”检验 intrinsic 指标能否跨模型家族、任务与语言预测下游表现；TokLens 报告特定多语 benchmark/模型族中的相关信号。二者的覆盖与分析条件不同，不能直接合并成一个互相否定的结论。它们共同支持把静态指标作为诊断线索，并将目标任务上的受控训练视为能力比较证据。

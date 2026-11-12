@@ -38,6 +38,6 @@
 
 ### NIST AI RMF
 
-- 来源：[NIST AI Risk Management Framework 页面](https://www.nist.gov/itl/ai-risk-management-framework) 与 [AI RMF 1.0 正文](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.100-1.pdf)，核验日期为 2026-11-05。
+- 来源：[NIST AI Risk Management Framework 页面](https://www.nist.gov/itl/ai-risk-management-framework) 与 [AI RMF 1.0 正文](https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-ai-rmf-10)，核验日期为 2026-11-05。
 - 页面说明 AI RMF 1.0 于 2023-01-26 发布、用于自愿采用，四个高层功能为 GOVERN、MAP、MEASURE 和 MANAGE，并显示 1.0 正在修订。NIST 另于 2024-07-26 发布 Generative AI Profile，作为 AI RMF 1.0 的生成式 AI 配套资源。
 - 证据等级：NIST 自愿风险管理框架。四个功能用于组织风险管理活动，不是特定服务的合规清单；正文使用这些术语不能替代行业法规分析或系统安全评测。

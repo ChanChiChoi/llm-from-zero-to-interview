@@ -2,20 +2,20 @@
 
 如果一个商品库有一千万张图片，用户输入“带木质桌面的黑色台灯”，系统怎样找到相关图片？传统分类器需要预先列出所有类别，新的组合一出现就要重新设计标签和分类头。图文对齐模型选择了另一条路线：把图片和自然语言描述分别编码成向量，让查询和候选媒体可以在同一个空间里比较。
 
-CLIP 是这条路线最有影响力的代表。它使用图像编码器和文本编码器组成双塔，通过图文配对的对比学习训练共享的 embedding 空间。训练完成后，文本可以检索图片，图片可以检索文字，类别名称也可以临时写成 prompt，作为 zero-shot 分类的候选描述。
+CLIP（Contrastive Language–Image Pre-training，图文对比预训练）是这条路线最有影响力的代表。它使用图像编码器和文本编码器组成双塔，通过图文配对的对比学习训练共享的嵌入向量（embedding）空间。训练完成后，文本可以检索图片，图片可以检索文字，类别名称也可以临时写成提示词（prompt），作为零样本（zero-shot）分类的候选描述。
 
 但“向量相似”不能被直接翻译成“模型理解了所有关系”。一个全局向量可能知道图片大致是狗，却分不清“狗追猫”和“猫追狗”；它可能知道页面与发票有关，却读不准小字号金额。理解 CLIP，既要理解它为什么有效，也要知道它把哪些信息压缩掉了。
 
 本章从一条可复现的数据流开始：
 
 ~~~text
-图像 x_i -> image encoder -> 投影 -> 归一化向量 v_i
-文本  y_i -> text encoder  -> 投影 -> 归一化向量 t_i
+图像 x_i -> 图像编码器（image encoder）-> 投影 -> 归一化向量 v_i
+文本  y_i -> 文本编码器（text encoder）-> 投影 -> 归一化向量 t_i
                                       |
                                       v
                            相似度矩阵与对比损失
                                       |
-                         检索、zero-shot 分类、评估
+                         检索、零样本（zero-shot）分类、评估
 ~~~
 
 读者会看到五个层次的区别：
@@ -35,17 +35,19 @@ CLIP 是这条路线最有影响力的代表。它使用图像编码器和文本
 本章讨论 CLIP 风格的双塔图文对齐模型，重点包括：
 
 1. 为什么自然语言可以作为视觉监督。
-2. image encoder、text encoder 和 projection head 如何形成形状契约。
-3. L2 normalization、cosine similarity 和 temperature 的关系。
-4. N 对图文样本如何形成 N x N 相似度矩阵。
-5. image-to-text 与 text-to-image 两个方向的 InfoNCE loss。
-6. zero-shot 分类、prompt ensemble 和校准。
+2. 图像编码器（image encoder）、文本编码器（text encoder）和投影头（projection head）如何形成形状契约。
+3. L2 归一化（L2 normalization）、余弦相似度（cosine similarity）和温度（temperature）的关系。
+4. $N$ 对图文样本如何形成 $N\times N$ 相似度矩阵。
+5. 图到文（image-to-text）与文到图（text-to-image）两个方向的噪声对比估计（InfoNCE）损失。
+6. 零样本（zero-shot）分类、提示词集成（prompt ensemble）和校准。
 7. 图文检索的离线索引、指标、延迟和分母。
-8. batch size、分布式负样本、重复样本和 false negative。
+8. 批大小（batch size）、分布式负样本、重复样本和假负例（false negative）。
 9. 数据质量、语言覆盖、快捷特征和版权/隐私边界。
-10. CLIP 与 VLM 的分工，以及全局 embedding 的能力上限。
+10. CLIP 与视觉语言模型（vision-language model，VLM）的分工，以及全局嵌入（embedding）的能力上限。
 
-本章不会把 SigLIP、BLIP、细粒度 grounding、向量数据库实现或完整的视觉对话训练展开成专题。它们会在后续章节各自讨论；这里会在需要划分边界的地方说明它们与 CLIP 的关系。
+CLIP 的双塔与 batch 内 softmax 是一条路线的基线，不代表后续工作只是在扩大模型：ALIGN 研究超过十亿对噪声替代文本（alt-text）的规模化双编码器训练；LiT 冻结预训练图像塔、主要调整文本塔；SigLIP 把全局 softmax 目标改为逐图文对的 sigmoid 目标；SigLIP 2 又组合图像描述生成（captioning）、自蒸馏（self-distillation）、掩码预测（masked prediction）与在线数据筛选，并扩展到多语言、定位和稠密特征。各论文的训练数据、初始化、模型和评估协议不同，结果不能归因于单一因素；本章聚焦 CLIP 的双向 softmax 目标，只用这些工作定位路线差异。[ALIGN](https://arxiv.org/abs/2102.05918)、[LiT](https://arxiv.org/abs/2111.07991)、[SigLIP](https://arxiv.org/abs/2303.15343)、[SigLIP 2](https://arxiv.org/abs/2502.14786)
+
+本章不把 SigLIP、BLIP、细粒度 grounding、向量数据库实现或完整的视觉对话训练展开成独立专题；只在划分边界处说明它们与 CLIP 的关系。
 
 ### 0.2 三种证据不能混用
 
@@ -57,7 +59,7 @@ CLIP 是这条路线最有影响力的代表。它使用图像编码器和文本
 | 官方代码或模型卡 | 某个版本的 API、权重格式和公开实现细节 | 所有部署版本都完全相同 |
 | 本章的教学实验 | 公式、形状和指标实现是否自洽 | 真实数据上的泛化能力和安全率 |
 
-CLIP 原论文报告了从互联网收集的大规模图文对，并展示了 zero-shot transfer。这个事实支持“自然语言弱监督可以训练出可迁移的视觉表示”，不支持把任意一个当前服务的训练数据规模、过滤规则或商业质量写成论文结论。后文引用 OpenAI 的公开代码时，也只把它当作某一开源实现的行为证据。
+CLIP 原论文报告了从互联网收集的 4 亿图文对，并展示了零样本迁移实验。这个事实支持“自然语言弱监督可以训练出可迁移的视觉表示”，不支持把任意一个当前服务的训练数据规模、过滤规则或商业质量写成论文结论。[CLIP 原论文](https://arxiv.org/abs/2103.00020)中的数据规模、模型和评测只代表该论文的实验设置。后文引用 OpenAI 的公开代码时，也只把它当作某个固定 revision 的实现证据。
 
 ### 0.3 初学者与工程师要分别问什么
 
@@ -79,14 +81,18 @@ CLIP 原论文报告了从互联网收集的大规模图文对，并展示了 ze
 
 ### 1.1 固定分类头的能力边界
 
-设传统分类器有 K 个固定类别，图像编码器输出 h，分类头输出：
+设传统分类器有 $K$ 个固定类别，图像编码器输出 $h$，分类头输出：
+
+其中 $W$ 和 $b$ 分别是分类头的权重与偏置，$z\in\mathbb{R}^K$ 是各类别的对数几率（logits）。
 
 ~~~math
 z=Wh+b,\qquad
-\hat y=\operatorname{argmax}_{k\in\{1,\ldots,K\}}z_k.
+\hat y=\mathrm{argmax}_{k\in\{1,\ldots,K\}}z_k.
 ~~~
 
-这种模型适合类别稳定、标注清晰的任务。问题在于，K 个类别是训练时就决定的。模型没有一个自然的机制去回答“这张图片是否符合一个训练时没有出现过的文字描述”。把新类别加入分类头也不是简单地增加一个字符串，因为新头需要有标注样本和重新校准的决策边界。
+这种模型适合类别稳定、标注清晰的任务。问题在于，$K$ 个类别是训练时就决定的。模型没有一个自然的机制去回答“这张图片是否符合一个训练时没有出现过的文字描述”。把新类别加入分类头也不是简单地增加一个字符串，因为新头需要有标注样本和重新校准的决策边界。
+
+例如 logits 为 $[1.2,0.8,0.1]$ 时，argmax 选择第一个固定类别。新类别没有对应的输出位置；即使字符串已知，也不能靠这个分类头直接比较它与图像的匹配程度。
 
 图文检索的候选集合更开放。用户可能查询：
 
@@ -106,7 +112,7 @@ z=Wh+b,\qquad
 (image_i, caption_i)
 ~~~
 
-配对关系告诉模型：caption_i 是描述 image_i 的一个文本。它没有告诉模型 caption 中每个词对应哪个像素区域，也没有保证文本完整描述了图片里的所有对象。于是这种监督有两个特点：
+配对关系告诉模型：$caption_i$ 是一条描述图片的说明文字（caption）。它没有告诉模型 caption 中每个词对应哪个像素区域，也没有保证文本完整描述了图片里的所有对象。于是这种监督有两个特点：
 
 1. 它比逐区域标注便宜，能够覆盖大量开放概念。
 2. 它比细粒度标注弱，容易携带噪声、偏见和快捷相关性。
@@ -115,7 +121,7 @@ z=Wh+b,\qquad
 
 ### 1.3 CLIP 的关键变化
 
-CLIP 的关键变化不是单独发明一个更大的 image encoder，而是把训练任务改写成配对识别：
+CLIP 的关键变化不是单独发明一个更大的 image encoder，而是把训练任务改写成配对识别；原论文以双编码器在 batch 内比较图文配对，并用对称交叉熵训练共享表示。[CLIP 原论文](https://arxiv.org/abs/2103.00020)
 
 ~~~text
 给定一张图片和 N 段候选文字，哪一段文字属于这张图片？
@@ -141,12 +147,12 @@ image_2: 一张折线图
 text_2: a line chart showing monthly sales
 ~~~
 
-训练并不要求模型直接生成 text_0，也不要求它先预测 dog、invoice、chart 三个固定类别。它只要求在这个 batch 中：
+训练并不要求模型直接生成 $text_0$，也不要求它先预测 dog、invoice、chart 三个固定类别。它只要求在这个 batch 中：
 
-1. image_0 与 text_0 的分数高于 image_0 与 text_1、text_2。
-2. image_1 与 text_1 的分数高于其他文本。
-3. image_2 与 text_2 的分数高于其他文本。
-4. 反方向也成立：text_0 应优先找到 image_0。
+1. $image_0$ 与 $text_0$ 的分数高于 $image_0$ 与 $text_1$、$text_2$。
+2. $image_1$ 与 $text_1$ 的分数高于其他文本。
+3. $image_2$ 与 $text_2$ 的分数高于其他文本。
+4. 反方向也成立：$text_0$ 应优先找到 $image_0$。
 
 这就是 batch 内负样本的来源，也是后面 false negative 问题的来源。
 
@@ -175,14 +181,14 @@ text y_i
 
 ### 2.2 形状契约
 
-设 batch size 为 B，图像编码器输出维度为 d_I，文本编码器输出维度为 d_T，共享 embedding 维度为 d：
+设 batch size 为 $B$，图像编码器输出维度为 $d_I$，文本编码器输出维度为 $d_T$，共享 embedding 维度为 $d$：
 
 ~~~math
 A\in\mathbb{R}^{B\times d_I},\qquad
 B_T\in\mathbb{R}^{B\times d_T}.
 ~~~
 
-投影后：
+设图像和文本投影矩阵分别满足 $W_I\in\mathbb{R}^{d_I\times d}$、$W_T\in\mathbb{R}^{d_T\times d}$。投影后：
 
 ~~~math
 V=A W_I+b_I,\qquad
@@ -195,7 +201,7 @@ T=B_T W_T+b_T,
 V,T\in\mathbb{R}^{B\times d}.
 ~~~
 
-这里用 B_T 表示文本特征矩阵，避免与 batch size 的符号 B 混淆。工程实现中也可以把投影写成线性层或更复杂的 projection head，但最后参与相似度的两个矩阵必须有相同的最后一维。
+这里用 $B_T$ 表示文本特征矩阵，避免与 batch size 的符号 $B$ 混淆。工程实现中也可以把投影写成线性层或更复杂的 projection head，但最后参与相似度的两个矩阵必须有相同的最后一维。
 
 形状检查至少要回答：
 
@@ -205,7 +211,9 @@ V,T\in\mathbb{R}^{B\times d}.
 4. 归一化是否沿最后一维执行。
 5. 相似度矩阵是否为 [B, B]。
 
-如果输出是 [B, d_I] 和 [B, d_T]，却直接相乘，问题不是“模型学得不好”，而是表示契约尚未满足。
+如果输出是 $[B,d_I]$ 和 $[B,d_T]$，却直接相乘，问题不是“模型学得不好”，而是表示契约尚未满足。
+
+取一个具体形状例：batch size 为 2，图像特征维度为 3，文本特征维度为 4，共享维度为 2。于是 $A\in\mathbb{R}^{2\times3}$、$W_I\in\mathbb{R}^{3\times2}$，得到 $V\in\mathbb{R}^{2\times2}$；$B_T\in\mathbb{R}^{2\times4}$、$W_T\in\mathbb{R}^{4\times2}$，得到 $T\in\mathbb{R}^{2\times2}$。最终 $VT^\top\in\mathbb{R}^{2\times2}$，每格对应一对图文的分数。这里的数字只是维度示例，不是某个 CLIP 检查点的配置。
 
 ### 2.3 Image encoder 不等于共享空间
 
@@ -213,23 +221,23 @@ Image encoder 可以是卷积网络，也可以是 Vision Transformer。它先�
 
 ~~~math
 a_i=f_I(x_i),\qquad
-v_i=\operatorname{normalize}(W_Ia_i).
+v_i=\mathrm{normalize}(W_Ia_i).
 ~~~
 
 这两个向量承担不同责任：
 
-1. a_i 是视觉主干的内部表示，可能保留多层空间信息。
-2. v_i 是为跨模态相似度训练过的全局表示。
+1. $a_i$ 是视觉主干的内部表示，可能保留多层空间信息。
+2. $v_i$ 是为跨模态相似度训练过的全局表示。
 
-不能因为 v_i 与文字对齐，就认为 a_i 的每个位置都具有可直接解释的词语含义。区域级 grounding 需要额外的标注、局部特征或交互结构。
+不能因为 $v_i$ 与文字对齐，就认为 $a_i$ 的每个位置都具有可直接解释的词语含义。区域级 grounding 需要额外的标注、局部特征或交互结构。
 
 ### 2.4 Text encoder 不是生成式语言模型
 
 文本塔的目标是把整段文字压缩成一个向量，而不是逐 token 预测下一个词：
 
 ~~~math
-b_i=f_T(\operatorname{tokenize}(y_i)),\qquad
-t_i=\operatorname{normalize}(W_Tb_i).
+b_i=f_T(\mathrm{tokenize}(y_i)),\qquad
+t_i=\mathrm{normalize}(W_Tb_i).
 ~~~
 
 它通常使用 Transformer，但“使用 Transformer”并不意味着它具备对话式生成能力。生成模型需要一个逐步输出 token 的解码过程；CLIP text encoder 只需要产生适合相似度比较的句子级表示。
@@ -241,11 +249,11 @@ t_i=\operatorname{normalize}(W_Tb_i).
 对非零向量 z 做 L2 归一化：
 
 ~~~math
-\operatorname{norm}(z)=\frac{z}{\lVert z\rVert_2},\qquad
+\mathrm{norm}(z)=\frac{z}{\lVert z\rVert_2},\qquad
 \lVert z\rVert_2=\sqrt{\sum_{k=1}^{d}z_k^2}.
 ~~~
 
-对归一化后的 v_i 和 t_j：
+对归一化后的 $v_i$ 和 $t_j$：
 
 ~~~math
 v_i^\top t_j
@@ -254,7 +262,7 @@ v_i^\top t_j
 =\cos\theta_{ij}.
 ~~~
 
-因此向量长度不再直接决定相似度，角度成为主要因素。代码中归一化必须处理零向量和数值精度；实际模型输出通常不会是零向量，但教学代码仍应明确异常行为。
+手算 $z=[3,4]$，其 L2 范数为 $\sqrt{3^2+4^2}=5$，归一化后是 $[0.6,0.8]$。再取单位向量 $u=[0.8,0.6]$，点积为 $0.6\times0.8+0.8\times0.6=0.96$，所以 cosine similarity 为 $0.96$。这说明长度不再直接决定相似度，角度成为主要因素。代码中归一化必须处理零向量和数值精度；实际模型输出通常不会是零向量，但教学代码仍应明确异常行为。数值无量纲，是构造出来的二维例子，不是模型测量值。
 
 这里的“非零”还不够：向量必须是有限数，不能含有 `NaN` 或无穷大。否则归一化后的每个分量都可能变成非有限值，后续 cosine、softmax 和检索排名会一起失去意义。工程接口应在进入共享空间前拒绝这种输入，而不是等到最后的 Recall 变成一个无法解释的数字。
 
@@ -276,11 +284,13 @@ C=VT^\top,\qquad
 C\in\mathbb{R}^{B\times B}.
 ~~~
 
-元素 C_ij 表示第 i 张图和第 j 段文本的相似度。若 batch 的配对关系确实按相同索引排列，正确配对在对角线：
+元素 $C_{ij}$ 表示第 $i$ 张图和第 $j$ 段文本的相似度。若 batch 的配对关系确实按相同索引排列，正确配对在对角线：
 
 ~~~math
-\text{target}_i=i.
+\mathrm{target}_i=i.
 ~~~
+
+可用两个正交的单位向量手算完整矩阵：令 $v_0=t_0=[1,0]$、$v_1=t_1=[0,1]$，则 $C=VT^\top=\begin{bmatrix}1&0\\0&1\end{bmatrix}$。对角线是两个正确配对，非对角线是点积为 0 的交叉组合；这组值将贯穿后面的温度和损失计算。
 
 一个三样本矩阵可以示意为：
 
@@ -306,7 +316,7 @@ image_2            0.26     0.35     0.94
 
 ### 3.3 Batch 内负样本的含义
 
-对 image_i 来说，text_j（j 不等于 i）是当前目标中的负样本。它们只是“当前 batch 里没有与 image_i 配对”的文本，不一定在现实世界中语义不相关。
+对 $image_i$ 来说，$text_j$（$j\ne i$）是当前目标中的负样本。它们只是“当前 batch 里没有与 $image_i$ 配对”的文本，不一定在现实世界中语义不相关。
 
 例如：
 
@@ -316,11 +326,11 @@ text_0: a golden retriever
 text_1: a dog running outdoors
 ~~~
 
-text_1 可能同样适合 image_0。如果把它强行当作负样本，模型会被要求降低一个合理匹配的分数。这种样本称为 false negative。它在大规模互联网数据中很难完全避免，尤其是重复图片、同一事件的多条描述和同一商品的多个角度。
+$text_1$ 可能同样适合 $image_0$。如果把它强行当作负样本，模型会被要求降低一个合理匹配的分数。这种本应为正却被标为负的样本称为假负例（false negative）。它在大规模互联网数据中很难完全避免，尤其是重复图片、同一事件的多条描述和同一商品的多个角度。
 
 ### 3.4 相似度矩阵不是证据解释
 
-C_ij 较大只能说明两个全局表示在训练得到的几何空间里接近。它不能直接说明：
+$C_{ij}$ 较大只能说明两个全局表示在训练得到的几何空间里接近。它不能直接说明：
 
 1. 哪个区域导致了分数。
 2. 文本中的哪个关系被验证。
@@ -333,20 +343,22 @@ C_ij 较大只能说明两个全局表示在训练得到的几何空间里接近
 
 ### 4.1 Temperature 缩放
 
-令可学习的温度为 tau，logits 为：
+令可学习的温度为 $\tau$，logits 为：
 
 ~~~math
 S_{ij}=\frac{C_{ij}}{\tau}.
 ~~~
 
-在很多实现中，直接维护 s=log(1/tau)，然后使用：
+在很多实现中，直接维护 $s=\log(1/\tau)$，然后使用：
 
 ~~~math
 \alpha=\exp(s)=\frac{1}{\tau},\qquad
 S=\alpha C.
 ~~~
 
-这样可以保证缩放因子为正。OpenAI 的公开实现使用 logit_scale 的指数形式，并以与 1/0.07 对应的初始值开始；不同实现可能增加上界或使用其他参数化，部署时要以具体版本为准。
+这样可以保证缩放因子为正。OpenAI CLIP 在固定 revision a1d071733d7111c9c014f024669f959182114e33 的实现中，将 `logit_scale` 初始化为 $\ln(1/0.07)$，前向时再取指数；这是该代码版本的行为，不是所有复现都必须采用的超参数。[固定 revision 的 model.py](https://github.com/openai/CLIP/blob/a1d071733d7111c9c014f024669f959182114e33/clip/model.py)
+
+例如 $s=\ln 2\approx0.6931$，则 $\alpha=\exp(s)=2$，对应 $\tau=1/\alpha=0.5$。这个取值将在下例中把对角线相似度 1 缩放为 logit 2。
 
 ### 4.2 Image-to-text loss
 
@@ -388,16 +400,20 @@ L_{I\rightarrow T}+L_{T\rightarrow I}
 
 这个目标看起来像分类，但类别不是固定的 dog、invoice 或 chart，而是当前 batch 中的文本或图片。下一批数据变化时，候选类别也变化。
 
+沿用前面 $B=2$ 的单位向量矩阵，并取 $\tau=0.5$，得到 $S=C/\tau=\begin{bmatrix}2&0\\0&2\end{bmatrix}$。第一行中正确文本的概率为 $\exp(2)/(\exp(2)+\exp(0))\approx0.8808$，行损失为 $-\ln(0.8808)=\ln(1+\exp(-2))\approx0.1269$。第二行相同；转置后矩阵也相同，因此 image-to-text loss、text-to-image loss 和它们的对称平均都是约 $0.1269$。数值为便于复算的无量纲教学输入，不是实测训练损失。
+
 ### 4.4 为什么必须使用稳定的 log-sum-exp
 
-直接计算 exp(S_ij) 可能溢出。对一行 logits z，令 m=max_j z_j：
+直接计算 $\exp(S_{ij})$ 可能溢出。对一行 logits $z$，令 $m=\max_j z_j$：
 
 ~~~math
 \log\sum_j\exp(z_j)
 =m+\log\sum_j\exp(z_j-m).
 ~~~
 
-由于 z_j-m 小于等于 0，指数项不会因为一个大正数而溢出。交叉熵实现通常内部使用这个技巧；自己实现教学代码时也应该使用稳定版本，而不是仅在小数字例子中调用 exp。
+由于 $z_j-m\le0$，指数项不会因为一个大正数而溢出。交叉熵实现通常内部使用这个技巧；自己实现教学代码时也应该使用稳定版本，而不是仅在小数字例子中调用 exp。
+
+例如 logits 为 $[1000,999]$，直接计算 $\exp(1000)+\exp(999)$ 会溢出；稳定形式先减去最大值，得到 $1000+\ln(\exp(0)+\exp(-1))=1000+\ln(1+\exp(-1))\approx1000.3133$，结果有限且与原式等价。
 
 ### 4.5 从损失看训练信号
 
@@ -407,19 +423,19 @@ L_{I\rightarrow T}+L_{T\rightarrow I}
 p_{ij}=\frac{\exp(S_{ij})}{\sum_k\exp(S_{ik})}.
 ~~~
 
-对 logits 的梯度有一个很有用的直觉：
+对未做 batch 平均的单行损失 $L_i=-\ln p_{ii}$，logits 梯度有一个很有用的直觉：
 
 ~~~math
 \frac{\partial L_i}{\partial S_{ij}}
 =p_{ij}-\mathbf{1}[j=i].
 ~~~
 
-因此：
+沿用上例的单行概率，正样本梯度为 $0.8808-1=-0.1192$，负样本梯度为 $0.1192$。这里的梯度针对未做 batch 平均的单行损失；若报告整批平均梯度，还要乘上对应的 $1/B$ 因子。具体来说：
 
-1. 正样本的梯度是 p_ii-1，推动 S_ii 增大。
-2. 负样本的梯度是 p_ij，推动 S_ij 减小。
+1. 正样本的梯度是 $p_{ii}-1$，推动 $S_{ii}$ 增大。
+2. 负样本的梯度是 $p_{ij}$，推动 $S_{ij}$ 减小。
 3. 已经很容易区分的负样本概率接近 0，获得的梯度很小。
-4. 分数接近的 hard negative 获得更明显的更新。
+4. 分数接近的困难负样本（hard negative）获得更明显的更新。
 
 这解释了为什么数据中的难例有价值，也解释了为什么错误标注的 hard negative 会造成更强的伤害。
 
@@ -433,7 +449,7 @@ p_{ij}=\frac{\exp(S_{ij})}{\sum_k\exp(S_{ik})}.
 [0.90, 0.50, 0.20]
 ~~~
 
-当 tau=0.5 时，缩放后的 logits 是 [1.8, 1.0, 0.4]；当 tau=0.05 时，logits 是 [18, 10, 4]。后者的 softmax 更尖锐，模型更强地要求正样本胜出。
+当 $\tau=0.5$ 时，缩放后的 logits 是 $[1.8,1.0,0.4]$，softmax 约为 $[0.5896,0.2649,0.1454]$；当 $\tau=0.05$ 时，logits 是 $[18,10,4]$，softmax 约为 $[0.999664,0.000335,0.000001]$。两次的最大相似度都来自第一个候选，但小温度把分布推得更尖；这组概率也说明过小温度会让剩余候选的梯度快速趋近于零。数值均为按给定相似度手算的教学结果。
 
 较小的 tau 有两个效果：
 
@@ -444,16 +460,16 @@ p_{ij}=\frac{\exp(S_{ij})}{\sum_k\exp(S_{ik})}.
 
 ### 5.2 logit_scale 的参数化
 
-若训练参数是 s，缩放因子为：
+若训练参数是 $s$，缩放因子为：
 
 ~~~math
 \alpha=\exp(s).
 ~~~
 
-优化 s 比直接优化 tau 更方便，因为无需在每一步手工保证 tau 为正。然而 alpha 可能增长过大。工程实现可以：
+优化 $s$ 比直接优化 $\tau$ 更方便，因为无需在每一步手工保证 $\tau$ 为正。然而 $\alpha$ 可能增长过大。工程实现可以：
 
 1. 对 s 或 alpha 设置上界。
-2. 记录训练过程中的 temperature 和 logit_scale。
+2. 记录训练过程中的 temperature 和 `logit_scale`。
 3. 检查验证集的检索指标是否与训练 loss 同步。
 4. 将异常样本、重复样本和损失变化一起观察。
 
@@ -461,12 +477,14 @@ p_{ij}=\frac{\exp(S_{ij})}{\sum_k\exp(S_{ik})}.
 
 ### 5.3 Batch size 不只是吞吐参数
 
-在一对一配对假设下，每个图像拥有 B-1 个候选负文本。增大 batch 会增加候选数量，但也会增加：
+在一对一配对假设下，每个图像拥有 $B-1$ 个候选负文本。增大 batch 会增加候选数量，但也会增加：
 
-1. 相似度矩阵的存储，规模约为 B^2。
+1. 相似度矩阵的存储，规模约为 $B^2$。
 2. image/text encoder 的激活和显存。
 3. 多卡训练时的通信量。
 4. false negative 出现的机会。
+
+例如 batch 从 $B=2$ 增至 $B=4$ 时，每个 query 的候选负文本从 1 个增至 3 个；相似度矩阵的格数则从 $2^2=4$ 增至 $4^2=16$。因此配对数翻倍会令矩阵格数变成 4 倍，但负样本数也会受重复样本和标注关系影响。这是 shape 账本，不代表实际吞吐或显存会严格按同一比例变化。
 
 因此“更大的 batch 一定更好”不成立。更大的 batch 提供更多负样本，但如果数据重复严重，新增的负样本可能只是同义或近重复样本。
 
@@ -478,13 +496,13 @@ p_{ij}=\frac{\exp(S_{ij})}{\sum_k\exp(S_{ik})}.
 B_{\mathrm{global}}=R b.
 ~~~
 
-如果使用 all-gather，标签也要带上设备偏移。rank r 上第 k 个本地样本，在全局矩阵中的目标位置通常是：
+如果使用全收集（all-gather），标签也要带上设备偏移。设设备进程编号（rank）从 0 起，每个 rank 的本地批次（batch）为 b，rank r 上第 k 个本地样本在全局矩阵中的目标位置通常是：
 
 ~~~math
-\operatorname{target}_{r,k}=rb+k.
+\mathrm{target}_{r,k}=r\cdot b+k.
 ~~~
 
-如果忘记这个偏移，loss 仍可能运行，却会把正确配对指向错误的全局列。
+这里 $r\cdot b$ 表示 rank 编号与每卡 batch size 的乘积。如果有 2 张卡、每卡 2 对样本，全局 batch 为 $2\times2=4$；rank 1 上本地第 0 个样本的标签偏移为 $1\times2+0=2$，即全局索引 2。如果忘记这个偏移，loss 仍可能运行，却会把正确配对指向错误的全局列。
 
 还要区分两种实现：
 
@@ -495,9 +513,9 @@ B_{\mathrm{global}}=R b.
 
 ### 5.5 累积梯度不能自动制造更多负样本
 
-梯度累积把多个 micro-batch 的梯度相加，再更新一次参数。若每个 micro-batch 单独计算相似度矩阵，它的负样本仍然只来自该 micro-batch。要得到更大的对比候选集合，需要显式缓存或聚合特征，并处理特征对应的参数版本。
+梯度累积把多个微批次（micro-batch）的梯度相加，再更新一次参数。若每个微批次单独计算相似度矩阵，它的负样本仍然只来自该微批次。要得到更大的对比候选集合，需要显式缓存或聚合特征，并处理特征对应的参数版本。
 
-用旧参数编码的缓存特征可能降低通信成本，但会引入 stale negatives。它是否值得，要通过同一验证集上的 Recall@K、训练稳定性和吞吐共同判断。
+用旧参数编码的缓存特征可能降低通信成本，但会让陈旧特征（stale features）继续充当负样本候选。它是否值得，要通过同一验证集上的 K 召回率（Recall@K）、训练稳定性和吞吐共同判断。
 
 ## 6. 多正样本、重复数据与对比目标的假设
 
@@ -516,7 +534,7 @@ B_{\mathrm{global}}=R b.
 
 ### 6.2 多正样本的一个改写
 
-令 P_i 是与图像 i 相关的文本索引集合，image-to-text 的多正样本损失可以写成：
+令 $P_i$ 是与图像 $i$ 相关的文本索引集合，image-to-text 的多正样本损失可以写成：
 
 ~~~math
 L_i^{\mathrm{multi+}}
@@ -526,6 +544,8 @@ L_i^{\mathrm{multi+}}
 ~~~
 
 这个形式允许多个正确候选共同承担分子。实际方法还可能对正样本平均、加权或采用专门的去重策略。重点不是固定某一个公式，而是先承认标注关系可能不是 permutation matrix。
+
+例如 logits 为 $[2,1,0]$，索引 $\{0,1\}$ 都是正样本。分母的 log-sum-exp 为 $\ln(\exp(2)+\exp(1)+1)\approx2.4076$，分子的 log-sum-exp 为 $\ln(\exp(2)+\exp(1))\approx2.3133$，所以多正样本损失约为 $2.4076-2.3133=0.0943$。若误把索引 1 当负样本、只以索引 0 为正，损失为 $2.4076-2=0.4076$。差异来自目标标签承认了第二条合理 caption，而不是模型分数发生变化。
 
 ### 6.3 重复和近重复样本
 
@@ -561,16 +581,16 @@ L_i^{\mathrm{multi+}}
 
 ### 7.1 从文本构造分类器
 
-给定 C 个类别描述 q_1,...,q_C，先用文本塔编码：
+给定 $C$ 个类别描述 $q_1,\ldots,q_C$，先用文本塔编码：
 
 ~~~math
-t_c=\operatorname{normalize}(f_T(q_c)).
+t_c=\mathrm{normalize}(f_T(q_c)).
 ~~~
 
 给定一张图片 x，得到：
 
 ~~~math
-v=\operatorname{normalize}(f_I(x)).
+v=\mathrm{normalize}(f_I(x)).
 ~~~
 
 类别分数为：
@@ -582,10 +602,12 @@ s_c=\frac{v^\top t_c}{\tau}.
 预测类别：
 
 ~~~math
-\hat c=\operatorname{argmax}_{c}s_c.
+\hat c=\mathrm{argmax}_{c}s_c.
 ~~~
 
 这里没有重新训练图片分类头。文本向量充当了分类器的候选权重，因此类别名称和 prompt 的写法会影响结果。
+
+例如图像向量 $v=[1,0]$，类别 A 的文本向量 $t_A=[0.8,0.6]$，类别 B 的文本向量 $t_B=[0,1]$；三个向量都是单位向量。取 $\tau=0.2$，则分数分别为 $0.8/0.2=4$ 和 $0/0.2=0$，argmax 选类别 A。温度改变概率的尖锐程度，但在 $\tau>0$ 时不改变这里的分数次序。
 
 ### 7.2 Prompt 为什么会改变结果
 
@@ -598,19 +620,19 @@ an image of a dog
 a close-up photograph of a golden retriever
 ~~~
 
-训练数据中的图片标题可能更接近其中某一种写法。prompt 改变了 t_c，也就改变了与图像向量的角度。
+训练数据中的图片标题可能更接近其中某一种写法。prompt 改变了 $t_c$，也就改变了与图像向量的角度。
 
-prompt ensemble 的常见做法是为一个类别准备 M 个模板，分别得到 t_c,m，先平均再归一化：
+prompt ensemble 的常见做法是为一个类别准备 $M$ 个模板，分别得到 $t_{c,m}$，先平均再归一化：
 
 ~~~math
 \bar t_c=
-\operatorname{normalize}
+\mathrm{normalize}
 \left(
 \frac{1}{M}\sum_{m=1}^{M}t_{c,m}
 \right).
 ~~~
 
-平均前是否归一化、平均后是否再次归一化、模板权重是否相同，都属于实现选择。为了让结果可复现，评估报告应保存模板列表和语言版本。
+平均前是否归一化、平均后是否再次归一化、模板权重是否相同，都属于实现选择。为了让结果可复现，评估报告应保存模板列表和语言版本。一个二维示意中，两条模板向量为 $[1,0]$ 和 $[0,1]$，等权平均后是 $[0.5,0.5]$，再次归一化为 $[1/\sqrt{2},1/\sqrt{2}]$；它与单条模板的方向不同，所以可能改变类别分数和排序。CLIP 原论文也报告模板工程与 embedding 集成会影响其零样本实验结果，具体收益绑定论文中的模型、模板和数据集。[CLIP 原论文 §3.1.4](https://arxiv.org/html/2103.00020)
 
 ### 7.3 类别名称不是中性的
 
@@ -632,7 +654,9 @@ prompt ensemble 的常见做法是为一个类别准备 M 个模板，分别得�
 \hat y_c=\mathbf{1}[s_c\ge\gamma_c].
 ~~~
 
-阈值 gamma_c 不一定对所有类别相同。类别频率、prompt 长度和分布差异都会影响分数，不能默认使用一个未经验证的 0.5。
+阈值 $\gamma_c$ 不一定对所有类别相同。类别频率、prompt 长度和分布差异都会影响分数，不能默认使用一个未经验证的 $0.5$。
+
+例如两个类别的分数是 $[0.74,0.32]$，阈值分别为 $[0.60,0.40]$，逐类比较得到标签 $[1,0]$。这个示例说明多标签任务可以同时输出多个正类或没有正类；阈值本身仍须在有代表性的验证集上校准。
 
 ### 7.5 Zero-shot 的正确评估方式
 
@@ -684,7 +708,7 @@ prompt ensemble 的常见做法是为一个类别准备 M 个模板，分别得�
 
 ### 8.3 Rank、Recall@K 与 MRR
 
-设 query i 的相关候选集合为 G_i，预测排序为 pi_i(1), pi_i(2), ...。若只有一个相关候选 g_i，target rank 可以写成：
+设 query $i$ 的相关候选集合为 $G_i$，预测排序为 $\pi_i(1),\pi_i(2),\ldots$。若只有一个相关候选 $g_i$，且候选分数无并列，target rank 可以写成：
 
 ~~~math
 r_i=1+\sum_{j\ne i}\mathbf{1}[S_{ij}>S_{ii}].
@@ -696,40 +720,44 @@ r_i=1+\sum_{j\ne i}\mathbf{1}[S_{ij}>S_{ii}].
 r_i^{+}=\min\{k:\pi_i(k)\in G_i\}.
 ~~~
 
-Recall@K：
+前 $K$ 条召回率（Recall@K）：
 
 ~~~math
-\operatorname{Recall@K}
+\mathrm{Recall@K}
 =\frac{1}{N}\sum_{i=1}^{N}
 \mathbf{1}[r_i^{+}\le K].
 ~~~
 
-MRR：
+平均倒数排名（mean reciprocal rank，MRR）：
 
 ~~~math
-\operatorname{MRR}
+\mathrm{MRR}
 =\frac{1}{N}\sum_{i=1}^{N}\frac{1}{r_i^{+}}.
 ~~~
 
 如果查询没有标注任何相关候选，不能把它悄悄计为失败或成功；应定义过滤规则或单独报告 coverage。
 
+例如三个 query 的第一个相关结果分别排在第 1、3、2 位，则 $\mathrm{Recall@1}=1/3$，$\mathrm{Recall@2}=2/3$；$\mathrm{MRR}=(1+1/3+1/2)/3=11/18\approx0.6111$。分母 $N$ 是有有效相关集合的 query 数，这里为 3；数值由这三个排序位置直接算得。
+
 排名还需要一个并列规则。教学代码使用“分数降序、原索引升序”的稳定排序，因此完全相同的分数也会得到确定的顺序；这只是 tie-breaking 约定，不是模型真的区分了两个候选。生产评估可以采用平均排名、最差排名或把并列视为同一名次，但必须在报告中固定口径。`N=0`、`K\le0` 或没有任何有效相关集合时，Recall@K 和 MRR 都不应返回一个伪造的均值。
 
 ### 8.4 nDCG 与分级相关性
 
-有些检索结果不是只有相关/不相关两种状态。比如同一型号的官方图片、同类商品、背景相似的图片，相关程度不同。设排序位置 k 的相关等级为 rel_k，常见折损累计收益为：
+有些检索结果不是只有相关/不相关两种状态。比如同一型号的官方图片、同类商品、背景相似的图片，相关程度不同。设排序位置 $k$ 的相关等级为 $rel_k$，折损累计增益（discounted cumulative gain，DCG）为：
 
 ~~~math
-\operatorname{DCG@K}
+\mathrm{DCG@K}
 =\sum_{k=1}^{K}
 \frac{2^{rel_k}-1}{\log_2(k+1)}.
 ~~~
 
-用理想排序的 DCG 归一化得到 nDCG。它适合分级标注，但仍依赖标注者一致性。指标变复杂不等于证据自动变强，最重要的是保存相关性定义和标注分母。
+用理想排序的 DCG 归一化得到归一化折损累计增益（normalized discounted cumulative gain，nDCG）。它适合分级标注，但仍依赖标注者一致性。指标变复杂不等于证据自动变强，最重要的是保存相关性定义和标注分母。
 
-### 8.5 Exact search、ANN 与重排
+例如某查询按预测顺序得到相关等级 $[2,3,0]$，理想顺序为 $[3,2,0]$。按本式计算，$\mathrm{DCG@3}=3+7/\log_2(3)\approx7.4165$，理想 $\mathrm{DCG@3}=7+3/\log_2(3)\approx8.8928$，$\mathrm{nDCG@3}\approx7.4165/8.8928=0.8340$。相关等级是本例的假设标注，不是某个数据集的评测结果。
 
-候选库较小时，可以对所有归一化向量做精确矩阵乘法。候选规模很大时，常使用 approximate nearest neighbor index。近似索引提供速度和规模，但可能牺牲召回。
+### 8.5 精确搜索（exact search）、ANN 与重排
+
+候选库较小时，可以对所有归一化向量做精确矩阵乘法。候选规模很大时，常使用近似最近邻（approximate nearest neighbor，ANN）索引。近似索引提供速度和规模，但可能牺牲召回。
 
 生产系统常分为：
 
@@ -747,6 +775,8 @@ query -> embedding -> ANN top-K' -> permission/filter/dedup
 5. exact search 与 ANN 的 Recall 差异。
 
 只报告总 QPS，无法判断模型、索引或业务过滤哪一层成为瓶颈。
+
+若精确检索的 top-3 是 [A,B,C]，近似索引返回 [A,C,D]，按精确 top-3 计算的重合率为 $2/3$。它只说明近似搜索复现了多少精确近邻，不等于相对于人工相关标签的任务 Recall；两种指标要分别报告。
 
 ## 9. 训练数据：对齐质量从网页之外开始
 
@@ -774,7 +804,7 @@ query -> embedding -> ANN top-K' -> permission/filter/dedup
 5. 敏感内容、版权和删除请求的处理。
 6. 过滤器的误删和漏删抽样。
 
-“清洗后数据更干净”不是充分说明。清洗可能删除低资源语言、少数场景和真实长尾，造成分布变窄。
+“清洗后数据更干净”不是充分说明。清洗可能删除低资源语言、少数场景和真实长尾，造成分布变窄。DataComp 将 12.8B 候选图文池、过滤方法、固定 CLIP 训练代码和 38 个下游测试集放在同一数据实验框架中；MetaCLIP 则研究按元数据分布构造平衡子集。它们说明数据构造本身需要受控比较，但论文报告结果仍绑定各自数据池、训练配置和评测集，不能推出一种过滤规则对所有任务都最好。[DataComp v5](https://arxiv.org/abs/2304.14108v5)、[MetaCLIP v6](https://arxiv.org/abs/2309.16671v6)
 
 ### 9.3 语言和领域迁移
 
@@ -790,6 +820,8 @@ CLIP 的共同空间不是天然语言无关。文本塔对不同语言、脚本
 6. 组合关系和否定表达。
 
 如果中文 query 的 Recall 下降，原因可能是 tokenizer、训练数据、prompt 模板或索引数据，而不应笼统称为“中文理解差”。
+
+多语言也不是由对比损失自动保证。SigLIP 2 的论文把多语言训练与 captioning、自蒸馏、masked prediction 和数据筛选组合在一起，并报告其方案在该论文任务中改善多语言理解、定位和稠密预测；因为这些改动同时出现，不能把结果单独归因于语言数据或 sigmoid 目标。[SigLIP 2](https://arxiv.org/abs/2502.14786)
 
 ### 9.4 数据许可和隐私
 
@@ -822,14 +854,16 @@ loss(image_features, text_features, pair_ids) -> scalar
 2. tokenizer 和 special token 版本。
 3. projection 维度。
 4. normalization 位置。
-5. temperature 或 logit_scale。
+5. temperature 或 `logit_scale`。
 6. 图文配对的唯一 id。
 
 如果模型服务只返回一个向量而不返回这些元数据，后续索引迁移和结果复现会变得困难。
 
 ### 10.2 PyTorch 训练骨架的责任边界
 
-下面的代码只展示损失层。image_encoder 和 text_encoder 的输出必须已经满足 batch 对齐，具体编码器、padding 和数据加载不在这个函数里：
+下面的代码只展示损失层，依赖 PyTorch 和 Python 标准库 `math`。输入应是同设备、同 dtype、同形状 $[B,d]$ 的浮点图像/文本特征，以及有限标量 `logit_scale`；函数返回双向交叉熵的标量平均值。`image_encoder` 和 `text_encoder` 的输出必须已经满足 batch 对齐，具体编码器、padding 和数据加载不在这个函数里：
+
+代码状态：已验证（2026-11-12；Python 3.12.9；PyTorch 2.12.0+cpu；CPU）
 
 ~~~python
 import math
@@ -847,6 +881,8 @@ def symmetric_clip_loss(image_features, text_features, logit_scale):
         raise ValueError("features must have a non-empty batch and dimension")
     if not image_features.is_floating_point() or not text_features.is_floating_point():
         raise ValueError("features must use a floating-point dtype")
+    if image_features.dtype != text_features.dtype:
+        raise ValueError("image and text features must use the same dtype")
     if image_features.device != text_features.device:
         raise ValueError("image and text features must be on the same device")
     if not torch.isfinite(image_features).all().item() or not torch.isfinite(
@@ -878,6 +914,8 @@ def symmetric_clip_loss(image_features, text_features, logit_scale):
 
 这段代码没有处理多正样本、分布式 all-gather、权限过滤或混合精度。它的价值是把最小的 shape contract 和 loss 责任说清楚，而不是冒充完整训练系统。
 
+上面的有限值与零向量检查通过 .item() 读取设备端结果，会触发 GPU 与主机同步；它适合作为教学和调试保护。训练热路径应把数据质量检查移到批次准备或调试抽样中，并根据吞吐实测保留必要的在线校验。
+
 ### 10.3 分布式实现的审计点
 
 多卡训练时，审计记录至少包含：
@@ -897,7 +935,7 @@ def symmetric_clip_loss(image_features, text_features, logit_scale):
 相似度通常在半精度中也可以计算，但要留意：
 
 1. 向量 norm 的累积误差。
-2. 很大的 logit_scale 与 exp 溢出。
+2. 很大的 `logit_scale` 与 exp 溢出。
 3. softmax 的稳定实现。
 4. all-gather 后的 dtype 一致性。
 5. 索引构建时是否重新归一化。
@@ -1075,6 +1113,10 @@ CLIP 在这里承担召回责任，不承担最终金额或期限证明责任。
 
 合成向量不是训练出来的 CLIP，也不代表真实数据质量。程序的作用是把索引、温度、标签和分母的关系变成可检查的对象。
 
+`multi_positive_row_loss` 只接受非空的 `set` 或 `frozenset`，并要求其中每个索引都是真正的整数且落在 logits 范围内；布尔值不会作为索引接受。集合保证每个正样本只计一次，避免重复索引人为放大分子；下例用 `{0, 1}` 表示两个不同的正样本。
+
+代码状态：已验证（2026-11-12；Python 3.12.9；仅 Python 标准库）
+
 ~~~python
 from math import exp, isfinite, log, sqrt
 
@@ -1105,7 +1147,12 @@ def logsumexp(values):
 
 
 def cross_entropy_row(logits, target):
-    if not isinstance(target, int) or target < 0 or target >= len(logits):
+    if (
+        isinstance(target, bool)
+        or not isinstance(target, int)
+        or target < 0
+        or target >= len(logits)
+    ):
         raise ValueError("target must be a valid logit index")
     return logsumexp(logits) - logits[target]
 
@@ -1122,7 +1169,12 @@ def transpose(matrix):
 def rank_of_target(scores, target):
     if not scores or not all(isfinite(score) for score in scores):
         raise ValueError("scores must be non-empty and finite")
-    if not isinstance(target, int) or target < 0 or target >= len(scores):
+    if (
+        isinstance(target, bool)
+        or not isinstance(target, int)
+        or target < 0
+        or target >= len(scores)
+    ):
         raise ValueError("target must be a valid score index")
     order = sorted(
         range(len(scores)),
@@ -1137,7 +1189,10 @@ def first_positive_rank(scores, positive_indices):
     if not positive_indices:
         raise ValueError("positive set cannot be empty")
     if any(
-        not isinstance(index, int) or index < 0 or index >= len(scores)
+        isinstance(index, bool)
+        or not isinstance(index, int)
+        or index < 0
+        or index >= len(scores)
         for index in positive_indices
     ):
         raise ValueError("positive indices must be valid score indices")
@@ -1154,10 +1209,13 @@ def first_positive_rank(scores, positive_indices):
 def multi_positive_row_loss(logits, positive_indices):
     if not logits or not all(isfinite(value) for value in logits):
         raise ValueError("logits must be non-empty and finite")
-    if not positive_indices:
-        raise ValueError("positive set cannot be empty")
+    if not isinstance(positive_indices, (set, frozenset)) or not positive_indices:
+        raise ValueError("positive_indices must be a non-empty set")
     if any(
-        not isinstance(index, int) or index < 0 or index >= len(logits)
+        isinstance(index, bool)
+        or not isinstance(index, int)
+        or index < 0
+        or index >= len(logits)
         for index in positive_indices
     ):
         raise ValueError("positive indices must be valid logit indices")
@@ -1345,14 +1403,17 @@ print("decision=", decision)
 ## 16. 资料入口与证据边界
 
 1. Radford et al., Learning Transferable Visual Models From Natural Language，CLIP 原始论文：<https://arxiv.org/abs/2103.00020>。
-2. OpenAI CLIP 官方代码与 README：<https://github.com/openai/CLIP>。
+2. OpenAI CLIP 官方代码：固定 revision [a1d071733d7111c9c014f024669f959182114e33 的 model.py](https://github.com/openai/CLIP/blob/a1d071733d7111c9c014f024669f959182114e33/clip/model.py)。
 3. van den Oord et al., Representation Learning with Contrastive Predictive Coding：<https://arxiv.org/abs/1807.03748>。
 4. Jia et al., Scaling Up Visual and Vision-Language Representation Learning With Noisy Text Supervision，ALIGN：<https://arxiv.org/abs/2102.05918>。
 5. Zhai et al., LiT: Zero-Shot Transfer with Locked-image text Tuning：<https://arxiv.org/abs/2111.07991>。
 6. Zhai et al., Sigmoid Loss for Language Image Pre-Training：<https://arxiv.org/abs/2303.15343>。
 7. Johnson et al., Billion-scale similarity search with GPUs，FAISS 论文：<https://arxiv.org/abs/1702.08734>。
+8. Tschannen et al., SigLIP 2: Multilingual Vision-Language Encoders with Improved Semantic Understanding, Localization, and Dense Features：<https://arxiv.org/abs/2502.14786>。
+9. Gadre et al., DataComp: In search of the next generation of multimodal datasets，NeurIPS 2023 Datasets and Benchmarks Track：<https://arxiv.org/abs/2304.14108v5>。
+10. Xu et al., Demystifying CLIP Data（MetaCLIP），arXiv v6：<https://arxiv.org/abs/2309.16671v6>。
 
-CLIP 论文支持双塔、图文对比目标和论文中的迁移实验；官方代码支持特定实现中的 normalization、logit_scale 和接口行为；ALIGN、LiT 和 SigLIP 说明图文对齐路线存在不同的数据规模、初始化和损失设计；FAISS 论文支持大规模相似度搜索的工程背景。这些资料都不能直接证明某个业务数据集上的 Recall、偏差、安全率、吞吐或成本。
+CLIP 论文支持双塔、图文对比目标和论文中的迁移实验；固定 revision 的代码支持该版本中的 normalization、`logit_scale` 和相似度接口；ALIGN、LiT、SigLIP、SigLIP 2 说明图文对齐路线在数据规模、初始化、目标与特征任务上存在不同设计；DataComp 与 MetaCLIP 提供数据构造和过滤的受控研究入口；FAISS 论文支持大规模相似度搜索的工程背景。这些资料都不能直接证明某个业务数据集上的 Recall、偏差、安全率、吞吐或成本。
 
 当资料声称一个模型“支持开放词表”“理解图片”或“具备强大的跨模态推理能力”时，至少要继续追问：
 

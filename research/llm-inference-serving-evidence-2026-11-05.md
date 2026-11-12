@@ -23,6 +23,12 @@
 
 - [Dao 等，FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness，arXiv:2205.14135v2](https://arxiv.org/abs/2205.14135)：原论文将 FlashAttention 定义为使用 tiling、减少 GPU HBM 与片上 SRAM 间读写的 IO-aware exact attention 算法，并分析其 IO 复杂度。论文没有给出完整服务系统中的排队、KV 分配器、集群容量或 SLA 保证；特定训练实验的速度数字不应挪作服务容量承诺。
 
+## Prefill/Decode 解耦及固定版本运行时边界
+
+- **DistServe**：[Zhong 等，DistServe: Disaggregating Prefill and Decoding for Goodput-optimized Large Language Model Serving，OSDI 2024 / arXiv:2401.09670v3](https://arxiv.org/abs/2401.09670v3)，访问日期 2026-11-05。核对摘要中的阶段干扰、独立资源/并行配置和集群带宽放置。论文提出把 prefill 与 decode 放在不同 GPU，以满足 TTFT/TPOT 目标并控制阶段干扰；7.4×请求率与 12.6×更紧 SLO 是作者指定模型、应用、SLO 与对照系统中的报告值，不是可移植容量系数。
+- **vLLM v0.33.0**：[Disaggregated Prefilling](https://docs.vllm.ai/en/v0.33.0/features/disagg_prefill/)，访问日期 2026-11-05。官方文档把该功能标为 experimental，说明 prefill 与 decode 可运行在不同实例并通过 connector 转移 KV；文档列出的目标是分别调节 TTFT 与 inter-token latency、控制尾部 ITL，并明确该功能不提高 throughput。实例和 KV connector 的具体接口绑定 v0.33.0。
+- **证据边界：** 来源支持“阶段分离可改变资源分配与干扰边界”，不支持普遍的吞吐收益。实际结果依赖请求形态、队列状态、各阶段容量、KV 传输带宽/延迟、实例拓扑及目标 SLO；vLLM v0.33.0 的实验特性声明也不能外推成其他版本的功能状态。
+
 ## 证据边界
 
 论文支持作者在特定设置下报告的机制与结果；官方文档支持被记录版本公开的功能和兼容说明。以上来源均不替代目标模型、GPU、引擎版本、批量和任务切片上的本地 profile 或质量验证。

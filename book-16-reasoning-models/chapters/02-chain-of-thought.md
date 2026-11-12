@@ -8,15 +8,15 @@ Chain-of-Thought（CoT）常被翻译成思维链。它最容易被误解的地�
 
 第一个问题关心计算能力，第二个问题关心生成接口，第三个问题关心解释的因果忠实性。一个系统可以在第二个问题上有效，却不能证明第三个问题；也可以不展示文字过程，却在隐藏状态或工具轨迹中完成了多步计算。
 
-本章把 CoT 放回大模型的发展脉络中讲清楚：为什么直接回答会在多步任务上遇到瓶颈，few-shot CoT 和 zero-shot CoT 分别改变了什么，scratchpad 与面向用户的解释有什么差别，训练数据怎样把错误过程传给模型，以及如何用干预、验证器、工具和成本曲线判断 CoT 是否真的值得使用。
+本章把 CoT 放回大模型的发展脉络中讲清楚：为什么直接回答会在多步任务上遇到瓶颈，few-shot CoT 和 zero-shot CoT 分别改变了什么，scratchpad 与面向用户的解释有什么差别，训练数据怎样把错误过程传给模型，以及如何用干预、验证器、工具和成本曲线判断 CoT 是否真的值得使用。推理对象的全景见[第一章](01-reasoning总览.md)；多路径聚合和步骤级训练分别由[第三章](03-self-consistency与采样.md)、[第四章](04-verifier与reward-model.md)和[第五章](05-process-supervision.md)继续展开。
 
 ## 0.1 本章的资料与证据边界
 
-本章的历史主线来自 Chain-of-Thought Prompting、Zero-shot Reasoners、Show Your Work: Scratchpads for Intermediate Computation、Faithful Chain-of-Thought Reasoning、Language Models Don't Always Say What They Think 等论文。它们分别支持 CoT 的提示现象、scratchpad 作为中间计算、忠实性讨论和反例分析。
+本章的历史主线来自 [Chain-of-Thought Prompting](https://arxiv.org/abs/2201.11903v6)、[Zero-shot Reasoners](https://arxiv.org/abs/2205.11916v4)、[Show Your Work: Scratchpads for Intermediate Computation](https://arxiv.org/abs/2112.00114)、[Faithful Chain-of-Thought Reasoning](https://arxiv.org/abs/2301.13379v3)、[Language Models Don't Always Say What They Think](https://arxiv.org/abs/2305.04388v2) 和 [Program of Thoughts Prompting](https://arxiv.org/abs/2211.12588v4) 等论文。它们分别支持 CoT 的提示现象、scratchpad 与外部执行、忠实性讨论、解释不忠实的实验例子和程序化计算路线；每项结论都限定于对应论文的模型、任务与协议。
 
 这些论文通常在特定模型、数据集和提示协议上报告实验。它们能说明“某种方法在某种条件下有效”，不能自动证明所有模型都采用同样的内部机制。尤其是闭源模型的隐藏推理、训练数据、奖励模型和服务端路由，除非官方公开，否则只能写成未知或待核验。
 
-本章还会讨论公开产品中的 thinking、extended thinking 或 reasoning 预算。官方文档可以支持接口层的参数语义和展示策略，但不能支持对内部完整思维链的猜测。产品返回的摘要、引用或解释，也不应被默认理解成隐藏状态的逐字转录。
+本章还会讨论公开产品中的 thinking 或 reasoning 预算。当前 [OpenAI Reasoning 指南](https://developers.openai.com/api/docs/guides/reasoning)、Anthropic 的 [Thinking](https://platform.claude.com/docs/en/build-with-claude/thinking) 和 [Preserved thinking](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking) 文档支持具体接口的参数、返回内容和跨轮状态合同，但不能支持对内部完整思维链的猜测。产品返回的摘要、引用或解释，也不应被默认理解成隐藏状态的逐字转录；这些文档按模型和 API 版本变化，本文按 2026-11-12 可访问的版本表述。
 
 ## 0.2 先看一个最小例子
 
@@ -120,17 +120,17 @@ CoT 提示改变的是生成轨迹的形式和上下文。它不改变基础概�
 
 早期的 prompt 通常给模型一个问题，让它直接输出答案。这个形式在事实问答和简单分类上有效，但在多步算术和逻辑问题上容易出现“最后一步错了，却看不出为什么”。
 
-few-shot CoT 的关键变化，是在提示中给出若干带有中间步骤的示例，再让模型按照类似结构处理新问题。示例不只是展示答案格式，也展示了如何选择变量、如何分解子问题以及何时结束。
+few-shot CoT 的关键变化，是在提示中给出若干带有中间步骤的示例，再让模型按照类似结构处理新问题。示例不只是展示答案格式，也展示了如何选择变量、如何分解子问题以及何时结束。[Wei 等人的原始研究](https://arxiv.org/abs/2201.11903v6)报告了这种提示在其大模型和算术、常识、符号任务上的结果；它没有证明任何模型或任务都能从 CoT 获益。
 
 ### 3.2 Zero-shot CoT 的变化
 
-Zero-shot CoT 不提供具体解题示例，而是通过一句自然语言提示要求模型先进行分步思考。它的实验意义在于：部分大模型已经从预训练和指令数据中学到逐步解答模式，简单的提示可能把这种模式激活。
+Zero-shot CoT 不提供具体解题示例，而是通过一句自然语言提示要求模型先进行分步思考。[Kojima 等人的论文](https://arxiv.org/abs/2205.11916v4)在多个指定算术、符号和逻辑基准上评估了这类提示。它的实验意义在于：部分受测大模型能在没有手写解题示例时生成逐步解答；这不能证明简单提示会给模型增加新知识或可靠计算器。
 
 但激活效果依赖模型规模、任务类型、提示语言、答案抽取和解题难度。对一个本来不具备必要知识或算术能力的模型，要求它“逐步思考”通常只会得到更长的错误文本。
 
 ### 3.3 Scratchpad 的变化
 
-scratchpad 研究进一步强调中间工作区，而不是面向用户的自然语言解释。草稿可以是加法结果、程序片段、状态表或离散标记。它的目标是帮助模型完成中间计算，最终输出可以只保留答案。
+scratchpad 研究进一步强调中间工作区，而不是面向用户的自然语言解释。草稿可以是加法结果、程序片段、状态表或离散标记。它的目标是帮助模型完成中间计算，最终输出可以只保留答案。[Nye 等人的研究](https://arxiv.org/abs/2112.00114)在多步算术和程序执行等设定中报告了 scratchpad 的实验收益；这些结果绑定其任务、训练方法和模型设定。
 
 这条路线揭示了一个重要边界：中间状态有用，不等于中间状态必须公开；公开解释有用，也不等于它就是模型内部真正使用的全部状态。
 
@@ -143,6 +143,8 @@ CoT 后来与多个方向连接起来：
 - 每一步可以交给 process verifier 检查；
 - 某一步可以调用代码、计算器或检索工具；
 - 高质量轨迹可以用于监督微调、蒸馏或强化学习。
+
+数值任务还可把自然语言推导与外部程序执行分开。[Program of Thoughts](https://arxiv.org/abs/2211.12588v4)由模型生成可执行程序，再由外部计算环境求值；论文结果只支持其指定数据集与模型条件，不说明程序化计算在所有任务上都会胜过自然语言 CoT。
 
 这些方向共享“中间状态”的思想，但优化目标和失败模式不同。不能因为一个系统使用了 CoT，就把它自动归类为搜索、过程监督或 RLVR 系统。
 
@@ -184,7 +186,7 @@ few-shot prompt 的上下文有限，示例要在覆盖和成本之间取舍。�
 
 ### 4.3 示例污染与记忆
 
-如果测试题与 prompt 示例过于相似，提升可能来自模板匹配而不是更好的推理。评估时应使用未见过的数值、实体、顺序和表述，并报告原题和变式题的差距。
+如果测试题与 prompt 示例过于相似，提升可能来自模板匹配而不是更好的推理。对 benchmark 而言，改写或翻译的同题样本也可能绕过词面去重；语义相似仍需人工或更强证据判定，不能直接等同于污染。[相关研究](https://arxiv.org/abs/2311.04850v2)在特定模型和基准上展示了这类筛查边界。评估时应使用未见过的数值、实体、顺序和表述，并报告原题和变式题的差距。
 
 ### 4.4 Few-shot CoT 的优点和限制
 
@@ -258,6 +260,14 @@ Zero-shot CoT 更可能帮助具有以下特点的任务：
 
 它们可能重叠，但不应混用。自然语言 CoT 的可读性高，却可能包含冗余和合理化；scratchpad 计算效率可能更高，却未必适合人类阅读；外部解释强调可验证和必要性，通常不追求完整记录。
 
+三者主要服务于不同的读者和检查目标：
+
+| 中间对象 | 主要目标 | 是否面向用户 | 优先核对 | 不能据此推出 |
+| --- | --- | --- | --- | --- |
+| 自然语言 CoT | 展示逐步生成的文字轨迹 | 视产品设计而定 | 关键步骤与答案是否一致、干预后答案是否按预期变化 | 它是忠实且完整的内部日志 |
+| scratchpad | 保存模型继续计算所需的中间状态 | 通常不必展示 | 状态转移、程序执行或可判定约束 | 它天然是清楚的用户解释 |
+| 外部解释 | 给用户必要的证据、假设和结论 | 是 | 引文、工具记录、复算结果及不确定性 | 它完整记录了模型内部过程 |
+
 ### 6.2 为什么产品常不展示完整 CoT
 
 不展示完整过程并不等于系统没有中间计算。常见原因包括：
@@ -269,6 +279,8 @@ Zero-shot CoT 更可能帮助具有以下特点的任务：
 5. 某些危险任务中，详细过程会暴露规避安全控制的路径。
 
 更可靠的外部解释通常包括：使用了哪些输入证据，执行了哪些可审计操作，结论依赖哪些假设，以及哪些部分仍然不确定。
+
+公开接口通常由 provider 定义实际返回什么：例如 OpenAI 文档区分不可见的 reasoning tokens 与可选的 summary，Anthropic 文档按模型定义 thinking 的显示方式和跨轮保留协议。[OpenAI Reasoning 指南](https://developers.openai.com/api/docs/guides/reasoning)、[Anthropic Thinking](https://platform.claude.com/docs/en/build-with-claude/thinking) 与 [Preserved thinking](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking)。这些是 API 合同，不是对模型内部状态的完整说明。
 
 ### 6.3 简洁解释也可能不可靠
 
@@ -290,9 +302,9 @@ Zero-shot CoT 更可能帮助具有以下特点的任务：
 
 ### 7.1 正确答案与忠实解释是两个指标
 
-最终答案正确，说明任务成功事件发生；解释忠实，要求解释中的关键步骤确实参与了答案形成。后者更难测，因为模型内部过程不可直接观察。
+最终答案正确，说明任务成功事件发生；解释忠实，要求解释中的关键步骤确实参与了答案形成。后者更难测，因为模型内部过程不可直接观察。[Faithful Chain-of-Thought Reasoning](https://arxiv.org/abs/2301.13379v3)提出把自然语言问题转成符号推理链，再由确定性求解器执行；[Unfaithful Explanations](https://arxiv.org/abs/2305.04388v2)则在指定任务中展示 CoT 可能遗漏影响答案的偏置输入。这些研究从不同方向表明，答案正确或文本连贯本身都不足以证明忠实性。
 
-可以定义答案正确率：
+令 $N>0$ 为参与评估的有效样本数，$y_i^*$ 为第 $i$ 个参考答案，$\hat y_i$ 为模型答案。可以定义答案正确率：
 
 ~~~math
 A_{\mathrm{final}}=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[\hat y_i=y_i^*]
@@ -304,11 +316,11 @@ A_{\mathrm{final}}=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[\hat y_i=y_i^*]
 C_{\mathrm{consistent}}=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[g(z_i)=\hat y_i]
 ~~~
 
-g 是从轨迹中抽取结论的函数。C 高只表示轨迹说的结论和最终答案一致，不表示轨迹是答案的真实原因。
+令 $z_i$ 表示第 $i$ 个样本的轨迹，$g$ 是从轨迹中抽取结论的函数。$C_{\mathrm{consistent}}$ 高只表示轨迹说的结论和最终答案一致，不表示轨迹是答案的真实原因。
 
 ### 7.2 反事实替换实验
 
-一种简单干预是替换中间步骤中的关键数字，再让模型继续生成。例如把“净流入速度为 2”改成“净流入速度为 4”，观察模型是否相应输出 5 分钟。如果答案完全不变，原步骤可能只是装饰性文字；如果答案随关键变量变化，说明它至少在行为上依赖该步骤。
+一种简单干预是替换中间步骤中的关键数字，再让模型继续生成。例如把“净流入速度为 2”改成“净流入速度为 4”，观察模型是否相应输出 5 分钟。如果答案完全不变，原步骤可能只是装饰性文字；如果答案随关键变量变化，说明它至少在行为上依赖该步骤。类似的受控扰动也出现在 [FACT-E](https://aclanthology.org/2026.findings-acl.1014/) 中；该研究针对指定模型和任务估计步骤间依赖，并把结果与轨迹—答案一致性结合，而不是把文字相似度当作忠实性证明。
 
 干预差异可以写成：
 
@@ -319,7 +331,7 @@ g 是从轨迹中抽取结论的函数。C 高只表示轨迹说的结论和最�
 \mathbb{1}[\hat y(\tilde z)=y^*]
 ~~~
 
-z 是原轨迹，tilde z 是被替换的轨迹。这个量只是一次干预的效果，不是完整的内部因果证明，因为替换文本也可能改变语法、长度和模型的后续分布。
+这里 $z$ 是原轨迹，$\tilde z$ 是替换关键步骤后的轨迹，$\hat y(z)$ 表示模型接收该轨迹后续生成的答案，$y^*$ 是参考答案。这个差值只表示一次干预的效果，不是完整的内部因果证明，因为替换文本也可能改变语法、长度和模型的后续分布。
 
 ### 7.3 删除步骤实验
 
@@ -339,7 +351,7 @@ z 是原轨迹，tilde z 是被替换的轨迹。这个量只是一次干预的�
 4. 覆盖忠实：解释没有遗漏决定性前提。
 5. 语义忠实：摘要没有改变原结论的条件。
 
-一个解释可以在其中一项上合格，在另一项上失败。因此论文或产品不能只给一个“解释质量”总分就结束分析。
+一个解释可以在其中一项上合格，在另一项上失败。因此论文或产品不能只给一个“解释质量”总分就结束分析。FACT-E 的干预估计、Faithful CoT 的外部符号求解，以及不忠实解释研究测量的是不同对象，不能合并成一个跨任务的忠实度结论。
 
 ## 8. CoT 数据：模型会学到什么
 
@@ -533,7 +545,7 @@ R_{\mathrm{reg}}
 
 ### 12.1 质量曲线不一定单调
 
-设 CoT token 预算为 B，任务质量为 A(B)。如果增加预算带来收益：
+设 CoT token 预算为 $B$，任务质量为 $A(B)$，增加的预算 $\Delta B>0$。如果增加预算带来收益：
 
 ~~~math
 \Delta A(B)=A(B+\Delta B)-A(B)
@@ -578,7 +590,7 @@ R_{\mathrm{reg}}
 
 ### 13.4 先猜答案再编理由
 
-当模型对答案有强先验时，它可能围绕候选答案构造解释。干预实验、工具执行和数字替换可以帮助发现这种现象，但一次失败不能证明所有解释都是事后编写。
+当模型对答案有强先验时，它可能围绕候选答案构造解释。[Unfaithful Explanations](https://arxiv.org/abs/2305.04388v2) 在其受控实验中观察到，模型可能省略影响回答的偏置特征，或为偏置答案给出合理化说明。干预实验、工具执行和数字替换可以帮助发现这种现象，但一次失败不能证明所有解释都是事后编写。
 
 ### 13.5 格式漂移
 
@@ -592,7 +604,7 @@ R_{\mathrm{reg}}
 
 ### 14.1 完整过程不是默认应公开的数据
 
-CoT 可能包含用户输入中的隐私、系统规则、工具权限和危险操作细节。即使某段文字看起来像普通推理，也可能把不应暴露的上下文重新组合出来。
+CoT 可能包含用户输入中的隐私、系统规则、工具权限和危险操作细节。即使某段文字看起来像普通推理，也可能把不应暴露的上下文重新组合出来。[Hidden Thoughts Are Not Secret](https://aclanthology.org/2026.findings-emnlp.2303/)在指定开源模型和实验设置中研究了隐藏 raw trace 后仍可能出现的用户可见推理轨迹；该实验不估计闭源服务的暴露率，也不证明可见轨迹复原了完整内部状态。
 
 ### 14.2 解释最小化
 
@@ -600,7 +612,7 @@ CoT 可能包含用户输入中的隐私、系统规则、工具权限和危险�
 
 ### 14.3 安全任务中的 CoT
 
-安全模型可能通过更长的 CoT 发现危险操作的分解方式，也可能把拒答理由写得过于详细。评估应同时看拒答正确率、危险信息泄露、工具动作和多轮绕过。
+安全模型可能通过更长的 CoT 发现危险操作的分解方式，也可能把拒答理由写得过于详细。评估应同时看拒答正确率、危险信息泄露、工具动作和多轮绕过。[TRACE](https://aclanthology.org/2026.emnlp-main.1174/)在其双语、多风险类别的基准中分别标注 prompt、推理轨迹和最终回复，并报告受测 guardrail 更难判断轨迹安全性；这支持把评估范围扩展到中间轨迹，但不代表生产环境风险率。
 
 ### 14.4 日志与用户展示分离
 
@@ -661,7 +673,6 @@ CoT 可能包含用户输入中的隐私、系统规则、工具权限和危险�
 实验故意保留两个坏样本：capital_lookup 展示 CoT 回归，distractor_math 展示步骤引入题目外条件。它们不是模型统计结论，而是帮助读者理解为什么需要分层报告。
 
 ~~~python
-import math
 from collections import Counter
 
 
@@ -756,7 +767,7 @@ def validate_cases(items):
         if not isinstance(case["id"], str) or not case["id"] or case["id"] in seen:
             raise ValueError("case ids must be unique non-empty strings")
         seen.add(case["id"])
-        if case["route"] not in allowed_routes:
+        if not isinstance(case["route"], str) or case["route"] not in allowed_routes:
             raise ValueError(f"case[{index}].route is unknown")
         for key in ("gold", "direct", "cot"):
             if not isinstance(case[key], str) or not case[key]:
@@ -772,13 +783,13 @@ def validate_cases(items):
 
 def accuracy(items, key):
     validate_cases(items)
-    if key not in {"direct", "cot"}:
+    if not isinstance(key, str) or key not in {"direct", "cot"}:
         raise ValueError("accuracy key must be direct or cot")
     return sum(case[key] == case["gold"] for case in items) / len(items)
 
 
 def route_answer(case):
-    if case["route"] not in {"hard_math", "code", "simple", "safety"}:
+    if not isinstance(case.get("route"), str) or case["route"] not in {"hard_math", "code", "simple", "safety"}:
         raise ValueError("unknown route")
     if case["route"] in {"hard_math", "code"}:
         return case["cot"], case["cot_tokens"]
@@ -812,11 +823,15 @@ visible_cot_blocked = [
 simple_cases = [case for case in cases if case["route"] == "simple"]
 if not simple_cases:
     raise ValueError("simple_cases must not be empty")
-simple_waste_or_regression = sum(
-    case["direct"] == case["gold"]
-    and case["cot_tokens"] > case["direct_tokens"]
-    for case in simple_cases
-) / len(simple_cases)
+simple_direct_successes = [
+    case for case in simple_cases if case["direct"] == case["gold"]
+]
+simple_cot_overhead_rate = (
+    sum(case["cot_tokens"] > case["direct_tokens"] for case in simple_direct_successes)
+    / len(simple_direct_successes)
+    if simple_direct_successes
+    else None
+)
 
 report = {
     "direct_accuracy": round(direct_acc, 3),
@@ -826,7 +841,7 @@ report = {
     "avg_cot_tokens": round(
         sum(case["cot_tokens"] for case in cases) / len(cases), 3
     ),
-    "cost_per_cot_correct": (
+    "tokens_per_cot_success": (
         round(
             sum(case["cot_tokens"] for case in cases)
             / sum(case["cot"] == case["gold"] for case in cases),
@@ -835,8 +850,10 @@ report = {
         if any(case["cot"] == case["gold"] for case in cases)
         else None
     ),
-    "cost_per_routed_correct": round(routed_tokens / routed_correct, 3) if routed_correct else None,
-    "simple_waste_or_regression": round(simple_waste_or_regression, 3),
+    "tokens_per_routed_success": round(routed_tokens / routed_correct, 3) if routed_correct else None,
+    "simple_cot_overhead_given_direct_success": (
+        round(simple_cot_overhead_rate, 3) if simple_cot_overhead_rate is not None else None
+    ),
     "route_counts": dict(route_counts),
     "cot_regression_ids": regression_ids,
     "unsupported_step_ids": unsupported_ids,
@@ -847,11 +864,13 @@ assert report["direct_accuracy"] == 0.5
 assert report["cot_accuracy"] == 0.667
 assert report["routed_accuracy"] == 0.833
 assert report["step_accuracy"] == 0.692
-assert report["cost_per_routed_correct"] == 35.2
+assert report["tokens_per_routed_success"] == 35.2
 
 for key, value in report.items():
     print(f"{key}={value}")
 ~~~
+
+> 代码状态：已验证（2026-11-12，Python 3.12.9，标准库）。
 
 预期输出：
 
@@ -861,9 +880,9 @@ cot_accuracy=0.667
 routed_accuracy=0.833
 step_accuracy=0.692
 avg_cot_tokens=43.667
-cost_per_cot_correct=65.5
-cost_per_routed_correct=35.2
-simple_waste_or_regression=1.0
+tokens_per_cot_success=65.5
+tokens_per_routed_success=35.2
+simple_cot_overhead_given_direct_success=1.0
 route_counts={'hard_math': 2, 'simple': 2, 'code': 1, 'safety': 1}
 cot_regression_ids=['capital_lookup']
 unsupported_step_ids=['distractor_math']
@@ -875,7 +894,7 @@ visible_cot_blocked=['safety_boundary']
 1. CoT 在这组构造样本上比 direct 正确率高，但仍然有错误步骤。
 2. routed 只把 CoT 用在 hard_math 和 code，因此避开了 capital_lookup 的回归。
 3. distractor_math 的两步都被标成错误，说明最终答案和过程质量必须分开统计。
-4. simple_waste_or_regression=1.0 表示两个 simple 样本都满足“CoT 比直答更费 token”，其中一个还发生了回归。
+4. simple_cot_overhead_given_direct_success=1.0 表示两个直答正确的 simple 样本，其 CoT 都比直答消耗更多 token；其中一个还发生了答案回归。它是条件性开销比例，不是所有简单任务的普遍估计。
 5. safety_boundary 被列入不可展示 CoT 的样本，说明内部工作区和用户界面策略可以不同。
 
 ## 17. 怎样设计 CoT 实验
@@ -977,21 +996,25 @@ CoT 是一种中间状态表达和推理时计算方法。它可能让模型把�
 7. CoT token、延迟、工具和验证成本是否值得质量收益。
 8. 简单任务是否出现回归，安全任务是否出现信息泄露。
 
-下一章进入 self-consistency 与采样，研究如何从多条 CoT 候选中利用多样性、答案标准化和投票降低一次生成的偶然错误。
+下一章进入 [Self-Consistency 与采样](03-self-consistency与采样.md)，研究如何从多条 CoT 候选中利用多样性、答案标准化和投票降低一次生成的偶然错误。
 
 ## 21. 资料索引
 
 以下链接优先保留原始论文。复现实验时要记录模型版本、提示文本、采样参数、最大输出长度、答案解析器和评估切分。
 
-1. Chain-of-Thought Prompting：<https://arxiv.org/abs/2201.11903>
-2. Zero-shot Reasoners：<https://arxiv.org/abs/2205.11916>
-3. Show Your Work: Scratchpads for Intermediate Computation：<https://arxiv.org/abs/2112.00114>
-4. Faithful Chain-of-Thought Reasoning：<https://arxiv.org/abs/2301.13379>
-5. Language Models Don't Always Say What They Think：<https://arxiv.org/abs/2305.04388>
-6. Chain-of-Thought Reasoning in Large Language Models：<https://arxiv.org/abs/2211.12588>
-7. Let's Verify Step by Step：<https://arxiv.org/abs/2305.20050>
-8. OpenAI reasoning guide：<https://platform.openai.com/docs/guides/reasoning>
-9. Anthropic extended thinking：<https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking>
-10. Gemini thinking：<https://ai.google.dev/gemini-api/docs/thinking>
+1. Wei et al., [“Chain-of-Thought Prompting Elicits Reasoning in Large Language Models”](https://arxiv.org/abs/2201.11903v6), 2022。
+2. Kojima et al., [“Large Language Models are Zero-Shot Reasoners”](https://arxiv.org/abs/2205.11916v4), 2022。
+3. Nye et al., [“Show Your Work: Scratchpads for Intermediate Computation with Language Models”](https://arxiv.org/abs/2112.00114), 2021。
+4. Lyu et al., [“Faithful Chain-of-Thought Reasoning”](https://arxiv.org/abs/2301.13379v3), 2023。
+5. Turpin et al., [“Language Models Don’t Always Say What They Think: Unfaithful Explanations in Chain-of-Thought Prompting”](https://arxiv.org/abs/2305.04388v2), 2023。
+6. Chen et al., [“Program of Thoughts Prompting: Disentangling Computation from Reasoning for Numerical Reasoning Tasks”](https://arxiv.org/abs/2211.12588v4), 2022。
+7. Lightman et al., [“Let’s Verify Step by Step”](https://arxiv.org/abs/2305.20050v1), 2023。
+8. Sun et al., [“FACT-E: Causality-Inspired Evaluation for Trustworthy Chain-of-Thought Reasoning”](https://aclanthology.org/2026.findings-acl.1014/), Findings of ACL 2026。
+9. Lu et al., [“Hidden Thoughts Are Not Secret: Reasoning-Trace Exposure in LLMs”](https://aclanthology.org/2026.findings-emnlp.2303/), Findings of EMNLP 2026。
+10. Wu et al., [“TRACE: An Evidence-Grounded Benchmark for Safety Evaluation of Large Reasoning Models”](https://aclanthology.org/2026.emnlp-main.1174/), EMNLP 2026。
+11. [“Benchmarking Data Contamination in the era of Large Language Models”](https://arxiv.org/abs/2311.04850v2), 2023。
+12. OpenAI, [Reasoning 指南](https://developers.openai.com/api/docs/guides/reasoning)（官方 API 文档，访问日期：2026-11-12）。
+13. Anthropic, [Thinking](https://platform.claude.com/docs/en/build-with-claude/thinking)（官方 API 文档，访问日期：2026-11-12）。
+14. Anthropic, [Preserved thinking](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking)（官方 API 文档，访问日期：2026-11-12）。
 
-本章写作时已对上述论文和官方文档入口进行联网访问。正文将论文实验、官方接口、教学构造和目标系统实测分开描述；没有把闭源模型的未公开内部推理写成确定事实。
+论文结论受各自模型、任务、数据和协议限制；API 字段和返回状态按 provider 文档、模型及访问日期理解。正文区分论文实验、接口合同、合成教学数据与目标系统实测，不把未公开的内部推理写成确定事实。

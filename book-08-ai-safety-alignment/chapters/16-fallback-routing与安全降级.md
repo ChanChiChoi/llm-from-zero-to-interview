@@ -705,7 +705,7 @@ retry_exhausted human handoff_to_human read_only scope_preserved=True
 ### 16.17.2 生成式 AI 风险和应用层边界
 
 1. [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：支持把 fallback、监控、事故和治理放入生命周期。
-2. [NIST Generative AI Profile](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf)：支持生成式 AI 的风险、数据、测量和治理边界。
+2. [NIST Generative AI Profile](https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence)：支持生成式 AI 的风险、数据、测量和治理边界。
 3. [OWASP Top 10 for LLM Applications 2026](https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/)：提供提示注入、敏感数据和工具集成风险分类；属于社区风险指南，不证明具体 fallback 路由已经安全。
 4. [Anthropic Claude Opus 5.5 发布页](https://www.anthropic.com/claude-opus-5-5)、[Fable 5.1 / Mythos 5.1 发布页](https://www.anthropic.com/claude-fable-and-mythos-5-1)与[Sonnet 5.5 System Card](https://www.anthropic.com/claude-sonnet-5-5-system-card)：支持相应版本公开披露的风险类别、控制和评测条件，不证明其他 provider 或版本采用同一路由。
 5. [Anthropic Refusals and fallback](https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback)与[Sonnet 5.5 migration guide](https://platform.claude.com/docs/en/models/sonnet-5-5/migration-guide)：支持当前 API 的拒绝字段、类别化 fallback、目标模型可观测字段和平台范围；这些接口及推荐目标会随文档版本变化。

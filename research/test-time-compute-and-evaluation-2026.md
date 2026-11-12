@@ -152,6 +152,14 @@
 - Percy Liang et al., “Holistic Evaluation of Language Models,” arXiv:2211.09110v2，[论文页](https://arxiv.org/abs/2211.09110)。摘要列出 accuracy、calibration、robustness、fairness、bias、toxicity、efficiency 七项指标，并说明核心场景覆盖同时受可行性和代表性限制。该来源支持多指标评估设计，不提供适用于任意产品的统一得分或完整覆盖保证。
 - Lianmin Zheng et al., “Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena,” arXiv:2306.05685v4，[论文 HTML](https://arxiv.org/html/2306.05685)。阅读摘要、位置偏差与冗长偏差部分：论文在其模型、提示和开放式对话数据上分析 position、verbosity、自我增强等偏差，并研究 judge 与人类偏好的一致性。实验不能证明当前 judge 或任意领域具有相同偏差幅度或普遍一致率。
 
+## 12. Provider thinking controls 与跨轮状态协议
+
+- **来源与版本：** Anthropic [Thinking](https://platform.claude.com/docs/en/build-with-claude/thinking) 与 [Preserved thinking](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking)，访问日期 2026-11-12；OpenAI [Reasoning models](https://developers.openai.com/api/docs/guides/reasoning)，访问日期 2026-11-12。
+- **实际阅读范围：** Anthropic Thinking 的各模型 `thinking` 模式支持表、显示/省略与 token 计费说明；Preserved thinking 的 model/account/prefix 检查和失效处理；OpenAI Reasoning 的 `configuration_update` 适用模式、压缩兼容性及 reasoning summary 说明。
+- **来源支持的事实：** Anthropic 当前接口按模型区分 adaptive、between-tools、enabled/budget 与 disabled 的可用性；例如 Opus 5.5 默认采用 adaptive thinking，Sonnet 5.5 支持特定 effort 范围内的 `between_tools`，而旧式 `budget_tokens` 并非新模型通用接口。该文档说明返回的 thinking block 是 reasoning summary 而非 raw chain of thought；跨轮和工具调用须按协议回传带签名的 block。Preserved-thinking 检查可绑定此前的 system prompt、工具集合和消息前缀，模型或 account 不兼容时可能丢弃 block；具体不匹配处理按当前账户及参数配置而变。OpenAI 当前指南将 `configuration_update` 限定在支持的 GPT-6+ standard single-agent 模式，并说明 raw reasoning tokens 不公开、summary 需显式请求；该更新与自动 compaction/truncation 和 standalone compact 有兼容性限制。
+- **证据等级：** source-backed（两家供应商的当前公开 API 文档）；这些材料支持所列接口合同，不揭示底层模型完整推理状态。
+- **适用边界：** 文档按模型、API surface、账号和访问日期变化，不能推导其他 provider 或本地模型使用相同协议。由文档差异可推论：`effort`、`thinking` 类型和 level 标签不是跨模型统一的 token/算力单位，也不保证质量提升；需在目标 endpoint 上按任务、模型和成本/延迟指标实测。本文没有执行真实 API 请求。
+
 ## 生命周期
 
 推理时计算：active；具体策略效果仍依赖任务与预算。

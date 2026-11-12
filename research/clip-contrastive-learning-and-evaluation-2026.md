@@ -25,6 +25,12 @@
 - 证据边界：这是组合 recipe 的论文结果，不能把相对 SigLIP 的变化单独归因于 sigmoid 损失，也不能推出其他 checkpoint、任务、评估 harness 或线上系统一定有相同优势。作者报告的表格数值未在本地复现。
 - 证据等级：source-backed，限定于论文报告的模型变体、数据、训练阶段和评测协议；无独立复现。
 
+## 数据构造与受控比较
+
+- **DataComp**：Gadre et al., [DataComp: In search of the next generation of multimodal datasets](https://arxiv.org/abs/2304.14108v5)，NeurIPS 2023 Datasets and Benchmarks Track，arXiv v5（2023-10-20）。2026-11-11 阅读摘要。来源支持其候选池规模、用固定 CLIP 训练代码和 38 个下游测试集比较过滤方法的 benchmark 设计；摘要中的 DataComp-1B 结果只代表作者列出的模型、计算量和 ImageNet zero-shot 协议。
+- **MetaCLIP**：Xu et al., [Demystifying CLIP Data](https://arxiv.org/abs/2309.16671v6)，arXiv v6（2025-11-23）。2026-11-11 阅读摘要。来源支持以原始数据池与元数据分布构造平衡子集，并在作者声明的模型与训练设置控制下分析数据效应；报告的准确率只适用于论文所列模型、数据和 benchmark，不等于普遍最优的数据筛选结论。
+- **边界**：本次只阅读两篇来源的摘要，正文仅概括其 benchmark 设计和研究对象；没有复现过滤过程、训练模型或验证论文报告数字。
+
 ## 教学算例边界
 
 - `s=1`、`b=0` 的单 pair 例中，正标签 logistic loss 为 `-ln(σ(1))≈0.313`；将同一相似度标作负例时为 `-ln(σ(-1))≈1.313`。这是根据公式计算的合成教学输入，不是模型输出或实测结果。

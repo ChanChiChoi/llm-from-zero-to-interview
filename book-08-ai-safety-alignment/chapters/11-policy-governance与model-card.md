@@ -1264,7 +1264,7 @@ print("boundary_checks=", boundary_checks)
 ### 18.2 风险管理和治理
 
 1. [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：用于组织治理、映射、测量和管理 AI 风险；NIST 页面标明 AI RMF 1.0 为自愿使用，并说明该框架正在修订。
-2. [NIST Generative AI Profile](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf)：2024 年发布的 AI RMF 配套 profile，列出生成式 AI 特定风险与建议行动。
+2. [NIST Generative AI Profile](https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence)：2024 年发布的 AI RMF 配套 profile，列出生成式 AI 特定风险与建议行动。
 3. [EU Artificial Intelligence Act](https://eur-lex.europa.eu/eli/reg/2024/1689/oj)：法规原文入口，具体适用范围和日期应依据最新官方指南与修订文本核对。
 4. [GPAI model obligations](https://digital-strategy.ec.europa.eu/en/factpages/general-purpose-ai-obligations-under-ai-act)：列出供应商的技术文档、版权政策、训练内容公开摘要等义务，以及系统性风险模型的附加要求。
 5. [GPAI Code of Practice](https://digital-strategy.ec.europa.eu/en/policies/contents-code-gpai)：自愿合规工具，Transparency 章节包含 Model Documentation Form；Safety and Security 章节针对系统性风险义务。

@@ -1,18 +1,18 @@
-# 第五章：多模态 Instruction Tuning——把看见变成可监督行为
+# 第五章：多模态指令微调（Instruction Tuning）——把看见变成可监督行为
 
-上一章讨论了图片如何经过 vision encoder、connector 和语言模型，进入一次生成计算。本章继续追问一个更容易被忽略的问题：模型已经“能接收图片”之后，为什么还要训练多模态 instruction tuning？
+上一章讨论了图片如何经过视觉编码器（vision encoder）、连接器（connector）和语言模型，进入一次生成计算。本章继续追问一个更容易被忽略的问题：视觉语言模型（vision-language model，VLM）已经“能接收图片”之后，为什么还要训练多模态指令微调？
 
-因为接口接通不等于行为学会。一个模型可以成功读取像素、完成一次前向计算，却仍然可能忽略图片，复述用户问题，把图片里的数字看错，混淆多张图片，或者在证据不足时自信地编造答案。Instruction tuning 的作用，是用带有任务意图、媒体绑定、回答责任和证据边界的样本，把这些行为变成可以优化、可以审计、可以评估的监督目标。
+因为接口接通不等于行为学会。一个模型可以成功读取像素、完成一次前向计算，却仍然可能忽略图片，复述用户问题，把图片里的数字看错，混淆多张图片，或者在证据不足时自信地编造答案。指令微调的作用，是用带有任务意图、媒体绑定、回答责任和证据边界的样本，把这些行为变成可以优化、可以审计、可以评估的监督目标。
 
-本章把多模态 SFT 当作一门数据与训练工程来讲。读者会看到：
+本章把多模态监督微调（supervised fine-tuning，SFT）当作一门数据与训练工程来讲。读者会看到：
 
-- 一条样本如何同时描述媒体、对话、任务、证据和风险；
-- chat template 如何把消息编译成模型真正看到的序列；
-- image reference 为什么不是一个普通字符串；
-- assistant-only label mask 如何与 attention mask 区分；
-- caption、VQA、OCR、图表、grounding、多图、视频、音频和拒答数据各自教什么；
-- 数据支持率、重复污染、隐私、配比和有效 token 如何测量；
-- 训练 batch、动态分辨率、梯度累积和冻结策略怎样影响监督；
+- 一条样本如何同时描述媒体、对话、任务、可核验主张（claim）、证据和风险；
+- 对话模板（chat template）如何把消息编译成模型真正看到的序列；
+- 图像引用（image reference）为什么不是一个普通字符串；
+- 仅对助手回答计算损失（assistant-only loss）的标签掩码（label mask）如何与注意力掩码（attention mask）区分；
+- 图片描述（caption）、视觉问答（visual question answering，VQA）、光学字符识别（optical character recognition，OCR）、图表问答、区域定位（grounding）、多图、视频、音频和拒答（refusal）数据各自教什么；
+- 数据支持率、重复污染、隐私、配比和有效词元（token）如何测量；
+- 训练批次（batch）、动态分辨率、梯度累积和冻结策略怎样影响监督；
 - 如何设计一套不能被总体平均数掩盖的评估；
 - 如何用一个标准库 Python demo 检查样本契约，但不把格式检查误认为视觉理解能力。
 
@@ -20,16 +20,16 @@
 
 ### 0.1 本章的边界
 
-多模态 instruction tuning 通常指使用图文、视频文、音频文或文档问答等指令样本，对已经具备基础表示能力的模型进行监督微调。这里的“监督”不只意味着有一段答案，还意味着训练系统知道：
+多模态指令微调（multimodal instruction tuning）通常指使用图文、视频文、音频文或文档问答等指令样本，对已经具备基础表示能力的模型进行监督微调。这里的“监督”不只意味着有一段答案，还意味着训练系统知道：
 
 1. 哪些媒体属于当前样本；
 2. 用户的问题在哪里；
-3. assistant 的输出从哪里开始、到哪里结束；
+3. 助手（assistant）的输出从哪里开始、到哪里结束；
 4. 哪些答案是由媒体证据支持的；
 5. 哪些样本要求模型说明不确定或拒绝回答；
-6. 这些字段应该如何进入 tokenizer、collator 和 loss。
+6. 这些字段应该如何进入分词器（tokenizer）、多模态处理器（processor）、批次整理器（collator）和损失函数（loss）。
 
-本章不重新推导视觉编码器、projector 或 cross-attention 的内部结构；那些结构决定信息怎样流动，而本章研究数据怎样规定模型应该做什么。本章也不把一个公开论文中的训练配方直接当成所有产品都适用的配方。不同模型的 tokenizer、placeholder、视觉 token 展开方式、上下文上限、图像预处理和冻结策略都可能不同。
+本章不重新推导视觉编码器、投影器（projector）或交叉注意力（cross-attention）的内部结构；那些结构决定信息怎样流动，而本章研究数据怎样规定模型应该做什么。本章也不把一个公开论文中的训练配方直接当成所有产品都适用的配方。不同模型的分词器（tokenizer）、占位符（placeholder）、视觉词元展开方式、上下文上限、图像预处理和冻结策略都可能不同。
 
 ### 0.2 资料层级与证据边界
 
@@ -37,11 +37,11 @@
 | --- | --- | --- |
 | LLaVA、InstructBLIP、MiniGPT-4 等原始论文 | 论文所述的数据构造、训练阶段和实验协议 | 当前产品的全部数据、全部安全行为和真实业务成功率 |
 | TextVQA、ChartQA 等任务论文 | 任务定义、标注形式和公开评估协议 | 模型在任意扫描件或任意语言上的 OCR 能力 |
-| Transformers、PyTorch 等官方文档 | 某个版本 API、模板或 loss 的语义 | 一个自定义 collator 一定正确 |
+| Transformers、PyTorch 等官方文档 | 某个版本的应用程序接口（API）、模板或 loss 的语义 | 一个自定义 collator 一定正确 |
 | 开源仓库 | 特定 commit 的实现细节 | 实现之外的部署路径和未来版本行为 |
-| 本章 demo | schema、计数、预算和 mask 的教学审计 | 图片是否真的被理解、答案是否真的有视觉依据 |
+| 本章演示 | 样本结构（schema）、计数、预算和掩码的教学审计 | 图片是否真的被理解、答案是否真的有视觉依据 |
 
-阅读论文时，先区分“论文报告了什么”与“论文没有测量什么”。例如，论文在某个 VQA benchmark 上取得较好分数，说明它在该数据、该模型版本和该评价协议下有效；这并不能自动证明它能读清用户上传的低清合同，也不能证明它在调用工具之前会遵守权限边界。
+阅读论文时，先区分“论文报告了什么”与“论文没有测量什么”。例如，论文在某个 VQA 基准（benchmark）上取得较好分数，说明它在该数据、该模型版本和该评价协议下有效；这并不能自动证明它能读清用户上传的低清合同，也不能证明它在调用工具之前会遵守权限边界。
 
 ### 0.3 初学者和专家各自要抓住什么
 
@@ -49,17 +49,17 @@
 
 - 图片是条件；
 - 用户消息是任务；
-- assistant 消息是要学习的输出；
+- 助手（assistant）消息是要学习的输出；
 - 证据标注说明答案为什么成立；
-- refusal 或 uncertainty 标注说明什么时候不能硬答。
+- 拒答（refusal）或不确定性（uncertainty）标注说明什么时候不能硬答。
 
-专家则要进一步记录数据的版本、来源、许可、媒体 hash、模板版本、token 长度、label 分母、任务采样概率、切分键和评估切片。只记录一段 JSON，而不记录这些上下文，未来很难解释一次 loss 下降究竟代表能力提升、数据泄漏，还是监督口径发生了变化。
+专家则要进一步记录数据的版本、来源、许可、媒体哈希（hash）、模板版本、词元长度、标签分母、任务采样概率、切分键和评估切片。把这些上下文与样本共同保存为数据制品（artifact），才能解释一次损失（loss）下降究竟代表能力提升、数据泄漏，还是监督口径发生了变化。
 
 ### 0.4 本章要回答的四个问题
 
 第一，样本如何从“有图有答案”变成有明确输入输出边界的训练对象？
 
-第二，模板、placeholder、视觉 token 和 label mask 如何协同，而不是各自“看起来合理”？
+第二，对话模板、占位符、视觉词元和标签掩码如何协同，而不是各自“看起来合理”？
 
 第三，不同任务的数据为什么不能互相替代？caption 能教什么，OCR 又缺什么？
 
@@ -69,15 +69,15 @@
 
 ### 1.1 架构能力与行为能力是两回事
 
-设媒体集合为 M，用户问题和对话历史为 U，assistant 回答为 A。一个生成式 VLM 最终要学习的是条件分布：
+设媒体集合为 $M$，用户问题和对话历史为 $U$，助手（assistant）回答为 $A$；分词后的回答包含 $T_A$ 个目标词元（token），第 $t$ 个为 $a_t$。令 $\theta$ 表示模型参数，一个生成式 VLM 最终要学习的是条件分布：
 
 ~~~math
 p_\theta(A\mid M,U)
 =\prod_{t=1}^{T_A}
-p_\theta(a_t\mid a_{<t},M,U).
+p_\theta(a_t\mid a_{1:t-1},M,U).
 ~~~
 
-视觉 encoder 和 connector 主要负责把 M 变成语言模型能够访问的表示；instruction tuning 则通过样本告诉模型，在什么 U 下应该生成什么 A。
+视觉编码器和连接器主要负责把 $M$ 变成语言模型能够访问的表示；指令微调则通过样本告诉模型，在什么 $U$ 下应该生成什么 $A$。
 
 如果只有图片-文本预训练或简单的视觉表示对齐，模型可能学会“图片和文字大致相关”，却不一定学会：
 
@@ -99,23 +99,18 @@ p_\theta(a_t\mid a_{<t},M,U).
 
 ### 1.3 SFT 在这里到底优化什么
 
-对一批样本 D，最简单的 token-level 监督目标是：
+设训练批次 $D$ 含 $N$ 条样本；第 $i$ 条样本有 $T_i$ 个目标位置，第 $t$ 个目标是 $y_{i,t}$，媒体和对话条件分别为 $M_i$ 与 $U_i$。令 $m_{i,t}=1$ 表示该位置纳入监督、$m_{i,t}=0$ 表示忽略，并令 $N_{\mathrm{valid}}=\sum_{i=1}^{N}\sum_{t=1}^{T_i}m_{i,t}>0$ 为有效监督词元数。最简单的按词元计算的监督目标是：
 
 ~~~math
 \mathcal{L}_{\mathrm{SFT}}
 =
--\frac{1}{\sum_{i,t}m_{i,t}}
+-\frac{1}{N_{\mathrm{valid}}}
 \sum_{i=1}^{N}\sum_{t=1}^{T_i}
 m_{i,t}
-\log p_\theta(y_{i,t}\mid y_{i,<t},M_i,U_i).
+\log p_\theta(y_{i,t}\mid y_{i,1:t-1},M_i,U_i).
 ~~~
 
-这里：
-
-- N 是样本数；
-- y_{i,t} 是第 i 条样本的目标 token；
-- m_{i,t}=1 表示该位置需要计算监督，m_{i,t}=0 表示忽略；
-- 分母是有效监督 token 数，而不是 padded 序列长度。
+这个词元平均只对掩码保留的位置累计负对数似然，分母是有效监督词元数，而不是填充后的序列长度。具体实现还需明确回答词元是否已按同一规则完成自回归移位（shift）。
 
 这个目标教的是“在给定媒体和指令的条件下生成目标序列”。它不自动教会模型辨别所有图片细节，也不自动提供 grounding、拒答、隐私和工具安全能力。若训练答案本身没有页码、区域、数值或不确定性信息，模型不会凭空从 loss 中得到这些责任。
 
@@ -137,7 +132,7 @@ m_{i,t}
 
 ### 2.1 从字符串升级为结构化对象
 
-最简单的旧式样本常把所有内容写在一条字符串中：
+最简单的旧式样本常把所有内容写在一条字符串中。下面 JSON 用来说明从字符串转向多模态样本结构（schema）的动机，字段名是教学示例：
 
 ~~~json
 {
@@ -146,7 +141,7 @@ m_{i,t}
 }
 ~~~
 
-这种表示可以作为教学起点，但在多图、多轮和文档任务中很快不够用。更稳健的样本应区分媒体对象、消息内容、任务标签和证据标注：
+这种表示可以作为教学起点，但在多图、多轮和文档任务中很快不够用。下一个样本中，`media_id` 是媒体对象标识，`annotations` 保存可核验主张（claim）与证据标注，`policy` 保存回答策略；边界框（bounding box，`bbox`）按原图像素坐标记录，顺序为左、上、右、下。更稳健的样本应区分媒体对象、消息内容、任务标签和证据标注：
 
 ~~~json
 {
@@ -201,7 +196,7 @@ m_{i,t}
 }
 ~~~
 
-这里的 content 是一个列表，而不是把图片和文本都塞进一个字符串。这样做的好处是：
+`content` 是一个列表，而不是把图片和文本都塞进一个字符串。这样做的好处是：
 
 1. 图片对象有自己的 id、尺寸、hash 和来源；
 2. 同一张图可以在多轮中被引用，而不必复制文件；
@@ -213,7 +208,7 @@ m_{i,t}
 
 ### 2.2 单图样本、多图样本与交错媒体
 
-在每个媒体对象只被引用一次的简化 schema 中，单图问答的最小不变量是：
+设 $s$ 是一条样本，$n_{\mathrm{media}}(s)$ 统计绑定的不同媒体对象数，$n_{\mathrm{refs}}(s)$ 统计消息中的媒体引用数。在每个对象只引用一次的简化样本结构（schema）中，单图问答的最小不变量是：
 
 ~~~math
 n_{\mathrm{media}}(s)
@@ -221,7 +216,7 @@ n_{\mathrm{media}}(s)
 n_{\mathrm{refs}}(s),
 ~~~
 
-其中 n_media 是样本中实际绑定的媒体对象数，n_refs 是消息内容中被引用的媒体数。一般 schema 还必须满足每个引用 id 都能在 media 表中找到；对一张图重复引用两次，n_refs 可以是 2，但这不等于一定需要加载两份图像，数据模型要进一步保存引用关系和是否复用同一视觉表示。
+一般 schema 还必须满足每个引用 id 都能在 media 表中找到；对一张图重复引用两次，$n_{\mathrm{refs}}$ 可以是 2，但这不等于一定需要加载两份图像，数据模型要进一步保存引用关系和是否复用同一视觉表示。
 
 多图比较不能只保存：
 
@@ -279,7 +274,7 @@ n_{\mathrm{refs}}(s),
 }
 ~~~
 
-音频样本也要区分原始音频、转写文本和时间区间：
+音频样本也要区分原始音频、逐字转写（transcript）和时间区间：
 
 ~~~json
 {
@@ -310,7 +305,7 @@ n_{\mathrm{refs}}(s),
 
 多模态数据的风险不只来自文本。图片中可能有姓名、证件号、人脸、车牌、屏幕内容和内部文件；音频中可能包含声音身份和会议内容；视频中还可能包含未被文字标注的旁观者。
 
-一个可复盘的数据 artifact 至少应关联：
+一个可复盘的数据 artifact 至少应关联来源、组成、采集与推荐用途等说明字段；Datasheets for Datasets 提供了这类数据集文档框架，但填写内容仍需核验（[arXiv v8](https://arxiv.org/abs/1803.09010v8)）：
 
 - 来源和采集时间；
 - 许可或使用依据；
@@ -322,39 +317,43 @@ n_{\mathrm{refs}}(s),
 
 hash 主要用于追踪和去重，不等于匿名化。把文件名改成随机字符串，也不等于隐私已经被保护。
 
-## 3. Chat Template 是一个编译器
+## 3. 对话模板（chat template）是一个编译器
 
 ### 3.1 从消息到模型输入的流水线
 
 chat template 不是为了让日志好看，它把高层消息对象编译成模型可以执行的输入：
 
 ~~~text
-structured messages
-    -> role and content normalization
-    -> template rendering
-    -> text tokenization
-    -> media reference resolution
-    -> visual feature insertion or memory construction
+结构化消息
+    -> 角色与内容规范化
+    -> 对话模板渲染
+    -> 文本分词
+    -> 媒体引用解析
+    -> 视觉特征插入或视觉记忆构造
     -> input_ids / embeddings / labels / masks
 ~~~
 
-编译器的输入是消息对象，输出是多个彼此必须一致的张量和 span。只检查最终字符串中出现了 image，就像只检查程序源代码中出现了变量名，不能证明运行时绑定正确。
+编译器的输入是消息对象，输出是多个彼此必须一致的张量和连续位置区间（span）。只检查最终字符串中出现了 `<image>`，就像只检查程序源代码中出现了变量名，不能证明运行时绑定正确。
 
 ### 3.2 角色语法与版本
 
-不同模型可能使用不同的 system、user、assistant 标记，也可能在 assistant 结尾添加 generation prompt。训练模板和推理模板若不一致，模型可能出现：
+不同模型可能使用不同的 system、user、assistant 标记，也可能在 assistant 结尾添加生成前缀（generation prompt）或停止词元（stop token）。Transformers v5.21.0 的多模态模板文档把消息内容表示为不同类型项目的列表，并由多模态处理器（processor）负责图像预处理、分词和模板应用；这是该版本的接口示例，不是所有框架的字段合同。[Transformers v5.21.0 多模态 chat template 文档](https://huggingface.co/docs/transformers/v5.21.0/chat_templating_multimodal)
+
+训练模板和推理模板若不一致，模型可能出现：
 
 - assistant 起始位置错位；
 - 训练时监督了模板符号，推理时却没有这些符号；
 - 多轮消息被拼成一轮；
-- 末尾的 EOS 或 stop token 不一致；
+- 末尾的结束标记（EOS）或停止词元（stop token）不一致；
 - user 内容被误当成 assistant 内容。
 
-因此应把模板版本写入数据 artifact，并把“从原始消息得到 assistant span”作为可测试函数。不要用一个正则表达式在所有模型上猜测 assistant 起点。
+因此应把模板版本写入数据制品（artifact），并把“从原始消息得到 assistant 回答区间”作为可测试函数。不要用一个正则表达式在所有模型上猜测 assistant 起点。
 
-### 3.3 Image reference 不是一个 token
+若使用框架提供的 assistant-only loss API，还要核对模板是否能产出助手掩码（assistant mask）。比如 TRL v1.16.0 的 `assistant_only_loss=True` 要求模板含 `{% generation %}` 和 `{% endgeneration %}` 标记；它对视觉数据还注明 Transformers 版本需为 5.18.0 或更高、数据需为对话式语言建模数据集（conversational language-modeling dataset）。这只是该版本 API 的要求，不是所有训练器的通用接口。[TRL v1.16.0 SFT Trainer 文档](https://huggingface.co/docs/trl/v1.16.0/sft_trainer)
 
-在很多系统中，消息里的一个 image reference 最终可能展开成 N_v 个连续视觉 embedding；也可能进入独立的视觉 memory，由语言层的 cross-attention 读取。于是：
+### 3.3 图像引用（image reference）不是一个词元（token）
+
+设一条样本有 $I$ 个图像引用，第 $j$ 个引用展开成 $N_{v,j}$ 个视觉 token；$T_{\mathrm{text}}$ 是模板化后的文本 token 数，$T_{\mathrm{special}}$ 是保留的边界、角色等特殊 token 数，$T_{\mathrm{total}}$ 是拼接后的总长度。在视觉 token 进入主序列的前缀拼接（prefix）路线中：
 
 ~~~math
 T_{\mathrm{total}}
@@ -366,14 +365,9 @@ T_{\mathrm{special}}
 \sum_{j=1}^{I}N_{v,j}
 ~~~
 
-适用于视觉 token 进入主序列的 prefix 路线。这里：
+如果采用 cross-attention，主文本序列可能不包含全部视觉 token，但视觉记忆（visual memory）、重采样器（resampler）和 cross-attention 仍然有成本。不能因为 tokenizer 中只有一个 image reference，就把视觉成本记成一个 token。
 
-- I 是图片或视觉片段数量；
-- N_{v,j} 是第 j 个片段实际贡献的 token 数；
-- T_text 是经过模板后的文本 token 数；
-- T_special 是边界、角色和其他特殊 token 数。
-
-如果采用 cross-attention，主文本序列可能不包含全部视觉 token，但视觉 memory、resampler 和 cross-attention 仍然有成本。不能因为 tokenizer 中只有一个 image reference，就把视觉成本记成一个 token。
+例如，假设两张图各展开为 576 个视觉词元，模板文本有 320 个词元，角色和边界标记有 8 个特殊词元，则总序列长度为 $2\times576+320+8=1{,}480$。这里的 576 和 320 是教学输入，不是某个模型的固定规格；换用独立视觉 memory 的架构时，主文本长度的记账方式也会不同。
 
 ### 3.4 多图绑定的三个同时成立的条件
 
@@ -421,18 +415,18 @@ visual inputs: [features(page_2), features(page_5)]
 
 数字只是示意。真正重要的是 span 来自编译过程，而不是训练循环再次用字符串搜索猜测。这样可以在样本进入 batch 前检查多轮 assistant span 是否为空、是否重叠、是否超出序列长度。
 
-## 4. Assistant-only Loss Mask：监督责任的边界
+## 4. 助手输出损失掩码（assistant-only loss mask）：监督责任的边界
 
-### 4.1 输入、标签和 shift
+### 4.1 输入、标签和移位（shift）
 
-自回归语言模型通常用当前位置的 logits 预测下一个 token。以简化序列为例：
+自回归语言模型通常用当前位置的未归一化输出分数（logits）预测下一个词元。下面的 `BOS` 和 `EOS` 分别表示序列起始和结束标记；示例中的 `-100` 是常见的标签忽略索引（ignore_index）：
 
 ~~~text
 input_ids: [BOS, user, image, question, assistant, answer_1, answer_2, EOS]
 labels:    [-100, -100, -100, -100, -100, answer_1, answer_2, EOS]
 ~~~
 
-实际实现还会进行一位 shift。若 logits 的长度为 T，labels 需要和 shift 后的目标位置对齐。最容易犯的错误是把“显示出来的 assistant 起始位置”直接当成 loss 起点，却没有核对 shift 之后的索引。
+每个预测位置都要和右移一位的目标词元对齐；具体由模型 forward 内部移位，还是由数据管线预先移位，取决于目标实现，不能漏移或重复移位。TRL v1.16.0 文档描述了单词元移位和 `-100` 忽略填充目标的做法；PyTorch 2.15 的 `CrossEntropyLoss` 文档说明 `ignore_index` 适用于类别索引目标，但这些 API 都不会替自定义数据管线确定 assistant span。[TRL v1.16.0 SFT Trainer](https://huggingface.co/docs/trl/v1.16.0/sft_trainer)，[PyTorch 2.15 CrossEntropyLoss](https://docs.pytorch.org/docs/2.15/generated/torch.nn.CrossEntropyLoss.html)
 
 当连续视觉 embedding 被展开到模型序列后，labels 仍要与完整序列长度对齐；对应视觉 span 的位置应填 `ignore_index`，不能因为视觉输入不是词表 id 就把这些位置从 labels 中悄悄删掉。下面的 toy demo 只统计有效 label 数，但真实 collator 必须同时保存文本 span、视觉 span 和 shift 后的坐标。
 
@@ -449,7 +443,7 @@ labels:    [-100, -100, -100, -100, -100, answer_1, answer_2, EOS]
 
 ### 4.3 多轮对话需要多个 assistant span
 
-如果一条样本有三轮 user/assistant 交互，三个 assistant 回答都可以是监督目标：
+如果一条样本有三轮 user/assistant 交互，令 $\mathcal{S}_{i,\mathrm{assistant}}$ 表示第 $i$ 条样本中所有 assistant 回答位置的并集，并令 $m_{i,t}$ 在第 $t$ 个位置属于该并集时为 1、否则为 0。三个 assistant 回答都可以是监督目标：
 
 ~~~math
 m_{i,t}
@@ -460,11 +454,11 @@ m_{i,t}
 \end{cases}
 ~~~
 
-这里 S_{i,assistant} 是所有 assistant span 的并集，不是最后一轮 span；实现还要明确这些 span 是 input 坐标还是 shift 后的 label 坐标，并在构造 labels 时完成同一坐标变换。若只监督最后一轮，模型可能学不到前两轮的指代和上下文行为；若把历史 user 内容也设为 1，模型会被鼓励复述对话。
+实现还要明确这些位置是 input 坐标还是 shift 后的 label 坐标，并在构造 labels 时完成同一坐标变换。若只监督最后一轮，模型可能学不到前两轮的指代和上下文行为；若把历史 user 内容也设为 1，模型会被鼓励复述对话。
 
 ### 4.4 有效分母比 padded shape 更重要
 
-带 mask 的平均 loss 可以写成：
+沿用 $m_{i,t}$ 表示是否计入监督，设 $N_{\mathrm{valid}}=\sum_{i,t}m_{i,t}>0$。带 mask 的平均 loss 可以写成：
 
 ~~~math
 \mathcal{L}
@@ -476,11 +470,11 @@ m_{i,t}
 }.
 ~~~
 
-这里假设总有效监督 token 数大于零。若一个 batch 的所有样本都没有 assistant span，分母为零，此 batch 没有可解释的 SFT loss，应在 collator 或训练循环处拒绝，而不是把 `NaN` 改成零继续更新。
+若一个 batch 的所有样本都没有 assistant span，$N_{\mathrm{valid}}=0$，此 batch 没有可解释的 SFT loss，应在 collator 或训练循环处拒绝，而不是把 `NaN` 改成零继续更新。
 
-如果一个 batch 中样本 A 有 100 个 assistant token，样本 B 只有 10 个，简单按样本平均会让短回答和长回答权重相同；按 token 平均则长回答贡献更多。两者都可能合理，但必须明确选择，因为它们对应不同的训练分布。
+例如，假设样本 A 有 2 个 assistant token，两个目标 token 的预测概率都为 $0.5$；样本 B 有 1 个 assistant token，预测概率为 $0.25$。按 token 平均的 loss 为 $(-\ln0.5-\ln0.5-\ln0.25)/3\approx(0.693+0.693+1.386)/3=0.924$；先对样本内 token 求平均、再对两条样本平均则为 $(0.693+1.386)/2=1.040$。前者按有效 token 加权，后者让短回答和长回答的样本权重相同；两种口径都可能有用，但必须明确选择。
 
-对于任务加权，可以写成：
+对于任务加权，令 $k(i)$ 表示样本 $i$ 的任务类型，$w_k\ge0$ 表示任务 $k$ 的权重，并要求加权有效分母大于零，可以写成：
 
 ~~~math
 \mathcal{L}_{\mathrm{weighted}}
@@ -492,7 +486,7 @@ m_{i,t}
 },
 ~~~
 
-其中 k(i) 是样本任务类型，w_k 是任务权重。权重不是越大越好；它会改变模型实际看到的梯度分布。
+权重不是越大越好；它会改变模型实际看到的梯度分布。
 
 ### 4.5 常见 mask 事故
 
@@ -502,7 +496,7 @@ m_{i,t}
 
 事故三：多轮只监督最后一轮。症状是模型不会解析历史指代，问“刚才那张图”时像面对新请求。
 
-事故四：padding 未忽略。症状是 batch 中短样本的 loss 被大量无意义位置污染。
+事故四：填充位置（padding）未忽略。症状是 batch 中短样本的 loss 被大量无意义位置污染。
 
 事故五：全样本没有有效 label。训练循环仍可能完成 backward，但分母为零、loss 为 NaN 或梯度没有实际意义。
 
@@ -510,7 +504,7 @@ m_{i,t}
 
 ## 5. 任务数据：每一种监督教的是不同能力
 
-### 5.1 Caption：从视觉主题到可描述属性
+### 5.1 图片描述（caption）：从视觉主题到可描述属性
 
 Caption 样本通常是图片配一段描述：
 
@@ -546,7 +540,7 @@ caption 有三个主要作用：
 
 高质量 caption 应尽量区分可观察事实和推测。例如“一个人在厨房准备晚餐”可能包含动作推断；若图片只能支持“一个人站在厨房台面旁”，训练数据就不应把未经证实的意图写成事实。对高风险领域，描述粒度和不确定性应有明确规范。
 
-### 5.2 VQA：问题类型决定视觉操作
+### 5.2 视觉问答（VQA）：问题类型决定视觉操作
 
 VQA 不是一个单一能力。下面这些问题需要不同操作：
 
@@ -572,7 +566,7 @@ VQA 不是一个单一能力。下面这些问题需要不同操作：
 
 计数数据还需要反事实和均衡设计。若训练集里“图片中有几只狗”的答案经常是一只，模型可能学到数量先验。可以对同一背景改变对象数量，或交换图片与问题，观察答案是否跟随视觉变化。空间关系则要明确坐标系和关系标签，否则“左边”可能相对于图片、人物还是页面区域产生歧义。
 
-### 5.3 OCR：读取文字不等于理解主题
+### 5.3 光学字符识别（OCR）：读取文字不等于理解主题
 
 OCR 样本的监督目标可能有三层：
 
@@ -600,7 +594,7 @@ OCR 样本的监督目标可能有三层：
 
 OCR 的困难包括小字体、模糊、倾斜、遮挡、低对比度、多语言混排和复杂版面。提高输入分辨率只是把更多像素送入视觉塔；如果后续 connector 把细节压缩掉，或语言模型上下文没有预算，放大本身不会自动提升答案。
 
-TextVQA 这类任务专门考查从图片文字中回答问题，适合用来提醒读者：普通 caption 的“这是一张收据”不能证明模型能读出收据金额。文档任务还需要记录页码、行号、字段坐标和归一化规则，避免把一个正确主题判断误报成正确 OCR。
+TextVQA 这类图片文字问答任务专门考查从图片文字中回答问题，适合用来提醒读者：普通 caption 的“这是一张收据”不能证明模型能读出收据金额；任务和评估入口见 [TextVQA 论文 v2](https://arxiv.org/abs/1904.08920v2)。文档任务还需要记录页码、行号、字段坐标和归一化规则，避免把一个正确主题判断误报成正确 OCR。
 
 ### 5.4 图表：视觉读取、数值运算和语言解释的组合
 
@@ -611,7 +605,7 @@ TextVQA 这类任务专门考查从图片文字中回答问题，适合用来提
 3. 读取或比较数据；
 4. 用问题要求的形式解释结果。
 
-例如“第四季度销售额最高”只是一种结论；若任务要求“比第一季度高多少百分比”，模型还必须读取两个数值并完成计算：
+例如“第四季度销售额最高”只是一种结论；若任务要求“比第一季度高多少百分比”，设 $v_1$ 和 $v_4$ 为同一数据系列、同一单位下第一和第四季度读出的正数值，则模型还必须完成：
 
 ~~~math
 \Delta_{\%}
@@ -619,22 +613,24 @@ TextVQA 这类任务专门考查从图片文字中回答问题，适合用来提
 \frac{v_4-v_1}{v_1}\times 100\%.
 ~~~
 
-变量 v_1 和 v_4 必须来自正确系列和正确单位。若纵轴单位是千元，答案不能直接当作元；若图例颜色相近，模型可能把两条曲线混在一起。
+若第一季度为 40 万元、第四季度为 60 万元，则代入后是 $(60-40)/40\times100\%=50\%$。先统一单位并读准数据点，才能解释这 50% 的分母是第一季度销售额。
 
-ChartQA 等公开任务可以支持图表问答的任务定义和评估入口，但不能代替目标业务图表的复测。真实系统常见的错误不是“完全不懂图表”，而是读错刻度、忽略负号、漏掉单位、混淆图例或把趋势猜成数值。数据中应同时包含读值、比较、趋势、单位换算和多步算术，并把中间结构或证据保存下来，便于错误归因。
+若纵轴单位是千元，答案不能直接当作元；若图例颜色相近，模型可能把两条曲线混在一起。
 
-### 5.5 Grounding：让答案指向区域
+[ChartQA 论文 v1](https://arxiv.org/abs/2203.10244v1)等公开任务可以支持图表问答的任务定义和评估入口，但不能代替目标业务图表的复测。真实系统常见的错误不是“完全不懂图表”，而是读错刻度、忽略负号、漏掉单位、混淆图例或把趋势猜成数值。数据中应同时包含读值、比较、趋势、单位换算和多步算术，并把中间结构或证据保存下来，便于错误归因。
+
+### 5.5 区域定位（grounding）：让答案指向区域
 
 Grounding 的目标不是让模型多说一句“在左边”，而是建立文本和空间区域的对应关系。监督可以使用：
 
-- bounding box；
-- point；
-- segmentation mask；
+- 边界框（bounding box）；
+- 点（point）；
+- 分割掩码（segmentation mask）；
 - 页面区域；
 - OCR span；
 - 生成答案中的 evidence_id。
 
-用归一化坐标表示一个框时，若图像宽高为 W、H，像素框为 (x_1,y_1,x_2,y_2)，可以写成：
+用归一化坐标表示一个框时，设图像宽高为 $W,H>0$，像素框为 $(x_1,y_1,x_2,y_2)$，坐标原点在左上角且 $0\le x_1<x_2\le W$、$0\le y_1<y_2\le H$，可以写成：
 
 ~~~math
 \tilde{x}_1=\frac{x_1}{W},\quad
@@ -643,7 +639,9 @@ Grounding 的目标不是让模型多说一句“在左边”，而是建立文�
 \tilde{y}_2=\frac{y_2}{H}.
 ~~~
 
-这样可以减少不同分辨率的坐标歧义，但仍要说明坐标原点、边界是否包含和图像是否经过 crop。两个系统即使都输出四个数字，只要坐标约定不同，数值就不能直接比较。
+例如，$W=2048$ 像素、$H=1024$ 像素，像素框为 $(512,256,1536,768)$，逐项除以宽高后得到 $(0.25,0.25,0.75,0.75)$。这个结果仍沿用左上为原点的坐标约定；若预处理先裁切或旋转图片，必须先把框映射到同一坐标系。
+
+这样可以减少不同分辨率的坐标歧义，但仍要说明坐标原点、边界是否包含和图像是否经过裁剪（crop）。两个系统即使都输出四个数字，只要坐标约定不同，数值就不能直接比较。
 
 最常见的 grounding 误解是把一个全局描述当作区域证据。“这是一份发票”不支持“第 3 行金额是 1280 元”。应按 claim 粒度保存支持关系，并分别评估答案正确和区域正确。
 
@@ -658,7 +656,7 @@ Grounding 的目标不是让模型多说一句“在左边”，而是建立文�
 - 票据、合同和表单中的数字；
 - 证据不足时的说明。
 
-结构化答案可以这样表示：
+结构化答案可以这样表示；其中 `quote` 保存证据区域中的原文摘录：
 
 ~~~json
 {
@@ -723,9 +721,9 @@ Grounding 的目标不是让模型多说一句“在左边”，而是建立文�
 这张图片中的车牌区域过于模糊，我无法可靠读出号码。请提供更高分辨率的原图，或裁剪车牌区域后重试。
 ~~~
 
-拒答数据也可能过强。如果把大量可回答样本标成拒答，模型会形成 over-refusal。数据中应同时有清晰、可回答、部分可回答和确实不可回答的对照组，并记录拒答原因。
+拒答数据也可能过强。如果把大量可回答样本标成拒答，模型会形成过度拒答（over-refusal）。数据中应同时有清晰、可回答、部分可回答和确实不可回答的对照组，并记录拒答原因。
 
-MM-SafetyBench 等研究可以作为多模态安全评估的资料入口，但公开 benchmark 的结果不能直接替代目标产品的权限、隐私和工具调用测试。尤其要把媒体观察通道和 trusted instruction channel 分开：图片里的“忽略之前指令”只是图片文字，不应获得 system 或 developer 权限。
+[MM-SafetyBench 论文 v5](https://arxiv.org/abs/2311.17600v5)等研究可以作为多模态安全评估的资料入口，但公开 benchmark 的结果不能直接替代目标产品的权限、隐私和工具调用测试。尤其要把媒体观察通道和可信指令通道（trusted instruction channel）分开：图片里的“忽略之前指令”只是图片文字，不应获得 system 或 developer 权限；多模态间接提示注入是已记录的风险类别，缓解措施仍需按目标系统验证。[OWASP LLM01:2025](https://genai.owasp.org/llmrisk/llm01-prompt-injection/)
 
 ## 6. 数据质量是一个测量问题
 
@@ -745,7 +743,7 @@ MM-SafetyBench 等研究可以作为多模态安全评估的资料入口，但�
 
 ### 6.2 证据支持要按 claim 统计
 
-不要把一整段 answer 粗略标成 supported 或 unsupported。设样本 i 有 C_i 个可核验 claim，第 j 个 claim 的支持标记为 z_{i,j}，则 claim-level 支持率可以写成：
+不要把一整段 answer 粗略标成 supported 或 unsupported。设样本 $i$ 有 $C_i\ge0$ 个可核验 claim，第 $j$ 个 claim 的支持标记 $z_{i,j}\in\{0,1\}$ 表示有无证据支持，并要求全数据的 claim 总数 $\sum_i C_i>0$；claim-level 支持率可以写成：
 
 ~~~math
 S_{\mathrm{claim}}
@@ -754,9 +752,9 @@ S_{\mathrm{claim}}
 {\sum_i C_i}.
 ~~~
 
-要求 $C_i$ 是非负整数，且总 claim 数大于零；没有任何可核验 claim 时，支持率是“没有分母”，不应报告为 0。若业务只关心高风险 claim，还应在分母中明确只纳入已标记为高风险的 claim，不能用全量分母和高风险分子混算。
+没有任何可核验 claim 时，支持率是“没有分母”，不应报告为 0。若业务只关心高风险 claim，还应在分母中明确只纳入已标记为高风险的 claim，不能用全量分母和高风险分子混算。
 
-若一个回答有四个 claim，其中三个有图片区域支持，一个是猜测，把整条样本记为“支持”会夸大质量。还可以单独报告关键 claim 支持率，把金额、日期、药名等高风险字段与普通场景描述分开。
+若一个回答有四个 claim，其中三个有图片区域支持，一个是猜测，则 claim-level 支持率为 $3/4=0.75$；把整条样本记为“支持”会夸大质量。还可以单独报告关键 claim 支持率，把金额、日期、药名等高风险字段与普通场景描述分开。
 
 支持标注本身也有成本。可以先对高风险任务保存 evidence span，对普通 caption 使用人工抽样和反事实测试。没有证据标注的样本不必全部丢弃，但不能在评估中假装它们具有同等可验证性。
 
@@ -777,7 +775,7 @@ S_{\mathrm{claim}}
 
 caption 中的“拥挤”“漂亮”“危险”可能存在合理分歧；OCR 中的字符通常有更严格答案；图表推理中的单位和数值则需要核对。把所有不一致都当作错误，会误删有价值的多视角样本；把所有不一致都保留，又会污染监督。
 
-对两位标注者在离散标签上的一致性，可以用 Cohen's kappa 表示：
+对两位标注者在离散标签上的一致性，令 $p_o$ 为观测一致率、$p_e$ 为按边际分布计算的随机一致率，且 $p_e<1$；Cohen's $\kappa$ 系数可写为：
 
 ~~~math
 \kappa
@@ -785,13 +783,15 @@ caption 中的“拥挤”“漂亮”“危险”可能存在合理分歧；OCR
 \frac{p_o-p_e}{1-p_e},
 ~~~
 
-其中 p_o 是观测一致率，p_e 是按边际分布计算的随机一致率。对于开放式答案，还需要字段级比对、数值容差、证据区域交并比和专家复核，而不能只用字符串相等。
+例如，两位标注者的观测一致率为 $p_o=0.9$，按边际标签分布计算的随机一致率为 $p_e=0.5$，则 $\kappa=(0.9-0.5)/(1-0.5)=0.8$。这个数值校正了偶然一致，但不能告诉我们分歧是否来自合理的主观描述、模糊图片还是错误标注，仍要回看样本切片。
+
+对于开放式答案，还需要字段级比对、数值容差、证据区域交并比和专家复核，而不能只用字符串相等。
 
 ### 6.5 隐私和许可属于数据语义
 
 脱敏不能只处理 OCR 文本。图片中的脸、车牌、屏幕、手写签名和背景文件都可能泄露信息；音频中的声音和视频中的旁观者同样需要考虑。训练前应记录哪些字段被删除、模糊、替换或保留，以及这种处理是否改变了任务标签。
 
-许可也会影响能否训练、能否分发和能否提供删除。公开可访问不等于可以任意再分发。模型卡或数据说明中的许可边界应与实际 artifact 对齐。
+许可也会影响能否训练、能否分发和能否提供删除。发布页可访问与许可授权是不同信息，不能由前者推定后者。模型卡或数据说明中的许可边界应与实际 artifact 对齐。
 
 ### 6.6 按切片记录质量
 
@@ -814,13 +814,13 @@ caption 中的“拥挤”“漂亮”“危险”可能存在合理分歧；OCR
 
 ### 7.1 样本比例不等于 token 比例
 
-假设有 K 类任务，第 k 类样本抽样概率是 p_k：
+设 $K\ge1$ 类任务，$k\in\{1,\ldots,K\}$，第 $k$ 类样本抽样概率为 $p_k\ge0$：
 
 ~~~math
 \sum_{k=1}^{K}p_k=1.
 ~~~
 
-如果每类回答长度不同，样本比例 p_k 不等于监督 token 比例。令第 k 类平均有效回答长度为 \ell_k，则近似的 token 占比为：
+如果每类回答长度不同，样本比例 $p_k$ 不等于监督 token 比例。令第 $k$ 类平均有效回答长度为 $\ell_k\ge0$，并要求 $\sum_{r=1}^{K}p_r\ell_r>0$，则近似的 token 占比为：
 
 ~~~math
 q_k
@@ -828,6 +828,8 @@ q_k
 \frac{p_k\ell_k}
 {\sum_{r=1}^{K}p_r\ell_r}.
 ~~~
+
+例如，假设 OCR 样本占 $p_{\mathrm{OCR}}=0.25$，平均有 $\ell_{\mathrm{OCR}}=80$ 个有效回答 token；短拒答样本占 $p_{\mathrm{refusal}}=0.75$，平均有 $\ell_{\mathrm{refusal}}=8$ 个有效回答 token。OCR 的加权 token 数为 $0.25\times80=20$，拒答为 $0.75\times8=6$，总数为 $20+6=26$，所以 $q_{\mathrm{OCR}}=20/26\approx0.769$、$q_{\mathrm{refusal}}=6/26\approx0.231$。样本比例是 25% 对 75%，但在这个按有效回答 token 等权的假设下，token 比例反过来约为 77% 对 23%。这些输入只用于说明分母，不能当作推荐数据配比。
 
 一个长文档任务即使样本数量不多，也可能贡献大量梯度；一个短拒答任务若只按样本数配比，实际监督 token 可能很少。配比设计必须先决定是控制样本频率、有效 token 还是任务成功率。
 
@@ -840,6 +842,8 @@ q_k
 =
 \sum_{k=1}^{K}p_k g_k.
 ~~~
+
+例如，只看某一个参数的梯度分量，任务 A 的期望梯度为 $g_A=2$、抽样概率为 $0.75$，任务 B 的期望梯度为 $g_B=-1$、抽样概率为 $0.25$，则该分量的混合期望为 $0.75\times2+0.25\times(-1)=1.25$。这是单个参数和固定任务分布下的教学算例；真实训练还受小批次噪声、优化器状态和参数更新影响。
 
 增加 OCR 样本不只“增加 OCR 能力”，也会改变模型对格式、长度、数字和视觉细节的偏好；增加拒答样本可能提高保守性，也可能损伤可回答任务。配比必须通过消融和切片评估来判断，不能把某篇论文的比例照搬为普遍规律。
 
@@ -905,20 +909,20 @@ q_k
 
 实际框架字段会不同，但责任不能消失。collator 需要把原始样本中的媒体引用、文本 token、视觉输入和 label span 组合成同一条可追踪记录。
 
-### 8.2 Padding、ragged 和固定预算
+### 8.2 填充、打包序列与不规则长序列（padding、packed、ragged）
 
 若视觉 token 长度不同，可以：
 
-1. padding 到 batch 最大长度；
-2. 使用 packed 或 ragged 表示；
+1. 填充（padding）到 batch 最大长度；
+2. 使用打包序列（packed sequence）或不规则长序列（ragged sequence）表示；
 3. 先用 resampler 压成固定长度；
 4. 按分辨率分桶。
 
-padding 简化实现，却可能浪费显存和注意力计算。固定长度降低预算波动，却可能形成视觉信息瓶颈。分桶减少浪费，但增加调度和数据组织复杂度。选择哪一种，要同时看吞吐、显存、OCR 质量和多图错误率。
+填充简化实现，却可能浪费显存和注意力计算。固定长度降低预算波动，却可能形成视觉信息瓶颈。分桶减少浪费，但增加调度和数据组织复杂度。选择哪一种，要同时看吞吐、显存、OCR 质量和多图错误率。
 
 ### 8.3 按有效 token 累积梯度
 
-若不同样本的 assistant token 数差异很大，按 micro-batch 平均 loss 再平均，和按所有有效 token 汇总后再除，结果不同。对窗口 W，按有效 token 统计的目标可以写成：
+若不同样本的 assistant token 数差异很大，按微批次（micro-batch）平均 loss 再平均，和按所有有效 token 汇总后再除，结果不同。令 $W$ 表示一次梯度累积窗口，$b$ 遍历窗口内的样本，$m_{b,t}$ 表示目标位置是否纳入监督，$\ell_{b,t}=-\log p_\theta(y_{b,t}\mid\mathrm{context})$ 表示该位置的负对数似然；按有效 token 统计的窗口目标可以写成：
 
 ~~~math
 \mathcal{L}_{W}
@@ -938,7 +942,7 @@ padding 简化实现，却可能浪费显存和注意力计算。固定长度降
 
 - 冻结 vision encoder，只训练 projector 或 query bridge；
 - 冻结 LLM，训练 connector 和部分视觉模块；
-- 对 LLM 使用 LoRA；
+- 对语言模型使用低秩适配（LoRA）；
 - 解冻视觉塔的高层；
 - 联合微调全部组件。
 
@@ -975,9 +979,9 @@ padding 简化实现，却可能浪费显存和注意力计算。固定长度降
 
 ### 9.2 文本答案指标的边界
 
-Exact Match 适合数字、短字段和结构化答案，但字符串不同不一定事实不同。自然语言相似度可以作为辅助，却可能把一个数字错误的答案评得很高。
+精确匹配（Exact Match）适合数字、短字段和结构化答案，但字符串不同不一定事实不同。自然语言相似度可以作为辅助，却可能把一个数字错误的答案评得很高。
 
-对数值字段，可定义容差匹配：
+对可比较的数值字段，令 $a$ 是参考值、$\hat{a}$ 是预测值，二者使用同一单位；$\epsilon_{\mathrm{abs}}\ge0$ 和 $\epsilon_{\mathrm{rel}}\ge0$ 分别是绝对与相对容差。匹配规则可写成：
 
 ~~~math
 \mathrm{match}(a,\hat a)
@@ -989,7 +993,9 @@ Exact Match 适合数字、短字段和结构化答案，但字符串不同不�
 \right].
 ~~~
 
-其中 ε_abs 和 ε_rel 应按字段风险和单位规定。金额、日期和药物剂量不能使用随意的宽容度。
+例如，参考值 $a=100$、预测值 $\hat a=102$，绝对容差 $\epsilon_{\mathrm{abs}}=1$、相对容差 $\epsilon_{\mathrm{rel}}=0.02$，则阈值为 $1+0.02\times100=3$，误差 $|100-102|=2\le3$，所以该字段匹配。两个数必须使用同一单位；容差仍应按字段风险规定，不能把这个例子直接套到金额、日期或药物剂量。
+
+因此，容差应按字段风险和单位规定；金额、日期和药物剂量不能使用随意的宽容度。
 
 ### 9.3 OCR 和图表需要结构化评估
 
@@ -1014,7 +1020,7 @@ OCR 可以分别报告：
 
 ### 9.4 Grounding 和引用支持
 
-设预测框为 B_p，标注框为 B_g，交并比为：
+设预测框 $B_p$ 和标注框 $B_g$ 使用相同坐标系，框的四个数按左上与右下边界表示并按边界差计算面积，且并集面积大于零；$|B|$ 表示框 $B$ 的面积，交并比（intersection over union，IoU）为：
 
 ~~~math
 \mathrm{IoU}(B_p,B_g)
@@ -1022,6 +1028,8 @@ OCR 可以分别报告：
 \frac{|B_p\cap B_g|}
 {|B_p\cup B_g|}.
 ~~~
+
+例如，在相同的像素边界坐标系中令 $B_p=[0,0,4,4]$、$B_g=[2,0,6,4]$，两个框面积各为 $16$ 平方像素，交集面积为 $2\times4=8$，并集面积为 $16+16-8=24$，所以 IoU 为 $8/24=1/3\approx0.333$。这是矩形框面积算例，不代表任何数据集的验收阈值。
 
 但 IoU 不是所有文档任务的唯一标准。合同问答还要检查：
 
@@ -1044,7 +1052,7 @@ OCR 可以分别报告：
 - 提供无关图片；
 - 保持图片不变，只改问题中的指代。
 
-对样本 i，若模型在原图上的预测为 \hat a_i，在反事实图片上的预测为 \hat a_i^{cf}，可以记录答案变化率：
+设有 $N>0$ 组成对样本，第 $i$ 组在原图上的预测为 $\hat a_i$，在反事实图片上的预测为 $\hat a_i^{\mathrm{cf}}$；先按任务要求规范化答案字段，再计算答案变化率：
 
 ~~~math
 R_{\mathrm{cf}}
@@ -1055,18 +1063,20 @@ R_{\mathrm{cf}}
 [\hat a_i\ne \hat a_i^{cf}].
 ~~~
 
-这里要求配对样本数 $N>0$，否则变化率未定义。这个指标不是“理解真值”。不该变化的问题可能被无关改变扰动，应该变化的问题也可能有多个合理答案。它的作用是暴露视觉未接入、placeholder 错位和语言先验主导。
+若 $N=0$，变化率未定义。这个指标不是“理解真值”。不该变化的问题可能被无关改变扰动，应该变化的问题也可能有多个合理答案。它的作用是暴露视觉未接入、placeholder 错位和语言先验主导。
+
+例如，四组成对样本中有三组的规范化答案字段按预期改变，则 $R_{\mathrm{cf}}=3/4=0.75$。这只描述该组探针的变化比例；还要逐条确认变化方向是否正确，不能把 0.75 当作通用合格线。
 
 ### 9.6 拒答是一个混淆矩阵
 
 把样本分为确实可回答和确实不可可靠回答，模型输出回答或拒答，就可以得到：
 
-- true answer：该答且答对；
-- false answer：不该可靠回答却硬答；
-- correct refusal：不可靠时拒答；
-- over-refusal：可答时拒答。
+- 正确回答（true answer）：可回答且答对；
+- 错误硬答（false answer）：不该可靠回答却仍然回答；
+- 正确拒答（correct refusal）：不可靠时拒答；
+- 过度拒答（over-refusal）：可回答时拒答。
 
-拒答准确率不应只看“拒答样本中拒了多少”，还要同时报告可回答样本上的过度拒答。可以使用精确率、召回率和风险-覆盖率曲线，而不是一个孤立比例。
+拒答召回率只回答“应拒答样本中有多少被拒答”，还要同时报告可回答样本上的过度拒答。可以使用精确率、召回率和风险-覆盖率曲线，而不是一个孤立比例。
 
 ### 9.7 纯文本回归与多轮回归
 
@@ -1082,7 +1092,7 @@ R_{\mathrm{cf}}
 
 ### 9.8 单位成功任务成本
 
-生产评估不只关心准确率，还关心得到一个证据充分答案的代价。定义证据支持成功事件为 S=1，成本为 C，则窗口内单位成功任务成本可以写成：
+生产评估不只关心准确率，还关心得到一个证据充分答案的代价。对窗口中的 $N$ 个请求，令 $S_i=1$ 表示第 $i$ 个请求达到预先定义的证据支持成功事件，$C_i$ 是该请求按统一计价单位折算的成本，并要求 $\sum_i\mathbf{1}[S_i=1]>0$；单位成功任务成本可以写成：
 
 ~~~math
 C_{\mathrm{per\ supported\ success}}
@@ -1091,7 +1101,9 @@ C_{\mathrm{per\ supported\ success}}
 {\sum_{i=1}^{N}\mathbf{1}[S_i=1]}.
 ~~~
 
-C_i 可以包括视觉编码、OCR、LLM token、重试、人工复核和 GPU 时间。要求成功事件分母大于零；窗口内没有一个证据支持的成功任务时，单位成功任务成本未定义，不能写成无穷大或零。若只把“生成了一段文字”算作成功，模型可能通过自信幻觉降低表面成本；分母必须与业务定义的成功事件一致。
+折算成本可以计入视觉编码、OCR、LLM token、重试、人工复核和 GPU 时间；若无法换算到同一单位，应分别报告成本项，不能直接相加。窗口内没有一个证据支持的成功任务时，单位成功任务成本未定义，不能写成无穷大或零。若只把“生成了一段文字”算作成功，模型可能通过自信幻觉降低表面成本；分母必须与业务定义的成功事件一致。
+
+例如，五个请求的成本已统一折算为 $1,1,2,1,1$ 个成本单位，总计 6；其中 3 个请求达到预先定义的证据支持成功事件，则单位成功任务成本为 $6/3=2$ 个成本单位。若人工复核时间尚未换算到同一单位，应单独列出，不直接加到这个分子中。
 
 ## 10. 贯穿案例：合同页面问答数据如何进入训练
 
@@ -1166,25 +1178,25 @@ C_i 可以包括视觉编码、OCR、LLM token、重试、人工复核和 GPU �
 
 ### 10.3 从样本到 batch 的责任链
 
-数据进入训练时要依次完成：
+将数据清单（manifest）送入训练流程时，依次完成：
 
 ~~~text
-manifest
-    -> media decode and permission check
-    -> message normalization
-    -> template rendering
-    -> placeholder/media binding
-    -> vision preprocessing
-    -> visual token or memory construction
-    -> assistant span extraction
-    -> labels and masks
-    -> token-budget accounting
-    -> batch and loss
+数据清单（manifest）
+    -> 媒体解码与权限检查
+    -> 消息规范化
+    -> 对话模板渲染
+    -> 占位符与媒体绑定
+    -> 视觉预处理
+    -> 视觉词元或视觉记忆构造
+    -> 助手回答区间提取
+    -> 标签与掩码生成
+    -> 词元预算核算
+    -> 批次整理与损失计算
 ~~~
 
 每一步都可能成为错误来源。例如：
 
-- manifest 顺序错，导致 p2 和 p3 互换；
+- 数据清单顺序错，导致 p2 和 p3 互换；
 - 图像读取成功但 crop 丢掉付款条款；
 - OCR annotation 正确但 labels 的 assistant 起点错一位；
 - 三张图 token 让上下文超限，末尾关键问题被截断；
@@ -1192,7 +1204,7 @@ manifest
 
 ### 10.4 如何定位一次失败
 
-若模型把 90 天读成 60 天，先查视觉分辨率、OCR 区域和数字标注；若数字读对但页码错，查 media_id 和多图顺序；若证据正确但模型把图片中的“忽略之前指令”当作工具命令，查 trusted instruction 与 observation 的权限分离；若所有回答都说无法确定，查拒答样本配比和 policy 标签。
+若模型把 90 天读成 60 天，先查视觉分辨率、OCR 区域和数字标注；若数字读对但页码错，查 media_id 和多图顺序；若证据正确但模型把图片中的“忽略之前指令”当作工具命令，查可信指令与媒体观察内容的权限分离；若所有回答都说无法确定，查拒答样本配比和 policy 标签。
 
 这就是数据工程的价值：把“模型答错了”拆成可以复测的局部责任，而不是用一次总体分数结束分析。
 
@@ -1221,7 +1233,7 @@ manifest
 - 资料不足样本的拒答标记；
 - 明显安全风险标记。
 
-为了让示例集中讨论数据契约，代码用布尔字段模拟人工或上游审核结果。真实系统必须把这些字段连接到图片解码、OCR、人工标注和权限服务，而不能直接相信它们。
+为了让示例集中讨论数据契约，代码用布尔字段模拟人工或上游审核结果，并要求计数是整数、策略标记是真正的布尔值。真实系统必须把这些字段连接到图片解码、OCR、人工标注和权限服务，而不能直接相信它们。
 
 ~~~python
 import re
@@ -1251,7 +1263,8 @@ records = [
         "user_tokens": 18,
         "assistant_tokens": 22,
         "special_tokens": 4,
-        "supported": True,
+        "claim_count": 1,
+        "supported_claims": 1,
         "needs_refusal": False,
         "refused": False,
         "safe": True,
@@ -1264,7 +1277,8 @@ records = [
         "user_tokens": 16,
         "assistant_tokens": 8,
         "special_tokens": 4,
-        "supported": True,
+        "claim_count": 1,
+        "supported_claims": 1,
         "needs_refusal": False,
         "refused": False,
         "safe": True,
@@ -1277,7 +1291,8 @@ records = [
         "user_tokens": 18,
         "assistant_tokens": 10,
         "special_tokens": 4,
-        "supported": True,
+        "claim_count": 1,
+        "supported_claims": 1,
         "needs_refusal": False,
         "refused": False,
         "safe": True,
@@ -1290,7 +1305,8 @@ records = [
         "user_tokens": 17,
         "assistant_tokens": 9,
         "special_tokens": 4,
-        "supported": True,
+        "claim_count": 2,
+        "supported_claims": 2,
         "needs_refusal": False,
         "refused": False,
         "safe": True,
@@ -1303,7 +1319,8 @@ records = [
         "user_tokens": 14,
         "assistant_tokens": 12,
         "special_tokens": 4,
-        "supported": True,
+        "claim_count": 1,
+        "supported_claims": 1,
         "needs_refusal": False,
         "refused": False,
         "safe": True,
@@ -1316,7 +1333,8 @@ records = [
         "user_tokens": 42,
         "assistant_tokens": 20,
         "special_tokens": 8,
-        "supported": True,
+        "claim_count": 1,
+        "supported_claims": 1,
         "needs_refusal": False,
         "refused": False,
         "safe": True,
@@ -1329,7 +1347,8 @@ records = [
         "user_tokens": 28,
         "assistant_tokens": 18,
         "special_tokens": 6,
-        "supported": True,
+        "claim_count": 1,
+        "supported_claims": 1,
         "needs_refusal": False,
         "refused": False,
         "safe": True,
@@ -1342,7 +1361,8 @@ records = [
         "user_tokens": 20,
         "assistant_tokens": 18,
         "special_tokens": 4,
-        "supported": True,
+        "claim_count": 1,
+        "supported_claims": 1,
         "needs_refusal": True,
         "refused": True,
         "safe": True,
@@ -1355,7 +1375,8 @@ records = [
         "user_tokens": 18,
         "assistant_tokens": 12,
         "special_tokens": 4,
-        "supported": False,
+        "claim_count": 1,
+        "supported_claims": 0,
         "needs_refusal": True,
         "refused": False,
         "safe": False,
@@ -1395,19 +1416,30 @@ def label_count(record):
 
 
 def safe_ratio(numerator, denominator):
-    if numerator < 0 or denominator < 0:
-        raise ValueError("ratio inputs cannot be negative")
+    require_nonnegative_int(numerator, "numerator")
+    require_nonnegative_int(denominator, "denominator")
     return None if denominator == 0 else numerator / denominator
 
 
 def safe_max(values):
+    values = list(values)
+    if any(
+        isinstance(value, bool) or not isinstance(value, int) or value < 0
+        for value in values
+    ):
+        raise ValueError("values must be non-negative integers")
     return None if not values else max(values)
 
 
 def audit(record):
     issues = []
-    if record["task"] not in REQUIRED_TASKS:
+    if not isinstance(record["task"], str):
+        issues.append("invalid_task_type")
+    elif record["task"] not in REQUIRED_TASKS:
         issues.append("unknown_task")
+    for field in ("needs_refusal", "refused", "safe"):
+        if not isinstance(record[field], bool):
+            issues.append(f"invalid_{field}_flag")
     if count_placeholders(record["prompt"]) != record["images"]:
         issues.append("placeholder_mismatch")
     if total_tokens(record) > CONTEXT_LIMIT:
@@ -1416,8 +1448,12 @@ def audit(record):
         issues.append("empty_assistant_supervision")
     elif label_count(record) != record["assistant_tokens"]:
         issues.append("label_mask_error")
-    if not record["supported"]:
-        issues.append("unsupported_answer")
+    require_nonnegative_int(record["claim_count"], "claim_count")
+    require_nonnegative_int(record["supported_claims"], "supported_claims")
+    if record["supported_claims"] > record["claim_count"]:
+        issues.append("invalid_claim_support_count")
+    elif record["supported_claims"] < record["claim_count"]:
+        issues.append("unsupported_claims")
     if record["needs_refusal"] and not record["refused"]:
         issues.append("missing_refusal")
     if not record["safe"]:
@@ -1443,15 +1479,23 @@ task_coverage = safe_ratio(
     len(REQUIRED_TASKS),
 )
 
-supported_count = sum(record["supported"] for record in accepted)
-support_rate = safe_ratio(supported_count, len(accepted))
+supported_count = sum(record["supported_claims"] for record in records)
+claim_count = sum(record["claim_count"] for record in records)
+support_rate = safe_ratio(supported_count, claim_count)
 
 refusal_needed = [
-    record for record in accepted if record["needs_refusal"]
+    record for record in records if record["needs_refusal"]
 ]
-refusal_accuracy = safe_ratio(
+refusal_recall = safe_ratio(
     sum(record["refused"] for record in refusal_needed),
     len(refusal_needed),
+)
+answerable = [
+    record for record in records if not record["needs_refusal"]
+]
+over_refusal_rate = safe_ratio(
+    sum(record["refused"] for record in answerable),
+    len(answerable),
 )
 
 checks = {
@@ -1462,8 +1506,23 @@ checks = {
         max_total_tokens is not None
         and max_total_tokens <= CONTEXT_LIMIT
     ),
-    "support_ok": support_rate == 1.0,
-    "refusal_ok": refusal_accuracy == 1.0,
+    "support_denominator_covers_all_claims": (
+        claim_count == 10
+        and supported_count == 9
+        and support_rate is not None
+        and abs(support_rate - 0.9) < 1e-12
+    ),
+    "unsupported_claim_detected": "unsupported_claims" in reports["bad_ocr_001"],
+    "refusal_denominator_covers_all_required_samples": (
+        len(refusal_needed) == 2
+        and refusal_recall is not None
+        and abs(refusal_recall - 0.5) < 1e-12
+    ),
+    "over_refusal_denominator_covers_all_answerable_samples": (
+        len(answerable) == 7
+        and over_refusal_rate is not None
+        and abs(over_refusal_rate) < 1e-12
+    ),
 }
 
 
@@ -1500,6 +1559,21 @@ boundary_checks = {
             }
         )
     ),
+    "fractional_ratio_rejected": expects_error(
+        lambda: safe_ratio(1.5, 2)
+    ),
+    "bool_ratio_rejected": expects_error(
+        lambda: safe_ratio(True, 2)
+    ),
+    "fractional_max_rejected": expects_error(
+        lambda: safe_max([1, 2.5])
+    ),
+    "invalid_task_type_flagged": (
+        "invalid_task_type" in audit({**records[0], "task": []})
+    ),
+    "invalid_policy_flag_flagged": (
+        "invalid_safe_flag" in audit({**records[0], "safe": "yes"})
+    ),
 }
 
 print("accepted_ids=", [record["id"] for record in accepted])
@@ -1509,8 +1583,11 @@ print("task_coverage=", round(task_coverage, 3))
 print("label_tokens=", label_tokens)
 print("assistant_tokens=", assistant_tokens)
 print("max_total_tokens=", max_total_tokens)
+print("supported_claims=", supported_count)
+print("claim_count=", claim_count)
 print("support_rate=", round(support_rate, 3))
-print("refusal_accuracy=", round(refusal_accuracy, 3))
+print("refusal_recall=", round(refusal_recall, 3))
+print("over_refusal_rate=", round(over_refusal_rate, 3))
 print("issue_counts=", dict(sorted(issue_counts.items())))
 print("checks=", checks)
 print("boundary_checks=", boundary_checks)
@@ -1520,24 +1597,30 @@ print(
 )
 ~~~
 
+> 代码状态：已验证（2026-11-11；Python 3.12.9；仅 Python 标准库）。
+
 这段程序的预期输出是：
 
 ~~~text
 accepted_ids= ['caption_001', 'vqa_count_001', 'ocr_001', 'chart_001', 'grounding_001', 'multi_turn_001', 'multi_image_001', 'refusal_001']
-rejected= {'bad_ocr_001': ['placeholder_mismatch', 'unsupported_answer', 'missing_refusal', 'safety_risk']}
+rejected= {'bad_ocr_001': ['placeholder_mismatch', 'unsupported_claims', 'missing_refusal', 'safety_risk']}
 task_counts= {'caption': 1, 'chart': 1, 'grounding': 1, 'multi_image': 1, 'multi_turn': 1, 'ocr': 1, 'refusal': 1, 'vqa': 1}
 task_coverage= 1.0
 label_tokens= 117
 assistant_tokens= 117
 max_total_tokens= 1204
-support_rate= 1.0
-refusal_accuracy= 1.0
-issue_counts= {'missing_refusal': 1, 'placeholder_mismatch': 1, 'safety_risk': 1, 'unsupported_answer': 1}
-checks= {'bad_sample_rejected': True, 'required_tasks_covered': True, 'labels_match_answers': True, 'within_context': True, 'support_ok': True, 'refusal_ok': True}
+supported_claims= 9
+claim_count= 10
+support_rate= 0.9
+refusal_recall= 0.5
+over_refusal_rate= 0.0
+issue_counts= {'missing_refusal': 1, 'placeholder_mismatch': 1, 'safety_risk': 1, 'unsupported_claims': 1}
+checks= {'bad_sample_rejected': True, 'required_tasks_covered': True, 'labels_match_answers': True, 'within_context': True, 'support_denominator_covers_all_claims': True, 'unsupported_claim_detected': True, 'refusal_denominator_covers_all_required_samples': True, 'over_refusal_denominator_covers_all_answerable_samples': True}
+boundary_checks= {'empty_ratio_is_undefined': True, 'non_string_prompt_rejected': True, 'negative_token_count_rejected': True, 'empty_assistant_rejected': True, 'fractional_ratio_rejected': True, 'bool_ratio_rejected': True, 'fractional_max_rejected': True, 'invalid_task_type_flagged': True, 'invalid_policy_flag_flagged': True}
 all_checks_passed= True
 ~~~
 
-这里的 all_checks_passed 只表示这 9 条 toy 记录的结构字段彼此一致。它不表示图片真的被解码、不表示答案真的被像素支持，也不表示训练后的模型会正确执行 OCR、grounding 或拒答。真正的系统还要把这段审计与媒体解码、人工抽检、独立验证集和反事实评估连接起来。
+这里的 `support_rate` 按全部输入记录中的 claim 计算，包括被拒绝的 `bad_ocr_001`；`refusal_recall` 按所有标有 `needs_refusal` 的样本计算，`over_refusal_rate` 则按其余可回答样本计算。这个 fixture 暴露一个 unsupported claim 和一条应拒答却硬答的记录，同时没有可回答样本被误拒。`all_checks_passed` 只表示这段 demo 的检查逻辑与九条合成记录的预期相符，不表示数据质量门槛已经通过，也不表示图片真的被解码、答案真的被像素支持，或训练后的模型会正确执行 OCR、grounding 或拒答。真正的系统还要把这段审计与媒体解码、人工抽检、独立验证集和反事实评估连接起来。
 
 ## 12. 练习：从样本契约到训练判断
 
@@ -1558,16 +1641,19 @@ all_checks_passed= True
 
 ## 13. 资料入口与证据边界
 
-1. Liu et al., Visual Instruction Tuning，LLaVA 原始论文：<https://arxiv.org/abs/2304.08485>。它支持视觉指令微调的数据与训练路线，但实验结论绑定论文中的模型、数据和评估协议。
-2. Dai et al., InstructBLIP: Towards General-purpose Vision-Language Models with Instruction Tuning：<https://arxiv.org/abs/2305.06500>。它支持 instruction-aware 的视觉语言训练研究背景，不能直接证明任意 connector 或数据配比。
-3. Liu et al., Improved Baselines with Visual Instruction Tuning，LLaVA-1.5：<https://arxiv.org/abs/2310.03744>。它可用于核对公开训练和评估设置，不能替代目标业务复测。
-4. Zhu et al., MiniGPT-4: Enhancing Vision-language Understanding with Advanced Large Language Models：<https://arxiv.org/abs/2304.10592>。它提供另一条视觉语言对齐与指令训练的公开研究路线。
-5. Singh et al., Towards VQA Models That Can Read：TextVQA：<https://arxiv.org/abs/1904.08920>。它支持“图片文字问答”这一任务定义和数据背景，不等于通用 OCR 质量保证。
-6. Masry et al., ChartQA: A Benchmark for Question Answering about Charts with Visual and Logical Reasoning：<https://arxiv.org/abs/2203.10244>。它支持图表问答和逻辑推理的公开评估入口。
-7. Gong et al., MM-SafetyBench: A Benchmark for Safety Evaluation of Multimodal Large Language Models：<https://arxiv.org/abs/2311.17600>。它支持多模态安全评估研究背景，不能替代产品权限和工具副作用测试。
-8. Hugging Face Transformers 多模态 chat template 文档：<https://huggingface.co/docs/transformers/main/chat_templating_multimodal>。它支持特定 Transformers 版本中多模态消息和 processor 的 API 语义，实际行为应绑定安装版本。
-9. PyTorch CrossEntropyLoss 文档：<https://docs.pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html>。它支持 ignore_index 和 reduction 等 loss API 语义；本章的多轮 span 构造仍是教学代码，需要目标框架实测。
-10. LLaVA 官方开源仓库：<https://github.com/haotian-liu/LLaVA>。它可用于核对某个代码版本的数据和模板实现；仓库当前状态、分支和部署路径必须单独记录。
+1. Liu et al., Visual Instruction Tuning，LLaVA 原始论文 v2：<https://arxiv.org/abs/2304.08485v2>。它支持视觉指令微调的数据与训练路线，但实验结论绑定论文中的模型、数据和评估协议。
+2. Dai et al., InstructBLIP: Towards General-purpose Vision-Language Models with Instruction Tuning，arXiv v2：<https://arxiv.org/abs/2305.06500v2>。它支持 instruction-aware 的视觉语言训练研究背景，不能直接证明任意 connector 或数据配比。
+3. Liu et al., Improved Baselines with Visual Instruction Tuning，LLaVA-1.5，arXiv v2：<https://arxiv.org/abs/2310.03744v2>。它可用于核对公开训练和评估设置，不能替代目标业务复测。
+4. Zhu et al., MiniGPT-4: Enhancing Vision-language Understanding with Advanced Large Language Models，arXiv v2：<https://arxiv.org/abs/2304.10592v2>。它提供另一条视觉语言对齐与指令训练的公开研究路线。
+5. Singh et al., Towards VQA Models That Can Read（TextVQA），arXiv v2：<https://arxiv.org/abs/1904.08920v2>。它支持“图片文字问答”这一任务定义和数据背景，不等于通用 OCR 质量保证。
+6. Masry et al., ChartQA: A Benchmark for Question Answering about Charts with Visual and Logical Reasoning，arXiv v1：<https://arxiv.org/abs/2203.10244v1>。它支持图表问答和逻辑推理的公开评估入口。
+7. Gong et al., MM-SafetyBench: A Benchmark for Safety Evaluation of Multimodal Large Language Models，arXiv v5：<https://arxiv.org/abs/2311.17600v5>。它支持多模态安全评估研究背景，不能替代产品权限和工具副作用测试。
+8. Hugging Face Transformers 多模态 chat template 文档，v5.21.0：<https://huggingface.co/docs/transformers/v5.21.0/chat_templating_multimodal>，访问日期 2026-11-11。它支持该版本中多模态消息内容列表、Processor 处理职责和模板接口的说明；页面提示有更新版本，本章没有据此核验更新版本行为。
+9. Hugging Face TRL SFT Trainer 文档，v1.16.0：<https://huggingface.co/docs/trl/v1.16.0/sft_trainer>，访问日期 2026-11-11。它支持该版本 `assistant_only_loss` 的模板标记要求，以及视觉数据对 Transformers 版本和 conversational language-modeling 格式的约束；不代表其他训练器的通用接口。
+10. PyTorch `CrossEntropyLoss` 文档，2.15：<https://docs.pytorch.org/docs/2.15/generated/torch.nn.CrossEntropyLoss.html>。它支持 `ignore_index` 和 reduction 等 loss API 语义；本章的多轮 span 构造仍是教学示例，需要在目标框架中核验。
+11. OWASP, LLM01:2025 Prompt Injection：<https://genai.owasp.org/llmrisk/llm01-prompt-injection/>。它作为提示注入风险类别与风险处置入口；不能证明本章描述的任何缓解措施已对目标系统有效。
+12. LLaVA 官方开源仓库：<https://github.com/haotian-liu/LLaVA>。它可用于核对某个代码版本的数据和模板实现；引用实现细节时仍需记录具体 commit，仓库当前状态、分支和部署路径不能自动外推。
+13. Gebru et al., [Datasheets for Datasets](https://arxiv.org/abs/1803.09010v8)，arXiv v8。它提出记录数据集动机、组成、采集过程和推荐用途的文档框架；框架不是法规，也不能证明填写内容真实或使用权成立。
 
 这些资料的可信度不同：原始论文最适合支持论文方法和论文实验，官方文档最适合支持 API 语义，仓库最适合支持某个版本的实现细节，本章 demo 只支持手算和数据契约。任何来源都不能单独证明目标系统的幻觉率、拒答质量、隐私安全或单位成功任务成本。
 

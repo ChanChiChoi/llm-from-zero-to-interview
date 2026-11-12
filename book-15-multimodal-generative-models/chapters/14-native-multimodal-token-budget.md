@@ -8,9 +8,11 @@
 
 ## 14.0 一张发票和一段视频的预算事故
 
-用户上传四张高分辨率发票图片、一段 20 分钟会议视频，并要求模型比较发票金额和定位会议中的审批决定。会话里还保留了 20K token 的工具历史。
+设一个合成请求：用户上传四张高分辨率发票图片和一段 20 分钟会议视频，要求比较发票金额并定位会议中的审批决定；会话还保留 20K token 的工具历史。
 
-系统有 32K 的有效上下文上限。若应用只按文本长度计数，可能以为输入还有空间；实际 processor 可能产生：
+假设目标服务的上下文合同上限是 32K。若应用只按文本长度计数，可能以为输入还有空间；实际 processor 可能产生：
+
+下面的 token 数是用于演示路由问题的合成值，不对应任何模型、服务或真实发票/视频测量。
 
 - 文本：4K token。
 - 四张图片：每张 2K 视觉 token，共 8K。
@@ -19,12 +21,12 @@
 - 协议和媒体边界：几百 token。
 - 输出和推理预留：至少 2K token。
 
-输入和输出相加已经超过预算。更危险的是，服务端可能静默丢弃部分历史或媒体，而用户只看到一个语法完整的答案。
+在这些假设下，输入和输出相加已经超过预算。更危险的是，服务端可能静默丢弃部分历史或媒体，而用户只看到一个语法完整的答案。
 
 ### 14.0.1 初学者先记住四个区别
 
 1. 文件大小不是 token 数。一个压缩得很小的高分辨率 JPEG 仍可能产生很多视觉 token。
-2. 输入 token 不是完整请求预算。输出、工具结果和推理预留也会占用上下文。
+2. 输入 token 不是完整请求预算。在 API 把这些内容计入同一上下文合同的模式下，输出、工具结果和推理预留也会占用预算。
 3. 能上传媒体不等于媒体被完整处理。processor 可能 resize、crop、抽帧或降采样。
 4. token 预算不是质量预算。减少 token 可能只损害小字，也可能直接丢掉关键事件。
 
@@ -44,7 +46,7 @@
 
 ## 14.1 总预算的组成
 
-设一条多模态请求包含文本、图像、音频、视频、协议字段、工具历史和输出预留，总预算可以写成：
+先把同一计数口径下、互不重叠的请求项放入账本。若媒体和工具结果已经计入服务返回的输入 token，就不能再把它们重复相加：
 
 ~~~math
 B_{\mathrm{total}}
@@ -53,9 +55,9 @@ B_{\mathrm{total}}
 +B_{\mathrm{output}}+B_{\mathrm{reason}}
 ~~~
 
-不同服务对 `B_reason` 的定义可能不同，有的把隐藏推理、草稿或内部计算放在上下文中，有的只在系统层面管理。教材中的公式是资源账本，不代表某个 API 的计费口径。
+不同服务对隐藏推理、草稿或内部计算的计数方式不同。只有当它是独立且不会与输出预留重叠的一项时，才额外记入 `B_{\mathrm{reason}}`；服务没有公开该值时标为未知，不要猜成零。教材公式是同一口径下的请求资源账本，不代表某个 API 的计费规则。
 
-这条等式要求各项预算使用同一计数单位，并且都是有限的非负数；如果某一项没有被服务公开，就应记录为“未知”，不能默认为零。`B_{\mathrm{total}}` 只是一次请求的资源估计，仍要区分硬性的上下文上限、计费 token、显存占用和实际延迟。若预算中包含输出预留，就不能在输入已经装满后再把输出当成额外空间。
+这条等式要求各项预算使用同一计数单位、互不重叠，且都是有限的非负数；如果某一项没有被服务公开，就应记录为“未知”，不能默认为零。若接口只给出一个包含媒体展开结果的输入 token 总数，应采用这个总数并避免再次加上估算的媒体子项。`B_{\mathrm{total}}` 只是一次请求的 token 账本，仍要区分服务上下文合同、计费 token、显存占用和实际延迟。若预算中包含输出预留，就不能在输入已经装满后再把输出当成额外空间；若 provider 将隐藏推理计入输出，也不能重复加一遍 `B_{\mathrm{reason}}`。
 
 ### 14.1.1 文本预算
 
@@ -160,9 +162,9 @@ B_{\mathrm{total}}
 =40664
 ~~~
 
-如果有效上下文为 32768，这份请求不能完整保留。系统必须在输入前做预算路由，而不是等服务端静默截断。
+如果教学配置的上下文上限为 32768，这份请求不能完整保留。示例把 2048 token 作为生成阶段的总预留，没有另行猜测隐藏推理 token；若目标服务将该预留拆成多个计数项，应按其合同改写账本。系统必须在输入前做预算路由，而不是等服务端静默截断。
 
-这里的算术假设图片、音频和视频都按本节的理想化规则计数，尚未加入图片边界、音频边界、视频时间边界和真实模板的额外 token。因此 `40664` 是教学配置下的下界式估算；调用真实 processor 后若数量更大，路由器必须以实测值为准。
+这里的算术假设图片、音频和视频都按本节的理想化规则计数，尚未加入图片边界、音频边界、视频时间边界和真实模板的额外 token。因此 40664 是教学配置下的理想化估算，不是目标 processor 的实测下界或 provider 计费数；调用真实 processor 后应以实际输入结构和服务返回的用量为准。
 
 ## 14.3 上下文上限和有效能力不是一回事
 
@@ -173,7 +175,7 @@ B_{\mathrm{total}}
 3. processor 产生的媒体和文本序列能否放入运行时。
 4. 在给定成本、延迟和任务质量下实际可用的长度。
 
-它们不能互相替代。一个服务可以接受 1M token，却在长视频时间定位、跨段比较或多轮证据引用上表现不稳定；一个模型可能限制 API 长度，却对 32K 内的关键字段表现可靠。
+它们不能互相替代。即使服务接受 1M token，这一字段本身也不能证明长视频时间定位、跨段比较或多轮证据引用稳定；一个模型也可能限制 API 长度，却对 32K 内的关键字段表现可靠。
 
 ### 14.3.1 接收、保留和使用
 
@@ -192,11 +194,11 @@ E_{\mathrm{usable}}
 
 ### 14.3.2 长度声明的资料边界
 
-模型卡或 API 文档通常能支持上限和输入格式；论文能支持训练上下文或实验设置；目标系统的有效检索、跨段推理和单位成功成本需要独立复测。教材不能把一项产品数字写成所有任务都拥有同样有效能力。
+模型卡或 API 文档通常能支持特定版本、区域和模式的输入格式及上限；论文能支持作者报告的训练上下文或实验设置。长上下文实验也表明，输入长度本身不能代替按位置、任务和证据类型测量检索质量；例如 LVOmniBench 将长音视频记忆、时间定位和细粒度理解分开评估，而不是仅以文件能否送入模型作为成功标准（[论文 v1](https://arxiv.org/abs/2603.19217v1)）。目标系统的有效检索、跨段推理和单位成功成本仍需在固定模型、processor、采样协议和任务集上复测。教材不能把一项产品数字写成所有任务都拥有同样有效能力。
 
 ## 14.4 Processor 是输入协议的一部分
 
-同一张图片在不同 processor revision、resize、颜色空间、裁剪、patchifier 和多尺度策略下，可能产生不同 token 数和不同视觉证据。多模态系统不能只把 processor 当作前端工具，它是模型输入协议的一部分。
+同一张图片在不同 processor revision、resize、颜色空间、裁剪、patchifier 和多尺度策略下，可能产生不同 token 数和不同视觉证据。多模态系统不能只把 processor 当作前端工具，它是模型输入协议的一部分。Transformers 的多模态模板文档也把对话模板与 processor 组合在一起处理文本、图像、音频和视频输入；这些接口示例说明怎样构造输入，不自动保证模型使用了全部媒体证据（[Transformers v5.21.0 文档](https://huggingface.co/docs/transformers/v5.21.0/chat_templating_multimodal)）。
 
 ### 14.4.1 可回放 manifest
 
@@ -248,6 +250,20 @@ N'_{\mathrm{patch}}
 
 这个近似要求原始网格足够大，且两次请求采用相同的取整、边界 token 和连接模式。若 `H` 或 `W` 不能被 `p` 整除，精确比值应使用两个 ceiling 后的网格计算；若 processor 先 resize 到固定画布，原始分辨率翻倍甚至可能不改变模型 token 数。
 
+例如 patch 为 14 时：
+
+~~~math
+N_{\mathrm{image}}=4\times(672/28)^2=4\times24^2=2304
+~~~
+
+两条边都翻倍为 1344×1344 后：
+
+~~~math
+N_{1344}=\frac{1344}{14}\times\frac{1344}{14}=96\times96=9216=4N_{672}
+~~~
+
+这里计算的是几何 patch 数，不含多尺度分支、边界 token 或模型内部合并。
+
 ### 14.5.2 帧率和时间覆盖
 
 长视频减少帧数可以节省 token，却可能漏掉短暂事件。若视频长度为 `D` 秒、抽样率为 `r` 帧/秒：
@@ -266,7 +282,7 @@ F=\lceil Dr\rceil
 
 ## 14.6 动态预算分配
 
-静态把预算平均分给文本、图像、音频和视频通常不合理。设总预算为 `B_total`，模态 `m` 的任务重要度为 `I_m`，成本权重为 `w_m`，一个教学上的分配形式为：
+静态把预算平均分给文本、图像、音频和视频通常不合理。设总预算为 `B_total`，模态 `m` 的任务重要度为 `I_m`，成本权重为 `w_m`，则从文本、协议、工具和生成预留中扣除后，可供媒体使用的剩余额度记为 `B_{\mathrm{media}}`。一个教学上的分配形式为：
 
 ~~~math
 B_m
@@ -284,6 +300,8 @@ B_m
 3. 输出前检查：确认关键证据覆盖、输出预算和安全条件。
 
 预算路由必须对用户可见或在内部记录降级范围。只看了视频的 10% 帧，不能把答案写成“完整视频中没有该事件”。
+
+把分配式代入一组明确的教学权重。假设可分配媒体预算为 12,000 token，发票图片、短视频事件和音频转写的任务权重分别为 3、2、1，示例中成本权重都取 1，则三类媒体分别获得 6,000、4,000、2,000 token。这个比例只展示如何把任务优先级变成账本初值；实际配置还要用覆盖率和质量曲线校准，不能把权重当成模型质量保证。
 
 ## 14.7 长文档和长视频的两阶段处理
 
@@ -344,6 +362,16 @@ M_{\mathrm{KV}}
 
 上述 KV 近似要求 `L,N,H_{kv},d_h,b` 为有限的非负或正参数，并且明确 `b` 是每个元素的字节数。`N=0` 时没有历史 cache，但一个可执行请求通常仍需要协议或输入 token；batch 维度、beam 数、跨请求共享和多层不同 KV 结构应单独计入，不能把该式当作完整显存账单。
 
+取一个教学配置：`L=32`、`N=4096`、`H_{kv}=8`、`d_h=128`、`b=2` 字节，则
+
+~~~math
+M_{\mathrm{KV}}
+=2\times32\times4096\times8\times128\times2
+=536{,}870{,}912\ \mathrm{bytes}
+~~~
+
+即约 512 MiB（按 1 MiB=1,048,576 字节）。上下文长度从 4096 增至 8192 时，这个未量化单请求近似值翻倍到约 1 GiB；attention score 的稠密二次代理则变为原来的 4 倍。该账本不含运行时分配器、临时激活、模型权重和其他请求。
+
 ### 14.8.1 Prefill 和 decode
 
 媒体 token 往往集中在 prefill 阶段，影响首 token 延迟和显存峰值；输出 token 影响 decode 时间和持续带宽。一个请求可以出现“输入很长、输出很短”或“输入不长、音频输出很长”两种完全不同的瓶颈。
@@ -361,14 +389,16 @@ M_{\mathrm{KV}}
 - model revision。
 - tenant 和权限边界。
 
-一个可审计的 key 可以写成：
+对于自建的媒体表示缓存，一个可审计的 key 可以写成：
 
 ~~~math
 K=H(\mathrm{digest},\mathrm{processor},\mathrm{resize},
 \mathrm{sampling},\mathrm{model},\mathrm{position},\mathrm{tenant})
 ~~~
 
-公共图片的视觉 embedding 可以共享，不代表包含私有问题、工具结果和用户上下文的 KV 可以跨租户共享。缓存命中率高但答案变旧，通常是失效字段缺失；命中率低但每次重新编码，通常是 key 过度包含请求级字段。
+例如，相同原始图片 digest 在 processor 从 r7 升到 r8、或者 resize 从 672 改成 448 后，处理结果 key 必须变化；否则缓存可能返回旧网格的媒体表示。完整 KV 还依赖文本前缀、工具结果、权限和模型状态，不能只用图片 digest 作 key。实际缓存键还应按共享范围区分用户/租户，避免把一个请求的私有上下文复用给另一个请求。
+
+公共图片的视觉 embedding 可以共享，不代表包含私有问题、工具结果和用户上下文的 KV 可以跨租户共享。provider-managed prefix cache 命中可能复用重复前缀的计算或计费，但不会缩短逻辑请求本身的上下文占用；命中也不保证发生。缓存命中率高但答案变旧，通常是失效字段缺失；命中率低但每次重新编码，通常是 key 过度包含请求级字段。
 
 ## 14.10 超预算时的回退语义
 
@@ -398,6 +428,21 @@ R(b)\ge R_{\min}
 `Q` 应拆为关键字段准确率、OCR、grounding、时间定位、引用支持和安全处置。主题回答保持不变，不代表数字、坐标和事件证据保持不变。
 
 这个优化问题还要求候选预算集合非空，且 `Q(b)`、`L(b)`、`C(b)`、`R(b)` 在候选配置上可比较并且有限。若没有任何配置同时满足延迟、成本和证据约束，`\arg\max` 没有可接受解，系统应回退、转人工或返回无法完成，而不能从不可行集合中挑一个“最优”配置。
+
+表中是一组用于说明约束筛选的合成实验值，不是模型测量。若要求延迟不超过 2.5 秒、单次成本不超过 0.02 美元、证据支持率至少 0.90，A 因证据门槛不合格，B 才是可行选择；若延迟上限降至 2 秒，两者都不合格，系统应拒绝自动完成。
+
+| 合成候选 | 任务质量 Q | 延迟 L | 单次成本 C | 证据支持率 R | 约束结果 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| A | 0.91 | 1.2 秒 | 0.012 美元 | 0.86 | R 未达 0.90，不可选 |
+| B | 0.96 | 2.1 秒 | 0.018 美元 | 0.94 | 满足 2.5 秒/0.02 美元/0.90 门槛 |
+
+单位成功成本可按任务门槛定义为：
+
+~~~math
+C_{\mathrm{success}}=\frac{C_{\mathrm{total}}}{N_{\mathrm{success}}}
+~~~
+
+其中 `C_{\mathrm{total}}` 包含成功与失败请求的总成本。假设 100 个请求共花费 2 美元，其中 80 个同时通过正确性、证据和安全门槛，则单位成功成本为 2/80=0.025 美元。分母不应只算有答案的请求；失败、重试和人工复核成本也应纳入相应系统口径。
 
 ### 14.11.1 实验矩阵
 
@@ -451,13 +496,31 @@ N=\left\lceil\frac{2048}{32}\right\rceil
 =64\times48=3072
 ~~~
 
-如果整张图片高分辨率输入超过预算，系统可以先用缩略图定位“总额”“日期”“币种”等字段，再对这些区域做局部 crop。局部高分辨率路径的输出必须保留原页面坐标，方便引用和人工复核。
+如果整张图片高分辨率输入超过预算，系统可以先用 512×384 缩略图定位“总额”“日期”“币种”，再对三个 512×512 局部区域做高分辨率回读。按同一 patch=32 的理想网格：
+
+~~~math
+N_{\mathrm{thumb}}=\frac{512}{32}\times\frac{384}{32}=16\times12=192
+~~~
+
+~~~math
+N_{\mathrm{crops}}=3\times\frac{512}{32}\times\frac{512}{32}
+=3\times16\times16=768
+~~~
+
+两部分合计 960；与整页 3072 相比，预算减少 `1-960/3072=68.75\%`。这不是质量改善保证：若缩略图没定位到字段，预算器必须扩大区域或转人工，且局部输出要映射回原页面坐标以供引用和复核。
 
 如果局部检索没有找到金额，系统不能把低分辨率结果当成“发票没有金额”。正确处理是扩大区域、请求更清晰图片或转人工。
 
 ## 14.14 案例：长视频的时间覆盖
 
-如果 20 分钟视频粗采样每秒 2 帧，采样间隔为 0.5 秒。持续 0.2 秒的事件可能完全落在两个采样点之间。模型回答“没有发生”之前，需要估计采样策略对该事件的召回能力。
+如果 20 分钟视频粗采样每秒 2 帧，采样间隔为 0.5 秒。持续 0.2 秒的事件可能完全落在两个采样点之间。再作一个理想化假设：事件开始相位在采样周期内均匀分布，采样点是瞬时且每个采样点都能正确识别事件，则：
+
+~~~math
+P(\mathrm{sampled})=\frac{0.2}{0.5}=0.4,\qquad
+P(\mathrm{missed})=1-0.4=0.6
+~~~
+
+真实帧有曝光时长、识别错误和事件边界，不能把这个玩具概率当成系统召回率；它只说明采样间隔本身会形成覆盖盲区。模型回答“没有发生”之前，需要在目标事件分布上估计采样策略的召回能力。
 
 可以引入短事件测试集，改变事件持续时间、发生位置、运动速度和背景相似度，记录：
 
@@ -483,11 +546,41 @@ N=\left\lceil\frac{2048}{32}\right\rceil
 
 ## 14.16 最小可运行的多模态预算审计
 
-下面的 Python 示例模拟一个超预算请求和一个预算回退路径。它不会调用真实模型，只计算不同媒体配置的 token，并把降级造成的覆盖风险显式记录出来。
+下面的 Python 示例模拟一个超预算请求和一个预算回退路径。它不会调用真实模型，只用 patch 网格、音频率和视频帧数做代理估算；协议字段是一个合成总数，没有逐一展开各类媒体边界 token。正式请求必须用目标 processor 的实际输出替换这些假设。
+
+程序先检查样本和配置的字段、类型及取值范围，再分别计算图像、音频和视频代理 token，将文本、工具历史、协议及输出预留相加。它先测试完整方案；若超过 context limit，则构造一个带降级警告的候选方案。改变 patch、音频时间率、codebook、帧数或工具历史字段，可以观察各项账本如何变化。任何候选方案都还要对照覆盖报告和质量评估，不能仅凭总数通过就直接回答。
+
+输入中的 `text_tokens` 和 `tool_history` 是已经计数的 token 长度；`images` 逐张给出高度、宽度，`audios` 给出秒数，`videos` 给出帧数和每帧的空间尺寸。配置给出空间 patch、时间 patch、音频时间率、codebook 数、协议和输出预留、context limit 以及回退值。输出的 `counts` 按模态列账，`total` 用于 preflight 检查，`warnings` 标出降级后必须重新核验的证据风险。
+
+本例完整方案中图像为 9,216、音频为 2,000、视频为 3,136，再加 4,200 文本、20,000 工具历史、64 协议和 2,048 输出预留，合计 40,664，超过 32,768。回退候选把图像降到 4,096、音频降到 1,000、视频降到 1,568、工具历史字段降到 8,000，合计 20,976；相对完整账本少 19,688 token，留出 11,792 token 账面空间。减少的不是抽象长度：图像缩小可能抹掉小字，降低视频帧数会漏掉短事件，缩短音频窗口会丢失较早语句，压缩工具历史也可能损坏计划或权限状态。
+
+这里工具历史只是把计数字段改为 8,000，没有真的摘要历史，也没有证明关键信息被保留；因此 warning 特意包含 `tool_history_summary_unverified`，整个方案仍标成 `candidate_only`。实际系统应在 token 预检后生成记录原始范围、保留范围、丢弃范围和质量门槛的 coverage report，再决定能否答复。输入足够放入 context，只证明账本没有超限。
+
+即使完整方案没有触发回退，`routing_consistent` 也只核对预算算术与所选分支；它不检查权限、媒体是否正确解码、摘要是否保真或答案是否正确。因此这个例子不会输出“可自动答复”的结论；生产门禁还要串接媒体覆盖、任务质量和安全校验，并保留失败时的转人工或补采样路径。
+
+可以再改一个配置，观察总量是否真的跨过准入线。把 image patch 从 14 改到 28，四张 672×672 图片的代理 token 变为：
+
+~~~math
+N_{\mathrm{image}}=4\times(672/28)^2=4\times24^2=2304
+~~~
+
+总账本随之变为：
+
+~~~math
+B_{\mathrm{total}}=40{,}664-9{,}216+2{,}304=33{,}752
+~~~
+
+它仍比 32,768 上限多 984。单独提高 patch 尺寸虽减少了视觉预算，却没有解决超限；还要重新分配其他项，或按任务要求拒绝/拆分请求。真实 processor 可能不会按这个理想网格计数，所以任何通过都要以目标 processor 输出复核。
+
+音频时长由十进制输入转换为分数后再乘以 rate 并向上取整，避免直接用浮点乘法时把 0.1 秒乘 50 得到略大于 5、错误进位到 6；整数时长也不会先转换成浮点数，因此超大整数仍可被安全计为超预算。布尔值、负数、NaN 和无穷值被拒绝。复制整段代码围栏可在 Python 3.12.9 运行，不需要第三方包；它只验证账本结构，不访问真实媒体，不运行 processor、模型、缓存或 GUI executor。
+
+接入目标模型时，应把代理数与 processor 实际输出按模态对照，记录绝对误差和相对误差；若误差会改变准入结论，就改用实际展开数量重新路由，而不要用一个未经校准的统一安全系数掩盖偏差。输出预留也要按目标 API 的输入/输出合同复核，避免把已包含的隐藏推理预算再加一次。
+
+代码状态：已验证（2026-11-12；Python 3.12.9；仅标准库）。
 
 ```python
 import math
-from math import ceil
+from fractions import Fraction
 
 
 def ceil_div(a, b):
@@ -512,11 +605,18 @@ def require_positive_int(value, name):
 
 
 def require_finite_nonnegative(value, name):
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be finite")
+    if isinstance(value, float) and not math.isfinite(value):
         raise ValueError(f"{name} must be finite")
     if value < 0:
         raise ValueError(f"{name} must be non-negative")
     return value
+
+
+def ceil_scaled_nonnegative(value, rate):
+    scaled = Fraction(str(value)) * rate
+    return (scaled.numerator + scaled.denominator - 1) // scaled.denominator
 
 
 def validate_sample_config(sample, config):
@@ -584,16 +684,18 @@ def video_tokens(videos, patch, temporal_patch):
 def audio_tokens(audios, rate, codebooks):
     require_positive_int(rate, "rate")
     require_positive_int(codebooks, "codebooks")
+    total = 0
     for index, audio in enumerate(audios):
-        require_finite_nonnegative(audio["seconds"], f"audios[{index}].seconds")
-    return sum(ceil(audio["seconds"] * rate) * codebooks for audio in audios)
+        seconds = require_finite_nonnegative(audio["seconds"], f"audios[{index}].seconds")
+        total += ceil_scaled_nonnegative(seconds, rate) * codebooks
+    return total
 
 
 def budget_plan(sample, config, detail):
     if not isinstance(sample, dict) or not isinstance(config, dict):
         raise TypeError("sample and config must be mappings")
     validate_sample_config(sample, config)
-    if detail not in {"full", "fallback"}:
+    if not isinstance(detail, str) or detail not in {"full", "fallback"}:
         raise ValueError("detail must be 'full' or 'fallback'")
     if detail == "full":
         images = sample["images"]
@@ -633,6 +735,7 @@ def budget_plan(sample, config, detail):
             "local_small_text_needs_recheck",
             "short_video_event_may_be_missed",
             "audio_history_window_reduced",
+            "tool_history_summary_unverified",
         ])
     return {"detail": detail, "counts": counts, "total": total, "warnings": warnings}
 
@@ -668,10 +771,10 @@ report = {
     "selected_plan": selected,
     "context_limit": config["context_limit"],
     "coverage_report_required": bool(selected["warnings"]),
-    "audit_consistent": (
-        full["total"] > config["context_limit"]
-        and fallback["total"] <= config["context_limit"]
-        and selected["detail"] == "fallback"
+    "plan_status": "candidate_only",
+    "routing_consistent": (
+        selected["detail"] == ("fallback" if full["total"] > config["context_limit"] else "full")
+        and selected["total"] <= config["context_limit"]
     ),
 }
 for key, value in report.items():
@@ -683,13 +786,14 @@ for key, value in report.items():
 ```text
 full_total=40664
 fallback_total=20976
-selected_plan={'detail': 'fallback', 'counts': {'text': 4200, 'image': 4096, 'audio': 1000, 'video': 1568, 'tool': 8000, 'protocol': 64, 'output': 2048}, 'total': 20976, 'warnings': ['local_small_text_needs_recheck', 'short_video_event_may_be_missed', 'audio_history_window_reduced']}
+selected_plan={'detail': 'fallback', 'counts': {'text': 4200, 'image': 4096, 'audio': 1000, 'video': 1568, 'tool': 8000, 'protocol': 64, 'output': 2048}, 'total': 20976, 'warnings': ['local_small_text_needs_recheck', 'short_video_event_may_be_missed', 'audio_history_window_reduced', 'tool_history_summary_unverified']}
 context_limit=32768
 coverage_report_required=True
-audit_consistent=True
+plan_status=candidate_only
+routing_consistent=True
 ```
 
-这个结果表达了三个事实：完整方案超预算，回退方案可以放入预算，回退方案伴随明确的证据风险。`audit_consistent=True` 只说明账本和路由规则符合示例设定，不代表回退后的发票 OCR 或视频问答一定正确。
+这个结果表达了三个事实：完整方案超预算，回退方案在合成账本中可以放入预算，回退方案伴随明确的证据风险。`plan_status=candidate_only` 表示它只是预检候选；`coverage_report_required=True` 只是要求后续生成覆盖报告，代码本身并未验证裁剪区域、摘要保真度、短事件召回或最终答案质量。`routing_consistent=True` 只说明示例按配置选中了可放入账本的候选，不代表可以直接回答。
 
 ## 14.17 练习：把长度数字变成任务判断
 
@@ -725,36 +829,41 @@ audit_consistent=True
 
 设计一个包含恶意图片文字的超预算请求。说明回退策略如何保证媒体来源、未覆盖范围和工具权限不会被混淆。
 
-## 14.18 资料与证据边界
+## 14.18 模型文档与预算证据边界
 
-本章主要依据前面章节已经核验的论文和公开资料：
+本章的几何、音频率和账本算例是明确标注的教学假设，不是论文或产品的 token 实测。外部资料用于核对 processor 接口、具体版本能力和作者报告的测量口径：
 
-1. Gemini: A Family of Highly Capable Multimodal Models，https://arxiv.org/abs/2312.11805
-2. Chameleon: Mixed-Modal Early-Fusion Foundation Models，https://arxiv.org/abs/2405.09818
-3. Unified-IO 2: Scaling Autoregressive Multimodal Models with Vision, Language, Audio, and Action，https://arxiv.org/abs/2312.17172
-4. Emu3: Next-Token Prediction is All You Need，https://arxiv.org/abs/2409.18869
-5. Show-o: One Single Transformer to Unify Multimodal Understanding and Generation，https://arxiv.org/abs/2408.12528
-6. Transfusion: Predict the Next Token and Diffuse Images with One Multi-Modal Model，https://arxiv.org/abs/2408.11039
-7. ViT: An Image is Worth 16x16 Words，https://arxiv.org/abs/2010.11929
-8. Hugging Face Transformers multimodal chat templates，https://huggingface.co/docs/transformers/main/en/chat_templating_multimodal
+1. [Transformers v5.21.0 多模态 chat template 文档](https://huggingface.co/docs/transformers/v5.21.0/chat_templating_multimodal)：消息结构与 processor 输入示例。
+2. [Qwen3-VL Technical Report v2](https://arxiv.org/abs/2511.21631v2)：作者报告中的 interleaved multimodal context、时空位置、DeepStack 和视频时间戳。
+3. [Qwen3-Omni Technical Report v1](https://arxiv.org/abs/2509.17765v1)：音频表示率、时间位置与特定 serving 配置下的理论首包延迟。
+4. [Qwen3.5-Omni Technical Report v2](https://arxiv.org/abs/2604.15804v2)：另一模型版本的上下文、视频长度与流式延迟设置。
+5. [Alibaba Cloud Qwen3.7 Plus 托管文档](https://www.alibabacloud.com/help/en/model-studio/qwen3-7-plus)，访问日期 2026-11-12：动态的 region/scope capability 和 context limit 表。
+6. [Alibaba Cloud Context Cache 文档](https://www.alibabacloud.com/help/en/model-studio/context-cache)，访问日期 2026-11-12：provider-managed prefix cache 的公开行为和命中边界。
+7. [LVOmniBench v1](https://arxiv.org/abs/2603.19217v1)：长音视频记忆、时间定位和细粒度理解的任务化评估。
 
-论文和模型卡可以支持公开的 token 化、上下文设置和实验条件；processor/API 文档可以支持某个版本的输入协议；目标系统的有效上下文、质量曲线、缓存行为和单位成功成本必须在目标版本和硬件上独立测量。Native multimodal 是能力或产品标签，不应被写成未公开的内部架构事实。
+论文、模型卡和 API 文档分别支持特定版本公开的机制、配置或服务字段，不互相替代。动态文档要按使用时的 region、scope、endpoint 和 mode 复核；目标系统的有效上下文、质量曲线、缓存行为和单位成功成本必须在固定版本与硬件上独立测量。Native multimodal 是能力或产品标签，不应被写成未公开的内部架构事实。
 
-## Qwen3-VL：视频时间戳也是预算字段
+以下三例按同一顺序阅读：先确认字段来自技术报告、模型配置还是托管 API，再判定它描述的是媒体 token、位置元数据、服务上限还是实测延迟，最后才决定能否放进请求预算。Qwen3-VL 展示位置与视觉 token 需要分账；Qwen3-Omni 展示 codec 时间率与首包关键路径不能互换；Qwen3.7 Plus 展示 API 的最大长度和 GUI 产品能力仍须经过目标 workload 验证。它们合起来是一套预算证据审计，不是三个模型的能力排名。
 
-Qwen3-VL 的视频预算不只有视觉 token 数。processor 还要为 temporal/height/width position、Video Timestamp、DeepStack residual、文本推理、工具 schema、工具结果和输出预留状态空间。`262,144` context 是接口/config/训练阶段字段，不保证任意长视频中的关键帧都被有效使用。
+### 14.18.1 Qwen3-VL：视频时间戳与媒体 token 分账
 
-设计长视频实验时，应同时记录媒体 revision、采样率、frame index、真实 timestamp、视觉 grid、token 数、chunk offset、未覆盖区间和回放结果；用 Interleaved-MRoPE 处理三轴位置，用显式 timestamp 提供可读时间证据。完整模型证据见 [`qwen3-vl-source-notes.md`](../../research/model-update-2026-09/qwen3-vl-source-notes.md)，不要把 Qwen3-Omni 的音频 token rate 或其他 Qwen 的 context 字段迁移到 Qwen3-VL。
+Qwen3-VL Technical Report v2 声称该模型系列支持 256K token 的文本和交错多模态上下文，并描述 Interleaved-MRoPE、DeepStack 和显式文本时间戳。[技术报告](https://arxiv.org/abs/2511.21631v2)中的模型设计信息不能当成所有部署接口的长度合同，也不保证关键视频事件已被覆盖或正确使用。
 
-## 14.19 Qwen3-Omni：音频 token rate、真实时间与输出码本
+为该类视频请求记账时，实际视觉 token 和显式时间戳文本应按 processor 输出计数；temporal/height/width position 是位置元数据，DeepStack 是多层视觉特征注入，两者不能未经实现证据就另算成文本 token。DeepStack 即使不增加序列长度，也可能改变层间计算和激活流量，需从目标实现单独 profile。回放记录应保存媒体 revision、帧采样率、frame index、真实 timestamp、视觉 grid、实际 token 数、chunk offset 和未覆盖区间。不要把 Qwen3-Omni 的音频 token rate 或另一模型的 context 字段迁移到 Qwen3-VL。
 
-Qwen3-Omni 提供一个适合面试的多模态预算案例。AuT 的公开音频 token rate 约为 12.5 Hz，即约 80 ms 一个音频时间步；TM-RoPE 又把视频真实 timestamp 对齐到相同时间尺度。但这两个数字只描述输入/位置粒度，不描述最终音频首包或播放体验。
+### 14.18.2 Qwen3-Omni：token rate 与流式延迟分账
 
-输出侧还要单独计算首码本 AR、residual-codebook MTP、Code2Wav、packet 和播放器缓冲。于是媒体预算至少包含：输入媒体 token、Thinker reasoning/tool token、Talker codebook steps、waveform chunk、网络和 verifier。把“66K context”“80 ms token”或报告 `234 ms` 首包数字相加，不能得到可用 SLO；必须绑定 variant、媒体采样、后端、硬件、并发和缓存命中实测。
+Qwen3-Omni Technical Report v1 报告输入和输出音频 code rate 为 12.5 Hz；按该报告的表示约定，一个时间步约对应 80 ms 音频。报告还把视频 timestamp 映射到相同的时间尺度。这些数值描述特定模型的位置/codec 粒度，不能推导成通用音频 token 预算或客户端可播放延迟。[原始报告](https://arxiv.org/abs/2509.17765v1)的单并发配置报告理论首包延迟为音频 234 ms、视频 547 ms；并发升至 4 时报告为 728/1,517 ms，升至 6 时为 1,172/2,284 ms，且测试使用报告指定的 vLLM、torch.compile 与 CUDA Graph 设置。
 
-## 14.20 Qwen3.7 Plus：GUI 交互也是多模态预算
+输出路径还要分别测量 Talker codec steps、MTP 补码、Code2Wav 解码、packet 和播放器缓冲。首包延迟是串行关键路径的测量值，不是 token 数；它必须绑定 variant、输入采样、并发、运行时和硬件，不能与 80 ms 时间步相加或互换。另一个版本 Qwen3.5-Omni 报告最高 256K context，并报告 720P 视频 1 FPS、超过 400 秒的处理设置；该版本和测试协议的字段不能覆盖 Qwen3-Omni 的配置。[Qwen3.5-Omni 报告 v2](https://arxiv.org/abs/2604.15804v2)
 
-Qwen3.7 Plus 的官方托管文档把图像和视频输入连接到读屏、GUI 交互、视觉参考生成代码和移动端导航。这个定位带来一个容易漏记的预算项：截图不是普通的一张图片，它还携带窗口尺寸、设备像素比、页面 revision、坐标系和动作后的观察证据。
+### 14.18.3 Qwen3.7 Plus：托管 API 合同不等于有效容量
+
+Qwen3.7 Plus 官方托管文档把输入模态列为文本、图像和视频，并将读屏、GUI 交互、视觉参考生成代码和移动端导航列为产品能力；该页面将当前 alias 对应到 `qwen3.7-plus-2026-05-26` snapshot。[官方文档](https://www.alibabacloud.com/help/en/model-studio/qwen3-7-plus)的 Context Limits 分别列出 1,000,000 context window、991,808 max input、131,072 max output；thinking mode 另列 983,616 max input、131,072 max output 和 262,144 max chain-of-thought length。这些是不同的托管合同字段，不应机械相加，也不说明任意长度下关键截图都被保留。
+
+同一文档按 region/scope 列出 capability；页面中的服务范围行对 Structured Outputs、Web Search 和 Batch 等字段给出不同支持状态。复现实验至少要固定 snapshot、region、scope、endpoint 和请求 mode，不能只记录模型 alias。
+
+GUI 截图还携带窗口尺寸、设备像素比、页面 revision、坐标系和动作后的观察证据。以下字段是本书建议的回放清单，不是厂商公开的内部输入 schema：
 
 一次可回放的 GUI 请求至少应有：
 
@@ -768,6 +877,8 @@ action proposal/permission/executor receipt/observation/verifier
 
 1M context 只能说明服务合同的窗口上限，不能说明所有截图细节都会被保留，更不能说明坐标动作一定成功。预算器应先把媒体处理结果和工具历史放进账本，再为 action schema、权限回执、观察和 verifier 预留空间。若预算不足，回退策略必须明确丢弃了哪些帧、分辨率或历史，并生成 coverage report；不能静默截掉包含按钮状态或错误提示的关键截图。
 
-还要把媒体预算和执行预算分开。`Structured Outputs` 可以保证 action JSON 形状，`Function Calling` 可以承载工具调用协议，但真实点击、输入和导航仍由宿主 executor 完成。页面 revision 变化后，旧坐标应失效并触发重新观测。于是有效能力应按四层验收：媒体被接受、关键证据被保留、模型提出了合法动作、宿主执行并验证了副作用。
+还要把媒体预算和执行预算分开。Structured Outputs 可约束返回格式满足 schema，Function Calling 可承载工具调用协议；它们不能证明 action 语义正确、坐标仍有效或操作已经获准。在自建系统中，真实点击、输入和导航应由有权限边界的宿主 executor 执行。页面 revision 变化后，旧坐标应失效并触发重新观测。于是有效能力应按四层验收：媒体被接受、关键证据被保留、模型提出了合法动作、宿主执行并验证了副作用。
 
-Qwen3.7 Plus 官方文档还把 Context Caching、Prefix Completion、Function Calling 和 Web Search 按 region/scope 列出。它们都可能改变输入预算或状态回放，但不能与 GPU KV cache 或应用 memory 混为一谈。缓存 key 至少应绑定模型 alias/snapshot、region/scope、媒体 revision 和 tool schema hash；价格则绑定输入长度档位、cache 状态和 provider，不用 Artificial Analysis 的一组价格替代实际合同。
+Qwen3.7 Plus 官方文档还把 Context Caching、Prefix Completion、Function Calling 和 Web Search 按 region/scope 列出。Alibaba 的 Context Cache 文档描述 provider-managed prefix matching，并说明满足最小前缀长度也不保证命中；这与 GPU KV cache 和应用 memory 属于不同层次。[Context Cache 文档](https://www.alibabacloud.com/help/en/model-studio/context-cache)
+
+对于自己维护的回放或应用缓存，key 应包含所需的模型 alias/snapshot、region/scope、媒体 revision 和 tool schema hash；provider 托管缓存的内部 key 未公开，不能把这份应用设计写成服务端实现。输入长度分段、cache 状态和价格应以实际 provider 合同为准。

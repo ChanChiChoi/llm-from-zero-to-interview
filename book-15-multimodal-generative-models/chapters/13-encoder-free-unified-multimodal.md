@@ -4,6 +4,8 @@
 
 因此本章先解决词义，再讨论结构。我们会把“前端编码器”“模态 tokenizer”“统一主干”“输出 decoder”拆开，说明它们各自承担什么责任；随后讨论统一 token 流的序列化、位置和 mask、训练目标、信息压缩、评估、部署协议和安全边界。最后用一个可运行的审计示例，检查不同模态 token、位置、预算和反事实实验是否自洽。
 
+第十章已经建立统一架构的总地图；本章只把镜头收窄到表示如何进入主干，以及 token、位置、可见性和处理器如何构成可审计的数据路径，不重复比较所有统一架构，也不替代第十四章的请求预算分析。阅读时可沿三段主线推进：§§13.1–13.6 拆解前端与序列表示；§§13.7–13.12 讨论压缩、训练和部署协议；§§13.13–13.15 用评估与故障定位检验前面的设计。§13.16 的代码是清单检查示例，不是模型实现或性能实验。
+
 ## 13.0 从一个表格截图开始
 
 用户上传一张财务表格，问：“第三行的数值比第二行高多少，并解释原因。”一个传统模块化系统可能这样处理：
@@ -78,15 +80,17 @@ Z_v=H_vW+b
 
 ### 13.2.2 表示统一
 
+公式中的 g_m 是中性的模态前端记号，可以代表 patchifier、离散 tokenizer、codec、专用 encoder 或它们的组合；它不预设前端是否属于独立的深层 encoder。
+
 不同模态被编码到可以互相访问的序列或 latent 空间：
 
 ~~~math
-z_m=E_m(x_m)\in\mathbb{R}^{N_m\times d}
+z_m=g_m(x_m)\in\mathbb{R}^{N_m\times d}
 ~~~
 
 这里的 `d` 统一了 hidden size，但不等于每种模态的信息语义已经完全对齐。图像 token 仍然需要二维位置，视频 token 仍然需要时间索引，音频 token 仍然有采样率和 codebook 层级。
 
-这个抽象至少要求 `N_m` 是非负整数、`d>0`，并且每种 `E_m` 的输出 dtype、设备和特殊 token 约定可以被主干接受。`N_m` 相同也不意味着 token 可以互换：一个图像 token 的坐标、一个音频 token 的时间和一个工具结果的权限来源，仍然需要元数据和 mask 共同解释。
+这个抽象至少要求 `N_m` 是非负整数、`d>0`，并且每种 g_m 前端的输出 dtype、设备和特殊 token 约定可以被主干接受。`N_m` 相同也不意味着 token 可以互换：一个图像 token 的坐标、一个音频 token 的时间和一个工具结果的权限来源，仍然需要元数据和 mask 共同解释。
 
 ### 13.2.3 目标统一
 
@@ -109,18 +113,33 @@ Z_v=(z_{v,1},\ldots,z_{v,N_v})
 通过 interleave、拼接或块状布局形成统一序列：
 
 ~~~math
-Z=\operatorname{Interleave}(Z_t,Z_i,Z_a,Z_v,Z_s)
+Z=\mathrm{Interleave}(Z_t,Z_i,Z_a,Z_v,Z_s)
 ~~~
 
 `Z_s` 是模态边界、角色、时间戳、坐标和版本等特殊或元数据元素。统一主干计算：
 
 ~~~math
-H=\operatorname{Transformer}(Z;M,\Pi)
+H=\mathrm{Transformer}(Z;M,\Pi)
 ~~~
 
 `M` 是 attention visibility 或 causal mask，`Pi` 是位置结构。这个抽象表达的是共享信息路由，不是所有模态都使用相同 tokenizer、相同位置编码或相同输出头。
 
 若统一序列为空，主干是否允许空上下文需要单独定义；若 `Z_s` 没有记录媒体边界、角色或版本，交错顺序本身不足以恢复来源。对同一个请求，序列化器还应保证 token、位置和 mask 使用同一索引，否则“看见了正确 token”仍可能等价于读取了错误区域。
+
+把数据路径画成图，可以看出“统一”并没有删除每个环节的责任：
+
+~~~mermaid
+flowchart LR
+  X["文本、图像、音频、视频"] --> F["模态前端：tokenizer、patchifier、codec"]
+  F --> Z["混合序列：token、边界、来源"]
+  Z --> P["位置结构：一维、二维、时间与空间"]
+  Z --> A["任务 mask：定义可见关系"]
+  P --> B["共享主干"]
+  A --> B
+  B --> D["任务输出头或 decoder"]
+~~~
+
+读图时，先从输入沿前端进入序列；位置字段说明 token 对应的时间、区域或顺序，mask 再规定当前任务允许哪些位置互相读取。它们作为不同信息共同进入主干，并不意味着位置编码就是 mask，也不意味着输出端共用一个 decoder。部署回放需要把这些字段和各自的 revision 一起保存。
 
 ### 13.3.1 序列布局的三种方式
 
@@ -197,24 +216,30 @@ M_{uv}=\begin{cases}
 
 mask 错误通常不会导致程序崩溃，却会让模型行为悄悄改变。因此 golden request 必须保存位置和 mask，而不仅仅保存原始媒体。
 
+在一个三位置的教学 attention 例子中，原始 logits 为 [0, ln 3, 2]，第三个 key 是未来视频帧。给第三项加上 mask 值负无穷后，softmax 变为 [exp(0), exp(ln 3), 0] 的归一化结果，即 [1/4, 3/4, 0]。模型仍能在前两个可见位置间分配注意力，但对未来帧的权重严格为零。这个小算例说明 mask 施加在 logits 后、softmax 前；生产实现可能用布尔、稀疏或 block mask 表示同一可见关系，具体约定应核对框架接口。
+
 ## 13.6 Token 化路线：连续、离散和混合
 
 ### 13.6.1 连续表示
 
-视觉或音频编码器输出浮点 hidden states：
+本节公式中的 H_m 是前端 g_m 对输入处理后的连续输出；g_m 可能是浅层投影或专用 encoder，本章不从表示形式单独推断它的层数。
+
+连续表示路径中的模态前端输出浮点 hidden states；此前端可以是浅层投影，也可以包含专用 encoder：
 
 ~~~math
 H_m\in\mathbb{R}^{N_m\times d_m}
 ~~~
 
-连续表示保留较丰富的几何信息，适合理解和 cross-attention，但生成端需要专用 decoder、扩散过程或声码器。
+连续表示保留可供后续网络处理的几何关系，常用于理解和 cross-attention；生成端则可能需要专用 decoder、扩散过程或声码器。
 
 ### 13.6.2 离散表示
+
+公式中的 g_m 先形成待量化的表示，Q 再把它映射到离散码本。g_m 可能只是局部投影，也可能是视觉或音频 encoder；只有资料明确说明取消了哪一个独立 encoder，encoder-free 才有可核查的含义。
 
 离散 tokenizer 把输入映射成有限词表中的整数：
 
 ~~~math
-z_m=Q(E_m(x_m)),
+z_m=Q(g_m(x_m)),
 \qquad
 z_m\in\{1,\ldots,V_m\}^{N_m}
 ~~~
@@ -246,6 +271,10 @@ D(R)=\mathbb{E}[d(x,\hat{x})]
 
 `D(R)` 只有在样本分布非空、`d(x,\hat{x})` 可计算且重建输出与输入处于同一比较空间时才有定义。像素均方误差、波形误差、感知距离和任务错误率不是同一个 `d`，不能在没有归一化和样本说明时直接比较。更重要的是，低媒体失真并不保证关键字段或权限信息没有丢失，因此应同时记录任务级失真。
 
+举一个明确标为教学假设的文档例子：同一组 10 个关键字段，保留 64 个视觉 token 时有 9 个字段读对，字段错误率是 (10-9)/10=0.10；压到 16 个 token 后只读对 7 个，错误率变成 (10-7)/10=0.30。token 数减少了 48/64=75%，任务错误率却从 10% 升到 30%。这不是某个模型的实测曲线，只说明压缩评价必须同时给出 rate 和任务失真，且比较时固定样本、字段分母和处理器。
+
+压缩曲线要按任务拆分，而不是只报一个平均相似度。合同字段、图表数值、说话人、事件先后和动作参数各自有不同的错误代价；同一份媒体在不同任务上也可能需要不同 token 数。做对照时固定模型 revision、processor、媒体集合、提示和评分规则，并同时报告每档 token 预算下的任务分母、错误类型与置信区间。这样才能判断省下的表示容量是否值得承担新增的任务错误，而不是用一个像素指标替所有下游目标做决定。
+
 ## 13.8 训练目标和共享主干
 
 统一模型的总损失可以抽象成：
@@ -261,6 +290,10 @@ D(R)=\mathbb{E}[d(x,\hat{x})]
 不同模态的有效 token 数、样本长度和 loss 尺度不同，`lambda` 不能脱离归一化口径解释。一个音频样本有上千 codec token，一条文本样本有几十 token；若直接累加逐 token loss，音频可能获得隐式更大权重。
 
 通常要求每个 `\lambda` 非负且有限，并至少有一个正权重；每个子损失也应在非空有效样本或 token 上定义。如果某个 batch 没有任何安全标签或没有 assistant token，不能把该项 loss 默认为零后悄悄改变训练比例。报告权重时还要写明是按样本、按有效 token，还是先按模态求均值再混合。
+
+考虑一个只用于演算的 batch：文本有 2 个有效 token，平均交叉熵为 (0.2+0.6)/2=0.4；音频有 6 个有效 token，平均交叉熵为 0.8。若将 8 个 token 的 loss 直接合并，结果是 (2×0.4+6×0.8)/8=5.6/8=0.7；若先分别求模态均值、再给两个模态相同权重，结果是 (0.4+0.8)/2=0.6。两种口径都可以定义，但第一种让 token 较多的音频占更大份额。报告总损失时必须同时说明分母和模态权重，才能解释训练信号。
+
+逐 token 平均可写成所有有效 token loss 的总和除以有效 token 数；按模态宏平均则先对每种模态分别归一，再求带权平均。上面的 0.7 与 0.6 来自分母不同，并非某一算术错误。真实训练还会受到样本采样比例、序列截断、loss mask 和缺失标注影响；调小音频 loss 权重无法补回被采样器少取的音频样本，增加音频样本也不一定改变逐 token 梯度的隐式权重。复现实验时需同时记每模态样本数、有效 token 数和参与 loss 的目标数，才能区分“数据没见到”和“见到了但梯度较弱”。
 
 ### 13.8.1 理解和生成的张力
 
@@ -297,7 +330,7 @@ high-resolution image
 
 1. 减少独立 encoder 与 connector 的桥接接口。
 2. 让图文交错和跨模态生成使用更直接的上下文。
-3. 共享部分主干、cache 和训练基础设施。
+3. 有机会复用部分主干、cache 和训练基础设施，但实际共享范围取决于架构和运行时实现。
 4. 统一任务 schema，便于组合输入输出。
 
 ### 13.10.2 可能代价
@@ -312,17 +345,19 @@ high-resolution image
 
 ## 13.11 公开研究路线如何提供证据
 
-本节只使用公开论文能够确认的机制，不把它们当作所有商业产品的内部架构：
+下表用公开论文和技术报告说明几种“统一”路线的差异，不把它们当作所有商业产品的内部架构：
 
 | 路线 | 公开资料能支持的结论 | 不能直接推出 |
 |---|---|---|
-| Chameleon | mixed-modal early-fusion、token-based 的图文混合建模 | 所有商业 omni 模型都采用相同实现 |
-| Unified-IO 2 | 将多类输入输出 token 化，用统一 encoder-decoder 处理 | 生产系统的实时延迟和安全行为 |
-| Emu3 | 图像、文本和视频离散化后使用 next-token 路线 | 所有媒体的细节和成本都与文本相同 |
-| Show-o | 共享 Transformer 中结合自回归和离散扩散 | 一个目标适用于所有模态 |
-| Transfusion | 文本 next-token 与图像 diffusion 在共享模型中结合 | 音频、视频和工具能力自动成立 |
+| [Chameleon（论文 v2）](https://arxiv.org/abs/2405.09818v2) | early-fusion、token-based 的混合模态模型可处理图文交错输入与输出 | 所有商业 omni 模型采用相同结构；token-based 就表示没有 tokenizer |
+| [Unified-IO 2（论文 v1）](https://arxiv.org/abs/2312.17172v1) | 图像、文本、音频、动作等被整理为统一任务表示，并由一个 encoder-decoder Transformer 处理 | 统一任务表示意味着取消各模态的 tokenizer；生产延迟和安全行为 |
+| [Emu3（论文 v1）](https://arxiv.org/abs/2409.18869v1) | 图像、文本和视频经离散化后，在单一 Transformer 中用 next-token 路线建模 | 离散表示无损，或所有媒体的 token 数与成本都和文本相同 |
+| [Show-o（论文 v7）](https://arxiv.org/abs/2408.12528v7) | 一个 Transformer 结合自回归建模与离散扩散以适配不同视觉任务 | 一个目标适用于所有模态，或架构没有模态专属前后处理 |
+| [Transfusion（论文 v1）](https://arxiv.org/abs/2408.11039v1) | 文本 next-token loss 与图像 diffusion 可在共享模型中协同；论文还加入模态专属编码/解码层 | 共享 Transformer 等于没有模态专属模块，或音频、视频和工具能力自动成立 |
+| [ImageBind（论文 v2）](https://arxiv.org/abs/2305.05665v2) | 为六种模态分别使用 encoder 和线性投影头，再把归一化向量对齐到共同嵌入空间 | 共享嵌入空间等于统一 token 序列、共享自回归主干或无专用 encoder |
+| [Qwen3.5-Omni（技术报告 v2）](https://arxiv.org/abs/2604.15804v2) | 报告列出 AuT 音频 encoder、SigLIP2 视觉 encoder、Thinker/Talker 等组件，展示统一交互系统仍可保留专用前端 | unified、native 或流式交互等于 encoder-free；报告中的配置代表所有产品版本 |
 
-如果产品只公开“支持图片输入”，教材最多写接口能力；如果技术报告公开了统一 token 主干，才能写对应的架构事实；如果 tokenizer 和内部层未公开，就保留限定语。
+这些路线并非同一评测下的横向性能对照。模型名右侧的括号固定论文版本；描述限定于该版本公开的方法，不比较作者报告的成绩。表格也给出阅读顺序：先看 token 如何形成，再看主干和目标共享到哪一层，最后检查哪些前端和输出部件仍然存在。若产品只公开“支持图片输入”，教材最多写接口能力；若技术报告只公开部分数据流，就不要补写未披露的 tokenizer、位置、mask 或处理器行为。
 
 ## 13.12 部署协议：处理器也是模型的一部分
 
@@ -347,6 +382,8 @@ high-resolution image
 
 只保存图片 URL 或音频路径无法证明线上使用了同一份预处理。缓存 key 还要包含租户和权限，避免私有上下文跨请求复用。
 
+处理器 manifest 不宜只写一个名字。回放时还要能找回实际预处理结果的形状、颜色/采样规范、裁剪或帧选择、token 数、位置与 mask schema，以及处理器和模型各自的不可变 revision。原始媒体 digest 用于确认输入版本，租户和权限字段用于隔离缓存；这些字段不应把原始用户媒体或凭据复制进审计日志。每次部署变更都可先对同一组 golden request 比较实际序列长度、媒体边界和答案支持证据，再判断差异来自权重还是 processor。
+
 ## 13.13 评估：接口声明、可用能力和有效证据
 
 评估应分为五层：
@@ -359,9 +396,19 @@ high-resolution image
 
 同一张表格截图可以同时测 OCR CER、行列定位、数值计算、引用支持和最终回答。只测 VQA accuracy，可能把 OCR 正确但引用错误的情况隐藏掉。
 
+例如，用 50 份合成合同走完一条固定数据链：46 份含有可读的目标字段，43 份在这 46 份里定位到正确区域，40 份在这 43 份里算对请求值，40 个正确答案中有 38 个能引用到支持它的原文。对应的 OCR 覆盖是 46/50=0.92，区域定位的条件准确率是 43/46≈0.935，数值计算的条件准确率是 40/43≈0.930，引用支持率是 38/40=0.95；全链路同时正确的比例是 38/50=0.76。若只按所有合同计算正确数值，准确率为 40/50=0.80，它不要求定位和引用也同时通过。它们回答不同问题，不能直接平均成一个“多模态能力分”。若 OCR 覆盖高但区域定位下降，排查位置绑定；若答案准确但引用支持低，排查证据对齐；若只有高分辨率恢复定位，则回看采样和预算。
+
+这组分母要在评测前固定：若把没有可读字段的 4 份合同从总数中直接剔除，答案准确率就会掩盖输入解析失败。拒答场景还需分别报告可回答子集的答案质量、不可回答子集的拒答召回和整体任务成功，不能把拒答样本当成普通错误或从统计中消失。通用不确定性、显著性和人工评分规约沿用第十一章，本节重点是把指标映射回本章的表示与数据路径。
+
+可以用 20 个含有明确金额冲突的合成表格请求演示一个捷径指标：把正确 OCR 中的金额替换成相反数值后，若模型有 15 次跟随错误 OCR，定义“错误转写跟随率”为 15/20=0.75。这个 75% 只描述该组反事实样本，不等于一般能力或因果效应；还要对照原图、正确 OCR、只给 OCR 和图像单独输入，并记录每种条件下的分母。改变一个因素并复用同一题目，才能把失败从识别、对齐或推理环节中逐步定位出来。
+
 ### 13.13.1 反事实评估
 
 对图表改变颜色、数值或行顺序，对视频打乱帧序或移动关键帧，对音频改变说话人或背景噪声。若输出不随关键证据变化，说明模型没有使用该模态或使用了错误捷径。
+
+反事实最好按同一题成对保存，而不是拿两批不同题目的分数相减。对每对样本记录原始图像、被修改的 OCR 字段、预期答案方向、实际答案和模型是否引用该区域。只有问题语义、图像布局、提示、采样和解码都固定时，答案向改写金额翻转才是“模型可能追随 OCR”的证据；仍需检查 OCR 位置变化和文字可见性等伴随因素。结果应按样本、字段类型与媒体质量分层，避免少数极端样本主导总体比例。
+
+同一配对原则也适用于音视频：把语音中的关键实体或否定词替换成最小对照，检查回答是否跟随变化；对视频只交换两帧次序或遮掉一个关键时间片，观察时间判断是否相应翻转。每项改动都要写明预期变化，否则只能说输出不稳定，不能说模型忽略了哪一类证据。
 
 ### 13.13.2 预算和质量同时记录
 
@@ -376,6 +423,10 @@ high-resolution image
 只有同时记录质量和成本，才能判断统一主干是否带来实际收益。
 
 ## 13.14 安全：外部媒体是证据，不是系统指令
+
+OWASP GenAI LLM Top 10 2026 将图片、音频、视频等多模态内容列为 LLM01:2026 Prompt Injection 的输入来源，并建议采用纵深防御；它明确指出单一控制不足以应对这类风险。[官方条目](https://github.com/GenAI-Security-Project/GenAI-LLM-Top10/blob/main/2026/final/LLM01_PromptInjection.md)提供风险分类和缓解指导，不是对某个模型或单项控制措施的效果实测。
+
+信任边界应当作为结构化的来源元数据一路传递，而不是只在 system prompt 中写一句“忽略媒体指令”。OCR 服务如果把图片中的文字提取出来，就要保留它来自用户媒体的标签；序列化器插入这些 span 时不能把角色改成 system 或 tool。模型可以把可疑句子作为被引用的内容解释，但访问文件、发送消息、下单或执行代码仍由独立执行器根据用户授权、参数白名单、资源范围和确认状态决定。评估也应把“识别出恶意文字”“没有服从它”和“没有产生外部副作用”分开计数；一个环节通过不能代替其他环节。
 
 图片、PDF、网页截图、音频和视频都可以藏有自然语言指令。`encoder-free` 并不会自动解决 prompt injection，反而可能让更多外部 token 直接进入共享主干。系统应在 schema 中保留信任标签：
 
@@ -409,13 +460,57 @@ executor           -> permission check
 
 训练时的模态顺序、processor、special token、位置 schema 和线上不同。权重可以加载，任务质量却会下降。版本字段必须成为回放和缓存契约的一部分。
 
+工程排障可以从一条错误回答反向回放，而不是先归因于模型推理能力。先核对媒体 digest 和处理器 revision，再对照实际 resize、裁剪、帧采样、时长和 token 账本；确认序列中的媒体边界与位置是否仍指向原证据；随后检查问题 query 是否能看到目标 token、答案是否按正确方向生成；最后用正确 OCR、错误 OCR、只给媒体和只给 OCR 的成对消融定位捷径。若离线 golden request 正确而线上失败，优先比较服务端 processor、mask schema 和模型 revision；若所有条件都无法指向字段，则把问题归入数据覆盖或模型能力，安排新的证据实验。日志至少要能记录各阶段版本、输入摘要、预处理结果、token 数、失败层和可复现样本 ID。
+
+做这种逐层回放时，一次只改变一个关键条件。若同时换了图像分辨率、OCR 结果和提示，就无法判断哪个改动让答案翻转；若采用随机采样，则还应固定解码参数与随机种子，必要时对同一条件重复运行并报告波动。OCR span 应和坐标、置信度、来源页面绑定，避免只保存识别后的纯文字。失败报告至少给出样本总数、被筛除样本、各层条件分母和预先定义的错误类别；这样能区分“没读到证据”“读到但位置错”“看见证据却推错”和“答案正确但引用无关”。排障结果只支持对应的模型、处理器、输入和解码条件，不能据少数案例概括整类系统。
+
 ## 13.16 最小可运行的统一 token 审计
 
-下面的示例不实现真实 encoder-free 模型，只审计一条混合请求的 token、模态位置、预算和反事实条件。它故意把 `encoder_free` 解释成“没有独立视觉语言 encoder 的抽象路线”，并保留 patchifier、audio codec 和 processor 字段，避免把术语误解成没有任何前端处理。
+下面的标准库示例检查一份教学 manifest 是否把 token 预算、位置字段、mask 规则、处理器版本和反事实测试计划声明完整。它不实现 encoder-free 模型，也不读取图片、音频或视频；输入尺寸和速率是为演算构造的假设。程序输出的是预算代理和清单一致性，不能证明实际 tokenizer 产生了相同序列，更不能证明模型看见了正确区域或完成了实验。
+
+先手算 token 数，代码会复用同一组输入。图片按每边 14 像素一块切分，336/14=24，所以有 24×24=576 个 patch。音频假设每秒产生 50 个时间帧、每帧有 4 个 codebook token，2.4×50×4=480。视频每 2 帧合成一个时间块，8/2=4 个时间块；每帧空间网格是 224/16=14×14，所以有 4×14×14=784 个视频 token。再加 96 个文本 token 和 12 个边界/角色 token，总数为 96+576+480+784+12=1,948。
+
+| 输入部分 | 假设与计算 | token 数 |
+|---|---|---:|
+| 文本 | 样本给定 | 96 |
+| 图像 | ceil(336/14)×ceil(336/14) | 576 |
+| 音频 | ceil(2.4×50)×4 个 codebook | 480 |
+| 视频 | ceil(8/2)×ceil(224/16)×ceil(224/16) | 784 |
+| 边界和角色 | 样本给定 | 12 |
+| 合计 | 五项相加 | 1,948 |
+
+在这个简化布局里，图像网格的位置可以写成 24×24 个 (行, 列) 坐标；音频可用 (时间步, codebook)；视频可用 (时间块, 行, 列)。代码只核对 manifest 声明了这些位置类型，并未逐个建立或检查真实 token 的坐标。它也只核对任务 mask 契约是否被声明完整：本例是媒体问答，要求问题能读取输入媒体、答案按自回归顺序生成、媒体边界保留。它不要求视频问答屏蔽未来帧，因为输入视频的后续帧也是可用证据；若任务改为视频自回归生成，则应另行声明并核对未来帧不可见。代码没有构造 Transformer 的注意力矩阵，不能验证线上 kernel 是否真的照此执行。
+
+把 1,948 个位置两两组合，得到 1,948²=3,794,704 个 score-cell 代理。这只是一个序列、一个 attention head、一个 layer 的稠密矩阵尺寸示意；多头、多层、batch、padding、窗口化/稀疏注意力及后端实现都会改变实际工作量。该数不能当成 FLOPs、显存、延迟或服务成本。第十四章会把请求级采样、缓存和真实部署测量放回完整预算。
+
+代码逐项核对输入 schema，特别拒绝 bool 伪装成整数、负尺寸、NaN/无穷时长和错误的 media trust 类型。超大整数时长不经过浮点有限性转换，仍可算出一个很大的 token 数并由 context_fits 标成超预算。positions_complete、mask_rules_declared 和 counterfactual_plan_complete 只回答配置字段是否完整；反事实列表里列出了原媒体、正确/错误转写和打乱视频顺序四种条件，但程序不会运行模型或证明结果随输入改变。模型卡或代码中的结构声明仍需回到固定 revision、真实 processor 输出、attention mask 与模型实验分别核验。
+
+运行方式是将下方代码保存为 Python 文件并直接执行；它只依赖 Python 标准库。首先查看 token_counts 和 total_tokens 是否与手算一致，再确认 checks 每一项的具体含义。改变 image_patch、audio_frames_per_second、audio_codebooks、video_temporal_patch 或 context_limit，会分别改变相应 token 项或预算结论。把图像 patch 从 14 改为 28 时，图像 token 从 24²=576 降到 12²=144，序列少 432 个 token；在同样的全注意力代理下，总长度从 1,948 变为 1,516，score-cell 从 3,794,704 变为 2,298,256。此变化只是本假设下的算术结果，也不说明细节质量保持不变。
+
+> **代码状态：已验证（2026-11-12；Python 3.12.9；仅标准库）。**
 
 ```python
 import math
 from math import ceil
+
+
+REQUIRED_POSITIONS = {
+    "text": "1d",
+    "image": "2d",
+    "audio": "time+codebook",
+    "video": "3d",
+}
+REQUIRED_MASK_RULES = {
+    "question_reads_media",
+    "answer_causal",
+    "media_boundaries_preserved",
+}
+REQUIRED_COUNTERFACTUALS = {
+    "original_media",
+    "correct_transcript",
+    "incorrect_transcript",
+    "shuffled_video_order",
+}
 
 
 def ceil_div(a, b):
@@ -440,50 +535,91 @@ def require_positive_int(value, name):
 
 
 def require_finite_nonnegative(value, name):
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"{name} must be a number")
+    if isinstance(value, float) and not math.isfinite(value):
         raise ValueError(f"{name} must be finite")
     if value < 0:
         raise ValueError(f"{name} must be non-negative")
     return value
 
 
+def require_exact_keys(value, expected, name):
+    if not isinstance(value, dict):
+        raise TypeError(f"{name} must be a mapping")
+    if set(value) != expected:
+        raise ValueError(f"{name} has an invalid schema")
+    return value
+
+
 def validate_sample_and_config(sample, config):
-    required_sample = {"text_tokens", "images", "audios", "videos", "media_trust"}
-    required_config = {
-        "image_patch", "video_patch", "video_temporal_patch", "audio_rate",
-        "audio_codebooks", "special_tokens", "context_limit", "processor_revision",
+    sample_keys = {"text_tokens", "images", "audios", "videos", "media_trust"}
+    config_keys = {
+        "image_patch", "video_patch", "video_temporal_patch",
+        "audio_frames_per_second", "audio_codebooks", "special_tokens",
+        "context_limit", "processor_revision", "position_schema",
+        "mask_schema", "counterfactual_plan",
     }
-    if set(sample) != required_sample or set(config) != required_config:
-        raise ValueError("sample or config has an invalid schema")
+    require_exact_keys(sample, sample_keys, "sample")
+    require_exact_keys(config, config_keys, "config")
+
     require_nonnegative_int(sample["text_tokens"], "text_tokens")
     if not isinstance(sample["images"], list) or not isinstance(sample["audios"], list) or not isinstance(sample["videos"], list):
         raise TypeError("media collections must be lists")
-    if sample["media_trust"] not in {"untrusted_evidence"}:
-        raise ValueError("media_trust must be untrusted_evidence")
+    if not isinstance(sample["media_trust"], str):
+        raise TypeError("media_trust must be a string")
+
     require_positive_int(config["image_patch"], "image_patch")
     require_positive_int(config["video_patch"], "video_patch")
     require_positive_int(config["video_temporal_patch"], "video_temporal_patch")
-    require_positive_int(config["audio_rate"], "audio_rate")
+    require_positive_int(config["audio_frames_per_second"], "audio_frames_per_second")
     require_positive_int(config["audio_codebooks"], "audio_codebooks")
     require_nonnegative_int(config["special_tokens"], "special_tokens")
     require_positive_int(config["context_limit"], "context_limit")
-    if not isinstance(config["processor_revision"], str) or not config["processor_revision"]:
-        raise ValueError("processor_revision must be non-empty")
+    if not isinstance(config["processor_revision"], str):
+        raise TypeError("processor_revision must be a string")
+
+    position_schema = require_exact_keys(
+        config["position_schema"], set(REQUIRED_POSITIONS), "position_schema"
+    )
+    if any(not isinstance(value, str) or not value.strip() for value in position_schema.values()):
+        raise ValueError("position schema values must be non-empty strings")
+
+    mask_schema = require_exact_keys(
+        config["mask_schema"], REQUIRED_MASK_RULES, "mask_schema"
+    )
+    if any(type(value) is not bool for value in mask_schema.values()):
+        raise TypeError("mask schema values must be booleans")
+
+    plan = config["counterfactual_plan"]
+    if not isinstance(plan, list) or any(not isinstance(item, str) for item in plan):
+        raise TypeError("counterfactual_plan must be a list of strings")
+    if len(plan) != len(set(plan)):
+        raise ValueError("counterfactual_plan must not contain duplicates")
+
     for index, image in enumerate(sample["images"]):
-        if set(image) != {"height", "width"}:
-            raise ValueError(f"images[{index}] has an invalid schema")
+        require_exact_keys(image, {"height", "width"}, f"images[{index}]")
         require_positive_int(image["height"], f"images[{index}].height")
         require_positive_int(image["width"], f"images[{index}].width")
+
     for index, audio in enumerate(sample["audios"]):
-        if set(audio) != {"seconds"}:
-            raise ValueError(f"audios[{index}] has an invalid schema")
+        require_exact_keys(audio, {"seconds"}, f"audios[{index}]")
         require_finite_nonnegative(audio["seconds"], f"audios[{index}].seconds")
+
     for index, video in enumerate(sample["videos"]):
-        if set(video) != {"frames", "height", "width"}:
-            raise ValueError(f"videos[{index}] has an invalid schema")
+        require_exact_keys(video, {"frames", "height", "width"}, f"videos[{index}]")
         require_positive_int(video["frames"], f"videos[{index}].frames")
         require_positive_int(video["height"], f"videos[{index}].height")
         require_positive_int(video["width"], f"videos[{index}].width")
+
+
+def ceil_audio_frames(seconds, frames_per_second):
+    if isinstance(seconds, int):
+        return seconds * frames_per_second
+    product = seconds * frames_per_second
+    if not math.isfinite(product):
+        raise ValueError("audio duration is too large for floating-point arithmetic")
+    return ceil(product)
 
 
 def build_audit(sample, config):
@@ -492,13 +628,14 @@ def build_audit(sample, config):
     validate_sample_and_config(sample, config)
     if not sample["text_tokens"] and not sample["images"] and not sample["audios"] and not sample["videos"]:
         raise ValueError("request must contain text or media")
+
     image_tokens = sum(
         ceil_div(image["height"], config["image_patch"])
         * ceil_div(image["width"], config["image_patch"])
         for image in sample["images"]
     )
     audio_tokens = sum(
-        ceil(audio["seconds"] * config["audio_rate"])
+        ceil_audio_frames(audio["seconds"], config["audio_frames_per_second"])
         * config["audio_codebooks"]
         for audio in sample["audios"]
     )
@@ -519,39 +656,25 @@ def build_audit(sample, config):
     if total_tokens == 0:
         raise ValueError("request must contain at least one token")
 
-    positions = {
-        "text": "1d",
-        "image": "2d",
-        "audio": "time+codebook",
-        "video": "3d",
-    }
-    counterfactuals = {
-        "original_media": True,
-        "correct_transcript": True,
-        "incorrect_transcript": True,
-        "shuffled_video_order": True,
-    }
     checks = {
         "context_fits": total_tokens <= config["context_limit"],
-        "positions_declared": set(positions) == {"text", "image", "audio", "video"},
-        "counterfactuals_declared": all(counterfactuals.values()),
-        "processor_pinned": bool(config["processor_revision"]),
+        "positions_complete": config["position_schema"] == REQUIRED_POSITIONS,
+        "mask_rules_declared": all(config["mask_schema"].values()),
+        "counterfactual_plan_complete": REQUIRED_COUNTERFACTUALS.issubset(
+            set(config["counterfactual_plan"])
+        ),
+        "processor_pinned": bool(config["processor_revision"].strip()),
         "trust_boundary_declared": sample["media_trust"] == "untrusted_evidence",
     }
     return {
-        "route": {
-            "encoder_free_claim": True,
-            "frontends": ["image_patchifier", "audio_codec", "video_sampler"],
-            "shared_backbone": "mixed_modal_transformer",
-            "output_decoder": ["text_decoder", "tool_executor"],
-        },
         "token_counts": token_counts,
         "total_tokens": total_tokens,
         "attention_cells_proxy": total_tokens * total_tokens,
-        "positions": positions,
-        "counterfactuals": counterfactuals,
+        "position_schema": config["position_schema"],
+        "mask_schema": config["mask_schema"],
+        "counterfactual_plan": config["counterfactual_plan"],
         "checks": checks,
-        "audit_consistent": all(checks.values()),
+        "manifest_complete": all(checks.values()),
     }
 
 
@@ -566,11 +689,28 @@ config = {
     "image_patch": 14,
     "video_patch": 16,
     "video_temporal_patch": 2,
-    "audio_rate": 50,
+    "audio_frames_per_second": 50,
     "audio_codebooks": 4,
     "special_tokens": 12,
     "context_limit": 4096,
     "processor_revision": "processor-r7",
+    "position_schema": {
+        "text": "1d",
+        "image": "2d",
+        "audio": "time+codebook",
+        "video": "3d",
+    },
+    "mask_schema": {
+        "question_reads_media": True,
+        "answer_causal": True,
+        "media_boundaries_preserved": True,
+    },
+    "counterfactual_plan": [
+        "original_media",
+        "correct_transcript",
+        "incorrect_transcript",
+        "shuffled_video_order",
+    ],
 }
 
 report = build_audit(sample, config)
@@ -581,17 +721,19 @@ for key, value in report.items():
 参考输出为：
 
 ```text
-route={'encoder_free_claim': True, 'frontends': ['image_patchifier', 'audio_codec', 'video_sampler'], 'shared_backbone': 'mixed_modal_transformer', 'output_decoder': ['text_decoder', 'tool_executor']}
 token_counts={'text': 96, 'image': 576, 'audio': 480, 'video': 784, 'special': 12}
 total_tokens=1948
 attention_cells_proxy=3794704
-positions={'text': '1d', 'image': '2d', 'audio': 'time+codebook', 'video': '3d'}
-counterfactuals={'original_media': True, 'correct_transcript': True, 'incorrect_transcript': True, 'shuffled_video_order': True}
-checks={'context_fits': True, 'positions_declared': True, 'counterfactuals_declared': True, 'processor_pinned': True, 'trust_boundary_declared': True}
-audit_consistent=True
+position_schema={'text': '1d', 'image': '2d', 'audio': 'time+codebook', 'video': '3d'}
+mask_schema={'question_reads_media': True, 'answer_causal': True, 'media_boundaries_preserved': True}
+counterfactual_plan=['original_media', 'correct_transcript', 'incorrect_transcript', 'shuffled_video_order']
+checks={'context_fits': True, 'positions_complete': True, 'mask_rules_declared': True, 'counterfactual_plan_complete': True, 'processor_pinned': True, 'trust_boundary_declared': True}
+manifest_complete=True
 ```
 
-`encoder_free_claim=True` 只表示这条教学路线的建模假设，不能证明任何真实模型没有视觉 encoder。`frontends` 列表特意保留了 patchifier、codec 和 sampler，说明减少独立 encoder 不等于删除所有模态处理。
+通过手算与代码对照，可以检查尺寸到 token 数、token 数到全注意力代理的算术是否一致。边界输入的意义是确保清单校验不会把配置错误误判为通过：布尔值不能冒充 token 整数，NaN/无穷秒数不能进入预算，非字符串 trust 值应被拒绝；若处理器 revision 为空或媒体信任标签不是 untrusted_evidence，对应检查应返回 False；缺少位置字段或重复反事实条件应明确报错或使对应检查失败。即便所有 checks 都为 True，也只表示这份教学 manifest 自洽；还要在真实模型中记录序列化后的 token、位置、mask 张量及模型/processor revision，才能验证实际数据路径。
+
+如果 positions_complete 为 False，正确做法是检查实际模型的坐标约定并更新 schema，而不是把模型强行改写成这里的一维/二维/三维模板；如果 mask_rules_declared 为 False，则要先查明任务是媒体理解、因果生成还是双向修复，再定义可见关系。counterfactual_plan_complete 为 True 只说明计划列齐，实验结果必须由外部评测器保存。这个区分让 demo 的绿色状态保持在配置门槛，不会被误读为模型质量或安全验收通过。
 
 ## 13.17 练习：把术语边界落实到实验
 
@@ -631,12 +773,13 @@ audit_consistent=True
 
 本章主要引用以下公开研究：
 
-1. Chameleon: Mixed-Modal Early-Fusion Foundation Models，https://arxiv.org/abs/2405.09818
-2. Unified-IO 2: Scaling Autoregressive Multimodal Models with Vision, Language, Audio, and Action，https://arxiv.org/abs/2312.17172
-3. Emu3: Next-Token Prediction is All You Need，https://arxiv.org/abs/2409.18869
-4. Show-o: One Single Transformer to Unify Multimodal Understanding and Generation，https://arxiv.org/abs/2408.12528
-5. Transfusion: Predict the Next Token and Diffuse Images with One Multi-Modal Model，https://arxiv.org/abs/2408.11039
-6. ImageBind: One Embedding Space To Bind Them All，https://arxiv.org/abs/2305.05665
-7. Unified multimodal 系统中的视觉、文档、视频、语音评估和安全资料，见本册第 11 章第 11.20 节。
+1. Chameleon Team, [Chameleon: Mixed-Modal Early-Fusion Foundation Models（arXiv v2）](https://arxiv.org/abs/2405.09818v2)。
+2. Lu et al., [Unified-IO 2: Scaling Autoregressive Multimodal Models with Vision, Language, Audio, and Action（arXiv v1）](https://arxiv.org/abs/2312.17172v1)。
+3. Emu3 Team, [Emu3: Next-Token Prediction is All You Need（arXiv v1）](https://arxiv.org/abs/2409.18869v1)。
+4. Xie et al., [Show-o: One Single Transformer to Unify Multimodal Understanding and Generation（arXiv v7）](https://arxiv.org/abs/2408.12528v7)。
+5. Zhou et al., [Transfusion: Predict the Next Token and Diffuse Images with One Multi-Modal Model（arXiv v1）](https://arxiv.org/abs/2408.11039v1)。
+6. Girdhar et al., [ImageBind: One Embedding Space To Bind Them All（arXiv v2）](https://arxiv.org/abs/2305.05665v2)。
+7. Qwen Team, [Qwen3.5-Omni Technical Report（arXiv v2）](https://arxiv.org/abs/2604.15804v2)。
+8. Unified multimodal 系统中的视觉、文档、视频、语音评估和安全资料，见本册[第十一章的资料与证据边界](11-多模态评估与安全.md)。
 
 这些论文支持各自公开的 token 化、融合或训练机制，不支持对未公开商业模型内部结构的推断。“Encoder-free”在不同资料中可能有不同范围，正文应明确说明它减少的是哪一类独立 encoder，以及哪些 tokenizer、patchifier、codec、projection 和 decoder 仍然存在。

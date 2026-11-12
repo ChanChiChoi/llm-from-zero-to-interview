@@ -136,30 +136,30 @@
 114. 删除 checkpoint 中分类头的 key，用 `load_state_dict(strict=False)` 加载，打印 missing / unexpected keys，并判断这些 key 是否符合预期。
 115. 冻结 encoder，只训练 head，重新创建 optimizer，并核对 optimizer 参数量是否等于 `requires_grad=True` 的参数量。
 116. 写一个最小 Module audit demo，输出普通 list 注册失败、ModuleList 注册成功、Parameter / buffer / state_dict 检查、train/eval 递归状态、冻结后 optimizer 参数量和保存加载一致性。
-117. 写一个 map-style `Dataset`，实现 `__len__` 和 `__getitem__`，返回变长 `input_ids`、`labels` 和 `length`。
+117. 写一个 map-style `Dataset`，按 key 返回变长 `input_ids`、`labels` 和 `length`；说明有限数据集为何通常实现 `__len__`，以及何时可选实现批量读取的 `__getitems__`。
 118. 写一个 `collate_fn`，把变长 causal LM 样本 pad 成 `[B,T]`，同时构造 `attention_mask`，并把 padding label 设为 `-100`。
 119. 给定 batch 内样本长度 `[2,6,3]`，计算 `T_b`、valid token ratio 和 padding waste。
-120. 用 PyTorch `DataLoader` 固定 `torch.Generator` seed，验证 shuffle 后第一个 batch 的 shape 和样本长度可复现。
+120. 用 PyTorch `DataLoader` 固定 `torch.Generator` seed，验证 map-style shuffle 的第一个 batch 可复现；再用 `worker_init_fn` 给 Python/NumPy 随机增强播种，并说明 generator 与 DistributedSampler seed 的边界。
 121. 写一个 length bucket 小函数，比较 bucket 前后 padding waste 的变化。
-122. 用 `DistributedSampler(num_replicas=2, rank=0/1)` 模拟两卡索引切分，验证两个 rank 的索引集合是否重叠。
-123. 解释 `num_workers`、`pin_memory`、`persistent_workers` 和 `prefetch_factor` 分别影响什么，以及为什么不是越大越好。
-124. 写一个最小 DataLoader audit demo，输出 batch shape、attention mask、ignore index 检查、shift logits / labels shape、padding waste 和 distributed overlap。
-125. 写一个最小 causal LM training step，包含 shift logits、shift labels、`ignore_index=-100` 和 `optimizer.step()`。
-126. 给定 `accum_steps=4`，解释为什么每个 micro-step 的 loss 要除以 4，并写出平均梯度公式。
+122. 令 `N=10`、`world_size=3`，用 `DistributedSampler` 分别列出补齐和 sampler `drop_last=True` 后每个 rank 的索引；再说明 DataLoader batch `drop_last` 如何继续处理尾批。
+123. 解释 `num_workers`、`pin_memory`、`persistent_workers`、`prefetch_factor` 和 PyTorch 2.15 `in_order` 的作用；估算四个 worker、factor 为 2、batch 为 64 MiB 时的排队数据量，并说明 worker 内存与随机种子风险。
+124. 写一个最小 DataLoader audit demo，输出 batch shape、attention mask、shift 后有效标签数、padding waste、worker seed 复现性以及可整除/不可整除情况下的 distributed overlap。
+125. 写一个最小 causal LM training step，包含 shift logits、shift labels、`ignore_index=-100`、`zero_grad(set_to_none=True)` 和 `optimizer.step()`；说明 None 梯度与全零梯度对 optimizer 的区别。
+126. 给定 `accum_steps=4`，分别推导完整窗口、只有 2 个 micro-batch 的尾窗，以及有效 token 数不等时的平均梯度公式；指出类别加权 CE 的分母。
 127. 写一个 PyTorch demo，比较 scheduler 每个 micro-step 更新和每个 optimizer step 更新时的学习率序列差异。
 128. 给训练循环加入 `clip_grad_norm_`，打印裁剪前总范数，并说明它应该放在 backward 之后、optimizer step 之前。
-129. 写一个 token-weighted validation loop，使用 `model.eval()` 和 `torch.inference_mode()`，验证结束后恢复原训练模式。
-130. 保存完整 checkpoint，字段至少包含 model、optimizer、scheduler、global_step、config 和 RNG state。
-131. 从 checkpoint 恢复模型、optimizer 和 scheduler，验证恢复前后 validation loss 是否一致。
-132. 写一个最小 Training Loop audit demo，输出 raw loss、grad norm、optimizer step 数、scheduler step 数、final lr、validation loss、checkpoint resume 一致性和非有限 loss 检查。
-133. 给定 100 万参数和 BF16 参数 / 梯度、FP32 AdamW 一阶矩 / 二阶矩，估算 params、grads、optimizer states 各占多少 MiB。
-134. 写出训练显存粗略分解公式，至少包含参数、梯度、optimizer state、activation 和临时 buffer。
-135. 比较 FP16 和 BF16 的指数范围、尾数精度、数值稳定性和硬件依赖。
+129. 写一个 token-weighted validation loop，使用 `model.eval()` 和 `torch.inference_mode()`，验证结束后恢复进入验证前的模式；拒绝全忽略目标 batch，并处理类别权重分母。
+130. 保存完整 checkpoint，字段包含 model、optimizer、scheduler、epoch / global_step、data_progress、config、best_metric、CPU/CUDA 与 loader RNG state；把配置和 NumPy 状态编码成可由 `weights_only=True` 读取的基础类型。
+131. 按正确顺序恢复 model、scheduler 和 optimizer；对照固定 batch 的输出，并让原模型与恢复模型各执行一步，比较权重、optimizer state、scheduler state 和数据游标。
+132. 写一个最小 Training Loop audit demo，输出 loss、有效 token 数、grad norm、optimizer/scheduler step 数、final lr、checkpoint resume 下一步一致性；说明同一 toy batch 训练和验证不能证明泛化，且 CPU 结果不覆盖 CUDA、多 worker。
+133. 给定 100 万参数和 BF16 参数 / 梯度、FP32 AdamW 一阶矩 / 二阶矩，估算 params、grads、optimizer states 的 MiB 及三项总和；说明为什么这仍不是训练峰值。
+134. 写出训练显存粗略分解公式，至少包含参数、梯度、optimizer state、activation 和临时 buffer。再令 `B=2`、`T=2048`、`d=4096`、`L=32`、`H=32`、BF16 为 2 bytes，计算每层一个 hidden state 与朴素 attention score 矩阵的预算；将 `T` 减半后比较线性项和平方项。
+135. 比较 FP16 和 BF16 的指数范围、尾数精度、数值稳定性和硬件依赖；解释 FP16 最大有限值约 65,504、GradScaler 的 scale 为什么可能低于 1，以及它不能保证模型兼容。
 136. 写一个 CPU 可运行的 `torch.amp.autocast("cpu", dtype=torch.bfloat16)` demo，打印 autocast 后线性层输出 dtype。
-137. 用 `torch.amp.GradScaler` 写一个最小 loss scaling / unscale / clip / step demo，并解释为什么裁剪前要先 unscale。
-138. 写一个 activation checkpointing demo，统计同一个 block 在不用 checkpoint 和使用 checkpoint 时 forward 调用次数。
-139. 设计一个 OOM audit checklist，覆盖训练 / 验证阶段、batch size、sequence length、AMP、gradient accumulation、activation checkpointing、optimizer state 和带图 tensor 缓存。
-140. 写一个最小 AMP memory audit demo，输出 dtype 显存估算、autocast dtype、GradScaler scale、checkpoint recompute 和 `torch.cuda.is_available()`。
+137. 用 FP16 `torch.amp.GradScaler` 写一个最小 loss scaling / unscale / clip / step demo，并解释为什么裁剪前要先 unscale、出现非有限梯度时参数更新可能被跳过；更新计数应怎样与 scheduler 对齐？
+138. 写一个 activation checkpointing demo，统计同一个 block 在不用 checkpoint 和使用 checkpoint 时 forward 调用次数；解释 `use_reentrant=False`、CPU 加一种非 CPU RNG 状态保存范围，以及 `torch.compile` 下 `preserve_rng_state=False` 的边界。
+139. 设计一个阶段化 OOM audit 表，覆盖模型加载、forward、backward、首次 optimizer step、validation 和每步 allocated 增长；说明每个独立测量区间怎样同步并重置 peak，以及为何不能把 `empty_cache()` 当作释放活 tensor 的修复。
+140. 写一个最小 CPU BF16 autocast 与显存公式 demo，输出估算值、线性层 autocast dtype 和 checkpoint 重算次数。说明这条 BF16 路径不需要 GradScaler，且 CPU demo 不代表 CUDA 性能或 GPU 显存；另写 FP16 scaler 调用顺序片段。
 141. 写出 `rank`、`local_rank` 和 `world_size` 的区别，并说明它们在 `torchrun` 脚本中分别用于什么。
 142. 给定 `per_device_batch_size=2`、`world_size=8`、`accum_steps=4`，计算 global batch size，并解释学习率和 warmup 为什么可能需要调整。
 143. 用纯 Python 模拟 4 个 rank 的数据索引切分，验证 rank 间索引集合没有 overlap，且覆盖完整 epoch 样本。
@@ -370,6 +370,34 @@
 68. 用 3 分钟回答“为什么 KL penalty 有用但不能根治 reward hacking”。
 68A. 解读 contrastive SDF 的 grader-sensitivity 实验：用 late checkpoint 的 87% 与 9% 计算行为差，写出配对干预、样本范围和可信区间；再说明它支持什么行为结论、不能证明什么隐藏目标或部署发生率，并比较 inoculation prompting 与 SDF 在对应研究设置中的结果。
 69. 写一个 0 依赖 Python tokenizer / 格式事故审计 demo，输入一条 system/user/assistant 多轮样本，输出 token ids、decode 前缀、assistant-only label 覆盖率、prompt loss 泄漏率、PAD loss 泄漏率、EOS 是否参与 label、训练 / 推理 template 是否一致、截断是否丢关键边界、多模态 placeholder 是否匹配和 gate pass 结论。
+
+### 第十四册第七章：分布式训练入门
+
+配套正文：[第十四册第七章](book-14-pytorch-deep-learning-engineering/chapters/07-分布式训练入门.md)。
+
+1. 两台同构节点各启动 4 个 worker。写出 `WORLD_SIZE`，列出节点 1 的 local rank 0、3 分别对应的 global rank，并说明真实作业为什么以 `torchrun` 的 `RANK` / `LOCAL_RANK` 为准。
+2. 对一维模型 `y=θx` 和损失 `0.5(θx-y)^2`，取 `θ=2`、`x=1`：rank 0 的标签为 `[0,2]`，rank 1 为 `[1,3]`。逐样本求梯度，计算 rank mean、DDP 平均梯度，以及学习率 `0.1` 后的新参数；再说明相同初始参数与 optimizer step 为何是必要条件。
+3. 令 `N=10`、`W=3`、关闭 shuffle，手列 `DistributedSampler(drop_last=False)` 补齐后的 rank 索引；再列 `sampler.drop_last=True` 的结果。保持默认 sampler，另设 `DataLoader(batch_size=3, drop_last=True)`，列出每个 rank 实际消费和丢弃的位置，说明两层 `drop_last` 改变的对象不同。
+4. 两个 rank 的 loss sum / valid token 数分别为 `(8,4)`、`(18,6)`。计算全局 token mean loss；推导默认 DDP 梯度平均时每 rank 应以多少倍的本地 loss sum 做 backward，并说明使用 `reduction="mean"` 时为什么不能再照搬该倍率。
+5. 有 5 个 micro-batch、`accum_steps=3`，比较普通 DDP 与 `no_sync()` 的同步次数，并计算完整窗和尾窗每步的梯度缩放。再构造 rank 间有效 token 数不同的情况，说明 `loss/window_size` 的简式何时失效。
+6. 四个 rank 的日志都带 `step`、`micro_step` 和 collective 事件；构造 rank 2 在数据解码时提前报错、其他 rank 停在 DDP backward 的轨迹。指出最早的异常、不能由 `TORCH_DISTRIBUTED_DEBUG=DETAIL` 替代的应用日志，以及何时考虑 uneven-input `join()`。
+7. 假设 120M 参数、BF16 参数/梯度和 FP32 AdamW 两个 moment，分别估算 DDP 四卡每 rank 状态、full-shard FSDP 的理想常驻状态；列出临时 gather、activation 和 rank-local RNG/数据游标为何仍要单独记账。
+
+### 第十四册第八章：Debug 与 Profiling
+
+配套正文：[第十四册第八章](book-14-pytorch-deep-learning-engineering/chapters/08-debug与profiling.md)。
+
+1. 取 `B=1,T=4,V=6`，labels 为 `[2,5,3,-100]`。列出 logits、shifted logits、shifted labels 与 flatten 后 shape；若两个有效目标的预测概率为 `0.5` 和 `0.25`，手算 `ignore_index=-100` 下的 token-mean CE。
+2. 构造 shape 正确但 padding mask 错一位的 causal LM batch。写出入口、collate、logits、shift loss 四处各自应满足的断言，并说明最早在哪个边界失败。
+3. 对一个含 NaN 的 forward 输出，设计按 input、hidden、attention score、logits、loss、grad 的有限值检查顺序。另构造全 `-100` labels，解释它与有限的零 loss 为什么不同。
+4. 用 `grad=[3,4]` 计算范数；分别构造 `grad is None`、全零 grad 和非有限 grad，说明 optimizer 参数覆盖与真实 step 还要检查什么。
+5. 计算 FP32 logits `[4,2048,32000]` 的 payload bytes / GiB；若错误地保留 10 个计算图输出，估算仅 logits 本身的占用，并区分它与 `allocated`、`reserved` 和本 step peak。
+6. 设计 DataLoader 的 10 batch 预热加 100 batch 稳态计时；说明 iterator 启动、短数据集和 batch 长度分布会怎样影响报告值。
+7. `B=8,T=1024`、单步 `0.20s`，padding 后只有 75% 位置是有效目标。分别算 padded token/s 和有效 token/s，并写出跨 padding 策略比较时应固定的 workload。
+8. 对 `wait=1,warmup=1,active=2` 写出 profiler 每一步的状态，计算至少要调用几次 `prof.step()`；解释 profiler schedule 与独立墙钟 benchmark 各回答什么问题。
+9. 对一个小模型比较 eager 和 `torch.compile`：设计固定输入正确性对照、代表性 shape 预热、graph break / recompile 日志和稳态计时。若 eager 为 `1.20ms`、compiled 为 `0.90ms`，计算 speedup 与延迟下降比例，并说明这是何种证据。
+10. 验证 batch A 有 2 个目标、mean loss 2，batch B 有 6 个目标、mean loss 1。计算 batch mean 和 token mean 的不同结果，解释为什么 train/val reduction 不一致会制造表面上的泛化异常。
+11. 构造 rank 2 在 step 20 数据解码失败、其他 rank 等待 backward 的四 rank 日志；设计一个最小复现的输入、断言、移除变量顺序和修复后回归条件。
 
 ### Tokenizer 词表扩展：兼容、成本与回归
 
@@ -762,17 +790,20 @@
 23. 写一个 0 依赖 VLM connector / prompt shape demo，检查 `[B,N_v,d_v] -> [B,N_v,d_l]` projector shape、`<image>` 占位符数量、多图 token budget、resampler 压缩、cross-attention cell 数和 assistant-only label 数；输出中分别注明“维度投影、序列压缩、语言模型读取位置”，不要把它们当互斥架构类型。
 23A. 用 BLIP-2 论文示例的视觉表示 shape `257×1024` 和 32 个输出 query，手算送往 LLM 的序列缩短倍数、减少的位置数与比例；再用助手回答目标概率 `0.8`、`0.5` 计算两 token 的 NLL 求和与 token 平均，并说明这些数值能支持什么、不能推出整体推理成本或通用训练目标的什么结论。
 23B. 对一项视觉问答任务取 `Content=0.90`、`Evidence=0.25`、`Relation=0.80`、`Format=1.00`，权重分别为 `0.30/0.40/0.20/0.10`，手算 TaskScore 并解释为何仍须报告分项；为对象是否存在和图像上下文推理分别设计一个 POPE 式或 HallusionBench 式诊断问题，写出各自覆盖范围与局限。
-24. 写一个 0 依赖多模态 SFT 数据审计 demo，检查 placeholder、assistant-only label 数、任务覆盖、evidence support、missing refusal、上下文预算和拒绝进入训练的坏样本。
+24. 写一个 0 依赖多模态 SFT 数据审计 demo，检查 placeholder、assistant-only label 数、任务覆盖、claim-level evidence support、应拒答样本的 refusal recall、可回答样本的 over-refusal rate、上下文预算和拒绝进入训练的坏样本；明确 support 分母是否包括被拒绝样本。
 25. 写一个 0 依赖 diffusion 加噪 / 去噪审计 demo；使用 `β=[0.1,0.2]`、`x0=(1,0)`、`ε=(0,1)`、预测噪声 `εθ=(0.2,0.6)`，核对 `alpha_bar`、`x_t`、noise MSE、`x0_hat` 与 DDPM reverse mean；用 `ε_uncond=0.2`、`ε_cond=0.5` 同时计算论文 CFG 参数 `w=2` 和差分系数约定 `s=1+w=3`，并注明这不意味着任意库的 `guidance_scale` 都采用相同映射；再以 `512×512×3 → 64×64×4` 手算 latent 标量数比例，并说明它不等于端到端算力比例。
-26. 写一个 0 依赖文生图 pipeline 审计 demo，输入 prompt、negative prompt、分辨率、VAE scale、采样步数、CFG scale、ControlNet 条件通道数和 DALL-E image token 网格，输出 latent shape、压缩比、U-Net 调用次数、cross-attention cells、image-to-image 起始步、自回归图像 token 数和 gate pass。
-26A. 区分可逆 Normalizing Flow、扩散模型与 Flow Matching。取噪声端 `x0=0`、数据端 `x1=4`，沿 `x_t=(1-t)x0+t*x1` 在 `t=0.25` 手算状态和目标速度；若模型预测 `3.5`，计算单样本平方速度误差，并解释该例为何不代表所有 Flow Matching 路径、精确似然或生产采样步数。再读 Pyramidal Flow Matching，画出空间金字塔阶段、单个 DiT 和自回归时间历史之间的关系。
+25A. 取 `γ=5、SNR=20`，分别计算 `x0`、epsilon、`v` 目标的 Min-SNR-γ 权重；再对照固定方差与 Improved DDPM 学习方差，解释前者为什么不改变 sampler、后者为什么不等于替换数值 solver。
+25B. 使用 Stable Diffusion 2.1 schedule 的论文示例 `sqrt(bar_alpha_T)=0.068265`，计算 `sqrt(1-bar_alpha_T)` 并写出末步 `x_T`；解释训练末端保留信号、生成从纯高斯开始时的边界错配，并说明为何该例不能推广到所有 checkpoint。
+26. 写一个 0 依赖文生图 pipeline 审计 demo，输入 prompt、negative prompt、批量、分辨率、VAE scale、采样步数、CFG scale、ControlNet 条件通道数和 DALL·E image token 网格；输出 latent shape 与元素比例、两路文本条件 shape、逐分支 denoiser forward-equivalents、按批量/条件分支/head/layer 口径计算的逻辑 cross-attention score cells、image-to-image 教学步数与列表起始索引、自回归图像 token 数和 gate pass。说明 forward-equivalents 不等于函数调用数，逻辑 score cells 不等于 FLOPs 或峰值显存。手算 30 步、CFG 正负条件各 77 token、每层 8 heads、8 层且每层有 4096 个 latent query 的累计 score cells。
+26A. 区分可逆 Normalizing Flow、扩散模型与 Flow Matching。取噪声端 `x_noise=0`、数据端 `x_data=4`，沿 `x_t=(1-t)x_noise+t*x_data` 在 `t=0.25` 手算状态和目标速度；若模型预测 `3.5`，计算单样本平方速度误差。再说明 Rectified Flow 与 Flow Matching 的关系，并解释这些例子为何不代表所有概率路径、精确似然或生产采样步数。最后阅读 Pyramidal Flow Matching，画出空间金字塔阶段、单个 DiT 和自回归时间历史之间的关系。
 27. 写一个 0 依赖视频 token / 多轮世界状态审计 demo，输入帧数、分辨率、spatial/temporal patch、latent 压缩倍数、采样步数、CFG scale、初始 scene state、view mode、action trace、camera trace 和多轮生成记录；输出 raw/framewise tokens、latent shape、denoiser calls、动作与镜头遵循、主体/背景/空间跨轮一致性、遮挡后状态、toy physics check、world rollout error 和 gate pass。另比较时空分解 U-Net、空间/时间级联、全片 Space-Time U-Net 与 latent DiT 在显存、序列成本和全局一致性上的取舍。说明每个分数的分母与评估模型，并限制结论在 toy 数据、论文配置与对应交互协议内。
 28. 写一个 0 依赖音频前端 / WER / codec 审计 demo，输入采样率、音频时长、window / hop、center 与 padding 约定、mel bins、文本规范化和分词规则、reference / hypothesis、codec 帧率、codebooks、各 stage 时间、chunk overlap 与说话人授权状态；输出采样点数、明确口径下的 STFT 帧数和 log-mel shape、语料汇总 WER/CER 与逐句宏平均、空参考样本数、codec token 数、压缩比、TTFC、客户端 TTFA、打断后静音时间和 gate pass。
 28A. 手算 CTC 路径 `b, o, blank, o, k` 与 `b, o, o, k` 分别折叠成什么文本，再画出一个 RNN-T 中 blank 推进声学时间、label 推进文本前缀的格点；据此比较 CTC、RNN-T 与 attention encoder-decoder 的等待来源。给出相同 encoder、数据和硬件下应报告的 chunk、lookahead、partial revision、WER/CER 与首个稳定转写延迟，并说明单有 CTC/RNN-T 目标不能保证流式。可用 Qwen3-ASR 的动态 1—8 秒 attention window 作为单一实现案例，但不得推广为所有 AED 的属性。
 28B. 为 10 条虚构业务语音建立双轨评估：逐词对齐后汇总 WER，再用明确 rubric 标记关键字段是否会改变业务操作，计算任务特定的 UER；构造一个 reference-guided normalizer 把错误金额改成参考值的反例，检查它如何改变评分。随后设计人工抽检和分 locale 切片，并说明 mu-bench 的 judge 一致性结果只适用于其数据、rubric 与 normalizer 设定。
 28C. 构造一段说话人参考音频和两段合成结果，分别评估 speaker embedding 相似度与 timing、prominence、intonation；手算 `[4,6]` 帧持续时间在速度系数 `r=1.5` 下如何变为 `[3,4]`，解释 MOS 或音色相似度高为何不能证明韵律被复制。阅读 LP-TTS-Bench 的 prompt-duration 结果时，把约 10 分钟附近的观察限定在论文基准与其参考系统，不把它当成通用 prompt 长度建议。
 29. 写一个 0 依赖统一多模态样本审计 demo，输入文本 token、图片分辨率、音频时长、视频帧数、输出模态、上下文上限、loss weights 和安全标记，输出各模态 token、输入 / 输出总 token、attention cells、路由模块、loss mixture、风险标记和 gate pass。
-30. 写一个 0 依赖多模态评估与安全审计 demo，输入 toy VQA、OCR / ASR、图表、grounding、claim support 和安全样本，输出 VQA accuracy、WER / CER、chart relaxed accuracy、IoU、hallucination rate、policy accuracy、risk counts、latency gate 和 gate pass。
+29A. 拆解“原生多模态、统一 token、端到端生成”三项模型声明，逐项列出需要的架构、训练或 API 证据；阅读 Qwen3.5-397B-A17B 官方模型卡中 early-fusion training 与 Vision Encoder 两条描述，解释它们为何不矛盾，并写出尚不能推出的 tokenizer、完整数据流和 encoder-free 结论。
+30. 写一个 0 依赖多模态评估与安全审计 demo，输入 toy VQA、OCR / ASR、图表、grounding、claim support 和安全样本，输出 VQA accuracy、WER / CER、chart relaxed accuracy、IoU、hallucination rate、policy accuracy、risk counts、latency gate 和 gate pass。VQA v2 子项固定每题 10 个参考答案，逐一留出一位标注者后计算评分；用 1、2、3 个匹配各手算一例，并与官方 evaluator 对照。
 30A. 设计两个互补的音视频评测切片：一个考察 10—90 分钟视频中的长程记忆与跨模态理解，一个用间接意图查询定位事件。手算 gold 区间 `[10,20]` 秒与预测 `[14,24]` 秒的 temporal IoU：交集为 6 秒、并集为 14 秒；再说明怎样在多样本上汇总 mIoU 和 Recall@IoU。为 RVG 式任务增加音频必要性、查询唯一性、目标泄漏检查和人类验证；对比模型结果时固定帧采样、音频输入、提示、API/checkpoint、时间戳协议和模型版本。解释长视频记忆与推理型定位是不同能力，不能用一个 benchmark 分数互相替代。
 31. 写一个 0 依赖多模态面试复盘 demo，输入 mock interview 回答记录、required topics、required formulas、required demos、risk set 和 trade-off set，输出 topic coverage、formula coverage、demo coverage、risk coverage、weak questions、missing formulas、revision plan 和 interview ready。
 32. 写一个 0 依赖 reasoning 成本 / 正确率审计 demo，输入 toy reasoning 题、候选答案、verifier 分数、步骤正确标签和 token 成本，输出 greedy accuracy、self-consistency accuracy、verifier accuracy、pass@k、process step accuracy、cost per verified correct 和 gate pass。
@@ -1914,6 +1945,29 @@
 5. 构造 CER 小于 0.2 但漏掉否定词的转写，以及“不是 128 元”的图片回答；确认 toy 规则可能通过，另设计关键字段和语义标注验收。比较语料级 CER 与逐句平均，并测试插入导致 CER 大于 1。
 6. 分开计算视觉/文本输入与输出 token 到达率；用总成本 20 元、100 次请求、80 次成功计算单位成功成本，再说明重试按任务归并后应如何统一分母。
 
+## 第十五册第八章：视频生成与 World Model
+
+配套正文：[第十五册第八章](book-15-multimodal-generative-models/chapters/08-视频生成与world-model.md)。
+
+1. 给四类请求选评测协议：自由文本生成、连续多轮动作/视角交互、可观测的对象物理变化、分镜关键帧执行。分别从 VBench-2.0、WBench、PVBench / World Models’ Last Exam in Physics、KeyFrame-Compass 中选择，写明输入条件、测量对象、样本分母和不能外推的结论。
+2. 用一维高斯特征手算 FVD：真实分布均值/方差为 1/4，生成分布为 2/1；拆开均值项与协方差项，再解释这个教学距离为什么不能报告为模型实测分数，也不能定位某条 prompt 的失败。
+3. 设 $x_{k+1}=x_k+a_k$、$x_0=0$、目标 $x^*=1$，比较两步动作序列 $(0.6,0.4)$ 和 $(0.8,0.8)$，使用正文的状态误差加动作代价复算 MPC 选择；再说明只执行首步后重观测解决了什么，以及模型误差和碰撞风险仍需怎样验证。
+4. 将视频 batch 改为 2，分别计算启用/关闭 CFG 时的样本级 denoiser 前向等价量；给正、负提示设置不同 token 长度，手算一个 attention head / layer 的 score-cell 数，并解释实际框架调用次数还取决于 batch 组织方式。
+
+## 第十五册第九章：语音与音频生成
+
+配套正文：[第十五册第九章](book-15-multimodal-generative-models/chapters/09-语音与音频生成.md)。
+
+1. 对 16 kHz、3.2 秒、25 ms window、10 ms hop 的单声道音频，计算样本数、window/hop 样本数、centered 帧数和 valid 帧数；解释为何两种帧口径分别是 320 与 318。
+2. 取输入 latent `[1.2, 0.1]`，第一码本候选 `[1,0]`/`[0,0]`，第二码本候选 `[0,0.1]`/`[0,0]`；逐层选择最近码、计算残差、重建向量和平方误差，并说明玩具向量不能代表实际 codec 听感。
+3. 用 50 Hz、4 个码本、每 codebook 1024 个条目计算每秒 token 数和理想 bit rate；再算 3.2 秒 token 数与 PCM bit 数，并列出 padding、熵编码和容器开销为何会改变真实文件比值。
+4. 参考文本为 `turn on the hallway lights`，假设文本为 `turn on the hallway light`。分别计算 WER 和 CER，说明空参考为什么是未定义值，以及大小写/标点/分词规范化如何改变分母或编辑距离。
+5. 设计 ASR 的关键字段切片：包含姓名、日期、金额、否定词和确认码；同时保留原始转写、规范化转写、WER/CER、UER 或人工重大错误标注，并验证 normalizer 不会把错误字段替换成参考答案。
+6. 给四个串行阶段 `VAD=30 ms`、`ASR=180 ms`、`LLM=220 ms`、`TTS=190 ms`，计算配置阶段和；再加入采集、网络、播放缓冲和部分重叠，画事件时间线，分别定义 TTFT、TTFC/TTFP 与客户端 TTFA。
+7. 为长 prompt 韵律复现、多说话人场景合成、长文播客和实时打断各自选择 LP-TTS-Bench、DRAMA-Eval、SwanBench-Speech 或 InteractionBench；写明评测单位、条件、主要分母和不能外推的结论。
+8. 给语音 Agent 设计第三方音频注入安全评估，区分用户直接说出的请求、录音中的第三方内容、模型识别、工具提议、授权确认和真实执行回执；说明论文攻击成功率为什么不能直接写成目标系统风险率。
+9. 为音乐增强系统设计一项 MUSHRA 主观比较，说明隐藏参考、锚点、听者与播放条件；再解释 FAD 如何比较输出集合与干净背景集合，为什么它不能替代单条语音的内容正确率或 TTS 自然度。
+
 ## 第三册第十章：Agent 轨迹与线上实验
 
 配套正文：[第三册第十章 10.1 轨迹回放](book-03-practical-handbook/chapters/10-agent轨迹与线上评估实战.md)、[10.2 线上 A/B](book-03-practical-handbook/chapters/10-agent轨迹与线上评估实战.md)。
@@ -1959,6 +2013,29 @@
 3. 用同一 bool mask 分别调用 SDPA 与 MultiheadAttention，验证 True 的含义相反；对 LayerNorm 设置非零 bias，说明输出均值不再为0。
 4. 用相同键、错误 shape 的 state_dict 测试 strict=False；保存普通 state_dict 引用后修改参数，与深拷贝比较，解释键相同为何不等于权重恢复正确。
 5. 两个 micro-batch 分别有10和1个有效 token，比较均值再平均与token加权平均；将同一推导扩展到默认按rank平均梯度的DDP，说明no_sync为什么不修正权重错误。
+
+## 第十四册第九章：Transformer 组件实现与 cache 状态
+
+配套正文：[第十四册第九章](book-14-pytorch-deep-learning-engineering/chapters/09-实现transformer组件.md)。
+
+1. 令 `V=32,d=16,m=32,L=2`，线性层无 bias、每层有两个 RMSNorm、LM head 可绑定。逐项计算 tied 与 untied 参数量，分别核对总数 `5,712` 和 `6,224`，并指出权重绑定共享的是哪个参数对象。
+2. 对 `x=[3,4]`、`gamma=[1,1]`，手算 LayerNorm 的均值、有偏方差和输出，再手算 RMSNorm 的均方值、RMS 和输出；说明 `eps=1e-6` 对舍入的影响，并查明 PyTorch 2.15 `nn.RMSNorm(eps=None)` 的 epsilon 规则。
+3. 用 `q=[0,1]`、`k_0=[1,0]`、`k_1=[0,1]`、`v_0=[10,0]`、`v_1=[0,20]` 手算缩放分数、softmax 权重和位置 1 的输出；再屏蔽 key 1，核对位置 0 输出。随后比较 SDPA 与 `MultiheadAttention` 布尔 mask 的 True 语义，并说明评估时 `dropout_p` 的设置。
+4. 对二维 RoPE，令同一向量 `[1,0]` 分别处于位置 1 和 3，计算旋转后点积 `cos(2)≈-0.4161`；说明它怎样依赖相对相位，并检查 decode 的新位置为何从 `past_len` 起算。
+5. 输入 `[3,1,2,0]`，标签 `[3,1,2,-100]`；写出右移后的三个标签，若前两个目标概率分别为 `0.8` 和 `0.5`，计算平均交叉熵约 `0.4581` 及困惑度约 `1.581`，解释忽略标签为何不进入分母。
+6. 对 `L=32,B=2,H_kv=4,T=512,D_h=64,b=2` 计算 KV cache 为 `32 MiB`，再令 `H_kv=2` 得 `16 MiB`。对 `P=3` 并生成两个 token，分别计算无 cache 的 causal pair 数 `16` 与带 cache 的 `10`，再写出 `past_len=3,q=2` 的两行 mask 并说明 cache 仍保留了哪些计算。
+7. 运行章节审计 demo，逐项解释 mask 方向、未来权重、RoPE 范数、权重绑定及 prefill/decode 对照各自能发现哪类错误；故意把 RoPE offset 设回零，预测哪些 shape 检查仍通过、哪项语义检查应失败。
+
+## 第十四册第十章：综合工程判断与复现
+
+配套正文：[第十四册第十章](book-14-pytorch-deep-learning-engineering/chapters/10-工程面试题.md)。
+
+1. 构造训练 loss 从 `2.1` 降到 `0.2`、独立验证不提升的四 token 样本；分别提出 label 泄漏、padding 监督、分母变化和数据分布四个假设。为每个假设写出最小输入、观测量、预期结果及会推翻该假设的反例。
+2. 为一次中断的训练写 checkpoint 状态清单，涵盖 model、optimizer、scheduler、global step、随机状态和数据游标；设计固定 batch logits、下一次随机数、下一批样本及真实 optimizer update 的恢复回归，并说明只比较权重不能证明什么。
+3. 两个 rank 的 loss sum/token 数分别为 `(4,4)` 和 `(12,16)`。计算本地 mean、rank mean `0.875` 与 global token mean `0.8`；说明如果 DDP 平均各 rank 梯度，怎样缩放 loss sum 才能表达全局 token mean，并标出该缩放依赖的同步假设。
+4. 对同一验证张量分别使用 `model.eval()`、`torch.no_grad()` 和 `torch.inference_mode()`；记录 Dropout 行为、`requires_grad`、输出能否重新进入 Autograd 图，并解释为什么三者不能互相替代。
+5. 针对 GPU 利用率低，设计一个不启用 profiler 的稳态计时基线，再选一个短 profiler 窗口解释如何测 DataLoader、copy、forward/backward 和同步；记录 warmup、有效 token、batch shape、dtype、CUDA 同步及 profiler 观测开销。
+6. 运行章节的 CPU 工程审计 demo，再分别注入全 ignore labels、optimizer 未包含模型参数、checkpoint 不恢复和 rank 分母混淆；预测 failed checks、signals、actions 和 gate 输出，区分代码运行成功与目标成立。
 
 ## Tokenization 百科：覆盖与计数契约
 

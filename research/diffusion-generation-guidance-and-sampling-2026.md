@@ -48,6 +48,24 @@
 - ICLR 2026 scaling-law 仅查阅官方摘要；全文实验细节、拟合稳定性与预测误差尚未独立审查。
 - Diffusers 证据固定在 v0.35.1 的经典 Stable Diffusion pipeline；其他 pipeline、版本或框架应重新检查对应源码与参数定义。
 
+## 2026-11-11 补充核验：方差、时间权重与设计空间
+
+- 来源：Nichol and Dhariwal, [Improved Denoising Diffusion Probabilistic Models](https://arxiv.org/abs/2102.09672v1)，arXiv v1。阅读 arXiv HTML 摘要、§2.2 和 §3.1。
+  - 来源支持：普通 DDPM 的简化 `L_simple` 不向反向协方差 `Σ_θ` 提供学习信号；作者以网络输出的逐维参数在对数空间参数化 `β_t` 与后验方差 `\tilde{β}_t`，并通过 `L_simple+λL_vlb` 混合目标训练方差。论文没有约束插值参数在 `[0,1]`，且其公式在零后验方差端点需要实现层的 log-variance 约定。
+  - 来源支持：摘要报告学习反向方差后，作者模型在其图像实验中可使用少一个数量级的模型前向调用，样本质量变化很小。
+  - 边界：少步数字绑定论文训练/采样模型和质量指标，不能推出其他 checkpoint 可直接跳步；不据此给出通用采样建议。
+  - 证据等级：方法定义和摘要级作者报告 source-backed；未本地运行 checkpoint 或复现 benchmark。
+
+- 来源：Karras et al., [Elucidating the Design Space of Diffusion-Based Generative Models](https://arxiv.org/abs/2206.00364v2)，arXiv v2 / NeurIPS 2022 官方论文。[NeurIPS 论文 PDF](https://papers.nips.cc/paper_files/paper/2022/file/a98846e9d9cc01cfb87eb694d946ce6b-Paper-Conference.pdf) 阅读摘要、§1、§2 和 §5。
+  - 来源支持：论文把扩散设计视为可分解的选择，分别分析时间/噪声参数化、ODE/SDE 采样与离散、训练噪声分布/损失以及 score network 输入/输出预条件；§5 给出依赖 `σ` 的 skip/preconditioning 结构。该视角用于厘清哪些改动作用于采样、哪些作用于训练或网络表示。
+  - 边界：作者 FID 与 NFE 结果绑定 CIFAR-10、ImageNet-64 等论文设置；设计项可分别研究不代表任意交叉组合都兼容，也不等于每个模型都应采用 EDM 全套参数。
+  - 证据等级：source-backed（同行评审论文，方法和指定实验条件已阅读）；未独立复现。
+
+- 来源：Hang et al., [Efficient Diffusion Training via Min-SNR Weighting Strategy](https://arxiv.org/abs/2303.09556v3)，arXiv v3。阅读 HTML §§3.1、3.4 和 §4.2。
+  - 来源支持：作者把不同时间步视为共享参数的多个去噪任务，提出由截断 SNR 定义的 Min-SNR-γ 权重；按论文等价目标换算，`x0` 目标为 `min(SNR,γ)`，`epsilon` 目标为 `min(1,γ/SNR)`，`v` 目标为 `min(SNR,γ)/(1+SNR)`。摘要及 ImageNet 256×256 等指定实验报告更快收敛；速度结论应绑定对应网络、γ、prediction target、数据和评价阈值。
+  - 边界：权重不是与 parameterization 无关的通用 multiplier；本记录只保存论文公式和作者实验边界，不声称本地训练验证或适用于所有损失归一化约定。
+  - 证据等级：方法与作者实验 source-backed；未复现。
+
 ## 图像生成评估指标
 
 - 来源：Heusel et al., [GANs Trained by a Two Time-Scale Update Rule Converge to a Local Nash Equilibrium](https://proceedings.neurips.cc/paper_files/paper/2017/file/8a1d694707eb0fefe65871369074926d-Paper.pdf)，NeurIPS 2017。核对摘要和 FID 定义段。

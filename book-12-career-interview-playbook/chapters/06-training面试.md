@@ -100,7 +100,7 @@
 
 精确去重可以按规范化后的字符串、文件哈希或样本哈希删除完全相同的记录。近似去重需要把文本表示成 n-gram、MinHash、SimHash 或 embedding，再根据相似度聚类或过滤。两者解决的问题不同：前者成本低、边界清楚；后者能处理轻微改写，却更容易误删相关但有价值的样本。
 
-评估污染是去重的另一面。训练集和测试集没有逐字相同，也可能存在高相似的网页副本、题目解析、代码镜像或模板。污染检查需要记录比较算法、阈值、时间范围和人工复核规则。一个“没有发现重叠”的结论，只能表示在该检查协议下没有发现，不等于数学意义上的完全独立。
+评估污染是去重的另一面。训练集和测试集没有逐字相同，也可能存在高相似的网页副本、题目解析、代码镜像或模板。污染检查需要记录比较算法、阈值、时间范围和人工复核规则。一个“没有发现重叠”的结论，只能表示在该检查协议下没有发现，不等于数学意义上的完全独立。近重复数据与 benchmark 污染的检测结果受语料、阈值和检测召回率限制，不能把任意文本重叠直接等同于分数虚高；可参考 [Deduplicating Training Data Makes Language Models Better](https://aclanthology.org/2022.acl-long.577/) 与 [Task Contamination](https://arxiv.org/abs/2312.16337) 的具体研究范围。
 
 ### 6.2.4 混合比例决定模型看见什么
 
@@ -116,11 +116,11 @@ w_kD,
 
 实际数据集大小、重复采样、上采样和过滤损耗会使 `D_k` 与这个期望不同。更重要的是，能力不是数据比例的线性函数：增加代码数据可能改变代码能力、自然语言风格、token 分布和训练速度，不能只用“代码 token 占比提高了”解释结果。
 
-网页提供覆盖面，书籍和长文提供段落结构，论文提供专业表达，代码提供严格的符号和执行反馈，数学数据提供形式化推导，对话和工具轨迹提供交互协议。它们不是互相替代的标签，而是不同的训练信号。数据混合应以目标能力和成本为约束，通过小规模对照而不是永久套用一个经验比例。
+网页提供覆盖面，书籍和长文提供段落结构，论文提供专业表达，代码提供严格的符号和执行反馈，数学数据提供形式化推导，对话和工具轨迹提供交互协议。它们不是互相替代的标签，而是不同的训练信号。数据混合应以目标能力和成本为约束，通过小规模对照而不是永久套用一个经验比例。DoReMi 与 Data Mixing Laws 展示了在特定 proxy、语料、模型和目标上搜索混合比例的方法；其结果支持做目标内实验，不构成跨项目的固定配方。[DoReMi](https://arxiv.org/abs/2305.10429v4)；[Data Mixing Laws](https://proceedings.iclr.cc/paper_files/paper/2025/hash/cc84bfabe6389d8883fc2071c848f62a-Abstract-Conference.html)
 
 ### 6.2.5 采样概率与数据量不是一回事
 
-设第 k 类原始有效 token 数为 `S_k\geq0`，采样权重为 `a_k\geq0`，且至少有一个 `a_kS_k` 为正。如果按加权重采样，归一化后的概率为：
+设第 k 类原始有效 token 数为 `S_k\geq0`，对每个池内 token 施加的采样权重为 `a_k\geq0`，且至少有一个 `a_kS_k` 为正。如果按加权重采样，归一化后的来源概率为：
 
 ~~~math
 p_k
@@ -128,11 +128,11 @@ p_k
 \frac{a_kS_k}{\sum_{j=1}^{K}a_jS_j}
 ~~~
 
-当某个小数据源被上采样时，它的 epoch 定义会变得模糊：同一条样本可能被重复看到多次。报告训练 token 时，应区分“抽取 token 数”和“去重后独立 token 数”；报告数据比例时，应说明是按原始数据、过滤后数据还是实际训练采样统计。
+当某个小数据源被上采样时，它的 epoch 定义会变得模糊：同一条样本可能被重复看到多次。如果 `a_k` 本身已经表示目标来源比例，而不是池中每个 token 的权重，则直接按 `a_k/Σ_j a_j` 采样来源，不再乘 `S_k`。报告训练 token 时，应区分“抽取 token 数”和“去重后独立 token 数”；报告数据比例时，应说明是按原始数据、过滤后数据还是实际训练采样统计。
 
 ### 6.2.6 一个数据混合的数值例子
 
-假设过滤后有网页 800B token、代码 150B token、数学 50B token。训练预算是 200B token，目标采样比例为 0.60、0.25、0.15，则期望抽取：
+假设过滤后有网页 800B token、代码 150B token、数学 20B token。训练预算是 200B token，目标采样比例为 0.60、0.25、0.15，则期望抽取：
 
 ~~~math
 D_{\mathrm{web}}=120\mathrm{B},
@@ -142,7 +142,7 @@ D_{\mathrm{code}}=50\mathrm{B},
 D_{\mathrm{math}}=30\mathrm{B}
 ~~~
 
-网页和代码可以主要来自一次遍历，数学则需要较高的重复或更积极的抽样。若数学样本实际只有 20B 且每条最多重复两次，那么“30B 数学 token”并不等于 30B 独立数学内容。这个区别会影响记忆风险、验证集独立性和对训练收益的解释。
+网页和代码的目标量不超过各自可用池，可以主要来自一次遍历；数学目标量超过 20B 的可用池，需要重复抽样。若每条数学样本最多抽两次（含首次），容量上限为 40B，可以满足 30B 预算，但其中至少 10B token 来自重复内容，并不等于 30B 独立数学内容。这个区别会影响记忆风险、验证集独立性和对训练收益的解释。
 
 ## 6.3 Tokenizer、序列长度与 packing
 
@@ -170,7 +170,7 @@ r_{\mathrm{pad}}
 - 独立 packing：每个样本有边界 mask，不能读取另一个样本的 token；
 - 连续 stream packing：把文本视为同一训练流，只在文档边界加入分隔符。
 
-它们的计算形状可以相同，训练语义却不同。实现时必须用小样本逐位置检查 attention mask 和 labels，而不能只比较 tokens/sec。
+它们的计算形状可以相同，训练语义却不同。实现时必须用小样本逐位置检查 attention mask 和 labels，而不能只比较 tokens/sec。针对预训练文档拼接与 intra-document causal masking 的对照研究也报告了特定设置下跨文档上下文的收益与干扰，结论不能脱离其模型和数据设置外推。[Packing and Masking Strategies for Pre-Training Sequence Composition](https://aclanthology.org/2024.acl-long.427.pdf)
 
 ### 6.3.3 变长 batch 的 loss reduction
 
@@ -198,6 +198,8 @@ r_{\mathrm{pad}}
 
 当 `m_i` 不相等时，两者并不相同；如果某条序列 `m_i=0`，它不能进入按序列平均的分母，应被显式跳过或作为无监督样本单独统计。前者让每个 token 贡献相近，后者让每条样本贡献相近。预训练通常关注 token-level 预算，指令数据有时更关心每条任务的均衡；选择哪一种不是实现细节，而是优化目标的一部分。
 
+例如，样本 A 有三个 token loss `[1,2,3]`，平均值为 `6/3=2`；样本 B 只有一个 token，loss 为 `4`。全局 token mean 是 `(1+2+3+4)/4=2.5`，每条序列等权的 sequence mean 是 `(2+4)/2=3`。同一组 token loss 因为分母不同会得到不同目标；比较训练日志时必须说明使用了哪一种 reduction。
+
 ### 6.3.4 tokenizer 变化会改变训练预算
 
 同样的字符文本使用不同 tokenizer，可能产生不同的 token 数、不同的序列边界和不同的监督粒度。token 数更多会增加训练计算、KV cache 读取和上下文截断概率；token 数更少则可能让单个 token 携带更复杂的语义，改变预测难度。
@@ -220,6 +222,8 @@ N(b_w+b_g+b_o)
 
 这是容量估算，不是某个框架的精确分配结果。AdamW 的一阶和二阶矩通常使用较高精度保存，混合精度训练还可能保留 master weights；因此“模型用 BF16”并不表示训练状态全部只占 BF16 的一份。
 
+例如，假设 7B 参数模型用 BF16 保存参数和梯度，每个参数另有两个 FP32 Adam 状态，则完整、未分片的这三项约占 `7×10^9×(2+2+8)=84×10^9` 字节，也就是 84 GB 十进制；如果另保留 FP32 master weights，再增加 `7×10^9×4=28` GB，总计约 112 GB。这里还没有加 activation、临时缓冲和碎片开销；即使将持久状态理想分到 8 张卡，也不能把分片后的每卡数字当作真实峰值，因为前向 all-gather、激活和通信 buffer 仍需显存。
+
 ### 6.4.2 激活显存和三个长度相关
 
 激活显存主要受 batch、序列长度、hidden size、层数、是否保存反向所需中间结果和 attention 实现影响。对 dense Transformer，可把主要趋势写成：
@@ -230,7 +234,7 @@ M_{\mathrm{act}}
 B\times T\times L\times H
 ~~~
 
-其中 `B` 是 micro-batch，`T` 是序列长度，`L` 是层数，`H` 是 hidden size。标准 attention 还会产生与 `T^2` 相关的 score 或概率中间量；memory-efficient attention 可以避免显式保存完整矩阵，但不能把算法的所有计算和带宽都变成线性。
+其中 `B` 是 micro-batch，`T` 是序列长度，`L` 是层数，`H` 是 hidden size。标准 attention 还会产生与 `T^2` 相关的 score 或概率中间量；FlashAttention 一类 IO-aware 实现可以避免显式保存完整注意力矩阵，但不能把算法的所有计算和带宽都变成线性。[FlashAttention](https://arxiv.org/abs/2205.14135v2)
 
 激活重计算用额外计算换显存：前向只保存部分边界，反向时重新计算中间激活。它通常能让更大的 batch 或更长序列放入显存，但会降低单步速度。正确比较时要同时记录峰值显存、有效 tokens/sec 和总训练时间。
 
@@ -250,7 +254,7 @@ C_{\mathrm{train}}
 kND
 ~~~
 
-常见的 `k` 量级近似会取 6 左右，但它依赖前向/反向计数、词表投影、attention、重计算、序列长度和实现，不能当作硬件实测。通信、数据读取、评估、checkpoint 和故障重跑都不在这个公式里。
+常见的 `k` 量级近似会取 6 左右，但它依赖前向/反向计数、词表投影、attention、重计算、序列长度和实现，不能当作硬件实测。Kaplan 等人对其 Transformer 设置给出每 token 约 `6N` 的非 embedding 计算估算；实际训练仍要按模型结构和实现核对。通信、数据读取、评估、checkpoint 和故障重跑都不在这个公式里。[Scaling Laws for Neural Language Models](https://arxiv.org/abs/2001.08361)
 
 ### 6.4.5 一个 7B 与 1T token 的计算例子
 
@@ -346,7 +350,7 @@ Data Parallel 在每个副本保存一份模型，不同副本处理不同样本
 
 ### 6.6.2 Tensor Parallel：切分层内矩阵
 
-Tensor Parallel 把线性层或 attention 投影的矩阵按行、列或 head 维度切分，使单层参数和中间张量分布在多张卡上。它解决的是单层放不下和层内计算规模过大的问题。
+Tensor Parallel 把线性层或 attention 投影的矩阵按行、列或 head 维度切分，使单层参数和中间张量分布在多张卡上。它解决的是单层放不下和层内计算规模过大的问题。Megatron-LM 的原始方案具体展示了 Transformer 层内的列并行、行并行及其 collective 通信点；性能仍依赖分区方式和 GPU 互联。[Megatron-LM](https://arxiv.org/abs/1909.08053v4)
 
 层内切分意味着前向和反向频繁通信，通常要求同一节点或高速互联域。TP degree 增大后，计算量下降，但 collective 的延迟和同步频率上升；选择切分维度时还要保证 hidden size、head 数和矩阵维度能整除。
 
@@ -354,7 +358,7 @@ Tensor Parallel 把线性层或 attention 投影的矩阵按行、列或 head �
 
 Pipeline Parallel 把连续层放到不同 stage，让多个 micro-batch 在流水线中同时运行。它能容纳更深的模型，但存在 pipeline bubble：流水线填充和排空时，部分 stage 没有工作。
 
-若 pipeline 有 `P` 个 stage，使用 `M` 个 micro-batch，理想化的 bubble 比例会随 `P/M` 增大而变差；具体调度还取决于 1F1B、交错 stage、负载不均衡和通信。增加 micro-batch 可以减少空泡，却会改变 activation、梯度累积和 latency。
+若 pipeline 有 `P` 个 stage，使用 `M` 个 micro-batch，理想化的 bubble 比例会随 `P/M` 增大而变差；具体调度还取决于 1F1B、交错 stage、负载不均衡和通信。增加 micro-batch 可以减少空泡，却会改变 activation、梯度累积和 latency。GPipe 的分析给出了填充/排空开销随 stage 数和 micro-batch 数变化的量级，但不提供所有 pipeline 调度的统一 step-time 公式。[GPipe](https://arxiv.org/abs/1811.06965v5)
 
 ### 6.6.4 ZeRO 与 FSDP：切分训练状态
 
@@ -365,13 +369,13 @@ ZeRO 和 FSDP 的核心思想是避免每个 data-parallel 副本都保存完整
 3. parameters；
 4. 参数在前向和反向期间临时 all-gather 的生命周期。
 
-显存下降通常伴随通信增加。参数切分不是“免费显存”，实际性能取决于 gather/reduce-scatter 是否能和计算重叠、网络拓扑、bucket 大小和模块粒度。一个配置在小模型上看起来更省显存，放到大模型或不同拓扑上可能因为通信而变慢。
+显存下降通常伴随通信增加。参数切分不是“免费显存”，实际性能取决于 gather/reduce-scatter 是否能和计算重叠、网络拓扑、bucket 大小和模块粒度。一个配置在小模型上看起来更省显存，放到大模型或不同拓扑上可能因为通信而变慢。ZeRO 论文给出优化器状态、梯度和参数分片的阶段划分；PyTorch FSDP2 的通信组则由 `fully_shard` 的模块粒度决定，FSDP1 与 FSDP2 接口并不相同。[ZeRO](https://arxiv.org/abs/1910.02054v3)；[PyTorch 2.15 FSDP2](https://docs.pytorch.org/docs/2.15/distributed.fsdp.fully_shard.html)
 
 ### 6.6.5 Sequence Parallel 与 Context Parallel
 
 当序列很长时，单个样本沿序列维度产生大量 activation。Sequence Parallel 可以在 tensor-parallel 组内切分部分序列相关计算；Context Parallel 则更广泛地沿上下文维度分布 attention 或状态。它们要处理跨设备的 key/value、mask、position 和通信。
 
-长上下文训练的困难不只是把 `T` 乘大：attention 可见性、位置外推、激活内存、通信体积和数据 packing 都会同时变化。只看模型配置中的 `max_position_embeddings`，不能证明训练系统和模型能力已经支持该长度。
+长上下文训练的困难不只是把 `T` 乘大：attention 可见性、位置外推、激活内存、通信体积和数据 packing 都会同时变化。只看模型配置中的 `max_position_embeddings`，不能证明训练系统和模型能力已经支持该长度。Sequence/Context Parallel 的划分方式与约束随实现变化；Megatron Core 的公开并行指南展示了其具体组合配置，但不能代表所有训练框架。[Megatron Core Parallelism Strategies](https://docs.nvidia.com/megatron-core/developer-guide/latest/user-guide/parallelism-guide.html)
 
 ### 6.6.6 并行度与设备拓扑
 
@@ -398,7 +402,7 @@ t_{\mathrm{compute}}
 +t_{\mathrm{save}}
 ~~~
 
-如果通信能够完全与计算重叠，实际时间更接近各阶段关键路径的最大值；如果同步点过多或 bucket 太小，则近似相加。优化前先用 profiler 测出时间线，才能知道应该改变并行度、bucket、数据读取，还是 kernel。
+如果通信能够完全与计算重叠，实际时间更接近各阶段关键路径的最大值；如果同步点过多或 bucket 太小，则近似相加。PyTorch DDP 会按梯度 bucket 启动 all-reduce，使通信有机会与反向计算重叠；具体收益取决于 bucket、模型图和网络。优化前先用 profiler 测出时间线，才能知道应该改变并行度、bucket、数据读取，还是 kernel。[PyTorch 2.15 DDP 设计说明](https://docs.pytorch.org/docs/2.15/notes/ddp.html)
 
 ## 6.7 混合精度与数值稳定性
 
@@ -406,20 +410,20 @@ t_{\mathrm{compute}}
 
 不同浮点格式在符号位、指数范围和尾数精度上不同。FP32 范围和精度较宽但占用大；FP16 节省内存却更容易 overflow 或 underflow；BF16 的指数范围接近 FP32，通常更能承受大模型训练中的动态范围，但尾数更短；FP8 进一步降低存储和带宽，却需要更细致的缩放、校准和硬件支持。
 
-“使用 BF16”通常只描述部分 forward/backward 张量，不代表 optimizer state、master weights、归约缓冲和 checkpoint 都使用同样精度。训练报告应分别写清参数、梯度、激活、optimizer state 和通信缓冲的 dtype。
+“使用 BF16”通常只描述部分 forward/backward 张量，不代表 optimizer state、master weights、归约缓冲和 checkpoint 都使用同样精度。训练报告应分别写清参数、梯度、激活、optimizer state 和通信缓冲的 dtype。PyTorch AMP 的算子级 casting 策略会在低精度与 FP32 之间选择，NVIDIA 的混合精度指南也区分模型不同状态的精度；这些是实现说明，不能替目标模型和硬件做稳定性保证。[PyTorch 2.15 AMP](https://docs.pytorch.org/docs/2.15/amp.html)；[NVIDIA Mixed Precision Training](https://docs.nvidia.com/deeplearning/performance/mixed-precision-training/index.html)
 
 ### 6.7.2 Loss scaling 为什么存在
 
 FP16 的小数范围有限，梯度很小时可能下溢为 0。loss scaling 先把 loss 乘以尺度 `s`，反向得到缩放梯度，再在更新前除以 `s`。如果检测到 Inf/NaN，则跳过该步并降低尺度；若长期稳定，可以逐步提高尺度。
 
-缩放只能处理表示范围问题，不能修复错误的梯度。BF16 通常不需要与 FP16 相同的动态 loss scaling，但仍可能出现 overflow、异常激活和归约误差。
+缩放只能处理表示范围问题，不能修复错误的梯度。BF16 通常不需要与 FP16 相同的动态 loss scaling，但仍可能出现 overflow、异常激活和归约误差。PyTorch 2.15 将 `torch.cuda.amp` 命名空间标为弃用，并推荐使用带设备类型参数的 `torch.amp` 接口；这是版本化 API 事实，不应外推为所有框架的接口约定。[PyTorch 2.15 AMP 文档](https://docs.pytorch.org/docs/2.15/amp.html)
 
 ### 6.7.3 稳定 softmax 与归约
 
 对 logits 向量 `z`，直接计算 `exp(z_i)` 可能溢出。稳定 softmax 先减去最大值 `m=max_i z_i`：
 
 ~~~math
-\operatorname{softmax}(z_i)
+\mathrm{softmax}(z_i)
 =
 \frac{\exp(z_i-m)}
 {\sum_j\exp(z_j-m)}
@@ -451,24 +455,26 @@ NaN 或 Inf 可能来自：
 
 ### 6.8.2 一个可复核的最小 loss 实现
 
-下面的实现刻意把 shift、ignore mask 和全忽略样本检查写出来。它适合作为训练框架中 fused loss 的参考测试，而不是用于替代高性能 kernel：
+下面的实现刻意把 shift、ignore mask 和全忽略样本检查写出来。调用方将 prompt、padding 或不参与训练的位置在 `labels` 中设为 `ignore_index`；`input_ids` 仍独立用于模型前向。它适合作为 fused loss 的语义参考，不是用于替代高性能 kernel：
 
 ~~~python
 import torch
 import torch.nn.functional as F
 
 
-def causal_lm_loss(logits, input_ids, ignore_index=-100):
+def causal_lm_loss(logits, labels, ignore_index=-100):
     """Return the mean loss over valid next-token labels."""
-    if logits.ndim != 3 or input_ids.ndim != 2:
-        raise ValueError("expected logits [batch, time, vocab] and ids [batch, time]")
-    if logits.shape[:2] != input_ids.shape:
-        raise ValueError("logits and input_ids must share batch and time dimensions")
-    if input_ids.shape[1] < 2:
+    if logits.ndim != 3 or labels.ndim != 2:
+        raise ValueError("expected logits [batch, time, vocab] and labels [batch, time]")
+    if logits.shape[:2] != labels.shape:
+        raise ValueError("logits and labels must share batch and time dimensions")
+    if labels.dtype != torch.long:
+        raise TypeError("labels must contain integer token IDs")
+    if labels.shape[1] < 2:
         raise ValueError("at least two positions are required")
 
     shifted_logits = logits[:, :-1, :].contiguous()
-    shifted_labels = input_ids[:, 1:].contiguous()
+    shifted_labels = labels[:, 1:].contiguous()
     per_token = F.cross_entropy(
         shifted_logits.reshape(-1, shifted_logits.shape[-1]),
         shifted_labels.reshape(-1),
@@ -481,7 +487,13 @@ def causal_lm_loss(logits, input_ids, ignore_index=-100):
     return per_token[valid].mean()
 ~~~
 
-这个函数的检查对应三个契约：时间维度必须对齐，标签必须向左移动一个位置，平均值只能在有效目标上计算。生产实现还要测试分布式 loss 的全局 token 归约、混合精度和 fused kernel 与参考实现的数值误差。
+> 状态：已验证（2026-11-06；Python 3.12.9；PyTorch 2.12.0+cpu）。
+
+这个函数的检查对应三个契约：时间维度必须对齐，标签必须向左移动一个位置，平均值只能在有效目标上计算。按 PyTorch 2.15 的 `cross_entropy` 约定，输入是 logits，类别索引标签可用 `ignore_index` 排除；代码在内部先得到逐位置 loss，再只对有效目标求均值。[PyTorch 2.15 `cross_entropy`](https://docs.pytorch.org/docs/2.15/generated/torch.nn.functional.cross_entropy.html)
+
+做一次小例子：词表只有 A、B，标签序列为 `[A, -100, B]`，中间位置代表不参与 loss 的 prompt。shift 后 labels 是 `[-100, B]`，第三位置的 logits 不参与预测，因为后面没有目标 token。若第二个 logit 行为 `[0, ln 3]`，它给 B 的概率为 `3/4`，唯一有效项的 NLL 是 `-ln(3/4)=ln(4/3)≈0.2877`。这个例子同时检查 shift、mask 和分母。
+
+该函数返回一次调用内的有效 token mean；如果在 DDP 中每个 rank 的有效 token 数不同，还必须按 §6.8.3 对本地 loss sum 作全局分母缩放。单 rank 参考实现本身不保证分布式目标等价。
 
 ### 6.8.3 梯度累积的正确归一化
 
@@ -503,6 +515,10 @@ def causal_lm_loss(logits, input_ids, ignore_index=-100):
 ~~~
 
 这只有在各个 `m_j` 相等时才与 token 平均一致。对于变长数据，错误归一化会改变梯度方向，且会随着 padding 比例变化而变化。
+
+分布式数据并行还要把各 rank 的 token 数放进同一个分母。设有 `R` 个 DDP rank，第 r 个 rank 在整个 accumulation cycle 的有效损失和为 `S_r`，有效 token 数为 `M_r`，全局总数 `M=Σ_r M_r`。DDP 默认对 rank 梯度求平均；若每个 rank 直接对自己的 token mean `S_r/M_r` 反向，得到的是 rank 等权平均，除非 `M_r` 相同，否则不等于全局 token mean。若各 rank 对本地损失和使用 `R S_r/M`，再由 DDP 除以 `R` 平均梯度，结果才对应 `Σ_r S_r/M`。这是从目标函数和 DDP 梯度平均语义推导出的缩放，具体代码还需匹配 accumulation 与通信组。[PyTorch 2.15 DDP](https://docs.pytorch.org/docs/2.15/generated/torch.nn.parallel.DistributedDataParallel.html)
+
+例如 rank 0 有 100 个 token，平均 loss 为 1，故 `S_0=100`；rank 1 有 300 个 token，平均 loss 为 2，故 `S_1=600`。全局 token mean 为 `(100+600)/(100+300)=1.75`，而直接平均两个 rank 的均值只有 `(1+2)/2=1.5`。两 rank 时按上述规则送入 DDP 的标量分别是 `2×100/400=0.5` 和 `2×600/400=3`；DDP 平均其梯度后对应全局目标。该数例使用构造输入。
 
 ### 6.8.4 训练状态机
 
@@ -543,7 +559,7 @@ def causal_lm_loss(logits, input_ids, ignore_index=-100):
 
 ### 6.9.2 有效吞吐的定义
 
-设一个 step 中实际经过设备的非 padding token 数为 `T_nonpad\geq0`，真正参与目标 loss 的 token 数为 `T_loss\geq0`，并且 `t_step>0`。可以同时报告：
+设一个 step 中所有 rank 合计的非 padding token 数为 `T_nonpad\geq0`，真正参与目标 loss 的 token 数为 `T_loss\geq0`，并且 `t_step>0`。可以同时报告：
 
 ~~~math
 R_{\mathrm{compute}}
@@ -562,13 +578,13 @@ R_{\mathrm{loss}}
 设每个 token 的理论训练 FLOPs 估算为 `f_model>0`，有效训练 token 吞吐为 `R_token\geq0`，设备峰值 FLOPs 为 `F_peak>0`，设备数为正整数 `N_device`，则教学化 MFU 为：
 
 ~~~math
-\operatorname{MFU}
+\mathrm{MFU}
 =
 \frac{f_{\mathrm{model}}R_{\mathrm{token}}}
 {N_{\mathrm{device}}F_{\mathrm{peak}}}
 ~~~
 
-如果 `f_model` 用了不同的 attention、MoE 或重计算假设，两个团队的 MFU 不能直接比较。MFU 也不包括数据等待和保存时间，项目排期仍应使用端到端有效吞吐。
+如果 `f_model` 用了不同的 attention、MoE 或重计算假设，两个团队的 MFU 不能直接比较。MFU 也不包括数据等待和保存时间，项目排期仍应使用端到端有效吞吐。PaLM 论文会把按目标模型所需 FLOPs 计算的 MFU 与把 rematerialization 等实际执行 FLOPs 纳入的 HFU 分开报告，比较效率时必须核对分子口径。[PaLM](https://arxiv.org/abs/2204.02311v5)
 
 ### 6.9.4 指标切片比一个总平均更重要
 
@@ -597,7 +613,7 @@ R_{\mathrm{loss}}
 
 ### 6.10.3 优化和数值原因
 
-检查学习率、warmup token、optimizer step、gradient norm、clip fraction、参数 norm、update/weight ratio、NaN/Inf 和 loss scale。一个常见误区是把调小学习率作为唯一处理；如果根因是错误 mask 或损坏 optimizer state，调小学习率只会延迟下一次故障。
+检查学习率、warmup token、optimizer step、gradient norm、clip fraction、参数 norm、update/weight ratio、NaN/Inf 和 loss scale。已有研究在特定大规模训练设置中观察过 Adam 更新与 loss 不稳定的联系，但模型、数据和配方也会影响现象，不能从一次 spike 直接断定 Adam 是根因。[A Theory on Adam Instability](https://arxiv.org/abs/2304.09871v2) 一个常见误区是把调小学习率作为唯一处理；如果根因是错误 mask 或损坏 optimizer state，调小学习率只会延迟下一次故障。
 
 恢复时还要检查 scheduler 是否跳步、梯度累积计数是否重置、optimizer state 是否只加载了部分 shard，以及不同 rank 是否从同一训练版本恢复。
 
@@ -607,9 +623,9 @@ R_{\mathrm{loss}}
 
 ### 6.10.5 一个完整的 spike 复盘
 
-假设“云砺”训练任务在第 18,420 个 optimizer step 出现 loss 从 2.8 跳到 9.4，两个 step 后变成 NaN。初步日志显示 GPU 利用率正常，只有 rank 7 的梯度范数先超过阈值。
+下面是一组为演示排查过程而构造的数字，不是生产事故记录。假设“云砺”训练任务在第 18,420 个 optimizer step 出现 loss 从 2.8 跳到 9.4，两个 step 后变成 NaN。初步日志显示 GPU 利用率正常，只有 rank 7 的梯度范数先超过阈值。
 
-第一轮检查发现 rank 7 的 batch 中有一条长度等于上限的样本，padding mask 的 key 轴全部为屏蔽值，fused softmax 在该行产生了非有限结果。回退到最近 checkpoint 并删除这条样本后训练恢复，但这还不是完整修复，因为同类样本仍可能再次出现。
+第一轮检查发现 rank 7 的 batch 中有一条长度等于上限的 packed 样本，packing 边界处的 mask 生成错误地把某个 query 的全部 key 标为不可见；这个构造案例所用的 fused softmax 路径没有安全处理全屏蔽行，因此产生了非有限结果。其他实现可能采用不同的边界行为，需在目标 kernel 上复核。回退到最近 checkpoint 并隔离这条样本后训练恢复，但这还不是完整修复，因为同类边界仍可能再次出现。
 
 第二轮修复增加了全屏蔽行的显式处理、输入 batch 断言和触发样本保存；CPU reference 与 fused attention 对随机 mask 做了对照。回归训练后，正常样本的 loss 与原轨迹一致，异常样本被记录并进入数据清理队列。这个案例说明，loss spike 的处理包含缓解、定位、修复和回归四个不同动作，不能以“训练继续跑了”作为结束。
 
@@ -643,7 +659,23 @@ Validation loss 测量模型对一个保留数据分布的 token 预测能力。
 \hat p=\frac{k}{n}
 ~~~
 
-当 `n` 不大或 `p` 接近 0/1 时，不能只用对称的正态近似。可以使用 Wilson 区间或精确二项区间报告不确定性。即使不写出区间公式，也要说明样本量和统计方法；一个 20 题任务从 70% 变成 75%，证据强度与 10,000 题任务完全不同。
+当 `n` 不大或 `p` 接近 0/1 时，不能只用对称的正态近似。这里用 Wilson score 区间演示怎样把样本量带入估计。设 `z` 是标准正态分布的双侧临界值，95% 区间取 `z=1.96`；先计算区间中心 `c` 和半宽 `h`：
+
+~~~math
+c=\frac{\hat p+z^2/(2n)}{1+z^2/n},\qquad
+h=\frac{z\sqrt{\hat p(1-\hat p)/n+z^2/(4n^2)}}{1+z^2/n}
+~~~
+
+Wilson 方法通过反演二项比例的检验得到区间；NIST 的统计手册列出该公式，并将它与基于二项分布的精确区间分别说明。[NIST：比例的置信区间](https://www.itl.nist.gov/div898/handbook/prc/section2/prc241.htm)
+
+用两个独立抽样的教学例子比较样本量。两组都观察到 70% 正确，因此 `\hat p=0.70`：
+
+| 样本 | 代入后的中心 `c` | 半宽 `h` | 95% Wilson 区间 |
+| --- | ---: | ---: | --- |
+| `n=20, k=14` | `(0.70+3.8416/40)/1.19208≈0.6678` | `1.96×√(0.012901)/1.19208≈0.1867` | `[0.481, 0.855]` |
+| `n=10,000, k=7,000` | `(0.70+3.8416/20,000)/1.000384≈0.6999` | `1.96×√(0.00002101)/1.000384≈0.0090` | `[0.691, 0.709]` |
+
+第一组区间宽约 37.4 个百分点，第二组约 1.8 个百分点；同一个 70% 点估计并不代表精度相同。这里的 95% 是重复抽样下区间构造程序的覆盖率，不是说真实准确率有 95% 概率落在已经算出的这一个区间中。二项计算还假定样本独立且定义一致；若题目按主题成簇、同一题有多次生成或模型间共用题目，需保留配对/聚类结构并选择相应分析。两条单独的区间也不能直接充当模型差异检验；比较模型时应固定评估协议，并按同题配对设计分析分差。一个 20 题任务从 70% 变成 75%，不能只看点估计宣称稳定提升。
 
 ### 6.11.4 评估矩阵而不是单一总分
 
@@ -667,7 +699,7 @@ Validation loss 测量模型对一个保留数据分布的 token 预测能力。
 8. 分布式切分、rank 映射和 shard manifest；
 9. 最近的指标摘要、数据校验和完整性信息。
 
-只保存参数适合发布推理模型，却通常不足以无缝恢复训练。缺少 sampler 状态可能导致数据重复或跳过；缺少 scheduler 状态会改变学习率；缺少 RNG 状态会改变 dropout 和数据增强轨迹。严格逐 bit 复现和语义等价恢复是两种不同目标，都应明确声明。
+只保存参数适合发布推理模型，却通常不足以无缝恢复训练。缺少 sampler 状态可能导致数据重复或跳过；缺少 scheduler 状态会改变学习率；缺少 RNG 状态会改变 dropout 和数据增强轨迹。PyTorch 2.15 Distributed Checkpoint 支持多 rank 保存/加载及受支持范围内的 load-time resharding，但其保存状态不承诺跨 PyTorch 版本向后兼容；改变 world size 也不保证优化轨迹或样本顺序不变。[PyTorch 2.15 Distributed Checkpoint](https://docs.pytorch.org/docs/2.15/distributed.checkpoint.html) 严格逐 bit 复现和语义等价恢复是两种不同目标，都应明确声明。
 
 ### 6.12.2 Checkpoint 频率的成本模型
 
@@ -690,9 +722,11 @@ T_{\mathrm{save}}
 
 保存越频繁，`T_save` 占比越高；保存越稀疏，故障后的重算越多。实际最优点还受异步保存、故障相关性、存储带宽、checkpoint 大小和可接受恢复时间影响。频率不应只按“每 N 个 step”决定，也可以按有效 token、预计故障风险和里程碑评估决定。
 
+例如，假设主训练需要 48 小时有效计算，每 2 小时保存一次，每次保存耗时 5 分钟，且平均每 48 小时发生一次训练故障。忽略保存过程中的故障和异步写入重叠，约有 24 次保存，写入共耗时 `24×5=120` 分钟，也就是 2 小时；故障次数期望约为 `48/48=1` 次，每次平均重算 1 小时，所以期望重算时间约为 1 小时。这个简化账本显示，保存频率同时决定 I/O 与故障重算成本；输入值是教学假设，不是集群观测。
+
 ### 6.12.3 原子写入与完整性
 
-保存过程应避免让恢复程序看到半写入目录。常见做法是写入临时 shard，完成 fsync 或对象存储确认后生成 manifest，再原子更新一个指向新版本的指针。manifest 应包含每个 shard 的大小、哈希、参数范围和版本。
+保存过程应避免让恢复程序看到半写入目录。在支持原子 rename 的文件系统上，可以先写临时 shard，刷盘并完成校验，再发布 manifest 和版本指针；对象存储则应使用不可变版本前缀、完整 manifest，以及该存储支持的条件写入或版本控制来发布。不能假设所有对象存储都提供与本地文件系统相同的原子目录 rename。manifest 应包含每个 shard 的大小、哈希、参数范围和版本。
 
 恢复前先验证所有 shard，而不是加载到一半才发现损坏。分布式保存还要确认 rank 数、切分方式和当前代码支持的 state dict 格式匹配。能读出参数并不等于参数被正确映射到了对应 rank。
 
@@ -706,7 +740,7 @@ T_{\mathrm{save}}
 - sampler 的下一个样本或 shard 位置；
 - 不同 rank 的状态一致性。
 
-如果追求严格复现，可以在相同 batch 上比较 logits 和梯度；如果只追求语义等价，则允许随机数和归约顺序带来的微小差异，但仍要设置数值误差范围和后续 loss/评估回归标准。
+如果追求严格复现，可以在相同 batch 上比较 logits 和梯度；如果只追求语义等价，则允许随机数和归约顺序带来的微小差异，但仍要设置数值误差范围和后续 loss/评估回归标准。即使 checkpoint API 能把 tensor shard 重新分配到不同拓扑，也仍需单独校验 optimizer、sampler、有效 batch、rank 映射和数据游标，不能把“成功加载”当成“训练轨迹连续”。
 
 ## 6.13 成本与容量：从 FLOPs 到单位能力
 
@@ -734,6 +768,8 @@ C_{\mathrm{per\ success}}
 
 其中 `N_task` 是评估任务数。如果 `q=0`，单位成功成本未定义，应报告“没有成功任务”，不能用零代替。这个指标不是产品收入，也不能替代安全和质量约束，但它提醒我们：一个更大的模型如果只带来很小的成功率增益，可能不值得增加训练和服务成本。
 
+例如，假设一个训练候选在 500 个目标任务上评估，总成本为 1,200 个货币单位，成功率 `q=0.8`，则期望成功数为 `500×0.8=400`，单位成功成本为 `1,200/400=3` 个货币单位。成本与成功率都是示例输入；若候选不满足最低安全或质量门槛，即使这个比值较低也不能据此选用。
+
 ### 6.13.3 训练排期的分解
 
 一个项目的日历时间至少包括：
@@ -753,22 +789,20 @@ C_{\mathrm{per\ success}}
 
 模型参数量、训练 token 数和计算预算相互耦合。固定参数增加数据，可能改善欠训练；固定数据增加参数，可能提高容量但收益递减；固定算力时，参数和 token 的分配存在一个依赖模型、数据和目标的有效区域。
 
-经验 scaling law 可以写成教学上的幂律近似：
+把一个实验切面上的其他条件固定后，参数量方向可以用单变量幂律近似：
 
 ~~~math
-L(N,D,C)
+L(N)
 \approx
 L_\infty
 +A N^{-\alpha}
-+B D^{-\beta}
-+E C^{-\gamma}
 ~~~
 
-`N` 是参数量，`D` 是训练 token 数，`C` 是计算预算，`L_infty`、系数和指数由特定实验拟合。这个关系用于比较趋势和分配实验预算，不是所有任务、架构和后训练阶段都成立的物理定律。
+`N` 是参数量，`L_infty`、`A` 和 `alpha` 由特定实验拟合。训练 token、数据质量和计算预算也会改变 loss，但各自的拟合形式、指数和适用范围需要由实验确定；不能把若干单变量关系直接相加，当成对任意 `N`、`D`、`C` 都成立的统一公式。Kaplan 等人分析了这些尺度与预训练交叉熵的经验关系，Chinchilla 则在自己的模型族和计算预算中比较参数与 token 的分配；二者都不提供任意任务的物理定律。[Scaling Laws](https://arxiv.org/abs/2001.08361)；[Chinchilla](https://arxiv.org/abs/2203.15556v1)
 
 ### 6.14.2 Compute-optimal 的含义
 
-Chinchilla 一类研究强调，在固定计算预算下，很多早期模型相对参数量使用了过少训练 token；增加高质量数据可能比继续增大参数更有效。这个结论依赖 dense 模型、数据质量、训练目标和评估指标，不能机械应用到多模态、MoE、长上下文或偏好学习。
+Chinchilla 一类研究强调，在固定计算预算下，许多此前模型相对参数量使用了较少训练 token；其 70B 模型使用 1.4T token。增加高质量数据可能比继续增大参数更有效。这个结论依赖 dense 模型、数据质量、训练目标和评估指标，不能机械应用到多模态、MoE、长上下文或偏好学习。[Chinchilla 原论文](https://arxiv.org/abs/2203.15556v1)
 
 当前项目应先写清“最优”针对什么：预训练 validation loss、代码能力、领域事实性、单位成功任务成本，还是上线收入。不同目标可能需要不同的参数、数据和后训练分配。
 
@@ -859,6 +893,15 @@ mask 不是越少越好。只训练极短的回答可能让模型忽略输入结
 
 如果资源允许，再使用不同随机种子或重复小实验估计波动。单次小跑不能证明普遍因果，但能排除一批明显的实现和契约错误。
 
+只做单因素对照也可能漏掉因素交互。设固定预算下的评估损失越低越好，下面是一个**构造的教学矩阵**，数值不是实测结果：
+
+| 数据 mixture | 旧学习率 | 新学习率 |
+| --- | ---: | ---: |
+| 旧 | 2.0 | 1.9 |
+| 新 | 2.1 | 1.7 |
+
+旧学习率下，换新数据使损失增加 `2.1-2.0=0.1`；新学习率下，换新数据却使损失减少 `1.7-1.9=-0.2`。差中之差 `-0.2-0.1=-0.3` 是这个教学矩阵中的交互量：数据 mixture 的效果取决于学习率。若只报告 A、B、C 三个单因素点，可能会判定新 mixture 有害，却看不到它与新学习率组合后表现更好。交互项提示还要跑组合对照；它本身不证明机制，更不代表所有规模都如此。实际决策应保持数据、token 预算和评估协议一致，重复关键组合或更换随机种子估计噪声，再查看目标能力与副作用切片。
+
 ### 6.17.3 记录负结果
 
 没有提升也是信息：增加某类数据没有改善目标能力，可能说明瓶颈在检索、任务格式或评估；更长上下文没有提升，可能是数据缺少长距离依赖或模型没有有效利用位置；更高 MFU 没有降低日历时间，可能是 checkpoint、通信或排队成为关键路径。
@@ -878,15 +921,25 @@ mask 不是越少越好。只训练极短的回答可能让模型忽略输入结
 下面的函数展示如何按有效 token 汇总多个 micro-batch 的损失，避免简单平均每批平均 loss。它不依赖 PyTorch，便于做测试：
 
 ~~~python
+from math import isfinite
+
+
 def weighted_loss_mean(batch_losses, batch_token_counts):
     if len(batch_losses) != len(batch_token_counts):
         raise ValueError("losses and token counts must have the same length")
     total_loss = 0.0
     total_tokens = 0
     for loss_value, token_count in zip(batch_losses, batch_token_counts):
+        if not isinstance(token_count, int) or isinstance(token_count, bool):
+            raise TypeError("token counts must be integers")
         if token_count < 0:
             raise ValueError("token count must be non-negative")
-        total_loss += float(loss_value) * token_count
+        if token_count == 0:
+            continue
+        loss_value = float(loss_value)
+        if not isfinite(loss_value):
+            raise ValueError("loss values must be finite")
+        total_loss += loss_value * token_count
         total_tokens += token_count
     if total_tokens == 0:
         raise ValueError("no valid tokens")
@@ -897,7 +950,9 @@ assert abs(weighted_loss_mean([1.0, 3.0], [3, 1]) - 1.5) < 1e-12
 assert abs(weighted_loss_mean([1.0, 3.0], [1, 1]) - 2.0) < 1e-12
 ~~~
 
-第一条断言说明 token 加权平均为 `(3*1+1*3)/4=1.5`；第二条才是两个 micro-batch 等长时的普通平均。把这类小函数放进训练框架测试，可以提前发现 reduction 语义错误。
+> 状态：已验证（2026-11-06；Python 3.12.9；仅标准库）。
+
+这个参考函数的输入是每个 micro-batch 的标量平均 loss 和有效 token 整数；零 token batch 不进入分子或分母，非有限 loss 和非法 token 计数会被拒绝。第一条断言说明 token 加权平均为 `(3*1+1*3)/4=1.5`；第二条才是两个 micro-batch 等长时的普通平均。该实现只处理单进程的统计归约，不能替代分布式 loss scaling。
 
 ## 6.19 把训练结果写成可追溯结论
 
@@ -905,7 +960,7 @@ assert abs(weighted_loss_mean([1.0, 3.0], [1, 1]) - 2.0) < 1e-12
 
 一句“loss 从 3.2 降到 2.8”缺少至少五个条件：在哪个数据切片，多少有效 token，使用什么 tokenizer 和 reduction，是否有污染，是否带来目标能力变化。更完整的结论应说明测量对象、对照、变化幅度和证据边界。
 
-例如，合理的表述是：在固定 tokenizer、模板和 validation 版本下，继续预训练 20B 有效 token 后，文档切片的 token-level loss 从 3.20 降至 2.80；代码切片无显著变化，产品问答的引用支持率提高 6 个百分点，95% 区间和样本量见评估记录。这个表述仍然不证明所有知识都变好了，但读者知道结论覆盖到哪里。
+例如，下面是一条数字均为教学假设的报告表述：在固定 tokenizer、模板和 validation 版本下，继续预训练 20B 有效 token 后，文档切片的 token-level loss 从 3.20 降至 2.80；代码切片无显著变化，产品问答的引用支持率提高 6 个百分点，95% 区间和样本量见评估记录。这个表述仍然不证明所有知识都变好了，但读者知道结论覆盖到哪里。
 
 ### 6.19.2 训练报告的最小结构
 
@@ -950,23 +1005,33 @@ assert abs(weighted_loss_mean([1.0, 3.0], [1, 1]) - 2.0) < 1e-12
 
 1. Attention Is All You Need：[https://arxiv.org/abs/1706.03762](https://arxiv.org/abs/1706.03762)
 2. Improving Language Understanding by Generative Pre-Training：[https://cdn.openai.com/research-covers/language-unsupervised/language_understanding_paper.pdf](https://cdn.openai.com/research-covers/language-unsupervised/language_understanding_paper.pdf)
-3. Training Compute-Optimal Large Language Models：[https://arxiv.org/abs/2203.15556](https://arxiv.org/abs/2203.15556)
+3. Training Compute-Optimal Large Language Models（Chinchilla）：[https://arxiv.org/abs/2203.15556v1](https://arxiv.org/abs/2203.15556v1)
 4. Scaling Laws for Neural Language Models：[https://arxiv.org/abs/2001.08361](https://arxiv.org/abs/2001.08361)
 5. Decoupled Weight Decay Regularization：[https://arxiv.org/abs/1711.05101](https://arxiv.org/abs/1711.05101)
-6. ZeRO: Memory Optimizations Toward Training Trillion Parameter Models：[https://arxiv.org/abs/1910.02054](https://arxiv.org/abs/1910.02054)
-7. PyTorch DistributedDataParallel：[https://docs.pytorch.org/docs/stable/generated/torch.nn.parallel.DistributedDataParallel.html](https://docs.pytorch.org/docs/stable/generated/torch.nn.parallel.DistributedDataParallel.html)
-8. PyTorch Fully Sharded Data Parallel：[https://docs.pytorch.org/docs/stable/fsdp.html](https://docs.pytorch.org/docs/stable/fsdp.html)
-9. PyTorch Distributed Checkpoint：[https://docs.pytorch.org/docs/stable/distributed.checkpoint.html](https://docs.pytorch.org/docs/stable/distributed.checkpoint.html)
-10. PyTorch Automatic Mixed Precision：[https://docs.pytorch.org/docs/stable/amp.html](https://docs.pytorch.org/docs/stable/amp.html)
+6. ZeRO: Memory Optimizations Toward Training Trillion Parameter Models：[https://arxiv.org/abs/1910.02054v3](https://arxiv.org/abs/1910.02054v3)
+7. PyTorch 2.15 DistributedDataParallel API 与设计说明：[API](https://docs.pytorch.org/docs/2.15/generated/torch.nn.parallel.DistributedDataParallel.html)、[设计说明](https://docs.pytorch.org/docs/2.15/notes/ddp.html)
+8. PyTorch 2.15 FSDP 与 FSDP2 `fully_shard`：[FSDP](https://docs.pytorch.org/docs/2.15/fsdp.html)、[FSDP2 API](https://docs.pytorch.org/docs/2.15/distributed.fsdp.fully_shard.html)
+9. PyTorch 2.15 Distributed Checkpoint：[https://docs.pytorch.org/docs/2.15/distributed.checkpoint.html](https://docs.pytorch.org/docs/2.15/distributed.checkpoint.html)
+10. PyTorch 2.15 Automatic Mixed Precision：[https://docs.pytorch.org/docs/2.15/amp.html](https://docs.pytorch.org/docs/2.15/amp.html)
 11. NVIDIA Mixed Precision Training：[https://docs.nvidia.com/deeplearning/performance/mixed-precision-training/index.html](https://docs.nvidia.com/deeplearning/performance/mixed-precision-training/index.html)
-12. Megatron-LM：[https://github.com/NVIDIA/Megatron-LM](https://github.com/NVIDIA/Megatron-LM)
-13. DeepSpeed：[https://github.com/microsoft/DeepSpeed](https://github.com/microsoft/DeepSpeed)
+12. Megatron-LM：[论文](https://arxiv.org/abs/1909.08053v4)、[官方实现](https://github.com/NVIDIA/Megatron-LM)
+13. DeepSpeed：[官方文档](https://deepspeed.readthedocs.io/en/latest/)，访问日期 2026-11-05；当前文档显示版本 0.19.10
 14. NCCL Documentation：[https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/](https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/)
-15. FlashAttention：[https://arxiv.org/abs/2205.14135](https://arxiv.org/abs/2205.14135)
+15. FlashAttention：[https://arxiv.org/abs/2205.14135v2](https://arxiv.org/abs/2205.14135v2)
+16. GPipe: Efficient Training of Giant Neural Networks using Pipeline Parallelism：[https://arxiv.org/abs/1811.06965v5](https://arxiv.org/abs/1811.06965v5)
+17. PaLM: Scaling Language Modeling with Pathways：[https://arxiv.org/abs/2204.02311v5](https://arxiv.org/abs/2204.02311v5)
+18. PyTorch 2.15 `cross_entropy`：[https://docs.pytorch.org/docs/2.15/generated/torch.nn.functional.cross_entropy.html](https://docs.pytorch.org/docs/2.15/generated/torch.nn.functional.cross_entropy.html)
+19. Deduplicating Training Data Makes Language Models Better：[https://aclanthology.org/2022.acl-long.577/](https://aclanthology.org/2022.acl-long.577/)
+20. Task Contamination: Language Models May Not Be Few-Shot Anymore：[https://arxiv.org/abs/2312.16337](https://arxiv.org/abs/2312.16337)
+21. Packing and Masking Strategies for Pre-Training Sequence Composition：[https://aclanthology.org/2024.acl-long.427.pdf](https://aclanthology.org/2024.acl-long.427.pdf)
+22. DoReMi: Optimizing Data Mixtures Speeds Up Language Model Pretraining：[https://arxiv.org/abs/2305.10429v4](https://arxiv.org/abs/2305.10429v4)
+23. Data Mixing Laws: Optimizing Data Mixtures by Predicting Language Modeling Performance：[https://proceedings.iclr.cc/paper_files/paper/2025/hash/cc84bfabe6389d8883fc2071c848f62a-Abstract-Conference.html](https://proceedings.iclr.cc/paper_files/paper/2025/hash/cc84bfabe6389d8883fc2071c848f62a-Abstract-Conference.html)
+24. Training language models to follow instructions with human feedback：[https://arxiv.org/abs/2203.02155](https://arxiv.org/abs/2203.02155)
+25. Direct Preference Optimization：[https://arxiv.org/abs/2305.18290v3](https://arxiv.org/abs/2305.18290v3)
 
 原始论文用于支持模型目标、优化方法、scaling、ZeRO 和 attention 的方法或实验结论；PyTorch、NVIDIA、NCCL、Megatron-LM 和 DeepSpeed 资料用于支持 API、并行实现、混合精度和工程语义。公式中的显存、FLOPs、MFU、checkpoint 重算和单位成功成本是教学近似，实际值取决于模型结构、序列长度、硬件、框架版本、通信拓扑和数据处理。
 
-论文中的 compute-optimal、scaling 和吞吐结果不能直接外推到任意模型或当前集群。一个公开框架的功能也不等于目标版本的实测性能。涉及具体模型、硬件或业务数据时，应以对应模型卡、版本文档、集群 profiling 和可复现实验为准。本轮写入前曾尝试联网复核资料入口，但当前环境 DNS 暂时无法解析外部域名；本章保留权威入口，正式发布前应在网络恢复后再次记录 HTTP 状态和版本。
+论文中的 compute-optimal、scaling 和吞吐结果不能直接外推到任意模型或当前集群。一个公开框架的功能也不等于目标版本的实测性能。涉及具体模型、硬件或业务数据时，应以对应模型卡、版本文档、集群 profiling 和可复现实验为准。PyTorch 文档引用固定在 2.15；DeepSpeed 在线文档版本会变化，本章只使用其公开接口说明，不把其功能描述当作生产性能保证。
 
 ## 6.22 结语：训练是一个可解释、可恢复的系统
 

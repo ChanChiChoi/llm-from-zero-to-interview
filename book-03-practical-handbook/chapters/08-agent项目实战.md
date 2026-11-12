@@ -1242,7 +1242,7 @@ R_{\mathrm{duplicate}}
 - OWASP Top 10 for LLM Applications：<https://owasp.org/projects/top-10-for-large-language-model-applications>
 - OWASP Agentic AI Threats and Mitigations：<https://genai.owasp.org/resource/agentic-ai-threats-and-mitigations/>
 - NIST AI Risk Management Framework：<https://www.nist.gov/itl/ai-risk-management-framework>
-- NIST Generative AI Profile：<https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf>
+- NIST Generative AI Profile：<https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence>
 - AgentDojo：<https://arxiv.org/abs/2406.13352>
 - ToolSandbox：<https://arxiv.org/abs/2408.04682>
 

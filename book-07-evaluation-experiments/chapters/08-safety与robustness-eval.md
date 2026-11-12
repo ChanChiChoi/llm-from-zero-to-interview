@@ -1613,7 +1613,7 @@ rate 在分母为零时返回 None，summary 保留这个不可评估状态，si
 policy、风险 taxonomy 和阈值都要有版本。策略变化后，旧分数不能直接和新
 分数比较。
 
-[NIST Generative AI Profile](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf)
+[NIST Generative AI Profile](https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence)
 把生命周期工作组织为 Govern、Map、Measure、Manage：先确定责任和风险容忍度，
 再映射用途、数据与影响，选择测量办法，最后决定缓解、监控和响应。它同时提醒，
 现有 pre-deployment 测试可能不系统或不匹配实际部署情境。这个框架提供的是风险
@@ -1771,7 +1771,7 @@ benchmark 上的攻击成功率不能自动代表所有产品、语言和工具�
 可作为方法入口的资料包括：
 
 1. [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：AI 风险管理和治理框架。
-2. [NIST Generative AI Profile](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf)：生成式 AI 的风险识别与管理补充。
+2. [NIST Generative AI Profile](https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence)：生成式 AI 的风险识别与管理补充。
 3. [OWASP Top 10 for LLM Applications](https://owasp.org/www-project-top-10-for-large-language-model-applications/)：LLM 应用的注入、数据和权限风险分类。
 4. [Red Teaming Language Models to Reduce Harms](https://arxiv.org/abs/2209.07858)：人工红队和伤害发现的研究背景。
 5. [AdvBench](https://arxiv.org/abs/2307.08487)：有害行为评估数据的研究入口。

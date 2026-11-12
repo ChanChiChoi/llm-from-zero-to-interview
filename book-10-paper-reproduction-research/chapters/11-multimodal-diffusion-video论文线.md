@@ -598,7 +598,7 @@ m_{align},m_{ground},m_{quality},m_{temporal},m_{safety},m_{cost}
 
 复现团队可以从 benchmark 中抽取一小组样本做误差审计，但要保留原测试集划分，避免把公开题目混入训练或反复 prompt 调优。更稳的做法是划分开发集、冻结提示与采样配置，再用未见过的保留集确认；长视频还要保存取帧时间戳和实际送入模型的音频片段。若自动 verifier 与人工意见不一致，先复查 rubric 解释、引用证据和分歧样本，不要把 judge 输出当作唯一真值。该流程检验的是指定模型—输入处理—评测器组合，不是所有模态模型的能力边界。
 
-来源：[MME-Unify](https://proceedings.iclr.cc/paper_files/papers/2026/hash/d8308c2c45cf95bfebb736be377f0982-Abstract-Conference.html)、[WorldSense](https://proceedings.iclr.cc/paper_files/papers/2026/hash/55dc32df563a35bfebb736be377f098d-Abstract-Conference.html)、[LongShOTBench v2](https://arxiv.org/abs/2512.16978v2)、[WBench v1](https://arxiv.org/abs/2605.25874v1)。
+来源：[MME-Unify](https://proceedings.iclr.cc/paper_files/paper/2026/hash/d8308c2c45cf95bfebb736be377f0982-Abstract-Conference.html)、[WorldSense](https://proceedings.iclr.cc/paper_files/paper/2026/hash/55dc32df563a35bf406717fb52c118d5-Abstract-Conference.html)、[LongShOTBench v2](https://arxiv.org/abs/2512.16978v2)、[WBench v1](https://arxiv.org/abs/2605.25874v1)。
 
 ## 9. 案例：视觉语言模型看似会看图
 

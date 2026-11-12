@@ -752,7 +752,7 @@ R_{\mathrm{parse}}=\frac{N_{\mathrm{artifact}}}{N_{\mathrm{supported\_2xx}}}.
 1. [RFC 9309: Robots Exclusion Protocol](https://www.rfc-editor.org/rfc/rfc9309.html)：支持 robots 语法和协议行为；标准明确指出该规则不是访问授权，不能替代许可证或法务结论。
 2. [Datasheets for Datasets](https://arxiv.org/abs/1803.09010)：支持记录数据集动机、组成、收集过程、推荐用途和限制。
 3. [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：支持从生命周期、风险识别和治理角度组织数据管理。
-4. [NIST Generative AI Profile](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf)：支持生成式 AI 的数据来源、隐私、评估和治理风险讨论。
+4. [NIST Generative AI Profile](https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence)：支持生成式 AI 的数据来源、隐私、评估和治理风险讨论。
 
 这些资料提供协议、研究方法和治理框架；它们不能替代组织自己的许可证审查、隐私影响评估、秘密扫描、删除流程和安全测试。
 

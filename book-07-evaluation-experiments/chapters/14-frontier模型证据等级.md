@@ -1038,7 +1038,7 @@ decision=publish_scoped_task_claim_and_hold_architecture
 - NIST AI Risk Management Framework；
   https://www.nist.gov/itl/ai-risk-management-framework
 - NIST Generative AI Profile；
-  https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf
+  https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence
 
 治理资料适合支持风险、记录和责任边界，不是模型排名或架构真实性的证明。
 

@@ -8,9 +8,11 @@
 
 本章目标是把 `nn.Module` 在工程中的规则讲清楚：如何写 `forward`，什么是 `Parameter`，子模块如何注册，`state_dict` 保存什么，`train()` 和 `eval()` 到底影响什么，模型保存加载应该怎么做，以及如何组织一个可维护的大模型代码结构。
 
+可沿三条连续链阅读：先从对象注册树走到参数、buffer 和 optimizer；再从模块状态走到 `state_dict`、checkpoint 和恢复；最后把这些规则放进大模型结构、故障排查、分布式和编译包装中。遇到“参数没更新、模型没迁移或 checkpoint 不匹配”时，都回到同一问题：该状态由哪个对象拥有，是否注册，谁在读取或更新它。
+
 ## 0. 本章范围与资料
 
-本章以 PyTorch 官方 `nn.Module`、`nn.Parameter`、`register_buffer`、`state_dict`、`load_state_dict`、`ModuleList`、`ModuleDict`、`ParameterList`、`ParameterDict`、`train()` / `eval()`、模型保存加载和 `torch.compile` 文档为 API 语义依据。文末列出可直接核验的资料入口，并区分 API 事实、工程惯例和目标系统复测。
+本章以 PyTorch 2.15 官方 `nn.Module`、`nn.Parameter`、`register_buffer`、`state_dict`、`load_state_dict`、容器、训练/评估模式、模型保存加载和 `torch.compile` 文档为 API 语义依据。文末列出可直接核验的资料入口，并区分 API 事实、工程惯例和目标系统复测；本章的本地代码运行记录会单独标明实际 PyTorch 版本。
 
 本章聚焦大模型工程最常用的 Module 组织问题：参数注册、子模块注册、buffer、`state_dict`、保存加载、训练/推理模式、device / dtype 迁移、参数冻结、参数分组、hook、DDP / FSDP 依赖的模块边界，以及最小可运行的 Module 审计 demo。
 
@@ -31,6 +33,7 @@ y = x @ w + b
 loss = y.pow(2).mean()
 loss.backward()
 ```
+> 代码片段，静态审阅，未运行。
 
 这段代码可以求梯度，但它不是一个好工程结构。问题在于：
 
@@ -65,8 +68,9 @@ loss = y.pow(2).mean()
 loss.backward()
 optimizer.step()
 ```
+> 代码片段，静态审阅，未运行。
 
-这里 `self.linear = nn.Linear(10, 1)` 不只是普通赋值。因为 `LinearModel` 继承了 `nn.Module`，PyTorch 会把 `linear` 识别为子模块并注册起来。后续 `model.parameters()`、`model.state_dict()`、`model.to(device)`、`model.train()` 都会递归作用到它。
+这里 `self.linear = nn.Linear(10, 1)` 不只是普通赋值。因为 `LinearModel` 继承了 `nn.Module`，PyTorch 会把 `linear` 识别为子模块并注册起来。后续 `model.parameters()`、`model.state_dict()`、`model.to(device)`、`model.train()` 都会递归作用到它；规则见 [PyTorch 2.15 `nn.Module`](https://docs.pytorch.org/docs/2.15/generated/torch.nn.Module.html)。
 
 ### 3.1.1 注册树、状态和参数更新
 
@@ -108,13 +112,26 @@ g_t = \frac{\partial L}{\partial \theta_t}
 
 如果某个 tensor 没有注册成 `Parameter`，或者某个子模块藏在普通 list / dict 中，它即使参与 forward，也不会自动出现在 `model.parameters()` 里，optimizer 通常不会更新它。
 
-第三，`state_dict` 不是保存整个 Python 对象，而是保存注册权重和持久化 buffer：
+第三，默认 `state_dict` 不是保存整个 Python 对象，而是保存注册权重和持久化 buffer：
 
 ~~~math
-S(M) = P(M) \cup B_p(M)
+S_{default}(M) = P(M) \cup B_p(M)
 ~~~
 
-其中 `P(M)` 表示 module 树上的注册参数，`B_p(M)` 表示 `persistent=True` 的 buffer。普通属性、临时 tensor、`persistent=False` 的 buffer、`forward` 代码和 Python 类定义都不在模型 `state_dict` 里。若两个模块共享同一个 `Parameter`，`state_dict` 可能为两个访问路径保留两个 key；因此 key 的数量不一定等于唯一参数存储的数量，参数统计时还要考虑别名。
+其中 `P(M)` 表示 module 树上的注册参数，`B_p(M)` 表示 `persistent=True` 的 buffer。普通属性和临时 tensor 不会自动保存；`persistent=False` 的 buffer、`forward` 代码和 Python 类定义也不在默认模型 `state_dict` 中。模块还可以实现 `get_extra_state()` / `set_extra_state()` 或注册状态字典 hook，显式加入额外状态，所以实际字典不保证只含 tensor。额外对象必须可序列化；PyTorch 对跨版本序列化的兼容承诺主要针对 tensor，详见 [PyTorch 2.15 `nn.Module`](https://docs.pytorch.org/docs/2.15/generated/torch.nn.Module.html)。若两个模块共享同一个 `Parameter`，`state_dict` 可能为两个访问路径保留两个 key；因此 key 的数量不一定等于唯一参数存储的数量，参数统计时还要考虑别名。
+
+下表把对象所在位置与框架能管理的状态对应起来。`ModuleList` / `ModuleDict` 中的子模块按递归注册处理；普通 Python 容器不会自动注册其中的 module 或 `Parameter`。
+
+| 对象 | `parameters()` | `buffers()` | 默认 `state_dict()` | `Module.to()` | 从 `model.parameters()` 交给 optimizer |
+| --- | --- | --- | --- | --- | --- |
+| 注册的 `Parameter` | 是 | 否 | 是 | 是 | 是 |
+| 属性、`ModuleList` 或 `ModuleDict` 中的已注册子模块 | 递归包含其参数 | 递归包含其 buffer | 递归包含参数和持久 buffer | 递归迁移 | 递归包含其参数 |
+| 持久 buffer | 否 | 是 | 是 | 是 | 否 |
+| `persistent=False` buffer | 否 | 是 | 否 | 是 | 否 |
+| 普通 tensor 属性 | 否 | 否 | 否 | 否 | 否 |
+| 普通 list/dict 中的 module 或 `Parameter` | 否 | 否 | 否 | 否 | 否 |
+
+表中的 optimizer 列说的是“通过 `model.parameters()` 取得”。优化器也能接收调用者手工传入的独立参数，但这不会让它们自动进入模型的保存、迁移或分布式注册树。
 
 第四，参数高效微调或冻结模型时，先看可训练参数比例：
 
@@ -122,7 +139,7 @@ S(M) = P(M) \cup B_p(M)
 r = \frac{\sum_{p \in P_{train}} |p|}{\sum_{p \in P_{all}} |p|}
 ~~~
 
-其中 `|p|` 是一个参数 tensor 的元素个数，且分母必须大于 0；如果模型没有参数，这个比例没有定义。LoRA、adapter、prompt tuning 的核心工程检查就是：应该训练的参数是否都被注册、`requires_grad=True`、进入 optimizer，并且保存时能从 `state_dict` 或 `named_parameters()` 中筛出来。
+其中 `|p|` 是一个参数 tensor 的元素个数，`P_train` 和 `P_all` 按 `model.parameters()` 默认的对象去重结果统计，且分母必须大于 0；如果模型没有参数，这个比例没有定义。LoRA、adapter、prompt tuning 的核心工程检查就是：应该训练的参数是否都被注册、`requires_grad=True`、进入 optimizer，并且保存时能从 `state_dict` 或 `named_parameters()` 中筛出来。
 
 第五，`train()` / `eval()` 改的是模块状态，不是梯度开关：
 
@@ -131,6 +148,7 @@ model.eval()
 with torch.no_grad():
     outputs = model(inputs)
 ```
+> 代码片段，静态审阅，未运行。
 
 `eval()` 递归设置 `training=False`，影响 Dropout、BatchNorm 等层；`no_grad()` / `inference_mode()` 关闭 autograd 记录。验证和推理通常两者都要用。
 
@@ -172,6 +190,7 @@ class MLP(nn.Module):
         x = self.fc2(x)
         return x
 ```
+> 代码片段，静态审阅，未运行。
 
 几个关键习惯：
 
@@ -192,6 +211,7 @@ class BadMLP(nn.Module):
         layer = nn.Linear(self.hidden_size, self.hidden_size)
         return layer(x)
 ```
+> 代码片段，静态审阅，未运行。
 
 这段代码的问题很严重：每次 forward 都会新建一组随机参数，这些参数不会被稳定训练，optimizer 也不知道它们应该被长期更新。除非你明确要创建临时无参数对象，否则可训练层应该放在 `__init__` 中。
 
@@ -206,6 +226,7 @@ class GoodMLP(nn.Module):
     def forward(self, x):
         return self.layer(x)
 ```
+> 代码片段，静态审阅，未运行。
 
 ## 3.3 forward 和 __call__ 的关系
 
@@ -214,14 +235,16 @@ class GoodMLP(nn.Module):
 ```python
 output = model(x)
 ```
+> 代码片段，静态审阅，未运行。
 
 而不是：
 
 ```python
 output = model.forward(x)
 ```
+> 代码片段，静态审阅，未运行。
 
-虽然最终会执行 `forward`，但两者不完全等价。`model(x)` 会调用 `nn.Module.__call__`，它在内部处理 hook、autograd 相关状态、编译包装以及其他框架机制，然后再进入 `forward`。
+虽然最终会执行 `forward`，但两者不完全等价。`model(x)` 经过 `nn.Module` 的调用路径并运行已注册的 forward pre/post hooks，然后进入 `forward`；直接写 `model.forward(x)` 会绕过这层调用路径。有关 hook 的签名和调用时机见 [PyTorch 2.15 `nn.Module`](https://docs.pytorch.org/docs/2.15/generated/torch.nn.Module.html)。
 
 因此工程中建议：
 
@@ -244,6 +267,7 @@ class ToyModel(nn.Module):
 model = ToyModel()
 out = model(torch.randn(3, 4))
 ```
+> 代码片段，静态审阅，未运行。
 
 ## 3.4 Parameter：什么会被 optimizer 更新
 
@@ -264,6 +288,7 @@ class ScaleLayer(nn.Module):
     def forward(self, x):
         return x * self.scale
 ```
+> 代码片段，静态审阅，未运行。
 
 检查参数：
 
@@ -273,6 +298,7 @@ layer = ScaleLayer(4)
 for name, param in layer.named_parameters():
     print(name, param.shape, param.requires_grad)
 ```
+> 代码片段，静态审阅，未运行。
 
 输出类似：
 
@@ -291,6 +317,7 @@ class BadScaleLayer(nn.Module):
     def forward(self, x):
         return x * self.scale
 ```
+> 代码片段，静态审阅，未运行。
 
 这个 `scale` 虽然 `requires_grad=True`，但它不是 `Parameter`，不会出现在 `model.parameters()` 中，optimizer 通常也不会更新它。
 
@@ -300,6 +327,7 @@ class BadScaleLayer(nn.Module):
 bad = BadScaleLayer(4)
 print(list(bad.named_parameters()))  # []
 ```
+> 代码片段，静态审阅，未运行。
 
 核心规则：
 
@@ -326,6 +354,7 @@ class Block(nn.Module):
     def forward(self, x):
         return x + self.mlp(self.norm(x))
 ```
+> 代码片段，静态审阅，未运行。
 
 `self.norm` 和 `self.mlp` 都会被注册。`self.mlp` 里面的 `Linear` 也会被递归注册。
 
@@ -337,6 +366,7 @@ block = Block(768)
 for name, module in block.named_modules():
     print(name, type(module).__name__)
 ```
+> 代码片段，静态审阅，未运行。
 
 输出类似：
 
@@ -364,6 +394,7 @@ class BadStack(nn.Module):
             x = layer(x)
         return x
 ```
+> 代码片段，静态审阅，未运行。
 
 这段代码能 forward，但 `self.layers` 里的 block 不会被注册为子模块。后果是：
 
@@ -387,6 +418,46 @@ class GoodStack(nn.Module):
             x = layer(x)
         return x
 ```
+> 代码片段，静态审阅，未运行。
+
+用一个两层小模型把注册、前向和状态大小连起来。令第一层权重为 `[2, -1]`、偏置为 `1`，第二层权重为 `2`、偏置为 `-1`，输入为 `[3, 2]`：
+
+```python
+import torch
+from torch import nn
+
+
+class HandCalcStack(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layers = nn.ModuleList([
+            nn.Linear(2, 1),
+            nn.Linear(1, 1),
+        ])
+        self.register_buffer("offset", torch.tensor(0.0))
+
+    def forward(self, x):
+        x = self.layers[0](x)
+        return self.layers[1](x) + self.offset
+
+
+model = HandCalcStack()
+with torch.no_grad():
+    model.layers[0].weight.copy_(torch.tensor([[2.0, -1.0]]))
+    model.layers[0].bias.copy_(torch.tensor([1.0]))
+    model.layers[1].weight.copy_(torch.tensor([[2.0]]))
+    model.layers[1].bias.copy_(torch.tensor([-1.0]))
+
+x = torch.tensor([[3.0, 2.0]])
+state = model.state_dict()
+print("output:", model(x).item())
+print("parameter elements:", sum(p.numel() for p in model.parameters()))
+print("state tensor elements:", sum(v.numel() for v in state.values()))
+print("state keys:", list(state))
+```
+> 代码片段，已验证（2026-11-09；Python 3.12.9、PyTorch 2.12.0+cpu，CPU）。
+
+手算第一层得到 `2×3 + (-1)×2 + 1 = 5`；第二层得到 `2×5 - 1 + 0 = 9`。第一层有两个权重和一个偏置，共 3 个参数；第二层有一个权重和一个偏置，共 2 个参数，因此模型有 5 个可训练标量。`offset` 是一个持久 buffer，不参加 optimizer，却和参数一起保存，所以 state dict 有 6 个 tensor 元素，key 为两层的 weight/bias 和 `offset`。若把 `ModuleList` 换成普通 list，前向仍可调用这些层，但这 5 个参数不会由 `model.parameters()`、`state_dict()` 或 `model.to()` 管理。
 
 如果是按名称组织，可以用 `nn.ModuleDict`：
 
@@ -402,6 +473,7 @@ class MultiHeadModel(nn.Module):
     def forward(self, x, task):
         return self.heads[task](x)
 ```
+> 代码片段，静态审阅，未运行。
 
 ## 3.6 Sequential、ModuleList、ModuleDict 怎么选
 
@@ -416,6 +488,7 @@ mlp = nn.Sequential(
     nn.Linear(512, 128),
 )
 ```
+> 代码片段，静态审阅，未运行。
 
 适合简单串联结构。缺点是不适合复杂控制流、多输入多输出或 residual connection。
 
@@ -426,6 +499,7 @@ self.layers = nn.ModuleList([
     Block(hidden_size) for _ in range(num_layers)
 ])
 ```
+> 代码片段，静态审阅，未运行。
 
 适合 Transformer block 堆叠，因为 forward 通常要加入 cache、mask、gradient checkpointing、输出 hidden states 等逻辑。
 
@@ -437,6 +511,7 @@ self.adapters = nn.ModuleDict({
     "domain_b": Adapter(hidden_size),
 })
 ```
+> 代码片段，静态审阅，未运行。
 
 适合多任务 head、多 adapter、多分支结构。
 
@@ -467,12 +542,14 @@ class WeightedSum(nn.Module):
             out = out + weight * x
         return out
 ```
+> 代码片段，静态审阅，未运行。
 
 如果直接用普通 list：
 
 ```python
 self.weights = [nn.Parameter(torch.ones(())) for _ in range(num_inputs)]
 ```
+> 代码片段，静态审阅，未运行。
 
 这些参数不会被注册。
 
@@ -490,6 +567,7 @@ class TaskBias(nn.Module):
     def forward(self, x, task):
         return x + self.biases[task]
 ```
+> 代码片段，静态审阅，未运行。
 
 在大模型工程中，直接使用 `ParameterList` 和 `ParameterDict` 的机会不如 `ModuleList` 多，但在自定义 embedding、adapter、可学习 prompt、可学习加权融合时很有用。
 
@@ -516,6 +594,7 @@ class PositionalEncoding(nn.Module):
         seq_len = x.size(1)
         return x + self.pe[:seq_len]
 ```
+> 代码片段，静态审阅，未运行。
 
 buffer 的特点：
 
@@ -529,6 +608,7 @@ buffer 的特点：
 ```python
 self.register_buffer("causal_mask", mask, persistent=False)
 ```
+> 代码片段，静态审阅，未运行。
 
 `persistent=False` 适合可重新生成的大缓存，避免 checkpoint 过大。
 
@@ -538,6 +618,7 @@ self.register_buffer("causal_mask", mask, persistent=False)
 for name, buf in model.named_buffers():
     print(name, buf.shape, buf.device)
 ```
+> 代码片段，静态审阅，未运行。
 
 ## 3.9 parameters、named_parameters 和参数分组
 
@@ -546,6 +627,7 @@ for name, buf in model.named_buffers():
 ```python
 optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
 ```
+> 代码片段，静态审阅，未运行。
 
 但真实训练里经常需要参数分组，例如：
 
@@ -573,6 +655,7 @@ optimizer = torch.optim.AdamW([
     {"params": no_decay_params, "weight_decay": 0.0},
 ], lr=1e-4)
 ```
+> 代码片段，静态审阅，未运行。
 
 为什么 LayerNorm 和 bias 常常不做 weight decay？直觉上，weight decay 更适合约束大矩阵权重，而归一化层的 scale、bias 和偏置参数承担的是平移缩放作用，强行衰减可能影响训练稳定性。这个是常见工程惯例，不是 PyTorch 的硬性规则；是否采用它取决于优化器、模型结构和实验结果。参数分组后还应检查每个参数只进入一个 group，避免重复引用或遗漏。
 
@@ -588,8 +671,9 @@ optimizer = torch.optim.AdamW(
     lr=1e-4,
 )
 ```
+> 代码片段，静态审阅，未运行。
 
-注意：修改 `requires_grad` 后，最好重新创建 optimizer，避免 optimizer 里仍然持有不该更新的参数组。
+如果在创建 optimizer 后冻结参数，优化器仍保留这些参数引用；通常不会为已冻结参数生成新梯度，但旧 `.grad`、显式零梯度、weight decay 或动量状态会影响后续行为。要让参数组清楚地对应当前训练目标，应清理旧梯度并重建参数组，或明确调用 `add_param_group` 管理后来解冻的参数。仅仅设置 `requires_grad=False` 不会自动重写 optimizer 的参数组。
 
 ## 3.10 state_dict 保存什么
 
@@ -599,21 +683,25 @@ optimizer = torch.optim.AdamW(
 state = model.state_dict()
 
 for key, value in state.items():
-    print(key, value.shape)
+    description = tuple(value.shape) if isinstance(value, torch.Tensor) else type(value).__name__
+    print(key, description)
 ```
+> 代码片段，已验证（2026-11-09；Python 3.12.9、PyTorch 2.12.0+cpu，CPU）。
 
-它保存的是：
+默认保存的是：
 
 1. 所有注册参数。
 2. 默认持久化的 buffer。
 
-它不保存：
+它不会自动保存：
 
 1. Python 类定义本身。
 2. `forward` 代码逻辑。
 3. optimizer 状态，除非单独保存 optimizer 的 `state_dict()`。
 4. 未注册在 module 上的普通 tensor。
 5. `persistent=False` 的 buffer。
+
+若自定义 module 通过 `get_extra_state()` 或 state-dict hook 加入额外值，这些值也可能进入返回字典；因此不能假定每个 value 都是权重 tensor。
 
 以一个简单模型为例：
 
@@ -626,6 +714,7 @@ model = nn.Sequential(
 
 print(model.state_dict().keys())
 ```
+> 代码片段，静态审阅，未运行。
 
 可能输出：
 
@@ -650,7 +739,7 @@ lm_head.weight
 
 理解 key 的层级非常重要，因为加载权重、排查 missing key、做 LoRA merge、切分 checkpoint 都依赖这些名称。
 
-还要注意 `state_dict()` 的对象生命周期。它返回的是一个保存 key 的映射，里面的 tensor 通常仍与当前模块参数共享底层内容；把它赋给 `best_state` 后继续训练，并不等于自动冻结了“最佳时刻”的数值。需要保留独立快照时，应显式复制到 CPU 或 clone：
+还要注意 `state_dict()` 的对象生命周期。它返回的是一个保存 key 的映射，里面的 tensor 通常仍与当前模块参数共享底层内容；把它赋给 `best_state` 后继续训练，并不等于自动冻结了“最佳时刻”的数值。这个浅拷贝语义见 [PyTorch 2.15 API](https://docs.pytorch.org/docs/2.15/generated/torch.nn.Module.html)。若模型使用标准 tensor 参数和 buffer，保留最佳权重时应显式复制到 CPU 或 clone：
 
 ```python
 best_state = {
@@ -658,6 +747,9 @@ best_state = {
     for name, value in model.state_dict().items()
 }
 ```
+> 代码片段，已验证（2026-11-09；Python 3.12.9、PyTorch 2.12.0+cpu，CPU）。
+
+自定义 extra state 若不是 tensor，应按它自己的类型建立独立副本；不能直接对任意 state value 调用 tensor 方法。
 
 否则常见的“验证集最好时保存了权重，训练结束后加载却变成最后一步”的问题，可能不是 `load_state_dict` 失效，而是保存的映射一直指向正在变化的存储。
 
@@ -670,6 +762,7 @@ best_state = {
 ```python
 torch.save(model.state_dict(), "model.pt")
 ```
+> 代码片段，静态审阅，未运行。
 
 加载：
 
@@ -678,16 +771,18 @@ model = MyModel(config)
 state = torch.load("model.pt", map_location="cpu", weights_only=True)
 model.load_state_dict(state)
 ```
+> 代码片段，静态审阅，未运行。
 
 为什么不推荐直接保存整个模型？
 
 ```python
 torch.save(model, "model.pt")
 ```
+> 代码片段，静态审阅，未运行。
 
 这种方式依赖 Python pickle，需要加载时能找到完全一致的类路径和代码结构。工程迭代后很容易因为类名、文件路径或依赖变化加载失败。保存 `state_dict` 更稳定，也更符合跨版本和跨工程迁移习惯。
 
-较新的 PyTorch 提供了受限的 `weights_only` 加载路径。对于只包含权重或由张量、数字、字符串、列表和字典组成的 checkpoint，优先显式使用 `weights_only=True`；这能减少从文件反序列化任意 Python 对象的风险。若旧 checkpoint 包含自定义 Python 类而无法用受限路径加载，不要为了消除报错而无条件关闭限制，应先确认文件来源、隔离加载环境，并评估是否可以把 checkpoint 改成更简单且可审计的结构。
+PyTorch 2.6 起，在未传入其他 pickle module 时，`torch.load` 默认采用 `weights_only=True`；本章显式写出该参数以便读者看清加载边界。受限加载适合 tensor、基本类型、字典等受支持对象组成的 checkpoint；自定义配置类、tensor subclass 或由 `get_extra_state()` 写入的对象可能需要审查并显式 allowlist。模型配置宜存成基本类型组成的字典，再由代码重建模型。该限制会缩小 pickle 动态反序列化的范围，但不防御所有拒绝服务或下游风险。不要对来源不可信的文件改用 `weights_only=False`；具体限制见 [PyTorch 2.15 `torch.load`](https://docs.pytorch.org/docs/2.15/generated/torch.load.html) 和[序列化说明](https://docs.pytorch.org/docs/2.15/notes/serialization.html)。
 
 完整训练 checkpoint 通常包含：
 
@@ -698,11 +793,12 @@ checkpoint = {
     "scheduler": scheduler.state_dict(),
     "step": step,
     "epoch": epoch,
-    "config": config,
+    "config": config_dict,  # 用数字、字符串、列表和字典等受支持的基本类型
 }
 
 torch.save(checkpoint, "checkpoint.pt")
 ```
+> 代码片段，静态审阅，未运行。
 
 恢复：
 
@@ -713,6 +809,7 @@ optimizer.load_state_dict(checkpoint["optimizer"])
 scheduler.load_state_dict(checkpoint["scheduler"])
 step = checkpoint["step"]
 ```
+> 代码片段，静态审阅，未运行。
 
 推理只需要模型权重时，通常不需要 optimizer 和 scheduler。
 
@@ -726,11 +823,12 @@ checkpoint = {
     "scaler": scaler.state_dict() if scaler is not None else None,
     "rng_torch": torch.get_rng_state(),
     "step": step,
-    "config": config,
+    "config": config_dict,
 }
 ```
+> 代码片段，静态审阅，未运行。
 
-这仍然不是绝对的 bitwise reproducibility 保证。数据 worker、CUDA kernel、分布式通信和外部数据版本也可能影响后续结果。好的 checkpoint 设计应明确写出“用于推理”“用于继续训练”还是“用于审计复现”，三者需要保存的状态不同。
+这里的 `rng_torch` 只示意 CPU PyTorch 随机状态。若训练还使用 Python `random`、NumPy、CUDA 随机数或带 worker 的采样器，应根据恢复目标保存相应状态和数据进度。这仍然不是绝对的 bitwise reproducibility 保证：算子确定性、worker 时序、分布式通信和外部数据版本也会影响后续轨迹。好的 checkpoint 设计应明确写出“用于推理”“用于继续训练”还是“用于审计复现”，三者需要保存的状态不同。
 
 ## 3.12 strict=True 和 strict=False
 
@@ -739,6 +837,7 @@ checkpoint = {
 ```python
 model.load_state_dict(state, strict=True)
 ```
+> 代码片段，静态审阅，未运行。
 
 如果不匹配，会报 missing key 或 unexpected key：
 
@@ -760,22 +859,23 @@ missing, unexpected = model.load_state_dict(state, strict=False)
 print("missing:", missing)
 print("unexpected:", unexpected)
 ```
+> 代码片段，静态审阅，未运行。
 
-但不要把 `strict=False` 当成万能修复。正确做法是检查 missing 和 unexpected 是否符合预期。例如加载预训练 backbone 到下游分类模型时，分类头 missing 是合理的；但如果 Transformer block 大量 missing，说明 key 对不上或模型结构不一致。
+`strict=False` 只放宽缺失 key 和多余 key 的检查；同名参数的 shape 不一致仍会报错。[`load_state_dict`](https://docs.pytorch.org/docs/2.15/generated/torch.nn.Module.html#torch.nn.Module.load_state_dict) 的 `strict` 只定义 key 是否严格匹配。若有意跳过尺寸变化的层，应先按 key 和 shape 筛选 checkpoint，并逐项记录被跳过或需要裁剪/扩展的参数。不要把 `strict=False` 当成万能修复：例如加载 backbone 到新分类模型时，分类头 missing 可能合理；但如果 Transformer block 大量 missing，说明 key 对不上或模型结构不一致。
 
-处理 `module.` 前缀：
+处理 DDP 的 `module.` 前缀时，优先使用 PyTorch 提供的 helper：
 
 ```python
-new_state = {}
-for key, value in state.items():
-    if key.startswith("module."):
-        key = key[len("module."):]
-    new_state[key] = value
+from torch.nn.modules.utils import consume_prefix_in_state_dict_if_present
 
-model.load_state_dict(new_state)
+consume_prefix_in_state_dict_if_present(state, "module.")
+model.load_state_dict(state)
 ```
+> 代码片段，已验证（2026-11-09；Python 3.12.9、PyTorch 2.12.0+cpu，CPU）。
 
 更好的习惯是在 DDP 训练时保存未包装模型或保存 `model.module.state_dict()`。
+
+PyTorch 2.15 的 `load_state_dict` 还提供 `assign=False` 参数。默认值会把 checkpoint 值复制到目标模型现有的参数和 buffer；若选择 `assign=True`，张量属性更多地沿用 checkpoint 一侧，官方文档提醒除非启用了参数交换机制，否则应在加载后再创建 optimizer。本章示例使用默认 `assign=False`，避免把两种参数对象生命周期混在一起；参数和 optimizer 的顺序约束见 [API 文档](https://docs.pytorch.org/docs/2.15/generated/torch.nn.Module.html#torch.nn.Module.load_state_dict)。
 
 ## 3.13 train() 和 eval() 到底改变什么
 
@@ -784,30 +884,35 @@ model.load_state_dict(new_state)
 ```python
 model.train()
 ```
+> 代码片段，静态审阅，未运行。
 
 等价于：
 
 ```python
 model.train(True)
 ```
+> 代码片段，静态审阅，未运行。
 
 推理模式：
 
 ```python
 model.eval()
 ```
+> 代码片段，静态审阅，未运行。
 
 等价于：
 
 ```python
 model.train(False)
 ```
+> 代码片段，静态审阅，未运行。
 
 它们会递归设置每个子模块的 `training` 标志：
 
 ```python
 print(model.training)
 ```
+> 代码片段，静态审阅，未运行。
 
 最受影响的层是：
 
@@ -826,8 +931,11 @@ print(dropout(x))  # 随机有些位置为 0
 dropout.eval()
 print(dropout(x))  # 通常保持不变
 ```
+> 代码片段，静态审阅，未运行。
 
 BatchNorm 在训练时使用当前 batch 的统计量并更新 running statistics，在 eval 时使用保存的 running statistics。
+
+例外是 `track_running_stats=False`：这时 BatchNorm 没有保存运行统计量，评估时也会使用当前 batch 的统计，所以同一个样本放在不同 batch 中可能得到不同结果，见 [PyTorch 2.15 BatchNorm 文档](https://docs.pytorch.org/docs/2.15/generated/torch.nn.BatchNorm1d.html)。`eval()` 只设置模块的 `training` 标志；自定义层若不检查该标志，或推理代码仍进行随机采样，输出仍可能变化。
 
 重要区别：`model.eval()` 不等于关闭梯度。
 
@@ -836,6 +944,7 @@ model.eval()
 with torch.no_grad():
     output = model(x)
 ```
+> 代码片段，静态审阅，未运行。
 
 推理时通常两者都需要：
 
@@ -850,6 +959,9 @@ with torch.no_grad():
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = model.to(device)
 ```
+> 代码片段，静态审阅，未运行。
+
+`.to()` 会原地修改模块。设备迁移完成后再创建 optimizer 是稳妥顺序；PyTorch 2.15 对 [`Module.cuda()`](https://docs.pytorch.org/docs/2.15/generated/torch.nn.Module.html#torch.nn.Module.cuda) 明确提醒迁移可能让参数对象改变，因此应在 optimizer 构造前完成迁移。
 
 输入数据也必须在同一个 device：
 
@@ -857,6 +969,7 @@ model = model.to(device)
 x = x.to(device)
 output = model(x)
 ```
+> 代码片段，静态审阅，未运行。
 
 常见错误：
 
@@ -877,6 +990,7 @@ class BadMask(nn.Module):
     def forward(self, x):
         return x.masked_fill(self.mask == 0, 0)
 ```
+> 代码片段，静态审阅，未运行。
 
 `self.mask` 不会随 `model.to("cuda")` 移动，容易 device mismatch。
 
@@ -892,12 +1006,14 @@ class GoodMask(nn.Module):
     def forward(self, x):
         return x.masked_fill(self.mask == 0, 0)
 ```
+> 代码片段，静态审阅，未运行。
 
 `model.to(dtype=torch.bfloat16)` 可以转换浮点参数和 buffer 的 dtype：
 
 ```python
 model = model.to(dtype=torch.bfloat16)
 ```
+> 代码片段，静态审阅，未运行。
 
 注意：整数类型 tensor 不会被转换成浮点；token id 通常仍然是 `torch.long`。
 
@@ -911,6 +1027,7 @@ model = model.to(dtype=torch.bfloat16)
 for child in model.children():
     print(type(child).__name__)
 ```
+> 代码片段，静态审阅，未运行。
 
 所有递归子模块，包括自身：
 
@@ -918,6 +1035,7 @@ for child in model.children():
 for module in model.modules():
     print(type(module).__name__)
 ```
+> 代码片段，静态审阅，未运行。
 
 带名称遍历：
 
@@ -925,6 +1043,7 @@ for module in model.modules():
 for name, module in model.named_modules():
     print(name, type(module).__name__)
 ```
+> 代码片段，静态审阅，未运行。
 
 这些接口常用于：
 
@@ -933,6 +1052,8 @@ for name, module in model.named_modules():
 3. 给特定模块加 hook。
 4. 收集特定模块的参数。
 5. 打印模型结构。
+
+`modules()`、`named_modules()`、`parameters()` 和 `named_parameters()` 默认会去重同一个对象。权重共享或同一子模块挂在多个访问路径时，遍历到的数量可能少于路径 key 数；需要审计别名时，应同时检查对象身份和 state dict key，而不能只看名称数量。
 
 自定义初始化示例：
 
@@ -946,6 +1067,7 @@ def init_weights(module):
 
 model.apply(init_weights)
 ```
+> 代码片段，静态审阅，未运行。
 
 `apply` 会递归访问所有子模块，并对每个模块执行函数。
 
@@ -956,6 +1078,7 @@ for name, module in model.named_children():
     if isinstance(module, nn.ReLU):
         setattr(model, name, nn.GELU())
 ```
+> 代码片段，静态审阅，未运行。
 
 复杂模型替换通常需要写递归函数，或者在模型构建阶段就通过配置决定层类型。
 
@@ -993,6 +1116,7 @@ class TinyTransformer(nn.Module):
         x = self.norm(x)
         return self.lm_head(x)
 ```
+> 代码片段，静态审阅，未运行。
 
 初始化要注意：
 
@@ -1006,6 +1130,7 @@ class TinyTransformer(nn.Module):
 ```python
 self.lm_head.weight = self.embed_tokens.weight
 ```
+> 代码片段，静态审阅，未运行。
 
 这表示两个模块引用同一个 `Parameter`。保存、加载、优化器更新时要理解它们是共享权重，而不是两份独立参数。共享权重会让参数统计、checkpoint key 和优化器状态出现别名关系：逻辑上可能有两个使用位置，实际只应有一份可训练存储。`model.parameters()` 默认会去重同一个参数对象，而 `state_dict` 可能保留两个名称，因此不能用 key 数量代替参数量。
 
@@ -1014,6 +1139,7 @@ self.lm_head.weight = self.embed_tokens.weight
 ```python
 assert model.lm_head.weight is model.embed_tokens.weight
 ```
+> 代码片段，静态审阅，未运行。
 
 如果手工构造 optimizer 参数列表，还要避免把共享参数重复加入；直接使用 `model.parameters()` 通常会得到去重后的参数迭代器。
 
@@ -1085,6 +1211,7 @@ class LanguageModel(nn.Module):
         logits = self.lm_head(x)
         return logits
 ```
+> 代码片段，静态审阅，未运行。
 
 这种组织方式的优点：
 
@@ -1101,6 +1228,7 @@ class LanguageModel(nn.Module):
 ```python
 return logits
 ```
+> 代码片段，静态审阅，未运行。
 
 但大模型常常需要返回更多信息：
 
@@ -1119,6 +1247,7 @@ return {
     "hidden_states": hidden_states,
 }
 ```
+> 代码片段，静态审阅，未运行。
 
 也可以使用 dataclass：
 
@@ -1132,6 +1261,7 @@ class ModelOutput:
     logits: torch.Tensor
     hidden_states: tuple[torch.Tensor, ...] | None = None
 ```
+> 代码片段，静态审阅，未运行。
 
 设计原则：
 
@@ -1157,6 +1287,7 @@ def forward(self, input_ids, labels=None):
 
     return {"loss": loss, "logits": logits}
 ```
+> 代码片段，静态审阅，未运行。
 
 这里要注意：如果使用 `view`，前面常常需要 `contiguous()`；如果不想关心连续性，可以用 `reshape`。
 
@@ -1191,6 +1322,7 @@ print(activations["layer0"].shape)
 
 handle.remove()
 ```
+> 代码片段，静态审阅，未运行。
 
 hook 使用注意：
 
@@ -1199,9 +1331,13 @@ hook 使用注意：
 3. hook 会增加调试复杂度，不适合作为核心业务逻辑长期依赖。
 4. 分布式和编译场景下 hook 行为可能更复杂。
 
+上例假设被观察层返回单个 tensor，且该层本轮只调用一次；若输出是 tuple/dict，或同一层会被多次调用，应显式选择要保存的张量并给调用位置编号，避免后一次输出覆盖前一次记录。
+
 ## 3.20 register_module、setattr 和动态添加层
 
 有时模型结构需要根据配置动态构建。只要用 `setattr` 把 module 赋给 `nn.Module` 属性，也会注册。
+
+显式调用 `add_module(name, module)` 也可注册子模块；`register_module` 是它的别名。一般模型用属性赋值或 `ModuleList` 更易读，手工注册接口主要用于确实需要动态命名的构建器。
 
 ```python
 class DynamicModel(nn.Module):
@@ -1217,6 +1353,7 @@ class DynamicModel(nn.Module):
             x = layer(x)
         return x
 ```
+> 代码片段，静态审阅，未运行。
 
 这样才会按照构造时的层数执行。它能工作，但不如 `ModuleList` 清晰，因为层名和遍历逻辑被拆开了，改结构时还要同步维护 `getattr`。更好的写法：
 
@@ -1225,12 +1362,14 @@ self.layers = nn.ModuleList([
     nn.Linear(hidden_size, hidden_size) for _ in range(num_layers)
 ])
 ```
+> 代码片段，静态审阅，未运行。
 
 动态添加层要注意：如果 optimizer 已经创建，再向模型里添加新参数，optimizer 默认不知道这些新参数。
 
 ```python
 model.new_head = nn.Linear(768, 2)
 ```
+> 代码片段，静态审阅，未运行。
 
 如果这发生在 optimizer 创建之后，需要重新创建 optimizer，或者显式 `add_param_group`。大多数情况下，应在构建 optimizer 前完成模型结构定义。
 
@@ -1252,6 +1391,7 @@ model.new_head = nn.Linear(768, 2)
 for name, param in model.named_parameters():
     print(name, param.shape, param.requires_grad)
 ```
+> 代码片段，静态审阅，未运行。
 
 检查目标层是否出现。如果没有出现，说明没有注册。
 
@@ -1267,6 +1407,7 @@ num_optim_params = sum(
 
 print(num_model_params, num_optim_params)
 ```
+> 代码片段，静态审阅，未运行。
 
 如果两者不一致，要确认是否有意冻结、是否参数分组遗漏、是否创建 optimizer 的时机不对。
 
@@ -1286,14 +1427,19 @@ print(num_model_params, num_optim_params)
 class CustomDropout(nn.Module):
     def __init__(self, p):
         super().__init__()
+        if not 0.0 <= p <= 1.0:
+            raise ValueError("p must be in [0, 1]")
         self.p = p
 
     def forward(self, x):
         if not self.training or self.p == 0:
             return x
+        if self.p == 1:
+            return torch.zeros_like(x)
         mask = torch.rand_like(x) > self.p
         return x * mask / (1 - self.p)
 ```
+> 代码片段，已验证（2026-11-09；Python 3.12.9、PyTorch 2.12.0+cpu，CPU）。
 
 如果只是推理忘了关梯度，输出通常不会因此随机变化，但会浪费显存：
 
@@ -1302,6 +1448,7 @@ model.eval()
 with torch.inference_mode():
     output = model(x)
 ```
+> 代码片段，静态审阅，未运行。
 
 ## 3.23 常见 bug：加载 checkpoint 报错
 
@@ -1331,17 +1478,21 @@ size mismatch for embed_tokens.weight
 
 ```python
 old_weight = state["embed_tokens.weight"]
-new_weight = model.embed_tokens.weight.data
+new_weight = model.embed_tokens.weight
 
 num = min(old_weight.size(0), new_weight.size(0))
-new_weight[:num].copy_(old_weight[:num])
+with torch.no_grad():
+    new_weight[:num].copy_(old_weight[:num])
 ```
+> 代码片段，已验证（2026-11-09；Python 3.12.9、PyTorch 2.12.0+cpu，CPU）。
 
 这类操作要明确知道语义，不能随便忽略。
 
 ## 3.24 LoRA、Adapter 与可训练参数筛选
 
 在参数高效微调中，经常冻结 base model，只训练 LoRA 或 adapter 参数。
+
+本章只检查这些参数是否注册并进入 optimizer；LoRA 的低秩分解和参数量推导见[第十三册第五章《矩阵分解与低秩》](../../book-13-math-foundations/chapters/05-矩阵分解与低秩.md)。
 
 典型逻辑：
 
@@ -1356,6 +1507,7 @@ for name, param in model.named_parameters():
 trainable_params = [p for p in model.parameters() if p.requires_grad]
 optimizer = torch.optim.AdamW(trainable_params, lr=1e-4)
 ```
+> 代码片段，静态审阅，未运行。
 
 检查可训练参数：
 
@@ -1364,6 +1516,7 @@ for name, param in model.named_parameters():
     if param.requires_grad:
         print(name, param.numel())
 ```
+> 代码片段，静态审阅，未运行。
 
 LoRA 参数能否被 optimizer 看到，仍然取决于注册机制：LoRA 层里的 A、B 矩阵必须是注册的 `nn.Parameter`，LoRA 子模块必须挂在模型模块树上，否则 optimizer、state_dict、DDP 都不会自动处理它们。只按 `requires_grad=True` 筛选还不够；还要核对参数命名、target module、adapter 配置和保存/加载后的结构。
 
@@ -1371,13 +1524,14 @@ LoRA 参数能否被 optimizer 看到，仍然取决于注册机制：LoRA 层�
 
 ```python
 lora_state = {
-    name: param.detach().cpu()
+    name: param.detach().cpu().clone()
     for name, param in model.named_parameters()
     if param.requires_grad
 }
 
 torch.save(lora_state, "lora.pt")
 ```
+> 代码片段，已验证（2026-11-09；Python 3.12.9、PyTorch 2.12.0+cpu，CPU）。
 
 真实项目中还要保存 LoRA 配置，例如 rank、alpha、target modules，否则只保存权重不够恢复结构。
 
@@ -1394,8 +1548,11 @@ model = torch.nn.parallel.DistributedDataParallel(
     device_ids=[local_rank],
 )
 ```
+> 代码片段，静态审阅，未运行。
 
 DDP 会遍历模型参数，注册梯度同步 hook。没有注册到 module 树上的参数不会被同步。
+
+构造 DDP 前必须完成参数和 buffer 的注册；包装后不得再增删参数或 buffer，而且各进程的参数注册顺序必须一致。否则 DDP 已安装的梯度归约 hook 与真实参数集合/顺序不再匹配。动态加层要发生在 DDP 包装之前，并在所有 rank 上以相同结构执行；这是 [PyTorch 2.15 DDP API](https://docs.pytorch.org/docs/2.15/generated/torch.nn.parallel.DistributedDataParallel.html) 的显式前提。本册的进程组、数据分片和梯度同步主讲见[第七章《分布式训练入门》](07-分布式训练入门.md)。
 
 保存时常用：
 
@@ -1403,6 +1560,7 @@ DDP 会遍历模型参数，注册梯度同步 hook。没有注册到 module 树
 if rank == 0:
     torch.save(model.module.state_dict(), "model.pt")
 ```
+> 代码片段，静态审阅，未运行。
 
 因为 DDP 包装后的外层对象有 `.module` 指向原始模型。
 
@@ -1418,11 +1576,12 @@ FSDP 更依赖模块边界，因为它会按模块切分、扁平化、分片参
 
 ## 3.26 torch.compile 对 Module 的影响
 
-`torch.compile` 可以编译模型以获得性能提升：
+`torch.compile` 会尝试捕获并编译模型可支持的计算段，是否加速取决于代码、输入、后端和运行环境：
 
 ```python
 model = torch.compile(model)
 ```
+> 代码片段，静态审阅，未运行。
 
 它通常包装 module 的调用过程，而不是改变你写 `forward` 的基本规则。为了更容易被编译和优化，模型代码应尽量：
 
@@ -1431,7 +1590,9 @@ model = torch.compile(model)
 3. 避免每次 forward 动态改变模块结构。
 4. 对 shape 变化和控制流保持可预期。
 
-不是所有模型都适合直接 compile。遇到 graph break、编译时间过长、显存变化或数值不一致时，需要逐步缩小范围，例如只 compile 某个 block 或推理路径。
+不是所有模型都适合直接 compile。遇到 graph break、编译时间过长、显存变化或数值不一致时，需要先与 eager 输出对照，再逐步缩小范围，例如只 compile 某个 block 或训练/推理函数。PyTorch 2.15 的 [compiler troubleshooting 文档](https://docs.pytorch.org/docs/2.15/user_guide/torch_compiler/torch.compiler_troubleshooting.html)建议选择问题较少的高层函数、顶层 module 或子 module；对 DDP/FSDP 包装场景，文档建议优先考虑编译传给分布式 wrapper 的内部 module。这个建议是版本化排障入口，不是所有组合都已在本章运行验证。
+
+本册的最小复现、Profiler 和编译性能验证流程放在[第八章《Debug 与 Profiling》](08-debug与profiling.md)；本节只交代 Module 边界及版本化排查入口。
 
 这里的关键不是背 compile 参数，而是知道：`nn.Module` 仍然是模型结构入口，`forward` 的 Python 写法会影响编译器是否能稳定捕获计算图。compile 前后都应比较数值、输出结构和状态切换行为，不应把一次成功编译当作所有动态输入都已兼容。
 
@@ -1565,6 +1726,16 @@ num_optimizer_params = sum(
     for group in frozen_optimizer.param_groups
     for param in group["params"]
 )
+trainable_ids = {id(param) for param in trainable_params}
+optimizer_param_ids = [
+    id(param)
+    for group in frozen_optimizer.param_groups
+    for param in group["params"]
+]
+optimizer_identity_match = (
+    len(optimizer_param_ids) == len(set(optimizer_param_ids))
+    and set(optimizer_param_ids) == trainable_ids
+)
 
 with tempfile.TemporaryDirectory() as tmpdir:
     path = Path(tmpdir) / "tiny_classifier.pt"
@@ -1599,6 +1770,7 @@ report = {
     "loss_first_last": (losses[0], losses[-1]),
     "trainable_after_freeze": num_model_trainable,
     "optimizer_param_count": num_optimizer_params,
+    "optimizer_identity_match": optimizer_identity_match,
     "missing_keys": sorted(missing),
     "unexpected_keys": unexpected,
 }
@@ -1612,7 +1784,7 @@ checks = {
     "nonpersistent_buffer_skipped": "scratch_mask" not in state_keys,
     "train_eval_recursive": recursive_train and recursive_eval,
     "loss_decreased": losses[-1] < losses[0],
-    "optimizer_matches_trainable": num_model_trainable == num_optimizer_params,
+    "optimizer_matches_trainable": optimizer_identity_match,
     "strict_false_reports_missing": (
         sorted(missing) == ["head.bias", "head.weight"] and unexpected == []
     ),
@@ -1629,6 +1801,7 @@ for key, value in checks.items():
 
 assert all(checks.values())
 ```
+> 代码片段，已验证（2026-11-09；Python 3.12.9、PyTorch 2.12.0+cpu，CPU）。
 
 如果这个 demo 在有 PyTorch 的环境里运行，应该看到：
 
@@ -1666,20 +1839,17 @@ assert all(checks.values())
 
 ## 3.29 资料与证据边界
 
-本章关于模块注册、参数、buffer、模式切换、状态字典和编译包装的 API 语义，优先依据 PyTorch 官方资料：
+本章关于模块注册、参数、buffer、模式切换、状态字典和编译包装的 API 语义，以 PyTorch 2.15 官方资料为基准：
 
-1. `nn.Module`：https://pytorch.org/docs/stable/generated/torch.nn.Module.html
-2. `nn.Parameter`：https://pytorch.org/docs/stable/generated/torch.nn.parameter.Parameter.html
-3. `register_buffer`：https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer
-4. `ModuleList`：https://pytorch.org/docs/stable/generated/torch.nn.ModuleList.html
-5. `ModuleDict`：https://pytorch.org/docs/stable/generated/torch.nn.ModuleDict.html
-6. `ParameterList`：https://pytorch.org/docs/stable/generated/torch.nn.ParameterList.html
-7. `state_dict` 与加载：https://pytorch.org/tutorials/beginner/saving_loading_models.html
-8. `load_state_dict`：https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.load_state_dict
-9. `torch.compile`：https://pytorch.org/docs/stable/torch.compiler.html
-10. DistributedDataParallel：https://pytorch.org/docs/stable/generated/torch.nn.parallel.DistributedDataParallel.html
+1. [`nn.Module`](https://docs.pytorch.org/docs/2.15/generated/torch.nn.Module.html)、[`nn.Parameter`](https://docs.pytorch.org/docs/2.15/generated/torch.nn.parameter.Parameter.html) 和 [`register_buffer`](https://docs.pytorch.org/docs/2.15/generated/torch.nn.Module.html#torch.nn.Module.register_buffer)
+2. [`ModuleList`](https://docs.pytorch.org/docs/2.15/generated/torch.nn.ModuleList.html)、[`ModuleDict`](https://docs.pytorch.org/docs/2.15/generated/torch.nn.ModuleDict.html)、[`ParameterList`](https://docs.pytorch.org/docs/2.15/generated/torch.nn.ParameterList.html) 和 [`ParameterDict`](https://docs.pytorch.org/docs/2.15/generated/torch.nn.ParameterDict.html)
+3. [保存与加载模型教程](https://docs.pytorch.org/tutorials/beginner/saving_loading_models.html) 与 [`torch.load`](https://docs.pytorch.org/docs/2.15/generated/torch.load.html)
+4. [序列化说明](https://docs.pytorch.org/docs/2.15/notes/serialization.html) 与 [`load_state_dict`](https://docs.pytorch.org/docs/2.15/generated/torch.nn.Module.html#torch.nn.Module.load_state_dict)
+5. [`Dropout`](https://docs.pytorch.org/docs/2.15/generated/torch.nn.Dropout.html) 和 [`BatchNorm1d`](https://docs.pytorch.org/docs/2.15/generated/torch.nn.BatchNorm1d.html)
+6. [`DistributedDataParallel`](https://docs.pytorch.org/docs/2.15/generated/torch.nn.parallel.DistributedDataParallel.html)
+7. [`torch.compile`](https://docs.pytorch.org/docs/2.15/torch.compiler.html) 与 [torch.compile troubleshooting](https://docs.pytorch.org/docs/2.15/user_guide/torch_compiler/torch.compiler_troubleshooting.html)
 
-官方资料能确认接口语义，但不能替代目标 checkpoint、硬件和分布式拓扑上的验证。共享权重、FSDP state dict、量化状态、LoRA adapter 合并和 `torch.compile` 的性能及兼容性，应以对应版本的实现和项目实测为准。加载来自外部的 pickle 或 checkpoint 时，还要遵守项目的安全策略，不要在未验证来源的情况下直接反序列化不可信文件。
+官方资料能确认版本化接口语义，但不能替代目标 checkpoint、硬件和分布式拓扑上的验证。共享权重、FSDP state dict、量化状态、LoRA adapter 合并和 `torch.compile` 的性能及兼容性，应以对应版本的实现和项目实测为准。`weights_only=True` 也不是对不可信 checkpoint 的完整安全保证；不要对不可信来源直接执行 pickle 加载。
 
 ## 3.30 本章总结
 

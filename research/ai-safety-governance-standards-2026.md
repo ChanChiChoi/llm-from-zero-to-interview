@@ -4,7 +4,7 @@
 
 ## AI 风险治理
 
-- **来源**：[NIST AI Risk Management Framework 官方页面](https://www.nist.gov/itl/ai-risk-management-framework)、[AI RMF 1.0（NIST AI 100-1）](https://nvlpubs.nist.gov/nistpubs/ai/nist.ai.100-1.pdf)、[Generative AI Profile（NIST AI 600-1）](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf)。
+- **来源**：[NIST AI Risk Management Framework 官方页面](https://www.nist.gov/itl/ai-risk-management-framework)、[AI RMF 1.0（NIST AI 100-1）](https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-ai-rmf-10)、[Generative AI Profile（NIST AI 600-1）](https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence)。
 - **版本与阅读范围**：AI RMF 1.0 发布于 2023-01-26；生成式 AI Profile 发布于 2024-07-26。阅读官方页面、AI RMF 核心功能介绍及 Profile 摘要和引言。
 - **来源支持的事实**：AI RMF 1.0 面向自愿使用，以 Govern、Map、Measure、Manage 四项功能组织风险管理；NIST AI 600-1 是面向生成式 AI 的跨行业 companion profile，提出与四项功能相对齐的风险管理行动。NIST 官方页面在 2026-10-30 标明 AI RMF 1.0 正在修订。
 - **证据边界**：框架提供风险管理目标与行动建议，不是法规清单、认证或系统性能保证。Profile 的风险和行动须按具体使用场景选择，不能据其发布推断所有组织已实施。

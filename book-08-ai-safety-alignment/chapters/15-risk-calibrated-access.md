@@ -947,7 +947,7 @@ allow_canary 也不是“发布完成”的同义词：它只允许审批绑定�
 ### 15.19.1 治理、零信任与 Agent 风险
 
 1. [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：提供 Govern、Map、Measure、Manage 的风险管理语言，支持把访问策略放入生命周期。
-2. [NIST Generative AI Profile](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf)：补充生成式 AI 的风险场景、测量和治理讨论。
+2. [NIST Generative AI Profile](https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence)：补充生成式 AI 的风险场景、测量和治理讨论。
 3. [NIST SP 800-207](https://csrc.nist.gov/pubs/sp/800/207/final) 与 [SP 800-207A](https://csrc.nist.gov/pubs/sp/800/207/a/final)：支持资源中心的零信任思路，以及用户身份、服务身份和应用级策略边界。
 4. [OWASP Top 10 for Agentic Applications 2026](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/) 将 Identity & Privilege Abuse（ASI03）列为 Agent 风险类别；它是社区风险分类和威胁发现入口，不是授权实现规范，也不能证明某个部署安全。
 

@@ -133,6 +133,22 @@
   - 证据等级：source-backed（早期预印本中的方法和作者实验报告）。
   - 边界：收益依赖作者定义的 base-pass-rate、模型、任务和训练协议；尚不能据此认定 advantage-adaptive clipping 是通用默认配置。
 
+## 2026-11-06 补充：GRPO 数学定义与 RL 后训练缩放
+
+### Group Relative Policy Optimization 的基本数学对象
+
+- Shao et al., “DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models,” arXiv:2402.03300v3（2024-04-27），[论文 HTML](https://arxiv.org/html/2402.03300)，§4.1.1；DeepSeek-AI, “DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning,” arXiv:2501.12948，[论文 HTML](https://arxiv.org/html/2501.12948)，§2.2.1 与式（1）—（3）。本次核阅两篇论文的相关算法说明及公式。
+  - 来源支持：DeepSeekMath 将 GRPO 描述为 PPO 变体；其方法省去单独的 value/critic 模型，用同一问题采样的一组回答得分构造 baseline。DeepSeek-R1 的公开算法进一步写出组内 reward 标准化 advantage、policy ratio、clipping 和 reference-policy KL 项。
+  - 证据等级：source-backed（论文定义与特定模型报告中的算法公式）。
+  - 适用边界：这些材料支持对应论文描述的 GRPO 版本，不能推出不同训练器具有相同 advantage 归一化、token/sequence reduction、长度处理或 KL 估计；组内没有奖励差异时也不会产生有效的相对优势信号。
+
+### RL 后训练的数学推理缩放
+
+- Tan et al., “Scaling Behaviors of LLM Reinforcement Learning Post-Training: An Empirical Study in Mathematical Reasoning,” arXiv:2509.25300（2025-09-29），[论文 HTML](https://arxiv.org/html/2509.25300)。本次核阅摘要、§§1–3 的模型/数据/训练设定与主结果。
+  - 来源支持：作者用 Qwen2.5 的 0.5B—72B 模型、数学推理训练数据和 GRPO 研究计算预算、数据预算及数据复用；文中提出 test loss 随资源变化的经验幂律拟合，并报告其设定下较大模型有更高的计算/数据效率、效率增益随模型规模出现饱和，以及数据受限时重复使用高质量数据可以有效。论文还报告按模型和配置重复训练，并以数学、代码、逻辑和科学任务检查泛化。
+  - 证据等级：source-backed（预印本中的方法定义和作者报告实验）。
+  - 边界：结论绑定 Qwen2.5 家族、作者的 VeRL 训练实现、数学数据与奖励、损失定义和评测集合；幂律及其参数是该实验范围内的拟合，不构成所有模型家族、任务或后训练算法的普遍 scaling law。数据复用的收益也不证明任意重复或低质量数据都有效。
+
 ## 生命周期
 
 三阶段 PPO-style RLHF、pairwise RM 目标、PPO clipping 与 DPO 关系，以及偏好候选来源、DQO、RLVR 标注噪声和 DeepSeek-V3.2 公开方案：active。反馈质量、候选生成分布、RM 校准、PPO 采样/优势估计、KL 归约、verifier 与偏好冲突依模型、任务、标注协议和实现分别核验。

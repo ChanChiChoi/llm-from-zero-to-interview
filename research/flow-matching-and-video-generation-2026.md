@@ -4,12 +4,12 @@
 
 ## Flow Matching 与 Normalizing Flow 的关系
 
-- Lipman et al., “Flow Matching for Generative Modeling,” [arXiv:2210.02747](https://arxiv.org/abs/2210.02747)，ICLR 2023。阅读 arXiv HTML 摘要、§2 的 continuous normalizing flow 定义、§3 的 Flow Matching/Conditional Flow Matching 目标、§4 的条件概率路径及结论。
+- Lipman et al., “Flow Matching for Generative Modeling,” [arXiv:2210.02747v2](https://arxiv.org/abs/2210.02747v2)，ICLR 2023。阅读 arXiv HTML 摘要、§2 的 continuous normalizing flow 定义、§3 的 Flow Matching/Conditional Flow Matching 目标、§4 的条件概率路径及结论。
   - 来源支持：论文将 Flow Matching 定义为训练连续正规化流的一种 simulation-free 向量场回归目标；通过构造每样本条件路径和向量场，可以获得可训练的条件目标。论文讨论的 Gaussian 路径族包含扩散路径，也允许非扩散路径；其中的 optimal-transport displacement interpolation 对应直线路径。
   - 证据等级：source-backed（原始方法论文及其指定图像实验）。
   - 边界：Flow Matching 是依赖所选概率路径的训练框架，不是某一固定采样器，也不等于传统离散可逆 Normalizing Flow 的换名。论文中的训练稳定性、似然和样本质量比较只绑定其数据、模型和实验协议；不能据此断言任意 Flow Matching 一定更快或更好。
 
-- Liu et al., “Flow Straight and Fast: Learning to Generate and Transfer Data with Rectified Flow,” [arXiv:2209.03003](https://arxiv.org/abs/2209.03003)。阅读论文摘要和版本信息。
+- Liu et al., “Flow Straight and Fast: Learning to Generate and Transfer Data with Rectified Flow,” [arXiv:2209.03003v1](https://arxiv.org/abs/2209.03003v1)。阅读 arXiv HTML 摘要及 §§2.1–2.2 的 rectified flow、rectification 和路径拉直讨论，并核对版本信息。
   - 来源支持：作者提出用 ODE 学习从一个经验分布到另一个经验分布的传输，并让轨迹尽可能接近连接样本对的直线路径；摘要报告递归 rectification 可产生更直的轨迹，并在其图像任务中以较粗的离散步长进行推理。
   - 证据等级：source-backed（原始预印本摘要级方法描述和作者报告）。
   - 边界：Rectified Flow 是一类具体路径/训练策略，不与所有 Flow Matching 同义；一步或少步的质量结论受该论文模型、训练和任务设置约束，本项目不把这些数字用作通用性能保证。

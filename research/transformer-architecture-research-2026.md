@@ -1,6 +1,6 @@
 # Transformer 架构方向的新证据（2026）
 
-检索日期：2026-10-30
+检索日期：2026-10-30；补充检索：2026-11-06
 
 ## 深度方向残差路由
 
@@ -95,6 +95,22 @@
 - 支持事实：MLA 将 key/value 联合投影到低秩 latent $c_t^{KV}$，推理时缓存该 latent 与解耦 RoPE key；论文给出的缓存量为 $(d_c+d_h^R)l$。在 DeepSeek-V2 配置中 $d_c=4d_h$、$d_h^R=d_h/2$，相当于 2.25 个 GQA 组。附录 D.2 报告小模型与大模型两组 MLA 变体的 KV 缓存分别是对应 MHA 变体的约 14% 与 4%，并在四项 hard benchmarks 上得分更高。
 - 证据等级：原始技术报告的机制说明及作者控制的两尺度比较。
 - 边界：各尺度变体的激活参数不同，结果只覆盖所列模型、token 预算和基准；摘要中相对 DeepSeek 67B 的 93.3% KV-cache 降幅是完整系统对比，不能作为 MLA 的单独因果效应或任意 serving 加速保证。
+
+### Low-Rank Key Value Attention（LRKV）
+
+- 来源：[Low-Rank Key Value Attention](https://arxiv.org/abs/2601.11471)，arXiv 论文（2026-01-16）。
+- 阅读位置：摘要、引言、方法中的 KV cache 公式及实验设置/结果段。
+- 支持事实：LRKV 使用共享的完整 KV 投影作为基础，再为每个 attention head 学习低秩残差；论文给出的每 token KV 数量为 `2(d_h+H r)`，标准 MHA 为 `2H d_h`。作者在 128M—6.3B 参数的预训练实验中报告，LRKV 使用标准 MHA 约 45%—53% 的 KV cache，并在其测试设置中取得较低的 held-out cross-entropy。
+- 证据等级：原始论文的方法说明和作者实验。
+- 边界：实验规模、数据、rank、模型实现和比较基线限于论文设置；公式是元素数估算，不包含 dtype、元数据、kernel 与系统开销，论文结果不代表任意模型或 serving workload 的质量和延迟收益。
+
+### Multi-Head Low-Rank Attention（MLRA）
+
+- 来源：[Multi-Head Low-Rank Attention](https://proceedings.iclr.cc/paper_files/paper/2026/hash/acf4a08f67724e9d2de34099f57a9c25-Abstract-Conference.html)，ICLR 2026；[论文全文](https://arxiv.org/abs/2603.02188)。
+- 阅读位置：摘要、MLA 背景、MLRA-4 方法和实验设置/结果。
+- 支持事实：MLRA 将 MLA 的单个低秩 latent 分成四个可分片 latent head，使方法可支持 4 路 tensor parallel decode；作者在 2.9B 模型设置中报告了 perplexity、常识任务和长上下文解码结果。
+- 证据等级：ICLR 同行评审论文的方法说明和作者实验。
+- 边界：关键比较限于论文所述 2.9B 规模、4 路并行、GPU、kernel 和评测；不能据此推断更大模型、其他并行拓扑或生产 serving 的收益。
 
 ### Structured State Space Duality / Mamba-2
 

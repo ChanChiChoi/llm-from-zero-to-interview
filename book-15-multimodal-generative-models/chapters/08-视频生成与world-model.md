@@ -44,7 +44,7 @@ World model 更关注状态和转移规律。它需要回答“当前环境处�
 | 教学 demo | 形状、算术和简化模型的可复核结论 | 真实视频的物理真实性和产品可靠性 |
 | 新闻或二次解读 | 线索和时间背景 | 关键架构事实和性能保证 |
 
-本章核验了 [Video Diffusion Models](https://arxiv.org/abs/2204.03458)、[Imagen Video](https://arxiv.org/abs/2210.02303)、[Make-A-Video](https://arxiv.org/abs/2209.14792)、[Phenaki](https://arxiv.org/abs/2210.02399)、[Lumiere](https://arxiv.org/abs/2401.12945)、[VideoPoet](https://arxiv.org/abs/2312.14125)、[CogVideoX](https://arxiv.org/abs/2408.06072)、[World Models](https://arxiv.org/abs/1803.10122)、[DreamerV3](https://arxiv.org/abs/2301.04104)、[V-JEPA 2](https://arxiv.org/abs/2506.09985)、[FVD](https://arxiv.org/abs/1812.01717) 和 [VBench](https://arxiv.org/abs/2311.17982) 的论文入口。Sora 的公开资料使用 [OpenAI 官方技术说明](https://openai.com/index/sora/) 作为产品层证据；本章只引用其公开的 patch 化视频表示和能力展示，不推断未公开的训练细节。
+技术论文可用于比较公开方法和作者报告的实验，例如 [Video Diffusion Models](https://arxiv.org/abs/2204.03458)、[Lumiere](https://arxiv.org/abs/2401.12945)、[CogVideoX](https://arxiv.org/abs/2408.06072) 与 [DreamerV3](https://arxiv.org/abs/2301.04104)；FVD、VBench 等评测论文说明各自的指标和任务协议。OpenAI 的 [2024 年 Sora 研究说明](https://openai.com/index/video-generation-models-as-world-simulators/)只公开时空 patch 表示及定性能力展示，并明确没有给出完整模型和实现细节，因此不能据此补写内部训练配方或生产性能。
 
 ### 8.0.3 初学者地图与专家地图
 
@@ -332,6 +332,8 @@ z_t=\sqrt{\bar{\alpha}_t}z_0+\sqrt{1-\bar{\alpha}_t}\epsilon,\qquad \epsilon\sim
 
 bar_alpha_t 决定信号和噪声在第 t 步的比例。z_t 中相邻帧之间原本的运动关系会随着噪声增强而变得难以辨认，denoiser 需要从带噪的时空上下文中恢复它。
 
+可以先把一段视频 latent 中的一个标量位置单独拿出来复算。设干净值 $z_0=0.8$，某个时间步的累计信号系数为 $\bar{\alpha}_t=0.64$，抽到的噪声为 $\epsilon=-0.5$，则 $\sqrt{0.64}=0.8$、$\sqrt{1-0.64}=0.6$，所以 $z_t=0.8\times0.8+0.6\times(-0.5)=0.34$。真实视频 latent 的每个通道、空间位置和帧位置都按同一形式加噪；这个标量例子只展示一个坐标，不代表整段视频的统计量。
+
 ### 8.5.2 训练目标
 
 条件可以是文本 c、参考图片 i、历史视频 h、姿态 p、深度 d 或动作 a 的组合。噪声预测器写作：
@@ -367,19 +369,19 @@ L_\epsilon=\mathbb{E}_{z_0,t,\epsilon,c}\left[\left\|\epsilon-\epsilon_\theta(z_
 
 ### 8.5.5 CFG 与视频推理成本
 
-若使用 classifier-free guidance，正条件预测和无条件预测通常需要两次 denoiser forward。采样步数为 S 时，理想化调用数约为：
+若使用 classifier-free guidance（CFG），每个采样步通常要得到无条件分支和条件分支两份预测。采样步数为 $S$、生成样本数为 $B$、实际执行的条件分支数为 $K$ 时，样本级 denoiser 前向等价数为：
 
 ~~~math
-C_{\mathrm{denoise}}\approx2S.
+C_{\mathrm{forward}}=BSK.
 ~~~
 
-如果每次预测处理 N_z 个视频 latent token，文本条件有 N_c 个 token，cross-attention cell 数量的粗略估计为：
+通常启用 CFG 时 $K=2$；有的采样器会把两路拼到一个 batch 中执行，有的会分开调用，因此 $BSK$ 不是 Python 或框架层的实际函数调用次数，而是“每个样本、每个条件分支各跑一次 denoiser”的计算量记账。若 guidance scale 为 1 且实现只保留条件分支，则 $K=1$。若每个视频样本有 $N_z$ 个 latent token，且第 $k$ 个分支的文本条件长度为 $N_c^{(k)}$，则一个注意力头、一个 cross-attention 层在全部采样步的 score cell 数近似为：
 
 ~~~math
-C_{\mathrm{cross}}\approx S N_zN_c.
+C_{\mathrm{score}}\approx BSN_z\sum_{k=1}^{K}N_c^{(k)}.
 ~~~
 
-上式默认只统计一个条件分支。若 CFG 同时执行正条件和负/空条件，且两者 token 数分别为 $N_c^+$ 与 $N_c^-$，则更接近实际的交互量是 $S N_z(N_c^+ + N_c^-)$；即使把两路拼成一个 batch，也只是改变 kernel 的组织方式，不会让第二路条件的 attention cell 凭空消失。
+这里的 score cell 是 query-key 位置对的数量，尚未乘以 Transformer 层数和注意力头数。若各层长度不同，总量应按层、头和条件分支求和；空间注意力、时序注意力、窗口注意力和稀疏 attention 也会改变实际计算图。两个分支即使被拼到同一个 batch，score cell 仍要覆盖两套条件输入。以下 demo 采用 batch=1、正负条件 token 数相等、每次只数一个头和一层的简化口径。
 
 CFG 会提高条件遵循，但过大的 guidance scale 可能造成动作僵硬、纹理重复、颜色过饱和和多样性下降。视频中这种副作用更明显，因为每个时间步的过强条件会把不确定的运动压到少数模式。
 
@@ -535,6 +537,8 @@ c(\tau_t)=\frac{\sigma_{j+1}-\tau_t}{\sigma_{j+1}-\sigma_j}c_j+\frac{\tau_t-\sig
 ~~~
 
 变量 c_j 可以是二维姿态坐标、深度或摄像机参数。插值对平滑轨迹有帮助，但不能修复原始条件的错误或遮挡。
+
+例如视频帧率为 24 fps，第 2 号帧的时间戳是 $\tau_2=2/24\approx0.0833$ 秒；姿态条件在 0 秒和 0.1 秒的横坐标分别为 0 和 10 像素。插值权重为 $0.0833/0.1\approx0.833$，得到 $c(\tau_2)\approx8.33$ 像素。若只按数组下标对齐，这一帧可能会错误地拿到索引相同但时间不同的姿态样本；实际系统还要记录时间戳基准和重采样策略。
 
 ### 8.9.3 多条件冲突
 
@@ -834,6 +838,8 @@ E_k=d(\hat{s}_{t+k},s_{t+k}).
 
 H 是规划 horizon，ell 是任务代价。若模型不确定性重要，应把期望风险、碰撞概率或最坏情况约束加入目标。一个只优化生成画面美观度的 world model 不能直接替代这个控制目标。
 
+用一维位置手算一次这个“预测—选序列—只执行第一步”过程。设教学动力学为 $x_{k+1}=x_k+a_k$，起点 $x_0=0$，目标 $x^*=1$，horizon $H=2$，每步代价定义为 $\ell(x_k,a_k)=(x_{k+1}-x^*)^2+0.1a_k^2$。候选 A 为动作 $(0.6,0.4)$：预测位置依次为 0.6、1.0，代价是 $(0.6-1)^2+0.1(0.6)^2=0.196$，再加 $(1-1)^2+0.1(0.4)^2=0.016$，总计 0.212。候选 B 为 $(0.8,0.8)$：位置为 0.8、1.6，代价分别为 0.104 和 0.424，总计 0.528。模型因此选择 A，但控制器只执行第一步 $a_0=0.6$；观察新位置后再重新规划。这个玩具模型没有障碍、不确定性和感知误差，只演示 MPC 如何把未来代价纳入当前动作选择。
+
 ## 8.16 物理一致性：视觉合理不等于因果正确
 
 ### 8.16.1 物理一致性的层次
@@ -876,15 +882,15 @@ H 是规划 horizon，ell 是任务代价。若模型不确定性重要，应把
 
 ### 8.17.1 FVD 的定义和限制
 
-[FVD](https://arxiv.org/abs/1812.01717) 把真实视频和生成视频送入视频特征提取器，在特征空间中分别估计高斯分布，然后计算 Fréchet 距离：
+[FVD v2](https://arxiv.org/abs/1812.01717v2) 把真实视频和生成视频送入视频特征提取器，在特征空间中分别估计高斯分布，然后计算 Fréchet 距离。令两组特征均值为 $\mu_r,\mu_g$，协方差为半正定矩阵 $\Sigma_r,\Sigma_g$，可以写成对称矩阵平方根形式：
 
 ~~~math
-\mathrm{FVD}=\|\mu_r-\mu_g\|_2^2+\mathrm{Tr}\left(\Sigma_r+\Sigma_g-2(\Sigma_r\Sigma_g)^{1/2}\right).
+\mathrm{FVD}=\|\mu_r-\mu_g\|_2^2+\mathrm{Tr}\left(\Sigma_r+\Sigma_g-2(\Sigma_r^{1/2}\Sigma_g\Sigma_r^{1/2})^{1/2}\right).
 ~~~
 
-mu_r、Sigma_r 是真实样本特征的均值和协方差，mu_g、Sigma_g 是生成样本对应统计量。通常距离越小表示两个特征分布越接近。
+可以用一维玩具分布检查公式：令真实特征均值 $\mu_r=1$、方差 $\Sigma_r=4$，生成特征均值 $\mu_g=2$、方差 $\Sigma_g=1$。均值项为 $(1-2)^2=1$；协方差项为 $4+1-2\sqrt{\sqrt{4}\times1\times\sqrt{4}}=5-2\sqrt4=1$；总距离为 2。这里的均值和方差是人为指定的单维示例，2 不是任何模型的真实 FVD 分数。
 
-FVD 是分布级指标，依赖特征提取器、样本数、视频长度、预处理和随机种子。它可能奖励生成常见的平均运动，却忽略少数高价值 prompt 的准确性；它也不能单独回答“这段视频是否保留了输入人物”。报告 FVD 时必须同时写清特征网络、采样设置和数据切分。
+原论文使用在 Kinetics 数据上预训练的 I3D 视频特征，并比较 logits 和最后 pooling 层等表示；不同特征会改变距离所观察的内容。FVD 因而依赖特征网络及其权重、抽取层、样本数、视频长度、预处理和随机种子。因为公式比较的是两组特征的总体统计，它本身不会给出某条视频违反了哪条 prompt，也不能单独回答“这段视频是否逐帧保留了输入人物”；这是由聚合口径带来的评估边界。报告 FVD 时应同时写清特征网络、特征层、采样设置和数据切分，并配合逐样本条件遵循或身份保持指标。
 
 ### 8.17.2 文本遵循与组合关系
 
@@ -900,11 +906,20 @@ FVD 是分布级指标，依赖特征提取器、样本数、视频长度、预�
 
 一个通用的视频-文本 embedding 分数可以反映整体相似度，但不适合替代关系和顺序测试。对于“红球在蓝球左边并绕过它”这样的 prompt，应使用对象跟踪和事件判定，而不是只测整段视频与文本的一个相似度。
 
-### 8.17.3 VBench 的维度化思路
+### 8.17.3 从 benchmark 维度走到任务协议
 
-[VBench](https://arxiv.org/abs/2311.17982) 把视频生成质量拆成多个相对独立的维度，例如主体身份一致性、运动平滑度、时间闪烁和空间关系，并使用专门的 prompt 与评估方法。它的启发是把“视频质量”拆成可诊断的子问题，而不是只排一个总榜。
+[VBench v1](https://arxiv.org/abs/2311.17982v1) 把视频生成质量拆成多个相对独立的维度，例如主体身份一致性、运动平滑度、时间闪烁和空间关系，并使用专门的 prompt 与评估方法。后续 [VBench-2.0 v2](https://arxiv.org/abs/2503.21755v2) 将内在忠实度组织为人体保真度、可控性、创造性、物理合理性和常识符合性五类、18 项细粒度能力。两者都体现了把“视频质量”拆成可诊断子问题的思路；VBench-2.0 的论文也报告通用 VLM 在人体解剖与运动、物体计数和三维理解上存在评估盲点，因此模型级排序对齐不等于每条视频的自动评分都可靠。
 
-使用 benchmark 时仍需注意：维度和数据集是公开实验的定义，不一定覆盖业务任务。商业广告、教育演示、机器人仿真和电影镜头的权重不同，应该在公开 benchmark 之外加入业务切片。
+benchmark 要按它的输入和测量目标来选，而不能把分数当作同一量纲横向排名：
+
+| 要回答的问题 | 协议例子 | 能测到什么 | 适用边界 |
+| --- | --- | --- | --- |
+| 文本条件是否在多种视频属性上兑现 | [VBench-2.0](https://arxiv.org/abs/2503.21755v2) 将忠实度分为五类、18 项能力 | 人体保真度、可控性、物理合理性与常识符合性等分项 | 分项和评估器属于该 benchmark；自动 VLM 评分需人工校准，不能替代产品自己的提示集。 |
+| 多轮动作、视角或场景编辑后是否保持可交互一致 | [WBench](https://arxiv.org/abs/2605.25874v1) 用 289 个案例、1,058 轮交互覆盖导航、主体动作、事件编辑和视角切换 | 视频质量、场景/交互遵循、一致性与物理符合度 | 结果受其接口、视频生成器和评分器约束；交互 benchmark 不等于真实环境闭环控制。 |
+| 生成视频是否遵守可观测的物理关系 | [PVBench](https://arxiv.org/abs/2610.26711v1) 从对象姿态、尺度、运动等构造测量；[World Models’ Last Exam in Physics](https://arxiv.org/abs/2610.08791v1) 用受控任务区分可观测性筛查与物理量测量 | 前者组织 600 个提示、7 个领域和 46 个维度；后者使用 40 个任务覆盖 9 类可观测现象 | 物理估计依赖跟踪、分割和标定；画面不可见或无法测量的状态应标为未知，不能推成物理正确。 |
+| 指定关键帧是否按存在、外观、顺序和时点执行 | [KeyFrame-Compass](https://arxiv.org/abs/2607.14202v1) 的 386 个样例使用六类关键帧执行指标 | 关键帧存在、外观保真、顺序、时间定位、持续性和唯一性 | 只适用于关键帧条件视频，不代表普通 T2V 的总体能力。 |
+
+这些工作不是可直接互换的总榜：每个分数都绑定 prompt、输入条件、模型快照、预处理、评估器和分母。它们提供的是任务设计和诊断维度；商业广告、教育演示、机器人仿真和电影镜头仍需加入自己的业务切片。对于控制型 world model，还要把单步预测、开放环 rollout、闭环规划和真实环境验证分开报告。
 
 ### 8.17.4 人工评估和统计不确定性
 
@@ -1008,21 +1023,45 @@ FVD 是分布级指标，依赖特征提取器、样本数、视频长度、预�
 
 代码中 `config["frames"]` 表示完整视频用于成本估算的帧数，`frames` 列表表示一段较短的人工指标窗口。二者有意分开：真实系统可以对完整视频分窗口计算身份、亮度和运动指标，但不能把一个 5 帧窗口的合格结果写成 16 帧视频整体合格。由于本 demo 还计算身份变化和二阶运动差分，指标窗口至少需要 3 帧；报告会显式输出窗口长度，并检查它没有超过完整视频长度。
 
+演示中的 `use_cfg` 明确控制是否计入两路条件分支；`denoiser_sample_forward_equivalents` 统计每个样本的分支前向等价量，不猜测框架把分支拼接后实际调用了几次。`cross_attention_score_cells_one_head_layer` 假定每个分支的提示长度都等于 `prompt_tokens`，并且只统计一个 attention 头和一层 cross-attention。
+
+代码状态：**已验证**（2026-11-12；Python 3.12.9；仅使用标准库）。
+
+此 demo 的帧数、尺寸、patch、压缩率和 token 数必须是正整数；时间质量计算中的数值必须是有限实数；`use_cfg` 与可见标记必须是布尔值。显式拒绝 bool 充当尺寸、计数或连续数值，避免 Python 将 `True` 当作 1。
+
 ~~~python
 from math import isfinite, sqrt
 
 
 def ceil_div(a, b):
-    if not isinstance(a, int) or not isinstance(b, int) or a <= 0 or b <= 0:
+    if (
+        isinstance(a, bool)
+        or not isinstance(a, int)
+        or isinstance(b, bool)
+        or not isinstance(b, int)
+        or a <= 0
+        or b <= 0
+    ):
         raise ValueError("ceil_div inputs must be positive integers")
     return (a + b - 1) // b
 
 
+def is_finite_real(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return isfinite(value)
+    except OverflowError:
+        return False
+
+
 def dot(a, b):
+    if not isinstance(a, (list, tuple)) or not isinstance(b, (list, tuple)):
+        raise ValueError("vectors must be lists or tuples")
     if len(a) != len(b):
         raise ValueError("vectors must have the same length")
-    if not all(isfinite(value) for value in a + b):
-        raise ValueError("vectors must contain finite values")
+    if not all(is_finite_real(value) for value in (*a, *b)):
+        raise ValueError("vectors must contain finite real numbers")
     return sum(x * y for x, y in zip(a, b))
 
 
@@ -1043,6 +1082,8 @@ def mean(values):
     values = list(values)
     if not values:
         raise ValueError("mean requires at least one value")
+    if not all(is_finite_real(value) for value in values):
+        raise ValueError("mean values must be finite real numbers")
     return sum(values) / len(values)
 
 
@@ -1062,30 +1103,31 @@ def audit_video(config, frames):
         "prompt_tokens",
         "token_budget",
     ):
-        if not isinstance(config[field], int) or config[field] <= 0:
+        if (
+            isinstance(config[field], bool)
+            or not isinstance(config[field], int)
+            or config[field] <= 0
+        ):
             raise ValueError(f"{field} must be a positive integer")
+    if not is_finite_real(config["guidance_scale"]):
+        raise ValueError("guidance_scale must be a finite real number")
     if config["guidance_scale"] < 0.0:
         raise ValueError("guidance_scale must be non-negative")
+    if not isinstance(config["use_cfg"], bool):
+        raise ValueError("use_cfg must be boolean")
     if len(frames) < 3 or len(frames) > config["frames"]:
         raise ValueError("metric window must contain 3..config['frames'] frames")
-    if not isfinite(config["guidance_scale"]):
-        raise ValueError("guidance_scale must be finite")
     for frame in frames:
-        if not isinstance(frame["center"], (int, float)) or not isfinite(frame["center"]):
-            raise ValueError("frame center must be numeric")
-        if not frame["identity"]:
+        if not is_finite_real(frame["center"]):
+            raise ValueError("frame center must be a finite real number")
+        if not isinstance(frame["identity"], (list, tuple)) or not frame["identity"]:
             raise ValueError("identity vector must be non-empty")
-        if any(
-            not isinstance(value, (int, float)) or not isfinite(value)
-            for value in frame["identity"]
-        ):
-            raise ValueError("identity vector must be numeric")
-        if (
-            not isinstance(frame["visible"], (int, float))
-            or not isfinite(frame["visible"])
-            or not 0.0 <= frame["visible"] <= 1.0
-        ):
-            raise ValueError("visibility must be in [0, 1]")
+        if any(not is_finite_real(value) for value in frame["identity"]):
+            raise ValueError("identity vector must contain finite real numbers")
+        if not is_finite_real(frame["brightness"]):
+            raise ValueError("brightness must be a finite real number")
+        if not isinstance(frame["visible"], bool):
+            raise ValueError("visible must be boolean")
     raw_shape = (
         config["batch"],
         config["channels"],
@@ -1120,14 +1162,16 @@ def audit_video(config, frames):
         latent_elements *= dimension
     latent_tokens = latent_shape[2] * latent_shape[3] * latent_shape[4]
 
-    denoiser_calls = config["steps"] * (
-        2 if config["guidance_scale"] > 1.0 else 1
+    cfg_branches = 2 if config["use_cfg"] else 1
+    denoiser_sample_forward_equivalents = (
+        config["batch"] * config["steps"] * cfg_branches
     )
-    cross_attention_cells = (
+    cross_attention_score_cells_one_head_layer = (
         config["steps"]
+        * config["batch"]
         * latent_tokens
         * config["prompt_tokens"]
-        * (2 if config["guidance_scale"] > 1.0 else 1)
+        * cfg_branches
     )
 
     centers = [item["center"] for item in frames]
@@ -1143,7 +1187,7 @@ def audit_video(config, frames):
         abs(frames[i]["brightness"] - frames[i - 1]["brightness"])
         for i in range(1, len(frames))
     ]
-    object_visibility = mean(item["visible"] for item in frames)
+    object_visibility = mean(float(item["visible"]) for item in frames)
 
     observed_velocity = frames[1]["center"] - frames[0]["center"]
     rollout = [
@@ -1164,8 +1208,9 @@ def audit_video(config, frames):
         "latent_shape": latent_shape,
         "latent_element_ratio": round(latent_elements / pixel_elements, 6),
         "latent_tokens": latent_tokens,
-        "denoiser_calls": denoiser_calls,
-        "cross_attention_cells": cross_attention_cells,
+        "cfg_branches": cfg_branches,
+        "denoiser_sample_forward_equivalents": denoiser_sample_forward_equivalents,
+        "cross_attention_score_cells_one_head_layer": cross_attention_score_cells_one_head_layer,
         "motion_second_difference": round(mean(abs(v) for v in second_diffs), 4),
         "minimum_identity_cosine": round(min(identity_cosines), 4),
         "average_brightness_change": round(mean(brightness_diffs), 4),
@@ -1177,7 +1222,8 @@ def audit_video(config, frames):
     checks = {
         "tokens_within_budget": st_tokens <= config["token_budget"],
         "latent_ratio_under_demo_limit": report["latent_element_ratio"] < 0.01,
-        "cfg_call_count_matches": denoiser_calls == config["steps"] * 2,
+        "cfg_forward_equivalents_match": denoiser_sample_forward_equivalents
+        == config["batch"] * config["steps"] * cfg_branches,
         "metric_window_within_video": len(frames) <= config["frames"],
         "identity_above_demo_threshold": report["minimum_identity_cosine"] > 0.98,
         "brightness_change_under_demo_limit": report["average_brightness_change"] < 0.04,
@@ -1203,6 +1249,7 @@ config = {
     "latent_channels": 4,
     "steps": 24,
     "guidance_scale": 6.0,
+    "use_cfg": True,
     "prompt_tokens": 14,
     "token_budget": 4096,
 }
@@ -1243,19 +1290,72 @@ boundary_checks = {
     "zero_identity_rejected": expects_value_error(
         lambda: audit_video(
             config,
-            [{**frames[0], "identity": [0.0, 0.0]}],
+            [
+                {**frames[0], "identity": [0.0, 0.0]},
+                frames[1],
+                frames[2],
+            ],
         )
     ),
     "mismatched_identity_rejected": expects_value_error(
         lambda: audit_video(
             config,
-            [{**frames[0], "identity": [1.0]}, frames[1]],
+            [
+                {**frames[0], "identity": [1.0]},
+                frames[1],
+                frames[2],
+            ],
         )
     ),
     "invalid_visibility_rejected": expects_value_error(
         lambda: audit_video(
             config,
-            [{**frames[0], "visible": 2.0}],
+            [
+                {**frames[0], "visible": 2.0},
+                frames[1],
+                frames[2],
+            ],
+        )
+    ),
+    "nonfinite_brightness_rejected": expects_value_error(
+        lambda: audit_video(
+            config,
+            [
+                {**frames[0], "brightness": float("nan")},
+                frames[1],
+                frames[2],
+            ],
+        )
+    ),
+    "disabled_cfg_uses_one_branch": audit_video(
+        {**config, "use_cfg": False, "guidance_scale": 1.0}, frames
+    )["cfg_branches"] == 1,
+    "disabled_cfg_forward_equivalents_match": audit_video(
+        {**config, "use_cfg": False, "guidance_scale": 1.0}, frames
+    )["denoiser_sample_forward_equivalents"]
+    == config["batch"] * config["steps"],
+    "boolean_count_rejected": expects_value_error(
+        lambda: audit_video({**config, "frames": True}, frames)
+    ),
+    "boolean_guidance_rejected": expects_value_error(
+        lambda: audit_video({**config, "guidance_scale": True}, frames)
+    ),
+    "boolean_center_rejected": expects_value_error(
+        lambda: audit_video(
+            config,
+            [{**frames[0], "center": True}, frames[1], frames[2]],
+        )
+    ),
+    "boolean_identity_value_rejected": expects_value_error(
+        lambda: audit_video(
+            config,
+            [{**frames[0], "identity": [True, 0.0]}, frames[1], frames[2]],
+        )
+    ),
+    "boolean_brightness_rejected": expects_value_error(
+        lambda: audit_video(
+            config,
+            [{**frames[0], "brightness": True}, frames[1], frames[2]],
         )
     ),
 }
@@ -1279,8 +1379,9 @@ token_ratio=0.5
 latent_shape=(1, 4, 4, 32, 32)
 latent_element_ratio=0.005208
 latent_tokens=4096
-denoiser_calls=48
-cross_attention_cells=2752512
+cfg_branches=2
+denoiser_sample_forward_equivalents=48
+cross_attention_score_cells_one_head_layer=2752512
 motion_second_difference=0.0133
 minimum_identity_cosine=0.9987
 average_brightness_change=0.015
@@ -1288,9 +1389,9 @@ object_visibility=1.0
 metric_window_frames=5
 linear_rollout=[0.1, 0.21, 0.32, 0.43, 0.54]
 linear_rollout_mae=0.002
-checks={'tokens_within_budget': True, 'latent_ratio_under_demo_limit': True, 'cfg_call_count_matches': True, 'metric_window_within_video': True, 'identity_above_demo_threshold': True, 'brightness_change_under_demo_limit': True, 'motion_change_under_demo_limit': True, 'object_visible_in_demo': True, 'linear_rollout_error_under_demo_limit': True}
-boundary_checks={'zero_patch_rejected': True, 'too_short_metric_window_rejected': True, 'oversized_metric_window_rejected': True, 'zero_identity_rejected': True, 'mismatched_identity_rejected': True, 'invalid_visibility_rejected': True}
+checks={'tokens_within_budget': True, 'latent_ratio_under_demo_limit': True, 'cfg_forward_equivalents_match': True, 'metric_window_within_video': True, 'identity_above_demo_threshold': True, 'brightness_change_under_demo_limit': True, 'motion_change_under_demo_limit': True, 'object_visible_in_demo': True, 'linear_rollout_error_under_demo_limit': True}
 audit_consistent=True
+boundary_checks={'zero_patch_rejected': True, 'too_short_metric_window_rejected': True, 'oversized_metric_window_rejected': True, 'zero_identity_rejected': True, 'mismatched_identity_rejected': True, 'invalid_visibility_rejected': True, 'nonfinite_brightness_rejected': True, 'disabled_cfg_uses_one_branch': True, 'disabled_cfg_forward_equivalents_match': True, 'boolean_count_rejected': True, 'boolean_guidance_rejected': True, 'boolean_center_rejected': True, 'boolean_identity_value_rejected': True, 'boolean_brightness_rejected': True}
 all_checks_passed=True
 ~~~
 
@@ -1298,7 +1399,7 @@ all_checks_passed=True
 
 1. 逐帧切分得到 4096 个 token，时间 patch 为 2 时得到 2048 个 token。
 2. 4 个 latent 通道、时间压缩 4、空间压缩 8 时，理想化元素比例为 0.005208。
-3. 24 个采样步和 CFG 对应 48 次 denoiser 调用。
+3. batch=1、24 个采样步和 CFG 的两个条件分支，对应 48 个样本级 denoiser 前向等价量；实际框架调用数取决于是否拼接 batch。一个 attention 头、一层 cross-attention 的 score cell 数为 $24\times1\times4096\times14\times2=2,752,512$。
 4. 人工轨迹的最小 identity cosine、亮度变化和二阶差分满足预先写明的教学阈值。
 5. 线性 rollout 的 MAE 很小，只说明这组人工轨迹接近匀速运动，不说明任何真实模型已经学会世界动力学。
 
@@ -1378,6 +1479,11 @@ World model 的核心是状态、观察、动作和状态转移。视频生成�
 8. [World Models](https://arxiv.org/abs/1803.10122)：压缩环境表示、动态模型与 imagined rollout 的早期工作。
 9. [DreamerV3](https://arxiv.org/abs/2301.04104)：在学习到的世界模型中想象未来并改进策略。
 10. [V-JEPA 2](https://arxiv.org/abs/2506.09985)：自监督视频表征、动作条件 latent world model 和规划实验。
-11. [FVD](https://arxiv.org/abs/1812.01717)：视频生成的 Fréchet Video Distance 与评估挑战。
-12. [VBench](https://arxiv.org/abs/2311.17982)：把视频生成质量拆成多个维度的 benchmark。
-13. [Sora 官方技术说明](https://openai.com/index/sora/)：公开的 patch 化视频表示和产品层能力说明；未公开内容不应从页面之外推断。
+11. [FVD v2](https://arxiv.org/abs/1812.01717v2)：视频生成的 Fréchet Video Distance 与评估挑战。
+12. [VBench v1](https://arxiv.org/abs/2311.17982v1)：把视频生成质量拆成多个维度的 benchmark。
+13. [Sora 2024 官方研究说明](https://openai.com/index/video-generation-models-as-world-simulators/)：公开的 patch 化视频表示和能力说明；未公开内容不应从页面之外推断。
+14. [WBench](https://arxiv.org/abs/2605.25874v1)：多轮交互式视频 world model 评估；案例、交互类型和评分器均属于该论文协议。
+15. [VBench-2.0](https://arxiv.org/abs/2503.21755v2)：内在忠实度的多维评估及自动评估器限制。
+16. [PVBench](https://arxiv.org/abs/2610.26711v1)：对象级物理可测量性和视频生成物理合理性评估。
+17. [World Models’ Last Exam in Physics](https://arxiv.org/abs/2610.08791v1)：受控物理现象任务，以及可观测性与物理量测量的区分。
+18. [KeyFrame-Compass](https://arxiv.org/abs/2607.14202v1)：关键帧条件视频的执行质量评估，不代表一般 T2V 能力。

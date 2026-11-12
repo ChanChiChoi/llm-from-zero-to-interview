@@ -35,12 +35,16 @@ Diffusion 是一类把生成问题改写成“沿着一条随机路径逐步还�
 | 资料 | 适合支持的判断 | 不应直接推出的判断 |
 | --- | --- | --- |
 | DDPM 原始论文 | 离散加噪链、变分目标和噪声预测路线 | 任意 scheduler 都等价 |
+| Improved DDPM | 学习反向方差、混合训练目标和论文设置内的少步采样结果 | 任意 checkpoint 都能因此少采样十倍 |
 | DDIM 原始论文 | 非马尔可夫采样和确定性路径 | 少步一定保持同样质量 |
 | Score SDE 论文 | 连续时间 score/SDE 视角 | 某个离散实现自动满足连续极限 |
+| EDM 设计空间论文 | 分析采样、训练与网络预条件等可区分设计项 | 任意组合都兼容或作者配置普遍最优 |
+| Min-SNR-γ 与终端 SNR 论文 | 特定预测目标的时间步加权、被检 schedule 的端点错配 | 一个权重或端点方案适用于所有 checkpoint |
 | Classifier Guidance 与 CFG 论文 | 条件引导的数学构造 | guidance scale 在所有模型上同样可用 |
+| Flow Matching 与 Rectified Flow 论文 | 前者作为选定概率路径的向量场回归框架；后者作为具体 ODE/轨迹整流路线 | 两者是同义词，或任一路线保证一步生成 |
 | Latent Diffusion 论文 | 在压缩表示空间扩散的路线 | 任意 VAE 压缩都不损伤语义 |
 | DiT 论文 | Transformer 作为 denoiser 的结构实验 | U-Net 在所有尺度都应被替换 |
-| Diffusers scheduler 文档 | 某个版本的 scheduler API 与参数语义 | API 默认值就是科学结论 |
+| Diffusers v0.35.1 scheduler 文档 | 固定版本的 scheduler API 与参数语义 | API 默认值就是科学结论或兼容性保证 |
 | 本章 demo | 小向量上的公式和算术 | 真实图片质量、审美、文本遵循或安全 |
 
 论文结论必须绑定论文中的模型、数据、训练预算和评估协议。官方文档可以说明接口如何工作，却不能替目标设备上的吞吐、峰值显存和图像质量测量。
@@ -114,6 +118,15 @@ GAN 让生成器直接产生样本，并通过判别器提供对抗反馈。VAE 
 
 但监督可计算不等于问题简单。网络仍要同时处理空间结构、时间步、条件、分辨率、长尾概念和采样误差。
 
+训练和生成都会处理某个带噪状态，但两者拥有的信息不同：训练能访问真实样本和构造噪声；生成只能从当前噪声状态反复前进。下表把这两个过程放在同一组变量上对照。
+
+| 阶段 | 起点与已知量 | 如何得到当前状态 | denoiser 输出的用途 |
+| --- | --- | --- | --- |
+| 训练 | 真实样本 `x_0`、条件 `c`、随机时间步 `t` 和噪声 `ε` | 用闭式分布一次构造 `x_t` | 与已知的 `ε`、`x_0`、`v` 等目标比较并更新参数；不需要逐步走完整条反向链 |
+| 生成 | 终端噪声 `x_T`、条件 `c` 和训练时匹配的 schedule | 从上一步样本经 scheduler/solver 得到下一状态 | 供采样更新使用；此时没有真实 `x_0` 或构造目标噪声可供比较 |
+
+因此，随机抽取 `t` 只是在训练中抽取一条可监督的局部状态；它不是对推理过程的简化模拟。生成时仍须按选定的时间网格完成一串有顺序的状态更新。
+
 ## 2. DDPM 的 forward diffusion
 
 ### 2.1 一步加噪的定义
@@ -171,7 +184,7 @@ x_t
 
 它表示从第 1 步到第 t 步累积保留下来的信号比例。随着 t 增大，通常有 bar alpha_t 逐步下降。
 
-将每一步的高斯变换合并，可以得到闭式边缘分布：
+将每一步的高斯变换合并，可以得到闭式边缘分布；这是 DDPM 论文用来直接构造训练状态的关系之一（[Ho et al., DDPM v2](https://arxiv.org/abs/2006.11239v2)）：
 
 ~~~math
 q(x_t\mid x_0)
@@ -214,20 +227,16 @@ s_t=\sqrt{1-\bar{\alpha}_t}.
 x_t=a_t x_0+s_t\epsilon.
 ~~~
 
-在一个简化的单位方差假设下，信号与噪声的强度比可以用：
+若每个数据坐标的方差为 `σ_data²`，且它与单位方差噪声独立，则该坐标的信号方差与噪声方差之比为：
 
 ~~~math
 \mathrm{SNR}(t)
 =
-\frac{\bar{\alpha}_t}
+\frac{\bar{\alpha}_t\sigma_{\mathrm{data}}^2}
 {1-\bar{\alpha}_t}
-=
-\frac{a_t^2}{s_t^2}
 ~~~
 
-表示。早期时间步 SNR 较高，xt 仍保留较多结构；晚期时间步 SNR 较低，样本更接近噪声。
-
-SNR 不是图像质量分数。它只是描述给定 forward schedule 下的信号噪声比例，不能单独说明模型在该时间步预测得好不好。
+常见的简化公式 `bar_alpha_t/(1-bar_alpha_t)` 还假设数据坐标已归一化到单位方差；此时也等于 `a_t²/s_t²`。例如 `bar_alpha_t=0.81` 且 `σ_data²=1` 时，`SNR=0.81/0.19≈4.263`。早期时间步 SNR 较高，`x_t` 的方差中信号占比更高；晚期时间步更接近噪声。SNR 描述的是给定 schedule 和数据尺度下的方差比，不是图像质量分数，也不能单独说明模型在该时间步预测得好不好。
 
 ### 2.4 时间表的选择
 
@@ -242,6 +251,10 @@ beta schedule 决定了训练样本在不同时间步的难度。常见设计包
 - 目标分辨率和状态空间的统计性质。
 
 不同 schedule 改变的不只是一个数组。它会改变 xt 的分布、网络在各时间步看到的任务难度、loss 的权重和 sampler 的假设。不能把一个 schedule 的 beta 数值直接移植到另一个归一化范围或 latent 分布上。
+
+还要检查训练末端和生成起点是否一致。训练时若终端 `bar_alpha_T` 仍大于零，末步样本里就还含有一部分数据；生成却常从纯高斯噪声开始。Lin 等人对其分析的常见 schedule 报告了这种非零终端 SNR，并在 Stable Diffusion 2.1 的特定配置中给出 `sqrt(bar_alpha_T)=0.068265`，对应 `x_T≈0.068265x_0+0.997667ε`；这个数值绑定论文所检查的配置，不是所有 checkpoint 的常数（[Lin et al., v4](https://arxiv.org/abs/2305.08891v4)）。
+
+这类边界错配可以造成可观测偏差。论文提出把 schedule 调整为零终端 SNR、采用 `v` prediction、从最后时间步开始采样，并在其设置中使用 CFG rescale；这些做法要与 checkpoint 的训练目标和采样约定一起核对，不能只在推理时任意改一个 beta 数组。若精确设 `bar_alpha_T=0`，后文 `x_0` 对 `ε` 预测的反解式会除以零，因此端点还必须由匹配的输出参数化和 solver 明确定义。
 
 ### 2.5 一个标量直觉例子
 
@@ -292,6 +305,8 @@ x_t
 - epsilon_theta 是 denoiser 输出。
 
 MSE 的优势是目标清晰、实现简单。它并不意味着最终评估只看 MSE；较低的噪声误差不一定对应更好的文本遵循、构图、细节或审美。
+
+DDPM 论文使用这一简化噪声目标作为重要训练选择，同时说明它与变分目标的权重并不相同；不能把它当作所有扩散模型的定义（[Ho et al., DDPM v2](https://arxiv.org/abs/2006.11239v2)）。
 
 ### 3.2 从 epsilon 预测恢复 x0
 
@@ -395,6 +410,10 @@ s_\theta(x_t,t,c)
 
 任何 weighting 都改变了训练目标。若只报告一个总体 loss，无法判断模型是否在某些时间区域退化。至少应记录时间步直方图、分桶 loss、重建误差和采样质量。
 
+一种有代表性的方案是 Min-SNR-γ：把不同噪声时间步视为共享参数下的不同任务，按 SNR 截断加权，以缓解不同时间步梯度方向的冲突。它的权重不能离开预测目标来读。按论文给出的目标参数化，`x_0` 预测可写成 `λ_t=min(SNR_t,γ)`；换成噪声预测时，相应权重为 `min(1,γ/SNR_t)`；`v` 预测则为 `min(SNR_t,γ)/(1+SNR_t)`（`SNR_t=0` 时噪声目标的表达式取连续极限 1）。这是同一类加权策略在不同目标上的匹配形式，不表示三种输出使用同一权重。具体归一化和 `γ` 仍应按训练配置记录（[Hang et al., Min-SNR-γ v3](https://arxiv.org/abs/2303.09556v3)）。
+
+以 `γ=5、SNR=20` 为例，`x_0` 目标乘数为 `min(20,5)=5`，噪声目标乘数为 `min(1,5/20)=0.25`，`v` 目标乘数为 `5/21≈0.2381`。同一 SNR 下三种目标的实际 loss 权重明显不同；照搬其中一个公式会改掉原本想要的 timestep 平衡。原论文在 ImageNet 256×256 等指定设置报告了更快的收敛，不能把报告的倍数推广到其他模型、schedule 或数据集。
+
 ### 3.7 随机时间步训练伪代码
 
 ~~~text
@@ -426,6 +445,19 @@ x_{t-1};
 ~~~
 
 最简单的 DDPM 讲解通常先固定或预先规定方差，让网络主要预测均值所需的信息。
+
+固定方差是便于入门的设计，不是反向分布唯一的形式。常见选择包括前向一步方差 `β_t` 或后验方差 `\tilde{β}_t`；此时 scheduler 已知采样噪声大小。Improved DDPM 则让网络也输出反向方差信息，并在对数空间里用模型输出表示 `β_t` 与 `\tilde{β}_t` 之间的方差参数化。为避免和前文的 velocity prediction `v_t` 混淆，下面将方差头输出记为 `ρ_θ`（Improved DDPM 论文记作 `v`）：
+
+~~~math
+\log\sigma_{\theta,t,i}^2
+=
+\rho_{\theta,t,i}\log\beta_t
++(1-\rho_{\theta,t,i})\log\tilde{\beta}_t.
+~~~
+
+这里 `i` 表示对角协方差中的坐标。论文没有把方差头输出强制裁剪到 `[0,1]`，所以这是对数方差的输出参数化，不应无条件称为受限凸插值。由于简化噪声 MSE 本身不训练方差，Improved DDPM 还引入 `L_simple+λL_vlb` 的混合目标；其论文实验使用的 `λ=0.001` 是该实验设置，不能当成固定默认值。`t=1` 时后验方差为零，不能直接对零取对数，实际实现必须显式规定末步的裁剪或边界值。
+
+这项改动改变的是模型所学习的反向分布及训练目标，不等于换一个数值 solver。原论文在自己的图像实验中报告学习方差后可用约十倍更少的模型前向调用而样本质量变化很小；这是该论文模型和评测设置下的结果，不保证任意 checkpoint 都能如此减少步数（[Nichol and Dhariwal, Improved DDPM v1](https://arxiv.org/abs/2102.09672v1)）。
 
 ### 4.2 已知 x0 时的后验
 
@@ -526,7 +558,7 @@ dx=f(x,t)\,dt+g(t)\,dW_t,
 
 其中 f 是 drift，g 是 diffusion coefficient，W_t 是 Brownian motion。
 
-这种视角可以统一不同噪声路径和 score-based 采样器，但它引入了连续时间、数值积分和边界约定。不能因为写成 SDE，就自动得到更好的图片。
+Score SDE 工作用连续 VP/VE 等过程连接噪声路径、score、反向时间 SDE 与 probability-flow ODE（[Song et al., Score SDE v2](https://arxiv.org/abs/2011.13456v2)）。这种视角可以放在同一概率过程框架中比较不同路径，但它引入了连续时间、数值积分和边界约定；不能因为写成 SDE，就自动得到更好的图片。
 
 ### 5.2 Score 是什么
 
@@ -603,6 +635,8 @@ SDE、ODE、DDPM 和 DDIM 可以放进同一张概念图中，但实现细节不
 
 因此“换 scheduler”可能改变多件事。实验记录中至少要保存 scheduler 名称、版本、时间步、prediction type、采样步数、guidance scale 和初始噪声种子。
 
+以 Diffusers v0.35.1 的 scheduler 文档为例，配置会携带训练时间步数、prediction type 和 timestep spacing 等约定；用 `from_config` 保留原配置后再替换 scheduler，是该版本文档提供的接口路径，不代表任意 scheduler 与任意 checkpoint 兼容（[Diffusers v0.35.1 scheduler 文档](https://huggingface.co/docs/diffusers/v0.35.1/en/using-diffusers/schedulers)）。
+
 一个可运行的 scheduler 还应对输入做契约检查：时间步不能越过训练 schedule 的范围，prediction type 必须与 denoiser 输出一致，且所有需要开方或作分母的系数必须处在合法区间。把非法系数钳制成一个可运行的数值，可能掩盖训练和推理 schedule 已经不匹配的问题。
 
 ### 6.2 DDPM ancestral sampling
@@ -613,7 +647,7 @@ DDPM 反向采样通常保留与后验方差相关的随机项。它的优点是
 
 ### 6.3 DDIM
 
-DDIM 构造了与相同训练目标兼容的另一类采样路径，可以使用更少的离散时间步，并在某些设置下使用确定性采样。它不是“DDPM 的加速开关”这么简单：
+DDIM 构造了与相同训练目标兼容的另一类非马尔可夫采样路径，可以使用更少的离散时间步，并在某些设置下使用确定性采样（[Song et al., DDIM v4](https://arxiv.org/abs/2010.02502v4)）。它不是“DDPM 的加速开关”这么简单：
 
 - 采样路径的随机性不同；
 - 选取的时间步子集不同；
@@ -623,7 +657,7 @@ DDIM 构造了与相同训练目标兼容的另一类采样路径，可以使用
 
 ### 6.4 Euler、Heun 与高阶 solver
 
-Euler 方法使用局部一阶近似，简单但步数少时误差较大；Heun 使用额外信息改善局部近似；DPM-Solver 等方法利用 diffusion ODE 的结构，试图在较少函数评估下保持质量。
+Euler 方法使用局部一阶近似，Heun 使用额外信息改善局部近似；DPM-Solver 利用 diffusion ODE 的结构构造专门的数值方法，试图在较少函数评估下保持质量（[Lu et al., DPM-Solver v3](https://arxiv.org/abs/2206.00927v3)）。Karras 等人的 EDM 工作进一步把噪声水平/时间参数化、采样离散与网络预条件等设计项拆开分析，使 sampler、training 和 denoiser preconditioning 可以分别研究（[Karras et al., EDM v2](https://arxiv.org/abs/2206.00364v2)）。这里引用 EDM 是一个设计空间视角，不是说它的整套参数都能无条件移植到任意 VP、latent 或 text-to-image checkpoint。
 
 “高阶”不等于在任何模型上都更好。solver 假设的时间坐标、模型输出类型、噪声参数化和网络误差都会影响最终结果。一个实现若把 v prediction 当成 epsilon 送入只接受 epsilon 的 scheduler，理论阶数再高也没有意义。
 
@@ -671,7 +705,7 @@ U-Net 适合多尺度图像结构，但每层的通道、分辨率、注意力�
 
 ### 7.2 DiT 的 token 化路径
 
-Diffusion Transformer 通常先把图片或 latent 切成 patch tokens，再用 Transformer block 处理：
+Diffusion Transformer（DiT）通常先把图片或 latent 切成 patch tokens，再用 Transformer block 处理；DiT 原论文研究的是这一类主干在 class-conditional ImageNet 设定中的扩展表现，并不推出所有 denoiser 都应替换成 DiT（[Peebles and Xie, DiT v2](https://arxiv.org/abs/2212.09748v2)）：
 
 ~~~math
 N
@@ -748,9 +782,9 @@ V=H_{\mathrm{text}}W_V.
 注意力输出为：
 
 ~~~math
-\operatorname{Attn}(H_{\mathrm{latent}},H_{\mathrm{text}})
+\mathrm{Attn}(H_{\mathrm{latent}},H_{\mathrm{text}})
 =
-\operatorname{softmax}
+\mathrm{softmax}
 \left(
 \frac{QK^\top}{\sqrt{d_h}}
 \right)V.
@@ -760,16 +794,16 @@ V=H_{\mathrm{text}}W_V.
 
 ### 8.2 Classifier guidance 与 classifier-free guidance
 
-Classifier guidance 使用额外分类器的梯度把样本推向目标类别。Classifier-free guidance 则训练同一个 denoiser 同时处理有条件和无条件输入，生成时比较两种预测。
+Classifier guidance 使用额外分类器的梯度把样本推向目标类别；其论文结果绑定 ImageNet 与指定模型/采样设置（[Dhariwal and Nichol, Classifier Guidance v4](https://arxiv.org/abs/2105.05233v4)）。Classifier-free guidance 则随机丢弃一部分训练条件，让同一个 denoiser 学到条件与空条件预测，再在生成时比较两种预测（[Ho and Salimans, CFG v1](https://arxiv.org/abs/2207.12598v1)）。
 
-若无条件预测为 epsilon_uncond，有条件预测为 epsilon_cond，常见 CFG 写法是：
+先把实现中常用的差分系数记为 `s`，以免和 Ho–Salimans 论文中的 `w` 混淆。若无条件预测为 `ε_uncond`、有条件预测为 `ε_cond`，常见组合式是：
 
 ~~~math
 \hat{\epsilon}_{\mathrm{cfg}}
 =
 \epsilon_{\mathrm{uncond}}
 +
-w
+s
 \left(
 \epsilon_{\mathrm{cond}}
 -
@@ -777,13 +811,13 @@ w
 \right).
 ~~~
 
-这里 w 是 guidance scale。按这个写法：
+按这个差分系数写法：
 
-- w=0 是无条件预测；
-- w=1 等于有条件预测；
-- w>1 放大条件方向。
+- `s=0` 是无条件预测；
+- `s=1` 等于有条件预测；
+- `s>1` 沿条件与无条件预测之差外推。
 
-有些库会把 guidance scale 定义成另一种偏移后的参数，阅读实现时不能只看变量名，必须看实际公式。
+Ho–Salimans 论文的参数记法则是 `ε_cfg=(1+w)ε_cond-wε_uncond`，代数上与上式相同，但 `s=1+w`，因此论文中的 `w=0` 对应条件预测，而不是无条件预测。实现和论文只要都把不同的基线记为 `guidance scale` 就很容易误读。以 Diffusers v0.35.1 的经典 Stable Diffusion pipeline 为例，`guidance_scale=1` 表示不启用 CFG；启用时该 pipeline 还可把 negative prompt 表示放进差分的无条件分支，因此它并非字面上的 null-condition prediction。读代码要核对组合式、输入分支和不启用 guidance 的基线，不能只按参数名推断（[Diffusers v0.35.1 pipeline 源码](https://github.com/huggingface/diffusers/blob/v0.35.1/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion.py)）。
 
 ### 8.3 条件 dropout 的作用
 
@@ -798,7 +832,7 @@ w
 
 ### 8.4 guidance 的质量和多样性折中
 
-提高 w 往往会让结果更贴近条件方向，但也可能：
+提高差分系数 `s` 往往会让结果更贴近条件方向，但也可能：
 
 - 颜色过饱和；
 - 局部结构失真；
@@ -828,7 +862,7 @@ N_{\mathrm{pixel}}=HWC.
 
 ### 9.2 VAE 与 latent 状态
 
-Latent diffusion 先用 VAE encoder 把图片映射为 latent z：
+Latent diffusion 先用 VAE encoder 把图片映射为 latent z，再在感知压缩空间执行去噪；这是 Latent Diffusion 论文降低高分辨率像素空间计算压力的路线，但压缩误差和完整系统成本仍要单独核算（[Rombach et al., LDM v2](https://arxiv.org/abs/2112.10752v2)）：
 
 ~~~math
 z=E_{\phi}(x),
@@ -902,7 +936,7 @@ R_{\mathrm{state}}
 
 ### 10.1 Progressive distillation
 
-标准 diffusion 可能需要很多 denoiser evaluations。蒸馏方法用一个较慢的 teacher 轨迹生成监督，让 student 用更少步骤近似 teacher 的结果。
+标准 diffusion 可能需要很多 denoiser evaluations。Progressive Distillation 用一个较慢的 teacher 轨迹生成监督，让 student 用更少步骤近似 teacher 的结果；原论文报告逐轮将采样步数减半的训练路线（[Salimans and Ho, Progressive Distillation v2](https://arxiv.org/abs/2202.00512v2)）。
 
 蒸馏的代价是：
 
@@ -915,7 +949,7 @@ R_{\mathrm{state}}
 
 ### 10.2 Consistency models
 
-Consistency 路线希望不同噪声水平沿同一轨迹映射到一致的 clean endpoint，因而可以支持较少步甚至一步的生成。它和 DDPM 的训练目标、网络输出和采样方式不完全相同。
+Consistency 路线希望同一条概率流轨迹上的不同噪声水平映射到一致的 clean endpoint，因而可以支持较少步甚至一步生成；原始论文据此定义 consistency function 和对应训练目标，不等同于 DDPM 的 epsilon MSE（[Song et al., Consistency Models v2](https://arxiv.org/abs/2303.01469v2)）。
 
 阅读 consistency 实现时，要问：
 
@@ -928,12 +962,12 @@ Consistency 路线希望不同噪声水平沿同一轨迹映射到一致的 clea
 
 ### 10.3 Flow matching
 
-Flow matching 直接学习一条概率路径上的速度场。一个简单的线性插值例子是：
+Flow Matching（流匹配）是 simulation-free 的向量场回归框架：先选定从噪声分布到数据分布的概率路径，再学习该路径对应的速度场。它可以使用扩散路径，也可以使用非扩散路径；下面只展示连接噪声与单个数据样本的直线路径（[Lipman et al., Flow Matching v2](https://arxiv.org/abs/2210.02747v2)）：
 
 ~~~math
-x_t=(1-t)x_0+t x_1,
+x_t=(1-t)x_{\mathrm{noise}}+t x_{\mathrm{data}},
 \qquad
-u_t=x_1-x_0.
+u_t=x_{\mathrm{data}}-x_{\mathrm{noise}}.
 ~~~
 
 模型学习：
@@ -942,7 +976,7 @@ u_t=x_1-x_0.
 v_\theta(x_t,t,c)\approx u_t.
 ~~~
 
-当 x_1 取噪声端点时，这条路线与从噪声到数据的连续运输有关；但它的训练路径、目标和 solver 需要单独定义。Flow matching、DDPM 和 score SDE 可以在连续生成的讨论中相互联系，却不能只通过“都用了 t”来互换公式。
+例如固定一对教学端点 `x_noise=-1、x_data=2`，在 `t=0.25` 时 `x_t=0.75×(-1)+0.25×2=-0.25`，目标速度为 `u_t=2-(-1)=3`。若模型给出 `2.5`，这一点上的平方误差是 `(2.5-3)^2=0.25`。训练会对许多端点对和时间取期望；真实生成则从噪声端沿学得的向量场积分到数据端。Rectified Flow（整流流）是特定的 ODE 运输/轨迹整流路线，论文研究迭代 rectification 如何让耦合样本间的路径更直；它与直线路径的 Flow Matching 有联系，但不是所有 Flow Matching 的同义词，少步效果也只在对应实验设定下成立（[Liu et al., Rectified Flow v1](https://arxiv.org/abs/2209.03003v1)）。
 
 ### 10.4 如何选择路线
 
@@ -1100,8 +1134,26 @@ loss 正常只能说明训练批次上的数值目标在下降。还可能存在
 - CFG 是否真的沿条件方向移动；
 - latent 状态元素的数量级是否变小。
 
+> 代码状态：已验证（2026-11-12；Python 3.12.9；仅 Python 标准库；CPU）。
+>
+> 输入约定：向量使用非空有限实数列表或元组；schedule 系数与 guidance scale 使用有限实数；时间步为整数；latent 的高宽、通道数和压缩因子为正整数。代码拒绝布尔值充当数值、尺寸或索引。
+
 ~~~python
 import math
+
+
+def is_finite_real(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
+def require_positive_integer(value, name):
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"{name} must be a positive integer")
 
 
 def round_list(values, ndigits=4):
@@ -1109,10 +1161,12 @@ def round_list(values, ndigits=4):
 
 
 def require_finite_vector(values, name):
+    if not isinstance(values, (list, tuple)):
+        raise ValueError(f"{name} must be a list or tuple")
     if not values:
         raise ValueError(f"{name} must be non-empty")
-    if not all(math.isfinite(value) for value in values):
-        raise ValueError(f"{name} must contain finite values")
+    if not all(is_finite_real(value) for value in values):
+        raise ValueError(f"{name} must contain finite real numbers")
 
 
 def validate_same_length(*named_vectors):
@@ -1123,9 +1177,9 @@ def validate_same_length(*named_vectors):
 
 
 def validate_schedule(betas):
-    if not betas:
+    if not isinstance(betas, (list, tuple)) or not betas:
         raise ValueError("schedule must contain at least one beta")
-    if not all(math.isfinite(beta) and 0.0 < beta < 1.0 for beta in betas):
+    if not all(is_finite_real(beta) and 0.0 < beta < 1.0 for beta in betas):
         raise ValueError("each beta must be finite and in (0, 1)")
     alphas = [1.0 - beta for beta in betas]
     alpha_bars = []
@@ -1141,11 +1195,14 @@ def validate_schedule(betas):
 def validate_timestep(t, total_steps):
     if isinstance(t, bool) or not isinstance(t, int):
         raise ValueError("timestep must be an integer")
+    require_positive_integer(total_steps, "total_steps")
     if not 1 <= t <= total_steps:
         raise ValueError("timestep must be in 1..T")
 
 
 def reverse_mean_from_epsilon(noisy, beta, alpha, alpha_bar, predicted):
+    if not all(is_finite_real(value) for value in (beta, alpha, alpha_bar)):
+        raise ValueError("schedule coefficients must be finite real numbers")
     if not 0.0 < beta < 1.0 or not 0.0 < alpha < 1.0:
         raise ValueError("beta and alpha must be in (0, 1)")
     if not 0.0 < alpha_bar < 1.0:
@@ -1162,6 +1219,11 @@ def reverse_mean_from_epsilon(noisy, beta, alpha, alpha_bar, predicted):
 
 
 def posterior_mean(noisy, clean, beta, alpha, alpha_bar, previous_alpha_bar):
+    if not all(
+        is_finite_real(value)
+        for value in (beta, alpha, alpha_bar, previous_alpha_bar)
+    ):
+        raise ValueError("schedule coefficients must be finite real numbers")
     if not 0.0 < beta < 1.0 or not 0.0 < alpha < 1.0:
         raise ValueError("beta and alpha must be in (0, 1)")
     if not 0.0 < alpha_bar < 1.0 or not 0.0 <= previous_alpha_bar <= 1.0:
@@ -1180,7 +1242,7 @@ def posterior_mean(noisy, clean, beta, alpha, alpha_bar, previous_alpha_bar):
 
 
 def cfg_combine(uncond, cond, guidance_scale):
-    if not math.isfinite(guidance_scale) or guidance_scale < 0.0:
+    if not is_finite_real(guidance_scale) or guidance_scale < 0.0:
         raise ValueError("guidance scale must be finite and non-negative")
     require_finite_vector(uncond, "unconditional prediction")
     require_finite_vector(cond, "conditional prediction")
@@ -1192,8 +1254,14 @@ def cfg_combine(uncond, cond, guidance_scale):
 
 
 def latent_state_ratio(height, width, pixel_channels, factor, latent_channels):
-    if min(height, width, pixel_channels, factor, latent_channels) <= 0:
-        raise ValueError("latent dimensions and compression settings must be positive")
+    for name, value in (
+        ("height", height),
+        ("width", width),
+        ("pixel_channels", pixel_channels),
+        ("factor", factor),
+        ("latent_channels", latent_channels),
+    ):
+        require_positive_integer(value, name)
     if height % factor or width % factor:
         raise ValueError("height and width must be divisible by the factor")
     pixel_values = height * width * pixel_channels
@@ -1368,6 +1436,31 @@ boundary_checks = {
     "non_divisible_latent_rejected": expects_value_error(
         lambda: latent_state_ratio(511, 512, 3, 8, 4)
     ),
+    "boolean_vector_value_rejected": expects_value_error(
+        lambda: require_finite_vector([True], "boolean vector")
+    ),
+    "non_numeric_vector_value_rejected": expects_value_error(
+        lambda: require_finite_vector(["0.5"], "text vector")
+    ),
+    "boolean_guidance_scale_rejected": expects_value_error(
+        lambda: cfg_combine([0.0], [1.0], True)
+    ),
+    "non_integer_latent_dimension_rejected": expects_value_error(
+        lambda: latent_state_ratio(512.0, 512, 3, 8, 4)
+    ),
+    "boolean_latent_factor_rejected": expects_value_error(
+        lambda: latent_state_ratio(512, 512, 3, True, 4)
+    ),
+    "boolean_previous_alpha_bar_rejected": expects_value_error(
+        lambda: posterior_mean(
+            x_t,
+            x0_hat,
+            betas[0],
+            alphas[0],
+            alpha_bars[0],
+            True,
+        )
+    ),
 }
 
 print("alpha_bars=", round_list(alpha_bars, 6))
@@ -1399,7 +1492,7 @@ print(
 )
 ~~~
 
-这段程序会输出类似：
+这段程序在上述环境下运行后的完整输出如下：
 
 ~~~text
 alpha_bars= [0.9999, 0.9949, 0.984951, 0.970177, 0.950774]
@@ -1416,12 +1509,12 @@ eps_roundtrip_error= 2.220446049250313e-16
 cfg_guided_eps= [-0.2, -1.7, 0.5, 1.4]
 latent_values= 16384 pixel_values= 786432 latent_ratio= 0.0208
 sampling_calls= {'ddpm_50': 50, 'ddim_20': 20, 'distilled_4': 4}
-checks= {'alpha_bar_decreases': True, 'xt_shape_ok': True, 'mse_positive': True, 'reconstruction_close': True, 'v_roundtrip_ok': True, 'epsilon_roundtrip_ok': True, 'posterior_mean_matches': True, 'cfg_changes_prediction': True, 'latent_is_smaller': True}
-boundary_checks= {'invalid_beta_rejected': True, 'out_of_range_timestep_rejected': True, 'negative_previous_alpha_bar_rejected': True, 'empty_vector_rejected': True, 'mismatched_vector_rejected': True, 'mismatched_cfg_vector_rejected': True, 'non_divisible_latent_rejected': True}
+checks= {'alpha_bar_decreases': True, 'xt_shape_ok': True, 'mse_positive': True, 'reconstruction_close': True, 'v_roundtrip_ok': True, 'epsilon_roundtrip_ok': True, 'posterior_mean_matches': True, 'first_step_posterior_defined': True, 'cfg_changes_prediction': True, 'latent_is_smaller': True}
+boundary_checks= {'invalid_beta_rejected': True, 'out_of_range_timestep_rejected': True, 'negative_previous_alpha_bar_rejected': True, 'empty_vector_rejected': True, 'mismatched_vector_rejected': True, 'mismatched_cfg_vector_rejected': True, 'non_divisible_latent_rejected': True, 'boolean_vector_value_rejected': True, 'non_numeric_vector_value_rejected': True, 'boolean_guidance_scale_rejected': True, 'non_integer_latent_dimension_rejected': True, 'boolean_latent_factor_rejected': True, 'boolean_previous_alpha_bar_rejected': True}
 all_checks_passed= True
 ~~~
 
-这些 checks 只证明四维教学算术彼此一致，并验证非法 schedule、时间步、向量、CFG 形状和 latent 尺寸不会静默通过。它们不证明网络预测准确，也不证明采样器在真实图片上有效。尤其是 latent_ratio 只按状态元素估算，不能当成端到端延迟或显存比例。
+这些 checks 只证明四维教学算术彼此一致，并验证非法 schedule、时间步、向量长度、非数值/bool 元素、CFG 参数和 latent 尺寸不会静默通过。它们不证明网络预测准确，也不证明采样器在真实图片上有效。尤其是 latent_ratio 只按状态元素估算，不能当成端到端延迟或显存比例。
 
 ## 14. 练习：从公式到采样系统
 
@@ -1441,21 +1534,30 @@ all_checks_passed= True
 14. 解释为什么少步蒸馏模型需要独立验证，不能只看采样步数。
 15. 比较 consistency 和 flow matching 与 DDPM epsilon prediction 的训练对象。
 16. 为一次生成失败建立记录：固定 seed、prompt、scheduler、步数、guidance、VAE 和硬件，并设计最小消融。
+17. 取 `γ=5、SNR=20`，分别计算 `x_0`、`epsilon` 和 `v` 目标的 Min-SNR-γ 权重，并解释为什么权重必须随预测参数化一起报告。
+18. 对比固定反向方差与 Improved DDPM 的学习方差，说明它改变了模型输出/训练目标的哪一部分，以及为何它不等于替换数值 solver。
+19. 用本章给出的 Stable Diffusion 2.1 schedule 系数解释非零终端 SNR 的训练/生成边界错配，并说明为何不能据此推断所有 checkpoint 都有相同问题。
+20. 用一个端点对和速度误差例子区分 Flow Matching 与 Rectified Flow，并说明二者不能互换名称或直接推出一步采样质量。
 
 ## 15. 资料入口与证据边界
 
-1. Ho et al., Denoising Diffusion Probabilistic Models：<https://arxiv.org/abs/2006.11239>。支持离散 forward/reverse diffusion、DDPM 训练和采样背景。
-2. Song et al., Denoising Diffusion Implicit Models：<https://arxiv.org/abs/2010.02502>。支持 DDIM 采样路径和确定性/随机性讨论。
-3. Song et al., Score-Based Generative Modeling through Stochastic Differential Equations：<https://arxiv.org/abs/2011.13456>。支持 score、SDE、reverse-time SDE 和 probability flow ODE 视角。
-4. Dhariwal and Nichol, Diffusion Models Beat GANs on Image Synthesis：<https://arxiv.org/abs/2105.05233>。支持 classifier guidance 研究背景。
-5. Ho and Salimans, Classifier-Free Diffusion Guidance：<https://arxiv.org/abs/2207.12598>。支持条件 dropout、无条件/有条件预测和 CFG 构造。
-6. Rombach et al., High-Resolution Image Synthesis with Latent Diffusion Models：<https://arxiv.org/abs/2112.10752>。支持 VAE latent 空间扩散、cross-attention 条件和成本动机。
-7. Peebles and Xie, Scalable Diffusion Models with Transformers：<https://arxiv.org/abs/2212.09748>。支持 DiT 作为 diffusion denoiser 的研究路线。
-8. Lu et al., DPM-Solver：<https://arxiv.org/abs/2206.00927>。支持少步数值求解器的研究背景，不能保证任意模型直接适配。
-9. Salimans and Ho, Progressive Distillation for Fast Sampling of Diffusion Models：<https://arxiv.org/abs/2202.00512>。支持把多步采样行为蒸馏到更少步的研究路线。
-10. Song et al., Consistency Models：<https://arxiv.org/abs/2303.01469>。支持 consistency 生成路线，不能把其目标当成 DDPM MSE。
-11. Lipman et al., Flow Matching for Generative Modeling：<https://arxiv.org/abs/2210.02747>。支持速度场和概率路径的 flow matching 研究背景。
-12. Hugging Face Diffusers scheduler 文档：<https://huggingface.co/docs/diffusers/using-diffusers/schedulers>。支持特定版本 scheduler 的接口说明；实际默认值、prediction type 和 scaling 仍要绑定安装版本。
+1. Ho et al., [Denoising Diffusion Probabilistic Models v2](https://arxiv.org/abs/2006.11239v2)。支持离散 forward/reverse diffusion、变分目标和噪声预测路线。
+2. Song et al., [Denoising Diffusion Implicit Models v4](https://arxiv.org/abs/2010.02502v4)。支持 DDIM 采样路径和确定性/随机性讨论。
+3. Song et al., [Score-Based Generative Modeling through Stochastic Differential Equations v2](https://arxiv.org/abs/2011.13456v2)。支持 score、SDE、reverse-time SDE 和 probability-flow ODE 视角。
+4. Dhariwal and Nichol, [Diffusion Models Beat GANs on Image Synthesis v4](https://arxiv.org/abs/2105.05233v4)。支持 classifier guidance 研究背景。
+5. Ho and Salimans, [Classifier-Free Diffusion Guidance v1](https://arxiv.org/abs/2207.12598v1)。支持条件 dropout、无条件/有条件预测和原论文 CFG 参数记法。
+6. Rombach et al., [High-Resolution Image Synthesis with Latent Diffusion Models v2](https://arxiv.org/abs/2112.10752v2)。支持 VAE latent 空间扩散、cross-attention 条件和成本动机。
+7. Peebles and Xie, [Scalable Diffusion Models with Transformers v2](https://arxiv.org/abs/2212.09748v2)。支持 DiT 作为 diffusion denoiser 的研究路线。
+8. Lu et al., [DPM-Solver v3](https://arxiv.org/abs/2206.00927v3)。支持少步数值求解器的研究背景，不能保证任意模型直接适配。
+9. Salimans and Ho, [Progressive Distillation for Fast Sampling of Diffusion Models v2](https://arxiv.org/abs/2202.00512v2)。支持把多步采样行为蒸馏到更少步的研究路线。
+10. Song et al., [Consistency Models v2](https://arxiv.org/abs/2303.01469v2)。支持 consistency 生成路线，不能把其目标当成 DDPM MSE。
+11. Lipman et al., [Flow Matching for Generative Modeling v2](https://arxiv.org/abs/2210.02747v2)。支持选定概率路径上的 simulation-free 向量场回归。
+12. Liu et al., [Flow Straight and Fast: Learning to Generate and Transfer Data with Rectified Flow v1](https://arxiv.org/abs/2209.03003v1)。支持特定 ODE 运输和轨迹整流路线；论文的少步结果不外推到所有 Flow Matching 模型。
+13. Nichol and Dhariwal, [Improved Denoising Diffusion Probabilistic Models v1](https://arxiv.org/abs/2102.09672v1)。支持学习反向方差和混合目标；少步结果绑定论文评估设置。
+14. Karras et al., [Elucidating the Design Space of Diffusion-Based Generative Models v2](https://arxiv.org/abs/2206.00364v2)。支持分别分析采样、训练和 score-network preconditioning 的设计空间。
+15. Hang et al., [Efficient Diffusion Training via Min-SNR Weighting Strategy v3](https://arxiv.org/abs/2303.09556v3)。支持时间步梯度冲突假设及依预测目标转换的截断 SNR 加权。
+16. Lin et al., [Common Diffusion Noise Schedules and Sample Steps are Flawed v4](https://arxiv.org/abs/2305.08891v4)。支持作者所分析 schedule 的非零终端 SNR 与训练/生成边界改进；不证明所有 checkpoint 都有相同问题。
+17. Hugging Face, [Diffusers v0.35.1 scheduler 文档](https://huggingface.co/docs/diffusers/v0.35.1/en/using-diffusers/schedulers)。支持固定版本的 scheduler 配置与 timestep spacing 接口说明；不能替代目标 checkpoint 的兼容性验证。
 
 原始论文适合支持方法定义和论文实验，官方文档适合支持 API 行为，教学 demo 只支持公式算术。上述资料不能单独证明某个产品的图片质量、prompt 遵循、文字可读率、版权安全或单位成功任务成本；这些结论必须在目标系统和目标硬件上复测。
 

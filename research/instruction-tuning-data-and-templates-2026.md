@@ -40,6 +40,7 @@
 
 ## Chat template 与 assistant-only loss
 
+- Hugging Face Transformers, “Multimodal chat templates,” v5.21.0，[固定版本文档](https://huggingface.co/docs/transformers/v5.21.0/chat_templating_multimodal)，访问日期 2026-11-11。实际阅读范围：多模态消息 `content` 列表、Processor 处理职责、`apply_chat_template()` 输出及视频输入部分。文档说明多模态内容由不同类型项目组成，Processor 负责预处理、分词和模板应用。证据等级：source-backed（固定版本官方文档）。适用边界：支持 Transformers v5.21.0 的文档接口；页面提示另有 v5.22.2，但本记录未据此核验该版本行为。
 - Hugging Face Transformers, “Chat templates,” v5.17.0，[官方文档](https://huggingface.co/docs/transformers/v5.17.0/chat_templating)；固定源 revision 见[文档源码](https://github.com/huggingface/transformers/blob/e598fbad926d80bc356c0c4d96532030e3dfdb62/docs/source/en/chat_templating.md)。
   - 实际阅读范围：消息序列化、模型模板差异、`add_generation_prompt`、`continue_final_message` 和训练数据格式说明。
   - 来源支持：chat template 将消息对象转成模型格式化序列；不同模型的控制 token 可不同；generation prompt 常添加 assistant 起始标记，但并非所有模型都需要；训练已完成的对话通常不添加空生成前缀。
@@ -51,6 +52,7 @@
   - 来源支持：该版本将 `assistant_only_loss` 定义为只对 assistant 响应计算 loss；相应功能要求模板正确返回 assistant mask，文档用 `{% generation %}` 与 `{% endgeneration %}` 标记说明模板需求，并介绍部分受支持模板的修补。
   - 证据等级：source-backed（TRL v1.16.0 官方接口文档）。
   - 适用边界：这是框架的可选实现，不代表所有 SFT 必须使用 assistant-only loss；模板是否产生预期 mask 仍需检查目标数据和实际输出。
+  - 补充核验（2026-11-11）：同一版 SFT Trainer 文档还注明，vision dataset 使用 `assistant_only_loss` 时需要 `transformers>=5.18.0`，并要求 conversational language-modeling dataset。该依赖门槛绑定 TRL v1.16.0 的文档实现，不能外推为其他训练器或更高版本的通用约束。
 
 ## 后训练方法关系的 2026 年视角
 
@@ -65,6 +67,21 @@
   - 来源支持：摘要报告超过 400,000 GPU-hours 的研究，并分析损失聚合、归一化、课程和 off-policy 等配方选择对其 RL compute scaling 实验的影响。
   - 证据等级：source-backed（会议论文摘要）。
   - 适用边界：摘要所述性能曲线、配方和效率结论限于论文任务、模型和评估口径；不构成所有 LLM 强化学习的统一排名。
+
+## 多模态指令微调和任务论文的固定版本
+
+2026-11-11 核对 arXiv 记录页的版本历史与摘要，固定正文引用入口：
+
+- Liu et al., “Visual Instruction Tuning” (LLaVA)，arXiv v2，2023-12-11 修订：[v2](https://arxiv.org/abs/2304.08485v2)。该版本记录用于定位论文描述的数据生成、模型连接和训练阶段；不能支持任意部署或业务质量结论。
+- Dai et al., “InstructBLIP: Towards General-purpose Vision-Language Models with Instruction Tuning”，arXiv v2，2023-06-15 修订：[v2](https://arxiv.org/abs/2305.06500v2)。摘要支持其多任务数据整理和 instruction-aware Query Transformer 的研究定位；实验结论仍绑定模型和评估集。
+- Liu et al., “Improved Baselines with Visual Instruction Tuning” (LLaVA-1.5)，arXiv v2，2024-05-15 修订：[v2](https://arxiv.org/abs/2310.03744v2)。引用用于核对其公开基线与训练设置，不能替代目标业务复测。
+- Zhu et al., “MiniGPT-4: Enhancing Vision-Language Understanding with Advanced Large Language Models”，arXiv v2，2023-10-02 修订：[v2](https://arxiv.org/abs/2304.10592v2)。摘要支持其视觉编码器、冻结语言模型与单投影层对齐及两阶段数据路线的研究背景；不证明这些配置在其他模型上最优。
+- Singh et al., “Towards VQA Models That Can Read” (TextVQA)，arXiv v2，2019-05-13 修订：[v2](https://arxiv.org/abs/1904.08920v2)。摘要定义依赖图中文字作答的任务和数据集；不等于通用 OCR 质量保证。
+- Masry et al., “ChartQA: A Benchmark for Question Answering about Charts with Visual and Logical Reasoning”，arXiv v1，2022-03-19：[v1](https://arxiv.org/abs/2203.10244v1)。摘要支持图表视觉读取与逻辑推理任务定位；分数绑定发布数据与评分口径。
+- Liu et al., “MM-SafetyBench: A Benchmark for Safety Evaluation of Multimodal Large Language Models”，arXiv v5，2024-06-19 修订：[v5](https://arxiv.org/abs/2311.17600v5)。摘要支持图像相关操纵风险的多模态安全评估动机；不替代目标系统工具权限或副作用检查。
+- Gebru et al., “Datasheets for Datasets”，arXiv v8，2021-12-01 修订：[v8](https://arxiv.org/abs/1803.09010v8)。摘要提出记录数据集动机、组成、采集过程与推荐用途的文档框架；框架不是法规，也不核验具体填报内容。
+
+本节只固定引用修订版本和摘要范围；若正文需要更细的论文机制、实验数字或局限，应回读相应版本的正文与附录。
 
 ## 生命周期
 

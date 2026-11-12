@@ -1218,7 +1218,7 @@ Agent 领域的资料类型差异很大，读者应把它们放在正确的位�
 - [AgentBench](https://arxiv.org/abs/2308.03688)、[WebArena](https://arxiv.org/abs/2307.13854)、[SWE-bench](https://arxiv.org/abs/2310.06770) 与 [τ-bench](https://arxiv.org/abs/2406.12045)
 - [OWASP Top 10 for Agentic Applications 2026](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/) 与 [OWASP GenAI LLM Top 10 2026](https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/)
 - [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)
-- [NIST AI 600-1 Generative AI Profile](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf)
+- [NIST AI 600-1 Generative AI Profile](https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence)
 - [Model Context Protocol specification 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28)
 - [Agent2Agent specification v1.0.1](https://a2a-protocol.org/v1.0.1/specification/)
 - [OpenID AuthZEN Authorization API 1.0](https://openid.net/specs/authorization-api-1_0.html)、[COAZ-MCP Working Group Draft](https://openid.github.io/authzen/authzen-coaz-mcp-binding-1_0.html)

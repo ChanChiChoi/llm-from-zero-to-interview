@@ -1435,7 +1435,7 @@ Debate 依赖人类 judge 能判断论点，也可能变成说服力竞赛。辩
 - [The Geometry of LLM-as-Judge](https://arxiv.org/abs/2606.03043)：arXiv v2（2026-09-02），研究 42 个 judge、两个 Indic benchmark、四个领域和八种语言；主观 rubric 的人类一致程度为 58%—66%，唯一可验证 rubric 的差距大多缩小。几何只描述评分协方差；来源还指出单一可验证 rubric 和不均衡人类参考等限制。
 - [OpenAI Model Spec](https://model-spec.openai.com/)：官方行为规范入口，支持分析监督目标和行为边界；规范文本不是独立实测结果。
 - [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：支持 Govern、Map、Measure、Manage 的治理结构。
-- [NIST Generative AI Profile](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf)：支持生成式系统的风险、测量和人工监督活动组织。
+- [NIST Generative AI Profile](https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence)：支持生成式系统的风险、测量和人工监督活动组织。
 
 引用这些资料时，应区分论文实验、厂商规范、治理建议和本项目实际测量。尤其是
 “监督更强”“AI feedback 可靠”或“人类成本下降”等结论，必须同时报告任务切片、

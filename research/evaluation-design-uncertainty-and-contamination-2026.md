@@ -38,6 +38,7 @@
 - **阅读范围：** ICLR 官方摘要和正式 PDF 摘要、引言、GRPO 步数实验描述、结果图表说明与 Table 2；未整理完整附录及全部消融。
 - **支持事实：** 作者报告 base model 经 benchmark 污染 SFT 后，继续用 10K 条 DeepMath-103K 问题做一轮（156 步）GRPO 时，多种检测器 AUROC 随步数下降；图注指出部分 reference-free 方法在该设置下接近随机猜测。论文还构造 advanced reasoning model 的末阶段 CoT 污染场景，多数检测器接近随机。
 - **证据边界：** 主要步数结果以 Qwen2.5-7B-Instruct 为 base model，并使用论文指定的模型、benchmark、训练数据及污染构造；其他模型见附录。结论不证明所有 RL 或所有推理模型都会抹除污染信号。它说明“没有检测到”不能视作“没有污染”的一般充分证据。
+- **实现分类补充（2026-11-09）：** 作者团队的[配套实现仓库](https://github.com/ASTRAL-Group/LRM_Conta_Detection_Arena)将检测实现分为 perturbation-based、reference-based 和 reference-free，并列出各类方法。该 README 只支持分类名称和实现入口；未固定仓库 revision，不作为方法性能或算法定义的独立证据。
 
 ## RL 后训练的专用检测信号
 

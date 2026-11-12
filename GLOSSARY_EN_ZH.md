@@ -96,6 +96,10 @@ CLIP Loss：CLIP 双向图文对比损失
 SigLIP：Sigmoid Loss for Language-Image Pre-training / 使用成对 sigmoid 目标的图文预训练方法；不要求 batch 内全局 softmax 归一化，但不会自动修正伪负样本标签。
 SigLIP 2：SigLIP 的多语言图文编码器系列；论文将 sigmoid 图文目标与 captioning、自蒸馏、masked prediction、数据筛选等训练方法组合，结果不能归因于损失函数单项。
 
+DINOv3：Meta 的自监督视觉基础模型系列；论文报告密集 patch 表示、Gram anchoring 与高分辨率适配，具体效果绑定其训练和评测设置。
+
+Gram Anchoring：Gram 矩阵锚定；DINOv3 论文以学生和较早教师的 patch 特征两两相似矩阵作约束，尝试维持 dense feature 的局部一致性，不是所有视觉塔的通用组件。
+
 Sigmoid Pairwise Contrastive Loss：成对 sigmoid 对比损失；对每个图文 logit 与正负标签分别计算 logistic loss，可加 logit scale 和 bias。
 
 BLIP-2：冻结视觉编码器与语言模型、用 Q-Former 查询压缩视觉表示的视觉语言预训练方法。
@@ -412,9 +416,13 @@ Train-Eval Overlap：训练集与评估集重叠
 
 Canary：金丝雀探针 / 受控记忆探针
 
+Training Data Exposure (Canary Metric)：训练数据暴露度；Carlini 等用随机填充值候选空间大小与目标 canary 排名的对数差，量化特定受控序列被优先复现的程度；依赖候选集合和插入方式，不是实际数据泄露概率。
+
 Memorization Risk：记忆风险
 
 Benchmark Contamination：基准污染
+
+Soft Contamination：软污染；部分 benchmark 污染研究用来描述训练语料含题目或答案的语义改写/近似内容；具体判定依候选检索和人工标注方案，不是统一统计口径。
 
 Data Packing：数据打包
 
@@ -534,29 +542,37 @@ Tensor Shape Audit：张量形状审计
 
 Distributed Training：分布式训练
 
-Rank：分布式进程全局编号
+Rank：当前 distributed worker group 内的全局进程编号，由 launcher 分配；不等同于机器号或物理 GPU 编号。
 
-Local Rank：本机进程 / GPU 编号
+Local Rank：当前节点内 worker 的编号；CUDA 单进程单 GPU 时通常用于绑定本进程可见的 GPU，容器内编号不一定等于宿主机物理编号。
 
-World Size：分布式训练总进程数
+World Size：当前 worker group 的总进程数；固定同构拓扑下通常等于节点数乘每节点进程数，弹性重启后可能变化。
 
-Process Group：进程组 / 通信进程组
+Local World Size：每个节点内启动的 worker 数；在每节点进程数相同的固定拓扑中，可与 node rank、local rank 一起解释 global rank 映射。
+
+Rendezvous：分布式 worker 会合过程；让 worker 发现并加入同一 worker group，依赖一致的 group id、endpoint 和规模配置。
+
+Process Group：进程组 / 通信进程组；定义哪些 rank 共同参与 collective，以及使用的通信 backend。
+
+NCCL：NVIDIA GPU collective communication backend；GPU DDP 常用，但实际性能和故障边界依赖设备拓扑、网络和配置。
+
+Gloo：PyTorch distributed backend；常用于 CPU 通信和部分调试路径，不能据其单机结果推断 NCCL 多机性能。
 
 Collective Order：集合通信顺序；同一通信组内各 rank 必须遵循兼容的 collective 顺序，否则可能挂起或得到错误结果。
 
 Data Parallelism：数据并行
 
-Distributed Data Parallel / DDP：分布式数据并行
+Distributed Data Parallel / DDP：分布式数据并行；各 rank 保留完整模型副本、处理各自输入，并在 backward 中同步梯度；DDP 不自动切分 Dataset 或训练状态。
 
-Gradient Synchronization：梯度同步
+Gradient Synchronization：梯度同步；标准 DDP 默认对参与 rank 的梯度做归约/平均，具体 loss 分母仍由样本数、有效 token 数和自定义 hook 等配置决定。
 
 Communication Overlap：通信与计算重叠
 
-Collective Operation：集合通信操作
+Collective Operation：集合通信操作；如 all-reduce、broadcast、barrier，要求同一 process group 的 rank 以兼容的顺序参与。
 
-torchrun：PyTorch 分布式启动命令
+torchrun：PyTorch 分布式 worker launcher；创建进程并提供 rank、world size、local rank 与 rendezvous 环境变量，不替应用切分数据。
 
-Rank 0 Checkpoint：rank 0 检查点保存
+Rank 0 Checkpoint：rank 0 检查点保存；适用于 DDP 参数和 optimizer 副本一致时只写一份共享状态。每 rank 的 RNG、数据进度等本地状态仍须分别保存。
 
 Distributed Checkpoint / DCP：PyTorch 分布式检查点 API；支持多 rank 保存/加载及按目标并行拓扑重新分片，但随机数状态、数据游标等应用状态仍须显式纳入 checkpoint。
 
@@ -566,11 +582,13 @@ Kueue Admission：Kubernetes 工作负载队列和配额准入；可在受支持
 
 Dominant Resource Fairness / DRF：面向多种资源的公平分配机制，以租户在各资源维度的最大归一化份额作为 dominant share；计算 dominant share 本身并不等同于完整 DRF 调度。
 
-DDP no_sync：DDP 跳过梯度同步上下文
+DDP no_sync：DDP 跳过梯度同步上下文；前向与反向都应放入该上下文，累积梯度会在后续同步 backward 中归约；它不负责 loss 分母或尾窗口归一化。
+
+DDP Join：DDP uneven-input 上下文；可让提前耗尽输入的 rank shadow DDP 通信，但不会自动 shadow 任意应用 collective；梯度按初始还是当前有效 world size 归一化也影响样本权重。
 
 ZeRO：零冗余优化器
 
-Fully Sharded Data Parallel / FSDP：全分片数据并行
+Fully Sharded Data Parallel / FSDP：全分片数据并行；full-shard 策略分片参数、梯度和 optimizer state，按计算阶段聚齐参数并在反向后归约分片梯度，以通信换较低常驻状态显存。
 
 FSDP1：PyTorch wrapper/FlatParameter 路线的早期全分片实现；wrap 边界会影响参数分组、all-gather 窗口与状态字典行为。
 
@@ -596,11 +614,11 @@ Zero Bubble Pipeline Parallelism / ZB1P：将 backward 拆成输入梯度与权�
 
 Hierarchical Data Parallelism / HSDP：层级数据并行；将 DP 划为内外层 process group，分别决定模型状态复制或分片的范围。组间策略和接口依框架实现，不代表固定的拓扑收益。
 
-Activation Checkpointing：激活检查点 / 激活重计算
+Activation Checkpointing：激活检查点 / 激活重计算；前向少保存部分中间激活，在反向阶段重算对应片段，以计算换显存。PyTorch checkpoint 默认跟踪 CPU 与一种推断出的非 CPU device type RNG；多设备和内部设备迁移有边界，通常显式使用 `use_reentrant=False`。
 
 Activation Offloading：激活卸载；将反向计算稍后才需要的前向张量移出 GPU HBM（常见去向为 CPU pinned memory），在需要前异步预取；以主机内存和 PCIe/互连带宽换显存，收益取决于拷贝能否被计算覆盖。
 
-All-Reduce：全归约
+All-Reduce：全归约；先对各 rank 的同形输入张量做 sum/mean 等归约，再让组内各 rank 都拿到归约结果；标准 DDP 默认把 rank 梯度求和并按参与 world size 平均。
 
 Reduce-Scatter：归约散射
 
@@ -625,6 +643,8 @@ Empirical Risk Minimization / ERM：经验风险最小化
 Generalization Gap：泛化差距
 
 Bias-Variance Trade-off：偏差-方差权衡
+
+Double Descent：双下降；在某些模型容量实验中，测试误差会在插值阈值附近升高，随后随容量继续增加而下降；依赖模型、数据与训练设置，不是任意模型扩容都会出现的规律。
 
 Underfitting：欠拟合
 
@@ -674,11 +694,17 @@ Epistemic Uncertainty：认知不确定性 / 模型知识不确定性
 
 Confidence：置信度
 
+Semantic Answer Calibration：语义答案校准；把多次生成的不同表述按语义归并为答案类别，再检查类别概率与实际正确率是否匹配。结论依赖采样、任务分布和归并方法，不等于 next-token calibration 或事实正确保证。
+
 Expected Calibration Error / ECE：期望校准误差；按置信度分桶后，以样本权重汇总各桶平均置信度与实际准确率的绝对差。结果依赖分桶方式，不表示严重度或单个样本风险。
 
 Brier Score：Brier 分数 / 概率预测均方误差
 
 Selective Prediction：选择性预测
+
+Conformal Prediction：保形预测；通过校准样本上的非一致性分数构造预测集合或区间，在交换性等条件下提供有限样本边际覆盖率保证；不保证每个子群覆盖率，也不自动保证开放文本事实正确。
+
+Conformal Abstention / CA：保形弃答；把有限样本校准用于回答或弃答决策。保证依赖交换性、参与事件和评价定义；不能据此承诺任意生成回答的事实正确率。
 
 Abstention：拒答 / 暂不自动回答
 
@@ -750,6 +776,8 @@ Dataset / PyTorch Dataset：数据集 / PyTorch 数据集
 
 Map-style Dataset：可索引数据集
 
+__getitems__：Dataset 批量取样协议
+
 IterableDataset：流式可迭代数据集
 
 DataLoader：数据加载器 / 批加载器
@@ -762,7 +790,7 @@ Sampler：采样器
 
 Batch Sampler：批采样器
 
-DistributedSampler：分布式采样器
+DistributedSampler：map-style Dataset 的 rank 分片采样器；各 rank 应使用相同 seed 并每 epoch 调用 `set_epoch()`；默认补齐可能重复索引，sampler `drop_last=True` 则截断数据集尾部。
 
 Length Bucket：长度分桶
 
@@ -773,6 +801,8 @@ Attention Mask：注意力掩码
 Ignore Index：忽略标签索引
 
 DataLoader Worker：数据加载 worker
+
+in_order：DataLoader 的批次返回顺序约束
 
 worker_init_fn：worker 初始化函数
 
@@ -830,6 +860,8 @@ Momentum：动量
 
 Adam：Adam 优化器
 
+AMSGrad：Adam 的一种变体；对逐坐标二阶矩维护运行最大值，限制自适应分母随时间回落。原论文算法与框架中的偏差修正实现需按各自定义区分。
+
 AdamW：AdamW 优化器
 
 Adafactor：一种自适应优化器；对矩阵参数用行/列统计近似逐元素二阶矩，以降低状态显存；原始 recipe 还包含 relative step、参数尺度与 update clipping 等选择。
@@ -878,13 +910,13 @@ Gradient-Directional Curvature：梯度方向曲率；沿当前梯度方向测�
 
 GradientStabilizer：梯度幅值稳定器；根据运行梯度范数统计调整更新幅值、保留当前梯度方向的研究方法；并不验证该方向本身正确。
 
-Global Batch Size：全局批大小
+Global Batch Size：全局批大小；等长样本、相同 rank batch 和完整累积窗口时为 `per-rank micro-batch × world_size × accumulation_steps`；变长语言模型还应报告实际有效 token 数。
 
 Micro Batch Size：微批大小
 
-Gradient Accumulation：梯度累积
+Gradient Accumulation：梯度累积；在多个 micro-batch 上累加梯度，再执行一次 optimizer 更新；尾窗口应按实际目标权重归一化。
 
-Token-Weighted Gradient Accumulation：按有效目标 token 数加权的梯度累积；用于让变长 micro-batch 的累积梯度与同一窗口的全局 token-mean loss 对齐。
+Token-Weighted Gradient Accumulation：按有效预测目标数加权的梯度累积；对无类别权重的 token mean，累计窗口内 loss sum 后除以有效目标数，可让变长 micro-batch 对应同一窗口的全局 token-mean loss；类别加权交叉熵应改用目标权重之和。
 
 Valid Prediction Target Count：有效预测目标数；必须按模型真实 label shift 和 ignore mask 统计，不能默认等于未移位 label 张量中非 ignore 元素数。
 
@@ -898,25 +930,25 @@ Fill-in-the-Middle / FIM：中间填充；将原文拆为 prefix、suffix、midd
 
 FIM Rate：中间填充变换比例；训练数据中被转换成 FIM 格式的样本比例，需与普通 left-to-right 样本比例及专用填空评测一起报告。
 
-Zero Grad：梯度清零
+Zero Grad：梯度清零；在新更新窗口开始前清除上一窗口的 `.grad`。
 
-Set Grad to None：将梯度设为 None
+Set Grad to None：将梯度设为 None；与显式零梯度不同，部分 optimizer 会跳过 `.grad is None` 的参数，因此 momentum 或 weight decay 等更新也可能不同。
 
 Training Loop：训练循环
 
-Training Step：训练步 / 参数更新步
+Training Step：训练步；具体指 micro-batch 处理还是参数更新需由上下文定义。
 
-Micro Step：微步 / 微批次反传步
+Micro Step：微步 / 微批次步；处理一个 micro-batch，通常包含一次反向传播，但不一定更新参数。
 
-Optimizer Step：优化器更新步
+Optimizer Step：优化器更新步；调用 `optimizer.step()` 更新参数及其优化器状态。
 
-Scheduler Step：学习率调度更新步
+Scheduler Step：学习率调度更新步；按 scheduler 配置更新学习率，通常与真实 optimizer 更新步对齐。
 
 Evaluation Loop：验证循环 / 评估循环
 
-Checkpoint Resume：检查点恢复训练
+Checkpoint Resume：检查点恢复训练；恢复模型、optimizer、scheduler、训练/数据进度和随机状态；默认在 optimizer step 后保存，累积窗口中途保存还需保留未提交梯度及其分母。
 
-Global Step：全局训练步
+Global Step：全局训练步；本章约定为真实 optimizer step 的累计次数，不能把 micro-step 数直接当作更新次数。
 
 Raw Loss：原始 loss / 未缩放 loss
 
@@ -951,6 +983,18 @@ Profiler Activity：Profiler 活动类型
 Record Shapes：记录算子输入形状
 
 Profile Memory：记录内存分配
+
+Graph Break：图断点 / 编译图中断；`torch.compile` 遇到无法捕获的代码后结束当前图并在 eager 中执行该段，默认路径可能继续捕获后续计算；会损失部分优化机会，但影响取决于位置与频率。
+
+Recompilation：重编译；已有编译代码的 guard 不再满足时重新追踪/编译，输入 shape、dtype、stride 或运行条件变化都可能触发。
+
+`torch.compile`：PyTorch 编译入口；将可捕获的模型/函数区域编译执行，需分别核对输出容差、graph breaks、重编译和预热后的稳态速度；不保证兼容或加速。
+
+`fullgraph=True`：完整图诊断选项；要求目标函数捕获为单个图，遇到 graph break 时出错，可用于发现断点，不是通用性能开关。
+
+Profiler Schedule：Profiler 采样计划；用 wait、warmup、active 和 repeat 指定哪些 step 等待、预热或记录，并由 `prof.step()` 推进。
+
+`torch.utils.benchmark.Timer`：PyTorch 基准计时工具；有 accelerator 时默认同步后计时，`blocked_autorange` 通过预热和多次采样减小计时器开销，但结果仍受输入、线程、设备和 workload 范围限制。
 
 DataLoader Bottleneck：DataLoader 瓶颈
 
@@ -1035,6 +1079,10 @@ Entropy：熵
 Conditional Entropy：条件熵
 
 Mutual Information / MI：互信息
+
+Conditional Mutual Information / CMI：条件互信息；在给定上下文后，衡量一个随机变量平均减少另一个变量多少不确定性。单条观测的后验熵变化可以为负，条件互信息对可能观测取平均后非负。
+
+Information Bottleneck / IB：信息瓶颈；压缩表示关于输入的信息，同时保留其对任务目标有用的信息；实际模型常优化变分界或其他代理目标，需区分理论量和估计值。
 
 Expected Information Gain / EIG：预期信息增益；实验结果分布下，观测结果带来的平均假设熵减少量；实际计算依赖候选假设、结果概率模型和实验设计，不等同于工程任务的收益/成本评分。
 
@@ -1313,6 +1361,8 @@ Padding Mask：填充掩码
 Causal LM：因果语言模型
 
 Causal LM Shift Loss：因果语言模型右移损失
+
+Causal Lower-Right Bias：右下对齐因果偏置；query/key 长度不同时，将 causal 对角线对齐到矩阵右下角，适用于 query 对齐到缓存尾部的场景。PyTorch 2.15 的 `causal_lower_right` 标记为 prototype；存在 padding 或其他位置布局时仍需按绝对位置核对可见关系。
 
 LM Head Weight Tying：语言模型输出头权重绑定
 
@@ -2458,6 +2508,10 @@ Parameter-Efficient Fine-Tuning / PEFT：参数高效微调
 
 Low-Rank Adaptation / LoRA：低秩适配
 
+Rank-Stabilized LoRA / rsLoRA：秩稳定低秩适配；在原论文的初始化与渐近稳定性条件下使用 $\alpha/\sqrt r$ 缩放，作为 rank 消融候选，不表示所有模型都应采用该设置。
+
+Weight-Decomposed Low-Rank Adaptation / DoRA：幅度分解低秩适配；逐列分开参数化权重幅度与方向，用低秩增量表示方向变化；性能和合并行为按论文模型、任务与实现版本核验。
+
 Quantized LoRA / QLoRA：量化低秩适配
 
 Chat Template：聊天模板
@@ -2752,7 +2806,7 @@ Verifier Completeness：验证器完备率 / completeness；在有限挑战集�
 
 Extensional Correctness：外延正确性；只表示规则或程序在已列出的输入输出样例上符合要求，不证明其捕获了可迁移到新实例的关系或机制。
 
-Evidence Support Rate：证据支持率
+Evidence Support Rate：证据支持率；必须说明判定单位和分母。复合回答可按 claim 逐条统计 supported claims / all labeled claims，并说明拒绝样本是否仍留在质量审计分母中，不能把整条回答二值化掩盖部分无证据内容。
 
 High-Risk Audit Coverage：高风险人审覆盖率
 
@@ -2944,7 +2998,9 @@ Systemic Risk：系统性风险；由 AI 的广泛部署、相互作用或对社
 
 Unsafe Compliance Rate：不安全服从率 / 漏拒率
 
-Refusal Accuracy：拒答准确率
+Refusal Accuracy：拒答准确率；使用前须定义正负样本和分母，通常还应分别报告不可回答样本上的拒答召回率与可回答样本上的过度拒答率。
+
+Refusal Recall：拒答召回率；所有应拒答样本中实际被正确拒答的比例，分母为应拒答样本数；不反映可回答样本上的过度拒答。
 
 Attack Success Rate：攻击成功率
 
@@ -3696,17 +3752,17 @@ FP8：8 位浮点数
 
 E4M3 / E5M2：OCP OFP8 的两种 FP8 编码；E4M3 有 4 指数位/3 尾数位，最大有限值 448、最小 subnormal 为 `2^-9`，没有 Inf 编码；E5M2 有 5/2 位，最大有限值 57,344、最小 subnormal 为 `2^-16`，支持 Inf/NaN。前者精度较细、范围较窄，后者范围较大、相邻码点更稀；硬件/库的 dtype variant、饱和和舍入模式仍需另核。
 
-Mixed Precision Training：混合精度训练
+Mixed Precision Training：混合精度训练；按算子、张量或阶段选择不同数值精度，以权衡范围、误差、显存、带宽与吞吐；实际收益和稳定性依赖硬件、算子策略与模型。
 
-Automatic Mixed Precision / AMP：自动混合精度
+Automatic Mixed Precision / AMP：自动混合精度；由 autocast 等运行时策略选择适合各算子的 dtype，通常保留模型参数和输入的常规 dtype；不是把整张模型统一转成 FP16/BF16。
 
-Autocast：自动类型转换上下文 / autocast
+Autocast：自动类型转换上下文 / autocast；按设备和算子策略选择前向及 loss 计算的 dtype；一般不包 backward，也不要求手动把模型或输入整体 `.half()` / `.bfloat16()`。
 
-GradScaler：梯度缩放器
+GradScaler：梯度缩放器；主要用于 FP16 训练，对 loss 放大后反向，再在参数更新前 unscale，并动态调整 scale；检测到非有限梯度时可跳过 optimizer 更新。scale 不保证大于 1；BF16 autocast 通常不需要启用它。
 
 Loss Scaling：损失缩放
 
-Dynamic Loss Scaling：动态损失缩放；根据梯度是否出现 Inf/NaN 调整 loss scale，溢出时跳过更新并回退 scale，稳定一段时间后再增大 scale。
+Dynamic Loss Scaling：动态损失缩放；根据反向梯度是否出现 Inf/NaN 调整 loss scale，非有限时跳过更新并回退 scale，稳定一段时间后再增大 scale。scale 可能降至 1 以下；这不意味着模型已适配 FP16 前向范围。
 
 Subnormal：次正规数；绝对值小于该格式最小正规数、但仍可表示的数；部分硬件或 kernel 可能采用 flush-to-zero，需核对具体执行路径。
 
@@ -3734,11 +3790,13 @@ Optimizer State Memory：优化器状态显存
 
 CUDA Memory Stats：CUDA 显存统计
 
-Memory Allocated：已分配显存
+Memory Allocated：已分配显存；PyTorch CUDA allocator 当前分配给存活 tensor 的内存，不等于设备进程总显存。
 
-Memory Reserved：已保留显存
+Memory Reserved：已保留显存；PyTorch caching allocator 当前管理的内存，包含可复用缓存块，通常不等于活 tensor 占用。
 
-Peak Memory：峰值显存
+Peak Memory：峰值显存；从程序启动或最近一次 `reset_peak_memory_stats()` 起记录的分配高水位；测每个阶段的局部峰值时，应在该阶段开始前重置并同步。
+
+Empty Cache：清空缓存；`torch.cuda.empty_cache()` 将 allocator 未使用的缓存块释放给其他 GPU 应用，不释放仍被 tensor 占用的显存，也不会增加 PyTorch 自身可用显存。
 
 Out of Memory / OOM：显存不足 / 内存不足
 
@@ -3808,6 +3866,10 @@ Reverse Denoising：反向去噪过程
 
 Noise Scheduler：噪声调度器
 
+Terminal SNR：终端信噪比；由训练 schedule 最后时间步确定的信号/噪声方差比。若训练末端仍保留信号而生成从纯高斯噪声开始，两端可能不匹配；数值与影响依具体 checkpoint 和 schedule 而定。
+
+Learned Reverse Variance：学习反向方差；denoiser 除预测反向均值所需的信息外，还输出反向分布的方差信息。Improved DDPM 的方差输出需配合其混合训练目标和端点约定，不能等同于更换采样 solver。
+
 Noise Prediction Loss：噪声预测损失
 
 Classifier-Free Guidance / CFG：无分类器引导
@@ -3819,6 +3881,12 @@ Latent Diffusion：潜空间扩散
 Variational Autoencoder / VAE：变分自编码器；将输入编码到潜空间表示并从中重构的概率生成模型；latent diffusion 的实际压缩方式与压缩比取决于具体实现。
 
 Diffusion Transformer / DiT：扩散 Transformer
+
+Multimodal Diffusion Transformer / MM-DiT：多模态扩散 Transformer；Stable Diffusion 3 论文中的架构以独立的文本/图像参数处理两类表示，并在联合注意力中让两类 token 交换信息；这是特定论文路线，不是所有 DiT 的共有结构。
+
+LoRA / Low-Rank Adaptation：低秩适配；冻结原权重，以低秩矩阵参数化部分权重更新；它描述参数更新方式，可用于不同的微调方法，不等同于 DreamBooth。
+
+Elucidating the Design Space of Diffusion Models / EDM：扩散设计空间分析；将噪声参数化、训练分布/损失、采样和网络预条件等选择分别研究，用于定位方法差异，不是可无条件移植到所有模型的通用配方。
 
 Min-SNR-γ Weighting：最小信噪比加权；按 diffusion timestep 的 SNR 和预测参数化（`x0`、`epsilon`、`v`）重加权去噪 loss，以缓解训练步之间的梯度冲突；权重不能脱离目标参数化解读。
 
@@ -3836,7 +3904,11 @@ Image-to-Image：图生图
 
 Inpainting：局部重绘
 
+DreamBooth：主体驱动的文生图个性化微调方法；使用少量主体图像和唯一标识词，并可用 class-specific prior preservation 缓解主体过拟合与语言漂移；可与 LoRA 这种参数更新方式组合。
+
 DALL-E：DALL-E 文生图系列
+
+C2PA / Content Credentials：内容来源凭证技术规范；通过签名声明、内容绑定和验证记录媒体来源与处理链，验证完整性不等于证明声明内容真实，也不等于内容质量或安全结论。
 
 Normalizing Flow：正规化流；用可逆映射将简单分布变换为数据分布，并用可计算的 Jacobian 行列式追踪密度；精确 likelihood 不等于人类偏好或图像质量。
 
@@ -3873,6 +3945,14 @@ Video Generation Evaluation：视频生成评估
 Fréchet Video Distance / FVD：弗雷歇视频距离
 
 WBench：多轮交互式视频世界模型 benchmark；2026 年论文使用 289 个案例、1,058 轮交互和五类评估维度，结果受论文数据、接口和评分协议限制。
+
+VBench-2.0：按人体保真度、可控性、创造性、物理合理性和常识符合性五类评估视频内在忠实度的 benchmark；其自动评估器在人体运动、计数和三维理解上有已报告的可靠性边界。
+
+PVBench：对象级视频物理合理性评估 benchmark；结合姿态、尺度、运动等可测量量，结论依赖视频可观测性、跟踪和测量工具。
+
+World Models’ Last Exam in Physics：受控视频物理任务集；分开检查画面是否足以观测，以及观测关系是否满足任务专属物理量，未观测状态保持未知。
+
+KeyFrame-Compass：关键帧条件视频生成 benchmark；检查关键帧存在、外观、顺序、时点、持续性和唯一性，不代表普通文本生成视频能力。
 
 Video Token Audit：视频 token 审计
 
@@ -3944,6 +4024,8 @@ Time to First Audio / TTFA：首音延迟；从明确的请求/输入时间边�
 
 Time to First Audio Chunk / TTFC：首个音频块延迟；模型/Talker 首次产出音频 chunk 的时间，不等同客户端首音播放延迟。
 
+Time to First Packet / TTFP：首个媒体包延迟；服务端从请求接收到输出第一个音频包的时间。与 Thinker 文本 TTFT、模型产出 chunk 的 TTFC、客户端实际播放首音的 TTFA 分别记录。
+
 Real-Time Factor / RTF：实时率；处理时间除以对应音频时长，RTF<1 表示平均计算快于播放速度，但不保证首包延迟、chunk 连续性或端到端体验。
 
 Adaptive Rate Interleave Alignment / ARIA：自适应速率交错对齐；Qwen3.5-Omni 用单流和单调约束协调文本 token 与语音 token 的生成速率，具体机制见第二十一册第 93 章。
@@ -3956,7 +4038,19 @@ Utterance Error Rate / UER：话语错误率；mu-bench 中由 LLM judge 按任�
 
 LP-TTS-Bench：Long-Prompt Zero-Shot TTS benchmark；评估长参考语音条件下的说话人韵律复现，并将 timing、prominence、intonation 与音色相似度、可懂度分开；结论受其双语说话人和评测协议限制。
 
+SwanBench-Speech：长篇语音生成基准；覆盖 17 种长文/对话场景，以声学、语义和表现力七项指标评估，结论绑定其数据、语种与自动评估器。
+
+DRAMA-Eval：上下文、多轮、多说话人语音生成基准；以场景脚本、角色资料和逐轮指令评估文本保真、说话人一致、局部表达和场景级连贯，受中文/英语数据、专有 judge 与不同模型输入条件限制。
+
+InteractionBench：实时语音交互评测；在共同 harness 中分别测轮次时机、口语任务、耳语/音量和长对话 groundedness；结果受合成用户语音、协议和客户端网络测量边界限制。
+
+Auditory Prompt Injection：音频提示注入；第三方音频内容试图影响模型对用户请求或工具行为的解释。评估时要分开记录媒体内容、用户授权、工具提议、确认和真实副作用；论文攻击结果不等于目标系统风险率。
+
 Mean Opinion Score / MOS：平均主观意见分
+
+MUSHRA：ITU-R BS.1534-3 的多刺激主观音质评测方法；以隐藏参考和锚点比较中等音质水平的音频系统，结论依赖听者、素材、播放条件和统计协议，不测转写正确或说话人授权。
+
+Fréchet Audio Distance / FAD：Fréchet 音频距离；原始版本以 VGGish 嵌入比较待评音频集合与干净背景音乐集合的高斯分布，主要面向音乐增强。它是受嵌入器、背景集和样本量影响的集合级指标，不代表单句内容或 TTS 自然度。
 
 Audio Token Audit：音频 token 审计
 
@@ -3994,7 +4088,7 @@ ASR Critical Field Accuracy：ASR 关键字段准确率
 
 Temporal Evidence Recall：时间证据召回率
 
-VQA Accuracy：视觉问答准确率
+VQA Accuracy：视觉问答准确率；VQA v2 官方评分对每题的 10 个参考答案逐一留一计算并取平均，1、2、3 个匹配答案分别得 0.3、0.6、0.9，至少 4 个得 1.0；不同 benchmark 的归一化与评分协议需单独核对。
 
 Chart Relaxed Accuracy：图表问答宽松准确率
 
@@ -4022,17 +4116,17 @@ Content Provenance：内容来源与溯源
 
 Multimodal Safety Audit：多模态安全审计
 
-Multimodal Interview Readiness：多模态面试准备度
+Multimodal Interview Readiness：多模态面试准备情况；按主题、公式、演练、风险和取舍汇总的证据记录，不等于客观能力测量或面试通过概率。
 
-Multimodal Interview Rubric：多模态面试评分规约
+Multimodal Interview Rubric：多模态面试评分规约；预先定义各类问题的表现描述、证据要求和评分方法，避免把自评分或未校准阈值当成通用标准。
 
-Multimodal Formula Coverage：多模态公式覆盖度
+Multimodal Formula Coverage：多模态公式覆盖度；已记录公式类别占预先清单的比例，只说明覆盖范围，不说明推导正确或掌握深度。
 
-Multimodal Demo Coverage：多模态 demo 覆盖度
+Multimodal Demo Coverage：多模态 demo 覆盖度；已有可检查演练类别占预先清单的比例，不说明演练质量或真实系统能力。
 
-Weak Multimodal Question：多模态薄弱题
+Weak Multimodal Question：多模态薄弱题；按固定评分规约需要补充证据或重做的题目，不应仅由未经校准的低分推断。
 
-Multimodal Revision Plan：多模态复习修正计划
+Multimodal Revision Plan：多模态复习修正计划；把已发现的证据、公式、代码、风险或取舍缺口转成可复核的后续任务，并注明完成条件。
 
 Temporal Alignment：时间对齐 / 时序对齐
 
@@ -6055,6 +6149,14 @@ Data Interview Readiness：数据工程面试准备度
 Answer Coverage：回答覆盖度
 
 Metric Coverage：指标覆盖度
+
+Behavioral Interview：行为面试；以过去发生的工作事件观察岗位相关行为，不是性格诊断或未来表现保证。
+
+Structured Interview：结构化面试；依据岗位能力组织一致的问题、追问范围和评分锚点，使候选人的证据更可比较；具体结构因组织和岗位而异。
+
+Situational Interview：情境面试；向候选人提出假设工作场景，询问其计划采取的行为；可观察迁移判断，但不等同于真实经历证据。
+
+STAR：Situation、Task、Action、Result 的经历组织框架；用于压缩表达，不是逐字背诵脚本；根据题目补充约束、证据、个人责任、代价和复盘。
 
 Interview Rubric：面试评分规约
 
@@ -9631,7 +9733,11 @@ Gated DeltaNet：带门控的 delta 状态更新模块；用固定形状递归 s
 
 Qwen3.5 Hybrid Layout：Qwen3.5-397B-A17B 的 15 组 `3 x (Gated DeltaNet -> MoE) + 1 x (Gated Attention -> MoE)` 层排布；体现递归 state 与显式 attention 的周期性交互。
 
-Native Multimodal Early Fusion：原生多模态早期融合；Qwen 官方声明文本、图像和视频 token 在统一 foundation model 训练中处理，具体 token budget、loss 和生产 kernel 仍待核验。
+Native Multimodal Model：原生多模态模型；`native` 没有跨论文和产品通用的架构定义，可能指训练方式、输入路径或生成能力。应按来源说明它具体指什么，不能仅凭该标签推出共享主干或 encoder-free。
+
+Multimodal Early-Fusion Training：多模态早期融合训练；[Qwen3.5-397B-A17B 模型卡](https://huggingface.co/Qwen/Qwen3.5-397B-A17B)称其为 unified vision-language foundation，并声明在 multimodal tokens 上进行 early-fusion training；同一模型卡的 Overview 又列出 Causal Language Model with Vision Encoder。早期融合训练与显式模态 encoder 可以同时存在；该说法不公开完整 tokenization、loss 配比或每次请求的数据流，也不等于 encoder-free。
+
+Encoder-Free Multimodal Route：无独立模态 encoder 的统一路线；该词没有跨论文通用的模块边界，使用时须指明被取消或合并的是哪一种独立 encoder。它不表示没有 tokenizer、patchifier、codec、projection、embedding 或输出 decoder；early-fusion、统一 token 或共享主干也不能单独证明 encoder-free。
 
 Multi-Token Prediction (MTP)：多 token 预测训练/推测解码路线；必须分开 draft、target verification、accepted length、rollback 和 committed KV，不能只看 speculative 开关。
 

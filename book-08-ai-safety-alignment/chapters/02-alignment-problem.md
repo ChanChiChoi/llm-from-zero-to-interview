@@ -1381,7 +1381,7 @@ Deceptive alignment 应作为潜在风险和研究问题讨论，不能把未证
 - [OpenAI Preparedness Framework Version 2](https://cdn.openai.com/pdf/18a02b5d-6b67-4cec-ab64-68cdfbddebcd/preparedness-framework-v2.pdf)：官方前沿风险评估框架，支持危险能力、保护措施和发布讨论的组织方式；阈值需结合具体模型和环境。
 - [OpenAI Frontier Governance Framework](https://openai.com/index/openai-frontier-governance-framework/)：说明发布组织自己的风险治理安排；不能作为独立认证或跨组织通用阈值。
 - [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：支持 Govern、Map、Measure、Manage 的风险治理结构；官方页面同时说明 AI RMF 1.0 正在修订。
-- [NIST Generative AI Profile](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf)：支持把生成式 AI 特有风险映射到治理和测量活动。
+- [NIST Generative AI Profile](https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence)：支持把生成式 AI 特有风险映射到治理和测量活动。
 - [Google DeepMind Frontier Safety Framework](https://deepmind.google/frontier-safety/)：官方页面列出版本和更新历史，支持讨论该组织的前沿能力评估与缓解措施；框架不能替代项目自己的任务和轨迹证据。
 
 引用这些资料时，正文应明确证据属于“论文实验”“厂商公开规范”“治理建议”

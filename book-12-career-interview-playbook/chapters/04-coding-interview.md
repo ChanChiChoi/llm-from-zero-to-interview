@@ -126,13 +126,19 @@ def require_logits_and_labels(
             f"sequence dimensions disagree: logits={logits.shape}, "
             f"labels={labels.shape}"
         )
+    if logits.device != labels.device:
+        raise ValueError("logits and labels must be on the same device")
     if not logits.is_floating_point():
         raise TypeError("logits must be floating point")
     if labels.dtype != torch.long:
         raise TypeError("labels must use torch.long")
     batch, seq_len, vocab = logits.shape
+    if batch == 0 or seq_len == 0 or vocab == 0:
+        raise ValueError("batch, sequence, and vocabulary dimensions must be non-empty")
     return batch, seq_len, vocab
 ~~~
+
+> 代码状态：静态审阅，未运行（2026-11-05）。
 
 一个好的检查函数应当指出违反了哪条契约。只写 assert logits.ndim == 3 在本地可以帮助自己，但在更大的系统中，带有实际 shape 的错误信息更容易定位数据管道问题。
 
@@ -140,9 +146,11 @@ def require_logits_and_labels(
 
 view 只是在已有存储上重新解释形状。它要求底层 stride 能够支持这种解释，所以 transpose 或 permute 后直接 view 可能报错。contiguous 会按照当前逻辑顺序建立一份连续存储，随后才可以安全地 view，但这可能产生额外内存和拷贝。
 
-reshape 会尽量复用原存储，必要时自行创建连续副本，因此通常更方便；不过它并不意味着没有拷贝。性能敏感代码仍应知道数据是否连续。
+reshape 会尽量复用原存储，必要时自行创建连续副本，因此通常更方便；不过它并不意味着没有拷贝。性能敏感代码仍应知道数据是否连续。PyTorch 对 view、transpose、contiguous 和 reshape 的关系见 [Tensor Views 文档](https://docs.pytorch.org/docs/2.15/tensor_view.html)。
 
 transpose 通常交换两个轴，permute 可以任意重排多个轴。它们一般只改变视图和 stride，不会立即搬动数据。比如：
+
+下面是依赖调用方提供 `x` 的片段，输入 shape 按注释约定为 [B,T,H,d]；它只展示轴变换，不是可独立运行的完整脚本。
 
 ~~~python
 # x: [B, T, H, d]
@@ -155,32 +163,41 @@ x_back = x_heads.transpose(1, 2).contiguous().reshape(
 )
 ~~~
 
+> 代码状态：静态审阅，未运行（2026-11-05）；片段，依赖调用方提供的 x。
+
 这里的 contiguous 不是装饰。没有它，某些版本和某些输入布局下的 view 会失败；即使用 reshape 让程序跑通，也可能暗中复制一个很大的张量。面试中说出“我在这里需要连续存储，代价是一份潜在的拷贝”，比单纯背 API 更能体现工程判断。
 
 ### 4.2.4 expand 和 repeat 不是同一个操作
 
 expand 通过 stride 为零的视图广播一个尺寸为 1 的轴，通常不复制数据；repeat 会真正复制数据。比如把一个 [B, 1, T] 的 mask 扩展到 head 维，通常只需要 expand 或让算子自动 broadcast，不应为每个 head 复制一份。
 
-expand 出来的多个位置可能指向同一块存储，因此不能对它做会改变值的原地写入。若需要独立可写的副本，使用 repeat 或 clone，并承担相应的内存成本。
+expand 出来的多个位置可能指向同一块存储，因此不能对它做会改变值的原地写入。若需要独立可写的副本，使用 repeat 或 clone，并承担相应的内存成本；其零步长视图和原地写入限制见 [Tensor.expand 文档](https://docs.pytorch.org/docs/2.15/generated/torch.Tensor.expand.html)。
 
-broadcast 的规则可以概括为：从最后一个轴向前对齐，两个尺寸相等，或者其中一个为 1，才可以广播。attention 中的 [B, 1, 1, S] key mask 可以广播到 [B, H, T, S]；[B, T] 则不能在所有情形下自动变成你想要的形状，最好显式写成 [B, 1, 1, T]。
+broadcast 的规则可以概括为：从最后一个轴向前对齐，两个尺寸相等，或者其中一个为 1，才可以广播。attention 中的 [B, 1, 1, S] key mask 可以广播到 [B, H, T, S]；[B, T] 则不能在所有情形下自动变成你想要的形状，最好显式写成 [B, 1, 1, T]。更完整的维度对齐规则见 [PyTorch Broadcasting Semantics](https://docs.pytorch.org/docs/2.15/notes/broadcasting.html)。
 
 ### 4.2.5 gather 表达“每行取一个类别”
 
 给定 log_probs [B, T, V] 和 labels [B, T]，想取每个位置对应标签的 log probability，正确的索引张量要增加最后一维：
 
 ~~~python
-log_probs = torch.randn(2, 4, 100).log_softmax(dim=-1)
-labels = torch.randint(0, 100, (2, 4))
+import torch
+
+log_probs = torch.tensor([
+    [[-0.6931, -1.2040, -1.6094]],
+    [[-1.6094, -0.6931, -1.2040]],
+])
+labels = torch.tensor([[0], [2]])
 
 selected = log_probs.gather(
     dim=-1,
     index=labels.unsqueeze(-1),
 ).squeeze(-1)
-# selected: [B, T]
+# selected: [[-0.6931], [-1.2040]]，shape [2, 1]
 ~~~
 
-gather 的 index 必须和输入在非索引轴上相容，index 的 dtype 必须是 long。labels 中的 -100 不能直接拿来 gather，因为它不是一个有效的词表索引；正确做法是先把无效位置替换成 0，再用 mask 清除对应结果。这个细节会在 DPO 和 sequence log probability 中反复出现。
+> 代码状态：静态审阅，未运行（2026-11-05）。
+
+第一个位置从词表索引 0 取出 −0.6931，第二个位置从索引 2 取出 −1.2040。这里的 index shape 是 [2, 1, 1]，在 batch 和时间轴上与输入相容，最后一轴只要求出一个类别。PyTorch 要求 index 使用 long，且 index 的非索引轴不能超过输入对应维度；详见 [torch.gather 2.15 文档](https://docs.pytorch.org/docs/2.15/generated/torch.gather.html)。labels 中的 −100 不能直接拿来 gather，因为它不是有效词表索引；应先替换成安全索引，再用 mask 清除对应结果。这个细节会在 DPO 和 sequence log probability 中反复出现。
 
 ## 4.3 Python：先把数据处理写成可追溯的程序
 
@@ -216,10 +233,11 @@ def _text_key(obj: dict[str, Any]) -> str | None:
 
 def analyze_jsonl(path: str) -> dict[str, Any]:
     total_lines = 0
-    valid_records = 0
+    json_object_records = 0
+    usable_text_records = 0
     malformed_lines = 0
     non_object_lines = 0
-    missing = Counter()
+    invalid_or_empty_fields = Counter()
     lengths: list[int] = []
     seen: set[str] = set()
     duplicate_records = 0
@@ -239,15 +257,16 @@ def analyze_jsonl(path: str) -> dict[str, Any]:
                 non_object_lines += 1
                 continue
 
-            valid_records += 1
+            json_object_records += 1
             for key in ("prompt", "response"):
                 value = obj.get(key)
                 if not isinstance(value, str) or not value.strip():
-                    missing[key] += 1
+                    invalid_or_empty_fields[key] += 1
 
             text = _text_key(obj)
             if text is None:
                 continue
+            usable_text_records += 1
             lengths.append(len(text))
             digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
             if digest in seen:
@@ -257,23 +276,28 @@ def analyze_jsonl(path: str) -> dict[str, Any]:
 
     return {
         "total_lines": total_lines,
-        "valid_records": valid_records,
+        "json_object_records": json_object_records,
+        "usable_text_records": usable_text_records,
         "malformed_lines": malformed_lines,
         "non_object_lines": non_object_lines,
-        "missing": dict(missing),
+        "invalid_or_empty_fields": dict(invalid_or_empty_fields),
         "duplicate_records": duplicate_records,
-        "char_length_mean": mean(lengths) if lengths else 0.0,
-        "char_length_median": median(lengths) if lengths else 0.0,
+        "char_length_mean": mean(lengths) if lengths else None,
+        "char_length_median": median(lengths) if lengths else None,
     }
 ~~~
 
-这里的 digest 只是为了减少内存占用和避免把完整文本暴露在日志中。重复统计只针对 prompt 和 response 都有效的记录；字段缺失样本会单独进入 missing，而不会因为都映射成空字符串而互相误报。digest 仍然只代表“规范化规则下的精确重复”，不代表语义重复，也不代表样本已经通过质量审核。若 prompt 前后空格、模板版本和系统消息会影响训练，规范化规则必须在数据说明中记录。
+> 代码状态：已验证（2026-11-06；Python 3.12.9；仅标准库）。
+
+取三行输入：第一、二行都为 `{"prompt":"hi","response":"ok"}`，第三行为非法 JSON `{bad`。本例得到 total_lines=3、json_object_records=2、usable_text_records=2、malformed_lines=1、duplicate_records=1；两条可用拼接文本都是 `hi\nok`，字符数均为 5，因此均值和中位数都是 5。这个结果只说明 JSON 语法、字段可用性和精确重复，不说明两条记录的语义质量。
+
+这里的 digest 只是为了减少内存占用和避免把完整文本暴露在日志中。重复统计只针对 prompt 和 response 都有效的记录；缺字段、空字符串或非字符串值会单独计入 `invalid_or_empty_fields`，不会因为都映射成空字符串而互相误报。没有可用文本时，长度均值和中位数返回 `None`，避免把“没有样本”误读成长度为零。`duplicate_records` 表示字段拼接后的文本产生相同 SHA-256 摘要；这是实用的去重指纹，不检测语义相似，也不代表样本已经通过质量审核。若 prompt 前后空格、模板版本和系统消息会影响训练，规范化规则必须在数据说明中记录。
 
 ### 4.3.2 数据结构题要把抽象结构连回模型系统
 
 哈希表、堆、队列和排序不是与大模型无关的基础题。它们分别对应 token 统计、Top-K 候选、生成队列、检索结果合并和 batch 调度。重要的不是在每个题目里强行套一个模型名词，而是能识别数据结构真正解决的约束。
 
-例如，计算频率最高的 k 个 token 或字符串，可以先统计，再用大小为 k 的堆保持候选。下面的实现对频率相同时使用字典序，便于测试和复现：
+例如，计算频率最高的 k 个 token 或字符串，可以先统计，再用大小为 k 的堆保持候选。Python 官方文档说明 `heapq.nsmallest` 按 key 升序返回最小的 n 项；当 n 较小时通常比完整排序更合适。此处通过负频数把“高频优先”转成升序，再用字符串打破平局，见 [Python 3.15 heapq.nsmallest 文档](https://docs.python.org/3.15/library/heapq.html#heapq.nsmallest)。下面的实现对频率相同时使用字典序，便于测试和复现：
 
 ~~~python
 from collections import Counter
@@ -290,7 +314,15 @@ def top_k_frequent(items: list[str], k: int) -> list[tuple[str, int]]:
         counts.items(),
         key=lambda item: (-item[1], item[0]),
     )
+
+
+example_top_k = top_k_frequent(["a", "b", "a", "c", "b", "a"], k=2)
+# [("a", 3), ("b", 2)]
 ~~~
+
+> 代码状态：静态审阅，未运行（2026-11-05）。
+
+取输入 `a, b, a, c, b, a`，计数后得到 `a:3, b:2, c:1`。当 k=2 时结果是 `[('a', 3), ('b', 2)]`；第三个元素不会进入候选。字典序只在频率相同时打破平局，例如 `b` 和 `c` 同为 2 时 `b` 排在前面。这个例子把计数与保留 k 个候选分开；当 k 接近不同元素数 m 时，全量排序可能更简单。
 
 假设输入长度为 n，不同元素数为 m。计数是 O(n)，堆选择是 O(m log k)，结果排序已经由 nsmallest 的 key 约定确定。若 k 接近 m，完整排序 O(m log m) 可能更简单；复杂度分析不是为了背一个最优答案，而是为了让实现选择与输入规模相称。
 
@@ -321,7 +353,11 @@ def iter_jsonl(path: str) -> Iterator[dict[str, Any]]:
             yield value
 ~~~
 
+> 代码状态：静态审阅，未运行（2026-11-05）。
+
 这里选择在遇到坏行时抛出异常，而不是静默跳过，是因为数据集构建和线上日志分析的责任不同。离线探索可以收集坏行继续跑，发布训练集前则通常应该让数据质量问题显式失败。一个好的答案会先说明场景，再选择错误策略。
+
+把每条记录的 payload 理想化为 1 MiB，1000 条全量加载至少保留约 1000 MiB（约 0.98 GiB）的文本载荷，尚未计入 Python 对象和列表开销；逐条生成时，读取端一次只交出当前记录，载荷工作集约为一条记录加消费端状态。生成器减少的是峰值驻留数据，不减少必须解析的 1000 条总工作量。
 
 ## 4.4 自回归语言模型损失：先对齐，再求概率
 
@@ -333,7 +369,7 @@ def iter_jsonl(path: str) -> Iterator[dict[str, Any]]:
 <bos> 机器 学习 很 有趣
 ~~~
 
-在 teacher forcing 训练中，模型读到 <bos> 后预测“机器”，读到“机器”后预测“学习”，以此类推。若把输入 token 记为 x_0 到 x_{T-1}，训练目标是：
+在 teacher forcing 训练中，模型读到 `<bos>` 后预测“机器”，读到“机器”后预测“学习”，以此类推。若把输入 token 记为 x_0 到 x_{T-1}，训练目标是：
 
 ~~~math
 \mathcal{L}(\theta)
@@ -349,11 +385,13 @@ def iter_jsonl(path: str) -> Iterator[dict[str, Any]]:
 
 | 模型读取的位置 | 它应该预测的目标 |
 | --- | --- |
-| <bos> | 机器 |
+| `<bos>` | 机器 |
 | 机器 | 学习 |
 | 学习 | 很 |
 | 很 | 有趣 |
 | 有趣 | 不参与本条序列的 next-token loss |
+
+用最小二分类例子核对一次损失：令序列为 `<bos>, A, B`，第一个位置的 logits 为 `[2, 0]`，目标 A 对应类别 0；第二个位置的 logits 为 `[0, 2]`，目标 B 对应类别 1。两处正确类别的概率都是 `e²/(e²+1)≈0.8808`，所以每处负对数概率是 `−log(0.8808)≈0.1269`，平均损失仍约为 0.1269。这个结果依赖输入和目标错开一位；若拿位置 0 的 logits 去对齐 `<bos>`，算出的值可能仍然有限，却对应了错误任务。
 
 如果训练数据已经单独准备好了 next-token labels，就不能再次 shift。代码本身无法猜测 labels 的约定，所以必须把“labels 是原序列还是已经错位的目标”写入接口。
 
@@ -375,6 +413,8 @@ padding token 在 batch 对齐时出现，它通常不应贡献 loss；prompt to
 ### 4.4.3 一个带边界检查的实现
 
 下面的实现假定 labels 是与输入序列等长的原始 token 序列，-100 表示不计入损失。它在计算前检查 rank、dtype、词表范围，并在整批没有有效目标时返回带梯度的零，而不是让 mean reduction 产生 NaN。
+
+实现复用本章前面的 `require_logits_and_labels` 检查函数，因此代码块需要与 §4.2.2 一起阅读。
 
 ~~~python
 from __future__ import annotations
@@ -412,9 +452,17 @@ def causal_lm_loss(
         ignore_index=ignore_index,
     ).view_as(shift_labels)
     return per_token.masked_select(valid).mean()
+
+
+example_logits = torch.tensor([[[2.0, 0.0], [0.0, 2.0], [0.0, 0.0]]])
+example_labels = torch.tensor([[1, 0, 1]])
+example_loss = causal_lm_loss(example_logits, example_labels)
+# approximately 0.1269
 ~~~
 
-这里使用 reshape 而不是直接对 permute 后的张量 view，是为了避免把连续性假设藏在调用者身上。F.cross_entropy 接收 [N, C] 的分类输入，所以 [B, T-1, V] 要展平为 [B(T-1), V]；类别标签则展平为 [B(T-1)]。
+> 代码状态：静态审阅，未运行（2026-11-05）；依赖 §4.2.2 的 require_logits_and_labels。
+
+这里使用 reshape 而不是直接对 permute 后的张量 view，是为了避免把连续性假设藏在调用者身上。F.cross_entropy 接收 [N, C] 的分类输入，所以 [B, T-1, V] 要展平为 [B(T-1), V]；类别标签则展平为 [B(T-1)]。权重、ignore_index 与 reduction 的接口语义见 [PyTorch 2.15 cross_entropy 文档](https://docs.pytorch.org/docs/2.15/generated/torch.nn.functional.cross_entropy.html)。
 
 ### 4.4.4 loss 能下降，不代表目标正确
 
@@ -428,6 +476,8 @@ def causal_lm_loss(
 极小数据集过拟合是一个很有用的诊断，但它只能证明梯度路径在这组数据上能工作，不能证明大规模训练的泛化和数据质量。它与真实验证集是两种不同的证据。
 
 ## 4.5 Mask：先规定语义，再规定形状
+
+上一节的 loss mask 决定哪些目标 token 参与监督；这里的 causal/key mask 决定模型计算某个位置时能读取哪些 token。两者都叫 mask，却作用在不同阶段，不能因为 shape 相似就互换。
 
 ### 4.5.1 causal mask 的含义
 
@@ -464,7 +514,15 @@ def make_causal_mask(
     )[:, None]
     key_positions = torch.arange(key_len, device=device)[None, :]
     return key_positions <= query_positions
+
+
+example_mask = make_causal_mask(3)
+# [[True, False, False], [True, True, False], [True, True, True]]
 ~~~
+
+> 代码状态：静态审阅，未运行（2026-11-05）。
+
+当 T=3 且 True 表示可见时，mask 是 `[[1,0,0],[1,1,0],[1,1,1]]`：第 0 行只能看位置 0，第 1 行可以看 0 和 1，第 2 行可以看全部三个位置。若把上三角误设为 True，第一行就会读到未来 token；输出 shape 仍然正确，因此需要检查矩阵语义而不只检查 shape。
 
 当 query 是带历史 cache 的新 token 时，query 的绝对位置不再是 0 到 query_len-1，因此需要把历史长度传给 past_len。比如 past_len=4、query_len=1、key_len=5 时，唯一的 query 可以访问 0 到 4 的全部 key。忽略这个 offset 会让增量解码的新 token 看不到一部分合法历史。若 key 还包含未来位置，仍需保证 key_len 与 cache 状态一致。
 
@@ -480,6 +538,8 @@ def make_causal_mask(
 
 这也是为什么“attention mask 是一个布尔矩阵”这个说法不够完整。必须说明它控制 query 还是 key，以及 True 的含义。
 
+例如短序列 `[a,b,pad]` 的 key mask 是 `[1,1,0]`。它阻止有效 query 读取第三个位置；但第三个位置作为 padding query 时仍可能对前两个合法 key 求注意力。若两个 value 为 `[0]` 和 `[2]` 且权重各 0.5，该 query 的输出是 `[1]`，不是零。因此要用 query mask 清零或在下游完全忽略这个位置。
+
 ### 4.5.3 手写 attention：适合解释，不一定适合部署
 
 scaled dot-product attention 的分数和输出为：
@@ -489,11 +549,13 @@ S = \frac{QK^\mathsf{T}}{\sqrt{d}}
 ~~~
 
 ~~~math
-\operatorname{Attention}(Q,K,V)
-= \operatorname{softmax}(S + A)V
+\mathrm{Attention}(Q,K,V)
+= \mathrm{softmax}(S + A)V
 ~~~
 
 Q 的形状是 [B, H, T, d]，K 和 V 的 key/value 长度可以是 S，A 是加性 mask；若使用布尔 keep mask，则被屏蔽位置在实现中填入一个足够小的值。除以 sqrt(d) 是为了抑制点积随维度增大而变得过大的趋势，使 softmax 不至于过早饱和。
+
+手算一个 query：令 d=2，q=[1,0]，两行 key 为 k₁=[1,0]、k₂=[0,1]，对应 value 为 v₁=[2,0]、v₂=[0,4]，且两个 key 都可见。未缩放点积为 `[1,0]`，除以 `sqrt(2)` 后分数约为 `[0.7071,0]`；softmax 权重约为 `[0.6698,0.3302]`，输出为 `0.6698·[2,0]+0.3302·[0,4]≈[1.3396,1.3208]`。权重偏向第一个 value，但第二个 value 仍贡献输出。原始 Transformer 论文给出这一缩放点积注意力结构；本例是便于复算的构造输入，见 [Attention Is All You Need v7](https://arxiv.org/abs/1706.03762v7)。
 
 下面是一个便于在白板上解释的版本。它把 softmax 的归一化放到 float32 中，减少低精度下的溢出风险；生产代码通常优先使用框架提供的 scaled dot-product attention，因为融合实现可以避免显式存储完整的 [B, H, T, S] 分数矩阵。
 
@@ -513,6 +575,10 @@ def manual_attention(
 ) -> torch.Tensor:
     if q.ndim != 4 or k.ndim != 4 or v.ndim != 4:
         raise ValueError("q, k, v must have shape [B, H, length, head_dim]")
+    if q.size(-2) == 0 or k.size(-2) == 0 or q.size(-1) == 0 or v.size(-1) == 0:
+        raise ValueError("query, key, and value dimensions must be non-empty")
+    if q.size(0) == 0 or q.size(1) == 0:
+        raise ValueError("batch and head dimensions must be non-empty")
     if q.shape[0] != k.shape[0] or q.shape[0] != v.shape[0]:
         raise ValueError("batch dimensions disagree")
     if q.shape[1] != k.shape[1] or k.shape[1] != v.shape[1]:
@@ -551,15 +617,28 @@ def manual_attention(
 
     weights = F.softmax(scores.float(), dim=-1).to(dtype=v.dtype)
     return torch.matmul(weights, v)
+
+
+example_q = torch.tensor([[[[1.0, 0.0]]]])
+example_k = torch.tensor([[[[1.0, 0.0], [0.0, 1.0]]]])
+example_v = torch.tensor([[[[2.0, 0.0], [0.0, 4.0]]]])
+example_output = manual_attention(example_q, example_k, example_v)
+# approximately [[[[1.3396, 1.3208]]]]
 ~~~
+
+> 代码状态：静态审阅，未运行（2026-11-05）。
 
 如果一整行 key 都被屏蔽，softmax 的分母可能变成 0，结果出现 NaN。用 -1e9 替代 -inf 并不能从根本上解决“整行没有合法 key”的逻辑错误；在 fp16 中，常量的表示范围也需要考虑。更可靠的做法是保证每个有效 query 至少有一个合法 key，并对 padded query 单独处理。
 
 ### 4.5.4 使用 PyTorch 的融合算子
 
-当前 PyTorch 提供 torch.nn.functional.scaled_dot_product_attention。它可以根据 device、dtype、输入规模和后端选择不同实现，并可能使用 FlashAttention 等融合路径。调用时仍要确认布尔 mask 的语义和版本行为，不能因为函数名相同就跳过契约。
+PyTorch 2.15 的 `scaled_dot_product_attention` 文档将该 API 标为 beta，并说明后端会按输入和设备选择。布尔 `attn_mask` 中 True 表示该位置参与注意力，语义与 `MultiheadAttention` 的 `key_padding_mask` 相反；mask 还必须能广播到 attention weight 的形状。`is_causal=True` 时不能同时传非空 `attn_mask`；非方形 causal bias 按左上角对齐。因此带 cache 的矩形 query/key 通常应显式构造与 cache 位置一致的 keep mask，并设置 `is_causal=False`。这些都是版本相关的接口契约，见 [PyTorch 2.15 SDPA 文档](https://docs.pytorch.org/docs/2.15/generated/torch.nn.functional.scaled_dot_product_attention.html)。
 
 ~~~python
+import torch
+import torch.nn.functional as F
+
+
 def fused_attention(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -576,7 +655,9 @@ def fused_attention(
     )
 ~~~
 
-如果使用 is_causal=True，就不应再传一个相互冲突的 attn_mask；如果 query 和 key 长度不同，还应确认该版本对非方形 causal mask 的定义。面试中的简化实现用于表达算法，工程实现则要以当前框架文档、profile 结果和回归测试为准。
+> 代码状态：静态审阅，未运行（2026-11-05）。
+
+布尔 keep mask 可以直接作为这里的 `attn_mask`，因为在该 API 中 True 表示保留位置。代码只展示 mask 已经按 query/key 位置正确构造的情况；非方形 decode 的对齐方式不能凭 shape 猜测。不同后端的浮点运算顺序可能带来小数差异，因此 reference 比较需按 dtype 与后端设置容差；性能也要在目标 PyTorch 版本和设备上测量。
 
 ## 4.6 Multi-Head Attention：从线性投影到轴的合并
 
@@ -599,7 +680,11 @@ def fused_attention(
 
 拆分本身不产生新的参数；参数来自 q、k、v 和输出投影。真正的成本主要由投影矩阵、attention 分数和 KV cache 共同决定。
 
+例如 D=8、H=2，则每个 head 的 d=D/H=4。输入 `[1,3,8]` 经投影后仍为 `[1,3,8]`，reshape 成 `[1,3,2,4]`，转置得到 `[1,2,3,4]`；合并时回到 `[1,3,8]`。轴的数值乘积保持不变：`3×8 = 2×3×4`。这一步只是重排同一批表示，不会凭空增加信息。原始 Transformer 论文采用多头注意力作为核心结构之一，见 [Attention Is All You Need v7](https://arxiv.org/abs/1706.03762v7)。
+
 ### 4.6.2 一个最小但完整的实现
+
+下面的类依赖前文定义的 `manual_attention`；除这一调用外，投影、拆头和合头都包含在此代码块中。decoder 场景还必须显式传入 causal keep mask。
 
 ~~~python
 from __future__ import annotations
@@ -655,7 +740,11 @@ class MultiHeadAttention(nn.Module):
         return self.o_proj(self._merge_heads(attended))
 ~~~
 
+> 代码状态：静态审阅，未运行（2026-11-05）；依赖前文 manual_attention，decoder 调用必须显式传 causal mask。
+
 这段实现先保证每一个轴都能解释，再谈优化。它没有 dropout、RoPE、cache、GQA 和 FlashAttention，因此不能直接当作生产 decoder。这样的限制反而适合教学：基础实现的边界明确，后续每一项优化都可以问“它改变了哪个轴、哪个存储、哪个计算阶段”。
+
+这个模块本身是非因果 attention：`keep_mask=None` 时每个位置都能读取同一序列中的其他位置。把它用于 decoder 时，调用方必须传入 causal keep mask；否则未来 token 会泄漏到当前输出。encoder 等双向场景则可以按任务保留全量可见性。
 
 ### 4.6.3 GQA 和 MQA 改变的是 K/V 的头数
 
@@ -694,11 +783,14 @@ R(\theta_i)
 
 它的一个重要性质是，旋转后 q 与 k 的内积包含相对位置信息，而不是简单地把一个位置向量加到 hidden 上。不同实现对偶数/奇数维的排列可能不同，代码必须和 checkpoint 的训练约定一致。
 
+取 head_dim=2、base=10000、位置 i=1，则唯一频率为 `10000^0=1`，角度是 1 弧度。向量 q=[1,0] 旋转后成为 `[cos(1), sin(1)]≈[0.5403,0.8415]`。这个数值只展示一个二维子空间的一次旋转；模型中的各维使用不同频率，实际 checkpoint 还要求配对顺序一致。RoPE 的方法定义见 [RoFormer v5](https://arxiv.org/abs/2104.09864v5)。
+
 下面使用“前半维与后半维配对”的教学约定：
 
 ~~~python
 from __future__ import annotations
 
+import math
 import torch
 
 
@@ -710,7 +802,7 @@ def build_rope_cache(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     if max_seq_len < 0 or head_dim <= 0 or head_dim % 2:
         raise ValueError("max_seq_len must be non-negative and head_dim even")
-    if base <= 0 or not torch.isfinite(torch.tensor(base)):
+    if not math.isfinite(base) or base <= 0:
         raise ValueError("base must be a finite positive number")
 
     indices = torch.arange(
@@ -745,7 +837,15 @@ def apply_rope(
 ) -> torch.Tensor:
     if x.ndim != 4:
         raise ValueError("x must have shape [B, H, T, d]")
+    if cos.shape != sin.shape or cos.ndim != 4 or cos.shape[:2] != (1, 1):
+        raise ValueError("cos and sin must share shape [1, 1, max_seq_len, d]")
+    if cos.size(-1) != x.size(-1):
+        raise ValueError("rope cache head_dim must match x")
+    if cos.device != x.device or sin.device != x.device:
+        raise ValueError("x and rope cache must be on the same device")
     if position_ids is None:
+        if x.size(-2) > cos.size(2):
+            raise ValueError("rope cache is shorter than the input sequence")
         selected_cos = cos[:, :, : x.size(-2), :]
         selected_sin = sin[:, :, : x.size(-2), :]
     else:
@@ -753,16 +853,31 @@ def apply_rope(
             position_ids.ndim != 1
             or position_ids.numel() != x.size(-2)
             or position_ids.dtype != torch.long
-            or position_ids.device != cos.device
+            or position_ids.device != x.device
         ):
             raise ValueError("position_ids must have shape [T]")
+        if bool((position_ids < 0).any()) or bool((position_ids >= cos.size(2)).any()):
+            raise ValueError("position_ids must be within the rope cache")
         selected_cos = cos.index_select(2, position_ids)
         selected_sin = sin.index_select(2, position_ids)
 
     x_float = x.float()
     result = x_float * selected_cos + _rotate_half(x_float) * selected_sin
     return result.to(dtype=x.dtype)
+
+
+example_x = torch.tensor([[[[1.0, 0.0]]]])
+example_cos, example_sin = build_rope_cache(2, 2)
+example_rotated = apply_rope(
+    example_x,
+    example_cos,
+    example_sin,
+    position_ids=torch.tensor([1]),
+)
+# approximately [[[[0.5403, 0.8415]]]]
 ~~~
+
+> 代码状态：静态审阅，未运行（2026-11-05）。
 
 如果增量解码已经生成了 past_len 个 token，新 token 的 position_ids 应从 past_len 开始，而不是每一步重新从 0 开始。已经写入 cache 的 k 不应在下一步再次旋转；它们已经带着自己的绝对位置。这个错误有时不会造成 shape 报错，却会让长序列的质量逐渐下降，因此必须用“全量前向”和“逐 token cache 前向”做数值对齐测试。
 
@@ -773,6 +888,8 @@ def apply_rope(
 在 coding 题中，先实现与配置一致的短序列版本；若讨论长上下文，要把“模型能接收更长输入”和“在更长输入上保持任务能力”分开验证。代码能索引到第 100000 个位置，只能证明索引和内存路径存在，不能证明模型在该位置理解证据。
 
 ## 4.8 采样：从 logits 到下一个 token
+
+前面的 attention 与位置计算形成每个位置的 logits；生成时，模型还要把最后一个位置的 logits 转成概率、截断候选并选择下一个 token。这里重点是采样分布的语义和每一步要维护的状态。
 
 ### 4.8.1 logits、probability 和 log probability
 
@@ -787,12 +904,14 @@ p_i = \frac{\exp(z_i)}{\sum_j \exp(z_j)}
 ~~~math
 p_i(T)
 =
-\operatorname{softmax}(z_i / T)
+\mathrm{softmax}(z_i / T)
 ~~~
 
 当 T 增大，分布通常变平；当 T 减小时，分布通常更集中。T = 0 在工程实现中通常作为 greedy argmax 的特殊分支，而不是把除法真的执行。
 
-top-k 保留固定数量的候选；top-p 按排序后的累计概率保留最小候选集合。它们都是对分布支持集的截断，不能改变已经被模型赋予的候选排序之外的事实。
+top-k 保留固定数量的候选；top-p 按排序后的累计概率保留最小候选集合。它们只筛选候选，不改变保留项之间的 logit 顺序，也不保证采出的内容真实或高质量。
+
+取 logits `[2,1,0]`，减去最大值后是 `[0,−1,−2]`，指数约为 `[1,0.3679,0.1353]`，归一化得到概率 `[0.665,0.245,0.090]`。temperature=2 时缩放 logits 得 `[1,0.5,0]`，稳定 softmax 约为 `[0.506,0.307,0.186]`，分布变平。若原分布设 top_p=0.8，首个 token 的累计概率 0.665 尚未达到阈值，前两个的累计概率 0.910 越过阈值，因此保留前两个；被保留的最后一个 token 是越过阈值的那一个。
 
 ### 4.8.2 一个边界明确的 top-k/top-p 实现
 
@@ -811,6 +930,8 @@ def filter_logits(
 ) -> torch.Tensor:
     if logits.ndim != 2:
         raise ValueError("logits must have shape [B, V]")
+    if logits.size(0) == 0 or logits.size(1) == 0:
+        raise ValueError("logits must have a non-empty batch and vocabulary")
     if not logits.is_floating_point():
         raise TypeError("logits must be floating point")
     if bool(torch.isnan(logits).any()) or bool(torch.isposinf(logits).any()):
@@ -866,6 +987,10 @@ def sample_next_token(
 ) -> torch.Tensor:
     if logits.ndim != 2:
         raise ValueError("logits must have shape [B, V]")
+    if logits.size(0) == 0 or logits.size(1) == 0:
+        raise ValueError("logits must have a non-empty batch and vocabulary")
+    if not logits.is_floating_point():
+        raise TypeError("logits must be floating point")
     if not torch.isfinite(torch.tensor(temperature)) or temperature < 0:
         raise ValueError("temperature must be finite and non-negative")
     if temperature == 0:
@@ -883,7 +1008,15 @@ def sample_next_token(
         num_samples=1,
         generator=generator,
     ).squeeze(-1)
+
+
+example_logits = torch.tensor([[2.0, 1.0, 0.0]])
+example_filtered = filter_logits(example_logits, top_p=0.8)
+example_probs = F.softmax(example_filtered.float(), dim=-1)
+# approximately [[0.731, 0.269, 0.000]] after renormalization
 ~~~
+
+> 代码状态：静态审阅，未运行（2026-11-05）。
 
 实现 top-k 时使用 topk 返回的索引，而不是用“低于第 k 大值就屏蔽”的阈值，可以保证在并列 logits 时最多保留 k 个 token。top-p 的移位操作则保证至少保留累计概率阈值前的第一个 token。两者组合时先 top-k 还是先 top-p 会影响结果，代码应固定顺序并在配置中记录。
 
@@ -895,7 +1028,7 @@ greedy 选择最大 logit，对重复和确定性调试很有用，但不等于�
 
 ### 4.8.4 生成循环的状态比一个采样函数复杂
 
-真正的生成过程还要维护已生成序列、attention mask、KV cache、结束状态和最大长度。下面用接近 Hugging Face 风格的接口展示状态变化；不同模型返回对象的字段可能不同，因此它是教学骨架，不是对所有模型的通用适配器。
+真正的生成过程还要维护已生成序列、attention mask、KV cache、结束状态和最大长度。下面依赖 §4.8.2 的 `sample_next_token`，并用接近 Hugging Face 风格的接口展示状态变化；不同模型返回对象的字段可能不同，因此它是教学骨架，不是对所有模型的通用适配器。
 
 ~~~python
 from __future__ import annotations
@@ -914,9 +1047,12 @@ def generate(
     temperature: float = 1.0,
     top_k: int | None = None,
     top_p: float | None = None,
+    generator: torch.Generator | None = None,
 ) -> torch.Tensor:
     if input_ids.ndim != 2 or input_ids.dtype != torch.long:
         raise ValueError("input_ids must be a long tensor of shape [B, T]")
+    if input_ids.size(0) == 0 or input_ids.size(1) == 0:
+        raise ValueError("input_ids must have a non-empty batch and prompt")
     if max_new_tokens < 0:
         raise ValueError("max_new_tokens must be non-negative")
     if attention_mask is None:
@@ -956,6 +1092,7 @@ def generate(
             temperature=temperature,
             top_k=top_k,
             top_p=top_p,
+            generator=generator,
         )
 
         if eos_token_id is not None:
@@ -984,6 +1121,10 @@ def generate(
 
     return generated
 ~~~
+
+> 代码状态：静态审阅，未运行（2026-11-05）；教学骨架，依赖 §4.8.2 的 sample_next_token 和模型接口约定。
+
+用构造 token id 跟一次状态：prompt `[11,12]` 经过 prefill 后 cache 长度为 2；假设第一次采样得到 13，生成序列变成 `[11,12,13]`，mask 从 `[1,1]` 追加为 `[1,1,1]`。下一步只输入新 token 13，并让位置从 cache 长度 2 开始；假设此步采到 EOS=2，输出变成 `[11,12,13,2]` 并停止。这里的 token 是状态演示输入，不是模型实测输出。若提供 generator，它的 device 还必须与 logits 所在设备兼容。
 
 这段代码有一个重要的接口假设：当 past_key_values 不为空时，模型能够把完整 attention_mask 与单个新 token 配合使用，并且能够从 cache 推断新 token 的位置。调用者可以传入初始 padding mask；新生成 token 会追加 True。某些模型需要显式 position_ids，某些模型使用 cache_position；如果模型接口不同，必须按其实现调整。不能把“看起来像 Hugging Face 的参数”当成跨模型协议。
 
@@ -1022,8 +1163,14 @@ def sequence_log_probs(
         raise ValueError("logits must be [B, T, V] and labels must be [B, T]")
     if logits.shape[:2] != labels.shape:
         raise ValueError("logits and labels have different [B, T]")
+    if not logits.is_floating_point():
+        raise TypeError("logits must be floating point")
     if labels.dtype != torch.long:
         raise TypeError("labels must use torch.long")
+    if logits.device != labels.device:
+        raise ValueError("logits and labels must be on the same device")
+    if logits.size(0) == 0 or logits.size(-1) == 0:
+        raise ValueError("batch and vocabulary dimensions must be non-empty")
 
     shift_logits = logits[:, :-1, :]
     shift_labels = labels[:, 1:]
@@ -1050,9 +1197,19 @@ def sequence_log_probs(
         sums / counts.clamp_min(1),
         torch.zeros_like(sums),
     )
+
+
+example_logits = torch.tensor([[[1.3862944, 0.0], [0.0, 0.0], [0.0, 0.0]]])
+example_labels = torch.tensor([[1, 0, 1]])
+example_logp = sequence_log_probs(example_logits, example_labels)
+# example_logp is approximately [-0.9163] = log(0.8) + log(0.5)
 ~~~
 
+> 代码状态：静态审阅，未运行（2026-11-05）。
+
 总 log probability 会随着 completion 变长而更负。这个现象不是实现错误，而是乘积概率在 log 空间中的自然结果。若把总和改成平均值，长度偏置会改变，但“每个 token 的平均偏好”和“整段 completion 的概率偏好”也不再是同一个目标。选择哪一种，取决于训练目标、数据构造和既有代码库约定，不能为了让数字好看而临时决定。
+
+例如两个 completion token 的条件概率分别是 0.8 和 0.5，则对应 log probability 为 `ln(0.8)≈−0.2231`、`ln(0.5)≈−0.6931`，序列总和是 `−0.9163`，按长度平均是 `−0.4581`。总和对应两个条件概率相乘后的 log 值；平均值则是每 token 的平均分数，不能互换解释。
 
 ### 4.9.2 DPO 比较的是相对 reference 的偏好
 
@@ -1088,10 +1245,13 @@ r_\theta(x,y_r)
 
 beta 控制相对 reference 的偏好差异进入 sigmoid 的尺度。reference 的 log probability 在计算时通常不需要梯度；它不是“一个额外的 chosen 标签”，而是提供 policy 偏移的参照。
 
+这一目标来自对 KL 正则化奖励优化的重参数化推导；这里采用常见的单对偏好写法，不覆盖采样、reference 更新或偏好数据质量问题。方法推导与实验设定见 [Direct Preference Optimization v3](https://arxiv.org/abs/2305.18290v3)。作一个单对计算：policy 的 chosen/rejected logps 为 −1.2/−2.0，reference 为 −1.0/−1.5；两者 margin 分别是 0.8 和 0.5，差值 0.3。取 beta=0.1，sigmoid 输入是 0.03，损失为 `−ln(sigmoid(0.03))≈0.6782`。正 margin 差让损失略低于 `ln(2)≈0.6931`；这是单个合成样本的算术，不代表训练效果。
+
 ~~~python
 from __future__ import annotations
 
 import torch
+import math
 import torch.nn.functional as F
 
 
@@ -1103,8 +1263,8 @@ def dpo_loss(
     *,
     beta: float = 0.1,
 ) -> torch.Tensor:
-    if beta <= 0:
-        raise ValueError("beta must be positive")
+    if not math.isfinite(beta) or beta <= 0:
+        raise ValueError("beta must be finite and positive")
     tensors = (
         policy_chosen_logps,
         policy_rejected_logps,
@@ -1115,18 +1275,45 @@ def dpo_loss(
         raise ValueError("all sequence log-probability tensors must be [B]")
     if len({value.shape for value in tensors}) != 1:
         raise ValueError("chosen/rejected tensors must have equal batch shapes")
+    if policy_chosen_logps.numel() == 0:
+        raise ValueError("DPO batch must contain at least one preference pair")
+    if not all(value.is_floating_point() for value in tensors):
+        raise TypeError("all sequence log probabilities must be floating point")
+    if len({value.dtype for value in tensors}) != 1:
+        raise TypeError("all sequence log probabilities must share a dtype")
+    if len({value.device for value in tensors}) != 1:
+        raise ValueError("all sequence log probabilities must share a device")
+    if not all(bool(torch.isfinite(value).all()) for value in tensors):
+        raise ValueError("sequence log probabilities must be finite")
 
     policy_margin = policy_chosen_logps - policy_rejected_logps
-    reference_margin = reference_chosen_logps - reference_rejected_logps
+    reference_margin = (
+        reference_chosen_logps.detach() - reference_rejected_logps.detach()
+    )
     logits = beta * (policy_margin - reference_margin)
     return -F.logsigmoid(logits).mean()
+
+
+example_loss = dpo_loss(
+    torch.tensor([-1.2]),
+    torch.tensor([-2.0]),
+    torch.tensor([-1.0]),
+    torch.tensor([-1.5]),
+    beta=0.1,
+)
+# example_loss is approximately 0.6782
 ~~~
+
+> 代码状态：静态审阅，未运行（2026-11-05）。
 
 ### 4.9.3 prompt mask 是偏好数据的关键
 
 如果 chosen 和 rejected 共享同一个 prompt，比较 prompt 部分的 log probability在理想情况下会抵消；但真实 batch 中的模板、padding、截断和拼接方式可能不同，直接把整段序列相加会引入额外差异。更稳妥的做法是明确记录 completion 起点，只给 completion token 建立 loss mask。
 
 ~~~python
+import torch
+
+
 def mask_prompt_tokens(
     labels: torch.Tensor,
     prompt_lengths: torch.Tensor,
@@ -1135,6 +1322,8 @@ def mask_prompt_tokens(
 ) -> torch.Tensor:
     if labels.ndim != 2 or prompt_lengths.ndim != 1:
         raise ValueError("labels must be [B, T], prompt_lengths must be [B]")
+    if labels.dtype != torch.long:
+        raise TypeError("labels must use torch.long")
     if labels.size(0) != prompt_lengths.size(0):
         raise ValueError("batch dimensions disagree")
     if prompt_lengths.dtype != torch.long or prompt_lengths.device != labels.device:
@@ -1149,18 +1338,30 @@ def mask_prompt_tokens(
     )[None, :]
     prompt_mask = positions < prompt_lengths[:, None]
     return labels.masked_fill(prompt_mask, ignore_index)
+
+
+example_labels = torch.tensor([[10, 11, 20, 21]])
+example_lengths = torch.tensor([2])
+example_masked = mask_prompt_tokens(example_labels, example_lengths)
+# example_masked is [[-100, -100, 20, 21]]
 ~~~
+
+> 代码状态：静态审阅，未运行（2026-11-05）。
+
+例如 labels 为 `[10,11,20,21]`，prompt_lengths 为 2，则前两个 prompt token 被改成 `[-100,-100]`，completion 仍为 `[20,21]`。之后 shift 和 gather 只会把 completion 位置纳入序列分数；若 prompt 长度边界错一位，比较对象就改变了。
 
 一个偏好损失的调试样本至少应包含 prompt 长度、chosen/rejected completion 长度、有效 token 数、policy/reference 的四个 log probability，以及最终 margin。只记录最终 loss，很难判断问题来自模型、mask、长度、reference 还是 preference 数据。
 
 ## 4.10 归一化和 MLP：简单模块也有精确边界
+
+采样与 DPO 从输出分布讨论“模型给 token 多大分数”；现在回到生成这些 logits 的内部表示，检查归一化和门控 MLP 如何改变 hidden。它们的代码更短，但 shape、统计轴和参数形状仍需明确。
 
 ### 4.10.1 LayerNorm 和 RMSNorm 处理的对象不同
 
 对 hidden 维度上的向量 x，LayerNorm 会减去均值并除以标准差：
 
 ~~~math
-\operatorname{LN}(x)
+\mathrm{LN}(x)
 =
 \gamma
 \odot
@@ -1171,15 +1372,16 @@ def mask_prompt_tokens(
 RMSNorm 不减均值，只按均方根缩放：
 
 ~~~math
-\operatorname{RMSNorm}(x)
+\mathrm{RMSNorm}(x)
 =
 \gamma
 \odot
-\frac{x}
-\sqrt{\operatorname{mean}(x^2)+\epsilon}
+\frac{x}{\sqrt{\mathrm{mean}(x^2)+\epsilon}}
 ~~~
 
-其中 mu 和 sigma^2 分别是 x 在最后一个 hidden 维度上的均值和方差，gamma 是逐通道缩放参数，beta 是 LayerNorm 的逐通道偏置，epsilon 用于避免除零。RMSNorm 的计算路径更短，很多 decoder-only 架构采用它；这不表示它在所有任务和所有实现中都必然更好。归一化位置也重要，Pre-Norm 和 Post-Norm 会改变残差路径、梯度传播和稳定性。
+其中 mu 和 sigma^2 分别是 x 在最后一个 hidden 维度上的均值和方差，gamma 是逐通道缩放参数，beta 是 LayerNorm 的逐通道偏置，epsilon 用于避免除零。RMSNorm 不减均值的定义及其设计动机见 [RMSNorm v1](https://arxiv.org/abs/1910.07467v1)；这不表示它在所有任务和所有实现中都必然更好。归一化位置也重要，Pre-Norm 和 Post-Norm 会改变残差路径、梯度传播和稳定性。
+
+用 x=[1,3]、gamma=[1,1]、beta=[0,0] 做近似计算，并暂忽略很小的 epsilon。LayerNorm 的均值是 2、方差是 1，标准化结果为 `[-1,1]`。RMSNorm 的均方根是 `sqrt((1²+3²)/2)=sqrt(5)≈2.2361`，结果约为 `[0.4472,1.3416]`。二者输入相同，差异来自 RMSNorm 保留了非零均值；真实实现加上 epsilon 后末位会略变。
 
 ~~~python
 from __future__ import annotations
@@ -1197,14 +1399,23 @@ class RMSNorm(nn.Module):
         self.eps = eps
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if x.size(-1) != self.weight.numel():
-            raise ValueError("last dimension does not match hidden_size")
+        if x.ndim == 0 or x.size(-1) != self.weight.numel():
+            raise ValueError("x must have a hidden dimension matching hidden_size")
+        if not x.is_floating_point():
+            raise TypeError("x must be floating point")
         rms_inv = torch.rsqrt(
             x.float().pow(2).mean(dim=-1, keepdim=True) + self.eps
         ).to(dtype=x.dtype)
         weight = self.weight.to(dtype=x.dtype)
         return x * rms_inv * weight
+
+
+example_norm = RMSNorm(hidden_size=2)
+example_output = example_norm(torch.tensor([[1.0, 3.0]]))
+# approximately [[0.4472, 1.3416]] for eps=1e-6
 ~~~
+
+> 代码状态：已验证（2026-11-06；Python 3.12.9；PyTorch 2.12.0+cpu）。
 
 这里在 float32 中计算均方根，再转换回输入 dtype，是一种清晰的数值稳定取舍。生产内核可能采用更专门的累加和融合方式，但仍应满足“最后一维归一化、参数逐通道缩放、epsilon 防止除零”这三个语义。
 
@@ -1213,11 +1424,11 @@ class RMSNorm(nn.Module):
 一个常见的 gated MLP 先生成两支中间表示，一支作为门，一支作为被调制的值：
 
 ~~~math
-\operatorname{SwiGLU}(x)
+\mathrm{SwiGLU}(x)
 =
 W_{\mathrm{down}}
 \left(
-\operatorname{SiLU}(W_{\mathrm{gate}}x)
+\mathrm{SiLU}(W_{\mathrm{gate}}x)
 \odot
 (W_{\mathrm{up}}x)
 \right)
@@ -1244,11 +1455,29 @@ class SwiGLU(nn.Module):
         gate = F.silu(self.gate_proj(x))
         value = self.up_proj(x)
         return self.down_proj(gate * value)
+
+
+example_mlp = SwiGLU(hidden_size=2, intermediate_size=2)
+with torch.no_grad():
+    for projection in (
+        example_mlp.gate_proj,
+        example_mlp.up_proj,
+        example_mlp.down_proj,
+    ):
+        projection.weight.copy_(torch.eye(2))
+example_output = example_mlp(torch.tensor([[1.0, 2.0]]))
+# approximately [[0.7311, 3.5232]]
 ~~~
+
+> 代码状态：静态审阅，未运行（2026-11-05）。
+
+取 x=[1,2]，令 gate、up、down 三个投影都是二维单位矩阵，则 `gate=SiLU(x)≈[0.7311,1.7616]`，`value=[1,2]`，逐元素相乘得到约 `[0.7311,3.5232]`，down 投影保持该结果。第二维比单独的 SiLU(2) 大一倍，是因为它还乘上 value 的 2；门控支路确实调制了另一支，而不是只替换激活函数。
 
 中间维度不是一个可以随便照抄的常数。不同模型会为了保持参数量、硬件对齐或 checkpoint 兼容而使用不同的 intermediate_size。实现时应该从配置读出它，并在初始化时检查权重形状，而不是用“hidden size 的四倍”作为所有架构的真理。
 
 ## 4.11 Debug：把“这里错了”变成可验证的定位过程
+
+前面已经给出可手算的目标与一组最小模块；真实面试还会追问实现为何异常。调试的第一步不是换算子，而是从输入契约、状态、数值和观测结果中找出第一个违反不变量的位置。
 
 ### 4.11.1 先分类症状
 
@@ -1269,9 +1498,12 @@ class SwiGLU(nn.Module):
 
 ### 4.11.2 一个有问题的训练步骤
 
-下面的代码看起来像训练，但至少有五个需要确认的地方：
+下面保留一个故意不完整的反例，只用于识别省略的接口假设，不应作为训练实现运行：
 
 ~~~python
+import torch.nn.functional as F
+
+
 def broken_train_step(model, batch, optimizer):
     logits = model(batch["input_ids"])
     loss = F.cross_entropy(logits, batch["labels"])
@@ -1279,6 +1511,8 @@ def broken_train_step(model, batch, optimizer):
     optimizer.step()
     return loss.item()
 ~~~
+
+> 代码状态：故意不完整的反例，静态审阅，未运行（2026-11-05）。
 
 问题不在于它“少写了几行”，而在于每个省略都隐藏了假设：
 
@@ -1290,9 +1524,12 @@ def broken_train_step(model, batch, optimizer):
 - model 可能返回带有 logits 字段的对象，而不是裸 tensor。
 - 没有 model.train()，dropout 和 batch-dependent 行为可能处于错误模式。
 
-一个基础但契约更完整的版本是：
+下面是一个基础但契约更完整的训练版本；它是调用片段，依赖前文的 `causal_lm_loss`，并假定调用方提供 model、optimizer、batch 和目标 device：
 
 ~~~python
+import torch
+
+
 def train_step(
     model,
     batch: dict[str, torch.Tensor],
@@ -1312,6 +1549,8 @@ def train_step(
     return float(loss.detach().cpu())
 ~~~
 
+> 代码状态：静态审阅，未运行（2026-11-05）；调用片段，依赖 §4.4.3 的 causal_lm_loss。
+
 如果使用梯度累积，zero_grad 和 optimizer.step 的周期要改成累积周期，且每次 backward 前通常将 loss 除以 accumulation_steps。若使用梯度裁剪，要明确裁剪发生在 unscale 之后还是之前；若使用混合精度，还要按当前 PyTorch 版本的 amp 接口处理 scaler。一个“通用训练函数”若把这些策略全部隐藏，反而难以复核。
 
 ### 4.11.3 用不变量而不是 print 海量张量
@@ -1319,6 +1558,9 @@ def train_step(
 有效的 debug 输出应当围绕不变量：
 
 ~~~python
+import torch
+
+
 def check_training_batch(
     input_ids: torch.Tensor,
     labels: torch.Tensor,
@@ -1330,6 +1572,10 @@ def check_training_batch(
         raise ValueError("input_ids and labels must both be [B, T]")
     if input_ids.dtype != torch.long or labels.dtype != torch.long:
         raise TypeError("token ids and labels must be long")
+    if input_ids.device != labels.device:
+        raise ValueError("input_ids and labels must be on the same device")
+    if vocab_size <= 0:
+        raise ValueError("vocab_size must be positive")
     if input_ids.numel():
         if int(input_ids.min()) < 0 or int(input_ids.max()) >= vocab_size:
             raise ValueError("input_ids contain an invalid token id")
@@ -1341,6 +1587,8 @@ def check_training_batch(
         if int(active_labels.max()) >= vocab_size:
             raise ValueError("active labels exceed vocabulary size")
 ~~~
+
+> 代码状态：静态审阅，未运行（2026-11-05）。
 
 对整数 token id 检查 finite 没有意义；范围检查才是这里的不变量。更重要的是，检查应在数据进入模型的地方发生，而不是等 CUDA kernel 报错后才看最后一批数据。
 
@@ -1363,7 +1611,7 @@ def check_training_batch(
 直接计算 exp(x) 可能溢出。对每行减去最大值 m 不改变 softmax：
 
 ~~~math
-\operatorname{softmax}(x_i)
+\mathrm{softmax}(x_i)
 =
 \frac{\exp(x_i-m)}
 {\sum_j \exp(x_j-m)},
@@ -1374,9 +1622,16 @@ m=\max_j x_j
 在 PyTorch 中优先使用 torch.softmax、torch.log_softmax 和 torch.logsumexp，而不是把这几个操作拆成多个临时张量。若必须说明原理，可以写一个稳定的 log-softmax：
 
 ~~~python
+import torch
+
+
 def stable_log_softmax(x: torch.Tensor, dim: int = -1) -> torch.Tensor:
     return x - torch.logsumexp(x, dim=dim, keepdim=True)
 ~~~
+
+> 代码状态：静态审阅，未运行（2026-11-05）。
+
+取 logits `[1000,999,998]`，直接算指数会遇到很大的中间值。减去最大值 1000 后得到 `[0,−1,−2]`，指数约为 `[1,0.3679,0.1353]`，总和 1.5032，因此 softmax 约为 `[0.665,0.245,0.090]`。平移改变了数值尺度，却没有改变概率比例；这就是稳定形式避免溢出而保持语义的原因。
 
 log_softmax 比先 softmax 再 log 更稳定，因为后者可能先把很小的概率下溢为 0，再得到 -inf。DPO、交叉熵、语言模型评分都更适合在 log 空间中计算。
 
@@ -1391,11 +1646,16 @@ log_softmax 比先 softmax 再 log 更稳定，因为后者可能先把很小的
 3. 对输出和 loss 检查 isfinite。
 4. 对全 padding 的 query 明确规定输出和下游行为。
 
+若一行两个 key 都不合法，填 `[-inf,-inf]` 后 softmax 会得到 `[NaN,NaN]`；若填两个相同的有限最小值，softmax 反而得到 `[0.5,0.5]`。后者数值有限却仍把注意力平均分给两个非法位置。检查“至少有一个合法 key”必须发生在选择填充值之前。
+
 ### 4.12.3 NaN 排查要保留第一个异常点
 
-loss NaN 可能在很早的 logits、attention score 或梯度中产生，直到 reduction 后才被看见。可以在调试版本中加入：
+loss NaN 可能在很早的 logits、attention score 或梯度中产生，直到 reduction 后才被看见。下面的代码是依赖外部 `model`、`input_ids`、`labels` 和 `causal_lm_loss` 的排错片段；需要在能复现问题的调用上下文中使用：
 
 ~~~python
+import torch
+
+
 def require_finite(name: str, value: torch.Tensor) -> None:
     if not bool(torch.isfinite(value).all()):
         bad = (~torch.isfinite(value)).sum().item()
@@ -1411,7 +1671,11 @@ with torch.autograd.detect_anomaly():
     loss.backward()
 ~~~
 
+> 代码状态：静态审阅，未运行（2026-11-05）；排错片段，依赖调用方对象及 §4.4.3 的 causal_lm_loss。
+
 detect_anomaly 会显著增加开销，适合最小复现而不适合常规训练。排查时还要区分输入数据异常、学习率过高、梯度爆炸、混合精度溢出、非法 labels、全屏蔽 mask 和 inplace 操作破坏 autograd。用 torch.nan_to_num 把 NaN 隐藏起来通常不是修复，因为它会让错误继续传播并污染评估。
+
+例如检查向量 `[1.2, NaN, +inf]` 时，非有限元素数是 2；只记录“tensor 有 NaN”会漏掉同一张量里的无穷值。最小复现应同时保留首次出现的张量名、shape、dtype 和触发输入，才能定位数值在哪个阶段变坏。
 
 ### 4.12.4 混合精度改变的是数值路径，不是模型目标
 
@@ -1426,16 +1690,16 @@ autocast 可以让适合低精度的算子使用 fp16 或 bfloat16，同时让�
 标准 self-attention 要形成 [B, H, T, T] 的 score 矩阵，因此分数计算和临时存储都随 T 的平方增长：
 
 ~~~math
-\operatorname{work}_{\mathrm{score}}
+\mathrm{work}_{\mathrm{score}}
 \propto BHT^2d
 ~~~
 
 ~~~math
-\operatorname{memory}_{\mathrm{score}}
+\mathrm{memory}_{\mathrm{score}}
 \propto BHT^2
 ~~~
 
-在训练中还要保存反向传播需要的中间结果；在推理 decode 中，query 往往只有一个新 token，主要增长的是它访问历史 K/V 的长度。FlashAttention 一类融合算法的价值不只是“写得更快”，还在于避免把完整 score 和 probability 矩阵写回高带宽内存。
+固定 batch、head 数和 head_dim，把 T 从 1024 增到 2048，score 元素数的比例是 `(2048/1024)^2=4`；翻倍的序列长度会带来四倍的 score 矩阵规模。在训练中还要保存反向传播需要的中间结果；在推理 decode 中，query 往往只有一个新 token，主要增长的是它访问历史 K/V 的长度。FlashAttention 通过分块计算与在线归一化减少 HBM 读写和完整 score/probability 矩阵的物化；它改善的是数据移动与中间存储，不把标准全注意力的成对交互自动变成线性。方法及其 I/O 分析见 [FlashAttention 论文](https://arxiv.org/abs/2205.14135v2)。
 
 ### 4.13.2 KV cache 的估算
 
@@ -1457,7 +1721,9 @@ M_{\mathrm{KV}}
 
 这个估算没有包括 allocator 对齐、分页元数据、临时 workspace、beam 或并发请求的额外副本。它的用途是判断量级和比较 MHA/GQA/MQA，而不是代替实际 profile。
 
-例如，从 MHA 改成 GQA 时，H_kv 变小，KV cache 和内存读写压力可能显著下降；query head 仍然可以很多，模型质量和并行方式则需要单独评估。不要把“active parameters 较少”“KV head 较少”和“总模型参数较少”混成一个概念。
+例如 L=24、B=1、T=2048、H_kv=8、d=128，使用每元素 2 字节，则 cache 约为 `2×24×1×2048×8×128×2=201,326,592` 字节，即 192 MiB。若改成 H_kv=32 的 MHA，其余不变，约为 805,306,368 字节，即 768 MiB。这个四倍差异只来自 K/V 头数；实际占用还要加上分页元数据和运行时 workspace。
+
+例如，从 MHA 改成 GQA 时，H_kv 变小，KV cache 和内存读写压力可能显著下降；query head 仍然可以很多，模型质量和并行方式则需要单独评估。PagedAttention 借鉴虚拟内存分页，把逻辑 KV 块映射到非连续物理块，改善动态请求下的分配和共享；它管理 cache 的放置方式，不会改变上面的原始 K/V 元素计数公式，且需要块表等额外管理。机制见 [PagedAttention 论文](https://arxiv.org/abs/2309.06180v1)。不要把“active parameters 较少”“KV head 较少”和“总模型参数较少”混成一个概念。
 
 ### 4.13.3 不同的节省方式解决不同瓶颈
 
@@ -1475,6 +1741,9 @@ M_{\mathrm{KV}}
 下面是一个典型的逐 token 统计。labels 为 -100 的位置不参与分母：
 
 ~~~python
+import torch
+
+
 def masked_token_accuracy(
     predictions: torch.Tensor,
     labels: torch.Tensor,
@@ -1483,11 +1752,17 @@ def masked_token_accuracy(
 ) -> torch.Tensor:
     if predictions.shape != labels.shape:
         raise ValueError("predictions and labels must have the same shape")
+    if predictions.device != labels.device:
+        raise ValueError("predictions and labels must be on the same device")
     mask = labels.ne(ignore_index)
     correct = (predictions.eq(labels) & mask).sum()
     total = mask.sum()
     return correct.float() / total.clamp_min(1)
 ~~~
+
+> 代码状态：静态审阅，未运行（2026-11-05）。
+
+取 predictions `[1,0,0]`、labels `[1,2,-100]`，有效位置是前两个，其中一个预测正确，accuracy 为 `1/2=0.5`。忽略位置不进入分子也不进入分母；全 batch 没有有效标签时，当前实现按约定返回 0，因此汇总多个 batch 时应优先累加 correct 和 total，最后统一相除。
 
 相对于 Python 双重循环，这个版本把比较交给张量算子。它仍然需要说明“没有有效 token 时返回 0”只是一个约定，汇总整个数据集时更严谨的方式是累积 correct 和 total，最后再相除，而不是对每个 batch 的 accuracy 直接取平均。
 
@@ -1495,7 +1770,7 @@ def masked_token_accuracy(
 
 ### 4.14.1 train、eval、no_grad 的三个层次
 
-model.train() 和 model.eval() 是模块行为的切换，典型影响包括 dropout 和 batch normalization。torch.no_grad() 是暂时不记录梯度；torch.inference_mode() 是更强的推理上下文，进一步减少 autograd 的元数据开销。三者解决不同问题，不能相互替代。
+model.train() 和 model.eval() 是模块行为的切换，典型影响包括 dropout 和 batch normalization。torch.no_grad() 是暂时不记录梯度；torch.inference_mode() 是更强的推理上下文，进一步减少 autograd 的元数据开销，但创建的 inference tensor 有更严格的 autograd 使用限制。三者解决不同问题，不能相互替代；接口边界见 [PyTorch 2.15 inference_mode 文档](https://docs.pytorch.org/docs/2.15/generated/torch.autograd.grad_mode.inference_mode.html)。
 
 训练循环通常需要：
 
@@ -1509,6 +1784,10 @@ for batch in loader:
     optimizer.step()
 ~~~
 
+> 代码状态：静态审阅，未运行（2026-11-05）；训练片段，依赖 §4.4.3 的 causal_lm_loss 和外部对象。
+
+这段训练循环是片段，依赖前文定义的 `causal_lm_loss`，并假定调用方已准备 model、optimizer 和 loader。它展示每个优化步的状态顺序，不包含梯度累积、混合精度或 device 搬运。
+
 评估循环则需要：
 
 ~~~python
@@ -1518,6 +1797,10 @@ with torch.inference_mode():
         outputs = model(input_ids=batch["input_ids"])
         loss = causal_lm_loss(outputs.logits, batch["labels"])
 ~~~
+
+> 代码状态：静态审阅，未运行（2026-11-05）；评估片段，依赖 §4.4.3 的 causal_lm_loss 和外部对象。
+
+这段评估循环同样依赖 `causal_lm_loss` 以及外部的 model、validation_loader；它说明 eval 模式与关闭梯度记录要同时发生。若评估目标需要输入梯度，就不能使用这里的 inference_mode。
 
 忘记 eval 可能让同一输入在两次评估中得到不同 dropout 结果；忘记 inference_mode 则可能仍然为每个 batch 保留不需要的 autograd 状态。反过来，在需要计算输入梯度的解释性实验中，不能盲目使用 inference_mode。
 
@@ -1544,9 +1827,13 @@ def accumulated_step(
             optimizer.zero_grad(set_to_none=True)
 ~~~
 
-除以 accumulation_steps 是为了让累积梯度近似目标 batch 的平均梯度。这个教学循环还假定 `micro_batches` 的数量正好是 `accumulation_steps` 的整数倍；如果最后一组不足一个完整累积周期，调用方必须显式执行一次尾批次 `optimizer.step()`，或者丢弃并记录这组样本，不能静默留下未更新的梯度。若每个 micro-batch 的有效 token 数差异很大，按 batch 平均和按 token 平均并不等价；严格训练还要根据有效 token 数做全局归一化。这是一个容易被“代码能运行”掩盖的目标定义问题。
+> 代码状态：静态审阅，未运行（2026-11-05）；训练片段，依赖 §4.4.3 的 causal_lm_loss。
+
+例如两个等量 micro-batch 的梯度分别为 2 和 4，各自除以 2 后累积为 `1+2=3`，恰好等于二者平均。若两个 micro-batch 的有效 token 数不同，先各自平均再除以步数通常不等于所有有效 token 的全局平均，因此要按 token 数加权。这个教学循环还假定 `micro_batches` 的数量正好是 `accumulation_steps` 的整数倍；如果最后一组不足一个完整累积周期，调用方必须显式执行一次尾批次 `optimizer.step()`，或者丢弃并记录这组样本，不能静默留下未更新的梯度。
 
 ## 4.15 评估小模块：正确性要有参考答案
+
+调试和优化都需要可比较的正确性基线。测试不必一开始就跑大模型；先用形状不变量、手算结果和小尺寸 reference 固定“正确”是什么意思，再讨论融合实现和属性测试。
 
 ### 4.15.1 先测形状和不变量
 
@@ -1568,6 +1855,10 @@ def accumulated_step(
 对 attention，可以用 manual_attention 作为小尺寸 reference，再和融合算子比较：
 
 ~~~python
+import torch
+import torch.nn.functional as F
+
+
 def compare_attention_implementations(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -1591,6 +1882,8 @@ def compare_attention_implementations(
     )
 ~~~
 
+> 代码状态：静态审阅，未运行（2026-11-05）；依赖前文 manual_attention 和 PyTorch SDPA。
+
 容差不是越大越好。它应当和 dtype、后端、序列长度及运算顺序有关。fp32 reference 的误差通常可以更紧；低精度和融合 kernel 需要合理放宽，但不能因为“不相等”就无限放宽。测试说明里应记录为什么选择这个容差。
 
 ### 4.15.3 属性测试比单个示例更有力量
@@ -1602,6 +1895,8 @@ def compare_attention_implementations(
 ### 4.15.4 极小数据的手算测试
 
 在损失测试中，可以构造一个只有两个有效目标的 batch，手动计算两个负对数概率的平均值，再与实现比较。在采样测试中，可以把一个 token 的 logit 设置得远高于其他 token，验证 temperature=0 一定返回它；把 top_p 设置为很小的值，验证最可能 token 仍被保留。
+
+例如复用 §4.4.1 的二分类 logits `[2,0]` 和 `[0,2]`，目标类别分别为 0、1。每个目标概率约为 0.8808，两个 NLL 都约为 0.1269，因此 batch mean 也约为 0.1269；reference test 应比较这个值及 shift 后对应的目标位置，而不只检查 loss 是有限数。
 
 手算测试的目的不是覆盖所有浮点细节，而是把“这个函数究竟算什么”固定下来。随机测试则补充不同 batch、长度、padding 和 dtype 的形状组合。
 
@@ -1620,6 +1915,8 @@ def compare_attention_implementations(
 7. 最后才检查 fused kernel、dtype 和随机种子。
 
 如果第 4 步发现 position_id 每次都是 0，修复后全量与 cache logits 对齐，说明根因是位置状态；如果 logits 已经对齐而字符串不同，再检查采样 generator 和 EOS 处理。把根因、诱因和表现分开，才能避免把所有问题都归结为“cache 有 bug”。
+
+具体看位置：prompt 有 3 个 token，cache 中 K/V 对应绝对位置 0、1、2；新 token 的 query 处在位置 3，且 key 长度为 4，所以它应看到 keep mask `[1,1,1,1]`。若错误地把 query 位置重置为 0，则 mask 会变成 `[1,0,0,0]`，新 token 只读取第一个历史位置。两种实现 shape 一样，逐步比较 logits 才能暴露差异。
 
 ## 4.17 代码质量：清楚地表达取舍
 
@@ -1659,21 +1956,40 @@ q_len、kv_len、head_dim、completion_mask、reference_logps 比 x1、x2、mask
 一种实现如下：
 
 ~~~python
+import torch
+
+
 def masked_mean(
     values: torch.Tensor,
     mask: torch.Tensor,
 ) -> torch.Tensor:
     if values.ndim != 3 or mask.ndim != 2:
         raise ValueError("values must be [B, T, D], mask must be [B, T]")
-    if values.shape[:2] != mask.shape or mask.dtype != torch.bool:
+    if (
+        values.shape[:2] != mask.shape
+        or mask.dtype != torch.bool
+        or values.device != mask.device
+    ):
         raise ValueError("values and mask are incompatible")
-    weights = mask.unsqueeze(-1).to(dtype=values.dtype)
-    totals = (values * weights).sum(dim=1)
-    counts = weights.sum(dim=1)
-    return totals / counts.clamp_min(1)
+    if not values.is_floating_point():
+        raise TypeError("values must be floating point")
+    accum_dtype = torch.float64 if values.dtype == torch.float64 else torch.float32
+    accumulated = values.to(dtype=accum_dtype)
+    selected = torch.where(
+        mask.unsqueeze(-1),
+        accumulated,
+        torch.zeros_like(accumulated),
+    )
+    totals = selected.sum(dim=1)
+    counts = mask.sum(dim=1, keepdim=True).to(dtype=accum_dtype)
+    return (totals / counts.clamp_min(1)).to(dtype=values.dtype)
 ~~~
 
-这里的零向量约定通过 totals / 1 实现，因为无效位置已经被乘成零。若零向量会在下游被误认为真实表示，也可以返回额外的 has_value 标记或直接拒绝空序列。边界行为应由调用方选择，而不是由实现者偷偷决定。
+> 代码状态：已验证（2026-11-06；Python 3.12.9；PyTorch 2.12.0+cpu）。
+
+例如一条序列的三个向量为 `[1,3]`、`[3,1]`、`[100,100]`，mask 为 `[True,True,False]`，只累加前两项，均值是 `([1,3]+[3,1])/2=[2,2]`。实现用 `where` 把无效位置直接替换为零，因此即使 padding 位置含有 NaN，也不会通过“NaN 乘以 0”污染求和。若 mask 全 False，分子为零而分母经 clamp 变成 1，结果按本实现约定是 `[0,0]`；若下游需要区分空序列与真实零向量，应同时返回有效标记。
+
+这里的零向量约定通过 totals / 1 实现，因为 `where` 已将无效位置替换为零。若零向量会在下游被误认为真实表示，也可以返回额外的 has_value 标记或直接拒绝空序列。边界行为应由调用方选择，而不是由实现者偷偷决定。
 
 ### 4.18.2 练习二：实现 token budget 的截断
 
@@ -1684,6 +2000,8 @@ def masked_mean(
 - completion 被截断时是否丢弃样本；
 - EOS 是否需要预留位置；
 - truncation 后 labels 和 attention mask 如何同步变化。
+
+例如 prompt 是 `[101,10,11]`，completion 是 `[20,21,102]`，max_length=5 且必须保留完整 prompt 与 EOS，则只剩一个 completion 内容位置。若策略要求完整答案，应丢弃这条样本；若允许截断，就要明确产物 `[101,10,11,20,102]` 的 labels 和停止语义，不能仍把被删掉的 `21` 当成有效监督目标。
 
 这道题的关键不是写切片，而是说明数据契约。训练数据处理中的一个 token 偏差，可能在数百万样本上变成系统性目标偏差。
 
@@ -1728,20 +2046,21 @@ def masked_mean(
 
 本章的 API 语义和工程建议分别来自不同等级的资料，不能混成一个“权威结论”。
 
-1. Python 官方教程的数据结构部分：[https://docs.python.org/3/tutorial/datastructures.html](https://docs.python.org/3/tutorial/datastructures.html)
-2. PyTorch Tensor Views：[https://docs.pytorch.org/docs/stable/tensor_view.html](https://docs.pytorch.org/docs/stable/tensor_view.html)
-3. PyTorch Broadcasting Semantics：[https://docs.pytorch.org/docs/stable/notes/broadcasting.html](https://docs.pytorch.org/docs/stable/notes/broadcasting.html)
-4. PyTorch gather：[https://docs.pytorch.org/docs/stable/generated/torch.gather.html](https://docs.pytorch.org/docs/stable/generated/torch.gather.html)
-5. PyTorch cross entropy：[https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.cross_entropy.html](https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.cross_entropy.html)
-6. PyTorch scaled dot-product attention：[https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html](https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html)
-7. PyTorch inference mode：[https://docs.pytorch.org/docs/stable/generated/torch.autograd.grad_mode.inference_mode.html](https://docs.pytorch.org/docs/stable/generated/torch.autograd.grad_mode.inference_mode.html)
-8. Attention Is All You Need：[https://arxiv.org/abs/1706.03762](https://arxiv.org/abs/1706.03762)
-9. RoFormer: Enhanced Transformer with Rotary Position Embedding：[https://arxiv.org/abs/2104.09864](https://arxiv.org/abs/2104.09864)
-10. Root Mean Square Layer Normalization：[https://arxiv.org/abs/1910.07467](https://arxiv.org/abs/1910.07467)
-11. Direct Preference Optimization：[https://arxiv.org/abs/2305.18290](https://arxiv.org/abs/2305.18290)
-12. Efficient Memory Management for Large Language Model Serving with PagedAttention：[https://arxiv.org/abs/2309.06180](https://arxiv.org/abs/2309.06180)
+1. Python 3.15.2 官方教程：数据结构与 heapq：[https://docs.python.org/3.15/tutorial/datastructures.html](https://docs.python.org/3.15/tutorial/datastructures.html)、[heapq.nsmallest](https://docs.python.org/3.15/library/heapq.html#heapq.nsmallest)
+2. PyTorch 2.15 Tensor Views：[https://docs.pytorch.org/docs/2.15/tensor_view.html](https://docs.pytorch.org/docs/2.15/tensor_view.html)
+3. PyTorch 2.15 Broadcasting Semantics：[https://docs.pytorch.org/docs/2.15/notes/broadcasting.html](https://docs.pytorch.org/docs/2.15/notes/broadcasting.html)
+4. PyTorch 2.15 torch.gather：[https://docs.pytorch.org/docs/2.15/generated/torch.gather.html](https://docs.pytorch.org/docs/2.15/generated/torch.gather.html)
+5. PyTorch 2.15 cross_entropy：[https://docs.pytorch.org/docs/2.15/generated/torch.nn.functional.cross_entropy.html](https://docs.pytorch.org/docs/2.15/generated/torch.nn.functional.cross_entropy.html)
+6. PyTorch 2.15 scaled_dot_product_attention：[https://docs.pytorch.org/docs/2.15/generated/torch.nn.functional.scaled_dot_product_attention.html](https://docs.pytorch.org/docs/2.15/generated/torch.nn.functional.scaled_dot_product_attention.html)
+7. PyTorch 2.15 inference_mode：[https://docs.pytorch.org/docs/2.15/generated/torch.autograd.grad_mode.inference_mode.html](https://docs.pytorch.org/docs/2.15/generated/torch.autograd.grad_mode.inference_mode.html)
+8. Attention Is All You Need, arXiv v7：[https://arxiv.org/abs/1706.03762v7](https://arxiv.org/abs/1706.03762v7)
+9. RoFormer: Enhanced Transformer with Rotary Position Embedding, arXiv v5：[https://arxiv.org/abs/2104.09864v5](https://arxiv.org/abs/2104.09864v5)
+10. Root Mean Square Layer Normalization, arXiv v1：[https://arxiv.org/abs/1910.07467v1](https://arxiv.org/abs/1910.07467v1)
+11. Direct Preference Optimization, arXiv v3：[https://arxiv.org/abs/2305.18290v3](https://arxiv.org/abs/2305.18290v3)
+12. FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness, arXiv v2：[https://arxiv.org/abs/2205.14135v2](https://arxiv.org/abs/2205.14135v2)
+13. Efficient Memory Management for Large Language Model Serving with PagedAttention, arXiv v1：[https://arxiv.org/abs/2309.06180v1](https://arxiv.org/abs/2309.06180v1)
 
-Python 和 PyTorch 官方文档用于支持 API、shape view、广播、索引、交叉熵和推理上下文的语义；Transformer、RoPE、RMSNorm、DPO 和 PagedAttention 的论文用于支持原始方法的定义或系统动机。本文中的代码是教学实现，经过语法和逻辑层面的人工检查，但不宣称覆盖所有 PyTorch 版本、模型协议或硬件后端。
+以上文档与论文按本次核阅的版本固定入口；核阅日期为 2026-11-05。Python 文档的版本是资料版本，不表示代码必须在 Python 3.15 运行。本章代码采用 Python 3.10+ 的类型标注语法；代码均未运行。连续复读时再次静态审阅了 `analyze_jsonl`、RMSNorm 与 `masked_mean` 三块（2026-11-06），其余未变化代码沿用原状态记录；这些状态不构成特定 PyTorch 版本、模型协议或硬件后端上的执行保证。
 
 案例中的数据、损失值、长度和性能比较均为教学构造，不能当作真实项目指标。手写 attention 与融合 attention 的数值容差、低精度行为和速度，必须在目标设备、目标版本和目标模型上重新测量。公开论文的实验结果也不能直接等价为某个 checkpoint、某个服务配置或某个岗位的统一要求。
 

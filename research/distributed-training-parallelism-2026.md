@@ -30,6 +30,22 @@
   - 证据等级：source-backed（PyTorch v2.14 API 与教程）。
   - 适用边界：wrap 粒度、reshard、混合精度、设备 mesh、预取和 checkpoint strategy 会改变峰值显存与通信路径；不能把简化 ZeRO-3 估算当作任何 FSDP 配置的精确峰值。
 
+### PyTorch 2.15 DDP token weighting 与 FSDP2 通信组
+
+- 来源：PyTorch 2.15 [DistributedDataParallel API](https://docs.pytorch.org/docs/2.15/generated/torch.nn.parallel.DistributedDataParallel.html)、[DDP 设计说明](https://docs.pytorch.org/docs/2.15/notes/ddp.html) 和 [FSDP2 `fully_shard` API](https://docs.pytorch.org/docs/2.15/distributed.fsdp.fully_shard.html)，2026-11-05 阅读。
+- 实际阅读范围：DDP gradient all-reduce/平均、loss 归约说明、通信 bucket 与反向计算重叠；FSDP2 按 `fully_shard` 模块形成通信组的说明。
+- 来源支持：DDP 在反向阶段同步并平均各 rank 梯度；以各 rank 的 token-average loss 直接做梯度平均，会让每个 rank 权重相同，不一定等于按全局有效 token 加权。由这个 API 语义和全局 token-average 目标可推导：若 rank `r` 的有效 loss 总和为 `S_r`、全局有效 token 数为 `M`、数据并行 rank 数为 `R`，则各 rank 对其 loss sum 乘 `R/M` 后再参与 DDP 的 rank 平均，结果对应全局 token mean。此 scaling 是目标函数推导，不是 DDP 提供的自动归约接口。FSDP2 中每次 `fully_shard` 调用为对应模块参数形成通信组，前向前 all-gather、反向后 reduce-scatter；通信分组由模块粒度决定，没有 DDP 的 `bucket_cap_mb` 参数。
+- 证据等级：source-backed（固定 PyTorch 2.15 API/设计文档）与明确标注的数学推导。
+- 适用边界：loss scaling 还要与梯度累积、TP/PP、不同 process group、unused parameters、join 行为和实际训练循环保持一致；单 rank 参考函数不能替代分布式集成验证。FSDP2 的调用接口和 FSDP1 不同，不能把该通信分组行为推广到其他框架实现。
+
+### PyTorch 2.15 发布说明中的分布式运维变化
+
+- 来源：PyTorch Foundation, “PyTorch 2.15 Release Blog,” 2026-10-28，[官方发布说明](https://pytorch.org/blog/pytorch-2-15-release-blog/)，2026-11-09 阅读。
+- 实际阅读位置：Distributed Training 下的 rewritten NCCL backend、flight recorder、FSDP2 和 pipeline parallelism 段落。
+- 来源支持：发布说明称 PyTorch 2.15 中默认 `nccl` process group 使用改写后的 NCCL backend，并列出回退设置；flight recorder 可在 collective hang 时导出多 rank 的事后诊断信息。FSDP2 与 pipeline parallelism 的版本更新包括更细的精度/通信控制、梯度累积 CUDA graph capture 和梯度归约与计算重叠。
+- 证据等级：source-backed（官方版本发布说明）。
+- 适用边界：这些是 2.15 发布说明列举的公开更新，不表示所有训练配置均启用相同路径、性能收益或故障恢复能力；NCCL/FSDP 行为和可用性仍需按精确版本、硬件及配置核验。该资料不证明 flight recorder 可恢复模型、优化器或数据游标状态。
+
 ## 张量并行、流水线并行与 activation checkpointing
 
 - Shoeybi et al., “Megatron-LM: Training Multi-Billion Parameter Language Models Using Model Parallelism,” arXiv:1909.08053 v4，[论文](https://arxiv.org/abs/1909.08053)，[HTML 正文](https://arxiv.org/html/1909.08053)。

@@ -960,7 +960,7 @@ R_{\mathrm{weighted}}=\frac{\sum_i w_i\,\mathbf{1}[\mathrm{failure}_i]}{\sum_i w
 - [OpenAI Agents SDK：Guardrails](https://openai.github.io/openai-agents-python/guardrails/)：guardrail 的公开 runtime 文档，适合参考输入/输出检查与运行时控制的接口边界。
 - [OpenAI Agents SDK：Tools](https://openai.github.io/openai-agents-python/tools/)：工具定义和调用相关的公开文档；接口语义不等于业务权限已经正确配置。
 - [OWASP GenAI Security Project：Prompt Injection](https://genai.owasp.org/llmrisk/llm01-prompt-injection/)：提示注入风险与防御视角入口；不把风险分类当作完整威胁模型。
-- [NIST AI RMF Generative AI Profile](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf)：NIST 官方生成式 AI 风险管理和治理出版物，适合建立风险识别、测量和响应的组织流程。
+- [NIST AI RMF Generative AI Profile](https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence)：NIST 官方生成式 AI 风险管理和治理出版物，适合建立风险识别、测量和响应的组织流程。
 - [MITRE ATLAS](https://atlas.mitre.org/)：面向机器学习系统的对抗性威胁知识库入口，适合组织攻击面和防御验证，不代表每项技术都适用于当前 Agent。
 
 资料阅读时要区分规范、风险分类、框架接口、论文实验和目标系统实测。某个 SDK 提供 guardrail，不说明所有工具路径都经过它；某个模型遵循指令层级，也不说明它能识别所有低信任数据；某个红队样本被阻断，也不说明未知环境中的数据流和供应链没有问题。最终安全结论必须绑定版本、配置、权限、环境、测试样本、真实副作用和事故响应能力。

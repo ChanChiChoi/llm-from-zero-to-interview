@@ -4,7 +4,7 @@
 
 当一个模型解一道数学题时，至少有五件事可能同时发生：模型从语言模式中提出解法，生成中间状态，调用计算器或代码执行器，比较多个候选路径，并根据外部反馈修正答案。只看最后一段文字，很难判断其中究竟是哪一部分带来了正确性。
 
-本章的任务是建立一张地图。后续章节会分别深入 Chain-of-Thought、self-consistency、verifier、process supervision、search、test-time compute、数学与代码推理训练以及 reasoning 评估。本章不把这些主题压缩成术语表，而是先说明它们为什么依次出现、彼此解决什么问题，以及哪些结论不能从表面现象直接推出。
+本章的任务是建立一张地图。后续章节会分别深入 [Chain-of-Thought](02-chain-of-thought.md)、[self-consistency](03-self-consistency与采样.md)、[verifier](04-verifier与reward-model.md)、[process supervision](05-process-supervision.md)、[search](06-search与tree-of-thought.md)、[test-time compute](07-test-time-compute-scaling.md)、[数学推理训练](08-数学推理训练.md)、[代码推理](09-代码推理与执行反馈.md)、[reasoning 评估](10-reasoning评估.md)和[安全边界](11-reasoning安全与局限.md)，再以[综合复习](12-reasoning面试题.md)收束主线；专题路径还包括[推理预算](13-reasoning-effort与推理预算.md)、[thinking levels](14-thinking-levels.md)、[推理状态](15-preserve-thinking与推理状态.md)、[并行推理](16-multi-agent与ultra-test-time-compute.md)、[DeepSeek-R1](17-deepseek-r1的rlvr与蒸馏路线.md)、[动态预算](18-adaptive-thinking与动态预算.md)、[工具交错](19-interleaved-thinking与工具协议.md)和[长任务环境案例](20-glm-5.3长任务环境与验证器.md)。这些章节各自承担完整主讲；本章作为总览说明它们为什么依次出现、分别解决什么问题，以及哪些结论不能从表面现象直接推出。
 
 ## 0.1 读者应该先建立的三个区分
 
@@ -60,9 +60,9 @@
 
 ## 0.3 本章使用的资料与证据边界
 
-本章的历史和方法主线主要来自原始论文：Chain-of-Thought 提示研究、Zero-shot CoT、Self-Consistency、数学题验证器、过程监督、Tree of Thoughts、GSM8K、MATH、HumanEval 以及 DeepSeek-R1 的公开技术报告。它们分别提供方法定义、实验设置或训练路线证据，而不是对所有商业模型内部实现的证明。
+本章的历史和方法主线主要来自原始论文：[Chain-of-Thought 提示研究](https://arxiv.org/abs/2201.11903)、[Zero-shot CoT](https://arxiv.org/abs/2205.11916)、[Self-Consistency](https://arxiv.org/abs/2203.11171)、[数学题验证器](https://arxiv.org/abs/2110.14168)、[过程监督](https://arxiv.org/abs/2305.20050)、[Tree of Thoughts](https://arxiv.org/abs/2305.10601)、[MATH](https://arxiv.org/abs/2103.03874)、[HumanEval](https://arxiv.org/abs/2107.03374) 以及 [DeepSeek-R1 的公开技术报告](https://arxiv.org/abs/2501.12948v2)。它们分别提供方法定义、实验设置或训练路线证据，而不是对所有商业模型内部实现的证明。GSM8K 的数据集与验证器方法来自同一篇数学验证器论文。
 
-本章还参考了 OpenAI reasoning guide、Anthropic extended thinking 文档和 Gemini thinking 文档。它们可以说明公开 API 中存在推理预算、thinking 或工具协同等产品层控制，但不同厂商的字段语义、计费方式、可见性和版本都可能变化。不能因为多个接口都出现了类似名称，就断言它们内部使用了同一种算法。
+本章还参考了 [OpenAI reasoning guide](https://developers.openai.com/api/docs/guides/reasoning)、Anthropic 的 [Thinking](https://platform.claude.com/docs/en/build-with-claude/thinking) 与 [Preserved thinking](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking) 文档。它们说明具体 API 当前公开支持哪些控制项、返回内容和状态传递方式；字段语义、计费方式、可见性和模型支持范围都随 provider、模型和版本变化。不能因为多个接口出现相近名称，就断言它们内部使用同一种算法或相同计算单位。
 
 阅读来源时可以按以下层级判断：
 
@@ -180,7 +180,7 @@ theta 是模型参数，T 是目标序列长度。这个目标只要求模型提
 
 ### 2.3 公开接口中的 reasoning 控制
 
-近年的公开 API 出现了 reasoning_effort、thinking、extended thinking 或相近概念。对初学者来说，它们可以理解为“允许服务为当前任务配置多少额外推理资源”；对专家来说，必须进一步追问：
+一些公开 API 提供名为 reasoning effort、thinking mode 或 budget 的控制项，但这些字段的含义由具体 provider、模型和 API 版本定义，不是跨模型共用的 token 或算力单位。当前 OpenAI 文档说明 `reasoning.effort` 用于引导模型的思考投入，同时模型之间支持的取值和默认值不同；Anthropic 文档也按模型列出 adaptive、enabled、`between_tools` 等模式及其限制。两家的文档都说明可返回的 reasoning/thinking 内容受到各自接口合同约束，不能仅凭一个字段名推断内部机制。[OpenAI Reasoning 指南](https://developers.openai.com/api/docs/guides/reasoning)、[Anthropic Thinking 文档](https://platform.claude.com/docs/en/build-with-claude/thinking)（访问日期：2026-11-12）。本册在[预算计量](13-reasoning-effort与推理预算.md)、[接口档位](14-thinking-levels.md)、[状态延续](15-preserve-thinking与推理状态.md)和[动态策略](18-adaptive-thinking与动态预算.md)中分别展开这些问题。对专家来说，还必须进一步追问：
 
 1. 预算是 token 上限、时间上限、搜索节点，还是多个资源的组合？
 2. 额外 token 是否真的被用于更深的计算，还是只是更长的表述？
@@ -202,7 +202,7 @@ Chain-of-Thought（CoT）提示让模型在最终答案之前生成中间推理�
 
 早期的问答系统经常被要求直接输出答案。当问题只需要事实检索时，这种形式很高效；当问题包含多步算术、逻辑链或程序构造时，直接生成最终 token 会让错误很难定位。
 
-Chain-of-Thought 研究展示了一个重要现象：给出少量带推理过程的示例，或用自然语言提示模型先思考，可能让大模型在复杂推理基准上明显受益。这个结果不应被解读为“所有模型只要加一句提示就会推理”，因为收益依赖模型规模、任务难度、示例质量、答案抽取和评估协议。
+Chain-of-Thought 研究展示了一个重要现象：给出少量带推理过程的示例，或用自然语言提示模型先思考，可能让论文所测的大模型在若干算术、常识和符号推理基准上受益；Zero-shot CoT 也在指定任务上报告了收益。[Wei 等人的 CoT 研究](https://arxiv.org/abs/2201.11903)、[Kojima 等人的 Zero-shot CoT 研究](https://arxiv.org/abs/2205.11916)。这些实验不应被解读为“所有模型只要加一句提示就会推理”，因为收益依赖模型、任务难度、示例质量、答案抽取和评估协议。
 
 ### 3.3 生成概率仍然是自回归的
 
@@ -222,7 +222,7 @@ u 是把步骤 z 和答案 y 拼接后的 token 序列。CoT 并没有自动引�
 - **隐式计算**：模型隐藏状态和注意力在生成 token 时完成的计算。
 - **可验证轨迹**：能够被规则、程序或独立检查器确认的中间状态。
 
-显式过程不一定等于隐式计算的完整记录。一个模型可能先形成答案，再生成一段看起来合理的解释；也可能因为输出格式要求而把真实计算拆成不自然的文字。若要研究过程是否有用，应进行干预：删除某一步、替换一个中间数字、要求模型继续计算，观察后续答案是否相应变化。
+显式过程不一定等于隐式计算的完整记录。一个模型可能先形成答案，再生成一段看起来合理的解释；也可能因为输出格式要求而把计算拆成不自然的文字。若要研究过程是否有用，应进行干预：删除某一步、替换一个中间数字、要求模型继续计算，观察后续答案是否相应变化。近年的 [FACT-E](https://aclanthology.org/2026.findings-acl.1014/) 用受控扰动评估步骤间依赖；[Hidden Thoughts Are Not Secret](https://aclanthology.org/2026.findings-emnlp.2303/) 在其所测模型和设置下研究界面隐藏后的推理轨迹暴露。两项工作研究的问题和模型范围不同，都不证明用户可见轨迹就是完整、真实的内部状态。
 
 ### 3.5 CoT 的收益和代价
 
@@ -247,7 +247,7 @@ CoT 可能带来四类收益：
 
 ### 4.1 为什么一次答案不够
 
-自回归生成每一步都可能做出概率上的选择。即使模型总体上知道解法，一次采样也可能在中间某一步选错。若改变随机种子或温度后，模型能够产生不同路径，就可以把多个路径作为候选集合。
+自回归生成每一步都可能做出概率上的选择。即使模型总体上知道解法，一次采样也可能在中间某一步选错。若改变随机种子或温度后，模型能够产生不同路径，就可以把多个路径作为候选集合。[Self-Consistency 的原始研究](https://arxiv.org/abs/2203.11171)将多路径采样与答案边缘化作为解码策略，并在指定算术与常识基准上报告了收益。
 
 设第 i 道题采样 K 条路径，抽取出的最终答案为 a_i1,...,a_iK。最简单的 self-consistency 是多数投票：
 
@@ -328,13 +328,13 @@ s_ik 是第 k 条候选的验证分数。投票适合答案可标准化且多数
 
 ### 5.2 Outcome verifier：检查最终结果
 
-Outcome verifier 只关心最终结果是否满足目标。例如水箱问题可以检查答案是否等于 10，代码问题可以运行测试用例，数据库查询可以比较结果集。
+Outcome verifier 只关心最终结果是否满足目标。例如水箱问题可以检查答案是否等于 10，代码问题可以运行测试用例，数据库查询可以比较结果集。[GSM8K 与数学验证器研究](https://arxiv.org/abs/2110.14168)展示了从多个候选中用训练得到的 verifier 排序选择这一具体路线；其结果只支持论文中的数据、模型和评测设置。
 
 它通常便宜、清晰、容易自动化，但不能定位错误发生在哪一步。一个程序通过了已有测试，也不代表没有未覆盖的边界错误；一个数学答案正确，也不代表模型掌握了可迁移的方法。
 
 ### 5.3 Programmatic verifier：优先使用可执行约束
 
-在代码、算术、格式和结构化输出任务中，程序化 verifier 往往比语言模型评分更可靠，因为它可以把任务要求写成确定规则。
+当约束能被程序准确表达、测试覆盖与目标相符时，程序化 verifier 能给出可重复的判断；这并不意味着它总比语言模型评分可靠，也不表示通过现有测试就满足所有未覆盖的真实要求。
 
 例如，对一个函数候选 f，测试器可以定义：
 
@@ -392,7 +392,7 @@ verifier 更强调“是否满足某个可定义约束”；reward model 更强�
 
 只用最终答案训练时，一条长轨迹通常只收到一个整体信号：正确或错误。模型不知道是读题、计算、引用还是格式化出了问题。对于长链路任务，这个信号过于稀疏。
 
-过程监督把轨迹拆成步骤，为每一步提供局部标签、奖励或检查结果。它的目标不是强迫所有模型使用同一种文字风格，而是让关键中间状态更容易被学习和审计。
+过程监督把轨迹拆成步骤，为每一步提供局部标签、奖励或检查结果。它的目标不是强迫所有模型使用同一种文字风格，而是让关键中间状态更容易被学习和审计。[Let's Verify Step by Step](https://arxiv.org/abs/2305.20050)在 MATH 任务中比较了结果监督和过程监督，并报告了其设置下过程监督模型的结果；这不代表过程监督在所有任务、标注协议或模型上都占优。
 
 ### 6.2 过程标签的几种形式
 
@@ -442,7 +442,7 @@ T 可以是语言模型生成的状态转移，也可以包含工具执行和环
 
 ### 7.2 Tree-of-Thought 的直觉
 
-Tree-of-Thought 把若干自然语言中间状态作为树节点：
+Tree-of-Thought（ToT）把若干自然语言中间状态作为树节点；原论文在 Game of 24、Creative Writing 和 Mini Crosswords 等指定任务中评估了搜索式推理，效果不能仅由 ToT 这个名称保证。[原论文](https://arxiv.org/abs/2305.10601)：
 
 1. 从当前状态生成多个可能的下一步。
 2. 用启发式或 verifier 给节点打分。
@@ -506,6 +506,8 @@ b=(T,K,N_{\mathrm{search}},N_{\mathrm{tool}},T_{\mathrm{verify}})
 
 增加某个分量，不一定能由另一个分量替代。多采样需要候选多样性，过程验证需要可检查轨迹，代码执行需要安全环境。
 
+由于这些分量单位不同，质量—预算曲线中的标量预算 B 必须说明其计量方式：可以固定单一资源上限，也可以按已声明的权重换算为共同成本；如果没有合理换算，就分别报告预算向量和质量，不能把 token、GPU 秒与工具调用次数直接相加。
+
 ### 8.2 质量—预算曲线
 
 把预算抽象为 B，任务成功率写成 A(B)。理想情况下，增加预算会带来收益但边际收益递减：
@@ -520,25 +522,25 @@ b=(T,K,N_{\mathrm{search}},N_{\mathrm{tool}},T_{\mathrm{verify}})
 
 ### 8.3 单位成功成本
 
-只报告准确率会掩盖计算代价。可以在一个固定窗口内定义：
+只报告准确率会掩盖计算代价。对一个固定评估窗口，可以按统一货币或明示的归一化权重定义单位成功成本：
 
 ~~~math
-C_{\mathrm{success}}=\frac{\sum_{i=1}^{N}C_i}{\sum_{i=1}^{N}\mathbb{1}[\mathrm{Success}_i=1]}
+C_{\mathrm{success}}=\frac{\sum_{i=1}^{N}c_i}{\sum_{i=1}^{N}\mathbb{1}[\mathrm{Success}_i=1]}
 ~~~
 
-C_i 可以包含输入 token、输出 token、候选、验证器、工具、GPU 时间和人工复核。分母为 0 时，不能把结果写成一个正常数，应报告“窗口内没有成功样本”。
+c_i 是第 i 个请求按同一价格表折算出的标量成本，例如美元。输入 token、输出 token、GPU 时间、工具执行和人工复核具有不同单位，不能直接相加；若没有可信的统一换算，就按资源维度报告向量。分母为 0 时，不能把结果写成一个正常数，应报告“窗口内没有成功样本”。
 
-### 8.4 动态预算比固定高预算更接近真实系统
+### 8.4 动态预算的动机与边界
 
-简单问题没有必要使用同样的推理资源。一个动态策略可以先用低预算尝试，再根据不确定性、验证失败或问题类型决定是否增加预算：
+简单问题可能不需要与困难问题相同的推理资源。一个动态策略可以先用较小预算尝试，再根据问题特征或外部验证决定是否追加资源。[Snell 等人的测试时计算研究](https://arxiv.org/abs/2408.03314)发现，不同扩展方法在论文设置下的效果会随提示难度变化，并据此研究按题目分配计算；这一结果不构成所有生产任务上动态策略必然优于固定预算的证明。策略可以表示为：
 
 ~~~math
-B_i=B_{\mathrm{base}}+\Delta B_i(\mathrm{difficulty},\mathrm{uncertainty},\mathrm{failure})
+b_i=b_{\mathrm{base}}+\Delta b_i(\mathrm{difficulty},\mathrm{uncertainty},\mathrm{failure})
 ~~~
 
-这里 B_i 是第 i 个请求的总预算。关键难点是估计难度和不确定性：模型的自信分数往往不可靠，候选一致也可能是共同错误。因此动态分配必须用独立验证、历史切片和实际成本曲线校准。
+这里 b_i 是第 i 个请求的预算向量。关键难点是估计难度和不确定性：模型的自信分数可能与真实错误率不匹配，候选一致也可能来自共同错误。因此动态分配应通过独立验证、历史任务切片和实际成本曲线校准；若把预算向量压成一个总分，还须记录换算权重。
 
-动态预算还应设定有限上界和停止条件。若验证失败就无限重试，系统的平均成本、P99 延迟和工具副作用都可能失控；若 `\Delta B_i` 为负或不是有限数，预算定义也失去意义。实际策略应记录每次升级预算的触发原因和最终停止原因。
+动态预算还应设定有限上界和停止条件。若验证失败就无限重试，系统的平均成本、P99 延迟和工具副作用都可能失控；若 `\Delta b_i` 的分量为负或不是有限数，预算定义也失去意义。实际策略应记录每次升级预算的触发原因和最终停止原因。
 
 ## 9. RLVR：可验证奖励推动训练路线变化
 
@@ -562,7 +564,7 @@ r(x,y) 是验证器给出的奖励。实际训练通常还需要参考策略、K
 
 ### 9.3 DeepSeek-R1 提供了什么公开证据
 
-DeepSeek-R1 的公开论文把冷启动数据、推理轨迹、强化学习、可验证奖励和蒸馏放在一条公开讨论较多的训练路线中。它的重要启发不是某个神奇的单一 loss，而是：在数学、代码等可验证任务上，模型可以通过在线生成候选并接受结果反馈来改进；随后再把较强模型的行为蒸馏到更小模型。
+DeepSeek-R1 的 [v2 论文](https://arxiv.org/abs/2501.12948v2)报告了两条相关路线：R1-Zero 从 DeepSeek-V3-Base 直接进行强化学习，不经过监督微调，也不使用人工标注的推理轨迹；R1 则采用多阶段流程，先用冷启动数据和强化学习改进对话式推理，再经过拒绝采样、监督微调和第二阶段强化学习。论文还报告用 R1 生成的数据蒸馏较小模型。论文把自我反思、验证和策略调整等行为作为其训练结果报告。这里描述的是论文公开的模型、数据与配方，不应扩展成所有 reasoning 模型的通用训练流程。
 
 阅读这类材料时要保留三个边界：
 
@@ -587,7 +589,7 @@ DeepSeek-R1 的公开论文把冷启动数据、推理轨迹、强化学习、�
 
 ### 10.1 数学推理：结果容易验证，过程不一定唯一
 
-数学是 reasoning 研究常用的起点，因为很多任务有明确答案。GSM8K 聚焦小学到初中程度的多步应用题，MATH 覆盖更复杂的竞赛数学。它们适合研究算术、代数、几何和组合推理，但不能代表所有真实推理。
+数学是 reasoning 研究常用的起点，因为很多任务有明确答案。[GSM8K](https://arxiv.org/abs/2110.14168)包含语言多样的小学数学文字题，[MATH](https://arxiv.org/abs/2103.03874)包含更具挑战性的竞赛数学题。它们适合研究算术、代数、几何和组合推理，但不能代表所有真实推理。
 
 数学评估至少要区分：
 
@@ -603,7 +605,7 @@ DeepSeek-R1 的公开论文把冷启动数据、推理轨迹、强化学习、�
 
 代码任务中，模型可以经历“读题—写代码—运行—读取错误—修复”的循环。编译器和测试器提供了比自然语言评分更硬的反馈。
 
-HumanEval 常用 pass@k 描述从 k 次候选中至少得到一个通过测试的概率。设生成 n 个候选，其中 c 个通过，抽取 k 个至少包含一个通过候选的无放回估计为：
+HumanEval 论文提出 pass@k 来估计从候选中抽取 k 个时至少包含一个通过测试的程序的概率。[原论文](https://arxiv.org/abs/2107.03374)给出的无偏估计为：设生成 n 个候选，其中 c 个通过，抽取 k 个至少包含一个通过候选的概率估计为：
 
 ~~~math
 \mathrm{pass@}k=1-\frac{\binom{n-c}{k}}{\binom{n}{k}}
@@ -670,7 +672,7 @@ A=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[\hat y_i=y_i^*]
 4. 隐藏测试集和私有任务。
 5. 报告原题与反事实题之间的差异。
 
-不能因为没有发现精确字符串重合，就断言不存在语义污染；近似解法、题型模板和公开教程也可能泄露答案路径。
+不能因为没有发现精确字符串重合，就断言不存在语义污染；改写或翻译的同题样本可能绕过基于词面重叠的筛查，而语义相似度本身也不能直接证明样本就是污染。[相关研究](https://arxiv.org/abs/2311.04850v2)展示了这两类检测边界。近似解法、题型模板和公开教程也可能泄露答案路径。
 
 ### 11.5 成本、延迟与可靠性
 
@@ -693,7 +695,7 @@ A=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[\hat y_i=y_i^*]
 
 ### 12.2 不要把完整 CoT 当作安全审计日志
 
-公开的长推理文本可能包含个人信息、系统提示、内部规则或危险操作细节；隐藏过程又不一定能被用户直接审计。更稳妥的系统通常保存结构化事件：输入类别、工具调用、验证结果、风险标签、最终决策和必要的可审计摘要，而不是默认把所有内部过程原样展示。
+公开的长推理文本可能包含个人信息、系统提示、内部规则或危险操作细节；隐藏过程又不一定能被用户直接审计。[Hidden Thoughts Are Not Secret](https://aclanthology.org/2026.findings-emnlp.2303/)在指定开源模型和实验设置中考察了接口隐藏后的推理轨迹暴露，因此接口隐藏本身不能当作所有模型都不会暴露有用轨迹的证明；该研究也不能给出任何闭源服务的暴露率。更稳妥的系统通常保存结构化事件：输入类别、工具调用、验证结果、风险标签、最终决策和必要的可审计摘要，而不是默认把所有内部过程原样展示。
 
 ### 12.3 工具权限是推理系统的实际边界
 
@@ -701,7 +703,7 @@ A=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[\hat y_i=y_i^*]
 
 ### 12.4 验证器和安全策略也会出错
 
-安全分类器可能误报或漏报，代码沙箱可能存在资源问题，事实 verifier 可能把伪造引用当成证据。安全不是给 reasoning 链末尾加一个分类器就结束，而是把风险控制分布在输入、生成、工具、输出和监控各层。
+安全分类器可能误报或漏报，代码沙箱可能存在资源问题，事实 verifier 可能把伪造引用当成证据。[TRACE](https://aclanthology.org/2026.emnlp-main.1174/)在其 prompt、推理轨迹和最终回复的标注基准上报告，推理轨迹安全判断比 prompt 或最终回复更难，且受测 guardrail 对证据提取也有困难；这说明评估应覆盖整条推理流程，但不等于生产系统的风险率。安全不是给 reasoning 链末尾加一个分类器就结束，而是把风险控制分布在输入、生成、工具、输出和监控各层。
 
 ## 13. 一个完整的推理系统案例
 
@@ -748,15 +750,15 @@ S_{\mathrm{total}}=S_{\mathrm{field}}\land S_{\mathrm{evidence}}\land S_{\mathrm
 
 只有四个事件都成功，系统才应把结果作为可执行建议交付。若字段抽取正确但证据位置错误，系统应报告需要复核，而不是把局部成功伪装成完整成功。
 
-### 13.4 预算分配
+### 13.4 成本与资源账本
 
-简单合同可以直接抽取并计算；复杂合同则可能需要更多检索、候选抽取和交叉验证。预算分配可以表示为：
+简单合同可以直接抽取并计算；复杂合同则可能需要更多检索、候选抽取和交叉验证。本次请求的资源消耗可记录为：
 
 ~~~math
-C_{\mathrm{request}}=C_{\mathrm{retrieve}}+C_{\mathrm{reason}}+C_{\mathrm{verify}}+C_{\mathrm{tool}}+C_{\mathrm{review}}
+\mathbf{C}_{\mathrm{request}}=(C_{\mathrm{retrieve}},C_{\mathrm{reason}},C_{\mathrm{verify}},C_{\mathrm{tool}},C_{\mathrm{review}})
 ~~~
 
-每一项都可能成为瓶颈。增加 reasoning token 不能修复 OCR 错字，增加检索数量也不能替代算术验证，增加工具调用又可能提高权限和延迟风险。
+向量中的分量分别记录检索、推理、验证、工具和人工复核的消耗，并保留各自单位；token、秒和人工分钟不能直接相加。若系统要汇成单一成本，须先按固定价格或明确的权重换算到共同单位。每一项都可能成为瓶颈：增加 reasoning token 不能修复 OCR 错字，增加检索数量也不能替代算术验证，增加工具调用又可能提高权限和延迟风险。
 
 ### 13.5 失败归因
 
@@ -840,10 +842,9 @@ def majority_answer(candidates):
     counts = Counter(candidate["answer"] for candidate in candidates)
     max_count = max(counts.values())
     winners = {answer for answer, count in counts.items() if count == max_count}
-    for candidate in candidates:
-        if candidate["answer"] in winners:
-            return candidate["answer"]
-    raise AssertionError("unreachable")
+    if len(winners) != 1:
+        raise ValueError("majority vote is tied; define an explicit tie-break policy")
+    return next(iter(winners))
 
 
 def pass_at_k(n, c, k):
@@ -894,11 +895,12 @@ def audit_reasoning_budget(problems, k=2):
                 raise ValueError("candidate schema is invalid")
             if not isinstance(candidate["correct"], bool):
                 raise TypeError("correct must be boolean")
-            if isinstance(candidate["verifier"], bool) or not isinstance(candidate["verifier"], (int, float)) or not math.isfinite(candidate["verifier"]):
+            score = candidate["verifier"]
+            if isinstance(score, bool) or not isinstance(score, (int, float)) or (isinstance(score, float) and not math.isfinite(score)):
                 raise ValueError("verifier must be finite")
             if isinstance(candidate["tokens"], bool) or not isinstance(candidate["tokens"], int) or candidate["tokens"] < 0:
                 raise ValueError("candidate tokens must be non-negative integers")
-            if not isinstance(candidate["steps"], list) or not candidate["steps"] or any(step not in (0, 1) for step in candidate["steps"]):
+            if not isinstance(candidate["steps"], list) or not candidate["steps"] or any(type(step) is not int or step not in (0, 1) for step in candidate["steps"]):
                 raise ValueError("steps must be a non-empty list of binary labels")
         gold = problem["gold"]
         if any(candidate["correct"] != (candidate["answer"] == gold) for candidate in candidates):
@@ -936,7 +938,7 @@ def audit_reasoning_budget(problems, k=2):
         "avg_candidates": round(sum(len(p["candidates"]) for p in problems) / n_problems, 3),
         "process_step_accuracy": round(step_correct / step_total, 3),
         "total_tokens": total_tokens,
-        "cost_per_verified_correct": (
+        "tokens_per_verifier_success": (
             round(total_tokens / verifier_correct, 3) if verifier_correct else None
         ),
         "per_problem": per_problem,
@@ -955,6 +957,8 @@ for key, value in report.items():
     print(f"{key}={value}")
 ~~~
 
+代码状态：已验证（2026-11-12；Python 3.12.9；仅使用标准库；数据为本章构造的合成候选）。
+
 预期输出为：
 
 ~~~text
@@ -966,7 +970,7 @@ pass_at_2_est=0.917
 avg_candidates=3.0
 process_step_accuracy=0.759
 total_tokens=1042
-cost_per_verified_correct=260.5
+tokens_per_verifier_success=260.5
 per_problem={'water_tank': {'greedy': '12', 'self_consistency': '10', 'verifier': '10', 'correct_candidates': 2}, 'code_sum': {'greedy': 'fail', 'self_consistency': 'pass', 'verifier': 'pass', 'correct_candidates': 2}, 'logic_grid': {'greedy': 'blue', 'self_consistency': 'blue', 'verifier': 'blue', 'correct_candidates': 3}, 'distractor_math': {'greedy': 'use_extra', 'self_consistency': 'use_extra', 'verifier': 'ignore', 'correct_candidates': 1}}
 verifier_improvement=0.75
 self_consistency_improvement=0.5
@@ -974,7 +978,7 @@ self_consistency_improvement=0.5
 
 这个输出必须这样读：在这组人为构造的数据上，verifier 选择正确答案的比例高于 greedy；self-consistency 也有提升，但对 distractor_math 仍然被两个相同的错误答案带偏；pass@2 比一次候选更高，表示候选集合中更可能包含正确答案；它不表示系统已经能稳定选出正确答案。
 
-total_tokens=1042 是三条候选的输入和输出 token 总和，不是实际 GPU 成本。真实系统还要把模型规格、批处理、缓存命中、验证器和工具执行时间加入成本账本。
+total_tokens=1042 是四道题的输入 token（按每条候选分别计入）与候选生成 token 的合计，只是本地合成账本，不是实际 GPU 成本或 provider 账单。真实系统还要按目标服务的计价口径记录模型、批处理、缓存命中、验证器和工具执行成本。
 
 ## 15. 如何把一次实验读成知识，而不是只记住数字
 
@@ -1087,18 +1091,21 @@ RLVR 对可验证任务很有价值，但开放式帮助性、事实性、价值
 
 以下链接优先保留原始论文、官方文档或官方仓库。论文页面和文档版本会变化，读者复现实验时应记录访问日期、模型版本、解码参数和评估脚本。
 
-1. Chain-of-Thought Prompting：<https://arxiv.org/abs/2201.11903>
-2. Zero-shot Reasoners：<https://arxiv.org/abs/2205.11916>
-3. Self-Consistency Improves Chain of Thought Reasoning：<https://arxiv.org/abs/2203.11171>
-4. Training Verifiers to Solve Math Word Problems：<https://arxiv.org/abs/2110.14168>
-5. Let's Verify Step by Step：<https://arxiv.org/abs/2305.20050>
-6. Tree of Thoughts：<https://arxiv.org/abs/2305.10601>
-7. GSM8K：<https://arxiv.org/abs/2110.14116>
-8. MATH：<https://arxiv.org/abs/2103.03874>
-9. HumanEval：<https://arxiv.org/abs/2107.03374>
-10. DeepSeek-R1：<https://arxiv.org/abs/2501.12948>
-11. OpenAI reasoning guide：<https://platform.openai.com/docs/guides/reasoning>
-12. Anthropic extended thinking：<https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking>
-13. Gemini thinking：<https://ai.google.dev/gemini-api/docs/thinking>
+1. [Chain-of-Thought Prompting Elicits Reasoning in Large Language Models](https://arxiv.org/abs/2201.11903)
+2. [Large Language Models are Zero-Shot Reasoners](https://arxiv.org/abs/2205.11916)
+3. [Self-Consistency Improves Chain of Thought Reasoning in Language Models](https://arxiv.org/abs/2203.11171)
+4. [Training Verifiers to Solve Math Word Problems（含 GSM8K）](https://arxiv.org/abs/2110.14168)
+5. [Let's Verify Step by Step](https://arxiv.org/abs/2305.20050)
+6. [Tree of Thoughts: Deliberate Problem Solving with Large Language Models](https://arxiv.org/abs/2305.10601)
+7. [Measuring Mathematical Problem Solving With the MATH Dataset](https://arxiv.org/abs/2103.03874)
+8. [Evaluating Large Language Models Trained on Code（HumanEval）](https://arxiv.org/abs/2107.03374)
+9. [DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning（v2）](https://arxiv.org/abs/2501.12948v2)
+10. [Scaling LLM Test-Time Compute Optimally can be More Effective than Scaling Model Parameters](https://arxiv.org/abs/2408.03314)
+11. [FACT-E: Causality-Inspired Evaluation for Trustworthy Chain-of-Thought Reasoning](https://aclanthology.org/2026.findings-acl.1014/)
+12. [Hidden Thoughts Are Not Secret: Reasoning-Trace Exposure in LLMs](https://aclanthology.org/2026.findings-emnlp.2303/)
+13. [TRACE: An Evidence-Grounded Benchmark for Safety Evaluation of Large Reasoning Models](https://aclanthology.org/2026.emnlp-main.1174/)
+14. [OpenAI Reasoning 模型指南](https://developers.openai.com/api/docs/guides/reasoning)
+15. Anthropic [Thinking](https://platform.claude.com/docs/en/build-with-claude/thinking) 与 [Preserved thinking](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking)
+16. [Rethinking Benchmark and Contamination for Language Models with Rephrased Samples](https://arxiv.org/abs/2311.04850v2)
 
-本章写作时已对上述入口进行联网访问；其中论文入口返回正常 HTTP 响应，三个官方文档入口也可访问。资料只用于支持公开方法、公开接口和公开实验，未将闭源模型的未披露训练细节写成事实。
+OpenAI 与 Anthropic API 文档核验日期：2026-11-12。页面会持续更新，实际集成应以目标模型和 API 版本的当前合同为准。论文和文档用于支持各自公开的方法、接口和实验，不证明闭源模型未披露的训练细节或内部状态。

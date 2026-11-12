@@ -469,83 +469,83 @@
 
 25. Dataset 和 DataLoader 的职责边界是什么？
     考察点：单样本读取、batch 组装、shuffle、sampler、worker。
-    回答框架：Dataset 负责定义单个样本如何读取和轻量预处理；DataLoader 负责按 batch 取样、可选 shuffle、多进程加载、调用 `collate_fn` 和配合 sampler 控制顺序。
+    回答框架：map-style Dataset 按 key 读取单样本，IterableDataset 从流中产样本；DataLoader 负责取样或迭代、worker 调度、batch 组装与 `collate_fn`。流式数据没有 index，rank/worker 分片和 shuffle 要由数据流实现。
 
 26. 为什么变长文本样本通常在 `collate_fn` 里 padding？
     考察点：batch max length、padding waste、attention_mask、labels ignore。
-    回答框架：pad 到多长取决于当前 batch 的最长样本，所以 padding 是 batch 级逻辑。放在 `collate_fn` 里可以按 batch 动态 padding，同时构造 `attention_mask` 并把 padding label 设为 `-100`。
+    回答框架：pad 到多长取决于当前 batch 的最长样本，所以通常由 `collate_fn` 动态 padding。它可同时构造 `attention_mask` 和 `labels=-100`；前者按模型约定控制注意力，后者忽略 loss 目标。还要在 shift 后核对有效标签数和 loss 分母。
 
 27. causal LM 数据 batch 的核心 shape 怎么检查？
     考察点：`input_ids [B,T]`、`labels [B,T]`、`attention_mask [B,T]`、shift。
-    回答框架：先看 `input_ids`、`labels` 和 `attention_mask` 是否都是 `[B,T]`；再看 padding 位置 label 是否为 ignore index；最后确认 next-token loss 使用 `logits[:, :-1, :]` 和 `labels[:, 1:]`。
+    回答框架：先看 `input_ids`、`labels` 和 `attention_mask` 是否都是 `[B,T]`；再看 padding 位置 label 是否为 ignore index；最后确认 next-token loss 的预测位置与 `labels[:, 1:]` 对齐，并检查模型是否已在内部 shift，避免重复移位。
 
 28. `shuffle`、`sampler` 和 `batch_sampler` 有什么区别？
     考察点：样本顺序、索引控制、batch 组成控制。
-    回答框架：`shuffle=True` 是简单随机打乱；sampler 控制单个样本索引顺序；batch sampler 直接产出一批索引，适合 length bucket 或复杂 batch 组成策略。
+    回答框架：map-style 的 `shuffle=True` 是随机顺序便捷入口；sampler 逐个控制 key，batch sampler 直接产出一批 key，适合 length bucket。它们不能重复指定；IterableDataset 没有 key，不能使用这两类 sampler，顺序由 `__iter__` 控制。
 
 29. 为什么分布式训练要用 `DistributedSampler`，还要调用 `set_epoch`？
     考察点：rank 切分、重复样本、epoch shuffle。
-    回答框架：`DistributedSampler` 按 rank 切分数据，避免每张卡都训练完整数据集。每个 epoch 调用 `set_epoch(epoch)` 可以刷新 shuffle 顺序，否则不同 epoch 的随机顺序可能不变。
+    回答框架：`DistributedSampler` 按 rank 切分有限 map-style 数据集；所有 rank 使用相同 seed，并在创建每个 epoch 的 iterator 前调用 `set_epoch(epoch)`。若 `N` 不能被 world size 整除，sampler 默认补齐会重复索引，sampler 自己的 `drop_last=True` 则丢尾；`DataLoader(drop_last=True)` 又会丢每个 rank 的不完整 batch，必须分别统计。
 
 30. `num_workers`、`pin_memory`、`persistent_workers` 和 `prefetch_factor` 分别解决什么问题？
     考察点：CPU 预处理、CPU-GPU 拷贝、worker 启动成本、预取。
-    回答框架：`num_workers` 控制并行加载进程数；`pin_memory` 有助于 CPU 到 GPU 异步拷贝；`persistent_workers` 减少多 epoch 反复启动 worker 的开销；`prefetch_factor` 控制预取 batch 数。它们影响吞吐和内存，不改变训练目标。
+    回答框架：`num_workers` 并行执行 Dataset/collate，也增加 Dataset 副本的内存；`pin_memory` 支持 host 到 CUDA 的快速传输，custom batch 需实现 `pin_memory()`；`persistent_workers` 保留 worker；`prefetch_factor` 决定每 worker 的排队 batch 数。PyTorch 2.15 的 `in_order=False` 允许先完成的 batch 先返回，但会削弱顺序复现并可能偏斜不平衡数据。收益需结合等待时间、内存和有效 token/s 测量。
 
 31. DataLoader 相关 bug 通常怎么排查？
     考察点：样本结构、batch shape、mask、worker、sampler。
-    回答框架：先打印单样本，再打印一个 batch；检查字段、shape、padding、ignore index 和 shift；再看 shuffle / sampler / rank 切分；最后排查 `num_workers`、IO、解码和 `collate_fn` 是否成为瓶颈。
+    回答框架：先打印单样本，再检查 batch 的字段、shape、padding、ignore index、shift 和有效目标数；再审计一个 epoch 的 sampler/rank 覆盖、IterableDataset 的 worker shard 与随机种子；最后分段量 batch 等待、collate、搬运、计算和内存，定位瓶颈。
 
 32. 如何设计一个最小 DataLoader audit demo？
     考察点：Dataset、collate、padding waste、DistributedSampler、reproducibility。
-    回答框架：构造变长 toy token 序列；Dataset 返回单样本；`collate_fn` 动态 padding 并设置 `labels=-100`；DataLoader 固定 generator seed；输出 batch shape、attention mask、valid token ratio、shift shape、length bucket 前后 padding waste，并用 `DistributedSampler` 验证 rank 间索引是否重叠。
+    回答框架：构造变长 toy token 序列；检查样本→collate→shift 后的有效标签数；固定 DataLoader generator 并单独设置 worker seed；输出 padding waste；再用可整除和不可整除的 `DistributedSampler` 对比补齐/丢尾与跨 rank overlap，明确它和 DataLoader 的 batch `drop_last` 不同。
 
 33. 一个标准 PyTorch training step 的顺序是什么？
     考察点：zero_grad、forward、loss、backward、clip、optimizer、scheduler。
-    回答框架：常见顺序是 `zero_grad`、forward、loss、`backward()`、可选 gradient clipping、`optimizer.step()`、`scheduler.step()` 和日志记录。梯度裁剪必须在 backward 后、optimizer step 前。
+    回答框架：先清除旧梯度（常用 `zero_grad(set_to_none=True)`），再 forward、计算 loss、`backward()`、可选裁剪、`optimizer.step()`，最后按配置调用 `scheduler.step()` 并记录指标。裁剪放在反向传播后、参数更新前；按更新计数的 scheduler 跟随真实 optimizer step。
 
 34. 梯度累积为什么要缩放 loss？
-    考察点：micro-batch、平均梯度、隐式学习率。
-    回答框架：PyTorch 梯度默认累积。累积 `K` 个 micro-batch 时，如果每个 loss 不除以 `K`，最终梯度尺度会约等于平均梯度的 `K` 倍，相当于隐式放大学习率。
+    考察点：micro-batch、尾窗口、有效目标分母、隐式学习率。
+    回答框架：梯度默认累加；若目标是让当前窗口内每个 micro-batch 等权，应除以窗口的实际 batch 数，尾窗不足 `K` 时不能仍除以 `K`。若目标是让每个预测 token 等权，应累计 loss sum 后除以窗口的有效目标数；类别加权交叉熵要改用目标权重之和作为分母。
 
 35. scheduler 应该按 micro-step 还是 optimizer step 更新？
     考察点：真实参数更新、梯度累积、warmup steps。
-    回答框架：多数按 step 更新的 scheduler 应跟随真实 `optimizer.step()`，不是每个 micro-step。否则使用梯度累积时学习率会过快 warmup 或 decay。
+    回答框架：多数按更新步定义的 scheduler 应跟随真实 `optimizer.step()`，不是每个 micro-step。`accum_steps=4` 时，每个 micro-step 调度会让 100-step warmup 在 100 个 micro-batch、即 25 次参数更新后结束，比配置早 75 次更新。
 
 36. 语言模型训练循环里 shift loss 怎么检查？
-    考察点：`logits[:, :-1, :]`、`labels[:, 1:]`、`ignore_index`。
-    回答框架：因果 LM 用当前位置预测下一个 token，所以 logits 去掉最后一位，labels 去掉第一位；展平后用 cross entropy，并用 `ignore_index=-100` 跳过 padding 或非监督位置。
+    考察点：因果预测对齐、padding mask、有效目标分母。
+    回答框架：因果 LM 用 `logits[:, :-1, :]` 预测 `labels[:, 1:]`，展平后以 `ignore_index=-100` 跳过非监督位置。累积和验证都要在 shift 后统计有效目标；无类别权重时按目标数归一化，有类别权重时按目标权重和归一化。
 
 37. validation loop 为什么要同时用 `eval()` 和 `inference_mode()`？
     考察点：模块行为、关闭梯度、显存、恢复训练模式。
-    回答框架：`eval()` 改变 dropout / batch norm 等模块行为，`inference_mode()` 关闭梯度记录并降低推理开销。它们解决的问题不同；验证结束后要恢复 `model.train()`。
+    回答框架：`eval()` 改变 Dropout / BatchNorm 等模块行为，`inference_mode()` 关闭梯度记录及相关跟踪；两者互不替代。验证应按有效目标数聚合 token loss，并在结束时恢复进入验证前的训练模式。inference mode 内创建的 tensor 之后不能直接用于 autograd 跟踪的计算。
 
 38. 完整训练 checkpoint 应该保存什么？
-    考察点：model、optimizer、scheduler、step、config、rng。
-    回答框架：恢复训练需要保存模型权重、optimizer state、scheduler state、epoch / global step、config 和随机状态。只保存模型会丢失动量、二阶矩和学习率位置，恢复后训练轨迹会变化。
+    考察点：安全保存边界、optimizer / scheduler、数据游标、随机状态、best metric。
+    回答框架：至少保存模型、optimizer、scheduler、epoch / global step、配置、最佳指标、随机状态和数据进度；需要时还要保存 GradScaler 及各 rank 状态。默认在 optimizer step 后保存；若在累积窗口中途保存，还要保存每个参数的 `.grad`、窗口计数、loss 分母和数据游标。加载时按 scheduler 文档要求先初始化 scheduler，再加载 scheduler/optimizer 状态，并核对下一步。
 
 39. 训练中出现 non-finite loss 怎么排查？
     考察点：NaN / Inf、batch、lr、grad norm、mask、AMP。
-    回答框架：先确认 loss 还是梯度非有限，再看当前 batch、学习率、grad norm、混合精度溢出、mask 是否全忽略或全 `-inf`、输入是否有异常值，并保存问题 batch 做复现。
+    回答框架：分层检查输入、logits、loss 和 backward 后的梯度，先确认 shift 后仍有有效监督目标。保留 batch 标识、有效 token 数、学习率和最近正常 checkpoint；非有限梯度用 `clip_grad_norm_(..., error_if_nonfinite=True)` 尽早中断，不要继续 step。裁剪限制更新尺度，不能修复坏数据、错误 mask 或 scheduler / optimizer 恢复问题。
 
 40. 如何设计一个最小 Training Loop audit demo？
     考察点：shift loss、accumulation、clip、scheduler、eval、checkpoint。
-    回答框架：构造 tiny causal LM 和 toy batches；训练时输出 raw loss、grad norm、optimizer step 数、scheduler last epoch 和 final lr；验证使用 token-weighted loss；保存并恢复完整 checkpoint，确认恢复后验证 loss 一致。
+    回答框架：构造 tiny causal LM 和固定 toy batches，输出 loss、有效 token 数、grad norm、真实 optimizer/scheduler step 和 final lr；用 token 加权验证，保存完整状态后恢复并比较固定 batch 的输出，再让两条分支执行同一步，比较权重、optimizer 和 scheduler state。若训练与评估使用同一组 toy batches，应声明这不证明泛化；CPU demo 也不能外推到 CUDA、多 worker 或生产训练。
 
 41. FP16 和 BF16 的核心区别是什么？
     考察点：指数范围、尾数精度、动态范围、训练稳定性。
-    回答框架：两者都是 16 位浮点，但 BF16 指数位更多，动态范围更接近 FP32，通常更不容易溢出；FP16 精度和硬件效率也常见，但更依赖 loss scaling 和数值检查。实际选择要看硬件、算子支持和训练稳定性。
+    回答框架：两者都是 16 位浮点，但 BF16 指数位更多，动态范围更接近 FP32，通常更不容易溢出；FP16 尾数更细，最大有限值约 65,504，但范围较窄。GradScaler 缓解 FP16 小梯度下溢，却不保证 scale 大于 1，也不能证明一个 BF16 预训练模型适配 FP16。实际选择要看硬件、算子支持和固定 workload 的数值/性能结果。
 
 42. `autocast` 和 `GradScaler` 分别解决什么问题？
     考察点：算子 dtype 选择、FP16 下溢、loss scaling。
-    回答框架：`autocast` 按算子策略自动选择低精度或高精度执行，减少手动 dtype 管理；`GradScaler` 主要用于 FP16，把 loss 放大后反传，再在 optimizer step 前把梯度缩回真实尺度，以降低小梯度下溢风险。
+    回答框架：`autocast` 在前向和 loss 区域按算子策略选择 dtype，不需要手动把模型或输入整体转为 FP16/BF16；`GradScaler` 主要用于 FP16，把 loss 放大后反传，再在 optimizer step 前 unscale，以降低小梯度下溢风险。若发现 Inf/NaN，它可跳过本次 optimizer 更新；scale 也可能降到 1 以下。
 
 43. 为什么梯度裁剪前要先 `unscale_`？
     考察点：scaled gradient、真实梯度范数、clip 顺序。
-    回答框架：loss scaling 后 `.grad` 里保存的是放大后的梯度。如果直接裁剪，裁剪的是 scale 后的范数，会改变真实优化方向和裁剪阈值含义。正确顺序是 backward、`scaler.unscale_(optimizer)`、clip、`scaler.step()`、`scaler.update()`。
+    回答框架：loss scaling 后 `.grad` 里保存的是放大后的梯度。如果真实范数为 10、scale 为 1,024，缩放范数为 10,240；直接以 1.0 裁剪再 unscale 会得到约 0.00098，而正确先 unscale 再裁剪应为 1.0。顺序是 backward、`scaler.unscale_(optimizer)`、clip、`scaler.step()`、`scaler.update()`。
 
 44. Activation checkpointing 为什么能省显存，代价是什么？
     考察点：保存激活、重算 forward、计算换显存。
-    回答框架：checkpointing 不保存某些中间激活，而是在 backward 时重新执行对应 forward 来恢复所需中间值，因此降低 activation 显存。代价是 backward 计算更慢，并且要注意随机层、非纯 forward 副作用和 checkpoint API 参数。
+    回答框架：checkpointing 不保存某些中间激活，而是在 backward 时重新执行对应 forward 来恢复所需中间值，因此降低 activation 显存。代价是 backward 计算更慢，并且要注意重算时状态一致。PyTorch 2.15 默认保存 CPU 和一种推断出的非 CPU device RNG；多设备类型或函数内部搬到新设备可能超出范围，`torch.compile` 下 `preserve_rng_state=False` 不生效。文档推荐显式传 `use_reentrant=False`。
 
 45. 训练显存通常由哪些部分组成？
     考察点：参数、梯度、optimizer state、activation、temporary buffer。
@@ -557,11 +557,11 @@
 
 47. 训练 OOM 时你会按什么顺序排查？
     考察点：batch、sequence length、precision、activation、optimizer state、泄漏。
-    回答框架：先记录 OOM 阶段、shape、有效 token、dtype、rank 和第一次超限的分配；再比较 PyTorch 的 allocated、reserved、peak 与设备进程读数。nvidia-smi 会计入 allocator 缓存块，但其读数不等于 memory_reserved，还可能包含 CUDA context、NCCL 或自定义分配。allocated 本身触顶时先找活 tensor 和生命周期；reserved 高而 allocated 低时看 snapshot 的 block/segment 与外部内存。之后再依 OOM 阶段检查 micro-batch、attention 中间量、optimizer 首步、evaluation 缓存、checkpoint copy 与 gradient checkpointing 的取舍。
+    回答框架：先记录 OOM 阶段、shape、有效 token、dtype、rank 和第一次超限的分配；每个要独立比较的区间开始前同步并重置 peak，再比较 PyTorch 的 allocated、reserved、peak 与设备进程读数。nvidia-smi 可能还包括 CUDA context、NCCL 或自定义分配，不等于 `memory_reserved()`。按加载、forward、backward、首次 optimizer step、validation 和随 step 增长区分参数/状态、激活、临时 buffer 与引用泄漏；一次只改一个变量。
 
 48. 如何设计一个最小 AMP memory audit demo？
-    考察点：显存估算、autocast dtype、GradScaler、checkpoint 重算、CUDA 状态。
-    回答框架：构造 tiny MLP，先用参数量和 activation 元素数估算参数、梯度、AdamW state 和 activation 显存；用 `torch.amp.autocast` 检查输出 dtype；用 `GradScaler` 跑 scale、unscale、step、update；再用一个计数 block 对比普通 forward 和 checkpoint backward 的 forward 调用次数，最后打印 CUDA 是否可用和显存统计字段。
+    考察点：显存估算、CPU BF16 autocast、checkpoint 重算和 GradScaler 的适用范围。
+    回答框架：构造 tiny MLP，先用参数量和 activation 元素数估算参数、梯度、AdamW state 和 activation 显存；用 CPU BF16 autocast 检查输出 dtype，并在这个 BF16 路径中不启用 GradScaler；再用计数 block 对比普通 forward 和 checkpoint backward 的调用次数。FP16 的 scaler 顺序单独展示 scale、unscale、clip、step 和 update，避免暗示 BF16 需要 GradScaler。CPU demo 不报告 CUDA 性能或真实 GPU 显存。
 
 48A. 如何从 `allocated`、`reserved` 和峰值时间线判断训练 OOM？
     考察点：live tensor、caching allocator、独立峰值、首个 Adam step。
@@ -633,35 +633,35 @@
 
 49. DDP 的工作原理是什么？
     考察点：数据并行、模型副本、backward、all-reduce、参数一致性。
-    回答框架：每个 rank 持有一份模型副本并处理不同 mini-batch；backward 时 DDP 通过 autograd hook 同步梯度 bucket，all-reduce 后每个 rank 拿到一致的平均梯度，再各自执行 optimizer step，因此参数保持一致。
+    回答框架：DDP 不切分输入，sampler/loader 负责给每个 rank 提供不同 batch。默认初始化同步先让各 rank 参数起点一致；backward 时 reducer 按 bucket 对梯度做跨 rank 平均；每个进程再用相同 optimizer 配置更新。若 loss reduction、optimizer step 或 rank 的更新状态不一致，通信完成本身不保证训练目标等价。
 
 50. rank、local rank 和 world size 分别是什么？
     考察点：全局进程编号、本机 GPU 编号、总进程数。
-    回答框架：rank 是全局进程编号，local rank 是当前机器内的进程或 GPU 编号，world size 是总训练进程数。通常用 local rank 绑定 GPU，用 rank 0 控制日志和 checkpoint，用 world size 计算 global batch 和通信规模。
+    回答框架：`RANK` 是当前 worker group 内的全局进程编号，`LOCAL_RANK` 是本机 worker 编号，`WORLD_SIZE` 是总进程数。固定且同构的节点上可用 `node_rank * local_world_size + local_rank` 理解映射；实际以 `torchrun` 环境变量为准。CUDA 模式下 local rank 常用于绑定本进程 GPU，rank 0 常用于日志/权重保存。
 
 51. 为什么 DDP 要配合 DistributedSampler？
     考察点：数据切分、重复样本、set_epoch、shuffle。
-    回答框架：DDP 不会自动切分 Dataset。每个 rank 应该处理不同样本子集，否则多卡重复训练同一批数据；DistributedSampler 按 rank / world size 切分索引，并通过 `set_epoch(epoch)` 改变每个 epoch 的 shuffle 顺序。
+    回答框架：DDP 不会自动切分 Dataset。map-style 数据常用 `DistributedSampler`，各 rank 使用同一 seed，并在创建该 epoch 的 iterator 前调用 `set_epoch(epoch)`。sampler 默认补齐使每个 rank 等长，可能重复索引；sampler `drop_last=True` 会先截尾，而 `DataLoader(drop_last=True)` 会丢每个 rank 的不完整尾 batch，需分别核对实际消费 id。
 
 52. global batch size 怎么计算，为什么它重要？
     考察点：per-device batch、world size、gradient accumulation、学习率。
-    回答框架：`B_global = B_device * world_size * accum_steps`。从单卡切到多卡时，如果每卡 batch 不变，global batch 会变大，优化动态、学习率、warmup、训练步数和日志指标都可能需要重新校准。
+    回答框架：在各 rank micro-batch 大小一致且 accumulation 窗口完整时，`B_global = B_device * world_size * accum_steps`。例如 `2×4×3=24`。尾窗应按实际 micro-step 计算；变长语言模型还要统计 `Σ valid_tokens`，它决定 token-mean loss 的分母和有效吞吐。从单卡换多卡后应说明保持的是 global batch、总训练 token 还是墙钟时间。
 
 53. all-reduce 在 DDP 中起什么作用？
     考察点：collective、梯度求和 / 平均、同步代价。
-    回答框架：all-reduce 会把所有 rank 上的梯度归约并把结果返回给所有 rank。DDP 用它让每张卡拿到相同平均梯度，代价是引入通信开销，受参数量、梯度 dtype、网络带宽和同步频率影响。
+    回答框架：all-reduce 对同一 process group 的张量做归约，并让参与 rank 都拿到结果。标准 DDP 默认按 world size 平均梯度；自定义 communication hook 或 uneven-input `join()` 的分母可能不同。梯度同步受 bucket 大小、数据量、拓扑、带宽及同步频率影响；全局指标应各自汇总分子与分母，不能只读 rank 0 的本地 mean。
 
 54. 梯度累积时为什么要用 DDP 的 `no_sync()`？
     考察点：micro-step、同步频率、通信浪费、最后一步同步。
-    回答框架：如果每个 micro-step 都同步梯度，通信次数会放大。`no_sync()` 应包含对应的 forward 和 backward，让非最后的 micro-step 只本地累积；最后一个恢复同步再更新。通信次数减少不改变归一化要求，变长 micro-batch 或不同 rank 的有效 token 不等时，不能只平均各自的 mean loss。
+    回答框架：`no_sync()` 应同时包含 forward 和 backward；前 `A-1` 个 micro-step 只本地累积，窗口末的同步 backward 再归约整个窗口的梯度。它减少重复通信，不会自动除以真实窗口大小或有效 token 总数；epoch 尾窗和 rank 间 token 数不等时必须按实际分母缩放。
 
 55. DDP 和 FSDP 的区别是什么？
     考察点：完整模型副本、参数 / 梯度 / optimizer state 分片、显存。
-    回答框架：DDP 每个 rank 通常持有完整参数、梯度和 optimizer state，主要解决吞吐扩展；FSDP 会分片参数、梯度和优化器状态，降低单卡显存，但通信、wrap policy、checkpoint 和 debug 更复杂。
+    回答框架：DDP 每个 rank 持有完整参数、梯度和 optimizer state，主要提供数据并行；full-shard FSDP 将这些训练状态按 rank 分片，计算时 all-gather 参数、反向后 reduce-scatter 梯度，从而降低常驻状态显存。临时 full parameters、activation 和通信 buffer 仍在峰值账本中；FSDP API/state_dict 也需按版本区分。
 
 56. 如何设计一个最小 Distributed Training audit demo？
     考察点：rank 切分、global batch、all-reduce、no_sync、collective、rank0 checkpoint。
-    回答框架：用 toy world size 构造每个 rank 的数据索引，检查 overlap 和覆盖；计算 global batch；用几个本地梯度模拟 all-reduce 平均和参数一致性；比较 `no_sync` 前后通信次数；构造某个 rank 缺失 all-reduce 的 trace 来验证能发现 collective 不一致；最后检查只有 rank 0 写 checkpoint。
+    回答框架：纯 Python toy demo 可以检查分片账本、均值梯度算术、同步次数和事件序列，但不能证明 PyTorch collective、NCCL、GPU 或多机行为。实际 DDP 需在目标环境另行验证 rank/设备映射、数据分片、token 分母、collective 顺序和 checkpoint 恢复。
 
 56A. 分布式训练卡死、吞吐低或 checkpoint 恢复异常时，如何设计 distributed incident gate？
     考察点：rank step alignment、collective mismatch、token shard imbalance、straggler ratio、communication ratio、checkpoint shard coverage、resume continuity、pipeline bubble。
@@ -669,7 +669,7 @@
 
 56B. 变长 batch 下如何用 DDP 得到全局 token-mean 梯度？
     考察点：输入 token 与 prediction target、loss sum/mean、DP group、梯度累积、DDP rank-average。
-    回答框架：先按真实 label shift 和 mask 计每个 rank 的有效目标数 `n_r`，令完整 accumulation window 的 `N=Σn_r`；局部保留未归一化 loss sum `S_r`。PyTorch DDP 默认把 DP ranks 的梯度平均，所以每 rank backward `S_r * P/N`，其中 `P=N_dp`，最终得到 `Σ∇S_r/N`。若 loss API 已做 mean、hook 改写了通信或 trainer 再除 accumulation steps，必须重推缩放；3 rank 的 `(n,s)=(100,50),(200,110),(400,220)` 全局 loss 为 `380/700≈0.5429`，等权 rank means 则约 `0.5333`。参考：[PyTorch DDP 2.14](https://docs.pytorch.org/docs/2.14/generated/torch.nn.parallel.DistributedDataParallel.html)。
+    回答框架：先按 label shift 和 mask 计每个 rank、整个 accumulation window 的有效目标数 `n_r`，令 `N=Σn_r`；本地保留未归一化 loss sum `S_r`。默认 DDP 对 `P` 个 rank 的梯度平均，因此每 rank backward `S_r * P/N`，归约后得到 `Σ∇S_r/N`。若 loss 已取 mean、hook 改写通信或 trainer 另做 world-size/accumulation 缩放，必须重推。示例 `(n,s)=(100,50),(200,110),(400,220)` 的全局 loss 为 `380/700≈0.5429`，rank means 等权平均约 `0.5333`。参考：[PyTorch DDP 2.15](https://docs.pytorch.org/docs/2.15/generated/torch.nn.parallel.DistributedDataParallel.html)。
 
 56C. ZeRO 阶段与 PyTorch FSDP1/FSDP2 如何对应，为什么不能把它们当成同一个 API？
     考察点：optimizer/gradient/parameter sharding、通信生命周期、FlatParameter、DTensor、wrap 粒度。
@@ -717,15 +717,19 @@
 
 62. GPU 利用率低怎么排查？
     考察点：DataLoader、CPU-GPU copy、forward/backward、同步、通信。
-    回答框架：先单独计时 DataLoader 迭代，再分段计时拷贝、forward、backward 和 optimizer step；CUDA 计时要 synchronize；最后用 profiler 看 CPU/CUDA 时间分布，区分数据瓶颈、小 batch、频繁同步和分布式通信瓶颈。
+    回答框架：先在预热后单独测 DataLoader，再分段测拷贝、forward、backward 和 optimizer step；CUDA 计时只在窗口边界 synchronize。报告固定工作量下的墙钟时间与有效 token/s，并用 profiler 查看 CPU/CUDA 活动；区分数据瓶颈、小 batch、频繁同步和分布式等待。
 
 63. `torch.profiler` 能看什么，使用时有什么边界？
     考察点：CPU/CUDA 时间、shape、memory、调用次数、开销。
-    回答框架：profiler 可以看到算子耗时、调用次数、shape 和内存分配，适合定位瓶颈算子、DataLoader / copy / forward / backward 占比。它本身有开销，通常只开少量 step，并结合 schedule 和 trace 使用。
+    回答框架：profiler 可查看 CPU/CUDA 活动、算子 self/total time、调用次数、shape 和内存事件，用 schedule 采少量稳定 step；`record_shapes` / stack 会产生额外开销，shape tracing 还可能暂时持有 tensor。不同算子时间会重叠，不能把 key averages 所有行相加当作 step 墙钟；关闭 profiler 后仍要用独立 benchmark 验证收益。
 
 64. 如何设计一个最小 Debug / Profiling audit demo？
     考察点：metadata、finite、shift loss、hook、grad norm、timing、profiler。
-    回答框架：构造 tiny LM 和 toy batch，输出 input / logits / shifted tensors 的 metadata；检查 shift flatten 维度和有效 label 数；计算 loss 并做 finite check；注册 forward hook 记录激活 shape 后 remove；打印所有参数 grad norm 和 optimizer 覆盖；做基础 step timing，并把 profiler 做成可选小范围入口。
+    回答框架：构造 tiny LM 和 toy batch，输出 input / logits / shifted tensors 的 metadata；检查 shift flatten 维度和有效 label 数；计算 loss 并做 finite check；注册 forward hook 记录激活 shape 后 remove；打印参数 grad norm 和 optimizer 覆盖；做 CPU smoke timing，并把 CPU profiler 做成可选小范围入口。明确它没有验证 optimizer update 或 CUDA 性能。
+
+64A. `torch.compile` 的 graph break 和重编译怎样排查，怎样判断是否值得保留？
+    考察点：eager correctness、`fullgraph=True`、`TORCH_LOGS`、shape guards、warmup、稳态 benchmark。
+    回答框架：先在同一固定输入上对照 eager/compiled 输出与适当容差，再覆盖代表性 shape 预热；用 `TORCH_LOGS="graph_breaks,recompiles"` 查看断点原因和 guard 失效，`fullgraph=True` 可把断图变成定位错误但不证明性能更好。用同步边界或 `torch.utils.benchmark.Timer` 比较稳态，固定模型、batch/token、dtype、设备与线程；Profiler trace 不代替 benchmark，单个模型或 shape 的收益不外推到全部 workload。
 
 65. 手写 decoder-only Transformer 组件时，最小模块清单是什么？
     考察点：embedding、RMSNorm、causal attention、MLP、block、LM head、loss。
@@ -739,9 +743,9 @@
     考察点：`hidden_size % num_heads`、reshape、transpose、mask、contiguous。
     回答框架：常见错误包括 `hidden_size` 不能整除 head 数、Q/K/V reshape 维度顺序错、mask 广播能跑但语义方向错、transpose 后直接 `view` 报错，以及 softmax 前没有正确屏蔽未来 token。
 
-68. 为什么 KV Cache decode 的 causal mask 不能只按 `[T,T]` 写？
-    考察点：prefill、decode、query_len、key_len、past length。
-    回答框架：训练或 prefill 时 query 和 key 长度通常相同；decode 时 query 可能只有当前 token，但 key/value 包含完整历史 cache。mask 要考虑 `past_key_values_length`，否则当前 query 可能只能看见 key 的第一个位置，而不是全部历史。
+68. PyTorch SDPA 中 `T_q != T_k` 时，为什么不能直接假设 `is_causal=True` 已处理 KV Cache offset？
+    考察点：prefill、decode、query_len、key_len、左上/右下对齐、显式绝对位置。
+    回答框架：PyTorch 2.15 的 SDPA 非方阵 `is_causal=True` 使用左上对齐；`T_q=1,T_k=6` 时只开放 key 0，不代表位于历史长度 5 后的新 query 可见全部 key。`causal_lower_right(1,6)` 能表达尾部对齐，但该 API 标为 prototype；含 padding 或非连续布局时，应按绝对 query/key 位置构造并核验 mask。SDPA bool mask 中 True 表示允许，MultiheadAttention 的 mask 中 True 表示屏蔽。
 
 69. LM head weight tying 如何检查？
     考察点：参数共享、embedding、lm_head、checkpoint。
@@ -758,6 +762,10 @@
 72. 手写 Transformer 组件和调用 `nn.Transformer` 的面试价值有什么区别？
     考察点：机制理解、shape debug、工程接口。
     回答框架：调用高层 API 能快速搭系统，但会隐藏 Q/K/V reshape、mask 方向、loss shift、cache 拼接等面试高频机制。手写最小组件的价值是证明自己能定位底层 shape 和语义错误；真实工程再根据需要使用高层 API 或优化 kernel。
+
+72A. `scaled_dot_product_attention` 的 `.eval()` 会自动关闭 dropout 吗？
+    考察点：函数参数、模块训练状态、推理确定性、后端误差。
+    回答框架：不会。SDPA 按传入的 `dropout_p` 应用 dropout；评估和生成时调用者应显式传 `0.0`。不同融合后端可能有细小浮点差异，因此应按 dtype/后端设合理容差，不能把调用 SDPA 等同于必然使用 FlashAttention 或获得固定加速。接口事实限定为 PyTorch 2.15 文档。
 
 73. PyTorch 工程面试回答的标准结构是什么？
     考察点：机制、shape、公式、坑、排查路径。
@@ -782,6 +790,10 @@
 78. 如何设计训练稳定性门禁？
     考察点：first bad step、loss spike、NaN / Inf、grad norm、AMP overflow、有效 label token、LR continuity、rank loss skew、checkpoint resume。
     回答框架：每 step 记录 loss、真实 lr、grad norm、overflow、有效 label token、batch id、rank loss 和 resume 状态；门禁约束 non-finite 为 0、spike 和 grad norm 不超阈值、overflow 率可控、有效 label token 不异常、resume 后 lr 连续、rank loss skew 不过大。失败时输出 first bad step 和 failed gates，再保存 batch 做单卡 / fp32 / 小 batch 最小复现。
+
+79. 训练 loss 快速下降但独立验证没有提升，怎样设计有区分力的最小实验？
+    考察点：成功条件、竞争假设、固定 batch、label shift、mask 可见性、有效分母、反事实验证。
+    回答框架：固定一个短序列，逐位置列出 input、允许读取的 key 和 shifted target；先核对 tokenizer/template 与有效 label 数，再分别只改 shift、causal mask 或 padding label 做反事实对照。预先说明每种假设预测的输出和会推翻它的观测；只有实现与分母通过后，再调查学习率、数据分布或模型容量。该顺序把“过拟合”等解释留到监督契约被验证之后。
 
 ## Transformer 与 LLM
 
@@ -2758,7 +2770,7 @@
 
 11. Vision encoder 在 VLM 中到底决定了什么？
     考察点：视觉可见性、patch tokens、全局 embedding、OCR / grounding、projector 前置条件。
-    回答框架：vision encoder 决定模型能从图像里提取哪些视觉证据，输出可以是全局 image embedding 或 patch-level visual tokens；如果 vision encoder 分辨率低、patch 太大或预训练目标不覆盖 OCR / 图表，后面的 LLM 和指令微调也很难凭空恢复细节。
+    回答框架：vision encoder 决定模型能从图像里提取哪些视觉证据，输出可以是全局 image embedding、多层特征或 patch-level visual tokens；如果分辨率低、patch 太大或预训练目标不保留局部关系，后面的 LLM 和指令微调也很难凭空恢复细节。DINOv3 论文用 Gram anchoring 维持长训练中的 patch-level 一致性，是该模型训练设置的例子，不是所有视觉塔的通用机制。还要区分视觉塔、processor、projector 和语言模型的责任。[第十五册第三章](book-15-multimodal-generative-models/chapters/03-vision-encoder.md)、[DINOv3 原论文](https://arxiv.org/abs/2508.10104v1)
 
 12. CNN 和 ViT 作为视觉编码器的核心区别是什么？
     考察点：卷积局部归纳偏置、残差连接、patch token、self-attention、数据规模。
@@ -2794,7 +2806,7 @@
 
 20. 多模态 instruction tuning 数据训练前要审计什么？
     考察点：样本 schema、placeholder、assistant-only labels、任务覆盖、证据支持、拒答边界。
-    回答框架：先检查图片数量和 `<image>` 占位符数量是否一致，再检查 visual tokens 加文本后是否超上下文、labels 是否只覆盖 assistant 回答；然后按 caption、VQA、OCR、chart、grounding、多轮和 refusal 统计 task coverage，抽检答案是否被图片证据支持，资料不足样本是否正确拒答，最后把不合格样本拒绝进入训练。
+    回答框架：先检查图片数量和 `<image>` 占位符数量是否一致，再检查 visual tokens 加文本后是否超上下文、labels 是否只覆盖 assistant 回答；然后按 caption、VQA、OCR、chart、grounding、多轮和 refusal 统计 task coverage。证据支持率按所有已标注 claim 计算，并明确被拒绝样本是否仍在质量审计分母中；应拒答样本报告拒答召回率，可回答样本另报过度拒答率。抽检答案是否被图片证据支持、资料不足样本是否正确拒答，最后把不合格样本拒绝进入训练。
 
 21. Chat template 在多模态 SFT 中为什么重要？
     考察点：role boundary、image placeholder、assistant 起始标记、训练推理一致性、label shift。
@@ -2822,11 +2834,15 @@
 
 27. Noise scheduler 对 diffusion 有什么影响？
     考察点：训练加噪、采样路径、步数、质量速度 trade-off。
-    回答框架：scheduler 决定训练/推理噪声时间表、输出参数化的还原方式和每步状态更新。DDIM 保留 DDPM 训练目标而改用非马尔可夫采样路径；DPM-Solver 把采样写成扩散 ODE 并使用专用高阶求解器，这两类不需为 sampler 额外重训。Progressive Distillation 则训练学生逼近教师多步轨迹，以训练成本换较少推理调用。三者的少步质量和真实延迟仍取决于 checkpoint、schedule、CFG、设备和评估任务。
+    回答框架：scheduler 决定推理时间网格、输出参数化的还原方式和每步状态更新；训练 schedule 则决定去噪器见到的噪声分布。DDIM 保留 DDPM 训练目标而改用非马尔可夫采样路径；DPM-Solver 为扩散 ODE 构造数值求解器，这两类不需为 sampler 额外训练。Progressive Distillation 训练学生逼近教师多步轨迹，以训练成本换较少推理调用。EDM 将训练、预条件与采样等设计项分开分析；Improved DDPM 的学习方差改变去噪器输出和训练目标。少步质量和真实延迟仍取决于 checkpoint、schedule、CFG、设备和评估任务；终端 SNR 问题也要核对具体 checkpoint 的训练端点。
 
 27A. Flow Matching 与 Normalizing Flow、Diffusion 是什么关系？
     考察点：可逆密度变换、连续向量场、概率路径、训练目标与 ODE 采样。
     回答框架：Normalizing Flow 常用可逆变换和 Jacobian 计算密度；Flow Matching 则训练连续向量场去拟合选定概率路径的目标速度。扩散路径可以是 Flow Matching 的路径之一，但路径、模型输出和数值采样器仍须配套。取 `x0=0`、`x1=4`、`t=0.25` 的直线路径时，`x_t=1`、目标速度为 `4`；预测 `3.5` 的平方误差为 `0.25`。这个单样本例子不能证明精确 likelihood、一步采样或更快的生产延迟。Pyramidal Flow Matching 展示了其与 DiT 和自回归视频时间金字塔的具体组合，结论绑定 ICLR 2025 论文配置。
+
+27B. 学习反向方差、训练权重和数值 solver 分别改变什么？
+    考察点：模型输出、训练目标、timestep weighting、采样更新。
+    回答框架：Improved DDPM 的学习方差增加反向分布方差输出，并配合混合变分目标训练；Min-SNR-γ 改变不同 timestep 对训练 loss 的贡献，且权重依赖 `x0`、epsilon 或 `v` 参数化；DPM-Solver 则改变推理时对扩散 ODE 的数值积分方式。三者作用位置不同，不能把学习方差或 loss weighting 叫作换 sampler。少步收益需绑定论文中的模型、训练和评估设置；见 [Improved DDPM v1](https://arxiv.org/abs/2102.09672v1)、[Min-SNR-γ v3](https://arxiv.org/abs/2303.09556v3)。
 
 28. Classifier-Free Guidance 的公式和风险是什么？
     考察点：conditional prediction、unconditional prediction、guidance scale、prompt 遵循、多样性。
@@ -2838,7 +2854,7 @@
 
 30. Stable Diffusion 的 pipeline 如何拆解？
     考察点：VAE、text encoder、U-Net / DiT、scheduler、latent denoising。
-    回答框架：prompt 先经过 tokenizer 和 text encoder 得到条件表示；随机 latent 在 scheduler 控制下由 U-Net 或 DiT 多步去噪；最后 VAE decoder 把 clean latent 解码成图片。VAE 负责降低空间成本，text encoder 负责语义条件，denoiser 负责生成主干，scheduler 决定采样路径。
+    回答框架：prompt 先经过 tokenizer 和 text encoder 得到条件表示；随机 latent 在 scheduler 控制下由 U-Net 或 DiT 多步去噪；最后 VAE decoder 把 clean latent 解码成图片。VAE 负责降低空间成本，text encoder 负责语义条件，denoiser 负责生成主干，scheduler 决定采样路径。SDXL 的 Diffusers v0.35.1 pipeline 使用 CLIP ViT-L/14 与 CLIP ViT-bigG/14 两路文本编码器，后一路还提供 pooled embedding；SD3 论文的 MM-DiT 则为文本/图像表示使用独立参数并在联合注意力中交换信息。这些是特定路线的例子，不可推广为所有 Stable Diffusion 系统的结构。
 
 31. Negative prompt 在 CFG 里到底怎么起作用？
     考察点：正条件、负条件、guidance scale、软约束、风险。
@@ -2846,15 +2862,19 @@
 
 32. ControlNet 和普通 prompt 控制有什么区别？
     考察点：结构条件、边缘 / 深度 / 姿态 / 分割、残差注入、可控性。
-    回答框架：prompt 主要描述语义，ControlNet 额外输入结构条件，并通过条件分支向 diffusion backbone 注入残差，让模型按给定边缘、深度、姿态或分割布局生成。它解决的是纯文本很难精确控制空间结构的问题。
+    回答框架：prompt 主要描述语义，ControlNet 额外输入结构条件，并通过条件分支向 diffusion backbone 注入残差，让模型按给定边缘、深度、姿态或分割布局生成。原论文冻结主干、复制可训练分支，并用零初始化卷积接入；训练开始时零卷积输出为零，因此初始控制支路不改变主干特征，之后再学会注入控制信号。条件预处理、裁剪、缩放和坐标对齐仍决定控制是否有效，不能只看网络结构。
 
 33. DALL·E 1、DALL·E 2、Imagen 和 Latent Diffusion 分别把瓶颈放在哪里？
     考察点：dVAE 离散图像 token、CLIP latent prior/decoder、T5 文本编码器、级联扩散、VAE latent 压缩、证据边界。
-    回答框架：DALL·E 1 把图像编码成离散 token 并自回归生成，统一 next-token 目标但序列长；DALL·E 2 将文本到 CLIP image embedding 的 prior 与扩散 decoder 分开，语义条件更明确但 embedding 会丢非关键细节；Imagen 用强文本编码器和级联扩散强调语言理解与高清合成，推理链更长；Latent Diffusion 把去噪移至感知压缩空间以降低成本，却受 VAE 重建质量限制。每种方案针对不同瓶颈，FID、DrawBench 和人评设置不一致，不能据论文数字拼成排行榜。
+    回答框架：DALL·E 1 把图像编码成离散 token 并自回归生成，统一 next-token 目标但序列长；DALL·E 2 将文本到 CLIP image embedding 的 prior 与扩散 decoder 分开，decoder 还保留可选 caption 条件，但论文发现这条路径对所研究的某些能力帮助有限；Imagen 用强文本编码器和级联扩散强调语言理解与高清合成，推理链更长；Latent Diffusion 把去噪移至感知压缩空间以降低成本，却受 VAE 重建质量限制。DALL·E 3 System Card 描述 ChatGPT/GPT-4 生成更详细 prompt 的产品编排与安全评估，不是完整模型架构披露。各路线的论文指标和人评设置不同，不能据此拼成排行榜。
+
+33A. DreamBooth 和 LoRA 分别是什么，能否组合？
+    考察点：subject-driven personalization、唯一标识词、prior preservation、低秩权重更新、参数量和训练成本。
+    回答框架：DreamBooth 是主体驱动的个性化微调方法，用少量主体图像和唯一标识词绑定特定主体，并可用 class-specific prior preservation 缓解过拟合和语言漂移；LoRA 是冻结基座权重、用低秩矩阵表示可训练更新的参数化方式。二者处于不同层次，可以组合。若目标矩阵为 `4096×4096`、rank 为 8，单矩阵 LoRA 更新含 `8×(4096+4096)=65,536` 个参数，约为原矩阵的 `0.390625%`；这不意味着训练总算力或激活显存按同一比例下降。
 
 34. 文生图 pipeline 上线前应该审计哪些数字？
     考察点：latent shape、VAE 压缩比、prompt token、U-Net 调用次数、ControlNet shape、安全门禁、组合能力评估。
-    回答框架：先检查分辨率和 VAE scale 得到的 latent shape，再算 prompt / negative prompt token 是否超上限；根据采样步数、CFG 和实现方式估 denoiser forward-equivalent；若有 image-to-image、inpainting 或 ControlNet，要检查 mask / 条件图 shape 与图像对齐。FID 看分布信号，GenEval / T2I-CompBench 看计数、位置和属性组合，最后加入人评、seed、scheduler、安全、版权和来源凭证回归。
+    回答框架：先检查分辨率和 VAE scale 得到的 latent shape，再算 prompt / negative prompt token 是否超上限；根据采样步数与 CFG 分支报告 denoiser forward-equivalents，同时单列函数调用数——两路拼成 batch 时可每步调用一次，但不会消除两路计算。Cross-attention 逻辑 score-cell 数按 `B×K×Σ_l(H_l N_{z,l}×Σ_j N_{c,j})` 估算，并说明它不等于 FLOPs 或峰值显存。image-to-image 的起始索引要标为教学映射，真实 timestep 由 pipeline/scheduler 决定；inpainting 和 ControlNet 还要检查 mask / 条件图 shape 与图像对齐。FID 看分布信号，GenEval / T2I-CompBench 看计数、位置和属性组合，最后加入人评、seed、scheduler、安全、版权和来源凭证回归。
 
 35. 视频生成为什么比图像生成难？
     考察点：时间维度、帧间一致性、身份保持、运动连续、物理合理性。
@@ -2873,8 +2893,8 @@
     回答框架：视频生成会学习时空外观与运动统计，因此是 world model 的候选，但判断关键是模型能否根据可观测状态和明确动作预测后果，并在多轮交互、遮挡恢复、反事实动作和长时滚动中保持一致。World-in-Context 这类预印本把视角、角色动作和摄像机控制显式表示并在 WBench 上评估；这是一个具体研究路线，不等于视频模型普遍具备可规划的物理世界模型（[论文](https://arxiv.org/abs/2610.33169)）。
 
 39. 如何设计一个视频生成上线前审计？
-    考察点：token / latent shape、时序一致性、FVD、VBench/VBench-2.0、自动评估器、人评、安全和 deepfake。
-    回答框架：先算帧数、分辨率、spatiotemporal tokens、latent shape、采样步数和 denoiser 调用次数；再切片评估 flicker、identity drift、动作遵循、遮挡后状态、跨轮一致、物理失败和 prompt 对齐。FVD 提供特征分布比较，VBench/VBench-2.0 拆分多项视频质量和内容维度；WBench 则以 5 个维度、289 个案例和 1,058 轮交互测多轮视频世界模型，并报告 22 个自动子指标经人工判断校验。它们分别服务于具体数据与协议，不能互相替代，也不能直接证明现实物理理解。最后加入深度伪造、肖像授权、版权和 provenance 门禁。
+    考察点：token / latent shape、CFG 计算口径、时序一致性、分布与任务评估、物理测量、自动评估器、人评、安全和 deepfake。
+    回答框架：先算帧数、分辨率、spatiotemporal tokens、latent shape 和采样步数；按 batch、采样步和条件分支报告样本级 denoiser 前向等价量，实际框架调用数另行记录；cross-attention score cells 要注明层、head 和 token 长度口径。评估按任务选协议：FVD 比较视频特征分布，VBench-2.0 拆分忠实度维度，WBench 测多轮交互，PVBench 与 World Models’ Last Exam in Physics 检查可观测的对象级或受控物理关系，KeyFrame-Compass 只适用于关键帧条件生成。记录 prompt、分母、模型快照、预处理、自动评估器和人工校准；这些协议不能互相替代，也不能单独证明现实物理理解。最后加入深度伪造、肖像授权、版权和 provenance 门禁。
 
 40. ASR、TTS 和 speech-to-speech 的区别是什么？
     考察点：语音转文本、文本转语音、语音到语音、cascade、full-duplex、Thinker-Talker、ARIA。
@@ -2898,11 +2918,11 @@
 
 45. 语音助手上线前应该审计哪些指标？
     考察点：采样率、log-mel shape、WER / CER、latency、codec tokens、授权、安全。
-    回答框架：先检查采样率、重采样、切片、VAD、文本规范化、WER/CER 和噪声/口音/数字/专名切片；对金额、日期、姓名和确认码另报关键字段错误与业务失败，必要时报告有明确 rubric 的 UER，并审计参考引导 normalizer 是否把错误改写成正确答案。再算 codec token rate、上下文长度、端到端首音与任务完成的 p50/p95/p99。流式系统需区分模型产出首个音频块与客户端实际播出首音，并测 endpoint、打断到停止旧音频的时间及迟到 chunk 是否被丢弃。若支持 voice cloning，还要把说话人相似度与 timing、prominence、intonation 等韵律指标分开，并检查授权、隐私、冒用风险和高风险操作确认。
+    回答框架：先检查采样率、重采样、切片、VAD、文本规范化、WER/CER 和噪声/口音/数字/专名切片；对金额、日期、姓名和确认码另报关键字段错误与业务失败，必要时报告有明确 rubric 的 UER，并审计参考引导 normalizer 是否把错误改写成正确答案。再算 codec token rate、上下文长度、端到端首音与任务完成的 p50/p95/p99。流式系统需区分文本 TTFT、模型首音频块 TTFC、服务端首包 TTFP 与客户端实际首音 TTFA，并测 endpoint、打断到停止旧音频的时间及迟到 chunk 是否被丢弃。若支持 voice cloning，还要把说话人相似度与 timing、prominence、intonation 等韵律指标分开，并按目标选择 LP-TTS-Bench（长 prompt 韵律）、SwanBench-Speech/DRAMA-Eval（长文或场景生成）或 InteractionBench（实时会话）；不同协议的结果不能拼成一个模型排名。最后检查授权、隐私、冒用风险和高风险操作确认。
 
 46. 什么是统一多模态模型？统一可以发生在哪些层次？
-    考察点：接口统一、表示统一、架构 / 目标统一、工程系统。
-    回答框架：统一多模态模型或系统希望处理文本、图像、音频、视频等多种输入输出。接口统一是多个模块对用户呈现一个助手；表示统一是映射到共享 embedding 空间；架构 / 目标统一是把多模态 token 放进统一 Transformer 或统一训练目标。真实产品常是三者混合。
+    考察点：接口统一、表示统一、架构 / 目标统一、native / end-to-end / encoder-free 的证据边界。
+    回答框架：统一多模态模型或系统希望处理文本、图像、音频、视频等输入输出。接口统一是多个模块对用户呈现一个助手；表示统一是映射到可比较的空间；架构 / 目标统一则要说明共享主干、共享训练机制或任务覆盖的具体范围。native 没有通用架构定义，end-to-end 不保证没有专用模块，encoder-free 是需要指定模态路径和组件的结构声明。[Qwen3.5 模型卡](https://huggingface.co/Qwen/Qwen3.5-397B-A17B)既称 early-fusion training，也列出 vision encoder；这两项描述的是不同层次，不能仅凭前者推出没有 encoder。
 
 47. Any-to-Any 多模态为什么难？
     考察点：输入输出模态、decoder 差异、数据配比、延迟、评估。
@@ -2914,7 +2934,7 @@
 
 49. 中心 LLM 模块化系统和 early-fusion 统一模型怎么取舍？
     考察点：LLM router、专用 encoder / decoder、信息瓶颈、端到端优化、安全。
-    回答框架：先区分模块化接口和模型内部的统一。中心 LLM 系统复用 ASR、OCR、vision encoder、TTS、image generator 和工具，易调试、权限边界清楚，但可能有误差传播和信息压缩。代表研究里，[Chameleon](https://arxiv.org/abs/2405.09818) 把文本与离散图像 token 放进同一自回归序列，解决交错图文联合建模问题，代价是长视觉 token 序列和高训练成本；[NExT-GPT](https://arxiv.org/abs/2309.05519) 复用多模态 encoder、中心 LLM 与专用生成 decoder，解决多输入到多输出的模块连接，代价是跨模块对齐和各 decoder 质量，论文的约 1% 参数仅指特定对齐阶段；[AnyGPT](https://arxiv.org/abs/2402.12226) 用离散模态 tokenizer 复用标准 next-token LLM，减少主干改造，但重建细节受 tokenizer 限制。它们的数据和评测协议不同，不能把论文分数当横向排行榜。
+    回答框架：先区分模块化接口和模型内部的统一。中心 LLM 系统复用 ASR、OCR、vision encoder、TTS、image generator 和工具，易调试、权限边界清楚，但可能有误差传播和信息压缩。代表研究里，[Chameleon](https://arxiv.org/abs/2405.09818v2) 把文本与离散图像 token 放进同一自回归序列，解决交错图文联合建模问题，代价是长视觉 token 序列和高训练成本；[Unified-IO 2](https://arxiv.org/abs/2312.17172v1) 把多类输入输出映射到统一任务表示并使用 encoder-decoder Transformer；[Emu3](https://arxiv.org/abs/2409.18869v1) 用离散图像/视频 token 做 next-token 建模；[Show-o](https://arxiv.org/abs/2408.12528v7) 结合自回归与离散扩散；[Transfusion](https://arxiv.org/abs/2408.11039v1) 让共享模型同时处理文本 next-token 和图像 diffusion，但仍保留模态专属编码/解码层。这几条路线的输入表示、主干和生成目标不同，不因共享 Transformer 就都成为 encoder-free。[ImageBind](https://arxiv.org/abs/2305.05665v2) 则用各自的模态 encoder 对齐到共同 embedding 空间，说明共享表示不等于共享 token 序列。[NExT-GPT](https://arxiv.org/abs/2309.05519) 复用多模态 encoder、中心 LLM 与专用生成 decoder，解决多输入到多输出的模块连接，代价是跨模块对齐和各 decoder 质量，论文的约 1% 参数仅指特定对齐阶段；[AnyGPT](https://arxiv.org/abs/2402.12226) 用离散模态 tokenizer 复用标准 next-token LLM，减少主干改造，但重建细节受 tokenizer 限制。它们的数据和评测协议不同，不能把论文分数当横向排行榜。
 
 50. 统一多模态上线前如何做审计？
     考察点：各模态 token、路由、loss mixture、modality conflict、安全门禁。
@@ -2922,7 +2942,7 @@
 
 51. 如何系统评估一个多模态模型？
     考察点：VQA、OCR、chart、grounding、hallucination、generation、安全、回归。
-    回答框架：先按任务拆成 VQA / OCR / 图表 / grounding / 视频 / 语音 / 生成和安全切片；再分别看 VQA accuracy、WER / CER、chart relaxed accuracy、IoU、faithfulness、人工偏好和安全门禁；最后做 bad case attribution，区分感知、OCR、grounding、推理、表达和拒答错误，不能只引用一个公开榜单均分。长音视频记忆（如 LVOmniBench）与意图驱动的音视频时间定位（如 RVG-Bench）测量不同能力；报告分数时要固定模型快照、帧/音频输入、提示和评分协议，不能互作代理或拼成统一排名。
+    回答框架：先按任务拆成 VQA / OCR / 图表 / grounding / 视频 / 语音 / 生成和安全切片；VQA v2 需按官方代码对每题 10 个参考答案逐一留一评分，匹配 1、2、3 个答案分别为 0.3、0.6、0.9，不能用 min(n/3,1) 代替；再分别看 WER / CER、chart relaxed accuracy、IoU、faithfulness、人工偏好和安全门禁；最后做 bad case attribution，区分感知、OCR、grounding、推理、表达和拒答错误，不能只引用一个公开榜单均分。长音视频记忆（如 LVOmniBench）与意图驱动的音视频时间定位（如 RVG-Bench）测量不同能力；报告分数时要固定模型快照、帧/音频输入、提示和评分协议，不能互作代理或拼成统一排名。
 
 52. 多模态 hallucination rate 应该怎么定义？
     考察点：atomic claim、media evidence、unsupported claim、拒答边界。
@@ -2950,7 +2970,7 @@
 
 56. 如何准备一轮完整的多模态面试复盘？
     考察点：topic coverage、formula coverage、demo coverage、risk coverage、project story、revision plan。
-    回答框架：先列出 CLIP、vision encoder、VLM connector、多模态 SFT、diffusion、文生图、视频、语音、统一多模态、评估安全和项目讲述这些 required topics；再检查每类是否能写公式、讲 shape、给 demo、说 bad case 和 trade-off；最后把低分题、缺失公式和缺失 demo 写成下一轮 revision plan，而不是只说“再复习一下”。
+    回答框架：先按主题列出公式、演练、风险、取舍和项目证据，再逐项核对分母、数据/模型版本和可复现 artifact。类别覆盖只说明“有无记录”，不能当成掌握程度；自评分必须有固定量表，不能把覆盖率或弱项阈值包装成客观面试通过率。最后把可复核的缺口写成下一轮 revision plan，而不是只说“再复习一下”。[第十五册第十二章](book-15-multimodal-generative-models/chapters/12-多模态面试题.md)
 
 57. SigLIP 相对 CLIP 改变了什么？它为什么不能单独解决图文数据里的伪负例？
     考察点：全局 softmax、成对 logistic loss、logit scale/bias、标签结构、batch 规模。
@@ -4091,6 +4111,26 @@
 52. 如何设计工具 / Skill 生态的开发者体验和文档治理？
     考察点：quickstart、scaffold、schema、examples、local debug、trace、review feedback、security docs、migration、DX gate。
     回答框架：先说明 DX 不是文档美化，而是质量治理前置条件；再把开发者路径拆成快速开始、脚手架、schema 规范、好坏示例、本地调试、模拟模型调用、trace / replay、lint、SDK / CLI、审核反馈和迁移文档；最后用 DX documentation gate 检查 quickstart path clarity、scaffold completeness、documentation example coverage、local debug readiness、trace replay readiness、review feedback actionability、security documentation coverage 和 migration documentation coverage。
+
+## 行为面试：真实经历与证据
+
+1. 讲一次你和跨团队成员对方案有分歧的真实经历。
+   考察点：共同目标、双方约束、证据比较、责任边界、决策过程和复查。
+   回答框架：先说分歧对应的具体决定和共同目标；再说明对方的合理顾虑、自己的担心和可用证据；讲清你本人做了什么、谁拥有最终决策权、结果及未解决风险。不要把分层实验或协作过程包装成“我说服了所有人”。
+
+2. 讲一次你最初判断有误、后来及时纠偏的经历。
+   考察点：当时信息、错误信号、坏消息沟通、止损、机制原因和流程改变。
+   回答框架：按时间顺序还原目标、初始假设、反例、影响范围和修正动作；区分个人决定与系统条件；说明后续加入了什么评估、监控、文档或回归检查。结果不佳但被及时发现的实验也可以是有效例子，不能改写成虚构的成功故事。
+
+3. 团队结果很好时，怎样说明你个人的贡献？
+   考察点：个人职责、团队协作、外部依赖、结果定义和证据来源。
+   回答框架：先说团队目标与共同结果，再说明自己直接负责的决定和工作、由他人负责的部分、可核验的 artifact 及不能单独归因的变化。记不准数字时说明范围或验证路径；不得披露未授权的用户数据、内部日志或机密材料。
+
+4. 收到一条你起初不认同的反馈后，你做了什么？
+   考察点：理解反馈、检查证据、具体行动、复测和持续变化。
+   回答框架：复述反馈指出的可观察问题；说明你怎样核对，而不是只评价反馈者；讲清调整了什么行为或流程，并提供后续检查信号。如果反馈不适用，也要说明依据和沟通结果。
+
+以上问题应使用自己的真实经历。完整的叙事、证据和英文迁移方法见[第十二册第十一章](book-12-career-interview-playbook/chapters/11-behavioral-interview.md)；模板不能替代事实核对。
 
 ## 模拟面试与复盘
 

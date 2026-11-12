@@ -104,7 +104,7 @@ next-token prediction 的监督信号看起来很局部：每次只问“下一�
 
 ### 5.3.1 从最大化概率到最小化损失
 
-给定包含 `N>0` 条训练序列的训练集 `D = {x^(1), ..., x^(N)}`，最大似然估计希望选择参数 theta，使观测到的训练序列概率最大。记 `M` 为所有有效目标 token 的位置集合；它排除了 padding、被 mask 的 prompt token 和其他不参与训练的位置。
+给定包含 `N>0` 条训练序列的训练集 `D = {x^(1), ..., x^(N)}`，最大似然估计希望选择参数 theta，使观测到的完整训练序列概率最大。标准自回归目标会预测序列中定义好的目标 token；作为条件上下文的起始 token 不算预测目标，padding 也不参与目标函数。指令微调有时会把 prompt token 从 loss 中 mask 掉，只训练回答部分；这时优化的是所选位置上的条件目标，不能把它与整条序列的联合似然混称。
 
 ~~~math
 \theta^\star
@@ -114,7 +114,7 @@ next-token prediction 的监督信号看起来很局部：每次只问“下一�
 \log P_\theta(x^{(n)})
 ~~~
 
-使用对数是因为概率连乘会非常小，而 log 可以把乘法变成加法，便于数值计算和梯度优化。将目标取负，就得到负对数似然：
+使用对数是因为概率连乘会非常小，而 log 可以把乘法变成加法，便于数值计算和梯度优化。将目标取负，并对样本数取平均，就得到按序列求和的负对数似然：
 
 ~~~math
 \mathcal{L}_{\mathrm{NLL}}
@@ -125,7 +125,7 @@ next-token prediction 的监督信号看起来很局部：每次只问“下一�
 \log P_\theta(x^{(n)})
 ~~~
 
-展开序列概率后，语言模型的训练损失就是有效目标 token 的平均负对数概率：
+展开序列概率后，负对数似然会变成逐个目标位置的负对数概率之和。记 `M` 为当前目标中的有效位置集合；它排除 padding、被 mask 的 prompt token 和其他无效位置。若 `M` 覆盖完整序列的预测位置，逐 token 求和就等于完整序列 NLL；若只保留回答位置，它表示回答条件目标。下面的 token-level loss 把所有有效位置放在同一个分母中：
 
 ~~~math
 \mathcal{L}_{\mathrm{token}}
@@ -139,9 +139,25 @@ x_t^{(n)} \mid x_{<t}^{(n)}
 \right)
 ~~~
 
-`M` 已在上文定义为有效目标位置集合，因此 padding、被忽略的 prompt token 或其他无效位置不进入分母。这个 token-level 公式要求 `|M|>0`；若评估批次没有任何有效目标，应报告“无有效 token”，不能把平均 loss 伪装成 0。
+`M` 已在上文定义为有效目标位置集合，因此 padding、被忽略的 prompt token 或其他无效位置不进入分母。这个 token-level 公式要求 `|M|>0`；若评估批次没有任何有效目标，应报告“无有效 token”，不能把平均 loss 伪装成 0。对同一组有效目标位置，按序列求和再除以 `N` 与全局 token mean 的分子相同、分母不同，只相差固定比例；若把数据项单独作为目标，它们有相同的最优点，但数值和梯度尺度不同。与正则项联合优化时，归一化会改变数据项相对正则项的权重；优化器和学习率调度也可能改变训练轨迹。若两种 reduction 使用了不同的目标位置，它们优化的目标本身就不同。若希望每条序列而非每个 token 权重相同，则先在每条序列内部按有效 token 求均值，再对非空序列平均。下面假设 N 条样本都含至少一个有效目标：
 
-这里还要区分两种常见的归一化。按序列平均时，每条序列先得到一个 NLL，再对 N 条序列平均；按 token 平均时，所有有效位置共享一个分母 `|M|`。当样本长度不同，这两种 reduction 会给长短样本不同的权重，因此报告 loss 时必须说明采用哪一种。
+~~~math
+\mathcal{L}_{\mathrm{seq}}
+=
+\frac{1}{N}
+\sum_{n=1}^{N}
+\left[
+-\frac{1}{|M_n|}
+\sum_{t:(n,t)\in M_n}
+\log P_\theta(x_t^{(n)}\mid x_{<t}^{(n)})
+\right]
+~~~
+
+这里 M_n 是第 n 条序列的有效目标位置；没有有效目标的序列应跳过或按任务定义处理，不能除以零。
+
+
+
+例如有两条样本，分别含 2 和 8 个有效目标 token，每条样本内部的平均 loss 分别为 1 和 3。全局 token mean 是 (2×1+8×3)/(2+8)=2.6；sequence mean 是 (1+3)/2=2。若按每条序列的 NLL 总和再除以 N，则结果为 (2×1+8×3)/2=13，它与全局 token mean 只有固定比例差异，不等于 sequence mean。这里的输入是为解释归一化而构造的；报告 loss 时必须说明 reduction 和有效目标集合。
 
 ### 5.3.2 one-hot 交叉熵为什么等于 NLL
 
@@ -163,7 +179,7 @@ H(p,q_\theta)
 -\log q_{\theta,y}
 ~~~
 
-这正是该位置的 NLL。对所有有效 token 求平均，就得到 causal LM loss。F.cross_entropy 通常将 logits 先进行稳定的 log-softmax，再计算目标类别的负对数似然；它不是一个与概率训练完全不同的目标。
+这正是该位置的 NLL。对所有有效 token 求平均，就得到常见的 causal LM loss。PyTorch 2.15 的 `cross_entropy` 接收未归一化 logits 与类别索引或概率目标；索引目标可以通过 `ignore_index` 排除无效位置，`reduction` 和 `label_smoothing` 会改变具体归约或目标分布。它内部实现稳定的 log-softmax 与 NLL 计算，不是一个与概率训练完全不同的目标。[PyTorch 2.15 `cross_entropy` 文档](https://docs.pytorch.org/docs/2.15/generated/torch.nn.functional.cross_entropy.html)
 
 ### 5.3.3 为什么不用 accuracy 直接训练
 
@@ -209,7 +225,7 @@ accuracy 只关心最大概率类别是否正确。模型给正确答案 0.51 �
 于是 perplexity 为：
 
 ~~~math
-\operatorname{PPL}
+\mathrm{PPL}
 =
 \exp(1.3863)
 \approx4.000
@@ -297,7 +313,7 @@ D_{\mathrm{KL}}(p\Vert q)
 
 D_KL(p || q) 使用 p 的样本区域来惩罚 q 没有覆盖真实分布的地方。在监督学习里，p 常常是标签分布，因此它要求模型给真实类别足够概率。
 
-D_KL(q || p) 则从 q 自己采样的区域出发，惩罚模型把概率放到 p 不支持的地方。它们在优化中可能表现出不同的模式，例如一个更倾向覆盖多个模式，另一个更倾向集中到某些模式。不能脱离优化方向讨论“KL 更好”。
+D_KL(q || p) 则从 q 自己采样的区域出发，惩罚模型把概率放到 p 不支持的地方。在简化的多峰分布近似中，这两种方向常呈现“覆盖多个模式”与“集中到某些模式”的差异；这是特定优化设定下的直觉，不是对所有网络、数据和训练过程的保证。不能脱离优化方向讨论“KL 更好”。
 
 ### 5.4.3 KL 在大模型中的三个用途
 
@@ -309,7 +325,7 @@ D_KL(q || p) 则从 q 自己采样的区域出发，惩罚模型把概率放到 
 
 ### 5.4.4 稳定实现和输入约定
 
-PyTorch 的 KL 接口通常要求调用方明确输入是 probability 还是 log-probability，以及 target 是否已经取 log。把普通 probability 误传给 log-probability 参数，数值上可能不立即报错，却会得到错误的目标。基础理解必须包括 API 的输入约定，而不是只会写 KL 的数学式。
+PyTorch 2.15 的 `F.kl_div(input, target)` 约定 `input` 是 log-probability；默认 `log_target=False` 时，`target` 是 probability，只有设为 `True` 时才传入 log-probability。默认 `reduction="mean"` 会除以输出元素总数，并不等于数学定义下的 KL；`"batchmean"` 是先求和再除以张量第一个维度的大小。若输入是 `[batch, time, vocab]` 的语言模型张量，`batchmean` 仍不是按有效 token 平均，需先沿词表维求和，再用有效 token mask 归一化。把普通 probability 误传给 `input`，数值上可能不报错，却会得到错误目标。[PyTorch 2.15 `kl_div` 文档](https://docs.pytorch.org/docs/2.15/generated/torch.nn.functional.kl_div.html)
 
 ## 5.5 Perplexity：一个有条件的语言模型指标
 
@@ -318,7 +334,7 @@ PyTorch 的 KL 接口通常要求调用方明确输入是 probability 还是 log
 如果存在至少一个有效目标 token，且平均 token NLL 使用自然对数，perplexity 定义为：
 
 ~~~math
-\operatorname{PPL}
+\mathrm{PPL}
 =
 \exp\left(
 \mathcal{L}_{\mathrm{token}}
@@ -458,7 +474,7 @@ Adam 的直觉是：梯度长期方向由 m 平滑，梯度尺度由 v 调整。
 
 ### 5.7.3 AdamW 为什么要解耦 weight decay
 
-如果把 L2 正则直接加到梯度中，Adam 的自适应缩放会同时作用于正则项，使不同参数的实际衰减受到梯度统计影响。令 `lambda` 为 weight decay 系数，AdamW 将衰减作为单独的参数操作：
+如果把 L2 正则直接加到梯度中，Adam 的自适应缩放会同时作用于正则项，使不同参数的实际衰减受到梯度统计影响。令 `lambda` 为 weight decay 系数，AdamW 将衰减作为单独的参数操作；这一解耦的提出与分析见 [AdamW 原论文](https://arxiv.org/abs/1711.05101)：
 
 ~~~math
 \theta_{t+1}
@@ -472,7 +488,11 @@ Adam 的直觉是：梯度长期方向由 m 平滑，梯度尺度由 v 调整。
 
 这个公式是教学化写法，具体实现还会处理参数组、学习率 schedule、混合精度和 fused optimizer。
 
-通常不对 bias、LayerNorm/RMSNorm 的 scale 以及其他一维统计参数施加同样的 weight decay，因为它们并非承担特征投影的普通矩阵权重。但“哪些参数排除”是训练配方的一部分，应查看代码和参数组，而不是假设所有 AdamW 默认相同。
+
+
+把更新复算一遍：设单个参数 `theta_0=1`，第 1 步数据梯度 `g_1=2`，`beta_1=0.9`、`beta_2=0.999`、`eta=0.1`，`epsilon=10^{-8}`。于是 `m_1=0.2`、`v_1=0.004`，偏差修正后为 `mhat_1=2`、`vhat_1=4`，Adam 的梯度更新约为 `0.1×2/2=0.1`，参数先降至约 `0.9`。若 AdamW 再用 `lambda=0.01` 做解耦衰减，衰减因子是 `1-0.1×0.01=0.999`，最终参数约为 `0.999-0.1=0.899`。忽略了极小的 epsilon 影响；这是单步教学算例，不代表训练配方。
+
+有些训练配方会把 bias、LayerNorm/RMSNorm 的 scale 等参数从 weight decay 参数组中排除；这不是 AdamW 数学定义强制的规则。具体哪些参数参与衰减取决于训练配方，应检查实际的参数分组配置。
 
 ## 5.8 Batch size、梯度累积和噪声
 
@@ -508,7 +528,11 @@ K_{\mathrm{accum}}
 4. 梯度裁剪可能按 micro-step 或 accumulation cycle 执行；
 5. optimizer 和 scheduler 只在 global step 更新。
 
-因此“梯度累积等于大 batch”必须附带条件。尤其在 token-level loss 中，简单地平均每个 micro-batch loss，可能让短 batch 与长 batch 权重不正确。
+因此“梯度累积等于大 batch”必须附带条件。尤其在 token-level loss 中，简单地平均每个 micro-batch loss，可能让短 batch 与长 batch 的权重不正确。
+
+
+
+例如，第一个 micro-batch 有 2 个有效 token，平均 loss 为 1；第二个有 8 个有效 token，平均 loss 为 3。直接平均两个均值会得到 `(1+3)/2=2`，而按有效 token 聚合应为 `(2×1+8×3)/(2+8)=2.6`。后者才等于把 10 个 token 放在一起求平均；分布式训练还要把每个 worker 的有效 token 数纳入同一分母。
 
 ### 5.8.3 batch 增大后的收益会饱和
 
@@ -585,7 +609,7 @@ RNN 逐步更新状态，天然保留顺序，但训练时存在串行依赖，�
 
 Self-attention 让每个 query 直接和一组 key 比较，再从 value 中取信息。任意两个位置之间可以用一次 attention 交互，训练时不同位置可以并行计算。代价是标准 attention 的 score 矩阵随序列长度平方增长。
 
-这不是说 Transformer 在所有场景都绝对优于 RNN 或状态空间模型。它是在长距离交互、并行训练、硬件矩阵乘法和可扩展优化之间取得了一个强折衷。
+这不是说 Transformer 在所有场景都绝对优于 RNN 或状态空间模型。它是在长距离交互、并行训练、硬件矩阵乘法和可扩展优化之间取得了一个强折衷；这段历史比较对应 Transformer 原论文报告的模型设计与机器翻译实验，不能据此宣称它在所有任务上都更优。[Transformer 原论文](https://arxiv.org/abs/1706.03762)
 
 ### 5.10.2 Q、K、V 的三个角色
 
@@ -600,15 +624,17 @@ query 可以理解为当前位置提出的检索条件，key 是每个位置可�
 scaled dot-product attention 为：
 
 ~~~math
-\operatorname{Attn}(Q,K,V)
+\mathrm{Attn}(Q,K,V)
 =
-\operatorname{softmax}
+\mathrm{softmax}
 \left(
 \frac{QK^\mathsf{T}}{\sqrt d}+A
 \right)V
 ~~~
 
 Q 的形状通常为 [B, H, T, d]，K/V 的长度可为 S，score 的形状是 [B, H, T, S]。A 可以是加性 bias 或由布尔 mask 转换而来的屏蔽项。softmax 沿 key 轴 S 归一化，因为每个 query 要在可访问的 key 集合上分配权重。
+
+用一个两维例子看清缩放和加权：令 `q=[1,0]`，两个 key 为 `k_1=[1,0]`、`k_2=[0,1]`，对应 value 为 `v_1=[1,0]`、`v_2=[0,2]`。因为 `d=2`，两个 score 是 `[1/\sqrt2,0]\approx[0.707,0]`；softmax 后约为 `[0.670,0.330]`，输出为 `0.670v_1+0.330v_2\approx[0.670,0.660]`。这些是假设输入，舍入到三位小数；如果 mask 屏蔽第二个 key，权重变为 `[1,0]`，输出就是 `[1,0]`。因此 mask 先改变可参与归一化的位置，再改变最终聚合结果。
 
 ### 5.10.3 为什么除以 sqrt(d)
 
@@ -648,7 +674,11 @@ M_{\mathrm{KV}}
 2LBT H_{\mathrm{kv}}d b
 ~~~
 
-`H_kv` 减少会直接降低 cache 容量和带宽压力，但共享 K/V 也改变了模型的表示自由度。质量、吞吐和显存需要在同一个 checkpoint 或可比实验中一起观察。
+`H_kv` 减少会直接降低 cache 容量和带宽压力，但共享 K/V 也改变了模型的表示自由度。质量、吞吐和显存需要在同一个 checkpoint 或可比实验中一起观察。原始 GQA 研究提出了介于 MHA 与 MQA 之间的 K/V head 数，并在其 uptraining 实验中报告了质量与速度折衷；这不是所有 checkpoint 和 kernel 的性能保证。[GQA 原论文 v3](https://arxiv.org/abs/2305.13245v3)
+
+取一个纯容量算例：`L=32` 层、`B=1`、`T=4096`、`H_kv=8`、`d=128`，每个 BF16 元素按 `b=2` 字节计，则 cache 约为 `2×32×1×4096×8×128×2=536,870,912` 字节，即 `512 MiB`。这是按公式估算 K/V 张量的原始容量，未计分配器、对齐、临时缓冲和其他模型状态；若 `H_kv` 从 8 降到 4，这一项减半，但不能据此推断端到端延迟也减半。
+
+
 
 这说明“参数量”和“推理成本”不是一个轴。GQA 不一定显著减少所有投影参数，却可能显著减少 decode 的 cache 读写；MoE 的 active parameters 也不等于 cache head 数。
 
@@ -658,7 +688,7 @@ M_{\mathrm{KV}}
 
 在不使用位置相关参数或因果 mask 的纯 self-attention 中，交换输入 token 的顺序会同步交换输出位置，这种性质称为置换等变；它没有为顺序提供语义。decoder 的 causal mask 本身也注入了部分顺序约束，但不能替代完整的位置表示。因此“狗咬人”和“人咬狗”仍可能缺少足够的顺序区分。
 
-绝对位置 embedding 直接为位置提供向量；相对位置方法把距离或方向加入 token 间的分数；RoPE 旋转 q/k；ALiBi 直接给不同距离添加线性 bias。它们都是位置归纳偏置，但外推、cache 和实现方式不同。
+绝对位置 embedding 直接为位置提供向量；相对位置方法把距离或方向加入 token 间的分数；RoPE 旋转 q/k；ALiBi 直接给不同距离添加线性 bias。它们都是位置归纳偏置，但外推、cache 和实现方式不同。RoPE 的相对角度机制见 RoFormer 原论文；ALiBi 以距离线性惩罚注意力分数，其长度外推结果来自特定训练长度、模型和 WikiText-103 实验，不能推广为普遍保证。[RoFormer](https://arxiv.org/abs/2104.09864)；[ALiBi 原论文 v2](https://arxiv.org/abs/2108.12409v2)
 
 ### 5.12.2 RoPE 的相对位置直觉
 
@@ -675,6 +705,10 @@ R(\theta_i)
 
 旋转后的 q_i 和 k_j 的内积包含 theta_i - theta_j，因此相对距离可以进入注意力分数。具体实现还要约定维度配对方式、频率 base、position_ids 的 dtype 和 cache 中历史位置的处理。
 
+
+
+例如只看一个二维子空间，取未旋转向量 `q=k=[1,0]`。位置 0 的角度为 0，位置 1 的角度为 `π/2`：旋转后分别是 `q_0=[1,0]`、`k_1=[0,1]`，点积从同位置时的 1 变为 0；两者的夹角差 `π/2` 已进入分数。真实 RoPE 会把多对维度分配给不同频率，这个单频例子只演示相对角度如何影响内积。[RoFormer 原论文](https://arxiv.org/abs/2104.09864)
+
 RoPE 能否外推到更长序列，不能只看一个配置字段。训练长度、频率缩放、checkpoint 训练约定、attention kernel、长文数据和评估任务共同决定有效能力。接口能够接受更长索引，只证明程序路径可用，不证明模型在长上下文中仍能检索和推理。
 
 ### 5.12.3 Pre-Norm 和 Post-Norm 的差异
@@ -685,7 +719,7 @@ RoPE 能否外推到更长序列，不能只看一个配置字段。训练长度
 x_{l+1}
 =
 x_l+
-F_l(\operatorname{Norm}(x_l))
+F_l(\mathrm{Norm}(x_l))
 ~~~
 
 Post-Norm 则把归一化放在残差相加之后：
@@ -693,7 +727,7 @@ Post-Norm 则把归一化放在残差相加之后：
 ~~~math
 x_{l+1}
 =
-\operatorname{Norm}
+\mathrm{Norm}
 \left(
 x_l+F_l(x_l)
 \right)
@@ -716,7 +750,7 @@ Pre-Norm 的残差路径更直接，深层训练中常较稳定；Post-Norm 的�
 归一化后再使用可学习的 gamma 和 beta：
 
 ~~~math
-\operatorname{LN}(x)
+\mathrm{LN}(x)
 =
 \gamma\odot
 \frac{x-\mu}{\sqrt{\sigma^2+\epsilon}}
@@ -727,21 +761,24 @@ Pre-Norm 的残差路径更直接，深层训练中常较稳定；Post-Norm 的�
 RMSNorm 只计算均方根：
 
 ~~~math
-\operatorname{RMSNorm}(x)
+\mathrm{RMSNorm}(x)
 =
 \gamma\odot
-\frac{x}
-\sqrt{\frac{1}{D}\sum_{i=1}^{D}x_i^2+\epsilon}
+\frac{x}{\sqrt{\frac{1}{D}\sum_{i=1}^{D}x_i^2+\epsilon}}
 ~~~
 
 LayerNorm 移除均值并缩放方差，RMSNorm 保留均值方向但控制整体 RMS。两者的差别不仅在计算量，还在归纳偏置。epsilon、归一化轴、参数 dtype 和归一化所在位置都可能影响结果。
+
+
+
+令 `x=[1,3]`、`gamma=[1,1]`、`beta=[0,0]`，暂令 `epsilon=0` 便于手算。均值为 2、方差为 1，所以 LayerNorm 输出 `[-1,1]`；均方根为 `sqrt((1²+3²)/2)=sqrt5≈2.236`，RMSNorm 输出约为 `[0.447,1.342]`。前者先居中，后者不减均值，故这个正值向量在 RMSNorm 下仍保持正向。真实实现会使用正 epsilon 和可学习缩放；RMSNorm 的动机与实验收益应限定在其论文所测模型和任务，不能保证所有配置都更快。[RMSNorm 原论文](https://arxiv.org/abs/1910.07467)
 
 ### 5.13.2 MLP 负责逐位置的非线性变换
 
 Attention 在 token 之间搬运信息，MLP 对每个位置独立地做非线性特征变换。一个简单的两层 MLP 是：
 
 ~~~math
-\operatorname{MLP}(x)
+\mathrm{MLP}(x)
 =
 W_2\phi(W_1x+b_1)+b_2
 ~~~
@@ -753,11 +790,11 @@ W_2\phi(W_1x+b_1)+b_2
 SwiGLU 将两条投影相乘：
 
 ~~~math
-\operatorname{SwiGLU}(x)
+\mathrm{SwiGLU}(x)
 =
 W_{\mathrm{down}}
 \left[
-\operatorname{SiLU}(W_{\mathrm{gate}}x)
+\mathrm{SiLU}(W_{\mathrm{gate}}x)
 \odot
 (W_{\mathrm{up}}x)
 \right]
@@ -769,19 +806,19 @@ W_{\mathrm{down}}
 
 ### 5.14.1 Encoder-only
 
-Encoder-only 模型通常允许一个位置同时看左右上下文，适合表示学习、分类、序列标注和检索。BERT 的 masked language modeling 训练目标随机遮盖部分 token，让模型利用双向上下文恢复它们。
+Encoder-only 模型通常允许一个位置同时看左右上下文，适合表示学习、分类、序列标注和检索。BERT 的 masked language modeling 训练目标随机遮盖部分 token，让模型利用双向上下文恢复它们；这是该论文提出的预训练设置，不代表所有 encoder-only 模型都采用同一目标。[BERT 原论文](https://arxiv.org/abs/1810.04805)
 
 它并非不能生成任何文本，而是其预训练目标和输出接口不是天然的左到右生成。把 BERT 和 GPT 的差异简化成“一个理解、一个生成”也不够准确；更准确的说法是，训练目标、attention 可见性和使用方式不同。
 
 ### 5.14.2 Decoder-only
 
-Decoder-only 模型使用 causal mask 和 next-token prediction。给定上下文，模型不断预测后续 token，因此对话、代码补全和开放式生成都可以共享一个接口。GPT 系列的早期工作展示了无监督预训练表示如何迁移到语言理解任务，后续 decoder-only 模型在规模、数据和训练配方上继续扩展。
+Decoder-only 模型使用 causal mask 和 next-token prediction。给定上下文，模型不断预测后续 token，因此对话、代码补全和开放式生成都可以共享一个接口。GPT 系列的早期工作展示了无监督预训练表示如何迁移到语言理解任务，后续 decoder-only 模型在规模、数据和训练配方上继续扩展；原论文的实验范围不能代表今天所有 decoder-only 训练配方。[GPT 原论文](https://cdn.openai.com/research-covers/language-unsupervised/language_understanding_paper.pdf)
 
 它的代价是每个 query 在训练中受 causal 可见性限制，推理时需要处理逐 token decode、KV cache 和停止条件。
 
 ### 5.14.3 Encoder-decoder
 
-Encoder-decoder 把输入序列先编码成表示，decoder 再通过 cross-attention 条件生成输出，适合翻译、摘要和许多输入到输出任务。T5 将多种 NLP 任务统一为 text-to-text 形式，展示了这种接口的灵活性。
+Encoder-decoder 把输入序列先编码成表示，decoder 再通过 cross-attention 条件生成输出，适合翻译、摘要和许多输入到输出任务。T5 将多种 NLP 任务统一为 text-to-text 形式，展示了这种接口的灵活性；它的结果绑定论文中的模型、任务和训练设置。[T5 原论文](https://arxiv.org/abs/1910.10683)
 
 三类架构没有脱离任务和预算的绝对排名。选择时要看输入输出关系、是否需要双向表示、生成长度、部署路径、checkpoint 生态和数据目标。
 
@@ -791,7 +828,7 @@ Encoder-decoder 把输入序列先编码成表示，decoder 再通过 cross-atte
 
 Word-level tokenization 词表直观，但词表会很大，未登录词和形态变化处理困难。Character-level 词表很小，几乎没有未知词，但序列变长，长距离建模和计算成本更高。Subword 方法试图在词表大小和序列长度之间取得折衷。
 
-BPE 从较小的符号单元开始，反复合并训练语料中高频的相邻符号；WordPiece 使用相似的子词思想但目标和训练细节不同；SentencePiece 把原始文本视为字符序列处理，可以不依赖预先分词器，适合多语言和包含空格的文本。
+BPE 从较小的符号单元开始，反复合并训练语料中高频的相邻符号；WordPiece 使用相似的子词思想但目标和训练细节不同；SentencePiece 可以直接从原始句子训练子词模型，而不要求先按空格切成词；其论文以英日机器翻译验证了这一接口。[SentencePiece 原论文](https://arxiv.org/abs/1808.06226) WordPiece 的子词方案在 GNMT 论文中用于稀有词处理，具体训练规则与 BPE 不应合并成一个算法名。[GNMT 原论文](https://arxiv.org/abs/1609.08144)
 
 这些名称不能互换成“都是分词”。词表训练规则、特殊 token、空格处理、Unicode 规范化和编码边界都会影响最终 token 序列。
 
@@ -808,6 +845,8 @@ BPE 从较小的符号单元开始，反复合并训练语料中高频的相邻�
 
 分母必须明确且 `N_char_or_byte>0`；如果文本批次为空，token 密度未定义。`rho_tok` 越大，表示同样文本需要更多 token；但这个比率受语言、代码、数字、URL、规范化和样本长度影响，不能用一个短句代表整种语言。
 
+用假设输入手算：语料 A 有 64 字节、32 个 token，密度是 32/64=0.5 token/字节；语料 B 同样 64 字节、48 个 token，密度是 48/64=0.75。若上下文窗口只有 1,024 个 token，忽略边界符号和长度波动，A 约可容纳 1,024/0.5=2,048 字节，B 约可容纳 1,024/0.75≈1,365 字节。两组数字是构造例，不代表任一语言或 tokenizer 的实测结果。
+
 更多 token 会带来至少三种成本：
 
 1. 相同上下文窗口承载的字符内容减少；
@@ -818,7 +857,7 @@ tokenizer 也会改变监督粒度。一个词被拆成多个 token 后，模型
 
 ### 5.15.3 tokenizer 与多语言、公平和安全
 
-不同语言的 token 密度差异会让相同字符长度对应不同训练成本和上下文占用。若只看 token 数，可能把某些语言的样本误判成更长、更贵或更难。多语言评估要同时报告语言切片、字符/字节长度和 token 长度。
+不同语言的 token 密度差异会让相同内容的训练成本和上下文占用不同。已有 tokenizer 比较在特定的语言、文本和词表上观察到明显编码长度差异。[Petrov 等人的 tokenizer 研究](https://arxiv.org/abs/2305.15425) 一项 2026 年预印本用约 1.27B 参数的 decoder-only 模型、同一训练配方和约 9.2B token 预算比较 54 个 tokenizer，在 31 个训练语言的 FLORES+ bits-per-byte（BPB）上发现，tokenizer 间的 BPB 波动与语言模型训练数据占比负相关（Spearman rho=-0.52）。但主比较中每个 tokenizer 多数只训练一次；相同 token 预算不代表看到相同字节数，且训练数据占比与书写系统在该语言样本中混杂。结果只说明该设置下逐语言语言建模指标对 tokenizer 敏感，不证明因果或下游任务能力差异。[Meister 等人 2026 年预印本](https://arxiv.org/abs/2610.12144v1) 这些结果不提供可外推的统一倍率，具体模型仍要按语言、字节长度、token 长度和下游任务分别测量。
 
 安全上，Unicode 同形字符、零宽字符、特殊控制符和异常规范化可能让人类看到的字符串与 tokenizer 看到的 token 序列不同。安全过滤、日志审计和模型输入应尽量在规范化规则明确的前提下进行，不能只按界面上的字符判断。
 
@@ -873,9 +912,9 @@ SFT 不是把所有事实“写进模型”的唯一机制，也不是事实更�
 
 ### 5.17.4 偏好学习塑造选择，而不是凭空创造能力
 
-RLHF、RLAIF、DPO 等方法使用偏好或比较信号，让模型在多个可能回答中更倾向 chosen。它们可以提高帮助性、风格和安全一致性，但也可能放大标注者偏差、长度偏差、过度拒答、迎合和 reward hacking。
+RLHF、RLAIF 和 DPO 都可能使用偏好或比较信号，但不是同一种算法。以 InstructGPT 的实验流程为例，作者先用示范做 SFT，再对输出排序训练 reward model，最后用 PPO 做 RLHF；该论文在其 prompt 分布和人工评估中观察到指令遵循、真实性等方面的变化，并明确指出模型仍会犯错。[InstructGPT 原论文](https://arxiv.org/abs/2203.02155) DPO 则在其 Bradley–Terry 等偏好建模假设下，直接用偏好对优化带 reference 的策略，不需要单独拟合 reward model；这不表示所有偏好学习都没有 reward model，也不保证超出论文数据和设置的结果。[DPO 原论文 v3](https://arxiv.org/abs/2305.18290v3)
 
-因此，偏好学习后的改善要用能力、偏好、安全、事实性和拒答质量的多维评估确认。一个总 reward 或单一 win rate 不能证明模型在所有维度都变好。
+一个偏好样本可以具体写成 (prompt, chosen, rejected)：同一问题下，标注者选择证据充分的回答而不是臆造引用的回答。训练数据只表达这两个候选之间的相对选择，不会自动验证 chosen 中的每个事实；因此仍要检查事实性、安全、拒答质量和不同长度偏差。
 
 ## 5.18 幻觉：为什么高概率续写可能是错误的
 
@@ -913,25 +952,19 @@ temperature 调低可能减少随机性，却不能修复错误的参数知识�
 
 扩大模型参数、训练 token 或计算预算，可能带来能力提升，但它们不是三个互相独立的旋钮。固定参数增加 token，可能让模型受益；固定 token 增加参数，可能让模型受益；如果只扩大一项而严重失衡，新增预算的收益会下降。
 
-经验 scaling law 常用幂律近似表示验证损失与模型规模、数据规模和计算量的关系。令 `N>0` 为参数量，`D>0` 为训练 token 数，`C>0` 为计算预算，则可写成教学上的幂律形式：
+Scaling law 是在特定模型族、数据、训练配方和评估条件下拟合出的经验关系。固定其余因素时，模型规模方向常写成：
 
 ~~~math
-L(N,D,C)
+L(N)
 \approx
-L_\infty
-+
-A N^{-\alpha}
-+
-B D^{-\beta}
-+
-E C^{-\gamma}
+L_{\infty}+A N^{-\alpha}
 ~~~
 
-`L_infty` 以及系数和指数由实验拟合。这个公式是经验模型，不是所有任务和架构的物理定律。它不能直接给出某个新模型的 benchmark 分数，也不能代替对数据质量和后训练的评估。
+N 是参数量，L_infty、A 和 alpha 由实验拟合。数据规模与计算量也各自可拟合经验曲线，但系数、指数和适用区间不同；不能把几个单变量拟合直接相加，当作一个对任意 N、D、C 都成立的统一公式。Kaplan 等人的结果研究了语言模型交叉熵随规模、数据和训练计算的经验幂律，并指出在固定预算下的配置会影响可达到的 loss；这些趋势不是所有任务和架构的物理定律，也不能直接给出新模型的 benchmark 分数。[Scaling Laws 原论文](https://arxiv.org/abs/2001.08361)
 
 ### 5.19.2 训练 FLOPs 只能做量级估算
 
-对 dense decoder-only Transformer，令 `N>0` 为参数量、`D>0` 为训练 token 数，常见教学近似是每个训练 token 的计算量与参数量成正比：
+对 dense decoder-only Transformer，令 N 为参数量、D 为训练 token 数，常见教学近似是：
 
 ~~~math
 C_{\mathrm{train}}
@@ -939,21 +972,51 @@ C_{\mathrm{train}}
 kND
 ~~~
 
-其中 `k` 是与前向、反向、激活、架构和实现有关的系数。实际成本还包括通信、重计算、padding、评估、checkpoint、数据读取和低利用率。MoE 要进一步区分 total parameters 与每个 token 激活的参数。
+k 依架构与计数约定而变。对 dense Transformer，一个常见粗估取 k≈6，把前向和反向的主要矩阵乘成本合并；长序列注意力、embedding、重计算、通信、padding、评估、checkpoint、数据读取和低利用率会改变实际成本。FLOP 与乘加的计数口径也须一致，MoE 则要区分总参数和每个 token 激活的参数。
 
-更大的模型不一定更便宜；更高的 GPU 峰值 FLOPs 也不一定转化为更高的有效 tokens/sec。必须测量 MFU、通信比例、序列利用率和故障重跑成本。
+做一组量级估算：若 N=10^9 参数、D=10^10 个训练 token，按 6ND 得 6×10^19 FLOPs。假设系统持续达到 10^14 FLOPs/s（100 TFLOP/s），理想时间约为 6×10^5 秒，即 6.94 天；若有效利用率只有 30%，粗略墙钟时间变为 6×10^5/0.3=2×10^6 秒，约 23.1 天。参数、token、持续吞吐和利用率都是教学假设，不是某个集群的实测；更高的峰值 FLOPs 也不保证更高的有效 tokens/sec，仍要测量 MFU、通信比例、序列利用率和故障重跑成本。
 
 ### 5.19.3 Chinchilla 式计算最优的含义
 
-在给定计算预算下，参数和 token 的配比存在一个近似最优区域。Chinchilla 的公开实验强调，许多当时的模型相对训练 token 不足，增加数据可以比单纯扩大参数更有效。这个结论针对特定模型族、数据和训练设置，不能机械外推到所有后训练或推理场景。
+在给定计算预算下，参数和 token 的配比存在一个近似最优区域。Chinchilla 研究在其模型范围内发现，计算最优时参数量与训练 token 数大致同比扩展；作者训练的 70B 模型使用 1.4T token，并与同预算的 Gopher 比较。这个结果针对其模型、数据和训练设置，不能简化成适用于所有场景的固定 token/parameter 法则，也不能机械外推到后训练或推理场景。[Chinchilla 原论文](https://arxiv.org/abs/2203.15556v1)
 
 当模型服务于知识密集任务时，数据新鲜度、质量和去重可能比 token 总数更重要；当服务于复杂推理时，后训练和 test-time compute 也会改变最优预算。预算问题必须写清优化对象：预训练 loss、某个能力、单位成功任务成本，还是上线收入。
+
+可以用一个刻意简化的拟合例子理解幂律指数，而不把它误当作能力承诺。假设参数量以十亿为单位，记 `n=N/(10^9)`；某个固定数据和训练设置下，假设拟合得到 `L_infty=1`、`A=1`、`alpha=0.5`：
+
+~~~math
+L(n)=1+n^{-0.5}
+~~~
+
+当 `n=1` 时，拟合 loss 为 `1+1=2`；当参数量增至 4B、即 `n=4` 时，拟合值为 `1+1/\sqrt4=1.5`；再增至 16B、即 `n=16`，拟合值为 `1+1/\sqrt{16}=1.25`。参数量每次扩大四倍，超过渐近值的那部分减半，但两段的绝对 loss 改善分别是 0.5 和 0.25。所有数值都是为演示代入步骤而构造的，并非论文测量，也不能推出 benchmark 分数会按同样比例变化。
+
+实际拟合还要检查数据量、训练 token、学习率日程、模型架构、tokenizer 和评估分布是否保持可比。模型规模曲线通常是控制其他因素后的切面；若同时更换语料、训练步数或评估集，曲线变化就混合了多个原因。拟合点附近的插值可作为预算规划线索，远距离外推则可能遇到数据重复、优化不足、分布变化或架构改变。最终决策仍需在目标设置下做受控训练和评估，分别报告 loss、下游任务、训练成本及推理成本，不能只凭一条曲线宣称某个规模必然更优。
 
 ## 5.20 从基础概念到一条可验证的推理链
 
 ### 5.20.1 一个 token 的完整路径
 
 考虑一句输入文本。它先经过 tokenizer，得到 token id；embedding 把 id 映射成向量；位置机制注入顺序；每层 attention 让 token 读取可见上下文，MLP 做逐位置的非线性变换；lm head 把最终 hidden 映射到词表 logits；softmax 给出下一个 token 的条件分布；训练时真实 token 进入交叉熵，推理时被选择或采样的 token 进入下一轮。
+
+图中先沿共享的前向链把文本变成 logits，再分成训练和推理两条路径：训练路径将预测与真实下一个 token 对照并更新参数；推理路径选择 token、追加到上下文后再次前向。图用于定位数据流，实际推理可以通过 KV cache 复用历史状态。
+
+~~~mermaid
+flowchart TD
+    A["原始文本"] --> B["Tokenizer：token ID"]
+    B --> C["Embedding 与位置机制"]
+    P["模型参数 θ"] --> D["Transformer"]
+    C --> D
+    D --> E["词表 logits"]
+    E --> F{"训练或推理？"}
+    F -->|训练| G["真实下一个 token"]
+    E --> H["交叉熵"]
+    G --> H
+    H --> I["梯度与优化器更新"]
+    I --> P
+    F -->|推理| J["选择或采样 token"]
+    J --> K["追加到上下文或 KV cache"]
+    K --> C
+~~~
 
 这条路径上的每个接口都有自己的失败方式：
 
@@ -1010,7 +1073,7 @@ Transformer 原论文的复杂度不能直接当成所有现代 attention kernel
 
 ### 练习一：从序列概率推到 loss
 
-选一个长度为 5 的 token 序列，写出联合概率的链式分解，标出第一个输入位置和最后一个 logits 为什么不参与标准 next-token loss。再加入一个 padding 位置，说明有效目标集合如何变化。
+选一个含 BOS 的长度为 5 的 token 序列，写出联合概率的链式分解，标出 BOS 如何提供首个预测上下文、输入与右移 labels 如何对齐，以及末尾 logits 为什么没有下一 token 目标。再加入一个 padding 位置，说明有效目标集合与分母如何变化。
 
 ### 练习二：画一层 decoder
 
@@ -1036,9 +1099,9 @@ Transformer 原论文的复杂度不能直接当成所有现代 attention kernel
 
 本章使用不同类型的公开资料支持不同层次的论述。
 
-1. PyTorch Cross Entropy：[https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.cross_entropy.html](https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.cross_entropy.html)
-2. PyTorch KL Divergence：[https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.kl_div.html](https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.kl_div.html)
-3. PyTorch Embedding：[https://docs.pytorch.org/docs/stable/generated/torch.nn.Embedding.html](https://docs.pytorch.org/docs/stable/generated/torch.nn.Embedding.html)
+1. PyTorch 2.15 Cross Entropy：[https://docs.pytorch.org/docs/2.15/generated/torch.nn.functional.cross_entropy.html](https://docs.pytorch.org/docs/2.15/generated/torch.nn.functional.cross_entropy.html)
+2. PyTorch 2.15 KL Divergence：[https://docs.pytorch.org/docs/2.15/generated/torch.nn.functional.kl_div.html](https://docs.pytorch.org/docs/2.15/generated/torch.nn.functional.kl_div.html)
+3. PyTorch 2.15 Embedding：[https://docs.pytorch.org/docs/2.15/generated/torch.nn.Embedding.html](https://docs.pytorch.org/docs/2.15/generated/torch.nn.Embedding.html)
 4. Attention Is All You Need：[https://arxiv.org/abs/1706.03762](https://arxiv.org/abs/1706.03762)
 5. Improving Language Understanding by Generative Pre-Training：[https://cdn.openai.com/research-covers/language-unsupervised/language_understanding_paper.pdf](https://cdn.openai.com/research-covers/language-unsupervised/language_understanding_paper.pdf)
 6. BERT: Pre-training of Deep Bidirectional Transformers：[https://arxiv.org/abs/1810.04805](https://arxiv.org/abs/1810.04805)
@@ -1051,6 +1114,13 @@ Transformer 原论文的复杂度不能直接当成所有现代 attention kernel
 13. Scaling Laws for Neural Language Models：[https://arxiv.org/abs/2001.08361](https://arxiv.org/abs/2001.08361)
 14. Training Compute-Optimal Large Language Models：[https://arxiv.org/abs/2203.15556](https://arxiv.org/abs/2203.15556)
 15. SentencePiece 官方实现：[https://github.com/google/sentencepiece](https://github.com/google/sentencepiece)
+16. GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints：[https://arxiv.org/abs/2305.13245v3](https://arxiv.org/abs/2305.13245v3)
+17. Root Mean Square Layer Normalization：[https://arxiv.org/abs/1910.07467](https://arxiv.org/abs/1910.07467)
+18. Train Short, Test Long: Attention with Linear Biases Enables Input Length Extrapolation：[https://arxiv.org/abs/2108.12409v2](https://arxiv.org/abs/2108.12409v2)
+19. Direct Preference Optimization: Your Language Model is Secretly a Reward Model：[https://arxiv.org/abs/2305.18290v3](https://arxiv.org/abs/2305.18290v3)
+20. Language Model Tokenizers Introduce Unfairness Between Languages：[https://arxiv.org/abs/2305.15425](https://arxiv.org/abs/2305.15425)
+21. Language-Specific Effects of Tokenizer Choice in Multilingual Language Models（2026 年预印本）：[https://arxiv.org/abs/2610.12144v1](https://arxiv.org/abs/2610.12144v1)
+22. Google's Neural Machine Translation System：[https://arxiv.org/abs/1609.08144](https://arxiv.org/abs/1609.08144)
 
 PyTorch 文档用于支持 API 输入约定；原始论文用于支持 Transformer、GPT、BERT、T5、AdamW、RoPE、子词 tokenizer、InstructGPT 和 scaling law 的定义或实验结论。文中的概率等式和优化公式是标准教学推导，代码与示例用于解释，不是对某个 checkpoint 或岗位要求的实测承诺。
 

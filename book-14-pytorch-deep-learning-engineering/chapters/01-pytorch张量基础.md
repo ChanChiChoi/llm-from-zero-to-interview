@@ -8,11 +8,13 @@ PyTorch 的核心对象是 tensor。大模型工程里的输入 token、embeddin
 
 ## 1.0 本章范围与资料
 
-本章以 PyTorch 官方文档为 API 语义的主要依据，参考张量属性、广播、`torch.matmul`、`torch.bmm`、`torch.einsum`、`Tensor.view`、`torch.reshape`、`Tensor.contiguous`、`Tensor.stride` 和 `torch.nn.functional.cross_entropy` 文档，并结合前序 Transformer、attention、LM loss、mask 和数学基础章节的 shape 推导口径。文末列出可直接核验的链接。
+本章以 PyTorch 2.15 官方文档为 API 语义的主要依据，参考张量属性、广播、`torch.matmul`、`torch.bmm`、`torch.einsum`、`Tensor.view`、`torch.reshape`、`Tensor.contiguous`、`Tensor.expand`、`torch.nn.Linear` 和 `torch.nn.functional.cross_entropy` 文档，并结合前序 Transformer、attention、LM loss、mask 和数学基础章节的 shape 推导口径。文末列出固定版本的核验链接。除单独标记执行状态的数值例子和完整 demo 外，文中局部短代码片段均经静态审阅、未逐段执行；性能、显存和设备行为仍须按目标环境复测。
 
 本章只聚焦大模型工程最常见的 tensor 基础：shape、dtype、device、broadcasting、matmul / bmm / einsum、索引切片、view / reshape / flatten、transpose / permute / contiguous、stride、mask、loss reshape 和 tensor debug。它不展开 CUDA kernel、autograd graph、distributed tensor、Tensor Core、编译优化或 profiler 细节；这些会在后续章节中处理。文中的小例子是可复现的教学构造，不等于对任意 PyTorch 版本、GPU 型号或混合精度配置的性能承诺；涉及性能的判断必须在目标环境中复测。
 
 ## 1.1 Tensor 是什么
+
+代码状态：本节局部片段静态审阅，未运行。
 
 Tensor 可以理解为多维数组，但在深度学习框架里，它不只是数组。一个 PyTorch tensor 至少包含几类关键信息：
 
@@ -52,10 +54,12 @@ X: [B, T, d]
 
 ### 1.1.1 语言模型的 shape contract
 
+先固定符号和索引约定：`B` 是 batch size，`T` 是序列长度，`d` 是 hidden size，`V` 是词表大小，`H` 是注意力头数，`d_h` 是每个头的维度。以下默认 batch-first，且 `B,T,d,V,H,d_h` 为正整数、`d=H d_h`。每个 `input_ids[b,t]` 是 `[0,V)` 中的整数；`labels[b,t]` 是 `[0,V)` 中的类别索引，或等于显式约定的 `ignore_index`。要产生至少一个 next-token 训练位置，还需 `T≥2`。
+
 语言模型中最常见的张量主线：
 
 ~~~math
-input\_ids \in \mathbb{Z}^{B \times T}
+input\_ids_{b,t} \in \{0,1,\ldots,V-1\},\qquad input\_ids \in \mathbb{Z}^{B \times T}
 ~~~
 
 ~~~math
@@ -116,13 +120,25 @@ broadcasting 从右往左对齐维度：
 [B,T,d] + [d] \rightarrow [B,T,d]
 ~~~
 
-LoRA 或线性层常见矩阵乘法：
+线性层的数学记法常把权重写成输入维在前：
 
 ~~~math
 X [B,T,d_{in}] \times W [d_{in},d_{out}] \rightarrow Y [B,T,d_{out}]
 ~~~
 
-这些 shape 还不是完整的正确性证明。通常要求 `B>0`、`T>0`、`d>0`、`V>0`、`H>0`，并且 `d=H*d_h`；next-token loss 若要产生至少一个位置，还需要 `T>=2`。每一个符号都对应一个约束：`V` 必须和词表索引范围一致，`labels` 的整数值必须落在 `[0, V)` 或等于明确约定的 `ignore_index`，而 mask 的最后一维必须确实对应 key position。工程上应把这些约束写成断言或单元测试，而不是只把 shape 打印出来。特别是 `T=1` 或一个 batch 的所有 label 都被忽略时，`mean` reduction 没有有效监督位置，不能把产生的 `NaN` 当成模型质量信号。
+PyTorch 的 [`nn.Linear(d_in, d_out)`](https://docs.pytorch.org/docs/2.15/generated/torch.nn.Linear.html) 则把 `weight` 存成 `[d_out,d_in]`，前向等价于 `x @ weight.T + bias`；数学记法和参数张量的存储形状方向相反，读代码时要分开看。
+
+读下面这条主线时，同时看每步的 shape 和它要守住的语义条件。shape 相等只说明接口维度对齐，不能替代 token、类别或 mask 的含义检查。
+
+| 阶段 | 张量 shape | 需要守住的条件 |
+| --- | --- | --- |
+| 输入 | `input_ids: [B,T]` | 每个值属于词表索引范围 `[0,V)`。 |
+| embedding | `hidden: [B,T,d]` | `d` 是每个 token 对应向量的宽度。 |
+| LM head | `logits: [B,T,V]` | 类别轴是词表 `V`；`nn.Linear` 的权重存为 `[V,d]`。 |
+| next-token shift | `logits[:, :-1, :]` 与 `labels[:, 1:]` | 两边对应同一批目标位置，shape 分别是 `[B,T-1,V]`、`[B,T-1]`。 |
+| 展平并计算 loss | `[B(T-1),V]` 与 `[B(T-1)]` | `cross_entropy` 将第 1 维当类别轴；至少保留一个有效目标。 |
+
+这些 shape 还不是完整的正确性证明。`V` 必须和词表索引范围一致，`labels` 必须是整数类别索引或约定的 `ignore_index`，而 mask 的最后一维必须确实对应 key position。工程上应把这些约束转成可执行 contract，而不是只打印 shape。检查取值范围时也要注意验证位置：对 CUDA tensor 调用 `.min()`、`.max()`、`.item()` 或把结果转为 Python 布尔值会让主机等待设备；适合调试的小 batch 检查，不宜不加判断地放进每一步训练。Python 的 `assert` 在 `-O` 模式会被移除，因此生产数据校验应使用显式异常或在数据进入 GPU 前完成。`T=1` 会产生空的 next-token 目标；若全部目标都等于 `ignore_index`，平均损失没有有效分母。PyTorch 2.12.0 CPU 的本地观察是该情形返回 NaN，但 API 文档没有保证所有版本、设备都以同一种方式返回；训练前应显式检查有效 token 数量大于零。
 
 `view`、`reshape` 和 `contiguous` 的关系可以这样理解：
 
@@ -133,6 +149,8 @@ X [B,T,d_{in}] \times W [d_{in},d_{out}] \rightarrow Y [B,T,d_{out}]
 这些公式不是为了背维度，而是为了形成一个调试顺序：先看 shape，再看 dtype，再看 device，再看 stride / contiguous，最后检查 mask 方向和数值稳定性。若只证明“代码能运行”，仍可能留下广播方向错、padding 被当成真实 token 或无效位置参与 loss 等语义错误。
 
 ## 1.2 Shape 是第一优先级
+
+代码状态：本节局部片段静态审阅，未运行；后面的手算样例附有独立执行记录。
 
 写深度学习代码时，最重要的习惯是先看 shape，再看数值。
 
@@ -174,7 +192,7 @@ shift_logits: [B, T - 1, vocab_size]
 shift_labels: [B, T - 1]
 ```
 
-很多 loss 报错都来自 shape 没有对齐。`cross_entropy` 的分类输入把类别放在最后一维之外的“类别维”上；最容易理解的二维形式是 logits 为 `[N, C]`、标签为 `[N]`。因此语言模型训练里常把时间和 batch 合并成样本维：
+很多 loss 报错都来自 shape 没有对齐。PyTorch `F.cross_entropy` 对一维输入 `[C]` 使用类别轴 `dim=0`，对多维输入则使用 `dim=1`：输入支持 `[C]`、`[N,C]` 或 `[N,C,d_1,...]`，类别索引目标的 shape 则省去类别轴。因此二维形式是 logits `[N,C]`、标签 `[N]`。语言模型常见 logits `[B,T,V]` 把类别放在最后；若直接传入，PyTorch 会把 `T` 当作类别数 `C`，并要求 target 对齐 `[B,V]`。常见做法是先把 batch 与时间合并：
 
 ```python
 loss = torch.nn.functional.cross_entropy(
@@ -184,6 +202,37 @@ loss = torch.nn.functional.cross_entropy(
 ```
 
 这里的含义是把 `[B, T - 1, vocab_size]` 展平为 `[B * (T - 1), vocab_size]`，把 `[B, T - 1]` 展平为 `[B * (T - 1)]`。如果 batch 中有 padding，还要同时把无效位置标记成 `ignore_index`，否则模型会被要求预测人为补上的 token。也就是说，shape 对齐只解决“张量能否传入 loss”，并不自动保证监督信号的语义正确。
+
+也可以把类别轴移到 `dim=1`，例如 logits `[B,T,V]` 变为 `[B,V,T]`，并保留 labels `[B,T]`；两种写法都要求目标 shape 与类别轴以外的维度对齐。展平方式通常更方便与 token mask 对齐。若采用 `reduction="mean"`，应先确认至少有一个未忽略的目标；全忽略 batch 没有有效平均分母。`ignore_index` 只对类别索引目标生效。[PyTorch 2.15 的 `cross_entropy` 输入和目标形状](https://docs.pytorch.org/docs/2.15/generated/torch.nn.functional.cross_entropy.html) 有完整约定。
+
+下面用一个可以手算的极小例子把 token id、embedding、广播、线性投影和语言模型 loss 串起来。设 `B=1`、`T=2`、`d=V=2`，输入为 `[[0,1]]`，embedding 表两行为 `[1,0]`、`[0,1]`。查表后 hidden 为 `[[[1,0],[0,1]]]`；加上 bias `[0,1]` 时，右侧长度为 2 的维度对齐到 hidden 的最后一维，结果是 `[[[1,1],[0,2]]]`。令投影权重为单位矩阵，则 logits 仍是 `[[[1,1],[0,2]]]`。next-token shift 只留下位置 0 的 logits `[1,1]`，目标是位置 1 的类别 `1`。softmax 两类概率分别为 `e^1/(e^1+e^1)=1/2`，所以交叉熵为 `-ln(1/2)=ln 2≈0.6931`。注意 loss 看到的是一条 `[N,C]=[1,2]` 记录，不是直接把 `[B,T,V]` 当成 `[N,C]`。
+
+以下代码使用同一组数值，对照手算结果；它只验证这个 CPU 教学例子，不是性能测试：
+
+```python
+import math
+import torch
+import torch.nn.functional as F
+
+input_ids = torch.tensor([[0, 1]], dtype=torch.long)
+embedding = torch.tensor([[1.0, 0.0], [0.0, 1.0]])
+bias = torch.tensor([0.0, 1.0])
+linear_weight = torch.eye(2)  # nn.Linear 存储方向：[out_features, in_features]
+labels = torch.tensor([[0, 1]], dtype=torch.long)
+
+hidden = embedding[input_ids] + bias
+logits = F.linear(hidden, linear_weight)
+shift_logits = logits[:, :-1, :].reshape(-1, 2)
+shift_labels = labels[:, 1:].reshape(-1)
+loss = F.cross_entropy(shift_logits, shift_labels)
+
+assert hidden.tolist() == [[[1.0, 1.0], [0.0, 2.0]]]
+assert shift_logits.shape == (1, 2) and shift_labels.tolist() == [1]
+assert math.isclose(loss.item(), math.log(2), rel_tol=0.0, abs_tol=1e-6)
+print(hidden.tolist(), shift_logits.tolist(), shift_labels.tolist(), round(loss.item(), 4))
+```
+
+状态：已验证；2026-11-09，Python 3.12.9、PyTorch 2.12.0+cpu，仅 CPU。实际输出为 `[[[1.0, 1.0], [0.0, 2.0]]] [[1.0, 1.0]] [1] 0.6931`，与手算一致。
 
 建议在模型边界写出显式检查。下面的断言把维度约定转成了可执行的 contract：
 
@@ -205,17 +254,19 @@ def check_lm_contract(input_ids, logits, labels, vocab_size, ignore_index):
     assert int(labels[valid].max()) < vocab_size
 ```
 
-这类检查不应只在调试时临时打印。数据格式、词表版本或 padding 策略一旦变化，contract 就是最早暴露错误的地方；当模型进入大规模训练后，尽早失败通常比训练数小时后才发现 loss 语义错更便宜。
+这类断言适合固定样例和小 batch 的教学/调试检查，不应直接照搬为每步 GPU 训练的完整数据验证：一方面 Python 优化模式会移除 `assert`，另一方面对 CUDA tensor 做范围归约并读取 Python 标量会造成同步。生产代码应把类型、shape 和词表范围的关键验证安排在数据入口或采样检查点；训练步可保留低成本、不会触发设备同步的 shape 检查和有效 token 计数。数据格式、词表版本或 padding 策略一旦变化，contract 就能及早暴露错误。
 
 ## 1.3 Dtype：精度、性能和数值稳定性
+
+代码状态：本节局部片段静态审阅，未运行。
 
 Tensor 的 dtype 决定数值精度和计算性能。
 
 常见 dtype：
 
-1. `torch.float32`：默认浮点类型，精度较高，显存占用较大。
-2. `torch.float16`：半精度，显存更省，吞吐更高，但更容易溢出或下溢。
-3. `torch.bfloat16`：常用于大模型训练，动态范围接近 fp32，精度低于 fp32。
+1. `torch.float32`：常用单精度浮点类型，单个元素占用的存储通常多于 16 位类型。
+2. `torch.float16`：16 位浮点类型，存储占用低于 fp32，动态范围较窄；能否提高吞吐取决于硬件、算子和数据布局。
+3. `torch.bfloat16`：16 位浮点类型，指数范围接近 fp32、有效精度较低；是否可用以及算子支持仍取决于设备和实现。
 4. `torch.int64`：常用于 token id、labels、索引。
 5. `torch.bool`：常用于 mask。
 
@@ -237,7 +288,7 @@ y = x.to(torch.bfloat16)
 3. 模型参数和激活可能是 fp32、fp16 或 bf16。
 4. Loss 计算、softmax、归一化等操作可能需要更稳定的 dtype。
 
-一个典型的数值边界是 attention 的缩放和 softmax。半精度 score 如果绝对值过大，可能在指数运算前后出现溢出；如果所有 key 都被 mask，整行 logits 都可能是负无穷，softmax 便会产生 NaN。选择 `-1e9` 还是负无穷，不是脱离算子和 dtype 的固定教条：要确认后续 kernel、dtype、是否存在全屏蔽行，以及框架版本对 mask 的处理方式。工程实现应在单元测试中覆盖“至少一个有效 key”和“全是 padding”的边界，而不是只测正常句子。
+一个典型的数值边界是 attention 的缩放和 softmax。半精度 score 如果绝对值过大，可能在指数运算前后出现溢出；常规 softmax 遇到整行负无穷时会得到 NaN（本地 PyTorch 2.12 CPU 观察），但 fused attention kernel 和其他版本应按其接口单独核验。有限的大负数在低精度 dtype 下转换时也可能变成负无穷，因而不能把 `-1e9` 当成对所有 dtype 都有限的安全值。真正需要保证的是：有效 query 至少有一个合法 key，或者在 softmax 后按明确策略清零无效 query。工程实现应覆盖“至少一个有效 key”和“全是 padding”的边界，而不是只测正常句子。
 
 常见错误：
 
@@ -249,7 +300,9 @@ RuntimeError: expected scalar type Long but found Float
 
 另一个常见误区是把 `.to(dtype)` 当成数值校验。它只执行转换，不会检查浮点值是否适合作为索引，也不会保证转换后的数值仍然是合法 token。数据进入 embedding 或 loss 前，应分别检查 dtype、取值范围和特殊 token 约定。
 
-## 1.4 Device：CPU 和 GPU 必须一致
+## 1.4 Device：显式管理设备
+
+代码状态：本节局部片段静态审阅，未运行。
 
 Tensor 的 device 表示它在哪个设备上。
 
@@ -262,7 +315,7 @@ if torch.cuda.is_available():
     print(x.device)  # cuda:0
 ```
 
-PyTorch 不会自动在 CPU 和 GPU 之间搬运参与同一次计算的 tensor。下面代码会报错：
+参与计算的非标量 tensor 应显式放在兼容的 device 上。PyTorch 2.15 [设备语义说明](https://docs.pytorch.org/docs/2.15/tensor_attributes.html)记录了一个窄例外：CPU 上的零维标量 tensor 在某些 CPU→GPU 运算中可自动迁移；GPU 标量不会反向自动搬回 CPU，CPU/GPU 非标量也不会自动迁移。工程代码仍应显式设置 device，避免依赖这个不对称特例。下面两个非标量混用会报错：
 
 ```python
 x = torch.randn(2, 3, device="cuda")
@@ -312,6 +365,8 @@ class CausalMask(torch.nn.Module):
 
 ## 1.5 创建 Tensor 的常用方式
 
+代码状态：本节局部片段静态审阅，未运行。
+
 常见创建方式：
 
 ```python
@@ -331,7 +386,7 @@ x = torch.tensor(data)
 y = torch.as_tensor(data)
 ```
 
-`torch.tensor` 通常会拷贝数据并创建新 tensor。`torch.as_tensor` 在某些输入类型下会尽量共享数据，避免额外拷贝。
+`torch.tensor` 会复制输入数据并创建新 tensor。`torch.as_tensor` 在 dtype、device 等条件允许时共享已有 tensor/数组的数据；若需要转换 dtype 或 device，则会复制。对 Python list 等输入，两者都需要构造 tensor 存储，不能把 `as_tensor` 理解成总是零拷贝。[`torch.tensor`](https://docs.pytorch.org/docs/2.15/generated/torch.tensor.html) 与 [`torch.as_tensor`](https://docs.pytorch.org/docs/2.15/generated/torch.as_tensor.html) 的官方文档分别说明了复制和尽可能共享的语义。
 
 `torch.empty` 只分配内存，不初始化数值：
 
@@ -342,6 +397,8 @@ x = torch.empty(2, 3)
 它的内容是不确定的，不能当作全 0 使用。只有你马上会覆盖所有元素时，才适合用 `empty`。
 
 ## 1.6 索引与切片
+
+代码状态：本节局部片段静态审阅，未运行。
 
 Tensor 支持类似 NumPy 的索引和切片。
 
@@ -373,9 +430,11 @@ x[:, 0:1, :].shape  # [B, 1, d]
 
 ## 1.7 Broadcasting：自动扩展维度
 
+代码状态：本节局部片段静态审阅，未运行。
+
 Broadcasting 是 PyTorch 自动对齐 shape 的规则。它允许某些不同 shape 的 tensor 做逐元素运算。
 
-规则可以简化为：从右往左对齐维度，每一维要么相等，要么其中一个是 1，要么其中一个维度不存在。
+规则可以简化为：从右往左对齐维度，每一维要么相等，要么其中一个是 1，要么其中一个维度不存在。这里的扩展是逻辑上的，不会复制较小输入的数据；原地运算还有额外限制，因为目标 tensor 不能因广播而改变自身 shape。细则见 [PyTorch 2.15 广播语义](https://docs.pytorch.org/docs/2.15/notes/broadcasting.html)。
 
 示例：
 
@@ -412,6 +471,8 @@ scores = scores.masked_fill(~mask, float("-inf"))
 
 ## 1.8 unsqueeze、squeeze 和 expand
 
+代码状态：本节局部片段静态审阅，未运行。
+
 为了让 tensor 满足 broadcasting，需要经常增加或删除长度为 1 的维度。
 
 ```python
@@ -442,7 +503,7 @@ print(y.shape)  # [8, 64]
 y = x.squeeze(2)
 ```
 
-`expand` 可以创建广播视图：
+`expand` 可以创建广播视图；它使用零 stride 让多个逻辑位置引用同一底层元素，写入前要先复制：
 
 ```python
 x = torch.randn(1, 3)
@@ -452,9 +513,11 @@ print(y.shape)  # [4, 3]
 
 `expand` 不会真正复制数据，而是通过 stride 让多个位置指向同一份底层存储。因此不能把它理解成物理拷贝。如果需要真实拷贝，可以使用 `repeat`，但会占更多内存。
 
-由于多个逻辑位置可能指向同一存储，不能对 `expand` 返回的视图做依赖独立元素的原地写入；这类写入可能报错，也可能产生难以察觉的别名语义。需要修改每个展开位置时，应先 `clone()`，或改用 `repeat()`，并在实际路径中衡量额外内存。
+由于多个逻辑位置可能指向同一存储，不能对 `expand` 返回的视图做依赖独立元素的原地写入；这类写入可能报错，也可能产生难以察觉的别名语义。需要修改每个展开位置时，应先 `clone()`，或改用 `repeat()`，并在实际路径中衡量额外内存。转换 dtype 等后续操作仍可能分配新内存；`expand` 本身不分配展开大小的存储，见 [`Tensor.expand`](https://docs.pytorch.org/docs/2.15/generated/torch.Tensor.expand.html)。
 
 ## 1.9 matmul：大模型里最常见的计算
+
+代码状态：本节局部片段静态审阅，未运行。
 
 矩阵乘法是 Transformer 的核心。
 
@@ -476,7 +539,7 @@ C = A @ B
 print(C.shape)  # [3, 5]
 ```
 
-对更高维 tensor，`torch.matmul` 会把最后两维当作矩阵维度，前面的维度按 batch 维处理并尝试 broadcast。
+对更高维 tensor，`torch.matmul` 会把最后两维当作矩阵维度，前面的维度按 batch 维处理并尝试 broadcast；具体规则见 [`torch.matmul`](https://docs.pytorch.org/docs/2.15/generated/torch.matmul.html)。
 
 ```python
 Q = torch.randn(2, 4, 8, 64)  # [B, H, T, d_h]
@@ -497,6 +560,8 @@ print(scores.shape)  # [2, 4, 8, 8]
 
 ## 1.10 bmm、mm 和 matmul 的区别
 
+代码状态：本节局部片段静态审阅，未运行。
+
 PyTorch 有多个矩阵乘法 API：
 
 1. `torch.mm`：只处理两个二维矩阵。
@@ -513,7 +578,7 @@ C = torch.bmm(A, B)
 print(C.shape)  # [10, 3, 5]
 ```
 
-`bmm` 不做 batch 维广播，要求 batch size 相同。`matmul` 更灵活，能处理更多 broadcasting 场景。
+`bmm` 不做 batch 维广播，要求 batch size 相同。`matmul` 更灵活，能处理更多 broadcasting 场景；若要利用广播维度，不能把 `bmm` 当作等价替换。
 
 工程里常用建议：
 
@@ -522,6 +587,8 @@ print(C.shape)  # [10, 3, 5]
 3. 如果明确是三维 batch 矩阵乘法，并且不需要广播，可以用 `bmm`。
 
 ## 1.11 einsum：把维度关系写清楚
+
+代码状态：本节局部片段静态审阅，未运行。
 
 `einsum` 可以用字符串显式描述维度之间的计算关系，适合表达复杂张量运算。
 
@@ -556,9 +623,11 @@ context = torch.einsum("bhts,bhsd->bhtd", attn, V)
 print(context.shape)  # [2, 4, 8, 64]
 ```
 
-`einsum` 的优点是把“哪些维度保留、哪些维度求和”写在表达式里，适合教学、原型和复杂的多路收缩。它不是性能保证：字符串写错时可能得到形状正确但语义错误的结果，某些路径也可能比专门的矩阵乘法慢。使用它时至少应做两件事：用一个小尺寸输入和 `matmul` 对照数值，用 profiler 在目标设备和真实尺寸上比较耗时、显存和 kernel 行为。
+`einsum` 的优点是把“哪些维度保留、哪些维度求和”写在表达式里，适合教学、原型和复杂的多路收缩。它不是性能保证：字符串写错时可能得到形状正确但语义错误的结果，某些路径也可能比专门的矩阵乘法慢。使用它时至少应做两件事：用一个小尺寸输入和 `matmul` 对照数值，用 profiler 在目标设备和真实尺寸上比较耗时、显存和 kernel 行为。下标语义和支持的收缩形式见 [`torch.einsum`](https://docs.pytorch.org/docs/2.15/generated/torch.einsum.html)。
 
 ## 1.12 reshape、view 和 flatten
+
+代码状态：本节局部片段静态审阅，未运行。
 
 改变 tensor shape 时常用 `reshape`、`view` 和 `flatten`。
 
@@ -572,7 +641,7 @@ w = x.flatten(0, 1)
 
 它们都可以把 `[2, 3, 4]` 变成 `[6, 4]`，但底层语义不同。
 
-`view` 要求 tensor 在内存布局上兼容目标 shape。`reshape` 更宽松，如果不能返回 view，可能会创建拷贝。
+`view` 要求目标 shape 与原有 size、stride 满足可合并条件；它只共享原数据，不会为满足 shape 而复制。`reshape` 更宽松：满足条件时返回 view，否则可能复制；`flatten` 同样可能返回 view 或新 tensor，代码不应依赖具体是哪一种。更准确的规则见 [`Tensor.view`](https://docs.pytorch.org/docs/2.15/generated/torch.Tensor.view.html)、[`torch.reshape`](https://docs.pytorch.org/docs/2.15/generated/torch.reshape.html) 和 [Tensor Views](https://docs.pytorch.org/docs/2.15/tensor_view.html)。
 
 常见错误：
 
@@ -604,6 +673,8 @@ z = y.contiguous().view(2, 12)
 4. 在性能敏感路径中，对疑似复制的操作记录内存峰值和耗时；不能把 `reshape` 视为永远零拷贝。
 
 ## 1.13 transpose、permute 和 contiguous
+
+代码状态：本节局部片段静态审阅，未运行。
 
 `transpose` 用来交换两个维度：
 
@@ -647,6 +718,8 @@ print(out.shape)  # [B, T, d_model]
 这里的 `contiguous()` 很关键。`transpose` 只是改变 stride 视图，不一定重新排列底层内存。后续使用 `view` 前，常常需要先调用 `contiguous()`。
 
 ## 1.14 Stride：理解 contiguous 的关键
+
+代码状态：本节局部片段静态审阅，未运行。
 
 Stride 表示沿某个维度移动一步，在底层存储中要跳过多少个元素。
 
@@ -696,6 +769,8 @@ assert y.stride() != z.stride()
 
 ## 1.15 cat 和 stack
 
+代码状态：本节局部片段静态审阅，未运行。
+
 `torch.cat` 和 `torch.stack` 都能拼接 tensor，但语义不同。
 
 `cat` 在已有维度上拼接：
@@ -729,6 +804,8 @@ print(batch.shape)  # [4, 10]
 如果每个样本长度不同，不能直接 stack，需要先 padding 或自定义 collate function。padding 后必须同时产出有效 token mask 或 labels mask；否则“为了得到矩形 batch”这一步会悄悄改变 loss 和 attention 的监督对象。
 
 ## 1.16 mask 的常见写法
+
+代码状态：本节局部片段静态审阅，未运行。
 
 Mask 是大模型代码里最容易出错的 tensor 之一。
 
@@ -774,6 +851,8 @@ scores = scores.masked_fill(~causal_mask[None, None, :, :], float("-inf"))
 
 ## 1.17 in-place 操作的风险
 
+代码状态：本节局部片段静态审阅，未运行。
+
 PyTorch 中以下划线结尾的方法通常是 in-place 操作：
 
 ```python
@@ -796,6 +875,8 @@ y = x * 2
 更稳妥的原则是先说明别名关系，再决定是否原地修改。`y = x` 只增加一个 Python 引用；`y = x.clone()` 才创建独立存储；`detach()` 切断梯度关系但仍可能与原 tensor 共享存储。若一个 tensor 还会被计算图、残差分支或日志线程使用，对它做 in-place 修改就可能导致反向结果错误或直接报错。优化显存时可以使用原地操作，但必须用梯度检查、有限值检查和目标 batch 的回归测试证明它没有改变语义。
 
 ## 1.18 调试 Tensor 的实用清单
+
+代码状态：本节局部片段静态审阅，未运行。
 
 当 PyTorch 代码报错时，不要只看最后一行错误。优先打印关键 tensor 的元信息：
 
@@ -844,6 +925,8 @@ print(bad.nonzero())
 
 下面用一段 demo 串起本章最重要的 tensor 操作：shape、dtype、device、broadcasting、matmul、einsum、mask、reshape、view、contiguous、stride、stack 和语言模型 loss reshape。
 
+代码状态：已验证；2026-11-09，Python 3.12.9、PyTorch 2.12.0+cpu，CPU 环境。完整输出中的 shape、`einsum`/`matmul` 一致性、mask 行和、layout、有限 loss 与 contract 检查均通过。
+
 ```python
 import math
 import torch
@@ -855,6 +938,7 @@ torch.manual_seed(7)
 B, T, d_model = 2, 5, 16
 num_heads = 4
 vocab_size = 32
+pad_token_id = 0
 head_dim = d_model // num_heads
 
 input_ids = torch.tensor(
@@ -891,12 +975,12 @@ scores = q @ k.transpose(-2, -1) / math.sqrt(head_dim)     # [B, H, T, T]
 scores_einsum = torch.einsum("bhtd,bhsd->bhts", q, k) / math.sqrt(head_dim)
 raw_scores = scores
 
-padding_mask = input_ids.ne(0)                             # [B, T]
+padding_mask = input_ids.ne(pad_token_id)                  # [B, T]
 causal_mask = torch.tril(torch.ones(T, T, dtype=torch.bool, device=device))
 combined_mask = padding_mask[:, None, None, :] & causal_mask[None, None, :, :]
 query_mask = padding_mask[:, None, :, None]
 valid_query = query_mask.any(dim=-1, keepdim=True)
-scores = scores.masked_fill(~combined_mask, -1e9)
+scores = scores.masked_fill(~combined_mask, float("-inf"))
 scores = torch.where(valid_query, scores, torch.zeros_like(scores))
 
 attn = torch.softmax(scores, dim=-1)                       # [B, H, T, T]
@@ -916,7 +1000,7 @@ lm_logits = torch.randn(B, T, vocab_size, device=device)
 labels = input_ids
 shift_logits = lm_logits[:, :-1, :].reshape(-1, vocab_size)
 shift_labels = labels[:, 1:].reshape(-1)
-loss = F.cross_entropy(shift_logits, shift_labels, ignore_index=0)
+loss = F.cross_entropy(shift_logits, shift_labels, ignore_index=pad_token_id)
 
 sample_a = torch.randn(d_model, device=device)
 sample_b = torch.randn(d_model, device=device)
@@ -976,6 +1060,8 @@ report = {
 print(report)
 ```
 
+命令：从本 Markdown 提取 §1.19 的 Python 代码块后运行。实际报告显示输入 `(2,5)`、hidden `(2,5,16)`、attention scores `(2,4,5,5)`、展平 logits `(8,32)`；`einsum_matches_matmul=True`、有效 attention 行和为 `1.0`、`loss_is_finite=True`，六项 contract 检查均为 `True`。本次仅验证 CPU fallback，不代表 CUDA 验证。
+
 这段代码覆盖了本章最核心的点：
 
 1. `input_ids` 是 `torch.long`，embedding 后变成 `[B,T,d_model]` 的浮点 hidden states。
@@ -989,6 +1075,8 @@ print(report)
 真正写 Transformer 时会使用 `nn.Linear`、更完整的 mask、dropout、输出投影和更严谨的初始化，但 tensor shape 主线是不变的。
 
 ## 1.20 一个完整的张量审计过程
+
+代码状态：`audit_tensor` 片段静态审阅，未运行；读取 CUDA tensor 的有限值会等待设备完成。
 
 前面的概念在真实项目中通常同时出现。假设训练突然出现 `loss=nan`，或者一个 attention 模块的输出形状正确但效果明显下降，可以按以下顺序审计，而不是只在报错行前面加 `print`。
 
@@ -1020,7 +1108,7 @@ def audit_tensor(name, value):
 
 ### 练习一：shape contract
 
-给定 `B=3`、`T=17`、`d_model=768`、`H=12`、`V=32000`，写出 embedding、Q/K/V、attention score、合并多头和 LM loss flatten 后的 shape。说明为什么 `d_model` 必须能被 `H` 整除。
+给定 `B=3`、`T=17`、`d_model=768`、`H=12`、`V=32000`，写出 embedding、Q/K/V、attention score、合并多头和 LM loss flatten 后的 shape。说明为什么 `d_model` 必须能被 `H` 整除，并解释为什么 `[B,T,V]` 不能直接按 `[N,C]` 传给 `F.cross_entropy`。
 
 ### 练习二：广播方向
 
@@ -1048,19 +1136,18 @@ def audit_tensor(name, value):
 
 ## 1.22 资料与证据边界
 
-本章优先依据 PyTorch 官方 API 和说明文档：
+本章优先依据 PyTorch 2.15 官方 API 和说明文档：
 
-1. 张量属性与基础操作：https://pytorch.org/docs/stable/tensors.html
-2. 广播语义：https://pytorch.org/docs/stable/notes/broadcasting.html
-3. `torch.matmul` 的维度规则：https://pytorch.org/docs/stable/generated/torch.matmul.html
-4. `torch.bmm` 的批量矩阵乘法：https://pytorch.org/docs/stable/generated/torch.bmm.html
-5. `torch.einsum` 的下标表达式：https://pytorch.org/docs/stable/generated/torch.einsum.html
-6. Tensor view、stride 与存储关系：https://pytorch.org/docs/stable/tensor_view.html
-7. `Tensor.view` 的限制：https://pytorch.org/docs/stable/generated/torch.Tensor.view.html
-8. `torch.reshape` 的 view/copy 语义：https://pytorch.org/docs/stable/generated/torch.reshape.html
-9. `torch.nn.functional.cross_entropy` 的输入和 target 约定：https://pytorch.org/docs/stable/generated/torch.nn.functional.cross_entropy.html
+1. [Tensor 属性与设备规则](https://docs.pytorch.org/docs/2.15/tensor_attributes.html)
+2. [`torch.tensor`](https://docs.pytorch.org/docs/2.15/generated/torch.tensor.html) 与 [`torch.as_tensor`](https://docs.pytorch.org/docs/2.15/generated/torch.as_tensor.html) 的复制/共享语义
+3. [广播语义](https://docs.pytorch.org/docs/2.15/notes/broadcasting.html)
+4. [`torch.nn.Linear`](https://docs.pytorch.org/docs/2.15/generated/torch.nn.Linear.html) 的权重形状和前向公式
+5. [`torch.matmul`](https://docs.pytorch.org/docs/2.15/generated/torch.matmul.html)、[`torch.mm`](https://docs.pytorch.org/docs/2.15/generated/torch.mm.html) 与 [`torch.bmm`](https://docs.pytorch.org/docs/2.15/generated/torch.bmm.html)
+6. [`torch.einsum`](https://docs.pytorch.org/docs/2.15/generated/torch.einsum.html) 的下标表达式
+7. [Tensor Views](https://docs.pytorch.org/docs/2.15/tensor_view.html)、[`Tensor.view`](https://docs.pytorch.org/docs/2.15/generated/torch.Tensor.view.html)、[`torch.reshape`](https://docs.pytorch.org/docs/2.15/generated/torch.reshape.html)、[`Tensor.expand`](https://docs.pytorch.org/docs/2.15/generated/torch.Tensor.expand.html) 与 [`Tensor.contiguous`](https://docs.pytorch.org/docs/2.15/generated/torch.Tensor.contiguous.html)
+8. [`torch.nn.functional.cross_entropy`](https://docs.pytorch.org/docs/2.15/generated/torch.nn.functional.cross_entropy.html) 的输入和 target 约定
 
-这些页面适合核对 API 的形状、dtype、device 和返回值语义，不等于对某个模型实现的正确性证明。性能、显存、非连续输入是否触发内部复制、混合精度下的数值稳定性，都依赖 PyTorch 版本、后端、硬件和具体输入；书中的 demo 只能证明教学构造在当前环境可运行，不能替代目标部署的 benchmark。
+这些页面适合核对固定版本 API 的形状、dtype、device 和返回值语义，不等于对某个模型实现的正确性证明。性能、显存、非连续输入是否触发内部复制、混合精度下的数值稳定性，都依赖 PyTorch 版本、后端、硬件和具体输入；书中的 demo 只能证明教学构造在当前环境可运行，不能替代目标部署的 benchmark。
 
 ## 1.23 本章小结
 
@@ -1068,7 +1155,7 @@ PyTorch 张量基础的重点不是背 API，而是形成稳定的工程判断�
 
 1. 任何模型代码先看 shape。
 2. Dtype 决定精度、性能和模块输入要求。
-3. Device 必须一致，否则 CPU/GPU 混用会报错。
+3. 参与计算的非标量 tensor 要显式放在兼容的 device 上，避免依赖零维 CPU 标量的自动迁移特例。
 4. Broadcasting 很强大，但要确认语义方向正确。
 5. `matmul` 和 `einsum` 是理解 attention 的核心工具。
 6. `reshape`、`view`、`transpose`、`permute`、`contiguous` 背后是内存布局和 stride。

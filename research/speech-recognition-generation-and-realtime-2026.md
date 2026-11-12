@@ -136,3 +136,51 @@
 - 来源支持：当前页面为低延迟流式配置列出 `chunk_size=0.16`、`padding_size=1.92`；高吞吐流式配置列出 `chunk_size=0.8`、`padding_size=1.6`。低延迟示例还包含相应 tokenizer、verbalizer、decoder 与 endpointing 参数，故该组合不是独立模型常数。
 - 证据等级：source-backed（访问日 NVIDIA 官方配置文档）。
 - 边界：配置绑定 Riva 的 Conformer 流式 API 与文档所述 pipeline；把 `chunk+2×padding` 当作输入窗口只是在左右 padding 对称时的估算，不能直接推出 GPU 工作量、并发或目标识别质量。动态页面在未来部署前应按目标 Riva 版本复查。
+
+## 2026 年长文、场景语音与音频注入研究
+
+检索与阅读日期：2026-11-12。
+
+### SwanBench-Speech
+
+- 来源：Pan et al., [Comprehensive Benchmarking of Long-Form Speech Generation in Diverse Scenarios](https://arxiv.org/abs/2605.28618v1)，arXiv:2605.28618v1，2026-05-27。
+- 阅读范围：摘要、§2 长文评估基准表、§3.1 基准范围、§3.4 指标、§3.5 人类感知对齐摘要、§4 评估设置、§5 讨论及附录 E 实验环境/语音条件说明。
+- 来源支持：SwanBench-Speech 覆盖长篇 TTS 和对话生成，共 1,101 个样本、17 种场景；指标分为声学、语义和表现力三组，共七项，覆盖音色/混响一致性、声音保真、内容准确、韵律连贯、表现丰富度和表现层次。作者对部分自动指标进行听者研究，并报告长篇、高表现力条件仍有持续性差距。
+- 证据等级：source-backed（预印本基准构造、指标定义和作者评测）。
+- 边界：结论绑定所选场景、数据、参考音频、推理配置和自动评估器；自动表现力打分采用 Gemini 3 Pro 等特定 judge，不能直接外推为其他语种/产品表现或普遍模型排名。该来源适合说明评测单位和指标维度扩展，不证明七项分数可以组成一个通用总分。
+
+### DRAMA-Eval
+
+- 来源：Hu et al., [DRAMA-Eval: A Benchmark for Context-Aware, Multi-Turn, Multi-Speaker Speech Generation](https://arxiv.org/abs/2610.31796v1)，arXiv:2610.31796v1，2026-10-22。
+- 阅读范围：摘要、§3.1–3.3 任务和数据、§4.1–4.5 推理协议/客观与自动评估/人类一致性/全局上下文消融、§6 limitations。
+- 来源支持：数据包含 1,038 个中英文案例（中文 537、英文 501），源音频 12.50 小时、标注语音 10.65 小时和 7,530 个轮次；每案例平均 43.36 秒、7.25 轮，涉及 1–4 位说话人。协议区分 WER/CER 与跨轮说话人一致性等客观指标、逐轮指令/韵律/表现力，以及场景交互/整体流畅/沉浸度。后六项使用 Gemini 3.8 Flash 与真实音频做 A/B 比较，报告 tie-adjusted win rate，并提供人工一致性分析。
+- 证据等级：source-backed（预印本数据说明、评分协议、人工校验和作者实验）。
+- 边界：只含中文与英语，自动 judge 是专有音频语言模型；不同模型类别通过各自支持的不同输入条件评测；平均场景约 43 秒，不等同长篇叙事；不评估背景音乐、环境音和音效。模型排名须绑定类别与接口，不能把场景评分直接解释成通用语音质量。
+
+### AudioHijack 与第三方音频注入
+
+- 来源：Chen et al., [Hijacking Large Audio-Language Models via Context-Agnostic and Imperceptible Auditory Prompt Injection](https://arxiv.org/abs/2604.14604v1)，arXiv:2604.14604v1，2026-04-16。
+- 阅读范围：摘要、§III 威胁模型、§V 评估与隐蔽性、§VI 商业代理实验、§VII 对策、§VIII 限制及伦理说明。
+- 来源支持：论文把 threat model 定义为第三方只能提供/影响音频数据、不能控制用户其它上下文，并提出 AudioHijack 攻击；作者报告在其 13 个测试 LALM、六类行为和未见上下文实验下的攻击成功，并在若干商业语音代理官方 API 上演示工具行为操纵。论文同时显示单靠 prompt 级告知或 response self-reflection 在其设置下并不足以可靠检测。
+- 证据等级：source-backed（预印本攻击定义、受控模型评估和商业 API 研究实验）。
+- 边界：预印本不是任意录音、模型、声学环境或生产集成系统的攻击率；作者指出其测试平台、模型版本、攻击类别和代理集成覆盖有限。该结果支持把音频理解与用户授权、工具权限和副作用确认分开，不支持把报告中的攻击率外推成目标产品风险概率。
+
+## 音频质量评测：MUSHRA 与 FAD
+
+检索与阅读日期：2026-11-12。
+
+### MUSHRA
+
+- 来源：[ITU-R BS.1534-3](https://www.itu.int/rec/r-rec-bs.1534/en)，《Method for the subjective assessment of intermediate quality level of audio systems》，2015-10，访问时状态为 In force (Main)。
+- 阅读范围：ITU 推荐页面与 BS.1534-3 官方 PDF 的范围、实验设计、听者筛选、刺激呈现、评分、统计分析和报告章节。
+- 来源支持：MUSHRA 是针对中等音质水平音频系统的多刺激主观评测方法，要求设计隐藏参考与锚点，并规定听者、测试素材、聆听条件、统计分析和结果报告。
+- 证据等级：verified（现行 ITU-R 推荐文本）。
+- 边界：它是受控主观评测协议，不会自动回答语音内容是否正确、说话人是否获授权、实时交互是否可靠；用于 TTS 或其他任务时仍须定义属性、样本和比较条件。
+
+### Fréchet Audio Distance
+
+- 来源：Kilgour et al., [Fréchet Audio Distance: A Metric for Evaluating Music Enhancement Algorithms](https://arxiv.org/pdf/1812.08466v4)，arXiv:1812.08466v4，2019-01-17。
+- 阅读范围：摘要、引言、§3.1–3.2 的定义与 VGGish 嵌入、§4 的实验设置/数据、§5 的失真和人工比较结果。
+- 来源支持：原始 FAD 面向音乐增强，不要求逐样本配对参考；VGGish 将 1 秒音频窗转换为 128 维嵌入，作者以 0.5 秒步长取重叠窗口，分别估计待评输出集合和干净背景音乐集合的多元高斯统计，再计算 Fréchet 距离。论文在 MagnaTagATune 数据（600 小时；540 小时背景集、60 小时评估集）上构造人工失真，并在 300 段 5 秒素材的听测子集上比较指标；作者报告该实验中 FAD 与人类偏好的相关系数为 0.52，高于所比较的 SDR、余弦距离和幅度 L2。
+- 证据等级：source-backed（原论文 v4 的定义、数据和指定人工听测）。
+- 边界：FAD 是评估集合相对背景分布的统计量，受嵌入模型、参考背景集合、样本量和预处理影响；论文的音乐增强结果不能外推为通用 TTS 自然度、内容准确率、授权或说话人安全指标。后续不同 embedding、sample-bias 修正或任务定义属于不同评估配置，应单独说明。

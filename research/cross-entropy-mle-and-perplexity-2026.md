@@ -29,6 +29,14 @@
 
 在 one-hot 监督下，交叉熵退化为真实类别的负对数概率；对一个序列的条件概率取乘积后再取负对数，会得到各位置负对数概率之和。按有效 token 平均并使用自然对数时，PPL 等于平均负对数似然的指数。它们是定义之间的代数关系；教学例子可使用合成概率，但不能把这些数值表述成模型实测结果。
 
+## KL divergence API 与 reduction 约定
+
+- 来源：PyTorch torch.nn.functional.kl_div 2.15，[官方 API 文档](https://docs.pytorch.org/docs/2.15/generated/torch.nn.functional.kl_div.html)，2026-11-05 阅读。
+- 实际阅读范围：函数签名、input/target/log_target 参数说明，以及 reduction 的定义和 warning。
+- 来源支持：input 必须是 log-probability；log_target=False（默认）时 target 以 probability 表示，设为 True 时 target 才是 log-probability。默认 reduction='mean' 除以输出元素数，官方明确说明它不等于数学 KL 值；batchmean 是先求和再除以第一个维度的 batch size。
+- 证据等级：source-backed（固定 PyTorch 2.15 版本的 API 输入和归约语义）。
+- 适用边界：对 [batch, time, vocab] 等序列张量，batchmean 的分母仍是 batch size，不是有效 token 数；按 token 评估须先沿类别维求和，并依据有效目标 mask 构造分母。类别加权、不同形状和自定义聚合需另按实际目标核对。
+
 ## 生命周期
 
 交叉熵、最大似然和标准自回归 perplexity：active。PPL 的可比性依赖 tokenizer、上下文窗口、stride、目标 mask、有效 token 计数与聚合方式；跨配置报告需给出这些条件。

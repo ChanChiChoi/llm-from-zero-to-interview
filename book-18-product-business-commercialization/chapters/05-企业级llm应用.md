@@ -745,7 +745,7 @@ needs_rework= {'contract_copilot': ['rag_permission_filter', 'tool_permission_ga
 ## 5.20 资料入口与证据边界
 
 - [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：NIST 的风险管理框架，可支持 govern、map、measure、manage 的治理闭环；它不替代具体组织的安全验收。
-- [NIST Generative AI Profile](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf)：NIST 的生成式 AI 风险画像，可支持数据、生成内容、评估和治理边界；实际风险概率和损失仍需结合业务数据。
+- [NIST Generative AI Profile](https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence)：NIST 的生成式 AI 风险画像，可支持数据、生成内容、评估和治理边界；实际风险概率和损失仍需结合业务数据。
 - [OWASP Top 10 for LLM Applications](https://owasp.org/www-project-top-10-for-large-language-model-applications/)：社区安全项目，可支持提示注入、敏感信息泄露、过度代理和资源消耗等应用层威胁分类；它不是某个产品的安全证明。
 - [Microsoft RBAC 文档](https://learn.microsoft.com/en-us/azure/role-based-access-control/overview)：官方身份与访问控制文档，可支持角色、主体、资源和动作授权的基础概念；企业实际策略仍需按租户和数据分类设计。
 - [Microsoft Zero Trust 概览](https://learn.microsoft.com/en-us/security/zero-trust/zero-trust-overview)：官方安全架构入口，可支持持续验证、最小权限和假设已被攻破等原则；它不自动完成 LLM 数据流审查。

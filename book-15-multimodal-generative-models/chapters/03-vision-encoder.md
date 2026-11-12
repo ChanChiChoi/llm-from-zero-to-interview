@@ -1,6 +1,6 @@
 # 第三章：Vision Encoder
 
-多模态模型看到的不是图片文件，而是图片经过视觉编码器转换后的表示。原始输入可能是一个形状为 [B, 3, H, W] 的像素张量；经过 vision encoder 后，它可能变成一个全局向量，也可能变成 [B, N, d_v] 的视觉 token 序列。后续的 CLIP 相似度、VLM projector、cross-attention 或语言模型，都建立在这个转换结果上。
+多模态模型看到的不是图片文件，而是图片经过视觉编码器（vision encoder）转换后的表示。原始输入可能是一个形状为 $[B,3,H,W]$ 的像素张量；经过视觉编码器后，它可能变成一个全局向量，也可能变成 $[B,N,d_v]$ 的视觉词元（visual token）序列。后续的 CLIP（Contrastive Language–Image Pre-training，图文对比预训练）相似度计算、视觉语言模型（vision-language model，VLM）投影器（projector）、交叉注意力（cross-attention）或语言模型，都建立在这个转换结果上。
 
 因此，vision encoder 不是一个可以随意替换的“前处理模块”。它决定了几个关键问题：
 
@@ -17,10 +17,10 @@
 
 ~~~text
 像素与预处理
-    -> 局部算子或 patch embedding
-    -> 空间位置与视觉主干
-    -> 全局向量、patch tokens 或多层特征
-    -> projector / pooling / cross-attention
+    -> 局部算子或图像块嵌入（patch embedding）
+    -> 空间位置与视觉主干（卷积神经网络 CNN 或变换器 Transformer）
+    -> 全局嵌入（global embedding）、patch token（图像块词元）或多层特征
+    -> projector / 池化（pooling）/ cross-attention
     -> CLIP 检索、VLM 问答或结构化视觉任务
 ~~~
 
@@ -30,16 +30,16 @@
 
 本章讨论视觉编码器在多模态系统中的表示与工程责任：
 
-1. CNN 如何利用局部感受野、权重共享和残差连接。
-2. ViT 如何把图像切成 patch，并把 patch 变成 Transformer token。
-3. 无 padding、显式 padding、resize 和 crop 如何改变网格大小。
+1. 卷积神经网络（CNN）如何利用局部感受野、权重共享和残差连接。
+2. 视觉 Transformer（Vision Transformer，ViT）如何把图像切成 patch，并把 patch 变成 Transformer 词元（token）。
+3. 无补边、显式补边（padding）、缩放（resize）和裁剪（crop）如何改变网格大小。
 4. patch embedding 的权重形状、位置编码和 token 顺序。
-5. CLS token、平均池化、attention pooling 和 patch tokens 的差异。
+5. 分类标记（class token，CLS token）、平均池化、注意力池化（attention pooling）和 patch tokens 的差异。
 6. 多层视觉特征、层间语义和局部空间信息。
 7. 分辨率、patch size、token 数、attention 成本和显存的关系。
-8. CLIP、SigLIP、MAE 等预训练目标对视觉表示的影响。
-9. 视觉塔与 projector、LLM hidden size 和上下文预算的接口。
-10. OCR、图表、小目标和空间关系为什么需要额外设计。
+8. CLIP、SigLIP（Sigmoid Loss for Language Image Pre-Training，sigmoid 图文预训练）、掩码自编码器（Masked Autoencoder，MAE）、DINOv3 等预训练目标对视觉表示的影响。
+9. 视觉塔与 projector、语言模型（large language model，LLM）的隐藏维度（hidden size）和上下文预算的接口。
+10. 光学字符识别（optical character recognition，OCR）、图表、小目标和空间关系为什么需要额外设计。
 
 检测、分割、专用 OCR 模型、视频时序编码和完整 VLM 对话训练会在其他章节展开。本章会在边界处说明它们需要视觉编码器提供什么，但不会用一张架构图替代专门论证。
 
@@ -49,11 +49,11 @@
 
 | 资料 | 可以支持 | 不应直接推出 |
 | --- | --- | --- |
-| ResNet、ViT、CLIP、SigLIP、MAE 等原始论文 | 论文提出的结构、目标和实验结果 | 任意产品版本的全部实现细节 |
+| 残差网络（ResNet）、ViT、CLIP、SigLIP、MAE 等原始论文 | 论文提出的结构、目标和实验结果 | 任意产品版本的全部实现细节 |
 | 官方代码和模型文档 | 特定实现的预处理、权重和张量接口 | 所有视觉塔都采用同样的 pooling 和位置编码 |
 | 本章的教学代码 | 形状、算术和成本公式是否自洽 | 真实图片上的识别、OCR 或安全能力 |
 
-例如，ViT 论文支持“patch 序列可以由 Transformer 处理”这一机制命题；OpenAI CLIP 的公开代码支持某个版本使用卷积 patch embedding、class embedding 和位置 embedding 的实现事实；它们不等于对一个新模型的私有视觉塔做了证明。
+例如，ViT 原论文支持“patch 序列可以由 Transformer 处理”这一机制命题；OpenAI CLIP 固定提交版本的 ViT 分支使用卷积图像块投影、分类标记嵌入（class embedding）和位置嵌入（position embedding），但同一仓库也包含 ResNet 分支。[ViT 原论文](https://arxiv.org/abs/2010.11929)、[CLIP 固定提交的 model.py](https://github.com/openai/CLIP/blob/a1d071733d7111c9c014f024669f959182114e33/clip/model.py) 它们都不能证明新模型的私有视觉塔采用相同接口。
 
 ### 0.3 小白先建立一个直觉
 
@@ -77,7 +77,7 @@
 3. patch size、网格高度和网格宽度。
 4. 是否有 CLS token、其他特殊 token 或位置 token。
 5. token 的行列顺序和坐标映射。
-6. 视觉 hidden size、投影维度和 dtype。
+6. 视觉隐藏维度（hidden size）、投影维度和数据类型（dtype）。
 7. 选用的层、pooling 方式和输出 token 数。
 8. 视觉塔的权重版本与预训练目标。
 
@@ -103,15 +103,15 @@ X\in\mathbb{R}^{B\times C\times H\times W}.
 
 视觉编码器的输出常见为三种形式：
 
-1. 全局向量 g，形状为 [B, d_g]。
-2. 空间 token Z，形状为 [B, N, d_v]。
-3. 多层或多尺度特征，形状可能是 [B, C_l, H_l, W_l] 的集合。
+1. 全局向量 $g$，形状为 $[B,d_g]$。
+2. 空间 token $Z$，形状为 $[B,N,d_v]$。
+3. 多层或多尺度特征，形状可能是 $[B,C_l,H_l,W_l]$ 的集合。
 
 选择哪一种输出，不是代码风格问题，而是任务需求问题。检索通常可以使用 g；图文对话、OCR 和定位通常需要 Z 或多尺度特征。
 
 ### 1.2 表示不是原图的无损副本
 
-如果一张 224 x 224 的 RGB 图片使用 patch size 16，单纯的 patch 数是：
+如果一张 $224\times224$ 的 RGB 图片使用图像块尺寸（patch size）16，单纯的 patch 数是：
 
 ~~~math
 N=\frac{224}{16}\times\frac{224}{16}=14\times14=196.
@@ -130,7 +130,7 @@ N=\frac{224}{16}\times\frac{224}{16}=14\times14=196.
 
 ### 1.3 视觉主干的两种基本路线
 
-CNN 通过局部卷积逐层扩大感受野，天然保留网格结构；ViT 先把图像变成 token，再用 self-attention 进行跨位置交互。两者都可以输出全局和局部特征，但它们的归纳偏置、成本曲线和预训练方式不同。
+CNN 通过局部卷积逐层扩大感受野，天然保留网格结构；ViT 先把图像变成 token，再用自注意力（self-attention）进行跨位置交互。两者都可以输出全局和局部特征，但它们的归纳偏置、成本曲线和预训练方式不同。
 
 可以用一个问题区分两条路线：
 
@@ -153,13 +153,22 @@ Y_{b,o,h,w}
 \sum_{u=0}^{K_h-1}
 \sum_{v=0}^{K_w-1}
 K_{o,c,u,v}\,
-X_{b,c,h',w'}
+X_{b,c,h\,s-p+u\,d,w\,s-p+v\,d}
 \right)+b_o.
 ~~~
 
-h' 和 w' 由 stride、padding 和 dilation 决定，`b_o` 是输出通道 `o` 的 bias，在所有输入通道和卷积窗口求和完成后只加一次。实际框架还会包含边界处理和通道分组，但核心直觉是：同一组局部权重在不同空间位置重复使用。
+这里按深度学习框架常见的互相关约定（卷积核不翻转），使用不分组卷积和从 0 开始的空间索引。$b$ 是批次索引，$c$ 是输入通道，$o$ 是输出通道，$h,w$ 是输出位置，$u,v$ 是卷积核位置；$C_{\mathrm{in}}$ 是输入通道数，$K_h,K_w$ 是卷积核高和宽。对应输入位置为 $h'=h\,s-p+u\,d$、$w'=w\,s-p+v\,d$。越出输入边界的元素按零处理。$s$ 是步幅（stride），$p$ 是边界填充（padding），$d$ 是膨胀率（dilation），$b_o$ 是输出通道 $o$ 的偏置（bias），在所有输入通道和卷积窗口求和完成后只加一次。分组卷积会限制每组可连接的输入通道，需要相应调整求和范围。核心直觉是同一组局部权重在不同空间位置重复使用。
 
-卷积的权重共享带来两个重要性质：
+例如输入高宽都是 224，取卷积核大小 $K=3$、$p=1$、$s=2$、$d=1$，代入输出公式得到：
+
+~~~math
+H_{\mathrm{out}}
+=\left\lfloor\frac{224+2(1)-1(3-1)-1}{2}+1\right\rfloor
+=\left\lfloor\frac{223}{2}+1\right\rfloor
+=\lfloor112.5\rfloor=112.
+~~~
+
+宽度相同，输出网格为 $112\times112$。这个中间结果展示了步幅为 2 如何把每一维约减半，而不是由“CNN”这个名称直接决定分辨率。卷积的权重共享带来两个重要性质：
 
 1. 一个边缘检测模式可以在图片不同位置复用。
 2. 局部邻域在网络早期被优先建模。
@@ -177,20 +186,20 @@ H_{\mathrm{out}}
 \right\rfloor,
 ~~~
 
-其中 H 是输入尺寸，p 是 padding，K 是 kernel size，s 是 stride，d 是 dilation。宽度方向使用同样公式。
+其中 $H$ 是输入尺寸，$p$ 是 padding，$K$ 是卷积核大小，$s$ 是 stride，$d$ 是 dilation；这些参数已在前一节定义。宽度方向使用同样公式。
 
 这个公式说明，视觉特征图的空间尺寸不是由模型名称决定的，而是由卷积配置和输入尺寸共同决定的。stride 越大，空间分辨率下降越快；连续下采样可以降低后续计算，却会损失小目标定位精度。
 
 ### 2.3 感受野
 
-如果一个输出单元依赖输入中的一块区域，这块区域称为它的感受野。堆叠卷积后，感受野逐层扩大。对一维简化情况，若第 l 层 kernel 为 k_l、stride 为 s_l，跳距 j_l 和感受野 r_l 可以递推：
+如果一个输出单元依赖输入中的一块区域，这块区域称为它的感受野。堆叠卷积后，感受野逐层扩大。对一维简化情况，若第 $l$ 层卷积核为 $k_l$、步幅为 $s_l$，跳距 $j_l$ 和感受野 $r_l$ 可以递推：
 
 ~~~math
 j_l=j_{l-1}s_l,\qquad
 r_l=r_{l-1}+(k_l-1)j_{l-1},
 ~~~
 
-初始 j_0=1、r_0=1。这个递推有两个工程含义：
+初始 $j_0=1$、$r_0=1$。这个递推有两个工程含义：
 
 1. 早期层更适合局部纹理和边缘。
 2. 深层单元覆盖更大的输入区域，语义更强但空间精度更粗。
@@ -205,13 +214,13 @@ ResNet 的核心形式是：
 h_{l+1}=h_l+F_l(h_l).
 ~~~
 
-残差块让网络学习相对输入的增量，而不是每一层都从零学习完整变换。反向传播时，恒等路径为梯度提供了直接通道，有助于训练更深的网络。
+残差块让网络学习相对输入的增量，而不是每一层都从零学习完整变换。反向传播时，恒等路径为梯度提供了直接通道，有助于训练更深的网络；这是 ResNet 原论文提出的残差学习路线。[ResNet 原论文](https://arxiv.org/abs/1512.03385)
 
 残差连接并不会自动增加分辨率，也不会自动保留 OCR 细节。它解决的是优化和表示变换的组织方式，空间下采样仍由 stride、pooling 和具体 block 决定。
 
 ### 2.5 CNN 的多尺度输出
 
-检测、分割和文档布局任务常从 CNN 的不同 stage 取特征：
+检测、分割和文档布局任务常从 CNN 的不同阶段（stage）取特征：
 
 ~~~text
 stage_1: 高分辨率、低层纹理
@@ -220,7 +229,7 @@ stage_3: 中等分辨率、部件语义
 stage_4: 低分辨率、全局语义
 ~~~
 
-这类 feature pyramid 的价值是同时保留不同尺度的信息。一个只输出最终 global pooling 向量的 CNN，可能很适合分类，却不适合直接预测细粒度坐标。
+这类特征金字塔（feature pyramid）的价值是同时保留不同尺度的信息。一个只输出最终全局池化（global pooling）向量的 CNN，可能很适合分类，却不适合直接预测细粒度坐标。
 
 ### 2.6 CNN 与 ViT 的比较边界
 
@@ -238,7 +247,7 @@ stage_4: 低分辨率、全局语义
 
 ### 3.1 Patch 网格的三种口径
 
-设输入高度 H、宽度 W、patch size P。工程中常见三种口径：
+设输入高度 $H$、宽度 $W$、图像块尺寸（patch size）$P$。工程中常见三种口径：
 
 1. 先 resize 或 crop 到 H、W 都能被 P 整除。
 2. 显式 padding 到完整网格。
@@ -259,16 +268,16 @@ N_h=\left\lfloor\frac{H-P}{P}\right\rfloor+1,\qquad
 N_w=\left\lfloor\frac{W-P}{P}\right\rfloor+1.
 ~~~
 
-例如 H=W=225、P=14：
+例如 $H=W=225$、$P=14$。补齐网格时，$N_h=N_w=\lceil225/14\rceil=17$，所以 $N=17\times17=289$。无 padding 时，$N_h=N_w=\lfloor(225-14)/14\rfloor+1=15+1=16$，所以 $N=16\times16=256$：
 
 1. 显式 padding 或先补齐时是 17 x 17=289 个 patch。
 2. 无 padding 的 kernel=14、stride=14 卷积是 16 x 16=256 个 patch。
 
-两者都可以是合理设计，但不能在同一份文档里把它们的 token 数混用。模型卡、processor 和实际代码决定了最终口径。
+两者都可以是合理设计，但不能在同一份文档里把它们的 token 数混用。模型卡、图像处理器（processor）和实际代码决定了最终口径。
 
 ### 3.2 Patch 是什么
 
-一个 RGB patch 的原始形状是：
+ViT 原论文采用固定大小的图像块序列作为 Transformer 输入；一个 RGB patch 的原始形状是：[ViT 原论文](https://arxiv.org/abs/2010.11929)
 
 ~~~math
 p_i\in\mathbb{R}^{C\times P\times P}.
@@ -277,20 +286,20 @@ p_i\in\mathbb{R}^{C\times P\times P}.
 展平后：
 
 ~~~math
-\operatorname{vec}(p_i)\in\mathbb{R}^{CP^2}.
+\mathrm{vec}(p_i)\in\mathbb{R}^{CP^2}.
 ~~~
 
 对每个 patch 使用线性投影：
 
 ~~~math
-z_i=\operatorname{vec}(p_i)W_e+b_e,
+z_i=\mathrm{vec}(p_i)W_e+b_e,
 \qquad
 W_e\in\mathbb{R}^{CP^2\times d_v}.
 ~~~
 
-z_i 是第 i 个视觉 token，d_v 是视觉主干的 hidden size。这个操作并没有理解图片内容，它只是把局部像素块放入一个可学习的向量空间；语义关系由后续主干和预训练目标建立。
+其中 $z_i$ 是第 $i$ 个视觉 token，$d_v$ 是视觉主干的隐藏维度（hidden size）。这个操作并没有理解图片内容，它只是把局部像素块放入一个可学习的向量空间；语义关系由后续主干和预训练目标建立。
 
-### 3.3 Conv2d 是批量 patch 投影
+### 3.3 二维卷积（Conv2d）是批量 patch 投影
 
 线性 patch embedding 可以用卷积高效实现：
 
@@ -312,37 +321,39 @@ W_{\mathrm{conv}}\in\mathbb{R}^{d_v\times C\times P\times P}.
 它与线性层的参数数量相同：
 
 ~~~math
-\#\mathrm{params}
+P_{\mathrm{embed}}
 =d_vCP^2+d_v
 ~~~
 
 其中最后一项是 bias。卷积实现的优势是直接在整张图片上并行计算，不需要先在 Python 中逐块切片。
 
+例如 RGB 图像（$C=3$）、$P=14$、$d_v=1024$ 且带 bias 时，权重数为 $1024\times3\times14\times14=602112$，加上 1024 个 bias，patch embedding 总参数为 $603136$。这个数字只计这一层，不包括视觉主干。
+
 ### 3.4 Token 顺序就是空间契约
 
-假设 patch 网格为 N_h x N_w，常见的展平顺序是按行优先：
+假设 patch 网格为 $N_h\times N_w$，常见的展平顺序是按行优先：
 
 ~~~math
-\operatorname{row}(i)=\left\lfloor\frac{i}{N_w}\right\rfloor,\qquad
-\operatorname{col}(i)=i\bmod N_w.
+\mathrm{row}(i)=\left\lfloor\frac{i}{N_w}\right\rfloor,\qquad
+\mathrm{col}(i)=i\bmod N_w.
 ~~~
 
-如果第 0 个 token 是 CLS，那么 patch token 的序号应使用 i-1 后再映射坐标。下游模块如果假设列优先、加入了特殊 token 或删除了某些 patch，坐标就会错位。
+如果第 0 个 token 是 CLS，那么 patch token 的序号应使用 $i-1$ 后再映射坐标。下游模块如果假设列优先、加入了特殊 token 或删除了某些 patch，坐标就会错位。
 
 对一个 patch token，中心坐标可以近似写成：
 
 ~~~math
-x_i=\left(\operatorname{col}(i)+\frac{1}{2}\right)P,\qquad
-y_i=\left(\operatorname{row}(i)+\frac{1}{2}\right)P.
+x_i=\left(\mathrm{col}(i)+\frac{1}{2}\right)P,\qquad
+y_i=\left(\mathrm{row}(i)+\frac{1}{2}\right)P.
 ~~~
 
-这只是规则网格的几何中心，不是模型真正关注的像素区域。它仍然是建立 grounding、裁剪回原图和调试 token 顺序的必要索引。
+这只是规则网格的几何中心，不是模型真正关注的像素区域。它仍然是建立区域定位（grounding）、裁剪回原图和调试 token 顺序的必要索引。
 
 如果输入为了形成完整网格而做了 padding，这个中心坐标首先属于“补齐后的输入画布”。要映射回原图，还需要保存 padding 的左、上偏移以及 resize 比例；不能把 `(x_i,y_i)` 直接当作原始文件坐标。切块输入还要再加上 tile 在原图中的 offset。
 
 ### 3.5 加入 CLS 与位置表示
 
-如果使用 CLS token，初始序列可以写成：
+如果使用分类标记（class token，简称 CLS token），初始序列可以写成：
 
 ~~~math
 X_0=
@@ -350,7 +361,7 @@ X_0=
 +E_{\mathrm{pos}},
 ~~~
 
-其中 E_pos 的形状必须与序列长度和 hidden size 匹配：
+其中 $E_{\mathrm{pos}}$ 的形状必须与序列长度和隐藏维度匹配：
 
 ~~~math
 E_{\mathrm{pos}}\in\mathbb{R}^{(N+1)\times d_v}.
@@ -363,7 +374,7 @@ E_{\mathrm{pos}}\in\mathbb{R}^{(N+1)\times d_v}.
 3. 相对位置偏置。
 4. 旋转或其他 attention 内位置表示。
 
-不同位置方案的外推行为不同。将 224 的位置表直接用于 336 的网格，通常需要插值或模型专门支持动态分辨率；不能把位置表当作一个与分辨率无关的常量。
+不同位置方案的外推行为不同。以 $P=14$ 为例，224 输入对应 $16\times16$ patch 网格，带 CLS 的位置表有 257 行；336 输入对应 $24\times24$ 网格，需要 577 行。将前一张位置表用于后一网格，通常需要把二维 patch 位置表插值到 $24\times24$，或由模型专门支持动态分辨率。OpenAI CLIP 固定 revision 的 ViT 分支按 `input_resolution // patch_size` 创建带 CLS 的位置表，并在前向时直接相加；该分支没有在这段路径中自动插值位置表。[固定 revision 的 model.py](https://github.com/openai/CLIP/blob/a1d071733d7111c9c014f024669f959182114e33/clip/model.py) 这只是该实现的接口约束，不能推广到其他视觉塔。
 
 ### 3.6 ViT 主干的形状
 
@@ -381,7 +392,7 @@ X_{l+1}\in\mathbb{R}^{B\times L\times d_v},
 
 ### 4.1 CLS token
 
-CLS token 是一个可学习的特殊 token。它通过 attention 与其他 patch 交互，最终可以作为整张图片的摘要：
+CLS token 是一个可学习的特殊词元。它通过 attention 与其他 patch 交互，最终可以作为整张图片的摘要：
 
 ~~~math
 g=x_{\mathrm{cls}}^{(L)}.
@@ -391,7 +402,7 @@ g=x_{\mathrm{cls}}^{(L)}.
 
 ### 4.2 平均池化与 attention pooling
 
-如果没有 CLS，或实现选择对 patch tokens 池化，可以写成：
+如果没有 CLS，或实现选择对 patch tokens 做平均池化，可以写成：
 
 ~~~math
 g=\frac{1}{N}\sum_{i=1}^{N}z_i^{(L)}.
@@ -436,6 +447,8 @@ projector 改变通道维，不会凭空增加已经在视觉塔中丢失的像�
 
 这不是严格的定律。训练目标、架构、输入分辨率和 pooling 都会改变层间差异。选择某一层时应使用任务验证集和反事实样本，而不是只因为“最后一层语义最强”就丢掉中间层。
 
+一个具体的多层接入例子是 Qwen3-VL 报告中的 DeepStack：作者描述将多个 ViT 层级特征用于加强视觉—语言对齐。[Qwen3-VL 技术报告 v2](https://arxiv.org/abs/2511.21631v2) 这说明某些架构会在输出最终层之前就使用中间视觉特征；它是该模型的设计说明，不证明所有 VLM 都需要多层注入，也不单独证明任务效果。
+
 ### 4.5 全局与局部的系统分工
 
 一个高效的系统可以把不同表示放到不同阶段：
@@ -460,7 +473,7 @@ N=
 \left\lceil\frac{W}{P}\right\rceil.
 ~~~
 
-如果高度和宽度同时乘以 r，token 数大约乘以 r^2。以 patch=14 的补齐网格为例：
+如果高度和宽度分别放大 $r$ 倍，token 数 $N$ 大约放大 $r^2$ 倍。以 $P=14$ 的补齐网格为例：
 
 ~~~text
 224 x 224 -> 16 x 16 = 256
@@ -472,40 +485,40 @@ N=
 
 ### 5.2 Attention 与 MLP 成本
 
-对长度 L、hidden size d_v 的全局 self-attention，注意力分数矩阵的元素数量约为：
+对长度为 $L$ 的序列，单个样本、单个 head 的全局自注意力分数矩阵有 $L^2$ 个元素：
 
 ~~~math
 M_{\mathrm{score}}=L^2.
 ~~~
 
-如果还考虑每个 head 的维度，QK^T 和 attention value 的主要乘法量可近似写成：
+若批大小（batch size）为 $B$、注意力头数为 $h$，所有样本和 head 的分数矩阵合计约有 $BhL^2$ 个元素；这是分数张量的逻辑元素数，不等于每个实现都会实际存下完整矩阵。包含所有 head 后，$QK^\top$ 和注意力值聚合（attention value）两次主要乘法的计算量仍可按隐藏维度 $d_v$ 写成：
 
 ~~~math
 C_{\mathrm{attn}}\propto L^2d_v.
 ~~~
 
-Transformer MLP 的计算量更接近：
+Transformer 多层感知机（MLP）的计算量更接近：
 
 ~~~math
 C_{\mathrm{mlp}}\propto Ld_vd_{\mathrm{ff}}.
 ~~~
 
-因此在高分辨率视觉塔中，attention 的平方项会成为重要成本来源，但实际瓶颈仍取决于 head 数、MLP 宽度、kernel、fused backend、显存带宽和 batch size。公式用于量级判断，不是硬件吞吐承诺。
+因此在高分辨率视觉塔中，自注意力的平方项会成为重要成本来源，但实际瓶颈仍取决于注意力头数、MLP 宽度、卷积核/attention kernel、融合后端（fused backend）、显存带宽和批大小。公式用于量级判断，不是硬件吞吐承诺。
 
 ### 5.3 为什么分辨率放大很贵
 
-若 H、W 和 token 数都近似按 r 放大：
+若 $H$、$W$ 分别放大 $r$ 倍：
 
 ~~~math
 N'\approx r^2N,\qquad
 M'_{\mathrm{score}}\approx r^4M_{\mathrm{score}}.
 ~~~
 
-例如 224 到 448，边长乘以 2，patch token 约乘以 4，attention score cell 约乘以 16。若把视觉 token 继续送入 LLM，语言模型的 prefill 也会增加；视觉塔和语言主干的成本不能只看其中一层。
+例如使用 $P=14$ 的补齐网格时，224 输入有 256 个 patch，带 CLS 后 $L=257$，所以每个样本、每个注意力头有 $257^2=66049$ 个分数矩阵元素（score cell）；448 输入有 1024 个 patch，带 CLS 后 $L=1025$，有 $1025^2=1050625$ 个元素，是前者约 15.9 倍，接近边长加倍时的 $2^4=16$ 倍。若把视觉 token 继续送入 LLM，语言模型的提示词预填充（prefill）也会增加；视觉塔和语言主干的成本不能只看其中一层。
 
 ### 5.4 视觉 token 进入多模态上下文
 
-若文本 token 数为 T_text、视觉 token 数为 N_vis、额外特殊 token 数为 T_extra，则：
+若文本 token 数为 $T_{\mathrm{text}}$、视觉 token 数为 $N_{\mathrm{vis}}$、额外特殊 token 数为 $T_{\mathrm{extra}}$，则：
 
 ~~~math
 T_{\mathrm{context}}
@@ -519,24 +532,24 @@ N_{\mathrm{vis}}
 =\sum_{m=1}^{M}N_m.
 ~~~
 
-视觉 token 预算必须和回答长度、KV cache、batch 并发一起估算。一个 1024 token 的单图看似不大，但在 32 张图片、长文本和高并发场景中会迅速成为上下文瓶颈。
+视觉 token 预算必须和回答长度、键值缓存（KV cache）、batch 并发一起估算。一个 1024 token 的单图看似不大，但在 32 张图片、长文本和高并发场景中会迅速成为上下文瓶颈。
 
 ### 5.5 高分辨率的工程策略
 
 常见策略及其信息损失不同：
 
 1. 动态 resize：按图片内容选择输入尺寸，节省平均成本，但请求间延迟不稳定。
-2. 切块或 tiling：保留局部细节，却需要合并跨块坐标和重复边缘。
+2. 切块（tiling）：保留局部细节，却需要合并跨块坐标和重复边缘。
 3. 多尺度编码：同时看缩略图和局部裁剪，成本较高但更完整。
-4. token merging：合并相似 token，便宜但可能合并掉小目标。
-5. token pruning：保留模型认为重要的 token，风险是重要性判断本身可能漏掉证据。
+4. 词元合并（token merging）：合并相似 token，便宜但可能合并掉小目标。
+5. 词元剪枝（token pruning）：保留模型认为重要的 token，风险是重要性判断本身可能漏掉证据。
 6. 先 OCR/检测再局部编码：适合文档，流水线更复杂。
 
 任何压缩都应绑定评估切片。对图像描述，合并背景 token 可能没有影响；对金额、车牌和表格，恰恰是低频小区域最重要。
 
 ### 5.6 位置编码的分辨率迁移
 
-如果位置 embedding 是固定长度 L_0，而目标网格长度是 L_1，就不能直接相加。常见处理包括：
+如果位置嵌入（position embedding）是固定长度 $L_0$，而目标网格长度是 $L_1$，就不能直接相加。常见处理包括：
 
 1. 将二维位置表恢复成网格后做二维插值。
 2. 使用相对位置或可外推的位置机制。
@@ -561,11 +574,11 @@ L_{\mathrm{cls}}
 
 ### 6.2 图文对齐预训练
 
-CLIP 风格目标让图像和文本进入共享空间。视觉塔因此学到与自然语言概念相关的全局特征，适合检索和 zero-shot 分类。它不自动提供像素到词语的精确对应，也不保证小字号文字能被解码。
+CLIP 风格目标让图像和文本进入共享空间。视觉塔因此学到与自然语言概念相关的全局特征，适合检索和零样本（zero-shot）分类。[CLIP 原论文](https://arxiv.org/abs/2103.00020) 它不自动提供像素到词语的精确对应，也不保证小字号文字能被解码。
 
 ### 6.3 Sigmoid 配对目标
 
-SigLIP 路线将每个图文对作为匹配或不匹配的二分类关系，避免把整个 batch 的候选归一化成一个 softmax 分类问题。其损失形式可以抽象为：
+SigLIP 路线将每个图文对作为匹配或不匹配的二分类关系，避免把整个 batch 的候选归一化成一个 softmax 分类问题；这是它与 CLIP 目标的主要差异之一。[SigLIP 原论文](https://arxiv.org/abs/2303.15343) 其损失形式可以抽象为：
 
 ~~~math
 L_{\mathrm{sigmoid}}
@@ -575,11 +588,11 @@ L_{\mathrm{sigmoid}}
 \qquad y_{ij}\in\{-1,+1\}.
 ~~~
 
-这里的 M 是配对数量，s_ij 是缩放后的相似度。不同实现会对正负配对采样、权重和标签组织做具体设计。本章只借此说明：视觉塔的训练目标会影响它如何组织共享空间，不能因为都叫 image encoder 就假设特征可直接互换。
+这里的 $M$ 是配对数量，$s_{ij}$ 是缩放后的相似度。不同实现会对正负配对采样、权重和标签组织做具体设计。本章只借此说明：视觉塔的训练目标会影响它如何组织共享空间，不能因为都叫图像编码器（image encoder）就假设特征可直接互换。
 
 ### 6.4 重建和掩码预训练
 
-MAE 等方法随机遮挡图像 patch，让编码器或解码器重建被遮挡内容。它更直接地利用视觉结构学习表示，但训练目标与图文对齐不同。一个 MAE 预训练的视觉塔可能在视觉迁移上很强，却未必已经位于适合文字相似度的共享空间。
+MAE 等方法随机遮挡图像 patch，由编码器处理可见 patch，再由解码器根据编码重建被遮挡区域。[MAE 原论文](https://arxiv.org/abs/2111.06377) 这种目标直接利用视觉结构学习表示，但与图文对齐不同；一个 MAE 预训练的视觉塔可能在视觉迁移上很强，却未必已经位于适合文字相似度的共享空间。
 
 因此下游接入 CLIP 或 VLM 时要确认：
 
@@ -587,6 +600,8 @@ MAE 等方法随机遮挡图像 patch，让编码器或解码器重建被遮挡�
 2. 是否需要额外 projection 或对齐训练。
 3. 取哪个层、哪种 pooling。
 4. 预处理和输入分辨率是否匹配。
+
+DINOv3 论文展示了另一种面向稠密特征（dense feature）的自监督（self-supervised）路线：作者报告长时间训练可提升全局指标，却会损伤 patch 级一致性；他们使用 Gram 矩阵锚定（Gram anchoring），让学生和较早教师的归一化 patch 特征两两相似矩阵靠近，以维持局部相似结构，同时允许特征本身移动。论文另设高分辨率适配和文本对齐阶段；文本对齐阶段冻结视觉主干、加入两个 Transformer 层，并将平均池化的 patch 表示与 CLS 表示拼接后对齐文本。[DINOv3 论文 v1](https://arxiv.org/abs/2508.10104v1) 这是该论文针对其训练设置提出的机制，不是所有视觉塔都需要的通用正则项，也不等于其作者结果已在本地复现。
 
 ### 6.5 冻结与微调
 
@@ -622,7 +637,7 @@ VLM 训练常见三种阶段：
 
 ### 7.2 数值范围和归一化
 
-像素可能以 [0,255] 的整数、[0,1] 的浮点或经过均值方差标准化的浮点进入模型。若每个通道的均值为 mu_c、标准差为 sigma_c，则：
+像素可能以 $[0,255]$ 的整数、$[0,1]$ 的浮点或经过均值方差标准化的浮点进入模型。若每个通道的均值为 $\mu_c$、标准差为 $\sigma_c$，则：
 
 ~~~math
 x'_{c,h,w}
@@ -651,6 +666,8 @@ x'_{c,h,w}
 3. crop 或 padding 模式。
 4. mean、std、颜色顺序。
 5. 多图、多 crop 和拼接规则。
+
+例如，OpenAI CLIP 的固定 revision 按短边缩放（resize）、中心裁剪、转 RGB、转张量和通道归一化的顺序构造预处理；Transformers 的 CLIPImageProcessor 文档则把 RGB 转换、缩放（resize）、裁剪（crop）、数值重缩放（rescale）、归一化（normalize）、补边（padding）与输入布局作为可配置字段。[CLIP 固定 revision 的 clip.py](https://github.com/openai/CLIP/blob/a1d071733d7111c9c014f024669f959182114e33/clip/clip.py)、[Transformers CLIPImageProcessor 文档](https://huggingface.co/docs/transformers/model_doc/clip) 这是两个具体接口的说明，默认值和行为必须绑定到模型、processor 与库版本。
 
 不要在生产环境中只保存一个模型权重文件而丢掉这些配置。
 
@@ -694,7 +711,7 @@ x'_{c,h,w}
 ~~~text
 缩略图全局编码
     -> 召回相关图片或页面
-局部裁剪 / OCR / layout
+局部裁剪 / OCR / 版面布局（layout）
     -> 提供精确字段和坐标
 VLM 或规则验证
     -> 生成带引用的结果
@@ -711,7 +728,7 @@ VLM 或规则验证
 | 任务 | 首选表示 | 主要原因 |
 | --- | --- | --- |
 | 图片库主题检索 | 全局 embedding | 固定长度、索引便宜 |
-| zero-shot 粗分类 | 全局 embedding | 文本候选可直接比较 |
+| 零样本（zero-shot）粗分类 | 全局 embedding | 文本候选可直接比较 |
 | 物体位置和区域引用 | patch tokens 或多尺度特征 | 保留空间网格 |
 | 扫描合同字段 | OCR、局部视觉特征和 patch tokens | 需要文字与版面 |
 | 多轮视觉对话 | patch tokens 加压缩策略 | 需要给语言模型提供细节 |
@@ -727,13 +744,13 @@ VLM 或规则验证
 | 窗口或层级 ViT | 更高分辨率下控制 attention 成本 | 跨窗口关系和实现更复杂 |
 | 混合架构 | 综合卷积与 attention 的优点 | 组件、权重和预处理契约更多 |
 
-Swin 等层级方法通过窗口或分层改变全局 attention 的成本曲线；这不意味着所有高分辨率输入都变便宜，而是把交互范围、下采样和跨窗口通信重新分配。
+Swin Transformer 等层级方法通过移位窗口和分层改变全局 attention 的成本曲线；这不意味着所有高分辨率输入都变便宜，而是把交互范围、下采样和跨窗口通信重新分配。[Swin Transformer 原论文](https://arxiv.org/abs/2103.14030)
 
 ### 9.3 选择视觉塔的实验矩阵
 
 对候选 vision encoder，至少比较：
 
-1. 全局检索 Recall@K。
+1. 全局检索 Recall@K（前 K 个候选中的相关项召回率）。
 2. 细粒度属性和关系准确率。
 3. OCR 字符或字段准确率。
 4. 输入分辨率与 token 数。
@@ -754,7 +771,7 @@ Swin 等层级方法通过窗口或分层改变全局 attention 的成本曲线�
 5. 位置编码和动态分辨率。
 6. 训练数据与下游评估是否重新校准。
 
-如果新旧视觉塔都输出 [B, 576, 1024]，也不代表它们的 token 语义和尺度相同。
+如果新旧视觉塔都输出 $[B,576,1024]$，也不代表它们的 token 语义和尺度相同。
 
 ## 10. Vision Encoder 与 VLM 的接口
 
@@ -766,7 +783,7 @@ Swin 等层级方法通过窗口或分层改变全局 attention 的成本曲线�
 Z\in\mathbb{R}^{B\times N\times d_v},
 ~~~
 
-语言模型 hidden size 为 d_l。线性 projector：
+语言模型的隐藏维度 $d_l$。线性 projector：
 
 ~~~math
 Y=ZW_p+b_p,\qquad
@@ -794,10 +811,10 @@ system / user text
 1. placeholder 数量与视觉 token 数的对应。
 2. 多图之间的边界标记。
 3. 视觉 token 的位置编码或模态标识。
-4. 视觉 token 是否参与 causal mask 的某些路径。
+4. 视觉 token 是否参与因果掩码（causal mask）的某些路径。
 5. loss 是否只计算 assistant 文本。
 
-视觉塔输出对了，不代表 chat template 和 label mask 就对了。
+视觉塔输出对了，不代表对话模板（chat template）和标签掩码（label mask）就对了。
 
 ### 10.3 冻结阶段的诊断
 
@@ -805,7 +822,7 @@ system / user text
 
 | 现象 | 可能原因 |
 | --- | --- |
-| loss 不下降 | placeholder、dtype、shape 或 label mask 错 |
+| loss 不下降 | 占位符（placeholder）、数据类型（dtype）、张量形状（shape）或标签掩码（label mask）错 |
 | 全局描述可用，OCR 失败 | 分辨率、patch 信息或视觉塔目标不适合 |
 | 视觉问答像纯文本猜测 | visual tokens 未真正进入主干或训练监督弱 |
 | 训练集好、跨域差 | 视觉塔和目标图像分布不匹配 |
@@ -847,7 +864,7 @@ system / user text
 候选页面
     -> 高分辨率 tile / patch tokens -> 局部视觉理解
 局部区域
-    -> OCR + layout + 规则核验 -> 字段和引用
+    -> OCR + 版面布局（layout）+ 规则核验 -> 字段和引用
 ~~~
 
 全局阶段追求召回，局部阶段追求细节，OCR 和规则阶段追求可验证字段。每一级都应保存输入坐标到原图的映射。
@@ -882,21 +899,27 @@ system / user text
 5. token 到二维坐标的映射。
 6. 不同任务对分辨率的需求提示。
 
-程序只验证算术和接口，不验证任何真实视觉模型的识别能力。
+程序只验证算术和接口，不验证任何真实视觉模型的识别能力。图像尺寸、通道数、patch、hidden size、token 数和索引要求为整数；`cls`、`padded` 与 `bias` 是布尔开关。`detail_need` 和 0.7 判断阈值是为展示分支逻辑构造的数值，不是校准后的任务分数或推荐分辨率。
+
+代码状态：已验证（2026-11-12；Python 3.12.9；仅 Python 标准库）
 
 ~~~python
-from math import ceil
+def require_integer(value, name, minimum):
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+        raise ValueError(f"{name} must be an integer >= {minimum}")
 
 
 def padded_grid(height, width, patch):
-    if min(height, width, patch) <= 0:
-        raise ValueError("image dimensions and patch must be positive")
-    return ceil(height / patch), ceil(width / patch)
+    require_integer(height, "height", 1)
+    require_integer(width, "width", 1)
+    require_integer(patch, "patch", 1)
+    return (height + patch - 1) // patch, (width + patch - 1) // patch
 
 
 def valid_conv_grid(height, width, patch):
-    if min(height, width, patch) <= 0:
-        raise ValueError("image dimensions and patch must be positive")
+    require_integer(height, "height", 1)
+    require_integer(width, "width", 1)
+    require_integer(patch, "patch", 1)
     if height < patch or width < patch:
         raise ValueError("an unpadded patch grid needs at least one full patch")
     return (height - patch) // patch + 1, (width - patch) // patch + 1
@@ -912,46 +935,52 @@ def patch_tokens(height, width, patch, padded=True):
 
 
 def patch_vector_dim(channels, patch):
-    if min(channels, patch) <= 0:
-        raise ValueError("channels and patch must be positive")
+    require_integer(channels, "channels", 1)
+    require_integer(patch, "patch", 1)
     return channels * patch * patch
 
 
 def patch_embedding_params(channels, patch, hidden, bias=True):
-    if hidden <= 0:
-        raise ValueError("hidden size must be positive")
+    require_integer(hidden, "hidden", 1)
+    if not isinstance(bias, bool):
+        raise ValueError("bias must be a boolean")
     params = patch_vector_dim(channels, patch) * hidden
     return params + (hidden if bias else 0)
 
 
 def position_shape(height, width, patch, hidden, cls=True, padded=True):
-    if hidden <= 0:
-        raise ValueError("hidden size must be positive")
+    require_integer(hidden, "hidden", 1)
+    if not isinstance(cls, bool) or not isinstance(padded, bool):
+        raise ValueError("cls and padded must be booleans")
     tokens = patch_tokens(height, width, patch, padded=padded)
     return (tokens + (1 if cls else 0), hidden)
 
 
 def attention_cells(tokens):
-    if tokens <= 0:
-        raise ValueError("token count must be positive")
+    require_integer(tokens, "tokens", 1)
     return tokens * tokens
 
 
 def projector_params(vision_hidden, llm_hidden, bias=True):
-    if vision_hidden <= 0 or llm_hidden <= 0:
-        raise ValueError("projector dimensions must be positive")
+    require_integer(vision_hidden, "vision_hidden", 1)
+    require_integer(llm_hidden, "llm_hidden", 1)
+    if not isinstance(bias, bool):
+        raise ValueError("bias must be a boolean")
     params = vision_hidden * llm_hidden
     return params + (llm_hidden if bias else 0)
 
 
 def token_coordinate(index, grid_width, patch, cls=True, grid_height=None):
-    if index < 0 or grid_width <= 0 or patch <= 0:
-        raise ValueError("token index, grid width and patch must be valid")
+    require_integer(index, "index", 0)
+    require_integer(grid_width, "grid_width", 1)
+    require_integer(patch, "patch", 1)
+    if not isinstance(cls, bool):
+        raise ValueError("cls must be a boolean")
     patch_index = index - 1 if cls else index
     if patch_index < 0:
         raise ValueError("CLS token has no patch coordinate")
-    if grid_height is not None and grid_height <= 0:
-        raise ValueError("grid height must be positive")
+    if grid_height is not None:
+        require_integer(grid_height, "grid_height", 1)
     if grid_height is not None and patch_index >= grid_height * grid_width:
         raise ValueError("patch index is outside the grid")
     row, column = divmod(patch_index, grid_width)
@@ -1116,7 +1145,7 @@ print("checks=", checks)
 print("decision=", decision)
 ~~~
 
-按代码中的补齐网格口径，224、336、448 的 patch token 分别是 256、576、1024；336 的 CLS 加 patch 序列长度是 577，projector 输出形状是 (2, 576, 4096)。对 225 x 225 图片使用 patch=14 时，补齐网格有 289 个 token，无 padding 卷积有 256 个 token，程序把两种口径同时打印出来，避免把 ceil 和 floor 混为一谈。
+按代码中的补齐网格口径，224、336、448 的 patch token 分别是 256、576、1024；336 的 CLS 加 patch 序列长度是 577，projector 输出形状是 $(2,576,4096)$。对 225 x 225 图片使用 patch=14 时，补齐网格有 289 个 token，无 padding 卷积有 256 个 token，程序把两种口径同时打印出来，避免把 ceil 和 floor 混为一谈。RGB、patch=14、hidden=1024 的 patch embedding 含 bias 时有 603,136 个参数；$1024\to4096$ 的 projector 含 bias 时有 4,198,400 个参数。索引 25 在计入 CLS 偏移后对应第 1 行、第 0 列，patch 中心是 $(x,y)=(7,21)$ 像素。224 与 448 输入的单样本、单 head attention score cell 分别为 66,049 和 1,050,625，比例约 15.91。
 
 这个实验没有运行 Transformer，也没有读取真实图片。它只证明形状、参数量、位置索引和成本估算彼此一致。真实视觉编码器还需要在目标分辨率、目标硬件和任务切片上评估。
 
@@ -1143,9 +1172,12 @@ print("decision=", decision)
 4. Zhai et al., Sigmoid Loss for Language Image Pre-Training，SigLIP 原始论文：<https://arxiv.org/abs/2303.15343>。
 5. He et al., Masked Autoencoders Are Scalable Vision Learners，MAE 原始论文：<https://arxiv.org/abs/2111.06377>。
 6. Liu et al., Swin Transformer: Hierarchical Vision Transformer Using Shifted Windows：<https://arxiv.org/abs/2103.14030>。
-7. OpenAI CLIP 官方代码：<https://github.com/openai/CLIP>。
+7. Siméoni et al., DINOv3，arXiv v1（自监督 dense features、Gram anchoring、分辨率适配与文本对齐）：<https://arxiv.org/abs/2508.10104v1>。
+8. Qwen Team, Qwen3-VL Technical Report，arXiv v2（DeepStack 多层 ViT 特征）：<https://arxiv.org/abs/2511.21631v2>。
+9. OpenAI CLIP 官方源码，固定 revision：[model.py](https://github.com/openai/CLIP/blob/a1d071733d7111c9c014f024669f959182114e33/clip/model.py) 与 [clip.py](https://github.com/openai/CLIP/blob/a1d071733d7111c9c014f024669f959182114e33/clip/clip.py)。
+10. Hugging Face Transformers, [CLIPImageProcessor 文档](https://huggingface.co/docs/transformers/model_doc/clip)，访问日期 2026-11-11；动态文档，具体参数随库版本核对。
 
-这些资料分别支持残差 CNN、patch Transformer、图文对齐、sigmoid 配对目标、掩码视觉预训练、层级窗口 attention 和某一公开 CLIP 实现。它们不能直接证明任意视觉塔的 OCR、文档理解、VLM 对话质量、吞吐、价格或安全率。模型卡和 processor 文档中的分辨率、pooling、特殊 token 与实际权重版本必须绑定记录。
+这些资料分别支持残差 CNN、patch Transformer、图文对齐、sigmoid 配对目标、掩码视觉预训练、层级窗口 attention、自监督密集视觉特征、某个 VLM 的多层特征设计及指定 revision 的公开 CLIP 实现。它们不能直接证明任意视觉塔的 OCR、文档理解、VLM 对话质量、吞吐、价格或安全率。模型卡和 processor 文档中的分辨率、pooling、特殊 token 与实际权重版本必须绑定记录。
 
 当一个视觉塔被描述为“高分辨率”“支持动态尺寸”或“适合 OCR”时，应继续核对：
 

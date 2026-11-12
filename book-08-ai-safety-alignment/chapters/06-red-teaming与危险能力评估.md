@@ -1345,7 +1345,7 @@ Frontier Safety Framework 支持能力分层、控制措施和治理流程；NIS
 - [Anthropic Responsible Scaling Policy v3.0](https://www.anthropic.com/news/responsible-scaling-policy-v3)：2026-02 发布的机构政策更新，说明其条件式能力门槛与控制承诺；不是第三方安全认证。
 - [Google DeepMind Frontier Safety Framework 3.1 更新](https://deepmind.google/blog/strengthening-our-frontier-safety-framework/)：2026-04-17 更新，加入 Tracked Capability Levels；能力等级和阈值不与其他机构直接换算。
 - [OpenAI Frontier Governance Framework](https://openai.com/index/openai-frontier-governance-framework/)：2026-05 发布的公开治理框架，结合特定法律义务说明风险评估、缓解和报告安排；不等于独立验证的模型安全结果。
-- [NIST Generative AI Profile](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf)：提供生成式 AI 风险识别、测量和管理活动框架，不替代红队任务和工具隔离。
+- [NIST Generative AI Profile](https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence)：提供生成式 AI 风险识别、测量和管理活动框架，不替代红队任务和工具隔离。
 - [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：提供 Govern、Map、Measure、Manage 的治理结构。
 - [OpenAI Evals](https://github.com/openai/evals)：提供组织回归任务和自定义 grader 的开源入口；评估证据仍取决于任务契约、判定器和数据隔离。
 

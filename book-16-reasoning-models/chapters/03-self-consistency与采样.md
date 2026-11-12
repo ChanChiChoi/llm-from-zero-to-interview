@@ -15,7 +15,7 @@ Self-consistency 的答案是：在一定条件下可以。它先用随机采样
 
 ## 0.1 本章的资料与证据边界
 
-Self-Consistency 的核心方法来自 Wang 等人的 Self-Consistency Improves Chain of Thought Reasoning in Language Models。pass@k 的常见评估口径来自 HumanEval 及其代码生成实验。temperature、top-k 和 top-p 的实现语义参考了采样研究与 Transformers 官方生成文档。
+Self-consistency 的核心方法来自 [Wang 等人的原始论文](https://arxiv.org/abs/2203.11171v4)：从同一问题采样多条推理路径，再聚合最终答案。pass@k 的评估口径来自 [HumanEval 代码生成研究](https://arxiv.org/html/2107.03374v2)。temperature、top-k 和 top-p 的接口语义参考采样论文与 [Transformers v5.20.0 官方生成文档](https://huggingface.co/docs/transformers/v5.20.0/en/main_classes/text_generation)；这里描述的是参数机制，不保证其在具体 reasoning 任务上提升质量。
 
 论文结果是在特定模型、数据集、采样参数和答案解析协议下获得的。不能把一个论文中的最佳 k、temperature 或准确率直接搬到另一个模型和业务上。官方框架文档可以说明参数如何截断或重排 token 分布，但不能说明某个模型在真实任务上一定更可靠。
 
@@ -32,7 +32,7 @@ Self-Consistency 的核心方法来自 Wang 等人的 Self-Consistency Improves 
 路径 4：读错题意，答案 40
 ~~~
 
-如果只使用路径 2，答案会错；如果把四条路径的最终答案归一化后投票，42 可能胜出。这个结论依赖一个关键条件：错误不是完全相同的，而且正确路径在候选中占有足够比例。
+把四个答案归一化后，42 出现 2 次，36 和 40 各出现 1 次；按最高频答案选择会交付 42。它是相对多数（plurality），只占 4 条里的 2 条，并未超过一半。这个选择仍依赖一个关键条件：错误不是完全相同的，而且正确路径在候选中占有足够票数。
 
 如果四条路径都把题目中的“每小时”误读成“每分钟”，投票会非常稳定地选出同一个错误答案。稳定性不等于正确性，共识也不等于独立证据。
 
@@ -48,7 +48,7 @@ Self-Consistency 的核心方法来自 Wang 等人的 Self-Consistency Improves 
 4. 统计频次或分数。
 5. 交付聚合后的结果。
 
-它不是重新训练模型，而是给一次请求更多计算预算。
+它不是重新训练模型，而是给一次请求更多计算预算。[Wang 等人](https://arxiv.org/abs/2203.11171v4)在 UL2、LaMDA、GPT-3 和 PaLM 等指定模型的算术与常识基准上报告了提升；论文结果不保证其他模型、数据集和预算都能获益。
 
 ### 1.2 专家视角：候选集合
 
@@ -129,9 +129,11 @@ Top-k 只保留 logits 最高的 k 个 token，再在这个集合中重新归一
 
 这里要求概率来自合法的非空分布，且 \(0<p\le 1\)。当分布很尖时，前缀可能很短；当分布平坦时，前缀会变长。因此 top-p 会根据当前位置的不确定性动态调整 token 集合，比固定 top-k 更能适应不同位置。
 
+[Holtzman 等人的 nucleus sampling 研究](https://arxiv.org/abs/1904.09751v2)以开放式文本生成中的重复退化和不可靠长尾为问题动机，并在其 GPT-2/WebText 设置下评估截断采样；这些结果说明解码选择会影响该类生成文本，不证明 top-p 能普遍提升数学或代码推理正确率。
+
 ### 2.5 参数的组合关系
 
-真实生成通常先调整 logits，再进行 top-k 或 top-p 截断，最后从剩余分布采样。不同框架对处理顺序、边界值和随机数实现可能存在差异。复现实验必须记录：
+真实生成通常先调整 logits，再进行 top-k 或 top-p 截断，最后从剩余分布采样。[Transformers v5.20.0 GenerationConfig](https://huggingface.co/docs/transformers/v5.20.0/en/main_classes/text_generation) 也列出 min-p、typical-p、top-h、epsilon/eta 等过滤参数；这些方式使用的阈值与分布统计不同，不能只按名字互换。尤其 min-p 的原始研究与后续证据复核，对其普遍质量/多样性优势给出不同结论，因此这里仅把它列为可比较的候选过滤方式，不当作默认更优方案。[原始研究](https://arxiv.org/abs/2407.01082v8)；[证据复核](https://arxiv.org/abs/2506.13681v2)。不同框架对处理顺序、边界值和随机数实现可能存在差异。复现实验必须记录：
 
 1. 模型版本和 tokenizer。
 2. temperature。
@@ -277,6 +279,8 @@ epsilon_abs 是绝对误差阈值，epsilon_rel 是相对误差阈值。不同�
 
 这个定义要求候选集合非空，即 \(K_i>0\)。如果有多个答案取得同一个最大票数，argmax 是一个集合而不是唯一答案，系统必须使用下一节的平票策略；不能把实现恰好返回的第一个元素误解为统计上更可信。优点是简单、便宜、无需额外模型；缺点是它不理解路径质量，也无法处理少数正确、多数错误的情况。
 
+本文沿用 self-consistency 文献中常见的用法，把 majority vote 定义为选择最高频答案；它可以只是相对多数，不要求某个答案严格超过总票数的一半。上一节四条候选中 42 得 2 票、36 和 40 各得 1 票，因此聚合结果是 42；平票仍须按下一节单独处理。
+
 ### 5.2 平票处理
 
 当两个答案票数相同，系统必须定义规则：
@@ -341,16 +345,20 @@ j^*=\arg\max_{j\in\{1,\ldots,K_i\}}s_{ij},
 1-\frac{\binom{n-c}{k}}{\binom{n}{k}}
 ~~~
 
+例如五个候选里有两个通过，随机取两个且不放回；两个都失败的组合数为 \(\binom{3}{2}=3\)，所有组合数为 \(\binom{5}{2}=10\)，所以 \(\mathrm{pass@2}=1-3/10=0.7\)。这正是后文合成 distractor_math 样本的口径。[Chen 等人](https://arxiv.org/html/2107.03374v2)在 HumanEval 研究中给出该估计，并讨论直接经验频率的方差。
+
 这个式子要求 \(n\) 是正整数、\(0\le c\le n\)、k 是正整数且 \(k\le n\)。当 \(c=0\) 时结果为 0；当 n-c 小于 k 时，分子组合数为 0，估计值为 1。它测量的是候选集合的潜力：只要知道哪些候选正确，就能判断集合里是否包含解。线上选择阶段通常并不知道 c，因此不能在生成时用真实 c 代替 parser、测试器或 verifier。
 
 ### 6.2 Pass@k 不等于系统成功率
 
-线上系统通常不知道 c，也不知道哪个候选正确。它还必须依赖答案 parser、投票器、verifier 或测试器选择候选。因此至少要区分：
+线上系统通常不知道 c，也不知道哪个候选正确。它还必须依赖答案 parser、投票器、verifier 或测试器选择候选。因此要区分候选集合指标和实际交付指标：
 
-- pass@k：候选集合中是否存在正确答案；
-- majority accuracy：多数聚合后的答案是否正确；
-- rerank accuracy：评分器是否选中正确候选；
-- execution success：程序或工具动作是否真实成功。
+| 指标 | 回答的问题 | 需要什么判定 | 不能单独说明什么 |
+| --- | --- | --- | --- |
+| pass@k | 候选集合中是否至少有一个正确答案 | 候选正确性标记；通常离线由测试器或参考答案给出 | 线上选择器能否找到该候选 |
+| majority accuracy | 最高频归一化答案是否正确 | parser、归一化规则和投票平票策略 | 候选中是否还存在正确答案却被漏选 |
+| rerank accuracy | verifier 是否选中正确候选 | 候选评分与选择规则 | 评分是否校准、候选生成成本是否合算 |
+| execution success | 代码或工具动作是否满足外部约束 | 执行环境、测试、权限和成功事件定义 | 测试未覆盖输入上的普遍正确性 |
 
 如果 pass@10 很高但 rerank 很差，系统仍然不能可靠交付。
 
@@ -613,7 +621,7 @@ pass@4 高，只说明 D 存在；交付成功还要求测试器能够找到 D�
 
 其中 distractor_math 专门构造“多数错误、少数正确”的情况，用于观察 weighted 选择是否能救回正确候选。
 
-为了让定义域在代码中可见，下面的审计函数会拒绝空题集、重复题目 ID、空答案、非有限或负的 verifier 分数、负 token、非法 k 和空候选集合。答案归一化器只服务于这个受控 toy 数据集：它把示例中的单位文本约化为数值，不能替代真实任务中按题目 schema 处理单位、精度和条件的 parser。
+为了让定义域在代码中可见，下面的审计函数会拒绝空题集、重复题目 ID、空答案、不在 \([0,1]\) 内的 verifier 分数、bool 或非有限分数、负 token、非法 k 和空候选集合。这里的分数按受控示例中的置信度口径限制在 \([0,1]\)，不是通用 reward model 的分数合同。答案归一化器只服务于这个 toy 数据集：它把示例中的单位文本约化为数值，不能替代真实任务中按题目 schema 处理单位、精度和条件的 parser。
 
 ~~~python
 from collections import Counter, defaultdict
@@ -725,8 +733,10 @@ def validate_candidate(candidate):
     score = candidate["score"]
     if isinstance(score, bool) or not isinstance(score, (int, float)):
         raise TypeError("score must be numeric")
-    if not math.isfinite(score) or score < 0:
-        raise ValueError("score must be a finite non-negative number")
+    if isinstance(score, float) and not math.isfinite(score):
+        raise ValueError("score must be finite")
+    if score < 0 or score > 1:
+        raise ValueError("score must be in [0, 1]")
     tokens = candidate["tokens"]
     if isinstance(tokens, bool) or not isinstance(tokens, int) or tokens < 0:
         raise ValueError("tokens must be a non-negative integer")
@@ -848,7 +858,7 @@ report = {
     "avg_unique_answer_ratio": round(avg_unique_ratio, 3),
     "total_candidates": total_candidates,
     "total_tokens": total_tokens,
-    "cost_per_majority_correct": (
+    "tokens_per_majority_correct": (
         round(total_tokens / majority_correct_count, 3)
         if majority_correct_count
         else None
@@ -868,6 +878,8 @@ for key, value in report.items():
     print(f"{key}={value}")
 ~~~
 
+> 代码状态：已验证（2026-11-12，Python 3.12.9，标准库）。
+
 预期输出：
 
 ~~~text
@@ -879,7 +891,7 @@ pass_at_2_est=0.907
 avg_unique_answer_ratio=0.53
 total_candidates=21
 total_tokens=1003
-cost_per_majority_correct=250.75
+tokens_per_majority_correct=250.75
 majority_failures=['distractor_math']
 weighted_rescues=['distractor_math']
 per_problem=[{'id': 'water_tank', 'greedy': '12', 'majority': '10', 'weighted': '10', 'correct_candidates': 3, 'unique_answers': 2, 'tokens': 219, 'pass_at_2': 1.0}, {'id': 'distractor_math', 'greedy': '99', 'majority': '111', 'weighted': '12', 'correct_candidates': 2, 'unique_answers': 2, 'tokens': 267, 'pass_at_2': 0.7}, {'id': 'code_loop', 'greedy': 'fail', 'majority': 'pass', 'weighted': 'pass', 'correct_candidates': 3, 'unique_answers': 2, 'tokens': 237, 'pass_at_2': 1.0}, {'id': 'logic_grid', 'greedy': 'red', 'majority': 'blue', 'weighted': 'blue', 'correct_candidates': 2, 'unique_answers': 3, 'tokens': 179, 'pass_at_2': 0.833}, {'id': 'capital_lookup', 'greedy': 'tokyo', 'majority': 'tokyo', 'weighted': 'tokyo', 'correct_candidates': 3, 'unique_answers': 2, 'tokens': 101, 'pass_at_2': 1.0}]
@@ -891,7 +903,9 @@ per_problem=[{'id': 'water_tank', 'greedy': '12', 'majority': '10', 'weighted': 
 2. distractor_math 的 majority vote 选错，但 weighted vote 选对，说明 pass@k 高不等于自动聚合后一定正确。
 3. pass_at_2_est 高于 pass_at_1_est，说明增加候选数提高了候选集合包含正确答案的概率。
 4. avg_unique_answer_ratio 不能太低，否则多次采样主要是在重复同一答案。
-5. cost_per_majority_correct 必须和准确率一起看，否则 self-consistency 会退化成堆叠 token。
+5. tokens_per_majority_correct=250.75 表示 1003 个候选 token 除以 4 道 majority-vote 成功题；它不是货币成本，必须与准确率和其他延迟/验证资源一起看。
+
+可以手算第二个样本：111 有 3 票，12 有 2 票，所以最高频投票选择 111；它们的 verifier 分数和分别为 0.35+0.40+0.37=1.12、0.91+0.88=1.79，加权投票因此选择 12。该题有 5 个候选、2 个正确，按前文无放回公式计算 pass@2 为 0.7；合计 token 为 52+49+57+50+59=267。这个样例把最高频结果、评分器结果、候选集合命中率和生成资源放在同一组输入中比较。
 
 ## 15. 怎样设计 self-consistency 实验
 
@@ -1007,12 +1021,12 @@ Self-consistency 是一种以多路径采样换取候选多样性的推理时计
 
 以下链接优先保留原始论文和官方实现文档。复现实验时应记录模型版本、tokenizer、采样参数、随机种子、候选数量、答案解析器和测试集。
 
-1. Self-Consistency Improves Chain of Thought Reasoning in Language Models：<https://arxiv.org/abs/2203.11171>
-2. Chain-of-Thought Prompting：<https://arxiv.org/abs/2201.11903>
-3. HumanEval：<https://arxiv.org/abs/2107.03374>
-4. The Curious Case of Neural Text Degeneration / nucleus sampling：<https://arxiv.org/abs/1904.09751>
-5. Transformers text generation：<https://huggingface.co/docs/transformers/main/en/main_classes/text_generation>
-6. Deep Learning for Text Generation with Nucleus Sampling：<https://arxiv.org/abs/1904.09751>
-7. A Simple Method for Controlled Generation of Text：<https://arxiv.org/abs/1609.08144>
+1. Wang et al., [“Self-Consistency Improves Chain of Thought Reasoning in Language Models”](https://arxiv.org/abs/2203.11171v4), ICLR 2023。
+2. Wei et al., [“Chain-of-Thought Prompting Elicits Reasoning in Large Language Models”](https://arxiv.org/abs/2201.11903v6), 2022。
+3. Chen et al., [“Evaluating Large Language Models Trained on Code”](https://arxiv.org/html/2107.03374v2), NeurIPS 2021。HumanEval 是该研究所用的代码生成 benchmark 之一。
+4. Holtzman et al., [“The Curious Case of Neural Text Degeneration”](https://arxiv.org/abs/1904.09751v2), ICLR 2020。本文仅用其 nucleus-sampling 方法和指定开放式文本生成实验作背景。
+5. Hugging Face, [Transformers v5.20.0 Generation API](https://huggingface.co/docs/transformers/v5.20.0/en/main_classes/text_generation)（官方接口文档，访问日期：2026-10-30）。
+6. Nguyen et al., [“Turning Up the Heat: Min-p Sampling for Creative and Coherent LLM Outputs”](https://arxiv.org/abs/2407.01082v8), ICLR 2025。
+7. Schaeffer et al., [“Min-p, Max Exaggeration: A Critical Analysis of Min-p Sampling in Language Models”](https://arxiv.org/abs/2506.13681v2), 2025。
 
-本章写作时已联网访问 Self-Consistency、HumanEval 和 Transformers 生成文档入口；部分论文入口受瞬时网络连接限制时，沿用此前已取得的原始页面状态，并没有把连接失败写成资料不存在。正文明确区分论文评估口径、框架参数语义、教学构造和目标系统实测。
+论文结果受各自模型、任务、采样和解析条件限制；Transformers 条目只说明 v5.20.0 的公开接口，不推导当前或其他 runtime 的效果。代码和输出是预先构造的教学数据，不代表真实模型、API 或线上服务。

@@ -20,6 +20,17 @@
 - 适用边界：原论文的实验结果来自其设定的任务和数据，不能直接外推为 AdamW 在所有 LLM 任务上都更优；PyTorch 文档仅支持 v2.14 的公开行为。
 - 未解决项：不同框架、融合 kernel、低精度状态和分片方案的具体数值顺序/内存实现需按所用版本另行核对。
 
+## AMSGrad 理论算法与框架实现
+
+补充核验日期：2026-11-09
+
+- 来源：[On the Convergence of Adam and Beyond](https://arxiv.org/abs/1904.09237v1)，Reddi、Kale 和 Kumar，arXiv v1（2019-04-19）；以及 [PyTorch 2.15 AdamW 文档](https://docs.pytorch.org/docs/2.15/generated/torch.optim.AdamW.html)。
+- 实际阅读位置：论文 §3 的 Adam 凸在线优化反例、§4 Algorithm 2 和 Theorem 4（原始 AMSGrad 的更新与有界可行域/梯度、步长和 beta 条件）；PyTorch 2.15 AdamW API 的 AMSGrad 更新公式（页面算法段）。
+- 来源支持的事实：原论文 Algorithm 2 对未校正的指数二阶矩维护逐坐标运行最大值，并用该最大值缩放一阶矩；其 regret bound 处于论文明确列出的凸在线优化假设下。PyTorch 2.15 文档中的 `AdamW(amsgrad=True)` 也维护未校正 `v_t` 的运行最大值，但随后按当前 step 的 `1-β_2^t` 做偏差修正，再开方并加 epsilon。两者的名称相同，更新细节并不完全相同。
+- 证据等级：原始论文的算法、定理及假设；固定版本官方 API 文档中的公开更新公式。
+- 适用边界：论文的 regret 结果不构成非凸深度网络的全局最优保证，也不能直接移植为带偏差修正框架变体的理论证明。官方算法文档不证明特定融合 kernel、低精度状态或硬件上的逐位数值行为。
+- 未验证项：本轮未运行 PyTorch AMSGrad 实现，也未比较不同版本、设备或 fused/foreach 路径的数值轨迹。
+
 ## 学习率预热的架构条件与后续研究
 
 - 来源：[On Layer Normalization in the Transformer Architecture](https://arxiv.org/abs/2002.04745v2)，Xiong 等，arXiv v2（2020-06-29），发表于 ICML 2020。

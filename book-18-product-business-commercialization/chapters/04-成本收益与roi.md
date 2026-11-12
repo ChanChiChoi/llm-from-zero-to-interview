@@ -821,7 +821,7 @@ print("boundary_status=", {name: result["status"] for name, result in boundary_r
 - [OpenAI Latency Optimization 指南](https://developers.openai.com/api/docs/guides/latency-optimization)：官方工程文档，可支持模型选择、token、并行、缓存和延迟之间的权衡；目标流量下的 p95/p99 仍需自行实测。
 - [OpenAI Evals 指南](https://developers.openai.com/api/docs/guides/evals)：官方评估入口，可支持把任务、样本、指标和回归评估纳入 ROI 计算的讨论；它不能替代具体业务的基线和因果归因。
 - [NIST AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)：政府机构发布的风险管理框架，可支持把风险识别、测量和治理纳入成本收益分析；它不自动证明某个产品安全。
-- [NIST Generative AI Profile](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf)：NIST 的生成式 AI 风险画像，可支持生成式系统的风险、评估和治理边界；具体风险概率与损失仍需按业务数据估计。
+- [NIST Generative AI Profile](https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence)：NIST 的生成式 AI 风险画像，可支持生成式系统的风险、评估和治理边界；具体风险概率与损失仍需按业务数据估计。
 - [FinOps Framework](https://www.finops.org/framework/)：FinOps Foundation 的成本管理框架，可支持成本可见性、责任归属、单位经济账和持续优化的讨论；它不是模型价格表，也不替代财务核算。
 
 本章引用的官方文档说明了成本、评估和治理应如何被拆分；公式、场景参数、收益货币化和 Python demo 是教学构造。任何“通过”或“不可回本”的结论只对 demo 参数成立，不能外推到真实供应商、组织或行业。生产决策还需要真实账单、基线、受控试点、失败样本、用户采用数据、可靠性指标和领域专家审查。

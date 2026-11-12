@@ -1246,7 +1246,7 @@ System prompt 可以表达策略，却不能代替权限、隔离、验证和审
 - [OWASP GenAI LLM Top 10 2026](https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/)：将 Prompt Injection 列为 LLM01:2026；该项目的分类用于威胁盘点，不代表某个系统的实测风险率。
 - [OWASP Top 10 for Agentic Applications 2026](https://genai.owasp.org/download/52117/)：以 ASI06 单列 Memory & Context Poisoning，说明跨任务复用的记忆与一次性输入提示应分别建模；它是风险分类，不是产品安全认证。
 - [OpenAI Model Spec](https://model-spec.openai.com/)：提供行为层级、冲突处理和安全边界的规范入口；规范文本不等于独立评估结果。
-- [NIST Generative AI Profile](https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf)：提供生成式 AI 风险识别、测量和治理活动的组织框架；它不替代应用自己的权限测试和事故数据。
+- [NIST Generative AI Profile](https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence)：提供生成式 AI 风险识别、测量和治理活动的组织框架；它不替代应用自己的权限测试和事故数据。
 - [OWASP Logging Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html)：提供日志字段最小化、敏感字段遮蔽和访问控制建议；它不替代本地数据分类和保留策略。
 
 ### 14.2 攻击研究与防御性评估

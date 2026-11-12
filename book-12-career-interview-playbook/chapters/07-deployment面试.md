@@ -1,15 +1,15 @@
-# 第七章：大模型部署：从 checkpoint 到可观测服务
+# 第七章：大模型部署：从模型检查点（checkpoint）到可观测服务
 
-模型权重放进 GPU，能够对一条 prompt 产生文本，只能说明推理路径在某个最小条件下可用。真正的部署要回答更多问题：输入协议是否和训练一致，长短请求能否共享设备，首 token 和持续输出的延迟是否满足目标，KV Cache 是否会在高并发下耗尽，量化是否改变了格式和工具行为，RAG 与工具调用的失败能否归因，用户取消后资源是否释放，模型升级是否可以灰度和回滚，以及每一个成功任务究竟花费多少计算资源。
+模型权重放进图形处理器（Graphics Processing Unit，GPU），能够对一条提示文本（prompt）产生文本，只能说明推理路径在某个最小条件下可用。真正的部署要回答更多问题：输入协议是否和训练一致，长短请求能否共享设备，首 token 和持续输出的延迟是否满足目标，键值缓存（Key-Value Cache，KV Cache）是否会在高并发下耗尽，量化是否改变了格式和工具行为，检索增强生成（Retrieval-Augmented Generation，RAG）与工具调用的失败能否归因，用户取消后资源是否释放，模型升级是否可以灰度和回滚，以及每一个成功任务究竟花费多少计算资源。
 
 本章把部署看作一条有状态的服务链：
 
 ~~~text
-checkpoint 与 tokenizer
+模型检查点与分词器（tokenizer）
     -> 请求契约与输入规范化
     -> 路由、排队与资源预算
-    -> prefill 建立 KV Cache
-    -> decode 逐 token 生成
+    -> 提示词处理（prefill）建立 KV Cache
+    -> 逐 token 解码（decode）
     -> 流式协议、工具/RAG 与审计
     -> 质量、延迟、吞吐、成本与安全评估
     -> 灰度、回滚、恢复与容量迭代
@@ -21,22 +21,22 @@ checkpoint 与 tokenizer
 
 ## 7.1 先写服务契约，再选择推理引擎
 
-### 7.1.1 部署的交付物不只是一个 endpoint
+### 7.1.1 部署的交付物不只是一个服务端点（endpoint）
 
 一个可交付的大模型服务至少包含四种契约：
 
 1. 输入契约：模型版本、tokenizer、chat template、上下文长度、特殊 token 和输入大小限制。
 2. 运行契约：允许的并发、优先级、超时、取消、流式事件、重试和资源预算。
-3. 输出契约：文本、结构化 JSON、工具调用、引用、停止原因和错误语义。
+3. 输出契约：文本、结构化数据格式 JavaScript 对象表示法（JavaScript Object Notation，JSON）、工具调用、引用、停止原因和错误语义。
 4. 证据契约：质量、延迟、吞吐、成本、安全、审计和版本变更能够被复核。
 
 如果只交付“模型服务地址”，调用方不知道 system prompt 是否会被拼接两次，不知道客户端断开是否会取消 GPU 计算，也不知道模型升级后输出格式变化是否能追踪。部署工程的边界因此比 HTTP handler 更大。
 
 ### 7.1.2 离线、内部和生产是三个不同目标
 
-离线评测更关心固定样本的正确性、复现和吞吐；内部 demo 更关心接入速度和调试能力；生产 API 还要满足尾延迟、多租户、故障恢复、权限、数据删除和成本约束；端侧部署则增加模型大小、功耗、内存和断网运行限制。
+离线评测更关心固定样本的正确性、复现和吞吐；内部 demo 更关心接入速度和调试能力；生产应用程序接口（application programming interface，API）还要满足尾延迟、多租户、故障恢复、权限、数据删除和成本约束；端侧部署则增加模型大小、功耗、内存和断网运行限制。
 
-同一个 checkpoint 可能适合离线批处理，却不适合交互式流式服务。部署目标必须先写清：请求量和 token 分布、TTFT/TPOT 或 E2E SLA、最大上下文、质量基线、允许的量化误差、故障恢复时间和每次成功任务的预算。
+同一个 checkpoint 可能适合离线批处理，却不适合交互式流式服务。部署目标必须先写清：请求量和 token 分布、首 token 延迟（Time to First Token，TTFT）、输出 token 间隔（Time Per Output Token，TPOT）或端到端延迟（end-to-end latency，E2E）的服务等级协议（service-level agreement，SLA）、最大上下文、质量基线、允许的量化误差、故障恢复时间和每次成功任务的预算。P95/P99 分别表示第 95/99 百分位数，必须同时写明采样窗口和请求集合；只写“低延迟”无法构成可验收目标。
 
 ### 7.1.3 请求从网关到 GPU 的边界
 
@@ -58,7 +58,35 @@ checkpoint 与 tokenizer
 
 一次生成请求最好被表示为有边界的状态机，而不是一个从开始持续到结束的函数调用。一个最小状态集合可以是：`CREATED`、`QUEUED`、`PREFILLING`、`DECODING`、`WAITING_TOOL`、`COMPLETED`、`CANCELLED`、`FAILED` 和 `UNKNOWN`。前几个状态描述系统正在做什么，后几个状态描述系统已经知道或暂时不知道什么结果。
 
-状态转移应当单向且可审计。例如，`QUEUED` 可以转到 `PREFILLING`、`CANCELLED` 或 `FAILED`；`DECODING` 可以转到 `WAITING_TOOL`、`COMPLETED`、`CANCELLED` 或 `FAILED`；工具调用超时后，如果执行器无法确认动作是否已经发生，应进入 `UNKNOWN`，而不是直接写成 `FAILED`。`UNKNOWN` 不是失败的同义词，它表示系统缺少足够证据，后续动作应当是查询、人工确认或补偿。
+状态转移应当单向且可审计。例如，`QUEUED` 可以转到 `PREFILLING`、`CANCELLED` 或 `FAILED`；`DECODING` 可以转到 `WAITING_TOOL`、`COMPLETED`、`CANCELLED` 或 `FAILED`；工具调用超时后，如果执行器无法确认动作是否已经发生，应进入 `UNKNOWN`，而不是直接写成 `FAILED`。`UNKNOWN` 不是失败的同义词，它表示系统缺少足够证据，后续动作应当是查询、人工确认或补偿。下面的状态图把终态和待核对状态分开；`UNKNOWN` 只有在对账后才能进入后续执行或终态。
+
+~~~mermaid
+stateDiagram-v2
+    [*] --> CREATED
+    CREATED --> QUEUED
+    CREATED --> CANCELLED
+    CREATED --> FAILED
+    QUEUED --> PREFILLING
+    QUEUED --> CANCELLED
+    QUEUED --> FAILED
+    PREFILLING --> DECODING
+    PREFILLING --> CANCELLED
+    PREFILLING --> FAILED
+    DECODING --> WAITING_TOOL
+    DECODING --> COMPLETED
+    DECODING --> CANCELLED
+    DECODING --> FAILED
+    WAITING_TOOL --> DECODING
+    WAITING_TOOL --> UNKNOWN
+    WAITING_TOOL --> COMPLETED
+    WAITING_TOOL --> FAILED
+    UNKNOWN --> WAITING_TOOL
+    UNKNOWN --> COMPLETED
+    UNKNOWN --> FAILED
+    COMPLETED --> [*]
+    CANCELLED --> [*]
+    FAILED --> [*]
+~~~
 
 流式响应还需要自己的事件序号。一个事件至少可以包含：
 
@@ -83,7 +111,7 @@ checkpoint 与 tokenizer
 
 资源判断必须发生在昂贵计算之前。网关先解析模型、租户、优先级、输入消息和最大输出，再由 tokenizer 得到输入 token 数，检查上下文上限、工具 schema 大小、预计 KV 占用和租户配额。请求通过这些检查，只表示它可以进入候选队列，不表示系统必须立即为它分配 GPU。
 
-输入 token 数不能用字符数简单替代。中文、英文、代码、JSON 和图片占位符的 token 密度不同；同样的字符上限可能造成完全不同的显存和延迟。对于多模态请求，还需要把图像 patch、音频帧或视频 token 转换成模型实际使用的序列预算，并将预处理显存纳入总账本。
+输入 token 数不能用字符数简单替代。中文、英文、代码、JSON（JavaScript Object Notation，结构化数据格式）和图片占位符的 token 密度不同；同样的字符上限可能造成完全不同的显存和延迟。对于多模态请求，还需要把图像 patch、音频帧或视频 token 转换成模型实际使用的序列预算，并将预处理显存纳入总账本。
 
 规范化阶段还应固定解码参数的默认值和上限。温度、top-p、最大输出、工具数量和重试次数如果由不同服务层分别设置，就会出现日志里“请求参数”和 GPU 实际参数不一致的情况。最终生效配置应生成一个可比较的摘要，和模型版本、模板版本一起写入 trace。
 
@@ -91,7 +119,7 @@ checkpoint 与 tokenizer
 
 ### 7.2.1 权重、配置和 tokenizer 必须成套
 
-服务启动时至少要加载：模型参数、结构配置、tokenizer 文件、special token 映射、位置编码配置、量化配置和 generation 默认值。若使用 LoRA 或 adapter，还要记录基础权重、adapter 版本和合并/动态加载方式。
+服务启动时至少要加载：模型参数、结构配置、tokenizer 文件、special token 映射、位置编码配置、量化配置和 generation 默认值。若使用低秩适配（Low-Rank Adaptation，LoRA）或其他 adapter，还要记录基础权重、adapter 版本和合并/动态加载方式。
 
 模型看到的是 token id 序列，不是抽象的 messages 对象。tokenizer 决定字符串如何切分，chat template 决定 system、user、assistant、tool call 和结束 token 如何排列。训练模板与推理模板不一致，会造成分布偏移：轻则角色边界混乱，重则输出永不停止、JSON 失配或工具调用参数不完整。
 
@@ -145,7 +173,7 @@ t_{\mathrm{first}}-t_{\mathrm{arrive}}
 t_{\mathrm{done}}-t_{\mathrm{arrive}}
 ~~~
 
-若只从 GPU kernel 开始计时，会漏掉排队、tokenizer、RAG、工具和网络时间。若首个事件只是空的心跳，也不能把它当作首 token。指标名称相同，时间边界不同，数值就不可直接比较。
+若只从 GPU kernel 开始计时，会漏掉排队、tokenizer、RAG、工具和网络时间。若首个事件只是空的心跳，也不能把它当作首 token。指标名称相同，时间边界不同，数值就不可直接比较；例如 vLLM v0.32.0 benchmark CLI 把 TTFT 定义为客户端发出请求至收到首个流式输出，比较工具结果时要核对各自的事件边界。[vLLM v0.32.0 Benchmark CLI](https://docs.vllm.ai/en/v0.32.0/benchmarking/cli/)
 
 如果需要单独观察排队和前处理，可以再记录：
 
@@ -169,7 +197,7 @@ t_{\mathrm{prefill\_start}}-t_{\mathrm{arrive}}
 \left(t_j-t_{j-1}\right)
 ~~~
 
-如果响应没有产生有效输出，或者只有一个有效输出 token，TPOT 没有相邻间隔，应报告“无可计算的 token 间隔”，不能填成 0。平均值会掩盖长时间停顿。交互服务还应报告 token 间隔的 P95/P99、首 token 后的最大间隔、客户端重连和流式事件丢失。一个平均 20 ms/token 的服务，如果每隔 30 个 token 停顿 2 秒，用户仍会觉得卡顿。
+这里的 `TPOT_mean` 是相邻输出 token 事件间隔的均值；若一个流事件携带多个 token，事件间隔与“按输出 token 数归一”的 request-level TPOT 就不是同一指标。vLLM v0.32.0 CLI 采用后者的逐请求计算口径，且排除零/单 token 请求；报告指标时应写出定义和排除规则。[vLLM v0.32.0 Benchmark CLI](https://docs.vllm.ai/en/v0.32.0/benchmarking/cli/)。如果响应没有产生有效输出，或者只有一个有效输出 token，本章定义的 TPOT 没有相邻间隔，应报告“无可计算的 token 间隔”，不能填成 0。平均值会掩盖长时间停顿。交互服务还应报告 token 间隔的 P95/P99、首 token 后的最大间隔、客户端重连和流式事件丢失。一个平均 20 ms/token 的服务，如果每隔 30 个 token 停顿 2 秒，用户仍会觉得卡顿。
 
 ## 7.4 KV Cache：每个请求都在占用的运行时内存
 
@@ -189,11 +217,11 @@ M_{\mathrm{KV}}
 2LBT H_{\mathrm{kv}}d b
 ~~~
 
-前面的 2 表示 K 和 V 两份缓存。这个公式解释了几个工程事实：并发、上下文和输出长度都会增加占用；GQA/MQA 减少 `H_kv`；BF16/FP16 使用 2 字节，FP8 或量化缓存可以减少字节数，但需要验证精度和 kernel；实际系统还要加 block 对齐、临时 buffer、共享前缀和 allocator 元数据。
+前面的 2 表示 K 和 V 两份缓存。这个公式解释了几个工程事实：并发、上下文和输出长度都会增加占用；GQA/MQA 减少 `H_kv`；bfloat16（BF16）和 binary16 半精度（FP16）使用 2 字节，8 位浮点格式（FP8）或量化缓存可以减少字节数，但需要验证精度和 kernel；实际系统还要加 block 对齐、临时 buffer、共享前缀和 allocator 元数据。
 
 ### 7.4.3 一个 KV Cache 数值例子
 
-设 `L=32`、`B=8`、`T=4096`、`H_kv=8`、`d=128`，使用 BF16，即 `b=2` 字节，则：
+设 `L=32`、`B=8`、`T=4096`、`H_kv=8`、`d=128`，使用 bfloat16（BF16），即 `b=2` 字节，则：
 
 ~~~math
 M_{\mathrm{KV}}
@@ -208,7 +236,7 @@ M_{\mathrm{KV}}
 
 ### 7.4.4 MHA、GQA 和 MQA 的部署取舍
 
-MHA 为每个 query head 保存独立 K/V，表达自由度高但 cache 大；MQA 让所有 query head 共享 K/V，cache 和带宽压力最低；GQA 处于中间位置。它们不是部署时可以任意切换的开关：改变 K/V head 数会改变权重 shape 和模型计算，通常需要训练或专门转换配方。
+多头注意力（Multi-Head Attention，MHA）为每个 query head 保存独立 K/V，表达自由度高但 cache 大；多查询注意力（Multi-Query Attention，MQA）让所有 query head 共享 K/V，cache 和带宽压力最低；分组查询注意力（Grouped-Query Attention，GQA）让一组 query heads 共用一组 K/V，处于两者之间。[MQA](https://arxiv.org/abs/1911.02150) 与 [GQA](https://arxiv.org/abs/2305.13245) 的论文讨论了这种头数折中。它们不是部署时可以任意切换的开关：改变 K/V head 数会改变权重 shape 和模型计算，通常需要训练或专门转换配方。
 
 因此要在同一模型族、相同请求分布和相同质量协议下比较：KV 容量、decode 吞吐、长上下文任务、事实性、格式和工具调用不能只看一个数字。
 
@@ -220,15 +248,15 @@ MHA 为每个 query head 保存独立 K/V，表达自由度高但 cache 大；MQ
 
 ### 7.5.2 PagedAttention 的职责边界
 
-PagedAttention 借鉴虚拟内存的分页思想：逻辑上的 token 序列分成固定大小的 KV blocks，物理显存中的 block 可以不连续，由 block table 映射。请求增长时追加 block，完成时回收 block，调度器可以在不同请求之间重新分配物理块。
+PagedAttention 借鉴虚拟内存的分页思想：逻辑上的 token 序列分成固定大小的 KV blocks，物理显存中的 block 可以不连续，由 block table 映射。请求增长时追加 block，完成时回收 block，调度器可以在不同请求之间重新分配物理块。[PagedAttention 原论文](https://arxiv.org/abs/2309.06180v1) 讨论了这一逻辑块到物理块的映射及其在 vLLM 中的实现。
 
 它不是新的语言建模算法，也不改变 attention 的数学定义。它解决的是 KV Cache 的分配、碎片和共享管理问题；它不能修复错误的模型权重、提高事实性，也不能绕过总显存上限。
 
-### 7.5.3 Prefix Cache 的共享条件
+### 7.5.3 前缀缓存（prefix cache）的共享条件
 
 多个请求如果有完全相同的前缀，可以共享前缀对应的 KV blocks，减少重复 prefill。共享必须以精确的 token 序列、模型版本、adapter、位置语义、模板、租户权限和缓存生命周期为条件。相似字符串不能直接当成相同 prefix；不同权限的文档和 system prompt 也不能因为文本相似就复用。
 
-prefix cache 命中率提高可能降低 TTFT，但会占用显存并增加失效管理。应同时测命中率、节省的 prefill 时间、占用的 block、版本切换后的失效和跨租户隔离。
+prefix cache 命中率提高可能降低 TTFT，但会占用显存并增加失效管理。vLLM v0.33.0 的文档说明，可将 `cache_salt` 纳入首个 block 的 hash 以隔离不同信任组的复用；这不是授权检查、加密或完整的数据删除保证。[vLLM v0.33.0 前缀缓存文档](https://docs.vllm.ai/en/v0.33.0/design/prefix_caching/)；多租户 KV 共享的 timing side channel 已有研究案例，威胁是否适用于具体 runtime 仍需单独评估。[NDSS 2025 研究](https://www.ndss-symposium.org/ndss-paper/i-know-what-you-asked-prompt-leakage-via-kv-cache-sharing-in-multi-tenant-llm-serving/)
 
 ### 7.5.4 Block pool、引用计数与抢占
 
@@ -250,7 +278,7 @@ block 大小也有取舍。block 太小，尾部浪费较少，但映射表更�
 
 ### 7.5.5 vLLM、SGLang 与自研引擎的选择
 
-推理引擎通常提供模型加载、kernel、KV 管理、continuous batching、流式输出、量化和分布式支持。vLLM 的 PagedAttention 是其中一类重要实现；SGLang 等系统还可能提供更强的结构化程序、前缀复用或缓存调度能力。具体功能随版本和模型后端变化，不能只根据项目名称推断性能。
+推理引擎通常提供模型加载、kernel、KV 管理、continuous batching、流式输出、量化和分布式支持。vLLM 的 PagedAttention 是其中一类重要实现；SGLang 论文和文档还描述了 RadixAttention 前缀复用及结构化生成能力。[SGLang 论文](https://arxiv.org/abs/2312.07104v2)；[SGLang 文档](https://docs.sglang.io/)。具体功能随版本和模型后端变化，不能只根据项目名称推断性能。
 
 选择引擎时，应对目标 checkpoint 和请求分布做 profiling：启动时间、首 token、持续 token、并发、长短请求混合、取消释放、结构化输出、量化质量、GPU 利用率和 P99 都应纳入比较。
 
@@ -308,7 +336,7 @@ m_{i,\mathrm{reserve}}
 \left(T_{\mathrm{in},i}+T_{\mathrm{out,max},i}\right)
 ~~~
 
-`m_i,reserve` 是保守预留，不是请求当前已经使用的字节数。用上限预留可以减少 decode 到一半才 OOM 的风险，但会降低并发；只按当前长度接纳可以提高利用率，却需要动态申请、等待或抢占。生产系统通常把硬上限、软上限和排队策略分开：硬上限保护设备，软上限允许短时借用，排队策略决定借用失败后谁先等待。
+`m_i,reserve` 是保守预留，不是请求当前已经使用的字节数。用上限预留可以减少 decode 到一半才显存溢出（out of memory，OOM）的风险，但会降低并发；只按当前长度接纳可以提高利用率，却需要动态申请、等待或抢占。生产系统通常把硬上限、软上限和排队策略分开：硬上限保护设备，软上限允许短时借用，排队策略决定借用失败后谁先等待。
 
 例如，一张卡经过权重和 runtime workspace 预留后有 24 GiB 可用于 KV。若请求平均最大上下文对应 1 GiB 的理想 KV，但 block 对齐和波动再预留 25%，安全估计约为 1.25 GiB/请求。理论上可以同时保持 19 个这样的请求，但还应为临时激活、通信、长请求尾部和故障恢复保留空间，因此实际并发上限可能低于 19。这个数字只是容量推演，不是任何特定引擎的承诺。
 
@@ -326,19 +354,37 @@ P_i
 
 任何抢占策略都应做成可观测事件：记录被抢占请求、释放的 block、换出或重算字节、恢复时间、额外 token 计算和最终任务成功率。否则“吞吐提高”可能只是把代价转成了更高的 TPOT 和更多失败。
 
+### 7.6.7 Prefill/Decode 解耦：分别规划两段计算
+
+同一批 GPU 同时处理 prompt prefill 和逐 token decode 时，长 prefill 可能插入正在流式输出的 decode 请求之间，拉高尾部 token 间隔。Prefill/Decode（P/D）解耦把两个阶段放到独立资源池，并用 KV connector 把 prefill 生成的缓存状态交给 decode。DistServe 论文据此分别分配阶段资源和并行策略，以满足 TTFT、TPOT 目标；vLLM v0.33.0 将自身 disaggregated prefilling 标为实验功能，说明目标是分开调节 TTFT 和 token 间隔延迟（inter-token latency，ITL），并明确不提高原始吞吐。[DistServe](https://arxiv.org/abs/2401.09670v3)；[vLLM v0.33.0 解耦 prefill 文档](https://docs.vllm.ai/en/v0.33.0/features/disagg_prefill/)
+
+两阶段分离增加了队列、路由和 KV 传输成本。网络若无法及时传输长 prompt 的 K/V，prefill 节省的排队时间会被传输延迟抵消；两类 GPU 池若负载比例偏斜，也可能一边排队、一边空闲。因此应同时比较合并部署、chunked prefill 和阶段解耦在相同流量与服务目标下的 goodput、TTFT、TPOT、KV 传输量和资源利用率，而不能把“阶段分开”直接等同于“吞吐更高”。
+
+用一组**完全构造的容量输入**演示如何先看阶段需求。假设每秒到达 40 个请求，每个请求平均输入 4,096 token、输出 256 token，则输入负载为 `40×4,096=163,840` input token/s，输出负载为 `40×256=10,240` output token/s。再假设同一服务目标下，一张 GPU 的 prefill 能力为 40,000 input token/s、decode 能力为 8,000 output token/s，则理想容量分别约需 `ceil(163,840/40,000)=5` 张 prefill GPU 和 `ceil(10,240/8,000)=2` 张 decode GPU。沿用 §7.4.3 的模型配置，4K prompt 的 KV 状态约 0.5 GiB/请求，40 请求/s 意味着约 `0.5×40=20 GiB/s` 的原始缓存传输量，尚未计入协议开销。这个账本只揭示两个阶段的负载比例和网络门槛；输入到达率、单卡能力和容量结果都是教学假设，不是实测或 GPU 数量承诺，真实分池要由目标集群上的测量决定。
+
+~~~mermaid
+flowchart LR
+    R["请求路由与队列"] --> P["Prefill 池：处理 prompt"]
+    P --> K["KV connector：传输缓存状态"]
+    K --> D["Decode 池：逐 token 生成"]
+    D --> S["流式响应"]
+    S --> C["客户端"]
+    M["容量与尾延迟监控"] -.->|调整资源池| R
+~~~
+
 ## 7.7 量化：压缩表示而不是免费性能
 
 ### 7.7.1 权重、激活和 KV 的量化对象
 
-权重量化减少模型参数存储和读取带宽；激活量化减少中间张量成本；KV Cache 量化减少请求状态容量。三者的误差传播、kernel 要求和质量风险不同，不能都叫“INT4 优化”。
+权重量化减少模型参数存储和读取带宽；激活量化减少中间张量成本；KV Cache 量化减少请求状态容量。常见的 4 位和 8 位整数表示分别记作 INT4 与 INT8；位宽描述量化值的存储表示，不说明被量化的是权重、激活还是 KV Cache。三者的误差传播、kernel 要求和质量风险不同，不能都叫“INT4 优化”。
 
-PTQ 在训练后使用校准数据估计尺度，成本较低；QAT 在训练中模拟量化误差，可能获得更稳质量但训练成本更高。Weight-only 量化常在加载或矩阵乘时反量化；如果反量化和矩阵乘 kernel 不高效，显存下降不必然转成速度提升。
+训练后量化（post-training quantization，PTQ）在训练后用校准数据估计尺度，成本较低；量化感知训练（quantization-aware training，QAT）在训练中模拟量化数值，可能减轻目标任务的质量损失，但需要额外训练成本。[PyTorch QAT 说明](https://pytorch.org/blog/quantization-aware-training/)。Weight-only 量化常在加载或矩阵乘时反量化；如果反量化和矩阵乘 kernel 不高效，显存下降不必然转成速度提升。
 
 ### 7.7.2 GPTQ、AWQ 与工程证据
 
-GPTQ 类方法用近似二阶信息逐层补偿权重量化误差；AWQ 类方法利用激活统计保护更重要的权重通道。论文或项目报告中的质量和速度结果依赖校准数据、模型架构、硬件、kernel、batch、序列长度和评估任务。
+GPTQ 类方法用近似二阶信息逐层补偿权重量化误差；AWQ 类方法利用激活统计保护更重要的权重通道。[GPTQ 原论文](https://arxiv.org/abs/2210.17323v2)；[AWQ 论文](https://arxiv.org/abs/2306.00978)。论文或项目报告中的质量和速度结果依赖校准数据、模型架构、硬件、kernel、batch、序列长度和评估任务。
 
-因此量化候选至少要和 FP16/BF16 baseline 比较：
+因此量化候选至少要和半精度浮点格式（binary16，FP16）及 bfloat16（BF16）基线比较：
 
 | 维度 | 必须检查的对象 |
 | --- | --- |
@@ -348,7 +394,7 @@ GPTQ 类方法用近似二阶信息逐层补偿权重量化误差；AWQ 类方�
 | 资源 | 权重、KV、临时 buffer、OOM、并发上限 |
 | 协议 | JSON、EOS、stop、函数 schema、错误恢复 |
 
-PPL 变化很小，也不能保证 JSON、代码边界、工具调用或安全判断没有退化。平均 token 指标需要任务级失败样例补充。
+困惑度（perplexity，PPL）变化很小，也不能保证 JSON、代码边界、工具调用或安全判断没有退化。平均 token 指标需要任务级失败样例补充。
 
 ### 7.7.3 一个权重显存例子
 
@@ -364,6 +410,8 @@ M_{\mathrm{INT4}}
 
 理想比例是四分之一，但实际 INT4 文件还要存 group scale、零点、索引和可能的高精度 outlier。更重要的是，权重节省出来的显存可能被更多 KV blocks 占用，最终吞吐取决于调度和请求分布。
 
+例如，一个 7B 参数模型用 FP16 存权重，理想值为 `7×10^9×2=14×10^9` bytes，即 14 GB（十进制）；INT4 的理想 payload 是 `7×10^9×0.5=3.5×10^9` bytes，即 3.5 GB，少 10.5 GB、约为原权重的 75%。实际 artifact 还需加入量化元数据、对齐和未量化部分，因此这个算式只能估计原始 payload，不能作为引擎峰值显存或速度提升的保证。
+
 ### 7.7.4 校准数据决定哪些误差会被看见
 
 后训练量化通常要用一批校准样本估计尺度、离群值和分组统计。校准集不是越大越好，也不是随便抽几段网页就足够。它应覆盖线上真正会出现的输入形态：自然语言、代码、表格、JSON、长上下文、多轮对话、工具 schema、不同语言以及领域术语。若线上主要是合同问答，而校准集只有通用英文新闻，权重可能在平均 token 误差上表现良好，却在日期、金额、否定词和结构化输出上失真。
@@ -373,9 +421,9 @@ M_{\mathrm{INT4}}
 ~~~math
 q
 =
-\operatorname{clip}
+\mathrm{clip}
 \left(
-\operatorname{round}\left(\frac{x}{s}\right),
+\mathrm{round}\left(\frac{x}{s}\right),
 -Q_{\max},
 Q_{\max}
 \right)
@@ -386,6 +434,8 @@ Q_{\max}
 =
 s q
 ~~~
+
+设 `Q_max=7`、分组尺度 `s=0.25`。某权重 `x=0.72` 时，`round(x/s)=round(2.88)=3`，反量化得到 `x_hat=0.25×3=0.75`，误差为 `+0.03`。若离群权重 `x=3.2`，未裁剪整数约为 13，clip 到 7 后反量化为 1.75，误差为 `-1.45`。前者展示舍入噪声，后者展示饱和截断；尺度过小会增加截断，过大则让常见值占用更少整数级。具体尺度策略应在目标数据分布上评估。
 
 `q` 是存储或计算使用的整数值，反量化后的近似值记为 `x_hat`。尺度 `s` 可以由分组最大绝对值、百分位值或更复杂的误差目标估计。最大值对离群点敏感，百分位值可能截断少量极端值；选择哪一种，应由目标任务和 kernel 支持共同决定。
 
@@ -417,17 +467,19 @@ KV Cache 量化与权重量化不同。权重误差会在每次前向传播中�
 
 测试 KV 量化时应固定权重、tokenizer、模板和调度，只改变 KV 表示，并按上下文长度分桶：短对话、长检索、跨段问答、长代码和多轮工具轨迹分别报告。若只在短 prompt 上测平均准确率，无法证明长上下文缓存安全。量化版本的缓存命名空间也必须独立；不同 dtype 或 scale 规则的旧 KV 不能被新 worker 直接读取。
 
-## 7.8 Speculative Decoding 与多 token 预测
+沿用 §7.4.3 的一个请求 0.5 GiB BF16 KV 估算，如果相同元素数改存每元素 1 byte 的 FP8，原始 KV payload 理想上约为 `0.5×1/2=0.25 GiB`，scale、对齐和临时 buffer 尚未计算。vLLM v0.33.0 的 engine 参数文档列有多种 KV dtype，但同时把可用类型绑定到平台和模型配置；“参数可选”不能推成某个目标 GPU 上必然兼容或质量不退化。[vLLM v0.33.0 engine arguments](https://docs.vllm.ai/en/v0.33.0/configuration/engine_args/)
+
+## 7.8 推测解码（speculative decoding）与多 token 预测
 
 ### 7.8.1 提案与验证
 
-Speculative decoding 使用较小的 draft model 先提出一段候选，target model 再验证。若候选与 target 分布兼容，可以在一次 target 前向中接受多个 token，减少昂贵的逐 token 调用。正确实现需要处理接受、拒绝、替代 token、随机采样和 KV 状态回滚。
+推测解码（speculative decoding）使用较小的 draft model 先提出一段候选，target model 再验证。若候选与 target 分布兼容，可以在一次 target 前向中接受多个 token，减少昂贵的逐 token 调用。原始方法用修正采样在加速时保持目标模型的输出分布；正确实现需要处理接受、拒绝、替代 token、随机采样和 KV 状态回滚。[Speculative Decoding 原论文](https://arxiv.org/abs/2211.17192)
 
 它的收益不是由 draft 模型大小单独决定，而取决于接受率、候选长度、draft 延迟、target 验证是否高效、batch 混合和输出分布。温度、任务类型、语言和代码结构都会改变接受率。
 
 ### 7.8.2 Medusa、EAGLE 与验证边界
 
-Medusa 使用额外预测头提出未来 token 候选；EAGLE 类方法更多利用 hidden/feature 层预测未来状态。它们可以放在“proposal -> verification”框架下理解，但不能把多个候选直接拼到上下文而跳过 target 语义验证。
+Medusa 使用额外预测头提出未来 token 候选；EAGLE 类方法更多利用 hidden/feature 层预测未来状态。[Medusa](https://arxiv.org/abs/2401.10774)；[EAGLE](https://arxiv.org/abs/2401.15077)。它们可以放在“proposal -> verification”框架下理解，但不能把多个候选直接拼到上下文而跳过 target 语义验证。
 
 上线评估应同时报告：
 
@@ -435,7 +487,7 @@ Medusa 使用额外预测头提出未来 token 候选；EAGLE 类方法更多利
 - draft/extra head 的额外计算；
 - target 验证的 batch 形状和 kernel；
 - KV Cache 额外占用与回滚成本；
-- 不同温度、长度、任务和并发下的 P50/P99；
+- 不同温度、长度、任务和并发下的 P50（中位数）/P99；
 - 与不使用 speculative decoding 时的质量与输出分布一致性。
 
 ### 7.8.3 接受率如何影响吞吐
@@ -482,7 +534,7 @@ R_{\mathrm{base}}
 
 ### 7.9.1 离线索引链路
 
-企业 RAG 的离线链路通常包括 artifact 接入、版本登记、解析/OCR、结构保留、清洗去重、chunk、metadata、权限标签、embedding、关键词索引和向量索引。每个 chunk 应能回到文档版本、页码、段落或区域，而不是只有一串不可解释的向量。
+企业 RAG 的离线链路可以包括 artifact 接入、版本登记、解析/光学字符识别（Optical Character Recognition，OCR）、结构保留、清洗去重、chunk、metadata、权限标签、embedding、关键词索引和向量索引。检索增强生成的早期系统论文将检索器和生成器组合起来，支持从外部文档取证后再生成回答；具体索引流水线需按数据和权限系统设计。[RAG 原论文](https://arxiv.org/abs/2005.11401)。每个 chunk 应能回到文档版本、页码、段落或区域，而不是只有一串不可解释的向量。
 
 稳定文档和实时数据的职责不同：前者适合版本化索引和缓存，后者可能需要数据库查询或工具调用。把实时库存、权限和合同状态永久写进 embedding，会产生新鲜度和撤销困难。
 
@@ -515,12 +567,12 @@ R_{\mathrm{base}}
 
 ### 7.9.4 RAG 的分层指标
 
-设 `N_evidence>0` 个测试问题能在索引中找到标注证据，Top-k 召回命中的问题数为 `0\leq N_hit\leq N_evidence`。最终回答中的可验证 claim 总数为 `N_claims\geq0`，其中被证据支持的 claim 数为 `N_supported`；当 `N_claims>0` 时，可分别报告：
+设 `N_q>0` 个测试问题至少有一个标注支持片段，Top-k 至少检出一个此类片段的问题数为 `0\leq N_hit\leq N_q`。这是“有证据问题命中率”，不是对所有标注文档逐条计数的 passage recall。最终回答中的可验证 claim 总数为 `N_claims\geq0`，其中被证据支持的 claim 数为 `N_supported`；当分母非零时，可分别报告：
 
 ~~~math
-\mathrm{Recall@k}
+\mathrm{EvidenceHit@k}
 =
-\frac{N_{\mathrm{hit}}}{N_{\mathrm{evidence}}}
+\frac{N_{\mathrm{hit}}}{N_q}
 ~~~
 
 ~~~math
@@ -529,7 +581,7 @@ R_{\mathrm{base}}
 \frac{N_{\mathrm{supported}}}{N_{\mathrm{claims}}}
 ~~~
 
-如果没有可检索证据，即 `N_evidence=0`，Recall@k 未定义，应报告“无证据样本”；如果没有可验证 claim，即 `N_claims=0`，CitationSupport 也未定义，不能把它记为 1。分母必须按项目定义处理：一个问题有多个证据、一个 claim 需要多个来源、无证据问题是否计入拒答评估，都会改变数值。还要报告 rerank 延迟、权限过滤召回损失、新鲜度、上下文 token 和 unsupported claim，而不是只看最终答案分数。
+如果没有可检索证据，即 `N_q=0`，EvidenceHit@k 未定义，应报告“无证据样本”；如果没有可验证 claim，即 `N_claims=0`，CitationSupport 也未定义，不能把它记为 1。假设 20 个问题中 15 个有证据，Top-5 至少命中一个证据的有 12 个，则 EvidenceHit@5 为 `12/15=0.80`；20 个可验证 claim 中 15 个得到支持，则 CitationSupport 为 `15/20=0.75`。若问题要求覆盖多个独立证据，应另外报告 passage-level recall，不能用一次命中代替完整证据覆盖。无证据问题是否计入拒答评估也要预先约定。还要报告 rerank 延迟、权限过滤召回损失、新鲜度、上下文 token 和 unsupported claim，而不是只看最终答案分数。
 
 ### 7.9.5 引用不等于证据支持
 
@@ -550,9 +602,9 @@ C_{\mathrm{request}}
 
 增加一个 verifier 可能提高引用质量，也会增加 prefill、延迟和失败路径。RAG 降本不能只缩小主模型，还要减少无效召回、重复 query rewrite、过长 context 和不必要的二次生成。
 
-## 7.10 Agent 与工具调用：部署系统必须拥有动作边界
+## 7.10 智能体（Agent）与工具调用：部署系统必须拥有动作边界
 
-### 7.10.1 Function calling 只是协议起点
+### 7.10.1 函数调用（function calling）只是协议起点
 
 模型输出一个符合 JSON schema 的函数调用，不等于动作可以执行。完整工具链应包括：工具注册、版本化 schema、参数校验、身份和资源授权、风险判断、执行隔离、超时、幂等、审计、结果校验和错误恢复。
 
@@ -567,7 +619,7 @@ C_{\mathrm{request}}
 
 ### 7.10.2 工具成功与任务成功不是一回事
 
-设任务包含 `N_tool` 次工具调用，其中成功完成并返回有效结果的次数为 `N_tool_success`；任务最终达到业务目标的数量为 `N_task_success`，总任务数为 `N_task`。可以分层报告：
+设评估集合包含 `N_tool>0` 次工具调用，其中成功完成并返回有效结果的次数为 `N_tool_success`；同时包含 `N_task>0` 个任务，最终达到业务目标的数量为 `N_task_success`。没有工具调用的任务不进入 `ToolSuccessRate` 的分母，但仍计入 `TaskSuccessRate`：
 
 ~~~math
 \mathrm{ToolSuccessRate}
@@ -581,11 +633,13 @@ C_{\mathrm{request}}
 \frac{N_{\mathrm{task\_success}}}{N_{\mathrm{task}}}
 ~~~
 
+例如评估 20 次工具调用，其中 18 次完成并通过结果校验，则 ToolSuccessRate 为 `18/20=0.90`；若评估集共含 10 个任务，其中只有 8 个达到业务目标，TaskSuccessRate 为 `8/10=0.80`。工具链路成功不能替代端到端任务成功，分母和“通过校验”的规则必须一起记录；若评估集没有工具调用，ToolSuccessRate 未定义。
+
 工具成功但参数语义错误，任务仍可能失败；工具失败但重试后任务成功，也应记录重试和副作用。需要把“调用发出”“服务返回 2xx”“结果通过业务校验”“目标状态改变”分成事件，而不是只看 HTTP status。
 
 ### 7.10.3 Prompt Injection 与工具注入
 
-RAG 文档、网页和工具结果都可能包含模型可读的指令。部署系统要把数据、指令、权限和动作分开：检索内容是证据，不自动升级为 system instruction；工具返回的文本不能改变授权策略；服务端每次执行都重新检查用户、资源和动作权限。
+RAG 文档、网页和工具结果都可能包含模型可读的指令。OWASP 将 prompt injection 列入 LLM01:2025，并指出 RAG 或微调不能单独消除这类风险。[OWASP LLM01:2025](https://genai.owasp.org/llmrisk/llm01-prompt-injection/)。组织可以用 NIST AI RMF 1.0 的 Govern、Map、Measure、Manage 四组功能安排风险责任、识别、测量和处置，但这个自愿风险框架本身不是运行时授权机制。[NIST AI RMF 1.0](https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-ai-rmf-10)。部署系统仍要把数据、指令、权限和动作分开：检索内容是证据，不自动升级为 system instruction；工具返回的文本不能改变授权策略；服务端每次执行都重新检查用户、资源和动作权限。
 
 日志要记录模型看到的工具结果摘要、最终参数、授权决策、执行结果和人工确认。防御目标不是让模型永远识别所有注入，而是即使识别失败，也不能直接越权或执行不可逆动作。
 
@@ -644,6 +698,8 @@ t_{\mathrm{queue}}
 
 不同阶段可能并行或重叠，因此这不是所有实现的严格加法；它是排查和预算的时间轴。工具调用、审核、rerank 和重试会把额外阶段插入其中。平均值之外要看 P95/P99 和失败请求，因为尾部通常由长 prompt、KV 紧张、排队或下游超时主导。
 
+假设某请求排队 0.20 秒、前处理 0.10 秒、检索 0.20 秒、prefill 0.35 秒、decode 1.20 秒、后处理 0.10 秒、网络 0.05 秒；在阶段不重叠的简化例子中，端到端时间为 `0.20+0.10+0.20+0.35+1.20+0.10+0.05=2.20` 秒。若 trace 显示阶段 wall-clock 时间有并行重叠，就不能把各阶段时长简单相加；应区分阶段持续时间与关键路径时长。
+
 ### 7.11.2 吞吐要说明单位
 
 可以报告 request/sec、input tokens/sec、output tokens/sec、total tokens/sec 或 successful tasks/sec。它们回答不同问题：
@@ -652,6 +708,8 @@ t_{\mathrm{queue}}
 - input tokens/sec 更接近 prefill 处理能力；
 - output tokens/sec 更接近 decode 产能；
 - successful tasks/sec 把重试、工具失败和质量纳入业务结果。
+
+例如每秒完成 50 个请求，平均每个请求输入 2,000 token、输出 256 token，则负载约为 `100,000 input token/s` 和 `12,800 output token/s`；若其中 90% 达到预定任务目标，成功任务吞吐约为 `50×0.90=45 tasks/s`。这些数字是算术示例，模型、硬件和请求混合仍决定真实服务能力。
 
 服务比较必须使用同一请求长度分布、同一 max output、同一解码参数、同一成功判定和同一硬件。单卡实验的 tokens/sec 不能直接外推到多租户 P99。
 
@@ -666,6 +724,8 @@ C_{\mathrm{per\ success}}
 ~~~
 
 如果 `N_success=0`，单位成功任务成本未定义，应报告“没有成功任务”，不能填成零。`C_total` 应包含 GPU、存储、网络、检索、工具、重试、冗余和人工处理。成功定义必须提前约定：格式正确、事实正确、工具状态改变和用户满意可能是不同层级。一个小模型单次便宜，但如果重试多、任务失败和人工介入多，单位成功任务成本可能更高。
+
+若一个固定窗口总服务成本为 12,000 元，成功任务为 6,000 个，则单位成功任务成本是 `12,000/6,000=2` 元/个。比较两种部署时还要固定时间窗口、任务定义和质量门槛；降低模型账单但把更多工作转给人工审核，不一定降低完整服务成本。
 
 ## 7.12 线上排障：从症状到最小对照
 
@@ -744,7 +804,7 @@ M_{\mathrm{variant}}-M_{\mathrm{baseline}}
 
 ### 7.14.1 输入输出分布
 
-容量规划要采集输入 token、输出 token、上下文长度、并发、请求到达率、取消率、工具/RAG 调用放大和优先级。两个 QPS 相同的业务，如果一个平均输入 200 token、输出 50 token，另一个输入 32K、输出 4K，GPU 和 KV 需求完全不同。
+容量规划要采集输入 token、输出 token、上下文长度、并发、每秒查询数（queries per second，QPS）、取消率、工具/RAG 调用放大和优先级。假设两个业务都是 10 QPS：业务 A 平均输入 200、输出 50 token，对应 2,000 input token/s 和 500 output token/s；业务 B 平均输入 32K、输出 4K token，对应 320,000 input token/s 和 40,000 output token/s。相同 QPS 下，输入负载相差 160 倍、输出负载相差 80 倍，因此不能只按请求数规划 GPU。
 
 ### 7.14.2 KV 容量上限
 
@@ -760,7 +820,7 @@ M_{\mathrm{budget}}
 
 ### 7.14.3 Little 定律的边界
 
-在稳定系统中，平均在途请求数 `L`、到达率 `lambda` 和平均时间 `W` 满足：
+Little 定律描述一个边界固定、长期稳定且平均量有限的系统：`L` 是该边界内的平均请求数，`lambda` 是进入边界的有效到达率，`W` 是请求从进入到离开该边界的平均时间；三者满足如下关系。[Little, “A Proof for the Queuing Formula: L = λW”](https://doi.org/10.1287/opre.9.3.383)
 
 ~~~math
 L
@@ -768,7 +828,7 @@ L
 \lambda W
 ~~~
 
-它可以帮助估算队列和并发，但不能直接给出 GPU 数量。LLM 服务的 `W` 受 token 长度、调度优先级、KV 状态和阶段重叠影响，系统不稳定、请求被拒绝或存在大量取消时，简单套用会误导容量结论。
+例如每秒有 12 个请求被接纳，平均在系统内停留 0.5 秒，则平均在途量约为 `12×0.5=6` 个请求。若另有每秒 3 个请求被入口拒绝，不能把 15 QPS 的尝试率代入已接纳请求的 `W`；到达率和时间必须指向同一系统边界。Little 定律可以帮助估算队列和并发，但不能直接给出 GPU 数量。LLM 服务的 `W` 受 token 长度、调度优先级、KV 状态和阶段重叠影响，系统不稳定、请求被拒绝或存在大量取消时，简单套用会误导容量结论。
 
 ### 7.14.4 单卡 profiling 到集群排期
 
@@ -778,7 +838,7 @@ L
 
 ### 7.15.1 初始设计
 
-“砚桥合同助手”使用一个 32B instruct checkpoint，接入企业合同 RAG 和只读合同查询工具。服务通过 API gateway 接收多轮消息，router 按租户选择 worker；worker 使用 GQA、Paged KV blocks、continuous batching 和 BF16；RAG 召回合同条款，工具查询当前合同状态。
+**以下是构造的教学案例；系统配置、日志、目标和结果数值均为假设，不是生产事故记录。**“砚桥合同助手”使用一个 32B instruct checkpoint，接入企业合同 RAG 和只读合同查询工具。服务通过 API gateway 接收多轮消息，router 按租户选择 worker；worker 使用 GQA、Paged KV blocks、continuous batching 和 BF16；RAG 召回合同条款，工具查询当前合同状态。
 
 产品目标是 P95 TTFT 小于 1.5 秒，P95 TPOT 小于 80 ms，引用支持率不低于 0.90，合同查询任务成功率不低于 0.95。高风险写操作不在本服务范围内，但只读工具也必须按租户和合同权限过滤。
 
@@ -786,11 +846,15 @@ L
 
 一次版本发布后，P95 TTFT 从 1.2 秒升到 3.8 秒，P99 TPOT 变差，部分请求 OOM。与此同时，少量答案引用了用户无权访问的旧合同条款。
 
+排查时先把首 token 等待拆成请求链阶段，而不是把所有问题归为“模型变慢”。例如一条构造的慢请求 trace 中，网关与路由耗时 0.15 秒、队列等待 0.65 秒、RAG 与两次 query rewrite 共 0.55 秒、prefill 耗时 2.45 秒，合计 `0.15+0.65+0.55+2.45=3.80` 秒。旧版本的一条代表性 trace 假设为 `0.15+0.25+0.30+0.50=1.20` 秒。这里的加和属于单条请求的阶段预算，不能把各阶段独立的 P95 相加当作服务 P95；它只帮助定位新增耗时落在队列和 prefill。更长的 max output 还会让请求占用 decode 与 KV 状态更久，影响并发请求的 TPOT 和 OOM 风险。
+
 ### 7.15.3 证据分层
 
 延迟日志显示新版本启用了更长的默认 max output，且 RAG query rewrite 从一次调用变成了两次；长 prompt 的 prefill 与 decode 争用同一 token budget。KV block 使用在取消请求后没有完全回落，压力测试中 block pool 单调增加。
 
 越权案例的 trace 显示 prefix cache key 只包含 token 前缀，没有包含租户和权限版本；两个租户使用相同 system/template 前缀时，带有合同内容的缓存块被错误复用。这里既是缓存隔离错误，也是版本和权限字段缺失，不能把问题归咎于模型“记住了别人的合同”。
+
+安全排查应沿缓存命中链逐项核对：命中键由哪些字段组成、缓存值是否含检索到的私有内容、读取前是否检查当前主体和资源权限、权限撤销后旧块如何失效。测试时让两个无关联租户发送完全相同的公共前缀，但分别拥有不同合同权限；再撤销其中一方的权限并重放同一请求。若第二次仍能读出旧条款，故障在隔离或失效协议，不能用“提示词要求模型保密”作为修复。暂停相关缓存能先止血，但长期修复还要保证命名空间和授权版本随请求变化，并在命中后做必要的权限复核。
 
 ### 7.15.4 修复路径
 
@@ -798,7 +862,9 @@ L
 
 ### 7.15.5 结果与边界
 
-修复后 P95 TTFT 回到 1.4 秒，P99 TPOT 回到 76 ms，取消压力测试的 KV blocks 能回收，权限切换后的缓存不会命中旧条款。引用支持率恢复到 0.92，合同查询成功率为 0.96。这个案例不能证明系统永远没有越权；它只证明在注册的租户、权限、缓存、取消和请求切片下，已复现的故障得到修复。还需持续做跨租户、权限撤销、旧版本回滚和新 RAG index 的回归。
+修复后 P95 TTFT 回到 1.4 秒，P95 TPOT 为 69 ms、P99 TPOT 为 76 ms，取消压力测试的 KV blocks 能回收，权限切换后的缓存不会命中旧条款。假设回归集有 500 个可验证 claim，其中 460 个得到证据支持，CitationSupport 为 `460/500=0.92`；另有 500 个合同查询任务，其中 480 个达到业务目标，TaskSuccessRate 为 `480/500=0.96`。这两个分母不同，不能把 claim 支持率误读成请求成功率。这个案例不能证明系统永远没有越权；它只证明在注册的租户、权限、缓存、取消和请求切片下，已复现的故障得到修复。还需持续做跨租户、权限撤销、旧版本回滚和新 RAG index 的回归。
+
+安全回归还要报告触发条件和覆盖数量。比如另设 1,000 次跨租户同前缀与权限撤销组合请求，假设没有一次返回旧合同片段；应同时说明这些请求确实触发过 prefix cache 命中。观察到零次泄漏不等于概率为零，也不能代表未覆盖的权限继承、索引更新或旧 worker 状态安全，因此需要把该用例纳入持续回归，并在权限或缓存策略变更时重新执行。
 
 ## 7.16 评估部署改动：质量和系统指标必须配对
 
@@ -806,21 +872,25 @@ L
 
 模型或引擎改动至少要覆盖通用能力、业务任务、格式、工具参数、RAG 召回和引用、安全拒答、长上下文、取消和错误恢复。量化和 speculative decoding 还要检查输出分布、重复率、停止原因和非确定性。
 
+每次实验先写成可证伪的变更假设，例如“固定模型和请求分布，只把 KV dtype 从 BF16 改为 FP8，目标是降低 KV 占用，同时质量回退不超过预先约定的范围”。冻结一组带稳定 id 的请求，让旧版和候选版处理相同输入；模板、检索快照、权限版本、采样设置和成功判定都保持一致。这样可做逐请求配对，检查哪些请求从失败变成功、哪些发生回退，而不是只比较两个不同流量批次的总分。
+
+假设 400 个测试任务中，旧版成功 352 个，候选版成功 368 个；配对结果显示 28 个任务由失败变成功，12 个由成功变失败，净增 16 个成功任务，即 `16/400=4` 个百分点。这个差值说明候选在该样本上更好，但不能仅凭净差宣称普遍提升；还要查看配对差异的不确定性，并按长上下文、语言、工具调用和租户权限切片。统计方法要匹配实验设计：同一请求在两个版本上重复测量属于配对数据，不能当作互相独立的两组比例；小样本或低频安全失败还需要扩大样本或用针对性用例补测。样本量、最小关注变化和停止规则应在观察结果前确定，避免看到有利数字后才挑评测集。
+
+质量指标也要和任务边界对应。RAG 检索命中不能代替回答证据支持，工具 schema 合法不能代替动作被授权，模型拒答正确不能代替服务成功处理拒答事件。对安全和权限应同时测正常请求的误拒、攻击请求的漏放、权限撤销后旧缓存命中、工具超时后的重复副作用；每个失败都保存可复现的输入、版本和审计证据。单一平均分会掩盖某个关键任务桶的退化，因此发布门槛应包括总体结果及不可被平均值抵消的严重失败条件。
+
 ### 7.16.2 系统评估
 
 同一请求集合下报告 TTFT、TPOT、E2E、P50/P95/P99、prefill/decode 吞吐、KV 使用、显存峰值、OOM、错误率、取消回收、GPU 利用率、成本和成功任务数。测试负载要包含短请求、长 prompt、长输出、突发、混合优先级和 RAG/工具放大。
 
+请求集合相同还不够：压测要固定到达时间或重放同一段流量轨迹，否则只用固定并发会产生闭环负载，变慢时发送量也会下降，容易把过载藏起来。记录 offered、admitted、completed 和 rejected 四种请求数，并明确吞吐的分子口径；同时固定预热时长、模型加载状态、GPU 时钟策略和测量窗口。一个负载切片至少重复多轮，报告中位结果和波动范围；长短请求混合时还要单独看长请求是否被短请求挤压，不能只报告全局平均延迟。
+
+系统指标需要和质量结果放在同一变体记录中。吞吐上升可能来自更长的排队、更少的拒绝或不同的请求完成定义；P50 改善也可能伴随 P99 长请求恶化。对 KV 优化要把峰值与回收后的稳态占用分开，对取消优化要验证停止生成、释放 block 和账本终态三者一致。若只测 kernel 时间，无法回答网关、RAG、排队和工具链路是否抵消了收益。
+
 ### 7.16.3 任务成功成本
 
-设一批任务的总成本为 `C_total`，成功完成的任务数为 `N_success`，则：
+本章的单位成功任务成本定义见 §7.11.3，评估变体沿用同一计费窗口和成功分母，避免为不同版本另换口径。同一个模型在纯文本问答和工具任务上的成功定义不同，成本也不能只按 output token 计；重试、RAG、rerank、人工审核和失败回滚都应进入总成本。只有先达到质量和安全门槛，再比较单位成功成本，才不会把更便宜但更常失败的版本误判为优化。
 
-~~~math
-C_{\mathrm{success}}
-=
-\frac{C_{\mathrm{total}}}{N_{\mathrm{success}}}
-~~~
-
-同一个模型在纯文本问答和工具任务上的成功定义不同，成本也不能只按 output token 计。重试、RAG、rerank、人工审核和失败回滚都应进入总成本。
+例如，在同一组 1,000 个构造任务上，旧版总成本假设为 1,200 元、成功 920 个，约为 `1,200/920=1.30` 元/成功任务。候选 A 花费 1,000 元、成功 880 个，表面成本降到 `1,000/880≈1.14` 元，但成功率从 92% 降到 88%；若发布门槛要求至少 90%，候选 A 必须淘汰。候选 B 花费 1,150 元、成功 925 个，单位成功成本约 `1,150/925≈1.24` 元；它满足这个示例的成功率门槛，成本比旧版低约 `1-1.24/1.30≈4.6%`，但 5 个任务的净增仍要结合配对不确定性和任务切片判断。所有金额和成功数都是教学假设；这里展示的是先过门槛、再比成本的顺序，不代表真实服务价格或阈值。
 
 ### 7.16.4 部署实验矩阵
 
@@ -840,11 +910,15 @@ C_{\mathrm{success}}
 
 不需要穷举所有笛卡尔积，但要保留能暴露不同瓶颈的代表性切片。例如短输入长输出主要观察 decode 和 KV 带宽，长输入短输出主要观察 prefill 和 TTFT，长输入长输出同时考验上下文容量和调度；RAG/工具请求还要测内部调用放大、取消和 unknown。每个切片都应有相同的成功判定、错误分类和资源上限。
 
+矩阵可以先用覆盖设计缩小组合数，再对可能相互作用的维度做定向交叉。比如量化单独看没有质量回退，并不证明“量化 × 最大上下文”安全；prefix cache 单独测试无泄漏，也不证明“多租户 × 权限撤销 × prefix 命中”安全。优先覆盖能改变状态所有权或资源瓶颈的组合，并把未测组合标作未知。每轮只改一个主要因素有助于归因，但若变更本身就是两项功能协同，则应设置基线、单项和组合组，才能看出交互而非误归因。
+
 实验结果不应只给一张 tokens/sec 表。至少同时保存质量、延迟、吞吐、显存、KV、错误、取消回收、任务成功和成本；对高风险动作，还要保留授权拒绝、越权尝试、重复副作用和人工处理结果。这样才能判断一个优化是否只是把成本或失败转移到另一层。
+
+通过离线门槛后，再进入影子流量和小比例灰度。影子请求只计算和记录，不得重复执行付款、写入或外发等副作用；灰度期间按模型、模板、引擎、量化、索引和权限版本拆分指标。预先设置停止条件，例如出现未授权访问、关键任务成功率越界、P99 延迟持续超标或取消后 KV 占用不回落时立即停止扩量。回滚也要覆盖整套版本依赖和缓存命名空间，不能只把模型权重换回旧版本。
 
 ### 7.16.5 最小请求状态转换实现
 
-下面的纯 Python 代码只实现状态约束，不执行 GPU、网络或工具动作。它的价值在于把“完成后不能再取消”“未知结果不能自动重试”等协议规则变成可测试的程序契约：
+下面的纯 Python 代码只实现状态约束，不执行 GPU、网络或工具动作。它把“完成后不能再取消”“未知结果不能自动重试”等协议规则变成可检查的程序契约。**已验证（2026-11-06；Python 3.12.9；仅标准库）**。
 
 ~~~python
 from dataclasses import dataclass
@@ -872,12 +946,12 @@ class RequestState:
     sequence: int = 0
 
     def transition(self, next_status: str) -> None:
+        if self.status in TERMINAL:
+            raise ValueError("terminal request cannot transition")
         if next_status not in ALLOWED[self.status]:
             raise ValueError(
                 f"invalid transition: {self.status} -> {next_status}"
             )
-        if self.status in TERMINAL:
-            raise ValueError("terminal request cannot transition")
         self.status = next_status
         self.sequence += 1
 
@@ -906,19 +980,26 @@ assert request.sequence == 7
 7. Speculative Decoding：[https://arxiv.org/abs/2211.17192](https://arxiv.org/abs/2211.17192)
 8. Medusa：[https://arxiv.org/abs/2401.10774](https://arxiv.org/abs/2401.10774)
 9. EAGLE：[https://arxiv.org/abs/2401.15077](https://arxiv.org/abs/2401.15077)
-10. GPTQ：[https://arxiv.org/abs/2210.17323](https://arxiv.org/abs/2210.17323)
+10. GPTQ：[https://arxiv.org/abs/2210.17323v2](https://arxiv.org/abs/2210.17323v2)
 11. AWQ：[https://arxiv.org/abs/2306.00978](https://arxiv.org/abs/2306.00978)
 12. REALM：[https://arxiv.org/abs/2002.08909](https://arxiv.org/abs/2002.08909)
 13. DPR：[https://arxiv.org/abs/2004.04906](https://arxiv.org/abs/2004.04906)
 14. RAG：[https://arxiv.org/abs/2005.11401](https://arxiv.org/abs/2005.11401)
 15. ReAct：[https://arxiv.org/abs/2210.03629](https://arxiv.org/abs/2210.03629)
 16. Toolformer：[https://arxiv.org/abs/2302.04761](https://arxiv.org/abs/2302.04761)
-17. OWASP Top 10 for LLM Applications：[https://owasp.org/www-project-top-10-for-large-language-model-applications/](https://owasp.org/www-project-top-10-for-large-language-model-applications/)
-18. NIST AI Risk Management Framework：[https://www.nist.gov/itl/ai-risk-management-framework](https://www.nist.gov/itl/ai-risk-management-framework)
+17. OWASP Top 10 for LLM Applications 2025：[https://genai.owasp.org/resource/owasp-top-10-for-llm-applications-2025/](https://genai.owasp.org/resource/owasp-top-10-for-llm-applications-2025/)
+18. NIST AI Risk Management Framework 1.0：[https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-ai-rmf-10](https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-ai-rmf-10)
+19. Fast Transformer Decoding: One Write-Head is All You Need：[https://arxiv.org/abs/1911.02150](https://arxiv.org/abs/1911.02150)
+20. GQA: Training Generalized Multi-Query Transformer Models：[https://arxiv.org/abs/2305.13245](https://arxiv.org/abs/2305.13245)
+21. DistServe：[https://arxiv.org/abs/2401.09670v3](https://arxiv.org/abs/2401.09670v3)
+22. vLLM v0.33.0 Disaggregated Prefilling：[https://docs.vllm.ai/en/v0.33.0/features/disagg_prefill/](https://docs.vllm.ai/en/v0.33.0/features/disagg_prefill/)
+23. A Proof for the Queuing Formula: L = λW：[https://doi.org/10.1287/opre.9.3.383](https://doi.org/10.1287/opre.9.3.383)
+24. Quantization-Aware Training for Large Language Models with PyTorch：[https://pytorch.org/blog/quantization-aware-training/](https://pytorch.org/blog/quantization-aware-training/)
+25. I Know What You Asked: Prompt Leakage via KV-Cache Sharing in Multi-Tenant LLM Serving：[https://www.ndss-symposium.org/ndss-paper/i-know-what-you-asked-prompt-leakage-via-kv-cache-sharing-in-multi-tenant-llm-serving/](https://www.ndss-symposium.org/ndss-paper/i-know-what-you-asked-prompt-leakage-via-kv-cache-sharing-in-multi-tenant-llm-serving/)
 
-原始论文用于支持 attention、PagedAttention、speculative decoding、量化和 RAG/Agent 方法；vLLM/SGLang 文档用于支持具体引擎的功能边界；OWASP 和 NIST 用于支持治理与风险管理框架。KV 容量、延迟分解、MFU、单位成功任务成本和故障案例中的数字是教学估算或合成案例，不是某个公开服务的实测承诺。
+原始论文用于支持 attention、PagedAttention、GQA/MQA、阶段解耦、speculative decoding、量化和 RAG/Agent 方法；vLLM/SGLang 文档用于支持带版本边界的引擎功能说明；OWASP 和 NIST 用于支持治理与风险管理框架。KV 容量、延迟分解、单位成功任务成本和故障案例中的数字是教学估算或合成案例，不是某个公开服务的实测承诺。
 
-公开论文中的吞吐、接受率和量化质量依赖模型、硬件、请求分布、kernel 和版本，不能直接外推到目标集群。当前模型卡和服务能力还需要回到对应厂商或项目的版本文档、实际 profiling、任务评估和安全审计。本轮写入前尝试联网复核资料入口，但当前环境 DNS 暂时无法解析外部域名；保留这些权威入口，正式发布前应在网络恢复后重新记录 HTTP 状态和版本。
+公开论文中的吞吐、接受率和量化质量依赖模型、硬件、请求分布、kernel 和版本，不能直接外推到目标集群。当前模型卡和服务能力还需要回到对应厂商或项目的版本文档、实际 profiling、任务评估和安全审计。动态文档应记录实际采用的 release、配置和硬件；文档功能存在不等于目标部署已满足服务目标。
 
 ## 7.18 结语：部署是对模型能力的重新定价
 

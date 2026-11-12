@@ -1,12 +1,12 @@
 # Statistical inference for LLM evaluation: judge noise, repeated runs, and benchmark resolution
 
-检索日期：2026-11-03。记录本轮核对的新来源事实和适用边界；未复现实验或论文计算。
+首次检索日期：2026-11-03；复核日期：2026-11-09。记录联网核对的来源事实和适用边界；未复现实验或论文计算。
 
 ## Noisy but Valid: Robust Statistical Evaluation of LLMs with Imperfect Judges
 
 - **来源与版本：** Chen Feng、Minghe Shen、Ananth Balashankar、Carsten Gerner-Beuerle、Miguel Rodrigues，*Noisy but Valid: Robust Statistical Evaluation of LLMs with Imperfect Judges*。arXiv:2601.20913 v1 于 2026-01-28 提交，arXiv 页面标注 accepted to ICLR 2026；同时核读 [ICLR 2026 proceedings abstract](https://proceedings.iclr.cc/paper_files/paper/2026/hash/08a67eb74bfb9ded9e949dd52973e997-Abstract-Conference.html) 与 [arXiv HTML](https://arxiv.org/html/2601.20913v1)。阅读摘要、认证假设、第 3—6 节的测试设置/程序/保证/实验、结论限制和附录数据卫生说明。
-- **支持事实：** 论文将认证问题表述为二元失败率阈值检验：原假设为真实失败率不低于容忍阈值；一组小规模人工标签估计 judge 的 TPR/FPR，另一组更大的 judge 标签用于计算 noisy failure rate，临界值将校准参数不确定性计入，并据此控制其定义下的有限样本第一类错误。作者在 Jigsaw Comment、Hate Speech 和 SafeRLHF 的实验中比较 noisy hypothesis testing、仅人工标签的 direct testing、PPI 变体和参数已知的 oracle。方法在 judge 质量高于推导条件的部分设置中可提高功效；实际估计参数仍与理想 oracle 有差距。
-- **证据边界：** 这是特定二元 pass/fail 认证方法，不等于通用多指标 p 值修正。理论依赖其独立抽样和 judge 误差建模假设；人工标签本身仍决定 ground truth 的含义。作者指出主观任务中的人工分歧、极小校准集和稀有失败事件可能削弱近似精度，并要求单独验证/选择 judge 以避免校准集 peeking。统计有效性不等于道德或构念效度。
+- **支持事实：** 论文将认证问题表述为二元失败率阈值检验：原假设为真实失败率不低于容忍阈值；一组小规模人工标签估计 judge 的 TPR/FPR，另一组更大的 judge 标签用于计算 noisy failure rate，临界值将校准参数不确定性计入。Theorem 5.1 对给定校准集给出 $P_e^{(I)}\leq\zeta+O(n_J^{-1/2}+n_{M_1}^{-1/2}+n_{M_0}^{-1/2})$ 的界；论文的精度依赖 Berry–Esseen/正态近似项，因此不能把它压缩成所有有限样本都精确满足 $P_e^{(I)}\leq\zeta$。作者在 Jigsaw Comment、Hate Speech 和 SafeRLHF 的实验中比较 noisy hypothesis testing、仅人工标签的 direct testing、PPI 变体和参数已知的 oracle。方法在 judge 质量高于推导条件的部分设置中可提高功效；实际估计参数仍与理想 oracle 有差距。
+- **证据边界：** 这是特定二元 pass/fail 认证方法，不等于通用多指标 p 值修正。理论依赖其 i.i.d. 抽样和 judge 误差建模假设；人工标签本身仍决定 ground truth 的含义。作者指出主观任务中的人工分歧、极小校准集和稀有失败事件可能削弱正态近似精度，并要求单独验证/选择 judge 以避免校准集 peeking。统计有效性不等于道德或构念效度。
 
 ## Towards Reproducible LLM Evaluation: Quantifying Uncertainty in LLM Benchmark Scores
 
@@ -19,3 +19,9 @@
 - **来源与版本：** TMLS AI Research，网页技术报告，2026-07-08。阅读网页摘要、引言、配对与小样本区间部分、聚类与 MDE 总览及限制说明；来源页面称其数值为既有资料与指定公式的分析/计算，不是新模型实验。
 - **支持事实：** 报告把独立、同题配对和题目聚类作为 benchmark 设计，讨论小样本比例区间、McNemar 不一致率、设计效应、生成运行噪声和 MDE 样本规划。其 MDE atlas 给出的 HumanEval、GPQA Diamond、SWE-bench Verified、GSM8K、MMLU 差异分辨率，绑定报告采用的项目规模、错误率、显著性/功效和配对不一致假设。
 - **证据边界：** 这是机构技术报告，未见同行评审出版信息；benchmark 特定 MDE 是分析结果，不能当作 benchmark 的永久常数。使用时必须确认题集版本、独立/配对结构、错误率和目标效应与报告设定相符。相关机制在教材中以公式和可复算的合成例讲解，不移植该 atlas 的单一数值表。
+
+## Wilson score intervals for binomial proportions
+
+- **来源与版本：** NIST/SEMATECH *e-Handbook of Statistical Methods*, §7.2.4.1, “Confidence intervals,” accessed 2026-11-05. 核读 Wilson 区间公式、由比例检验反演区间的说明、二项精确区间段落及术语说明：https://www.itl.nist.gov/div898/handbook/prc/section2/prc241.htm。
+- **支持事实：** NIST 将 Wilson 区间说明为通过反演二项比例的检验得到，并给出由样本比例、样本数和标准正态临界值计算上下界的表达式；页面另行描述基于二项分布的精确区间。书中 `n=20,k=14` 与 `n=10,000,k=7,000` 的 95% 区间是按公式自行复算的教学数据，不是 NIST 的实测结果。
+- **证据边界：** 推断对象是独立二项抽样下的比例；相关题目、重复生成、题目聚类或同题模型比较需要保留其依赖/配对结构，不能把独立二项区间直接当成模型差异检验。NIST 给出的比例区间不替代对具体 benchmark 抽样设计和评估协议的审查。
