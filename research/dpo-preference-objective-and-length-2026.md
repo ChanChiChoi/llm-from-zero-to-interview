@@ -62,3 +62,10 @@
 ## 生命周期
 
 标准 DPO 的 reference-adjusted preference objective：active；SimPO 为对 reference 依赖和序列长度目标的一个特定方法变体。Likelihood displacement 的成因和 2026 正则化方案仍需结合论文全文、后续复现及不同 direct preference objectives 分别核验。
+
+## 2026-11-13 来源复核补充
+
+- Schulman et al., “Proximal Policy Optimization Algorithms,” arXiv:1707.06347v2，[原论文页面](https://arxiv.org/abs/1707.06347v2)。
+  - 实际阅读范围：§2.2—§3 与 Algorithm 1。论文定义裁剪 surrogate objective，通过裁剪新旧策略概率比，削弱把比值推离区间的更新激励；每轮先从当前策略采样，再对收集到的数据做若干 epoch 的小批次优化。
+  - 证据等级：source-backed（原论文）；不据此比较 PPO 与 DPO 在语言任务上的优劣。
+- 重新打开 TRL v1.14.1 的 [DPOTrainer](https://huggingface.co/docs/trl/v1.14.1/dpo_trainer) 与[数据格式](https://huggingface.co/docs/trl/v1.14.1/dataset_formats)文档，核对 preference 字段、聊天格式、ref_model=None、beta、loss_type、max_length、eval_strategy、processing_class 和 logps 记录。固定版本页面同时提示存在更新的文档版本；章节继续把 v1.14.1 作为明确的示例接口版本，不称其为最新版本。文档核对不代表示例依赖组合已安装、联调或运行。

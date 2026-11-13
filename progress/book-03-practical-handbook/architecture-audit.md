@@ -134,6 +134,19 @@
 - 对照 Markdown 源码后确认，公式的大括号本身成对；差异在展示公式中的 `y_{<t}`：下标以 `<` 开头，可能在 Markdown/HTML 解析阶段被误当成标签，导致后续数学内容解析错位。此写法也不符合模块 04 关于避免尖括号下标的要求。
 - 已改为显式前缀范围 `y_{1:t-1}`，并说明 `t=1` 时前缀为空。未改公式含义、代码或训练结论；全章仅此一处含 `_{<` 的数学写法。待用户在 GitHub 页面确认实际渲染。
 
+### GitHub 行内数学分隔符修正（2026-11-13）
+
+- 用户进一步指出同一段及后文叙述中的行内公式仍显示为原始文本。检查发现全章 61 对行内数学分隔符均写作 `\(...\)`，而[GitHub 官方文档](https://docs.github.com/en/get-started/writing-on-github/working-with-advanced-formatting/writing-mathematical-expressions)列出的行内语法为 `$...$` 或 `$` 反引号 `$` 形式；本章规范也要求使用单美元符号。
+- 全章 61 对行内分隔符已统一改为 `$...$`。此前文件没有其他美元符号；展示公式、代码块和数学内容未改。尚待用户在 GitHub 页面确认行内公式渲染。
+
+### 全章重写（2026-11-13）
+
+- **范围与读者路径**：按用户最新指示完全替换第 5 章正文，代码也重新编写，不再沿用此前“保留代码围栏”的限制。章节由原先密集的实现片段改为一条连续路径：偏好数据怎样记录比较、Reward Model 怎样学习排序、PPO 路线怎样使用奖励、DPO 怎样从 KL 正则化目标推出、序列概率怎样落实到 token mask、TRL 怎样接训练循环、训练后怎样做独立评估。
+- **教学主线**：贯穿“每天只有 20 分钟，怎么开始学 Python”的假设例子，说明 chosen/rejected 是特定标准下的相对标签。对 SFT、RM、RLHF、PPO、policy、reference、token 概率、KL 和 DPO loss 补了首次解释；加入 RM 分数差与梯度、DPO 的隐式 reward 推导、policy/reference 概率对照，以及 40 个盲评问题的胜负平分母例子。结尾要求读者留下数据、配置、评估输出和失败案例，呼应第三册实战交付目标。
+- **代码与框架**：四个 Python 块均为本轮新写：偏好数据基本审计、response-mask 序列 log-probability、DPO loss、TRL v1.14.1 最小训练流程。均标为“静态审阅，未运行（2026-11-13）”；未执行书中代码、测试、模型、benchmark 或训练。
+- **证据与版本**：重新核对 DPO 原论文 v3、InstructGPT 论文、PPO 原论文 v2，以及 TRL v1.14.1 DPOTrainer 和数据格式文档。章节固定引用 v1.14.1 参数，不声称文档版本等于当前最新版本或已联调依赖；source-backed 资料和边界补记于 research/dpo-preference-objective-and-length-2026.md。
+- **静态验收与同步**：24 个围栏块、48 个围栏标记成对（4 Python、15 math、2 text、2 JSON、1 Mermaid）；84 个单美元行内数学分隔符成对，行内括号分隔符为 0；未发现以尖括号开头的数学下标；本章无本地相对链接。git diff --check 通过。简介和目录中第 5 章的摘要仍符合本章结果，本轮不改导航或配套题库。未更新 PDF；GitHub 上 Mermaid 和数学公式的页面渲染仍待用户实际查看。
+
 ## chapter_scan：第 6 章《推理优化实战》
 
 - **扫描范围与主线**：2026-10-29 完整通读 `chapters/06-推理优化实战.md`，沿单个请求的状态与资源生命周期检查 KV Cache、Prefill/Decode 指标、vLLM 分页和调度、量化、speculative decoding、长上下文压测，以及最终实验报告如何衔接。维持 6.1—6.7 原有结构，没有增删章节。

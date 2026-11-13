@@ -29,7 +29,7 @@ observe state
 
 ## 19.2 状态转移：模型究竟根据什么改变下一步
 
-如果只把上一轮工具结果拼接为一段文本，下一轮模型很难区分事实、假设、过期结果和未完成动作。更可靠的做法是显式维护状态。令 \(t\) 为非负整数轮次，\(x_t\) 表示任务目标和当前用户约束，\(F_t\) 是已确认事实集合，\(H_t\) 是带有证据的候选假设集合，\(P_t\) 是待执行动作及其依赖，\(B_t\) 是模型、工具、时间和副作用的剩余非负预算，\(R_t\) 记录权限、代码、数据和工具版本。由这些量组成的状态为：
+如果只把上一轮工具结果拼接为一段文本，下一轮模型很难区分事实、假设、过期结果和未完成动作。更可靠的做法是显式维护状态。令 \(t\) 为非负整数轮次，\(x_t\) 表示任务目标和当前用户约束，\(F_t\) 是已确认事实集合，\(H_t\) 是带有证据的候选假设集合，\(P_t\) 是待执行动作及其依赖，\(B_t\) 是模型、工具、时间和副作用的有限非负剩余预算，\(R_t\) 记录权限、代码、数据和工具版本。由这些量组成的状态为：
 
 ~~~math
 s_t=(x_t,F_t,H_t,P_t,B_t,R_t)
@@ -167,7 +167,7 @@ seq 用于同一条事件流的顺序校验；trace_id 把多轮调用归入同�
 
 trust_level 表示处理策略，不是“内容一定为真”的概率。官方数据库也可能在查询后变化，可信域名的网页也可能过期；不可信网页中的一个数字在通过独立核对后也可能成为有用证据。来源、时间、新鲜度、完整性和独立验证应分别记录。
 
-令 \(\mathrm{source\_ok}\)、\(\mathrm{freshness\_ok}\)、\(\mathrm{schema\_ok}\) 和 \(\mathrm{permission\_ok}\) 分别表示来源、时效、结构和当前权限检查；只有四项都已执行并得到 0/1 结果时，才计算 observation \(o\) 的形式可用性 \(V(o)\)：
+令 \(o\) 表示待核验的 observation；\(\mathrm{source\_ok}\)、\(\mathrm{freshness\_ok}\)、\(\mathrm{schema\_ok}\) 和 \(\mathrm{permission\_ok}\) 分别表示来源、时效、结构和当前权限检查。只有四项都已执行并得到 0/1 结果时，才计算其形式可用性 \(V(o)\)：
 
 ~~~math
 V(o)=\mathbf{1}[\mathrm{source\_ok}]
@@ -290,7 +290,7 @@ proposal
 
 这里的“应用层两阶段”不要和数据库理论中的严格 two-phase commit 混为一谈。它的重点是把“模型建议动作”和“执行外部副作用”隔开，并为恢复、查询和人工确认留下位置；它不能自动让跨系统操作具备原子性。
 
-一个动作请求至少需要目标、参数、影响范围、风险级别、证据、授权版本和幂等键。幂等键 $k$ 应绑定同一个业务意图，例如规范化后的工具名、目标资源、参数和任务版本的摘要：
+一个动作请求至少需要目标、参数、影响范围、风险级别、证据、授权版本和幂等键。令 `tool`、`target`、`normalized_args` 和 `intent_revision` 分别表示工具名、目标资源、按共享 schema 规范化的参数和业务意图版本；它们必须能按调用方与执行器约定的稳定 JSON 规则编码。`Hash` 表示对该规范编码的 UTF-8 字节计算 SHA-256。幂等键 \(k\) 将同一业务意图绑定到：
 
 ~~~math
 k=\mathrm{Hash}(\mathrm{tool},\mathrm{target},\mathrm{normalized\_args},\mathrm{intent\_revision})
@@ -314,7 +314,7 @@ k=\mathrm{Hash}(\mathrm{tool},\mathrm{target},\mathrm{normalized\_args},\mathrm{
 - 剩余预算、权限版本和用户取消状态；
 - 最近一次 observation 的来源、hash 和有效期。
 
-恢复前可以把条件写成：
+恢复检查结果 \(\mathrm{log\_valid}\)、\(\mathrm{schema\_compatible}\)、\(\mathrm{policy\_valid}\) 和 \(\mathrm{side\_effects\_reconciled}\) 各取 0 或 1，只有完成检查且通过时才取 1；任一项未知时不得自动恢复。\(\mathrm{resume}\in\{0,1\}\) 表示是否允许继续，只有四项检查全通过才取 1：
 
 ~~~math
 \mathrm{resume}=1
@@ -325,7 +325,7 @@ k=\mathrm{Hash}(\mathrm{tool},\mathrm{target},\mathrm{normalized\_args},\mathrm{
 \land\mathrm{side\_effects\_reconciled}
 ~~~
 
-四个条件都必须已被检查。log_valid 表示事件没有丢失或乱序；schema_compatible 表示恢复器理解旧状态；policy_valid 表示权限和策略仍适用；side_effects_reconciled 表示所有可能已经执行的动作都有明确状态。任何条件未知，都不应自动继续。
+其中四项依次表示事件日志没有丢失或乱序、恢复器理解旧状态 schema、当前权限与策略仍适用，以及所有可能已经执行的副作用均已对账。任何条件未知，都不应自动继续。
 
 例如检查结果依次为 `log_valid=1`、`schema_compatible=1`、`policy_valid=0`、`side_effects_reconciled=1`，则 $\mathrm{resume}=1\land1\land0\land1=0$。即使事件完整、外部动作已对账，权限撤回仍会阻止恢复；必须重新取得授权或转人工，其他条件不能抵消这一项。
 
@@ -363,23 +363,23 @@ k=\mathrm{Hash}(\mathrm{tool},\mathrm{target},\mathrm{normalized\_args},\mathrm{
 - 证据覆盖、引用正确性或代码测试通过情况；
 - p50、p95、p99 延迟和单位成功成本。
 
-若任务总数 $N_{\mathrm{task}}$ 是正整数，最终成功率为：
+令 \(N_{\mathrm{task}}\) 为正整数任务总数，\(N_{\mathrm{success}}\) 为其中满足成功谓词的非负整数任务数，且 \(0\le N_{\mathrm{success}}\le N_{\mathrm{task}}\)。最终成功率为：
 
 ~~~math
 \mathrm{success\_rate}=\frac{N_{\mathrm{success}}}{N_{\mathrm{task}}}
 ~~~
 
-若有效调用数为 $N_{\mathrm{valid\_call}}$，所有模型发出的调用数为 $N_{\mathrm{all\_call}}$，则：
+令 \(N_{\mathrm{all\_call}}\) 为正整数形式的模型工具调用总数，\(N_{\mathrm{valid\_call}}\) 为其中满足目标、schema 和权限约束的调用数，满足 \(0\le N_{\mathrm{valid\_call}}\le N_{\mathrm{all\_call}}\)。没有任何调用时该比率未定义；有调用时按下式计算：
 
 ~~~math
 \mathrm{valid\_call\_rate}=\frac{N_{\mathrm{valid\_call}}}{N_{\mathrm{all\_call}}}
 ~~~
 
-两个分母都必须大于 0；没有任务或没有调用时，指标应报告为 undefined，不能用 0 填充后制造可比较的假象。重复副作用率同理：如果没有任何已提交动作，就没有一个有意义的重复率。
+没有任务或没有调用时，相应指标应报告为 undefined，不能用 0 填充后制造可比较的假象。重复副作用率同理：如果没有任何已提交动作，就没有一个有意义的重复率。
 
 在一组合成的 50 个任务中若 42 个达到成功谓词，成功率为 $42/50=0.84$；若模型一共发出 100 次工具调用，其中 80 次满足目标、schema 和权限约束，有效调用率为 $80/100=0.80$。调用是否有效和任务是否成功是两个不同层级，不能用一个数替代另一个数。
 
-成本应分项记录：
+在同一评估任务集和时间窗内，\(C_{\mathrm{model}}\)、\(C_{\mathrm{tool}}\)、\(C_{\mathrm{wait}}\)、\(C_{\mathrm{verify}}\) 与 \(C_{\mathrm{human}}\) 分别是模型、工具、等待、验证和人工的有限非负成本；先统一到同一货币或归一化单位，且不能把未测量项当作 0。总成本为：
 
 ~~~math
 C_{\mathrm{total}}
@@ -390,14 +390,14 @@ C_{\mathrm{total}}
  +C_{\mathrm{human}}
 ~~~
 
-所有项必须先换算到同一货币或同一归一化成本单位；没有测量的数据不能默认为 0。单位成功成本为：
+总成本按这些分项求和。若 \(N_{\mathrm{success}}>0\)，单位成功成本可定义为下式；当 \(N_{\mathrm{success}}=0\) 时该指标未定义，应报告 None 或 undefined：
 
 ~~~math
 C_{\mathrm{per\ success}}
 =\frac{C_{\mathrm{total}}}{N_{\mathrm{success}}}
 ~~~
 
-例如沿用上面的 50 个合成任务，假设模型、工具、等待、验证和人工成本分别为 120、30、10、20、20 个归一化成本单位，则总成本为 $120+30+10+20+20=200$，单位成功成本为 $200/42\approx4.76$ 个单位/成功任务。实际各项必须来自同一时间窗和可比较的成本口径。若 $N_{\mathrm{success}}=0$，单位成功成本未定义，应报告 None 或 undefined。
+例如沿用上面的 50 个合成任务，假设模型、工具、等待、验证和人工成本分别为 120、30、10、20、20 个归一化成本单位，则总成本为 $120+30+10+20+20=200$，单位成功成本为 $200/42\approx4.76$ 个单位/成功任务。实际各项必须来自同一时间窗和可比较的成本口径。
 
 一个系统如果成功率提高但单位成功成本上升十倍，是否值得采用取决于任务价值和失败代价，而不是只看单次回答的长度。
 
