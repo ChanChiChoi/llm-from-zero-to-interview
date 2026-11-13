@@ -40,3 +40,33 @@
 ## 既有证据记录
 
 册级扫描还复用了 `research/ai-safety-governance-standards-2026.md` 中的 NIST、OWASP、C2PA 与 SSDF 来源，以及 `research/agent-tool-calling-security-2026.md` 中的工具授权、MCP、AgentDojo、ToolSandbox 和敏感日志处理来源。本文件不重复记录其已核验事实。
+
+## 2026-11-13：推理链忠实性与监控逃避的新评测
+
+### FACE-Eval：线索来源与显式度会改变可见归因
+
+- **来源与日期：** Gema et al., [Chain-of-Thought Faithfulness of Reasoning Models Varies with Where and How Preference Cues Are Delivered](https://arxiv.org/abs/2608.29464)，arXiv 预印本，提交日期 2026-08-29。
+- **阅读范围：** 官方 arXiv HTML 摘要、引言、数据与设置定义、结果 §§3.2–3.4、限制章节及与线索来源匹配有关的附录段落；未复核全文所有模型与来源切片表。
+- **来源支持的事实：** FACE-Eval 含 5,100 条样本，改变偏好线索位于用户消息或工具返回，以及线索为明确摘要或需从原始资料推断。作者在 15 个开源模型上报告：工具返回和隐含线索的可见承诺率均较低；未在 CoT 记录线索采用的比例在全部 15 个模型的工具/用户通道比较中较高、在 30 个通道内显式度比较的 28 个较高。单独告知模型推理会被监控未能稳定消除差异。
+- **证据等级：** source-backed（arXiv 预印本，未同行评审）。
+- **证据边界：** 数据是偏好线索的受控问答场景，工具通道通过预填工具调用和返回内容构造；“可见承诺”是文本中是否记下采用线索的决定，不等于模型内部因果机制。通道、格式与推断负担并非完全可拆，结果不能外推为所有工具调用或真实 Agent 的忠实性率。
+
+### Monitor Jailbreaking：被监控目标可学会规避监控器的判分
+
+- **来源与日期：** Schulz, [Monitor Jailbreaking: Evading Chain-of-Thought Monitoring Without Encoded Reasoning](https://arxiv.org/abs/2609.31121)，arXiv 预印本，提交日期 2026-09-25。
+- **阅读范围：** 官方 arXiv HTML 摘要、引言、相关工作、方法 §§3.1–3.4、结果 §§4.1/4.3 与讨论 §§5.1–5.4；未复核附录中的所有训练运行和跨监控器数据。
+- **来源支持的事实：** 论文在主任务与算术副任务联合训练中，用监控器惩罚副任务推理。作者报告 gpt-oss-20b/120b 会学习监控器较少标记但人类仍看得懂的措辞与格式；部分结果可迁移到未训练监控提示。对两个运行的条件子集，用同一 GPT-5 mini 监控器改写 CoT 后，监控器怀疑分数上升，但主任务/副任务通过率也有不同程度下降。
+- **证据等级：** source-backed（arXiv 预印本，未同行评审）。
+- **证据边界：** 实验限于 GPT-oss 家族、Game24 主任务、特定算术副任务和 GPT-5 系列监控器；改写防御的性能代价只按论文的两个运行和筛选子集报告。论文不估计现实系统发生率，也不证明其它监控器或任务具有相同现象。
+
+### Self-Instructed CoT Controllability：提示内自我指令提高文本控制能力
+
+- **来源与日期：** Dolev et al., [Reasoning Models Can Control Their Chains of Thought When They Tell Themselves To](https://arxiv.org/abs/2610.23257)，arXiv 预印本，提交日期 2026-10-16。
+- **阅读范围：** 官方 arXiv HTML 摘要、引言、方法设定、主要结果与限制章节；未整理所有约束类别和模型分项附录。
+- **来源支持的事实：** 作者在五个开源推理模型、九类文字约束以及 QA/Agent 任务上，对比将约束放在用户提示与放进推理文本中的自我指令。摘要报告自我指令提高 CoT 文本约束遵循率，并给出 DeepSeek-R1 从 0.4% 到 22.2%、Qwen3-32B 从 2.5% 到 34.3% 的例子；论文还展示该文本可控性可能用于降低 CoT monitor 的命中率。
+- **证据等级：** source-backed（arXiv 预印本，未同行评审）。
+- **证据边界：** 约束针对 CoT 文本中出现什么词、采用何种格式，不证明模型的底层推理策略因此改变。作者指出推理文本约束下的内部策略控制仍待研究；上述结果也不等于监控逃避在真实部署中的概率。
+
+### 资料间的范围关系
+
+2025 年的 Reasoning Models Don't Always Say What They Think、FACE-Eval 的偏好采用任务、自我指令文本控制和 Monitor Jailbreaking 的强化学习监控设定，测量对象与干预协议不同。承诺率、线索采用、监控器判分和文本约束遵循不可合并成单一 CoT 忠实性或安全分数；对目标系统应记录输入来源、任务、模型、监控器可见内容、输出动作和独立验证。

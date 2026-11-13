@@ -120,6 +120,14 @@
 - **证据与配套同步**：TRL v1.14.1 的 DPO 数据/API/左 padding/reference/loss 聚合、Transformers v5.17.0 的 bitsandbytes 训练设备放置、PEFT v0.18.0 的 LoRA 初始化/Conv1D 约定、PyTorch v2.14 的损失与 log-prob API，以及固定 tiny-gpt2 commit 的来源边界已补入 `research/dpo-preference-objective-and-length-2026.md`。检查 `简介.md` 的第 5 章摘要、目录和 PAPERS/EXERCISES/INTERVIEW_BANK/GLOSSARY_EN_ZH/KNOWLEDGE_GRAPH 现有 DPO、Reward Model 与偏好数据入口，均与正文一致，不需重复增项；没有改目录。
 - **静态验收与遗留项**：`git diff --check` 通过；围栏、字数、状态标记、公式分隔符、本地相对链接和控制字符静态检查通过。文档版本不等于已联调依赖锁；tiny-gpt2 只作 API/数据流示范；目标平台 Mermaid 渲染、最终整册连续复读与全章外链终审仍待本册收口。没有更新 PDF。下一步处理第 6 章《推理优化实战》。
 
+### 初学者视角正文重写（2026-11-13）
+
+- **修改目标与主线**：按“懂深度学习和 Python、刚接触大模型”的读者视角重写代码围栏外的讲解，保留 5.1—5.6 结构。章节开头补了阅读路线，并用“每天 20 分钟学 Python”的同一问题串起偏好对、Reward Model、DPO 和评估；首次出现的 SFT、RM、PPO、DPO、policy、reference、token 概率等概念补充直白解释，区分相对偏好、奖励分数、排序概率和回答正确性。
+- **难点拆解与去重**：把 Reward Model 的分差、sigmoid 概率、loss 和梯度方向连成手算过程；DPO 部分先用 token 条件概率乘积解释整句概率，再说明 log 概率、KL 惩罚和偏好 logit，并展示 KL 正则化目标到隐式 reward 的关系。将数据审计、奖励模型实现、TRL 配置及底层细节明确标成进阶查阅，压缩重复的边界提醒和路线对比。
+- **解释性篇幅**：排除标题、代码/公式围栏、text 样例、状态行、行内代码和链接后，5.1—5.6 分别为 2,099、1,947、1,814、2,033、2,060、2,058 个汉字；各节均包含能手算或对照的具体例子。
+- **代码与静态检查**：相对本轮开始版本，43 个 Python 围栏、33 个 text 示例和 1 个 Mermaid 围栏逐字未变；数学围栏随讲解调整，从 46 个增至 50 个。当前共 127 个围栏块、全部配对；行内数学分隔符各 59 个，无控制字符；3 个 Markdown 链接中无失效相对链接。git diff --check 通过。
+- **执行边界与遗留项**：本轮未运行书中代码、测试、模型、benchmark、构建或 PDF，也未新增联网研究。目标平台 Mermaid 渲染、最终整册连续复读和外链终审仍按本册既有门禁处理。
+
 ## chapter_scan：第 6 章《推理优化实战》
 
 - **扫描范围与主线**：2026-10-29 完整通读 `chapters/06-推理优化实战.md`，沿单个请求的状态与资源生命周期检查 KV Cache、Prefill/Decode 指标、vLLM 分页和调度、量化、speculative decoding、长上下文压测，以及最终实验报告如何衔接。维持 6.1—6.7 原有结构，没有增删章节。

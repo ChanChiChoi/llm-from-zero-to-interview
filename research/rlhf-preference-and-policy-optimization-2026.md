@@ -137,7 +137,7 @@
 
 ### Group Relative Policy Optimization 的基本数学对象
 
-- Shao et al., “DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models,” arXiv:2402.03300v3（2024-04-27），[论文 HTML](https://arxiv.org/html/2402.03300)，§4.1.1；DeepSeek-AI, “DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning,” arXiv:2501.12948，[论文 HTML](https://arxiv.org/html/2501.12948)，§2.2.1 与式（1）—（3）。本次核阅两篇论文的相关算法说明及公式。
+- Shao et al., “DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models,” arXiv:2402.03300v3（2024-04-27），[固定论文 HTML](https://arxiv.org/html/2402.03300v3)，§4.1.1；DeepSeek-AI, “DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning,” arXiv:2501.12948v2（2026-01-04），[固定论文 HTML](https://arxiv.org/html/2501.12948v2)，§2.1 与式（1）—（3）。本次核阅两篇论文的相关算法说明及公式。
   - 来源支持：DeepSeekMath 将 GRPO 描述为 PPO 变体；其方法省去单独的 value/critic 模型，用同一问题采样的一组回答得分构造 baseline。DeepSeek-R1 的公开算法进一步写出组内 reward 标准化 advantage、policy ratio、clipping 和 reference-policy KL 项。
   - 证据等级：source-backed（论文定义与特定模型报告中的算法公式）。
   - 适用边界：这些材料支持对应论文描述的 GRPO 版本，不能推出不同训练器具有相同 advantage 归一化、token/sequence reduction、长度处理或 KL 估计；组内没有奖励差异时也不会产生有效的相对优势信号。

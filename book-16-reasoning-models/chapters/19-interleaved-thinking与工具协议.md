@@ -1,4 +1,4 @@
-# 第 19 章 Interleaved Thinking：工具观察如何改变推理轨迹
+# 第 19 章 交错推理（Interleaved Thinking）：工具观察如何改变推理轨迹
 
 ## 19.1 从一次性生成到交错循环
 
@@ -6,7 +6,7 @@
 
 第一个任务是回答“什么是二分查找”。模型可以在没有外部信息的情况下直接组织答案。第二个任务是修复一个只在高并发时出现的缓存故障。模型必须先读取日志，再查看当前代码和部署版本，提出一个假设，运行复现测试，看到测试结果后修改假设，最后决定是否生成补丁。第二个任务如果被压缩成“一次生成完整计划，最后统一执行”，计划中的很多事实在生成时其实还不存在。
 
-Interleaved thinking 指的是把推理、动作和观察交替放入一个闭环：模型形成当前判断，提出一个动作；执行器完成或拒绝动作；系统把结果作为带结构的 observation 返回；模型根据新信息更新状态，再决定下一步。ReAct 论文把 reasoning trace 与 action 交错起来，强调动作可以取得外部信息、修正计划并处理异常；Toolformer 则研究模型如何决定是否调用工具、传递什么参数以及如何把结果纳入后续生成。两者都说明，工具调用不是答案末尾的一种装饰格式，而是推理过程中的信息获取动作。
+交错推理（interleaved thinking）指把推理、动作和观察（observation）交替放入一个闭环：模型形成当前判断，提出一个动作；执行器完成或拒绝动作；系统把结果作为带结构的 observation 返回；模型根据新信息更新状态，再决定下一步。ReAct 论文把推理轨迹（reasoning trace）与行动（action）交错起来，强调动作可以取得外部信息、修正计划并处理异常；Toolformer 则研究模型如何决定是否调用工具、传递什么参数以及如何把结果纳入后续生成。两者都说明，工具调用不是答案末尾的一种装饰格式，而是推理过程中的信息获取动作。
 
 这里的“thinking”需要一个边界。它表示系统内部可记录的决策状态、计划片段、工具请求和验证结果，不等于模型的全部内部计算，也不意味着把隐藏推理 token 原样暴露给用户。工程系统真正需要审计的是：模型提出了什么动作，策略是否批准，工具是否启动，观察来自哪里，哪一个版本被验证，以及外部副作用是否已经提交。
 
@@ -24,6 +24,8 @@ observe state
 ~~~
 
 它和“先规划、后执行”并不是非此即彼的关系。稳定的读取、解析、测试和审批步骤可以由固定工作流承担；只有那些会被外部反馈改变的节点，才需要重新交错推理。这样既保留适应性，也避免把所有简单步骤都交给一个不断循环的语言模型。
+
+本章在动态预算策略上承接[第十八章](18-adaptive-thinking与动态预算.md)，在跨轮推理状态上承接[第十五章](15-preserve-thinking与推理状态.md)；这里聚焦工具事件、结果校验和恢复协议。
 
 ## 19.2 状态转移：模型究竟根据什么改变下一步
 
@@ -48,7 +50,9 @@ s_t=(x_t,F_t,H_t,P_t,B_t,R_t)
 s_{t+1}=U(s_t,a_t,o_{t+1})
 ~~~
 
-U 不是一个只能由模型自由发挥的自然语言函数。它应当包含 schema 校验、权限检查、版本检查和状态机约束。例如，tool_started 事件不能把一个没有授权的工具调用变成“已执行”；一个建立在 repo@r41 上的测试报告也不能自动证明 repo@r42 上的补丁正确。
+U 不是一个只能由模型自由发挥的自然语言函数。它应当包含结构模式（schema）校验、权限检查、版本检查和状态机约束。例如，tool_started 事件不能把一个没有授权的工具调用变成“已执行”；一个建立在 repo@r41 上的测试报告也不能自动证明 repo@r42 上的补丁正确。
+
+用一个合成调试请求走一遍状态更新。初始任务是“refresh_config 偶发 500”，已确认事实只有当前 revision=`r42`，候选假设是连接池耗尽；计划动作是只读查询，资源状态为 8,000 个模型 token、3 次工具调用、20 秒、2 次验证和 0 次副作用。查询返回 `active_connections=100`、`pool_limit=100`，执行耗时 6 秒。更新后事实集合新增连接池饱和，工具调用预算由 3 降为 2、时间预算由 20 秒降为 14 秒，副作用预算仍为 0；假设因此得到支持，但尚未成为已证实根因，下一步应在隔离环境中复现。
 
 观察至少要区分四种情况：
 
@@ -71,7 +75,7 @@ empty 和 unknown 的区别很重要。搜索没有命中是一个有意义的�
 
 第三类是动作有依赖和异常分支的任务，例如“读取配置、修改文件、测试、提交补丁”。下一步是否存在，取决于上一步的返回值；固定计划可以给出主路径，但不能预先知道所有分支。
 
-交错推理也有明确的反模式。若每一步都已知、工具延迟远高于模型计算、没有可靠 verifier，或者动作本身不可逆且无法获得状态查询，那么增加循环只会增加等待和风险。此时固定 workflow、批量读取或先生成候选再统一验证，可能更合适。
+交错推理也有明确的反模式。若每一步都已知、工具延迟远高于模型计算、没有可靠 verifier，或者动作本身不可逆且无法获得状态查询，那么增加循环只会增加等待和风险。此时固定工作流（workflow）、批量读取或先生成候选再统一验证，可能更合适。
 
 可以把选择写成一个工程问题：新增一轮工具调用是否带来足以改变决策的信息。若答案是否定的，继续生成更长的 reasoning trace 并不会创造新事实。
 
@@ -123,7 +127,7 @@ started -> unknown
 }
 ~~~
 
-seq 用于同一条事件流的顺序校验；trace_id 把多轮调用归入同一个任务；turn_id 区分一次模型决策轮；call_id 把请求、结果和验证绑定起来；state_version 绑定代码或数据基线；idempotency_key 用于恢复和去重。时间戳便于排查延迟，但不能单独决定事件顺序，因为不同机器的时钟可能不一致。
+seq 用于同一条事件流的顺序校验；trace_id 把多轮调用归入同一个任务；turn_id 区分一次模型决策轮；call_id 把请求、结果和验证绑定起来；content_hash 记录观察的哈希值（hash）；state_version 绑定代码或数据基线；幂等键（idempotency key）用于恢复和去重。时间戳便于排查延迟，但不能单独决定事件顺序，因为不同机器的时钟可能不一致。
 
 事件消费者至少要检查三件事。
 
@@ -135,9 +139,19 @@ seq 用于同一条事件流的顺序校验；trace_id 把多轮调用归入同�
 
 模型生成的自然语言仍然有价值，它可以帮助用户理解进度和原因；但它不能覆盖事件事实。模型在后续轮次说“我已经发送了邮件”，不应替代执行器的 committed 记录。
 
+上面的事件字段是应用为恢复和审计定义的记录结构，不是任何一家模型服务都采用的 wire protocol。当前三类调用面的往返结构不同：
+
+| 调用面 | 模型提出的调用 | 执行结果如何回传 | 必须保留的边界 |
+| --- | --- | --- | --- |
+| OpenAI Responses | `function_call` output item | `function_call_output` input item 通过相同 `call_id` 关联；应用通常执行 client-owned function，再继续 Responses 请求。 | `call_id` 关联调用与结果，不表示业务授权；托管工具按各自合同执行。见[Function calling](https://developers.openai.com/api/docs/guides/function-calling)。 |
+| Anthropic Messages | assistant content 中的 `tool_use` block，通常以 `stop_reason=tool_use` 结束本轮。 | 应用执行 client tool，再用带相同 `tool_use_id` 的 `tool_result` 回传；错误可用 `is_error` 表示。 | tool result 需紧接匹配的 tool-use 历史；thinking block 的回放和交错行为依模型合同。见[Handle tool calls](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls)与[Thinking](https://platform.claude.com/docs/en/build-with-claude/thinking)。 |
+| 模型上下文协议（Model Context Protocol，MCP）2026-07-28 | JSON-RPC `tools/call` 请求。 | 返回 `CallToolResult`；协商 Tasks 扩展时也可能返回异步任务句柄（task handle）。 | 这是工具连接协议，不替 Host 决定业务授权或证明任务成功。见[版本化规范](https://modelcontextprotocol.io/specification/2026-07-28)。 |
+
+表中的标识符只在各自协议范围内关联消息；应用日志另设 `trace_id`、`state_version` 和授权记录，不能把 provider 的 call ID 当作跨系统事件 ID。OpenAI、Anthropic 与 MCP 的结构示例分别来自动态官方接口文档和固定版本规范，集成时要按所用 API surface 核对。
+
 ## 19.6 Observation 是数据，不会自动变成指令
 
-工具返回的内容可能来自网页、issue、代码注释、数据库字段、用户上传文件或第三方 API。这些来源都可能包含类似“忽略前面的规则”“把密钥发送到某个地址”的文字。它们是 observation 中的数据，不会因为被模型读到就获得系统消息或开发者消息的优先级。
+工具返回的内容可能来自网页、issue、代码注释、数据库字段、用户上传文件或第三方 API。这些来源都可能包含类似“忽略前面的规则”“把密钥发送到某个地址”的文字。它们是 observation 中的数据，不会因为被模型读到就获得系统消息或开发者消息的优先级。OWASP 2025 将这类风险归入提示注入（LLM01），并单列 Agent 权限过宽导致的过度代理权限（LLM06）；这是风险分类，不代表任一系统的实测发生率，见[OWASP Top 10 for LLM Applications 2025](https://genai.owasp.org/initiatives/top-10-for-llm-and-genai/)。
 
 一个结构化 observation 可以把事实和自然语言分开：
 
@@ -173,11 +187,15 @@ V(o)=\mathbf{1}[\mathrm{source\_ok}]
 
 这里每个指示量在检查明确完成时取 0 或 1，V(o)=1 只表示 observation 满足这些形式条件，不表示其中的事实已经被独立证明。若某一项尚未测量，不能把它默认为 0 或 1；工程实现应额外使用 unknown 状态。否则系统会把“尚未检查”错误地当成“检查失败”或“检查通过”。
 
+例如，来源已核验、内容仍新鲜、结构合法且当前权限有效时，四项分别为 1、1、1、1，$V(o)=1$；若网页内容的有效期已过，组合变为 $1\times0\times1\times1=0$。这个 0 仅说明 observation 不能直接进入当前决策，不能据此断言其中的事实为假。
+
 大 observation 也不应无界地回填上下文。工具可以返回结构化摘要、分页游标和受控 artifact；模型先使用摘要决定是否需要原文，再通过带 hash 的引用读取指定片段。这样既减少上下文污染，也让最后的结论能够回到具体证据。
 
 ## 19.7 代码调试：观察如何改变假设
 
 考虑一个“昨天发布后接口偶发 500”的请求。一个可信的交错轨迹不会直接生成根因报告，而是逐步缩小假设空间。
+
+这种先设假设、再执行观察、最后复核补丁的代码路径，和[第九章的代码推理与执行反馈](09-代码推理与执行反馈.md)相连；本节侧重事件和状态如何约束修复步骤。
 
 第一步，读取部署 revision 和错误样本。系统得到事实：“错误集中在 refresh_config 路径，当前 revision 是 r42。”这还不能证明根因。
 
@@ -221,19 +239,21 @@ V(o)=\mathbf{1}[\mathrm{source\_ok}]
 
 ## 19.9 信息增益、预算与继续条件
 
-交错循环不能只用“模型还想继续”作为继续条件。设当前关于任务的候选假设空间为 \mathcal{H}_t，模型对这些假设有一个归一化概率分布 p_t(h)，则不确定性可以写成熵：
+交错循环不能只用“模型还想继续”作为继续条件。设当前关于任务的候选假设空间为 $\mathcal{H}_t$，模型对这些假设有一个归一化概率分布 $p_t(h)$，则不确定性可以写成熵：
 
 ~~~math
 H_t=-\sum_{h\in\mathcal{H}_t}p_t(h)\log p_t(h)
 ~~~
 
-要求 \mathcal{H}_t 是有限或可计算的假设集合，p_t(h)\ge0，且总和为 1；当某个概率为 0 时，约定 0\log0=0。一次观察带来的理想信息增益为：
+要求 $\mathcal{H}_t$ 是有限或可计算的假设集合，$p_t(h)\ge0$，且总和为 1；当某个概率为 0 时，约定 $0\log0=0$。这里的 $\log$ 为自然对数，熵的单位是 nat。一次观察带来的理想信息增益为：
 
 ~~~math
 I_t=H_t-H_{t+1}
 ~~~
 
-真实 Agent 通常没有可靠的概率分布，因此不能把模型自报 confidence 直接当作 p_t。工程上可以使用候选数量变化、独立 verifier 分数、证据覆盖或不确定性标注作为 proxy，但应把它们称为近似指标。若连续若干轮没有新增来源、没有改变候选、没有改善 verifier，也没有修复状态问题，继续调用通常只是在重复成本。
+用一个两假设的合成分布手算。观察前 $p(h_1)=0.75$、$p(h_2)=0.25$，则 $H_t=-(0.75\ln0.75+0.25\ln0.25)\approx0.562$ nat。假设一条新观察后分布变为 0.90/0.10，则 $H_{t+1}=-(0.90\ln0.90+0.10\ln0.10)\approx0.325$ nat，信息增益为 $0.562-0.325=0.237$ nat。该数值依赖示例分布；真实路由器若没有校准分布，就只能报告代理指标，不能把自报信心伪装成信息增益。
+
+真实 Agent 通常没有可靠的概率分布，因此不能把模型自报置信度（confidence）直接当作 $p_t$。工程上可以使用候选数量变化、独立 verifier 分数、证据覆盖或不确定性标注作为代理指标（proxy），但应把它们称为近似量。若连续若干轮没有新增来源、没有改变候选、没有改善 verifier，也没有修复状态问题，继续调用通常只是在重复成本。
 
 预算至少应拆成向量，而不是把不同单位直接相加：
 
@@ -241,7 +261,7 @@ I_t=H_t-H_{t+1}
 \mathbf{B}_t=(B_{\mathrm{model}},B_{\mathrm{tool}},B_{\mathrm{time}},B_{\mathrm{verify}},B_{\mathrm{side}})
 ~~~
 
-其中各分量分别是剩余模型 token 或计算量、工具调用或工具时间、wall-clock、验证资源和外部副作用次数。B_side=0 明确表示当前阶段不能产生外部副作用。只有在定义了换算价格后，才可以把这些量折算为统一成本；不能把 1000 token、2 秒和一次发信未经说明地相加。
+其中各分量分别是剩余模型 token 或计算量、工具调用或工具时间、墙钟时间（wall-clock）、验证资源和外部副作用次数。$B_{\mathrm{side}}=0$ 明确表示当前阶段不能产生外部副作用。若初始预算为 $(8000,3,20,2,0)$，依次对应 token、工具调用、秒、验证次数和副作用次数；一次只读查询消耗 1,200 token、1 次工具调用和 6 秒后，预算变为 $(6800,2,14,2,0)$。只有在定义了换算价格后，才可以把这些量折算为统一成本；不能把 1,000 token、2 秒和一次发信未经说明地相加。
 
 继续一轮动作至少要满足：预算足够、权限仍有效、输入版本没有失效、动作有合理的信息或业务价值，并且风险处于允许范围。如果任何条件未知，状态应是“无法判断”，而不是默认允许。
 
@@ -279,17 +299,19 @@ proposal
 
 这里的“应用层两阶段”不要和数据库理论中的严格 two-phase commit 混为一谈。它的重点是把“模型建议动作”和“执行外部副作用”隔开，并为恢复、查询和人工确认留下位置；它不能自动让跨系统操作具备原子性。
 
-一个动作请求至少需要目标、参数、影响范围、风险级别、证据、授权版本和幂等键。幂等键 k 应绑定同一个业务意图，例如规范化后的工具名、目标资源、参数和任务版本的摘要：
+一个动作请求至少需要目标、参数、影响范围、风险级别、证据、授权版本和幂等键。幂等键 $k$ 应绑定同一个业务意图，例如规范化后的工具名、目标资源、参数和任务版本的摘要：
 
 ~~~math
 k=\mathrm{Hash}(\mathrm{tool},\mathrm{target},\mathrm{normalized\_args},\mathrm{intent\_revision})
 ~~~
 
+例如工具为 `reserve_stock`、目标为 `order-42`、规范化参数为 `{"quantity":2,"sku":"A7"}`、意图版本为 `order@r3`。若用 UTF-8 编码规范 JSON `{"args":{"quantity":2,"sku":"A7"},"intent_revision":"order@r3","target":"order-42","tool":"reserve_stock"}` 后取 SHA-256，则键为 `sha256:c3dc203a758f739a20f7240a9d6965d073d8b06b51a96f0c8b09d2d07b7e743c`。生产键的规范化规则须由调用方与执行器共同固定；不能用语言未定义的字段顺序生成彼此不兼容的键。
+
 哈希函数、参数规范化规则和意图版本必须稳定；不要把模型自然语言解释直接当成键，也不要让两个不同业务意图错误共享同一个键。对于同一个 k，执行器应保证重复请求返回同一操作记录，或者明确告诉调用方状态未知。超时后的正确顺序是：查询幂等键、查询外部资源状态、判断是否已经完成，再决定等待、补偿、重试或人工接管。直接重发支付请求是最危险的恢复方式之一。
 
 多步骤工作流可以使用 saga 思路，为已经完成的步骤定义补偿动作。例如创建草稿、锁定库存、发送通知分别可能有取消草稿、释放库存和发送更正通知的补偿。但补偿不是时间倒流：已经发出的邮件、已经被读取的秘密或已经产生的外部通知无法完全恢复成“从未发生过”。用户界面和审计记录必须保留真实状态。
 
-## 19.12 Checkpoint 与恢复
+## 19.12 检查点（checkpoint）与恢复
 
 长任务的 checkpoint 不能只保存最近一段模型文本。至少要保存：
 
@@ -314,9 +336,13 @@ k=\mathrm{Hash}(\mathrm{tool},\mathrm{target},\mathrm{normalized\_args},\mathrm{
 
 四个条件都必须已被检查。log_valid 表示事件没有丢失或乱序；schema_compatible 表示恢复器理解旧状态；policy_valid 表示权限和策略仍适用；side_effects_reconciled 表示所有可能已经执行的动作都有明确状态。任何条件未知，都不应自动继续。
 
+例如检查结果依次为 `log_valid=1`、`schema_compatible=1`、`policy_valid=0`、`side_effects_reconciled=1`，则 $\mathrm{resume}=1\land1\land0\land1=0$。即使事件完整、外部动作已对账，权限撤回仍会阻止恢复；必须重新取得授权或转人工，其他条件不能抵消这一项。
+
 恢复成功只表示“可以安全地继续这个状态机”，不表示业务目标已经完成。比如一个支付请求已被确认扣款，但后续开票步骤失败，恢复器应从开票步骤继续，而不是重新支付。
 
 版本变化同样会使 checkpoint 失效。用户在 Agent 运行期间修改了代码，旧 patch 的 base_revision 就不再适用于当前 workspace；检索索引更新后，旧 observation 也可能需要重新验证。恢复器应重新读取变化部分，并把受影响 artifact 标记为待验证。
+
+持久工作区、长任务资源管理和跨会话恢复的完整 Runtime 设计见[第二十册第十七章](../../book-20-agent-harness-runtime/chapters/17-long-running-agent与checkpoint.md)。
 
 ## 19.13 流式输出与幂等消费
 
@@ -346,19 +372,21 @@ k=\mathrm{Hash}(\mathrm{tool},\mathrm{target},\mathrm{normalized\_args},\mathrm{
 - 证据覆盖、引用正确性或代码测试通过情况；
 - p50、p95、p99 延迟和单位成功成本。
 
-若任务总数 N_task 是正整数，最终成功率为：
+若任务总数 $N_{\mathrm{task}}$ 是正整数，最终成功率为：
 
 ~~~math
 \mathrm{success\_rate}=\frac{N_{\mathrm{success}}}{N_{\mathrm{task}}}
 ~~~
 
-若有效调用数为 N_valid_call，所有模型发出的调用数为 N_all_call，则：
+若有效调用数为 $N_{\mathrm{valid\_call}}$，所有模型发出的调用数为 $N_{\mathrm{all\_call}}$，则：
 
 ~~~math
 \mathrm{valid\_call\_rate}=\frac{N_{\mathrm{valid\_call}}}{N_{\mathrm{all\_call}}}
 ~~~
 
 两个分母都必须大于 0；没有任务或没有调用时，指标应报告为 undefined，不能用 0 填充后制造可比较的假象。重复副作用率同理：如果没有任何已提交动作，就没有一个有意义的重复率。
+
+在一组合成的 50 个任务中若 42 个达到成功谓词，成功率为 $42/50=0.84$；若模型一共发出 100 次工具调用，其中 80 次满足目标、schema 和权限约束，有效调用率为 $80/100=0.80$。调用是否有效和任务是否成功是两个不同层级，不能用一个数替代另一个数。
 
 成本应分项记录：
 
@@ -378,7 +406,9 @@ C_{\mathrm{per\ success}}
 =\frac{C_{\mathrm{total}}}{N_{\mathrm{success}}}
 ~~~
 
-当 N_success=0 时该值未定义，应报告 None 或 undefined。一个系统如果成功率提高但单位成功成本上升十倍，是否值得采用取决于任务价值和失败代价，而不是只看单次回答的长度。
+例如沿用上面的 50 个合成任务，假设模型、工具、等待、验证和人工成本分别为 120、30、10、20、20 个归一化成本单位，则总成本为 $120+30+10+20+20=200$，单位成功成本为 $200/42\approx4.76$ 个单位/成功任务。实际各项必须来自同一时间窗和可比较的成本口径。若 $N_{\mathrm{success}}=0$，单位成功成本未定义，应报告 None 或 undefined。
+
+一个系统如果成功率提高但单位成功成本上升十倍，是否值得采用取决于任务价值和失败代价，而不是只看单次回答的长度。
 
 比较交错路径与“一次性生成完整计划再执行”时，必须使用相同任务集、成功定义、工具权限和资源上限。交错路径适合外部反馈能够改变下一步的任务；步骤固定、工具延迟极高的流水线可以采用批量读取或预编译工作流。结论应来自受控实验，而不是来自某个模型发布页对“更会使用工具”的描述。
 
@@ -393,13 +423,25 @@ C_{\mathrm{per\ success}}
 
 沙箱可以限制文件、网络、CPU、内存和运行时间，但沙箱本身不是正确性证明。代码可能在资源限制内产生错误结果，工具可能返回带提示注入的内容，测试也可能覆盖不足。安全设计必须把 allowlist、参数校验、秘密隔离、审计、验证和回滚结合起来。
 
-以 MCP 这类工具协议为例，协议可以规定消息结构、工具描述、资源引用和生命周期交互，但协议本身不应被理解为业务授权系统。一个 host 是否允许某个 server 访问文件、某个 tool 是否可以写数据库、一个结果是否需要用户确认，都必须由应用的 policy 和 executor 决定。协议标准化减少了连接成本，却不会自动解决权限、可信度和外部副作用问题。
+MCP 说明连接协议和应用状态的边界会随版本演进。截至 2026-11-13，2026-07-28 版把核心请求设计为无协议会话的自包含请求，移除 `initialize`/`initialized` 握手和 `Mcp-Session-Id`；需要预先发现能力时可使用 `server/discover`。服务器需要跨请求状态时，应显式发放句柄，而不是依赖传输层会话。该版本还把异步任务从核心移入 `io.modelcontextprotocol/tasks` 扩展，通过 `tasks/get`、`tasks/update`、`tasks/cancel` 管理 task handle；取消是协作式请求，收到确认后任务仍可能完成或进入其他终态。具体行为见[2026-07-28 版规范](https://modelcontextprotocol.io/specification/2026-07-28)、[发布说明](https://blog.modelcontextprotocol.io/posts/2026-07-28/)和[Tasks 扩展](https://tasks.extensions.modelcontextprotocol.io/specification/2026-07-28/tasks)。这些是版本绑定的协议合同，不是所有 MCP SDK 都已实现的保证。
 
-同样的原则适用于 browser agent、插件、workflow、skill 和 agent runtime。它们可以成为动作接口或调度层，但模型能力增强后，某些复杂 scaffold 可能下沉为实现细节。设计者应关注长期不变的约束：状态可恢复、权限可解释、工具调用可验证、事件可重放、成本可归因，而不是只追逐某个接口名称。
+协议可以规定消息结构、工具描述、资源引用和生命周期交互，但协议本身不应被理解为业务授权系统。一个 host 是否允许某个 server 访问文件、某个 tool 是否可以写数据库、一个结果是否需要用户确认，都必须由应用的策略（policy）和执行器（executor）决定。协议标准化减少连接成本，却不会自动解决权限、可信度和外部副作用问题。OWASP 2025 Top 10 将提示注入（LLM01）和过度代理权限（Excessive Agency，LLM06）列为风险类别；这是威胁分类，不是任一 Agent 的实际发生率或失效率测量，具体缓解仍需结合目标系统的威胁模型与执行控制。
+
+同样的原则适用于 browser agent、插件、workflow、skill 和 agent runtime。它们可以成为动作接口或调度层，但模型能力增强后，某些复杂 scaffold 可能下沉为实现细节。设计者应关注长期不变的约束：状态可恢复、权限可解释、工具调用可验证、事件可重放、成本可归因，而不是只追逐某个接口名称。MCP 的完整概念和资源类型见[第二十二册第十八章](../../book-22-tool-protocol-ecosystem/chapters/18-mcp基本概念client-server-tools-resources-prompts.md)；工具 executor 的超时/幂等和权限安全见[第十一章](../../book-22-tool-protocol-ecosystem/chapters/11-tool-executor同步异步超时和幂等.md)及[第十三章](../../book-22-tool-protocol-ecosystem/chapters/13-工具安全越权注入数据泄露和危险动作.md)。
 
 ## 19.16 一个可运行的事件协议审计器
 
-下面的示例只使用 Python 标准库。它不是生产级消息系统，而是把本章的几个不变量放在一段可以运行的代码中：事件序号连续；工具必须先授权再启动；返回内容的 hash 必须匹配；同一个幂等键不能提交两次；启动后断线会变成 unknown；取消或未知状态之后不能产生新的提交。
+下面的示例只使用 Python 标准库，适用于 Python 3.10 及以上版本。它不是生产级消息系统，而是把本章的几个不变量放在一段可以运行的代码中：事件序号连续；工具必须先授权再启动；返回内容的 hash 必须匹配；单条事件流拒绝重复提案并禁止同一幂等键提交两次；启动后断线会变成 unknown。取消会阻止后续新提案；已经启动的调用转为 unknown，不能因此推断远端执行已停止或副作用未发生。
+
+输入是一个单轮事件列表和一组允许工具名。审计器要求序号从 1 开始连续递增，事件共享同一组 `trace_id` 和 `turn_id`；所有工具事件都要有 `call_id` 和对象型 `payload`。提案事件还必须声明允许列表中的工具名和非空幂等键。函数先检查这些公共字段，再按工具自身状态检查授权、启动、结果、验证和提交顺序。审计成功时返回每个调用的终态和已提交的幂等键；违反合同则抛出 `ProtocolError`。
+
+将代码保存为 `audit.py` 后，可在 CPython 3.10 及以上版本运行 `python3 audit.py`。示例使用 `write_file` 作为合成的副作用工具，实际返回体只是一份固定字典；它不会创建或修改文件。生产部署还需在执行前接入真实的授权服务和执行器，且不能仅凭此审计器返回 `ok` 就认定外部操作已发生。
+
+事件来源也是合同的一部分：`tool_authorized` 应由 host 或授权服务写入，`tool_returned` 应来自执行器，`observation_verified` 应由明确的 verifier 产生，`action_committed` 则应对应可查询的业务账本或执行器事实。本例只检查字段和先后顺序，不验证签名、事件生产者、租户、revision 或真实业务状态；示例事件由本地代码构造，因此 `ok: True` 仅表示这段输入通过了形状与状态审计。若攻击者能同时替换 `body` 和 `content_hash`，当前 hash 检查仍会通过；生产日志还需可信采集、访问控制和与执行器状态的对账。
+
+本例把取消建模为协作式请求：它将尚未启动的 `proposed`/`authorized` 调用标为 `cancelled`，将 `started` 调用标为 `unknown`，并拒绝新的工具提案。取消不能证明远端执行已停止；若返回结果已经到达，或副作用可能已发生，系统仍须按业务合同查询执行器并记录恢复或补偿结果。本地状态只描述当前事件流，不是外部世界的最终事实。
+
+代码状态：已验证（2026-11-13，CPython 3.12.9，Python 标准库）。
 
 ~~~python
 from __future__ import annotations
@@ -429,13 +471,26 @@ class ProtocolError(ValueError):
 
 
 def stable_hash(value: Any) -> str:
-    encoded = json.dumps(
-        value, ensure_ascii=True, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
+    try:
+        encoded = json.dumps(
+            value,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ProtocolError("value is not canonical JSON") from exc
     return "sha256:" + hashlib.sha256(encoded).hexdigest()
 
 
 def audit(events: list[dict[str, Any]], allowed_tools: set[str]) -> dict[str, Any]:
+    if not isinstance(events, list):
+        raise ProtocolError("event log must be a list")
+    if not isinstance(allowed_tools, set) or any(
+        not isinstance(tool, str) or not tool for tool in allowed_tools
+    ):
+        raise ProtocolError("allowed_tools must be a set of non-empty strings")
     if not events:
         raise ProtocolError("event log is empty")
 
@@ -446,6 +501,7 @@ def audit(events: list[dict[str, Any]], allowed_tools: set[str]) -> dict[str, An
     seen_keys: set[str] = set()
     committed_keys: set[str] = set()
     cancelled = False
+    response_complete = False
 
     tool_events = {
         "tool_call_proposed",
@@ -459,21 +515,24 @@ def audit(events: list[dict[str, Any]], allowed_tools: set[str]) -> dict[str, An
     }
 
     for item in events:
+        if response_complete:
+            raise ProtocolError("event after response_completed")
         if not isinstance(item, dict):
             raise ProtocolError("each event must be an object")
-        if item.get("seq") != expected_seq:
+        seq = item.get("seq")
+        if type(seq) is not int or seq != expected_seq:
             raise ProtocolError(
-                f"expected seq {expected_seq}, got {item.get('seq')}"
+                f"expected integer seq {expected_seq}, got {seq}"
             )
         expected_seq += 1
 
         event_type = item.get("type")
-        if event_type not in EVENT_TYPES:
+        if not isinstance(event_type, str) or event_type not in EVENT_TYPES:
             raise ProtocolError(f"unknown event type: {event_type}")
-        if not isinstance(item.get("trace_id"), str):
-            raise ProtocolError("trace_id is required")
-        if not isinstance(item.get("turn_id"), str):
-            raise ProtocolError("turn_id is required")
+        if not isinstance(item.get("trace_id"), str) or not item["trace_id"]:
+            raise ProtocolError("trace_id must be a non-empty string")
+        if not isinstance(item.get("turn_id"), str) or not item["turn_id"]:
+            raise ProtocolError("turn_id must be a non-empty string")
         if trace_id is None:
             trace_id = item["trace_id"]
             turn_id = item["turn_id"]
@@ -481,8 +540,10 @@ def audit(events: list[dict[str, Any]], allowed_tools: set[str]) -> dict[str, An
             raise ProtocolError("trace or turn id changed inside one audit")
 
         call_id = item.get("call_id")
-        if event_type in tool_events and not isinstance(call_id, str):
-            raise ProtocolError(f"{event_type} requires call_id")
+        if event_type in tool_events and (
+            not isinstance(call_id, str) or not call_id
+        ):
+            raise ProtocolError(f"{event_type} requires non-empty call_id")
         if event_type not in tool_events and call_id is not None:
             raise ProtocolError(f"{event_type} must not carry call_id")
 
@@ -507,6 +568,7 @@ def audit(events: list[dict[str, Any]], allowed_tools: set[str]) -> dict[str, An
             }
             if active:
                 raise ProtocolError(f"response completed with active calls: {active}")
+            response_complete = True
             continue
 
         payload = item.get("payload")
@@ -519,6 +581,8 @@ def audit(events: list[dict[str, Any]], allowed_tools: set[str]) -> dict[str, An
                 raise ProtocolError(f"duplicate call_id: {call_id}")
             tool = item.get("tool")
             key = item.get("idempotency_key")
+            if not isinstance(tool, str) or not tool:
+                raise ProtocolError("proposal requires a non-empty tool name")
             if tool not in allowed_tools:
                 raise ProtocolError(f"tool is not allowlisted: {tool}")
             if not isinstance(key, str) or not key:
@@ -586,6 +650,9 @@ def audit(events: list[dict[str, Any]], allowed_tools: set[str]) -> dict[str, An
                 raise ProtocolError("unknown result requires started state")
             call["state"] = "unknown"
 
+    if not response_complete:
+        raise ProtocolError("event log ended before response_completed")
+
     return {
         "ok": True,
         "trace_id": trace_id,
@@ -605,9 +672,9 @@ def event(
     }
     if call_id is not None:
         item["call_id"] = call_id
-        item["tool"] = fields.pop("tool", "read_file")
+        item["tool"] = fields.pop("tool", "write_file")
         item["idempotency_key"] = fields.pop(
-            "idempotency_key", "read:demo:c1"
+            "idempotency_key", "write:demo:c1"
         )
     item.update(fields)
     return item
@@ -616,7 +683,12 @@ def event(
 body = {"bytes": 42, "revision": "repo@r7"}
 normal = [
     event(1, "reasoning_started"),
-    event(2, "tool_call_proposed", "c1", payload={"path": "parser.py"}),
+    event(
+        2,
+        "tool_call_proposed",
+        "c1",
+        payload={"path": "parser.py", "contents": "updated file contents"},
+    ),
     event(3, "tool_authorized", "c1", payload={"authorized": True}),
     event(4, "tool_started", "c1", payload={}),
     event(
@@ -634,7 +706,7 @@ normal = [
     event(7, "action_committed", "c1", payload={}),
     event(8, "response_completed"),
 ]
-print(audit(normal, {"read_file", "run_test"}))
+print(audit(normal, {"read_file", "run_test", "write_file"}))
 
 
 unknown = [
@@ -678,7 +750,7 @@ print(audit(unknown, {"read_file", "run_test"}))
 
 def expect_error(label: str, events: list[dict[str, Any]]) -> None:
     try:
-        audit(events, {"read_file", "run_test"})
+        audit(events, {"read_file", "run_test", "write_file"})
     except ProtocolError as exc:
         print(label, str(exc))
     else:
@@ -715,19 +787,59 @@ cancelled_after_start = [
     event(6, "action_committed", "c1", payload={}),
 ]
 expect_error("cancel", cancelled_after_start)
+
+bad_sequence = [event(1, "reasoning_started")]
+bad_sequence[0]["seq"] = True
+expect_error("sequence", bad_sequence)
+
+unhashable_type = [event(1, "reasoning_started")]
+unhashable_type[0]["type"] = []
+expect_error("event_type", unhashable_type)
+
+unhashable_tool = [
+    event(1, "reasoning_started"),
+    event(2, "tool_call_proposed", "c1", payload={}),
+]
+unhashable_tool[1]["tool"] = []
+expect_error("tool_name", unhashable_tool)
+
+after_completion = normal + [event(9, "reasoning_started")]
+expect_error("after_completion", after_completion)
+
+incomplete = normal[:-1]
+expect_error("incomplete", incomplete)
+
+try:
+    stable_hash({"value": float("nan")})
+except ProtocolError as exc:
+    print("non_finite_hash", str(exc))
+else:
+    raise AssertionError("non-finite JSON value should have failed")
 ~~~
 
 正常路径的结果形态是：
 
 ~~~text
-{'ok': True, 'trace_id': 'trace-demo', 'calls': {'c1': 'committed'}, 'committed_keys': ['read:demo:c1']}
+{'ok': True, 'trace_id': 'trace-demo', 'calls': {'c1': 'committed'}, 'committed_keys': ['write:demo:c1']}
 {'ok': True, 'trace_id': 'trace-demo', 'calls': {'c1': 'unknown'}, 'committed_keys': []}
 unauthorized tool_started requires authorization
 hash observation hash mismatch
 cancel commit requires verified state
+sequence expected integer seq 1, got True
+event_type unknown event type: []
+tool_name proposal requires a non-empty tool name
+after_completion event after response_completed
+incomplete event log ended before response_completed
+non_finite_hash value is not canonical JSON
 ~~~
 
 这个审计器有意保持简单。它没有实现消息队列持久化、分布式锁、真实执行器查询或数据库事务；它做的是把几个容易被自然语言掩盖的错误变成可测试的失败。生产系统还需要为事件持久化、版本迁移、密钥保护、租户隔离、重放窗口和人工接管定义更完整的契约。
+
+示例采用保守策略，在同一事件流中拒绝重复提案。生产环境若要安全重试，应先用业务幂等键查询执行器，并把已有操作记录关联到恢复轨迹；本例没有实现这项状态对账。
+
+正常轨迹按 1 到 8 递增：先提出 `write_file`，通过授权后启动；工具返回体按排序键和紧凑 JSON 编码计算哈希，随后验证事件必须带回同一个哈希；只有 verified 状态才接受 `action_committed`。因此预期输出含 `calls: committed` 和 `write:demo:c1`。第二条轨迹在 started 后返回 unknown，审计器允许响应以 unknown 结束，但提交键列表为空；它没有把断线伪装成失败或成功。
+
+后面的错误路径分别说明合同如何拒绝：未经授权就启动；返回体与 content hash 不符；started 之后取消再尝试提交；把布尔值当整数序号；把列表当事件类型或工具名；response_completed 之后继续追加事件；省略 response_completed；以及对 NaN 生成非标准 JSON 哈希。哈希只证明两个相同规范编码的对象匹配，不证明返回内容可信、完整或语义正确。unknown 在这个局部事件日志里是终态标签，生产恢复仍需查询外部执行器并对账副作用。
 
 ## 19.17 读者练习：把循环设计成可以恢复的系统
 
@@ -745,13 +857,15 @@ Interleaved thinking 的核心不是把可见思考写得更长，而是让外�
 
 交错循环适合事实会变化、执行会暴露错误、下一步依赖外部反馈的任务；它不适合无反馈地重复调用工具。工具调用必须经历授权、启动、返回、验证和提交等有明确含义的状态；超时和断线必须保留 unknown，不能为了让流程继续而伪装成失败或成功。高风险动作需要应用层的提议、批准、幂等执行、状态查询和补偿；checkpoint 则要保存“下一步是什么”，而不只是保存上一段回答。
 
-本章的状态机、事件日志、预算账本和审计器是通用工程抽象。ReAct 和 Toolformer 支撑“推理与工具交错”的研究脉络，但它们不等于某个生产协议的完整实现；MCP 等协议文档可以说明消息和工具接口的标准化方向，却不能替代应用自己的权限与副作用策略；OWASP 的 LLM 应用安全资料支持把外部内容视为潜在攻击面，但具体风险仍需在目标系统中通过威胁建模和对抗测试确认；Stripe 和 AWS 关于幂等请求的工程资料说明了重试安全的基本原则，但不同业务的状态查询和补偿语义仍需单独设计。
+本章的状态机、事件日志、预算账本和审计器是通用工程抽象。ReAct 和 Toolformer 支撑“推理与工具交错”的研究脉络，但它们不等于某个生产协议的完整实现；MCP 等协议文档可以说明消息和工具接口的标准化方向，却不能替代应用自己的权限与副作用策略；OWASP 的风险分类可用于威胁建模，但不提供目标系统的实测安全率；RFC 9110 与 AWS 的重试资料说明 HTTP 幂等和退避原则，不会自动赋予具体业务动作幂等性，不同业务仍需定义状态查询、去重和补偿语义。
 
 参考资料：
 
 - Yao et al., *ReAct: Synergizing Reasoning and Acting in Language Models*：<https://arxiv.org/abs/2210.03629>
 - Schick et al., *Toolformer: Language Models Can Teach Themselves to Use Tools*：<https://arxiv.org/abs/2302.04761>
-- Model Context Protocol Specification：<https://modelcontextprotocol.io/specification/2025-06-18>
-- OWASP GenAI Security Project, *LLM Applications Security Risks*：<https://owasp.org/www-project-top-10-for-large-language-model-applications/>
-- Stripe API Reference, *Idempotent requests*：<https://docs.stripe.com/api/idempotent_requests>
+- OpenAI, [Function calling](https://developers.openai.com/api/docs/guides/function-calling)：Responses API 工具调用与结果回传合同。
+- Anthropic, [Handle tool calls](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls) and [Thinking](https://platform.claude.com/docs/en/build-with-claude/thinking)：Messages API 工具结果、thinking block 回放和 interleaved thinking 边界。
+- Model Context Protocol, [2026-07-28 Specification](https://modelcontextprotocol.io/specification/2026-07-28)、[release notes](https://blog.modelcontextprotocol.io/posts/2026-07-28/) 与 [Tasks extension](https://tasks.extensions.modelcontextprotocol.io/specification/2026-07-28/tasks)。
+- OWASP GenAI Security Project, [Top 10 for LLM Applications 2025](https://genai.owasp.org/initiatives/top-10-for-llm-and-genai/) 与 [MCP Security Best Practices](https://modelcontextprotocol.io/docs/2026-07-28/tutorials/security/security_best_practices)。
+- IETF, [RFC 9110 §9.2.2 Idempotent Methods](https://www.rfc-editor.org/rfc/rfc9110#section-9.2.2).
 - AWS Builders' Library, *Making retries safe with idempotent APIs*：<https://aws.amazon.com/builders-library/making-retries-safe-with-idempotent-APIs/>

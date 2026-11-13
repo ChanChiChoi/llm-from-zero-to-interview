@@ -6,6 +6,8 @@
 
 这种生成—验证分工很有用，却也很危险。验证器并不是天然正确的裁判，它可能偏好长答案、整齐格式、自信语气或训练数据中的表面模式。只要生成模型针对评分器优化，就可能出现 reward hacking：分数提高了，真实任务质量却没有提高。
 
+本章承接[第三章《Self-Consistency 与采样》](03-self-consistency与采样.md)，把多候选生成之后的“怎样判断”单独展开；步骤级监督接到[第五章《Process Supervision》](05-process-supervision.md)，搜索节点的评分与剪枝再交给[第六章《搜索与 Tree-of-Thought》](06-search与tree-of-thought.md)。
+
 本章要建立的不是“有一个分数就能选最优答案”的直觉，而是完整的判断链：
 
 1. 先定义验证对象和成功事件。
@@ -17,7 +19,7 @@
 
 ## 0.1 本章的资料与证据边界
 
-Training Verifiers to Solve Math Word Problems 说明了训练验证器来筛选数学候选的基本思路；Let's Verify Step by Step 进一步讨论过程级验证和步骤反馈。InstructGPT、Learning to Summarize from Human Feedback 等工作提供 reward model 在人类偏好优化中的背景；RewardBench 提供了对 reward model 和偏好模型进行多维评估的公开路线。
+[Training Verifiers to Solve Math Word Problems](https://arxiv.org/abs/2110.14168v2) 展示了生成多个数学候选、再用验证器排序的做法；[Let's Verify Step by Step](https://arxiv.org/abs/2305.20050v1) 比较了结果监督和过程监督在其 MATH 设置中的表现。[InstructGPT](https://arxiv.org/abs/2203.02155v1) 与[Learning to Summarize from Human Feedback](https://arxiv.org/abs/2009.01325v3) 展示了由人工偏好训练 reward model 并用于策略优化的路线；[RewardBench](https://arxiv.org/abs/2403.13787v2) 则评测跨聊天、推理和安全类别的偏好模型。
 
 这些资料的任务目标不同。数学答案验证器、偏好 reward model、代码测试器和安全分类器不能简单互换。论文中的 pairwise accuracy 也不能自动推导出真实候选集合上的 top-1 选择准确率。
 
@@ -145,7 +147,11 @@ V_{\mathrm{code}}(f)=
 
 x_m 和 y_m 是测试输入与期望输出。这里要求测试集大小 \(M>0\)，每个测试的期望输出和比较规则已定义；编译异常、超时和资源耗尽也应有明确状态，不能在统计时悄悄当成普通的错误输出。这个分数是测试集通过率，不是所有可能输入上的正确率。
 
+例如，若 4 个测试中有 3 个通过，则测试集通过率是 \(3/4=0.75\)。这个数只回答候选通过了这 4 个断言，不说明未覆盖输入也正确。
+
 隐藏测试、边界样例、资源限制和随机测试可以提高覆盖，但也会增加执行成本。
+
+测试套件质量也需要单独衡量。Ma 等人在 TCGBench-Lite 中把“检测到多少已知错误提交”和“对一道题是否拒绝全部收集到的错误提交”区分为 detection rate 与 verifier accuracy；在每题使用 50 个测试的设置中，论文报告 SAGA 的两项结果分别为 90.62% 和 32.58%。这些数字描述该数据集和指标定义，不能解释为所有代码测试器的通用检错率；它们说明单看平均检错比例，可能掩盖仍有题目未被完整区分的情况。[原论文](https://arxiv.org/abs/2507.06920v2)
 
 ## 3. Process Verifier：检查中间步骤
 
@@ -170,6 +176,8 @@ S_{\mathrm{proc}}(z_i)=
 ~~~
 
 这个平均值要求 \(M_i>0\)。如果 q_im 被解释为概率或正确性分数，应规定它是有限数并位于约定范围（通常是 \([0,1]\)）；空轨迹的过程分数未定义，不能用 0 代替。q_im 可以是 0/1 标签，也可以是连续分数。平均值只是一个聚合方式，不能替代对关键步骤的检查。
+
+若三个步骤分数为 \(1,0.5,1\)，平均值为 \((1+0.5+1)/3=2.5/3\approx0.833\)。这个汇总分会掩盖中间那一步较低的局部分数，因此用于剪枝时还应保留步骤级记录。
 
 ### 3.3 局部正确不等于全局正确
 
@@ -227,6 +235,8 @@ S_{\mathrm{proc}}(z_i)=
 4. 记录超时、异常和资源耗尽；
 5. 定期更新隐藏测试。
 
+还要确认测试判据与自然语言规格一致。ImpossibleBench 刻意构造规格与单元测试直接冲突的任务；在这种任务上通过测试必然意味着违反规格。它是用于诊断测试利用行为的受控基准，不是生产系统发生率的估计。[ICLR 2026 论文](https://proceedings.iclr.cc/paper_files/paper/2026/hash/ca688eb14e29701a11bdba6633186328-Abstract-Conference.html)
+
 ### 4.3 沙箱与权限
 
 让模型生成代码并执行，必须考虑：
@@ -257,7 +267,7 @@ S_{\mathrm{proc}}(z_i)=
 
 ### 5.1 Reward model 学习代理目标
 
-reward model 通常从人工偏好、规则标签、程序结果或历史选择中学习一个评分函数。它的分数不是任务真值，而是对任务真值或偏好目标的近似。
+reward model 通常从人工偏好或其他明确指定的反馈标签中学习评分函数；InstructGPT 和摘要偏好研究展示了用人类成对比较训练评分器，再将其用于策略优化的典型路线。程序结果也可以作为学习目标，但须明确此时代理的是哪一组规则。无论标签来自何处，分数都不是任务真值，而是对目标的近似。[InstructGPT](https://arxiv.org/abs/2203.02155v1)；[Learning to Summarize from Human Feedback](https://arxiv.org/abs/2009.01325v3)
 
 可以把 reward model 写成：
 
@@ -267,15 +277,27 @@ r_{\phi}(x,y,z)=f_{\phi}(x,y,z)
 
 它可能学习正确性、帮助性、格式、安全、风格或多种目标的组合。
 
-### 5.2 Verifier 更窄，reward model 更宽
+### 5.2 两者是使用角色的区别
 
-Verifier 通常围绕一个明确约束：答案是否正确、步骤是否成立、程序是否通过测试。Reward model 可以处理开放式偏好，但也更容易受到标注风格、长度和语气的影响。
+Verifier 描述系统如何检查候选是否满足某个任务约束；reward model 描述一个从反馈中学习到的评分函数。前者强调被检查的对象和判据，后者强调分数的来源与训练方式，二者不是互斥的模型类别。Reward model 可以充当 learned verifier；程序测试器也可以作为 verifier，却不是 reward model。
 
-二者可以重叠，但不能简单等同：
+为了避免把“检查什么”和“怎样检查”混成一个分类，可把目标粒度与实现形式分开：
+
+| 分类轴 | 选项 | 直接回答的问题 | 示例 |
+| --- | --- | --- | --- |
+| 检查粒度 | outcome | 最终结果是否满足任务？ | 数值答案断言、程序测试集 |
+| 检查粒度 | process | 中间步骤或状态转移是否成立？ | 证明步骤检查、搜索节点评分 |
+| 实现形式 | programmatic | 显式规则、执行结果或 schema 是否通过？ | 单元测试、JSON schema |
+| 实现形式 | learned | 从反馈样本学到怎样的分数？ | outcome/process reward model |
+
+因此 ORM/PRM 说明 reward model 检查的结果或过程粒度；programmatic/learned 则说明判据如何实现。实际系统可以组合两条轴，例如用规则检查最终算术，同时用 PRM 排序中间步骤。
+
+应当按具体目标区分它们，而不是按名字推断能力：
 
 - 程序测试器是 verifier，不是学习到的人类偏好模型；
 - 一个偏好长答案的 reward model 不一定能验证数学；
 - 数学验证器的高分不代表回答更有帮助或更安全。
+- 偏好 reward model 排序更高的回答，也不因此证明其数学事实正确或满足硬性权限约束。
 
 ### 5.3 Outcome Reward Model 与 Process Reward Model
 
@@ -306,6 +328,8 @@ S_{\mathrm{total}}
 
 alpha、beta、gamma、delta 不是通用常数，需要在业务验证集和风险切片上校准。若把它们用于数值计算，应明确它们为有限权重，并确认各分数已经在可比较的尺度上；线性组合本身不会自动解决量纲、阈值或安全硬约束问题。
 
+例如，假设四个分数都已缩放到 \([0,1]\)，取权重 \(0.5,0.3,0.2,0.4\)，候选的正确性、证据、格式和风险分数依次为 \(0.9,0.8,1,0.5\)，则总分为 \(0.5\times0.9+0.3\times0.8+0.2\times1-0.4\times0.5=0.69\)。这只是演示组合运算；若风险是硬约束，不能只靠扣分代替拒绝规则。
+
 ## 6. Verifier 的训练目标
 
 ### 6.1 Pointwise：每个候选单独判断
@@ -319,7 +343,7 @@ alpha、beta、gamma、delta 不是通用常数，需要在业务验证集和风
 -(1-q)\log(1-\sigma(s))
 ~~~
 
-s 是 verifier 的 logit，q 必须是 0 或 1，且每个 logit 和损失项都应为有限数。实际实现通常使用数值稳定的 binary-cross-entropy-with-logits，而不是先计算极端 sigmoid 再取对数。Pointwise 训练简单，适合有明确正负标签的任务，但分数跨问题是否可比较，需要额外校准。
+s 是 verifier 的 logit，\(\sigma(s)=1/(1+e^{-s})\)，q 必须是 0 或 1，且每个 logit 和损失项都应为有限数。举例取 q=1、s=\(\ln 3\)，则 \(\sigma(s)=3/4\)，损失为 \(-\ln(3/4)\approx0.288\)（自然对数）。实际实现通常使用数值稳定的 binary-cross-entropy-with-logits，而不是先计算极端 sigmoid 再取对数。Pointwise 训练简单，适合有明确正负标签的任务，但分数跨问题是否可比较，需要额外校准。
 
 ### 6.2 Pairwise：比较两个候选
 
@@ -331,6 +355,8 @@ s 是 verifier 的 logit，q 必须是 0 或 1，且每个 logit 和损失项都
 ~~~
 
 这里要求 winner 与 loser 的标签关系已经定义，且两个分数为有限数；如果两者在任务上等价，应单独标为 tie，不能随意制造 winner/loser。Pairwise 标注常比绝对打分容易，适合偏好数据和候选排序。但它只提供相对关系，不能直接得到跨任务的成功概率。
+
+例如令 \(r_w=0.7\)、\(r_l=0.2\)，分差为 0.5，损失是 \(-\ln\sigma(0.5)=\ln(1+e^{-0.5})\approx0.474\)。这只是演示单个偏好对的计算，不表示分数具有概率含义。
 
 ### 6.3 Listwise：直接学习候选列表
 
@@ -345,6 +371,8 @@ s 是 verifier 的 logit，q 必须是 0 或 1，且每个 logit 和损失项都
 ~~~
 
 这个式子要求 \(K_i>0\)，并且标注位置 \(j^+\) 满足 \(1\le j^+\le K_i\)；空列表或没有可接受候选时，listwise loss 未定义。实现时还应使用 log-sum-exp 形式避免指数溢出。Listwise 目标更贴近 reranking，但需要列表级数据和稳定的候选顺序协议。它也可能把候选数量和位置偏差带入训练。
+
+若列表只有两个候选，分数分别是 0.7 和 0.2，且第一个较优，则代入后为 \(-\ln(e^{0.7}/(e^{0.7}+e^{0.2}))=\ln(1+e^{-0.5})\approx0.474\)。此时它与上面的二元 pairwise logistic loss 数值相同；列表有更多候选时，分母会纳入所有候选。
 
 ### 6.4 Ranking loss 不等于校准损失
 
@@ -454,6 +482,10 @@ A_{\mathrm{pair}}
 
 这里要求比较对集合 \(\mathcal{P}\) 非空，且每个 pair 的正确候选和错误候选都可判定。公式中的严格大于意味着分数相同时记为失败；也可以另报 tie rate，但不能把平票悄悄算作胜利。它适合检查排序倾向，但不能直接代表 top-1 选择。
 
+以第 13 节的 distractor_math 为例，正确答案 12 的 RM 分数是 0.78；错误答案 111 和 99 的分数分别为 0.91 和 0.28。正确候选只胜过 99，所以 pairwise accuracy 是 \(1/2=0.5\)；若直接按最高分重排，系统反而会选中 111。
+
+把第 13 节的五题全部展开，共有 10 个正确—错误候选对；9 对中正确候选分数更高，故汇总 pairwise accuracy 为 \(9/10=0.9\)。其中剩下的一对正是 distractor_math 的错误排序。
+
 ### 9.2 Rerank top-1 accuracy
 
 对每道题从真实候选集合选择最高分候选：
@@ -467,6 +499,10 @@ A_{\mathrm{rerank}}
 
 这里要求评估题数 \(N>0\)，每道题都有非空候选集合，并且最高分并列时有固定的可复现处理。若某题没有可交付候选，应单独统计 abstain，而不是把它自动算成错误或正确。这是更贴近下游的指标。候选集合必须来自实际 generator，否则会出现评估分布偏移。
 
+同一 distractor_math 案例中，纯 RM 选择分数 0.91 的 111，top-1 失败；若程序检查确实独立验证答案 12，混合选择器会在分数为 0.78 的通过项中交付 12，本题 top-1 成功。这个结果依赖程序检查覆盖了题目规格；一个错误或不完整的 oracle 会把结论一起带偏。
+
+在五题整体上，纯 RM 选择器答对 \(4/5=0.8\)，混合选择器答对 \(5/5=1.0\)，greedy 只答对 \(1/5=0.2\)。这是五个预设 toy case 的计数，不是模型效果或统计显著性结论。
+
 ### 9.3 Hard negative accuracy
 
 对每个 hard negative，检查它的分数是否低于至少一个正确候选：
@@ -479,6 +515,8 @@ A_{\mathrm{hard}}
 ~~~
 
 这里要求 hard negative 数量 \(H>0\)，并且每个 hard negative 都有至少一个明确的 good 对照；若没有 hard negative，这个指标未定义。它能发现 verifier 是否被“完整但错误”的候选欺骗。
+
+代码示例中有 4 个 hard negative，其中 3 个分数低于该题最佳正确候选，所以此指标是 \(3/4=0.75\)。它与 pairwise accuracy 的分母不同：前者每个 hard negative 只取一个最佳正确对照，后者展开所有正确—错误候选对。
 
 ### 9.4 Calibration 与 ECE
 
@@ -494,6 +532,8 @@ A_{\mathrm{hard}}
 
 S_b 是第 b 个分数桶，acc 是真实成功比例，conf 是平均预测置信度。计算 ECE 要求总样本数 \(n>0\)，并且被解释为概率的分数位于 \([0,1]\)。空桶不应贡献误差，但必须记录桶覆盖；如果所有样本都被过滤，ECE 未定义。ECE 依赖分桶方式，不能单独作为完整校准证明。
 
+第 13 节的 15 个 toy 候选分入三个桶：低于 0.5 的 4 个分数和为 1.37，故平均置信度 \(1.37/4=0.3425\)，准确率为 0，贡献约为 \((4/15)\times0.3425=0.0913\)；\([0.5,0.75)\) 中 6 个分数的均值为 \(3.99/6=0.665\)，其中 3 个正确，贡献为 \((6/15)\times|0.665-0.5|=0.066\)；\([0.75,1]\) 中 5 个分数的均值为 \(4.12/5=0.824\)，4 个正确，贡献为 \((5/15)\times|0.824-0.8|=0.008\)。三项相加约为 0.165。分桶边界和 toy 数据决定了这个数，它不是实际模型校准结果。
+
 ### 9.5 下游指标优先
 
 最终要问：
@@ -507,11 +547,13 @@ S_b 是第 b 个分数桶，acc 是真实成功比例，conf 是平均预测置�
 
 验证集分类准确率高，但下游选择没有提升，说明训练目标和实际使用方式不匹配。
 
+RewardBench 用 prompt/chosen/rejected 样本覆盖聊天、推理和安全等类别，也包含答案优劣可验证的细微错误；作者同时指出，部分偏好对由半自动方式构造，格式可能引入伪相关，benchmark 分数与下游训练效果的关系仍未确定。因此它能提供有用切片，不能替代目标系统真实候选分布上的复测。[RewardBench v2](https://arxiv.org/abs/2403.13787v2)
+
 ## 10. Reward hacking 与评分器偏差
 
 ### 10.1 长度偏差
 
-若评分器把更多解释误当成更高质量，生成器会学习输出冗长文本。需要控制长度、比较等长度候选，并报告质量随 token 的曲线。
+若评分器把更多解释误当成更高质量，生成器会学习输出冗长文本。需要控制长度、比较等长度候选，并报告质量随 token 的曲线。RewardBench 特意设置 chosen 回答长度与 rejected 相近或更短的子集，尝试减少长度作为捷径；这是评测设计，不能据此断言所有 reward model 都有同样的偏差。[RewardBench v2](https://arxiv.org/abs/2403.13787v2)
 
 ### 10.2 格式偏差
 
@@ -535,7 +577,7 @@ S_b 是第 b 个分数桶，acc 是真实成功比例，conf 是平均预测置�
 \Delta Q_{\mathrm{task}}>0
 ~~~
 
-R_proxy 是代理分数，Q_task 是真实任务质量。两者是否同步，需要独立验证集和业务指标确认。
+R_proxy 是代理分数，Q_task 是真实任务质量。两者是否同步，需要独立验证集和业务指标确认。Gao 等人用一个固定 6B reward model 作为合成 gold，再训练 proxy RM；在该合成配置中，增加对 proxy 的 best-of-N 或 RL 优化可能让 gold 分数先升后降，曲线还随优化方法和模型/数据设置变化。这支持监测代理目标与独立指标的分离，不给出通用停止阈值，也不等同于真实人类偏好实验。[论文 v1](https://arxiv.org/abs/2210.10760v1)
 
 ### 10.6 防护方法
 
@@ -549,6 +591,8 @@ R_proxy 是代理分数，Q_task 是真实任务质量。两者是否同步，�
 6. 人工分歧抽样；
 7. 允许 abstain；
 8. 定期刷新候选分布。
+
+验证器只能检查写进判据的性质。一个 2026 年预印本在归纳逻辑任务中发现，部分 RLVR 模型可以枚举已见实例的标签并通过逐例检查，却没有学到应当迁移的关系规则；作者用逻辑同构扰动测试这类捷径。证据目前限于 SLR-Bench 等指定任务和受控 7B 训练，不应外推到数学、代码或所有 RLVR 模型。[研究 v1](https://arxiv.org/abs/2604.15149v1)
 
 ## 11. 不确定性、拒绝与成本
 
@@ -564,6 +608,8 @@ R_proxy 是代理分数，Q_task 是真实任务质量。两者是否同步，�
 
 s_(1) 和 s_(2) 是最高与次高分数，因此至少需要两个可比较候选；少于两个候选时分数间隔未定义。间隔小不一定表示错误，但表示选择依据弱，需要结合校准和风险等级。
 
+例如 distractor_math 的最高分是 0.91，第二高是 0.78，分数间隔为 \(0.91-0.78=0.13\)；但最高分候选仍是错误答案。这说明间隔描述分数排序的分离程度，不自动给出正确概率。
+
 ### 11.2 风险感知的阈值
 
 低风险问答可以接受较小间隔；付款、删除、权限和医疗建议需要更高证据阈值。阈值应按任务风险切片校准，而不是全局使用一个分数。
@@ -571,6 +617,8 @@ s_(1) 和 s_(2) 是最高与次高分数，因此至少需要两个可比较候�
 ### 11.3 成本账本
 
 验证系统的成本可以拆成：
+
+不同分量必须先换算到共同成本单位；若保留 token、秒和人工分钟等异质量，应记录为成本向量，不可直接相加。
 
 ~~~math
 C_{\mathrm{total}}
@@ -584,6 +632,8 @@ C_{\mathrm{generate}}
 
 只看 generator token 会低估 verifier、工具和人工复核成本。
 
+第 13 节的五个 toy 案例总共生成 693 tokens，混合选择器答对 5 题，所以按这份账本计算为 \(693/5=138.6\) 个生成 token/正确案例。它没有计入 verifier、程序运行和复核成本；因此这里的单位是 token 账本，不是货币成本或端到端服务成本。
+
 ## 12. 一个综合案例：合同金额与代码候选
 
 ### 12.1 合同金额
@@ -591,8 +641,8 @@ C_{\mathrm{generate}}
 系统从合同中抽取基础金额、折扣和税率，生成两个计算候选：
 
 ~~~text
-候选 A：100000 × 0.95 × 1.06 = 100700 元，引用正文第 3、4、7 页。
-候选 B：100000 × 0.95 × 1.60 = 152000 元，税率来自 OCR 结果，没有引用原文。
+候选 A：100000 × 0.95 = 95000；再算 \(95000\times1.06=95000+5700=100700\) 元，引用正文第 3、4、7 页。
+候选 B：100000 × 0.95 = 95000；再算 \(95000\times1.60=95000+57000=152000\) 元，税率来自 OCR 结果，没有引用原文。
 ~~~
 
 一个只看解释长度的 reward model 可能给 B 高分，因为它写了更多步骤；程序计算和原文检查应把 B 判为不可信。
@@ -626,6 +676,8 @@ C_{\mathrm{generate}}
 5. 一个 hard negative 被 RM 选错、但混合验证器救回的案例。
 
 代码中的分数是人为构造的代理分数，不代表真实 reward model 的概率。为避免把 demo 的正常路径误读成通用保证，下面先校验 case、候选、步骤、分数和 token 的契约；没有比较对、hard negative 或成功候选的指标返回 None，而不是伪造一个 0。
+
+代码状态：已验证（2026-11-12，Python 3.12.9，标准库）
 
 ~~~python
 import math
@@ -828,9 +880,11 @@ def validate_cases(items):
             if (
                 isinstance(score, bool)
                 or not isinstance(score, (int, float))
-                or not math.isfinite(score)
-                or not 0 <= score <= 1
             ):
+                raise ValueError("rm_score must be finite and in [0, 1]")
+            if isinstance(score, float) and not math.isfinite(score):
+                raise ValueError("rm_score must be finite and in [0, 1]")
+            if not 0 <= score <= 1:
                 raise ValueError("rm_score must be finite and in [0, 1]")
             steps = candidate["steps"]
             if (
@@ -918,6 +972,8 @@ def hard_negative_accuracy():
             for candidate in case["candidates"]
             if candidate["hard_negative"]
         ]
+        if not hard_negatives:
+            continue
         if hard_negatives and not correct_candidates:
             raise ValueError(
                 "a hard negative requires at least one correct candidate"
@@ -931,7 +987,7 @@ def hard_negative_accuracy():
 
 
 def calibration_ece():
-    bins = [(0.0, 0.5), (0.5, 0.75), (0.75, 1.01)]
+    bins = [(0.0, 0.5), (0.5, 0.75), (0.75, 1.0)]
     total = sum(len(case["candidates"]) for case in cases)
     if total == 0:
         return None, []
@@ -943,6 +999,7 @@ def calibration_ece():
             for case in cases
             for candidate in case["candidates"]
             if lo <= candidate["rm_score"] < hi
+            or (hi == 1.0 and candidate["rm_score"] == 1.0)
         ]
         if not bucket:
             continue
@@ -950,8 +1007,9 @@ def calibration_ece():
         accuracy_value = sum(ok for _, ok in bucket) / len(bucket)
         gap = abs(confidence - accuracy_value)
         ece += len(bucket) / total * gap
+        bin_label = f"[{lo},{hi}]" if hi == 1.0 else f"[{lo},{hi})"
         details.append(
-            (f"[{lo},{hi})", round(confidence, 3), round(accuracy_value, 3), len(bucket))
+            (bin_label, round(confidence, 3), round(accuracy_value, 3), len(bucket))
         )
     return round(ece, 3), details
 
@@ -1001,7 +1059,7 @@ report = {
     "rm_failures": rm_failures,
     "hybrid_rescues": hybrid_rescues,
     "total_tokens": total_tokens,
-    "cost_per_hybrid_correct": (
+    "tokens_per_hybrid_correct": (
         round(total_tokens / hybrid_correct_count, 3)
         if hybrid_correct_count
         else None
@@ -1030,11 +1088,11 @@ pairwise_accuracy=0.9
 hard_negative_accuracy=0.75
 process_step_accuracy=0.679
 rm_ece=0.165
-ece_bins=[('[0.0,0.5)', 0.343, 0.0, 4), ('[0.5,0.75)', 0.665, 0.5, 6), ('[0.75,1.01)', 0.824, 0.8, 5)]
+ece_bins=[('[0.0,0.5)', 0.343, 0.0, 4), ('[0.5,0.75)', 0.665, 0.5, 6), ('[0.75,1.0]', 0.824, 0.8, 5)]
 rm_failures=['distractor_math']
 hybrid_rescues=['distractor_math']
 total_tokens=693
-cost_per_hybrid_correct=138.6
+tokens_per_hybrid_correct=138.6
 ~~~
 
 这个实验应这样解读：
@@ -1042,8 +1100,8 @@ cost_per_hybrid_correct=138.6
 1. RM 重排在这组构造样本上高于 greedy，但它被 distractor_math 的 hard negative 误导。
 2. 混合验证器使用程序通过结果和过程分数，救回了 RM 选错的样本。
 3. pairwise accuracy 和 hard negative accuracy 描述 verifier 的局部能力，不等于下游选择准确率。
-4. ECE 为 0.165，说明教学构造中的分数并非完美概率；真实系统需要更多校准数据。
-5. 总 token 693 是候选生成账本，不包含实际 GPU、程序执行、缓存和人工复核成本。
+4. 把构造的 rm_score 暂当置信度代入固定分桶 ECE，结果为 0.165；这只是展示计算方式，不是 reward model 的概率校准实测。
+5. 五题都被混合选择器答对，故生成 token 账本为 \(693/5=138.6\) tokens/正确案例；它不包含实际 GPU、程序执行、缓存和人工复核成本。
 
 ## 14. 怎样设计 verifier 实验
 
@@ -1153,18 +1211,21 @@ Verifier 和 reward model 把“提出候选”和“判断候选”分开，是
 8. 高分候选不是执行许可；高风险动作需要权限、规则、工具和必要人工确认。
 9. verifier 应允许不确定状态，而不是在证据不足时强行选择。
 
-下一章进入 process supervision，继续讨论如何给中间步骤标注、如何处理多种正确过程，以及 PRM 如何参与训练和搜索。
+下一章进入[过程监督](05-process-supervision.md)，继续讨论如何给中间步骤标注、如何处理多种正确过程，以及 PRM 如何参与训练和搜索；搜索中的评分与剪枝见[第六章](06-search与tree-of-thought.md)。
 
 ## 19. 资料索引
 
 以下链接优先保留原始论文和评估资料。复现实验时记录候选生成器、候选数量、负例来源、评分器版本、阈值和下游任务。
 
-1. Training Verifiers to Solve Math Word Problems：<https://arxiv.org/abs/2110.14168>
-2. Let's Verify Step by Step：<https://arxiv.org/abs/2305.20050>
-3. InstructGPT：<https://arxiv.org/abs/2203.02155>
-4. Learning to Summarize from Human Feedback：<https://arxiv.org/abs/2009.01325>
-5. RewardBench：<https://arxiv.org/abs/2403.13787>
-6. HumanEval：<https://arxiv.org/abs/2107.03374>
-7. Self-Consistency：<https://arxiv.org/abs/2203.11171>
+1. Training Verifiers to Solve Math Word Problems：<https://arxiv.org/abs/2110.14168v2>
+2. Let's Verify Step by Step：<https://arxiv.org/abs/2305.20050v1>
+3. Training language models to follow instructions with human feedback（InstructGPT）：<https://arxiv.org/abs/2203.02155v1>
+4. Learning to Summarize from Human Feedback：<https://arxiv.org/abs/2009.01325v3>
+5. RewardBench：<https://arxiv.org/abs/2403.13787v2>
+6. Evaluating Large Language Models Trained on Code（HumanEval）：<https://arxiv.org/abs/2107.03374v2>
+7. Rethinking Verification for LLM Code Generation: From Generation to Testing：<https://arxiv.org/abs/2507.06920v2>
+8. ImpossibleBench: Measuring LLMs' Propensity of Exploiting Test Cases：<https://proceedings.iclr.cc/paper_files/paper/2026/hash/ca688eb14e29701a11bdba6633186328-Abstract-Conference.html>
+9. LLMs Gaming Verifiers: RLVR can Lead to Reward Hacking：<https://arxiv.org/abs/2604.15149v1>
+10. Scaling Laws for Reward Model Overoptimization：<https://arxiv.org/abs/2210.10760v1>
 
-本章写作时已联网访问上述论文入口。正文区分数学验证器、偏好 reward model、代码测试器和教学构造；没有把某个评分器的公开结果外推为所有 reasoning 系统的内部事实。
+论文结果和教学构造分别绑定各自的数据、模型、标注协议与指标；本章不把基准分数外推为目标系统的生产表现，也不据此推断未公开的模型内部结构。

@@ -1,136 +1,50 @@
-# 第 14 章 Thinking Levels：离散思考档位背后的预算、协议与取舍
+# 第 14 章 Thinking Levels：离散档位如何成为可验证的服务契约
 
-## 14.1 为什么产品把复杂策略做成几个档位
+本章讨论用户或调用方看到的 low、medium、high 等离散控制项。它们是具体 provider、模型和 API 版本上的接口选项，不是跨模型通用的智力刻度。本章沿“接口映射—质量与成本—容量和权限—协议回归”展开；预算计量见[第十三章](13-reasoning-effort与推理预算.md)，在线策略见[第十八章](18-adaptive-thinking与动态预算.md)，跨轮状态见[第十五章](15-preserve-thinking与推理状态.md)。
 
-多数用户不会配置候选数量、验证轮次、工具 deadline 和内部 token 上限。他们更容易理解“快速”“标准”“深度”三个选项。因此产品把一组复杂策略包装成 low、medium、high 或类似的 thinking level。
+## 14.1 档位是产品控制面
 
-这种设计降低了使用门槛，却引入了一个误解：用户可能以为 `high` 是跨模型统一的“智力等级”。实际上它更像一个 provider-specific policy。它可能改变内部推理预算、模型路由、验证次数、工具权限、服务优先级或超时时间，也可能只是一个 prompt 和 `max_tokens` 的组合。公开文档没有说明的内部映射，不能靠名称猜测。
+大多数调用方不希望逐项配置推理 token 上限、验证次数、工具次数和截止时间。产品可以将一组请求选项合并成“快速”“标准”“深入”等档位，降低选择成本。这样的档位有用，但它首先是一个接口约定：请求方选择名称，provider 按该模型和 API 的公开合同解释它，服务端再记录实际模型、事件和 usage。
 
-## 14.2 从连续预算到离散界面
+档位名称本身并不说明内部算法。仅凭 `high`，不能断定后端增加了多少 token、运行了几轮验证或使用了树搜索。不同模型甚至可能让同一字段控制不同对象。读档位文档时，应依次确认准确的 model ID、API surface、支持值、默认值、输出上限、usage 字段和状态延续要求；没有公开的内部映射就应保留为未知。
 
-假设底层真正需要管理的是一个连续或半连续的资源预算 `b`，产品对外暴露一个离散 level `\ell`，那么二者的关系可以抽象为：
+这也是接口与测量的分界：请求的档位是输入条件，实际消耗和任务结果是观测值。最终可见文本长度不能替代 reasoning usage；一次回答更长，可能只是解释更长，并不能证明它检验了更多候选。
 
-```math
-b=g(\ell,\mathrm{model},\mathrm{task},\mathrm{policy})
-```
+## 14.2 把档位展开成资源向量
 
-这里 `\ell` 属于有限的离散 level 集合，例如 `{low, medium, high}`；`b` 应明确是标量还是预算向量，`g` 还可能因为当前 revision、任务画像、剩余容量和停止事件而返回不同结果。如果某个 level 不被当前后端支持，映射不是一个有效预算，而应返回显式的“不支持”状态。
-
-同一个 `high` 在不同模型、不同任务和不同版本中可能映射到不同的 `b`。甚至同一次请求也可能因为 verifier 提前通过而没有用满预算。因此输出文本长度不能反推 level 的真实成本。
-
-更现实的表达是把档位看成预算区间：
+为了说明某个产品如何实现档位，设 \(\ell\) 是离散 level，\(m\) 是模型及其 revision，\(x\) 是任务类型，\(p\) 是产品策略，\(\mathbf b\) 是该请求的资源约束向量。它可以分别记录推理 token 上限、允许的工具调用数、验证次数和 deadline；计数上限是非负整数，时间以秒或毫秒记录，这些量单位不同，不能未经换算相加。产品策略可以把这些输入映射成请求配置：
 
 ```math
-\ell_k\mapsto[b_k^{\min},b_k^{\max}]
+\mathbf b = g(\ell,m,x,p)
 ```
 
-区间端点必须是同一资源单位下的有限非负数，并满足 `b_k^{\min}\le b_k^{\max}`。如果底层是多维预算，应写成向量区间或分别记录 token、工具、验证和时间上限，不能把不同单位未经换算相加。
+例如，某个**合成的产品配置**可把后端 A 的 `medium` 展开为“推理 token 目标 2,048、最多 1 次工具调用、1 次 verifier、4 秒 deadline”；另一个后端 B 的 `medium` 则可能只对应“推理 token 目标 1,024、无工具调用、0 次 verifier、2 秒 deadline”。这些数字只是展示字段如何分开记录，不是 provider 的真实预算或性能承诺。它们说明 `medium` 只能在各自合同内解释，不能据名称说 A 与 B 投入了相同计算。
 
-模型可以在区间内根据难度、停止条件和工具结果决定何时结束。工程师做跨 provider 比较时，应测量有效 reasoning token、工具次数、验证次数和 wall-clock，而不是比较字符串 `high`。
+产品还应区分“请求上限”和“实际消耗”。一次请求即便获准最多进行两轮验证，也可能首轮通过而只执行一轮；deadline 则可能先于 token 上限触发。账本应记录请求配置、实际事件、实际 usage 和结束原因，具体计量口径与单位沿用第十三章。
 
-## 14.3 level 到底能改变什么
+## 14.3 建立 capability matrix 与有损适配规则
 
-一个 thinking level 可能影响以下资源：内部推理 token 上限、候选数量、verifier 调用、工具轮次、模型选择、超时时间和队列优先级。它还可能改变返回内容，例如是否包含 reasoning summary、是否把工具事件分开返回。
+跨 provider 迁移时，直接转发 `high` 字符串会把接口名称误当成语义兼容。适配层需要对每个 model ID 维护能力矩阵，至少说明原生档位字段、usage 能否拆分、thinking 状态是否需要回传、工具事件是否有结构化表达、截止/取消语义，以及不支持时的返回方式。返回给调用方的结果也要包含实际采用的路径。
 
-但 level 不应该改变用户身份、访问范围和基本安全策略。高档位不能因此读取更多租户数据，不能绕过敏感工具的人工确认，也不能把被策略拒绝的内容强行生成出来。预算控制和访问控制必须由两个服务分别决定。
+| 状态 | 适配器能承诺什么 | 需要暴露的限制 |
+| --- | --- | --- |
+| `native` | 使用后端文档明确支持的档位字段 | 不推断未公开的内部预算；仍记录 usage 与 model revision |
+| `adapted` | 按公开能力做有边界的转换 | 逐项列出语义损失；不得称为与原生档位等价 |
+| `unsupported` | 拒绝该请求或转到调用方认可的后端 | 明确返回不支持或实际改用的 model ID，不静默伪装 |
 
-这个区分在企业系统尤其重要。假设一个开发者没有生产数据库写权限，给请求设置 `high` 只能让模型更认真地分析日志，不能把数据库写权限附加给模型。否则“深度思考”会变成隐式权限提升。
+例如，后端没有 native thinking level、只有 `max_output_tokens` 时，适配器只能提供一个**总生成上限**，不能把该上限命名为 reasoning budget。它限制思考与可见输出的总量或后端文档规定的输出范围；它不保证更多验证，也不保证留下足够的可见答案空间。因此应记录 `adapted` 及其损失，并把真实质量交给对照评测。
 
-## 14.4 一个文档分析例子
+### 14.3.1 教学适配器
 
-有一项任务要求比较两份配置文件，指出为什么部署结果不同。low 档位可以直接回答，并要求模型只引用明显的差异；medium 档位允许一次检索和一次自检；high 档位允许生成两个解释、运行配置解析器、检查冲突字段，再输出结论。
+下面的代码用三个合成后端展示 `native`、`adapted` 与 `unsupported` 三种返回状态。`output_only` 后端只收到总输出 token 上限；该数字不代表内部思考预算。工具权限由调用方单独传入，不由档位推导。
 
-假设固定模型和数据后得到：
-
-| level | 成功率 | reasoning token | 工具调用 | p95 | 单位成功成本 |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| low | 0.70 | 1.0x | 0.2 | 1.2 s | 1.4 |
-| medium | 0.78 | 1.8x | 0.6 | 2.6 s | 2.9 |
-| high | 0.81 | 3.6x | 1.4 | 6.7 s | 5.9 |
-
-如果简单样本占 95%，medium 可能已经覆盖大部分价值；high 只对冲突配置和高风险发布有意义。产品可以先用 low，遇到验证失败或任务风险高时升级，而不是让所有请求从一开始就使用 high。
-
-## 14.5 Thinking level 与协议适配
-
-跨 provider 迁移时，不能简单地把字符串 `high` 原样转发。适配层应维护一张 capability matrix：
-
-```text
-requested_level
-native_field
-effective_budget
-visible_reasoning
-tool_policy
-stream_events
-usage_accounting
-fallback_behavior
-```
-
-例如目标后端没有 native thinking level，但支持显式的 reasoning token 上限，适配层可以标记为 `adapted`，并把映射和误差写入 trace。如果目标后端既没有对应预算，也不能保证工具或事件语义，应该标记为 `unsupported` 或路由到另一个模型，不能静默返回一个看似成功的 `high`。
-
-协议适配尤其要关注 usage。某个 provider 将内部 reasoning token 单独计费，另一个 provider 只报告总输出 token；如果适配层把两者都叫 `output_tokens`，成本看板会产生错误结论，用户也无法解释为什么 level 升级后账单变化。
-
-## 14.6 公平评估需要对齐真实预算
-
-比较模型 A 和 B 的 high 分数没有意义，除非知道两者实际消耗了多少计算。公平实验至少固定任务、工具、总时间和成功定义，并报告实际 reasoning token、工具时间、verifier 次数、成功率、p95 和单位成功成本。
-
-可以做两种比较。一种是固定预算比较：让不同模型使用尽量相同的 token、工具和时间上限，观察谁更有效。另一种是固定质量比较：达到同一个成功率时，比较谁的成本和延迟更低。前者看单位计算效率，后者更接近产品选择。
-
-高档位还要做安全评估。更多探索可能提升代码修复率，也可能增加敏感工具调用、错误外发或重复副作用。评估表中应把安全违规作为硬约束，而不是在总分里用几个百分点抵消。
-
-## 14.7 版本变化与回归
-
-档位是产品协议的一部分。provider 更新模型或 runtime 后，`medium` 可能从两次工具调用变成一次，也可能因为新停止条件而消耗更少 token。旧的成本和质量基线因此不能永久复用。
-
-上线前可以保存一组 golden tasks，覆盖直接回答、长文档、代码、结构化输出、工具失败和敏感动作。每次版本变更都回放这些任务，比较 response item、stream event、usage、工具事件和最终结果。若只是内部预算变化，应在版本说明中记录；若语义变化使旧客户端无法理解，应提升协议版本或显式拒绝。
-
-## 14.8 常见误解
-
-第一，把档位名称当成统一标准。不同 provider 的 low/high 没有天然可比性。
-
-第二，把 level 只实现为更大的 `max_output_tokens`。这样可能只生成更长的解释，没有增加验证和工具能力。
-
-第三，让高档位绕过安全限制。预算是计算资源，不是授权凭证。
-
-第四，忽略计费和事件。用户只看到一个 level，却不知道多了哪些 token、工具和排队时间。
-
-第五，切换档位不做回归。模型升级可能让同一个档位的成本、输出协议和成功率同时变化。
-
-## 14.9 综合判断与练习
-
-理解 thinking level 和 reasoning effort 的关键，是把前者看成面向产品的离散控制接口，把后者看成请求级的计算和验证预算概念。level 的实际映射由 provider 和版本决定，不能跨厂商按名字比较。工程上要把档位映射到有效预算、工具、验证、事件、usage 和安全策略，并用质量、成本、延迟和风险做回归。
-
-练习一：为 low、medium、high 设计 capability matrix，标出 reasoning token、工具、verifier、deadline 和安全权限。
-
-练习二：目标 provider 不支持 thinking level，但支持普通 decode 和一个固定的输出上限。设计三种响应：近似映射、显式不支持和路由其他后端，并说明客户端如何知道实际结果。
-
-练习三：设计一个实验，证明 high 档位的收益来自验证而不是输出变长。
-
-### 14.9.1 把产品档位展开成 capability matrix
-
-一个可靠的档位设计需要把隐藏在名称后的能力显式列出：
-
-| 项目 | low | medium | high |
-| --- | --- | --- | --- |
-| 最大 reasoning 预算 | 低 | 中 | 高 |
-| 工具轮次 | 禁用或少量 | 允许已授权只读 | 允许更多已授权调用 |
-| verifier | 格式/规则 | 单元测试 | 多阶段验证 |
-| deadline | 短 | 中 | 长 |
-| 人工确认 | 高风险必需 | 高风险必需 | 高风险必需 |
-| 降级 | 直接回答/拒答 | 重试或检索 | 异步/人工 |
-
-这张表不是跨 provider 的事实，而是产品内部的契约。真正实现时要用 usage、事件和 trace 验证每个档位是否真的遵守了它；如果三个档位只改变 `max_tokens`，就不应把它描述成三种不同的推理能力。
-
-表中的“允许更多已授权调用”不等于 level 赋予了写权限。工具权限、资源范围和人工确认由独立策略决定；一个 high 请求可以拥有更多验证轮次，但仍然只能读公开文件。若产品需要受控写入，必须在权限服务中显式授予，并在外部动作前完成确认。
-
-### 14.9.2 最小可运行的档位适配器
-
-下面的 demo 不连接任何 provider，只模拟三种后端：原生支持 thinking level 的后端、只能用输出长度近似的后端，以及完全没有可接受映射的后端。`adapted` 表示有明确的语义损失，`unsupported` 表示适配层拒绝假装兼容。无论 level 如何变化，`tool_permission` 都由调用方传入并原样保留。
+代码状态：**已验证**（2026-11-13；Python 3.12.9，标准库，无第三方依赖）。
 
 ```python
 LEVELS = {
-    "low": {"reasoning_tokens": 512, "deadline_ms": 1500, "tool_rounds": 0},
-    "medium": {"reasoning_tokens": 2048, "deadline_ms": 4000, "tool_rounds": 1},
-    "high": {"reasoning_tokens": 8192, "deadline_ms": 10000, "tool_rounds": 3},
+    "low": {"max_output_tokens": 1024},
+    "medium": {"max_output_tokens": 3072},
+    "high": {"max_output_tokens": 6144},
 }
 BACKENDS = {"native", "output_only", "plain"}
 PERMISSIONS = {"none", "read_only", "approved_write"}
@@ -142,33 +56,35 @@ def require(condition, message):
 
 
 def compile_level(level, backend, tool_permission, allow_approximation=False):
-    require(level in LEVELS, "unknown level")
-    require(backend in BACKENDS, "unknown backend")
-    require(tool_permission in PERMISSIONS, "unknown tool permission")
-    config = LEVELS[level]
+    require(type(level) is str and level in LEVELS, "unknown level")
+    require(type(backend) is str and backend in BACKENDS, "unknown backend")
+    require(
+        type(tool_permission) is str and tool_permission in PERMISSIONS,
+        "unknown tool permission",
+    )
+    require(type(allow_approximation) is bool, "allow_approximation must be bool")
+
     if backend == "native":
         return {
             "status": "native",
-            "field": "thinking_level",
-            "requested_level": level,
-            "reasoning_tokens": config["reasoning_tokens"],
-            "deadline_ms": config["deadline_ms"],
-            "tool_rounds": config["tool_rounds"],
+            "request_fields": {"thinking_level": level},
             "tool_permission": tool_permission,
-            "usage": "split",
         }
+
     if backend == "output_only" and allow_approximation:
         return {
             "status": "adapted",
-            "field": "max_output_tokens",
-            "requested_level": level,
-            "output_tokens": config["reasoning_tokens"],
-            "deadline_ms": config["deadline_ms"],
-            "tool_rounds": 0,
+            "request_fields": {
+                "max_output_tokens": LEVELS[level]["max_output_tokens"]
+            },
             "tool_permission": tool_permission,
-            "usage": "output_only",
-            "losses": ["no_native_reasoning_budget", "no_structured_thinking_events"],
+            "losses": [
+                "no_native_thinking_level",
+                "total_output_cap_is_not_reasoning_budget",
+                "no_added_verifier_or_tool_round",
+            ],
         }
+
     return {
         "status": "unsupported",
         "requested_level": level,
@@ -177,9 +93,13 @@ def compile_level(level, backend, tool_permission, allow_approximation=False):
 
 
 native = compile_level("high", "native", "read_only")
-adapted = compile_level("high", "output_only", "read_only", allow_approximation=True)
+adapted = compile_level(
+    "high", "output_only", "read_only", allow_approximation=True
+)
 unsupported = compile_level("high", "plain", "read_only")
+
 print(native["status"], adapted["status"], unsupported["status"])
+print(adapted["request_fields"]["max_output_tokens"], "total-output-cap")
 print(native["tool_permission"], adapted["tool_permission"])
 ```
 
@@ -187,212 +107,101 @@ print(native["tool_permission"], adapted["tool_permission"])
 
 ```text
 native adapted unsupported
+6144 total-output-cap
 read_only read_only
 ```
 
-这个 demo 只验证适配器的状态和字段，不证明后端真的消耗了对应预算。生产适配层还应校验模型 revision、取消和超时语义、事件顺序、usage 拆分、工具参数、权限决定和 fallback 结果，并把 `losses` 写入 trace。
+输入校验先检查类型再进行集合查找，因此列表等不可哈希值会转成明确的 `ValueError`，而不是泄漏底层 `TypeError`。这段代码只验证适配器如何表达状态和请求字段；它不连接 provider，也不证明后端按预期消耗了推理资源。
 
-### 14.9.3 迁移实验：档位名称不一致怎么办
+## 14.4 用同一任务族测质量与成本
 
-假设后端 A 支持 `thinking_level`，后端 B 只支持普通生成。迁移时可做三组对照：A 的 low/medium/high，B 的固定生成上限，B 加上外部 verifier 和工具循环。比较时固定任务和 deadline，报告实际输出 token、工具事件、验证次数、成功率和成本。
-
-如果 B 的长输出没有提高验证率，就只能把它标成“近似长度映射”，不能承诺等价；如果 B 的外部 verifier 带来了相近成功率，但延迟更高，应在 capability matrix 中标出不同的成本和事件语义。兼容层应向客户端返回实际路径，而不是伪造一个 provider 原生档位。
-
-### 14.9.4 档位和用户体验
-
-低档位不等于低质量，也可能是对简单任务更合适的快速路径；高档位不等于一定正确，仍可能输出更长的错误理由。界面上应展示预计等待、是否会调用工具、是否需要确认和结果是否经过验证，而不是只显示一个“思考等级”。
-
-## 14.10 level 是产品协议，不是能力刻度
-
-同名的 low、medium、high 可能在不同模型、日期和供应商中对应不同思考预算、工具权限或最大输出。迁移时要记录模型 id、level 字符串、实际 reasoning token、工具调用、最终质量和 p95。
-
-如果用户要求固定预算，系统应把档位展开为可观测的 token/时间验收条件，而不是承诺一个模糊的“高思考”。
-
-## 14.11 把档位变成可观测的服务契约
-
-一个真正有用的 thinking level 不应只存在于请求 JSON 中。服务端需要把它展开为可观测字段：请求的档位、实际模型、实际 reasoning token、工具轮次、verifier 次数、截止时间、降级路径和最终状态。否则用户看到的是 `high`，运维看到的却只是一个无法解释的输出 token 数。
-
-可以为每个后端建立 capability matrix：
-
-| 能力 | native | adapted | unsupported |
-| --- | --- | --- | --- |
-| reasoning budget | 后端原生控制 | 由 adapter 近似映射 | 明确拒绝或换路由 |
-| thinking item | 事件语义完整 | 转换后保留有限字段 | 不返回伪造字段 |
-| tool interleave | 原生支持 | 外部循环补齐 | 关闭工具路径 |
-| usage accounting | reasoning 与 output 可分 | 只能报告总量 | 不承诺精确拆分 |
-| state preservation | 协议支持复用 | 结构化状态重建 | 每轮重新开始 |
-
-`adapted` 不是“差不多能用”的同义词。它必须写明转换损失和回归测试。例如后端 B 没有 reasoning level，但能接受 `max_reasoning_tokens`，可以把 `medium` 映射成一个预算区间；如果后端连内部 token 都不报告，就只能标记为近似长度策略，不能对外宣称与原生 `medium` 等价。
-
-## 14.12 档位比较要看质量—成本曲线
-
-档位的价值不是让所有答案都变长，而是让目标任务在可接受成本下更可靠。设档位为 `\ell`，质量为 `Q(\ell)`，成本为 `C(\ell)`，则相邻档位的边际收益可以写成：
+档位比较必须先固定任务集、成功定义、验证器、工具权限、deadline、重试规则和 model revision。设 \(Q(\ell)\) 是档位 \(\ell\) 在固定评测集上的成功率，\(C(\ell)\) 是同一批请求按统一口径统计的成本点，\(\lambda\) 表示每个成本点对应的质量效用折减；因此 \(Q\in[0,1]\)、成本有限且非负、\(\lambda\ge0\)。相邻档位的边际效用可写为：
 
 ```math
-\Delta U_{\ell\rightarrow\ell+1}
-=[Q(\ell+1)-Q(\ell)]-\lambda[C(\ell+1)-C(\ell)]
+\Delta U_{\mathrm{low}\rightarrow\mathrm{high}}
+=[Q(\mathrm{high})-Q(\mathrm{low})]
+-\lambda[C(\mathrm{high})-C(\mathrm{low})]
 ```
 
-这里 `Q(\ell)` 应在同一任务集、同一成功定义和同一评估 oracle 上计算；如果它表示概率，则取值在 `[0,1]`。`C(\ell)` 是有限非负成本，`\lambda\ge0` 是把成本换算成效用的权重。两个档位的任务、超时、重试和安全失败处理不一致时，差值不能解释为档位本身的收益。
+用一组合成教学数据复算：low 的成功率为 \(0.70\)，high 为 \(0.81\)，所以质量增量是 \(0.81-0.70=0.11\)；low 与 high 的成本分别为 1.4 和 5.9 成本点，成本增量为 \(5.9-1.4=4.5\)。若本例设 \(\lambda=0.02\)（每成本点折减 0.02 个效用点），则：
 
-当边际收益为负时，继续升级没有经济意义；但高风险任务还要加上失败损失。支付、生产发布或医疗建议不能只用平均质量减成本，必须把严重错误作为硬性条件：即使 high 档位的平均分更高，只要工具越权率超过阈值，也不能上线。
-
-一个实用的评测表如下：
-
-| bucket | low 成功率 | high 成功率 | low p95 | high p95 | 单位成功成本变化 |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| 简单问答 | 0.98 | 0.99 | 1.1 s | 3.9 s | 明显上升 |
-| 跨文件代码 | 0.55 | 0.76 | 2.8 s | 9.2 s | 视失败代价而定 |
-| 高风险写操作 | 0.63 | 0.71 | 3.0 s | 10.1 s | 还需审批验收条件 |
-
-这张表告诉初学者：high 不是“更聪明的按钮”，而是用更多资源换取特定任务的成功概率。它告诉专家：路由器应针对任务 bucket 学习曲线，并将风险、尾延迟和人工确认纳入决策。
-
-## 14.13 档位升级的协议回归
-
-升级模型或 runtime 后，最容易被忽略的是事件语义变化。一次请求可能从普通文本事件变成 reasoning item、tool call item、tool result item 和最终 message 的组合；如果客户端仍按“每个 chunk 都是字符串”解析，就会丢状态或重复执行工具。
-
-因此，golden test 不能只比较最终文本。每个档位至少应覆盖：普通回答、长上下文、结构化 JSON、单工具、并行工具、工具拒绝、取消、超时和多轮 preserve state。对每个用例保存序列化输入、事件顺序、usage、finish reason、实际预算和权限判定。回归失败时要能回答是质量退化、成本变化还是协议破坏。
-
-产品界面也应显示与用户决策相关的事实，例如预计等待、是否使用外部工具、结果是否通过测试、是否需要人工确认。不要把未公开的内部算法包装成“深度等级”。在文档中可以说“该档位允许更多推理预算”，不能说“该档位一定进行了更深的树搜索”，除非 provider 明确披露。
-
-## 14.14 档位是一个服务契约
-
-把 thinking level 当成一个整数会产生错误期待。对服务端而言，它至少可能影响推理预算、最大输出、工具轮数、验证频率、队列优先级和计费；对客户端而言，它还影响事件格式、usage 拆分和取消语义。因而一个完整的档位契约应回答：
-
-```text
-level -> allowed budget -> observable events -> tool policy
-      -> timeout/SLO -> fallback -> accounting
+```math
+\Delta U = 0.11 - 0.02\times4.5 = 0.02
 ```
 
-如果 provider 只公开了 `low`、`medium`、`high` 三个名称，而没有公开预算映射，客户端就只能把它们当成离散服务选项，不能把 `high` 转译成“多做两层树搜索”或“必然使用某种 verifier”。对外文档应承诺可观测行为，不承诺未公开的内部算法。
+该合成例中升级的净效用为 0.02，刚好为正；若 \(\lambda=0.03\)，结果是 \(0.11-0.135=-0.025\)，则该评测目标下升级不合算。权重来自产品目标，不是模型常数。支付、发布等高风险任务还要保留越权率、严重错误率等硬门槛，不能让平均质量分抵销安全失败。
 
-## 14.15 档位路由需要任务画像
+下面的表也只是合成教学数据，用来说明任务族会改变档位收益。p95 延迟和成本列须按同一任务集、版本与测量窗口复算，不能作为任何产品的经验基线。
 
-一个统一默认档位通常不是最优策略。路由器可以根据任务类型、输入长度、历史失败、工具副作用和用户等待预算选择档位，但选择信号必须与权限分离。一个简单的任务效用可以写成：
+| 任务族 | low 成功率 | high 成功率 | low p95 | high p95 | 成本判断 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| 简单问答 | 0.70 | 0.72 | 1.1 s | 3.9 s | 质量增量小，成本可能不值 |
+| 跨文件代码 | 0.55 | 0.76 | 2.8 s | 9.2 s | 需结合成功任务成本判断 |
+| 高风险写操作 | 0.63 | 0.71 | 3.0 s | 10.1 s | 仍须通过独立审批和权限门槛 |
 
-~~~math
-U(\ell\mid x)
-=Q(\ell\mid x)-\lambda C(\ell\mid x)
- -\mu R(\ell\mid x),
-~~~
+跨任务合并的平均分可能掩盖收益只出现在某些任务上。应分别报告任务族的成功率、证据正确率、格式通过率、工具次数、p95、单位成功成本和安全失败；当数据量足以支持时，再给出不确定区间。若只有某个稀有任务从 high 受益，可以由第十八章的在线策略考虑何时升级；本章只规定档位合同和评测方法。
 
-其中 `x` 是任务画像，`Q` 是通过质量验收条件的概率或分数，`C` 是 token、GPU 和时间成本，`R` 是错误或副作用风险。要求这些量在同一任务和版本条件下可比较，成本和风险不得用负数抵消质量损失；`\lambda、\mu` 是非负权重。`high` 只有在它提高目标任务的可接受质量时才有价值；对不可逆动作，`R` 仍由权限和审批控制，不能由档位直接覆盖。
+## 14.5 档位比例会改变活跃资源占用
 
-## 14.16 预算和队列必须一起看
+档位提升不只影响单次调用账单，也会改变同时运行请求持有的资源。设 \(N\) 为非负整数形式的活跃请求数，\(q\in[0,1]\) 为其中 high 档位的占比，\(M_{\mathrm{low}}\) 和 \(M_{\mathrm{high}}\) 是同一窗口与单位下有限非负的单请求平均资源占用。用线性均值作初步容量估算：
 
-如果 30% 请求从 low 升到 high，平均 token 可能只增加 20%，但长思考会让活跃请求持有 KV 更久，p99 可能增加得更多。可以用一个粗略容量式检查升级比例：
-
-~~~math
+```math
 M_{\mathrm{active}}
-\approx N\left((1-q)M_{\mathrm{low}}+qM_{\mathrm{high}}\right),
-~~~
-
-其中 `N` 是非负整数形式的活跃请求数，`q\in[0,1]` 是 high 占比，`M_low` 和 `M_high` 是在同一时间窗口、同一资源单位下估计的单请求资源占用，并且都应为有限非负数。`N=0` 时没有活跃负载；`q` 缺失或超出 `[0,1]` 时不能用这个式子推算容量。实际还要计入 batch、cache、工具等待和 preemption，但这个式子足以提醒我们：档位路由是容量问题，不是 UI 问题。
-
-因此应设置每租户升级配额、全局 reasoning token 预算和过载策略。容量不足时可以排队、异步、降级或请求用户确认；不能偷偷把 high 变成 low，却仍然向用户宣称执行了同一档位。
-
-## 14.17 档位迁移的 golden suite
-
-从 provider A 迁移到 provider B 时，先建立行为矩阵，而不是把字符串字段直接替换。测试集至少包括：简单问答、长文档中间证据、数学/代码、结构化输出、单工具、并行工具、工具拒绝、取消、超时和多轮状态。
-
-每个用例保存实际档位、输入 token、reasoning/visible output usage、事件序列、工具调用、finish reason、延迟、成本和权限决定。适配器内部可以使用 `native`、`adapted` 和 `unsupported`；发布报告也可以把有损适配进一步标记为 `mapped` 或 `degraded`。无论采用哪套标签，都必须写明语义损失并完成质量、成本和协议回归，不能只因为请求没有报错就认为兼容。
-
-## 14.18 一个文档分析路由例子
-
-用户上传一份合同并提出三个问题。第一个问题只要求查找定义，low 档位已足够；第二个问题需要比较跨页例外条款，medium 档位可能值得；第三个问题要求修改合同并发送给外部人员，即使 high 档位能提高分析质量，也必须停在草稿和人工确认。
-
-路由日志应让人看出这三件事：为什么选择该档位，消耗了多少预算，最终动作是否仍受独立权限策略和人工确认约束。这样“档位升级”不会被误解成“授权升级”，也便于在用户投诉延迟或成本时回放决策。
-
-## 14.19 评测档位的停止条件
-
-档位实验应先定义停止条件：某任务 bucket 的质量不低于基线、p99 不超过 SLO、单位成功成本可接受、协议回归全通过、危险动作漏放为零或低于硬性条件。若只要平均分上升就继续扩大 high 流量，系统可能在尾部和高风险切片上退化。
-
-每次发布还要保留旧档位的 shadow 结果。shadow 可以记录“如果使用另一个档位会怎样”，但不能触发第二次工具副作用。新旧结果的差异要按任务类型、租户、语言、上下文长度和工具状态切片。
-
-## 14.20 level 的内部实现不能从名字倒推
-
-“low、medium、high”只是用户可见的控制面。某个 provider 可能改变隐藏推理预算，另一个可能改变候选数、工具轮数、模型路由或超时；还有的实现只把字段映射为一组服务端默认参数。相同的 level 名称不能证明两个系统使用相同算法，也不能证明 token 计费口径相同。
-
-因此，迁移 level 时应把它编译成自己的内部资源策略，而不是把字符串原样透传。例如内部策略可以显式记录 `max_reasoning_tokens`、`max_tool_rounds`、`deadline_ms`、`verification_required` 和 `fallback_model`，再由 provider adapter 映射。映射失败时要拒绝或降级到已验证的档位，不能静默把 high 变成无限重试。
-
-## 14.21 档位曲线要按任务族绘制
-
-不同任务的收益曲线可能完全相反。简单分类题在 low 到 medium 之间几乎没有提升，代码修复可能在 medium 明显提升，开放研究题则可能直到 high 才增加证据覆盖。把所有任务混成一个平均分，会掩盖尾部任务和成本爆炸。
-
-建议为每个任务族记录：档位、成功率、证据正确率、格式通过率、工具次数、p95、单位成功成本和安全拒绝率。一个档位只有在目标任务族的质量/成本曲线上位于可接受 Pareto 前沿，才值得作为默认选项。档位不是越多越好，过多档位会增加测试矩阵、缓存分裂和用户解释成本。
-
-## 14.22 从产品字段到运行时检查条件
-
-一次请求进入 runtime 后，先校验 level 是否被当前模型 revision 支持，再计算输入、输出和 reasoning 的预算，随后把工具权限和超时写入独立状态。生成过程中如果达到 token 预算，应进入验证或降级状态；如果工具返回新证据，可以按策略升级，但每次升级都要留下原因和剩余预算。
-
-这样处理后，客户端看到的只是稳定的档位语义，服务端仍然保留可审计的资源轨迹。若 provider 修改了 level 定义，golden suite 可以发现质量、usage 或事件顺序变化，而不是等到线上发现“同一个 high 变慢了”。
-
-## 14.23 level 的用户语义和内部指标
-
-对用户来说，level 应表达“更快、更省”或“更充分地验证”，而不是暴露某个 provider 的内部 token 字段。对工程师来说，内部必须能映射到明确的最大 token、deadline、工具轮数、验证器和 fallback。两套语义通过版本化配置连接，不能让 UI 文案直接控制权限。
-
-## 14.24 档位变更的兼容性实验
-
-模型升级后，即使 low/medium/high 字段仍然存在，实际预算和质量也可能变化。用固定任务回放旧版本和新版本，比较档位间质量差、usage、事件序列、工具调用和成本；若 high 变成更长的输出但没有新增验证，应调整文档和默认路由，而不是继续沿用旧阈值。
-
-## 14.25 小结与资料边界
-
-Thinking level 的价值是把复杂的 test-time compute 策略包装成易用界面，代价是隐藏了预算、协议、队列和成本差异。阅读这类字段时，先问它实际改变了什么资源、什么事件和什么 SLO，再问它是否让目标任务更可靠。
-
-档位名称、映射和计费必须以对应版本的官方模型文档为准；没有公开映射时，本书只能讨论可测的外部行为，不能把产品标签当成内部算法证明。任何档位都不能绕过身份、最小权限、审批和工具执行验收条件。
-
-本章可进一步核对的公开资料包括：OpenAI Reasoning 指南（请求级 reasoning 参数和 usage 说明入口）<https://platform.openai.com/docs/guides/reasoning>；Anthropic Extended Thinking 文档（思考预算和工具协议入口）<https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking>；以及前文的 Self-Consistency、Tree of Thoughts 和 test-time compute 研究论文。官方文档能支持字段和外部协议的说明，不能证明 provider 未公开的内部搜索、verifier 或停止策略。
-
-## 14.28 Gemini 3.8 Flash：思考预算、签名状态与可审计回放
-
-Gemini 3.8 Flash 把 `low`、`medium`、`high` 暴露为请求级 thinking level，默认/合法档位必须以该模型版本的官方表为准；本版本的 `minimal` 不支持。它们是同一基础模型的运行配置，不是三个 checkpoint。`max_output_tokens` 还可能同时约束 thinking 和可见输出，因此“回答短”不等于“没有思考”，预算耗尽也可能表现为最终答案截断。
-
-Google 的 thought summary 是开发者可见的摘要，thought signature 是跨轮维持 reasoning 连续性的 opaque 协议状态；两者都不是完整 chain-of-thought、应用永久记忆或 GPU KV cache。Interactions API 进一步把 `thought`、`tool_call`、`tool_result`、`model_output` 组织成 steps。评测档位时，除了成功率，还要保存 summary/signature 是否存在、SSE 事件、回放顺序、thinking/visible usage、工具轮数、TTFT/TPOT、截断和单位成功成本。
-
-本节的原则是：level 改变的是可观察的预算/行为控制面，不能从名称推导 Google 未公开的搜索树、RL 目标、verifier 或 Transformer 结构。完整案例与快照见 [`gemini-3.8-flash-source-notes.md`](../../research/model-update-2026-09/gemini-3.8-flash-source-notes.md)。
-
-2026-09-23 的官方 Thinking 文档又给出一个容易漏掉的硬边界：`max_output_tokens` 同时计入 thought 与可见输出；如果在思考阶段触顶，Interaction 会以 `incomplete` 结束，可能没有完整最终答案，但已经生成的 thought tokens 仍计费。要降低成本应调低 `thinking_level`，而不是把硬上限压到会截断答案。Interactions 的 `thought.signature` 是必需的 opaque 状态，`summary` 可以为空；因此 usage、summary、signature 和 visible output 必须在实验账本中分开。
-
-## 14.26 Gemini 3.5 Flash-Lite：默认 minimal 与任务级预算
-
-Google Thinking 文档把 `gemini-3.5-flash-lite` 列为默认 `On (minimal)`，并支持 `minimal`、`low`、`medium`、`high`。这里的 level 是请求级 test-time compute 控制，不是四个 checkpoint，也不是严格的 reasoning token 上限。`minimal` 仍可能在复杂请求中产生少量思考，所以“minimal”不能简单等同于关闭 reasoning。
-
-对于低延迟 subagent，合理的路由策略是把 level、输出上限、工具轮数、deadline 和 verifier 作为一个版本化预算策略。例如分类或抽取优先 minimal；需要少量规划的工具任务使用 low；复杂代码或多步验证再升到 medium/high。比较不同 level 时必须固定模型 revision、prompt、工具 schema、工具结果、缓存命中和任务验证器，并记录 reasoning token、可见输出、TTFT、TPOT、重试和单位成功成本。
-
-不要把 Gemini 3.5 Flash 的默认 `medium` 迁移到 Flash-Lite。正确的 `whats-new-gemini-3.5` 页面属于 Flash；Lite 自己的 Thinking 表和 Model Card 才是本模型的直接证据。Model Card 同时把 Lite 的架构、训练数据、软硬件资料指向 Gemini 3.1 Flash-Lite，因此公开 level 变化不能被扩写成新的内部推理算法。
-
-## 14.27 Grok 4.20：`reasoning.effort` 可能是 Agent 数量
-
-xAI 的 Grok 4.20 文档给出了一个容易误读的例子：对普通 reasoning 模型，`reasoning.effort` 可以表示 test-time compute 或推理预算；但对 `grok-4.20-multi-agent`，官方明确把它映射为协作规模：`low/medium` 使用 4 个 Agent，`high/xhigh` 使用 16 个 Agent。它不是四个 checkpoint，也不是每个 Agent 内部“多想几层”的公开证明。
-
-应把控制面拆成两层：
-
-```text
-ordinary model: effort -> reasoning budget/observable usage
-multi-agent:   effort -> agent_count -> sub-agent DAG -> leader synthesis
+\approx N\bigl((1-q)M_{\mathrm{low}}+qM_{\mathrm{high}}\bigr)
 ```
 
-因此评测多 Agent 时必须同时记录子 Agent 数量、分工、工具调用、来源、汇总和 leader verifier。16 Agent 可能提高检索覆盖，却也会增加 token、延迟、重复证据和错误汇总；不能只比较最终文本长度。xAI 当前没有为普通 Grok 4.20 专属页公开完整 effort 档位，所以不能把 Grok 4.6 的 effort 表自动迁移给它。
+例如，假设有 100 个活跃请求，25% 使用 high；合成假设 low 每请求占 1 GiB、high 占 3 GiB，则 low 侧有 75 个请求，占 \(75\times1=75\) GiB；high 侧有 25 个请求，占 \(25\times3=75\) GiB；合计约 \(150\) GiB。这里的输入和结果都是玩具估算，实际系统必须用目标模型、批处理、缓存、抢占和工具等待数据替换。
 
-## Grok 4.7：encrypted reasoning state 与 compaction
+该均值只能帮助估算资源总量，不能推出 p95/p99 延迟，也不能替代队列模拟或负载实验。容量不足时，系统应明示排队、异步、已批准的降级或请求重选；若实际档位改变，就把实际执行状态回传并记入账本，避免继续显示原请求档位。
 
-Grok 4.7 的 `reasoning_effort` 仍是同一模型的运行配置，不是四个 checkpoint。更重要的边界在 Responses 协议：每次响应可能包含 `reasoning.encrypted_content`，后续请求需要原样回传。这个字段是 opaque runtime state，不是可见 chain-of-thought、应用永久记忆或可以编辑的摘要；Chat Completions 也不提供同样的 ciphertext。
+## 14.6 档位与权限分别决策
 
-Context Compaction 返回单个 opaque `type=compaction` item。它不能被裁剪、重排或手工改写，而且只能在请求还没有超过当前 context limit 时帮助重组上下文。长任务 trace 应同时保留：
+档位可能控制文档明确说明的推理或响应资源。产品也可以把某个档位映射为更多验证轮次或更长 deadline，但这属于产品自己的服务契约，必须可观测且经过评测。档位字符串本身不授予身份、数据范围或工具权限。
 
-```text
-model/revision/effort
-reasoning item and encrypted state order
-tool call/result, call_id, permission and side effect
-compaction trigger/item, restored context and verifier result
-```
+例如，调用方只持有只读权限时，即使请求 `high`，适配器也只能在该权限下增加允许的分析或验证工作。写入、发送、支付和发布等外部副作用仍须由独立授权规则决定；需要人工确认时，档位不能跳过确认。能力矩阵应同时记录“档位允许的资源”和“外部策略批准的动作”，避免 UI 或日志把两者混成一个值。
 
-因此“不能关闭 reasoning”不等于公开了隐藏推理算法；“发生 compaction”也不等于清空历史或重置预算。真正的评测要观察状态能否完整回放、工具副作用是否重复、压缩后任务是否仍能通过独立 verifier。
+取消与超时也属于契约：若客户端 deadline 到期，宿主应停止后续工具动作，并记录请求是否取消成功、工具是否已经产生副作用。若 fallback 改了模型或档位，响应须带上实际 model ID、实际 level 和降级原因。不同供应商的具体状态协议另见第十五章。
 
-Reasoning 文档刷新后还要把三类状态分开：每次 Responses 返回的 `reasoning.encrypted_content` 及服务端工具的加密输出是原样回放的 opaque state；`response.reasoning_text.delta` 和 `response.reasoning_summary_text.delta` 是面向开发者的可见 reasoning/summary 流，不等于完整隐藏 CoT；`store` 决定 response 是否可由 `previous_response_id` 复用，不能把它与 encrypted field 的默认返回或服务端 rehydration 混为一谈。
+## 14.7 升级时回放协议与质量回归
 
-## 14.29 Qwen3-Omni：思考配置和 Talker 状态不是同一预算
+模型、endpoint 或适配器升级后，字段名可能仍相同，事件顺序和 usage 口径却可能变化。回归集应覆盖直接回答、长上下文取证、数学/代码、结构化输出、工具成功与拒绝、取消、超时及多轮状态。每个用例保存准确 model ID/revision、输入、请求档位、返回事件、usage、结束状态、成本和 verifier 结果，才能区分质量回退、计量变化与协议破坏。
 
-Qwen3-Omni 的 Thinker/Talker 结构提醒我们，`thinking`、文本输出和语音输出不能只用一个 `max_tokens` 解释。Thinker 的理解/推理 token、工具调用和 policy/verifier 事件会影响 Talker 何时开始生成；Talker 又有首码本、residual codebooks、Code2Wav 和音频 packet 的独立状态。
+shadow 回放可以比较候选档位的输出和账单，但不能再次触发真实工具副作用。涉及写入或外发的案例，应使用无副作用的模拟工具或只比较到动作草稿。评估通过后，才按产品自己的发布门槛逐步切换；门槛由任务成功、尾延迟、成本和独立安全条件组成，不由“请求没有报错”替代。
 
-因此评测多模态 reasoning 时至少记录：模型 variant、Thinker 输入/推理/文本 token、工具轮数、RAG/安全等待、Talker codebook steps、首音频包、waveform/packet 和最终 verifier。AuT 的 12.5 Hz/约 80 ms 是编码时间粒度，不是 thinking budget；报告的 `234 ms` 首音频包也不是通用 p99。Instruct、Thinking、Captioner 仍是同家族 artifact，不把它们当成不同 reasoning checkpoint。
+客户端提示也应选择可验证的语义，例如“使用了外部检索”“通过了单元测试”“需要人工确认”。不要向用户承诺“更聪明”或某个未公开算法。切档位后的策略选择如何利用任务特征和反馈交给第十八章，本章不重复定义在线控制器。
+
+## 14.8 三类公开接口如何解释档位
+
+以下案例展示字段虽相似，合同对象却可能不同。页面会随 provider、model ID 和日期变化；事实均限定在对应官方材料的公开范围内，访问日期为 2026-11-13。
+
+### 14.8.1 Google Gemini：默认值、输出硬上限与 thought state
+
+Google 当前 Thinking 文档将 `gemini-3.8-flash` 列为默认 `medium`，支持 `low`、`medium`、`high`，不支持 `minimal`；`gemini-3.5-flash-lite` 默认 `minimal`，支持 `minimal`、`low`、`medium`、`high`。这张表说明即使同属 Gemini 系列，也不能把一个模型的默认档位直接复制给另一个 model ID。见 [Gemini Thinking 文档](https://ai.google.dev/gemini-api/docs/thinking)及[Gemini 3.5 Flash-Lite 模型页](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite)。
+
+在 Interactions API 文档中，`max_output_tokens` 是包括 thought tokens 在内的总生成硬上限，不会替模型重新分配 thinking level；若模型在思考中触顶，请求会以 `incomplete` 返回，可能没有完整最终答案，而已生成的 thought tokens 仍计费。官方建议需要降低成本或延迟时先降低 `thinking_level`，不要把总输出上限压到截断答案。usage 可分别检查 `total_thought_tokens` 与 `total_output_tokens`。这些字段对应当前 Interactions API 文档，不应未经核实外推到其它 API surface。
+
+同一 API 的 `thought` step 必须带加密 signature；summary 可缺省或为空。多轮 stateful 请求由服务端管理 signature，stateless 请求则需按文档原样回送 thought blocks。Interaction 的 steps 按时间顺序记录 thought、工具调用/结果及最终 model output。signature 是延续协议所需的 opaque state，summary 是可见摘要；二者都不能当作完整内部推理文本。更完整的跨轮状态分工见第十五章。相关入口：[Thought signatures](https://ai.google.dev/gemini-api/docs/thought-signatures)与[Interactions API 概览](https://ai.google.dev/gemini-api/docs/interactions-overview)。
+
+### 14.8.2 xAI Grok：effort 也可能控制协作规模
+
+xAI 的 reasoning 文档列出 `grok-4.7` 的 `reasoning.effort` 支持 `low`、`medium`、`high`（默认）和 `xhigh`，并说明 reasoning 不能关闭。Responses API 对 `grok-4.7` 会返回 `reasoning.encrypted_content`；后续请求需要把 reasoning item 原样回传，供多轮连续性使用。该字段是协议状态，不是可读 CoT；Chat Completions 不提供同一 ciphertext 字段。来源：[xAI Reasoning](https://docs.x.ai/developers/model-capabilities/text/reasoning)、[Grok 4.7 文档](https://docs.x.ai/developers/models/grok-4.7)。
+
+同一份官方文档对 `grok-4.20-multi-agent` 给出不同的字段语义：`reasoning.effort` 为 low/medium 时使用 4 个协作 agent，high/xhigh 时使用 16 个。xAI 将多 Agent Research 标为 beta；其文档说明更大的协作规模会消耗更多 token 和延迟，子 Agent 的中间状态默认不直接展示给用户。此处的 level 控制 agent 数，不应讲成普通单模型的推理深度档位；协作和验证成本留在第十六章展开。来源：[xAI Reasoning](https://docs.x.ai/developers/model-capabilities/text/reasoning)与[Multi Agent 文档](https://docs.x.ai/developers/model-capabilities/text/multi-agent)。
+
+### 14.8.3 Qwen3-Omni：模型变体不等于单一模型的档位
+
+Qwen3-Omni 技术报告与官方仓库发布 Instruct、Thinking 和 Captioner 等不同变体；报告把 Thinking 描述为面向多模态推理的变体，把 Captioner 描述为从 Qwen3-Omni-30B-A3B 微调出的音频描述模型。它们是用途和训练不同的公开 artifact，不是一个 checkpoint 上 low/medium/high 三个运行档位。来源：[Qwen3-Omni 技术报告](https://arxiv.org/html/2509.17765)、[官方仓库](https://github.com/QwenLM/Qwen3-Omni)。
+
+该报告描述 Thinker 处理多模态输入与文本生成，Talker 生成流式语音；音频 codec 速率为 12.5 Hz，即每秒 12.5 个 codec frame，帧间隔为 \(1/12.5=0.08\) 秒，也就是 80 ms。这个是音频时间粒度，不是推理预算。报告称在冷启动、没有先前上下文时，理论首包延迟为 234 ms；其并发表进一步给出并发为 1 时音频/视频 234/547 ms，并发为 4 时 728/1517 ms，并发为 6 时 1172/2284 ms。作者说明这些是特定 vLLM、torch.compile 和 CUDA Graph 设置下的理论数据，不是 p99，也不是不同 reasoning level 的质量—成本比较。
+
+这个案例提醒我们，分析多模态系统时需分别记录 Thinker 的处理、Talker 的流式输出和任务成功条件。若把 codec 帧率、首包延迟或模型变体名称直接当成 thinking level，就会混淆时间单位、解码架构和推理控制。
+
+## 14.9 小结与练习
+
+thinking level 是具体服务接口上的离散选择。读者要先查 model ID 与 API surface，再识别它控制的对象、总输出上限、usage、事件和状态协议；迁移时用 capability matrix 标记 `native`、有损 `adapted` 或 `unsupported`。档位收益用固定任务族上的质量、成本、尾延迟与安全条件判断，外部权限必须独立决策。第十三章提供计量账本，第十八章处理在线预算策略，第十五章继续讨论状态延续。
+
+练习一：为两个不同后端写一张 capability matrix。每一项标注“官方可确认”“产品自定义”或“未知”，并说明 usage 和状态如何回放。
+
+练习二：某后端只有 `max_output_tokens`，没有 native level。设计一条 `adapted` 响应，解释为什么该字段不能称作 reasoning budget，并给出一个验证其成本与可见答案完整性的实验。
+
+练习三：某档位升级使跨文件代码成功率由 0.55 升至 0.76，p95 从 2.8 秒升至 9.2 秒。列出仍需收集的成本、安全和样本不确定性信息，再判断是否适合默认启用。

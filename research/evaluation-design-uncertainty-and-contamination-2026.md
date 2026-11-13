@@ -84,6 +84,24 @@
 
 - 于 2026-11-03 再读 OpenAI 官方 [Working with evals](https://developers.openai.com/api/docs/guides/evals) 与 [Deprecations](https://developers.openai.com/api/docs/deprecations)。指南仍称 Evals 对现有用户于 2026-10-31 转为只读，平台计划于 2026-11-30 关闭，并建议新建或迭代评测考虑 Datasets。这里记录的是官方页面当前公布的生命周期时间表；未通过账户登录验证具体项目的可写状态。依赖该托管平台的文档应在迁移时再核对官方时间表。
 
+## 2026-11-12 补充：检测方法综合与在线检索泄漏
+
+### Benchmark contamination 检测方法系统综述
+
+- **来源与版本：** Nourbakhsh et al., [Are LLM Benchmarks Already Contaminated? A Systematic Review of Contamination Detection Methods](https://aclanthology.org/2026.gem-main.50/)，GEM 2026，ACL Anthology 页 518—539；本次核验官方书目信息与摘要。
+- **阅读范围：** ACL Anthology 正式摘要和元数据；未逐章复核 55 篇纳入研究的编码表与全部效应量。
+- **来源支持：** 作者综述截至 2025 年的 55 项研究，提出 exact、syntactic、semantic、task-level 四层污染分类，比较字符串匹配、似然、成员推断、LLM 提示探测和 benchmark 审计五类方法及其访问假设/失效模式。摘要称没有一种检测法能在污染层次、模型访问条件和训练阶段间持续可靠，并提醒各污染效应估计依赖不同假设。
+- **证据等级：** source-backed（正式 workshop 论文摘要中的综述范围和作者结论）。
+- **适用边界：** 本次只读官方摘要，不把不同方法报出的命中率、AUC 或分数变化合并成统一污染率；系统综述也不意味着每个纳入研究都已独立复现。具体方法仍需按目标任务、可访问信号和后训练阶段校准。
+
+### Deep Research agent 的检索时 benchmark 泄漏
+
+- **来源与版本：** Wang et al., [Search-Time Contamination in Deep Research Agents: Measuring Performance Inflation in Public Benchmark Evaluation](https://aclanthology.org/2026.findings-emnlp.760/)，Findings of EMNLP 2026，页 16012—16027。
+- **阅读范围：** ACL Anthology 正式摘要和书目信息；未逐表复核七个 benchmark 的具体样本、分类器阈值和分任务效应量。
+- **来源支持：** 作者定义 benchmark 元数据泄漏、题目上下文泄漏和答案泄漏三类 search-time contamination，并在七个公开 benchmark 上考察 deep research agents。摘要报告该问题普遍出现，特定设置下测得的性能抬升最高约 4%。
+- **证据等级：** source-backed（同行评审 Findings 论文的作者报告）。
+- **适用边界：** 该上界只适用于论文所测 agent、检索轨迹、七个 benchmark 和检测流程；不代表所有联网模型都被抬高 4%，也不能与训练数据污染率混为一谈。评估是否隔离网络应由任务是否允许外部检索、生产流程是否联网及威胁模型决定。
+
 ## 尚未解决的证据问题
 
 - 工程诊断中的“实验区分度”如何转成可信的先验概率、结果似然和行动效用，需要目标任务自身的数据与决策模型；通用 `G×R/C` 分数没有校准依据。

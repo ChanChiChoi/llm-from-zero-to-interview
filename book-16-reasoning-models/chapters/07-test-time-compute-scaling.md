@@ -23,13 +23,15 @@
 
 ## 0.2 资料与证据边界
 
-`Scaling LLM Test-Time Compute Optimally` 研究了在固定模型和推理预算下如何在不同推理策略之间分配计算，适合说明“预算分配”而不只是“预算增加”。`Large Language Monkeys` 讨论了大量采样和推理时扩展的经验现象，适合说明高预算曲线、长尾和边际收益的观察边界。
+几项研究说明，推理时计算的收益取决于任务和分配方式。Snell 等在其数学任务与模型设置中发现，策略效果随题目难度变化，并报告按题分配计算的策略比 Best-of-N 基线有更高的预算效率；论文的“超过 4 倍”结果只适用于其比较设置，不能外推到任意模型或业务流量。[论文版本](https://arxiv.org/abs/2408.03314v1)
 
-Tree of Thoughts 说明了逐步生成、评估和搜索中间 thought 的路线；Self-Consistency 说明了通过多条采样轨迹聚合答案的路线；DeepSeek-R1 的公开论文可以作为 reasoning 训练与推理时计算关系的一个公开研究入口，但不能用它推断其他模型的内部实现。
+`Large Language Monkeys` 在代码、形式证明等任务上研究重复采样，报告候选覆盖随样本数增加；在缺少自动验证器的实验任务中，多数投票和 reward model 的选择效果会遇到瓶颈。这说明“池中至少有一个正确答案”和“系统能选对答案”必须分开测量。[论文 v3](https://arxiv.org/abs/2407.21787v3)
+
+2026 年的分析工作按计算发生的位置区分单轨迹延长、完整候选生成后的终局聚合，以及对未完成前缀进行搜索；这些是描述推理结构的类别，实际系统可以组合使用。[Hariri 等，预印本 v2](https://arxiv.org/abs/2608.04001v2) 另一项预印本把逐题预算选择写成受平均计算约束的准确率优化，并在 MATH、GSM8K 和指定模型上评估 learned allocator；其结果是有限题集上的实验报告，不证明同一路由器可直接迁移到代码、合同或线上延迟目标。[Zhai 等，预印本 v1](https://arxiv.org/abs/2604.14853v1)
 
 本章还会讨论产品接口中常见的 effort、thinking level 或类似控制面。字段名称只能证明产品暴露了某种控制方式，不能证明不同厂商的档位对应相同 token、相同搜索深度或相同内部算法。除非官方文档明确说明，正文不把产品词翻译成确定的内部结构。
 
-本章的曲线数字、成本权重和 Python 数据均为教学构造。论文结果只在论文任务、模型、数据和预算口径内成立；本章 demo 只证明代码逻辑和指标关系，不代表真实模型性能。
+本章的曲线数字、成本权重和 Python 数据均为教学构造。论文结果只在论文任务、模型、数据和预算口径内成立；本章 demo 只说明 toy 数据下的指标关系，不代表真实模型性能。
 
 ## 0.3 初学者视角：多花计算到底在做什么
 
@@ -66,24 +68,28 @@ b_i=(K_i,L_i,D_i,V_i,U_i,H_i)
 
 把预算写成向量很重要。增加 `K` 和增加 `D` 都会让系统更忙，但一个主要增加横向候选，一个主要增加纵向搜索；增加 `V` 可能提高选择质量，也可能让一个有偏的评分器影响更多决策。
 
+例如，合同核对请求可先设置 `b_i=(4,512,2,2,1,1)`：最多生成 4 条、每条最多 512 token，搜索深度不超过 2，调用 verifier 不超过 2 次、工具不超过 1 次、修正循环不超过 1 轮。它们是不同资源的上限，实际策略可能提前停止；预算口径和成本账本的细化见[第十三章](13-reasoning-effort与推理预算.md)。
+
 ### 1.2 成本函数
 
-设 `T_i` 是请求实际消耗的生成和评分 token，`v_i`、`u_i` 分别是实际 verifier 和工具调用数量，`R_i` 是用户可感知的服务时间，可以写一个抽象成本：
+设 `T_i` 是请求实际消耗的生成和评分 token，`n_{\mathrm{ver},i}`、`n_{\mathrm{tool},i}` 分别是实际 verifier 和工具调用数量，`R_i` 是用户可感知的服务时间，可以写一个抽象成本：
 
 ~~~math
 C_i(m)
 =
 c_{\mathrm{tok}}T_i
-+c_{\mathrm{ver}}v_i
-+c_{\mathrm{tool}}u_i
++c_{\mathrm{ver}}n_{\mathrm{ver},i}
++c_{\mathrm{tool}}n_{\mathrm{tool},i}
 +c_{\mathrm{lat}}R_i
 ~~~
 
-`m` 是推理策略，`c_tok`、`c_ver`、`c_tool` 和 `c_lat` 是有限的非负业务权重；`T_i`、`v_i`、`u_i` 和 `R_i` 也必须是有限且非负的实际消耗。批处理评测可能更重视总计算量，在线交互可能更重视延迟，高风险审阅则可能把人工复核和错误代价加入成本。预算上限与实际消耗要分开记录：没有达到上限，不代表系统一定使用了相同的计算量。
+`m` 是推理策略，`c_tok`、`c_ver`、`c_tool` 和 `c_lat` 是有限的非负业务权重；`T_i`、`n_{\mathrm{ver},i}`、`n_{\mathrm{tool},i}` 和 `R_i` 也必须是有限且非负的实际消耗。批处理评测可能更重视总计算量，在线交互可能更重视延迟，高风险审阅则可能把人工复核和错误代价加入成本。预算上限与实际消耗要分开记录：没有达到上限，不代表系统一定使用了相同的计算量。
+
+手算一笔教学成本：设 `T_i=500` token、`n_{\mathrm{ver},i}=2` 次 verifier 调用、`n_{\mathrm{tool},i}=1` 次工具调用、`R_i=0.4` 秒，并假设 `c_tok=0.002`、`c_ver=1`、`c_tool=3`、`c_lat=5`。则 `C_i=0.002×500+1×2+3×1+5×0.4=8` 个归一化成本单位。这里的权重是示例中的换算假设，不是市场价格；实际系统若没有可靠的共同换算率，就应分别报告 token、调用数和秒数，不能直接相加。
 
 ### 1.3 质量函数
 
-令 `B` 表示一种有限的非负预算口径，例如每请求 token、总模型调用或金钱成本。当评估任务数 `N>0` 时，固定策略在预算 `B` 下的任务准确率可以写成：
+令 `B` 表示一种有限的非负预算口径，例如每请求 token、总模型调用或金钱成本。当评估任务数 `N>0` 时，固定策略在预算 `B` 下的任务准确率可以写成。比较不同预算时要固定模型版本、提示、评估样本和选择规则；若资源仍是多维向量，就选定一个预算轴并固定其他轴，或先说明有依据的标量换算，不能把 token、调用数和秒数直接拼成 `B`：
 
 ~~~math
 A(B)
@@ -105,7 +111,9 @@ G(B_1,B_2)
 \frac{A(B_2)-A(B_1)}{C(B_2)-C(B_1)}
 ~~~
 
-如果两种预算的成本相同，`G` 没有定义；不能用 0 代替。`G` 不是能力的绝对度量，而是一个资源决策指标。不同阶段的 `G` 可能差别很大：从一次生成增加到少量采样，收益可能明显；从大量采样再翻倍，收益可能接近零。
+这里 `C(B)` 表示固定评估集上采用预算 `B` 时的总成本，即对各请求的 `C_i` 求和；各成本必须使用同一口径。若两种预算的成本相同，`G` 没有定义；不能用 0 代替。`G` 不是能力的绝对度量，而是一个资源决策指标。不同阶段的 `G` 可能差别很大：从一次生成增加到少量采样，收益可能明显；从大量采样再翻倍，收益可能接近零。
+
+例如，固定 4 道题评估时，低预算答对 2 道，故 `A(B_1)=2/4=0.50`；高预算答对 3 道，故 `A(B_2)=3/4=0.75`。若两档总成本分别为 12 和 20 个同口径成本单位，则 `G=(0.75−0.50)/(20−12)=0.03125`，即每增加一个成本单位，样本平均准确率增加 0.03125。小样本的这个差值很不稳定，正式比较还要报告不确定性和任务切片。
 
 ## 2. 为什么增加推理时计算可能有效
 
@@ -118,6 +126,8 @@ P_i(K)=1-(1-p_i)^K
 ~~~
 
 当 `K=0` 时，按空事件概率为 0 处理；当 `K>0` 时，公式依赖候选相互独立且每个候选命中概率相同的假设。它只说明“候选覆盖”会随着 `K` 增加而提高。它没有说明最终答案会正确，因为系统还要从候选中选出正确的那个。
+
+例如，若单条候选答对概率 `p_i=0.2`，生成 `K=3` 条且暂时假设独立，则至少一条正确的概率为 `1−(1−0.2)^3=1−0.8^3=1−0.512=0.488`。这个 48.8% 是候选覆盖概率，不是最终交付准确率：选择器仍可能挑中错误候选。重复采样在代码任务上的覆盖结果与无自动验证器时的选择瓶颈，见[Large Language Monkeys v3](https://arxiv.org/abs/2407.21787v3)；其结论依论文中的模型、任务和 oracle。
 
 真实候选往往相关。若所有候选都共享同一个错误的题意理解，独立假设就不成立，实际提升会比公式慢得多。可以用有效独立样本数、错误类型覆盖和答案去重率补充描述。
 
@@ -151,23 +161,23 @@ Long CoT 允许模型生成更长的中间轨迹。它可能提供更多计算�
 
 Self-Consistency 生成多条推理链，将最终答案归一化后投票或聚合。它适合答案形式明确、错误路径不会高度相关的数学和逻辑任务；对开放写作和主观偏好任务，投票本身可能没有明确含义。
 
-Self-consistency 的核心成本是候选生成；它通常不在中间步骤动态剪枝。若候选可以并行，墙钟延迟可能低于同 token 数的串行搜索，但 GPU 资源和总 token 仍会上升。
+Self-consistency 的核心成本是候选生成；它通常不在中间步骤动态剪枝。若候选可以并行，墙钟延迟可能低于同 token 数的串行搜索，但 GPU 资源和总 token 仍会上升。原始论文在其任务与模型上报告了多路径采样和终局聚合的收益，不能把该结果当作所有开放式任务都适合多数投票的证明。[Wang 等，ICLR 2023](https://arxiv.org/abs/2203.11171v4)
 
 ### 3.3 Best-of-N
 
 Best-of-N 的流程是生成 `N` 个候选、评分、选择最高分。它比自一致性更依赖 verifier，因为最终不一定采用多数答案，而是采用评分器最喜欢的答案。
 
-如果候选存在多个等价正确表达，评分器应先做答案等价类归一化或使用程序验证；否则同一答案的不同措辞可能被错误当成多个竞争候选。
+如果候选存在多个等价正确表达，评分器应先做答案等价类归一化或使用程序验证；否则同一答案的不同措辞可能被错误当成多个竞争候选。Best-of-N 的生成—评分—选择路线已有数学题任务研究，但收益依赖候选分布和 verifier；Cobbe 等在 GSM8K 上报告其训练 verifier 对候选排序的实验结果。[论文 v2](https://arxiv.org/abs/2110.14168v2)
 
 ### 3.4 Verifier reranking
 
-Verifier reranking 让 verifier 在候选生成之后参与排序。outcome verifier 主要看终局，process verifier 还看中间步骤，programmatic verifier 执行代码、公式或 schema。
+Verifier reranking 让 verifier 在候选生成之后参与排序。outcome verifier 主要看终局，process verifier 还看中间步骤，programmatic verifier 执行代码、公式或 schema；监督粒度、verifier 与 reward model 的差别及常见校准指标见[第四章](04-verifier与reward-model.md)。
 
-reranking 的评估不能只看 verifier 的 pairwise accuracy。真正的下游问题是：在真实生成器产生的候选集合上，最高分候选是否正确，是否增加了高分 hard negative，单位成功成本是多少。
+reranking 的评估不能只看 verifier 的 pairwise accuracy。真正的下游问题是：在真实生成器产生的候选集合上，最高分候选是否正确，是否增加了高分 hard negative，单位成功成本是多少。候选覆盖与 verifier 选择也是不同的实验对象；重复采样研究已显示，无自动 oracle 的部分任务中选择方法会遇到上限。[Brown 等，arXiv v3](https://arxiv.org/abs/2407.21787v3)
 
 ### 3.5 Tree search
 
-Tree-of-Thought、beam、best-first 和 MCTS 将候选扩展提前到中间步骤。它们可以在发现明显错误时节省后续计算，也可以回溯和尝试不同策略；代价是状态表示、去重、剪枝、缓存和日志更复杂。
+Tree-of-Thought、beam、best-first 和 MCTS 将候选扩展提前到中间步骤。它们可以在发现明显错误时节省后续计算，也可以回溯和尝试不同策略；代价是状态表示、去重、剪枝、缓存和日志更复杂。Tree of Thoughts 的原论文在 Game of 24、创意写作和迷你填字等特定任务上研究中间状态搜索；算法结构和细节见[第六章](06-search与tree-of-thought.md)及[论文 v2](https://arxiv.org/abs/2305.10601v2)。
 
 ### 3.6 Reflection 和修正循环
 
@@ -177,7 +187,7 @@ Tree-of-Thought、beam、best-first 和 MCTS 将候选扩展提前到中间步�
 
 ### 3.7 Tool loop
 
-工具循环把生成、执行、观察和下一次决策串起来。代码修复可以生成补丁、运行测试、分析失败、再次修改；文档问答可以检索条款、核对引用、比较版本、重新计算。
+工具循环把生成、执行、观察和下一次决策串起来。代码修复可以生成补丁、运行测试、分析失败、再次修改；文档问答可以检索条款、核对引用、比较版本、重新计算。代码修复 demo 中，search 用 `940` 个生成/评分 token、`5` 次 verifier 和 `2` 次工具调用；按示例权重，成本为 `940×1+5×45+2×100=1365` 个成本单位。这个手算把复合策略拆成独立资源项，也展示为何不能只报 token 数。
 
 工具循环的计算不是单纯 token。每一次执行都有环境状态、时间、权限和失败成本，必须在预算账本中单独记录。
 
@@ -187,13 +197,29 @@ Tree-of-Thought、beam、best-first 和 MCTS 将候选扩展提前到中间步�
 
 程序化 workflow 也属于推理时计算的一部分。批量检索、表格处理、格式转换和测试执行交给确定性程序，模型处理策略选择、异常和解释，往往比让多个 Agent 自由调用工具更容易复现。
 
+下表把策略的计算位置和主要限制放在同一尺度上比较。单轨迹、终局聚合和前缀搜索是分析预算发生位置的视角；同一系统可以先搜索中间状态，再聚合完整候选。[Hariri 等的分类](https://arxiv.org/abs/2608.04001v2)提供了术语依据。表中适用场景是机制层面的判断，不是跨论文效果排名。
+
+| 路线 | 计算发生在哪里 | 反馈或选择 | 适合的问题 | 主要限制 |
+|---|---|---|---|---|
+| Long CoT / reflection | 延长单条轨迹，或在轨迹末尾追加批评与修正 | 模型自身续写或自评 | 可在线性步骤中记录变量、补充推导的任务 | 错误前提可能沿同一路径重复，文本变长不等于有效计算 |
+| Self-Consistency / Best-of-N | 生成多条完整候选后再聚合 | 多数投票、答案归一化或 verifier 重排 | 有明确答案等价关系，且采样能覆盖不同路径的任务 | 候选相关时覆盖增长变慢；选择器会成为瓶颈 |
+| Tree Search | 候选完成前扩展和比较部分状态 | 中间状态评分、环境反馈、剪枝或回溯 | 早期选择会影响后续结果，且状态能表示和比较的任务 | 状态设计和估值有偏会造成误剪，控制逻辑更复杂；搜索细节见[第六章](06-search与tree-of-thought.md) |
+| Tool loop / 程序化 workflow | 模型调用之间插入执行、检索或确定性计算 | 测试、数据库、文档或工具返回的观察 | 有可重复的外部检查器或权威数据源的任务 | 结果受工具版本、覆盖、权限和串行延迟约束 |
+| Multi-agent / 多 worker | 多个轨迹并行或分工处理子问题 | 主控合并、冲突消解和独立验证 | 子任务相对独立、产物可验证且可并行的任务 | 多 worker 不自动提供独立证据；协调和合并成本见[第十六章](16-multi-agent与ultra-test-time-compute.md) |
+
 ## 4. 候选覆盖和选择质量
 
-### 4.1 pass@K 不是最终选择准确率
+### 4.1 pass@k 不是最终选择准确率
 
-代码任务中常见 pass@K 表示 K 个候选中至少有一个通过测试的概率；对于一个样本集合，它可以理解为候选覆盖能力。最终系统通常还要从 K 个候选中选择一个，选择准确率是另一件事。
+代码任务中常见的 `pass@k` 用候选覆盖能力描述“抽出的 k 个程序里至少有一个通过测试”的概率。HumanEval 论文给出基于每题 `n` 个样本和其中 `c` 个通过样本的无偏估计，公式中的 `C(n,k)` 表示从 `n` 项中取 `k` 项的组合数：[Chen 等，论文 v2](https://arxiv.org/abs/2107.03374v2)
 
-在候选数 `K>0` 且每个候选的正确性和分数定义完整时，可以把两者写成：
+~~~math
+\widehat{\mathrm{pass@}k}
+=1-\frac{\binom{n-c}{k}}{\binom{n}{k}},
+\qquad 0<k\le n
+~~~
+
+例如 `n=5,c=2,k=2` 时，`pass@2=1−C(3,2)/C(5,2)=1−3/10=0.7`。它估计从这 5 个样本中取 2 个时命中通过解的比例，依赖该题的测试 oracle，并不表示一个实际选择器必定能交付通过的候选。在候选数 `K>0` 且每个候选的正确性和分数定义完整时，还需把候选覆盖和实际选择分开：
 
 ~~~math
 A_{\mathrm{exist}}(K)
@@ -209,7 +235,7 @@ A_{\mathrm{select}}(K)
 j^*=\arg\max_j s_j
 ~~~
 
-当 `K=0` 时，这两个指标都没有定义；空候选不能被当作 0% 的选择准确率。`A_exist` 高而 `A_select` 低，说明生成器能提出正确候选，但评分器或选择策略没有识别出来。增加 `K` 可能进一步扩大两者的差距。
+分数并列时，评估协议必须固定一个平局处理规则。`A_exist` 和 `A_select` 是固定评估分布上的概率或其样本估计；单个请求的 0/1 例子只展示两种事件的差别。当 `K=0` 时，这两个指标都没有定义；空候选不能被当作 0% 的选择准确率。`A_exist` 高而 `A_select` 低，说明生成器能提出正确候选，但评分器或选择策略没有识别出来。以单个请求为例，若三个候选的答案为 `42、42、40`，正确性依次为真、真、假，verifier 分数为 `0.70、0.74、0.92`，则 `A_exist=1`，但最高分选择的是错误的 `40`，所以 `A_select=0`。这个小例子表示一题的状态；总体指标要在固定评估集上取平均。增加 `K` 可能进一步扩大两者的差距。
 
 ### 4.2 候选相关性
 
@@ -226,10 +252,10 @@ j^*=\arg\max_j s_j
 ~~~math
 D_{\mathrm{answer}}
 =
-\frac{|\operatorname{unique}(\operatorname{normalize}(y_1,\ldots,y_K))|}{K}
+\frac{|\mathrm{uniq}(\mathrm{norm}(y_1,\ldots,y_K))|}{K}
 ~~~
 
-当 `K=0` 时，去重率没有定义。去重率高不代表候选正确，只说明答案表面更分散；去重率低也不一定坏，多个独立推导得到同一正确答案可能正是自一致性的目标。它必须和真实正确率一起解释。
+`norm` 是固定的答案规范化规则，`uniq` 统计规范化后不重复的答案。若三个候选依次是 `42、40、40`，则 `D_answer=2/3≈0.667`。它只测表面答案多样性，不证明正确性；对自一致性中的候选聚合和采样关系，可回看[第三章](03-self-consistency与采样.md)，搜索路径的多样性见[第六章](06-search与tree-of-thought.md)。当 `K=0` 时，去重率没有定义。去重率高不代表候选正确，只说明答案表面更分散；去重率低也不一定坏，多个独立推导得到同一正确答案可能正是自一致性的目标。它必须和真实正确率一起解释。
 
 ### 4.3 hard negative
 
@@ -253,7 +279,7 @@ A(B)=A_{\infty}-cB^{-\alpha},
 c>0,\ \alpha>0
 ~~~
 
-`A_{\infty}` 是理想化的饱和值，`c` 和 `\alpha` 是拟合参数。若把 `A` 当准确率，通常还应检查 `0\le A_{\infty}\le 1`；拟合时需要正预算 `B>0` 和足够的观测点。这个公式不是所有模型都必须遵守的定律，不能拿少量预算点就宣称找到了普适 scaling law。
+`A_{\infty}` 是理想化的饱和值，`c` 和 `\alpha` 是拟合参数。若把 `A` 当准确率，通常还应检查 `0\le A_{\infty}\le 1`；拟合时需要正预算 `B>0` 和足够的观测点。例如，取教学参数 $A_{\infty}=0.9,c=0.2,\alpha=0.5$，在 `B=1` 时 `A(1)=0.9−0.2×1^{-0.5}=0.7`；在 `B=4` 时 `A(4)=0.9−0.2×4^{-0.5}=0.9−0.1=0.8`。这只展示该函数形状：预算增加时质量靠近假设的上限，不能当作实测曲线或普适 scaling law。拟合真实曲线还要报告数据、误差和模型选择。
 
 ### 5.3 质量提高但业务价值下降
 
@@ -267,7 +293,7 @@ Q_{\mathrm{weighted}}
 \frac{\sum_i w_i q_i}{\sum_i w_i}
 ~~~
 
-当所有权重都为 0 时，分母为 0，加权质量没有定义；不能把它报告为 0。`w_i` 可以表示任务价值或风险权重，但不能借此隐藏普通样本回归。普通准确率、价值加权准确率和关键切片结果应同时报告。
+当所有权重都为 0 时，分母为 0，加权质量没有定义；不能把它报告为 0。`q_i` 是第 `i` 个请求的质量值，需使用同一套定义和尺度（例如准确/错误分别为 1/0）；`w_i` 是有限、非负的任务权重，可以表示任务价值或风险权重，但不能借此隐藏普通样本回归。普通准确率、价值加权准确率和关键切片结果应同时报告。例如两个任务的 `q=(0.8,0.5)`、权重 `w=(1,3)` 时，`Q_weighted=(1×0.8+3×0.5)/(1+3)=2.3/4=0.575`。第二项权重大，所以它的较低质量拉低了总分；仍应同时公布两个单项结果，避免加权平均遮住回归。
 
 ## 6. 预算如何分配
 
@@ -280,12 +306,12 @@ Q_{\mathrm{weighted}}
 自适应路由可以把请求 `i` 的策略写成：
 
 ~~~math
-m_i=\pi(x_i,\hat d_i,v_i,u_i,r_i)
+m_i=\pi(x_i,\hat d_i,v_i,e_i,r_i)
 ~~~
 
-其中 `hat d_i` 是难度估计，`v_i` 是业务价值，`u_i` 是可验证性或工具可用性，`r_i` 是风险。策略 `m_i` 可以是 direct、self-consistency、verifier、search、tool loop 或人工复核。
+其中 $\hat d_i$ 是难度估计，`v_i` 是业务价值，`e_i` 表示是否有可用且适合该任务的外部验证信号，`r_i` 是风险。用 `e_i` 避免和前文预算向量中的 `U_i`（工具调用上限）混淆。策略 `m_i` 可以是 direct、self-consistency、verifier、search、tool loop 或人工复核。`π` 是待评估的路由策略，不是已训练或已经验证的模型。
 
-路由模型也会犯错。它把简单题升级，浪费计算；把难题降级，增加错误。因此需要评估路由混淆矩阵、升级收益和降级损失。
+例如，一个 code patch 请求若 $\hat d_i=0.90,v_i=0.95,e_i=1,r_i=0.70$，可被教学规则送往 search；一个稳定事实查询若 $\hat d_i=0.15,v_i=0.20,e_i=0,r_i=0.10$，可走 direct。这两个数值只演示特征如何影响路由，不能当成通用阈值。路由器也会犯错：它把简单题升级会浪费计算，把难题降级会增加错误。因此需要评估路由混淆矩阵、升级收益和降级损失。已有逐题分配方案在数学数据集和指定模型上与固定/启发式预算作过匹配预算比较，但跨任务迁移仍需重测。[Zhai 等，预印本 v1](https://arxiv.org/abs/2604.14853v1) 按观测反馈调节预算的控制环留给[第十八章](18-adaptive-thinking与动态预算.md)。
 
 ### 6.3 选择继续计算还是停止
 
@@ -295,7 +321,7 @@ m_i=\pi(x_i,\hat d_i,v_i,u_i,r_i)
 v\,\mathbb{E}[\Delta A\mid x]-c>0
 ~~~
 
-这不是可直接部署的概率模型，而是把业务权衡写出来。困难在于估计条件期望：模型可能不知道自己是否会被下一轮纠正，verifier 分数也可能没有校准。
+例如，若一次继续计算的预期准确率增量是 `0.05`，任务价值权重 `v=10` 个效用单位/准确率单位，增量成本 `c=0.4` 个效用单位，则 `10×0.05−0.4=0.1>0`，按这个简化准则值得继续。若预期增量降到 `0.03`，净值为 `10×0.03−0.4=−0.1`，应停止或转向其他检查。这不是可直接部署的概率模型，而是把业务权衡写出来。困难在于估计条件期望：模型可能不知道自己是否会被下一轮纠正，verifier 分数也可能没有校准。
 
 ### 6.4 多目标预算优化
 
@@ -309,6 +335,8 @@ v\,\mathbb{E}[\Delta A\mid x]-c>0
 ~~~
 
 `A_i(b_i)` 是第 `i` 个请求在预算 `b_i` 下的质量，`w_i` 是任务价值权重。现实系统还会加入 p95 延迟、并发 GPU、工具配额和安全约束。
+
+用两个请求演示离散分配。设请求 A 的低/高档准确率为 `0.6/0.8`、成本为 `2/5`，权重 `w_A=1`；请求 B 的低/高档准确率为 `0.7/0.8`、成本为 `3/5`，权重 `w_B=2`；总预算是 7。两题都用低档花 5；升级 A 会多花 3，合计 8，超预算；升级 B 多花 2，合计 7，目标值从 `1×0.6+2×0.7=2.0` 增至 `1×0.6+2×0.8=2.2`。在这组离散选项下，应把额外预算给 B。真实问题通常需要在离线实验中估计每条路由的质量—成本曲线。
 
 ### 6.5 预算花在什么位置
 
@@ -343,7 +371,7 @@ H(\hat p)
 -\sum_y\hat p(y)\log\hat p(y)
 ~~~
 
-约定 `0\log 0=0`；当 `K=0` 时，分布和熵都没有定义。分歧高时增加计算通常更有理由，但低分歧不一定安全：所有候选可能共享同一错误前提。分歧应和输入变化、证据覆盖和外部验证结合。
+约定 `0\log 0=0`；当 `K=0` 时，分布和熵都没有定义。例如，若候选答案的经验分布是 `\hat p(42)=0.75,\hat p(40)=0.25`，使用自然对数时，`H=−0.75\ln(0.75)−0.25\ln(0.25)≈0.562` nat。若所有候选都给同一答案，熵为 0；这只表示答案一致，不表示答案正确。分歧高时增加计算通常更有理由，但低分歧不一定安全：所有候选可能共享同一错误前提。分歧应和输入变化、证据覆盖和外部验证结合。
 
 ### 7.3 分数间隔
 
@@ -353,7 +381,7 @@ H(\hat p)
 \Delta_{\mathrm{score}}=s_{(1)}-s_{(2)}
 ~~~
 
-候选少于两个时，`\Delta_{\mathrm{score}}` 没有定义；不能把单候选的间隔写成 0。小间隔可以触发更多验证或保留两个候选，大间隔可能允许提前停止。但只有经过校准的分数间隔才有较稳定的解释，未经校准的高间隔也可能是评分器自信地犯错。
+候选少于两个时，`\Delta_{\mathrm{score}}` 没有定义；不能把单候选的间隔写成 0。若最高和次高分分别是 `0.81` 与 `0.78`，原始分差就是 `0.81−0.78=0.03`；它不是 3% 的正确概率，也不是自动可比较的置信度。小间隔可以触发更多验证或保留两个候选，大间隔可能允许提前停止。但只有经过校准的分数间隔才有较稳定的解释，未经校准的高间隔也可能是评分器自信地犯错。
 
 ### 7.4 动态停止
 
@@ -380,11 +408,11 @@ R^{\mathrm{parallel}}
 +R^{\mathrm{verify}}
 ~~~
 
-现实中还要加队列等待、显存不足、批处理填充和 verifier 服务时间。并行降低墙钟延迟，却不降低总 token，也可能降低系统同时服务其他请求的吞吐。
+例如，三条候选的生成时延为 `120、180、150 ms`，并行完成后 verifier 还需 `40 ms`，则近似请求时延为 `max(120,180,150)+40=220 ms`。现实中还要加队列等待、显存不足、批处理填充和 verifier 服务时间。并行降低墙钟延迟，却不降低总 token，也可能降低系统同时服务其他请求的吞吐。
 
 ### 8.2 串行搜索和工具循环
 
-搜索深度 `H` 为正整数时，串行循环更接近：
+串行循环轮数 `H` 为正整数时，累计时延更接近：
 
 ~~~math
 R^{\mathrm{serial}}
@@ -397,17 +425,19 @@ R_t^{\mathrm{gen}}
 \right)
 ~~~
 
-工具调用、数据库锁和人工复核通常不能完全并行。相同 token 数的 self-consistency 和工具搜索，用户体验可能差几个数量级。
+例如，两轮串行循环的三段时延分别是 `(100+80+20) ms` 和 `(120+50+30) ms`，总计 `200+200=400 ms`。工具调用、数据库锁和人工复核通常不能完全并行。相同 token 数的 self-consistency 和工具搜索，用户体验可能差几个数量级。
 
 ### 8.3 P50 和 P95
 
 平均延迟掩盖不了高预算长尾。自适应系统需要在延迟样本非空时至少报告 P50、P95 和超时率，并按路由模式、任务类型和工具路径分组。P95 还要明确分位数插值规则；样本数太少时，不能把最大值无条件称为 P95。
 
-高质量模式可以比普通模式慢，但必须有硬上限和降级行为。超时后的空答案、部分结果和人工转交都要计入任务质量，不能只统计成功完成的请求。
+本章 demo 使用最近秩（nearest-rank）约定：将 `n` 个延迟排序后取秩 `ceil(0.95n)`。若有 6 个观测值，秩为 `ceil(5.7)=6`，所以代码返回样本最大值。六个样本不足以稳定估计尾部延迟，报告时必须同时给样本量；生产比较还应采用预先固定的分位数定义和足够样本。高质量模式可以比普通模式慢，但必须有硬上限和降级行为。超时后的空答案、部分结果和人工转交都要计入任务质量，不能只统计成功完成的请求。
 
 ### 8.4 成本账本
 
 总成本可以拆成：
+
+这些成本项只有换算到同一单位后才能相加；没有可靠换算率时，应分别报告资源向量，不直接相加。
 
 ~~~math
 C_{\mathrm{total}}
@@ -427,7 +457,7 @@ C_{\mathrm{per\ correct}}
 \frac{C_{\mathrm{total}}}{N_{\mathrm{correct}}}
 ~~~
 
-这里 `N_{\mathrm{correct}}` 是通过独立成功检查的任务数；当它为 0 时，单位正确任务成本没有定义，应报告 `None` 或“没有正确任务”。成本定义应包含失败重试、缓存未命中、日志、工具执行和人工复核，否则高预算模式会看起来比实际便宜。
+这里 `N_{\mathrm{correct}}` 是通过独立成功检查的任务数；当它为 0 时，单位正确任务成本没有定义，应报告 `None` 或“没有正确任务”。例如，某组请求的模型、verifier、工具、存储和人工复核成本分别为 `3、1、2、0.2、0` 个同口径单位，则 `C_total=3+1+2+0.2+0=6.2`。成本定义应包含失败重试、缓存未命中、日志、工具执行和人工复核，否则高预算模式会看起来比实际便宜。沿用后文 demo 的教学权重，direct 的总成本是 `488`、答对 2 题，故每正确题 `488/2=244` 个成本单位；adaptive 的总成本是 `3223`、答对 5 题，故 `3223/5=644.6` 个成本单位。单位成本更高不代表 adaptive 不值得：它在这组构造数据上把准确率从 `2/6` 提到 `5/6`。这些单位由 toy 权重构成，不是货币价格；生产账本口径见[第十三章](13-reasoning-effort与推理预算.md)。
 
 ## 9. Multi-agent、Ultra 和产品预算旋钮
 
@@ -441,7 +471,7 @@ C_{\mathrm{per\ correct}}
 
 多 Agent 系统可以把工作分给检索、规划、实现、测试和审查 worker。它增加的不只是模型 token，还有上下文传递、协调、冲突合并和权限隔离成本。
 
-一个可观察的 multi-agent 账本应包含：
+本章只把多 worker 当作一种计算分配形态；角色设计、协作协议和系统编排由[第十六章](16-multi-agent与ultra-test-time-compute.md)深入处理。一个可观察的 multi-agent 账本应包含：
 
 - worker 数量和角色；
 - 每个 worker 的输入输出 token；
@@ -572,7 +602,7 @@ C_{\mathrm{per\ correct}}
 - `search`：搜索加 verifier 或工具；
 - `adaptive`：根据难度、价值和可验证性选择策略。
 
-`adversarial_math` 故意让高预算策略仍然失败。这个样本用来说明：把请求升级到更高预算不等于一定解决问题，高预算失败仍然是成本浪费和 hard slice 证据。
+`TOKEN_COST`、`VERIFIER_COST` 和 `TOOL_COST` 是教学用的归一化成本权重；它们不是服务报价或跨系统通用换算率。`adversarial_math` 故意让高预算策略仍然失败。这个样本用来说明：把请求升级到更高预算不等于一定解决问题，高预算失败仍然是成本浪费和 hard slice 证据。
 
 ~~~python
 from math import ceil, isfinite
@@ -664,11 +694,16 @@ def require(condition, message):
 
 
 def finite_number(value):
-    return (
-        isinstance(value, (int, float))
-        and not isinstance(value, bool)
-        and isfinite(value)
-    )
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return isfinite(float(value))
+    except (OverflowError, TypeError, ValueError):
+        return False
+
+
+def finite_non_negative_int(value):
+    return type(value) is int and value >= 0 and finite_number(value)
 
 
 def validate_cases(cases):
@@ -689,7 +724,7 @@ def validate_cases(cases):
             require(isinstance(stats, dict), f"{mode} stats must be a dictionary")
             require(type(stats.get("correct")) is bool, "correct must be boolean")
             for field in ("tokens", "verifier_calls", "tool_calls", "latency_ms"):
-                require(type(stats.get(field)) is int and stats[field] >= 0, f"{field} must be a non-negative integer")
+                require(finite_non_negative_int(stats.get(field)), f"{field} must be a finite non-negative integer")
 
 
 validate_cases(CASES)
@@ -698,18 +733,22 @@ validate_cases(CASES)
 def unit_cost(stats):
     require(isinstance(stats, dict), "stats must be a dictionary")
     for field in ("tokens", "verifier_calls", "tool_calls"):
-        require(type(stats.get(field)) is int and stats[field] >= 0, f"{field} must be a non-negative integer")
-    return round(
-        TOKEN_COST * stats["tokens"]
-        + VERIFIER_COST * stats["verifier_calls"]
-        + TOOL_COST * stats["tool_calls"],
-        3,
-    )
+        require(finite_non_negative_int(stats.get(field)), f"{field} must be a finite non-negative integer")
+    try:
+        cost = (
+            TOKEN_COST * stats["tokens"]
+            + VERIFIER_COST * stats["verifier_calls"]
+            + TOOL_COST * stats["tool_calls"]
+        )
+    except OverflowError as error:
+        raise ValueError("cost must be finite") from error
+    require(finite_number(cost), "cost must be finite")
+    return round(cost, 3)
 
 
 def p95(values):
     require(isinstance(values, list) and values, "p95 requires a non-empty list")
-    require(all(type(value) is int and value >= 0 for value in values), "latencies must be non-negative integers")
+    require(all(finite_non_negative_int(value) for value in values), "latencies must be finite non-negative integers")
     ordered = sorted(values)
     rank = max(1, ceil(0.95 * len(ordered)))
     return ordered[rank - 1]
@@ -775,7 +814,7 @@ base_cost = fixed_summary["direct"]["total_cost"]
 for mode in ["self_consistency", "verifier", "search"]:
     acc_gain = fixed_summary[mode]["accuracy"] - base_acc
     cost_gain = fixed_summary[mode]["total_cost"] - base_cost
-    marginal[mode] = round(acc_gain / cost_gain, 6) if cost_gain else 0.0
+    marginal[mode] = round(acc_gain / cost_gain, 6) if cost_gain else None
 
 wasted_high_compute = [
     item["id"]
@@ -797,6 +836,8 @@ print(f"marginal_accuracy_per_cost={marginal}")
 print(f"wasted_high_compute={wasted_high_compute}")
 print(f"review={review}")
 ~~~
+
+**代码状态：已验证（2026-11-12；Python 3.12.9；仅使用标准库）。** 完整代码块已执行，实际输出与下方预期输出一致；另检查了有限数值、布尔值、NaN/无穷、超大整数计数、成本溢出和 nearest-rank 边界。
 
 预期输出：
 
@@ -895,11 +936,13 @@ review={'adaptive_accuracy_ok': True, 'adaptive_cheaper_than_search': True, 'lat
 
 ## 18. 资料索引
 
-1. Scaling LLM Test-Time Compute Optimally：<https://arxiv.org/abs/2408.03314>
-2. Large Language Monkeys：<https://arxiv.org/abs/2407.21787>
-3. Tree of Thoughts：<https://arxiv.org/abs/2305.10601>
-4. Self-Consistency Improves Chain of Thought Reasoning in Language Models：<https://arxiv.org/abs/2203.11171>
-5. DeepSeek-R1：<https://arxiv.org/abs/2501.12948>
-6. Training Verifiers to Solve Math Word Problems：<https://arxiv.org/abs/2110.14168>
+1. Charlie Snell et al., *Scaling LLM Test-Time Compute Optimally can be More Effective than Scaling Model Parameters*, ICLR 2025，[arXiv v1](https://arxiv.org/abs/2408.03314v1)。
+2. Bradley Brown et al., *Large Language Monkeys: Scaling Inference Compute with Repeated Sampling*, [arXiv v3](https://arxiv.org/abs/2407.21787v3)。
+3. Mohsen Hariri et al., *Test-Time Scaling in Reasoning LLMs: Inference Regimes, Evaluation, and Reproducibility*, [arXiv 预印本 v2](https://arxiv.org/abs/2608.04001v2)。
+4. Zhiyuan Zhai et al., *Adaptive Test-Time Compute Allocation for Reasoning LLMs via Constrained Policy Optimization*, [arXiv 预印本 v1](https://arxiv.org/abs/2604.14853v1)。
+5. Shunyu Yao et al., *Tree of Thoughts: Deliberate Problem Solving with Large Language Models*, NeurIPS 2023，[arXiv v2](https://arxiv.org/abs/2305.10601v2)。
+6. Xuezhi Wang et al., *Self-Consistency Improves Chain of Thought Reasoning in Language Models*, ICLR 2023，[arXiv v4](https://arxiv.org/abs/2203.11171v4)。
+7. Karl Cobbe et al., *Training Verifiers to Solve Math Word Problems*, [arXiv v2](https://arxiv.org/abs/2110.14168v2)。
+8. Mark Chen et al., *Evaluating Large Language Models Trained on Code*, [arXiv v2](https://arxiv.org/abs/2107.03374v2)。
 
-本章写作时联网访问了上述论文入口。正文区分论文实验、产品公开控制面、教学曲线和目标系统复测；没有把某个模型的推理档位、隐藏过程或内部路由写成未经公开资料支持的确定事实。
+来源按论文或预印本的固定版本标注。正文中的实验结论保留其任务、模型、预算和评估设置；本章曲线、成本和代码样本是教学构造，不能代替目标系统复测。

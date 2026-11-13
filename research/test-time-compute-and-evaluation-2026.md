@@ -1,6 +1,6 @@
 # 推理时计算、实时交互与评估激励：来源证据
 
-记录日期：2026-10-28；补充日期：2026-10-29、2026-10-30
+记录日期：2026-10-28；补充日期：2026-10-29、2026-10-30、2026-11-13
 
 本记录只保存联网发现的知识点及其证据。来源内容的具体适用范围、与书册的映射、正文修改状态和后续安排记录在 progress/。
 
@@ -14,10 +14,10 @@
   - 证据等级：source-backed（同行评审论文的特定实验结果）。
   - 适用边界：结果依赖该论文的 PaLM 2 系模型、数学问题、verifier/修订方法、预算和评价设置；不得外推为所有模型、任务或生产场景中推理计算都优于扩大预训练。
 - DeepSeek-AI, “DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning,” arXiv v2 revised 2026-01-04; journal reference: Nature 645, 633–638 (2025); [固定 arXiv v2](https://arxiv.org/abs/2501.12948v2)。
-  - 实际阅读范围：摘要、引言、R1-Zero 训练方法和作者报告的实验结果。
-  - 来源支持：作者报告 DeepSeek-R1-Zero 在没有先做监督微调的设定下直接进行大规模 RL，并观察到回答长度和某些推理行为随训练变化；论文也报告可读性差和语言混杂等问题。
+  - 实际阅读范围：摘要、引言、§2.1 及 §2.2 奖励设计、§§3.1–3.2 的训练阶段、主结果表、附录 B.3.2 冷启动数据说明、E.2/E.4 的数学泛化与推理 token 分析、F 的蒸馏比较、G.2 的 PRM/MCTS 失败分析；官方仓库 README 用于核对公开 checkpoint 摘要。
+  - 来源支持：作者报告 DeepSeek-R1-Zero 从 DeepSeek-V3-Base 出发、未先做 SFT 而直接进行大规模 RL；报告中的 R1 流水线则加入数千条 cold-start 样本、推理 RL、拒绝采样、混合推理/非推理 SFT 和第二阶段 RL。作者观察到 R1-Zero 的长推理、反思和自我检查变化，同时报告可读性差、重复与语言混杂。论文称以 R1 生成约 800,000 条样本对开源底模做 SFT 蒸馏，蒸馏阶段未再做 RL。表 3 报告 R1 在 AIME 2024 Pass@1 为 79.8%、MATH-500 为 97.3%、LiveCodeBench CoT Pass@1 为 65.9%；评估上限为 32,768 tokens，采样温度 0.6/top-p 0.95，AIME 每题用 64 个回答估计 Pass@1。附录还记录其大规模 RL 配置下 PRM 的细粒度标注、reward hacking 与开销困难，以及 MCTS 训练搜索空间和值模型的扩展问题；作者仍认可 PRM 在 reranking/搜索、MCTS 在配合预训练 value model 时的特定用途。
   - 证据等级：source-backed（作者技术报告中的模型特定描述和实验）。
-  - 适用边界：这是特定模型与训练方案的作者报告，不构成对所有 RL 训练的结论；论文中的 benchmark 分数、训练过程和推理行为不能证明通用推理能力或自然语言推理过程的忠实性。
+  - 适用边界：这是特定模型与训练方案的作者报告，不构成对所有 RL 训练、PRM 或 MCTS 的结论；上述 benchmark 分数绑定论文模型、提示/采样配置、数据集和评测 harness，不是独立复现、一般推理能力或生产成功率，也不能证明可见自然语言推理过程忠实。论文说明 n-gram 去污染无法排除测试题改写暴露。来源 v2 是 2026-01-04 修订版本；作者未公开完整数据筛选、奖励权重和训练实现细节。
 
 - Zhai et al., “Adaptive Test-Time Compute Allocation for Reasoning LLMs via Constrained Policy Optimization,” arXiv:2604.14853v1（2026-04-16），[论文 HTML](https://arxiv.org/html/2604.14853v1)。
   - 实际阅读范围：摘要、§5.1 的实验设置和 §5.2 的主结果表。
@@ -91,7 +91,7 @@
 
 ## 9. 推理轨迹干预、并行计算与检索式推理
 
-以下条目在 2026-10-29 通过 ACL Anthology、NeurIPS 和 ICLR 官方论文页核对。实际阅读范围为论文摘要及书目元数据；具体结论只记录摘要明确陈述的设计和作者结果，不将摘要当作全文实验审计。
+以下条目在 2026-10-29 通过 ACL Anthology、NeurIPS 和 ICLR 官方论文页核对；PaCoRe 与 ParaThinker 摘要于 2026-11-13 复核。实际阅读范围为论文摘要及书目元数据；具体结论只记录摘要明确陈述的设计和作者结果，不将摘要当作全文实验审计。
 
 - Soumadeep Saha et al., “KisMATH: Do LLMs Have Knowledge of Implicit Structures in Mathematical Reasoning?”, *Transactions of the Association for Computational Linguistics* 14 (2026), 1308–1328, [ACL Anthology](https://aclanthology.org/2026.tacl-1.59/), DOI 10.1162/tacl.a.729。
   - 实际阅读范围：摘要与 ACL Anthology 书目元数据。
@@ -100,12 +100,12 @@
   - 适用边界：题型、图抽取方式和模型集合特定；不能由图节点干预敏感推出所有自然语言 CoT 都忠实，也不能将该结果视作内部推理状态的完整观测。
 - Jingcheng Hu et al., “PaCoRe: Learning to Scale Test-Time Compute with Parallel Coordinated Reasoning,” *Proceedings of ACL 2026*, 27200–27215, [ACL Anthology](https://aclanthology.org/2026.acl-long.1253/), DOI 10.18653/v1/2026.acl-long.1253。
   - 实际阅读范围：摘要与 ACL Anthology 书目元数据。
-  - 来源支持：论文摘要描述多轮并行推理轨迹、消息压缩/传递和聚合，并报告通过 outcome-based RL 训练的系统可在固定上下文窗口下扩展有效测试时计算。
+  - 来源支持：摘要描述多轮并行轨迹、把发现压缩为受上下文长度约束的消息并传给下一轮，最终聚合回答；系统通过 outcome-based RL 训练。作者报告其 8B 模型在 HMMT 2025 达到 94.5%，并称使用约 200 万 effective test-time tokens 的设置超过其摘要所列 GPT-5 的 93.2%。
   - 证据等级：source-backed（同行评审论文摘要中的方法及作者报告）。
-  - 适用边界：摘要中的模型、数学基准、有效 token 预算和上下文管理设置不可与其他系统直接排名；不能推出并行推理普遍优于串行策略。
+  - 适用边界：只阅读摘要和元数据，无法在本记录中核验该 GPT-5 对照的完整 prompt、预算和 harness 对齐条件；94.5%/93.2% 是作者摘要报告，不能据此做通用模型排名，也不能推出并行推理普遍优于串行策略。
 - Hao Wen et al., “ParaThinker: Native Parallel Reasoning for Scaling LLM Test-Time Compute,” *Findings of EMNLP 2026*, 31265–31285, [ACL Anthology](https://aclanthology.org/2026.findings-emnlp.1469/)。
   - 实际阅读范围：摘要与 ACL Anthology 书目元数据。
-  - 来源支持：摘要描述单一架构内并行生成多条推理路径并聚合；作者报告 AIME-24 的特定模型/token-budget 对照，以及使用 KV-cache reuse 时的延迟收益。
+  - 来源支持：摘要描述单一架构内并行生成多条推理路径并聚合；作者报告在 1.5B 模型与相同 decoding-token 预算下，AIME-24 准确率相对 sequential-reasoning 基线提高 6.5%–20.7%；启用 KV-cache reuse 时，作者报告并行生成的推理延迟低 38.7%–66.8%。
   - 证据等级：source-backed（同行评审论文摘要中的方法和作者报告结果）。
   - 适用边界：准确率和延迟数字绑定 1.5B 模型、指定基准、同 decoding-token 预算与 KV reuse 条件，不是不同硬件或服务负载下的通用延迟结论。
 - Vaibhav Singh et al., “ThinkRetrieve: Retrieval-Augmented Reasoning Traces for Test-Time Scaling,” *Findings of EMNLP 2026*, 36409–36426, [ACL Anthology](https://aclanthology.org/2026.findings-emnlp.1703/)。
@@ -145,7 +145,7 @@
 - Karl Cobbe et al., “Training Verifiers to Solve Math Word Problems,” arXiv:2110.14168v2，[论文页](https://arxiv.org/abs/2110.14168)。摘要描述 GSM8K 及通过 verifier 为多条候选排序的测试时选择，并报告论文设置下的收益。结果受数据集、模型和 verifier 训练条件约束。
 - Qiying Yu et al., “DAPO: An Open-Source LLM Reinforcement Learning System at Scale,” arXiv v2 revised 2025-05-20，[固定版本](https://arxiv.org/abs/2503.14476v2)。实际阅读范围为 arXiv 书目元数据与摘要；来源支持作者开放训练代码和数据，并报告 Qwen2.5-32B base 在 AIME 2024 上达到 50 分。该结果属于完整数据、系统、采样与算法配方，不能归因给单个组件或外推至其他任务。
 - Zichen Liu et al., “Understanding R1-Zero-Like Training: A Critical Perspective,” arXiv v2 revised 2025-10-06，[固定版本](https://arxiv.org/abs/2503.20783v2)。实际阅读范围为 arXiv 书目元数据与摘要；作者分析 GRPO 的回答长度偏差，并提出 Dr.GRPO，报告其在特定 7B 数学设置下达到 AIME 2024 43.3%。结果受底模、奖励、预算、任务和 loss 实现限制，“unbiased”应按论文推导假设理解。
-- Hunter Lightman et al., “Let’s Verify Step by Step,” arXiv:2305.20050v1，[论文页](https://arxiv.org/abs/2305.20050)。摘要报告该研究在 MATH 基准上比较 outcome/process supervision，并发布 800,000 条步骤级人工反馈标签 PRM800K。不能外推为所有任务上的过程监督必然优于结果监督。
+- Hunter Lightman et al., “Let’s Verify Step by Step,” arXiv:2305.20050v1，[论文 HTML](https://arxiv.org/html/2305.20050)及[PRM800K 官方仓库](https://github.com/openai/prm800k)。阅读摘要、§§2–6、相关评估设置与仓库数据说明：论文在其 MATH 实验中报告过程监督显著优于结果监督，PRM 在代表性测试子集上解出 78.2% 的题目；论文同时报告主动学习提高该设置下的标注效率，并发布 800,000 条步骤级人工正确性标签。不能外推为其他任务、标注协议或大规模 RL 系统中的过程监督必然优于结果监督；该仓库于 2026-05-29 归档为只读，仓库状态不改变论文结果的适用边界。
 - Shunyu Yao et al., “Tree of Thoughts: Deliberate Problem Solving with Large Language Models,” arXiv:2305.10601v2，[论文页](https://arxiv.org/abs/2305.10601)。摘要描述以 thought 为单位进行分支探索、回看和回溯；实验覆盖 Game of 24、Creative Writing、Mini Crosswords 等特定任务。效果不由 ToT 名称本身保证。
 - Mark Chen et al., “Evaluating Large Language Models Trained on Code,” arXiv:2107.03374v2，[论文 HTML](https://arxiv.org/html/2107.03374)。阅读 §2.1 与 Appendix A：pass@k 以每题生成 n≥k 个候选、统计通过测试数 c，并用 `1−C(n−c,k)/C(n,k)` 估计从 k 个候选中至少找到一个通过解的成功率；作者说明直接经验频率可能有较高方差。估计依赖候选采样和测试 oracle，pass@k 不等于系统无选择器时的 pass@1。
 - Chuan Guo et al., “On Calibration of Modern Neural Networks,” arXiv:1706.04599v2，[论文 HTML](https://arxiv.org/html/1706.04599)。阅读 ECE 定义与摘要：ECE 以分桶内准确率和平均置信度差的加权和近似校准误差；论文还研究分类器温度缩放。论文数据来自图像/文档分类任务，不能据此声称 LLM verifier 在目标任务上已校准。
@@ -160,6 +160,33 @@
 - **证据等级：** source-backed（两家供应商的当前公开 API 文档）；这些材料支持所列接口合同，不揭示底层模型完整推理状态。
 - **适用边界：** 文档按模型、API surface、账号和访问日期变化，不能推导其他 provider 或本地模型使用相同协议。由文档差异可推论：`effort`、`thinking` 类型和 level 标签不是跨模型统一的 token/算力单位，也不保证质量提升；需在目标 endpoint 上按任务、模型和成本/延迟指标实测。本文没有执行真实 API 请求。
 
+### 12.1 续接 API 的当前回放与保留合同
+
+- **复核日期与来源：** 2026-11-13 复核 Anthropic [Preserved thinking](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking)、OpenAI [Conversation state](https://developers.openai.com/api/docs/guides/conversation-state)、[Preserve reasoning](https://developers.openai.com/api/docs/guides/preserved-reasoning)与[Reasoning models](https://developers.openai.com/api/docs/guides/reasoning)，以及 Google [Thought signatures](https://ai.google.dev/gemini-api/docs/thought-signatures)和[Interactions API 概览](https://ai.google.dev/gemini-api/docs/interactions-overview)。
+- **实际阅读范围：** Anthropic 对 reasoning block 的原样回传、system/tools/此前 messages 前缀检查、模型与账号兼容规则；OpenAI 服务端会话引用、无状态完整 output 回放、reasoning.context=all_turns、前缀变化后的 reasoning item 丢弃规则和对象保留期限；Gemini Interactions 的 stateful previous_interaction_id 与 stateless thought-block/signature 回放说明。
+- **来源支持的事实：** Anthropic 要求客户端回传原响应 content blocks 及其顺序；在运行前缀检查的模型上，thinking block 受此前 system、tools、messages 以及模型和部分账号绑定约束，发生不兼容时可能请求报错或 block 被丢弃。OpenAI 无状态续接时应保留 response output 中所有项目，包括加密 reasoning items 和 assistant phase；支持 persisted reasoning 的模型可将 reasoning.context 设为 all_turns。OpenAI 当前 preserved-reasoning 文档说明，较新的 frontier models 遇到 reasoning item 前缀变化时会丢弃后续 reasoning item。Conversation state 文档说明 Responses 对象默认保存 30 天、可用 store=false 关闭该保存；Conversation 对象及其 items 不受同一 30 天 TTL。Gemini Interactions stateful 模式通过 previous_interaction_id 由服务端管理 thought blocks/signatures；stateless 模式需按原样回送 thought blocks。
+- **证据等级：** source-backed（供应商当前官方 API 文档）；未执行线上 API 请求或账户保留策略实验。
+- **适用边界：** 条款绑定准确模型、账号、API surface、当前文档和账户设置。Gemini 结论仅指 Interactions API；不能据此推断所有 Gemini endpoint。provider 状态协议不包含宿主工具执行事实，也不构成公开 raw chain-of-thought。Responses 与 Conversation 的文档级保留语义不能替代实际租户的数据治理条款。
+
+## 13. Provider effort controls 与输出上限的职责边界
+
+- **来源与版本：** OpenAI [Reasoning models](https://developers.openai.com/api/docs/guides/reasoning)、Anthropic [Effort](https://platform.claude.com/docs/en/build-with-claude/effort)与[Extended thinking](https://platform.claude.com/docs/en/build-with-claude/extended-thinking)、Google [Gemini thinking](https://ai.google.dev/gemini-api/docs/generate-content/thinking)官方 API 文档，访问日期均为 2026-11-13。
+- **实际阅读范围：** OpenAI Reasoning 的 effort 值、reasoning mode、usage token 统计和 `max_output_tokens`；Anthropic Effort 的模型差异、thinking/effort 关系、工具使用和 Extended thinking 的 `budget_tokens`/`max_tokens` 规则；Google Gemini thinking 的模型级 `thinkingLevel` 支持表、`thinkingBudget` 弃用提示、`max_output_tokens` 截断与 thought token 计费段落。
+- **来源支持的事实：** OpenAI 文档明确 effort 值及默认值取决于模型；支持的接口可把 `reasoning.mode`（standard/pro）与 `reasoning.effort` 分开设置；reasoning token 计入输出 token，`max_output_tokens` 限制 reasoning、可见输出及格式 token 的总生成量。Anthropic 将 `output_config.effort`、thinking mode 和部分旧式手动 `budget_tokens` 分开；手动 token budget 在支持的模型上是目标预算，`max_tokens` 仍限制总输出，effort 与具体模型、thinking mode 和工具行为有关。Google 文档将 `thinkingLevel` 设为 Gemini 3/4 的模型级枚举（支持值和默认值各异），保留 Gemini 2.5 的 `thinkingBudget`，并指出 Gemini 4 已弃用旧字段；`max_output_tokens` 包含 thought tokens，是执行层硬截断，usage 可按字段报告 thought token。
+- **证据等级：** source-backed（供应商官方公开 API 文档；未执行线上请求）。
+- **适用边界：** 参数名和枚举属于各自 endpoint/model revision 的协议合同。官方文档没有给出可跨供应商比较的 effort→token 或 effort→质量映射，也不能证明 effort 标签代表固定 GPU 计算量、固定搜索算法或某个质量增益。Google 文档按官方域名跳转至 AI Studio 文档页面；本文只记录其 thinking 参数相关页面内容，不记录其它模型能力主张。
+
+## 14. Provider thinking levels、多 Agent effort 与多模态变体
+
+- **来源与访问日期：** Google [Gemini Thinking](https://ai.google.dev/gemini-api/docs/thinking)、[Gemini 3.5 Flash-Lite 模型页](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite)、[Thought signatures](https://ai.google.dev/gemini-api/docs/thought-signatures)、[Interactions API 概览](https://ai.google.dev/gemini-api/docs/interactions-overview)；xAI [Reasoning](https://docs.x.ai/developers/model-capabilities/text/reasoning)、[Grok 4.7](https://docs.x.ai/developers/models/grok-4.7)、[Multi Agent](https://docs.x.ai/developers/model-capabilities/text/multi-agent)；Qwen [Qwen3-Omni 技术报告](https://arxiv.org/html/2509.17765)与[官方仓库](https://github.com/QwenLM/Qwen3-Omni)。访问日期均为 2026-11-13。
+- **实际阅读范围：** Google Thinking 模型支持表、Interactions 的 `max_output_tokens`、thought usage、stateful/stateless signature 和事件步骤；xAI Reasoning 的模型档位表、Grok 4.7 encrypted reasoning 合同和 Grok 4.20 多 Agent 配置表及 beta 说明；Qwen3-Omni 报告摘要、`2.5 流式与并发、`4.3 Captioner、`5 评估和官方仓库模型下载入口。
+- **来源支持的事实：**
+  - Google 文档列出 `gemini-3.8-flash` 默认 `medium`、支持 `low/medium/high`，不支持 `minimal`；`gemini-3.5-flash-lite` 默认 `minimal`，支持 `minimal/low/medium/high`。Interactions API 的 `max_output_tokens` 包含 thought tokens，是硬截断上限，不改变 `thinking_level`；思考中触顶会以 `incomplete` 停止，已生成 thought tokens 仍计费。thought step 的 signature 为必需加密状态，summary 可缺省或为空；stateful mode 由服务端管理状态，stateless mode 按合同原样回送 thought blocks。Interaction steps 按时间序列呈现 thoughts、工具调用/结果及 model output。
+  - xAI 当前文档列出 Grok 4.7 的 `reasoning.effort` 为 `low/medium/high/xhigh`，默认 high，不能关闭 reasoning；Responses API 对该模型总是返回 `reasoning.encrypted_content`，后续请求需把相关 item 原样回传以延续多轮上下文，Chat Completions 不包含该字段。`grok-4.20-multi-agent` 则将 low/medium 映射为 4 agents，将 high/xhigh 映射为 16 agents。该多 Agent research 功能在文档中标为 beta；公开给用户的主要结果由 leader 汇总，子 Agent 中间状态按文档设置加密返回。多 Agent 与工具消耗会计入 usage/计费。
+  - Qwen3-Omni 报告区分 Instruct、Thinking 和 Captioner 等发布变体；报告说明 Captioner 是从 Qwen3-Omni-30B-A3B 微调得到的音频描述变体。报告说明 Thinker 处理多模态输入和文本生成、Talker 生成流式语音，音频 codec 速率为 12.5 Hz，即帧间隔约 80 ms。作者称在冷启动、没有先前上下文时的理论首包延迟为 234 ms；其并发表进一步报告并发 1 时 audio/video 为 234/547 ms，并发 4 时 728/1517 ms，并发 6 时 1172/2284 ms。这些数值绑定 vLLM、torch.compile 与 CUDA Graph 设置，不是生产 p99 或 thinking-level 对照结果。
+- **证据等级：** source-backed（供应商官方 API/模型文档；Qwen 作者技术报告与官方模型仓库）。未执行线上 provider API 调用，也未本地复现 Qwen 延迟。
+- **适用边界：** 字段语义和支持表依 model ID、API surface、服务版本及访问日期变化。不能由 provider 文档推断未公开的内部推理算法，不能跨 provider 比较同名 level，也不能把输出上限当作 reasoning-only budget。Grok 4.20 的 agent 数合同仅适用于 `grok-4.20-multi-agent`；beta 行为可能变化。Qwen 延迟为作者报告的理论配置数据，不能外推为通用线上服务表现。
+
 ## 生命周期
 
 推理时计算：active；具体策略效果仍依赖任务与预算。
@@ -170,4 +197,14 @@ CoT 忠实性与分层轨迹安全评估：active；FACT-E、TRACE 等结论绑�
 
 实时多模态会话接口：active；此处描述的供应商 API 细节需按版本复核。
 
+Provider effort 与输出 token 上限：active；字段语义和模型支持表需按 API revision 复核。
+
+Provider thinking levels 与多 Agent effort：active；Gemini、Grok 接口按 model ID/API surface 复核，Qwen 延迟只按作者报告条件引用。
+
 评估激励分析：active；需结合具体任务效用、错误代价和 abstention 规则设计指标。
+
+## 2026-11-13 选择性预测、转交、级联与自适应计算论文
+
+- **来源与版本：** Geifman 与 El-Yaniv，[SelectiveNet](https://proceedings.mlr.press/v97/geifman19a.html)，ICML 2019 / PMLR 97；Madras 等，[Predict Responsibly](https://arxiv.org/abs/1711.06664)，arXiv v3，2018-09-07；Chen 等，[FrugalGPT](https://arxiv.org/abs/2305.05176)，arXiv v1，2023-05-09；Graves，[Adaptive Computation Time](https://arxiv.org/abs/1603.08983)，arXiv v6，2017-02-21。2026-11-13 阅读原论文摘要及相关方法/贡献部分；均为论文证据，不是当前 provider 文档。
+- **来源支持的发现：** SelectiveNet 把预测与拒答选择集成到深度网络，直接在目标覆盖子集上优化，并报告分类和回归任务的 risk-coverage 实验。Predict Responsibly 建模“自动预测—外部决策者”的两阶段系统，学习何时把决定交给下游决策者，并在论文设定的模拟场景中评估整体准确率与公平性。FrugalGPT 研究提示调整、模型近似与 LLM API 级联，并在查询预算下适应性地选择 API 组合；其成本/准确率结果绑定 2023 年论文所用模型和数据集。Adaptive Computation Time 允许循环神经网络学习每个序列位置采用多少循环步数，实验覆盖合成序列任务和字符级 Wikipedia 语言模型。
+- **证据等级与边界：** `source-backed`（ICML 论文与原始 arXiv 论文）。这些工作可分别支持覆盖率—风险权衡、转交决策、预算内模型级联和条件计算的概念依据；不能证明当前闭源 LLM API 提供校准置信度、effort 标签对应固定算力，或论文效果可迁移至现代推理模型路由。当前产品行为须以 provider 官方接口合同和目标任务测量为准。

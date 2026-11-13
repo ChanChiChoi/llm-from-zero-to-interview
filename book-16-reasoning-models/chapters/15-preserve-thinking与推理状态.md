@@ -1,368 +1,177 @@
-# 第 15 章 Preserve Thinking：保留的是可继续执行的状态，不是把隐藏思维全量暴露
+# 第 15 章 Preserve Thinking：协议状态如何跨轮延续
 
-## 15.1 多轮工具任务为什么不能只拼聊天记录
+推理模型在一次请求中生成了 reasoning item，下一次请求怎样接着走？“保存状态”至少涉及两件不同的事：把模型协议要求的历史交回去，以及让宿主确认工具、权限和外部世界的实际状态。前者可能帮助模型沿原上下文继续；后者决定系统能不能安全地继续执行。把二者都叫作“保留思维”，容易把 opaque 状态误当成可读思维链，也容易把旧计划误当成已完成的动作。
 
-一次复杂任务通常不是“一问一答”。模型先分析问题，提出工具调用；工具返回文件、网页或测试结果；模型根据观察修正计划；最后才给出答案或提交一个外部动作。如果每一轮都把所有历史重新序列化成普通文本，系统不仅要重复支付 token，还容易丢掉工具调用 ID、权限决定和提交状态。
+## 15.1 先区分三类状态
 
-因此，很多推理或 Agent API 会提供某种 preserve thinking、reasoning item 或可继续状态的能力。它关注的是下一轮如何继续执行，而不是让客户端看到模型的全部隐藏思维。把它翻译成“把思维链发出来”会同时造成安全、隐私和协议误解。
+| 状态 | 例子 | 谁负责 | 保存它能解决什么 |
+|---|---|---|---|
+| 可见对话 | 用户请求、最终回答、允许展示的工具摘要 | 应用与产品界面 | 让用户理解前因后果 |
+| Provider 推理状态 | reasoning item、thinking block、thought signature、续接 ID | 模型服务和 API 客户端按协议协作 | 在受支持的接口上延续原请求的上下文 |
+| 宿主执行状态 | 工具调用 ID、外部执行结果、权限版本、artifact 和待确认副作用 | 调用模型的应用、工具服务及其持久化系统 | 判断动作是否执行、是否能重试以及当前是否仍获授权 |
 
-## 15.2 三种历史必须分开
+这三类内容可以有关联，但不能互相替代。Provider 状态可能是不透明或加密的协议数据，并不等于可展示的思维链；它通常也不包含文件系统、数据库或浏览器的权威现状。反过来，宿主保存了工具结果，也不代表某个模型 API 能接收或继续使用此前的推理状态。
 
-第一种是可见对话历史。它包括用户消息、模型最终回答和应用允许用户看到的工具摘要。
+因此，本章说的 preserve thinking，限定为：按特定 provider、模型和 API surface 的公开协议，保留或引用可续接的模型上下文。它不表示模型拥有永久记忆，不表示客户端可以解密全部内部推理，也不自动恢复工具执行。
 
-第二种是执行状态。它包括 request id、tool call id、工具输入、授权结果、执行状态、观察结果、预算、checkpoint 和待提交副作用。这些字段通常是恢复任务真正需要的内容。
+## 15.2 续接方式由 API 合同决定
 
-第三种是内部推理状态。它可能是 provider 管理的 reasoning token、摘要、latent state 或不可见 item。客户端能否保存、转发和复用，取决于官方协议；应用不能因为看到了某个字段名就假设它是普通文本。
+多轮 API 大致有两种续接路径。第一种由服务端保存会话或响应，调用方在后续请求中引用前一状态标识。第二种由调用方管理历史，并按接口要求回放响应项。具体合同可不同，不能把一种供应商的做法当成通用标准。
 
-可以给每个状态字段附上三个属性：谁拥有它、谁能读取它、保存多久。比如工具结果可能归属于租户，系统摘要可能只能由 runtime 读取，用户可见解释则需要经过脱敏和引用检查。
+| API 示例 | 状态如何续接 | 必须留意的边界 |
+|---|---|---|
+| OpenAI Responses | 可用 Conversations 或 previous_response_id 延续服务端状态；自行无状态回放时，保留响应 output 中的全部项目，包括加密 reasoning item 和 phase 信息。支持的模型还可用 reasoning.context=all_turns。 | 对话对象、响应保存期限和 store 设置有不同语义；新一代模型遇到前缀变化时可能丢弃后续 reasoning item。详细规则见 [Conversation state](https://developers.openai.com/api/docs/guides/conversation-state) 和 [Preserve reasoning](https://developers.openai.com/api/docs/guides/preserved-reasoning)。 |
+| Anthropic Messages | 客户端将每轮返回的 content blocks 按原顺序带回，包括 thinking、redacted_thinking 和工具项；部分模型按 system、tools 和此前 messages 检查前缀。 | 是否可回放还取决于生产模型、目标模型及部分模型的账号绑定。历史编辑可能让 block 失效或被丢弃；处理方式按模型和参数而异。见 [Preserved thinking](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking)。 |
+| Gemini Interactions | stateful 请求可用 previous_interaction_id，由服务端管理 thoughts 和 signatures；stateless 请求需要按原样回送 thought blocks。 | 此说明针对 Interactions API；其他 Gemini API surface 有自己的字段与回放规则。见 [Interactions 概览](https://ai.google.dev/gemini-api/docs/interactions-overview) 和 [Thought signatures](https://ai.google.dev/gemini-api/docs/thought-signatures)。 |
+| xAI Responses（Grok 4.7） | 文档说明 Responses 返回 encrypted reasoning content；续接时按文档回传相关项目。 | 这条规则绑定 Grok 4.7 与 Responses API，不能外推到 Chat Completions。见 [Reasoning](https://docs.x.ai/developers/model-capabilities/text/reasoning)。 |
 
-## 15.3 工具任务的提交边界
+表中合同依据 2026-11-13 阅读的官方文档；接口、模型支持表和存储策略可能变化，实际集成应按目标 model ID 与 API surface 复核。
 
-一条工具链可以画成：
+这些例子说明，“拿到一个状态 ID”与“客户端必须回传完整响应项”是不同接口设计；即便都叫 reasoning 或 thinking，数据结构和兼容条件也不同。发送完整历史不等于把完整历史展示给用户，返回的加密或签名字段也不等于可读取的自然语言推理。Provider 文档说明的是 API 合同，不披露模型内部状态的完整表示。
 
-```text
-thinking -> tool_requested -> authorized -> executing
-       -> observed -> thinking -> final
-```
+## 15.3 历史编辑会改变状态的含义
 
-`tool_requested` 只是模型提出了意图，`authorized` 说明策略允许，`executing` 说明 executor 已经开始，`committed` 才表示外部副作用已经完成。恢复系统必须保存这些阶段，不能把一个未执行的计划当成已经执行，也不能把执行中的请求当成一定失败。
+许多续接协议会把推理项与它产生前的上下文绑定。若调用方重写早先的指令、工具 schema 或工具结果，新的输入已经不是原来的上下文。继续带上旧状态，可能被服务拒绝、静默丢弃，或使模型失去原有推理上下文。Anthropic 的前缀检查明确依赖 system、tools 和先前消息；OpenAI 文档也说明，部分较新的模型会在前缀变化后丢弃后续 reasoning item。具体行为以相应模型和 API 文档为准。
 
-一个最小的工具事件应该至少带有：
+这也是为什么“追加新消息”通常比“重写旧历史”更容易满足续接合同。需要删改长历史时，应区分两种操作：
 
-```text
-request_id, call_id, tool_name, input_hash,
-auth_decision, started_at, finished_at,
-result_hash, error, committed, trace_id
-```
+1. 若 provider 为目标 API 提供签名压缩或正式 compaction 协议，按其规定保存压缩块、版本和回放顺序。
+2. 若应用自行生成摘要，应把它当成新的、由应用负责的上下文；按 provider 规则丢弃不再兼容的旧推理项，再用摘要、来源引用和明确的未完成事项重新开始。不能宣称旧推理状态仍然连续。
 
-工具输入可以包含敏感数据，日志通常保存 hash、脱敏摘要和受控引用，而不是无条件复制完整内容。结果也应带版本或来源，方便下一轮推理判断它是否仍然有效。
+模型切换也不是简单替换 model 字段。目标模型可能无法读取源模型的状态；有的接口会丢弃不兼容项，有的只允许特定兼容对。即使同一个 provider 内切换，也要查看准确 model ID、API surface 和版本。第十四章讨论档位配置，本章讨论状态续接，两者都不能用一个跨模型通用映射来代替实测。
 
-## 15.4 一个超时例子
+## 15.4 模型续接与工具恢复是两条链
 
-模型请求搜索工具，网络在服务端已经收到请求后断开。客户端只看到 timeout。此时“没有搜索结果”和“搜索没有命中”不是一回事：前者是未知状态，后者是一个有效观察。
+考虑一个测试工具：宿主发出运行请求后，网络断开，客户端没有收到响应。此时至少有两个未知：模型 API 是否保存了可续接状态；测试服务是否已经收到并执行请求。前一个问题由 provider 协议回答，后一个必须向测试服务查询，或通过工具自己的幂等键防止重复提交。
 
-如果系统只保存一句“搜索失败”，模型重连后可能把未知当成空结果，继续写出错误结论。更好的状态是保存 `call_id`、query hash、是否到达供应商、执行状态、超时类型和重试次数。重连时 runtime 先查询 call 状态；若确定未执行，可以安全重试；若可能已执行，需要使用幂等键或查询副作用，不能盲目再次发送。
+| 宿主观察到的动作状态 | 可以得出的结论 | 恢复时的动作 |
+|---|---|---|
+| 尚未发送 | 已知外部工具没有收到本次提交 | 重新检查授权后再发送 |
+| 已发送或执行中 | 请求可能正在执行，不能当成失败 | 查询原 call ID 或幂等键，等待权威结果 |
+| 已成功或已失败 | 有工具侧结果可以读取 | 校验结果来源与目标任务，再更新任务状态 |
+| 未知 | 当前证据不足以判断外部结果 | 继续查询、安全暂停或转人工；不盲目重发 |
 
-这就是 preserve thinking 的工程价值：它让下一轮拥有足够的事实继续工作，而不是让下一轮拥有更多未经验证的文字。
+“未知”描述的是宿主目前掌握的信息，不是工具执行的一种确定结果。若调用方把超时直接当失败，下一轮可能重复发信、付款、发布或写文件。若旧授权已经撤销，保存下来的状态也不能自行恢复授权；每个新的外部副作用都要由当前策略和执行器重新判断。
 
-## 15.5 为什么不能直接持久化全部隐藏思维
+这里仅划清责任边界：Provider item 负责模型上下文的协议续接；事件顺序、工具结果、幂等和错误恢复由工具协议与宿主处理。工具交错生命周期见[第十九章](19-interleaved-thinking与工具协议.md)，长任务 Runtime 与 checkpoint 实现见[第二十册第十七章](../../book-20-agent-harness-runtime/chapters/17-long-running-agent与checkpoint.md)。
 
-完整 reasoning 可能包含用户没有授权的敏感材料、系统提示片段、未验证假设和内部安全控制信息。把它原样写入日志会扩大数据泄露面，也会让调试人员把模型草稿误当成事实。
+## 15.5 保存边界还包括隐私和生命周期
 
-实际系统通常保存三类可审计信息：结构化执行事件、工具结果的来源和 hash、面向用户的结论摘要。若确实需要保存 reasoning item，应由 provider 协议和租户策略明确允许，并设置访问控制、加密、保留期限和删除流程。
+不透明状态不等于无敏感性。它可能受模型、消息前缀、账号、租户或 provider 存储策略约束；响应 ID 也不等于永久可取回的记忆。以 OpenAI 文档为例，Responses 对象默认保存 30 天，可用 store=false 关闭该项保存；Conversation 对象及其项目不受同一 30 天 TTL 规则约束。实际部署仍需核对账户设置和适用的数据保留条款，不能只凭字段名判断数据生命周期。以上行为依据 2026-11-13 查阅的[官方状态文档](https://developers.openai.com/api/docs/guides/conversation-state)。
 
-摘要也不是天然安全。过度压缩可能丢掉“只读”“不能修改生产”的约束，把猜测写成事实，或删除证据来源。一个有用的摘要要带 source reference、生成时间、模型 revision 和验证状态。例如“猜测配置 X 导致问题”应标记为 hypothesis，而不是记录成 root cause。
+宿主应按任务需要保存最少且可核验的信息：provider 与 model 标识、接口版本、续接 ID 或原始响应项、事件与 artifact 的引用、外部执行状态、授权版本以及保留期限。凭证、无关个人信息和完整的用户可见之外推理文本，不应因为“方便续接”而无条件落盘。用户需要解释时，给出经过验证的结论、来源和暂停原因；不要把内部协议字段直接当成解释文本。
 
-## 15.6 热状态、冷状态和恢复校验
+## 15.6 用中断演练衡量能否正确续接
 
-可以把状态分成热状态和冷状态。热状态保留在 runtime 内存或低延迟缓存中，支持短时间内继续；冷状态写入 checkpoint、workspace 或事件存储，支持进程重启和长时间恢复。
+只测正常的多轮请求，看不出恢复能力。应在模型响应前后、工具已提交后、权限变化后、历史压缩后和模型切换后设置中断，检查恢复后的 artifact、工具副作用、授权判断和用户可见状态。一个任务只有同时满足以下条件，才计为正确恢复：模型上下文通过目标 API 的兼容检查；外部执行状态已确认或被安全地保持为未知；新副作用重新检查当前授权；没有重复提交；最终 artifact 满足任务契约。
 
-状态演化可抽象为：
+令中断任务总数为 N_{interrupted}，其中恢复后完成任务契约、且满足上述条件的任务数为 N_{correct\_resume}。只有中断样本数大于零时，恢复率才有定义：
 
-```math
-s_{t+1}=F(s_t,o_t,a_t;\theta)
-```
-
-`s_t`、`o_t` 和 `a_t` 应分别通过版本化 schema 表示；`F` 是由 runtime、工具执行器、权限服务和日志系统共同实现的状态转移，不是模型可以随意改写的函数。`\theta` 可以包含模型 revision、工具 schema、策略版本和上下文折叠规则；如果这些依赖发生变化，恢复时必须先做兼容性检查。外部动作的状态转移还应具有幂等键或可查询的执行 ID，避免网络重试产生重复副作用。
-
-恢复时读取 checkpoint：
-
-```math
-\hat s_t=\mathrm{Restore}(\mathrm{checkpoint}_t)
-```
-
-`Restore` 不应只是反序列化。它要检查模型 revision、tokenizer 和 chat template、工具 schema、权限版本、上下文折叠策略、外部资源版本以及 state checksum。内部 latent state 或 KV cache 通常强绑定模型和 runtime，不能在版本升级后默认复用。
-
-## 15.7 上下文折叠时保留什么
-
-当对话接近 context limit，系统会压缩旧历史。保留一段自然语言摘要比直接删除更好，但摘要必须区分事实、假设、未完成动作和已提交副作用。
-
-例如，下面两条记录看似类似，恢复含义完全不同：
-
-```text
-已检查部署配置，推测 timeout 可能导致失败，尚未运行测试。
-```
-
-```text
-已将 timeout 改为 30s，并完成生产提交。
-```
-
-第二条包含外部副作用，必须带提交人、授权和变更 ID。上下文折叠不能把它们压成同一句“timeout 已处理”。对于每个结论，最好保留来源文档或 artifact 引用，以便恢复后的模型重新核对。
-
-## 15.8 安全边界与状态泄露
-
-工具结果本身可能包含不可信指令；内部摘要可能泄露 system prompt；用户可见的错误信息可能被再次注入。状态存储要做租户隔离、加密、访问审计、过期删除和字段级脱敏。
-
-最重要的边界是：模型生成的计划不是授权，状态中出现的动作也不是执行命令。恢复时每一个外部副作用都必须重新经过 auth 和 executor。权限在任务中途发生变化时，旧状态不能自动继承旧授权。
-
-## 15.9 如何评估 preserve thinking
-
-评估不能只测正常多轮对话，要主动中断任务：客户端断开、工具超时、进程重启、模型 fallback、上下文折叠、权限变化和 checkpoint 跨版本恢复。
-
-正确恢复率可以写成：
-
-```math
+~~~math
 R_{\mathrm{resume}}
-=\frac{N_{\mathrm{tasks\ resumed\ correctly}}}
-{N_{\mathrm{interrupted\ tasks}}}
-```
+=\frac{N_{\mathrm{correct\_resume}}}
+{N_{\mathrm{interrupted}}}
+~~~
 
-这个比例要求 `N_interrupted_tasks>0`，且 `0\le N_resumed_correctly\le N_interrupted_tasks`。如果评估期间没有中断任务，恢复率未定义，应记录为 `None`，不能用 `0` 或 `1` 伪造结果。一个“正确恢复”任务至少要满足：状态校验通过、外部执行状态得到确认或被明确标为未知、权限重新检查、没有重复副作用，并且最终 artifact 或用户可见状态符合任务契约。
+例如一次演练中断了 100 个任务：82 个恢复后通过 artifact、权限和副作用检查；12 个因外部状态未知而安全暂停；6 个出现错误结果或恢复不安全。此时 N_{correct_resume}=82、N_{interrupted}=100，代入得到 R_resume=82/100=0.82，即 82%。12 个安全暂停不算成功续接，但应另报安全暂停率 12%；否则单看恢复率，可能鼓励系统冒险继续执行。若演练中没有中断任务，分母为零，恢复率应记为 N/A，而不是 0% 或 100%。
 
-同时报告重复副作用率、状态泄露率、恢复延迟、摘要事实支持率和跨版本拒绝率。一个系统即使恢复率高，只要它在网络不确定时重复支付或重复发送外部请求，仍然不适合生产。
+恢复率还不能替代分项指标。至少应同时记录重复副作用数、越权动作数、错误 artifact 数、状态不兼容率、人工接管比例和恢复延迟。每项都要保留明确分母和“未发生”的表示方法；例如没有任何外部副作用尝试时，重复副作用率应记为 N/A。上述是评测设计，不是行业统一 SLO。
 
-## 15.10 一个 checkpoint 的教学结构
+## 15.7 一个最小的前缀兼容性演示
 
-可以用以下结构描述浏览器或代码 Agent 的 checkpoint：
+以下 Python 例子用哈希比较保存时和续接时的上下文前缀，演示“只追加”与“编辑旧内容”会得到不同检查结果。它刻意采用严格的教学合同，不模拟任何 provider 的签名、加密、模型兼容矩阵、compaction 或账号规则；真实请求必须按对应官方文档处理。
 
-```json
-{
-  "schema_version": 1,
-  "task_id": "...",
-  "model_revision": "...",
-  "workspace_revision": "...",
-  "summary": {"facts": [], "hypotheses": [], "open_questions": []},
-  "tool_calls": [],
-  "artifacts": [],
-  "pending_effects": [],
-  "budget": {"reasoning": 0, "tools": 0, "deadline": "..."},
-  "policy_version": "...",
-  "checksum": "..."
-}
-```
+**代码状态：已验证（2026-11-13；CPython 3.12.9；仅 Python 标准库）。**
 
-`schema_version`、`task_id`、模型和 workspace revision、policy version、checksum 都是恢复契约的一部分，不能省略后靠字段猜测。`budget` 中的数值应带单位并为有限非负数；`tool_calls` 中每个动作至少要有唯一 `call_id`、幂等键、状态和授权结果；`pending_effects` 只能表示尚未提交的动作，不能把“模型打算做”写成“系统已经做”。
-
-这里的 `pending_effects` 故意和 `artifacts` 分开。artifact 是已经生成的产物，pending effect 是尚未提交的动作。恢复系统在提交前必须再次显示或确认高风险动作，并检查 workspace revision 没有被其他任务覆盖。
-
-## 15.11 常见误区
-
-把 preserve thinking 当成暴露 CoT，是第一个误区。可继续执行的结构化状态和用户可见解释应有不同的权限。
-
-第二个误区是认为保存文本就能恢复。工具 ID、外部状态、权限、版本和幂等性同样重要。
-
-第三个误区是把断线等同于工具没有执行。必须查询执行状态或使用幂等设计。
-
-第四个误区是摘要越短越好。摘要丢掉约束和来源后，恢复任务会变得更危险。
-
-## 15.12 综合判断、练习与边界
-
-设计多轮工具 Agent 的状态保存时，应先区分可见历史、结构化执行状态和 provider 管理的内部状态；保存 call ID、观察、权限、预算、checkpoint、artifact 和来源；恢复前校验模型与工具版本，处理外部副作用的幂等性，不能把隐藏思维或未授权计划直接暴露或执行。
-
-练习一：为一个代码 Agent 设计 checkpoint schema，覆盖当前分支、测试结果、待确认修改和工具状态。
-
-练习二：设计一个搜索超时的状态机，分别处理“未发送”“执行中”“成功”“失败”“未知”五种状态。
-
-练习三：列出上下文折叠时必须保留的五类信息，并说明删除哪一类会产生什么风险。
-
-### 15.12.1 三种状态必须分开保存
-
-可见对话是用户和模型交换的文本；执行状态是任务阶段、工具调用、验证结果和待确认动作；环境状态是 workspace、数据库、浏览器和外部服务的真实状态。把三者全部序列化成聊天历史，会让恢复过程无法判断哪些是模型的说法、哪些是已验证事实。
-
-可以用如下结构表达一条状态记录：
-
-```text
-state = {
-  facts: [{value, source, revision}],
-  hypotheses: [{text, status, evidence_ids}],
-  actions: [{call_id, args_hash, status, idempotency_key}],
-  artifacts: [{uri, checksum, workspace_revision}],
-  policy: {principal_revision, policy_revision},
-  budget: {used, remaining, deadline}
-}
-```
-
-恢复时，`facts` 需要按来源复核，`hypotheses` 可以重新评估，`actions` 要查询外部状态，`artifacts` 要校验 checksum，`policy` 要重新读取授权。这样才不会把一段旧摘要当成新的事实。
-
-### 15.12.2 preserve thinking 不等于暴露隐藏思维
-
-系统需要保存的是让任务可继续、可审计、可恢复的结构化状态，而不是把所有内部推理文本原样暴露给用户或下游模型。可保留问题分解、证据 ID、工具结果、失败原因、验证状态和待确认动作；敏感的内部 token、凭证和不必要的私人内容应受访问控制。
-
-如果产品需要给用户解释，应生成面向用户的简洁依据和结果摘要，并把详细 trace 放在受权限保护的审计系统中。可解释性要求来源和决策理由可查，不要求把内部推理过程当作 API 合同。
-
-这种保留方式存在清晰的工程取舍：保存更多结构化证据、版本和工具状态，能够提高恢复率与审计能力，却会增加存储、加密、脱敏和访问控制成本；保存得过少则节省空间，但恢复时更容易把旧假设误当成事实。实际系统应按风险和恢复价值决定保留粒度，而不是追求“全部保存”或“全部删除”。
-
-### 15.12.3 中断恢复的 worked example
-
-代码 Agent 在运行测试时网络断开。checkpoint 显示测试请求已发送但没有响应，状态不能直接记为失败。恢复后先用 `run_id` 查询测试服务；如果已完成，读取结果并继续；如果不存在且动作可幂等，才重新运行；如果无法查询，转为未知并请求人工。
-
-同样的规则适用于支付、发邮件和发布。外部副作用的“未知”是一个真实状态，不是普通异常。把未知状态直接当失败并重试，是重复副作用的主要来源之一。
-
-### 15.12.4 一个最小可运行的恢复状态机
-
-下面的 demo 用内存字典模拟一个测试工具。第一次发送后客户端超时，恢复流程查询 `run_id`；如果工具状态仍为 `running`，系统不会重复发送，而是返回等待状态。随后用户撤销写权限，恢复流程会拒绝新的写动作。示例不连接网络，也不代表任何 provider 的具体 API。
-
-```python
-from dataclasses import dataclass, field
+~~~python
+import hashlib
+import json
+from dataclasses import dataclass
 
 
-ALLOWED = {"planned", "authorized", "sent", "running", "succeeded", "failed", "unknown"}
+def prefix_digest(system, tools, messages):
+    prefix = {
+        "system": system,
+        "tools": tools,
+        "messages_before_state": messages,
+    }
+    encoded = json.dumps(
+        prefix,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
-@dataclass
-class Action:
-    call_id: str
-    idempotency_key: str
-    kind: str
-    status: str = "planned"
-    committed: bool = False
-    history: list = field(default_factory=list)
-
-    def transition(self, status):
-        if status not in ALLOWED:
-            raise ValueError("unknown action status")
-        if self.status in {"succeeded", "failed"}:
-            raise ValueError("terminal action cannot transition")
-        self.status = status
-        self.history.append(status)
+@dataclass(frozen=True)
+class SavedState:
+    provider: str
+    model: str
+    prefix_hash: str
 
 
-class FakeTool:
-    def __init__(self):
-        self.runs = {}
-
-    def send_once(self, action):
-        if action.idempotency_key in self.runs:
-            return self.runs[action.idempotency_key]
-        action.transition("sent")
-        action.transition("running")
-        self.runs[action.idempotency_key] = {"status": "running", "call_id": action.call_id}
-        return self.runs[action.idempotency_key]
-
-    def query(self, idempotency_key):
-        return self.runs.get(idempotency_key)
+def check_replay(saved, provider, model, current_prefix_hash):
+    if provider != saved.provider:
+        return "provider_mismatch"
+    if model != saved.model:
+        return "model_mismatch"
+    if current_prefix_hash != saved.prefix_hash:
+        return "prefix_mismatch"
+    return "compatible"
 
 
-def authorize(action, write_allowed):
-    if action.kind == "write" and not write_allowed:
-        raise PermissionError("write permission revoked")
-    if action.status not in {"planned", "unknown"}:
-        raise ValueError("action is not awaiting authorization")
-    action.transition("authorized")
+system = "只查公开文档，保留来源。"
+tools = [{"name": "search", "schema_version": 1}]
+messages = [{"role": "user", "content": "查找接口状态规则"}]
+saved_hash = prefix_digest(system, tools, messages)
+saved = SavedState("Provider-A", "Model-X", saved_hash)
 
+append_only = check_replay(
+    saved, "Provider-A", "Model-X",
+    prefix_digest(system, tools, messages),
+)
+edited_history = check_replay(
+    saved, "Provider-A", "Model-X",
+    prefix_digest(
+        system,
+        tools,
+        [{"role": "user", "content": "查找另一个接口状态规则"}],
+    ),
+)
+changed_tools = check_replay(
+    saved, "Provider-A", "Model-X",
+    prefix_digest(system, [{"name": "search", "schema_version": 2}], messages),
+)
+model_switch = check_replay(
+    saved, "Provider-A", "Model-Y", saved_hash,
+)
 
-tool = FakeTool()
-action = Action("call-1", "idem-1", "write")
-authorize(action, write_allowed=True)
-first = tool.send_once(action)
-action.status = "unknown"  # client timed out after the request was sent
-observed = tool.query(action.idempotency_key)
-assert observed["status"] == "running"
-assert tool.send_once(action)["call_id"] == "call-1"  # no duplicate send
+assert append_only == "compatible"
+assert edited_history == "prefix_mismatch"
+assert changed_tools == "prefix_mismatch"
+assert model_switch == "model_mismatch"
 
-try:
-    authorize(action, write_allowed=False)
-except PermissionError as exc:
-    print("duplicate_send_prevented", "permission_rechecked", str(exc))
-else:
-    raise AssertionError("revoked permission must stop the write")
-```
+print(
+    f"append_only={append_only} "
+    f"edited_history={edited_history} "
+    f"changed_tools={changed_tools} "
+    f"model_switch={model_switch}"
+)
+~~~
 
 预期输出：
 
-```text
-duplicate_send_prevented permission_rechecked write permission revoked
-```
+~~~text
+append_only=compatible edited_history=prefix_mismatch changed_tools=prefix_mismatch model_switch=model_mismatch
+~~~
 
-这个 demo 只演示幂等键、状态查询和权限重新检查。生产系统还要把状态写入持久化事件日志，处理并发恢复、租户隔离、凭证撤销、工具自身的幂等保证和最终提交确认。
+例子中没有真实 reasoning payload；它只展示调用方可计算的上下文指纹。实际 provider 可能允许特定模型切换、签名 compaction 或显式丢弃不兼容状态，所以这段代码不能用来判定真实请求是否会成功。
 
-## 15.13 用状态机和幂等键恢复任务
+## 15.8 本章结论与练习
 
-恢复任务的核心不是把上一轮文字重新发给模型，而是确定每个动作处于什么状态。一个工具调用至少要区分 `planned`、`authorized`、`sent`、`running`、`succeeded`、`failed` 和 `unknown`。网络断开时，`sent` 和 `running` 不能直接改成 `failed`，因为外部服务可能已经执行成功。
+跨轮推理状态是带有模型和历史约束的 API 协议对象，不是可以随意编辑的普通文本，也不是永久记忆。正确恢复还需要宿主核实工具的权威结果、当前权限和 artifact。设计时先识别状态归属和 API surface，再决定服务端续接、精确回放或安全重建；遇到未知外部结果时，宁可暂停，也不把超时猜成失败。
 
-可以用幂等键和状态查询处理这种不确定性：
-
-```text
-create action(call_id, idempotency_key)
-  -> authorize
-  -> send once
-  -> query status after timeout
-  -> commit result or mark unknown
-```
-
-恢复规则应按动作类型决定。读取文件可以安全重试；创建订单、发送邮件和发布配置必须先查询 `idempotency_key`；无法查询的高风险动作应转人工，而不是让模型“猜测已经失败”。这也是为什么 preserve thinking 更接近工作流 checkpoint，而不是聊天记录功能。
-
-若将恢复正确性记为 `P_recover`，可以把它拆成：
-
-```math
-P_{\mathrm{recover}}
-=P_{\mathrm{state\_valid}}
- P_{\mathrm{external\_status\_known}}
- P_{\mathrm{policy\_rechecked}}
- P_{\mathrm{no\_duplicate\_effect}}
-```
-
-这里每一项都表示一个在 `[0,1]` 内的事件概率或分层通过率；若把它们当作概率相乘，需要明确这是一个近似分解，并且各事件之间通常并不独立。工程报告更推荐同时列出四个分量，而不是只发布乘积。任一关键条件确定失败时，恢复后的“继续执行”都不应被视为成功；某一项状态未知时，应进入人工或安全暂停，而不是把未知当作 0 或 1。这个乘积是教学上的分解，不能当作真实系统可靠性的证明。
-
-## 15.14 Checkpoint 的快照、日志与版本
-
-只保存最新快照会丢掉故障前最后一个事件；只保存事件日志则恢复时需要重放很长历史。常见做法是周期性 snapshot 加短的 append-only event log：快照保存可快速加载的状态，事件日志保存快照之后的动作和观察。
-
-```text
-snapshot S_k
-  + event e_(k+1)
-  + event e_(k+2)
-  + ...
-  -> replayed state S_(k+m)
-```
-
-每个事件应带 `trace_id`、`call_id`、schema version、model revision、workspace revision、输入 hash、输出来源和时间。状态 schema 变化时，使用显式 migration；不要让新 runtime 默默解释旧字段。若 `S_k` 的 workspace revision 与当前工作区不同，恢复流程应先重新读取冲突文件，再决定重放或生成 patch。
-
-对安全和隐私，事件日志可以保存脱敏参数、hash 和受控 artifact 引用，而不是无条件保存全部 prompt、凭证或工具结果。审计要求“能证明发生了什么”，不等于“所有原始数据永久保留”。保留期限、租户隔离、加密和删除流程都是状态契约的一部分。
-
-## 15.15 上下文折叠时如何保留证据链
-
-当历史接近 context limit，最危险的做法是让模型把一切压成一句“任务进行中”。折叠后的状态至少要区分四类内容：已验证事实、尚未证实的假设、已执行动作和待执行动作。每条事实应有来源、版本和时间；每个假设应有支持或反驳它的 evidence id。
-
-例如：
-
-```text
-facts:       config revision r17 contains timeout=30
-hypotheses:  timeout causes retry storm [supported_by: e12]
-executed:    read logs with call_id c4
-pending:     run read-only reproduction on revision r17
-```
-
-折叠不能把“模型认为已完成”改写成“系统已完成”。如果外部状态没有验证，摘要中应保留 `unknown`；如果工具结果来自网页或用户上传文件，还要标出不可信来源，避免下一轮把其中的指令当成系统规则。对需要引用的研究任务，摘要还应保留 URL、文档版本、段落定位或内容 hash。
-
-## 15.16 恢复系统的 SLO 与演练
-
-preserve thinking 不应只在 demo 中演示“断线后还能继续”。生产评估至少包含恢复成功率、恢复延迟、重复副作用率、状态泄露率、版本不兼容拒绝率和人工接管率。要注入模型服务超时、工具执行超时、进程重启、workspace 冲突、权限撤销和上下文折叠，观察系统是否按状态机处理。
-
-一个合格的演练案例是：代码 Agent 已写入 patch，测试任务返回未知，用户随后撤销写权限。恢复时系统应查询测试状态，重新读取授权，禁止新的写操作，并把已有 patch 作为待审核 artifact 展示。若系统只把历史文本交给模型，模型可能在权限已撤销后再次尝试写入。
-
-## 15.17 preserved state 的最小数据结构
-
-保存“继续思考”不能只保存一段可见文本。一个可恢复状态至少要区分：已提交的输出、未提交的候选、模型和 tokenizer 版本、工具事件、外部 observation、权限快照、预算、artifact 引用和校验值。对每个字段还要标注来源是模型生成、用户输入、工具返回还是系统事实。
-
-可以用如下抽象描述状态：
-
-```math
-S=(M,T,P,O,A,B,E,H),
-```
-
-其中 `M` 是模型版本，`T` 是 tokenizer/template，`P` 是 committed prefix，`O` 是 observations，`A` 是 artifacts，`B` 是 budget，`E` 是 external effects，`H` 是权限和审计信息。恢复前先验证兼容性；任何一项不匹配，都应重算或人工接管，不能把旧状态当作普通 prompt 继续喂给新模型。
-
-## 15.18 可见思考和内部状态的边界
-
-用户可能需要知道系统为什么暂停、用了哪些证据和下一步是什么，但这不等于系统应泄露内部 reasoning token。工程上可以保存结构化的决策摘要、引用、工具结果和失败原因，而把内部推理表示视为受保护状态。摘要也必须标记未知和待验证，不能把模型的假设写成事实。
-
-这一边界对安全尤其重要：如果恢复摘要包含系统秘密、隐藏策略或其他租户的上下文，持久化本身就造成泄露；如果摘要过度压缩，恢复后又可能重复动作。最小必要、分层权限和字段级加密比“把整段上下文全存下来”更可靠。
-
-## 15.19 恢复正确性的反事实测试
-
-把同一任务分别在未中断、工具前中断、工具后中断、权限撤销后中断和模型升级后中断。比较最终 artifact、工具副作用、事件顺序和用户可见状态。理想结果不是每个断点都得到完全相同的 token，而是所有可接受路径都不重复提交、不越权，并能解释差异来自哪里。
-
-如果恢复后的答案更长但事实一致，可以接受；如果输出看似相同却多发了一次邮件，则是严重失败。恢复测试要把业务状态和文本结果同时纳入断言。
-
-## 15.20 状态恢复的 worked example
-
-假设 Agent 已读取三份文档、生成 patch、调用测试工具，测试返回超时，随后用户撤销写权限。恢复时应先查询测试是否实际完成，再重新读取权限和 workspace revision；如果测试未知，只能把 patch 标为待验证，不能再次写文件。模型可以继续分析已有 artifact，但不能继续执行已撤销的写操作。
-
-## 15.21 状态快照的安全保留
-
-保留期限应按字段区分：业务 artifact、审计元数据、工具原文、内部状态和临时候选有不同的删除要求。加密、访问控制、租户隔离和可验证删除必须进入 checkpoint 设计；为了“以后恢复方便”无限期保存全部思考内容会扩大泄露面。
-
-## 15.22 小结与资料边界
-
-本章参考 reasoning API、tool calling、Agent tracing、checkpoint 和状态机工程资料。具体 reasoning item 的可见性、加密状态和跨请求复用能力以对应 provider 的版本化协议为准。
+1. 选择 OpenAI Responses、Anthropic Messages 或 Gemini Interactions，画出一次工具调用前后需要回传或引用的状态，并标出服务端状态与客户端状态。
+2. 构造一个历史前缀被编辑、一个工具结果超时的恢复案例，分别判断 provider 状态兼容性和工具执行状态；说明为何一个判断不能替代另一个。
+3. 为含个人数据的任务设定 reasoning item、工具原文、artifact 和审计元数据的访问者、保留期与删除方式，并写出模型切换及 provider 不兼容时的降级策略。

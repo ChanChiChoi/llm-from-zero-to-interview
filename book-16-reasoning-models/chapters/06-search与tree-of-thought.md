@@ -8,17 +8,31 @@
 
 本章先用初学者能理解的例子建立直觉，再给出状态空间和搜索算法的数学表达，最后讨论工具环境、错误剪枝、成本账本、评估、综合案例和可运行实验。读者不应把某个算法名称当成答案；真正需要掌握的是，为什么要搜索、搜索什么、凭什么保留一条路，以及如何证明它没有把正确路径过早丢掉。
 
+本章承接[第三章《Self-Consistency 与采样》](03-self-consistency与采样.md)：由完整路径末端聚合转向中间状态的展开和筛选；评分与验证边界回用[第四章《Verifier 与 Reward Model》](04-verifier与reward-model.md)，步骤级信号则联系[第五章《过程监督》](05-process-supervision.md)。下一章会把搜索与采样等策略放入 test-time compute 的质量—预算关系中比较。
+
 ## 0.1 一个具体问题：同一目标，几条不同的路
 
 有一个水壶容量为 8 升和 5 升，初始都是空的，目标是得到恰好 3 升。可执行动作包括装满、倒空和互相倾倒。模型可以写出一条动作序列，也可以先枚举多种可能：
 
 ~~~text
-路径 A：装满 5 升 -> 倒入 8 升 -> 再装满 5 升 -> 倒入 8 升直到 8 升满
-路径 B：装满 8 升 -> 倒入 5 升 -> 倒空 5 升 -> 把剩余 3 升保留在 8 升壶中
-路径 C：先把 5 升倒入 8 升，再重复相同动作
+路径 A：装满 8 升 -> 倒入 5 升 -> 倒空 5 升 -> 把 8 升壶剩余的 3 升倒入 5 升壶
+路径 B：装满 8 升 -> 倒入 5 升 -> 倒空 5 升 -> 把剩余 3 升留在 8 升壶中
+路径 C：装满 5 升 -> 倒入 8 升 -> 再装满 5 升 -> 倒入 8 升直到它装满
 ~~~
 
-路径 A 和 B 可能都能到达目标，路径 C 可能陷入重复状态。若系统只沿着一条语言生成链前进，早期动作一旦不合适，就要从头重来；若系统维护多个状态，就可以比较剩余容量、动作长度和是否重复，并继续扩展更有希望的分支。
+把状态记为 `(8 升壶, 5 升壶)`，路径 A 的状态变化是：
+
+| 动作 | 状态（升） |
+| --- | --- |
+| 初始 | `(0, 0)` |
+| 装满 8 升壶 | `(8, 0)` |
+| 倒入 5 升壶 | `(3, 5)` |
+| 倒空 5 升壶 | `(3, 0)` |
+| 把 8 升壶剩余的水倒入 5 升壶 | `(0, 3)` |
+
+路径 A 和 B 都达到目标，只是 3 升留在不同的壶中。路径 C 并不是解：第三步后状态是 `(5, 5)`，再倒水只会把 8 升壶装满并留下 2 升，得到 `(8, 2)`。这个错误路径说明，动作序列看起来合理并不等于状态转移满足目标。
+
+若系统只沿着一条语言生成链前进，早期动作一旦不合适，就要从头重来；若系统维护多个状态，就可以比较剩余容量、动作长度和是否重复，并继续扩展更有希望的分支。
 
 对合同审阅助手也一样。一个候选可能先检索付款条款，再计算金额；另一个候选先抽取所有数字，再回到条款确认条件。只要中间状态能表示“已经确认了什么、还缺什么、证据来自哪里”，搜索就不只是生成不同文字，而是在探索不同的证据获取路径。
 
@@ -26,11 +40,11 @@
 
 本章的主要研究入口是 Tree of Thoughts、Language Agent Tree Search，以及经典的 Monte Carlo Tree Search 和 UCT 资料。
 
-`Tree of Thoughts: Deliberate Problem Solving with Large Language Models` 讨论了让语言模型生成、评估和搜索中间 thought 的框架。它支持“把推理组织为多个候选状态”的研究背景，但论文中的任务、提示和实验设置不能直接推出所有模型和所有任务都能获得相同收益。
+`Tree of Thoughts: Deliberate Problem Solving with Large Language Models` 讨论了让语言模型生成、评估和搜索中间 thought 的框架。原论文在 Game of 24、创意写作和迷你填字等任务上评估该方法；这些结果说明特定提示、模型和任务设置中的效果，不能推出所有模型和任务都能获得相同收益。[原论文固定版本 v2](https://arxiv.org/abs/2305.10601v2)
 
-`Language Agent Tree Search` 把树搜索与语言代理、环境反馈和反思机制结合起来，适合说明当动作会改变外部环境时，搜索状态不再只是文本前缀。它仍然是特定研究方法，不应被写成闭源产品的内部实现事实。
+`Language Agent Tree Search` 把树搜索与语言代理、环境反馈和值估计/反思机制结合起来，适合说明当动作会改变外部环境时，搜索状态不再只是文本前缀。原论文的编程、问答和网页导航结果仍受任务与模型设置约束，不能据此推断闭源产品的内部实现。[原论文固定版本 v3](https://arxiv.org/abs/2310.04406v3)
 
-UCT 和 MCTS 的理论与算法来自更早的树搜索和蒙特卡洛规划研究。把它们用于语言模型时，模型生成的 thought、工具结果和自然语言评分会带来新的噪声；经典公式可以说明算法结构，却不能保证语言评分满足游戏搜索中的理想假设。
+Monte Carlo Tree Search（MCTS，蒙特卡洛树搜索）的典型循环包括选择、扩展、模拟和回传；UCT（Upper Confidence bounds applied to Trees）把置信上界思路用于树节点选择。[MCTS 综述](https://doi.org/10.1109/TCIAIG.2012.2186810)和[UCT 原始论文](https://doi.org/10.1007/11871842_29)描述的是经典规划/搜索设定。用于语言模型时，thought 生成、工具观察和自然语言评分会带来新的噪声；经典公式能解释选择结构，却不能保证语言评分满足原有统计假设。
 
 本章的数字、候选路径和 Python demo 都是教学构造。它们用于解释节点数量、分数、剪枝和成本之间的关系，不代表任何公开模型的 benchmark 成绩。对于论文、公开仓库、框架 API 和本章 toy 代码，证据等级始终分开记录。
 
@@ -148,10 +162,10 @@ N_{\mathrm{full}}
 ~~~math
 B_{\mathrm{eff}}
 =
-\left|\operatorname{unique}(\operatorname{normalize}(A(s)) )\right|
+\left|\mathrm{unique}\left(\mathrm{normalize}\left(\{T(s,a):a\in A(s)\}\right)\right)\right|
 ~~~
 
-`normalize` 可以做格式归一化、变量重命名、答案单位统一或状态哈希。它不应过度合并语义不同的路径，否则会把真正的多样性误判为重复。
+`normalize` 可以做格式归一化、变量重命名、答案单位统一或状态哈希。它不应过度合并语义不同的路径，否则会把真正的多样性误判为重复。比如生成器提出 5 个动作文本，但它们经状态转移和归一化后只有 3 个不同结果状态，则 `B_eff=3`，而不是 5。这里统计的是不同后继状态；如果任务关心动作策略本身，即使到达同一状态的动作也有不同代价，就应把该代价纳入状态/动作键，不能只按最终文本去重。
 
 ### 2.3 节点、token 和工具成本
 
@@ -175,7 +189,9 @@ C_{\mathrm{tool}}
 \sum_{n\in\mathcal{N}_i}c_{\mathrm{tool}}(n)
 ~~~
 
-`N_i` 是搜索过程中访问的节点集合，`T_n` 是节点生成或评分产生的 token，`c_tool(n)` 可以是一次调用的金钱成本、执行时间或风险权重。三种账本不能互相替代：缓存可能减少 token，却不一定减少工具延迟；并行生成可能增加 token，却减少墙钟时间。
+`\mathcal{N}_i` 是第 `i` 个任务搜索过程中访问的节点集合，`T_n` 是节点生成或评分产生的 token，`c_{\mathrm{tool}}(n)` 是为节点 `n` 记入的工具资源量。每个账本内部都要统一单位；工具资源可以选调用数、美元、秒或风险分，但这些量不能相互替代：缓存可能减少 token，却不一定减少工具延迟；并行生成可能增加 token，却减少墙钟时间。
+
+例如，一个根节点扩展出 3 个候选时，按“根节点加子节点”计有 `C_node=1+3=4` 个节点；若三个候选分别消耗 70、110、40 个 token，则 `C_tok=70+110+40=220`；若另有两次工具调用、每次按教学假设计价 0.01 美元，则 `C_tool=2×0.01=0.02 美元`。这三个结果分别保留节点数、token 和货币单位，不能直接相加。
 
 ### 2.4 单位成功成本
 
@@ -196,6 +212,8 @@ C_{\mathrm{success}}
 ~~~
 
 这里 `N_{\mathrm{success}}` 是通过独立终局检查的任务数，不是“模型返回了文本”的任务数。当 `N_{\mathrm{success}}=0` 时，单位成功成本没有定义，应报告 `None` 或“没有成功任务”，不能用分子本身伪装成单位成本。如果搜索把成功率从 70% 提高到 75%，但生成和评分成本增加十倍，系统是否值得采用要结合任务价值、错误损失和延迟要求判断。不能只看准确率的绝对提升。
+
+分子中的成本必须先换算到同一单位，例如都折算为美元；若 token、秒和人工分钟没有可靠换算率，就应分别报告资源向量，而不是把不同单位相加。本章 demo 只核算 token：四题候选共 980 token，beam top-1 选对 3 题，因此 `980/3=326.667` token/成功题。它不是 API 价格或线上系统的综合单位成本。
 
 ## 3. Tree-of-Thought：把中间思路变成搜索节点
 
@@ -221,7 +239,7 @@ Tree-of-Thought，简称 ToT，把推理过程组织成多个可评估的 though
 ~~~math
 \mathcal{F}_{t+1}
 =
-\operatorname{Select}
+\mathrm{Select}
 \left(
 \left\{T(s,a):s\in\mathcal{F}_t,\ a\in\mathcal{A}(s)\right\}
 \right)
@@ -230,6 +248,8 @@ Tree-of-Thought，简称 ToT，把推理过程组织成多个可评估的 though
 `Select` 不一定是简单的 top-k。它可以是 beam、阈值筛选、随机抽样、去重后保留、MCTS 选择，或者程序验证后只保留可执行状态。
 
 `\mathcal{F}_t` 是有限 frontier；它可以为空。若 frontier 为空，或某个状态的 `\mathcal{A}(s)` 为空，说明当前搜索没有可扩展候选，系统应进入“找到终局”或“搜索失败”的终止状态，而不是凭空生成一个节点。`Select` 还必须明确保留数量和 tie-break；否则相同分数下依赖输入顺序的结果无法复现。
+
+例如 `F_t={A,B}`，扩展后得到 `A_1`、`A_2`、`B_1`，分数分别为 0.72、0.81、0.76。若 `Select` 采用 `K=2` 的 top-k，下一层就是 `{A_2,B_1}`；若只保留 `A_2`，则 `K=1`，其余候选在这一层被剪去。这个计算显示，ToT 描述 thought 节点如何组织；实际保留规则仍由 beam、阈值或其他选择算法决定。
 
 ### 3.3 thought 粒度的取舍
 
@@ -254,7 +274,7 @@ thought 太长时，一步内部可能已经包含多个不可逆错误；评分
 ~~~math
 F_{t+1}
 =
-\operatorname{TopK}
+\mathrm{TopK}
 \left(
 \left\{T(s,a):s\in F_t,\ a\in A(s)\right\},
 S,
@@ -263,6 +283,8 @@ K
 ~~~
 
 `K` 是正整数 beam 宽度。每层先扩展再排序，只保留分数最高的 `K` 个节点；如果候选数小于 `K`，就保留全部候选；如果候选集合为空，frontier 为空并终止。分数必须是有限值，并且相同分数时要使用固定的次级键，例如状态 ID 的字典序，不能依赖哈希表遍历顺序。
+
+在 `hard_negative` 玩具候选中，三个分数是 0.88（`polished_wrong`）、0.62（`plain_correct`）和 0.59（`unit_checked`）。若 `K=2`，beam 保留前两个并剪掉第三个；若 `K=1`，就只留下最高分的错误候选。增加宽度能避免这次误剪，但是否能提升最终准确率还要看后续扩展和终局验证。
 
 ### 4.2 Beam 的优点
 
@@ -298,19 +320,21 @@ S_{\mathrm{disc}}(z_{1:t})
 
 当 `t=0` 时，平均分没有定义；折扣分也应把空路径当作“尚未评分”，而不是默认得分为 0。平均分和折扣分都改变了搜索偏好。它们不是数学上“正确”的修正，只是不同的决策策略；需要在相同候选集合上比较长度偏差和最终任务效果。
 
+取一条三步路径的局部分数 `s=[0.8,0.4,0.9]`。平均分是 `(0.8+0.4+0.9)/3=0.7`。若折扣因子 `γ=0.5`，折扣分为 `0.8+0.5×0.4+0.25×0.9=1.225`。第二种算法更强调早期步骤，且数值可以超过 1；它是排序分数，不是概率。
+
 ## 5. Best-First、A* 和回溯
 
 ### 5.1 Best-first 的思想
 
-Best-first search 维护一个全局候选池，每次取当前评分最高的节点扩展，而不是严格按层推进。它适合某些路径很快变得明显有希望、另一些路径需要暂时搁置的任务。
-
-如果节点分数只表示当前状态质量，best-first 可能沉迷于一个局部看起来很好的分支。更合理的评分有时需要同时考虑已经付出的代价和对未来的估计：
+Best-first search 维护一个全局候选池，每次取当前优先级最高的节点扩展，而不是严格按层推进。它适合某些路径很快变得明显有希望、另一些路径需要暂时搁置的任务。A* 是一种按累计代价和剩余代价估计排序的 best-first 方法：
 
 ~~~math
 F(n)=g(n)+h(n)
 ~~~
 
-`g(n)` 是从起点到节点 `n` 的累计代价，`h(n)` 是对剩余代价或未来价值的估计。经典 A* 对启发式函数有额外假设；语言模型的 PRM 分数通常不满足可采纳性和一致性，因此这里只能借用结构直觉，不能宣称得到经典 A* 的最优性保证。
+`g(n)` 是从起点到节点 `n` 的累计代价，`h(n)` 是对到达目标还需付出的代价的估计。A* 按 `F(n)` 选当前预计总代价较低的节点；其最优性依赖代价和启发式满足经典条件。[Hart、Nilsson 与 Raphael 的原始论文](https://doi.org/10.1109/TSSC.1968.300136) 语言模型的 PRM 分数通常不是以剩余代价定义的启发函数，不能直接满足这些条件；因此这里只借用优先级的结构直觉，不能宣称得到经典 A* 的最优性保证。
+
+以最小化代价为例，节点 A 已付代价 `g=4`、估计剩余代价 `h=3`，所以 `f(A)=4+3=7`；节点 B 的 `g=5,h=1`，所以 `f(B)=5+1=6`。A* 会先扩展 B，因为当前估计总成本更低。这个排序算例只说明优先级计算，不说明启发式满足最优性条件。
 
 ### 5.2 回溯
 
@@ -325,16 +349,18 @@ F(n)=g(n)+h(n)
 ~~~math
 n_a\sim n_b
 \quad\Longleftrightarrow\quad
-\operatorname{StateKey}(n_a)=\operatorname{StateKey}(n_b)
+\mathrm{StateKey}(n_a)=\mathrm{StateKey}(n_b)
 ~~~
 
 `StateKey` 不能只对自然语言文本做哈希。它还应包含工具版本、文档版本、权限状态、随机种子和未完成的约束，否则两个看似相同的文本可能对应不同环境。
+
+例如，路径 A 先读第 7 页、再计算税额，累计成本 4；路径 B 先抽取金额、再读同一版本的第 7 页，累计成本 3。若两条路径最终拥有完全相同的字段、证据、文档版本、权限和未完成约束，它们可合并为一个 `StateKey`，并保留成本为 3 的到达路径。若 B 读的是另一版合同，即使文本和金额相同也不能合并。
 
 ## 6. Monte Carlo Tree Search：探索和利用
 
 ### 6.1 四个阶段
 
-MCTS 通常重复四个阶段：
+MCTS 通常重复选择、扩展、模拟和回传四个阶段；这是经典算法的组织方式，具体实现会改变模拟策略、终止条件和回传统计。[Browne 等人的 MCTS 综述](https://doi.org/10.1109/TCIAIG.2012.2186810)
 
 1. Selection：从根节点沿选择规则走到待扩展节点；
 2. Expansion：生成一个或多个新动作和子节点；
@@ -356,7 +382,9 @@ Q(v)
 
 `Q(v)` 是节点当前平均价值，`N_v` 和 `N_p` 分别是节点与父节点的非负整数访问次数，`c` 是非负探索系数。第一项鼓励利用已知高价值节点，第二项鼓励访问次数少的节点。这里的 `+1` 是为了让教学 demo 在 `N_v=0` 或 `N_p=0` 时仍可计算；经典 UCT 实现也常把未访问子节点直接赋为 `+\infty`，优先完成首次访问，而不是使用这个平滑形式。两种约定不能混写，实验报告必须说明采用哪一种。
 
-语言模型版本通常还要处理价值归一化、未完成节点、不同动作成本和工具失败。如果一个节点的价值来自不可校准的语言评分，UCT 公式仍然可以运行，但它不再自动拥有经典随机树搜索的统计保证。
+语言模型版本通常还要处理价值归一化、未完成节点、不同动作成本和工具失败。原始 UCT 的分析建立在特定规划问题和回报假设上；如果一个节点的价值来自不可校准的语言评分，公式仍然可以运行，但不会自动继承经典统计保证。[Kocsis 与 Szepesvári 的 UCT 原始论文](https://doi.org/10.1007/11871842_29)
+
+用 demo 的 `hard_negative` 分支手算：三个子节点访问数为 10、3、2，父节点访问数 `N_p=15`；`c=0.45`，所以 `log(16)≈2.773`。对 `polished_wrong`，`Q=0.38,N_v=10`，得分约为 `0.38+0.45×sqrt(2.773/11)=0.606`；对 `plain_correct`，`Q=0.78,N_v=3`，得分约为 `0.78+0.45×sqrt(2.773/4)=1.155`；对 `unit_checked`，`Q=0.71,N_v=2`，得分约为 `0.71+0.45×sqrt(2.773/3)=1.143`。因此这组输入选中 `plain_correct`。这些 `Q` 和访问次数是预制玩具值，算式只演示选择分数，不是模型测量结果。
 
 ### 6.3 访问次数不是质量
 
@@ -364,7 +392,18 @@ Q(v)
 
 ### 6.4 MCTS 适合什么任务
 
-MCTS 更适合有明确状态、可执行动作和可重复反馈的规划任务，例如游戏、代码修复、组合搜索和工具流程。对完全开放的写作任务，如果没有可靠状态和结果检查，MCTS 可能只是在语言空间中反复生成相似文本。
+MCTS 更适合有明确状态、可执行动作和可重复反馈的规划任务，例如游戏、代码修复、组合搜索和工具流程。AlphaZero 将神经网络评估与树搜索、自我对弈结合用于棋类任务，说明搜索能够利用结构明确的状态与规则；这类结果不能直接推出开放式语言评分也满足相同条件。[AlphaZero 原论文](https://arxiv.org/abs/1712.01815v1)
+
+对完全开放的写作任务，如果没有可靠状态和结果检查，MCTS 可能只是在语言空间中反复生成相似文本。
+
+下面把几种常被并列提及的名称放回各自层次：ToT 说明如何组织 thought 节点和搜索循环，其他行描述具体的节点选择规则。
+
+| 方法 | 搜索时怎样选状态 | 主要优势 | 典型失效边界 |
+| --- | --- | --- | --- |
+| Tree-of-Thought（ToT） | 生成 thought、评估并用可选策略维护 frontier；自身不规定唯一的选择算法 | 把中间推理显式变成可比较、可回溯的节点 | 依赖 thought 粒度和评分质量；论文设置不等于通用收益 |
+| Beam search | 每层扩展后按分数保留前 `K` 个节点 | 易并行、预算较容易估算 | 可能早剪正确路径，也可能把同质候选都留在 beam 中 |
+| Best-first / A* | Best-first 按任务优先级取节点；A* 按 `g+h` 估计总代价 | 可优先处理估计更有希望的路线 | 估计偏差会造成局部偏好；A* 的最优性要求不能直接转移到语言评分 |
+| MCTS / UCT | 反复模拟并更新访问统计，以价值和探索项选择分支 | 在可执行、可重复反馈的状态空间中平衡探索与利用 | 奖励噪声、状态不完整或动作不可回放会破坏比较基础 |
 
 ## 7. LLM 代理树搜索与环境反馈
 
@@ -378,9 +417,11 @@ o_{t+1}=E(s_t,a_t)
 
 `E` 是环境执行函数，`o_{t+1}` 是观察结果。语言模型可以根据 `o_{t+1}` 更新状态，但观察结果本身不应被当成无条件可信的自然语言指令。
 
+例如，合同状态中税率仍标为“来自 OCR、待核对”。动作 `a_t` 是打开合同第 7 页并检查正文；若环境观察到页面版本一致且正文写明 6%，则 `o_{t+1}` 应把已核实税率和页码/版本写入 `m_t`，并从待办字段中移除 `tax_rate`。只把“已查过税率”这句话附加到文本、却不保存证据版本，并没有形成可复核的状态转移。
+
 ### 7.2 Language Agent Tree Search 的启发
 
-公开的 Language Agent Tree Search 工作说明了一种研究路线：让语言模型提出动作和反思，环境提供反馈，树搜索在多个候选轨迹之间分配计算。它有助于理解“代理搜索”的结构，但具体的反思提示、价值估计和工具接口仍属于论文实验设置。
+公开的 Language Agent Tree Search 工作说明了一种研究路线：让语言模型提出动作和反思，环境提供反馈，树搜索在多个候选轨迹之间分配计算。它有助于理解“代理搜索”的结构，但具体的反思提示、价值估计和工具接口仍属于论文实验设置。[LATS 原论文固定版本 v3](https://arxiv.org/abs/2310.04406v3)
 
 工程实现还要增加事务、权限、重试、环境快照和资源清理。没有这些机制，搜索可能在不同分支之间污染文件、数据库或浏览器状态，导致分数无法比较。
 
@@ -414,6 +455,8 @@ o_{t+1}=E(s_t,a_t)
 
 语言自评便宜但容易自我确认；程序检查精确但覆盖有限；人工判断灵活但昂贵。更可靠的系统会按任务分解评分来源，而不是让一个标量承担所有职责。
 
+过程监督的一个研究实例是在 MATH 设置中比较 outcome supervision 与 process supervision，并发布 PRM800K 步骤标签；这能支持“中间步骤可作为单独监督对象”，不能证明任意任务上的过程评分都准确。[Let's Verify Step by Step](https://arxiv.org/abs/2305.20050v1)
+
 ### 8.2 组合节点分数
 
 一个教学性的组合分数可以写成：
@@ -430,6 +473,8 @@ S(n)
 ~~~
 
 `S_process` 衡量中间步骤，`S_outcome` 衡量已知终局结果，`S_evidence` 衡量证据支持，`S_tool` 衡量工具反馈，`C(n)` 是计算成本，`R(n)` 是风险。所有权重都需要通过任务数据校准，不能从一个任务直接搬到另一个任务。
+
+取一组明确标为玩具的归一化值：权重依次为 `λ_p=0.2, λ_o=0.3, λ_e=0.25, λ_t=0.15, λ_c=0.1, λ_r=0.05`；各评分为 `S_process=0.8, S_outcome=0.9, S_evidence=0.8, S_tool=0.9, C=0.2, R=0.1`。逐项代入得到 `S=0.16+0.27+0.20+0.135−0.02−0.005=0.74`。由于成本、风险已先归一化且权重只是示例，这个 0.74 仅表示该假设下的排序值，不是正确概率。
 
 ### 8.3 硬约束和软评分分开
 
@@ -449,6 +494,8 @@ JSON 解析失败、权限不足、代码无法编译、状态违反不变量等
 ~~~
 
 当候选少于两个时，`\Delta_{\mathrm{top}}` 没有定义；不要把单个候选的间隔写成 0。间隔小的时候保留备选、增加验证或请求更多证据，通常比强行输出一个候选更稳妥；但保留备选会增加成本，必须纳入预算。
+
+若最高和次高分分别为 0.88、0.62，则 `Δ_top=0.88−0.62=0.26`。这个值只是两个排序分数的间隔；除非评分器已在当前任务和数据分布上校准，否则 0.26 不能解释成 26% 的置信度。
 
 ## 9. 剪枝：减少成本，也可能丢掉正确答案
 
@@ -484,6 +531,8 @@ N_{\mathrm{tasks\ with\ a\ correct\ path}}
 
 分母不能随意使用所有任务数。如果生成器根本没有产生正确路径，不能把它归因于剪枝；需要区分候选生成失败和搜索选择失败。如果没有任何任务生成正确路径，该指标返回 `None`，而不是 0；0 表示“已知有正确路径的任务中没有发生误剪”，两者含义不同。
 
+在后面的四题 demo 中，每题都预先包含至少一个正确候选，beam top-1 只在 `hard_negative` 上舍弃正确候选。因此按这个定义，剪枝错误率是 `1/4=0.25`。若某题根本没有正确候选，它不会进入这个指标的分母。
+
 ### 9.3 早期和后期的不同策略
 
 早期节点承载许多潜在未来，评分器对它们的判断通常更不稳定，因此可以保留更多多样性，使用较宽 beam 或较宽阈值。后期节点已经接近终局，工具测试和硬约束更有信息，可以加强筛选。
@@ -503,16 +552,18 @@ S(n_a)\ge S(n_b),\ C(n_a)\le C(n_b),
 
 支配剪枝需要完整状态表示。只比较最终文本或语言分数，容易错误合并不同证据和权限状态。
 
+例如 A 的分数为 0.8、成本为 3、覆盖 2 项约束；B 的分数为 0.6、成本为 5，也覆盖同样 2 项约束。在这些量采用同一比较口径、且两者环境状态等价时，A 的分数不低、成本不高、覆盖不弱，因此可剪去 B。若 B 还带有 A 没有的有效证据或安全条件，两者就不满足这个支配关系。
+
 ## 10. 多样性、相关错误和搜索退化
 
 ### 10.1 候选不同不等于方法不同
 
-三个候选只把“因此”改成“所以”，对搜索没有真正帮助。在候选集合非空、且归一化规则固定时，可以先做答案和状态归一化，再统计有效多样性：
+三个候选只把“因此”改成“所以”，对搜索没有真正帮助。在候选集合非空、且归一化规则固定时，可以先按任务规则规范化单位、格式和答案抽取，再统计有效多样性：
 
 ~~~math
 D_{\mathrm{answer}}
 =
-\frac{|\operatorname{unique}(\operatorname{answer}(\mathcal{C}))|}
+\frac{|\mathrm{unique}(\mathrm{answer}(\mathcal{C}))|}
 {|\mathcal{C}|}
 ~~~
 
@@ -526,11 +577,13 @@ D_{\mathrm{answer}}
 R_{\mathrm{dup}}
 =
 1-
-\frac{|\operatorname{unique}(\operatorname{normalize}(\mathcal{C}))|}
+\frac{|\mathrm{unique}(\mathrm{normalize}(\mathcal{C}))|}
 {|\mathcal{C}|}
 ~~~
 
 候选集合为空时，多样性和重复率都没有定义，应报告 `None`。重复率高，说明增加搜索宽度可能只是在重复计算；重复率低也不能证明候选有用，因为不同的错误方法仍然会导致低质量多样性。
+
+`hard_negative` 的三个答案 `42,40,40` 已采用相同单位和规范格式，归一化后有 2 个不同答案、共 3 个候选，所以答案多样性为 `2/3≈0.667`，重复率为 `1−2/3=1/3≈0.333`。多样性只说明答案不同，不说明这些答案中有多少正确；demo 四题的平均唯一答案比例是 0.75，也不是正确率。
 
 ### 10.3 相关错误
 
@@ -542,7 +595,7 @@ R_{\mathrm{dup}}
 
 ## 11. Search 和 Self-Consistency 的区别
 
-Self-consistency 通常是独立生成多条完整推理链，最后抽取答案并聚合。它的中间过程一般不会影响其他候选的展开。
+Self-consistency 通常是独立生成多条完整推理链，最后抽取答案并聚合。它的中间过程一般不会影响其他候选的展开；原论文把它作为 CoT 解码策略，在一组算术和常识基准上报告了特定模型设置的收益，不保证任意任务都能获益。[Self-Consistency 原论文 v4](https://arxiv.org/abs/2203.11171v4)
 
 Search 是分步展开、分步评分和动态选择。某个分支的中间状态会决定它是否继续消耗预算，也可能回溯到父节点并尝试另一动作。
 
@@ -556,6 +609,8 @@ search：          多步展开 -> 中间评分/工具反馈 -> 剪枝/回溯 ->
 Self-consistency 实现简单，适合候选独立且最终答案容易验证的任务；search 更适合中间状态有信息、错误可以提前发现、并且任务价值能覆盖额外成本的场景。
 
 两者也可以组合：先采样多个策略，再对每个策略进行局部搜索；或在搜索叶子上做 self-consistency。组合后必须重新计算成本和相关错误，不能把两个方法的收益简单相加。
+
+一种近期的 test-time scaling 分类把完整候选生成后再聚合称为 leaf-level scaling，把候选结束前就扩展和筛选部分状态称为 prefix-level scaling。这个分类描述预算施加的位置，不是互斥算法清单；系统可以先做 prefix search，再对叶子做聚合。[Hariri 等，arXiv:2608.04001v2](https://arxiv.org/abs/2608.04001v2)
 
 ## 12. 工具反馈和搜索环境
 
@@ -585,6 +640,8 @@ Self-consistency 实现简单，适合候选独立且最终答案容易验证的
 
 同一层的候选常常可以并行生成和评分，但工具调用可能有顺序依赖，某些环境还需要串行锁。应分别测模型计算时间、工具时间、队列等待和人工等待。
 
+本节只区分节点并行与端到端延迟，不展开协调多个推理轨迹的算法；多路径协作与并行测试时计算见[第十六章《Multi-Agent 与 Ultra Test-Time Compute》](16-multi-agent与ultra-test-time-compute.md)。
+
 ### 13.2 前缀缓存
 
 多个节点共享同一个前缀时，可以缓存模型的前缀状态，减少重复计算。缓存键至少要考虑模型版本、输入、工具状态、系统提示、采样设置和权限上下文。
@@ -613,6 +670,8 @@ A_{\mathrm{search}}
 
 当 `N=0` 时，准确率没有定义；空评估集不能被报告为 0。它应和 greedy、self-consistency、beam、ToT 或 MCTS 在同一任务切分和相同预算口径下比较。
 
+在四题 demo 中，greedy、beam top-1 和 UCT 风格选择分别选对 1、3、4 题，因此准确率依次是 `1/4=0.25`、`3/4=0.75` 和 `4/4=1.0`。这是同一组预制题目上的教学算例，样本数太小，不能据此声称某类算法普遍更准。
+
 ### 14.2 搜索增益
 
 如果基线方法准确率为 `A_base`，搜索方法准确率为 `A_search`，绝对增益是：
@@ -622,6 +681,8 @@ A_{\mathrm{search}}
 ~~~
 
 但绝对增益没有包含成本。还应报告每增加一个正确任务所消耗的 token、工具调用和延迟。
+
+若以 greedy 的 `0.25` 为基线、beam top-1 的 `0.75` 为搜索结果，则 `ΔA=0.75−0.25=0.50`，也就是这组玩具数据上提高 50 个百分点。这里是百分点差，不是“相对提升 50%”；相对变化会用基线作分母，且在小样本上同样不稳定。
 
 ### 14.3 生成失败和选择失败要分开
 
@@ -648,6 +709,8 @@ C_{\mathrm{path}}(t)
 ~~~
 
 它能揭示“最终没选对”究竟发生在早期剪枝还是叶子重排。
+
+四题 demo 每题都生成了正确候选，beam top-1 在三题上将其保留到最终选择，因此深度 1 的路径覆盖率是 `3/4=0.75`。若不同任务深度不同，应在相同任务或明确的深度口径下计算，不能把没有生成正确候选的任务算作剪枝失败。
 
 ### 14.5 候选多样性和搜索退化
 
@@ -739,14 +802,16 @@ best-first 或 beam 可能不断扩展短期高分节点，忽略需要更多步
 
 如果下一步是创建付款指令，搜索只能生成草稿和模拟结果。真实提交必须离开语言搜索，进入独立的权限和审批流程。搜索树可以帮助找到正确金额和证据路径，但不能把“高分节点”直接转换成生产动作。
 
-## 17. 最小可运行实验：Beam 与 MCTS 的差异
+## 17. 最小可运行实验：候选排序与 UCT 式选择
 
-下面的 demo 使用四个 toy 任务比较 greedy、按 verifier 分数选择的 beam 和带 UCT 探索项的选择。它不是 MCTS 的完整实现，而是把每个任务的候选分支看成已经展开的一层，用来展示：
+下面的 demo 使用四个 toy 任务比较 greedy、固定候选上的 beam top-1（即 `K=1`）和一轮 UCT 式选择。候选集已提前给定；程序没有运行完整的 MCTS selection、expansion、simulation、backpropagation 循环，因此不用于比较完整 MCTS 算法。它只展示：
 
-- 搜索可能比 greedy 找到更多正确答案；
+- 固定候选上的排序可能比 greedy 找到更多正确答案；
 - 高分 hard negative 会让 beam 选错；
-- 探索项可能选择价值更高但语言分数较低的候选；
+- 探索项可能选择价值更高但表面评分较低的候选；
 - 需要同时报告正确路径被剪掉、候选多样性和 token 成本。
+
+本例使用有限、可转成浮点数的整数或浮点数作为评分和成本，拒绝布尔值；无法转成有限浮点数的超大整数会被当作无效输入平稳拒绝。`visits` 和 `tokens` 则必须是非负整数。
 
 ~~~python
 from math import isfinite, log, sqrt
@@ -755,11 +820,11 @@ from math import isfinite, log, sqrt
 cases = [
     {
         "id": "water_jug",
-        "gold": "4",
-        "greedy": "4",
+        "gold": "3",
+        "greedy": "3",
         "branches": [
             {"name": "wrong_volume", "answer": "5", "score": 0.45, "value": 0.20, "visits": 7, "tokens": 70, "correct": False},
-            {"name": "state_search", "answer": "4", "score": 0.82, "value": 0.92, "visits": 6, "tokens": 110, "correct": True},
+            {"name": "state_search", "answer": "3", "score": 0.82, "value": 0.92, "visits": 6, "tokens": 110, "correct": True},
             {"name": "irrelevant_fact", "answer": "5", "score": 0.18, "value": 0.10, "visits": 3, "tokens": 40, "correct": False},
         ],
     },
@@ -802,11 +867,12 @@ def require(condition, message):
 
 
 def finite_number(value):
-    return (
-        isinstance(value, (int, float))
-        and not isinstance(value, bool)
-        and isfinite(value)
-    )
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return isfinite(float(value))
+    except (OverflowError, TypeError, ValueError):
+        return False
 
 
 def validate_cases(items):
@@ -861,7 +927,7 @@ def unit_cost(total_cost, successes):
 
 
 beam_choices = []
-mcts_choices = []
+uct_choices = []
 pruned_correct_paths = []
 unique_ratios = []
 
@@ -871,15 +937,15 @@ for case in cases:
         case["branches"],
         key=lambda branch: (-branch["score"], branch["name"]),
     )[0]
-    mcts_choice = sorted(
+    uct_choice = sorted(
         case["branches"],
         key=lambda branch: (-uct_score(branch, parent_visits), branch["name"]),
     )[0]
     beam_choices.append(
         {"id": case["id"], "choice": beam_choice["name"], "correct": beam_choice["correct"]}
     )
-    mcts_choices.append(
-        {"id": case["id"], "choice": mcts_choice["name"], "correct": mcts_choice["correct"]}
+    uct_choices.append(
+        {"id": case["id"], "choice": uct_choice["name"], "correct": uct_choice["correct"]}
     )
     if (not beam_choice["correct"]) and any(
         branch["correct"] for branch in case["branches"]
@@ -894,25 +960,25 @@ greedy_accuracy = accuracy(
     [case["greedy"] == case["gold"] for case in cases]
 )
 beam_accuracy = accuracy([choice["correct"] for choice in beam_choices])
-mcts_accuracy = accuracy([choice["correct"] for choice in mcts_choices])
+uct_accuracy = accuracy([choice["correct"] for choice in uct_choices])
 avg_unique_answer_ratio = round(sum(unique_ratios) / len(unique_ratios), 3)
-total_nodes_expanded = sum(1 + len(case["branches"]) for case in cases)
+total_nodes_counted = sum(1 + len(case["branches"]) for case in cases)
 total_tokens = sum(
     branch["tokens"] for case in cases for branch in case["branches"]
 )
-cost_per_beam_correct = unit_cost(
+tokens_per_beam_correct = unit_cost(
     total_tokens,
     sum(choice["correct"] for choice in beam_choices),
 )
-mcts_rescues = [
+uct_rescues = [
     beam["id"]
-    for beam, mcts in zip(beam_choices, mcts_choices)
-    if (not beam["correct"]) and mcts["correct"]
+    for beam, uct in zip(beam_choices, uct_choices)
+    if (not beam["correct"]) and uct["correct"]
 ]
 
 review = {
     "beam_accuracy_ok": beam_accuracy >= 0.75,
-    "mcts_accuracy_ok": mcts_accuracy >= 0.9,
+    "uct_accuracy_ok": uct_accuracy >= 0.9,
     "diversity_ok": avg_unique_answer_ratio >= 0.7,
     "budget_ok": total_tokens <= 1000,
     "pruned_correct_paths": bool(pruned_correct_paths),
@@ -920,44 +986,48 @@ review = {
 
 print(f"greedy_accuracy={greedy_accuracy}")
 print(f"beam_accuracy={beam_accuracy}")
-print(f"mcts_accuracy={mcts_accuracy}")
+print(f"uct_accuracy={uct_accuracy}")
 print(f"avg_unique_answer_ratio={avg_unique_answer_ratio}")
-print(f"total_nodes_expanded={total_nodes_expanded}")
+print(f"total_nodes_counted={total_nodes_counted}")
 print(f"total_tokens={total_tokens}")
-print(f"cost_per_beam_correct={cost_per_beam_correct}")
+print(f"tokens_per_beam_correct={tokens_per_beam_correct}")
 print(f"beam_choices={beam_choices}")
-print(f"mcts_choices={mcts_choices}")
+print(f"uct_choices={uct_choices}")
 print(f"pruned_correct_paths={pruned_correct_paths}")
-print(f"mcts_rescues={mcts_rescues}")
+print(f"uct_rescues={uct_rescues}")
 print(f"review={review}")
 ~~~
+
+代码状态：已验证（2026-11-12，Python 3.12.9，标准库）
 
 预期输出：
 
 ~~~text
 greedy_accuracy=0.25
 beam_accuracy=0.75
-mcts_accuracy=1.0
+uct_accuracy=1.0
 avg_unique_answer_ratio=0.75
-total_nodes_expanded=16
+total_nodes_counted=16
 total_tokens=980
-cost_per_beam_correct=326.667
+tokens_per_beam_correct=326.667
 beam_choices=[{'id': 'water_jug', 'choice': 'state_search', 'correct': True}, {'id': 'logic_grid', 'choice': 'row_elimination', 'correct': True}, {'id': 'code_patch', 'choice': 'patch_edge_case', 'correct': True}, {'id': 'hard_negative', 'choice': 'polished_wrong', 'correct': False}]
-mcts_choices=[{'id': 'water_jug', 'choice': 'state_search', 'correct': True}, {'id': 'logic_grid', 'choice': 'row_elimination', 'correct': True}, {'id': 'code_patch', 'choice': 'patch_edge_case', 'correct': True}, {'id': 'hard_negative', 'choice': 'plain_correct', 'correct': True}]
+uct_choices=[{'id': 'water_jug', 'choice': 'state_search', 'correct': True}, {'id': 'logic_grid', 'choice': 'row_elimination', 'correct': True}, {'id': 'code_patch', 'choice': 'patch_edge_case', 'correct': True}, {'id': 'hard_negative', 'choice': 'plain_correct', 'correct': True}]
 pruned_correct_paths=['hard_negative']
-mcts_rescues=['hard_negative']
-review={'beam_accuracy_ok': True, 'mcts_accuracy_ok': True, 'diversity_ok': True, 'budget_ok': True, 'pruned_correct_paths': True}
+uct_rescues=['hard_negative']
+review={'beam_accuracy_ok': True, 'uct_accuracy_ok': True, 'diversity_ok': True, 'budget_ok': True, 'pruned_correct_paths': True}
 ~~~
 
-这个实验要这样读。Greedy 只看每题的第一个答案，在四题中只对一题；beam 使用语言分数后找回了三题，但在 `hard_negative` 上选择了高分错误候选。MCTS 风格的 UCT 分数使用了另一套价值和探索项，选择了 `plain_correct`，因此在这个构造中达到 1.0。
+这个实验要这样读。Greedy 只看每题给出的基线答案，在四题中只对一题；固定候选上的 beam top-1 找回了三题，但在 `hard_negative` 上选择了高分错误候选。UCT 式选择使用预制的价值和访问次数，算出探索项后选择 `plain_correct`，因此在这个构造中达到 1.0。程序没有执行树扩展、模拟或回传；这个结果只能说明这组分数会产生不同选择，不能说明完整 MCTS 在真实任务上优于 beam。
 
 `pruned_correct_paths=['hard_negative']` 说明 beam 的错误不是“候选不存在”，而是正确候选存在却被更高的表面分数压过。`total_tokens=980` 是候选生成账本，不包括实际模型硬件、工具执行、缓存和人工等待。`review` 只是实验报告中的观察字段，用来把结果拆开，不是一个神奇的最终结论。
+
+`total_nodes_counted=16` 按四题各自一个根节点和三个候选节点求和，即 `4×(1+3)=16`；它统计这份预制候选表的状态数，不是 MCTS 的节点展开次数。`tokens_per_beam_correct=326.667` 则是 `980` 个候选 token 除以 beam top-1 答对的 3 题。
 
 ## 18. 设计一次可复现的搜索实验
 
 ### 18.1 固定候选生成器
 
-比较 beam 和 MCTS 时，要记录同一模型、同一 prompt、相同动作候选或相同生成预算。否则一个方法获得更好的候选集合，另一个方法获得更差的候选集合，最终差异无法归因于搜索策略。
+比较 beam 和 MCTS 时，要记录同一模型、同一 prompt、相同动作候选或相同生成预算。否则一个方法获得更好的候选集合，另一个方法获得更差的候选集合，最终差异无法归因于搜索策略。本节代码只是固定候选上的 UCT 选择分数示范；若要比较完整算法，还需要实现并记录扩展、模拟和价值回传。
 
 ### 18.2 分离生成、评分和选择
 
@@ -1029,15 +1099,16 @@ Tree-of-Thought 提供了把 thought 作为中间节点的框架；beam search �
 
 最终决策不能只看准确率。节点数、token、工具调用、p95 延迟、单位成功成本、候选多样性、剪枝误报和高风险动作拦截率都属于搜索系统的真实行为。
 
-下一章将讨论 test-time compute scaling：当推理阶段可以继续增加采样、验证、搜索或思考预算时，质量曲线、成本曲线和动态分配应该如何分析。
+下一章将讨论 test-time compute scaling：当推理阶段可以继续增加采样、验证、搜索或思考预算时，质量曲线、成本曲线和动态分配应该如何分析，详见[第七章《推理时计算扩展》](07-test-time-compute-scaling.md)。
 
 ## 22. 资料索引
 
-1. Tree of Thoughts：<https://arxiv.org/abs/2305.10601>
-2. Language Agent Tree Search：<https://arxiv.org/abs/2310.04406>
-3. Mastering the Game of Go without Human Knowledge：<https://arxiv.org/abs/1712.01815>
-4. Monte Carlo Tree Search: A Review：<https://arxiv.org/abs/2007.14554>
-5. Self-Consistency Improves Chain of Thought Reasoning in Language Models：<https://arxiv.org/abs/2203.11171>
-6. Let's Verify Step by Step：<https://arxiv.org/abs/2305.20050>
-
-本章写作时联网访问了 ToT、Language Agent Tree Search、AlphaZero、MCTS review、Self-Consistency 和过程监督论文入口。正文区分经典搜索算法定义、论文实验、工具环境抽象、教学构造和目标系统实测；没有把论文中的搜索结果外推为所有模型或所有任务的通用保证。
+1. Yao et al., *Tree of Thoughts: Deliberate Problem Solving with Large Language Models*, arXiv:2305.10601v2（2023-12-03）。[固定版本](https://arxiv.org/abs/2305.10601v2)
+2. Zhou et al., *Language Agent Tree Search Unifies Reasoning Acting and Planning in Language Models*, arXiv:2310.04406v3（2024-06-06）。[固定版本](https://arxiv.org/abs/2310.04406v3)
+3. Silver et al., *Mastering Chess and Shogi by Self-Play with a General Reinforcement Learning Algorithm*, arXiv:1712.01815v1（2017-12-05）。[固定版本](https://arxiv.org/abs/1712.01815v1)
+4. Browne et al., *A Survey of Monte Carlo Tree Search Methods*, IEEE Transactions on Computational Intelligence and AI in Games, 4(1), 1–43（2012）。[DOI](https://doi.org/10.1109/TCIAIG.2012.2186810)
+5. Kocsis and Szepesvári, *Bandit Based Monte-Carlo Planning*, ECML 2006, LNCS 4212, 282–293。[DOI](https://doi.org/10.1007/11871842_29)
+6. Wang et al., *Self-Consistency Improves Chain of Thought Reasoning in Language Models*, arXiv:2203.11171v4（2023-03-07）。[固定版本](https://arxiv.org/abs/2203.11171v4)
+7. Lightman et al., *Let's Verify Step by Step*, arXiv:2305.20050v1（2023-05-31）。[固定版本](https://arxiv.org/abs/2305.20050v1)
+8. Hariri et al., *Test-Time Scaling in Reasoning LLMs: Inference Regimes, Evaluation, and Reproducibility*, arXiv:2608.04001v2（2026-08-31）。[固定版本](https://arxiv.org/abs/2608.04001v2)
+9. Hart, Nilsson, and Raphael, *A Formal Basis for the Heuristic Determination of Minimum Cost Paths*, IEEE Transactions on Systems Science and Cybernetics, 4(2), 100–107（1968）。[DOI](https://doi.org/10.1109/TSSC.1968.300136)

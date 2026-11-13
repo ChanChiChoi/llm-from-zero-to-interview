@@ -16,66 +16,64 @@
 
 这几个角色可以由不同模型承担，也可以由同一个模型在不同状态机节点中承担。角色名称本身没有安全或正确性含义，真正重要的是输入输出契约、版本、权限和验收规则。
 
-## 16.2 从 self-consistency 到 multi-agent
+## 16.2 从 self-consistency 到并行协调：额外计算改变了什么
 
-self-consistency 的基本做法是对同一问题采样多条回答，再根据最终答案投票。它利用的是候选多样性，通常没有独立工具状态，也没有写入型产物。multi-agent 在此基础上增加了环境和协作协议：worker 可能读取不同资料、运行不同测试、维护独立 workspace，并将结果交给后续节点。
+额外推理计算有几种不同的组织方式，不能都叫作“多 Agent”，再用参与者数量解释效果。
 
-两者的差异可以用一次代码修复任务说明。self-consistency 可能生成十个修复建议，然后让一个选择器挑选其一；multi-agent 则可以让一个 worker 构建调用链，一个 worker 创建最小复现，一个 worker 检查历史变更，最后由测试和安全 worker 验证候选 patch。后者的额外价值不在于“回答更长”，而在于每条轨迹都能携带不同的观察和 artifact。
+Self-consistency 对同一问题采样多条轨迹，通常在最终答案层投票；这一经典定义见 [Wang 等人的原始研究](https://arxiv.org/abs/2203.11171)。它增加候选覆盖，但候选可能共享同一模型偏差、提示和检索来源；十条答案一致不等于十个独立证据。
 
-但 multi-agent 也会带来新的问题：消息要序列化，workspace 要隔离，冲突要合并，失败要区分是否产生了副作用，更多候选还需要更多验证。若任务本身很短、没有外部反馈或不存在可靠的合并规则，单 Agent 或固定 workflow 往往更容易审计。
+Multi-agent debate 让多个模型实例先分别作答，再在数轮交互中查看并质疑彼此的回答。[Du 等人的多 Agent debate 论文](https://arxiv.org/abs/2305.14325)报告了数学、策略和事实性任务上的改善，但实验结论绑定论文中的模型、提示和任务设置。若实例使用相同模型、共享相同证据，它们可能通过相同错误达成共识，辩论次数也不能代替 verifier。
+
+[Language Agent Tree Search（LATS）](https://arxiv.org/abs/2310.04406)把搜索推进到状态转移层：用树搜索组织候选动作，结合语言模型的价值评估、自我反思和环境反馈。它与“同时生成多份最终答案”不同，关键在于搜索过程能从环境观察得到新状态。论文的结果属于其编程、网页和交互任务设置，不代表所有工具任务都有同样收益。
+
+近期并行推理工作把问题进一步推到协调协议本身。[PaCoRe](https://aclanthology.org/2026.acl-long.1253/)把多条轨迹分轮并行展开，将发现压缩成受上下文限制的消息，再传给下一轮聚合；论文摘要报告系统把 effective test-time compute 扩展到约 200 万 token，并报告 8B 模型在 HMMT 2025 得到 94.5%。该数字是作者摘要中的特定模型和基准结果，摘要没有提供足够的预算与 harness 对齐细节支持跨系统排名。[ParaThinker](https://aclanthology.org/2026.findings-emnlp.1469/)则在单一模型架构内并行产生多条推理路径并聚合；其摘要报告 1.5B 模型在相同 decoding-token 预算下 AIME-24 准确率提升 6.5%–20.7%，并报告启用 KV-cache reuse 时相对 sequential decoding 的推理延迟降低 38.7%–66.8%。这些结果绑定论文的模型、任务、预算和推理实现，不能据此推断所有并行系统都更快。
+
+| 方法 | 额外计算放在哪里 | 新增的协调责任 |
+|---|---|---|
+| Self-consistency | 多条独立采样轨迹 | 去重、投票或 verifier 选择 |
+| Debate | 多轮候选之间交换论据 | 控制共同偏差，验证共识所依赖的来源 |
+| LATS | 状态与动作上的搜索节点 | 验证转移、评分函数和环境反馈 |
+| PaCoRe | 多轮并行轨迹与消息聚合 | 压缩发现、跨轮传递和最终合成 |
+| ParaThinker | 单一架构内的并行路径 | 路径多样性、聚合和推理实现成本 |
+
+因此，选择方案时要问：新增预算买到的是更多样本、互相批评、真实环境观察，还是更宽的并行路径？协调机制必须针对新买到的计算，否则只会重复候选并增加合并成本。provider 产品里的 worker 数映射是另一个层次；例如[第十四章](14-thinking-levels.md) 的 Grok 4.20 文档示例是具体服务合同，不能当作通用 multi-agent 规律。
 
 ## 16.3 任务图：哪些节点可以并行
 
-把协作过程表示为有向图：
+把协作过程表示为有向任务图：节点是需要完成的工作，边表示某个节点必须等待另一个节点提供指定产物、版本或状态。边表达数据依赖或副作用依赖，不只是“两个角色有关系”。
 
-```math
-G=(V,E)
-```
+以跨仓库修复为例，节点包括读取调用链、阅读历史 issue、构造复现、生成 patch、运行测试和合并审查。读取调用链、历史 issue 和只读复现可并行；生成 patch 至少要等待足够的定位证据；测试必须针对一个确定的 patch revision；合并还要等待测试、安全检查和授权。可用以下轨迹表示关键依赖：
 
-`V` 是任务节点集合，例如 `search_logs`、`read_history`、`build_patch` 和 `run_tests`；`E` 是依赖边。若存在边 `u -> v`，表示节点 `v` 至少要等到节点 `u` 的指定产物、版本和状态满足条件后才能开始。边表达的是数据依赖或副作用依赖，不只是“两个角色有关系”。
+~~~text
+调用链 ─┐
+历史记录 ├─> 候选 patch -> 隔离测试 ─┐
+并发复现 ┘                            ├─> 合并审查
+安全只读检查 ─────────────────────────┘
+~~~
 
-例如，定位调用链和阅读历史 issue 可能没有数据依赖，可以并行；生成 patch 依赖定位结果，必须等待；部署依赖测试、安全检查和授权，不能仅因为测试 worker 完成就开始。一个更具体的图可以写成：
+图中的“并行”只表示节点可以同时运行，不表示它们可以同时修改同一个外部对象。调用链分析可输出只读报告，patch worker 可写自己的分支；未经协调的两个 worker 不应同时写生产分支。
 
-```text
-call_graph ─┐
-reproduce   ├─> patch_candidate ─> isolated_test ─┐
-history     ─┘                                    ├─> merge_review
-security_read ────────────────────────────────────┘
-```
-
-图中的“并行”只表示节点可以同时运行，不表示它们可以同时修改同一个外部对象。`reproduce` 可以在隔离目录中生成日志，`patch_candidate` 可以在自己的分支中写文件，但两个节点不能未经协调同时写生产分支。
-
-如果任务图中有大量强顺序边，增加 worker 数不会带来相同比例的加速。图的价值在于先暴露关键路径，再决定哪些节点值得并行。只根据产品名称启动 swarm，无法替代这一步分析。
+如果图中有大量强顺序边，增加 worker 数不会带来同比例加速。先画依赖图，再找关键路径，才能判断并行是否值得。
 
 ## 16.4 关键路径与并行效率
 
-设并行阶段有 `n` 个 worker，第 `j` 个 worker 的有效工作时间为 `T_j`，协调、合并和验证时间分别为 `T_coord`、`T_merge` 和 `T_verify`。在 worker 可以同时运行的近似条件下：
+设一个阶段有 n 个可并行 worker，第 j 个 worker 的有效工作时间为 T_j，协调、合并和验证时间分别为 T_coord、T_merge 和 T_verify。在协调、合并和验证位于并行工作之后这一简化假设下，时间使用秒等同一单位；n 为正整数，所有时间有限且非负；0<η≤1 表示排队、争用和调度折损。阶段延迟可近似为：
 
-```math
+~~~math
 T_{\mathrm{parallel}}
 \approx \frac{\max_{1\le j\le n}T_j}{\eta}
- +T_{\mathrm{coord}}+T_{\mathrm{merge}}+T_{\mathrm{verify}}
-```
++T_{\mathrm{coord}}+T_{\mathrm{merge}}+T_{\mathrm{verify}}
+~~~
 
-这里 `n` 是正整数，所有时间都应是有限的非负数，`0<\eta\le1` 是把队列、资源争用、调度和不完全并行折算进去的效率系数。使用最大 worker 时间而不是平均时间，是因为一个最慢的 worker 仍可能阻塞后继节点。
+例如三个独立 worker 分别需要 4、6、5 秒，η=0.8，协调 1 秒、合并 1 秒、验证 2 秒。关键 worker 的有效延迟是 6/0.8=7.5 秒，再加 1+1+2 秒，得到 T_parallel≈11.5 秒。若同样三项工作串行执行，则工作本身要 4+6+5=15 秒，再加 4 秒协调/合并/验证，总计 19 秒。这个合成算例显示并行减少了关键路径延迟，但并未减少 15 秒的 worker 工作量，也未说明实际系统的 token 或货币成本。
 
-如果 worker 负载大致均衡，且 `T_work=\sum_j T_j`，可以进一步写成：
+即使所有可并行工作都能理想缩短，总加速仍受串行部分限制。令 S(n) 为 n 个 worker 下的理想加速比，W_s 为串行工作量、W_p 为可并行工作量；两种工作量使用同一单位，n 为正整数且 W_s+W_p>0：
 
-```math
-T_{\mathrm{parallel}}
- \approx \frac{T_{\mathrm{work}}}{n\eta}
- +T_{\mathrm{coord}}+T_{\mathrm{merge}}+T_{\mathrm{verify}}
-```
-
-这只是均衡负载下的近似，不能用于掩盖长尾。共享 GPU、工具队列、网络带宽和合并阶段都会使 `\eta` 下降。并行主要减少 wall-clock 的关键路径，不保证减少 token、GPU 时间或货币成本。
-
-理想加速还受到 Amdahl 定律约束。设总工作量中不可并行部分为 `W_s`，可并行部分为 `W_p`，使用 `n` 个 worker，则：
-
-```math
+~~~math
 S(n)\le\frac{W_s+W_p}{W_s+W_p/n}
-```
+~~~
 
-这里 `W_s,W_p` 是同一计量单位下的有限非负工作量，`n` 是正整数，且 `W_s+W_p>0`。当 `W_p=0` 时，理想加速比为 1；当 `W_s` 很大时，继续增加 worker 的收益迅速变小。真实系统还要把消息、调度、重复探索和验证成本加到分母中，因此实际加速通常低于这个上界。
+例如串行工作为 20 秒、可并行工作为 80 秒、n=4，则理想上界是 100/(20+80/4)=100/40=2.5 倍；即使 worker 无限增加，上界也只有 100/20=5 倍。真实系统还要付出消息、调度、重复探索和 verifier 成本，因此不能把这个上界当成实际加速承诺。
 
 ## 16.5 并行是否带来新的信息
 
@@ -156,62 +154,53 @@ artifact 还应有唯一 ID、任务 ID、worker ID、输入基线和版本。�
 
 代码 patch 的合并至少检查共同基线、修改路径、用户已有变更、测试对应的 revision、生成文件和外部命令。两个 patch 修改同一行时，系统应生成显式冲突并交给重新计算或人工处理，不能用最后写入覆盖先写入。
 
-## 16.9 生命周期、取消与未知状态
+## 16.9 产物生命周期与不确定结果
 
-worker 和 artifact 需要明确的生命周期。一个常见的 artifact 状态序列是：
+候选产物的最小生命周期可以写成：
 
-```text
+~~~text
 created -> evidence_attached -> tested -> reviewed
                                       ├-> accepted
                                       └-> rejected
-```
+~~~
 
-每次状态迁移都应绑定 `task_id`、`base_revision`、owner、证据 hash、schema version 和过期时间。旧 revision 的 artifact 不能因为重试而覆盖新 revision。若输入代码已经变化，即使旧测试曾经通过，artifact 也应回到待验证状态。
+状态迁移要绑定 task ID、输入 revision、产物 owner 和证据摘要。若代码或数据基线发生变化，旧测试结果就不能继续支持新 revision，应回到待验证状态。
 
-worker 状态还要区分 `queued`、`running`、`succeeded`、`failed`、`blocked`、`cancelled` 和 `unknown`。`unknown` 不是 `failed` 的同义词：客户端在发送创建工单或支付请求后断线，可能不知道动作是否已经执行。直接把 unknown 改成 failed 再重试，可能产生重复副作用。
-
-取消也不是只向模型发送一句“停止”。协调器要向工具执行器传播取消，记录取消时的 artifact 和预算，等待可安全停止的子任务，并把已经提交的副作用与未提交的草稿分开。恢复时先查询外部状态，再决定等待、补偿、重试或人工接管。
+worker 的运行状态可以包括 queued、running、succeeded、failed、cancelled 和 unknown。unknown 表示调用方暂时拿不到权威结果；它不能被当成失败并直接重发。涉及工具请求的查询、幂等和副作用恢复属于第十九章的工具协议范围；跨进程 checkpoint 属于第二十册 Runtime。本章只把这些状态作为并行候选能否进入聚合和 verifier 的输入。
 
 ## 16.10 Workspace 与权限隔离
 
-共享上下文和共享 workspace 是两个不同的选择。多个 worker 可以共享任务目标和只读证据索引，却不应默认共享所有历史、凭证和写权限。一个实用的分区是：
+并行实验要能比较，worker 的输入基线和可写区域必须可区分。一个简化布局是：共享只读证据索引；每个可写 worker 使用独立分支或目录；merge owner 产出新的合并 revision；具备授权的 executor 才能执行外部副作用。这样可以把结果绑定到具体输入和 patch，避免 worker 相互覆盖尚未完成的实验。
 
-- 只读证据区：保存来源、版本、hash 和脱敏摘要；
-- worker 写区：每个可写 worker 使用独立目录、分支或容器；
-- 合并区：只有 merge owner 能生成新的合并 revision；
-- 执行区：独立 executor 在重新检查权限后执行外部动作。
-
-隔离 workspace 解决三类问题。第一，worker 不会看到其他 worker 的半成品，实验更可复现。第二，patch、测试结果和输入基线能够绑定，责任可以归因。第三，合并器可以比较差异，而不是猜测某个共享文件是由谁最后写入的。
-
-权限必须与计算预算分离。增加 reasoning token、worker 数量或验证轮次，不应自动增加文件、网络、数据库或生产写权限。高风险动作需要独立的 policy 检查、用户确认或人工审核；即使所有 worker 一致，也不能用投票替代授权。
-
-worker 读取的网页、issue、代码注释和用户上传文档都是外部数据，可能包含提示注入。artifact 中的自然语言不能自动提升为系统指令。后续节点只应把经 schema 解析的字段作为数据使用，所有可执行动作仍须经过工具 allowlist、参数校验和策略服务。
+计算预算和权限是独立的控制面。增加 token、worker 或 verifier 次数不改变文件、网络、数据库或生产写权限；多个 worker 达成共识也不构成授权。网页、issue、代码注释和上传文件的内容仍是待核验数据，不能自动升级成系统指令。Agent 的完整工具和权限架构见[第十七册第十四章](../../book-17-agent-tool-use/chapters/14-agent-swarm并行协作.md)与[第二十册第八章](../../book-20-agent-harness-runtime/chapters/08-权限模型与安全沙箱.md)。
 
 ## 16.11 Ultra Test-Time Compute 是预算控制问题
 
-这里的 ultra 不是一个精确的模型类别，而是把更多候选、工具观察、验证、恢复或协作预算投入一次任务。它可以通过更多采样实现，也可以通过搜索、verifier、工具循环或多个 Agent 实现。统一的抽象是：在请求完成前，系统允许花费更多资源来降低任务失败概率。
+这里的 ultra 不是一个精确的模型类别，而是把更多候选、工具观察、验证或协调预算投入一次任务。它可以通过更多采样、搜索、verifier、工具循环或多个 Agent 实现。共同点是：任务结束前，系统允许花费更多资源来降低失败概率。跨策略的质量—成本比较见[第七章](07-test-time-compute-scaling.md)，请求预算的计量口径见[第十三章](13-reasoning-effort与推理预算.md)；本章专注多条推理路径的并行组织、协调和验证。
 
-如果所有预算已经换算为同一个成本单位，可以写成：
+若所有预算已经换算到同一个成本单位，可以写成：
 
-```math
+~~~math
 \sum_{i=1}^{n}b_i+b_v+b_m\le B
-```
+~~~
 
-`b_i` 是第 `i` 个 worker 的预算，`b_v` 是验证预算，`b_m` 是合并和恢复预算，`B` 是总预算。上述式子要求所有变量是同一账本中的有限非负量，`n` 是正整数。不能把 token、毫秒和副作用次数未经换算直接相加；更准确的工程表示是预算向量：
+其中 b_i 是第 i 个 worker 的预算，b_v 是验证预算，b_m 是合并与恢复预算，B 是总预算，n 为正整数。所有值必须是同一账本中的有限非负数。例如，教学账本给三个 worker 分配 25、20、15 credits，验证 20 credits，合并与恢复 5 credits，总用量是 25+20+15+20+5=85 credits；若总额 B=100 credits，则尚余 15 credits。credits 是这里构造的统一单位，不代表某个供应商的价格。
 
-```math
+不能把 token、毫秒和副作用次数未经换算直接相加。工程上更准确的表示是按单位逐项限制的预算向量：
+
+~~~math
 \mathbf{B}=(B_{\mathrm{model}},B_{\mathrm{tool}},B_{\mathrm{verify}},B_{\mathrm{time}},B_{\mathrm{side}})
-```
+~~~
 
-其中每个分量使用自己的单位和上限，`B_side=0` 明确表示不允许外部副作用。向量预算的比较是逐项约束，而不是把所有单位假装成一个数字。
+例如，一个合成预算向量可以是 40,000 tokens、8 次工具调用、2 次验证、90 秒 deadline、0 次副作用。每个分量都保留自己的单位；0 次副作用表示禁止外部写入，而不是“便宜的写权限”。
 
-生成预算和验证预算之间存在实际取舍。若 `b_v` 太小，系统会收集很多候选却无法判断；若 `b_m` 太小，冲突会被文本拼接掩盖；若工具预算耗尽，新增的 reasoning token 也无法获得新的观察。困难任务不一定需要更多 worker，可能更需要一个更强的 verifier 或更好的测试环境。
+生成预算和验证预算之间存在取舍。若验证预算不足，系统会收集很多候选却无法判断；若合并预算不足，冲突会被文本拼接掩盖；若工具预算耗尽，新增 reasoning token 也无法获得新的观察。困难任务不一定需要更多 worker，可能更需要独立 verifier 或更好的测试环境。
 
 ## 16.12 成本、单位成功成本与边际收益
 
-多 Agent 的成本账本应至少包括模型、工具、通信、合并、验证和人工：
+多 Agent 的成本账本至少应包括模型、工具、通信、合并、验证和人工；求和下标 i 遍历批次中发生的相应调用或成本项。以下各项要使用同一个货币或归一化成本单位，不能把未测量的成本默认为零：
 
-```math
+~~~math
 C_{\mathrm{total}}
 =\sum_i C_{\mathrm{model},i}
 +\sum_i C_{\mathrm{tool},i}
@@ -219,39 +208,39 @@ C_{\mathrm{total}}
 +C_{\mathrm{merge}}
 +C_{\mathrm{verify}}
 +C_{\mathrm{human}}
-```
+~~~
 
-这些成本项必须使用同一个货币或归一化成本单位，且是有限非负数。未测量的成本不能默认为 0；它应记录为缺失，直到账单、容量模型或人工工时补齐。只有“明确没有发生”的资源才能记为 0。
+例如一个构造的批次中，模型 64 credits、工具 18、通信 2、合并 8、验证 12、人工 16，总成本为 64+18+2+8+12+16=120 credits。这里每项都是教学输入，真实成本应来自账单、容量模型或人工工时记录。
 
-设一批任务的成功数为 `N_success`，单位成功成本定义为：
+设成功数 N_success 是非负整数，单位成功成本为：
 
-```math
+~~~math
 C_{\mathrm{success}}=\frac{C_{\mathrm{total}}}{N_{\mathrm{success}}}
-```
+~~~
 
-这里要求 `N_success` 是非负整数。当 `N_success=0` 时，单位成功成本未定义，应返回 `None` 或报告为 `undefined`；不能用 `max(1,N_success)` 把失败批次伪装成一个可比较的成本。比较不同架构时，成功判据、任务集和成本账本也必须一致。
+若上述 120 credits 的批次有 3 个成功任务，则单位成功成本为 120/3=40 credits/成功任务。当 N_success=0 时，分母为零，指标未定义，应该报告 None 或 undefined；不能用 max(1,N_success) 把失败批次伪装成可比较成本。
 
-新增 worker 是否值得，可以用边际效用表示：
+判断增加第 k 个 worker 是否值得，可估算边际效用：
 
-```math
+~~~math
 \Delta U_k
 =\Delta P_{\mathrm{success},k}V
 -\Delta C_k
 -\lambda\Delta R_k
-```
+~~~
 
-`\Delta P_{\mathrm{success},k}` 是在同一任务分布和成功定义下新增第 `k` 个 worker 带来的成功概率增量，取值应在 `[-1,1]`；`V` 是成功的业务价值；`\Delta C_k` 是同一成本单位下的增量成本；`\Delta R_k` 是风险增量；`\lambda\ge0` 是风险折算系数。若风险是不可接受的硬约束，不能让很大的 `V` 抵消它，而应直接拒绝该扩展。
+ΔP_success,k 是在同一任务集和成功定义下成功概率的增量，V 是一次成功的价值，ΔC_k 是同单位增量成本，ΔR_k 是风险增量，λ≥0 把风险换算成与 V 同单位的代价。例如 ΔP=0.08、V=100 credits、ΔC=5 credits、ΔR=0.1、λ=10 credits/风险单位，则 ΔU=0.08×100−5−10×0.1=2 credits。这个正值只在教学设定的价值、成本和风险刻度成立时有意义；样本不足时不应把估计值写成确定收益。
 
-继续扩展还可以写成三个同时成立的条件：
+若风险属于不可接受的硬约束，就不能让很大的 V 抵消它。可预先设定质量增量、成本和风险门槛：
 
-```math
+~~~math
 G_{\mathrm{expand}}
 =\mathbf{1}[\Delta P_{\mathrm{success}}>\delta]
  \mathbf{1}[C_{\mathrm{extra}}\le C_{\max}]
  \mathbf{1}[R_{\mathrm{extra}}\le R_{\max}]
-```
+~~~
 
-这里 `\delta`、`C_max` 和 `R_max` 应事先定义，所有增量来自相同的评估口径。若概率或风险没有测量，不能用 0 代替以获得一个“允许继续”的结果；应进入信息不足或人工决策状态。
+其中指示函数条件成立取 1，否则取 0；δ 是最低成功率增量，C_max 和 R_max 是允许的增量成本与风险上限。例如 δ=0.02、C_max=6 credits、R_max=0.15，观测到 ΔP=0.08、C_extra=5 credits、R_extra=0.10，则三个条件分别为 1，G_expand=1；这是合成门槛例；若成本变为 7 credits，第二个条件为 0，系统就不应扩张。未测量的概率或风险不能用 0 填充来得到“允许”结果。
 
 ## 16.13 什么时候停止扩张
 
@@ -264,25 +253,15 @@ G_{\mathrm{expand}}
 5. 预算已经耗尽，或者风险超过硬性约束；
 6. 工具状态未知，继续重试可能产生重复副作用。
 
-“模型还想继续思考”不是充分的继续条件。停止时要保存未完成 worker 的状态、取消原因、已生成 artifact、预算余额和外部动作状态，使任务可以安全恢复或交给人工。
+“模型还想继续思考”不是充分的继续条件。停止时要保存未完成 worker 的状态、取消原因、已生成 artifact、预算余额和外部动作状态，使任务可以安全恢复或交给人工；持久化 checkpoint 的设计见[第二十册第十七章](../../book-20-agent-harness-runtime/chapters/17-long-running-agent与checkpoint.md)。
 
-## 16.14 一个跨仓库修复的完整流程
+## 16.14 一个跨仓库修复的并行划分
 
-假设用户报告某个服务在高并发刷新配置时偶发 500。协调器先固定仓库 revision、问题描述、允许访问的目录和只读权限，然后建立四个子任务。
+假设服务在高并发刷新配置时偶发 500。协调器固定仓库 revision、失败日志和只读范围，再建立三条可以独立取证的路径：调用链 worker 找到刷新与重试逻辑；复现 worker 在隔离分支构造最小并发测试；历史 worker 查找相同组件的已合并修复。每条路径都交付带来源、基线 revision 和验证状态的 artifact。
 
-**调用链 worker** 读取入口、缓存刷新和异常处理，输出带文件位置的调用链 artifact。它不能修改代码。
+三条证据汇合后，patch worker 根据已验证的根因提交候选 patch。测试 worker 对具体 patch revision 运行原失败复现和回归测试；安全检查针对同一 diff 独立执行。只有测试通过且合并审查引用这些结果时，候选才进入 accepted 状态。若复现失败，或测试与 patch 的 revision 不一致，结论应保持为待验证。
 
-**复现 worker** 在隔离 workspace 中构造最小并发测试，记录命令、依赖版本、运行次数和失败日志。它的失败也有价值：如果无法复现，应明确说明条件不足，而不是输出“问题不存在”。
-
-**历史 worker** 只读取版本记录和 issue，寻找相同组件的历史修复。引用必须包含 revision 或原始记录定位，社区转述不能与正式变更混为同一证据等级。
-
-**安全 worker** 检查候选变更可能触碰的敏感路径、网络访问、依赖变化和凭证处理。它不接受 patch worker 的自然语言声称作为结论。
-
-当调用链、复现和历史证据汇合后，patch worker 在隔离分支中生成一个或多个候选 patch。每个候选都记录共同基线、修改文件、未验证假设和测试计划。测试 worker 对每个候选执行公开测试、回归测试和针对原始失败的并发测试；安全 worker 对最终 diff 重新检查。
-
-只有测试、安全检查、版本一致性和授权都满足条件，merge owner 才能生成合并 revision。外部 executor 再次读取当前仓库状态和权限，最后才执行提交或发布。任一环节返回 unknown，都不能直接重试写入。
-
-这个例子展示了并行真正解决的问题：把只读调查和相互独立的实验并行化，同时把 patch 合并和外部副作用留在有版本、有验证、有权限的串行路径。若三个 worker 都直接修改共享工作区，系统并没有获得可靠的并行，只是把竞争条件引入开发流程。
+这个任务之所以适合并行，是因为只读调查和复现可以给出互补观察；patch 修改、候选合并和任何部署仍需受依赖边约束。若每个 worker 都直接写共享分支，系统会增加冲突和不确定性，无法把并行加速转化为可验证的成功率。完整代码 Agent 的工作流和 Runtime 交接见[第十七册](../../book-17-agent-tool-use/简介.md)与[第二十册第十七章](../../book-20-agent-harness-runtime/chapters/17-long-running-agent与checkpoint.md)。
 
 ## 16.15 如何证明 multi-agent 值得
 
@@ -318,6 +297,8 @@ G_{\mathrm{expand}}
 
 下面的示例不调用模型、网络或文件系统。它用三个 worker artifact 模拟一个候选修复流程，演示四个工程要点：artifact 需要完整身份和证据 hash；相同 claim 的不同方案必须报告冲突；预算必须在同一 `credits` 账本中分配；当成功数为零时，单位成功成本返回 `None`，而不是制造一个分母。
 
+**代码状态：已验证（2026-11-13；CPython 3.12.9；仅 Python 标准库）。**
+
 ```python
 import math
 
@@ -336,9 +317,14 @@ def require_text(value, name):
 
 def require_finite_non_negative(value, name):
     require(
-        type(value) in {int, float} and math.isfinite(value) and value >= 0,
+        type(value) in {int, float} and value >= 0,
         f"{name} must be a finite non-negative number",
     )
+    try:
+        finite = math.isfinite(float(value))
+    except (OverflowError, ValueError):
+        finite = False
+    require(finite, f"{name} must be a finite non-negative number")
 
 
 def validate_artifacts(artifacts):
@@ -364,7 +350,8 @@ def validate_artifacts(artifacts):
         seen.add(artifact["artifact_id"])
         for key in ("task_id", "worker_id", "base_revision", "claim_id", "claim", "position", "evidence_hash"):
             require_text(artifact[key], key)
-        require(artifact["status"] in ARTIFACT_STATES, "unknown artifact status")
+        status = artifact["status"]
+        require(isinstance(status, str) and status in ARTIFACT_STATES, "unknown artifact status")
         require(type(artifact["verified"]) is bool, "verified must be boolean")
         require(not artifact["verified"] or artifact["status"] == "verified", "verified status mismatch")
     return True
@@ -487,10 +474,14 @@ Self-Consistency、Tree of Thoughts、Language Agent Tree Search 和多 Agent de
 
 本章最重要的结论是：multi-agent 是把计算、证据和权限分布到多条轨迹的组织方式；ultra test-time compute 是在可观测预算内购买更多候选、观察和验证。它们只有在任务可以分解、产物可追踪、错误不完全相关、合并可验证且风险可控时才有价值。增加 worker 数量本身不是目标，能够在固定资源下提高可验证的任务成功率，才是值得保留的工程结果。
 
+PaCoRe 与 ParaThinker 的方法和作者结果依据 2026-11-13 查阅的 ACL Anthology 论文摘要表述；未从摘要推导完整的模型、prompt、硬件或生产服务对照条件。
+
 参考资料：
 
 - Wang et al., *Self-Consistency Improves Chain of Thought Reasoning in Language Models*：<https://arxiv.org/abs/2203.11171>
 - Yao et al., *Tree of Thoughts: Deliberate Problem Solving with Large Language Models*：<https://arxiv.org/abs/2305.10601>
 - Zhou et al., *Language Agent Tree Search Unifies Reasoning, Acting, and Planning in Language Models*：<https://arxiv.org/abs/2310.04406>
 - Du et al., *Improving Factuality and Reasoning in Language Models through Multiagent Debate*：<https://arxiv.org/abs/2305.14325>
+- Hu et al., *PaCoRe: Learning to Scale Test-Time Compute with Parallel Coordinated Reasoning*：<https://aclanthology.org/2026.acl-long.1253/>
+- Wen et al., *ParaThinker: Native Parallel Reasoning for Scaling LLM Test-Time Compute*：<https://aclanthology.org/2026.findings-emnlp.1469/>
 - Amdahl, *Validity of the Single Processor Approach to Achieving Large Scale Computing Capabilities*：<https://doi.org/10.1145/1465482.1465560>

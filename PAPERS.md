@@ -446,6 +446,7 @@ InstructGPT、RLHF、DPO、Constitutional AI、RLAIF、KTO、ORPO。
 16. [Hidden Thoughts Are Not Secret: Reasoning-Trace Exposure in LLMs](https://aclanthology.org/2026.findings-emnlp.2303/)：研究接口隐藏轨迹后仍可能出现可用于迁移的用户可见文本；证据来自受限开源模型实验，相似度不证明恢复了完整内部状态。
 17. [TRACE: An Evidence-Grounded Benchmark for Safety Evaluation of Large Reasoning Models](https://aclanthology.org/2026.emnlp-main.1174/)：分开评估 prompt、推理轨迹、最终回复及证据归因；覆盖中英文和有限模型/风险集合，不能视作普遍安全率。
 18. [Scaling up Test-Time Compute with Latent Reasoning](https://proceedings.neurips.cc/paper_files/paper/2025/hash/3b01972cf31e6fa0fe29e4b8b5c2a0a1-Abstract-Conference.html)：以循环深度在潜在状态中扩展测试时计算；作者报告属于单个 3.5B/800B-token 概念验证，训练与基准比较有明确限制。
+19. [SelectiveNet](https://proceedings.mlr.press/v97/geifman19a.html) 与 [Predict Responsibly](https://arxiv.org/abs/1711.06664)：分别作为 risk-coverage 选择性预测、自动决策与下游决策者转交的研究入口；结果绑定论文的学习设定和模拟任务。另参阅 [FrugalGPT](https://arxiv.org/abs/2305.05176) 的预算内 API 级联及 [Adaptive Computation Time](https://arxiv.org/abs/1603.08983) 的循环网络条件计算；均不能直接证明现代闭源 LLM 的路由阈值或 effort 行为。
 
 ### 推理优化
 

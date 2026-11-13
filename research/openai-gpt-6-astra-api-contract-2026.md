@@ -62,3 +62,9 @@
 - **提示词/技能建议**：开发者博客建议短路由文档与 progressive disclosure，指出读取技能会消耗上下文、把无关指引强制带入可能增加 compaction 并影响路由。GPT-6 family guide 另提醒 Astra 对 skills/AGENTS.md 一类 instruction sources 更敏感，并建议审核可访问指令。该建议是官方工程观察，不是对所有工作负载的量化收益承诺。
 - **模型生命周期与比较**：GPT-5.3 Codex 当前模型页标为 Deprecated，并列 400,000 context、128,000 max output、Chat Completions 与 Responses endpoint。GPT-6 Sol 页面指向较新的 GPT-6.1 Sol；GPT-6 Sol、Luna、6.1 Sol 页面列出各自的能力与参数差异。相同窗口数字或产品定位不代表质量、延迟、费用、架构或训练方式相同。
 - **证据等级与边界**：`source-backed`（OpenAI 官方动态页面与开发者博客）。公开页面未给出模型参数量、生产 kernel、训练 recipe、unpublished serving topology 或任意 workload 延迟；产品定位文字不等于独立评估。GPT-5.3 Codex 仅为已弃用的历史合同例子。
+
+## 2026-11-13 reasoning 配置更新复核
+
+- **来源与阅读范围：** OpenAI 当前[Reasoning 指南](https://developers.openai.com/api/docs/guides/reasoning)及[GPT-6 Sol 模型页](https://developers.openai.com/api/docs/models/gpt-6-sol)，访问日期 2026-11-13；复核 `configuration_update` 的支持模式、历史保留、compaction 限制和响应中的 `reasoning.effort` 含义。
+- **来源支持的事实：** GPT-6 标准单 Agent Responses 会话可将 `configuration_update` 放入历史，以更新后续响应的 effort；更新持续生效直至后续 item 覆盖。该 item 必须随后续 history replay 保留。官方指南规定它不能与自动 compaction/truncation 或独立 `/responses/compact` 混用；显式压缩后若仍需所设 effort，应在下一条用户消息前重新加入配置更新。响应的 `reasoning.effort` 字段反映请求级设置，不足以单独还原更新后的有效设置。
+- **证据等级与边界：** `source-backed`（OpenAI 官方动态 API 指南）。该合同只描述文档列出的 GPT-6 接口模式，不证明不同 API surface 或 provider 兼容层具有相同状态语义，也不揭示内部推理量或质量。

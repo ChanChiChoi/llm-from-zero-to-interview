@@ -60,3 +60,19 @@
 ## 跨来源限制
 
 上述论文研究目标、模型规模、数据构造和评分协议各异。它们适合说明应保留问题/答案/测试/来源/权限等结构化证据，不能合并成一个通用训练配方或数据比例。数值只在各来源定义的分母、模型和 benchmark 条件下成立；这里没有复现代码、训练或评估实验。
+
+## 2026-11-12 补充：数学语料与神经—符号几何路线
+
+### OpenWebMath
+
+- **来源与版本：** Paster et al., “OpenWebMath: An Open Dataset of High-Quality Mathematical Web Text”，arXiv v1，[论文 HTML](https://arxiv.org/html/2310.06786v1)。
+- **阅读范围：** 摘要、语料构建流程、去重说明及 1.4B 参数模型的数据比较。
+- **来源支持的事实：** 作者从 Common Crawl 构建包含 14.7B token 的数学网页语料，描述了 LaTeX/文本提取、HTML boilerplate 清理、质量过滤和去重步骤；其小规模实验在 1.4B 模型和固定训练 token 数下报告数学任务结果。
+- **证据边界：** 语料规模与模型结果属于论文版本、预处理、训练预算和评测设置；不表示该网页集合就是数学题/解答数据，也不能据“公开数据集”推断任意用途的授权状态。
+
+### AlphaGeometry
+
+- **来源与版本：** Trinh et al., “Solving olympiad geometry without human demonstrations,” *Nature* 625 (2024), 476–482，[Google Research 作者论文页](https://research.google/pubs/solving-olympiad-geometry-without-human-demonstrations/)与[Nature DOI](https://doi.org/10.1038/s41586-023-06747-5)。
+- **阅读范围：** 作者论文页摘要，重点确认任务范围、系统组成和评测对象。
+- **来源支持的事实：** AlphaGeometry 被作者描述为欧几里得平面几何的神经—符号系统：从合成数据训练的神经语言模型引导符号演绎引擎；在论文的 30 道奥林匹克几何题测试集中报告解出 25 题。
+- **证据边界：** 这是特定几何域、合成数据、搜索预算和 30 题基准中的作者报告；不能推出自然语言证明都可被符号化或其他数学题型具有相同验证覆盖。

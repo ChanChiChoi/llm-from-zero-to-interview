@@ -112,3 +112,17 @@
 - **Kubernetes Pod Security Standards**：[官方文档](https://kubernetes.io/docs/concepts/security/pod-security-standards/)，访问日期 2026-11-05；当前导航指向 Kubernetes v1.37，页面标注 2026-10-16 更新；阅读三档策略总览及 Restricted policy 的说明和相关字段约束。
 - **来源支持的事实**：文档定义 Privileged、Baseline 和 Restricted 三种累积策略；Restricted 面向采用当前 Pod hardening practices 的安全关键应用和较低信任用户，限制特权容器、HostPath、特权提升、root 身份及 Linux capabilities 等 Pod 字段。
 - **证据等级与边界**：source-backed（Kubernetes 官方配置标准）；Pod policy 约束 Kubernetes 对 Pod 配置的接受范围，不是任意代码逃逸、内核漏洞、多租户数据隔离或微虚拟机比较的实测证明。关于更强隔离技术的选择仍需依据部署威胁模型判断。
+
+## 2026-11-13 工具往返、thinking 交错与 MCP 当前协议面
+
+- **OpenAI Responses Function Calling**：[官方文档](https://developers.openai.com/api/docs/guides/function-calling)，2026-11-13 访问；阅读术语定义、tool calling flow、function-call output 与多轮继续部分。Responses 将调用和结果表示为不同类型的 item，结果通过原 `call_id` 关联；应用执行 client-owned function 后回传结果并继续请求，直到最终响应或下一次工具调用。`call_id` 只关联 API 项，不代表业务授权。文档同时包括托管工具，实际执行责任需按工具类型区分；接口规则不外推到其他 provider 或 API surface。
+- **Anthropic Messages 工具往返**：[Handle tool calls](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls) 与 [Thinking](https://platform.claude.com/docs/en/build-with-claude/thinking)，2026-11-13 访问；阅读 `tool_use`/`tool_result`、`tool_use_id`、`is_error`、结果块顺序、thinking block 回传和 interleaved thinking 可用范围。client tool 由应用执行，工具结果需与原 tool-use ID 对应；工具循环中的 thinking block 必须按原顺序回传，不能编辑或局部删除。interleaved thinking 是否可用以及是否需 beta header 依模型/模式而变，且该文档所述能力限 Messages API。以上均为当前动态 API 合同，不表明隐藏推理可见，也不赋予应用授权。
+- **Model Context Protocol**：阅读[2026-07-28 版官方规范](https://modelcontextprotocol.io/specification/2026-07-28)、[发布说明](https://blog.modelcontextprotocol.io/posts/2026-07-28/)及 [Tasks extension 2026-07-28](https://tasks.extensions.modelcontextprotocol.io/specification/2026-07-28/tasks)，访问日期 2026-11-13。正式版本把核心改为自包含无协议会话请求，移除 `initialize`/`initialized` 握手和 `Mcp-Session-Id`；请求携带版本与 client 元数据，需要预先发现能力时可调用 `server/discover`。Multi Round-Trip Requests 将工具中途需要的 client 输入随原请求的响应/更新流转。Tasks 从核心实验功能移入 `io.modelcontextprotocol/tasks` 扩展，当前适用 `tools/call`，由 server 决定是否返回任务句柄；客户端通过 `tasks/get`、`tasks/update`、`tasks/cancel` 查询、更新和取消。取消语义为协作式且最终状态可能不是 `cancelled`。应用仍可保存外部业务状态；无协议会话不等于无状态业务。
+- **证据等级与边界**：source-backed（供应商动态官方文档、MCP 版本化规范和扩展规范）。OpenAI/Anthropic 字段绑定其 API 与模型版本；MCP 事实绑定 2026-07-28 规范和 Tasks 扩展，不证明每个 SDK/host 已实现新版功能。API 文档不揭示模型内部策略，不替代 host 的业务授权、幂等执行、结果验证和状态恢复。
+
+## 2026-11-13 工具返回内容与 Agent 安全分类
+
+- **来源与版本**：OWASP GenAI Security Project [Top 10 for LLM Applications](https://genai.owasp.org/initiatives/top-10-for-llm-and-genai/)，2025 版页面，访问日期 2026-11-13；Anthropic [Handle tool calls](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls)，访问日期 2026-11-13；MCP [Security Best Practices](https://modelcontextprotocol.io/docs/2026-07-28/tutorials/security/security_best_practices)，对应 2026-07-28 页面，访问日期 2026-11-13。
+- **实际阅读范围**：OWASP 当前 LLM01 Prompt Injection、LLM06 Excessive Agency 列表；Anthropic 对网页、邮件、上传文件等 tool results 的 untrusted-content 提醒；MCP 安全页面目录中的 confused deputy、scope minimization、token passthrough、SSRF 和 state-handle hijacking 风险。
+- **来源支持的事实**：OWASP 2025 Top 10 将 Prompt Injection 与 Excessive Agency 列为风险类别；Anthropic 要求将不受控制的工具结果作为不可信内容处理；MCP 独立列出其实现特定的授权、委托、scope 和资源访问安全风险与缓解指导。
+- **证据等级与边界**：source-backed（OWASP 风险分类和官方协议/供应商安全文档）。这些资料用于提出威胁模型与控制点，不是目标 Agent 的攻击成功率或生产风险率测量；具体缓解仍需在目标工具、权限和执行环境中测试。

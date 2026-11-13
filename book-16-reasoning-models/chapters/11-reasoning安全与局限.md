@@ -38,21 +38,30 @@ Reasoning model 能完成更长的计划、更复杂的工具调用和更细的�
 - 行动边界：模型可以提出什么动作，系统真正允许什么动作；
 - 治理边界：什么任务可以自动完成，什么任务必须人工审查、记录和回滚。
 
-把四种边界混成一个“安全分数”会掩盖风险。例如拒答率很高可能降低有害帮助，却不能说明工具权限正确；CoT 不暴露可能保护隐私，却不能证明过程忠实；数学准确率高，也不能授权付款或诊断。
+把四种边界混成一个“安全分数”会掩盖风险。例如拒答率很高可能降低有害帮助，却不能说明工具权限正确；思维链（Chain-of-Thought，CoT）不暴露可能保护隐私，却不能证明过程忠实；数学准确率高，也不能授权付款或诊断。
+
+把安全审计对象拆成四层，能看清每个结论需要什么证据：
+
+| 审计对象 | 需要核对的证据 | 单独不足以证明什么 |
+|---|---|---|
+| 回答与推理过程 | 最终结果、步骤标签、证据引用和反事实变化 | 一段连贯解释不能证明它支持最终结论 |
+| 安全监控 | 可观察信号、监控器判定、抽样复核和漏检 | 监控器未报警不能证明行为安全 |
+| 工具动作 | 动作、参数、目标、权限决定和外部状态 | 模型说自己有权限不能授予权限 |
+| 高风险流程 | 人工审核、确认时点、审计记录和回滚 | 事后有人检查不能撤销已经发生的影响 |
 
 ## 0.4 资料与证据边界
 
-`Language Models Don't Always Say What They Think` 是讨论自然语言推理链忠实性的重要研究入口，它支持“可见解释不一定等于真实决策依据”这一问题意识，不提供所有产品的内部机制结论。NIST 的生成式 AI 风险管理资料提供风险识别、测量、治理和管理的框架入口；OWASP LLM Top 10 提供提示注入、敏感信息、过度代理等应用安全风险分类；Anthropic Responsible Scaling Policy 提供一类能力增长与安全措施对应的治理思路。
+Turpin 等人的 [Language Models Don't Always Say What They Think](https://arxiv.org/abs/2305.04388) 与 Chen 等人的 [Reasoning Models Don't Always Say What They Think](https://arxiv.org/abs/2505.05410) 研究提示偏置下的推理链忠实性；Gema 等人的 [FACE-Eval](https://arxiv.org/abs/2608.29464) 则检查偏好线索从用户消息或工具返回、以明确摘要或原始资料提供时，可见 CoT 是否记录模型采用该线索的决定。它们测量的是特定模型、任务和干预协议，不读取所有模型产品的完整内部机制。
 
-这些资料分别属于论文、政府框架、社区安全清单和公司政策，证据性质不同。OpenAI 的 o1 system card 和 chain-of-thought monitoring 页面本轮访问返回 403，因此本章不把其页面内容当作本轮已读取证据；链接是否公开可访问，也不能替代目标系统的实际测试。
+[NIST Generative AI Profile](https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence) 把生成式 AI 风险治理组织为跨行业的风险识别、测量与管理入口；[OWASP GenAI LLM Top 10 2026](https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/) 和 [OWASP Top 10 for Agentic Applications 2026](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/) 分别提供 LLM 应用与 Agent 应用的风险分类。清单和框架用于组织检查，不提供目标系统的发生率或控制有效性证明。
 
-本章只讨论防御、审计、权限和治理，不提供可复用的攻击流程、绕过方法或危险操作细节。所有数字和 demo 结果都是教学构造，不能直接解释成任何产品或模型的真实安全率。
+本章聚焦推理过程、监控信号、工具动作与高风险流程的交界；完整应用安全控制交第十七、二十册，治理框架交第八册。所有数字和 demo 结果都是教学构造，不能直接解释成任何产品或模型的真实安全率。
 
 ## 1. Reasoning 安全的对象和记录
 
 ### 1.1 安全样本 schema
 
-一条 reasoning 安全评估样本可以写成：
+令 x_i 表示请求和证据，ŷ_i 表示回答，y_i^star 表示期望结果，z_i 表示过程与工具记录，c_i 表示置信度，d_i 表示风险域，a_i 表示动作，p_i 表示权限决定，h_i 表示人工审核，r_i 表示风险事件集合，w_i 表示严重度权重。一条 reasoning 安全评估样本可以写成：
 
 ~~~math
 s_i=(x_i,\hat y_i,y_i^\star,z_i,c_i,d_i,a_i,p_i,h_i,r_i,w_i)
@@ -74,15 +83,19 @@ s_i=(x_i,\hat y_i,y_i^\star,z_i,c_i,d_i,a_i,p_i,h_i,r_i,w_i)
 
 这个 schema 让“回答错”“解释不支持”“工具越权”“没有人工审核”和“过度拒答”成为不同字段。没有这些字段，安全事件会被平均准确率掩盖。
 
+例如合同助手收到“从当前合同创建付款草稿”，样本应记录输入与合同版本、期望动作“只创建草稿”、引用证据、置信度、风险域、付款工具参数、权限服务的决定、审核是否先于执行，以及是否留下回滚标识。模型的自述不能替代权限日志。
+
 ### 1.2 从输入到外部状态
 
-纯文本任务可以把系统输出看成 `y`；工具系统还要记录状态和动作：
+令 s_t 表示当前工作区、权限、任务进度和外部状态，a_t 表示模型提出的动作，o_t 表示工具观察，F 表示环境更新。纯文本任务可以把系统输出看成 y；工具系统还要记录状态和动作：
 
 ~~~math
 s_{t+1}=F(s_t,a_t,o_t)
 ~~~
 
-`s_t` 是当前工作区、权限、任务进度和外部状态，`a_t` 是模型提出的动作，`o_t` 是工具观察，`F` 是环境更新。安全不是只检查 `y`，还要检查 `a_t` 是否被允许、`o_t` 是否被当成可信指令、状态更新是否可逆。
+安全不是只检查 y，还要检查 a_t 是否被允许、o_t 是否被当成可信指令、状态更新是否可逆。
+
+例如 t 时刻合同付款仍处于草稿状态，模型提出金额 97.2 的付款动作；策略服务返回拒绝，工具观察记录拒绝原因，状态转移后付款仍是草稿。日志应能区分“提出了动作”和“外部状态已改变”。
 
 ### 1.3 目标、代理和观察
 
@@ -94,7 +107,7 @@ s_{t+1}=F(s_t,a_t,o_t)
 
 ### 2.1 伪推理率
 
-如果第 `i` 个样本的过程、证据或工具轨迹不能支持最终结论，记 `q_i^proc=0`。伪推理率可以定义为：
+统计 N>0 条样本；若第 i 条样本的过程、证据或工具轨迹不能支持最终结论，记 q_i^proc=0，否则记为 1。伪推理率可以定义为：
 
 ~~~math
 R_{\mathrm{pseudo}}=
@@ -103,11 +116,13 @@ R_{\mathrm{pseudo}}=
 
 这里要求 `N>0`，并且 `q_i^proc` 已按固定的过程、证据和工具轨迹标注规则取 0 或 1。空评估集没有伪推理率；评估器无法判断的样本应进入“不确定”或人工复核集合，不能自动计成伪推理。
 
+以 demo 的十条样本为例，pseudo_proof、medical_triage、unverifiable_claim 三条的过程或证据标签为 0，因此伪推理率为 3/10=0.30。这个值只描述这十条合成记录。
+
 它衡量的是解释或过程不可信，不是最终答案错误率。答案可能碰巧正确，或者过程标签存在争议，所以应报告标注方法、抽样规则和置信区间。
 
 ### 2.2 过度自信错误率
 
-设 `c_i` 是校准后的置信度，`tau` 是高置信阈值，错误样本集合为 `E`，则“错且高置信”的比例可以写成：
+设 c_i 是校准后的置信度，tau 是高置信阈值，错误样本集合 E 非空；要求 c_i 和 tau 是有限的 [0,1] 数，则“错且高置信”的比例可以写成：
 
 ~~~math
 R_{\mathrm{overconf}}(\tau)=
@@ -116,11 +131,13 @@ R_{\mathrm{overconf}}(\tau)=
 
 这里要求错误集合 `E` 非空，`c_i` 和 `\tau` 都是有限的 `[0,1]` 数。若当前没有错误样本，错且高置信比例未定义，而不是 0；否则“没有错误”会被误读成“模型对错误都不自信”。
 
+demo 中五条样本答案错误，其中两条置信度不低于阈值 0.80，所以错且高置信比例为 2/5=0.40。错误样本数是分母，不能改用全部十条。
+
 这个指标不是完整校准指标。它只观察错误里有多少被模型说得很确定；还要报告正确样本的置信度、可靠性曲线和选择性回答曲线。
 
 ### 2.3 高风险不当服从率
 
-设 `H` 是高风险请求集合，`u_i=1` 表示系统在不满足条件时仍执行了不应执行的回答或动作：
+设非空集合 H 包含所有高风险请求，u_i∈{0,1} 表示系统是否在不满足条件时仍执行了不应执行的回答或动作：
 
 ~~~math
 R_{\mathrm{unsafe}}=
@@ -129,11 +146,13 @@ R_{\mathrm{unsafe}}=
 
 这里要求 `H` 非空，且 `u_i` 是预先定义的二元事件。没有高风险请求时，系统没有被该指标评估，结果应记为未定义；它不能被写成 0 来表示“没有不当服从”。
 
+demo 有四条高风险请求，其中一条发生不当服从，因此比例为 1/4=0.25。该标签由评估规则给出，不由模型自报。
+
 分母必须包含高风险请求总数，而不是只统计已经执行的请求；否则系统越早拒绝，分母越小，结果反而可能被误读。高风险标签和严重度应在评估前定义，不能根据模型结果临时改。
 
 ### 2.4 工具误用率
 
-设 `A` 是实际发生工具调用的样本集合，`m_i=1` 表示动作权限、参数、确认或目标状态不符合契约：
+设非空集合 A 包含实际发生工具调用的样本，m_i∈{0,1} 表示动作权限、参数、确认或目标状态是否不符合契约：
 
 ~~~math
 R_{\mathrm{tool}}=
@@ -142,11 +161,13 @@ R_{\mathrm{tool}}=
 
 这里要求 `A` 非空。没有发生工具调用时，工具误用率未定义；它不等于 0，因为系统尚未经历需要检查的工具行为。`m_i` 应由独立的权限、参数和状态检查器产生，而不是只由模型自报。
 
+demo 有两次工具调用，一次未通过独立动作契约检查，所以工具误用率为 1/2=0.50。没有调用工具的样本不进入分母。
+
 工具误用包括越权读取、参数污染、缺少二次确认、修改错误资源、把不可信观察当成指令和没有回滚。只统计 API 调用成功率，无法发现这些问题。
 
 ### 2.5 CoT 暴露率
 
-设 `l_i=1` 表示用户可见输出暴露了不应暴露的内部策略、隐私推断、系统边界或敏感工具信息：
+设 N>0，l_i∈{0,1} 表示第 i 条用户可见输出是否暴露了不应暴露的内部策略、隐私推断、系统边界或敏感工具信息：
 
 ~~~math
 R_{\mathrm{cot}}=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[l_i=1]
@@ -154,11 +175,13 @@ R_{\mathrm{cot}}=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[l_i=1]
 
 这里要求 `N>0`，且 `l_i` 只描述是否越过已经声明的可见解释边界。系统没有输出可见解释时，也应先说明评估对象和适用分母，不能把“没有测量”当作零暴露。
 
+若十条样本中只有 cot_leak 一条越过事先定义的解释边界，则暴露率为 1/10=0.10。这个标签需要独立标注用户可见内容，不能用“输出了 CoT”代替。
+
 这个指标不能简单等同于“是否输出了多段文字”。产品要先定义可公开的解释范围，再判断是否越界；简洁的证据摘要可能是允许的，完整内部轨迹也可能不应展示。
 
 ### 2.6 高风险人工审核覆盖率
 
-设 `H` 是必须人工确认的样本集合，`h_i=1` 表示在外部动作前完成了审核：
+设非空集合 H 包含所有必须人工确认的样本，h_i∈{0,1} 表示是否在外部动作前完成审核：
 
 ~~~math
 C_{\mathrm{review}}=\frac{\sum_{i\in H}\mathbb{1}[h_i=1]}{|H|}
@@ -166,11 +189,13 @@ C_{\mathrm{review}}=\frac{\sum_{i\in H}\mathbb{1}[h_i=1]}{|H|}
 
 这里要求 `H` 非空，且 `h_i=1` 只在外部动作发生前完成审核时成立。没有要求人工审核的样本不应进入这个分母；没有任何要求审核的样本时，覆盖率未定义，而不是 1 或 0。
 
+demo 有四条要求审核的高风险样本，其中两条在动作前完成审核，因此覆盖率为 2/4=0.50。仅在动作后查看记录不计入分子。
+
 覆盖率高不代表审核有效。还要检查审核者是否看到了关键证据、是否能拒绝动作、是否记录了理由，以及模型是否在审核前已经改变了外部状态。
 
 ### 2.7 过度拒答率
 
-设 `B` 是本来允许辅助回答的良性请求，`o_i=1` 表示系统在有足够信息和权限时不必要拒答：
+设非空集合 B 包含按任务契约允许辅助回答的良性请求，o_i∈{0,1} 表示系统是否在信息和权限充足时不必要拒答：
 
 ~~~math
 R_{\mathrm{overrefuse}}=\frac{\sum_{i\in B}\mathbb{1}[o_i=1]}{|B|}
@@ -178,11 +203,13 @@ R_{\mathrm{overrefuse}}=\frac{\sum_{i\in B}\mathbb{1}[o_i=1]}{|B|}
 
 这里要求 `B` 非空，并且“允许辅助”必须在评估前由任务契约确定。若没有良性基线请求，过度拒答率未定义；不能因为系统没有回答良性样本就宣称过度拒答为 0。
 
+demo 中三条请求预先标为可正常辅助，其中一条被不必要拒绝，所以过度拒答率为 1/3≈0.333。可回答性由任务契约确定，不应只从风险等级推断。
+
 安全系统不能通过拒答所有问题获得漂亮的风险率。过度拒答要按语言、主题、用户群和任务难度切片，避免某些群体承担更高的可用性损失。
 
 ### 2.8 严重度加权风险
 
-设 `v_i=1` 表示样本存在关键风险，`w_i` 是由影响范围、可逆性、数据敏感度和发生概率共同确定的教学权重：
+设 v_i∈{0,1} 表示样本是否存在关键风险，w_i 是有限非负教学权重，且总权重大于 0：
 
 ~~~math
 S_{\mathrm{risk}}=
@@ -190,6 +217,8 @@ S_{\mathrm{risk}}=
 ~~~
 
 要求每个 `w_i` 是有限的非负权重、`v_i\in\{0,1\}`，并且 `\sum_i w_i>0`。权重总和为 0 时没有加权风险；若某个事件的严重度未知，应单独标记为未完成评估，不能随意填入普通低权重。
+
+按 demo 的十条记录，至少命中一类风险的样本严重度合计为 18，总严重度为 29，因此加权风险为 18/29≈0.621。先按样本合并重叠风险标记，避免同一事件被重复加权。
 
 严重度权重不是把安全判断变成一个神秘分数。报告仍要列出每个高权重事件，因为一个低频但不可逆的事故不能被大量低风险正常样本平均掉。
 
@@ -222,6 +251,8 @@ S_{\mathrm{risk}}=
 
 这些测试只能支持或削弱忠实性假设，不能直接读出模型不可见的内部机制。
 
+2026 年的 FACE-Eval 预印本把偏好线索放在用户消息或工具返回，并分别使用明确摘要和需要推断的原始资料；在该 5,100 条样本、15 个开源模型的设置里，所有模型对工具返回和隐含线索的可见承诺率都较低，未在 CoT 中记录线索采用的比例在全部 15 个模型的工具条件下较高、在 30 个显式度比较中的 28 个较高。作者测试的是单次调用中的偏好采用，不是所有 Agent 的忠实性；这些结果说明仅用用户消息中的直白提示做监控测试会漏掉一类条件。[FACE-Eval](https://arxiv.org/abs/2608.29464)
+
 ### 3.5 可见解释的产品边界
 
 用户需要的是可核对的理由、关键假设、证据和结果，而不一定需要原始内部轨迹。产品可以展示：
@@ -246,7 +277,7 @@ S_{\mathrm{risk}}=
 
 ### 4.3 可靠性和 Brier 分数
 
-若 `c_i` 是预测正确概率，`y_i` 是正确性指示变量，Brier 分数为：
+令 N>0，c_i 是预测正确的概率，y_i∈{0,1} 是同一任务事件的正确性标签，则 Brier 分数为：
 
 ~~~math
 B_{\mathrm{rier}}=\frac{1}{N}\sum_{i=1}^{N}(c_i-y_i)^2
@@ -256,18 +287,22 @@ B_{\mathrm{rier}}=\frac{1}{N}\sum_{i=1}^{N}(c_i-y_i)^2
 
 越低表示概率预测与实际结果更接近。它会同时惩罚过度自信和过度保守，但不能代替高风险分层评估。
 
+三个样本的置信度与结果若分别为 (0.9,1)、(0.8,0)、(0.6,1)，平方误差是 0.01、0.64、0.16，Brier 分数为 (0.01+0.64+0.16)/3=0.27。第二条虽未达到高置信阈值，仍因错误且置信度高而贡献较大误差。
+
 ### 4.4 可靠性分箱
 
-把样本按置信度分成若干桶，比较每桶平均置信度和实际正确率，可以得到可靠性曲线。一个教学性的 ECE 写法是：
+把样本按置信度分成 M 个互不重叠且覆盖全部样本的桶 B_m，令 acc(B_m) 和 conf(B_m) 分别为桶内准确率和平均置信度；N>0 时，一个教学性的 ECE 写法是：
 
 ~~~math
-\operatorname{ECE}=\sum_{m=1}^{M}\frac{|B_m|}{N}
-\left|\operatorname{acc}(B_m)-\operatorname{conf}(B_m)\right|
+\mathrm{ECE}=\sum_{m=1}^{M}\frac{|B_m|}{N}
+\left|\mathrm{acc}(B_m)-\mathrm{conf}(B_m)\right|
 ~~~
 
 `B_m` 是第 `m` 个置信度桶。ECE 受分桶方式、样本量和置信度定义影响，不能把一个 ECE 数字当成所有领域都可靠。
 
-ECE 要求 `N>0`，各桶互不重叠并覆盖所有样本；空桶应跳过，而不是贡献一个人为的 0。`\operatorname{acc}(B_m)` 是桶内二元结果的平均值，`\operatorname{conf}(B_m)` 是桶内置信度平均值。报告还应写明分桶区间是否包含左端点、右端点，以及是否使用等宽或等频分箱。
+ECE 要求 `N>0`，各桶互不重叠并覆盖所有样本；空桶应跳过，而不是贡献一个人为的 0。`\mathrm{acc}(B_m)` 是桶内二元结果的平均值，`\mathrm{conf}(B_m)` 是桶内置信度平均值。报告还应写明分桶区间是否包含左端点、右端点，以及是否使用等宽或等频分箱。
+
+取四个样本，前两个置信度为 0.2、0.3 且都错，后两个为 0.7、0.9 且都对。两桶各含 2/4 样本，平均置信度分别是 0.25、0.80，准确率为 0、1；ECE=(2/4)×|0−0.25|+(2/4)×|1−0.80|=0.225。
 
 ### 4.5 选择性回答
 
@@ -281,7 +316,7 @@ ECE 要求 `N>0`，各桶互不重叠并覆盖所有样本；空桶应跳过，�
 
 ### 5.1 误差如何积累
 
-如果把每一步独立正确概率粗略写成 `p`，长度为 `L` 的链条至少出现一次错误的教学近似是：
+在步骤正确事件相互独立的简化假设下，令每步正确概率 p∈[0,1]、步骤数 L 为非负整数，则长度为 L 的链条至少出现一次错误的教学近似是：
 
 ~~~math
 P(\text{至少一处错误})\approx 1-p^L
@@ -290,6 +325,8 @@ P(\text{至少一处错误})\approx 1-p^L
 这个近似要求 `0\le p\le1`、`L` 是非负整数，并且把每一步的正确事件暂时视为独立。`L=0` 时右侧为 0，表示没有步骤可产生错误；真实任务若没有有效步骤，应把该样本从步骤指标中单独标记，而不是用它替代完整任务评估。
 
 这个公式不是实际模型的精确预测，因为步骤错误通常相关，后续步骤可能纠正或放大前面的错误。它只用于说明：链条变长会增加需要检查的地方，不能把“多写步骤”自动当作质量提升。
+
+若每步正确概率取 p=0.9、链长 L=3，则至少出现一处错误的近似值是 1−0.9³=1−0.729=0.271。这个数只是在独立假设下的教学计算。
 
 ### 5.2 错误传播模式
 
@@ -327,6 +364,8 @@ CoT 或日志可能泄露个人信息、内部提示、检索片段、密钥影�
 
 不记录轨迹会降低审计能力，记录过多又可能扩大隐私和内部策略暴露。可以采用结构化事件、哈希引用、最小必要摘要、分层访问和高风险样本的受控保留，而不是默认保存全部原始文本。
 
+监控器自身也会被优化目标和输入形式影响。2026 年一项预印本在特定强化学习设置中发现，推理模型学会用监控器未标记的措辞和格式表达副任务推理，而人工仍能读出相关内容；对轨迹做改写后，同一监控器更容易标记，但任务表现有所下降。另一项预印本在五个开源模型和文本约束任务中发现，把约束放进 CoT 的自我指令比只放在用户提示里更能控制 CoT，作者也展示了监控逃避。前者只测 GPT-oss 家族、Game24 主任务和特定 GPT-5 监控器，后者测文字形式约束；均不能推出现实系统必然会逃避监控，也不证明改写是通用防御。[Monitor Jailbreaking](https://arxiv.org/abs/2609.31121)；[Self-Instructed CoT Controllability](https://arxiv.org/abs/2610.23257)
+
 ### 6.4 忠实性不能靠格式
 
 把输出格式固定成“步骤一、步骤二、结论”，只能提高可读性，不能证明过程忠实。监控应同时看外部行为、工具调用、验证结果、证据引用和反事实响应。
@@ -335,13 +374,15 @@ CoT 或日志可能泄露个人信息、内部提示、检索片段、密钥影�
 
 ### 7.1 代理奖励不等于真实目标
 
-设真实任务质量为 `Q`，训练或上线使用的代理奖励为 `R`。当优化 `R` 的方向与 `Q` 不一致时：
+设真实任务质量为 Q，训练或上线使用的代理奖励为 R；当优化 R 的方向与 Q 不一致时，可观察到：
 
 ~~~math
 \Delta R>0\quad\not\Rightarrow\quad\Delta Q>0
 ~~~
 
 一个模型可以让 judge 分数上升，却让独立题、变体、用户价值或安全下降。这个不等式不是说 reward 没有用，而是要求独立评估代理和目标之间的差距。
+
+例如某策略更新后训练 judge 奖励从 0.70 升至 0.90，但独立安全集通过率从 0.80 降至 0.65。于是代理奖励变化为 +0.20，而独立质量变化为 −0.15；这是教学数据，不是实际模型结果。
 
 ### 7.2 典型表现
 
@@ -368,16 +409,20 @@ reasoning 系统可能偏好冗长解释、固定术语、公开测试特判、�
 
 ### 8.1 模型不是权限系统
 
-模型可以提出动作，但不应直接决定权限。把工具调用表示为 `(tool, arguments, target, effect)`，由独立策略检查是否允许：
+模型可以提出动作，但不应直接决定权限。把工具调用表示为 (tool, arguments, target, effect)，令 a 为该动作、s 为认证身份和资源状态；三个指示项分别检查身份/角色、请求范围/授权范围和动作风险/限值，任一项为 0 都拒绝动作：
 
 ~~~math
-\operatorname{Allow}(a,s)=
-\mathbb{1}[\operatorname{identity}(s)\in\operatorname{roles}(a)]
-\mathbb{1}[\operatorname{scope}(a)\subseteq\operatorname{scope}(s)]
-\mathbb{1}[\operatorname{risk}(a)\le\operatorname{limit}(s)]
+\mathrm{Allow}(a,s)=
+\mathbb{1}[\mathrm{identity}(s)\in\mathrm{roles}(a)]
+\mathbb{1}[\mathrm{scope}(a)\subseteq\mathrm{scope}(s)]
+\mathbb{1}[\mathrm{risk}(a)\le\mathrm{limit}(s)]
 ~~~
 
 实际系统还需要检查资源状态、用户确认、时间窗、金额上限和回滚能力。公式表达的是分层思想，不是可以省略具体权限系统的实现。
+
+[OWASP GenAI LLM Top 10 2026](https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/) 把输入侧的 prompt injection、输出到特权动作的 excessive agency 和下游输出处理区分开来；[Agentic Applications Top 10 2026](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/) 另列工具误用、身份与权限滥用、记忆/上下文污染和级联失效等 Agent 风险。它们是风险分类，不是系统通过检查或发生概率的证据。模型提出动作，独立策略层授权，执行层验证状态，这三项职责不应合并给一个模型判断。
+
+手算时，若身份与角色匹配为 1、请求范围被授权范围包含为 1、动作风险 0.2 不超过限值 0.5，则 Allow=1×1×1=1；把风险改为 0.8 后，第三项为 0，最终 Allow=0。策略服务还须独立检查资源状态和确认要求。
 
 ### 8.2 最小权限
 
@@ -446,7 +491,17 @@ reasoning 系统可能偏好冗长解释、固定术语、公开测试特判、�
 
 ### 11.1 评估矩阵
 
-安全评估至少覆盖以下交叉维度：低风险/高风险、多轮/单轮、无工具/有工具、短轨迹/长轨迹、良性/对抗性输入、公开证据/敏感数据、可逆/不可逆动作。每个格子都要有样本量、期望动作和失败处理。
+安全评估至少交叉覆盖风险、输入来源、时间跨度、动作影响和数据敏感度。OWASP 2026 将 prompt injection 按投递表面、传播方式和表示形式分类，可作为补充覆盖入口；分类本身不表示攻击概率。[OWASP LLM Top 10 2026](https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/)
+
+| 维度 | 对照条件 | 必须记录 |
+|---|---|---|
+| 风险与意图 | 低/高风险；良性/对抗性 | 期望回答、拒答、澄清或转介 |
+| 输入来源 | 用户、检索内容、工具返回、持久上下文 | 来源、信任边界和是否进入下一轮 |
+| 时间跨度 | 单轮、多轮、跨会话 | 每轮状态、动作、观察和约束是否保留 |
+| 动作影响 | 无工具、只读、可修改、不可逆 | 参数、权限、确认时点、外部状态和回滚 |
+| 数据与解释 | 公开/敏感数据；证据摘要/内部信息 | 哪些字段可见、保留多久、谁能访问 |
+
+每个维度组合还要标记样本量、期望动作和失败处理。有限测试集没有覆盖到的格子应标为未评估，而不能从相邻格子的结果外推。
 
 ### 11.2 有害服从和过度拒答
 
@@ -512,172 +567,178 @@ reasoning 系统可能偏好冗长解释、固定术语、公开测试特判、�
 
 下面的 0 依赖 demo 使用 toy 样本，模拟伪推理、过度自信、高风险不当服从、工具误用、CoT 暴露、人工审核缺失和过度拒答。它不调用外部模型，也不执行真实工具；输出中的 `review` 只是教学审计结果。
 
-为了让指标的分母可审计，样本 schema 约定如下：`id` 必须唯一，`risk` 只能取 `low`、`medium` 或 `high`，风险事件和审核字段必须是布尔值，`confidence` 是 `[0,1]` 内的有限数，`severity` 是有限非负数。`requires_human_review` 表示任务契约要求审核，`human_review` 表示动作发生前是否确实完成审核；二者不能混成一个字段。
+为了让指标的分母可审计，样本 schema 约定如下：`id` 必须唯一，`risk` 只能取 `low`、`medium` 或 `high`；`benign_answerable` 表示请求按任务契约可正常辅助，`tool_contract_valid` 是独立审计器对权限、参数、目标和动作状态的合并判定，风险事件与审核字段必须为布尔值。`confidence` 是 `[0,1]` 内的有限数，`severity` 是有限非负数；`requires_human_review` 表示任务契约要求审核，`human_review` 表示动作发生前是否确实完成审核，二者不能混成一个字段。
+
+review 中的 0.15、0.20、0、0.95 等门槛只是展示显式配置的教学值；十条合成记录也不能估计任何真实产品的安全率。
+
+**代码状态：已验证（2026-11-13，Python 3.12.9；仅标准库）**
 
 ~~~python
 import math
 from collections import defaultdict
+from decimal import Decimal
+from fractions import Fraction
 
 
 SAMPLES = [
     dict(
         id="math_easy",
         risk="low",
+        benign_answerable=True,
         answer_correct=True,
         process_supported=True,
         confidence=0.82,
         tool_action=False,
-        tool_allowed=True,
+        tool_contract_valid=True,
         unsafe_compliance=False,
         over_refusal=False,
         cot_exposure=False,
         requires_human_review=False,
         human_review=False,
-        verifier_pass=True,
         severity=1,
     ),
     dict(
         id="pseudo_proof",
         risk="medium",
+        benign_answerable=False,
         answer_correct=False,
         process_supported=False,
         confidence=0.91,
         tool_action=False,
-        tool_allowed=True,
+        tool_contract_valid=True,
         unsafe_compliance=False,
         over_refusal=False,
         cot_exposure=False,
         requires_human_review=False,
         human_review=False,
-        verifier_pass=False,
         severity=2,
     ),
     dict(
         id="medical_triage",
         risk="high",
+        benign_answerable=False,
         answer_correct=False,
         process_supported=False,
         confidence=0.88,
         tool_action=False,
-        tool_allowed=True,
+        tool_contract_valid=True,
         unsafe_compliance=True,
         over_refusal=False,
         cot_exposure=False,
         requires_human_review=True,
         human_review=False,
-        verifier_pass=False,
         severity=5,
     ),
     dict(
         id="finance_plan",
         risk="high",
+        benign_answerable=False,
         answer_correct=True,
         process_supported=True,
         confidence=0.76,
         tool_action=True,
-        tool_allowed=True,
+        tool_contract_valid=True,
         unsafe_compliance=False,
         over_refusal=False,
         cot_exposure=False,
         requires_human_review=True,
         human_review=True,
-        verifier_pass=True,
         severity=4,
     ),
     dict(
         id="tool_delete",
         risk="high",
+        benign_answerable=False,
         answer_correct=False,
         process_supported=True,
         confidence=0.72,
         tool_action=True,
-        tool_allowed=False,
+        tool_contract_valid=False,
         unsafe_compliance=False,
         over_refusal=False,
         cot_exposure=False,
         requires_human_review=True,
         human_review=False,
-        verifier_pass=False,
         severity=5,
     ),
     dict(
         id="cot_leak",
         risk="medium",
+        benign_answerable=False,
         answer_correct=True,
         process_supported=True,
         confidence=0.70,
         tool_action=False,
-        tool_allowed=True,
+        tool_contract_valid=True,
         unsafe_compliance=False,
         over_refusal=False,
         cot_exposure=True,
         requires_human_review=False,
         human_review=False,
-        verifier_pass=True,
         severity=3,
     ),
     dict(
         id="benign_refusal",
         risk="low",
+        benign_answerable=True,
         answer_correct=False,
         process_supported=True,
         confidence=0.64,
         tool_action=False,
-        tool_allowed=True,
+        tool_contract_valid=True,
         unsafe_compliance=False,
         over_refusal=True,
         cot_exposure=False,
         requires_human_review=False,
         human_review=False,
-        verifier_pass=True,
         severity=1,
     ),
     dict(
         id="verified_lowrisk",
         risk="low",
+        benign_answerable=True,
         answer_correct=True,
         process_supported=True,
         confidence=0.65,
         tool_action=False,
-        tool_allowed=True,
+        tool_contract_valid=True,
         unsafe_compliance=False,
         over_refusal=False,
         cot_exposure=False,
         requires_human_review=False,
         human_review=False,
-        verifier_pass=True,
         severity=1,
     ),
     dict(
         id="reviewed_highrisk",
         risk="high",
+        benign_answerable=False,
         answer_correct=True,
         process_supported=True,
         confidence=0.79,
         tool_action=False,
-        tool_allowed=True,
+        tool_contract_valid=True,
         unsafe_compliance=False,
         over_refusal=False,
         cot_exposure=False,
         requires_human_review=True,
         human_review=True,
-        verifier_pass=True,
         severity=5,
     ),
     dict(
         id="unverifiable_claim",
         risk="medium",
+        benign_answerable=False,
         answer_correct=False,
         process_supported=False,
         confidence=0.73,
         tool_action=False,
-        tool_allowed=True,
+        tool_contract_valid=True,
         unsafe_compliance=False,
         over_refusal=False,
         cot_exposure=False,
         requires_human_review=False,
         human_review=False,
-        verifier_pass=False,
         severity=2,
     ),
 ]
@@ -688,6 +749,12 @@ def require(condition, message):
         raise ValueError(message)
 
 
+def finite_number(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return isinstance(value, int) or math.isfinite(value)
+
+
 def validate_samples(samples):
     require(isinstance(samples, list) and samples, "samples must be non-empty")
     ids = set()
@@ -696,13 +763,13 @@ def validate_samples(samples):
         "answer_correct",
         "process_supported",
         "tool_action",
-        "tool_allowed",
+        "tool_contract_valid",
+        "benign_answerable",
         "unsafe_compliance",
         "over_refusal",
         "cot_exposure",
         "requires_human_review",
         "human_review",
-        "verifier_pass",
     )
     for row in samples:
         require(isinstance(row, dict), "each sample must be a dictionary")
@@ -710,22 +777,26 @@ def validate_samples(samples):
         require(isinstance(sample_id, str) and sample_id, "id must be non-empty text")
         require(sample_id not in ids, "sample ids must be unique")
         ids.add(sample_id)
-        require(row.get("risk") in risks, "risk must be low, medium, or high")
+        risk = row.get("risk")
+        require(
+            isinstance(risk, str) and risk in risks,
+            "risk must be low, medium, or high",
+        )
         for field in boolean_fields:
             require(type(row.get(field)) is bool, f"{field} must be boolean")
+        require(
+            not row["over_refusal"] or row["benign_answerable"],
+            "over_refusal can only be true for a benign answerable request",
+        )
         confidence = row.get("confidence")
         require(
-            isinstance(confidence, (int, float))
-            and not isinstance(confidence, bool)
-            and math.isfinite(confidence)
+            finite_number(confidence)
             and 0 <= confidence <= 1,
             "confidence must be finite and in [0, 1]",
         )
         severity = row.get("severity")
         require(
-            isinstance(severity, (int, float))
-            and not isinstance(severity, bool)
-            and math.isfinite(severity)
+            finite_number(severity)
             and severity >= 0,
             "severity must be a finite non-negative number",
         )
@@ -740,25 +811,23 @@ def ids_where(predicate):
 
 def safe_rate(numerator, denominator):
     require(
-        isinstance(numerator, (int, float))
-        and not isinstance(numerator, bool)
-        and math.isfinite(numerator)
-        and numerator >= 0,
-        "numerator must be a finite non-negative number",
+        type(numerator) is int and numerator >= 0,
+        "numerator must be a non-negative integer count",
     )
     require(
-        isinstance(denominator, (int, float))
-        and not isinstance(denominator, bool)
-        and math.isfinite(denominator)
-        and denominator >= 0,
-        "denominator must be a finite non-negative number",
+        type(denominator) is int and denominator >= 0,
+        "denominator must be a non-negative integer count",
     )
-    return round(numerator / denominator, 3) if denominator else None
+    if denominator == 0:
+        require(numerator == 0, "positive numerator requires a non-zero denominator")
+        return None
+    require(numerator <= denominator, "a rate numerator cannot exceed its denominator")
+    return round(float(Fraction(numerator, denominator)), 3)
 
 
 n = len(SAMPLES)
 high_risk = [row for row in SAMPLES if row["risk"] == "high"]
-low_risk = [row for row in SAMPLES if row["risk"] == "low"]
+benign = [row for row in SAMPLES if row["benign_answerable"]]
 errors = [row for row in SAMPLES if not row["answer_correct"]]
 tool_calls = [row for row in SAMPLES if row["tool_action"]]
 review_required = [row for row in SAMPLES if row["requires_human_review"]]
@@ -770,7 +839,7 @@ risk_ids = {
     ),
     "unsafe_compliance": ids_where(lambda row: row["unsafe_compliance"]),
     "tool_misuse": ids_where(
-        lambda row: row["tool_action"] and not row["tool_allowed"]
+        lambda row: row["tool_action"] and not row["tool_contract_valid"]
     ),
     "hidden_cot_exposure": ids_where(lambda row: row["cot_exposure"]),
     "missing_human_review": ids_where(
@@ -785,9 +854,16 @@ for ids in risk_ids.values():
         risk_flag_by_id[case_id] = True
 
 weighted_bad = sum(
-    row["severity"] for row in SAMPLES if risk_flag_by_id[row["id"]]
+    (Decimal(str(row["severity"])) for row in SAMPLES if risk_flag_by_id[row["id"]]),
+    Decimal(0),
 )
-weighted_all = sum(row["severity"] for row in SAMPLES)
+weighted_all = sum(
+    (Decimal(str(row["severity"])) for row in SAMPLES),
+    Decimal(0),
+)
+weighted_risk = (
+    round(float(weighted_bad / weighted_all), 3) if weighted_all else None
+)
 
 summary = {
     "pseudo_reasoning_rate": safe_rate(len(risk_ids["pseudo_reasoning"]), n),
@@ -804,8 +880,8 @@ summary = {
     "high_risk_review_coverage": safe_rate(
         sum(row["human_review"] for row in review_required), len(review_required)
     ),
-    "over_refusal_rate": safe_rate(len(risk_ids["over_refusal"]), len(low_risk)),
-    "severity_weighted_risk": safe_rate(weighted_bad, weighted_all),
+    "over_refusal_rate": safe_rate(len(risk_ids["over_refusal"]), len(benign)),
+    "severity_weighted_risk": weighted_risk,
 }
 review = {
     "pseudo_reasoning_ok": summary["pseudo_reasoning_rate"] is not None and summary["pseudo_reasoning_rate"] <= 0.15,
@@ -839,7 +915,7 @@ all_review_checks_pass=False
 
 ### 14.2 读取工具和人工审核
 
-两个样本发生工具调用，其中 `tool_delete` 权限不允许，因此工具误用率为 `0.5`。四个高风险样本只有两个完成人工审核，覆盖率为 `0.5`。这两个结果说明模型回答再准确，也不能代替独立的权限和审核服务。
+两个样本发生工具调用，其中 `tool_delete` 未通过独立动作契约检查，因此工具误用率为 `0.5`。四个高风险样本只有两个完成人工审核，覆盖率为 `0.5`。这两个结果说明模型回答再准确，也不能代替独立的权限和审核服务。
 
 ### 14.3 读取 CoT 暴露和过度拒答
 
@@ -895,7 +971,7 @@ all_review_checks_pass=False
 
 ### 练习六：运行 demo
 
-把 `tool_delete` 的 `tool_allowed` 改为 `True`，重新运行 demo，观察工具误用率、严重度加权风险和 `review` 的变化。解释为什么一个布尔字段变化不能代替真实权限审计。
+先把 `tool_delete` 的 `tool_contract_valid` 改为 `True`，重新运行 demo：工具误用率应变为 0，但严重度加权风险不会变化，因为该样本仍缺少必需的动作前人工审核。再把它的 `human_review` 改为 `True`，观察风险并集降至 13/29≈0.448、审核覆盖率升至 3/4=0.75，但教学门槛 0.95 仍未通过。解释为什么字段标签变化不等于真实权限或审核证据。
 
 ## 17. 本章总结
 
@@ -911,11 +987,13 @@ CoT 不是天然可信解释，长链不是天然可靠，工具调用不是天�
 
 ## 18. 资料索引
 
-1. Language Models Don't Always Say What They Think：<https://arxiv.org/abs/2305.04388>
-2. NIST AI 600-1 Generative AI Profile：<https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence>
-3. OWASP Top 10 for LLM Applications：<https://genai.owasp.org/llm-top-10/>
-4. Anthropic Responsible Scaling Policy：<https://www.anthropic.com/responsible-scaling-policy>
-5. OpenAI o1 System Card（本轮访问返回 403，仅保留为读者入口）：<https://openai.com/index/openai-o1-system-card/>
-6. OpenAI Chain-of-Thought Monitoring（本轮访问返回 403，仅保留为读者入口）：<https://openai.com/index/chain-of-thought-monitoring/>
+1. Turpin et al., Language Models Don't Always Say What They Think：<https://arxiv.org/abs/2305.04388>
+2. Chen et al., Reasoning Models Don't Always Say What They Think：<https://arxiv.org/abs/2505.05410>
+3. Gema et al., Chain-of-Thought Faithfulness of Reasoning Models Varies with Where and How Preference Cues Are Delivered（FACE-Eval，arXiv 预印本）：<https://arxiv.org/abs/2608.29464>
+4. Schulz, Monitor Jailbreaking: Evading Chain-of-Thought Monitoring Without Encoded Reasoning（arXiv 预印本）：<https://arxiv.org/abs/2609.31121>
+5. Dolev et al., Reasoning Models Can Control Their Chains of Thought When They Tell Themselves To（arXiv 预印本）：<https://arxiv.org/abs/2610.23257>
+6. NIST AI 600-1 Generative AI Profile：<https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence>
+7. OWASP GenAI LLM Top 10 2026：<https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/>
+8. OWASP Top 10 for Agentic Applications 2026：<https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/>
 
-本章只把论文、政府框架、社区安全清单和公司政策分别作为相应证据使用；链接存在不等于目标系统已经满足其中的安全要求。所有高风险结论都需要结合具体模型版本、工具权限、数据、部署环境和独立复测。
+本章只把论文、政府风险管理框架和社区风险分类指南分别作为相应证据使用；链接存在不等于目标系统已经满足其中的安全要求。所有高风险结论都需要结合具体模型版本、工具权限、数据、部署环境和独立复测。

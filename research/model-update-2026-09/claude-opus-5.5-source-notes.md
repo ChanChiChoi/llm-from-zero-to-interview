@@ -19,3 +19,9 @@
 ## 证据边界
 
 官方发布页与 System Card 支持“发布方在指定 effort、harness、任务、safeguards、fallback 和成功定义下报告了结果”。Artificial Analysis 支持其第三方配置测量，DataCurve 页面支持它列出的固定 Agent 配置。它们不能互相替代，也不能证明裸模型跨任务、跨 provider 或生产流量的能力。System Card 与当前发布页的 OSWorld 版本标签存在需保留的差异；未用相同任务文件和协议逐项核对，不能断言标签差异代表何种数据集变更。
+
+## 2026-11-13 API effort 合同复核
+
+- **来源与阅读范围：** Anthropic 当前 [Claude Opus 5.5 模型页](https://platform.claude.com/docs/en/models/opus-5-5/overview)与[Thinking 文档](https://platform.claude.com/docs/en/build-with-claude/thinking)，访问日期 2026-11-13；复核 adaptive thinking、effort 配置、手工 budget 和同步输出限制。
+- **来源支持的事实：** Opus 5.5 模型页将 adaptive thinking 列为始终开启，以 `output_config.effort` 控制档位；文档说明该模型不接受 `thinking.type=disabled` 或手工 `budget_tokens`。同步请求的 `max_tokens` 是 thinking、工具调用和可见输出共享的响应上限。
+- **证据等级与边界：** `source-backed`（Anthropic 官方当前 API 文档）。这些字段说明公开请求合同，不表示固定的内部 token 预留量、模型推理算法或跨 endpoint 的统一行为；应用仍需用真实 usage 校准任务级成本与时限。

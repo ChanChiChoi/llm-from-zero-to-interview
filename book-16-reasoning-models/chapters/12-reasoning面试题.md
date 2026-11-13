@@ -51,28 +51,23 @@
 
 本章引用的 CoT、self-consistency、Training Verifiers、过程监督、Tree-of-Thought、HumanEval 和 test-time compute scaling 论文分别支撑对应方法的研究背景；它们不自动证明闭源产品的内部实现。数学和代码案例是教学构造，合同助手是工程抽象，不是某个真实部署的性能报告。
 
-安全部分沿用 NIST 生成式 AI 风险管理、OWASP LLM 应用安全分类和前一章的防御性边界。公开系统卡、官方产品说明和论文的证据等级不同，涉及未公开模型细节时只写可核对的公开行为，不把推测写成内部事实。
+回看入口按核心路径排列为：[Chain-of-Thought 第二章](02-chain-of-thought.md)、[self-consistency 与采样第三章](03-self-consistency与采样.md)、[verifier 第四章](04-verifier与reward-model.md)、[过程监督第五章](05-process-supervision.md)、[搜索第六章](06-search与tree-of-thought.md)、[推理时计算第七章](07-test-time-compute-scaling.md)、[数学训练第八章](08-数学推理训练.md)、[代码反馈第九章](09-代码推理与执行反馈.md)、[评估第十章](10-reasoning评估.md)和[安全第十一章](11-reasoning安全与局限.md)。
+
+安全部分沿用 NIST 生成式 AI 风险管理、[OWASP GenAI LLM Top 10 2026](https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/)、[OWASP Agentic Applications Top 10 2026](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/)和[第十一章的防御性边界](11-reasoning安全与局限.md)。这些框架用于组织检查，不提供目标系统的发生率或控制有效性证明。公开系统卡、官方产品说明和论文的证据等级不同，涉及未公开模型细节时只写可核对的公开行为，不把推测写成内部事实。
 
 ## 1. 统一状态：Reasoning 系统到底在处理什么
 
 ### 1.1 任务状态
 
-把合同助手在时刻 `t` 的状态写成：
+令 `x` 表示原始请求和不可变任务约束，`m_t` 表示当前证据、候选和中间计算结果，`e_t` 表示已确认的外部环境状态，`p_t` 表示当前身份和工具权限，`b_t` 表示剩余资源预算，`ell_t` 表示审计日志、错误和回滚信息。把合同助手在时刻 `t` 的完整状态写成：
 
 ~~~math
 s_t=(x,m_t,e_t,p_t,b_t,\ell_t)
 ~~~
 
-其中：
-
-- `x` 是原始请求和不可变任务约束；
-- `m_t` 是当前证据、候选和中间计算结果；
-- `e_t` 是已确认的外部环境状态，例如合同版本和审批状态；
-- `p_t` 是当前身份和工具权限；
-- `b_t` 是剩余 token、调用、延迟和费用预算；
-- `ell_t` 是审计日志、错误和回滚信息。
-
 这里的 `b_t` 应由有限的非负资源余额组成，例如剩余 token、调用次数、毫秒和费用；余额耗尽时不能继续假设还有预算。`x` 中的授权、禁止事项和成功条件应是不可变字段，模型只能提出对 `m_t` 的候选更新，不能自行改写 `x`、`e_t` 或 `p_t`。`ell_t` 可以包含脱敏后的事件引用，但不能为了方便重放而无期限保存所有敏感原文。
+
+例如第 7 步读取付款前合同：`x` 规定“只读，审批不足时不得付款”；`m_7` 已有待核对的金额 claim；`e_7` 记着合同版本 `v4`、审批状态为 pending；`p_7` 只有只读权限；`b_7` 还剩 1,200 个生成 token、3 次工具调用、2,000 毫秒和 0 元额外费用；`ell_7` 只保存脱敏事件 ID。这个状态让系统能检查版本、权限和预算，而不把它们藏在一段自然语言里。
 
 如果状态只保存模型最近一段文字，就会丢掉版本、权限和预算。下一步动作可能因此基于旧合同、旧测试或已撤销权限。
 
@@ -82,26 +77,32 @@ s_t=(x,m_t,e_t,p_t,b_t,\ell_t)
 
 状态转移可以抽象为：
 
+令 `F` 是由宿主系统实施的状态转移函数，`a_t` 是第 `t` 步提出的动作，`o_t` 是工具或环境返回的观察，则：
+
 ~~~math
 s_{t+1}=F(s_t,a_t,o_t)
 ~~~
 
 `F` 不是模型自己决定的函数。权限、日志、资源限制和回滚都应由系统实现；模型只能在允许的动作空间中提出下一步。
 
+具体地，若 `a_7=read_page(3)`，而 `o_7` 返回当前 `v4` 合同第 3 页的金额 `1,000 元`，系统验证返回版本后，得到 `m_8=m_7∪{金额 claim→第 3 页}`，`e_8` 仍是 `v4/pending`，工具余额从 3 次减为 2 次。若观察来自旧版本，状态转移应拒绝把它加入当前证据，而不是让模型自行判断版本可以忽略。
+
 ### 1.3 成功谓词
 
-合同助手的成功不是单一数字，而是一个合取条件：
+令 `AnswerOK`、`EvidenceOK`、`VersionOK`、`PermissionOK`、`ReviewOK` 分别表示答案正确、证据支持、版本有效、权限允许和要求的审核已完成；每项都取布尔值。合同助手的成功不是单一数字，而是这些检查的合取：
 
 ~~~math
-\operatorname{Success}=
-\operatorname{AnswerOK}
-\land\operatorname{EvidenceOK}
-\land\operatorname{VersionOK}
-\land\operatorname{PermissionOK}
-\land\operatorname{ReviewOK}
+\mathrm{Success}=
+\mathrm{AnswerOK}
+\land\mathrm{EvidenceOK}
+\land\mathrm{VersionOK}
+\land\mathrm{PermissionOK}
+\land\mathrm{ReviewOK}
 ~~~
 
 如果任务只是低风险只读计算，`ReviewOK` 可以由系统策略设为不需要人工；如果任务会改变付款状态，则需要显式确认。成功谓词必须根据任务风险定义，不能用一个通用布尔值覆盖所有场景。
+
+例如只读报价场景的五项值为 `(1,1,1,1,1)`，合取结果为真；付款动作的审批仍为 pending 时，`ReviewOK=0`，即使答案、证据、版本和当前权限检查全为 1，成功仍是 `1∧1∧1∧1∧0=0`。
 
 ## 2. Generator：候选从哪里来
 
@@ -109,15 +110,17 @@ s_{t+1}=F(s_t,a_t,o_t)
 
 Generator 把任务状态转换成文本答案、结构化动作、代码、数学步骤或工具计划。一次生成成本低、延迟短，但容易受单次采样错误影响；多候选生成可以提高正确候选出现的机会，却增加 token、选择和执行成本。
 
-候选池可以表示为：
+令 `p_{ij}` 表示任务 `i` 的第 `j` 个候选，`K_i` 是该任务生成的候选数。候选池可以表示为：
 
 ~~~math
 P_i=\{p_{i1},p_{i2},\ldots,p_{iK_i}\}
 ~~~
 
-`K_i` 是第 `i` 个任务的候选数。候选不仅是不同答案文本，也可以是不同证据路径、不同代码实现、不同搜索分支或不同工具计划。
+候选不仅是不同答案文本，也可以是不同证据路径、不同代码实现、不同搜索分支或不同工具计划。
 
 对需要聚合的任务，`K_i` 应是正整数；候选集合为空时，不能把“没有生成候选”和“生成了候选但全部错误”混成一个准确率。候选还应有稳定 ID、生成配置和所属任务 ID，便于区分重复采样与真正不同的路径。
+
+例如任务 `i=2` 生成 `P_2={p_{21},p_{22},p_{23}}`，因此 `K_2=3`；三个候选可分别是不同算式、不同证据页和不同工具计划，候选 ID 应继续关联到同一个任务，而不能因为文本相同就合并掉不同的证据来源。
 
 ### 2.2 候选多样性
 
@@ -127,30 +130,34 @@ P_i=\{p_{i1},p_{i2},\ldots,p_{iK_i}\}
 
 ### 2.3 Self-consistency
 
-当任务有明确答案等价类时，可以对多个候选做规范化投票：
+当任务有明确答案等价类时，令 `\hat y_j` 表示第 `j` 个候选的答案，`y` 表示一个规范化答案类，`norm` 把候选映射到可比较的答案类，`\mathbb{1}[condition]` 在条件成立时取 1、否则取 0，`K>0` 为候选数；可以对多个候选做规范化投票：
 
 ~~~math
 \hat y=
 \arg\max_y\sum_{j=1}^{K}
-\mathbb{1}[\operatorname{norm}(\hat y_j)=y]
+\mathbb{1}[\mathrm{norm}(\hat y_j)=y]
 ~~~
 
-这里要求 `K>0`，`norm` 必须把输出映射到有限且可比较的答案等价类；如果存在并列最高票，应预先规定固定的 tie-break 规则。`K` 越大只说明观察到的候选更多，不自动说明候选相互独立，也不说明多数答案是真实答案。
+`norm` 必须把输出映射到有限且可比较的答案等价类；如果存在并列最高票，应预先规定固定的 tie-break 规则。`K` 越大只说明观察到的候选更多，不自动说明候选相互独立，也不说明多数答案是真实答案。
 
 `norm` 把等价表达映射到同一类。投票依赖候选错误不完全相关；如果模型在同一错误模板上重复采样，多数票只会更稳定地选择错误。
 
+例如四个候选经 `norm` 后为 `{1,040, 1,040, 1,040, 1,080}`，票数分别是 3 和 1，self-consistency 选择 `1,040`；它只是候选池的多数答案。若两类各 2 票，系统必须使用预先声明的 tie-break 规则，不能临时挑更符合期待的结果。
+
 ### 2.4 pass@k 和最终选择
 
-如果 `n` 个候选中有 `c` 个通过独立 oracle，候选池的无放回 pass@k 估计为：
+如果 `n` 个候选中有 `c` 个通过独立 oracle，且 `k` 表示从该池中无放回抽取的候选数，候选池的 pass@k 估计为：
 
 ~~~math
-\operatorname{pass@}k=
+\mathrm{pass@k}=
 1-\frac{\binom{n-c}{k}}{\binom{n}{k}}
 ~~~
 
 该估计要求 `n` 是正整数、`0\le c\le n`，并且 `1\le k\le n`；`c` 是同一候选池中通过独立 oracle 的候选数。`c=0` 时结果为 0；当 `n-c<k` 时组合数分子按 0 处理，结果为 1。候选池为空或 `k` 超出 `n` 时，pass@k 未定义，不能返回一个看似正常的 0。
 
 它表示候选池中找到正确候选的潜力，不表示最终选择一定正确。最终系统还要报告 verifier 选择后的准确率、选择失败案例和候选存在但未被选中的比例。
+
+例如 `n=5` 个候选中 `c=2` 个通过 oracle，抽看 `k=2` 个时：`pass@2=1-\binom{3}{2}/\binom{5}{2}=1-3/10=0.70`。这表示两次抽取至少遇到一个正确候选的池内概率估计，不表示最终 verifier 一定选中正确解。
 
 ### 2.5 生成失败的诊断
 
@@ -166,26 +173,28 @@ P_i=\{p_{i1},p_{i2},\ldots,p_{iK_i}\}
 
 ### 3.2 Pairwise reward model
 
-如果 `r_w` 是偏好候选的分数，`r_l` 是较差候选的分数，pairwise 训练损失可以写成：
+如果 `r_w` 是偏好候选的分数，`r_l` 是较差候选的分数，且 `\sigma(z)=1/(1+e^{-z})` 是 logistic sigmoid，pairwise 训练损失可以写成：
 
 ~~~math
 L_{\mathrm{pair}}=-\log\sigma(r_w-r_l)
 ~~~
 
-它训练排序关系，不保证分数具有概率含义。排序器可能偏好长度、格式和自信语气，因此需要 hard negative、独立 oracle 和校准评估。
+取 `r_w=2`、`r_l=1`，则 `\sigma(1)≈0.731`，损失为 `-\log(0.731)≈0.313`；若两者同分，损失是 `-\log(0.5)≈0.693`。它训练排序关系，不保证分数具有概率含义。排序器可能偏好长度、格式和自信语气，因此需要 hard negative、独立 oracle 和校准评估。
 
 ### 3.3 过程监督
 
-若 `q_ij` 是第 `i` 条轨迹第 `j` 步的正确标签，`p_ij` 是过程模型预测，可以使用：
+若 `q_{ij}\in\{0,1\}` 是第 `i` 条轨迹第 `j` 步的正确标签，`p_{ij}\in(0,1)` 是过程模型预测，`M>0` 是所有有效步骤的数量，可以使用：
 
 ~~~math
 L_{\mathrm{proc}}=-\frac{1}{M}\sum_{i,j}
 \left[q_{ij}\log p_{ij}+(1-q_{ij})\log(1-p_{ij})\right]
 ~~~
 
-`M` 是有效步骤数。后续步骤可能只是第一处错误的连锁结果，标注时应区分第一处错误、受影响步骤和真正独立的新错误。
+后续步骤可能只是第一处错误的连锁结果，标注时应区分第一处错误、受影响步骤和真正独立的新错误。
 
 这里要求 `M>0`，`q_{ij}\in\{0,1\}`，而 `p_{ij}` 是严格位于 `(0,1)` 的有限概率；实际实现通常需要对模型输出做裁剪以避免 `\log 0`。没有有效步骤时，过程损失未定义，不能把空轨迹当成全错或全对。
+
+例取三步标签 `q=(1,1,0)`、预测概率 `p=(0.9,0.8,0.2)`，则 `L_{proc}=[-\log0.9-\log0.8-\log(1-0.2)]/3≈(0.105+0.223+0.223)/3≈0.184`。第三步标签为 0，所以代入的是 `-\log(1-p_3)`，不能误算成 `-\log p_3`。
 
 ### 3.4 Verifier 的校准
 
@@ -205,7 +214,7 @@ Outcome supervision 只告诉系统最终答案是否正确，信号简单但稀
 
 ### 4.2 第一处错误
 
-真实第一处错误位置定义为：
+令 `q_{ij}` 是以 1 开始编号的步骤正确性标签；若存在错误，轨迹 `i` 的第一处错误位置定义为：
 
 ~~~math
 e_i^\star=\min\{j:q_{ij}=0\}
@@ -214,6 +223,8 @@ e_i^\star=\min\{j:q_{ij}=0\}
 这个最小值只有在错误位置集合非空时才存在。若整条轨迹没有错误，应使用 `None` 或 `no_error` 状态；正文公式的步骤编号从 1 开始，代码实现若使用 0-based 索引，必须显式注明转换。
 
 第一处错误用于修复和搜索剪枝，但它不是所有任务都能唯一标注。证明题可能有多条路径，代码中的局部错误可能来自更早的规格误读，因此需要保存标注分歧和证据。
+
+若四步标签为 `q=(1,1,0,0)`，错误位置集合是 `{3,4}`，所以 `e^\star=\min\{3,4\}=3`；第 4 步可能只是第 3 步的后果。若标签为 `(1,1,1,1)`，集合为空，应记为 `None/no_error`，不能把不存在的最小值写成 0。
 
 ### 4.3 步骤粒度
 
@@ -239,13 +250,15 @@ Beam search 按层保留有限候选，成本容易控制，却可能过早删�
 
 ### 5.4 MCTS 和探索利用
 
-MCTS 使用访问次数和价值估计平衡探索与利用，常见 UCT 形式为：
+MCTS 使用访问次数和价值估计平衡探索与利用。令 `Q(v)` 为节点价值，`N_p` 和 `N_v` 分别为父节点和当前节点的访问次数，`c` 为非负探索系数，常见 UCT 形式为：
 
 ~~~math
 U(v)=Q(v)+c\sqrt{\frac{\log(N_p+1)}{N_v+1}}
 ~~~
 
-`Q(v)` 是节点价值，`N_p` 是父节点访问数，`N_v` 是当前节点访问数，`c` 控制探索。语言任务的难点不是记住公式，而是如何定义状态、模拟、回传价值和可靠的终止奖励。
+语言任务的难点不是记住公式，而是如何定义状态、模拟、回传价值和可靠的终止奖励。
+
+取 `Q(v)=0.6`、`N_p=10`、`N_v=3`、`c=1`，则 `U(v)=0.6+\sqrt{\ln(11)/4}≈0.6+0.774=1.374`。探索项会提高访问较少节点的分数；它不是正确性的概率，也不能替代独立终止验证。
 
 ### 5.5 正确路径误剪
 
@@ -259,35 +272,38 @@ U(v)=Q(v)+c\sqrt{\frac{\log(N_p+1)}{N_v+1}}
 
 ### 6.1 预算向量
 
-可以用下面的向量记录一次请求的推理时资源：
+令 `K_i`、`T_i`、`D_i`、`J_i`、`U_i` 和 `L_i` 分别表示候选数、生成 token 数、搜索节点数、verifier 调用数、工具调用数和延迟。可以用下面的向量记录一次请求的推理时资源：
 
 ~~~math
 b_i=(K_i,T_i,D_i,J_i,U_i,L_i)
 ~~~
 
-`K_i` 是候选数，`T_i` 是生成 token，`D_i` 是搜索深度或节点数，`J_i` 是 verifier 调用，`U_i` 是工具调用，`L_i` 是延迟或时间预算。这里使用 `J_i`，避免与前文的变体集合 `V_i` 混淆。
+`D_i` 在本章按搜索节点计数；延迟的单位固定为秒，不能在同一账本里混用毫秒和秒。这里使用 `J_i`，避免与前文的变体集合 `V_i` 混淆。
 
 在预算比较中，计数通常取非负整数，token 和延迟可以取有限非负数；如果系统用“未知”或“未记录”，应保留缺失状态，不能悄悄当作 0。不同策略必须采用同一计量口径，例如是否包含重试、排队、人工复核和工具返回 token。
 
+例如一个请求使用 `K=3` 个候选、生成 `T=1,200` 个 token、搜索 `D=5` 个节点、调用 verifier `J=4` 次、工具 `U=1` 次，端到端延迟 `L=2` 秒，则账本记为 `b=(3,1200,5,4,1,2)`。若未记录工具耗时，不能把 `L` 误读成工具调用耗时之和。
+
 ### 6.2 成本账本
 
-教学成本模型为：
+令 `c_{tok}`、`c_{cand}`、`c_{node}`、`c_{ver}`、`c_{tool}`、`c_{lat}` 是把各资源项换算成抽象成本的非负系数。教学成本模型为：
 
 ~~~math
 C_i=c_{\mathrm{tok}}T_i
 +c_{\mathrm{cand}}K_i
++c_{\mathrm{node}}D_i
 +c_{\mathrm{ver}}J_i
 +c_{\mathrm{tool}}U_i
 +c_{\mathrm{lat}}L_i
 ~~~
 
-这些 `c` 是换算系数，不是跨系统通用价格。产品报告应分别保存 token、GPU 秒、工具费用、人工成本和延迟，必要时再给出统一的单位成功成本。
+这些 `c` 是换算系数，不是跨系统通用价格。产品报告应分别保存 token、GPU 秒、工具费用、人工成本和延迟，必要时再给出统一的单位成功成本。教学时令 `c_tok=0.001`、`c_cand=0.10`、`c_node=0.03`、`c_ver=0.02`、`c_tool=0.25`、`c_lat=0.05`，并使用上一节的 `T=1200,K=3,D=5,J=4,U=1,L=2`，则 `C=1.20+0.30+0.15+0.08+0.25+0.10=2.08` 个抽象成本单位。这些权重只为展示记账；实际标定时不能把已计入 token 的成本再次重复算进候选项。
 
 若要把 `C_i` 用于排序或单位成功成本，资源量和系数都应是有限非负数；允许某一项权重为 0，但负权重会让增加资源反而降低账面成本。统一成本只在换算系数经过说明和校准后才有比较意义。
 
 ### 6.3 边际收益
 
-如果预算从 `B_1` 增加到 `B_2`，质量—成本边际收益可写为：
+如果预算从 `B_1` 增加到 `B_2`，令 `A(B)` 为预算 `B` 下的任务准确率，`C(B)` 为相同任务集上的成本，则质量—成本边际收益可写为：
 
 ~~~math
 g(B_1,B_2)=
@@ -297,6 +313,8 @@ g(B_1,B_2)=
 该式要求两个预算点有效，且 `C(B_2)-C(B_1)\ne0`；通常还要说明是否要求 `B_2>B_1`。成本没有增加时，不能除以 0，应分别报告质量变化和成本变化。若 `A(B)` 的评估样本、超时处理或安全失败定义在两个预算点不同，边际收益同时混入了评估规则变化。
 
 边际收益递减不表示高预算没有价值。高风险、难题或可验证任务可能值得高预算；简单请求则可能只需要短路径。路由器需要同时考虑价值、风险和延迟。
+
+例如预算点 1 的准确率 `A_1=0.60`、成本 `C_1=2`，预算点 2 的准确率 `A_2=0.75`、成本 `C_2=3`，则 `g=(0.75-0.60)/(3-2)=0.15`，即每增加 1 个抽象成本单位，准确率增加 0.15。只有在两点使用同一任务集、成功定义和成本口径时，这个差值才可比较。
 
 ### 6.4 动态路由
 
@@ -336,7 +354,7 @@ g(B_1,B_2)=
 
 ### 8.3 配对提升
 
-在同一批题上比较 baseline 和 candidate，第 `i` 个样本差值为：
+在同一批 `N>0` 个题上比较 baseline 和 candidate；令 `y_i^{new}`、`y_i^{base}` 分别为两系统按同一 oracle 得到的 0/1 正确标签，`\mathbb{1}[condition]` 在条件成立时为 1、否则为 0，单题差值为：
 
 ~~~math
 d_i=\mathbb{1}[y_i^{\mathrm{new}}\text{ correct}]
@@ -347,16 +365,20 @@ d_i=\mathbb{1}[y_i^{\mathrm{new}}\text{ correct}]
 
 这里要求 `N>0`，且两个系统在同一批任务、同一 oracle 和同一成功判定下形成一一配对。超时、拒答和执行错误应先按任务契约编码，不能对 baseline 和 candidate 使用不同的缺失值处理。
 
+例如四题的新旧系统正确性依次为 `(1,0)`、`(0,1)`、`(1,1)`、`(0,0)`，则 `d=(1,-1,0,0)`，平均配对提升为 `(1-1+0+0)/4=0`。平均分没有变化，但第一题是修复、第二题是回退；只报总分会漏掉这两种变化。
+
 ### 8.4 Bootstrap 和样本量
 
-从任务或题目族重采样差值可以得到提升区间：
+从任务或题目族重采样配对差值，得到 `R>0` 个 bootstrap 估计 `\Delta^*`；令 `0<\alpha<1` 为尾部概率、`q_p` 为已声明分位数规则下的 `p` 分位数，可以得到提升区间：
 
 ~~~math
-\operatorname{CI}_{1-\alpha}=
+\mathrm{CI}_{1-\alpha}=
 \left[q_{\alpha/2}(\Delta^\ast),q_{1-\alpha/2}(\Delta^\ast)\right]
 ~~~
 
 差值集合必须非空，重采样轮数 `R` 是正整数，且 `0<\alpha<1`。`q` 的分位数实现要固定，例如使用最近秩或线性插值；小样本下不同约定可能产生不同端点。若题目按仓库、模板或题目族相关，应按组重采样。
+
+例如有 `R=100` 次重采样，排序后的第 5 和第 95 个提升值分别为 `0.01` 和 `0.04`；取 `\alpha=0.10`、最近秩规则，则两端秩是 `\lceil0.05\times100\rceil=5` 与 `\lceil0.95\times100\rceil=95`，所以 90% 区间为 `[0.01,0.04]`。这是排序端点的教学算例，不是本书系统的实验结果。
 
 小样本区间很宽是正常现象。推理时计算曲线和安全稀有事件尤其需要足够任务数、多个随机种子和按族重采样。
 
@@ -452,9 +474,13 @@ d_i=\mathbb{1}[y_i^{\mathrm{new}}\text{ correct}]
 
 下面的 0 依赖 demo 使用六个教学任务，分别记录候选池是否存在正确解、最终选择、过程、变体、安全、成本和风险。它不调用模型、工具或外部数据，目的是演示综合报告如何同时暴露能力和系统边界。
 
-为了让这个综合表可以复核，任务 schema 约定如下：`id` 必须唯一，能力和安全字段必须是布尔值，`cost` 是有限非负数，`risk` 为 `None` 或固定的风险类别。若候选池没有正确解，最终选择不可能被标记为正确；这条约束只是教学数据的一致性检查，真实系统还需要独立 oracle 重新验证。
+为了让这个综合表可以复核，任务 schema 约定如下：`id` 必须唯一，能力和安全字段必须是布尔值，`cost` 是有限非负数，`risk` 为 `None` 或与记录问题相符的主要风险类别。若候选池没有正确解，最终选择不可能被标记为正确；若动作不安全，必须记为 `permission_failure`。这些只是教学数据的一致性检查，真实系统还需要独立 oracle 和权限服务重新验证。
+
+**代码状态：已验证（2026-11-13，Python 3.12.9；仅标准库）**
 
 ~~~python
+from decimal import Decimal, InvalidOperation
+from fractions import Fraction
 import math
 
 
@@ -527,6 +553,18 @@ def require(condition, message):
         raise ValueError(message)
 
 
+def finite_nonnegative_number(value):
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return value >= 0
+    if isinstance(value, float):
+        return math.isfinite(value) and value >= 0
+    if isinstance(value, Decimal):
+        return value.is_finite() and value >= 0
+    return False
+
+
 def validate_tasks(tasks):
     require(isinstance(tasks, list) and tasks, "tasks must be a non-empty list")
     ids = set()
@@ -546,19 +584,33 @@ def validate_tasks(tasks):
         ids.add(task_id)
         for field in boolean_fields:
             require(type(task.get(field)) is bool, f"{field} must be boolean")
-        require(task.get("risk") in allowed_risks, "unknown risk category")
+        risk = task.get("risk")
+        require(
+            risk is None or isinstance(risk, str) and risk in allowed_risks,
+            "unknown risk category",
+        )
         cost = task.get("cost")
         require(
-            isinstance(cost, (int, float))
-            and not isinstance(cost, bool)
-            and math.isfinite(cost)
-            and cost >= 0,
+            isinstance(cost, (int, float)) and finite_nonnegative_number(cost),
             "cost must be a finite non-negative number",
         )
         require(
             not task["selected_correct"] or task["candidate_pool_has_correct"],
             "a correct selection requires a correct candidate in the pool",
         )
+        require(
+            task["safe_action"] or risk == "permission_failure",
+            "an unsafe action requires a permission_failure label",
+        )
+        if risk == "process_failure":
+            require(not task["process_correct"], "process_failure conflicts with process_correct")
+        elif risk == "permission_failure":
+            require(not task["safe_action"], "permission_failure conflicts with safe_action")
+        elif risk == "selection_failure":
+            require(
+                task["candidate_pool_has_correct"] and not task["selected_correct"],
+                "selection_failure requires a correct candidate that was not selected",
+            )
 
 
 validate_tasks(TASKS)
@@ -566,26 +618,21 @@ validate_tasks(TASKS)
 
 def ratio(numerator, denominator):
     require(
-        isinstance(numerator, (int, float))
-        and not isinstance(numerator, bool)
-        and math.isfinite(numerator)
-        and numerator >= 0,
-        "numerator must be a finite non-negative number",
+        type(numerator) is int and numerator >= 0,
+        "numerator must be a non-negative integer count",
     )
     require(
-        isinstance(denominator, (int, float))
-        and not isinstance(denominator, bool)
-        and math.isfinite(denominator)
-        and denominator >= 0,
-        "denominator must be a finite non-negative number",
+        type(denominator) is int and denominator >= 0,
+        "denominator must be a non-negative integer count",
     )
-    return round(numerator / denominator, 3) if denominator else None
+    require(numerator <= denominator, "numerator cannot exceed denominator")
+    return round(float(Fraction(numerator, denominator)), 3) if denominator else None
 
 
 def accuracy(field):
     require(
-        field
-        in {
+        isinstance(field, str)
+        and field in {
             "candidate_pool_has_correct",
             "selected_correct",
             "process_correct",
@@ -599,14 +646,18 @@ def accuracy(field):
 
 def cost_per_success(total_cost, successes):
     require(
-        isinstance(total_cost, (int, float))
-        and not isinstance(total_cost, bool)
-        and math.isfinite(total_cost)
-        and total_cost >= 0,
+        finite_nonnegative_number(total_cost),
         "total cost must be finite and non-negative",
     )
     require(type(successes) is int and successes >= 0, "successes must be a non-negative integer")
-    return round(total_cost / successes, 3) if successes else None
+    if not successes:
+        return None
+    try:
+        result = float(Decimal(str(total_cost)) / Decimal(successes))
+    except (InvalidOperation, OverflowError) as error:
+        raise ValueError("cost per success could not be represented") from error
+    require(math.isfinite(result), "cost per success must fit in a finite float")
+    return round(result, 3)
 
 
 candidate_pool_coverage = accuracy("candidate_pool_has_correct")
@@ -615,7 +666,8 @@ process_accuracy = accuracy("process_correct")
 variant_accuracy = accuracy("variant_correct")
 safe_action_rate = accuracy("safe_action")
 correct_count = sum(row["selected_correct"] for row in TASKS)
-total_cost = sum(row["cost"] for row in TASKS)
+total_cost = sum((Decimal(str(row["cost"])) for row in TASKS), Decimal("0"))
+cost_per_correct = cost_per_success(total_cost, correct_count)
 risk_ids = [row["id"] for row in TASKS if row["risk"] is not None]
 rescue_candidates = [
     row["id"]
@@ -628,7 +680,7 @@ review = {
     "process_ok": process_accuracy is not None and process_accuracy >= 0.75,
     "variant_ok": variant_accuracy is not None and variant_accuracy >= 0.7,
     "safe_action_ok": safe_action_rate is not None and safe_action_rate == 1.0,
-    "cost_ok": cost_per_success(total_cost, correct_count) is not None and cost_per_success(total_cost, correct_count) <= 400,
+    "cost_ok": cost_per_correct is not None and cost_per_correct <= 400,
 }
 summary = {
     "candidate_pool_coverage": candidate_pool_coverage,
@@ -636,7 +688,7 @@ summary = {
     "process_accuracy": process_accuracy,
     "variant_accuracy": variant_accuracy,
     "safe_action_rate": safe_action_rate,
-    "cost_per_correct": cost_per_success(total_cost, correct_count),
+    "cost_per_correct": cost_per_correct,
 }
 
 print(f"summary={summary}")
@@ -718,7 +770,7 @@ all_review_checks_pass=False
 
 ### 练习六：运行综合 demo
 
-把 `simple_regression` 的 `selected_correct` 改为 `True`，重新运行 demo，观察选择准确率、单位成本和 `review` 变化。解释为什么修复选择器不代表过程和变体能力自动提高。
+把 `simple_regression` 的 `selected_correct` 改为 `True`，并把其主要风险标签改为 `None`，重新运行 demo：选择准确率变为 `0.833`，单位正确成本降至 `336.0`，`risk_ids` 不再包含该任务；过程准确率仍为 `0.667`、变体准确率仍为 `0.5`、安全动作率仍为 `0.833`，所以整体验收仍失败。解释为什么修复选择器不代表过程、变体和安全能力自动提高。
 
 ## 15. 本章总结
 
@@ -738,6 +790,7 @@ Reasoning 系统不是一个会输出长答案的模型，而是一组围绕状�
 6. HumanEval：<https://arxiv.org/abs/2107.03374>
 7. Scaling LLM Test-Time Compute Optimally：<https://arxiv.org/abs/2408.03314>
 8. NIST AI 600-1 Generative AI Profile：<https://www.nist.gov/publications/artificial-intelligence-risk-management-framework-generative-artificial-intelligence>
-9. OWASP Top 10 for LLM Applications：<https://genai.owasp.org/llm-top-10/>
+9. OWASP GenAI LLM Top 10 2026：<https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/>
+10. OWASP Top 10 for Agentic Applications 2026：<https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/>
 
 本章将论文机制、公开评估、官方治理资料、教学案例和目标系统实测区分开来。综合复习只能帮助建立系统推理框架，不能替代针对具体模型、数据、工具权限和部署环境的独立验证。
