@@ -114,5 +114,5 @@
 - **已完成：** 对照《BOOK_SERIES.md》《ROADMAP.md》及第十五、十七册定位；建立契约；审读现有简介和目录；按 20 个章节文件名/标题整理章节地图；围绕 RLVR、TTS、provider thinking/state 和长任务 verifier 完成定向册级扫描；决定保留现有编号。第 1—20 章已完成通读、章级扫描和精修，细节见[第一章审计](chapter-01-audit.md)、[第二章审计](chapter-02-audit.md)、[第三章审计](chapter-03-audit.md)、[第四章审计](chapter-04-audit.md)、[第五章审计](chapter-05-audit.md)、[第六章审计](chapter-06-audit.md)、[第七章审计](chapter-07-audit.md)、[第八章审计](chapter-08-audit.md)、[第九章审计](chapter-09-audit.md)、[第十章审计](chapter-10-audit.md)、[第十一章审计](chapter-11-audit.md)、[第十二章审计](chapter-12-audit.md)、[第十三章审计](chapter-13-audit.md)、[第十四章审计](chapter-14-audit.md)、[第十五章审计](chapter-15-audit.md)、[第十六章审计](chapter-16-audit.md)、[第十七章审计](chapter-17-audit.md)、[第十八章审计](chapter-18-audit.md)、[第十九章审计](chapter-19-audit.md)和[第二十章审计](chapter-20-audit.md)。
 - **已同步：** 简介和目录路径已更新；两份读者导航中的全部本地链接存在，目录列出 20/20 章。
 - **第二十章审计：** 逐章扫描、篇幅、数例、代码、公式、证据、链接、视觉与配套状态见[第二十章审计](chapter-20-audit.md)；GLM-5.3 发布方、榜单、固定源码和本地 toy 的来源证据见[GLM-5.3 来源记录](../../research/model-update-2026-09/glm-5.3-source-notes.md)。
-- **待完成：** 第十六册整册连续复读已覆盖第 1—10 章；本轮选择先读完第 1—12 章、再回看第 17 章的路径，随后复读第 13—16、18—20 章专题。完成后核查跨章依赖、重复、术语和前后交接并执行最终门禁。阶段记录见[整册连续复读记录](continuous-read.md)。
-- **下一步：** 从第 11 章《Reasoning 安全与局限》继续连续复读；整册门禁完成后按全套书进度队列进入下一册。PDF 暂不更新，审计记录不回填 `plan.md`。
+- **待完成：** 第十六册整册连续复读已覆盖第 1—18 章并回看第 17 章；随后复读第 19—20 章专题。完成后核查跨章依赖、重复、术语和前后交接并执行最终门禁。阶段记录见[整册连续复读记录](continuous-read.md)。
+- **下一步：** 从第 19 章《Interleaved Thinking 与工具协议》继续连续复读；整册门禁完成后按全套书进度队列进入下一册。PDF 暂不更新，审计记录不回填 `plan.md`。

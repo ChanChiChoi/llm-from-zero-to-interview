@@ -67,7 +67,7 @@ T_{\mathrm{parallel}}
 
 例如三个独立 worker 分别需要 4、6、5 秒，η=0.8，协调 1 秒、合并 1 秒、验证 2 秒。关键 worker 的有效延迟是 6/0.8=7.5 秒，再加 1+1+2 秒，得到 T_parallel≈11.5 秒。若同样三项工作串行执行，则工作本身要 4+6+5=15 秒，再加 4 秒协调/合并/验证，总计 19 秒。这个合成算例显示并行减少了关键路径延迟，但并未减少 15 秒的 worker 工作量，也未说明实际系统的 token 或货币成本。
 
-即使所有可并行工作都能理想缩短，总加速仍受串行部分限制。令 S(n) 为 n 个 worker 下的理想加速比，W_s 为串行工作量、W_p 为可并行工作量；两种工作量使用同一单位，n 为正整数且 W_s+W_p>0：
+即使所有可并行工作都能理想缩短，总加速仍受串行部分限制。设 \(W_s\) 和 \(W_p\) 分别是串行与可并行的有限非负工作量，两者使用同一单位且 \(W_s+W_p>0\)；\(n\) 为正整数，\(S(n)\) 表示使用 \(n\) 个 worker 相对串行执行的加速比。Amdahl 上界为：
 
 ~~~math
 S(n)\le\frac{W_s+W_p}{W_s+W_p/n}
@@ -178,15 +178,15 @@ worker 的运行状态可以包括 queued、running、succeeded、failed、cance
 
 这里的 ultra 不是一个精确的模型类别，而是把更多候选、工具观察、验证或协调预算投入一次任务。它可以通过更多采样、搜索、verifier、工具循环或多个 Agent 实现。共同点是：任务结束前，系统允许花费更多资源来降低失败概率。跨策略的质量—成本比较见[第七章](07-test-time-compute-scaling.md)，请求预算的计量口径见[第十三章](13-reasoning-effort与推理预算.md)；本章专注多条推理路径的并行组织、协调和验证。
 
-若所有预算已经换算到同一个成本单位，可以写成：
+设 \(b_i\) 是第 \(i\) 个 worker 的预算，\(b_v\) 是验证预算，\(b_m\) 是合并与恢复预算，\(B\) 是总预算，\(n\) 为正整数。所有值均是同一账本中的有限非负数。若所有预算已经换算到同一个成本单位，则总额约束为：
 
 ~~~math
 \sum_{i=1}^{n}b_i+b_v+b_m\le B
 ~~~
 
-其中 b_i 是第 i 个 worker 的预算，b_v 是验证预算，b_m 是合并与恢复预算，B 是总预算，n 为正整数。所有值必须是同一账本中的有限非负数。例如，教学账本给三个 worker 分配 25、20、15 credits，验证 20 credits，合并与恢复 5 credits，总用量是 25+20+15+20+5=85 credits；若总额 B=100 credits，则尚余 15 credits。credits 是这里构造的统一单位，不代表某个供应商的价格。
+该式把所有 worker、验证、合并与恢复预算相加，并限制在总额 \(B\) 内。例如，教学账本给三个 worker 分配 25、20、15 credits，验证 20 credits，合并与恢复 5 credits，总用量是 25+20+15+20+5=85 credits；若总额 \(B=100\) credits，则尚余 15 credits。credits 是这里构造的统一单位，不代表某个供应商的价格。
 
-不能把 token、毫秒和副作用次数未经换算直接相加。工程上更准确的表示是按单位逐项限制的预算向量：
+不能把 token、毫秒和副作用次数未经换算直接相加。设 \(B_{\mathrm{model}}\)、\(B_{\mathrm{tool}}\)、\(B_{\mathrm{verify}}\)、\(B_{\mathrm{time}}\) 和 \(B_{\mathrm{side}}\) 分别表示模型 token、工具调用、验证调用、时间和副作用的预算上限；各分量均为有限非负数，并保留自己的单位。工程上应按单位逐项限制：
 
 ~~~math
 \mathbf{B}=(B_{\mathrm{model}},B_{\mathrm{tool}},B_{\mathrm{verify}},B_{\mathrm{time}},B_{\mathrm{side}})
@@ -198,7 +198,7 @@ worker 的运行状态可以包括 queued、running、succeeded、failed、cance
 
 ## 16.12 成本、单位成功成本与边际收益
 
-多 Agent 的成本账本至少应包括模型、工具、通信、合并、验证和人工；求和下标 i 遍历批次中发生的相应调用或成本项。以下各项要使用同一个货币或归一化成本单位，不能把未测量的成本默认为零：
+多 Agent 的成本账本至少应包括模型、工具、通信、合并、验证和人工；求和下标 \(i\) 遍历批次中发生的相应调用或成本项。公式中的各项都是有限非负成本，使用同一个货币或归一化成本单位；不能把未测量的成本默认为零：
 
 ~~~math
 C_{\mathrm{total}}
@@ -212,15 +212,15 @@ C_{\mathrm{total}}
 
 例如一个构造的批次中，模型 64 credits、工具 18、通信 2、合并 8、验证 12、人工 16，总成本为 64+18+2+8+12+16=120 credits。这里每项都是教学输入，真实成本应来自账单、容量模型或人工工时记录。
 
-设成功数 N_success 是非负整数，单位成功成本为：
+设 \(N_{\mathrm{success}}\) 为非负整数形式的成功任务数，\(C_{\mathrm{total}}\) 为有限非负批次总成本。当 \(N_{\mathrm{success}}>0\) 时，单位成功成本为：
 
 ~~~math
 C_{\mathrm{success}}=\frac{C_{\mathrm{total}}}{N_{\mathrm{success}}}
 ~~~
 
-若上述 120 credits 的批次有 3 个成功任务，则单位成功成本为 120/3=40 credits/成功任务。当 N_success=0 时，分母为零，指标未定义，应该报告 None 或 undefined；不能用 max(1,N_success) 把失败批次伪装成可比较成本。
+若上述 120 credits 的批次有 3 个成功任务，则单位成功成本为 120/3=40 credits/成功任务。若 \(N_{\mathrm{success}}=0\)，分母为零，指标未定义，应该报告 None 或 undefined；不能用 `max(1, N_success)` 把失败批次伪装成可比较成本。
 
-判断增加第 k 个 worker 是否值得，可估算边际效用：
+判断增加第 \(k\) 个 worker 是否值得，可估算边际效用。所有量均为有限数；\(\Delta P_{\mathrm{success},k}\in[-1,1]\) 是在同一任务集和成功定义下的成功概率增量，\(V\) 是一次成功的非负价值，\(\Delta C_k\) 是与 \(V\) 使用同一单位的成本增量，\(\Delta R_k\) 是风险增量；\(\lambda\ge0\) 把每个风险单位换算成与 \(V\) 相同单位的代价：
 
 ~~~math
 \Delta U_k
@@ -229,9 +229,9 @@ C_{\mathrm{success}}=\frac{C_{\mathrm{total}}}{N_{\mathrm{success}}}
 -\lambda\Delta R_k
 ~~~
 
-ΔP_success,k 是在同一任务集和成功定义下成功概率的增量，V 是一次成功的价值，ΔC_k 是同单位增量成本，ΔR_k 是风险增量，λ≥0 把风险换算成与 V 同单位的代价。例如 ΔP=0.08、V=100 credits、ΔC=5 credits、ΔR=0.1、λ=10 credits/风险单位，则 ΔU=0.08×100−5−10×0.1=2 credits。这个正值只在教学设定的价值、成本和风险刻度成立时有意义；样本不足时不应把估计值写成确定收益。
+例如 \(\Delta P_{\mathrm{success},k}=0.08\)、\(V=100\) credits、\(\Delta C_k=5\) credits、\(\Delta R_k=0.1\)、\(\lambda=10\) credits/风险单位，则 \(\Delta U_k=0.08\times100-5-10\times0.1=2\) credits。这个正值只在教学设定的价值、成本和风险刻度成立时有意义；样本不足时不应把估计值写成确定收益。
 
-若风险属于不可接受的硬约束，就不能让很大的 V 抵消它。可预先设定质量增量、成本和风险门槛：
+若风险属于不可接受的硬约束，就不能让很大的 \(V\) 抵消它。在固定任务集和成功定义下，\(\Delta P_{\mathrm{success}}\in[-1,1]\) 是成功率增量；\(C_{\mathrm{extra}}\) 与 \(R_{\mathrm{extra}}\) 分别是有限非负的额外成本和风险，\(C_{\max}\) 与 \(R_{\max}\) 是相同单位下的有限非负上限，\(\delta\in[0,1]\) 是最低成功率增量。指示函数在条件成立时取 1，否则取 0；三项相乘只有所有门槛都通过时才取 1：
 
 ~~~math
 G_{\mathrm{expand}}
@@ -240,7 +240,7 @@ G_{\mathrm{expand}}
  \mathbf{1}[R_{\mathrm{extra}}\le R_{\max}]
 ~~~
 
-其中指示函数条件成立取 1，否则取 0；δ 是最低成功率增量，C_max 和 R_max 是允许的增量成本与风险上限。例如 δ=0.02、C_max=6 credits、R_max=0.15，观测到 ΔP=0.08、C_extra=5 credits、R_extra=0.10，则三个条件分别为 1，G_expand=1；这是合成门槛例；若成本变为 7 credits，第二个条件为 0，系统就不应扩张。未测量的概率或风险不能用 0 填充来得到“允许”结果。
+例如 \(\delta=0.02\)、\(C_{\max}=6\) credits、\(R_{\max}=0.15\)，观测到 \(\Delta P_{\mathrm{success}}=0.08\)、\(C_{\mathrm{extra}}=5\) credits、\(R_{\mathrm{extra}}=0.10\)，则三个条件分别为 1，\(G_{\mathrm{expand}}=1\)；这是合成门槛例。若成本变为 7 credits，第二个条件为 0，系统就不应扩张。未测量的概率或风险不能用 0 填充来得到“允许”结果。
 
 ## 16.13 什么时候停止扩张
 
