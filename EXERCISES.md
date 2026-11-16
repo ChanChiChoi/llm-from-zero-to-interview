@@ -855,20 +855,20 @@
 20. 对同一个场景做敏感性分析，分别把采用率降低 15%、可变成本提高 20%、人审时间翻倍，观察净收益和回本周期如何变化。
 21. 构造一个“用户量越大亏越多”的负单位经济账案例，说明为什么单次毛利为负时不能靠规模化解决。
 22. 比较 API 调用和自部署两种成本模型，至少覆盖 token 价格、GPU 利用率、固定运维、人力、低延迟、合规、模型升级和故障风险。
-23. 为 5 个企业级 LLM 应用设计 enterprise audit 表，字段至少包含 scenario type、users、data sources、permission coverage、tenant isolation、RAG permission filter、tool permission gate、audit log coverage、PII redaction、data freshness、citation support、SSO integration、workflow integration、eval ready、feedback loop、SLO pass、business metric 和 human review coverage。
-24. 写一个 0 依赖企业级应用审计 demo，输入 toy 应用，输出 enterprise score、enterprise gate、failed gates、enterprise pass candidates 和 needs rework。
+23. 为 5 个企业级 LLM 应用设计 enterprise evidence 表，包含身份/租户、资源权限、数据来源与版本、工具权限、审计、风险与人审、延迟、业务结果和单位成本；为每项写清适用范围、分母、证据来源、状态（passed/failed/unknown/not applicable）和负责人。
+24. 用一个客服 Copilot 合成案例填写 enterprise evidence 表，分别记录授权测试、审计完整性、引用支持、时效、p95 和任务结果；预先声明本地要求，指出任何不可由平均分抵消的阻断项，并给出继续小范围试点或暂停的理由。无需编写综合评分器。
 25. 对一个企业知识库 RAG 项目画出权限链路，要求覆盖身份登录、用户组、文档 ACL、检索过滤、rerank、上下文拼接、引用展示、日志脱敏和审计查询。
 26. 选一个高风险企业场景，分别设计 copilot、review、approval 和 full automation 四种上线形态，并说明每一层需要哪些权限、SLO、评估、人审和审计门禁。
-27. 为 4 个 RAG 产品设计 RAG product audit 表，字段至少包含 retrieved relevant、relevant total、context relevant、context total、supported claims、total claims、citation supported、citation total、correct abstentions、expected abstentions、permission filter rate、unauthorized hits、stale evidence rate、P95 latency、cost per answer、eval ready、feedback loop 和 business metric。
-28. 写一个 0 依赖 RAG 产品审计 demo，输出 retrieval recall、context precision、evidence support、citation accuracy、abstention accuracy、RAG score、RAG gate、failed gates 和 needs rework。
+27. 为 4 个 RAG 产品设计分层评估表，分别定义 retrieval recall、候选有效率、最终上下文相关片段占比、Ragas 排序型 Context Precision、evidence support、citation accuracy/coverage、abstention recall/false refusal、授权测试与真实越权事件、freshness、p95、成本和业务结果；每项注明定义、分母、judge/人工来源、版本与 unknown 条件。
+28. 设计一个 10-query 的客服 RAG 合成评估样例，标注可回答/应拒答、gold evidence、候选、最终上下文、原子断言、引用和版本；手算 recall、候选有效率、上下文相关占比、证据支持、引用准确率/覆盖率、拒答召回和误拒答率，再按预先声明的本地目标决定修复顺序。不要合成通用 RAG score 或编写排行榜 demo。
 29. 把一个 RAG 回答拆成 atomic claims，并逐条标注引用是否存在、相关、足以支持、版本正确、权限正确和能打开原文。
 30. 构造 3 个 RAG 应该拒答的样本，分别覆盖无证据、权限不足和文档过期，并说明如何避免过度拒答。
-31. 为 4 个 Agent 产品设计 agent product audit 表，字段至少包含 tasks total、tasks completed、tool calls、tool successes、high-risk actions、high-risk confirmed、recoveries needed、recoveries succeeded、state update required、state updates、observations total、observations used、trace complete、unauthorized actions、budget overruns、P95 latency、unit cost、eval ready、feedback loop 和 business metric。
-32. 写一个 0 依赖 Agent 产品审计 demo，输出 task success、tool success、confirmation coverage、recovery rate、state update coverage、observation use rate、trace coverage、unauthorized rate、budget overrun rate、agent score、agent gate、failed gates 和 needs rework。
-33. 对同一个企业任务分别设计 suggest、draft、semi-auto、approval 和 auto 五种自动化层级，说明每一层需要怎样的权限、验收器、人审、回滚和审计。
+31. 为 4 个 Agent 产品设计证据表，逐项给出任务验收、已执行工具、需确认动作、授权负例、恢复事件、必要观察的使用、状态更新、trace、预算、延迟和单位成功成本的分子、分母、来源版本、样本数与 unknown 条件；把未授权提议阻断测试与真实越权副作用分开记录。
+32. 用一个客服工单合成样例手算任务验收、工具契约、确认、授权负例、失败恢复、状态/trace、预算和单位成功成本。预先声明场景内的局部目标，指出哪些结果允许扩大到草稿或有限动作、哪些必须阻断；不要生成 agent score 或综合 gate。
+33. 为同一企业任务设计建议、草稿、人工审批和受限自动执行模式；说明这些是按动作风险选择的模式而非固定升级阶梯，并比较各自需要的权限、验收器、人审、恢复和审计证据。
 34. 画出一个 workflow-agent hybrid 产品流程，要求 workflow 负责接收、审批、提交、审计和回滚，Agent 负责分类、检索、草稿、诊断和异常恢复。
 35. 构造 3 条 Agent 产品失败 trace，分别覆盖工具参数错误、未授权动作和 observation 未使用，并给出应触发的恢复策略或降级策略。
-35A. 用纯 Python 写一个 Agent 落地事故审计 demo，输入 toy trace、expected tools、plan steps、tool args、permission、tool status、observation use、state update、confirmation、budget 和 backend status，输出 task success、plan feasibility、tool selection accuracy、argument validity、tool execution success、false completion、unauthorized action、budget overrun、trace completeness 和 failed gates。
+35A. 对 4 条合成 Agent 失败轨迹制作事故审阅表，记录任务契约、第一处偏离、动作是否已发生、外部状态是否可确认、授权与确认记录、状态/trace 缺口、可行恢复和下一步自动化模式；不能把未知状态写成失败重试或成功。
 35B. 构造 5 个 Agent bad case：工具失败但最终声称完成、参数结构合法但业务归属错误、高风险动作缺少确认、工具结果不可信边界失败、循环检索超预算，并为每个样本写出 root cause 和降级策略。
 35C. 为一个最小 Coding Agent Harness 设计运行审计表，字段至少包含 task、context、model output、action、arguments、permission、confirmed、executed、execution result、observation used、state updated、trace fields、budget、final status 和 final verified。
 35D. 写一个 0 依赖 harness loop 审计 demo，输出 parse valid rate、tool execution success、unauthorized execution rate、confirmation coverage、observation use rate、state update coverage、trace completeness、budget overrun rate、task success rate、root causes、failed gates 和 harness gate。
@@ -1051,11 +1051,11 @@
 35E47. 写一个 0 依赖 Production Deployment 审计 demo，输入 image artifact、model artifact、deployment config、old/new workers、canary users 和 canary metrics；实现 ImageArtifact、ModelArtifact、WorkerState、DeploymentConfig、CanaryMetrics、ToyProductionDeploymentAuditor、runtime compatibility matrix、model artifact manifest、startup readiness gate、warmup probe check、worker registration gate、drain completion gate、rolling update capacity gate、canary traffic split、canary regression gate、rollback readiness gate 和 production deployment gate；输出 runtime compatible、artifact ready、startup phases、probe report、registered workers、capacity before/after drain、drain events、canary routes、canary report、rollback ready、observability logs、metrics 和 gates；要求说明 LLM serving 生产部署不能只看容器进程是否启动，而要证明 runtime、模型 manifest、readiness、滚动容量、drain、灰度、回滚和 revision 级观测都闭环。
 35E48. 写一个 0 依赖 Capacity SLO Fault Drill 审计 demo，输入 workloads、worker benchmark、cost config、SLO target、incoming burst 和 fault scenarios；实现 WorkloadProfile、WorkerBenchmark、CostConfig、SLOTarget、FaultScenario、ToyCapacitySLOFaultDrillAuditor、workload token profile、benchmark stable capacity、GPU count estimate、KV concurrency limit、cost attribution model、SLO error budget、admission overload policy、fault drill scenario、runbook coverage check 和 capacity SLO fault drill gate；输出 traffic profile、required workers by request/prefill/decode/KV、base/safe/N+1/release workers、planned GPUs、cost report、SLO report、admission decision、fault drill rows 和 gates；要求说明 LLM serving 容量规划不能只看 QPS，而要把 token 压力、KV 并发、稳定压测容量、利用率、成本、error budget、admission 和故障演练放在一起复算。
 35E49. 写一个 0 依赖 Inference Engine Interview Readiness 审计 demo，输入 question rubrics、candidate answers 和 project evidence；实现 QuestionRubric、CandidateAnswer、ProjectEvidence、ToyInferenceEngineInterviewAuditor、interview question rubric、concept coverage score、request lifecycle answer、KV cache answer evidence、scheduler answer evidence、serving metrics coverage、ordered debug path、production governance answer、project evidence portfolio、tradeoff coverage 和 inference engine interview gate；输出 concept rows、metric gate、debug gate、tradeoff gate、project gate、weak questions、revision plan 和 gates；要求说明推理框架面试不能只背框架名，而要证明生命周期、KV/PagedAttention、调度、指标、debug、生产治理、项目证据和 trade-off 都能闭环表达。
-36. 为 5 个多模态产品设计 multimodal product audit 表，字段至少包含 modalities、samples total、task success、quality pass、supported claims、OCR CER、ASR WER、generation adopted、safety pass、privacy pass、copyright pass、high-risk reviewed、token equivalent、P95 latency、unit cost、eval ready、feedback loop 和 business metric。
-37. 写一个 0 依赖多模态产品审计 demo，输出 task success、input quality、evidence support、OCR quality、ASR quality、generation adoption、safety pass、privacy pass、copyright pass、multimodal score、multimodal gate、failed gates 和 needs rework。
+36. 以 100 张合成票据为例，设 90 张输入质量通过、每张草稿 4 个必需字段中共 338 个字段正确、82 张记录通过全部关键字段和业务规则、12 张记录转人工且 10 张确认可用。分别计算输入质量通过率、字段准确率、精确记录通过率和端到端任务成功率；说明每个分母、8 张记录为何不能自动采纳，以及 2 张未确认任务应如何报告。
+37. 为文档抽取、实时语音、图像生成和视频草稿四类产品设计分层评估表，分别写明任务验收、真实输入切片、媒体证据、质量拒绝/补充路径、人工处理、授权与隐私、延迟和单位成功成本的分母；指出哪些字段不适用、哪些缺证据时必须记为未知，并说明为什么不做跨模态加权总分。
 38. 构造 3 个输入质量不足样本，分别覆盖模糊文档、噪声音频和长视频关键片段缺失，并说明产品应如何引导重传、裁剪、澄清或转人工。
 39. 把一个图像问答或文档问答案例拆成 atomic claims，并逐条标注是否被图片区域、OCR 文本、表格、文档页或引用证据支持。
-39A. 用纯 Python 写一个多模态项目事故审计 demo，输入 toy media cases、expected evidence、observed evidence、OCR / ASR 错误、critical fields、video events、grounding IoU、claim support、safety flags、confirmation 和 budget，输出 input fidelity、evidence recall、OCR / ASR accuracy、temporal evidence recall、evidence support、hallucination rate、root causes 和 failed gates。
+39A. 将一个票据抽取失败追踪到首个偏离点：原图清晰度、OCR 金额、行项目合计、草稿规则、人工确认或最终入账。为每一步列出可观察证据、应阻断的动作和需要保留的媒体版本，不用混合总分定位原因。
 39B. 构造 6 个多模态 bad case：长截图裁剪丢证据、OCR 读错金额、ASR 读错关键字段、视频关键事件未抽到、grounding 区域不支持 claim、不可信媒体内容安全边界失败，并为每个样本写出修复优先级。
 40. 为一个生成式多模态产品设计安全和版权审计表，覆盖输入素材授权、参考图边界、输出使用范围、内容溯源、深伪风险、品牌安全和人工复核。
 41. 为 4 个企业大模型产品设计 privacy governance audit 表，字段至少包含 PII detected、PII redacted、sensitive events、sensitive blocked、access checks、unauthorized hits、logs total、logs redacted、training candidates、training consent ok、retention items、retention ok、deletion requests、deletion SLA met、external transfers、external approved、audit events、audit complete、high-risk reviewed、DPA ready、incident response ready 和 business metric。

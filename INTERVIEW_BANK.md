@@ -3275,7 +3275,7 @@
 
 31. 如何设计企业 RAG 产品的评估指标？
     考察点：retrieval、context、generation、citation、abstention、product。
-    回答框架：检索层看 retrieval recall、hit@k、MRR、nDCG 和 rerank 命中；上下文层看 context precision / recall 和过期证据率；生成层看 answer correctness、evidence support、faithfulness 和 citation accuracy；系统层看权限过滤、拒答准确率、P95 延迟、单位成本；产品层看自助解决率、满意度、反馈闭环和业务指标。
+    回答框架：检索层看 retrieval recall 与候选/上下文的相关性；需区分简单片段占比和 Ragas 的排序型 Context Precision。生成层分别看 answer correctness、claim evidence support、citation accuracy 与 citation coverage；拒答看应拒答样本召回和可回答样本误拒。系统层覆盖权限测试、真实越权事件、过期证据、p95、超时和单位成本；产品层看自助解决率、满意度、反馈闭环和业务结果。所有比例都要写清分母、版本、切片与 unknown 条件。
 
 31A. RAGAS 和 ARES 能否代替人工评估？
     考察点：reference-free judge、faithfulness、context relevance、prediction-powered inference、人工校准、置信区间、分布漂移。
@@ -3287,11 +3287,11 @@
 
 33. RAG 应该什么时候拒答或澄清？
     考察点：无证据、低召回、冲突、权限不足、过期、问题不清。
-    回答框架：当检索不到足够证据、证据冲突、用户无权查看来源、文档过期、问题超出知识库范围或用户问题缺少关键信息时，RAG 应该拒答、澄清、提示已检索范围或转人工。拒答准确率和过度拒答率都要评估，不能靠一句 prompt 保证。
+    回答框架：当检索不到足够证据、证据冲突、用户无权查看来源、文档过期、问题超出知识库范围或用户问题缺少关键信息时，RAG 应该拒答、澄清、提示已检索范围或转人工。分别统计应拒答样本中的拒答召回率和可回答样本中的误拒答率，不能靠一句 prompt 保证。
 
 34. RAG 产品上线门禁应该包含什么？
-    考察点：retrieval recall、context precision、evidence support、citation accuracy、permission、freshness、latency、cost、feedback。
-    回答框架：上线门禁至少包含 retrieval recall、context precision、evidence support、citation accuracy、abstention accuracy、permission filter pass rate、stale evidence rate、P95 latency、unit cost、eval ready、feedback loop 和 business metric。任何关键门禁不过线，都应先拆试点、补文档治理、补权限或改成 copilot，而不是直接全量上线。
+    考察点：retrieval recall、候选/上下文相关度、evidence support、引用准确和覆盖、拒答与误拒、权限、freshness、latency、cost、feedback。
+    回答框架：按目标任务预先声明各指标的口径和局部目标；同时展示权限测试覆盖和实际越权、来源版本、人工评估样本、p95/超时、单个合格结果成本与业务结果。权限泄露或错误版本等既定阻断项不能靠综合分抵消；样本或分母不足时标 `unknown`，不要把它当作通过或零失败。
 
 34A. RAG 答案错误时如何做事故归因？
     考察点：retrieval miss、context drop、citation、permission、freshness、root cause。
@@ -3299,7 +3299,7 @@
 
 34B. 如何设计一个 RAG 事故审计 demo？
     考察点：toy corpus、expected evidence、context、claims、ACL、staleness、gate。
-    回答框架：可以构造小型 corpus 和 5 类 bad case：召回不到正确文档、召回后上下文丢证据、引用旧版本、无权文档进入上下文、证据不足却未拒答。脚本输出 retrieval recall、MRR、context recall / precision、citation accuracy、unsupported claim rate、permission leak rate、stale evidence rate、abstention accuracy、P95 延迟、单位成本、root cause 和 failed gates。
+    回答框架：可以构造小型 corpus 和 5 类 bad case：召回不到正确文档、召回后上下文丢证据、引用旧版本、无权文档进入上下文、证据不足却未拒答。分别报告 retrieval recall、候选有效率、Ragas 排序型 Context Precision、简单上下文相关片段占比、citation accuracy/coverage、unsupported claim rate、授权测试与 permission leak、stale evidence、拒答召回率/误拒答率、p95/超时、单位成本和 root cause；阈值按目标任务预先定义，不合成通用 RAG score。
 
 35. Agent demo 和 Agent 产品差在哪里？
     考察点：task boundary、tool permission、human confirmation、trace、budget、eval、business metric。
@@ -3307,15 +3307,15 @@
 
 36. Agent 产品为什么不应该一开始全自动？
     考察点：automation level、risk、verification、rollback、trust。
-    回答框架：自动化层级应从 suggest、draft、semi-auto、approval 到 auto 逐步提高。高风险、不可逆、验收器不足或责任边界不清的任务，应先做 copilot / review / approval；只有任务成功率、权限、人审、恢复、trace、预算和回归评估稳定后，才考虑自动执行。
+    回答框架：建议、草稿、审批和受限自动执行是按动作风险选择的模式，不是必须逐级走完的路线。先明确任务边界、授权、验收和失败恢复；高影响或结果不可核验的动作保持人审。即使某些低风险步骤适合自动执行，也要用任务与权限证据验证范围，不能从离线成功率推导生产权限。
 
 37. Agent 产品评估应该看哪些指标？
     考察点：task success、tool execution、confirmation、recovery、state、observation、trace、unauthorized、budget。
-    回答框架：至少看任务成功率、工具执行成功率、高风险确认覆盖率、失败恢复率、状态更新覆盖率、观察使用率、trace 完整率、未授权动作率、预算超限率、P95 延迟、单位成本、评估覆盖、反馈闭环和业务指标。最终回答正确但越权调用、忽略 observation 或成本失控，仍然不能上线。
+    回答框架：按任务验收、已执行工具、需确认动作、授权负例、恢复事件、必要观察使用、状态更新、trace、预算、服务延迟和单位成功成本分别报告分子、分母、版本与样本量。未授权提议是否被阻断要和真实越权副作用分开；分母缺失或外部状态未知时标 `unknown`。越权执行、高影响动作绕过确认或虚报完成等阻断项不能被其他高分抵消，也不合成通用 Agent score。
 
 38. 如何设计 Agent 产品的工具权限和人工确认？
     考察点：least privilege、permission checker、risk level、dry run、audit。
-    回答框架：工具按只读、低风险写入、中风险业务操作和高风险外部副作用分层；controller 在模型外做用户权限、任务权限、参数校验和风险检查。删除、支付、发送、改权限、生产变更等动作必须展示对象、参数、原因、影响范围和取消方式，并记录审计日志。
+    回答框架：执行器在模型外逐次检查主体、租户、资源、动作、参数和当前状态。人工确认绑定具体动作、对象和参数版本，展示影响与依据；执行前重新校验权限和状态，变更后重新确认。只读权限不自动包含写入权，泛化确认也不能授权未来动作。
 
 39. 为什么生产系统常用 workflow-agent hybrid？
     考察点：deterministic workflow、open branch、control、recoverability。
@@ -3323,7 +3323,7 @@
 
 40. Agent 产品上线门禁应该包含什么？
     考察点：task、tool、confirmation、recovery、trace、unauthorized、budget、latency、cost、feedback。
-    回答框架：上线门禁至少包含任务成功率、工具执行成功率、高风险确认覆盖率、失败恢复率、状态更新覆盖率、观察使用率、trace 覆盖率、未授权动作率、预算超限率、P95 延迟、单位成本、eval ready、feedback loop 和 business metric。越权、trace 缺失或高风险确认不足应直接降级为建议、草稿、review 或 approval。
+    回答框架：为每个必要指标预先定义对象、分母、版本、样本量和未知条件；结合负向授权测试、业务验收、失败恢复、状态/trace、预算/延迟、单位成功成本与反馈证据决定是否扩大某项动作。高影响越权、确认绕过、不可判定的外部副作用等阻断项单独处理，不能由综合分补偿；证据不够时维持建议、草稿或人工审批范围。
 
 40A. Agent 声称任务已完成但后台没有完成，如何排查？
     考察点：final status、backend status、tool result、observation、state、truthfulness。
@@ -3331,7 +3331,7 @@
 
 40B. 如何设计一个 Agent 落地事故审计 demo？
     考察点：trace、tool schema、permission、confirmation、budget、injection boundary、gate。
-    回答框架：可以构造小型 Agent trace 集，覆盖正常任务、工具失败但声称完成、参数结构合法但业务归属错误、无权高风险工具、工具结果携带不可信指令、循环检索超预算和 trace 缺失。脚本输出 task success、plan feasibility、tool selection accuracy、argument validity、tool execution success、observation use、state update、confirmation coverage、false completion、unauthorized action、budget overrun、trace completeness、tool result injection block、root cause 和 failed gates。
+    回答框架：构造小型 Agent trace 集，覆盖工具失败却声称完成、结构合法但资源归属错误、缺少高风险确认、工具结果携带不可信指令、循环调用超预算和 trace 缺失。逐条记录任务验收、真实副作用状态、权限与确认、预算和日志证据，找出第一处偏离，决定重读状态、幂等重试、补偿、只读降级或人工接管。分别报告有明确定义的分子/分母，未知不得折算为通过，也不合成通用 Agent 分数。
 
 40C. 如何设计一个最小 Coding Agent Harness？
     考察点：runtime、action parser、tool registry、permission gate、sandbox、trace、replay、evaluation。

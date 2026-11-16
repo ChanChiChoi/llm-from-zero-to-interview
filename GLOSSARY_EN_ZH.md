@@ -4148,7 +4148,7 @@ Grounded Multimodal QA：有媒体证据支撑的多模态问答
 
 Multimodal Product：多模态产品
 
-Multimodal Product Gate：多模态产品上线门禁
+Multimodal Product Gate：按具体任务预先设定的上线条件集合；每项指标保留分母，并区分通过、失败、未知和不适用，不将不同模态压成跨产品加权总分。
 
 Input Quality Pass Rate：输入质量通过率
 
@@ -4220,7 +4220,7 @@ Retrieval-Augmented Generation / RAG：检索增强生成
 
 RAG Product：RAG 产品
 
-RAG Product Gate：RAG 产品上线门禁
+RAG Product Gate：RAG 产品上线条件；按任务预先定义并逐项核验权限、证据、引用、拒答、时效、延迟和业务要求；阻断项不由综合分抵消，证据不足记为 unknown。阈值需按本地风险和承诺设定，不是通用常数。
 
 RAG Incident：RAG 事故
 
@@ -5376,21 +5376,21 @@ False Completion Rate：误报完成率
 
 Tool Result Injection Block Rate：工具结果注入阻断率
 
-Agent Gate：智能体上线门禁
+Agent Gate：智能体上线门禁；按任务、权限、验收、恢复、预算和责任设定的局部条件。各项证据保留分母和 `unknown`，越权副作用、确认绕过等阻断项单独处理，不由加权总分补偿。
 
-Agent Product：Agent 产品 / 智能体产品
+Agent Product：Agent 产品 / 智能体产品；模型能在运行时选择步骤或工具，并通过执行器影响外部系统的任务产品；模型输出的工具调用仍是待授权的提议。
 
-Agent Product Gate：Agent 产品上线门禁
+Agent Product Gate：Agent 产品上线门禁；根据具体任务风险审查授权、动作确认、业务验收、未知状态恢复、审计、预算和单位成功成本的证据；分母缺失时标为 `unknown`。
 
-Agent Automation Level：Agent 自动化层级
+Agent Automation Level：Agent 自动化层级；建议、草稿、人工审批和受限自动执行是可按任务/动作选择的模式，不要求沿固定阶梯升级。
 
-Agent Product Trace：Agent 产品执行轨迹
+Agent Product Trace：Agent 产品执行轨迹；将任务 ID、主体/权限、模型与工具版本、动作提议、确认、执行回执、状态变化、预算和验收关联起来的可复核事件记录；日志仍须按目的最小化并控制访问。
 
 Workflow-Agent Hybrid：工作流与 Agent 混合架构
 
-Tool Execution Success Rate：工具执行成功率
+Tool Execution Success Rate：工具执行成功率；符合工具契约、权限、执行回执和后置检查的已执行调用占比；成功调用不等于任务完成。
 
-Human Confirmation Coverage：人工确认覆盖率
+Human Confirmation Coverage：人工确认覆盖率；具有新鲜且参数匹配的确认的高影响执行数 / 高影响执行数；没有此类执行时为 `unknown`，未确认提议的阻断另行评估。
 
 Unauthorized Action Rate：未授权动作率；报告时必须明确统计的是未授权动作提案还是已经执行的越权副作用，不能用同一名称掩盖分母差异。
 
