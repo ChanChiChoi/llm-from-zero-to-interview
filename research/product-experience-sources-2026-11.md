@@ -28,3 +28,19 @@
 - Google HEART / Goals–Signals–Metrics 的 2010 论文事实及边界已记录于[产品发现与评估来源记录](product-discovery-evaluation-sources-2026-11.md)。
 - OpenAI Evals 的官方产品状态（截至 2026-11-16 已只读，计划 2026-11-30 关闭）及评估指南边界亦记于同一研究记录；Evals 的平台退役不等于任务样本、验收标准和评估流程这些通用方法失效。
 
+## 上线运营与安全观察
+
+### OpenAI Evals 迁移期
+
+- 来源：[Working with evals](https://developers.openai.com/api/docs/guides/evals) 与[弃用时间线](https://developers.openai.com/api/docs/deprecations)。核对日期：2026-11-16。
+- 来源支持：Evals 指南描述任务说明、测试输入、评分标准、运行结果分析和迭代流程；官方时间线显示现有 Evals 于 2026-10-31 转为只读，平台计划于 2026-11-30 关闭。
+- 状态细节：Evals 指南建议新用户了解 Datasets；弃用时间线列出迁往 Promptfoo 的指引。两个页面侧重不同使用路径，不能把某个替代入口表述为所有评估流程的唯一迁移方案。
+- 证据等级：供应商官方文档，可支持公开平台状态和其示例工作流；不是独立评估方法论。
+- 边界：平台退役不改变任务契约、测试样本、评分定义、切片、人工复核和回归等通用流程。固定样本上的离线结果不能单独证明真实用户任务成功或线上风险可接受。
+
+### OWASP GenAI LLM Top 10 2026
+
+- 来源：[OWASP GenAI LLM Top 10 2026](https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/)，页面标注 2026-08-03；核对日期：2026-11-16。
+- 来源支持：这是 OWASP GenAI Security Project 发布的社区风险分类与缓解指南；项目页面称该版本更新了风险排序和覆盖，并映射到 NIST、MITRE ATLAS、CWE 等资料。
+- 证据等级：社区安全项目指南；风险识别和威胁建模入口，不是法规或目标系统的独立渗透测试报告。
+- 边界：分类本身不能证明某产品存在或不存在漏洞，也不能替代基于具体数据、权限、工具和业务后果的威胁建模与测试。

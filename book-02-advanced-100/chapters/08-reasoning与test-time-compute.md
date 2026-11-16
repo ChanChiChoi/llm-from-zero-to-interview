@@ -418,8 +418,10 @@ P(a\mid x)
 
 温度改变 logits 分布：
 
+其中 $x$ 是输入问题，$y_{1:t-1}$ 是当前位置之前已经生成的 token 前缀；$T>0$ 控制分布的尖锐程度。
+
 ~~~math
-p_T(y_t\mid y_{<t},x)
+p_T(y_t\mid y_{1:t-1},x)
 = \mathrm{softmax}
 \left(
 \frac{z_t}{T}
@@ -2260,11 +2262,13 @@ cost per solved task：成功任务平均花费的生成与执行资源
 s_{t+1}
 =\delta(s_t,a_t,o_t),
 \qquad
-a_t\sim\pi_\theta(\cdot\mid x,s_t,o_{<t})
+a_t\sim\pi_\theta(\cdot\mid x,s_t,o_{1:t-1})
 ~~~
 
 
 s_t 是第 t 轮状态，a_t 是模型或控制器采取的动作，o_t 是执行器返回的观察。`delta` 不一定由神经网络完成，它可以是确定性的工作流代码。把状态转移交给控制器，有助于限制模型不能自行宣布“测试已经通过”。
+
+公式中的 $o_{1:t-1}$ 表示此前各轮已经收到的执行器观察；控制器根据这些观察更新状态，再决定下一步动作。
 
 执行器返回的反馈应该结构化，而不是只拼接一大段日志：
 

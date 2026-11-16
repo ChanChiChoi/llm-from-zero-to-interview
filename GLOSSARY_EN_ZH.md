@@ -4150,15 +4150,15 @@ Multimodal Product：多模态产品
 
 Multimodal Product Gate：按具体任务预先设定的上线条件集合；每项指标保留分母，并区分通过、失败、未知和不适用，不将不同模态压成跨产品加权总分。
 
-Input Quality Pass Rate：输入质量通过率
+Input Quality Pass Rate：输入质量通过率；质量检查通过的输入数除以已检查输入数，同时报告已检查输入占全部提交的比例，避免未检查样本从分母中消失。
 
-Multimodal Evidence Support Rate：多模态证据支持率
+Multimodal Evidence Support Rate：多模态证据支持率；有媒体证据支持的已核验关键断言数除以全部已核验关键断言数，需报告证据抽样和任务范围。
 
-OCR Quality Score：OCR 质量分
+OCR Quality Score：OCR 质量；按有参考文本的字符错误率（CER）或关键字段准确率报告，空参考和缺少判断不能记作零错误。
 
-ASR Quality Score：ASR 质量分
+ASR Quality Score：ASR 质量；按有参考文本的词错误率（WER）、字符错误率（CER）或任务关键字段准确率报告，并按语言、噪声和说话人切片。
 
-Generation Adoption Rate：生成结果采纳率
+Generation Adoption Rate：生成结果采纳率；被保存、编辑采用或进入业务草稿的生成结果数除以生成结果总数，须先定义“采纳”事件及时间窗。
 
 Media Safety Pass Rate：媒体安全通过率
 
@@ -6388,7 +6388,7 @@ Audit Log Coverage：审计日志覆盖率
 
 Data Freshness：数据新鲜度
 
-PII Redaction：个人身份信息脱敏
+PII Redaction：个人可识别信息脱敏；PII 是工程常用简称，不自动等同任何法域的法定个人信息类别。
 
 Workflow Integration：工作流集成
 
@@ -6398,11 +6398,11 @@ Enterprise Readiness Score：企业就绪分
 
 SLO Pass Rate：服务目标通过率
 
-Privacy Governance：隐私治理
+Privacy Governance：隐私治理；按数据类别、处理目的、角色、系统流向、保留/删除和证据责任组织产品控制。
 
-Privacy Governance Gate：隐私治理门禁
+Privacy Governance Gate：隐私治理门禁；按适用控制逐项记录 passed、failed、unknown 或 not applicable，阻断项不能由其他控制的高分抵消。
 
-Data Minimization Rate：数据最小化率
+Data Minimization Rate：数据最小化率；按具体任务契约核对必要字段，不等同法律合规结论或跨产品排行榜指标。
 
 PII Redaction Coverage：个人身份信息脱敏覆盖率
 

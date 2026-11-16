@@ -827,7 +827,7 @@
 45. 对一次 mock interview 做复盘，记录原题、原回答、错误原因和修正答案。
 46. 准备 10 个必须能讲清的问题，并逐个写出 5 句话版本答案。
 47. 做一次 45 分钟完整模拟面试：自我介绍、项目、基础、系统、开放题各一轮。
-48. 写一个 0 依赖事故排查复盘 demo，输入 toy incident 记录，输出 evidence coverage、repro rate、root cause rate、priority、postmortem completeness、needs rework 和 debug gate。
+48. 复盘一次多项同时变更后的 RAG 故障：新模型、提示和索引在同一时段上线，部分用户报告引用了过期制度，另有请求缺少完整 trace。写出任务契约和影响切片，区分已知、未知与不适用；列出能被反证的竞争假设，设计固定样本、一次只改变一个条件的回放；说明当前证据能支持什么、哪些结论仍未知；最后给出止损、修复、回归边界和交接记录，不用未校准的加权分数或固定阈值宣布事故已解决。
 49. 用 3 分钟讲一次大模型项目异常排查经历，必须覆盖背景、现象、影响范围、证据链、最小复现、baseline、根因、修复、回滚和复盘沉淀。
 50. 选一个第一册核心知识点，设计一次无资料检索、一次难度匹配的变体检索、一个最小实现和一个反例；在短延迟与长延迟下记录结果和错误类型，手算 mastery/transfer score，并说明这些自评分数的 rubric、证据边界及下一次复习动作。
 
@@ -840,7 +840,7 @@
 5. 构造一个“demo 看起来很好但不适合产品化”的场景，说明它在哪些门禁上失败。
 6. 设计一个大模型产品上线门禁，至少覆盖 quality、unit economics、latency、risk、workflow、eval、feedback 和 rollback。
 7. 用 3 分钟回答“为什么大模型产品化不是接一个模型 API，而是建立可评估、可运营、可控风险的产品系统”。
-8. 为自己的一个项目补充产品化表达：目标用户、痛点、baseline、技术指标、产品指标、ROI 粗算、风险门禁、反馈闭环和下一步迭代。
+8. 为一个合同与采购助手写出端到端产品决定：当前工作基线、目标角色、只读/草稿/低风险待办/高风险动作的边界、任务契约、证据和权限门禁、试点结果、全成本与未知项、反馈转回归流程，以及下一阶段继续、暂停或停止的理由。
 9. 为 5 个候选大模型场景设计 scenario selection audit 表，字段至少包含 user persona、stakeholder、task journey、real demand、monthly frequency、value per task、LLM fit、data readiness、verifiability、risk control、workflow fit、automation level 和 implementation difficulty。
 10. 构造 2 个真实需求和 2 个伪需求，分别说明当前替代方案、用户痛点、任务频率、可衡量指标和为什么适合或不适合进入试点。
 11. 写一个 0 依赖场景选择 demo，输入 toy 场景，输出 monthly benefit、LLM fit、priority score、recommendation、rejected reasons 和 pilot candidates。
@@ -1058,14 +1058,14 @@
 39A. 将一个票据抽取失败追踪到首个偏离点：原图清晰度、OCR 金额、行项目合计、草稿规则、人工确认或最终入账。为每一步列出可观察证据、应阻断的动作和需要保留的媒体版本，不用混合总分定位原因。
 39B. 构造 6 个多模态 bad case：长截图裁剪丢证据、OCR 读错金额、ASR 读错关键字段、视频关键事件未抽到、grounding 区域不支持 claim、不可信媒体内容安全边界失败，并为每个样本写出修复优先级。
 40. 为一个生成式多模态产品设计安全和版权审计表，覆盖输入素材授权、参考图边界、输出使用范围、内容溯源、深伪风险、品牌安全和人工复核。
-41. 为 4 个企业大模型产品设计 privacy governance audit 表，字段至少包含 PII detected、PII redacted、sensitive events、sensitive blocked、access checks、unauthorized hits、logs total、logs redacted、training candidates、training consent ok、retention items、retention ok、deletion requests、deletion SLA met、external transfers、external approved、audit events、audit complete、high-risk reviewed、DPA ready、incident response ready 和 business metric。
-42. 写一个 0 依赖隐私治理审计 demo，输出 PII 脱敏覆盖率、敏感数据阻断率、越权访问率、日志脱敏覆盖率、训练授权覆盖率、保留合规率、删除 SLA 通过率、外部传输审批覆盖率、审计覆盖率、privacy score、privacy gate、failed gates 和 needs rework。
-43. 构造 3 个隐私治理失败案例，分别覆盖 RAG 越权召回、排障日志原文泄露和外部模型传输未审批，并说明应触发的阻断、降级、通知、修复和复测流程。
-43A. 用纯 Python 写一个安全合规事故审计 demo，输入 toy cases 的 expected action、actual action、PII、sensitive events、access checks、high-risk confirmation、log redaction、training consent、retention、deletion、external transfer、audit、DPA 和 incident response，输出 unsafe pass rate、over-refusal rate、PII redaction coverage、sensitive block rate、unauthorized access rate、tool confirmation coverage、log redaction coverage、training consent coverage、retention / deletion、external approval、audit coverage、root causes、failed gates 和 gate pass。
-43B. 构造 6 个安全合规 bad case：正常合规问题被误拒、RAG 越权上下文放行、工具写操作缺少确认、日志保存敏感原文、反馈数据未经授权进入训练候选、外部传输缺审批，并为每个样本写出阻断、降级、通知、修复和复测动作。
-44. 为 4 个大模型产品设计上线运营审计表，字段至少包含 eligible、rollout、tasks、success、adopted、feedback、feedback actioned、bad cases、bad triaged、regression pass、slice covered、P95 latency、unit cost、incidents、trace coverage、rollback ready 和 business metric。
-45. 写一个 0 依赖上线运营审计 demo，输出 ranked、ops pass、live success、adoption、feedback action rate、bad case triage coverage、regression pass rate、trace coverage、needs rework 和 top failure reasons。
-46. 构造 3 个上线后必须暂停或回滚的案例，分别覆盖高风险事故未处理、反馈没有进入回归集、trace 缺失导致无法复现，并说明如何通过 feature flag、灰度降级、人工兜底和事故复盘恢复。
+41. 为一个企业合同摘要助手画数据流和责任表，标出每个数据对象的来源、个人信息/企业机密分类、任务目的与处理依据、访问角色、处理方与接收方、地区、保留期限、派生对象、删除方法和审计责任；每项证据用 passed、failed、unknown 或 not applicable 记录，并写清判断依据。
+42. 合同摘要助手的派生对象清单含 PDF 1 个、OCR 文本 1 个、索引片段 3 个、向量 3 个、缓存 1 个、含载荷的 trace 1 个和评估副本 1 个。首次只确认删除 PDF、OCR、三个片段和两个向量。计算删除覆盖率，列出仍待处理的对象，并说明为什么 100% 清单覆盖仍不能证明源系统没有漏掉其他副本。
+43. 构造 3 个治理失败案例，分别覆盖 RAG 越权召回、诊断日志保存原文，以及外部模型/跨境传输的角色、依据或审批未核实；为每个案例写出阻断、降级、通知、修复、复测和责任记录。
+43A. 对照《个人信息保护法》、GDPR、CCPA 官方说明和一家供应商的企业数据声明，分别标出法律文本、主管机构说明、供应商自述的证据层级；解释产品区域、API 配置、保留策略和训练使用各自需要核对什么，为什么“默认不训练”不能证明“没有日志或合规”。
+43B. 构造 6 个安全与隐私 bad case：正常合规问题被误拒、RAG 越权上下文放行、工具写操作缺少确认、日志保存敏感原文、反馈样本未经用途审查进入训练候选、删除请求遗漏向量/缓存/评估副本；为每个样本写出阻断、降级、通知、修复和复测动作。
+44. 用客服政策助手的合成灰度记录复核口径：1,000 个符合条件任务中 120 个进入新版本；120 个任务里 104 个确认成功、8 个失败、8 个未知；全周成本 960 元；P95 为 4.6 秒，预先约定目标为 4.0 秒。分别计算灰度比例、全量分母成功占比、已判定任务成功占比、平均任务成本和单位确认成功成本；说明为什么未知任务不能从报告里消失。
+45. 对一个 RAG 灰度失败做第一处分叉分析：索引更新后租户标签丢失，负向权限回归发现跨租户文档可能进入候选上下文；另有部分运行缺少完整 trace。写出立即停止动作、受影响范围取证、根因修复、同类与相邻权限回归、影子流量复查及恢复放量所需证据，不以其他指标的高值抵消权限失败。
+46. 为客服 RAG、会改变外部状态的 Agent 和多模态文档助手各设计一个上线观察方案。分别列出任务结果、路线专属运行证据、输入或权限边界、未知与不适用口径、反馈进入回归的条件、停止/降级/回滚动作和责任人；说明没有观测到事故不等于安全通过。
 47. 为 8 道技术产品面试题设计复盘表，字段至少包含 question、topics、formulas、demos、risks、tradeoffs、score、weak reason 和 revision plan。
 48. 写一个 0 依赖技术产品面试复盘 demo，输出 topic coverage、formula coverage、demo evidence coverage、risk coverage、trade-off coverage、weak questions、interview ready 和 revision plan。
 49. 为 5 个跨团队大模型项目设计 project collaboration audit 表，字段至少包含 objective clear、metric tree、baseline frozen、experiment record、version trace、RACI、change control、risk escalation、rollout、rollback、bad case regression、postmortem、action items、P95 latency 和 cost ratio。
