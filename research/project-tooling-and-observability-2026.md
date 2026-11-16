@@ -83,3 +83,13 @@ PyTorch 2.15.0 的发布日期是截至检索日的状态；Hugging Face Model C
 - **阅读位置**：autocast 区域及其前向/损失/反向顺序；gradient scaling 机制；FP16 CUDA 训练示例；旧 `torch.cuda.amp.*` 与 `torch.cpu.amp.*` API 弃用提示。
 - **来源支持的事实**：`torch.autocast` 按算子选择执行精度，通常包住前向和损失计算，反向在 autocast 区域外进行。FP16 梯度缩放会在反向前放大 loss，并在优化器更新前还原梯度；检测到 inf 或 NaN 时，`GradScaler` 会跳过该次更新并调整尺度。PyTorch 2.15 文档将 `torch.cuda.amp.autocast`、`torch.cuda.amp.GradScaler` 及 CPU 对应旧入口标记为弃用，建议使用 `torch.amp` 命名空间；CPU BF16 autocast 示例不依赖 GradScaler。
 - **证据等级与边界**：source-backed（固定版本 PyTorch 官方文档）。Autocast 运算类型取决于设备、dtype 和算子清单；FP16/BF16 的数值适用性及性能需在目标设备和模型上核验，不能据接口说明推断收益。
+
+## NIST AI RMF 与 OpenTelemetry GenAI 内容采集复核（2026-11-16）
+
+- **NIST 来源与版本**：[AI Risk Management Framework](https://www.nist.gov/itl/ai-risk-management-framework)，动态官方页面，访问日期 2026-11-16；阅读 Overview 和当前状态说明。页面说明 AI RMF 面向自愿采用，AI RMF 1.0 正在修订，并注明修订工作属于 White House AI Action Plan；页面另列出 2026-04-07 发布的 Critical Infrastructure Profile concept note。证据等级：source-backed（NIST 官方页面）。边界：自愿框架不等于法规要求或产品合规认证；revision/profile 状态应在引用时重新确认。
+- **OpenTelemetry 来源与版本**：[GenAI span semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-spans.md)，独立 `semantic-conventions-genai` 仓库的 `main` 动态页面，访问日期 2026-11-16；OpenTelemetry 注册表当日标识 Semantic Conventions 1.45.0，并把 GenAI 页面标为迁入独立仓库。阅读 Full (buffered) content、Content capture configuration 和 Uploading content to external storage。当前规范称指令、输入和输出内容通常既敏感又较大，建议 instrumentation 默认不采集；内容采集须显式 opt-in，缺省值为 `NO_CONTENT`。把内容上传到外部存储并在 span 写入引用也应单独显式启用。规范不规定 URI、存储布局、保存期限或访问方式。证据等级：source-backed（OpenTelemetry 官方动态语义约定）。边界：规范建议不证明具体 SDK 默认值或实现支持；部署时需核对固定 SDK/语义约定版本及实际配置，外部存储的授权和保留策略由应用实现负责。
+
+## Model Cards 与 MLflow Tracking 动态文档复核（2026-11-16）
+
+- **Hugging Face Model Cards**：[官方 Hub 文档](https://huggingface.co/docs/hub/en/model-cards)，动态页面，访问日期 2026-11-16；阅读 What are Model Cards 与 card metadata。当前页面说明 model card 是模型仓库中的 Markdown/README 文件及元数据，建议描述模型、预期用途和限制、训练参数/实验信息、使用数据集与评估结果。证据等级：source-backed（Hugging Face 官方文档）。边界：文档建议不证明具体模型卡字段真实、完整或已被独立核验。
+- **MLflow Tracking**：[官方 Tracking 文档](https://mlflow.org/docs/latest/ml/tracking/)，动态 `latest` 页面，访问日期 2026-11-16；阅读 overview 与 Concepts/Runs。当前页面将 Tracking 描述为记录参数、代码版本、指标和输出文件的 API/UI，并把一次代码执行作为 run；run 保存 metadata 和 artifacts。证据等级：source-backed（MLflow 官方文档）。边界：`latest` 页面随版本变化；跟踪系统能存储运行材料，不会验证数据无泄漏、评分规则正确或结论可外推。

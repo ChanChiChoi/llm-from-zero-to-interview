@@ -10,9 +10,9 @@
 
 ReAct 把模型决策与环境观察交替组织。[原论文](https://arxiv.org/abs/2210.03629)研究模型交错生成任务相关轨迹与动作、再从外部知识库或环境取得观察的做法。对一条包含 $K$ 次动作的轨迹，可记为：
 
-$$
+```math
 \tau=(q,a_1,o_1,a_2,o_2,\ldots,a_K,o_K,y)
-$$
+```
 
 其中 $q$ 是用户目标，$a_k$ 是第 $k$ 步提出的动作，$o_k$ 是执行器返回的观察，$y$ 是最终结果。状态可以写成 $s_{k+1}=s_k\oplus(a_k,o_k)$：把新动作和观察加入已有状态，再让模型基于更新后的状态决定下一步。
 
@@ -63,8 +63,10 @@ print("event_kinds=", [event["kind"] for event in state["events"]])
 
 如果模型没有原生工具协议，教学实现可能让它输出：
 
-> Action: search_docs  
-> Action Input: 报销金额审批规则
+```text
+Action: search_docs
+Action Input: 报销金额审批规则
+```
 
 解析器再把文本转成动作：
 
@@ -102,9 +104,9 @@ print(parse_react("Final Answer: 资料不足。"))
 
 循环需要有限预算，例如最大决策步数、工具调用数、累计输入与输出 token、总耗时和金额成本：
 
-$$
+```math
 B=(B_{\mathrm{steps}},B_{\mathrm{calls}},B_{\mathrm{tokens}},B_{\mathrm{time}},B_{\mathrm{cost}})
-$$
+```
 
 执行器每一步检查已用预算；触及任一上限，任务进入 budget_exhausted。Prompt 中写“请不要调用太多工具”只是软提示，不能代替程序里的硬限制。
 

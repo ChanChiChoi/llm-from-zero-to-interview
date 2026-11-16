@@ -10,7 +10,7 @@
 
 1. `book-01-core-30/`：第一册，大模型算法岗核心主线；以文本语言模型从输入、表示、训练到生成和验证的生命周期建立书系共同基础，并提供各专题的阅读入口，不替代专题深挖或项目实战。
 2. `book-02-advanced-100/`：第二册，进阶 124 讲，沿建模、架构、数据、训练、对齐、Serving、应用和研究判断形成连续主线；多模态部分拆分为理解与对齐、图像/视频生成、语音交互、评估与研究四个单元。第二部分覆盖现代 Transformer 变体、SSM/S4/Mamba 与混合架构。
-3. `book-03-practical-handbook/`：第三册，16 章实战项目教材，沿实现基础、训练适配、推理、RAG 证据回答、Agent 受控动作、离线评估、轨迹与线上验证、多模态选读和作品集表达形成可复核交付闭环；RAG 与 Agent 分章讲解并在项目接口处衔接。
+3. `book-03-practical-handbook/`：第三册，18 章实战项目教材，沿实现基础、训练适配、推理、RAG 证据回答、Agent 受控动作、离线评估、轨迹与线上验证、多模态选读、作品集、项目答辩、系统设计和论文复现形成可复核交付闭环；RAG 与 Agent 分章讲解并在项目接口处衔接。
 4. `book-04-llm-encyclopedia/`：第四册，大模型百科全书，用于概念速查。
 5. `book-05-llm-training/`：第五册，大模型训练全流程。
 6. `book-06-llm-deployment/`：第六册，大模型部署与推理工程。
@@ -94,7 +94,7 @@ Claude Opus 5.5 的 compaction 增补接入第二十册第 7.25 节：对照 on-
 
 Kimi K2.7 Code 接入第二十一册第 94 章：从 1T/32B active MoE、MLA 与 native INT4 拆解权重/缓存账本，再沿强制 thinking、reasoning_content 回传和多模态工具循环分析长周期 coding Agent。第六册承接量化权重、KV cache、视觉 prefill 与单位成功成本；第十七册和第二十册承接工具授权、执行回执、幂等、状态回放与 verifier；第七册区分 Artificial Analysis、DataCurve mini-swe-agent 和 Kimi 发布方 benchmark。官方称同模型的 Highspeed 服务变体仅作为路由/供给条件，不新增模型候选；训练 recipe、完整权重、硬件 profile 和生产 acceptance 仍未确认。详见 [Kimi K2.7 Code 研究笔记](research/model-update-2026-09/kimi-k2.7-code-source-notes.md)。
 
-第六册新增 GPT-6 Astra 长上下文、reasoning effort、工具宿主、阈值计费、异步工具、WebSocket steering、canonical compaction 和技能/`AGENTS.md` 上下文治理章节；第十六册新增 GLM-5.3 长任务环境、验证器、奖励捷径和协议迁移章节；第十七册新增 Kimi K3 发布证据、思考状态和 Harness 评测章节；第二十一册新增 Mistral Small 4、Step 3.5 Flash、DeepSeek V4.1-Flash、K2 Horizon、Qwen3.8、GLM-5.3-Flash 与 DeepSeek V4 Flash Vision 架构/多模态专题。相关章节均以官方模型页、发布文档、模型卡和论文为事实边界，并将参数规模、训练架构、完整配置、alias 路由与未公开缩写保留为待核验或带日期字段。
+第六册新增 GPT-6 Astra 长上下文、reasoning effort、工具宿主、阈值计费、异步工具、WebSocket steering、canonical compaction 和技能/`AGENTS.md` 上下文治理章节；第十六册新增 GLM-5.3 长任务环境、验证器、奖励捷径和协议迁移章节；第十七册第 15 章串联 Kimi K3 与 K3.1 Pro 的架构版本、API 消息合同和 Harness 评测证据；第二十一册新增 Mistral Small 4、Step 3.5 Flash、DeepSeek V4.1-Flash、K2 Horizon、Qwen3.8、GLM-5.3-Flash 与 DeepSeek V4 Flash Vision 架构/多模态专题。相关章节均以官方模型页、发布文档、模型卡和论文为事实边界，并将参数规模、训练架构、完整配置、alias 路由与未公开缩写保留为待核验或带日期字段。
 
 第二十一册第 88.26–88.27 节补入 Kimi K3 的 DFLASH 周边：公开 draft-only checkpoint、target hidden feature 的逐层 K/V 注入、block diffusion 训练对齐、SGLang capture hook 的 layer-output 索引语义，以及公开 checkpoint 与 PR 未公开 production benchmark 的证据边界。该内容属于 K3 serving/runtime 专题，不把 DFlash 另列为榜单模型。
 

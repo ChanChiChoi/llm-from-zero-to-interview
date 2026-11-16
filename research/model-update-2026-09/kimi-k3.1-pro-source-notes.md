@@ -48,3 +48,21 @@
 - 多轮消息回放与会话切换建议都绑定 Kimi 的模型/产品合同；不将其描述成通用 reasoning 协议或所有模型都必须回传隐藏思维。
 - 公开模型卡未固定读取 revision；技术报告与配置的后续引用需补固定 commit、实际阅读位置及差异。未独立执行权重加载、接口请求或 benchmark。
 
+## 2026-11-16 K3.1 Pro 固定模型卡、权重与接口快照
+
+### 来源与阅读范围
+
+- [Kimi K3.1 Pro 官方发布文章](https://www.kimi.ai/en/blog/kimi-k3-1-pro)：2026-11-16 访问。阅读模型定位、post-training/infra 说明、Terminal-Bench 4.0、Kimi Code Bench 3.0 Long-horizon 与脚注；Kimi Code 官方 [What's New](https://www.kimi.com/code/docs/en/kimi-code/whats-new.html) 将系列上线日期列为 2026-10-23。
+- [Kimi K3.1 Pro 固定 HF 模型卡](https://huggingface.co/moonshotai/Kimi-K3.1-Pro/blob/6d0a0202956796543364d666ab19c6ad1a494ee1/README.md) 与 [固定 `config.json`](https://huggingface.co/moonshotai/Kimi-K3.1-Pro/blob/6d0a0202956796543364d666ab19c6ad1a494ee1/config.json)：revision `6d0a0202956796543364d666ab19c6ad1a494ee1`，2026-11-16 访问。阅读 Model Introduction、Model Summary、Evaluation Results/footnotes、Deployment and Availability、Model Usage、License，以及 `text_config`、`dsa_config`、`linear_attn_config` 和 `quantization_config`。
+- [Kimi API Quickstart](https://platform.kimi.ai/docs/guide/kimi-k3-1-pro-quickstart)：2026-11-16 访问；核对 API model ID、thinking/effort、会话和多轮消息回放入口。该页是动态接口文档。
+- [Kimi Code 模型配置](https://www.kimi.com/code/docs/kimi-code/models.html)：2026-11-16 访问；核对 Kimi Code 模型 ID、上下文档位、thinking 默认值、effort 映射和切换会话建议。该页是动态产品文档。
+
+### 来源支持的事实与边界
+
+- 发布方称 K3.1 Pro 是 K3 的 post-trained 版本，使用更多后训练计算，并披露 RL framework、长上下文推理、训练效率、sandbox、rollout scheduling 和环境质量检查等栈级改进方向；没有公开足以复现完整训练的训练数据、目标函数与运行配方。产品文章称它为 3T-class，但固定模型卡结构表报告总参数 2.8T、激活参数 104B。
+- 固定模型卡/config 报告 93 层、1 个 dense layer、69 个 KDA 与 24 个 Gated DSA attention layers、896 个 experts、每 token top-16、2 个 shared experts、1,048,576 context、MXFP4 weights/MXFP8 activations。模型卡说明 K3.1 Pro 将 K3 中的 24 个 full-attention Gated MLA layers 换成 Gated DSA；固定 config 的 index top-k 为 2048。该 revision 支持具体公开配置字段，不支持推断任一 provider 或 runtime 的实际 kernel、缓存实现、性能或完整加载已验收。
+- K3.1 Pro 权重与配置文件在公开 HF 模型仓库可见，许可证为 Kimi K3.1 Pro License。仓库文件/metadata 存在不等于本地下载完整权重或通过目标硬件加载。
+- Kimi API 模型卡列出模型 ID `kimi-k3.1-pro`、`reasoning_effort` 的 `low`/`high`/`max` 取值且默认 `max`；多轮对话和工具调用须将完整 assistant message 原样回传，包括 `reasoning_content`、`tool_calls`，不能只保留 `content`。这是 Kimi API 接口合同，不证明该字段是所有内部推理的完整表示，也不应外推到其他 provider。
+- Kimi Code 文档使用 `k3.1-pro` 与 `k3.1-pro-highspeed` 等 Code product IDs；文档将 K3.1 Pro 默认 effort 列为 `high`，只支持 thinking 模式，关闭 thinking 会拒绝请求，并建议模型/effort 切换时新建会话以避免上下文缓存失效。Kimi Code 文档与 Kimi API 模型卡属于不同产品文档，因此各自默认值不能合并。
+- 官方发布材料报告 Kimi Code Bench 3.0 Long-horizon 内部评测中 K3.1 Pro 61.2%、K3 55.95%；Terminal-Bench 4.0 的 K3.1 Pro 报告值为 65.7%。模型卡脚注指出 K3.1 Pro 的 Terminal-Bench 使用 Claude Code harness，peer 值取自发布文章或官方 leaderboard；Kimi Code Bench 使用 Kimi 发布的内部设置，K3.1 Pro 使用 Claude Code harness，比较模型使用各自 max effort，部分专有模型测试可能有 fallback。发布方材料常规 benchmark 档位为 max/temperature 1.0/top-p 0.95，另有指定的例外。内部 benchmark 与跨来源 peer 数字均不能解释为裸模型准确率或严格同条件受控比较。
+- 本次只阅读官方发布资料、模型卡/config 和产品 API 文档；未调用 API、下载/加载权重、运行 Kimi Code、运行 benchmark、独立检查服务 fallback 或验证目标硬件性能。

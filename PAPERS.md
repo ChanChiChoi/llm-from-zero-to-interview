@@ -865,10 +865,11 @@ Model editing 与 unlearning 补读入口：[EVOKE](https://proceedings.iclr.cc/
 
 这些材料是官方发布方资料和页面脚注，不是 GLM-5.3 独立技术报告。50% 提升、84.5%、54.4%、105/130 及 2,436/269/1,097 等数字必须连同任务定义和运行条件引用，不能与 DataCurve 或 Artificial Analysis 拼成裸模型结论。
 
-### Kimi K3 发布与长任务 Harness
+### Kimi K3/K3.1 Pro 发布与长任务 Harness
 
 1. [Kimi K3 官方发布文章](https://www.kimi.com/en/blog/kimi-k3)：KDA、AttnRes、Stable LatentMoE、量化、视觉、长上下文、Agent 限制和评测脚注入口。
 2. K3 文章中的技术和 benchmark 需绑定发布时的模型、harness、硬件、effort 与 fallback；Kimi Linear、Attention Residuals 论文只用于解释一般机制，不证明 K3 的完整配置。
+3. [Kimi K3.1 Pro 官方发布文章](https://www.kimi.ai/en/blog/kimi-k3-1-pro)、[固定 HF revision](https://huggingface.co/moonshotai/Kimi-K3.1-Pro/tree/6d0a0202956796543364d666ab19c6ad1a494ee1) 与 [Kimi API Quickstart](https://platform.kimi.ai/docs/guide/kimi-k3-1-pro-quickstart)：K3.1 Pro 后训练说明、Gated DSA 配置、消息回传合同和 benchmark 条件；Kimi API 与 Kimi Code 的 model ID/effort defaults 分属各自产品文档。来源版本和边界见[Kimi K3.1 Pro 来源记录](research/model-update-2026-09/kimi-k3.1-pro-source-notes.md)。
 
 ### DeepSWE v1.1 评测快照
 
@@ -1030,7 +1031,7 @@ K3 report 与固定 config 是官方配置证据，不等于完整训练 recipe�
 
 1. [固定 HF safetensors index](https://huggingface.co/moonshotai/Kimi-K3/blob/f831ab66814297da540d832a5235f8e904f29d06/model.safetensors.index.json)：`497,220` tensor mappings、96 shards、`metadata.total_size=1,560,860,324,864` bytes；这是 packed artifact 证据，不是本地权重加载证明。
 2. [固定 `modeling_kimi_linear.py`](https://huggingface.co/moonshotai/Kimi-K3/blob/f831ab66814297da540d832a5235f8e904f29d06/modeling_kimi_linear.py)：`KimiDynamicCache` 分离 full-attention K/V 与 KDA conv/recurrent state；chunk/prefill 和 single-token recurrent decode 走不同路径。
-3. [`kimi_k3_manifest_audit.py`](research/model-update-2026-09/code/kimi_k3_manifest_audit.py)：零依赖教学审计器，用于验证 revision/config/index 的一致性；通过不等于完整权重、CUDA kernel、目标硬件 profiling 或线上 acceptance。
+3. 固定 config/index 元数据可在不加载完整权重时检查模型 revision、层数、专家字段与分片清单；index 统计不能证明 CUDA kernel、目标硬件 profiling 或线上 acceptance。
 
 ## Qwen3.5-397B-A17B：原生多模态与混合 state 架构
 

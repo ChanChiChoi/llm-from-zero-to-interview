@@ -18,9 +18,9 @@
 
 工具定义可抽象为 $t_i=(\mathrm{name}_i,\mathrm{schema}_i,\mathrm{risk}_i,\mathrm{roles}_i,\mathrm{sideEffects}_i,f_i)$。一次调用的自动执行条件为：
 
-$$
+```math
 A(c)=I_{\mathrm{known}}\land I_{\mathrm{schema}}\land I_{\mathrm{identity}}\land I_{\mathrm{scope}}\land I_{\mathrm{budget}}\land I_{\mathrm{riskPolicy}}
-$$
+```
 
 每个 $I$ 是独立检查：工具是否在固定目录、参数是否符合结构、身份是否可信、对象范围是否授权、预算是否充足、风险策略是否允许。自动条件全部通过，也不代表高风险动作不需要人工确认。
 
@@ -84,9 +84,9 @@ print(validate_email({"to": "attacker@example.com", "body": "通知"}))
 
 确认页面应把用户真正要授权的动作说清楚，例如收件人、金额、订单号或文件路径。服务端把确认绑定到用户与租户、工具名、规范化参数摘要、策略版本、有效期和一次性状态：
 
-$$
+```math
 \mathrm{approval}[\mathrm{id}]=(\mathrm{user},\mathrm{tenant},\mathrm{tool},H(\mathrm{canonicalArgs}),\mathrm{policyVersion},\mathrm{expiresAt},\mathrm{pending})
-$$
+```
 
 这里的 id 是服务端记录索引，不是可转交的万能授权 token。用户确认后，执行服务要在共享状态中原子检查并消费记录；收件人、金额、对象版本、角色或策略若有变化，就必须重新确认。
 

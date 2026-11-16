@@ -9751,6 +9751,18 @@ Hybrid Cache Recovery：混合缓存恢复；同时恢复 MLA attention history�
 
 Tool-call Parser Drift：工具调用解析漂移；模型生成的 tool-call 格式与宿主 parser/schema 预期不一致。应通过 schema validation、retry/idempotency、权限、executor receipt 和 verifier 处理，不能直接执行或把解析失败等同于模型能力。
 
+## 2026-11 Kimi K3.1 Pro
+
+Kimi K3.1 Pro：Kimi K3 的后训练版本；公开资料还显示它与 K3 的注意力层配置不同。应分别固定模型/API ID、权重 revision、provider、effort 和 harness，不能把它当成 K3 的别名。
+
+Gated DSA：门控 DeepSeek Sparse Attention；K3.1 Pro 固定配置包含 24 个 Gated DSA 层，模型卡称它们替换 K3 的 24 个全注意力 Gated MLA 层，config 的 index top-k 为 2048。该配置字段不证明目标 serving backend 已实现相同路径或性能。
+
+K3.1 Pro Model-ID Scope：K3.1 Pro 模型 ID 的产品作用域；Kimi API 使用 `kimi-k3.1-pro`，Kimi Code 使用 `k3.1-pro` 等 Code ID，二者的默认 reasoning effort 文档也不同，需连同 provider 记录。
+
+K3.1 Pro `reasoning_content` Replay Contract：Kimi API 的 K3.1 Pro 多轮消息回放合同；回传完整 assistant message，包括 `reasoning_content` 和 `tool_calls`。这是具体 API 字段合同，不等于其他模型通用的隐藏思维表示。
+
+Kimi K3.1 Pro HF Revision：固定 K3.1 Pro 模型卡/config 的 Hugging Face revision `6d0a0202956796543364d666ab19c6ad1a494ee1`；锁定结构字段版本，不代表本地下载、加载或目标硬件推理已经通过。
+
 ## 2026-09 Qwen3.5-397B-A17B
 
 Qwen3.5-397B-A17B：Qwen3.5 的 397B total/17B active MoE 多模态模型；本项目将它作为 Qwen3.8 架构专题的前置锚点。

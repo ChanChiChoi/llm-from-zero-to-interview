@@ -1293,16 +1293,16 @@
 12. 为 tool job、steering、断线恢复与安全阻断设计本地 toy 状态机，覆盖重复 task handle/call ID、错误 call ID、pending job 消费、steering 失败和 `misalignment_policy_violation` 后停止自动 retry；标明 toy 不调用真实 API，也不能证明服务端事件调度。
 13. 按 2026-11-02 当前官方页面制作 capability matrix：`none` effort、Responses/Chat Completions function calling、EU data residency、Fast/Ultrafast 资格、价格和 cache-preserving `configuration_update`；对每个字段记录 model ID、来源链接与访问日期，不能把文档路由变化直接当作模型 revision。
 
-## 2026-09 Kimi K3 发布证据与 Harness 验收
+## 2026-11 Kimi K3/K3.1 Pro 发布证据与 Harness 验收
 
-1. 阅读 Kimi K3 发布文章、技术报告和固定 config，把总参数、视觉、长上下文、KDA、AttnRes、Stable LatentMoE、量化、评测和权重状态分别标成“发布披露 / 论文机制 / 已核验配置 / 待核验实现”。
+1. 阅读 Kimi K3 与 K3.1 Pro 发布资料、技术报告和各自固定 config，把总参数、视觉、长上下文、KDA、AttnRes、Gated MLA/DSA、Stable LatentMoE、量化、评测和权重状态分别标成“发布披露 / 论文机制 / 已核验配置 / 待核验实现”。
 2. 为跨模型代码任务写一个 state manifest，覆盖目标、事实、假设、diff、工具 observation、权限、版本、预算、artifact hash 和未完成副作用。
 3. 设计固定模型换 harness、固定 harness 换模型、固定模型与 harness 换 effort 的三组实验，并分别报告成功率、工具轮数、恢复成功率、延迟、成本和失败类型。
 4. 比较 KDA、全注意力和混合路径，固定模型规模、训练 token、硬件和任务集，测精确检索、TTFT、TPOT、cache bytes 和长任务恢复。
 5. 给出一组带 fallback 的基线/候选分数，计算绝对提升、相对提升和单位成功成本，指出哪些结果不可比。
-6. 根据固定 HF `config.json` 写一份 K3 identity/config manifest，至少包含 revision、93 layers、69 KDA/24 Gated MLA、`q_lora_rank`、`kv_lora_rank`、experts、context 和“完整权重未下载”状态；禁止把 metadata 写成本地加载成功。
+6. 为 K3 与 K3.1 Pro 分别根据固定 HF `config.json` 写 identity/config manifest；至少比较 revision、93 layers、K3 的 69 KDA/24 Gated MLA 与 K3.1 Pro 的 69 KDA/24 Gated DSA、index top-k、`q_lora_rank`、`kv_lora_rank`、experts、context 和本地权重状态；禁止把 metadata 写成本地加载成功。
 7. 根据 FlashKDA README 设计 H20/GB200 benchmark 复现实验，固定 `T/H/D`、warmup、iters、repeats、baseline、CUDA/PyTorch/driver 和 backend，报告 latency、speedup、失败环境与“不能外推端到端吞吐”的理由。
-8. 设计 K3 hybrid serving recovery 测试：分别注入 MLA cache 丢失、KDA recurrent state 丢失、prefix-match unit 不一致、KV dtype 变化、模型 revision 变化和 tool-call parser 漂移，要求系统在 schema/权限/executor/verifier 层给出可审计失败，而不是静默继续。
+8. 设计 K3/K3.1 Pro hybrid serving recovery 测试：分别注入 MLA/DSA index cache 丢失、KDA recurrent state 丢失、prefix-match unit 不一致、KV dtype 变化、模型 revision 变化和 tool-call parser 漂移，要求系统在 schema/权限/executor/verifier 层给出可审计失败，而不是静默继续。
 
 ## 2026-09 GLM-5.3 长任务与验证器验收
 
