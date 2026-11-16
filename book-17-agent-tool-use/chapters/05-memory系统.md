@@ -236,6 +236,8 @@ project=billing-api; environment=production; python=3.12; valid_from=2026-10-19
 
 如果记忆更新由 LLM 决定，必须把输出限制为候选动作和可验证字段；存储层仍要检查调用主体、字段范围、版本冲突和策略。不能让模型返回一段“已检查权限”的文字，就把权限判断也交给模型。
 
+写入策略还可以按交互情境表达用户的记忆偏好，再由反馈逐步调整。AdaMem 将这个问题定义为 preference-conditioned write control：每种情境对应一条自然语言 Memory Policy，周期反馈用于更新策略，策略再影响后续候选的写入。在 AdaMem-Bench 的六个并行 persona 和五段十周故事中，作者在两种抽取模型和两类反馈模式下报告平均问答准确率从 Mem0 的 80.0% 提高到 84.35%，持久记忆量减少 9.27%；作者也指出，模型仍难以稳定按策略选择性写入。这些结果只说明该论文基准和配置中的表现。写入偏好可以表达“我希望记住什么”，不能授予访问他人数据或执行操作的权限。[AdaMem 论文](https://aclanthology.org/2026.emnlp-industry.189/)
+
 ## 5.6 检索：先确定能看什么，再判断什么相关
 
 一次检索可拆成六步。每一步都处理不同的错误来源：
@@ -403,8 +405,13 @@ tombstone 应只留下阻止旧副本复活所需的标识、版本和状态，�
 | Reflexion，2023 | 从环境反馈生成语言经验，用于后续尝试 | 保存“失败原因和下次可执行策略”往往比保存整条轨迹更有用 | 自我反思可能错误；特定 benchmark 提升不能直接代表开放场景 |
 | LongMemEval，2025 | 把长期对话记忆拆成抽取、多 session 推理、时间推理、知识更新和拒答等能力 | 记忆评测不能只看单一 top-k 命中率 | benchmark 分数受数据集、模型和系统配置影响，不能当作产品上线指标 |
 | MemoryAgentBench，ICLR 2026 | 评估准确检索、交互中的新知识学习、长程理解和选择性遗忘 | 冲突更新与旧事实处理应有独立测试，不能仅评估召回 | 论文将 selective forgetting 操作化为基准任务，不等于所有产品的删除承诺 |
+| [Memora](https://aclanthology.org/2026.findings-acl.1337/)，Findings of ACL 2026 | 用 Forgetting-Aware Memory Accuracy（FAMA）惩罚依赖过期或已失效记忆 | 将旧记忆误用单独列为评测目标 | 作者报告的失效模式限于其四个模型、六个记忆系统和基准设置 |
 | EverMemBench，2026 预印本 | 评估多参与者、多群组、跨话题且随时间变化的协作对话记忆 | 除记住内容，还要测试说话者、角色和群组归属 | 结果只适用于其构造的协作对话基准，不能直接代表单用户产品或所有部署 |
 | Mem0，2025 预印本 | 从新对话提取候选事实，与近似旧记忆比较，再做新增、更新或失效处理；图版本还表示关系 | 提取之后还需要合并与冲突管理；时间信息应显式保存 | 论文中的对比结果由论文作者报告，需看其数据集、基线与 judge 设置 |
+| [AdaMem](https://aclanthology.org/2026.emnlp-industry.189/)，EMNLP 2026 Industry Track | 按情境记忆偏好控制写入，并利用周期反馈更新策略 | 写入策略也应接受选择性写入评测 | 偏好策略不等于访问控制；作者报告当前模型仍难稳定执行选择性策略 |
+| [Mem2ActBench](https://aclanthology.org/2026.acl-long.370/)，ACL 2026 | 评估长期记忆是否被主动用于工具选择和参数落地 | 从“能回答过去发生了什么”扩展到“能否据此正确行动” | 数据构造和结果绑定其工具任务与被测系统 |
+| [OP-Bench](https://aclanthology.org/2026.emnlp-main.1168/)，EMNLP 2026 | 评估不相关提及、重复使用和迎合式的过度个性化 | 记忆质量还包括当前回答是否适当地使用已获准记忆 | 基准报告不能代表所有产品中的发生率，也不替代访问授权检查 |
+| [PS-Bench](https://aclanthology.org/2026.acl-long.1260/)，ACL 2026 | 评估个人记忆是否会影响模型对请求意图的安全判断 | 需要把长期个人上下文纳入安全回归集 | 作者报告的攻击成功率变化只适用于所测框架和模型 |
 
 MemGPT 的论文把超出上下文窗口的旧消息移出当前上下文、生成递归摘要，并保存在可通过函数调用读取的 recall storage 中。[论文实现描述](https://arxiv.org/html/2310.08560v2) 这回答的是“上下文满了怎么办”，不能单独回答“用户要求删除后，摘要和 recall 副本怎样同步清理”。
 
@@ -414,7 +421,11 @@ Mem0 论文展示了另一类问题：新对话中提取候选事实后，先检
 
 LongMemEval 是评估对话助手长期记忆能力的基准。论文整理了 500 个问题，并覆盖信息抽取、多 session 推理、知识更新、时间推理和未知信息拒答等能力。作者报告在其持续交互设置下，商业助手和长上下文模型的记忆准确率会下降约 30%；这是该基准的实验观察，不是所有产品固定会下降的比例。[LongMemEval 论文](https://arxiv.org/abs/2410.10813)
 
-后续基准把评测范围继续向任务学习和协作记忆拓展。MemoryAgentBench 将能力分为准确检索、test-time learning、长程理解和 selective forgetting；它构造事实整合任务，检查新信息出现后旧信息是否仍主导答案。[论文](https://arxiv.org/abs/2507.05257) EverMemBench 使用五个跨群组协作项目的长对话，共 51,023 轮、约 422 万 tokens 和 2,400 组问答，覆盖细粒度回忆、memory awareness 和用户画像理解。它把“谁说的、属于哪个项目/群组、后来是否更新”也纳入测试，因此比单用户、单主题的回忆题更能暴露归属与时间问题。[论文预印本](https://arxiv.org/abs/2602.01313)
+后续基准把评测范围继续向任务学习、选择性遗忘和协作记忆拓展。MemoryAgentBench 将能力分为准确检索、test-time learning、长程理解和 selective forgetting；它构造事实整合任务，检查新信息出现后旧信息是否仍主导答案。[论文](https://arxiv.org/abs/2507.05257) Memora 提出 Forgetting-Aware Memory Accuracy（FAMA），对依赖过期或已失效记忆的回答施加惩罚；作者在四个 LLM 和六个记忆系统上报告常见的旧记忆复用及新旧信息协调失败。这些是该基准中的观察，不是产品级错误率。[Memora 论文](https://aclanthology.org/2026.findings-acl.1337/)
+
+EverMemBench 使用五个跨群组协作项目的长对话，共 51,023 轮、约 422 万 tokens 和 2,400 组问答，覆盖细粒度回忆、memory awareness 和用户画像理解。它把“谁说的、属于哪个项目/群组、后来是否更新”也纳入测试，因此比单用户、单主题的回忆题更能暴露归属与时间问题。[论文预印本](https://arxiv.org/abs/2602.01313)
+
+这些基准仍不能代替任务执行评测：记忆检索正确，不代表 Agent 会在动作中用对它。Mem2ActBench 专门测试历史偏好和任务状态能否进入工具选择与参数填写；其数据包含 2,029 个 session，平均每个约 12 轮用户、助手和工具交互，并生成 400 个工具任务。人工评估将其中 91.3% 判为强依赖记忆；这是任务集的依赖性标注比例，不是模型成功率。作者在七种记忆框架上发现，主动用记忆完成参数落地仍有明显不足。[Mem2ActBench 论文](https://aclanthology.org/2026.acl-long.370/)
 
 EverMemBench 的详细结果还区分了检索与推理：在其 multi-hop 归因任务上，Gemini-3-Flash 使用完整历史时准确率为 26.51%，提供标注的 oracle 证据后为 88.37%；GPT-4.1-mini 对应为 2.41% 和 97.99%。这些数字绑定论文模型、任务和评测设置，说明该数据集上的证据定位/归属会成为瓶颈，不能说成所有 Agent 的固定能力水平。论文摘要对 26% 的描述与正文详细结果并不完全一致，因此这里采用正文表格和实验分析中的分模型口径，并在研究笔记中保留该来源差异。
 
@@ -435,6 +446,7 @@ EverMemBench 的详细结果还区分了检索与推理：在其 multi-hop 归�
 | 不安全候选写入率 | 标注为不应写入的候选数，例如不可信指令、无来源推断或超出保存策略的敏感数据 | 写入策略是否错误接受了候选；同时报告误拒绝的可保存候选，避免只压低写入率 |
 | 删除后残留率 | 已确认删除的记忆及其派生副本数 | 删除后在线检索、近义查询、摘要恢复是否仍能召回 |
 | 任务提升 | 同一任务在 memory on/off 下的配对样本 | 记忆是否提高成功率，是否也增加错误工具动作 |
+| 记忆驱动工具任务正确率 | 预先标注需要历史记忆的工具任务数 | 分别检查工具选择、参数是否由正确记忆支持、执行后状态是否满足任务契约；不要只报告一个合并成功率 |
 | 运行成本 | 同一批任务的 token、延迟和存储量 | 提升是否值得其成本 |
 
 不要把所有错误揉成一个平均分。比如，一个系统可能检索命中率很高，却把过期记录当成当前事实；另一个系统可能准确拒答未知问题，但漏掉用户明确要求保存的偏好。它们需要不同修复。
@@ -460,6 +472,10 @@ EverMemBench 的详细结果还区分了检索与推理：在其 multi-hop 归�
 
 一个有用的安全设计原则是：**记忆是数据，不是权限；过去的许可不是现在的许可；相似性不是事实性。** 这些原则不是依赖模型“听话”，而要落实在授权服务、数据模型、工具前置检查和评测里。
 
+还有一类独立问题：一条记忆可能已获准读取，却不适合出现在当前回答中。访问控制判断“当前主体能否读取”，相关性和恰当性判断“这次回答是否需要使用它”。OP-Bench 将过度个性化分为无关提及（Irrelevance）、重复（Repetition）和迎合（Sycophancy），并构造 1,700 个经核验实例；作者报告，在所测模型和记忆增强方法中，这类过度使用并不少见。[OP-Bench 论文](https://aclanthology.org/2026.emnlp-main.1168/) 这些观察受该基准限制。评测时应把“有权读取但不应提及”的样例单列，与越权访问率分开。
+
+长期个人上下文还可能影响模型对当前请求意图的判断。PS-Bench 把良性个人记忆使模型将有害请求解释为良性，称为 intent legitimation；作者在多个记忆增强框架和基础模型上报告，相对无记忆基线，攻击成功率增加 15.8%–243.7%。这是相对变化范围，绑定其评测设置，不能当作线上系统的普遍风险率。[PS-Bench 论文](https://aclanthology.org/2026.acl-long.1260/) 因此，安全回归集除了检查恶意内容写入，也应检查无害偏好或历史上下文会不会削弱对当前请求的独立判断。
+
 尤其要注意，记忆会放大提示注入的持续时间。恶意网页如果只影响当前回答，危害可能止于一次交互；如果它被写进长期偏好、项目规则或程序性记忆，之后许多任务都可能重复受影响。因此，不可信来源标签应沿着摘要和派生记录传播，不能因改写成更流畅的中文就失去来源属性。
 
 ## 5.14 框架文档和工程文章给出的实现视角
@@ -467,7 +483,7 @@ EverMemBench 的详细结果还区分了检索与推理：在其 multi-hop 归�
 研究论文常在受控任务中比较机制；框架文档展示状态和存储接口如何落地；工程博客则会讨论真实系统中的上下文、成本和运维约束。阅读时要保持它们的证据边界。
 
 - **LangGraph**：短期 thread 状态通过 checkpointer 持久化；长期记忆在 namespace 下跨 session 保存。适合学习任务 checkpoint 与长期 store 的接口边界。[官方文档](https://docs.langchain.com/oss/python/langgraph/add-memory)
-- **OpenAI Agents SDK Sessions**：文档展示 session 的恢复、历史合并、限制检索历史和基本 memory 操作。它提供的是会话持久化接口；具体应用仍需自行设计跨用户授权、事实版本和产品删除语义。[Sessions 文档](https://openai.github.io/openai-agents-python/sessions/)
+- **OpenAI Agents SDK Sessions**：文档展示 session 的恢复、历史合并、限制检索历史和基本 memory 操作。SQLiteSession 的信任边界写得很明确：session ID 只用于选择会话历史，本身不认证用户，也不授权读取该历史；应用必须逐个 session 授权，并限制数据库文件、底层存储和备份的访问。文档还说明，EncryptedSession 提供加密，但不验证历史条目是否完整、顺序是否正确，也不替代存储完整性控制。这是该文档对 SQLite 存储的说明；其他后端应核对各自的授权与完整性合同。[SQLite storage trust boundary](https://openai.github.io/openai-agents-python/sessions/#sqlite-storage-trust-boundary)
 - **LangChain Context Engineering**：文章把写入、选择、压缩和隔离作为上下文管理的常用操作，并讨论如何检查 Agent 各步的输入。这是工程团队的经验归纳，可用来审阅 prompt 组装链路。[文章](https://www.langchain.com/blog/context-engineering-for-agents)
 - **Databricks Memory Scaling**：文章讨论外部记忆、规模化共享、访问控制、来源追踪和保留策略，也报告了其公司场景中的实验观察。适合看工程约束和组织级记忆问题；其中效果数字是公司报告，不能直接泛化到其他任务。[文章](https://www.databricks.com/blog/memory-scaling-ai-agents)
 
@@ -576,6 +592,11 @@ Agent Memory 是一套持续维护状态的系统，至少包含表示、写入�
 6. Hu et al., [Evaluating Long-Horizon Memory for Multi-Party Collaborative Dialogues（EverMemBench）](https://arxiv.org/abs/2602.01313), 2026 预印本。
 7. Chhikara et al., [Mem0: Building Production-Ready AI Agents with Scalable Long-Term Memory](https://arxiv.org/abs/2504.19413), 2025 预印本。
 8. Hu et al., [Memory in the Age of AI Agents: A Survey](https://arxiv.org/abs/2512.13564), 2025 预印本。
+9. Chen et al., [AdaMem: Learning What to Remember with Adaptive Memory Policies for Personalized Agents](https://aclanthology.org/2026.emnlp-industry.189/), EMNLP 2026 Industry Track。
+10. Uddin et al., [From Recall to Forgetting: Benchmarking Long-Term Memory for Personalized Agents（Memora）](https://aclanthology.org/2026.findings-acl.1337/), Findings of ACL 2026。
+11. Shen et al., [Mem2ActBench: A Benchmark for Evaluating Long-Term Memory Utilization in Task-Oriented Autonomous Agents](https://aclanthology.org/2026.acl-long.370/), ACL 2026。
+12. Hu et al., [OP-Bench: Benchmarking Over-Personalization for Memory-Augmented Personalized Conversational Agents](https://aclanthology.org/2026.emnlp-main.1168/), EMNLP 2026。
+13. Guo et al., [When Personalization Legitimizes Risks: Uncovering Safety Vulnerabilities in Personalized Dialogue Agents（PS-Bench）](https://aclanthology.org/2026.acl-long.1260/), ACL 2026。
 
 ### 官方文档与工程文章
 

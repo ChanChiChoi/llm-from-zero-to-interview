@@ -65,3 +65,17 @@
 - **阅读位置**：README 的项目定位、Repository Guidance、indexing 成本提示和版本迁移说明。
 - **来源支持的事实**：仓库说明该项目是探索图结构增强问答的 research project，当前处于 largely in maintenance mode，不计划接受新功能 PR 或实现新功能，仍会按需要处理 bug 与依赖更新；README 另提醒 indexing 可能成本较高，建议先小规模试验，并指出示例代码不是正式支持的 Microsoft 产品。
 - **证据等级与边界**：source-backed（项目官方仓库动态页面）；结论绑定 2026-11-02 访问时的 `main` README，不代表未来支持策略或每个版本的维护周期。论文关于 global sensemaking 的结果仍限于论文语料、任务和对照方法，仓库维护状态不改变论文实验结论。
+
+## BM25 词项排序机制
+
+- **来源与版本**：[Lucene 10.3.1 `BM25Similarity` API](https://lucene.apache.org/core/10_3_1/core/org/apache/lucene/search/similarities/BM25Similarity.html)，官方版本文档；Stephen Robertson、Hugo Zaragoza，*The Probabilistic Relevance Framework: BM25 and Beyond*，Foundations and Trends in Information Retrieval 3(4), 2009，[论文 PDF](https://www.ccs.neu.edu/home/vip/teach/IRcourse/IR_surveys/robertson_foundations.pdf)。访问日期：2026-11-16。
+- **阅读位置**：Lucene `idf`、`avgFieldLength`、`k1`、`b` 的 API 说明；论文第 3.4 节 Eliteness Model and BM25 与第 3.9 节开源实现。
+- **来源支持的事实**：BM25 对查询词贡献进行累计，Lucene 10.3.1 的默认形式包含词频饱和、文档长度归一化和 IDF 项；其 `k1` 控制非线性词频归一化，`b` 控制长度归一化程度，Lucene 默认值为 1.2 和 0.75，IDF 使用 `log(1 + (N - df + 0.5)/(df + 0.5))`。
+- **证据等级与边界**：source-backed（Lucene 固定版本 API 与原始作者综述）。BM25 变体、默认参数和文本分析器会因引擎与配置而异；该公式说明词项匹配排序机制，不证明它在特定中文语料、RAG 问题类型或混合检索链上优于其他方法。需要保留目标语料分词设置并实测。
+
+## Structured Outputs 的应用校验边界
+
+- **来源与版本**：[OpenAI Structured Outputs API 文档](https://developers.openai.com/api/docs/guides/structured-outputs)，动态官方文档，访问日期 2026-11-16。
+- **阅读位置**：Responses API 的用途说明、Schema adherence、拒答/不完整响应处理以及 schema 支持范围。
+- **来源支持的事实**：Structured Outputs 能让符合条件的完整、非拒答输出遵循所提供 JSON Schema；拒答、长度不足造成的不完整响应和 API 错误仍需应用单独处理。Schema 不能表达的业务规则也需应用校验。
+- **证据等级与边界**：source-backed（OpenAI API 官方文档，动态页面）。Schema 合规只约束结构，不证明答案事实正确、引用指向本次获准证据，或证据足以支持主张；可用能力还受模型和 Schema 子集限制。

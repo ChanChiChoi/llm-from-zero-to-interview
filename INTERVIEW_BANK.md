@@ -243,7 +243,11 @@
 
 49H. 代表性 Agent 工作流评测各解决什么缺口？怎样区分它们支持的结论？
     考察点：SWE-bench/SWE-Gym/Terminal-Bench、WebArena/OSWorld/BrowserGym、τ-bench/ToolSandbox/AgentDojo、GAIA/ScienceAgentBench/PaperBench、METR/Gaia2、工具合同审计。
-    回答框架：先按工作对象比较：SWE-bench 测仓库 issue 到 patch/测试，SWE-Gym 加入可执行环境和可用轨迹，Terminal-Bench 测终端工作流；WebArena 检查网站任务后的功能状态，OSWorld 测桌面应用与 GUI 流程，BrowserGym 是实验框架而非统一任务集或 grader。τ-bench 以领域 API/状态和 pass^k 测多轮可靠性：pass^k 是 k 次都成功，pass@k 是至少一次成功；ToolSandbox 用 milestone 与 minefield 表达过程依赖和禁止事件，AgentDojo 分开报告正常效用、攻击下效用和攻击成功。GAIA 看综合助理答案，ScienceAgentBench 看可执行数据分析产物，PaperBench 看长程论文复现的部分进度。METR 的 time horizon 是人类任务耗时构成的难度刻度；Gaia2 测动态异步环境变化，两者不是 Agent 自主运行时长。最后说明 benchmark 分数绑定任务、环境、预算和 grader；工具合同审计要检查文档/schema、状态变化及 grader 读取字段，但潜在缺陷不证明 Agent 曾触发，也不证明排行榜变化。方法对照见[第七册第十五章研究记录](research/specialized-frontier-eval-cluster-depth-review-2026-10-27.md)。
+    回答框架：先按工作对象比较：SWE-bench 测仓库 issue 到 patch/测试，SWE-Gym 加入可执行环境和可用轨迹，Terminal-Bench 测终端工作流；WebArena 检查网站任务后的功能状态，OSWorld 测桌面应用与 GUI 流程，BrowserGym 是实验框架而非统一任务集或 grader。τ-bench 以领域 API/状态和 pass^k 测多轮可靠性：pass^k 是 k 次都成功，pass@k 是至少一次成功；ToolSandbox 用 milestone 与 minefield 表达过程依赖和禁止事件，AgentDojo 分开报告正常效用、攻击下效用和攻击成功。GAIA 看综合助理答案，ScienceAgentBench 看可执行数据分析产物，PaperBench 看长程论文复现的部分进度。METR 的 time horizon 是人类任务耗时构成的难度刻度；Gaia2 测动态异步环境变化，两者不是 Agent 自主运行时长。多用户共享资源任务还要把群体结果和逐用户请求/同意并列。最后说明 benchmark 分数绑定任务、环境、预算和 grader；工具合同审计要检查文档/schema、状态变化及 grader 读取字段，但潜在缺陷不证明 Agent 曾触发，也不证明排行榜变化。方法对照见[第七册第十五章研究记录](research/specialized-frontier-eval-cluster-depth-review-2026-10-27.md)。
+
+49I. 怎样验证 Agent 的 verifier 和 LLM judge 是否可信？
+    考察点：false accept/false reject、参考标签、弃权覆盖率、judge accuracy、重复稳定性、候选顺序敏感性、难度切片、留出校准集。
+    回答框架：先用外部状态或独立人工裁定作为参考，列 confusion matrix，分开计算无效结果误接收和有效结果误拒绝，并报告弃权/未评分样本与分母。对 LLM judge 另外检查与参考标签的准确性、固定输入重复调用的稳定性、交换候选顺序后的翻转率和覆盖率；这些指标不能互相替代。按领域与难度分层，在留出集校准；温度为零或多数投票都不等于可靠性保证。Agent 评估中的具体口径见[第十七册第十章](book-17-agent-tool-use/chapters/10-agent评估.md)。
 
 50. 如何设计一个最小泛化审计 demo？
    考察点：memorizer、rule model、underfit、分布偏移、overlap。
@@ -2306,7 +2310,7 @@
 
 97. 什么时候才值得使用 Multi-Agent？
     考察点：复杂任务、专业角色、并行、独立验证、baseline、成本。
-    回答框架：当任务需要多个专业角色、可以并行、需要独立审查或需要暴露冲突时才值得使用 Multi-Agent。简单任务应优先单 Agent 或固定 workflow；是否采用要和单 Agent baseline 比较任务成功率、质量、延迟、成本和安全性。
+    回答框架：当任务需要多个专业角色、可以并行、需要独立审查或需要暴露冲突时才值得使用 Multi-Agent。简单任务应优先单 Agent 或固定 workflow；采用前用相同输入、验收规则和可比预算做配对 baseline，比较任务成功率差、质量、延迟、成本和安全性。
 
 98. 如何设计一个 Multi-Agent coordinator？
     考察点：任务拆解、路由、状态、冲突、预算、停止条件。
@@ -2326,7 +2330,7 @@
 
 102. 如何评估 Multi-Agent 系统？
      考察点：任务成功、单 Agent 增益、角色匹配、消息、证据、冲突、重复、权限、成本。
-     回答框架：除了任务成功率，还要看 single-agent lift、role match rate、message valid rate、evidence support rate、conflict resolution rate、duplicate work rate、permission violation rate、unnecessary multi-agent rate、平均成本、延迟和人工接管率。
+     回答框架：除了任务成功率，还要看配对任务上的成功率绝对差、role match、assignment success、message validity、evidence support、conflict resolution 与 correctly resolved conflict、duplicate work、permission violation、不必要编排、平均成本、延迟和人工接管。MAMUBench 一类共享资源场景还要把群体结果与用户级目标、授权和 Agent 行为并列评估。
 
 103. Multi-Agent 为什么更需要权限隔离？
      考察点：最小权限、工具范围、上下文隔离、高风险动作、trace。
@@ -2394,7 +2398,7 @@
 
 119. Agent 安全评估应该看哪些指标？
      考察点：越权、注入、不可信内容、敏感数据、高风险、沙箱、审计。
-     回答框架：看 unauthorized attempt block rate、untrusted instruction block rate、tool output block rate、sensitive data block rate、external transfer block rate、high-risk protection rate、dry-run coverage、sandbox block rate、memory pollution block rate 和 audit completeness。
+     回答框架：把未授权提案率、未授权执行率和未授权阻断率分开；再看不可信指令隔离率、工具输出控制率、按策略禁止的数据流阻断率、高风险动作确认率与安全处置率、支持 dry-run 的已执行动作预演覆盖率、沙箱和 memory 污染阻断率、审计完整率及安全替代方案覆盖率。每项说明样本切片和分母；`drafted` 与 `blocked` 分开，确认率只统计已执行的高风险动作，安全处置率则覆盖全部高风险提案。
 
 120. Multi-Agent 安全为什么更复杂？
      考察点：跨 Agent 传播、共享状态、权限混乱、责任不清。
@@ -2402,7 +2406,7 @@
 
 121. 一道 Agent 面试题怎样才算回答完整？
      考察点：概念、公式、demo、trace、评估、安全、项目证据、trade-off。
-     回答框架：完整回答应先给定义和边界，再讲系统模块、关键指标、一个最小 demo 或 trace 数据结构、评估方式、安全门禁、项目经验和取舍。只讲术语或只讲最终效果都不完整。
+     回答框架：先明确任务目标、完成条件与 workflow/Agent 的边界，再画出状态、工具、权限、证据和 verifier 的责任关系；用一条成功或失败轨迹说明 observation 怎样改变状态、动作如何被校验、未知结果怎样恢复。最后报告结果、过程、成本和安全指标，说明替代方案及取舍；若引用项目经验，再给 baseline、失败样本、本人负责范围和可复核证据。只报术语或最终成功率都不完整。
 
 122. 如何设计 Agent interview readiness rubric？
      考察点：answer coverage、formula coverage、demo coverage、safety coverage、evaluation coverage、project evidence、red flags。
@@ -6362,21 +6366,21 @@
 ## 2026-09 Claude Opus 4.8：Dynamic Workflows 与多 Agent 评测
 
 1. **问：Dynamic Workflows 相比普通 tool loop 的关键系统差异是什么？**
-   **答：** Claude 按任务动态生成外部 orchestration scripts，拆解并行 subagents，并在结果汇总前检查、让其他 agents 尝试反驳；长任务的进度可持久化并在中断后恢复。它是产品/harness 形态，不是 Opus 4.8 的内部架构披露。
+   **答：** Claude 按任务动态生成外部 orchestration scripts，拆解并行 subagents，并在结果汇总前检查、让其他 agents 尝试反驳；长任务的进度可持久化并在中断后恢复。它是产品/harness 形态，不是 Opus 4.8 的内部架构披露。当前计划和默认开启范围见官方产品文档，且会随产品更新。
 
 2. **问：Opus 4.8 的 BrowseComp 多 Agent 数字能说明“Agent 越多越强”吗？**
-   **答：** 不能。System Card 报告 blocking orchestrator 为 88.5%；fixed 五 Agent team 为 85.4%，single agent 为 84.3%，但分别绑定 5M 与 10M total-token limits，latency 也是按固定 token 速率折算后加工具时间的 derived metric。多 Agent 通常花更多 tokens；易题没有明显 speedup，收益集中在 hard tail。
+   **答：** 不能。System Card §8.1 摘要表报告 single-agent 84.3、multi-agent 88.5。这是发布方特定 harness 的结果；没有对齐任务和预算时，不能把差异直接归因于增加 Agent，也不能推出通用成本或延迟收益。
 
 3. **问：为什么 System Card 的多 Agent 结果不能当作 Dynamic Workflows 的线上 SLO？**
-   **答：** 它们是不同 harness；论文式 benchmark 还固定了任务集、effort、工具、上下文/compaction、token budget 和 verifier。报告 latency 不是服务端原始 wall-clock，也没有包含实际队列、硬件、租户限额及生产错误分布。要评估产品必须按同一任务同时记录 score、全 Agent token、工具时间、真实 p50/p95 和 verifier 结果。
+   **答：** 它们是不同产品和评测 harness。使用产品时应按同一任务记录任务成功、全部 Agent 用量、协调和工具成本、实际 wall-clock、verifier 结果与失败分布；若 benchmark 使用了派生 latency 或特殊预算，应先核对对应原文定义，不能直接当成线上服务指标。
 
-4. **问：Opus 4.8 在代码总结中的 `3.7%` 代表整体诚信率吗？**
-   **答：** 不代表。它是预填充短上下文、off-policy coding transcript 的特定评测：模型没有主动披露重要失败事件的比例。提示并未直接追问失败，而且 transcript 不等同于真实部署轨迹；最终交付仍须由测试、权限检查和 artifact verifier 验收。
+4. **问：Opus 4.8 在代码总结中的 3.7% 代表整体诚信率吗？**
+   **答：** 不代表。它是预填充、未完全成功 coding transcript 的特定评测：模型没有主动披露重要失败事件的比例。用户没有明确追问失败，评测是 off-policy，且上下文短于不少真实部署轨迹；最终交付仍须由测试、权限检查和 artifact verifier 验收。
 
 5. **问：设计可恢复的长时 workflow 时，除了 checkpoint 还要记录什么？**
    **答：** 持久化任务 DAG 和版本、子任务 owner/status、输入输出 artifact digest、权限/批准记录、预算、取消与重试次数、消息/工具 trace 及 verifier 结果；恢复时做幂等检查，避免把“可 resume”误当作“已完成”或重复提交外部副作用。
 
-依据：[Claude Opus 4.8 研究笔记](research/model-update-2026-09/claude-opus-4.8-source-notes.md) §6；[第十七册第九章](book-17-agent-tool-use/chapters/09-multi-agent.md)。
+依据：[Agent 环境与多 Agent 研究笔记](research/agent-environments-multi-agent-2026-11.md)；[第十七册第九章](book-17-agent-tool-use/chapters/09-multi-agent.md)。
 
 ## 2026-09 Claude Sonnet 5.5：Thinking State 与类别化安全路由
 
@@ -6464,7 +6468,7 @@
 3. **问：工具请求超时后，为什么不能创建新的业务请求重试？**
    **答：** 下游可能已经提交，只是回执丢失。保持原 request ID 与幂等键，把状态记为 `committed_unknown`，先查询同一事务；确认已提交才补记成功，确认未提交后再按下游合同重试，仍未知则保持处理中或转人工。幂等键防止重复副作用，但不替代身份、资源授权和参数校验。
 
-依据：[第六册第九章](book-06-llm-deployment/chapters/09-rag与agent部署.md)、[第三册 RAG 项目实战](book-03-practical-handbook/chapters/07-rag项目实战.md)、[第十七册工具调用](book-17-agent-tool-use/chapters/02-tool-use与function-calling.md)。
+依据：[第六册第九章](book-06-llm-deployment/chapters/09-rag与agent部署.md)、第三册 [RAG 检索与上下文](book-03-practical-handbook/chapters/07-rag项目实战-2-检索与上下文.md)、[引用与证据](book-03-practical-handbook/chapters/07-rag项目实战-4-引用与证据.md)和[失败归因与报告](book-03-practical-handbook/chapters/07-rag项目实战-6-失败归因与报告.md)、[第十七册工具调用](book-17-agent-tool-use/chapters/02-tool-use与function-calling.md)。
 
 ## 第六册第十五章：FP4、MXFP4 与 NVFP4
 

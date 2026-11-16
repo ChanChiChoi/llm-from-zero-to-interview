@@ -1,12 +1,12 @@
 # Safety 与 Alignment 总览：来源证据
 
-检索与阅读日期：2026-11-03。本文只保存第八册第一章定向扫描中新核验的公开事实、版本和证据范围；章节处理决定与修改记录见 `progress/book-08-ai-safety-alignment/chapter-01-audit.md`。供应商政策、风险分类和治理框架说明发布者的意图或流程，不等于独立评估或系统安全认证。
+首次检索与阅读日期：2026-11-03；Model Spec 页面复核：2026-11-16。本文只保存公开资料支持的事实、版本和证据范围；供应商政策、风险分类和治理框架说明发布者的意图或流程，不等于独立评估或系统安全认证。
 
 ## Model Spec 的公开行为原则
 
 - **来源**：[OpenAI Model Spec (2026-10-29)](https://model-spec.openai.com/2026-10-29.html) 与 [openai/model_spec CHANGELOG](https://github.com/openai/model_spec/blob/main/CHANGELOG.md)。
-- **版本与阅读位置**：公开页面标注 October 29, 2026；阅读 Overview、五个组织价值、Chain of Command、行为规范和更新记录。
-- **支持的事实**：当前公开版本按 faithfulness to human intent、minimize harm、honesty and transparency、facilitate human agency、act with care 五项价值组织原则；加入了支持用户理解/选择/行动、谨慎使用上下文与记忆、尊重隐私和用户控制等内容，并把 side effects 与授权/取舍纳入行为原则。OpenAI 页面明确称 Model Spec 描述其预期行为，公开版可能不包含所有细节，生产模型尚未完全反映该规范。
+- **版本与阅读位置**：公开页面标注 October 29, 2026；2026-11-16 复核版本日期、Overview、Chain of Command 和 “Ignore untrusted data by default” 条目；此前阅读五个组织价值、行为规范和更新记录。
+- **支持的事实**：当前公开版本按 faithfulness to human intent、minimize harm、honesty and transparency、facilitate human agency、act with care 五项价值组织原则；加入了支持用户理解/选择/行动、谨慎使用上下文与记忆、尊重隐私和用户控制等内容，并把 side effects 与授权/取舍纳入行为原则。Chain of Command 下列有默认忽略不可信数据的行为原则。OpenAI 页面明确称 Model Spec 描述其预期行为，公开版可能不包含所有细节，生产模型尚未完全反映该规范。
 - **证据等级与边界**：source-backed（发布方规范与变更记录）。可支持“公开行为规范如何表述”和对应版本的原则，不能作为某个模型已满足规范的实验结果，也不能代替系统执行器与权限验证。
 
 ## NIST AI RMF 与关键基础设施 Profile

@@ -15,3 +15,10 @@
 - **实际阅读位置**：博客摘要及 AgentRx 问题、框架、benchmark 和结果概述。
 - **来源支持的事实**：发布方介绍用 guarded executable constraints 和逐步证据日志定位首个 critical failure step；AgentRx Benchmark 包含 115 条来自 τ-bench、Flash 和 Magentic-One 的人工标注失败轨迹，附九类 failure taxonomy。博客报告相对 prompting baselines 的失败定位提升 23.6%、根因归因提升 22.9%。
 - **证据等级与边界**：Microsoft Research 发布方介绍；样本范围、比较基线和数字按博客所述理解，未在本地复现，也不是对所有 agent 任务的普遍收益承诺。
+
+## OpenAI Agent Evals 与 trace 指南复核（2026-11-16）
+
+- **来源与版本**：[Evaluate agent workflows](https://developers.openai.com/api/docs/guides/agent-evals)，2026-11-16 访问的动态官方文档，未标固定 revision。
+- **实际阅读位置**：trace grading 工作流、datasets/eval runs、related evaluation surfaces。
+- **来源支持的事实**：指南建议在工作流仍需调试时从 trace grading 开始，trace 覆盖一次运行中的模型调用、工具调用、guardrails 和 handoffs；当“good”的判断标准明确后，转向固定 datasets 和 eval runs 做重复比较。需要外部模型或更大规模 API 评测时，指南仍指向 Evals。
+- **证据等级与边界**：source-backed（访问日官方公开指南）。产品页面、dashboard 路径和托管功能均会变化；这不是 Agent 评测效果的独立实验，也不能替项目确定成功率、安全分母或 trace 留存策略。托管 Evals 的当前生命周期见 evaluation-design-uncertainty-and-contamination-2026.md 中 2026-11-16 的复核记录。

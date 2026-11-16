@@ -91,7 +91,7 @@ Google 文档把 Search、Maps、URL Context、File Search 等描述为服务端
 
 Gemini 3.8 Flash 的官方视频文档描述了专用 `processing_call` / `processing_result` steps：前者请求加载指定视频片段或 transcript（有 `id`），后者以 `call_id` 关联返回内容。它们让动态媒体选择可见于 Interaction trace，但不等于应用自定义 function，也不能据此推断 endpoint 的普通 function signature 规则。应用应保留媒体对象版本、时间范围、处理请求/结果及答案引用；服务端提供媒体处理 step，也不替宿主做租户授权和资源访问控制。
 
-静态路径默认每秒取一帧；agentic 路径按问题动态读取帧、transcript 或音频，长视频可减少输入 token，但增加导航思考和处理往返。Usage 需区分 `total_thought_tokens` 与 `total_tool_use_tokens`。Google 报告的“最多约 88% 少用 token、约 7% 质量提升”是文档中的长视频比较描述；短于 5 分钟的片段可能因导航而增加 TTFT，自定义 FPS/区间也只支持 static。具体应用评测和宿主责任链见[第十七册 Code Agent 视频案例](../../book-17-agent-tool-use/chapters/07-code-agent.md#agentic-video从整段采帧到问题驱动的时间轴检索)及[研究笔记 §20](../../research/model-update-2026-09/gemini-3.8-flash-source-notes.md#20-2026-09-28-gemini-38-flashagentic-video-的按需证据读取)。
+静态路径默认每秒取一帧；agentic 路径按问题动态读取帧、transcript 或音频，长视频可减少输入 token，但增加导航思考和处理往返。Usage 需区分 `total_thought_tokens` 与 `total_tool_use_tokens`。Google 报告的“最多约 88% 少用 token、约 7% 质量提升”是文档中的长视频比较描述；短于 5 分钟的片段可能因导航而增加 TTFT，自定义 FPS/区间也只支持 static。代码任务的通用评估维度与产物验收见[第十七册第七章](../../book-17-agent-tool-use/chapters/07-code-agent.md)；视频处理 step 的媒体对象、时间范围、工具回执与答案引用仍由本章按 Interactions API 合同单独记录。
 
 ## 23.7 Thinking 预算、硬截止线与 `incomplete`
 

@@ -107,3 +107,11 @@
 - 工程诊断中的“实验区分度”如何转成可信的先验概率、结果似然和行动效用，需要目标任务自身的数据与决策模型；通用 `G×R/C` 分数没有校准依据。
 - 等价改写的语义、难度和分布保持应由领域专家或经验证的流程检查；词级扰动、数字/实体替换和组合新题不是同一种干预。
 - 污染检测方法依赖访问条件和可观测行为，异质信号不能合并成一个普适污染率；未检出、分数差和语料近重复分别支持不同命题。
+
+### 2026-11-16 托管 Evals 生命周期复核
+
+- **来源与版本：** OpenAI 官方 [Working with evals](https://developers.openai.com/api/docs/guides/evals)、[Deprecations](https://developers.openai.com/api/docs/deprecations) 和 [Evaluate agent workflows](https://developers.openai.com/api/docs/guides/agent-evals)，2026-11-16 访问；网页未提供固定文档 revision。
+- **阅读范围：** Evals 指南弃用提示；Deprecations 的 feature/endpoint 表中 Evals dashboard、API 和 graders 条目；Agent Evals 对 traces、datasets 与 eval runs 的用途说明。
+- **来源支持：** Evals 指南仍说明现有托管 Evals 于 2026-10-31 转为只读，平台计划于 2026-11-30 关闭；Deprecations 将 2026-11-30 列为 Evals dashboard/API/graders 的迁移日期，并建议迁移既有工作流。指南对新建或迭代评测提到 Datasets；迁移表另提供 Promptfoo 迁移入口。Agent 工作流指南区分单条 trace 诊断和固定 dataset/eval run 的重复比较。
+- **证据等级：** source-backed（当前官方动态文档直接支持其产品时间表与公开建议）。
+- **适用边界：** 这是托管服务的产品状态，不表示评测方法或开源 `openai/evals` 仓库停止存在，也不能由公共页面确认某个账户、组织或资源的迁移状态。Datasets 与 Promptfoo 是官方文档中针对不同场景给出的入口，不能据此声称二者功能完全等价。依赖该服务的用户应以官方页面和自身资源状态为准，并保留可迁移的样本、评分规则和运行记录。

@@ -173,7 +173,7 @@ Transformer 核心机制入口：
 
 ### 评估与 Debug 的统计和方法
 
-正文入口：[第三册第九章：离线评估与 Debug](book-03-practical-handbook/chapters/09-评估与debug实战.md)、[第三册第十章：Agent 轨迹与线上评估](book-03-practical-handbook/chapters/10-agent轨迹与线上评估实战.md)、[第五册第十章](book-05-llm-training/chapters/10-checkpoint评估与实验管理.md)、[第七册第三章](book-07-evaluation-experiments/chapters/03-human-eval与pairwise-eval.md)、[第七册第四章](book-07-evaluation-experiments/chapters/04-llm-as-a-judge.md)、[第七册第五章](book-07-evaluation-experiments/chapters/05-污染检测与可信评估.md)、[第七册第六章](book-07-evaluation-experiments/chapters/06-reasoning-code-math-eval.md)、[第七册第七章](book-07-evaluation-experiments/chapters/07-多模态与长上下文评估.md)、[第七册第十一章](book-07-evaluation-experiments/chapters/11-error-analysis与回归测试.md)和[第七册第十二章](book-07-evaluation-experiments/chapters/12-评估体系综合设计与工程落地.md)。
+正文入口：[第三册第九章：评测协议](book-03-practical-handbook/chapters/09-评估与debug实战-1-评测协议与benchmark.md)、[污染与泄漏](book-03-practical-handbook/chapters/09-评估与debug实战-2-数据污染与泄漏.md)、[事实性与证据](book-03-practical-handbook/chapters/09-评估与debug实战-3-事实性与claim.md)、[训练诊断](book-03-practical-handbook/chapters/09-评估与debug实战-4-训练不收敛.md)、[能力回归](book-03-practical-handbook/chapters/09-评估与debug实战-5-微调能力回归.md)、[人工评测](book-03-practical-handbook/chapters/09-评估与debug实战-6-人工评测.md)、[第三册第十章：轨迹诊断](book-03-practical-handbook/chapters/10-agent轨迹与线上评估实战-1-轨迹诊断.md)、[A/B 实验设计](book-03-practical-handbook/chapters/10-agent轨迹与线上评估实战-2-ab实验设计.md)、[灰度发布](book-03-practical-handbook/chapters/10-agent轨迹与线上评估实战-3-灰度发布.md)、[第五册第十章](book-05-llm-training/chapters/10-checkpoint评估与实验管理.md)、[第七册第三章](book-07-evaluation-experiments/chapters/03-human-eval与pairwise-eval.md)、[第七册第四章](book-07-evaluation-experiments/chapters/04-llm-as-a-judge.md)、[第七册第五章](book-07-evaluation-experiments/chapters/05-污染检测与可信评估.md)、[第七册第六章](book-07-evaluation-experiments/chapters/06-reasoning-code-math-eval.md)、[第七册第七章](book-07-evaluation-experiments/chapters/07-多模态与长上下文评估.md)、[第七册第十一章](book-07-evaluation-experiments/chapters/11-error-analysis与回归测试.md)和[第七册第十二章](book-07-evaluation-experiments/chapters/12-评估体系综合设计与工程落地.md)。
 
 1. [Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena v4](https://arxiv.org/abs/2306.05685v4)：位置、冗长和自我偏好等评审偏差；结论绑定其题目、模型和人工比较协议。
 2. [Judging the Judges: A Systematic Study of Position Bias in LLM-as-a-Judge](https://arxiv.org/abs/2406.07791)：用候选顺序交换、重复评审和多候选指标分析位置敏感性；v9 报告 15 个 judge、22 类任务和超过 150,000 次评估。偏差随 judge/任务变化，长度影响较弱但不能据此假定为零；交换一致不代表评分正确或目标任务已校准。
@@ -221,6 +221,9 @@ Transformer 核心机制入口：
 38. [Pair Difficulty Matters: Rethinking Pairwise LLM-as-a-Judge Evaluation and Consistency](https://arxiv.org/abs/2609.37577)：预印本研究 pairwise 一致性代理指标与 gold 排序的关系，提出按 rank gap 分层；实验限于两类英语教育文本语料。
 39. [Am I More Pointwise or Pairwise? Revealing Position Bias in Rubric-Based LLM-as-a-Judge](https://aclanthology.org/2026.findings-emnlp.1444/)：发现 rubric 评分档位位置和多维标准排列都可能影响结果；方向受模型影响，相关性收益主要出现在原有位置偏差较强的 judge。
 40. [From Rubrics to Reliable Scores: Evidence-Grounded Text Evaluation with LLM Judges](https://aclanthology.org/2026.emnlp-main.566/)：RULERS 结合锁定 rubric、可核查文本证据和人工分数量尺校准；研究覆盖四个文本评分 benchmark，不能视为 Agent 评估或高风险自动评分的通用保证。
+41. [AgentJudgeBench](https://aclanthology.org/2026.emnlp-main.659/)：覆盖多种 workflow topology 与难度层级的 Agent judge benchmark；其一致性变化与 rubric 收益绑定论文任务和标注协议，不能外推为通用 judge 准确率。
+42. [All Verdicts Are Not Equal: Rethinking LLM Judge Reliability](https://aclanthology.org/2026.aacl-long.207/)：分别分析裁决准确性、重复稳定性和顺序敏感性；论文中的翻转比例受其模型、任务和候选集限制。
+43. [When Agents Fail: Model or Harness—Who’s to Blame?](https://arxiv.org/abs/2610.32483)：模型—harness 归因框架，区分有效完成与任务成功，并把失败尝试计入资源；这是特定 benchmark/harness 下的预印本方法，不是统一行业标准。
 
 #### 污染检测与评估器独立性
 
@@ -779,7 +782,7 @@ Model editing 与 unlearning 补读入口：[EVOKE](https://proceedings.iclr.cc/
 1. 模型名、参数、上下文、架构字段和 API 能力优先引用官方模型卡、官方模型目录或官方开发者文档；模型卡能证明公开字段，不能证明未披露的训练细节。
 2. Qwen3.8-Max 只使用 QwenCloud 一方产品页作为产品信号；GLM 模型目录当前可核对到 GLM-5.2，GLM-5.5 继续列为待核验观察项。
 3. `CSA/HCA`、`KDA`、`Gated DeltaNet`、`Gated MLA`、`p-RoPE`、`MetaP`、`NoPE` 等章节把模型卡事实和教学公式分开；公式用于理解机制，不冒充厂商源码。
-4. `AgentWorld`、`Shieldstral` 和 DeepSeek-V4 的论文链接用于核对任务闭环、安全分类器和技术路线；产品页、模型卡、论文和引擎文档的证据等级不混用。
+4. [Qwen-AgentWorld](https://arxiv.org/abs/2606.24597) 与 [AgentWorld 多 Agent benchmark](https://arxiv.org/abs/2609.31590) 是不同论文/项目；前者讨论 Qwen 模型与环境闭环，后者是长周期协作评测环境。Shieldstral 和 DeepSeek-V4 的来源也应按模型/系统卡、论文、产品页和引擎文档分别核对，不能混用证据等级。
 
 ### 论文与技术报告补充入口
 
@@ -792,6 +795,7 @@ Model editing 与 unlearning 补读入口：[EVOKE](https://proceedings.iclr.cc/
 7. [SingGuard v3](https://arxiv.org/abs/2606.22873v3)：动态规则下的多模态对话 guardrail，包含跨模态联合风险评测。
 8. [EAGLE](https://arxiv.org/abs/2401.15077) 与 [EAGLE-3](https://arxiv.org/abs/2503.01840)：推测解码 draft head 路线。
 9. [Scaling LLM Test-Time Compute Optimally](https://arxiv.org/abs/2408.03314)：推理预算、候选和验证成本的实验基础。
+10. [AgentWorld 多 Agent benchmark](https://arxiv.org/abs/2609.31590)：特定长周期协作环境与 Causal Collaboration Effectiveness（CCE）指标；预印本结果受任务、动作依赖归因和模型辅助标签口径限制。
 
 ### 长序列注意力与循环状态综述
 
@@ -1005,11 +1009,12 @@ DataCurve 当前没有精确 `mini_swe_agent_claude_opus_4_6_*` 行，不能迁�
 
 ### Claude Opus 4.8：Dynamic Workflows 与多 Agent benchmark
 
-1. [Artificial Analysis Claude Opus 4.8](https://artificialanalysis.ai/models/claude-opus-4-8) 与 [DataCurve DeepSWE v1.1](https://deepswe.datacurve.ai/) 的 `xhigh/max + mini-swe-agent` 行：仅用于锚点及配置条件下的榜单结果；AA 当前已将模型标为 deprecated。
-2. [Claude Opus 4.8 System Card](https://www.anthropic.com/claude-opus-4-8-system-card)：§8.11 描述 BrowseComp/ProgramBench 的 blocking orchestrator、fixed team 和 async-subagent harness 及 score/token/派生 latency 评估；§6.3.6 描述 coding diligence 与状态总结诚实度。
-3. [Introducing dynamic workflows in Claude Code](https://claude.com/blog/introducing-dynamic-workflows-in-claude-code)：长任务的动态外部编排、并行 subagents、独立检查/反驳、checkpoint 恢复，以及成本、首次确认和管理员控制。
+1. [Artificial Analysis Claude Opus 4.8](https://artificialanalysis.ai/models/claude-opus-4-8) 与 [DataCurve DeepSWE v1.1](https://deepswe.datacurve.ai/) 的 xhigh/max + mini-swe-agent 行：仅用于锚点及对应配置下的榜单结果；AA 当前已将模型标为 deprecated。
+2. [Claude Opus 4.8 System Card](https://www.anthropic.com/claude-opus-4-8-system-card)：§8.1 摘要表报告 BrowseComp single-agent 84.3、multi-agent 88.5；§8.11 介绍多 Agent 评测及 harness；§6.3.6.2 报告代码总结漏报评测。预算、延迟及固定团队对照只能引用能从指定 harness 原表核实的条件。
+3. [Introducing dynamic workflows in Claude Code](https://claude.com/resources/articles/introducing-dynamic-workflows-in-claude-code)：2026-11-16 核对的 GA 计划、默认开启范围、确认/管理员控制和 token 成本提示。
+4. [Worse Together 研究说明](https://alignment.anthropic.com/2026/worse-together/)、[论文 arXiv:2610.00583](https://arxiv.org/abs/2610.00583) 与 [MAMUBench 仓库](https://github.com/safety-research/MAMUBench)：共享资源模拟环境中的多用户协作、群体结果和 Agent 行为评测。
 
-System Card 分数是特定 Anthropic harness 的发布方结果；其 latency 由固定 prefill/decode rate、token 数与工具耗时推导，不是生产 wall-clock。Dynamic Workflows 产品不能与 System Card benchmark harness 视为同一实现。完整证据及页面 hash、勘误和限制见 [`claude-opus-4.8-source-notes.md`](research/model-update-2026-09/claude-opus-4.8-source-notes.md)。没有独立技术报告、内部架构或完整训练配方，不新增第二十一册架构章节。
+Opus 4.8 的分数是发布方特定 harness 的结果，不能单凭摘要表推出通用质量、成本或延迟结论；Dynamic Workflows 产品也不能与 benchmark harness 视为同一实现。MAMUBench 论文场景与公开发布场景数量不同。来源事实、版本和证据边界见[Agent 环境与多 Agent 研究笔记](research/agent-environments-multi-agent-2026-11.md)。没有公开的完整内部架构或训练配方，不新增第二十一册架构章节。
 
 ## 2026-09 Kimi K3 技术报告
 
@@ -1060,7 +1065,7 @@ K3 report 与固定 config 是官方配置证据，不等于完整训练 recipe�
 3. [Kimi K2.6 部署指南](https://huggingface.co/moonshotai/Kimi-K2.6/raw/main/docs/deploy_guidance.md)：K2.5 架构路线复用、vLLM/SGLang/KTransformers 和 `kimi_k2` tool/reasoning parser。
 4. [Kimi K2.6 官方博客](https://www.kimi.com/blog/kimi-k2-6) 与 [Kimi Vendor Verifier](https://www.kimi.com/blog/kimi-vendor-verifier.html)：long-horizon coding、Agent Swarm、proactive agents，以及参数、视觉、长输出、ToolCall 和 SWE-Bench 的部署验收分层。
 
-正式落点为第二十一册第 90 章 [`Kimi K2.6：Native Multimodal、Agent Swarm 与推理验收`](book-21-transformer-architecture-evolution/chapters/90-kimi-k2.6-native-multimodal-agent-swarm与推理验收.md)。官方资料没有公开完整 K2.6 训练 recipe、生产 kernel 或独立技术报告；不要把 K3 的 KDA/AttnRes 或 K2.7 Code 的协议/评测回写为 K2.6 专属事实。
+正式落点为第二十一册第 90 章 [`Kimi K2.6：Native Multimodal、Agent Swarm 与推理验收`](book-21-transformer-architecture-evolution/chapters/90-kimi-k2.6-native-multimodal-agent-swarm与推理验收.md)。官方资料没有公开完整 K2.6 训练 recipe、生产 kernel 或独立技术报告；不要把 K3 的 KDA/AttnRes 或 K2.7 Code 的协议/评测回写为 K2.6 专属事实。Agent Swarm 数量、长时程案例与模型内部 MoE 字段的证据区分见 [Agent Swarm 产品与 Multi-agent runtime 来源记录](research/agent-swarm-runtime-evidence-2026-11.md)。
 
 ## GPT-5.4 mini/nano：精确 API sibling 与小模型 serving
 
@@ -1110,7 +1115,7 @@ GLM-5.1 的 SWE-Bench Pro `58.4`、655 次 Linux desktop 迭代/6.9× 吞吐和 
 5. [DataCurve DeepSWE](https://deepswe.datacurve.ai/)：当前没有精确 `mini_swe_agent_grok_4_20_*` 行；页面中的 Grok 4.5/4.6 结果不能迁移为 Grok 4.20 的 Pass@1、成本、输出 token 或 Agent steps。
 6. [arXiv 标题精确检索 “Grok 4.20”](https://arxiv.org/search/?query=%22Grok+4.20%22&searchtype=title)：本轮无精确标题结果；全文命中只是外部评测或使用 Grok 4.20，没有检出 xAI 发布的 Grok 4.20 专属技术报告。因此不能补写参数量、MoE/注意力架构、训练 recipe、生产 kernel 或独立 benchmark。
 
-这些资料支持的是模型目录、API/runtime、工具协议和评测证据分层，不支持把 multi-agent 编排写成新的 Transformer 结构。完整快照、哈希、负面证据和待核验项见 [`grok-4.20-source-notes.md`](research/model-update-2026-09/grok-4.20-source-notes.md)。
+这些资料支持的是模型目录、API/runtime、工具协议和评测证据分层，不支持把 multi-agent 编排写成新的 Transformer 结构。官方文档事实、访问日期与 beta 边界见 [Agent Swarm 产品与 Multi-agent runtime 来源记录](research/agent-swarm-runtime-evidence-2026-11.md)。
 
 ## Gemini 3.8 Flash：Thinking、Interactions 与工具协议资料
 

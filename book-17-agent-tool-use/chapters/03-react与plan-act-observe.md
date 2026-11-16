@@ -38,16 +38,24 @@ ReAct 论文提供 reasoning 与 acting 交替的研究背景；MRKL Systems 说
 
 ### 1.3 专家视角：闭环的最小状态机
 
-把每一轮看成一个状态机：
+把每一轮看成一个受控制的状态机。图中把模型提出的动作与宿主门禁、执行器和停止判断分开；观察只有写回状态后，才成为下一轮决策的依据。
 
-~~~text
-目标与当前状态
--> 产生候选动作
--> 检查动作
--> 执行动作
--> 接收观察
--> 更新状态和计划
--> 判断停止、追问或继续
+~~~mermaid
+flowchart TD
+    A["目标、当前状态、计划与预算"] --> B["生成决策摘要与候选动作"]
+    B --> C{"执行前门禁通过？"}
+    C -->|否| D["追问、申请确认或安全停止"]
+    D --> E["更新阻断原因与任务状态"]
+    C -->|是| F["执行器调用工具或环境"]
+    F --> G["接收 observation 与执行结果"]
+    G --> H["写入证据、状态差异和预算"]
+    H --> I["按观察更新计划"]
+    E --> J{"停止判断"}
+    I --> J
+    J -->|继续| B
+    J -->|已完成| K["返回最终结果"]
+    J -->|缺信息或需确认| L["向用户追问或请求确认"]
+    J -->|权限、风险或预算不允许| M["安全停止并说明未完成"]
 ~~~
 
 模型负责提出候选，系统负责执行边界。计划不是永久真理，观察也不是自动可信；二者都要进入结构化状态，并带有来源、时间、错误和预算信息。
@@ -142,6 +150,8 @@ ReAct 更强调在每一轮根据当前观察选择下一步，适合开放探�
 
 这不是二选一。一个生产 Agent 常常先生成粗粒度计划，再用 ReAct 风格逐步执行：当前计划规定阶段和完成条件，模型每次只提出一个或少量动作，观察回来后更新计划。
 
+这几个相近研究处在不同层次。Plan-and-Solve Prompting 是一种推理提示策略：先拆出子任务，再按计划逐项求解；论文在十个数据集、三类推理问题上评估它，但这个方法本身不规定外部工具或环境交互协议。Reflexion 不更新模型权重，而是把任务反馈转成语言反思，存入情景记忆（episodic memory），供后续尝试参考。2025 年的 Pre-Act 预印本则把多步计划和工具动作放进同一过程，并在每步执行后用此前动作与观察细化后续计划。作者的端到端评估从 Almita 的 18 个用例中人工筛选 5 个，并报告了该设置下的结果；这能说明一种具体设计和评测办法，不能据此宣称它普遍优于 ReAct。[Plan-and-Solve Prompting](https://arxiv.org/abs/2305.04091)、[Reflexion](https://arxiv.org/abs/2303.11366)、[Pre-Act](https://arxiv.org/abs/2505.09970)。
+
 ### 4.3 三种计划粒度
 
 可以把计划分成三种粒度：
@@ -156,13 +166,13 @@ ReAct 更强调在每一轮根据当前观察选择下一步，适合开放探�
 
 ### 5.1 轨迹
 
-设目标为 `g`，初始计划为 `p_0`，初始状态为 `s_0`。一次轨迹可以写成：
+设目标为 $g$，初始计划为 $p_0$，初始状态为 $s_0$。一次轨迹可以写成：
 
 ~~~math
 \tau=(g,p_0,s_0,d_1,a_1,o_1,s_1,\ldots,d_K,a_K,o_K,s_K,\hat y)
 ~~~
 
-`d_k` 是第 `k` 步的决策摘要，`a_k` 是动作，`o_k` 是观察，`s_k` 是更新后的状态，`K` 是动作步数，`\hat y` 是最终输出。把决策摘要、动作和观察分开，有助于检查“模型的意图”和“系统的实际行为”是否一致。
+$d_k$ 是第 $k$ 步的决策摘要，$a_k$ 是动作，$o_k$ 是观察，$s_k$ 是更新后的状态，$K$ 是动作步数，$\hat y$ 是最终输出。把决策摘要、动作和观察分开，有助于检查“模型的意图”和“系统的实际行为”是否一致。
 
 ### 5.2 动作
 
@@ -172,7 +182,7 @@ ReAct 更强调在每一轮根据当前观察选择下一步，适合开放探�
 a_k=(u_k,n_k,\alpha_k,\rho_k)
 ~~~
 
-`u_k` 是动作类型，`n_k` 是工具名称，`\alpha_k` 是参数，`\rho_k` 是风险和所需授权。`ask_user`、`final` 和 `stop` 也属于控制循环中的动作，它们不一定调用外部工具，但会改变任务状态。
+$u_k$ 是动作类型，$n_k$ 是工具名称，$\alpha_k$ 是参数，$\rho_k$ 是风险和所需授权。`ask_user`、`final` 和 `stop` 也属于控制循环中的动作，它们不一定调用外部工具，但会改变任务状态。
 
 ### 5.3 执行前检查
 
@@ -187,7 +197,7 @@ I_{\mathrm{risk}}(a_k,s_k)
 ~~~
 
 每个指示量的取值都必须先经过相应检查，可以是 `1`、`0` 或
-`unknown`。只有四项都已测量且都为 `1` 时，`I_allow=1`，执行器才
+`unknown`。只有四项都已测量且都为 $1$ 时，$I_{\mathrm{allow}}=1$，执行器才
 能执行动作并返回观察；只要一项已测量为 `0`，结果就是 `0`；如果没有
 足够证据判断，结果应保持 `unknown`，不能把未测量当成允许或拒绝。这里
 的乘法只描述四个已知布尔条件同时成立的情形，不意味着模型可以自行把
@@ -217,8 +227,8 @@ p_{k+1}=V(p_k,s_{k+1},o_k)
 o_k\sim O(\mathord{\cdot}\mid s_{k-1},a_k)
 ~~~
 
-这里的 `s_{k-1}` 是执行第 `k` 个动作前的状态，`o_k` 是该动作返回
-的观察；索引与轨迹中的 `s_0,d_1,a_1,o_1,s_1` 保持一致。这意味着
+这里的 $s_{k-1}$ 是执行第 $k$ 个动作前的状态，$o_k$ 是该动作返回
+的观察；索引与轨迹中的 $s_0,d_1,a_1,o_1,s_1$ 保持一致。这意味着
 Agent 需要处理不确定观察，不能把缺少证据当成否定事实，更不能把超时
 当成“肯定没有执行”。对状态未知的写操作，应先查询最终状态或转人工。
 
@@ -231,7 +241,7 @@ h(s_k,p_k,b_k)\in
 \{\mathrm{continue},\mathrm{final},\mathrm{ask},\mathrm{stop}\}
 ~~~
 
-`b_k` 是剩余预算。`final` 表示完成条件已满足；`ask` 表示需要用户提供信息或确认；`stop` 表示权限、资源、证据或安全条件不允许继续。把“停止”与“最终成功”分开很重要：系统可以安全停止，但任务仍未完成。
+$b_k$ 是剩余预算。`final` 表示完成条件已满足；`ask` 表示需要用户提供信息或确认；`stop` 表示权限、资源、证据或安全条件不允许继续。把“停止”与“最终成功”分开很重要：系统可以安全停止，但任务仍未完成。
 
 ## 6. Action：从意图到实际动作
 
@@ -422,6 +432,8 @@ def run_agent_loop(user_goal, model, controller, executor, max_steps):
 
 敏感数据要按照用途最小化保存。Trace 完整不等于保存所有原始内容；真正需要的是足够复盘决策和外部影响的结构化证据。
 
+一个公开实现例子是 OpenAI Agents SDK：截至 2026-11-16 的官方文档说明，默认运行轨迹（trace）会覆盖 Agent 运行、模型轮次、生成、函数工具、护栏检查（guardrail）和 Agent 交接（handoff），并把操作组织成跨度（span）。generation 与 function span 可能包含输入/输出，`trace_include_sensitive_data` 当时默认为 `True`，应用可以将其关闭。[Tracing 文档](https://openai.github.io/openai-agents-python/tracing/) 这是某一 SDK 在该日期公开的行为，不是所有 tracing 系统的默认值；接入 trace 前仍要设定脱敏、访问权限、保留周期和导出边界。
+
 ### 12.2 重放不是重新产生副作用
 
 只读查询可以在固定版本环境中重放；写操作应使用模拟执行、幂等键或状态查询。调试程序若简单地再次调用真实发信或删除接口，可能把一次事故变成两次。Trace 系统要明确区分 replay、dry run 和 execute。
@@ -440,11 +452,16 @@ Trace 可以帮助区分：计划本身错误、动作选择错误、参数错�
 A_{\mathrm{task}}=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[z_i=1]
 ~~~
 
-`z_i` 必须由任务完成条件定义。代码任务可能要求测试通过，调查任务可能要求证据覆盖，写操作任务可能要求权限、确认和最终状态都正确。
-这里要求 `N>0`；没有任务样本时，任务成功率是 `None`，而不是 `1` 或
-`0`。`None` 表示没有测量到该指标，不能拿它宣称系统达标。
+$z_i$ 必须由任务完成条件定义。代码任务可能要求测试通过，调查任务可能要求证据覆盖，写操作任务可能要求权限、确认和最终状态都正确。
+这里要求 $N>0$；没有任务样本时，任务成功率是 `None`，而不是 $1$ 或
+$0$。`None` 表示没有测量到该指标，不能拿它宣称系统达标。
 
 ### 13.2 动作和计划
+
+设 $N_s$ 为有参考标注的动作步骤数，$\hat a_i$ 为 Agent 实际发出的
+第 $i$ 个动作，$a_i^*$ 为该步骤按任务状态和观察标注的参考动作。动作
+是否正确要与任务级成功分开看：一条轨迹最终答对，不代表中间每个工具
+选择都合理。
 
 每个步骤的动作准确率为：
 
@@ -458,30 +475,62 @@ A_{\mathrm{act}}=\frac{1}{N_s}\sum_{i=1}^{N_s}\mathbf{1}[\hat a_i=a_i^*]
 A_{\mathrm{plan}}=\frac{1}{N_s}\sum_{i=1}^{N_s}I_{\mathrm{align}}(a_i,p_i)
 ~~~
 
-当动作与执行时的计划阶段一致时，`I_align` 取 1，否则取 0；重规划后应使用新计划版本判断，而不是拿旧计划机械比较。
+当动作与执行时的计划阶段一致时，$I_{\mathrm{align}}$ 取 $1$，否则取 $0$；重规划后应使用新计划版本判断，而不是拿旧计划机械比较。
 
-两者都不能替代任务成功率。一个动作可能符合计划，但计划本身已经过期；一个动作可能偏离初始计划，却是观察后正确的重规划结果。
+决策摘要与动作的一致性需要单独标注。令 $N_d$ 为有可审阅决策摘要和
+对应动作的步骤数；若摘要与当前状态、最近观察、有效计划和已发出的动作
+相符，$I_{\mathrm{decision}}$ 取 $1$，否则取 $0$。它衡量“说要做的”和
+“实际发出的”是否一致，不判断动作是否符合参考答案，也不等于任务成功：
+
+~~~math
+A_{\mathrm{decision}}=\frac{1}{N_d}\sum_{i=1}^{N_d}I_{\mathrm{decision}}(d_i,a_i),
+\qquad N_d>0
+~~~
+
+示例里的 `decision_ok` 是预先给定的人工判定标签，表示决策摘要与动作
+是否相符；由于 toy trace 省略了摘要原文，代码不会从其他字段推算这个
+标签。实际评估必须由审阅者查看摘要、当前状态、最近观察、计划和动作后
+标注，不能把它与参考动作准确率混为一谈。
+
+计划修订覆盖率则只看确实需要改计划的轨迹。令 $\mathcal{P}$ 为至少有一次
+观察使当前计划失效、不完整，或触发了必须改换阶段的轨迹集合，$N_p=|\mathcal{P}|$；
+$I_{\mathrm{revision}}(t)$ 在该轨迹发生了有理由的计划修订时取 $1$，否则取 $0$：
+
+~~~math
+R_{\mathrm{plan}}=\frac{1}{N_p}\sum_{t\in\mathcal{P}}I_{\mathrm{revision}}(t),
+\qquad N_p>0
+~~~
+
+其中，修订必须发生在触发观察之后，并有记录的理由；仅仅刷新计划文本不
+计为一次有效修订。如果没有轨迹需要修订计划，该指标应记为 `None`，而不是把“未触发重规划”
+算成失败或满分。是否需要修订由参考轨迹或人工审阅预先标注，不能看模型
+有没有自行改计划再反推分母。
+
+动作准确率和计划遵循率都不能替代任务成功率。一个动作可能符合计划，
+但计划本身已经过期；一个动作可能偏离初始计划，却是观察后正确的重规划结果。
 
 ### 13.3 观察和状态
 
-设 `N_o` 为确实收到可审计 observation 的步骤数。直接回答、没有调用
-工具的步骤不进入这个分母；只有 `N_o>0` 时才计算观察使用率：
+设 $N_o$ 为确实收到可审计 observation 的步骤数。直接回答、没有调用
+工具的步骤不进入这个分母；只有 $N_o>0$ 时才计算观察使用率：
 
 ~~~math
 R_{\mathrm{obs}}=\frac{1}{N_o}\sum_{i\in\mathcal{O}}I_{\mathrm{obs}}(o_i)
 ~~~
 
-其中 `\mathcal{O}` 是收到 observation 的步骤集合。`I_obs` 在观察改变
+其中 $\mathcal{O}$ 是收到 observation 的步骤集合。$I_{\mathrm{obs}}$ 在观察改变
 后续状态或动作时取 1，未改变时取 0；没有观察不能记为 0，也不能把
 “模型直接回答”算作使用了 observation。
 
-状态更新覆盖率（对所有需要状态更新的动作步骤）为：
+设 $N_u$ 为按任务状态契约需要写入状态记录的动作步骤数；该记录可以是
+实际状态差异，也可以是明确记录的空差异。状态更新覆盖率为：
 
 ~~~math
-R_{\mathrm{state}}=\frac{1}{N_s}\sum_{i=1}^{N_s}I_{\mathrm{state}}(\Delta s_i)
+R_{\mathrm{state}}=\frac{1}{N_u}\sum_{i\in\mathcal{U}}I_{\mathrm{state}}(\Delta s_i),
+\qquad N_u=|\mathcal{U}|>0
 ~~~
 
-这里的 `N_s` 必须大于 0；`I_state` 在需要记录的状态差异确实写入
+其中 $\mathcal{U}$ 是这 $N_u$ 个步骤的集合；$I_{\mathrm{state}}$ 在需要记录的状态差异确实写入
 trace 时取 1。状态没有变化和状态更新没有被记录是两件事：前者可能
 是合法的空变化，后者则是审计缺口，应在数据中区分。
 
@@ -507,19 +556,19 @@ R_{\mathrm{early}}=\frac{1}{N}\sum_{i=1}^{N}I_{\mathrm{early}}(\tau_i)
 R_{\mathrm{over}}=\frac{1}{N}\sum_{i=1}^{N}I_{\mathrm{over}}(\tau_i)
 ~~~
 
-`I_repeat`、`I_early` 和 `I_over` 分别表示无进展重复、未满足完成条件就结束、以及超出步数或工具预算；发生对应情况时取 1，否则取 0。
-以上按轨迹统计的三个公式都要求 `N>0`；动作级指标中的 `N_s` 要求
-`N_s>0`。如果评估集没有动作、观察或可判定的阻断事件，对应指标应
+$I_{\mathrm{repeat}}$、$I_{\mathrm{early}}$ 和 $I_{\mathrm{over}}$ 分别表示无进展重复、未满足完成条件就结束、以及超出步数或工具预算；发生对应情况时取 $1$，否则取 $0$。
+以上按轨迹统计的指标都要求 $N>0$；动作级指标中的 $N_s$、$N_d$、
+$N_o$、$N_u$ 和计划修订指标中的 $N_p$ 分别要求对应集合非空。如果评估集没有动作、观察、需要修订的计划或可判定的阻断事件，对应指标应
 报告为 `None`，而不是用空集合制造一个满分。对恢复指标还要单独说明
 分母是“被阻断的步骤数”，只在该分母大于 0 时计算。
 
-这些指标的方向不同：任务成功、动作、计划和观察使用率通常越高越好，重复、过早结束和超限率通常越低越好。报告时不要把它们未经说明地平均成一个总分。
+这些指标的方向不同：任务成功率、决策—动作一致率、动作准确率、计划遵循率、计划修订覆盖率、观察使用率和状态更新覆盖率通常越高越好；重复、过早结束、解析失败和超限率通常越低越好。报告时不要把它们未经说明地平均成一个总分。
 
 ### 13.5 恢复指标
 
 对失败案例，应判断 Agent 是否采取了正确恢复，并最终处于安全、可解释状态。恢复成功不一定等于任务成功：一个被权限阻断后安全停止的任务，恢复状态可能是正确的，业务任务却仍然未完成。把安全恢复和任务完成分开记录，可以避免鼓励危险的强行执行。
 
-令 `\mathcal{B}` 为被阻断的步骤集合，恢复率定义为：
+令 $\mathcal{B}$ 为被阻断的步骤集合，恢复率定义为：
 
 ~~~math
 R_{\mathrm{recover}}=
@@ -528,7 +577,7 @@ R_{\mathrm{recover}}=
 \qquad |\mathcal{B}|>0
 ~~~
 
-没有任何阻断步骤时，`R_recover` 是 `None`，因为“没有需要恢复的
+没有任何阻断步骤时，$R_{\mathrm{recover}}$ 是 `None`，因为“没有需要恢复的
 案例”不等于“恢复能力达到 100%”。同样，任何未测量的指标都应保留
 为 `unknown` 或 `None`，不能为了通过阈值而填入默认值。
 
@@ -536,7 +585,11 @@ R_{\mathrm{recover}}=
 
 下面的 demo 不调用模型或真实 API，只审计六条 toy trace。它包含一个成功查询、一个需要计划更新的检索任务、一个重复循环、一个忽略测试错误的过早结束、一个被阻断后没有恢复的写入动作，以及一个参数解析失败后恢复的计算任务。
 
+代码状态：**静态审阅，未运行**。示例只使用 Python 标准库，所有轨迹和参数均为合成数据。
+每个工具动作都应留下状态差异或明确的空差异记录，因此本 demo 的状态更新覆盖率以全部动作步骤为分母。`decision_ok` 和 `plan_update_required` 是预先给定的评估标签，不由代码从最终成功与否反推。
+
 ~~~python
+import json
 from collections import Counter
 
 
@@ -547,12 +600,11 @@ TRACES = [
     {
         "id": "weather_success",
         "goal": "answer weather question",
-        "expected_tools": ["get_weather"],
-        "plan_steps": ["get weather", "answer"],
         "steps": [
             {
                 "decision_ok": True,
                 "action": "get_weather",
+                "args": {"location": "Helsinki"},
                 "args_valid": True,
                 "expected_action": "get_weather",
                 "observation": "sunny 25C",
@@ -566,22 +618,22 @@ TRACES = [
             }
         ],
         "plan_updates": 0,
+        "plan_update_required": False,
         "success": True,
         "stop_reason": "final",
         "expected_stop": "final",
     },
     {
         "id": "refund_plan_update_success",
-        "goal": "answer refund policy with evidence",
-        "expected_tools": ["search_docs", "query_order"],
-        "plan_steps": ["find policy", "check order", "answer with evidence"],
+        "goal": "find current refund policy with evidence",
         "steps": [
             {
                 "decision_ok": True,
                 "action": "search_docs",
+                "args": {"query": "refund policy"},
                 "args_valid": True,
                 "expected_action": "search_docs",
-                "observation": "policy says 10 days",
+                "observation": "policy page is superseded; locate current policy",
                 "observation_used": True,
                 "state_updated": True,
                 "plan_step": "find policy",
@@ -592,13 +644,14 @@ TRACES = [
             },
             {
                 "decision_ok": True,
-                "action": "query_order",
+                "action": "search_docs",
+                "args": {"query": "current refund policy"},
                 "args_valid": True,
-                "expected_action": "query_order",
-                "observation": "order delivered 6 days ago",
+                "expected_action": "search_docs",
+                "observation": "current policy: 10 days",
                 "observation_used": True,
                 "state_updated": True,
-                "plan_step": "check order",
+                "plan_step": "find current policy",
                 "plan_aligned": True,
                 "parse_ok": True,
                 "blocked": False,
@@ -606,6 +659,8 @@ TRACES = [
             },
         ],
         "plan_updates": 1,
+        "plan_update_required": True,
+        "plan_update_reason": "first result was superseded",
         "success": True,
         "stop_reason": "final",
         "expected_stop": "final",
@@ -613,12 +668,11 @@ TRACES = [
     {
         "id": "repeat_loop_failure",
         "goal": "find current inventory",
-        "expected_tools": ["query_inventory"],
-        "plan_steps": ["query inventory", "answer"],
         "steps": [
             {
                 "decision_ok": True,
                 "action": "search_docs",
+                "args": {"query": "current inventory"},
                 "args_valid": True,
                 "expected_action": "query_inventory",
                 "observation": "no inventory data",
@@ -633,9 +687,10 @@ TRACES = [
             {
                 "decision_ok": True,
                 "action": "search_docs",
+                "args": {"query": "current inventory"},
                 "args_valid": True,
                 "expected_action": "query_inventory",
-                "observation": "same empty result",
+                "observation": "no inventory data",
                 "observation_used": False,
                 "state_updated": False,
                 "plan_step": "query inventory",
@@ -647,9 +702,10 @@ TRACES = [
             {
                 "decision_ok": False,
                 "action": "search_docs",
+                "args": {"query": "current inventory"},
                 "args_valid": True,
                 "expected_action": "query_inventory",
-                "observation": "same empty result",
+                "observation": "no inventory data",
                 "observation_used": False,
                 "state_updated": False,
                 "plan_step": "query inventory",
@@ -661,9 +717,10 @@ TRACES = [
             {
                 "decision_ok": False,
                 "action": "search_docs",
+                "args": {"query": "current inventory"},
                 "args_valid": True,
                 "expected_action": "query_inventory",
-                "observation": "same empty result",
+                "observation": "no inventory data",
                 "observation_used": False,
                 "state_updated": False,
                 "plan_step": "query inventory",
@@ -675,9 +732,10 @@ TRACES = [
             {
                 "decision_ok": False,
                 "action": "search_docs",
+                "args": {"query": "current inventory"},
                 "args_valid": True,
                 "expected_action": "query_inventory",
-                "observation": "same empty result",
+                "observation": "no inventory data",
                 "observation_used": False,
                 "state_updated": False,
                 "plan_step": "query inventory",
@@ -688,6 +746,8 @@ TRACES = [
             },
         ],
         "plan_updates": 0,
+        "plan_update_required": True,
+        "plan_update_reason": "send was blocked pending confirmation",
         "success": False,
         "stop_reason": "max_steps",
         "expected_stop": "ask",
@@ -695,12 +755,11 @@ TRACES = [
     {
         "id": "ignored_error_premature_final",
         "goal": "fix failing test",
-        "expected_tools": ["run_tests", "read_file"],
-        "plan_steps": ["run tests", "inspect error", "patch"],
         "steps": [
             {
                 "decision_ok": True,
                 "action": "run_tests",
+                "args": {"target": "auth tests"},
                 "args_valid": True,
                 "expected_action": "run_tests",
                 "observation": "test failed: missing edge case",
@@ -714,6 +773,7 @@ TRACES = [
             }
         ],
         "plan_updates": 0,
+        "plan_update_required": False,
         "success": False,
         "stop_reason": "final",
         "expected_stop": "continue",
@@ -721,12 +781,11 @@ TRACES = [
     {
         "id": "blocked_write_not_recovered",
         "goal": "send summary email",
-        "expected_tools": ["draft_email", "ask_confirmation"],
-        "plan_steps": ["draft", "confirm", "send"],
         "steps": [
             {
                 "decision_ok": True,
                 "action": "send_email",
+                "args": {"draft_id": "email-7"},
                 "args_valid": True,
                 "expected_action": "draft_email",
                 "observation": "blocked: confirmation required",
@@ -740,6 +799,8 @@ TRACES = [
             }
         ],
         "plan_updates": 0,
+        "plan_update_required": True,
+        "plan_update_reason": "repeated empty result should trigger a new source or a question",
         "success": False,
         "stop_reason": "blocked",
         "expected_stop": "ask",
@@ -747,12 +808,11 @@ TRACES = [
     {
         "id": "parse_failure_recovered",
         "goal": "calculate invoice total",
-        "expected_tools": ["calculator"],
-        "plan_steps": ["calculate", "answer"],
         "steps": [
             {
                 "decision_ok": True,
                 "action": "calculator",
+                "args": {},
                 "args_valid": False,
                 "expected_action": "calculator",
                 "observation": "parse error: expression missing",
@@ -767,6 +827,7 @@ TRACES = [
             {
                 "decision_ok": True,
                 "action": "calculator",
+                "args": {"expression": "80 + 48"},
                 "args_valid": True,
                 "expected_action": "calculator",
                 "observation": "total=128",
@@ -779,7 +840,8 @@ TRACES = [
                 "recovered": True,
             },
         ],
-        "plan_updates": 1,
+        "plan_updates": 0,
+        "plan_update_required": False,
         "success": True,
         "stop_reason": "final",
         "expected_stop": "final",
@@ -818,17 +880,27 @@ def has_observation(step):
 
 
 def repeated_action(trace):
-    seen = set()
+    seen = {}
     for step in trace["steps"]:
-        signature = (step["action"], step.get("plan_step"))
-        if signature in seen:
+        signature = (
+            step["action"],
+            json.dumps(step.get("args", {}), sort_keys=True, ensure_ascii=False),
+            step.get("plan_step"),
+        )
+        observation = step.get("observation")
+        if (
+            signature in seen
+            and observation == seen[signature]
+            and not step["state_updated"]
+        ):
             return True
-        seen.add(signature)
+        seen[signature] = observation
     return False
 
 
 def over_budget(trace):
-    tool_calls = len([s for s in trace["steps"] if s["action"] != "final"])
+    # This toy trace stores only tool-call attempts in steps.
+    tool_calls = len(trace["steps"])
     return len(trace["steps"]) > LIMITS["max_steps"] or tool_calls > LIMITS["max_tool_calls"]
 
 
@@ -867,13 +939,17 @@ def audit_react_traces(traces):
 
     observed_steps = [step for step in steps if has_observation(step)]
     blocked_steps = [step for step in steps if step["blocked"]]
+    plan_update_traces = [t for t in traces if t["plan_update_required"]]
     metrics = {
         "task_success_rate": rate(sum(t["success"] for t in traces), len(traces)),
         "decision_action_alignment": rate(sum(s["decision_ok"] for s in steps), total_steps),
         "action_accuracy": rate(sum(s["action"] == s["expected_action"] for s in steps), total_steps),
         "argument_valid_rate": rate(sum(s["args_valid"] for s in steps), total_steps),
         "plan_adherence_rate": rate(sum(s["plan_aligned"] for s in steps), total_steps),
-        "plan_update_coverage": rate(sum(t["plan_updates"] > 0 for t in traces), len(traces)),
+        "plan_update_coverage": rate(
+            sum(t["plan_updates"] > 0 for t in plan_update_traces),
+            len(plan_update_traces),
+        ),
         "observation_use_rate": rate(
             sum(s["observation_used"] for s in observed_steps), len(observed_steps)
         ),
@@ -892,8 +968,10 @@ def audit_react_traces(traces):
     }
     checks = {
         "success_ok": at_least(metrics["task_success_rate"], 0.75),
+        "decision_action_ok": at_least(metrics["decision_action_alignment"], 0.85),
         "action_ok": at_least(metrics["action_accuracy"], 0.85),
         "plan_ok": at_least(metrics["plan_adherence_rate"], 0.85),
+        "plan_update_ok": at_least(metrics["plan_update_coverage"], 0.80),
         "observation_ok": at_least(metrics["observation_use_rate"], 0.90),
         "state_ok": at_least(metrics["state_update_coverage"], 0.90),
         "parse_ok": at_most(metrics["parse_failure_rate"], 0.05),
@@ -923,16 +1001,23 @@ print("all_checks_pass=", report["all_checks_pass"])
 预期输出如下：
 
 ~~~text
-metrics= {'task_success_rate': 0.5, 'decision_action_alignment': 0.75, 'action_accuracy': 0.5, 'argument_valid_rate': 0.917, 'plan_adherence_rate': 0.5, 'plan_update_coverage': 0.333, 'observation_use_rate': 0.5, 'state_update_coverage': 0.5, 'parse_failure_rate': 0.083, 'repeat_action_rate': 0.333, 'budget_overrun_rate': 0.167, 'premature_final_rate': 0.167, 'stop_correct_rate': 0.5, 'blocked_recovery_rate': 0.0}
+metrics= {'task_success_rate': 0.5, 'decision_action_alignment': 0.75, 'action_accuracy': 0.5, 'argument_valid_rate': 0.917, 'plan_adherence_rate': 0.5, 'plan_update_coverage': 0.333, 'observation_use_rate': 0.5, 'state_update_coverage': 0.5, 'parse_failure_rate': 0.083, 'repeat_action_rate': 0.167, 'budget_overrun_rate': 0.167, 'premature_final_rate': 0.167, 'stop_correct_rate': 0.5, 'blocked_recovery_rate': 0.0}
 failed_traces= ['repeat_loop_failure', 'ignored_error_premature_final', 'blocked_write_not_recovered', 'parse_failure_recovered']
-top_failure_reasons= [('task_failed', 3), ('bad_stop', 3), ('repeated_action', 2), ('plan_drift', 2), ('observation_ignored', 2), ('budget_overrun', 1), ('premature_final', 1), ('blocked_not_recovered', 1), ('parse_failure', 1)]
-checks= {'success_ok': False, 'action_ok': False, 'plan_ok': False, 'observation_ok': False, 'state_ok': False, 'parse_ok': False, 'repeat_ok': False, 'budget_ok': False, 'premature_final_ok': False, 'stop_ok': False, 'blocked_recovery_ok': False}
+top_failure_reasons= [('task_failed', 3), ('bad_stop', 3), ('plan_drift', 2), ('observation_ignored', 2), ('budget_overrun', 1), ('repeated_action', 1), ('premature_final', 1), ('blocked_not_recovered', 1), ('parse_failure', 1)]
+checks= {'success_ok': False, 'decision_action_ok': False, 'action_ok': False, 'plan_ok': False, 'plan_update_ok': False, 'observation_ok': False, 'state_ok': False, 'parse_ok': False, 'repeat_ok': False, 'budget_ok': False, 'premature_final_ok': False, 'stop_ok': False, 'blocked_recovery_ok': False}
 all_checks_pass= False
 ~~~
 
+这组六条轨迹的预期数字按代码静态推导，不能当作真实 Agent 的效果结论。
+动作指纹使用动作名、规范化 JSON 参数和计划阶段；只有同一指纹再次出现、
+返回相同观察且本步没有写入状态差异时，demo 才将它算作无进展重复。生产级
+判断还应结合领域状态、错误语义和幂等约束，不能只凭相同工具参数就拦截
+合法重试。三条样本被标为需要计划修订，其中一条实际修订，所以覆盖率是
+$1/3\approx0.333$。阈值也只是示例门槛，不是行业标准。
+
 ### 14.1 先看重复循环
 
-`repeat_loop_failure` 连续五次使用同一个搜索动作、同一个计划阶段和同一种空结果。它不仅超出四步和三次工具调用的限制，还没有把观察写进状态。重复动作率和预算超限率把这个问题明确标出来；真实控制器应在第二次无进展后考虑换工具、追问或停止，而不是等到上限才结束。
+`repeat_loop_failure` 连续五次使用同一个搜索动作、同一组参数和同一个计划阶段，并得到同一种空结果。它不仅超出四步和三次工具调用的限制，还没有把观察写进状态。重复动作率和预算超限率把这个问题明确标出来；真实控制器应在第二次无进展后考虑换工具、追问或停止，而不是等到上限才结束。代码按动作名、参数和计划阶段识别相同调用，因此计算器第一次缺少表达式、第二次补上表达式的修复重试不会误算为重复。
 
 ### 14.2 再看过早结束
 
@@ -944,7 +1029,7 @@ all_checks_pass= False
 
 ### 14.4 解析失败也要保留
 
-`parse_failure_recovered` 最终成功，但第一次计算参数解析失败。成功恢复不应抹掉失败轨迹，否则线上数据会低估解析器和参数生成的脆弱性。恢复指标和失败率应同时报告。
+`parse_failure_recovered` 最终成功，但第一次计算参数解析失败。第二次调用修正了参数，仍处在原计划的“计算”阶段，因此它不算计划修订。成功恢复不应抹掉失败轨迹，否则线上数据会低估解析器和参数生成的脆弱性。恢复指标和失败率应同时报告。
 
 ## 15. 实验设计和失败归因
 
@@ -996,7 +1081,7 @@ all_checks_pass= False
 
 ### 练习二：标注轨迹字段
 
-给出一条三步 ReAct 轨迹，标出 `d_k`、`a_k`、`o_k`、`s_k`、`p_k` 和预算变化。说明哪些内容来自工具，哪些内容只是模型候选。
+给出一条三步 ReAct 轨迹，标出 $d_k$、$a_k$、$o_k$、$s_k$、$p_k$ 和预算变化。说明哪些内容来自工具，哪些内容只是模型候选。
 
 ### 练习三：设计无进展检测
 
@@ -1035,5 +1120,7 @@ ReAct 和 Plan-Act-Observe 的共同核心是：动作必须受到环境观察�
 3. Plan-and-Solve Prompting，论文：<https://arxiv.org/abs/2305.04091>。
 4. Reflexion: Language Agents with Verbal Reinforcement Learning，论文：<https://arxiv.org/abs/2303.11366>。
 5. OpenAI Agents SDK 文档入口：<https://openai.github.io/openai-agents-python/>。
+6. OpenAI Agents SDK Tracing：<https://openai.github.io/openai-agents-python/tracing/>。
+7. Pre-Act: Multi-Step Planning and Reasoning Improves Acting in LLM Agents，论文：<https://arxiv.org/abs/2505.09970>。
 
 论文资料支撑研究方法和概念来源，官方文档支撑公开 runtime 组件。论文中的 thought、action 和环境接口与生产系统的内部消息格式不必相同；真实系统还要结合自己的工具版本、权限配置、状态存储、故障样本和评估 harness 独立验证。

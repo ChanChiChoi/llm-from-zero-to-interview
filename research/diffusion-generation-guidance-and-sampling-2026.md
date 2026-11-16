@@ -99,3 +99,11 @@
 - 来源支持：摘要提出按学生分布分配适配网络的 progressive multistep data-free distillation，并报告特定图像设置中的实验数字。
 - 边界：仅有摘要级核对；方法细节、数据来源、指标口径和结果尚未审查，本轮不将其作为已建立的通用路线或性能证据。
 - 证据等级：预印本摘要级 candidate；不用于正文定论。
+
+## 2026-11-16 Diffusers 调度器与经典 Stable Diffusion CFG 接口
+
+- 来源：[当前 DDPMScheduler API 文档](https://huggingface.co/docs/diffusers/api/schedulers/ddpm)，于 2026-11-16 阅读参数定义；[Diffusers v0.35.1 Stable Diffusion pipeline 固定版本源码](https://github.com/huggingface/diffusers/blob/v0.35.1/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion.py)，检查 guidance 分支、negative prompt 编码和拼 batch 路径。
+- 来源支持：当前 API 文档公开 `prediction_type` 的 `epsilon`、`sample`、`v_prediction` 选项；公开 `variance_type` 的 fixed small/large、learned 和 learned range 选项，以及 `timestep_spacing`、零终端 SNR 等配置。该文档说明 scheduler 的输出解释和方差选择可配置，模型输出与 scheduler 不能只按名称随意替换。
+- 固定源码支持：v0.35.1 经典 Stable Diffusion pipeline 在不使用 time-conditioned projection 的 guidance 路径中以 `guidance_scale > 1` 开启 CFG，按 `uncond + scale * (text - uncond)` 组合预测；`negative_prompt` 表示进入无条件分支位置的文本编码，两组条件表示拼入一个 batch。
+- 边界：当前 API 文档是动态页面，不能替代读者实际安装版本的参数核验；源码结论只适用于标注的 v0.35.1 pipeline 和上述分支，不外推到其他 Diffusers pipeline、模型库、版本或 time-conditioned 路径。拼 batch 减少调用次数不代表只计算了一组预测。
+- 证据等级：当前参数列表为官方文档 source-backed；CFG 行为为固定 revision 实现证据，不构成统一 API 标准。

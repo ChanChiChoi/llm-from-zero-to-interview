@@ -8,7 +8,7 @@ Planning 解决的是“接下来要完成哪些阶段、它们依赖什么、�
 
 ## 0. 资料边界与方法
 
-Plan-and-Solve Prompting 提供先规划再求解的研究背景；LLM+P 说明语言模型可以与传统规划器连接；Tree of Thoughts、ReAct 和 Reflexion 分别提供搜索、行动反馈和修正方向。OpenAI Agents SDK 的 tools、guardrails 和 tracing 文档展示了公开 runtime 中的工具、控制和轨迹概念。
+几种研究把“规划”放在不同层次。[Plan-and-Solve](https://arxiv.org/abs/2305.04091) 是先拆分再求解的提示策略；[LLM+P](https://arxiv.org/abs/2304.11477) 把自然语言问题转成 PDDL，交给经典规划器求解，再把计划译回自然语言；[Tree of Thoughts](https://arxiv.org/abs/2305.10601) 在推理时搜索多个文本思路分支；[ReAct](https://arxiv.org/abs/2210.03629) 和 [Reflexion](https://arxiv.org/abs/2303.11366) 分别展示动作观察交替与跨尝试的语言反馈记忆。它们分别涉及提示、符号规划、推理搜索和行动反馈，不能当成同一种运行时计划格式。OpenAI Agents SDK 的 tools、guardrails 和 tracing 文档则展示公开 runtime 的工具、控制和轨迹概念。
 
 这些资料并不构成统一的规划协议。论文中的计划可能是文本步骤，生产系统中的计划也可能是 DAG、状态机、队列、数据库记录或传统调度器对象。规划质量必须绑定模型、工具、环境、约束、预算和执行器版本，不能仅凭计划文字是否完整来判断。
 
@@ -138,18 +138,18 @@ v_i=(q_i,I_i,O_i,A_i,D_i,C_i,\rho_i,b_i)
 
 其中：
 
-- `q_i` 是子目标描述；
-- `I_i` 是输入及来源；
-- `O_i` 是预期输出；
-- `A_i` 是允许的动作或工具；
-- `D_i` 是依赖的子任务集合；
-- `C_i` 是验收条件；
-- `\rho_i` 是风险级别；
-- `b_i` 是该子任务的资源预算。
+- $q_i$ 是子目标描述；
+- $I_i$ 是输入及来源；
+- $O_i$ 是预期输出；
+- $A_i$ 是允许的动作或工具；
+- $D_i$ 是依赖的子任务集合；
+- $C_i$ 是验收条件；
+- $\rho_i$ 是风险级别；
+- $b_i$ 是该子任务的资源预算。
 
 ### 4.2 目标覆盖
 
-令 `R(v_i)` 表示子任务覆盖的需求，目标覆盖率为：
+令 $R(v_i)$ 表示子任务覆盖的需求，目标覆盖率为：
 
 ~~~math
 C_{\mathrm{goal}}=
@@ -157,7 +157,7 @@ C_{\mathrm{goal}}=
 {|\mathcal{R}_g|}
 ~~~
 
-这里要求 `|R_g|>0`。它回答“分解是否覆盖了原始目标”；若没有任何
+这里要求 $|\mathcal{R}_g|>0$。它回答“分解是否覆盖了原始目标”；若没有任何
 可评估的原始需求，覆盖率应为 `None`，而不是把空集合当成完全覆盖。
 覆盖率高不代表任务可执行，因为需求可能由顺序错误、缺少输入或没有
 验收标准的子任务覆盖。
@@ -170,7 +170,7 @@ C_{\mathrm{goal}}=
 G=(\mathcal{V},\mathcal{E})
 ~~~
 
-若 `(v_i,v_j)\in\mathcal{E}`，表示 `v_j` 依赖 `v_i` 的输出。一个合法执行顺序 `\pi` 应满足：
+若 $(v_i,v_j)\in\mathcal{E}$，表示 $v_j$ 依赖 $v_i$ 的输出。一个合法执行顺序 $\pi$ 应满足：
 
 ~~~math
 (v_i,v_j)\in\mathcal{E}
@@ -182,14 +182,14 @@ G=(\mathcal{V},\mathcal{E})
 
 ### 4.4 关键路径
 
-若 `c_i` 是子任务的时间或成本，依赖图中的关键路径长度为：
+若 $c_i$ 是子任务的时间或成本，依赖图中的关键路径长度为：
 
 ~~~math
 L_{\mathrm{critical}}=
 \max_{p\in\mathcal{P}(G)}\sum_{v_i\in p}c_i
 ~~~
 
-`\mathcal{P}(G)` 是非空图中的路径集合，`c_i` 是非负且有限的时间或
+其中 $\mathcal{P}(G)$ 是非空图中的路径集合，$c_i$ 是非负且有限的时间或
 成本。空图没有可比较的关键路径，应报告 `None`；不能把长度 `0` 解读
 成任务已经完成。即使所有互不依赖的子任务都能并行，任务耗时也不能
 低于关键路径。若关键路径包含高风险写入或昂贵人工确认，应优先优化
@@ -216,7 +216,7 @@ R_{\mathrm{dep}}=\frac{1}{|\mathcal{E}|}
 \sum_{(v_i,v_j)\in\mathcal{E}}I_{\mathrm{violation}}(v_i,v_j)
 ~~~
 
-`I_exec` 表示子任务是否具备可执行输入、工具和动作，`I_accept` 表示是否有非空且可检查的验收条件，`I_violation` 表示执行顺序是否违反依赖。分母为零时应在实现中定义明确的空图策略，而不是默默把结果当成满分。
+$I_{\mathrm{exec}}$ 表示子任务是否具备可执行输入、工具和动作，$I_{\mathrm{accept}}$ 表示是否有非空且可检查的验收条件，$I_{\mathrm{violation}}$ 表示执行顺序是否违反依赖。分母为零时应在实现中定义明确的空图策略，而不是默默把结果当成满分。
 因此，`n>0` 时才计算前两个比例，`|E|>0` 时才计算依赖违规率；没有
 节点、没有边或没有可评估事件时，指标值是 `None`。`None` 代表尚未
 测量，不代表规划质量为好或为坏。
@@ -322,6 +322,23 @@ DAG 用节点表示子任务，用边表示依赖，适合表达并行和汇合�
 
 这个例子里，“收集三家资料”可以并行，“比较字段”必须等待所有必要资料，“生成建议”又依赖比较结果和冲突状态。如果供应商 B 的资料过期，汇总节点不能用 A、C 的结果掩盖缺失，而应把 B 标记为待补充或降低结论强度。并行的正确性来自依赖和合并契约，而不是启动了多少个子 Agent。
 
+这张依赖图把可并行的采集阶段与必须等待的汇总阶段分开：
+
+~~~mermaid
+flowchart LR
+    A["收集供应商 A"] --> D["字段对齐"]
+    B["收集供应商 B"] --> D
+    C["收集供应商 C"] --> D
+    D --> E["冲突核查"]
+    E --> F["生成采购建议"]
+~~~
+
+假设 A、B、C 的资料收集分别需要 6、8、10 分钟，字段对齐需要 3 分钟，
+冲突核查 2 分钟，建议生成 1 分钟。若三条采集分支可同时运行且不受限流，
+关键路径为 $\max(6,8,10)+3+2+1=16$ 分钟；完全串行则需要 $6+8+10+3+2+1=30$
+分钟。这里的耗时是教学假设，真实系统还会受到队列、限流、失败重试和
+结果合并开销影响。
+
 可以用如下结构记录合并输入：
 
 ~~~text
@@ -339,34 +356,15 @@ evidence = {
 
 持续监控、工单处理、知识库整理和实验跟踪可能持续数小时或数天。模型上下文会被压缩、服务可能重启、权限可能过期、外部资源可能改变，不能只把全部历史放在一次 prompt 中。
 
-### 10.2 Checkpoint 内容
+### 10.2 Checkpoint 保存规划状态
 
-一个可恢复 checkpoint 至少包含：
+一个可恢复 checkpoint 要保留目标和约束版本、当前计划版本及节点状态、已确认输出和证据、未完成/阻塞/取消节点、外部资源版本或 request ID、剩余预算与权限状态，以及最后一个安全恢复位置。它是可供控制器继续调度的任务状态，不是把模型最后一句话当成全部历史。
 
-1. 目标和约束版本。
-2. 当前计划版本和节点状态。
-3. 已确认事实及来源。
-4. 未完成、阻塞和取消的节点。
-5. 最近工具结果和外部 request id。
-6. 资源版本、幂等键和副作用状态。
-7. 剩余预算和权限有效期。
-8. 最后一次安全可恢复位置。
+### 10.3 恢复前核对依赖和外部事实
 
-Checkpoint 不是把模型最后一句话存下来。恢复程序必须验证外部状态，再决定是否可以重放动作。写操作若状态未知，应先查询而不是从旧 checkpoint 直接重发。
+恢复程序先确认目标仍有效，再检查资源版本、权限和未完成节点的依赖条件；只有依赖和验收条件仍成立，节点才可进入 `ready`。如果写操作可能已经生效但响应丢失，应先按 request ID 查询外部状态；无法确定时将状态保留为 `unknown` 并交人工处理，不从旧计划盲目重发。若目标或依赖图改变，创建新计划版本并记录变化原因。
 
-### 10.3 断点恢复
-
-恢复时先加载计划和状态摘要，再验证资源版本、权限和未完成节点。若依赖图已经变化，创建新计划版本；若目标已被用户修改，暂停旧计划并请求确认。恢复成功的标准是状态一致，而不是模型继续输出。
-
-### 10.4 持久执行与重复副作用
-
-长期任务的调度器可能在节点执行后、状态写回前崩溃，也可能在状态写回后没有收到执行器的响应。此时不能简单依赖“每个节点只执行一次”的假设。读操作可以通过请求 ID 重放；写操作需要幂等键、外部状态查询或明确的 pending 状态。
-
-例如，邮件服务已经接受请求，但 Agent 进程在收到响应前退出。恢复程序看到节点仍是 `running`，正确动作是查询 request id，而不是再次发送。若服务没有查询接口，系统应把节点标记为 `unknown` 并交给人工。所谓 exactly-once 往往需要执行器、存储和外部服务共同支持，不能由 planner 的文本承诺实现。
-
-### 10.5 检查点的粒度
-
-每个动作都保存 checkpoint 会产生大量存储和恢复成本，只在阶段结束保存又可能丢失关键外部状态。常见做法是对只读探索按若干节点保存，对有副作用的动作在执行前后分别保存，对计划版本变化立即保存。粒度选择应由重放成本、数据敏感性和副作用风险决定。
+计划版本只能声明调度意图；exactly-once 语义需要调度器、状态存储和外部服务共同实现，检查点本身不能保证副作用只发生一次。计划中的 checkpoint 时机要权衡存储成本、可恢复性和副作用风险：有副作用的动作需要在执行前后保存状态，计划版本变更也应可追溯。第二十册[第 17 章](../../book-20-agent-harness-runtime/chapters/17-long-running-agent与checkpoint.md)深入讨论长任务 checkpoint 的原子性、幂等、状态迁移和恢复测试；这里保留这些运行时机制与计划节点状态之间的接口。
 
 ## 11. Planning 与 Memory
 
@@ -402,30 +400,35 @@ Checkpoint 不是把模型最后一句话存下来。恢复程序必须验证外
 
 ### 12.4 Search-based Planner
 
-搜索规划器生成多个分解或路径，再用成本、完成条件、风险和验证器评分。它可以避免一次错误计划决定全局，但会增加计算和选择错误；若评分器偏向计划长度或格式，搜索可能稳定选择漂亮但不可执行的计划。
+搜索规划器生成多个分解或路径，再用成本、完成条件、风险和验证器评分。Tree of Thoughts 是推理时搜索的例子：它把连贯文本思路作为节点，让模型扩展、比较和回看候选路径；论文评估 Game of 24、创意写作和 Mini Crosswords 等特定任务。这种推理分支不自动成为外部环境的可执行任务图。搜索可以避免一次错误计划决定全局，但会增加计算和选择错误；若评分器偏向计划长度或格式，搜索可能稳定选择漂亮但不可执行的计划。
 
 ### 12.5 Hierarchical 和 External Planner
 
-分层规划器处理高层目标和低层动作；传统调度器、SAT/SMT 求解器、任务规划器或业务规则引擎可以处理严格约束。LLM 不必独自承担所有规划工作，关键是定义清楚输入输出、失败状态和责任边界。
+分层规划器处理高层目标和低层动作；传统调度器、SAT/SMT 求解器、任务规划器或业务规则引擎可以处理严格约束。LLM+P 是一种具体组合：模型负责把自然语言问题映射成 PDDL，经典规划器在给定领域和动作模型下搜索可行或最优计划，模型再将结果译回自然语言。它依赖正确的领域描述和映射，不能自动处理未建模的外部状态。LLM 不必独自承担所有规划工作，关键是定义清楚输入输出、失败状态和责任边界。
 
 ### 12.6 规划成本和收益
 
-规划本身也消耗资源。一次请求的规划成本可以粗略拆成：
+规划本身也消耗资源。先把模型生成与更新计划、为计划收集信息的工具、依赖/验收检查和人工审核都换算成同一成本单位，分别记为 $C_{\mathrm{model}}$、$C_{\mathrm{tool}}$、$C_{\mathrm{verify}}$ 和 $C_{\mathrm{review}}$。如果要同时比较美元、秒数和 token 数，应保留成本向量，不能把不同单位直接相加。在统一单位下，一次请求的规划成本可以粗略写成：
 
 ~~~math
 C_{\mathrm{plan}}=C_{\mathrm{model}}+C_{\mathrm{tool}}+C_{\mathrm{verify}}+C_{\mathrm{review}}
 ~~~
 
-`C_model` 是生成和更新计划的模型成本，`C_tool` 是为规划收集信息的工具成本，`C_verify` 是依赖和验收检查，`C_review` 是人工确认。加入规划后的收益不应只看任务成功率，也要看每个成功任务的额外成本和延迟。
+例如，若这四项分别为 4、1、2、3 个合成成本单位，则 $C_{\mathrm{plan}}=4+1+2+3=10$ 个单位。加入规划后的收益不应只看任务成功率，也要看每个成功任务的额外成本和延迟。
 
-如果 baseline 的成功率为 `A_0`，加入规划后的成功率为 `A_1`，相应成本为 `C_0` 和 `C_1`，可以用教学性的边际收益表示：
+设直接执行 baseline 与加入规划后的成功率为 $A_0$、$A_1$，两者必须在同一任务分布和评分口径下测量；总成本 $C_0$、$C_1$ 使用同一单位。可以用教学性的边际收益表示：
 
 ~~~math
 G_{\mathrm{plan}}=\frac{A_1-A_0}{C_1-C_0}
 ~~~
 
-当 `C_1=C_0` 时不能直接使用这个比值；当规划提高了高风险任务的安全性而没有提高平均成功率时，也不能仅凭平均值否定规划。应按简单任务、难任务、高风险任务和需要恢复的任务分别看收益。
-只有 `C_1-C_0\ne0` 且成本口径一致时，`G_plan` 才是有定义的边际比值；
+若 baseline 成功率为 $0.70$、成本为 50 个单位，加入规划后成功率为
+$0.80$、成本为 60 个单位，则 $G_{\mathrm{plan}}=(0.80-0.70)/(60-50)=0.01$，
+表示每个额外成本单位对应 0.01 的绝对成功率增量。这是教学假设，不是
+产品效果数据。
+
+当 $C_1=C_0$ 时不能直接使用这个比值；当规划提高了高风险任务的安全性而没有提高平均成功率时，也不能仅凭平均值否定规划。应按简单任务、难任务、高风险任务和需要恢复的任务分别看收益。
+只有 $C_1-C_0\ne0$ 且成本口径一致时，$G_{\mathrm{plan}}$ 才是有定义的边际比值；
 成本没有增加时，应单独报告成功率差和成本差，而不是用无穷大或零替代。
 如果任一成功率来自空样本，边际收益也应保持 `None`。
 
@@ -439,15 +442,36 @@ G_{\mathrm{plan}}=\frac{A_1-A_0}{C_1-C_0}
 
 ### 13.2 验收和依赖
 
-验收覆盖率检查每个子任务是否有可检查条件，依赖违规率检查实际顺序是否满足图约束。还应检查依赖是否真实存在：过度添加依赖会降低并行度，遗漏依赖则会产生错误或副作用。
+验收覆盖率检查每个子任务是否有可检查条件。依赖违规率按依赖边计算：每条边检查前置节点是否已经完成；若图中没有边，指标为 `None`。代码里另行列出“至少含一条违规边的计划”，两种分母不能混叫同一个 rate。还应检查依赖是否真实存在：过度添加依赖会降低并行度，遗漏依赖则会产生错误或副作用。
 
 ### 13.3 重规划和恢复
 
-失败发生后，系统是否更新了受影响计划，是否保留了原始目标，是否恢复到安全状态，都是独立指标。重规划覆盖率高不一定好，因为无意义地反复重写计划也可能表示不稳定；要同时报告重规划原因、后续成功率和额外成本。
+失败发生后，系统是否更新了受影响计划，是否保留了原始目标，是否恢复到安全状态，都是独立指标。令 $\mathcal{Q}$ 为经任务标注或审计判定确实需要修订计划的样本，$N_q=|\mathcal{Q}|$；$I_{\mathrm{replan}}(q)$ 在触发条件出现后完成了有理由的计划修订时取 $1$，否则取 $0$：
+
+~~~math
+R_{\mathrm{replan}}=\frac{1}{N_q}\sum_{q\in\mathcal{Q}}I_{\mathrm{replan}}(q),
+\qquad N_q>0
+~~~
+
+失败恢复率则只在发生失败或阻断的节点上计算。令 $\mathcal{F}$ 为这些节点的集合，$I_{\mathrm{recover}}(v_i)$ 在系统恢复到安全、可解释的状态时取 $1$：
+
+~~~math
+R_{\mathrm{recover}}=\frac{1}{|\mathcal{F}|}\sum_{v_i\in\mathcal{F}}I_{\mathrm{recover}}(v_i),
+\qquad |\mathcal{F}|>0
+~~~
+
+若没有样本需要修订或恢复，相应指标应记为 `None`。重规划覆盖率高不一定好，因为无意义地反复重写计划也可能表示不稳定；要同时报告触发原因、后续成功率和额外成本。
 
 ### 13.4 关键路径、成本和任务结果
 
-计划文本质量不能替代实际任务成功。报告应同时包括关键路径、总成本、并行度、P50/P95 延迟、人工介入、失败分支和最终成功率。若规划增加了大量步骤却没有提高变体任务成功率，应考虑减少规划或改进验证器。
+计划文本质量不能替代实际任务成功。对需要显式确认的高风险节点，设 $\mathcal{H}$ 为这类节点集合，$I_{\mathrm{confirm}}(v_i)$ 表示动作执行前是否取得要求的确认，则确认覆盖率为：
+
+~~~math
+R_{\mathrm{confirm}}=\frac{1}{|\mathcal{H}|}\sum_{v_i\in\mathcal{H}}I_{\mathrm{confirm}}(v_i),
+\qquad |\mathcal{H}|>0
+~~~
+
+若样本中没有高风险节点，该指标记为 `None`。完整报告还应包括关键路径、总成本、并行度、P50/P95 延迟、人工介入、失败分支和最终成功率。若规划增加了大量步骤却没有提高变体任务成功率，应考虑减少规划或改进验证器。
 
 ### 13.5 一个小型 worked example
 
@@ -465,9 +489,29 @@ G_{\mathrm{plan}}=\frac{A_1-A_0}{C_1-C_0}
 
 这个例子说明规划评估至少有三个层次：图结构是否合法，节点输出是否满足验收，整个任务是否满足用户目标。只检查拓扑顺序会漏掉测试失败，只检查最终文本会漏掉中间依赖和授权范围。
 
+再把同一套口径用于第 14 节的五份合成计划，可以手工核对代码中的关键结果。五份计划共含 20 个步骤、14 条依赖边；目标覆盖先逐计划计算，再取平均：
+
+| 指标 | 手算口径 | 结果 |
+| --- | --- | ---: |
+| 目标覆盖率 | $(1+0.75+1+1+1)/5$ | 0.95 |
+| 可执行步骤比例 | $18/20$ | 0.90 |
+| 验收条件覆盖率 | $13/20$ | 0.65 |
+| 依赖违规率 | $1/14$ 条违规边 | 0.071 |
+| 重规划覆盖率 | $1/4$ 个预先标注需要重规划的计划 | 0.25 |
+| 失败恢复率 | $1/2$ 个失败或阻断步骤恢复 | 0.50 |
+| 高风险确认覆盖率 | $0/1$ 个高风险步骤确认 | 0.00 |
+| 过长计划比例 | $1/5$ | 0.20 |
+| 含重复子目标的计划比例 | $2/5$ | 0.40 |
+| 任务成功率 | $2/5$ | 0.40 |
+
+演示程序为关键路径中的每个节点赋单位权重。最长路径是 `think_1 -> think_2 -> search_logs -> search_logs_again -> answer_without_evidence -> extra_check`，所以长度为 $1+1+1+1+1+1=6$ 步。依赖顺序违规会单独计入依赖指标；只在图存在环或引用未知前置时跳过关键路径计算。这里的数值只用于核对定义和实现，不是实际 Agent 的性能结果。
+
 ## 14. 最小可运行 Planning 审计实验
 
 下面的 demo 不访问外部 API，只用五个教学计划检查目标覆盖、可执行性、验收标准、依赖顺序、重规划、失败恢复、高风险确认、计划长度、重复子目标和任务结果。数据故意包含缺验证、依赖违规、过度分解和虽然成功但有审计问题的计划。
+
+代码状态：**静态审阅，未运行**。示例只用 Python 标准库，所有计划和评分都是合成数据；关键路径函数把每个节点按一个等权步骤计数，不代表实测时间或费用。
+`replan_required` 是预先标注的分母：`missing_verify` 有计划缺口，`deploy_dependency_violation` 被阻断，`replan_success` 的首个来源失败，`over_decomposed_loop` 有重复和过长结构；只有 `replan_success` 实际完成了修订。
 
 ~~~python
 from collections import Counter
@@ -481,6 +525,7 @@ PLANS = [
         "id": "code_fix_good",
         "requirements": {"inspect", "test", "patch", "verify", "summarize"},
         "replanned": False,
+        "replan_required": False,
         "final_success": True,
         "steps": [
             {"id": "run_tests", "covers": {"test"}, "deps": [], "executable": True, "acceptance": True, "risk": "low", "confirmed": True, "status": "done", "recovered": True},
@@ -494,6 +539,7 @@ PLANS = [
         "id": "missing_verify",
         "requirements": {"inspect", "patch", "verify", "summarize"},
         "replanned": False,
+        "replan_required": True,
         "final_success": False,
         "steps": [
             {"id": "inspect", "covers": {"inspect"}, "deps": [], "executable": True, "acceptance": True, "risk": "low", "confirmed": True, "status": "done", "recovered": True},
@@ -505,6 +551,7 @@ PLANS = [
         "id": "deploy_dependency_violation",
         "requirements": {"collect", "evaluate", "deploy"},
         "replanned": False,
+        "replan_required": True,
         "final_success": False,
         "steps": [
             {"id": "deploy", "covers": {"deploy"}, "deps": ["evaluate"], "executable": True, "acceptance": True, "risk": "high", "confirmed": False, "status": "blocked", "recovered": False},
@@ -516,6 +563,7 @@ PLANS = [
         "id": "replan_success",
         "requirements": {"find_policy", "answer"},
         "replanned": True,
+        "replan_required": True,
         "final_success": True,
         "steps": [
             {"id": "search_docs", "covers": {"find_policy"}, "deps": [], "executable": True, "acceptance": True, "risk": "low", "confirmed": True, "status": "failed", "recovered": True},
@@ -527,6 +575,7 @@ PLANS = [
         "id": "over_decomposed_loop",
         "requirements": {"diagnose", "answer"},
         "replanned": False,
+        "replan_required": True,
         "final_success": False,
         "steps": [
             {"id": "think_1", "covers": set(), "deps": [], "executable": False, "acceptance": False, "risk": "low", "confirmed": True, "status": "done", "recovered": True},
@@ -562,13 +611,14 @@ def is_zero(value):
 
 
 def dependency_violations(plan):
-    done_or_seen = set()
+    completed = set()
     violations = []
     for step in plan["steps"]:
         for dep in step["deps"]:
-            if dep not in done_or_seen:
+            if dep not in completed:
                 violations.append((step["id"], dep))
-        done_or_seen.add(step["id"])
+        if step["status"] == "done":
+            completed.add(step["id"])
     return violations
 
 
@@ -611,33 +661,35 @@ def critical_path_len(plan):
 
 
 def critical_path_metric(plans):
-    lengths = [critical_path_len(plan) for plan in plans if plan["steps"]]
+    lengths = []
+    for plan in plans:
+        if not plan["steps"]:
+            continue
+        try:
+            lengths.append(critical_path_len(plan))
+        except ValueError:
+            continue
     return max(lengths) if lengths else None
-
-
-def plan_gain(success_before, success_after, cost_before, cost_after):
-    if cost_after == cost_before:
-        return None
-    if success_before is None or success_after is None:
-        return None
-    return round((success_after - success_before) / (cost_after - cost_before), 3)
 
 
 def audit_plans(plans):
     all_steps = [step for plan in plans for step in plan["steps"]]
     coverage_scores = []
-    failed_or_blocked_plans = []
+    replan_required_plans = []
     dep_violation_plans = []
+    dependency_findings = {}
     overlong_plans = []
     repeated_plans = []
     missing_acceptance_plans = []
     for plan in plans:
         covered = set().union(*(step["covers"] for step in plan["steps"])) if plan["steps"] else set()
         coverage_scores.append(rate(len(covered & plan["requirements"]), len(plan["requirements"])))
-        if any(step["status"] in {"failed", "blocked"} for step in plan["steps"]):
-            failed_or_blocked_plans.append(plan)
-        if dependency_violations(plan):
+        if plan["replan_required"]:
+            replan_required_plans.append(plan)
+        violations = dependency_violations(plan)
+        if violations:
             dep_violation_plans.append(plan["id"])
+            dependency_findings[plan["id"]] = violations
         if len(plan["steps"]) > MAX_STEPS:
             overlong_plans.append(plan["id"])
         if repeated_cover(plan):
@@ -647,6 +699,8 @@ def audit_plans(plans):
 
     high_risk_steps = [step for step in all_steps if step["risk"] == "high"]
     failed_or_blocked_steps = [step for step in all_steps if step["status"] in {"failed", "blocked"}]
+    dependency_edge_count = sum(len(step["deps"]) for step in all_steps)
+    dependency_violation_count = sum(len(items) for items in dependency_findings.values())
     metrics = {
         "goal_coverage": (
             round(sum(coverage_scores) / len(coverage_scores), 3)
@@ -655,8 +709,8 @@ def audit_plans(plans):
         ),
         "executable_step_rate": rate(sum(step["executable"] for step in all_steps), len(all_steps)),
         "acceptance_coverage": rate(sum(step["acceptance"] for step in all_steps), len(all_steps)),
-        "dependency_violation_rate": rate(len(dep_violation_plans), len(plans)),
-        "replan_coverage": rate(sum(plan["replanned"] for plan in failed_or_blocked_plans), len(failed_or_blocked_plans)),
+        "dependency_violation_rate": rate(dependency_violation_count, dependency_edge_count),
+        "replan_coverage": rate(sum(plan["replanned"] for plan in replan_required_plans), len(replan_required_plans)),
         "failure_recovery_rate": rate(sum(step["recovered"] for step in failed_or_blocked_steps), len(failed_or_blocked_steps)),
         "risk_confirmation_coverage": rate(sum(step["confirmed"] for step in high_risk_steps), len(high_risk_steps)),
         "overlong_plan_rate": rate(len(overlong_plans), len(plans)),
@@ -695,11 +749,7 @@ def audit_plans(plans):
     }
     return {
         "metrics": metrics,
-        "dependency_violations": {
-            plan["id"]: dependency_violations(plan)
-            for plan in plans
-            if dependency_violations(plan)
-        },
+        "dependency_violations": dependency_findings,
         "problem_plans": sorted(
             set(
                 dep_violation_plans
@@ -727,11 +777,11 @@ print("all_checks_pass=", report["all_checks_pass"])
 预期输出如下：
 
 ~~~text
-metrics= {'goal_coverage': 0.95, 'executable_step_rate': 0.9, 'acceptance_coverage': 0.65, 'dependency_violation_rate': 0.2, 'replan_coverage': 0.5, 'failure_recovery_rate': 0.5, 'risk_confirmation_coverage': 0.0, 'overlong_plan_rate': 0.2, 'repeat_subgoal_rate': 0.4, 'task_success_rate': 0.4, 'max_critical_path_len': 6}
+metrics= {'goal_coverage': 0.95, 'executable_step_rate': 0.9, 'acceptance_coverage': 0.65, 'dependency_violation_rate': 0.071, 'replan_coverage': 0.25, 'failure_recovery_rate': 0.5, 'risk_confirmation_coverage': 0.0, 'overlong_plan_rate': 0.2, 'repeat_subgoal_rate': 0.4, 'task_success_rate': 0.4, 'max_critical_path_len': 6}
 dependency_violations= {'deploy_dependency_violation': [('deploy', 'evaluate')]}
 problem_plans= ['deploy_dependency_violation', 'missing_verify', 'over_decomposed_loop', 'replan_success']
 top_failure_reasons= [('task_failed', 3), ('missing_acceptance', 2), ('repeated_subgoal', 2), ('goal_not_fully_covered', 1), ('dependency_violation', 1), ('unconfirmed_high_risk', 1), ('overlong_plan', 1)]
-checks= {'coverage_ok': True, 'executable_ok': True, 'acceptance_ok': False, 'dependency_ok': False, 'replan_ok': True, 'recovery_ok': False, 'risk_ok': False, 'length_ok': False, 'repeat_ok': False, 'success_ok': False}
+checks= {'coverage_ok': True, 'executable_ok': True, 'acceptance_ok': False, 'dependency_ok': False, 'replan_ok': False, 'recovery_ok': False, 'risk_ok': False, 'length_ok': False, 'repeat_ok': False, 'success_ok': False}
 all_checks_pass= False
 ~~~
 

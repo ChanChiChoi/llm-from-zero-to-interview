@@ -1,6 +1,6 @@
 # 长上下文 Harness 与 Agent Memory：来源证据
 
-检索与阅读日期：2026-10-29。本记录仅存来源支持的技术事实、版本、阅读范围与证据边界；章节审阅决定、去向和修改状态见 `progress/book-02-advanced-100/architecture-audit.md`。
+检索与复核日期：长上下文 Harness 与 RAG 来源于 2026-10-29 初检；Agent 长期记忆相关论文和 OpenAI Agents SDK Sessions 文档于 2026-11-16 复核。本记录仅存来源支持的技术事实、版本、阅读范围与证据边界；章节审阅决定、去向和修改状态见各书册对应的 `progress/` 记录。
 
 ## 长上下文 Harness 评测
 
@@ -18,7 +18,7 @@
 
 上述方法分别改变检索决策、低质量召回的恢复、文档层级表示和全局语料摘要路线；机制不可互换，论文实验也不能合并成跨系统的性能排名。
 
-## Agent 长期记忆的写入、使用和安全
+## Agent 长期记忆的写入、使用和安全（来源复核：2026-11-16）
 
 - **AdaMem**：[Chen et al., EMNLP 2026 Industry Track](https://aclanthology.org/2026.emnlp-industry.189/)。阅读 ACL Anthology 论文记录和摘要。AdaMem 将记忆写入建模为 preference-conditioned write control：每种交互情境有自然语言 memory policy，并通过周期反馈更新；AdaMem-Bench 使用 6 个并行 persona 和 5 段 10 周故事。摘要报告，在两种抽取模型与两种反馈模式下，其平均 QA accuracy 从 Mem0 的 80.0% 到 84.35%，persistent memory 减少 9.27%；作者同时报告模型仍不能稳定执行选择性写入政策。数值绑定论文基准、baseline 和配置，不代表生产记忆策略的普遍收益。
 - **Memora**：[Uddin et al., Findings of ACL 2026](https://aclanthology.org/2026.findings-acl.1337/)。阅读 ACL Anthology 论文记录和摘要。基准覆盖数周至数月的对话，评 remembering、reasoning、recommending，并提出 Forgetting-Aware Memory Accuracy 以惩罚对已过期或失效记忆的依赖；作者测试 4 个 LLM 与 6 个 memory agents，报告常见过期记忆复用和新旧信息协调问题。该摘要不提供跨产品的普遍失效率。
@@ -28,3 +28,26 @@
 - **MemoryCD**：[Zhang et al., Findings of EMNLP 2026](https://aclanthology.org/2026.findings-emnlp.1804/)。阅读 ACL Anthology 论文记录和摘要。其 benchmark 从 Amazon Review 相关行为数据构造跨年、多领域 personalization 任务，摘要列出 14 个 base models、6 种 memory baselines、4 类任务和 12 个领域。该摘要支持其数据与任务设计，不足以证明 benchmark 可代表真实用户日常对话或其他隐私/授权制度。
 
 这些来源分别强调写入策略、过期记忆、行动参数使用、过度个性化、个性化安全以及跨领域历史。数据集和结果不可合并为一个“记忆能力”指标；读摘要所得结论限于上述摘要明确披露的信息。
+
+## 长期记忆基准：召回、遗忘与行动（来源复核：2026-11-16）
+
+- **LongMemEval**：[Wu et al., arXiv:2410.10813v2，ICLR 2025](https://arxiv.org/abs/2410.10813)。阅读 arXiv HTML 摘要、统一设计 §4、时间查询实验 §5.4。论文用 500 道问题评估信息抽取、多 session 推理、时间推理、知识更新和拒答；摘要报告，在持续交互记忆设置下，商业助手和长上下文 LLM 出现约 30% 的准确率下降。作者将系统分成 indexing、retrieval、reading 三阶段，并报告会话拆分、事实扩展索引和时间感知查询扩展等改法。§5.4 的时间扩展收益取决于负责解析时间范围的 query LLM；结果限于 LongMemEval 的问题、模型和检索配置，不是所有产品的固定下降或增益。
+- **MemoryAgentBench**：[Hu et al., arXiv:2507.05257v4，ICLR 2026](https://arxiv.org/abs/2507.05257)。阅读当前 v4 摘要、Selective Forgetting 定义 §B.4 和任务提示说明。论文把记忆能力拆为 accurate retrieval、test-time learning、long-range understanding 和 selective forgetting；后者指在新证据与旧知识矛盾时检测并修订、覆盖或移除旧信息。其 FactConsolidation 任务显式要求按编号优先考虑较新的事实。这个操作定义用于基准中的矛盾更新任务，不等同产品收到用户请求后清理索引、摘要、缓存和备份的删除义务；具体 benchmark 结果也受任务提示和样本构造影响。
+- **EverMemBench**：[Hu et al., arXiv:2602.01313v3](https://arxiv.org/html/2602.01313v3)，版本修订于 2026-03-11。阅读数据统计 §3.4、主要结果表 4—5 及误差分析 §§4.2—4.3。该预印本构造 5 个项目/15 个子项目、170 名员工、51,023 轮对话、4,225,555 tokens 和 2,400 组问答。表 4 的 Gemini-3-Flash full-context multi-hop 准确率为 26.51%，提供 gold evidence 的 oracle 设置为 88.37%；GPT-4.1-mini 对应为 2.41% 和 97.99%。摘要把“即使给 oracle evidence 也仅约 26%”作为概括，与详细分模型表及 §4.2 对 Gemini 的 oracle 结果不一致；正文引用采用分模型表值，保留此来源内部差异。所有分数均限于其合成协作对话、模型和评测设置，不能外推为通用产品水平。
+
+## OpenAI Agents SDK Sessions 的会话历史信任边界
+
+- **来源与版本**：[OpenAI Agents SDK Sessions：SQLite storage trust boundary](https://openai.github.io/openai-agents-python/sessions/#sqlite-storage-trust-boundary)，动态文档，核阅日期 2026-11-16。
+- **阅读范围**：Sessions 概览、SQLite storage trust boundary、EncryptedSession 说明。
+- **来源支持的事实**：Agents SDK 的 session 用于跨运行保存和恢复对话历史。SQLiteSession 文档明确说明，session ID 只是选择会话历史的键，不认证用户，也不授权访问该历史；应用负责授权每个 session，并保护数据库文件、底层存储和备份。文档还指出 EncryptedSession 提供加密，但不验证历史条目是否完整、顺序是否正确；它接受未经加密的条目，也不能替代存储完整性控制。
+- **证据等级与边界**：官方文档快照，source-backed；授权和完整性描述针对文档中的 SQLite trust boundary，不能外推到每种 session backend。文档与 SDK 会更新；涉及具体版本行为时应再核对固定 package revision 及所用后端实现。
+
+## Agentic RAG：检索决策、工具接口与评测（来源复核：2026-11-16）
+
+- **FLARE**：[Jiang et al., “Active Retrieval Augmented Generation,” arXiv:2305.06983](https://arxiv.org/abs/2305.06983)。阅读 arXiv 摘要。Forward-Looking Active Retrieval Augmented Generation (FLARE) 预测即将生成的句子，把预测内容用作检索查询，并在出现低置信 token 时结合新检索的材料重新生成句子；作者在四个长篇知识密集生成任务/数据集上比较 FLARE 与基线。机制和结果限于论文方法、数据、模型及实验设置，不代表任一产品会默认执行置信触发或保证生成事实正确。
+- **IRCoT**：[Trivedi et al., “Interleaving Retrieval with Chain-of-Thought Reasoning for Knowledge-Intensive Multi-Step Questions,” arXiv:2212.10509](https://arxiv.org/abs/2212.10509)。阅读 arXiv 摘要。IRCoT 在逐步推理过程中交错检索：先前已推导或检索到的信息会影响下一步该查什么，检索结果再进入后续推理；作者报告了 HotpotQA、2WikiMultiHopQA、MuSiQue 和 IIRC 上的实验。证据适用于论文的多跳问答设置，不等价于对任意开放域 Agent 的生产效果。
+- **A-RAG**：[Du et al., “A-RAG: Scaling Agentic Retrieval-Augmented Generation via Hierarchical Retrieval Interfaces,” arXiv:2602.03442v1](https://arxiv.org/abs/2602.03442)。该版本提交于 2026-02-03；阅读摘要、§3.2 的检索接口与实验摘要。论文向模型提供 `keyword_search`、`semantic_search` 和 `chunk_read` 三类接口，以不同粒度访问语料；作者在多个开放域 QA benchmark 上报告其配置的答案表现和检索 token 使用。结果绑定论文基准、模型与实现；它支持“检索工具粒度可成为模型决策接口”的实例，不证明分层工具在所有语料或权限制度下都优于其他设计。
+- **RAGCap-Bench**：[Lin et al., AACL-IJCNLP 2026, ACL Anthology 2026.aacl-long.245](https://aclanthology.org/2026.aacl-long.245/)。阅读 ACL Anthology 元数据、论文摘要及 §§2—3.2。论文以开源 deep-research 问题和 Agentic RAG 轨迹构建 255 道筛选后的选择题，覆盖 Planning、Evidence Extraction、Grounded Reasoning、Noise Robustness 四类中间能力，并由专家参与答案标注。它为组件级诊断提供一个 benchmark；这些题目和实验不能代替部署系统的检索端到端质量、权限、成本或安全评估。
+- **Q2D-Web**：[Schall et al., “Q2D-Web: A Large-Scale Benchmark for Retrieval in Agentic RAG Systems,” arXiv:2609.08887v2](https://arxiv.org/abs/2609.08887v2)。v2 日期为 2026-09-28；阅读摘要、§3 的查询/语料/相关性标注构造及 §4 的第一阶段检索实验。论文描述约 1.9 亿网页文档、约 7 万条十种语言的 Agent 改写查询，查询采样自九个月的去 PII 生产流量，并设置 Agent citations、production rankings、Combined+LLM-judged 三种相关性判断；比较 13 个词法、dense 和 late-interaction retrievers。各模型仅读取每篇文档前 512 个 token（平均文档约 3.3K token），大规模 benchmark 的结论因此不覆盖全文长文档读取；该工作针对第一阶段检索，不测完整 RAG 的引用推理或应用权限。语料、查询和 judgments 不公开，复现实验受限。
+
+这些来源分别观察检索触发、多跳步骤依赖、工具粒度、Agent 中间能力和第一阶段召回；各自的任务对象和指标不同，数字不能合并成统一的 Agentic RAG 排名。

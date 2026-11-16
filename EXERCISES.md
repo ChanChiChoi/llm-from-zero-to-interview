@@ -712,23 +712,23 @@
 231. 比较 screenshot、DOM 和 accessibility tree 在 UI Agent 中的优缺点。
 232. 用 3 分钟回答“为什么 UI Agent 的难点不是能点鼠标，而是状态理解、风险控制和失败恢复”。
 233. 设计一个 Multi-Agent trace schema，字段包含 run id、agent role、task assignment、message intent、evidence、conflict、permission violation、cost 和 final status。
-234. 写一个 0 依赖 Multi-Agent audit demo，输出 task success rate、single-agent lift rate、role match rate、message valid rate、evidence support rate、conflict resolution rate、duplicate work rate、permission violation rate、unnecessary multi-agent rate 和 gate pass。
+234. 写一个 0 依赖 Multi-Agent audit demo，输出 task success rate、配对成功率差（无 baseline 时为 None）、role match rate、assignment success rate、message valid rate、evidence support rate、conflict resolution rate、correctly resolved conflict rate、duplicate work rate、permission violation rate、unnecessary multi-agent rate、平均单次成本和 gate pass。
 235. 给一个研究报告任务设计 planner、researcher、verifier、summarizer 和 coordinator 的权限边界，说明哪些信息应该进入 blackboard。
 236. 构造一个角色分配错误样本，计算 role match rate，并说明 coordinator 如何修复。
 237. 构造一个冲突样本，要求包含两个 Agent 的证据、冲突类型、自动验证结果和人工升级条件。
 238. 构造一个重复劳动样本，计算 duplicate work rate，并说明共享状态如何减少重复。
 239. 比较 debate、judge、verifier 和 voting 在开放问答、代码修复、事实核验和高风险决策中的适用边界。
-240. 用 3 分钟回答“为什么 Multi-Agent 不是 Agent 越多越好”，要求覆盖单 Agent baseline、通信成本、冲突、权限和评估指标。
-241. 设计一个 Agent eval sample schema，字段包含 goal、initial state、tools、permission policy、verifier、risk level、weight 和 reset rule。
-242. 写一个 0 依赖 Agent evaluation audit demo，输出 task success rate、avg partial score、tool selection accuracy、argument valid rate、observation use rate、state update coverage、summary faithfulness、claim support rate、recovery success rate、repeat action rate、unauthorized action rate、high-risk confirmation rate、avg cost、P95 latency 和 gate pass。
+240. 用 3 分钟回答“为什么 Multi-Agent 不是 Agent 越多越好”，要求覆盖配对单 Agent baseline、通信成本、冲突正确率、权限，以及共享资源场景中群体结果与用户意图/行为指标的区别。
+241. 设计一个 Agent eval sample schema，字段包含 goal、initial state、tools、permission policy、verifier、risk level、weight、reset rule、observation availability、是否存在后续决策，以及动作提案的 execution status。
+242. 写一个 0 依赖 Agent evaluation audit demo，输出 task success rate、avg partial score、tool selection accuracy、argument valid rate、按有效后续决策统计的 observation use/state update、summary faithfulness、claim support rate、recovery success rate、repeat action rate、unauthorized proposal/execution/block rate、已执行高风险动作的 confirmation rate、高风险安全处置率、avg cost、P95 latency 和 gate pass；空分母返回 `None`，并手算每个输出的分母。
 243. 构造一个最终总结不忠实的 trace 样本，要求列出 summary claim、trace evidence 和 unsupported claim。
 244. 设计一个错误恢复评估样本，覆盖工具超时、权限不足、测试失败、搜索无结果和页面状态变化。
 245. 设计一个 Agent benchmark 的 sandbox reset 机制，说明如何固定初始状态、工具版本、权限和验收脚本。
-246. 比较自动评估、人工 rubric 和 LLM judge 在 Code Agent、Browser Agent、RAG Agent 和数据分析 Agent 中的适用边界。
+246. 比较自动评估、人工 rubric 和 LLM judge 在 Code Agent、Browser Agent、RAG Agent 和数据分析 Agent 中的适用边界；用一张 verifier confusion matrix 手算 false accept、false reject 与评分覆盖率，再为 LLM judge 设计参考标签准确性、重复稳定性、候选顺序翻转和弃权覆盖四项校准检查。
 247. 构造一个 Agent 成本评估表，包含模型调用、token、工具调用、重试、人工审阅、P95 延迟和每成功任务成本。
 248. 用 3 分钟回答“为什么 Agent eval 必须看 trace、成本和安全，而不能只看任务成功率”。
 249. 设计一个 Agent tool permission matrix，覆盖 read-only、write、external transfer、high-risk、scope、TTL 和 approval 字段。
-250. 写一个 0 依赖 Agent safety audit demo，输出 unauthorized attempt block rate、untrusted instruction block rate、tool output block rate、sensitive data block rate、external transfer block rate、high-risk protection rate、dry-run coverage、sandbox block rate、memory pollution block rate、audit completeness 和 gate pass。
+250. 写一个 0 依赖 Agent safety audit demo，区分 `executed`、`blocked`、`drafted`，输出 unauthorized proposal/execution/block rate、untrusted instruction block rate、tool output block rate、按策略禁止的数据流阻断率、high-risk confirmation/safe-disposition rate、仅对支持 dry-run 的已执行动作计算的 dry-run coverage、sandbox block rate、memory pollution block rate、audit completeness、安全替代方案覆盖率和 gate pass；手算每项分母，并让空分母返回 `None`。
 251. 构造一个不可信内容隔离样本，只记录 source、trust level、expected policy action 和 metric，不写可复用注入文本。
 252. 设计一个 external transfer gate，说明内部数据传给外部工具前要检查哪些权限、脱敏和审计字段。
 253. 设计一个 high-risk confirmation 页面，要求展示动作、对象、参数摘要、影响范围、dry-run 结果、取消按钮和审计 id。
@@ -1471,11 +1471,11 @@
 
 ## 2026-09 Claude Opus 4.8 Dynamic Workflows 与多 Agent 评测
 
-1. 为同一个 BrowseComp-style 任务实现 single-agent、blocking orchestrator、fixed peer team 和 async-subagent 四种 harness；明确每个 Agent 的任务视图、工具、上下文、消息协议、token cap 和结束条件。
-2. 按 System Card 的报告方式分别计算 score、跨全部 Agent 的 total tokens 与 derived latency；再记录真实 wall-clock/p50/p95。解释 blocking orchestrator 88.5%、fixed 5-agent 85.4% vs single 84.3%（5M vs 10M token limit、约 20% 派生 latency）为什么不是模型裸能力或生产 SLO。
-3. 将任务按预先固定的难度切片，比较易题和 hard tail 的多 Agent 净收益；加入协调成本、重复劳动、token 成本和 verifier 错误率，检查 Agent 数量增加是否真的提升 NetLift。
+1. 阅读 System Card §8.11，按原文整理实际披露的 Multi-Agent harness、任务、工具、预算、计分和 latency 口径；每格附页码/小节，无法确认的字段写 unknown，不推测缺失配置。
+2. System Card 摘要表报告 BrowseComp single-agent 84.3、multi-agent 88.5。说明这对发布方分数能支持什么、不能支持什么；若要比较成本或延迟，先从各自 harness 原始条件核实预算和时间定义。
+3. 设计一组可复现的单 Agent 与多 Agent 配对评测，固定任务、输入、验收规则和可比预算，按任务难度预先切片；分别记录任务成功、全体 Agent 用量、协调成本、实际 wall-clock、重复工作和 verifier 错误率。把这是拟议实验与 System Card 已报告结果分开。
 4. 设计可恢复的长迁移 workflow：持久化任务 DAG、checkpoint、子任务 owner、重试/取消、permission manifest 与最终 artifact digest；让 reviewer 进行反驳，再由独立测试/verifier 验收，覆盖中断恢复和重复副作用。
-5. 复现“总结不完整 coding transcript”的 honesty 测试，分别标记未完成特性、失败测试和未批准设计；把模型是否主动披露与外部测试结果分开计分，并说明发布方短上下文 off-policy `3.7%` 漏报率不是通用诚信率。
+5. 复现“总结未完全成功的预填充 coding transcript”评测，分别标记未完成特性、失败测试和未批准设计；把模型是否主动披露与外部测试结果分开计分，并说明发布方 3.7% 漏报率是 off-policy、短上下文特定评测，不是通用诚信率。
 
 ## 2026-09 Kimi K3
 
@@ -1921,7 +1921,7 @@
 
 ## 评估与 Debug：分母、证据与安全放行
 
-配套正文：[第三册第九章](book-03-practical-handbook/chapters/09-评估与debug实战.md)。
+配套正文：[第三册第九章：评测协议与 benchmark](book-03-practical-handbook/chapters/09-评估与debug实战-1-评测协议与benchmark.md)。
 
 1. 在四条 benchmark 全部正确时复算 Wilson 下界；把 JSON 年龄改成字符串，区分键检查、字段类型、业务约束与模型正确率。
 2. 构造“两条必需事实只正确回答一条”的例子，分别计算回答支持率和完整性；将证据改成否定句，证明字符串命中不代表语义支持。
@@ -1970,7 +1970,7 @@
 
 ## 第三册第十章：Agent 轨迹与线上实验
 
-配套正文：[第三册第十章 10.1 轨迹回放](book-03-practical-handbook/chapters/10-agent轨迹与线上评估实战.md)、[10.2 线上 A/B](book-03-practical-handbook/chapters/10-agent轨迹与线上评估实战.md)。
+配套正文：[第三册第十章轨迹诊断](book-03-practical-handbook/chapters/10-agent轨迹与线上评估实战-1-轨迹诊断.md)、[线上 A/B 实验设计](book-03-practical-handbook/chapters/10-agent轨迹与线上评估实战-2-ab实验设计.md)、[灰度发布](book-03-practical-handbook/chapters/10-agent轨迹与线上评估实战-3-灰度发布.md)。
 
 1. 为“修改订单地址”任务构造两条轨迹：第一条在未确认时提议更新，但执行器返回拒绝且状态未变；第二条同样缺少确认，却收到 `accepted=true` 且订单地址改变。标出哪一条是可恢复的策略违规尝试，哪一步构成首个不可恢复失败；说明最终回答文本为什么不能证明动作状态。
 2. 对 12 条轨迹，8 条达成任务目标、12 个适用节点中 10 个选择了正确工具、12 条中 1 条有越权副作用。分别计算任务成功率、工具选择准确率和策略违例率，给每个分母加上适用范围；解释为什么不能把三个比例平均成一个总分。

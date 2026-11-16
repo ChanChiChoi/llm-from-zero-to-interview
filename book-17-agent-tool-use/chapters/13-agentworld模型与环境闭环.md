@@ -1,4 +1,4 @@
-# 第 13 章 AgentWorld：模型只有进入环境，才真正面对任务
+# 第 13 章 Agent—环境闭环：模型只有进入环境，才真正面对任务
 
 ## 13.0 从回答到完成：为什么 Agent 需要环境
 
@@ -6,13 +6,15 @@
 
 例如，用户说：“请修复日期解析错误。”模型可以直接给出一段代码。可是这段代码可能改错文件、覆盖用户尚未提交的修改、依赖一个并不存在的库，或者只让公开测试通过而破坏了隐藏行为。只有仓库状态、测试结果和最终 diff 能够说明任务是否完成，模型的总结不能代替这些事实。
 
-本章把这样的交互环境称为 AgentWorld。它不是某一个必须安装的产品名称，而是一种分析框架：Agent 通过 observation 看到世界，通过 action 改变世界，再根据新的 observation 继续决策。这个世界可以是代码仓库、浏览器、数据库沙箱、文件系统、游戏模拟器，也可以是由多个服务组成的业务工作流。
+本章把这种交互关系称为 **Agent—环境闭环**：Agent 通过 observation 看到世界，通过 action 改变世界，再根据新的 observation 继续决策。环境可以是代码仓库、浏览器、数据库沙箱、文件系统、游戏模拟器，也可以是由多个服务组成的业务工作流。
+
+这里刻意不用“AgentWorld”泛指环境框架。AgentWorld 是 2026 年一项特定长周期多 Agent benchmark 的专名，面向 3—20 个 Agent 的协作任务，并提出 Causal Collaboration Effectiveness（CCE）指标；它与本章的通用环境闭环不是同一概念。该论文中的任务设计和归因口径是一个具体评测案例，不能当作 Agent—环境闭环的通用定义或模型的一般能力结论。[AgentWorld 论文](https://arxiv.org/html/2609.31590)
 
 因此，评估一个 Agent 时不能只记录模型名称。模型能力、工具能力、环境信息量、权限、grader 和 reset 机制共同决定最终结果。一个 Agent 完成任务，不一定说明模型独自具备了全部能力；它可能使用了更强的搜索工具、更宽的观察权限，或者得到了一个过于宽松的成功判据。可靠的环境契约，必须把这些因素分别写出来，才能说明一次成功究竟证明了什么。
 
-## 13.1 AgentWorld 到底在描述什么
+## 13.1 Agent—环境闭环包含哪些对象
 
-AgentWorld 可以看作三个对象的组合：
+一个 Agent—环境评估系统可以看作三个对象的组合：
 
 1. **策略或模型**：根据当前目标、历史轨迹和 observation 产生下一步 action。
 2. **环境**：保存真实状态，执行 action，产生状态转移和结果。
@@ -47,6 +49,24 @@ r_t=R(s_t,a_t,s_{t+1})
 ~~~
 
 其中，π_θ 是模型或策略，h_t 是到当前为止的历史，O 是观察生成机制，P 是环境转移机制，R 是反馈函数。反馈可以是训练用 reward，也可以只是评测期间的结构化结果；不要因为符号写成 r_t，就把它误认为模型已经获得了可靠的学习标签。
+
+把闭环画出来，可以看见 Agent 的 action 先是请求，经过 harness 的独立校验后才可能改变环境；环境状态本身也不会原样交给模型，而是经 observation 投影。
+
+```mermaid
+flowchart LR
+    contract["任务契约与权限"] --> agent["Agent 策略"]
+    state["环境真实状态"] --> observe["Observation 投影"]
+    observe --> agent
+    agent --> request["Action 请求"]
+    request --> harness["Harness：校验、授权与预算"]
+    harness -->|拒绝、草稿或待查| event["处置事件"]
+    harness -->|允许| transition["环境状态转移"]
+    transition --> state
+    transition --> verifier["外部 verifier"]
+    verifier -->|满足目标| done["确认完成"]
+    verifier -->|失败或证据不足| agent
+    reset["Reset 与新任务快照"] --> state
+```
 
 一条轨迹可以写成：
 
@@ -87,7 +107,7 @@ b_t(s)=P(s_t=s\mid o_{0:t},a_{0:t-1})
 
 模型不一定显式计算 b_t，但环境设计者仍要意识到它在处理不确定性。一次“提交成功”的页面提示可能让模型提高对已提交状态的相信程度；网络超时则可能使状态同时包含“已提交”和“未提交”两种可能。此时直接重复提交不是更努力，而是把不确定性变成重复副作用。
 
-普通 workflow 通常预先规定步骤和状态转移；AgentWorld 允许策略根据 observation 选择下一步，因此必须额外定义停止、重试、回退、未知状态和人工接管。自主性越高，环境契约越不能只写一个最终文本格式。
+普通 workflow 通常预先规定步骤和状态转移；Agent—环境闭环允许策略根据 observation 选择下一步，因此必须额外定义停止、重试、回退、未知状态和人工接管。自主性越高，环境契约越不能只写一个最终文本格式。
 
 ## 13.3 环境契约的四个基本面
 
@@ -378,6 +398,8 @@ reset 不是测试框架里一个方便的按钮，而是环境契约的一部�
 
 沙箱并不自动保证安全。容器配置、挂载、日志、缓存和依赖安装仍可能形成出域路径；环境评估还要测试拒绝动作、资源耗尽和异常退出。对于含不可信文档的任务，数据内容与控制平面也要隔离。
 
+沙箱隔离、提示注入和高影响动作的授权细节见[第十一章《Agent 安全》](11-agent安全.md)；本章关注这些控制如何成为可复现环境契约的一部分。
+
 ## 13.13 环境反馈：类型比数量重要
 
 编译器的错误通常结构清晰，网页上的“操作失败”却可能同时包含权限、网络、业务规则和页面过期。若把所有错误都映射成同一个负反馈，Agent 很难学会应该修复哪一层。
@@ -401,7 +423,7 @@ reset 不是测试框架里一个方便的按钮，而是环境契约的一部�
 
 ## 13.14 部分可观测性：模型必须管理不确定性
 
-AgentWorld 中，模型每次只能看到状态的一部分。旧网页、并发更新、权限过滤和外部事件都可能使 observation 与真实状态不同步。策略应把 observation 当成带来源和时间的证据，而不是无条件的事实。
+在部分可观测的 Agent—环境闭环中，模型每次只能看到状态的一部分。旧网页、并发更新、权限过滤和外部事件都可能使 observation 与真实状态不同步。策略应把 observation 当成带来源和时间的证据，而不是无条件的事实。
 
 在无法确定外部写入是否完成时，至少要保留三个状态：confirmed_success、confirmed_failure 和 unknown。unknown 的价值在于阻止系统把“没有收到响应”误判成“没有产生副作用”。对于高风险动作，宁可停止并请求人工，也不能为了提高自动完成率把 unknown 强行压成 failure 后重试。
 
@@ -477,6 +499,8 @@ G(\tau)
 
 若完整工具显著提升成功率，不能直接写成“模型推理能力提高”；它说明系统得到了更强的行动接口。若 oracle verifier 只提高候选选择，说明生成可能不是唯一问题。每组都应固定模型版本、上下文预算、超时、重试、网络、随机种子、初始状态和 grader 版本。
 
+任务成功、动作与安全指标的统计集合、空分母、不确定性和 Harness 成本口径可沿用[第十章《Agent 评估》](10-agent评估.md)；本章补充固定环境状态、权限、reset 与 verifier 的条件。
+
 ### 13.18.1 结果报告至少要拆开的指标
 
 至少报告最终成功率、部分成功分布、动作合法率、观察使用率、恢复率、P50/P95 延迟、token/工具成本、外部副作用和 reset failure。多 Agent 还要和单 Agent baseline 在相同或可解释的预算下比较。
@@ -523,6 +547,8 @@ checkpoint 自身也属于外部状态。它可能过期、被并发任务覆盖
 
 任何一项变化都可能改变任务难度。环境升级后成功率变化，首先要检查页面、依赖、隐藏测试、时间和 reset 是否变化；只有环境契约稳定，才能把差异归因于模型或控制器。公开 benchmark 的分数只能支持其公开 harness 条件下的结论，不能直接外推到生产系统。
 
+OSWorld 展示了为什么要把论文基准和可复现 release 分开记录：OSWorld 2.0 论文 v2（2026-07-13）定义 108 个长程 computer-use 工作流；另一个官方仓库 release `osworld-v2.1`（2026-09-16）更新并固定 agents、evaluation workflows、task snapshots、assets、mocked websites 和 VM 镜像。论文结果不能改称为 `osworld-v2.1` 的实验结果；复现时要分别写明论文协议、代码 tag、任务/资产快照、镜像和 harness。[OSWorld 2.0 论文 v2](https://arxiv.org/html/2606.29537v2)、[OSWorld-V2 `osworld-v2.1` release](https://github.com/xlang-ai/OSWorld-V2/releases/tag/osworld-v2.1)。
+
 ## 13.22 常见环境漏洞和错误归因
 
 **reset 泄漏**：前一个任务的文件、cookie 或数据库记录进入后一个任务，导致样本不独立。
@@ -545,13 +571,13 @@ checkpoint 自身也属于外部状态。它可能过期、被并发任务覆盖
 
 ## 13.23 数字例子：把成功率拆成可诊断的链条
 
-设 100 个代码任务中，90 个 patch 可以应用，75 个通过公开测试，60 个通过隐藏测试，其中 3 个修改了禁止文件，另外 2 个覆盖了用户已有改动。若最终要求隐藏测试通过、禁止文件未变更、用户改动保留，则安全成功数最多是：
+设 100 个代码任务中，90 个 patch 可以应用，75 个通过公开测试，60 个通过隐藏测试。在这 60 个 patch 中，3 个修改了禁止文件，另有 2 个不同 patch 覆盖了用户已有改动；这里明确假设两类问题没有重叠。若最终要求隐藏测试通过、禁止文件未变更、用户改动保留，则安全成功数是：
 
 ~~~math
 N_{\mathrm{safe}}=60-3-2=55
 ~~~
 
-这里没有假设各项独立；它只是把最终结果按验收条件拆开。若把 60 个隐藏测试通过直接报告为成功，就会把策略违规和用户数据破坏隐藏掉。
+因此 `55/100=0.55` 是同时满足这些条件的任务比例。这里按样本集合做交集，不需要假设通过测试、范围合规等事件彼此独立；若禁止文件修改与用户改动覆盖有重叠，就应从 60 中减去两类失败样本的并集，而不能直接把数量相加。若把 60 个隐藏测试通过直接报告为成功，就会把策略违规和用户数据破坏隐藏掉。
 
 在更抽象的分析中，可以写成：
 
@@ -568,9 +594,11 @@ P_{\mathrm{artifact\ valid}}
 
 再看一个业务例子：100 次工单任务中，92 次找到合同，80 次找到正确政策版本，70 次规则判断有充分证据，65 次创建请求被接受，63 次重新读取后状态正确。报告应同时给出这些中间比例，不能只说最终成功率为 63%。
 
-## 13.24 最小可运行的环境闭环审计 demo
+## 13.24 环境闭环审计 demo
 
 下面的 demo 不调用外部模型，也不模拟真实沙箱；它用一个小型 workspace 展示四个事实：合法 patch 可以通过测试，越界 patch 会在执行层被拒绝，最终成功依赖 verifier 而不是模型自报，reset 能把文件恢复到基线。
+
+代码状态：静态审阅，未运行（2026-11-16）；仅使用 Python 标准库。下面的结果依据状态转移和 verifier 条件手工推演，不是运行日志。
 
 ~~~~python
 from dataclasses import dataclass, field
@@ -784,7 +812,7 @@ print(f"good_hash_recorded={len(good_hash) == 12}")
 print(f"reset_clean={reset_clean}")
 ~~~~
 
-运行结果应为：
+按代码逻辑手工推演的输出应为：
 
 ~~~~text
 good_success=True
@@ -878,17 +906,20 @@ demo 中的 parser.py 相当于一个受控 artifact，tests.py 相当于一个�
 - [Sutton 与 Barto 的 Reinforcement Learning 电子版](http://incompleteideas.net/book/the-book-2nd.html)：MDP、策略、回报和强化学习的经典教材入口；书中的奖励模型不能直接等同于 Agent 业务成功。
 - [AgentBench 论文](https://arxiv.org/abs/2308.03688)：多环境 Agent 评估的论文入口，可支持任务环境、动作和结果评估的讨论；其分数依赖具体环境和 harness。
 - [WebArena 论文](https://arxiv.org/abs/2307.13854) 与 [项目页](https://webarena.dev/)：真实网站交互环境和任务评测入口；不能把网页任务分数直接外推为所有浏览器操作能力。
-- [OSWorld 论文](https://arxiv.org/abs/2404.07972) 与 [项目页](https://os-world.github.io/)：真实计算机环境中的多模态操作评估入口；其结果受桌面镜像、应用版本、观察通道和 grader 影响。
+- [OSWorld 1.0 论文](https://arxiv.org/abs/2404.07972) 与 [项目页](https://os-world.github.io/)：真实计算机环境中的多模态操作评估入口；其结果受桌面镜像、应用版本、观察通道和 grader 影响。
+- [OSWorld 2.0 论文 v2](https://arxiv.org/html/2606.29537v2)：定义 108 个长程 computer-use 工作流；论文中的分数绑定所述模型、配置、预算、任务快照和评分协议。
+- [OSWorld-V2 `osworld-v2.1` 官方 release](https://github.com/xlang-ai/OSWorld-V2/releases/tag/osworld-v2.1)：固定更新后的任务、资产、网站和 VM 等复现组件；这是独立的代码/环境发布快照，不应把论文 2.0 的结果改标成 v2.1 结果。
+- [AgentWorld 多 Agent benchmark 论文](https://arxiv.org/abs/2609.31590)：3—20 个 Agent 的长周期协作任务与 CCE 指标案例；CCE 依赖论文的动作依赖归因和模型辅助标签，结论受其任务及标注口径限制，也不等于通用 Agent—环境闭环定义。
 - [SWE-bench 论文](https://arxiv.org/abs/2310.06770) 与 [项目页](https://www.swebench.com/)：软件工程 issue 修复环境入口；通过率依赖仓库版本、测试、补丁应用和评估 harness。
 - [BrowserGym 论文](https://arxiv.org/abs/2407.06903)：网页 Agent 环境和任务定义的研究入口；它支持环境设计讨论，不证明任何闭源模型的内部机制。
 - [dm_env 接口](https://github.com/google-deepmind/dm_env)：DeepMind 公开的环境接口实现入口，可用于理解 step、observation、reward 和终止的工程表达；它不是本章业务安全策略的唯一规范。
-- [OpenAI Evals](https://github.com/openai/evals)：评估框架入口；运行框架本身不能替代外部状态 verifier、权限检查和 reset 审计。
+- [OpenAI Agent evals 文档](https://developers.openai.com/api/docs/guides/agent-evals) 与 [Evaluation best practices](https://developers.openai.com/api/docs/guides/evaluation-best-practices)：官方评估设计入口；文档或评估框架不能替代外部状态 verifier、权限检查和 reset 审计。（2026-11-16 核阅）
 
 这些资料分别支持经典环境抽象、公开接口、网页/桌面/代码 benchmark 或评估框架。论文中的实验结论、官方 API 的接口语义、本章的教学 demo 和目标生产系统的实测结果属于不同证据层级，不能互相冒充。使用公开 benchmark 时，应同时记录模型版本、提示、工具、观察空间、预算、网络、初始状态、grader 和 reset 版本。
 
 ## 13.28 小结
 
-AgentWorld 把“生成一个答案”扩展成“在一个受约束的世界中观察、行动、处理反馈、恢复不确定性，并让环境达到可验证目标”。状态、observation、action、转移、权限、verifier 和 reset 共同决定了任务究竟测到了什么。
+Agent—环境闭环把“生成一个答案”扩展成“在一个受约束的世界中观察、行动、处理反馈、恢复不确定性，并让环境达到可验证目标”。状态、observation、action、转移、权限、verifier 和 reset 共同决定了任务究竟测到了什么。
 
 读者可以先记住一句话：模型说完成了，不等于世界已经完成。进一步的工程审查还要追问：环境给了模型哪些信息，动作改变了哪些真实状态，失败是否可恢复，成功是否由外部 verifier 证明，实验结束后 reset 是否真的清理，以及结论是否只在当前 harness 条件下成立。
 

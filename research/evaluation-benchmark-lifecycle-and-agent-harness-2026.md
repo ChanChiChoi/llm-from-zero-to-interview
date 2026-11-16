@@ -28,6 +28,11 @@
 - **来源支持的事实：** TraceTrial-Bench 将 harness reliability 分为 context、execution、governance、lifecycle、observability、tools、verification 七类；用 95 个机制任务比较 4 个 harness 与 9 个模型，共计 3,420 次运行。其框架把 Agent 任务表现与 harness 标准分开计分，并将候选失败机制与经过人工核验的传播链分开报告。摘要报告宏观 harness 分数为 59.8%—72.0%，且 31.1% 的运行完成任务但至少违反一项 harness 标准。
 - **证据边界：** 这是近期预印本和特定任务/系统配置的结果。论文将候选 link 和人工核验的因果传播分开；只有经端点、事件顺序、可观测中间变化和竞争解释复核的 link 才支持其定义下的传播结论。不能把候选轨迹关联直接当成普遍根因，judge 辅助标注也不替代独立人工核验。
 
+- **来源与版本：** [When Agents Fail: Model or Harness—Who’s to Blame?](https://arxiv.org/abs/2610.32483)，arXiv 预印本，2026-10；2026-11-16 复核摘要和框架定义，未复现实验。
+- **阅读范围：** 摘要、任务成功与有效完成的区分、模型—harness 配置比较、资源用量和交互归因定义。
+- **来源支持的事实：** 作者把“有效完成”定义为正常终止并提供评估器可消费的 handoff，不要求任务答案正确；因此它与任务成功是不同测量量。框架比较模型与 harness 的匹配、跨模型表现和交互项，并把失败尝试计入 token/resource load；成本必须与任务结果一起解读，因为提前失败也会造成低用量。预印本报告在六个 benchmark、四种 harness 及所测模型上进行分析。
+- **证据边界：** 指标定义和归因结果属于该预印本框架，不是 Agent 评测的统一术语或行业标准。实验基准、模型和 harness 覆盖有限，不能据此推出任意生产系统的模型/框架排名或成本效应。
+
 ## 长上下文任务的表面匹配与有效长度
 
 - **来源与版本：** Modarressi et al., [NoLiMa: Long-Context Evaluation Beyond Literal Matching](https://arxiv.org/abs/2502.05167)，arXiv v3，2025-07-09。

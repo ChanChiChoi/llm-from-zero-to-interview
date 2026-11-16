@@ -6,9 +6,11 @@
 
 ## 0. 本章范围与资料
 
-本章参考 OpenAI Agents SDK 的 tools、guardrails、tracing 公开文档，OpenAI Evals、OpenAI Model Spec，以及 SWE-bench、WebArena、OSWorld、AgentBench、GAIA 和 τ-bench 等公开 Agent 评估资料。它们分别提供 runtime 接口、指令与安全边界、任务定义和环境评估入口；没有任何一个来源可以替代对目标系统的实测。
+本章参考 OpenAI Agents SDK 的 tools、guardrails、tracing 公开文档，OpenAI Agent evals 与 Model Spec，以及 SWE-bench、WebArena、OSWorld、AgentBench、GAIA 和 τ-bench 等公开 Agent 评估资料。它们分别提供 runtime 接口、指令与安全边界、任务定义和环境评估入口；没有任何一个来源可以替代对目标系统的实测。
 
-本章会复用前十一章的机制，但每一节都给出新的系统连接、边界案例或判断依据。安全相关内容只讨论防御性设计，不提供可复用注入提示、绕过权限、规避审计、高风险自动操作或破坏系统的方法。章节文件名保留历史目录兼容性，正文已经改为综合系统教材。
+本章会复用前十一章的机制，但每一节都给出新的系统连接、边界案例或判断依据。安全相关内容只讨论防御性设计，不提供可复用注入提示、绕过权限、规避审计、高风险自动操作或破坏系统的方法。
+
+本章的结果不是再记一遍术语，而是能把一句业务请求转成可执行的任务契约和架构，说明哪些决定交给模型、哪些由宿主或外部验收器控制，并为完成、拒绝、证据不足和状态未知分别安排可核对的处理路径。
 
 ## 12.0 从任务契约开始的综合方法
 
@@ -169,6 +171,8 @@ C_{\mathrm{plan}}=C_{\mathrm{initial}}+n_rC_{\mathrm{replan}}+n_cC_{\mathrm{coor
 
 `n_r` 是重规划次数，`n_c` 是协调和状态合并次数。这个式子不是产品报价，而是提醒我们：动态规划的灵活性有额外成本；如果每次 observation 都触发完整计划重写，系统可能把 token 花在重复描述上，而没有获得新的证据。
 
+例如，只核算模型 token 时，初始规划用 120 token，两次重规划各用 60 token，三次协调各用 20 token，则 `C_plan = 120 + 2 × 60 + 3 × 20 = 300 token`。这只是规划相关的 token 账本，不包含工具调用、外部服务或等待时间；若比较总成本，应把这些资源分别计量后再汇总。
+
 ## 12.10 Agent Memory 如何设计
 
 Memory 设计要先区分短期状态和长期记忆。短期状态保存当前目标、计划版本、工具结果、错误和待办；长期记忆保存经过验证的用户偏好、项目事实或可复用经验。二者的写入门槛、过期时间、权限和删除语义不同，不能因为都放在向量库里就当成同一类数据。
@@ -224,6 +228,8 @@ S(c)=A(c)\land V(c)\land L(c)\land P(c)\land K(c)
 其中，`A` 表示来源具有读取授权，`V` 表示版本和生效范围有效，`L` 表示引用定位可复核，`P` 表示证据确实支持该 claim，`K` 表示关键冲突已经解决。这个表达式只适用于规则清楚、条件可以明确检查的任务；它不是把复杂事实判断伪装成一个普适的数学真理。
 
 状态变化还必须约束动作。`candidate` 允许继续检索，`verified` 可以生成“符合/不符合”的草稿，`conflicting` 只能生成冲突说明或进入人工处理，`insufficient` 只能说明缺失了什么。若 `create_pending_review_ticket` 的参数要求已验证的合同版本，那么控制器应该在状态不是 `verified` 时拒绝调用，而不是依靠提示词提醒模型“谨慎一点”。这样，证据状态就从文字描述变成了真正影响执行的业务条件。
+
+在前面的合同例子里，若授权、版本、定位、claim 支持和冲突解决这五项都通过，则 `(A,V,L,P,K)=(1,1,1,1,1)`，所以 `S(c)=1`；若政策版本冲突而其余条件均满足，则 `K=0`，得到 `S(c)=0`，系统只能报告冲突或请求复核。这个二值规则适用于条件可以明确检查的 claim，不代替模糊事实的人工判断。
 
 ## 12.14 Code Agent 和普通代码生成有什么区别
 
@@ -313,6 +319,8 @@ Multi-Agent 的价值不能由“角色数量更多”推导出来。它只有�
 
 例如，两个并行研究 Agent 让证据支持率提高 0.08，但把延迟提高 1.4 倍、成本提高 2 倍，并且引入了跨租户消息风险。如果任务是低风险的离线研究，质量收益可能值得进一步实验；如果任务会直接修改生产合同，即使平均质量提高，也应该先解决权限隔离和冲突归因，再讨论是否扩大并发。
 
+这条净收益式只有在各项差异先按业务约定转成可比较的效用单位后才可计算。比如在一个低风险离线任务中，教学假设将质量归一到 0—1，将成本和延迟分别按各自单 Agent 基线归一，将风险量表限制在 0—1；若 `ΔQ=0.08`、成本增量 `ΔC=1.0`、延迟增量 `ΔL=0.4`、风险增量 `ΔR=0.1`，并预先设定 `λ_c=0.02`、`λ_l=0.03`、`λ_r=0.4`，则净收益为 `0.08 - 0.02 - 0.012 - 0.04 = 0.008`。这些数值只是说明如何复算，量表和权重必须由具体业务定义；若风险是硬约束，越界时应直接判不合格，不能靠正的净收益抵消。
+
 比较时必须固定任务分布、模型版本、工具、上下文预算、超时和重试策略。否则，Multi-Agent 的提升可能只是因为它获得了更多 token 或更宽的工具权限。还要报告长尾而非只报告平均数：P95 延迟、最坏副作用、冲突率和单位成功任务成本，往往比平均答案分数更能揭示系统是否真正受益。
 
 ## 12.19 如何设计 Multi-Agent 系统
@@ -351,17 +359,19 @@ blackboard 可以理解为一个共享的“状态索引”，而不是所有 Ag
 
 可验证任务优先使用测试、页面/数据库状态、文件 diff 或引用检查；开放任务再使用明确 rubric、人工抽样和 LLM judge。报告至少包含任务成功、部分成功、工具与参数质量、trace 忠实性、恢复、风险切片、P95 延迟、单位成功任务成本和回归结果。多 Agent 还必须与单 Agent baseline 在相近预算下比较。
 
-### 12.20.1 把危险动作分成三个不同事件
+### 12.20.1 把危险动作分成不同的处置状态
 
-安全评估经常把“模型没有造成事故”简单记成一次安全成功，但至少要区分三种轨迹：系统根本没有提出危险动作；模型提出了危险动作，但独立策略或执行器在副作用发生前阻断；危险动作确实被执行，随后才被发现或补救。三者的风险含义完全不同。
+安全评估经常把“模型没有造成事故”简单记成一次安全成功，但至少要区分这些轨迹：系统根本没有提出危险动作；模型提出了危险动作，但独立策略或执行器在副作用发生前阻断；系统只生成草稿、等待确认；动作已提出但外部状态仍未知；危险动作确实被执行，随后才被发现或补救。它们的风险含义完全不同，也不能合并成一个布尔值。
 
 | 轨迹 | 发生了什么 | 可以说明什么 | 不能说明什么 |
 |---|---|---|---|
 | 未提出 | 模型没有生成或请求高风险动作 | 当前任务和提示下没有观察到该行为 | 不能证明系统遇到诱导时仍然安全 |
 | 提出但阻断 | 动作进入 trace，但策略、权限或人工确认拒绝执行 | 防御层在副作用前发挥作用 | 不能把模型本身说成没有风险 |
+| 草稿 | 系统记录了待确认动作，没有交给执行器产生副作用 | 工作流保留了待审请求 | 不能把草稿算作已阻断或已执行 |
+| 状态未知 | 请求超时或回执缺失，外部状态还未查清 | 系统识别出尚未解决的执行结果 | 不能将其推定为成功、失败或已阻断 |
 | 已执行 | executor 接受动作，外部状态发生变化 | 需要检查授权、影响、回滚和审计 | 不能用后续补救抵消原始越权 |
 
-报告指标时应分别统计三类数量。例如，`unauthorized_proposal_rate` 衡量模型提出不应提出的动作，`pre_effect_block_rate` 衡量这些动作在副作用前被阻断的比例，`unauthorized_execution_rate` 则只统计已经改变外部状态的越权动作。它们的分母、任务切片和判定时间必须写清楚；把前两类合并成“未发生事故”，会掩盖策略层依赖或模型行为的退化。
+指标与第十、十一章保持同一口径：`unauthorized_proposal_rate` 的分母是全部动作提案；`unauthorized_block_rate` 只把状态明确为 `blocked` 的未授权提案计入分子，分母是全部未授权提案；`unauthorized_execution_rate` 的分母是全部已执行动作。`drafted` 不算阻断，外部状态未知时应继续查询或转交处理，不能记作成功、失败或阻断。高风险确认率只统计已执行的高风险动作；高风险安全处置率则覆盖全部高风险提案，并把明确阻断、保留草稿、或已执行且有有效确认视为安全处置。具体定义和空分母处理见[第十章评估协议](10-agent评估.md)与[第十一章安全指标](11-agent安全.md)。把提案与执行合并成“未发生事故”，会掩盖策略层依赖或模型行为的退化。
 
 测试还要覆盖边界条件：工具超时后重复请求、权限在规划后被撤销、低信任文档出现在参数附近、人工确认信息过期，以及外部服务返回未知状态。对每条轨迹，评估器都应能回答“危险动作何时被提出、谁阻断、是否产生副作用、最终状态是什么”。只有这样，安全结论才不是对最终文本的猜测，而是对事件链的分析。
 
@@ -394,6 +404,33 @@ prompt 可以帮助模型理解规则，但不能替代执行器。一个安全�
 5. **控制与评估平面**：预算、重试、人工确认、verifier、回归、成本和风险切片。
 6. **审计与恢复平面**：trace、事件账本、快照、回滚、未知状态和事故响应。
 
+下面把这些责任连成合同助手的执行闭环。图中方框表示逻辑责任，不限定它们必须部署成独立服务；实线循环表示环境观察会回到控制器，校验、授权和验收则各有自己的检查点。
+
+```mermaid
+flowchart TD
+    request["请求与用户身份"] --> contract["任务契约与数据范围"]
+    contract --> controller["控制器：状态、计划与预算"]
+    controller --> router["选择 workflow、单 Agent 或局部协作"]
+    router --> model["模型提出候选动作"]
+    model --> checks["Schema、业务条件与权限策略"]
+    checks -->|拒绝或需确认| handoff["拒绝、保留草稿或请求人工"]
+    checks -->|允许| executor["受控执行器"]
+    executor --> environment["外部环境与业务状态"]
+    environment --> observation["回执、版本与观察"]
+    observation --> controller
+    controller -->|读取或更新受控状态| evidence["证据与记忆存储"]
+    evidence -->|返回带来源的候选信息| controller
+    observation --> verifier["独立 verifier 与评估"]
+    executor --> verifier
+    verifier -->|满足完成条件| result["结果、状态与说明"]
+    verifier -->|证据不足或状态未知| controller
+    contract --> audit["Trace 与事件账本"]
+    checks --> audit
+    executor --> audit
+    environment --> audit
+    verifier --> audit
+```
+
 router 可以选择 workflow、单 Agent 或局部 Multi-Agent；planner 不能绕过权限；memory 不能自动成为授权；evaluator 不能只看模型总结；logger 不能把敏感原文无期限复制。生产系统的关键不是组件名称，而是每条跨平面的数据流和控制流都有明确责任。
 
 ## 12.25 设计取舍与失败诊断
@@ -418,6 +455,19 @@ router 可以选择 workflow、单 Agent 或局部 Multi-Agent；planner 不能�
 
 第一步是身份和范围检查：读取当前用户、租户、合同 id 和版本。第二步是规划：合同解析与政策检索可以并行，但二者输出必须是带来源和定位的 evidence。第三步是规则判断：把合同条款逐项映射到政策条件，缺失字段标记为 unknown，不用模型猜测。第四步是动作策略：若确有例外，只能创建 `pending_review`，参数包括租户、合同版本、证据引用和幂等键；批准、发信和权限修改没有可用工具。第五步是状态确认：重新读取工单，确认对象存在、状态正确、版本匹配，并把最终 claim 绑定到这些事件。
 
+用一组明确标为合成的值走完整条轨迹：合同 `c-1842:v7` 的付款期限为 90 天；当前有效的采购政策 `p-2026-03` 要求超过 60 天时进入例外审批；用户 `u-42` 只能创建待审核工单。下表展示模型提议、执行器回执和外部验收怎样共同决定状态。
+
+| 步骤 | 当前状态与动作 | 外部观察 | 状态更新和下一步 |
+|---|---|---|---|
+| 1 | `received`；解析用户、租户和合同标识 | 用户对租户 `org-17` 的 `c-1842:v7` 有读取权限 | 转为 `authorized`；读取合同和适用政策 |
+| 2 | `collecting_evidence`；分别读取合同条款和政策版本 | 合同第 4 页第 3.2 条为 90 天；`p-2026-03` 生效且阈值为 60 天 | 两份证据都有授权、版本和定位，claim 转为 `verified` |
+| 3 | `decision_ready`；比较 `90 > 60` | 规则要求例外审批；没有证据冲突 | 生成创建 `pending_review` 工单的提案，不开放批准或发信工具 |
+| 4 | `creating_ticket`；以任务幂等键提交工单 | 请求超时，没有可靠回执 | 转为 `unknown`；不重复写入，按幂等键查询 |
+| 5 | `resolving_unknown`；读取该幂等键对应对象 | 找到 `ticket-729`，状态为 `pending_review`，绑定合同 `c-1842:v7` | verifier 核对租户、状态和证据引用后转为 `completed` |
+| 6 | `completed`；向用户报告判断与工单 | 可重新读取的工单状态及两条证据定位 | 回答“需要例外审批，已创建待审核工单”，附合同和政策版本；不声称已经批准 |
+
+这里的时间、编号和条款都是教学假设。例子中的关键判断不是只看 `90 > 60`，而是先确认两端数据的授权、版本、生效范围和定位，再把规则结果映射到受限动作；超时后也只有查询到持久化对象，才允许报告完成。
+
 失败路径同样重要。若合同附录无权读取，系统输出“证据不足”并请求授权；若政策版本冲突，保留冲突并升级；若创建工单超时，查询幂等键而不是重复创建；若检索文档包含操作性文字，只把它当 evidence；若用户要求直接批准，策略引擎拒绝并说明可提供的安全替代方案。
 
 这个案例的验收矩阵如下：
@@ -432,13 +482,15 @@ router 可以选择 workflow、单 Agent 或局部 Multi-Agent；planner 不能�
 | 成本 | 查询、重试和上下文是否可控 | 循环检索无新证据 |
 | 说明 | 最终 claim 是否忠实 | 证据不足却说已完成 |
 
-## 12.27 最小可运行 Agent 综合设计审计 demo
+## 12.27 Agent 综合设计审计 demo
 
 下面这个 demo 不调用外部模型，而是构造 5 个综合系统设计记录，检查每个主题是否同时覆盖机制、数量关系、可运行 demo、trace 指标、安全边界、评估方法、项目证据和 trade-off。
 
 它演示的问题是：综合设计不能只列组件名称。一个主题如果没有失败案例、外部验收、权限边界或成本解释，仍然不能支撑可靠系统。代码中的集合是教学标签，不是对读者能力的评分。
 
 这里要区分两种情况：某类证据对当前主题确实不适用，和本来需要该证据但记录中没有它。前者不应进入该主题的加权分母，并显示为 `None`；后者必须进入缺口清单，不能因为集合为空而得到满分。综合覆盖率只能回答记录中声明的维度是否有证据，不能替代对真实系统的运行验收。
+
+代码状态：静态审阅，未运行（2026-11-16）；仅使用 Python 标准库。下方输出根据集合和权重手工复核，不是运行日志。
 
 ```python
 import math
@@ -769,7 +821,7 @@ print(f"all_checks_pass={all_checks_pass}")
 print(f"revision_plan={revision_plan}")
 ```
 
-输出示例：
+按代码逻辑手工复核的输出示例：
 
 ```text
 topic_scores={'q1': 1.0, 'q2': 0.779, 'q3': 1.0, 'q4': 0.973, 'q5': 0.662}
@@ -781,6 +833,8 @@ observed_topic_count=5
 all_checks_pass=False
 revision_plan={'q2': {'missing': {'formulas': ['argument_validity'], 'trace_metrics': ['error_recovery_rate'], 'safety': ['human_confirmation']}, 'red_flags': ['missing_confirmation'], 'next_action': '补一个约束、一个可运行 demo、一个失败案例和一个可信资料入口'}, 'q4': {'missing': {'project_evidence': ['bad_cases']}, 'red_flags': ['weak_project_evidence'], 'next_action': '补一个约束、一个可运行 demo、一个失败案例和一个可信资料入口'}, 'q5': {'missing': {'concepts': ['ui_agent'], 'formulas': ['safety_profile'], 'demos': ['agent_safety_audit'], 'trace_metrics': ['cost_per_success'], 'safety': ['data_flow_guard'], 'evaluation': ['human_rubric'], 'project_evidence': ['bad_cases'], 'tradeoffs': ['single_vs_multi']}, 'red_flags': [], 'next_action': '补一个约束、一个可运行 demo、一个失败案例和一个可信资料入口'}}
 ```
+
+`overall.project_evidence_score=1.0` 是跨主题集合的并集覆盖：它只说明这些证据类型至少在一个主题中出现。它不会抹掉 q4、q5 各自的 `bad_cases` 缺项，所以还要读取每题的 `missing` 和 `weak_topics`。
 
 这个 demo 的 `all_checks_pass=False` 不是程序错误，而是说明综合设计记录存在三个缺口：工具调用主题缺少高风险确认口径，Code Agent 主题缺少失败证据，评估与安全主题缺少数据流验收、人工 rubric、成本指标和 single-vs-multi 取舍。它用于发现设计缺口，不用于给人贴“准备好/没准备好”的标签。
 
@@ -800,10 +854,11 @@ revision_plan={'q2': {'missing': {'formulas': ['argument_validity'], 'trace_metr
 
 本章使用的代表性资料入口如下：
 
-- [OpenAI Agents SDK Tools](https://openai.github.io/openai-agents-python/tools/)：工具定义和运行接口；接口存在不等于业务权限配置正确。
-- [OpenAI Agents SDK Guardrails](https://openai.github.io/openai-agents-python/guardrails/)：输入/输出和运行时 guardrail 的公开文档；仍需独立执行层保护副作用。
-- [OpenAI Model Spec](https://model-spec.openai.com/2025-12-18.html)：指令优先级和行为规范入口；规范不能替代 policy engine。
-- [OpenAI Evals](https://github.com/openai/evals)：评估框架入口；具体任务仍需自定义验收器和环境。
+- [OpenAI Agents SDK Tools](https://openai.github.io/openai-agents-python/tools/)：工具 schema 和运行时执行路径的动态文档；2026-11-16 核阅。接口存在不等于业务权限配置正确。
+- [OpenAI Agents SDK Guardrails](https://openai.github.io/openai-agents-python/guardrails/)：输入、输出和工具运行时检查的动态文档；2026-11-16 核阅。仍需独立执行层保护副作用。
+- [OpenAI Agents SDK Tracing](https://openai.github.io/openai-agents-python/tracing/)：SDK 的 trace/span 公开接口；2026-11-16 核阅。trace 有助于观察运行过程，但不等于完整业务状态或安全审计账本。
+- [OpenAI Model Spec（2026-10-29）](https://model-spec.openai.com/2026-10-29.html)：公开的预期模型行为和指令原则；模型规范不能替代 policy engine、执行器或外部验收。
+- [OpenAI Agent evals](https://developers.openai.com/api/docs/guides/agent-evals) 与 [Evaluation best practices](https://developers.openai.com/api/docs/guides/evaluation-best-practices)：官方评估工作流入口；2026-11-16 核阅。具体任务仍需自定义验收器、数据和环境。
 - [AgentBench](https://arxiv.org/abs/2308.03688)：多环境 Agent 评估论文。
 - [WebArena](https://webarena.dev/)：网页交互环境入口。
 - [OSWorld](https://os-world.github.io/)：真实计算机环境中的多模态 Agent 评估入口。

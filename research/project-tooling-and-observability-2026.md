@@ -76,3 +76,10 @@ PyTorch 2.15.0 的发布日期是截至检索日的状态；Hugging Face Model C
 - **阅读位置**：Full (buffered) content §（全文内容敏感性）、Content capture configuration（显式启用与默认 `NO_CONTENT`）、Uploading content to external storage（外部引用与 hook）。
 - **来源支持的事实**：当前规范认为系统指令、用户消息和模型输出通常敏感且体积较大，建议 instrumentation 默认不采集；内容采集须显式 opt-in。规范允许实现把内容上传到外部存储并发出引用，但不规定 URI、布局、保留期限、访问控制或读取方式；外部存储和引用安全由应用实现负责。
 - **证据等级与边界**：source-backed（OpenTelemetry 动态语义约定，访问时为 `main`）；规范和各 SDK 支持情况持续变化。默认值建议不等于 SDK 一定遵循，需按固定 SDK/规范版本检查实际配置；该约定不自动脱敏、删除或授权访问。
+
+## PyTorch 2.15 混合精度接口与梯度缩放
+
+- **来源与版本**：[PyTorch 2.15 AMP 文档](https://docs.pytorch.org/docs/2.15/amp.html)与[AMP examples](https://docs.pytorch.org/docs/2.15/notes/amp_examples.html)，访问日期 2026-11-16。
+- **阅读位置**：autocast 区域及其前向/损失/反向顺序；gradient scaling 机制；FP16 CUDA 训练示例；旧 `torch.cuda.amp.*` 与 `torch.cpu.amp.*` API 弃用提示。
+- **来源支持的事实**：`torch.autocast` 按算子选择执行精度，通常包住前向和损失计算，反向在 autocast 区域外进行。FP16 梯度缩放会在反向前放大 loss，并在优化器更新前还原梯度；检测到 inf 或 NaN 时，`GradScaler` 会跳过该次更新并调整尺度。PyTorch 2.15 文档将 `torch.cuda.amp.autocast`、`torch.cuda.amp.GradScaler` 及 CPU 对应旧入口标记为弃用，建议使用 `torch.amp` 命名空间；CPU BF16 autocast 示例不依赖 GradScaler。
+- **证据等级与边界**：source-backed（固定版本 PyTorch 官方文档）。Autocast 运算类型取决于设备、dtype 和算子清单；FP16/BF16 的数值适用性及性能需在目标设备和模型上核验，不能据接口说明推断收益。

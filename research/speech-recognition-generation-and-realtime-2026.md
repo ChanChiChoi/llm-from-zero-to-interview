@@ -184,3 +184,21 @@
 - 来源支持：原始 FAD 面向音乐增强，不要求逐样本配对参考；VGGish 将 1 秒音频窗转换为 128 维嵌入，作者以 0.5 秒步长取重叠窗口，分别估计待评输出集合和干净背景音乐集合的多元高斯统计，再计算 Fréchet 距离。论文在 MagnaTagATune 数据（600 小时；540 小时背景集、60 小时评估集）上构造人工失真，并在 300 段 5 秒素材的听测子集上比较指标；作者报告该实验中 FAD 与人类偏好的相关系数为 0.52，高于所比较的 SDR、余弦距离和幅度 L2。
 - 证据等级：source-backed（原论文 v4 的定义、数据和指定人工听测）。
 - 边界：FAD 是评估集合相对背景分布的统计量，受嵌入模型、参考背景集合、样本量和预处理影响；论文的音乐增强结果不能外推为通用 TTS 自然度、内容准确率、授权或说话人安全指标。后续不同 embedding、sample-bias 修正或任务定义属于不同评估配置，应单独说明。
+
+## 2026-11-16 Whisper 输入、长音频与时间戳 API 复核
+
+### Whisper v20250625 前处理
+
+- 来源：[Whisper v20250625 `audio.py`](https://github.com/openai/whisper/blob/v20250625/whisper/audio.py)，固定 release 源码。
+- 阅读范围：音频常量、`load_audio`、`pad_or_trim` 与 `log_mel_spectrogram`。
+- 来源支持：该实现把默认采样率设为 16 kHz，短时窗口长度设为 30 秒；`load_audio` 通过 ffmpeg 解码为单声道并在需要时重采样。log-Mel 前处理不只是 STFT 和 Mel 投影，还包含动态范围截断与数值缩放。
+- 证据等级：source-backed（固定 tag 源码）。
+- 边界：这些常量和流程描述 OpenAI Whisper v20250625 实现；其他模型、前处理器或 Transformers 自定义输入路径须按其 checkpoint 和接口验证。该复核不证明任何音频的识别质量。
+
+### Transformers v5.17.0 Whisper 长音频与提示
+
+- 来源：[Transformers v5.17.0 Whisper 文档](https://huggingface.co/docs/transformers/v5.17.0/en/model_doc/whisper)及[Whisper 长音频章节](https://huggingface.co/docs/transformers/v5.17.0/en/model_doc/whisper#longform-transcription)。
+- 阅读范围：`generate()` 的 `return_timestamps`、`return_token_timestamps`、`prompt_ids`、长音频示例和 fallback 参数说明。
+- 来源支持：超过 30 秒的输入需要保留完整 Mel 特征并启用时间戳，模型按时间戳顺序处理片段；文档列出 compression ratio、average log probability、no-speech 与 temperature fallback 等启发式。`prompt_ids` 可提供自定义词汇或专名上下文，让模型更可能生成指定词；文档还区分 token 时间戳与经 tokenizer 分组得到的词级时间戳。
+- 证据等级：source-backed（固定版本官方 API 文档）。
+- 边界：提示上下文不保证术语正确，可能使相近发音被过度纠正；模型产生的时间戳不自动等于人工精确对齐；文档未提供目标业务准确率或线上延迟证据。v5.17.0 是本章固定示例 API，不声称为检索日最新版本，也不代表已在本地运行。

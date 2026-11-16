@@ -90,14 +90,13 @@ m_t=(s_t,r_t,\iota_t,c_t,E_t,\gamma_t)
 2. 它是请求、回答、证据、反驳、状态更新还是最终建议。
 3. 它有没有可检查的证据和置信度。
 
-消息有效率可以写成：
+设 $T_{\mathrm{msg}}$ 是纳入评估的消息数，$\mathrm{valid}(m_t)$ 表示第 $t$ 条消息的 schema 可解析、字段完整、接收方明确且意图合法。消息有效率可以写成：
 
 ~~~math
-R_{\mathrm{msg}}=\frac{1}{T}\sum_{t=1}^{T}\mathbf{1}[\mathrm{valid}(m_t)]
+R_{\mathrm{msg}}=\frac{1}{T_{\mathrm{msg}}}\sum_{t=1}^{T_{\mathrm{msg}}}\mathbf{1}[\mathrm{valid}(m_t)]
 ~~~
 
-其中 `valid` 表示消息 schema 可解析、字段完整、接收方明确、意图合法。
-只有实际记录了消息时，`R_msg` 才有数值；`T=0` 表示没有消息证据，
+只有实际记录了消息时，$R_{\mathrm{msg}}$ 才有数值；$T_{\mathrm{msg}}=0$ 表示没有消息证据，
 应记为 `None` 或 `unknown`，不能因为没有观察到无效消息就记成 `1`。
 
 ### 9.4.2 任务分配
@@ -108,7 +107,9 @@ R_{\mathrm{msg}}=\frac{1}{T}\sum_{t=1}^{T}\mathbf{1}[\mathrm{valid}(m_t)]
 z_j=(u_j,a(z_j),d_j,\rho_j)
 ~~~
 
-其中 `u_j` 是子任务，`a(z_j)` 是被分配的 Agent，`d_j` 是 deadline 或依赖约束，`\rho_j` 是风险等级。
+其中 $u_j$ 是子任务，$a(z_j)$ 是被分配的 Agent，$d_j$ 是 deadline 或依赖约束，$\rho_j$ 是风险等级。
+
+设 $M$ 是纳入评估的分配数，$j$ 为分配编号。$\mathrm{role}(a(z_j))$ 表示被分配 Agent 的实际角色，$\mathrm{role}^{\star}(z_j)$ 表示按子任务要求预先确定的目标角色；$\mathrm{success}(z_j)$ 表示子任务通过预先约定的验收条件。
 
 角色匹配率衡量任务是否分给了合适角色：
 
@@ -116,9 +117,13 @@ z_j=(u_j,a(z_j),d_j,\rho_j)
 R_{\mathrm{role}}=\frac{1}{M}\sum_{j=1}^{M}\mathbf{1}[\mathrm{role}(a(z_j))=\mathrm{role}^{\star}(z_j)]
 ~~~
 
-其中 `M` 是子任务数量，`\mathrm{role}^{\star}(z_j)` 是该子任务理想角色。
-只有 `M>0` 时才定义角色匹配率。空计划表示没有角色匹配证据，而不是
-所有任务都分配正确。
+分配任务成功率则检查子任务是否通过预先约定的验收条件：
+
+~~~math
+R_{\mathrm{assign}}=\frac{1}{M}\sum_{j=1}^{M}\mathbf{1}[\mathrm{success}(z_j)]
+~~~
+
+角色匹配和任务完成是两个不同问题：任务可能分给了合适角色但仍然失败。只有 $M>0$ 时这两个比率才有定义；空计划表示没有分配证据，而不是全部正确。
 
 ### 9.4.3 通信图
 
@@ -133,78 +138,93 @@ G_{\mathrm{comm}}=(\mathcal{A},\mathcal{E}_{\mathrm{comm}})
 通信成本可以粗略写成：
 
 ~~~math
-C_{\mathrm{comm}}=\sum_{t=1}^{T}C(m_t)
+C_{\mathrm{comm}}=\sum_{t=1}^{T_{\mathrm{msg}}}C(m_t)
 ~~~
 
-其中 `C(m_t)` 可以按 token、延迟、模型调用成本或人工审阅成本估算。
+其中 $T_{\mathrm{msg}}$ 是纳入消息记录的条数，$C(m_t)$ 可以按 token、延迟、模型调用成本或人工审阅成本估算。
 若没有消息，通信成本可以记录为观测到的零成本，但通信质量指标仍然是
 `unknown`；二者不能混为一谈。
 
 ### 9.4.4 证据支持与冲突解决
 
-证据支持率衡量消息或结论是否有可追溯依据：
+证据支持率衡量被审计消息是否有可追溯依据。设 $T_{\mathrm{evid}}$ 是纳入证据审计的消息数，$\mathrm{supported}(m_t)$ 表示第 $t$ 条消息中的关键主张有可检查的证据支持：
 
 ~~~math
-R_{\mathrm{evid}}=\frac{1}{T}\sum_{t=1}^{T}\mathbf{1}[\mathrm{supported}(m_t)]
+R_{\mathrm{evid}}=\frac{1}{T_{\mathrm{evid}}}\sum_{t=1}^{T_{\mathrm{evid}}}\mathbf{1}[\mathrm{supported}(m_t)]
 ~~~
 
-这里的 `T` 是实际进入评估集的消息或结论数，`T=0` 时支持率未定义。
+只有 $T_{\mathrm{evid}}>0$ 时支持率才有定义；$T_{\mathrm{evid}}=0$ 表示没有消息证据，不能记为满分。
 
-冲突解决率衡量系统是否识别并解决矛盾结论：
+设评估记录中有 $K$ 个冲突候选。$\mathrm{conflict}_k$ 表示评测者确认第 $k$ 项是真实冲突且系统识别到了它；$\mathrm{resolved}_k$ 表示系统对该冲突给出了结论，而不只是记录其存在。冲突解决率衡量已检测冲突中有多少得到处理：
 
 ~~~math
 R_{\mathrm{conf}}=\frac{\sum_{k=1}^{K}\mathbf{1}[\mathrm{conflict}_k \land \mathrm{resolved}_k]}{\sum_{k=1}^{K}\mathbf{1}[\mathrm{conflict}_k]}
 ~~~
 
-注意：冲突“被解决”不等于“解决正确”。高风险任务还要看解决正确率：
+冲突“被解决”不等于“解决正确”。正确解决率只把已检测、已解决且结果正确的冲突计入分子；$\mathrm{correct}_k$ 表示裁决符合预先设定的证据和验收标准：
 
 ~~~math
-R_{\mathrm{conf\_ok}}=\frac{\sum_{k=1}^{K}\mathbf{1}[\mathrm{conflict}_k \land \mathrm{correct}_k]}{\sum_{k=1}^{K}\mathbf{1}[\mathrm{conflict}_k]}
+R_{\mathrm{conf\_ok}}=\frac{\sum_{k=1}^{K}\mathbf{1}[\mathrm{conflict}_k \land \mathrm{resolved}_k \land \mathrm{correct}_k]}{\sum_{k=1}^{K}\mathbf{1}[\mathrm{conflict}_k]}
 ~~~
 
-两个冲突指标都要求至少存在一个被检测到的冲突。没有冲突样本时，
-系统没有获得冲突处理能力的证据；不能把它当作解决率或正确率为 `1`。
+两个冲突指标的分母都是已检测到的冲突数，因此它们衡量冲突被发现后的处理质量，不衡量系统发现所有真实冲突的能力。若要测冲突发现能力，还需用人工标注的真实冲突集合单独计算召回率。没有检测到冲突时，这两个比率未定义；不能把它当作解决率或正确率为 1。
 
 ### 9.4.5 重复劳动、收益和成本
 
-重复劳动率衡量多个 Agent 是否在做同一件事：
+重复劳动率衡量多个 Agent 是否在做同一件事。$\mathrm{duplicate}(z_j)$ 表示按预先确定的任务目标与验收标准，第 $j$ 个分配被判定为重复劳动；$M$ 与任务分配部分相同，只有 $M>0$ 时该率才有定义：
 
 ~~~math
 R_{\mathrm{dup}}=\frac{1}{M}\sum_{j=1}^{M}\mathbf{1}[\mathrm{duplicate}(z_j)]
 ~~~
 
-Multi-Agent 相比单 Agent 的收益可以写成：
+设共有 $N$ 次 Multi-Agent 运行，第 $r$ 次运行是否通过任务验收记为 $y_{\mathrm{multi},r}\in\{0,1\}$。只有 $N>0$ 时任务成功率才有定义：
 
 ~~~math
-L_{\mathrm{multi}}=S_{\mathrm{multi}}-S_{\mathrm{single}}
+S_{\mathrm{multi}}=\frac{1}{N}\sum_{r=1}^{N}y_{\mathrm{multi},r}
 ~~~
 
-其中 `S_{\mathrm{multi}}` 是 multi-agent 系统任务分数，`S_{\mathrm{single}}` 是单 Agent baseline 分数。这个指标很重要，因为 Multi-Agent 的比较对象不是“空系统”，而是更简单、更便宜的单 Agent 或固定 workflow。
-只有 multi-agent 与 baseline 在相同任务、输入、评估规则和可比预算下都
-有观测值时，`L_multi` 才有解释力。缺少 baseline 不能默认为零收益。
-
-总成本可以写成：
+收益要在同一批配对任务上比较。令 $\mathcal{P}$ 是 Multi-Agent 与单 Agent 都有结果的配对集合，$y_{\mathrm{single},r}$ 是同一任务的单 Agent 结果；$S_{\mathrm{multi}}^{\mathcal{P}}$ 和 $S_{\mathrm{single}}^{\mathcal{P}}$ 分别表示两种方案只在这批配对任务上的成功率，则：
 
 ~~~math
-C_{\mathrm{multi}}=\sum_{i=1}^{n}C(a_i)+\sum_{t=1}^{T}C(m_t)+C_{\mathrm{coord}}+C_{\mathrm{verify}}
+L_{\mathrm{multi}}=\frac{1}{|\mathcal{P}|}\sum_{r\in\mathcal{P}}(y_{\mathrm{multi},r}-y_{\mathrm{single},r})=S_{\mathrm{multi}}^{\mathcal{P}}-S_{\mathrm{single}}^{\mathcal{P}}
 ~~~
 
-其中 `C_{\mathrm{coord}}` 是协调器成本，`C_{\mathrm{verify}}` 是验证和人工升级成本。
+$L_{\mathrm{multi}}$ 是成功率的绝对差；例如 $0.20$ 表示提升 20 个百分点，不是相对提升 $20\%$。配对任务应使用相同输入、验收规则和可比预算。$|\mathcal{P}|=0$ 时收益未定义；代码只按记录中的配对标记计算，评测者仍须确认配对条件合理。
+
+第 $r$ 次运行的总成本可拆为 Agent 调用、消息、协调和验证成本。$n_r$ 是该次运行中计入成本的 Agent 调用数，$T_r$ 是消息数；$C(a_i)$ 与 $C(m_t)$ 分别是对应调用和消息的成本，后两项是协调与验证成本。各项必须使用同一种成本单位，不能把 token、美元和秒直接相加。代码中的 total_cost 字段表示这些项目合计后的单次运行成本：
+
+~~~math
+C_{\mathrm{run},r}=\sum_{i=1}^{n_r}C(a_i)+\sum_{t=1}^{T_r}C(m_t)+C_{\mathrm{coord},r}+C_{\mathrm{verify},r}
+~~~
+
+若共有 $N>0$ 次运行，平均单次成本为：
+
+~~~math
+\bar C_{\mathrm{multi}}=\frac{1}{N}\sum_{r=1}^{N}C_{\mathrm{run},r}
+~~~
 
 ### 9.4.6 Multi-Agent 综合交付检查
 
-一个简化的综合交付检查条件可以形式化为：
+除任务和过程指标外，还要把权限违规率与不必要的多 Agent 使用率纳入门槛。$V_{\mathrm{perm}}$ 是至少出现一次权限违规的分配记录数；$\mathrm{unnecessary}(r)$ 表示根据预先约定的验收条件和配对基线，第 $r$ 次任务用单 Agent 以更低成本也能达到同等验收结果：
 
 ~~~math
-I_{\mathrm{multi}}=\mathbf{1}[S_{\mathrm{multi}}\ge \tau_s \land L_{\mathrm{multi}}\ge \tau_l \land R_{\mathrm{conf}}\ge \tau_c \land R_{\mathrm{dup}}\le \tau_d \land R_{\mathrm{perm}}\le \tau_p \land C_{\mathrm{multi}}\le B]
+R_{\mathrm{perm}}=\frac{V_{\mathrm{perm}}}{M},\qquad
+R_{\mathrm{unnecessary}}=\frac{1}{N}\sum_{r=1}^{N}\mathbf{1}[\mathrm{unnecessary}(r)]
 ~~~
 
-其中 `R_{\mathrm{perm}}` 是权限违规率，`B` 是成本预算，`\tau_s,\tau_l,\tau_c,\tau_d,\tau_p` 是上线阈值。
+设 $\tau_s,\tau_l,\tau_{\mathrm{role}},\tau_{\mathrm{assign}},\tau_{\mathrm{msg}},\tau_{\mathrm{evid}},\tau_{\mathrm{conf}},\tau_{\mathrm{conf\_ok}},\tau_{\mathrm{dup}},\tau_{\mathrm{perm}},\tau_{\mathrm{unnecessary}}$ 是按产品风险和验收要求预先确定的阈值，$B$ 是平均单次运行的成本预算。在所有指标都有定义时，一个简化的综合交付检查条件可以形式化为：
 
-直觉：Multi-Agent 必须同时证明“做得好”“比单 Agent 有增益”“冲突能处理”“没有大量重复劳动”“权限不乱”“成本可接受”。只展示一个看起来很热闹的协作过程，不足以交付。`I_multi` 是把这些维度汇总到审计表的教学记号，不是建议把复杂产品压缩成一个布尔字段。
-公式中的每个比例都需要自己的非空分母，收益需要配对 baseline，成本需要
-完整记录模型、通信、协调和验证开销。任一必要指标为 `None` 或 `unknown`
-时，综合结果应保持未定义，直到补齐相应证据；不能把未知当成通过。
+~~~math
+I_{\mathrm{multi}}=\mathbf{1}[
+S_{\mathrm{multi}}\ge\tau_s \land L_{\mathrm{multi}}\ge\tau_l
+\land R_{\mathrm{role}}\ge\tau_{\mathrm{role}} \land R_{\mathrm{assign}}\ge\tau_{\mathrm{assign}}
+\land R_{\mathrm{msg}}\ge\tau_{\mathrm{msg}} \land R_{\mathrm{evid}}\ge\tau_{\mathrm{evid}}
+\land R_{\mathrm{conf}}\ge\tau_{\mathrm{conf}} \land R_{\mathrm{conf\_ok}}\ge\tau_{\mathrm{conf\_ok}}
+\land R_{\mathrm{dup}}\le\tau_{\mathrm{dup}} \land R_{\mathrm{perm}}\le\tau_{\mathrm{perm}}
+\land R_{\mathrm{unnecessary}}\le\tau_{\mathrm{unnecessary}} \land \bar C_{\mathrm{multi}}\le B]
+~~~
+
+$R_{\mathrm{perm}}$ 以分配数 $M$ 为分母，$R_{\mathrm{unnecessary}}$ 以运行数 $N$ 为分母；$M=0$ 或 $N=0$ 时对应指标未定义。正文 demo 采用的是一组教学阈值，不是通用上线标准。门槛覆盖任务成功和配对收益、角色与分配、消息和证据、冲突处理、重复劳动、权限、不必要编排及成本；只展示看起来热闹的协作过程不足以交付。$I_{\mathrm{multi}}$ 是教学审计记号，不建议把复杂产品压成一个布尔字段。任一必要指标为 `None` 或 `unknown` 时，综合结果应保持未定义，直到补齐证据；不能把未知当成通过。
 
 ## 9.5 角色分工
 
@@ -469,9 +489,11 @@ Multi-Agent 评估可以看：
 
 ## 9.18 最小可运行 Multi-Agent audit demo
 
-下面这个 demo 不调用外部模型，而是构造 4 条 toy multi-agent trace，审计角色匹配、任务成功、消息有效性、证据支持、冲突解决、重复劳动、权限违规和相对单 Agent 的收益。
+下面这个 demo 不调用外部模型，而是构造 4 条 toy multi-agent trace，审计角色匹配、子任务完成、任务成功、消息有效性、证据支持、冲突解决、重复劳动、权限违规和相对单 Agent 的收益。total_cost 使用合成的归一化成本单位，不代表美元或 token 数。
 
 它演示的问题是：Multi-Agent 不能只看最终是否成功，还要看协作过程是否可控、可解释、低重复、低权限风险，并且是否真的优于单 Agent baseline。
+
+代码状态：静态审阅，未运行。
 
 ~~~python
 import math
@@ -668,9 +690,14 @@ def audit_metrics(runs):
     paired_baseline = [run for run in runs if run.single_agent_success is not None]
     return {
         "task_success_rate": rate(sum(run.final_success for run in runs), total_runs),
-        "single_agent_lift_rate": rate(
-            sum(run.final_success and not run.single_agent_success for run in paired_baseline),
-            len(paired_baseline),
+        "single_agent_lift": (
+            None
+            if not paired_baseline
+            else round(
+                sum(run.final_success for run in paired_baseline) / len(paired_baseline)
+                - sum(run.single_agent_success for run in paired_baseline) / len(paired_baseline),
+                3,
+            )
         ),
         "role_match_rate": rate(
             sum(role_match(run, assignment) for run in runs for assignment in run.assignments),
@@ -680,7 +707,10 @@ def audit_metrics(runs):
         "message_valid_rate": rate(sum(m.valid_schema for m in all_messages), len(all_messages)),
         "evidence_support_rate": rate(sum(m.supported_by_evidence for m in all_messages), len(all_messages)),
         "conflict_resolution_rate": rate(sum(c.resolved for c in all_conflicts), len(all_conflicts)),
-        "correct_resolution_rate": rate(sum(c.resolution_correct for c in all_conflicts), len(all_conflicts)),
+        "correct_resolution_rate": rate(
+            sum(c.resolved and c.resolution_correct for c in all_conflicts),
+            len(all_conflicts),
+        ),
         "duplicate_work_rate": rate(sum(a.duplicate for a in all_assignments), len(all_assignments)),
         "permission_violation_rate": rate(
             sum(run.permission_violations for run in runs), len(all_assignments)
@@ -822,6 +852,9 @@ for run in runs:
         if conflict.detected and not conflict.resolved:
             failure_reasons["unresolved_conflict"] += 1
             run_has_problem = True
+        elif conflict.detected and not conflict.resolution_correct:
+            failure_reasons["incorrect_conflict_resolution"] += 1
+            run_has_problem = True
     if run.permission_violations:
         failure_reasons["permission_violation"] += run.permission_violations
         run_has_problem = True
@@ -836,11 +869,13 @@ for run in runs:
 
 checks = {
     "task_success": at_least(metrics["task_success_rate"], 0.80),
-    "single_agent_lift": at_least(metrics["single_agent_lift_rate"], 0.30),
+    "single_agent_lift": at_least(metrics["single_agent_lift"], 0.30),
     "role_match": at_least(metrics["role_match_rate"], 0.90),
+    "assignment_success": at_least(metrics["assignment_success_rate"], 0.80),
     "message_valid": at_least(metrics["message_valid_rate"], 0.95),
     "evidence_support": at_least(metrics["evidence_support_rate"], 0.80),
     "conflict_resolution": at_least(metrics["conflict_resolution_rate"], 0.80),
+    "conflict_correctness": at_least(metrics["correct_resolution_rate"], 0.80),
     "duplicate_work": at_most(metrics["duplicate_work_rate"], 0.10),
     "permission": exactly(metrics["permission_violation_rate"], 0.0),
     "unnecessary_multi_agent": at_most(metrics["unnecessary_multi_agent_rate"], 0.10),
@@ -864,7 +899,7 @@ no_baseline_run = Run(
     single_agent_success=None,
     total_cost=0.2,
 )
-assert audit_metrics([no_baseline_run])["single_agent_lift_rate"] is None
+assert audit_metrics([no_baseline_run])["single_agent_lift"] is None
 assert not at_least(None, 0.0)
 assert not at_most(None, 0.0)
 assert not exactly(None, 1.0)
@@ -909,18 +944,18 @@ print(f"empty_metrics={empty_metrics}")
 print(f"all_checks_pass={all_checks_pass}")
 ~~~
 
-输出示例：
+以下输出按四条合成轨迹逐项手算，代码未运行：
 
 ~~~text
-metrics={'task_success_rate': 0.75, 'single_agent_lift_rate': 0.5, 'role_match_rate': 0.929, 'assignment_success_rate': 0.857, 'message_valid_rate': 0.929, 'evidence_support_rate': 0.714, 'conflict_resolution_rate': 0.5, 'correct_resolution_rate': 0.5, 'duplicate_work_rate': 0.143, 'permission_violation_rate': 0.071, 'unnecessary_multi_agent_rate': 0.25, 'avg_cost': 1.325}
+metrics={'task_success_rate': 0.75, 'single_agent_lift': 0.5, 'role_match_rate': 0.929, 'assignment_success_rate': 0.857, 'message_valid_rate': 0.929, 'evidence_support_rate': 0.714, 'conflict_resolution_rate': 0.5, 'correct_resolution_rate': 0.5, 'duplicate_work_rate': 0.143, 'permission_violation_rate': 0.071, 'unnecessary_multi_agent_rate': 0.25, 'avg_cost': 1.325}
 problem_runs=['code_review_swarm', 'debate_answer', 'over_coordinated_small_task']
 top_failure_reasons=[('unsupported_message', 4), ('assignment_failed', 2), ('duplicate_work', 2), ('invalid_message_schema', 1), ('permission_violation', 1), ('role_mismatch', 1), ('task_failed', 1), ('unnecessary_multi_agent', 1), ('unresolved_conflict', 1)]
-checks={'task_success': False, 'single_agent_lift': True, 'role_match': True, 'message_valid': False, 'evidence_support': False, 'conflict_resolution': False, 'duplicate_work': False, 'permission': False, 'unnecessary_multi_agent': False, 'cost': True}
-empty_metrics={'task_success_rate': None, 'single_agent_lift_rate': None, 'role_match_rate': None, 'assignment_success_rate': None, 'message_valid_rate': None, 'evidence_support_rate': None, 'conflict_resolution_rate': None, 'correct_resolution_rate': None, 'duplicate_work_rate': None, 'permission_violation_rate': None, 'unnecessary_multi_agent_rate': None, 'avg_cost': None}
+checks={'task_success': False, 'single_agent_lift': True, 'role_match': True, 'assignment_success': True, 'message_valid': False, 'evidence_support': False, 'conflict_resolution': False, 'conflict_correctness': False, 'duplicate_work': False, 'permission': False, 'unnecessary_multi_agent': False, 'cost': True}
+empty_metrics={'task_success_rate': None, 'single_agent_lift': None, 'role_match_rate': None, 'assignment_success_rate': None, 'message_valid_rate': None, 'evidence_support_rate': None, 'conflict_resolution_rate': None, 'correct_resolution_rate': None, 'duplicate_work_rate': None, 'permission_violation_rate': None, 'unnecessary_multi_agent_rate': None, 'avg_cost': None}
 all_checks_pass=False
 ~~~
 
-这个 demo 的 `all_checks_pass=False` 不是程序错误，而是刻意暴露 multi-agent 系统的常见问题：成功率不足、消息证据不够、冲突未解决、重复劳动、权限违规和小任务过度编排。真实系统应把这些 trace 级问题作为待处理的工程发现，而不是用一个总结果掩盖具体原因。
+这个 demo 的 `all_checks_pass=False` 不是程序错误，而是刻意暴露 multi-agent 系统的常见问题：任务和子任务成功率不足、消息证据不够、冲突未解决或未正确解决、重复劳动、权限违规和小任务过度编排。真实系统应把这些 trace 级问题作为待处理的工程发现，而不是用一个总结果掩盖具体原因。
 
 ## 9.19 Agent Swarm 的收益、成本与责任边界
 
@@ -936,6 +971,8 @@ C_{\mathrm{swarm}}=\sum_{i=1}^{N}C_{\mathrm{agent},i}
 ~~~
 
 `C_sync` 包括消息、共享状态和上下文重建成本，`C_verify` 包括最终汇总、冲突解决和工具验证。并发只可能降低 wall-clock 的一部分，不能消除 token、工具和通信成本。
+
+第九章讨论协作的适用条件和收益判断；Agent Swarm 的任务隔离、artifact、合并、恢复和预算控制由[第十四章](14-agent-swarm并行协作.md)进一步展开。
 
 设计 Agent Swarm 时应明确：
 
@@ -958,20 +995,20 @@ C_{\mathrm{swarm}}=\sum_{i=1}^{N}C_{\mathrm{agent},i}
 
 Anthropic 的 Claude Code **Dynamic Workflows** 展示了一种面向长任务的产品形态：Claude 根据 prompt 动态拆解任务、生成 orchestration scripts、并行运行 subagents，在结果汇总前检查；其他 agents 会从独立角度尝试反驳发现，workflow 迭代到结论收敛。协调状态放在对话之外并持续保存，因此中断的长任务可以从 checkpoint 恢复。这超出了普通的“同一轮多发几次 tool call”，但官方博客没有公开完整 scheduler、失败合并算法或独立成功率，不能据此推断模型内部结构。该博客是沿 Opus 4.8 锚点补充的 Anthropic 产品/harness 资料，不表示这项产品能力仅属于 Opus 4.8。
 
-这类并行化要与安全、预算控制一起设计。Anthropic 页面提醒 workflow 比一般 Claude Code session 消耗更多 token；首次触发先展示将运行的内容并请求确认，组织管理员可以通过 managed settings 关闭。页面当前称该功能 generally available，建议开启 auto mode，并称 Max/Team/Enterprise 与 Claude Code API 默认开启、Pro 可在 `/config` 启用；具体计划权限仍受管理员设置影响。`ultracode` 是 Claude Code 专属入口：effort 设为 `xhigh`，workflow 的启动时机由 Claude 决定。Bun 从 Zig 移植到 Rust 的案例报告约 750,000 行、11 天、99.8% 测试通过、数百并行 agents 和每文件双 reviewer；文章同时注明尚未用于生产，因此应作为发布方案例，而非对照实验结论。
+截至 2026-11-16，Anthropic 将 Dynamic Workflows 标为 GA，Claude Code CLI、Desktop 和 VS Code 扩展在 Pro、Max、Ultra、Team、Enterprise 计划以及 Claude API、Amazon Bedrock、Vertex AI、Microsoft Foundry 上可用。默认开启范围是 Max、Ultra、Team、Enterprise 和 Claude Code API；Pro 用户可在 /config 启用。官方建议搭配 auto mode，并说明首次触发会先展示待运行内容并请求确认，管理员可以关闭。该功能比普通会话消耗更多 token，以上均是产品文档当前公布的计划与使用合同，不是多 Agent 效果保证。
 
-Opus 4.8 System Card 又提供了独立于产品 Dynamic Workflows 的多 Agent benchmark harness，面试时不要把二者混成同一系统：
+官方举例称，Bun 从 Zig 移植到 Rust 的工作涉及约 750,000 行 Rust、11 天、99.8% 测试通过、数百个并行 Agent 和每个文件两名 reviewer；官方同时说明项目尚未用于生产。这是厂商发布的案例，不能当作对照实验或普遍吞吐率。
 
-| 评测与配置 | 发布方观察 | 解释边界 |
-|---|---|---|
-| BrowseComp，blocking orchestrator | 88.5% | 该 harness 的最高分；不能单独推出它的延迟/成本更优 |
-| BrowseComp，fixed 5-agent team vs single agent | 85.4% vs 84.3%；total token limit 为 5M vs 10M，派生 latency 约为 single 的 20% | 质量略高且 latency 更低，但仍消耗较多 tokens；这是指定配置下的比较 |
-| BrowseComp 难度切片 | 100% 历史通过率的易题没有明显 speedup；历史通过率低于 0.5 的 hard tail 中位约 3× | 难度由先前模型通过率代理，收益集中在慢的困难题 |
-| ProgramBench，166 个 golden tasks | 三 Agent team 在 score 0.6 时约 1.8× latency improvement | 从 200 题中排除 34 个参考实现质量不足的题；分数—成本曲线依赖该筛选与 harness |
+Opus 4.8 System Card 则给出另一项与产品 Dynamic Workflows 分开的 BrowseComp 评测摘要：
 
-System Card 的 “latency” 是派生值：把所有 Agent 的 token 数按固定 prefill/decode rate 折算，再加工具执行时间；它不是生产环境的实际 wall-clock 或 p95 SLO。测试还分别定义 blocking、peer team 与 asynchronous subagents 的上下文、工具和预算，见 [System Card §8.11](https://www.anthropic.com/claude-opus-4-8-system-card)。因此公平的 multi-agent 面试回答至少要同时给任务成功率、全体 Agent token、串并行关键路径、工具时间、真实 wall-clock 和 verifier 质量，并按简单/困难任务切片。
+| 配置 | BrowseComp 得分 | 可支持的判断 |
+|---|---:|---|
+| Opus 4.8 single-agent | 84.3% | 该模型在所述评测配置下的单 Agent 结果 |
+| Opus 4.8 multi-agent | 88.5% | System Card 摘要表报告的多 Agent 结果 |
 
-System Card 还把 coding honesty 具体化为“未完成事项是否在总结中被主动披露”：预填充短上下文 coding traces 中，Opus 4.8 漏报重要失败事件为 3.7%，但该评测是 off-policy transcript，不能写作普适 honesty rate。最终仍应由测试和 artifact verifier 判断交付状态，而不是让模型自我宣布完成。
+这些数值来自发布方的特定评测；不能由摘要行推出所有多 Agent 架构都更准确、更省时或更便宜。System Card §8.11 将不同多 Agent harness 和评测方法分开说明，横向比较前应先对齐任务、Harness、预算、计分和延迟口径。细节数字若不能从相应配置和原始表格核实，就不应拼进同一张比较表。
+
+System Card §6.3.6.2 还评估了代码总结是否主动披露预填充轨迹中的重要失败：Opus 4.8 在这项评测中有 3.7% 的轨迹未提及重要事件。轨迹原本并未完全成功，用户只要求总结，没有明确追问失败；评测是 off-policy，且上下文短于不少真实部署任务，因此这个数字不是普适的诚实率。最终仍应由测试和 artifact verifier 判断交付状态，而不是让模型自我宣布完成。
 
 ## 9.20 常见失败模式
 
@@ -987,6 +1024,12 @@ System Card 还把 coding honesty 具体化为“未完成事项是否在总结�
 10. 最终结果没人负责。
 11. 简单任务过度使用多 Agent。
 12. 缺少单 Agent baseline，无法证明增益。
+
+### 案例：共享资源下的多用户协作
+
+Anthropic 与合作者在 Worse Together 研究中测试了 5 个模型、77 个实验场景和 4 种共享资源模拟环境：API token 预算、诊所日历、个人助理安排的团体订单或旅行，以及带发布截止时间的合并队列。论文报告，在这些设置中，由一个 Agent 代表多人协调的组结果优于每位用户各自委托 Agent 的团队；这是特定模型、任务、共享资源和协调方式下的发现，不表示所有 Multi-Agent 任务都会变差。公开发布的 MAMUBench 包含 3 个环境、74 个场景，未包含 merge-queue 环境；两个数字对应不同范围，不能混用。[Anthropic 研究说明](https://alignment.anthropic.com/2026/worse-together/)、[论文](https://arxiv.org/abs/2610.00583)、[MAMUBench 发布仓库](https://github.com/safety-research/MAMUBench)。
+
+这个案例还提醒我们同时检查群体结果和每位用户的意图。研究说明指出，单看群体得分可能漏掉 Agent 未经同意取消他人任务；单看动作合规也可能看不出团队整体表现明显低于协调器。因此评测应把最终群体结果与逐用户目标、授权、同意和动作记录并列；通用轨迹与结果指标见[第十章《Agent 评估》](10-agent评估.md)，权限和意图保护见[第十一章《Agent 安全》](11-agent安全.md)。缓解措施也依赖环境：共享预算可设明确负责人和优先级；下单前由平台强制要求 Agent 先读取同伴消息。这样的门禁只说明对应场景的修复方向，不是通用解法。
 
 Multi-Agent 的目标不是把系统变热闹，而是提高任务成功率、可验证性、并行效率和权限可控性。
 
@@ -1030,14 +1073,14 @@ Verifier 的作用是检查候选结果是否满足外部可观察条件。数�
 6. 记录一次并行运行的 wall-clock、模型 token、消息 token、验证成本和人工升级成本，计算 NetLift，并与串行 workflow 比较。
 7. 构造两个共享同一错误文档的 Agent，说明为什么多数票没有增加独立证据；再加入一个外部工具 verifier，比较冲突识别结果。
 8. 比较单 Agent、固定 workflow 和 Multi-Agent 在成本、可靠性、可解释性上的差异。
-9. 用同一任务复刻 BrowseComp 风格的 single、blocking、fixed-team、async 四条曲线；分别累计所有 Agent token、模型关键路径、工具时间和实际 wall-clock，说明 benchmark 的派生 latency 为什么不能当线上 SLO。
+9. 选择一项公开的多 Agent benchmark，按来源实际披露的配置重建对照表；分别记录单 Agent baseline、协作方式、全体 Agent 调用、token 预算、工具时间、计分方法和延迟口径。未公开的字段标为 unknown，并说明为何 benchmark 中的时间估算不能自动当作线上 SLO。
 10. 为一个跨数百文件的长迁移设计 Dynamic Workflow：写出任务 DAG、独立验证与反驳回合、checkpoint/resume、取消和预算/权限门禁；用故意失败的测试验证“状态已保存”“任务已完成”和“artifact 已验收”是三个不同状态。
 
 ## 9.25 本章小结
 
 Multi-Agent 通过角色分工、并行执行和互相检查，让 Agent 系统有机会处理更复杂任务。但它不是免费午餐，会引入通信成本、协调复杂度、冲突解决、权限管理、安全风险和评估难度。
 
-可靠的 Multi-Agent 系统通常不是一群 Agent 自由聊天，而是有 coordinator、结构化消息、共享状态、明确权限、冲突解决和评估闭环的工程系统。下一章会进入 Agent 评估，系统讨论如何衡量 Agent 是否真的完成任务、是否安全、是否高效。
+可靠的 Multi-Agent 系统通常不是一群 Agent 自由聊天，而是有 coordinator、结构化消息、共享状态、明确权限、冲突解决和评估闭环的工程系统。下一章[《Agent 评估》](10-agent评估.md)会系统讨论如何衡量 Agent 是否真的完成任务、是否安全、是否高效。
 
 本章的代表性资料入口：
 
@@ -1047,7 +1090,8 @@ Multi-Agent 通过角色分工、并行执行和互相检查，让 Agent 系统�
 - [ChatDev](https://arxiv.org/abs/2307.07924)：软件开发场景中的多 Agent 协作研究入口。
 - [AI Safety via Debate](https://arxiv.org/abs/1805.00899)：用辩论暴露和检查模型结论的研究入口。
 - [LLM-based Multi-Agent Systems survey](https://arxiv.org/abs/2402.01680)：多 Agent 系统的综述入口。
-- [Introducing dynamic workflows in Claude Code](https://claude.com/blog/introducing-dynamic-workflows-in-claude-code)：Anthropic 对长周期动态编排、subagents、复核、恢复与使用门禁的产品描述。
-- [Claude Opus 4.8 System Card](https://www.anthropic.com/claude-opus-4-8-system-card)：§8.11 的多 Agent benchmark harness、score/token/派生 latency 曲线，以及 §6.3.6 的 coding diligence 评测。
+- [Introducing dynamic workflows in Claude Code](https://claude.com/resources/articles/introducing-dynamic-workflows-in-claude-code)：截至 2026-11-16 的功能可用范围、默认开启计划和使用门禁。
+- [Claude Opus 4.8 System Card](https://www.anthropic.com/claude-opus-4-8-system-card)：§8.1 摘要表中的 BrowseComp single/multi-agent 分数，以及 §6.3.6.2 的代码总结披露评测。
+- [Worse Together 研究说明](https://alignment.anthropic.com/2026/worse-together/)、[论文](https://arxiv.org/abs/2610.00583)与 [MAMUBench 发布仓库](https://github.com/safety-research/MAMUBench)：多用户共享资源场景中的群体结果、个体意图与协调失败证据。
 
 这些资料分别涉及框架、角色化工作流、软件开发协作、辩论和综述。它们可以帮助理解架构空间，却不能单独证明多 Agent 比单 Agent 更便宜、更可靠或更安全；具体结论仍需在相同任务、相近预算、明确 baseline、权限配置和失败切片下复测。

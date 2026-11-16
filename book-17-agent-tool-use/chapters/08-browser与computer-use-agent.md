@@ -130,11 +130,11 @@ I_{\mathrm{budget}}(a_t,s_t)
 确认、降级为草稿或停止；模型识别出一个按钮，不等于该按钮在当前主体
 权限下可以点击。
 
-动作准确率：
+设 `T` 为轨迹中的动作数，`N_task` 为任务数。`success_t` 表示动作结果经环境或外部回执确认有效；`target_t` 是实际目标，`target_t^\star` 是任务标注的期望目标。动作准确率：
 
 ~~~math
 A_{\mathrm{act}}=
-\frac{\sum_t \mathbf{1}[a_t\ \mathrm{matches\ target}_t]}
+\frac{\sum_t \mathbf{1}[\mathrm{success}_t\land target_t=target_t^\star]}
 {T}
 ~~~
 
@@ -192,15 +192,49 @@ R_{\mathrm{rec}}=
 
 只有存在失败动作时才定义恢复率。注入拦截率也只在确实观察到注入事件
 时定义；没有注入样本不能据此宣称系统具备拦截能力。
+任务成功率把任务状态和外部验证结合起来：
+
+~~~math
+R_{\mathrm{task}}=
+\frac{\sum_i \mathbf{1}[status_i=\mathrm{success}\land verified_i]}
+{N_{\mathrm{task}}}
+~~~
+
+最终验证率单独报告，避免“任务成功”标签掩盖未核对的结果：
+
+~~~math
+R_{\mathrm{verify}}=
+\frac{\sum_i \mathbf{1}[verified_i]}
+{N_{\mathrm{task}}}
+~~~
+
+其中 `verified_i` 表示有页面状态、对象状态或可审计回执支持的任务级验证。
+当 `N_task=0` 时，任务成功率与最终验证率均为 `None`。
+注入拦截率与重复动作率按已标注事件计算：
+
+~~~math
+R_{\mathrm{inject}}=
+\frac{\sum_t \mathbf{1}[injection_t\land blocked_t]}
+{\sum_t \mathbf{1}[injection_t]},
+\qquad
+R_{\mathrm{repeat}}=
+\frac{\sum_t \mathbf{1}[repeat_t]}
+{T}
+~~~
+
+`repeat_t=1` 表示动作在状态变化得到确认前，无必要地重复了同一规范化目标和参数；
+空注入集或 `T=0` 时相应比例为 `None`。重复判定要写入标注规则，不能只凭动作文本相似。
 一个简化的 UI 交付检查指标：
 
 ~~~math
 I_{\mathrm{ui\_agent}}=
 \mathbf{1}[
 R_{\mathrm{task}}\ge\tau_{\mathrm{task}}
+\land R_{\mathrm{verify}}\ge\tau_{\mathrm{verify}}
 \land A_{\mathrm{act}}\ge\tau_{\mathrm{act}}
 \land R_{\mathrm{misclick}}\le\tau_{\mathrm{misclick}}
 \land A_{\mathrm{form}}\ge\tau_{\mathrm{form}}
+\land R_{\mathrm{repeat}}\le\tau_{\mathrm{repeat}}
 \land R_{\mathrm{risk}}=1
 \land R_{\mathrm{inject}}=1
 ]
@@ -674,7 +708,7 @@ traces = [
                 high_risk=True,
                 confirmed=False,
                 failure=True,
-                repeated=True,
+                repeated=False,
             ),
             UIAction(
                 "f2",
@@ -762,7 +796,7 @@ print("all_checks_pass=", all_checks_pass, sep="")
 预期输出：
 
 ~~~text
-metrics={'task_success_rate': 0.5, 'final_verification_rate': 0.5, 'action_accuracy': 0.733, 'misclick_rate': 0.3, 'form_accuracy': 0.667, 'state_observation_coverage': 0.933, 'high_risk_protection_rate': 0.25, 'prompt_injection_block_rate': 1.0, 'failure_recovery_rate': 0.333, 'repeat_action_rate': 0.133}
+metrics={'task_success_rate': 0.5, 'final_verification_rate': 0.5, 'action_accuracy': 0.733, 'misclick_rate': 0.3, 'form_accuracy': 0.667, 'state_observation_coverage': 0.933, 'high_risk_protection_rate': 0.25, 'prompt_injection_block_rate': 1.0, 'failure_recovery_rate': 0.333, 'repeat_action_rate': 0.067}
 problem_tasks=['submit_profile_form', 'download_report_popup', 'unsafe_transfer_request', 'repeated_wrong_click']
 top_failure_reasons=[('task_not_verified', 3), ('unconfirmed_high_risk', 2), ('misclick', 2), ('bad_form_value', 1), ('bad_observation', 1), ('repeat_action', 1)]
 checks={'task_success_ok': False, 'final_verification_ok': False, 'action_accuracy_ok': False, 'misclick_rate_ok': False, 'form_accuracy_ok': False, 'high_risk_protected': False, 'injection_blocked': True, 'repeat_action_ok': False}
@@ -852,19 +886,23 @@ Browser Agent 和 Computer Use Agent 把 Agent 带入网页、桌面应用和真
 
 ## 8.23 延伸资料与证据边界
 
-MiniWoB 和 MiniWoB++ 提供了浏览器交互任务的受控评估入口，WebArena 把任务放入更接近真实网站的环境，OSWorld 则把范围扩展到桌面应用和多步骤计算机操作。这些 benchmark 能帮助比较任务完成、动作轨迹和环境鲁棒性，但其页面、权限和风险分布并不等于生产系统。
+MiniWoB 和 MiniWoB++ 提供了浏览器交互任务的受控评估入口，WebArena 把任务放入更接近真实网站的环境，OSWorld 则把范围扩展到桌面应用和多步骤计算机操作。引用 OSWorld 时需要标明版本：OSWorld 2.0 论文定义了 108 个长程工作流；OSWorld-V2 仓库当前推荐的 `osworld-v2.1` 是另一份配套发布快照，固定了代码、任务、资产、模拟网站和虚拟机镜像。论文中的 OSWorld 2.0 分数不能改称 `osworld-v2.1` 结果。跨系统比较还需记录模型、Harness、动作预算和 verifier。这些 benchmark 能帮助比较任务完成、动作轨迹和环境鲁棒性，但其页面、权限和风险分布并不等于生产系统。
 
-Anthropic 的 computer use 文档、OpenAI 的 computer use / Operator 公开资料可以帮助理解当前产品暴露的观察和动作接口；网页内容安全、提示注入和不可信工具输出还应结合 OWASP GenAI/LLM 安全资料阅读。产品文档说明接口和使用边界，不能证明模型在任意页面都能正确定位、不会泄露凭据或自动安全处理不可逆动作。
+供应商接口只作为版本化案例。以 2026-11-16 的官方文档快照为例，OpenAI Responses API 的 `computer` 工具返回结构化动作，由宿主执行器执行并回传对应截图；Anthropic 文档使用 `computer_toolset_20260801` 工具集。具体工具名称和动作合同可能变化；部署时应一起固定模型、工具版本、执行器和环境权限。两家的文档都强调隔离运行环境、限制权限、把屏幕内容当作不可信输入，并在有重大现实后果的动作前保留人工确认。网页内容安全、提示注入和不可信工具输出还应结合 OWASP GenAI/LLM 安全资料阅读。产品文档说明接口和使用边界，不能证明模型在任意页面都能正确定位、不会泄露凭据或自动安全处理不可逆动作。
 
 本章的教学 demo 只统计结构化轨迹中的动作、表单、观察和风险字段，不代表真实视觉模型能力。上线前还需要在目标网站、语言、页面版本、登录流程、网络条件和人工接管策略下进行复测，并把严重度高的误操作单独报告。
+
+本章只处理 UI 任务切面；通用轨迹与结果指标见[第十章](10-agent评估.md)，权限和注入威胁模型见[第十一章](11-agent安全.md)，环境状态与 verifier 合同见[第十三章](13-agentworld模型与环境闭环.md)。
 
 本章的代表性资料入口：
 
 - [MiniWoB++](https://arxiv.org/abs/1802.08802)：受控浏览器交互任务和环境入口。
 - [WebArena](https://webarena.dev/)：更接近真实网站的多站点任务评估入口。
-- [OSWorld](https://arxiv.org/abs/2404.07972)：桌面应用和通用计算机操作评估入口。
-- [Anthropic computer use](https://docs.anthropic.com/en/docs/agents-and-tools/computer-use)：computer use 工具形态和安全边界文档入口。
-- [OpenAI computer use](https://platform.openai.com/docs/guides/tools-computer-use)：computer use 接口和操作约束文档入口。
+- [OSWorld 初版](https://arxiv.org/abs/2404.07972)：桌面应用和通用计算机操作评估入口。
+- [OSWorld 2.0 论文](https://arxiv.org/abs/2606.29537)：108 个长程 computer-use 工作流的论文版本。
+- [Anthropic computer use](https://platform.claude.com/docs/en/agents-and-tools/tool-use/computer-use-tool)：computer use 工具形态和安全边界文档入口。
+- [OpenAI computer use](https://developers.openai.com/api/docs/guides/tools-computer-use)：computer use 接口和操作约束文档入口。
+- [OSWorld-V2 `osworld-v2.1` release](https://github.com/xlang-ai/OSWorld-V2/releases/tag/osworld-v2.1)：与论文版本区分的配套环境快照入口。
 - [OWASP Top 10 for LLM Applications](https://owasp.org/www-project-top-10-for-large-language-model-applications/)：提示注入和不可信内容风险入口。
 
 这些资料分别说明受控 benchmark、真实网站任务、桌面环境、产品接口和安全风险。它们不能直接证明目标网站上的视觉定位、登录隔离、确认流程或不可逆动作保护已经可靠；这些性质仍需在具体页面、权限和版本下复测。

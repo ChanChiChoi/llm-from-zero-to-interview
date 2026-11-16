@@ -5392,7 +5392,11 @@ Tool Execution Success Rate：工具执行成功率
 
 Human Confirmation Coverage：人工确认覆盖率
 
-Unauthorized Action Rate：未授权动作率
+Unauthorized Action Rate：未授权动作率；报告时必须明确统计的是未授权动作提案还是已经执行的越权副作用，不能用同一名称掩盖分母差异。
+
+Unauthorized Action Proposal Rate：未授权动作提案率；所有动作提案中不符合当前授权条件的比例，不表示动作已执行。
+
+Unauthorized Execution Rate：未授权执行率；实际执行的动作中缺少授权的比例，衡量已经发生的越权副作用。
 
 Agent Recovery Rate：Agent 失败恢复率
 
@@ -5848,9 +5852,11 @@ Consensus / Voting：共识 / 投票
 
 Conflict Resolution：冲突解决
 
+Correct Conflict Resolution Rate：已检测到的冲突中，已解决且结果正确的比例；未解决或错误解决均计为失败
+
 Duplicate Work Rate：重复劳动率
 
-Single-Agent Lift Rate：相对单智能体提升率
+Single-Agent Lift Rate：配对任务上的 Multi-Agent 与单 Agent 成功率绝对差；正值表示提升，负值表示下降，不能与 Multi-Agent 单侧胜率混同
 
 Multi-Agent Gate：Multi-Agent 上线门禁
 
@@ -5904,7 +5910,9 @@ Least Privilege Coverage：最小权限覆盖率
 
 Permission Matrix Coverage：权限矩阵覆盖率
 
-Unauthorized Action Block Rate：未授权动作阻断率
+Unauthorized Action Block Rate：未授权动作阻断率；未授权提案中执行状态明确记为 `blocked` 的比例，反映控制层拦截。只转成 `drafted` 的提案尚未执行，但不计为已阻断。
+
+Execution Status：动作执行状态；记录提案最终处于 `executed`、`blocked` 或 `drafted`，用于区分产生副作用、明确阻断和仅保留草稿。
 
 Secret Access Block Rate：Secret 访问阻断率
 
@@ -5912,11 +5920,17 @@ Network Egress Control：网络外发控制
 
 Sandbox Enforcement Coverage：沙箱执行覆盖率
 
-Dry Run Coverage：预演覆盖率
+Dry Run Coverage：预演覆盖率；已执行且支持安全预览/模拟的高风险动作中，执行前完成可验证 dry-run 的比例。不支持 dry-run 的动作不计入分母。
 
 Audit Log Completeness：审计日志完整率
 
 Irreversible Action Protection：不可逆动作保护率
+
+High-Risk Confirmation Rate：高风险动作确认率；已执行的高风险动作中，在执行前获得与动作对象、参数和版本绑定的有效确认的比例。
+
+High-Risk Safe Disposition Rate：高风险动作安全处置率；所有高风险动作提案中，被阻断、保持为草稿，或经有效确认后执行的比例；需同时报告提案数与各处置类别。
+
+Safe Alternative Coverage：安全替代方案覆盖率；对已阻断且存在可行安全替代方案的请求，系统实际提供替代方案的比例；不把草稿或不适用样本混入分母。
 
 Permission Sandbox Gate：权限沙箱门禁
 
@@ -5959,6 +5973,8 @@ Evaluation Harness：评估执行框架
 Evaluation Contract：评测协议；一次可复核评测所固定的 checkpoint、tokenizer/chat template、任务数据与 split、prompt/few-shot、生成参数、metric/scorer、harness 版本和样本级输出。
 
 Task Contract：任务契约；固定一次评测的输入、初始环境、允许动作、成功判据、预算、harness 与风险/副作用约束；不同任务契约下的结果不能只凭名称或总分直接等同。
+
+Valid Completion Rate：有效完成率；按明示协议统计正常终止且 evaluator 可读取 handoff 的任务比例，与任务是否正确完成分开报告；不同框架对有效 handoff 的定义可能不同。
 
 Macro-Averaged Success Rate：宏平均成功率；先分别计算每个非空切片的成功率，再对切片等权平均；回答“典型切片平均表现如何”，不表示目标流量下的总体率。
 
@@ -6097,6 +6113,12 @@ LLM-as-a-Judge：用大模型作评审（按固定 rubric 评分，需在目标�
 Rubric Verification：评分规约逐项核验；针对单条可观察要求检查回答或轨迹证据，分别判断满足、不满足或无法判定，不等同于整份回答的偏好评分。
 
 Judge Repeatability：评审重复性；固定 judge、输入和 prompt 重复调用时标签或分数的稳定程度；稳定不代表与人工 gold 一致或事实正确。
+
+Judge Order Invariance：评审顺序不变性；交换成对候选在输入中的位置后，judge 仍作出相同质量判断的比例或翻转率；应与重复调用稳定性分开报告。
+
+Verifier False Acceptance Rate：验证器误接收率；参考结果为无效、verifier 却接受的比例，通常以被明确判定的无效样本为分母；须说明弃权样本是否另计。
+
+Verifier False Rejection Rate：验证器误拒绝率；参考结果为有效、verifier 却拒绝的比例，通常以被明确判定的有效样本为分母；须说明弃权样本是否另计。
 
 Pair-Difficulty-Conditioned Evaluation：按比较对难度分层的评估；有人工排序依据时按质量差距分组报告 pairwise judge 表现，不能由全局一致率替代最终排序检查。
 
@@ -6384,7 +6406,9 @@ Data Minimization Rate：数据最小化率
 
 PII Redaction Coverage：个人身份信息脱敏覆盖率
 
-Sensitive Data Block Rate：敏感数据阻断率
+Sensitive Data Block Rate：敏感数据阻断率；按业务策略禁止的敏感数据流中，在产生副作用前被阻断的比例。经授权、最小化并脱敏的合法数据流另行评估，不混入该分母。
+
+External Transfer Block Rate：外部传输阻断率；按策略禁止的外部传输尝试中，在产生副作用前被阻断的比例；合法的最小化外发应单独审查授权和数据最小化。
 
 Permission Isolation：权限隔离
 
@@ -9176,7 +9200,9 @@ Multi-Rollout On-Policy Distillation via Peer Successes and Failures：通过同
 
 Answer Correctness and Stopping：答案正确性与停止/收束能力；前者衡量答案是否正确或被标记，后者衡量模型在给出答案后是否恰当结束。应分别评估正确答案后的结束率和过度生成率，不能用“答案出现过”替代停止质量。
 
-AgentWorld：Agent 世界模型/环境体系；把模型、工具、环境和任务 verifier 结合起来，不是普通聊天模型名称的同义词。
+Agent—环境闭环（Agent–environment loop）：Agent 根据 observation 提出 action，经 harness 校验后改变环境状态，再依据新 observation 继续决策；这是描述交互结构的通用概念。
+
+AgentWorld benchmark：2026 年提出的特定长周期多 Agent 评测环境与任务集合，含 Causal Collaboration Effectiveness（CCE）指标；专名不泛指所有 Agent 环境或 Agent—环境闭环，也不同于 Qwen-AgentWorld（arXiv:2606.24597）。
 
 Context Folding：上下文折叠；把长轨迹折叠成结构化状态、摘要和 artifact 引用，同时保留可回放原始 trace。
 

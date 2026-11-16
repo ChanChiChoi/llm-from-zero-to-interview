@@ -24,3 +24,11 @@
 - **阅读位置**：`Embedding.padding_idx` 的参数说明；SDPA `attn_mask`、`is_causal`、`dropout_p` 与 backend/numerical accuracy 边界；causal lower-right bias 的定义与 prototype 标记；MultiheadAttention 的 mask 语义；RMSNorm epsilon 默认值；LayerNorm 方差和统计维度。
 - **来源支持的事实**：SDPA 的 bool mask 中 True 表示该元素参与 attention，而 `MultiheadAttention` 的相关 mask 中 True 表示屏蔽/忽略；SDPA 的 `dropout_p` 不跟随 module `.eval()` 自动变为 0；SDPA 的 `is_causal=True` 在非方形矩阵上使用左上对齐 causal bias，且不能同时传入显式 `attn_mask`。`causal_lower_right(L,S)` 按右下对角线对齐，等价 materialized bool mask 的对角偏移为 `S-L`，但该 bias API 标为 prototype。`Embedding.padding_idx` 行不从 lookup 梯度更新，新建层该行默认初始化为零。`RMSNorm(eps=None)` 使用 computation/opmath dtype 的 machine epsilon；fp16、bf16、fp32 输入用 fp32 epsilon，fp64 输入用 fp64 epsilon。`LayerNorm` 沿 `normalized_shape` 的末尾维度统计，使用 `correction=0` 的有偏方差，并在 train/eval 都用当前输入统计量。SDPA 不同后端可能产生略有差异的浮点结果，后端自动选择不能单独证明目标硬件上的速度收益。
 - **证据等级与边界**：source-backed（固定版本官方 API 文档）。cached query 的绝对位置可见关系 `key_position <= query_position` 是因果生成定义的推论，不是 API 对所有 cache 布局的自动推断；lower-right bias 的 prototype 稳定性/后端支持须按实际运行版本和设备重新核验。以上文档语义不替代本地 PyTorch 2.15、CUDA 或融合后端运行验证。
+
+## PyTorch 2.15 页面复查
+
+复查日期：2026-11-16。
+
+- **来源与阅读位置**：[Embedding](https://docs.pytorch.org/docs/2.15/generated/torch.nn.Embedding.html)、[SDPA](https://docs.pytorch.org/docs/2.15/generated/torch.nn.functional.scaled_dot_product_attention.html)、[MultiheadAttention](https://docs.pytorch.org/docs/2.15/generated/torch.nn.MultiheadAttention.html)、[LayerNorm](https://docs.pytorch.org/docs/2.15/generated/torch.nn.LayerNorm.html)、[Dropout](https://docs.pytorch.org/docs/2.15/generated/torch.nn.Dropout.html) 页面中的参数说明、shape、布尔 mask、归一化统计量及训练/评估行为。
+- **来源支持的事实**：本次复查与前述 2.15 记录一致：`padding_idx` 行不从 lookup 累积常规梯度；SDPA 布尔 mask 的 True 表示参与计算，`dropout_p` 由调用方显式控制；MHA 的布尔 mask True 表示屏蔽/忽略；LayerNorm 沿 `normalized_shape` 的末尾维计算并使用 `correction=0` 的方差；Dropout 在 eval 下不置零输入。SDPA 非方形 `is_causal=True` 的 mask 为左上对齐；对 KV Cache 中带绝对位置偏移的 query，是否可见应按目标 query/key 位置关系核对，API 不会从 cache 自动推断该偏移。
+- **证据等级与边界**：source-backed（PyTorch 2.15 官方文档，页面于本日直接打开）。复查只确认文档接口语义，没有运行本地代码，也没有测量具体设备的 backend、精度或性能。

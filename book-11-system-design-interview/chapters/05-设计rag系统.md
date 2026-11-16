@@ -6,7 +6,7 @@
 
 因此，生产 RAG 不是“embedding 加向量库加 prompt”。本章沿着企业知识系统“澄明”的一次建设展开。澄明为多个部门提供制度、产品文档、工单、代码和实时业务资料的问答。我们先定义什么叫有证据的回答，再从离线索引链路和在线问答链路逐层设计，最后用一次权限泄漏和更新延迟故障复盘完整系统。
 
-本章聚焦系统边界、数据流、权限、新鲜度、证据和工程取舍。书系分工上，[第二册第七章](../../book-02-advanced-100/chapters/07-长上下文rag与agent.md)讲检索与长上下文机制，[第三册第七章](../../book-03-practical-handbook/chapters/07-rag项目实战.md)讲项目实现；数据版本和治理见[第九册第十一章](../../book-09-data-engineering/chapters/11-dataset-versioning与governance.md)及[第十二章](../../book-09-data-engineering/chapters/12-数据工程综合设计与故障诊断.md)。评估方法见[第七册第五章](../../book-07-evaluation-experiments/chapters/05-污染检测与可信评估.md)、[第八章](../../book-07-evaluation-experiments/chapters/08-safety与robustness-eval.md)和[第十二章](../../book-07-evaluation-experiments/chapters/12-评估体系综合设计与工程落地.md)；提示注入威胁与防御见[第八册第五章](../../book-08-ai-safety-alignment/chapters/05-jailbreak与prompt-injection.md)。
+本章聚焦系统边界、数据流、权限、新鲜度、证据和工程取舍。书系分工上，[第二册第七章](../../book-02-advanced-100/chapters/07-长上下文rag与agent.md)讲检索与长上下文机制，第三册分篇讲项目实现：[文档与切分](../../book-03-practical-handbook/chapters/07-rag项目实战-1-文档与切分.md)、[检索与上下文](../../book-03-practical-handbook/chapters/07-rag项目实战-2-检索与上下文.md)、[引用与证据](../../book-03-practical-handbook/chapters/07-rag项目实战-4-引用与证据.md)和[失败归因与报告](../../book-03-practical-handbook/chapters/07-rag项目实战-6-失败归因与报告.md)；数据版本和治理见[第九册第十一章](../../book-09-data-engineering/chapters/11-dataset-versioning与governance.md)及[第十二章](../../book-09-data-engineering/chapters/12-数据工程综合设计与故障诊断.md)。评估方法见[第七册第五章](../../book-07-evaluation-experiments/chapters/05-污染检测与可信评估.md)、[第八章](../../book-07-evaluation-experiments/chapters/08-safety与robustness-eval.md)和[第十二章](../../book-07-evaluation-experiments/chapters/12-评估体系综合设计与工程落地.md)；提示注入威胁与防御见[第八册第五章](../../book-08-ai-safety-alignment/chapters/05-jailbreak与prompt-injection.md)。
 
 ## 5.0 先建立正确直觉：RAG 是证据链，不是外挂记忆
 

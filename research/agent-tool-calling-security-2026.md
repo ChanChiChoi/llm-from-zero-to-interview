@@ -33,8 +33,8 @@
 ## 高风险动作授权与日志
 
 - **OWASP Transaction Authorization Cheat Sheet**：[官方指南](https://cheatsheetseries.owasp.org/cheatsheets/Transaction_Authorization_Cheat_Sheet.html)，访问日期 2026-10-30；阅读交易数据展示、服务端强制、授权状态转换、一次性使用、有效期和执行前检查部分。
-- **来源支持的事实**：指南要求用户能识别并确认关键交易数据，授权在服务端实施，交易数据在授权期间不得被篡改，授权凭据应限时、按操作唯一且执行前在共享状态中原子检查/消费。
-- **证据等级与边界**：source-backed（OWASP 开发安全指南）。将这些要求组合成 Agent 的服务端 `approval_id` 与动作摘要记录，是本项目的工程化设计推论，不是 OWASP 规定的专用 Agent 协议。
+- **来源支持的事实**：指南要求用户能识别并确认关键交易数据，授权在服务端实施，交易数据在授权期间不得被篡改，授权流程按允许的状态顺序推进，并在执行前做最终授权检查；授权凭据应限时、按操作唯一。
+- **证据等级与边界**：source-backed（OWASP 开发安全指南）。把这些要求组合成 Agent 的服务端 `approval_id` 与动作摘要记录，是本项目的工程化设计推论。共享状态中的原子检查/消费可用于处理并发与重放，但不是该指南明确规定的 Agent 协议或专门原子操作要求。
 
 - **OWASP Logging Cheat Sheet**：[官方指南](https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html)，访问日期 2026-10-30；阅读需要移除、遮蔽、散列或加密的日志字段，以及事件关联和访问控制部分。
 - **来源支持的事实**：日志字段应由采集目的决定；访问令牌、密码、密钥、敏感个人数据、支付信息和高等级数据通常不应直接写入日志，需要删除、遮蔽、散列或加密，并限制日志访问。
@@ -126,3 +126,20 @@
 - **实际阅读范围**：OWASP 当前 LLM01 Prompt Injection、LLM06 Excessive Agency 列表；Anthropic 对网页、邮件、上传文件等 tool results 的 untrusted-content 提醒；MCP 安全页面目录中的 confused deputy、scope minimization、token passthrough、SSRF 和 state-handle hijacking 风险。
 - **来源支持的事实**：OWASP 2025 Top 10 将 Prompt Injection 与 Excessive Agency 列为风险类别；Anthropic 要求将不受控制的工具结果作为不可信内容处理；MCP 独立列出其实现特定的授权、委托、scope 和资源访问安全风险与缓解指导。
 - **证据等级与边界**：source-backed（OWASP 风险分类和官方协议/供应商安全文档）。这些资料用于提出威胁模型与控制点，不是目标 Agent 的攻击成功率或生产风险率测量；具体缓解仍需在目标工具、权限和执行环境中测试。
+
+## 2026-11-16 工具 schema、工具往返与 trace grading 当前页面复核
+
+- **OpenAI Function Calling**：[官方文档](https://developers.openai.com/api/docs/guides/function-calling)，访问日期 2026-11-16；复核 strict mode、Responses/Chat Completions 默认行为和并行函数调用部分。
+- **来源支持的事实**：strict mode 要求 parameters 中的对象设置 additionalProperties=false，properties 中的字段都列为 required；Responses 请求会在可兼容时尝试规范化到 strict mode，不兼容时可能回退到 best-effort，并在响应中显示 strict=false；Chat Completions 默认仍为 non-strict。文档还说明可通过 parallel_tool_calls=false 将一轮限制为零个或一个函数调用。
+- **适用边界**：这些默认值和字段约束绑定 OpenAI 当前 API surface；schema 符合要求不等于调用正确、业务合法或已获授权。接口允许多调用也不代表工具之间没有依赖，执行器仍要负责预算、并发和先后顺序。
+
+- **Anthropic Handle tool calls**：[官方文档](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls)，访问日期 2026-11-16；复核 client tool 的 tool_use/tool_result 往返、错误标记和 server tool 差异。
+- **来源支持的事实**：客户端工具的 tool_use 块包含 id、name 和 input；应用执行后通过 tool_use_id 关联 tool_result，可使用 is_error 表示工具错误。文档对结果块位置有顺序约束；服务端工具具有不同的执行责任和回传规则。
+- **适用边界**：此结构属于 Anthropic Messages API 与相应工具类型，不能当作跨供应商的统一 wire format；ID 用于请求和结果关联，不授予业务权限。
+
+- **OpenAI Evaluate agent workflows**：[官方文档](https://developers.openai.com/api/docs/guides/agent-evals)，访问日期 2026-11-16；复核 trace grading 的说明。
+- **来源支持的事实**：文档将单次 workflow trace 描述为模型调用、工具调用、guardrails 和 handoffs 的端到端记录，并建议用结构化 grader 查找工作流级失败和回归。
+- **适用边界**：产品 trace 与 grader 不自动提供脱敏、访问控制或正确性保证；评分仍需结合任务定义、人工复核和本地固定样例。
+- **ReAct 原论文**：[arXiv 页面](https://arxiv.org/abs/2210.03629)，2026-11-16 复核当前页面；页面指向 v3 camera-ready 版本，摘要描述模型交错生成任务相关轨迹和动作，并从外部知识库或环境取得观察。该论文支持方法背景，不规定现代工具 API、生产轨迹 schema 或内部推理披露策略。
+- **OWASP Transaction Authorization 与 Logging Cheat Sheets**：[交易授权](https://cheatsheetseries.owasp.org/cheatsheets/Transaction_Authorization_Cheat_Sheet.html)和[日志指南](https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html)，2026-11-16 复核。交易授权指南支持确认关键交易数据、服务端执行授权、限制有效期、按操作唯一并在执行前检查；原子检查/消费和 Agent approval record 属工程推导。日志指南建议对访问令牌、密钥、敏感个人数据等移除、遮蔽、散列或加密。
+- **OpenTelemetry GenAI spans**：[当前语义约定](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-spans.md)，main 分支动态页面，2026-11-16 复核。页面建议默认不采集完整系统指令、输入和输出，可由明确配置选择采集；约定本身不落实脱敏、访问控制或留存策略。

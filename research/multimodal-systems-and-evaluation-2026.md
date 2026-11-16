@@ -89,6 +89,14 @@
 
 以上 benchmark 的数据、输入输出和分数口径彼此不同；不可把它们的准确率或任务结果拼成一张跨 benchmark 排名表。摘要阅读只支持候选任务和协议概览；若正文要引用具体成绩、模型排序或细节，需先阅读相应全文并固定版本。
 
+## Transformers 多模态接口与向量过滤语义（2026-11-16）
+
+- **Transformers 来源**：[Qwen2.5-VL 当前模型文档](https://huggingface.co/docs/transformers/model_doc/qwen2_5_vl)、[多模态 chat template 当前文档](https://huggingface.co/docs/transformers/chat_templating_multimodal)、[图像到文本任务指南](https://huggingface.co/docs/transformers/tasks/image_text_to_text)；另核对固定版本的 [Transformers v5.21.0 多模态模板文档](https://huggingface.co/docs/transformers/v5.21.0/chat_templating_multimodal) 与 [Qwen2.5-VL 模型文档](https://huggingface.co/docs/transformers/v5.21.0/en/model_doc/qwen2_5_vl)。访问日期：2026-11-16。
+- **来源支持**：当前 Qwen2.5-VL 文档仍列出 `Qwen2_5_VLForConditionalGeneration`；多模态 `Processor.apply_chat_template()` 可格式化图文消息并准备 tokenized model inputs。模板指南示例包含 `input_ids`、`attention_mask`、`pixel_values`、`image_grid_thw`，模型文档建议用 `min_pixels` / `max_pixels` 控制图像分辨率。通用 `image-text-to-text` 任务指南也展示 `AutoModelForImageTextToText`，因此类名应绑定具体 checkpoint 和所用接口示例，不能只替换模型名就默认兼容。
+- **证据等级与边界**：source-backed（访问时的 Transformers 动态文档和固定版本文档）。文档能支持公开 API 与输入/输出契约，不证明特定环境依赖已联调、模型能装入目标设备、图片问答质量或服务性能；复现时应固定 Transformers、模型和 processor revision、图像及预处理设置。
+- **向量检索过滤来源**：[Azure AI Search 向量查询过滤文档](https://learn.microsoft.com/en-us/azure/search/vector-search-filters)、[Security Filter Pattern](https://learn.microsoft.com/en-us/azure/search/search-security-trimming-for-azure-search)，访问日期：2026-11-16。当前向量查询文档区分 `preFilter`、`postFilter` 和预览态 `strictPostFilter`，并说明不同执行时机对 filtered recall、假阴性、延迟和吞吐的影响；过滤字段与请求方 principal 需要由应用提供。security-filter 示例是过滤模式，不提供身份认证或授权本身。
+- **证据等级与边界**：source-backed（厂商当前产品文档）。过滤模式名称和默认值属于具体检索服务及索引版本；不代表其他向量库的执行语义。安全边界仍须由可信认证上下文、查询过滤、返回候选复核和应用授权共同落实，不能把全局 top-k 后再删掉不可见结果当作召回等价，也不能向生成模型暴露未获授权的候选。
+
 ## 教学公式边界
 
 Patch 与 tubelet 公式给出在固定 patch 大小、边缘补齐和固定 tubelet 约定下的原始空间/时空块数。真实模型可以裁剪、多尺度切块、合并或 resample；原始块数不等于 tokenizer token 数、真实模型计算量或服务成本。该教学关系不构成对某一模型接口的规格声明。

@@ -1,6 +1,6 @@
 # LLM Judge 协议、重复性与判别力研究
 
-研究日期：2026-11-03
+研究日期：2026-11-03；补充核验：2026-11-16
 
 ## Pairwise 与逐条评分对干扰的敏感性
 
@@ -14,6 +14,12 @@
 - **支持事实：** RuVerBench 包含 2,458 条输出—单条 rubric 判断，分属 Deep Research（1,615）和 Agentic Coding（843）；每条标签表示输出是否满足该条 rubric。专业标注团队与独立内部团队双重标注，总体一致率 90.4%，Cohen κ 为 0.808，分歧再基于相应输出和 rubric 仲裁。Deep Research 输出平均约 7.1K tokens，Agentic Coding 轨迹平均约 49.4K tokens。18 个 judge 的结果在两个领域和类别间不同；Deep Research 的最佳 Avg BAcc 为 94.7，Agentic Coding 的最佳为 89.4。作者将典型错误归纳为把片段证据当作完整满足，以及向 rubric 添加未要求的条件。多 rubric batching 和重复多数投票的影响依赖领域与模型。
 - **证据边界：** 数据仅覆盖两个具代表性的 Agent 领域和其 rubric 来源。类别结果、最佳模型分数和 prompt/batching 效果绑定论文模型快照、分组、标签和实验子集；不代表自然用户任务或其他 Agent 系统的总体 judge 失误率。
 
+## AgentJudgeBench：任务难度与 judge 对齐
+
+- **来源与版本：** AgentJudgeBench，EMNLP 2026 主会论文。[ACL Anthology 论文页](https://aclanthology.org/2026.emnlp-main.659/)。2026-11-16 阅读论文摘要与实验范围说明，未复现实验。
+- **支持事实：** 基准含 3,808 个实例，覆盖六类 workflow DAG 拓扑和三个难度层级；论文比较五个任务生成器和六个 judge。作者报告 judge 与参考评判的一致程度随任务难度变化；结构化 rubric 在部分设置中最多提高约 6.5 个百分点，但收益没有跨全部任务/裁判稳定复现。论文也报告显式给出 gold 不会在所有 judge 设置中提升对齐。
+- **证据边界：** 这些观察绑定该基准的 workflow、难度标注、生成器、judge 与提示协议；最高 rubric 增益是局部条件结果，不是普遍提升。摘要与论文结果不构成对任意真实 Agent 任务的 judge 效度证明。
+
 ## 去偏提示、平局与测量分辨率
 
 - **来源：** Zhao, Wang, and Chen, *Debiasing as a Measurement Intervention: Calibrated Ties and Resolution Loss in LLM-as-a-Judge Evaluation*, Findings of EMNLP 2026。阅读论文摘要、问题设定、指标、结果与局限。https://aclanthology.org/2026.findings-emnlp.1880/
@@ -25,6 +31,12 @@
 - **来源：** Yagubyan, *The Coin Flip Judge? Reliability and Bias in LLM-as-a-Judge Evaluation*, Proceedings of GroundLM 2026，2026-10-29。阅读 ACL Anthology PDF 的方法、结果、建议与威胁有效性部分。https://aclanthology.org/2026.groundlm-1.64/
 - **支持事实：** 主实验在 29 个刻意选为近似质量匹配的问题上，对六个 judge 重复进行 pairwise 和 pointwise 评审；pairwise 标签的平均重复翻转率约 11%–14%。双向换序实验覆盖五个 judge，共 8,700 次判断；按相同展示位置胜出的双向 order-driven 比例约 21.1%–46.0%。例如 GPT-5.4-mini 的首位胜出比例为 33.5%，但按同一展示位置选择的比例为 33.9%；只报告首位偏好方向会掩盖其第二位偏好。论文从该样本内的可靠性曲线估计，约 11 次调用平均可复现 50 次调用的多数标签达到 95%，困难项可能需要更多调用。
 - **证据边界：** 重复性不等于对人工 gold 正确；研究样本刻意选择近似质量回答，翻转率不能外推到明显胜负的样本。问题数为 29，跨类别样本数少，类别差异仅属探索性。11 次调用是该实验内估计，不是通用采样规则；跨代结果不足以证明模型版本等价或所有 prompt 都无法改进。
+
+## 重复稳定性与准确性的区分
+
+- **来源与版本：** *All Verdicts Are Not Equal: Rethinking LLM Judge Reliability*, AACL 2026 长文论文。[ACL Anthology 论文页](https://aclanthology.org/2026.aacl-long.207/)。2026-11-16 阅读摘要及论文报告的研究范围，未复现实验。
+- **支持事实：** 论文在六个模型和四个 benchmark 上研究裁决准确性、重复稳定性和展示顺序影响。其报告指出，temperature 设为 0 仍可能出现重复判断变化；一致性高也不必然意味着准确，在论文某个设置中，完全一致的裁判输出仍仅有 51% 与参考标签一致。
+- **证据边界：** 51% 是论文中特定条件下的观测，不是通用 judge 准确率。研究任务、模型、prompt 和标注协议有限；该结果支持分别校准 accuracy、repeatability 和 order sensitivity，不证明其他系统达到相同错误率。
 
 ## Pairwise judge 指标与比较难度
 

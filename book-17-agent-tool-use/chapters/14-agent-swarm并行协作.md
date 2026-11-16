@@ -6,7 +6,7 @@
 
 但把同一个 prompt 复制十份，不叫协作。多个 Agent 之间还需要通信、共享证据、隔离可变状态、处理冲突、管理预算，并决定谁有权改变外部世界。没有这些机制，系统只是并行生成多段文本，最后仍然要靠一个模型猜哪段更可信。
 
-本章把这种系统称为 Agent Swarm。这里的 swarm 不是一个固定产品名，而是一种协作架构：多个具有明确角色和权限的策略节点，围绕任务图生产 artifact，由协调器或固定 workflow 合并，并由独立 verifier 判断是否可以产生外部副作用。
+本章把这种系统称为 Agent Swarm。这里先把 swarm 作为协作架构的通用称呼，不特指单一产品：多个具有明确角色和权限的策略节点，围绕任务图生产 artifact，由协调器或固定 workflow 合并，并由独立 verifier 判断是否可以产生外部副作用。厂商也会把 Agent Swarm 用作具体产品描述；§14.25 的 Kimi K2.6 案例按其官方材料单独引用，不把发布方规模数字当作通用定义。
 
 因此，评估协作系统时要区分“生成了多少份结果”和“增加了多少独立证据”。如果所有 worker 使用相同模型、相同检索结果和相同错误假设，十票赞成也可能只是一次错误被复制了十遍。并行只有在任务依赖、观察来源、权限边界和验收责任都被明确时，才可能带来可解释的收益。
 
@@ -44,6 +44,8 @@
 
 Swarm 不一定比固定 workflow 更自主，也不一定比单 Agent 更可靠。一个合同任务如果步骤已经稳定，固定 workflow 可能更容易审计；一个需要从多个来源收集证据的研究任务，局部并行可能更有效；一个会直接修改生产对象的任务，则应该把并行限制在只读分析阶段。
 
+关于何时值得协作、怎样建立单 Agent baseline 和如何判断净收益，见[第九章《Multi-Agent》](09-multi-agent.md)；本章继续讲任务图、artifact 和并行运行时的实现。
+
 ## 14.3 用任务图表达依赖
 
 把 Agent 看成节点，把消息、artifact 和依赖看成边，可以得到协作图：
@@ -57,11 +59,15 @@ V=\{\mathrm{planner},\mathrm{researcher},\mathrm{builder},\mathrm{tester},\mathr
 
 例如，合同助手可以有以下依赖：
 
-~~~~text
-contract_read ─┐
-policy_read   ─┼─> rule_check ─> ticket_prepare ─> external_verify
-permission    ─┘
-~~~~
+```mermaid
+flowchart LR
+    contract["合同读取"] --> rule["规则检查"]
+    policy["政策读取"] --> rule
+    permission["权限检查"] --> rule
+    rule -->|证据与权限通过| ticket["待审核工单准备"]
+    ticket -->|受控提交| executor["外部执行器"]
+    executor -->|状态回读| verifier["外部 verifier"]
+```
 
 contract_read、policy_read 和 permission 可以在满足权限条件时并行；rule_check 必须等到三者的结果都达到所需状态；ticket_prepare 只能接收已验证的合同和政策版本；external_verify 必须重新读取工单，而不能只相信 ticket_prepare 的返回文本。
 
@@ -198,6 +204,8 @@ Q(c)=w_sS(c)+w_rR(c)+w_vV(c)-w_uU(c)
 
 S 表示来源质量，R 表示与任务的相关性，V 表示是否被可复核测试验证，U 表示不确定性；各项应在约定的有限区间内，w_s、w_r、w_v、w_u 是非负权重。若某个候选没有来源版本、验证结果或不确定性记录，Q(c) 就不应被伪造为一个完整数值，可以把它标为 unknown 并优先补证据。这个分数只能帮助安排复核顺序，不能替代 verifier。
 
+把四个分项和权重都暂定在 0 到 1 的教学尺度上，令候选 A 的 `(S,R,V,U)=(0.8,0.9,0.75,0.1)`，权重为 `(w_s,w_r,w_v,w_u)=(0.35,0.25,0.35,0.05)`，则 `Q(A)=0.35×0.8+0.25×0.9+0.35×0.75-0.05×0.1=0.7625`。若候选 B 的来源和相关性更高、但验证更弱且不确定性更高，例如 `(0.9,0.95,0.2,0.6)`，同样算得 `Q(B)=0.5925`。这些是假设输入，只说明排序分数如何工作；不代表真实资料的校准评分，硬性安全条件仍不能被分数抵消。
+
 独立支持也需要单独定义。若每个证据记录都带有经过审计的 `source_id`，可以计算候选使用了多少个来源组：
 
 ~~~math
@@ -271,6 +279,7 @@ cancelled 不等于 rolled_back。一个 worker 可以被取消，但它已经�
 \mathrm{return\ existing\ result}, & k\in K_{\mathrm{committed}}\land H_k=H(a);\\
 \mathrm{reject\ key\ conflict}, & k\in K_{\mathrm{committed}}\land H_k\ne H(a);\\
 \mathrm{hold\ for\ review}, & k\notin K_{\mathrm{committed}}\land \mathrm{state}(a)=\mathrm{unknown};\\
+\mathrm{reject\ invalid\ action}, & k\notin K_{\mathrm{committed}}\land \mathrm{state}(a)\ne\mathrm{unknown}\land A(a)=0;\\
 \mathrm{execute\ once}, & k\notin K_{\mathrm{committed}}\land \mathrm{state}(a)\ne\mathrm{unknown}\land A(a)=1.
 \end{cases}
 ~~~
@@ -278,6 +287,8 @@ cancelled 不等于 rolled_back。一个 worker 可以被取消，但它已经�
 这个表达描述的是业务层的幂等语义，不意味着底层网络天然提供 exactly-once。系统仍要处理请求到达但响应丢失、executor 重启、数据库提交和审计写入不一致等情况。
 
 这里的 K_committed 是已经被持久化记录的幂等键集合，H_k 是记录在该键上的规范化 action hash，H(a) 是当前请求的 hash；A(a)=1 表示 action a 的 schema、权限、版本、前置条件和预算都已通过独立检查；`state(a)` 是外部状态查询的结果。相同幂等键对应不同动作时，不能返回旧结果，否则会把客户端错误隐藏成成功。若 k 不存在但 state(a)=unknown，不能仅因为“尚未看到提交记录”就执行写入。提交前应检查候选 artifact 的基线、证据、测试、冲突和当前权限；提交后要查询外部对象并记录 verified_state。多个 worker 可以并行提出候选，但不应并行对同一个生产资源执行写操作。
+
+例如，第一次提交返回超时后，若状态查询仍是 `unknown`，相同幂等键进入 hold；若查到同键同 hash 已提交，返回已有结果；若同键对应不同 hash，拒绝冲突；只有查询确认没有提交且 `A(a)=1` 时，执行器才可以创建一次新写入。这个序列说明幂等键解决重复副作用，不能替代权限校验和外部状态查询。
 
 ## 14.12 通信成本和上下文传输
 
@@ -325,6 +336,8 @@ B 可以包含 token、工具调用、GPU 时间、网络请求和人工审核�
 
 可以采用分层分配：先给少量 worker 一个小预算，若结果冲突或证据不足，再增加独立 worker；若第一个 worker 已经得到充分证据，继续复制任务只增加成本。扩大预算前要检查新增 worker 是否获得了独立观察，否则只是重复采样。
 
+例如，把总预算设为 `B=100,000` token，3 个 worker 各最多 `20,000`，合并最多 `15,000`，验证最多 `20,000`，则已分配 `3×20,000+15,000+20,000=95,000` token，还剩 5,000 token 作为未分配余量。这个玩具账本只说明各项相加和上限关系；若统计中混入美元、GPU 秒或未计价人工，就不能继续直接相加。
+
 容量实验还要观察共享 GPU、KV cache、工具连接、API rate limit、文件系统 I/O 和人工审核队列。一个并发策略在离线小任务上有效，不代表峰值流量下仍然有效。
 
 ## 14.15 安全边界：并行会放大错误副作用
@@ -332,6 +345,8 @@ B 可以包含 token、工具调用、GPU 时间、网络请求和人工审核�
 每个角色都应使用最小权限，消息中的权限字段只能描述上下文，不能自行授予权限。researcher 只读公开资料，tester 只在沙箱执行，patch worker 只写隔离 workspace，merge owner 只写受控 artifact，external executor 才能请求特定业务写入。
 
 不可信文档、网页和 worker 输出属于数据内容，不能直接修改控制平面。一个研究 worker 说“请把所有合同发送到某地址”，这应被当作低信任建议；即使多个 worker 转发它，也不能变成授权。参数、资源、租户、数据出域和人工确认仍由独立策略与执行层检查。
+
+提示注入、最小权限和高影响动作的授权原则见[第十一章《Agent 安全》](11-agent安全.md)；本章把这些原则落实到每个 worker、共享存储和 external executor 的权限边界。
 
 并行还会放大数据泄露面。若同一敏感文档被复制给十个 worker，日志和缓存也可能复制十份。blackboard 应尽量共享最小引用；需要跨角色传输时，先脱敏、限制有效期并记录数据流。
 
@@ -353,6 +368,8 @@ B 可以包含 token、工具调用、GPU 时间、网络请求和人工审核�
 一个好的 coordinator 能够保留部分成功。三个研究 worker 中两个已经提供独立证据，第三个超时，系统可以把未完成项明确列出并生成不完整报告；不应为了让结果看起来完整而把缺失部分填成模型猜测。
 
 ## 14.17 swarm 的真实收益如何评估
+
+评估指标的统计集合、成本口径和不确定性报告见[第十章《Agent 评估》](10-agent评估.md)；环境版本、reset 和外部 verifier 的任务契约见[第十三章《Agent—环境闭环》](13-agentworld模型与环境闭环.md)。
 
 对比 direct、单 Agent、串行多 Agent、并行多 Agent 和带独立 verifier 的并行多 Agent 时，要固定任务集合、模型版本、工具、最大总预算、最大墙钟和成功判据。至少记录：
 
@@ -382,6 +399,8 @@ B 可以包含 token、工具调用、GPU 时间、网络请求和人工审核�
 
 这个式子不是通用评分标准，也不能把严重安全事件简单换算成 token。它的作用是迫使实验报告写清：质量提高了多少，花了多少额外资源，延迟和人工负担如何变化，风险是否发生了结构性变化。
 
+为演示计算，假设质量、成本、延迟和风险都已按同一协议归一化，`(ΔQ,ΔC,ΔL,ΔR)=(0.08,0.4,0.2,0.1)`，权重为 `(λ_c,λ_l,λ_r)=(0.05,0.10,0.30)`，则 `NetLift=0.08-0.05×0.4-0.10×0.2-0.30×0.1=0.01`。这是正的教学净收益，但只要并行触发禁止的外部副作用或其他硬风险门槛，系统仍不能据此获准上线。
+
 ## 14.18 什么时候不该使用 Swarm
 
 以下情况通常不适合勉强并行：
@@ -410,9 +429,11 @@ B 可以包含 token、工具调用、GPU 时间、网络请求和人工审核�
 
 完整对话可以保留在各自 trace，但共享索引只应保存协作所需的最小字段。这样既能做失败归因，也能减少跨角色数据复制。
 
-## 14.20 最小可运行的 Swarm 协作审计 demo
+## 14.20 Swarm 协作审计 demo
 
 下面的 demo 使用标准库的线程池模拟三个独立读取 worker。它不调用外部模型，也不声称实现了生产级调度；它只演示三个设计点：worker 返回结构化 artifact，合并器检查证据是否来自不同来源，候选结论即使得到一致支持，也不能直接获得外部提交权限。
+
+代码状态：静态审阅，未运行（2026-11-16）；仅使用 Python 标准库。下方输出按代码分支手工推演，不是运行日志；示例和边界断言均未执行。
 
 ~~~~python
 from concurrent.futures import ThreadPoolExecutor
@@ -631,7 +652,7 @@ for key in (
     print(f"{key}={merged[key]}")
 ~~~~
 
-运行结果应为：
+按代码逻辑静态推演的输出为：
 
 ~~~~text
 artifact_count=3
@@ -642,6 +663,8 @@ commit_allowed=False
 ~~~~
 
 三个 worker 提供了三组经标记且共同上游不同的 source_group，因此在这个教学构造中，合并器可以把结果标为 agree_independent；这仍然不是最终 verified。worker 只发布 candidate artifact，外部 verifier 没有运行，commit_allowed 必须为 False。真实系统还要检查来源是否真正独立、版本是否一致、测试是否反事实有效，以及提交动作的权限和幂等性。
+
+这个 demo 的 gate 只会关闭：合并器不执行外部 verifier，也没有把任何结果状态转换为 `verified` 的路径，因此 `commit_allowed` 在所有输入下都为 False。它演示的是“证据一致不等于获得提交权”，不是一套可提交实现；生产系统需把独立 verifier 的结果和 artifact revision 绑定后，再设计显式授权转换。示例里的来源组/上游组也是预先填写的教学标签，并不自动证明真实证据独立。
 
 边界测试进一步说明，来源数量不够、共享上游、重复任务和空集合都不能被误报为独立支持：
 
@@ -725,6 +748,8 @@ else:
 - [AI Safety via Debate](https://arxiv.org/abs/1805.00899)：关于通过对抗式辩论辅助判断的研究入口；论文中的实验设定不能直接证明多个同质 worker 就拥有独立证据。
 - [AgentBench](https://arxiv.org/abs/2308.03688)：多环境 Agent 评估论文入口，可用于任务环境和工具交互的评估背景；其结果依赖具体环境、权限、工具和 harness。
 - [AutoGen 源码仓库](https://github.com/microsoft/autogen)：公开实现入口，适合核对框架演进和示例；仓库内容不等于目标系统的安全审计结论。
+- [Kimi K2.6 官方博客](https://www.kimi.com/en/blog/kimi-k2-6)、[模型卡](https://huggingface.co/moonshotai/Kimi-K2.6)与[固定 config](https://huggingface.co/moonshotai/Kimi-K2.6/resolve/7eb5002f6aadc958aed6a9177b7ed26bb94011bb/config.json)：区分发布方 Swarm 规模/长时程案例、模型内部 MoE 字段和 `preserve_thinking` 接口；博客数据是厂商展示，不是独立并行对照。
+- [xAI Grok 4.20 模型文档](https://docs.x.ai/developers/models/grok-4.20) 与 [Multi-agent 文档](https://docs.x.ai/developers/model-capabilities/text/multi-agent.md)：当前 model ID、beta、leader 输出、4/16 Agent 数和 effort 映射的官方 API/runtime 入口（2026-11-16 核阅）；文档不证明一般性能或生产 SLO。
 
 本章区分四种证据：经典并行模型的定义、官方框架的接口语义、论文中的受控实验和本地系统的实测结果。官方文档能说明 API 怎么工作，不能证明模型的内部推理；论文能支持特定实验结论，不能自动支持生产场景；教学 demo 只展示机制，不能替代容量、安全和故障注入测试。
 
@@ -736,9 +761,13 @@ Agent Swarm 的核心不是 worker 数量，而是协作协议。任务图决定
 
 当所有重要结论都能回到带版本的 artifact，当所有外部写入都经过受控执行和状态回读，swarm 才从“同时生成很多答案”变成了可审计的并行系统。
 
+接下来的 Kimi K2.6 与 Grok 4.20 是两个特定厂商的运行时案例，用来观察模型内部路由与外部 Agent 编排、leader 汇总和状态回放的区别；其中的数量与接口字段只适用于所引版本资料，不能替代前文的通用设计原则。
+
 ## 14.25 Kimi K2.6：Agent Swarm 数量不是模型内部结构
 
-Kimi K2.6 官方博客把 Agent Swarm 描述为最多 300 个 sub-agents、4,000 个 coordinated steps，并给出数小时到十几小时的 coding 案例。阅读这类数字时，必须先区分：384 experts/top-8 是模型内部 MoE 路由；300 sub-agents 是 harness 创建的外部运行实例。后者需要单独的任务图、上下文、权限、预算、workspace、取消和 artifact verifier。
+Moonshot 官方博客把 Kimi K2.6 的 Agent Swarm 描述为最多 300 个 sub-agents、4,000 个 coordinated steps；这是发布方对编排能力的描述，不是独立 benchmark 结果。[官方博客](https://www.kimi.com/en/blog/kimi-k2-6)还展示了两个长时程编码案例：Mac 上优化 Qwen3.5-0.8B 的案例报告 4,000 多次 tool call 和超过 12 小时；`exchange-core` 案例报告运行 13 小时和超过 1,000 次 tool call。文章没有说明这些案例都使用了 300 个 Agent，也未提供可比较的受控吞吐实验，因此 tool call 数、运行时长和 swarm 并发规模要分开记。
+
+另一个数量属于模型内部结构：[K2.6 固定 config](https://huggingface.co/moonshotai/Kimi-K2.6/resolve/7eb5002f6aadc958aed6a9177b7ed26bb94011bb/config.json)列出 384 个 routed experts、每 token 选择 8 个 expert 和 1 个 shared expert。按公开材料的层级区分，MoE expert 是模型中的路由单元，sub-agent 是 harness 组织的外部执行实例；二者不能互换。外部 worker 仍需自己的任务图、上下文、权限、预算、workspace、取消和 artifact verifier。
 
 一个可审计的 K2.6 swarm trace 至少记录：
 
@@ -748,11 +777,11 @@ model/revision -> subtask DAG -> worker context/permission
 -> artifact revision -> coordinator merge/retry/cancel
 ```
 
-K2.6 的 `preserve_thinking`/`reasoning_content` 和多步 tool call 还要求把思考状态、工具 schema、工具结果和权限决定一起回放。模型提出调用不等于宿主执行；Agent Swarm 案例中的成功率、工具次数和持续时间必须绑定 harness、环境和验收条件。完整模型规格、KVV 六类部署验收和 DataCurve 精确行缺失边界见第二十一册第 90 章；不能迁移 K2.7 Code/K3 的 Agent 结果。
+K2.6 [模型卡](https://huggingface.co/moonshotai/Kimi-K2.6)说明 `preserve_thinking` 可把 `reasoning_content` 保留到后续轮次，且默认关闭；这是该模型接口的对话状态合同。Swarm 系统还应另行回放工具 schema、工具结果和权限决定，因为模型提出调用不等于宿主执行。K2.6 相关参数、部署验收与评测边界见[第二十一册第 90 章](../../book-21-transformer-architecture-evolution/chapters/90-kimi-k2.6-native-multimodal-agent-swarm与推理验收.md)；不能迁移 K2.7 Code/K3 的 Agent 结果。
 
 ## 14.26 Grok 4.20：研究型 Multi-agent 的运行时账本
 
-xAI 将 `grok-4.20-multi-agent` 定义为 Realtime Multi-agent Research beta。一次请求不是简单复制 16 份 prompt，而是由多个专门 Agent 搜索、分析、交叉核验，再由 leader agent 综合。可观察的系统图应写成：
+xAI 的[官方文档](https://docs.x.ai/developers/model-capabilities/text/multi-agent.md)将 `grok-4.20-multi-agent` 定义为 Realtime Multi-agent Research beta。一次请求不是简单复制 16 份 prompt，而是由多个专门 Agent 搜索、分析、交叉核验，再由 leader agent 综合。可观察的系统图应写成：
 
 ```text
 user goal
@@ -764,8 +793,8 @@ user goal
   -> verifier / final response
 ```
 
-这里的 4/16 是 harness/runtime 的协作规模，不是 MoE experts；`reasoning.effort=low/medium` 与 `high/xhigh` 在该服务上是 agent-count 映射，而不能解释成普通模型内部推理深度。生产 trace 至少要保存 sub-agent role、prompt/revision、工具调用、来源、重试、汇总依据和 leader 的最终引用。
+文档列出 4/16 两种运行规模，并把 `reasoning.effort=low/medium` 与 `high/xhigh` 映射到相应 Agent 数量；这是该 beta 服务的编排配置，不是普通模型内部推理深度。[Grok 4.20 模型页](https://docs.x.ai/developers/models/grok-4.20)和 Multi-agent 文档均为动态官方资料（2026-11-16 核阅）。生产 trace 至少要保存 sub-agent role、prompt/revision、工具调用、来源、重试、汇总依据和 leader 的最终引用。
 
-xAI 默认只把工具调用和 leader 最终响应返回给调用方；子 Agent 的中间状态可以用 `use_encrypted_content` 作为 opaque encrypted state 回放。它能帮助多轮延续，但不意味着客户端可以读取、编辑或重排隐藏 reasoning。内置 server-side tools 与宿主 function calling 还必须分账：前者由 xAI 执行，后者只产生模型提案，权限、数据库/API 副作用和幂等仍由宿主控制。
+xAI 文档称默认只把工具调用和 leader 最终响应返回给调用方；设置 `use_encrypted_content` 后，响应才会包含加密的 sub-agent 状态。它能帮助多轮延续，但不意味着客户端可以读取、编辑或重排隐藏 reasoning。内置 server-side tools 与宿主 function calling 还必须分账：前者由 xAI 执行，后者只产生模型提案，权限、数据库/API 副作用和幂等仍由宿主控制。
 
 评测时至少做 4-agent/16-agent/单 Agent 三组消融，并固定来源白名单、工具版本、问题集、预算、超时和 verifier。输出不仅包括最终质量，还包括证据召回、引用覆盖、重复检索率、错误汇总率、工具成本、p95 延迟和单位成功成本。更多 Agent 只有在这些指标的 Pareto 曲线改善时才是收益；多数票不能替代独立来源和外部验证。

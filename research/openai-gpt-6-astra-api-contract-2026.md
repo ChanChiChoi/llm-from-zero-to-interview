@@ -68,3 +68,10 @@
 - **来源与阅读范围：** OpenAI 当前[Reasoning 指南](https://developers.openai.com/api/docs/guides/reasoning)及[GPT-6 Sol 模型页](https://developers.openai.com/api/docs/models/gpt-6-sol)，访问日期 2026-11-13；复核 `configuration_update` 的支持模式、历史保留、compaction 限制和响应中的 `reasoning.effort` 含义。
 - **来源支持的事实：** GPT-6 标准单 Agent Responses 会话可将 `configuration_update` 放入历史，以更新后续响应的 effort；更新持续生效直至后续 item 覆盖。该 item 必须随后续 history replay 保留。官方指南规定它不能与自动 compaction/truncation 或独立 `/responses/compact` 混用；显式压缩后若仍需所设 effort，应在下一条用户消息前重新加入配置更新。响应的 `reasoning.effort` 字段反映请求级设置，不足以单独还原更新后的有效设置。
 - **证据等级与边界：** `source-backed`（OpenAI 官方动态 API 指南）。该合同只描述文档列出的 GPT-6 接口模式，不证明不同 API surface 或 provider 兼容层具有相同状态语义，也不揭示内部推理量或质量。
+
+
+## 2026-11-16 当前模型 ID 与工具调用合同复核
+
+- **来源与版本：** OpenAI 当前 [Models](https://developers.openai.com/api/docs/models) 页面与 [Using GPT-6](https://developers.openai.com/api/docs/guides/latest-model) 指南，访问日期 2026-11-16。
+- **来源支持的事实：** 当前模型目录将 Sol 列为 `gpt-6.1-sol`，Luna 列为 `gpt-6-luna`。GPT-6.1 Sol 支持 `low/medium/high/xhigh/max`，不支持 `none`；其工具调用需使用 Responses API。GPT-6 Luna 的 Chat Completions function calling 仅在 `reasoning_effort=none` 时支持；若请求需要 reasoning 与 tools，指南指向 Responses API。旧 `gpt-6-sol` 用户应按指南复核迁移。
+- **证据等级与边界：** `source-backed`（OpenAI 当前官方模型目录与迁移指南）。模型 ID、effort 支持与 API 兼容性可能更新；工具调用合同不授予宿主文件、网络或执行器权限，也不构成 Agent 任务成功率证据。
