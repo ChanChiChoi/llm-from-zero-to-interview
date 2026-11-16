@@ -48,9 +48,10 @@
 
 - Hugging Face TRL DPOTrainer v1.14.1：[DPOTrainer 文档](https://huggingface.co/docs/trl/v1.14.1/dpo_trainer)、[dataset formats](https://huggingface.co/docs/trl/v1.14.1/dataset_formats)、[RewardTrainer 文档](https://huggingface.co/docs/trl/v1.14.1/reward_trainer)。
   - 实际核对范围：DPO 的标准/对话型数据格式、DPOTrainer 参数签名、processing_class、DPOConfig 签名、参考策略说明、记录指标和 loss 类型。
-  - 来源支持：显式 prompt 的偏好行使用 prompt/chosen/rejected；对话型数据由 trainer 应用 chat template；processing_class 要设置左侧 padding 并有 pad token；ref_model=None 使用训练开始前的初始 policy；日志的 logps/chosen 与 logps/rejected 是 completion token 的平均 log-probability。v1.14.1 的 DPOConfig 签名包含 max_length 与 truncation_mode，没有 max_prompt_length 参数。
-  - 证据等级：source-backed（固定版本官方接口说明与签名）。
-  - 适用边界：这些行为绑定 TRL v1.14.1。其他版本参数名和 adapter/reference 机制需要分别核对。Trainer 平均 log-probability与手写按 response mask 求和的序列 log-probability是不同 reduction，不可直接比较 loss 数值；文档版本也不等于已联调依赖锁。
+  - 来源支持：显式 prompt 的偏好行使用 prompt/chosen/rejected；对话型数据由 trainer 应用 chat template；processing_class 要设置左侧 padding 并有 pad token；ref_model=None 使用训练开始前的初始 policy。v1.14.1 的 DPOConfig 签名包含 max_length 与 truncation_mode，没有 max_prompt_length 参数。
+  - 固定版本源码补核：在 `loss_type="sigmoid"` 且未启用长度位移权重时，`_compute_loss` 先对每条 completion 的 per-token log-probability 求和，再计算 chosen/rejected 相对 log-ratio；reference 同样按 token 求和。`logps/chosen` 与 `logps/rejected` 指标取 batch 内每条序列 log-probability 总和的平均，不是单条 completion 内按 token 数平均。`sigmoid_norm` 分支另将 chosen/rejected 的序列分数除以各自 completion 长度后构造差值，目标口径因此不同。源码位置：[`dpo_trainer.py` loss 与 reduction](https://github.com/huggingface/trl/blob/v1.14.1/trl/trainer/dpo_trainer.py#L1241-L1268)、[normalized loss](https://github.com/huggingface/trl/blob/v1.14.1/trl/trainer/dpo_trainer.py#L1471-L1476)、[logps metric aggregation](https://github.com/huggingface/trl/blob/v1.14.1/trl/trainer/dpo_trainer.py#L1548-L1566)。官方文档将 logps 指标描述为平均 token log-probability；在解释具体口径时，应以固定版本源码的除法/求和路径为准，并与跨样本聚合区分。
+  - 证据等级：source-backed（固定版本官方文档、参数签名及 release tag 源码）。
+  - 适用边界：这些行为绑定 TRL v1.14.1 及上述 loss 配置。其他版本参数名和 adapter/reference 机制需要分别核对。文档版本也不等于已联调依赖锁；不同 reduction 的 loss 数值不可直接比较。
 - Transformers v5.17.0 [bitsandbytes 微调说明](https://huggingface.co/docs/transformers/v5.17.0/quantization/bitsandbytes) 与 PEFT v0.18.0 [LoRA API](https://huggingface.co/docs/peft/v0.18.0/package_reference/lora)。
   - 来源支持：Transformers 指出训练时不必传 device_map，device_map=auto 只用于推理；NF4 用于 4-bit base model fine-tuning。PEFT 指出 GPT-2 Conv1D 采用 fan_in/fan_out 存储，LoRA 配置需设 fan_in_fan_out=True；默认初始化将 LoRA B 置零，使初始 adapter 为 no-op。
   - 证据等级：source-backed（固定版本官方文档）。
