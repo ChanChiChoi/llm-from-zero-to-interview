@@ -667,9 +667,9 @@
     考察点：rank 切分、global batch、all-reduce、no_sync、collective、rank0 checkpoint。
     回答框架：纯 Python toy demo 可以检查分片账本、均值梯度算术、同步次数和事件序列，但不能证明 PyTorch collective、NCCL、GPU 或多机行为。实际 DDP 需在目标环境另行验证 rank/设备映射、数据分片、token 分母、collective 顺序和 checkpoint 恢复。
 
-56A. 分布式训练卡死、吞吐低或 checkpoint 恢复异常时，如何设计 distributed incident gate？
+56A. 分布式训练卡死、吞吐低或 checkpoint 恢复异常时，如何设计一份可复核的审计合同？
     考察点：rank step alignment、collective mismatch、token shard imbalance、straggler ratio、communication ratio、checkpoint shard coverage、resume continuity、pipeline bubble。
-    回答框架：先要求每个 rank 输出 step、phase、batch id、token 数、step/data/comm time、collective 序列、loss 和 checkpoint 状态；再检查所有 rank 是否在同一 step、collective 是否一致、token shard 是否均衡、最慢 rank 是否超过典型 rank、通信占比是否过高、checkpoint shard 是否完整、resume 后 global step 和 lr 是否连续，以及 pipeline micro-batch 是否足以压低 bubble。PyTorch 2.15 NCCL 路径可结合 flight recorder 事后记录定位 hang，但要固定版本并逐 rank 对齐证据。门禁输出 failed gates 和对应 rank / shard / stage，避免只凭 rank 0 日志猜测。
+    回答框架：先声明预期 rank 集合和共同观测窗口，再记录每 rank 的 step、phase、batch、输入 token、shift/mask 后有效目标数、loss numerator、实际 denominator 与 loss contract。collective 要按顺序比较完整签名（类型、group、shape、dtype）；报告首个不匹配位置。输入 token 不均衡、straggler 和通信占比先作为观测值，只有运行方提供本次策略上限时才标策略违规。checkpoint 同时核对缺失与额外 shard，并另查 hash、metadata 和训练状态；resume 分开报告 `Δstep`、`Δlr` 与数据游标/optimizer/scheduler 状态。pipeline bubble 公式须标理想化调度假设。缺 rank 日志或指标列为 unknown，不将各项合成一个 gate pass。PyTorch 2.15 NCCL 路径可结合 flight recorder 事后查看 collective 轨迹；固定版本并逐 rank 对齐证据。
 
 56B. 变长 batch 下如何用 DDP 得到全局 token-mean 梯度？
     考察点：输入 token 与 prediction target、loss sum/mean、DP group、梯度累积、DDP rank-average。

@@ -168,7 +168,7 @@
 146. 写一个梯度累积下 `no_sync()` 的伪代码，并计算 6 个 micro-step、`accum_steps=3` 时同步次数从多少降到多少。
 147. 设计一个分布式训练 deadlock audit 表，至少覆盖缺失 collective、rank 条件分支、不同 batch 数、rank 0 文件依赖和未使用参数。
 148. 写一个最小 Distributed Training audit demo，输出 global batch、rank 数据切分、all-reduce 平均梯度、参数一致性、`no_sync` 同步次数、缺失 collective rank 和 rank 0 checkpoint 写入者。
-148A. 写一个 0 依赖 Python 分布式事故审计 demo，输入 4 个 toy rank 的 step、phase、token 数、step/data/comm time、collective 序列、checkpoint shard、resume step / lr 和 pipeline stage 耗时，输出 rank step alignment、collective mismatch、token shard imbalance、straggler ratio、communication ratio、checkpoint shard coverage、resume continuity、pipeline bubble ratio、failed gates 和 gate pass 结论。
+148A. 写一个 0 依赖 Python 分布式事故审计 demo。为每个 rank 明确预期成员、共同观测窗口、输入 token 数、shift/mask 后有效目标数、loss numerator、实际 denominator 和 loss contract；collective 按顺序记录名称、group、shape、dtype。报告缺失/额外 rank、step 差异、序列首个不匹配位置、输入 token 不均衡、straggler/通信实测比率、checkpoint 缺失与额外 shard、resume 的 `Δstep` / `Δlr` 和理想化 pipeline bubble。缺失证据标为 unknown；只有显式传入本次运行策略时才报告策略违规，不输出综合 gate pass。
 148B. TorchTitan 的一个 8×H100 教学案例中，Llama3 8B（batch=1、sequence=8192、defer=8）把 offload budget 从 10 GB 提到 12 GB，额外释放约 0.46 GiB、tokens/s 减少 60—70。计算区间平均每 GiB 的吞吐代价；再比较保留、重计算和 CPU 卸载各消耗的资源，并设计需要固定的 token、模型、NUMA、峰值显存和 loss 测量条件。解释为什么这个拐点不能外推成通用配置。
 148C. 一个 8-rank mesh 设 DP=2、TP=4。权重 `W` 的全局形状为 `[16,64]`，沿输出维做 TP 切分、再沿行做 DP/FSDP 切分，dtype 为 BF16。逐步计算全局权重、每 rank 常驻分片和 FSDP all-gather 后的本地 TP 权重元素数与字节数。说明 DTensor 持久化表示和 SPMD Types 计算表示改变了什么，又有哪些张量形状、collective 和 checkpoint 性质仍需一致。
 148D. 画出 Kubernetes GPU 资源从 device plugin 注册、kubelet 发布 extended resource、Kueue 队列/配额准入到 kube-scheduler 选择节点的边界；说明 topology-aware admission 检查了什么，以及它没有接管哪一步。

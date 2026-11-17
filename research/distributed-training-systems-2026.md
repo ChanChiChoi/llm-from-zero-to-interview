@@ -16,6 +16,20 @@
 - **来源支持的事实**：DCP 支持多 rank 并行保存和加载，并可在加载时针对不同 cluster topology 重新分片；state-dict API 帮助映射模型和 optimizer 状态。
 - **证据等级与边界**：source-backed。DCP 不会自动恢复未放入应用状态的随机数、数据游标、外部数据副作用或任意框架状态；教程页面和 API 仍应按部署 PyTorch 版本复核。
 
+## PyTorch 2.15 collective hang 诊断入口
+
+- **来源与版本**：[PyTorch 2.15 发布说明](https://pytorch.org/blog/pytorch-2-15-release-blog/)、[NCCL 环境变量](https://docs.pytorch.org/docs/2.15/torch_nccl_environment_variables.html) 和 [torch.distributed 调试说明](https://docs.pytorch.org/docs/2.15/distributed.html#debugging-torch-distributed-applications)，于 2026-11-17 定向复核；发布说明日期为 2026-10-28。
+- **阅读位置**：Distributed Training 中的 flight recorder / rewritten NCCL backend；`TORCH_NCCL_TRACE_BUFFER_SIZE`、`TORCH_NCCL_DESYNC_DEBUG`；`monitored_barrier` 的 backend 条件与超时诊断说明。
+- **来源支持的事实**：PyTorch 2.15 发布说明称默认 NCCL process group 使用改写后的 backend，并介绍 collective hang 的 flight-recorder 事后 trace；发布说明标明相关接口不稳定。环境变量文档说明 trace buffer 的配置以及 desync debug 的用途。`monitored_barrier` 依赖 Gloo process group，可报告未能到达 barrier 的 rank。
+- **证据等级与边界**：source-backed（PyTorch 2.15 官方发布说明和版本文档）。这些能力帮助定位 collective 轨迹或未到达 barrier 的 rank，不会恢复已退出 worker、证明网络是根因或保证任意训练配置下都能导出完整 trace；`TORCH_DISTRIBUTED_DEBUG=DETAIL` 等调试设置还可能带来性能开销。
+
+## NVIDIA NCCL 故障排查分类
+
+- **来源与版本**：[NVIDIA NCCL Troubleshooting](https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/troubleshooting.html)，访问日期 2026-11-17；页面版本为 NCCL 2.32.3。
+- **阅读位置**：诊断章节对 GPU/NIC、拓扑、网络、runtime、日志和性能问题的分类，以及收集信息后再调整环境配置的建议。
+- **来源支持的事实**：官方手册把网络和 GPU/NIC/拓扑、runtime 与性能等分作不同调查入口，并列出用于诊断的日志和系统信息。此分类支持先区分证据类型再调整设置的排障顺序。
+- **证据等级与边界**：source-backed（NVIDIA 官方文档）。文档给出的诊断步骤不等于某个作业的根因结论；具体 NCCL 行为、环境变量和拓扑需绑定安装版本、网络栈和硬件核实。
+
 ## Kubernetes device plugin 与 Kueue 的职责边界
 
 - **来源与版本**：[Kubernetes device plugins](https://kubernetes.io/docs/concepts/extend-kubernetes/compute-storage-net/device-plugins/)，官方动态文档，访问日期 2026-10-30；[Kueue v0.20 admission](https://kueue.sigs.k8s.io/v0.20/docs/concepts/admission/) 与 [Kueue overview](https://kueue.sigs.k8s.io/docs/overview/)，访问日期 2026-10-30。

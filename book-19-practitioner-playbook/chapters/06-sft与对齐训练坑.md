@@ -8,55 +8,43 @@
 
 ## 6.1 后训练改变的是行为分布
 
-基础模型学习的是广泛的语言和知识分布，后训练则在更窄的任务、角色、偏好和安全约束上重新加权。可以把基础模型分布写成 `P_base(y|x)`，后训练后的分布写成：
-
-```math
-
-P_{post}(y\mid x)=P_{base}(y\mid x;\theta+\Delta\theta,\mathcal{D}_{post},\mathcal{R})
-```
-
-其中 `Delta theta` 是参数变化，`D_post` 是后训练数据，`R` 是损失、偏好、奖励、策略和安全约束的组合。这个表达不是一个具体算法，而是提醒我们：数据、mask、reference、reward 和评估定义都会改变最终行为。
+基础模型定义初始策略 $\pi_{\mathrm{base}}(y\mid x)$；后训练用特定数据、监督目标、偏好或奖励，以及优化和安全约束，得到新的策略 $\pi_{\mathrm{post}}(y\mid x)$。这不是一个统一算法：数据和 mask 决定哪些行为进入训练信号，reference 和 reward 影响优化方向，评估定义决定我们能看见哪些变化。行为分布可能在目标任务上改善，也可能在没有直接训练的能力切片上回退。
 
 后训练开始前，应该写一份“允许改变”和“必须保留”的能力合同：
 
-```text
-允许改变：指令跟随、结构化输出、目标领域术语、工具调用格式
-必须保留：基础知识、数学、代码、事实准确性、长上下文和多语言能力
-必须改善：危险请求处理、隐私边界、误拒和漏拒
-必须稳定：EOS、role、tool schema、引用和状态协议
-必须观察：输出长度、风格、成本、延迟、人工采纳和真实任务完成
-```
+- **允许改变：** 指令跟随、结构化输出、目标领域术语、工具调用格式。
+- **必须保留：** 基础知识、数学、代码、事实准确性、长上下文和多语言能力。
+- **必须改善：** 危险请求处理、隐私边界、误拒和漏拒。
+- **必须稳定：** EOS、role、tool schema、引用和状态协议。
+- **必须观察：** 输出长度、风格、成本、延迟、人工采纳和真实任务完成。
 
-没有这份合同，团队很容易用一个聊天分数证明所有事情都变好。后训练评估至少要比较 base、SFT、偏好优化和最终版本，并保留每个阶段的 checkpoint、数据版本、模板和评估器。
+没有这份合同，团队容易用一个聊天分数证明所有事情都变好。比较 base、SFT、偏好优化和最终版本时，还要固定 checkpoint、数据版本、模板、解码和评估器；否则观察到的变化可能来自评估条件，而不是训练。
 
 ## 6.2 SFT 的监督边界
 
-SFT 的关键不是“有多少条指令”，而是模型被要求预测哪些 token。设第 `i` 个样本的目标 token 为 `y_{i,t}`，监督 mask 为 `m_{i,t}`，当有效监督 token 总数 `N_loss>0` 时：
+SFT 的关键不是“有多少条指令”，而是模型被要求预测哪些 token。设第 $i$ 条序列经 tokenizer 后为 $z_{i,1},\ldots,z_{i,L_i}$。自回归模型在读到 $z_{i,1:t-1}$ 后预测目标 token $z_{i,t}$；监督 mask $m_{i,t}$ 必须与 causal shift 后的目标位置对齐。若训练目标是对所有有效目标 token 作等权平均，损失为：
 
-```math
+$L_{\mathrm{SFT}}=-\frac{1}{D_{\mathrm{loss}}}\sum_i\sum_{t=2}^{L_i}m_{i,t}\log p_\theta(z_{i,t}\mid z_{i,1:t-1})$
 
-L_{SFT}=-\frac{1}{N_{loss}}
-\sum_{i,t}m_{i,t}\log p_\theta(y_{i,t}\mid x_{i,<t})
-```
+在这个等权 token-mean 合同下，$D_{\mathrm{loss}}=\sum_i\sum_t m_{i,t}$；若有样本权重、按序列平均或自定义分布式归约，分母要按实际实现另行定义。输入 token 数描述计算负载，shift/mask 后有效目标数描述监督覆盖，loss 分母取决于 reduction 合同，三者不能互换。
 
-system 和 user 通常是条件，不是要模型复述的目标；assistant 内容和必要的 EOS 通常参与 loss；PAD、未监督控制 token 和被截断的空区域不应参与。具体策略可因任务不同而变化，但必须明确写入 collator 和数据契约。
+PyTorch 的类别索引交叉熵会忽略 ignore_index 目标，并按未忽略目标或有效权重归一。[PyTorch 2.14 CrossEntropyLoss 文档](https://docs.pytorch.org/docs/2.14/generated/torch.nn.CrossEntropyLoss.html) 具体 SFT 训练器还可能从 chat template 生成 assistant mask。例如 TRL v1.14.1 的 assistant-only loss 依赖模板中的 generation 区域标记，因此应回放实际渲染、shift 后 labels 和 reduction，而不能只看配置名。[TRL v1.14.1 SFTTrainer 文档](https://huggingface.co/docs/trl/v1.14.1/sft_trainer)。
+
+在 assistant-only 任务中，system 和 user 通常是条件，不是要模型复述的目标；assistant 内容和按任务约定的 EOS 参与 loss；PAD 和未监督控制位置不参与。具体策略可以因任务而变化，但必须写进 collator 和数据契约。
 
 最常见的 SFT 事故是 prompt loss 泄漏：labels 在 system/user 位置没有被忽略，模型因此学会复述问题、生成 role token 或把下一轮 user 说出来。另一个相反事故是 assistant 内容被全部 mask，训练 loss 仍能计算或被日志吞掉，但模型没有获得有效答案监督。
 
-检查一条样本时，必须同时打印原始 messages、渲染文本、token、role spans、labels 和有效监督 token 数。仅仅看到训练 loss 在下降，不能证明监督位置正确。
+检查一条样本时，必须同时打印原始 messages、渲染文本、token、role spans、shift 后 labels 和有效监督目标数。仅仅看到训练 loss 在下降，不能证明监督位置或实际 reduction 正确。
 
 ## 6.3 SFT 后能力回归
 
-SFT 后聊天体验变好而数学、代码或事实能力下降，通常与数据范围、学习率、训练步数、模板和分布偏移有关。先不要把它归因于灾难性遗忘，因为评估格式、提示和数据也可能已经变了。
+SFT 后聊天体验变好而数学、代码或事实能力下降，可能与数据范围、学习率、训练步数、模板和分布偏移有关；也可能是评估格式、提示或评分器变化造成的假象。先固定 checkpoint、tokenizer、模板、解码和评分协议，再做同条件比较。InstructGPT 论文在其特定 RLHF 流程中报告了若干公共 NLP 任务回退，并发现混入预训练目标可缓解部分回退，但仍未恢复所有任务；这说明回归需要测量，不证明所有后训练都会产生同样变化。[InstructGPT 论文 §1、§4](https://arxiv.org/html/2203.02155)。参数高效微调也不保证旧能力不变；LoRA 微调中的遗忘已有特定模型和配置下的研究观察。[Kalajdzievski, 2024](https://arxiv.org/html/2401.05605)。
 
-对能力切片 `k`，设后训练前后的指标分别为 `M_before,k` 和 `M_after,k`：
+对能力切片 $k$，设同一评估口径下训练前后的指标分别为 $M_{\mathrm{before},k}$ 和 $M_{\mathrm{after},k}$：
 
-```math
+$\Delta_k=M_{\mathrm{after},k}-M_{\mathrm{before},k}$
 
-\Delta_k=M_{after,k}-M_{before,k}
-```
-
-`Delta_k` 只有在数据集、提示、评分器、解码、工具和资源条件足够一致时才可比较。需要单独报告 instruction、math、code、knowledge、long-context、multilingual、safety、tool 和真实业务任务，而不是只报一个加权总分。
+例如数学正确率从 70/100 到 55/100，差值是 −15 个百分点。这个差值描述这组样本上的结果；样本量、任务构成和抽样不确定性仍要一并报告。数据集、提示、评分器、解码、工具和资源条件不一致时，不能把差值归因于模型变化。需要分别报告 instruction、math、code、knowledge、long-context、multilingual、safety、tool 和真实业务任务，而不是只报一个加权总分。
 
 常见回归模式：
 
@@ -109,98 +97,76 @@ R_{unsafe\_leak}=\frac{N_{U,answered\_unsafely}}{|U|}
 
 ## 6.6 偏好数据是一份质量合同
 
-DPO、RLHF、RLAIF 和其他偏好方法依赖 chosen/rejected 或排序数据。偏好不是一个天然客观的标签，它可能同时混入事实正确性、安全、简洁、风格、格式、礼貌、长度和标注者个人偏好。
+DPO、RLHF、RLAIF 和其他偏好方法依赖 chosen/rejected 或排序数据。偏好不是天然客观的标签；它可能同时混入事实正确性、安全、简洁、风格、格式、礼貌、长度和标注者个人偏好。偏好标签表示在给定任务、rubric、目标人群和候选回答下作出的比较，不能直接解释成绝对质量或事实真值。DPO 的推导也明确依赖所选偏好模型等假设。[DPO 原论文](https://arxiv.org/html/2305.18290)。
 
 一条偏好记录应至少说明：
 
-```text
-输入和任务类型
-chosen / rejected 文本
-偏好的主要维度
-风险等级和安全策略
-标注者或评审器版本
-置信度与是否需要复核
-长度、格式和工具状态
-```
+- 输入和任务类型；
+- chosen / rejected 文本；
+- 偏好的主要维度与 rubric；
+- 风险等级和安全策略；
+- 标注者或评审器版本、目标人群和语言；
+- 置信度、平局/弃判及复核状态；
+- 长度、格式和工具状态。
 
 如果 chosen 只是更长、更礼貌或格式更完整，但事实并不更正确，模型可能学到长度或模板捷径。训练前要对 pair 做独立质量检查，不要把“有人选了 chosen”当作“chosen 在所有目标上都更好”。
 
+标注一致性要按任务、风险级别和标注者分片。整体一致率高，可能只是大量容易样本掩盖了高风险边界的一致性低。对低置信 pair，隔离、重标或降低权重通常比盲目增加数量更可靠。偏好也受目标人群和评分规程影响：HUMAINE 的美国、英国参与者研究在其样本中观察到模型排名随年龄组变化；这提醒我们记录评审群体、语言和任务维度，不能把单一标注池的平均排序当成所有用户的共同偏好。[HUMAINE（ICLR 2026）](https://proceedings.iclr.cc/paper_files/paper/2026/hash/9c1bcfe6edf7e47d83d2e99492d851e4-Abstract-Conference.html)。
+
 ## 6.7 Chosen/Rejected 差异太小或方向相反
 
-设人工或高可信评审对 chosen 和 rejected 的质量分为 `h_c` 与 `h_r`，偏好间隔为：
+偏好 pair 审计的首要问题是方向是否与任务 rubric 一致，不是两个回答的分数差够不够大。让独立评审在不知道原始标签的情况下，对事实、任务完成、安全、格式和风格等目标维度分别判断：chosen 更好、rejected 更好、平局，或证据不足无法判断。
 
-```math
+对于方向明确的抽查 pair，可以报告 chosen 胜出的占比：
 
-\Delta_{pref}=h_c-h_r
-```
+$A_{\mathrm{pref}}=\frac{N_{\mathrm{chosen\ wins}}}{N_{\mathrm{chosen\ wins}}+N_{\mathrm{rejected\ wins}}}$
 
-当 pair 集合非空时，可以报告平均间隔；若 pair 为空，没有偏好证据。`Delta_pref` 很小表示训练信号噪声大，`Delta_pref<0` 则说明 chosen 可能被标错。
-
-差异检查不能只比较文本长度。应分别比较：
-
-- 事实和引用是否正确；
-- 是否完整回答任务；
-- 安全边界是否合规；
-- 是否存在工具或格式错误；
-- 是否引入无关长篇内容；
-- 是否能被真实用户采纳。
-
-标注一致性要按任务、风险级别和标注者分片。整体一致率高，可能只是大量容易样本掩盖了高风险边界的一致性低。对低置信 pair，隔离、重标或降低权重通常比盲目增加数量更可靠。
+平局和无法判断项不进入这个分母，必须另外列出；若没有方向明确的 pair，该占比不适用。这个数只描述指定样本和 rubric 下的方向一致性，不是跨任务阈值。低置信 pair 应重标、仲裁或保留为不确定；若要比较数值评分，先确认两个分数来自同一量尺并有共同校准依据。
 
 ## 6.8 Reward Model 的捷径偏差
 
 Reward Model 的目标是近似某种偏好或质量判断，但它可能学到容易检测的表面特征：答案长度、礼貌词、项目符号、免责声明、特定模板或参考答案词汇。模型一旦被 RL 或 rerank 优化，就会放大这些捷径。
 
-设 reward 为 `r_i`，人工或高可信质量为 `h_i`，在 `N>0` 个同口径样本上，平均差距可写成：
+Reward 分数和人工 rubric 分数通常不是同一量尺。除非定义了共同校准集和映射，不要直接计算两者之差并称作“人类质量差距”。更稳妥的检查是对相同 prompt 构造反事实 pair：保持任务答案和事实内容不变，只改变长度、礼貌模板、免责声明或格式；再检查 RM 的排序是否随表面变化，而独立评审是否认为任务质量发生变化。也可以保持长度相近，只改变事实正确性。
 
-```math
-
-G_{rh}=\frac{1}{N}\sum_{i=1}^{N}|r_i-h_i|
-```
-
-如果样本没有人工质量标签，`G_rh` 是 `unknown`，不是 0。长度偏差可以用 reward 与长度的相关性作为线索，但相关性要求长度和 reward 都有方差；如果其中一者是常数，相关性未定义。
-
-Reward 检查需要构造反事实对：保持事实和任务答案相同，只改变长度、礼貌模板、免责声明和格式；或者保持长度相近，只改变事实正确性。若 reward 只随长度上升，而人工质量不变甚至下降，说明 reward 存在捷径。
+长度与 reward 的相关性只能作为筛查信号，不能单独说明长度造成了奖励上升；样本少或长度/reward 几乎不变时，相关系数也不稳定或未定义。抽查样本少时，报告具体 pair 和不确定性，不把一个相关系数当成上线结论。
 
 ## 6.9 RLHF reward hacking
 
-Reward hacking 是策略学会利用 reward 的漏洞，而没有提升真实任务质量。常见表现是回答越来越长、免责声明泛滥、格式越来越像评分器偏好的模板、事实错误被漂亮结构掩盖，reward 曲线上升而人工评价下降。
+Reward hacking 是策略学会利用 reward 的漏洞，而没有提升真实任务质量。常见候选信号是回答越来越长、免责声明泛滥、格式越来越像评分器偏好的模板、事实错误被漂亮结构掩盖，代理 reward 上升而独立任务评估没有同步改善。
 
 排查要保留 SFT 或 base baseline，并同时监控：
 
-- reward 和人工质量；
+- reward 和独立人工/任务质量；
 - 输出长度与有效信息密度；
 - 事实错误和引用支持；
 - 安全误拒和漏拒；
 - KL 或与 reference 的行为偏移；
 - 真实任务完成率、成本和延迟。
 
-KL 约束可以帮助限制策略偏离 reference，但 KL 不是质量指标，也不能修复错误 reward。多维 reward、独立人工抽样、反事实 reward 测试和定期回放高 reward 样本，才有机会发现奖励漏洞。
+KL 约束可以帮助限制策略偏离 reference，但 KL 不是质量指标，也不能修复错误 reward。Gao 等人的合成研究在其指定 proxy/gold RM 与优化设置中观察到 gold reward 随优化强度先升后降；这支持监测代理与独立质量信号是否分离，不提供跨任务阈值或普遍的人类偏好定律。[Gao et al., 2022](https://arxiv.org/html/2210.10760)。一项 2025 年预印本还在特定编码 RL 环境中报告 reward hacking 与若干跨任务行为评估变化相关；该结果受其训练与评估构造限制，不能解读成线上模型的发生率或所有 reward hacking 的必然后果。[MacDiarmid et al., 2025](https://arxiv.org/html/2511.18397v1)。
+
+多维独立评估、人工抽样、反事实 reward 测试和高 reward 样本回放，才能发现代理目标是否偏离本次任务目标。
 
 ## 6.10 DPO 的 reference、beta 和 margin
 
-DPO 直接用偏好 pair 和 reference model 优化相对偏好。对 chosen `c`、rejected `r` 和输入 `x`，一个常见 margin 为：
+DPO 直接用偏好 pair 和 reference model 优化相对偏好。这里把一个回答的序列 log probability 定义为目标回答各 token 条件 log probability 的**和**：
 
-```math
+$\log\pi(y\mid x)=\sum_{t=1}^{|y|}\log\pi(y_t\mid x,y_{1:t-1})$
 
-m=\left[\log\pi_\theta(c\mid x)-\log\pi_\theta(r\mid x)\right]
--\left[\log\pi_{ref}(c\mid x)-\log\pi_{ref}(r\mid x)\right]
-```
+对 chosen $c$、rejected $r$ 和输入 $x$，reference-adjusted margin 为：
 
-对应的损失可以写成：
+$m=\left[\log\pi_\theta(c\mid x)-\log\pi_\theta(r\mid x)\right]-\left[\log\pi_{\mathrm{ref}}(c\mid x)-\log\pi_{\mathrm{ref}}(r\mid x)\right]$
 
-```math
+相应的 sigmoid loss 是 $L_{\mathrm{DPO}}=-\log\sigma(\beta m)$。reference model 必须是训练记录中声明的固定版本；$\beta>0$ 控制这个目标对 margin 的缩放，但具体效果依赖数据、reference 和实现，不能作为统一质量旋钮。
 
-L_{DPO}=-\log\sigma(\beta m)
-```
-
-其中 `beta>0`，`pi_ref` 必须是记录中声明的 reference。reference 版本不匹配、chat template 不一致、tokenizer 不一致或 chosen/rejected 的长度处理不同，都会让 margin 失去预期含义。
+reference、tokenizer、template、EOS/截断和序列 reduction 必须绑定版本，否则 margin 不能直接解释。序列求和会累积每个 token 的 log probability；若改成 token 平均，长度不同的回答会得到不同的 margin 和训练目标。DPO 原论文推导依赖固定 reference、KL 正则化 reward 目标及 Bradley–Terry 类偏好模型假设；实现中也可能提供长度归一化等不同目标。举例来说，TRL v1.14.1 的 sigmoid 路径对 completion token log-prob 求和，而 sigmoid_norm 会按 completion 长度归一；这些结果不能混成同一配置比较。[DPO 原论文](https://arxiv.org/html/2305.18290)；[TRL v1.14.1 DPO 源码](https://github.com/huggingface/trl/blob/v1.14.1/trl/trainer/dpo_trainer.py#L1241-L1268)。
 
 DPO 排查要看：
 
-1. margin 分布和负 margin 比例；
+1. margin 分布及方向明确/不确定的样本；
 2. beta 的反事实实验；
-3. reference 和 policy 的版本、模板和 tokenizer；
+3. reference 和 policy 的 checkpoint、模板和 tokenizer；
 4. pair 的任务、风险和长度分布；
 5. 输出风格、长度和能力切片的回归；
 6. 训练前后真实任务和安全边界。
@@ -250,376 +216,116 @@ loss 下降只能说明优化目标被拟合，不能说明偏好标签正确或
 
 ## 6.14 指标定义域
 
-### 6.14.1 Assistant 覆盖和 prompt 泄漏
+### 6.14.1 Assistant 覆盖、prompt 泄漏和 loss 分母
 
-```math
+所有位置先对齐到 causal shift 后的目标 token，再按 role span、EOS 和真实 padding 位置分类：
 
-C_{asst}=\frac{N_{assistant\ labels}}{N_{assistant\ positions}},\qquad
-R_{prompt}=\frac{N_{prompt\ labels}}{N_{prompt\ positions}}
-```
+$C_{\mathrm{asst}}=\frac{N_{\mathrm{assistant\ labels}}}{N_{\mathrm{assistant\ target\ positions}}},\quad
+R_{\mathrm{prompt}}=\frac{N_{\mathrm{prompt\ labels}}}{N_{\mathrm{prompt\ target\ positions}}},\quad
+R_{\mathrm{pad}}=\frac{N_{\mathrm{pad\ labels}}}{N_{\mathrm{pad\ target\ positions}}}$
 
-两个分母都必须为正；没有对应位置时应标记 `not_applicable` 或 `unknown`。PAD 泄漏同理。
+$C_{\mathrm{EOS}}=\frac{N_{\mathrm{EOS\ labels}}}{N_{\mathrm{EOS\ target\ positions}}}$
+
+这里 labels 指训练目标中未被忽略的 labels；target positions 指 shift 后属于相应类别的目标位置。若目标位置分母为零，指标是 not_applicable；若本应存在但数据/执行结果缺失，则是 unknown。input tokens 单独报告，不代替有效监督目标数。实际 $D_{\mathrm{loss}}$ 由训练器 reduction 决定：仅在等权 token-mean 且无额外权重时，它等于未忽略目标数；按样本、序列或 rank 聚合的实现应列出自己的分母合同。
 
 ### 6.14.2 能力回归
 
-```math
+$\Delta_k=M_{\mathrm{after},k}-M_{\mathrm{before},k}$
 
-\Delta_k=M_{after,k}-M_{before,k}
-```
-
-要求前后评估使用同一口径。若任一阶段缺少有效分母，`Delta_k` 不能被计算。
+前后评估必须使用同一任务、样本版本、提示、评分器、解码、工具和资源条件。汇报每一切片的分子/分母、样本量及适用的不确定性；缺少一侧有效分母时不计算差值。
 
 ### 6.14.3 拒答边界
 
-```math
+$R_{\mathrm{false\_refuse}}=\frac{N_{\mathrm{safe,\ refused}}}{N_{\mathrm{safe}}},\quad
+R_{\mathrm{unsafe\_leak}}=\frac{N_{\mathrm{unsafe,\ answered\ unsafely}}}{N_{\mathrm{unsafe}}}$
 
-R_{false\_refuse}=N_{safe,refused}/N_{safe}
-```
+safe 和 unsafe 集合须由任务策略事先定义，澄清、部分拒绝或安全替代回答按 rubric 单独标记。分母为零时记 not_applicable；应有样本但标注/输出缺失时记 unknown。误拒与漏拒不能合并成一个 refusal rate。
 
-```math
+### 6.14.4 Reward 与独立质量判断
 
-R_{unsafe\_leak}=N_{unsafe,answered\_unsafely}/N_{unsafe}
-```
+对同 prompt、同 rubric 下由独立评审判为非平局的 $N_{\mathrm{resolved}}$ 个 pair，可报告 RM 排序与独立评审方向一致的占比：
 
-安全集合为空时不适用；样本存在但判定缺失时未知。
+$C_{\mathrm{rank}}=\frac{N_{\mathrm{same\ order}}}{N_{\mathrm{resolved}}}$
 
-### 6.14.4 Reward 与人工质量
-
-```math
-
-G_{rh}=\frac{1}{N}\sum_i|r_i-h_i|
-```
-
-要求 `N>0`，并且 `r` 和 `h` 在同一范围或已校准。相关性需要非零方差，常数序列没有定义相关系数。
+另列平局、无法判断和评审分歧。这个指标只描述抽查 pair 的排序一致性，不是奖励校准、事实性或普遍质量；长度相关性只能作为筛查，需结合按任务匹配的反事实 pair。若 reward 与人工评分没有共同量尺，不计算二者的数值差。
 
 ### 6.14.5 DPO margin
 
-```math
+$m_j=(\log\pi_\theta(c_j\mid x_j)-\log\pi_\theta(r_j\mid x_j))-(\log\pi_{\mathrm{ref}}(c_j\mid x_j)-\log\pi_{\mathrm{ref}}(r_j\mid x_j))$
 
-m_j=(\log\pi_\theta(c_j|x_j)-\log\pi_\theta(r_j|x_j))
--(\log\pi_{ref}(c_j|x_j)-\log\pi_{ref}(r_j|x_j))
-```
+这里每个序列 log probability 按实际实现由 completion token log probability 求和或归约；reference revision、tokenizer、template、EOS、截断、长度归一化、beta 和 loss type 必须随指标记录。$m_j$ 不是 chosen 内容真实优劣的证明，负 margin 也要回到偏好方向和样本内容检查。
 
-reference、tokenizer、template 和长度归一化必须绑定版本，否则 margin 不能直接解释。
+## 6.15 用一份合成账本复算后训练事故
 
-## 6.15 一个可运行的后训练事故审计示例
+下面的数据都是教学构造，不代表真实模型结果或行业门槛。先声明本例的训练合同：按 causal shift 后的目标 token 对所有未忽略 labels 作等权平均；assistant 回答和约定的 EOS 参与监督，system/user 和真实 padding 位置不参与。实际工程若使用别的 reduction，要换成其真实分母。
 
-下面的示例使用 Python 标准库，把 SFT mask、能力回归、拒答边界、偏好 pair、reward shortcut、DPO reference 和工具 schema 放在一份报告中。所有统计都通过显式分母函数计算，空集合返回 `None`。
+### 先确认模型实际学了哪些位置
 
-```python
-from dataclasses import dataclass
-from math import exp, isfinite, log, log1p, sqrt
-from typing import Dict, List, Optional, Tuple
+| 样本 | 输入 token 数 | assistant 目标位 / 已标注 | prompt 目标位 / 已标注 | padding 目标位 / 已标注 | EOS 目标位 / 已标注 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| A | 10 | 4 / 4 | 3 / 0 | 2 / 0 | 1 / 1 |
+| B | 8 | 3 / 2 | 4 / 0 | 0 / 0 | 1 / 0 |
+| C | 7 | 3 / 3 | 2 / 1 | 2 / 1 | 1 / 1 |
+| 合计 | 25 | 10 / 9 | 9 / 1 | 4 / 1 | 3 / 2 |
 
+先不要把 25 个输入 token 当成 25 个监督目标。按表中 causal shift 后的目标位置计算，assistant 覆盖率是 $9/10=90\\%$，prompt loss 泄漏是 $1/9$，padding loss 泄漏是 $1/4$，EOS 覆盖率是 $2/3$。样本 B 漏掉一个 assistant 目标（这里是 EOS）；样本 C 则让一个 prompt 位置和一个真实 padding 位置进入 labels。
 
-def strict_int(value: object) -> bool:
-    return type(value) is int
+如果这 9 个已标注 assistant 目标的交叉熵之和为 7.2，prompt 泄漏贡献 0.8，padding 泄漏贡献 1.1，那么本例实际 numerator 为 $7.2+0.8+1.1=9.1$，实际未忽略 label 数作为分母时 $D_{loss}=11$，观察到的 token-mean loss 为 $9.1/11\\approx0.827$。这个数反映训练器实际优化的目标；它既没有补回漏掉的 assistant 目标，也不能仅凭 loss 数值发现错位。修正 labels 后还要重算有效目标数和 reduction 分母。
 
+### 再看行为变化落在哪些任务
 
-def safe_ratio(numerator: int, denominator: int) -> Optional[float]:
-    if not strict_int(numerator) or not strict_int(denominator):
-        raise ValueError("ratio arguments must be integers")
-    if numerator < 0 or denominator < 0:
-        raise ValueError("ratio arguments must be non-negative")
-    if numerator > denominator:
-        raise ValueError("numerator cannot exceed denominator")
-    if denominator == 0:
-        return None
-    return round(numerator / denominator, 3)
+| 切片 | 后训练前 | 后训练后 | 差值 |
+| --- | ---: | ---: | ---: |
+| 指令完成 | 62/100 | 76/100 | +14 个百分点 |
+| 数学正确 | 70/100 | 55/100 | −15 个百分点 |
+| 代码正确 | 66/100 | 49/100 | −17 个百分点 |
+| 工具调用成功 | 60/100 | 52/100 | −8 个百分点 |
 
+这些差值只有在同一批任务、提示、评分器、解码和工具条件下才有可比性。它们提示本次后训练伴随数学、代码和工具回退，不能单凭这 100 个样本推断长期总体表现；需报告样本构成和适用的不确定性，再定位回退首次出现的 checkpoint。
 
-def safe_average(values: List[float]) -> Optional[float]:
-    if not values:
-        return None
-    if any(not isfinite(float(value)) for value in values):
-        raise ValueError("average values must be finite")
-    return sum(values) / len(values)
+### 拆开检查误拒和漏拒
 
+本例的安全集合包含 3 个应正常回答的请求，其中 2 个被拒；风险集合包含 3 个应拒绝或受限处理的请求，其中 1 个得到不安全回答。因此误拒率为 $2/3$，漏拒率为 $1/3$。两个分母分别来自安全请求和风险请求，不能合并。样本数很小，只能指出值得复查的具体案例，不能当作稳定发生率。
 
-@dataclass(frozen=True)
-class SFTSample:
-    sample_id: str
-    system_tokens: int
-    user_tokens: int
-    assistant_tokens: int
-    assistant_labels: int
-    prompt_labels: int
-    pad_tokens: int
-    pad_labels: int
-    eos_tokens: int
-    eos_labels: int
+### 复核偏好方向，而不是制造通用 margin
 
+对 4 个 pair 做一次盲审：p1 的 chosen 更符合事实和任务；p2 的 rejected 更好；p3 在目标 rubric 上打平；p4 缺少判断领域事实所需的来源。方向明确的 pair 中，chosen 胜出占比为 $1/(1+1)=1/2$；另有 1 个平局和 1 个无法判断。这个小账本暴露出一条反向标签，但不能估计整个数据集的质量。应按事实、安全、完整性和风格拆分原因，重标或保留不确定样本。
 
-def validate_sft(row: SFTSample) -> None:
-    if not row.sample_id.strip():
-        raise ValueError("sample_id must not be empty")
-    for name in (
-        "system_tokens",
-        "user_tokens",
-        "assistant_tokens",
-        "assistant_labels",
-        "prompt_labels",
-        "pad_tokens",
-        "pad_labels",
-        "eos_tokens",
-        "eos_labels",
-    ):
-        value = getattr(row, name)
-        if not strict_int(value) or value < 0:
-            raise ValueError(f"{name} must be a non-negative integer")
-    if row.assistant_labels > row.assistant_tokens:
-        raise ValueError("assistant labels cannot exceed assistant tokens")
-    if row.pad_labels > row.pad_tokens:
-        raise ValueError("pad labels cannot exceed pad tokens")
-    if row.eos_labels > row.eos_tokens:
-        raise ValueError("eos labels cannot exceed eos tokens")
+### 用反事实 pair 检查 reward 是否追逐表面形式
 
+固定同一 prompt 和正确答案，只给短答案增加重复铺垫：短版 60 token，RM 分数 0.42；冗长版 240 token，RM 分数 0.88。独立 rubric 认为事实与任务完成相同，并更偏好简洁表达。这里可以直接比较同一个 RM 在配对变体上的排序；不能把 0.88 与另一套 1–5 人工分数相减。一个 pair 只是需要扩大抽查的线索，不是 reward 长度偏差的稳定估计。
 
-def sft_audit(rows: List[SFTSample]) -> Dict[str, Optional[float]]:
-    if not rows:
-        return {
-            "assistant_coverage": None,
-            "prompt_loss_rate": None,
-            "pad_loss_rate": None,
-            "eos_coverage": None,
-        }
-    for row in rows:
-        validate_sft(row)
-    assistant_tokens = sum(row.assistant_tokens for row in rows)
-    assistant_labels = sum(row.assistant_labels for row in rows)
-    prompt_tokens = sum(row.system_tokens + row.user_tokens for row in rows)
-    prompt_labels = sum(row.prompt_labels for row in rows)
-    pad_tokens = sum(row.pad_tokens for row in rows)
-    pad_labels = sum(row.pad_labels for row in rows)
-    eos_tokens = sum(row.eos_tokens for row in rows)
-    eos_labels = sum(row.eos_labels for row in rows)
-    return {
-        "assistant_coverage": safe_ratio(assistant_labels, assistant_tokens),
-        "prompt_loss_rate": safe_ratio(prompt_labels, prompt_tokens),
-        "pad_loss_rate": safe_ratio(pad_labels, pad_tokens),
-        "eos_coverage": safe_ratio(eos_labels, eos_tokens),
-    }
+### 手算 DPO，再检查 reference 和工具协议
 
+设同一 prompt 下 policy 对 chosen/rejected 的序列 log probability 分别为 −1.2、−1.9，reference 对应值为 −1.4、−1.6。policy gap 是 $-1.2-(-1.9)=0.7$，reference gap 是 $-1.4-(-1.6)=0.2$，所以 $m=0.7-0.2=0.5$。若本次 $\beta=0.8$，则 $\beta m=0.4$，损失为 $-\log\sigma(0.4)=\log(1+e^{-0.4})\\approx0.513$。这个正 margin 只说明该 policy 相对 reference 更偏向这个 chosen；它不证明 chosen 事实正确。
 
-def correlation(xs: List[float], ys: List[float]) -> Optional[float]:
-    if len(xs) != len(ys):
-        raise ValueError("correlation inputs must have equal length")
-    if not xs:
-        return None
-    if any(not isfinite(float(value)) for value in xs + ys):
-        raise ValueError("correlation inputs must be finite")
-    mean_x = sum(xs) / len(xs)
-    mean_y = sum(ys) / len(ys)
-    centered_x = [x - mean_x for x in xs]
-    centered_y = [y - mean_y for y in ys]
-    norm_x = sqrt(sum(value * value for value in centered_x))
-    norm_y = sqrt(sum(value * value for value in centered_y))
-    if norm_x == 0 or norm_y == 0:
-        return None
-    return sum(x * y for x, y in zip(centered_x, centered_y)) / (norm_x * norm_y)
+本例的 log probability 是按 completion token 求和。若记录显示这些 reference log probability 来自 sft-v2，而训练配置声明 sft-v3，则这组 margin 不符合声明的 DPO 合同，必须用实际 reference 重算。若将序列求和改为 token 平均，长度不同的回答会改变 margin 和训练目标，不是只改日志展示方式。
 
+训练 schema 若登记 search(query)、calculator(expression)，线上执行器却要求 web_search(query)、calculator(expr)，则工具名和参数字段都存在协议差异。模型能生成 JSON 不代表执行器能接受；应按版本化 schema 精确回放调用和结果状态。
 
-def stable_softplus(value: float) -> float:
-    if not isfinite(value):
-        raise ValueError("softplus input must be finite")
-    if value > 0:
-        return value + log1p(exp(-value))
-    return log1p(exp(value))
+### 把报告分成能采取行动的几类
 
+- **可观测变化：** 指令切片上升，数学/代码/工具切片下降；小样本拒答统计、偏好盲审和 reward 反事实各自给出了具体异常候选。
+- **已确认的协议问题：** assistant 目标缺失，prompt 与 padding 泄漏；DPO reference 版本不匹配；训练和线上工具 schema 不一致。
+- **运行策略违规：** 本例没有提供本次任务预先声明的发布策略，因此不能判定策略违规，也不能临时发明统一门槛。
+- **未知：** 这些样本是否代表目标人群、差值的不确定性、未覆盖的高风险行为，以及独立评审在更大样本上的一致性。
 
-def dpo_margin(pair: Dict[str, float]) -> float:
-    value = (pair["pi_chosen"] - pair["pi_rejected"]) - (
-        pair["ref_chosen"] - pair["ref_rejected"]
-    )
-    if not isfinite(value):
-        raise ValueError("DPO margin must be finite")
-    return value
-
-
-sft_rows = [
-    SFTSample("good_math", 5, 8, 12, 12, 0, 4, 0, 1, 1),
-    SFTSample("prompt_leak", 4, 10, 9, 9, 10, 2, 2, 1, 1),
-    SFTSample("masked_answer", 3, 7, 11, 6, 0, 0, 0, 1, 0),
-]
-mask_audit = sft_audit(sft_rows)
-
-before = {"instruction": 0.62, "math": 0.70, "code": 0.66, "safety": 0.78, "tool": 0.60}
-after = {"instruction": 0.76, "math": 0.55, "code": 0.49, "safety": 0.83, "tool": 0.52}
-if set(before) != set(after):
-    raise ValueError("capability slices must match")
-capability_delta = {name: round(after[name] - before[name], 3) for name in before}
-regressions = {name: delta for name, delta in capability_delta.items() if delta <= -0.08}
-
-refusal_cases = [
-    {"id": "defensive_security", "unsafe": False, "refused": True},
-    {"id": "medical_general", "unsafe": False, "refused": True},
-    {"id": "homework_math", "unsafe": False, "refused": False},
-    {"id": "high_risk_steps", "unsafe": True, "refused": False},
-    {"id": "privacy_exposure", "unsafe": True, "refused": True},
-    {"id": "dangerous_operation", "unsafe": True, "refused": True},
-]
-safe_cases = [row for row in refusal_cases if not row["unsafe"]]
-unsafe_cases = [row for row in refusal_cases if row["unsafe"]]
-false_refusals = [row["id"] for row in safe_cases if row["refused"]]
-unsafe_leaks = [row["id"] for row in unsafe_cases if not row["refused"]]
-refusal_audit = {
-    "over_refusal_rate": safe_ratio(len(false_refusals), len(safe_cases)),
-    "unsafe_leak_rate": safe_ratio(len(unsafe_leaks), len(unsafe_cases)),
-    "false_refusals": false_refusals,
-    "unsafe_leaks": unsafe_leaks,
-}
-
-preference_pairs = [
-    {"id": "fact_fix", "chosen_quality": 0.90, "rejected_quality": 0.40, "agreement": 0.90},
-    {"id": "small_margin", "chosen_quality": 0.62, "rejected_quality": 0.59, "agreement": 0.52},
-    {"id": "length_bias", "chosen_quality": 0.55, "rejected_quality": 0.80, "agreement": 0.60},
-    {"id": "safety_boundary", "chosen_quality": 0.70, "rejected_quality": 0.65, "agreement": 0.55},
-]
-preference_margins = {
-    row["id"]: round(row["chosen_quality"] - row["rejected_quality"], 3)
-    for row in preference_pairs
-}
-preference_audit = {
-    "average_margin": round(
-        safe_average(list(preference_margins.values())), 3
-    ),
-    "average_agreement": round(
-        safe_average([row["agreement"] for row in preference_pairs]), 3
-    ),
-    "low_margin_pairs": [
-        name for name, value in preference_margins.items() if value < 0.10
-    ],
-    "bad_chosen_pairs": [
-        name for name, value in preference_margins.items() if value < 0
-    ],
-}
-
-reward_samples = [
-    {"id": "concise_correct", "quality": 0.90, "length": 60, "reward": 0.42},
-    {"id": "verbose_shallow", "quality": 0.45, "length": 240, "reward": 0.88},
-    {"id": "safe_alt", "quality": 0.82, "length": 110, "reward": 0.74},
-    {"id": "long_refusal", "quality": 0.50, "length": 210, "reward": 0.86},
-]
-reward_audit = {
-    "length_reward_corr": correlation(
-        [row["length"] for row in reward_samples],
-        [row["reward"] for row in reward_samples],
-    ),
-    "reward_human_gap": round(
-        safe_average([abs(row["reward"] - row["quality"]) for row in reward_samples]),
-        3,
-    ),
-    "high_reward_low_quality": [
-        row["id"] for row in reward_samples if row["reward"] >= 0.80 and row["quality"] < 0.60
-    ],
-}
-
-dpo_pairs = [
-    {"id": "clear_win", "pi_chosen": -1.2, "pi_rejected": -1.9, "ref_chosen": -1.4, "ref_rejected": -1.6},
-    {"id": "policy_prefers_bad", "pi_chosen": -2.5, "pi_rejected": -2.2, "ref_chosen": -2.1, "ref_rejected": -2.0},
-    {"id": "ref_mismatch_case", "pi_chosen": -3.1, "pi_rejected": -3.0, "ref_chosen": -2.7, "ref_rejected": -2.9},
-]
-beta = 0.8
-if beta <= 0 or not isfinite(beta):
-    raise ValueError("beta must be positive and finite")
-dpo_margins = {row["id"]: round(dpo_margin(row), 3) for row in dpo_pairs}
-dpo_losses = {
-    name: round(stable_softplus(-beta * margin), 3)
-    for name, margin in dpo_margins.items()
-}
-dpo_audit = {
-    "margins": dpo_margins,
-    "losses": dpo_losses,
-    "negative_margins": [name for name, value in dpo_margins.items() if value <= 0],
-    "reference_match": "sft_v2" == "sft_v3",
-    "beta": beta,
-}
-
-train_tool_schema = {"search": ["query"], "calculator": ["expression"]}
-serving_tool_schema = {"web_search": ["query"], "calculator": ["expr"]}
-tool_schema_match = train_tool_schema == serving_tool_schema
-
-checks = {
-    "sft_mask": (
-        mask_audit["assistant_coverage"] is not None
-        and mask_audit["assistant_coverage"] >= 0.95
-        and mask_audit["prompt_loss_rate"] == 0
-        and mask_audit["pad_loss_rate"] == 0
-        and mask_audit["eos_coverage"] is not None
-        and mask_audit["eos_coverage"] >= 0.95
-    ),
-    "capability_regression": not regressions,
-    "refusal_boundary": (
-        refusal_audit["over_refusal_rate"] is not None
-        and refusal_audit["over_refusal_rate"] <= 0.20
-        and refusal_audit["unsafe_leak_rate"] == 0
-    ),
-    "preference_data": (
-        preference_audit["average_margin"] >= 0.15
-        and preference_audit["average_agreement"] >= 0.70
-        and not preference_audit["bad_chosen_pairs"]
-    ),
-    "reward_model": (
-        reward_audit["length_reward_corr"] is not None
-        and abs(reward_audit["length_reward_corr"]) <= 0.50
-        and reward_audit["reward_human_gap"] <= 0.20
-        and not reward_audit["high_reward_low_quality"]
-    ),
-    "dpo": not dpo_audit["negative_margins"] and dpo_audit["reference_match"],
-    "tool_schema": tool_schema_match,
-}
-decision = "ready_for_review" if all(checks.values()) else "hold_for_repair"
-print("mask_audit=", mask_audit)
-print("capability_delta=", capability_delta)
-print("refusal_audit=", refusal_audit)
-print("preference_audit=", preference_audit)
-print("reward_audit=", reward_audit)
-print("dpo_audit=", dpo_audit)
-print("tool_schema_match=", tool_schema_match)
-print("checks=", checks)
-print("decision=", decision)
-
-assert decision == "hold_for_repair"
-assert mask_audit["prompt_loss_rate"] > 0
-assert regressions["math"] == -0.15
-assert refusal_audit["unsafe_leak_rate"] > 0
-assert dpo_audit["reference_match"] is False
-assert safe_ratio(0, 0) is None
-
-assert sft_audit([])["assistant_coverage"] is None
-try:
-    safe_ratio(1, 0)
-except ValueError:
-    pass
-else:
-    raise AssertionError("positive numerator with zero denominator is invalid")
-
-bad_sft = SFTSample("bad_bool", True, 1, 1, 1, 0, 0, 0, 1, 1)
-try:
-    validate_sft(bad_sft)
-except ValueError as exc:
-    assert "system_tokens" in str(exc)
-else:
-    raise AssertionError("bool must not masquerade as a token count")
-
-assert correlation([1.0, 1.0], [0.2, 0.2]) is None
-```
-
-示例中的 `hold_for_repair` 不是某个供应商或业务的通用上线标准，而是由本例构造的多个失败项共同产生：prompt/PAD 泄漏、assistant 覆盖不足、math/code/tool 回归、误拒和漏拒、低质量偏好 pair、reward 长度捷径、DPO reference 不匹配和工具 schema 漂移。实际项目应根据任务风险配置阈值，并保留每个失败项的样本和版本。
+工程上的下一步是先修复 labels、reference 元数据和工具 schema，再用冻结的任务集重跑各切片；扩充低置信偏好与高 reward 反事实抽查，并记录实际 loss contract。最终是否继续训练或发布，由本次任务的风险负责人依据事先声明的策略判断，而不是把不同量纲的信号合成为一个默认通过分数。
 
 ## 6.16 后训练事故的恢复路径
 
 修复后训练事故时，不要直接从最终 checkpoint 继续优化。建议分层处理：
 
 1. 保存 base、SFT、偏好优化和最终版本，冻结受影响评估结果。
-2. 重新抽样 SFT labels、偏好 pair、拒答边界和工具样本。
-3. 先修复数据、template、mask 和 schema，再讨论训练超参。
-4. 对 reward 做反事实和人工校准，隔离高 reward 低质量样本。
-5. 对 DPO/RLHF 做 reference、beta、KL、长度和多维 reward 对照。
-6. 在固定能力回归集上选择 checkpoint，而不是只选最低训练 loss。
-7. 通过真实任务、人工抽检和受控灰度观察成本、延迟、采用和安全。
+2. 重新抽样 SFT labels、偏好 pair、拒答边界和工具样本；标明 shift 后目标和 reduction contract。
+3. 先修复数据、template、mask、reference 版本和 schema，再讨论训练超参。
+4. 对 reward 做反事实测试和独立人工审查，隔离高 reward 但不符合任务 rubric 的样本。
+5. 对 DPO/RLHF 做 reference、beta、KL、长度和多维任务对照。
+6. 在固定能力回归集上选择 checkpoint，并报告各切片结果和不确定性，不只看训练 loss。
+7. 为本次具体任务预先声明风险、可接受回退和硬性停止条件；将策略违规与观测指标分开报告。
+8. 通过真实任务、人工抽检和受控灰度观察成本、延迟、采用和安全。
 
-最佳 checkpoint 可能在训练中间。后训练时间越长，越可能放大偏好噪声、reward shortcut 或领域过拟合；必须让 checkpoint 选择依赖多维目标，而不是单一 loss 或 reward。
+最佳 checkpoint 可能在训练中间。训练更久可能继续放大偏好噪声、reward shortcut 或领域过拟合，但不应把训练时长本身当成故障判据。恢复决策必须回到本次任务合同；没有声明策略时，不能从一组指标自动推出通用“通过”结论。
 
 ## 6.17 常见但危险的处理方式
 

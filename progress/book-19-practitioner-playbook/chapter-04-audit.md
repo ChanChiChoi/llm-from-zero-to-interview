@@ -40,11 +40,11 @@
 - **证据**：PyTorch 2.15 anomaly detection、AMP examples、`clip_grad_norm_`、DDP design note、Distributed Checkpoint 和 FSDP 官方页面；Transformers Trainer 当前滚动文档和 checkpoint resume 教程，检索快照日期 2026-11-17；Molybog et al. 2023、Bai et al. 2026、Chen et al. 2026 论文。公开 API 仅支持相应版本的行为，论文实验不构成目标任务复现或通用处方。事实与来源证据存于[训练稳定性与调试研究记录](../../research/training-stability-and-debug-2026.md)及[PyTorch 训练 API 边界记录](../../research/pytorch-training-api-boundaries-2026.md)。
 - **example_status**：4.7 六 token 序列在内部 shift 下，raw labels 非忽略数为 6、有效目标位置数为 5；仅监督答案与 EOS 时有效目标数为 2。4.13 rank0 loss sum 3/目标 2、rank1 loss sum 6/目标 6，rank means 为 1.5/1.0，全局 token mean 为 1.125。均为手算教学输入。
 - **code_status**：4.17 标为“静态审阅，未运行”。toy 日志记录 raw count、shift 后目标数、loss contract、denominator、各 rank numerator/denominator/target count；默认无阈值，样例策略仅供演示。未运行章节代码或测试。
-- **formula_status**：已核对 causal shift 计数、token mean 分母、rank spread 与 DDP 梯度缩放假设；关键变量均在相邻正文说明。未做 GitHub MathJax 页面渲染。
+- **formula_status**：已核对 causal shift 计数、token mean 分母、rank spread 与 DDP 梯度缩放假设；关键变量均在相邻正文说明。12 个 math fence marker（6 对）静态配对；未做 GitHub MathJax 页面渲染。
 
 ## 配套、链接与未决事项
 
 - **sync_status**：更新 `EXERCISES.md` 第 173 题，要求显式 loss contract、shift 后目标数、分母和 per-rank 口径；更新 `INTERVIEW_BANK.md` 第 78 题，区分事件、硬失败、策略违规和 unknown。简介/目录摘要与本章读者结果一致，无需改动。
-- **link_status**：正文和配套文件的本地链接待本轮静态目标检查后记录；外部链接只做本章相关来源定向打开，不代表全量可达性确认。
+- **link_status**：本章、第四章审计、架构审计和两份相关研究记录共检查 13 个本地 Markdown 链接目标，缺失 0；练习与面试题本轮未新增链接。外部链接做了本章相关来源定向打开，不代表全量可达性确认。
 - **open_risks**：代码未运行，策略数值不适用于真实任务；HF `main` 文档是滚动页面，本轮记录的是 2026-11-17 快照；MathJax 页面渲染、外链长期可达性和第十九册整册连续复读仍待后续门禁。第五章需承接本章 rank loss 数学口径，但避免重复说明本章通用 loss 时间线。
 - **下一入口**：第五章《分布式训练事故宝典》，重点检查 rank、collective、数据/通信关键路径、checkpoint 拓扑和本章已交出的 per-rank 分母口径。
