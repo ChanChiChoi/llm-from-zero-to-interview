@@ -19,7 +19,7 @@
 
 - Hugging Face Transformers, “Causal language modeling,” 文档版本 v5.17.0，[官方文档](https://huggingface.co/docs/transformers/v5.17.0/tasks/language_modeling)。
   - 实际阅读范围：因果语言建模说明、数据拼接/切块示例、`labels = input_ids.copy()`、`tokenizer.pad_token = tokenizer.eos_token` 以及 `DataCollatorForLanguageModeling(mlm=False)` 段落。教程描述 causal LM 会将输入作为 labels，并在训练目标中错开一个 token。
-- Hugging Face Transformers v5.17.0 固定版本源码：[DataCollatorForLanguageModeling](https://github.com/huggingface/transformers/blob/v5.17.0/src/transformers/data/data_collator.py#L3414-L3422)、[GPT2LMHeadModel](https://github.com/huggingface/transformers/blob/v5.17.0/src/transformers/models/gpt2/modeling_gpt2.py#L3248-L3253)。
+- Hugging Face Transformers v5.17.0 固定版本源码：[DataCollatorForLanguageModeling](https://github.com/huggingface/transformers/blob/v5.17.0/src/transformers/data/data_collator.py#L3393-L3400)、[GPT2LMHeadModel labels 参数说明](https://github.com/huggingface/transformers/blob/v5.17.0/src/transformers/models/gpt2/modeling_gpt2.py#L3227-L3232)。
   - 实际阅读范围：`mlm=False` 分支将输入复制为 labels 并把 padding label 设为 `-100`；GPT-2 causal LM 头的文档说明 labels 在模型内移位。
   - 证据等级：source-backed（固定 revision 的公开实现路径和接口说明）。
   - 适用边界：任务教程的概括把“右移后的训练目标”与 data collator 放在同一流程中；固定 revision 源码表明 collator 的职责是生成同长度 labels 和忽略 padding，GPT-2 模型头负责内部移位。不可把这一责任划分推广到所有 Transformers 模型头、版本或其他框架；实际实现须检查具体 loss 契约。该文档页面提示已有 v5.21.0 更新版本，但本次浏览工具未能打开该版本页面，因此不把 v5.17.0 描述为最新文档。
@@ -38,3 +38,9 @@
 ## 生命周期
 
 因果 next-token 训练、标签移位与模型特定聊天格式：active。具体张量长度、loss 移位位置、特殊 token 和 mask 行为取决于模型、tokenizer、训练目标、框架及版本；需要按运行配置核验。
+
+## 2026-11-17 复查
+
+- 固定源码行锚点复查：collator 的 `mlm=False` 分支在 3393–3400 行复制 labels 并按 `pad_token_id` 相等关系将标签设为 `-100`；GPT-2 的 labels 参数说明在 3227–3232 行明确写明模型内部 shift。正文引用应指向这两段，而不是文件中的其他模型或函数行。
+- Transformers v5.17.0 chat-template 页面在本次访问时提示 v5.23.0 为较新版本；本文正文保留固定 v5.17 源码作为可追溯实现示例，不称其为当前最新版。当前滚动文档与固定 revision 的边界仍需分别标明。
+- 证据边界不变：共用 PAD/EOS ID 是否造成真实 EOS 被忽略，取决于是否采用该 ID 相等的 collator 路径以及实际 label 构造，不能写成对所有训练实现都成立的结果。

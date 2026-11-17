@@ -196,7 +196,7 @@
 170. 对“loss 不下降”“NaN/Inf”“OOM”“GPU 利用率低”四类问题分别写出 5 步排查顺序。
 171. 录一段 3 分钟 PyTorch 工程面试回答，按 mechanism、shape/formula、pitfall、debug path、demo evidence 五项自评。
 172. 选择一个最薄弱的 PyTorch 工程主题，补一个最小 demo，并说明它如何支持面试回答。
-173. 写一个 0 依赖 Python 训练稳定性审计 demo，输入 toy step 日志，输出 first bad step、loss spike steps、non-finite steps、grad explosion steps、AMP overflow steps、有效 label token 异常、LR resume jump、rank loss skew、failed gates 和 gate pass 结论。
+173. 写一个 0 依赖 Python 训练稳定性审计 demo。日志同时记录原始非忽略 label 数、完成目标模型 shift/mask 后的有效目标数、loss contract 和实际 denominator；分布式日志记录各 rank 的 loss numerator、denominator 与有效目标数。输出测量值、loss/grad/LR/rank 的候选异常、非有限值、AMP overflow 与跳过的 optimizer step、硬失败、运行策略违规和 unknown。所有阈值必须由本次运行显式传入，不设通用默认值；用一组不等长 rank 手算为什么全局 token mean 要按目标分母加权。
 174. 对照 Molybog 的 Adam instability 与 adaptive-preconditioner decoupling 研究，画出各自的因果链、观测量和证据边界，并设计一次固定 checkpoint 的反事实重放。
 175. 为 global norm clipping、降低 Adam β₂、SPAM 和 GradientStabilizer 设计同口径对照；报告机制、状态改动、额外超参、吞吐、目标质量和失败条件。
 176. 用逐层 activation RMS、gradient RMS、残差流 RMS 和 update/parameter ratio 比较 Post-LN、Pre-LN、DeepNorm、Peri-LN 的训练信号；说明为何架构改动应从初始化开始验证。
@@ -369,7 +369,7 @@
 67. 为一个 RAG 系统设计 reward hacking 防护表，覆盖 citation presence、citation accuracy、unsupported claim、faithfulness、人工抽检和回归集。
 68. 用 3 分钟回答“为什么 KL penalty 有用但不能根治 reward hacking”。
 68A. 解读 contrastive SDF 的 grader-sensitivity 实验：用 late checkpoint 的 87% 与 9% 计算行为差，写出配对干预、样本范围和可信区间；再说明它支持什么行为结论、不能证明什么隐藏目标或部署发生率，并比较 inoculation prompting 与 SDF 在对应研究设置中的结果。
-69. 写一个 0 依赖 Python tokenizer / 格式事故审计 demo，输入一条 system/user/assistant 多轮样本，输出 token ids、decode 前缀、assistant-only label 覆盖率、prompt loss 泄漏率、PAD loss 泄漏率、EOS 是否参与 label、训练 / 推理 template 是否一致、截断是否丢关键边界、多模态 placeholder 是否匹配和 gate pass 结论。
+69. 写一个 0 依赖 Python tokenizer / 格式事故审计 toy demo，明确它采用的模板、训练目标、结束标记和媒体映射约定；对 system/user/assistant 多轮样本输出 token IDs、decode 前缀、attention mask、loss mask、shift 后的有效目标位置、assistant 目标覆盖率、prompt loss 泄漏率、PAD loss 泄漏率、协议要求的结束边界覆盖、训练 / 推理协议兼容性和截断影响。另构造 PAD 与 EOS 共用 ID 的 batch，分别展示按 ID 和按真实 padding 位置屏蔽 labels 的差异；多模态检查按具体模型规定的 placeholder-to-feature 映射进行，允许一对多关系。指标应区分已确认、候选、unknown 和 not_applicable，不设通用 token/字符合格阈值，也不输出脱离任务合同的统一 gate pass。
 
 ### 第十四册第七章：分布式训练入门
 
@@ -1159,7 +1159,7 @@
 59. 给一次数据工程 mock interview 设计自评表，字段包含 answer coverage、metric coverage、evidence、risk coverage、trade-off depth、red flags 和 time budget。
 60. 写一个 0 依赖 Python demo，输入 4 道 mock interview 回答记录，输出每题得分、平均分、缺失框架、缺失风险和 revision plan。
 61. 用 3 分钟回答“为什么数据工程面试不是背数据集比例，而是证明你能建立可审计的数据系统”。
-62. 写一个 0 依赖 Python 数据事故审计 demo，输入 12 条 toy 样本，输出 exact duplicate group、near duplicate pair、benchmark contamination、secret / license 风险、清洗后 actual mixture、mixture shift、lineage coverage、failed gates 和 gate pass 结论。
+62. 用 10 条合成记录构造数据事故审计账本，手算精确重复率、近重复候选对率、基准测试候选命中率、许可证/secret/PII 分项、清洗后 token 配比及最大偏移、lineage 完整率和合成数据占比。逐条写明保留、去重、隔离、复核或排除理由；把候选命中与确认污染分开，在无分母时区分 `not_applicable` 与 `unknown`，不要把异质风险折成单一质量分或通用准入门禁。
 
 ## 阶段 2026-08：Frontier Model、Agent Runtime 与 Serving
 

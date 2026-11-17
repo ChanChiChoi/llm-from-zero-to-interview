@@ -143,3 +143,9 @@
 - **ReAct 原论文**：[arXiv 页面](https://arxiv.org/abs/2210.03629)，2026-11-16 复核当前页面；页面指向 v3 camera-ready 版本，摘要描述模型交错生成任务相关轨迹和动作，并从外部知识库或环境取得观察。该论文支持方法背景，不规定现代工具 API、生产轨迹 schema 或内部推理披露策略。
 - **OWASP Transaction Authorization 与 Logging Cheat Sheets**：[交易授权](https://cheatsheetseries.owasp.org/cheatsheets/Transaction_Authorization_Cheat_Sheet.html)和[日志指南](https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html)，2026-11-16 复核。交易授权指南支持确认关键交易数据、服务端执行授权、限制有效期、按操作唯一并在执行前检查；原子检查/消费和 Agent approval record 属工程推导。日志指南建议对访问令牌、密钥、敏感个人数据等移除、遮蔽、散列或加密。
 - **OpenTelemetry GenAI spans**：[当前语义约定](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-spans.md)，main 分支动态页面，2026-11-16 复核。页面建议默认不采集完整系统指令、输入和输出，可由明确配置选择采集；约定本身不落实脱敏、访问控制或留存策略。
+
+## 2026-11-17 Structured Outputs 边界复核
+
+- **来源与版本**：OpenAI [Structured Outputs 官方文档](https://developers.openai.com/api/docs/guides/structured-outputs)，动态 API 文档，访问日期 2026-11-17；阅读 schema adherence、refusal/incomplete response 和 business rule 说明。
+- **来源支持的事实**：文档说明 Structured Outputs 可约束非拒绝的完整响应符合所提供且受支持的 JSON Schema；应用仍需处理拒绝、不完整输出和 API 错误，并验证 schema 未表达的业务规则。
+- **证据等级与边界**：source-backed（OpenAI 当前公开 API 行为）。严格 schema 只约束其支持范围内的结构，不证明语义正确、动作获得授权或其他 provider 采用相同保证；API 细节应按访问时版本复核。

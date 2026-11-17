@@ -26,3 +26,9 @@
 
 - 没有测量任何真实模型的词表、规范化、编码长度、模板输出或服务可用上下文；这些必须针对明确的 tokenizer 文件、模型版本和请求模板实测。
 - BPE、WordPiece、Unigram 的概述不构成完整训练算法说明。本材料不评价特定算法在不同语言、语料或任务上的总体优劣。
+
+## 2026-11-17 tokenizer 指标与多模态映射边界
+
+- **Tokenizer 内在指标**：[No Single Tokenizer Feature Reliably Predicts Downstream Language Model Performance](https://aclanthology.org/2026.findings-emnlp.96/)，ACL Findings of EMNLP 2026；2026-11-17 复核 ACL Anthology 摘要。作者分析约 200 个覆盖 9 种语言的语言模型，报告没有单一 tokenizer 内在特征能在其测试范围内可靠预测下游模型表现。证据等级：source-backed（该模型集合、语言和任务范围内的研究分析）。边界：不能据此说所有 tokenizer 指标都无用，也不能外推为任意新模型或任务都无法预测。
+- **视觉特征连接实例**：[Visual Instruction Tuning / LLaVA](https://arxiv.org/abs/2304.08485)（arXiv:2304.08485v2，2023-12-11）描述将视觉编码器连接到语言模型的端到端多模态架构；[BLIP-2](https://arxiv.org/abs/2301.12597)（arXiv:2301.12597v3，2023-06-15）描述用轻量 Querying Transformer 连接冻结图像编码器与冻结语言模型。证据等级：source-backed（指定论文架构）。边界：两个工作展示不同视觉—语言连接方案，不能推出 placeholder 数与特征组数的一对一规则或推断其他模型的 projector 协议。
+- **RFC 3629 复核**：[第 3 节](https://www.rfc-editor.org/rfc/rfc3629#section-3)仍支持 UTF-8 使用 1–4 octet 表示一个字符；正文应明确比较 token/Unicode 码点还是 token/UTF-8 字节，不能把“每个汉字三字节”写成通则。

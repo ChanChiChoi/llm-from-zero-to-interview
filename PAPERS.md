@@ -361,8 +361,14 @@ Scaling Law、Chinchilla、数据配比、分布式训练、训练稳定性。
 7. 新的监督目标与合并路径：[OPRD v4](https://arxiv.org/abs/2606.06021v4) 对齐学生 rollout 上的中间隐藏表示；[OPTD v1](https://arxiv.org/abs/2610.28048v1) 对齐层间 log-prob 预测变化；[Training-Free OPD v2](https://arxiv.org/abs/2610.22236v2) 用共享底模专家 rollout 的二阶矩求层级最小二乘解，主要设置不等于当前学生严格 on-policy 更新。三者的目标对象、rollout 来源和证据边界不同。
 8. [Solving Without Stopping: On-Policy Distillation at Small Scale](https://arxiv.org/abs/2609.37326v1)：单独检查答案正确性、答案标记和停止/收束能力；结论绑定 Qwen3 小模型与论文的 thinking-mode 设置。
 9. 工程入口：[Thinking Machines Lab 的 OPD 实践文章](https://thinkingmachines.ai/blog/on-policy-distillation/)、[TRL DistillationTrainer](https://huggingface.co/docs/trl/en/distillation_trainer) 与 [TRL GKDTrainer](https://huggingface.co/docs/trl/en/gkd_trainer)。工程文章是团队自身实验，TRL 页面为动态文档；阅读时固定版本、代码 revision 和指标分母。
-10. [DeepSeek-V4 Technical Report v1](https://arxiv.org/abs/2606.19348v1) §5.1–5.2：领域 SFT/GRPO 专家、GRM、三类 reasoning effort、工具/思考上下文协议、多教师 reverse-KL、全词表 logit distillation 与教师调度。报告是该模型的作者披露；effort 配置、GRM schema、教师路由细节和 OPD 对照消融未完整公开，不能把其系统设计当成通用配方。
+10. [DeepSeek-V4 Technical Report v1](https://arxiv.org/abs/2606.19348v1) §5.1–5.2：领域 SFT/GRPO 专家、GRM、三类 reasoning effort、工具/思考上下文协议、多教师 reverse-KL、全词表 logit distillation 与教师调度。后续 [V4.1-Flash 技术报告 v1](https://arxiv.org/abs/2609.19969v1) §5.1、§5.2.4 补充了合成任务/交互环境数据管线及 40 多教师的全词表 OPD 披露。两份报告是不同版本的作者材料，effort 配置、完整教师路由和对照消融未完整公开，不能把系统设计当成通用配方或直接归因模型增益。
 11. 比较边界：[Model Soups](https://proceedings.mlr.press/v162/wortsman22a.html) 研究兼容 fine-tuned checkpoints 的权重平均；它与学生状态上的 logit distillation 是不同合并对象，也不能从该论文的图像/迁移实验推导出多领域 LLM 专家可直接平均。
+12. [Qwen3.5-Omni Technical Report v2](https://arxiv.org/abs/2604.15804v2) §3、§4.1：Thinker 将文本条件回答作为配对音频条件查询的回答级 OPD 目标；报告未将其描述为同一前缀上的全词表 logits 蒸馏。语音架构与 ARIA 细节见本索引的 Qwen3.5-Omni 专题。
+13. [Bernoulli On-Policy Distillation](https://arxiv.org/abs/2611.02093v1)：用 Bernoulli 交叉熵修正 sampled reverse-KL 对高置信学生 token 的梯度抑制；作者报告四种师生配置的推理汇总增益为 0.98–7.38 个百分点，任务限于指定数学基准且增益依教师而变。
+14. [Bootstrapped On-Policy Distillation](https://arxiv.org/abs/2611.13680v1)：先用 privileged reference 训练中间 OPSD 教师，再蒸馏给从初始模型重新开始的 reference-free 学生；作者报告 Qwen3/SmolLM3 的数学与代码结果，仍是受限任务和预算下的预印本证据。
+15. [Learning Dynamics of On-Policy Distillation](https://arxiv.org/abs/2611.08016v1)：将 OPD 动态拆为监督转成参数更新的 conversion 与更新改变前缀预测/rollout 的 broadcast；分析限于论文所用的少数模型和数学推理设置，不是通用控制算法。
+
+来源版本、阅读范围、结果口径和证据限制见 [OPD 新论文研究摘录](research/opd-papers-2026-11.md)。
 
 ### 对齐
 

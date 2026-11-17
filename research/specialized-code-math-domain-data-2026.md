@@ -4,6 +4,13 @@
 
 ## 代码数据
 
+### GitHub Secret Scanning 的检测范围
+
+- **来源与版本：** [Secret scanning](https://docs.github.com/en/code-security/concepts/secret-security/secret-scanning) 与 [Secret scanning detection scope](https://docs.github.com/en/code-security/reference/secret-security/secret-scanning-scope)，GitHub 动态官方文档；访问日期 2026-11-17。
+- **实际阅读范围：** 代码历史扫描说明、pattern pair 条件、push protection 限制。
+- **来源支持的事实：** 当前文档称 Secret Scanning 会扫描仓库所有分支的 Git 历史，并列出 issue、PR、discussion、wiki 和 secret gist 等扫描资源；企业还可按配置开启 public monitoring。检测依赖支持的 secret pattern、token 类型和配置。某些成对模式要求 ID 与 secret 位于同一文件并一同推送；push protection 只阻止一部分低误报、可高置信识别的模式。文档还列出超大 push、超时和旧 token 等无法拦截的情况。
+- **证据等级与边界：** source-backed（GitHub 官方产品文档）。功能可用性和覆盖随套餐、实例版本和配置变化；文档所列扫描范围不等于对所有代码、提交来源、训练派生对象或供应商数据的完整安全审计。
+
 ### rStar-Coder
 
 - **来源与版本：** NeurIPS 2025 正式论文，[会议论文页](https://papers.nips.cc/paper_files/paper/2025/hash/54e847e1dffc87a8063844b149148557-Abstract-Conference.html)，[论文 PDF](https://papers.nips.cc/paper_files/paper/2025/file/54e847e1dffc87a8063844b149148557-Paper-Conference.pdf)。

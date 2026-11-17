@@ -731,7 +731,7 @@ g(\tau)=
 
 ### 17.20 代表性研究分别解决了什么
 
-截至 2026-11-02，OPD 已不再是一个单独 loss 名称，而是一条从状态采样、教师反馈、支持集选择到梯度更新的设计链。近年的方法分别针对序列分布错位、反向 KL 的 mode collapse、后段 token 失真、学生与教师严重失配、单样本梯度方差、教师错误信号和多次尝试之间的信息浪费；这些是不同故障，修复部位也不同。
+截至 2026-11-17，OPD 已不再是一个单独 loss 名称，而是一条从状态采样、教师反馈、支持集选择到梯度更新的设计链。近年的方法分别针对序列分布错位、反向 KL 的 mode collapse、后段 token 失真、高置信学生 token 的梯度弱化、特权参考信号与学生状态的错配、教师信号转成参数更新及其对后续 rollout 的影响、单样本梯度方差、教师错误信号和多次尝试之间的信息浪费；这些是不同故障，修复部位也不同。
 
 先用统一的问题轴读这些论文，再比较各自结果：
 
@@ -769,6 +769,8 @@ g(\tau)=
 
 论文对照说明了研究者改了哪一种学习信号，公开技术报告和工程实现还补上了两个不同问题：一条训练流水线在模型开发中如何分阶段使用 OPD，以及研究目标落入代码后会变成哪些采样、显存和接口选择。技术报告提供作者自己的系统结果，工程文章提供某个实现视角，框架文档描述接口；它们都不能代替独立复现。
 
+Qwen3.5-Omni 技术报告还把 OPD 用于跨条件迁移：对音文配对查询，先取得模型在文本条件下生成的回答，再把它作为对应音频条件查询的目标，以缩小两种输入条件下的回答质量差距。报告描述的是回答级目标，没有据此披露同一前缀上的全词表分布匹配；因此它说明 OPD 思路可用于跨模态条件迁移，但不应和常见的同状态 token-logit 配方混为一谈。[Qwen3.5-Omni 技术报告 v2](https://arxiv.org/html/2604.15804v2#S4.SS1)
+
 Qwen3 的小模型路线不是“只做一次 on-policy KL”。技术报告先在 off-policy 阶段用 teacher 响应做 `/think` 与 `/no_think` 模式蒸馏，再让学生自生成序列，并将学生 logits 对齐到 Qwen3-32B 或 Qwen3-235B-A22B。表 21 从相同的 off-policy-distilled Qwen3-8B checkpoint 比较后续 RL 与 OPD：
 
 | 后续阶段 | AIME'24 accuracy %（Pass@64 %） | AIME'25 accuracy %（Pass@64 %） | LiveCodeBench v5 accuracy % | GPU-hours |
@@ -788,6 +790,16 @@ Thinking Machines Lab 的工程文章展示了另一种使用方式：在领域 
 | [Microsoft LMOps MiniLLM 实现](https://github.com/microsoft/LMOps/tree/main/minillm) | 官方仓库包含训练脚本、教师混合采样、模型并行及数据处理；README 标注示例实验使用 16×32 V100，且针对 MiniLLM 修改了 Transformers。 | 这是复现实验代码入口，不是现代训练栈的开箱即用 recipe；需核对依赖版本、数据处理、硬件规模和论文中的 checkpoint 选择条件。 |
 
 把框架配置映射回算法时，最少记录五项：rollout 由谁生成、哪些前缀被训练、teacher logits 或 log-prob 以什么粒度读取、loss 的词表/序列归一化方式、训练吞吐中是否计入生成与教师服务。若训练器只输出一个总 loss，仍需额外记录成功率、恢复率、教师调用与失败状态覆盖，否则无法判断优化了的是能力、模仿分布，还是更容易的状态子集。
+
+#### 17.20.2 2026 年 11 月的三项新诊断
+
+这三项预印本分别把问题定位到采样 token 的梯度分配、带特权参考答案的教师错配，以及 OPD 反馈环的学习动态。它们改动的对象不同，不能概括成一个“更好的 OPD loss”。
+
+| 研究 | 改动解决什么问题 | 作者报告的证据 | 证据边界 |
+| --- | --- | --- | --- |
+| [Bernoulli On-Policy Distillation（Bernoulli OPD）](https://arxiv.org/abs/2611.02093v1) | 用 Bernoulli 交叉熵直接匹配已采样 token 上的学生与教师概率，减轻 vanilla sampled reverse-KL 对高置信学生 token 的额外梯度抑制。 | 在 Qwen3-4B-Instruct-2507 教师与 Qwen3-1.7B 学生的主设置中，五基准汇总从 vanilla OPD 的 44.38 升至 51.76；四种师生组合的汇总增益为 0.98–7.38 个百分点。前四个基准用 Avg@32，MATH500 用 Avg@4。 | 结果是单篇预印本的数学推理实验，增益随教师而变；它说明修正梯度分配有帮助，不代表教师修正本身总是正确，也不构成跨任务通用配方。 |
+| [Bootstrapped On-Policy Distillation（BOPD）](https://arxiv.org/abs/2611.13680v1) | 两阶段处理 privileged reference 与 reference-free 学生的分布错配：先用带参考答案的 OPSD 训练中间教师，再由它指导从初始模型重新开始的学生，第二阶段不再给教师参考答案。 | 作者报告数学三基准均值：4B 从初始模型的 18.06% 到 23.98%，8B 从 18.70% 到 22.04%；代码四基准 Pass@1 均值分别从 44.42% 到 46.54%、48.73% 到 48.82%。 | 证据集中在 Qwen3、SmolLM3 的数学与代码任务；两阶段需要额外训练和参考数据，结果绑定论文的模型、数据与预算，尚不能推断其他任务也会受益。 |
+| [Learning Dynamics of On-Policy Distillation](https://arxiv.org/abs/2611.08016v1) | 将反馈环拆为 conversion（教师信号能否转成参数更新）与 broadcast（更新如何改变其他前缀的预测及后续 rollout），解释教师分歧大却更新有限，或局部教师一致性改善但最终推理退化的情况。 | 作者在若干数学推理设置中观察到，离线准备可以让 OPD 后续更有效，即使离线阶段本身没有显著提升 held-out 准确率；分析强调梯度范数和训练 loss 不足以单独诊断迁移。 | 机制分析限于论文所用的少数模型和数学任务；conversion/broadcast 是诊断框架，不是已验证的通用控制算法或成功保证。 |
 
 ## 四、验证迁移能力并解释失败边界
 
@@ -896,7 +908,7 @@ On-policy distillation 的价值在于让教师看到学生真正会访问的状
 
 一套可解释的 OPD 系统应分开记录学生状态分布、教师版本与信号粒度、tokenizer 和协议、verifier、过滤和权重、工具环境、缓存、教师成本、恢复成功率以及独立任务结果。长轨迹后段、学生与教师分布偏离、高熵 token 和教师高置信错误，是需要单独抽样的风险区域。
 
-2023 年 MiniLLM 与 GKD 建立了序列级和条件分布两条学生状态蒸馏路线；Qwen3 技术报告展示了 off-policy 初始化与 on-policy logits 对齐的组合流水线。2026 年 REOPOLD、TrOPD、位置偏差、熵感知、vOPD、RG-OPD 和成功/失败 peer 多 rollout 路线分别处理估计稳定性、可信监督和组内信息；OPRD、OPTD 与 TF-OPD 又把监督目标分别扩展到隐藏表示、层间预测变化和共享底模专家的无梯度合并。它们的 rollout 来源、更新方式和证据成熟度并不相同。评估还要把答案正确性与停止/收束能力分开。论文结果、厂商报告、工程文章和框架文档各有证据边界；不能压缩成“用了 OPD 就能把大模型能力传给小模型”的新闻结论。
+2023 年 MiniLLM 与 GKD 建立了序列级和条件分布两条学生状态蒸馏路线；Qwen3 技术报告展示了 off-policy 初始化与 on-policy logits 对齐的组合流水线。2026 年的 REOPOLD、TrOPD、位置偏差、熵感知、vOPD、RG-OPD 和成功/失败 peer 多 rollout 路线分别处理估计稳定性、可信监督和组内信息；OPRD、OPTD 与 TF-OPD 又把监督目标分别扩展到隐藏表示、层间预测变化和共享底模专家的无梯度合并。11 月的 Bernoulli OPD 进一步检查高置信学生 token 的梯度分配，BOPD 处理特权参考教师与 reference-free 学生的错配，Learning Dynamics 则区分监督信号如何转成参数更新、以及更新如何改变后续状态分布。它们的 rollout 来源、更新方式和证据成熟度并不相同。评估还要把答案正确性与停止/收束能力分开。论文结果、厂商报告、工程文章和框架文档各有证据边界；不能压缩成“用了 OPD 就能把大模型能力传给小模型”的新闻结论。
 
 ## 17.23 资料与进一步阅读
 
@@ -923,13 +935,17 @@ On-policy distillation 的价值在于让教师看到学生真正会访问的状
 14. [On-Policy Transition Distillation](https://arxiv.org/abs/2610.28048v1)：对齐学生 rollout 上层间 log-prob 预测增量；预印本结果需绑定论文的模型、数据、预算与评测协议。
 15. [Training-Free On-Policy Distillation](https://arxiv.org/abs/2610.22236v2)：共享底模专家的层级最小二乘合并路线；注意其主要设置使用专家 rollout，不等同于当前学生 on-policy 训练。
 16. [Solving Without Stopping: On-Policy Distillation at Small Scale](https://arxiv.org/abs/2609.37326v1)：将解题、答案标记和停止分开评估；结果限于论文的小模型与 thinking-mode 设置。
+17. [Bernoulli On-Policy Distillation](https://arxiv.org/abs/2611.02093v1)：检查高置信学生 token 的 sampled reverse-KL 梯度抑制、Bernoulli 概率差目标和教师依赖的实验结果。
+18. [Bootstrapped On-Policy Distillation](https://arxiv.org/abs/2611.13680v1)：检查 privileged reference 如何先形成中间教师，再转移给 reference-free 的新学生，以及两阶段成本和任务范围。
+19. [Learning Dynamics of On-Policy Distillation](https://arxiv.org/abs/2611.08016v1)：阅读 conversion/broadcast 分解、局部 loss 与终局结果不一致的分析，以及离线准备对后续 OPD 的作用。
 
 ### 综述、工程文章与框架文档
 
-17. [A Survey of On-Policy Distillation for Large Language Models](https://arxiv.org/abs/2604.00626)：使用 2026-10-21 修订的 v5 建立 student state、teacher feedback、policy update 的分类地图；页面标注 Work in Progress，应按在写综述阅读。
-18. [A Formula-Driven Survey and Research Agenda for On-Policy Distillation](https://arxiv.org/abs/2606.22793)：以采样动作权重、时间信用和词表质量路由拆解估计器；GAE-OPD、CR-OPD 在该文中是待研究议程，不是已验证的通用方案。
-19. [Thinking Machines Lab：On-Policy Distillation](https://thinkingmachines.ai/blog/on-policy-distillation/)：工程团队解释逐 token reverse-KL、rollout 与教师 log-prob 路径，并报告其 Qwen3-8B 行为恢复/效率实验；内部评测、模型和预算只支持该文自身结论。
-20. [TRL DistillationTrainer 文档](https://huggingface.co/docs/trl/en/distillation_trainer) 与 [GKDTrainer 文档](https://huggingface.co/docs/trl/en/gkd_trainer)：查看当前接口中的学生 rollout、chunked JSD、vLLM/HTTP teacher、`lmbda`、`seq_kd` 和 `beta` 语义；动态文档需对照固定安装版本和源码后再复现。
+20. [A Survey of On-Policy Distillation for Large Language Models](https://arxiv.org/abs/2604.00626)：使用 2026-10-21 修订的 v5 建立 student state、teacher feedback、policy update 的分类地图；页面标注 Work in Progress，应按在写综述阅读。
+21. [A Formula-Driven Survey and Research Agenda for On-Policy Distillation](https://arxiv.org/abs/2606.22793)：以采样动作权重、时间信用和词表质量路由拆解估计器；GAE-OPD、CR-OPD 在该文中是待研究议程，不是已验证的通用方案。
+22. [Thinking Machines Lab：On-Policy Distillation](https://thinkingmachines.ai/blog/on-policy-distillation/)：工程团队解释逐 token reverse-KL、rollout 与教师 log-prob 路径，并报告其 Qwen3-8B 行为恢复/效率实验；内部评测、模型和预算只支持该文自身结论。
+23. [TRL DistillationTrainer 文档](https://huggingface.co/docs/trl/en/distillation_trainer) 与 [GKDTrainer 文档](https://huggingface.co/docs/trl/en/gkd_trainer)：查看当前接口中的学生 rollout、chunked JSD、vLLM/HTTP teacher、`lmbda`、`seq_kd` 和 `beta` 语义；动态文档需对照固定安装版本和源码后再复现。
+24. [Qwen3.5-Omni Technical Report v2](https://arxiv.org/abs/2604.15804v2)：查看文本条件回答如何作为配对音频条件查询的 OPD 目标；注意报告没有将其描述为同前缀全词表 logits 蒸馏。
 
 阅读这些资料时，应分别记录论文明确报告的训练设置、方法假设、数据范围和结果指标。教师与学生的分布、verifier 的独立性、tokenizer 的兼容性、隐私边界和线上成本，任何一项没有落到当前系统的实测证据上，都不能被一句“蒸馏成功”掩盖。
 
@@ -937,6 +953,6 @@ On-policy distillation 的价值在于让教师看到学生真正会访问的状
 
 1. 令 `p_S=(0.5,0.5)`、`p_T=(0.8,0.2)`。分别计算两个动作的 sampled log-ratio、其学生期望、`D_KL(p_S||p_T)` 以及使用 `b=E[r]` 后的优势。解释为什么一次采样的 `-r` 不是独立的监督 loss，并说明教师偏好仍不能替代任务正确性验证。
 2. 给一个长度为 3 的学生 rollout，构造“当前位置 conditional KL”与“序列级 reverse-KL return-to-go”两种更新信号。指出第一个动作怎样改变后续状态，以及局部目标为什么看不到完整的时间信用。
-3. 设计一个同条件比较表，对照 MiniLLM、GKD、REOPOLD、EOPD 和成功/失败 peer 多 rollout 路线。每种方法写清问题、反馈/支持集、更新估计器、论文证据、成本或失败条件；说明为何这些公开数字不能直接排名，并避免将 peer-rollout 论文与 Multi-Teacher OPD 混称。
+3. 设计一个同条件比较表，对照 MiniLLM、GKD、Bernoulli OPD、BOPD、Learning Dynamics、EOPD 和成功/失败 peer 多 rollout 路线。分别记录目标或教师构造、状态来源、更新机制、论文证据、成本和失败条件；说明为何这些公开数字不能直接排名，并避免将 peer-rollout 论文与 Multi-Teacher OPD 混称。
 4. 根据 Qwen3 表 21 计算 OPD 与 RL 在 AIME'24、AIME'25、LiveCodeBench v5 和 GPU-hours 上的差值。写出两条结论：一条由报告数字直接支持，另一条当前证据还不能支持。然后设计一个复现方案，至少控制起始 checkpoint、teacher、rollout 数、生成长度、GPU-hours、随机种子和独立评测。
 5. 阅读 TRL DistillationTrainer 与 GKDTrainer 文档，制作“论文中的符号—框架配置—代码实现”映射，检查 rollout 源、JSD/KL 方向、loss reduction、tool-token mask、版本与生成成本。用固定版本运行一个小规模配置后，分别报告训练损失、任务成功、恢复率和生成/教师时间；未实际运行时只提交审计表，不填写模拟结果。

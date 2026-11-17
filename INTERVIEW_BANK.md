@@ -793,7 +793,7 @@
 
 78. 如何设计训练稳定性门禁？
     考察点：first bad step、loss spike、NaN / Inf、grad norm、AMP overflow、有效 label token、LR continuity、rank loss skew、checkpoint resume。
-    回答框架：每 step 记录 loss、真实 lr、grad norm、overflow、有效 label token、batch id、rank loss 和 resume 状态；门禁约束 non-finite 为 0、spike 和 grad norm 不超阈值、overflow 率可控、有效 label token 不异常、resume 后 lr 连续、rank loss skew 不过大。失败时输出 first bad step 和 failed gates，再保存 batch 做单卡 / fp32 / 小 batch 最小复现。
+    回答框架：先定义任务的 loss contract 和本次运行策略，再逐 step 保存 loss、实际 denominator、原始非忽略 labels、shift/mask 后有效目标数、真实 lr、grad norm、batch id、AMP scaler、是否跳过 optimizer update 和恢复状态；每个 rank 另记 loss numerator、denominator 与有效目标数。loss delta、梯度范数、LR 偏差和 rank mean range 先作为测量值，只有显式配置了本次运行阈值才判策略违规。非有限 loss/梯度和零有效目标属于硬失败；单次 AMP overflow 可能只让 scaler 跳过该次更新，应结合 overflow 频率、scaler 和实际更新计数判定。缺少必要分母或 rank 数据时返回 unknown。报告 first event 与 first hard failure，再保存 batch 做单卡 / fp32 / 小 batch 最小复现；不把任何固定数写成通用 gate。
 
 79. 训练 loss 快速下降但独立验证没有提升，怎样设计有区分力的最小实验？
     考察点：成功条件、竞争假设、固定 batch、label shift、mask 可见性、有效分母、反事实验证。
@@ -1238,11 +1238,11 @@
 
 9. SFT 数据怎么构造成 input 和 labels？
    考察点：messages、chat template、tokenization、label mask、ignore index。
-   回答框架：序列化对话，tokenize，labels 复制 input_ids，再把 system/user/padding token 置为 `-100`。
+   回答框架：先按目标模型模板序列化并 tokenize，再按训练目标构造 labels；有些 causal LM 训练器先复制 `input_ids`，然后屏蔽上下文或 padding 目标。assistant 头和结束边界是否监督要由任务合同决定，causal shift 由 collator 还是模型头执行也要查清。
 
 10. SFT 后模型复述用户输入或不停生成，如何从 tokenizer 和格式排查？
     考察点：chat template、special token、assistant-only mask、prompt loss leak、PAD loss leak、EOS、截断、多模态 placeholder。
-    回答框架：先打印 messages 渲染结果、token ids、decode 文本、role span、labels 和 attention mask；确认训练与推理模板一致，system/user/control/PAD 都为 ignore index，assistant 与必要 EOS 参与 loss，`eos_token_id` 和 `pad_token_id` 不混，截断没有切掉 assistant/EOS，多模态 placeholder 数量和视觉特征数量一致。
+    回答框架：先打印 messages 渲染结果、token IDs、decode 文本、role spans、attention mask、labels 和 shift 后的有效目标；核对训练与推理的角色、起始位置、结束边界和工具 schema 是否兼容。分别说明 attention mask、loss mask 与 causal shift；按任务合同决定 assistant 内容、角色头和结束标记哪些是目标。PAD 与 EOS 可以在某些协议中共用 ID，重点检查 collator 是否按 ID 屏蔽，避免把真实 EOS 一并忽略；停止行为还要核对 generation 配置。截断检查协议要求的边界，多模态则按目标模型的 placeholder-to-feature 映射、顺序和形状检查，不能用原始计数相等作通用规则。
 
 11. LoRA 和全参 SFT 有什么区别？
    考察点：参数更新范围、显存、成本、能力上限、部署。
@@ -2522,9 +2522,9 @@
     考察点：baseline mixture、单变量变化、小模型预实验、多维评估、放大验证。
     回答框架：先固定数据版本和训练 recipe，设计 baseline mixture，再单独调整代码、数学、多语言、高质量数据或合成数据比例；用通用、代码、数学、多语言、安全、事实性和人工样例评估 trade-off，最后在更大规模复验。
 
-22. 合成数据配比过高有什么风险？
+22. 合成数据怎样加入训练，何时会产生风险？
     考察点：同质化、教师偏差、模板化、事实错误、真实分布偏移。
-    回答框架：合成数据适合补稀缺能力，但比例过高会让模型拟合生成器风格和偏差，降低自然性和多样性。需要单独标记、质量过滤、去重、执行验证和 ablation，而不是无追踪混入自然语料。
+    回答框架：合成数据可以补充稀缺能力；风险取决于生成来源、验证、去重和它与真实数据的组合方式。递归地用生成数据替代真实数据，在部分研究设置中会损害覆盖或多样性；与已有真实数据累积混合的结果可能不同。应记录来源和训练阶段，用独立真实任务切片比较加入、替代和混合方案，不套用一个通用安全比例。
 
 23. 代码数据治理和普通文本治理有什么不同？
     考察点：license、secret、fork、vendor、自动生成文件、语法解析、测试、benchmark 污染。
@@ -2688,7 +2688,7 @@
 
 58. data lineage 在大模型数据治理里解决什么问题？
     考察点：source id、raw hash、processing steps、dataset version、training run、删除追溯。
-    回答框架：lineage 让样本能追溯到来源和处理路径，也能从来源追踪到哪些版本和模型使用过。它支撑污染排查、删除请求、模型行为归因和版本回滚。
+    回答框架：lineage 让样本能追溯到来源和处理路径，也能从来源追踪到哪些版本和训练批次使用过。它支持污染排查、删除请求、暴露范围调查和版本回滚；记录某来源进入了训练，不单独证明它因果性地造成某种模型行为。
 
 59. 删除请求为什么不是简单删除当前目录？
     考察点：旧版本、缓存、shard、索引、embedding、训练日志、模型处理。
@@ -2728,7 +2728,7 @@
 
 67. 如何排查一次模型效果异常背后的数据事故？
     考察点：exact / near duplicate、benchmark contamination、quality filter、secret / license / PII、mixture shift、lineage、版本回滚。
-    回答框架：先确认异常切片和最近数据版本 diff，再抽样看原始样本；随后量化重复率、近重复、评估污染、风险命中、合成数据比例、清洗后实际 mixture 和 lineage 覆盖率。若门禁失败，要隔离问题桶、回滚或重建数据版本，并用干净评估集和小规模 ablation 复验修复。
+    回答框架：先确认异常切片和最近数据版本差异，再抽样看原始样本；随后分别报告精确重复、近重复候选、评估命中、许可证/secret/PII、合成数据占比、清洗后实际 mixture 和 lineage 完整率。每项都说明扫描范围、分母和状态，把待复核候选与已确认问题分开；再隔离相应数据、决定回滚或重建，并用干净评估集和小规模 ablation 检验修复。单有 lineage 或扫描零命中不能证明没有污染或找到行为根因。
 
 ## 多模态
 
@@ -2792,13 +2792,13 @@
     考察点：projector 拼接、gated cross-attention、Perceiver Resampler、Q-Former、冻结策略。
     回答框架：先说明比较维度并不互斥：projector 处理特征维度，query/resampler 处理视觉序列长度，prefix 或 cross-attention 决定语言模型如何读取。LLaVA 原论文用可训练矩阵投影视觉特征，并将结果作为视觉 token 接入语言序列；BLIP-2 用 Q-Former 从冻结视觉特征中抽取 query，在论文示例中把 257 个视觉位置变成 32 个输出位置；Flamingo 把 Perceiver Resampler 与插入语言模型层间的 gated cross-attention 组合。比较时分别讨论训练参数、LLM 侧 token 数、细节瓶颈和架构改造，不能只按“压缩率”推断总延迟或效果。
 
-16. 为什么 VLM 的 `<image>` 占位符数量必须和图片数量一致？
+16. VLM 的 image placeholder 怎样与图像特征对齐？
     考察点：chat template、visual token 插入位置、多图引用、batch collator、label mask。
-    回答框架：`<image>` 是文本模板和视觉 token 插入位置之间的锚点。占位符少于图片数会导致图片被忽略或插入位置不确定，占位符多于图片数会让模型以为空缺位置也有视觉证据，多图时还会造成引用混乱；插入视觉 token 后 labels 也要同步对齐，避免 loss mask 错位。
+    回答框架：placeholder 是协议中的媒体位置锚点，但一个标记可能展开为多个 crop/patch 特征，查询模块也可能把大量视觉位置压成不同数量的特征。因此要按具体模型核对媒体引用、placeholder 顺序、feature 映射、张量形状及截断后的对齐；只有协议明确一对一时，placeholder 和特征组数相等才是必要检查。loss mask 与媒体映射也要分开审计。
 
 17. VLM 为什么常用 assistant-only loss mask？
     考察点：next-token loss、user/system mask、visual tokens、label shift、多模态 SFT。
-    回答框架：自回归对话 SFT 常把助手回答 token 作为目标，把用户问题、视觉条件和 padding 屏蔽；这样训练器优化回答生成，而不是复述输入。若两个正确目标 token 的概率为 `0.8` 和 `0.5`，求和 NLL 为 `-ln(0.8)-ln(0.5)=0.916` nat，按目标 token 平均为 `0.458` nat/token。有效 label 数应与协议指定的目标位置一致；助手角色标记和结束 token 是否纳入也要按模板核对。该做法是常见 SFT 目标，不是所有多模态预训练/微调任务的标准答案。
+    回答框架：自回归对话 SFT 常把助手回答 token 作为目标，把 user 内容和某些视觉条件位置作为上下文；padding 与 loss 目标的位置分别检查。若两个正确目标 token 的概率为 `0.8` 和 `0.5`，求和 NLL 为 `-ln(0.8)-ln(0.5)=0.916` nat，按目标 token 平均为 `0.458` nat/token。有效 label 数应按模型的 causal shift 与忽略值规则计算；助手角色标记和结束 token 是否纳入也要按模板核对。该做法是常见 SFT 目标，不是所有多模态预训练/微调任务的标准答案。
 
 18. 多图 VLM 输入如何做 token budget 审计？
     考察点：图片数、visual tokens、resampler、context limit、attention 二次成本。

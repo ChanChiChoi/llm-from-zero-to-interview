@@ -15,6 +15,13 @@
   - DDP 文档说明构造、forward 和输出反向传播可能形成同步点，且所有进程的参数注册顺序须相同。
 - **证据等级与边界：** source-backed（固定版本的官方 API 文档），不代表本地运行复核。Anomaly detection 的说明只保证 backward NaN 检测和 forward traceback，不等于 forward first-bad-tensor 或 Inf 检查；梯度范数检查只能指出总范数非有限；TORCH_DIST_NAN_CHECK 的接口描述限于 NaN collective buffer，不能据此推断其能定位上游算子、检查 Inf 或诊断 collective 顺序/hang。框架接口不保证应用层数据游标、随机状态或跨文件原子发布。
 
+## Hugging Face Trainer 当前公开的恢复语义
+
+- **来源与版本：** Transformers 当前在线 [`Trainer` 文档](https://huggingface.co/docs/transformers/main_classes/trainer#resuming-training)与[训练恢复教程](https://huggingface.co/docs/transformers/trainer_recipes#resume-training)，2026-11-17 查阅；文档入口是滚动的 `main` 页面，本记录不将其当作固定库版本。
+- **实际阅读范围：** Trainer `resume_from_checkpoint`、`save_only_model`、`ignore_data_skip` 和恢复教程的 Checkpointing/Resume training 段。
+- **来源支持的事实：** 文档说明 `resume_from_checkpoint` 会从 checkpoint 恢复模型、optimizer 和 scheduler 状态；教程另说明恢复时恢复 RNG state。教程称缺少 optimizer/scheduler state（例如启用 `save_only_model=True`）时 optimizer 会从头开始。`ignore_data_skip=False` 时，Trainer 会跳过已消费数据以继续旧位置；设为 `True` 则从数据起点开始以加快恢复，但文档明确说结果不会与中断前的运行相同。
+- **证据等级与边界：** source-backed（2026-11-17 的官方滚动文档快照），没有在本地运行 Trainer 验证。它描述 Trainer 公开 API，不代表任意自定义 Dataset、DataLoader worker 的内部 RNG、prefetch queue、流式数据游标或并行状态会精确恢复，也不保证跨环境 bitwise 相同。
+
 ## Adam loss spike 机制及适用范围
 
 ### Molybog 等：Adam update 与训练不稳定

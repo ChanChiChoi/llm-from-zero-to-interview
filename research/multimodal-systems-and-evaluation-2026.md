@@ -138,10 +138,12 @@ OmniCapBench：2026 年 arXiv 预印本候选；若要引用其完整指标、�
 
 ## 2026-11-11 原生音视频模型的组件边界
 
-- Qwen Team, [“Qwen3.5-Omni Technical Report”](https://arxiv.org/abs/2604.15804)，arXiv:2604.15804v2（2026-04-21）。访问日期 2026-11-11；阅读摘要、架构表、§2.5 “Designs for Streaming and Concurrency” 及相邻延迟指标定义。
+- Qwen Team, [“Qwen3.5-Omni Technical Report”](https://arxiv.org/abs/2604.15804v2)，arXiv:2604.15804v2（2026-04-21）。访问日期 2026-11-17；阅读摘要、§2.5 “Designs for Streaming and Concurrency”、§3 “Pretraining”、§4.1–4.2 及相邻延迟指标定义。
 - 来源支持：报告公开列出 AuT audio encoder、SigLIP2 vision encoder、Hybrid MoE Thinker/Talker、MTP 与流式 ConvNet Code2Wav；文本和语音通过 ARIA 单流交错约束组织。作者报告 256K context 以及特定音频/视频处理长度；报告分别定义 Thinker TTFT、Talker TTFC、稳态 TPOP 和 first-packet critical path。
+- 训练披露：§3 将预训练分为 S1 encoder alignment、S2 general、S3 long-context。S1 固定 LLM，先训练视觉/音频适配器，再训练 encoder；S2 解冻参数，序列长度 32,768，报告称约 4T token，并列出 text 0.92T、audio 1.99T、image 0.95T、video 0.14T、video-audio 0.29T；分项合计 4.29T，与“约 4T”只能按近似口径并列保留。S3 将最大长度从 32,768 提至 262,144，并提高长音频和长视频比例。
+- 后训练披露：Thinker 先用各领域 SFT/RL 专家蒸馏，再把文本条件下的回答作为对应音频条件查询的回答级 OPD 目标，之后做多轮交互对齐 RL。报告未将这一步描述为同一前缀上的全词表 logits 对齐。Talker 是独立的四阶段流程：多语言通用语音训练、高质量长上下文继续训练（最长 64K）、多语言 DPO 加规则奖励/GSPO、说话人微调。
 - 证据等级：source-backed（发布团队技术报告中的架构与测试口径）。
-- 边界：模型仍有显式音频和视觉 encoder；“native/unified/end-to-end”不等价于“encoder-free”。长度、并发和延迟数字绑定论文所述模型变体、内部 vLLM、`torch.compile`/CUDA Graph 配置及输入设置；不代表外部 API 保证或独立复现。其他模型的处理器、tokenizer 和服务接口仍需按各自 revision 核验。
+- 边界：模型仍有显式音频和视觉 encoder；“native/unified/end-to-end”不等价于“encoder-free”。阶段、数据量和目标均是单一技术报告的作者披露，不是通用训练 recipe；音文配对 OPD 的回答级目标不能推成全词表同状态蒸馏。长度、并发和延迟数字绑定报告模型变体、内部 vLLM、`torch.compile`/CUDA Graph 配置及输入设置；不代表外部 API 保证或独立复现。其他模型的处理器、tokenizer 和服务接口仍需按各自 revision 核验。
 
 
 ## 2026-11-12 VQA 官方评分实现与多模态注入评测
