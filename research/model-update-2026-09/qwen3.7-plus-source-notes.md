@@ -22,5 +22,5 @@
 ## 2026-11-17 地域与 scope 能力矩阵复核
 
 - **来源：** [Alibaba Cloud Model Studio Qwen3.7 Plus](https://www.alibabacloud.com/help/en/model-studio/qwen3-7-plus)，页面标注 Last Updated: 2026-10-11；2026-11-17 阅读 Model Capabilities 表。
-- **来源支持：** 文档在 US (Virginia) 分别列出 Global 与 US scope。Global scope 表列 `Structured Outputs` 和 `Web Search` 为 supported，US scope 表列两项为 unsupported；输入模态列也不同（Global 为 Image/Text/Video，US 为 Text/Image/Video）。China (Beijing)、Singapore (International) 与其他地域另有各自能力表。
+- **来源支持：** 文档在 US (Virginia) 分别列出 Global 与 US scope。Global scope 表列 `Structured Outputs` 和 `Web Search` 为 supported，US scope 表列两项为 unsupported。两张表的输入模态行只是列项顺序不同（Global 写作 Image/Text/Video，US 写作 Text/Image/Video）；它们列出的模态集合相同，不据此推断输入模态能力差异。China (Beijing)、Singapore (International) 与其他地域另有各自能力表。
 - **证据等级与边界：** source-backed（供应商当前动态模型/API 页面）。差异说明调用合同按 region/scope 细分；页面没有说这代表模型权重或推理质量不同。发起请求时仍需记录 endpoint 和部署范围，并以当日文档/请求结果为准。

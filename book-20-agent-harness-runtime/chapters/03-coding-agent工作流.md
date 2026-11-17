@@ -1,16 +1,12 @@
 # 第三章：Coding Agent 工作流
 
-## 0. 本讲范围与资料
+## 0. 本章范围与资料
 
-本章参考 OpenAI Agents SDK 关于 tools、guardrails、sessions、human-in-the-loop 和 tracing 的公开文档，Anthropic Claude Code 关于权限、hooks、MCP、skills 和常见工作流的公开说明，OpenHands 关于 runtime、sandbox、evaluation 和安全边界的公开资料，以及 SWE-agent / mini-SWE-agent 围绕 SWE-bench、仓库导航、工具交互和 Agent-Computer Interface 的公开资料。
+本章是面向工程任务的工作流教程，回答一个具体问题：Coding Agent 怎样从一条代码需求出发，读对仓库上下文、只改该改的内容、用合适证据确认结果，并把实际执行情况交还给用户？我们沿着第一、二章的合成认证任务完整复走一次；随后再把这条过程拆成可复用的判断方法。
 
-本章讨论防御性的 coding agent 工作流设计：如何理解任务、探索仓库、制定计划、小步修改、运行验证、使用失败反馈、保护用户改动和记录 trace。它不提供绕过权限、规避 sandbox、自动执行危险命令、读取敏感文件、批量删除仓库内容或对真实生产系统做高风险操作的技巧。
+案例中的路径、文件状态、测试输出和并发编辑都是教学构造，不是实际仓库运行记录。流程也不是每项任务都必须逐项照做的固定模板：任务风险、仓库约定、可用测试和用户授权会改变下一步动作。
 
-本章重点放在三件事：
-
-1. 把“探索 / 计划 / 编辑 / 验证”从经验流程补成可度量的工作流指标。
-2. 用 GitHub 兼容的数学公式描述任务分类、仓库探索、patch 聚焦、测试反馈和权限验收条件。
-3. 增加一个 0 依赖 Python demo，演示如何用 toy trace 审计 coding agent workflow，而不是只看最终代码 diff。
+文中引用 Anthropic Claude Code 的公开工作流说明、OpenAI Codex 的 ExecPlans 教程，以及 SWE-agent、SWE-Gate 和 ANCHOR 的论文。产品文档说明特定产品公开建议；论文证据只支持其任务、环境和评估设计范围内的结论，不自动构成所有 Coding Agent 的通用规律。
 
 ## 3.1 本章目标
 
@@ -18,47 +14,29 @@
 
 Coding agent 不是“看一眼需求，直接生成一大段代码”。真实代码库里有已有架构、隐含约束、测试体系、用户未提交改动、依赖版本、风格规范和安全边界。好的 coding agent 工作流必须先理解环境，再小步修改，最后用测试或其他证据验证。
 
-学完本章，你应该能回答：
+学完本章，你应该能：
 
-1. Coding agent 常见任务类型有哪些。
-2. 为什么工作流要先探索、再计划、再编辑。
-3. Agent 如何选择读哪些文件、跑哪些命令。
-4. 为什么小步编辑比一次性大改更可靠。
-5. 测试失败后 agent 应该如何继续修复。
-6. 工作流中哪些地方最容易出事故。
-7. 面试中如何设计一个 coding agent 的端到端工作流。
+1. 把用户目标转成可检查的结果、范围和限制，并辨认任务类型。
+2. 根据当前问题选择要读的文件和要运行的检查，不把全仓库扫描当作探索。
+3. 让每个 patch 和验证动作都能回应任务中的一个具体不确定点。
+4. 处理失败、并发修改和无法验证的情况，不把模型意图写成执行事实。
+5. 用用户能复核的方式总结改动、证据和未解决事项。
 
 ## 3.2 典型任务流程
 
-一个相对稳健的 coding agent 工作流通常是：
+一个常见工作流可以画成：
 
 ```text
 接收任务
--> 澄清目标和约束
--> 探索代码库
--> 定位相关文件
--> 制定修改计划
--> 小步编辑
--> 运行测试或静态检查
--> 根据反馈继续修复
--> 总结改动和验证结果
+-> 写清结果、范围与限制
+-> 探索当前仓库状态
+-> 形成并随证据更新计划
+-> 小步修改
+-> 验证结果与修改范围
+-> 根据反馈继续诊断，或交付
 ```
 
-展开来看：
-
-1. 用户提出任务。
-2. Agent 判断任务类型和风险。
-3. Agent 读取项目说明、目录结构、相关文件和测试。
-4. Agent 必要时向用户追问。
-5. Agent 制定一个可执行计划。
-6. Agent 选择最小修改范围。
-7. Agent 应用 patch 或编辑文件。
-8. Agent 运行相关测试、lint 或类型检查。
-9. Agent 分析失败日志。
-10. Agent 继续修复或回滚错误修改。
-11. Agent 输出最终总结，包括改了什么、如何验证、还有什么风险。
-
-工作流设计的核心原则：不要让模型在缺少上下文和验证信号时做大规模不可控修改。
+这是一个带反馈的过程，而不是单向流水线。验证发现原因不明的失败，Agent 应先回到探索；文件版本已变化，就先更新对仓库的认识，再决定是否沿用旧计划；任务目标本身不明确时，应先澄清验收条件。下文的合成任务会展示这些回退点。
 
 ## 3.3 Coding Agent 常见任务类型
 
@@ -110,17 +88,16 @@ Debug production issue：
 
 ## 3.4 任务开始：理解目标和边界
 
-Coding agent 接到任务后，不应该立即改文件。
+Coding Agent 接到任务后，先把用户的自然语言要求整理成一份足以指导下一步的任务约定（task contract）。它不必是一张表单，但至少要让 Agent 和验收者对下面几件事有共同认识：
 
-它应该先判断：
+| 要素 | 要回答的问题 | 登录修复例子 |
+| --- | --- | --- |
+| 目标结果 | 用户希望哪个可观察行为发生变化？ | 未登录的受保护请求返回 `401`，不能返回成功响应 |
+| 验收证据 | 哪个测试、检查或人工观察能支持这个结果？ | 认证回归测试断言状态码为 `401` |
+| 修改范围 | 哪些实现和测试可能需要变化？哪些内容必须保留？ | 可以检查并修改认证实现与相关测试；保留已有文档编辑 |
+| 操作限制 | 有哪些副作用、文件或命令需要额外处理？ | 不覆盖用户编辑；不改无关模块；只运行与认证相关的本地测试 |
 
-1. 用户想解决什么问题。
-2. 任务是否明确。
-3. 成功标准是什么。
-4. 有哪些不能改的边界。
-5. 是否需要先复现问题。
-6. 是否涉及危险操作。
-7. 是否需要用户补充信息。
+Agent 还要辨认哪些信息已足够、哪些仍会改变方案。如果用户只说“帮我优化这个项目”，目标和验收标准都缺失；此时可以询问想优化性能、结构、测试还是特定故障。若尚可通过只读探索澄清问题，可以先说明探索范围，不必把每个未知点都变成问题。
 
 模糊任务示例：
 
@@ -128,21 +105,21 @@ Coding agent 接到任务后，不应该立即改文件。
 帮我优化这个项目。
 ```
 
-这时 agent 不应该直接重构代码，而应该追问或先做只读探索：
+合适的追问是：
 
 ```text
-你希望优化哪一类问题：性能、代码结构、测试覆盖、启动速度还是某个具体 bug？我可以先只读检查项目结构并给出建议，不直接修改文件。
+你希望优化哪一类问题：性能、代码结构、测试覆盖、启动速度，还是某个具体 bug？在你确定目标前，我可以先只读查看项目结构和现有检查方式。
 ```
 
 明确任务示例：
 
 ```text
-修复登录接口在空密码时返回 500 的问题，并补一个测试。
+修复未登录请求仍返回成功的问题。保留工作区里已有的无关改动，只改必要实现，运行相关测试，并说明验证结果。
 ```
 
-这时 agent 可以进入 bug fix 工作流：找接口、找测试、复现、修改、验证。
+这项要求已经给出目标和主要限制，但 Agent 仍需通过仓库探索确认实际路由、测试约定和当前文件状态。任务约定不是把推测写成事实；它把已知要求和仍待确认的事实分开。
 
-任务开始阶段最重要的是不要误解目标。很多 agent 事故不是写错代码，而是从一开始就做错任务。
+任务分类也会改变“下一步应该收集什么证据”：bug fix 通常先定位失败路径并建立回归检查；feature 要先找现有接口和兼容约定；refactor 则要先知道哪些行为必须保持。误分类会导致 Agent 选择错误的探索和验收路径。
 
 ## 3.5 探索代码库：先读什么
 
@@ -158,7 +135,9 @@ Coding agent 接到任务后，不应该立即改文件。
 6. 相关接口或调用方。
 7. 项目约定文件，例如 CONTRIBUTING、AGENTS、lint 配置。
 
-不要一开始读取整个代码库。
+开始时也要查看工作区状态。`git status` 和相关文件的版本/差异能区分任务开始前已经存在的改动与本次任务的新产物。若某个目标文件已有编辑，Agent 应先读懂它并把最新内容作为基线；不能假定 Git 中的未提交改动可以丢弃。
+
+不要一开始读取整个代码库。探索要由一个待回答的问题驱动：例如“哪段代码把未认证请求变成成功响应？”于是先看路由入口、认证函数和相关测试，再按调用关系扩展到中间件或错误处理。每读一个文件都应能说明它如何缩小了问题范围，或仍留下什么未知。
 
 好的探索策略是：
 
@@ -168,25 +147,15 @@ Coding agent 接到任务后，不应该立即改文件。
 4. 再找相邻模式。
 5. 最后补缺失上下文。
 
-例子：修复登录接口 bug。
+以未登录请求错误返回成功为例，探索可按下面顺序推进：
 
-Agent 可以先搜索：
+1. 读取认证测试，确认当前失败现象、测试夹具和状态码约定。
+2. 从测试触及的接口追到 route/controller，再找到认证校验的实现。
+3. 检查错误处理如何把认证失败转换为 HTTP 响应。
+4. 查看项目里的相邻测试，确认同类错误使用 `401` 还是其他状态码。
+5. 对照工作区差异，标记用户已有编辑。
 
-```text
-login
-auth
-password
-empty password
-```
-
-然后读取：
-
-1. 登录 route/controller。
-2. auth service。
-3. 登录相关测试。
-4. 错误处理 middleware。
-
-探索阶段的输出应该是“我知道要改哪里，以及为什么”，而不是“我读了很多文件”。
+若 route 已清楚显示它调用 `require_user()`，接下来读这个函数比搜索整个仓库所有 `auth` 字样更有价值。探索的完成信号是能用文件和测试证据解释故障路径，并知道还缺哪项证据；搜索次数或读取文件数本身不能代表探索质量。
 
 ## 3.6 计划阶段：计划要短、可执行、可更新
 
@@ -198,19 +167,22 @@ empty password
 2. 要修改的文件。
 3. 修改步骤。
 4. 验证方式。
-5. 风险点。
+5. 风险点，以及什么新发现会让计划改变。
 
 示例：
 
 ```text
 计划：
-1. 阅读 auth controller 和 auth service，确认空密码如何进入校验逻辑。
-2. 在参数校验层处理空密码，避免进入下游 hash/DB 逻辑。
-3. 补充空密码返回 400 的单元测试。
-4. 运行 auth 相关测试。
+1. 阅读路由、认证函数和认证测试，确认未认证请求如何得到成功响应。
+2. 将现有失败测试作为基线；必要时补齐只断言未登录请求的回归测试。
+3. 在认证边界做最小修复，不改已有 `docs/guide.md` 编辑。
+4. 运行 `pytest -q tests/test_auth.py::test_unauthenticated_request_rejected`，预期目标断言通过。
+5. 查看目标文件 diff 和工作区状态，确认用户已有文档编辑仍保留。
 ```
 
-计划不要太长。
+这个计划说明了要读什么、为何修改、改动边界和如何判断结果。OpenAI 一篇已归档的 Codex 计划教程建议写明验证命令、工作目录、预期结果和失败信息；它是该产品的操作示例，不是所有仓库都必须采用的唯一计划格式或当前 API 规格。[OpenAI Codex：PLANS.md 教程](https://developers.openai.com/cookbook/articles/codex_exec_plans)
+
+计划不要写成越详细越好的长清单。短任务可以只用一句话记录下一步和验证方式；跨模块任务则可分阶段并保存已完成证据。
 
 坏计划：
 
@@ -224,16 +196,16 @@ empty password
 
 ## 3.7 编辑阶段：小步修改
 
-编辑阶段最重要的原则是小步、局部、可验证。
+编辑阶段最重要的原则是小步、局部、可验证。一次 patch 应对应一个可以说明的意图：比如只在认证边界返回 `401`，而不是顺手重排整个模块。
 
 推荐做法：
 
-1. 优先修改最小相关文件。
+1. 优先修改任务约定允许且确实相关的文件。
 2. 遵循现有代码风格。
 3. 不重写无关模块。
 4. 不顺手格式化大文件。
 5. 每次 patch 尽量聚焦一个意图。
-6. 修改前确认文件内容是最新的。
+6. 修改前确认文件仍是刚才理解过的版本；若版本变了，先重读再决定能否应用旧 patch。
 7. 修改后保留 diff 给用户和 trace。
 
 为什么不能一次大改？
@@ -250,11 +222,15 @@ empty password
 2. 文件修改前后进入 trace。
 3. 检测用户未提交改动。
 4. 高风险文件修改需要确认。
-5. 修改失败要返回结构化错误。
+5. 修改失败要返回结构化错误，不能静默把新文件替换成旧版本。
+
+小步修改的价值是缩短“原因—改动—反馈”之间的距离。如果一轮同时改变认证、路由、错误处理和格式，测试失败时就难以判断哪项变化造成结果。Anthropic 的 Claude Code 工作流文档在重构建议中强调分成可测试的小步并在步骤间验证；这是该产品的具体建议，实际步长仍要看仓库和任务。[Anthropic Claude Code：Common Workflows](https://code.claude.com/docs/en/common-workflows)
 
 ## 3.8 验证阶段：不验证就不算完成
 
 Coding agent 最常见的问题之一是“看起来修了，但没有验证”。
+
+验证应覆盖任务约定中的结果和副作用边界。通过相关测试可以说明被测试行为满足断言，但不能自动证明没有改错文件、没有覆盖用户编辑，或所有兼容条件都正确。
 
 验证方式包括：
 
@@ -266,32 +242,33 @@ Coding agent 最常见的问题之一是“看起来修了，但没有验证”�
 6. 手动运行最小复现命令。
 7. 对无测试项目做静态检查和代码路径解释。
 
-验证优先级：
+选择验证时要让命令和证据对应：
 
 1. 先运行最相关、最快的测试。
 2. 如果通过，再运行更大范围检查。
 3. 如果失败，读取错误日志并判断是否和本次修改相关。
-4. 如果无法运行测试，明确说明原因和替代验证。
+4. 若任务要求的检查无法运行，记录具体阻碍；用替代证据缩小未知范围，但不能把替代检查说成原测试已通过。
+5. 检查本次 diff 与任务范围，并把任务开始前就存在的改动单独识别出来。
 
-最终总结必须包含验证结果：
+最终总结必须包含实际验证结果：
 
 ```text
 验证：已运行 npm test -- auth，全部通过。
 ```
 
-如果不能验证：
+如果不能运行目标测试：
 
 ```text
 未能运行测试，因为当前环境缺少数据库服务。已补充单元测试代码，并基于现有错误处理路径做静态检查。建议在 CI 环境运行 auth test suite。
 ```
 
-不要把“我认为应该可以”说成“已验证”。
+“测试进程返回 0”是命令执行事实；“任务已接受”还取决于任务规定的其他证据。不要把“我认为应该可以”说成“已验证”。
 
 ## 3.9 测试失败后的修复循环
 
-测试失败后，agent 不应该盲目继续修改。
+测试失败是新的观察（observation），不是要求 Agent 立刻改代码的命令。先判断观察是否可信、属于哪个阶段，再选择下一步。
 
-正确流程：
+常见诊断顺序：
 
 1. 读取失败命令、exit code、stderr 和关键日志。
 2. 判断失败是否和本次修改相关。
@@ -299,8 +276,9 @@ Coding agent 最常见的问题之一是“看起来修了，但没有验证”�
 4. 如果是测试断言不匹配，读取相关测试。
 5. 如果是编译或类型错误，定位文件和行号。
 6. 制定更小修复。
-7. 修改后重新运行同一测试。
-8. 多次失败后考虑回滚或请求用户介入。
+7. 把有证据支持的最小修复写入计划。
+8. 修改后重新运行能验证该修复的检查。
+9. 若连续尝试没有缩小问题，回到探索、撤销无效改动，或请求用户补充信息。
 
 错误处理示例：
 
@@ -315,11 +293,11 @@ Agent 应该判断：
 3. 是代码错了，还是测试预期错了。
 4. 是否需要询问用户。
 
-不要为了让测试过而随便改测试。测试失败是信号，不是障碍。
+不要为了让测试过而随便改测试。若测试预期与项目约定不一致，要说明冲突并查证；若失败来自环境，就不能把它归因于 patch。重复原命令而不改变假设，也不会自动增加证据。
 
 ## 3.10 总结阶段：告诉用户什么
 
-最终回答应该简洁但完整。
+最终回答应该简洁但完整。它应让用户能把承诺、文件差异与实际验证对上。
 
 至少包含：
 
@@ -332,41 +310,21 @@ Agent 应该判断：
 示例：
 
 ```text
-已修复空密码登录返回 500 的问题。改动在 auth service 的输入校验层，对空密码提前返回 validation error，避免进入后续 hash 逻辑。补充了空密码登录的单元测试。已运行 npm test -- auth，测试通过。
+已修复未登录请求返回成功的问题，在认证边界返回 `401`。运行已有的回归测试 `pytest -q tests/test_auth.py::test_unauthenticated_request_rejected`，该测试通过；没有运行其余测试套件。保留了任务开始前已存在的 `docs/guide.md` 编辑。
 ```
 
 不要输出过长流水账。用户不需要每一步内部思考，但需要知道结果、验证和风险。
 
 ## 3.11 工作流中的权限点
 
-Coding agent 工作流中有多个权限点。
+权限判断应绑定本次任务给出的授权、仓库策略、目标路径、命令副作用和执行环境。不能用一份脱离上下文的“安全命令清单”代替策略判断。
 
-通常可自动执行：
+- 任务范围内的只读搜索、读取相关源码和查看 diff，通常不会改变仓库状态；仍要服从敏感文件和多租户隔离策略。
+- 用户明确要求修改指定仓库时，局部、可审阅的源码修改可以属于任务授权；删除、覆盖用户编辑或超出目标范围的写入需要更严格的检查。
+- 安装依赖、联网、迁移数据库、推送远程资源或运行来源不明脚本会产生额外副作用，应根据环境策略要求审批、隔离或拒绝。
+- 读取密钥、外传代码或访问生产资源需要明确、有限的授权；若策略禁止，即使模型认为它有助于调试也不能执行。
 
-1. 读取项目内普通源码文件。
-2. 搜索代码。
-3. 查看 git diff。
-4. 运行只读检查命令。
-
-通常需要确认：
-
-1. 修改文件。
-2. 删除文件。
-3. 安装依赖。
-4. 执行带网络访问的命令。
-5. 执行数据库迁移。
-6. 大范围格式化。
-7. 访问敏感文件。
-
-通常应禁止或强确认：
-
-1. 删除仓库目录。
-2. 修改系统文件。
-3. 读取密钥文件。
-4. 上传代码或数据到外部服务。
-5. 在未隔离环境运行不可信脚本。
-
-工作流设计不能只看效率，还要看操作风险。
+用户确认、工具授权和执行隔离是不同控制：确认某次动作不等于命令已被沙箱限制；沙箱可限制影响范围，但也不能代替对目标和副作用的理解。具体权限模型交第八章，本节只要求工作流在需要决定前停下来，并记录决定及其实际效果。
 
 ## 3.12 用户并发修改怎么办
 
@@ -387,6 +345,8 @@ Coding agent 和用户共享工作区。用户可能在 agent 运行过程中修
 4. 如果冲突，停止并提示用户。
 5. 不自动覆盖未知改动。
 6. Trace 中记录修改前后状态。
+
+文件修改前后要比较的不是“对话里记得的内容”，而是当前工作区版本。若发现 `src/auth.py` 从上次读取后已变化，旧 patch 就不能直接套用：先读新版本，标出用户新增内容与本任务需要的改动，再重新生成窄 patch。对于已有的 `docs/guide.md` 编辑，即使任务测试通过也要确认它仍在；若来源或所有者不清楚，不应擅自把它纳入任务 diff。
 
 面试表达：
 
@@ -415,6 +375,8 @@ Coding agent 不能假设工作区只有自己在改。编辑前要确认文件�
 5. 保留关键决策。
 6. 分批验证。
 7. 支持用户中断和恢复。
+
+Checkpoint 应记录可用于下一步决策的目标、限制、当前文件版本、已完成项、最近验证结果和待处理问题，并把这些摘要连回相应的源文件、命令回执或 trace 事件。摘要只能帮助快速恢复，不能代替恢复时重新检查可能变化的工作区或外部状态。长任务的原子性、幂等和恢复边界在第十七章展开；历史压缩如何保留证据在第十八章展开。
 
 长任务反模式：
 
@@ -445,27 +407,49 @@ Runtime 应该帮助 agent 管理长任务，而不是把所有历史都塞给�
 
 ## 3.15 一个 Bug Fix 工作流示例
 
-任务：
+先把前两章的登录认证任务当作一项真实工程工作来复走。案例沿用第一章的目标和第二章讨论的文件状态，但下面重新构造一条完整轨迹；各次文件版本、测试输出都是为了教学而设，不能当作实际仓库运行记录。
+
+用户要求：
+
+> 修复未登录请求仍然返回成功的问题。保留工作区里已有的无关改动，只改必要实现，运行相关测试，并说明验证结果。
+
+仓库中有四个与任务有关的对象：
+
+| 文件 | 起始状态 | 为什么要看 |
+| --- | --- | --- |
+| `src/routes/profile.py` | 路由入口 | 确认受保护请求经过哪段认证逻辑 |
+| `src/auth.py` | 读取时为版本 `v0` | 检查认证失败如何表示 |
+| `tests/test_auth.py` | 有一个失败的回归测试 | 记录目标行为和实际失败 |
+| `docs/guide.md` | 任务开始前已有用户编辑 | 这是应保留的既有改动，不是本任务的输出 |
+
+据此形成任务约定：未登录访问受保护路由应得到 `401`；认证用户仍能得到原有成功响应；修复只触及认证实现和必要测试；`docs/guide.md` 原样保留；最后如实报告具体测试是否运行。
+
+为让这次修改过程可跟随，合成代码路径设定为：`src/auth.py` 的认证函数在缺少凭证时构造 `status=200` 的结果，路由再把这个状态作为响应返回。已有测试把问题缩小为这一分支：未登录不应走成功状态，目标是 `401`；认证用户的成功路径应保持原状。
+
+完整轨迹如下：
+
+| 阶段 | 仓库中观察到的事实 | Agent 的决定及理由 | 可复核的结果 |
+| --- | --- | --- | --- |
+| 接收任务 | 用户给出目标，同时要求保留既有改动 | 将任务分类为 bug fix；把目标响应、测试、范围和保留项分开记录 | 任务约定，不把“已理解”当作已修复 |
+| 探索 | `git status` 显示 `docs/guide.md` 已有修改；路由调用认证函数；回归测试报告 `expected 401, got 200` | 读路由、`src/auth.py`、相关测试和错误响应约定；不扫描无关模块 | 已定位失败路径和当前行为；文档编辑记为任务前状态 |
+| 计划 | 已知修复点在认证边界，测试已有目标断言 | 先检查文件版本，再在认证边界做窄改动；运行指定回归测试；最后检查 diff 与既有文档修改 | 一份包含文件、动作、验证命令和风险的短计划 |
+| 中断与并发编辑 | Agent 暂停期间，用户把 `src/auth.py` 从 `v0` 更新为 `v1`，增加了与本次状态码判断相邻的辅助逻辑 | 旧 patch 的上下文已过期；先重读 `v1`，确认辅助逻辑含义并基于新内容重做 patch，不覆盖用户的编辑 | 新的文件版本和更新后的计划；`docs/guide.md` 仍是保留项 |
+| 复现 | 在最新文件上运行 `pytest -q tests/test_auth.py::test_unauthenticated_request_rejected`，合成输出仍是 `expected 401, got 200` | 失败证明目标路径仍未满足断言；结合路由和认证函数确认修复位置，不改测试预期 | 命令、退出码和失败断言被保存；任务仍未完成 |
+| 修改 | 最新代码路径仍让“缺少凭证”分支产生 `200` | 只把该分支改为项目约定的 `401`，不移除 `v1` 中用户新增的辅助逻辑，也不编辑文档 | 可审阅的 `src/auth.py` patch |
+| 验证 | 同一目标测试现在返回通过 | 以这条测试证明该断言成立；随后对照任务约定查看实现和测试 diff、工作区状态 | 合成结果为 `1 passed`；没有据此声称整个套件已通过 |
+| 交付 | `src/auth.py` 是本任务改动；已有测试文件只作为验证证据；`docs/guide.md` 的编辑在任务前已存在且仍保留 | 只有行为证据、修改范围和保留项都对得上，才把任务报告为完成 | 用户得到改动、实际运行的命令与结果，以及未运行更大测试套件的说明 |
+
+这条轨迹中，暂停期间的版本变化改变了下一步：如果 Agent 继续对 `v0` 应用旧 patch，可能覆盖 `v1` 的用户逻辑。它因此回到探索，更新文件事实，再继续计划。测试通过也没有结束工作流；Agent 还要检查本次 diff 与任务约定，并区分任务开始前已有的 `docs/guide.md` 编辑。
+
+**可向前复述的报告**可以是：
 
 ```text
-修复注册接口在 email 为空时返回 500 的问题，并补测试。
+已修复未登录请求返回成功的问题，在认证边界返回 401，并保留了暂停期间用户对 src/auth.py 的更新。运行已有的未登录请求回归测试
+pytest -q tests/test_auth.py::test_unauthenticated_request_rejected，结果为 1 passed。
+任务开始前已有的 docs/guide.md 编辑仍保留；本轮没有运行更大的测试套件。
 ```
 
-稳健工作流：
-
-1. 搜索 register、email、validation。
-2. 读取注册 controller/service。
-3. 读取已有注册测试。
-4. 确认错误处理约定，比如参数错误返回 400 还是 422。
-5. 复现或理解 500 来源。
-6. 在输入校验层补空 email 处理。
-7. 新增测试：空 email 返回约定错误码。
-8. 运行注册相关测试。
-9. 如果失败，读取断言和日志。
-10. 修复后重新运行。
-11. 总结改动和测试结果。
-
-这个流程的重点是：先找约定，再做最小修复，再验证。
+这里的命令输出和“1 passed”是教学构造，用来演示报告如何对应证据，并非本仓库执行结果。
 
 ## 3.16 一个 Feature 工作流示例
 
@@ -490,6 +474,8 @@ Runtime 应该帮助 agent 管理长任务，而不是把所有历史都塞给�
 
 Feature 任务最容易范围蔓延。Agent 应该避免顺手重构整个导出模块，除非用户明确要求。
 
+如果输出格式属于公开 API，验收还应覆盖现有格式未回归、CSV 内容和编码约定、错误输入处理及对应文档；“新增分支测试通过”不能替代这些由任务约定要求的兼容检查。
+
 ## 3.17 一个 Refactor 工作流示例
 
 任务：
@@ -512,458 +498,82 @@ Feature 任务最容易范围蔓延。Agent 应该避免顺手重构整个导出
 
 Refactor 的核心是保持行为一致。没有测试时，agent 应该更保守。
 
+若原有测试没有覆盖被抽取逻辑，先补行为测试或用现有调用方做对照，再分批替换。通过编译或静态检查只能说明相应检查项成立，不能单独证明重构前后行为等价。
+
 ## 3.18 工作流如何进入 Trace
 
-每个工作流步骤都应该进入 trace。
+Trace 的重点不是把 Agent 的每个 token 或屏幕内容都存下来，而是保留能区分意图、决定和实际副作用的事件。对前面的认证任务，一条精简记录可以是：
 
-Trace 应该记录：
+| 事件 | 应记录的事实 | 它回答什么问题 |
+| --- | --- | --- |
+| `task_received` | 任务目标、范围、既有工作区编辑的基线版本 | Agent 要达到什么结果，哪些改动不是它造成的？ |
+| `file_read` | 路径、文件版本/摘要、读取时间或顺序 | 计划基于哪个版本的文件？ |
+| `plan_updated` | 计划版本、更新原因、受影响步骤 | 哪条新观察改变了下一步？ |
+| `patch_applied` | 目标路径、基准版本、变更标识、执行结果 | 建议的 patch 是否真正写入？ |
+| `command_finished` | 命令、工作目录、退出码、可访问的输出引用 | 哪条检查实际执行，返回了什么？ |
+| `policy_decision` | 动作、资源范围、允许/拒绝/等待及决定依据 | 哪个动作得到授权，哪个未执行？ |
+| `task_verdict` | 任务约定、采用的证据、通过/失败/待定 | 验收结论依据是什么？ |
 
-1. 用户任务。
-2. agent 判断的任务类型。
-3. 读取了哪些文件。
-4. 搜索了哪些关键词。
-5. 计划内容和计划更新。
-6. 应用了哪些 patch。
-7. 运行了哪些命令。
-8. 命令结果。
-9. 测试失败后的修复循环。
-10. 权限确认。
-11. 最终总结。
+事件要通过 task、step 和 tool call 标识连起来。Trace 中应明确区分“模型提出读取/修改/运行命令”与“工具已经执行并返回结果”。对用户既有文件，初始状态和后续版本要可区分；对敏感内容，应按用途脱敏或只保留受控的 artifact 引用，不默认复制整段文件或终端输出。
 
-Trace 的作用：
+SWE-agent 论文把 Agent 与计算机的接口（Agent-Computer Interface, ACI）作为设计对象，报告其接口设计会影响论文所测任务上的行为和表现；它提醒我们工具接口与反馈形式值得设计和评估，但不能据此推出某种界面在所有仓库或 Agent 上都会提升结果。[SWE-agent 论文 v3](https://arxiv.org/abs/2405.15793v3)
 
-1. 用户审计 agent 做了什么。
-2. 开发者 debug agent 为什么失败。
-3. evaluation harness 回放同一任务。
-4. 收集 bad cases 和高质量成功轨迹。
-
-没有 trace 的工作流不可复盘。
+Trace 可帮助开发者还原失败、定位过时上下文，并为评估提供过程证据；它不能替代当前文件系统、测试进程或外部系统给出的事实。回放也要明确哪些是原始 artifact、哪些只是摘要。第九章进一步讨论 trace schema、回放和隐私。
 
 ## 3.19 工作流质量指标
 
-Coding agent 工作流可以被评估。
+评价 Coding Agent 工作流时，应把“任务是否完成”和“怎样完成”分开观察。任务类型、测试结果、diff 范围、用户已有改动、失败反馈和权限决定都可能影响验收，但它们不是天然同单位的分数，不宜压成一个固定综合门槛。
 
-常见指标：
+这一点也出现在近期 Coding Agent 评估研究中。SWE-Gate 在其 Python 仓库修复基准中报告：644 个通过功能测试的候选修复结果里，有 221 个未通过该基准的 review-constraint 校验，约为 34.3%。这说明在该基准定义下，功能测试通过并不保证满足所有代码审查约束；它不表示任意生产仓库或任意 Agent 都有相同错误比例。[SWE-Gate 论文 v1](https://arxiv.org/abs/2609.04167v1)
 
-1. Task success rate。
-2. Test pass rate。
-3. 平均步骤数。
-4. 平均工具调用次数。
-5. 平均 token cost。
-6. 平均 wall-clock time。
-7. 无关文件修改率。
-8. 测试未运行率。
-9. 用户确认次数。
-10. 回滚或失败恢复成功率。
-11. 危险命令拦截率。
-12. 用户满意度。
+ANCHOR 基准同时考察最终 diff 和执行轨迹，并把修改范围、步骤顺序、验证、工具使用和报告等要求表示为任务约束。它提供了一种评估设计例子：有些要求只能从过程证据判断。但论文使用的任务、Agent scaffold 和判分方法限定了结论范围，不能据此把它的约束集合当作所有项目的标准清单。[ANCHOR 论文 v2](https://arxiv.org/abs/2610.16859v2)
 
-不要只看最终成功率。
+### 3.19.1 分开记录工作流证据
 
-一个 agent 可能成功率高，但成本极高、改动范围过大、经常运行危险命令。工作流质量要同时看成功、效率和安全。
+报告一个比例之前，要先说明观察单位、分子、分母和“未运行/未知”如何处理。相同名字的指标若分母不同，就不能直接比较。
 
-### 3.19.1 关键公式与 Coding Agent 工作流指标速查
+| 观察维度 | 一个可回答的问题 | 分母或条件应说明什么 |
+| --- | --- | --- |
+| 任务验收 | 最终 artifact 是否满足任务约定？ | 明确“已判定”与“待定”任务数量；按任务类型和 verifier 分层 |
+| 功能检查 | 执行的目标检查中，多少通过？ | 仅统计实际运行的检查；另报未运行、环境失败和超时 |
+| 修改范围 | diff 是否只触及任务允许且必要的内容？ | 统计有可审阅 diff 的任务；区分预先存在的用户改动和本次改动 |
+| 失败反馈 | 有可行动失败信号时，下一步是否使用了它？ | 分母是可行动失败事件；重复失败和环境阻塞分别标记 |
+| 权限与副作用 | 高风险动作如何被允许、阻止或隔离？ | 按动作次数和严重性列出；未经授权的副作用单独呈现，不能被平均数抵消 |
+| 成本与时长 | 哪些任务更耗时、调用多或成本高？ | 按成功/失败和任务类型给分布或分位数，不只报跨任务平均值 |
 
-为了把 coding agent 工作流从“看起来挺稳”变成可评估对象，可以把第 $i$ 个任务轨迹记为：
+当任务集合和检查条件已经明确时，可以用最简单的比例描述某一维度。例如，把“目标检查通过数”记为 $N_{\mathrm{pass}}$，把“实际运行过目标检查的任务数”记为 $N_{\mathrm{run}}$，则：
 
-```math
-\tau_i=(g_i,k_i,\hat{k}_i,R_i,E_i,P_i,D_i,V_i,F_i,U_i,H_i,B_i,Y_i)
-```
+$$
+r_{\mathrm{check}}=\frac{N_{\mathrm{pass}}}{N_{\mathrm{run}}},\qquad N_{\mathrm{run}}>0
+$$
 
-其中 $g_i$ 是用户目标，$k_i$ 是真实任务类型，$\hat{k}_i$ 是 agent 判断的任务类型，$R_i$ 是完成任务必须覆盖的关键文件或证据集合，$E_i$ 是探索阶段实际读取或搜索到的文件集合，$P_i$ 是计划，$D_i$ 是实际修改集合，$V_i$ 是验证命令集合，$F_i$ 是失败反馈集合，$U_i$ 是用户已有改动集合，$H_i$ 是高风险动作集合，$B_i$ 是预算，$Y_i$ 是最终结果。
+没有运行检查的任务不进入这个分母，应另报数量和原因。这个比例只回答“运行过的目标检查有多少通过”，不能代替任务验收或 diff 审核。
 
-任务分类准确率：
+### 3.19.2 一个小型合成账本
 
-```math
-A_{\mathrm{type}}=
-\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[\hat{k}_i=k_i]
-```
+下面的四条记录纯为演示计算口径，不是实验或真实产品结果：
 
-如果 bug fix 被误判成 feature，agent 可能跳过复现；如果 refactor 被误判成 bug fix，agent 可能在没有回归测试时扩大修改范围。
+| 任务 | 最终功能检查 | Diff 范围 | 最终状态 |
+| --- | --- | --- | --- |
+| A：bug fix | 通过；初次失败日志被用于定位修复点 | 符合约定 | 接受 |
+| B：feature | 通过 | 多改了一个未要求的配置文件 | 未接受：范围违规 |
+| C：refactor | 失败 | 符合约定 | 未完成：行为检查未通过 |
+| D：依赖问题 | 未运行，所需服务不可用 | 符合约定 | 待定：缺少验收证据 |
 
-仓库探索覆盖率：
+按这四条演示记录，可以这样读：
 
-```math
-C_{\mathrm{explore}}=
-\frac{1}{N}\sum_{i=1}^{N}
-\frac{|E_i\cap R_i|}{|R_i|}
-```
+- 目标功能检查实际运行在 A、B、C 三个任务上，最终通过 2/3；D 是未运行，不能当作失败，也不能计为通过。
+- 四个可审阅 diff 中有一个范围违规，即 1/4；这条记录不能被 B 的功能测试通过抵消。
+- 三个已判定任务中有一个被接受，即 1/3；D 保持待定，因此报告还应写“另有 1/4 个任务未判定”。
 
-这里的 $R_i$ 不是全仓库，而是当前任务必须理解的最小证据集合，例如报错文件、相关实现、调用方和测试。探索覆盖率低，通常意味着 agent 在缺上下文时开始改代码。
-
-Patch 定位精确率和召回率：
-
-```math
-P_{\mathrm{patch}}=
-\frac{\sum_i |D_i\cap M_i|}{\sum_i |D_i|},
-\qquad
-R_{\mathrm{patch}}=
-\frac{\sum_i |D_i\cap M_i|}{\sum_i |M_i|}
-```
-
-其中 $M_i$ 是理想情况下应该修改的文件或代码区域集合。$P_{\mathrm{patch}}$ 低说明无关改动太多，$R_{\mathrm{patch}}$ 低说明关键修改遗漏。
-
-无关改动率：
-
-```math
-R_{\mathrm{unrel}}=
-\frac{\sum_i |D_i-M_i|}{\sum_i |D_i|}
-```
-
-无关改动包括顺手格式化、跨模块重构、依赖升级、锁文件改动和与任务无关的文档改写。它们可能让 diff 看起来更大，但不一定提升任务成功率。
-
-验证覆盖率：
-
-```math
-C_{\mathrm{val}}=
-\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[|V_i|>0]
-```
-
-测试反馈使用率：
-
-```math
-U_{\mathrm{fb}}=
-\frac{\sum_i \mathbb{1}[|F_i|>0\wedge \mathrm{used}(F_i)=1]}
-{\sum_i \mathbb{1}[|F_i|>0]}
-```
-
-测试失败不是噪声，而是工作流的 observation。一个可靠 agent 应该读取失败命令、exit code、stderr、断言差异和相关测试，再决定是修实现、修测试预期、说明环境问题，还是请求用户确认。
-
-用户改动触碰率：
-
-```math
-R_{\mathrm{user}}=
-\frac{\sum_i \mathbb{1}[D_i\cap U_i\ne \varnothing \wedge c_i=0]}
-{\sum_i \mathbb{1}[|U_i|>0]}
-```
-
-其中 $c_i$ 表示触碰用户已有改动前是否得到确认。这个指标应该接近 0；否则 agent 很容易覆盖用户刚写的代码。
-
-高风险动作保护率：
-
-```math
-C_{\mathrm{risk}}=
-\frac{\sum_i \sum_{h\in H_i}\mathbb{1}[\mathrm{blocked}(h)=1\vee \mathrm{confirmed}(h)=1]}
-{\sum_i |H_i|}
-```
-
-高风险动作包括删除、迁移、安装依赖、网络访问、访问敏感文件、写生产资源和大范围格式化。工作流不应该把这些动作只交给 prompt 自觉，而要由 runtime / harness 做权限验收条件。
-
-综合工作流验收条件：
-
-```math
-G_{\mathrm{workflow}}=
-\mathbb{1}[
-A_{\mathrm{type}}\ge \alpha_{\mathrm{type}}
-\wedge C_{\mathrm{explore}}\ge \alpha_{\mathrm{explore}}
-\wedge P_{\mathrm{patch}}\ge \alpha_{\mathrm{patch}}
-\wedge C_{\mathrm{val}}\ge \alpha_{\mathrm{val}}
-\wedge U_{\mathrm{fb}}\ge \alpha_{\mathrm{fb}}
-\wedge R_{\mathrm{user}}=0
-\wedge C_{\mathrm{risk}}\ge \alpha_{\mathrm{risk}}
-]
-```
-
-面试里可以把这套指标总结成一句话：coding agent 不是“生成代码的模型”，而是一个可审计的任务执行系统；上线前要同时证明它会选对任务策略、读对上下文、改对位置、用好测试反馈、保护用户改动、遵守权限边界，并能留下可复盘 trace。
-
-### 3.19.2 最小可运行 Coding Agent Workflow 审计 demo
-
-下面的 0 依赖脚本构造 6 条 toy coding agent trace，覆盖正常 bug fix、未探索直接编辑、无关重构、测试失败被忽略、覆盖用户改动和高风险命令未确认。它演示如何把工作流质量拆成指标，而不是只看最终 diff。
-
-```python
-from statistics import mean
-
-
-REQUIRED_TRACE_FIELDS = {
-    "task",
-    "task_type",
-    "search",
-    "read_files",
-    "plan",
-    "edits",
-    "commands",
-    "feedback",
-    "permissions",
-    "summary",
-}
-
-
-def safe_div(num, den, default=1.0):
-    return default if den == 0 else num / den
-
-
-traces = [
-    {
-        "id": "bugfix_ok",
-        "expected_type": "bugfix",
-        "predicted_type": "bugfix",
-        "required_files": {"auth.py", "test_auth.py"},
-        "expected_edits": {"auth.py", "test_auth.py"},
-        "explored_files": {"README.md", "auth.py", "test_auth.py"},
-        "plan_present": True,
-        "edited_files": {"auth.py", "test_auth.py"},
-        "commands": [
-            {"name": "pytest test_auth.py", "kind": "test", "success": True},
-            {"name": "ruff check auth.py", "kind": "lint", "success": True},
-        ],
-        "failure_used": True,
-        "final_verified": True,
-        "false_completion": False,
-        "user_modified_files": set(),
-        "touched_user_change_without_confirm": False,
-        "dependency_change": False,
-        "high_risk_actions": [],
-        "trace_fields": REQUIRED_TRACE_FIELDS,
-    },
-    {
-        "id": "direct_edit_no_explore",
-        "expected_type": "bugfix",
-        "predicted_type": "feature",
-        "required_files": {"auth.py", "test_auth.py"},
-        "expected_edits": {"auth.py", "test_auth.py"},
-        "explored_files": {"app.py"},
-        "plan_present": False,
-        "edited_files": {"app.py"},
-        "commands": [],
-        "failure_used": False,
-        "final_verified": False,
-        "false_completion": True,
-        "user_modified_files": set(),
-        "touched_user_change_without_confirm": False,
-        "dependency_change": False,
-        "high_risk_actions": [],
-        "trace_fields": {"task", "task_type", "edits", "summary", "permissions"},
-    },
-    {
-        "id": "broad_refactor_unrelated",
-        "expected_type": "refactor",
-        "predicted_type": "refactor",
-        "required_files": {"permissions.py", "test_permissions.py"},
-        "expected_edits": {"permissions.py"},
-        "explored_files": {"README.md", "permissions.py", "test_permissions.py"},
-        "plan_present": True,
-        "edited_files": {"permissions.py", "user.py", "settings.py", "pyproject.toml"},
-        "commands": [{"name": "pytest test_permissions.py", "kind": "test", "success": True}],
-        "failure_used": True,
-        "final_verified": True,
-        "false_completion": False,
-        "user_modified_files": set(),
-        "touched_user_change_without_confirm": False,
-        "dependency_change": True,
-        "high_risk_actions": [],
-        "trace_fields": REQUIRED_TRACE_FIELDS - {"feedback"},
-    },
-    {
-        "id": "test_failure_ignored",
-        "expected_type": "feature",
-        "predicted_type": "feature",
-        "required_files": {"export.py", "test_export.py"},
-        "expected_edits": {"export.py", "test_export.py"},
-        "explored_files": {"export.py", "test_export.py"},
-        "plan_present": True,
-        "edited_files": {"export.py"},
-        "commands": [{"name": "pytest test_export.py", "kind": "test", "success": False}],
-        "failure_used": False,
-        "final_verified": False,
-        "false_completion": True,
-        "user_modified_files": set(),
-        "touched_user_change_without_confirm": False,
-        "dependency_change": False,
-        "high_risk_actions": [],
-        "trace_fields": REQUIRED_TRACE_FIELDS - {"feedback"},
-    },
-    {
-        "id": "user_change_overwritten",
-        "expected_type": "bugfix",
-        "predicted_type": "bugfix",
-        "required_files": {"report.py", "test_report.py"},
-        "expected_edits": {"report.py"},
-        "explored_files": {"report.py", "test_report.py"},
-        "plan_present": True,
-        "edited_files": {"report.py"},
-        "commands": [{"name": "pytest test_report.py", "kind": "test", "success": True}],
-        "failure_used": True,
-        "final_verified": True,
-        "false_completion": False,
-        "user_modified_files": {"report.py"},
-        "touched_user_change_without_confirm": True,
-        "dependency_change": False,
-        "high_risk_actions": [],
-        "trace_fields": REQUIRED_TRACE_FIELDS - {"permissions"},
-    },
-    {
-        "id": "risky_command_missing_confirm",
-        "expected_type": "migration",
-        "predicted_type": "migration",
-        "required_files": {"schema.py", "test_schema.py"},
-        "expected_edits": {"schema.py", "test_schema.py"},
-        "explored_files": {"schema.py"},
-        "plan_present": True,
-        "edited_files": {"schema.py"},
-        "commands": [],
-        "failure_used": False,
-        "final_verified": False,
-        "false_completion": False,
-        "user_modified_files": set(),
-        "touched_user_change_without_confirm": False,
-        "dependency_change": False,
-        "high_risk_actions": [
-            {"name": "db migrate --prod", "blocked": False, "confirmed": False}
-        ],
-        "trace_fields": REQUIRED_TRACE_FIELDS - {"commands", "feedback"},
-    },
-]
-
-
-def validation_commands(trace):
-    return [cmd for cmd in trace["commands"] if cmd["kind"] in {"test", "lint", "type", "build"}]
-
-
-def failed_validation_commands(trace):
-    return [cmd for cmd in validation_commands(trace) if not cmd["success"]]
-
-
-def trace_score(trace):
-    expected = trace["expected_edits"]
-    edited = trace["edited_files"]
-    explored = trace["explored_files"]
-    required = trace["required_files"]
-    type_ok = trace["expected_type"] == trace["predicted_type"]
-    explore = safe_div(len(explored & required), len(required))
-    patch_precision = safe_div(len(edited & expected), len(edited))
-    validation_ok = bool(validation_commands(trace))
-    feedback_ok = not failed_validation_commands(trace) or trace["failure_used"]
-    user_ok = not trace["touched_user_change_without_confirm"]
-    risk_ok = all(a["blocked"] or a["confirmed"] for a in trace["high_risk_actions"])
-    trace_complete = len(trace["trace_fields"] & REQUIRED_TRACE_FIELDS) / len(REQUIRED_TRACE_FIELDS)
-    success_ok = trace["final_verified"] and not trace["false_completion"]
-    parts = [
-        float(type_ok),
-        explore,
-        float(trace["plan_present"]),
-        patch_precision,
-        float(validation_ok),
-        float(feedback_ok),
-        float(user_ok),
-        float(risk_ok),
-        trace_complete,
-        float(success_ok),
-    ]
-    return round(mean(parts), 3)
-
-
-def root_causes(trace):
-    causes = []
-    if trace["expected_type"] != trace["predicted_type"]:
-        causes.append("task_type_mismatch")
-    if (trace["explored_files"] & trace["required_files"]) != trace["required_files"]:
-        causes.append("missing_required_exploration")
-    if not trace["plan_present"]:
-        causes.append("missing_plan")
-    if trace["edited_files"] - trace["expected_edits"]:
-        causes.append("unrelated_patch")
-    if trace["dependency_change"]:
-        causes.append("unnecessary_dependency_change")
-    if not validation_commands(trace):
-        causes.append("missing_validation")
-    if failed_validation_commands(trace) and not trace["failure_used"]:
-        causes.append("test_feedback_ignored")
-    if trace["false_completion"]:
-        causes.append("false_completion")
-    if trace["touched_user_change_without_confirm"]:
-        causes.append("user_change_violation")
-    if any(not (a["blocked"] or a["confirmed"]) for a in trace["high_risk_actions"]):
-        causes.append("risky_action_without_confirmation")
-    if len(trace["trace_fields"] & REQUIRED_TRACE_FIELDS) < len(REQUIRED_TRACE_FIELDS):
-        causes.append("trace_incomplete")
-    return causes or ["pass"]
-
-
-total_edits = sum(len(t["edited_files"]) for t in traces)
-total_expected = sum(len(t["expected_edits"]) for t in traces)
-relevant_edits = sum(len(t["edited_files"] & t["expected_edits"]) for t in traces)
-unrelated_edits = sum(len(t["edited_files"] - t["expected_edits"]) for t in traces)
-validation_total = sum(len(validation_commands(t)) for t in traces)
-validation_passed = sum(sum(cmd["success"] for cmd in validation_commands(t)) for t in traces)
-failed_with_feedback = [t for t in traces if failed_validation_commands(t)]
-user_modified_runs = [t for t in traces if t["user_modified_files"]]
-all_risky = [a for t in traces for a in t["high_risk_actions"]]
-protected_risky = [a for a in all_risky if a["blocked"] or a["confirmed"]]
-
-metrics = {
-    "task_success_rate": round(mean(t["final_verified"] and not t["false_completion"] for t in traces), 3),
-    "task_type_accuracy": round(mean(t["expected_type"] == t["predicted_type"] for t in traces), 3),
-    "exploration_coverage": round(
-        mean(safe_div(len(t["explored_files"] & t["required_files"]), len(t["required_files"])) for t in traces),
-        3,
-    ),
-    "planning_coverage": round(mean(t["plan_present"] for t in traces), 3),
-    "patch_precision": round(safe_div(relevant_edits, total_edits), 3),
-    "patch_recall": round(safe_div(relevant_edits, total_expected), 3),
-    "unrelated_change_rate": round(safe_div(unrelated_edits, total_edits, default=0.0), 3),
-    "minimal_patch_rate": round(
-        mean(
-            not (t["edited_files"] - t["expected_edits"])
-            and not t["dependency_change"]
-            and len(t["edited_files"]) <= len(t["expected_edits"]) + 1
-            for t in traces
-        ),
-        3,
-    ),
-    "validation_coverage": round(mean(bool(validation_commands(t)) for t in traces), 3),
-    "test_pass_rate": round(safe_div(validation_passed, validation_total, default=0.0), 3),
-    "feedback_use_rate": round(
-        safe_div(sum(t["failure_used"] for t in failed_with_feedback), len(failed_with_feedback), default=1.0),
-        3,
-    ),
-    "user_change_violation_rate": round(
-        safe_div(
-            sum(t["touched_user_change_without_confirm"] for t in user_modified_runs),
-            len(user_modified_runs),
-            default=0.0,
-        ),
-        3,
-    ),
-    "risky_action_protection": round(safe_div(len(protected_risky), len(all_risky), default=1.0), 3),
-    "trace_completeness": round(
-        mean(len(t["trace_fields"] & REQUIRED_TRACE_FIELDS) / len(REQUIRED_TRACE_FIELDS) for t in traces),
-        3,
-    ),
-}
-
-gates = {
-    "task_success_ok": metrics["task_success_rate"] >= 0.75,
-    "type_ok": metrics["task_type_accuracy"] >= 0.9,
-    "exploration_ok": metrics["exploration_coverage"] >= 0.85,
-    "patch_ok": metrics["patch_precision"] >= 0.85 and metrics["unrelated_change_rate"] <= 0.1,
-    "validation_ok": metrics["validation_coverage"] >= 0.8 and metrics["test_pass_rate"] >= 0.8,
-    "feedback_ok": metrics["feedback_use_rate"] >= 0.8,
-    "user_change_ok": metrics["user_change_violation_rate"] == 0.0,
-    "risk_ok": metrics["risky_action_protection"] >= 1.0,
-    "trace_ok": metrics["trace_completeness"] >= 0.9,
-}
-
-ranked = sorted(
-    [(t["id"], trace_score(t), root_causes(t) == ["pass"]) for t in traces],
-    key=lambda item: item[1],
-    reverse=True,
-)
-
-print("ranked=", ranked)
-print("metrics=", metrics)
-print("root_causes=", {t["id"]: root_causes(t) for t in traces})
-print("failed_gates=", [name for name, ok in gates.items() if not ok])
-print("workflow_gate_pass=", all(gates.values()))
-```
-
-一次典型输出会显示：正常 bug fix 得分最高，但整组 workflow gate 不通过，因为样本中存在未探索直接编辑、无关重构、测试失败后 false completion、用户改动触碰和高风险命令未确认。真实 evaluation harness 也应该保留这些失败样本，而不是只展示 happy path。
+这些数值只演示分母怎样读。四个合成样本太少，也没有经过任务类型、仓库或验证策略校准，不能拿来设上线门槛。实际评估还应保存任务版本、初始仓库、Agent 与工具配置、verifier 版本及失败样本，并在第十章和第十九章讨论的条件下做可比分析。
 
 ## 3.20 面试题：Coding Agent 的典型工作流是什么
 
 回答要点：
 
 ```text
-我会把 coding agent 工作流设计成“理解任务 -> 探索代码库 -> 定位相关文件 -> 制定计划 -> 小步编辑 -> 运行验证 -> 根据反馈修复 -> 总结结果”。关键是不要让模型直接大段生成代码，而是让它先收集足够上下文，再做最小修改，并用测试、lint 或静态检查验证。整个过程要保留 trace，并对写文件、危险命令和外部访问做权限确认。
+我先把用户目标转成可观察的验收条件、修改范围和保留项，再按任务类型探索相关代码、测试和工作区状态。计划会随新证据更新；每次 patch 都要有清楚意图，并运行能验证目标行为的检查。最后我会分别核对功能证据、diff 范围和权限结果，报告实际运行过什么、还缺什么证据。Trace 用于关联决定与执行回执，但不替代文件和测试工具的事实。
 ```
 
 ## 3.21 面试题：Agent 如何决定读哪些文件
@@ -971,7 +581,7 @@ print("workflow_gate_pass=", all(gates.values()))
 回答要点：
 
 ```text
-我会让 agent 先从任务描述、报错栈、目录结构和项目配置定位入口，再用搜索找相关实现、调用方和测试。读取文件时优先读和当前任务直接相关的文件，而不是全仓库扫描。Context builder 应该保留文件路径、关键片段和行号，并在上下文过长时摘要旧信息。目标是构建最小必要上下文。
+我会从任务描述、报错栈、目录结构和项目配置定位入口，再沿调用关系查看实现、调用方和测试。先查看工作区状态，并记录文件版本或差异；每读一个文件都要回答一个具体问题。Context builder 可以保留相关路径、片段和来源，但恢复或准备写入前仍要核对文件是否变化，摘要不能当作当前文件真值。
 ```
 
 ## 3.22 面试题：Agent 修改后如何验证
@@ -979,7 +589,7 @@ print("workflow_gate_pass=", all(gates.values()))
 回答要点：
 
 ```text
-优先运行和修改范围最相关、成本最低的测试，例如单元测试或特定 test target。如果通过，再按需要运行更大范围的 lint、type check 或集成测试。如果测试无法运行，要明确说明环境限制，并提供替代验证，例如静态检查、代码路径解释或建议在 CI 中运行。不能在未验证时声称任务已完成。
+先按任务约定运行最相关的测试，并准确报告命令和结果；再看修改范围和其他验收条件是否需要 lint、type check、集成检查或人工复核。若目标测试无法运行，要报告具体阻碍和替代证据，并将仍未知的结果保留为未验证。功能测试通过不等于 diff 范围、用户并发改动和权限约束都满足。
 ```
 
 ## 3.23 小练习
@@ -992,6 +602,7 @@ print("workflow_gate_pass=", all(gates.values()))
 6. 思考 agent 测试失败三次后应该如何处理。
 7. 思考用户并发修改文件时 agent 应该如何发现和响应。
 8. 用 3 分钟回答“为什么 coding agent 要先探索再修改”。
+9. 在四个合成任务中分别记录：目标检查是否运行、diff 是否越界、失败反馈是否使用、任务是已接受还是待定；写出各比例的分母。
 
 ## 3.24 本章总结
 
@@ -1003,8 +614,9 @@ print("workflow_gate_pass=", all(gates.values()))
 2. 工作流通常包括探索、计划、编辑、验证、修复和总结。
 3. 不同任务类型需要不同策略，bug fix、feature、refactor、test writing 和 code review 不能用同一套流程粗暴处理。
 4. 小步编辑和及时验证比一次性大改更可靠。
-5. 测试失败是反馈信号，不是简单障碍。
-6. 用户并发修改、危险命令、长任务和上下文压缩都是工作流设计中的真实难点。
-7. Trace 是工作流可观测、可回放、可评估的基础。
+5. 测试失败是反馈信号；测试通过只证明对应断言，不自动证明整个任务可接受。
+6. 用户并发修改、危险命令、长任务和上下文压缩都会改变下一步决策。
+7. Trace 应区分计划、授权、工具执行与验证结果，并保护敏感数据。
+8. 评估要分别报告功能、范围、权限、成本等证据及其分母，不能用一个任意总分取代任务验收。
 
 下一章会进入工具系统与 Tool Registry，讨论 runtime 如何把 Read、Edit、Search、Bash、Apply Patch、Test Runner 等能力安全、结构化地暴露给模型。

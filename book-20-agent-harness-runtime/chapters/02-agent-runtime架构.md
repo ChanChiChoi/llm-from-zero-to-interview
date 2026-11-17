@@ -10,7 +10,7 @@
 
 ## 2.1 沿一次失败后的续跑追踪 Runtime
 
-继续使用第一章的登录认证任务。下面的 session、状态、命令输出和用户操作均为**教学构造**，不是实际产品或仓库运行记录。
+沿用第一章的任务目标和文件名，但本节展示的是另一条教学构造的恢复分支：第一章的示例走到测试通过并交付；这里把视角切到一个尚未验收的 checkpoint，专门演示中断和并发修改后的恢复。下面的 session、状态、命令输出和用户操作均为**教学构造**，不与第一章的每个事件构成同一条连续运行记录。
 
 用户重新打开一个还没有完成的会话。Runtime 读到以下初始信息：
 
@@ -18,6 +18,7 @@
 - 任务记录显示目标文件曾应用过一次 patch，但验收仍未通过。
 - 最近一次测试结果是 `expected 401, got 200`。
 - workspace 中的 `docs/guide.md` 在任务开始前已有用户修改。
+- 任务暂停后，用户又手动修改了 `src/auth.py`；这项新改动还没有进入上次 checkpoint。
 - 上次运行没有最终验收结果，因此任务不能标成完成。
 
 Runtime 需要走完下面这一轮，才能决定是否继续改代码：
@@ -28,9 +29,9 @@ Runtime 需要走完下面这一轮，才能决定是否继续改代码：
 | 2. 核对 workspace | 发现 `src/auth.py` 的文件版本与上次 checkpoint 不同 | Workspace adapter 读取当前文件状态；Task Manager 把冲突标成待检查 | Runtime 不直接重放旧 patch；真实文件状态优先于对话摘要 |
 | 3. 构造上下文 | 选择用户目标、相关测试、最新 handler 内容、前次失败输出和工作区约束 | Context Builder 负责筛选、排序和标注来源 | 上下文包含最新文件事实；无关历史和原始长日志不整段塞入请求 |
 | 4. 调用模型 | 模型请求运行指定认证测试 | Model Adapter 按当前 provider/API contract 编码请求，记录模型、协议、工具清单和请求结果 | Runtime 保存本次调用标识；模型响应尚未改变文件或启动命令 |
-| 5. 解析与授权 | 响应中出现 `run_tests`，参数指向目标测试 | Action Parser 校验动作格式和参数；Tool Registry 找到工具定义；Permission System 核对工作区与命令策略 | 合法且获准的调用才进入执行队列；格式正确不等于动作必然获准 |
+| 5. 解析与授权 | 响应中出现 `run_tests`，参数为 `{"path":"tests/test_auth.py"}`（合成示例） | Action Parser 校验动作格式和参数；Tool Registry 找到工具定义；Permission System 核对工作区与命令策略 | 合法且获准的调用才进入执行队列；格式正确不等于动作必然获准 |
 | 6. 执行并收集结果 | 测试命令返回退出码 `1`，仍报告认证断言失败 | Execution Engine 捕获退出码、stdout/stderr、执行状态与持续时间 | 此次工具调用是 `failed`；这不代表整个 task 已失败或可直接重试 |
-| 7. 持久化观察 | Runtime 把失败结果连到原始 tool call 和当前文件版本 | State Store 保存当前 task 状态；Trace Logger 追加事件 | task 更新为“验证未通过”；trace 保留“模型请求了什么、谁批准、执行器返回什么” |
+| 7. 持久化观察 | Runtime 把失败结果连到原始 tool call 和当前文件版本 | State Store 保存当前 task 状态；Trace Logger 追加事件 | task 更新为“验证未通过”；trace 保留模型请求、策略决定（如需人工审批则记录决定者）和执行器回执 |
 | 8. 选择下一步 | 模型收到新的失败 observation 后，提出重新读取 handler 再编辑 | Error Handler 判断这是可继续诊断的测试失败，并创建下一步，而不是盲目重试相同命令 | task 留在 `active`，进入新一轮 context 构造；原有失败不会被覆盖成成功 |
 
 这条运行链里有多个对象，保存它们的目的不同：session 让后续交互找回相关对话；task 记录目标与完成条件；workspace 保存实际文件；checkpoint 给中断后的恢复点；trace 记录历史事件。Runtime 必须让它们相互关联，但不能把它们压成一段可任意改写的对话摘要。
@@ -45,23 +46,23 @@ Runtime 需要走完下面这一轮，才能决定是否继续改代码：
 
 ## 2.3 一次 step 的组件链
 
-登录测试从模型提议到退出码 `1` 的过程，可以拆成以下组件关系：
+登录测试从模型提议到退出码 `1` 的过程，可以拆成以下组件关系。模型收到可用工具的 schema 后，返回一个候选调用；这里用 `run_tests` 和目标测试路径作合成示例：
 
 ```mermaid
 flowchart TD
     U["用户请求与限制"] --> S["Session Manager"]
     S --> T["Task Manager"]
     T --> C["Context Builder"]
+    R["Tool Registry"] -->|工具 schema| C
     C --> M["Model Adapter"]
     M --> L["模型响应"]
     L --> P["Action Parser"]
-    P --> R["Tool Registry"]
+    P --> R
     R --> Q{"权限策略"}
     Q -->|允许| E["Execution Engine"]
     Q -->|拒绝或待确认| H["记录决定并回送结果"]
     E --> O["结构化执行回执"]
-    O --> V["Verifier / Evaluator"]
-    H --> V
+    O --> V["Task Verifier"]
     O --> D["State Store 与 Trace Logger"]
     H --> D
     D --> T
@@ -70,24 +71,24 @@ flowchart TD
     V -->|不可安全继续| X["停止并说明状态"]
 ```
 
-图中的箭头不是单纯的数据搬运。每次交接都要保留足够的关联信息：session/task id、模型请求 id、工具调用 id、策略结果、执行器结果和当前 workspace 版本。这样 Runtime 才能回答“这个退出码属于哪次测试”“这次拒绝对应哪一个动作”“恢复后接着处理的是哪个 task”。
+图中的箭头不是单纯的数据搬运。Tool Registry 在模型调用前提供工具 schema，在动作返回后再按名称和版本解析对应的执行合同。每次交接都要保留足够的关联信息：session/task id、模型请求 id、工具调用 id、策略结果、执行器结果和当前 workspace 版本。这样 Runtime 才能回答“这个退出码属于哪次测试”“这次拒绝对应哪一个动作”“恢复后接着处理的是哪个 task”。被拒绝的动作只作为策略事件记入状态并回到下一轮上下文，不应伪装成一次工具执行或任务验收。
 
 ## 2.4 Session、Task、Workspace、Checkpoint 和 Trace
 
-多个 Agent 产品把这些状态放进相同的 session 对象里，但它们的语义仍不同。用登录任务举例：
+有些 Agent 实现会把多类状态放进同一个 session 对象，但对象被放在一起不代表语义相同。用登录任务举例：
 
 | 对象 | 它回答的问题 | 典型内容 | 不能单独证明什么 |
 | --- | --- | --- | --- |
 | **Session（会话）** | 这是哪段交互？后续输入应接到哪里？ | 对话历史、会话配置、交互标识或持久化记录 | 不自动证明发起者有权访问此会话，也不一定等于一个待办任务 |
 | **Task（任务）** | 用户想达到什么结果？现在完成到哪里？ | 目标、范围、验收条件、子任务、待处理问题、完成状态 | 不证明 workspace 里的文件仍与上次读取时相同 |
 | **Workspace（工作区）** | 当前实际文件和工具运行环境是什么？ | 文件内容、Git 状态、运行依赖、命令副作用 | 不包含模型看到过什么或用户是否批准某个动作的完整历史 |
-| **Run state / Checkpoint（运行状态/检查点）** | 中断后从什么状态继续？ | 正在等待的调用、当前 phase、审批、模型 item、序列化上下文等 | 不保证所引用的文件、进程或远程 API 副作用仍处于原状态 |
+| **Checkpoint（检查点）** | 从哪个可恢复边界继续？ | task 目标、待处理动作、最近回执、审批引用和所依赖的版本 | 不会自动恢复文件、进程或远程 API 的真实副作用 |
 | **Trace（执行轨迹）** | 过去实际发生了哪些事件？ | 请求、模型响应、动作、权限决定、工具回执、错误和终态 | 不一定是可以直接恢复运行的权威状态，也不应成为未脱敏的全量数据仓库 |
 | **Evaluation record（评估记录）** | 这次运行如何按任务规则判定？ | 初始环境、配置、verifier 结果、失败标签与测量数据 | 不把单次评估结果推广成所有任务的保证 |
 
 对同一个 session，用户可以先修登录问题，再提出一个独立代码清理任务；两个 task 可以共享某些会话历史，却应分别保存目标、验收状态和权限范围。反过来，一个长期 task 也可能跨多个交互会话继续。数据模型必须明确这些关系，不能把 session id 当作授权令牌。
 
-例如，OpenAI Agents SDK 的 SQLite Sessions 文档明确指出，session id 用于选择历史记录，本身不认证用户或授予访问权；应用仍要对每次 session 访问做授权，并保护 SQLite 文件和备份。这是 SDK 对 SQLite backend 的说明，不代表其他存储后端的合同。[OpenAI Agents SDK：Sessions](https://openai.github.io/openai-agents-python/sessions/)
+产品文档中的 `RunState` 是另一类、由具体 SDK 定义的可序列化运行对象；它可能保存该次 run 的上下文和待恢复步骤，但不能据此假设通用 checkpoint、session 历史或 workspace 也被同一对象完整保存。例如，OpenAI Agents SDK 的 SQLite Sessions 文档明确指出，session id 用于选择历史记录，本身不认证用户或授予访问权；应用仍要对每次 session 访问做授权，并保护 SQLite 文件和备份。这是 SDK 对 SQLite backend 的说明，不代表其他存储后端的合同。[OpenAI Agents SDK：Sessions](https://openai.github.io/openai-agents-python/sessions/)
 
 ## 2.5 UI、Session Manager 和 Task Manager
 
@@ -231,17 +232,29 @@ Trace 不是默认安全的黑盒。模型输入、工具参数、终端输出�
 
 一次运行可以同时有多个问题。先按 event/step id 找出第一个错误状态，再判断它导致了什么后续影响。对外部副作用结果未知时，先做对账；若无法确认安全状态，停止并请求人工处理。
 
-## 2.13 Evaluator：Runtime 内验收与离线评测
+## 2.13 任务验收与离线评测
 
-Runtime 中的 verifier/evaluator 用来检查当前任务证据，例如测试结果、diff 范围、格式规则或业务状态。它可能是确定性测试、规则检查、人工审核，也可能由模型辅助；要明确每一种信号能支持什么结论。
+Runtime 中的任务验收器（task verifier）检查当前任务证据，例如测试结果、diff 范围、格式规则或业务状态。它可能是确定性测试、规则检查、人工审核，也可能由模型辅助；要明确每一种信号能支持什么结论。模型辅助判断仍是一个信号，不会取代文件系统、测试工具或业务系统提供的事实。
 
 对认证修复任务，目标测试通过只是一个条件；还需要检查原有文档修改是否仍存在、patch 是否超出任务范围。若验收器只会运行测试，它就不能单独证明“没有覆盖用户改动”。模型说“已完成”也不能覆盖文件系统或测试工具返回的相反事实。
 
-离线 Evaluation Harness 则把固定任务、初始环境、模型/API 配置、Runtime 版本、工具和 verifier 组织成可重复比较的评估。报告应分开列出任务成功、权限拦截/违规副作用、运行时间、成本和未判定样本，并明确各项分母；不要用任意统一阈值把这些性质压成 Runtime 总分。统计方法和 Harness 归因分别见第七册、第十和第十九章。
+离线 Evaluation Harness 则把固定任务、初始环境、模型/API 配置、Runtime 版本、工具和 verifier 组织成可重复比较的评估。报告应分开列出任务成功、权限拦截/违规副作用、运行时间、成本和未判定样本，并明确各项分母；不要用任意统一阈值把这些性质压成 Runtime 总分。运行中还要保留能解释这些结果的组件级事件：
+
+| 观察点 | 需要记录的事实 | 不能直接推出的结论 |
+| --- | --- | --- |
+| Session 与租户隔离 | 调用主体、session/task/workspace、目标资源及策略允许/拒绝结果；将被阻止的越权尝试与已经发生的越界读取分开 | “没有确认泄露”不等于隔离已被证明；拒绝次数也不等于泄露次数 |
+| Phase 转移 | 转移前后状态、触发事件、违反的状态不变量和关联 step | 转移合法不代表任务目标正确，也不证明结果通过验收 |
+| Context 构造 | 来源和版本、选入/省略的关键事实、token 用量、过期信息标记 | token 用量低或窗口填得满，都不能单独证明上下文充分 |
+| Adapter、Parser 与 Registry | provider/API 版本、工具 schema 版本、协议/解析错误、未知工具、重试次数及最终结果 | 高恢复率可能掩盖上游格式问题；模型服务失败不能混成解析失败 |
+| Execution 回执 | call id、执行状态、退出码或错误、输出引用、持续时间、副作用是否已确认 | 工具返回成功不等于 task 成功；没有回执也不等于没有副作用 |
+| 恢复与 Checkpoint | 错误类别、恢复动作、恢复前后的版本、状态冲突、重复副作用和人工接管 | 重试后继续运行不代表恢复安全或结果一致 |
+| 取消与超时 | 取消请求、执行器确认、进程/外部任务状态、部分产物和未知副作用 | 发出取消请求不代表进程已经停止 |
+
+这些记录要按任务类型和失败类别解释。需要计算比例时，先说清观察单位和分母，例如一次工具调用、一个被取消的进程或一次 session 资源访问；将拒绝、执行失败、未知和不适用分开报告。单一“处理覆盖率”或总分可能掩盖低频但严重的隔离错误、重复副作用或未确认的超时；是否适合合并指标，应由明确的任务合同和证据用途决定。统计方法和 Harness 归因分别见第七册、第十和第十九章。
 
 ## 2.14 Runtime 状态机：把“下一步做什么”变成显式状态
 
-如果只用一个 `while not done` 循环，用户中断、审批等待、工具超时和模型最终回答都容易被混在一起。更稳妥的做法是给运行阶段命名，并规定能从哪里转到哪里：
+如果只用一个 `while not done` 循环，用户中断、审批等待、工具超时和模型最终回答都容易被混在一起。先把两套状态分开：Task 状态说明目标仍在进行、等待、取消还是完成；下表中的 Runtime phase 说明一次执行走到哪一步。一个 Task 可以在多个 Runtime phase 间往返，失败的工具调用也不必立刻把整个 Task 标成失败。下面给出一组示意转移：
 
 | 当前阶段 | 事件 | 下一阶段 | 说明 |
 | --- | --- | --- | --- |
@@ -249,17 +262,22 @@ Runtime 中的 verifier/evaluator 用来检查当前任务证据，例如测试�
 | `building_context` | 输入准备完毕 | `calling_model` | 对本轮 context 与工具清单建立版本/引用 |
 | `calling_model` | 模型响应完成 | `parsing_action` | 区分文本、工具动作、拒绝、超时和不完整响应 |
 | `parsing_action` | 动作结构合法 | `checking_policy` | 仍要检查 schema 外的任务语义和权限 |
-| `parsing_action` | 格式无效 | `recovering` 或 `failed` | 根据可修复性决定反馈还是停止 |
+| `parsing_action` | 格式无效 | `recovering` 或 `stopping` | 根据可修复性决定反馈还是停止 |
 | `checking_policy` | 允许 | `executing` | 执行前核对参数、工作区版本和资源限制 |
 | `checking_policy` | 需要确认 | `waiting_for_approval` | 挂起具体调用，不把 task 误写成失败 |
 | `checking_policy` | 拒绝 | `updating_state` | 记录无副作用的拒绝事件并回送 observation |
-| `waiting_for_approval` | 批准/拒绝/取消 | `executing` / `updating_state` / `cancelled` | 决定绑定本次调用，不默认沿用到无关动作 |
+| `waiting_for_approval` | 批准/拒绝/取消 | `checking_policy` / `updating_state` / `cancelling` | 批准只绑定本次调用；恢复后仍要复核参数、任务范围和 workspace 状态 |
+| `updating_state` | 拒绝结果和原因已持久化 | `building_context` | 将决策作为 observation 交给下一轮，或按任务策略停止 |
 | `executing` | 收到明确结果 | `recording_result` | 保存执行状态和产物变化 |
 | `executing` | 超时或连接丢失 | `reconciling` | 先检查副作用状态，不能直接假定成功或失败 |
+| `reconciling` | 副作用已核实 | `recording_result` | 把核对到的外部状态作为实际结果保存 |
+| `reconciling` | 副作用仍无法确认 | `stopping` | 保持 unknown 并转人工处理，不要伪造确定结果 |
 | `recording_result` | 状态保存完成 | `verifying` 或 `building_context` | 任务内验证，或继续下一轮模型决策 |
 | `verifying` | 条件满足 | `completed` | 记录具体证据，而非只记录模型的完成声明 |
 | `verifying` | 条件不满足且可继续 | `building_context` | 将失败原因和最新状态交回下一轮 |
-| 任意可取消阶段 | 用户取消 | `cancelling` → `cancelled` | 停止后续动作并确认运行中的进程/工具状态 |
+| `verifying` | 条件不满足且不可安全继续 | `stopping` | 保留缺少的证据和停止原因，不输出完成声明 |
+| `stopping` | 状态与停止原因已持久化 | `stopped` | Task Manager 另行记录 `failed` 或 `interrupted` 等任务状态 |
+| 任意可取消阶段 | 用户取消 | `cancelling` → `cancelled` | 停止后续动作并确认运行中的进程/工具状态；Task 状态单独记录 |
 
 状态机使 Runtime 可以拒绝非法转移，例如在工具调用仍 pending 时标记 `completed`，或在写入结果未对账时恢复旧 checkpoint。它也为并发事件、重试和审计提供一致边界。实际产品可以有不同状态名，但须明确终态、等待态和未知结果的含义。
 
@@ -271,6 +289,8 @@ Runtime 中的 verifier/evaluator 用来检查当前任务证据，例如测试�
 - 两个 patch 同时写同一文件，必须有版本校验或串行化；否则第二个 patch 可能基于旧内容覆盖第一个结果。
 - 多个互不相关但有副作用的 API 调用，应检查权限、幂等键、审批和部分成功后的补偿方案后再并行。
 - 一个工具超时后，即使 Runtime 已停止等待，也要追踪它是否还在执行；取消请求也需要执行器确认，不只是更新 UI 上的文字。
+
+例如，两个 worker 都从 `src/auth.py` 的版本 `v0` 生成 patch。第一个 patch 写入后，文件变成 `v1`；第二个 patch 若仍以 `v0` 为基准，就不能直接覆盖。Execution Engine 应在写入前比较基准版本，发现当前为 `v1` 后拒绝旧 patch 并触发重新读取/合并。版本检查把并发冲突变成可处理的失败；没有这一步，两个单独看来都成功的写入仍可能丢掉其中一个改动。
 
 用户取消后，Runtime 应阻止新动作发出，向正在运行的执行器发送取消，等待并记录已知结果，再持久化终态或“副作用状态未知”。取消不能撤销已完成的写入、已发送的邮件或已提交的远程任务；若无法安全回滚或确认，就需要对账或人工接管。
 
@@ -288,7 +308,7 @@ Runtime 中的 verifier/evaluator 用来检查当前任务证据，例如测试�
 
 以上是 OpenAI 文档在 2026-11-17 的公开产品比较，不是所有 provider 都有同名接口，也不说明三种模式保存同一类状态。OpenAI 文档还特别指出，Agents API session、SDK session、Responses conversation 和 sandbox 是不同资源。选择接口时，应把“谁管理 loop、谁保存历史、谁执行工具、谁拥有文件、谁恢复外部副作用”分别写入设计，而不是只在配置中记录一个 model id。[OpenAI Agents：Runtime options](https://developers.openai.com/api/docs/guides/agents)，[Agents API overview](https://developers.openai.com/api/docs/guides/agents-api/overview)
 
-跨 provider 的 API 兼容、地域/scope 和能力差异会在后续专题核验。例如 Qwen3.7 Plus 的官方页面按 region 与 deployment scope 列功能支持；完整能力矩阵应放在第二十二章讨论，避免把单一 provider 的合同写成 Runtime 通则。
+跨 provider 的 API 兼容、地域/scope 和能力差异会在后续专题核验。例如，Qwen3.7 Plus 的[官方能力表](https://www.alibabacloud.com/help/en/model-studio/qwen3-7-plus)按 region 与 deployment scope 列功能支持：页面列出的 Virginia Global 与 US scope 在 Structured Outputs 和 Web Search 支持上不同。这个 2026-11-17 核验的供应商合同会在[第二十二册第 47 章《主流平台工具协议对比》](../../book-22-tool-protocol-ecosystem/chapters/47-主流平台工具协议对比-openai-anthropic-google-langchain-llamaindex.md)复核，不能把单一 provider 的能力写成 Runtime 通则。
 
 ## 2.17 面试题：Agent Runtime 怎样设计
 
