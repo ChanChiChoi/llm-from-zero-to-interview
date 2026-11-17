@@ -236,3 +236,26 @@ vLLM v0.32.0 的客户端/服务端指标定义：active，已固定对应 relea
 - **实际阅读位置**：DistServe 摘要、§6 evaluation 及 OPT-66B summarization 结果；TaiChi 摘要、SLO 区域动机及性能评估摘要。
 - **来源支持的事实**：DistServe v3 报告多种模型、任务与 latency requirement 中最高 7.4× request rate 或 12.6× tighter SLO，并以超过 90% SLO attainment 为目标；其 OPT-66B/LongBench summarization 对 vLLM 的具体比较为 4.3× request rate 和 12.6× 更严格 SLO。TaiChi v1 报告在 balanced TTFT/TPOT SLO 条件下 goodput 相对 state-of-the-art 最高提高 77%；其论文机制是在 prefill-heavy/decode-heavy instance、chunk 与请求调度之间调节，使系统在共置与完全解耦之间形成 hybrid。
 - **证据等级与边界**：`source-backed`（论文/预印本作者结果）。两个系统使用不同模型、trace、SLO 和指标，不可合成单一排行榜；倍数只在论文对照和 attainment 口径下成立。
+
+## 2026-11-17 vLLM v0.33.0 指标、调度与缓存边界
+
+### 固定版本的 benchmark 与服务端指标
+
+- **来源与版本**：[vLLM v0.33.0 release](https://github.com/vllm-project/vllm/releases/tag/v0.33.0)，[Benchmark CLI](https://docs.vllm.ai/en/v0.33.0/benchmarking/cli/)，[Production Metrics](https://docs.vllm.ai/en/v0.33.0/usage/metrics/)；访问日期 2026-11-17。只记录该固定 release 的公开定义，不以滚动 `latest` 页代替。
+- **实际阅读位置**：Benchmark CLI 的 “Understanding the Latency Metrics” 与 “Saving Server-Side Per-Request Metrics”；Production Metrics 中 request latency、TTFT、ITL/TPOT、KV usage 与 residency metric families。
+- **来源支持的事实**：该版 `vllm bench serve` 的客户端 TTFT 从发出请求到收到首个 streamed output；ITL 按成功请求里相邻 streamed outputs 的 gap 记录；TPOT 先逐请求按 `(E2E-TTFT)/(output_tokens-1)` 计算，再按请求聚合。单个 streamed output 可携带多个 speculative-decoding token，此时 ITL 只统计输出事件间隔，TPOT 则把 decode 总时间摊到所有输出 token，两者并不等价。逐请求结果中的 `server_queue_times` 是服务端 scheduler wait，`server_ttfts` 是 scheduling 到 first-token generation；客户端 TTFT 约由这两项与 frontend/network overhead 组成。文档将 server-side per-request metrics 的高并发 CPU 开销列为诊断限制。生产 metrics 页面暴露 request end-to-end、queue、inference、prefill/decode、TTFT、ITL/TPOT、KV usage 和 preemption 等类别；KV residency histogram 为抽样/可选项。
+- **证据等级与边界**：`source-backed`（固定 release 的官方文档）。客户端、服务端、设备生成和界面渲染各自有不同测量点；不同工具的字段名不能代替公式、事件边界、聚合方法和特殊值约定。开启诊断指标后的观测开销不应与无诊断开销的 headline benchmark 混为一谈。
+
+### Chunked prefill 的预算取舍
+
+- **来源与版本**：[vLLM v0.33.0 Optimization and Tuning](https://docs.vllm.ai/en/v0.33.0/configuration/optimization/)，访问日期 2026-11-17。
+- **实际阅读位置**：`Preemption`、`Chunked Prefill` 和 `Performance Tuning with Chunked Prefill`。
+- **来源支持的事实**：文档描述 vLLM V1 在支持时启用 chunked prefill；调度优先处理待 decode 请求，再用 `max_num_batched_tokens` 的余量排入 prefill，无法整体放入的 prefill 可被切块。文档说明较小预算在其配置中有利于 ITL，较大预算可改善 TTFT；并建议特定小模型/大 GPU 工作负载采用更高预算以追求吞吐。
+- **证据等级与边界**：`source-backed`（v0.33.0 官方配置指南）。参数方向受模型、GPU、输入分布、调度器版本和目标指标约束；文档中的取值建议不能作为跨环境的固定参数。
+
+### 前缀缓存收益与多租户风险
+
+- **来源与版本**：[vLLM v0.33.0 Automatic Prefix Caching](https://docs.vllm.ai/en/v0.33.0/features/automatic_prefix_caching/)、[Prefix Caching design](https://docs.vllm.ai/en/v0.33.0/design/prefix_caching/) 与 [Security](https://docs.vllm.ai/en/v0.33.0/usage/security/)；访问日期 2026-11-17。
+- **实际阅读位置**：APC 的 `Limits`；设计文档的 block hashing、extra hashes 与 “Cache Isolation for Security”；安全文档的 “Multi-Tenant Deployments” 和 “Prefix Cache Timing Side-Channel Mitigation”。
+- **来源支持的事实**：前缀缓存可复用相同 token 前缀的 KV blocks，从而跳过共享前缀的 prefill；文档明确其不缩短生成新 token 的 decode。v0.33.0 设计文档说明可选请求参数 `cache_salt` 混入首个 block hash，使不同盐值的请求不能复用同一前缀块。安全文档另明确：同一 server process 中的不同租户共享调度和缓存，`cache_salt` 只降低特定跨租户风险而非隔离边界，调用者身份认证和盐值范围应由可信网关/部署架构管理。
+- **证据等级与边界**：`source-backed`（固定版本官方功能、设计和安全文档）。缓存是否提升吞吐取决于匹配前缀和 prefill 占比；盐值的具体端点、生成与传递行为应在目标 release 核对，不能把它当成独立授权或进程隔离机制。

@@ -76,3 +76,10 @@
 - **来源与版本：** 原 [OpenTelemetry GenAI events 页面](https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-events/) 已标记迁移且不再维护；迁移目标为 OpenTelemetry [GenAI semantic conventions repository](https://github.com/open-telemetry/semantic-conventions-genai)，本次实际阅读 [gen-ai-events.md](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-events.md)，分支为 `main`，核验日期 2026-11-03。
 - **来源支持的事实：** 当前文档定义 `gen_ai.evaluation.result` 事件，用于记录对 GenAI 输出进行质量、准确性或其他属性评价的结果；定义 `gen_ai.evaluation.name`、`gen_ai.evaluation.score.label`、`gen_ai.evaluation.score.value`、`gen_ai.evaluation.explanation`，并建议在 span ID 不可用时用 `gen_ai.response.id` 关联被评价输出。
 - **证据边界：** 仓库将语义规范标为 Development，字段要求和实现支持仍会变化；遥测字段只帮助关联评分结果，不定义正确性、gold label 或 grader 效度。事件还可能包含内容或评价解释，接入前须单独做敏感数据与留存控制。
+
+
+### 2026-11-17 补充核验：benchmark 饱和研究
+
+- **来源与版本：** Akhtar et al., [When AI Benchmarks Plateau: A Systematic Study of Benchmark Saturation](https://arxiv.org/abs/2602.16763)，arXiv v4 页面；2026-11-17 复核摘要及既有研究范围记录。
+- **来源支持：** 作者分析 60 个来自主要模型技术报告的 LLM benchmark，按其饱和定义报告近半数已饱和，并观察到饱和随 benchmark 年龄增加；在该分析中，隐藏与公开测试集的饱和比例未显示保护差异。
+- **证据边界：** 这是按作者指标对公开报告的观察性研究，不建立年龄导致饱和的因果关系，也不表示隐藏集不能降低直接题目曝光或调参风险。隐藏性、分辨率、训练隔离和目标任务代表性是不同属性。
