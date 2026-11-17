@@ -149,3 +149,18 @@
 - **来源与版本**：OpenAI [Structured Outputs 官方文档](https://developers.openai.com/api/docs/guides/structured-outputs)，动态 API 文档，访问日期 2026-11-17；阅读 schema adherence、refusal/incomplete response 和 business rule 说明。
 - **来源支持的事实**：文档说明 Structured Outputs 可约束非拒绝的完整响应符合所提供且受支持的 JSON Schema；应用仍需处理拒绝、不完整输出和 API 错误，并验证 schema 未表达的业务规则。
 - **证据等级与边界**：source-backed（OpenAI 当前公开 API 行为）。严格 schema 只约束其支持范围内的结构，不证明语义正确、动作获得授权或其他 provider 采用相同保证；API 细节应按访问时版本复核。
+
+## 2026-11-17 间接提示注入结果与轨迹隐私复核
+
+- **研究来源**：[Ignored, Not Refused: What Low Prompt-Injection Success Rates Hide in Small Tool-Using Agents](https://arxiv.org/abs/2610.23254)，v1，2026-10-16 提交；2026-11-17 阅读摘要、研究设计、结果和局限。
+- **实际阅读位置**：研究设计与威胁模型、AgentDojo/InjecAgent 样本说明、失败行为分类、Attack–Task Outcome Matrix、局限。
+- **来源支持的事实**：作者对 11 个 2B—14B 开源 Agent 在两个合成单 Agent benchmark 中的 33,000 条轨迹做 LLM-judge 行为审计；报告 benchmark 记为“攻击失败”的轨迹可进一步分为忽略注入、显式拒绝、机械故障或部分/完整服从。作者在其样本中观察到，低攻击成功率不必然表示显式拒绝或完成了用户任务，并建议同时报告行为和任务结果。
+- **证据等级与边界**：当前按 arXiv 预印本记录，不据此宣称独立复现或生产验证。研究只使用静态注入、两个合成单 Agent benchmark、小型开源模型和指定工具脚手架，采用一个经人工标签核验的 LLM judge；没有证明对自适应/白盒攻击、多 Agent 或真实生产环境的韧性。论文中的比例不能外推到其他模型、部署或任务。
+
+- **OpenAI Agents SDK Tracing**：[官方动态文档](https://openai.github.io/openai-agents-python/tracing/)，2026-11-17 访问；阅读敏感数据、trace processors 与 redaction before export 部分。
+- **来源支持的事实**：当前文档写明 `trace_include_sensitive_data` 默认值为 `True`；通过 `add_trace_processor()` 增加的处理器不会移除默认 exporter。处理器回调异常会被捕获并继续调用其他 processor，因此单独注册的脱敏处理器失败时，不能阻止另一个 exporter 收到原始数据。文档建议依赖脱敏成功时，在同一应用自有 exporter 内完成脱敏和发送，并在脱敏失败时丢弃该批次。
+- **证据等级与边界**：source-backed（访问日官方 SDK 文档）；此结论绑定动态页面所描述的 OpenAI Agents SDK 实现，不代表其他 tracing SDK。不能据此确认任一本地部署的版本、配置、exporter 顺序或数据已经安全脱敏，需核实实际锁定版本和运行配置。
+
+- **OpenTelemetry GenAI spans**：[开发中的语义约定](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-spans.md)，动态 `main` 页面，2026-11-17 访问；复核 status、content capture configuration 与 external storage 部分。
+- **来源支持的事实**：页面将该约定标为 Development；模型指令、输入、输出和工具调用参数/结果内容需要显式选择采集，默认 `NO_CONTENT`。该约定不规定外部对象的访问机制、留存期限或存储布局。
+- **证据等级与边界**：source-backed（动态开发中语义约定）；需固定访问时 commit/SDK 才能复核具体实现。约定本身不落实脱敏、权限、留存或目标系统的合规义务。

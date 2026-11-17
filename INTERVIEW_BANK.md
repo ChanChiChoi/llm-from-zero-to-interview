@@ -3331,7 +3331,7 @@
 
 40B. 如何设计一个 Agent 落地事故审计 demo？
     考察点：trace、tool schema、permission、confirmation、budget、injection boundary、gate。
-    回答框架：构造小型 Agent trace 集，覆盖工具失败却声称完成、结构合法但资源归属错误、缺少高风险确认、工具结果携带不可信指令、循环调用超预算和 trace 缺失。逐条记录任务验收、真实副作用状态、权限与确认、预算和日志证据，找出第一处偏离，决定重读状态、幂等重试、补偿、只读降级或人工接管。分别报告有明确定义的分子/分母，未知不得折算为通过，也不合成通用 Agent 分数。
+    回答框架：构造小型 Agent trace 集，覆盖工具失败却声称完成、结构合法但资源归属错误、缺少高风险确认、工具结果携带不可信指令、循环调用超预算和 trace 缺失。逐条记录任务验收、真实副作用状态、权限与确认、预算和日志证据，找出第一处偏离，决定重读状态、幂等重试、补偿、只读降级或人工接管。注入样本要分别报告攻击副作用结果 S 和用户任务结果 U，并把危险提议、被阻断动作和实际副作用分开；各指标使用明确分子/分母，未知不得折算为通过，也不合成通用 Agent 分数。
 
 40C. 如何设计一个最小 Coding Agent Harness？
     考察点：runtime、action parser、tool registry、permission gate、sandbox、trace、replay、evaluation。

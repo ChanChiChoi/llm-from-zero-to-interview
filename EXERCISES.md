@@ -597,7 +597,7 @@
 127. 设计一个 RAG error attribution 表，覆盖解析、chunk、retrieval、rerank、context、generation、citation、permission。
 128. 设计一个企业 RAG 权限控制方案，说明过滤应发生在哪些环节。
 129. 设计一个 RAG 评估集，包含 retrieval、generation 和 system 三类指标。
-129A. 用纯 Python 写一个 RAG 事故审计 demo，输入 toy corpus、expected evidence、retrieved、context、claims、ACL 和 staleness，输出 retrieval recall、MRR、context recall / precision、citation accuracy、unsupported claim rate、permission leak rate、stale evidence rate 和 failed gates。
+129A. 用纯 Python 写一个 RAG 事故审计 demo，输入 toy corpus、expected evidence、retrieved、context、claims、ACL 和 freshness 标签，输出 retrieval recall、MRR、集合型 context recall / precision、citation accuracy、unsupported claim rate、已核验 permission leak rate、stale evidence rate，以及各项 unknown / not_applicable 状态。允许调用方显式传入本次审计的局部验收条件；不得把缺失标签算作通过，也不得输出通用 RAG score 或 release decision。
 129B. 构造 5 个 RAG bad case：retrieval miss、context drop、旧版本引用、越权证据进入上下文、证据不足却未拒答，并为每个样本写出 root cause 和修复优先级。
 129C. 设计一个 GraphRAG 小型案例：给 8 段跨文档材料抽取 entity、relation 和 community summary，并比较 GraphRAG、向量 RAG、Agentic RAG 在全局问题、多跳问题和局部事实问题上的适用边界。
 129D. 对照原始固定 top-k RAG、Self-RAG、CRAG、GraphRAG 和 Agentic RAG：为“局部事实漏召回、检索候选不可靠、语料全局总结、多跳证据缺口”分别选方案，列出核心机制、运行/索引成本、失效条件、需要的评估集和一项下一步改进假设。
@@ -869,7 +869,7 @@
 34. 画出一个 workflow-agent hybrid 产品流程，要求 workflow 负责接收、审批、提交、审计和回滚，Agent 负责分类、检索、草稿、诊断和异常恢复。
 35. 构造 3 条 Agent 产品失败 trace，分别覆盖工具参数错误、未授权动作和 observation 未使用，并给出应触发的恢复策略或降级策略。
 35A. 对 4 条合成 Agent 失败轨迹制作事故审阅表，记录任务契约、第一处偏离、动作是否已发生、外部状态是否可确认、授权与确认记录、状态/trace 缺口、可行恢复和下一步自动化模式；不能把未知状态写成失败重试或成功。
-35B. 构造 5 个 Agent bad case：工具失败但最终声称完成、参数结构合法但业务归属错误、高风险动作缺少确认、工具结果不可信边界失败、循环检索超预算，并为每个样本写出 root cause 和降级策略。
+35B. 构造 5 个 Agent bad case：工具失败但最终声称完成、参数结构合法但业务归属错误、高风险动作缺少确认、工具结果不可信边界失败、循环检索超预算，并为每个样本写出 root cause 和降级策略。对注入样本分别记录攻击是否造成未经授权的外部副作用（S）和原用户任务是否完成（U），并把危险动作提议、执行器阻断和实际副作用分开统计。
 35C. 为一个最小 Coding Agent Harness 设计运行审计表，字段至少包含 task、context、model output、action、arguments、permission、confirmed、executed、execution result、observation used、state updated、trace fields、budget、final status 和 final verified。
 35D. 写一个 0 依赖 harness loop 审计 demo，输出 parse valid rate、tool execution success、unauthorized execution rate、confirmation coverage、observation use rate、state update coverage、trace completeness、budget overrun rate、task success rate、root causes、failed gates 和 harness gate。
 35E. 为 Agent Runtime 设计状态机，至少包含 RECEIVED_TASK、BUILDING_CONTEXT、CALLING_MODEL、PARSING_ACTION、WAITING_PERMISSION、EXECUTING_ACTION、OBSERVING_RESULT、UPDATING_STATE、COMPLETED、FAILED 和 CANCELLED，并标出非法状态转移。

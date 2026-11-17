@@ -79,3 +79,10 @@
 - **阅读位置**：Responses API 的用途说明、Schema adherence、拒答/不完整响应处理以及 schema 支持范围。
 - **来源支持的事实**：Structured Outputs 能让符合条件的完整、非拒答输出遵循所提供 JSON Schema；拒答、长度不足造成的不完整响应和 API 错误仍需应用单独处理。Schema 不能表达的业务规则也需应用校验。
 - **证据等级与边界**：source-backed（OpenAI API 官方文档，动态页面）。Schema 合规只约束结构，不证明答案事实正确、引用指向本次获准证据，或证据足以支持主张；可用能力还受模型和 Schema 子集限制。
+
+## 分级相关性与折损累计增益（nDCG）
+
+- **来源与版本**：Kalervo Järvelin、Jaana Kekäläinen，*Cumulated Gain-based Evaluation of IR Techniques*，ACM TOIS 20(4), 2002，DOI：[10.1145/582415.582418](https://doi.org/10.1145/582415.582418)；阅读作者论文 PDF（高校课程副本）与 Tampere University 论文元数据页，访问日期：2026-11-17。
+- **阅读位置**：论文摘要和 §2.2–2.3 对分级相关性、按排名位置折扣的 DCG、相对理想结果的归一化指标的定义。
+- **来源支持的事实**：分级相关性可表达“高度相关”与“边缘相关”的差异；DCG 对排名靠后的结果施加折扣；归一化形式把实际累计收益与同一 query 的理想排序对照。
+- **证据等级与边界**：source-backed（同行评审论文）；相关等级、gain 函数、折扣位置/底数和 cutoff 约定会影响结果。本章以线性等级增益和 `log2(j+1)` 折扣作手算示例，只是明确的一种教学口径，不代表所有工具的默认实现。
