@@ -1532,7 +1532,7 @@
     考察点：U/T 基线、微协议执行细节、诚实效用、攻击分母、协议知情红队、提交前控制与迁移假设。
     回答框架：先冻结模型、工具、权限、轨迹可见性和主/副任务判定，再分别测 $U$、$T$ 与协议的诚实成功率，以及攻击轨迹的审核捕获和未捕获副任务。先做属性明确的监控性评估：按干预、过程或结果属性选择任务，并比较 CoT-only、action-only 与 all-messages 证据范围；CoT 监控效果较好只说明特定设置下更容易识别标签，不证明 CoT 忠实，也不代替执行门禁。区分最低可疑分候选直接提交的 `defer-to-resample` 与只收集线索、最终由可信执行方提交的 `resample-then-defer`；对不可逆动作可用 `defer-on-critical` 加执行器审批。红队应知道协议并尝试针对监控器，协议冻结后留独立 holdout。报告原始分母、效用/安全门槛、审计时点、外部副作用、补偿结果和成本；事后发现不等于提交前阻止，benchmark 分数也不等于部署安全保证。
 
-本节新增方法比较依据：[Safety 与 Robustness Eval 研究记录](research/safety-robustness-evaluation-depth-review-2026-10-27.md)。
+本节新增方法比较依据：[CheckList 行为测试证据记录](research/checklist-behavioral-testing-evidence-2026-11-17.md)，以及 [CheckList 原始论文](https://aclanthology.org/2020.acl-main.442/)。
 
 ## 部署
 
@@ -4078,7 +4078,7 @@
 
 43. 多模态理解产品如何评估答案是否可信？
     考察点：grounded claims、OCR/ASR、引用、人工复核、切片。
-    回答框架：把任务要求的字段或关键断言拆开，检查证据是否指向原图区域、文档页/表格单元、音频时间段或视频帧。字段微平均可能掩盖某条记录的关键字段错误，因此同时报字段分母、精确记录分母和端到端任务分母；流畅但无证据的回答不能算通过。
+    回答框架：沿原始媒体、预处理、中间感知、跨模态对齐、最终上下文、claim 和业务动作逐层找第一处分歧。把 OCR/ASR 的一般准确率与关键字段分开，确认引用能回到页码、bbox 或时间段，并区分 unknown、not_applicable 和有效零；字段宏平均、精确记录和端到端任务要分别报告分母。无处置记录不能算安全通过，流畅但无证据的回答也不能算可信。
 
 44. 图像 / 视频生成产品应该看哪些产品指标？
     考察点：adoption、edit、controllability、brand、copyright、safety。
@@ -4094,11 +4094,11 @@
 
 47. 大模型产品的隐私治理门禁应该包含什么？
     考察点：data flow、purpose、legal basis、jurisdiction、controller/processor roles、PII、enterprise secrets、permissions、supplier transfer、logs、training/evaluation separation、retention/deletion lineage、audit and ownership。
-    回答框架：先以一项用户任务画出从原始输入、OCR/RAG、模型服务、日志到评估副本的完整数据流；为每类对象分别写目的、适用依据、租户与访问角色、接收方/地区、保留和删除路径。再按具体服务范围核对法域与时间：把法规、主管机构说明和供应商自述分开，不能把供应商的默认不训练声明当成无日志、无外发或已合规。控制状态逐项记录为 passed、failed、unknown 或 not applicable，并注明分母和证据；越权、未核实的外部传输、未授权用途和删除链断裂等阻断项不能被平均分抵消，不生成跨项目隐私总分。
+    回答框架：先以一项用户任务画出从原始输入、OCR/RAG、模型服务、日志到评估副本的完整数据流；为每类对象分别写目的、处理依据、租户与访问角色、接收方/地区、保留和删除路径。说明处理依据不能一概等同于同意，并按具体服务范围核对法域与时间：把法规、主管机构说明和供应商自述分开，不能把供应商的默认不训练声明当成无日志、无外发或已合规。控制状态逐项记录为 passed、failed、unknown 或 not applicable，并注明分母和证据；越权、未核实的外部传输、未授权用途和删除链断裂等阻断项不能被平均分抵消，不生成跨项目隐私总分。
 
 48. 企业客户问“我们的数据会不会被拿去训练”，你怎么回答？
-    考察点：contract、data control、training consent、lineage、deletion、third-party。
-    回答框架：不能只口头保证，要说明产品条款、控制面和 data pipeline 是否一致：哪些产品数据会被记录，供应商的默认训练设置覆盖哪些产品/端点/账户条件，是否另有反馈或 opt-in 路径，训练候选数据是否有明确用途依据和来源记录，是否会传给第三方模型或标注方，保留与删除如何执行。再明确“未用于训练”不等于“没有日志、支持访问、备份或外部处理”，并用当前合同、设置和审计证据核实承诺。
+    考察点：contract、data control、purpose/legal basis、lineage、deletion、third-party。
+    回答框架：不能只口头保证，要说明产品条款、控制面和 data pipeline 是否一致：哪些产品数据会被记录，供应商的默认训练设置覆盖哪些产品/端点/账户条件，是否另有反馈或 opt-in 路径，训练候选数据是否有明确用途依据和来源记录，是否会传给第三方模型或标注方，保留与删除如何执行。若讨论 consent，要说明它只是某些法域/处理情形下可能使用的依据之一，不把 opt-in 记录当作所有场景的法律结论。再明确“未用于训练”不等于“没有日志、支持访问、备份或外部处理”，并用当前合同、设置和审计证据核实承诺。
 
 49. 企业 RAG / Agent 为什么需要把日志治理当成隐私能力？
     考察点：raw log、tool args、retrieved docs、retention、access control、audit。
@@ -4152,15 +4152,15 @@
 
 2B. 如何管理一个跨团队大模型项目，避免 demo 很好但上线失败？
     考察点：目标清晰度、指标树、baseline、版本 trace、RACI、变更控制、灰度回滚、bad case 回归、复盘行动项。
-    回答框架：先把业务问题写成用户、场景、主指标、护栏指标和失败边界，再冻结 baseline 和评估集。实验阶段记录 hypothesis、数据、模型、prompt、检索、工具、配置和 bad case；上线阶段用灰度、feature flag、监控、回滚和降级控制风险；事故后用 project collaboration gate 检查 objective clarity、metric tree、baseline coverage、experiment reproducibility、version trace、RACI、change control、risk escalation、rollout、rollback、postmortem 和 action item closure。
+    回答框架：先把业务问题写成用户、场景、主指标、护栏指标和失败边界，再冻结 baseline 和评估集。实验阶段记录 hypothesis、数据、模型、prompt、检索、工具、配置和 bad case；上线阶段用灰度、feature flag、监控、回滚和降级控制风险；事故后分开记录已确认的控制失败与仍未知的结果，明确谁能暂停、谁负责止损以及哪些证据尚缺。清单帮助团队发现协作缺口，但不把不同指标平均成项目总分，也不由 RACI 或清单自动给出发布决定。
 
 2C. 如何把一次失败实验或线上事故复盘成可展示的工程能力？
     考察点：hypothesis、baseline、版本 trace、分桶分析、证据链、时间线、影响量化、根因、止损、预防、行动项关闭、回归验证。
-    回答框架：先区分实验复盘和事故报告。实验复盘要讲 hypothesis、baseline、controlled change、分桶指标、bad case taxonomy 和 decision；事故报告要讲 impact、timeline、mitigation、direct cause、system root cause 和 prevention。最后用 retrospective gate 检查 hypothesis coverage、baseline coverage、version trace、slice analysis、evidence coverage、timeline coverage、root cause rate、action item closure、regression verification rate、change failure rate 和 recovery time，证明这次失败已经沉淀为回归样本、监控告警、上线门禁或团队规范。
+    回答框架：先区分实验复盘和生产事故。实验说明 hypothesis、baseline、唯一变化、评估集版本、分桶结果、反例和结论边界；事故说明样本单位、影响、时间线、止损、直接原因、系统条件和未知证据。分别给出行动项负责人、验收证据和关闭条件；若引用覆盖率、失败率或恢复时间，先讲清分母、观察窗口和缺失项。最后说明由哪位责任人依据哪条预先约定的规则决定暂停、恢复或继续实验，不用一个 retrospective gate 证明事故已解决。
 
 2D. 如何把一个大模型项目讲出资深工程师的可信度？
     考察点：项目证据、STAR / 复盘、trade-off、专家追问、防夸大。
-    回答框架：先用目标、baseline、指标、实验、失败、debug、上线、安全、成本和复盘组成项目证据链；行为面用 STAR 加 Reflection，但 Reflection 要落到评估集、门禁、版本治理、监控或 action item 关闭；trade-off 要同时讲收益、代价、最终决策和验证方式；专家追问时回到 baseline、分桶指标、bad case、上线边界和证据边界。可以用 practitioner interview gate 检查 project evidence score、trade-off depth、STAR reflection score、expert follow-up readiness、red flags 和 weak questions，而不是只看表达是否流畅。
+    回答框架：先说明目标、baseline、样本与指标，再按证据顺序讲实验、失败、debug、上线、安全、成本和复盘。行为面用 STAR 加 Reflection，但 Reflection 要落到具体证据、被否定的假设、未知项、行动负责人和回归结果。trade-off 同时讲收益、代价、被放弃的方案和验证方式；专家追问时回到分桶、bad case、任务边界和证据范围。逐题准备薄弱点与补证据计划，不把不同问题的分数合并成招聘或发布 gate。
 
 3. 面试官连续追问你不确定的问题时，你怎么回答？
    考察点：诚实性、推理能力、边界意识。
@@ -5766,7 +5766,7 @@
 10. **为什么 GPT-5.6 Luna 的状态审计必须同时验证 replay、idempotency 和 verifier？**
 
    考察点：协议状态、外部副作用、幂等、artifact 真相。
-   回答框架：完整 replay 只能证明下一轮拿到了 reasoning、phase、tool call/output 和 compaction item；它不证明工具没有重复执行，也不证明生成的 artifact 正确。应以 `call_id` 和 idempotency key 关联执行回执，用独立 verifier 检查 artifact digest，并把 hosted/client tool search 的加载责任与 executor 权限分开。研究中的 [`gpt56_luna_state_replay_audit.py`](research/model-update-2026-09/code/gpt56_luna_state_replay_audit.py) 只是合成 toy，不是线上 API 复现。
+   回答框架：完整 replay 只能证明下一轮拿到了 reasoning、phase、tool call/output 和 compaction item；它不证明工具没有重复执行，也不证明生成的 artifact 正确。应以 `call_id` 和 idempotency key 关联执行回执，用独立 verifier 检查 artifact digest，并把 hosted/client tool search 的加载责任与 executor 权限分开。这是协议验证设计；仓库当前没有对应的独立脚本，也没有真实 API 复现结果。
 
 ## Claude Sonnet 5：System Card 与 adaptive thinking
 
@@ -6294,10 +6294,10 @@
    **答：** 不是。作者比较 40-turn recurrent-oracle p-rescore 的 argmax flip，并称 tree arm 的差异在观察到的 native numerical flip floor 内。它不等于 full distribution-distance proof；样本相关、request-level bootstrap、更多 seeds 与 B=4 仍未完成。
 
 5. **问：GDN Tree-Scan 是 Qwen3.6 官方能力吗？**
-   **答：** 不是。它是 Zhiyuan Ma 的单作者 arXiv 预印本和其 pinned serving artifact，使用 Qwen3.6-27B-FP8 作为实验模型；不是 Qwen 官方架构披露或通用性能保证，本项目也未独立运行复现。来源见 [qwen3.6-27b-source-notes.md](research/model-update-2026-09/qwen3.6-27b-source-notes.md)。
+   **答：** 不是。它是 Zhiyuan Ma 的单作者 arXiv 预印本和其 pinned serving artifact，使用 Qwen3.6-27B-FP8 作为实验模型；不是 Qwen 官方架构披露或通用性能保证，本项目也未独立运行复现。来源与边界见 [PAPERS.md 的 Qwen3.6-27B 条目](PAPERS.md)及[第二十一册第 83 章](book-21-transformer-architecture-evolution/chapters/83-qwen3.8-qsa-gated-residual-n-gram-muon.md)。
 
 6. **问：官方博客的 SWE-bench Pro 53.5 和 OpenClaw 128K 配置分别能证明什么？**
-   **答：** 53.5 是 Qwen 发布方报告的修订 benchmark 分数；官方说明对部分 SWE-bench Pro 任务作了修订并在修订集上重跑所有基线，仍需附上评测集与 harness 条件，不能当作独立复现。OpenClaw 的 `contextWindow=131072`、`maxTokens=16384` 是客户端示例预算，与模型卡 262,144 native context 不同；它既不改写模型规格，也不证明百炼 endpoint 当前开放完整窗口。来源见 [Qwen3.6-27B 研究笔记](research/model-update-2026-09/qwen3.6-27b-source-notes.md)。
+   **答：** 53.5 是 Qwen 发布方报告的修订 benchmark 分数；官方说明对部分 SWE-bench Pro 任务作了修订并在修订集上重跑所有基线，仍需附上评测集与 harness 条件，不能当作独立复现。OpenClaw 的 `contextWindow=131072`、`maxTokens=16384` 是客户端示例预算，与模型卡 262,144 native context 不同；它既不改写模型规格，也不证明百炼 endpoint 当前开放完整窗口。来源见 [PAPERS.md](PAPERS.md)及[第二十一册第 83 章](book-21-transformer-architecture-evolution/chapters/83-qwen3.8-qsa-gated-residual-n-gram-muon.md)。
 
 ## 2026-09 Qwen3.6-35B-A3B：Thinking Preservation 与混合注意力
 
@@ -6314,10 +6314,10 @@
    **答：** 模型卡列 40 层，每四层中三层 Gated DeltaNet、再一层 Gated Attention，且各层接 MoE；总参数 35B、激活约 3B，256 experts 中每 token 选 8 个 routed + 1 shared。不要把 Qwen3.8 Flash-Next 的 QSA、Gated Residual、N-gram 或 Muon 迁移到 Qwen3.6。
 
 5. **问：262K native context、约 1.01M YaRN context 能否直接代表长上下文质量？**
-   **答：** 不能。约 1.01M 是官方 YaRN `factor=4.0` 配置外推，不代表可用 API 上限或该长度的召回质量；官方还提示 static YaRN 可能影响短文本。需按长度测检索质量、TTFT、KV/显存、吞吐和成功成本。完整证据见 [`qwen3.6-35b-a3b-source-notes.md`](research/model-update-2026-09/qwen3.6-35b-a3b-source-notes.md)。
+   **答：** 不能。约 1.01M 是官方 YaRN `factor=4.0` 配置外推，不代表可用 API 上限或该长度的召回质量；官方还提示 static YaRN 可能影响短文本。需按长度测检索质量、TTFT、KV/显存、吞吐和成功成本。来源与配置边界见 [PAPERS.md](PAPERS.md)及[第二十一册第 83 章](book-21-transformer-architecture-evolution/chapters/83-qwen3.8-qsa-gated-residual-n-gram-muon.md)。
 
 6. **问：Qwen 官方博客中的 TAU3-Bench、VITA-Bench 和 MCPMark 数字为什么必须连同 evaluator/harness 记录？**
-   **答：** 因为测量对象并非只有被测模型：TAU3 使用 GPT-5.2 low-reasoning user model 与默认 BM25；VITA 将 judge 从已不可用的 Claude 3.7 Sonnet 换成 Claude 4 Sonnet；MCPMark 固定 GitHub MCP v0.30.3，并将 Playwright 响应截断到 32K tokens。版本或 evaluator 改变时必须检查任务和基线是否同步重跑；这些名字是评测依赖，不是本项目新增的模型候选。来源：[Qwen3.6-35B-A3B 研究笔记](research/model-update-2026-09/qwen3.6-35b-a3b-source-notes.md)。
+   **答：** 因为测量对象并非只有被测模型：TAU3 使用 GPT-5.2 low-reasoning user model 与默认 BM25；VITA 将 judge 从已不可用的 Claude 3.7 Sonnet 换成 Claude 4 Sonnet；MCPMark 固定 GitHub MCP v0.30.3，并将 Playwright 响应截断到 32K tokens。版本或 evaluator 改变时必须检查任务和基线是否同步重跑；这些名字是评测依赖，不是本项目新增的模型候选。来源：[PAPERS.md](PAPERS.md)及[第二十一册第 83 章](book-21-transformer-architecture-evolution/chapters/83-qwen3.8-qsa-gated-residual-n-gram-muon.md)。
 
 7. **问：官方发布博客为什么把 Qwen3.6-35B-A3B 称作 `qwen3.6-flash`？这是另一个榜单模型吗？**
    **答：** 不是。博客把它写作同一开源 35B-A3B checkpoint 的百炼 API 名称/alias；没有对应的独立 canonical 锚点时，不应新增模型记录。博客 OpenClaw 示例的 128K context/16K output 是客户端预算，不能改写模型卡的 262,144 native context，也不能替代真实 endpoint probe。
@@ -6365,7 +6365,7 @@
 5. **问：如何评价论文的证据强度？**
    **答：** 它是 arXiv v1、页面评论标为 “Qwen Technical Report”，其中结果仍是作者报告。本地没有独立复现；作者注明 one training run / one evaluation seed。reference replay 审计只覆盖 8/11 个机制家族，剩余家族有可计算参考值但没有相同 replay driver。外部电商实验每臂五次，不能直接推出普遍能力优势；作者报告训练 checkpoint 在该设置下均值高于 Qwen3.7-Max，但 TravelBench 均值仍低于 Max 对照。
 
-研究笔记：[`qwen3.6-35b-a3b-source-notes.md`](research/model-update-2026-09/qwen3.6-35b-a3b-source-notes.md#9-vhd-play先求解机制再生成可交互环境)；教材：[第二十册第 19.41 节](book-20-agent-harness-runtime/chapters/19-harness-aware-evaluation.md#1941-qwen36-35b-a3b先求解机制再构造可验证-agent-环境)。
+证据入口：[arXiv:2609.27321v1](https://arxiv.org/abs/2609.27321v1)；教材：[第二十册第 19 章](book-20-agent-harness-runtime/chapters/19-harness-aware-evaluation.md)及[第二十一册第 83 章](book-21-transformer-architecture-evolution/chapters/83-qwen3.8-qsa-gated-residual-n-gram-muon.md)。
 
 ## 2026-09 Claude Opus 4.8：Dynamic Workflows 与多 Agent 评测
 
@@ -6416,7 +6416,7 @@
 3. **问：怎样区分 K3 的 ROCm recipe、stable 支持和 benchmark 证据？**
    **答：** vLLM `v0.30.0` stable 与 MI355X nightly recipe 不是同一部署路径；SiTUv2 a4w4 还依赖匹配的 vLLM/AITER 与权重布局开关。InferenceX 的 synthetic acceptance sweep 注入 golden 接受长度并跳过 target verification，只能测该假设下吞吐；真实正确性与 acceptance 必须走 block verification 并由任务 verifier 判定。
 
-依据：[Kimi K3 研究笔记](research/model-update-2026-09/kimi-k3-source-notes.md)；[第二十一册第 88 章](book-21-transformer-architecture-evolution/chapters/88-kimi-k3-kda-stable-latentmoe与百万token-agent.md)；[第二十四册第 32 章](book-24-llm-inference-engine/chapters/32-multi-turn-tool-use和agent-serving支持.md)。
+依据：[第十七册第 15 章](book-17-agent-tool-use/chapters/15-kimi-k3发布证据与长任务harness.md)、[第二十一册第 88 章](book-21-transformer-architecture-evolution/chapters/88-kimi-k3-kda-stable-latentmoe与百万token-agent.md)和[第二十四册第 32 章](book-24-llm-inference-engine/chapters/32-multi-turn-tool-use和agent-serving支持.md)。
 
 ## 2026-09 DeepSeek V4 family：mixed-precision MegaMoE fusion
 
@@ -6432,7 +6432,7 @@
 4. **问：PR merged 和有 benchmark 表，能否当作 production/CI acceptance？**
    **答：** 不能。合入 main 不等于进入 stable `v0.5.20`；PR 检查快照包含失败、成功和跳过项，且没有在当前机器复跑 4×B300 测试。还需固定权重与 runtime revision，验证 mixed layout 数值正确性、CUDA Graph replay、各 batch 质量/延迟、fallback 和目标硬件 SLO。
 
-依据：[SGLang PR #39313](https://github.com/sgl-project/sglang/pull/39313)；[DeepSeek V4.1 source notes](research/model-update-2026-09/deepseek-v4.1-flash-source-notes.md#2026-09-29-sglang-main-pr-39313-混合精度-megamoeshared-expert-fusion)；[第二十一册第 81.21 节](book-21-transformer-architecture-evolution/chapters/81-deepseek-v4.1-flash-causal-encoder-decoder.md#8121-sglang-main混合精度-megamoeshared-expert-fusion)。
+依据：[SGLang PR #39313](https://github.com/sgl-project/sglang/pull/39313)及[第二十一册第 81 章](book-21-transformer-architecture-evolution/chapters/81-deepseek-v4.1-flash-causal-encoder-decoder.md)。
 
 ## 2026-09 Kimi K3：DFlash block diffusion 与 capture hook
 
@@ -6459,7 +6459,7 @@
 2. **问：DeepSWE v1.1 的 77.9% 能否写成裸模型能力？** **答：** 不能。这是 Google 发布方在特定 harness、工具、预算和 verifier 下的结果；DataCurve 没有精确 Argon 配置。
 3. **问：无 cyber guardrails 是否适合普通生产环境？** **答：** 不适合。官方语境是受信任防御者和授权环境；生产仍需权限、沙箱、出站控制、审批、审计和漏洞修复 verifier。
 
-依据：[Gemini 4 Argon 研究笔记](research/model-update-2026-09/gemini-4-argon-source-notes.md)；[第二十一册第 95 章](book-21-transformer-architecture-evolution/chapters/95-gemini-4-argon长程推理与网络安全防御.md)。
+依据：[第二十一册第 95 章](book-21-transformer-architecture-evolution/chapters/95-gemini-4-argon长程推理与网络安全防御.md)。
 
 ## 第六册第九章：RAG 与 Agent 部署
 

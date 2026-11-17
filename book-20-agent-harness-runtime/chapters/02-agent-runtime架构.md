@@ -1,1276 +1,325 @@
 # 第二章：Agent Runtime 架构
 
-## 0. 本讲范围与资料
+## 0. 本讲范围与前置
 
-本章参考 OpenAI Agents SDK 关于 run lifecycle、sessions、tracing、guardrails、tool execution 和 handoff 的公开文档，OpenAI Agents SDK tracing 对 LLM generation、tool call、handoff、guardrail 和 custom event 的记录口径，Claude Code hooks / permissions / skills / MCP 等公开说明中对生命周期事件、权限请求、工具前后置处理和会话扩展点的描述，OpenHands runtime / sandbox / evaluation 公开资料，以及 SWE-agent / mini-SWE-agent 围绕 agent-computer interface、工具交互、仓库导航、测试执行和 SWE-bench 评估的公开资料。
+第一章从整体上定义了 Harness，并用修复登录认证的任务说明模型提议如何经过策略检查、工具执行和验收。本章沿用这项合成任务，继续追问：一轮运行中的每份状态由谁保存？模型请求如何变成动作？工具失败、用户中断或工作区变化后，Runtime 怎样决定恢复、重试或停止？
 
-因此，本章只讨论 agent runtime 的工程内核：session 和 task 如何隔离，context 如何构造，模型调用如何适配，动作如何解析和修复，工具如何调度，错误如何分类恢复，状态如何 checkpoint，trace 如何支持 replay。它不是某个具体产品的内部实现，不提供绕过权限、规避沙箱、执行危险命令或读取敏感文件的方法。
+读者应已理解 Agent 会根据目标和环境反馈进行多步行动，能看懂简单 JSON、文件 diff、命令输出和状态表。生产级 Agent 经验不是前置条件。本章讲通用架构责任；不同 API 的状态字段、兼容规则和服务能力并不相同，供应商特例会链接到后续专题。
 
-本章聚焦三点：
+读完本章，读者应该能沿一次 runtime step 追踪上下文、模型请求、动作解析、策略决定、执行回执和状态更新；能区分 session、task、workspace、checkpoint 与 trace；能根据失败发生的位置设计安全的恢复路径。
 
-1. 把 runtime 从“一个 while loop”拆成可审计的 step：session isolation、phase transition、context budget、adapter retry、action parse repair、execution result、error handling、checkpoint、trace 和 cancel / timeout。
-2. 用公式说明 runtime 可靠性不是最终答案分数，而是状态机、错误恢复和 replay 证据共同构成。
-3. 补充一个 0 依赖 Python demo，用 toy runtime step 日志输出 runtime gate、root causes 和修复优先级。
+## 2.1 沿一次失败后的续跑追踪 Runtime
 
-## 2.1 本章目标
+继续使用第一章的登录认证任务。下面的 session、状态、命令输出和用户操作均为**教学构造**，不是实际产品或仓库运行记录。
 
-第一章从整体上解释了 harness 是什么：它是把模型能力变成可执行系统的工程层。本章进一步拆解 runtime 架构，也就是一个 agent 在真实环境里如何被调度、执行、观察、恢复和记录。
+用户重新打开一个还没有完成的会话。Runtime 读到以下初始信息：
 
-如果说 harness 是完整外壳，那么 runtime 就是其中的执行核心。它负责让 agent loop 真正跑起来：什么时候调用模型，什么时候执行工具，怎么保存状态，怎么处理失败，怎么中断和恢复，怎么把每一步写进 trace。
+- 会话中保存了用户的目标和限制：修复未认证请求返回 `200` 的问题，并保留原有无关改动。
+- 任务记录显示目标文件曾应用过一次 patch，但验收仍未通过。
+- 最近一次测试结果是 `expected 401, got 200`。
+- workspace 中的 `docs/guide.md` 在任务开始前已有用户修改。
+- 上次运行没有最终验收结果，因此任务不能标成完成。
 
-学完本章，你应该能回答：
+Runtime 需要走完下面这一轮，才能决定是否继续改代码：
 
-1. Agent runtime 的核心组件有哪些。
-2. 一次 agent step 从输入到输出经历了哪些数据流。
-3. Runtime 如何管理任务状态和 session。
-4. Runtime 如何处理模型输出非法、工具失败、命令超时和用户中断。
-5. 为什么 trace、state store 和 permission system 是 runtime 的核心。
-6. 面试中如何设计一个可恢复、可观测、可扩展的 agent runtime。
+| 步骤 | 当前动作或结果 | Runtime 中负责的组件 | 运行状态怎样变化 |
+| --- | --- | --- | --- |
+| 1. 恢复任务 | 找到原 session 和未完成的认证修复 task | Session Manager 加载会话范围；Task Manager 读取目标、限制、待验收项 | task 仍为 `active`；上一轮测试失败仍是最近观察 |
+| 2. 核对 workspace | 发现 `src/auth.py` 的文件版本与上次 checkpoint 不同 | Workspace adapter 读取当前文件状态；Task Manager 把冲突标成待检查 | Runtime 不直接重放旧 patch；真实文件状态优先于对话摘要 |
+| 3. 构造上下文 | 选择用户目标、相关测试、最新 handler 内容、前次失败输出和工作区约束 | Context Builder 负责筛选、排序和标注来源 | 上下文包含最新文件事实；无关历史和原始长日志不整段塞入请求 |
+| 4. 调用模型 | 模型请求运行指定认证测试 | Model Adapter 按当前 provider/API contract 编码请求，记录模型、协议、工具清单和请求结果 | Runtime 保存本次调用标识；模型响应尚未改变文件或启动命令 |
+| 5. 解析与授权 | 响应中出现 `run_tests`，参数指向目标测试 | Action Parser 校验动作格式和参数；Tool Registry 找到工具定义；Permission System 核对工作区与命令策略 | 合法且获准的调用才进入执行队列；格式正确不等于动作必然获准 |
+| 6. 执行并收集结果 | 测试命令返回退出码 `1`，仍报告认证断言失败 | Execution Engine 捕获退出码、stdout/stderr、执行状态与持续时间 | 此次工具调用是 `failed`；这不代表整个 task 已失败或可直接重试 |
+| 7. 持久化观察 | Runtime 把失败结果连到原始 tool call 和当前文件版本 | State Store 保存当前 task 状态；Trace Logger 追加事件 | task 更新为“验证未通过”；trace 保留“模型请求了什么、谁批准、执行器返回什么” |
+| 8. 选择下一步 | 模型收到新的失败 observation 后，提出重新读取 handler 再编辑 | Error Handler 判断这是可继续诊断的测试失败，并创建下一步，而不是盲目重试相同命令 | task 留在 `active`，进入新一轮 context 构造；原有失败不会被覆盖成成功 |
 
-## 2.2 Runtime 和 Harness 的关系
+这条运行链里有多个对象，保存它们的目的不同：session 让后续交互找回相关对话；task 记录目标与完成条件；workspace 保存实际文件；checkpoint 给中断后的恢复点；trace 记录历史事件。Runtime 必须让它们相互关联，但不能把它们压成一段可任意改写的对话摘要。
 
-Harness 和 runtime 经常混用，但可以做一个工程上的区分。
+特别要注意第 2 步。恢复时，task state 中的文件摘要可能已经过时。如果文件本身在中断期间改变，Runtime 应先重新读取、比较版本，并决定是否重做计划。把旧 patch 直接写回去会覆盖人的工作；将“历史上曾读到的内容”误当作“当前文件内容”则会让后续动作建立在过时事实之上。
 
-Harness 更像完整系统边界：
+## 2.2 Runtime 和 Harness：边界按责任理解
 
-1. 用户交互。
-2. 模型适配。
-3. 工具系统。
-4. 文件和终端。
-5. 权限和沙箱。
-6. 日志和评估。
-7. 产品体验和配置。
+第一章把 Harness 作为完整的运行控制与证据系统，把 Runtime 作为其中推进模型和工具循环的执行内核。这是本书的架构约定，不是每个产品都采用的模块名称。
 
-Runtime 更像运行时执行内核：
+在登录修复任务里，Runtime 的工作包括创建 step、构造上下文、发起模型调用、解析动作、调度工具、处理错误和保存运行状态。外围 Harness 还包括用户界面、文件和终端权限、执行沙箱、产品策略以及离线 evaluation。两者可以部署在同一个进程中，也可以跨服务协作；设计时要问的是“谁拥有这项状态、谁能产生这个副作用、谁能证明任务满足目标”，而不是只看目录或类名。
 
-1. 维护 session 和 task state。
-2. 驱动 agent loop。
-3. 调用模型。
-4. 解析动作。
-5. 调度工具执行。
-6. 处理错误和重试。
-7. 保存 trace 和中间结果。
-8. 判断任务是否继续。
+## 2.3 一次 step 的组件链
 
-可以这样理解：
+登录测试从模型提议到退出码 `1` 的过程，可以拆成以下组件关系：
 
-```text
-Harness = Runtime + Tools + Permissions + Sandbox + UI + Evaluation + Product policies
-Runtime = Agent loop + State management + Execution orchestration + Error handling
+```mermaid
+flowchart TD
+    U["用户请求与限制"] --> S["Session Manager"]
+    S --> T["Task Manager"]
+    T --> C["Context Builder"]
+    C --> M["Model Adapter"]
+    M --> L["模型响应"]
+    L --> P["Action Parser"]
+    P --> R["Tool Registry"]
+    R --> Q{"权限策略"}
+    Q -->|允许| E["Execution Engine"]
+    Q -->|拒绝或待确认| H["记录决定并回送结果"]
+    E --> O["结构化执行回执"]
+    O --> V["Verifier / Evaluator"]
+    H --> V
+    O --> D["State Store 与 Trace Logger"]
+    H --> D
+    D --> T
+    V -->|证据不足且可继续| C
+    V -->|满足任务条件| F["交付结果"]
+    V -->|不可安全继续| X["停止并说明状态"]
 ```
 
-在实际系统中，两者边界不一定严格。但面试中这样拆分，有助于讲清架构层次。
-
-## 2.3 核心组件总览
-
-一个典型 agent runtime 包含以下组件：
-
-1. User Interface。
-2. Session Manager。
-3. Task Manager。
-4. Context Builder。
-5. Model Adapter。
-6. Action Parser。
-7. Tool Registry。
-8. Execution Engine。
-9. Permission System。
-10. State Store。
-11. Trace Logger。
-12. Error Handler。
-13. Evaluator。
+图中的箭头不是单纯的数据搬运。每次交接都要保留足够的关联信息：session/task id、模型请求 id、工具调用 id、策略结果、执行器结果和当前 workspace 版本。这样 Runtime 才能回答“这个退出码属于哪次测试”“这次拒绝对应哪一个动作”“恢复后接着处理的是哪个 task”。
 
-可以用一条数据流串起来：
+## 2.4 Session、Task、Workspace、Checkpoint 和 Trace
 
-```text
-User Request
--> Session Manager
--> Task Manager
--> Context Builder
--> Model Adapter
--> Action Parser
--> Permission System
--> Execution Engine
--> Tool Result
--> State Store / Trace Logger
--> Next Step or Final Answer
-```
+多个 Agent 产品把这些状态放进相同的 session 对象里，但它们的语义仍不同。用登录任务举例：
 
-Runtime 的目标不是让每个组件都复杂，而是让每个责任边界清楚。
+| 对象 | 它回答的问题 | 典型内容 | 不能单独证明什么 |
+| --- | --- | --- | --- |
+| **Session（会话）** | 这是哪段交互？后续输入应接到哪里？ | 对话历史、会话配置、交互标识或持久化记录 | 不自动证明发起者有权访问此会话，也不一定等于一个待办任务 |
+| **Task（任务）** | 用户想达到什么结果？现在完成到哪里？ | 目标、范围、验收条件、子任务、待处理问题、完成状态 | 不证明 workspace 里的文件仍与上次读取时相同 |
+| **Workspace（工作区）** | 当前实际文件和工具运行环境是什么？ | 文件内容、Git 状态、运行依赖、命令副作用 | 不包含模型看到过什么或用户是否批准某个动作的完整历史 |
+| **Run state / Checkpoint（运行状态/检查点）** | 中断后从什么状态继续？ | 正在等待的调用、当前 phase、审批、模型 item、序列化上下文等 | 不保证所引用的文件、进程或远程 API 副作用仍处于原状态 |
+| **Trace（执行轨迹）** | 过去实际发生了哪些事件？ | 请求、模型响应、动作、权限决定、工具回执、错误和终态 | 不一定是可以直接恢复运行的权威状态，也不应成为未脱敏的全量数据仓库 |
+| **Evaluation record（评估记录）** | 这次运行如何按任务规则判定？ | 初始环境、配置、verifier 结果、失败标签与测量数据 | 不把单次评估结果推广成所有任务的保证 |
 
-如果责任混在一起，后续会出现几个问题：
+对同一个 session，用户可以先修登录问题，再提出一个独立代码清理任务；两个 task 可以共享某些会话历史，却应分别保存目标、验收状态和权限范围。反过来，一个长期 task 也可能跨多个交互会话继续。数据模型必须明确这些关系，不能把 session id 当作授权令牌。
 
-1. 工具失败时不知道谁负责重试。
-2. 上下文过长时不知道谁负责压缩。
-3. 权限确认散落在各个工具里，难以审计。
-4. trace 不完整，无法 replay。
-5. 模型输出格式变化导致整个系统崩溃。
-6. session 中断后无法恢复。
+例如，OpenAI Agents SDK 的 SQLite Sessions 文档明确指出，session id 用于选择历史记录，本身不认证用户或授予访问权；应用仍要对每次 session 访问做授权，并保护 SQLite 文件和备份。这是 SDK 对 SQLite backend 的说明，不代表其他存储后端的合同。[OpenAI Agents SDK：Sessions](https://openai.github.io/openai-agents-python/sessions/)
 
-## 2.4 User Interface：用户交互层
+## 2.5 UI、Session Manager 和 Task Manager
 
-User Interface 不只是聊天框。对 coding agent 来说，它还要展示和控制 agent 的行动。
+### UI 让用户看到运行边界
 
-UI 需要支持：
+用户界面（User Interface）不只是显示最终回答。它还要告诉用户当前任务处于调查、编辑、验证、等待批准还是已停止；在适用场景展示 patch、命令状态、等待的决定和最终证据。用户取消或补充指令时，UI 需要传递带关联 id 的事件给 Runtime，而不能只中止文本流。
 
-1. 接收用户任务。
-2. 展示 agent 的计划和当前步骤。
-3. 展示工具调用和命令执行。
-4. 展示文件 diff。
-5. 请求用户确认危险操作。
-6. 支持用户中断、继续、补充要求。
-7. 展示最终总结和验证结果。
+UI 不必展示所有内部信息。涉及源代码、密钥、个人信息或不可信工具输出时，应按产品需要做摘要、隐藏或脱敏；但隐藏内容不应导致审计记录把动作来源和决定理由也抹掉。
 
-终端型 coding agent 的 UI 重点是：
+### Session Manager 管交互与隔离
 
-1. 流式输出。
-2. 命令确认。
-3. diff 展示。
-4. 当前工作目录和文件路径。
-5. 错误信息和下一步建议。
+Session Manager 负责创建、读取、更新和结束会话，并把对话记录与正确用户、工作区和存储后端关联。对于登录修复，它应能找到之前的用户限制和最近任务状态，同时不把另一个用户的工具结果、approval 或 workspace 路径混进来。
 
-IDE 型 coding agent 的 UI 重点是：
+应用重启后恢复 session 时，要先核实主体权限和数据版本，再加载可复用历史。session id 是标识，不是身份验证；调用者能猜到或拿到一个 id，不应因此自动获得访问权。
 
-1. 文件定位。
-2. inline diff。
-3. 代码选择区上下文。
-4. 测试结果面板。
-5. 用户接受或拒绝 patch。
+### Task Manager 管目标与完成条件
 
-UI 的核心原则：用户必须知道 agent 正在做什么，尤其是写文件、执行命令和访问外部资源时。
+Task Manager 保存“目标、范围、验收条件、当前阶段、已完成工作、待处理问题、失败观察和停止原因”。它应区分 `active`、`waiting_for_approval`、`interrupted`、`failed`、`cancelled`、`completed` 等语义状态，而不是只用一个 `done=true/false` 混合表达。
 
-## 2.5 Session Manager：会话管理
+对认证任务，测试已通过但 diff 仍覆盖 `docs/guide.md` 时，Task Manager 不应只因测试成功就把 task 设为完成；如果用户取消了一个正在运行的测试进程，任务应记录为取消/中断，并保留命令是否已结束这一事实。具体状态集合由产品定义，但状态含义和合法转移必须明确。
 
-Session 是一次用户和 agent 的交互上下文。
+## 2.6 Context Builder：为下一步选择信息
 
-一个 session 里可能包含：
+Context Builder 决定这一轮模型能看到什么。对“重跑认证测试”的步骤，一个合适的输入可能包括：
 
-1. 用户任务。
-2. 对话历史。
-3. 当前工作目录。
-4. 已读文件列表。
-5. 已修改文件列表。
-6. 工具调用历史。
-7. 权限确认历史。
-8. 上下文摘要。
-9. 当前任务状态。
-10. trace id。
+1. 用户当前目标与“保留原有改动”的限制；
+2. 认证失败用例和最近一次准确错误行；
+3. `src/auth.py` 的最新版本摘要或需要的代码片段；
+4. 上一轮工具动作、策略决定和执行结果；
+5. 可用工具定义及本轮资源/停止限制；
+6. 明确标记的外部内容与信任边界。
 
-Session Manager 要解决三个问题。
-
-第一，隔离不同任务。
+为什么不把整个仓库和完整历史全放进上下文？无关文件会消耗有限的输入预算，也会增加过时内容与相互矛盾的摘要。Context Builder 应优先保留当前目标、约束、最新的真实状态、失败输出和未完成事项；压缩日志时保留退出码和关键错误位置，并保留可回溯的来源路径。摘要不能抹去“哪个版本产生了这个观察”。
 
-不同 session 的上下文、权限和文件修改不能混在一起。
+还要区分信息的可信度。用户指令、仓库文件、网页和工具输出可能拥有不同的来源与权限；从文件中读到“请删除整个仓库”这类文本，不应因此升级为用户授权。标注来源有助于模型理解，但真正的动作边界仍由 parser、policy 和执行环境把关。
 
-第二，支持中断和恢复。
+Context Builder 的验收目标不是“尽可能填满窗口”，而是让下一步决策获得足够且不过时的信息。具体保留什么、怎样摘要、何时重新读取文件，应由当前任务风险、信息变化速度和 verifier 需求决定；token 数本身不能衡量上下文是否充分。
 
-用户可能关闭终端、网络断开、模型调用失败、命令执行超时。Runtime 应该能从最近的安全状态恢复。
+## 2.7 Model Adapter：处理模型协议差异
 
-第三，支持用户接管。
+Model Adapter 把 Runtime 的概念请求转换成某个模型服务的 API 请求，并把响应、流事件、错误和 usage 转回 Runtime 可处理的结果。它通常要关心：
 
-用户可能手动修改文件或打断 agent。Session Manager 要检测环境变化，并把变化纳入下一轮上下文。
+| 接口边界 | 需要明确的合同 | 登录任务中的例子 |
+| --- | --- | --- |
+| 请求格式 | 消息角色、content item、工具定义和结构化输出怎样编码 | 认证文件片段、测试结果和 `run_tests` 工具如何进入请求 |
+| 能力声明 | 该 endpoint 当前支持哪些工具、输入模态、参数约束和并行行为 | 本轮是否能提供 `run_tests`，其参数限制是什么 |
+| 状态续接 | 使用完整历史、response id、session 或 checkpoint 中哪种方式 | 继续上次运行前，如何找回任务上下文和工具结果 |
+| 流式事件 | token、工具调用、错误和终态如何表示 | 收到部分调用参数时不得提前启动命令 |
+| 错误与重试 | 超时、限流、不完整响应、拒绝和格式错误如何区分 | 模型 API 超时不等于测试命令失败，也不等于 task 可以结束 |
+| 观测字段 | 模型 id、snapshot、effort、usage 和 request id 如何保存 | 评估回放时知道实际使用了哪一配置 |
 
-面试表达：
+Adapter 可以提供统一的内部接口，但不能假设各 provider 的外部字段、状态和工具语义等价。若一个服务不支持所需的 continuation 或 tool contract，适配层应显式拒绝、降级或要求调用方确认；不能只因 HTTP 请求成功，就默默丢掉状态字段或更改工具行为。OpenAI-compatible API 的字段差异与兼容边界会在第二十二章展开。
 
-```text
-我会把 session 看成 agent 任务的边界。它保存用户目标、对话历史、工具调用、文件 diff、权限确认和 trace id。好的 session manager 要支持隔离、中断恢复和用户接管，否则长任务很容易因为一次模型失败或命令超时就丢失上下文。
-```
+## 2.8 Action Parser、Tool Registry 与 Permission System
 
-## 2.6 Task Manager：任务状态和子任务
+模型响应是数据，不是执行命令。Parser、Registry 和 Permission System 依次处理三个不同问题。
 
-Task Manager 管理的是“这件事做到哪里了”。
+### Action Parser 检查结构
 
-它和 Session Manager 的区别是：
+Parser 把响应解释成一个候选动作，例如 `run_tests` 加上测试路径参数。它要检查类型、必填字段、参数形状、调用 id 和输出是否完整。若模型返回截断的 JSON，Runtime 应记录 parse error，再选择有限重试、把错误交回模型或停止；不能从未完成的参数里猜出命令并执行。
 
-1. Session 更偏交互和上下文边界。
-2. Task 更偏目标、计划、步骤和完成状态。
+Parser 通过只能说明“这份动作能被系统解释”。它不能证明工具有权限、路径属于当前 task、参数符合业务规则或动作能解决问题。
 
-一个 task state 可以包含：
+### Tool Registry 说明允许请求哪些能力
 
-```text
-task_id
-goal
-current_phase
-subtasks
-completed_steps
-pending_questions
-modified_files
-validation_status
-failure_count
-done
-```
+Tool Registry 管理工具名称、描述、输入/输出 schema、版本、副作用类型、超时与取消能力，以及策略会用到的元数据。它既帮助模型选择工具，也让 Runtime 知道如何验证和调用工具。工具定义变更后应记录版本或 hash，否则回放可能使用了不同参数含义。
 
-对于 coding agent，常见 phase 包括：
+工具注册也不等于授权：把 `run_shell` 暴露给模型，只表示它是候选能力之一，不表示任意 shell 命令都能运行。
 
-1. understanding：理解任务。
-2. exploration：探索代码库。
-3. planning：制定修改计划。
-4. editing：编辑代码。
-5. validating：运行测试或检查。
-6. fixing：根据失败继续修复。
-7. summarizing：总结结果。
-8. done：任务结束。
+### Permission System 判断本次调用
 
-Task Manager 的价值：
+Permission System 根据任务范围、调用者、工具、路径、参数、环境和既有用户决定，输出允许、拒绝或等待确认。登录任务的规则可以允许指定只读文件访问和目标测试命令，同时拒绝写入任务之外的用户文件。
 
-1. 防止 agent 迷失在长任务里。
-2. 支持把大任务拆成子任务。
-3. 支持失败后回到上一步。
-4. 支持用户查看当前进度。
-5. 支持 evaluation harness 判断任务是否完成。
+如果动作需要人批准，审批记录应绑定到具体调用和参数摘要，并明确适用范围；用户改动参数或目标后，旧审批不应自动覆盖新动作。权限决定也不能替代执行隔离：即使请求获批，进程仍应只能访问配置好的文件、网络和系统资源。第八章会详细讲授权与沙箱。
 
-## 2.7 Context Builder：上下文构造器
+## 2.9 Execution Engine：执行动作并返回可判读结果
 
-Context Builder 是 runtime 中最影响效果的模块之一。
+Execution Engine 才是真正读取文件、写入 patch、调用进程或访问外部服务的一层。对一次测试调用，至少要能区分以下结果：
 
-它决定模型每一轮能看到什么。
+| 执行状态 | 含义 | Runtime 下一步要做什么 |
+| --- | --- | --- |
+| `succeeded` | 工具按自身合同完成，且结果已返回 | 更新状态并交给 verifier；不直接等同 task success |
+| `failed` | 工具明确返回失败或非零退出码 | 保存错误结果，判断需要修正输入、环境还是方案 |
+| `denied` | policy 或审批流程拒绝执行 | 记录决定原因；不得伪装成工具执行失败 |
+| `timed_out` | 等待超过限制，执行结果可能已知也可能未知 | 先确认进程/外部副作用现状，再决定重试或接管 |
+| `cancelled` | 执行器确认任务已停止或取消 | 保存部分输出和实际副作用；取消不自动撤销已发生更改 |
+| `unknown` | 调用方没有收到足以判断是否执行的回执 | 对非幂等动作先对账，不能假设“没回包就没发生” |
 
-输入来源包括：
+结果对象应包含可关联的调用 id、状态、退出码或错误类型、输出引用、持续时间、产物变化以及副作用是否确定。长输出可存到受控 artifact 中，让 context 只携带摘要与引用；但模型、用户和验收器仍应能按权限读取必要证据。
 
-1. 用户最新请求。
-2. system prompt 和开发者约束。
-3. 对话历史。
-4. task state。
-5. 已读文件片段。
-6. 搜索结果。
-7. 命令输出。
-8. 测试失败日志。
-9. 当前 diff。
-10. 项目说明文件。
-11. 相关工具 schema。
-12. 权限和安全策略。
+对于会改变环境的工具，要给出幂等键、事务、回滚或对账策略中的适用方案。超时后无条件重试“创建远程资源”“提交交易”“发送邮件”，可能重复产生副作用；先检查动作是否已成功，再安全地继续。
 
-Context Builder 的难点：
+## 2.10 State Store 与 Checkpoint：恢复运行前先核对外部事实
 
-1. 上下文窗口有限。
-2. 代码库很大。
-3. 命令输出可能很长。
-4. 历史对话可能包含过时信息。
-5. 外部内容可能不可信。
-6. 敏感信息不能随便放入模型。
+State Store 保存 Runtime 需要快速读取的结构化当前状态，例如 session/task 关联、当前 phase、待执行动作、最近 observation、审批状态、checkpoint 版本和验收结果。它不必保存每一份完整原始内容；长文本、diff 和命令输出可以存成带权限和版本的引用。
 
-常见策略：
+Checkpoint 是恢复边界，不是“把聊天记录序列化”这么简单。至少要考虑：
 
-1. 只放和当前步骤相关的文件片段。
-2. 对长日志做摘要，并保留关键错误行。
-3. 对旧对话做 summary。
-4. 对工具结果做结构化压缩。
-5. 保留当前目标、约束和未完成事项。
-6. 明确标记不可信外部内容。
-7. 保留文件路径和行号，方便后续编辑。
+1. 当前 task 目标、限制和未完成项是否保存；
+2. 有副作用的动作是未执行、已执行还是结果未知；
+3. 用户审批是否仍适用于当前参数和环境；
+4. 当前 workspace 文件是否仍匹配 checkpoint 的版本；
+5. pending tool call、外部任务和运行中的进程如何接续；
+6. 模型/API 的状态续接需要哪些 item 或 id；
+7. 恢复前是否需要重新做权限检查和 verifier 检查。
 
-Context Builder 的输出不是越多越好，而是要让模型看到“下一步决策最需要的信息”。
+假设登录 task 保存 checkpoint 后，用户手动修改了 `src/auth.py`。Runtime 读文件 hash 或版本发现差异，应该将对应上下文标为 stale，重读当前文件，再决定合并、放弃旧 patch 或请求用户介入。只恢复模型的历史对话会把模型带回旧认识；只保存文件 diff 又可能遗漏用户目标和待确认审批。
 
-## 2.8 Model Adapter：模型适配层
+不同 SDK/API 的“可恢复状态”只涵盖各自定义的范围。例如，OpenAI Agents SDK 的 `RunState` 文档将其作为暂停后序列化并恢复一次 run 的边界，包含运行上下文和中断等信息；SDK Sessions 另用于保存跨运行会话历史。这些公开接口都不能证明应用的 workspace 或业务系统副作用已经恢复一致。[OpenAI Agents SDK：Run State](https://openai.github.io/openai-agents-python/ref/run_state/)
 
-Model Adapter 负责把 runtime 的请求转成具体模型 API 调用。
+## 2.11 Trace Logger：让每个事件能回到具体运行
 
-它要处理：
+Trace Logger 记录任务运行中有解释价值的事件，例如模型请求与响应标识、解析出的动作、权限决定、工具开始/结束、结果、状态更新、重试/取消、checkpoint 和最终 verifier 结论。事件应使用稳定的 session id、task id、step id 和 tool call id 关联，时间顺序清楚。
 
-1. 不同模型的消息格式。
-2. system/developer/user/tool message 的组织。
-3. tool schema 或 function calling 格式。
-4. streaming 输出。
-5. token budget。
-6. temperature、max tokens 等参数。
-7. API 错误、限流和重试。
-8. 模型不支持某些工具格式时的兼容。
-9. 多模型路由。
+Trace 的典型用途包括：
 
-为什么需要单独 adapter？
+- **排障：** 找到最早一次偏离预期的状态转移；
+- **回放：** 用固定输入、环境快照和工具响应复现应用控制逻辑；
+- **评估：** 汇总任务完成、错误类型、成本和运行时长；
+- **审计：** 核对谁请求了副作用、权限如何决定、实际结果是什么。
 
-因为不同模型供应商的接口差异很大。如果业务逻辑直接依赖某个模型 API，后续切换模型、做 fallback 或 A/B test 会很困难。
+Trace 不是默认安全的黑盒。模型输入、工具参数、终端输出和文件 diff 可能包含密钥、个人信息或商业数据；采集范围、脱敏、访问控制和保留周期需要与任务目的匹配。OpenAI Agents SDK 的 tracing 文档以 trace/span 记录模型、工具和 guardrail 等事件；OpenTelemetry GenAI 语义约定也把输入、输出和工具参数内容视为需明确配置的敏感数据。它们说明“能追踪”与“可以默认保存全部原文”是不同决定。[OpenAI Agents SDK：Tracing](https://openai.github.io/openai-agents-python/tracing/)，[OpenTelemetry GenAI spans](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-spans.md)
 
-Adapter 的设计原则：
+为了恢复运行，Runtime 还需要结构化状态和工作区核对；Trace 只保存发生过的事件，不应直接代替当前 task state。
 
-1. 对 runtime 暴露统一接口。
-2. 把模型差异封装在 adapter 内部。
-3. 记录模型版本、参数和 token 用量。
-4. 对 API 错误做标准化。
-5. 支持模型能力声明，例如是否支持 tool calling、vision input、JSON mode。
+## 2.12 Error Handler：按失败类型恢复
 
-## 2.9 Action Parser：动作解析器
+错误处理不等于“再问一次模型”。同一个失败通知可能来自不同层，应先识别失败发生在哪里、执行是否已经产生副作用，再选恢复动作。
 
-模型输出不一定可靠。Action Parser 的任务是把模型输出解析成 runtime 可以理解的动作。
+| 错误类别 | 登录任务里的例子 | 合适的处理 | 应避免的做法 |
+| --- | --- | --- | --- |
+| 模型调用暂时失败 | API 超时或限流 | 按接口合同做有限退避重试，保留原 task 状态 | 把模型调用失败记成测试失败，或丢掉用户限制重建 task |
+| 动作解析失败 | 工具调用参数截断 | 记录原响应；若可安全续传则请求合法输出，否则停止并说明 | 猜测缺失参数后执行 |
+| 工具名或参数错误 | 请求了未注册工具或路径字段类型不对 | 返回结构化错误给模型，或终止该 step | 把错误交给任意工具兜底执行 |
+| 权限拒绝 | patch 目标是任务范围外文件 | 将拒绝原因作为新 observation；必要时请求用户修改任务范围 | 无视拒绝重复请求，或把审批默认记为“允许” |
+| 文件冲突 | 用户在中断时改了同一文件 | 重新读取并合并；不能判断时交给用户 | 直接重放旧 patch 覆盖新内容 |
+| 工具明确失败 | 测试返回退出码 `1` | 保存原输出，修复方案或环境后再验证 | 忽略失败 observation，仍宣称任务完成 |
+| 超时且副作用未知 | 命令超时后连接断开 | 对账执行状态，检查幂等性，再决定继续 | 因为没收到回执就假设“未执行”并再次写入 |
+| 用户取消 | 测试进程仍在运行时收到取消 | 停止后续动作，协调进程终止，记录部分结果并进入 cancelled/interrupted | 只停止 UI 输出，却让后台进程继续写文件 |
+| 状态持久化失败 | patch 已应用但 task state 未保存 | 先查询当前 workspace 和执行回执，再修复状态记录 | 直接恢复旧 checkpoint 并重复写入 |
 
-动作类型可以包括：
+一次运行可以同时有多个问题。先按 event/step id 找出第一个错误状态，再判断它导致了什么后续影响。对外部副作用结果未知时，先做对账；若无法确认安全状态，停止并请求人工处理。
 
-1. final_answer。
-2. read_file。
-3. search_code。
-4. apply_patch。
-5. run_command。
-6. ask_user。
-7. update_plan。
-8. call_tool。
+## 2.13 Evaluator：Runtime 内验收与离线评测
 
-一个结构化 action 可以长这样：
+Runtime 中的 verifier/evaluator 用来检查当前任务证据，例如测试结果、diff 范围、格式规则或业务状态。它可能是确定性测试、规则检查、人工审核，也可能由模型辅助；要明确每一种信号能支持什么结论。
 
-```text
-action_type: run_command
-command: npm test -- login
-working_dir: /repo
-risk_level: medium
-reason: verify login test after patch
-```
+对认证修复任务，目标测试通过只是一个条件；还需要检查原有文档修改是否仍存在、patch 是否超出任务范围。若验收器只会运行测试，它就不能单独证明“没有覆盖用户改动”。模型说“已完成”也不能覆盖文件系统或测试工具返回的相反事实。
 
-Action Parser 要做校验：
+离线 Evaluation Harness 则把固定任务、初始环境、模型/API 配置、Runtime 版本、工具和 verifier 组织成可重复比较的评估。报告应分开列出任务成功、权限拦截/违规副作用、运行时间、成本和未判定样本，并明确各项分母；不要用任意统一阈值把这些性质压成 Runtime 总分。统计方法和 Harness 归因分别见第七册、第十和第十九章。
 
-1. action_type 是否存在。
-2. 必填参数是否完整。
-3. 参数类型是否正确。
-4. 文件路径是否在允许目录内。
-5. 命令是否包含危险片段。
-6. 是否需要用户确认。
+## 2.14 Runtime 状态机：把“下一步做什么”变成显式状态
 
-当模型输出非法时，runtime 可以：
+如果只用一个 `while not done` 循环，用户中断、审批等待、工具超时和模型最终回答都容易被混在一起。更稳妥的做法是给运行阶段命名，并规定能从哪里转到哪里：
 
-1. 要求模型重新输出合法格式。
-2. 自动修复轻微格式错误。
-3. 返回错误 observation 给模型。
-4. 终止任务并请求用户介入。
+| 当前阶段 | 事件 | 下一阶段 | 说明 |
+| --- | --- | --- | --- |
+| `task_created` | 任务和工作区边界已读取 | `building_context` | 记录目标、限制和当前环境版本 |
+| `building_context` | 输入准备完毕 | `calling_model` | 对本轮 context 与工具清单建立版本/引用 |
+| `calling_model` | 模型响应完成 | `parsing_action` | 区分文本、工具动作、拒绝、超时和不完整响应 |
+| `parsing_action` | 动作结构合法 | `checking_policy` | 仍要检查 schema 外的任务语义和权限 |
+| `parsing_action` | 格式无效 | `recovering` 或 `failed` | 根据可修复性决定反馈还是停止 |
+| `checking_policy` | 允许 | `executing` | 执行前核对参数、工作区版本和资源限制 |
+| `checking_policy` | 需要确认 | `waiting_for_approval` | 挂起具体调用，不把 task 误写成失败 |
+| `checking_policy` | 拒绝 | `updating_state` | 记录无副作用的拒绝事件并回送 observation |
+| `waiting_for_approval` | 批准/拒绝/取消 | `executing` / `updating_state` / `cancelled` | 决定绑定本次调用，不默认沿用到无关动作 |
+| `executing` | 收到明确结果 | `recording_result` | 保存执行状态和产物变化 |
+| `executing` | 超时或连接丢失 | `reconciling` | 先检查副作用状态，不能直接假定成功或失败 |
+| `recording_result` | 状态保存完成 | `verifying` 或 `building_context` | 任务内验证，或继续下一轮模型决策 |
+| `verifying` | 条件满足 | `completed` | 记录具体证据，而非只记录模型的完成声明 |
+| `verifying` | 条件不满足且可继续 | `building_context` | 将失败原因和最新状态交回下一轮 |
+| 任意可取消阶段 | 用户取消 | `cancelling` → `cancelled` | 停止后续动作并确认运行中的进程/工具状态 |
 
-不要假设模型永远输出合法动作。
+状态机使 Runtime 可以拒绝非法转移，例如在工具调用仍 pending 时标记 `completed`，或在写入结果未对账时恢复旧 checkpoint。它也为并发事件、重试和审计提供一致边界。实际产品可以有不同状态名，但须明确终态、等待态和未知结果的含义。
 
-## 2.10 Tool Registry：工具注册表
+## 2.15 并发、取消和超时
 
-Tool Registry 是 runtime 知道“有哪些工具可用”的地方。
+不同工具调用能否并行，取决于它们的数据依赖和副作用，而不只取决于模型一次发出了几个请求。
 
-每个工具至少要有：
+- 读取互不相关的只读文件，通常可以并行；返回结果需保留 call id，不能把两个文件内容错配给两个请求。
+- 两个 patch 同时写同一文件，必须有版本校验或串行化；否则第二个 patch 可能基于旧内容覆盖第一个结果。
+- 多个互不相关但有副作用的 API 调用，应检查权限、幂等键、审批和部分成功后的补偿方案后再并行。
+- 一个工具超时后，即使 Runtime 已停止等待，也要追踪它是否还在执行；取消请求也需要执行器确认，不只是更新 UI 上的文字。
 
-1. 工具名。
-2. 描述。
-3. 参数 schema。
-4. 返回 schema。
-5. 权限等级。
-6. 风险等级。
-7. 超时设置。
-8. 是否可自动执行。
-9. 是否需要用户确认。
-10. 版本信息。
+用户取消后，Runtime 应阻止新动作发出，向正在运行的执行器发送取消，等待并记录已知结果，再持久化终态或“副作用状态未知”。取消不能撤销已完成的写入、已发送的邮件或已提交的远程任务；若无法安全回滚或确认，就需要对账或人工接管。
 
-示例：
+## 2.16 扩展点与 Provider 运行时所有权
 
-```text
-name: run_command
-description: Execute a shell command in the current workspace.
-args: command, working_dir, timeout
-risk: medium/high depending on command
-permission: requires confirmation for write, network, install, delete operations
-timeout: 120s
-```
+扩展时应保持核心 step 的输入、输出、错误和状态转移可观察；模型适配器、工具执行后端、trace sink 和 evaluator 可以替换，但替换后必须记录配置版本和实际能力。插件能新增工具，不代表它自动获得任务授权；服务端能存对话历史，也不代表它管理 workspace、审批和外部任务恢复。
 
-Tool Registry 的常见问题：
+一个有日期边界的公开例子能说明托管方式怎样改变责任。OpenAI 当前文档把 Agents API、Agents SDK 与 Responses API 列为三种 runtime 入口：
 
-1. 工具描述太模糊，模型选错工具。
-2. 参数 schema 太宽，模型构造危险参数。
-3. 工具没有版本，trace 无法复现。
-4. 工具权限散落在执行逻辑中，难以审计。
-5. 工具返回不结构化，模型难以理解。
+| 入口 | 谁运行 loop / 保存跨轮状态 | 应用侧仍要明确什么 |
+| --- | --- | --- |
+| Agents API | OpenAI 管理 Codex harness、session orchestration、上下文压缩与恢复；session 保存配置、turns 和 items | 应用提供工具并选择执行环境；也要处理事件、required actions、产物和 verifier |
+| Agents SDK | SDK runner 在应用中运行 loop/handoff；session 可由 SDK 后端保存对话历史，run state 可用于暂停后恢复 | 应用仍控制部署、存储、审批、workspace、sandbox provider 和业务任务状态 |
+| Responses API | 可以直接调用模型或由应用自行构建 Agent loop；历史可由应用维护、response chaining 或 Conversations 接续 | 应用定义 orchestration、工具回执、权限、执行环境、checkpoint、trace 和任务验收 |
 
-好的 Tool Registry 不只是给模型看的工具列表，也是 runtime 的安全和治理入口。
+以上是 OpenAI 文档在 2026-11-17 的公开产品比较，不是所有 provider 都有同名接口，也不说明三种模式保存同一类状态。OpenAI 文档还特别指出，Agents API session、SDK session、Responses conversation 和 sandbox 是不同资源。选择接口时，应把“谁管理 loop、谁保存历史、谁执行工具、谁拥有文件、谁恢复外部副作用”分别写入设计，而不是只在配置中记录一个 model id。[OpenAI Agents：Runtime options](https://developers.openai.com/api/docs/guides/agents)，[Agents API overview](https://developers.openai.com/api/docs/guides/agents-api/overview)
 
-## 2.11 Execution Engine：执行引擎
+跨 provider 的 API 兼容、地域/scope 和能力差异会在后续专题核验。例如 Qwen3.7 Plus 的官方页面按 region 与 deployment scope 列功能支持；完整能力矩阵应放在第二十二章讨论，避免把单一 provider 的合同写成 Runtime 通则。
 
-Execution Engine 负责真正执行 action。
+## 2.17 面试题：Agent Runtime 怎样设计
 
-它需要处理：
+### Runtime 包含哪些核心组件？
 
-1. 工具调用。
-2. 文件读写。
-3. 命令执行。
-4. 超时。
-5. 取消。
-6. 重试。
-7. 并发控制。
-8. 结果标准化。
-9. 错误分类。
+可以按一轮执行的责任回答：Session/Task 管交互和目标，Context Builder 准备当前输入，Model Adapter 适配接口，Action Parser 和 Tool Registry 定义候选调用，Permission System 决定能否执行，Execution Engine 产生真实结果，State Store 与 Trace Logger 保存当前状态和历史，Error Handler 与 Verifier 决定怎样恢复及是否完成。组件可以合并，但状态所有者和副作用责任要明确。
 
-执行结果应该结构化：
+### 工具执行失败后怎样恢复？
 
-```text
-status: success | failed | timeout | denied | cancelled
-stdout: ...
-stderr: ...
-exit_code: 0
-duration_ms: 1234
-artifacts: modified files, generated files, logs
-error_type: permission_error | command_error | parse_error | timeout
-```
+先判断失败在哪一层、执行有没有发生、副作用状态是否确定。格式错误可以有限修复；暂时性 API 失败可按合同重试；权限拒绝需要改变授权或任务范围；测试失败应把原始 observation 反馈给模型；超时后要先对账再考虑重试；文件冲突要重新读取并合并。不要对所有错误使用同一条 retry 路径。
 
-为什么要结构化？
+### 怎样让长任务可恢复？
 
-因为模型需要读懂结果，trace 需要回放，评估系统需要统计，用户需要审计。
+持久化目标、限制、当前 phase、已完成项、pending action、工具回执、权限决定、checkpoint 版本和 verifier 状态；恢复时重新检查 workspace、外部任务和审批是否仍然有效。若文件或外部系统已经变化，更新事实后再续跑；若副作用是否发生无法确定，先对账或交人工，不要盲目重放。
 
-Execution Engine 不能只是调用系统函数。它必须理解 agent 场景里的风险和反馈。
+## 2.18 小练习
 
-## 2.12 Permission System：权限系统
+1. 沿 2.1 节记录“测试退出码为 1”这次事件。列出 session、task、workspace、checkpoint 和 trace 各自应更新什么；说明哪个对象提供当前文件真值。
+2. 模拟 Runtime 中断后用户修改 `src/auth.py`。设计恢复检查，决定何时可重用旧 context、何时必须重读、何时要请求用户处理冲突。
+3. 写出模型调用超时、测试命令超时和外部写入 API 超时三种错误的不同恢复步骤；指出哪些情况下副作用状态是 unknown。
+4. 为只读搜索、同一文件 patch、远程任务创建设计并发规则，说明各自的 call id、幂等、版本检查和部分失败处理。
+5. 选择托管 Agent API、应用内 SDK 或直接模型 API，画出会话历史、任务状态、workspace、工具执行和 verifier 的所有权边界。标注结论使用的文档日期和 provider 限制。
 
-Permission System 决定 action 能否执行。
+## 2.19 本章总结
 
-常见权限等级：
+Runtime 不是只有一个循环，它要为每个 step 管理模型协议、任务状态、外部副作用、失败路径和验收证据。设计时记住：
 
-1. read：读取文件、列目录、搜索代码。
-2. write：修改文件、创建文件、删除文件。
-3. execute_safe：运行只读或低风险命令。
-4. execute_risky：安装依赖、删除、移动、大规模修改、网络访问。
-5. external_access：访问外部 API、网络、远程仓库。
-6. secret_access：读取环境变量、密钥、凭证。
+1. Session 是交互边界，Task 是目标与验收边界，Workspace 是当前文件事实，Checkpoint 用于恢复，Trace 记录历史；它们不能相互替代。
+2. 模型响应必须经过解析、工具契约和策略检查；只有执行器能报告真实副作用。
+3. State Store 保存可继续决策的当前状态，Trace Logger 保存可复核的历史；两者都要保护敏感数据并绑定版本。
+4. 错误恢复要基于错误类别和副作用确定性；超时、取消和持久化失败都可能留下未知状态。
+5. 验收器根据任务证据判断完成；运行时指标要保留样本范围、单位和分母，不汇成通用 gate。
 
-权限策略可以是：
-
-1. always allow。
-2. ask once per session。
-3. ask every time。
-4. deny by default。
-5. allow only in sandbox。
-
-例子：
-
-```text
-read file: allow by default inside workspace
-apply patch: show diff and allow after user confirmation
-run tests: allow if command matches safe allowlist
-rm -rf: deny or require explicit high-risk confirmation
-network install: ask every time
-read .env: deny by default
-```
-
-权限系统必须在 runtime 层硬校验，不能只靠 prompt 告诉模型不要乱做。
-
-## 2.13 State Store：状态存储
-
-State Store 保存 runtime 运行过程中的状态。
-
-它可以分为三类。
-
-短期状态：
-
-1. 当前步骤。
-2. 当前上下文摘要。
-3. 最近工具结果。
-4. 未完成计划。
-
-任务状态：
-
-1. task id。
-2. subtask 列表。
-3. modified files。
-4. validation status。
-5. failure count。
-6. permission decisions。
-
-持久状态：
-
-1. session history。
-2. trace id。
-3. 用户偏好。
-4. 项目级记忆。
-5. evaluation records。
-
-State Store 的设计取舍：
-
-1. 存太少，任务无法恢复。
-2. 存太多，隐私和成本风险上升。
-3. 存非结构化文本，后续难以查询和回放。
-4. 存结构化状态，开发成本更高但更可靠。
-
-生产系统通常需要结构化状态和生命周期管理。
-
-## 2.14 Trace Logger：日志与回放
-
-Trace Logger 是 agent runtime 的黑盒记录器。
-
-一次完整 trace 应该记录：
-
-1. 用户请求。
-2. system prompt 和关键配置版本。
-3. 模型版本和参数。
-4. 每轮模型输入摘要。
-5. 每轮模型输出。
-6. 解析出的 action。
-7. 权限判断和用户确认。
-8. 工具执行结果。
-9. 文件 diff。
-10. 命令 stdout、stderr、exit code。
-11. 错误和重试。
-12. 最终答案。
-13. token、时间和成本。
-
-Trace 的价值：
-
-1. Debug：定位 agent 为什么做错。
-2. Replay：用新模型或新 prompt 重放任务。
-3. Evaluation：统计成功率、工具准确率和成本。
-4. Audit：审计文件修改和命令执行。
-5. Training data：提取高质量轨迹或 bad cases。
-
-Trace 也有风险：
-
-1. 可能包含敏感代码。
-2. 可能包含密钥和环境变量。
-3. 可能包含用户隐私。
-4. 可能包含企业内部信息。
-
-所以 trace 必须有脱敏、权限和保留周期。
-
-## 2.15 Error Handler：错误处理和恢复
-
-Agent runtime 必须假设任何环节都会失败。
-
-常见错误：
-
-1. 模型 API 超时。
-2. 模型输出非法格式。
-3. 工具参数缺失。
-4. 文件不存在。
-5. Patch 应用失败。
-6. 命令执行失败。
-7. 命令超时。
-8. 权限被拒绝。
-9. 用户中断。
-10. 上下文过长。
-11. 工具返回内容过大。
-
-错误处理策略：
-
-1. retry：适合临时 API 错误。
-2. repair：适合轻微格式错误。
-3. ask model again：把错误作为 observation 返回模型。
-4. ask user：需要业务判断或权限确认。
-5. rollback：文件修改有问题时回退。
-6. degrade：禁用高风险工具或切换简单模式。
-7. abort：无法安全继续时终止。
-
-例子：
-
-```text
-patch apply failed -> 把失败原因和冲突位置返回模型 -> 模型重新读取文件 -> 生成更小 patch -> 再次应用
-```
-
-错误处理能力决定了 agent 是“演示可用”还是“真实可用”。
-
-## 2.16 Evaluator：运行时评估器
-
-Evaluator 可以在 runtime 中做两类事。
-
-第一，任务内验证。
-
-例如：
-
-1. 修改代码后运行测试。
-2. 检查 lint。
-3. 检查格式。
-4. 检查 diff 是否只改了相关文件。
-5. 检查是否出现敏感文件读取。
-
-第二，离线评估。
-
-例如：
-
-1. 在 SWE-bench 类任务上跑 agent。
-2. 比较不同模型版本成功率。
-3. 比较不同工具策略成本。
-4. 重放历史失败 trace。
-5. 做 regression test。
-
-Runtime 中的 evaluator 不一定是一个复杂模型。很多时候，最可靠的 evaluator 是测试、静态检查、规则和人工审核。
-
-面试中要注意：不要把 LLM-as-a-judge 当成唯一评估方式。Coding agent 最重要的验证信号通常是测试和真实任务成功。
-
-## 2.17 Runtime 的状态机设计
-
-为了让 agent 可控，runtime 可以显式设计状态机。
-
-示例状态：
-
-```text
-IDLE
-RECEIVED_TASK
-BUILDING_CONTEXT
-CALLING_MODEL
-PARSING_ACTION
-WAITING_PERMISSION
-EXECUTING_ACTION
-OBSERVING_RESULT
-UPDATING_STATE
-WAITING_USER
-COMPLETED
-FAILED
-CANCELLED
-```
-
-状态转移示例：
-
-```text
-RECEIVED_TASK -> BUILDING_CONTEXT -> CALLING_MODEL -> PARSING_ACTION
-PARSING_ACTION -> WAITING_PERMISSION -> EXECUTING_ACTION
-EXECUTING_ACTION -> OBSERVING_RESULT -> UPDATING_STATE -> BUILDING_CONTEXT
-PARSING_ACTION -> COMPLETED
-EXECUTING_ACTION -> FAILED
-WAITING_PERMISSION -> CANCELLED
-```
-
-状态机的好处：
-
-1. 每个阶段职责清楚。
-2. 错误处理更明确。
-3. 用户中断更好处理。
-4. trace 更结构化。
-5. evaluation harness 更容易重放。
-
-很多看似复杂的 agent runtime，底层都可以理解成状态机加事件循环。
-
-## 2.18 并发、取消和超时
-
-生产 runtime 必须处理并发和取消。
-
-并发场景：
-
-1. 多个用户同时使用 agent。
-2. 一个用户开启多个 session。
-3. 一个任务中并行搜索多个文件。
-4. 多个工具调用排队执行。
-
-需要注意：
-
-1. 同一个工作区的写操作不能乱并发。
-2. 命令执行要有超时。
-3. 用户取消后要终止后续工具调用。
-4. 长任务要定期 checkpoint。
-5. 文件状态变化要重新读取。
-
-取消不是简单停止输出。
-
-如果 agent 正在运行命令，runtime 要决定：
-
-1. 是否杀掉子进程。
-2. 是否保留部分输出。
-3. 是否回滚文件修改。
-4. 是否记录 cancelled 状态。
-5. 是否允许用户继续恢复。
-
-这些都是 runtime 层的职责。
-
-## 2.19 Runtime 的可扩展性设计
-
-一个好的 runtime 不应该只支持一个模型、一个工具和一种任务。
-
-可扩展点包括：
-
-1. 多模型 adapter。
-2. 可插拔 tool registry。
-3. 可配置 permission policy。
-4. 多种 context builder。
-5. 多种 execution backend，例如本地、容器、远程 sandbox。
-6. 多种 trace sink，例如本地文件、数据库、可观测性平台。
-7. 多种 evaluator。
-8. skill 或 workflow 插件。
-
-设计原则：
-
-1. 核心 loop 稳定。
-2. 外围能力插件化。
-3. 工具 schema 标准化。
-4. trace 格式稳定。
-5. 权限策略集中管理。
-6. 配置和版本可追踪。
-
-扩展性不是一开始就做复杂插件系统，而是先把边界设计清楚，避免所有逻辑粘在一起。
-
-## 2.20 一个最小 Runtime 伪代码
-
-下面是一个更接近 runtime 的伪代码：
-
-```text
-def run_agent(session_id, user_request):
-    session = session_manager.load_or_create(session_id)
-    task = task_manager.create_task(user_request)
-    trace = trace_logger.start(session, task)
-
-    while not task.done:
-        context = context_builder.build(session, task)
-        trace.log_context(context.summary)
-
-        model_response = model_adapter.generate(context)
-        trace.log_model_response(model_response)
-
-        action = action_parser.parse(model_response)
-        if action.invalid:
-            task.add_observation(action.error)
-            continue
-
-        if action.type == "final_answer":
-            task.done = true
-            task.final_answer = action.content
-            break
-
-        decision = permission_system.check(action, session)
-        trace.log_permission(action, decision)
-
-        if decision.denied:
-            task.add_observation("Action denied")
-            continue
-
-        result = execution_engine.execute(action)
-        trace.log_execution(action, result)
-
-        error_handler.update_task(task, action, result)
-        state_store.save(session, task)
-
-        if evaluator.task_complete(task):
-            task.done = true
-
-    trace.finish(task.final_answer)
-    return task.final_answer
-```
-
-这段伪代码不是为了实现细节，而是为了展示 runtime 的责任分层。
-
-### 2.20.1 Model Adapter 的兼容边界：Responses API 不等于 OpenAI-compatible API
-
-很多服务宣称“OpenAI-compatible”，通常只表示 HTTP 路径、认证方式或基本 chat/completions 字段相似。它不自动意味着以下能力完全兼容：
-
-1. reasoning channel、隐藏/可保留的 thinking item 和 `reasoning_effort`。
-2. Responses API 的 response item、previous response、后台任务和多步 tool state。
-3. parallel tool call、computer use、web/file search、MCP 或 A2A 的生命周期。
-4. tool result 的关联 id、重放语义、流式事件类型和错误分类。
-5. chat template、特殊 token、custom encoding 和模型自己的 reasoning protocol。
-
-因此 Model Adapter 应暴露能力矩阵，而不是只暴露一个 `generate()`：
-
-| 能力 | 基本 chat 兼容 | Responses/原生接口 | Adapter 必须记录 |
-|---|---|---|---|
-| 文本生成 | 常见 | 常见 | model id、token usage、停止原因 |
-| reasoning effort | 可能不支持 | 常见于原生接口 | 档位、实际 reasoning budget |
-| tool call | schema 可能相似 | 可能包含多种 item/event | call id、参数、结果关联 |
-| preserve/interleaved thinking | 通常不保证 | 模型特定 | 状态是否可跨请求保留 |
-| custom encoding/chat template | 可能被错误假设 | 原生接口/模型卡定义 | tokenizer、template、版本 |
-
-适配层的统一形式可以写成：
-
-```math
-\mathrm{RuntimeRequest}
-\xrightarrow{\mathrm{adapter}}
-(\mathrm{provider\ request},\mathrm{capability\ contract})
-```
-
-如果模型使用独立 encoding 目录或非标准 chat template，adapter 必须显式实现，不应因为返回了 HTTP 200 就认为协议兼容。
-
-## 2.21 常见误区
-
-误区一：Runtime 就是一个 while loop。
-
-纠正：while loop 只是表面。真正重要的是状态、权限、错误处理、trace 和恢复。
-
-误区二：工具执行失败就让模型再试一次。
-
-纠正：有些错误可以重试，有些必须请求用户，有些必须回滚或终止。错误要分类处理。
-
-误区三：上下文越多越好。
-
-纠正：上下文要服务下一步决策。无关文件、长日志和过时历史会干扰模型。
-
-误区四：Trace 只是 debug 日志。
-
-纠正：Trace 还是 replay、evaluation、audit 和训练数据沉淀的基础。
-
-误区五：权限系统放到工具内部即可。
-
-纠正：权限策略应集中管理，工具内部可以二次校验，但不能每个工具各写一套规则。
-
-### 2.21.1 关键公式与 Runtime 运行指标速查
-
-把第 `i` 个 session 中第 `j` 个 task 的第 `t` 个 runtime step 抽象为：
-
-$$
-u_{i,j,t}=(s_i,q_j,\phi_{j,t},c_{j,t},m_{j,t},a_{j,t},e_{j,t},r_{j,t},k_{j,t},\ell_{j,t})
-$$
-
-其中，`s_i` 是 session，`q_j` 是 task，`\phi_{j,t}` 是 runtime phase，`c_{j,t}` 是 context，`m_{j,t}` 是模型调用，`a_{j,t}` 是解析后的 action，`e_{j,t}` 是 execution result，`r_{j,t}` 是 error / recovery 决策，`k_{j,t}` 是 checkpoint，`\ell_{j,t}` 是 trace event。
-
-定义指示函数：
-
-$$
-I(z)=
-\begin{cases}
-1,& z=\mathrm{true}\\
-0,& z=\mathrm{false}
-\end{cases}
-$$
-
-Session 隔离率：
-
-$$
-R_{\mathrm{iso}}=1-\frac{N_{\mathrm{cross}}}{N_{\mathrm{access}}}
-$$
-
-其中，`N_cross` 是跨 session 读取上下文、状态、权限或工具结果的违规次数，`N_access` 是所有 session 资源访问次数。这个指标应该接近 1。
-
-状态转移合法率：
-
-$$
-A_{\mathrm{phase}}=\frac{1}{N}\sum_{j,t} I((\phi_{j,t},\phi_{j,t+1})\in P_{\mathrm{valid}})
-$$
-
-其中，`P_valid` 是 runtime 状态机允许的转移集合。比如 `EXECUTING_ACTION -> OBSERVING_RESULT -> UPDATING_STATE` 是正常路径，`EXECUTING_ACTION -> COMPLETED` 但没有 observation 和验证就很可疑。
-
-Context 预算通过率：
-
-$$
-C_{\mathrm{ctx}}=\frac{1}{N}\sum_{j,t} I(T(c_{j,t})\le B_{\mathrm{ctx}})I(R(c_{j,t})\ge R_{\min})
-$$
-
-其中，`T(c)` 是 context token 数，`B_ctx` 是预算，`R(c)` 是与当前 phase 相关的必要信息覆盖率。上下文不是越多越好，要同时满足预算和相关性。
-
-模型适配成功率：
-
-$$
-S_{\mathrm{adapter}}=\frac{N_{\mathrm{model\_ok}}}{N_{\mathrm{model\_call}}}
-$$
-
-它统计模型 adapter 是否成功完成消息格式转换、tool schema 注入、streaming 收集、错误标准化和重试。模型 API 失败不是 runtime 失败，但 adapter 必须把失败转成结构化事件。
-
-动作解析恢复率：
-
-$$
-R_{\mathrm{parse\_recover}}=\frac{N_{\mathrm{parse\_fixed}}}{N_{\mathrm{parse\_error}}}
-$$
-
-其中，`N_parse_error` 是非法 action 输出次数，`N_parse_fixed` 是通过自动修复、重新询问模型或返回 observation 后成功恢复的次数。恢复率低说明 action parser 和模型输出协议需要重构。
-
-执行结果标准化率：
-
-$$
-C_{\mathrm{exec}}=\frac{1}{N_{\mathrm{exec}}}\sum_{j,t} I(e_{j,t}\ \mathrm{has}\ status,stdout,stderr,exit,kind)
-$$
-
-工具结果必须结构化，否则模型、trace、evaluation 和 error handler 都无法稳定使用。
-
-错误恢复成功率：
-
-$$
-S_{\mathrm{recover}}=\frac{N_{\mathrm{recovered}}}{N_{\mathrm{error}}}
-$$
-
-这里的恢复不是“盲目 retry”，而是按错误类型采取 repair、retry、ask user、rollback、degrade 或 abort，并且最终状态一致。
-
-Checkpoint 覆盖率：
-
-$$
-C_{\mathrm{ckpt}}=\frac{N_{\mathrm{checkpointed}}}{N_{\mathrm{mutating}}+N_{\mathrm{long}}}
-$$
-
-其中，`N_mutating` 是写文件、应用 patch、更新状态等会改变环境的步骤数，`N_long` 是长命令或长任务步骤数。没有 checkpoint，session 中断后很难安全恢复。
-
-取消 / 超时处理覆盖率：
-
-$$
-C_{\mathrm{cancel}}=\frac{N_{\mathrm{cancel\_handled}}+N_{\mathrm{timeout\_handled}}}{N_{\mathrm{cancel}}+N_{\mathrm{timeout}}}
-$$
-
-取消不是简单停止输出，runtime 还要处理子进程、部分输出、文件 diff、trace 状态和恢复点。
-
-Runtime 准入条件可以形式化为：
-
-$$
-G_{\mathrm{runtime}}=I(R_{\mathrm{iso}}\ge 0.99)I(A_{\mathrm{phase}}\ge 0.95)I(C_{\mathrm{ctx}}\ge 0.90)I(S_{\mathrm{adapter}}\ge 0.95)I(C_{\mathrm{exec}}\ge 0.95)I(S_{\mathrm{recover}}\ge 0.70)I(C_{\mathrm{ckpt}}\ge 0.90)I(C_{\mathrm{cancel}}\ge 0.80)
-$$
-
-这组条件强调 runtime 的工程可靠性：能不能隔离 session，能不能按状态机运行，能不能把失败变成可恢复状态，能不能从 checkpoint 和 trace 重放，而不是只看模型某次回答是否正确。
-
-### 2.21.2 最小可运行 Runtime Step 审计 demo
-
-下面的 demo 用 toy runtime step 日志审计一个 agent runtime。它不调用模型，也不执行真实命令，只检查 runtime 事件是否满足 session 隔离、状态机、context budget、adapter、parser、execution result、error handling、checkpoint、cancel / timeout 和 trace 要求。
-
-```python
-from pprint import pprint
-
-VALID_TRANSITIONS = {
-    ("RECEIVED_TASK", "BUILDING_CONTEXT"),
-    ("BUILDING_CONTEXT", "CALLING_MODEL"),
-    ("CALLING_MODEL", "PARSING_ACTION"),
-    ("PARSING_ACTION", "WAITING_PERMISSION"),
-    ("PARSING_ACTION", "COMPLETED"),
-    ("WAITING_PERMISSION", "EXECUTING_ACTION"),
-    ("WAITING_PERMISSION", "CANCELLED"),
-    ("EXECUTING_ACTION", "OBSERVING_RESULT"),
-    ("EXECUTING_ACTION", "FAILED"),
-    ("OBSERVING_RESULT", "UPDATING_STATE"),
-    ("UPDATING_STATE", "BUILDING_CONTEXT"),
-    ("UPDATING_STATE", "COMPLETED"),
-}
-
-REQUIRED_EXEC_FIELDS = {"status", "stdout", "stderr", "exit_code", "error_type"}
-REQUIRED_TRACE_FIELDS = {
-    "session",
-    "task",
-    "phase",
-    "context",
-    "model",
-    "action",
-    "execution",
-    "recovery",
-    "checkpoint",
-    "budget",
-}
-
-steps = [
-    {
-        "id": "s1:t_login:1",
-        "session": "s1",
-        "task": "t_login",
-        "phase": "RECEIVED_TASK",
-        "next_phase": "BUILDING_CONTEXT",
-        "resource_session": "s1",
-        "context_tokens": 1200,
-        "context_relevance": 0.92,
-        "model_ok": True,
-        "parse_error": False,
-        "parse_fixed": False,
-        "exec_fields": set(),
-        "error": False,
-        "recovered": False,
-        "mutating": False,
-        "long_running": False,
-        "checkpointed": True,
-        "cancel_or_timeout": False,
-        "cancel_handled": False,
-        "trace_fields": REQUIRED_TRACE_FIELDS,
-    },
-    {
-        "id": "s1:t_login:2",
-        "session": "s1",
-        "task": "t_login",
-        "phase": "EXECUTING_ACTION",
-        "next_phase": "OBSERVING_RESULT",
-        "resource_session": "s1",
-        "context_tokens": 3800,
-        "context_relevance": 0.88,
-        "model_ok": True,
-        "parse_error": False,
-        "parse_fixed": False,
-        "exec_fields": REQUIRED_EXEC_FIELDS,
-        "error": False,
-        "recovered": False,
-        "mutating": True,
-        "long_running": False,
-        "checkpointed": True,
-        "cancel_or_timeout": False,
-        "cancel_handled": False,
-        "trace_fields": REQUIRED_TRACE_FIELDS,
-    },
-    {
-        "id": "s2:t_report:1",
-        "session": "s2",
-        "task": "t_report",
-        "phase": "BUILDING_CONTEXT",
-        "next_phase": "CALLING_MODEL",
-        "resource_session": "s1",
-        "context_tokens": 9200,
-        "context_relevance": 0.55,
-        "model_ok": True,
-        "parse_error": False,
-        "parse_fixed": False,
-        "exec_fields": set(),
-        "error": False,
-        "recovered": False,
-        "mutating": False,
-        "long_running": False,
-        "checkpointed": False,
-        "cancel_or_timeout": False,
-        "cancel_handled": False,
-        "trace_fields": REQUIRED_TRACE_FIELDS - {"context"},
-    },
-    {
-        "id": "s2:t_report:2",
-        "session": "s2",
-        "task": "t_report",
-        "phase": "CALLING_MODEL",
-        "next_phase": "PARSING_ACTION",
-        "resource_session": "s2",
-        "context_tokens": 3600,
-        "context_relevance": 0.82,
-        "model_ok": False,
-        "parse_error": True,
-        "parse_fixed": True,
-        "exec_fields": set(),
-        "error": True,
-        "recovered": True,
-        "mutating": False,
-        "long_running": False,
-        "checkpointed": False,
-        "cancel_or_timeout": False,
-        "cancel_handled": False,
-        "trace_fields": REQUIRED_TRACE_FIELDS - {"model"},
-    },
-    {
-        "id": "s3:t_refactor:1",
-        "session": "s3",
-        "task": "t_refactor",
-        "phase": "EXECUTING_ACTION",
-        "next_phase": "COMPLETED",
-        "resource_session": "s3",
-        "context_tokens": 4100,
-        "context_relevance": 0.9,
-        "model_ok": True,
-        "parse_error": False,
-        "parse_fixed": False,
-        "exec_fields": {"status", "stdout"},
-        "error": True,
-        "recovered": False,
-        "mutating": True,
-        "long_running": True,
-        "checkpointed": False,
-        "cancel_or_timeout": True,
-        "cancel_handled": False,
-        "trace_fields": REQUIRED_TRACE_FIELDS - {"execution", "checkpoint"},
-    },
-]
-
-CTX_BUDGET = 6000
-MIN_RELEVANCE = 0.75
-
-
-def ratio(num, den):
-    return 0.0 if den == 0 else num / den
-
-
-session_access = len(steps)
-cross_session = [s["id"] for s in steps if s["session"] != s["resource_session"]]
-phase_invalid = [
-    s["id"]
-    for s in steps
-    if (s["phase"], s["next_phase"]) not in VALID_TRANSITIONS
-]
-context_bad = [
-    s["id"]
-    for s in steps
-    if s["context_tokens"] > CTX_BUDGET or s["context_relevance"] < MIN_RELEVANCE
-]
-exec_steps = [s for s in steps if s["phase"] == "EXECUTING_ACTION"]
-exec_bad = [
-    s["id"]
-    for s in exec_steps
-    if not REQUIRED_EXEC_FIELDS.issubset(s["exec_fields"])
-]
-errors = [s for s in steps if s["error"]]
-mutating_or_long = [s for s in steps if s["mutating"] or s["long_running"]]
-cancel_steps = [s for s in steps if s["cancel_or_timeout"]]
-trace_scores = [
-    len(s["trace_fields"] & REQUIRED_TRACE_FIELDS) / len(REQUIRED_TRACE_FIELDS)
-    for s in steps
-]
-
-metrics = {
-    "session_isolation": round(1 - ratio(len(cross_session), session_access), 3),
-    "phase_transition_valid": round(1 - ratio(len(phase_invalid), len(steps)), 3),
-    "context_budget_ok": round(1 - ratio(len(context_bad), len(steps)), 3),
-    "adapter_success": round(ratio(sum(s["model_ok"] for s in steps), len(steps)), 3),
-    "parse_recovery": round(
-        ratio(sum(s["parse_fixed"] for s in steps if s["parse_error"]), sum(s["parse_error"] for s in steps)),
-        3,
-    ),
-    "execution_standardized": round(1 - ratio(len(exec_bad), len(exec_steps)), 3),
-    "error_recovery": round(ratio(sum(s["recovered"] for s in errors), len(errors)), 3),
-    "checkpoint_coverage": round(ratio(sum(s["checkpointed"] for s in mutating_or_long), len(mutating_or_long)), 3),
-    "cancel_timeout_handled": round(ratio(sum(s["cancel_handled"] for s in cancel_steps), len(cancel_steps)), 3),
-    "trace_completeness": round(sum(trace_scores) / len(trace_scores), 3),
-}
-
-root_causes = {}
-for s in steps:
-    causes = []
-    if s["id"] in cross_session:
-        causes.append("session_leak")
-    if s["id"] in phase_invalid:
-        causes.append("invalid_phase_transition")
-    if s["id"] in context_bad:
-        causes.append("context_budget_or_relevance")
-    if not s["model_ok"]:
-        causes.append("model_adapter_error")
-    if s["id"] in exec_bad:
-        causes.append("unstructured_execution_result")
-    if s["error"] and not s["recovered"]:
-        causes.append("unrecovered_error")
-    if (s["mutating"] or s["long_running"]) and not s["checkpointed"]:
-        causes.append("missing_checkpoint")
-    if s["cancel_or_timeout"] and not s["cancel_handled"]:
-        causes.append("cancel_or_timeout_unhandled")
-    if len(s["trace_fields"] & REQUIRED_TRACE_FIELDS) < len(REQUIRED_TRACE_FIELDS):
-        causes.append("trace_incomplete")
-    if not causes:
-        causes.append("pass")
-    root_causes[s["id"]] = causes
-
-gates = {
-    "session_ok": metrics["session_isolation"] >= 0.99,
-    "phase_ok": metrics["phase_transition_valid"] >= 0.95,
-    "context_ok": metrics["context_budget_ok"] >= 0.90,
-    "adapter_ok": metrics["adapter_success"] >= 0.95,
-    "execution_ok": metrics["execution_standardized"] >= 0.95,
-    "recovery_ok": metrics["error_recovery"] >= 0.70,
-    "checkpoint_ok": metrics["checkpoint_coverage"] >= 0.90,
-    "cancel_ok": metrics["cancel_timeout_handled"] >= 0.80,
-    "trace_ok": metrics["trace_completeness"] >= 0.90,
-}
-
-failed_gates = [name for name, ok in gates.items() if not ok]
-runtime_gate_pass = all(gates.values())
-
-print("metrics:")
-pprint(metrics)
-print("\ncross_session:")
-pprint(cross_session)
-print("\nphase_invalid:")
-pprint(phase_invalid)
-print("\ncontext_bad:")
-pprint(context_bad)
-print("\nroot_causes:")
-pprint(root_causes)
-print("\nfailed_gates:")
-pprint(failed_gates)
-print("\nruntime_gate_pass:", runtime_gate_pass)
-```
-
-一组可能输出如下：
-
-```text
-metrics:
-{'adapter_success': 0.8,
- 'cancel_timeout_handled': 0.0,
- 'checkpoint_coverage': 0.5,
- 'context_budget_ok': 0.8,
- 'error_recovery': 0.5,
- 'execution_standardized': 0.5,
- 'parse_recovery': 1.0,
- 'phase_transition_valid': 0.8,
- 'session_isolation': 0.8,
- 'trace_completeness': 0.92}
-
-cross_session:
-['s2:t_report:1']
-
-phase_invalid:
-['s3:t_refactor:1']
-
-context_bad:
-['s2:t_report:1']
-
-root_causes:
-{'s1:t_login:1': ['pass'],
- 's1:t_login:2': ['pass'],
- 's2:t_report:1': ['session_leak',
-                   'context_budget_or_relevance',
-                   'trace_incomplete'],
- 's2:t_report:2': ['model_adapter_error', 'trace_incomplete'],
- 's3:t_refactor:1': ['invalid_phase_transition',
-                     'unstructured_execution_result',
-                     'unrecovered_error',
-                     'missing_checkpoint',
-                     'cancel_or_timeout_unhandled',
-                     'trace_incomplete']}
-
-failed_gates:
-['session_ok',
- 'phase_ok',
- 'context_ok',
- 'adapter_ok',
- 'execution_ok',
- 'recovery_ok',
- 'checkpoint_ok',
- 'cancel_ok']
-
-runtime_gate_pass: False
-```
-
-这里 `runtime_gate_pass=False` 是故意设计的：它暴露了跨 session 泄漏、非法状态转移、context 预算和相关性失败、adapter 错误、执行结果不结构化、错误未恢复、缺 checkpoint、取消 / 超时未处理和 trace 不完整。Runtime 架构的价值，就是把这些失败变成可定位、可恢复、可回放的工程事件。
-
-## 2.22 面试题：Agent Runtime 包含哪些组件
-
-回答要点：
-
-```text
-一个 agent runtime 通常包含 session manager、task manager、context builder、model adapter、action parser、tool registry、execution engine、permission system、state store、trace logger、error handler 和 evaluator。它的核心职责是驱动 agent loop：构造上下文、调用模型、解析动作、校验权限、执行工具、记录结果、更新状态，并决定是否进入下一轮。
-```
-
-## 2.23 面试题：Runtime 如何处理工具失败
-
-回答要点：
-
-```text
-我会先把工具失败结构化，例如 parse_error、permission_error、timeout、command_error、not_found。不同错误采用不同策略：临时错误可以 retry，参数错误可以把错误反馈给模型重新生成，权限错误要请求用户或拒绝，patch 冲突要重新读取文件再生成更小 diff，危险错误要 abort 或 rollback。关键是不要把所有失败都简单交给模型盲目重试。
-```
-
-## 2.24 面试题：如何让 Agent 任务可恢复
-
-回答要点：
-
-```text
-要让任务可恢复，需要 session manager、state store 和 trace logger 配合。Runtime 每轮保存 task state，包括目标、当前 phase、已执行 action、工具结果、文件 diff、权限决策和上下文摘要。长任务要定期 checkpoint。恢复时重新加载 session 和 task state，检查工作区文件是否变化，再从最近安全状态继续，而不是把整段历史重新丢给模型猜。
-```
-
-## 2.25 小练习
-
-1. 画出 agent runtime 的核心组件图。
-2. 用状态机表示一次 read file -> edit file -> run test -> fix 的过程。
-3. 设计一个 action 数据结构，至少包含 action type、参数、风险等级和 reason。
-4. 设计一个 execution result 数据结构，至少包含 status、stdout、stderr、exit code 和 error type。
-5. 思考模型输出非法 JSON 时 runtime 应该如何处理。
-6. 思考用户在 agent 修改文件后手动改了同一个文件，runtime 应该如何处理。
-7. 设计一个 trace schema，用于支持 replay。
-8. 用 3 分钟回答“如何设计一个可恢复的 coding agent runtime”。
-
-## 2.26 本章总结
-
-本章把 agent runtime 拆成了更具体的工程组件。
-
-核心结论：
-
-1. Runtime 是 agent loop 的执行内核，负责状态、调度、执行、错误处理和 trace。
-2. Session Manager 管交互边界，Task Manager 管目标和进度。
-3. Context Builder 决定模型每一轮看到什么，是影响效果的关键模块。
-4. Model Adapter 隔离不同模型 API，Action Parser 把模型输出变成结构化动作。
-5. Tool Registry、Execution Engine 和 Permission System 共同决定动作是否可执行、如何执行、是否安全。
-6. State Store 和 Trace Logger 决定任务是否可恢复、可调试、可回放、可评估。
-7. 生产级 runtime 必须处理错误、取消、超时、并发、权限和隐私。
-
-下一章会进入 Coding Agent 工作流，重点讨论一个 coding agent 在真实代码库中如何探索、计划、编辑、验证和总结。
-
-## 2.27 GPT-5.6 的三层 Agent runtime 所有权
-
-OpenAI 的 Agents 文档给出了一个很适合 runtime 设计的切分：Agents API、Agents SDK 和 Responses API 都能完成 Agent 工作，但它们的状态所有者不同。把它们都叫作“Agent API”会让恢复、审计和权限责任变得模糊。
-
-| 层 | 主要所有者 | Runtime 需要记录什么 |
-|---|---|---|
-| Agents API | OpenAI 托管 Codex harness | session configuration、turns、items、托管工具、sandbox 与平台进度 |
-| Agents SDK | 应用及其 runner | deployment、storage、approval、handoff、工具集、session 和本地 sandbox |
-| Responses API | 应用自建 harness | input/output item、previous response 或完整 replay、executor、permission、artifact 和 verifier |
-
-这里的“所有者”不是账户归属，而是谁负责把状态恢复到一个可继续执行的状态。一个 Agents SDK session、Responses conversation、Agents API session 和 sandbox 不能互相替换。Runtime 的 capability manifest 至少要包含：
-
-```text
-runtime_owner, session_id, model, snapshot, effort, tools_hash,
-reasoning_state_policy, context_policy, permission_policy,
-executor, sandbox, checkpoint, verifier, retention
-```
-
-GPT-5.6 的 reasoning item 是 opaque protocol state，不是可读 CoT；`reasoning.context` 的选择也不等于应用永久记忆。Tool search 还引入了“能力发现状态”：hosted path 由服务端返回 loaded tools，client path 由应用回传 `tool_search_output`，同一 `call_id`、schema hash、tenant scope 和 policy version 都应进入 trace。模型搜索到工具不代表 executor 已授权。
-
-Prompt cache 与 compaction 也要进入 runtime 状态机。稳定 developer 前缀、工具定义和历史回执可以形成可复用 cache prefix；tool search 把新增定义追加到尾部以尽量保护它。Compaction 则会替换早期上下文，触发 canonical context 更新，首次恢复可能 cache miss。验收不能只看压缩后 token 数，还要比较 `cache hit/write`、恢复后的工具重复率、artifact 一致性、E2E 延迟和单位成功成本。
-
-面试中可以用一句话收束：模型负责提出 reasoning/tool intent，Responses 负责携带 typed items，harness 负责 loop/state/policy，executor 负责真实副作用，verifier 负责判断任务是否完成。
-
-## 2.28 Qwen3.7 Plus：把 region/scope 也纳入 capability manifest
-
-Qwen3.7 Plus 的官方 Model Studio 文档说明，同一个模型 alias 在不同 region/scope 下可能拥有不同能力。例如 Virginia 的 Global scope 支持 Structured Outputs 和 Web Search，而 Virginia 的 US scope 不支持；Batch、价格、endpoint 和 API key 也按区域变化。因此 runtime 不能只在 manifest 里写 `model=qwen3.7-plus`，还要写：
-
-```text
-model_alias/snapshot/provider/region/scope/endpoint
-input_output_modalities/context_and_thinking_limits
-capability_flags/tool_schema_hash/permission_policy
-cache_policy/media_revision/executor/verifier
-```
-
-启动时先做 capability probe，或读取带日期的 provider manifest；发现 schema 不支持、API key 属于另一地域或 Web Search 被 scope 禁用时，应在执行前失败，并把错误归因于合同/配置，而不是误报为模型推理失败。模型生成合法 JSON 也不能跳过权限、沙箱、超时、幂等和真实 executor。
-
-Qwen3.7 Plus 的 `qwen3.7-plus-2026-05-26` 是托管 snapshot 关系，不是本地可加载的公开 checkpoint。runtime 应把 alias、resolved snapshot、页面采集日期和 provider revision 记录下来；不能用 Qwen3.5、Qwen3.8、Qwen3-VL 或 Qwen3-Omni 的 config 填充缺失的内部架构字段。
+下一章进入 Coding Agent 工作流，从用户需求澄清和仓库探索开始，把本章的状态、接口与失败处理带入完整代码任务。

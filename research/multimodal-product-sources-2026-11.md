@@ -53,3 +53,12 @@
 ## 证据范围限制
 
 未运行任何模型、API 请求、媒体处理、业务样本评估或性能 benchmark；未评估特定 provider 的准确率、实时体验、生成质量、安全拦截率、价格或法律适用性。正文中为讲解分母而构造的票据数量和结果均为明确标注的合成教学数据，不是生产经验或行业基准。
+
+
+## OpenAI 图像 detail 与录音转写接口快照
+
+- **来源与检索日期：** [Images and vision](https://developers.openai.com/api/docs/guides/images-vision)、[File transcription](https://developers.openai.com/api/docs/guides/speech-to-text)，OpenAI 官方开发者文档，2026-11-17。
+- **实际阅读位置：** 图像页 detail 参数及坐标/缩放说明；语音页文件转写模型示例、completed recording streaming 与 timestamp 说明。
+- **来源支持的事实：** 图像 detail 选项依模型而定，公开值为 low、high、original、auto，省略时默认 auto；original 仍可能按模型像素或 patch 预算缩放，坐标任务要在变换后映回原图。语音文档使用 `/v1/audio/transcriptions` 与 `gpt-transcribe` 展示文件转写；对完成录制的音频设置 `stream=true` 会分段返回 transcript events，输入仍在到达时使用 Realtime transcription。页面在 2026-11-17 还将 `whisper-1`、`gpt-4o-transcribe`、`gpt-4o-mini-transcribe`、`gpt-4o-transcribe-diarize` 和 `/v1/audio/translations` 标为弃用，并称计划于 2027-02-26 关闭。
+- **证据等级：** source-backed，适用于页面检索时点的 OpenAI API 公开接口说明。
+- **边界：** 文档页面持续更新；detail 参数不是跨模型统一的像素保证，文件转写流式事件不等于麦克风实时会话，弃用/关闭日期也只代表访问时的公开计划；接口说明不支持对准确率、业务字段可靠性、延迟或成本作保证。

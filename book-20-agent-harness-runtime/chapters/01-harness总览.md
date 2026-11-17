@@ -1,1010 +1,254 @@
 # 第一章：Harness 总览
 
-## 0. 本讲范围与资料
+## 0. 本讲范围与前置
 
-本章参考 OpenAI Agents SDK 关于 agent loop、tool execution、guardrails、sandbox agents、sessions、human-in-the-loop 和 tracing 的公开文档，Claude Code 关于读写代码库、执行命令、MCP、CLAUDE.md、skills、hooks、权限和多环境运行的公开说明，OpenHands 关于 SDK、CLI、GUI、Cloud、RBAC / permissions 和 evaluation infrastructure 的公开 README，以及 SWE-agent / mini-SWE-agent 围绕 GitHub issue 自动修复、工具使用、SWE-bench 和 Agent-Computer Interface 的公开资料边界。
+本章讨论 Coding Agent（编码智能体）怎样在真实代码工作区里完成多步任务。读者需要知道，大模型能根据上下文生成回答或结构化工具调用；还需要能读普通文件路径、Git 状态和测试结果。不要求有生产 Agent 的开发经验。
 
-因此，本章只讨论 agent harness / coding agent runtime 的工程抽象：模型输出如何变成受控动作，工具和文件系统如何被系统层校验，终端命令如何受权限和沙箱约束，trace / replay / evaluation harness 如何支撑复盘。它不是某个具体产品的内部架构复刻，不提供绕过权限、执行危险命令、读取敏感文件或自动化高风险操作的技巧。
+这一章的重点不是某个产品的内部架构，而是一条执行链：用户给出目标和限制，模型提出下一步，Harness 判断这一步能不能执行，工具改变或读取外部环境，运行结果再影响任务状态和下一次模型调用。后续各章再分别讲工具、文件、终端、权限、trace 和评估。
 
-本章聚焦三点：
+不同框架对 Agent Runtime（智能体运行时）、Harness 和 Skill（技能流程）的命名并不完全一致。本书会给出便于分析系统责任的工作定义；遇到具体产品时，以该产品当前公开文档和实现为准。
 
-1. 把 harness 从“外层框架”落成可度量的运行闭环：action parse、permission gate、tool execution、observation use、state update、trace completeness、budget overrun 和 replay readiness。
-2. 用公式区分模型能力、runtime 控制、工具执行、安全边界和评估回放，避免把 coding agent 能力全部归因给模型。
-3. 补充一个 0 依赖 Python demo，用 toy agent trace 审计一个最小 harness 是否具备可执行、可控、可观测、可复盘的基本条件。
+读完本章后，读者应该能沿一条任务轨迹指出动作由谁提出、由谁执行、状态在哪里更新、什么证据支持完成；还能解释 Harness、Runtime、Tool、权限和隔离各自承担什么责任。
 
-## 1.1 本章目标
+## 1.1 从一个修复任务看 Harness
 
-这一章先回答一个核心问题：为什么 coding agent 不能只是“一个会写代码的模型 API”？
+先看一个小型 Coding Agent 任务。下面的文件状态、模型动作和测试结果都是**教学构造**，用来演示控制流程；它们不是实际运行某个仓库或产品得出的结果。
 
-如果只把大模型接到聊天窗口里，它最多能生成文本、解释代码、给出修改建议。真正的 coding agent 要能读文件、改文件、跑命令、看报错、继续修复、申请权限、记录过程、支持回滚和评估任务是否完成。把这些能力组织起来的系统层，就是本书所说的 agent harness 或 coding agent runtime。
+用户提出任务：
 
-学完本章，你应该能回答：
+> 修复未登录请求仍然返回成功的问题。保留工作区里已有的无关改动，只改必要实现，运行相关测试，并说明验证结果。
 
-1. Harness 是什么，不是什么。
-2. Harness 和 model、agent、tool、skill、runtime、evaluation harness 有什么关系。
-3. 为什么模型能力越强，harness 反而越重要。
-4. 一个 coding agent harness 通常包含哪些模块。
-5. Harness 如何把模型输出变成可执行、可控、可观测的动作。
-6. 面试中如何从系统设计角度解释 harness。
+任务开始时，工作区已经有一处用户自己的文档修改，`tests/test_auth.py` 中也有一个失败用例，预期未登录请求返回 `401`，当前结果却是 `200`。仅把用户这句话发给模型还不够：模型必须知道当前测试、认证处理代码、工作区状态和允许修改的范围；系统还要防止无意覆盖那处文档修改。
 
-## 1.2 核心定义
+沿着一次完整尝试，看 Harness 怎样管理这项任务：
 
-Harness 是把模型能力组织成可执行系统的运行框架。
+| 步骤 | 模型提出的动作或环境结果 | Harness/runtime 做什么 | 任务状态和执行轨迹（trace）应记录什么 |
+| --- | --- | --- | --- |
+| 0. 建立任务 | 用户给出目标，并要求保留已有改动 | `git status --short` 得到 ` M docs/guide.md`；把验收条件和限制放入任务状态 | `docs/guide.md` 已有修改，标成任务开始前的状态；不得把它算作本任务产物 |
+| 1. 调查 | 模型请求读取 `tests/test_auth.py` 和 `src/auth.py` | 检查路径与读取权限，再调用只读工具 | 保存实际读到的文件版本和测试失败信息；不能把模型猜测当成文件事实 |
+| 2. 阻止越界编辑 | 模型提议 `apply_patch(path="docs/guide.md")` | 参数格式正确，但策略发现该文件已有用户改动且不在本任务必要范围，于是拒绝这次写入 | 记录被拒绝的动作及原因；没有写操作发生。把拒绝结果交回模型，让它调整方案 |
+| 3. 修改目标实现 | 模型提议在 `src/auth.py` 增加未认证请求返回 `401` 的分支 | 再检查路径、patch 和当前权限；通过后才让文件工具应用修改 | 记录实际 diff、执行结果和当前代码状态。动作“已提出”与副作用“已发生”是两件事 |
+| 4. 第一次验证 | 命令 `pytest -q tests/test_auth.py::test_unauthenticated_request_rejected` 仍报 `expected 401, got 200` | 测试进程执行结束，返回退出码和标准输出/错误输出 | 把这次失败作为新的执行观察（observation），任务仍是未完成；不能因为代码已改就标记成功 |
+| 5. 根据反馈修正 | 模型根据失败位置提出第二次小修改 | 重新执行参数和权限检查，再应用 patch | 保留上次失败结果，更新当前 diff 和下一步计划 |
+| 6. 再次验证与验收 | 同一条相关测试返回退出码 `0` | 验收规则检查测试结果、目标文件 diff 和任务前后的工作区状态 | 只有约定的证据都满足，任务才进入完成状态；原有 `docs/guide.md` 修改仍在 |
+| 7. 交付 | 模型生成任务总结 | Harness 将总结与实际执行记录对照，避免把未运行的测试说成已通过 | 告诉用户改了什么、运行了什么、结果如何；同时说明仍未解决或未验证的事项 |
 
-更具体地说，在 coding agent 场景中，harness 负责把下面这些东西连接起来：
+这张表里的状态不是同一种东西。用户的要求属于任务约束；模型提出的是候选动作；文件工具和测试进程产生的是实际执行结果；工作区和任务状态保存当前事实；trace 则保存这段过程的记录。Harness 负责把它们连起来，而不能让前一类信息冒充后一类证据。
 
-1. 用户任务。
-2. 大模型调用。
-3. 上下文构造。
-4. 工具注册和工具调用。
-5. 文件读取和代码编辑。
-6. 终端命令执行。
-7. 权限控制和用户确认。
-8. 沙箱和安全策略。
-9. 状态管理和任务进度。
-10. trace、日志、回放和评估。
+例如，第一次测试失败之后，当前任务状态可以简记为“任务仍在进行；第一次 patch 已应用；验收未通过；下一步要处理失败输出”。与之不同，trace 需要保留这条事件的具体命令、当时的代码版本、退出码 `1` 和测试输出。下一轮上下文可以使用前者快速了解进度；复盘时则需要后者还原究竟执行了什么。两种记录都来自这次合成轨迹，不代表真实运行日志。
 
-一句话定义：
+## 1.2 模型提出动作，Harness 决定怎样处理
 
-```text
-Agent harness 是包裹在模型外层的工程运行系统，它把模型的文本决策转成受控动作，并把环境反馈重新组织成下一轮模型上下文。
+在上面的任务里，“修改 `src/auth.py`”起初只是模型的提议。只有通过动作解析、任务策略和执行环境后，文件才真的改变。可以把一次循环拆成五步：
+
+1. **准备输入。** Harness 从任务、相关文件、历史动作和工具结果中选出本轮模型需要的信息。它还要保留用户限制，例如“不要覆盖已有改动”。
+2. **接收提议。** 模型返回文本、结构化答案或工具调用。输出可能不完整、格式错误、引用不存在的工具，或提出超出任务范围的动作。
+3. **检查并执行。** Harness 解析动作格式、验证参数和策略，再由工具执行器访问文件、进程或外部服务。被拒绝的动作不应产生对应副作用。
+4. **记录观察并更新状态。** 执行器返回文件内容、patch 结果、退出码、stdout/stderr 或错误。Harness 将这些观察送回模型，并更新任务的已完成项、当前版本、预算和待处理问题。
+5. **判断是否结束。** 模型可以建议完成，但系统仍需按任务的验收规则检查证据。若任务尚未完成且仍可继续，就开始下一轮；若无法继续，应停止并如实报告未完成状态。
+
+下面的图把同一过程缩成一条控制流。模型输出最终答复也要经过验收；若失败或证据不足，系统应保留未完成状态，而不是仅凭答复宣布成功。
+
+```mermaid
+flowchart TD
+    U["用户目标与限制"] --> H["建立任务状态"]
+    H --> C["构造本轮上下文"]
+    C --> M["调用模型"]
+    M --> K{"输出类型？"}
+    K -->|工具动作| P["解析结构与参数"]
+    P --> D{"策略检查"}
+    D -->|允许| E["执行工具"]
+    D -->|需确认| A["等待审批"]
+    D -->|拒绝| O["记录拒绝结果"]
+    A -->|批准| E
+    A -->|拒绝| O
+    E --> R["收集实际结果"]
+    O --> S["更新状态与 trace"]
+    R --> S
+    S --> V{"验收证据满足？"}
+    V -->|否，仍可继续| C
+    V -->|是| F["交付结果与证据"]
+    V -->|否，停止条件满足| X["说明未完成项"]
+    K -->|最终答复| V
+    P -->|格式错误或越预算| X
 ```
 
-这里有两个关键词：受控动作和环境反馈。
+这个循环与某个 SDK 的实现可以互相印证，但不能把一种实现当成所有产品的统一标准。例如，OpenAI Agents SDK 的公开文档描述了模型调用、工具执行后再运行下一轮、handoff 后切换 agent，以及达到 turn 上限时停止等路径；它也为未知工具名提供不同的错误处理配置。这里引用它是为了展示一个具体公开实现，不表示每种 Harness 都采用同一接口或控制顺序。[OpenAI Agents SDK：Running agents](https://openai.github.io/openai-agents-python/running_agents/)
 
-模型本身只输出 token。Harness 要做的是：
+## 1.3 Harness、Agent、Runtime 和周边对象
 
-1. 判断这些 token 是否表示一个工具调用、文件修改、命令执行或最终回答。
-2. 校验动作是否合法、安全、可执行。
-3. 执行动作并收集结果。
-4. 把结果压缩、结构化后交还给模型。
-5. 记录整个过程，方便用户审计、系统回放和后续评估。
+这些术语在不同项目中会重叠，因此需要先约定本书的用法。表中的例子都对应前面的登录修复任务。
 
-## 1.3 为什么需要 Harness
+| 对象 | 本书中的工作定义 | 在修复任务中的例子 |
+| --- | --- | --- |
+| **Model（模型）** | 根据输入生成文本、工具调用或结构化输出的模型服务 | 提议先读测试、再修改认证处理函数 |
+| **Agent（智能体）** | 围绕目标反复观察、决策和行动的行为过程；它可以由模型、工具和运行循环共同实现 | 调查失败、修改代码、读测试结果并决定下一步 |
+| **Runtime（运行时）** | 推进一次运行的执行机制，包括调用模型、调度工具、处理结果、错误和运行限制 | 让读文件、改文件、运行测试依次发生，并在失败后继续 |
+| **Harness** | 围绕 Agent 运行建立的控制与证据层，组织任务、上下文、动作、权限、状态、环境和验收 | 保护用户改动，限制可执行动作，保留测试结果并判断是否完成 |
+| **Tool（工具）** | Agent 可请求的一项具体操作，通常有输入参数、返回值和副作用范围 | 读取文件、应用 patch、运行指定测试 |
+| **Skill（技能流程）** | 可复用的一组任务指引、知识或工具使用流程；具体含义依产品而异 | “修复并验证 bug”的步骤说明可以被封装成一个可复用流程 |
+| **Task state（任务状态）** | 系统认为当前任务处于什么阶段、哪些约束仍有效、已有何种执行证据 | 记下原有文档修改、已尝试的 diff、测试失败以及尚未完成的验收项 |
+| **Memory（记忆）** | 为后续决策保留的信息；可能是上下文、摘要或长期偏好 | 保存任务摘要，帮助长任务续接。它本身不证明文件当前是什么状态 |
+| **Trace（执行轨迹）** | 按时间记录一次运行的输入、动作、控制决定和结果，供排障或复核 | 回看谁提出写入、策略为何拒绝、测试实际返回什么 |
+| **Evaluation harness（评估框架）** | 用固定任务、环境和验收器（verifier）反复运行 Agent 并整理结果的评估系统 | 在若干初始工作区上重复运行同一修复任务并检查最终 patch |
 
-单独一个 LLM API 只能生成文本。真实 coding agent 面对的是一个动态环境。
+在本书中，Harness 是较大的系统视角，Runtime 是其中推进执行的核心部分。不过，不同产品可能把两者当作同义词，或使用不同模块边界。理解系统时，应先问“这个组件实际拥有哪项状态或副作用”，不要只根据名字推断责任。
 
-这个环境里有：
+Skill、Memory 和 Trace 也不能互相替代。Skill 规定某类任务怎样做；Memory 为之后的决策留下信息；Trace 记录已经发生的过程。任务状态则要能回答“当前要达到什么目标、哪些动作已生效、还有什么未验收”。一段摘要可以进入模型上下文，但不能成为文件事实或授权记录的唯一来源。
 
-1. 一个具体工作目录。
-2. 很多源代码文件。
-3. 测试、构建、lint、格式化命令。
-4. Git 状态和用户未提交改动。
-5. 权限边界和危险操作。
-6. 长上下文和有限 context window。
-7. 命令失败、测试失败和工具异常。
-8. 用户随时插入的新指令。
-9. 多轮任务状态。
+## 1.4 组件的责任：谁决定、谁执行、谁留证
 
-如果没有 harness，模型会遇到几个问题：
+把 Harness 写成一张很长的模块清单，读者仍然不知道模块之间有什么关系。更有用的检查方法是问：谁拥有当前事实？谁能产生副作用？哪个组件判断任务完成？下面按一次运行中的责任整理。
 
-1. 它不知道当前真实文件内容，只能凭用户粘贴的片段猜。
-2. 它无法安全地修改文件，只能输出建议。
-3. 它无法运行测试验证自己的修改。
-4. 它无法知道命令失败后的 stderr、退出码和环境状态。
-5. 它无法区分可执行动作和危险动作。
-6. 它无法稳定记录自己做过什么。
-7. 它无法复盘一次任务为什么成功或失败。
+| 责任 | 常见组件 | 主要输入与输出 | 缺失时会发生什么 |
+| --- | --- | --- | --- |
+| 接收目标和限制 | User Interface、Task Manager | 用户目标、范围、取消或确认 → 结构化任务状态 | 模型可能漏掉“保留旧改动”等限制，系统也无法知道何时停止 |
+| 准备本轮信息 | Context Builder、Session/State Store | 任务状态、相关文件、历史观察 → 本轮上下文 | 重要约束或最新工具结果可能未传给模型；跨轮状态容易丢失 |
+| 适配模型协议 | Model Adapter | 当前上下文、工具定义、模型配置 → 模型响应或错误 | provider 差异泄漏到业务逻辑，格式、超时和重试难以一致处理 |
+| 解释候选动作 | Action Parser、Tool Registry | 模型响应 → 经过 schema 校验的动作与参数 | 错误格式、未知工具或非法参数可能流入执行层 |
+| 决定动作能否发生 | 策略层（Policy）、权限系统（Permission System）、审批界面（Approval UI） | 动作、主体、路径、风险和用户决定 → 允许、拒绝或等待确认 | 给模型的提示词被误当成强制策略，动作控制无法复核 |
+| 产生真实副作用 | Tool Executor、File System Layer、Terminal Executor | 获准的动作 → 文件变化、进程结果或外部响应 | 系统无法说明是谁在什么环境里真正改动了什么 |
+| 限制执行环境 | OS 权限、容器/虚拟机、网络与资源隔离 | 执行身份和环境策略 → 可访问的文件、进程、网络范围 | 确认界面可能限制不了模型或工具在宿主机能做的事 |
+| 保存事实与过程 | 状态存储（State Store）、轨迹记录器（Trace Logger） | 执行结果、状态更新、策略决定 → 当前状态和历史记录 | 下一轮使用过期信息，事故后无法定位动作从哪里开始偏离 |
+| 验证用户目标 | 测试、验收器（Verifier）、人工审查或业务规则 | 最终交付物（artifact）与验收标准 → 通过、失败或未知 | 模型的自信总结被误当作任务成功证明 |
 
-所以，harness 的核心价值不是“让模型更聪明”，而是让模型能在真实系统中可靠工作。
+这些责任可以合并到少数服务里，也可能分散到多个进程或第三方工具；表中不是要求所有产品都实现十种独立服务。无论怎样部署，系统设计都应明确状态和副作用的所有者。例如，文件工具能报告 patch 是否写入；它不一定能证明测试通过。trace 能说明曾经执行过测试；它不能替代测试结果或业务验收。
 
-面试表达：
+## 1.5 几组不能混为一谈的边界
 
-```text
-我会把 harness 理解成模型外层的运行时和控制层。模型负责生成决策，harness 负责把决策转成受权限约束的动作，比如读文件、改文件、跑测试、调用工具，再把环境反馈组织回上下文。没有 harness，coding agent 只是聊天模型；有了 harness，才可能成为可执行、可观测、可评估的工程系统。
-```
+### 模型提议与环境副作用
 
-## 1.4 Harness 不是什么
+一次工具调用至少有三个时点：模型提出调用、系统决定是否允许、执行器返回结果。被拒绝的调用没有产生对应副作用；调用成功也只说明该工具按自身合同完成了工作。读文件成功不等于找对了问题，测试进程退出码为零也不自动证明所有用户要求都已满足。
 
-理解 harness，也要知道它不是什么。
+### 用户确认与安全隔离
 
-Harness 不是模型本身。
+确认界面可以让人知道某项动作即将发生，并给出批准或拒绝的机会；它不会自动限制进程能够访问哪些文件或网络。安全隔离要由执行身份、操作系统权限、容器或虚拟机等执行环境提供。策略判断还要检查动作是否符合任务授权和产品规则。
 
-模型负责生成 token，harness 负责控制 token 变成什么动作。换模型可以提升推理和代码能力，但不会自动解决权限、安全、日志、回放和工具执行问题。
+一个公开例子能看出这几层的区别：截至 2026-11-17，OpenCode 仓库的 `SECURITY.md` 说明它不提供 agent sandbox，并把 permission system 描述为让用户了解和确认动作的界面；需要真正隔离时，文档建议在 Docker 容器或虚拟机内运行。[OpenCode `SECURITY.md`](https://github.com/anomalyco/opencode/blob/dev/SECURITY.md) 这是该项目在该日期的公开安全边界说明，不代表其他产品实现相同，也不证明一个实际容器配置已经安全。
 
-Harness 不只是 prompt。
+### 任务状态与 Trace
 
-Prompt 可以告诉模型有哪些工具、应该如何思考、何时调用命令，但真正的工具注册、参数校验、权限确认、执行沙箱和结果记录都在系统层。
+状态回答“现在是什么情况”。Trace 回答“之前发生过什么”。两者通常有关联，但用途不同：状态需要可供下一步决策和恢复；trace 便于追查历史、比较和审计。把一份不可变日志直接当成可恢复状态，可能缺少当前版本或待处理决定；把一段可修改摘要当成审计日志，也无法可靠证明历史动作。
 
-Harness 不只是 tool calling。
+例如 OpenAI Agents SDK 将一次 workflow 作为 trace，并用 span 表示模型生成、工具调用、guardrail 等执行片段；这是一个具体 SDK 的观测设计示例。若日志会记录用户输入或工具结果，仍须单独决定敏感字段、访问控制和保留方式，不能因为启用了 trace 就默认隐私问题已经解决。[OpenAI Agents SDK：Tracing](https://openai.github.io/openai-agents-python/tracing/)
 
-Tool calling 只是模型和外部函数交互的接口。Harness 还要管理上下文、状态、文件系统、终端、安全、用户交互、trace 和 evaluation。
+### 工具成功与任务成功
 
-Harness 不只是 evaluation harness。
+工具的成功状态只回答“这项工具调用有没有按接口执行”。任务成功则要回到用户目标：生成的 patch 是否解决了问题？有没有损坏原工作区？需要的测试和人工审核是否已完成？这两层判断应分别记录。
 
-传统 evaluation harness 多用于跑 benchmark、收集模型输出和算分。本书中的 agent harness 更广义，是智能体运行时系统。Evaluation harness 是其中一个子模块，用于离线评估、回放和回归测试。
+## 1.6 Harness 为什么不可由 Prompt（提示词）代替
 
-Harness 不等于某个具体产品。
+Prompt 可以告诉模型可用工具、期望步骤和禁止事项，但它只是模型输入的一部分。若模型仍能调用一个没有经过策略检查的工具，单靠文字要求“不要写文件”并不能阻止写入。
 
-Claude Code、OpenCode、Codex、Cursor、Aider、SWE-agent、OpenHands 都可以看作不同形态的 coding agent 产品或框架。它们背后都会有某种 harness，只是设计取舍不同。
+公开 SDK 的实现也说明工具执行有多个独立责任。OpenAI Agents SDK 的工具文档指出，直接调用它暴露的 Python 函数会绕过该 SDK 自己的参数结构（schema）校验、上下文注入、安全检查（guardrail）、超时、失败处理和 trace 管线。因此“模型能生成函数调用”与“系统按预期控制并执行函数”不是一回事。[OpenAI Agents SDK：Tools](https://openai.github.io/openai-agents-python/tools/) 这个细节只描述该 SDK，不应外推为所有框架的内部实现。
 
-## 1.5 Harness、Agent、Runtime、Tool、Skill 的边界
+当模型具有更多可行动作、任务涉及更大副作用、运行时间更长或失败代价更高时，系统就需要更明确地设计权限、状态、资源限制、恢复与验收。这个判断来自风险和系统责任变化；它不是一个“新模型一定要求更复杂 Harness”的经验定律。模型能力本身不能替代文件系统权限、任务状态所有权或独立验收证据。
 
-这些词经常混在一起，需要先区分。
+## 1.7 安全设计：限制可以发生什么
 
-Agent：
+Coding Agent 处理的内容可能来自用户、仓库文件、命令输出、网页和外部工具。它们都可能包含错误或带指令性的文本。系统应让模型知道来源和可信边界，同时把关键限制放在模型之外执行：
 
-```text
-Agent 是能根据目标、上下文和环境反馈进行多步决策的系统行为模式。
-```
+1. **定义任务授权。** 指明允许修改的仓库、路径和动作类型；超出范围时拒绝或请求用户决定。
+2. **限制工具面。** 每个工具只暴露本任务所需能力，参数经过结构校验；不要只凭模型描述判断工具是否安全。
+3. **分开策略和隔离。** 权限策略决定某类动作是否符合任务规则；执行环境限制进程即使出错也能访问什么。
+4. **保留撤销与人工接管路径。** 对不可逆或影响外部系统的动作，考虑审批、备份、事务、幂等和取消语义。
+5. **保护执行记录。** Trace 可能含源码、命令参数、凭证或个人数据，应控制记录范围、脱敏、访问与保留。
 
-它强调“目标驱动 + 多步行动 + 反馈循环”。
+并非所有动作都需要相同控制强度。读取一个明确指定的文件、覆盖用户文件、执行未经审查的安装脚本、调用付费外部 API，其副作用明显不同；策略应根据数据敏感性、可逆性、授权范围和故障代价设置，而不是把一切动作归为“允许”或“危险”。第八章会深入工具权限与隔离，第十二章会从公开实现分析产品安全边界。
 
-Runtime：
+## 1.8 怎样评估 Harness，而不把指标拼成一个万能分数
 
-```text
-Runtime 是让 agent 行为实际运行起来的执行环境。
-```
+Agent Harness 负责一次真实任务的运行；Evaluation Harness 则负责把若干次运行组织成可比较的实验。它至少需要固定或记录：
 
-它强调事件循环、状态管理、工具执行、错误处理和资源控制。
+- 任务输入与初始工作区状态；
+- 模型及服务配置、提示、工具定义和 Harness 版本；
+- 执行环境、权限规则和可用资源；
+- 任务完成的验收器，以及遇到无法自动判断时的人工判定规则；
+- 重试、暂停、取消、预算和外部依赖的处理方法。
 
-Harness：
+评估开始前，先写清“怎样才算完成”。对上面的修复任务，可以要求：指定测试通过、patch 只涉及必要的认证实现、任务开始时已有的文档改动保持不变。测试结果是其中一份证据；若任务还要求不改文档，diff 检查也必须进入验收。
 
-```text
-Harness 是更偏工程组织和控制的外层框架，负责把模型、runtime、工具、权限、上下文、日志和评估统一起来。
-```
+数字要保留分母和数据范围。假设在一组固定任务中，有 2 个任务被 verifier 判为完成、总共评估了 3 个任务，就应报告“这组任务上 2/3 通过”，并解释其余任务是失败还是未判定。它不是所有仓库上的成功概率，也不是通用上线阈值。权限问题另报实际执行的违规副作用数和被拦截动作数；这两类数回答不同的问题，不能和任务通过率加权成一个看似精确的 Harness 总分。
 
-在很多语境里，agent runtime 和 agent harness 会重叠。本书会把 harness 作为更大的系统视角，把 runtime 看成其中的执行核心。
+一次 Agent 结果至少可能同时受模型、Harness、工具实现、初始环境、任务样本和验收器影响。若比较两个版本，应尽量保持其他条件一致；否则就把差异记录下来，并限制结论范围。第十章介绍怎样构造 Evaluation Harness，第十九章再讨论如何把 Harness、模型和环境差异分开归因。
 
-Tool：
+## 1.9 用一条失败链定位问题
 
-```text
-Tool 是 agent 可以调用的外部能力，例如读文件、写文件、搜索、执行 shell、运行测试、查询 API。
-```
+当任务没有成功时，不要笼统地归因为“模型不够聪明”。沿着实际发生的状态转移寻找第一个不符合预期的位置：
 
-Tool 强调单个可调用动作。
+| 观察到的现象 | 首先检查 | 仍不能据此断定什么 |
+| --- | --- | --- |
+| 工具名不存在或参数无法解析 | 工具定义、schema、模型响应与错误回送方式 | 不能仅凭一次失败判定模型总体能力不足 |
+| 动作被策略拒绝 | 任务授权、路径范围、风险规则与审批结果 | 被拦截并不一定代表执行器故障；它可能是预期安全结果 |
+| 工具报告失败 | 执行环境、输入、依赖、退出码和 stderr | 不能把工具失败直接归咎于模型生成内容 |
+| 工具成功但模型重复相同动作 | 观察结果是否进入新上下文、状态是否保存、模型是否读取 | trace 中有结果不代表下一轮实际使用了结果 |
+| 模型称已完成但验收失败 | 最终 artifact、验收标准和 verifier 输入 | 模型的最终文字不能覆盖外部失败证据 |
+| 重启后重复执行已完成副作用 | checkpoint、幂等键、事务边界和已完成状态 | 仅有对话历史不等于安全恢复状态 |
 
-Skill：
+第一个偏离点常常比最后一条错误消息更有解释力。例如，模型提出错误 patch 是一个问题；若策略错误地允许覆盖用户文件，则系统还存在另一层失效。一次运行可以同时包含多个根因，trace 和工作区差异有助于按层追查，而不是把全部责任推给单一模块。
 
-```text
-Skill 是对一类任务能力的封装，可能包含 prompt、工具组合、工作流、知识和约束。
-```
+## 1.10 一个最小 Harness Loop
 
-例如“代码审查 skill”可能包含读取 diff、检查风险、运行测试、输出 review 结构的完整流程。Skill 比 tool 更高层。
-
-Memory：
-
-```text
-Memory 是 agent 在任务内或跨任务保留信息的机制，包括短期上下文、摘要、用户偏好和项目知识。
-```
-
-Trace：
+下面是非执行伪代码，用来概括控制责任，不是可运行程序或产品规范。它省略具体 API、事务和并发细节；这些内容后续章节再展开。
 
 ```text
-Trace 是一次任务执行过程的结构化记录，包括模型输入输出、工具调用、命令结果、文件 diff、权限确认和错误。
-```
+state = create_task(user_request, constraints, initial_workspace)
 
-这些边界可以帮助你在面试中避免把所有东西都叫 agent。
-
-## 1.6 一个 Coding Agent 的基本执行循环
-
-最简单的 agent loop 可以写成：
-
-```text
-observe -> think -> act -> observe
-```
-
-在 coding agent 中，它会更具体：
-
-```text
-接收用户任务
--> 构造上下文
--> 调用模型
--> 解析模型动作
--> 权限校验
--> 执行工具或命令
--> 收集环境反馈
--> 更新状态和 trace
--> 判断是否继续
--> 输出最终结果
-```
-
-如果展开为一次修 bug 任务：
-
-1. 用户说“修复登录接口测试失败”。
-2. Harness 读取工作目录、相关文件、测试失败日志和 git 状态。
-3. Context builder 把关键信息组织成模型输入。
-4. 模型决定先搜索登录接口代码。
-5. Harness 解析为 search 或 read file 工具调用。
-6. Tool executor 执行读取或搜索。
-7. Harness 把搜索结果返回模型。
-8. 模型决定修改某个文件。
-9. Harness 检查文件写权限和 patch 格式。
-10. 文件编辑工具应用补丁。
-11. 模型决定运行相关测试。
-12. Harness 检查命令是否安全，必要时请求用户确认。
-13. Terminal executor 运行测试，收集 stdout、stderr、exit code。
-14. 如果失败，模型继续修；如果通过，模型总结改动和验证结果。
-15. Trace logger 记录完整过程。
-
-模型只是其中的决策引擎。真正让流程可执行的是 harness。
-
-## 1.7 Harness 的核心模块
-
-一个典型 coding agent harness 可以拆成以下模块。
-
-User Interface：
-
-1. 接收用户任务。
-2. 展示模型计划、工具调用、文件 diff 和执行结果。
-3. 支持用户中断、追问、批准或拒绝操作。
-
-Task Manager：
-
-1. 维护任务状态。
-2. 区分当前目标、子任务、已完成动作和待处理问题。
-3. 判断任务是否结束。
-
-Context Builder：
-
-1. 选择哪些文件、日志、历史对话和工具结果进入上下文。
-2. 做摘要、压缩、裁剪和优先级排序。
-3. 避免把无关或敏感内容塞进模型。
-
-Model Adapter：
-
-1. 适配不同模型 API。
-2. 管理 system prompt、tool schema、streaming、重试和错误。
-3. 处理模型输出格式差异。
-
-Action Parser：
-
-1. 从模型输出中解析工具调用、文件修改、命令执行或最终回答。
-2. 校验结构化输出格式。
-3. 处理模型输出不合法时的重试或修复。
-
-Tool Registry：
-
-1. 注册可用工具。
-2. 定义工具 schema、权限级别和说明。
-3. 管理工具版本和执行策略。
-
-Execution Engine：
-
-1. 执行工具调用。
-2. 管理并发、超时、重试和错误。
-3. 返回结构化结果。
-
-File System Layer：
-
-1. 读文件、列目录、搜索代码。
-2. 应用 patch 或编辑文件。
-3. 检查用户未提交改动，避免覆盖。
-
-Terminal Executor：
-
-1. 执行 shell 命令。
-2. 捕获 stdout、stderr、exit code 和运行时间。
-3. 限制危险命令和长时间命令。
-
-Permission System：
-
-1. 区分只读、写入、执行、高风险操作。
-2. 对危险动作请求用户确认。
-3. 记录授权和拒绝。
-
-Sandbox：
-
-1. 限制文件系统、网络、环境变量和系统命令访问。
-2. 降低命令执行和工具调用风险。
-3. 隔离不可信代码。
-
-State Store：
-
-1. 保存任务状态、上下文摘要、工具结果和中间计划。
-2. 支持恢复、中断和继续。
-3. 支持多任务或多 session。
-
-Trace Logger：
-
-1. 记录模型输入输出。
-2. 记录工具调用和命令结果。
-3. 记录文件 diff、权限确认和错误。
-4. 支持 replay 和评估。
-
-Evaluator：
-
-1. 判断任务是否完成。
-2. 跑测试、检查 diff、比较输出。
-3. 用于离线 benchmark 和回归测试。
-
-这些模块不是每个产品都完整具备，但越接近生产级 coding agent，越需要这些能力。
-
-## 1.8 Harness 的核心价值
-
-Harness 的价值可以概括为六点。
-
-第一，把模型输出变成可执行动作。
-
-模型输出本质是文本。Harness 通过 action parser、tool schema、execution engine，把文本映射到真实动作。
-
-第二，把不可靠模型包裹在可控系统中。
-
-模型可能幻觉、误判、输出非法 JSON、误调用工具。Harness 通过校验、权限、回滚、重试和用户确认降低风险。
-
-第三，提供安全边界。
-
-读文件、写文件、执行命令、访问网络都可能有风险。Harness 必须控制哪些动作允许自动执行，哪些动作需要用户确认，哪些动作永远禁止。
-
-第四，提供可观测性。
-
-当 agent 做错事时，团队需要知道它看到了什么、调用了什么、改了什么、命令返回什么。Trace 是 debug 和复盘的基础。
-
-第五，提供评估和回放能力。
-
-没有 replay，就很难比较两个 agent 版本。Evaluation harness 可以让同一批任务在不同模型、prompt、工具和策略下重复执行，比较成功率、成本和安全。
-
-第六，支持复杂任务的多步执行。
-
-真实任务不是一次问答，而是多步探索、修改、验证和修复。Harness 负责维护任务状态和环境反馈。
-
-## 1.9 为什么模型越强，Harness 越重要
-
-直觉上，模型越强，好像越不需要复杂工程。但真实情况相反：模型越能行动，越需要 harness 约束。
-
-原因有三点。
-
-第一，强模型会提出更复杂动作。
-
-弱模型可能只会回答文本。强模型会主动搜索文件、修改多个模块、运行命令、调用外部工具。如果没有权限和沙箱，风险更大。
-
-第二，强模型的错误更隐蔽。
-
-强模型输出更流畅，可能让错误 diff、错误命令和错误解释看起来很合理。Harness 需要用测试、类型检查、权限、trace 和 review 抵消这种风险。
-
-第三，强模型更适合长任务。
-
-长任务需要状态、记忆、上下文压缩和回放。仅靠模型上下文很难稳定管理几十轮工具调用。
-
-所以，harness 不是弱模型时代的补丁，而是 agent 系统走向生产的必要层。
-
-## 1.10 一个最小 Harness 长什么样
-
-一个教学版 coding agent harness 可以很小。
-
-最小模块：
-
-1. 用户输入。
-2. 读取文件工具。
-3. 写文件或 apply patch 工具。
-4. 执行测试命令工具。
-5. 模型调用。
-6. 工具调用解析。
-7. 简单权限确认。
-8. 日志记录。
-
-伪代码：
-
-```text
-state = init_task(user_request)
-
-while not state.done:
+while state.can_continue:
     context = build_context(state)
-    model_output = call_model(context, tool_schemas)
-    action = parse_action(model_output)
+    proposal = call_model(context, available_tools)
+    action = parse_and_validate(proposal)
 
-    if action.type == "final_answer":
-        state.done = true
-        break
+    if action is invalid:
+        record_error(state, proposal)
+        continue_or_stop(state)
 
-    if not permission_allowed(action):
-        user_decision = ask_user(action)
-        if user_decision == "deny":
-            state.add_observation("User denied action")
-            continue
+    decision = policy_check(action, state)
+    if decision requires approval:
+        decision = wait_for_approval(action)
+    if decision is denied:
+        record_denial_and_update_state(state, action)
+        continue_or_stop(state)
 
-    result = execute_action(action)
-    trace.log(model_output, action, result)
-    state.add_observation(result)
+    result = execute_in_configured_environment(action)
+    record_result_and_update_state(state, action, result)
+
+    if acceptance_evidence_is_sufficient(state):
+        state.mark_complete()
+
+return report_result_and_evidence(state)
 ```
 
-这个循环很简单，但已经包含 harness 的本质：上下文、模型、动作、权限、执行、反馈、日志。
+每一步都有不同输入和结果：`parse_and_validate` 检查动作形状，`policy_check` 检查系统规则，`execute_in_configured_environment` 产生真实结果，验收器检查任务证据。真实系统还要定义停止条件、取消、超时、重试和资源预算；达到限制时应停止或交给人工，而不是无限循环。
 
-生产级系统会在每一步增加大量工程细节：并发、超时、沙箱、文件冲突、上下文压缩、模型重试、token 成本、trace 存储、评估回放等。
+## 1.11 面试题：怎样解释 Harness
 
-## 1.11 Harness 的安全风险
+### Harness 是什么？
 
-Harness 把模型接到真实环境，因此安全风险比普通聊天机器人更高。
+Harness 是围绕模型驱动任务的运行控制和证据系统。它组织任务上下文，把模型提出的动作交给解析、策略和执行环境处理，再保存真实结果与任务状态，并根据明确的验收条件决定是否完成。它通常包括 Runtime，但两者在不同项目中的边界可能重叠。
 
-常见风险：
+### 为什么 Coding Agent 不能只是模型 API？
 
-1. 模型误删文件。
-2. 模型覆盖用户未提交改动。
-3. 模型执行危险 shell 命令。
-4. 模型读取敏感文件。
-5. 模型把密钥写入日志。
-6. Prompt injection 诱导 agent 执行越权动作。
-7. 依赖安装脚本执行恶意代码。
-8. 测试命令或构建命令长时间占用资源。
-9. 工具返回内容污染模型上下文。
-10. Trace 保存了隐私或机密信息。
+模型 API 可以生成回答或工具调用，但不会自动拥有仓库当前状态、文件系统权限、终端隔离、用户审批、恢复状态和任务验收。Coding Agent 需要 Harness 把提议连接到受控副作用，再把环境结果交回下一轮，并留下能支持复核的证据。
 
-基本防护：
+### 如何设计最小 Harness？
 
-1. 默认最小权限。
-2. 读写分级授权。
-3. 高风险命令确认。
-4. 文件修改前展示 diff。
-5. 不覆盖用户未提交改动。
-6. 限制网络、环境变量和系统路径访问。
-7. 日志脱敏。
-8. 对外部内容标记为不可信。
-9. 支持撤销、回滚和人工接管。
+先选定一个有限任务和验收方式，再实现任务状态、上下文构造、模型适配、工具 schema、动作解析、权限策略、执行器、trace 和 verifier。先明确哪些文件和副作用可触及、失败怎样回送、怎样停止、怎样证明完成；再按真实风险增加审批、沙箱、checkpoint、并发和评估能力。不要先列模块名，却没有说明状态和权限由谁持有。
 
-面试中要强调：安全不能只靠 prompt 约束，必须在 harness 层做硬控制。
+## 1.12 小练习
 
-## 1.12 Harness 的评估问题
+1. 沿 1.1 节的修复任务，分别写出模型动作提议、策略决定、工具执行结果和验收结果。指出哪一项才是文件实际改变的证据。
+2. 设模型请求编辑一个已有用户改动的文件。分别说明 Parser、Permission System、执行环境和 Trace 各自应提供什么信息；其中哪一项能阻止写入，哪一项只能记录写入？
+3. 将“测试工具返回退出码 0”与“任务成功”写成两个独立判断，并为任务成功补一项适合的 artifact 检查。
+4. 为一个只读代码搜索任务设计最小 trace 字段。标出哪些字段用来恢复当前任务状态，哪些字段用于事后复盘，以及日志中哪些内容需要脱敏。
 
-Coding agent 的评估比普通问答更复杂。
+## 1.13 本章总结
 
-普通问答评估通常比较最终答案。Coding agent 评估还要看：
+Harness 的核心作用，是把“模型建议做什么”与“系统实际上允许并执行了什么”分开，再用环境反馈、任务状态和验收证据把多步任务连起来。理解它时，记住四个区分：
 
-1. 是否正确理解任务。
-2. 是否找到相关文件。
-3. 是否修改了正确位置。
-4. 是否保持代码风格。
-5. 是否通过测试。
-6. 是否没有引入回归。
-7. 是否没有越权操作。
-8. 是否成本和时间可接受。
-9. 是否能在失败后恢复。
-10. Trace 是否可解释。
+1. 模型动作提议不等于实际副作用。
+2. 用户确认不等于安全隔离，trace 不等于当前状态。
+3. 工具调用成功不等于用户任务完成。
+4. 一次评估结果只支持特定任务、环境、配置和 verifier 范围内的结论。
 
-常见指标：
-
-1. Task success rate。
-2. Test pass rate。
-3. Patch correctness。
-4. Regression rate。
-5. Tool call accuracy。
-6. Unauthorized action rate。
-7. Human intervention rate。
-8. Average turns。
-9. Token cost。
-10. Wall-clock time。
-
-Evaluation harness 的关键是可重复执行同一批任务。否则很难判断是模型更强、prompt 更好、工具更稳，还是只是运气更好。
-
-## 1.13 Harness 和主流 Coding Agent 产品
-
-虽然不同产品实现不同，但都绕不开 harness 问题。
-
-Claude Code 这类终端 coding agent：
-
-1. 强调命令行交互。
-2. 需要读写本地代码库。
-3. 需要执行命令和管理权限。
-4. 需要长任务上下文和工具调用。
-
-OpenCode 这类开源 coding agent：
-
-1. 强调可扩展工具和多模型适配。
-2. 需要清晰的 session、tool、permission 和 trace 设计。
-3. 适合作为分析 harness 架构的工程样本。
-
-Codex 或云端 coding agent：
-
-1. 更强调远程沙箱和任务环境。
-2. 需要自动运行测试、生成 patch、提交结果。
-3. 对安全隔离和 evaluation harness 要求更高。
-
-Cursor、Aider、OpenHands、SWE-agent 等系统：
-
-1. 有的偏 IDE 交互。
-2. 有的偏命令行 pair programming。
-3. 有的偏自动修复 benchmark 任务。
-4. 但都需要工具、文件、上下文、执行和评估。
-
-后续章节会分别分析这些系统背后的共性设计。
-
-### 1.13.1 前沿模型越强，Harness 的职责越不能省略
-
-GPT-5.5、GPT-5.6 Sol/Terra/Luna、Claude、Gemini、DeepSeek-V4、Qwen3.5/3.6、Kimi K2/K3 等模型都在强化 reasoning、工具和长上下文能力，但模型发布页上的能力不等于一个可上线的 Agent 系统。Harness 仍然要负责：
-
-1. 根据任务价值和风险选择模型、effort 或 thinking level。
-2. 注入最小且可信的工具 schema，按需搜索工具而不是无条件加载全部工具。
-3. 保存 persistent workspace、session、checkpoint 和可回放 trace。
-4. 把工具结果标记为 data 或 instruction，隔离 prompt injection。
-5. 对长周期任务执行预算、权限、并发、取消、恢复和人工接管。
-
-Qwen-AgentWorld、Kimi Agent Swarm 这类资料还提醒我们：Agent 的能力边界由模型、环境和 harness 共同决定。模型支持更多子 Agent 或更长任务，不意味着系统已经解决状态隔离、错误恢复和责任归属。
-
-### 1.13.2 GPT-5.6 Luna：服务档位与状态协议要分账
-
-GPT-5.6 Luna 是 GPT-5.6 家族的服务档位锚点，不能把 `Luna`、`reasoning.effort`、`standard/pro` mode 和 Artificial Analysis 的 `max` 标签合并成一个“模型强弱”字段。面试或评测 manifest 至少要记录精确 model ID、snapshot、mode、effort、工具、上下文策略、harness、任务集和 verifier。当前双榜结果仍分别属于 AA 的第三方 max 测量与 DataCurve 的 `mini-swe-agent` 组合系统。
-
-运行时状态也有不同责任：`reasoning.context`/opaque reasoning item 负责跨轮推理连续性，prompt cache breakpoint 负责服务侧稳定前缀复用，compaction item 负责长任务上下文压缩，Responses output item 负责工具循环回放。它们都不是应用永久记忆，也不是可以直接读取的 chain-of-thought 或 GPU KV cache。函数调用后若手工裁剪 reasoning item，可能破坏下一步规划；但回放状态仍不能赋予模型工具执行权限。
-
-Luna 的高并发定位不能替代容量实验。1.05M context、922K maximum input、128K maximum output、272K 整次请求价格阈值、reasoning token 和工具结果必须分别进入 token、缓存、延迟、重试、权限和单位成功成本账本。tool search/Programmatic Tool Calling 可以减少 schema 往返或上下文负担，但 schema 版本、权限、沙箱、幂等、超时和最终 verifier 仍由 harness 负责。
-
-## 1.14 常见误区
-
-误区一：Harness 就是把工具列表塞进 prompt。
-
-纠正：工具列表只是模型可见接口。真正的 harness 还包括工具执行、权限、安全、状态和日志。
-
-误区二：模型足够强就不需要 runtime。
-
-纠正：模型越能行动，越需要 runtime 控制风险和维护状态。
-
-误区三：Coding agent 只要能改代码就行。
-
-纠正：生产级 coding agent 还要能验证、回滚、避免覆盖用户改动、记录 trace 和支持评估。
-
-误区四：Evaluation harness 和 agent harness 是一回事。
-
-纠正：Evaluation harness 是评估子系统；agent harness 是完整运行框架。两者相关但不等价。
-
-误区五：权限确认会降低体验，所以越少越好。
-
-纠正：权限确认要分级。低风险只读操作可以自动化，高风险写入、删除、网络和系统命令必须谨慎。
-
-### 1.14.1 关键公式与 Harness 运行指标速查
-
-把第 `i` 次 harness run 的第 `t` 个执行步抽象为：
-
-$$
-h_{i,t}=(x_i,c_{i,t},y_{i,t},a_{i,t},p_{i,t},o_{i,t},s_{i,t},\ell_{i,t},b_{i,t})
-$$
-
-其中，`x_i` 是用户任务，`c_{i,t}` 是上下文，`y_{i,t}` 是模型输出，`a_{i,t}` 是解析后的动作，`p_{i,t}` 是权限和确认结果，`o_{i,t}` 是工具或命令返回的 observation，`s_{i,t}` 是状态更新，`\ell_{i,t}` 是 trace 记录，`b_{i,t}` 是预算消耗。
-
-定义指示函数：
-
-$$
-I(z)=
-\begin{cases}
-1,& z=\mathrm{true}\\
-0,& z=\mathrm{false}
-\end{cases}
-$$
-
-动作解析合法率：
-
-$$
-A_{\mathrm{parse}}=\frac{1}{N}\sum_{i,t} I(a_{i,t}\in A_{\mathrm{valid}})
-$$
-
-其中，`A_valid` 是 tool schema、patch schema、命令 schema 或 final answer schema 允许的动作集合。解析合法率低，说明模型输出和 action parser / tool schema 没有对齐。
-
-工具执行成功率：
-
-$$
-S_{\mathrm{tool}}=\frac{\sum_{i,t} I(a_{i,t}\in A_{\mathrm{exec}})I(o_{i,t}=\mathrm{success})}{\sum_{i,t} I(a_{i,t}\in A_{\mathrm{exec}})}
-$$
-
-其中，`A_exec` 是实际进入执行器的动作集合。它不等于任务成功率，因为工具成功可能只是读对文件或跑完命令，最终 patch 仍可能错。
-
-未授权执行率：
-
-$$
-R_{\mathrm{unauth}}=\frac{\sum_{i,t} I(p_{i,t}=\mathrm{blocked})I(a_{i,t}=\mathrm{executed})}{\sum_{i,t} I(p_{i,t}=\mathrm{blocked})}
-$$
-
-这个指标必须接近 0。只在 prompt 里告诉模型“不要做危险操作”，不能替代系统层 permission gate。
-
-高风险确认覆盖率：
-
-$$
-C_{\mathrm{confirm}}=\frac{\sum_{i,t} I(a_{i,t}\in A_{\mathrm{risk}})I(p_{i,t}=\mathrm{confirmed})}{\sum_{i,t} I(a_{i,t}\in A_{\mathrm{risk}})}
-$$
-
-其中，`A_risk` 包含写文件、删除、网络、安装依赖、提交代码、外部 API 调用等高风险动作。不同产品会有不同风险分层，但必须有清晰策略。
-
-Observation 使用率：
-
-$$
-U_{\mathrm{obs}}=\frac{\sum_{i,t} I(o_{i,t}\ne \emptyset)I(o_{i,t}\rightarrow s_{i,t+1})}{\sum_{i,t} I(o_{i,t}\ne \emptyset)}
-$$
-
-直觉：工具返回失败、测试报错或权限拒绝后，模型下一步必须真的读取并利用 observation。否则 agent 会出现“工具失败但最终声称完成”的 false completion。
-
-状态更新覆盖率：
-
-$$
-C_{\mathrm{state}}=\frac{\sum_{i,t} I(s_{i,t}\ \mathrm{updated})}{\sum_{i,t} I(o_{i,t}\ne \emptyset)}
-$$
-
-没有 state update，长任务会丢失已经做过什么、失败原因是什么、下一步该验证什么。
-
-Trace 完整率：
-
-$$
-C_{\mathrm{trace}}=\frac{1}{N}\sum_{i,t}\frac{|L_{i,t}\cap L_{\mathrm{req}}|}{|L_{\mathrm{req}}|}
-$$
-
-其中，`L_req` 至少包含 task、step、model output、action、arguments、permission、execution result、observation、state update、budget 和 final status。Trace 不完整时，debug、replay、安全审计和评估都会失真。
-
-预算超限率：
-
-$$
-R_{\mathrm{budget}}=\frac{1}{M}\sum_i I(B_i>B_i^{\max})
-$$
-
-其中，`B_i` 可以是 step 数、tool call 数、token、成本、wall-clock time 或 retry 次数。没有 budget gate 的 agent 容易循环、重复搜索和成本失控。
-
-一个保守的 harness 上线准入条件可以形式化为：
-
-$$
-G_{\mathrm{harness}}=I(A_{\mathrm{parse}}\ge 0.95)I(S_{\mathrm{tool}}\ge 0.80)I(R_{\mathrm{unauth}}=0)I(C_{\mathrm{confirm}}\ge 0.80)I(U_{\mathrm{obs}}\ge 0.75)I(C_{\mathrm{state}}\ge 0.75)I(C_{\mathrm{trace}}\ge 0.90)I(R_{\mathrm{budget}}=0)
-$$
-
-这组条件故意偏保守。真实产品可以按场景调阈值，但不能只用“最终 diff 看起来对”来证明 coding agent harness 可靠。
-
-### 1.14.2 最小可运行 Harness Loop 审计 demo
-
-下面的 demo 不调用真实模型、不执行真实命令，只用 toy trace 模拟 harness 的核心闭环。它检查：模型动作是否解析合法、权限是否阻断危险动作、工具执行是否成功、observation 是否被后续状态使用、trace 是否完整、预算是否超限，以及最终是否可 replay。
-
-```python
-from pprint import pprint
-
-REQUIRED_TRACE_FIELDS = {
-    "task",
-    "step",
-    "model_output",
-    "action",
-    "arguments",
-    "permission",
-    "execution_result",
-    "observation",
-    "state_update",
-    "budget",
-    "final_status",
-}
-
-EXEC_ACTIONS = {"read_file", "apply_patch", "run_tests", "run_shell"}
-HIGH_RISK_ACTIONS = {"apply_patch", "run_shell"}
-
-
-runs = [
-    {
-        "id": "fix_login_ok",
-        "max_steps": 5,
-        "max_cost": 6.0,
-        "final_status": "completed",
-        "final_verified": True,
-        "actions": [
-            {
-                "action": "read_file",
-                "parsed": True,
-                "args_valid": True,
-                "permission": "allowed",
-                "confirmed": False,
-                "executed": True,
-                "success": True,
-                "observation_used": True,
-                "state_updated": True,
-                "cost": 0.8,
-                "trace_fields": REQUIRED_TRACE_FIELDS,
-            },
-            {
-                "action": "apply_patch",
-                "parsed": True,
-                "args_valid": True,
-                "permission": "confirmed",
-                "confirmed": True,
-                "executed": True,
-                "success": True,
-                "observation_used": True,
-                "state_updated": True,
-                "cost": 1.5,
-                "trace_fields": REQUIRED_TRACE_FIELDS,
-            },
-            {
-                "action": "run_tests",
-                "parsed": True,
-                "args_valid": True,
-                "permission": "allowed",
-                "confirmed": False,
-                "executed": True,
-                "success": True,
-                "observation_used": True,
-                "state_updated": True,
-                "cost": 1.2,
-                "trace_fields": REQUIRED_TRACE_FIELDS,
-            },
-        ],
-    },
-    {
-        "id": "dangerous_shell_blocked",
-        "max_steps": 4,
-        "max_cost": 4.0,
-        "final_status": "blocked",
-        "final_verified": False,
-        "actions": [
-            {
-                "action": "run_shell",
-                "parsed": True,
-                "args_valid": True,
-                "permission": "blocked",
-                "confirmed": False,
-                "executed": False,
-                "success": False,
-                "observation_used": True,
-                "state_updated": True,
-                "cost": 0.4,
-                "trace_fields": REQUIRED_TRACE_FIELDS - {"execution_result"},
-            }
-        ],
-    },
-    {
-        "id": "test_failure_ignored",
-        "max_steps": 5,
-        "max_cost": 5.0,
-        "final_status": "completed",
-        "final_verified": False,
-        "actions": [
-            {
-                "action": "apply_patch",
-                "parsed": True,
-                "args_valid": True,
-                "permission": "confirmed",
-                "confirmed": True,
-                "executed": True,
-                "success": True,
-                "observation_used": True,
-                "state_updated": True,
-                "cost": 1.6,
-                "trace_fields": REQUIRED_TRACE_FIELDS,
-            },
-            {
-                "action": "run_tests",
-                "parsed": True,
-                "args_valid": True,
-                "permission": "allowed",
-                "confirmed": False,
-                "executed": True,
-                "success": False,
-                "observation_used": False,
-                "state_updated": False,
-                "cost": 1.1,
-                "trace_fields": REQUIRED_TRACE_FIELDS - {"state_update"},
-            },
-        ],
-    },
-    {
-        "id": "invalid_action_and_budget",
-        "max_steps": 3,
-        "max_cost": 3.0,
-        "final_status": "failed",
-        "final_verified": False,
-        "actions": [
-            {
-                "action": "read_file",
-                "parsed": True,
-                "args_valid": True,
-                "permission": "allowed",
-                "confirmed": False,
-                "executed": True,
-                "success": True,
-                "observation_used": True,
-                "state_updated": True,
-                "cost": 1.0,
-                "trace_fields": REQUIRED_TRACE_FIELDS,
-            },
-            {
-                "action": "unknown_tool",
-                "parsed": False,
-                "args_valid": False,
-                "permission": "blocked",
-                "confirmed": False,
-                "executed": False,
-                "success": False,
-                "observation_used": True,
-                "state_updated": False,
-                "cost": 0.8,
-                "trace_fields": REQUIRED_TRACE_FIELDS - {"arguments", "execution_result"},
-            },
-            {
-                "action": "read_file",
-                "parsed": True,
-                "args_valid": True,
-                "permission": "allowed",
-                "confirmed": False,
-                "executed": True,
-                "success": True,
-                "observation_used": False,
-                "state_updated": False,
-                "cost": 1.0,
-                "trace_fields": REQUIRED_TRACE_FIELDS - {"state_update"},
-            },
-            {
-                "action": "read_file",
-                "parsed": True,
-                "args_valid": True,
-                "permission": "allowed",
-                "confirmed": False,
-                "executed": True,
-                "success": True,
-                "observation_used": False,
-                "state_updated": False,
-                "cost": 1.0,
-                "trace_fields": REQUIRED_TRACE_FIELDS - {"budget"},
-            },
-        ],
-    },
-]
-
-
-def ratio(num, den):
-    return 0.0 if den == 0 else num / den
-
-
-all_actions = [action for run in runs for action in run["actions"]]
-executed = [action for action in all_actions if action["executed"]]
-observed = [action for action in all_actions if action["executed"] or action["permission"] == "blocked"]
-blocked = [action for action in all_actions if action["permission"] == "blocked"]
-high_risk = [action for action in all_actions if action["action"] in HIGH_RISK_ACTIONS]
-
-trace_scores = [
-    len(action["trace_fields"] & REQUIRED_TRACE_FIELDS) / len(REQUIRED_TRACE_FIELDS)
-    for action in all_actions
-]
-
-budget_overruns = []
-for run in runs:
-    total_cost = sum(action["cost"] for action in run["actions"])
-    if len(run["actions"]) > run["max_steps"] or total_cost > run["max_cost"]:
-        budget_overruns.append(run["id"])
-
-blocked_unsafe = [
-    run["id"] + ":" + action["action"]
-    for run in runs
-    for action in run["actions"]
-    if action["permission"] == "blocked" and not action["executed"]
-]
-
-root_causes = {}
-for run in runs:
-    causes = []
-    if not run["final_verified"] and run["final_status"] == "completed":
-        causes.append("false_completion")
-    if any(not action["parsed"] or not action["args_valid"] for action in run["actions"]):
-        causes.append("invalid_action_schema")
-    if any(action["executed"] and action["permission"] == "blocked" for action in run["actions"]):
-        causes.append("permission_violation")
-    if any(action["permission"] == "blocked" and not action["executed"] for action in run["actions"]):
-        causes.append("blocked_by_permission")
-    if any(action["executed"] and not action["observation_used"] for action in run["actions"]):
-        causes.append("observation_ignored")
-    if any(action["executed"] and not action["state_updated"] for action in run["actions"]):
-        causes.append("state_not_updated")
-    if run["id"] in budget_overruns:
-        causes.append("budget_overrun")
-    if not causes and run["final_verified"]:
-        causes.append("pass")
-    root_causes[run["id"]] = causes
-
-metrics = {
-    "parse_valid_rate": round(ratio(sum(a["parsed"] and a["args_valid"] for a in all_actions), len(all_actions)), 3),
-    "tool_execution_success": round(ratio(sum(a["success"] for a in executed), len(executed)), 3),
-    "unauthorized_execution_rate": round(ratio(sum(a["executed"] for a in blocked), len(blocked)), 3),
-    "confirmation_coverage": round(ratio(sum(a["confirmed"] for a in high_risk), len(high_risk)), 3),
-    "observation_use_rate": round(ratio(sum(a["observation_used"] for a in observed), len(observed)), 3),
-    "state_update_coverage": round(ratio(sum(a["state_updated"] for a in observed), len(observed)), 3),
-    "trace_completeness": round(sum(trace_scores) / len(trace_scores), 3),
-    "budget_overrun_rate": round(len(budget_overruns) / len(runs), 3),
-    "task_success_rate": round(ratio(sum(run["final_verified"] for run in runs), len(runs)), 3),
-}
-
-gates = {
-    "parse_ok": metrics["parse_valid_rate"] >= 0.95,
-    "tool_exec_ok": metrics["tool_execution_success"] >= 0.80,
-    "permission_ok": metrics["unauthorized_execution_rate"] == 0.0,
-    "confirmation_ok": metrics["confirmation_coverage"] >= 0.80,
-    "observation_ok": metrics["observation_use_rate"] >= 0.75,
-    "state_ok": metrics["state_update_coverage"] >= 0.75,
-    "trace_ok": metrics["trace_completeness"] >= 0.90,
-    "budget_ok": metrics["budget_overrun_rate"] == 0.0,
-    "task_success_ok": metrics["task_success_rate"] >= 0.60,
-}
-
-failed_gates = [name for name, ok in gates.items() if not ok]
-harness_gate_pass = all(gates.values())
-
-print("metrics:")
-pprint(metrics)
-print("\nblocked_unsafe:")
-pprint(blocked_unsafe)
-print("\nbudget_overruns:")
-pprint(budget_overruns)
-print("\nroot_causes:")
-pprint(root_causes)
-print("\nfailed_gates:")
-pprint(failed_gates)
-print("\nharness_gate_pass:", harness_gate_pass)
-```
-
-一组可能输出如下：
-
-```text
-metrics:
-{'budget_overrun_rate': 0.25,
- 'confirmation_coverage': 0.667,
- 'observation_use_rate': 0.7,
- 'parse_valid_rate': 0.9,
- 'state_update_coverage': 0.6,
- 'task_success_rate': 0.25,
- 'tool_execution_success': 0.875,
- 'trace_completeness': 0.945,
- 'unauthorized_execution_rate': 0.0}
-
-blocked_unsafe:
-['dangerous_shell_blocked:run_shell', 'invalid_action_and_budget:unknown_tool']
-
-budget_overruns:
-['invalid_action_and_budget']
-
-root_causes:
-{'dangerous_shell_blocked': ['blocked_by_permission'],
- 'fix_login_ok': ['pass'],
- 'invalid_action_and_budget': ['invalid_action_schema',
-                               'blocked_by_permission',
-                               'observation_ignored',
-                               'state_not_updated',
-                               'budget_overrun'],
- 'test_failure_ignored': ['false_completion',
-                          'observation_ignored',
-                          'state_not_updated']}
-
-failed_gates:
-['parse_ok',
- 'confirmation_ok',
- 'observation_ok',
- 'state_ok',
- 'budget_ok',
- 'task_success_ok']
-
-harness_gate_pass: False
-```
-
-这里 `harness_gate_pass=False` 是故意设计的：它暴露了非法动作、预算超限、测试失败 observation 未使用、状态未更新和 false completion。一个真实 coding agent harness 的价值，正是把这些问题在系统层显性化，而不是只看最终回答是否自信。
-
-## 1.15 面试题：Harness 是什么
-
-回答要点：
-
-```text
-Harness 是模型外层的运行和控制框架。它负责接收用户任务，构造上下文，调用模型，解析模型动作，执行工具、文件编辑和终端命令，同时做权限、安全、状态管理、trace 日志和评估回放。没有 harness，LLM 只是生成文本；有了 harness，模型输出才能变成受控的可执行动作。
-```
-
-## 1.16 面试题：为什么 Coding Agent 不能只是模型 API
-
-回答要点：
-
-```text
-因为 coding agent 需要和真实代码环境交互。它要读文件、改文件、跑测试、看错误、处理用户未提交改动、申请危险命令权限、记录执行过程，并在失败后恢复。模型 API 只负责生成 token，不负责文件系统、终端、安全、上下文压缩、trace 和评估。这些都需要 harness/runtime 层。
-```
-
-## 1.17 面试题：如何设计一个最小 Agent Harness
-
-回答要点：
-
-```text
-我会先设计一个最小闭环：用户任务输入、context builder、model adapter、tool registry、action parser、execution engine、permission system、state store 和 trace logger。最小工具包括 read file、search、apply patch 和 run command。每轮循环中，harness 构造上下文，模型输出动作，系统解析并校验权限，执行动作，把结果写入 trace 和 state，再进入下一轮。后续再扩展 sandbox、memory、evaluation harness 和多模型适配。
-```
-
-## 1.18 小练习
-
-1. 用自己的话解释 harness、runtime、tool、skill 的区别。
-2. 画出一个 coding agent 从用户提问到修改文件再运行测试的执行链路。
-3. 列出一个最小 coding agent harness 必须具备的 8 个模块。
-4. 设计一个工具权限分级表，至少包含只读、写文件、执行命令和高风险命令。
-5. 设计一次 agent 任务 trace，需要记录哪些字段。
-6. 思考如果模型输出了非法工具调用，harness 应该如何处理。
-7. 思考如果命令执行超时，harness 应该如何反馈给模型和用户。
-8. 用 3 分钟回答“为什么 Claude Code/OpenCode/Codex 背后需要 agent runtime”。
-
-## 1.19 本章总结
-
-本章建立了第二十册的主线：Harness 是把模型能力变成可执行系统的工程层。
-
-核心结论：
-
-1. 模型负责生成决策，harness 负责让决策安全、可控、可执行。
-2. Harness 不只是 prompt，也不只是 tool calling，而是上下文、工具、文件、终端、权限、状态、trace 和评估的统一框架。
-3. Coding agent 的难点不只是“模型会不会写代码”，还包括能否安全读写文件、执行命令、验证结果和复盘过程。
-4. 模型越强、任务越长、动作越多，harness 越重要。
-5. 面试中理解 harness，能帮助你从“会调用 LLM API”升级到“能设计智能体工程系统”。
-
-下一章会进入 Agent Runtime 架构，系统拆解 user interface、task manager、context builder、model adapter、tool registry、execution engine、permission system、state store 和 trace logger 如何协同工作。
+下一章会把这个闭环拆成 Runtime 的组件和状态转移，继续追踪每一步由谁执行、失败如何返回，以及系统怎样判断是否继续。

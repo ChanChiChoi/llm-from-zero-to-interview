@@ -18,3 +18,9 @@
 - **来源支持：** 文档描述 provider-managed context cache 对请求消息中的共同前缀进行匹配；达到文档列出的最小 token 条件只是满足写入/命中的技术前提，不保证实际命中。支持的模型列表按 deployment scope 变化。
 - **证据等级：** source-backed（访问日的 provider 服务说明）。
 - **边界：** 文档不披露内部缓存 key、驱逐实现或命中保证；该功能不等同于 GPU KV cache 或应用级会话 memory。具体模型、区域、请求和缓存命中应按当前 API 响应与合同核验。
+
+## 2026-11-17 地域与 scope 能力矩阵复核
+
+- **来源：** [Alibaba Cloud Model Studio Qwen3.7 Plus](https://www.alibabacloud.com/help/en/model-studio/qwen3-7-plus)，页面标注 Last Updated: 2026-10-11；2026-11-17 阅读 Model Capabilities 表。
+- **来源支持：** 文档在 US (Virginia) 分别列出 Global 与 US scope。Global scope 表列 `Structured Outputs` 和 `Web Search` 为 supported，US scope 表列两项为 unsupported；输入模态列也不同（Global 为 Image/Text/Video，US 为 Text/Image/Video）。China (Beijing)、Singapore (International) 与其他地域另有各自能力表。
+- **证据等级与边界：** source-backed（供应商当前动态模型/API 页面）。差异说明调用合同按 region/scope 细分；页面没有说这代表模型权重或推理质量不同。发起请求时仍需记录 endpoint 和部署范围，并以当日文档/请求结果为准。
