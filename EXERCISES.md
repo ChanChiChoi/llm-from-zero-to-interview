@@ -329,7 +329,7 @@
 41. 分析 over-refusal 为什么会损害用户体验。
 42. 实现 SFT label mask。
 43. 手写 DPO loss。
-43A. 写一个 0 依赖 Python SFT / 对齐训练事故审计 demo，输入 toy SFT 样本的 role token 数和 label 数、base / after 各能力分数、误拒 / 漏拒案例、chosen/rejected 偏好 pair、reward 样本、DPO policy / reference log probability 和工具 schema，输出 assistant mask coverage、prompt loss leak、PAD loss leak、EOS coverage、capability regression、over-refusal rate、unsafe leak rate、preference margin、reward-human gap、reward length bias、DPO negative margins、tool schema drift、failed gates 和 gate pass 结论。
+43A. 设计一份 SFT / 对齐训练事故审计账本，可用零依赖 Python 复算：把 SFT 位置对齐到 causal shift 后的目标，按声明的 loss reduction 分别报告 input tokens、assistant 覆盖、prompt/PAD 泄漏、EOS 和实际 denominator；对照 base/after 能力切片与误拒/漏拒的各自分子分母；盲审 chosen/rejected 的方向、平局和不确定项；用同 prompt 的长度反事实检查 reward 排序；手算序列求和口径下的 DPO margin/loss 并核对 reference revision；精确比较训练与线上工具 schema。最后将证据分为观测变化、协议错误、本次预先声明策略的违规和 unknown；不得用跨量纲分数相减、通用固定阈值或综合 gate pass 替代解释。
 43B. 比较 DPO、KTO、ORPO 和 SimPO，要求写出每种方法是否需要 reference model、是否需要成对偏好、最容易出现的偏差和上线前必须看的回归指标。
 43C. 设计一个 RLVR / DeepSeek-R1 风格 reasoning 后训练审计表，字段包含任务是否可验证、reward 来源、rollout 数、采样策略、错误答案处理、过程质量、人审切片、安全回归、蒸馏目标和污染标记。
 43D. 同一 prompt 的 reward 为 [1, 0]，response 长度为 20 和 100，generation budget 为 100。分别计算 group-standardized GRPO advantage 与只中心化的 DrGRPO advantage；对照逐 response 长度 mean 和固定预算分母时两条回答的总 token 权重。再构造全同 reward group，说明 DrGRPO 为什么仍没有相对信号，DAPO dynamic sampling 和 DCPO 的历史 SAS 分别改变什么。

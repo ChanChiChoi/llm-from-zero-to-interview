@@ -1284,9 +1284,9 @@
    考察点：偏好数据噪声、长度偏差、reference 选择、over-refusal、能力回归。
    回答框架：DPO 工程简单但依赖数据质量，需要评估偏好、安全、事实性和原能力。
 
-20A. SFT / RLHF / DPO 后模型行为异常，如何设计 alignment training gate？
-    考察点：assistant mask coverage、prompt loss leak、PAD loss leak、EOS coverage、capability regression、false refusal、unsafe leak、preference margin、reward-human gap、reward length bias、DPO reference、tool schema drift。
-    回答框架：先打印 SFT 样本的渲染文本、role span、labels 和 EOS/PAD，确认只对 assistant 回答计算 loss；再比较 base / SFT / aligned model 的数学、代码、安全、工具和真实任务切片；随后统计误拒率和漏拒率，抽查 chosen/rejected 的偏好间隔和标注一致性，检查 reward 分数是否偏好长答案或高 reward 低质量样本；最后确认 DPO reference、beta、tokenizer、chat template 和线上工具 schema 一致。门禁要输出 failed gates，而不是只说 reward 或 DPO loss 下降。
+20A. SFT / RLHF / DPO 后模型行为异常，如何建立可复核的诊断报告？
+    考察点：shift 后监督目标、loss denominator、能力切片、拒答分母、偏好方向与不确定性、reward 反事实、DPO reference/reduction、工具 schema。
+    回答框架：先固定 checkpoint、tokenizer、chat template、解码和评估器，再按 causal shift 后的 labels 核实 assistant 覆盖、prompt/PAD 泄漏、EOS 与实际 loss denominator；用同条件的 base/SFT/aligned 切片分别报告数学、代码、安全、工具和真实任务结果及其分母；误拒和漏拒按不同目标集合分别统计；盲审 chosen/rejected 的方向、平局和无法判断项，检查同 prompt 的长度反事实是否改变 reward 排序，不跨量尺相减 reward 与人工评分；DPO 要核对 reference revision、序列求和或其他 reduction、beta、tokenizer/template；工具 schema 按版本精确回放。最后分开报告观测变化、协议错误、本次预先声明策略的违规与 unknown；没有任务策略时不能自动输出通用 gate pass。
 
 20B. SimPO 和 DPO / KTO / ORPO 的核心区别是什么？
     考察点：reference-free、平均 log probability、margin、长度偏置、偏好数据质量、KL 锚点缺失。

@@ -4,7 +4,7 @@
 
 后训练事故的危险在于，局部体验可能变好，整体能力却已经退化。模型更会聊天，但数学和代码变差；安全拒答率上升，但正常教育和防护问题也被拒绝；reward 分数上升，但答案更长、更空、更模板化；DPO loss 下降，但 reference model、偏好 pair 或工具 schema 根本没有对齐。
 
-本章把后训练看成一次行为分布重塑。先定义训练想改变什么、不能损伤什么，再分别审查 SFT 监督边界、能力回归、过度拒答、偏好数据、Reward Model、RLHF reward hacking、DPO margin、长度和工具协议。每个指标都明确样本集合、适用条件和零分母语义，最后用一个标准库审计示例把多个故障放在同一张报告中。
+本章把后训练看成一次行为分布重塑。先定义训练想改变什么、不能损伤什么，再分别审查 SFT 监督边界、能力回归、过度拒答、偏好数据、Reward Model、RLHF reward hacking、DPO margin、长度和工具协议。各项指标都要说明样本集合、分母和适用条件；最后用一份合成账本手算关键量，把可观测变化、协议错误、运行策略违规和未知信息分开报告。
 
 ## 6.1 后训练改变的是行为分布
 
@@ -30,7 +30,7 @@ $L_{\mathrm{SFT}}=-\frac{1}{D_{\mathrm{loss}}}\sum_i\sum_{t=2}^{L_i}m_{i,t}\log 
 
 PyTorch 的类别索引交叉熵会忽略 ignore_index 目标，并按未忽略目标或有效权重归一。[PyTorch 2.14 CrossEntropyLoss 文档](https://docs.pytorch.org/docs/2.14/generated/torch.nn.CrossEntropyLoss.html) 具体 SFT 训练器还可能从 chat template 生成 assistant mask。例如 TRL v1.14.1 的 assistant-only loss 依赖模板中的 generation 区域标记，因此应回放实际渲染、shift 后 labels 和 reduction，而不能只看配置名。[TRL v1.14.1 SFTTrainer 文档](https://huggingface.co/docs/trl/v1.14.1/sft_trainer)。
 
-在 assistant-only 任务中，system 和 user 通常是条件，不是要模型复述的目标；assistant 内容和按任务约定的 EOS 参与 loss；PAD 和未监督控制位置不参与。具体策略可以因任务而变化，但必须写进 collator 和数据契约。
+在 assistant-only 任务中，system 和 user 通常是条件，不是要模型复述的目标；assistant 内容和按任务约定的 EOS 参与 loss；PAD 和未监督控制位置不参与。[第三章](03-tokenizer与格式坑.md)解释 tokenizer、模板和 shift 后标签；[第四章](04-训练不稳定排查宝典.md)与[第五章](05-分布式训练事故宝典.md)进一步区分有效目标数与 loss reduction 分母，本章把这些口径用于行为事故诊断。具体策略可以因任务而变化，但必须写进 collator 和数据契约。
 
 最常见的 SFT 事故是 prompt loss 泄漏：labels 在 system/user 位置没有被忽略，模型因此学会复述问题、生成 role token 或把下一轮 user 说出来。另一个相反事故是 assistant 内容被全部 mask，训练 loss 仍能计算或被日志吞掉，但模型没有获得有效答案监督。
 
@@ -207,7 +207,7 @@ loss 下降只能说明优化目标被拟合，不能说明偏好标签正确或
 3. 抽查原始 SFT 样本和 labels，确认 assistant 监督边界。
 4. 抽查 chosen/rejected，确认偏好方向、任务和风险维度。
 5. 查看拒答、输出长度、风格、工具和引用的变化。
-6. 对 reward 与人工质量做相关和反事实测试。
+6. 比较 reward 排序与独立评审方向，并做按任务匹配的反事实测试。
 7. 检查 DPO reference、beta、margin 和 tokenizer/template。
 8. 复核工具 schema、权限、状态和错误恢复数据。
 9. 做小规模单变量 ablation，再决定重训或回滚。
@@ -220,9 +220,7 @@ loss 下降只能说明优化目标被拟合，不能说明偏好标签正确或
 
 所有位置先对齐到 causal shift 后的目标 token，再按 role span、EOS 和真实 padding 位置分类：
 
-$C_{\mathrm{asst}}=\frac{N_{\mathrm{assistant\ labels}}}{N_{\mathrm{assistant\ target\ positions}}},\quad
-R_{\mathrm{prompt}}=\frac{N_{\mathrm{prompt\ labels}}}{N_{\mathrm{prompt\ target\ positions}}},\quad
-R_{\mathrm{pad}}=\frac{N_{\mathrm{pad\ labels}}}{N_{\mathrm{pad\ target\ positions}}}$
+$C_{\mathrm{asst}}=\frac{N_{\mathrm{assistant\ labels}}}{N_{\mathrm{assistant\ target\ positions}}}$；$R_{\mathrm{prompt}}=\frac{N_{\mathrm{prompt\ labels}}}{N_{\mathrm{prompt\ target\ positions}}}$；$R_{\mathrm{pad}}=\frac{N_{\mathrm{pad\ labels}}}{N_{\mathrm{pad\ target\ positions}}}$。
 
 $C_{\mathrm{EOS}}=\frac{N_{\mathrm{EOS\ labels}}}{N_{\mathrm{EOS\ target\ positions}}}$
 
@@ -236,8 +234,7 @@ $\Delta_k=M_{\mathrm{after},k}-M_{\mathrm{before},k}$
 
 ### 6.14.3 拒答边界
 
-$R_{\mathrm{false\_refuse}}=\frac{N_{\mathrm{safe,\ refused}}}{N_{\mathrm{safe}}},\quad
-R_{\mathrm{unsafe\_leak}}=\frac{N_{\mathrm{unsafe,\ answered\ unsafely}}}{N_{\mathrm{unsafe}}}$
+$R_{\mathrm{false\_refuse}}=\frac{N_{\mathrm{safe,\ refused}}}{N_{\mathrm{safe}}}$；$R_{\mathrm{unsafe\_leak}}=\frac{N_{\mathrm{unsafe,\ answered\ unsafely}}}{N_{\mathrm{unsafe}}}$。
 
 safe 和 unsafe 集合须由任务策略事先定义，澄清、部分拒绝或安全替代回答按 rubric 单独标记。分母为零时记 not_applicable；应有样本但标注/输出缺失时记 unknown。误拒与漏拒不能合并成一个 refusal rate。
 
@@ -247,13 +244,13 @@ safe 和 unsafe 集合须由任务策略事先定义，澄清、部分拒绝或�
 
 $C_{\mathrm{rank}}=\frac{N_{\mathrm{same\ order}}}{N_{\mathrm{resolved}}}$
 
-另列平局、无法判断和评审分歧。这个指标只描述抽查 pair 的排序一致性，不是奖励校准、事实性或普遍质量；长度相关性只能作为筛查，需结合按任务匹配的反事实 pair。若 reward 与人工评分没有共同量尺，不计算二者的数值差。
+另列平局、无法判断和评审分歧。没有方向明确的 pair 时记 not_applicable；本应评审但标签缺失时记 unknown。这个指标只描述抽查 pair 的排序一致性，不是奖励校准、事实性或普遍质量；长度相关性只能作为筛查，需结合按任务匹配的反事实 pair。若 reward 与人工评分没有共同量尺，不计算二者的数值差。
 
 ### 6.14.5 DPO margin
 
 $m_j=(\log\pi_\theta(c_j\mid x_j)-\log\pi_\theta(r_j\mid x_j))-(\log\pi_{\mathrm{ref}}(c_j\mid x_j)-\log\pi_{\mathrm{ref}}(r_j\mid x_j))$
 
-这里每个序列 log probability 按实际实现由 completion token log probability 求和或归约；reference revision、tokenizer、template、EOS、截断、长度归一化、beta 和 loss type 必须随指标记录。$m_j$ 不是 chosen 内容真实优劣的证明，负 margin 也要回到偏好方向和样本内容检查。
+标准 DPO 中每个序列 log probability 是 completion token log probability 之和；若实现采用 token 平均或其他归约，就改变了 margin 的长度口径和目标。reference revision、tokenizer、template、EOS、截断、归一化、beta 和 loss type 必须随指标记录。$m_j$ 不是 chosen 内容真实优劣的证明，负 margin 也要回到偏好方向和样本内容检查。
 
 ## 6.15 用一份合成账本复算后训练事故
 
@@ -265,12 +262,12 @@ $m_j=(\log\pi_\theta(c_j\mid x_j)-\log\pi_\theta(r_j\mid x_j))-(\log\pi_{\mathrm
 | --- | ---: | ---: | ---: | ---: | ---: |
 | A | 10 | 4 / 4 | 3 / 0 | 2 / 0 | 1 / 1 |
 | B | 8 | 3 / 2 | 4 / 0 | 0 / 0 | 1 / 0 |
-| C | 7 | 3 / 3 | 2 / 1 | 2 / 1 | 1 / 1 |
-| 合计 | 25 | 10 / 9 | 9 / 1 | 4 / 1 | 3 / 2 |
+| C | 8 | 3 / 3 | 2 / 1 | 2 / 1 | 1 / 1 |
+| 合计 | 26 | 10 / 9 | 9 / 1 | 4 / 1 | 3 / 2 |
 
-先不要把 25 个输入 token 当成 25 个监督目标。按表中 causal shift 后的目标位置计算，assistant 覆盖率是 $9/10=90\\%$，prompt loss 泄漏是 $1/9$，padding loss 泄漏是 $1/4$，EOS 覆盖率是 $2/3$。样本 B 漏掉一个 assistant 目标（这里是 EOS）；样本 C 则让一个 prompt 位置和一个真实 padding 位置进入 labels。
+先不要把 26 个输入 token 当成 26 个监督目标。按表中 causal shift 后的目标位置计算，assistant 覆盖率是 $9/10=90\%$，prompt loss 泄漏是 $1/9$，padding loss 泄漏是 $1/4$，EOS 覆盖率是 $2/3$。样本 B 漏掉一个 assistant 目标（这里是 EOS）；样本 C 则让一个 prompt 位置和一个真实 padding 位置进入 labels。
 
-如果这 9 个已标注 assistant 目标的交叉熵之和为 7.2，prompt 泄漏贡献 0.8，padding 泄漏贡献 1.1，那么本例实际 numerator 为 $7.2+0.8+1.1=9.1$，实际未忽略 label 数作为分母时 $D_{loss}=11$，观察到的 token-mean loss 为 $9.1/11\\approx0.827$。这个数反映训练器实际优化的目标；它既没有补回漏掉的 assistant 目标，也不能仅凭 loss 数值发现错位。修正 labels 后还要重算有效目标数和 reduction 分母。
+如果这 9 个已标注 assistant 目标的交叉熵之和为 7.2，prompt 泄漏贡献 0.8，padding 泄漏贡献 1.1，那么本例实际 numerator 为 $7.2+0.8+1.1=9.1$，实际未忽略 label 数作为分母时 $D_{\mathrm{loss}}=11$，观察到的 token-mean loss 为 $9.1/11\approx0.827$。这个数反映训练器实际优化的目标；它既没有补回漏掉的 assistant 目标，也不能仅凭 loss 数值发现错位。修正 labels 后还要重算有效目标数和 reduction 分母。
 
 ### 再看行为变化落在哪些任务
 
@@ -285,7 +282,7 @@ $m_j=(\log\pi_\theta(c_j\mid x_j)-\log\pi_\theta(r_j\mid x_j))-(\log\pi_{\mathrm
 
 ### 拆开检查误拒和漏拒
 
-本例的安全集合包含 3 个应正常回答的请求，其中 2 个被拒；风险集合包含 3 个应拒绝或受限处理的请求，其中 1 个得到不安全回答。因此误拒率为 $2/3$，漏拒率为 $1/3$。两个分母分别来自安全请求和风险请求，不能合并。样本数很小，只能指出值得复查的具体案例，不能当作稳定发生率。
+本例的安全集合包含 3 个应正常回答的请求，其中 2 个被拒；风险集合包含 3 个应拒绝或受限处理的请求，其中 1 个得到不安全回答。因此误拒率为 $2/3$，漏拒率为 $1/3$。两个分母分别来自安全请求和风险请求，不能合并。安全集合中的例子是防御性安全咨询、一般医学信息和家庭作业数学；风险集合中的例子是高危操作步骤、隐私暴露和危险操作。样本数很小，只能指出值得复查的具体案例，不能当作稳定发生率。
 
 ### 复核偏好方向，而不是制造通用 margin
 
@@ -297,7 +294,7 @@ $m_j=(\log\pi_\theta(c_j\mid x_j)-\log\pi_\theta(r_j\mid x_j))-(\log\pi_{\mathrm
 
 ### 手算 DPO，再检查 reference 和工具协议
 
-设同一 prompt 下 policy 对 chosen/rejected 的序列 log probability 分别为 −1.2、−1.9，reference 对应值为 −1.4、−1.6。policy gap 是 $-1.2-(-1.9)=0.7$，reference gap 是 $-1.4-(-1.6)=0.2$，所以 $m=0.7-0.2=0.5$。若本次 $\beta=0.8$，则 $\beta m=0.4$，损失为 $-\log\sigma(0.4)=\log(1+e^{-0.4})\\approx0.513$。这个正 margin 只说明该 policy 相对 reference 更偏向这个 chosen；它不证明 chosen 事实正确。
+设同一 prompt 下 policy 对 chosen/rejected 的序列 log probability 分别为 −1.2、−1.9，reference 对应值为 −1.4、−1.6。policy gap 是 $-1.2-(-1.9)=0.7$，reference gap 是 $-1.4-(-1.6)=0.2$，所以 $m=0.7-0.2=0.5$。若本次 $\beta=0.8$，则 $\beta m=0.4$，损失为 $-\log\sigma(0.4)=\log(1+e^{-0.4})\approx0.513$。这个正 margin 只说明该 policy 相对 reference 更偏向这个 chosen；它不证明 chosen 事实正确。
 
 本例的 log probability 是按 completion token 求和。若记录显示这些 reference log probability 来自 sft-v2，而训练配置声明 sft-v3，则这组 margin 不符合声明的 DPO 合同，必须用实际 reference 重算。若将序列求和改为 token 平均，长度不同的回答会改变 margin 和训练目标，不是只改日志展示方式。
 
@@ -339,7 +336,7 @@ $m_j=(\log\pi_\theta(c_j\mid x_j)-\log\pi_\theta(r_j\mid x_j))-(\log\pi_{\mathrm
 
 ### 偏好 pair 越多越好
 
-低质量、低间隔和方向错误的 pair 会增加噪声。先做 pair 质量和标注一致性，再扩大数量。
+标签方向不清、评审分歧高或任务 rubric 不匹配的 pair 会增加噪声。先抽查 pair 质量、复核分歧来源，再扩大数量。
 
 ### Reward 越高越好
 
@@ -355,18 +352,17 @@ DPO loss 只反映相对 reference 的优化目标。reference、tokenizer、tem
 
 ## 6.18 资料与证据边界
 
-本章参考以下资料：
+- InstructGPT 论文公开描述了示范 SFT、比较数据训练 Reward Model、再用 PPO 优化策略的流程；论文也报告其特定评测中的任务回退，不能据此推断当前产品效果。[Ouyang et al., 2022](https://arxiv.org/html/2203.02155)。
+- SFT 的 labels 与分母要按实际实现确认。PyTorch 2.14 文档定义了 ignore_index 和 mean reduction 的分母语义；TRL v1.14.1 文档说明 assistant-only loss 需要模板的 generation 区域标记。[PyTorch CrossEntropyLoss](https://docs.pytorch.org/docs/2.14/generated/torch.nn.CrossEntropyLoss.html)；[TRL SFTTrainer v1.14.1](https://huggingface.co/docs/trl/v1.14.1/sft_trainer)。
+- DPO 原论文给出在 KL 正则化 reward 目标和 Bradley–Terry 类偏好假设下的 reference-adjusted 目标；TRL v1.14.1 的固定版本源码展示了序列求和与长度归一化 loss 的实现差别。[Rafailov et al., 2023](https://arxiv.org/html/2305.18290)；[TRL DPO 源码 v1.14.1](https://github.com/huggingface/trl/blob/v1.14.1/trl/trainer/dpo_trainer.py#L1241-L1268)。
+- Gao 等人的 gold reward 结果来自合成 reward-model 环境和特定策略优化设置，用来说明代理过度优化风险，不是跨任务的普遍曲线或阈值。[Gao et al., 2022](https://arxiv.org/html/2210.10760)。
+- 人类偏好会随目标人群、语言和 rubric 变化。HUMAINE 是美国和英国参与者的 ICLR 2026 研究，其年龄组排名差异不能外推成普遍因果规律。[HUMAINE, ICLR 2026](https://proceedings.iclr.cc/paper_files/paper/2026/hash/9c1bcfe6edf7e47d83d2e99492d851e4-Abstract-Conference.html)。
+- MacDiarmid 等人的 reward-hacking 跨任务研究是 2025 年预印本，其编码环境、训练设计和行为评估范围有限；它是值得纳入风险测试的研究信号，不是线上发生率或普遍后果。[arXiv:2511.18397v1](https://arxiv.org/html/2511.18397v1)。
 
-- InstructGPT 论文用于说明 SFT、奖励模型和人类反馈的训练链路；论文结果不能直接推出当前应用的安全或业务效果。
-- PPO、DPO 及其后续偏好优化论文用于说明 reference、偏好 pair、策略变化和优化目标；具体实现需要绑定框架版本和损失细节。
-- Hugging Face Transformers chat template、TRL SFT/DPO/GRPO 文档用于公开 API、数据字段和训练接口边界；默认 collator 和版本行为应通过样本回放验证。
-- Reward Model、RLHF reward hacking 和 process preference 的研究用于解释奖励捷径、长度偏差和人工质量差距；任何阈值都需要在目标任务上校准。
-- OpenAI Evals、NIST AI RMF 和 OWASP 资料用于多维评估、风险和持续治理的框架背景，不替代人工安全审查或目标系统实测。
-
-闭源模型的内部后训练配方通常没有公开。公开 API 的 `reasoning`、`effort`、`refusal` 或工具字段不能用来反推训练数据、reward model、RL 算法或内部 verifier。正文只写论文、官方文档、模型卡和本地实验能够支持的内容。
+闭源模型的内部后训练配方通常没有公开。公开 API 的 reasoning、effort、refusal 或工具字段不能用来反推训练数据、reward model、RL 算法或内部 verifier。正文只写论文、官方文档、模型卡和本地实验能够支持的内容。
 
 ## 6.19 本章小结
 
-后训练不是把基础模型统一推向“更好”，而是在新的数据、偏好和约束下重塑行为。SFT 需要先保证 labels 和模板正确；能力评估需要发现数学、代码、知识、长上下文和工具回归；安全训练要同时控制误拒和漏拒；偏好数据需要方向、间隔和标注一致性；Reward Model 要接受人工质量和反事实挑战；RLHF 要防止 reward hacking；DPO 要保证 reference、tokenizer、template、beta 和 pair 的一致。
+后训练不是把基础模型统一推向“更好”，而是在新的数据、偏好和约束下重塑行为。SFT 需要先核实 shift 后 labels 和 loss denominator；能力评估要发现数学、代码、知识、长上下文和工具回归；安全训练要分别报告误拒与漏拒；偏好数据要审计方向、rubric、分歧和不确定性；Reward Model 要接受独立评审和反事实挑战；RLHF 要监控 reward hacking 风险；DPO 要记录 reference、tokenizer、template、beta 和序列 reduction。
 
 当后训练报告能同时回答“模型学了什么、忘了什么、为什么拒绝、为什么变长、reward 是否可信、工具是否仍能执行、哪个版本引入了变化”，训练结果才具有工程意义。任何单一 loss、reward 或聊天分数，都不能替代这条行为证据链。

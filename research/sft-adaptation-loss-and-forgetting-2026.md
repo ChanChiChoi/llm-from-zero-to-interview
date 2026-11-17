@@ -73,3 +73,9 @@
 ## 生命周期
 
 loss mask 接口、LoRA/QLoRA 方法和指定实验结果：active。具体训练目标、有效 token 归一化、量化内核、参数层选择、部署合并和能力回归必须按实际框架、模型、任务与评测单独核对。
+
+
+## 2026-11-17 固定版 SFT 接口复核
+
+- 重新打开 Hugging Face TRL [SFTTrainer v1.14.1 文档](https://huggingface.co/docs/trl/v1.14.1/sft_trainer)，确认该固定版本的 assistant-only loss 要求 conversational dataset，并依赖 chat template 中的 generation 区域标记；页面同时提示 v1.18.0 是较新的文档版本。因此 v1.14.1 在正文中只作为可追溯的固定版本示例，不称为当前最新版。
+- 证据范围：官方固定版本文档对数据格式和配置要求的说明；未在本地安装、运行或验证任何 TRL 代码，不能据此推断目标项目的 collator 已正确构造 labels。
