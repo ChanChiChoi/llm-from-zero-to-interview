@@ -56,9 +56,9 @@ RAG 至少包含两个记忆来源：模型参数中的参数记忆，以及外�
 
 把第 `i` 个 RAG 请求抽象为：
 
-$$
+```math
 q_i=(x_i,u_i,e_i,r_i,z_i,a_i,c_i,p_i,f_i,o_i)
-$$
+```
 
 其中：
 
@@ -180,9 +180,9 @@ Dense retrieval 通常对自然语言改写、同义词和语义近似有帮助�
 
 对第 `i` 个可评估问题，标准证据集合 `E_i` 非空，初始 top-k 集合为 `R_i^K`：
 
-$$
+```math
 Recall@K_i=\frac{\lvert R_i^K\cap E_i\rvert}{\lvert E_i\rvert}
-$$
+```
 
 如果人工没有标注标准证据，结果是 `unknown`；如果该问题不需要外部证据，指标是 `not_applicable`；`E_i` 为空不能被当成 Recall 1。评估集应区分“无需检索的闲聊”和“必须找到规范的知识问题”。
 
@@ -212,11 +212,11 @@ final_context
 
 ### 9.6.3 排序指标也有边界
 
-若第一个标准证据在排名 `rank_i`，则单样本 reciprocal rank 为 `1/rank_i`；没有标准证据时记为 0，但只有当该样本确实应该有证据时才成立。平均倒数排名：
+对每个应由外部证据回答的问题，如果第一个标准证据在排名 `rank_i`，则单样本 reciprocal rank 为 `1/rank_i`；检索列表里没有标准证据时记为 0。只对标准证据非空、且标签可用的问题求平均，记样本数为 `N>0`：
 
-$$
+```math
 MRR=\frac{1}{N}\sum_{i=1}^{N}\frac{1}{rank_i},\qquad N>0
-$$
+```
 
 如果 `N=0` 或样本标签缺失，MRR 没有定义。MRR 关注第一个正确证据，不能替代多证据覆盖、权限和版本正确性。
 
@@ -242,17 +242,17 @@ $$
 
 设标准证据集合为 `E_i`，进入 context 的集合为 `Z_i`。在 `E_i` 非空时，证据覆盖率为：
 
-$$
-ContextRecall_i=\frac{\lvert Z_i\cap E_i\rvert}{\lvert E_i\rvert}
-$$
+```math
+R^{set}_{ctx,i}=\frac{\lvert Z_i\cap E_i\rvert}{\lvert E_i\rvert}
+```
 
-如果标准证据存在但 `Z_i` 为空，覆盖率应记为 0；如果样本本来不需要外部证据，则是 `not_applicable`。上下文精确率要求 `Z_i` 非空：
+如果标准证据存在但 `Z_i` 为空，覆盖率应记为 0；如果样本本来不需要外部证据，则是 `not_applicable`。无排序的集合证据精确率要求 `Z_i` 非空：
 
-$$
-ContextPrecision_i=\frac{\lvert Z_i\cap E_i\rvert}{\lvert Z_i\rvert}
-$$
+```math
+P^{set}_{ctx,i}=\frac{\lvert Z_i\cap E_i\rvert}{\lvert Z_i\rvert}
+```
 
-`Z_i` 为空时，这个数学比例没有定义，但“答案需要证据而没有选入任何证据”仍可作为单独失败事件记录，不能用非零分母伪造精确率。
+`Z_i` 为空时，这个数学比例没有定义，但“答案需要证据而没有选入任何证据”仍可作为单独失败事件记录，不能用非零分母伪造精确率。本节的集合证据覆盖率和集合精确率都使用人工核对的标准证据 ID，不考虑排名，也不是 Ragas 同名指标的实现；Ragas 的 `Context Precision` 会依据相关 chunk 在排序列表中的位置计分。[Ragas Context Precision 定义](https://docs.ragas.io/en/stable/concepts/metrics/available_metrics/context_precision/)
 
 ### 9.7.3 冲突证据必须显式建模
 
@@ -284,7 +284,7 @@ context 构造应保留冲突关系：
 
 如果只给标准证据就能答对，加入噪声后答错，问题更可能在 context precision、排序或冲突组织；如果标准证据单独给出仍答错，可能是解析、格式、模型能力或任务定义问题。
 
-Prompt 可以明确要求“只依据给定资料，资料不足时说明不足”，但 prompt 不能替代证据质量、权限和版本控制。把无法支持的答案改成拒答，需要评估器和产品状态共同配合。
+Prompt 可以明确要求“只依据给定资料，资料不足时说明不足”，但 prompt 不能替代证据质量、权限和版本控制。检索文档本身也可能夹带恶意指令；系统不能把外部文档内容当成新的高权限指令，更不能让文档文本自行授权工具动作。检验间接提示注入时，除了观察模型在已给定恶意文本后的行为，还要检查目标 retriever 是否会在自然 query 下把该文本实际送入 context。USENIX Security 2026 的一项研究专门构造了能提高恶意片段召回的 trigger，并评估 RAG/Agent 端到端攻击；它说明“恶意文档存在”与“恶意文档被检索并影响行为”是不同阶段，但其攻击结果受论文中的语料、embedding retriever 和系统设置限制，不能当作通用攻击率。[Overcoming the Retrieval Barrier, USENIX Security 2026](https://www.usenix.org/conference/usenixsecurity26/presentation/chang-hongyan)
 
 ## 9.9 Claim-level grounding：答案不是一个原子标签
 
@@ -301,9 +301,9 @@ claim_id、文本、类型、重要性和风险
 
 设有 `M>0` 个已完成标注的 claim，`s_m=1` 表示引用证据确实支持第 `m` 个声明，则 citation/grounding 准确率为：
 
-$$
+```math
 A_{cite}=\frac{\sum_{m=1}^{M}s_m}{M}
-$$
+```
 
 当没有 claim、claim 标注未完成或引用关系无法复核时，指标分别是 `not_applicable` 或 `unknown`。unsupported claim rate 只有在同一批 claim 的支持标签完整时才能写成 `1-A_cite`。
 
@@ -319,6 +319,8 @@ $$
 6. 引用编号和正文 claim 对不上。
 
 高风险场景应把引用定位到段落、表格单元、代码行或政策条款，而不是只返回整篇文档首页。引用校验可以使用规则、字符串/数值比对、NLI 或 LLM judge，但关键结果应有人审或程序验证。
+
+判断引用是否支持 claim 时，还要比较证据力度。FORCEBENCH 固定被引用段落，并构造一个与证据强度相称的 claim 和一个局部强化措辞的 claim；它测试关系、情态、范围、时效和数字具体性等维度。这个诊断性压力测试说明“引用主题相关”或“答案里有引用”都不足以证明措辞没有超出证据；它不估计生产系统中此类错误的发生比例。[Relevant Is Not Warranted: Evidence-Force Calibration for Cited RAG](https://arxiv.org/abs/2605.28044)
 
 ## 9.10 权限必须在检索前生效
 
@@ -337,15 +339,17 @@ $$
 
 “先全库检索和生成，最后过滤引用”是不够的。无权限文档已经进入模型上下文，模型可能在没有显式引用的情况下泄露其中内容；日志、缓存和 trace 也可能保存敏感信息。
 
+检索接口提供 metadata filter 只是可用的筛选能力，不会替应用认证用户、证明 ACL 元数据正确或自动防止调用者伪造权限条件。过滤值应由服务端从可信身份和权限快照生成，并在检索阶段生效；OpenAI Retrieval API 文档展示了属性过滤接口，同时权限模型仍须由应用维护。OWASP 的 2026 版风险指南把敏感信息披露和向量/embedding 风险列为独立风险类别，可作为威胁建模入口，但不是产品认证或权限实现保证。[OpenAI Retrieval API](https://developers.openai.com/api/docs/guides/retrieval)；[OWASP GenAI LLM Top 10 2026](https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/)
+
 ### 9.10.2 权限数据和缓存数据要一致
 
 权限至少需要考虑租户、组织、角色、用户组、文档 ACL、段落 ACL、字段级脱敏和权限版本。缓存 key 要包含影响可见性的字段；权限变更应使相关索引和缓存失效。
 
 如果 context 集合为 `Z_i`，其中用户 `u_i` 无权访问的证据数为 `L_i`，在总 context 证据数大于零时，权限泄露率为：
 
-$$
+```math
 R_{perm}=\frac{\sum_iL_i}{\sum_i\lvert Z_i\rvert}
-$$
+```
 
 没有 context 时比率 `0/0` 是 `not_applicable`；权限审计未执行时是 `unknown`；存在一条越权证据时，即使最终答案没有引用它，也应记录为安全事件。
 
@@ -368,9 +372,9 @@ RAG 的外部记忆只有在更新链路可靠时才有价值。文档版本、�
 
 若最终 context 中有 `S` 个证据被判定为过期，所有已知 freshness 的 context 证据数为 `Z_known`，且 `|Z_known|>0`：
 
-$$
+```math
 R_{stale}=\frac{S}{\lvert Z_{known}\rvert}
-$$
+```
 
 如果文档时间字段缺失，不能把它当作新鲜；状态应为 `unknown`。旧证据率为零也不能证明系统正确，可能只是没有配置过期规则或没有覆盖更新场景。
 
@@ -409,15 +413,15 @@ RAG 系统不应把每个 query 都映射成一段肯定回答。没有证据、
 
 设 `A` 是应该回答的样本，`U` 是证据不足、无权限或应该受限处理的样本。对 `U`，正确拒答率为：
 
-$$
-R_{correct\_abstain}=\frac{N_{U,abstain}}{\lvert U\rvert},\qquad \lvert U\rvert>0
-$$
+```math
+R_{\mathrm{correct\_abstain}}=\frac{N_{U,abstain}}{\lvert U\rvert},\qquad \lvert U\rvert>0
+```
 
 对 `A`，误拒率为：
 
-$$
-R_{false\_abstain}=\frac{N_{A,abstain}}{\lvert A\rvert},\qquad \lvert A\rvert>0
-$$
+```math
+R_{\mathrm{false\_abstain}}=\frac{N_{A,abstain}}{\lvert A\rvert},\qquad \lvert A\rvert>0
+```
 
 没有 `U` 或 `A` 时对应指标是 `not_applicable`，标签不确定时是 `unknown`。只报“拒答率”无法判断系统是更安全还是更无用。
 
@@ -437,7 +441,7 @@ $$
 
 ### 9.14.3 生成层
 
-关注答案正确性、完整性、claim 支持、引用位置、拒答、事实一致性和条件保留。开放式质量可以用人工或校准后的 judge 辅助，但关键数字和协议优先使用程序验证。
+关注答案正确性、完整性、claim 支持、引用位置、拒答、事实一致性和条件保留。开放式质量可以用人工或校准后的 judge 辅助，但关键数字和协议优先使用程序验证。检索上下文还可能改变安全行为：RAG-Safety-Bench 在无 RAG、含答案的 oracle 文档、相关但不含具体答案的文档、随机安全文档四种条件下比较五个开源模型，报告结果依模型与条件而异；这支持把安全结果单独评估，但不说明任意企业知识库都有同样风险率。[RAG-Safety-Bench, EMNLP 2026](https://aclanthology.org/2026.emnlp-main.2246/)
 
 ### 9.14.4 系统层
 
@@ -461,398 +465,72 @@ $$
 
 根因可以分为 `ingestion`、`parsing`、`chunking`、`embedding`、`retrieval`、`rerank`、`context`、`generation`、`citation`、`permission`、`freshness`、`abstention` 和 `product`。一个案例可以有多个标签，但报告要区分主因和伴随问题。
 
-## 9.16 最小可运行的 RAG 事故审计
+## 9.16 用六条记录手算一次 RAG 事故
 
-下面的代码只使用标准库，构造六个案例：旧版本进入 context、一个正常的多证据问题、错误码召回失败、越权薪酬文档、超预算多跳问题，以及正确拒答的无资料问题。
+下面的文档、权限、token 数、预算、耗时和成本全是构造数据，不代表生产测量。`expected` 表示在这位用户的权限和任务条件下应使用的标准证据；即使全库里存在文档，用户无权访问时，它也不属于该用户的标准证据集。每条记录分别保存初始召回、重排和最终 context，避免把中间错误压成一个答案分数。
 
-### 9.16.1 数据结构和定义域工具
+### 9.16.1 先固定文档、版本和可见范围
 
-```python
-from dataclasses import dataclass
-from math import ceil, isfinite
-from typing import Iterable, Optional
+| 文档 ID | 可见角色 | token 数 | 教学状态 |
+| --- | --- | ---: | --- |
+| `return_v1` | employee、admin | 120 | 旧版、已失效 |
+| `return_v2` | employee、admin | 130 | 当前退货政策 |
+| `sso_admin` | admin | 180 | 当前 SSO 步骤 |
+| `billing_enterprise` | admin | 160 | 当前企业版账单规则 |
+| `error_e1427` | employee、admin | 90 | 当前错误码说明 |
+| `comp_private` | exec | 140 | 当前高管薪酬计划 |
+| `login_generic` | employee、admin | 100 | 通用登录说明 |
 
+### 9.16.2 沿六条请求检查证据在哪一步分歧
 
-@dataclass(frozen=True)
-class Metric:
-    value: Optional[float]
-    status: str
-    reason: str = ""
+表中方括号内的 ID 按排序由前到后排列。`∅` 表示没有标准证据或没有选入任何 context；“多跳升级”要求三份证据共同完成任务。
 
+| 请求 | 用户角色 | 标准证据 | retriever → reranker | 最终 context |
+| --- | --- | --- | --- | --- |
+| 当前退货政策 | employee | [`return_v2`] | [`return_v1`, `return_v2`, `login_generic`] → [`return_v1`, `return_v2`, `login_generic`] | [`return_v1`, `login_generic`] |
+| 管理员 SSO 与账单 | admin | [`sso_admin`, `billing_enterprise`] | [`sso_admin`, `login_generic`, `billing_enterprise`] → [`sso_admin`, `billing_enterprise`, `login_generic`] | [`sso_admin`, `billing_enterprise`] |
+| 错误码 E1427 | employee | [`error_e1427`] | [`login_generic`, `return_v1`] → [`login_generic`, `return_v1`] | [`login_generic`] |
+| 薪酬计划 | employee | ∅（无权访问） | [`comp_private`] → [`comp_private`] | [`comp_private`] |
+| 升级企业版多跳问题 | admin | [`sso_admin`, `billing_enterprise`, `return_v2`] | [`sso_admin`, `billing_enterprise`, `return_v1`] → [`sso_admin`, `billing_enterprise`, `return_v1`] | [`sso_admin`, `billing_enterprise`, `return_v1`] |
+| 没有对应政策 | employee | ∅ | ∅ → ∅ | ∅ |
 
-def finite_number(value, name):
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{name} must be a finite number")
-    value = float(value)
-    if not isfinite(value):
-        raise ValueError(f"{name} must be finite")
-    return value
+再把最终回答和资源放回同一账本。这里把回答中已标注的 claim 是否由正确版本证据支持写成分数；这只是本例的人工真值，不是自动评估器的输出。
 
+| 请求 | claim 与任务结果 | context token / 预算 | 端到端耗时 | 成本单位 |
+| --- | --- | ---: | ---: | ---: |
+| 当前退货政策 | 1 条 claim 引用 `return_v1`，应由 `return_v2` 支持；回答失败 | 220 / 320 | 980 ms | 0.018 |
+| 管理员 SSO 与账单 | 2/2 条 claim 获当前证据支持；任务成功 | 340 / 420 | 1,180 ms | 0.023 |
+| 错误码 E1427 | 1 条 claim 用 `login_generic` 解释 E1427；证据不支持 | 100 / 250 | 920 ms | 0.015 |
+| 薪酬计划 | claim 与文档内容相符，但员工无权看到；系统本应拒答 | 140 / 220 | 1,200 ms | 0.019 |
+| 升级企业版多跳问题 | 3 条 claim 中 2 条有支持；退货 claim 引用旧版；context 超预算 | 460 / 400 | 1,850 ms | 0.041 |
+| 没有对应政策 | 无 claim；系统正确拒答，任务成功 | 0 / 220 | 460 ms | 0.009 |
 
-def safe_mean(values: Iterable[float], *, empty_status="not_applicable"):
-    values = list(values)
-    if not values:
-        return Metric(None, empty_status, "empty sample set")
-    checked = [finite_number(value, "mean.value") for value in values]
-    return Metric(sum(checked) / len(checked), "valid")
+为这个小例子定义 `task_success`：答案中的所有必要 claim 都获授权且有适用证据支持，或者资料不足时正确拒答。按此合同，只有“管理员 SSO 与账单”和“没有对应政策”两项成功。六次尝试总成本为 `0.018+0.023+0.015+0.019+0.041+0.009=0.125` 个构造单位；单位成功任务成本为 `0.125/2=0.0625`。失败请求的资源仍在分子里。因为样本混合了不同任务，这个数字只演示账本算法，不用于跨任务比较或上线判断。
 
+### 9.16.3 手算每层指标，保留各自分母
 
-def safe_ratio(numerator, denominator, *, name="ratio", empty_status="not_applicable"):
-    numerator = finite_number(numerator, f"{name}.numerator")
-    denominator = finite_number(denominator, f"{name}.denominator")
-    if numerator < 0 or denominator < 0:
-        raise ValueError(f"{name} cannot be negative")
-    if denominator == 0:
-        if numerator == 0:
-            return Metric(None, empty_status, f"{name} has no denominator")
-        raise ValueError(f"{name} has positive numerator and zero denominator")
-    return Metric(numerator / denominator, "valid")
+先只对四个需要外部证据且有标准答案的请求，逐条算 Recall@K：当前政策 `1/1=1`，管理员问题 `2/2=1`，E1427 `0/1=0`，多跳问题 `2/3`。按问题宏平均为 `(1+1+0+2/3)/4=2/3≈0.667`。首个标准证据的 reciprocal rank 分别为 `1/2、1、0、1`，MRR 是 `2.5/4=0.625`。这表示案例中 E1427 在初始召回阶段已经丢失，而当前政策和多跳问题的召回列表也不完整反映版本适用性。
 
+最终 context 的标准证据集合召回率，同四个问题分别为 `0、1、0、2/3`，宏平均 `5/12≈0.417`。无排序的集合证据精确率也分别为 `0/2、2/2、0/1、2/3`，宏平均同为 `5/12≈0.417`。这里的精确率把每个入选证据按集合成员关系计数，不考虑排序；它不是 Ragas 的 `Context Precision` 排序指标，后者会依据相关 chunk 在结果中的位置计分。[Ragas Context Precision 定义](https://docs.ragas.io/en/stable/concepts/metrics/available_metrics/context_precision/)
 
-def percentile(values, percentage):
-    values = [finite_number(value, "percentile.value") for value in values]
-    percentage = finite_number(percentage, "percentile.percentage")
-    if not values:
-        return Metric(None, "not_applicable", "empty sample set")
-    if not 0 <= percentage <= 100:
-        raise ValueError("percentage must be between 0 and 100")
-    ordered = sorted(values)
-    position = (len(ordered) - 1) * percentage / 100
-    lower = int(position)
-    upper = min(lower + 1, len(ordered) - 1)
-    fraction = position - lower
-    value = ordered[lower] + (ordered[upper] - ordered[lower]) * fraction
-    return Metric(value, "valid")
+八条已标注 claim 中，五条得到本例指定版本证据支持，所以 claim 支持率是 `5/8=0.625`。其中薪酬案例的 claim 虽与文档相符，却来自员工无权访问的文档；因此内容支持率不能替代权限审计。六份 context 一共出现九次文档证据：`return_v1` 在两个请求中出现，构成 `2/9≈22.2%` 的旧证据出现率；`comp_private` 在员工 context 中出现一次，按“越权文档出现次数 / context 文档出现总次数”计算，权限泄露率为 `1/9≈11.1%`。这是证据出现次数口径；还应另报至少含一条越权证据的请求比例，本例为 `1/6`。
 
+两条不应回答的请求中，一条正确拒答，正确拒答率为 `1/2=0.5`；四条应回答请求没有误拒，误拒率为 `0/4=0`。多跳请求的三个 context 文档合计 `180+160+120=460` token，超过本例假设的 400-token 预算 60 token；六个请求中有一条超预算。不能用高 Recall 或 claim 支持率抵消这条独立的权限失败。
 
-docs = {
-    "return_v1": {"acl": {"employee", "admin"}, "tokens": 120, "stale": True},
-    "return_v2": {"acl": {"employee", "admin"}, "tokens": 130, "stale": False},
-    "sso_admin": {"acl": {"admin"}, "tokens": 180, "stale": False},
-    "billing_enterprise": {"acl": {"admin"}, "tokens": 160, "stale": False},
-    "error_e1427": {"acl": {"employee", "admin"}, "tokens": 90, "stale": False},
-    "comp_private": {"acl": {"exec"}, "tokens": 140, "stale": False},
-    "login_generic": {"acl": {"employee", "admin"}, "tokens": 100, "stale": False},
-}
+六条端到端耗时是 `980、1,180、920、1,200、1,850、460 ms`。按第八章给出的线性插值规则，排序后为 `460、920、980、1,180、1,200、1,850`，位置 `h=(6-1)×0.95=4.75`，所以 `P95=1,200+0.75×(1,850-1,200)=1,687.5 ms`。六条构造样本不能估计线上总体尾延迟；真实报告还需说明时间窗、取消/超时处理和分位数实现。
 
+### 9.16.4 回到第一处分歧，而不是压成一个通过分
 
-cases = [
-    {
-        "id": "return_policy_current", "role": "employee",
-        "expected": ["return_v2"],
-        "retrieved": ["return_v1", "return_v2", "login_generic"],
-        "reranked": ["return_v1", "return_v2", "login_generic"],
-        "context": ["return_v1", "login_generic"], "budget": 320,
-        "claims": [{"citation": "return_v1", "support": "return_v2"}],
-        "answerable": True, "model_abstains": False,
-        "latency_ms": 980, "cost": 0.018, "online_delta": -0.20,
-    },
-    {
-        "id": "sso_billing_admin", "role": "admin",
-        "expected": ["sso_admin", "billing_enterprise"],
-        "retrieved": ["sso_admin", "login_generic", "billing_enterprise"],
-        "reranked": ["sso_admin", "billing_enterprise", "login_generic"],
-        "context": ["sso_admin", "billing_enterprise"], "budget": 420,
-        "claims": [
-            {"citation": "sso_admin", "support": "sso_admin"},
-            {"citation": "billing_enterprise", "support": "billing_enterprise"},
-        ],
-        "answerable": True, "model_abstains": False,
-        "latency_ms": 1180, "cost": 0.023, "online_delta": 0.08,
-    },
-    {
-        "id": "error_code_e1427", "role": "employee",
-        "expected": ["error_e1427"],
-        "retrieved": ["login_generic", "return_v1"],
-        "reranked": ["login_generic", "return_v1"],
-        "context": ["login_generic"], "budget": 250,
-        "claims": [{"citation": "login_generic", "support": "error_e1427"}],
-        "answerable": True, "model_abstains": False,
-        "latency_ms": 920, "cost": 0.015, "online_delta": -0.15,
-    },
-    {
-        "id": "private_comp_plan", "role": "employee", "expected": [],
-        "retrieved": ["comp_private"], "reranked": ["comp_private"],
-        "context": ["comp_private"], "budget": 220,
-        "claims": [{"citation": "comp_private", "support": "comp_private"}],
-        "answerable": False, "model_abstains": False,
-        "latency_ms": 1200, "cost": 0.019, "online_delta": -0.45,
-    },
-    {
-        "id": "upgrade_multi_hop", "role": "admin",
-        "expected": ["sso_admin", "billing_enterprise", "return_v2"],
-        "retrieved": ["sso_admin", "billing_enterprise", "return_v1"],
-        "reranked": ["sso_admin", "billing_enterprise", "return_v1"],
-        "context": ["sso_admin", "billing_enterprise", "return_v1"], "budget": 400,
-        "claims": [
-            {"citation": "sso_admin", "support": "sso_admin"},
-            {"citation": "billing_enterprise", "support": "billing_enterprise"},
-            {"citation": "return_v1", "support": "return_v2"},
-        ],
-        "answerable": True, "model_abstains": False,
-        "latency_ms": 1850, "cost": 0.041, "online_delta": -0.10,
-    },
-    {
-        "id": "no_policy_found", "role": "employee", "expected": [],
-        "retrieved": [], "reranked": [], "context": [], "budget": 220,
-        "claims": [], "answerable": False, "model_abstains": True,
-        "latency_ms": 460, "cost": 0.009, "online_delta": 0.02,
-    },
-]
+| 请求 | 第一处可见分歧 | 下一步检查 |
+| --- | --- | --- |
+| 当前退货政策 | 正确版本已进入候选，但旧版排在前面，最终 context 又漏掉当前版 | 查版本特征、reranker/context 预算和旧索引清理 |
+| 管理员 SSO 与账单 | 这条轨迹没有发现分歧 | 留作当前权限与多证据任务的回归样本 |
+| 错误码 E1427 | 初始召回未找到错误码文档 | 查文档入库、精确词项索引、错误码切片和 hybrid retrieval |
+| 薪酬计划 | 越权文档进入检索和 context，之后模型也没有拒答 | 先阻断并修权限过滤/缓存，再修拒答；不能只隐藏引用 |
+| 升级企业版多跳问题 | 当前退货证据没有召回，context 同时超出局部预算 | 查多跳证据覆盖、版本筛选、预算优先级和旧版索引 |
+| 没有对应政策 | 没有证据且系统正确拒答 | 保留为拒答回归样本 |
 
-
-def validate_case(case):
-    required = ("id", "role", "expected", "retrieved", "reranked", "context",
-                "budget", "claims", "answerable", "model_abstains", "latency_ms",
-                "cost", "online_delta")
-    if any(key not in case for key in required):
-        raise ValueError("case is missing a required field")
-    if not case["id"] or not case["role"] or not isinstance(case["id"], str):
-        raise ValueError("case id and role must be non-empty strings")
-    if type(case["answerable"]) is not bool or type(case["model_abstains"]) is not bool:
-        raise ValueError("answerable and model_abstains must be real bools")
-    if case["answerable"] != bool(case["expected"]):
-        raise ValueError("answerable must agree with the expected evidence set")
-    if not isinstance(case["budget"], int) or isinstance(case["budget"], bool) or case["budget"] <= 0:
-        raise ValueError("budget must be a positive integer")
-    finite_number(case["latency_ms"], "latency_ms")
-    finite_number(case["cost"], "cost")
-    finite_number(case["online_delta"], "online_delta")
-    for key in ("expected", "retrieved", "reranked", "context"):
-        if len(set(case[key])) != len(case[key]):
-            raise ValueError(f"{key} contains duplicate document ids")
-        for doc_id in case[key]:
-            if doc_id not in docs:
-                raise ValueError(f"unknown document id: {doc_id}")
-    for claim in case["claims"]:
-        if claim["citation"] not in docs or claim["support"] not in docs:
-            raise ValueError("claim references an unknown document")
-
-
-if len({case["id"] for case in cases}) != len(cases):
-    raise ValueError("case ids must be unique")
-for case in cases:
-    validate_case(case)
-```
-
-这里显式检查 `answerable` 与标准证据集合是否一致，避免“没有证据却被标成可回答”的数据错误。`private_comp_plan` 是一个故意的安全事故：它不应该被普通员工回答，但系统仍把私有文档放进 context；这与“没有任何资料”的 `no_policy_found` 是两种不同的不可回答状态。
-
-### 9.16.2 计算检索、上下文、引用和安全指标
-
-```python
-def retrieval_recall(items, expected):
-    if not expected:
-        return Metric(None, "not_applicable", "no evidence is required")
-    return safe_ratio(len(set(items) & set(expected)), len(expected), name="recall")
-
-
-def first_rank(items, expected):
-    if not expected:
-        return Metric(None, "not_applicable", "no evidence is required")
-    for index, item in enumerate(items, start=1):
-        if item in expected:
-            return Metric(1 / index, "valid")
-    return Metric(0.0, "valid", "evidence was not retrieved")
-
-
-def context_recall(context, expected):
-    if not expected:
-        return Metric(None, "not_applicable", "no evidence is required")
-    return safe_ratio(len(set(context) & set(expected)), len(expected), name="context_recall")
-
-
-def context_precision(context, expected):
-    if not context:
-        return Metric(None, "not_applicable", "no context was selected")
-    return safe_ratio(len(set(context) & set(expected)), len(context), name="context_precision")
-
-
-answerable = [case for case in cases if case["answerable"]]
-unanswerable = [case for case in cases if not case["answerable"]]
-retrieval_recalls = [retrieval_recall(c["retrieved"], c["expected"]).value for c in answerable]
-context_recalls = [context_recall(c["context"], c["expected"]).value for c in answerable]
-context_precision_metrics = [context_precision(c["context"], c["expected"]) for c in answerable]
-context_precisions = [m.value for m in context_precision_metrics if m.status == "valid"]
-mrr_scores = [first_rank(c["retrieved"], c["expected"]).value for c in answerable]
-
-claim_results = []
-for case in cases:
-    for claim in case["claims"]:
-        claim_results.append(
-            claim["citation"] == claim["support"]
-            and not docs[claim["citation"]]["stale"]
-        )
-claim_accuracy = safe_ratio(sum(claim_results), len(claim_results), name="citation_accuracy")
-
-context_doc_count = sum(len(case["context"]) for case in cases)
-permission_leaks = [
-    (case["id"], doc_id)
-    for case in cases
-    for doc_id in case["context"]
-    if case["role"] not in docs[doc_id]["acl"]
-]
-stale_context = [
-    (case["id"], doc_id)
-    for case in cases
-    for doc_id in case["context"]
-    if docs[doc_id]["stale"]
-]
-permission_rate = safe_ratio(len(permission_leaks), context_doc_count, name="permission_leak_rate")
-stale_rate = safe_ratio(len(stale_context), context_doc_count, name="stale_evidence_rate")
-
-correct_abstentions = sum(case["model_abstains"] for case in unanswerable)
-abstention_rate = safe_ratio(
-    correct_abstentions, len(unanswerable), name="correct_abstention_rate"
-)
-false_abstentions = sum(case["model_abstains"] for case in answerable)
-false_abstention_rate = safe_ratio(
-    false_abstentions, len(answerable), name="false_abstention_rate"
-)
-
-budget_overflows = [
-    case["id"] for case in cases
-    if sum(docs[doc_id]["tokens"] for doc_id in case["context"]) > case["budget"]
-]
-budget_overflow_rate = safe_ratio(len(budget_overflows), len(cases), name="budget_overflow_rate")
-```
-
-注意几个定义域：检索 Recall 只对需要外部证据的样本计算；context precision 对空 context 是 `not_applicable`，但 answerable 样本的 context recall 会是 0；权限和旧证据率使用实际进入 context 的证据数作为分母；正确拒答和误拒答分别使用不可回答与可回答集合。
-
-### 9.16.3 归因、延迟、成本和线上反馈
-
-```python
-def causes_for(case):
-    causes = []
-    context = case["context"]
-    if any(case["role"] not in docs[doc_id]["acl"] for doc_id in context):
-        causes.append("permission")
-    if any(docs[doc_id]["stale"] for doc_id in context):
-        causes.append("freshness")
-    if case["answerable"]:
-        if retrieval_recall(case["retrieved"], case["expected"]).value < 1:
-            causes.append("retrieval_miss")
-        elif context_recall(case["context"], case["expected"]).value < 1:
-            causes.append("context_drop")
-    if any(
-        claim["citation"] != claim["support"]
-        or docs[claim["citation"]]["stale"]
-        for claim in case["claims"]
-    ):
-        causes.append("citation_or_grounding")
-    if not case["answerable"] and not case["model_abstains"]:
-        causes.append("abstention_failure")
-    if not causes:
-        causes.append("pass")
-    return causes
-
-
-root_causes = {case["id"]: causes_for(case) for case in cases}
-latency_p95 = percentile([case["latency_ms"] for case in cases], 95)
-average_cost = safe_mean([case["cost"] for case in cases])
-average_online_delta = safe_mean([case["online_delta"] for case in cases])
-
-metrics = {
-    "retrieval_recall": round(safe_mean(retrieval_recalls).value, 3),
-    "mrr": round(safe_mean(mrr_scores).value, 3),
-    "context_recall": round(safe_mean(context_recalls).value, 3),
-    "context_precision": round(safe_mean(context_precisions).value, 3),
-    "citation_accuracy": round(claim_accuracy.value, 3),
-    "unsupported_claim_rate": round(1 - claim_accuracy.value, 3),
-    "permission_leak_rate": round(permission_rate.value, 3),
-    "stale_evidence_rate": round(stale_rate.value, 3),
-    "correct_abstention_rate": round(abstention_rate.value, 3),
-    "false_abstention_rate": round(false_abstention_rate.value, 3),
-    "budget_overflow_rate": round(budget_overflow_rate.value, 3),
-    "p95_latency_ms": round(latency_p95.value, 1),
-    "average_cost": round(average_cost.value, 3),
-    "average_online_delta": round(average_online_delta.value, 3),
-}
-
-failed_conditions = []
-if metrics["retrieval_recall"] < 0.80 or metrics["mrr"] < 0.70:
-    failed_conditions.append("retrieval")
-if metrics["context_recall"] < 0.75 or metrics["context_precision"] < 0.60:
-    failed_conditions.append("context")
-if metrics["citation_accuracy"] < 0.80 or metrics["unsupported_claim_rate"] > 0.10:
-    failed_conditions.append("citation_grounding")
-if metrics["permission_leak_rate"] > 0:
-    failed_conditions.append("permission")
-if metrics["stale_evidence_rate"] > 0:
-    failed_conditions.append("freshness")
-if metrics["correct_abstention_rate"] < 0.90:
-    failed_conditions.append("abstention")
-if metrics["budget_overflow_rate"] > 0 or metrics["p95_latency_ms"] > 1500:
-    failed_conditions.append("latency_or_budget")
-if metrics["average_online_delta"] <= 0:
-    failed_conditions.append("online_feedback")
-
-release_decision = "repair_evidence_pipeline" if failed_conditions else "expand_evidence"
-```
-
-这里的 `failed_conditions` 是本例的诊断列表，不是某种通用标准。真正的业务阈值需要按照文档风险、用户任务、权限事件和人工成本校准。一个 `permission` 事件不能被平均准确率抵消；它要进入独立的安全修复路径。
-
-### 9.16.4 输出和边界测试
-
-```python
-report = {
-    "metrics": metrics,
-    "permission_leaks": permission_leaks,
-    "stale_context": stale_context,
-    "budget_overflows": budget_overflows,
-    "root_causes": root_causes,
-    "failed_conditions": failed_conditions,
-    "release_decision": release_decision,
-}
-
-for key, value in report.items():
-    print(f"{key}= {value}")
-
-assert safe_mean([]).status == "not_applicable"
-assert safe_ratio(0, 0).status == "not_applicable"
-assert percentile([], 95).status == "not_applicable"
-assert root_causes["return_policy_current"] == [
-    "freshness", "context_drop", "citation_or_grounding"
-]
-assert "permission" in root_causes["private_comp_plan"]
-assert root_causes["no_policy_found"] == ["pass"]
-
-try:
-    safe_ratio(1, 0)
-except ValueError:
-    pass
-else:
-    raise AssertionError("positive numerator with zero denominator is invalid")
-
-try:
-    validate_case({**cases[0], "model_abstains": 1})
-except ValueError:
-    pass
-else:
-    raise AssertionError("bool fields must not accept integer lookalikes")
-
-try:
-    finite_number(float("nan"), "latency")
-except ValueError:
-    pass
-else:
-    raise AssertionError("NaN must not enter an evidence report")
-
-assert release_decision == "repair_evidence_pipeline"
-```
-
-运行结果的关键部分应类似：
-
-```text
-metrics= {'retrieval_recall': 0.667, 'mrr': 0.625, 'context_recall': 0.417, 'context_precision': 0.417, 'citation_accuracy': 0.625, 'unsupported_claim_rate': 0.375, 'permission_leak_rate': 0.111, 'stale_evidence_rate': 0.222, 'correct_abstention_rate': 0.5, 'false_abstention_rate': 0.0, 'budget_overflow_rate': 0.167, 'p95_latency_ms': 1687.5, 'average_cost': 0.021, 'average_online_delta': -0.133}
-permission_leaks= [('private_comp_plan', 'comp_private')]
-stale_context= [('return_policy_current', 'return_v1'), ('upgrade_multi_hop', 'return_v1')]
-budget_overflows= ['upgrade_multi_hop']
-release_decision= repair_evidence_pipeline
-```
-
-实际运行时，浮点分位数和平均值应以代码输出为准；关键结论不是某个小数，而是根因被拆开了：`return_policy_current` 同时有旧证据和 context 丢失；`error_code_e1427` 是初始召回失败；`private_comp_plan` 是权限前置失败并且没有正确拒答；`upgrade_multi_hop` 缺少当前证据、使用旧版本并超预算；`no_policy_found` 正确拒答。
-
-这个 demo 还故意保留了一个容易误解的现象：`return_v2` 在 retriever 列表里，但没有进入最终 context。只看 Recall@K 会以为检索正常，只看最终答案会把问题归因给生成；只有同时保存三层列表，才能知道是 rerank/context selection 的问题。
+这些结果没有通用阈值，也不自动给出“发布/拒绝”。六条记录足以演示如何区分解析、召回、排序、context、版本、权限、支持关系和拒答，但不足以说明生产中的发生率、在线收益或应采用的 SLO。真实决策需要按任务价值和风险预先定义目标，并用有代表性的查询、权限、版本、质量和延迟样本复核。
 
 ## 9.17 RAG 事故的修复顺序
 
@@ -878,19 +556,22 @@ release_decision= repair_evidence_pipeline
 
 - [Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks](https://arxiv.org/abs/2005.11401) 提出结合参数记忆与显式非参数记忆的 RAG 路线，并讨论 provenance 和知识更新问题。论文实验使用特定 Wikipedia 索引、模型和任务，不能直接代表企业文档、权限和当前产品效果。
 - RAG 领域后续关于 REALM、DPR、FiD、Self-RAG、corrective/agentic retrieval 的论文可用于理解检索训练、证据使用和多步搜索，但每个方法的指标、数据和成本边界都不同。
-- [Ragas available metrics](https://docs.ragas.io/en/stable/concepts/metrics/available_metrics/) 说明 context precision、context recall、faithfulness 等评估概念的实现入口。Ragas 是评估框架和指标实现，不是对任意业务答案的独立真值来源；LLM-based metric 仍需要人工校准。
+- [Ragas Context Precision](https://docs.ragas.io/en/stable/concepts/metrics/available_metrics/context_precision/) 说明其指标按相关 chunk 的检索排序位置计分。本章的集合证据精确率只比较 gold evidence ID，不考虑排序，不能当作 Ragas 同名指标。Ragas 是评估框架和指标实现，不是对任意业务答案的独立真值来源；LLM-based metric 仍需要人工校准。
+- [Relevant Is Not Warranted: Evidence-Force Calibration for Cited RAG](https://arxiv.org/abs/2605.28044) 以固定引用段落和证据力度不同的成对 claim 诊断引用支持判断的边界。其 198 对样本与 judge 结果是压力测试，不是生产错误率估计。
+- [RAG-Safety-Bench](https://aclanthology.org/2026.emnlp-main.2246/) 用四类文档条件隔离检索文档对生成安全表现的影响；结果只绑定其论文数据、五个模型和评测协议。
+- [Overcoming the Retrieval Barrier: Indirect Prompt Injection in the Wild for LLM Systems](https://www.usenix.org/conference/usenixsecurity26/presentation/chang-hongyan) 研究攻击片段在检索阶段的可达性及 RAG/Agent 端到端影响。其设置并不覆盖所有 hybrid retrieval、reranker 或企业权限方案。
 
 ### 9.18.2 官方工具和安全资料
 
-- [OpenAI File Search](https://developers.openai.com/api/docs/guides/tools-file-search) 说明托管文件搜索工具的接口和使用方式。托管检索减少了部分基础设施工作，但业务仍需自行验证权限、文档版本、引用支持、删除传播和任务质量。
+- [OpenAI File Search](https://developers.openai.com/api/docs/guides/tools-file-search) 说明 Responses API 中托管文件搜索的当前接口；[OpenAI Retrieval API](https://developers.openai.com/api/docs/guides/retrieval) 说明向量存储的语义搜索和 metadata filtering。托管检索减少了部分基础设施工作，但过滤接口不等于用户认证或企业 ACL；业务仍需验证权限、文档版本、引用支持、删除传播和任务质量。文档为动态页面，调用语义和可用字段应按部署版本复核。
 - 向量数据库、embedding 模型、reranker 和搜索引擎的官方文档适合确认 API、过滤字段和索引语义，不等于目标领域的召回质量。部署时应锁定版本，并使用带标签的 query-positive-negative 集合实测。
-- [OWASP GenAI Security Project](https://genai.owasp.org/) 提供生成式 AI 的风险资料入口。权限、数据泄露、间接提示注入和向量/embedding 风险需要结合目标数据流和权限模型验证，不能用一个安全分数替代审计。
+- [OWASP GenAI LLM Top 10 2026](https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/) 提供生成式 AI 风险识别和威胁建模入口。权限、数据泄露、间接提示注入和向量/embedding 风险需要结合目标数据流和权限模型验证；该社区指南不是法律结论、产品安全认证或完整系统威胁模型。
 
 资料来源要分清“论文提出了什么”“工具实现了什么”“本地系统测到了什么”。尤其不能因为某个托管服务自动做了检索，就推断它已经满足企业权限、时效和合规要求。
 
 ### 9.18.3 本地实验和业务证据
 
-本章 demo 是教学构造，不是向量库或模型的 benchmark。真实 RAG 结论需要：文档来源、解析快照、索引版本、权限快照、query 分布、人工证据标注、模型输出、线上反馈和回归结果。
+本章的六条手算账本是教学构造，不是向量库或模型的 benchmark。真实 RAG 结论需要：文档来源、解析快照、索引版本、权限快照、query 分布、人工证据标注、模型输出、线上反馈和回归结果。
 
 如果评估集只包含最终答案而没有标准证据，检索 Recall 和 citation accuracy 不能被可靠计算；如果文档 ACL 或更新时间缺失，权限和 freshness 只能报告 `unknown`。证据不足时降低结论强度，比编造一个完整百分比更专业。
 
