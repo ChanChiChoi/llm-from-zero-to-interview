@@ -179,10 +179,10 @@ student rollout -> collect states and observations
 
 ~~~math
 w_t=m_t\cdot q_T(s_t)\cdot q_V(y_t)
-\cdot\exp\left(-\lambda\sum_{j<t}D_j\right)
+\cdot\exp\left(-\lambda\sum_{j=1}^{t-1}D_j\right)
 ~~~
 
-m_t 表示基本有效 mask，q_T 是教师置信或校准质量，q_V 是 verifier 对当前目标的支持，D_j 是前面位置的分布差异，lambda 控制偏离累积的衰减。这个公式是教学性的组合，不是所有 OPD 方法的标准定义；它表达的工程直觉是：无效 token、低可信教师输出和远离教师支持区域的后段 token 不应拥有同样权重。
+这里按 token 从 1 开始编号，求和只覆盖当前位置之前的分布差异；t=1 时是空和。m_t 表示基本有效 mask，q_T 是教师置信或校准质量，q_V 是 verifier 对当前目标的支持，D_j 是前面位置的分布差异，lambda 控制偏离累积的衰减。这个公式是教学性的组合，不是所有 OPD 方法的标准定义；它表达的工程直觉是：无效 token、低可信教师输出和远离教师支持区域的后段 token 不应拥有同样权重。
 
 使用这类权重前，需要声明 `m_t\in\{0,1\}`、`q_T,q_V\in[0,1]`、`D_j\geq0`、`\lambda\geq0`，并保证参与求和的量有限。教师无法回答、verifier 超时或状态已被撤销时，`q_T` 或 `q_V` 应为未知而不是主观补成 `0` 或 `1`；这类轨迹应从当前更新中隔离，同时作为数据或系统健康信号保留。
 

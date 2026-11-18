@@ -2377,3 +2377,15 @@
 3. 设计一个 rank 2 在 collective 前产生 NaN、rank 0 仍等待的最小日志表。说明 PyTorch 2.15 的 `TORCH_DIST_NAN_CHECK=1` 检查什么、适用哪些 backend，以及它不能检查 Inf、定位上游算子或诊断 collective 顺序错误的边界。
 4. 一个训练配置每个 optimizer step 消耗 480,000 个有效 label token。step 500 checkpoint 的 data cursor 相当于 245M token，而累计量应是多少？计算偏差，并分别检查 optimizer/scheduler step、真实有效 token、RNG 和 data cursor，解释为什么 checkpoint 文件可读不等于恢复连续。
 5. 为同一个异常前 checkpoint 设计 global norm clipping、AdaGC、降低 \(\beta_2\)、SPAM 和 GradientStabilizer 五组对照。比较整体范数、逐张量历史阈值、二阶矩响应、逐坐标 spike 代理和运行统计幅值分别改变什么，并记录超参数、状态丢失、吞吐及目标质量。
+
+## 第二十册第十七章：Long-Running Agent 与 Checkpoint
+
+配套正文：[第二十册第十七章](book-20-agent-harness-runtime/chapters/17-long-running-agent与checkpoint.md)；来源证据见[checkpoint 与恢复研究记录](research/long-running-agent-checkpoint-recovery-evidence-2026-11-18.md)。
+
+35EL. 延续教学构造 `task-42`：checkpoint 18 记录 workspace `r42` 和 CI job `ci-884`，CI 已成功但结果未写回；暂停期间用户把工作区推进到 `r43`；创建代码审查的请求已经派发，回执仍是 `unknown`。写出恢复顺序，分别列出 checkpoint、Trace、workspace 和服务端查询能证明什么；说明 `ci-884` 的结果能否复用、哪些验收要针对 `r43` 重跑，以及何时可以按原操作身份查询或重试审查请求。再设 worker A 的租约过期、worker B 接管后 A 恢复，说明 fencing 能阻止哪些旧写入、哪些在途副作用仍需对账。不得写代码或综合成通用 gate；没有服务查询/幂等合同的副作用要保留 unknown 并给出人工核对入口。
+
+## 第二十册第十八章：Context Folding
+
+配套正文：[第二十册第十八章](book-20-agent-harness-runtime/chapters/18-context-folding上下文折叠.md)；来源证据见[Context Folding 与长任务压缩来源记录](research/context-folding-and-compaction-strategy-2026-11-18.md)。
+
+35EM. 沿用教学构造 `task-42`，把“不得修改测试”“用户只批准为 `r42` 申请一次代码审查”“`ci-884` 对 `r42` 通过”“兼容层问题是假设且已被排除”“审查请求已派发但回执 `unknown`”“完整 CI 日志可从 artifact 取回”分别归类为约束、授权、事实、假设/结论、未知副作用和外置来源。写一份适合下一轮模型输入的短折叠摘要，给每项事实保留来源、版本或回查入口。随后设 workspace 已被用户推进到 `r43`：指出哪些 CI 证据过期、用户授权是否仍覆盖新版本、哪些事实须重查；不得把作者知道的 `review-481` 写成 Runtime 已知事实。最后设计一项比较 self-summary、裁剪旧工具输出和从 checkpoint 重启的评估，分别报告任务结果、约束遵守、来源支持、恢复正确性与 token/调用成本，并说明样本数和固定 scaffold 的限制；不要合成单一总分或通用阈值。

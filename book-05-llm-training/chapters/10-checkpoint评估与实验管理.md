@@ -72,7 +72,7 @@ C_{\mathrm{base}}=
 
 若训练确实启用了 FP16 loss scaler，则令 `C_precision={scaler}`；若使用 BF16 或其他不含 scaler 的配置，则 `C_precision=\varnothing`。完整恢复集合为 `C_resume=C_base\cup C_precision`。这样 manifest 中的精度、checkpoint 字段和恢复脚本必须使用同一份训练配置解释，不能把“这个字段常见”误写成所有任务都必需。
 
-用两个配置对照就能看出条件字段的作用：FP16 run 启用了 scaler，若 checkpoint 字段齐全却没有 scaler，则 $M_{\mathrm{missing}}=\{\mathrm{scaler}\}$，不能称为完整恢复；BF16 run 没有 scaler，$C_{\mathrm{precision}}=\varnothing$，缺少 scaler 不算缺项。但这两种 run 都需要 optimizer state；若 optimizer state 缺失，二者都不能从原更新轨迹无缝续训。
+用两个配置对照就能看出条件字段的作用：FP16 run 启用了 scaler，若 checkpoint 字段齐全却没有 scaler，则 $M_{\mathrm{missing}}=\{\mathrm{scaler}\}$，不能称为完整恢复；BF16 run 没有 scaler， $C_{\mathrm{precision}}=\varnothing$，缺少 scaler 不算缺项。但这两种 run 都需要 optimizer state；若 optimizer state 缺失，二者都不能从原更新轨迹无缝续训。
 
 恢复时要把缺失或版本不匹配的字段显式列出来。设 `available(u)` 表示当前 checkpoint 的字段 `u` 存在、版本匹配且能被训练脚本读取，则缺失集合为：
 

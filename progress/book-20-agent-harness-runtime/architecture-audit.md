@@ -1,6 +1,6 @@
 # 第二十册《Agent Harness、Coding Agent Runtime 与智能体工程框架》架构审视
 
-审视日期：2026-11-18。阶段：册级初审、发现扫描、简介与目录重构完成；第 1—16 章章级扫描与精修完成，第 17—24 章待逐章处理。
+审视日期：2026-11-18。阶段：册级初审、发现扫描、简介与目录重构完成；第 1—18 章章级扫描与精修完成，第 19—24 章待逐章处理。
 
 ## 审视范围与方法
 
@@ -49,8 +49,8 @@
 | 14 MCP/A2A 与 Harness 集成 | 外部工具和 agent 如何进入 runtime 的 capability、permission、trace 与 evaluation？ | 讲协议集成责任。 | 依第 4、8—10 章；协议主讲交第二十二册。 |
 | 15 Agent Harness 系统设计 | 如何从任务契约设计到状态、执行、恢复和验收边界？ | 以一条修复任务整合前十四章的运行知识，形成可审阅的系统设计与部署取舍。 | 依第 1—14 章；交第 16 章故障诊断，checkpoint 与 workspace 所有权分别深化到第 17、21 章。 |
 | 16 Harness 故障诊断与面试题 | 一次错误、危险、卡住或“测试通过但交付不合约”的运行，怎样从证据找到最早偏离并安全恢复？ | 训练契约、事件轨迹、真实状态与 verifier 的分层判断，并把故障固化为回归案例。 | 依第 1—15 章；checkpoint/幂等由第 17 章深化，harness 归因由第 19 章深化。 |
-| 17 Long-Running Agent 与 Checkpoint | 中断后凭什么安全继续，而不是重放副作用？ | 深化任务状态原子性、幂等和恢复。 | 依第 7、9、15 章；交第 18、20—21、23 章。 |
-| 18 Context Folding | 上下文缩短后如何保留可恢复任务状态和证据？ | 深化第 7 章压缩机制与评估。 | 依第 7、17 章；交 provider state 案例。 |
+| 17 Long-Running Agent 与 Checkpoint | 中断后哪些事实已成立、哪些动作未派发、哪些结果仍 unknown？如何按证据安全续跑？ | 区分对话、任务 checkpoint、Trace、工作区和远端事实；用 intent/effect ledger、幂等合同、fencing 和独立验收处理恢复。 | 依第 7、9、15—16 章；context folding 交第 18 章，workspace 所有权交第 21 章，provider 状态合同交第 20、23 章。 |
+| 18 Context Folding | 长任务轨迹如何折叠成更短的模型输入，同时保留约束、来源、版本和未知副作用？ | 深化第 7 章逐轮输入选择与第 17 章任务恢复；分别检查任务结果、规则保留、证据支持和折叠成本。 | 依第 7、17 章；RAG/memory 回链第 7 章，workspace/Artifact 交第 21 章，provider 状态合同交第 20、23 章；评估方法交第 19 章。 |
 | 19 Harness-Aware Evaluation | 结果差异来自模型、harness、环境还是交互？ | 深化第 10 章的归因与轨迹评估。 | 依第 9—10 章；统计方法回链第七册。 |
 | 20 Responses API | Response/item/conversation 与宿主执行状态怎样区分？ | 记录 OpenAI API 的状态、流式和计费合同。 | 依第 4、7、9、17 章；结论绑定官方 API 版本。 |
 | 21 Persistent Workspace | 文件事实、模型记忆、数据库和 task checkpoint 谁拥有？ | 深化跨轮状态所有权和 artifact 交接。 | 依第 7、9、17 章；与第 20、23 章互链。 |
@@ -96,6 +96,8 @@
 14. 第十五章完成系统综合设计精修。以合成登录错误修复任务串联任务契约、编排选择、架构责任图、Session/Task/Run/Workspace/Artifact/Effect 状态所有权、Context/Model/Capability 边界、权限/隔离/确认/验收、崩溃恢复、评估与部署。删除原通用模块覆盖公式、聚合系统上线 gate 和长 Python 审计 demo；将原有模块知识保留为一条可追踪设计过程，并把失败结果分为已知、拒绝、基础设施错误和 unknown。章节边界与第 16 章故障排查、第 17/21 章 checkpoint/workspace 专题保持衔接；替换练习 35S 并修订面试题 40C、40Q。详细取舍见[第十五章精修审计](chapter-15-audit.md)，来源证据见[系统设计外部资料记录](../../research/agent-harness-system-design-evidence-2026-11-18.md)。
 
 15. 第十六章将“实战坑清单”重构为一条并发编辑故障的证据诊断过程：复述契约、对齐 h0/h1/h2 事件、定位过期写入的最早偏离、区分执行故障与 verifier 漏检，再根据是否已派发/已回执/状态 unknown 选择恢复路径。保留权限、上下文、stale edit、命令副作用、注入、trace、eval、循环成本、MCP 工具过载和环境漂移十类主题，改为症状—证据—判断表；删除通用 coverage 公式、综合 pitfall gate 与约 400 行 Python auditor。将原宽泛定义/设计/产品比较问答回链到第 1、4、6—15 章，新增故障排查问答；用一项多步事故复盘练习替换七项跨章重复练习。详细去向见[第十六章精修审计](chapter-16-audit.md)，证据来源见[故障诊断、重试与运行证据记录](../../research/agent-harness-failure-diagnostics-evidence-2026-11-18.md)。
+16. 第十七章从 `task-42` 的 CI 回执迟写和代码审查响应丢失切入，区分模型上下文、Trace、checkpoint、workspace 与服务端状态；保留旧稿的检查点字段、状态机、幂等/提交协议、跨日续跑、版本/租约/预算、故障注入、分母和保留/取消主题，删除任意汇总公式、覆盖阈值及长审计 demo。增加条件写入、outbox/派发、服务方幂等合同、unknown 核查和 fencing 的故障边界；不宣称任意跨系统 exactly-once。补充 Chubby/etcd 原始资料，来源和范围见[checkpoint 与恢复研究记录](../../research/long-running-agent-checkpoint-recovery-evidence-2026-11-18.md)；正文取舍见[第十七章精修审计](chapter-17-audit.md)。同步目录、练习 35EL 和面试题 40AA，下一篇深化 Context Folding。
+17. 第十八章将 context folding 定位为对“下一轮模型输入”的有损变换，不等同 transcript、checkpoint、Trace、workspace 或长期 memory。以 `task-42` 演示硬约束、已验证 CI 结果、版本绑定、来源指针、假设和未知审查副作用如何分别折叠和恢复；用一组明确教学预算算例讲 token 预留，不设通用触发百分比。删除旧任意损失函数、coverage/约束总分、权重排序公式与审计 demo；加入 Anthropic/OpenAI 公开合同差异、DeepSeek Search Agent 策略与 2026 context-compaction 评测证据，均限于各自任务、模型和配置。来源证据见[Context Folding 与长任务压缩来源记录](../../research/context-folding-and-compaction-strategy-2026-11-18.md)，正文覆盖和交接见[第十八章精修审计](chapter-18-audit.md)。同步目录摘要、练习 35EM 与面试题 40AB。
 
 ## 开放风险与交接
 
@@ -104,4 +106,4 @@
 - 第 1 章原有“0 依赖 Python demo”承诺、9 个固定阈值和约 330 行 toy auditor 已移除；内容改由完整合成修复轨迹、最小伪代码和任务特定验收解释。其余章节中仍有 Python demo 或自动 gate 的部分尚待逐章核验；决定删除代码时须保留必要的过程、数值解释和明确去向。
 - 第 2 章原有运行指标公式及 `G_runtime` 固定门槛已移除；核心观察意图改为记录 session/tenant 隔离、phase 转移、context 来源与新鲜度、adapter/parser/registry 错误、执行回执、恢复/checkpoint 和取消/超时事件，并要求为任何汇总率声明单位和分母。旧的 GPT-5.6 运行时归属快照由 OpenAI 当前公开 Agents API/SDK/Responses API 对比替代；Qwen3.7 Plus region/scope 能力细节待第二十二册第 47 章复核和承接，不能在第二十册正文里留作无去向内容。
 - GitHub 页面公式/图表渲染和全量外链可达性尚未核验；动态产品事实需按每章核验日期固定。
-- **当前下一入口：** [第十七章《Long-Running Agent 与 Checkpoint》](../../book-20-agent-harness-runtime/chapters/17-long-running-agent与checkpoint.md)。第十六章已完成故障证据路径、重试状态判断和回归练习；正文取舍与静态验收见[第十六章审计](chapter-16-audit.md)。第二十册第 17—24 章和全套书精修 goal 继续 active。
+- **当前下一入口：** [第十九章《Harness-Aware Evaluation》](../../book-20-agent-harness-runtime/chapters/19-harness-aware-evaluation.md)。第十八章已完成 Context Folding 章级扫描、正文重写、配套同步和静态验收；压缩来源边界与覆盖决定见[第十八章审计](chapter-18-audit.md)。第二十册第 19—24 章和全套书精修 goal 继续 active。
