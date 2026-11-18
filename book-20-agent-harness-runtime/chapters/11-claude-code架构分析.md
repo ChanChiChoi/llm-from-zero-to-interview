@@ -1,763 +1,245 @@
 # 第十一章：Claude Code 架构分析
 
-## 0. 本讲范围与资料
+## 0. 本讲范围与证据等级
 
-本章参考 Claude Code 官方公开文档中关于终端 coding agent、权限、设置、记忆、hooks、MCP、sandbox 和安全建议的资料，并结合前十章的 agent harness、runtime、工具、文件编辑、终端执行、权限、trace 和 evaluation harness 框架来分析。
+Claude Code 的公开资料可以帮助我们分析一个真实的 AI 编码代理（coding agent）产品，但公开产品行为不能直接还原闭源内部实现。本章以 Anthropic 官方文档截至 2026-11-18 的描述为证据，沿一项明确标记为教学构造的登录测试修复任务，练习怎样区分产品合同、可观察行为、系统设计推断和未知细节。
 
-边界要说清楚：
+本讲里的“可观察行为”指使用者可以在具体版本、配置和执行环境中亲自检查的界面、工具回执、文件变化或运行记录。本章不声称执行过 Claude Code；合成任务中的测试输出和文件状态只用于讲清审计方法。
 
-1. 本章分析的是 Claude Code 类终端型 coding agent 的公开产品形态和可迁移架构模式。
-2. 对官方文档明确描述的能力，可以写成公开能力或产品约束。
-3. 对没有公开确认的内部实现，例如隐藏 planner、具体 prompt、模型侧策略、内部 trace 存储格式和排序算法，不能写成确定结论。
-4. 面试中应把 Claude Code 当作“成熟 coding agent 产品案例”来分析，而不是把外部源码阅读笔记或社区猜测当作官方架构。
-5. 本章的公式和 demo 不是为了复刻 Claude Code 内部实现，而是给出一种审计公开资料边界、架构组件、权限治理、扩展治理、可观测性和评估准备度的教学方法。
+| 证据等级 | 可以怎样写 | 不能据此推出什么 |
+| --- | --- | --- |
+| 官方公开描述 | “官方文档说明 Claude Code 提供文件读取、编辑、搜索、命令执行和结果验证能力。” | 不能自动推出每个版本、界面和配置都具有完全相同的默认行为。 |
+| 可观察行为 | “在版本 X、配置 Y 的这次运行中，界面显示了某项权限请求，命令返回了指定退出码。” | 不能把一次运行扩大成所有版本、用户或任务的一般规律。 |
+| 系统设计推断 | “为了组织这些公开能力，可以把系统分析为交互面、工具执行、策略和状态等职责。” | 不能称这些职责就是产品内部的模块、服务或进程。 |
+| 未知 | “公开资料没有说明具体规划器（planner）、完整隐藏系统提示词（system prompt）或内部排序机制。” | 不能用经验猜测补成事实。 |
 
-可以把本章的分析口径压缩成一句话：用公开证据约束架构推断，用 harness 指标审计系统边界，不把闭源内部猜测写成事实。
+下文会把“官方资料支持什么”与“分析者用来理解系统的抽象”分开。涉及权限默认值、平台差异和监控字段时，均以访问日期为边界；更新产品资料时应重新核对对应官方页面。
 
-## 11.1 本章定位
+## 11.1 本章要回答的问题
 
-本章用于分析 Claude Code 这类终端型 coding agent 产品的架构思想。
+读者已经在前十章学习了代理运行框架（Harness）、运行时（Runtime）、编码代理工作流、工具、文件编辑、终端执行、上下文、权限、运行轨迹（Trace）和评估框架（Evaluation Harness）。本章不再重复讲一套通用架构，而是用 Claude Code 这个公开产品案例回答：
 
-这里的重点不是复述某个官方内部实现，而是用前十章建立的 harness 视角，理解一个成熟 coding agent 产品通常如何组织用户交互、上下文、工具、文件编辑、终端执行、权限控制、trace 和任务循环。
+> 面对一个内部实现并未完全公开的编码代理，怎样用公开证据分析它的工作流和控制边界，又不把合理的系统设计推断误说成产品事实？
 
-本章可以参考公开资料和产品行为进行架构推断，但要注意边界：没有官方确认的实现细节，不应写成确定源码结论。面试中也应使用“从系统设计角度看”“这类产品通常会”这样的表达，避免把推测说成事实。
+读完后，读者应能沿一项代码任务指出公开资料能支持的能力、需要在具体运行中验证的行为、可用于讨论的架构推断，以及目前无法确认的内部细节。[第十二章《OpenCode 架构分析》](12-opencode架构分析.md)转向可检查的开源实现；[第十三章《Codex 与主流 Coding Agent 对比》](13-codex与主流coding-agent对比.md)再把不同 coding agent 放到同一组问题下比较。
 
-学完本章，你应该能回答：
+## 11.2 用一个合成修复任务看证据怎么流动
 
-1. Claude Code 类产品为什么是 agent harness 的典型案例。
-2. 终端型 coding agent 和 IDE 型 coding agent 有什么差异。
-3. Claude Code 类系统通常包含哪些核心模块。
-4. 用户输入如何变成模型上下文和工具动作。
-5. 文件编辑、命令执行、权限确认和 trace 如何协同。
-6. 面试中如何分析一个真实 coding agent 产品的架构。
+假设一个教学仓库有 **tests/test_login.py** 和 **src/login.py**。测试要求过期 token 返回 HTTP 401，现有实现却返回 HTTP 200。用户提出：“修复这个失败，并解释原因。”
 
-## 11.2 为什么 Claude Code 是典型案例
+这只是合成案例，不是一次 Claude Code 运行。它让我们把“Agent 可能做什么”与“公开证据能证明什么”逐步分开。
 
-Claude Code 代表的是一种终端型 coding agent 产品形态。
+| 步骤 | 合成案例中的状态变化 | 官方资料支持的范围 | 仍须验证或不能推断的内容 |
+| --- | --- | --- | --- |
+| 收集上下文 | 工具搜索测试和实现，再读取相关文件及项目说明 | Claude Code 文档列出文件读取、搜索、项目上下文和指令文件等能力；公开工作循环把 gather context 列为一个阶段。[How Claude Code works](https://code.claude.com/docs/en/how-claude-code-works) | 不能仅凭这些能力清单断言某次任务读取了哪些文件、用了什么内部检索排序，或完整上下文如何拼接。 |
+| 形成修改提议 | 根据预期 401、实际 200 和代码路径，提出一个局部修正 | 文档说明模型借助工具行动，工具结果会回到循环中影响后续决定。 | “上下文构造器（Context Builder）”“规划器（planner）”是否是产品里的独立内部模块，公开资料没有证明。 |
+| 执行修改 | 请求文件工具修改 src/login.py，形成可查看的差异 | 官方文档描述了文件编辑能力和权限规则。 | 具体修改是否符合用户意图，要看实际 diff 和任务约束，不能由“编辑成功”推出。 |
+| 运行验证 | 请求测试命令，得到通过或失败回执 | 文档描述了命令执行和验证能力；某些动作受权限模式和设置影响。 | 是否无需确认、是否进入 OS 沙箱、实际执行了什么命令，都取决于版本、平台和配置，需检查本次运行。 |
+| 交付结果 | 说明修改和测试结果，交给用户复核 | 官方工作循环包含 verify；公开界面可展示任务过程和结果。 | 测试通过只支持该测试在该环境中的结果，不证明所有功能、权限和安全要求均已满足。 |
 
-它的典型特点是：
+这个过程展示了一个重要区别：官方文档足以支持“产品提供这些能力”，但要证明“这次任务确实按某种顺序使用了它们”，还需要具体的会话、权限、执行和任务产物（artifact）证据。还要区分命令返回成功、目标测试通过与用户任务最终满足；[第十章《Evaluation Harness》](10-evaluation-harness.md)讨论如何用独立验收条件判断最后一项。
 
-1. 面向真实本地或远程代码库。
-2. 通过命令行与用户交互。
-3. 能读取文件、搜索代码、编辑文件。
-4. 能运行命令、测试和构建。
-5. 需要处理权限确认。
-6. 需要管理长任务上下文。
-7. 需要在多轮工具调用后总结结果。
+## 11.3 Claude Code 对外呈现的产品形态
 
-这类系统的关键不是“模型会不会写代码”，而是能不能把模型安全接入真实开发环境。
+早期把 Claude Code 简称为“终端型编码代理”有助于理解它的起点，但已经不足以描述目前公开的产品形态。官方文档把它描述为可通过命令行界面（CLI）、Desktop、VS Code、JetBrains、Web、移动端和其他集成使用的编码代理产品。文档还区分代码实际运行的位置：本机、Anthropic 管理或组织自管的云环境，以及由浏览器控制但仍在本机运行的 Remote Control。界面不同，代码所在环境和配置合同也可能不同。[Platforms and integrations](https://code.claude.com/docs/en/platforms)；[How Claude Code works](https://code.claude.com/docs/en/how-claude-code-works)
 
-从 harness 视角看，它必须解决：
+| 维度 | 读者要查什么 | 为什么不能只看界面名称 |
+| --- | --- | --- |
+| 交互界面 | CLI、IDE 插件、Desktop、Web、移动端或持续集成（CI） | 界面影响用户怎样提供上下文、查看文件差异（diff）、回应确认和接收结果。 |
+| 执行环境 | 本机、远程云环境、组织自管环境，或 Remote Control 对本机的远程控制 | 文件、进程、网络、凭据和数据保留边界取决于代码在哪里运行。 |
+| 配置来源 | 用户、项目、项目本地和组织托管设置 | 同一个设置项可能有不同作用范围和优先级；云会话读取的设置也可能与本机不同。[Settings files and precedence](https://code.claude.com/docs/en/settings) |
+| 可用能力 | 当前表面是否支持某个工具、扩展或管理功能 | “同一底层产品”不等于各表面暴露相同按钮、默认设置或部署控制。 |
 
-1. 用户任务如何进入系统。
-2. 模型每轮看到什么上下文。
-3. 模型如何表达动作。
-4. 动作如何映射到工具。
-5. 工具结果如何返回模型。
-6. 危险动作如何确认。
-7. 文件修改如何展示 diff。
-8. 失败如何恢复。
+因此，本章把“终端 vs IDE”改成一个局部比较问题：两种界面怎样改变交互和观察方式？它们不能单独说明底层执行位置、安全边界或运行状态。要回答后几项，必须继续检查实际环境和对应的产品文档。
 
-这正是前十章讲的 agent runtime 主线。
+## 11.4 先区分产品事实、观察、推断与未知
 
-## 11.3 终端型 Coding Agent 的产品形态
+分析闭源产品时，先给每条主张贴上证据类型，再决定要不要放进架构图。下面这张证据阶梯也适用于其他 Coding Agent：
 
-终端型 coding agent 和 IDE 型产品不同。
+1. **公开合同**：官方文档、设置说明和发布资料明确描述的能力、限制或行为。要记录页面、访问日期、适用平台和条件。
+2. **具体观察**：对固定产品版本、设置和任务直接检查得到的界面、回执、文件差异或运行记录。它证明的是这次观察。
+3. **设计抽象**：为了讨论职责而构造的模型。例如把“上下文准备”“动作授权”“外部执行”“状态保存”分开谈。它是分析工具，不是源码图。
+4. **未知内部**：公开材料未披露、观察也无法确认的机制。把它保留为未知，或明确写成待验证假设。
 
-终端型产品优势：
+| 主张 | 合适的证据标签 | 更准确的表述 |
+| --- | --- | --- |
+| Claude Code 能收集项目上下文、调用工具并验证结果 | 官方公开描述 | “官方文档将其工作过程概括为 gather context、take action、verify。” |
+| 某次运行读取了两个文件、获得一次权限确认并运行了测试 | 可观察行为 | “该版本、配置和任务的会话记录中出现了这些回执。” |
+| 系统由会话管理器（Session Manager）、上下文构造器（Context Builder）、动作解析器（Action Parser）等组件组成 | 系统设计推断 | “为了讨论职责，可以用这些名称分析一个可能的 Harness 分层。” |
+| 隐藏 planner 的算法或内部 system prompt 的完整内容 | 未知 | “公开资料没有给出足够信息，不能确认。” |
 
-1. 接近开发者真实工作流。
-2. 容易访问 shell、git、测试命令。
-3. 易于在服务器、容器、远程环境中运行。
-4. 对大型仓库和工程任务更自然。
-5. 可以用纯文本展示计划、命令、diff 和结果。
+官方文档本身也划定了边界：它介绍周边层如何提供工具并管理模型看到的上下文；同时明确 Claude Code 的 system prompt 并未公开。[How Claude Code works](https://code.claude.com/docs/en/how-claude-code-works)；[Settings files and precedence](https://code.claude.com/docs/en/settings) 因此，我们可以复述公开的产品说明，也可以提出有标记的系统设计推断，但不能据此声称读过隐藏 prompt 或确认内部组件图。
 
-终端型产品挑战：
+## 11.5 用公开工作循环构造分析图
 
-1. UI 交互空间有限。
-2. Diff 和多文件导航不如 IDE 直观。
-3. 命令执行风险更高。
-4. 用户确认流程要尽量清晰。
-5. 长日志和上下文展示需要压缩。
+官方资料把代理工作循环（agentic loop）概括为三个会反复交织的阶段：收集上下文、采取行动、验证结果。工具结果会成为后续判断的新输入，用户可以在循环中介入。[How Claude Code works](https://code.claude.com/docs/en/how-claude-code-works)
 
-IDE 型产品优势：
+下面的图把这条公开描述与其他官方文档列出的权限、执行环境、扩展和状态资料放在同一张分析图中。图中扩展能力的名称沿用官方术语：技能（skill）、钩子（hook）、Model Context Protocol（MCP，模型上下文协议）和子代理（subagent）；细节见 11.9。图里的“交互界面”“策略检查”“状态来源”等框，是为了说明审计时应追问哪些关系；它们不是 Claude Code 内部模块的确认清单。
 
-1. 能直接显示文件和 inline diff。
-2. 用户可以局部选择代码。
-3. 更容易和编辑器状态集成。
-4. 可视化体验更好。
+```mermaid
+flowchart LR
+    U["用户目标"] --> S["交互界面与执行环境"]
+    S --> G["收集上下文"]
+    G --> M["模型推理与动作提议"]
+    M --> P["产品权限规则与用户确认"]
+    P --> T["文件、搜索、命令或外部工具"]
+    T --> O["工具回执"]
+    O --> M
+    M --> V["验证结果"]
+    V -->|还需处理| G
+    V -->|汇报结果| U
 
-但 IDE 型产品也要处理相同的 harness 问题：上下文、工具、权限、trace、评估。
-
-## 11.4 高层架构图
-
-从系统设计角度，可以把 Claude Code 类系统拆成：
-
-```text
-CLI / UI Layer
--> Session Manager
--> Context Builder
--> Model Adapter
--> Action Parser
--> Tool Registry
--> Execution Engine
--> Permission System
--> File System / Terminal / Search Tools
--> Trace Logger
--> Final Response Renderer
+    C["项目文件与指令"] --> G
+    H["会话历史与记忆"] --> G
+    X["Skills、Hooks、MCP、Subagents"] -.->|扩展能力| T
+    B["已配置的 OS 沙箱"] -.->|仅覆盖部分命令| T
+    R["Transcript、Checkpoint、可选监控"] -.->|记录部分状态| O
 ```
 
-模块职责：
+图里的权限检查与操作系统沙箱（OS sandbox）必须分开看：前者决定某项工具动作是否被允许或需要确认；后者在特定设置和平台上限制受保护的 shell 命令及其子进程。扩展、记录和其他工具不因此自动处于同一隔离范围。后文会逐项说明这些边界。
 
-1. CLI/UI Layer：接收用户输入，展示流式输出、计划、命令、diff 和确认提示。
-2. Session Manager：维护当前会话、任务状态和历史摘要。
-3. Context Builder：选择文件、工具结果、diff、规则和计划进入模型上下文。
-4. Model Adapter：调用 Claude 或其他模型，处理 streaming 和 tool use。
-5. Action Parser：解析模型输出中的动作或工具调用。
-6. Tool Registry：管理 read、search、edit、bash 等工具。
-7. Execution Engine：执行工具，处理超时、错误和结果标准化。
-8. Permission System：判断动作是否允许、是否需要用户确认。
-9. Trace Logger：记录每轮模型调用、工具调用、文件 diff、命令输出和权限决策。
-10. Response Renderer：把最终结果整理给用户。
+## 11.6 交互控制面和模型工具调用不是一件事
 
-面试时，这个图比“它调用了大模型”更能体现系统理解。
+在命令行界面中，用户输入的普通任务请求与产品控制命令承担不同职责。普通请求会进入代理工作循环；像 /permissions、/sandbox、/resume 这样的可见命令则用于调整、检查或恢复产品会话。文件读取、搜索、编辑和 Bash 等工具调用是模型在工作循环中使用的能力。把它们分开，才能判断一个操作是用户在管理产品，还是模型提议了任务动作。
 
-## 11.5 用户输入如何进入系统
+这一区分并不表示每个可见命令都能改变所有界面或执行环境。当前设置文档说明，部分终端命令只在相应 CLI 表面提供；设置文件则按 user、shared project、project-local 和 managed 等作用域加载。分析一次任务时，要记录实际启动表面、设置来源和生效值，不要只根据仓库里存在一个配置文件就断定它已加载。[Settings files and precedence](https://code.claude.com/docs/en/settings)；[Configure permissions](https://code.claude.com/docs/en/permissions)
 
-用户输入通常有几类：
+一个实用的审计记录可以分成四列：
 
-1. 自然语言任务。
-2. 斜杠命令或系统命令。
-3. 文件路径或代码片段。
-4. 对当前 agent 行动的确认或拒绝。
-5. 中途追加要求。
+- 用户给了什么目标或控制输入；
+- 产品向模型或工具暴露了什么能力；
+- 哪项权限规则、确认或系统限制影响了动作；
+- 实际执行环境返回了什么回执。
 
-系统需要先判断输入类型。
+这样就不会把“模型建议执行命令”“产品请求用户批准”和“命令进程确实运行”合并成一个事件。
 
-例如：
+## 11.7 上下文和跨会话状态分别来自哪里
 
-```text
-修复 auth 测试失败
-```
+“记忆”常被用来统称一切跨轮信息，但不同状态的来源、生命周期和约束能力不同。Claude Code 的公开资料至少区分以下几类：
 
-这是任务输入。
+| 状态来源 | 主要作用 | 可以证明什么 | 不等于什么 |
+| --- | --- | --- | --- |
+| 当前会话消息与工具结果 | 供当前任务继续推理 | 该会话中记录了哪些对话和工具结果 | 不是完整的长期项目状态，也不是所有外部副作用的证明。 |
+| CLAUDE.md 或可读取的 AGENTS.md | 提供项目或组织指令与背景 | 某类文字说明会作为上下文加载 | 不是不可绕过的权限规则或 OS 安全边界。 |
+| 自动记忆（Auto memory） | 保存模型归纳的偏好、经验和项目线索 | 相关记忆可能进入后续会话的上下文 | 不保证记忆正确、完整或具有强制执行效果。 |
+| 设置（settings）/ 组织托管策略（managed policy） | 控制产品设置、权限规则和组织策略 | 对应设置范围内的产品行为受这些配置影响 | 不是模型“记住了”的自然语言说明。 |
+| 文件 checkpoint | 支持恢复部分文件编辑状态 | 被追踪的文件编辑可以通过产品恢复界面回退 | 不是数据库事务、完整环境快照或外部副作用回滚。 |
 
-```text
-/help
-/clear
-/resume
-```
+官方文档说明每个新会话从新的上下文窗口开始；CLAUDE.md 和自动记忆会作为上下文提供，而非强制配置。若要在工具调用前实施控制，文档指出可用 PreToolUse 钩子；但这仍需和操作系统级执行隔离区分。[How Claude remembers your project](https://code.claude.com/docs/en/memory)
 
-这更像控制命令，不应该直接交给模型当普通任务。
+会话 transcript、项目指令、自动记忆和设置解决的是不同问题。前几类提供信息，设置改变产品行为；一个工具能否触碰文件或网络，还要看具体权限、运行环境和沙箱。不要因为提示词中写了“不能访问密钥”，就把它当成操作系统已经阻断访问。
 
-用户确认：
+## 11.8 文件 checkpoint 只恢复一部分状态
 
-```text
-Approve running npm test -- auth?
-```
+官方文档说明，本机工作时 Claude Code 会将会话消息、工具调用和结果保存为 ~/.claude/projects 下的明文 JSON Lines（JSONL）transcript，并支持恢复、继续或分叉会话；检查点（checkpoint）会在启动新一轮的 prompt 前捕获文件状态，并记录产品文件编辑工具在当前会话中的文件变化。[How Claude Code works](https://code.claude.com/docs/en/how-claude-code-works)；[Checkpointing](https://code.claude.com/docs/en/checkpointing)
 
-这属于权限系统的一部分。
+这两个机制不能合称为“完整快照”。例如，在教学任务里，模型用文件编辑工具修改了 src/login.py，随后在 shell 中运行测试。文件编辑可以被 checkpoint 机制追踪；测试进程可能已写日志、更新缓存或访问外部服务，这些副作用并不会因为恢复文件就自动撤销。文档也说明只由 Bash 改过的文件、外部手工修改及部分并行子 Agent 编辑不一定能通过当前会话 rewind 恢复。
 
-输入路由的价值是防止所有文本都混进模型上下文。控制命令、权限确认、自然语言任务应走不同路径。
+所以恢复一次 coding agent 任务时，要分别检查：
 
-## 11.6 命令系统
+1. 对话是否继续了，还是仅复制到一个新会话；
+2. 哪些文件有产品 checkpoint；
+3. shell 或 MCP 工具是否已产生外部副作用；
+4. 是否需要 Git、数据库或其他系统自己的回滚机制；
+5. 重新执行动作是否安全、幂等且仍经过授权。
 
-终端型 coding agent 通常会有命令系统。
+检查点是文件编辑恢复能力，不是通用的撤销按钮。它和[第十七章《Long-Running Agent 与 Checkpoint》](17-long-running-agent与checkpoint.md)的长任务状态、幂等与副作用账本属于相关但不同的层次。
 
-命令系统解决：
+## 11.9 权限、沙箱和扩展点有不同执行边界
 
-1. 查看帮助。
-2. 清理上下文。
-3. 切换模型或配置。
-4. 管理会话。
-5. 查看状态。
-6. 控制权限。
-7. 退出或中断任务。
+“有权限提示”“运行在沙箱里”“工具由模型调用”是三件不同的事。要分析一个动作，沿着“谁提出—谁授权—谁执行—执行过程被什么隔离—结果由谁验证”分别追问。
 
-这些命令不是模型工具，而是产品控制面。
+### 权限规则说明产品如何处理工具请求
 
-需要区分：
+Claude Code 当前权限文档描述了 allow（允许）、ask（询问）和 deny（拒绝）规则；文档中的规则顺序为 deny、ask、allow。权限模式和工具类型会改变哪些调用需要用户确认。这个产品权限层回答的是：Claude Code 对某个工具请求如何处理。它不等同于通用操作系统进程隔离，也不能只凭一次提示框证明整个运行时都受到了限制。[Configure permissions](https://code.claude.com/docs/en/permissions)
 
-1. 用户命令：控制 agent 产品行为。
-2. 模型工具调用：agent 请求 runtime 执行动作。
-3. Shell 命令：通过 Bash 工具在工作区执行。
+/permissions 一类管理界面和模型生成的 Bash/文件/MCP 工具请求也应分开记录。审批通过只说明产品允许该动作继续；还要验证审批所覆盖的具体参数、真正执行的动作和执行结果。
 
-混淆这三者会导致设计混乱。
+### OS 沙箱只覆盖文档列明的执行路径
 
-面试表达：
+截至本章核对日期，Claude Code 的沙箱文档说明：本机沙箱在启用且依赖可用时，通过操作系统边界限制 Bash、PowerShell、Monitor 命令及其子进程；默认关闭。文档同时列出内建文件与 Web 工具、MCP servers、hooks、plugin monitors、LSP servers 和辅助进程在沙箱之外运行。原生 Windows 下命令也不在此沙箱中运行；出错时还存在请求无沙箱重试的路径。[Configure the sandboxed Bash tool](https://code.claude.com/docs/en/sandboxing)
 
-```text
-我会把终端型 agent 的命令系统分成控制命令和模型工具调用。像 /help、/clear、/resume 是产品控制面，不应该当作普通 prompt；而 read_file、run_command 是模型请求 runtime 执行的工具。Shell 命令又必须经过 Bash 工具和权限系统。
-```
+这使审计问题变得具体：测试命令是不是受沙箱约束？文件编辑工具是否在同一边界内？MCP server 自己访问外部系统的权限是什么？hook 的脚本和凭据由谁控制？不能从“Bash sandbox 已开启”推出“所有 Agent 动作都被同一个 OS 边界包住”。
 
-## 11.7 上下文构造
+### 扩展增加能力，也引入新的执行者
 
-Claude Code 类产品的效果很大程度取决于上下文构造。
+Claude Code 文档介绍了若干不同扩展点：
 
-上下文来源：
+- **钩子（Hooks）** 可以在会话或工具生命周期事件上触发命令、HTTP、Model Context Protocol（模型上下文协议，MCP）、prompt 或 agent hook handler。不同类型有不同输入、控制和执行语义；“配置了 hook”不代表它必然是确定性、失败关闭的安全控制。[Hooks reference](https://code.claude.com/docs/en/hooks)
+- **MCP** 让 Claude Code 连接外部工具、数据源和 API；要继续追查 server 身份、连接方式、认证和每个 tool 的授权。[Connect Claude Code to tools via MCP](https://code.claude.com/docs/en/mcp)
+- **子代理（subagent）** 使用独立上下文，并可配置各自的工具访问和权限。它们适合隔离子任务信息，但也需要追踪委派目标、实际写入和返回结果。[Create custom subagents](https://code.claude.com/docs/en/sub-agents)
+- **技能（skill）** 提供可复用工作流和相关指令；**插件（plugin）** 可以把 skills、agents、hooks、MCP servers 等组件打包成一个安装单元。[Extend Claude with skills](https://code.claude.com/docs/en/skills)；[Plugins overview](https://code.claude.com/docs/en/plugins)
 
-1. 用户任务。
-2. 系统规则。
-3. 项目规则文件。
-4. 已读文件。
-5. 搜索结果。
-6. 最近命令输出。
-7. 当前 diff。
-8. 会话历史摘要。
-9. 当前计划。
-10. 工具 schema。
+这些功能是公开的产品扩展合同，不是一个统一的“插件权限”。审计时要为每类扩展分别记来源、加载范围、执行位置、可访问资源、权限来源、失败行为和 trace 证据；尤其不能假定扩展进程自动继承 shell sandbox。
 
-终端型 agent 的上下文难点：
+## 11.10 观察产品运行和评估任务结果
 
-1. 代码库很大。
-2. 终端输出很长。
-3. 用户可能连续追加要求。
-4. 文件不断变化。
-5. 模型需要知道哪些动作已执行。
+产品运行留下的记录有不同用途。Claude Code 的本地 transcript 保存会话消息和工具交互；组织也可以配置 OpenTelemetry（OTel，可观测性标准）导出 metrics（指标）、events/logs（事件/日志）和可选 traces（轨迹）。监控文档把分布式 traces 标为 beta，并说明部分工具路径、命令或内容字段需要显式配置才会导出。因而“有遥测（telemetry）”不等于“有完整可重放轨迹”；导出内容也需要按敏感数据和保留策略审查。[Monitoring](https://code.claude.com/docs/en/monitoring-usage)
 
-合理策略：
+审阅一项运行时，至少分开找这些证据：
 
-1. 用户目标和最新指令固定保留。
-2. 当前任务计划固定保留。
-3. 当前编辑文件和测试失败片段高优先级。
-4. 长日志压缩成摘要。
-5. 旧历史压缩成 task state。
-6. 关键文件修改后重新读取或更新摘要。
+- **模型提议**：请求了哪个动作；
+- **策略决定**：产品规则、hook 或用户对它作了什么决定；
+- **执行回执**：工具是否实际运行、输入输出和退出状态是什么；
+- **文件证据**：最终 diff 和相关 artifact；
+- **任务验收**：独立测试或用户指定条件是否满足；
+- **监控记录**：导出了哪些事件、字段和状态，缺失哪些信息。
 
-这对应第七章的 context builder 设计。
+这组证据不会自然合成一个“架构准备度分数”。如果要评估 Claude Code 或另一个 Agent 的表现，应像第十章那样固定任务、初始环境、配置和独立验收器（verifier），分开报告 Agent 结果、运行错误、无法判定和验收器错误。单次产品演示只能展示一种可行路径，不能替代公平的系统评估。
 
-## 11.8 工具调用架构
+## 11.11 手工做一次架构审计
 
-Claude Code 类系统必须有工具调用层。
+分析公开产品时，先建立“问题—证据—边界—待验证项”记录，不需要先给组件打分。下面的审阅表把前十章的概念应用到产品案例中。
 
-常见工具：
+| 审阅问题 | 要找的公开或可观察证据 | 必须保留的边界 |
+| --- | --- | --- |
+| 任务从哪个界面进入，代码在哪个环境运行？ | 平台文档、环境配置、会话中的实际项目和路径 | 产品表面不等于执行位置；云与本机的配置和数据边界可能不同。 |
+| 官方把一次工作循环描述成什么？ | Gather / act / verify 的产品说明，具体任务里的工具回执 | 公开循环不是内部实现图，也不证明一次任务确实执行了全部步骤。 |
+| 上下文由哪些公开来源构成？ | 项目文件、指令文件、session、Auto memory 和工具输出 | 来源清单不等于内部 token 拼接顺序、裁剪算法或优先级实现。 |
+| 哪个主体提出、批准并执行工具动作？ | 工具请求、权限提示、规则来源、执行记录和命令回执 | 模型提议、用户同意、进程启动和任务成功是不同事件。 |
+| 文件、shell 和外部服务分别受什么隔离？ | 当前平台的 permission/sandbox 配置、MCP/hook 设置及实际执行位置 | 一个沙箱范围不能推广到所有工具、扩展或宿主进程。 |
+| 暂停、恢复和撤销分别保留什么？ | 会话 ID（session ID）、transcript、checkpoint、工作区（workspace）版本和外部系统状态 | 聊天历史不是执行状态；文件 rewind 不会撤销所有外部副作用。 |
+| 用户能从哪里观察运行？ | transcript、diff、工具回执、可选 telemetry 和 retention 配置 | 观测面可能采样、裁剪或省略字段；trace 不是独立 verifier。 |
+| 哪些能力需要任务集验证？ | 固定任务、环境、权限、独立验收器、失败分类和重复运行 | 产品文档和单次演示不能证明总体成功率或跨任务可靠性。 |
+| 哪些内部内容仍然未知？ | 官方没有公开、运行时行为也无法直接观测的部分 | 将其明确记为未知，不用一个推测模块名来填空。 |
 
-1. 读文件。
-2. 搜索代码。
-3. 编辑文件。
-4. 执行命令。
-5. 查看 diff。
-6. 询问用户。
+执行这份审计时，每条证据还应附上来源 URL、访问日期、官方文档的版本/适用范围，或产品观察所用的版本、设置和任务。若来源只说明“支持某能力”，记录为能力；若亲自观察一次运行，记录为单次行为；若为了讨论职责而命名组件，在句子和图题里标明“分析模型”。
 
-工具调用架构要包含：
+## 11.12 分析公开产品时容易越界的地方
 
-1. 工具 schema。
-2. 工具描述。
-3. 权限等级。
-4. 执行入口。
-5. 结果标准化。
-6. 错误处理。
-7. trace 记录。
+1. **把产品能力列表写成内部源码图。** 文档说产品能搜索、编辑、执行和验证，不代表系统内部必定有同名、独立部署的模块。
+2. **把人工确认当作隔离。** 一次权限提示不能替代执行环境限制；审批范围还要和实际参数、执行动作相匹配。
+3. **把 shell sandbox 当作全工具 sandbox。** 文件工具、MCP、hooks 和其他辅助进程可能位于 sandbox 边界之外，须按当前文档和配置逐项检查。
+4. **把自然语言指令当作强制策略。** 项目说明帮助模型理解任务；真正改变产品权限的是对应设置和控制机制。
+5. **把 transcript 或 checkpoint 当作全量快照。** transcript 记录对话和工具事件；checkpoint 面向部分文件编辑恢复，二者都不能证明外部副作用被撤销。
+6. **把可选监控当作完整 trace。** 可导出的字段取决于配置、平台和版本；还要确认采样、内容隐私、保留和关联 ID。
+7. **把一次成功当作一般能力。** 一项测试通过只证明指定测试在该环境中的结果，不等于需求、diff 范围和安全约束都已满足。
+8. **把闭源猜测写得像事实。** 对隐藏 planner、完整系统 prompt、内部评分/排序或模型路由，除非官方后来提供证据，否则保留为未知或显式假设。
 
-模型不能直接访问文件系统或 shell。它应该输出结构化动作，由 runtime 校验后执行。
+## 11.13 面试如何回答
 
-这点非常关键：成熟 agent 产品不是“模型自己操作电脑”，而是模型通过受控工具接口操作环境。
+遇到“Claude Code 的架构是什么”时，先说明证据范围，再给出能够解释产品行为的分析模型，而不是声称知道内部源码。可以按下面顺序组织回答：
 
-## 11.9 文件编辑机制
+1. **产品形态**：说明本题讨论的是哪个 Claude Code 表面和执行环境；不要把当前产品缩成只有终端。
+2. **公开工作循环**：引用 gather context、take action、verify，说明工具结果怎样影响后续行动。
+3. **责任划分**：把上下文来源、工具调用、产品权限、OS 执行边界、会话状态和用户交互逐项解释，并指出这是职责分析模型。
+4. **证据与风险**：举一个“测试失败—读取代码—修改—重跑—检查 diff”的任务，区分提议、批准、执行回执和独立验收。
+5. **未知项**：明确不推断未公开的 planner、内部模块、完整 prompt 或路由策略；对权限模式、沙箱和环境差异按版本与配置限定。
 
-文件编辑是 coding agent 的核心能力。
+面试官若追问“测试通过是不是代表任务完成”，回答应回到验收条件：测试回执支持它实际覆盖的行为；还需要检查改动范围和题目要求，并对没有测试覆盖的条件保留未知。若追问“打开 sandbox 后是否所有操作都安全”，应明确当前文档描述的本机 sandbox 作用在特定 shell 路径，其他工具和扩展要另查。
 
-一个稳健的编辑机制应支持：
+## 11.14 练习
 
-1. 读取目标文件。
-2. 基于上下文生成 patch。
-3. 应用 patch。
-4. 检查冲突。
-5. 生成 diff。
-6. 记录 trace。
-7. 必要时回滚。
+为上面的合成登录修复任务制作一份人工审阅表，不写代码、不运行真实产品，也不生成总分或 gate。
 
-设计重点：
+1. 将任务拆成输入、上下文来源、动作提议、权限决定、执行回执、文件差异、测试结果和最终验收。
+2. 为每项分别标注“官方公开描述”“假设的单次观察”“系统设计推断”或“未知”。
+3. 选一个 Bash 测试动作和一个 MCP 工具动作，分别追查权限、执行位置、沙箱覆盖和外部副作用；说明当前信息不足时要向哪份配置或回执补证。
+4. 列出会话 transcript、项目指令、自动记忆、设置和文件检查点各自能证明什么、不能证明什么。
+5. 写一段面试回答，说明你怎样分析公开产品能力，又怎样避免把闭源内部细节说成事实。
 
-1. 避免 whole-file rewrite。
-2. 优先小 patch。
-3. 编辑前检查文件是否变化。
-4. 不覆盖用户并发修改。
-5. 修改后展示 diff。
-6. 大范围改动需要确认。
+## 11.15 小结
 
-终端型产品尤其需要清晰展示 diff，因为用户不在 IDE 的可视化编辑界面里。
+Claude Code 的公开资料让我们可以具体分析一个成熟 coding agent 的产品工作循环、工具、会话、权限、沙箱和扩展能力。准确的架构分析仍需守住证据层级：官方资料支持产品合同，具体运行记录支持一次观察，系统分层是分析者的推断，未公开内部细节就保持未知。
 
-## 11.10 终端执行机制
-
-终端执行能力让 coding agent 能验证自己的修改。
-
-典型用途：
-
-1. 运行测试。
-2. 运行 lint。
-3. 构建项目。
-4. 查看 git 状态。
-5. 复现错误。
-
-但终端执行必须受控：
-
-1. 工作目录限制。
-2. 超时限制。
-3. 命令风险分级。
-4. 用户确认。
-5. 输出截断和摘要。
-6. 环境变量脱敏。
-7. trace 记录。
-
-面试中要强调：能跑命令不是重点，能安全跑命令才是重点。
-
-## 11.11 权限与确认
-
-Claude Code 类系统面对真实代码库，必须有权限确认机制。
-
-需要确认的操作通常包括：
-
-1. 写文件。
-2. 删除文件。
-3. 执行可能有副作用的命令。
-4. 安装依赖。
-5. 访问网络。
-6. Git 高风险操作。
-7. 读取敏感文件。
-
-确认提示应该说明：
-
-1. 要执行什么。
-2. 为什么执行。
-3. 影响哪些文件或资源。
-4. 风险等级。
-5. 是否可回滚。
-
-权限系统要挡住 prompt injection。即使模型被 README 或网页诱导读取 secret，runtime 也应该拒绝。
-
-## 11.12 会话状态和恢复
-
-Coding agent 任务可能很长。
-
-会话状态应保存：
-
-1. 用户目标。
-2. 当前计划。
-3. 已读文件。
-4. 已修改文件。
-5. 工具调用历史。
-6. 权限确认历史。
-7. 当前 diff。
-8. 测试结果。
-9. 上下文摘要。
-
-恢复场景：
-
-1. 用户中断后继续。
-2. 模型调用失败后重试。
-3. 命令超时后恢复。
-4. 上下文过长后压缩。
-5. 用户手动修改文件后同步。
-
-Session manager 和 state store 决定了 agent 能否处理长任务。
-
-## 11.13 日志和 Trace
-
-Claude Code 类产品也需要 trace。
-
-Trace 用于：
-
-1. 用户审计。
-2. Debug 失败。
-3. 复现任务。
-4. 安全审计。
-5. 产品质量改进。
-
-Trace 应记录：
-
-1. 用户任务。
-2. 模型调用。
-3. 工具调用。
-4. 工具结果。
-5. 文件 diff。
-6. 命令输出摘要。
-7. 权限决策。
-8. 错误和重试。
-
-这里要注意隐私和安全。Trace 不能无脑保存 secret、完整环境变量、私有 token 或敏感文件内容。
-
-## 11.14 任务循环
-
-Claude Code 类 coding agent 的典型任务循环可以抽象为：
-
-```text
-receive user goal
--> build context
--> call model
--> parse action
--> check permission
--> execute tool
--> append observation
--> update state
--> repeat until done or blocked
--> summarize result
-```
-
-这个循环看起来简单，但工程难点在边界条件：
-
-1. 模型请求不存在的工具。
-2. 工具参数不合法。
-3. 文件已被用户改动。
-4. 命令超时。
-5. 测试失败但原因不明确。
-6. 上下文超过窗口。
-7. 用户中途改变目标。
-8. 权限被拒绝。
-
-成熟 harness 的价值，就是把这些情况变成可控状态，而不是让 agent 崩掉或乱改。
-
-## 11.15 一个示例任务链路
-
-假设用户说：
-
-```text
-修复登录接口单测失败，并解释原因。
-```
-
-合理链路是：
-
-1. Session manager 创建任务状态。
-2. Context builder 加入用户目标、项目规则和工具 schema。
-3. 模型先搜索测试文件和登录接口代码。
-4. Search tool 返回相关路径和片段。
-5. 模型读取测试文件和实现文件。
-6. 模型推断失败原因，并请求运行相关测试。
-7. Permission system 判断测试命令风险较低，可执行或请求确认。
-8. Terminal tool 执行测试并返回失败日志摘要。
-9. 模型生成最小 patch。
-10. Edit tool 应用 patch 并生成 diff。
-11. 模型再次请求运行测试。
-12. 测试通过后，agent 总结修改内容、失败原因和验证结果。
-
-这个例子说明：coding agent 的智能不只在模型推理，而在“读、想、改、测、解释”的闭环。
-
-## 11.16 和前面章节的映射
-
-Claude Code 类产品几乎覆盖了本书前十章的所有主题。
-
-对应关系：
-
-1. 第 1 章 harness 总览：Claude Code 是面向代码任务的 harness 产品形态。
-2. 第 2 章 agent runtime：它需要 runtime loop、state manager 和 action executor。
-3. 第 3 章 coding agent 工作流：它完整覆盖理解、检索、修改、验证、总结。
-4. 第 4 章工具系统：它需要文件、搜索、编辑、终端等工具注册和调度。
-5. 第 5 章文件系统与代码编辑：它必须安全修改真实仓库。
-6. 第 6 章终端执行：它必须运行测试、构建和诊断命令。
-7. 第 7 章上下文管理：它要在长任务中压缩历史、保留关键状态。
-8. 第 8 章权限模型：它需要确认危险操作并防御注入。
-9. 第 9 章 trace：它需要记录执行链路以便审计和复盘。
-10. 第 10 章 evaluation harness：它可以被放进任务集里做自动回归评估。
-
-## 11.17 真实工程坑
-
-真实系统中，最容易踩坑的不是模型调用，而是 harness 边界。
-
-常见坑：
-
-1. 把终端输出全塞进上下文，导致重要信息被挤掉。
-2. 编辑文件前不重新读取，覆盖用户并发修改。
-3. 命令权限太宽，agent 能执行高风险操作。
-4. 只记录最终回答，不记录中间工具调用，失败后无法复盘。
-5. 工具错误返回不标准，模型无法判断下一步。
-6. Diff 展示不清晰，用户不知道 agent 改了什么。
-7. 会话恢复只恢复聊天记录，不恢复任务状态。
-8. 对 prompt injection 只靠系统提示，不靠 runtime 权限。
-9. 把产品控制命令和模型工具调用混在一起。
-10. 没有 regression eval，新版本 prompt 改动后质量漂移。
-
-## 11.18 Claude Code 类架构审计指标
-
-分析 Claude Code 类闭源或半闭源产品时，最容易犯的错误是把“公开可见能力”“系统设计合理推断”和“未经确认的内部实现”混在一起。本章可以把架构分析写成可审计对象。
-
-令第 `i` 个架构项为：
-
-```math
-a_i=(n_i,g_i,d_i,p_i,c_i,r_i)
-```
-
-其中 `n_i` 是组件名，`g_i` 是组件分组，`d_i` 表示是否有公开文档或可观察产品行为支撑，`p_i` 表示该组件是否出现在本次架构分析中，`c_i` 表示是否有明确治理机制，`r_i` 表示是否属于高风险能力面。
-
-下面的覆盖率都只在对应观测集合非空时定义。若 `N`、`|\mathcal{R}|`、`|\mathcal{A}|` 等分母为零，指标记为 `not_applicable`（demo 中用 `None` 表示），不能用 epsilon、上一轮分数或默认满分/零分替代；高风险集合为空时，`C_{\mathrm{risk}}` 同样是 `not_applicable`。
-
-公开证据覆盖率：
-
-```math
-C_{\mathrm{pub}}=\frac{1}{N}\sum_{i=1}^{N} d_i
-```
-
-必需模块覆盖率：
-
-```math
-C_{\mathrm{mod}}=\frac{\sum_{i\in \mathcal{R}} p_i d_i}{|\mathcal{R}|}
-```
-
-这里 `\mathcal{R}` 是分析 Claude Code 类 coding agent 时必须覆盖的模块集合，例如 CLI 控制面、session、context builder、工具、文件、终端、权限、sandbox、memory、hooks、MCP、trace 和 evaluation。
-
-访问治理覆盖率：
-
-```math
-C_{\mathrm{access}}=\frac{\sum_{i\in \mathcal{A}} c_i}{|\mathcal{A}|}
-```
-
-这里 `\mathcal{A}` 包含 CLI 控制命令、workspace 文件、终端、项目记忆和外部资源访问等入口。
-
-核心循环治理覆盖率：
-
-```math
-C_{\mathrm{loop}}=\frac{\sum_{i\in \mathcal{L}} c_i}{|\mathcal{L}|}
-```
-
-这里 `\mathcal{L}` 包含 session manager、context builder、model adapter、action parser、tool registry、execution engine、state store 和 response renderer。
-
-权限控制覆盖率：
-
-```math
-C_{\mathrm{perm}}=\frac{\sum_{i\in \mathcal{P}} c_i}{|\mathcal{P}|}
-```
-
-状态恢复覆盖率：
-
-```math
-C_{\mathrm{state}}=\frac{\sum_{i\in \mathcal{S}} p_i}{|\mathcal{S}|}
-```
-
-扩展治理覆盖率：
-
-```math
-C_{\mathrm{ext}}=\frac{\sum_{i\in \mathcal{E}} c_i}{|\mathcal{E}|}
-```
-
-这里 `\mathcal{E}` 包含 hooks、MCP、skills、插件和外部工具接入。扩展能力越强，越不能只看“能接入”，还要看 allowlist、权限绑定、输出边界和 trace。
-
-可观测性覆盖率：
-
-```math
-C_{\mathrm{obs}}=\frac{\sum_{i\in \mathcal{O}} p_i c_i}{|\mathcal{O}|}
-```
-
-评估准备度：
-
-```math
-C_{\mathrm{eval}}=\frac{\sum_{i\in \mathcal{V}} p_i c_i}{|\mathcal{V}|}
-```
-
-高风险面治理率：
-
-```math
-C_{\mathrm{risk}}=\frac{\sum_{i:r_i=1} c_i}{\sum_{i=1}^{N} r_i}
-```
-
-上式要求 `\sum_i r_i>0`；否则按上述约定报告 `not_applicable`，而不是把空的高风险面当作治理率 `1.0`。
-
-最后可以把这些指标组成 Claude Code 类架构分析验收条件：
-
-```math
-G_{\mathrm{claude}}=
-\mathbb{1}[C_{\mathrm{pub}}\ge \tau_{\mathrm{pub}}]
-\mathbb{1}[C_{\mathrm{mod}}\ge \tau_{\mathrm{mod}}]
-\mathbb{1}[C_{\mathrm{perm}}\ge \tau_{\mathrm{perm}}]
-\mathbb{1}[C_{\mathrm{risk}}\ge \tau_{\mathrm{risk}}]
-```
-
-工程上不要只看 soft score。只要高风险工具、终端、memory、hooks、MCP、sandbox 或 trace 这类硬边界缺失治理，就应该判定为需要补充证据或重新设计，而不是用“模型足够强”掩盖。
-
-### 11.18.1 最小可运行 Claude Code 架构审计 demo
-
-下面的 0 依赖 demo 不调用模型、不读取真实文件、不执行命令，也不声称复刻 Claude Code 内部实现。它只演示如何把公开架构分析写成一张可审计表，暴露三类问题：没有公开证据的内部实现猜测、必需模块缺失、高风险能力没有治理。
-
-```python
-from collections import defaultdict
-
-
-components = [
-    {"name": "cli_control_commands", "group": "access", "documented": True, "present": True, "governed": True, "required": True, "risk": False},
-    {"name": "slash_command_router", "group": "access", "documented": True, "present": True, "governed": True, "required": True, "risk": False},
-    {"name": "terminal", "group": "access", "documented": True, "present": True, "governed": False, "required": True, "risk": True},
-    {"name": "workspace_files", "group": "access", "documented": True, "present": True, "governed": False, "required": True, "risk": True},
-    {"name": "project_memory", "group": "access", "documented": True, "present": True, "governed": False, "required": True, "risk": True},
-    {"name": "session_manager", "group": "core_loop", "documented": True, "present": True, "governed": True, "required": True, "risk": False},
-    {"name": "context_builder", "group": "core_loop", "documented": True, "present": True, "governed": False, "required": True, "risk": True},
-    {"name": "model_adapter", "group": "core_loop", "documented": True, "present": True, "governed": True, "required": True, "risk": False},
-    {"name": "action_parser", "group": "core_loop", "documented": True, "present": True, "governed": True, "required": True, "risk": False},
-    {"name": "tool_registry", "group": "core_loop", "documented": True, "present": True, "governed": True, "required": True, "risk": False},
-    {"name": "execution_engine", "group": "core_loop", "documented": True, "present": True, "governed": False, "required": True, "risk": True},
-    {"name": "state_store", "group": "core_loop", "documented": True, "present": True, "governed": True, "required": True, "risk": False},
-    {"name": "response_renderer", "group": "core_loop", "documented": True, "present": True, "governed": False, "required": True, "risk": False},
-    {"name": "permission_prompt", "group": "permission", "documented": True, "present": True, "governed": True, "required": True, "risk": False},
-    {"name": "tool_allowlist", "group": "permission", "documented": True, "present": True, "governed": False, "required": True, "risk": False},
-    {"name": "sandbox", "group": "permission", "documented": True, "present": False, "governed": False, "required": True, "risk": True},
-    {"name": "secret_guard", "group": "permission", "documented": True, "present": True, "governed": True, "required": True, "risk": False},
-    {"name": "network_control", "group": "permission", "documented": True, "present": True, "governed": False, "required": True, "risk": True},
-    {"name": "session_resume", "group": "state", "documented": True, "present": True, "governed": True, "required": True, "risk": False},
-    {"name": "context_compaction", "group": "state", "documented": True, "present": True, "governed": True, "required": True, "risk": False},
-    {"name": "local_transcript", "group": "state", "documented": True, "present": True, "governed": True, "required": True, "risk": False},
-    {"name": "auto_memory_scope", "group": "state", "documented": True, "present": False, "governed": False, "required": True, "risk": True},
-    {"name": "hooks", "group": "extension", "documented": True, "present": True, "governed": False, "required": True, "risk": True},
-    {"name": "mcp_allowlist", "group": "extension", "documented": True, "present": False, "governed": False, "required": True, "risk": False},
-    {"name": "skills_extensions", "group": "extension", "documented": True, "present": True, "governed": False, "required": True, "risk": True},
-    {"name": "local_session_transcript", "group": "observability", "documented": True, "present": True, "governed": True, "required": True, "risk": False},
-    {"name": "permission_audit", "group": "observability", "documented": True, "present": True, "governed": True, "required": True, "risk": False},
-    {"name": "trace_logger", "group": "observability", "documented": True, "present": False, "governed": False, "required": True, "risk": False},
-    {"name": "trace_export", "group": "observability", "documented": True, "present": False, "governed": False, "required": True, "risk": False},
-    {"name": "regression_cases", "group": "eval", "documented": True, "present": False, "governed": False, "required": True, "risk": False},
-    {"name": "safety_metrics", "group": "eval", "documented": True, "present": False, "governed": False, "required": True, "risk": False},
-    {"name": "cost_metrics", "group": "eval", "documented": True, "present": False, "governed": False, "required": True, "risk": False},
-    {"name": "internal_planner_kernel", "group": "core_loop", "documented": False, "present": True, "governed": False, "required": False, "risk": False},
-]
-
-
-def ratio(numerator, denominator):
-    if denominator == 0:
-        return None
-    return round(numerator / denominator, 3)
-
-
-def at_least(value, threshold):
-    return value is not None and value >= threshold
-
-
-def group_items(group):
-    return [item for item in components if item["group"] == group and item["required"]]
-
-
-def governance(group):
-    items = group_items(group)
-    return ratio(sum(item["governed"] for item in items), len(items))
-
-
-required = [item for item in components if item["required"]]
-risk_items = [item for item in components if item["risk"]]
-
-metrics = {
-    "public_evidence": ratio(sum(item["documented"] for item in components), len(components)),
-    "required_module_coverage": ratio(
-        sum(item["present"] and item["documented"] for item in required),
-        len(required),
-    ),
-    "access_governance": governance("access"),
-    "core_loop_governance": governance("core_loop"),
-    "permission_control": governance("permission"),
-    "state_recovery": ratio(sum(item["present"] for item in group_items("state")), len(group_items("state"))),
-    "extension_governance": governance("extension"),
-    "observability": ratio(
-        sum(item["present"] and item["governed"] for item in group_items("observability")),
-        len(group_items("observability")),
-    ),
-    "eval_readiness": ratio(
-        sum(item["present"] and item["governed"] for item in group_items("eval")),
-        len(group_items("eval")),
-    ),
-    "high_risk_governance": ratio(sum(item["governed"] for item in risk_items), len(risk_items)),
-}
-
-root_causes = defaultdict(list)
-for item in components:
-    name = item["name"]
-    if item["present"] and not item["documented"]:
-        root_causes[name].append("undocumented_architecture_claim")
-    if item["required"] and not item["present"]:
-        root_causes[name].append("required_component_missing")
-    if item["required"] and item["present"] and not item["governed"]:
-        root_causes[name].append("required_component_not_governed")
-    if item["risk"] and not item["governed"]:
-        root_causes[name].append("high_risk_surface_ungoverned")
-
-thresholds = {
-    "public_evidence": 1.0,
-    "required_module_coverage": 0.9,
-    "access_governance": 0.8,
-    "core_loop_governance": 0.8,
-    "permission_control": 0.8,
-    "state_recovery": 0.9,
-    "extension_governance": 0.8,
-    "observability": 0.8,
-    "eval_readiness": 0.8,
-    "high_risk_governance": 1.0,
-}
-failed_gates = [
-    name
-    for name, threshold in thresholds.items()
-    if not at_least(metrics[name], threshold)
-]
-not_applicable_metrics = [name for name, value in metrics.items() if value is None]
-
-assert ratio(0, 0) is None
-assert not at_least(None, 0.8)
-
-print(f"metrics={metrics}")
-print(f"not_applicable_metrics={not_applicable_metrics}")
-print(f"root_causes={dict(root_causes)}")
-print(f"failed_gates={failed_gates}")
-print(f"claude_code_architecture_gate_pass={not failed_gates}")
-```
-
-一组典型输出：
-
-```text
-metrics={'public_evidence': 0.97, 'required_module_coverage': 0.75, 'access_governance': 0.4, 'core_loop_governance': 0.625, 'permission_control': 0.4, 'state_recovery': 0.75, 'extension_governance': 0.0, 'observability': 0.5, 'eval_readiness': 0.0, 'high_risk_governance': 0.0}
-not_applicable_metrics=[]
-root_causes={'terminal': ['required_component_not_governed', 'high_risk_surface_ungoverned'], 'workspace_files': ['required_component_not_governed', 'high_risk_surface_ungoverned'], 'project_memory': ['required_component_not_governed', 'high_risk_surface_ungoverned'], 'context_builder': ['required_component_not_governed', 'high_risk_surface_ungoverned'], 'execution_engine': ['required_component_not_governed', 'high_risk_surface_ungoverned'], 'response_renderer': ['required_component_not_governed'], 'tool_allowlist': ['required_component_not_governed'], 'sandbox': ['required_component_missing', 'high_risk_surface_ungoverned'], 'network_control': ['required_component_not_governed', 'high_risk_surface_ungoverned'], 'auto_memory_scope': ['required_component_missing', 'high_risk_surface_ungoverned'], 'hooks': ['required_component_not_governed', 'high_risk_surface_ungoverned'], 'mcp_allowlist': ['required_component_missing'], 'skills_extensions': ['required_component_not_governed', 'high_risk_surface_ungoverned'], 'trace_logger': ['required_component_missing'], 'trace_export': ['required_component_missing'], 'regression_cases': ['required_component_missing'], 'safety_metrics': ['required_component_missing'], 'cost_metrics': ['required_component_missing'], 'internal_planner_kernel': ['undocumented_architecture_claim']}
-failed_gates=['public_evidence', 'required_module_coverage', 'access_governance', 'core_loop_governance', 'permission_control', 'state_recovery', 'extension_governance', 'observability', 'eval_readiness', 'high_risk_governance']
-claude_code_architecture_gate_pass=False
-```
-
-这里的失败是刻意设计的。它提醒你：如果一份架构分析声称存在未公开内部 planner，或者只写“有 hooks、MCP、memory、terminal、sandbox”但没有治理指标、权限边界、trace/export 和回归评估准备度，就不应该通过架构审计。
-
-## 11.19 面试题
-
-### 题 1：如何设计 Claude Code 类 coding agent 的高层架构？
-
-参考回答：
-
-```text
-我会把它拆成 CLI/UI 层、session manager、context builder、model adapter、action parser、tool registry、execution engine、permission system、trace logger 和 response renderer。用户输入先进入 session，context builder 组织任务、规则、文件片段和工具结果，模型输出结构化动作，runtime 校验权限后执行工具，再把 observation 送回模型，循环直到任务完成或阻塞。核心不是简单调用模型，而是安全、可观测、可恢复地把模型接入代码库、文件系统和终端。
-```
-
-### 题 2：为什么 coding agent 需要权限系统？
-
-参考回答：
-
-```text
-因为 coding agent 会操作真实代码库和终端。写文件、删除文件、运行命令、访问网络、安装依赖、执行 git 操作都可能有副作用。权限系统要根据动作类型、路径、命令风险和用户策略决定是否允许或确认。只靠 prompt 约束不够，因为模型可能被仓库内容或外部文本注入诱导，真正的边界必须在 runtime 层实现。
-```
-
-### 题 3：Claude Code 类系统的上下文构造难点是什么？
-
-参考回答：
-
-```text
-难点是代码库、日志和会话历史都可能远超上下文窗口，而且文件会被 agent 或用户持续修改。Context builder 需要保留用户目标、最新指令、当前计划、关键文件片段、测试失败摘要和当前 diff，同时压缩旧历史和长日志。不能把所有内容都塞进去，否则会浪费窗口并降低模型注意力。
-```
-
-### 题 4：终端型 coding agent 和 IDE 型 coding agent 有什么差异？
-
-参考回答：
-
-```text
-终端型 agent 更接近真实工程环境，适合跑测试、构建、git、容器和远程服务器任务，但 UI 展示有限，权限和日志管理要求更高。IDE 型 agent 更适合局部代码编辑、inline diff 和可视化交互，但也需要同样的工具、上下文、权限和 trace 体系。两者产品形态不同，底层 harness 问题类似。
-```
-
-## 11.20 小练习
-
-1. 画出一个 Claude Code 类系统从用户输入到工具执行再到最终回答的链路图。
-2. 为 `run_command` 工具设计一个权限分级策略，至少区分只读命令、测试命令、安装命令、删除命令和 git 高风险命令。
-3. 设计一个 trace schema，记录一次 coding agent 修改文件并运行测试的全过程。
-4. 假设 agent 覆盖了用户刚刚手动修改的文件，分析 harness 应该如何预防和恢复。
-5. 设计一个 evaluation task，用于评估 Claude Code 类 agent 是否能修复一个真实单测失败。
-
-## 11.21 本章总结
-
-本章用 harness 视角分析了 Claude Code 类终端型 coding agent。
-
-核心结论：
-
-1. Claude Code 类产品的本质是把模型安全接入真实代码库和终端的 agent harness。
-2. 终端型 coding agent 的优势是贴近真实工程环境，挑战是权限、日志、diff 和上下文管理更复杂。
-3. 高层架构通常包括 CLI/UI、session manager、context builder、model adapter、tool registry、execution engine、permission system 和 trace logger。
-4. 用户命令、模型工具调用和 shell 命令必须分层处理。
-5. 文件编辑要避免覆盖并发修改，终端执行要有权限、超时和输出摘要。
-6. Trace 和 session state 是长任务恢复、失败复盘和 evaluation harness 的基础。
-7. 面试中分析 Claude Code 类系统，应强调 harness、工具、权限、上下文和闭环验证，而不是只说“调用大模型写代码”。
-
-下一章会分析 OpenCode 这类开源 coding agent，从开放配置、工具抽象、权限规则和多模型适配角度继续理解 agent runtime。
+带着这套方法继续看第十二章时，可以进一步检查一个开源 Agent 的配置、工具、扩展和权限实现；到第十三章再对齐产品表面、执行位置、状态恢复、控制边界和评估证据，避免用不同系统各自宣传材料拼成一个虚假的统一排名。

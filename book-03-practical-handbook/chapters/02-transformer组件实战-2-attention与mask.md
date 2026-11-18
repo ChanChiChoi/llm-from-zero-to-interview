@@ -412,7 +412,7 @@ cross-attention 更能检验是否把形状想清楚。若两个 decoder query �
 
 多头结构提供多个可学习的投影空间，但没有硬性规定第 1 个 head 必须看语法、第 2 个必须看长距离依赖。若要判断某个 head 对模型是否有作用，可以固定输入做 head 消融（head ablation），观察任务指标和输出变化，并控制随机性；只可视化某一层的注意力热图不能证明这个 head 是模型决策的唯一原因。
 
-分组查询注意力（grouped-query attention，GQA）让多个 query head 共享较少的 key/value head；多查询注意力（multi-query attention，MQA）可看作 KV head 数更少的一类配置。若 $H_q=8,H_{kv}=2$，每组四个 query head 共享一组 key/value 表示，但 query score 仍按 query head 分开计算。它改变了 Q 与 KV head 数量之间的约定，不能直接套用本节假设 Q/K/V head 数相同的实现；实现时要明确每个 query head 对应哪个 KV head。第 6 章会用 cache shape 和容量例子说明它们对推理的影响，见[KV Cache 篇](06-推理优化实战-1-kv-cache.md)。
+分组查询注意力（grouped-query attention，GQA）让多个 query head 共享较少的 key/value head；多查询注意力（multi-query attention，MQA）可看作 KV head 数更少的一类配置。若 $H_q=8,H_{kv}=2$，每组四个 query head 共享一组 key/value 表示，但 query score 仍按 query head 分开计算。它改变了 Q 与 KV head 数量之间的约定，不能直接套用本节假设 Q/K/V head 数相同的实现；实现时要明确每个 query head 对应哪个 KV head。第 6 章会用 cache shape 和容量例子说明它们对推理的影响，见[KV Cache 篇](06-推理优化实战-1-缓存延迟与调度.md)。
 
 ### 2.3.6 针对实现的局部测试
 
@@ -670,7 +670,7 @@ padding 的 key mask 与 query 是否有效要分别表达。右 padding 序列 
 
 若 batch 内每条序列长度相同且没有无效位置，通常只需广播一份 causal mask；不要为每个样本复制完整矩阵。反之，若使用不同长度、prefix 目标或 packed segments，广播本身不会自动表达这些差异，需要把每条样本的边界纳入 mask。检查 mask 时同时观察其 dtype、device、广播形状和 True/False 语义，避免数据搬运或隐式转换掩盖问题。
 
-现在，注意力计算的输入、权重、可见范围和输出已经连成一条路径：Q/K 决定怎样匹配，掩码规定允许读取哪些位置，权重再把 V 汇聚成新的上下文表示。多头输出合并后仍回到 `[B,T,D]`；下一篇会解释它怎样经残差、归一化和前馈层成为可堆叠的 Transformer block。
+现在，注意力计算的输入、权重、可见范围和输出已经连成一条路径：Q/K 决定怎样匹配，掩码规定允许读取哪些位置，权重再把 V 汇聚成新的上下文表示。多头输出合并后仍回到 `[B,T,D]`；下一部分会解释它怎样经残差、归一化和前馈层成为可堆叠的 Transformer block。
 
 ## 继续阅读与资料边界
 

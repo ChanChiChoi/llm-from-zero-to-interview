@@ -32,7 +32,7 @@
 | BPE、Unigram、字节覆盖如何工作，怎样比较 tokenizer 指标 | 本章保留接口影响和训练预算所需的背景 | [第二册第三章](../../book-02-advanced-100/chapters/03-tokenization数据与预训练进阶.md) |
 | 数据采集、筛选、去重、配比与治理 | 本章约定进入训练前后的序列和版本字段 | [第九册数据工程](../../book-09-data-engineering/简介.md) |
 | SFT、偏好优化、RL 或多模态任务怎样训练 | 本章说明记录结构、标签和输入边界 | [本册第十一章](11-后训练与对齐训练.md)、[第十二章](12-多模态训练.md)、[第十五章](15-领域专家sft与rl.md)、[第十六章](16-rlvr与可验证奖励.md)、[第十七章](17-on-policy-distillation.md)、[第十八章](18-deepseek-v4领域专家与统一蒸馏.md) |
-| 如何实现完整微调项目 | 本章给出协议清单和回归样例 | [第三册 Hugging Face 微调实战](../../book-03-practical-handbook/chapters/04-huggingface微调实战.md)、[偏好优化实战](../../book-03-practical-handbook/chapters/05-偏好优化实战.md) |
+| 如何实现完整微调项目 | 本章给出协议清单和回归样例 | 第三册 [基线与全参数 SFT](../../book-03-practical-handbook/chapters/04-huggingface微调实战-1-基线与全参数sft.md)、[LoRA 与 QLoRA](../../book-03-practical-handbook/chapters/04-huggingface微调实战-2-lora与qlora.md)、[评估与报告](../../book-03-practical-handbook/chapters/04-huggingface微调实战-3-评估与报告.md)；[偏好优化实战](../../book-03-practical-handbook/chapters/05-偏好优化实战.md) |
 | 格式错位如何定位和复发预防 | 本章给出契约检查项 | [第十九册 Tokenizer 与格式故障手册](../../book-19-practitioner-playbook/chapters/03-tokenizer与格式坑.md) |
 | 图像、音频、视频的任务与表示方法 | 本章只明确训练记录里的媒体边界、占位符和数量账本 | [第十五册多模态专题](../../book-15-multimodal-generative-models/简介.md) |
 

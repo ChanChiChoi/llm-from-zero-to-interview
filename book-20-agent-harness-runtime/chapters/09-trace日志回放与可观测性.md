@@ -1,1246 +1,267 @@
 # 第九章：Trace、日志、回放与可观测性
 
-## 0. 本讲范围与资料
+Agent 的最终回答只能说明它最后说了什么，不能说明它看过哪些文件、执行过什么、改动是否落盘，也不能说明一次失败发生在哪一步。要回答这些问题，运行时需要把一次任务中的关键动作、状态变化和外部结果连成可以追查的证据链。
 
-本章参考 OpenAI Agents SDK 中 tracing、spans、processors、guardrails 和 workflow tracing 的公开资料，OpenTelemetry 关于 traces、spans、events、attributes、status、logs / metrics 关系的公开文档，W3C Trace Context 关于 `traceparent`、`tracestate` 和跨服务上下文传播的标准口径，以及 LangSmith 关于 agent trace、调试、评估、监控和从生产 trace 构建数据集的公开说明。
+本章从一项合成的 Coding Agent 任务出发，说明追踪（Trace）、跨度（span）、事件（event）、日志（log）、指标（metric）和制品（artifact）各自记录什么，怎样用记录定位失败，回放（replay）能复现到什么程度，以及怎样在调试价值、隐私、成本和安全之间划定边界。这里的记录样例是教学构造，不是一次真实运行的日志。
 
-本章聚焦防御性的 Agent trace、日志、回放和可观测性设计：如何让一次 agent run 可解释、可复盘、可审计、可导出为评估样本，同时控制隐私、secret、artifact、保留周期和访问权限风险。正文和 demo 不提供绕过日志、隐藏高风险行为、规避审计、泄露敏感信息、篡改生产 trace 或攻击可观测性系统的方法。
+## 9.1 从“任务失败了”追到“哪一步出了问题”
 
-## 9.1 本章目标
+假设 Agent 收到一项很小的任务：修复个人资料页的显示名清理逻辑，只改显示名，不碰邮箱字段，也不发布代码。工作区起始内容标为 `rev-17`（教学用修订标记，不是真实提交哈希），当前验收条件是显示名相关测试通过，diff 只涉及目标文件。
 
-Agent 是多步系统。它会构造上下文、调用模型、解析动作、执行工具、修改文件、运行命令、处理权限、失败重试、最终总结。任何一步都可能出错。如果没有 trace，你只能看到“agent 失败了”，却不知道它为什么失败、看到了什么、调用了什么、改了什么、哪里判断错了。
+任务运行时可能发生这样的过程：Agent 读取目标文件和测试；提出一个补丁；运行时按策略允许在隔离工作区应用补丁；测试有一项失败，命令输出被截断；Agent 根据失败回执修正补丁；下一轮测试通过。与此同时，仓库中的一段不可信说明可能诱导 Agent 读取 `.env` 并外传，或要求执行 Git push。运行时会拒绝读取 Secret，并把 push 留在待审批状态，不执行外部副作用。
 
-本章讨论运行时可观测性：如何记录 trace、如何设计日志、如何支持 replay、如何做 debug、安全审计和质量监控。下一章会讲 evaluation harness，本章重点是一次真实 agent 执行过程如何被记录、复现和观察。
+如果最后只保存“任务完成”，就无法知道测试是否真的运行、第一次失败的输出是否送回模型、`.env` 是否被读过，或者 push 是否发生。若只保存完整原始 prompt 和命令输出，又可能把私有代码、凭据和业务数据长期放进所有人都能访问的遥测系统。
 
-学完本章，你应该能回答：
+因此，trace 设计要回答两个具体问题：**哪些事实足以解释任务中的关键决定与副作用？哪些内容应该留在受限存储之外？** 接下来会用同一个合成任务回答它们。
 
-1. 为什么 agent runtime 必须有 trace。
-2. 一条完整 trace 应该记录哪些字段。
-3. Trace、log、metric、event、artifact 的区别是什么。
-4. Replay 如何帮助 debug、eval 和 regression test。
-5. 如何在可观测性和隐私安全之间取舍。
-6. 如何用 trace 分析 agent 失败原因。
-7. 面试中如何设计 agent 的日志回放系统。
+## 9.2 先分清 Trace、Span、Event、Log、Metric 和 Artifact
 
-## 9.2 为什么需要 Trace
+这些词描述的是不同的数据形态。把它们混成“日志”，常会造成两种问题：明明有文本，却找不到动作之间的因果关系；或者为了排查问题，把所有原始内容都写进一条记录。
 
-普通 LLM 调用通常是一问一答，记录 prompt 和 response 就能复盘大部分问题。
+| 对象 | 主要记录什么 | 在显示名任务中的例子 | 适合回答的问题 |
+| --- | --- | --- | --- |
+| Trace（追踪） | 一次运行中相关操作的因果和关联关系 | 一次 Agent run 从构建上下文到测试和最终报告 | 这次运行由哪些步骤构成？ |
+| Span（跨度） | 有开始、结束和状态的工作单元 | `model.call`、`file.patch`、`test.run` | 哪个操作花了多久，在哪里出错？ |
+| Event（事件） | 某个时间点发生的结构化事实 | `permission.denied`、`approval.requested`、`output.truncated` | 某一刻发生了什么？ |
+| Log（日志） | 便于检索的细节记录，可与 trace/span 关联 | 某个测试进程返回退出码 1 | 这一操作具体返回了什么诊断信息？ |
+| Metric（指标） | 可按时间和有限维度聚合的数值 | 测试运行耗时分布、模型调用次数、权限拒绝计数 | 系统整体是否变慢或错误增多？ |
+| Artifact（制品） | 较大或需要独立权限管理的内容 | 文件 diff、完整测试输出、环境快照、评估报告 | 如何在授权后检查完整材料？ |
 
-Agent 不一样。Agent 的结果来自一条执行链：
+OpenTelemetry 把 trace 组织成有父子关系的 spans；span 表示持续一段时间的操作，span event 则表示操作期间某个时间点的结构化事件。异步任务有时无法自然地嵌在同一条父子树中，可以用 span link 表示关联的因果关系。[OpenTelemetry Trace 概念文档](https://opentelemetry.io/docs/concepts/signals/traces/) 对这些对象作了区分。
 
-```text
-用户任务
--> context builder
--> 模型输出
--> action parser
--> permission decision
--> tool execution
--> observation
--> state update
--> 下一轮
-```
+Trace 不是必须严格按一条直线排列的“步骤列表”。并行工具调用、后台任务或跨服务操作可能同时发生；时间戳说明先后，父子关系说明嵌套，link 说明跨树关联。读者不要只按列表顺序推断因果。
 
-如果只记录最终回答，无法回答：
+日志和事件也不相同。事件通常有稳定名称和字段，说明状态在某一时刻发生了变化；日志可以更详细，也可能是面向人工阅读的文字。事件和日志都可以带 `trace_id`、`span_id`，让使用者从一个错误记录跳回对应操作。
 
-1. 模型是否看到了正确文件。
-2. 工具是否选对。
-3. 参数是否构造正确。
-4. 权限是否被正确判断。
-5. 命令是否真实执行。
-6. 测试失败信息是否被压缩错。
-7. 文件 diff 是否符合预期。
-8. 哪一轮开始偏离目标。
+Artifact 也不等于“把文件存进 trace”。trace 可以保留稳定的引用、哈希、版本和访问策略；大对象则由 artifact store 保存。这样既减少遥测体积，也能为 diff、完整输出或数据样本施加单独的访问控制和保留期限。
 
-Trace 的核心价值：让 agent 行为可解释、可复现、可审计、可评估。
+## 9.3 用一个时间线追踪任务、状态与副作用
 
-面试表达：
+先为样例定义几个对象：`task-42` 表示“修好显示名”这一持久任务；`session-7` 表示用户在产品中的一次会话范围；`run-01` 是这次具体的执行尝试；`trace-T1` 是运行记录的关联标识；`span-A`、`span-B` 等标识各项持续操作。它们的生命周期可能不同，具体含义由系统设计约定，不能把这些 ID 当成同一概念。
 
-```text
-Agent 是多步系统，最终结果只是最后一层。Trace 要记录每一轮的上下文、模型输出、工具调用、权限决策、工具结果、文件 diff、命令输出、错误和恢复。这样失败时才能定位是上下文缺失、模型判断错、工具失败、权限拦截还是执行环境问题。
-```
+下表是一份教学构造的时间线。`trace-T1` 是便于阅读的内部示例标记，不是 W3C `traceparent` 值。摘要只写排查所需的事实，不放完整 prompt、文件内容或 Secret。
 
-## 9.3 Trace、Log、Metric、Event、Artifact 的区别
+| 相对时间 | Span / 事件 | 关联 | 记录的事实 | 结果或后续 |
+| --- | --- | --- | --- | --- |
+| 0 ms | `agent.run` 开始 | 根 span | `task-42`、`session-7`、`run-01`、代码修订 `rev-17`、运行时版本 | 运行开始 |
+| 8 ms | `context.build` | `agent.run` 的子 span | 选入显示名实现和目标测试；未记录文件原文 | 上下文构建完成 |
+| 35 ms | `model.call` | `agent.run` 的子 span | Provider/model、prompt 模板版本、调用状态；输出摘要为“提出目标文件补丁” | 收到动作提议 |
+| 39 ms | `permission.allowed` | `model.call` 之后的事件 | 规范化动作、目标路径、策略版本和允许范围 | 允许应用局部补丁 |
+| 42 ms | `file.patch` | `agent.run` 的子 span | `rev-17 → rev-18`，diff artifact 引用和摘要哈希 | 第一次补丁已落盘 |
+| 90 ms | `test.run` | `agent.run` 的子 span | 目标测试集版本、退出码 `1`、`4/5` 项通过、输出被截断标记、完整输出引用 | 一项测试失败 |
+| 91 ms | `artifact.created` | `test.run` 内的事件 | 完整输出保存在受限 artifact store；trace 只记录引用、摘要哈希和截断状态 | 可授权查阅原始诊断 |
+| 130 ms | `model.call` | `agent.run` 的子 span | 模型获得了失败摘要和 artifact 可用提示；原始输出未自动加入普通 trace | 提出修正方案 |
+| 146 ms | `file.patch` | `agent.run` 的子 span | `rev-18 → rev-19`，仍只改显示名目标文件 | 第二次补丁已落盘 |
+| 200 ms | `test.run` | `agent.run` 的子 span | 退出码 `0`、`5/5` 项通过、验收器版本和结果引用 | 局部验证通过 |
+| 205 ms | `permission.denied` | `agent.run` 内的事件 | 对 `.env` 的读取请求被拒绝；执行器未收到读取任务 | 无文件读取副作用 |
+| 207 ms | `approval.requested` | `agent.run` 内的事件 | 记录 push 操作的风险和请求范围，不记录凭据 | 没有确认，push 未执行 |
+| 220 ms | `agent.run` 结束 | 根 span | 任务状态、验证器结果、最终 diff 引用 | 报告局部修复已验证，未发布 |
 
-这些概念容易混用。
+这个表能支持几项具体判断：第一次测试确实执行过；失败发生在 `rev-18`；完整输出存在，但 trace 只暴露引用；第二次测试在 `rev-19` 上通过；敏感文件访问被拒绝，且拒绝结果与“没有发生读取”对应；push 没有因为用户未审批而执行。
 
-Trace：
+若系统只记录 `permission.denied`，却无法知道拒绝发生在执行前还是执行后，读者就不能判断副作用是否发生。因此，重要安全事件要把**请求、策略决定、执行器接收、执行结果**串起来。不要用模型的自述代替执行器回执。
 
-```text
-一次任务从开始到结束的完整链路记录。
-```
+同样，测试进程退出码 `0` 只说明该进程按自己的接口报告成功。任务状态还要结合验收范围、测试版本、diff 和用户要求判断；不能看到一个成功状态字段就直接宣称任务整体正确。
 
-它强调因果关系和时序。
+## 9.4 Span 粒度：保留可解释的操作边界
 
-Log：
+Span 粒度太粗，会把模型选择、权限判断和工具执行混成一个看不出责任归属的大步骤；粒度太细，则会制造大量几乎无法检索的遥测，并扩大内容暴露面。
 
-```text
-系统在某个时间点输出的文本或结构化日志。
-```
+在 Agent runtime 中，通常值得单独计时或可能独立失败的操作可以成为 span，例如上下文构建、模型请求、工具调用、补丁应用、命令执行和验收器调用。某些瞬时状态变化更适合放在 span event，例如权限拒绝、超时被请求、命令输出被截断或用户确认到达。具体命名要绑定项目的语义约定，不存在对所有 Agent 都通用的 span 清单。
 
-它强调事件详情。
+可以用一个实用问题判断粒度：**排查故障时，我是否需要单独定位这个操作的耗时、结果、错误或责任边界？** 如果需要，就给它一个可查询的操作边界；如果只需要记录某一时刻的决定或状态变化，就增加结构化事件。不要把每个 token、每次局部字符串拼接或每个没有独立含义的内部函数都变成 span。
 
-Metric：
+Span 记录开始与结束时间、父 span、操作名和状态；属性记录稳定的低敏元数据；event 记录时间点有意义的事实；link 用于表示跨 trace 的因果连接。长输入、命令输出、文件 diff 不应被复制进每个 span。OpenTelemetry 的 span 语义允许 attributes、events、links 和 status 配合描述操作，具体字段仍由应用和语义约定决定。
 
-```text
-可聚合的数值指标，例如成功率、错误率、耗时、token 成本。
-```
+## 9.5 不要混淆 Span 状态、工具结果和 Task 状态
 
-它强调统计和监控。
+一次 Agent run 至少涉及三种不同的状态。
 
-Event：
+| 状态层 | 表示什么 | 示例 | 不能据此推出什么 |
+| --- | --- | --- | --- |
+| Span 状态 | 当前这个操作是否报告错误 | 第一次 `test.run` 以失败退出；第二次 `test.run` 成功结束 | 整个任务最终失败或成功 |
+| 工具/外部操作状态 | 执行器或下游服务确认了什么 | 文件补丁应用回执、Shell 退出码、HTTP 请求是否完成 | 用户目标已满足 |
+| Task 状态 | 这项持久任务现在处于什么阶段 | 正在恢复、等待审批、已完成、失败或结果未知 | 某一个 span 的状态就是 task 状态 |
 
-```text
-一个离散事件，例如 tool_called、permission_denied、command_timeout。
-```
+OpenTelemetry span 状态包括 `Unset`、`Error` 和 `Ok`。`Unset` 是默认状态，表示没有显式标记错误；`Error` 表示对应操作遇到错误；`Ok` 用于显式标记无错误。它们描述 span，而不是 Coding Agent 的业务任务生命周期。[OpenTelemetry Span Status 文档](https://opentelemetry.io/docs/concepts/signals/traces/) 说明了这一语义。
 
-它强调状态变化。
+例如，第一次测试 span 可以是 `Error`，但 Agent 随后根据失败回执修补代码，整个 task 最终仍可能完成。反过来，一个工具 span 也可能正常结束，却执行了错误目标；此时操作没有运行时错误，但任务验收仍失败。
 
-Artifact：
+如果工具超时后外部状态无法确认，记录状态应是 `unknown` 或产品明确定义的等效状态，并附上后续核对动作。不要把“没有收到回复”直接改写成“操作失败”，再盲目重试造成重复副作用。这一点与[第八章的执行边界](08-权限模型与安全沙箱.md)相接，也会在长任务恢复章节继续展开。
 
-```text
-执行过程中产生的大对象，例如完整命令输出、文件 diff、截图、生成文件、评估报告。
-```
+## 9.6 设计一份够用的 Trace 记录
 
-它强调可引用的大内容。
-
-设计上可以这样分：
-
-1. Trace 串起完整过程。
-2. Event 构成 trace 的节点。
-3. Log 保存细节。
-4. Metric 负责聚合统计。
-5. Artifact 保存大对象。
-
-## 9.4 一条完整 Trace 应记录什么
-
-一条完整 agent trace 应记录：
-
-任务级信息：
-
-1. trace_id。
-2. session_id。
-3. task_id。
-4. 用户输入。
-5. 用户配置和权限策略。
-6. workspace 信息。
-7. 开始时间和结束时间。
-8. 最终状态：success、failed、cancelled。
-
-模型级信息：
-
-1. 模型名称和版本。
-2. 模型参数。
-3. prompt/template 版本。
-4. 每轮上下文摘要。
-5. 模型输出。
-6. token 用量。
-7. 模型 API 错误和重试。
-
-工具级信息：
-
-1. 工具名和版本。
-2. 工具输入参数。
-3. 权限决策。
-4. 用户确认结果。
-5. 工具输出摘要。
-6. 错误类型。
-7. 耗时。
-
-文件和命令信息：
-
-1. 读取了哪些文件。
-2. 修改了哪些文件。
-3. 文件 diff。
-4. 运行了哪些命令。
-5. stdout/stderr 摘要。
-6. exit code。
-7. 是否截断和脱敏。
-
-状态信息：
-
-1. task state 变化。
-2. plan 更新。
-3. error handler 决策。
-4. retry 次数。
-5. rollback 或 recovery 行为。
-
-安全信息：
-
-1. 权限请求。
-2. 权限拒绝。
-3. prompt injection 迹象。
-4. secret masking。
-5. 网络访问。
-6. 高风险命令拦截。
-
-## 9.5 Trace Schema 示例
-
-一个简化 trace schema：
-
-```text
-trace_id: tr_123
-session_id: sess_456
-task:
-  user_request: fix empty password login 500 and add test
-  status: success
-  started_at: ...
-  ended_at: ...
-
-environment:
-  workspace_root: /workspace/app
-  git_commit: abc123
-  branch: feature/auth-fix
-
-steps:
-  - step_id: 1
-    type: model_call
-    model: gpt-x
-    prompt_version: pv12
-    context_summary: user goal + auth files + plan
-    output_summary: call search_code for login
-
-  - step_id: 2
-    type: tool_call
-    tool: search_code
-    tool_version: v1
-    input: { pattern: "login" }
-    output_summary: 3 matches
-    status: success
-
-  - step_id: 3
-    type: file_patch
-    files: [src/auth/login.ts]
-    diff_ref: artifact://diff-789
-    status: success
-
-  - step_id: 4
-    type: command
-    command: npm test -- auth
-    exit_code: 0
-    duration_ms: 4321
-    output_ref: artifact://cmd-456
-```
-
-实际系统可以用 JSON、protobuf、数据库表或事件流。关键是字段稳定、可查询、可回放。
-
-## 9.6 Step 粒度如何设计
-
-Trace 粒度太粗，无法 debug；太细，成本和隐私风险上升。
-
-常见 step 粒度：
-
-1. model_call。
-2. tool_call。
-3. permission_check。
-4. file_read。
-5. file_patch。
-6. command_execution。
-7. state_update。
-8. user_confirmation。
-9. error_recovery。
-10. final_answer。
+没有唯一正确的 schema。记录哪些字段，要从本系统要支持的排障、恢复、安全审计和评估问题反推。一个实用的起点如下。
 
-每个 step 应包含：
+| 记录层 | 建议保留的低敏事实 | 根据目的单独管理的内容 |
+| --- | --- | --- |
+| Run 身份 | trace、session、task、attempt 标识；开始/结束；运行时与部署版本；最终状态 | 用户账号、租户等身份信息应使用受控关联键，不直接当作所有人可见字段 |
+| Span 关系 | span ID、parent ID、操作类型、时间、持续时间、状态和错误类型 | prompt 正文、工具完整参数或原始模型响应 |
+| Model 调用 | Provider/model 标识、公开版本或解析后的 revision、参数配置版本、调用状态、token 用量（如果可得） | 完整输入上下文、输出全文、隐藏的内部思维内容 |
+| 工具与权限 | 工具 ID/版本、规范化目标、策略版本、allow/ask/deny 结果、确认 ID（如有）、执行回执 | Secret 原文、令牌、未经授权的完整参数内容 |
+| 文件与命令 | 仓库 revision、目标路径分类、操作类型、退出码、截断与脱敏标志、验证器结果 | 完整 diff、标准输出、错误栈或私有文件内容 |
+| 错误与恢复 | 错误类别、首个失败 span、重试/取消/恢复决定、未知状态与核对结果 | 可能含凭据、路径或客户数据的原始异常文本 |
+| Artifact 引用 | URI/存储键、内容摘要哈希、创建时间、类型、版本、ACL/保留策略标识 | 大文件、完整命令输出、数据样本、截图和导出报告 |
 
-1. step_id。
-2. parent_step_id 或 previous_step_id。
-3. timestamp。
-4. type。
-5. input summary。
-6. output summary。
-7. status。
-8. error_type。
-9. artifact refs。
+这张表是设计起点，不是每项字段都必须记录，也不是所有字段都应该向所有使用者展示。对于每个字段，先问：它支持什么排查或验收问题？谁可以读？保存多久？空缺时会导致什么不可解释的边界？如果没有明确用途，就不应仅为“以后可能有用”而采集敏感内容。
 
-不要把所有内容都直接塞在 step 里。大文件、长日志、完整 prompt 可以放 artifact，再用 ref 引用。
+版本上下文决定复现边界：至少要能识别模型/Provider、prompt 或工作流配置、工具实现、权限策略、代码 revision、依赖/执行环境与验收器版本。字段可以是可追溯的版本号或受控快照引用，不等于把所有配置和密钥原文复制进 trace。
 
-## 9.7 Replay 是什么
+记录工具输入输出时，优先保留规范化动作、字段摘要、参数来源、执行结果类型和 Artifact 引用。若必须查看精确参数，应通过受控的二级访问流程读取独立保存的数据。JSON、数据库表、事件流和 OpenTelemetry 都可以承载这些信息；格式选择不代替 schema 的语义说明。
 
-Replay 是用 trace 复现一次 agent 执行过程。
+## 9.7 用 Trace 按证据顺序排查失败
 
-Replay 可以有不同层级。
+面对“Agent 修复失败”这句话，先不要从模型回答猜原因，而是沿实际运行顺序找第一处与任务目标不一致的事实。仍以 `task-42` 为例：
 
-只读 replay：
+1. **确认任务边界。** 运行开始事件说明目标文件是显示名实现，验收条件是目标测试通过并且 diff 只触及指定范围。session 或旧记忆不能覆盖这次用户限制。
+2. **确认上下文输入。** `context.build` span 记录了选入的文件与测试版本，以及是否截断。若实现文件根本没进入上下文，后续模型决策可能从错误前提开始。
+3. **确认模型提议与运行时行动分开。** `model.call` 的输出摘要说明模型建议了什么；`permission.allowed` 和 `file.patch` 回执说明运行时是否批准并真正写入。模型输出不是执行证据。
+4. **找到第一次失败。** `test.run` 显示退出码 1、4/5 项通过。它的 Artifact 标志显示原始输出被截断，但仍有独立引用。
+5. **读取所需证据。** 有授权的排查者查看完整测试 Artifact，定位到 `None` 输入分支未被覆盖。普通 trace 页面仍只显示经过审查的摘要。
+6. **检查反馈是否被模型使用。** 后续 `context.build` 记录了失败目标、退出码、截断标志和 Artifact 引用。第二次 `model.call` 因此是在已知失败条件下提出修正。
+7. **确认改动没有漂移。** 两次补丁分别标记 `rev-17 → rev-18` 和 `rev-18 → rev-19`。最终 diff 摘要仍只涉及显示名目标文件。
+8. **核对独立验收。** 第二次测试回执是 `5/5`，并链接到目标测试集和验收器版本。只有这项证据与最终状态一起支持“局部验证通过”。
+9. **核对拒绝和未执行操作。** `.env` 的拒绝发生在 executor 派发之前；push 只生成了待审批请求，没有授权或执行事件。于是可以报告“未读取 `.env`，未 push”，而不是依据模型答复作推断。
 
-1. 重放 trace 时间线。
-2. 展示模型输入输出。
-3. 展示工具调用和结果。
-4. 不重新执行任何动作。
+这一过程将“模型判断错误”“工具执行失败”“验收失败”“权限拦截”和“外部状态未知”分成不同故障类别。trace 让人找证据，但不自动给出 root cause。root cause 通常是调查者根据最早偏离点、执行回执和环境反馈作出的判断，应与原始观测分栏保存，并保留归因者或标签来源。
 
-模拟 replay：
+## 9.8 Replay 有几个层级，不要把查看历史说成重跑
 
-1. 使用 trace 中记录的工具结果。
-2. 重新调用模型或不同模型。
-3. 比较新旧输出。
-4. 不触碰真实环境。
+“Replay（回放）”容易让人误以为把历史记录再跑一遍就会得到同样结果。实际至少要区分三种用途。
 
-真实 replay：
+| 模式 | 做什么 | 外部副作用 | 能回答什么 | 主要限制 |
+| --- | --- | --- | --- | --- |
+| 只读回放 | 展示 spans、events、状态和授权后的 Artifacts | 不发起模型、工具或远程请求 | 当时记录了什么，时间线怎样发展？ | 没记录的输入不能恢复，摘要不能替代原文 |
+| 固定回执模拟 | 把 trace 中存下的模型输出与工具回执作为 fixture 再输入运行时 | 应禁用真实外部写入；测试环境的本地状态可按需重建 | parser、状态机和恢复逻辑如何处理同一组回执？ | 不检验真实模型或外部服务当前行为 |
+| 隔离重跑 | 在克隆环境中重新运行代码、模型或工具，比较新结果 | 只允许在明确受控的工作区和副作用边界内发生 | 环境或版本变化后，任务结果是否发生变化？ | 非确定性、模型别名、依赖和外部状态可能造成不同结果 |
 
-1. 重新初始化环境。
-2. 重新执行工具和命令。
-3. 用于 benchmark 或 regression。
-4. 风险更高，需要 sandbox。
+固定回执模拟与隔离重跑不是一回事。前者重用已记录的输出，主要检查 orchestration、parser 和状态转换；后者会重新调用某些组件，输入或环境都可能改变，所以不能承诺结果逐字一致。
 
-Replay 的价值：
+如果目标只是检查回执解析，优先用固定回执模拟；如果目标是回归验证代码，就在初始文件版本、依赖和工具条件可控的隔离环境里重跑，并把真实联网和写外部系统默认关掉。若确实要验证外部系统集成，使用测试租户或专用 sandbox，并创建新的授权决定。
 
-1. Debug。
-2. Evaluation。
-3. Regression test。
-4. 安全审计。
-5. 模型/工具版本对比。
+## 9.9 回放前先检查它依赖什么
 
-## 9.8 Replay 的难点
+回放是否可行取决于测试目标，而不取决于 schema 里是否填了一个名为 `replay_ready` 的布尔值。按要回答的问题准备相应状态：
 
-Replay 听起来简单，实际很难。
+- 要看历史过程，需要有 spans、events、状态和访问所需的权限。
+- 要重放固定输入输出，需要捕获回执或能提供明确的 fixture，并记录截断与缺失。
+- 要重跑代码，需要恢复初始仓库 revision、未提交文件、依赖锁、执行镜像、命令工具版本和测试数据。
+- 要重跑模型，需要记录实际 Provider/model、请求参数、prompt/工具配置版本和 API 响应边界；即使这些都齐全，也不保证随机生成、模型更新或服务端实现会复现原答案。
+- 要重放带副作用操作，需要隔离环境、阻断或模拟出站连接、使用测试身份，并基于当前策略重新授权；历史审批和凭据不能直接拿来执行新动作。
+- 要判断文件和远程状态，需要确认 Artifact 引用仍存在、内容版本一致，且恢复动作不会覆盖用户在原运行之后的修改。
 
-难点包括：
+环境快照、工具回执和模型输入可能本身包含敏感内容。重放需求不自动赋予查看权限；应由需要的回放模式决定保存哪些快照、保留多久以及由谁能恢复。若缺少某项依赖，应明确降级为只读查看或报告“无法复现”，不要用残缺 trace 伪装成完整实验。
 
-1. 环境变化。
-2. 文件版本变化。
-3. 依赖版本变化。
-4. 工具版本变化。
-5. 模型输出非确定性。
-6. 时间、网络和外部 API 不可复现。
-7. Secret 和权限不可复用。
-8. 随机数和并发影响结果。
+## 9.10 面向排障的 Trace UI 应该展示什么
 
-提高可复现性需要记录：
+Trace UI 的目标是让人从任务结果回到证据，而不是把所有原始数据一次性展开。打开一条 trace 时，可以先显示任务 ID、运行尝试、最终状态、总体耗时、代码 revision、验证结果和首个失败 span；随后按父子关系展开模型调用、权限决定、工具执行、Artifact 和恢复操作。
 
-1. git commit。
-2. 工具版本。
-3. prompt 版本。
-4. 模型版本和参数。
-5. 环境配置。
-6. 依赖锁文件。
-7. 权限策略版本。
-8. sandbox 镜像版本。
+每条可见内容都要告诉使用者它是：模型提议、策略决定、实际执行回执、外部 Artifact，还是调查者添加的 root-cause 标签。若输出被截断，要显示截断标志、保存是否成功、引用是否仍可访问。对于权限或隔离结论，还要指出作出决定的策略版本、执行器回执及结果未知的部分。
 
-Replay 不是只保存最终答案，而是保存足够恢复执行环境的信息。
+全文搜索、diff 查看、命令输出下载、导出数据和打上评估标签都可能扩大访问面。UI 应使用与数据敏感等级相符的访问控制；Artifact 链接不能因为用户看得到 trace 页面就自动放宽权限。用户从 UI 删除 trace 时，也要说明依赖的 Artifact、索引和备份如何按产品策略处理。
 
-## 9.9 Debug Workflow：如何用 Trace 排查失败
+## 9.11 Trace 中首先要控制的是采集内容
 
-Agent 失败后，可以按 trace 分层排查。
+Trace 的最佳隐私策略不是事后把每个字段都替换成星号，而是先决定哪些内容根本不需要进入 telemetry。常见高风险内容包括用户 prompt、模型输入输出、函数参数、工具结果、私有代码、命令输出、环境变量、异常栈和导出的测试数据。
 
-第一，看任务理解。
+一个可实施的分层方式是：
 
-1. 用户目标是否被正确保留。
-2. 是否有误解或范围扩大。
-3. 最新用户指令是否覆盖旧计划。
+1. 默认记录稳定的结构化元数据，例如操作名、版本、状态、耗时、退出码、失败类型和经过分类的目标标识。
+2. 对文本内容优先保存经审核的短摘要、字段计数、内容哈希和 Artifact 引用；摘要应保留来源和截断标志，不能声称它等于原始输入。
+3. 只有具体排障或产品功能确实需要时，才按配置采集原始内容；记录前完成分类、Secret 检查和脱敏，并限制接收方、保留时间和导出范围。
+4. 对需要精确检查的长内容，放在权限独立、加密并可删除的 Artifact store 中；引用、哈希和读取审计保存在 trace 周边。
+5. 将运行日志、产品分析、训练数据和评估数据区分用途。某数据被采集用于排障，不代表它可以自动转作训练材料。
 
-第二，看上下文。
+正则表达式可以发现一部分 API key 和常见令牌格式，但不能证明所有秘密都被识别；路径、代码片段、客户字段和二进制数据也未必适合简单文本替换。需要为脱敏规则、失败处理和导出链路设计验证，并在任何一环无法按策略处理时阻止含敏感内容的数据继续发送。
 
-1. 关键文件是否进入上下文。
-2. 测试错误是否被正确摘要。
-3. 是否有过期 summary。
+保留周期要按数据类型分别确定：trace 索引、短期排障 Artifact、长期聚合指标和删除审计记录可能需要不同期限。加密、访问控制和保留期限都不能替代最小采集；无用的原始内容仍会扩大被误用、泄漏和误导后续分析的风险。OWASP 的 [Logging Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html) 也建议按用途排除或遮蔽敏感值，并保护日志的机密性、完整性和可用性。
 
-第三，看模型输出。
+## 9.12 脱敏必须发生在数据离开信任边界之前
 
-1. 是否选择正确工具。
-2. 是否构造正确参数。
-3. 是否幻觉不存在文件。
+“注册了脱敏处理器”不等于“后续导出只会收到脱敏内容”。这是具体 SDK 的处理顺序与失败语义问题，部署前必须检查实际版本、默认 exporter 和错误处理。
 
-第四，看工具执行。
+以 OpenAI Agents SDK 当前公开文档为例，`trace_include_sensitive_data` 在文档访问时默认是 `True`，可能让 generation/function spans 捕获模型和工具输入输出。`add_trace_processor()` 会附加处理器，但不会移除默认 OpenAI exporter；默认 provider 会捕获单个 processor 的回调异常并继续其他处理器。因此，单独注册的脱敏 processor 若失败，不能保证阻断后续 exporter 获取原始内容。文档给出的 fail-closed 方向是用 `set_trace_processors()` 替换默认处理器，在同一个应用自有 exporter 中完成复制、脱敏和发送，脱敏或序列化失败就丢弃该批次。[OpenAI Agents SDK Tracing 文档](https://openai.github.io/openai-agents-python/tracing/) 的默认值和 processor 行为绑定该动态文档及对应 SDK 版本，不是所有 tracing SDK 的通则。
 
-1. 工具是否成功。
-2. 错误是否结构化。
-3. 权限是否拦截。
+OpenTelemetry GenAI spans 约定当前状态为 `Development`。它建议默认不记录模型指令、输入和输出，需要采集时明确 opt in；对生产数据量或差异化访问控制的场景，约定说明可以把内容放到外部存储并在 span 留引用。它没有替应用决定 Artifact 的 URI 权限、加密、保留和脱敏实现。[OpenTelemetry GenAI spans 草案](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-spans.md) 是持续变化的约定，使用时应固定 revision 或访问日期，并核对实际 instrumentation 是否遵循它。
 
-第五，看环境反馈。
+对导出链路要逐个检查 SDK、processor、collector、批处理器、exporter 和遥测平台。只在界面上隐藏字段，不能撤回已经送到后端的原始值；先在信任边界前处理，才可能真正限制数据流。
 
-1. 测试失败是否被正确理解。
-2. 命令输出是否截断过度。
-3. 文件 diff 是否符合预期。
+## 9.13 Trace Context 只关联请求，不证明身份或权限
 
-第六，看恢复策略。
+分布式系统可通过 W3C Trace Context 的 `traceparent` 和 `tracestate` 传递跨服务的关联信息。它们帮助不同服务把一次调用放到可查询的 trace 中，但不是用户身份、tenant 权限、任务合同或审批凭证。应用仍要通过认证、授权与任务状态系统确认这些事实。
 
-1. 是否盲目重试。
-2. 是否请求用户。
-3. 是否回滚错误修改。
+这两个 header 不应携带个人信息或其他敏感值。公开入口还要考虑调用者伪造采样标志造成额外 tracing 负载或成本。服务可按认证状态、配额和信任边界决定如何处理来访采样信息，而不让未知调用方决定全部观测开销。[W3C Trace Context Recommendation](https://www.w3.org/TR/trace-context/) 将这些字段限定为 trace correlation，并讨论了隐私与拒绝服务风险。
 
-Trace 能把“agent 不行”拆成具体失败点。
+Trace ID 也不应成为 metrics 的用户级标签。要查单个用户授权的运行，可通过受控索引从业务 ID 跳转到 trace；不要把高基数身份直接塞进所有指标时间序列。这样才能分别管理可观测性检索与身份权限。
 
-## 9.10 可观测性指标
+## 9.14 指标、采样和日志量要一起设计
 
-Agent runtime 可以监控很多指标。
+Trace 适合解释单次运行，metric 用于观察大量运行的趋势。常见的 Agent 指标可以包括任务数、模型请求错误数、工具超时数、端到端耗时分布、token 用量、权限拒绝数、验收器失败数和遥测导出丢弃数。每项指标要写清单位、条件和分母；“成功率”至少要定义谁是一个样本、什么结果算成功、未完成或未知状态如何计入。
 
-任务指标：
+下面是另一个合成批次的手算例子。它不代表任何生产系统，也不构成阈值或质量门禁：
 
-1. Task success rate。
-2. Failure rate。
-3. Cancellation rate。
-4. Human intervention rate。
-5. Average task duration。
+- 5 次已启动运行中，4 次同时存在 root span、task ID 和 run ID，故这批运行的关联记录覆盖是 `4/5`。它只说明 trace 与任务记录是否连得上，不说明记录内容充分。
+- 4 项已完成且需要本地测试的任务中，3 项有测试集版本与验收回执引用，故该条件下的验收证据关联率为 `3/4`。它不等于测试通过率。
+- 3 次隔离重跑中，2 次恢复出的输入 fixture 哈希与声明值相符，故本批的输入恢复匹配比例为 `2/3`。它不证明重跑模型的输出与原始运行相同。
 
-模型指标：
+如果分母为零，就报告 `N/A`，不能将“没有适用任务”写成 `100%`。如果结果未知，要将 unknown 与失败、拒绝、未执行分开记录。三个比例衡量不同对象，不能加权成一个总分或通用 gate。
 
-1. Model call count。
-2. Token cost。
-3. Model error rate。
-4. Invalid action rate。
-5. Retry rate。
+指标标签要控制基数。OpenTelemetry Metrics 文档指出，每种属性组合会占用聚合状态；用户 ID、原始 URL 路径等高基数属性会增加内存使用，超过 SDK 配置上限后还可能失去按原属性筛选的能力。因此，指标适合用有限的服务、Provider、操作类型和结果类别切分；单次任务、trace ID 和精确路径更适合去 trace 或日志索引里查。[OpenTelemetry Metrics 文档](https://opentelemetry.io/docs/concepts/signals/metrics/) 介绍了 cardinality 及其 SDK 处理边界，具体限制取决于实际配置。
 
-工具指标：
+为了控制成本和噪声，系统可能会对 trace 采样。Head sampling 在运行开始时决定是否记录整条 trace，开销低，但单靠它无法知道后续是否发生错误；tail sampling 可等大部分 span 到达后按错误或延迟筛选，却需要缓存、状态和额外运行资源。它们可组合使用，但采样策略必须明确可能漏掉哪些运行，以及不同状态是否获得不同的观测机会。[OpenTelemetry Sampling 文档](https://opentelemetry.io/docs/concepts/sampling/) 讨论了两种策略及其取舍。采样不是脱敏，也不能作为删除敏感字段的理由。
 
-1. Tool call count。
-2. Tool success rate。
-3. Tool timeout rate。
-4. Schema error rate。
-5. Tool selection distribution。
+“日志太少”让人找不到第一处偏离；“日志太多”则增加费用、搜索噪声和数据暴露。可先按操作和结果选择结构化事件，再按明确目的保存少量全文 Artifact；采样、压缩、访问控制和保留策略各自解决不同问题，不能互相替代。
 
-安全指标：
+## 9.15 Trace 为 Evaluation Harness 提供证据，但不替它验收
 
-1. Permission denied count。
-2. Dangerous command blocked count。
-3. Secret masking count。
-4. Network access request count。
-5. Prompt injection detection count。
+Trace 是单次或多次执行留下的观察材料，可以用于定位失败、建立候选回归样例、比较版本和审计策略。然而，一条完整 trace 本身不能证明任务成功：它可能只记录了模型说“已完成”，却没有测试或外部状态回执；也可能记录了所有事件，但任务目标或评估数据本身定义错了。
 
-质量指标：
+Evaluation Harness 需要另外提供固定任务集、初始环境、执行配置、验收器、样本口径和报告逻辑。它把 trace 与实际 artifact、测试结果和目标条件对齐，再判断指定配置下发生了什么。[第十章《Evaluation Harness》](10-evaluation-harness.md)会把这些组成部分串成完整评估流程；本章只负责说明运行证据如何记录和被引用。
 
-1. Test pass rate。
-2. Regression rate。
-3. Unrelated file modification rate。
-4. No-verification completion rate。
-5. Rollback rate。
+长任务的持久状态与 trace 也不是同一存储对象。trace 记录发生过的操作和观察；checkpoint 或 task state 用于恢复下一步该做什么。跨轮折叠上下文时，应让摘要引用可追踪的状态来源，而不能把旧 trace 摘要当成当前文件状态。可继续阅读[第十七章的 checkpoint](17-long-running-agent与checkpoint.md)、[第十八章的 context folding](18-context-folding上下文折叠.md) 和[第十九章的 Harness-aware evaluation](19-harness-aware-evaluation.md)。
 
-这些指标可以帮助团队发现 runtime、工具、模型和策略的问题。
+## 9.16 评估这条 Trace 是否支持当前用途
 
-## 9.11 日志太少和日志太多
+不需要为每条 trace 填满十几项指标。先选一个具体用途，再检查对应证据是否存在。
 
-日志太少的问题：
+| 用途 | 需要的证据 | 独立的检查口径 | 缺少证据时的结论 |
+| --- | --- | --- | --- |
+| 调查一次失败 | 失败 span、工具/命令回执、错误类别、可访问的引用、恢复过程 | 指定失败运行中，是否能定位第一处失败及其实际回执 | 失败归因不确定；不能只靠最终回答归因 |
+| 证明策略拒绝已生效 | 规范化请求、策略版本、拒绝事件、执行器派发状态和副作用回执 | 适用的拒绝请求中，有多少能够对应到未派发/无副作用证据 | 无法由 trace 证明没有副作用；应核对执行系统状态 |
+| 复现固定回执流程 | 所需 fixture、工具回执、环境和版本引用 | 选择的回放样例中，固定输入与回执是否完整并匹配声明哈希 | 只读检查或部分模拟；明确缺失条件 |
+| 判断任务是否通过 | 目标条件、验收器版本、验收回执、最终状态 | 适用的已完成任务中，有多少关联到独立验收结果 | 只能说运行结束，不能说目标通过 |
+| 控制数据暴露 | 内容分类、脱敏/不采集配置、processor 结果、exporter 去向和权限 | 应受控的导出路径中，有多少按策略记录了结果或被 fail closed 阻断 | 无法证明脱敏链路生效；需要独立验证导出配置 |
 
-1. 无法复盘。
-2. 无法定位失败点。
-3. 无法比较版本。
-4. 无法做安全审计。
+这里的统计只应回答各自的问题，必须把分子、分母、适用对象和未知状态说清楚。数据缺口、未发生的事件和安全失败的意义不同，不能用一个聚合评分抹平。
 
-日志太多的问题：
+## 9.17 本章面试题
 
-1. 成本高。
-2. 检索困难。
-3. 泄露隐私。
-4. 保存敏感代码和 secret。
-5. 噪声淹没关键事件。
+### Trace 与普通日志有什么区别？
 
-策略：
+日志记录单条结构化或文本事实；Trace 将一次运行里多个持续操作和瞬时事件按父子关系、时间和关联标识串起来。Trace 可以关联日志和 Artifact，但不会自动替代它们。指标再把大量运行压缩为可聚合数值，适合看趋势而不适合还原单次过程。
 
-1. Trace 保存结构化关键事件。
-2. 大对象放 artifact。
-3. 默认脱敏。
-4. 设置保留周期。
-5. 按权限控制访问。
-6. 支持采样和压缩。
+### 怎样设计安全的 Agent Replay？
 
-可观测性的目标不是记录一切，而是记录足够解释、复现和审计的信息。
+先说清 replay 模式：只读查看、使用固定模型/工具回执做模拟，还是在隔离环境重新执行。按模式恢复所需的任务、上下文、版本、代码和数据，不默认保留原始 prompt 或凭据。真实重跑使用克隆工作区和受限网络，阻断默认外部写入，并重新走当前授权。历史审批不自动批准新动作。还要声明模型和外部服务可能不确定，因此隔离重跑不保证完全复现原结果。
 
-## 9.12 隐私、脱敏和保留周期
+### Agent Trace 如何处理隐私？
 
-Trace 可能包含敏感内容：
+默认先采集完成排障所需的低敏元数据。prompt、模型输出、工具参数、代码和命令输出按需 opt in；脱敏在数据离开信任边界前完成，失败时按策略丢弃或阻断导出。较大内容单独存入有访问控制和保留策略的 Artifact store，trace 只存引用。追踪系统的默认值、处理器顺序和 exporter 行为按具体 SDK 版本核验；trace ID 和 W3C 传播 header 不可替代认证或授权。
 
-1. 私有代码。
-2. 用户输入。
-3. 环境变量。
-4. 命令输出。
-5. 文件 diff。
-6. API key。
-7. 业务数据。
+## 9.18 小练习
 
-必须考虑：
+本章所有数字都可以自造，但请标明是教学构造，不能把它们描述成真实运行结果。
 
-1. 哪些字段脱敏。
-2. 哪些 artifact 加密。
-3. 谁能访问 trace。
-4. 保存多久。
-5. 是否可用于训练。
-6. 是否允许导出。
-7. 用户是否能删除。
+1. 为显示名修复任务画一条 span 时间线，至少包含模型调用、权限决定、补丁应用、测试回执和最终验收。指出哪项是 span、哪项是 event，哪项实际结果应放在 Artifact。
+2. 给出 4 条合成 run 记录，分别包含一次工具失败、一次权限拒绝、一次测试通过和一次外部状态未知。为每项检查写清分母，并说明哪些结果只能标 `N/A` 或 `unknown`。
+3. 给显示名修复任务设计只读、固定回执模拟和隔离重跑三种 replay。逐项说明恢复哪些版本/fixture、哪些调用被 stub、哪些网络或文件副作用必须封锁，以及缺少什么时只能降级到只读。
+4. 设计一次 trace 导出失败演练：脱敏器报错时，默认 exporter 会不会继续收到数据？根据实际 SDK 版本和处理器配置画出发送路径，并说明怎样验证 fail-closed。
+5. 设计 Trace UI 的列表和详情视图，区分模型提议、策略结果、执行器回执、Artifact 引用和调查者 root-cause 标签；标出哪些字段只有进一步授权后才能查看。
 
-默认策略：
+## 9.19 本章总结
 
-1. Secret pattern 自动 mask。
-2. `.env`、SSH key、token 不进入模型上下文。
-3. Trace 访问按角色控制。
-4. 长期保存只保存摘要和指标。
-5. 用于训练前必须做数据治理。
+Trace 把一次 Agent 运行中的持续操作、时间点事件和跨服务因果关系关联起来；日志提供可检索细节，指标展示运行趋势，Artifact 保存需要独立访问控制的大内容。task、session、run 和 trace ID 的范围必须由系统定义，相关 ID 不能作为身份或权限证明。
 
-## 9.13 Trace 和 Evaluation Harness 的关系
+一条有用的 trace 不等于保存所有原始输入。它要能区分模型提出了什么、策略允许了什么、执行器实际做了什么、验收器确认了什么；对于隐私内容，优先减少采集并在导出前处理。回放要标明是查看历史、固定回执模拟，还是隔离重跑。真实副作用需要新的环境和授权。
 
-Trace 是 evaluation harness 的原材料之一。
-
-Evaluation harness 可以使用 trace：
-
-1. 重放历史任务。
-2. 构建 regression set。
-3. 分析失败类型。
-4. 比较模型和工具版本。
-5. 统计成本和步数。
-6. 审计安全事件。
-
-但 trace 不等于 evaluation harness。
-
-Trace 是单次或多次任务执行记录。Evaluation harness 是自动运行任务、计算指标、生成报告和做回归的框架。
-
-下一章会重点展开 evaluation harness。
-
-## 9.14 Trace UI 应该展示什么
-
-如果 trace 只能存在数据库里，使用价值会下降。
-
-Trace UI 可以展示：
-
-1. 时间线。
-2. 每轮模型调用。
-3. 工具调用列表。
-4. 权限确认。
-5. 文件 diff。
-6. 命令输出摘要。
-7. 错误和 retry。
-8. token 和耗时。
-9. 安全事件。
-10. 最终结果。
-
-好的 Trace UI 应该支持：
-
-1. 按 step 展开。
-2. 搜索工具调用。
-3. 查看 diff。
-4. 查看截断输出的完整 artifact。
-5. 标记 bad case。
-6. 导出 replay case。
-
-可观测性不只是后端日志，也是产品体验的一部分。
-
-## 9.15 真实坑
-
-常见真实坑：
-
-1. 日志太少无法复盘。
-2. 日志太多泄露隐私。
-3. 没有记录 prompt 版本。
-4. 工具结果不可复现。
-5. 没有记录权限决策。
-6. 命令输出被截断但未标记。
-7. 文件 diff 没进入 trace。
-8. Replay 时环境和原任务不一致。
-9. Trace 中保存了 secret。
-10. 指标只看最终成功率，不看过程风险。
-
-经验法则：没有 trace 的 agent 失败不可 debug，没有 replay 的 agent 改进不可验证。
-
-## 9.16 Trace / Replay 质量指标
-
-Trace 不是“多打点日志”这么简单。真正能服务 debug、评估、安全审计和回放的 trace，必须同时满足结构完整、span 因果树正确、时间线一致、artifact 可追溯、版本可复现、隐私可控和最终状态可信。
-
-可以把第 $i$ 条 agent trace 写成：
-
-```math
-\tau_i=(g_i,S_i,E_i,A_i,V_i,R_i,M_i,Q_i,y_i)
-```
-
-其中，$g_i$ 是 trace id、session id、task id 等任务级标识，$S_i$ 是 span 集合，$E_i$ 是事件序列，$A_i$ 是 artifact 集合，$V_i$ 是模型、prompt、工具、代码、沙箱和权限策略版本，$R_i$ 是 replay 所需环境信息，$M_i$ 是可聚合指标，$Q_i$ 是评估导出标签，$y_i$ 是最终状态。
-
-第 $j$ 个 span 可以写成：
-
-```math
-s_{ij}=(p_{ij},k_{ij},t_{ij}^{0},t_{ij}^{1},u_{ij},v_{ij},a_{ij},e_{ij})
-```
-
-其中，$p_{ij}$ 是 parent span，$k_{ij}$ 是 span 类型，$t_{ij}^{0}$ 和 $t_{ij}^{1}$ 是开始 / 结束时间，$u_{ij}$ 和 $v_{ij}$ 是输入 / 输出摘要，$a_{ij}$ 是 artifact 引用，$e_{ij}$ 是错误类型、状态和 root cause。
-
-Trace schema 完整率：
-
-```math
-C_{\mathrm{trace}}=
-\frac{1}{N}\sum_{i=1}^{N}\frac{|F_i\cap F^{\ast}|}{|F^{\ast}|}
-```
-
-其中，$F^{\ast}$ 是 trace 必填字段集合，例如 trace id、session id、task id、workflow、状态、开始时间和结束时间。
-
-Span schema 完整率：
-
-```math
-C_{\mathrm{span}}=
-\frac{1}{\sum_i |S_i|}
-\sum_{i=1}^{N}\sum_{s\in S_i}
-\frac{|H_s\cap H^{\ast}|}{|H^{\ast}|}
-```
-
-其中，$H^{\ast}$ 是 span 必填字段集合，例如 span id、parent id、类型、时间、状态、输入摘要、输出摘要、artifact 引用和错误字段。
-
-Span 树合法率：
-
-```math
-C_{\mathrm{tree}}=
-\frac{1}{N}\sum_{i=1}^{N}
-\mathbf{1}[\mathrm{root}(S_i)=1\wedge \mathrm{parent\_ok}(S_i)=1]
-```
-
-一条 trace 应该有一个清晰 root span，其他 span 的 parent 必须指向同一条 trace 中真实存在的 span。否则 replay UI 会无法还原因果链。
-
-时间线合法率：
-
-```math
-C_{\mathrm{time}}=
-\frac{1}{N}\sum_{i=1}^{N}
-\mathbf{1}[\forall s\in S_i,\ t_i^{0}\le t_s^{0}\le t_s^{1}\le t_i^{1}]
-```
-
-时间线合法不是为了好看，而是为了排查 timeout、并发、重试、取消和外部工具延迟。
-
-Artifact 引用覆盖率：
-
-```math
-C_{\mathrm{art}}=
-\frac{\sum_i\sum_{s\in S_i}\mathbf{1}[r_s=1\wedge a_s\in A_i]}
-{\sum_i\sum_{s\in S_i}\mathbf{1}[r_s=1]}
-```
-
-其中，$r_s=1$ 表示该 span 需要 artifact，例如文件 diff、截断命令输出、截图、报告或长工具结果。长内容不必直接塞入 span，但引用必须可追溯。
-
-版本捕获率：
-
-```math
-C_{\mathrm{ver}}=
-\frac{1}{N}\sum_{i=1}^{N}
-\mathbf{1}[V_i\supseteq V^{\ast}]
-```
-
-其中，$V^{\ast}$ 通常包括模型版本、prompt 版本、工具 registry 版本、git commit、sandbox 镜像和权限策略版本。没有版本信息，replay 通常只能“看历史”，不能可靠复现。
-
-Replay 就绪率：
-
-```math
-R_{\mathrm{replay}}=
-\frac{1}{N}\sum_{i=1}^{N}
-\mathbf{1}[C_{\mathrm{ver},i}=1\wedge d_i=1\wedge b_i=1\wedge q_i=1]
-```
-
-其中，$d_i$ 表示工具结果或外部依赖可确定，$b_i$ 表示 sandbox / 环境快照可恢复，$q_i$ 表示权限策略可复用或可模拟。真实 replay 必须比只读 replay 更严格。
-
-敏感信息脱敏率：
-
-```math
-C_{\mathrm{mask}}=
-\frac{\sum_i\sum_{z\in Z_i}\mathbf{1}[\mathrm{masked}(z)=1]}
-{\sum_i |Z_i|}
-```
-
-其中，$Z_i$ 是 trace、span、log 和 artifact 中的敏感字段集合。可观测性不能以泄露 secret、私有代码或用户数据为代价。
-
-错误归因覆盖率：
-
-```math
-C_{\mathrm{err}}=
-\frac{\sum_i\mathbf{1}[y_i\ne \mathrm{success}\wedge c_i=1]}
-{\sum_i\mathbf{1}[y_i\ne \mathrm{success}]}
-```
-
-其中，$c_i=1$ 表示失败 trace 至少能定位到 error type、失败 span 和 root cause。没有错误归因，trace 很容易变成长日志存档。
-
-最终状态一致率：
-
-```math
-C_{\mathrm{final}}=
-\frac{1}{N}\sum_{i=1}^{N}
-\mathbf{1}[\neg (y_i=\mathrm{success}\wedge z_i=0)]
-```
-
-其中，$z_i=1$ 表示测试、验证器、业务状态或用户验收通过。Agent 声称完成但 trace 里验证失败，是典型 false completion。
-
-指标导出覆盖率：
-
-```math
-C_{\mathrm{metric}}=
-\frac{1}{N}\sum_{i=1}^{N}
-\mathbf{1}[M_i\supseteq M^{\ast}]
-```
-
-其中，$M^{\ast}$ 可以包含 latency、token cost、tool count、step count、error count、permission denied count 和 validation result。没有可聚合指标，就很难发现版本回归。
-
-评估导出覆盖率：
-
-```math
-C_{\mathrm{eval}}=
-\frac{1}{N}\sum_{i=1}^{N}
-\mathbf{1}[Q_i\supseteq Q^{\ast}]
-```
-
-其中，$Q^{\ast}$ 包含 replay case、failure taxonomy、bad case label、expected behavior 和可用于 regression 的输入输出摘要。
-
-Trace / Replay 准入条件可以形式化为：
-
-```math
-G_{\mathrm{trace}}=
-\mathbf{1}[
-C_{\mathrm{trace}}=1
-\wedge C_{\mathrm{span}}=1
-\wedge C_{\mathrm{tree}}=1
-\wedge C_{\mathrm{time}}=1
-\wedge C_{\mathrm{art}}=1
-\wedge C_{\mathrm{ver}}=1
-\wedge R_{\mathrm{replay}}\ge \alpha_{\mathrm{replay}}
-\wedge C_{\mathrm{mask}}=1
-\wedge C_{\mathrm{err}}=1
-\wedge C_{\mathrm{final}}=1
-\wedge C_{\mathrm{metric}}=1
-\wedge C_{\mathrm{eval}}=1
-]
-```
-
-这组条件的目标不是无限制保存所有内容，而是在隐私和成本可控的前提下，让 agent 的关键行为可解释、可回放、可评估。
-
-这里也要区分“没有样本”和“样本全部通过”：例如一条 trace 没有命令、patch 或截断输出时，artifact 覆盖率对该 trace 是 `not_applicable`，不应把空集合当作 `1.0`。聚合时只对有定义的 trace 计算均值；如果整个评估批次都没有有效样本，则报告 `not_applicable`，并让对应门禁显式失败或由上层策略记录跳过原因。
-
-### 9.16.1 最小可运行 Trace / Replay 审计 demo
-
-下面的 demo 不调用模型、不执行工具、不访问网络，只审计 toy traces 是否满足 trace / replay 验收条件。它故意构造缺 artifact、span parent 错误、时间线越界、敏感 artifact 未脱敏、外部网络不可复现、最终状态虚假成功等 bad case。
-
-```python
-from dataclasses import dataclass
-from typing import Optional
-
-
-TRACE_FIELDS = (
-    "trace_id",
-    "session_id",
-    "task_id",
-    "workflow",
-    "status",
-    "started",
-    "ended",
-)
-SPAN_FIELDS = ("span_id", "kind", "start", "end", "status")
-VERSION_FIELDS = ("model", "prompt", "tools", "git", "sandbox", "permission")
-METRIC_FIELDS = ("latency_ms", "token_cost", "tool_count", "step_count")
-
-
-@dataclass(frozen=True)
-class Span:
-    span_id: str
-    parent_id: Optional[str]
-    kind: str
-    start: float
-    end: float
-    status: str
-    input_summary: str = ""
-    output_summary: str = ""
-    artifact_ref: str = ""
-    truncated: bool = False
-    error_type: str = ""
-    root_cause: str = ""
-    sensitive_masked: bool = True
-
-
-@dataclass(frozen=True)
-class Trace:
-    trace_id: str
-    session_id: str
-    task_id: str
-    workflow: str
-    status: str
-    started: float
-    ended: float
-    spans: tuple[Span, ...]
-    artifacts: dict[str, dict]
-    versions: dict[str, str]
-    replay: dict[str, bool]
-    metrics: dict[str, float]
-    eval_labels: dict[str, str | bool]
-    validation_passed: bool
-
-
-def mean(values):
-    values = list(values)
-    return None if not values else round(sum(values) / len(values), 3)
-
-
-def mean_defined(values):
-    return mean(value for value in values if value is not None)
-
-
-def at_least(value, threshold):
-    return value is not None and value >= threshold
-
-
-# 空集合回归：没有可评估 span 时不能伪造完整覆盖率。
-assert mean([]) is None
-assert mean_defined([None, None]) is None
-assert at_least(None, 1.0) is False
-
-
-def present(value):
-    return value is not None and value != ""
-
-
-def trace_schema_score(trace):
-    return mean(present(getattr(trace, name)) for name in TRACE_FIELDS)
-
-
-def span_schema_score(span):
-    return mean(present(getattr(span, name)) for name in SPAN_FIELDS)
-
-
-def tree_ok(trace):
-    span_ids = {span.span_id for span in trace.spans}
-    roots = [span for span in trace.spans if span.parent_id is None]
-    parents_ok = all(
-        span.parent_id in span_ids or span.parent_id is None for span in trace.spans
-    )
-    return len(roots) == 1 and parents_ok
-
-
-def time_ok(trace):
-    inside = all(
-        trace.started <= span.start <= span.end <= trace.ended
-        for span in trace.spans
-    )
-    ordered = all(a.start <= b.start for a, b in zip(trace.spans, trace.spans[1:]))
-    return trace.started <= trace.ended and inside and ordered
-
-
-def artifact_ok(trace):
-    required = [
-        span
-        for span in trace.spans
-        if span.truncated or span.kind in {"file_patch", "command"}
-    ]
-    return mean(span.artifact_ref in trace.artifacts for span in required)
-
-
-def version_ok(trace):
-    return all(trace.versions.get(name) for name in VERSION_FIELDS)
-
-
-def replay_ok(trace):
-    replay_fields = ("env_snapshot", "deterministic_tools", "sandbox")
-    return version_ok(trace) and all(trace.replay.get(name) for name in replay_fields)
-
-
-def privacy_ok(trace):
-    span_ok = all(span.sensitive_masked for span in trace.spans)
-    artifact_ok_ = all(
-        not artifact.get("raw_secret", False) for artifact in trace.artifacts.values()
-    )
-    return span_ok and artifact_ok_
-
-
-def error_attributed(trace):
-    if trace.status == "success":
-        return True
-    failed = [span for span in trace.spans if span.status == "error"]
-    return bool(failed) and all(span.error_type and span.root_cause for span in failed)
-
-
-def final_consistent(trace):
-    return not (trace.status == "success" and not trace.validation_passed)
-
-
-def metric_ok(trace):
-    return all(name in trace.metrics for name in METRIC_FIELDS)
-
-
-def eval_ok(trace):
-    if "replay_case" not in trace.eval_labels:
-        return False
-    if trace.status != "success" and not trace.eval_labels.get("failure_taxonomy"):
-        return False
-    return True
-
-
-traces = (
-    Trace(
-        "tr_good",
-        "sess_a",
-        "task_bugfix",
-        "code_agent",
-        "success",
-        0.0,
-        9.0,
-        (
-            Span("s1", None, "agent_run", 0.0, 9.0, "ok", "goal", "completed"),
-            Span("s2", "s1", "model_call", 0.2, 1.4, "ok", "context", "search_code"),
-            Span("s3", "s1", "tool_call", 1.4, 2.0, "ok", "search args", "3 matches"),
-            Span(
-                "s4",
-                "s1",
-                "file_patch",
-                2.2,
-                3.1,
-                "ok",
-                "patch",
-                "diff saved",
-                "diff_good",
-            ),
-            Span(
-                "s5",
-                "s1",
-                "command",
-                3.2,
-                8.2,
-                "ok",
-                "pytest auth",
-                "passed",
-                "cmd_good",
-            ),
-            Span("s6", "s1", "final", 8.3, 9.0, "ok", "verified", "final answer"),
-        ),
-        {
-            "diff_good": {"kind": "diff"},
-            "cmd_good": {"kind": "stdout", "raw_secret": False},
-        },
-        {
-            "model": "gpt-x",
-            "prompt": "pv12",
-            "tools": "tv4",
-            "git": "abc123",
-            "sandbox": "py311",
-            "permission": "perm8",
-        },
-        {"env_snapshot": True, "deterministic_tools": True, "sandbox": True},
-        {"latency_ms": 9000, "token_cost": 0.19, "tool_count": 3, "step_count": 6},
-        {"replay_case": True},
-        True,
-    ),
-    Trace(
-        "tr_missing_artifact",
-        "sess_a",
-        "task_timeout",
-        "code_agent",
-        "failed",
-        0.0,
-        6.0,
-        (
-            Span(
-                "s1",
-                None,
-                "agent_run",
-                0.0,
-                6.0,
-                "error",
-                "goal",
-                "failed",
-                error_type="command_timeout",
-                root_cause="test_hung",
-            ),
-            Span("s2", "s1", "model_call", 0.2, 1.1, "ok", "context", "run tests"),
-            Span(
-                "s3",
-                "s1",
-                "command",
-                1.2,
-                6.0,
-                "error",
-                "pytest",
-                "truncated",
-                "missing_cmd",
-                True,
-                "timeout",
-                "no_cancel",
-            ),
-        ),
-        {},
-        {
-            "model": "gpt-x",
-            "tools": "tv4",
-            "git": "abc123",
-            "sandbox": "py311",
-            "permission": "perm8",
-        },
-        {"env_snapshot": True, "deterministic_tools": True, "sandbox": True},
-        {"latency_ms": 6000, "token_cost": 0.12, "tool_count": 1, "step_count": 3},
-        {"replay_case": True, "failure_taxonomy": "timeout"},
-        False,
-    ),
-    Trace(
-        "tr_orphan",
-        "sess_b",
-        "task_refactor",
-        "code_agent",
-        "failed",
-        0.0,
-        5.0,
-        (
-            Span("s1", None, "agent_run", 0.0, 5.0, "error", "goal", "failed"),
-            Span("s2", "missing_parent", "tool_call", -0.1, 1.0, "ok", "read", "file"),
-            Span("s3", "s1", "final", 1.2, 5.1, "error", "summary", "failed"),
-        ),
-        {},
-        {
-            "model": "gpt-y",
-            "prompt": "pv13",
-            "tools": "tv5",
-            "git": "def456",
-            "sandbox": "py311",
-            "permission": "perm8",
-        },
-        {"env_snapshot": True, "deterministic_tools": False, "sandbox": True},
-        {"latency_ms": 5000, "tool_count": 1, "step_count": 3},
-        {"replay_case": False},
-        False,
-    ),
-    Trace(
-        "tr_secret",
-        "sess_c",
-        "task_config",
-        "code_agent",
-        "failed",
-        0.0,
-        4.0,
-        (
-            Span(
-                "s1",
-                None,
-                "agent_run",
-                0.0,
-                4.0,
-                "error",
-                "goal",
-                "blocked",
-                error_type="secret_leak",
-                root_cause="raw_artifact",
-            ),
-            Span(
-                "s2",
-                "s1",
-                "tool_call",
-                0.4,
-                1.0,
-                "error",
-                "read config",
-                "secret copied",
-                "raw_config",
-                False,
-                "sensitive_data",
-                "artifact_unmasked",
-                False,
-            ),
-        ),
-        {"raw_config": {"kind": "file", "raw_secret": True}},
-        {
-            "model": "gpt-x",
-            "prompt": "pv12",
-            "tools": "tv4",
-            "git": "abc123",
-            "sandbox": "py311",
-            "permission": "perm8",
-        },
-        {"env_snapshot": True, "deterministic_tools": True, "sandbox": True},
-        {"latency_ms": 4000, "token_cost": 0.07, "tool_count": 1, "step_count": 2},
-        {"replay_case": True, "failure_taxonomy": "privacy"},
-        False,
-    ),
-    Trace(
-        "tr_network",
-        "sess_d",
-        "task_docs",
-        "code_agent",
-        "failed",
-        0.0,
-        7.0,
-        (
-            Span(
-                "s1",
-                None,
-                "agent_run",
-                0.0,
-                7.0,
-                "error",
-                "goal",
-                "failed",
-                error_type="network_unrecorded",
-                root_cause="external_docs_changed",
-            ),
-            Span("s2", "s1", "tool_call", 0.5, 2.0, "ok", "web fetch", "doc text"),
-            Span("s3", "s1", "model_call", 2.1, 6.0, "ok", "doc text", "patch plan"),
-        ),
-        {},
-        {
-            "model": "gpt-x",
-            "prompt": "pv12",
-            "tools": "tv4",
-            "git": "abc123",
-            "permission": "perm8",
-        },
-        {"env_snapshot": False, "deterministic_tools": False, "sandbox": False},
-        {"latency_ms": 7000, "token_cost": 0.21, "tool_count": 1, "step_count": 3},
-        {"failure_taxonomy": "non_deterministic"},
-        False,
-    ),
-    Trace(
-        "tr_false_success",
-        "sess_e",
-        "task_test",
-        "code_agent",
-        "success",
-        0.0,
-        8.0,
-        (
-            Span("s1", None, "agent_run", 0.0, 8.0, "ok", "goal", "success"),
-            Span(
-                "s2",
-                "s1",
-                "command",
-                2.0,
-                7.0,
-                "error",
-                "pytest",
-                "failed",
-                "cmd_fail",
-                False,
-                "test_failed",
-                "assertion",
-            ),
-            Span("s3", "s1", "final", 7.1, 8.0, "ok", "ignored failure", "claimed fixed"),
-        ),
-        {"cmd_fail": {"kind": "stdout", "raw_secret": False}},
-        {
-            "model": "gpt-z",
-            "prompt": "pv14",
-            "tools": "tv4",
-            "git": "abc123",
-            "sandbox": "py311",
-            "permission": "perm8",
-        },
-        {"env_snapshot": True, "deterministic_tools": True, "sandbox": True},
-        {"latency_ms": 8000, "token_cost": 0.16, "tool_count": 1, "step_count": 3},
-        {"replay_case": True},
-        False,
-    ),
-)
-
-all_spans = [span for trace in traces for span in trace.spans]
-metrics = {
-    "trace_schema": mean(trace_schema_score(trace) for trace in traces),
-    "span_schema": mean(span_schema_score(span) for span in all_spans),
-    "summary_coverage": mean(
-        bool(span.input_summary and span.output_summary) for span in all_spans
-    ),
-    "span_tree_validity": mean(tree_ok(trace) for trace in traces),
-    "timeline_validity": mean(time_ok(trace) for trace in traces),
-    "artifact_coverage": mean_defined(artifact_ok(trace) for trace in traces),
-    "version_capture": mean(version_ok(trace) for trace in traces),
-    "replay_readiness": mean(replay_ok(trace) for trace in traces),
-    "privacy_masking": mean(privacy_ok(trace) for trace in traces),
-    "error_attribution": mean(error_attributed(trace) for trace in traces),
-    "final_consistency": mean(final_consistent(trace) for trace in traces),
-    "metric_export": mean(metric_ok(trace) for trace in traces),
-    "eval_export": mean(eval_ok(trace) for trace in traces),
-}
-
-root_causes = {}
-for trace in traces:
-    causes = []
-    if trace_schema_score(trace) < 1:
-        causes.append("trace_schema_incomplete")
-    if not tree_ok(trace):
-        causes.append("span_tree_invalid")
-    if not time_ok(trace):
-        causes.append("timeline_invalid")
-    artifact_score = artifact_ok(trace)
-    if artifact_score is not None and artifact_score < 1:
-        causes.append("artifact_reference_missing")
-    if not version_ok(trace):
-        causes.append("version_capture_missing")
-    if not replay_ok(trace):
-        causes.append("replay_not_ready")
-    if not privacy_ok(trace):
-        causes.append("sensitive_data_unmasked")
-    if not error_attributed(trace):
-        causes.append("error_not_attributed")
-    if not final_consistent(trace):
-        causes.append("final_status_inconsistent")
-    if not metric_ok(trace):
-        causes.append("metrics_incomplete")
-    if not eval_ok(trace):
-        causes.append("eval_export_missing")
-    if causes:
-        root_causes[trace.trace_id] = causes
-
-thresholds = {
-    "trace_schema": 1.0,
-    "span_schema": 1.0,
-    "summary_coverage": 0.95,
-    "span_tree_validity": 1.0,
-    "timeline_validity": 1.0,
-    "artifact_coverage": 1.0,
-    "version_capture": 1.0,
-    "replay_readiness": 0.95,
-    "privacy_masking": 1.0,
-    "error_attribution": 1.0,
-    "final_consistency": 1.0,
-    "metric_export": 1.0,
-    "eval_export": 1.0,
-}
-failed_gates = [
-    name for name, threshold in thresholds.items() if not at_least(metrics[name], threshold)
-]
-
-print(f"metrics={metrics}")
-print(f"not_applicable_metrics={[name for name, value in metrics.items() if value is None]}")
-print(f"root_causes={root_causes}")
-print(f"failed_gates={failed_gates}")
-print(f"trace_replay_gate_pass={not failed_gates}")
-```
-
-一组故意包含坏 case 的输出示例：
-
-```text
-metrics={'trace_schema': 1.0, 'span_schema': 1.0, 'summary_coverage': 1.0, 'span_tree_validity': 0.833, 'timeline_validity': 0.833, 'artifact_coverage': 0.833, 'version_capture': 0.667, 'replay_readiness': 0.5, 'privacy_masking': 0.833, 'error_attribution': 0.833, 'final_consistency': 0.833, 'metric_export': 0.833, 'eval_export': 0.667}
-root_causes={'tr_missing_artifact': ['artifact_reference_missing', 'version_capture_missing', 'replay_not_ready'], 'tr_orphan': ['span_tree_invalid', 'timeline_invalid', 'replay_not_ready', 'error_not_attributed', 'metrics_incomplete', 'eval_export_missing'], 'tr_secret': ['sensitive_data_unmasked'], 'tr_network': ['version_capture_missing', 'replay_not_ready', 'eval_export_missing'], 'tr_false_success': ['final_status_inconsistent']}
-failed_gates=['span_tree_validity', 'timeline_validity', 'artifact_coverage', 'version_capture', 'replay_readiness', 'privacy_masking', 'error_attribution', 'final_consistency', 'metric_export', 'eval_export']
-trace_replay_gate_pass=False
-```
-
-这个 demo 的重点是把“trace 不完整”拆成可修复的系统问题：补 artifact 引用、补 prompt / sandbox 版本、修正 span parent 和时间线、对 artifact 做脱敏、记录 failure taxonomy、把最终成功绑定到真实验证结果。
-
-## 9.17 面试题：Agent Trace 应该记录什么
-
-回答要点：
-
-```text
-Agent trace 应该记录一次任务的完整执行链路，包括用户请求、session/task id、模型版本、prompt 版本、每轮上下文摘要、模型输出、解析出的 action、工具调用、工具结果、文件 diff、命令输出、权限决策、错误和恢复、token 成本、耗时和最终状态。大对象可以放 artifact，通过引用关联。这样才能支持 debug、replay、evaluation 和安全审计。
-```
-
-## 9.18 面试题：Replay 有什么用
-
-回答要点：
-
-```text
-Replay 可以复现或模拟一次 agent 执行过程。只读 replay 用于看时间线和 debug；模拟 replay 可以固定工具结果、换模型或 prompt 对比行为；真实 replay 可以在 sandbox 里重新执行任务，用于 regression test 和 benchmark。Replay 的关键是 trace 里要记录模型、prompt、工具、环境和权限策略版本，否则很难复现。
-```
-
-## 9.19 面试题：如何处理 Trace 中的隐私和 Secret
-
-回答要点：
-
-```text
-Trace 很可能包含私有代码、用户输入、命令输出、diff 和 secret，所以必须默认脱敏和访问控制。Secret pattern 要自动 mask，敏感文件默认不进入模型上下文，trace artifact 可以加密并设置保留周期。用于训练或长期分析前，需要做数据治理和用户/企业策略授权。不能为了可观测性无限制保存所有内容。
-```
-
-## 9.20 小练习
-
-1. 设计一个 agent trace schema，包含 task、model、tool、file、command、permission 和 error 字段。
-2. 设计一个 replay 流程，用于复现一次失败的 code edit 任务。
-3. 列出 10 个 agent runtime 可观测性指标。
-4. 思考 trace 中哪些字段需要脱敏。
-5. 设计一个 Trace UI 时间线视图。
-6. 思考如何从 trace 中构建 regression test。
-7. 思考命令输出被截断后如何支持后续 debug。
-8. 用 3 分钟回答“为什么没有 trace 的 coding agent 很难生产化”。
-
-## 9.21 本章总结
-
-本章讨论了 Trace、日志、回放与可观测性。
-
-核心结论：
-
-1. Agent 是多步系统，只看最终回答无法复盘失败原因。
-2. Trace 应记录用户输入、上下文、模型输出、工具调用、权限、文件 diff、命令输出、错误恢复和最终状态。
-3. Log、metric、event、artifact 和 trace 各有不同职责。
-4. Replay 可以用于 debug、evaluation、regression test 和安全审计。
-5. 可观测性指标要覆盖任务、模型、工具、安全和质量。
-6. 日志太少无法复盘，日志太多会带来成本、隐私和噪声问题。
-7. Trace 必须考虑脱敏、访问控制和保留周期。
-8. Trace 是下一章 evaluation harness 的基础输入之一。
-
-下一章会进入 Evaluation Harness，系统讨论如何自动运行 agent 评估任务、构造数据集、复现环境、计算指标和生成回归报告。
+Trace 为[下一章的 Evaluation Harness](10-evaluation-harness.md)提供证据，但不能替代任务集、环境、验收器和成功定义。设计指标、采样和保留策略时，应分别说明分母、适用边界、未知结果和数据权限，不能以一个分数代替系统判断。

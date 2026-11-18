@@ -19,7 +19,7 @@
 
 本章不展开成完整向量数据库、Agent 框架或工具协议实现手册。框架 API 会变化，但生产边界稳定：数据权限、证据质量、工具执行安全、trace 可观测性和失败回退必须由系统保证。
 
-完整的文档清洗、chunk、embedding、检索融合、重排、证据选择和离线评估机制，见第三册连续六篇：[文档与切分](../../book-03-practical-handbook/chapters/07-rag项目实战-1-文档与切分.md)、[检索与上下文](../../book-03-practical-handbook/chapters/07-rag项目实战-2-检索与上下文.md)、[候选重排](../../book-03-practical-handbook/chapters/07-rag项目实战-3-候选重排.md)、[引用与证据](../../book-03-practical-handbook/chapters/07-rag项目实战-4-引用与证据.md)、[评估指标](../../book-03-practical-handbook/chapters/07-rag项目实战-5-评估指标.md)和[失败归因与报告](../../book-03-practical-handbook/chapters/07-rag项目实战-6-失败归因与报告.md)；ANN、向量表示和长上下文检索方法见[第二册《长上下文 RAG 与 Agent》](../../book-02-advanced-100/chapters/07-长上下文rag与agent.md)。Agent 的工具选择、规划和安全主线见[第十七册工具调用](../../book-17-agent-tool-use/chapters/02-tool-use与function-calling.md)、[Agentic RAG](../../book-17-agent-tool-use/chapters/06-agentic-rag.md)与[Agent 安全](../../book-17-agent-tool-use/chapters/11-agent安全.md)；harness 权限与沙箱见[第二十册第 8 章](../../book-20-agent-harness-runtime/chapters/08-权限模型与安全沙箱.md)，trace 和回放见[第二十册第 9 章](../../book-20-agent-harness-runtime/chapters/09-trace日志回放与可观测性.md)，RAG/工具/Agent/记忆的组合见[第二十二册第 43 章](../../book-22-tool-protocol-ecosystem/chapters/43-工具调用和rag-agent-memory的组合.md)。评估设计与测量不确定性见第七册。本章只在解释部署接口时简述这些机制，重点是版本、容量、权限、恢复和发布门槛。
+完整的文档清洗、chunk、embedding、检索融合、重排、证据选择和离线评估机制，见第三册连续六篇：[文档与切分](../../book-03-practical-handbook/chapters/07-rag项目实战-1-文档与检索.md)、[检索与上下文](../../book-03-practical-handbook/chapters/07-rag项目实战-1-文档与检索.md)、[候选重排](../../book-03-practical-handbook/chapters/07-rag项目实战-2-重排与证据.md)、[引用与证据](../../book-03-practical-handbook/chapters/07-rag项目实战-2-重排与证据.md)、[评估指标](../../book-03-practical-handbook/chapters/07-rag项目实战-3-评估与失败归因.md)和[失败归因与报告](../../book-03-practical-handbook/chapters/07-rag项目实战-3-评估与失败归因.md)；ANN、向量表示和长上下文检索方法见[第二册《长上下文 RAG 与 Agent》](../../book-02-advanced-100/chapters/07-长上下文rag与agent.md)。Agent 的工具选择、规划和安全主线见[第十七册工具调用](../../book-17-agent-tool-use/chapters/02-tool-use与function-calling.md)、[Agentic RAG](../../book-17-agent-tool-use/chapters/06-agentic-rag.md)与[Agent 安全](../../book-17-agent-tool-use/chapters/11-agent安全.md)；harness 权限与沙箱见[第二十册第 8 章](../../book-20-agent-harness-runtime/chapters/08-权限模型与安全沙箱.md)，trace 和回放见[第二十册第 9 章](../../book-20-agent-harness-runtime/chapters/09-trace日志回放与可观测性.md)，RAG/工具/Agent/记忆的组合见[第二十二册第 43 章](../../book-22-tool-protocol-ecosystem/chapters/43-工具调用和rag-agent-memory的组合.md)。评估设计与测量不确定性见第七册。本章只在解释部署接口时简述这些机制，重点是版本、容量、权限、恢复和发布门槛。
 
 ## 为什么 RAG 和 Agent 部署更复杂
 
@@ -126,7 +126,7 @@ T_queue 是等待构建的时间，T_parse、T_embed、T_index 和 T_publish 分
 
 ## 2. 文档解析和切分：把源资料变成可发布 artifact
 
-本节关注资料进入线上知识服务时怎样保持来源、版本和可撤回性。切分粒度、语义边界和 chunk 算法的完整比较见[第三册 RAG 文档与切分篇](../../book-03-practical-handbook/chapters/07-rag项目实战-1-文档与切分.md)；这里把解析和切分视为一项有输入、有产物、有验收和回滚点的部署任务。
+本节关注资料进入线上知识服务时怎样保持来源、版本和可撤回性。切分粒度、语义边界和 chunk 算法的完整比较见[第三册 RAG 文档与切分篇](../../book-03-practical-handbook/chapters/07-rag项目实战-1-文档与检索.md)；这里把解析和切分视为一项有输入、有产物、有验收和回滚点的部署任务。
 
 ### 2.1 先定义输入和产物的身份
 
@@ -370,7 +370,7 @@ runbook 应从 request_id 找到实际 revision，再沿检索、组装、模型
 
 候选版本还应可被重复构建和比较。记录输入 manifest、构建容器/解析器版本、embedding 请求配置、索引参数和评测样本 hash 后，维护者才能判断相同 revision 重建为何出现不同数量或延迟。目标存储引擎可能有非确定性并发和压缩行为，不能假定 hash 相同就意味着内部布局完全一致；发布验收关心的是可见文档、权限结果、检索候选和服务行为在约定误差内一致，并记录无法稳定重现的指标。
 
-需要逐步推导解析、chunk、embedding、融合、重排、证据选择和 RAGAS/ARES 等评估方法时，转到第三册第七章的[文档与切分](../../book-03-practical-handbook/chapters/07-rag项目实战-1-文档与切分.md)、[检索与上下文](../../book-03-practical-handbook/chapters/07-rag项目实战-2-检索与上下文.md)、[候选重排](../../book-03-practical-handbook/chapters/07-rag项目实战-3-候选重排.md)、[引用与证据](../../book-03-practical-handbook/chapters/07-rag项目实战-4-引用与证据.md)、[评估指标](../../book-03-practical-handbook/chapters/07-rag项目实战-5-评估指标.md)和[失败归因与报告](../../book-03-practical-handbook/chapters/07-rag项目实战-6-失败归因与报告.md)；长上下文检索和 RAG 方法路线见[第二册第 7 章](../../book-02-advanced-100/chapters/07-长上下文rag与agent.md)，评估设计与不确定性见第七册。GraphRAG、Agentic RAG、工具规划和注入防护的机制分别转到[第十七册 Agentic RAG](../../book-17-agent-tool-use/chapters/06-agentic-rag.md)、[工具调用](../../book-17-agent-tool-use/chapters/02-tool-use与function-calling.md)和[Agent 安全](../../book-17-agent-tool-use/chapters/11-agent安全.md)。这些主讲入口不意味着方法可直接上线；目标语料、权限、runtime 和负载仍需本章的版本回放与发布门禁。
+需要逐步推导解析、chunk、embedding、融合、重排、证据选择和 RAGAS/ARES 等评估方法时，转到第三册第七章的[文档与切分](../../book-03-practical-handbook/chapters/07-rag项目实战-1-文档与检索.md)、[检索与上下文](../../book-03-practical-handbook/chapters/07-rag项目实战-1-文档与检索.md)、[候选重排](../../book-03-practical-handbook/chapters/07-rag项目实战-2-重排与证据.md)、[引用与证据](../../book-03-practical-handbook/chapters/07-rag项目实战-2-重排与证据.md)、[评估指标](../../book-03-practical-handbook/chapters/07-rag项目实战-3-评估与失败归因.md)和[失败归因与报告](../../book-03-practical-handbook/chapters/07-rag项目实战-3-评估与失败归因.md)；长上下文检索和 RAG 方法路线见[第二册第 7 章](../../book-02-advanced-100/chapters/07-长上下文rag与agent.md)，评估设计与不确定性见第七册。GraphRAG、Agentic RAG、工具规划和注入防护的机制分别转到[第十七册 Agentic RAG](../../book-17-agent-tool-use/chapters/06-agentic-rag.md)、[工具调用](../../book-17-agent-tool-use/chapters/02-tool-use与function-calling.md)和[Agent 安全](../../book-17-agent-tool-use/chapters/11-agent安全.md)。这些主讲入口不意味着方法可直接上线；目标语料、权限、runtime 和负载仍需本章的版本回放与发布门禁。
 
 ## 8. Agent 和普通 Chat 的区别
 

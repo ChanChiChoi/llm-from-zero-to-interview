@@ -25,7 +25,7 @@
 
 | 查询主题 | 完整主讲入口 |
 | --- | --- |
-| 词表训练、BPE、WordPiece、Unigram、字节覆盖和 tokenizer 评测 | [第二册第三章：Tokenization 与预训练进阶](../../book-02-advanced-100/chapters/03-tokenization数据与预训练进阶.md)；训练预算账本见[第五册第三章](../../book-05-llm-training/chapters/03-tokenizer与数据格式.md) |
+| 词表训练、BPE、WordPiece、Unigram、字节覆盖和 tokenizer 评测 | [第二册第三章：Tokenization 与预训练进阶](../../book-02-advanced-100/chapters/03-tokenization数据与预训练进阶.md)；训练预算记录见[第五册第三章](../../book-05-llm-training/chapters/03-tokenizer与数据格式.md) |
 | Special token、EOS/PAD、chat template、label mask 和工具调用格式 | [第五册第三章：Tokenizer 与数据格式](../../book-05-llm-training/chapters/03-tokenizer与数据格式.md) |
 | Tokenizer、模板与监督格式的故障定位 | [第十九册第三章：Tokenizer 与格式坑](../../book-19-practitioner-playbook/chapters/03-tokenizer与格式坑.md) |
 | 预训练目标、有效预测 token 和损失口径 | [本册第 06 章：预训练与数据](06-预训练与数据.md)、[第五册第三章：Tokenizer 与数据格式](../../book-05-llm-training/chapters/03-tokenizer与数据格式.md) |
@@ -80,7 +80,7 @@ chat template
 
 只保存原始字符串而不保存这些配置，无法保证以后得到相同的模型输入。对一个已训练模型来说，tokenizer 不是可以随手替换的 UI 组件，而是模型参数语义的一部分。
 
-### token 数量与计算账本
+### token 数量与计算开销
 
 一段文本 x 被编码后得到长度 T(x)。一个 batch 的有效 token 数可以写成：
 
@@ -118,7 +118,7 @@ padding waste 可以用下面的比例表示：
 
 ### 一个不依赖 tokenizer 的成本估算
 
-下面的标准库代码演示如何把不同样本的 token 长度转成 padding waste 和平均长度。它不模拟切分算法，只验证成本账本。
+下面的标准库代码演示如何把不同样本的 token 长度转成 padding waste 和平均长度。它不模拟切分算法，只计算相应的成本。
 
 ~~~python
 def padding_report(lengths):
@@ -596,7 +596,7 @@ T_{\mathrm{in}}+T_{\mathrm{visible}}+T_{\mathrm{hidden}}
 \le C.
 ~~~
 
-T_in 应包含本次输入中实际计入窗口的历史、工具结果、模板和多模态位置。如果接口的输出上限已经包含可见输出和隐藏输出，就只加这一个总上限，不能再加一次 T_hidden。例如输入 600、可见预留 200、隐藏预留 100，总计 900；若输出预算字段已经为 300，总计仍是 900。未来工具结果进入下一次调用后应重新计算输入账本。窗口占用、输出上限和计费是不同口径，具体 API 的计数规则须以其文档为准。
+T_in 应包含本次输入中实际计入窗口的历史、工具结果、模板和多模态位置。如果接口的输出上限已经包含可见输出和隐藏输出，就只加这一个总上限，不能再加一次 T_hidden。例如输入 600、可见预留 200、隐藏预留 100，总计 900；若输出预算字段已经为 300，总计仍是 900。未来工具结果进入下一次调用后应重新计算输入 token 数。窗口占用、输出上限和计费是不同口径，具体 API 的计数规则须以其文档为准。
 
 ### 截断策略
 

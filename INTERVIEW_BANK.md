@@ -3365,16 +3365,15 @@
      考察点：可信身份、任务范围、权限决定、人工确认、下游业务授权、执行隔离、出站控制、提示注入和审计隐私。
      回答框架：由运行时基于可信主体、任务、动作、资源、环境和副作用构造权限请求，模型只能提出动作，不能自报用户或租户权限。策略在执行前给出 allow / ask / deny；缺少高影响动作规则时暂停或拒绝。人工确认展示具体目标和副作用，并绑定一次性动作、资源版本及短有效期；实际执行前再次核对策略和目标，下游服务还要检查业务授权。沙箱由操作系统或受管执行环境落实，分别限制文件、网络、身份、凭据和资源，并覆盖文件工具、Shell、MCP 等所有入口；容器、沙箱 ID 或提示标记本身不证明隔离生效。Trace 记录身份、任务、规范化动作、策略版本、确认 ID、环境和结果，但不记录 Secret 原文。评估时分别报告策略覆盖、拒绝后副作用、审批精确匹配和隔离覆盖，注明分子、分母与 N/A，不合成通用安全分数或 gate。
 40K. 如何设计和审计 Coding Agent 的 Trace、日志、回放与可观测性？
-     考察点：trace schema、span tree、artifact、version、replay、privacy masking、error attribution、final consistency、metrics、eval export。
-     回答框架：Trace 要记录一次 agent run 的完整链路，而不是只保存最终回答。任务级字段包括 trace id、session、task、workflow、状态、开始/结束时间和环境摘要；span 级字段包括 span id、parent、类型、时间、状态、输入/输出摘要、artifact ref、错误类型和 root cause；artifact 保存 diff、截断命令输出、截图、长工具结果等大对象；版本字段要覆盖模型、prompt、工具 registry、git commit、sandbox 镜像和权限策略。Replay 分只读、模拟和真实三层，真实 replay 需要环境快照、确定性工具结果、沙箱和权限策略。审计指标包括 trace schema completeness、span schema completeness、span tree validity、timeline validity、artifact reference coverage、version capture coverage、replay readiness rate、privacy masking coverage、error attribution coverage、final status consistency、metric export coverage、eval export coverage 和 trace replay gate。
-
+     考察点：trace/session/task/run 的范围，span/event/log/metric/artifact 的分工，执行证据，状态层次，三种 replay，采样、指标分母和隐私边界。
+     回答框架：Trace 关联一次运行中的 spans、时间点事件及跨服务因果关系；span 表示持续操作，event 表示某时刻发生的决定，log 提供细节，metric 聚合多次运行，artifact 保存需独立授权的大内容。明确系统如何定义 trace、session、task、attempt 和 span ID，不能把关联 ID 当成身份或权限证明。记录模型/工具提议、策略决定、执行器回执、版本、错误/重试/取消、验证器结果及 Artifact 引用，并区分 span 状态、工具结果和 Task 状态；模型自述不是副作用证据。回放分只读查看、固定回执模拟和隔离重跑；真实重跑要恢复与目标相称的环境和 fixture，封锁默认外部副作用并按当前策略重新授权，历史审批不复用。内容采集先做最小化，敏感正文按需显式 opt in，脱敏必须在数据离开信任边界前完成，失败时验证 fail-closed；核对具体 SDK 默认值、processor 顺序和 exporter 行为。指标逐项声明样本单位、分母、N/A 与 unknown；采样说明遗漏偏差，避免将高基数 ID 放入 metric 标签，也不汇总成通用 trace/replay gate。
 40L. 如何设计和审计 Coding Agent 的 Evaluation Harness？
-     考察点：dataset bucket、environment reset、validator、trajectory、baseline fairness、regression、safety、cost、flaky、report。
-     回答框架：Evaluation Harness 不是只跑 benchmark，而是自动加载任务集、初始化 repo / sandbox 环境、运行 agent、收集 trace / artifacts、调用验收器、计算指标、保存结果、对比 baseline 并生成回归报告。Agent eval 的任务 schema 要包含 task type、初始环境、允许工具、权限策略、成功条件、timeout、风险标签和样本权重；成功条件不能只看最终回答，要看测试、diff scope、guardrails、trace 和最终总结是否一致。审计指标包括 eval dataset bucket coverage、environment reproducibility、validator coverage、weighted task success、partial success score、diff scope safety、trace coverage、baseline fairness、regression pass rate、unsafe execution rate、cost budget pass rate、flaky task rate、eval version capture、eval report completeness 和 evaluation harness gate。
+     考察点：任务夹具与尝试的单位、环境预检、独立验收器、结果/环境/评分故障的区分、成对比较、公平性、安全副作用、成本、重复运行和报告边界。
+     回答框架：先固定 task fixture，包括仓库初始状态、目标、允许范围、环境和 hard success 条件；为每份系统配置记录模型、提示词、Runtime、工具、权限与预算版本。每个 attempt 从干净快照启动，先做环境预检，失败则记为基础设施故障而不是 Agent 失败。功能测试、diff/过程约束和安全检查分别给出证据；将有效任务判定、运行错误、评分错误和无法判定分开，并逐项声明分母。Baseline 与 candidate 在相同任务、环境、权限、验收条件和预算下成对比较；若多个组件同时变化，结论归于整份配置。报告分桶、失败样例、Trace/Artifact、成本、重复运行波动和未覆盖范围，不汇总成无业务依据的通用 gate。
 
-40M. 如何从公开资料分析 Claude Code 类 Coding Agent 架构？
-     考察点：资料边界、CLI 控制面、session、context、工具、权限、sandbox、memory、hooks、MCP、trace、eval readiness。
-     回答框架：先声明边界：只把官方文档和可观察产品行为当作确定证据，闭源内部 planner、prompt、排序策略和隐藏状态只能作为系统设计推断，不能说成官方实现。再按 terminal coding agent 的 harness 拆：CLI / slash command 是产品控制面，session manager 管长任务状态，context builder 选择用户目标、规则、文件、diff、工具结果和 memory，model adapter 调用模型，action parser / tool registry / execution engine 把模型动作变成受控文件、搜索、编辑和终端工具，permission / sandbox 负责最小权限、secret、网络、不可逆动作和人工确认，trace / local transcript / eval harness 负责复盘和回归。审计指标可以看 architecture evidence coverage、required module coverage、access governance、core loop governance、permission control、state recovery、extension governance、observability、architecture eval readiness、high-risk surface governance 和 Claude Code architecture gate。核心观点是：分析真实 coding agent 产品时，不能只讲“模型会写代码”，要证明公开证据、runtime 边界、安全治理、trace 和评估都成立。
+40M. 如何从公开资料分析 Claude Code 架构？
+     考察点：公开来源与推断边界、产品表面和执行环境、gather/action/verify、上下文与状态、工具权限与 OS sandbox、扩展、trace 和独立验收。
+     回答框架：先限定文档日期、版本、表面和执行环境。官方资料可支持产品公开描述；具体运行记录只支持那次观察；把职责拆成 context、tool execution、policy、state 等层是分析模型，不是源码图；隐藏 planner、完整 system prompt 和内部路由若无新证据就保留为未知。沿一项合成登录测试修复任务，区分模型提出动作、产品规则或用户批准、工具真实执行、文件 diff、测试回执和独立任务验收。项目说明与 Auto memory 是上下文，settings 会影响产品行为；产品权限规则不等于 OS 级隔离，当前文档中的本机 sandbox 只约束特定 shell 命令及其子进程，MCP、hooks 等路径要另查。最后用固定任务、环境和 verifier 做评估，不把一项演示或任意覆盖率合成为通用 gate。
 
 40N. 如何从 OpenCode 分析开源 Coding Agent Runtime？
      考察点：open runtime、config、agents、tools、permissions、MCP、custom tools、server、SDK、snapshot、compaction、eval readiness。
@@ -6471,7 +6470,7 @@
 3. **问：工具请求超时后，为什么不能创建新的业务请求重试？**
    **答：** 下游可能已经提交，只是回执丢失。保持原 request ID 与幂等键，把状态记为 `committed_unknown`，先查询同一事务；确认已提交才补记成功，确认未提交后再按下游合同重试，仍未知则保持处理中或转人工。幂等键防止重复副作用，但不替代身份、资源授权和参数校验。
 
-依据：[第六册第九章](book-06-llm-deployment/chapters/09-rag与agent部署.md)、第三册 [RAG 检索与上下文](book-03-practical-handbook/chapters/07-rag项目实战-2-检索与上下文.md)、[引用与证据](book-03-practical-handbook/chapters/07-rag项目实战-4-引用与证据.md)和[失败归因与报告](book-03-practical-handbook/chapters/07-rag项目实战-6-失败归因与报告.md)、[第十七册工具调用](book-17-agent-tool-use/chapters/02-tool-use与function-calling.md)。
+依据：[第六册第九章](book-06-llm-deployment/chapters/09-rag与agent部署.md)、第三册 [RAG 检索与上下文](book-03-practical-handbook/chapters/07-rag项目实战-1-文档与检索.md)、[引用与证据](book-03-practical-handbook/chapters/07-rag项目实战-2-重排与证据.md)和[失败归因与报告](book-03-practical-handbook/chapters/07-rag项目实战-3-评估与失败归因.md)、[第十七册工具调用](book-17-agent-tool-use/chapters/02-tool-use与function-calling.md)。
 
 ## 第六册第十五章：FP4、MXFP4 与 NVFP4
 

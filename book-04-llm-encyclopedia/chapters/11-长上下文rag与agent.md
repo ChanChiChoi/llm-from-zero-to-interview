@@ -14,7 +14,7 @@
 | 11.2 上下文预算、压缩与排序 | [第二十册第 7 章：上下文管理与记忆压缩](../../book-20-agent-harness-runtime/chapters/07-上下文管理与记忆压缩.md)、[第 18 章：Context Folding](../../book-20-agent-harness-runtime/chapters/18-context-folding上下文折叠.md) |
 | 11.3–11.6 RAG、检索、证据与引用 | [第二册第七部分](../../book-02-advanced-100/chapters/07-长上下文rag与agent.md)、[第十七册第 6 章：Agentic RAG](../../book-17-agent-tool-use/chapters/06-agentic-rag.md)、[第七册第 12 章：评估体系综合设计](../../book-07-evaluation-experiments/chapters/12-评估体系综合设计与工程落地.md) |
 | 11.7–11.8 Agent 状态、循环与规划 | [第十七册第 1 章：Agent 总览](../../book-17-agent-tool-use/chapters/01-agent总览.md)、[第 3 章：ReAct 与 Plan-Act-Observe](../../book-17-agent-tool-use/chapters/03-react与plan-act-observe.md)、[第 4 章：Planning 与 Task Decomposition](../../book-17-agent-tool-use/chapters/04-planning与task-decomposition.md)、[第二十册第 2 章：Agent Runtime 架构](../../book-20-agent-harness-runtime/chapters/02-agent-runtime架构.md) |
-| 11.9–11.10 工具契约、重试与副作用 | [第十七册第 2 章：Tool Use 与 Function Calling](../../book-17-agent-tool-use/chapters/02-tool-use与function-calling.md)、[第二十二册第 3 章：Tool Schema](../../book-22-tool-protocol-ecosystem/chapters/03-tool-schema-json-schema与参数约束.md)、[第 7 章：失败、重试与人工接管](../../book-22-tool-protocol-ecosystem/chapters/07-工具调用失败重试降级和人工接管.md)、[第 11 章：Tool Executor 与幂等](../../book-22-tool-protocol-ecosystem/chapters/11-tool-executor同步异步超时和幂等.md) |
+| 11.9–11.10 工具接口、重试与副作用 | [第十七册第 2 章：Tool Use 与 Function Calling](../../book-17-agent-tool-use/chapters/02-tool-use与function-calling.md)、[第二十二册第 3 章：Tool Schema](../../book-22-tool-protocol-ecosystem/chapters/03-tool-schema-json-schema与参数约束.md)、[第 7 章：失败、重试与人工接管](../../book-22-tool-protocol-ecosystem/chapters/07-工具调用失败重试降级和人工接管.md)、[第 11 章：Tool Executor 与幂等](../../book-22-tool-protocol-ecosystem/chapters/11-tool-executor同步异步超时和幂等.md) |
 | 11.11–11.12 MCP | [第二十二册第 18 章：MCP 基本概念](../../book-22-tool-protocol-ecosystem/chapters/18-mcp基本概念client-server-tools-resources-prompts.md)、[第 21 章：Resources](../../book-22-tool-protocol-ecosystem/chapters/21-mcp-resources文件数据库网页和上下文资源暴露.md)、[第 22 章：Prompts](../../book-22-tool-protocol-ecosystem/chapters/22-mcp-prompts可复用提示模板和工作流封装.md)、[第 23 章：权限与沙箱](../../book-22-tool-protocol-ecosystem/chapters/23-mcp权限安全和本地沙箱.md)、[第二十册第 14 章：MCP/A2A 与 Harness 集成](../../book-20-agent-harness-runtime/chapters/14-mcp-a2a与harness集成.md) |
 | 11.13 A2A | [第二十二册第 26 章：Agent Card](../../book-22-tool-protocol-ecosystem/chapters/26-agent-card能力声明和服务发现.md)、[第 27 章：任务委派](../../book-22-tool-protocol-ecosystem/chapters/27-agent间任务委派状态同步和结果返回.md)、[第 28 章：消息与上下文边界](../../book-22-tool-protocol-ecosystem/chapters/28-multi-agent协作中的消息格式和上下文边界.md)、[第 29 章：A2A 与 MCP 分工](../../book-22-tool-protocol-ecosystem/chapters/29-a2a与mcp的分工agent-to-agent-vs-agent-to-tool.md)、[第 30 章：身份、权限与信任](../../book-22-tool-protocol-ecosystem/chapters/30-跨agent权限身份审计和信任模型.md)、[第二十册第 14 章](../../book-20-agent-harness-runtime/chapters/14-mcp-a2a与harness集成.md) |
 | 11.14 Memory | [第十七册第 5 章：Memory 系统](../../book-17-agent-tool-use/chapters/05-memory系统.md)、[第二十册第 7 章](../../book-20-agent-harness-runtime/chapters/07-上下文管理与记忆压缩.md) |
@@ -54,7 +54,7 @@
 n_{\mathrm{in}}+n_{\mathrm{out}}\leq L.
 ~~~
 
-这个不等式只描述接口是否接受请求。它没有说明模型是否能找到位于中间的证据，也没有说明一次请求的延迟和价格是否可以接受。更准确的系统账本还应记录系统提示 `n_sys`、历史 `n_hist`、检索证据 `n_evi`、工具结果 `n_tool` 和用户问题 `n_user`：
+这个不等式只描述接口是否接受请求。它没有说明模型是否能找到位于中间的证据，也没有说明一次请求的延迟和价格是否可以接受。要准确计算上下文占用，还应分别记录系统提示 `n_sys`、历史 `n_hist`、检索证据 `n_evi`、工具结果 `n_tool` 和用户问题 `n_user`：
 
 ~~~math
 n_{\mathrm{in}}
@@ -458,7 +458,7 @@ Anthropic 的工程文章 [Building effective agents](https://www.anthropic.com/
 
 遇到工具错误或新证据时，系统可能需要改变计划。重规划前要保留已完成动作和不可逆副作用，不能像改一段文本一样把过去的外部操作抹掉。对于资金、删除、发布和权限变更，重规划应先进入确认或补偿流程。
 
-## 11.9 工具契约：Schema、选择与参数语义
+## 11.9 工具接口：Schema、选择与参数含义
 
 ### Function calling 的本质
 
@@ -636,7 +636,7 @@ MCP 解决了“能力如何发现、消息如何表达和请求能力如何协�
 
 ### 请求生命周期与能力协商
 
-2026-07-28 规范概览采用自包含无状态请求和逐请求能力协商，因此不应把 2025-06-18 的连接初始化模型当作现行契约。调用方仍须确认特定请求依赖的能力或可选扩展已协商；不同版本并存时，应由版本适配层处理差异。进度、取消和错误应进入 trace，否则超时后的半完成任务无法恢复。
+2026-07-28 规范概览采用自包含无状态请求和逐请求能力协商，因此不应把 2025-06-18 的连接初始化模型当作现行规则。调用方仍须确认特定请求依赖的能力或可选扩展已协商；不同版本并存时，应由版本适配层处理差异。进度、取消和错误应进入 trace，否则超时后的半完成任务无法恢复。
 
 ### MCP 的工程评估
 
@@ -797,7 +797,7 @@ except ValueError:
 
 ### 四类对象的职责
 
-RAG 提供带来源的外部证据，Tool 提供可执行的输入输出契约，Agent 负责根据目标和状态选择下一步，Memory 保存跨步骤或跨会话的部分状态。四者组合后，任何一类错误都可能被另一类放大：错误检索会诱导错误工具参数，工具结果写入记忆会造成长期污染，过长记忆又会让 Agent 忽略当前证据。
+RAG 提供带来源的外部证据，Tool 定义可执行操作的输入和返回结果，Agent 负责根据目标和状态选择下一步，Memory 保存跨步骤或跨会话的部分状态。四者组合后，任何一类错误都可能被另一类放大：错误检索会诱导错误工具参数，工具结果写入记忆会造成长期污染，过长记忆又会让 Agent 忽略当前证据。
 
 ### 优先级与数据流
 

@@ -39,3 +39,17 @@
 - **证据等级：** source-backed（NIST 发布的自愿风险管理框架及其建议）。
 - **边界：** 这是治理建议，不是强制标准、产品认证、特定评分器或发布阈值；组织仍须按领域与风险定义具体指标。
 - **未解决问题：** NIST 建议如何映射为某一企业客服系统的具体验收门槛，需由业务、风险和领域负责人共同确定。
+
+## 2026-11-18 补充核验：评估产品生命周期与确定性测试边界
+
+### OpenAI Evals 平台生命周期
+
+- **来源与核验日期：** OpenAI 官方 [Working with evals](https://developers.openai.com/api/docs/guides/evals)，2026-11-18 访问。
+- **来源支持的事实：** 当前动态指南说明 OpenAI 正在弃用 Evals 平台，已有 evals 从 2026-10-31 起只读，计划于 2026-11-30 关闭；指南建议新建评估的用户考虑 Datasets。
+- **证据边界：** 这是单一供应商对平台生命周期的当前说明，不表示数据集、grader、运行与对照等一般评估概念失效，也不能据此推断其他平台或本地 harness 的生命周期。
+
+### OpenAI Agents SDK 的内存态测试与集成测试边界
+
+- **来源与核验日期：** OpenAI Agents SDK 官方 [Testing 文档](https://openai.github.io/openai-agents-python/testing/)，2026-11-18 访问；阅读测试范围、选择测试边界和 sandbox recipe 的说明。
+- **来源支持的事实：** 文档描述 deterministic、provider-neutral 的 testing utilities 在内存中运行，不发出 model、sandbox-provider 或 Realtime API 请求；可测试 SDK/应用拥有的规范化 orchestration 交互，如工具执行、handoff、guardrail、重试、session 等。文档要求由真实 provider adapter 或 integration environment 覆盖真实模型、provider protocol、网络、sandbox provider、进程执行、文件系统保真、持久化、资源限制和隔离行为。
+- **证据边界：** source-backed（OpenAI Agents SDK 动态文档）。这是该 SDK 当前测试工具的范围，不是通用测试金字塔，也不证明任何脚本测试已覆盖外部组件。使用时需要核验锁定 SDK 版本、instrumentation 配置和真实集成环境。

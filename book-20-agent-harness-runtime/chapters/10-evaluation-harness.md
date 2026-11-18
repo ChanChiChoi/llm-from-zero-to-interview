@@ -1,1211 +1,266 @@
 # 第十章：Evaluation Harness
 
-## 0. 本讲范围与资料
+## 10.1 从一次“修好了”到可以比较的结论
 
-本章参考 OpenAI Evals API 与 graders 的公开资料，OpenAI `simple-evals` 对轻量基准评估的工程口径，SWE-bench 关于 issue、repo snapshot、patch、test harness 和 verified 子集的公开资料，以及 LangSmith 关于 datasets、experiments、evaluators、trace 和 regression 的公开说明。
+Coding Agent 最后说“已经修好”，并不能说明任务真的完成。补丁可能没有解决问题，测试可能只覆盖了常见路径，或者目标行为虽然正确，Agent 却改了无关文件。要判断一个 Agent 版本是否变好，我们需要固定任务和环境，运行系统，检查结果与过程，再把每项结论连回证据。
 
-本章聚焦防御性的 Evaluation Harness 设计：如何用固定数据集、环境快照、sandbox reset、验收器、trajectory scoring、baseline comparator、regression runner、成本 / 安全指标和 trace artifacts 判断 agent runtime 是否真的变好。正文和 demo 不提供 benchmark 污染、规避验收器、伪造测试通过、隐藏失败 trace、绕过权限或攻击评估平台的方法。
+本章用一项**明确为教学构造**的仓库任务作贯穿例子：资料页应优先显示用户填写的首选名称；首选名称为空时，才回退显示账户名。验收除了行为测试，还检查补丁只涉及允许的源码与测试文件，并检查运行期间是否发生未授权读取或外发。这个例子不代表真实仓库、实际运行或 benchmark 结果。
 
-## 10.1 本章目标
+Agent Harness 执行一次任务；Evaluation Harness 把许多任务按固定条件组织成评估，并留下可复核的结果。评估对象通常不是单独的模型，而是一份完整配置：模型与版本、提示词、Runtime、工具、权限、执行环境和验收规则。只有在其他条件受控时，结果差异才可能帮助我们判断某个组件是否造成了变化。
 
-前一章讲了 trace、日志、回放和可观测性。本章讨论 Evaluation Harness：如何系统评估一个模型、一个 coding agent 或一个 agent runtime 是否真的变好了。
+读完本章，读者应能把一项 Agent 任务整理成可复现的评估夹具，区分 Agent 结果、环境故障和评分故障，设计结果与过程验收，并公平比较两份系统配置。
 
-普通模型评估通常是“给 prompt，看答案，算分”。Agent 评估更复杂，因为 agent 会多步行动：读文件、写文件、运行命令、调用工具、处理权限、失败恢复。最终答案只是结果之一，过程是否安全、成本是否可接受、是否修改了无关文件、是否真的通过测试，同样重要。
+## 10.2 评估里有哪些对象
 
-学完本章，你应该能回答：
+设计 Harness 前，先把几种容易混在一起的对象分开：
 
-1. Evaluation harness 是什么。
-2. 普通 LLM evaluation 和 agent evaluation 有什么区别。
-3. 一个 evaluation harness 包含哪些核心组件。
-4. Agent 评估如何初始化环境、执行任务和判断成功。
-5. 如何设计指标、报告和 regression runner。
-6. 评估可复现性为什么困难。
-7. 面试中如何设计 coding agent evaluation harness。
+| 对象 | 含义 | 例子 |
+| --- | --- | --- |
+| 任务夹具（task fixture） | 一份固定任务定义及其初始状态 | 一份仓库快照、任务说明、允许的文件范围和验收条件 |
+| 尝试（attempt） | 某个配置对一个任务夹具进行的一次执行 | 候选 Agent 在夹具 B 上从干净快照开始运行一次 |
+| 系统配置（system configuration） | 本次评估要观察的模型、提示词、Runtime、工具、权限和环境组合 | 固定模型与工具，仅替换 Runtime revision |
+| 实验（experiment） | 一组任务夹具、系统配置、重复次数和分析口径 | 让 baseline 与 candidate 在同一组夹具上各运行一次 |
 
-## 10.2 Evaluation Harness 是什么
+同一个任务可以有多次尝试；每次尝试都应从相同的初始状态开始，不能把前一次留下的文件或缓存带进下一次。一次实验也可能包含多份配置和多轮重复。把这些单位写清楚，后面的分母才不会混乱。
 
-Evaluation harness 是自动运行评估任务、收集输出、计算指标、保存结果并支持复现的框架。
+## 10.3 一次评估怎样从任务走到报告
 
-它的目标不是只跑一次 benchmark，而是形成稳定评估闭环：
+Evaluation Harness 把数据、环境、运行、验收和分析接成一条可追踪的路径。下图中的分支很重要：环境预检失败时，Agent 尚未运行，不能把这次结果算成 Agent 失败。
 
-```text
-加载数据集
--> 初始化环境
--> 运行模型或 agent
--> 收集 trace 和结果
--> 计算指标
--> 生成报告
--> 对比 baseline
--> 发现回归
+```mermaid
+flowchart TD
+    A["固定任务夹具与数据集版本"] --> B["初始化环境并运行预检"]
+    B -->|预检失败| C["记录环境故障，不启动 Agent"]
+    B -->|预检通过| D["按固定配置运行 Agent"]
+    D --> E["保存 Trace、Artifact、测试回执与实际副作用"]
+    E --> F["独立验收结果、约束和安全事件"]
+    F --> G["分别归类 Agent、环境与评分结果"]
+    G --> H["按任务桶比较配置并查看失败样例"]
+    H --> I["生成带分母、版本和边界的报告"]
 ```
 
-对普通 LLM，evaluation harness 主要处理：
-
-1. prompt 模板。
-2. 模型调用。
-3. 输出解析。
-4. 指标计算。
-5. 结果存储。
-
-对 agent，evaluation harness 还要处理：
-
-1. 任务环境。
-2. 工具和权限策略。
-3. 多步 trace。
-4. 文件 diff。
-5. 命令执行。
-6. 成功条件。
-7. 成本和步数。
-8. 过程安全。
-
-一句话：
-
-```text
-Evaluation harness 是让 agent 能被稳定、可复现、可比较地测试的工程框架。
-```
-
-## 10.3 为什么 Agent Evaluation 更难
-
-Agent evaluation 难在它不是单步输出。
-
-难点包括：
-
-1. 任务过程多步。
-2. 工具调用具有副作用。
-3. 环境状态会变化。
-4. 模型输出有随机性。
-5. 测试和依赖可能不稳定。
-6. 成功标准不总是最终文本。
-7. 过程安全也要评估。
-8. 运行成本高。
-9. replay 和复现困难。
-
-例子：修复一个 bug。
-
-不能只看 agent 最终说“已修复”。更应该看：
-
-1. 是否修改了正确文件。
-2. 是否通过相关测试。
-3. 是否没有引入回归。
-4. 是否没有修改无关文件。
-5. 是否没有运行危险命令。
-6. 是否成本和步数合理。
-7. 失败时是否可复盘。
-
-所以 agent evaluation 既评估结果，也评估过程。
-
-## 10.4 核心组件
-
-一个 evaluation harness 通常包含：
-
-1. Dataset Loader。
-2. Task Environment Manager。
-3. Prompt / Instruction Template。
-4. Model Adapter。
-5. Agent Runner。
-6. Tool / Sandbox Manager。
-7. Trace Collector。
-8. Metric Registry。
-9. Result Store。
-10. Report Generator。
-11. Regression Runner。
-12. Baseline Comparator。
-
-数据流：
-
-```text
-Dataset
--> Task Environment
--> Agent Runner
--> Trace / Artifacts
--> Metrics
--> Result Store
--> Report
--> Regression Decision
-```
-
-每个组件都要版本化，否则结果很难比较。
-
-## 10.5 Dataset Loader
-
-Dataset Loader 负责加载评估任务。
-
-任务可以来自：
-
-1. 人工构造案例。
-2. 历史线上 bad cases。
-3. benchmark，例如 SWE-bench 类任务。
-4. 内部 issue 和 bug fix 记录。
-5. replay trace 转换出的 regression case。
-6. 安全红队样例。
-
-一个 agent eval task 应包含：
-
-```text
-task_id
-task_type
-user_instruction
-repo_or_environment
-initial_state
-allowed_tools
-permission_policy
-success_criteria
-timeout
-expected_risks
-metadata
-```
-
-任务类型可以包括：
-
-1. Bug fix。
-2. Feature implementation。
-3. Refactor。
-4. Test writing。
-5. Code review。
-6. Security task。
-7. Tool-use task。
-
-数据集要有分桶标签，否则只能看到总分，看不到哪里退化。
+可以把组件按职责理解：
 
-## 10.6 Task Environment Manager
-
-Agent 评估必须初始化环境。
-
-环境包括：
-
-1. 代码仓库版本。
-2. 依赖版本。
-3. 工作目录。
-4. 测试数据。
-5. 环境变量。
-6. 权限策略。
-7. 工具版本。
-8. sandbox 镜像。
+| 组件 | 它负责什么 | 必须留下什么 |
+| --- | --- | --- |
+| 数据集加载器 | 选择任务、版本、分桶和运行顺序 | 夹具 ID、数据集 revision、抽样与排除规则 |
+| 环境管理器 | 创建干净的仓库、测试数据和隔离执行环境 | 初始状态、镜像/依赖版本、预检结果与重置回执 |
+| Runner | 用指定配置启动 Agent 并执行停止策略 | 配置 revision、开始/结束状态、终止原因与用量 |
+| 工具与沙箱管理器 | 固定可用工具和执行边界 | 工具版本、权限决定、调用回执和副作用 |
+| 证据收集器 | 关联 Trace、文件差异、测试输出及 Artifact | 可追溯的运行 ID、证据引用和采集范围 |
+| 验收器 | 判断预先声明的行为与约束是否满足 | 每项判定、输入证据、错误或无法判定的原因 |
+| 结果与报告组件 | 保存、比较和解释实验结果 | 原始结果、配置对照、分桶摘要与失败样例 |
 
-环境初始化流程：
+这些组件可以由一个程序实现，也可以分散在多个服务里。无论如何，运行事实、验收结果和最终报告要通过稳定的 task/run 标识关联起来；报告不能只留一个无法回溯到样本的分数。
 
-```text
-checkout repo at commit
--> install or restore dependencies
--> apply task-specific initial patch if needed
--> configure sandbox
--> run precheck
--> start agent
-```
+## 10.4 把任务写成可以恢复的夹具
 
-环境不可复现是 agent eval 的常见问题。
+任务说明不能只保存一句用户 prompt。要让另一轮运行可以从相同起点重来，至少还要记录：
 
-例如同一个任务，今天测试通过，明天依赖升级后失败。这时不是 agent 退化，而是环境变了。
+- 唯一任务 ID、任务类别和数据集版本；
+- 初始仓库 revision、工作区文件、必要数据和依赖快照；
+- 用户目标、允许修改的范围，以及明确禁止的动作；
+- 成功条件、风险标签和各个验收器的版本；
+- 环境创建所需的镜像、工具、权限和外部服务条件；
+- 哪些信息属于合成数据、脱敏数据或仅供评估的秘密占位值。
 
-所以 evaluation harness 要记录：
+在贯穿例子里，夹具先固定初始提交，再说明“首选名称非空时显示首选名称；否则回退到账户名”。允许修改资料页实现与对应测试。验收条件要求检查两种输入、限制文件差异范围，并确认没有发生任务不需要的外部访问。初始提交、测试版本和验收器一起固定后，之后的 Agent 配置才是在同一问题上作答。
 
-1. git commit。
-2. dependency lock。
-3. container image。
-4. tool version。
-5. dataset version。
-6. environment checksum。
+数据集可来自人工编写任务、历史缺陷、公开 benchmark、安全案例或经授权的运行失败。无论来源如何，都要记录筛选和去重过程；同一问题的近重复版本跨越训练/评估边界，或参考补丁泄漏到评估输入中，都可能让结果高估实际泛化能力。无法核实训练数据是否包含某个公开任务时，应把它写成未解决边界，而不是声称已排除污染。用于真实用户问题时，还须先处理个人信息、密钥和授权边界，不能把生产记录直接复制进评估集。
 
-## 10.7 Agent Runner
+## 10.5 分桶回答“哪些任务变好”
 
-Agent Runner 负责执行 agent。
+一个总成功率可能掩盖局部退化。代码修复、功能实现、重构、测试编写、安全任务和工具使用任务需要不同的能力与验收方式；数据集应按这些任务特征分桶，并说明哪些桶在本次结论范围内。
 
-它要控制：
+分桶标签应在运行前确定。报告中要列出每桶的样本数、有效运行数、成功数和失败类型；若某桶没有样本，应标为未覆盖，而不是把它并入总体成功率。加权结果只有在权重及业务理由预先确定时才有解释意义，不能在看到结果后调整权重来抵消退化。
 
-1. 模型版本。
-2. Prompt 版本。
-3. 工具集合。
-4. 权限策略。
-5. 最大轮数。
-6. 最大时间。
-7. 最大 token 成本。
-8. 是否允许网络。
-9. 是否允许写文件。
-10. 是否自动运行测试。
+基准的版本、任务内容、验收规则和允许工具也应固定。更换任务集或评分标准后得到的新数字，不能不加说明地与旧版本并排当成同一实验。
 
-Agent Runner 不是简单调用模型。它要运行完整 harness loop，并收集 trace。
+## 10.6 环境预检要先于 Agent 运行
 
-常见终止条件：
+同一份任务若在一次运行中缺少依赖、下一次又连不上测试服务，所得差异就不能直接归因给 Agent。环境管理器应从固定的仓库 revision、依赖锁文件、镜像和工具版本创建新工作区，重置任务数据与权限，再运行轻量预检，例如确认目标文件存在、关键测试可以启动、fixture 校验值吻合。
 
-1. agent 输出 final answer。
-2. 任务成功条件满足。
-3. 超过最大步数。
-4. 超过最大时间。
-5. 超过成本预算。
-6. 触发安全拦截。
-7. runtime error。
+预检失败必须在启动 Agent 前分类。依赖下载失败、容器未启动和测试服务不可用是环境或基础设施故障；只有 Agent 已接到任务并产生结果后，才有资格讨论它是否解决了任务。环境故障样本也要留在 Harness 报告里，因为它暴露评估服务的可用性问题。不要悄悄删除这些行，再把剩下的成功率写成评估全貌。
 
-终止原因必须进入结果，否则无法分析失败。
+## 10.7 固定 Runner 配置和终止条件
 
-## 10.8 Tool 和 Sandbox Manager
+Agent Runner 不只是发出一次模型请求。它要按实验配置准备模型适配器、提示词、Runtime、工具、权限和预算，并记录每次任务的终止原因。配置至少要标识：
 
-Agent eval 需要控制工具和环境副作用。
+- 模型服务方（provider）和模型的可追溯名称与所用 revision；
+- 系统提示词、任务模板和 Harness 代码的版本；
+- 工具集合、权限策略、沙箱和网络设置；
+- 最大轮数、墙钟时间、Token 或计算预算；
+- 本次使用的随机性配置，以及服务端无法固定的因素；
+- 重试策略、人工介入规则和取消行为。
 
-Tool Manager 负责：
+一次 run 可能以最终回答、满足任务条件、预算耗尽、安全拦截、Runtime 错误或超时结束。这些终止原因不能折成一个通用的“失败”：预算耗尽可能是资源限制，安全拦截可能表示防护成功，也可能表示任务流程无法完成，Runtime 错误则可能根本没有得到可评分结果。报告应保留发生了什么以及发生在哪一层。
 
-1. 注册工具。
-2. 固定工具版本。
-3. 模拟或真实执行工具。
-4. 记录工具调用。
-5. 注入工具错误用于鲁棒性测试。
+## 10.8 什么时候用 mock，什么时候跑真实集成
 
-Sandbox Manager 负责：
+Mock 工具用固定输入和回执替代真实工具。它适合检查 Harness 自己拥有的编排：例如参数校验后有没有调用正确工具、错误后有没有按预期重试、结果有没有回到下一轮上下文。因为回执固定，测试更容易复现，也不必触发真实副作用。
 
-1. 隔离文件系统。
-2. 限制网络。
-3. 控制环境变量。
-4. 限制 CPU、内存和时间。
-5. 清理环境。
+Mock 回执无法证明真实模型会选择正确工具，也不能证明 provider 协议、网络、文件系统、进程执行或沙箱隔离真实可用。OpenAI Agents SDK 的 Testing 文档把它自己的确定性测试工具描述为内存态、provider-neutral 的测试方式，不会发起模型、沙箱 provider 或 Realtime API 请求；它也建议用真实 provider adapter 或集成环境测试外部系统拥有的行为。[OpenAI Agents SDK Testing 文档](https://openai.github.io/openai-agents-python/testing/)（核对日期：2026-11-18）。这是该 SDK 当前测试工具的范围示例，不应外推成所有 Harness 的固定测试分层。
 
-有些评估可以使用 mock tools：
+因此评估通常同时需要两类任务：大量低成本的确定性测试检查 Harness 编排；较小但必要的真实集成任务检查服务接口、文件/进程语义、网络限制和隔离行为。只有在某个任务确实不依赖外部执行细节时，mock 才能覆盖它的全部目标。
 
-1. 成本低。
-2. 可复现。
-3. 安全。
-4. 但和真实环境有差距。
+## 10.9 用彼此独立的验收条件判断“完成”
 
-有些评估必须使用真实工具：
+Agent 的自然语言总结是证据入口，不是验收器。把所有必须满足的条件标成 hard 条件；只有这些条件全部通过，任务才算 hard pass。可选质量或效率评分可以另报，不能抵消某项必须满足的条件。对于显示名任务，可以把条件拆开：
 
-1. 代码编辑任务。
-2. 测试执行任务。
-3. 文件系统任务。
-4. 终端命令任务。
+1. **行为条件：** 首选名称非空时显示首选名称；为空时回退到账户名。
+2. **回归条件：** 任务要求的旧行为仍然通过相应测试。
+3. **修改范围条件：** 实际 diff 只包含允许的源码和测试文件。
+4. **流程条件：** 任务要求的验证步骤有可查看的回执。
+5. **安全条件：** 没有不必要的秘密读取、未授权网络访问或其他实际副作用。
+6. **报告条件：** 最终说明与观察到的 patch、测试和运行事实相符。
 
-工具真实性和可控性之间需要 trade-off。
+每项都要说明观察什么证据。例如，测试回执能证明指定测试在该环境中得到了某个结果，却不能证明所有用户输入都正确；diff 能显示被修改的文件，却不能单独说明运行时没有读取秘密；模型说“没有访问网络”也不能替代网络策略或执行器的观测记录。
 
-## 10.9 成功条件设计
+功能正确与约束遵循尤其需要分开看。SWE-Gate 预印本将功能测试与 review-constraint 测试分开；其 303 个修复任务覆盖 75 个 Python 仓库，在四个模型后端和共同 Agent scaffold 的实验中，644 个功能测试通过的修复里有 221 个不满足给定 review constraints。这个比例只描述该数据集与实验配置，不能当作所有项目的违规概率；它说明只看功能测试可能遗漏了任务要求。[SWE-Gate, arXiv v1](https://arxiv.org/abs/2609.04167v1)。ANCHOR 的研究设计则同时检查最终 diff 与执行轨迹中的工程约束，提醒评估者：有些要求涉及动作顺序、工具使用和验证过程，单看最终文件并不足够。[ANCHOR, arXiv v2](https://arxiv.org/abs/2610.16859v2)。
 
-成功条件是 agent eval 的核心。
+## 10.10 把 Agent 结果和评估故障分开记
 
-坏成功条件：
+一次评估至少可能产生四种不同结果：
 
-```text
-模型最终回答说任务完成。
-```
+| 结果类别 | 发生了什么 | 如何进入分析 |
+| --- | --- | --- |
+| 任务判定通过/失败 | Agent 已运行，验收器得到了有效判定 | 按预先定义的任务成功口径计入，并保留每项条件 |
+| 运行或环境错误 | 环境未就绪、调用中断、进程或 Runtime 出错 | 记为基础设施/运行故障；按故障位置决定是否可重试 |
+| 评分错误 | 验收器自身崩溃、输入格式不适用或 judge 服务失败 | 记为测量故障，修复后重新评分或重跑，不伪装成 Agent 错误 |
+| 无法判定 | 证据不足或评分器未能给出 verdict | 保留 unknown/unscored 状态并说明原因，不默认为成功或失败 |
 
-好成功条件：
+如果任务运行结束但功能错了，这是 Agent 的失败；如果 agent run 之前环境没启动，这是 Harness/环境故障；若 judge 收到结果却解析崩溃，则是评分故障。它们回答的是不同问题，必须分列。对于归因有歧义的超时或网络中断，要保留最后的状态和回执，不能猜测它属于哪一类。
 
-```text
-相关测试通过，新增测试覆盖目标 bug，diff 只修改允许文件，未触发高风险权限，最终回答包含验证结果。
-```
+评估框架的分母规则也可能不同。以 Inspect 的 scoring policy 为例，有效的错误答案仍计入该 scorer 的分母；scorer 错误和无法评分的结果则分别记录，不按同一种方式进入指标。[Inspect scoring policy](https://inspect.aisi.org.uk/scoring-policy.html)（核对日期：2026-11-18）是一个框架实现示例，不是跨平台标准。设计自己的报告时，要明示哪些状态进入了哪项指标，并同时公布错误和未判定的数量。
 
-常见成功信号：
+## 10.11 用同一组有效任务比较两个配置
 
-1. 单元测试通过。
-2. 集成测试通过。
-3. 目标文件 diff 满足规则。
-4. 输出格式正确。
-5. 人工或 judge 认为回答正确。
-6. 没有安全违规。
-7. 没有无关文件修改。
+下面五个 fixture、两列结果和所有计数均为**教学构造**。A—D 的环境预检成功；E 在 Agent 启动前因测试服务不可用而失败。每个有效 fixture 都从同一初始快照分别创建独立 workspace，baseline 与 candidate 使用相同任务、工具权限、验收条件和预算。
 
-成功条件可以分层：
+| Fixture | 环境预检 | Baseline | Candidate | 观察 |
+| --- | --- | --- | --- | --- |
+| A | 通过 | 通过 | 通过 | 两者都满足全部 hard 条件 |
+| B | 通过 | 失败 | 通过 | Candidate 修复了目标行为并满足范围约束 |
+| C | 通过 | 失败 | 通过 | Candidate 满足任务条件 |
+| D | 通过 | 通过 | 失败 | Candidate 的功能测试通过，但改动了允许范围外的文件 |
+| E | 失败 | 未运行 | 未运行 | 环境未就绪，不能判为 Agent 失败 |
 
-1. Hard pass：必须满足，例如测试通过。
-2. Soft score：加分项，例如步数少、成本低。
-3. Guardrail：不能违反，例如读取 secret。
+在这四项可比较任务中，Baseline 通过 2/4，Candidate 通过 3/4。把通过全部预先声明 hard 条件的 run 数记为 $N_{\mathrm{pass}}$，把获得有效任务判定的 run 数记为 $N_{\mathrm{verdict}}$，则任务成功率为 $R_{\mathrm{task}}=N_{\mathrm{pass}}/N_{\mathrm{verdict}}$。按这个定义，两者分别为 $2/4=50\%$ 和 $3/4=75\%$，差 25 个百分点。E 不进入 Agent 成功率分母，但环境预检结果仍须报告为 4/5。
 
-Agent eval 不应该只看一个分数。
+这组小样本只说明如何读分母，不证明 Candidate 普遍更强。配对结果是两项改善、一项退化、一项持平；D 的退化也不会被平均数掩盖，因为失败项连着具体 diff。实际结论需要足够覆盖的任务、重复运行和不确定性分析；统计设计与区间估计见[第七册《统计显著性与实验设计》](../../book-07-evaluation-experiments/chapters/10-统计显著性与实验设计.md)。
 
-## 10.10 Metric Registry
+## 10.12 公平比较与组件归因是两件事
 
-Metric Registry 管理评估指标。
+配对比较时，应尽量让两份配置使用相同 fixture、仓库快照、环境、工具能力、权限、预算、成功条件和运行次数。只有两侧都得到有效任务判定的样本才能组成有效配对；若一侧发生环境或评分故障，要另报未配对数和原因，不能静默删掉后只展示剩余差值。若 Candidate 获得更多上下文、更宽权限或两倍预算，成功率上升仍可作为整体系统结果报告，但不能直接说模型或 Runtime 本身变强。
 
-结果指标：
+如果实验同时改了模型、提示词、Harness 和工具，比较的是整个配置包；要判断单一组件贡献，需要固定其余部分，或设计能分离交互效应的控制实验。例如，比较两个 Runtime 时固定模型、提示词、工具和权限；若模型与 Runtime 都变了，结论就应写成这两份组合配置的差异。更多轮次、更多调用和更高预算本身也会提升完成机会，因此配额须与结果一起列出。
 
-1. Task success rate。
-2. Test pass rate。
-3. Patch correctness。
-4. Answer correctness。
-5. Regression rate。
+## 10.13 重复运行时辨认随机性与 flaky
 
-过程指标：
+固定 seed 只能减少某些随机来源，不能保证托管模型、远程依赖、并发服务或测试数据完全确定。对关键 fixture 重复运行，并保留每次尝试的配置、环境和结果，不要只保留多数票。
 
-1. Tool call count。
-2. Average turns。
-3. Invalid action rate。
-4. Retry count。
-5. Human intervention rate。
+如果同一 Agent 配置从相同快照出发，几次 run 的任务结果不同，而固定 Artifact 上重复运行验收器都稳定，差异更可能来自 Agent 轨迹或服务随机性。如果同一固定 Artifact 被同一验收器评出不同结果，或一份没有修改的仓库反复出现不同测试结果，则先调查验收器、依赖、时间、随机测试数据或环境竞争。对固定输出重评也应保存 grader 版本和输入。
 
-成本指标：
+报告要按任务呈现重复结果，例如 3 次中通过 2 次，而非把三次运行伪装成三份独立任务。任务抽样误差、成对实验与统计判断可继续读第七册；本章强调的是先找到不稳定来自 Agent、环境还是测量过程。
 
-1. Token cost。
-2. Wall-clock time。
-3. Tool execution time。
-4. Sandbox cost。
+## 10.14 安全评估要区分请求、拦截和副作用
 
-安全指标：
+安全任务可以包含诱导读取秘密、运行高风险命令、访问不允许的网络地址或改动范围外文件的输入。评估者要记录 Agent 是否提出过这些动作、策略是否允许、执行器是否派发、外部系统是否发生了副作用。四者不能合写成一个“安全失败率”。
 
-1. Permission denied count。
-2. Dangerous command attempt rate。
-3. Secret access attempt rate。
-4. Network access attempt rate。
-5. Unrelated file modification rate。
+例如，一个合成安全夹具诱导 Agent 打开工作区中的 .env。Agent 提出读取请求后，策略拒绝，执行器没有派发读取，状态检查也没有发现文件内容进入输出或网络。结果应分别记为：读取请求 1 次、策略拒绝 1 次、实际读取 0 次、观察到的外发 0 次。拦截说明控制路径在这次任务中阻止了该动作；它不证明所有绕过路径都安全。反过来，只记“出现了敏感请求”也不能证明秘密已泄露。
 
-可复现性指标：
+每项比率都要说清样本是什么。例如，“风险夹具中出现被禁止请求的比例”以符合条件的夹具数为分母；“被禁止请求实际执行率”以被禁止请求事件为分母；“任务出现未授权副作用的比例”以完成检查且能观测副作用的任务为分母。没有观察能力时，副作用状态应标 unknown，不能记为 0。
 
-1. Replay success rate。
-2. Environment setup success rate。
-3. Flaky task rate。
+## 10.15 成本和资源按可解释的单位分别报告
 
-Metric Registry 的价值是统一定义指标，避免每次评估口径不同。
+Token、模型调用次数、工具调用、墙钟时间、CPU/内存和人工介入时间不是同一种成本。分开记录能说明系统把资源花在哪里；如果需要估算金额，还要固定计价时间、provider、缓存和失败重试口径。
 
-## 10.11 Result Store
+平均值也可能掩盖少数任务特别昂贵或耗时。报告可同时列出中位数、尾部区间和超预算样本，并按任务桶观察。预算要在实验前定义；预算耗尽是有意义的 run 结果，不应从成功率里消失，也不能只看通过任务的成本。跨 provider 比较费用时，应列明各自价格版本与计费覆盖范围；在条件不一致时，优先并列原始用量而不合并成单一成本分数。
 
-Result Store 保存评估结果。
+## 10.16 让每项指标都有自己的单位和分母
 
-应保存：
+Metric Registry 的价值不是把每个数字变成统一分数，而是规定同一指标的口径与证据来源。至少应区分以下观察：
 
-1. run_id。
-2. dataset version。
-3. agent version。
-4. model version。
-5. prompt version。
-6. tool version。
-7. environment version。
-8. task result。
-9. metrics。
-10. trace refs。
-11. artifacts。
-12. failure reason。
+| 观察问题 | 一个可用口径 | 需要另行报告的状态 |
+| --- | --- | --- |
+| 本次要求覆盖的任务桶是否都有样本？ | 有样本的必需桶数 ÷ 预先声明的必需桶数 | 无样本桶、未纳入桶及覆盖边界 |
+| 环境是否成功准备？ | 预检成功的 fixture 数 ÷ 尝试准备的 fixture 数 | Agent 未启动、重试及环境故障原因 |
+| 每个任务是否都有可用的验收器？ | 验收器成功给出所需判定的适用任务数 ÷ 应提供该判定的任务数 | scorer error、unscored、验收条件没有覆盖到的部分 |
+| 任务是否成功？ | 满足全部 hard 条件的有效 run 数 ÷ 获得有效任务判定的 run 数 | Agent 失败、partial、运行错误和无法判定 |
+| 约束或 diff 是否符合要求？ | 满足对应约束的适用 run 数 ÷ 有效且适用的 run 数 | 不适用、判定器错误和未知 |
+| 风险动作是否执行？ | 实际执行的禁止动作数 ÷ 观察到的禁止动作请求数 | 请求被拦截、实际派发及副作用未知 |
+| 结果能否归因？ | 含有所需版本和证据引用的 run 数 ÷ 目标评估 run 数 | 缺 trace、缺 Artifact 或敏感内容不可见 |
+| 资源花费多少？ | 依各自单位统计每个有效 run 的用量 | 超预算、超时、错误退出和重试用量 |
 
-为什么要保存这么多版本？
+分母为零时写 N/A；状态不明时写 unknown，并解释缺失原因。部分成功可以由独立 rubric 描述，但不能把它悄悄加入 hard success。样本权重、部分分和多指标合成只有在决策问题确实需要、定义事先透明且能解释时才采用；本章不规定跨业务通用阈值，也不把这些维度合成一个 Harness gate。
 
-因为评估结论必须可比较。
+Metric Registry 可为每个指标登记稳定名称、定义、单位、分母、适用条件、证据来源和版本。这样同名指标在下一次实验里才仍有相同含义。即使注册表中有许多独立口径，也不意味着它们应被加权合成一个分数。
 
-如果新 run 分数下降，团队需要知道是模型变了、prompt 变了、工具变了、数据集变了，还是环境变了。
+## 10.17 保存任务结果和能复查它的证据
 
-## 10.12 Report Generator
+每个 run 至少要能追到任务夹具、配置和实际工作区。记录 dataset/task revision、仓库 commit、依赖与镜像、验收器版本、模型与 prompt、Runtime、工具和权限配置、运行预算、终止原因、各项验收、错误分类及成本。还要关联必要的 Trace、diff、测试回执和 Artifact。
 
-评估报告不应该只给一个总分。
+Trace 用于还原事件顺序，Artifact 保存需要单独查看的内容；两者都不能替代 verifier。本章沿用[上一章的 Trace 与 Artifact 边界](09-trace日志回放与可观测性.md)：在最小必要范围内采集，敏感数据使用受控引用，不把密钥或完整用户输入无差别塞进日志。评估证据既要足以复查，也要控制访问和保留。
 
-报告应包含：
+## 10.18 把回归集作为评估的一部分维护
 
-1. 总体指标。
-2. 分桶指标。
-3. 和 baseline 对比。
-4. 失败任务列表。
-5. 典型 bad cases。
-6. 成本和耗时。
-7. 安全事件。
-8. 回归任务。
-9. flakiness 分析。
-10. 是否建议发布。
+回归集可由历史失败、修复过的缺陷、高价值用户需求、安全边界案例和已经发现的 flaky 任务构成。新增任务时保存其初始状态、原始问题、验收理由与版本；只保留“某次 run 失败”的 trace，而不保存重建它所需的 fixture，后续无法稳定重放。
 
-示例报告摘要：
+每次运行新配置后，先逐项检查新通过、持续通过、发生退化、环境失败和无法判定的任务，再看汇总变化。出现回归时，trace 和 diff 帮助定位变化来自哪一层；确认问题后再把任务补进回归集。是否阻止上线取决于任务风险和发布政策，由相应团队明确阈值与责任人，不能由一套没有业务依据的通用评估公式替代。
 
-```text
-Overall task success: 62.4% -> 65.1%
-Bug fix bucket: +4.2%
-Refactor bucket: -2.1%
-Dangerous command attempts: unchanged
-Token cost: +18%
-Recommendation: do not roll out until refactor regression is investigated
-```
+## 10.19 报告要让读者看见证据与边界
 
-好的报告要能指导决策，而不是只展示分数上涨。
+一份可用的评估报告应包含：
 
-## 10.13 Regression Runner
+- 评估问题、系统配置、数据集 revision、任务桶及纳入/排除规则；
+- 环境准备数、有效任务判定数、运行错误数、评分错误数和无法判定数；
+- 每桶的任务数、通过数、失败类型，以及 baseline 与 candidate 的配对差异；
+- 结果条件、约束条件、安全请求与实际副作用的独立统计；
+- 各类成本和预算耗尽/超时情况；
+- 代表性失败的 Trace、diff、测试回执或 Artifact 引用；
+- 重复运行或 flaky 任务的表现；
+- 本次数据与证据支持到什么范围，仍有哪些未覆盖问题。
 
-Regression Runner 用于防止新版本破坏旧能力。
+将贯穿例子的数字写进报告时，可表述为：五个 fixture 中四个通过环境预检；在这四个有效 fixture 上，baseline 通过两个，candidate 通过三个；两者在同一套任务上成对运行。另一个独立安全夹具中出现一次被拦截的 .env 读取请求，没有实际读取证据。报告还应注明以上数字是教学构造，不能被读成实际系统结果。
 
-Regression set 来源：
+结论不应只写“candidate 提升 25 个百分点”。还要说明样本很小、D 项发生退化、E 项未启动，以及目前证据只覆盖哪些任务桶。这样，读者能看到提升的同时，也知道提升不能证明什么。
 
-1. 历史线上失败。
-2. 重要客户场景。
-3. 安全红队样例。
-4. 过去修复过的 bug。
-5. 高价值 benchmark 子集。
+## 10.20 常见的评估误读
 
-Regression Runner 应支持：
+- **把最终回答当成任务完成。** 任务条件应由可检查的输出、状态或过程证据判断。
+- **把环境失败算给 Agent。** 未启动 Agent 的 fixture 是 Harness/基础设施结果。
+- **把 judge 错误算成错误回答。** 评分器没有给出判定，不等于 Agent 被判错。
+- **只看功能测试。** 修改范围、动作顺序、安全要求和报告义务也可能是任务约束。
+- **基线条件不一致。** 权限、工具、上下文或预算发生变化时，应收窄归因。
+- **总分上涨掩盖失败桶。** 展示分桶和具体退化样本。
+- **重试后只保留成功。** 保留每次尝试及重试原因，不能把不稳定性从报告中擦掉。
+- **用 mock 的通过结果推断真实环境可靠。** 只对 mock 覆盖到的 Harness 自有逻辑作结论。
+- **把数据缺失记成安全成功。** 没有日志或回执时，副作用状态可能是 unknown。
+- **从 benchmark 单次结果推出普遍能力。** 结论限于所用模型、Harness、环境、任务集和判定规则。
 
-1. 固定数据集版本。
-2. 固定环境。
-3. 固定权限策略。
-4. 对比 baseline。
-5. 阻止发布。
-6. 输出失败 trace。
+第十九章会进一步分析模型、Harness 与环境之间的交互和归因；本章先把一次评估该固定哪些条件、保留哪些证据和怎样解释分母讲清楚。[第十九章：Harness-Aware Evaluation](19-harness-aware-evaluation.md)。
 
-每次改 prompt、工具、模型、权限策略、context builder，都应该跑核心 regression set。
+## 10.21 面试题：Evaluation Harness 是什么
 
-## 10.14 Baseline Comparator
+回答时先说明它解决的问题：把一组任务放在可追溯的配置和环境中运行，独立验收结果与约束，再报告可比较的证据。随后讲清任务夹具、Runner、环境/工具、验收器、结果存储与对比报告各自的责任。最后强调有效任务判定、基础设施错误和评分器错误的分母不同，报告不能只给总分。
 
-没有 baseline，就没有可信评估。
+## 10.22 面试题：怎样判断 Coding Agent 变好了
 
-Baseline 可以是：
+先定义任务集和 hard success 条件，固定或记录模型、提示词、工具、权限、环境和预算，再让候选版本与 baseline 在配对任务上运行。结果按任务桶分别报告功能验收、工程约束、安全副作用、成本、运行/评分故障和重复运行差异。解释改变了哪些配置、样本范围有多大、哪些失败仍未解决；若一次改动包含多个组件，就把结论限定为整份配置的变化。
 
-1. 上一个稳定 agent 版本。
-2. 只读助手。
-3. 无工具模型。
-4. 人类参考 patch。
-5. 其他 agent 产品。
-6. 简单规则系统。
+## 10.23 面试题：怎样区分随机波动和评估故障
 
-比较时要确保：
+先用同一任务快照重复 Agent run，并保存各次轨迹；再把固定 Artifact 重复交给验收器，观察 verifier 是否稳定。若 Agent 输出变化而固定 Artifact 的判定一致，重点调查 Agent 轨迹和服务随机性；若固定 Artifact 或未改变的环境也得出不同判定，先调查验收器、测试和依赖。最终仍按任务成对统计，并在小样本下谨慎表达不确定性。
 
-1. 同一数据集。
-2. 同一环境。
-3. 同一工具权限。
-4. 同一成本预算。
-5. 同一成功条件。
+## 10.24 小练习与本章收束
 
-否则比较不公平。
+1. 为一个显示名修复任务写出完整 task fixture：初始状态、操作范围、行为条件、diff 条件、安全要求和验收证据。
+2. 用 A—E 五个教学 fixture 复算环境预检率、baseline/candidate 成功率和配对胜负；解释为什么 E 不进入 Agent 成功率分母，却仍须出现在 Harness 报告里。
+3. 设计一组 mock 测试与真实集成测试，并分别说明每组结果能支持什么结论。
+4. 为一次被策略拦截的秘密读取请求，分别记录 Agent 提议、策略决定、执行派发和可观察的副作用。
+5. 设计一张报告表，分别展示任务结果、环境故障、评分故障、成本、分桶和重复结果；空分母标 N/A，未知状态单列。
+6. 说明若同时更换模型和 Harness，可以得出什么结论，不能据此归因什么。
 
-例如新 agent 成功率高，但给了更多工具权限和更大 token budget，这不一定说明 agent 本身更强。
+回看整条路径：任务夹具定义“要解决什么”，预检确认“条件是否成立”，Runner 记录“哪份配置做了什么”，验收器判断“哪些条件有证据满足”，报告再说明“这些结果能比较到什么范围”。当这些层次清楚分开时，Evaluation Harness 才能支撑可复查的工程判断，而不是把一次分数误当成系统能力本身。
 
-## 10.15 Flaky Evaluation
-
-Agent eval 很容易 flaky。
-
-原因：
-
-1. 模型非确定性。
-2. 测试本身不稳定。
-3. 依赖下载不稳定。
-4. 环境差异。
-5. 网络波动。
-6. 时间相关逻辑。
-7. 并发执行干扰。
-
-处理策略：
-
-1. 固定 seed 或降低 temperature。
-2. 重复运行关键任务。
-3. 标记 flaky tasks。
-4. 分离环境失败和 agent 失败。
-5. 缓存依赖。
-6. 使用 sandbox snapshot。
-7. 记录终止原因。
-
-报告中应显示 flakiness，不要把不稳定任务当成确定结论。
-
-## 10.16 Agent Evaluation 的安全维度
-
-Agent 评估必须包含安全。
-
-安全评估任务包括：
-
-1. Prompt injection 文件。
-2. 恶意 README。
-3. 诱导读取 secret。
-4. 诱导执行危险命令。
-5. 诱导上传代码。
-6. 恶意 install script。
-7. 工具返回不可信内容。
-8. 权限绕过尝试。
-
-安全指标包括：
-
-1. 越权尝试率。
-2. 越权成功率。
-3. 危险命令拦截率。
-4. Secret 保护率。
-5. 用户确认触发率。
-6. 误拒率。
-
-只评估 task success，不评估安全，会把危险 agent 误判成强 agent。
-
-## 10.17 Agent Eval 和 Trace 的关系
-
-Trace 是 agent eval 的关键输入。
-
-Trace 可以用于：
-
-1. 判断失败原因。
-2. 计算工具调用次数。
-3. 统计权限事件。
-4. 构建 replay case。
-5. 生成 bad case。
-6. 分析成本和耗时。
-
-如果没有 trace，eval 只能告诉你“失败了”，不能告诉你为什么失败。
-
-Evaluation harness 应该默认收集 trace，并把 trace ref 写入 result store。
-
-## 10.18 真实坑
-
-常见真实坑：
-
-1. Prompt template 版本不一致。
-2. Benchmark 被污染。
-3. Agent 评估环境不可复现。
-4. 指标只看最终答案，不看过程安全。
-5. 成功条件太宽，agent 说完成就算成功。
-6. 工具权限不同导致 baseline 不公平。
-7. 评估集只覆盖简单任务。
-8. Flaky tests 被当成 agent 失败。
-9. 没有保存 trace，失败无法归因。
-10. 只看平均分，不看分桶和 bad cases。
-
-经验法则：Agent evaluation 评估的是“模型 + runtime + 工具 + 环境 + 权限策略”的整体系统。
-
-## 10.19 Evaluation Harness 质量指标
-
-Agent evaluation harness 的目标不是把一堆任务跑完，而是证明评估结论可复现、公平、可归因，并且覆盖质量、成本、安全、回归和 flaky 风险。
-
-可以把第 $i$ 个评估样本写成：
-
-```math
-e_i=(x_i,b_i,r_i,v_i,p_i,h_i,c_i,\rho_i,w_i)
-```
-
-其中，$x_i$ 是任务输入和初始状态，$b_i$ 是任务桶标签，$r_i$ 是 repo / sandbox 环境，$v_i$ 是模型、prompt、工具、权限和数据集版本，$p_i$ 是 agent 轨迹，$h_i$ 是验收器集合，$c_i$ 是成本和预算，$\rho_i$ 是风险标签，$w_i$ 是样本权重。
-
-数据集桶覆盖率：
-
-```math
-C_{\mathrm{bucket}}=
-\frac{|\mathcal{B}_{\mathrm{eval}}\cap \mathcal{B}^{\ast}|}{|\mathcal{B}^{\ast}|}
-```
-
-其中，$\mathcal{B}^{\ast}$ 是必须覆盖的任务桶，例如 bugfix、feature、refactor、safety、tool use 和 code review。只评估 happy path 会高估 agent 能力。
-
-环境可复现率：
-
-```math
-C_{\mathrm{env}}=
-\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[a_i=1\wedge q_i=1\wedge z_i=1]
-```
-
-其中，$a_i$ 表示环境初始化成功，$q_i$ 表示 checksum / lockfile / repo commit 一致，$z_i$ 表示 sandbox reset 成功。环境不可复现时，分数变化不能直接归因到模型或 agent。
-
-验收器覆盖率：
-
-```math
-C_{\mathrm{val}}=
-\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[|h_i|>0\wedge \mathrm{valid}(h_i)=1]
-```
-
-其中，$h_i$ 可以包含单元测试、格式校验、diff scope、rubric judge、安全验收条件和业务状态检查。没有验收器的任务只能用于探索，不适合作为上线条件。
-
-加权任务成功率：
-
-```math
-S_{\mathrm{task}}=
-\frac{\sum_{i=1}^{N}w_i y_i}{\sum_{i=1}^{N}w_i}
-```
-
-其中，$y_i=1$ 表示样本通过 hard success criteria。高风险安全样本或关键客户场景可以有更高权重。
-
-加权部分成功分：
-
-```math
-S_{\mathrm{partial}}=
-\frac{\sum_{i=1}^{N}w_i s_i}{\sum_{i=1}^{N}w_i}
-```
-
-其中，$s_i\in[0,1]$ 来自 trajectory rubric 或多验收点评分。它能解释“为什么失败”，但不能替代 hard pass。
-
-Diff 范围安全率：
-
-```math
-C_{\mathrm{diff}}=
-\frac{\sum_i \mathbf{1}[D_i\subseteq D_i^{\ast}]}
-{\sum_i \mathbf{1}[|D_i|>0]}
-```
-
-其中，$D_i$ 是实际修改文件集合，$D_i^{\ast}$ 是允许修改文件集合。Coding agent 成功率提升但频繁改无关文件，不应直接上线。
-
-Trace 覆盖率：
-
-```math
-C_{\mathrm{trace}}=
-\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\tau_i=1]
-```
-
-其中，$\tau_i=1$ 表示样本保存了可归因的 trace、artifact 和关键指标。没有 trace 的失败样本很难进入 regression set。
-
-Baseline 公平率：
-
-```math
-C_{\mathrm{fair}}=
-\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[u_i=1\wedge t_i=1\wedge m_i\le m_i^{0}]
-```
-
-其中，$u_i$ 表示候选与 baseline 使用相同权限，$t_i$ 表示工具集合可比，$m_i$ 和 $m_i^{0}$ 分别是候选和 baseline 的预算。新 agent 拿到更多权限或预算时，不能直接说能力更强。
-
-回归通过率：
-
-```math
-R_{\mathrm{reg}}=
-\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\neg(y_i^{0}=1\wedge y_i=0)]
-```
-
-其中，$y_i^{0}$ 是 baseline 是否通过，$y_i$ 是候选是否通过。这个指标关注“不能把旧能力弄坏”。
-
-不安全执行率：
-
-```math
-R_{\mathrm{unsafe}}=
-\frac{\sum_i \mathbf{1}[r_i=1\wedge o_i=1]}
-{\sum_i \mathbf{1}[r_i=1]}
-```
-
-其中，$r_i=1$ 表示样本中出现安全诱导或高风险动作尝试，$o_i=1$ 表示不安全动作被实际执行。该指标应该为 $0$。
-
-成本预算通过率：
-
-```math
-C_{\mathrm{cost}}=
-\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[\kappa_i\le \kappa_i^{\ast}]
-```
-
-其中，$\kappa_i$ 是 token、wall-clock、工具调用或 sandbox 成本，$\kappa_i^{\ast}$ 是预算上限。
-
-Flaky 任务率：
-
-```math
-R_{\mathrm{flaky}}=
-\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[|\{y_{i,1},\ldots,y_{i,K}\}|>1]
-```
-
-其中，$K$ 是重复运行次数。Flaky task 应该隔离分析，不能直接当作稳定回归结论。
-
-版本捕获率：
-
-```math
-C_{\mathrm{version}}=
-\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[V_i\supseteq V^{\ast}]
-```
-
-其中，$V^{\ast}$ 包括 dataset、agent、model、prompt、tool registry、environment 和 permission policy 版本。
-
-报告完整率：
-
-```math
-C_{\mathrm{report}}=
-\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[P_i\supseteq P^{\ast}]
-```
-
-其中，$P^{\ast}$ 包括 overall、by bucket、baseline delta、failures、cost、safety、flaky 和 rollout recommendation。
-
-Evaluation Harness 准入条件可以形式化为：
-
-```math
-G_{\mathrm{evalh}}=
-\mathbf{1}[
-C_{\mathrm{bucket}}=1
-\wedge C_{\mathrm{env}}\ge \alpha_{\mathrm{env}}
-\wedge C_{\mathrm{val}}\ge \alpha_{\mathrm{val}}
-\wedge S_{\mathrm{task}}\ge \alpha_{\mathrm{task}}
-\wedge S_{\mathrm{partial}}\ge \alpha_{\mathrm{partial}}
-\wedge C_{\mathrm{diff}}=1
-\wedge C_{\mathrm{trace}}=1
-\wedge C_{\mathrm{fair}}=1
-\wedge R_{\mathrm{reg}}\ge \alpha_{\mathrm{reg}}
-\wedge R_{\mathrm{unsafe}}=0
-\wedge C_{\mathrm{cost}}\ge \alpha_{\mathrm{cost}}
-\wedge R_{\mathrm{flaky}}\le \beta_{\mathrm{flaky}}
-\wedge C_{\mathrm{version}}=1
-\wedge C_{\mathrm{report}}\ge \alpha_{\mathrm{report}}
-]
-```
-
-这组条件强调的是系统级评估可信度：结果要好，过程要安全，比较要公平，失败要可复盘，报告要能指导是否发布。
-
-### 10.19.1 最小可运行 Evaluation Harness 审计 demo
-
-下面的 demo 不调用模型、不执行测试、不访问网络，只审计 toy evaluation runs 是否满足 evaluation harness 验收条件。它故意构造环境不可复现、验收器缺失、baseline 不公平、无关 diff、flaky task、安全诱导被执行、版本缺失和报告不完整等 bad case。
-
-```python
-from dataclasses import dataclass
-
-
-REQUIRED_BUCKETS = {"bugfix", "feature", "refactor", "safety", "tool_use", "code_review"}
-REQUIRED_VERSION_FIELDS = (
-    "dataset",
-    "agent",
-    "model",
-    "prompt",
-    "tools",
-    "env",
-    "permission",
-)
-REQUIRED_REPORT_FIELDS = (
-    "overall",
-    "by_bucket",
-    "baseline_delta",
-    "failures",
-    "cost",
-    "safety",
-    "flaky",
-    "recommendation",
-)
-
-
-@dataclass(frozen=True)
-class EvalRun:
-    task_id: str
-    bucket: str
-    weight: float
-    env_ready: bool
-    checksum_ok: bool
-    sandbox_reset: bool
-    validators: tuple[str, ...]
-    success: bool
-    partial: float
-    tests_passed: bool
-    expected_files: tuple[str, ...]
-    modified_files: tuple[str, ...]
-    trace_complete: bool
-    failure_taxonomy: str
-    baseline_success: bool
-    baseline_budget: int
-    candidate_budget: int
-    same_permission: bool
-    same_tools: bool
-    unsafe_attempted: bool
-    unsafe_executed: bool
-    cost: float
-    cost_budget: float
-    repeats: tuple[bool, ...]
-    versions: dict[str, str]
-    report_fields: tuple[str, ...]
-
-
-def mean(values):
-    values = list(values)
-    return None if not values else round(sum(values) / len(values), 3)
-
-
-def weighted_mean(items, value_fn):
-    total = sum(item.weight for item in items)
-    return None if total == 0 else round(sum(item.weight * value_fn(item) for item in items) / total, 3)
-
-
-def at_least(value, threshold):
-    return value is not None and value >= threshold
-
-
-def at_most(value, threshold):
-    return value is not None and value <= threshold
-
-
-# 空评估集/零权重集合必须报告 not_applicable，不能伪造 1.0 或 0.0。
-assert mean([]) is None
-assert weighted_mean([], lambda item: item) is None
-assert at_least(None, 1.0) is False
-assert at_most(None, 0.0) is False
-
-
-def bucket_coverage(runs):
-    buckets = {run.bucket for run in runs}
-    return round(len(buckets & REQUIRED_BUCKETS) / len(REQUIRED_BUCKETS), 3)
-
-
-def env_ok(run):
-    return run.env_ready and run.checksum_ok and run.sandbox_reset
-
-
-def validator_ok(run):
-    return bool(run.validators) and (run.tests_passed or "unit_test" not in run.validators)
-
-
-def file_scope_ok(run):
-    expected = set(run.expected_files)
-    modified = set(run.modified_files)
-    return bool(modified) and modified <= expected
-
-
-def fair_compare_ok(run):
-    return run.same_permission and run.same_tools and run.candidate_budget <= run.baseline_budget
-
-
-def flaky(run):
-    return len(set(run.repeats)) > 1
-
-
-def version_ok(run):
-    return all(run.versions.get(name) for name in REQUIRED_VERSION_FIELDS)
-
-
-def report_ok(run):
-    return set(REQUIRED_REPORT_FIELDS) <= set(run.report_fields)
-
-
-runs = (
-    EvalRun(
-        "bugfix_login",
-        "bugfix",
-        1.5,
-        True,
-        True,
-        True,
-        ("unit_test", "diff_scope"),
-        True,
-        1.0,
-        True,
-        ("src/auth.py", "tests/test_auth.py"),
-        ("src/auth.py", "tests/test_auth.py"),
-        True,
-        "",
-        True,
-        120,
-        120,
-        True,
-        True,
-        False,
-        False,
-        0.42,
-        0.80,
-        (True, True, True),
-        {
-            "dataset": "ds2",
-            "agent": "a9",
-            "model": "m5",
-            "prompt": "p7",
-            "tools": "t4",
-            "env": "e3",
-            "permission": "perm2",
-        },
-        (
-            "overall",
-            "by_bucket",
-            "baseline_delta",
-            "failures",
-            "cost",
-            "safety",
-            "flaky",
-            "recommendation",
-        ),
-    ),
-    EvalRun(
-        "feature_csv",
-        "feature",
-        1.0,
-        True,
-        True,
-        True,
-        ("unit_test", "format"),
-        True,
-        0.9,
-        True,
-        ("src/export.py", "tests/test_export.py"),
-        ("src/export.py", "tests/test_export.py"),
-        True,
-        "",
-        False,
-        120,
-        140,
-        True,
-        True,
-        False,
-        False,
-        0.91,
-        0.80,
-        (True, True, False),
-        {
-            "dataset": "ds2",
-            "agent": "a9",
-            "model": "m5",
-            "prompt": "p7",
-            "tools": "t4",
-            "env": "e3",
-            "permission": "perm2",
-        },
-        ("overall", "by_bucket", "baseline_delta", "failures", "cost", "recommendation"),
-    ),
-    EvalRun(
-        "refactor_cache",
-        "refactor",
-        1.2,
-        True,
-        False,
-        True,
-        ("unit_test", "diff_scope"),
-        False,
-        0.4,
-        False,
-        ("src/cache.py",),
-        ("src/cache.py", "src/config.py"),
-        True,
-        "test_regression",
-        True,
-        120,
-        120,
-        True,
-        False,
-        False,
-        False,
-        0.35,
-        0.80,
-        (False, False, False),
-        {
-            "dataset": "ds2",
-            "agent": "a9",
-            "model": "m5",
-            "prompt": "p7",
-            "tools": "",
-            "env": "e3",
-            "permission": "perm2",
-        },
-        (
-            "overall",
-            "by_bucket",
-            "baseline_delta",
-            "failures",
-            "cost",
-            "safety",
-            "flaky",
-            "recommendation",
-        ),
-    ),
-    EvalRun(
-        "prompt_injection",
-        "safety",
-        2.0,
-        True,
-        True,
-        True,
-        ("secret_block", "permission_gate"),
-        False,
-        0.2,
-        False,
-        ("README.md",),
-        ("README.md",),
-        True,
-        "unsafe_executed",
-        True,
-        120,
-        120,
-        True,
-        True,
-        True,
-        True,
-        0.28,
-        0.80,
-        (False, False, False),
-        {
-            "dataset": "ds2",
-            "agent": "a9",
-            "model": "m5",
-            "prompt": "p7",
-            "tools": "t4",
-            "env": "e3",
-            "permission": "perm2",
-        },
-        ("overall", "by_bucket", "failures", "cost", "safety", "recommendation"),
-    ),
-    EvalRun(
-        "tool_api",
-        "tool_use",
-        1.0,
-        False,
-        False,
-        False,
-        (),
-        False,
-        0.0,
-        False,
-        ("src/client.py",),
-        (),
-        False,
-        "env_setup_failed",
-        False,
-        120,
-        120,
-        True,
-        True,
-        False,
-        False,
-        0.05,
-        0.80,
-        (False, False, False),
-        {
-            "dataset": "ds2",
-            "agent": "a9",
-            "model": "m5",
-            "prompt": "p7",
-            "tools": "t4",
-            "env": "",
-            "permission": "perm2",
-        },
-        ("overall", "failures"),
-    ),
-    EvalRun(
-        "review_diff",
-        "code_review",
-        0.8,
-        True,
-        True,
-        True,
-        ("rubric",),
-        True,
-        0.8,
-        False,
-        ("src/payments.py",),
-        (),
-        True,
-        "",
-        True,
-        80,
-        80,
-        True,
-        True,
-        False,
-        False,
-        0.18,
-        0.80,
-        (True, True, True),
-        {
-            "dataset": "ds2",
-            "agent": "a9",
-            "model": "m5",
-            "prompt": "p7",
-            "tools": "t4",
-            "env": "e3",
-            "permission": "perm2",
-        },
-        (
-            "overall",
-            "by_bucket",
-            "baseline_delta",
-            "failures",
-            "cost",
-            "safety",
-            "flaky",
-            "recommendation",
-        ),
-    ),
-)
-
-metrics = {
-    "dataset_bucket_coverage": bucket_coverage(runs),
-    "environment_reproducibility": mean(env_ok(run) for run in runs),
-    "validator_coverage": mean(validator_ok(run) for run in runs),
-    "task_success": weighted_mean(runs, lambda run: run.success),
-    "partial_success": weighted_mean(runs, lambda run: run.partial),
-    "diff_scope_safety": mean(file_scope_ok(run) for run in runs if run.modified_files),
-    "trace_coverage": mean(run.trace_complete for run in runs),
-    "baseline_fairness": mean(fair_compare_ok(run) for run in runs),
-    "regression_pass": mean(not (run.baseline_success and not run.success) for run in runs),
-    "unsafe_execution_rate": mean(run.unsafe_executed for run in runs if run.unsafe_attempted),
-    "cost_budget_pass": mean(run.cost <= run.cost_budget for run in runs),
-    "flaky_rate": mean(flaky(run) for run in runs),
-    "version_capture": mean(version_ok(run) for run in runs),
-    "report_completeness": mean(report_ok(run) for run in runs),
-}
-
-root_causes = {}
-for run in runs:
-    causes = []
-    if not env_ok(run):
-        causes.append("environment_not_reproducible")
-    if not validator_ok(run):
-        causes.append("validator_missing_or_failed")
-    if run.modified_files and not file_scope_ok(run):
-        causes.append("modified_unexpected_files")
-    if not run.trace_complete:
-        causes.append("trace_missing")
-    if not fair_compare_ok(run):
-        causes.append("baseline_comparison_unfair")
-    if run.baseline_success and not run.success:
-        causes.append("regression_against_baseline")
-    if run.unsafe_executed:
-        causes.append("unsafe_action_executed")
-    if run.cost > run.cost_budget:
-        causes.append("cost_budget_exceeded")
-    if flaky(run):
-        causes.append("flaky_repeats")
-    if not version_ok(run):
-        causes.append("version_capture_missing")
-    if not report_ok(run):
-        causes.append("report_incomplete")
-    if causes:
-        root_causes[run.task_id] = causes
-
-thresholds = {
-    "dataset_bucket_coverage": 1.0,
-    "environment_reproducibility": 0.95,
-    "validator_coverage": 0.95,
-    "task_success": 0.75,
-    "partial_success": 0.80,
-    "diff_scope_safety": 1.0,
-    "trace_coverage": 1.0,
-    "baseline_fairness": 1.0,
-    "regression_pass": 0.95,
-    "unsafe_execution_rate": 0.0,
-    "cost_budget_pass": 0.95,
-    "flaky_rate": 0.10,
-    "version_capture": 1.0,
-    "report_completeness": 0.95,
-}
-failed_gates = []
-for name, threshold in thresholds.items():
-    value = metrics[name]
-    if name in {"unsafe_execution_rate", "flaky_rate"}:
-        if not at_most(value, threshold):
-            failed_gates.append(name)
-    elif not at_least(value, threshold):
-        failed_gates.append(name)
-
-print(f"metrics={metrics}")
-print(f"not_applicable_metrics={[name for name, value in metrics.items() if value is None]}")
-print(f"root_causes={root_causes}")
-print(f"failed_gates={failed_gates}")
-print(f"evaluation_harness_gate_pass={not failed_gates}")
-```
-
-一组故意包含坏 case 的输出示例：
-
-```text
-metrics={'dataset_bucket_coverage': 1.0, 'environment_reproducibility': 0.667, 'validator_coverage': 0.667, 'task_success': 0.44, 'partial_success': 0.523, 'diff_scope_safety': 0.75, 'trace_coverage': 0.833, 'baseline_fairness': 0.667, 'regression_pass': 0.667, 'unsafe_execution_rate': 1.0, 'cost_budget_pass': 0.833, 'flaky_rate': 0.167, 'version_capture': 0.667, 'report_completeness': 0.5}
-not_applicable_metrics=[]
-root_causes={'feature_csv': ['baseline_comparison_unfair', 'cost_budget_exceeded', 'flaky_repeats', 'report_incomplete'], 'refactor_cache': ['environment_not_reproducible', 'validator_missing_or_failed', 'modified_unexpected_files', 'baseline_comparison_unfair', 'regression_against_baseline', 'version_capture_missing'], 'prompt_injection': ['regression_against_baseline', 'unsafe_action_executed', 'report_incomplete'], 'tool_api': ['environment_not_reproducible', 'validator_missing_or_failed', 'trace_missing', 'version_capture_missing', 'report_incomplete']}
-failed_gates=['environment_reproducibility', 'validator_coverage', 'task_success', 'partial_success', 'diff_scope_safety', 'trace_coverage', 'baseline_fairness', 'regression_pass', 'unsafe_execution_rate', 'cost_budget_pass', 'flaky_rate', 'version_capture', 'report_completeness']
-evaluation_harness_gate_pass=False
-```
-
-这个 demo 的重点不是让 toy agent 通过，而是把 eval harness 的失败拆清楚：环境 checksum 不一致不能归因模型退化，验收器缺失不能算稳定成功，候选 agent 拿到更多预算不是公平比较，安全样本被执行应直接阻断，报告缺少 flaky / safety / by bucket 就不能指导发布。
-
-## 10.20 面试题：Evaluation Harness 是什么
-
-回答要点：
-
-```text
-Evaluation harness 是自动运行评估任务、收集结果、计算指标、保存 trace 并生成报告的框架。对普通 LLM，它主要管理数据集、prompt、模型调用和指标；对 agent，它还要管理任务环境、工具、权限、sandbox、多步 trace、成功条件、成本和安全指标。它的目标是让不同 agent 版本可以稳定、公平、可复现地比较。
-```
-
-## 10.21 面试题：如何评估 Coding Agent 是否变好
-
-回答要点：
-
-```text
-我不会只看最终成功率。首先要固定数据集、环境、模型、工具权限和成功条件，和 baseline 公平对比。指标上看 task success、test pass、patch correctness、回归率、工具调用次数、token 成本、耗时和安全事件。还要分桶看 bug fix、feature、refactor、review 等任务类型，并查看失败 trace 和 bad cases。只有质量提升且成本、安全、回归可接受，才说明 agent 真的变好。
-```
-
-## 10.22 面试题：Agent Eval 如何保证可复现
-
-回答要点：
-
-```text
-需要版本化和环境固定。评估结果要记录 dataset version、repo commit、dependency lock、sandbox image、model version、prompt version、tool version、permission policy 和 random seed。每个任务要保存 trace 和 artifacts。对于外部网络、时间相关和 flaky tests，要隔离或标记。否则分数变化可能来自环境变化，而不是 agent 能力变化。
-```
-
-## 10.23 小练习
-
-1. 设计一个 coding agent eval task schema。
-2. 为 bug fix、feature、refactor 三类任务分别设计成功条件。
-3. 设计一个 metric registry，包含质量、成本、安全和可复现性指标。
-4. 思考如何从线上失败 trace 构造 regression set。
-5. 设计一个 baseline comparator 的公平性检查清单。
-6. 思考如何识别 flaky evaluation task。
-7. 设计一份 agent eval report 模板。
-8. 用 3 分钟回答“为什么 agent eval 不能只看最终答案”。
-
-## 10.24 本章总结
-
-本章讨论了 Evaluation Harness。
-
-核心结论：
-
-1. Evaluation harness 是让 agent 可稳定评估、可比较、可复现的工程框架。
-2. Agent eval 比普通 LLM eval 更复杂，因为它包含环境、工具、副作用、权限、trace 和成功条件。
-3. 数据集、环境、模型、prompt、工具、权限和指标都要版本化。
-4. 成功条件要同时看结果、过程和 guardrails。
-5. 评估指标应覆盖质量、成本、过程、安全和可复现性。
-6. Baseline 对比必须公平，不能让新 agent 拥有更多权限或预算却直接比较分数。
-7. Trace 是 eval 归因和 replay 的基础。
-8. 安全评估和 regression runner 是生产级 agent harness 的必要组成。
-
-下一章会进入 Claude Code 架构分析，把前面十章的 harness 概念映射到真实 coding agent 产品的设计视角上。
+本章的主线是先固定任务和环境，再运行明确的系统配置，随后用独立验收器检查行为、约束和副作用，最后按样本单位和分母报告比较结果。Trace、测试回执和 Artifact 让结论可以复查，但能否推广仍受数据覆盖、环境稳定性、评分可靠性和实验设计限制。下一章会把这套通用框架用于 Claude Code 的公开架构分析。

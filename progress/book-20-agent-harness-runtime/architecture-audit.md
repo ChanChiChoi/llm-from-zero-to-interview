@@ -1,6 +1,6 @@
 # 第二十册《Agent Harness、Coding Agent Runtime 与智能体工程框架》架构审视
 
-审视日期：2026-11-18。阶段：册级初审、发现扫描、简介与目录重构完成；第 1—8 章章级扫描与精修完成，第 9—24 章待逐章处理。
+审视日期：2026-11-18。阶段：册级初审、发现扫描、简介与目录重构完成；第 1—9 章章级扫描与精修完成，第 10—24 章待逐章处理。
 
 ## 审视范围与方法
 
@@ -43,7 +43,7 @@
 | 8 权限模型与安全沙箱 | 权限决定、用户确认、环境隔离和审计各自限制什么？ | 建立全书安全边界。 | 依第 4—7 章；细节交第 14—16、22 章。 |
 | 9 Trace、日志、回放与可观测性 | 怎样从一次运行恢复输入、动作、结果和副作用？ | 建立复盘和证据层。 | 依第 2、7—8 章；交第 10、17—19 章。 |
 | 10 Evaluation Harness | 怎样复现任务、初始化环境、判断 artifact 成功并比较变更？ | 将执行证据变成评估。 | 依第 9 章；方法回链第七册，深化交第 19 章。 |
-| 11 Claude Code 架构分析 | 如何从官方公开资料抽取产品形态而不猜闭源实现？ | 用产品案例应用前十章框架。 | 依第 1—10 章；交第 13、15 章。 |
+| 11 Claude Code 架构分析 | 怎样从官方公开资料和可观察证据分析工作循环、权限与执行边界，并标出未知内部？ | 用多表面产品案例练习证据分层和可迁移审阅方法。 | 依第 1—10 章；交第 12 章 OpenCode 和第 13 章产品对比。 |
 | 12 OpenCode 架构分析 | 开源 runtime 的配置、工具、扩展和权限如何可见？ | 通过公开实现学习控制平面。 | 依第 1—10 章；交第 13—15 章。 |
 | 13 Codex 与主流产品比较 | 怎样在同一维度比较 CLI/IDE/Web/Cloud/SDK agent？ | 把案例归纳成比较方法。 | 依第 11—12 章；不做实时排名；交系统选型。 |
 | 14 MCP/A2A 与 Harness 集成 | 外部工具和 agent 如何进入 runtime 的 capability、permission、trace 与 evaluation？ | 讲协议集成责任。 | 依第 4、8—10 章；协议主讲交第二十二册。 |
@@ -82,7 +82,10 @@
 4. 第 11—13 章仅比较公开接口、可复查行为和固定 revision；第 20—24 章只表达相应 API/provider 的合同，不把历史默认值推广为通用 runtime 定律。
 5. 第六章删除命令安全旧审计脚本、`G_cmd` 和固定阈值，改用明确标记的合成执行轨迹及按事件、适用对象和分母复核的观察路径；权限、确认、OS 沙箱、网络/凭据、资源和任务验收各自承担不同边界。
 6. 第七章以合成的显示名修复任务讲解上下文来源、优先级、预算、日志/历史压缩、task state、memory 和 freshness；删除旧 Python context auditor、任意指标阈值及 `G_context`，改为按单位和分母报告的手算审阅。Anthropic compaction 保留为带访问日期的 API 合同示例，model-specific thinking 状态回链第二十四章。
-7. 第八章以合成显示名修复任务贯穿权限决策、一次性审批、下游业务授权、全执行路径隔离和审计；删除原固定阈值、聚合 G_perm 与长 Python auditor，改用分母明确、互不汇总的手算诊断量。目录摘要仍准确；下一步进入第九章。
+7. 第八章以合成显示名修复任务贯穿权限决策、一次性审批、下游业务授权、全执行路径隔离和审计；删除原固定阈值、聚合 G_perm 与长 Python auditor，改用分母明确、互不汇总的手算诊断量。目录摘要仍准确。
+8. 第九章用合成显示名修复 trace 连接上下文、模型提议、策略判断、补丁、测试回执与最终状态；厘清 trace/span/event/log/metric/artifact 和 task/session/run 的边界，区分只读回放、固定回执模拟与隔离重跑。删除原聚合 G_trace 和长 Python 审计 demo，隐私部分改为内容最小化、Artifact 分权、导出前 fail-closed，以及绑定当前 SDK 文档的处理器行为；采样与指标采用各自明确分母，不汇总成通用 gate。
+9. 第十章把 fixture、attempt、系统配置和 experiment 分开，以独立的教学构造显示名任务说明数据集、环境预检、Runner、verifier、分母、配对比较与报告；分类保留 Agent 结果、环境/运行错误、评分错误和无法判定。删除原 15 项任意聚合的质量率、`G_evalh` 固定准入公式和长 Python audit demo；保留 bucket、环境、验收器、结果/约束、安全、成本、可复现、版本、trace 与报告完整性的观测意图，逐项写清单位和适用分母。第七册承接统计设计，第十九章承接 Model×Harness×Environment 归因。
+10. 第十一章把 Claude Code 从“终端型产品”改为多表面、不同执行环境的公开产品案例。按官方文档截至 2026-11-18 的合同组织 gather/action/verify、session/context、permission、OS shell sandbox、checkpoint、hooks/MCP/subagents/skills/plugins 与 OTel；将内部模块图明确标为分析者推断，将未公开 planner、system prompt 和排序/路由机制保留为未知。删除十项覆盖率及 `G_claude` 聚合 gate 和约 140 行 Python audit demo，以合成登录修复流程和人工证据审阅表保留分析目标。第 12 章承接 OpenCode 可检查实现，第 13 章承接跨产品比较。
 
 ## 开放风险与交接
 
@@ -91,4 +94,4 @@
 - 第 1 章原有“0 依赖 Python demo”承诺、9 个固定阈值和约 330 行 toy auditor 已移除；内容改由完整合成修复轨迹、最小伪代码和任务特定验收解释。其余章节中仍有 Python demo 或自动 gate 的部分尚待逐章核验；决定删除代码时须保留必要的过程、数值解释和明确去向。
 - 第 2 章原有运行指标公式及 `G_runtime` 固定门槛已移除；核心观察意图改为记录 session/tenant 隔离、phase 转移、context 来源与新鲜度、adapter/parser/registry 错误、执行回执、恢复/checkpoint 和取消/超时事件，并要求为任何汇总率声明单位和分母。旧的 GPT-5.6 运行时归属快照由 OpenAI 当前公开 Agents API/SDK/Responses API 对比替代；Qwen3.7 Plus region/scope 能力细节待第二十二册第 47 章复核和承接，不能在第二十册正文里留作无去向内容。
 - GitHub 页面公式/图表渲染和全量外链可达性尚未核验；动态产品事实需按每章核验日期固定。
-- **当前下一入口：** [第九章《Trace、日志、回放与可观测性》](../../book-20-agent-harness-runtime/chapters/09-trace日志回放与可观测性.md)。第八章已完成权限请求、审批、业务授权、隔离覆盖和审计隐私的章级扫描与正文精修；本轮审计见[第八章审计](chapter-08-audit.md)。
+- **当前下一入口：** [第十二章《OpenCode 架构分析》](../../book-20-agent-harness-runtime/chapters/12-opencode架构分析.md)。第十一章已完成公开证据边界、产品表面、状态、权限/sandbox、扩展与观测的章级扫描和正文精修；本轮决定与剩余风险见[第十一章审计](chapter-11-audit.md)。第二十册第 12—24 章和全套书精修 goal 继续 active。

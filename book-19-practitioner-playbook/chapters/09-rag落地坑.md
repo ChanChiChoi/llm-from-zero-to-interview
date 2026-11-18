@@ -598,6 +598,6 @@ RAG 不是把文档塞进 prompt，而是建立一条可以追溯的证据链。
 
 最后，所有失败案例都要沿着“证据存在、解析、召回、排序、context、权限、版本、生成、引用、拒答”的顺序找第一处分歧。只有当这条账本能够回放，团队才知道应该修数据、检索、排序、权限、prompt、模型还是产品流程。
 
-想从搭建项目的角度练习文档解析、切分、检索、重排、引用和评估，可继续读[第三册第七章的文档与切分](../../book-03-practical-handbook/chapters/07-rag项目实战-1-文档与切分.md)、[检索与上下文](../../book-03-practical-handbook/chapters/07-rag项目实战-2-检索与上下文.md)、[候选重排](../../book-03-practical-handbook/chapters/07-rag项目实战-3-候选重排.md)、[引用与证据](../../book-03-practical-handbook/chapters/07-rag项目实战-4-引用与证据.md)、[评估指标](../../book-03-practical-handbook/chapters/07-rag项目实战-5-评估指标.md)和[失败归因与报告](../../book-03-practical-handbook/chapters/07-rag项目实战-6-失败归因与报告.md)。如果检索步骤由 Agent 根据中间结果动态决定，可接着读[第十七册第六章《Agentic RAG》](../../book-17-agent-tool-use/chapters/06-agentic-rag.md)。
+想从搭建项目的角度练习文档解析、切分、检索、重排、引用和评估，可继续读[第三册第七章的文档与切分](../../book-03-practical-handbook/chapters/07-rag项目实战-1-文档与检索.md)、[检索与上下文](../../book-03-practical-handbook/chapters/07-rag项目实战-1-文档与检索.md)、[候选重排](../../book-03-practical-handbook/chapters/07-rag项目实战-2-重排与证据.md)、[引用与证据](../../book-03-practical-handbook/chapters/07-rag项目实战-2-重排与证据.md)、[评估指标](../../book-03-practical-handbook/chapters/07-rag项目实战-3-评估与失败归因.md)和[失败归因与报告](../../book-03-practical-handbook/chapters/07-rag项目实战-3-评估与失败归因.md)。如果检索步骤由 Agent 根据中间结果动态决定，可接着读[第十七册第六章《Agentic RAG》](../../book-17-agent-tool-use/chapters/06-agentic-rag.md)。
 
 下一章进入 Agent 落地坑。RAG 主要解决“基于外部证据回答”，Agent 还要在这些证据基础上规划、调用工具、改变外部状态，并处理失败和恢复。
