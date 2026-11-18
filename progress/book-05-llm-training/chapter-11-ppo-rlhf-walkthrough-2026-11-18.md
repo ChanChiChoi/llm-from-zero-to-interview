@@ -52,3 +52,9 @@
 - 补清各模型来源与训练方式：policy/reference 从 SFT 复制且只有 policy 更新；reward model 接 score head 后用 chosen/rejected 偏好对训练并冻结；critic 接 value head 后用 GAE returns 作为目标训练。用同一条算术回答连接 rollout、token reward、advantage 和后续更新。
 - 保留必要公式和边界说明，包括逐 token reward shaping、GAE 递推、截断与终止的区别，以及 reference KL 与 PPO 新旧策略 ratio 各自约束什么；移除本节没有解释作用的任意数值演算。
 - 本轮仍是 §3 的局部教学改写，不改变章节结构、研究结论或配套索引。目标正文和进度文件的 `git diff --check` 通过；本章 132 行代码围栏标记成对，50 个 Markdown 链接中的 5 个本地目标均存在；公式围栏已静态检查。未运行测试或 PDF 构建。
+
+## 本轮补充 GAE 小例子
+
+- 根据读者反馈，沿用 PPO 的算术回答，在 GAE 处加入三步手算：从末尾 reward 和三个前缀的 critic 预测出发，逐步计算 TD residual、向前递推 advantage，并得到 critic 的 returns target。
+- 明确三步是便于讲解的生成位置简化，不代表 tokenizer 切分；暂时忽略逐 token KL，只展示终局分数怎样传回前面，避免把示例数值误当作真实 reward 标尺或训练配方。
+- 目标正文和进度文件的 `git diff --check` 通过；本章 132 行代码围栏标记成对，50 个 Markdown 链接中的 5 个本地目标均存在；新增公式与推算已静态复核。未运行测试或 PDF 构建。
