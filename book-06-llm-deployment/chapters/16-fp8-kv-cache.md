@@ -1,4 +1,4 @@
-# 第十六章：FP8 KV Cache：用低精度换长上下文并发
+# 第十六章：低精度 KV Cache：FP8 工程基线与 FP4 前沿
 
 在大模型推理中，权重通常在服务启动时加载一次，而 KV Cache 会随着每个活跃请求
 的上下文和输出不断增长。短请求时，权重显存可能是主要开销；到了长上下文、高
@@ -10,15 +10,17 @@ FP8 KV Cache 的目标是把 K/V 历史从更高精度 payload 换成 8 bit 浮�
 channel 或 block 保存，page 迁移和 prefix sharing 要携带这些 scale，runtime 还
 可能因为硬件或 shape 不支持而回退到高精度或慢路径。
 
-本章从 KV 的计算动机开始，建立显存公式，再展开 FP8 的数值和 scale、K/V 不对称、
-静态/动态校准、分页 cache 生命周期、kernel 性能、长上下文评估、租户路由、回退和
-发布。读者最终要能回答的不是“FP8 能省多少显存”，而是“在哪类请求上，付出什么
-质量和工程代价后，显存收益是否值得”。
+本章以 FP8 作为工程主线：从 KV 的计算动机开始，建立显存公式，再展开 FP8 的数值
+和 scale、K/V 不对称、静态/动态校准、分页 cache 生命周期、kernel 性能、长上下文
+评估、租户路由、回退和发布；最后把近期 FP4 KV 实现与论文作为实验前沿对照。读者
+最终要能回答的不是“低精度能省多少显存”，而是“在哪类请求上，付出什么质量和工程
+代价后，显存收益是否值得”。
 
 通用量化对象、校准和质量门槛框架见[第 7 章](07-量化与模型压缩.md)；KV 活动状态、
 容量池、分页和复用由[第 3 章](03-kv-cache与内存管理.md)主讲。权重 FP4 和 native
 INT4 artifact 分别见[第 15 章](15-fp4-mxfp4-nvfp4.md)与[第 17 章](17-native-int4与原生量化部署.md)。
-本章只沿 FP8 KV 的数值表示与在线状态生命周期展开。
+本章以 FP8 KV 的数值表示与在线状态生命周期为主，不把 FP4 前沿写成已成熟的生产
+路径；第十五章讲的是权重格式，不能把权重 FP4 与运行中的 KV 状态量化混为一谈。
 
 ## 1. 为什么先量化 KV，而不是只量化权重
 
@@ -683,6 +685,38 @@ T_{\mathrm{break-even}}
 并发条件和受限资源不同。发布时需要同时保留这些口径，才能知道收益来自更低的单步
 读取成本、增加的驻留并发，还是 workload 恰好更适合候选路径。
 
+### 8.5 FP4 KV：有实现和新论文，仍属实验路线
+
+截至 2026-11-18，SGLang 当前文档把 FP4 KV 明确标为 experimental，并列出两种
+E2M1 recipe：`nvfp4` 使用 16 值 block、E4M3 block scale 和 per-tensor global scale；
+`fp4_mx_block16` 是 block size 为 16 的兼容路径。后者不是 OCP 标准 MXFP4 的
+block size 32。它们不是可以互换的名称；切换时还要看量化布局、attention backend、
+硬件、page size 和是否能与当前缓存管理功能组合。SGLang 文档特别注明，当前某些
+FP4 native 路径不支持 PD disaggregation、层级 KV cache 和 LMCache。([SGLang
+Quantized KV Cache](https://github.com/sgl-project/sglang/blob/main/docs/docs/advanced_features/quantized_kv_cache.mdx)，访问于 2026-11-18)
+
+低位宽的容量收益很直接，质量损失却可能集中在难题上。SGLang 文档收录的初步
+结果中，GPT-OSS-120B 在 GSM8K 上 BF16/FP8/FP4 分数分别为 0.9161/0.9163/0.9152，
+但 AIME25 为 0.7533/0.7667/0.3533，GPQA Diamond 为 0.5081/0.5434/0.3202。较大的
+Qwen3-235B-A22B 在部分数据集上退化较小，例如 GSM8K 接近，但 AIME25 的 FP4 仍从
+0.7733 降到 0.6000。分数绑定 SGLang 文档所引用的 PR、模型、数据集和实现配置；
+它们不是跨模型结论。它们足以提醒我们：只测常规问答或简单数学，可能看不出 FP4
+在复杂推理上的质量代价。
+
+近期论文继续探索把量化与 attention kernel 一起设计。2026-11-13 提交的
+NVFP4-MLA 预印本报告其 DeepSeek-R1 和 Kimi-K3 MLA 设定下，九项 benchmark 的平均
+准确率接近 BF16，并报告 KV 压缩和 Rubin GPU 上的 kernel/服务收益；2026-11-06
+提交的 BitDecoding-FP4 预印本则在 B300 与 Qwen3-4B/Qwen3-30B-A3B 设定下报告准确率
+接近 BF16、峰值吞吐提升。这些是作者报告的结果，受论文版本、专用 kernel、模型、
+数据和硬件限制，不能直接推导为当前通用 serving runtime 的生产承诺。([NVFP4-MLA
+预印本](https://arxiv.org/abs/2611.18972)，[BitDecoding-FP4 预印本](https://arxiv.org/abs/2611.09825))
+
+因此，当前实践仍以目标硬件上经过校准的 FP8 路径为默认比较基线；评估 FP4 时，
+先验证“能启动”和 backend 融合，再比较容量、prefill/ITL、端到端延迟、长上下文
+检索与高难度任务质量、崩溃/回退，以及单位成功任务成本。只有目标 runtime 明确
+支持该格式和所需组合、且同一验收集通过质量门槛，才把 FP4 纳入灰度；若实现仍是
+实验接口或仅有论文数据，就把它留在候选实验清单中。
+
 ## 9. 量化 cache 的 manifest、灰度和回滚
 
 ### 9.1 manifest 字段
@@ -1014,6 +1048,9 @@ dtype、scale、layout、position、模型 revision 或 page schema 任一变化
    是通用状态接口参考，不约束其他 runtime 的 page/scale layout。
 6. 本章 Python demo 只计算教学账本与合成质量门禁，不实现 OCP FP8 cast、attention
    dequant kernel 或 GPU page allocator；其结果不代表 benchmark。
+7. [SGLang Quantized KV Cache](https://github.com/sgl-project/sglang/blob/main/docs/docs/advanced_features/quantized_kv_cache.mdx)（访问于 2026-11-18）：核对 FP8/FP4 recipe、FP4 experimental 状态、backend 与功能兼容边界，以及其公开的初步质量表；文档会随 main 分支变化，需锁定部署 commit。
+8. [NVFP4-MLA](https://arxiv.org/abs/2611.18972)（arXiv v1，提交于 2026-11-13）：作者报告 MLA 的 FP4 KV 与 attention 联合设计及模型/硬件绑定的质量、压缩和速度结果；目前是预印本。
+9. [BitDecoding-FP4](https://arxiv.org/abs/2611.09825)（arXiv v1，提交于 2026-11-06）：作者报告 native FP4 KV decoding 的算法与系统协同设计；吞吐和精度数字绑定 B300、Qwen3 变体和论文实现，不能当作一般 runtime 基线。
 
 延伸阅读：
 
@@ -1027,10 +1064,12 @@ dtype、scale、layout、position、模型 revision 或 page schema 任一变化
 8. [PagedAttention](https://arxiv.org/abs/2309.06180) 与 [System-Aware KV Cache Optimization survey](https://arxiv.org/abs/2607.08057)：分页、表示压缩、迁移、调度和淘汰的系统边界。
 9. [Hugging Face KV Cache](https://huggingface.co/docs/transformers/en/kv_cache)：通用 KV cache 生命周期与接口参考。
 10. [SmoothQuant](https://arxiv.org/abs/2211.10438)：相邻的 activation outlier 处理方法；不是 FP8 KV 的直接效果证据。
+11. [SGLang Quantized KV Cache](https://github.com/sgl-project/sglang/blob/main/docs/docs/advanced_features/quantized_kv_cache.mdx)：当前 runtime 对低精度 KV 格式、backend 和精度注意事项的文档入口；FP4 仍标注为实验功能。
+12. [NVFP4-MLA](https://arxiv.org/abs/2611.18972) 与 [BitDecoding-FP4](https://arxiv.org/abs/2611.09825)：FP4 KV 与 attention/kernel 协同设计的近期预印本，阅读时要保留作者报告与生产验证之间的证据边界。
 
 ## 13. 本章小结
 
-FP8 KV Cache 的本质是用更小的历史状态 payload 换取显存和调度空间，并可能降低
+本章的工程基线是 FP8 KV：用更小的历史状态 payload 换取显存和调度空间，并可能降低
 decode 读取流量；代价是数值误差、转换成本和状态生命周期进入 serving 主路径。
 
 1. 先用 `2LBTH_kvD_hb` 估算 KV 数量级，再把 scale、page、workspace、对齐和余量
@@ -1047,6 +1086,8 @@ decode 读取流量；代价是数值误差、转换成本和状态生命周期�
    不等于 TPOT 或单位成功成本减半。
 7. 量化发布应支持按任务/层路由、敏感 KV 保留高精度和可观察 fallback，依据实测逐步
    扩大请求范围。
+8. SGLang 当前将 FP4 KV 标为实验功能；新预印本提供了值得关注的设计，但仍需要
+   在目标 runtime、硬件和业务验收集上复核，不能取代 FP8 工程基线。
 
 当一个系统能说明“哪些请求使用 FP8、哪些请求保留 BF16、为什么这样分、发生异常
 如何回退、旧 page 如何处理、质量和成本怎样证明”，FP8 KV 才真正从一个 dtype

@@ -1,6 +1,6 @@
 # 第二十册《Agent Harness、Coding Agent Runtime 与智能体工程框架》架构审视
 
-审视日期：2026-11-18。阶段：册级初审、发现扫描、简介与目录重构完成；第 1—9 章章级扫描与精修完成，第 10—24 章待逐章处理。
+审视日期：2026-11-18。阶段：册级初审、发现扫描、简介与目录重构完成；第 1—13 章章级扫描与精修完成，第 14—24 章待逐章处理。
 
 ## 审视范围与方法
 
@@ -44,8 +44,8 @@
 | 9 Trace、日志、回放与可观测性 | 怎样从一次运行恢复输入、动作、结果和副作用？ | 建立复盘和证据层。 | 依第 2、7—8 章；交第 10、17—19 章。 |
 | 10 Evaluation Harness | 怎样复现任务、初始化环境、判断 artifact 成功并比较变更？ | 将执行证据变成评估。 | 依第 9 章；方法回链第七册，深化交第 19 章。 |
 | 11 Claude Code 架构分析 | 怎样从官方公开资料和可观察证据分析工作循环、权限与执行边界，并标出未知内部？ | 用多表面产品案例练习证据分层和可迁移审阅方法。 | 依第 1—10 章；交第 12 章 OpenCode 和第 13 章产品对比。 |
-| 12 OpenCode 架构分析 | 开源 runtime 的配置、工具、扩展和权限如何可见？ | 通过公开实现学习控制平面。 | 依第 1—10 章；交第 13—15 章。 |
-| 13 Codex 与主流产品比较 | 怎样在同一维度比较 CLI/IDE/Web/Cloud/SDK agent？ | 把案例归纳成比较方法。 | 依第 11—12 章；不做实时排名；交系统选型。 |
+| 12 OpenCode 架构分析 | 固定版本下，配置、指令、Agent、权限、宿主执行和状态证据如何共同构成一次可审阅任务？ | 用公开合同和定向源码路径分析开放 Runtime，并明确其本身不提供 Agent sandbox。 | 依第 1—10 章；交第 13 章做同维度产品比较，并为第 14—15 章提供扩展与控制边界案例。 |
+| 13 Codex 与主流产品比较 | 怎样分清产品入口、Agent/harness、执行环境和评估器，并基于公开证据比较一条修复任务？ | 将产品案例归纳为“产品选择”和“受控 harness 比较”两种方法。 | 依第 11—12 章；不做产品排名；交第 14 章协议集成和第 15 章系统设计。 |
 | 14 MCP/A2A 与 Harness 集成 | 外部工具和 agent 如何进入 runtime 的 capability、permission、trace 与 evaluation？ | 讲协议集成责任。 | 依第 4、8—10 章；协议主讲交第二十二册。 |
 | 15 Agent Harness 系统设计 | 怎样把前面模块整合成可部署、可审计的系统方案？ | 形成全书架构综合练习。 | 依第 1—14 章；交第 16 章故障复盘。 |
 | 16 Harness 实战坑与面试题 | 常见故障怎样按证据定位，并形成回答？ | 回收前十六章并暴露薄弱处。 | 依第 1—15 章；不替代专项章节。 |
@@ -87,6 +87,10 @@
 9. 第十章把 fixture、attempt、系统配置和 experiment 分开，以独立的教学构造显示名任务说明数据集、环境预检、Runner、verifier、分母、配对比较与报告；分类保留 Agent 结果、环境/运行错误、评分错误和无法判定。删除原 15 项任意聚合的质量率、`G_evalh` 固定准入公式和长 Python audit demo；保留 bucket、环境、验收器、结果/约束、安全、成本、可复现、版本、trace 与报告完整性的观测意图，逐项写清单位和适用分母。第七册承接统计设计，第十九章承接 Model×Harness×Environment 归因。
 10. 第十一章把 Claude Code 从“终端型产品”改为多表面、不同执行环境的公开产品案例。按官方文档截至 2026-11-18 的合同组织 gather/action/verify、session/context、permission、OS shell sandbox、checkpoint、hooks/MCP/subagents/skills/plugins 与 OTel；将内部模块图明确标为分析者推断，将未公开 planner、system prompt 和排序/路由机制保留为未知。删除十项覆盖率及 `G_claude` 聚合 gate 和约 140 行 Python audit demo，以合成登录修复流程和人工证据审阅表保留分析目标。第 12 章承接 OpenCode 可检查实现，第 13 章承接跨产品比较。
 
+11. 第十二章固定 OpenCode v2.3.2（release commit c0ad18b）及 2026-11-18 官方文档，按明确标为教学构造的认证修复任务连接配置与指令、Agent/子 Agent、工具提议、action/resource/effect 权限、宿主执行、Session/Event、Snapshot/Diff、compaction 和独立 verifier。用定向源码核对权限求值和 Session 操作入口；把模块图标为分析抽象，并引用项目 SECURITY.md 明确 OpenCode 自身不提供 Agent sandbox。删除旧版工具/字段清单、Plan 只读和权限隔离泛化、覆盖率、G_opencode gate 及约 140 行 Python demo；改用问题—证据—边界人工审阅表。更新练习 35P、面试题 40N 与目录摘要，第 13 章承接跨产品比较。
+
+12. 第十三章完成产品案例横向精修。按 2026-11-18 官方文档与研究证据，校正 Codex 本地/Cloud、Cursor IDE/Cloud、SWE-agent maintenance-only 与 mini-SWE-agent、OpenHands Canvas/ACP/Runtime 的比较单位；以认证响应修复的明确教学构造追踪上下文、提议、派发、回执、diff 和验收。把“产品选择”与“harness 因果比较”分开讲；删除原覆盖率公式、综合 ranking/gate 与 Python toy audit demo，改为条件记录卡和证据边界。更新练习 35Q、面试题 40O；正文取舍见[第十三章精修审计](chapter-13-audit.md)。
+
 ## 开放风险与交接
 
 - 全书本地链接静态扫描发现 14 个缺失目标引用，集中在第 19—23 章：`grok-4.20`、`gemini-3.8-flash`、`glm-5.1`、`gpt-6-luna`、`gpt-5.5`、Qwen3.6-27B/35B-A3B 研究笔记，及 `deepseek_harness_protocol_audit.py`、`gpt56_luna_state_replay_audit.py`、`gpt6_sol_contract_audit.py`、`claude_fable51_state_protocol_audit.py`。对应文件目前不存在。逐章修复时必须检查引用所支持的具体断言：迁移到真实来源、改为可复核的手工练习，或补建有来源的新研究记录；不得只隐藏链接而保留“脚本已运行/输出为……”的无证据表述。
@@ -94,4 +98,4 @@
 - 第 1 章原有“0 依赖 Python demo”承诺、9 个固定阈值和约 330 行 toy auditor 已移除；内容改由完整合成修复轨迹、最小伪代码和任务特定验收解释。其余章节中仍有 Python demo 或自动 gate 的部分尚待逐章核验；决定删除代码时须保留必要的过程、数值解释和明确去向。
 - 第 2 章原有运行指标公式及 `G_runtime` 固定门槛已移除；核心观察意图改为记录 session/tenant 隔离、phase 转移、context 来源与新鲜度、adapter/parser/registry 错误、执行回执、恢复/checkpoint 和取消/超时事件，并要求为任何汇总率声明单位和分母。旧的 GPT-5.6 运行时归属快照由 OpenAI 当前公开 Agents API/SDK/Responses API 对比替代；Qwen3.7 Plus region/scope 能力细节待第二十二册第 47 章复核和承接，不能在第二十册正文里留作无去向内容。
 - GitHub 页面公式/图表渲染和全量外链可达性尚未核验；动态产品事实需按每章核验日期固定。
-- **当前下一入口：** [第十二章《OpenCode 架构分析》](../../book-20-agent-harness-runtime/chapters/12-opencode架构分析.md)。第十一章已完成公开证据边界、产品表面、状态、权限/sandbox、扩展与观测的章级扫描和正文精修；本轮决定与剩余风险见[第十一章审计](chapter-11-audit.md)。第二十册第 12—24 章和全套书精修 goal 继续 active。
+- **当前下一入口：** [第十四章《MCP、A2A 与 Harness 集成》](../../book-20-agent-harness-runtime/chapters/14-mcp-a2a与harness集成.md)。第十三章已完成公开证据扫描、比较方法重构和配套同步；正文取舍与静态验收见[第十三章审计](chapter-13-audit.md)。第二十册第 14—24 章和全套书精修 goal 继续 active。

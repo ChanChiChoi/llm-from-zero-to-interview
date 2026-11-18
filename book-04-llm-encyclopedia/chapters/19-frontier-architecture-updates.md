@@ -86,7 +86,7 @@
 
 | 查询主题 | 深入阅读 |
 | --- | --- |
-| GPT-6 Astra 的上下文、工具与运行时预算 | [第六册第 18 章](../../book-06-llm-deployment/chapters/18-gpt-6-astra长上下文与工具预算.md) |
+| GPT-6.2 Astra 的上下文、工具与运行时预算 | [第六册第 18 章](../../book-06-llm-deployment/chapters/18-gpt-6.2-astra长上下文与工具预算.md) |
 | GLM-5.3 的长任务环境、奖励捷径与验证器 | [第十六册第 20 章](../../book-16-reasoning-models/chapters/20-glm-5.3长任务环境与验证器.md) |
 | Kimi K3/K3.1 Pro 发布证据与长任务 harness | [第十七册第 15 章](../../book-17-agent-tool-use/chapters/15-kimi-k3发布证据与长任务harness.md) |
 

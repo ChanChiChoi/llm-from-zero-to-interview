@@ -2,246 +2,107 @@
 
 ## 0. 本讲范围与资料
 
-本章参考各项目官方公开资料：OpenAI Codex / Codex CLI / Codex surfaces 的官方资料、Anthropic Claude Code 官方文档、OpenCode 官方文档和官方仓库、Cursor 官方文档、Aider 官方文档、SWE-agent 官方文档和仓库、OpenHands 官方仓库和文档、GitHub Copilot coding agent 公开文档。Codex manual helper 在当前环境中因官方站点返回 403 未能直接抓取，因此本章只采用可访问的 OpenAI 官方公开页面和仓库说明，不写未核实的 Codex 内部实现。
+本章以 **2026-11-18** 能查到的官方产品文档、项目文档和研究论文为准，挑选 Codex、Claude Code、OpenCode、Cursor、Aider、SWE-agent/mini-SWE-agent 与 OpenHands 作案例。它们不是同一类产品，也不是穷尽市场的清单。逐项事实、来源日期和未验证边界见[本章资料与证据记录](../../research/coding-agent-product-comparison-evidence-2026-11-18.md)。第十一章和第十二章已经分别分析 Claude Code 与固定版本的 OpenCode；本章把重点放在如何对齐比较问题。
 
-边界要说清楚：
+阅读时先分清四个层次：用户接触的产品入口（CLI、IDE、Web 等）、运行 Agent 的 harness、实际提供文件/命令/网络能力的执行环境，以及评估任务和 verifier。一个品牌可以同时覆盖多个入口；一个平台也可以承载不同 Agent。把层次分开后，再看上下文、编辑、权限、状态、验收和交接。
 
-1. 本章比较的是公开产品形态、官方能力说明和可迁移 harness 设计，不做实时榜单排名。
-2. 闭源产品的内部 prompt、planner、工具排序、trace 存储、沙箱实现和模型路由不能从外部资料反推成确定结论。
-3. 开源项目虽然能读源码，但本章仍以架构学习和面试表达为目标，不逐行复刻实现。
-4. 各系统版本更新很快，正文只写稳定架构维度，例如产品入口、上下文工程、工具执行、权限边界、编辑机制、trace、评估和企业治理。
-5. 本章的公式和 demo 用于建立横向比较方法：把“好用不好用”的主观体验拆成可审计指标，而不是替代真实 benchmark 或企业 PoC。
-
-一句话口径：比较 coding agent 时，先比较 harness，再比较模型；先说公开资料边界，再说系统取向；先拆上下文、工具、权限、编辑、验证和评估，再谈个人体验。
+本章不报告产品实测结果或实时排名，也不把闭源 prompt、planner、路由、内部状态或隔离强度写成已知事实。文档支持的是公开合同；论文支持的是其指定任务与配置下的观察；两者都不等同于本地部署审计。本章中的认证修复任务是**教学构造**，没有运行这些产品。
 
 ## 13.1 本章定位
 
-前面两章分别分析了 Claude Code 和 OpenCode。本章进入横向比较：Codex、Claude Code、OpenCode、Cursor、Aider、SWE-agent、OpenHands 这些 coding agent 或 coding assistant 到底有什么差异。
+前面两章分别分析了 Claude Code 和 OpenCode。本章继续看 Codex、Cursor、Aider、SWE-agent/mini-SWE-agent 与 OpenHands，并沿一项小任务比较它们：仓库中的 `/api/profile` 对缺失 bearer token 返回 `200`，我们要修为 `401`、增加回归测试，而且不 push。此时不能只问“哪个 Agent 更强”，还要问用户启动的是哪个入口、代码在哪个执行环境、Agent 看到了什么、哪些动作会真的派发，以及结果由什么证据验收。
 
-本章不做简单产品测评，也不排名谁更强。因为 coding agent 的能力不是单一模型能力决定的，而是由模型、上下文工程、工具系统、编辑方式、权限模型、执行环境、评估体系和产品入口共同决定。
+产品表现受到模型、工具和预算，也受到上下文、编辑方式、权限、执行环境、交互表面与验证流程影响。只看品牌或模型名称，不能判断这些条件是否相同；只把差异统称为 harness，也会把模型和产品的真实差异抹掉。
 
 学完本章，你应该能回答：
 
-1. 为什么主流 coding agent 的差异主要体现在 harness 设计上。
-2. Codex、Claude Code、OpenCode、Cursor、Aider、SWE-agent、OpenHands 分别代表什么设计取向。
-3. CLI、IDE、Web、Cloud、SDK 这些产品形态会如何影响 agent runtime。
-4. repo map、rules、AGENTS.md、CLAUDE.md、terminal、issue、test output 分别如何进入上下文。
-5. patch editing、IDE edit、architect/editor、sandbox execution、SWE-bench runner 的差异是什么。
-6. 面试中如何系统比较多个 coding agent，而不是停留在“某个产品好用”层面。
+1. 区分产品 surface、Agent/harness、执行环境和评估器。
+2. 用同一条任务检查上下文来源、文件与命令动作、权限边界、状态记录和验收证据。
+3. 说明 Codex、Claude Code、OpenCode、Cursor、Aider、SWE-agent/mini-SWE-agent 与 OpenHands 的公开形态，以及资料没有揭示什么。
+4. 区分“选用完整产品”与“研究某个 harness 因素”两种比较：前者要披露差异，后者要控制变量。
+5. 根据具体任务和约束形成可复核的选择理由，不把局部证据汇成通用排名。
 
 ## 13.2 资料来源和可信边界
 
-本章主要参考以下公开资料：
-
-1. OpenAI `openai/codex` 官方 GitHub 仓库 README：Codex CLI 是 OpenAI 的本地 coding agent，支持 CLI、IDE、desktop app、Codex Web 等入口。
-2. Anthropic Claude Code 官方文档：Claude Code 是能读取代码库、编辑文件、运行命令并集成开发工具的 agentic coding tool，支持 terminal、IDE、desktop app、browser、GitHub Actions、GitLab CI/CD、Agent SDK、sub-agents、skills、hooks、MCP 等能力。
-3. OpenCode 官方文档：OpenCode 是开源 AI coding agent，支持 terminal、desktop、IDE、server、SDK、config、tools、permissions、agents、MCP、custom tools、plugins、session、diff、snapshot、undo 等能力。
-4. Aider 官方文档：Aider 是终端里的 AI pair programming 工具，强调 git repo、repo map、chat modes、architect/editor、edit formats、lint/test、prompt caching 等。
-5. SWE-agent 官方文档和 GitHub 仓库：SWE-agent 面向自动修复 GitHub issue、SWE-bench、研究和可配置实验，强调 agent-computer interface、YAML 配置、tools、environment、trajectory 等。
-6. OpenHands 官方 GitHub 仓库：OpenHands 是 AI-driven development 平台，提供 Software Agent SDK、CLI、Local GUI、Cloud、Enterprise、REST API、React UI、RBAC、协作和集成能力。
-7. Cursor 官方文档入口：Cursor 是 IDE 内 coding assistant/agent，文档覆盖 Agent、Rules、MCP、Skills、CLI 等能力。部分页面抓取结果较少，本章只采用公开且可确认的高层能力，不推断未公开实现细节。
-
-需要注意：不同产品更新很快，闭源产品的内部实现细节不能从外部完全确认。因此本章重点比较公开能力和可验证的架构取向，不把社区传闻写成确定事实。
+本章按产品官方文档和项目维护者资料描述公开入口与合同；有关 benchmark、Agent scaffolding 和 ACI 的论点则绑定到具体论文。链接集中放在对应产品小节和[证据记录](../../research/coding-agent-product-comparison-evidence-2026-11-18.md)，并标明来源能支持到哪里。OpenHands 仓库 `main` 与各产品动态文档会变化；这里的访问日期不代表读者当前安装版本。
 
 ## 13.3 为什么不能只比较模型
 
-很多人比较 coding agent 时会说：某个产品更聪明，某个模型更会写代码。
-
-这只说对了一部分。真实 coding agent 至少由七层组成：
+比较结果时，常见的第一句话是“这个 Agent 更聪明”。但同一任务的结果同时取决于模型、产品入口、上下文、工具、权限与运行环境。先把一次任务经过的对象画出来，才知道比较落在哪一层：
 
 ```text
 User / Issue / IDE Selection / CLI Prompt
--> Context Builder
--> Agent Policy / Planning Loop
--> Tool Registry
--> Permission / Sandbox / Execution Environment
--> File Editing / Diff / Patch / IDE Apply
--> Verification / Test / Trace / Review
+-> Public product surface
+-> Agent or harness (partly hidden in commercial products)
+-> Tool request and host-side policy
+-> Local or remote execution environment
+-> File changes and task evidence
+-> Independent verification and human review
 ```
 
-模型只在中间负责推理和生成动作。其他层决定它能看到什么、能做什么、怎么改文件、能不能运行测试、出了错能不能恢复。
+图中的层是**比较用的分析框架**，不是任何单一产品已公开的内部模块图。模型会读取上下文并提出动作；宿主是否派发、动作实际运行在哪里、改动怎样留下证据，则取决于公开合同和部署设置。对闭源产品，内部组件边界通常未知；对开源项目，读到某个版本的代码也只支持该版本中实际检查的路径。
 
-两个系统使用同一个模型，表现也可能差很多：
-
-1. 一个系统有 repo map，另一个只能靠用户手动粘文件。
-2. 一个系统能运行测试并读取错误，另一个只能给建议。
-3. 一个系统有 patch apply 和 diff review，另一个只输出整段代码。
-4. 一个系统有权限沙箱，另一个默认执行所有命令。
-5. 一个系统有 trajectory 和 replay，另一个没有可复现记录。
-
-因此，本章比较的核心不是“模型榜单”，而是 harness 设计。
+即使两个实验使用同一模型，若一边只给 issue，另一边还提供认证 handler、相关测试和失败回执，模型能用的证据就不同；若一边可以修改并运行测试，另一边只能返回建议，执行路径也不同。这是帮助区分变量的概念例子，不是本章产品实测。反过来，完整产品比较中的模型和环境差异本来就是产品条件，不能为了强调 harness 而忽略它们。SWE-agent 论文在指定实验中研究了 Agent-Computer Interface（ACI）；较新的 scaffold 研究也报告实际交互可能偏离配置标签。它们支持把接口与运行轨迹纳入问题，不支持给所有产品排出固定优劣顺序（[SWE-agent 论文 v3](https://arxiv.org/abs/2405.15793v3)，[scaffolding 研究预印本](https://arxiv.org/abs/2608.08654)）。
 
 ## 13.4 对比总表
 
 可以先用一张表建立整体印象。
 
-| 系统 | 主要形态 | 核心取向 | 典型强项 | 主要风险或边界 |
-|---|---|---|---|---|
-| Codex | CLI、IDE、desktop app、Codex Web | OpenAI 本地与云端 coding agent | 轻量本地 CLI、OpenAI 模型和 ChatGPT 生态入口 | 公开文档能确认产品形态，但内部 harness 细节需谨慎判断 |
-| Claude Code | Terminal、IDE、desktop、web、CI、SDK | 产品化 agentic coding tool | 多入口、工具执行、MCP、skills、hooks、sub-agents、Agent SDK | 闭源能力多，内部实现边界不能过度推断 |
-| OpenCode | Terminal、desktop、IDE、server、SDK | 开源可配置 runtime | config、permissions、agents、MCP、custom tools、server API、snapshot/diff/revert | 开放能力越强，权限治理和配置复杂度越高 |
-| Cursor | IDE | IDE-native coding assistant/agent | 编辑器上下文、selection、rules、MCP、skills、交互式编辑体验 | 强依赖 IDE 场景，批处理和研究复现实验不是核心形态 |
-| Aider | Terminal | Git repo 中的 AI pair programming | repo map、chat modes、architect/editor、edit formats、git 集成、lint/test | 更偏本地结对编程，不是完整企业平台 |
-| SWE-agent | CLI、研究框架、benchmark runner | 自动修复 issue 和研究评测 | SWE-bench、trajectory、YAML 配置、agent-computer interface、可复现实验 | 面向研究和任务自动化，日常 IDE 体验不是核心 |
-| OpenHands | SDK、CLI、Local GUI、Cloud、Enterprise | AI-driven development 平台 | Software Agent SDK、GUI、REST API、Cloud、Enterprise、RBAC、协作和集成 | 平台复杂度高，部署和治理成本也更高 |
+| 比较对象 | 公开入口/层次 | 可观察的产品合同 | 需要单独核实 |
+|---|---|---|---|
+| Codex | CLI、IDE、desktop 与 Cloud 等不同 surface | 本地仓库路径与 OpenAI 管理计算机上的 Cloud 任务都公开存在 | 当前任务使用的 surface、sandbox/approval、workspace、网络和账号配置 |
+| Claude Code | CLI、IDE、desktop、web、CI 等 | 多入口 agentic coding 产品 | 每个 surface 的实际执行位置，以及 shell sandbox 没覆盖的工具边界 |
+| OpenCode V2 | TUI/IDE、server、SDK 等 | 可读源码、公开配置和 API 合同的开源 runtime | 安装版本、配置与项目自行提供的隔离；OpenCode 本身不提供 Agent sandbox |
+| Cursor | 本地 IDE Agent 与 Cloud Agents | IDE 工作流和远端 VM 工作流并存 | 当前任务使用哪种入口、cloud 环境的网络/secret 设置 |
+| Aider | 本地 Git 仓库中的终端 pair programming | repo map、ask/code/architect 等交互模式 | 所用模型、编辑格式、仓库规则与用户给定的运行/验证流程 |
+| SWE-agent / mini-SWE-agent | 研究/批处理框架与轻量 CLI scaffold | SWE-agent 处于 maintenance-only；项目文档称 mini-SWE-agent 为后续方向 | 固定的项目版本、配置、模型、环境和复现实验条件 |
+| OpenHands | Agent Canvas/Server、内建 Agent 或 ACP 外部 Agent、不同 runtime/backend | 可作为平台与执行入口，也可连接外部 Agent | 选定的是平台、内建 Agent 还是外部 ACP Agent，以及实际 backend/runtime |
 
-这张表背后的关键是：每个系统优化的不是同一个目标。
+这是一张入口地图，不是强弱排名。相同品牌可覆盖多个不同的比较单位；产品默认值和可用能力也会随版本、账户和组织配置变化。后文分别说明公开资料支持的事实与仍需在具体环境中核实的部分。
 
-Codex、Claude Code、OpenCode 更像通用 coding agent；Cursor 更像 IDE 原生助手；Aider 更像终端结对编程工具；SWE-agent 更像研究和 benchmark agent；OpenHands 更像可部署的软件工程 agent 平台。
+## 13.5 Codex：同一产品线中的本地与云端执行路径
 
-## 13.5 Codex：OpenAI 的轻量本地 Coding Agent
+Codex 不应再被概括为“轻量本地 CLI”。截至本章访问的官方资料，产品入口包括本地 CLI、IDE、desktop，以及在 OpenAI 管理计算机上执行任务的 Codex Cloud；不同入口的可见能力、workspace 与控制边界不能互相代替（[Codex CLI](https://developers.openai.com/codex/cli)、[ChatGPT Work and Codex](https://help.openai.com/en/articles/20001275-chatgpt-work-and-codex)、[Using Codex Cloud](https://help.openai.com/en/articles/20001545-using-codex-cloud)）。
 
-根据 `openai/codex` 官方仓库，Codex CLI 是 OpenAI 的 coding agent，可以在本地电脑运行。
+先用一个差异说明为什么 surface 很重要。开发者在本地 CLI 中启动任务时，Codex 的本地工作流面向当前本地仓库；在 Codex Cloud 中，任务会在 OpenAI 管理的计算机和准备好的环境里运行，工作文件位于云端任务 workspace。即使两边都叫 Codex，文件系统、网络、预装依赖和结果交接也可能不同。不能从“Codex 支持云端”推断本地终端命令运行在云上，也不能从本地 workspace-write 推断 Cloud 环境具有相同限制。
 
-公开 README 提到几个关键形态：
+OpenAI 的本地 sandbox 文档把 `read-only`、`workspace-write` 和 `danger-full-access` 分为不同文件/命令权限模式，并另行说明 approval policy。审批提示影响是否需要用户作决定；sandbox 限定执行能力；自动审批审阅不改变 sandbox 本身的边界（[Sandboxing](https://learn.chatgpt.com/docs/sandboxing)）。具体任务仍要记录实际选用的模式、审批策略和网络设置，不能仅凭产品名判断。
 
-1. Codex CLI：本地终端 agent。
-2. IDE 插件：面向 VS Code、Cursor、Windsurf 等编辑器。
-3. Desktop app：可通过 `codex app` 或 Codex App 页面进入。
-4. Codex Web：云端 agent 入口。
-5. 支持通过 ChatGPT 账号或 API key 使用。
+因此比较 Codex 时，先问三件事：任务在 CLI/IDE/desktop 还是 Cloud 启动？代码实际在哪台机器和哪个 workspace？采用什么 sandbox 与 approval policy？公开文档能定义可选合同，却不能证明某个用户任务当时采用了哪种配置。
 
-从 harness 角度看，Codex 的重要意义是：OpenAI 把代码生成能力从“聊天窗口回答代码”推进到“本地运行、读写 repo、执行开发任务”的 agent runtime。
+## 13.6 Claude Code：多入口产品与有范围的执行控制
 
-可以把 Codex 抽象成：
+Claude Code 官方文档覆盖 CLI、IDE、desktop、web 和自动化等入口；permission、checkpoint、MCP、hooks、skills 与 sandbox 又各有自己的作用范围（[Platforms](https://code.claude.com/docs/en/platforms)、[Permissions](https://code.claude.com/docs/en/permissions)、[Checkpointing](https://code.claude.com/docs/en/checkpointing)）。这使它适合用来观察产品工作流如何穿过不同入口，但公开页面不足以证明各表面共享一套相同执行环境或内部调度逻辑。
 
-```text
-CLI / IDE / App / Web
--> Codex Runtime
--> Local workspace or cloud workspace
--> Model reasoning
--> File edits / commands / diffs / task results
-```
+比较安全边界时要更具体。Claude Code 文档描述的 shell sandbox 保护的是其覆盖范围内的 shell 命令及相关子进程；不能因此推出所有文件工具、MCP server、hook、插件或其他 surface 都在同一 OS 隔离边界内（[Sandboxing](https://code.claude.com/docs/en/sandboxing)）。权限规则、用户审批和系统级隔离回答不同问题：规则决定某项动作是否可继续，审批让用户授权某一决定，sandbox 限制动作能触及的资源。要分析某个部署，必须继续检查未被 shell sandbox 覆盖的通道。
 
-本地 CLI 的优势：
+`CLAUDE.md`、session 和记忆类能力可以为任务提供指令或历史信息，MCP、hooks 和 skills 则扩展连接或工作流。它们分别影响输入和动作路径；文档名称相似不代表它们是同一种状态存储、授权机制或执行隔离。内部 planner、system prompt 与跨 surface 状态迁移实现仍应标作未知。
 
-1. 离代码仓库近，能直接进入项目目录。
-2. 适合开发者用自然语言驱动小到中等任务。
-3. 能和本地 shell、git、测试命令形成闭环。
-4. 安装和启动成本较低。
+## 13.7 OpenCode：固定版本下可读的 runtime 案例
 
-Web 或 cloud 形态的优势：
+第十二章已按 OpenCode v2.3.2 与固定源码 revision 分析配置、权限、Agent、工具、Session、Snapshot、Server 和 SDK。本章只抽取横向比较需要的结论：公开配置和源码让部分路径可以逐项核对，但开源不等于某个部署的全部行为已经被审计。
 
-1. 可以处理长任务。
-2. 可以脱离本地机器执行。
-3. 更适合多人协作、远程任务和异步开发。
-4. 可以与 ChatGPT 账号体系和云端工作流结合。
+尤其要保留第十二章的安全结论：OpenCode 自身不提供 Agent sandbox。permission 规则能够控制工具动作是否被允许，却不等同于操作系统对文件、进程和网络的隔离；Server、SDK 和扩展工具也要按实际部署分别检查。版本、源码路径和证据边界见[第十二章](12-opencode架构分析.md)及[OpenCode V2 来源记录](../../research/opencode-v2-runtime-public-contracts-2026-11-18.md)。
 
-面试中不要把 Codex 只理解为“代码补全模型”。在当前语境下，它更接近一个 coding agent 产品线：CLI 解决本地交互，IDE 解决编辑器嵌入，Web/Cloud 解决异步任务和远程执行。
+## 13.8 Cursor：本地 IDE Agent 与 Cloud Agents 并存
 
-## 13.6 Claude Code：强产品闭环的 Agentic Coding Tool
+Cursor 的本地 Agent 文档围绕代码库探索、编辑、终端、rules、diff review 与 checkpoints 描述 IDE 工作流；Cloud Agents 文档另行说明远端任务、环境准备、分支交接和可配置 runtime（[Agent overview](https://cursor.com/docs/agent/overview)、[Agent Review](https://cursor.com/docs/agent/agent-review)、[Cloud Agents](https://cursor.com/docs/cloud-agent)、[Choose where Cloud Agents run](https://cursor.com/docs/cloud-agent/self-hosted/choose-runtime)）。所以把 Cursor 归纳为“只能在 IDE 使用”的工具已经不完整。
 
-Claude Code 官方文档把它定义为 agentic coding tool：能读取代码库、编辑文件、运行命令，并和开发工具集成。
+本地 IDE 入口把用户当前编辑工作流与 Agent 交互放在一起；Cloud Agent 则可以在隔离 VM 或选定的 self-hosted 环境处理任务，并使用配置好的仓库、依赖和网络条件。云端网络、secret、私有网络连通性及 runtime 选项需要按管理员配置核实，不能把 Cloud Agent 的隔离 VM 描述推广到本地 IDE Agent。
 
-公开文档显示它支持多种入口：
-
-1. Terminal CLI。
-2. VS Code、Cursor、JetBrains 等 IDE 插件。
-3. Desktop app。
-4. Web。
-5. GitHub Actions 和 GitLab CI/CD。
-6. Slack、remote control、routines、browser 等工作流。
-7. Agent SDK。
-
-Claude Code 的公开能力中，最值得从 harness 角度关注的是：
-
-1. `CLAUDE.md`：项目级和团队级 instruction/memory。
-2. 自动 memory：保存构建命令、调试经验等会话外知识。
-3. MCP：连接外部数据源和工具系统。
-4. Skills：封装团队可复用工作流。
-5. Hooks：在 action 前后运行 shell 命令，例如格式化、lint 或提交前检查。
-6. Sub-agents 和 background agents：并行处理不同任务。
-7. Agent SDK：构建自定义 agent 和编排逻辑。
-8. 多入口 session：终端、IDE、desktop、web 之间迁移任务。
-
-这代表一种产品闭环取向：不只是让 agent 能改代码，而是让它融入开发者日常工作流。
-
-从系统设计看，Claude Code 的重点是：
-
-```text
-Developer workflow
--> Claude Code surface
--> Shared coding engine
--> Project memory / skills / hooks / MCP
--> File edit / command execution / git / CI
--> Review / PR / automation
-```
-
-它的优势不是某一个工具，而是多入口、多工作流和产品体验整合。比如同一个任务可以从 terminal 开始，在 desktop 里看 diff，在 web 上继续，或者接到 GitHub Actions 做自动 review。
-
-面试回答时可以说：Claude Code 类系统的护城河不只是模型，而是“模型 + 工具 + workflow + memory + permissions + integration”的完整闭环。
-
-## 13.7 OpenCode：开源、可配置、可扩展 Runtime
-
-上一章已经详细分析 OpenCode，这里只做横向定位。
-
-OpenCode 的公开文档显示它是开源 AI coding agent，可用作 terminal interface、desktop app 或 IDE extension，并且有 server、SDK、config、tools、permissions、agents、MCP、custom tools、plugins、snapshot、diff、undo 等能力。
-
-它和 Claude Code 的不同在于：OpenCode 更适合作为可学习、可扩展、可配置的公开 runtime 样本。
-
-OpenCode 的关键设计取向包括：
-
-1. 配置系统是控制平面。
-2. Permission engine 用 allow、ask、deny 控制工具风险。
-3. Primary agents 和 subagents 体现任务专门化。
-4. MCP 和 custom tools 扩展外部工具生态。
-5. Server 和 SDK 让 runtime 可编程。
-6. Snapshot、diff、revert 支撑可审查和可恢复。
-
-如果要设计一个企业内部 coding agent，OpenCode 提供了很多可借鉴模块：
-
-1. 全局配置和项目配置如何合并。
-2. agent 级权限如何覆盖默认权限。
-3. custom tool 如何拿到 session、directory、worktree 等上下文。
-4. TUI 和 server 如何解耦。
-5. session、message、diff、permission response 如何暴露成 API。
-
-它的风险也明显：开放能力越多，治理越难。MCP、plugins、custom tools、server、SDK 都是扩展点，同时也是安全边界。
-
-## 13.8 Cursor：IDE Native Agent
-
-Cursor 的定位和终端 agent 不完全一样。它是 IDE 原生 coding assistant/agent，核心优势来自编辑器上下文。
-
-IDE 内 agent 能天然获得：
-
-1. 当前打开文件。
-2. 光标位置和选区。
-3. 当前诊断、lint、类型错误。
-4. 跳转定义、引用、符号搜索。
-5. 编辑器 diff 和 apply。
-6. 用户正在看的代码区域。
-
-这和 CLI agent 的上下文入口不同。CLI agent 通常要靠 `grep`、`glob`、`read`、`bash` 去主动探索；IDE agent 可以直接利用用户已经建立的局部上下文。
-
-Cursor 文档入口显示其能力覆盖 Agent、Rules、MCP、Skills、CLI 等。这说明 IDE agent 也在向完整 harness 演进，而不是只做补全。
-
-Cursor 类系统的典型优势：
-
-1. 适合局部代码修改和交互式编辑。
-2. 能自然使用 selection、diagnostics、symbols。
-3. 用户可以实时审查 diff。
-4. 对日常开发体验友好。
-5. rules 能把项目规范注入上下文。
-
-边界也很清楚：
-
-1. 对大规模异步任务，IDE UI 不一定是最佳载体。
-2. 对 benchmark 和可复现实验，IDE 交互记录通常不如 trajectory runner 明确。
-3. 对企业批处理迁移，可能需要 CLI、server 或 SDK 形态补充。
-
-因此，Cursor 代表的是 IDE-native harness：上下文来自编辑器，动作落在编辑器，用户审查也发生在编辑器。
+比较 Cursor 时先问任务在本地 Agent 还是 Cloud Agent 中运行，再检查上下文如何给入、改动如何 review、工作区如何交接，以及云端环境的网络和凭据策略。编辑器集成是一项产品优势，但不自动说明异步任务、企业控制或评测复现的全部条件。
 
 ## 13.9 Aider：Git Repo 中的终端结对编程
 
-Aider 官方文档把它定位为终端里的 AI pair programming 工具，工作对象是本地 git repo。
+Aider 官方文档把它定位为终端里的 AI pair programming 工具，工作对象是本地 Git 仓库（[文档入口](https://aider.chat/docs/index.html)）。
 
 它有几个非常值得学习的设计点。
 
 第一个是 repo map。
 
-Aider 会构建一个简洁的仓库地图，包含关键文件、类、函数、类型和调用签名，并根据 token budget 选择最相关部分发送给模型。这解决了一个核心问题：大仓库不能全部塞进上下文，但 agent 又需要知道整体结构。
+Aider 的 repo map 文档说明，它会构建仓库结构摘要，并按 token budget 选择内容提供给模型（[Repository map](https://aider.chat/docs/repomap.html)）。这解决了一个核心问题：大仓库不能全部塞进上下文，但 Agent 又需要知道整体结构。
 
-repo map 的价值：
+repo map 的设计目标是：
 
 1. 让模型看到全仓库的骨架。
 2. 帮助模型判断应该打开哪些文件。
@@ -250,20 +111,18 @@ repo map 的价值：
 
 第二个是 chat modes。
 
-Aider 支持：
+Aider 的官方模式文档列出 `code`、`ask` 和 `architect` 等交互模式（[Chat modes](https://aider.chat/docs/usage/modes.html)、[In-chat commands](https://aider.chat/docs/usage/commands)）：
 
 1. `code`：直接修改代码。
 2. `ask`：讨论代码但不修改。
 3. `architect`：先由 architect model 提方案，再由 editor model 转成具体编辑。
 4. `help`：回答 aider 使用问题。
 
-这和前面讲的 Plan/Build 非常接近，但 Aider 的 architect/editor 更明确地区分了“方案推理”和“文件编辑”。
+`architect` 模式中，architect model 负责提出方案，editor model 再转成文件编辑。这和前面讲的 Plan/Build 有相似之处，但不应假设两者实现相同。
 
-第三个是 edit formats。
+第三个是 edit formats。Aider 的 `whole` 格式要求模型返回完整文件；`diff` 以搜索/替换块表示局部变更；`udiff` 则采用简化的 unified diff 形式。`architect` 流程还可让一个模型角色先提出方案，再由 editor role 按选定格式生成编辑（[Edit formats](https://aider.chat/docs/more/edit-formats.html)）。例如，本章的认证修复若使用搜索/替换块，旧文件片段必须能在当前版本中定位；即使格式正确，改动仍可能遗漏边界条件或破坏其他行为。格式定义了怎样表达 patch，不替独立测试和 diff review 验证其语义。
 
-Aider 很重视让模型以可解析格式表达修改，而不是只生成自然语言代码块。因为文件编辑失败往往不是模型不会写代码，而是 edit format、上下文定位、冲突处理出了问题。
-
-Aider 代表一种小而强的设计取向：
+Aider 展示了一种围绕本地仓库、上下文地图和明确编辑协议组织的终端工作流：
 
 ```text
 local git repo
@@ -273,123 +132,69 @@ local git repo
 -> git diff / lint / test
 ```
 
-它不一定追求完整平台化，但在“本地仓库 + 终端 + git + 精确编辑”这个场景里很有代表性。
+它的公开文档突出本地 Git 仓库中的结对编程流程；这说明其工具定位，不代表它在所有本地任务上都优于其他 Agent。
 
-## 13.10 SWE-agent：研究和 Benchmark 取向的 Agent Framework
+## 13.10 SWE-agent 与 mini-SWE-agent：研究 scaffold 的生命周期
 
-SWE-agent 的目标不是普通 IDE 助手，而是让语言模型自主使用工具修复真实 GitHub issue，并能跑 SWE-bench 等 benchmark。
+SWE-agent 的历史论文和接口设计仍适合说明 Agent-Computer Interface（ACI）是一个可研究的系统因素：Agent 看到的命令和结果如何组织，会影响它与代码环境交互的路径。但项目维护状态已经变化。SWE-agent 当前 FAQ 说明该项目已被 mini-SWE-agent 取代，并处于 maintenance-only；mini-SWE-agent 文档将其定位为更轻量的 CLI 与批处理/研究 scaffold（[SWE-agent FAQ](https://swe-agent.com/latest/faq/)、[mini-SWE-agent overview](https://mini-swe-agent.com/latest/)、[mini-SWE-agent usage](https://mini-swe-agent.com/latest/usage/)）。
 
-官方文档强调：
+因此正文中的“SWE-agent”主要指研究历史和已固定版本论文，不把它描述成仍在积极演进的当前产品。若读者要复现实验，应进一步固定论文版本、仓库 commit、model、环境、工具和 benchmark 配置；维护者文档中的定位或自报结果不是独立性能比较。
 
-1. 面向真实 GitHub repository issue。
-2. 支持自动修复、网络安全 challenge、coding challenge 等任务。
-3. 使用 YAML 配置管理模型、工具、环境和 agent 行为。
-4. 面向研究，simple、hackable、configurable。
-5. 有 trajectory inspector、batch mode、competitive runs 等能力。
-6. 当前推荐 mini-swe-agent，强调更简单但性能接近。
+ACI 论文支持的结论范围也很具体：在论文报告的模型、任务与设置中，接口设计与任务行为有关。它提出了值得控制或研究的变量，不能单独证明某一种接口在所有模型、任务和产品上都更好（[SWE-agent 论文 v3](https://arxiv.org/abs/2405.15793v3)）。
 
-SWE-agent 的关键贡献是 agent-computer interface 思想。也就是说，不只是模型强不强，还要看 agent 和计算机环境之间的接口是否适合软件工程任务。
+## 13.11 OpenHands：平台、内建 Agent 与外部 Agent 要分开
 
-在 SWE-bench 场景里，agent 需要：
+OpenHands 的 Agent Canvas 文档描述的是通过 Agent Server backend 路由交互的界面。使用者可以选择 OpenHands 内建 Agent，也可以连接 ACP subprocess Agent；文档列举 Codex、Claude Code、Gemini CLI、Pi 和 OpenCode 等外部 Agent。选择外部 Agent 时，Agent 自己管理其模型、工具和执行路径；Canvas 与 Server 作为平台入口，并不会把这些 Agent 自动变成同一个 runtime（[Agent Canvas setup](https://github.com/OpenHands/OpenHands/blob/main/docs/openhands/usage/agent-canvas/first-time-setup.mdx)、[ACP agents](https://github.com/OpenHands/OpenHands/blob/main/docs/openhands/usage/agent-canvas/acp-agents.mdx)）。
 
-1. 读取 issue 描述。
-2. 探索 repo。
-3. 编辑文件。
-4. 运行测试。
-5. 处理失败。
-6. 生成 patch。
-7. 记录 trajectory。
-8. 在 batch 中复现实验。
+部署时还要继续区分 Agent Server 与 runtime/backend。OpenHands 架构文档说明运行位置可以有不同方式，例如 local 或 Docker；各模式的文件系统可见性与风险并不相同（[Architecture](https://github.com/OpenHands/OpenHands/blob/main/docs/architecture.md)、[Runtime architecture](https://github.com/OpenHands/OpenHands/blob/main/docs/openhands/usage/architecture/runtime.mdx)）。这些页面来自仓库 `main` 分支，结论绑定 2026-11-18 访问时的文档内容。
 
-这和产品型 coding agent 不同。产品型 agent 更关心交互体验，SWE-agent 更关心可复现、可评估、可配置。
-
-面试中可以这样总结：
-
-```text
-SWE-agent 代表研究型 coding agent harness。它关心如何把 GitHub issue、repo、tool interface、execution environment、trajectory 和 benchmark runner 组织成可复现实验，用于评估 agent 是否真的能解决软件工程问题。
-```
-
-## 13.11 OpenHands：从 Agent 到开发平台
-
-OpenHands 的官方仓库把它定位为 AI-driven development。它不只是一个 CLI，而是一组平台能力。
-
-公开 README 提到几种形态：
-
-1. Software Agent SDK：可组合的 Python library，是底层 agentic tech engine。
-2. CLI：类似 Claude Code 或 Codex 的命令行体验，可使用 Claude、GPT 或其他 LLM。
-3. Local GUI：本地运行 agent，带 REST API 和 React 单页应用。
-4. Cloud：托管版本，支持 GitHub/GitLab 登录。
-5. Enterprise：自托管到企业 VPC/Kubernetes，包含企业集成和治理能力。
-
-OpenHands Cloud 还提到：
-
-1. Slack、Jira、Linear 集成。
-2. 多用户支持。
-3. RBAC 和 permissions。
-4. 协作能力，例如 conversation sharing。
-
-这说明 OpenHands 更像“软件工程 agent 平台”，而不是单一编码助手。
-
-从 harness 角度看，它覆盖了更完整的平台层：
-
-```text
-SDK / CLI / GUI / Cloud / Enterprise
--> Agent runtime
--> Workspace / container / environment
--> REST API / frontend
--> Integrations / RBAC / collaboration
--> Benchmark / deployment / enterprise governance
-```
-
-这种系统适合：
-
-1. 企业内部 agent 平台。
-2. 多人协作的软件工程 agent。
-3. 云端异步开发任务。
-4. 自托管和合规要求较强的场景。
-5. 研究、评估、产品形态统一的平台。
-
-代价也很明显：平台复杂度、部署复杂度、权限治理和运维成本都比单机 CLI 高。
+所以选型或比较时要写全具体对象：OpenHands Agent Canvas + 内建 OpenHands Agent + 某个 runtime，还是 Canvas + ACP 外部 Agent + 由外部 Agent 管理的执行环境？只写“用了 OpenHands”不足以说明模型、工具、权限或副作用发生在哪里。
 
 ## 13.12 产品形态对比：CLI、IDE、Web、Cloud、SDK
 
-不同产品形态会决定 agent 的能力边界。
+产品入口会影响用户怎样提供上下文、审阅改动和接收结果，但入口本身不能说明完整执行边界。先把可观察问题拆开：
 
-CLI 的特点：
+| 入口 | 读者应检查什么 | 不能单凭入口推断什么 |
+|---|---|---|
+| CLI | 当前目录/仓库、可用 shell、命令确认和输出回传方式 | 命令实际有多少文件/网络权限；是否存在独立 sandbox |
+| IDE | selection、diagnostics、索引、diff 应用与 review 路径 | Agent 是否只使用当前编辑器上下文；后台动作能访问什么 |
+| Web/Desktop | 会话入口、任务委派、产物与本地文件如何交接 | 代码是在本地还是远端；不同入口是否共享完整状态 |
+| Cloud/远端 workspace | VM/container/runtime、依赖准备、网络/secret、分支或 patch 交付 | 所有云端任务是否使用同一种隔离/网络配置 |
+| SDK/API | 调用者提供什么上下文、怎样启动任务、事件/错误如何回传 | SDK 默认就有产品 UI、可恢复状态或部署级治理 |
 
-1. 离本地 shell 和 git 最近。
-2. 适合执行命令、跑测试、快速修改。
-3. 对开发者透明，容易和现有工具链组合。
-4. UI 审查能力通常弱于 IDE 或 desktop。
+Codex 和 Cursor 的官方文档都分别描述本地与云端路径；Claude Code 文档也按多个产品 surface 列出能力。因此在比较时应直接记录实际运行的模式，而不是以品牌替代环境说明（[Codex Cloud](https://help.openai.com/en/articles/20001545-using-codex-cloud)、[Cursor Cloud Agents](https://cursor.com/docs/cloud-agent)、[Claude Code platforms](https://code.claude.com/docs/en/platforms)）。
 
-IDE 的特点：
+### 用一项修复任务对齐观察点
 
-1. 天然拥有光标、选区、diagnostics、symbols。
-2. 适合局部编辑和实时交互。
-3. 用户审查 diff 更方便。
-4. 不一定适合长时间无人值守任务。
+下面是一项**教学构造**，不是某个产品的运行记录：仓库里 `/api/profile` 对缺失 bearer token 返回了 `200`，目标是修复为 `401` 并加回归测试；改动限于认证处理和相关测试，不创建远端分支、不 push。
 
-Web/Cloud 的特点：
+为说明如何沿着任务追踪比较，假设初始请求记录是 `Authorization: absent → HTTP 200`，而任务要求它返回 `401`。下表里的动作和回执也都是教学构造，不代表 Codex、Cursor 或任何其他 Agent 的实际输出：
 
-1. 适合异步长任务。
-2. 可以运行在托管环境中。
-3. 容易接入 issue、PR、CI、chat 平台。
-4. 需要更强 sandbox、secret、权限和资源隔离。
+| 步骤 | 教学构造中的状态变化 | 这一步支持什么结论 |
+|---|---|---|
+| 1. 定位 | 读取认证 handler 和对应测试；找到当前缺失 token 路径 | 能说明任务上下文是否包含相关实现与验收位置；不能说明 Agent 看过整个仓库 |
+| 2. 提议 | 提议把无凭据请求拒绝，并新增缺 token 回归测试 | 这是模型/Agent 提议；此时还不能说文件已改变 |
+| 3. 派发 | 宿主按授权写入限定文件；push 请求不在允许动作中 | 策略与实际派发分开；被拒绝的 push 不能被当成“没有尝试”或“已有隔离” |
+| 4. 执行 | 合成测试回执为新增测试通过、有效凭据测试仍通过 | 只说明指定测试在该假设环境中的回执，不证明全部行为正确 |
+| 5. 检查 | 合成 diff 只含认证 handler 与测试；没有远端提交 | diff 支持范围检查；Git/远程副作用仍需结合执行记录核对 |
+| 6. 验收 | 独立检查缺 token 得到 401、有效 token 路径未回归、改动范围符合要求 | 这些条件支持本任务的结果；不能外推为产品整体能力排名 |
 
-Desktop app 的特点：
+逐步记录这条路径，比只记“任务成功”更有用：它能区分模型建议、宿主决定、真实副作用、测试回执和任务结论。若实际记录缺少某一环，应把它标为 unknown，而不是用最终回答补齐。
 
-1. 可以比终端提供更强可视化 diff 和多 session 管理。
-2. 可以结合本地文件和远程 session。
-3. 适合需要可视化审查但不想进 IDE 的用户。
+把同一任务交给不同产品前，可以按阶段问同一组问题：
 
-SDK 的特点：
+| 阶段 | 需要观察的事实 | 能回答的问题 |
+|---|---|---|
+| 任务入口 | 本地 CLI、IDE Agent、Cloud task，或由平台承载的 Agent | 用户请求落在哪个 surface？运行代码的主机是谁管理？ |
+| 上下文 | issue 文本、仓库指令、认证 handler、相关测试、用户选区或工具输出 | Agent 看到了哪些输入？有哪些遗漏、陈旧或不可信内容？ |
+| 动作 | 读取文件、编辑补丁、运行指定测试、调用外部服务 | 哪些动作由 Agent 提议，哪些由宿主实际派发？ |
+| 控制边界 | 文件范围、命令审批、sandbox、网络与 secret 设置 | “需要确认”是否和“被隔离”分开？push 是否被单独限制？ |
+| 结果状态 | diff、测试输出、任务分支、会话事件、错误记录 | 实际改了什么？执行失败和任务失败是否被区分？ |
+| 验收与交接 | 复查缺 token 得到 401、有效 token 行为仍通过、diff 无越界、无 push | 哪些检查证明目标达成？哪些仍需人工审查？ |
 
-1. 面向程序化集成。
-2. 可以构建自定义 agent、批处理、内部平台。
-3. 更适合企业和研究者。
-4. 要求 API 稳定、trace 清晰、权限可控。
+例如，Cloud 任务的测试通过只证明那个准备好的 workspace 中对应测试给出了通过回执；它不会自动证明本地工作区也同步了改动、没有遗漏其他接口，或服务端部署已安全。反过来，本地 IDE 的 diff review 也不能证明远端 CI 环境已重现同一结果。比较时把产物、执行回执与独立验收逐一对应起来。
 
-因此，产品形态不是壳子，而是 harness 的入口层设计。
+这条任务贯穿后续的上下文、编辑、权限、评估和选型部分。比较表里的事实应来自产品文档或实际可复查的运行记录；本例只提供观察路径，不替任何产品填造结果。
 
 ## 13.13 上下文工程对比
 
@@ -407,14 +212,7 @@ coding agent 的第一难题是：它到底看到了什么。
 8. MCP 工具返回结果。
 9. 历史 session summary 和 memory。
 
-不同系统的侧重点不同：
-
-1. Aider 强调 repo map。
-2. Cursor 强调 IDE selection、diagnostics 和 rules。
-3. Claude Code 强调 `CLAUDE.md`、memory、skills、MCP 和多入口 session。
-4. OpenCode 强调 AGENTS.md、config、agents、MCP、session 和 compaction。
-5. SWE-agent 强调 issue、repo、environment、trajectory 和 benchmark instance。
-6. OpenHands 强调 workspace、SDK、GUI、cloud integrations 和平台上下文。
+公开文档中的例子显示了不同的上下文入口：Aider 的 repo map 按 token 预算挑选仓库结构信息（[Repository map](https://aider.chat/docs/repomap.html)）；Cursor 的 Agent 文档涉及代码库和 IDE 工作流（[Agent overview](https://cursor.com/docs/agent/overview)）；Claude Code 与 OpenCode 各有项目指令、配置及 session 合同（[Claude Code memory](https://code.claude.com/docs/en/memory)、[OpenCode instructions](12-opencode架构分析.md)）；SWE-bench 类型任务以 issue 与仓库作为输入；OpenHands Canvas 则可承载内建 Agent 或 ACP Agent。每项事实只说明文档公开的入口，不证明运行中模型完整接收了所有相关信息。
 
 一个成熟 harness 不能只把所有东西塞给模型，而要做选择：
 
@@ -425,11 +223,11 @@ coding agent 的第一难题是：它到底看到了什么。
 5. 哪些上下文可能包含 prompt injection。
 6. 哪些敏感信息不能进入模型。
 
-上下文工程做不好，模型再强也会浪费在错误信息上。
+回到缺 token 修复任务，最先需要的通常是 issue 中的预期行为、认证 handler、相关测试和项目指令；只有测试失败后，新的测试回执才成为下一轮的重要输入。整份安装日志或无关业务模块增加了上下文，却未必帮助决定这次改动。`AGENTS.md` 或 `CLAUDE.md` 一类文件可以提供项目指导，但它们不是授权凭据，也不自动创建文件/网络隔离边界。上下文工程做不好，模型再强也可能基于错误或过期信息采取动作。
 
 ## 13.14 编辑方式对比
 
-coding agent 修改代码的方式大致有几类。
+下面按读者可能观察到的编辑接口分类，不声称盘点了本章所有产品的内部实现。Coding Agent 修改代码的方式大致有几类。
 
 第一类是 whole-file generation。
 
@@ -454,7 +252,7 @@ coding agent 修改代码的方式大致有几类。
 
 第五类是 AST 或语义编辑。
 
-理论上更稳，但实现成本高，而且跨语言支持复杂。多数产品仍主要依赖文本 diff、patch、LSP 辅助和测试验证。
+这类方法可以保留语法结构关系，但实现成本与语言覆盖是额外约束。对具体产品是否用 AST、patch 或其他内部编辑算法，若官方材料没有说明，就应写作未知；外部能稳定比较的通常是可见变更、冲突处理、diff review 和验收回执。
 
 从本书角度看，编辑方式的核心问题是：如何把模型输出转成可审查、可回滚、可验证的文件变化。
 
@@ -471,24 +269,22 @@ coding agent 的工具通常包括：
 
 工具越多，能力越强，风险也越大。
 
-权限模型可以分成几类：
+比较权限和执行边界时，至少分开四类机制：
 
-1. 只读模式：只能分析，不能修改。
-2. 手动确认：每次高风险操作问用户。
-3. pattern allow/deny：按工具和参数规则控制。
-4. sandbox：允许执行，但限制文件系统、网络和环境变量。
-5. cloud workspace：在隔离容器或远程环境执行。
-6. enterprise policy：组织级配置和 RBAC。
+1. **策略决定**：当前主体能否请求某项 tool/action。
+2. **用户审批**：是否需要人对这次具体操作作决定。
+3. **执行隔离**：进程实际能读写哪些文件、访问哪些网络、继承哪些凭据。
+4. **业务授权**：下游服务是否允许当前身份对目标资源执行操作。
 
-OpenCode 的 allow/ask/deny 是显式 runtime 权限；Claude Code 和 Codex 类产品通常也需要用户确认、sandbox 或工作区边界；OpenHands 企业形态会更强调 RBAC 和 permissions；SWE-agent 更强调实验环境和 benchmark runner 的可控性。
+产品文档分别展示了不同组合，而不是一个通用的“安全等级”：OpenCode 的 permission 与其自身不提供 Agent sandbox 的边界见第十二章；Codex 文档将 sandbox mode 和 approval policy 分开；Claude Code 的 shell sandbox 只覆盖文档说明的命令路径；Cursor Cloud Agents 的网络与 runtime 也受环境配置影响（[Codex sandboxing](https://learn.chatgpt.com/docs/sandboxing)、[Claude Code sandboxing](https://code.claude.com/docs/en/sandboxing)、[Cursor runtime options](https://cursor.com/docs/cloud-agent/self-hosted/choose-runtime)）。SWE-agent/mini-SWE-agent 是研究 scaffold，不应因“benchmark runner”一词就推断每个环境都能隔离任意副作用。
 
-面试中要强调：权限不能只靠 prompt。Prompt 可以告诉模型不要执行危险命令，但真正的边界必须在 execution layer。
+面试时可以用缺 token 修复任务举例：读取认证文件和写入 patch 是文件权限问题；运行测试是命令派发问题；访问远端 API 是网络权限问题；push 则是新的外部副作用。Prompt 可以表达任务约束，但要限制副作用还需在实际工具派发与执行环境中落实，并留下可检查的回执。
 
 ## 13.16 评估方式对比
 
 coding agent 的评估也分多层。
 
-最简单是人工体验：用户觉得是否有用。但它不可复现，也容易被 demo 误导。
+人工体验能发现交互摩擦和审查成本，但单次 demo 很难复现，也容易受任务选择影响。
 
 更系统的评估包括：
 
@@ -501,16 +297,11 @@ coding agent 的评估也分多层。
 7. 是否能在 benchmark 上复现。
 8. 成本、延迟和失败率。
 
-SWE-bench 是 coding agent 评估中最常被提到的 benchmark 之一，因为它把真实 GitHub issue 和 repo 结合起来，要求 agent 生成能通过测试的 patch。
+以 SWE-bench Verified 为例，任务从 GitHub issue 和指定仓库出发，应用 patch 后运行 `FAIL_TO_PASS` 与 `PASS_TO_PASS` 测试。OpenAI 的说明同时记录了需求描述不充分、测试拒绝合理解和环境设置失败等问题；官方描述的是这个评测设计及其局限，不是对所有软件工程质量的测量（[Introducing SWE-bench Verified](https://openai.com/index/introducing-swe-bench-verified/)）。
 
-但 SWE-bench 也不是全部：
+测试通过回答的是“指定测试集合在指定环境下是否给出通过回执”。它不能独自回答 patch 是否最小、没有安全回归、符合团队风格或适合维护。要比较产品表现，还要披露模型、Agent/harness、环境、提示、工具权限、预算、重试、verifier、seed 与产物评审口径。否则差异不能归因到某一个层面；已有 benchmark 方法论论文也指出，端到端结果会混合多个系统因素（[Coding Benchmarks Are Misaligned with Agentic Software Engineering](https://arxiv.org/abs/2606.17799)）。
 
-1. 它不能覆盖所有产品交互体验。
-2. 它和企业私有代码库分布不同。
-3. 它更关注 issue fix，不完全覆盖新功能设计、架构重构、协作 review。
-4. benchmark 可能存在污染和过拟合风险。
-
-因此，企业落地时通常需要：
+团队可按任务和风险组合不同层次的证据，不要求每个项目采用同一套指标：
 
 1. 公共 benchmark。
 2. 私有 issue benchmark。
@@ -521,30 +312,17 @@ SWE-bench 是 coding agent 评估中最常被提到的 benchmark 之一，因为
 
 ## 13.17 典型场景如何选型
 
-如果目标是日常本地结对编程：
+选型不是把每个产品塞进一个固定场景类别，而是先写出这次任务的硬约束，再筛选能满足这些约束的 surface 和配置：
 
-1. Aider、Codex CLI、Claude Code CLI、OpenCode TUI 都适合。
-2. 重点看 repo context、编辑成功率、git 集成、测试闭环和成本。
+| 任务条件 | 先检查 | 可从哪些公开案例开始核对 |
+|---|---|---|
+| 代码必须留在本机、开发者逐步 review | 本地执行位置、workspace 边界、diff 与撤销方式、测试命令 | Codex CLI、Claude Code CLI、OpenCode、Aider、Cursor 本地 Agent |
+| 编辑器选区和诊断是主要任务上下文 | IDE integration、索引/selection、diff review 和规则来源 | Cursor Agent、Claude Code IDE、Codex IDE、OpenCode IDE |
+| 任务需远程异步执行并交回 patch/branch | 云端机器归属、workspace 生命周期、网络/secret、分支和恢复 | Codex Cloud、Cursor Cloud Agents、Claude Code web/automation、OpenHands Canvas/runtime |
+| 需要固定配置重复跑研究任务 | 项目版本、模型、Agent scaffold、环境初始化、trajectory 与 verifier | mini-SWE-agent、OpenHands SDK；历史 SWE-agent 研究需固定版本 |
+| 需要嵌入既有平台或切换 Agent | API/SDK/ACP 合同、Agent 与执行环境的责任归属、事件和权限映射 | OpenHands Agent Canvas/ACP、OpenCode Server/SDK 及各产品已公开 SDK |
 
-如果目标是 IDE 内高频开发：
-
-1. Cursor、Claude Code IDE、Codex IDE、OpenCode IDE 更适合。
-2. 重点看 selection、diagnostics、inline diff、rules 和编辑器集成。
-
-如果目标是异步修 issue 或自动 PR：
-
-1. Codex Web、Claude Code Web/GitHub Actions、OpenHands Cloud、SWE-agent 更相关。
-2. 重点看 sandbox、CI 集成、PR workflow、trace、失败恢复。
-
-如果目标是研究 agent 能力：
-
-1. SWE-agent、mini-swe-agent、OpenHands SDK 更适合。
-2. 重点看可配置、trajectory、batch mode、benchmark reproducibility。
-
-如果目标是企业内部平台：
-
-1. OpenHands Enterprise、OpenCode server/SDK、自建 Claude Code/Codex workflow 都可能是候选。
-2. 重点看 RBAC、审计、权限、私有部署、MCP/custom tools、数据边界和成本治理。
+表中只是调研入口，不代表这些对象都满足企业要求，也不构成推荐排名。对任意候选，都要用自己的仓库、权限策略、网络约束和验收标准完成小范围验证；特别注意“产品可提供某能力”不等于“当前租户已启用该能力”。
 
 ## 13.18 横向比较时最容易犯的错
 
@@ -558,389 +336,91 @@ SWE-bench 是 coding agent 评估中最常被提到的 benchmark 之一，因为
 6. 只看 benchmark 分数，不看真实业务分布。
 7. 忽略权限、secret、网络和外部目录风险。
 8. 忽略用户体验和审查成本。
-9. 把 IDE assistant、CLI agent、research runner、enterprise platform 混为一谈。
-10. 把社区传闻当成官方能力。
+9. 把 IDE Assistant、CLI Agent、research scaffold、平台控制面和执行环境混为一个对象。
+10. 因为入口名称相同，就假设本地与云端有相同 workspace、网络和审批策略。
+11. 因为公开文档列出能力，就认为某个部署当前已启用该能力。
+12. 把社区传闻或产品自述当作独立比较证据。
 
-面试中如果被问“你怎么看 Claude Code、Codex、Cursor、Aider 这些工具”，不要只说个人体验。更好的回答是：先按产品形态和 harness 层拆开，再比较上下文、工具、权限、编辑、验证和评估。
+面试中如果被问“你怎么看 Claude Code、Codex、Cursor、Aider 这些工具”，先说明当前谈的是哪个版本和入口，再沿一个任务比较上下文、工具、权限、执行位置、状态、验收和交付。指出证据来源与未知项，比给出没有条件的强弱判断更可复核。
 
-## 13.19 主流 Coding Agent 横向审计指标
+## 13.19 怎样做一次可复核的横向比较
 
-横向比较 coding agent 时，可以把第 `i` 个系统抽象为：
+前面已经得到一个认证修复任务和一组观察维度。现在要避免把这些维度重新压成一个看似客观的总分。产品选择和 harness 因果研究回答的是不同问题，比较前先确定自己在做哪一种。
 
-```math
-z_i=(n_i,S_i,C_i,T_i,P_i,E_i,V_i,G_i,R_i)
-```
+### 选产品：把差异作为使用条件记录
 
-其中 `n_i` 是系统名称，`S_i` 是产品入口集合，`C_i` 是上下文来源集合，`T_i` 是工具集合，`P_i` 是权限和沙箱机制集合，`E_i` 是编辑和恢复机制集合，`V_i` 是验证和评估机制集合，`G_i` 是治理机制集合，`R_i` 是风险标签集合。
+如果问题是“团队在这项工作里应该使用哪个产品入口”，模型、产品 surface、网络策略、上下文注入方式、权限提示和云端执行都可能是产品的一部分。不要为了让表格整齐而假设这些条件相同。先写清任务范围、硬性约束和验收方式，然后对候选逐项记录实际合同：
 
-产品入口覆盖率：
+| 记录项 | 认证修复任务中的具体问题 | 证据例子 |
+|---|---|---|
+| 比较单位 | 比较的是 Codex CLI、Codex Cloud、Cursor 本地 Agent、Cursor Cloud Agent，还是 OpenHands Canvas 中的某个 Agent？ | 产品 surface、Agent 名称、固定版本或访问日期 |
+| 任务输入 | issue、测试、项目指令、IDE 选区分别如何提供？ | 任务文本、实际可见文件与会话记录 |
+| 模型与配置 | 运行时使用什么模型/provider、配置和预算？ | 产品设置、运行日志；未显示的字段标 unknown |
+| 工作区 | 哪个仓库副本被修改，结果如何交回？ | 本地路径说明、云端 workspace、branch/patch |
+| 动作与边界 | 读取、写入、测试、网络访问和 push 分别受到什么控制？ | permission/approval 配置、sandbox/runtime 文档、执行回执 |
+| 状态与恢复 | 中断或失败后保留哪些 session、patch、事件或 checkpoint？ | 产品记录和可复查产物；没有记录就注明 unknown |
+| 验收 | 哪个测试或人工 review 判断 401 修复和改动范围？ | verifier 版本、测试结果、diff 与 reviewer 结论 |
+| 限制 | 哪些条件无法确认，或不满足团队要求？ | 未公开项、文档适用范围、待验证项 |
 
-```math
-C_{\mathrm{surf}}(i)=\frac{|S_i\cap S_{\mathrm{target}}|}{|S_{\mathrm{target}}|}
-```
+这张表是记录卡，不计算产品总分。对“支持隔离执行”这样的表述，要追到具体 surface、运行时和策略；对“测试通过”，要写明测试和仓库状态。文档展示可选能力时，具体用户配置依然可能不同。
 
-这里 `S_target` 可以包含 CLI、IDE、Web/Cloud、Desktop、SDK、CI/PR bot 等入口。入口越多，不代表一定更好；它只说明该系统覆盖的使用形态更广。
+### 研究 harness 影响：只改变要研究的因素
 
-上下文覆盖率：
+如果问题变成“改用某种工具接口是否让同一个模型在该任务上更容易修复”，就进入受控比较。先明确要研究的 harness 因素；若研究的是上下文构建，就把上下文策略作为 treatment，而不是同时要求它保持相同。其余关键条件应尽可能固定，例如任务集、模型 revision、初始用户请求、预算、执行环境和 verifier。保存实际交互轨迹，确认配置的工具真的被调用；若轨迹偏离配置，结果不能简单归因到标签。scaffolding 研究报告过这种偏离，但它的发现受单一任务与具体实现限制（[The Scaffolding Matters More Than the Interface](https://arxiv.org/abs/2608.08654)）。
 
-```math
-C_{\mathrm{ctx}}(i)=\frac{|C_i\cap C_{\mathrm{need}}|}{|C_{\mathrm{need}}|}
-```
+即使控制了这些因素，结论也只适用于所测任务、模型和环境。要推广到产品选择，还要另外考虑真实用户需要的 IDE、云端任务、审批、集成和交接工作流。benchmark 分数能说明指定 verifier 和实验条件下的结果，不能自动变成“产品整体更好”。
 
-常见上下文包括 repo map / symbol index、current selection、issue / PR、rules / memory、terminal output、test output、external docs、MCP result 和 session summary。
+### 把主张、证据和未知并排写
 
-工具执行覆盖率：
+最终报告最好按下面顺序表达：
 
-```math
-C_{\mathrm{tool}}(i)=\frac{|T_i\cap T_{\mathrm{need}}|}{|T_{\mathrm{need}}|}
-```
+1. **主张：** 我们想判断哪件具体事？例如“对本地私有仓库的认证 bug 修复，开发者能否 review 并接受 patch？”
+2. **条件：** 哪个产品 surface、模型/provider、仓库、配置、权限、网络、预算和验证器参与？
+3. **证据：** 哪些来自官方合同，哪些来自固定源码，哪些来自实际运行记录，哪些只是人工判断？
+4. **观察：** 任务产物、测试回执、失败和副作用分别是什么？将环境错误、Agent 行为、验收器错误分开。
+5. **边界：** 什么没有测到？是否只测一个仓库或一个任务？这条证据不能支持什么更大的判断？
 
-权限治理覆盖率：
-
-```math
-C_{\mathrm{perm}}(i)=\frac{|P_i\cap P_{\mathrm{need}}|}{|P_{\mathrm{need}}|}
-```
-
-编辑恢复覆盖率：
-
-```math
-C_{\mathrm{edit}}(i)=\frac{|E_i\cap E_{\mathrm{need}}|}{|E_{\mathrm{need}}|}
-```
-
-评估准备度：
-
-```math
-C_{\mathrm{eval}}(i)=\frac{|V_i\cap V_{\mathrm{need}}|}{|V_{\mathrm{need}}|}
-```
-
-企业治理覆盖率：
-
-```math
-C_{\mathrm{gov}}(i)=\frac{|G_i\cap G_{\mathrm{need}}|}{|G_{\mathrm{need}}|}
-```
-
-高风险治理率：
-
-```math
-C_{\mathrm{risk}}(i)=1-\frac{|R_i\setminus P_i|}{|R_i|},\qquad |R_i|>0
-```
-
-这个简化公式的意思是：如果系统暴露了 shell、network、MCP、custom tools、cloud workspace、server API、enterprise integration 等风险面，却没有对应权限或治理机制，风险治理率就会下降。
-
-上述覆盖率都只在对应需求集合非空时定义。若 `S_target`、`C_need`、`T_need`、`P_need`、`E_need`、`V_need`、`G_need` 或 `R_i` 为空，指标应报告为 `not_applicable`（demo 中用 `None` 表示），而不是用 epsilon、历史值、默认 `1.0/0.0` 或人为下限分母填补。聚合分数和门禁必须显式处理该状态；没有有效样本时不能把系统判定为通过。
-
-可以组合成一个横向审计分：
-
-```math
-S_{\mathrm{agent}}(i)=
-w_s C_{\mathrm{surf}}(i)+
-w_c C_{\mathrm{ctx}}(i)+
-w_t C_{\mathrm{tool}}(i)+
-w_p C_{\mathrm{perm}}(i)+
-w_e C_{\mathrm{edit}}(i)+
-w_v C_{\mathrm{eval}}(i)+
-w_g C_{\mathrm{gov}}(i)+
-w_r C_{\mathrm{risk}}(i)
-```
-
-其中权重由场景决定。日常 IDE 开发可以提高 `w_c` 和 `w_e`，企业平台可以提高 `w_p`、`w_g` 和 `w_r`，研究 benchmark 可以提高 `w_v`。
-
-最后的验收条件不应该只看总分：
-
-```math
-G_{\mathrm{compare}}(i)=
-\mathbb{1}[C_{\mathrm{perm}}(i)\ge \tau_p]
-\mathbb{1}[C_{\mathrm{eval}}(i)\ge \tau_v]
-\mathbb{1}[C_{\mathrm{risk}}(i)\ge \tau_r]
-```
-
-如果一个系统工具很强但权限、评估或高风险治理明显不足，在企业落地场景中仍应判定为需要补治理，而不是因为总分高就上线。
-
-### 13.19.1 最小可运行 Coding Agent 横向对比 demo
-
-下面的 0 依赖 demo 不调用任何真实 coding agent，也不访问网络。它只用 toy capability table 演示如何按不同场景比较 Codex、Claude Code、OpenCode、Cursor、Aider、SWE-agent 和 OpenHands。
-
-```python
-systems = {
-    "codex": {
-        "surface": {"cli", "ide", "desktop", "cloud"},
-        "context": {"repo", "rules", "terminal", "test_output", "session"},
-        "tools": {"read", "edit", "patch", "shell", "git"},
-        "permission": {"confirmation", "workspace", "sandbox"},
-        "edit": {"patch", "diff", "review"},
-        "eval": {"task_trace", "regression"},
-        "governance": {"account_policy"},
-        "risk": {"shell", "cloud"},
-    },
-    "claude_code": {
-        "surface": {"cli", "ide", "desktop", "cloud", "ci", "sdk"},
-        "context": {"repo", "memory", "rules", "terminal", "test_output", "mcp", "session"},
-        "tools": {"read", "edit", "patch", "shell", "git", "mcp", "hooks"},
-        "permission": {"confirmation", "workspace", "sandbox", "allow_deny", "network_control"},
-        "edit": {"patch", "diff", "review", "session_resume"},
-        "eval": {"task_trace", "regression", "ci_checks"},
-        "governance": {"team_memory", "managed_settings"},
-        "risk": {"shell", "mcp", "hooks", "cloud"},
-    },
-    "opencode": {
-        "surface": {"cli", "ide", "desktop", "sdk"},
-        "context": {"repo", "rules", "terminal", "test_output", "mcp", "session"},
-        "tools": {"read", "edit", "patch", "shell", "git", "mcp", "custom_tools", "lsp"},
-        "permission": {"allow_deny", "confirmation", "workspace"},
-        "edit": {"patch", "diff", "snapshot", "revert"},
-        "eval": {"task_trace"},
-        "governance": {"config", "project_policy"},
-        "risk": {"shell", "mcp", "custom_tools", "server"},
-    },
-    "cursor": {
-        "surface": {"ide", "cli"},
-        "context": {"repo", "selection", "diagnostics", "rules", "terminal"},
-        "tools": {"read", "edit", "shell", "mcp"},
-        "permission": {"confirmation", "workspace"},
-        "edit": {"ide_apply", "diff", "review"},
-        "eval": {"manual_review"},
-        "governance": {"rules"},
-        "risk": {"shell", "mcp"},
-    },
-    "aider": {
-        "surface": {"cli"},
-        "context": {"repo", "repo_map", "terminal", "test_output"},
-        "tools": {"read", "edit", "patch", "shell", "git"},
-        "permission": {"confirmation", "git_boundary"},
-        "edit": {"patch", "diff", "git_commit"},
-        "eval": {"lint_test"},
-        "governance": {"local_config"},
-        "risk": {"shell"},
-    },
-    "swe_agent": {
-        "surface": {"cli", "benchmark"},
-        "context": {"repo", "issue", "terminal", "test_output", "trajectory"},
-        "tools": {"read", "edit", "patch", "shell", "test_runner"},
-        "permission": {"sandbox", "environment"},
-        "edit": {"patch", "diff"},
-        "eval": {"benchmark", "trajectory", "batch", "regression"},
-        "governance": {"yaml_config"},
-        "risk": {"shell", "benchmark_leakage"},
-    },
-    "openhands": {
-        "surface": {"cli", "gui", "cloud", "sdk", "enterprise"},
-        "context": {"repo", "issue", "terminal", "test_output", "integration", "session"},
-        "tools": {"read", "edit", "patch", "shell", "git", "browser", "api"},
-        "permission": {"sandbox", "rbac", "confirmation", "workspace", "network_control"},
-        "edit": {"patch", "diff", "review", "session_resume"},
-        "eval": {"benchmark", "task_trace", "regression", "safety_eval"},
-        "governance": {"rbac", "audit", "enterprise_policy"},
-        "risk": {"shell", "cloud", "browser", "enterprise_integration"},
-    },
-}
-
-targets = {
-    "daily_ide": {
-        "surface": {"ide", "cli"},
-        "context": {"repo", "selection", "diagnostics", "rules", "terminal"},
-        "tools": {"read", "edit", "shell", "git"},
-        "permission": {"confirmation", "workspace"},
-        "edit": {"diff", "review", "ide_apply", "patch"},
-        "eval": {"manual_review", "lint_test", "task_trace"},
-        "governance": {"rules", "local_config"},
-        "weights": {"surface": 0.16, "context": 0.22, "tools": 0.16, "permission": 0.12, "edit": 0.16, "eval": 0.1, "governance": 0.08, "risk": 0.0},
-    },
-    "enterprise_platform": {
-        "surface": {"cli", "ide", "cloud", "sdk", "enterprise"},
-        "context": {"repo", "issue", "terminal", "test_output", "integration", "session"},
-        "tools": {"read", "edit", "patch", "shell", "git", "mcp", "api"},
-        "permission": {"sandbox", "rbac", "confirmation", "workspace", "network_control"},
-        "edit": {"patch", "diff", "review", "session_resume"},
-        "eval": {"task_trace", "regression", "safety_eval", "benchmark"},
-        "governance": {"rbac", "audit", "enterprise_policy", "account_policy", "managed_settings"},
-        "weights": {"surface": 0.12, "context": 0.14, "tools": 0.14, "permission": 0.18, "edit": 0.1, "eval": 0.14, "governance": 0.12, "risk": 0.06},
-    },
-    "research_benchmark": {
-        "surface": {"cli", "benchmark", "sdk"},
-        "context": {"repo", "issue", "terminal", "test_output", "trajectory"},
-        "tools": {"read", "edit", "patch", "shell", "test_runner"},
-        "permission": {"sandbox", "environment"},
-        "edit": {"patch", "diff"},
-        "eval": {"benchmark", "trajectory", "batch", "regression"},
-        "governance": {"yaml_config"},
-        "weights": {"surface": 0.08, "context": 0.16, "tools": 0.16, "permission": 0.12, "edit": 0.08, "eval": 0.3, "governance": 0.06, "risk": 0.04},
-    },
-}
-
-
-def coverage(values, needed):
-    if not needed:
-        return None
-    return len(values & needed) / len(needed)
-
-
-def risk_governance(system):
-    risk = systems[system]["risk"]
-    if not risk:
-        return None
-    permission = systems[system]["permission"] | systems[system]["governance"]
-    guarded = 0
-    for item in risk:
-        if item == "shell" and ({"confirmation", "sandbox", "git_boundary"} & permission):
-            guarded += 1
-        elif item == "cloud" and ({"account_policy", "rbac", "enterprise_policy"} & permission):
-            guarded += 1
-        elif item == "mcp" and ({"allow_deny", "network_control", "managed_settings"} & permission):
-            guarded += 1
-        elif item == "custom_tools" and "project_policy" in permission:
-            guarded += 1
-        elif item == "server" and ({"rbac", "audit"} & permission):
-            guarded += 1
-        elif item == "hooks" and "managed_settings" in permission:
-            guarded += 1
-        elif item == "browser" and {"sandbox", "rbac"} <= permission:
-            guarded += 1
-        elif item == "enterprise_integration" and {"rbac", "audit"} <= permission:
-            guarded += 1
-        elif item == "benchmark_leakage" and "yaml_config" in permission:
-            guarded += 1
-    return coverage(set(range(guarded)), set(range(len(risk))))
-
-
-def at_least(value, threshold):
-    return value is not None and value >= threshold
-
-
-def score(system, scenario):
-    spec = targets[scenario]
-    parts = {
-        "surface": coverage(systems[system]["surface"], spec["surface"]),
-        "context": coverage(systems[system]["context"], spec["context"]),
-        "tools": coverage(systems[system]["tools"], spec["tools"]),
-        "permission": coverage(systems[system]["permission"], spec["permission"]),
-        "edit": coverage(systems[system]["edit"], spec["edit"]),
-        "eval": coverage(systems[system]["eval"], spec["eval"]),
-        "governance": coverage(systems[system]["governance"], spec["governance"]),
-        "risk": risk_governance(system),
-    }
-    weighted_names = [name for name, weight in spec["weights"].items() if weight > 0]
-    total = (
-        None
-        if any(parts[name] is None for name in weighted_names)
-        else sum(parts[name] * spec["weights"][name] for name in weighted_names)
-    )
-    gates = {
-        "permission": at_least(parts["permission"], 0.5),
-        "eval": at_least(parts["eval"], 0.5),
-        "risk": at_least(parts["risk"], 0.5),
-    }
-    rounded_parts = {
-        key: None if value is None else round(value, 3)
-        for key, value in parts.items()
-    }
-    return (None if total is None else round(total, 3)), rounded_parts, gates
-
-
-for scenario in targets:
-    ranked = []
-    details = {}
-    for system in systems:
-        total, parts, gates = score(system, scenario)
-        ranked.append((system, total, all(gates.values())))
-        details[system] = {"parts": parts, "gates": gates}
-    ranked.sort(key=lambda item: item[1], reverse=True)
-    print(f"{scenario}_ranked={ranked[:3]}")
-    print(f"{scenario}_top_details={details[ranked[0][0]]}")
-
-weak_spots = {
-    system: [
-        name
-        for name, value in score(system, "enterprise_platform")[1].items()
-        if value is None or value < 0.5
-    ]
-    for system in systems
-}
-print(f"enterprise_weak_spots={weak_spots}")
-
-# 空需求集合必须是 not_applicable，不能被当作满覆盖；门禁对 None 显式拒绝。
-assert coverage({"repo"}, set()) is None
-assert not at_least(None, 0.5)
-```
-
-一组典型输出：
-
-```text
-daily_ide_ranked=[('cursor', 0.813, False), ('codex', 0.725, False), ('claude_code', 0.725, False)]
-daily_ide_top_details={'parts': {'surface': 1.0, 'context': 1.0, 'tools': 0.75, 'permission': 1.0, 'edit': 0.75, 'eval': 0.333, 'governance': 0.5, 'risk': 0.5}, 'gates': {'permission': True, 'eval': False, 'risk': True}}
-enterprise_platform_ranked=[('openhands', 0.908, True), ('claude_code', 0.692, True), ('codex', 0.602, True)]
-enterprise_platform_top_details={'parts': {'surface': 0.8, 'context': 1.0, 'tools': 0.857, 'permission': 1.0, 'edit': 1.0, 'eval': 1.0, 'governance': 0.6, 'risk': 1.0}, 'gates': {'permission': True, 'eval': True, 'risk': True}}
-research_benchmark_ranked=[('swe_agent', 0.973, True), ('openhands', 0.639, True), ('claude_code', 0.522, False)]
-research_benchmark_top_details={'parts': {'surface': 0.667, 'context': 1.0, 'tools': 1.0, 'permission': 1.0, 'edit': 1.0, 'eval': 1.0, 'governance': 1.0, 'risk': 1.0}, 'gates': {'permission': True, 'eval': True, 'risk': True}}
-enterprise_weak_spots={'codex': ['governance'], 'claude_code': ['governance'], 'opencode': ['permission', 'eval', 'governance'], 'cursor': ['surface', 'context', 'permission', 'eval', 'governance'], 'aider': ['surface', 'permission', 'eval', 'governance'], 'swe_agent': ['surface', 'permission', 'governance'], 'openhands': []}
-```
-
-这个 demo 的重点不是证明谁更强，而是说明“最佳选择”取决于场景。日常 IDE 场景里 Cursor 的上下文和编辑体验更贴近目标，但 eval gate 可能需要额外补；企业平台场景里 OpenHands 的 RBAC、API、Cloud / Enterprise 和审计维度更匹配；研究 benchmark 场景里 SWE-agent 的 trajectory、batch 和 benchmark runner 更匹配。
+不要把“没有观察到某个风险”写成“该风险不存在”，也不要用任意覆盖率、加权平均或固定 gate 代替条件说明。读者应能从报告还原比较对象与证据，而不是只得到一个名次。
 
 ## 13.20 面试题
 
-### 题 1：为什么 coding agent 的差异不只来自模型？
+### 题 1：为什么不能只用模型名称比较 coding agent？
 
-参考回答：
+因为完成任务的不只是模型。入口决定上下文怎样进入，harness 提供哪些工具和派发规则，执行环境决定文件、命令和网络边界，verifier 决定哪些结果算通过。若比较完整产品，应把这些条件作为产品的一部分报告；若研究某个组件的因果作用，则要固定其他关键条件。端到端 benchmark 结果不能自动归因到单一组件。
 
-```text
-因为 coding agent 是一个完整 runtime，而不是单次模型调用。模型只是负责推理和生成动作，真正决定效果的还有上下文构建、repo 搜索、文件编辑格式、工具注册、shell 执行、权限沙箱、测试验证、diff review、trace 和 session 管理。两个系统即使用同一个模型，如果一个有 repo map、测试闭环和安全权限，另一个只能生成代码块，最终表现会差很多。
-```
+### 题 2：Codex CLI 与 Codex Cloud 有什么比较上的区别？
 
-### 题 2：Codex、Claude Code、OpenCode 的设计取向有什么不同？
+官方资料把 Codex CLI 描述为本地仓库工作流，把 Codex Cloud 描述为在 OpenAI 管理计算机和任务 workspace 中执行的远端路径。比较时要确认任务实际使用哪个 surface、代码在哪里运行、workspace 如何准备和结果如何交回。还应把 sandbox mode 与 approval policy 分开记录；不能因品牌相同就假设执行边界相同。
 
-参考回答：
+### 题 3：Claude Code 的 shell sandbox 是否等于所有工具都被沙箱隔离？
 
-```text
-Codex 可以看成 OpenAI 的 coding agent 产品线，覆盖本地 CLI、IDE、desktop app 和 Codex Web，强调 OpenAI 模型与本地/云端开发工作流结合。Claude Code 更强调产品化闭环，支持 terminal、IDE、desktop、web、CI、MCP、skills、hooks、sub-agents 和 Agent SDK。OpenCode 则更像开源可配置 runtime，公开提供 config、permissions、agents、MCP、custom tools、server、SDK、snapshot、diff 和 revert，适合作为学习 agent harness 的样本。
-```
+不能这样推断。官方文档说明 shell sandbox 对其覆盖的 shell 命令和相关子进程生效；其他工具、MCP、hook、插件或产品入口要按各自边界核对。permission、用户审批和 OS 隔离也分别解决不同问题，不能互相替代。
 
-### 题 3：Aider 的 repo map 解决什么问题？
+### 题 4：怎样比较 OpenCode、Cursor 和 OpenHands？
 
-参考回答：
+先把对象写具体。OpenCode 要固定 V2 版本并区分公开 permission 与操作系统隔离；Cursor 要区分本地 IDE Agent 和 Cloud Agent；OpenHands 要说明使用 Canvas/Server、内建 OpenHands Agent 还是 ACP 外部 Agent，以及所选 runtime/backend。之后再对齐任务、模型、仓库、权限、网络、验证器和交付形式。只说品牌不足以说明运行条件。
 
-```text
-repo map 解决大仓库上下文选择问题。模型不能每次读取整个仓库，Aider 会构建包含关键文件、类、函数、签名和依赖关系的简洁仓库地图，并根据 token budget 选择最相关部分发给模型。这样模型能先理解仓库骨架，再决定要打开哪些具体文件，减少无关上下文浪费。
-```
+### 题 5：Aider repo map 与 IDE 上下文有什么差异？
 
-### 题 4：SWE-agent 和日常 IDE agent 的差异是什么？
+Aider 文档说明 repo map 会根据 token 预算选择仓库结构信息，帮助模型看到相关文件和符号骨架；IDE Agent 的上下文还可能包含当前编辑位置、selection、diagnostics 等编辑器状态。两者说明上下文入口不同，不足以单独证明谁能修得更好。要比较结果，还要固定任务与模型并观察实际被提供的上下文。
 
-参考回答：
+### 题 6：SWE-agent 与 mini-SWE-agent 在本章中怎样定位？
 
-```text
-SWE-agent 更像研究和 benchmark 取向的 agent framework，目标是让模型在真实 GitHub repo 中根据 issue 自主探索、编辑、测试并生成 patch，重点是可配置、trajectory、batch mode 和 SWE-bench 复现。IDE agent 更关注开发者交互体验，例如当前选区、diagnostics、inline diff 和实时审查。两者都能写代码，但优化目标不同。
-```
-
-### 题 5：企业内部要落地 coding agent，应该重点比较哪些维度？
-
-参考回答：
-
-```text
-我会比较七个维度：第一是上下文接入，包括 repo、issue、PR、CI 和内部文档；第二是工具和执行能力，包括 shell、测试、git、MCP 和内部 API；第三是权限和 sandbox，包括 secret、外部目录、网络和高风险命令；第四是编辑和 diff review；第五是 trace、replay 和审计；第六是评估体系，包括私有 issue benchmark、回归测试和人工 review；第七是成本、延迟、部署和 RBAC。企业场景不能只看模型效果。
-```
+SWE-agent 的论文适合作为 ACI 和研究 scaffold 的历史案例；项目 FAQ 现在说明它处于 maintenance-only，并指向 mini-SWE-agent。后者被维护者定位为轻量 CLI 与批处理/研究 scaffold。复现实验应固定具体版本和配置；维护者定位不能替代独立性能对照。
 
 ## 13.21 小练习
 
-1. 画一张表，比较 Codex、Claude Code、OpenCode、Cursor、Aider、SWE-agent、OpenHands 的产品形态、上下文来源、工具执行、权限模型和评估方式。
-2. 选择一个你常用的代码仓库，设计一个 Aider 风格 repo map，列出哪些文件、类、函数应该进入 map。
-3. 设计一个企业 coding agent 权限策略：哪些命令 allow，哪些 ask，哪些 deny。
-4. 设计一个私有 SWE-bench 风格评估集：从历史 issue 中抽样，定义输入、期望 patch、测试和评分方式。
-5. 比较 CLI agent 和 IDE agent 在“修复一个线上 bug”场景中的优缺点。
-6. 设计一个 OpenHands 风格平台架构，包含 SDK、GUI、REST API、workspace、RBAC、trace 和 integrations。
+1. 对本章的合成认证修复任务，写出可检查的成功条件和不允许发生的副作用。说明每条条件由什么产物或观察支持。
+2. 为 Codex CLI 与 Codex Cloud 各填一张比较记录卡。哪些合同可从官方文档确认？哪些必须从具体运行配置确认？
+3. 为 Cursor 本地 Agent、Cursor Cloud Agent 和 OpenHands Canvas 画出“surface → Agent/harness → execution environment → artifact”的关系图。对无法从公开资料确定的边界标记 unknown。
+4. 设计一个只研究工具接口影响的对照实验。列出要固定的模型、任务、预算、环境和 verifier，并说明怎样检查实际工具调用确实遵循配置。
+5. 阅读 SWE-bench Verified 说明，解释 FAIL_TO_PASS、PASS_TO_PASS 以及环境设置各能证明什么；列举测试通过仍无法证明的两个工程结论。
+6. 任选一个团队任务，写一段不超过一页的选型理由：先列硬约束，再列比较对象、证据、未知和验证计划。不要给产品排名或合成分数。
 
 ## 13.22 本章总结
 
-本章横向比较了 Codex、Claude Code、OpenCode、Cursor、Aider、SWE-agent、OpenHands 等主流 coding agent 或 coding assistant。
+比较 Coding Agent 时，先明确比较的是产品 surface、Agent/harness、执行环境还是评估配置。Codex CLI 与 Codex Cloud、Cursor 本地 Agent 与 Cloud Agent、OpenHands 平台与其内建或 ACP 外部 Agent，都是不同的运行组合。产品名本身不能告诉我们文件、网络、权限和状态边界。
 
-核心结论：
+沿一条具体任务追踪输入、工具请求、宿主决定、执行副作用、diff、测试回执和验收结论，再比较上下文、编辑、恢复和治理。公开文档能说明公开合同，固定版本源码能支持具体实现路径，实际运行记录能说明指定配置下发生的事；每类证据都有边界。
 
-1. coding agent 的差异不只来自模型，更来自 harness 设计。
-2. Codex 代表 OpenAI 本地和云端 coding agent 产品线。
-3. Claude Code 代表强产品闭环、多入口、多工作流的 agentic coding tool。
-4. OpenCode 代表开源、可配置、可扩展的 agent runtime。
-5. Cursor 代表 IDE-native agent，优势在编辑器上下文和交互式审查。
-6. Aider 代表终端里的 git repo 结对编程，repo map 和 edit format 很有启发。
-7. SWE-agent 代表研究和 benchmark 取向，强调 issue、environment、trajectory 和可复现评估。
-8. OpenHands 代表平台化方向，把 SDK、CLI、GUI、Cloud、Enterprise、RBAC 和协作集成到同一体系。
-9. 企业落地时不能只看 demo，要看上下文、工具、权限、编辑、验证、评估、审计和成本治理。
-
-下一章会进入 MCP、A2A 与 harness 集成，重点讲外部工具协议、跨 agent 通信和 runtime 扩展边界。
+选产品时披露产品差异；做 harness 因果研究时控制其余条件并检查真实轨迹。Benchmark、测试、人工 review 和产品体验各自回答不同问题。最终结论应给读者足够信息复核，而不是把复杂系统压成一个总分。

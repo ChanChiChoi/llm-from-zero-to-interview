@@ -3375,13 +3375,13 @@
      考察点：公开来源与推断边界、产品表面和执行环境、gather/action/verify、上下文与状态、工具权限与 OS sandbox、扩展、trace 和独立验收。
      回答框架：先限定文档日期、版本、表面和执行环境。官方资料可支持产品公开描述；具体运行记录只支持那次观察；把职责拆成 context、tool execution、policy、state 等层是分析模型，不是源码图；隐藏 planner、完整 system prompt 和内部路由若无新证据就保留为未知。沿一项合成登录测试修复任务，区分模型提出动作、产品规则或用户批准、工具真实执行、文件 diff、测试回执和独立任务验收。项目说明与 Auto memory 是上下文，settings 会影响产品行为；产品权限规则不等于 OS 级隔离，当前文档中的本机 sandbox 只约束特定 shell 命令及其子进程，MCP、hooks 等路径要另查。最后用固定任务、环境和 verifier 做评估，不把一项演示或任意覆盖率合成为通用 gate。
 
-40N. 如何从 OpenCode 分析开源 Coding Agent Runtime？
-     考察点：open runtime、config、agents、tools、permissions、MCP、custom tools、server、SDK、snapshot、compaction、eval readiness。
-     回答框架：先把 OpenCode 看成开放 coding agent runtime，而不是普通 CLI。公开模块可以拆成多客户端入口、server / SDK、session manager、agent manager、provider adapter、tool registry、permission engine、execution engine、file / shell / search / LSP / MCP / custom tools、snapshot / diff / revert、event stream 和 config 控制面。配置系统是 runtime 控制面，管理模型、agents、tools、permissions、MCP、plugins、instructions、compaction 和组织级策略；agent 系统体现权限隔离，Plan / Build / subagent / custom agent 应有不同工具和 step budget；工具和 MCP 体现扩展性，但必须绑定 allow / ask / deny、schema、namespace、鉴权、上下文成本和 trace；server / SDK 让 runtime 可编程，也必须讨论认证、网络边界和审计。审计指标包括 open runtime module coverage、config governance、agent permission isolation、tool permission binding、MCP namespace coverage、custom tool schema coverage、server API governance、snapshot recovery、architecture eval readiness、high-risk surface governance 和 OpenCode architecture gate。
+40N. 如何从公开证据分析 OpenCode V2 的 Runtime？
+     考察点：固定版本和证据等级、配置与指令、Agent/工具/权限、宿主执行边界、扩展、Server/API/SDK、Session 与验收。
+     回答框架：先声明版本、访问日期和源码核验范围，再沿一项明确标为合成的代码修复任务说明配置与指令如何进入模型上下文，模型工具提议如何经过 action/resource/effect 权限判断，以及工具回执、文件 diff、Snapshot 和独立 verifier 分别能证明什么。把 AGENTS.md 视为模型指导，不当作授权；指出 Plan 并非普遍只读，subagent 使用自己的权限配置；OpenCode V2 的权限确认不等于 sandbox，项目本身不提供 Agent 执行隔离。比较 MCP/plugin 与 Skills 等不同扩展路径，并区分网络 API 客户端和进程内 SDK。最后区分官方文档合同、固定版本源码、真实部署观察和分析者推断；不使用任意覆盖率或综合 gate 代替证据审阅。
 
-40O. 如何横向比较 Codex、Claude Code、OpenCode、Cursor、Aider、SWE-agent 和 OpenHands？
-     考察点：资料边界、产品入口、上下文来源、工具执行、权限治理、编辑恢复、评估准备度、企业治理、高风险能力面。
-     回答框架：先声明边界：只能把官方文档、官方仓库和可观察产品形态当作确定证据，闭源内部 planner、prompt、工具排序、trace 存储和模型路由不能说成事实。然后按场景比较：日常 IDE 场景提高 selection、diagnostics、rules、IDE apply 和 review 权重；企业平台提高 RBAC、audit、managed settings、network control、server / SDK、MCP / custom tools 和安全评估权重；研究 benchmark 提高 issue、trajectory、batch、environment、test runner 和 regression 权重。指标可以拆成 product surface coverage、context source coverage、tool execution coverage、permission governance coverage、edit recovery coverage、agent eval readiness、enterprise governance coverage 和 cross-agent risk governance。最后用 coding agent comparison gate 检查 permission、eval 和 risk 三个硬门禁，避免因为单次 demo 顺滑或模型强就忽略治理缺口。
+40O. 如何横向比较 Codex、Claude Code、OpenCode、Cursor、Aider、SWE-agent/mini-SWE-agent 和 OpenHands？
+     考察点：比较单位；本地/云端 surface；Agent 与平台的区分；上下文、动作、权限、执行环境、状态和验收；证据等级；产品选择与因果实验的差异。
+     回答框架：先说明比较的是某个产品入口、Agent/harness、执行环境还是完整工作流。沿同一项任务记录输入、真实 workspace、模型与配置、工具派发、权限/审批、文件和网络边界、patch、测试回执与独立验收。Codex CLI 与 Cloud、Cursor 本地 Agent 与 Cloud Agents 是不同执行路径；OpenHands 要区分 Canvas/Server、内建 Agent 或 ACP 外部 Agent，以及 runtime；SWE-agent 当前为 maintenance-only，mini-SWE-agent 是维护者指向的后续轻量 scaffold。官方文档只支持公开合同，固定源码只支持审阅路径，具体运行只支持该配置下的观察；闭源内部实现保留为未知。产品选择应披露差异，harness 因果比较应尽可能固定模型、任务、预算、工具、环境和 verifier 并查看实际轨迹。结论限于任务和证据范围，不做总分、排名或通用 gate。
 
 40P. 如何把 MCP 和 A2A 集成进 Agent Harness？
      考察点：MCP Host / Client / Server、resources / prompts / tools、A2A Agent Card、task lifecycle、capability registry、namespace、schema、permission、context budget、trace、replay、version。
