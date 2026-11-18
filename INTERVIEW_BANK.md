@@ -3391,9 +3391,9 @@
      考察点：任务契约、工作流与 Agent 的分工；API/身份、Task/Session、Runtime、模型与能力、策略与执行、workspace、Artifact/Trace、Verifier 的责任边界；状态所有权；外部副作用恢复；评估、部署与放量。
      回答框架：先约定任务目标、仓库 revision、允许和禁止动作、验收条件、用户/租户、数据边界、时限与负载。选择一个合成修复任务，说明确定性阶段由程序控制，模型只处理需要开放判断的部分。架构图标出请求入口、Task Store/队列、Runtime、Context Builder/Model Adapter、Capability Registry、逐次策略检查、执行器/隔离 workspace、Artifact/事件/Trace 与独立 verifier。区分 Session、Task、Run、Workspace、Artifact、Approval 和外部 Effect Record；按任务状态解释提议、实际执行、验收与完成。挑一个 worker 崩溃或远端回执丢失的场景，先检查 workspace 或 provider 状态，再决定恢复、重试或保留 unknown；不要把 checkpoint 当作外部回滚或 exactly-once。最后按本地 CLI、团队自托管或 managed Harness 说明状态、环境和密钥归谁管理，并用固定任务/环境、版本记录和分项结果设计评估与受控发布。指标需各自声明对象和分母，不汇总成通用 harness score 或上线 gate。
 
-40R. 如何排查和回答 Agent Harness 实战坑？
-     考察点：triage、permission、context、edit、command、prompt injection boundary、trace、replay、eval、doom loop、environment parity。
-     回答框架：先不要把问题归因成“模型不行”，而是按 user goal、context、model、tool、permission、execution、state、observability 八层排查。典型坑包括权限过大、大输出挤爆上下文、覆盖用户改动、shell hang、外部内容边界失效、trace 缺失、eval 不可比、重复工具循环、MCP tool overload 和本地 / 云端环境漂移。工程上可以定义 harness pitfall gate，指标包括 triage coverage、permission safety、context budget pass、edit safety、command safety、prompt injection boundary、trace completeness、replay readiness、eval determinism、cost loop control 和 environment parity。面试时要把每类坑讲成症状、根因、排查字段、修复策略和防复发门禁，而不是只背工具名。
+40R. 某 Coding Agent 的测试通过了，但用户说它覆盖了并发编辑。你怎样排查并安全恢复？
+     考察点：用户约束、读取与写入版本、工具提议/派发、实际 diff、verifier 范围、回执丢失时的 unknown、回归样例。
+     回答框架：先复述任务目标和不可破坏条件，再按因果顺序关联文件版本、用户写入、Agent 补丁、工具应用及测试范围；指出第一次违约发生在哪个状态变化，并把它与验收器未检查并发保留条件分开。保存当前 workspace 和 diff，不从旧版本盲目重放；以最新内容合并最小改动，核对实际变更和授权范围，再增加“读取后版本改变”与特殊 query 的回归。如果工具已经派发但回执丢失，先查询权威文件/服务状态；没有证据时保持 unknown，不声称失败或成功。
 
 40S. 如何设计和审计工具调用中的参数校验与修复？
      考察点：parse、schema、normalization、business validation、evidence、repair、clarification、unsafe block、idempotency、trace。

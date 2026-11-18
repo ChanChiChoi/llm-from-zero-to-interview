@@ -1,1087 +1,161 @@
-# 第十六章：Harness 实战坑与面试题
+# 第十六章：Harness 故障诊断与面试题
 
-## 0. 本讲范围与资料
+## 16.1 从“出错了”走到可复核的判断
 
-本章只基于公开资料和前文已经建立的 Agent Harness 抽象：Claude Code security / troubleshooting 文档、OpenCode troubleshooting / permissions / MCP 文档、SWE-agent trajectory / output files 文档、Aider troubleshooting / repo map 文档、MCP specification 与安全最佳实践、OpenAI Agents SDK 的 agent、tool、session、human-in-the-loop、MCP 和 tracing 公开资料，以及本册前十五章对 runtime、工具、权限、沙箱、trace、replay 和 evaluation harness 的拆解。
+上一章回答怎样设计 Harness：怎样分配组件责任、管理状态和副作用、设置验收边界。本章接着回答运行之后的问题：当 Agent 改错文件、做了不该做的事、卡住、花费失控，或报告成功但交付物不合约时，怎样找到最早偏离，并选一条安全的恢复路径？
 
-本章不把任何闭源 coding agent 的内部 planner、隐藏 prompt、工具排序、沙箱实现、远端 trace 存储或模型路由写成确定事实；如果需要讨论，只作为系统设计推断。本章只讨论防御性工程排查、面试表达和 toy audit demo，不提供绕过权限、规避沙箱、读取密钥、破坏工作区、攻击 MCP/A2A 服务、隐藏 trace、伪造评估通过或自动执行生产高风险动作的方法。
+故障排查不是把“模型、工具、权限、执行、状态、日志”逐项打勾。我们需要把用户要求、运行事件、真实状态和验收结果放在同一条时间线上。排查结束时，读者应能：
 
-本章重点有三点：
+- 用用户约束描述本次运行的成功条件；
+- 从证据中找出最早一次与约束不符的状态变化；
+- 区分已经确认、尚未确认和仅仅没有观测到的事实；
+- 在安全可重入、确定未派发和副作用状态未知之间选择不同恢复方式；
+- 把失败样本变成可重复检查的回归案例，并指出回归仍不能证明什么。
 
-1. 把“实战坑”从经验清单升级成可审计指标，避免面试回答停留在“要加权限、要加日志”的口号。
-2. 用稳定 MathJax 公式定义排查覆盖率、权限安全、上下文预算、编辑安全、命令安全、注入边界、trace、replay、eval、成本循环和环境一致性。
-3. 补一个 0 依赖 Python demo，输入 toy incident 表，输出 failed gates 和 root causes，帮助读者把事故复盘讲成可复现工程方法。
+本章所说的 verifier，是独立检查交付物和用户约束的验收器；它的结果只覆盖实际检查的条件。
 
-## 16.1 本章定位
+这里的事件是教学构造，不代表某个真实产品或真实事故。第十五章的系统设计案例讲“系统应如何协作”；本章只讲怎样用一次具体运行的证据检查它是否按预期协作。Checkpoint、幂等和恢复状态的完整机制见[第十七章](17-long-running-agent与checkpoint.md)；Harness 与模型、环境的评估归因见[第十九章](19-harness-aware-evaluation.md)。
 
-这是第二十册的收尾章。前面我们已经系统讲过 Agent Harness、Coding Agent Runtime、工具系统、文件编辑、终端执行、上下文压缩、权限沙箱、trace/replay、evaluation harness、Claude Code、OpenCode、Codex、MCP、A2A 和系统设计。本章不再引入大量新概念，而是把这些内容转成实战排查清单和面试回答模板。
+## 16.2 一次覆盖用户并发编辑的运行
 
-真实 coding agent 系统的问题很少是“模型完全不会写代码”。更常见的是：上下文错了、工具太多、权限太松、编辑失败、命令副作用、trace 不完整、eval 不稳定、MCP 输出污染上下文、云端沙箱和本地环境不一致。
+用户要求修复登录重定向的 query 编码，并附上三条约束：只改 src/login/redirect.ts；保留工作区里其他人的并发编辑；不要提交 Git commit。故障任务的目标不是“让某个测试变绿”，而是同时满足功能和这三条约束。
 
-学完本章，你应该能回答：
+例如目标地址是 /reports?tab=annual&view=compact。若把它原样拼在 /login?next= 后面，里面的 &view=compact 可能被当成登录地址自己的另一个参数；需要把整个目标地址编码成 next 的一个参数值。只用 /reports 测试时没有这些 query 分隔符，旧实现也可能看起来正常。
 
-1. Coding agent harness 最常见的线上问题有哪些。
-2. 每类问题的症状、根因、排查步骤和修复方案是什么。
-3. 面试中如何从模型、上下文、工具、权限、执行、trace、eval 和产品体验几个维度回答 harness 问题。
-4. 如何把第二十册内容压缩成一套高频面试题答案。
+在 Agent 启动前，文件内容处于版本 h0，其中仍把目标地址直接拼进 next。Agent 读取 h0 后，用户在同一工作区保存了版本 h1：h1 已加入对相对路径的检查和 query 编码。Agent 仍然根据旧的 h0 生成整文件替换内容。文件工具只检查路径和写入权限，没有要求“仅当当前版本仍是我读取的 h0 时才应用”，于是把旧提案写到较新的 h1 上，工作区变成 h2。
 
-## 16.2 资料来源和可信边界
+| 顺序 | 发生了什么 | 当时可看到的证据 | 这条证据能说明什么 |
+| --- | --- | --- | --- |
+| 1 | 用户提交任务与约束 | 任务文本、允许修改的路径、禁止提交的要求 | 定义了功能目标和不可破坏的条件 |
+| 2 | Agent 读取 src/login/redirect.ts 的 h0 | 文件读取事件及版本摘要 | 说明模型基于哪个版本作出提案 |
+| 3 | 用户保存并发版本 h1 | 工作区快照或编辑器保存记录；h1 含新增的相对路径检查 | 说明执行前文件已经改变 |
+| 4 | Agent 生成基于 h0 的整文件提案，工具把它写成 h2 | 提案内容、应用事件、应用前后的版本或 diff | 如果没有版本比较，这次写入可能覆盖 h1 |
+| 5 | 只测不带 query 的 /reports 路径并通过 | 测试命令、测试集合和结果 | 只说明该测试集合所覆盖的简单路径通过，未触及 query 编码 |
+| 6 | Agent 报告“已完成” | 最终回答、运行状态、当前 diff | 不能单靠回答证明并发改动仍在，也不能证明没有提交 |
 
-本章综合参考以下公开资料和前面章节内容：
+这条轨迹里，最早的偏离发生在第 4 步：系统把针对 h0 的整文件提案应用到了已经变成 h1 的文件上，却没有要求操作者重新读取、合并或通过版本比较。第 5 步揭示了另一个问题：验证器只检查了简单的 /reports 路径，没有检查相对路径约束，也没有把最终 diff 与“保留并发编辑、只改指定文件、不提交”这些任务条件比对。两处故障不能混成一个“测试不够”结论：前者是过期写入造成的真实状态变化，后者是检测没有覆盖任务约束。
 
-1. Claude Code security 文档：read-only 默认、显式权限、sandboxed bash、写权限限制、prompt injection 防护、trust verification、MCP security、云端 VM 隔离和 audit logging。
-2. Claude Code troubleshooting 文档：高 CPU/内存、auto-compaction thrashing、大文件和大工具输出、命令 hang、search 问题、WSL 文件系统性能问题。
-3. OpenCode troubleshooting 文档：日志位置、storage、desktop server 连接、插件、缓存、provider 和 auth 问题。
-4. OpenCode permissions 文档：allow/ask/deny、granular rules、external directory、`.env` 默认 deny、doom loop、agent 级权限。
-5. OpenCode MCP 文档：MCP server 会增加上下文、GitHub 等 MCP server 可能消耗大量 token、local/remote MCP、OAuth、按 agent 管理 MCP。
-6. SWE-agent output files 文档：trajectory 记录 thought/action/observation/state/query，是 debug 和研究复现的重要基础。
-7. Aider troubleshooting 和 repo map 文档：编辑失败、模型警告、token 限制、repo map token budget 等问题。
-8. MCP specification：MCP 安全原则、user consent、tool safety、data privacy、sampling controls。
+排查者也不能只凭 h0、h1、h2 的标签下结论。标签可能由不同存储层定义。应把本地文件快照、修改时间、内容摘要、工具请求和版本控制差异相互核对。若工具没有记录应用前内容，保留工作区副本和 diff 可能比相信面板里的“写入成功”状态更可靠。
 
-不同产品的具体命令和实现会变化。本章提炼的是通用工程模式，不把某个工具的私有细节当成行业标准。
+“不要提交”也要用仓库状态确认：检查当前分支、运行前后 HEAD（当前提交位置）与运行期间的 commit 事件；最终回答说“没有提交”不等于仓库里没有新 commit。
 
-## 16.3 总排查框架
+## 16.3 先分清四类事实
 
-遇到 coding agent 出问题，不要一上来就说“模型不行”。先按八层排查：
+一次运行至少涉及四类不同事实。把它们混在一起，会把模型的提议误当成动作，把工具回执误当成真实状态，也会把测试通过误当成满足全部用户要求。
 
-```text
-1. User goal: 用户目标是否清楚？
-2. Context: 模型看到的信息是否正确、足够、不过载？
-3. Model: 模型能力、参数、provider 是否正常？
-4. Tool: 工具 schema、参数、输出是否正确？
-5. Permission: 权限是否过松或过紧？
-6. Execution: 文件、shell、sandbox、网络、环境是否正确？
-7. State: session、diff、todo、memory、history 是否一致？
-8. Observability: trace、logs、replay、eval 是否能定位问题？
-```
+| 事实层 | 要回答的问题 | 可能的证据 | 常见误读 |
+| --- | --- | --- | --- |
+| 任务契约 | 用户要求了什么，哪些条件不能破坏？ | 原始请求、补充约束、授权范围、验收条件 | 把“修复功能”当成唯一条件，遗漏路径、提交、网络或数据约束 |
+| 运行轨迹 | 模型提出了什么，Harness 作了什么决定，哪个工具何时被派发？ | 轮次记录、工具请求、权限决定、执行开始/结束和关联 ID | 模型提议了工具，就以为工具已经执行；审批按钮被点击，就以为操作成功 |
+| 状态与副作用 | 文件、进程、数据库或外部服务实际上变成什么状态？ | 工作区快照、进程状态、服务端查询、commit、artifact、业务回执 | “本地没有回执”就推断远端没有副作用 |
+| 验收与报告 | 哪些条件被检查，哪些还没检查？ | 测试结果、独立 verifier、人工检查、最终回答 | 一个 exit code 为零就推断任务的所有约束都成立 |
 
-一个好的排查顺序是：
+排查时把每条事件写成“谁在何时对哪个对象做了什么、发生了什么决定、拿到了什么结果、结果存在哪里”。若多台机器时钟不同，事件顺序优先根据调用关联、消息序号和因果关系重建；墙上时钟只能提供辅助线索。把用户任务、run、attempt、工具调用和外部服务请求的标识对应起来，才能发现是哪一层丢了事件或重复了动作。
 
-1. 看 final diff 和用户目标是否匹配。
-2. 看 trace 中模型看到的 query/context。
-3. 看工具调用输入输出。
-4. 看权限请求和用户批准。
-5. 看 shell/test/lint 输出。
-6. 看文件修改前后的 diff。
-7. 看是否有上下文压缩或大输出污染。
-8. 看是否能 replay。
+不同产品对这些标识的定义可能不同。这里的 task 指用户要求完成的一项工作；run 指系统为完成它执行的一轮完整运行；attempt 指模型或工具的一次尝试，包括重试。需要记录实际对象之间的关联，不要假定同名 ID 在不同产品里代表同一层。
 
-如果没有 trace，只能猜。这就是为什么生产级 harness 必须记录足够轨迹。
+同一事实也可能有不同强度。工具返回“写入成功”支持工具认为写入完成；实际文件内容和前后 diff 能确认工作区的结果；版本控制状态可能看出额外文件变化；单元测试只覆盖测试所执行的行为。证据应贴着它实际证明的对象，不要用一份日志替代所有其他检查。
 
-## 16.4 坑一：工具权限过大
+## 16.4 从症状选择证据
 
-症状：
+“Agent 不好用”不是根因。相同症状可能来自不同层：工具调用失败，可能是模型参数错、schema 不匹配、权限拒绝、下游超时，或工具已经成功但回执丢失。先把症状变成一个可检查的问题，再找能回答它的证据。
 
-1. Agent 自动执行了删除、覆盖、部署、发邮件、写数据库等高风险动作。
-2. Agent 读取了不该读的 `.env`、token、私有目录。
-3. MCP server 拿到了过宽 OAuth scope。
-4. 用户不知道 agent 做了哪些副作用操作。
+| 症状与例子 | 优先检查的证据 | 下一步判断 |
+| --- | --- | --- |
+| 只授权读 src/，工具轨迹却请求读取 .env，或未获批就派发写操作 | 工具能力和身份范围、实际策略输入/决定、审批内容、派发事件及副作用 | 分清策略过宽、审批对象不具体、执行器绕过策略，还是内容不可信导致模型提出危险动作。权限提示文字不能证明执行边界有效。 |
+| 工具一次返回数千行，关键约束在截断前的早期轮次，随后补丁偏离目标 | 该轮实际序列化给模型的上下文、来源和新鲜度、压缩摘要、截断标记、工具返回长度 | 不是只看“用了多少 token”；核对关键约束是否进入了上下文、是否被旧摘要覆盖或被输出截断。 |
+| Agent 按 h0 读文件，用户保存 h1 后仍写入旧提案；或测试通过但 diff 多了文件 | 用户约束、读取时版本、写入前版本、补丁范围、实际 diff、测试覆盖路径 | 是模型提案本身错、过期提案覆盖新版本，还是 verifier 没检查任务约束？先比较状态，再决定合并或重做。 |
+| 数据迁移命令超时后界面显示停止，但本机进程仍在运行 | 实际命令、工作目录、脱敏后的环境标识、进程 ID、启动/退出/超时/取消事件、远端服务状态 | UI 超时不证明子进程已经结束；先查仍在运行的进程和外部状态，再决定是否终止或重试。 |
+| Issue 文本写着“忽略此前指令”，Agent 随后提出发信或写库动作 | 来源位置、信任标记、进入模型的内容、模型工具提议、策略或 guardrail（SDK 执行检查的钩子）决定、真实效果 | 内容本身不自动成为用户授权。若使用 OpenAI Agents SDK，当前文档说明输入 guardrail 只在 agent chain 起点运行、工具 guardrail 按工具调用运行；并行输入检查可能在模型已启动后才发现问题，blocking 模式会等待检查完成。该语义只适用于该 SDK，不能当作所有 Harness 的安全设计。 |
+| 工具执行回执已在本地文件中，但 Trace 面板没有这次运行 | 埋点和采样设置、事件队列、导出器状态、flush 记录、认证/网络错误、保留和查询条件 | 空白面板只是“当前没有看到记录”。OpenAI Agents SDK 文档说明 trace 通过后台批量导出；需要任务结束前立即交付时，可在 trace 关闭后调用 flush。先核查导出路径，再从文件、工具或服务端证据确认动作。 |
+| baseline 在本地镜像通过，candidate 在不同云端镜像失败 | 固定任务集、模型/provider 版本、prompt、工具 schema、执行环境、verifier、重复次数和随机性 | 先保证比较条件和失败分类一致。一个配置下的分数不能自动说明变化来自模型；跨模型、harness、环境归因见第十九章。 |
+| 同一搜索请求在仓库未变化时连续三次返回相同结果 | 每次调用的语义、输入/输出、状态变化、重试来源、停止条件及按任务记录的预算 | 看连续调用是否针对同一未解决状态，还是输入已变、确有进展。只加 token 上限可能截断答案而没有阻止重复副作用；要限制未有进展的执行，并说明何时交人判断。 |
+| 两个 MCP 工具名相近、描述重复，模型选到只读查询以外的写工具 | 实际暴露给模型的工具列表和描述、名称冲突、筛选结果、上下文快照、最终选中工具 | “连接了多少 server”不能说明本轮用了哪些能力。按任务缩小暴露面或修正文档后，确认选中工具和权限决策都改变到预期状态。 |
+| 本地 Node 版本和云端镜像不一致，只有一端通过 | commit/revision、容器镜像、依赖锁、运行时版本、OS、工作目录、非秘密环境配置、网络策略和测试数据 | 把差异写成可比条件。不要把本地 secrets、完整环境变量或用户数据拷进日志；先找能解释结果差异的最小环境项。 |
 
-常见根因：
+日志或 trace 含有原始 prompt、工具参数、会话状态或文件片段时，可能包含凭证和个人数据。Google ADK 的当前日志说明也提醒 DEBUG 与调试插件可能输出敏感内容。应只保留足够区分事件的来源、版本、策略结果、摘要、关联 ID 和副作用状态；采集范围、访问控制、保留期和脱敏方式要按实际部署核验。引用：[OpenAI Agents SDK tracing](https://openai.github.io/openai-agents-python/tracing/)、[OpenAI Agents SDK guardrails](https://openai.github.io/openai-agents-python/guardrails/)、[Google ADK logging](https://adk.dev/observability/logging/)。
 
-1. 默认所有工具 allow。
-2. 没有区分 read-only、edit、bash、network、external system。
-3. 权限只靠 prompt，没有 runtime enforcement。
-4. MCP/A2A 默认可信。
-5. 没有路径级、参数级、agent 级权限。
+## 16.5 找最早偏离，再判断原因
 
-修复方案：
+一次事件里可能同时有执行缺陷、检测缺陷和影响扩大的条件。诊断不是先挑一个“根因”标签，而是按事实顺序回答：第一个与任务契约不一致的事件是什么？哪项控制本可以阻止它？哪项验收本可以更早发现？后续哪些动作扩大了影响？
 
-1. 默认 read-only，写文件和 bash 需要 ask。
-2. 对高风险命令 deny，例如 `rm -rf`、`git push`、生产 deploy、数据库写入。
-3. 对 `.env`、secret、外部目录默认 deny 或 ask。
-4. MCP server 做 allowlist，OAuth scope 最小化。
-5. agent 级权限隔离：review agent 不能 edit，build agent 可以 run test 但不能 push。
-6. 所有权限决策写入 trace。
+可以按这个顺序复盘：
 
-面试表达：
+1. **先控制继续发生的动作。** 如果运行仍在写文件、调用外部服务或消耗资源，暂停新的写入和外部副作用调用，记录尚未完成的工具调用和进程。取消并不总等于撤销；先看调用的取消语义及可能的副作用。
+2. **保存现状和关联证据。** 留下工作区快照、diff、任务/run/attempt ID、工具调用、策略决定、测试命令与范围、服务端回执。保留原始时序，但对外分享前脱敏。
+3. **把任务要求写成可核对的条件。** 例如“只改路径 A”“保留其他工作区内容”“不提交”“服务端不重复创建”。区分用户明确约束和排查者后来提出的改进建议。
+4. **按因果顺序重建运行。** 对每个事件写清发起者、对象、前置版本、决定、派发、结果和证据位置。将运行轨迹与文件/服务实际状态对齐。
+5. **标出第一处不一致及后续检测缺口。** 在前面的案例中，第一处不一致是针对 h0 的完整文件提案无版本比较地覆盖 h1；简单路径测试未检查保留并发编辑和相对路径约束，是检测缺口。不能把“最终 diff 错”直接当作事件根因，也不能把“模型提案错误”直接当作已经发生的副作用。
+6. **选最小、可审阅的修复，并固化回归。** 先保留当前工作区，再以最新内容为基础人工合并未完成的修改；确认实际 diff 只含获准改动，验证功能路径和任务约束，再把“读取后版本改变”加入回归样例。
 
-```text
-权限系统必须在 runtime 层实现。Prompt 可以告诉模型不要执行危险命令，但不能作为安全边界。真正的边界应该是 permission engine，根据工具、参数、路径、agent、用户和组织策略输出 allow、ask 或 deny。
-```
+“最早偏离”用来确定因果顺序，不意味着它永远是唯一根因。版本比较失效可能是写入工具缺少前置版本条件；并发编辑未被保护可能是系统合同或任务协调问题；测试遗漏约束则是独立的检测不足。把这些分开，才能同时修复执行路径和验收路径。
 
-## 16.5 坑二：上下文被大文件或大工具输出挤爆
+## 16.6 超时之后，先确认动作处于什么状态
 
-症状：
+“超时”只说明某个等待超过了它的时限，并没有说明远端做了什么。一次模型调用 attempt（单次尝试）超时、单个工具调用超时、整个 run（完整运行）超时、等待人工审批超时和 trace 导出超时是不同事件。排查记录必须写明是哪一层的计时器到期，以及请求是否已经派发。
 
-1. Agent 前面理解任务，后面突然忘记目标。
-2. Auto-compaction 反复触发，甚至出现 thrashing。
-3. MCP 或日志输出非常长，模型开始围绕无关日志回答。
-4. 读取整个 bundle、lockfile、minified 文件、超长测试日志。
+| 已有证据 | 当前状态判断 | 安全的下一步 |
+| --- | --- | --- |
+| 请求被队列拒绝或策略拦截，且有证据证明工具未派发 | 已确认未执行 | 修复拒绝原因后再派发；保存本次拒绝及新的授权条件。 |
+| 工具在派发前明确拒绝，且它的合同确认拒绝不会有部分副作用 | 已知未完成 | 不要用相同无效请求循环重试；补齐权限、参数或前置状态后再决定。若工具可能部分执行，改列为未知。 |
+| 请求已派发，但客户端没有收到确定回执 | **未知**，不能视为失败或成功 | 使用同一操作标识查询服务端权威状态。只有服务明确支持并实际执行去重的幂等键时，才依赖该键。查不到状态时保留 unknown，转人工核对或暂停。 |
+| 服务端确认副作用已完成 | 已完成该副作用 | 不要重放原请求；检查结果是否满足任务契约，然后继续后续步骤或交付。 |
+| 服务端确认副作用失败且没有部分提交 | 已确认失败 | 按错误类型修复后再尝试，并保留本次尝试和结果。若“没有部分提交”并未得到证明，状态仍是未知。 |
 
-常见根因：
+OpenAI Agents SDK 的当前 Python 文档把模型调用 timeout 定义为单次 model-call attempt 的限制，不覆盖整个 agent run、工具执行或重试间隔；该 SDK 的自动重试需显式配置，并结合 safe、unsafe、unknown 的 replay-safety 判断。LangGraph 的故障处理文档则说明其节点重试会从节点开头重跑，具有 at-least-once 语义；节点内外部副作用不由 checkpoint 自动回滚，缺失 provider acknowledgment 时应查询状态。这些是各自框架的行为例子，不是所有 Agent runtime 的统一约定。来源：[OpenAI Agents SDK models](https://openai.github.io/openai-agents-python/models/)、[LangGraph fault tolerance](https://docs.langchain.com/oss/python/langgraph/fault-tolerance/)。
 
-1. 无 token budget。
-2. 工具输出不截断。
-3. 大文件整读。
-4. MCP tools 全量加载到上下文。
-5. history compaction 没有保留关键任务状态和 diff。
+对工具超时，还要检查命令进程是否仍活着、远端作业是否仍在排队、请求是否被服务端接收、取消是否仅取消客户端等待。若动作可能已经发出，盲目重试会把一次不确定操作变成两次真实副作用。第十七章进一步讲 task state、checkpoint、幂等和恢复协议。
 
-修复方案：
+## 16.7 从故障样本形成可检验的回归
 
-1. 大文件按范围读取。
-2. 工具输出分页、摘要或落盘引用。
-3. 对 MCP tools 做 tool search 或按 agent 启用。
-4. 使用 repo map，而不是全仓库塞上下文。
-5. compaction 时保留用户目标、当前 plan、已改 diff、失败测试、关键文件。
-6. 对 node_modules、dist、build、lockfile、minified 文件默认降权。
+复盘之后，保留足以重新构造故障的输入条件：任务约束、初始文件版本、并发写入时点、运行配置、工具响应、执行环境、预期 diff 和 verifier 口径。只记“修复了 stale write”无法说明后来是否覆盖了同一条路径。对本章案例，至少要让回归能区分：
 
-排查问题时看：
+- 只含 /reports 的简单路径与包含空格、问号、& 符号或非 ASCII 字符的 query；
+- 写入前 workspace 仍是 h0 与写入前已变为 h1；
+- 文件内容符合功能要求与同时保留用户并发修改；
+- 目标文件变化与其他路径的意外变化；
+- 测试通过与最终任务约束全部得到验证。
 
-1. 当前 context 中最大块是什么。
-2. 最近一次工具输出是否超长。
-3. 是否读取了无关大文件。
-4. compaction 后是否丢失用户目标。
+回归可以分层。固定文件快照或模拟工具回执能稳定检查 Harness 的版本比较、策略分支和 verifier；真实 provider、云端执行环境或外部服务集成仍需要对应的集成检查。模拟通过不等于真实服务行为通过。Google ADK Python v1.24.0 的 Environment Simulation 文档提供工具调用拦截、受控错误/延迟注入和固定 seed 的例子；这是该版本 ADK 的测试能力，不代表其他框架能力，也不把模拟结果变成生产集成证据。[Google ADK Environment Simulation](https://adk.dev/evaluate/environment_simulation/)。
 
-## 16.6 坑三：文件编辑覆盖用户改动
+Google Agents CLI 的公开调试指南给出一条具体工作循环：重现一个失败输入，把它保存为 eval case，查看指标和 trace，修正后重跑并比较。这里值得保留的是失败用例进入回归和逐项看证据的做法；其工具命令、metric 和实验性功能只适用于该 CLI 文档说明的范围。[Debug a failing agent](https://google.github.io/agents-cli/guide/debugging/) 与 [Evaluation guide](https://google.github.io/agents-cli/guide/evaluation/)。
 
-症状：
+运行期间记录的错误还需要结合最终操作结果解读。OpenTelemetry 的通用错误记录约定指出，已经处理或重试成功的中间错误，不应让最终成功的 operation（被记录的一次操作）被误记为失败；相关页面仍标注 Development，正文因此把它当作遥测语义参考，而不是 Agent 的专用成功定义。[OpenTelemetry: Recording errors](https://opentelemetry.io/docs/specs/semconv/general/recording-errors/)。
 
-1. Agent 修改后，用户并发改动丢失。
-2. Patch apply 成功但覆盖了无关代码。
-3. 整文件重写导致格式和注释大面积变化。
-4. Revert 不能精确撤销。
+生产事故还包含协调工作：谁在保护用户数据、谁负责恢复服务、谁维护过程记录、谁安排后续修复。Google SRE 的 incident response 材料区分恢复服务与协调响应，并介绍持续维护事件工作记录和事后复盘的做法；这是其组织实践示例，不表示所有团队都必须使用同一模板。[Google SRE Workbook: Incident Response](https://sre.google/workbook/incident-response/)。
 
-常见根因：
+## 16.8 面试时怎样把诊断讲清楚
 
-1. 没有 before hash。
-2. 没有检测工作区 dirty state。
-3. 使用 whole-file generation。
-4. Patch context 太宽或太窄。
-5. 没有把 FileChange 绑定到 message。
+回答故障题时，先说判断依据，再说修复动作。可以用五步组织答案：**复述成功契约、重建事件顺序、指出最早偏离、核实真实副作用、给出有证据的恢复与回归**。如果一个关键事实未知，就明确标为未知，说明要从哪个权威状态源查询。不要只列出“加日志、加权限、加测试”。
 
-修复方案：
+以本章并发编辑故障为例，一个完整回答可以这样展开：
 
-1. 每次 edit 前记录 file hash。
-2. Apply 前检查文件是否被外部修改。
-3. 优先小 patch，避免整文件重写。
-4. 生成 diff 并让用户审查。
-5. 支持按 message revert。
-6. 对冲突重新读文件并重新规划。
+> 我会先确认用户要求的是修复 query 编码，并且只允许改指定文件、保留其他并发编辑、不提交。随后关联读取版本、用户写入、Agent 补丁、工具应用和测试结果。证据显示 Agent 按 h0 生成了整文件替换，而写入前文件已是 h1；工具没有比较预期版本就把提案应用到 h1，因此第一次偏离发生在过期写入。简单路径测试只检查了 /reports，无法证明并发改动和路径约束仍在。现在我先保存 h2 和 diff，不继续重试；再从最新 h1 合并最小修改，核对目标文件和完整 diff，确认 HEAD/commit 事件符合用户要求，运行覆盖特殊 query 的测试，并把并发版本变化加入回归。如果工具应用回执缺失，我不会假定写入失败，而会先核对实际文件。
 
-面试表达：
+这段回答把执行故障与验证缺口分开，也没有把“修好功能”误当成“履行全部约束”。
 
-```text
-文件编辑不能只看模型输出是否合理，还要看 apply 语义。生产系统需要 before hash、patch apply、diff review、conflict detection 和 message-level revert，避免覆盖用户并发修改。
-```
+可继续练习这些具体问题：
 
-## 16.7 坑四：终端命令有副作用
+1. **测试通过了，用户却说 Agent 覆盖了他的修改。** 先看写入前后版本和实际 diff，再核对 verifier 是否检查并发保留条件；不要只重跑原测试。
+2. **Agent 调外部服务后超时。** 写明超时发生在哪一层，查请求是否派发、服务端是否提交；无明确回执时按 unknown 处理，先查询状态再考虑重试。
+3. **同一个工具调用反复出现。** 比较相邻调用输入和状态变化，确认是合法重试还是无进展循环；检查 run/task 预算、停止条件、调用返回和当前执行是否仍在运行。
+4. **Issue 或 MCP 输出中有指令，Agent 随后准备发信或写库。** 追踪该内容的来源和信任标签、是否进入模型上下文、模型提议了什么、策略是否放行以及副作用是否发生。外部内容本身不授予权限。
+5. **仪表板没有 trace。** 先检查采样、队列/flush、导出与查询条件；再从 workspace、工具或服务端证据确认运行和副作用。没有 trace 不等于没有执行。
+6. **升级后评估结果变了。** 对齐任务、model/provider、prompt、工具、环境、verifier 与随机性，并检查失败样例和 trace；在控制比较条件前，不将差异归因给单一组件。
 
-症状：
+## 16.9 练习：复盘并发编辑事故
 
-1. Agent 执行了安装依赖、迁移数据库、删除缓存、启动长进程。
-2. 命令 hang 住，session 卡死。
-3. 命令在错误 cwd 执行。
-4. 环境变量泄漏到日志或模型上下文。
-5. 本地能跑，云端 sandbox 不一致。
+下面仍使用 16.2 的教学构造，不代表真实线上事件。请按证据作答，不添加题面没有给出的事实。
 
-常见根因：
+1. 用一句话写出用户要求中的功能条件和三条约束。说明哪些约束需要检查变更范围或仓库状态，不能只靠功能单测证明。
+2. 按顺序列出 h0 读取、h1 并发保存、过期提案应用、简单路径测试、最终报告。指出最早偏离发生在哪里，并说明它与 verifier 漏检有什么区别。
+3. 分别写出任务契约、运行轨迹、实际工作区状态、测试结果能证明和不能证明的内容。
+4. 在不假设 h1 可以直接覆盖回 h2 的前提下，列出安全恢复步骤。说明为什么不应从 h0 重新运行整文件替换。
+5. 设计两条回归：一条触发读取后并发修改，另一条覆盖非简单 query；写明每条回归要观察的最终状态。
+6. 假设写入工具已经派发，但运行面板没有返回结果。把状态标为已完成、失败或 unknown 之一，并写出下一项应查询的证据。
 
-1. bash 权限过宽。
-2. 没有 timeout。
-3. 没有 cwd/env 显式记录。
-4. 没有区分 test/lint 和 destructive command。
-5. sandbox 没有限制网络和文件系统。
+## 16.10 本章收束
 
-修复方案：
+一次故障排查应留下三样东西：与用户目标对齐的运行时间线、对已确认/未知状态的诚实判断，以及能复核修复效果的回归案例。先找最早偏离，再分别修复执行路径、状态确认和检测缺口；不要用一个通过的测试、空白 trace 或“安全重试”标签替代实际状态证据。
 
-1. 命令级 allow/ask/deny。
-2. 对每个 command 设置 timeout。
-3. 记录 cwd、env 摘要、exit code、stdout/stderr。
-4. 长进程要求后台管理或明确终止策略。
-5. 网络命令默认 ask。
-6. 生产环境命令 deny。
-7. 云端使用 VM/container 隔离，并限制网络。
-
-安全原则：复杂 bash 命令应该给自然语言解释，让用户知道它要做什么。
-
-## 16.8 坑五：Prompt Injection 通过外部内容进入系统
-
-症状：
-
-1. GitHub issue、网页、README、MCP 输出中写着“忽略之前指令”。
-2. Agent 试图读取 secret 或执行与任务无关命令。
-3. 外部文档让 agent 改权限或连接未知服务。
-
-常见根因：
-
-1. 把外部内容当成 trusted instruction。
-2. Context builder 没有标注来源和信任级别。
-3. Permission engine 被模型输出绕过。
-4. Web/MCP 内容没有隔离。
-
-修复方案：
-
-1. 外部内容统一标注为 untrusted data。
-2. 系统指令和安全策略优先级最高。
-3. 高风险动作必须 permission ask。
-4. Web fetch、MCP output、issue content 做 prompt injection 检测或隔离摘要。
-5. 不允许外部内容修改权限策略。
-6. 对命令注入做参数化和 blocklist。
-
-面试表达：
-
-```text
-Prompt injection 不能靠让模型“更听话”解决。要把外部内容当成数据，不当成指令，并让 permission engine、sandbox、secret redaction 和工具边界承担真正防护。
-```
-
-## 16.9 坑六：Trace 不完整导致无法 Debug
-
-症状：
-
-1. 线上事故后不知道 agent 为什么执行某个命令。
-2. 只能看到最终回答，看不到中间工具调用。
-3. 无法复现同一个任务。
-4. Eval 失败不知道是模型、工具、上下文还是环境问题。
-
-常见根因：
-
-1. 只记录聊天消息，不记录 tool call。
-2. 不记录 context/query。
-3. 不记录权限决策。
-4. 不记录文件 diff。
-5. 不记录外部系统版本和输出 hash。
-
-修复方案：
-
-1. 记录 model query metadata。
-2. 记录 model output 和 tool call。
-3. 记录 tool input/output、exit code、耗时、错误。
-4. 记录 permission request 和用户响应。
-5. 记录 FileChange 和 patch。
-6. 记录 MCP/A2A server、版本、参数摘要、结果摘要。
-7. 支持 deterministic replay 和 re-evaluation replay。
-
-SWE-agent 的 trajectory 思想很有代表性：每一步都记录 response、thought/action、observation、state 和 query，方便研究和 debug。
-
-## 16.10 坑七：Evaluation 不可比
-
-症状：
-
-1. 今天 pass rate 提升，明天下降，不知道为什么。
-2. 换了 prompt、模型、工具、repo snapshot 后仍放在一起比较。
-3. 外部 API 返回变化导致任务不稳定。
-4. 测试本身 flaky。
-
-常见根因：
-
-1. 没有固定 repo snapshot。
-2. 没有记录 prompt/model/tool 版本。
-3. 没有隔离外部依赖。
-4. 没有统计成本和失败类型。
-5. benchmark 任务和真实业务分布不一致。
-
-修复方案：
-
-1. 固定 task set、repo snapshot、测试命令。
-2. 记录 agent config、prompt version、model version、tool version。
-3. 对 MCP/A2A 外部结果做 mock 或 snapshot。
-4. 区分 compile fail、test fail、timeout、permission fail、wrong patch。
-5. 使用公共 benchmark + 私有历史 issue benchmark。
-6. 加入人工 review 和安全评分。
-
-面试表达：
-
-```text
-Evaluation harness 的核心不是跑一批 prompt，而是固定任务、环境、工具、模型和评分函数，让不同版本 agent 的结果可比。否则 pass rate 的变化没有工程意义。
-```
-
-## 16.11 坑八：Agent 循环调用导致成本失控
-
-症状：
-
-1. Agent 反复 grep 同一个关键词。
-2. 反复读取同一个文件。
-3. 反复运行失败测试但不改变代码。
-4. subagent 互相委派或重复执行。
-5. token 和费用快速上升。
-
-常见根因：
-
-1. 没有 step limit。
-2. 没有 repeated tool call detection。
-3. 工具失败后没有状态更新。
-4. Agent plan 不稳定。
-5. 没有 stop condition。
-
-修复方案：
-
-1. 每个 session 设置 max steps、max cost、max wall time。
-2. 对相同 tool+input 连续调用触发 doom loop guard。
-3. 工具失败后要求模型解释新策略。
-4. 用 todo/plan 约束任务进展。
-5. subagent 设置独立预算。
-6. 触发循环时总结当前状态并询问用户。
-
-OpenCode 的 `doom_loop` 权限项就是这类保护的一个公开例子：相同工具调用重复多次时触发安全机制。
-
-## 16.12 坑九：MCP Server 过多导致工具选择混乱
-
-症状：
-
-1. 模型选择了错误 MCP tool。
-2. 工具 schema 占满上下文。
-3. GitHub、Jira、Sentry、Docs 工具全打开，模型不知道用哪个。
-4. MCP server 认证失败但错误不明显。
-
-常见根因：
-
-1. MCP 全局启用。
-2. 工具命名和描述不清。
-3. 没有 tool search 或 lazy loading。
-4. 没有按 agent 管理工具。
-5. OAuth 和 server 状态不可见。
-
-修复方案：
-
-1. MCP server 默认按需启用。
-2. 按 agent 或任务类型启用工具。
-3. 工具加 namespace 和清晰 description。
-4. 使用 tool search，避免全量 schema 进上下文。
-5. 暴露 MCP status、auth status、tool count。
-6. 对大输出设置 output limit。
-
-面试表达：
-
-```text
-MCP 扩展能力很强，但不能无限制堆工具。Harness 要把 MCP tools 纳入 capability registry、权限、上下文预算和状态监控，否则工具越多，模型越容易误选，成本也越高。
-```
-
-## 16.13 坑十：本地和云端环境不一致
-
-症状：
-
-1. 本地测试通过，云端失败。
-2. 云端没有某个依赖、系统库或环境变量。
-3. 文件路径、换行、权限、shell 不同。
-4. WSL 或跨文件系统搜索变慢或漏结果。
-
-常见根因：
-
-1. 没有标准 workspace image。
-2. 环境初始化不完整。
-3. 依赖安装不确定。
-4. 命令默认 shell 不同。
-5. 文件系统性能和语义不同。
-
-修复方案：
-
-1. 使用 dev container、Docker 或固定 VM image。
-2. 记录 environment fingerprint。
-3. 初始化阶段运行 doctor/check。
-4. 明确 shell、cwd、PATH。
-5. 对 WSL/Windows/macOS 做平台适配。
-6. 失败时输出环境诊断信息。
-
-## 16.14 实战排查清单
-
-当用户说“agent 改错了代码”，按这个顺序查：
-
-1. 用户原始 prompt 是否清楚。
-2. Agent 当时看到哪些文件和规则。
-3. 是否读取了正确文件。
-4. 是否有错误 repo map 或过期 summary。
-5. 模型生成了什么 plan。
-6. 执行了哪些 tool call。
-7. 每个 edit 的 before/after diff。
-8. 是否覆盖用户并发改动。
-9. 是否运行了测试。
-10. 最终回答是否如实说明验证情况。
-
-当用户说“agent 卡住了”，按这个顺序查：
-
-1. 当前是否在等待权限确认。
-2. 是否有 shell 命令 hang。
-3. 是否模型 API timeout 或 rate limit。
-4. 是否 auto-compaction thrashing。
-5. 是否 MCP server 连接或认证失败。
-6. 是否 event stream 断开。
-7. 是否进入重复工具调用。
-
-当用户说“agent 太贵”，按这个顺序查：
-
-1. 平均 steps。
-2. 每步 context size。
-3. 是否全量加载 MCP tools。
-4. 是否读取大文件或大日志。
-5. 是否频繁重新总结。
-6. 是否使用过大模型处理简单任务。
-7. 是否缺少缓存和 repo map。
-
-当用户说“agent 不安全”，按这个顺序查：
-
-1. 默认权限是否过松。
-2. `.env` 是否可读。
-3. 外部目录是否可写。
-4. 网络请求是否默认允许。
-5. MCP server 是否可信。
-6. OAuth scope 是否过宽。
-7. 是否有 audit log。
-8. 是否有 prompt injection 防护。
-
-## 16.15 高频面试题总表
-
-| 问题 | 回答关键词 |
-|---|---|
-| Harness 是什么？ | 把模型、工具、状态、权限、执行、trace、eval 组织成 runtime |
-| 为什么 coding agent 需要 runtime？ | 需要读写文件、执行命令、管理上下文、权限、安全和恢复 |
-| Tool registry 怎么设计？ | schema、namespace、risk、permission、timeout、output limit、origin |
-| 权限系统怎么设计？ | allow/ask/deny，按工具、参数、路径、agent、组织策略判断 |
-| 如何防 prompt injection？ | 外部内容 untrusted，权限 runtime enforcement，secret redaction |
-| 如何防危险命令？ | bash pattern、sandbox、timeout、blocklist、用户确认 |
-| 如何管理上下文？ | repo map、检索、摘要、token budget、大输出截断 |
-| 如何支持 replay？ | trace model/tool/context/diff/permission，mock 外部依赖 |
-| 如何评估 agent？ | task set、repo snapshot、tests、scoring、cost、safety、human review |
-| MCP 如何接入？ | MCP client、capability registry、permission、output limit、trace |
-| A2A 如何接入？ | Agent Card、task delegation、streaming、trust policy、trace |
-| Claude Code/OpenCode/Codex 差异？ | 产品入口、闭源/开源、配置、权限、server/SDK、生态和 workflow |
-
-## 16.16 高频题参考答案
-
-### 题 1：Harness 是什么？
-
-参考回答：
-
-```text
-Harness 是把大模型包装成可运行 agent 的工程外壳。它不只是调用模型 API，而是管理上下文、工具、文件系统、终端执行、权限、安全、session 状态、trace、replay 和 evaluation。对于 coding agent，harness 决定模型能看到什么、能做什么、怎么改代码、怎么验证、出错后怎么恢复。
-```
-
-### 题 2：为什么 coding agent 不能只是一个聊天机器人？
-
-参考回答：
-
-```text
-因为 coding agent 要在真实代码库里完成任务，需要搜索、读取、编辑、运行测试、处理错误、生成 diff、回滚修改、调用外部系统并保证安全。聊天机器人只输出文本，而 coding agent runtime 必须把模型输出转成受控动作，并记录整个过程。
-```
-
-### 题 3：如何设计 tool registry？
-
-参考回答：
-
-```text
-Tool registry 要统一管理内置工具、custom tools、MCP tools 和 A2A remote agents。每个工具要有 namespace、schema、description、origin、risk level、permission policy、timeout、output limit、enabled agents 和 version。这样模型选择工具时有清晰描述，runtime 执行前可以检查权限，trace/replay 也知道调用了哪个版本的工具。
-```
-
-### 题 4：如何设计权限系统？
-
-参考回答：
-
-```text
-权限系统输入用户、workspace、agent、tool、参数、路径、当前模式和组织策略，输出 allow、ask 或 deny。规则支持系统默认、组织、用户、项目、agent 和 session 临时批准多层覆盖。读普通文件可以 allow，写文件 ask，读 .env deny，外部目录 ask，git push、生产 deploy、数据库写入默认 deny。关键是权限在 runtime 层执行，而不是靠 prompt。
-```
-
-### 题 5：如何防止 agent 执行危险命令？
-
-参考回答：
-
-```text
-我会从三层防护：第一是 permission pattern，对 bash 命令按前缀、参数和路径做 allow/ask/deny；第二是 sandbox，用容器或 VM 限制文件系统、网络、环境变量和资源；第三是用户确认和审计，对高风险命令给出自然语言解释、要求批准并记录 trace。命令还要设置 timeout，避免 hang 住。
-```
-
-### 题 6：如何处理大仓库上下文？
-
-参考回答：
-
-```text
-不能把整个仓库塞进上下文。我会先构建 repo map，让模型看到关键文件、类、函数和符号骨架，再用 grep/glob/LSP 找相关文件，只读取关键片段。历史对话做 compaction，大工具输出做摘要或落盘引用，MCP tools 用 tool search 延迟加载。Context builder 要有 token budget，并保留用户目标、当前 plan、diff 和失败测试这些关键状态。
-```
-
-### 题 7：如何设计 trace 和 replay？
-
-参考回答：
-
-```text
-Trace 记录每一步的用户输入、context/query、模型输出、tool call 输入输出、权限决策、文件 diff、shell exit code、MCP/A2A 调用、错误和 final answer。Replay 分两类：deterministic replay 用录制的模型和工具结果复现问题；re-evaluation replay 重新调用模型和工具比较新版本。对外部系统要记录版本、输出 hash，并在评估中尽量 mock 或 snapshot。
-```
-
-### 题 8：如何设计 evaluation harness？
-
-参考回答：
-
-```text
-Evaluation harness 要固定 task set、repo snapshot、prompt、agent config、model config、tool version、测试命令和评分函数。指标不仅看 test pass，还要看 patch minimality、regression、安全违规、成本、延迟和人工 review。公共 benchmark 可以看通用能力，企业还需要私有历史 issue benchmark 来贴近真实业务分布。
-```
-
-### 题 9：MCP 如何接入 harness？
-
-参考回答：
-
-```text
-MCP 接入时，harness 先从配置加载 local 或 remote MCP server，建立 MCP client，做 capability discovery，把 resources、prompts、tools 注册到 capability registry。每个 MCP tool 要绑定 namespace、权限、timeout、output limit 和 risk level。调用前经过 permission engine，调用后结果做截断、脱敏和 prompt injection 标记，并写入 trace。不能简单把 MCP 全量工具塞进上下文。
-```
-
-### 题 10：Claude Code、OpenCode、Codex 这类系统核心差异在哪里？
-
-参考回答：
-
-```text
-核心差异不只是模型，而是 harness 和产品形态。Claude Code 更强调多入口、产品闭环、MCP、skills、hooks、subagents 和安全权限；OpenCode 更强调开源、config、server/SDK、permissions、agents、MCP、custom tools 和可扩展 runtime；Codex 代表 OpenAI 的本地和云端 coding agent 产品线，覆盖 CLI、IDE、desktop app 和 Codex Web。比较时要看上下文、工具、权限、执行、trace、评估和工作流，而不是只看 demo。
-```
-
-## 16.17 回答 Harness 问题的万能结构
-
-面试中遇到任何 harness 问题，可以用这个结构回答：
-
-```text
-1. 先定义问题边界：产品形态、任务范围、安全要求。
-2. 拆核心模块：session、context、model、tools、permission、execution、trace、eval。
-3. 讲一次完整链路：用户输入 -> context -> model -> tool -> permission -> execution -> result -> trace。
-4. 讲关键风险：上下文、权限、prompt injection、文件覆盖、命令副作用、成本。
-5. 讲验证方式：test、diff review、trace、replay、benchmark、人工 review。
-6. 讲 trade-off：自动化 vs 安全，上下文 vs 成本，通用性 vs 体验。
-```
-
-如果时间很短，可以压缩成一句：
-
-```text
-Coding agent harness 的本质是用工程 runtime 约束和增强模型，让模型在受控上下文、受控工具、受控权限、可观测 trace 和可评估环境中完成软件工程任务。
-```
-
-## 16.18 最后一张知识图
-
-第二十册可以浓缩成这张图：
-
-```text
-User / Issue / IDE / CLI
--> Session Manager
--> Context Builder
-   -> repo map / rules / history / diff / tool results
--> Model Adapter
--> Agent Orchestrator
--> Capability Registry
-   -> built-in tools / custom tools / MCP / A2A / skills
--> Permission Engine
-   -> allow / ask / deny
--> Execution Engine
-   -> file edit / shell / sandbox / git / LSP / MCP / A2A
--> Trace Store
-   -> model / tool / permission / diff / observation
--> Replay / Evaluation
-   -> benchmark / private issues / regression / safety
-```
-
-只要能围绕这张图展开，绝大多数 agent harness 面试题都能答得有结构。
-
-## 16.19 Harness 实战坑审计指标
-
-为了把本章十类坑讲成工程闭环，可以把每个事故样本抽象成：
-
-```math
-h_i=(g_i,c_i,t_i,p_i,e_i,s_i,o_i,r_i,v_i,u_i)
-```
-
-其中 $g_i$ 是用户目标和验收标准，$c_i$ 是上下文与预算，$t_i$ 是工具和协议能力，$p_i$ 是权限决策，$e_i$ 是文件 / 终端 / sandbox 执行，$s_i$ 是 session 状态和 diff，$o_i$ 是 trace / log / artifact，$r_i$ 是 replay 条件，$v_i$ 是 eval / 版本条件，$u_i$ 是用户影响和事故分级。
-
-以下指标只在有事故样本时定义。若 `N=0`，聚合结果为 `not_applicable`（demo 中用 `None` 表示），不使用 epsilon、历史值或默认满分/零分伪造安全、稳定或覆盖率；`F_{\mathrm{req}}` 也必须是非空的必需 trace 字段集合。
-
-常用排查指标可以写成：
-
-```math
-C_{\mathrm{triage}}=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[\mathrm{triaged}(h_i)]
-```
-
-```math
-C_{\mathrm{perm}}=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[\mathrm{permission\_ok}(h_i)]
-```
-
-```math
-C_{\mathrm{ctx}}=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[B_i\le L_i\land \mathrm{output\_limited}(h_i)]
-```
-
-```math
-C_{\mathrm{edit}}=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[\neg \mathrm{edit\_risk}(h_i)\lor \mathrm{edit\_checked}(h_i)]
-```
-
-```math
-C_{\mathrm{cmd}}=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[\neg \mathrm{command\_risk}(h_i)\lor \mathrm{command\_guarded}(h_i)]
-```
-
-```math
-C_{\mathrm{inj}}=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[\neg \mathrm{untrusted}(h_i)\lor \mathrm{boundary\_ok}(h_i)]
-```
-
-```math
-C_{\mathrm{trace}}=\frac{1}{N}\sum_{i=1}^{N}\frac{|F_i\cap F_{\mathrm{req}}|}{|F_{\mathrm{req}}|}
-```
-
-```math
-C_{\mathrm{replay}}=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[\mathrm{replay\_ready}(h_i)\land \mathrm{version\_captured}(h_i)]
-```
-
-```math
-C_{\mathrm{eval}}=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[\mathrm{eval\_deterministic}(h_i)\land \mathrm{version\_captured}(h_i)]
-```
-
-```math
-C_{\mathrm{cost}}=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[S_i\le S_{\max}\land M_i\le M_{\max}\land \neg \mathrm{repeat}(h_i)]
-```
-
-```math
-C_{\mathrm{env}}=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[\mathrm{env\_fingerprint}(h_i)\land \mathrm{cwd\_recorded}(h_i)]
-```
-
-最终实战坑准入条件可以定义为：
-
-```math
-G_{\mathrm{pitfall}}=\mathbb{1}[
-C_{\mathrm{triage}}\ge\tau_{\mathrm{triage}}
-\land C_{\mathrm{perm}}\ge\tau_{\mathrm{perm}}
-\land C_{\mathrm{ctx}}\ge\tau_{\mathrm{ctx}}
-\land C_{\mathrm{edit}}\ge\tau_{\mathrm{edit}}
-\land C_{\mathrm{cmd}}\ge\tau_{\mathrm{cmd}}
-\land C_{\mathrm{inj}}\ge\tau_{\mathrm{inj}}
-\land C_{\mathrm{trace}}\ge\tau_{\mathrm{trace}}
-\land C_{\mathrm{replay}}\ge\tau_{\mathrm{replay}}
-\land C_{\mathrm{eval}}\ge\tau_{\mathrm{eval}}
-\land C_{\mathrm{cost}}\ge\tau_{\mathrm{cost}}
-\land C_{\mathrm{env}}\ge\tau_{\mathrm{env}}
-]
-```
-
-这些指标的价值不是替代人工复盘，而是让排查顺序更稳定：先确认事故是否被正确归因，再看权限、上下文、编辑、终端、外部内容、trace、replay、eval 和环境是否形成闭环。
-
-### 16.19.1 最小可运行 Harness 实战坑审计 demo
-
-下面的 demo 不调用模型、不执行命令、不访问文件系统或网络，只审计一组 toy incident。它故意构造 permission overreach、context overload、用户改动覆盖、shell hang、外部内容边界缺失、trace 缺失、eval flaky、doom loop、MCP tool overload 和环境漂移等 bad case，让 gate 失败并输出根因。
-
-```python
-incidents = [
-    {
-        "id": "permission_overreach",
-        "root": "permission_overreach",
-        "triaged": True,
-        "expected_permission": "ask",
-        "actual_permission": "allow",
-        "high_risk": True,
-        "approved": False,
-        "context_tokens": 3600,
-        "context_limit": 8000,
-        "output_limited": True,
-        "edit_risk": False,
-        "edit_checked": True,
-        "command_risk": False,
-        "command_safe": True,
-        "timeout": True,
-        "cwd_recorded": True,
-        "env_masked": True,
-        "untrusted": False,
-        "trust_labeled": True,
-        "high_risk_blocked": False,
-        "trace_fields": ["goal", "tool", "permission", "diff"],
-        "replay_ready": False,
-        "eval_deterministic": True,
-        "version_captured": True,
-        "steps": 4,
-        "step_limit": 12,
-        "cost": 0.08,
-        "cost_limit": 0.30,
-        "repeated_call": False,
-        "env_fingerprint": True,
-    },
-    {
-        "id": "context_overload",
-        "root": "context_overload",
-        "triaged": True,
-        "expected_permission": "allow",
-        "actual_permission": "allow",
-        "high_risk": False,
-        "approved": True,
-        "context_tokens": 14500,
-        "context_limit": 8000,
-        "output_limited": False,
-        "edit_risk": False,
-        "edit_checked": True,
-        "command_risk": False,
-        "command_safe": True,
-        "timeout": True,
-        "cwd_recorded": True,
-        "env_masked": True,
-        "untrusted": False,
-        "trust_labeled": True,
-        "high_risk_blocked": True,
-        "trace_fields": ["goal", "context", "tool", "error"],
-        "replay_ready": False,
-        "eval_deterministic": False,
-        "version_captured": False,
-        "steps": 9,
-        "step_limit": 12,
-        "cost": 0.41,
-        "cost_limit": 0.30,
-        "repeated_call": False,
-        "env_fingerprint": True,
-    },
-    {
-        "id": "user_edit_overwrite",
-        "root": "edit_overwrite",
-        "triaged": True,
-        "expected_permission": "ask",
-        "actual_permission": "ask",
-        "high_risk": True,
-        "approved": True,
-        "context_tokens": 5200,
-        "context_limit": 8000,
-        "output_limited": True,
-        "edit_risk": True,
-        "edit_checked": False,
-        "command_risk": False,
-        "command_safe": True,
-        "timeout": True,
-        "cwd_recorded": True,
-        "env_masked": True,
-        "untrusted": False,
-        "trust_labeled": True,
-        "high_risk_blocked": True,
-        "trace_fields": ["goal", "diff", "permission", "error"],
-        "replay_ready": True,
-        "eval_deterministic": True,
-        "version_captured": True,
-        "steps": 5,
-        "step_limit": 12,
-        "cost": 0.11,
-        "cost_limit": 0.30,
-        "repeated_call": False,
-        "env_fingerprint": True,
-    },
-    {
-        "id": "shell_hang",
-        "root": "shell_hang",
-        "triaged": True,
-        "expected_permission": "ask",
-        "actual_permission": "ask",
-        "high_risk": True,
-        "approved": True,
-        "context_tokens": 4200,
-        "context_limit": 8000,
-        "output_limited": True,
-        "edit_risk": False,
-        "edit_checked": True,
-        "command_risk": True,
-        "command_safe": False,
-        "timeout": False,
-        "cwd_recorded": False,
-        "env_masked": False,
-        "untrusted": False,
-        "trust_labeled": True,
-        "high_risk_blocked": True,
-        "trace_fields": ["goal", "tool", "permission"],
-        "replay_ready": False,
-        "eval_deterministic": False,
-        "version_captured": False,
-        "steps": 13,
-        "step_limit": 12,
-        "cost": 0.22,
-        "cost_limit": 0.30,
-        "repeated_call": False,
-        "env_fingerprint": False,
-    },
-    {
-        "id": "prompt_injection_from_issue",
-        "root": "prompt_injection_boundary",
-        "triaged": True,
-        "expected_permission": "deny",
-        "actual_permission": "ask",
-        "high_risk": True,
-        "approved": False,
-        "context_tokens": 3900,
-        "context_limit": 8000,
-        "output_limited": True,
-        "edit_risk": False,
-        "edit_checked": True,
-        "command_risk": True,
-        "command_safe": True,
-        "timeout": True,
-        "cwd_recorded": True,
-        "env_masked": True,
-        "untrusted": True,
-        "trust_labeled": False,
-        "high_risk_blocked": False,
-        "trace_fields": ["goal", "context", "tool", "permission", "error"],
-        "replay_ready": True,
-        "eval_deterministic": True,
-        "version_captured": True,
-        "steps": 6,
-        "step_limit": 12,
-        "cost": 0.16,
-        "cost_limit": 0.30,
-        "repeated_call": False,
-        "env_fingerprint": True,
-    },
-    {
-        "id": "trace_missing",
-        "root": "trace_missing",
-        "triaged": False,
-        "expected_permission": "allow",
-        "actual_permission": "allow",
-        "high_risk": False,
-        "approved": True,
-        "context_tokens": 4700,
-        "context_limit": 8000,
-        "output_limited": True,
-        "edit_risk": False,
-        "edit_checked": True,
-        "command_risk": False,
-        "command_safe": True,
-        "timeout": True,
-        "cwd_recorded": True,
-        "env_masked": True,
-        "untrusted": False,
-        "trust_labeled": True,
-        "high_risk_blocked": True,
-        "trace_fields": ["goal"],
-        "replay_ready": False,
-        "eval_deterministic": False,
-        "version_captured": False,
-        "steps": 3,
-        "step_limit": 12,
-        "cost": 0.05,
-        "cost_limit": 0.30,
-        "repeated_call": False,
-        "env_fingerprint": True,
-    },
-    {
-        "id": "eval_flaky",
-        "root": "eval_flakiness",
-        "triaged": True,
-        "expected_permission": "allow",
-        "actual_permission": "allow",
-        "high_risk": False,
-        "approved": True,
-        "context_tokens": 5100,
-        "context_limit": 8000,
-        "output_limited": True,
-        "edit_risk": False,
-        "edit_checked": True,
-        "command_risk": False,
-        "command_safe": True,
-        "timeout": True,
-        "cwd_recorded": True,
-        "env_masked": True,
-        "untrusted": False,
-        "trust_labeled": True,
-        "high_risk_blocked": True,
-        "trace_fields": ["goal", "tool", "trace", "error"],
-        "replay_ready": False,
-        "eval_deterministic": False,
-        "version_captured": False,
-        "steps": 5,
-        "step_limit": 12,
-        "cost": 0.12,
-        "cost_limit": 0.30,
-        "repeated_call": False,
-        "env_fingerprint": False,
-    },
-    {
-        "id": "doom_loop",
-        "root": "doom_loop",
-        "triaged": True,
-        "expected_permission": "allow",
-        "actual_permission": "allow",
-        "high_risk": False,
-        "approved": True,
-        "context_tokens": 7800,
-        "context_limit": 8000,
-        "output_limited": True,
-        "edit_risk": False,
-        "edit_checked": True,
-        "command_risk": False,
-        "command_safe": True,
-        "timeout": True,
-        "cwd_recorded": True,
-        "env_masked": True,
-        "untrusted": False,
-        "trust_labeled": True,
-        "high_risk_blocked": True,
-        "trace_fields": ["goal", "context", "tool", "trace", "error"],
-        "replay_ready": True,
-        "eval_deterministic": True,
-        "version_captured": True,
-        "steps": 18,
-        "step_limit": 12,
-        "cost": 0.52,
-        "cost_limit": 0.30,
-        "repeated_call": True,
-        "env_fingerprint": True,
-    },
-    {
-        "id": "mcp_tool_overload",
-        "root": "mcp_tool_overload",
-        "triaged": True,
-        "expected_permission": "ask",
-        "actual_permission": "allow",
-        "high_risk": True,
-        "approved": False,
-        "context_tokens": 9800,
-        "context_limit": 8000,
-        "output_limited": False,
-        "edit_risk": False,
-        "edit_checked": True,
-        "command_risk": False,
-        "command_safe": True,
-        "timeout": True,
-        "cwd_recorded": True,
-        "env_masked": True,
-        "untrusted": True,
-        "trust_labeled": True,
-        "high_risk_blocked": False,
-        "trace_fields": ["goal", "context", "tool", "permission", "trace"],
-        "replay_ready": False,
-        "eval_deterministic": True,
-        "version_captured": False,
-        "steps": 10,
-        "step_limit": 12,
-        "cost": 0.36,
-        "cost_limit": 0.30,
-        "repeated_call": False,
-        "env_fingerprint": True,
-    },
-    {
-        "id": "env_drift",
-        "root": "environment_drift",
-        "triaged": True,
-        "expected_permission": "allow",
-        "actual_permission": "allow",
-        "high_risk": False,
-        "approved": True,
-        "context_tokens": 4100,
-        "context_limit": 8000,
-        "output_limited": True,
-        "edit_risk": False,
-        "edit_checked": True,
-        "command_risk": True,
-        "command_safe": True,
-        "timeout": True,
-        "cwd_recorded": False,
-        "env_masked": True,
-        "untrusted": False,
-        "trust_labeled": True,
-        "high_risk_blocked": True,
-        "trace_fields": ["goal", "tool", "permission", "trace", "version"],
-        "replay_ready": False,
-        "eval_deterministic": True,
-        "version_captured": False,
-        "steps": 7,
-        "step_limit": 12,
-        "cost": 0.15,
-        "cost_limit": 0.30,
-        "repeated_call": False,
-        "env_fingerprint": False,
-    },
-]
-
-required_trace = {"goal", "context", "tool", "permission", "diff", "trace", "error", "version"}
-
-
-def avg(values):
-    return round(sum(values) / len(values), 3) if values else None
-
-
-def at_least(value, threshold):
-    return value is not None and value >= threshold
-
-
-def trace_score(case):
-    return len(required_trace & set(case["trace_fields"])) / len(required_trace)
-
-
-metrics = {
-    "triage_coverage": avg([case["triaged"] for case in incidents]),
-    "permission_safety": avg([
-        case["actual_permission"] == case["expected_permission"]
-        or (case["expected_permission"] == "deny" and case["actual_permission"] == "ask" and not case["approved"])
-        for case in incidents
-    ]),
-    "context_budget_pass": avg([
-        case["context_tokens"] <= case["context_limit"] and case["output_limited"]
-        for case in incidents
-    ]),
-    "edit_safety": avg([not case["edit_risk"] or case["edit_checked"] for case in incidents]),
-    "command_safety": avg([
-        not case["command_risk"]
-        or (case["command_safe"] and case["timeout"] and case["cwd_recorded"] and case["env_masked"])
-        for case in incidents
-    ]),
-    "prompt_injection_boundary": avg([
-        not case["untrusted"] or (case["trust_labeled"] and case["high_risk_blocked"])
-        for case in incidents
-    ]),
-    "trace_completeness": avg([trace_score(case) for case in incidents]),
-    "replay_readiness": avg([case["replay_ready"] and case["version_captured"] for case in incidents]),
-    "eval_determinism": avg([case["eval_deterministic"] and case["version_captured"] for case in incidents]),
-    "cost_loop_control": avg([
-        case["steps"] <= case["step_limit"]
-        and case["cost"] <= case["cost_limit"]
-        and not case["repeated_call"]
-        for case in incidents
-    ]),
-    "environment_parity": avg([case["env_fingerprint"] and case["cwd_recorded"] for case in incidents]),
-}
-
-thresholds = {
-    "triage_coverage": 0.95,
-    "permission_safety": 0.95,
-    "context_budget_pass": 0.90,
-    "edit_safety": 0.95,
-    "command_safety": 0.95,
-    "prompt_injection_boundary": 0.95,
-    "trace_completeness": 0.85,
-    "replay_readiness": 0.80,
-    "eval_determinism": 0.80,
-    "cost_loop_control": 0.90,
-    "environment_parity": 0.90,
-}
-
-failed_gates = [
-    name
-    for name, limit in thresholds.items()
-    if not at_least(metrics[name], limit)
-]
-not_applicable_metrics = [name for name, value in metrics.items() if value is None]
-
-assert avg([]) is None
-assert not at_least(None, 0.9)
-root_causes = {}
-for case in incidents:
-    root_causes.setdefault(case["root"], []).append(case["id"])
-
-print(f"metrics={metrics}")
-print(f"not_applicable_metrics={not_applicable_metrics}")
-print(f"failed_gates={failed_gates}")
-print(f"root_causes={root_causes}")
-print(f"harness_pitfall_gate_pass={not failed_gates}")
-```
-
-运行结果应类似：
-
-```text
-metrics={'triage_coverage': 0.9, 'permission_safety': 0.8, 'context_budget_pass': 0.8, 'edit_safety': 0.9, 'command_safety': 0.8, 'prompt_injection_boundary': 0.8, 'trace_completeness': 0.5, 'replay_readiness': 0.3, 'eval_determinism': 0.4, 'cost_loop_control': 0.6, 'environment_parity': 0.7}
-not_applicable_metrics=[]
-failed_gates=['triage_coverage', 'permission_safety', 'context_budget_pass', 'edit_safety', 'command_safety', 'prompt_injection_boundary', 'trace_completeness', 'replay_readiness', 'eval_determinism', 'cost_loop_control', 'environment_parity']
-root_causes={'permission_overreach': ['permission_overreach'], 'context_overload': ['context_overload'], 'edit_overwrite': ['user_edit_overwrite'], 'shell_hang': ['shell_hang'], 'prompt_injection_boundary': ['prompt_injection_from_issue'], 'trace_missing': ['trace_missing'], 'eval_flakiness': ['eval_flaky'], 'doom_loop': ['doom_loop'], 'mcp_tool_overload': ['mcp_tool_overload'], 'environment_drift': ['env_drift']}
-harness_pitfall_gate_pass=False
-```
-
-面试中可以这样解释这个 demo：它不是为了证明某个真实产品不合格，而是展示 production harness 的事故复盘应该有一张统一表，把权限、上下文、编辑、终端、外部内容、trace、replay、eval、预算和环境问题放在同一个 gate 里。只看最终 diff 或最终回答，无法稳定定位这些根因。
-
-## 16.20 小练习
-
-1. 拿一个你使用过的 coding agent，按本章八层排查框架分析它的一次失败案例。
-2. 设计一个 permission policy，要求 review agent 只读，build agent 可编辑和测试，release agent 可创建 PR 但不能 deploy。
-3. 设计一个 trace viewer 页面，显示模型调用、工具调用、权限请求、diff 和测试结果。
-4. 构造一个 MCP prompt injection 示例，并写出 harness 防护策略。
-5. 设计一个私有 evaluation task，从历史 bug issue 到 repo snapshot、测试命令和评分函数。
-6. 对比“本地 CLI agent”和“云端异步 agent”的安全威胁模型。
-7. 用 3 分钟口述“设计一个 coding agent harness”的面试答案，并录音复盘是否覆盖了核心模块。
-
-## 16.21 本章总结
-
-本章整理了 Agent Harness 的实战坑和面试题。
-
-核心结论：
-
-1. 真实 coding agent 问题往往不只是模型问题，而是上下文、工具、权限、执行、状态和观测问题。
-2. 排查时要按 user goal、context、model、tool、permission、execution、state、observability 八层定位。
-3. 工具权限过大、大输出挤爆上下文、文件覆盖、命令副作用、prompt injection、trace 不完整、eval 不可比、agent 循环、MCP 过载、本地云端不一致，是最常见工程坑。
-4. 面试回答要有结构：定义边界、拆模块、讲链路、讲风险、讲验证、讲 trade-off。
-5. 一个优秀的 harness 不是让模型“想做什么就做什么”，而是让模型在可控、可审计、可恢复、可评估的工程系统里完成任务。
-
-Agent Harness 的判断标准可以带到任何 coding agent 或研究型 Agent 中：模型只负责提出候选计划，harness 负责提供上下文、工具、权限、状态、验证和审计。系统是否可靠，不取决于某个 demo 是否偶尔完成任务，而取决于失败时能否阻止副作用、保存证据、恢复状态并把问题沉淀为下一次回归测试。
+本章资料的来源、版本和证据边界见[Agent Harness 故障诊断、重试与运行证据记录](../../research/agent-harness-failure-diagnostics-evidence-2026-11-18.md)。关于系统设计回链[第十五章](15-agent-harness系统设计.md)，关于长任务 checkpoint 与恢复见[第十七章](17-long-running-agent与checkpoint.md)，关于 Harness 评估归因见[第十九章](19-harness-aware-evaluation.md)。

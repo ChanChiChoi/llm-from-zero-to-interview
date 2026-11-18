@@ -45,3 +45,10 @@
 - 补上对应的符号表达和终止/截断 mask 说明；clipped surrogate 的数值例子沿用前文 §1.3，避免在 §3 重复另设一组数字。将 `β` 的额外数值例子改为其对偏好分数与 reference 偏移的定性取舍。
 - 此次改写覆盖此前记录中的 §3 教学手算；旧数值只代表较早版本的编辑记录，不再对应当前正文。
 - 本轮未改变章节结论或研究事实。检查结果：`git diff --check` 通过，138 行 Markdown 围栏成对，50 个本地链接目标存在；公式围栏已静态检查。未运行测试或 PDF 构建。
+
+## 本轮按伪代码调用顺序重写 PPO 说明
+
+- 根据读者反馈，删去伪代码后脱离流程的通用目标、重复 KL 解释和分散的工程监控段，改为沿循环逐项解释 `sample_and_record`、`shape_rewards`、`critic_model.value`/`GAE`、policy 更新、critic 更新和评估。
+- 补清各模型来源与训练方式：policy/reference 从 SFT 复制且只有 policy 更新；reward model 接 score head 后用 chosen/rejected 偏好对训练并冻结；critic 接 value head 后用 GAE returns 作为目标训练。用同一条算术回答连接 rollout、token reward、advantage 和后续更新。
+- 保留必要公式和边界说明，包括逐 token reward shaping、GAE 递推、截断与终止的区别，以及 reference KL 与 PPO 新旧策略 ratio 各自约束什么；移除本节没有解释作用的任意数值演算。
+- 本轮仍是 §3 的局部教学改写，不改变章节结构、研究结论或配套索引。目标正文和进度文件的 `git diff --check` 通过；本章 132 行代码围栏标记成对，50 个 Markdown 链接中的 5 个本地目标均存在；公式围栏已静态检查。未运行测试或 PDF 构建。

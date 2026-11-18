@@ -1,6 +1,6 @@
 # 第二十册《Agent Harness、Coding Agent Runtime 与智能体工程框架》架构审视
 
-审视日期：2026-11-18。阶段：册级初审、发现扫描、简介与目录重构完成；第 1—15 章章级扫描与精修完成，第 16—24 章待逐章处理。
+审视日期：2026-11-18。阶段：册级初审、发现扫描、简介与目录重构完成；第 1—16 章章级扫描与精修完成，第 17—24 章待逐章处理。
 
 ## 审视范围与方法
 
@@ -48,7 +48,7 @@
 | 13 Codex 与主流产品比较 | 怎样分清产品入口、Agent/harness、执行环境和评估器，并基于公开证据比较一条修复任务？ | 将产品案例归纳为“产品选择”和“受控 harness 比较”两种方法。 | 依第 11—12 章；不做产品排名；交第 14 章协议集成和第 15 章系统设计。 |
 | 14 MCP/A2A 与 Harness 集成 | 外部工具和 agent 如何进入 runtime 的 capability、permission、trace 与 evaluation？ | 讲协议集成责任。 | 依第 4、8—10 章；协议主讲交第二十二册。 |
 | 15 Agent Harness 系统设计 | 如何从任务契约设计到状态、执行、恢复和验收边界？ | 以一条修复任务整合前十四章的运行知识，形成可审阅的系统设计与部署取舍。 | 依第 1—14 章；交第 16 章故障诊断，checkpoint 与 workspace 所有权分别深化到第 17、21 章。 |
-| 16 Harness 实战坑与面试题 | 常见故障怎样按证据定位，并形成回答？ | 回收前十六章并暴露薄弱处。 | 依第 1—15 章；不替代专项章节。 |
+| 16 Harness 故障诊断与面试题 | 一次错误、危险、卡住或“测试通过但交付不合约”的运行，怎样从证据找到最早偏离并安全恢复？ | 训练契约、事件轨迹、真实状态与 verifier 的分层判断，并把故障固化为回归案例。 | 依第 1—15 章；checkpoint/幂等由第 17 章深化，harness 归因由第 19 章深化。 |
 | 17 Long-Running Agent 与 Checkpoint | 中断后凭什么安全继续，而不是重放副作用？ | 深化任务状态原子性、幂等和恢复。 | 依第 7、9、15 章；交第 18、20—21、23 章。 |
 | 18 Context Folding | 上下文缩短后如何保留可恢复任务状态和证据？ | 深化第 7 章压缩机制与评估。 | 依第 7、17 章；交 provider state 案例。 |
 | 19 Harness-Aware Evaluation | 结果差异来自模型、harness、环境还是交互？ | 深化第 10 章的归因与轨迹评估。 | 依第 9—10 章；统计方法回链第七册。 |
@@ -93,6 +93,9 @@
 
 13. 第十四章按 MCP `2026-07-28` 与 A2A v1.0.1 官方规范修正协议生命周期边界：区分新版 MCP 无协议会话核心、旧版握手、Draft Tasks extension 与 A2A Task；以订单重试教学构造追踪 MCP 只读发现、A2A AgentCard/委派、身份与本地策略、远端状态、Artifact、本地执行及独立验收。删除原协议覆盖率公式、汇总 gate 和 Python toy audit demo，改为可复走运行轨迹、失败恢复表和无分数评估/回放边界；更新练习 35R 与面试题 40P。详细去向见[第十四章精修审计](chapter-14-audit.md)。
 14. 第十五章完成系统综合设计精修。以合成登录错误修复任务串联任务契约、编排选择、架构责任图、Session/Task/Run/Workspace/Artifact/Effect 状态所有权、Context/Model/Capability 边界、权限/隔离/确认/验收、崩溃恢复、评估与部署。删除原通用模块覆盖公式、聚合系统上线 gate 和长 Python 审计 demo；将原有模块知识保留为一条可追踪设计过程，并把失败结果分为已知、拒绝、基础设施错误和 unknown。章节边界与第 16 章故障排查、第 17/21 章 checkpoint/workspace 专题保持衔接；替换练习 35S 并修订面试题 40C、40Q。详细取舍见[第十五章精修审计](chapter-15-audit.md)，来源证据见[系统设计外部资料记录](../../research/agent-harness-system-design-evidence-2026-11-18.md)。
+14. 第十五章完成系统综合设计精修。以合成登录错误修复任务串联任务契约、编排选择、架构责任图、Session/Task/Run/Workspace/Artifact/Effect 状态所有权、Context/Model/Capability 边界、权限/隔离/确认/验收、崩溃恢复、评估与部署。删除原通用模块覆盖公式、聚合系统上线 gate 和长 Python 审计 demo；将原有模块知识保留为一条可追踪设计过程，并把失败结果分为已知、拒绝、基础设施错误和 unknown。章节边界与第 16 章故障排查、第 17/21 章 checkpoint/workspace 专题保持衔接；替换练习 35S 并修订面试题 40C、40Q。详细取舍见[第十五章精修审计](chapter-15-audit.md)，来源证据见[系统设计外部资料记录](../../research/agent-harness-system-design-evidence-2026-11-18.md)。
+
+15. 第十六章将“实战坑清单”重构为一条并发编辑故障的证据诊断过程：复述契约、对齐 h0/h1/h2 事件、定位过期写入的最早偏离、区分执行故障与 verifier 漏检，再根据是否已派发/已回执/状态 unknown 选择恢复路径。保留权限、上下文、stale edit、命令副作用、注入、trace、eval、循环成本、MCP 工具过载和环境漂移十类主题，改为症状—证据—判断表；删除通用 coverage 公式、综合 pitfall gate 与约 400 行 Python auditor。将原宽泛定义/设计/产品比较问答回链到第 1、4、6—15 章，新增故障排查问答；用一项多步事故复盘练习替换七项跨章重复练习。详细去向见[第十六章精修审计](chapter-16-audit.md)，证据来源见[故障诊断、重试与运行证据记录](../../research/agent-harness-failure-diagnostics-evidence-2026-11-18.md)。
 
 ## 开放风险与交接
 
@@ -101,4 +104,4 @@
 - 第 1 章原有“0 依赖 Python demo”承诺、9 个固定阈值和约 330 行 toy auditor 已移除；内容改由完整合成修复轨迹、最小伪代码和任务特定验收解释。其余章节中仍有 Python demo 或自动 gate 的部分尚待逐章核验；决定删除代码时须保留必要的过程、数值解释和明确去向。
 - 第 2 章原有运行指标公式及 `G_runtime` 固定门槛已移除；核心观察意图改为记录 session/tenant 隔离、phase 转移、context 来源与新鲜度、adapter/parser/registry 错误、执行回执、恢复/checkpoint 和取消/超时事件，并要求为任何汇总率声明单位和分母。旧的 GPT-5.6 运行时归属快照由 OpenAI 当前公开 Agents API/SDK/Responses API 对比替代；Qwen3.7 Plus region/scope 能力细节待第二十二册第 47 章复核和承接，不能在第二十册正文里留作无去向内容。
 - GitHub 页面公式/图表渲染和全量外链可达性尚未核验；动态产品事实需按每章核验日期固定。
-- **当前下一入口：** [第十六章《Harness 实战坑与面试题》](../../book-20-agent-harness-runtime/chapters/16-harness实战坑与面试题.md)。第十五章已完成系统设计主线重构、状态/副作用边界补全和配套同步；正文取舍与静态验收见[第十五章审计](chapter-15-audit.md)。第二十册第 16—24 章和全套书精修 goal 继续 active。
+- **当前下一入口：** [第十七章《Long-Running Agent 与 Checkpoint》](../../book-20-agent-harness-runtime/chapters/17-long-running-agent与checkpoint.md)。第十六章已完成故障证据路径、重试状态判断和回归练习；正文取舍与静态验收见[第十六章审计](chapter-16-audit.md)。第二十册第 17—24 章和全套书精修 goal 继续 active。
