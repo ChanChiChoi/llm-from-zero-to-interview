@@ -9,9 +9,9 @@
 | [上篇：模型与生成](04-huggingface微调实战-1-模型与生成.md) | 基座模型怎样读取输入并生成回答？ | 固定的模型身份与生成基线 |
 | [第二篇：SFT 数据](04-huggingface微调实战-2-sft数据.md) | 对话中的哪些 token 是训练目标？ | 可审计的 input、mask 和 labels |
 | [第三篇：数据审计与全参数 SFT](04-huggingface微调实战-3-data-audit-full-sft.md) | 样本是否适合训练？更新全部权重需要什么资源？ | 可复原的数据集与全参数训练基线 |
-| [第四篇：LoRA](04-huggingface微调实战-4-lora.md) | 怎样只训练低秩增量？ | adapter 与资源账本 |
+| [第四篇：LoRA](04-huggingface微调实战-4-lora.md) | 怎样只训练低秩增量？ | adapter 和资源占用估算 |
 | [第五篇：QLoRA](04-huggingface微调实战-5-qlora.md) | 怎样把低比特基座纳入低秩微调？ | 量化配置与 adapter 产物 |
-| [第六篇：评估协议与任务指标](04-huggingface微调实战-6-evaluation-metrics.md) | base 与 SFT 怎样在同一条件下比较？ | 固定的数据切片与指标口径 |
+| [第六篇：评估协议与任务指标](04-huggingface微调实战-6-evaluation-metrics.md) | base 与 SFT 怎样在同一条件下比较？ | 固定的数据分组和指标口径 |
 | [第七篇：自动评估与报告](04-huggingface微调实战-7-evaluation-report.md) | 怎样保存逐样本证据并写出有边界的结论？ | 可复核的行为对照报告 |
 
 六篇共享同一份监督目标；全参数、LoRA 和 QLoRA 改变的是可训练参数与基座权重存储方式。数据目标相同，方法才有可比较性。
@@ -38,7 +38,7 @@ flowchart LR
 
 Checkpoint 是一份模型快照，通常包含权重以及恢复模型结构所需的配置；tokenizer 则决定文本如何切成 token、每个整数 id 对应什么内容。把模型 A 的 tokenizer 换成模型 B 的 tokenizer，即使层结构相同，整数 123 也可能代表完全不同的片段。
 
-两者的最低契约是：
+两者都必须满足的最低要求是：
 
 ```math
 0\leq x_{b,t}<V,
@@ -255,7 +255,7 @@ decoder-only 生成通常从批次最后一个位置继续。左补齐能让每�
 
 ### 4.1.5 只验证接口的纯 Python 实验
 
-没有 torch 或无法下载模型时，可以先验证 shape、padding 和生成长度。下面不模拟语言能力，只模拟接口契约：
+没有 torch 或无法下载模型时，可以先检查 shape、padding 和生成长度。下面只模拟输入输出接口，不模拟语言能力：
 
 > 代码状态：静态审阅，未运行（2026-10-29）
 
@@ -362,6 +362,6 @@ prompt 的原文和 token 数。
 
 上下文窗口还要同时容纳 prompt 和生成预算。若上限为 4096，设置 `max_new_tokens=1024` 后，prompt 最多占 3072 个位置；已有 3500 个 token 时，两者冲突，必须按模型/API 的截断规则调整并记录。预算应在 tokenization 后计算，不能用字符数猜测。解码时还要区分 EOS、服务端 stop string 和长度上限这三种停止原因，因为它们会产生不同的输出长度与格式结果。
 
-自动设备映射时，模型可能分布在多张 GPU、CPU 或 offload 目录，不能据单个参数的 `device` 推断整模型位置，也不要再无条件调用 `model.to("cuda")`。先用短输入检查目标 checkpoint 的加载和生成，再测试变长 batch、padding 与峰值显存；纯 Python toy 成功只能说明数据处理契约，不能证明目标权重或 GPU kernel 可用。保存原始响应和 token ids 后，后续才能把 SFT 引起的内容变化与模板、停止规则或设备差异区分开。
+自动设备映射时，模型可能分布在多张 GPU、CPU 或 offload 目录，不能据单个参数的 `device` 推断整模型位置，也不要再无条件调用 `model.to("cuda")`。先用短输入检查目标 checkpoint 能否加载和生成，再测试变长 batch、padding 与峰值显存；纯 Python toy 成功只能说明数据处理规则正确，不能证明目标权重或 GPU kernel 可用。保存原始响应和 token ids 后，后续才能把 SFT 引起的内容变化与模板、停止规则或设备差异区分开。
 
 要让训练结果可解释，下一篇先把对话模板展开，逐个标出哪些 token 作为条件、哪些 token 进入 loss。

@@ -2,7 +2,7 @@
 
 上一部分搭好了 block 骨架。这一部分看三个会改变具体计算、但不改变 `[B,T,D]` 外部接口的组件：旋转位置编码（RoPE）把位置信息写进 query-key 匹配，均方根归一化（RMSNorm）改变归一化方式，SwiGLU（一种以 SiLU 为门控激活的 GLU 前馈结构）改变前馈网络的计算路径。理解它们时，重点不是记住模型名称，而是看清每个组件替换了什么、引入了什么假设、怎样检查实现。
 
-读完后，你应能手算一次 RoPE 旋转和 RMSNorm/SwiGLU 的小例子，沿位置偏移量（position offset）与键值缓存（KV cache）长度检查增量解码契约，并把现代组件组合成一层可审计的 decoder block。这里的局部数值与 shape 检查仍不等于模型能力或长上下文效果评估。
+读完后，你应能手算一次 RoPE 旋转和 RMSNorm/SwiGLU 的小例子，检查增量解码时位置偏移量（position offset）是否与键值缓存（KV cache）长度一致，并把这些组件组合成一层可以逐步检查的 decoder block。局部数值和 shape 检查不能代替模型能力或长上下文效果评估。
 
 ```mermaid
 flowchart LR
@@ -20,7 +20,7 @@ flowchart LR
 
 ### 2.6.1 为什么 self-attention 需要位置机制
 
-纯自注意力对输入集合的排列缺少天然的顺序偏好。位置机制可以把位置向量加到隐藏状态，也可以改变 Q、K 的相似度几何。RoPE 属于后者：它不把一张位置表简单加到隐藏状态上，而是按位置对每个注意力头的 Q、K 进行二维旋转。
+如果不加位置机制，自注意力只按 token 内容计算，不会知道它们的先后顺序。位置机制可以把位置向量加到隐藏状态，也可以改变 Q、K 的相似度计算。RoPE 属于后一种：它不把位置表加到隐藏状态上，而是按位置旋转每个注意力头的 Q、K。
 
 ### 2.6.2 二维旋转和偶奇维配对
 
@@ -441,7 +441,7 @@ N_{\mathrm{SwiGLU}}\approx DH_{\mathrm{ff}}+DH_{\mathrm{ff}}+H_{\mathrm{ff}}D
 H_{\mathrm{ff}}\approx\frac{8D}{3}
 ```
 
-真实配置还会把 $H_{\mathrm{ff}}$ 向硬件友好的倍数取整，也可能加入 bias、张量并行切分或不同的扩展比例。这个公式用于参数账本，不是规定所有 LLM 必须使用同一个 hidden dimension。
+真实配置还会把 $H_{\mathrm{ff}}$ 向硬件友好的倍数取整，也可能加入 bias、张量并行切分或不同的扩展比例。这个公式用于估算参数量，不是规定所有 LLM 必须使用同一个 hidden dimension。
 
 取 $D=12$ 作一次数值核对：普通 FFN 的中间维为 $4D=48$，两矩阵共有 $12\cdot48+48\cdot12=1152$ 个权重；SwiGLU 若取 $H_{\mathrm{ff}}=8D/3=32$，三个矩阵也共有 $3\cdot12\cdot32=1152$ 个权重。实际实现若把 32 向上取整到硬件要求的倍数，应按取整后的维度重算。参数相近不代表中间激活、计算量或速度相同。
 
@@ -487,7 +487,7 @@ print("parameter_count=", sum(p.numel() for p in mlp.parameters()))
 ```
 输入输出都保持 $[B,T,D]$。当 $D=12$、multiple_of=8 时，向上取整后的 hidden_dim 是 32；不带 bias 的参数量是 $3\times12\times32=1152$。
 
-参数账本还没有算 gate/up 中间激活和临时 buffer。训练时这些值可能需要为反向传播保留；推理时宽 FFN 也可能成为矩阵计算热点。应按同一 batch、dtype 和序列长度下的实测 profile 判断是否优化 FFN、attention kernel 或激活存储，不能只凭参数量猜瓶颈。
+这里只算了参数，还没有算 gate/up 中间激活和临时 buffer。训练时这些值可能需要为反向传播保留；推理时较宽的 FFN 也可能成为矩阵计算热点。应在相同 batch、dtype 和序列长度下查看实际 profile，再判断该优化 FFN、attention kernel 还是激活存储，不能只凭参数量猜瓶颈。
 
 ### 2.7.6 现代 decoder block 的组合
 
@@ -699,7 +699,7 @@ SwiGLU hidden             [B,T,H_ff]
 SwiGLU output             [B,T,D]
 ```
 
-这个账本应该与代码中的每次 view、transpose、矩阵乘法和残差相加对应。遇到 shape error 时，从这条路径反向定位，通常比直接修改 reshape 参数更可靠。
+这份形状记录应与代码中的每次 view、transpose、矩阵乘法和残差相加对应。遇到 shape error 时，沿这条路径逐步定位，通常比直接修改 reshape 参数更可靠。
 
 ### 2.7.9 组件回归实验的最小集合
 
@@ -720,7 +720,7 @@ SwiGLU output             [B,T,D]
 
 这些测试不能替代训练和评估，但能为后续实现 KV Cache、GQA、FlashAttention 和量化提供稳定的局部基线。
 
-上面的手算分别检查归一化定义、零值边界、门控关系和参数预算。它们能帮助定位组件实现中的错误，但属于局部数值证据；整层是否有效，还要在下一章的小 GPT 训练闭环里用 loss、固定生成样例和验证集判断。
+上面的手算分别检查归一化定义、零值边界、门控关系和参数预算。它们能帮助定位组件实现中的错误，但只提供局部数值证据；整层是否有效，还要在下一章的小 GPT 训练中结合 loss、固定生成样例和验证集判断。
 
 ## 继续阅读与资料边界
 

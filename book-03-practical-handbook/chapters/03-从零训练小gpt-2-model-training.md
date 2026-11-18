@@ -21,7 +21,7 @@ cross entropy         scalar
 
 $B$ 是 batch size，$T$ 是上下文长度，$D$ 是 hidden size，$V$ 是词表大小。Transformer block 的输入输出都保持 $[B,T,D]$，只有最后的语言模型头把 hidden 维度映射成词表类别。
 
-沿着这条路径读代码时，可以逐层问两个问题：当前张量表示什么，下一层要求什么形状？例如 embedding 把 token id 映射成向量，attention 在序列位置之间交换信息，lm head 再把每个位置的向量映射为 $V$ 个候选分数。代码断言只检查这些接口是否对齐，不会替你验证模型是否学到了有用规律。
+沿着这条路径读代码时，可以逐层问：当前张量表示什么，下一层需要什么形状？例如 embedding 把 token id 映射成向量，attention 在序列位置之间交换信息，lm head 再把每个位置的向量映射为 $V$ 个候选分数。代码断言只检查这些接口是否对齐，不会替你判断模型是否学到了有用规律。
 
 token embedding 矩阵 $E\in\mathbb{R}^{V\times D}$ 通过索引取得 $E_{x_{b,t},:}$。如果使用 learned position embedding，位置表 $P\in\mathbb{R}^{T_{\max}\times D}$ 提供位置向量，初始 hidden 为：
 
@@ -68,7 +68,7 @@ O_{b,i,:}=\sum_{j=0}^{T-1}A_{b,i,j}V_{b,j,:}
 
 在教学实现中，mask 采用下三角布尔矩阵。对于每一行，至少保留当前位置，因此不会因为 causal mask 单独造成全 mask 行。加入 padding、局部检索或外部过滤后，仍需要单独检查空候选情况。
 
-### 3.2.3 Pre-LN block 与参数账本
+### 3.2.3 Pre-LN block 与参数量估算
 
 一个常见的 Pre-LN decoder block 可以写成：
 
@@ -80,7 +80,7 @@ H'=H+\mathrm{Attn}(\mathrm{LN}_1(H))
 H_{\mathrm{out}}=H'+\mathrm{FFN}(\mathrm{LN}_2(H'))
 ```
 
-残差让输入存在一条恒等路径，LayerNorm 控制子层看到的数值范围。普通 FFN 的中间维度为 $D_{\mathrm{ff}}$ 时，忽略 bias 的主要参数量约为 $2DD_{\mathrm{ff}}$；四个 $D\times D$ 的 attention 投影约为 $4D^2$。教学代码采用普通 GELU FFN，便于把注意力和训练目标分开观察；换成 SwiGLU 会改变参数账本，但不会改变 x/y 的数据契约。
+残差让输入保留一条不经过子层变换的路径，LayerNorm 则控制子层接收的数值范围。普通 FFN 的中间维度为 $D_{\mathrm{ff}}$ 时，忽略 bias 的主要参数量约为 $2DD_{\mathrm{ff}}$；四个 $D\times D$ 的 attention 投影约为 $4D^2$。教学代码采用普通 GELU FFN，便于单独观察注意力和训练目标；换成 SwiGLU 会改变参数量，但不会改变 x 和 y 错位一位的约定。
 
 ### 3.2.4 一个完整的最小模型实现
 
@@ -366,7 +366,7 @@ L_0\approx\log V
 -> backward -> 可选梯度裁剪 -> optimizer.step
 ```
 
-下面把数据适配器、评估函数和训练循环放在同一个示例中。它依赖 3.1.5 的 `get_batch_from_source`，以及 3.2.4 的模型定义和 `model = TinyGPT(...)` 初始化；从相应代码段的变量继续执行即可。这里的 `get_batch(split)` 是应用层适配器，必须返回同一设备或可迁移到该设备的 `(input_ids, targets)`，并且 `split` 只能是 `train` 或 `val`。示例用两条合成整数流说明接口分流，不是有效的泛化评估语料；真实项目应替换为按文档或其他独立实体切分的数据。
+下面的示例把数据适配器、评估函数和训练循环放在一起。它会用到 3.1.5 的 `get_batch_from_source`，以及 3.2.4 中定义并初始化的 `TinyGPT`；请在运行过前面相应代码段后接着执行。这里的 `get_batch(split)` 负责选择数据，返回 `(input_ids, targets)`；两个张量必须在同一设备上，或能转到同一设备上。`split` 只能是 `train` 或 `val`。示例用两条合成整数序列演示如何选择数据，不能用于判断泛化能力；真实项目应换成按文档或其他独立对象切分的数据。
 
 > 代码状态：静态审阅，未运行（2026-10-29）
 

@@ -1,6 +1,6 @@
 # Agent 工具调用、安全确认与评测：来源证据
 
-创建于 2026-10-30；最后更新于 2026-11-05。本文只记录公开资料支持的接口约束、授权建议和评测构造；产品接口与仓库文档为动态页面时，以访问日期和具体 API 模式限定适用范围。
+创建于 2026-10-30；最后更新于 2026-11-18。本文只记录公开资料支持的接口约束、授权建议和评测构造；产品接口与仓库文档为动态页面时，以访问日期和具体 API 模式限定适用范围。
 
 ## 工具协议与 schema
 
@@ -164,3 +164,157 @@
 - **OpenTelemetry GenAI spans**：[开发中的语义约定](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-spans.md)，动态 `main` 页面，2026-11-17 访问；复核 status、content capture configuration 与 external storage 部分。
 - **来源支持的事实**：页面将该约定标为 Development；模型指令、输入、输出和工具调用参数/结果内容需要显式选择采集，默认 `NO_CONTENT`。该约定不规定外部对象的访问机制、留存期限或存储布局。
 - **证据等级与边界**：source-backed（动态开发中语义约定）；需固定访问时 commit/SDK 才能复核具体实现。约定本身不落实脱敏、权限、留存或目标系统的合规义务。
+
+## 2026-11-18 工具目录、schema、结果与执行边界复核
+
+- **OpenAI Function Calling**：[官方文档](https://developers.openai.com/api/docs/guides/function-calling)，2026-11-18 访问；阅读 “How it works” 与 “The tool calling flow”、strict mode、tool choice、并行调用和结果格式部分。
+- **来源支持的事实**：模型响应可包含工具调用；应用执行其自定义函数后将结果与原调用关联并继续请求模型。结果可以按应用选择的字符串格式返回，例子包含结构化 JSON 和纯文本。strict=true 约束受支持 schema 范围内的参数格式；对象需要 additionalProperties=false，所有 properties 均列为 required，可选字段可包含 null。文档说明 Responses 与 Chat Completions 的默认 strict 行为不同，也允许零个、一个或多个调用并通过 tool choice/allowed tools 限制当前可调用集合。
+- **证据等级与边界**：source-backed（OpenAI 当前动态 API 文档）。执行和字段结论绑定相应 API 与工具类型；schema 符合不证明语义正确、业务授权、目标安全或任务已验收，也不能外推至其他 provider。
+
+- **OpenAI Agents SDK Tools**：[官方工具文档](https://openai.github.io/openai-agents-python/tools/)，2026-11-18 访问；阅读 hosted tool search、Function tools、工具 schema 生成和直接调用包装函数的说明。
+- **来源支持的事实**：SDK 可根据 Python 函数名、docstring 和参数类型生成工具名、描述及 JSON schema；文档明确指出直接调用 decorated function 的 wrapped callable 会绕过该 SDK runtime 的 schema validation、context injection、guardrails、timeouts、failure handling 和 tracing。工具搜索/deferred loading 可延迟暴露部分工具表面，文档将其列为 Responses API 的特定能力。
+- **证据等级与边界**：source-backed（当前 SDK 文档）。绕过的是所述 SDK runtime pipeline；不能据此声称所有框架具有相同包装层、工具执行责任或发现能力。
+
+- **Model Context Protocol Tools**：[2026-07-28 版 server/tools 规范](https://modelcontextprotocol.io/specification/2026-07-28/server/tools)，2026-11-18 访问；阅读用户交互模型、Tool 数据类型、structured content、output schema、错误处理及安全考虑部分。
+- **来源支持的事实**：该版本 Tool 定义包含 name、description、inputSchema，并允许可选 outputSchema 与 annotations；客户端必须将来自非可信 server 的 annotations 视为不可信。声明 outputSchema 时 server 必须返回符合 schema 的结构化结果，client 应进行验证。规范将协议请求结构错误与工具执行错误分开；后者可通过 isError 和可操作内容返回，并建议 client 把执行错误交给模型以便自我纠错。规范指出 MCP 不强制单一 UI 交互模式；在人机确认、显示输入、校验结果、超时和日志方面使用 SHOULD 建议，同时对 server 输入校验、访问控制、速率限制和输出净化规定 MUST 要求。
+- **证据等级与边界**：source-backed（固定版本的官方协议规范）。MUST/SHOULD 只表示该版本协议的规范性要求；不能证明具体 host/server 已实现，也不意味着协议自身完成业务授权、沙箱或数据保留控制。
+
+- **未验证项与分歧边界**：当前三类来源共同支持“工具定义、运行时执行、权限策略和任务验收不是一个环节”，但没有规定跨供应商统一的 Registry 字段、错误枚举、权限等级或 trace 格式。具体实现须按 provider/API、MCP 版本、host 和执行器分别复核。上述事实均未由本地代码或生产运行验证。
+
+## 2026-11-18 工作区路径、符号链接与 Git patch/diff 语义复核
+
+- **OWASP Path Traversal Prevention**：[官方指南](https://cheatsheetseries.owasp.org/cheatsheets/Path_Traversal_Prevention_Cheat_Sheet.html)，2026-11-18 访问；阅读路径解码/规范化、固定根目录、符号链接和 TOCTOU 部分。
+- **来源支持的事实**：指南建议在固定 base directory 下解析规范化路径，检查解析结果仍在该目录内并使用已检查的路径；若检查与打开之间可替换 symlink，仍会有 TOCTOU 风险。指南举例说明使用能在打开时强制根目录约束的 API（如 Linux `openat2` 或 Go `os.Root`）以及最小权限。
+- **证据等级与边界**：source-backed（OWASP 安全指南）。具体安全保证由平台和文件 API 实现决定；字符串规范化本身不能证明随后打开的文件对象未发生替换。
+
+- **Linux pathname lookup**：[Linux 6.15 内核文档](https://docs.kernel.org/6.15/filesystems/path-lookup.html)，2026-11-18 访问；阅读 openat2 resolution flags 与 pathname lookup race 部分。
+- **来源支持的事实**：文档说明 `openat2` 的 `resolve` 字段向路径查找提供组件级约束；内核内部的 `LOOKUP_BENEATH` 阻止解析结果越过起始点，`LOOKUP_NO_SYMLINKS` 阻止符号链接遍历，并使用 rename/mount 检查发现特定竞态。对外 API 名称 `RESOLVE_BENEATH` 的例子由 OWASP 指南明确列出。
+- **证据等级与边界**：source-backed（Linux 6.15 内核文档）；文中的 `LOOKUP_*` 是 Linux 内部路径查找语义，不是跨平台文件 API 合同，也不证明某个 Agent 执行器已经采用相应的打开约束。
+
+- **Git apply**：[官方命令文档](https://git-scm.com/docs/git-apply)，2026-11-18 访问；阅读 `--check`、默认失败行为、`--reject`、`--reverse` 和 `--3way`。
+- **来源支持的事实**：`--check` 检查 patch 是否可应用而不写入；默认行为下无法应用的 hunk 会使整个 patch 被拒绝且不修改工作树；`--reject` 可让可匹配 hunk 部分应用并把失败 hunk 写入 `.rej`；`--reverse` 尝试反向应用 patch。三方应用可能留下冲突标记。
+- **证据等级与边界**：source-backed（Git 当前命令文档）；上述行为只描述 Git `apply`，不能外推为所有文件编辑工具的原子性、冲突或回滚保证。patch 可应用也不证明语义正确。
+
+- **Git diff 与 gitignore**：[git diff](https://git-scm.com/docs/git-diff) 和 [gitignore](https://git-scm.com/docs/gitignore) 官方文档，2026-11-18 访问；阅读工作区/暂存区比较及 tracked-file ignore 说明。
+- **来源支持的事实**：`git diff` 默认比较工作区与 index，`git diff --cached` 比较 index 与提交基线；不同选项可以选择其他比较对象。`.gitignore` 规则针对未跟踪文件，已经被 Git 跟踪的文件不受该规则影响。
+- **证据等级与边界**：source-backed（Git 命令与配置文档）。单一 diff 视图不能自动区分作者，也不涵盖所有未跟踪状态；`.gitignore` 是版本控制排除机制，不是运行时文件访问控制。
+
+## 2026-11-18 终端命令执行、隔离、资源与输出边界复核
+
+- **命令权限匹配**：[Claude Code 权限文档](https://code.claude.com/docs/en/permissions)，2026-11-18 访问；阅读 Bash 规则、复合命令、包装器和规则边界部分。
+- **来源支持的事实**：该产品的 Bash 规则匹配完整命令文本；文档说明其会识别一组 shell 分隔符并分别检查子命令，也会剥除特定包装器，但相同程序通过绝对路径或 `sh -c` 等形式调用时可能不再匹配同一规则。文档明确指出命令字符串规则不是围绕程序行为的安全边界，参数模式也可能被选项、协议、重定向、变量和 URL 跳转改变。
+- **证据等级与边界**：source-backed（Claude Code 当前产品文档）。这些是该产品公开的匹配行为和警告，不定义通用命令解析器，也不证明其他 harness 的规则相同。
+
+- **命令沙箱与权限层**：[Claude Code 沙箱文档](https://code.claude.com/docs/en/sandboxing)，2026-11-18 访问；阅读 OS-level enforcement、permissions relationship 和 security limitations。
+- **来源支持的事实**：该产品说明权限规则在工具执行前决定工具调用是否允许，操作系统沙箱在命令运行时限制文件系统和网络访问，并作用于 Bash/PowerShell/Monitor 命令及其子进程；当前产品在 macOS 使用 Seatbelt、Linux/WSL 使用 bubblewrap。其沙箱仅覆盖 shell 命令，文件工具和 MCP 等工具在沙箱外运行。文档还指出域名代理默认不终止或检查 TLS，允许宽泛域名有外传风险；放行 Docker socket 可能触达宿主机。
+- **证据等级与边界**：source-backed（Claude Code 当前产品文档）。平台、版本和工具覆盖范围均绑定该产品；不能从“开了沙箱”推出所有进程、工具和网络都已隔离。
+
+- **OpenAI Agents API 环境安全**：[官方 Sandbox security 文档](https://developers.openai.com/api/docs/guides/agents-api/environments/security)，2026-11-18 访问；阅读隔离计算、网络访问、automatic review 和凭据分离部分。
+- **来源支持的事实**：文档称 Agent 生成的代码可以访问环境可用的文件、凭据和网络，建议隔离工作负载、仅允许已批准的出站目标，并指出 automatic review 不替代环境网络限制和凭据控制。它要求应用 API key 留在环境之外；其 executor environment key 虽然 scope 受限，生成代码仍可读取该环境变量；第三方凭据建议由可信 proxy、server、vault 或调用工具所在应用代为提供。
+- **证据等级与边界**：source-backed（OpenAI 当前 Agents API 产品文档）。key scope、review profile 与网络职责是该 API 的公开合同，不能推为其他执行器的保证。
+
+- **Docker Engine 安全**：[官方 Engine security 文档](https://docs.docker.com/engine/security/)，2026-11-18 访问；阅读 namespaces、cgroups、daemon attack surface 和容器配置部分。
+- **来源支持的事实**：文档将内核 namespace/cgroup、Docker daemon 攻击面、容器配置缺口和内核 hardening 作为不同安全审查面；说明 cgroup 可进行资源核算与限制，而 Docker daemon 的特权能力和宿主目录挂载可能扩大容器对宿主文件系统的影响。
+- **证据等级与边界**：source-backed（Docker 当前 Engine 文档）。文档用于说明容器配置及 daemon 权限仍属威胁面，不能把容器视为自动等价于强隔离。
+
+- **Linux cgroup v2 资源接口**：[Linux 6.18 cgroup v2 文档](https://docs.kernel.org/6.18/admin-guide/cgroup-v2.html)，2026-11-18 访问；阅读 `cpu.max`、`memory.max` 和资源事件部分。
+- **来源支持的事实**：`cpu.max` 用 MAX/PERIOD 表示非 root cgroup 的 CPU 带宽上限，具体作用受调度器类型限制；`memory.max` 是主要内存硬限制机制，达到上限且不能回收时会在该 cgroup 触发 OOM 处理，使用量在特定条件下可能暂时超过设定值。文档同时提供资源压力和 OOM 事件计数接口。
+- **证据等级与边界**：source-backed（固定版本 Linux 内核文档）。这些是 Linux cgroup v2 语义，不代表所有 OS 的资源控制接口或严格绝不超限保证。
+
+- **OWASP LLM06:2025 Excessive Agency**：[官方风险说明](https://genai.owasp.org/llmrisk/llm062025-excessive-agency/?lang=us)，2026-11-18 访问；阅读风险成因和预防建议。
+- **来源支持的事实**：该风险由功能、权限或自主性过度引起，触发因素包括模型误输出和直接/间接 prompt injection。建议缩减扩展功能和权限，能用窄能力扩展时避免开放式 shell/URL 扩展，高影响动作要求人工批准，并在下游系统实施授权；日志、监控和 rate limiting 用于限制损害，不单独预防过度授权。
+- **证据等级与边界**：source-backed（OWASP 2025 风险说明及建议）；建议不是特定产品接口合同，也不能单独证明某一控制已经充分。
+
+- **OWASP LLM10:2025 Unbounded Consumption**：[官方风险说明](https://genai.owasp.org/llmrisk/llm102025-unbounded-consumption/)，2026-11-18 访问；阅读资源耗尽案例和缓解建议。
+- **来源支持的事实**：过量、无控制的推理可能造成拒绝服务、经济损失、模型提取或服务退化；指南列出输入验证、rate limit/用户配额、动态资源管理、timeout/throttling、sandbox 和监控等缓解项。
+- **证据等级与边界**：source-backed（OWASP 2025 风险说明及建议）。不为终端执行器提供通用 timeout 数值、cgroup 配置或发布阈值。
+
+- **OWASP SSRF Prevention Cheat Sheet**：[官方指南](https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html)，2026-11-18 访问；阅读域名 allowlist、DNS rebinding 与连接目标校验部分。
+- **来源支持的事实**：在服务端请求伪造防护语境中，域名 allowlist 本身不能阻止 DNS rebinding；需要校验解析后的目标 IP，并保证 HTTP 客户端连接到已校验地址；校验和连接之间再次未受控解析，以及重定向、重试或 fallback，可能绕过目的地址规则。
+- **证据等级与边界**：source-backed（OWASP SSRF 指南）。该建议针对处理不可信目标 URL 的 SSRF 路径，不是所有 shell 出站网络的完整安全方案。
+
+- **Python subprocess 超时语义**：[Python 3.15.2 官方 subprocess 文档](https://docs.python.org/3/library/subprocess.html)，2026-11-18 访问；阅读 `subprocess.run` 与 `timeout` 参数说明。
+- **来源支持的事实**：`subprocess.run(timeout=...)` 在超时后会终止并等待所启动的 child process，然后重新抛出 `TimeoutExpired`；部分平台的初始进程创建本身不可中断，因此异常可能晚于 timeout 才出现。
+- **证据等级与边界**：source-backed（Python 3.15.2 API 文档）。该说明针对所启动的 child process，不构成进程后代树、OS job、容器或外部副作用均已取消的证明。
+
+- **OWASP Logging Cheat Sheet**：[官方指南](https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html)，2026-11-18 访问；阅读 event attributes、data to exclude 和 log confidentiality 部分。
+- **来源支持的事实**：日志指南要求按用途选取事件字段，并识别应排除或脱敏的敏感数据；其威胁模型涵盖日志的机密性、完整性、可用性与问责性。
+- **证据等级与边界**：source-backed（OWASP 日志指南）。具体字段、保留周期、访问控制和脱敏方法须按系统与数据分类确定。
+
+## 2026-11-18 Shell 参数化、npm lifecycle 与 Git 破坏性命令语义复核
+
+- **OWASP OS Command Injection Defense**：[官方 Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html)，2026-11-18 访问；阅读优先使用库/API、参数化和输入校验部分。
+- **来源支持的事实**：指南把避免直接调用 OS 命令、优先使用用途更窄的内建库/API，列为主要防御；无法避免时，应使用结构化参数化以分离命令与数据，并与输入校验一起使用。
+- **证据等级与边界**：source-backed（OWASP 安全指南）。分离参数降低 shell 元字符注入风险，不证明目标程序参数本身无危险，也不替代权限、沙箱和资源限制。
+
+- **npm 生命周期**：[npm CLI v11 Scripts 文档](https://docs.npmjs.com/cli/v11/using-npm/scripts/)，2026-11-18 访问；阅读 `npm install`、`npm ci` 与用户脚本执行顺序。
+- **来源支持的事实**：文档列出 `npm install` 和 `npm ci` 的生命周期事件，包括 `preinstall`、`install`、`postinstall`、`prepare` 等；`npm run <user-defined>` 会依次运行同名脚本的 `pre`、主体和 `post` 生命周期函数。执行这些命令不等于只进行文件下载或只读查询。
+- **证据等级与边界**：source-backed（npm CLI v11 文档）。实际脚本由项目和依赖定义；具体行为还与 npm 版本、配置和项目内容有关。
+
+- **Git reset 与 Git clean**：[git reset](https://git-scm.com/docs/git-reset) 和 [git clean](https://git-scm.com/docs/git-clean) 官方命令文档，2026-11-18 访问；阅读 hard reset 与未跟踪文件移除说明。
+- **来源支持的事实**：`git reset --hard` 会重置 index 和工作树状态，官方示例说明它会丢弃本地改动；`git clean` 递归删除工作树中的未跟踪文件，`-x` 还会包含被忽略文件。
+- **证据等级与边界**：source-backed（Git 命令文档）。具体受影响对象取决于参数、工作目录、配置和当前仓库状态；命令名本身不能说明用户有哪些未提交或未跟踪内容。
+
+## 2026-11-18 Linux 进程组脱离与 cgroup v2 清理接口复核
+
+- **Linux `setsid(2)`**：[Linux man-pages](https://man7.org/linux/man-pages/man2/setsid.2.html)，man-pages 6.19，2026-11-18 访问；阅读 `setsid()` 的 session/process-group 语义。
+- **来源支持的事实**：满足条件的进程可调用 `setsid()` 创建新 session，并成为新 session/process group 的 leader；其后代继承 session ID，直到显式改变。由此可推断，单靠向原 process group 发信号，不能作为“任意后代均已退出”的普遍证明。
+- **证据等级与边界**：source-backed（Linux man-pages）。session/process-group 行为属于 POSIX/Linux 进程接口；这里只说明其对进程组清理的影响，不代表任意执行器都允许或能阻止会话变化。
+
+- **Linux cgroup v2 kill 与状态**：[Linux 6.18 cgroup v2 文档](https://docs.kernel.org/6.18/admin-guide/cgroup-v2.html)，2026-11-18 访问；阅读 `cgroup.kill` 和 `cgroup.events`。
+- **来源支持的事实**：非 root cgroup 上的 `cgroup.kill` 写入 `1` 会通过 SIGKILL 终止该 cgroup 树中的进程；文档说明它会处理并发 fork 并防止迁移竞态。`cgroup.events` 中的 `populated` 在本 cgroup 或其后代存在存活进程时为 1，否则为 0。
+- **证据等级与边界**：source-backed（固定版本 Linux 内核文档）。接口仅适用 Linux cgroup v2；SIGKILL 是强制终止，不是优雅清理，也不证明命令此前没有产生文件、网络或业务副作用。
+
+## 2026-11-18 权限授权、审批绑定与工具覆盖范围复核
+
+- **OWASP LLM06:2025 Excessive Agency**：[官方风险说明](https://genai.owasp.org/llmrisk/llm062025-excessive-agency/?lang=us)，2026-11-18 再次打开；阅读 excessive functionality / permissions / autonomy、least privilege、high-impact approval 与 downstream authorization 部分。
+- **来源支持的事实**：风险来自超出任务需要的扩展功能、权限或自主程度；可能由模型误输出或直接/间接 prompt injection 触发。建议尽量缩小工具数量与每个工具的功能，避免不必要的开放式 Shell/URL 扩展，在高影响动作前加入人工批准，并由下游系统验证授权。
+- **证据边界**：source-backed（OWASP 2025 风险说明）；建议不规定 Agent 的统一权限 schema，不证明某产品实现符合这些建议。日志、监控和限速可帮助发现或限制影响，但不能代替执行前授权。
+
+- **OWASP Transaction Authorization Cheat Sheet**：[官方指南](https://cheatsheetseries.owasp.org/cheatsheets/Transaction_Authorization_Cheat_Sheet.html)，2026-11-18 再次打开；阅读关键交易字段可识别、服务端生成与保存、流程顺序、交易数据变更和执行前验证部分。
+- **来源支持的事实**：用户需要识别并确认对交易有意义的数据；授权步骤应由服务端按顺序强制；授权期间更改交易数据需要使先前授权失效或重启流程，并在执行前核验。
+- **证据等级与边界**：source-backed（OWASP 开发安全指南）。把动作、目标、版本摘要绑定到 Agent approval ID，并设计短时、单次使用、变更后重新审批，是将交易授权原则迁移到 Agent 的工程设计推论，不是 OWASP 定义的 Agent 标准协议。
+
+- **Claude Code Configure permissions 与 sandbox**：[权限规则](https://code.claude.com/docs/en/permissions)和[沙箱说明](https://code.claude.com/docs/en/sandboxing)，2026-11-18 访问；阅读规则顺序、模型与运行时边界、命令沙箱覆盖范围和沙箱外工具列表。
+- **来源支持的事实**：该产品说明 permission rule 由 Claude Code 执行而不是模型执行，并按 deny、ask、allow 顺序匹配；其沙箱限制指定的 Shell/PowerShell/Monitor 命令及子进程，但内建文件与 Web 工具、MCP server、hooks、部分辅助进程不因此自动进入同一沙箱。
+- **证据等级与边界**：source-backed（Claude Code 当前产品文档）。规则优先级、平台实现和覆盖面只适用于所访问版本；不能外推为其他 Agent 的通用合同或权限最佳实践。
+
+- **OpenAI Agents API Sandbox security**：[官方文档](https://developers.openai.com/api/docs/guides/agents-api/environments/security)，2026-11-18 访问；阅读自动 review、网络限制和凭据边界。
+- **来源支持的事实**：该文档说明生成代码能够访问环境可用的文件、凭据和网络；automatic review 不替代出站网络限制与凭据控制；应用 API key 应留在环境之外，环境凭据仍可能被环境内生成代码读取。
+- **证据等级与边界**：source-backed（OpenAI 当前 Agents API 文档）。这是该服务的合同说明，不代表其他 provider 或执行器具有相同环境结构或密钥隔离行为。
+
+- **Docker Engine security**：[官方文档](https://docs.docker.com/engine/security/)，2026-11-18 访问；阅读 namespaces、cgroups、daemon attack surface 和共享宿主目录部分。
+- **来源支持的事实**：文档将内核 namespaces/cgroups、Docker daemon 攻击面、容器配置和内核 hardening 作为独立审查面；共享宿主目录可以让容器进程影响宿主文件，cgroups 负责资源核算/限制而不负责数据隔离。
+- **证据等级与边界**：source-backed（Docker Engine 文档）。不能仅由“使用 Docker”推出具体部署已具备最小权限或强租户隔离。
+
+- **OWASP Logging Cheat Sheet**：[官方指南](https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html)，2026-11-18 再次打开；阅读事件字段、敏感数据排除、日志机密性和访问保护部分。
+- **来源支持的事实**：日志事件按用途确定字段；敏感值应依数据与法律要求排除、遮蔽、散列或加密，并保护日志的机密性、完整性、可用性和问责能力。
+- **证据等级与边界**：source-backed（OWASP 日志指南）。具体保留策略、合法依据、字段分类和脱敏措施需要按系统确定，不能只靠通用字段名单。
+
+## 2026-11-18 Agent Trace 隐私、处理器与跨服务上下文复核
+
+- **OpenAI Agents SDK tracing**：[官方 tracing 文档](https://openai.github.io/openai-agents-python/tracing/)，2026-11-18 访问；阅读 sensitive data、add/set trace processors 和 redaction before export。
+- **来源支持的事实**：该动态文档说明 generation/function spans 可捕获模型和工具输入输出；访问时 trace_include_sensitive_data 默认值为 True。add_trace_processor 增加一个处理器但保留默认 OpenAI exporter；默认 provider 捕获处理器回调异常后仍继续其他处理器，因此独立脱敏处理器失败不保证阻止后续 exporter 获取原数据。文档建议需要脱敏成功才能发送时，用 set_trace_processors 替换默认处理链，在同一个应用自有 exporter 内完成复制、脱敏和发送，并在序列化、复制或脱敏失败时丢弃该批次。
+- **证据等级与边界**：source-backed（OpenAI Agents SDK 当前动态文档，访问日期 2026-11-18）。接口、默认值和处理器语义绑定访问版本；未运行本地 SDK，也未验证其他 exporter / SDK 的行为。
+
+- **OpenTelemetry GenAI spans**：[语义约定](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-spans.md)，动态 main 页面，2026-11-18 访问；阅读内容捕获、外部存储引用和配置值。
+- **来源支持的事实**：页面状态为 Development；当前草案建议默认不记录模型指令、用户输入和输出，内容捕获配置的默认值为 NO_CONTENT，并要求内容采集由显式 opt-in 控制。草案也描述可将大内容另存，再在 span 中放引用，以便独立配置访问控制。
+- **证据等级与边界**：source-backed（OpenTelemetry GenAI 动态开发中语义约定）。约定不替 instrumentation、SDK、collector 或厂商 exporter 关闭内容采集，也不规定 URI 权限、保留期限、对象结构或脱敏实现。
+
+- **OpenTelemetry Traces 概念文档**：[官方文档](https://opentelemetry.io/docs/concepts/signals/traces/)，2026-11-18 访问；阅读 span、event、link、status 与父子关系。
+- **来源支持的事实**：文档将 span 定义为带开始/结束时间的操作，span event 是记录 span 持续期间某个单点事件的结构化信息；parent span 表示嵌套子操作；span links 可以关联异步或跨 trace 的因果操作。文档区分 Unset、Error 和 Ok 状态。
+- **证据边界**：source-backed（OpenTelemetry 官方概念文档）。具体 Agent span 名、task 状态和业务验收字段需要由应用与所用语义约定另行定义。
+
+- **W3C Trace Context**：[Recommendation](https://www.w3.org/TR/trace-context/)，2021-11-23 发布，2026-11-18 访问；阅读 traceparent / tracestate 传播、隐私和公开入口 DoS 风险。
+- **来源支持的事实**：规范定义 HTTP 头传播 trace 和 vendor-specific correlation context；traceparent / tracestate 仅用于链路关联，不得包含个人身份或其他敏感信息。规范指出公共 API 若盲目遵循调用方采样标志，可能增加 tracing 负载或成本；调用方可按认证状态或记录配额治理。
+- **证据等级与边界**：source-backed（W3C Recommendation）。这类 header 用于相关追踪，不是认证、授权或任务身份；跨其他协议的传播需要对应扩展规范。
+
+## 2026-11-18 Agent Trace 采样与指标基数复核
+
+- **OpenTelemetry Sampling**：[官方概念文档](https://opentelemetry.io/docs/concepts/sampling/)，2026-11-18 访问；阅读 head sampling、tail sampling 与取舍。
+- **来源支持的事实**：head sampling 在 trace 开始较早决定是否保留，不能依据尚未发生的整条 trace 结果保证采样错误轨迹；tail sampling 等待观察大部分或全部 spans 后，可按错误、总延迟等条件选择 trace，但需要有状态的缓冲与处理，实施、运行和容量管理更复杂。两者可以组合，但前序 head sampling 丢弃的 trace 不会进入后续 tail decision。
+- **证据边界**：source-backed（OpenTelemetry 官方概念文档，2026-11-18 访问）。采样策略、保留率和错误轨迹覆盖取决于具体 SDK、collector、backend 和负载，文档没有规定 Agent 系统的固定比例。
+
+- **OpenTelemetry Metrics**：[官方概念文档](https://opentelemetry.io/docs/concepts/signals/metrics/)，2026-11-18 访问；阅读 metric attribute combinations 与 cardinality limit。
+- **来源支持的事实**：指标的 cardinality 是不同属性组合数；OpenTelemetry Metrics SDK 为每种组合维护聚合状态，所以 user ID、原始 URL 路径等高基数维度会增加内存成本。当前文档记载 SDK 默认 cardinality limit 为 2000；超过上限时额外测量会折叠到 overflow 点，保留总量但丢失相关属性，按这些属性过滤或分组可能低计数。
+- **证据边界**：source-backed（OpenTelemetry 当前概念文档，2026-11-18 访问）。2000 是该文档描述的 SDK 默认值，不代表所有 OTel 版本、后端或 Agent 指标系统的固定限制；设计指标维度时仍须核对实际 SDK 配置。

@@ -140,7 +140,7 @@ A_{b,a,c}\approx0\quad (M_{b,a,c}=0)
 
 教学实现常使用 torch.finfo(scores.dtype).min；某些实现使用负无穷或 additive mask。选择哪一个要看 dtype 和 kernel 的行为，但所有方案都要面对同一个边界：如果某个 query 的所有 key 都被屏蔽，归一化没有合法的分母，结果可能是 NaN 或无意义的均匀分布。
 
-不要在 softmax 之后简单把权重置零来代替 mask。这样会破坏可见位置的归一化，除非你随后重新归一化，而且重新归一化又要处理全零行。更稳妥的契约是：在进入 softmax 前保证每个有效 query 至少有一个可见 key。
+不要在 softmax 之后简单把权重置零来代替 mask。这样会破坏可见位置的归一化，除非你随后重新归一化，而且重新归一化又要处理全零行。更稳妥的做法是：在进入 softmax 前，保证每个有效 query 至少有一个可见 key。
 
 ### 2.2.5 PyTorch 缩放点积注意力接口（SDPA）的边界
 
@@ -233,7 +233,7 @@ D=H d_h
 
 标准实现通常用三个 $D\to D$ 的线性层一次性产生 Q、K、V，再重新组织最后一维，而不是为每个 head 单独创建 Python 模块；这与 [Transformer 原论文](https://arxiv.org/abs/1706.03762)中的多头结构一致。只要 $D$ 固定，改变 $H$ 会改变每个 head 的维度和计算组织，但不会自动把四个投影矩阵的参数量乘以 $H$。
 
-### 2.3.2 shape 账本
+### 2.3.2 逐步核对张量形状
 
 以 self-attention 为例：
 
@@ -412,11 +412,11 @@ cross-attention 更能检验是否把形状想清楚。若两个 decoder query �
 
 多头结构提供多个可学习的投影空间，但没有硬性规定第 1 个 head 必须看语法、第 2 个必须看长距离依赖。若要判断某个 head 对模型是否有作用，可以固定输入做 head 消融（head ablation），观察任务指标和输出变化，并控制随机性；只可视化某一层的注意力热图不能证明这个 head 是模型决策的唯一原因。
 
-分组查询注意力（grouped-query attention，GQA）让多个 query head 共享较少的 key/value head；多查询注意力（multi-query attention，MQA）可看作 KV head 数更少的一类配置。若 $H_q=8,H_{kv}=2$，每组四个 query head 共享一组 key/value 表示，但 query score 仍按 query head 分开计算。它改变了 Q 与 KV 的 head 数契约，不能直接套用本节假设 Q/K/V head 数相同的实现；实现需明确 query head 到 KV head 的映射。第 6 章会用 cache shape 和容量例子说明它们对推理的影响，见[KV Cache 篇](06-推理优化实战-1-kv-cache.md)。
+分组查询注意力（grouped-query attention，GQA）让多个 query head 共享较少的 key/value head；多查询注意力（multi-query attention，MQA）可看作 KV head 数更少的一类配置。若 $H_q=8,H_{kv}=2$，每组四个 query head 共享一组 key/value 表示，但 query score 仍按 query head 分开计算。它改变了 Q 与 KV head 数量之间的约定，不能直接套用本节假设 Q/K/V head 数相同的实现；实现时要明确每个 query head 对应哪个 KV head。第 6 章会用 cache shape 和容量例子说明它们对推理的影响，见[KV Cache 篇](06-推理优化实战-1-kv-cache.md)。
 
 ### 2.3.6 针对实现的局部测试
 
-下面是针对 2.3.3 中 `MultiHeadAttention` 实现的局部测试片段；它复用前面的类定义，省略 dropout 以便结果确定。测试关注 shape、保留掩码和输出契约，不再重复实现注意力层。
+下面的代码片段检查 2.3.3 中的 `MultiHeadAttention` 实现；它复用前面的类定义，并关闭 dropout 以便结果确定。检查内容包括 shape、保留掩码和输出格式，不再重复实现注意力层。
 
 > 代码片段状态：静态审阅，未运行（2026-11-16）；需先运行 2.3.3 的类定义。
 
@@ -445,9 +445,9 @@ assert torch.allclose(
 assert weights.masked_select(future).abs().max().item() < 1e-6
 print("mha_contract_ok=True")
 ```
-这个测试没有证明模型训练有效，但能把 shape、归一化、因果方向和输出接口四个问题从端到端 loss 中隔离出来。若某一项失败，先修复局部契约，再讨论模型质量。
+这个检查不能证明模型训练有效，但能把 shape、归一化、因果方向和输出接口四个问题从端到端 loss 中分离出来。若有一项失败，先修好对应的实现约定，再讨论模型质量。
 
-序列长度对中间 score 张量的影响是平方级的。一个 head、单条长度 1024 的序列有 $1024^2$ 个分数；若有 8 个 head，便是 8,388,608 个元素，按 FP16/BF16 的 2 bytes 计算约 16 MiB。长度增至 4096 后，同一张量约有 134,217,728 个元素、256 MiB。这个账只计算一层的一份 score，不含 batch、softmax 中间量、反向保存和其他激活，因此不能当作完整显存估算。它说明 head 数线性增加这部分存储，而序列长度翻倍会让分数元素数约增至四倍，也解释了为何长上下文实现要关注 kernel 是否物化整张矩阵。
+序列长度对中间 score 张量的影响是平方级的。一个 head、单条长度 1024 的序列有 $1024^2$ 个分数；若有 8 个 head，便是 8,388,608 个元素，按 FP16/BF16 的 2 bytes 计算约 16 MiB。长度增至 4096 后，同一张量约有 134,217,728 个元素、256 MiB。这个估算只计算一层的一份 score，不含 batch、softmax 中间量、反向传播保存的内容和其他激活，因此不能当作完整显存估算。head 数增加时，这部分存储也按比例增加；序列长度翻倍时，分数元素数约增至四倍。这也是长上下文实现需要关注 kernel 是否真的生成整张矩阵的原因。
 
 比较 head 配置时应把参数、算子和质量分别记录。改变 $H$ 而保持 $D$ 会改变 $d_h$ 与并行分组，但投影参数量不变；改变 $D$ 才会明显改变线性层参数和计算量。不同 head 数还可能改变支持的 fused kernel、张量并行切分和对齐要求。一个局部 MHA 单测通过只证明指定 shape、mask 和 dtype 下接口成立，不保证不同 head 配置有相同速度或任务效果。
 
@@ -595,7 +595,7 @@ visible_count = keep_mask.sum(dim=-1)
 bad_rows = visible_count == 0
 print("bad_rows=", bad_rows.tolist())
 ```
-系统应先决定空候选的语义：跳过该 query、返回显式错误、使用安全哨兵（sentinel）key，还是让上层重新规划。把全屏蔽行默默交给 softmax，会把数据错误变成 NaN，增加归因难度。
+系统应先决定空候选时该怎么办：跳过该 query、返回明确错误、使用安全哨兵（sentinel）key，还是让上层重新规划。把全屏蔽行默默交给 softmax，会把数据错误变成 NaN，也更难找到问题原因。
 
 ### 2.4.6 在 softmax 前应用 mask 的完整函数
 
@@ -656,11 +656,11 @@ print("row_sums=", weights.sum(dim=-1).tolist())
 
 手算一个三 token 的例子，可以看清因果与填充掩码怎样组合。令所有未屏蔽分数都为 0，只有因果约束时，三行 softmax 权重依次为 $[1,0,0]$、$[1/2,1/2,0]$、$[1/3,1/3,1/3]$：越靠后的 query 能看到的历史 key 越多。若第三列是 padding，填充 keep mask 为 $[1,1,0]$，与因果掩码取逻辑与后，第三行变成 $[1/2,1/2,0]$。第三个 query 仍产生输出；它是否参与语言模型损失，要由 loss mask 决定。仅把 padding embedding 设为零或设置 `padding_idx`，都不会自动屏蔽第三列。
 
-全 mask 行并非只有奇怪输入才会出现。假如左 padding 的两个位置均标为无效，而实现又要求第一个 query 只能看当前位置及以前，那么第一个有效 query 之前可能没有任何允许 key；若同时把 padding key 全部排除，softmax 行就没有合法元素。数据契约必须说明是跳过无效 query、在输入端裁去左 padding、使用模型约定的 sentinel，还是直接报错。不同选择会影响位置编号和 KV Cache，不能在 attention 函数里默默把全屏蔽行改成均匀分布。
+全 mask 行并非只有奇怪输入才会出现。假如左 padding 的两个位置均标为无效，而实现又要求第一个 query 只能看当前位置及以前，那么第一个有效 query 之前可能没有任何允许 key；若同时把 padding key 全部排除，softmax 行就没有合法元素。数据处理规则必须说清楚：是跳过无效 query、在输入端裁掉左 padding、使用模型约定的 sentinel，还是直接报错。不同选择会影响位置编号和 KV Cache，不能在 attention 函数里默默把全屏蔽行改成均匀分布。
 
 接口适配时，先写一条长度为 3 的确定性序列，手算应该允许的格子，再调用目标函数。若把保留掩码直接交给期待屏蔽掩码的 API，程序通常不会报错，只会把允许项变成禁止项；最终 logits 可能依然有限，却已泄漏未来信息或丢弃历史证据。最小回归用例应检查实际权重为零的位置和行和，并把“布尔 True 的意义”与掩码形状一起写入接口说明。
 
-文档问答与长文档训练还会遇到打包序列（packed sequence）：为了减少 padding，把多段互不相关的文本拼入同一条 token 序列。单纯的下三角因果掩码会允许后一个片段读取前一个片段；若训练契约要求片段彼此隔离，就必须加分段/块掩码（segment/block mask）。以两段长度分别为 2 和 1 的序列为例，第三个 token 因果上可以看到前两个；但若它属于第二段，隔离协议应让它只访问自身及第二段允许的前缀。掩码不只是张量 shape，也是数据边界和监督假设的一部分。
+文档问答与长文档训练还会遇到打包序列（packed sequence）：为了减少 padding，把多段互不相关的文本拼入同一条 token 序列。单纯的下三角因果掩码会允许后一个片段读取前一个片段；如果训练时要求片段彼此隔离，就必须加分段/块掩码（segment/block mask）。以两段长度分别为 2 和 1 的序列为例，第三个 token 按因果规则可以看到前两个；但如果它属于第二段，就只能访问自身和第二段允许的前缀。掩码不只是张量 shape，也体现了数据边界和训练目标的约定。
 
 增量推理时，掩码的 key 轴包含缓存历史；query 长度、缓存长度、key 总长度和掩码形状必须一起核对。非方形因果对齐的具体例子已在 2.4.6 说明；这里要记住的是，形状能广播不代表可见位置符合生成协议。
 

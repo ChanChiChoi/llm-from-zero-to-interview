@@ -295,7 +295,7 @@ Y：labels，padding 使用 -100。
 
 最小 collator：
 
-本实现固定使用右侧 padding，符合下面 `pad_sequence` 的输出方式。上一节生成示例中的左侧 padding 服务于 decoder-only 批量生成，两种场景的 padding 契约不能混用。
+本实现固定使用右侧 padding，符合下面 `pad_sequence` 的输出方式。上一节生成示例中的左侧 padding 用于 decoder-only 批量生成；两种场景的 padding 位置约定不能混用。
 
 > 代码状态：静态审阅，未运行（2026-10-29）
 

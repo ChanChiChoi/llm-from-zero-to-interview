@@ -49,7 +49,7 @@ y_i^{\mathrm{sft}}
 G(\theta_{\mathrm{sft}},p_i,g)
 ```
 
-其中 $g$ 包括 max_new_tokens、do_sample、temperature、top-p、停止 token 和随机种子。比较时只应改变模型参数；如果同时改变 prompt 或采样策略，就不能把结果差异归因于 SFT。
+其中 $g$ 包括 max_new_tokens、do_sample、temperature、top-p、停止 token 和随机种子。比较时只应改变模型参数；如果同时改变 prompt 或采样策略，就不能认定结果差异是 SFT 带来的。
 
 base 与 SFT 应尽量使用相同 tokenizer 和模板。LoRA/QLoRA 的 SFT 模型通常是同一个 base 加 adapter；全参数 SFT 则应从保存目录加载对应 tokenizer。若更换了 base、词表或模板，报告中必须把它作为独立变量。
 
@@ -267,4 +267,4 @@ JSON 是否能解析。
 
 只有当 tokenization、mask、评估文本和归一化方式一致时，PPL 才适合做相对比较。不同 tokenizer、不同回答长度和不同 mask 不能直接横向比较。
 
-比较对象、评估切片和指标口径已经固定。下一篇把它们落成可保存逐样本输出的脚本，并写出有边界的实验结论。
+比较对象、评估分组和指标口径已经固定。下一篇把它们落成可保存逐样本输出的脚本，并写出有边界的实验结论。
