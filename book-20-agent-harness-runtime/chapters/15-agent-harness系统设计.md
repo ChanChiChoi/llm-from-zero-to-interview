@@ -1,1204 +1,329 @@
 # 第十五章：Agent Harness 系统设计
 
-## 0. 本讲范围与资料
+一次编码任务看起来只是让 Agent 修复一个 bug，但它会跨过多个系统边界：用户把任务交给应用，应用选择仓库版本，Runtime 组织模型和工具，执行环境读写文件并运行命令，存储系统留下 diff 和测试回执，验收器再判断目标是否达到。
 
-本章参考 OpenAI Agents SDK 关于 agent loop、tools、sessions、guardrails、human-in-the-loop、MCP、tracing 和 sandbox agents 的公开资料，Claude Code 关于权限、安全、sandbox、prompt injection、MCP 安全、云端隔离和 audit logging 的公开文档，OpenCode server / permissions 文档中 server API、session、message、permission、diff、MCP、LSP 和事件流的公开能力，SWE-agent 关于 environment、container / shell session、agent、parser、tool execution 和 trajectory 的公开设计，Aider repo map 文档，以及 OpenHands SDK / CLI / GUI / Cloud / Enterprise / REST API / RBAC 公开资料。
+这些边界在正常运行时容易被一张组件图遮住。真正的设计题通常出现在中断之后：工作进程在改完文件后崩溃，用户收到的最后一条事件却是工具调用中；外部服务可能已经接受操作，只是回执丢了。此时系统不能只靠模型的最终回答猜测任务结果。
 
-边界要说清楚：
+本章用一项明确标为教学构造的登录错误修复任务，走完从需求到部署的系统设计过程。读者应能把任务约束转成架构边界，说明数据与状态由谁拥有，沿一次运行定位动作和证据，并为重试、取消、审批、评估和发布设计可核对的处理方式。本章承接第 1—14 章的 Runtime、工具、权限、文件、上下文、Trace、Evaluation 和协议集成；第 16 章再按故障现象练习排查。
 
-1. 本章是系统设计抽象，不复刻任何闭源产品的内部 planner、prompt、工具排序、缓存策略、trace 存储或模型路由。
-2. OpenAI Agents SDK、Claude Code、OpenCode、SWE-agent、Aider、OpenHands 等公开资料只作为可迁移设计参考；不同产品版本和部署形态会变化。
-3. 本章聚焦防御性 coding agent harness：session、orchestrator、context builder、model adapter、capability registry、permission engine、execution engine、sandbox、diff/revert、trace、replay、evaluation、MCP/A2A、server/SDK 和企业治理。
-4. 不提供绕过 sandbox、读取密钥、规避权限、破坏工作区、隐藏 trace、伪造评估通过、攻击 MCP/A2A 外部系统或让 agent 自动执行高风险生产动作的方法。
-5. 公式和 demo 的目标是把“系统设计回答”落到可审计模块和上线条件，而不是替代真实架构评审、威胁建模或企业安全合规流程。
+## 15.1 先看一条任务会跨过哪些系统边界
 
-一句话口径：Agent Harness 系统设计不是画一个模型调用框，而是证明模型外层的状态机、权限、执行、上下文、trace、replay、评估和治理都能闭环。
+教学构造的需求是：开发者提交一个登录错误 issue，要求定位并修复会话校验问题、运行相关测试、交付补丁和测试结果。任务在团队的 Git 仓库中进行；Agent 可以读取仓库、改动隔离工作区并运行指定测试，但不能读取密钥、推送分支或部署。
 
-## 15.1 本章定位
+这不是一次真正运行的产品记录，也不代表某个现有 coding agent 的内部实现。它只是一个设计样例，帮助我们把需求、动作、状态和证据放在同一条线上。
 
-前面十四章分别讲了 harness 总览、agent runtime、coding agent 工作流、工具系统、文件编辑、终端执行、上下文管理、权限沙箱、trace/replay、evaluation harness、Claude Code、OpenCode、Codex 对比、MCP/A2A 集成。本章把这些内容合成一道系统设计题：
+先把关键对象分开：
 
-```text
-设计一个 coding agent harness。
-```
+- 用户提出的是目标和约束，例如修复哪种登录错误，以及哪些操作禁止执行。
+- 模型输出的是诊断、补丁或工具调用提议。
+- Runtime 根据当前身份、任务范围和策略决定是否派发动作。
+- 执行环境产生真实文件变化、命令输出和外部副作用。
+- verifier 根据预先约定的验收条件判断补丁是否达到目标。
 
-这道题不是让你设计一个“调用大模型的聊天机器人”。它考察的是你能不能把模型、工具、文件系统、终端、权限、安全、上下文、trace、replay、评估、MCP/A2A 和用户交互组织成一个可运行、可控、可观测、可扩展的软件系统。
+所以设计目标不是让 Agent 尽可能多地调用工具，而是让系统可以回答四个问题：这次任务允许做什么；每个动作实际发生在哪里；中断后哪些工作已完成、哪些结果仍未知；交给用户的结果凭什么算完成。
 
-学完本章，你应该能回答：
+## 15.2 把用户请求写成任务契约
 
-1. 面试中如何澄清 coding agent harness 的需求。
-2. 一个生产级 harness 的核心模块有哪些。
-3. 用户输入到 agent 完成任务的完整链路是什么。
-4. 如何设计 session、message、tool call、permission、diff、trace 等数据模型。
-5. 如何处理上下文窗口、工具选择、权限确认、沙箱执行和文件回滚。
-6. 如何支持 evaluation、replay、MCP、A2A、server/SDK 和企业治理。
-7. 这类系统最关键的 trade-off 是什么。
-
-## 15.2 资料来源和可信边界
-
-本章综合参考前面章节已检索过的公开资料：
-
-1. Claude Code 官方文档：agentic coding tool、多入口、文件编辑、命令执行、MCP、skills、hooks、sub-agents、Agent SDK、安全和权限架构。
-2. Claude Code security 文档：read-only 默认、显式权限、sandboxed bash、写权限限制、prompt injection 防护、trust verification、MCP 安全、云端 VM 隔离、audit logging。
-3. OpenCode 官方 server 文档：TUI 与 server 解耦，HTTP server、OpenAPI 3.1、session/message/file/diff/permission/event/MCP/LSP/agent/log API。
-4. OpenCode permissions 文档：allow/ask/deny、tool 和参数级规则、external directory、doom loop、agent 级权限覆盖。
-5. SWE-agent 架构文档：CLI 初始化 environment、container/shell session、Agent、HistoryProcessor、parser、tool execution、trajectory 等。
-6. Aider repo map 文档：用 concise repository map 和 token budget 优化大仓库上下文。
-7. MCP specification：Host/Client/Server、JSON-RPC、resources/prompts/tools、security principles、progress/cancellation/logging。
-8. OpenHands README：SDK、CLI、Local GUI、Cloud、Enterprise、REST API、RBAC、协作和集成。
-
-这些资料代表的是公开能力和设计取向。具体实现可能随版本变化，本章重点提炼系统设计原则，不声称复刻某个产品的内部实现。
-
-## 15.3 需求澄清
-
-面试题是“设计一个 coding agent harness”，第一步不能直接画架构图，而要澄清边界。
-
-可以先问：
-
-1. 目标用户是谁：个人开发者、企业团队、研究者，还是平台用户？
-2. 产品形态是什么：CLI、IDE、Web、Desktop、SDK，还是都要支持？
-3. 任务范围是什么：问答解释、修 bug、写功能、重构、跑测试、开 PR、处理 issue？
-4. 是否要自动执行命令和修改文件？是否需要用户确认？
-5. 是否接入外部系统：GitHub、Jira、Sentry、数据库、Figma、Slack、MCP、A2A？
-6. 是否需要沙箱：本地进程、Docker、远程 VM、云端 workspace？
-7. 是否需要评估和回放：只做产品，还是要 benchmark 和 regression eval？
-8. 安全要求是什么：只读默认、最小权限、审计、RBAC、组织策略、secret 防护？
-9. 规模要求是什么：单用户本地，还是多租户云服务？
-
-一个合理的面试假设可以是：
+系统设计从功能清单之前开始：先明确请求目标、范围、成功证据和停止条件。对上面的任务，一份教学构造的任务契约可以写成：
 
 ```text
-我们设计一个面向开发者和企业团队的 coding agent harness，第一版支持 CLI 和 server API，后续可接 IDE/Web。它能读取和搜索代码库、编辑文件、运行测试、调用 MCP 工具、记录 trace、支持 diff/revert、权限确认和基础 evaluation。默认在本地 workspace 运行，也支持 Docker sandbox。高风险命令需要用户确认。
+task: 修复登录接口对无效会话的处理
+repository: shop-service
+base_revision: rev-42
+acceptance: 无效会话返回预期错误；相关回归检查通过；补丁范围可审阅
+allowed_actions: 读取仓库、改动隔离工作区、运行指定测试
+forbidden_actions: 读取密钥、访问生产数据库、推送、部署
+result: 补丁、验证回执、未完成事项和风险说明
 ```
 
-这个假设足够具体，可以继续设计。
+这里的 `rev-42` 是合成标识，不是仓库的真实版本。它的作用是把任务绑定到明确的代码起点。否则，即使 Agent 和测试命令完全相同，两个工作进程读取不同提交，也可能得出不同结果。
 
-## 15.4 功能需求
+任务契约要让成功与失败都可解释。如果某项验收条件无法检查，系统就应把它标为未验证，而不是把模型回答流畅当作成功。动作范围也应具体到资源和影响：允许在临时工作区修改代码，并不自动允许把改动推送到远端。
 
-核心功能可以分成八类。
+设计前需要问清的维度如下。表中没有通用默认值，项目负责人应根据实际用户和运行环境给出答案。
 
-第一类是代码理解：
+| 设计维度 | 需要回答的问题 | 对系统设计的影响 |
+|---|---|---|
+| 用户与产品入口 | 个人 CLI、团队 IDE、Web 服务、SDK，还是 CI 机器人？ | 决定身份入口、交互方式、是否需要异步任务和事件流。 |
+| 任务与成功条件 | Agent 只提供建议，还是编辑文件、跑测试、创建 PR？由谁验收？ | 决定执行器、verifier、人工确认和回滚边界。 |
+| 运行环境 | 代码在本机、容器、远程 VM，还是厂商托管环境？ | 决定工作区生命周期、网络、文件持久化和环境清理责任。 |
+| 数据与权限 | 仓库是否含敏感数据？Agent 代表用户、服务账号还是组织？ | 决定身份委派、租户隔离、密钥注入、日志访问和数据保留。 |
+| 负载与时限 | 任务平均多久、并发多少、等待用户多久可以接受？ | 决定同步或异步 API、队列、工作进程数量和资源限额。 |
+| 质量与成本 | 如何比较版本？单次任务可用多少模型调用、时间和执行资源？ | 决定评估任务集、预算控制、模型配置和发布条件。 |
 
-1. 读取文件。
-2. 文件名搜索。
-3. 正则搜索。
-4. 符号搜索和 LSP。
-5. repo map。
-6. git diff、branch、status。
+先说明哪些是业务要求，哪些是实现假设。例如，用户要求任务可以在网络断开后继续，这是产品要求；使用队列和数据库保存任务状态，是一种可替换的实现方案。面试答案应把两者分开，避免把熟悉的技术栈误当成需求。
 
-第二类是代码修改：
+## 15.3 让确定流程留在程序里，让模型处理开放判断
 
-1. 精确 edit。
-2. patch apply。
-3. 新增文件。
-4. 格式化。
-5. diff 预览。
-6. revert/undo。
+登录修复任务中，有些阶段的顺序是确定的：固定仓库版本、准备工作区、检查权限、运行指定验收、保存补丁和报告。这些步骤应由 Runtime 或普通程序控制。模型更适合处理开放部分，例如根据 issue、源码和测试失败推断可能原因，并提出要读取或修改的文件。
 
-第三类是命令执行：
+一个可理解的分工是：
 
-1. 运行测试。
-2. 运行 lint/typecheck。
-3. 安装依赖。
-4. 启动开发命令。
-5. 限制危险命令。
+1. 应用接收请求，确定用户身份、仓库和任务边界。
+2. 工作流准备隔离环境，固定源码版本和运行配置。
+3. Agent 根据经过筛选的上下文提出分析或动作。
+4. 策略层检查每个动作，执行器完成批准范围内的副作用。
+5. 任务专用 verifier 检查最终补丁和验证证据。
 
-第四类是 agent loop：
+只有当任务需要开放式推理时，才让模型参与相应阶段。提交任务、执行审批、保存审计记录和清理环境等责任不应依赖模型自行记住。多 Agent 也不是默认选项：只有任务可以拆成相对独立的工作、确实需要不同能力或并行收益足以抵消协调代价时，再考虑加入。Azure 的官方编排指南把顺序、并发、交接和动态计划等模式分别映射到任务结构，也提示额外 Agent 会增加延迟、资源消耗和共享状态协调问题；这是一份设计指南，不是所有工作负载的统一结论。[Azure Architecture Center：Agent 编排模式](https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/ai-agent-design-patterns)
 
-1. 规划。
-2. 调用模型。
-3. 选择工具。
-4. 解析 tool call。
-5. 执行工具。
-6. 汇总结果。
-7. 决定下一步。
+## 15.4 用责任边界画架构，而不是堆模块名
 
-第五类是上下文管理：
+下面的架构按任务控制、模型与能力、执行和证据分区。它是本章的教学设计图，不是必须照搬的标准架构。外部连接器即使接入 MCP 或 A2A，也仍由本地 Runtime 负责把身份、权限、状态和结果纳入同一条任务链；完整协议语义见[第十四章](14-mcp-a2a与harness集成.md)和[第二十二册](../../book-22-tool-protocol-ecosystem/目录.md)。
 
-1. 项目规则。
-2. 用户消息。
-3. 历史压缩。
-4. 文件片段选择。
-5. 工具结果摘要。
-6. token budget。
-
-第六类是安全治理：
-
-1. 权限 allow/ask/deny。
-2. 只读模式和 build 模式。
-3. sandbox。
-4. 外部目录限制。
-5. secret 防护。
-6. prompt injection 防护。
-
-第七类是可观测和可恢复：
-
-1. trace。
-2. event stream。
-3. logs。
-4. session diff。
-5. snapshot。
-6. replay。
-
-第八类是扩展和评估：
-
-1. MCP server。
-2. A2A remote agents。
-3. custom tools。
-4. plugins/skills。
-5. evaluation harness。
-6. SDK/server API。
-
-## 15.5 非功能需求
-
-非功能需求决定系统是否能进生产。
-
-1. 安全性：默认最小权限，高风险操作需要确认，secret 不应泄漏。
-2. 可恢复性：每次文件修改都能 diff、undo、revert。
-3. 可观测性：每次模型调用、工具调用、权限请求和错误都能追踪。
-4. 可复现性：关键任务能 replay，评估能复跑。
-5. 可扩展性：工具、模型、MCP、agent、UI 都能扩展。
-6. 低延迟体验：常见读写和搜索不能太慢。
-7. 成本可控：上下文构建和模型调用不能无节制膨胀。
-8. 多租户隔离：如果是云端服务，需要 workspace、credential、日志隔离。
-9. 兼容性：支持不同语言、不同包管理器、不同测试框架。
-10. 审计合规：企业场景需要保存操作记录、权限决策和用户确认。
-
-## 15.6 高层架构
-
-一个完整 agent harness 可以抽象成下面的架构：
-
-```text
-CLI / IDE / Web / SDK
--> API Gateway / Server
--> Session Manager
--> Agent Orchestrator
--> Context Builder
--> Model Adapter
--> Capability Registry
-   -> Built-in Tools
-   -> Custom Tools
-   -> MCP Clients
-   -> A2A Clients
-   -> Skills / Plugins
--> Permission Engine
--> Execution Engine
-   -> File Engine
-   -> Shell Runner
-   -> Sandbox Manager
-   -> Git/Diff Manager
-   -> LSP/Search Engine
--> Trace Store / Event Bus / Log Store
--> Evaluation Runner / Replay Engine
--> Config / Policy / Auth / RBAC
+```mermaid
+flowchart LR
+  subgraph Client[交互入口]
+    UI[CLI / IDE / Web]
+  end
+  subgraph Control[任务控制面]
+    API[API 与身份认证]
+    TaskStore[(Task / Session Store)]
+    Queue[持久任务队列]
+    Runtime[Agent Runtime]
+  end
+  subgraph Agent[模型与能力]
+    Context[Context Builder]
+    Registry[Capability Registry]
+    Adapter[Model Adapter]
+    Model[(Model Provider)]
+  end
+  subgraph Execute[受控执行面]
+    Policy[Policy / Approval]
+    Executor[Execution Broker]
+    Workspace[隔离 Workspace]
+    Remote[MCP / A2A Connector]
+  end
+  subgraph Evidence[证据与验收]
+    Events[(事件与 Trace)]
+    Artifacts[(Artifact Store)]
+    Cases[(固定任务与仓库快照)]
+    Eval[Evaluation Runner]
+  end
+  UI -->|提交任务| API
+  API -->|验证身份并记录任务| TaskStore
+  API -->|排队| Queue
+  Queue -->|分配任务| Runtime
+  TaskStore -->|加载任务状态| Runtime
+  Runtime --> Context
+  Registry -->|受限能力描述| Context
+  Context --> Adapter
+  Adapter --> Model
+  Model -->|动作提议| Runtime
+  Runtime -->|检查主体、动作与资源| Policy
+  Policy -->|允许的动作| Executor
+  Executor --> Workspace
+  Executor --> Remote
+  Workspace -->|文件与命令回执| Executor
+  Remote -->|远端回执| Executor
+  Executor -->|观察结果| Runtime
+  Runtime -->|状态与事件| TaskStore
+  Runtime --> Events
+  Workspace --> Artifacts
+  Runtime --> Artifacts
+  Events -->|进度与结果| UI
+  Cases --> Eval
+  Artifacts --> Eval
+  Eval -->|评估报告| Events
 ```
 
-各模块职责如下：
-
-1. CLI/IDE/Web/SDK：用户入口和程序化入口。
-2. API Gateway/Server：统一暴露 HTTP、OpenAPI、SSE、鉴权和 session API。
-3. Session Manager：管理会话、消息、状态、todo、diff、revert。
-4. Agent Orchestrator：运行 agent loop，决定模型调用和工具调用。
-5. Context Builder：构建模型输入，控制 token budget。
-6. Model Adapter：适配不同模型提供商和工具调用格式。
-7. Capability Registry：统一管理工具、MCP、A2A、skills、plugins。
-8. Permission Engine：判断 allow、ask、deny。
-9. Execution Engine：执行文件、shell、MCP、A2A、git、LSP 等动作。
-10. Trace Store：记录完整执行轨迹。
-11. Evaluation Runner：跑 benchmark、回归任务和 replay。
-12. Config/Policy/Auth/RBAC：配置、组织策略、认证和访问控制。
-
-这个架构的关键是把“模型推理”和“动作执行”分开。模型可以建议动作，但真正执行动作的是 runtime。
-
-## 15.7 核心数据模型
-
-系统设计面试中，数据模型能体现你是否真的理解 runtime。
-
-Session：
-
-```text
-Session {
-  id
-  user_id
-  workspace_id
-  parent_session_id
-  title
-  status
-  current_agent
-  created_at
-  updated_at
-}
-```
-
-Message：
-
-```text
-Message {
-  id
-  session_id
-  role: user | assistant | tool | system
-  parts
-  model_id
-  agent_id
-  created_at
-}
-```
-
-ToolCall：
-
-```text
-ToolCall {
-  id
-  session_id
-  message_id
-  tool_id
-  origin: builtin | custom | mcp | a2a
-  input_json
-  status
-  permission_id
-  started_at
-  finished_at
-  error
-}
-```
-
-PermissionRequest：
-
-```text
-PermissionRequest {
-  id
-  session_id
-  tool_call_id
-  action
-  resource
-  risk_level
-  proposed_policy
-  user_response: allow_once | allow_session | deny
-  created_at
-  resolved_at
-}
-```
-
-FileChange：
-
-```text
-FileChange {
-  id
-  session_id
-  message_id
-  path
-  change_type: create | edit | delete | rename
-  before_hash
-  after_hash
-  patch
-  reversible
-}
-```
-
-TraceEvent：
-
-```text
-TraceEvent {
-  id
-  session_id
-  type
-  parent_event_id
-  payload
-  redaction_policy
-  timestamp
-}
-```
-
-EvalRun：
-
-```text
-EvalRun {
-  id
-  task_set_id
-  agent_config_id
-  model_config_id
-  status
-  metrics
-  started_at
-  finished_at
-}
-```
-
-这些模型不是为了数据库设计而设计，而是为了支持四件事：恢复、审计、回放、评估。
-
-## 15.8 一次请求的完整链路
-
-以用户输入“修复登录失败的 bug，并运行测试”为例。
-
-完整链路是：
-
-```text
-User submits prompt
--> Server creates Message
--> Session Manager loads session state
--> Context Builder builds context
--> Model Adapter calls model
--> Model returns plan or tool call
--> Permission Engine checks tool call
--> Execution Engine runs read/grep/bash/edit
--> Tool result enters trace and context
--> Agent loop continues
--> FileChange and diff generated
--> Tests run
--> Final response summarizes changes and test result
-```
-
-这个链路里有几个关键点：
-
-1. 每一步都产生 trace event。
-2. 每次文件修改都产生 FileChange 和 diff。
-3. 每次高风险工具调用都经过 PermissionRequest。
-4. 工具结果不是无限制塞回上下文，而是经过截断、摘要或文件引用。
-5. Agent loop 有 step limit、token limit、time limit，防止无限循环。
-6. 最终回答要把修改、验证、风险和未完成项讲清楚。
-
-## 15.9 Context Builder 设计
-
-Context Builder 是 coding agent 的核心模块之一。
-
-它要决定模型看到什么。输入来源包括：
-
-1. 系统 prompt。
-2. agent prompt。
-3. 项目规则，如 `AGENTS.md`、`CLAUDE.md`、rules。
-4. 用户当前消息。
-5. 会话历史。
-6. 压缩摘要。
-7. repo map。
-8. 当前打开文件或相关文件。
-9. 工具结果。
-10. git diff。
-11. todo 状态。
-12. MCP resources。
-
-Context Builder 的基本策略：
-
-1. 高优先级指令先放。
-2. 用户当前任务必须完整保留。
-3. 项目规则只保留相关部分。
-4. 历史对话可压缩成任务状态。
-5. 大文件只放相关片段。
-6. 大工具输出只放摘要和引用。
-7. 外部内容标记为 untrusted data。
-8. 保留当前 diff 和失败日志。
-
-可以把 context 分成层：
-
-```text
-Policy layer: system / security / permissions
-Project layer: rules / repo map / coding conventions
-Task layer: user goal / plan / todo
-Working layer: relevant files / diff / tool outputs
-Memory layer: summaries / previous decisions
-```
-
-一个常见错误是把所有文件和日志都塞进去。更好的做法是 iterative retrieval：先用 repo map、grep、glob、LSP 找候选，再读取关键片段。
-
-## 15.10 Agent Orchestrator 设计
-
-Agent Orchestrator 负责运行循环。
-
-基本伪代码：
-
-```text
-while not done:
-  context = build_context(session)
-  model_output = call_model(context, tools)
-  action = parse(model_output)
-
-  if action is final_answer:
-    finish
-  if action is tool_call:
-    decision = permission_engine.check(action)
-    if decision == ask:
-      wait_user_approval
-    if decision == deny:
-      return denial to model
-    result = execution_engine.run(action)
-    record_trace(action, result)
-    update_session(result)
-```
-
-Orchestrator 要处理：
-
-1. step limit。
-2. max runtime。
-3. token budget。
-4. repeated tool call detection。
-5. failed tool retry。
-6. user interruption。
-7. model timeout。
-8. parallel subagents。
-9. plan/build mode。
-10. final answer quality。
-
-如果没有 Orchestrator，系统就只是模型和工具的松散拼接。
-
-## 15.11 Model Adapter 设计
-
-不同模型提供商对 tool calling、streaming、reasoning、structured output、token 统计、错误格式都不一样。
-
-Model Adapter 的职责是统一：
-
-1. message format。
-2. tool schema format。
-3. streaming events。
-4. tool call parsing。
-5. retry/backoff。
-6. token usage。
-7. model capability。
-8. structured output。
-9. rate limit handling。
-
-一个 ModelConfig 可以包含：
-
-```text
-model_id
-provider
-context_window
-supports_tool_calling
-supports_streaming
-supports_reasoning_tokens
-supports_parallel_tools
-cost_per_input_token
-cost_per_output_token
-default_temperature
-```
-
-面试中要强调：不能把业务逻辑写死在某个模型 API 格式上。Harness 应该能替换模型提供商，否则很难做评估、降本和容灾。
-
-## 15.12 Capability Registry 设计
-
-传统叫 Tool Registry，但在支持 MCP/A2A/skills 后，更准确地叫 Capability Registry。
-
-它管理：
-
-1. 内置工具：read、grep、glob、edit、bash、lsp、todo。
-2. Custom tools：项目或组织自定义脚本。
-3. MCP tools/resources/prompts。
-4. A2A remote agents。
-5. Skills/plugins。
-6. System actions：summary、compaction、title。
-
-每个 capability 需要记录：
-
-```text
-id
-type: tool | resource | prompt | remote_agent | skill
-origin
-schema
-description
-risk_level
-required_permission
-timeout
-output_limit
-enabled_agents
-enabled_scopes
-version
-```
-
-为什么要注册，而不是直接给模型？
-
-1. 方便按 agent 启用工具。
-2. 方便权限检查。
-3. 方便动态禁用。
-4. 方便统计使用率。
-5. 方便做 tool search。
-6. 方便 trace 和 replay。
-
-## 15.13 Permission Engine 设计
-
-Permission Engine 是安全边界。
-
-它的输入是：
-
-1. 用户身份。
-2. workspace。
-3. agent 身份。
-4. tool name。
-5. tool input。
-6. 文件路径或外部资源。
-7. 当前模式：plan/build/read-only。
-8. 组织策略。
-9. 历史批准记录。
-
-输出是：
-
-```text
-allow | ask | deny
-```
-
-权限规则要支持多级覆盖：
-
-1. 系统默认。
-2. 组织策略。
-3. 用户全局配置。
-4. 项目配置。
-5. agent 配置。
-6. session 临时批准。
-
-高风险动作包括：
-
-1. 删除文件。
-2. 写外部目录。
-3. 读取 `.env`。
-4. 网络请求。
-5. 安装依赖。
-6. git commit/push。
-7. 部署命令。
-8. 数据库写入。
-9. 发送邮件。
-10. 调用远程 agent 执行副作用任务。
-
-关键原则：prompt 不是权限边界。真正的 allow/ask/deny 必须在 runtime 执行。
-
-## 15.14 Sandbox 和 Execution Engine
-
-Execution Engine 负责执行工具。
-
-核心子模块：
-
-1. File Engine：read、edit、write、patch、snapshot。
-2. Shell Runner：bash、timeout、cwd、env、output capture。
-3. Search Engine：grep、glob、file search。
-4. LSP Engine：symbols、definition、references。
-5. Git/Diff Manager：status、diff、revert、branch。
-6. MCP Client：外部工具调用。
-7. A2A Client：远程 agent task。
-8. Sandbox Manager：Docker、VM、dev container、local restricted mode。
-
-Sandbox 要控制：
-
-1. 文件系统边界。
-2. 网络访问。
-3. 环境变量。
-4. 进程生命周期。
-5. CPU/内存/时间限制。
-6. 工作区挂载。
-7. secret 注入。
-8. 日志导出。
-
-本地 CLI 可以先做轻量限制：工作目录写限制、外部目录 ask、危险命令 deny、`.env` deny。云端或企业场景则需要 VM/container 隔离、网络 allowlist、credential proxy 和审计日志。
-
-## 15.15 文件编辑、Diff 和 Revert
-
-文件编辑是 coding agent 的核心动作，也最容易出事故。
-
-设计原则：
-
-1. 尽量做小 patch，不要整文件重写。
-2. 每次 edit 前记录 before hash。
-3. 每次 edit 后生成 diff。
-4. 支持按 message revert。
-5. 支持用户审查。
-6. 检测工作区已有未提交修改。
-7. 不自动覆盖用户并发修改。
-8. 格式化要可控。
-
-FileChange 应该和 Message 绑定。用户说“撤销刚才那步”，系统知道要 revert 哪些 patch。
-
-如果文件在 agent 读取后被用户修改，apply patch 可能失败。这时应该重新读取文件并让模型重新规划，而不是强行覆盖。
-
-## 15.16 Trace、Replay 和 Observability
-
-Trace 不是日志的同义词。Trace 要能回答：agent 为什么这么做，做了什么，结果是什么。
-
-需要记录：
-
-1. 用户输入。
-2. context 摘要和版本。
-3. model request metadata。
-4. model output。
-5. tool call 输入输出。
-6. permission decision。
-7. file diff。
-8. shell output。
-9. MCP/A2A 调用。
-10. errors 和 retry。
-11. final answer。
-
-Observability 指标包括：
-
-1. success rate。
-2. tool call count。
-3. permission ask rate。
-4. edit failure rate。
-5. test pass rate。
-6. average steps。
-7. latency。
-8. token cost。
-9. revert rate。
-10. user interruption rate。
-
-Replay 分两种：
-
-1. Deterministic replay：mock 模型输出和工具结果，用于 debug。
-2. Re-evaluation replay：重新调用模型和工具，用于比较新版本 agent。
-
-对外部工具要记录版本、参数、输出 hash，并决定 replay 时 mock 还是真实调用。
-
-## 15.17 Evaluation Harness 设计
-
-Evaluation Harness 用来回答：这个 coding agent 真的变好了吗？
-
-任务集可以包括：
-
-1. 单文件 bug fix。
-2. 多文件 feature。
-3. 测试修复。
-4. lint/type error 修复。
-5. RAG/文档问题。
-6. 安全 review。
-7. SWE-bench 风格 issue。
-8. 私有历史 issue。
-
-每个任务需要定义：
-
-```text
-repo snapshot
-initial prompt or issue
-expected behavior
-test command
-scoring function
-timeout
-allowed tools
-security constraints
-```
-
-指标包括：
-
-1. pass rate。
-2. test pass。
-3. patch quality。
-4. minimality。
-5. regression。
-6. cost。
-7. latency。
-8. human review score。
-9. safety violation。
-10. flakiness。
-
-评估不能只看最终是否通过测试，还要看 patch 是否过度、是否破坏风格、是否引入安全问题。
-
-## 15.18 Server、SDK 和多客户端
-
-如果系统只支持 CLI，短期实现简单，但扩展受限。
-
-更合理的架构是 runtime server 化：
-
-```text
-TUI / CLI
-IDE Extension
-Web UI
-Desktop App
-SDK / CI Bot
--> Harness Server API
-```
-
-Server API 应支持：
-
-1. session create/list/get。
-2. send message。
-3. stream events。
-4. file read/search。
-5. diff/status。
-6. permission response。
-7. abort/fork/revert。
-8. tool/MCP status。
-9. eval run。
-10. logs and traces。
-
-OpenCode 的 server 架构就是很好的公开参考：TUI 是 client，server 暴露 OpenAPI，SDK 可以基于 spec 生成。
-
-多客户端要解决一致性问题：同一个 session 可以从 CLI 发起，在 IDE 看 diff，在 Web 审批权限。这要求 session state 在 server 中统一管理，而不是散落在各 UI。
-
-## 15.19 MCP/A2A 扩展设计
-
-MCP 接入：
-
-1. Config 加载 MCP server。
-2. 建立 MCP client。
-3. 发现 resources/prompts/tools。
-4. 注册到 Capability Registry。
-5. 绑定权限和输出限制。
-6. 记录 trace。
-
-A2A 接入：
-
-1. Agent registry 读取 Agent Card。
-2. 记录 remote agent capability。
-3. 主 agent 按 policy 委派任务。
-4. A2A client 处理 task lifecycle。
-5. streaming update 进入 event bus。
-6. 结果 artifact 进入 session。
-
-关键治理点：
-
-1. MCP server allowlist。
-2. OAuth scope 最小化。
-3. A2A remote agent trust level。
-4. 数据出境审计。
-5. 外部输出 prompt injection 标记。
-6. replay 时 mock 外部系统。
-
-## 15.20 安全威胁模型
-
-一个 coding agent harness 至少要考虑这些威胁。
-
-Prompt injection：
-
-1. 来自 issue、网页、文档、MCP output。
-2. 防护：外部内容标记 untrusted，权限层不听外部指令。
-
-Command injection：
-
-1. 用户输入或工具输出拼接进 shell。
-2. 防护：参数化、命令解释、危险命令 blocklist、用户确认。
-
-Secret leakage：
-
-1. 读取 `.env`、日志、token 文件。
-2. 防护：默认拒绝敏感文件、redaction、最小上下文。
-
-Workspace escape：
-
-1. 写父目录、读 home、访问网络路径。
-2. 防护：external directory ask/deny、sandbox mount。
-
-Destructive actions：
-
-1. 删除文件、drop table、git push、deploy。
-2. 防护：高风险 ask/deny、dry-run、二次确认。
-
-Supply chain risk：
-
-1. 自动安装依赖或执行远程脚本。
-2. 防护：网络请求审批、依赖变更审查、sandbox。
+读图时可以先只跟一条实线：UI 提交任务后，API 验证调用者并保存任务；队列把任务交给 Runtime；Runtime 向模型取回动作提议；Policy 决定哪些动作可执行；Executor 在受限 workspace 或外部连接器中运行它们；结果回到 Runtime，再被写入状态、trace 和 artifact。
 
-MCP/A2A trust risk：
+每个方框背后不一定对应一个独立服务。单用户 CLI 可以把 API、队列和 Runtime 放进一个进程；团队异步服务通常会拆开。拆分的理由应来自并发、故障隔离、权限或扩缩容要求，而不是图上组件越多越像生产系统。
 
-1. 不可信 server 或 remote agent。
-2. 防护：allowlist、scope、auth、audit。
+图中的三个数据出口也不能混为一谈：Task / Session Store 保存当前任务状态和会话关联；事件与 Trace 保存发生顺序和审计证据；Artifact Store 保存补丁、仓库快照或测试产物等较大的交付数据。它们可以部署在相同产品中，但保留期限、访问权限和写入语义不同。
 
-## 15.21 分阶段落地方案
+OpenAI Agents API 的公开架构把托管 Harness、执行环境和 application server 分开，并明确自管环境的启动、重连与清理责任；这可作为一种真实责任划分样本，但不是通用 Harness 的固定组件图。[Architecture](https://developers.openai.com/api/docs/guides/agents-api/architecture)；[Sandbox lifecycle](https://developers.openai.com/api/docs/guides/agents-api/environments/lifecycle)
 
-第一阶段：本地 CLI MVP。
+## 15.5 把 Session、Task、Run、Workspace 和 Artifact 分开
 
-1. session/message。
-2. read/grep/glob/edit/bash。
-3. permission allow/ask/deny。
-4. diff 和 revert。
-5. 基础 trace。
+系统数据模型不是把所有信息塞进一个 session JSON。每类数据要有明确的范围、事实来源和生命周期。
 
-第二阶段：上下文和代码理解增强。
+| 对象 | 保存什么 | 它不能单独证明什么 |
+|---|---|---|
+| Session | 一段对话及其用户界面连续性。 | 当前 task 是否完成、文件是否已改、外部操作是否成功。 |
+| Task | 任务目标、代码起点、允许动作、验收条件、负责人和业务状态。 | 某次尝试使用了哪版模型或运行环境。 |
+| Run | 一次具体执行尝试及其模型、prompt、工具目录、策略和环境版本。 | 最终产物一定符合用户目标。 |
+| Workspace | 当前运行时可读写的文件和进程环境，以及其基准提交。 | 工作区中的文件已经提交到远端或长期保存。 |
+| Artifact | 可交接的补丁、测试报告、日志片段或其他文件及其版本。 | Artifact 中的结论已由独立验收器验证。 |
+| Effect record | 外部动作的稳定 operation ID、请求摘要、派发状态和服务端回执。 | 缺少本地回执就表示外部副作用没有发生。 |
+| Approval | 审批人、具体动作、目标资源、参数摘要、范围和时间。 | 未来所有相似或修改过的操作都已获准。 |
 
-1. repo map。
-2. LSP。
-3. history compaction。
-4. todo。
-5. test/lint 自动闭环。
+例如，`session_id` 可串联用户对话，`task_id` 表示要达成的业务目标，`run_id` 表示一次尝试，`workspace_id` 指向实际执行环境。若一个 task 失败后重跑，就保留原 task 并创建新 run；否则比较两次尝试时，无法区分任务本身没有变化和执行配置已经变化。
 
-第三阶段：server 和多客户端。
+建议让 Task 状态表达可观察事实，而不是模型自报的心情。以下状态只是一个可用设计：
 
-1. HTTP API。
-2. event stream。
-3. IDE/Web client。
-4. SDK。
-5. session fork/share。
+| 状态 | 进入条件 | 离开条件 |
+|---|---|---|
+| `queued` | 任务契约已持久化，等待 worker。 | worker 接管后进入 `preparing`。 |
+| `preparing` | 正在校验仓库版本、分配 workspace 和加载策略。 | 准备完成进入 `running`；准备失败进入 `failed`。 |
+| `running` | Runtime 正在分析或执行已授权动作。 | 验收前进入 `verifying`；需人工决定时进入 `waiting_for_approval`。 |
+| `waiting_for_approval` | 一个具体动作暂停等待指定主体回应。 | 批准后回到策略复核，再进入 `running`；拒绝后依策略终止或继续只读工作。 |
+| `verifying` | Agent 已停止提议新动作，系统检查补丁和验收证据。 | 证据满足契约才进入 `completed`；已知失败进入 `failed`。 |
+| `cancelling` | 收到停止请求，系统正在停止本地任务并检查已派发动作。 | 副作用已知且 worker 停止后进入 `cancelled`；仍有未知动作则进入 `needs_reconciliation`。 |
+| `needs_reconciliation` | 外部动作结果不明，不能安全地直接重试。 | 查询外部事实或人工对账后，进入合适的终态或恢复执行。 |
 
-第四阶段：扩展生态。
+状态名不会自动带来正确的状态机。要为每个转移写出触发事件、守卫条件、事实来源和失败恢复。OpenAI Agents API 文档也将 session 与 turn 区分，并要求应用检查真实 turn outcome 和 tool result；`idle` 或一条最终回答不能代替任务验收。[Run and continue sessions](https://developers.openai.com/api/docs/guides/agents-api/sessions)
 
-1. MCP。
-2. custom tools。
-3. skills/plugins。
-4. A2A remote agents。
+## 15.6 从一条用户请求走到可以交付的结果
 
-第五阶段：企业和评估。
+现在沿着登录修复任务，把架构图落实成一次运行。表中的每一步都写清动作和证据；其中的补丁与回执属于教学构造，并非实际运行数据。
 
-1. RBAC。
-2. org policy。
-3. audit logs。
-4. sandbox/VM。
-5. evaluation harness。
-6. replay 和 regression dashboard。
+| 步骤 | 谁在做什么 | 保存或检查的事实 |
+|---|---|---|
+| 1. 接收 | API 验证用户身份、租户、仓库权限和请求字段。 | 用调用者身份生成任务范围；客户端重试应通过同一逻辑请求标识，避免无意创建重复任务。 |
+| 2. 固定输入 | Task Store 保存任务契约、仓库基准 revision 和验收器版本。 | 后续能识别任务从哪个代码起点开始，以及计划用什么标准验收。 |
+| 3. 分配执行 | Worker 领取任务，在隔离环境中建立对应 revision 的 workspace。 | 记录 workspace 与 run 的关联、环境镜像或依赖版本和资源预算。 |
+| 4. 构建上下文 | Context Builder 先读取项目规则和相关测试，再根据搜索结果补读登录校验代码。 | 记录来源标识、revision 和截断状态；外部 issue 文本按不可信内容处理。 |
+| 5. 调用模型 | Adapter 把上下文与当前可用工具投影为该 provider 支持的输入。 | 保存 model/provider、请求配置和 capability schema 版本，不假设所有 provider 语义相同。 |
+| 6. 执行动作 | Runtime 收到读文件、编辑或测试提议，Policy 按用户、任务、路径、参数和动作重新判断。 | 记录策略版本、决定理由、实际派发参数和执行回执。 |
+| 7. 观察反馈 | 执行器将文件 diff、测试退出状态和截断信息交给 Runtime。 | 测试输出作为观察证据进入上下文；不能把模型对输出的摘要当作原始回执。 |
+| 8. 验收交付 | Verifier 检查任务约定的登录行为、测试结果和 diff 范围。 | 保存验收器版本、检查结果、补丁 artifact 和尚未验证的条件。 |
+| 9. 通知用户 | API 通过事件流或查询接口返回进度和终态。 | 仅在 Task Store 中任务已通过 verifier 后报告完成；否则说明失败、被拒绝或仍待对账。 |
 
-## 15.22 关键 Trade-off
+一个关键区分是用户界面的交互事件不一定就是业务任务的终态。模型回答工具调用已发出，只能说明有提议；执行器回报命令结束，只能说明进程有一个回执；测试通过也只支持特定检查。只有任务契约中规定的证据齐备，系统才能把 Task 标为完成。
 
-自动化程度 vs 安全：
-
-1. 自动化越高，用户越省心。
-2. 但误删、误部署、泄密风险越高。
-3. 解决方式是分风险等级、分模式、分 agent 权限。
+## 15.7 让 Context、Model 和 Capability 使用同一份任务边界
 
-上下文完整性 vs 成本：
+Context Builder 应根据任务契约选择当前这一步需要的材料，而不是把整个仓库和完整会话历史送给模型。对登录任务，它可以先放入：用户目标与禁止项、固定的仓库 revision、项目规则、相关测试失败摘要、必要源码片段和当前 diff。搜索结果如果很大，正文保留摘要和 Artifact 引用；如果被截断，就把截断标记一起传递。
 
-1. 上下文越多，模型越可能理解任务。
-2. 但 token 成本、延迟和干扰也更高。
-3. 解决方式是 repo map、检索、摘要、tool search。
+模型看到的材料还应保留来源和信任级别。仓库文件、issue 描述和 MCP 返回都可能包含指令式文本，但它们不是系统策略。模型可以把它们作为待分析数据；权限层不能因此把动作范围扩大。
 
-工具能力 vs 风险：
+Capability Registry 是 Runtime 的能力目录，而不是所有工具的无差别菜单。每个工具至少需要一个稳定身份、输入输出合同、真实执行器、作用范围、风险/副作用、超时与输出限制、版本和 owner。Registry 再根据当前任务、用户权限和 provider 能力生成模型可见的工具描述。模型可见 schema 只是接口投影，不能代替执行端的参数与资源校验。
 
-1. 工具越多，agent 能做的事越多。
-2. 但误调用和权限面扩大。
-3. 解决方式是 capability registry 和 permission engine。
-
-通用性 vs 产品体验：
+Model Adapter 负责把通用请求映射到 provider 的具体合同，再把响应规范化给 Runtime。它应保留 tool calling、streaming、结构化输出、错误类型、用量和支持能力等差异。不能因为两个 provider 都接受一个名叫 `tools` 的字段，就推断两者的并发、拒绝、流式回执或计费语义相同；切换 provider 时还要重新评估行为。
 
-1. 通用 runtime 支持多场景。
-2. 但可能不如 IDE 原生体验顺滑。
-3. 解决方式是 server runtime + 多客户端 UI。
+Orchestrator 则管理有界循环：当前阶段、已完成步骤、最大时长、调用/资源预算、重试策略、用户中断、审批等待和终止条件。模型负责提出下一步；它不拥有任务状态，也不能自行改变策略或宣布 verifier 已通过。上下文管理与工具机制的详细教学分别见[第七章](07-上下文管理与记忆压缩.md)和[第四章](04-工具系统与tool-registry.md)。
 
-可观测性 vs 性能：
-
-1. trace 记录越完整，debug 和审计越好。
-2. 但存储、脱敏、性能成本更高。
-3. 解决方式是分级 trace 和可配置 retention。
+## 15.8 把动作提议变成有边界的执行
 
-本地执行 vs 云端执行：
+工具调用从模型输出到真实副作用之间，至少有四个不同职责：
 
-1. 本地更贴近用户环境和隐私。
-2. 云端更适合异步、协作和隔离。
-3. 解决方式是支持两种 workspace backend。
+1. **身份与授权**决定当前用户、服务主体或远端连接器是否有权访问某个资源。
+2. **任务策略**判断这次动作是否符合任务契约、组织策略和风险要求。
+3. **人工确认**让有权的人针对一个明确动作、参数和对象作决定。
+4. **执行隔离**限制进程能读取或修改哪些文件、访问哪些网络、消耗多少资源。
 
-## 15.23 Agent Harness 系统设计质量指标
+第五个独立职责是 verifier：它检查动作结果是否完成了任务。确认通过不等于动作已经正确执行；沙箱隔离也不等于业务权限正确；权限允许更不等于任务成功。
 
-系统设计面试中，可以把第 `i` 个 harness 模块抽象为：
+对本例，可以把读取和搜索限定在工作区内；编辑仅写入临时 workspace；测试由执行器在时间和资源限制内启动。读取密钥、访问生产数据库和推送远端均不在原任务契约里，因此必须拒绝，而不是因为 issue、README 或模型提议要求就追加权限。如果用户另行请求创建 PR，应生成一个新的具体操作，展示目标仓库、分支和补丁范围，并走相应的授权与确认流程。
 
-```math
-m_i=(n_i,g_i,p_i,c_i,s_i,a_i,b_i,e_i,t_i,r_i,q_i,u_i,v_i,h_i)
-```
+允许执行后，仍需在执行时重新校验资源是否变化。一个延迟的审批不能授权后来改过参数的动作；一个经过授权的 tool call 也不能把 shell 子进程的所有后续行为自动纳入允许范围。
 
-其中 `n_i` 是模块名，`g_i` 是模块组，例如 session、orchestrator、context、model、capability、permission、execution、sandbox、trace、replay、eval、api，`p_i` 表示模块是否存在，`c_i` 表示接口契约是否清楚，`s_i` 表示是否有状态机或生命周期，`a_i` 表示是否绑定权限，`b_i` 表示是否受上下文和输出预算控制，`e_i` 表示执行是否隔离，`t_i` 表示 trace 是否覆盖，`r_i` 表示 replay 是否就绪，`q_i` 表示 evaluation 是否接入，`u_i` 表示恢复能力，`v_i` 表示版本是否捕获，`h_i` 表示企业治理是否覆盖。
+当 MCP 或 A2A 作为外部能力接入时，本地 Policy、身份映射、动作预算和事件记录仍然存在；远端工具或 Agent 的 schema、身份和完成状态不能替本地 Runtime 证明权限与业务验收。AWS Agentic AI Lens 将显式合同、端到端可观察性、行为配置版本化和与动作后果相称的人类监督列为设计原则；这些是参考建议，不是可直接复制的通用安全证明。[Design principles](https://docs.aws.amazon.com/wellarchitected/latest/agentic-ai-lens/design-principles.html)
 
-下面的比率仅对非空定义域计算。若 `M_{\mathrm{present}}`、`M_{\mathrm{required}}` 或某个按模块组筛选出的集合为空，指标统一报告 `not_applicable`（demo 中为 `None`）；不以 epsilon、历史值或默认 `1.0/0.0` 代替缺失样本。上线门禁必须显式处理该状态。
+## 15.9 失败恢复先核对副作用，再决定是否重跑
 
-必需模块覆盖率：
-
-```math
-C_{\mathrm{mod}}=\frac{|M_{\mathrm{present}}\cap M_{\mathrm{required}}|}{|M_{\mathrm{required}}|}
-```
+如果工作进程退出，系统必须先区分哪些步骤可安全重试、哪些步骤可能已经改变外部世界。一个持久 checkpoint 只能恢复它实际保存的状态，不能自动撤销已提交的文件写入、邮件、数据库更新或远端 PR。
 
-接口契约覆盖率：
+| 失败点 | 本地已知事实 | 合理的恢复动作 |
+|---|---|---|
+| API 接收后客户端超时 | Task Store 已有相同逻辑请求标识。 | 返回已存在的 task，而不是新建另一个同样的任务。 |
+| worker 在只读搜索时崩溃 | 没有发生外部写入；当前 run 未完成。 | 以相同输入和预算重试，保存新的 run 记录。 |
+| 补丁写入 workspace 后崩溃 | 磁盘是否保留取决于环境生命周期；模型输出不能证明文件状态。 | 重新连接或从已保存快照恢复，读取实际 diff，再决定继续或重建。 |
+| 远端服务接受操作但回执丢失 | 外部状态 unknown；本地缺少确认不等于操作没发生。 | 用稳定 operation ID 查询远端状态；确认前不盲目重放。 |
+| 用户提出取消 | 取消请求只代表系统收到停止意图。 | 停止继续派发、终止可控进程，并检查已发出的外部动作；无法确认时保留 `needs_reconciliation`。 |
 
-```math
-C_{\mathrm{contract}}=
-\frac{1}{|M_{\mathrm{present}}|}
-\sum_{i\in M_{\mathrm{present}}}\mathbb{1}[c_i=1]
-```
+LangGraph 的官方 fault-tolerance 文档明确说明，其节点重试会从节点开头重新执行，语义是至少一次；节点中的外部副作用不由 checkpoint 包住。文档建议在副作用前持久化稳定幂等键，并将丢失确认保留为 unknown，再查询 provider 状态。这说明 checkpoint 和幂等键能改善恢复，但并不构成跨系统 exactly-once 保证。[Fault tolerance](https://docs.langchain.com/oss/python/langgraph/fault-tolerance)
 
-状态机覆盖率：
+取消和回滚也要分开。取消可以阻止未来步骤，或请求正在运行的进程退出；它不能保证已经发送的请求被远端撤销。回滚通常需要另一个明确的补偿动作，也可能失败。状态机应如实保留这些差异，而不是把所有中断都归并为 `failed`。
 
-```math
-C_{\mathrm{state}}=
-\frac{1}{|M_{\mathrm{state}}|}
-\sum_{i\in M_{\mathrm{state}}}\mathbb{1}[s_i=1]
-```
-
-权限集成覆盖率：
-
-```math
-C_{\mathrm{perm}}=
-\frac{1}{|M_{\mathrm{risk}}|}
-\sum_{i\in M_{\mathrm{risk}}}\mathbb{1}[a_i=1]
-```
-
-上下文控制覆盖率：
-
-```math
-C_{\mathrm{ctx}}=
-\frac{1}{|M_{\mathrm{ctx}}|}
-\sum_{i\in M_{\mathrm{ctx}}}\mathbb{1}[b_i=1]
-```
-
-执行隔离覆盖率：
-
-```math
-C_{\mathrm{iso}}=
-\frac{1}{|M_{\mathrm{exec}}|}
-\sum_{i\in M_{\mathrm{exec}}}\mathbb{1}[e_i=1]
-```
-
-Trace 覆盖率：
-
-```math
-C_{\mathrm{trace}}=
-\frac{1}{|M_{\mathrm{present}}|}
-\sum_{i\in M_{\mathrm{present}}}\mathbb{1}[t_i=1]
-```
-
-Replay 就绪率：
-
-```math
-C_{\mathrm{replay}}=
-\frac{1}{|M_{\mathrm{present}}|}
-\sum_{i\in M_{\mathrm{present}}}\mathbb{1}[r_i=1]
-```
-
-Evaluation 接入率：
-
-```math
-C_{\mathrm{eval}}=
-\frac{1}{|M_{\mathrm{present}}|}
-\sum_{i\in M_{\mathrm{present}}}\mathbb{1}[q_i=1]
-```
-
-恢复覆盖率：
-
-```math
-C_{\mathrm{recover}}=
-\frac{1}{|M_{\mathrm{present}}|}
-\sum_{i\in M_{\mathrm{present}}}\mathbb{1}[u_i=1]
-```
-
-版本捕获率：
-
-```math
-C_{\mathrm{ver}}=
-\frac{1}{|M_{\mathrm{present}}|}
-\sum_{i\in M_{\mathrm{present}}}\mathbb{1}[v_i=1]
-```
-
-企业治理就绪率：
-
-```math
-C_{\mathrm{gov}}=
-\frac{1}{|M_{\mathrm{present}}|}
-\sum_{i\in M_{\mathrm{present}}}\mathbb{1}[h_i=1]
-```
-
-最终上线准入条件可以形式化为：
-
-```math
-G_{\mathrm{system}}=
-\prod_{z\in\mathcal{Z}}
-\mathbb{1}[C_z\ge \tau_z]
-```
-
-其中 `\mathcal{Z}` 包含 module、contract、state、permission、context、isolation、trace、replay、eval、recovery、version 和 governance。这组条件的价值是防止面试回答只画出模块名，却没有说明模块间契约、权限边界、状态恢复和评估复现。
-
-### 15.23.1 最小可运行 Harness 系统设计审计 demo
-
-下面的 0 依赖 demo 不调用模型、不执行命令、不访问文件系统和网络。它只审计一张 toy module table，用来演示如何把 Agent Harness 系统设计从架构图落到上线条件。
-
-```python
-required_modules = {
-    "api_server",
-    "session_manager",
-    "agent_orchestrator",
-    "context_builder",
-    "model_adapter",
-    "capability_registry",
-    "permission_engine",
-    "execution_engine",
-    "sandbox_manager",
-    "diff_manager",
-    "trace_store",
-    "replay_engine",
-    "eval_runner",
-    "policy_auth",
-}
-stateful_groups = {"session", "orchestrator", "permission", "execution", "replay", "eval"}
-risky_groups = {"api", "capability", "permission", "execution", "sandbox", "external"}
-context_groups = {"context", "model", "capability", "trace", "external"}
-execution_groups = {"execution", "sandbox", "external"}
-
-components = [
-    {"name": "api_server", "group": "api", "present": True, "contract": True, "stateful": True, "permission": True, "context_budget": True, "isolated": True, "trace": True, "replay": True, "eval": False, "recovery": True, "version": True, "governance": True},
-    {"name": "session_manager", "group": "session", "present": True, "contract": True, "stateful": True, "permission": True, "context_budget": True, "isolated": True, "trace": True, "replay": True, "eval": True, "recovery": True, "version": True, "governance": True},
-    {"name": "agent_orchestrator", "group": "orchestrator", "present": True, "contract": True, "stateful": False, "permission": True, "context_budget": True, "isolated": True, "trace": True, "replay": False, "eval": True, "recovery": False, "version": True, "governance": False},
-    {"name": "context_builder", "group": "context", "present": True, "contract": True, "stateful": True, "permission": True, "context_budget": False, "isolated": True, "trace": True, "replay": True, "eval": True, "recovery": True, "version": True, "governance": True},
-    {"name": "model_adapter", "group": "model", "present": True, "contract": True, "stateful": False, "permission": True, "context_budget": True, "isolated": True, "trace": True, "replay": False, "eval": True, "recovery": True, "version": False, "governance": True},
-    {"name": "capability_registry", "group": "capability", "present": True, "contract": False, "stateful": True, "permission": False, "context_budget": False, "isolated": True, "trace": True, "replay": True, "eval": True, "recovery": True, "version": False, "governance": False},
-    {"name": "permission_engine", "group": "permission", "present": True, "contract": True, "stateful": True, "permission": True, "context_budget": True, "isolated": True, "trace": True, "replay": True, "eval": True, "recovery": True, "version": True, "governance": True},
-    {"name": "execution_engine", "group": "execution", "present": True, "contract": True, "stateful": True, "permission": True, "context_budget": True, "isolated": False, "trace": True, "replay": False, "eval": True, "recovery": False, "version": True, "governance": True},
-    {"name": "sandbox_manager", "group": "sandbox", "present": True, "contract": True, "stateful": True, "permission": True, "context_budget": True, "isolated": False, "trace": False, "replay": False, "eval": True, "recovery": False, "version": False, "governance": True},
-    {"name": "diff_manager", "group": "execution", "present": True, "contract": True, "stateful": True, "permission": True, "context_budget": True, "isolated": True, "trace": True, "replay": True, "eval": True, "recovery": True, "version": True, "governance": True},
-    {"name": "trace_store", "group": "trace", "present": True, "contract": True, "stateful": True, "permission": True, "context_budget": True, "isolated": True, "trace": True, "replay": True, "eval": True, "recovery": True, "version": True, "governance": True},
-    {"name": "replay_engine", "group": "replay", "present": True, "contract": True, "stateful": True, "permission": True, "context_budget": True, "isolated": True, "trace": True, "replay": False, "eval": True, "recovery": True, "version": False, "governance": True},
-    {"name": "eval_runner", "group": "eval", "present": True, "contract": False, "stateful": True, "permission": True, "context_budget": True, "isolated": True, "trace": False, "replay": True, "eval": False, "recovery": True, "version": True, "governance": False},
-    {"name": "policy_auth", "group": "api", "present": True, "contract": True, "stateful": True, "permission": True, "context_budget": True, "isolated": True, "trace": True, "replay": True, "eval": True, "recovery": True, "version": True, "governance": False},
-    {"name": "mcp_a2a_gateway", "group": "external", "present": False, "contract": False, "stateful": False, "permission": False, "context_budget": False, "isolated": False, "trace": False, "replay": False, "eval": False, "recovery": False, "version": False, "governance": False},
-]
-
-
-def rate(values):
-    return round(sum(values) / len(values), 3) if values else None
-
-
-def ratio(numerator, denominator):
-    if denominator == 0:
-        return None
-    return round(numerator / denominator, 3)
-
-
-def at_least(value, minimum):
-    return value is not None and value >= minimum
-
-
-present_names = {component["name"] for component in components if component["present"]}
-missing_required = sorted(required_modules - present_names)
-metrics = {
-    "module_coverage": ratio(len(required_modules & present_names), len(required_modules)),
-    "interface_contract": rate([component["contract"] for component in components if component["present"]]),
-    "state_machine": rate([component["stateful"] for component in components if component["group"] in stateful_groups]),
-    "permission_integration": rate([component["permission"] for component in components if component["group"] in risky_groups]),
-    "context_control": rate([component["context_budget"] for component in components if component["group"] in context_groups]),
-    "execution_isolation": rate([component["isolated"] for component in components if component["group"] in execution_groups]),
-    "trace_coverage": rate([component["trace"] for component in components if component["present"]]),
-    "replay_readiness": rate([component["replay"] for component in components if component["present"]]),
-    "eval_readiness": rate([component["eval"] for component in components if component["present"]]),
-    "recovery_coverage": rate([component["recovery"] for component in components if component["present"]]),
-    "version_capture": rate([component["version"] for component in components if component["present"]]),
-    "enterprise_governance": rate([component["governance"] for component in components if component["present"]]),
-}
-
-thresholds = {
-    "module_coverage": 1.0,
-    "interface_contract": 0.95,
-    "state_machine": 0.95,
-    "permission_integration": 1.0,
-    "context_control": 0.9,
-    "execution_isolation": 0.95,
-    "trace_coverage": 0.95,
-    "replay_readiness": 0.85,
-    "eval_readiness": 0.9,
-    "recovery_coverage": 0.9,
-    "version_capture": 0.9,
-    "enterprise_governance": 0.9,
-}
-failed_gates = [
-    name
-    for name, minimum in thresholds.items()
-    if not at_least(metrics[name], minimum)
-]
-not_applicable_metrics = [name for name, value in metrics.items() if value is None]
-
-assert rate([]) is None
-assert ratio(0, 0) is None
-assert not at_least(None, 0.9)
-
-root_causes = {}
-for component in components:
-    causes = []
-    if not component["present"]:
-        causes.append("module_missing")
-    if component["present"] and not component["contract"]:
-        causes.append("interface_contract_missing")
-    if component["group"] in stateful_groups and not component["stateful"]:
-        causes.append("state_machine_missing")
-    if component["group"] in risky_groups and not component["permission"]:
-        causes.append("permission_not_bound")
-    if component["group"] in context_groups and not component["context_budget"]:
-        causes.append("context_budget_uncontrolled")
-    if component["group"] in execution_groups and not component["isolated"]:
-        causes.append("execution_isolation_missing")
-    if component["present"] and not component["trace"]:
-        causes.append("trace_missing")
-    if component["present"] and not component["replay"]:
-        causes.append("replay_not_ready")
-    if component["present"] and not component["eval"]:
-        causes.append("eval_not_ready")
-    if component["present"] and not component["recovery"]:
-        causes.append("recovery_missing")
-    if component["present"] and not component["version"]:
-        causes.append("version_not_captured")
-    if component["present"] and not component["governance"]:
-        causes.append("governance_missing")
-    if causes:
-        root_causes[component["name"]] = causes
-
-print(f"missing_required={missing_required}")
-print(f"metrics={metrics}")
-print(f"not_applicable_metrics={not_applicable_metrics}")
-print(f"failed_gates={failed_gates}")
-print(f"root_causes={root_causes}")
-print(f"harness_system_gate_pass={not failed_gates}")
-```
-
-一组典型输出：
-
-```text
-missing_required=[]
-metrics={'module_coverage': 1.0, 'interface_contract': 0.857, 'state_machine': 0.857, 'permission_integration': 0.75, 'context_control': 0.4, 'execution_isolation': 0.25, 'trace_coverage': 0.857, 'replay_readiness': 0.643, 'eval_readiness': 0.857, 'recovery_coverage': 0.786, 'version_capture': 0.714, 'enterprise_governance': 0.714}
-not_applicable_metrics=[]
-failed_gates=['interface_contract', 'state_machine', 'permission_integration', 'context_control', 'execution_isolation', 'trace_coverage', 'replay_readiness', 'eval_readiness', 'recovery_coverage', 'version_capture', 'enterprise_governance']
-root_causes={'api_server': ['eval_not_ready'], 'agent_orchestrator': ['state_machine_missing', 'replay_not_ready', 'recovery_missing', 'governance_missing'], 'context_builder': ['context_budget_uncontrolled'], 'model_adapter': ['replay_not_ready', 'version_not_captured'], 'capability_registry': ['interface_contract_missing', 'permission_not_bound', 'context_budget_uncontrolled', 'version_not_captured', 'governance_missing'], 'execution_engine': ['execution_isolation_missing', 'replay_not_ready', 'recovery_missing'], 'sandbox_manager': ['execution_isolation_missing', 'trace_missing', 'replay_not_ready', 'recovery_missing', 'version_not_captured'], 'replay_engine': ['replay_not_ready', 'version_not_captured'], 'eval_runner': ['interface_contract_missing', 'trace_missing', 'eval_not_ready', 'governance_missing'], 'policy_auth': ['governance_missing'], 'mcp_a2a_gateway': ['module_missing', 'permission_not_bound', 'context_budget_uncontrolled', 'execution_isolation_missing']}
-harness_system_gate_pass=False
-```
-
-这个 demo 的重点不是给出唯一架构答案，而是训练系统设计审计习惯。`module_coverage=1.0` 只能说明核心模块名都出现了；验收条件仍然失败，是因为接口契约、状态机、权限、上下文预算、执行隔离、trace、replay、eval、恢复、版本和治理没有全部闭环。面试中能讲出这些缺口，比只画一张大图更接近生产级思维。
-
-## 15.24 面试题
-
-### 题 1：如何设计一个 coding agent harness？
-
-参考回答：
-
-```text
-我会先澄清产品形态和安全边界。高层上分成客户端、server、session manager、agent orchestrator、context builder、model adapter、capability registry、permission engine、execution engine、trace store 和 eval runner。用户输入进入 session 后，context builder 构建上下文，model adapter 调模型，orchestrator 解析工具调用，permission engine 判断 allow/ask/deny，execution engine 执行文件、shell、MCP 或 A2A 调用，结果进入 trace 和 context，直到生成最终回答。所有文件修改生成 diff 和 revert 信息，所有高风险动作需要权限确认，评估和 replay 基于 trace 和 repo snapshot 实现。
-```
-
-### 题 2：为什么 session manager 很重要？
-
-参考回答：
-
-```text
-因为 coding agent 不是单轮问答。Session 需要保存用户目标、消息、工具调用、文件 diff、todo、权限请求、summary、trace 和 revert 状态。没有 session manager，就无法支持长任务、撤销、fork、share、异步执行、event stream 和 evaluation replay。
-```
-
-### 题 3：权限系统应该怎么设计？
-
-参考回答：
-
-```text
-权限系统要在 runtime 层执行，而不是只靠 prompt。它输入用户、workspace、agent、tool、参数、路径、组织策略和 session 临时授权，输出 allow、ask 或 deny。规则要支持系统默认、组织、用户、项目、agent 和 session 多层覆盖。高风险动作如读 .env、写外部目录、删除文件、git push、部署、数据库写入和发送邮件都应 ask 或 deny。
-```
-
-### 题 4：如何让 agent 既能理解大仓库，又不爆上下文？
-
-参考回答：
-
-```text
-不能把整个仓库塞进上下文。我会结合 repo map、grep/glob、LSP、git diff 和历史摘要。先用 repo map 提供全局骨架，再根据用户任务检索相关文件，读取关键片段，工具结果做摘要或落盘引用。上下文分为 policy、project、task、working、memory 几层，并用 token budget 控制每层大小。
-```
-
-### 题 5：如何设计 trace 和 replay？
-
-参考回答：
-
-```text
-Trace 要记录用户输入、context 版本、模型调用元信息、模型输出、工具调用输入输出、权限决策、文件 diff、shell 输出、MCP/A2A 调用、错误和最终答案。Replay 分 deterministic replay 和 re-evaluation replay。前者用录制的模型和工具结果复现 bug，后者重新调用模型比较新版本 agent。对外部系统要记录版本、输出 hash，并决定 replay 时 mock 还是真实调用。
-```
-
-## 15.25 小练习
-
-1. 画出一个 coding agent harness 的模块图，要求包含 session、context、model、tool、permission、execution、trace、eval。
-2. 设计 `Session`、`Message`、`ToolCall`、`PermissionRequest`、`FileChange` 五张表。
-3. 给 `bash`、`edit`、`read`、`mcp.github.create_issue`、`a2a.security_agent` 设计权限规则。
-4. 设计一个 context budget 分配方案：系统指令、项目规则、repo map、文件片段、工具结果、历史摘要各占多少。
-5. 设计一个 replay 方案，说明如何处理 MCP 外部系统结果。
-6. 设计一个 evaluation task schema，用于评估 agent 修复历史 bug 的能力。
-7. 设计一个企业版 harness 的 RBAC 和 audit log 方案。
-8. 写一个 0 依赖 Harness 系统设计审计脚本，输入 toy module table，输出 module、contract、state、permission、context、isolation、trace、replay、eval、recovery、version、governance 和 system gate。
-
-## 15.26 本章总结
-
-本章把第二十册前面的内容整合成一个完整系统设计答案。
-
-核心结论：
-
-1. Coding agent harness 不是模型 API 包装，而是完整 runtime。
-2. 高层架构应包含 client/server、session manager、agent orchestrator、context builder、model adapter、capability registry、permission engine、execution engine、trace store 和 eval runner。
-3. Session、Message、ToolCall、PermissionRequest、FileChange、TraceEvent 是关键数据模型。
-4. Context Builder 决定模型能否正确理解代码库，必须结合 repo map、检索、摘要和 token budget。
-5. Permission Engine 和 Sandbox 是安全边界，不能只靠 prompt。
-6. Trace、diff、revert、replay 和 evaluation 是生产级 coding agent 的核心能力。
-7. MCP、A2A、skills、plugins 和 SDK 让 harness 具备扩展性，但也扩大了治理面。
-8. 企业落地时要重点关注 RBAC、审计、secret、防 prompt injection、外部系统权限和评估复现。
-
-下一章会整理 Agent Harness 真实实战坑和面试题，把本书的知识转成排查清单和高频问答。
+完整的长任务 checkpoint 和文件/外部状态所有权留给[第十七章](17-long-running-agent与checkpoint.md)与[第二十一章](21-persistent-workspace与状态边界.md)展开；本章只在系统图中指出它们的责任位置。
+
+## 15.10 Trace、Evaluation 和发布闭环
+
+Trace 记录一次真实运行发生了什么；Evaluation 使用固定任务和环境比较配置。二者有关联，但不能互相替代。
+
+单次运行至少要能关联 task、run、workspace 和 trace；保存模型/provider 配置、prompt 与 tool schema 版本、策略版本、仓库 revision、环境镜像、verifier 版本、工具参数摘要、权限决定、实际派发回执、退出状态和 Artifact ID。Trace 中只保留诊断所需内容，敏感输入与输出需要最小化、脱敏和访问控制；不要假设所有内部推理文本都可见或应当长期保存。
+
+固定评估样本则要固定仓库快照、问题、验收器、工具/权限范围和运行环境。对每个 run 分类记录任务通过、按策略安全拒绝、补丁不符合要求、执行环境故障、评估器故障或结果 unknown。将安全拒绝和基础设施错误算成模型失败，或把拒绝动作当作真实越权副作用，都会误导设计决定。
+
+发布时应版本化模型选择、prompt、工具目录、权限策略、执行环境和 verifier。合理路径是先在固定样本上回归，再在隔离 staging 环境做端到端检查，然后对限定任务和用户逐步放量。每一阶段要有对应的安全和业务检查；不合格时需要能回到一个已知版本。具体阈值取决于任务影响和证据量，本章不设跨产品通用分数或自动上线门槛。
+
+## 15.11 根据运行任务选择部署形态
+
+同一套 Harness 可以有不同部署边界。区别不在于某个名称更先进，而在于谁拥有模型循环、状态、执行环境、密钥和恢复责任。
+
+| 部署形态 | 常见责任划分 | 主要代价与问题 |
+|---|---|---|
+| 单用户本地 CLI | 用户进程控制 Runtime；仓库和工作区在本机；文件和命令可直接接本地开发环境。 | 易于贴近开发者工具，但进程退出、机器离线、多客户端同步和企业审计需要另外设计。 |
+| 团队自托管服务 | 应用验证用户与租户；任务/会话数据库和队列保存工作；worker 在隔离环境中执行；对象存储保存 artifact。 | 支持异步、协作与统一控制，但需要负责工作进程、环境生命周期、数据隔离、密钥和运维。 |
+| 管理型 Harness | Provider 负责公开合同范围内的模型循环或 session；应用仍需处理业务身份、任务授权、业务数据与最终验收。 | 接入成本可能较低，但存储、保留、环境、事件失败、可配置性和迁移能力都要逐项核对。 |
+
+OpenAI 当前 Agents API 的文档就是第三类的一种公开实例：托管 Harness 可以和可选环境分开，应用为 self-hosted 环境管理启动、重连和释放；删除 session 也不会自动停止自管 compute。具体责任必须以所用服务的当前文档为准，不能从某个托管 API 推断所有供应商都会处理相同生命周期。[Agents API architecture](https://developers.openai.com/api/docs/guides/agents-api/architecture)；[Sandbox lifecycle](https://developers.openai.com/api/docs/guides/agents-api/environments/lifecycle)
+
+无论采用哪种形态，扩容设计都要区分 API 接收能力、待执行队列、模型 provider 并发、工作区资源和远端工具限制。任务超过交互等待时间时，应返回可查询的 Task ID 并提供进度事件；不能让 HTTP 连接是否仍打开成为任务唯一状态记录。每个租户的并发、模型调用和执行资源也要有额度，以免一个长任务耗尽共享池。
+
+粗略估算时，把资源换成有单位的工作量，再用实际运行数据校准。假设教学构造的忙时每小时提交 24 个修复任务，每个任务累计占用隔离 worker 5 分钟；模型等待期间如果 worker 可以释放，这 5 分钟只统计真实占用计算资源的时间。并发工作槽位（worker slot）的平均占用量约为 $24 \times 5 \div 60 = 2$，其中 24 的单位是任务/小时，5 是 worker 分钟/任务，60 是分钟/小时。这只是平均值，不能当作最终 worker 数：测试时间长尾、启动开销、突发到达和目标排队时间仍要用目标环境的测量来核算。
+
+同一工作量还要分别估模型和存储。若每个任务平均调用模型 6 次，忙时大约产生 $24 \times 6 = 144$ 次模型请求；token 数应由每次输入/输出的实际分布另算，不能从 worker slot 推出。若每天交付 50 份、每份平均 200 KB 的补丁和报告，并保留 30 天，教学估算是 $50 \times 200 \times 30 = 300{,}000$ KB，约 300 MB 的基础 artifact 数据；Trace、快照、副本和版本保留还会增加空间。部署容量应根据观测到的峰值、延迟目标和保留策略继续调整，不把这组示例值当成推荐配置。
+
+## 15.12 分阶段构建，每阶段都留下验收证据
+
+可以按风险从低到高推进，但阶段并非所有团队都必须照此排列：
+
+1. **单用户最小闭环：** 一个明确任务类型，固定仓库版本，读取/搜索/小补丁/指定测试，保留 diff 和任务结果；高影响外部动作暂不开放。
+2. **持久任务与恢复：** 保存 Task 与 Run 状态、运行事件和 artifacts；定义重复提交、崩溃、取消和未知回执的处理方式。
+3. **团队服务：** 增加租户身份、隔离 worker、异步队列、状态查询、进度事件、密钥管理、资源预算和审计访问控制。
+4. **扩展与多环境：** 接入 MCP、A2A、插件或多个 provider；每一种扩展都有版本、权限、输出预算、trace 和 mock/真实集成的评估边界。
+5. **受控放量：** 固定回归样本和策略版本，先限定用户与任务，观察任务结果、拒绝、未知状态、时延和成本，再按证据扩大动作范围。
+
+每个阶段都要写清它允许什么动作、验收什么、失败后怎么停和恢复。新能力不是自动继承上一阶段的信任：新增远端 server、模型、工具或用户角色都需要重新评估身份、数据范围、预算和 verifier。
+
+## 15.13 把关键取舍说成带条件的决定
+
+系统设计面试不需要把每个维度都说成越多越好。要说明选择适用的条件以及它会带来什么代价。
+
+| 取舍 | 更偏向左侧的条件 | 代价与补救 |
+|---|---|---|
+| 固定工作流 / 动态 Agent 规划 | 流程和验收稳定时固定顺序；路径确实未知时才让 Agent 规划。 | 固定流程适应性较低；动态规划增加延迟、循环和审计难度。 |
+| 本地 / 远程工作区 | 依赖用户本地环境、源代码不能离开设备时偏本地；需要异步、隔离或团队协作时偏远程。 | 本地难以统一服务治理；远程增加存储、隔离、网络和环境维护责任。 |
+| 多 Agent / 单 Agent 多工具 | 独立任务可并行且互相依赖少时考虑多 Agent；依赖顺序明确时先用单 Agent 工作流。 | 并发提高协调与冲突成本；显式共享状态和交接合同可以降低混乱，但不能消除成本。 |
+| Trace 完整度 / 数据最小化 | 事故影响和审计要求高时保留足够事件与版本证据。 | 原始内容可能包含秘密或个人信息；按需要记录字段、限制访问和保留时间。 |
+| 持久化 / 临时资源 | 需要跨中断恢复的状态和 artifact 应持久化；可重建的缓存和临时计算可丢弃。 | 持久数据需要访问控制、迁移、清理和恢复演练；临时资源需要明确丢失后的重建路径。 |
+| 同步 / 异步请求 | 任务短、用户需要即时交互时可同步；可能等待模型、审批或长测试时用异步任务和事件流。 | 异步增加状态查询、通知和重复消息处理；同步长连接易受客户端和代理超时影响。 |
+
+每项决定都可以回到四个问题：解决哪个用户问题，要求哪些前置，依赖什么机制或数据，失败时由谁观察和恢复。这样可以避免把技术偏好写成普遍架构定律。
+
+## 15.14 用四步组织面试回答
+
+可以用下列顺序组织一个完整但不冗长的答案：
+
+1. **定契约：** 说明用户、任务、允许与禁止的动作、成功证据、负载、数据和交互要求。
+2. **画边界：** 区分 API/身份、Task 与 Session、Runtime、Context/Model、Policy/Executor、workspace、持久状态、artifact/trace 和 verifier。
+3. **走一条任务：** 从提交到模型提议、授权、实际执行、观察、验收和通知，逐步说明谁做什么、留下什么事实。
+4. **讲故障和取舍：** 挑一个崩溃或丢失回执的场景，说明如何先查外部事实、再重试或接管；最后解释部署、成本、隐私和扩展选择。
+
+例如可以这样概括：
+
+> 我会先约定任务从哪个仓库版本开始、允许读写哪些资源、用什么测试和 diff 条件验收，以及哪些外部动作要单独授权。请求进入 API 后保存为有身份范围的 Task，worker 在隔离 workspace 中创建一个 Run；Context Builder 只取相关文件、规则和失败反馈，模型给出工具提议。Runtime 根据任务策略逐次检查参数，再由执行器运行读取、编辑和测试，结果连同版本、diff 和回执保存。最后 verifier 决定是否完成，应用向用户返回可复核的 artifact。如果 worker 在外部操作后丢了回执，我先查远端状态并保留 unknown，不直接盲目重放。
+
+这段回答能展示系统边界，也留下讨论容量规划、身份模型、成本预算或 rollout 的入口。不要一次把所有组件名念完却不解释它们怎样交接。
+
+## 15.15 小练习
+
+1. 将一个 coding agent 需求写成任务契约，列出代码起点、允许动作、禁止动作、验收证据和停止条件。
+2. 为单用户 CLI 和团队异步服务分别画责任图，标出 Task Store、队列、Runtime、workspace、artifact、trace 和身份系统由谁管理。
+3. 追踪一次从模型提议到 verifier 的任务过程。为每一步写出主体、资源、策略决定、真实回执和持久证据。
+4. 假设 worker 在 workspace 已写入补丁、但测试回执尚未入库时崩溃。分别说明 workspace 可恢复和不可恢复时怎样继续，并写出不能直接推断的事实。
+5. 假设 PR 服务接受了请求但客户端没有收到响应。设计查询、幂等键和 `needs_reconciliation` 的处理路径，说明什么条件下可以安全继续。
+6. 为本章的登录修复任务设计离线评估夹具，固定仓库 revision、测试环境、工具策略和 verifier；将任务失败、安全拒绝、基础设施错误和 evaluator error 分开报告。
+7. 以三分钟回答一次系统设计题：先讲契约，再讲边界，完整走一条请求，最后解释一个副作用不明的恢复场景。
+
+## 15.16 本章回收
+
+设计 Agent Harness 时，先规定任务契约和成功证据，再决定 Runtime、环境和存储如何分工。Session、Task、Run、Workspace、Artifact、Approval 和外部 Effect Record 代表不同事实，不能靠单一对话状态替代。
+
+模型只提出下一步；策略层判断是否允许，执行器在限定环境中实施，Trace 保存事件证据，Verifier 判断结果是否达到目标。可靠恢复要求把 checkpoint 和外部副作用分开看：状态可恢复不代表外部操作可撤销，回执丢失也不证明没有副作用。
+
+部署与自动化范围应随任务风险、数据敏感度、可验证性、时限和成本逐步扩大。遇到真实故障时，第十六章会从症状和证据开始定位；长任务的 checkpoint 与持久工作区再分别由第十七章和第二十一章展开。
+
+## 资料与证据范围
+
+下列公开资料支持正文中与具体实现有关的边界判断。它们是各自平台或框架的当前文档，不构成统一标准。
+
+- OpenAI：[Agents API architecture](https://developers.openai.com/api/docs/guides/agents-api/architecture)、[Run and continue sessions](https://developers.openai.com/api/docs/guides/agents-api/sessions)、[Sandbox lifecycle](https://developers.openai.com/api/docs/guides/agents-api/environments/lifecycle)，访问日期 2026-11-18。
+- Google ADK：[State](https://adk.dev/sessions/state/)、[Event Loop](https://adk.dev/runtime/event-loop/)、[Artifacts](https://adk.dev/artifacts/)，访问日期 2026-11-18。
+- LangGraph：[Persistence](https://docs.langchain.com/oss/python/langgraph/persistence)、[Fault tolerance](https://docs.langchain.com/oss/python/langgraph/fault-tolerance)，访问日期 2026-11-18。
+- 架构指南：[AWS Agentic AI Lens](https://docs.aws.amazon.com/wellarchitected/latest/agentic-ai-lens/)、[Microsoft AI agent orchestration patterns](https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/ai-agent-design-patterns)，访问日期 2026-11-18。
+- 技术事实、检索范围和未验证边界见[Agent Harness 系统设计外部资料记录](../../research/agent-harness-system-design-evidence-2026-11-18.md)。

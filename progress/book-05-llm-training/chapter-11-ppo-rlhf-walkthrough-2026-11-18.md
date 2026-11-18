@@ -26,3 +26,10 @@
 - 同一算术题贯穿 SFT 示范、chosen/rejected 偏好对和 policy rollout。伪代码之后按其顺序拆开 reward、GAE/value target 与 clipped policy loss；明确 actor 和 critic 使用不同 loss 与 optimizer。
 - 更正 token reward 的解释：三个位置的 KL 成本合计 `0.06`，末位置承担 `0.03`，所以加入 `1.50` 的回答分后该位置 reward 为 `1.47`。按教学用 `0.5 × token mean squared error`，critic loss 初值约 `0.5895`。
 - 验收：`git diff --check` 通过；手工静态检查确认 Markdown fence 数为偶数、50 个本地 Markdown 链接均可解析且目标存在。约定伪代码不作为可运行代码执行，未运行测试或 PDF 构建。仓库临时目录中的 `check_ch11_review.py` 不存在，因此本地链接使用一次性只读检查复核。
+
+## 本轮继续修订：压缩 PPO 伪代码
+
+- 根据读者反馈，删去伪代码里的 dataloader、loss 展开、反向传播、优化器和梯度裁剪等实现步骤；SFT、reward model 训练、reward shaping、GAE 和 PPO 更新改用简短动作函数表示。
+- 保留读者需要追踪的主线：从云舟-32B-SFT 复制 policy 与冻结 reference，用 chosen/rejected 偏好对训练并冻结 reward model，从 SFT 初始化 critic，再按“采样—打分与 KL—GAE—更新 policy/critic—评估”循环。
+- 伪代码仍与后文同一条算术回答衔接；详细 reward、GAE、value target 和 clipped ratio 手算留在后文，不在伪代码重复推导。
+- 伪代码为说明流程的非执行片段。完成 `git diff --check`、Markdown 围栏、链接和公式的静态复核；未运行测试或 PDF 构建。

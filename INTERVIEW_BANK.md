@@ -3335,7 +3335,7 @@
 
 40C. 如何设计一个最小 Coding Agent Harness？
     考察点：runtime、action parser、tool registry、permission gate、sandbox、trace、replay、evaluation。
-    回答框架：先定义 harness 是模型外层的运行和控制框架，而不是单个 prompt 或模型 API。最小闭环包括 context builder、model adapter、action parser、tool registry、execution engine、permission gate、state store、trace logger 和 evaluator；最小工具包括 read file、search、apply patch 和 run tests。上线门禁要看 parse valid rate、tool execution success、unauthorized execution rate、confirmation coverage、observation use、state update、trace completeness、budget overrun 和 task success。核心观点是 coding agent harness 不能只看最终 diff，还要证明动作受控、反馈被使用、状态可恢复、trace 可 replay。
+    回答框架：先定义一个具体任务和成功证据，再搭最小闭环：Context Builder 准备相关输入，Model Adapter 与模型交互，Runtime 解析动作，Policy 检查调用者、动作和资源，Executor 在受限 workspace 中运行读、搜索、编辑和测试工具，Verifier 独立检查补丁与验收条件。Task 状态、Artifact、实际执行回执和 Trace 要能关联起来。最小设计不要求先加入多 Agent、完整回放平台或所有企业治理模块；是否增加它们取决于任务时长、风险、并发和审计要求。用单任务完整走读和明确分母的评估证据说明系统行为，不合成通用上线分数或 gate。
 
 40D. 如何设计一个可恢复的 Agent Runtime？
     考察点：session、task state、context、adapter、parser、error handler、checkpoint、cancel / timeout、trace。
@@ -3388,8 +3388,8 @@
      回答框架：先划清对象：MCP 连接 Host 与 tools、resources、prompts Server；A2A 让独立 Agent 用 AgentCard 发现能力，并围绕 Task、Message 和 Artifact 协作。随后固定协议和实现版本：MCP `2026-07-28` 使用无协议会话的请求生命周期，旧版仍有 initialize 握手；`io.modelcontextprotocol/tasks` 是可选且当前为 Draft 的扩展；A2A 以 v1.0.1 规范中的接口版本和 Task 状态为准。将发现结果注册成带来源、schema/card 摘要、身份/scope 和本地 allow/ask/deny 策略的能力快照。运行时分别保留本地 task ID、MCP request ID/可选 task handle、A2A taskId/contextId；不能把这些 ID 或 Task `COMPLETED` 当作授权和验收。安全控制要区分认证、对端资源授权、Harness 任务策略、用户确认、操作系统隔离和结果验收；凭据采用最小 scope，不能因为跨协议委派就默认转交上游 token。外部描述、resource、tool result、Message 和 Artifact 要保留来源并按不可信数据处理。Trace 记录版本、远端对象 ID、策略决定、状态与执行回执，同时限制敏感内容；回放时固定 fixture、能力快照、身份、环境和 verifier，并区分固定回执、mock/snapshot 与真实 integration。最后由本地独立 verifier 检查副作用和用户目标；取消请求不等于回滚，超时后有副作用的操作须核实或保持 unknown，不能盲目重试。
 
 40Q. 如何系统设计一个生产级 Agent Harness？
-     考察点：需求澄清、模块边界、session、orchestrator、context builder、model adapter、capability registry、permission engine、execution engine、sandbox、diff/revert、trace、replay、eval、MCP/A2A、server/SDK、RBAC、治理。
-     回答框架：先澄清产品形态、任务范围、执行权限、外部系统、安全等级、评估和多租户要求。高层架构可以拆成 client / server、session manager、agent orchestrator、context builder、model adapter、capability registry、permission engine、execution engine、sandbox / diff / git / LSP / MCP / A2A、trace store、replay engine、evaluation runner 和 config / policy / auth / RBAC。核心数据模型包括 Session、Message、ToolCall、PermissionRequest、FileChange、TraceEvent 和 EvalRun。运行链路是：用户消息进入 session，context builder 构建预算受控上下文，model adapter 调模型，orchestrator 解析动作，permission engine 做 allow / ask / deny，execution engine 在沙箱和 workspace 边界内执行，结果进入 trace 和下一轮上下文，最终生成 diff、测试结果和总结。生产级设计要补充系统指标：runtime module coverage、interface contract coverage、agent state machine coverage、permission integration coverage、context control coverage、execution isolation coverage、system trace coverage、system replay readiness、system eval readiness、recovery coverage、harness version capture、enterprise governance readiness 和 harness system gate。
+     考察点：任务契约、工作流与 Agent 的分工；API/身份、Task/Session、Runtime、模型与能力、策略与执行、workspace、Artifact/Trace、Verifier 的责任边界；状态所有权；外部副作用恢复；评估、部署与放量。
+     回答框架：先约定任务目标、仓库 revision、允许和禁止动作、验收条件、用户/租户、数据边界、时限与负载。选择一个合成修复任务，说明确定性阶段由程序控制，模型只处理需要开放判断的部分。架构图标出请求入口、Task Store/队列、Runtime、Context Builder/Model Adapter、Capability Registry、逐次策略检查、执行器/隔离 workspace、Artifact/事件/Trace 与独立 verifier。区分 Session、Task、Run、Workspace、Artifact、Approval 和外部 Effect Record；按任务状态解释提议、实际执行、验收与完成。挑一个 worker 崩溃或远端回执丢失的场景，先检查 workspace 或 provider 状态，再决定恢复、重试或保留 unknown；不要把 checkpoint 当作外部回滚或 exactly-once。最后按本地 CLI、团队自托管或 managed Harness 说明状态、环境和密钥归谁管理，并用固定任务/环境、版本记录和分项结果设计评估与受控发布。指标需各自声明对象和分母，不汇总成通用 harness score 或上线 gate。
 
 40R. 如何排查和回答 Agent Harness 实战坑？
      考察点：triage、permission、context、edit、command、prompt injection boundary、trace、replay、eval、doom loop、environment parity。
