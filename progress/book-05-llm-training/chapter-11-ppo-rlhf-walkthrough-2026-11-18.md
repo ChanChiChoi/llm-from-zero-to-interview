@@ -19,3 +19,10 @@
 - `git diff --check` 通过；静态检查确认本章 50 个 Markdown 链接的本地目标均存在、132 行围栏标记成对；目录和简介仍指向本章。
 - 未运行测试或 PDF 构建。
 - 偏好模型分数仍只是对偏好标签的代理，不构成数学正确性证明；本例已在正文注明这一边界。
+
+## 本轮继续修订：补上训练脚本顺序
+
+- 根据读者反馈，将 §3 开头改为 PyTorch 风格的端到端伪代码：从 Base/SFT 数据与 checkpoint 开始，分别展示 policy、冻结 reference、偏好对训练的 reward model、以 GAE return 为目标训练的 critic，再展示 rollout、token log probability、KL shaping、GAE、PPO minibatch 更新和评估循环。
+- 同一算术题贯穿 SFT 示范、chosen/rejected 偏好对和 policy rollout。伪代码之后按其顺序拆开 reward、GAE/value target 与 clipped policy loss；明确 actor 和 critic 使用不同 loss 与 optimizer。
+- 更正 token reward 的解释：三个位置的 KL 成本合计 `0.06`，末位置承担 `0.03`，所以加入 `1.50` 的回答分后该位置 reward 为 `1.47`。按教学用 `0.5 × token mean squared error`，critic loss 初值约 `0.5895`。
+- 验收：`git diff --check` 通过；手工静态检查确认 Markdown fence 数为偶数、50 个本地 Markdown 链接均可解析且目标存在。约定伪代码不作为可运行代码执行，未运行测试或 PDF 构建。仓库临时目录中的 `check_ch11_review.py` 不存在，因此本地链接使用一次性只读检查复核。
