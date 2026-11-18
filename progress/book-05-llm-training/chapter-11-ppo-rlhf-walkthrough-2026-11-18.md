@@ -32,4 +32,16 @@
 - 根据读者反馈，删去伪代码里的 dataloader、loss 展开、反向传播、优化器和梯度裁剪等实现步骤；SFT、reward model 训练、reward shaping、GAE 和 PPO 更新改用简短动作函数表示。
 - 保留读者需要追踪的主线：从云舟-32B-SFT 复制 policy 与冻结 reference，用 chosen/rejected 偏好对训练并冻结 reward model，从 SFT 初始化 critic，再按“采样—打分与 KL—GAE—更新 policy/critic—评估”循环。
 - 伪代码仍与后文同一条算术回答衔接；详细 reward、GAE、value target 和 clipped ratio 手算留在后文，不在伪代码重复推导。
-- 伪代码为说明流程的非执行片段。完成 `git diff --check`、Markdown 围栏、链接和公式的静态复核；未运行测试或 PDF 构建。
+- 伪代码为说明流程的非执行片段。完成 `git diff --check`、Markdown 围栏和链接的静态检查；本轮未改公式。未运行测试或 PDF 构建。
+
+## 本轮补充 score/value head 结构
+
+- 在不展开训练器细节的前提下补齐两个 head：`score_head = Linear(H, 1)`，将完整回答末尾的隐藏向量映射为一个回答分数；`value_head = Linear(H, 1)`，将每个生成位置的隐藏向量映射为该前缀的 `V(s_t)`。
+- 伪代码其余主流程与后文算例保持不变。检查结果：`git diff --check` 通过，134 行 Markdown 围栏成对，50 个本地链接目标存在；未运行测试或 PDF 构建。
+
+## 本轮重写 PPO 的 reward 与 GAE 说明
+
+- 根据读者反馈，删去 §3 中为演算临时设定的 RM 分数、token log-ratio、value、returns、loss 和 PPO ratio 数值链；改用同一条回答说明“整条回答分数落在末 token、KL 项逐 token 计算、GAE 把终局信号传回前缀、returns 训练 critic”的关系。
+- 补上对应的符号表达和终止/截断 mask 说明；clipped surrogate 的数值例子沿用前文 §1.3，避免在 §3 重复另设一组数字。将 `β` 的额外数值例子改为其对偏好分数与 reference 偏移的定性取舍。
+- 此次改写覆盖此前记录中的 §3 教学手算；旧数值只代表较早版本的编辑记录，不再对应当前正文。
+- 本轮未改变章节结论或研究事实。检查结果：`git diff --check` 通过，138 行 Markdown 围栏成对，50 个本地链接目标存在；公式围栏已静态检查。未运行测试或 PDF 构建。
