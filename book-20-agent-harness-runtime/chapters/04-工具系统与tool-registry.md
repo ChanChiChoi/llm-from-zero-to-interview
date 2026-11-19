@@ -345,19 +345,21 @@ MCP 2026-07-28 规范要求客户端不要把不可信服务器的 tool annotati
 
 下面两个比例回答不同问题。分母必须使用真正经过相应阶段的请求：
 
+在同一观察窗口内，$N_{\mathrm{schema\_checked}}$ 表示已解析出工具并实际进入 schema 校验的提议数，$N_{\mathrm{schema\_rejected}}$ 表示其中被 schema 拒绝的提议数；$N_{\mathrm{dispatched\_calls}}$ 表示已派发给执行器的调用数，$N_{\mathrm{executor\_errors}}$ 表示这些派发调用中发生执行器内部错误的数量。未知工具名、解析失败、策略拒绝和用户拒绝分别在其对应阶段计数，不并入这两个分子。
+
 ```math
 r_{\mathrm{schema\_reject}}=
 \frac{N_{\mathrm{schema\_rejected}}}
-{N_{\mathrm{tool\_proposals}}}
+{N_{\mathrm{schema\_checked}}},\qquad N_{\mathrm{schema\_checked}}>0
 ```
 
 ```math
 r_{\mathrm{executor\_error}}=
 \frac{N_{\mathrm{executor\_errors}}}
-{N_{\mathrm{dispatched\_calls}}}
+{N_{\mathrm{dispatched\_calls}}},\qquad N_{\mathrm{dispatched\_calls}}>0
 ```
 
-在一份**教学构造**的 20 次调用账本中，2 次提议因 schema 不合格而在派发前被拒；18 次进入策略判断，其中 1 次被拒绝，17 次符合策略；15 次实际派发，另有两次在确认或其他前置阶段结束。15 次派发中有 2 次执行器内部错误，13 次得到正常执行回执；其中 4 次由测试运行器完成，1 次测试命令退出码为 1。
+分母为 0 时该比例记为 N/A，并报告没有样本，不能记成 0%。在一份**教学构造**的 20 次调用账本中，20 次提议都进入 schema 校验，其中 2 次因 schema 不合格而在派发前被拒；18 次进入策略判断，其中 1 次被拒绝，17 次符合策略；15 次实际派发，另有两次在确认或其他前置阶段结束。15 次派发中有 2 次执行器内部错误，13 次得到正常执行回执；其中 4 次由测试运行器完成，1 次测试命令退出码为 1。
 
 因此，schema 拒绝率是 2/20，执行器内部错误率是 2/15。4 次测试运行中有 1 次退出码为 1，即 1/4 的测试调用报告了失败结果；这不是执行器内部错误。这个示例说明分母如何影响解释，不是生产观测，也没有提供任何通用合格门槛。不要把这些率合成一个总分或据此推导发布结论；是否可接受取决于动作风险、任务要求、样本范围和验收规则。
 
@@ -391,7 +393,7 @@ runtime:
   execution:
     timeout_seconds: 10
     retry: never_on_conflict
-    idempotency: compare_expected_revision
+    revision_precondition: compare_expected_revision
   result:
     normalizer: workspace_patch_v1
     output_limit_chars: 2000
@@ -400,7 +402,7 @@ runtime:
 version: 1.0
 ```
 
-这里的 `permission`、`effect` 和 `confirmation` 并非同一个字段的不同写法。策略要根据当前身份、任务和资源判定动作是否允许；副作用描述潜在影响；确认规则决定何时将具体操作交给用户审阅；执行版本检查保护并发状态。`output_limit_chars` 也只限制回传或摘要大小，不应该悄悄改变原始结果的含义。
+这里的 `permission`、`effect` 和 `confirmation` 并非同一个字段的不同写法。策略要根据当前身份、任务和资源判定动作是否允许；副作用描述潜在影响；确认规则决定何时将具体操作交给用户审阅；`revision_precondition` 要求写入前目标文件仍是生成补丁时的版本，用于拒绝过期写入。它不是通用幂等键或 exactly-once 保证；其他外部副作用仍需按各自合同对账或提供幂等机制。`output_limit_chars` 也只限制回传或摘要大小，不应该悄悄改变原始结果的含义。
 
 实际系统可使用 JSON Schema、类型系统或协议定义描述调用合同。选择格式时，优先保证模型接口、运行时校验和执行器映射能够保持一致，并有版本可追踪。
 

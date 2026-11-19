@@ -1244,7 +1244,7 @@
 12. 复现一个安全评测 manifest，输入 IPI、Shade coding、browser-use 和 sandbox 事件，输出 attack success、fallback 覆盖率、`actual_model`、`fallback_reason`、safeguard state 和 verifier；禁止把不同 harness 的数字合成一条安全率。
 13. 将 Terminal-Bench、ProgramBench、OSWorld partial/strict 和 AA Intelligence Index 放入三本独立账本，构造缺失 snapshot、工具或成功定义的样本，要求系统返回 `not_comparable` 而不是自动排序。
 14. 设计 RSP 阈值练习：解释 CB-1/CB-2 与 autonomy threat model 1/2 的定义、证据和不确定性；分别写出“未达阈值”“没有能力”“生产 safeguards 已阻止”三句话为什么不能互换。
-15. 为 Claude Fable 5.1 与 Opus 5.5 建立有方向的 thinking-block compatibility matrix：验证 Claude API 与其他托管 surface 的差别、model_binding_mismatch 与 prefix_binding_mismatch 的不同处理、旧/新账户的 prefix 检查门槛，以及 fallback 是否真正可用。不得把“能读取”直接当成默认 fallback 或跨平台保证。
+15. 为 Claude Fable 5.1 与 Opus 5.5 建立有方向的 thinking-block compatibility matrix：区分 producer/consumer、provider surface、model-binding drop 与 prefix mismatch。比较当前 Platform 指南和官方 Cookbook 对 prefix mismatch 默认处理的描述；若来源仍有差异，记录未解边界，不假设固定账户创建日期适用于所有账户或托管平台。不得把“能读取”直接当成默认 fallback 或跨平台保证。
 
 ## 2026-09 Claude Sonnet 5 接口与平台对照验收
 
@@ -1608,20 +1608,6 @@
 
 8. 加入 multi-agent API contract gate：拒绝 Chat Completions、`max_tokens` 和 client-side/custom function tools；允许 Responses `previous_response_id`、内置工具与 Remote MCP。模拟 beta contract 变更、encrypted sub-agent state 未携带、token/tool usage 只记录 leader 的错误账本；最终报告应汇总所有 Agent 的 input/output/reasoning tokens、server-side tool calls、continuation success、wall-clock 与单位成功成本，不调用真实 API。
 
-## 2026-11 Gemini Interactions：中断恢复与工具副作用
-
-配套章节：[第二十册第 23 章](book-20-agent-harness-runtime/chapters/23-gemini-interactions与thought-state回放.md)。依据截至 2026-11-19 的官方 Interactions 文档完成本练习；不要求调用真实 API 或编写程序。
-
-设想 Agent 处理工单 742：它读取工单后提出 `add_comment` 调用。工单服务已接受评论，但宿主在写入本地执行回执前崩溃。用这条轨迹完成以下分析：
-
-1. 画出状态所有权：分别标出 Gemini Interaction 历史、逐轮配置、function call/result、SSE 事件流、外部评论和任务验收结果由谁保存。
-2. 为 `Interaction id`、`previous_interaction_id`、function `id`/`call_id`、SSE `event_id` 和 `continuation_token` 各写一句用途，并说明它不能证明什么。不要把这五类标识合并为一个通用 checkpoint。
-3. 给出 stateful 与 stateless 两种续接方案。列出下一轮仍需传入的配置；说明 stateless 路径如何原样保留收到的 thought/signature 状态，以及 API 文档对 signature 必需性的表述边界。
-4. 设计宿主从崩溃恢复的判定：如何查询工单评论、何时使用外部幂等键、无法确认时如何保留 unknown 状态；解释为什么恢复 SSE 流本身不能安全地重放评论写入。
-5. 分别说明 `store=true` 与 `store=false` 对服务端历史、后台执行和后续 `previous_interaction_id` 的影响；列出删除 Interaction 后仍需由宿主单独处理的记录。
-
-答案应能让读者判断“对话接上了”与“业务动作完成了”是否为同一件事，并绑定说明所依据的 API version 和文档查阅日期。
-
 ## 2026-09 DeepSeek V4 Pro reference implementation 审计练习
 
 1. 读取固定 revision 的 `config.json` 与 `inference/config.json`，生成一份 manifest；把模型配置、inference 配置、encoding revision、kernel 文件哈希、权重 metadata 和“未下载权重”状态分别列出。
@@ -1732,7 +1718,7 @@
 
 9. 为 Opus 5.5 实现 on-demand/threshold compaction compatibility matrix：分别校验 beta header、请求字段、平台可用性、签名 block 续接、服务端旧前缀裁剪和混用时的拒绝路径；加入 Bedrock 仅 threshold 列 beta 的负例。
 10. 构造相同长任务的 keep-tail replay：对照 on-demand 条件满足、on-demand tail 被编辑、threshold tail 含旧 `thinking`、threshold tail 已剥除 reasoning、`drop_block` 五种情况；检查摘要、普通 text/tool blocks、reasoning binding 和 side-effect lineage，不以“请求成功”推断原 reasoning 被接受。
-11. 为 2026-08-31 00:00 UTC 前后创建的账号分别模拟 prefix mismatch：区分新账号默认 `error`、显式 `drop_block` 与旧账号 opt-in；同时加入目标模型无法读取 producer block 的 model-binding mismatch，确保两种不兼容原因分开记账。输出标为文档驱动的 local toy，不调用真实 Messages API。
+11. 对 Sonnet 5.5 构造 prefix mismatch 场景，分别核对当前 Platform 指南与官方 Cookbook 对默认行为的表述，并记录“可能 400”与无错误但 block 仍到达模型两条路径；再加入显式 `error`、`drop_block` 和目标模型不可读的 model-binding mismatch。区分文档声称、模拟结果与线上实测，不假设账户创建日期是所有平台的统一阈值，也不调用真实 Messages API。
 
 ## 2026-09 GPT-6 Sol：预算、状态与工具 runtime 验收
 
@@ -1877,13 +1863,13 @@
 
 证据入口：[PAPERS.md](PAPERS.md) 的 Qwen3.6-35B-A3B 条目；arXiv：[2609.27321v1](https://arxiv.org/abs/2609.27321v1)。
 
-## 2026-09 Claude Sonnet 5.5：协议迁移与安全评测账本
+## 2026-11 Claude Sonnet 5.5：工具循环状态与拒答路由
 
-1. 写出 `disabled` → `between_tools` 迁移的 request contract matrix；覆盖合法 effort、400 条件、无工具任务、工具间进度 block、`display` 解析和 assistant-turn replay。只依据官方 schema，不调用未授权 API。
-2. 建立 thinking-block replay ledger，分别模拟 producer model 不兼容、system/tools 前缀改写、跨账号回放和 compaction 后保留 tail；每种用例选择 `replay`、`drop` 或 `reject`，并记录 `input_transformations`/错误及原始 block hash。
-3. 构建 refusal/fallback 路由矩阵：`cyber`、`frontier_llm`、`bio`、`reasoning_extraction`、`general_harms`。验证非允许类别不会自动重试；对允许的 fallback 保存 requested/actual model、category、permission set、副作用状态和 verifier。
-4. 为 Gray Swan IPI 与 Coding Shade 编写仅含汇总计数的 benchmark manifest，分别记 attempt-level 与 scenario-level 分母、fallback/probe 覆盖、实际执行模型、thinking 可见性及置信区间。不要生成攻击 payload，也不要把发布方结果称为独立复现。
-5. 重述 Terminal-Bench 4.0 `70.6%` 和 OSWorld 2.1 `80.1% partial / 43.5% strict` 的所有必要条件；指出 resource-adaptive benchmark revision、server-side compaction、grader model 和 fallback 如何影响可比性。
+1. 为合成工单 742 画出 `thinking`、`tool_use`、宿主授权/执行、`tool_result` 与最终验收的时间线。每一步标注状态所有者，说明为什么 API 对话历史不能证明文件已修改或测试已通过。
+2. 写出 `disabled` → `between_tools` 的请求合同表，覆盖合法 effort、400 条件、无工具任务、进度 block、默认 `display="omitted"` 与 assistant-turn 回放；标明这是官方文档合同，不是 endpoint 实测。
+3. 构造 model/prefix/account 三类 thinking-block mismatch 记录。模型兼容必须标方向和 provider；前缀改动要处理可能 400 与未报错两种结果；账号创建日期差异须并列引用当前 Platform 指南和 Cookbook，不得静默选用一个版本。
+4. 构造五类 refusal 的 fallback 路由表，分别加入 HTTP 状态、`stop_reason`、category、actual model 和 `usage.iterations`。另加入 429/overload/server error 作为不触发 safety fallback 的对照；不调用 endpoint 或尝试绕过拒绝。
+5. 选择一项 Sonnet 5.5 发布方评测，写明任务、harness、effort、工具/权限、fallback 和 verifier 中公开可查的条件；未知字段标为 unknown。不得把发布方材料改写成独立复现、普遍能力或生产安全率。
 
 研究笔记：[`claude-sonnet-5.5-source-notes.md`](research/model-update-2026-09/claude-sonnet-5.5-source-notes.md)；正式章节：[第二十册第 24 章](book-20-agent-harness-runtime/chapters/24-claude-sonnet-5.5-thinking-state与安全路由.md)。
 
@@ -2406,3 +2392,15 @@
 配套正文：[第二十册第二十二章](book-20-agent-harness-runtime/chapters/22-openai-compatible-api边界.md)；外部来源和证据边界见[兼容 API 研究记录](research/openai-compatible-api-compatibility-evidence-2026-11-19.md)。
 
 35EQ. 假设一个 Agent 通过 OpenAI SDK 调用 Chat Completions，并依赖中途出现的 developer 指令、严格工具参数、reasoning effort、流式工具调用和文件输入。只依据 Anthropic OpenAI SDK compatibility 官方文档，制作一张迁移记录卡：每项注明文档原话对应的行为、状态（明确支持、有条件或转换、明确不支持、未说明）、对调用方的影响和可选处理方式。区分“SDK 能发请求”“字段进入请求”和“原有行为得到保留”；指出哪些结论还需要当前账户与 endpoint 的集成验证，哪些不能从单次成功请求推广。再选 DeepSeek Responses 或 vLLM 作为第二个目标，只核对会话续接、模板或并行工具中的一项差异，并标明 endpoint、model 和文档版本范围。不得把文档未说明写成不支持，也不得把两家差异概括为所有兼容 API 的统一规则。
+
+## 第二十册第二十三章：Gemini Interactions 与 thought-state 回放
+
+配套正文：[第二十册第二十三章](book-20-agent-harness-runtime/chapters/23-gemini-interactions与thought-state回放.md)；来源范围见[Gemini Interactions 状态证据记录](research/gemini-interactions-state-evidence-2026-11-19.md)。
+
+35ER. 复走教学构造工单 742：Agent 读取工单后提出 `add_comment` 调用；工单服务已接受评论，但宿主在写入本地执行回执前崩溃。先画出 Interaction 历史、逐轮配置、function call/result、SSE 事件流、外部评论和任务验收结果的状态所有者。再分别解释 Interaction `id`、`previous_interaction_id`、function `id`/`call_id`、SSE `event_id` 和 `continuation_token` 能恢复什么、不能证明什么；给出 stateful 与 stateless 两种续接方案，写清要重发的配置和实际收到的 thought/signature 状态如何保留。随后设计宿主判定：何时查询工单评论、如何利用外部幂等合同、无法确认时怎样保留 unknown，说明恢复 SSE 流不能安全地重放评论写入。最后比较 `store=true` 与 `store=false` 对服务端历史、后台执行、后续 `previous_interaction_id` 和删除责任的影响。绑定 API version 与文档查阅日期；不要把教学构造当作 endpoint 实测，也不要把 API status、事件 ID 或模型总结当作业务验收。
+
+## 第二十册第二十四章：Claude Sonnet 5.5 thinking state 与安全路由
+
+配套正文：[第二十册第二十四章](book-20-agent-harness-runtime/chapters/24-claude-sonnet-5.5-thinking-state与安全路由.md)；来源和文档差异见[Sonnet 5.5 研究记录](research/model-update-2026-09/claude-sonnet-5.5-source-notes.md)。
+
+35ES. 复走合成工单 742：模型提出 `run_tests`，宿主核验权限后执行，随后 API 请求在两轮之间中断。说明 assistant turn 中哪些 thinking/tool blocks 要按原样回放，哪些事实必须从 workspace、执行回执或 verifier 另行确认。再分别改变旧消息、工具 schema、producer model 和调用账户，判断它们属于 prefix、model 还是 account binding；对前缀默认值并列记录当前 Platform 指南与 Cookbook 的不一致，不把账户日期写成通用规则。最后假设 API 返回 HTTP 200 且 `stop_reason="refusal"`：对五种 refusal category 和 429/overload/server error 分别判断 Anthropic `fallbacks="default"` 是否适用，并列出确认实际服务模型所需的 response 字段。全程只用公开文档与合成状态，不调用 Messages API，也不把模型答复当作副作用或任务验收证据。

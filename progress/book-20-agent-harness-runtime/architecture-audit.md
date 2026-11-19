@@ -1,6 +1,6 @@
 # 第二十册《Agent Harness、Coding Agent Runtime 与智能体工程框架》架构审视
 
-审视日期：2026-11-19。阶段：册级初审、发现扫描、简介与目录重构完成；第 1—22 章章级扫描与精修完成，第 23—24 章待逐章处理。
+审视日期：2026-11-19。阶段：册级初审、发现扫描、简介与目录重构完成；第 1—24 章章级扫描与首轮精修完成。2026-11-19 开始按目录顺序做整册连续复读，当前完成第 1—3/24 章；第 3 章复读时已修正一处样例结果笔误、一处比例单位问题及两项可能暗示固定门槛的练习措辞。
 
 ## 审视范围与方法
 
@@ -56,7 +56,7 @@
 | 21 Persistent Workspace | 长任务恢复时，哪个状态来源能证明对话、文件、测试结果和外部系统当前各是什么？ | 区分上下文/记忆、checkpoint、workspace、job 与外部系统事实，并让 artifact 和验证结果绑定具体 revision。 | 依第 7、9、17 章；文件编辑回链第 5 章、权限/保留回链第 8 章、评测回链第 10、19 章；与第 18、20、23 章互链。 |
 | 22 OpenAI-Compatible API 边界 | 调用方怎样判断一个具体兼容 endpoint 是否保留了应用依赖的字段、工具、状态、流式和用量行为？ | 让读者按 SDK/endpoint/provider/model/日期记录支持、转换、不支持和未知，再决定复用、适配或缩小承诺。 | 依第 20 章；Gemini/Claude 专属合同分别交第 23—24 章；推理引擎服务端 API 实现交第二十四册第 57 章。 |
 | 23 Gemini Interactions | 中断后应续接对话历史、事件流还是长解码？哪些外部事实仍由宿主确认？ | 区分 Interaction ID、function call/result ID、SSE event ID 与 continuation token；说明逐轮配置、thought 签名回放、工具副作用及保留合同。 | 依第 17—18、20—22 章；API/runtime 事实绑定官方文档日期，通用工具治理回链第 4、8、17、21 章。 |
-| 24 Claude Sonnet 5.5 状态与安全路由 | thinking state、tool transition、safeguard 与 routing 数字如何读？ | 单一 provider/model 的发布与 API 案例。 | 依第 8—10、20—23 章；不把模型能力归因成 runtime 保证。 |
+| 24 Claude Sonnet 5.5 状态与安全路由 | 工具回合中断或出现 refusal 后，宿主怎样保留协议状态、识别实际答复模型并确认任务完成？ | 沿工单 742 追踪 typed block 回放、宿主工具执行、binding、类别化 fallback 和独立验收。 | 依第 4、8、17—23 章；API 合同绑定 2026-11-19 官方资料，不推断模型内部机制。 |
 
 ## 发现扫描与候选去向
 
@@ -104,11 +104,13 @@
 20. 第二十二章将 OpenAI-compatible 收窄为调用方迁移合同审读：以 Anthropic compatibility layer 作完整实例，解释 endpoint 范围、字段移位/忽略/报错、tool schema、reasoning、stream、state、usage 与 provider/model/region 条件。删除五层 taxonomy、`G_compat`/`G_route`/`T_request` 公式、统一 gate 和重复的固定 conformance 清单；将深层工具责任回链第 4、20 章，状态副作用回链第 17 章，服务端 API 鉴权/限流/协议实现回链第二十四册第 57 章。事实与证据范围见[兼容 API 研究记录](../../research/openai-compatible-api-compatibility-evidence-2026-11-19.md)，原稿映射与正文验收见[第二十二章精修审计](chapter-22-audit.md)。同步目录、练习 35EQ、面试题 40AF，并修正一条既有 Responses 兼容面试答法。
 21. 第二十三章将 Gemini Interactions 收窄为跨轮状态和恢复边界：用工单评论任务区分 Interaction history、SSE stream、long-decode continuation 与宿主外部副作用；解释 `previous_interaction_id`、function `id`/`call_id`、`event_id` 和 `continuation_token` 各自用途，逐轮配置、thought summary/signature、status、retention 与删除合同。删除 Gemini 3.8 榜单/预算主张、旧 SDK `_gaos` schema 实现和视频 token/质量数字；保留 provider-managed `processing_call/result` 与自定义 function 的边界，以及官方文档对 thought signature 必需性的标记差异。来源见[Gemini Interactions 状态证据记录](../../research/gemini-interactions-state-evidence-2026-11-19.md)，取舍与静态验收见[第二十三章精修审计](chapter-23-audit.md)。同步目录、`BOOK_SERIES.md`、练习与题库、知识图谱。
 
+22. 第二十四章将 Claude Sonnet 5.5 收窄为一个 Messages API/runtime 合同案例：以合成工单 742 区分 API 消息块、工具实际副作用和任务验收；保留 `between_tools`、原样 thinking/redacted-thinking 回放、model/prefix/account binding、强制 tool choice 限制、拒答类别、beta fallback 与 actual-model 追踪。校正旧稿未经当前文档支持的账号默认值断言，并记录 Platform 指南与官方 Cookbook 对 prefix mismatch 默认边界的差异。将 AA/DeepSWE 快照、价格/context 列表、Computer Use/Advisor/inline-tool 细节和重复 benchmark 条件移出正文；benchmark 归因回链第 19 章，compaction 回链第 18 章，工具/权限回链第 4/8/17 章。保留一段 monitorability 的条件化结论并链接现有 PMLR 研究记录。将 Fable 5.1 thinking-state 候选收束为 Sonnet 5.5 的方向性兼容边界，不新增独立主题。证据见[Sonnet 5.5 研究记录](../../research/model-update-2026-09/claude-sonnet-5.5-source-notes.md)，章节去向和静态验收见[第二十四章审计](chapter-24-audit.md)。同步目录、`BOOK_SERIES.md`、练习 35ES、题库 40AH 和知识图谱。
+
 ## 开放风险与交接
 
-- 第 21 章新稿已移除旧稿中指向缺失 Claude audit script 和 Qwen source-note 的链接；Claude Fable 5.1 的 provider thinking-state 合同列为第 24 章候选，须在该章定向核验后决定去向。Qwen3.6 source-note 链接仍在第二十一册第 83 章 §83.15，待该册逐章审阅时处理。
+- 第 21 章移除的 Claude Fable 5.1 provider thinking-state 候选已在第 24 章定向核验：其必要读者价值由 Sonnet 5.5 的 model-binding 兼容边界承接，不单独扩成 Fable 主题。Qwen3.6 source-note 链接仍在第二十一册第 83 章 §83.15，待该册逐章审阅时处理。
 - 第 23 章和 `BOOK_SERIES.md` 对缺失的 `gemini-3.8-flash-source-notes.md` 的引用已删除，改用 2026-11-19 的官方 Interactions 状态证据记录。thought signature 的 requiredness 表述仍存在文档标记差异；本轮未调用真实 endpoint，正文将其保留为待目标接入方确认的边界。
 - 第 1 章原有“0 依赖 Python demo”承诺、9 个固定阈值和约 330 行 toy auditor 已移除；内容改由完整合成修复轨迹、最小伪代码和任务特定验收解释。其余章节中仍有 Python demo 或自动 gate 的部分尚待逐章核验；决定删除代码时须保留必要的过程、数值解释和明确去向。
 - 第 2 章原有运行指标公式及 `G_runtime` 固定门槛已移除；核心观察意图改为记录 session/tenant 隔离、phase 转移、context 来源与新鲜度、adapter/parser/registry 错误、执行回执、恢复/checkpoint 和取消/超时事件，并要求为任何汇总率声明单位和分母。旧的 GPT-5.6 运行时归属快照由 OpenAI 当前公开 Agents API/SDK/Responses API 对比替代；Qwen3.7 Plus region/scope 能力细节待第二十二册第 47 章复核和承接，不能在第二十册正文里留作无去向内容。
 - GitHub 页面公式/图表渲染和全量外链可达性尚未核验；动态产品事实需按每章核验日期固定。
-- **当前下一入口：** [第二十四章《Claude Sonnet 5.5 thinking state 与安全路由》](../../book-20-agent-harness-runtime/chapters/24-claude-sonnet-5.5-thinking-state与安全路由.md)。第二十三章的正文取舍见[第二十三章审计](chapter-23-audit.md)，来源范围见[Gemini Interactions 状态证据记录](../../research/gemini-interactions-state-evidence-2026-11-19.md)。第二十册第 24 章和全套书精修 goal 继续 active。
+- **当前入口：** [第二十册整册连续复读](continuous-read.md)，按目录顺序复读第 1—24 章；目前第 1—3 章完成。整册交接、平台呈现与最终门禁仍待处理；第二十四章取舍与静态验收见[章节审计](chapter-24-audit.md)。全套书精修 goal 继续 active。

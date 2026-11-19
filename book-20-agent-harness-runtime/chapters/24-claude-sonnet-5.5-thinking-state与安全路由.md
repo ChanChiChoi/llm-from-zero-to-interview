@@ -1,84 +1,80 @@
-# Claude Sonnet 5.5：Thinking State、Agent Runtime 与安全路由
+# Claude Sonnet 5.5：工具循环中的状态回放与安全路由
 
-本章把 Claude Sonnet 5.5 作为官方 API/runtime 合同案例。模型来自 Artificial Analysis 榜单锚点；DataCurve DeepSWE 当前无精确 Agent 行。下面的 API 行为以 Anthropic 文档为准，能力与安全数字以 System Card 的发布方测试为准；两类证据都不揭示内部模型架构。
+本章以 Claude API 的 Messages API model ID `claude-sonnet-5-5` 为例，回答一个 Agent 运行时问题：工具调用暂停、对话续接或安全拒答之后，宿主怎样知道哪些状态要保留、实际由哪个模型作答、任务是否真的完成？以下时效性接口事实按 2026-11-19 查阅的官方文档表述；其他托管平台、账户和模型组合可能有差异。
 
-完整快照、来源与未核验项见[研究笔记](../../research/model-update-2026-09/claude-sonnet-5.5-source-notes.md)。
+先看一条教学构造的工单：工单 742 要求修复日期解析问题、运行测试，但不要提交代码。Messages API 不只返回一整段文本，而是返回带类型的内容块，例如 `thinking`、`tool_use` 和 `text`。这里的 `read_file`、`write_patch`、`run_tests` 是宿主应用执行的 client tools；Anthropic 自己运行的 server tools 属于另一种执行位置。
 
-## 24.1 从榜单配置到模型身份
+| 时点 | 发生了什么 | 这份记录能证明什么 |
+| --- | --- | --- |
+| 请求 | 宿主把工单要求、`read_file`/`write_patch`/`run_tests` 工具定义和对话历史发给 Sonnet 5.5；起始工作区快照记为 `r17` | 模型收到哪些目标和工具说明 |
+| 读取 | 模型用 `tool_use` 提出 `read_file`；宿主核对权限后读取 `r17`，并用 `tool_use.id` 与 `tool_result.tool_use_id` 配对返回结果 | 模型提出了读取动作；宿主的执行记录证明读取发生在 `r17` |
+| 编辑与测试 | 模型基于读取结果提出补丁并请求 `run_tests`；宿主检查补丁范围后写入，形成 `r18`，再在 `r18` 上运行测试并保存回执，不提交代码 | 模型提议本身不能证明已执行；宿主记录确认补丁和测试对应 `r18` |
+| 中断 | 工单暂停时，用户又改动工作区，当前快照成为 `r19`；API 历史前缀仍可保持原样 | thinking block 可能仍符合 API 前缀合同，但 `r17` 的读取结果和 `r18` 的测试回执都不能证明 `r19` 的状态 |
+| 恢复与验收 | 宿主检查 `r19` 的实际 diff，在当前快照重新运行测试，并确认没有提交 | 只有当前快照上的 diff、测试回执和提交状态共同支持任务验收 |
 
-Artificial Analysis 当前列出 `claude-sonnet-5-5`，及 low/medium/high/xhigh effort 变体。它们属于同一基础模型的配置；AA 主页面的 max + Default Fallback 是第三方测量配置。DataCurve 没有精确 `mini_swe_agent_claude_sonnet_5_5_*` 行，因此不要借用 Sonnet 5 或其他 Claude 版本的 coding-agent 分数。
+该例中的每一步都归不同状态所有者：API 保存的对话历史不能代替工作区快照，`tool_use` 与 `tool_result` 的 ID 配对只关联一次请求和结果，不能代替宿主授权或当前执行回执；测试通过也要绑定实际测试过的快照。
 
-Anthropic API model ID 是 `claude-sonnet-5-5`，官方文档列 1M context、128K max output、输入/输出 `$2/$10` 每百万 token、adaptive thinking、默认 `high` effort。Sonnet 5.5 与 Sonnet 5 的 tokenizer 相同，但 effort 行为重新校准；从旧版本迁移要重跑 workload-specific effort sweep，而不是把 `high` 当成固定 token 预算。
+因此，API 历史不是工作区快照，模型的“已完成”也不是执行回执。第二十册第 17 章讲长任务恢复与外部副作用，第 21 章讲 workspace 状态；本章只看 Sonnet 5.5 的接口如何影响这条状态链。
 
-## 24.2 `between_tools`：关闭 upfront thinking，但不是“没有 reasoning block”
+## 24.1 `between_tools` 关闭了什么
 
-Sonnet 5.5 不接受旧字段 `thinking: {"type":"disabled"}`。关闭工具调用前的 upfront thinking 要求 `thinking: {"type":"between_tools"}`。名字容易令人以为模型在工具间绝不会输出 thinking；官方文档实际说明，较长的工具间进度仍可能作为 thinking/progress block 返回。
+Sonnet 5.5 的 Messages API 默认启用 adaptive thinking。旧客户端若发送 `thinking: {"type":"disabled"}` 会收到 400；要关闭工具调用前的 upfront thinking，应改用 `thinking: {"type":"between_tools"}`。这个设置只关闭工具调用前的思考阶段，不表示工具之间绝不会返回进度消息。
 
-| 请求 | Sonnet 5.5 合同 | 宿主注意点 |
-|---|---|---|
-| `thinking.type=disabled` | 400 | 迁移旧客户端 |
-| `thinking.type=between_tools` + low/medium/high | 接受 | 工具间仍解析/回放 progress blocks |
-| `between_tools` + xhigh/max | 400 | 改用 adaptive thinking |
-| `between_tools` + `display` / `budget_tokens` / `block_binding` | 400 | 该模式不接受额外 thinking 字段 |
-| adaptive + 默认 display omitted | 可接受 | 可能返回空文本的 thinking block；不要只取首个 text |
+| 设置 | Sonnet 5.5 的公开行为 | 客户端需要注意 |
+| --- | --- | --- |
+| `thinking.type=disabled` | 请求被拒绝，返回 400 | 不能把旧模型配置原样迁来 |
+| `thinking.type=between_tools`，effort 为 low、medium 或 high | 接受；不做 upfront thinking | 工具间较长的进度消息仍可能以 `thinking` block 返回 |
+| `between_tools`，effort 为 xhigh 或 max | 返回 400 | 这组 effort 不兼容该模式 |
+| `between_tools`，同时设置 `display`、`budget_tokens` 或 `block_binding` | 返回 400 | 这些额外 thinking 字段不属于该模式的请求合同 |
 
-如果请求没有工具，`between_tools` 会直接回答，不先进行多步思考。因此它适合降低工具型工作流中的 upfront reasoning 成本，不能代替需要先推理的数学或 JSON 问题。adaptive thinking 的 effort 也不是精确 token 预算；`max_tokens` 是思考与最终答复共享的硬上限。
+没有工具可调用时，`between_tools` 会直接生成文本答复。相反，默认 `display="omitted"` 时，返回的 thinking block 可能带有空的可读文本；如果界面只渲染 `text` block，用户会觉得长任务“没反应”，但这不等同于 API 报错。客户端应按 block 类型处理消息，并把模型进度与可见界面分开设计。
 
-## 24.3 Thinking block 是绑定的会话状态
+`effort` 控制模型投入多少工作，不是精确 token 预算；`max_tokens` 才是本轮输出的硬上限，而且会被 thinking 与最终答复共同消耗。Sonnet 5.5 重新校准了 effort 的行为，不能假设 Sonnet 5 上的同一个标签会产生同等成本或思考深度。迁移时应按自己的任务重新比较质量、延迟和成本。[Sonnet 5.5 迁移说明](https://platform.claude.com/docs/en/models/sonnet-5-5/whats-new-sonnet-5-5)、[Thinking 指南](https://platform.claude.com/docs/en/build-with-claude/thinking)和[专用提示指南](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5-5)分别说明了这些接口行为与显示差异。
 
-模型返回的 thinking block 属于有类型的协议状态，不能随意删除、重排、跨模型搬运或当成 UI 文本展示。默认 display 设置下，其内部文本可能为空；同时工具间的长 progress update 也可能被封装为 block。一个只渲染 `text` 的界面会表现为“工具调用期间突然没动静”，但服务并没有报错。
+## 24.2 thinking block 是需要按合同回放的状态
 
-回放前至少检查三种绑定：
+工具调用把一次 assistant turn 分成多段：模型先提出 `tool_use`，宿主返回 `tool_result`，模型再接着生成。工具结果不是新的独立任务；它接在刚才那次模型输出之后。对 Sonnet 5.5 的工具回合，宿主应把 API 返回的 assistant 内容块按原顺序、不改内容地带回去，包括 `thinking` 和 `redacted_thinking` block。thinking block 携带供接口校验和续接使用的签名状态；默认显示设置下其可读文本可能为空，redacted block 本身也不提供可读内容。只保留可见文本，或把 block 拆开重排，可能让续接丢掉原有状态或触发协议错误。
 
-1. **Model binding：**目标模型是否能读取 producer model 的 block。Sonnet 5.5 可以接续部分旧模型 block，但 Sonnet 5.5 自己产生的 block 不会被其他模型读取；切换后不兼容 block 可静默 drop。
-2. **Prefix binding：**block 前面的 `system`、`tools` 或旧消息有没有被改写。特定新账号默认强制检查，失败可能是 400；老账号的默认行为不同，需按请求字段判断。
-3. **Account binding：**Sonnet 5.5 的 block 绑定生成它的账号或关联账号；跨账号回放会被 drop。可用 beta 返回的 `input_transformations` 审计 drop 原因。
+thinking block 的可用性有三种彼此独立的绑定：
 
-因而 thinking replay 必须原样保留 block 和对话前缀，或者在编辑历史时有意识地删掉失效 block。API 接受请求不等于它接收了所有旧 thinking 状态。模型块也不是持久 memory：目标、权限、工具副作用和 artifact 仍要写在应用状态库。
+| 绑定 | API 检查的关系 | 不匹配时可能发生什么 |
+| --- | --- | --- |
+| 模型绑定 | 目标模型能否读取生成该 block 的模型状态；这是有方向的关系，还受 provider surface 影响 | 请求可以成功，但不可读取的 block 会被丢弃 |
+| 前缀绑定 | block 之前的 `system`、`tools` 与所有旧消息是否仍和生成时相同 | 对 Sonnet 5.5，失败可能返回 400，也可能没有 400；不能只看 HTTP 状态判断 |
+| 账号绑定 | 生成 block 的账户与当前账户是否相同或关联 | 某些账户/托管组合会静默丢弃 block；部分 surface 可借 beta `input_transformations` 查看原因 |
 
-## 24.4 工具、Computer Use 与长任务合同
+模型兼容不是对称矩阵。按当前官方兼容说明，Sonnet 5.5 不读取 Fable 或 Mythos 系列的 thinking blocks；而 Sonnet 5.5 生成的 blocks 只有在特定 API/Google 托管 surface 上，才可由 Opus 5.5、Fable 5.2 或 Mythos 5.2 读取。切模型前应查清“来源模型 → 目标模型 → provider”这条方向，不能把“Claude 模型”当成同一种状态格式。[官方 preserved-thinking 指南](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking)列出当前方向与平台条件。
 
-Sonnet 5.5 的工具调用存在实际迁移差异：
+前缀变化也不只指 system prompt。重写、插入或删掉旧消息，或改动工具 schema，都可能使后续 thinking block 与原来的上下文不匹配。稳妥的续接方式是沿用原来的 system、tools 和历史，只在末尾追加新消息；若确实要改写历史，就不要把依赖旧前缀的 block 当成仍有效的状态。当前 [Platform 前缀检查指南](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking/prefix-checks)把 Sonnet 5.5 标为“可能返回 400”；[官方 Cookbook](https://platform.claude.com/cookbook/extended-thinking-extended-thinking-with-tool-use)仍以账号创建日期描述默认检查行为。两页对默认边界的说明粒度不一致，因此不要把某个日期推广成所有账户、模型和托管平台的通则；目标环境要按当前合同处理 400 与未报错两种结果。
 
-- 不支持 `tool_choice=any` 或指定单个 tool；保留 `auto`/`none`。严格参数输出用 `strict=true` 或 Structured Outputs，避免用强制 tool choice 代替 schema。
-- Claude API 和 Google Cloud 的 computer use 使用 `computer_toolset_20260801`；旧 `computer_20251124` 在这两个平台会报 400。Bedrock 当前文档仍接受旧类型，因此 provider 是 capability key 的一部分。
-- Advisor tool 只接受兼容的模型组合，建议结果以 `advisor_redacted_result` 加密块返回，宿主不得假设可以读取建议正文。
-- `compact-2026-09-04` on-demand compaction 由客户端选择触发时机，返回签名 compaction block；保留 tail 的 thinking block 仍需满足模型/前缀/回放合同。
-- `inline-tools-2026-09-15` beta 允许通过会话中的 `tool_addition` 增加完整 tool schema 或切换 server-tool 版本，避免修改顶层 tools 列表并失去 prompt cache。
+Sonnet 5.5 默认保留先前轮次的 thinking blocks；这些状态会随历史进入上下文并占用窗口。`between_tools` 不会自动清除已有历史。长任务需要把这些块与普通消息一起纳入上下文管理，折叠和裁剪的条件见[第二十册第 18 章](18-context-folding上下文折叠.md)。还有一条工程边界：thinking block 是对话状态，不是任务的持久记忆，也不记录工具调用是否真的产生副作用。宿主应另外保存工具执行回执、工作区版本和验收结果；遇到回执丢失时，查询实际系统，不能靠重放 thinking 来推断写入是否成功。
 
-这给出一个通用工程原则：模型/API 迁移不只是 endpoint/model 字符串修改，还包括 typed block、工具策略、平台能力、错误语义、缓存前缀和状态回放的兼容性矩阵。
+## 24.3 `tool_use` 提议动作，不授予执行权限
 
-## 24.5 安全防护与 fallback：请求可能被分流，但类别不同
+Sonnet 5.5 不接受强制工具选择：`tool_choice` 为 `any` 或指定单个 `tool` 会返回 400；`auto` 与 `none` 才受支持。若需要限制参数形状，可使用工具 schema 的 `strict: true` 或 Structured Outputs，但 schema 合法不等于调用安全，也不等于模型必定选择某个工具。
 
-System Card 报告 cyber safeguard 有三阶段：内部 activation probe、轻量 classifier、独立 LLM classifier 与 probe 结果共同决定是否 block。普通 API/产品的 cyber block 在一些配置上可能 fallback 到 Sonnet 5；但类别之间差异很大：
+回到工单 742：模型提出 `run_tests` 后，宿主仍要检查这项工具是否在任务允许范围、参数指向哪个仓库、当前权限是否允许执行，再由执行器运行并记录实际结果。模型输出是候选动作；授权、沙箱和执行回执属于宿主。工具注册与参数边界见[第二十册第 4 章](04-工具系统与tool-registry.md)，权限见[第 8 章](08-权限模型与安全沙箱.md)。[Sonnet 5.5 迁移说明](https://platform.claude.com/docs/en/models/sonnet-5-5/whats-new-sonnet-5-5)记录了强制工具调用的 400 条件；[Tool use 指南](https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview)说明调用方与工具执行器的消息流程。
 
-| 风险类别 | 报告中的处理 |
-|---|---|
-| Cyber misuse | 阻断；产品路径可能 fallback 到 Sonnet 5；API 的 `fallbacks="default"` 目前为 beta |
-| Chemical / biological | 阻断；API default 不自动重试 `bio` refusal |
-| 窄范围 AI/frontier-LLM development | 部分请求可能 fallback 到 Sonnet 5 |
-| 常规武器/高当量爆炸物 | 卡片披露为阻断；API default 对无推荐 fallback 的拒绝保留原响应 |
-| Distillation / reasoning extraction | 卡片披露为阻断；API default 不自动重试 `reasoning_extraction` refusal |
+## 24.4 refusal 是响应状态，fallback 是按类别配置的路由
 
-API refusal 仍是正常 HTTP 200 响应，`stop_reason=refusal`，并用 `stop_details.category` 表达类别。截至 2026-11-03，Anthropic 的 server-side fallback 文档说明：Claude API 与 Google Cloud Anthropic-managed surface 可用 beta `fallbacks="default"`；Sonnet 5.5 的默认推荐目标是将 `cyber` 与 `frontier_llm` 拒绝交给 Sonnet 5，而 `bio`、`reasoning_extraction` 和 `general_harms` 不自动重试。应用也可指定 permitted target 集合中的 fallback 模型；这属于应用自己的路由策略，不能把它当成绕过拒绝的通用重试。默认路由目标按请求模型和类别决定，实际 served model 应从顶层 `model`、`fallback` content block 和 `usage.iterations` 核对；API 不会因请求模型的 429、overload 或 server error 触发这条安全 fallback。其他产品和 provider 的路由行为要分别查证。审计 trace 应保存 `requested_model`、`actual_model`、分类器结果、fallback reason、工具权限、执行副作用和独立 verifier。详见[官方 Refusals and fallback 文档](https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback)及[迁移指南](https://platform.claude.com/docs/en/models/sonnet-5-5/migration-guide)。
+安全拒答不是 HTTP 传输错误。Sonnet 5.5 可以返回正常的 HTTP 200 响应，同时将 `stop_reason` 设为 `refusal`，并在 `stop_details.category` 中报告触发的策略类别。这些标签分别覆盖网络安全伤害、化学/生物伤害、前沿模型开发、reasoning extraction 或其他政策领域；类别可能为空，因此客户端应先判断 `stop_reason`，再按可用的类别信息处理。类别说明路由原因，不替代应用自己的权限判断。
 
-## 24.6 System Card 数字必须绑定 harness
+| 拒答类别 | Anthropic 当前默认 fallback 合同 |
+| --- | --- |
+| `cyber`、`frontier_llm` | 开启 beta `fallbacks="default"` 时，可能转由 Sonnet 5 继续处理 |
+| `bio`、`reasoning_extraction`、`general_harms` | 不走这条默认自动 fallback |
+| 429、过载或服务端错误 | 不是这条 safety fallback 的触发条件 |
 
-System Card 判定 Sonnet 5.5 达到 CB-1 与 Autonomy-1 阈值、未达到 CB-2/Autonomy-2；Autonomy threat model 1 的风险评估为 low。它是 Anthropic 按 RSP 评测得出的风险结论，不等于没有风险或独立验证。
+默认 fallback 目前只在 Anthropic API 和 Anthropic 管理的 Google Cloud surface 提供，且需要对应 beta 配置；其他 provider 和产品要分别核对。若开启它，响应中的实际服务模型、fallback block 和 `usage.iterations` 能说明发生过哪些尝试。流式请求可能先以请求模型开始、随后才出现 fallback 标记，所以不能只保存最初的 `message_start`；中途切换时还要读 fallback block 的 `to.model` 和结束事件中的 `fallback_message` 记录。如果 refusal 在流中的某个 tool-use block 尚未闭合时触发，官方合同规定直接返回 refusal，不执行这条 server-side fallback。fallback 模型若也过载，原拒答可能仍会返回。上述规则见[Refusals and fallback](https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback)；`between_tools` 请求在 2026-07-01 beta fallback 路由到 Sonnet 5 时还有 thinking 参数兼容处理，不能假设其他 fallback target 也接受同一组字段。
 
-两个代表性结果展示了评测口径的重要性：
+对宿主来说，这条路由不是“重试任意错误”的开关。日志至少应区分 requested model、实际回答的 model、拒答类别、fallback 是否执行及每次尝试；工具副作用仍由执行回执和外部系统确认。发现拒答后换了模型，也不自动改变调用者权限或任务边界。任务评分和 Model×Harness 归因见[第二十册第 19 章](19-harness-aware-evaluation.md)。
 
-| 评测 | 发布方结果 | 必须保留的条件 |
-|---|---:|---|
-| Terminal-Bench 4.0 | `70.6%` | 66 tasks，Claude Code `--bare`、max effort、5 trials、无外网、预缓存资源；1.2% requests/1.5% trials 触发 fallback |
-| OSWorld 2.1 | `80.1%` partial / `43.5%` strict | 108 GUI tasks、1080p、最多 500 actions、5 runs、max effort、100K 后 server-side compaction；模型 grader 使用 Opus 4.8 |
+## 24.5 发布方评测说明发布方测了什么
 
-Terminal-Bench 4.0 的更新还通过更长 timeout 和部分任务 RAM/CPU 自适应，降低旧版对资源限制、CLI 内存和 compaction 策略的混杂。这是 benchmark 设计的知识点，不是“新版本分数自然更可信”：仍需注明容器提供方与候选任务约束。
+Anthropic 的公开 [Transparency Hub](https://www.anthropic.com/transparency)把 Sonnet 5.5 的评估描述为特定模型与安全配置下的发布方测试，并将化学/生物能力和 safeguards 放在自己的风险框架中报告。这类材料能说明厂商如何评估和部署模型，不能证明你的宿主权限、工具执行或任务验收正确。
 
-安全评测也要把 fallback 写入数据模型。Gray Swan IPI 的 k=1/10/15 `0.4%/2.7%/3.4%` 包含 classifier fallback；报告称约 11% rollout 转到 Sonnet 5，而成功攻击集中在没有 fallback 的 computer-use 场景。Coding Shade 中整体 ASR 也不能解释成 Sonnet 5.5 裸模型风险率，因为一部分请求由 Sonnet 5 实际作答。CoT controllability 的“较低”只被 Anthropic解释成更易监控的弱证据；当 monitor 看不到 reasoning，SHADE/LinuxArena 的行为又不同。它不能证明公开 reasoning 忠实映射内部状态，也不能转成通用欺骗概率。
+当某项评测启用工具、fallback、产品级 safeguards 或特定 verifier 时，结果对应的是那组配置下的系统。报告时应保留任务版本、harness、effort、工具权限、fallback 与实际服务模型；这与第二十册第 19 章的模型—Harness 归因原则一致。排行榜配置、另一版本模型的 Agent 分数以及发布方测试，都不能替代目标部署的任务证据。更完整的官方来源、版本范围与未解决边界见[Sonnet 5.5 研究记录](../../research/model-update-2026-09/claude-sonnet-5.5-source-notes.md)。
 
-## 24.7 面试回答框架
+如果评测使用 thinking 或行动轨迹训练/运行监控器，还要分清两件事：轨迹里是否出现了可识别信号，以及监控器能否从信号中判断指定属性。Guan 等人提出的 monitorability 评测显示，在其研究任务中，CoT 监控通常比只看动作更有信息，但并不完美，也不是所有属性都同样容易识别。这不证明 thinking block 是内部过程的完整记录，也不能替代工具授权、执行前拦截和外部状态审计；研究的任务与监控协议见[论文](https://proceedings.mlr.press/v306/guan26h.html)及[安全评测研究记录](../../research/ai-safety-alignment-architecture-scan-2026-11-03.md)。
 
-被问到“升级到 Sonnet 5.5 最需要改什么”，先答协议合同：`disabled` 改 `between_tools`，按 block type 解析与完整回放，复核 tool choice / computer toolset / advisor 兼容，并为 effort 重新做成本-质量 sweep。再答状态与治理：模型/前缀/账号三种 binding、refusal category-specific fallback、实际执行模型记录和独立验证。最后说明 System Card 的分数绑定工具、effort、权限、网络、compaction、fallback 和任务判分，不能等同裸模型能力或生产 SLO。
-
-研究笔记：[Claude Sonnet 5.5 来源与证据账本](../../research/model-update-2026-09/claude-sonnet-5.5-source-notes.md)。本章没有真实 API probe，也未独立复现 benchmark、下载权重或推断参数/架构/完整训练配方。
+回到工单 742：宿主按原样保存需要续接的消息块，单独追踪文件变更、测试回执和提交状态；遇到 refusal 时记录类别与实际服务模型；最后由独立检查确认代码和测试属于同一工作区版本，而且没有提交。这样读者才能分清模型生成了什么、接口路由了谁、宿主实际做了什么，以及任务最终是否达到要求。

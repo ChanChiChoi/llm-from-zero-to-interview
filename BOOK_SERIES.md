@@ -47,7 +47,7 @@
 10. `progress_v2.md`：常态化全书精修，包括逐章复读、公式/代码修订、章节扩展和全书审计。
 11. `progress_v3.md`：以排行榜新进模型为锚点，基于权威资料更新新模型、新知识点及周边技术的执行记录。
 
-2026-09-29 沿 Artificial Analysis 新增的 Claude Sonnet 5.5 锚点补入第二十册第 24 章与第八册第 16.22 节：覆盖 `between_tools`、thinking block 绑定、工具迁移、三阶段 cyber safeguards、类别化 fallback 和 System Card 的评测条件。DataCurve 无精确 Sonnet 5.5 Agent 行；API 与 System Card 资料不支持推断参数、内部架构、完整训练 recipe 或生产 SLO。
+第二十册第 24 章以 Claude Sonnet 5.5 Messages API 为例，说明工具回合中的 typed-block 回放、model/prefix/account 绑定、强制 tool choice 限制、拒答分类与实际 fallback 模型追踪。动态接口事实按官方文档查阅日期标注；System Card 和 benchmark 结论仅代表发布方的特定评估，不推断参数、内部架构、完整训练 recipe 或生产 SLO。详见 [Sonnet 5.5 研究记录](research/model-update-2026-09/claude-sonnet-5.5-source-notes.md)。
 
 ## 推荐学习顺序
 
@@ -90,7 +90,7 @@
 
 Gemini Interactions 的跨轮状态专题落点为第二十册第 23 章：以 Gemini Developer API 的公开 Interaction 合同为范围，说明 `previous_interaction_id`、function `id`/`call_id`、SSE `event_id` 与 `continuation_token` 各自恢复什么，并区分服务端对话历史、逐轮配置、thought signature、宿主工具副作用和 Interaction 保留期限。Thinking guide 与 API v1 reference 对 thought signature 必需性的标记粒度不同；正文保留该证据边界，不推断真实 endpoint 对缺省字段的行为，也不推断 Gemini 内部架构或训练方法。来源与版本范围见 [Gemini Interactions 状态证据记录](research/gemini-interactions-state-evidence-2026-11-19.md)。
 
-Claude Opus 5.5 的 compaction 增补接入第二十册第 7.25 节：对照 on-demand 与 threshold 两种 beta 状态机、平台兼容差异、Opus 5.5 threshold thinking 丢弃规则，以及账号创建时间影响的 prefix-check 默认策略；题库、练习和知识图谱同步区分 model binding 与 prefix binding。它们是 Anthropic 文档合同，不是本项目对 Messages API 的实测，也不构成参数、架构或训练 recipe 证据。
+Claude Opus 5.5 的 compaction 增补接入第二十册第 7.25 节：对照 on-demand 与 threshold 两种 beta 状态机、平台兼容差异、threshold thinking 丢弃规则，以及 preserved-thinking 的 model/prefix/account binding。当前 Platform 指南与官方 Cookbook 对 prefix mismatch 默认值的描述粒度不同；正文不将账号创建日期推广为通用阈值，并保留各目标平台查阅当前合同的要求。它们是 Anthropic 文档合同，不是本项目对 Messages API 的实测，也不构成参数、架构或训练 recipe 证据。
 
 Kimi K2.7 Code 接入第二十一册第 94 章：从 1T/32B active MoE、MLA 与 native INT4 拆解权重/缓存账本，再沿强制 thinking、reasoning_content 回传和多模态工具循环分析长周期 coding Agent。第六册承接量化权重、KV cache、视觉 prefill 与单位成功成本；第十七册和第二十册承接工具授权、执行回执、幂等、状态回放与 verifier；第七册区分 Artificial Analysis、DataCurve mini-swe-agent 和 Kimi 发布方 benchmark。官方称同模型的 Highspeed 服务变体仅作为路由/供给条件，不新增模型候选；训练 recipe、完整权重、硬件 profile 和生产 acceptance 仍未确认。详见 [Kimi K2.7 Code 研究笔记](research/model-update-2026-09/kimi-k2.7-code-source-notes.md)。
 

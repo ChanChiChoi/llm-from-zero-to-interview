@@ -76,38 +76,40 @@ optimizer.step()
 
 `nn.Module` 本身不是一个数学层，而是一套工程组织规则。理解它的关键不是记住很多类名，而是能回答三个问题：这个对象是否在模块树上、它是否会出现在保存状态中、优化器是否拿到了它。
 
-第一，参数量来自注册参数，而不是来自 Python 变量名。以下参数量公式假定各维度是正整数，并且只统计实际创建的参数，不把临时激活或未注册 tensor 算进去。线性层参数量为：
+第一，参数量来自注册参数，而不是来自 Python 变量名。以下参数量公式假定各维度是正整数，并且只统计实际创建的参数，不把临时激活或未注册 tensor 算进去。线性层的输入特征数记作 $d_{\mathrm{in}}$，输出特征数记作 $d_{\mathrm{out}}$。每个输出特征对应 $d_{\mathrm{in}}$ 个权重；若包含偏置，还要给每个输出特征加一个偏置。因此参数总数 $N$ 为：
 
 ~~~math
-N = d_{in} d_{out} + d_{out}
+N = d_{\mathrm{in}}d_{\mathrm{out}} + d_{\mathrm{out}}
 ~~~
 
 如果 `bias=False`，则只有：
 
 ~~~math
-N = d_{in} d_{out}
+N = d_{\mathrm{in}}d_{\mathrm{out}}
 ~~~
 
-Embedding 表的参数量为：
+Embedding 表为词表中的每个 token ID 保存一个长度为 $d$ 的向量；词表有 $V$ 个 token ID 时，参数量为：
 
 ~~~math
-N_{emb} = V d
+N_{\mathrm{emb}} = Vd
 ~~~
 
-其中 `V` 是词表大小，`d` 是 hidden size。一个两层 MLP 的参数量常写成：
+词表大小用 $V$ 表示，向量维度用 $d$ 表示。对包含两层线性层及其偏置、隐藏维度为 $d_{\mathrm{h}}$ 的 MLP，参数量常写成：
 
 ~~~math
-N_{mlp} = d_{in} d_h + d_h + d_h d_{out} + d_{out}
+N_{\mathrm{mlp}} = d_{\mathrm{in}}d_{\mathrm{h}} + d_{\mathrm{h}} + d_{\mathrm{h}}d_{\mathrm{out}} + d_{\mathrm{out}}
 ~~~
 
-第二，optimizer 更新的是它拿到的 `Parameter`。单个参数的 SGD 更新可以写成：
-
-~~~math
-\theta_{t+1} = \theta_t - \eta g_t
-~~~
+第二，optimizer 更新的是它拿到的 `Parameter`。设当前损失为 $L$，第 $t$ 步的参数记作 $\theta_t$，学习率为 $\eta$。该参数的梯度为：
 
 ~~~math
 g_t = \frac{\partial L}{\partial \theta_t}
+~~~
+
+基础 SGD 沿着损失下降方向更新参数：
+
+~~~math
+\theta_{t+1} = \theta_t - \eta g_t
 ~~~
 
 如果某个 tensor 没有注册成 `Parameter`，或者某个子模块藏在普通 list / dict 中，它即使参与 forward，也不会自动出现在 `model.parameters()` 里，optimizer 通常不会更新它。
@@ -115,10 +117,10 @@ g_t = \frac{\partial L}{\partial \theta_t}
 第三，默认 `state_dict` 不是保存整个 Python 对象，而是保存注册权重和持久化 buffer：
 
 ~~~math
-S_{default}(M) = P(M) \cup B_p(M)
+S_{\mathrm{default}}(M) = P(M) \cup B_{\mathrm{p}}(M)
 ~~~
 
-其中 `P(M)` 表示 module 树上的注册参数，`B_p(M)` 表示 `persistent=True` 的 buffer。普通属性和临时 tensor 不会自动保存；`persistent=False` 的 buffer、`forward` 代码和 Python 类定义也不在默认模型 `state_dict` 中。模块还可以实现 `get_extra_state()` / `set_extra_state()` 或注册状态字典 hook，显式加入额外状态，所以实际字典不保证只含 tensor。额外对象必须可序列化；PyTorch 对跨版本序列化的兼容承诺主要针对 tensor，详见 [PyTorch 2.15 `nn.Module`](https://docs.pytorch.org/docs/2.15/generated/torch.nn.Module.html)。若两个模块共享同一个 `Parameter`，`state_dict` 可能为两个访问路径保留两个 key；因此 key 的数量不一定等于唯一参数存储的数量，参数统计时还要考虑别名。
+式中的模块树记作 $M$，其中注册参数集合记作 $P(M)$；持久化 buffer 集合记作 $B_{\mathrm{p}}(M)$。普通属性和临时 tensor 不会自动保存；`persistent=False` 的 buffer、`forward` 代码和 Python 类定义也不在默认模型 `state_dict` 中。模块还可以实现 `get_extra_state()` / `set_extra_state()` 或注册状态字典 hook，显式加入额外状态，所以实际字典不保证只含 tensor。额外对象必须可序列化；PyTorch 对跨版本序列化的兼容承诺主要针对 tensor，详见 [PyTorch 2.15 `nn.Module`](https://docs.pytorch.org/docs/2.15/generated/torch.nn.Module.html)。若两个模块共享同一个 `Parameter`，`state_dict` 可能为两个访问路径保留两个 key；因此 key 的数量不一定等于唯一参数存储的数量，参数统计时还要考虑别名。
 
 下表把对象所在位置与框架能管理的状态对应起来。`ModuleList` / `ModuleDict` 中的子模块按递归注册处理；普通 Python 容器不会自动注册其中的 module 或 `Parameter`。
 
@@ -136,10 +138,10 @@ S_{default}(M) = P(M) \cup B_p(M)
 第四，参数高效微调或冻结模型时，先看可训练参数比例：
 
 ~~~math
-r = \frac{\sum_{p \in P_{train}} |p|}{\sum_{p \in P_{all}} |p|}
+r = \frac{\sum_{p \in P_{\mathrm{train}}} |p|}{\sum_{p \in P_{\mathrm{all}}} |p|}
 ~~~
 
-其中 `|p|` 是一个参数 tensor 的元素个数，`P_train` 和 `P_all` 按 `model.parameters()` 默认的对象去重结果统计，且分母必须大于 0；如果模型没有参数，这个比例没有定义。LoRA、adapter、prompt tuning 的核心工程检查就是：应该训练的参数是否都被注册、`requires_grad=True`、进入 optimizer，并且保存时能从 `state_dict` 或 `named_parameters()` 中筛出来。
+其中，参数 tensor $p$ 的元素数记作 $|p|$；可训练参数集合记作 $P_{\mathrm{train}}$，全部参数集合记作 $P_{\mathrm{all}}$。后者对应 `model.parameters()` 默认去重后的结果，且前者是其子集。分母必须大于 0；如果模型没有参数，这个比例没有定义。LoRA、adapter、prompt tuning 的核心工程检查就是：应该训练的参数是否都被注册、`requires_grad=True`、进入 optimizer，并且保存时能从 `state_dict` 或 `named_parameters()` 中筛出来。
 
 第五，`train()` / `eval()` 改的是模块状态，不是梯度开关：
 
@@ -420,7 +422,7 @@ class GoodStack(nn.Module):
 ```
 > 代码片段，静态审阅，未运行。
 
-用一个两层小模型把注册、前向和状态大小连起来。令第一层权重为 `[2, -1]`、偏置为 `1`，第二层权重为 `2`、偏置为 `-1`，输入为 `[3, 2]`：
+用一个两层小模型把注册、前向和状态大小连起来。令第一层权重为 $[2,-1]$、偏置为 $1$，第二层权重为 $2$、偏置为 $-1$，输入向量为 $[3,2]$：
 
 ```python
 import torch
@@ -457,7 +459,7 @@ print("state keys:", list(state))
 ```
 > 代码片段，已验证（2026-11-09；Python 3.12.9、PyTorch 2.12.0+cpu，CPU）。
 
-手算第一层得到 `2×3 + (-1)×2 + 1 = 5`；第二层得到 `2×5 - 1 + 0 = 9`。第一层有两个权重和一个偏置，共 3 个参数；第二层有一个权重和一个偏置，共 2 个参数，因此模型有 5 个可训练标量。`offset` 是一个持久 buffer，不参加 optimizer，却和参数一起保存，所以 state dict 有 6 个 tensor 元素，key 为两层的 weight/bias 和 `offset`。若把 `ModuleList` 换成普通 list，前向仍可调用这些层，但这 5 个参数不会由 `model.parameters()`、`state_dict()` 或 `model.to()` 管理。
+手算第一层得到 $2\times3+(-1)\times2+1=5$；第二层得到 $2\times5-1+0=9$。第一层有两个权重和一个偏置，共 3 个参数；第二层有一个权重和一个偏置，共 2 个参数，因此模型有 5 个可训练标量。`offset` 是一个持久 buffer，不参加 optimizer，却和参数一起保存，所以 state dict 有 6 个 tensor 元素，key 为两层的 weight/bias 和 `offset`。若把 `ModuleList` 换成普通 list，前向仍可调用这些层，但这 5 个参数不会由 `model.parameters()`、`state_dict()` 或 `model.to()` 管理。
 
 如果是按名称组织，可以用 `nn.ModuleDict`：
 

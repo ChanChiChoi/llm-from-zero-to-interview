@@ -77,3 +77,10 @@
 - 将本章 SFT loss 中的 `y_{i,<t}` 改为 `y_{i,1:t-1}`，并将 GSPO 公式里的两处 `y_{i,j,<t}` 改为 `y_{i,j,1:t-1}`，保留“当前位置之前的回答 token”这一条件。
 - 在 SFT 和 GSPO 公式后说明显式范围的含义及首位置前缀为空，避免只为渲染而丢掉数学语义。GitHub 会先经过 Markdown/HTML 处理，`<t` 可能被识别为标签片段并导致 `Missing close brace`。
 - 静态检查本章不再含以 `<t` 开头的下标写法，公式围栏配对且 `git diff --check` 通过；未运行测试或 PDF 构建。
+
+## 本轮沿同一回答补全 PPO-RLHF 六步算例（2026-11-19）
+
+- 根据读者反馈，让 PPO-RLHF 整节围绕 prompt `$3/4+1/4=?$` 和回答“分母相同，分子相加，得到 `$4/4=1$`。”贯穿说明；同题偏好样本补出 chosen“答案是 `$1$`。”与 rejected“答案是 `$2$`。”的示例。
+- 为手算假设 tokenizer 将回答切成六个教学片段，并在正文明确这不是某个真实 tokenizer 的切分。逐项连接 rollout 记录的旧 log probability、reference log probability、policy/reference 差、逐 token KL reward，以及 reward model 对整条回答输出 `$1.50$` 单一分数；教学用 `$\beta=0.5$` 时，六个 reward 合计 `$1.47$`。
+- GAE 继续使用同六个位置，列出 critic 对每个生成前缀的 value、TD residual、advantage 和 returns。明确 critic 输出是每个前缀的价值预测，不是 token 偏好分；RM 输出的是整条回答的分数。PPO ratio 和 critic 平方误差也沿用第四个 token 的数值作说明。
+- 本次只扩写 §3 教学解释，没有改变方法结论、章节结构、配套索引或新增研究事实。手工复核 reward 求和、GAE 倒推、returns 和 ratio 数值；完成 `git diff --check`；未运行测试或 PDF 构建。

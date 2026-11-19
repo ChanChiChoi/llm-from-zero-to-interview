@@ -1,6 +1,6 @@
-# Claude Sonnet 5.5：System Card 与 fallback API 合同
+# Claude Sonnet 5.5：thinking state、fallback API 合同与发布方证据
 
-资料核对日期：2026-11-03。本文只记录 Anthropic 对 Sonnet 5.5 的模型安全披露、拒绝类别和 fallback API 合同；不把发布方评测写成独立复现或生产安全率。
+资料核对日期：2026-11-19。本文记录 Anthropic 对 Sonnet 5.5 的 Messages API 状态回放、工具选择、拒绝类别、fallback 和发布方安全评估的公开说明；不把官方文档写成真实 endpoint 探测，也不把发布方评测改写为独立复现或生产安全率。System Card 的旧 benchmark 数字和风险说明来源于 2026-11-03 的材料核对，第二十册第 24 章不再复述这些 benchmark 数字。
 
 ## 官方来源
 
@@ -8,7 +8,32 @@
 - [Introducing Claude Sonnet 5.5](https://www.anthropic.com/claude-sonnet-5-5)：发布方称常规软件开发中的找错和修复可以继续；较高风险 cyber 请求会 visibly fall back 到 Sonnet 5。生物 safeguards 与 Sonnet 5 相同；Sonnet 5.5 还加入 reasoning-extraction safeguards。
 - [Refusals and fallback](https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback)：Anthropic API 拒绝字段、当前类别推荐、fallback 配置、响应轨迹与计费合同。页面检索日期 2026-11-03。
 - [Claude Sonnet 5.5 migration guide](https://platform.claude.com/docs/en/models/sonnet-5-5/migration-guide)：当前 API refusal 类别及 `between_tools` 请求转 Sonnet 5 时的接口约束。
+- [What's new in Claude Sonnet 5.5](https://platform.claude.com/docs/en/models/sonnet-5-5/whats-new-sonnet-5-5)：model ID、thinking 与 effort、强制工具选择、跨模型状态和 beta 功能迁移合同。
+- [Thinking](https://platform.claude.com/docs/en/build-with-claude/thinking)、[Preserved thinking](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking) 与 [Prefix checks on thinking blocks](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking/prefix-checks)：typed block 回放、模型/账号/前缀绑定、兼容方向及不匹配时的响应。
+- [Prompting Claude Sonnet 5.5](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5-5)：工具间进度块与默认显示行为。
+- [Tool use with Claude](https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview)：模型工具请求、宿主执行与结果回传的调用流程。
+- [Claude Cookbook：Extended thinking with tool use](https://platform.claude.com/cookbook/extended-thinking-extended-thinking-with-tool-use)：工具回合 block 回传建议；其账号创建日期默认值说明与当前 Platform 前缀检查指南的描述不一致，见下文。
+- [Diátaxis](https://www.diataxis.fr/)：区分教程、操作指南、参考与解释四种文档任务；这是文档组织框架，不是某种章节编排能改善学习效果的研究结论。
 - [Anthropic Transparency Hub](https://www.anthropic.com/transparency)：提供 System Card 的公开摘要，不等同于完整 System Card。
+
+## 2026-11-19 核验的 API/runtime 合同
+
+- 官方 Claude API model ID 为 `claude-sonnet-5-5`；adaptive thinking 默认开启，Claude API 默认 effort 为 `high`。Anthropic 说明 Sonnet 5.5 对 effort 行为重新校准，迁移时应重跑 workload-specific effort sweep；effort 是工作深度控制，不是 `max_tokens` 的硬上限。
+- Sonnet 5.5 不接受 `thinking.type=disabled`；`thinking.type=between_tools` 可在 `low`、`medium`、`high` effort 下关闭 upfront thinking，`xhigh`/`max` 会返回 400。该模式不接受 `display`、`budget_tokens` 或 `block_binding` 等额外 thinking 字段；不使用工具时会直接输出文本。
+- `between_tools` 仍可能返回工具间进度 block。默认 `display="omitted"` 会使普通 thinking block 的可读文本为空；这与 `redacted_thinking` 是不同 block 状态。将 assistant 工具回合回传时，需按原顺序保留 `thinking` 和 `redacted_thinking` 等协议块；只渲染 `text` 的 UI 可能看起来没有进展。
+- Sonnet 5.5 不支持 `tool_choice` 为 `any` 或指定 `tool`；`auto` 与 `none` 可用。严格 schema 限制参数形状，不替代宿主的授权、执行和副作用记录。
+- client-tool 回合在 `stop_reason="tool_use"` 下返回一个或多个 `tool_use` block；`tool_use.id` 用来与后续 `tool_result.tool_use_id` 配对，宿主执行 client tools。Anthropic server tools 在供应商侧运行，不能把两者都写成应用宿主执行。
+- thinking block 的模型兼容具有方向性和 provider 条件。当前官方文档说明 Sonnet 5.5 不读取 Claude Fable 或 Mythos 模型的 blocks；其 blocks 仅在 Claude API 与 Google 管理的 Google Cloud 等指定 surface 上可被 Opus 5.5、Fable 5.2、Mythos 5.2 读取。不可读 block 可被静默丢弃，不能仅依赖请求成功判断状态完整。
+- Sonnet 5.5 的 thinking blocks 仅可在生成它的账户或关联账户中使用；跨账户请求可能成功但丢弃 block。指定 surface 的 `input_transformations` 可报告 `organization_binding_mismatch`。
+- 前缀检查覆盖生成该 block 前的 `system`、`tools` 和所有旧消息。当前 Platform 指南把 Sonnet 5.5 的未显式配置行为标为“可能 400”，并要求应用准备好 400 与无错误但 mismatch block 到达模型两种结果；`thinking-binding-controls-2026-08-01` 允许请求显式设置 `error` 或 `drop_block`，但该控制字段不应与 `between_tools` 混用。
+- **官方文档默认值描述有冲突：**当前 [Platform Prefix checks 指南](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking/prefix-checks)说明未设置 `prefix_mismatch_behavior` 时的结果取决于模型，并将 Sonnet 5.5 标为可能 400；官方 [Cookbook](https://platform.claude.com/cookbook/extended-thinking-extended-thinking-with-tool-use)仍称 2026-08-31 起创建的账户默认返回 400、旧账户通过 beta opt in。不能把这两页合并成普遍账户阈值；目标 provider/account 的实际默认行为仍需在对应环境确认。
+- Anthropic API 的拒答正常返回 HTTP 200，使用 `stop_reason="refusal"` 及 `stop_details.category`；类别可以缺失。Sonnet 5.5 的 server-side `fallbacks="default"` 当前仅在 Claude API 和 Anthropic 管理的 Google Cloud beta surface 上适用，`cyber` 与 `frontier_llm` 可路由至 Sonnet 5，`bio`、`reasoning_extraction` 与 `general_harms` 不走该默认 fallback。请求模型的 429、overload 或 server error 不触发该 safety fallback。
+- 成功 fallback 的返回记录包括实际服务模型、`fallback` block 和 `usage.iterations`。流式输出可以中途切换；仅记录最初的 `message_start` 会漏掉实际 fallback 模型。请求方仍需独立核对工具执行回执与任务完成条件。
+- Anthropic 官方文档还说明，若流式 refusal 到达时任意 tool-use block 仍打开，该请求直接返回 refusal，不走 server-side fallback；已完成的 server-tool 结果可随部分回退路径保留。fallback 状态不能替代宿主对 client-tool 执行回执的查询。
+
+## 文档组织参考
+
+本章的主读者任务是理解一次工具回合中 API 状态、宿主执行和任务验收如何分属不同所有者，并查清具体 provider 的兼容条件。因此正文先用一条工具轨迹解释状态，再整理请求兼容表和拒答路由；它不是要求读者照步骤调用 API 的操作教程。Diátaxis 将 explanation、reference、how-to 与 tutorial 视作不同读者需求；本章借其任务区分决定顺序，不声称该框架验证了本章的学习效果。
 
 ## 来源支持的事实
 

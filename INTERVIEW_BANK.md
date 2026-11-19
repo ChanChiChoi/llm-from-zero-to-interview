@@ -3452,6 +3452,15 @@
      考察点：SDK/transport、endpoint 范围、字段处理方式、tool schema 与 call ID、reasoning 参数、流式事件、会话状态、usage、错误和版本/模型范围。
      回答框架：先说清客户端调用的是哪个 endpoint，再区分客户端能发请求、目标接受该 schema、应用依赖的语义能否保留。按目标服务文档逐项记录明确支持、有条件或转换、明确不支持、未说明；用具体差异说明适配或功能收缩，例如 system/developer 消息被移位、strict 被忽略或 Responses API 无状态。对关键行为补充限定范围的集成用例，但不把一次成功或一份文档推广到其他 endpoint、model、provider 或版本；服务端 API 的鉴权、限流与实现细节另看第二十四册第五十七章。
 
+
+40AG. Gemini Interactions 中断后，怎样判断应续接对话历史、事件流、长解码还是外部动作？
+     考察点：Interaction ID、function call/result ID、SSE event ID、continuation token；stateful/stateless history；逐轮配置；thought signature；API status；外部副作用和验收。
+     回答框架：先明确待恢复的对象，再选择 `previous_interaction_id`、`event_id` 或 `continuation_token`；它们分别恢复已存储的对话历史、事件流和未完成长解码。自定义 function 的 `id`/`call_id` 只关联调用与结果。逐轮重发所需配置，stateless 路径原样保留已收到的 thought/signature 状态，并说明 Thinking guide 与 API v1 reference 对 signature 必需性的标记差异。若外部副作用结果未知，查询外部系统或按其幂等合同处理，不因 stream 恢复就盲目重放；由宿主 verifier 确认任务完成。最后固定 SDK/API/model 版本和 store/retention 条件。
+
+40AH. Claude Sonnet 5.5 的工具回合中断或返回 refusal 后，宿主怎样安全续接并确认谁完成了任务？
+     考察点：`between_tools` 与 adaptive/disabled 的差别；thinking/redacted-thinking 回放；model/prefix/account binding；`tool_use` 与宿主授权；refusal category 与 default fallback；requested/actual model；工具回执与独立 verifier。
+     回答框架：先区分 API 消息状态、工具实际执行状态和任务验收状态。工具回合按原顺序保存 assistant blocks，并按 provider/model 前缀合同续接；`tool_use` 仍须经过宿主 schema、权限和执行检查。拒答按 `stop_reason` 和可用类别处理，分别判断 Sonnet 5.5 的 beta fallback 是否适用，并从 fallback block 与 `usage.iterations` 等记录实际响应模型；流中途切换时读 fallback block 的 `to.model`，若 refusal 到达时 tool-use block 尚未闭合则不走该 server-side fallback。429、overload 与 server error 走不同恢复路径。最后查询当前 workspace 和执行回执，由 verifier 确认测试与交付结果，不把模型输出或 API 成功状态当成完成证明。
+
 40ZA. 如何设计工具调用 trace、replay 和审计体系？
       考察点：trace schema、span tree、ID propagation、version capture、argument lineage、permission trace、tool result trace、privacy masking、audit event、replay readiness、side-effect replay safety、metrics、alerts、eval linkage。
       回答框架：先把 trace 定义成一次工具调用的事实链，而不是普通文本日志。链路要覆盖用户请求、模型输入输出、Router 候选和过滤原因、tool call、raw / parsed / normalized / final arguments、权限决策、Executor 执行、tool result 投影、最终回答和用户可见错误。每个 span 要有稳定 ID、parent、时间、状态、输入输出摘要和 artifact 引用；版本要记录 model、prompt、tool schema、registry、router policy 和 adapter。Replay 分 trace-only、model replay 和 tool / sandbox replay，有副作用动作默认禁止 live replay。审计事件要记录 actor、tenant、tool、action、resource、decision、confirmation、timestamp、trace id 和 outcome。指标包括 trace schema completeness、ID tree integrity、version capture coverage、argument lineage coverage、permission trace completeness、tool result trace completeness、privacy masking coverage、audit event completeness、replay readiness rate、side effect replay safety、metric export coverage、alert owner coverage、eval linkage coverage 和 trace replay gate。核心观点是没有 trace 就没有可靠评估、调试、回放和安全追责。
@@ -6051,7 +6060,7 @@
     **答：** Opus 5.5 不保留 threshold 压缩点前的 `thinking`/`redacted_thinking`。若配置 `pause_after_compaction` 后手动重插 tail，应删掉这些 reasoning blocks，或按文档用 `thinking-binding-controls-2026-08-01` 选择 `drop_block`；普通文本和 tool blocks 可按协议保留。On-demand keep-tail 是另一套满足条件后才保留 thinking 的流程。
 
 17. **问：Opus 5.5 thinking replay 的 model binding 和 prefix binding 有什么区别？**
-    **答：** Model binding 检查目标模型能否读取 producer 的 block；prefix binding 检查 block 前的 system/tools/历史前缀是否被改写。Opus 5.5 可读 Opus 5 及更早 Opus/Sonnet/Haiku blocks，但不能读 Fable/Mythos；prefix mismatch 的默认检查又取决于账号创建时间：2026-08-31 00:00 UTC 起新账号默认执行，旧账号只有显式设置时 opt in。不能把“不支持的模型 block 被静默丢弃”和“前缀变化返回 400/drop”混为一类。
+    **答：** Model binding 检查目标模型能否读取 producer 的 block；prefix binding 检查 block 前的 system/tools/历史前缀是否被改写。它们是两个独立条件，不要把模型静默丢弃和 prefix mismatch 的 400/drop 混为一类。当前 Platform 指南将默认行为描述为依模型而异，官方 Cookbook 仍记载 2026-08-31 的账号日期阈值；出现文档差异时应标明来源并核对目标 endpoint，不能把旧日期说成所有平台通用规则。
 
 18. **问：仅凭 Opus 5.5 的 compaction `supportedModels`，能否断言每个托管平台都可用？**
     **答：** 不能。On-demand 文档不列 Amazon Bedrock，threshold 文档则列 Bedrock 为 beta；应分别核对模式、平台和 beta header，不能从模型支持推导 provider 可用，也不能把文档兼容表当成本项目的真实 endpoint probe。
@@ -6381,24 +6390,24 @@
 
 依据：[Agent 环境与多 Agent 研究笔记](research/agent-environments-multi-agent-2026-11.md)；[第十七册第九章](book-17-agent-tool-use/chapters/09-multi-agent.md)。
 
-## 2026-09 Claude Sonnet 5.5：Thinking State 与类别化安全路由
+## 2026-11 Claude Sonnet 5.5：工具回合状态与安全路由
 
-1. **问：Sonnet 5.5 如何关闭 thinking？`between_tools` 是否等于 `disabled`？**
-   **答：** 不等于。`thinking.type=disabled` 会 400；`between_tools` 关闭 upfront thinking，但较长工具间进度仍可能作为 thinking block 返回。它只兼容 low/medium/high，不兼容 xhigh/max，且不能同时设置 display、budget_tokens 或 block_binding。无工具任务会直接回答，因此要先按 workload 选择 adaptive 或 between_tools。
+1. **问：Sonnet 5.5 的 `between_tools` 和 `disabled` 有什么区别？**
+   **答：** Sonnet 5.5 拒绝 `thinking.type=disabled`；`between_tools` 只关闭工具调用前的思考，仍可能返回工具间进度 block。它兼容 low/medium/high，不兼容 xhigh/max，也不接受 `display`、`budget_tokens` 或 `block_binding`。默认 `display="omitted"` 时 thinking block 的可读文本可能为空，所以只渲染 `text` 的界面会显得沉默；这不是没有发生工具进度的证据。
 
-2. **问：为什么客户端不能只拼接 Sonnet 5.5 的 text block？**
-   **答：** Thinking/progress 是 typed block，默认 omitted 时 block 文本可能为空；若 UI 只显示 text，工具循环期间会静默。回放还受 model、prefix 和 account binding 约束；不兼容 block 可能被 drop 或触发 400。客户端要逐类解析、按文档保留回放状态，并把长期任务事实/副作用另存到应用状态库。
+2. **问：工具回合被中断后，哪些状态需要分别恢复？**
+   **答：** API 对话历史中的 assistant blocks 要按原顺序回放，工具回合中的 `thinking` 和 `redacted_thinking` 不应按文本筛选删改；但实际工具调用、文件版本和外部副作用要从宿主执行器、workspace 或服务端另查。API 接受一段历史不证明旧工具结果仍然对应当前任务状态。
 
-3. **问：System Card 的 cyber 防护有哪些阶段？**
-   **答：** 发布方描述 activation probe、Sonnet 5.5 上的轻量 classifier、以及结合 probe 判定的独立 LLM classifier。它是官方公开的保护链描述，不代表内部完整实现已披露或经过独立复现。
+3. **问：thinking block 的绑定失败怎样区分？**
+   **答：** model binding 检查目标模型能否读取 producer block；prefix binding 检查此前的 `system`、`tools` 和消息是否改变；account binding 检查生成账户与当前账户的关系。三者可能分别造成静默 drop 或 400。当前 Platform 指南将 Sonnet 5.5 的 prefix mismatch 默认处理标为“可能 400”，官方 Cookbook 仍按账号创建日期描述默认值；没有证据时不要把一个阈值推广到所有 provider/account。
 
-4. **问：拒绝请求可以自动交给另一个模型吗？**
-   **答：** 不能笼统处理。截至 2026-11-03，Sonnet 5.5 的 Anthropic API 默认 server-side fallback（beta）只把 `cyber` 与 `frontier_llm` refusal 重试到 Sonnet 5；`bio`、`reasoning_extraction`、`general_harms` 不重试。它只处理 classifier refusal，不处理 429、overload 或 server error。要从响应的 `model`、`fallback` block 和 `usage.iterations` 记录实际模型与尝试，避免借模型切换绕过策略拒绝。
+4. **问：Sonnet 5.5 返回 `tool_use` 就可以执行工具吗？**
+   **答：** 不可以。它不支持 `tool_choice=any` 或指定 `tool`，但 `auto` 和 `none` 可用；strict schema 约束参数格式，不授予权限。宿主仍要检查工具、资源、身份与参数，再执行并保存回执。
 
-5. **问：如何准确报告 Sonnet 5.5 的 Terminal-Bench/OSWorld 结果？**
-   **答：** 同时报任务集版本、CLI/harness、effort、trials、网络/资源条件、指标定义、fallback 覆盖和 verifier。`70.6%` Terminal-Bench 4.0 是 66 tasks、Claude Code `--bare`、max、5 trials、无外网且有少量 fallback；OSWorld `80.1% partial` 与 `43.5% strict` 是不同度量，绑定 108 个任务、500-action 上限、5 runs 和 compaction。它们是发布方结果，不是裸模型或生产 SLO。
+5. **问：如何分辨 refusal 与一般服务错误，并审计 fallback？**
+   **答：** refusal 是正常 HTTP 200 响应，先检查 `stop_reason="refusal"`，再读取可能为空的类别。Sonnet 5.5 的 `fallbacks="default"`（beta）仅将 `cyber`、`frontier_llm` 等适用拒答送往 Sonnet 5；`bio`、`reasoning_extraction` 和 `general_harms` 不走这条默认路由，429/过载/服务错误也不触发它。审计应记录实际回答模型、fallback block 与 `usage.iterations`；流式响应可能中途切换，不能只读最初的 model。
 
-依据：[Sonnet 5.5 研究笔记](research/model-update-2026-09/claude-sonnet-5.5-source-notes.md)；[第二十册第 24 章](book-20-agent-harness-runtime/chapters/24-claude-sonnet-5.5-thinking-state与安全路由.md)。
+依据：[Sonnet 5.5 研究记录](research/model-update-2026-09/claude-sonnet-5.5-source-notes.md)；[第二十册第 24 章](book-20-agent-harness-runtime/chapters/24-claude-sonnet-5.5-thinking-state与安全路由.md)。
 
 ## 2026-09 Kimi K3：adaptive DSpark 与 ROCm serving
 

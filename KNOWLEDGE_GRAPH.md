@@ -448,7 +448,7 @@ Claude Opus 5 -> 1M Context -> 128K Max Output -> 300K Batch Output -> Adaptive 
 
 Claude Opus 5.5 -> On-demand Compaction (`compact-2026-09-04`) -> Signed Summary Block + Conditional Preserved-Thinking Tail
 Claude Opus 5.5 -> Threshold Compaction (`compact-2026-01-12`) -> `context_management.edits` -> Pre-compaction Thinking Dropped
-Claude Opus 5.5 -> Model Binding != Prefix Binding -> Account-age-dependent Prefix Check -> `error` / `drop_block`
+Claude Opus 5.5 -> Model Binding != Prefix Binding -> model/surface-specific prefix mismatch behavior -> `error` / `drop_block`; current Platform guide and Cookbook differ on the default boundary -> do not generalize an account-age cutoff
 Claude Opus 5.5 -> Platform/Beta Compatibility Matrix -> Append-only Replay -> Agent Harness Trace and State Recovery
 
 以上是 Anthropic 文档描述的 API/runtime 合同；本项目没有调用 Messages API。参数量、训练架构、训练配方和生产端点行为仍待独立证据。
@@ -1381,16 +1381,17 @@ PyTorch DCP 2.15 -> rank-local shard save/load + load-time reshard -> no cross-v
 
 TierCheck preprint -> local/peer differential state + remote base checkpoint -> global commit marker/watermark -> software/node/rack failure-specific recovery -> benchmark on target topology/storage before adopting author-reported latency
 
-### Claude Sonnet 5.5：Thinking State、API contract 与发布方安全评估
+### Claude Sonnet 5.5：Thinking State、API contract 与安全路由
 
-Claude Sonnet 5.5 -> Artificial Analysis `max + Default Fallback` -> third-party config measurement; DataCurve exact Agent row absent -> no score transfer
-`thinking.type=between_tools` -> disables upfront thinking, not every tool-progress block -> effort/provider/error compatibility gate
-thinking block -> model binding + prefix binding + account binding -> exact replay/drop/error behavior -> not UI text or durable memory
-forced `tool_choice=any/tool` -> unsupported -> strict schema / Structured Outputs alternative -> validate host executor separately
-Cyber misuse -> activation probe + lightweight classifier + second LLM classifier -> refusal/fallback routing -> `requested_model` != `actual_model`
-refusal category -> cyber/frontier_llm may fallback -> bio/reasoning_extraction/general_harms do not -> transport/overload errors use separate recovery -> audit `model`/fallback block/iterations
-Terminal-Bench 4.0 / OSWorld 2.1 -> task/harness/effort/safeguard/fallback/verifier -> publisher-reported evaluation -> not AA/DataCurve or independent reproduction
-Monitorability -> intervention/process/outcome-property + CoT-only/action-only/all-messages -> trajectory signal × monitor extraction -> property-specific score (non-intervention $g\text{-mean}^2=TPR×TNR$) -> not CoT faithfulness, authorization or pre-commit execution control
+Sonnet 5.5 Messages API -> `thinking` / `tool_use` / `tool_result` -> 对话续接状态 -> host execution receipt 与任务验收仍由宿主/外部系统拥有
+`thinking.type=between_tools` -> disables upfront thinking -> tool progress block may remain -> effort and block-type handling
+thinking block -> directional model binding + prefix binding + account binding -> may be kept, dropped, or trigger a 400 -> not UI text, permission, or durable task memory
+Platform prefix guide vs. official Cookbook -> possible 400/model-dependent default vs. account-date default -> unresolved documentation boundary -> no universal cutoff
+forced `tool_choice=any/tool` -> 400 -> `auto`/`none` + strict schema/Structured Outputs -> schema validity still does not grant host permission
+refusal -> HTTP 200 + `stop_reason=refusal` -> category-specific fallback only for configured classes -> distinguish safety refusal from 429/overload/server error
+Anthropic `fallbacks="default"` -> `cyber`/`frontier_llm` may route to Sonnet 5 -> `model` + fallback block + `usage.iterations` -> record actual response model
+Anthropic Transparency Hub -> publisher safety/evaluation framing -> source- and configuration-bound evidence -> not a claim about host permission or production SLO
+Monitorability -> trajectory signal × monitor extraction -> property-specific evidence; CoT is not a faithful full internal record -> not authorization or pre-commit execution control
 
 ### Gemini 4 Argon
 

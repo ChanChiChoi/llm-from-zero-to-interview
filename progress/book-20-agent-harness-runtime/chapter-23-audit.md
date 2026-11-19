@@ -61,11 +61,11 @@ Diátaxis 用来辨认教程、操作指南、参考和解释任务；它不是�
 - [交叉链接记录](chapter-23-crosslink-note.md)中的缺失 source-note 目标已从正文与 `BOOK_SERIES.md` 移除；新研究记录已建立并链接。
 - `thought.signature` 的必需性在 Thinking guide 与 API v1 reference 的标记粒度不同；本轮不调用真实 endpoint，按 endpoint/SDK 版本将该边界留给接入方验证。
 - 保留期、API version、SDK continuation 行为均可能变化，正文会注明文档日期和适用产品范围。
-- 正文、目录、`BOOK_SERIES.md`、练习、面试题、知识图谱、第二十册架构地图及全套进度交接均已同步。
+- 正文、目录、`BOOK_SERIES.md`、练习 35ER、面试题 40AG、知识图谱、第二十册架构地图及全套进度交接均已同步。
 
 ## 静态验收
 
 - 正文 H2 `23.1`—`23.8` 连续；Markdown 围栏成对；无占位符。唯一的 `text` 围栏明确标为概念示意，不是可执行 API 请求。
-- 检查本章正文、目录、`BOOK_SERIES.md`、练习、题库、章节审计、交叉链接记录与架构审计中的 11 个相关本地目标，缺失为 0；读者材料中对旧 `gemini-3.8-flash-source-notes.md` 的引用为 0。
-- `git diff --check` 通过。
+- 检查本章正文、目录、`BOOK_SERIES.md`、练习、题库、知识图谱、章节审计、交叉链接记录、架构审计和全套交接中的 46 处相关本地链接，缺失为 0；读者材料中对旧 `gemini-3.8-flash-source-notes.md` 的引用为 0。
+- 练习 35ER 与面试题 40AG 各唯一；`git diff --check` 通过。
 - 未运行书中代码、SDK、真实 API、自动化测试、模型、benchmark 或 PDF；未验证 GitHub 页面渲染和外链长期可达性。
