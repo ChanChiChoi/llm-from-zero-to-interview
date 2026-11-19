@@ -1,6 +1,6 @@
 # 第二十册《Agent Harness、Coding Agent Runtime 与智能体工程框架》架构审视
 
-审视日期：2026-11-18。阶段：册级初审、发现扫描、简介与目录重构完成；第 1—20 章章级扫描与精修完成，第 21—24 章待逐章处理。
+审视日期：2026-11-19。阶段：册级初审、发现扫描、简介与目录重构完成；第 1—21 章章级扫描与精修完成，第 22—24 章待逐章处理。
 
 ## 审视范围与方法
 
@@ -53,7 +53,7 @@
 | 18 Context Folding | 长任务轨迹如何折叠成更短的模型输入，同时保留约束、来源、版本和未知副作用？ | 深化第 7 章逐轮输入选择与第 17 章任务恢复；分别检查任务结果、规则保留、证据支持和折叠成本。 | 依第 7、17 章；RAG/memory 回链第 7 章，workspace/Artifact 交第 21 章，provider 状态合同交第 20、23 章；评估方法交第 19 章。 |
 | 19 Harness-Aware Evaluation | 结果差异来自模型、harness、环境还是交互？ | 深化第 10 章的归因与轨迹评估。 | 依第 9—10 章；统计方法回链第七册。 |
 | 20 Responses API | 怎样沿 Response/item 与工具往返读懂 OpenAI 的状态、续接、保留、流式和用量合同？ | 让读者区分 API response、item、宿主工具执行、conversation state 与任务验收。 | 依第 4、7、9、17 章；workspace 回链第 21 章；结论绑定官方文档访问日期。 |
-| 21 Persistent Workspace | 文件事实、模型记忆、数据库和 task checkpoint 谁拥有？ | 深化跨轮状态所有权和 artifact 交接。 | 依第 7、9、17 章；与第 20、23 章互链。 |
+| 21 Persistent Workspace | 长任务恢复时，哪个状态来源能证明对话、文件、测试结果和外部系统当前各是什么？ | 区分上下文/记忆、checkpoint、workspace、job 与外部系统事实，并让 artifact 和验证结果绑定具体 revision。 | 依第 7、9、17 章；文件编辑回链第 5 章、权限/保留回链第 8 章、评测回链第 10、19 章；与第 18、20、23 章互链。 |
 | 22 OpenAI-Compatible API 边界 | 字段相同为何不保证语义、工具和计费兼容？ | 提供 provider adapter 的合同检查方法。 | 依第 20 章；provider 实现回链相应书册。 |
 | 23 Gemini Interactions | Interactions ID、thought signature、工具副作用和 retention 如何共同影响续接？ | 单一 provider 的协议状态案例。 | 依第 17—18、20—22 章；逐项固定官方文档日期。 |
 | 24 Claude Sonnet 5.5 状态与安全路由 | thinking state、tool transition、safeguard 与 routing 数字如何读？ | 单一 provider/model 的发布与 API 案例。 | 依第 8—10、20—23 章；不把模型能力归因成 runtime 保证。 |
@@ -104,9 +104,9 @@
 
 ## 开放风险与交接
 
-- 第 20 章已移除三个缺失的模型 source-note / audit-script 引用，并用当前 OpenAI 官方 Responses API 文档支持保留的 API 合同。第 21—23 章尚有 4 处本地目标缺失（3 个不同目标）：`gemini-3.8-flash-source-notes.md`（第 23 章两处）、`claude_fable51_state_protocol_audit.py`、`qwen3.6-35b-a3b-source-notes.md`（第 21 章）。逐章核实对应断言并迁移到真实来源或可复核说明；不能只删链接而留下脚本运行或 benchmark 结论。
-- 第 23 章缺少的 `gemini-3.8-flash-source-notes.md` 已在[交叉链接记录](chapter-23-crosslink-note.md)登记。下一步按顺序处理第 21 章，并在逐章精修时解决第 21—23 章剩余缺失目标。
+- 第 21 章新稿已移除旧稿中指向缺失 Claude audit script 和 Qwen source-note 的链接；Claude Fable 5.1 的 provider thinking-state 合同列为第 24 章候选，须在该章定向核验后决定去向。第 23 章仍有 gemini-3.8-flash-source-notes.md 两处缺失链接，已在交叉链接记录登记。Qwen3.6 source-note 链接仍在第二十一册第 83 章 §83.15，待该册逐章审阅时处理。
+- 第 23 章的 gemini-3.8-flash-source-notes.md 缺失目标已登记在交叉链接记录；第 21 章完成后按顺序继续第 22 章，再处理第 23—24 章的剩余 provider/API 边界。
 - 第 1 章原有“0 依赖 Python demo”承诺、9 个固定阈值和约 330 行 toy auditor 已移除；内容改由完整合成修复轨迹、最小伪代码和任务特定验收解释。其余章节中仍有 Python demo 或自动 gate 的部分尚待逐章核验；决定删除代码时须保留必要的过程、数值解释和明确去向。
 - 第 2 章原有运行指标公式及 `G_runtime` 固定门槛已移除；核心观察意图改为记录 session/tenant 隔离、phase 转移、context 来源与新鲜度、adapter/parser/registry 错误、执行回执、恢复/checkpoint 和取消/超时事件，并要求为任何汇总率声明单位和分母。旧的 GPT-5.6 运行时归属快照由 OpenAI 当前公开 Agents API/SDK/Responses API 对比替代；Qwen3.7 Plus region/scope 能力细节待第二十二册第 47 章复核和承接，不能在第二十册正文里留作无去向内容。
 - GitHub 页面公式/图表渲染和全量外链可达性尚未核验；动态产品事实需按每章核验日期固定。
-- **当前下一入口：** [第二十一章《Persistent Workspace》](../../book-20-agent-harness-runtime/chapters/21-persistent-workspace与状态边界.md)。第二十章已完成章级扫描、正文重写、配套同步和静态验收；官方 API 合同及证据边界见[Responses API 研究记录](../../research/openai-responses-api-contract-evidence-2026-11-18.md)，原稿内容去向见[第二十章审计](chapter-20-audit.md)。第二十册第 21—24 章和全套书精修 goal 继续 active。
+- **当前下一入口：** [第二十二章《OpenAI-Compatible API 边界》](../../book-20-agent-harness-runtime/chapters/22-openai-compatible-api边界.md)。第二十一章已完成章级扫描、正文重组、配套同步与静态验收；内容去向见[第二十一章审计](chapter-21-audit.md)，外部证据及边界见[Persistent Workspace 研究记录](../../research/persistent-workspaces-and-agent-state-evidence-2026-11-19.md)。第二十册第 22—24 章和全套书精修 goal 继续 active。

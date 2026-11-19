@@ -3443,6 +3443,11 @@
      考察点：Response 封套与 output item；completed/failed/incomplete；function_call 与 function_call_output 的 call_id；宿主执行器和 verifier；previous_response_id、Conversations API、store 与 retention 的边界。
      回答框架：先读取 Response 的 status、error 和 incomplete_details，再按 type 遍历 output。若 output 含 function_call，它只表示模型提出调用；应用还要校验并执行工具，之后以原 call_id 回传 function_call_output。response completed 只能证明这次生成结束，工具回执说明执行器观察到了什么，独立 verifier 才判断任务结果是否满足契约。随后说明上下文是通过手工回放、previous_response_id 还是 Conversations API 续接，并分别核对 instructions 是否延续、Response 的 store 设置、Conversation 的生命周期以及 background mode 的临时存储。API 的 response ID、事件 sequence_number 和 conversation state 都不能单独证明 workspace 或外部业务副作用已经提交。
 
+
+40AE. 长任务恢复后，怎样判断上下文、模型记忆、任务检查点、workspace 文件、CI 结果和外部系统分别处于什么状态？
+     考察点：每类状态的所有者；摘要/索引与源文件的关系；workspace revision 与提交快照；并发修改；测试结果的版本绑定；外部副作用查询；artifact 交接；权限和保留边界。
+     回答框架：先说清要确认的具体事实，再找到负责该事实的系统。模型上下文只能说明本轮看到了什么，记忆或解析索引要回查来源和版本，任务检查点记录运行进度但不证明文件现状。读取工作区当前 revision 和 diff；若旧 patch 的基线已变化，保留候选并检查冲突，在新版本上完成相关验证。CI 结果说明某次运行对指定版本报告了什么，外部部署或数据库状态则查询对应服务。交接 artifact 时附上来源 revision、变化、验证对象和未知事项；授权、租户隔离和数据保留另按产品与策略核对。
+
 40ZA. 如何设计工具调用 trace、replay 和审计体系？
       考察点：trace schema、span tree、ID propagation、version capture、argument lineage、permission trace、tool result trace、privacy masking、audit event、replay readiness、side-effect replay safety、metrics、alerts、eval linkage。
       回答框架：先把 trace 定义成一次工具调用的事实链，而不是普通文本日志。链路要覆盖用户请求、模型输入输出、Router 候选和过滤原因、tool call、raw / parsed / normalized / final arguments、权限决策、Executor 执行、tool result 投影、最终回答和用户可见错误。每个 span 要有稳定 ID、parent、时间、状态、输入输出摘要和 artifact 引用；版本要记录 model、prompt、tool schema、registry、router policy 和 adapter。Replay 分 trace-only、model replay 和 tool / sandbox replay，有副作用动作默认禁止 live replay。审计事件要记录 actor、tenant、tool、action、resource、decision、confirmation、timestamp、trace id 和 outcome。指标包括 trace schema completeness、ID tree integrity、version capture coverage、argument lineage coverage、permission trace completeness、tool result trace completeness、privacy masking coverage、audit event completeness、replay readiness rate、side effect replay safety、metric export coverage、alert owner coverage、eval linkage coverage 和 trace replay gate。核心观点是没有 trace 就没有可靠评估、调试、回放和安全追责。

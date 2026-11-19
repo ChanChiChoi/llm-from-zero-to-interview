@@ -2400,3 +2400,10 @@
 配套正文：[第二十册第二十章](book-20-agent-harness-runtime/chapters/20-responses-api.md)；官方合同与访问日期见[Responses API 证据记录](research/openai-responses-api-contract-evidence-2026-11-18.md)。
 
 35EO. 用一个教学构造的仓库任务“读取 src/parser.py，并指出 tokenize 对空输入的处理”复走一次 Responses API 工具回合。先写出模型返回的 function_call item，标明 call_id、name 和 arguments；再描述流式参数 delta 到达时客户端应保存什么、何时才可提交应用校验；随后写出工具以同一 call_id 返回 function_call_output 后，模型可能继续产生的 message。区分 response completed、工具执行回执和任务 verifier 通过分别能证明什么。最后比较手工回放 output items、previous_response_id 和 Conversations API 三种续接方式，并说明顶层 instructions 的延续、store=false、Conversation 保留、后台响应临时存储及 background-only cancel 的边界。全程只按本次官方文档合同推理，不把教学构造说成线上执行记录，也不把序号或 response ID 当作外部副作用证明。
+
+
+## 第二十册第二十一章：Persistent Workspace 与状态边界
+
+配套正文：[第二十册第二十一章](book-20-agent-harness-runtime/chapters/21-persistent-workspace与状态边界.md)；研究证据见[Persistent Workspace 与 Agent 状态边界记录](research/persistent-workspaces-and-agent-state-evidence-2026-11-19.md)。
+
+35EP. 复走教学构造 task-42：Agent 基于工作区 r17 生成 patch-41 后暂停，用户在 IDE 修改同一函数，使当前工作区成为 r18；原任务检查点仍写着“patch 已准备好”，CI 是否有结果尚待查询。画出对话/模型上下文、记忆或检索索引、任务检查点、工作区、CI 和外部部署系统各自能证明什么；说明应从哪里确认当前文件、旧测试结果是否可复用、重叠修改如何处理，以及新验证应绑定哪个 revision。最后写一份简短的交接记录，包含来源版本、候选 diff、验证对象与未解决状态；指出 content hash、摘要和旧 CI 结果各自不能证明什么。全程把情景标为教学构造，不设计通用 gate，也不把 workspace 文件当作数据库或部署系统的回执。
