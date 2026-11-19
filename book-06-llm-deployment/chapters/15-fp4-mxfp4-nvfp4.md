@@ -306,7 +306,7 @@ E2M1 饱和端的范围。例如归一化最大值从 3.3 加倍到 6.6，最近
 已经正确。
 
 MBS 再将 8 个连续的 1×16 子块合成 1×128 macro block，为该 macro block 增加一个
-8-bit mantissa 因子；局部 E8M0 scale 继续承载 2 的幂指数。例如 $α_\mathrm{max}=3.3$ 时，
+8-bit mantissa 因子；局部 E8M0 scale 继续承载 2 的幂指数。例如 $\alpha_{\mathrm{max}}=3.3$ 时，
 论文示意 scale 为 $6/3.3\approx 1.82=2^{0}\times 1.82$，可将指数部分并入局部 E8M0，并额外
 存储 mantissa。只按 E2M1 payload、每 16 值一个 E8M0 和每 128 值一个 8-bit mantissa
 估算，为 $4+8/16+8/128=4.5625 \mathrm{bit}/\mathrm{value}$，仍未计布局与 padding。OAS 和 MBS

@@ -43,7 +43,7 @@ M_{\mathrm{weight}}
 \qquad 0<\rho<1.
 ~~~
 
-M_weight 是本 rank 实际持有的权重和元数据，M_state 是 KV/latent/递归 state，M_buffer 是临时空间，M_gpu 是显存容量，\rho 是为碎片、突发和故障恢复留下的比例。它是容量账本，不是一个内部总开关：即使不等式成立，也可能因为 kernel、通信、P99 或协议不兼容而不适合上线。
+$M_{\mathrm{weight}}$ 是本 rank 实际持有的权重和元数据，$M_{\mathrm{state}}$ 是 KV/latent/递归 state，$M_{\mathrm{buffer}}$ 是临时空间，$M_{\mathrm{gpu}}$ 是显存容量，\rho 是为碎片、突发和故障恢复留下的比例。它是容量账本，不是一个内部总开关：即使不等式成立，也可能因为 kernel、通信、P99 或协议不兼容而不适合上线。
 
 容量不足时有几条路线：量化权重或 KV，减少上下文/并发，使用 TP/PP/EP 分片，换更大显存 GPU，或者将模型拆成多个服务阶段。选型时要说明减少的是哪一本账；例如 TP 分摊权重和某些状态，量化减少每元素 bytes，PP 分摊层，副本不会减少单副本容量。
 
@@ -115,7 +115,7 @@ Y=\sum_{j=1}^{g}X_{j}W_{j},
 
 这通常需要 all-reduce 或等价的聚合。具体通信点取决于 block 设计、attention/MoE 结构和 runtime。
 
-若 TP 大小为 g_tp，权重切分近似为：
+若 TP 大小为 $g_{\mathrm{tp}}$，权重切分近似为：
 
 ~~~math
 M_{w,\mathrm{tp}}
@@ -125,7 +125,7 @@ M_{w,\mathrm{tp}}
 +M_{\mathrm{metadata}}.
 ~~~
 
-M_replicated 包括 norm、embedding、router 或未切分小矩阵，不能默认是零。KV head 若能均匀切分，某个 rank 的 cache 账本可近似为：
+$M_{\mathrm{replicated}}$ 包括 norm、embedding、router 或未切分小矩阵，不能默认是零。KV head 若能均匀切分，某个 rank 的 cache 账本可近似为：
 
 ~~~math
 M_{\mathrm{kv,tp}}
@@ -136,7 +136,7 @@ H_{\mathrm{kv,rank}}D_{h}b,
 H_{\mathrm{kv,rank}}\approx\frac{H_{\mathrm{kv}}}{g_{\mathrm{tp}}}.
 ~~~
 
-L 是层数，B 是 active sequence 数，T_ctx 是上下文 token 数，H_kv 是 KV head 数，D_h 是 head dimension，b 是每个 K/V 元素的字节数。若 H_kv 不能被 g_tp 整除，或模型使用 MQA/GQA/MLA/递归 state，可能发生 head 复制、不同切分或 latent state 分片；必须用模型配置和 runtime layout 校验。
+L 是层数，B 是 active sequence 数，$T_{\mathrm{ctx}}$ 是上下文 token 数，$H_{\mathrm{kv}}$ 是 KV head 数，$D_{h}$ 是 head dimension，b 是每个 K/V 元素的字节数。若 $H_{\mathrm{kv}}$ 不能被 $g_{\mathrm{tp}}$ 整除，或模型使用 MQA/GQA/MLA/递归 state，可能发生 head 复制、不同切分或 latent state 分片；必须用模型配置和 runtime layout 校验。
 
 TP 的每层通信可以用一个下界直觉表示：
 
@@ -152,11 +152,11 @@ T_{\mathrm{collective}}
 +T_{\mathrm{launch}}.
 ~~~
 
-V_comm 是实际 collective 搬运的字节数，B_link 是有效链路带宽，不是规格书峰值带宽。all-reduce、all-gather 的算法、rank 数、消息大小、拓扑、竞争流量和 overlap 都会改变结果。跨节点 TP 如果把 collective 放在每个 decode iteration 的关键路径上，网络尾延迟会直接变成 TPOT 尾延迟。
+$V_{\mathrm{comm}}$ 是实际 collective 搬运的字节数，$B_{\mathrm{link}}$ 是有效链路带宽，不是规格书峰值带宽。all-reduce、all-gather 的算法、rank 数、消息大小、拓扑、竞争流量和 overlap 都会改变结果。跨节点 TP 如果把 collective 放在每个 decode iteration 的关键路径上，网络尾延迟会直接变成 TPOT 尾延迟。
 
 TP 更适合同一节点内有 NVLink/NVSwitch 等高速互联、模型层内矩阵足够大且单卡容量确实不足的场景。它的代价是每层通信、rank 同步和故障域扩大：一个 rank 退出，整个 TP group 往往都要摘除。选择 TP 时要同时报告每 rank 显存、collective 时间占比、节点内/跨节点链路和副本数量。
 
-用一个小矩阵可以看清两种切分各自交付什么。令输入 X 的 shape 为 4×8，权重 W 的 shape 为 8×16，输出 Y=XW 的 shape 为 4×16。按输出维做 TP=4 列切分时，每个 rank 持有 8×4 的 W_i，独立得到 4×4 的 Y_i，最后沿输出维拼接；四个 rank 一起覆盖原来的 4×8 与 8×16 运算。若按输入维做行切分，每个 rank 持有 2×16 的 W_i 和相应的 4×2 输入片段 X_i，各自产生 4×16 的部分和，必须在 rank 间求和才能得到完整 Y。行切分的结果不是把四份输出拼起来，而是归约部分和；把这两类 collective 角色混为一谈，会误读张量布局和通信量。
+用一个小矩阵可以看清两种切分各自交付什么。令输入 X 的 shape 为 4×8，权重 W 的 shape 为 8×16，输出 Y=XW 的 shape 为 4×16。按输出维做 TP=4 列切分时，每个 rank 持有 8×4 的 $W_{i}$，独立得到 4×4 的 $Y_{i}$，最后沿输出维拼接；四个 rank 一起覆盖原来的 4×8 与 8×16 运算。若按输入维做行切分，每个 rank 持有 2×16 的 $W_{i}$ 和相应的 4×2 输入片段 $X_{i}$，各自产生 4×16 的部分和，必须在 rank 间求和才能得到完整 Y。行切分的结果不是把四份输出拼起来，而是归约部分和；把这两类 collective 角色混为一谈，会误读张量布局和通信量。
 
 这个 toy 矩阵里，总计有 4×8×16=512 个乘加位置；均匀分成四片时，每 rank 处理 128 个位置。并行并不意味着一次前向就精确快四倍：输入广播、部分和归约、同步、未切分算子和 kernel 效率都会占时间。生产模型的矩阵大得多，但决策逻辑相同：并行组要比较“减少了多少本地计算或权重”与“把多少张量放入通信路径”。对小 batch、短生成或小矩阵，通信与 kernel launch 占比可能比计算更显眼；对大矩阵和足够大的 batch，计算才更容易摊薄固定通信成本。
 
@@ -168,7 +168,7 @@ KV head 的分片同样要从实际模型配置读起。若模型有 8 个 KV he
 
 ## 3. Pipeline Parallel 推理
 
-Pipeline Parallel 按层把模型切成多个 stage。比如 stage 0 持有前半层，stage 1 持有后半层；一个请求的 hidden activation 依次经过这些 stage。若 stage 数为 g_pp，层数为 L，均匀切分时：
+Pipeline Parallel 按层把模型切成多个 stage。比如 stage 0 持有前半层，stage 1 持有后半层；一个请求的 hidden activation 依次经过这些 stage。若 stage 数为 $g_{\mathrm{pp}}$，层数为 L，均匀切分时：
 
 ~~~math
 L_{\mathrm{stage},s}
@@ -188,7 +188,7 @@ M_{\mathrm{kv,pp},s}
 M_{\mathrm{kv},s}.
 ~~~
 
-这里不应简单写成每张卡严格得到 M/g_pp，因为 embedding、lm_head、norm、MoE 层、不同层的 attention 状态和 stage 间 buffer 可能不均匀。PP 的容量价值来自把不同层的常驻状态分开，而不是让每个 rank 都复制完整模型。
+这里不应简单写成每张卡严格得到 M/$g_{\mathrm{pp}}$，因为 embedding、lm_head、norm、MoE 层、不同层的 attention 状态和 stage 间 buffer 可能不均匀。PP 的容量价值来自把不同层的常驻状态分开，而不是让每个 rank 都复制完整模型。
 
 单请求的串行路径可粗略表示为：
 
@@ -200,7 +200,7 @@ T_{\mathrm{req}}
 +T_{\mathrm{bubble}}.
 ~~~
 
-T_s 是各 stage 的计算时间，T_comm,s 是传递 activation 的时间，T_bubble 是由于 stage 空闲、动态请求到达或长度不均造成的空洞。训练可用 micro-batch 填充 pipeline，但在线推理的请求会动态到达、输出长度不同，还会被取消或抢占；因此训练 benchmark 的 pipeline utilization 不等于在线单请求延迟。
+$T_{s}$ 是各 stage 的计算时间，$T_{\mathrm{comm},s}$ 是传递 activation 的时间，$T_{\mathrm{bubble}}$ 是由于 stage 空闲、动态请求到达或长度不均造成的空洞。训练可用 micro-batch 填充 pipeline，但在线推理的请求会动态到达、输出长度不同，还会被取消或抢占；因此训练 benchmark 的 pipeline utilization 不等于在线单请求延迟。
 
 PP 适合层数多、权重按层分割能解决容量、同一 stage 间通信不如层内 TP 紧密的场景。代价是 stage 顺序和故障域：某个 stage 失败通常使整个 PP replica 不可用；如果把不同租户请求混入 pipeline，还要保证取消和 backpressure 能沿 stage 传播。低并发、强 TTFT SLO 的服务应先测 stage 间通信和 bubble，再决定是否用 PP。
 
@@ -236,7 +236,7 @@ PP 适合层数多、权重按层分割能解决容量、同一 stage 间通信�
 
 ## 5. Expert Parallel for MoE
 
-MoE 模型有多个 expert，但每个 token 通常只激活 top-k 个 expert。若 router 为 token x_i 选出集合 E_i，并给出权重 p_i,e，MoE 层可抽象为：
+MoE 模型有多个 expert，但每个 token 通常只激活 top-k 个 expert。若 router 为 token $x_{i}$ 选出集合 $E_{i}$，并给出权重 $p_{i,e}$，MoE 层可抽象为：
 
 ~~~math
 y_{i}=\sum_{e\in E_{i}}p_{i,e}f_{e}(x_{i}).
@@ -244,7 +244,7 @@ y_{i}=\sum_{e\in E_{i}}p_{i,e}f_{e}(x_{i}).
 
 Expert Parallel 把不同 expert 放到不同 GPU。一个 iteration 需要经历 dispatch、expert compute 和 combine 三步：先把 token 发到拥有目标 expert 的 rank，完成局部 expert 计算，再把结果发回原 token 的位置。若 expert 与 token 不在同一 rank，通信通常表现为 all-to-all 或其分解。
 
-设本轮 token 数为 N，top-k 为 k，expert e 收到 n_e 个 token，则：
+设本轮 token 数为 N，top-k 为 k，expert e 收到 $n_{e}$ 个 token，则：
 
 ~~~math
 \sum_{e=1}^{E}n_{e}=kN,
@@ -254,7 +254,7 @@ Expert Parallel 把不同 expert 放到不同 GPU。一个 iteration 需要经�
 R_{\mathrm{imbalance}}=\frac{\max_{e} n_{e}}{\bar n}.
 ~~~
 
-R_imbalance 越高，最热 expert 越可能决定这一轮的完成时间；但它还没有包含跨节点链路、capacity padding、expert kernel shape 和 combine 顺序。若启用 capacity factor c，某个 expert 可接收的上限通常可近似为 c\bar n；超出的 token 可能被丢弃、重路由、padding 或采用 dropless 实现，四种选择对质量和吞吐不同。
+$R_{\mathrm{imbalance}}$ 越高，最热 expert 越可能决定这一轮的完成时间；但它还没有包含跨节点链路、capacity padding、expert kernel shape 和 combine 顺序。若启用 capacity factor c，某个 expert 可接收的上限通常可近似为 c\bar n；超出的 token 可能被丢弃、重路由、padding 或采用 dropless 实现，四种选择对质量和吞吐不同。
 
 EP 的收益是让总参数量超过单卡容量，同时每个 token 只激活部分计算；难点是 router 动态改变通信和负载。推理时请求长度、语言和任务分布可能造成与训练不同的 expert 热点，不能只看训练期间的 load balance loss。线上应记录每个 expert 的 token 数、排队时间、dispatch/combine bytes、跨节点比例、丢 token/重路由率和 P99。
 
@@ -297,7 +297,7 @@ replica 1: GPU 4-7, TP=4
 
 ### 6.1 副本数量、容量和吞吐
 
-若每个副本需要 g_rep 张 GPU，机器上有 G 张可用 GPU，忽略预留卡和碎片时，物理副本上限为：
+若每个副本需要 $g_{\mathrm{rep}}$ 张 GPU，机器上有 G 张可用 GPU，忽略预留卡和碎片时，物理副本上限为：
 
 ```math
 R_{\mathrm{physical}}
@@ -318,9 +318,9 @@ R_{\mathrm{active}}
 \right).
 ```
 
-G_reserved 不是浪费掉的 GPU，而是为了节点维护、故障替换或流量突增保留的服务能力。没有冗余要求的离线批处理可以令它为零；在线服务若把所有卡都打满，任何一次故障都可能让可用容量突然跌到目标以下。
+$G_{\mathrm{reserved}}$ 不是浪费掉的 GPU，而是为了节点维护、故障替换或流量突增保留的服务能力。没有冗余要求的离线批处理可以令它为零；在线服务若把所有卡都打满，任何一次故障都可能让可用容量突然跌到目标以下。
 
-如果单副本在某个 workload 上的有效吞吐是 S_rep，理想情况下有：
+如果单副本在某个 workload 上的有效吞吐是 $S_{\mathrm{rep}}$，理想情况下有：
 
 ```math
 S_{\mathrm{aggregate}}
@@ -332,7 +332,7 @@ R_{\mathrm{active}}S_{\mathrm{rep}}.
 
 这个近似只有在请求能够均匀分布、每个副本的模型和调度配置一致、网关不成为瓶颈时才成立。真实服务还要减去负载倾斜、冷启动、限流、网络和故障余量。对于流式生成，吞吐还应区分 output tokens/s、完成请求数/s 和满足 SLO 的 goodput；只报一个 aggregate TPS 容易掩盖长请求拖慢尾延迟的事实。
 
-容量也不能只用副本数量相加。先把 token、KV 和队列限制都换算成同一种可接纳工作量，例如“等价 token 数”；若副本 r 的三种约束分别为 C_r,token、C_r,kv 和 C_r,queue，则：
+容量也不能只用副本数量相加。先把 token、KV 和队列限制都换算成同一种可接纳工作量，例如“等价 token 数”；若副本 r 的三种约束分别为 $C_{r,\mathrm{token}}$、$C_{r,\mathrm{kv}}$ 和 $C_{r,\mathrm{queue}}$，则：
 
 ```math
 C_{\mathrm{service}}
@@ -384,7 +384,7 @@ C_{r,\mathrm{queue}}
 
 ### 7.1 先估计请求成本
 
-对请求 i，可以先用 prompt token 数 P_i、预计输出 token 数 Y_i、当前已占用的 KV token K_i 和工具/多模态附加成本构造一个粗略分数：
+对请求 i，可以先用 prompt token 数 $P_{i}$、预计输出 token 数 $Y_{i}$、当前已占用的 KV token $K_{i}$ 和工具/多模态附加成本构造一个粗略分数：
 
 ~~~math
 \widehat C_{i}
@@ -395,7 +395,7 @@ C_{r,\mathrm{queue}}
 +\delta C_{i,\mathrm{extra}}.
 ~~~
 
-P_i 主要影响 prefill，Y_i 影响 decode 持续时间，K_i 反映已经占用的 state，C_extra 可以表示图像 token、检索重排或工具等待等额外资源。alpha、beta、gamma、delta 不是通用常数，应通过 trace 拟合或压测校准；如果没有可靠的输出长度预测，使用 max_new_tokens 只能提供保守上界，不能当成真实完成长度。
+$P_{i}$ 主要影响 prefill，$Y_{i}$ 影响 decode 持续时间，$K_{i}$ 反映已经占用的 state，$C_{\mathrm{extra}}$ 可以表示图像 token、检索重排或工具等待等额外资源。alpha、beta、gamma、delta 不是通用常数，应通过 trace 拟合或压测校准；如果没有可靠的输出长度预测，使用 max_new_tokens 只能提供保守上界，不能当成真实完成长度。
 
 副本 r 的负载可以写成：
 
@@ -409,7 +409,7 @@ P_i 主要影响 prefill，Y_i 影响 decode 持续时间，K_i 反映已经占�
 +\lambda_{f} F_{r}.
 ~~~
 
-Q_r 是排队请求数，A_tokens 是活动请求的预计剩余 token 负载，K_used 是 KV 使用量，P_pending 是等待 prefill 的 token 数，F_r 是故障、降级或冷启动惩罚。将不同单位相加前要做归一化；否则数值最大的字段会无意中支配路由。
+$Q_{r}$ 是排队请求数，$A_{\mathrm{tokens}}$ 是活动请求的预计剩余 token 负载，$K_{\mathrm{used}}$ 是 KV 使用量，$P_{\mathrm{pending}}$ 是等待 prefill 的 token 数，$F_{r}$ 是故障、降级或冷启动惩罚。将不同单位相加前要做归一化；否则数值最大的字段会无意中支配路由。
 
 最简单的选择规则是：
 
@@ -423,9 +423,9 @@ r^\star
 \right),
 ~~~
 
-H 是当前健康且未超过队列/租户限制的副本集合，C_r,remaining 是用同一单位表示的副本 r 剩余容量，D_i,r 是请求 i 在副本 r 上的预计等待或数据搬运代价。eta 和 mu 体现服务对请求成本及 locality 的重视。路由器不必实现精确排队模型，但必须明确自己是在优化等待时间、KV 空间、prefix 命中率，还是它们的组合。
+H 是当前健康且未超过队列/租户限制的副本集合，$C_{r,\mathrm{remaining}}$ 是用同一单位表示的副本 r 剩余容量，$D_{i,r}$ 是请求 i 在副本 r 上的预计等待或数据搬运代价。eta 和 mu 体现服务对请求成本及 locality 的重视。路由器不必实现精确排队模型，但必须明确自己是在优化等待时间、KV 空间、prefix 命中率，还是它们的组合。
 
-用 demo 中的假设手算一次请求路由。新请求有 1200 个 prompt token、最多生成 256 个 token，按 `0.5×prompt+max_new` 得到成本 856。副本 0 当前有 3200 个 queued tokens、11 个活动请求；每个活动请求在分数里按 32 单位计，且其 24 个槽位只剩 13 个。分数为 3200+32×11+856/13≈3617.85。副本 1 有 900 queued tokens、8 个活动请求，剩余 16 槽，分数为 900+32×8+856/16=1209.5，因此选副本 1。这个分数故意很粗：排队 token、活跃序列和可用槽位必须按服务 trace 校准；硬性的 KV watermark、租户上限或健康状态应先过滤，不能让一个低总分绕过容量门槛。
+用 demo 中的假设手算一次请求路由。新请求有 1200 个 prompt token、最多生成 256 个 token，按 $0.5\times T_{\mathrm{prompt}}+T_{\mathrm{new}}$ 得到成本 856。副本 0 当前有 3200 个 queued tokens、11 个活动请求；每个活动请求在分数里按 32 单位计，且其 24 个槽位只剩 13 个。分数为 $3200+32\times11+856/13\approx3617.85$。副本 1 有 900 queued tokens、8 个活动请求，剩余 16 槽，分数为 $900+32\times8+856/16=1209.5$，因此选副本 1。这个分数故意很粗：排队 token、活跃序列和可用槽位必须按服务 trace 校准；硬性的 KV watermark、租户上限或健康状态应先过滤，不能让一个低总分绕过容量门槛。
 
 ### 7.2 常见策略和适用边界
 
@@ -466,7 +466,7 @@ T_{\mathrm{comm}}(V)
 +\frac{V}{B_{\mathrm{eff}}},
 ~~~
 
-V 是实际传输字节数，alpha_path 是启动、同步和协议开销，B_eff 是考虑拓扑、协议和竞争后的有效带宽。collective 还要乘上与 rank 数、算法和通信模式有关的系数；因此这个式子是定位瓶颈的账本，不是 NCCL 的性能预测器。
+V 是实际传输字节数，$\alpha_{\mathrm{path}}$ 是启动、同步和协议开销，$B_{\mathrm{eff}}$ 是考虑拓扑、协议和竞争后的有效带宽。collective 还要乘上与 rank 数、算法和通信模式有关的系数；因此这个式子是定位瓶颈的账本，不是 NCCL 的性能预测器。
 
 TP 可能在每层触发 all-reduce 或 all-gather，EP 可能在每个 MoE 层触发 dispatch/combine all-to-all，PP 通常在 stage 边界传递 activation。若这些操作处于 decode 的关键路径，它们会反复贡献 TPOT；若能与计算重叠，表面上的 kernel 时间可能看不出网络成本，但尾延迟仍可能受到最慢 rank 影响。
 
@@ -480,7 +480,7 @@ T_{\mathrm{iter}}
 +T_{\mathrm{sync}},
 ~~~
 
-其中 max_r 表示最慢 rank 的计算，T_critical comm 只包含不能被计算隐藏的通信。GPU 利用率高并不代表系统高效：如果 rank 在等待 all-to-all 时仍有少量 kernel 活动，利用率看起来不低，用户的 TPOT 却已经变差。
+其中 max_r 表示最慢 rank 的计算，$T_{\mathrm{critical}}$ comm 只包含不能被计算隐藏的通信。GPU 利用率高并不代表系统高效：如果 rank 在等待 all-to-all 时仍有少量 kernel 活动，利用率看起来不低，用户的 TPOT 却已经变差。
 
 ### 8.2 拓扑映射比并行度数字更重要
 
@@ -520,7 +520,7 @@ T_{\mathrm{iter}}
 | EP | expert 按 rank 分布，主干可能另行切分 | 通常由 attention/主干布局决定，不等于 expert 权重归属 | 把 expert 分片误当成 KV 分片 |
 | 多副本 | 每个副本拥有完整执行组 | 每个副本私有；prefix cache 也通常是局部的 | 请求迁移需要重算或显式搬运 |
 
-对标准 attention，如果一个 TP rank 持有 H_kv,rank 个 KV head，其粗略 cache 账本为：
+对标准 attention，如果一个 TP rank 持有 $H_{\mathrm{kv},\mathrm{rank}}$ 个 KV head，其粗略 cache 账本为：
 
 ~~~math
 M_{\mathrm{kv},r}
@@ -528,7 +528,7 @@ M_{\mathrm{kv},r}
 2LBT_{\mathrm{ctx}}H_{\mathrm{kv},r}D_{h}b.
 ~~~
 
-2 表示 K 和 V 两份，L 是层数，B 是活动 sequence 数，T_ctx 是每条 sequence 已占用的 token 数，D_h 是 head dimension，b 是每个元素的字节数。MHA、GQA、MQA、MLA 或递归 state 会改变 H_kv,r 和 state 的含义；不能因为 runtime 使用 TP 就默认 cache 一定按完整 hidden 维度均匀切分。
+2 表示 K 和 V 两份，L 是层数，B 是活动 sequence 数，$T_{\mathrm{ctx}}$ 是每条 sequence 已占用的 token 数，$D_{h}$ 是 head dimension，b 是每个元素的字节数。MHA、GQA、MQA、MLA 或递归 state 会改变 $H_{\mathrm{kv},r}$ 和 state 的含义；不能因为 runtime 使用 TP 就默认 cache 一定按完整 hidden 维度均匀切分。
 
 PP 下，stage s 只需维护自己负责的层的状态，但它仍然要为每一个经过该 stage 的请求保留位置和 block table。于是 stage 间的容量不一定均匀：长上下文和层数分布、embedding/lm_head 放置方式、不同 attention 结构都可能造成某个 stage 先满。工程上应看每 stage 的 cache 使用峰值，而不是只看全局平均值。
 
@@ -540,7 +540,7 @@ PP 下，stage s 只需维护自己负责的层的状态，但它仍然要为每
 
 ### 9.3 状态搬运的成本和边界
 
-若需要迁移 V_state 字节的 KV 或 latent state，可以先用下面的账本估算：
+若需要迁移 $V_{\mathrm{state}}$ 字节的 KV 或 latent state，可以先用下面的账本估算：
 
 ~~~math
 T_{\mathrm{move}}
@@ -559,7 +559,7 @@ T_{\mathrm{move}}+T_{\mathrm{risk}}
 T_{\mathrm{recompute}}.
 ~~~
 
-T_risk 表示版本不一致、校验失败、并发写入和隐私擦除等工程风险的预留成本。实际系统不必把它当成精确概率，但必须把“迁移更快”从口号变成可观测的比较。
+$T_{\mathrm{risk}}$ 表示版本不一致、校验失败、并发写入和隐私擦除等工程风险的预留成本。实际系统不必把它当成精确概率，但必须把“迁移更快”从口号变成可观测的比较。
 
 迁移前至少校验模型 revision、tokenizer/template revision、位置编码参数、dtype、KV block layout、adapter、采样 RNG 和 speculative tree。KV Cache 不是普通的无语义显存块；把不兼容的 cache 当成可复用结果，可能产生静默的错误文本，而不是立刻报错。
 
@@ -852,7 +852,7 @@ route_to= replica_1
 2. `tp4_two_replicas` 每个副本 4 卡，可在 8 卡机器上放两个副本，toy 容量高于单个 8 卡副本。
 3. TP4/TP8 的 `tp_collective_payload_mib_per_decode_per_rank=60.0` 按 80 层、每层两次 hidden-size collective、24 个活动序列计算：单个 collective 的输入 payload 为 $24\times 8192\times 2$ bytes，再乘 $2\times 80$。这是每 rank 参与 collective 的逻辑输入量，不是链路实际收发字节；后者取决于 TP group 大小、NCCL 算法、拓扑与 overlap。`pp_activation_payload_mib_per_decode=0.375` 是一次 decode iteration 中所有 pipeline stage 边界的逻辑 activation payload 总和；PP2 只有一个边界，因此对应 24 个 hidden vector。
 4. `aggregate_active_seq` 只是把每副本假定能容纳的 24 条活动 sequence 乘以可行副本数，所以两个 TP4 副本得到 48；它不是 requests/s、output tokens/s 或 goodput。`capacity_choice` 仅按这个玩具容量上限选择，不表示实测性能最优。
-5. `route_to` 不按 round-robin，而是先排除 active sequence 已达上限的副本，再按 queued tokens、active sequence、可用槽位和新请求成本排序。以新请求 prompt=1200、max_new=256 为例，`request_cost=0.5×1200+256=856`；replica 0 有 3200 queued tokens、11 个 active sequence，余量槽 13，分数约为 3200+32×11+856/13=3617.85。replica 1 对应 900+32×8+856/16=1209.5，因此选 replica 1。0.5、32 是人为设定的权重。
+5. `route_to` 不按 round-robin，而是先排除 active sequence 已达上限的副本，再按 queued tokens、active sequence、可用槽位和新请求成本排序。以新请求 `prompt` 为 1200、`max_new` 为 256 个 token 为例，`request_cost` 为 $0.5\times1200+256=856$；replica 0 有 3200 queued tokens、11 个 active sequence，余量槽 13，分数约为 $3200+32\times11+856/13\approx3617.85$。replica 1 对应 $900+32\times8+856/16=1209.5$，因此选 replica 1。0.5、32 是人为设定的权重。
 
 这段路由只把 active sequence 上限作为硬过滤；KV watermark、租户配额、健康状态和 prefix locality 还未进入代码。实际服务应先按这些硬门槛筛出可接收请求的副本，再用同一 workload trace 校准软分数，否则较低的队列分数也可能把请求送到没有可用 KV 或不允许该租户访问的副本。
 

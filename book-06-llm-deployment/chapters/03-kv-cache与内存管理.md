@@ -29,7 +29,7 @@ Q=XW_{Q},\qquad K=XW_{K},\qquad V=XW_{V}.
 
 在 decode 的第 t 步，新 token 的 query 需要看到从输入到当前为止的上下文。历史 token 的 key/value 在它们自己的位置上已经由固定模型参数计算完成；新 token 加入之后，历史 token 的 K/V 不会改变。因此可以把历史 K/V 放在 GPU 显存中，下一步直接读取。
 
-如果没有 cache，长度为 T_ctx 的上下文在每一个新 token 到来时都要重新计算历史 token 的 K/V。若有 cache，每一步只为新 token 计算新的 K/V，再追加到状态中。节省的是历史 K/V 的重复投影和写入，并不是所有 attention 工作。
+如果没有 cache，长度为 $T_{\mathrm{ctx}}$ 的上下文在每一个新 token 到来时都要重新计算历史 token 的 K/V。若有 cache，每一步只为新 token 计算新的 K/V，再追加到状态中。节省的是历史 K/V 的重复投影和写入，并不是所有 attention 工作。
 
 ### 3.1.2 Cache 保存的不是 logits
 
@@ -62,7 +62,7 @@ empty
 
 ### 3.2.1 标准 MHA 的形状
 
-设模型有 L 层，第 l 层有 H_kv 个 K/V head，每个 head 的维度为 D_h，当前有 B 个请求，每条序列长度为 T_ctx。一层的 K 和 V 可以表示为：
+设模型有 L 层，第 l 层有 $H_{\mathrm{kv}}$ 个 K/V head，每个 head 的维度为 $D_{h}$，当前有 B 个请求，每条序列长度为 $T_{\mathrm{ctx}}$。一层的 K 和 V 可以表示为：
 
 ~~~math
 K_{l},V_{l}\in
@@ -88,7 +88,7 @@ M_{\mathrm{KV}}
 
 ### 3.2.2 变长请求必须按总长度相加
 
-线上 batch 很少是每条请求恰好同样长。第 i 条请求的上下文长度为 T_ctx,i 时，所有活跃请求的状态大小应写成：
+线上 batch 很少是每条请求恰好同样长。第 i 条请求的上下文长度为 $T_{\mathrm{ctx},i}$ 时，所有活跃请求的状态大小应写成：
 
 ~~~math
 S_{\mathrm{ctx}}=\sum_{i=1}^{B_{\mathrm{active}}}T_{\mathrm{ctx},i},
@@ -100,7 +100,7 @@ M_{\mathrm{KV}}
 2L H_{\mathrm{kv}}D_{h} b\,S_{\mathrm{ctx}}.
 ~~~
 
-不要把 B_active * T_max 当成真实使用量，除非 runtime 确实按最大长度为每条请求完整预留。连续 batching、paged allocation 和 ragged kernel 往往按真实 token 数管理，但仍可能有 block rounding 和 padding 浪费。
+不要把 $B_{\mathrm{active}}$ * $T_{\mathrm{max}}$ 当成真实使用量，除非 runtime 确实按最大长度为每条请求完整预留。连续 batching、paged allocation 和 ragged kernel 往往按真实 token 数管理，但仍可能有 block rounding 和 padding 浪费。
 
 单个上下文 token 在所有层的理论 cache 成本是：
 
@@ -125,7 +125,7 @@ B_{\mathrm{rough}}
 
 ### 3.2.3 一个可复算的 8k 例子
 
-假设 L=32、H_kv=8、D_h=128、T_ctx=8192、b=2，则一个请求的 cache 约为：
+假设 L=32、$H_{\mathrm{kv}}$=8、$D_{h}$=128、$T_{\mathrm{ctx}}$=8192、b=2，则一个请求的 cache 约为：
 
 ~~~math
 M_{\mathrm{KV}}
@@ -134,7 +134,7 @@ M_{\mathrm{KV}}
 \approx1024\text{ MiB}.
 ~~~
 
-同样的模型，如果使用 MHA 且 H_kv=32，约为 4096 MiB；如果是 MQA 且 H_kv=1，约为 128 MiB。这里的比例来自 K/V head 数，不能据此断言 MQA 在所有任务上质量与 MHA 相同。
+同样的模型，如果使用 MHA 且 $H_{\mathrm{kv}}$=32，约为 4096 MiB；如果是 MQA 且 $H_{\mathrm{kv}}$=1，约为 128 MiB。这里的比例来自 K/V head 数，不能据此断言 MQA 在所有任务上质量与 MHA 相同。
 
 ### 3.2.4 不能从参数量反推 cache
 
@@ -153,7 +153,7 @@ M_{\mathrm{KV}}
 
 ### 3.3.1 Prefill 如何写入 cache
 
-输入有 T_in 个 token 时，prefill 会在每层产生整段 K/V，并把它们写入从位置 0 到 T_in-1 的状态槽。若使用 RoPE 或其他位置编码，写入 cache 的 K 通常已经包含相应的位置信息；后续 query 必须采用兼容的位置计算和 position ids。
+输入有 $T_{\mathrm{in}}$ 个 token 时，prefill 会在每层产生整段 K/V，并把它们写入从位置 0 到 $T_{\mathrm{in}}$-1 的状态槽。若使用 RoPE 或其他位置编码，写入 cache 的 K 通常已经包含相应的位置信息；后续 query 必须采用兼容的位置计算和 position ids。
 
 这意味着 cache 不是可以脱离上下文随意搬运的普通 tensor。下列变化可能使一个看似相同的前缀不能复用：
 
@@ -165,7 +165,7 @@ M_{\mathrm{KV}}
 
 ### 3.3.2 Decode 如何追加
 
-如果输入 token 数是 T_in，已经生成了 t 个 token，下一次 decode 产生的新 K/V 对应位置 T_in+t。概念上可以写成：
+如果输入 token 数是 $T_{\mathrm{in}}$，已经生成了 t 个 token，下一次 decode 产生的新 K/V 对应位置 $T_{\mathrm{in}}$+t。概念上可以写成：
 
 ~~~math
 T_{\mathrm{ctx}}(t)=T_{\mathrm{in}}+t,
@@ -181,7 +181,7 @@ V_{l}^{(t+1)}=V_{l}^{(t)}\mathbin{\|}V_{l,\mathrm{new}}.
 
 ### 3.4.1 被省掉的重复投影
 
-设当前上下文长度为 T_ctx，hidden size 为 d。如果每一步都重新计算全部历史 token 的 K/V，历史投影的工作量数量级是：
+设当前上下文长度为 $T_{\mathrm{ctx}}$，hidden size 为 d。如果每一步都重新计算全部历史 token 的 K/V，历史投影的工作量数量级是：
 
 ~~~math
 C_{\mathrm{no\ cache}}
@@ -213,7 +213,7 @@ H_{q}T_{\mathrm{ctx}}D_{h}.
 
 ### 3.4.3 没有 cache 的复杂度直觉要谨慎
 
-如果生成 N 个 token，没有 cache 时，历史 K/V 投影会反复覆盖从 T_in 到 T_in+N 的长度，累计工作大致呈二次增长；有 cache 时，历史投影变为一次 prefill 加上 N 次单 token 投影。attention 对历史的读取仍然随每一步上下文增长，因此总成本不会变成严格线性于输出长度的简单常数。
+如果生成 N 个 token，没有 cache 时，历史 K/V 投影会反复覆盖从 $T_{\mathrm{in}}$ 到 $T_{\mathrm{in}}$+N 的长度，累计工作大致呈二次增长；有 cache 时，历史投影变为一次 prefill 加上 N 次单 token 投影。attention 对历史的读取仍然随每一步上下文增长，因此总成本不会变成严格线性于输出长度的简单常数。
 
 更准确的工程表述是：“KV Cache 将重复的历史 K/V 投影换成状态读取；它降低了大量重复计算，但 decode 的 attention 读取、模型权重访问和逐步调度仍然存在。”
 
@@ -237,7 +237,7 @@ Multi-Query Attention（MQA）让多个 query head 共享同一组 K/V：
 H_{\mathrm{kv}}=1.
 ~~~
 
-这样 cache 的 K/V head 因子从 H_q 降到 1，理论上把这部分显存和历史 K/V 读取降到 MHA 的 1/H_q。query 仍然可以有多个 head，模型计算并不是所有部分都减少；共享 K/V 还可能改变质量和训练稳定性。MQA 不能在服务配置里随意把一个已经训练好的 MHA 模型改成 MQA，除非模型架构、权重转换和质量回归支持这种改变。
+这样 cache 的 K/V head 因子从 $H_{q}$ 降到 1，理论上把这部分显存和历史 K/V 读取降到 MHA 的 1/$H_{q}$。query 仍然可以有多个 head，模型计算并不是所有部分都减少；共享 K/V 还可能改变质量和训练稳定性。MQA 不能在服务配置里随意把一个已经训练好的 MHA 模型改成 MQA，除非模型架构、权重转换和质量回归支持这种改变。
 
 ### 3.5.3 GQA 是按组共享
 
@@ -256,7 +256,7 @@ R_{\mathrm{GQA/MHA}}
 =\frac{1}{g}.
 ~~~
 
-例如 H_q=32、H_kv=8 时，每 4 个 query head 共享一个 K/V head，cache 约为 MHA 的四分之一。这个比例只针对标准显式 K/V cache；MLA、滑动窗口和混合架构不能直接套用。
+例如 $H_{q}$=32、$H_{\mathrm{kv}}$=8 时，每 4 个 query head 共享一个 K/V head，cache 约为 MHA 的四分之一。这个比例只针对标准显式 K/V cache；MLA、滑动窗口和混合架构不能直接套用。
 
 ### 3.5.4 质量、带宽和并行之间的取舍
 
@@ -272,7 +272,7 @@ R_{\mathrm{GQA/MHA}}
 
 ## 3.6 MLA、滑动窗口与递归 state：不都是同一种 cache
 
-### 3.6.1 MLA 不能套用 H_kv 公式
+### 3.6.1 MLA 不能套用 $H_{\mathrm{kv}}$ 公式
 
 Multi-head Latent Attention（MLA）类架构的思路不是简单减少 K/V head，而是把历史信息压缩到低维 latent，并可能额外保存与位置编码相关的解耦 key。用抽象符号表示，单层每个 token 的 cache 可以近似写成：
 
@@ -283,9 +283,9 @@ M_{\mathrm{MLA/token/layer}}
 +M_{\mathrm{scale/metadata}}.
 ~~~
 
-这里 d_latent 是压缩的 KV latent 维度，d_pos 是位置相关状态维度；精确布局、是否保留可复用的投影量以及不同 kernel 的 workspace，要以具体实现为准。DeepSeek-V2 技术报告是 MLA 公开设计的主要一手资料之一。
+这里 $d_{\mathrm{latent}}$ 是压缩的 KV latent 维度，$d_{\mathrm{pos}}$ 是位置相关状态维度；精确布局、是否保留可复用的投影量以及不同 kernel 的 workspace，要以具体实现为准。DeepSeek-V2 技术报告是 MLA 公开设计的主要一手资料之一。
 
-工程上最重要的边界是：看到模型使用“multi-head”并不意味着可以用标准 MHA/GQA 的 2*L*H_kv*D_h*b 直接计算它的 cache。应从模型 config、实现代码或官方技术报告确认真正保存的是 full K/V、latent、位置 key、递归 state，还是几种状态的组合。
+工程上最重要的边界是：看到模型使用“multi-head”并不意味着可以用标准 MHA/GQA 的 2*L*$H_{\mathrm{kv}}$*$D_{h}$*b 直接计算它的 cache。应从模型 config、实现代码或官方技术报告确认真正保存的是 full K/V、latent、位置 key、递归 state，还是几种状态的组合。
 
 ### 3.6.2 滑动窗口让部分 cache 随窗口而不是随全历史增长
 
@@ -299,7 +299,7 @@ T_{\mathrm{effective}}=\min(T_{\mathrm{ctx}},W).
 
 ### 3.6.3 递归或线性 attention 的 state
 
-状态空间模型、线性 attention 或 gated delta rule 一类结构，可能用每个序列一个递归 state 汇总历史，而不是保存每个历史 token 的 full K/V。若模型包含 L_a 个显式 attention 层和 L_r 个递归层，可用下面的抽象估算：
+状态空间模型、线性 attention 或 gated delta rule 一类结构，可能用每个序列一个递归 state 汇总历史，而不是保存每个历史 token 的 full K/V。若模型包含 $L_{a}$ 个显式 attention 层和 $L_{r}$ 个递归层，可用下面的抽象估算：
 
 ~~~math
 M_{\mathrm{history}}
@@ -310,7 +310,7 @@ B\sum_{l\in A}
 +M_{\mathrm{metadata}}.
 ~~~
 
-A 是显式 attention 层集合，W_l 是该层的窗口（global 层可以取很大的值），R 是递归层集合，S_l 是每个序列该层 state 的元素数。第二项对递归 state 不随 token 长度线性增长，但 state 可能是矩阵而不只是一个向量，因此必须使用实际元素数。
+A 是显式 attention 层集合，$W_{l}$ 是该层的窗口（global 层可以取很大的值），R 是递归层集合，$S_{l}$ 是每个序列该层 state 的元素数。第二项对递归 state 不随 token 长度线性增长，但 state 可能是矩阵而不只是一个向量，因此必须使用实际元素数。
 
 这类模型的部署风险从“cache token 数是否够”扩展为“每一步的 state transition 是否正确”：
 
@@ -339,9 +339,9 @@ M_{\mathrm{GPU}}
 +M_{\mathrm{runtime}}.
 ~~~
 
-M_weights 是权重和常驻模型 buffer，M_KV 是已写入的 K/V 数值载荷，M_activation 是当前 prefill/decode 的中间激活，M_workspace 是 kernel 临时空间，M_communication 是 TP/PP/NCCL 等通信 buffer；metadata、fragmentation 和 runtime 分别计入元数据、未使用槽位和框架自身开销。这里把载荷与分配池分开：活跃 token 需要的字节只是池里的一部分，不能直接等同于 GPU 已为 cache 保留的全部显存。
+$M_{\mathrm{weights}}$ 是权重和常驻模型 buffer，$M_{\mathrm{KV}}$ 是已写入的 K/V 数值载荷，$M_{\mathrm{activation}}$ 是当前 prefill/decode 的中间激活，$M_{\mathrm{workspace}}$ 是 kernel 临时空间，$M_{\mathrm{communication}}$ 是 TP/PP/NCCL 等通信 buffer；metadata、fragmentation 和 runtime 分别计入元数据、未使用槽位和框架自身开销。这里把载荷与分配池分开：活跃 token 需要的字节只是池里的一部分，不能直接等同于 GPU 已为 cache 保留的全部显存。
 
-如果 GPU 总容量为 M_total，先算动态 KV 池可以占用的毛预算：
+如果 GPU 总容量为 $M_{\mathrm{total}}$，先算动态 KV 池可以占用的毛预算：
 
 ~~~math
 M_{\mathrm{KV,pool}}
@@ -355,7 +355,7 @@ M_{\mathrm{KV,pool}}
 -M_{\mathrm{headroom}}.
 ~~~
 
-M_runtime,outside pool 指不由 KV 池承担的运行时常驻分配；若 block table、scale 或 allocator 元数据也在池外申请，就应在计算 M_KV,pool 前一并扣除。反之，若这些开销从池内支付，则毛预算不能全部用来存 token 载荷：
+$M_{\mathrm{runtime},\mathrm{outside}}$ pool 指不由 KV 池承担的运行时常驻分配；若 block table、scale 或 allocator 元数据也在池外申请，就应在计算 $M_{\mathrm{KV},\mathrm{pool}}$ 前一并扣除。反之，若这些开销从池内支付，则毛预算不能全部用来存 token 载荷：
 
 ~~~math
 M_{\mathrm{KV,payload}}
@@ -365,7 +365,7 @@ M_{\mathrm{KV,pool}}
 -M_{\mathrm{fragmentation}}.
 ~~~
 
-这里的 fragmentation 包括已分配 block 的尾部空槽；它不是另一份可以回收给 token 的载荷。M_headroom 用于吸收长度突发、临时分配、编译 kernel、驱动和监控误差。把所有剩余显存都分给 KV Cache，通常会把偶发 prefill 或长请求变成 OOM。估算时要标清每项由池内还是池外承担，避免既在总账扣一次、又在池预算里重复扣。
+这里的 fragmentation 包括已分配 block 的尾部空槽；它不是另一份可以回收给 token 的载荷。$M_{\mathrm{headroom}}$ 用于吸收长度突发、临时分配、编译 kernel、驱动和监控误差。把所有剩余显存都分给 KV Cache，通常会把偶发 prefill 或长请求变成 OOM。估算时要标清每项由池内还是池外承担，避免既在总账扣一次、又在池预算里重复扣。
 
 ### 3.7.2 统一最大长度为什么会浪费
 
@@ -390,7 +390,7 @@ M_{\mathrm{KV,rank}}
 
 但只有在 head 可分片、layout 和实现确实如此时才能除以 r。一些架构的 K/V、latent 或通信状态会复制；pipeline parallel 则按层分配，不是把所有 cache 简单平均。容量报告必须注明“单卡显存”还是“整机总显存”，并给出每 rank 的实际读数。
 
-把窗口和分片代入同一账本，可以看出“架构状态”和“设备放置”是两次不同的缩放。假设一个教学模型有 32 层、H_kv=8、D_h=128、BF16，单请求上下文为 8,192 token，若 32 层都保存全历史 GQA cache，则约为 1 GiB。再假设其中 12 层是 global attention，另外 20 层在模型定义中只保留最近 4,096 token，则有效的 layer-token 数为 $12\times 8192+20\times 4096=180224$，而全历史基线是 $32\times 8192=262144$；相除为 0.6875，因此理论 payload 约 0.6875 GiB。若 TP=4 且 8 个 KV heads 均匀分给 4 个 rank，理想每 rank 约 0.1719 GiB；实际是否分片、复制或另存状态，仍须查 layout 和设备读数。这个例子假定模型本身支持这些窗口，不是在服务端把任意 checkpoint 的历史截短；它也未计 pool rounding、通信和 workspace。
+把窗口和分片代入同一账本，可以看出“架构状态”和“设备放置”是两次不同的缩放。假设一个教学模型有 32 层、$H_{\mathrm{kv}}$=8、$D_{h}$=128、BF16，单请求上下文为 8,192 token，若 32 层都保存全历史 GQA cache，则约为 1 GiB。再假设其中 12 层是 global attention，另外 20 层在模型定义中只保留最近 4,096 token，则有效的 layer-token 数为 $12\times 8192+20\times 4096=180224$，而全历史基线是 $32\times 8192=262144$；相除为 0.6875，因此理论 payload 约 0.6875 GiB。若 TP=4 且 8 个 KV heads 均匀分给 4 个 rank，理想每 rank 约 0.1719 GiB；实际是否分片、复制或另存状态，仍须查 layout 和设备读数。这个例子假定模型本身支持这些窗口，不是在服务端把任意 checkpoint 的历史截短；它也未计 pool rounding、通信和 workspace。
 
 落地时应按模型配置逐层列出 full-attention、windowed attention 和递归 state 三类，再把各层贡献相加；不能先用一个全局 `H_kv` 和统一最大长度替代混合结构。得到整机的理论状态后，再按实现检查每个 TP rank 的真实布局；如果分片不均或存在复制，容量门槛由最紧张的 rank 决定，而不是用各卡平均值掩盖单卡先 OOM。这样，模型结构、请求长度和并行布局才能落在同一份可核对的账本里。
 
@@ -420,13 +420,13 @@ physical block table:            [5, 9]
 
 attention kernel 仍然按逻辑顺序读取 token，只是在访问时通过 block table 找到物理位置。物理上不连续并不改变模型看到的 token 顺序；它改变的是 allocator 如何给状态找位置。
 
-若 block size 为 S_block，第 i 个请求当前长度为 T_i，需要的 block 数为：
+若 block size 为 $S_{\mathrm{block}}$，第 i 个请求当前长度为 $T_{i}$，需要的 block 数为：
 
 ~~~math
 N_{i}=\left\lceil\frac{T_{i}}{S_{\mathrm{block}}}\right\rceil.
 ~~~
 
-该式要求 `T_i\geq0` 为整数且 `S_block>0` 为正整数；空序列需要零个 block，但不能使用零 block size 进行所谓的“自动计算”。
+该式要求 $T_{i}\geq0$ 为整数且 $S_{\mathrm{block}}>0$ 为正整数；空序列需要零个 block，但不能使用零 block size 进行所谓的“自动计算”。
 
 所有请求分配的 token 槽位和尾部浪费为：
 
@@ -437,21 +437,21 @@ W_{\mathrm{tail}}
 =A_{\mathrm{paged}}-\sum_{i=1}^{B}T_{i}.
 ~~~
 
-W_tail 是 token 槽位口径的内部浪费；还要加 block table、对齐、scale 和 allocator 元数据。block 越小，尾部浪费通常越小，但 table 更大、映射和 kernel 调度开销可能更高；block 越大，元数据更少，却可能浪费更多尾部空间。不存在脱离 workload 的万能 block size。
+$W_{\mathrm{tail}}$ 是 token 槽位口径的内部浪费；还要加 block table、对齐、scale 和 allocator 元数据。block 越小，尾部浪费通常越小，但 table 更大、映射和 kernel 调度开销可能更高；block 越大，元数据更少，却可能浪费更多尾部空间。不存在脱离 workload 的万能 block size。
 
-用三条当前长度分别为 680、3,360、1,420 token 的请求手算，设 S_block=128。第一条需要 ceil(680/128)=6 个 block，即 768 个槽位，尾部空 88；第二条需要 27 个 block、3,456 个槽位，尾部空 96；第三条需要 12 个 block、1,536 个槽位，尾部空 116。合计 45 个 block、5,760 个槽位，真实载荷为 5,460 token，因而尾部浪费 300 个槽位，约占载荷的 5.49%。同一组请求若预留 1,024、4,096、2,048 个槽位，则多占 1,708 个槽位；分页把这组假设中的空槽减少 1,408 个，但没有把它变成零。
+用三条当前长度分别为 680、3,360、1,420 token 的请求手算，设 $S_{\mathrm{block}}=128$。第一条需要 $\lceil680/128\rceil=6$ 个 block，即 768 个槽位，尾部空 88；第二条需要 27 个 block、3,456 个槽位，尾部空 96；第三条需要 12 个 block、1,536 个槽位，尾部空 116。合计 45 个 block、5,760 个槽位，真实载荷为 5,460 token，因而尾部浪费 300 个槽位，约占载荷的 5.49%。同一组请求若预留 1,024、4,096、2,048 个槽位，则多占 1,708 个槽位；分页把这组假设中的空槽减少 1,408 个，但没有把它变成零。
 
-block size 会改变这一折中。仍用相同长度，S_block=64 时分别分配 11、53、23 个 block，共 87 个 block 和 5,568 个槽位，尾部浪费 108；S_block=128 时为 45 个 block、浪费 300；S_block=256 时为 23 个 block、5,888 个槽位，浪费 428。较小 block 在这个例子里减少了尾部空槽，却让 block table 条目数从 23 增到 87。该计数不含 table 字节、kernel 查表开销或并发分配成本，因此只能说明方向，不能据此宣布 64-token block 的运行性能更好。
+block size 会改变这一折中。仍用相同长度，$S_{\mathrm{block}}=64$ 时分别分配 11、53、23 个 block，共 87 个 block 和 5,568 个槽位，尾部浪费 108；$S_{\mathrm{block}}=128$ 时为 45 个 block、浪费 300；$S_{\mathrm{block}}=256$ 时为 23 个 block、5,888 个槽位，浪费 428。较小 block 在这个例子里减少了尾部空槽，却让 block table 条目数从 23 增到 87。该计数不含 table 字节、kernel 查表开销或并发分配成本，因此只能说明方向，不能据此宣布 64-token block 的运行性能更好。
 
-把槽位换成显存，才能判断这组差异对服务预算有多大影响。沿用 L=32、H_kv=8、D_h=128、BF16 的 GQA 教学配置，每个 token 的 K/V payload 是 128 KiB。128-token block 方案的 300 个尾部槽位占 37.5 MiB；静态预留的 1,708 个空槽位占 213.5 MiB，二者相差 176 MiB。这个差额只比较 token 槽位，不含 block table、scale、对齐和 allocator 开销。小 block 让 payload 更贴近当前长度，却也提高 block 数和分配/查表频率；因此应把“少浪费了多少 cache 字节”和“kernel 与调度多做了什么工作”作为两类测量结果，不能只用内部碎片比例选 block size。
+把槽位换成显存，才能判断这组差异对服务预算有多大影响。沿用 L=32、$H_{\mathrm{kv}}$=8、$D_{h}$=128、BF16 的 GQA 教学配置，每个 token 的 K/V payload 是 128 KiB。128-token block 方案的 300 个尾部槽位占 37.5 MiB；静态预留的 1,708 个空槽位占 213.5 MiB，二者相差 176 MiB。这个差额只比较 token 槽位，不含 block table、scale、对齐和 allocator 开销。小 block 让 payload 更贴近当前长度，却也提高 block 数和分配/查表频率；因此应把“少浪费了多少 cache 字节”和“kernel 与调度多做了什么工作”作为两类测量结果，不能只用内部碎片比例选 block size。
 
 同一假设下，64-token block 的 108 个尾部槽位是 13.5 MiB，256-token block 的 428 个尾部槽位是 53.5 MiB；中间的 128-token 方案是 37.5 MiB。对应 block 数却分别为 87、45 和 23。这个换算只描述三条请求的尾部 payload，并不代表 table metadata 同比例变化，也不包含并发扩缩和 kernel 查表成本。Paged allocator 缓解了必须找到大段连续空间的外部碎片问题，但页池固定大小、空闲块是否仍驻留 GPU、尾块何时回收都由具体实现决定；读者应分别看槽位浪费、物理池占用和分配失败，不能把“总空闲字节够”当作分配一定成功。
 
-逻辑 block 数也不总等于需要新申请的物理 block 数。设 `S_block=4`、某请求已写 6 个 token，逻辑上占两个 block；再追加一个 token，$\left\lceil 7/4 \right\rceil$ 仍为 2，独占的尾 block 不需扩容。但若第二个 block 还被另一分支共享，写入前必须 copy-on-write：申请一个新物理 block，把已有的 `p4,p5` 复制过去，再写 `p6`。因此 scheduler 的分配预算除了序列长度，还要看共享引用和尾块是否可写；只按 `ceil(T/S_block)` 的差值做 admission 会漏掉分叉写入所需空间。
+逻辑 block 数也不总等于需要新申请的物理 block 数。设 $S_{\mathrm{block}}=4$、某请求已写 6 个 token，逻辑上占两个 block；再追加一个 token，$\left\lceil 7/4 \right\rceil$ 仍为 2，独占的尾 block 不需扩容。但若第二个 block 还被另一分支共享，写入前必须 copy-on-write：申请一个新物理 block，把已有的 `p4,p5` 复制过去，再写 `p6`。因此 scheduler 的分配预算除了序列长度，还要看共享引用和尾块是否可写；只按 $\lceil T/S_{\mathrm{block}}\rceil$ 的差值做 admission 会漏掉分叉写入所需空间。
 
 ### 3.8.3 地址换算与 copy-on-write 轨迹
 
-block table 不是抽象的“页号列表”，attention kernel 必须用它把逻辑 token 位置换成物理槽位。用教学 block size `S_block=4`，某请求的 table 是 `[8, 2, 11]`。逻辑 token 下标从 0 开始时：
+block table 不是抽象的“页号列表”，attention kernel 必须用它把逻辑 token 位置换成物理槽位。用教学 block size $S_{\mathrm{block}}=4$，某请求的 table 是 `[8, 2, 11]`。逻辑 token 下标从 0 开始时：
 
 ~~~math
 b_{\mathrm{logical}}=\left\lfloor\frac{i}{S_{\mathrm{block}}}\right\rfloor,\qquad
@@ -508,7 +508,7 @@ copy-on-write 的关键不是“复制整条 cache”，而是只隔离将被改
 
 ### 3.9.1 理想空间收益
 
-如果 cache 的数据部分从 b_old 字节变成 b_new 字节，在相同 token 数、shape 和无额外元数据的理想条件下：
+如果 cache 的数据部分从 $b_{\mathrm{old}}$ 字节变成 $b_{\mathrm{new}}$ 字节，在相同 token 数、shape 和无额外元数据的理想条件下：
 
 ~~~math
 \frac{M_{\mathrm{new}}}{M_{\mathrm{old}}}
@@ -531,7 +531,7 @@ q=\mathrm{clip}\left(\mathrm{round}\left(\frac{x}{s}\right)+z,\ q_{\min},q_{\max
 \hat{x}=s(q-z).
 ~~~
 
-x 是原始 K/V 值，q 是低精度整数，$s\gt 0$ 是 scale，z 是 zero point，q_min 和 q_max 是满足 `q_min <= q_max` 的整数表示范围，x_hat 是反量化近似。对称量化常取 z=0；scale 可以按 tensor、head、channel、token 或 block 统计。
+x 是原始 K/V 值，q 是低精度整数，$s\gt 0$ 是 scale，z 是 zero point，$q_{\mathrm{min}}$ 和 $q_{\mathrm{max}}$ 是满足 `q_min <= q_max` 的整数表示范围，$x_{\mathrm{hat}}$ 是反量化近似。对称量化常取 z=0；scale 可以按 tensor、head、channel、token 或 block 统计。
 
 粒度越细，通常越能跟踪局部分布，metadata 和读取 scale 的开销也越大；粒度越粗，管理简单，但异常值可能占据动态范围，使大部分值量化误差变大。K 和 V 的误差影响也不完全相同：K 参与 attention score，误差会改变权重分布；V 参与加权聚合，误差会改变输出内容。
 
@@ -580,7 +580,7 @@ KV 是逐 token 到达的流式状态，按 channel 量化 K 还带来实现问�
 
 ### 3.10.1 哪些前缀适合复用
 
-常见共享前缀包括固定 system prompt、企业助手规则、稳定的工具 schema、RAG 模板和多轮对话中未改变的历史部分。若前缀 token 数为 T_shared，完整 prompt 为 T_prompt，最粗的 prefill 复用比例直觉是：
+常见共享前缀包括固定 system prompt、企业助手规则、稳定的工具 schema、RAG 模板和多轮对话中未改变的历史部分。若前缀 token 数为 $T_{\mathrm{shared}}$，完整 prompt 为 $T_{\mathrm{prompt}}$，最粗的 prefill 复用比例直觉是：
 
 ~~~math
 R_{\mathrm{prefix}}
@@ -588,7 +588,7 @@ R_{\mathrm{prefix}}
 \frac{T_{\mathrm{shared}}}{T_{\mathrm{prompt}}}.
 ~~~
 
-这个比例要求 `T_prompt>0` 且 `0\leq T_shared\leq T_prompt`。它不是实际延迟收益。前缀命中后仍可能需要读取 cache、做新 suffix 的 prefill、执行后续 decode；如果原先 prefill 主要受 MLP 而非 attention 限制，复用比例和延迟比例也不会完全相同。
+这个比例要求 $T_{\mathrm{prompt}}>0$ 且 $0\leq T_{\mathrm{shared}}\leq T_{\mathrm{prompt}}$。它不是实际延迟收益。前缀命中后仍可能需要读取 cache、做新 suffix 的 prefill、执行后续 decode；如果原先 prefill 主要受 MLP 而非 attention 限制，复用比例和延迟比例也不会完全相同。
 
 ### 3.10.2 Cache key 的组成
 
@@ -692,7 +692,7 @@ H₂O 的论文将累计 attention score 作为 heavy-hitter 代理，并与 rec
 
 ### 3.11.4 1M context 的现实边界
 
-接口接受 1M token、模型训练过长上下文、runtime 能分配 1M cache、模型能在中间位置找回证据，是四个不同命题。用一个 full-attention 教学配置看容量：若 L=32、H_kv=8、D_h=128、BF16 每值 2 bytes，则每 token 的 K/V payload 为 $2\times32\times8\times128\times2=131072$ bytes，即 128 KiB。1,000,000 个 token 因而需要 131,072,000,000 bytes，除以 $2^{30}$ 约为 122.1 GiB；若说的是 1 Mi token（1,048,576 个）则恰为 128 GiB。这里仅算一条活跃请求的 full-KV 数值载荷，不含权重、激活、scale、block 尾槽、共享缓存、通信和 headroom；并发请求还要把各自状态相加。
+接口接受 1M token、模型训练过长上下文、runtime 能分配 1M cache、模型能在中间位置找回证据，是四个不同命题。用一个 full-attention 教学配置看容量：若 L=32、$H_{\mathrm{kv}}$=8、$D_{h}$=128、BF16 每值 2 bytes，则每 token 的 K/V payload 为 $2\times32\times8\times128\times2=131072$ bytes，即 128 KiB。1,000,000 个 token 因而需要 131,072,000,000 bytes，除以 $2^{30}$ 约为 122.1 GiB；若说的是 1 Mi token（1,048,576 个）则恰为 128 GiB。这里仅算一条活跃请求的 full-KV 数值载荷，不含权重、激活、scale、block 尾槽、共享缓存、通信和 headroom；并发请求还要把各自状态相加。
 
 即使每个 token 的 cache 成本看起来不大，单请求也可能占用大量显存；如果模型有多层 global attention，窗口策略也不会自动帮它保存全部能力。容量、有效检索、跨段推理和单位成功成本应分别测量，不能把 context window 的宣传上限当作可承载并发。
 
@@ -709,14 +709,14 @@ prefill OOM、decode 过程中 OOM 和模型加载 OOM 的原因不同：
 | decode | cache 增长、block 分配、长输出 | active context、block 水位、完成释放、抢占 |
 | 高并发突发 | 多条请求同时申请状态 | queue、admission、最大 batch、回收延迟 |
 
-“权重能加载”只说明 M_weights 放得下，不能说明 prefill 和 decode 的动态状态有空间。
+“权重能加载”只说明 $M_{\mathrm{weights}}$ 放得下，不能说明 prefill 和 decode 的动态状态有空间。
 
 ### 3.12.2 一套可复现的检查顺序
 
 先保存发生问题时的 workload 和 revision，再按以下顺序计算：
 
-1. 统计 active request 数以及每条请求当前 T_ctx，不要只记录平均长度。
-2. 用模型真实的 L、H_kv、D_h 和 cache dtype 计算理论 M_KV。
+1. 统计 active request 数以及每条请求当前 $T_{\mathrm{ctx}}$，不要只记录平均长度。
+2. 用模型真实的 L、$H_{\mathrm{kv}}$、$D_{h}$ 和 cache dtype 计算理论 $M_{\mathrm{KV}}$。
 3. 加上 block rounding、scale、table、TP/PP buffer 和 allocator 读数。
 4. 分开查看权重、activation、workspace、通信和 cache 的峰值时间。
 5. 检查完成、取消、超时和异常路径是否释放 block/reference。
@@ -733,7 +733,7 @@ cache 排查中常见三种分母：
 2. 所有 active request 的总 token 数，用来解释动态状态。
 3. GPU 可用 cache budget，用来解释是否会触发分配失败。
 
-例如“cache 使用率 80%”必须说明是 M_active/M_KV_budget，还是 runtime pool 的已分配 block 数；如果把可复用 prefix、空闲但已分配 block 和活跃状态放在一个分子里，运维决策会失真。
+例如“cache 使用率 80%”必须说明是 $M_{\mathrm{active}}$/M_KV_budget，还是 runtime pool 的已分配 block 数；如果把可复用 prefix、空闲但已分配 block 和活跃状态放在一个分子里，运维决策会失真。
 
 沿用前面的三条请求长度和 GQA 教学配置，可以把 OOM 从“权重加载成功”推到实际预算。三个请求共 5,460 个 active token，单 token payload 为 128 KiB，因此精确载荷约 0.667 GiB；按 128-token block 分配后是 5,760 个槽位，约 0.703 GiB。再假设一张 12 GiB GPU 上，权重占 8.5 GiB、prefill 峰值激活 1.0 GiB、workspace 0.8 GiB、通信 0.4 GiB、池外 runtime 0.3 GiB，并保留 0.6 GiB headroom，则 KV 毛池只有 $12-8.5-1.0-0.8-0.4-0.3-0.6=0.4$ GiB。权重虽然能加载，当前这批 cache 连尾部槽位都放不下；根因是剩余预算，而不是 block table 的地址映射本身。
 
@@ -975,9 +975,9 @@ empty batch: requests must be a non-empty list
 
 通常不行。GQA 是模型架构和训练权重的一部分，runtime 可以识别已有的 num_key_value_heads，但不能无损地把一个 MHA checkpoint 改成 GQA。任何转换都需要权重处理、兼容的 attention 实现和质量回归。见 [§3.5](#35-mhamqagqakv-head-数的取舍)。
 
-### 3.14.5 MLA 只是 H_kv 更小的 GQA
+### 3.14.5 MLA 只是 $H_{\mathrm{kv}}$ 更小的 GQA
 
-不是。MLA 通过 latent 和位置相关状态改变 cache 表示方式；它的显存和 kernel 需要使用自己的 layout 计算。用标准 2*L*H_kv*D_h*b 公式估算 MLA，可能得到方向完全错误的结论。见 [§3.6](#36-mla滑动窗口与递归-state不都是同一种-cache)。
+不是。MLA 通过 latent 和位置相关状态改变 cache 表示方式；它的显存和 kernel 需要使用自己的 layout 计算。用标准 2*L*$H_{\mathrm{kv}}$*$D_{h}$*b 公式估算 MLA，可能得到方向完全错误的结论。见 [§3.6](#36-mla滑动窗口与递归-state不都是同一种-cache)。
 
 ### 3.14.6 INT8 KV Cache 一定省一半显存且没有质量代价
 
@@ -1064,7 +1064,7 @@ prefix_token_hash
 
 KV Cache 保存的是每层历史 attention 的 K/V 状态。它通过复用历史投影减少重复计算，但新 query 仍要读取历史状态，所以长上下文 decode 的带宽和延迟压力不会自动消失。
 
-标准 full-KV 模型的基础账本是 2 * L * H_kv * D_h * b * S_ctx；S_ctx 应该是所有活跃请求真实上下文长度之和。MHA、MQA 和 GQA 主要通过 K/V head 数改变这笔账，MLA、滑动窗口和递归 state 则改变了状态的表示方式，不能机械套用同一个公式。
+标准 full-KV 模型的基础账本是 2 * L * $H_{\mathrm{kv}}$ * $D_{h}$ * b * $S_{\mathrm{ctx}}$；$S_{\mathrm{ctx}}$ 应该是所有活跃请求真实上下文长度之和。MHA、MQA 和 GQA 主要通过 K/V head 数改变这笔账，MLA、滑动窗口和递归 state 则改变了状态的表示方式，不能机械套用同一个公式。
 
 PagedAttention 解决的是动态 cache 的 block 分配、地址映射、回收和共享，仍然会有 block 尾部浪费和 metadata 成本。KV Cache 量化减少数据字节，却需要处理 scale、反量化、kernel 和质量误差。Prefix cache 可以减少重复 prefill，但必须绑定 token 序列、版本、位置配置和权限。
 

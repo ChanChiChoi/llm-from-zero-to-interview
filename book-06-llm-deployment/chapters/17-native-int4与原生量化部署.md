@@ -85,9 +85,9 @@ h_{\mathrm{hw}},
 r_{\mathrm{runtime}})
 ~~~
 
-其中 W_pack 是压缩权重，S 是 scale，Z 是 zero point 或其他偏移信息，L 是
-布局和 pack 规则，d_acc 是累加 dtype，k_kernel 是执行 kernel，h_hw 是硬件
-能力，r_runtime 是 runtime 版本。这个元组中的任一字段变化都可能改变结果
+其中 $W_{\mathrm{pack}}$ 是压缩权重，S 是 scale，Z 是 zero point 或其他偏移信息，L 是
+布局和 pack 规则，$d_{\mathrm{acc}}$ 是累加 dtype，$k_{\mathrm{kernel}}$ 是执行 kernel，$h_{\mathrm{hw}}$ 是硬件
+能力，$r_{\mathrm{runtime}}$ 是 runtime 版本。这个元组中的任一字段变化都可能改变结果
 或性能。
 
 所以本章使用“原生 INT4”时，读者应该把它理解成“有明确执行契约的 INT4
@@ -102,7 +102,7 @@ artifact”，而不是把它当成一个神奇的模型标签。
 因此权重 INT4 的第一收益往往是让模型能够放进更少的 GPU，或者把原来被
 权重占用的空间让给 KV Cache，而不是让所有 decode kernel 自动提速。
 
-设模型有 P 个参数，每个参数使用 b_w bit 存储，理想权重 payload 为：
+设模型有 P 个参数，每个参数使用 $b_{w}$ bit 存储，理想权重 payload 为：
 
 ~~~math
 M_{\mathrm{weight,payload}}
@@ -110,8 +110,8 @@ M_{\mathrm{weight,payload}}
 \frac{P b_{w}}{8}
 ~~~
 
-这里的 P 是参数数量，b_w 是每个参数的存储 bit 数，结果的单位是 byte。
-BF16 取 b_w=16，INT4 取 b_w=4。理想情况下，INT4 payload 是 BF16 的
+这里的 P 是参数数量，$b_{w}$ 是每个参数的存储 bit 数，结果的单位是 byte。
+BF16 取 $b_{w}$=16，INT4 取 $b_{w}$=4。理想情况下，INT4 payload 是 BF16 的
 四分之一，但这个比例还没有计入 scale、zero point、对齐和未量化模块。
 
 实际 worker 的峰值工作集可以先写成：
@@ -126,9 +126,9 @@ M_{\mathrm{weight}}
 +M_{\mathrm{runtime}}
 ~~~
 
-M_weight 包含 payload、scale、metadata 和高精度保留层；M_KV 是活跃请求
-的历史状态；M_workspace 是 GEMM、attention 和编译 kernel 的临时空间；
-M_comm 是 tensor parallel 或 pipeline parallel 的通信 buffer；M_runtime
+$M_{\mathrm{weight}}$ 包含 payload、scale、metadata 和高精度保留层；$M_{\mathrm{KV}}$ 是活跃请求
+的历史状态；$M_{\mathrm{workspace}}$ 是 GEMM、attention 和编译 kernel 的临时空间；
+$M_{\mathrm{comm}}$ 是 tensor parallel 或 pipeline parallel 的通信 buffer；$M_{\mathrm{runtime}}$
 是框架和 allocator 的常驻开销。为了应对峰值抖动，还可以另记策略性预算：
 
 ~~~math
@@ -171,7 +171,7 @@ M_{\mathrm{INT4,payload}}
 
 ### 17.2.3 GPU 数量也不是简单除法
 
-设单卡显存为 C_gpu，实际允许给 worker 使用的比例为 u，则仅从容量得到
+设单卡显存为 $C_{\mathrm{gpu}}$，实际允许给 worker 使用的比例为 u，则仅从容量得到
 的最低卡数可以写成：
 
 ~~~math
@@ -183,7 +183,7 @@ N_{\mathrm{raw}}
 ~~~
 
 u 通常小于 1，因为要给 CUDA context、通信、碎片和峰值留空间；这里已经
-用 u 表示了余量。如果团队已经把明确的 M_reserve 加进 M_budget，就应改用：
+用 u 表示了余量。如果团队已经把明确的 $M_{\mathrm{reserve}}$ 加进 $M_{\mathrm{budget}}$，就应改用：
 
 ~~~math
 N_{\mathrm{raw,budget}}
@@ -193,9 +193,9 @@ N_{\mathrm{raw,budget}}
 \right\rceil
 ~~~
 
-两种口径只能选一种，不能同时给同一份账本加 headroom。N_raw 还没有考虑
+两种口径只能选一种，不能同时给同一份账本加 headroom。$N_{\mathrm{raw}}$ 还没有考虑
 tensor parallel 的可用 degree、节点拓扑、故障冗余、跨卡带宽和发布策略。
-INT4 把 M_weight 变小，只改变这个分式的一个组成部分。
+INT4 把 $M_{\mathrm{weight}}$ 变小，只改变这个分式的一个组成部分。
 
 ### 17.2.4 小白视角：为什么显存省了，速度可能没有翻倍
 
@@ -212,7 +212,7 @@ INT4 把 M_weight 变小，只改变这个分式的一个组成部分。
 
 ### 17.3.1 对称量化
 
-对一组浮点权重 w_i，对称量化可以抽象成：
+对一组浮点权重 $w_{i}$，对称量化可以抽象成：
 
 ~~~math
 q_{i}
@@ -227,7 +227,7 @@ q_{\max}
 \hat{w}_{i}=sq_{i}
 ~~~
 
-q_i 是存储的整数码，s 是 scale，q_min 和 q_max 是该格式允许的整数范围，
+$q_{i}$ 是存储的整数码，s 是 scale，$q_{\mathrm{min}}$ 和 $q_{\mathrm{max}}$ 是该格式允许的整数范围，
 hat{w}_i 是反量化后的近似值。二进制补码有符号 INT4 的整数码范围是
 [-8, 7]；但许多对称量化器为了让正负两侧幅值相同，会选择 [-7, 7]，把
 -8 留空。两种说法并不矛盾：前者是编码可表示的范围，后者是量化器选择使用
@@ -297,8 +297,8 @@ B_{\mathrm{group}}
 +b_{m}
 ~~~
 
-其中第一项是 INT4 payload，b_s 是 scale 字节数，b_z 是 zero point 字节数，
-b_m 是对齐或其他 metadata。平均每个参数的字节数为：
+其中第一项是 INT4 payload，$b_{s}$ 是 scale 字节数，$b_{z}$ 是 zero point 字节数，
+$b_{m}$ 是对齐或其他 metadata。平均每个参数的字节数为：
 
 ~~~math
 b_{\mathrm{param}}
@@ -352,7 +352,7 @@ PTQ 的典型链路是：
 
 逐元素 round-to-nearest（RTN）只看某个权重离哪个量化格点最近，不看这一格
 误差通过当前层输入后会不会显著改变输出。GPTQ 把目标改成校准输入上的层输出
-重建误差。对线性层 Y=WX，令 X 是收集到的输入激活，W_q 是量化矩阵：
+重建误差。对线性层 Y=WX，令 X 是收集到的输入激活，$W_{q}$ 是量化矩阵：
 
 ~~~math
 \mathcal{L}(W_{q})
@@ -366,8 +366,8 @@ H\approx 2XX^\top+\lambda I
 它不是整个语言模型任务损失对所有参数的 Hessian。lambda I 是阻尼项，用来
 避免校准样本不足或数值误差造成矩阵病态。
 
-每次把一个权重坐标 w_j 量化成 q_j 后，量化误差
-e_j=w_j-q_j 不会被丢在原地。GPTQ 根据逆 Hessian 把它分摊给尚未量化的坐标：
+每次把一个权重坐标 $w_{j}$ 量化成 $q_{j}$ 后，量化误差
+$e_{j}$=$w_{j}$-$q_{j}$ 不会被丢在原地。GPTQ 根据逆 Hessian 把它分摊给尚未量化的坐标：
 
 ~~~math
 w_{F}
@@ -390,7 +390,7 @@ H^{-1}=
 w_{1}=0.62,\quad q_{1}=0.42,\quad w_{2}=0.50
 ~~~
 
-此时 e_1=0.20，补偿后的第二个权重为
+此时 $e_{1}$=0.20，补偿后的第二个权重为
 0.50-0.20\times 0.8/1=0.34。若第二通道与第一通道在校准输入上的关系很弱，
 逆 Hessian 的非对角项接近 0，算法就不会把太多误差分给它。这个例子只演示
 局部更新，不意味着 GPTQ 能让每个样本的输出完全不变。
@@ -416,21 +416,21 @@ AWQ 先问“哪些权重误差会被当前输入放大”。对线性层 Y=XW�
 某个输入通道若经常乘上较大的激活，该通道的量化误差更容易影响输出。AWQ
 用校准激活的逐通道平均幅值估计这种敏感性，而不是只按权重绝对值挑异常项。
 
-如果 D_s 是输入通道的对角缩放矩阵，未量化时可以做等价变换：
+如果 $D_{s}$ 是输入通道的对角缩放矩阵，未量化时可以做等价变换：
 
 ~~~math
 XW=(XD_{s}^{-1})(D_{s}W)
 ~~~
 
 AWQ 把敏感通道对应的权重放大，再把激活反向缩小；浮点计算仍是同一个线性
-映射，但被量化的 D_sW 中这些权重相对 group scale 更容易获得细粒度表示。
+映射，但被量化的 $D_{\mathrm{sW}}$ 中这些权重相对 group scale 更容易获得细粒度表示。
 量化后两侧不再严格抵消，留下的误差由校准数据上的层输出误差来衡量。若缩放
 只照顾显著通道，也可能放大同一 group 内普通通道的误差，所以 AWQ 不会简单
 地把显著通道无限放大。
 
-论文把搜索范围限制为 s=s_X^alpha，其中 s_X 是逐输入通道的平均激活幅值，
+论文把搜索范围限制为 s=$s_{\mathrm{X}}$^alpha，其中 $s_{\mathrm{X}}$ 是逐输入通道的平均激活幅值，
 alpha 在 [0,1] 的小网格上搜索；目标是让量化层输出接近原层输出，并可再搜索
-weight clipping。D_s^{-1} 通常可以折入前一个算子，避免推理时多出独立缩放
+weight clipping。$D_{s}$^{-1} 通常可以折入前一个算子，避免推理时多出独立缩放
 操作。部署时目标仍是整组低比特权重；“保留 1% 权重为 FP16”是 AWQ 论文
 讨论重要权重时的动机和对照，不是 AWQ 主方法的必需执行路径。部分综述把
 AWQ 简写成保留 1% 高精度权重，谈具体算法时应以[AWQ 原论文](https://arxiv.org/html/2306.00978v6)
@@ -669,7 +669,7 @@ INT4 后在计算前恢复。权重 bit width、激活 bit width、KV dtype 和�
 ### 17.7.1 scale 存储也有成本
 
 假设每个 group 有 G 个权重，INT4 payload 每个参数占 0.5 byte，scale
-占 b_s byte，zero point 占 b_z byte，额外 metadata 占 b_m byte，则：
+占 $b_{s}$ byte，zero point 占 $b_{z}$ byte，额外 metadata 占 $b_{m}$ byte，则：
 
 ~~~math
 b_{\mathrm{avg}}
@@ -773,7 +773,7 @@ Q_{\mathrm{mixed},l}
 Q_{\mathrm{INT4}}
 ~~~
 
-Q_INT4 是全量化候选在一个任务切片上的分数，Q_mixed,l 是只把第 l 层
+$Q_{\mathrm{INT4}}$ 是全量化候选在一个任务切片上的分数，$Q_{\mathrm{mixed},l}$ 是只把第 l 层
 恢复到较高精度后的分数。解释 Delta_l 时要按指标方向统一口径：准确率类
 指标越高越好，PPL/错误率类指标越低越好。恢复后改善越明显，说明该层值得
 进一步检查；它不是跨模型通用的固定敏感层名单。
@@ -788,7 +788,7 @@ Q_{\mathrm{weighted}}
 \sum_{t=1}^{T}\alpha_{t}=1
 ~~~
 
-Q_t 是任务桶 t 的质量，alpha_t 是业务权重。这个分数适合观察总体趋势，
+$Q_{t}$ 是任务桶 t 的质量，$\alpha_{t}$ 是业务权重。这个分数适合观察总体趋势，
 但不能把安全、财务数字或工具副作用等高风险任务的失败用普通聊天的高分
 抵消。高风险切片应单独报告和单独决定。
 
@@ -866,9 +866,9 @@ v 遍历词表，p 可以是 BF16 基线分布，q 可以是 INT4 候选分布�
 
 ### 17.9.4 单位成功任务成本
 
-成本分子和成功率必须使用同一批原始请求作分母。令 C_all 是按候选策略处理
+成本分子和成功率必须使用同一批原始请求作分母。令 $C_{\mathrm{all}}$ 是按候选策略处理
 一个原始请求所产生的期望总成本，已经包含首次推理、所有重试、验证、fallback
-和人工复核；令 p_final 是这批原始请求最终成功的比例，则：
+和人工复核；令 $p_{\mathrm{final}}$ 是这批原始请求最终成功的比例，则：
 
 ~~~math
 C_{\mathrm{success}}
@@ -908,9 +908,9 @@ N_{\mathrm{network}}
 \right)
 ~~~
 
-这里 B_worker 是分配给单个 worker 的显存预算，M_weight 是常驻权重，M_fixed
-是 runtime、保留余量和固定 workspace；M_KV,req 与 M_workspace,req 是一个
-活跃请求带来的 KV 和增量 workspace 估算，N_scheduler 与 N_network 则是调度
+这里 $B_{\mathrm{worker}}$ 是分配给单个 worker 的显存预算，$M_{\mathrm{weight}}$ 是常驻权重，$M_{\mathrm{fixed}}$
+是 runtime、保留余量和固定 workspace；$M_{\mathrm{KV},\mathrm{req}}$ 与 $M_{\mathrm{workspace},\mathrm{req}}$ 是一个
+活跃请求带来的 KV 和增量 workspace 估算，$N_{\mathrm{scheduler}}$ 与 $N_{\mathrm{network}}$ 则是调度
 和网络上限。这个式子是线性近似：真实 workspace 可能随 batch、shape 和 kernel
 变化，KV 也要按请求长度/模型结构计算，最终值应由目标 runtime profile 校正。
 
@@ -1310,7 +1310,7 @@ bf16_min_cards 和 int4_min_cards 是按 85% 可用显存得到的容量下界�
 
 还可以单独观察容量门槛。只把 `common_memory` 中的 KV 从 20 GiB 改为 60 GiB，
 INT4 总账便从 165 GiB 增到 205 GiB；$205/68\approx 3.015$，向上取整后卡数下界从
-3 变为 4，$\mathrm{int4}_{\mathrm{min}}_\mathrm{cards} \lt  4$ 不再成立，拓扑复核动作会消失。代码质量仍低于
+3 变为 4，`int4_min_cards < 4` 不再成立，拓扑复核动作会消失。代码质量仍低于
 门槛时，`retain_high_precision_for:code_json` 仍然保留。这个演算说明容量结果会
 随 KV 预算变化，而质量门禁独立存在；它也提醒读者，释放权重空间可能被更大的
 活动 KV 需求占用，不能把容量余量直接算成可售并发。

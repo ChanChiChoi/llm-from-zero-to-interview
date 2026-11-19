@@ -56,3 +56,10 @@
 - 加细 GRPO 的 token ratio 与 clipped objective、GSPO 的序列 ratio 与序列级裁剪、DAPO 的动态采样和 token 级 loss、DCPO 的历史优势平滑、动态裁剪与 OTM 走查，让例子能接上各自伪代码的更新阶段。
 - 进一步核对原论文：DAPO 的正确性 reward 刻度、动态采样、token-level loss 与 soft overlong shaping；GSPO 的长度归一化序列 importance ratio；DCPO 的动态边界、平滑优势与 OTM。相关数值均标为教学设定，论文结果只限其公开的模型和评测协议。
 - 本轮仍只改第十一章 §4–§9 及本进度记录；§3 PPO-RLHF 和第 17 节 demo 保持原样。
+
+## 本轮统一 §4–§9 伪代码形式（2026-11-19）
+
+- 按读者反馈，将 DPO、SimPO、GRPO、GSPO、DAPO、DCPO 六个独立算法的伪代码统一改成 PPO-RLHF 的函数调用风格，并将代码围栏标为 `python` 以显示缩进、循环和调用关系。
+- 为偏好打分、组内 advantage、token/sequence ratio、动态采样、动态 clipping 与 OTM 等核心调用补充 `【核心】` 注释；其余注释说明输入约定、mask、评分器、终止/截断或不训练额外模型等要点。
+- 保留每个算法自己的完整例子、变量语义和原有正文解释；不改 §3 PPO-RLHF、数学公式、研究结论或第 17 节 demo。伪代码仍是机制骨架，不声明为可执行实现。
+- 静态检查 `git diff --check`、Markdown 围栏和公式/链接边界；未运行测试或 PDF 构建。
