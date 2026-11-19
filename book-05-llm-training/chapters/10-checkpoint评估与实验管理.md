@@ -30,7 +30,7 @@ e=
 其中 $c$ 是代码版本， $d$ 是数据版本， $m$ 是模型和 tokenizer 配置， $h$ 是训练超参和硬件环境， $a$ 是 checkpoint artifact， $r$ 是评估结果。实验结论是否值得采信，取决于这些对象之间能否追溯和对齐，而不是取决于一个单独的总分。
 
 ```math
-E_evidence=(E_ckpt,E_eval,E_repro,E_compare,E_safety)
+E_{\mathrm{evidence}}=(E_{\mathrm{ckpt}},E_{\mathrm{eval}},E_{\mathrm{repro}},E_{\mathrm{compare}},E_{\mathrm{safety}})
 ```
 
 这五个分量分别描述 checkpoint 完整性、评估覆盖、记录可复现性、对比公平性以及安全/回归风险。某一项不足时，结论的适用范围应随之收窄；例如 benchmark 分数可以报告，但不能把它解释成完整能力提升。
@@ -170,11 +170,11 @@ R_{\mathrm{save}}=
 
 “sharded”描述的是存储布局，不等于“不能换并行规模”。有的格式保存了全局参数名和分片元数据，允许加载端重新切分；有的格式与当前 world size 或参数分片方式绑定，换机器数后需要转换。评估一个格式时，要把保存端和加载端的 world size、参数命名、dtype、词表大小以及 optimizer state 的布局一起记录。
 
-设模型参数量为 $P$，权重每个参数占 $b_w$ 字节，则推理权重大小近似为：
+设模型参数量为 $P$，权重每个参数占 $b_{w}$ 字节，则推理权重大小近似为：
 
 ```math
 M_{\mathrm{eval}}=
-Pb_w+M_{\mathrm{meta}}
+Pb_{w}+M_{\mathrm{meta}}
 ```
 
 如果训练恢复还保存梯度、AdamW 一阶/二阶状态和 master weights，恢复 checkpoint 可以粗略估成：
@@ -182,7 +182,7 @@ Pb_w+M_{\mathrm{meta}}
 ```math
 M_{\mathrm{resume}}
 \approx
-P(b_w+b_g+b_m+b_v+b_{\mathrm{master}})
+P(b_{w}+b_{g}+b_{m}+b_{v}+b_{\mathrm{master}})
 +M_{\mathrm{meta}}
 ```
 
@@ -230,7 +230,7 @@ global step 和 token count 正确
 恢复后要做连续性检查。设恢复前最后一个健康日志为 `-`，恢复后第一个日志为 `+`：
 
 ```math
-\delta_L=
+\delta_{L}=
 \frac{|L^+-L^-|}{L^-}
 ```
 
@@ -256,10 +256,10 @@ global step 和 token count 正确
 
 ```math
 R_{\mathrm{resume}}=
-(\delta_L,\delta_{\eta},\delta_{\mathrm{step}},\delta_{\mathrm{tok}})
+(\delta_{L},\delta_{\eta},\delta_{\mathrm{step}},\delta_{\mathrm{tok}})
 ```
 
-这个向量比一个真假值更有信息。 $\delta_L$ 较大，可能指向数据 batch、loss mask 或 optimizer state； $\delta_{\eta}$ 异常，优先检查 scheduler 的 step 口径； $\delta_{\mathrm{step}}$ 或 $\delta_{\mathrm{tok}}$ 异常，则要检查 global step、gradient accumulation 和 data cursor。阈值 $\tau_L$、 $\tau_{\eta}$ 只能作为当前实验的比较尺度，不能被当成所有模型都适用的固定常数。
+这个向量比一个真假值更有信息。 $\delta_{L}$ 较大，可能指向数据 batch、loss mask 或 optimizer state； $\delta_{\eta}$ 异常，优先检查 scheduler 的 step 口径； $\delta_{\mathrm{step}}$ 或 $\delta_{\mathrm{tok}}$ 异常，则要检查 global step、gradient accumulation 和 data cursor。阈值 $\tau_{L}$、 $\tau_{\eta}$ 只能作为当前实验的比较尺度，不能被当成所有模型都适用的固定常数。
 
 相对偏差要求用于分母的 $L^-$、 $\eta^-$ 和 $B_{\mathrm{tok}}^+$ 都严格大于 0，且比较值有限。loss 恰为 0、初始学习率为 0 或恢复后没有有效 token 的情形，应分别报告绝对差、调度阶段或 `not_applicable`，而不是在分母加 $\epsilon$ 把“没有可比基线”伪装成一个稳定的小偏差。
 
@@ -269,7 +269,7 @@ R_{\mathrm{resume}}=
 
 以 PyTorch 2.15 的 Distributed Checkpoint（DCP）为例，分布式保存/读取接口处理各 rank 的本地分片和状态字典；应用仍要为自己的训练数据游标、配置 manifest 和版本发布定义完整性条件。`async_save` 把状态先 staging 到默认的 CPU 存储，再由后台线程执行保存；返回结果区分本地 staging 完成与 checkpoint 存储写入完成。前者意味着训练状态已有一份可继续写入的快照，后者才表示本次保存完成，应用应在后者成功后再把版本指针发布给读取者。异步 staging 会占用 CPU 或 pinned memory，多个未完成的写入会增加排队状态和内存压力；因此要同时记录 staging 与写入完成状态，并限制在途保存数。PyTorch 2.15 文档还明确说明，DCP 保存的 state dict 不保证跨 PyTorch 版本向后兼容。DCP 管理自己的保存/读取流程，但不会替应用提交对象存储事务或保证自定义 manifest 的原子发布；这些边界要按具体后端和版本进行恢复演练。[PyTorch 2.15 DCP 文档](https://docs.pytorch.org/docs/2.15/distributed.checkpoint.html)；[异步保存教程](https://docs.pytorch.org/tutorials/recipes/distributed_async_checkpoint_recipe.html)。
 
-可以用一组数值输入理解恢复探针。设中断前 $L^- = 2.00$、 $\eta^- = 3\times10^{-4}$、 $s^- = 10,000$、 $T^- = 50.000B$；恢复后第一步记录 $L^+ = 2.04$、相同学习率、 $s^+ = 10,001$、 $T^+ = 50.004B$，本步按 batch 预期消费 0.004B（4M）token。则 $\delta_L=|2.04−2.00|/2.00=0.02$，学习率偏差为 0，step 偏差为 $|(10,001−10,000)−1|=0$，token 偏差为 $|(0.004−0.004)|/0.004=0$。若本项目预先设定 $\tau_L=0.03$，这组观测通过这些探针；阈值只是本例的决策设置，不是通用常数。若实际 token 增量只有 0.0035B，则 $\delta_{\mathrm{tok}}=|0.0035−0.004|/0.004=0.125$，即 12.5%，应先检查 batch 计数和数据游标，而不是把它当作普通浮点噪声。
+可以用一组数值输入理解恢复探针。设中断前 $L^- = 2.00$、 $\eta^- = 3\times10^{-4}$、 $s^- = 10,000$、 $T^- = 50.000B$；恢复后第一步记录 $L^+ = 2.04$、相同学习率、 $s^+ = 10,001$、 $T^+ = 50.004B$，本步按 batch 预期消费 0.004B（4M）token。则 $\delta_{L}=|2.04−2.00|/2.00=0.02$，学习率偏差为 0，step 偏差为 $|(10,001−10,000)−1|=0$，token 偏差为 $|(0.004−0.004)|/0.004=0$。若本项目预先设定 $\tau_{L}=0.03$，这组观测通过这些探针；阈值只是本例的决策设置，不是通用常数。若实际 token 增量只有 0.0035B，则 $\delta_{\mathrm{tok}}=|0.0035−0.004|/0.004=0.125$，即 12.5%，应先检查 batch 计数和数据游标，而不是把它当作普通浮点噪声。
 
 因此，说明 checkpoint 恢复时，不能只停留在“调用 `load_state_dict`”。完整流程应先验证 artifact 和版本，再恢复所有训练状态，最后用 loss、学习率、step、token 增量和数据游标做一个短探针；如果某一项偏离，就根据偏差类型定位，而不是盲目继续训练。
 
@@ -315,9 +315,9 @@ perplexity = exp(loss)
 L_{\mathrm{val}}=
 -
 \frac{
-\sum_i\sum_t m_{i,t}\log p_{\theta}(x_{i,t}\mid x_{i,1,\ldots,t-1})
+\sum_{i}\sum_{t} m_{i,t}\log p_{\theta}(x_{i,t}\mid x_{i,1,\ldots,t-1})
 }{
-\sum_i\sum_t m_{i,t}
+\sum_{i}\sum_{t} m_{i,t}
 }
 ```
 
@@ -330,7 +330,7 @@ PPL=
 
 手算一个只有两个有效目标 token 的构造例。若模型给真实 token 的概率分别为 $1/2$ 和 $1/4$，mask 为 `[1,1,0]`（第三个位置不计入），则有效 token 平均交叉熵为 $L=−(\ln(1/2)+\ln(1/4))/2=(\ln 2+\ln 4)/2\approx(0.6931+1.3863)/2=1.0397$ nat。于是 $PPL=\exp(1.0397)=\sqrt{8}\approx2.83$。分母是 2 个有效目标，不是 3 个位置；这个小例只说明定义中的计算，不能拿来比较不同 tokenizer 或数据分布。
 
-固定长度模型还要明确 stride（滑动窗口步长）。设最大上下文为 4，待评估序列为 $x_1,\ldots,x_7$，使用 $stride=2$ 的窗口 $[x_1,x_2,x_3,x_4]$、 $[x_3,x_4,x_5,x_6]$、 $[x_5,x_6,x_7]$。第一窗计分 $x_2,x_3,x_4$ 三个目标；第二窗把重叠前缀 $x3,x4$ 的 label mask 掉，只计新目标 $x5,x6$；第三窗 mask 掉 $x5,x6$，只计 $x_7$。最终共计 $3+2+1=6$ 个目标且每个只出现一次。若改成互不重叠的 4-token 窗口，第二窗开头 $x_5$ 没有左侧上下文，常见因果计分方式会漏掉它，只剩 5 个目标。stride 改变上下文与被计分 token 的组合，因此两条 PPL 曲线只有在窗口、mask 和分母口径一致时才可比较；固定长度模型的具体示例见[官方 PPL 说明](https://huggingface.co/docs/transformers/perplexity)。
+固定长度模型还要明确 stride（滑动窗口步长）。设最大上下文为 4，待评估序列为 $x_{1},\ldots,x_{7}$，使用 $stride=2$ 的窗口 $[x_{1},x_{2},x_{3},x_{4}]$、 $[x_{3},x_{4},x_{5},x_{6}]$、 $[x_{5},x_{6},x_{7}]$。第一窗计分 $x_{2},x_{3},x_{4}$ 三个目标；第二窗把重叠前缀 $x3,x4$ 的 label mask 掉，只计新目标 $x5,x6$；第三窗 mask 掉 $x5,x6$，只计 $x_{7}$。最终共计 $3+2+1=6$ 个目标且每个只出现一次。若改成互不重叠的 4-token 窗口，第二窗开头 $x_{5}$ 没有左侧上下文，常见因果计分方式会漏掉它，只剩 5 个目标。stride 改变上下文与被计分 token 的组合，因此两条 PPL 曲线只有在窗口、mask 和分母口径一致时才可比较；固定长度模型的具体示例见[官方 PPL 说明](https://huggingface.co/docs/transformers/perplexity)。
 
 loss 越低，perplexity 越低，说明模型对验证集 token 的预测越好。这里的“更好”只针对给定 tokenizer、给定数据分布和给定预测目标；它不是对模型全部能力的排序。
 
@@ -371,15 +371,15 @@ Perplexity 还受 tokenizer 的切分粒度影响。同一段文本被切成更�
 
 domain 划分也要保持稳定。若一次实验把“代码注释”放进 general，另一次把它放进 code，曲线变化可能只是分类规则变化。比较时应保存 domain 定义、样本清单或稳定的哈希抽样规则，并记录每个桶的有效 token 数。
 
-设验证集按 domain 分成 $D_k$，每个 domain 的 loss 为：
+设验证集按 domain 分成 $D_{k}$，每个 domain 的 loss 为：
 
 ```math
-L_k=
+L_{k}=
 -
 \frac{
-\sum_{(i,t)\in D_k}m_{i,t}\log p_{\theta}(x_{i,t}\mid x_{i,1,\ldots,t-1})
+\sum_{(i,t)\in D_{k}}m_{i,t}\log p_{\theta}(x_{i,t}\mid x_{i,1,\ldots,t-1})
 }{
-\sum_{(i,t)\in D_k}m_{i,t}
+\sum_{(i,t)\in D_{k}}m_{i,t}
 }
 ```
 
@@ -387,18 +387,18 @@ L_k=
 
 ```math
 L_{\mathrm{all}}=
-\sum_k w_kL_k
+\sum_{k} w_{k}L_{k}
 ```
 
-其中 $w_k$ 来自各 domain 的有效 token 占比。checkpoint 对比时，不仅要看 $L_{\mathrm{all}}$ 是否下降，也要看是否存在：
+其中 $w_{k}$ 来自各 domain 的有效 token 占比。checkpoint 对比时，不仅要看 $L_{\mathrm{all}}$ 是否下降，也要看是否存在：
 
 ```math
-L_k^{new}-L_k^{old}>\tau_k
+L_{k}^{new}-L_{k}^{old}>\tau_{k}
 ```
 
 这类 domain regression。
 
-每个 domain 的有效 token 分母都必须大于 0，权重满足 $w_k\ge0$ 且 $\sum_k w_k=1$。空 domain 应从本次聚合中排除并记录为未评估，而不是以零 loss 参与平均；否则只改变切分或过滤规则就能人为降低总 loss。
+每个 domain 的有效 token 分母都必须大于 0，权重满足 $w_{k}\ge0$ 且 $\sum_{k} w_{k}=1$。空 domain 应从本次聚合中排除并记录为未评估，而不是以零 loss 参与平均；否则只改变切分或过滤规则就能人为降低总 loss。
 
 例如 general domain 有 80 个有效 token、平均 loss 为 2.0；code domain 有 20 个有效 token、平均 loss 为 3.0。按有效 token 聚合得到 $L_{\mathrm{all}}=(80\times2.0+20\times3.0)/(80+20)=220/100=2.2$，权重分别为 0.8 和 0.2。若错误地把两个 domain 均值等权平均，会得到 2.5；那回答的是“每个 domain 权重相同”的另一个问题，不是这 100 个 token 的整体平均。选择哪一种聚合必须在实验间保持一致并写明。
 
@@ -491,25 +491,25 @@ Regression eval 的目标是发现：
 
 这类样本可以叫 lost cases 或回归样本。
 
-设旧模型正确标记为 $z_i^{old}$，新模型正确标记为 $z_i^{new}$，回归率可以写成：
+设旧模型正确标记为 $z_{i}^{old}$，新模型正确标记为 $z_{i}^{new}$，回归率可以写成：
 
 ```math
 R_{\mathrm{reg}}=
 \frac{
-\sum_i \mathbf{1}[z_i^{old}=1]\mathbf{1}[z_i^{new}=0]
+\sum_{i} \mathbf{1}[z_{i}^{old}=1]\mathbf{1}[z_{i}^{new}=0]
 }{
-\sum_i \mathbf{1}[z_i^{old}=1]
+\sum_{i} \mathbf{1}[z_{i}^{old}=1]
 }
 ```
 
-如果样本带业务权重 $w_i$，高风险回归率可以写成：
+如果样本带业务权重 $w_{i}$，高风险回归率可以写成：
 
 ```math
 R_{\mathrm{reg,w}}=
 \frac{
-\sum_i w_i\mathbf{1}[z_i^{old}=1]\mathbf{1}[z_i^{new}=0]
+\sum_{i} w_{i}\mathbf{1}[z_{i}^{old}=1]\mathbf{1}[z_{i}^{new}=0]
 }{
-\sum_i w_i\mathbf{1}[z_i^{old}=1]
+\sum_{i} w_{i}\mathbf{1}[z_{i}^{old}=1]
 }
 ```
 
@@ -584,7 +584,7 @@ $C_{\mathrm{repro}}$ 只是记录覆盖率：它等于 1，仍不等于重新运
 
 对于 loss、吞吐、benchmark 分数等指标，允许的偏差应分别定义，并说明数据顺序、硬件、随机性和评估脚本是否一致。这样，“可复现”才同时包含可取得的材料和重新运行后的证据，而不是一个没有定义的完整标记。
 
-$\Delta_j$ 也只有在同一指标定义、同一单位和两个有限数值下才可比较，缺失 artifact 或不可比评估脚本应作为限制单列，而不是赋予零偏差。
+$\Delta_{j}$ 也只有在同一指标定义、同一单位和两个有限数值下才可比较，缺失 artifact 或不可比评估脚本应作为限制单列，而不是赋予零偏差。
 
 实验管理的核心也由此变得清楚：让别人能够取得同一组输入和 artifact，知道每次变化来自哪一个版本，并能判断复现实验与原实验的差异是否在合理范围内。
 
@@ -679,20 +679,20 @@ final_v2
 4. 只看一个 benchmark。
 5. 没有统计波动和多次实验。
 
-如果两个实验配置分别是 $h_A$ 和 $h_B$，想验证的变量集合是 $V$，公平对比要求除 $V$ 外的关键字段一致：
+如果两个实验配置分别是 $h_{A}$ 和 $h_{B}$，想验证的变量集合是 $V$，公平对比要求除 $V$ 外的关键字段一致：
 
 ```math
 D_{\mathrm{diff}}=
-\{u\mid h_A(u)\ne h_B(u),u\notin V\}
+\{u\mid h_{A}(u)\ne h_{B}(u),u\notin V\}
 ```
 
 ```math
 \Delta_{\mathrm{compare}}=
-\left(D_{\mathrm{diff}},\left|T_A-T_B\right|,
-\mathbf{1}[E_A\ne E_B]\right)
+\left(D_{\mathrm{diff}},\left|T_{A}-T_{B}\right|,
+\mathbf{1}[E_{A}\ne E_{B}]\right)
 ```
 
-其中 $T_A/T_B$ 是训练 token 数， $E_A/E_B$ 是评估集和评估脚本版本。 $\Delta_{\mathrm{compare}}$ 把对比中最容易被忽略的三类差异显式列出来：未列入研究变量的配置差异、训练量差异和评估定义差异。真实实验中很难做到所有变量完全一致，但至少要把差异记录清楚，不能把多变量变化包装成单变量结论。比如数据版本变化通常比学习率变化更可能改变结果，却最容易被一个“lr sweep”标题掩盖。
+其中 $T_{A}/T_{B}$ 是训练 token 数， $E_{A}/E_{B}$ 是评估集和评估脚本版本。 $\Delta_{\mathrm{compare}}$ 把对比中最容易被忽略的三类差异显式列出来：未列入研究变量的配置差异、训练量差异和评估定义差异。真实实验中很难做到所有变量完全一致，但至少要把差异记录清楚，不能把多变量变化包装成单变量结论。比如数据版本变化通常比学习率变化更可能改变结果，却最容易被一个“lr sweep”标题掩盖。
 
 所以，比较两个实验时，最重要的不是把结果表格做得很大，而是先写清楚反事实问题：如果只改变 $V$，结果是否仍然发生同样方向的变化？对照越接近这个问题，结论越有解释力。
 

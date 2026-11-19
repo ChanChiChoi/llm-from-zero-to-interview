@@ -246,17 +246,17 @@
 31E. 结合第 21 册第 21 章，给定 12 个 token、8 个 experts、top-2 routing 和 capacity factor 1.25，手算 balanced routing 与 collapsed routing 的 expert counts、capacity、overflow assignments 和 load ratio；区分超额 assignment 数与受影响的唯一 token 数。
 31F. 令输入向量为 $x=[1,3]$、缩放参数为 $\gamma=[1,1]$、LayerNorm 偏移为 $\beta=[0,0]$；忽略 $\epsilon$，手算 LayerNorm 和 RMSNorm 的结果，并解释为什么两者输出不同。
 31G. 写出 Pre-LN 与 Post-LN 的 block 方程，比较它们的局部 Jacobian；结合 [Xiong 等人的分析](https://arxiv.org/abs/2002.04745)，说明 warmup 证据支持什么、不能推出什么，再概述 Admin、NormFormer、DeepNorm 和 Peri-LN 分别调整了哪部分。区分 Kim 等人 2025 年对 Peri-LN 的命名与实验，以及 Kan 等人 2026 年的后续稳定性分析。
-31H. 运行第 21 册第 7 章的 Position Encoding 审计 demo，解释为什么 `score_2_5` 和 `score_10_13` 相等、`key_2` 的 ALiBi bias 更负，以及 position gate 为什么失败。
-31I. 给定 `cache_len=128`、新 token position ids `[0,1,2]`、训练上下文 4096、目标上下文 32768，写出 position id audit 应该报出的风险，并说明如何修正。
-31J. 运行第 21 册第 8 章的 Mask 可见性审计 demo，解释 `prefix_counts`、`plain_causal_packing_leak`、`block_diag_packing_leak` 和 `mask_gate_pass` 分别说明什么。
-31K. 手画 prefix 长度为 2、target 长度为 4 的 Prefix LM mask，并说明哪些位置如果错误可见会造成未来泄漏。
+31H. 假设只看一个 RoPE 二维子空间，频率为 $\omega=\pi/4$，未旋转的 query 和 key 都是 $[1,0]$。分别计算 positions $(2,5)$、$(10,13)$ 和 $(2,6)$ 的点积，并说明这些结果能证明 RoPE 的哪条代数性质、不能证明长上下文中的什么能力。再令 ALiBi 的斜率 $m=1/8$、query position 为 $7$、key positions 为 $6$ 和 $2$；计算两个 bias，并在内容分数相同的假设下比较 softmax 权重比。
+31I. 假设某个 decode 路径使用连续递增的绝对 position ids，给定 `cache_len=128`、新 token position ids `[0,1,2]`、训练上下文 4096、目标上下文 32768。指出 cache 续接处的编号不一致，并写出通常应使用的位置序列；再说明目标长度超过训练范围时，还需要查哪些扩展配置和任务证据，为什么不能仅凭修改窗口字段宣布能力成立。
+31J. 对照第 21 册第 8 章，分别画出连续文本流的 causal mask 与两条独立样本的 packed causal mask。指出哪些可见边会造成未来读取或跨样本读取，并检查 shifted label 是否把一条样本末尾错误地配成下一条样本的目标；说明 EOS 为什么不能单独建立 attention 边界。
+31K. 手画 prefix 长度为 2、target 长度为 4 的 Prefix LM 可见矩阵，逐行说明可读取的位置；再说明这个矩阵本身没有规定哪些 token 是训练目标或如何计算 loss。
 31L. 运行第 21 册第 9 章的并行与 Scaling 审计 demo，解释 `arch_cost`、`loss_best`、`ready_best` 和 `scaling_gate_pass` 分别说明什么。
 31M. 给定固定训练 FLOPs 预算，列出 3 个不同参数量 / token 数候选，并判断哪个候选可能 undertrained、哪个 serving pressure 最高。
 31N. 运行第 21 册第 10 章的 Attention 成本审计 demo，解释 `short_vs_long_pair_multiplier`、`full_32k_score_tensor_gib`、`prefill_32k_tflops_per_layer`、`decode_one_step_32k_tflops_per_layer` 和 `attention_cost_gate_pass` 分别说明什么。
 31O. 给定 `B=1`、`H=32`、`T=32768`、`D_h=128` 和 fp16，手算 full score tensor、score+prob tensor、causal visible score tensor 的显存，并解释为什么 causal mask 不能根治平方瓶颈。
 31P. 运行第 21 册第 11 章的 KV Cache 成本审计 demo，解释 `mha_8k_cache_gib`、`gqa_8k_cache_gib`、`gqa_cache_per_token_kib`、`decode_read_gib_per_step`、`paged_waste_ratio` 和 `kv_cache_gate_pass` 分别说明什么。
 31Q. 给定 `L=32`、`B=16`、`T=8192`、`H_q=32`、`H_kv=8`、`D_h=128`、fp16，手算 GQA KV cache 显存，并说明把 `H_kv` 降到 4 可能带来哪些质量和工程风险。
-32. 比较 causal mask 和 padding mask。
+32. 比较 attention visibility、padding validity、loss mask 与独立样本边界的职责；说明一个 prompt token 为什么可以被读取却不计入 assistant-only loss。
 33. 用自己的话解释 GPT 和 BERT 的训练目标区别。
 34. 画出 decoder-only Transformer block 的数据流。
 35. 写出 Pre-LN block 的两行核心公式。

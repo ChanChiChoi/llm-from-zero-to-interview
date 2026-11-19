@@ -1286,7 +1286,9 @@ Relative Position Bias：相对位置偏置
 
 Rotary Position Embedding / RoPE：旋转位置编码
 
-ALiBi / Attention with Linear Biases：线性注意力偏置
+ALiBi / Attention with Linear Biases：距离相关的线性注意力偏置
+
+Permutation Equivariance：置换等变性；无位置线索和位置相关 mask 时，输入 token 行置换后，self-attention 输出以相同置换变换。
 
 Position Interpolation：位置插值
 
@@ -1297,8 +1299,6 @@ YaRN：RoPE 上下文扩展方法；按波长对不同频率做分段/平滑插�
 LongRoPE：长距离 RoPE 扩展方法；搜索维度相关的非均匀插值因子并分阶段延长上下文，同时单独评估短上下文恢复。
 
 Position ID Audit：位置编号审计
-
-Position Encoding Gate：位置编码门禁
 
 Attention Mask：注意力掩码
 
@@ -1312,15 +1312,15 @@ Encoder-Decoder Attention：编码器-解码器注意力
 
 Cross-Attention：交叉注意力
 
-Packed Sequence Mask：拼接样本掩码
+Packed Sequence Mask：拼接序列的可见性掩码；只有在各段代表互相独立样本时才需阻断段间读取，连续文本流可能有意保留跨段上下文。
 
-Block-Diagonal Causal Mask：块对角因果掩码
+Independent-Sample Boundary：独立样本边界；规定拼接样本之间不共享上下文，并需另行检查 shifted-label 是否跨边界配对。
+
+Block-Diagonal Causal Mask：块对角因果掩码；各独立样本块内因果可见、块间不可见，适用于独立样本语义。
 
 Sliding Window Attention：滑动窗口注意力
 
 Mask Visibility Audit：掩码可见性审计
-
-Mask Gate：掩码门禁
 
 Parallel Path Length：并行路径长度 / 信息路径长度
 

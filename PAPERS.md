@@ -125,7 +125,7 @@ Transformer 核心机制入口：
 - [Pre-training under infinite compute](https://proceedings.iclr.cc/paper_files/paper/2026/hash/79682ef54677a2cb3dfb8383b372037f-Abstract-Conference.html)、[Pretraining Scaling Laws for Generative Evaluations of Language Models](https://proceedings.iclr.cc/paper_files/paper/2026/hash/55d7fbeddfd9bb6dace146cc4fa02ff0-Abstract-Conference.html) 与 [How Text Quality Interventions Reshape Neural Scaling Laws for LLMs: Empirical Study](https://proceedings.iclr.cc/paper_files/paper/2026/hash/6544c0b53cc1ea51d0c7086b536830a8-Abstract-Conference.html)：分别扩展固定数据/重复训练、生成式 pass@k 评估和数据质量干预下的 scaling 问题；结论仍受作者拟合形式、任务和实验范围约束。
 
 1. [Attention Is All You Need](https://arxiv.org/abs/1706.03762)：scaled dot-product attention、多头结构和正弦位置编码。
-2. [BERT](https://arxiv.org/abs/1810.04805)：WordPiece、双向 encoder、MLM 与 NSP 的代表性实例；可对照 [RoBERTa](https://arxiv.org/abs/1907.11692) 看预训练数据量、动态 masking、NSP 和训练预算等因素如何共同改变结果；再读 [GPT 原始预训练报告](https://cdn.openai.com/research-covers/language-unsupervised/language_understanding_paper.pdf)，比较 decoder-only 的无监督预训练与 BERT 的双向编码目标。
+2. [BERT](https://arxiv.org/abs/1810.04805)：WordPiece、双向 encoder、MLM 与 NSP 的代表性实例；可对照 [RoBERTa](https://arxiv.org/abs/1907.11692) 看预训练数据量、动态 masking、NSP 和训练预算等因素如何共同改变结果；再读 [GPT 原始预训练报告](https://cdn.openai.com/research-covers/language-unsupervised/language_understanding_paper.pdf)，比较 decoder-only 的语言模型目标与 BERT 的双向编码目标。要区分可见性与预训练目标，可继续读 [UniLM](https://proceedings.neurips.cc/paper/2019/file/c20bb2d9a50d5ac1f713f8b34d9aac5a-Paper.pdf) 的多种 mask 模式和 [BART](https://aclanthology.org/2020.acl-main.703.pdf) 的双向 encoder/自回归 decoder 去噪方案；单看 mask 不能确定监督目标。
 3. [SentencePiece](https://arxiv.org/abs/1808.06226)：从原始文本训练子词模型的 tokenizer 工具与模型入口。
 4. [RoFormer](https://arxiv.org/abs/2104.09864)：RoPE 的旋转位置机制。
 5. [ALiBi](https://arxiv.org/abs/2108.12409)：在 attention 分数中加入距离相关线性 bias 的位置方案。
@@ -133,7 +133,7 @@ Transformer 核心机制入口：
 7. [Fast Transformer Decoding: One Write-Head is All You Need](https://arxiv.org/abs/1911.02150) 与 [GQA](https://aclanthology.org/2023.emnlp-main.298/)：MQA 的增量解码带宽动机，以及从 MHA checkpoint 通过组内 K/V mean pooling 和 uptraining 转到 GQA 的方法；前者结果绑定论文模型、任务和 TPU 设置，后者实验限于 T5 encoder-decoder，不能外推为通用质量或延迟保证。
 8. [Lost in the Middle](https://arxiv.org/abs/2307.03172)：长上下文中信息位置效应的研究实例。
 9. [Layer Normalization](https://arxiv.org/abs/1607.06450)、[ScaleNorm](https://arxiv.org/abs/1910.05895) 与 [GeLU](https://arxiv.org/abs/1606.08415)：归一化和激活的原始定义及实验范围。
-10. [Position Interpolation](https://arxiv.org/abs/2306.15595) 与 [YaRN](https://arxiv.org/abs/2309.00071)：RoPE 上下文扩展的代表性训练方案；结果受模型、训练预算和评测任务约束。
+10. [Shaw 等人的相对位置表示](https://aclanthology.org/N18-2074/)、[T5](https://arxiv.org/html/1910.10683v4) 的分桶 relative bias、[Position Interpolation](https://arxiv.org/abs/2306.15595) 与 [YaRN](https://arxiv.org/abs/2309.00071)：分别对照相对向量、标量偏置和 RoPE 长度扩展；结果受任务、模型、训练预算与评测口径约束。
 11. [PagedAttention](https://arxiv.org/abs/2309.06180)：KV block 分配、缓存共享和 vLLM serving 系统。
 12. [Switch Transformers](https://arxiv.org/abs/2101.03961) 与 [ST-MoE](https://arxiv.org/abs/2202.08906)：top-1 路由、capacity、token dropping 和 router z-loss。
 13. [LongRoPE](https://arxiv.org/abs/2402.13753)：非均匀位置插值搜索、分阶段扩展到超长上下文和短上下文恢复；2M 是论文设置中的结果，不是通用有效上下文承诺。

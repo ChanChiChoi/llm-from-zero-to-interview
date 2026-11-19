@@ -40,3 +40,19 @@
 - **代码：** 第 17 节已经验证的分析 demo 及说明原样保留。
 - **联网核验：** 对照 PPO、InstructGPT、DPO、DeepSeekMath、SimPO、DAPO、DrGRPO、GSPO、DCPO、DHPO、DeepSeek-R1 的原始论文，以及 GLM-5.3、gpt-oss、Grok 4.7 官方披露；补核 GAPO 已收录 EMNLP 2026 主会的 ACL Anthology 正式记录。新增来源证据写入 research/rlhf-preference-and-policy-optimization-2026.md。
 - **验收：** 检查章节标题、公式块、围栏、链接和补丁空白；本轮不运行测试或 PDF 构建。
+
+
+## 2026-11-19：按独立算法重做第 4–9 节的讲解路径
+
+- 根据读者反馈，撤回让 DPO、SimPO、GRPO、GSPO、DAPO、DCPO 共用“3/4 + 1/4”例子的组织方式。前面的反馈概念与 PPO-RLHF 继续沿用分数题；第 4–9 节每个算法各用不同任务，避免用单一玩具例子承载不同机制。
+- 六节都改为“问题/目的 → 算法伪代码 → 按伪代码走一遍本算法专属完整例子 → 适用场景与优缺点”。伪代码定义输入、状态、核心操作和输出；例子继续追踪数据、reward、ratio、advantage 或状态变化，不以一组孤立数字代替算法 walkthrough。
+- DPO 使用临时加班回复偏好对；SimPO 使用缓存解释及长度平均 log probability；GRPO 使用保持顺序去重的代码与单测；GSPO 使用值班回滚说明并计算序列级 ratio；DAPO 使用 1 到 100 求和来走动态采样、Clip-Higher、token loss reduction 与长度处理；DCPO 使用 19×21 来走历史 advantage、动态 clipping 和 OTM。
+- 根据 DCPO 原论文补齐 OTM loss 的 response 内 token mean 解释，并修正 advantage 平滑说明：统计来自同一 prompt 的当前与累计 reward，平滑后选择绝对值较小的候选；论文 objective 不含 PPO-RLHF 的 reference KL 项。教学数值明确标注为假设，不冒充论文默认参数。
+- 联网对照 DPO、SimPO、DeepSeekMath/GRPO、GSPO、DAPO、DCPO 原始论文；沿用 research/rlhf-preference-and-policy-optimization-2026.md 中已有的机制与证据边界。第 17 节 demo 不在本次修改范围。
+
+## 2026-11-19：进一步按 PPO-RLHF 形式走查独立算法
+
+- 按用户反馈复核 §4–§9：每节都以本算法的伪代码呈现全局路径，再沿不同任务的专属例子追踪偏好/奖励、相对优势或概率比、裁剪/损失和更新方向；不再让一个例子兼任六种算法的说明。
+- 加细 GRPO 的 token ratio 与 clipped objective、GSPO 的序列 ratio 与序列级裁剪、DAPO 的动态采样和 token 级 loss、DCPO 的历史优势平滑、动态裁剪与 OTM 走查，让例子能接上各自伪代码的更新阶段。
+- 进一步核对原论文：DAPO 的正确性 reward 刻度、动态采样、token-level loss 与 soft overlong shaping；GSPO 的长度归一化序列 importance ratio；DCPO 的动态边界、平滑优势与 OTM。相关数值均标为教学设定，论文结果只限其公开的模型和评测协议。
+- 本轮仍只改第十一章 §4–§9 及本进度记录；§3 PPO-RLHF 和第 17 节 demo 保持原样。

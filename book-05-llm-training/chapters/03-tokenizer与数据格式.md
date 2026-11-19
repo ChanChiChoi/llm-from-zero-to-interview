@@ -45,9 +45,9 @@
 给定文本 $x$、tokenizer $T$ 和词表大小 $V$，编码结果是：
 
 ~~~math
-z=T(x)=(z_1,z_2,\ldots,z_L),
+z=T(x)=(z_{1},z_{2},\ldots,z_{L}),
 \qquad
-z_t\in\{0,1,\ldots,V-1\}
+z_{t}\in\{0,1,\ldots,V-1\}
 ~~~
 
 $L$ 是这段文本的 token 数。解码器 $D$ 将 token id 转回字符串：
@@ -249,7 +249,7 @@ assistant-only label mask 也不一定自动缩小 logits 矩阵。许多实现�
 ~~~math
 \mathrm{BPB}
 =
-\frac{-\sum_{t=1}^{L}\log_2 p_\theta(z_t\mid z_{1:t-1})}
+\frac{-\sum_{t=1}^{L}\log_{2} p_{\theta}(z_{t}\mid z_{1:t-1})}
 {|x|_{\mathrm{byte}}}
 ~~~
 
@@ -300,18 +300,18 @@ OpenAI 的 gpt-oss Harmony 文档给出一个具体协议例子：`<|end|>` 结�
 padding 是为了把不同长度样本放进规则张量。定义：
 
 ~~~math
-a_t=\mathbf{1}[t<\ell]
+a_{t}=\mathbf{1}[t<\ell]
 ~~~
 
-这里按右 padding 书写， $\ell$ 是该样本在 padding 前的真实长度；若使用左 padding，应从真实起始位置或 collator 输出计算有效位置。不能总用 $z_t\ne z_{\mathrm{pad}}$ 推断真实位置：有些训练配置会让 PAD 与 EOS 共用同一个 id；此时按 id 比较会把真实结束符也误判成 padding。模型的 causal mask 还要阻止当前位置看未来 token；packed 独立样本可能还需要 document/block mask。三类作用不同，不能混为一个“attention mask”。
+这里按右 padding 书写， $\ell$ 是该样本在 padding 前的真实长度；若使用左 padding，应从真实起始位置或 collator 输出计算有效位置。不能总用 $z_{t}\ne z_{\mathrm{pad}}$ 推断真实位置：有些训练配置会让 PAD 与 EOS 共用同一个 id；此时按 id 比较会把真实结束符也误判成 padding。模型的 causal mask 还要阻止当前位置看未来 token；packed 独立样本可能还需要 document/block mask。三类作用不同，不能混为一个“attention mask”。
 
 loss 也要忽略 PAD。很多 PyTorch 训练代码用 `ignore_index=-100` 表示不计算该位置，但 `-100` 是实现约定，不是模型词表中的真实 token：
 
 ~~~math
-y_t=
+y_{t}=
 \begin{cases}
-z_t,&a_t=1\\
--100,&a_t=0
+z_{t},&a_{t}=1\\
+-100,&a_{t}=0
 \end{cases}
 ~~~
 
@@ -334,10 +334,10 @@ z_t,&a_t=1\\
 消息对象可以写成：
 
 ~~~math
-M=((r_1,c_1),(r_2,c_2),\ldots,(r_K,c_K))
+M=((r_{1},c_{1}),(r_{2},c_{2}),\ldots,(r_{K},c_{K}))
 ~~~
 
-其中 $r_k$ 是 role， $c_k$ 是内容。chat template $T_{\mathrm{chat}}$ 先把消息序列化为字符串或事件序列：
+其中 $r_{k}$ 是 role， $c_{k}$ 是内容。chat template $T_{\mathrm{chat}}$ 先把消息序列化为字符串或事件序列：
 
 ~~~math
 s=T_{\mathrm{chat}}(M)
@@ -393,7 +393,7 @@ user tokens     -> ignore
 assistant tokens -> compute loss
 ~~~
 
-令 $m_t=1$ 表示第 $t$ 个 token 是监督目标， $m_t=0$ 表示只作为条件，则 causal LM 的 masked loss 可以写成：
+令 $m_{t}=1$ 表示第 $t$ 个 token 是监督目标， $m_{t}=0$ 表示只作为条件，则 causal LM 的 masked loss 可以写成：
 
 ~~~math
 L_{\mathrm{SFT}}
@@ -401,7 +401,7 @@ L_{\mathrm{SFT}}
 -\frac{1}{\max(\sum_{t=1}^{L-1}m_{t+1},1)}
 \sum_{t=1}^{L-1}
 m_{t+1}
-\log p_\theta(z_{t+1}\mid z_{1:t})
+\log p_{\theta}(z_{t+1}\mid z_{1:t})
 ~~~
 
 教学代码常用 $\max(\cdot,1)$ 避免除零，但它不能把没有监督的位置变成有效样本。真实训练应要求 $\sum_{t=1}^{L-1}m_{t+1}>0$；若模板、截断或 role 标注让分子和监督分母都为空，应跳过并记录该样本，而不是以零 loss 混入 batch。分母使用有效 assistant token 数，避免不同回答长度让 loss 口径变化。system、user、tool result 和 padding 是否被 mask，要由训练目标决定，而不是机械按角色名称处理。
@@ -429,14 +429,14 @@ batch reduction 也是数据语义的一部分。按有效 token 总数求平均
 ~~~math
 L_{\mathrm{token}}
 =
-\frac{\sum_i\sum_t m_{i,t}\ell_{i,t}}
-{\sum_i\sum_t m_{i,t}},
+\frac{\sum_{i}\sum_{t} m_{i,t}\ell_{i,t}}
+{\sum_{i}\sum_{t} m_{i,t}},
 \qquad
 L_{\mathrm{sample}}
 =
-\frac{1}{N}\sum_i
-\frac{\sum_t m_{i,t}\ell_{i,t}}
-{\sum_t m_{i,t}}
+\frac{1}{N}\sum_{i}
+\frac{\sum_{t} m_{i,t}\ell_{i,t}}
+{\sum_{t} m_{i,t}}
 ~~~
 
 假设样本 A 有 10 个监督 token、平均 loss 为 1；样本 B 有 100 个监督 token、平均 loss 为 2。token 平均是 $(10\times1+100\times2)/110\approx1.91$，样本平均则是 $(1+2)/2=1.5$。前者让每个目标 token 权重相同，后者让每条样本权重相同；分布式训练还要保证跨 rank 聚合时的有效 token 分母口径一致。两种都可以是有意设计，但不能默默换口径。
@@ -448,24 +448,24 @@ L_{\mathrm{sample}}
 预训练常把文档编码后追加 EOS：
 
 ~~~math
-s_i=T(x_i)\oplus[z_{\mathrm{eos}}]
+s_{i}=T(x_{i})\oplus[z_{\mathrm{eos}}]
 ~~~
 
 所有文档拼接为：
 
 ~~~math
-S=s_1\oplus s_2\oplus\cdots\oplus s_n
+S=s_{1}\oplus s_{2}\oplus\cdots\oplus s_{n}
 ~~~
 
 再按上下文长度 $C$ 切成 block：
 
 ~~~math
-b_j=S_{jC:(j+1)C-1}
+b_{j}=S_{jC:(j+1)C-1}
 ~~~
 
 EOS 告诉模型文档边界，但在普通 causal mask 下，后一个文档仍可看到前一个文档的历史。若希望样本完全独立，要使用 document-level attention mask 或分别计算样本；如果允许跨文档上下文，则必须在评估中接受这个训练假设。
 
-SFT packing 和预训练连续语料尤其不能混为一谈。假设把两个样本接成 $[BOS_A,A_1,A_2,END_A | BOS_B,B_1,B_2,END_B]$：普通 causal attention 会允许 $B_1$ 读取 $A$ 的全部 token；若两个样本应独立，必须在注意力上隔开两段，而 EOS 本身不会清除 KV 或改写 attention mask。小例子中的允许注意力矩阵是：
+SFT packing 和预训练连续语料尤其不能混为一谈。假设把两个样本接成 $[BOS_{A},A_{1},A_{2},END_{A} | BOS_{B},B_{1},B_{2},END_{B}]$：普通 causal attention 会允许 $B_{1}$ 读取 $A$ 的全部 token；若两个样本应独立，必须在注意力上隔开两段，而 EOS 本身不会清除 KV 或改写 attention mask。小例子中的允许注意力矩阵是：
 
 ~~~text
          BOS_A A_1 A_2 | BOS_B B_1 B_2
@@ -477,9 +477,9 @@ B_1        0   0   0  |  1    1   0
 B_2        0   0   0  |  1    1   1
 ~~~
 
-实现可以显式构造 block-causal mask，也可以把每个独立序列的 cumulative lengths 传给支持变长输入的 attention kernel。后者跳过跨样本的注意力计算；理论 attention 工作量可保持为 $\sum_i s_i^2$，而不是把总长度 $\sum_i s_i$ 当成一个样本计算平方。具体格式、position id 是否在边界重置、padding 如何对齐，都由模型和训练 kernel 的 packing contract 决定。
+实现可以显式构造 block-causal mask，也可以把每个独立序列的 cumulative lengths 传给支持变长输入的 attention kernel。后者跳过跨样本的注意力计算；理论 attention 工作量可保持为 $\sum_{i} s_{i}^2$，而不是把总长度 $\sum_{i} s_{i}$ 当成一个样本计算平方。具体格式、position id 是否在边界重置、padding 如何对齐，都由模型和训练 kernel 的 packing contract 决定。
 
-边界还会影响 next-token label。若 `BOS_B` 是 $B_1$ 的上下文， $B_1$ 可以照常监督；若样本 B 没有 BOS，而它的首 token 在扁平流里紧接着 A，那么不能让 A 的末 token 来预测 B 的首 token，除非训练目标本来就允许跨文档条件。应在 boundary 处插入模型规定的起始符，或屏蔽那一个跨样本预测，并检查 position id、label 和 attention 的边界采用同一序列切分。
+边界还会影响 next-token label。若 `BOS_B` 是 $B_{1}$ 的上下文， $B_{1}$ 可以照常监督；若样本 B 没有 BOS，而它的首 token 在扁平流里紧接着 A，那么不能让 A 的末 token 来预测 B 的首 token，除非训练目标本来就允许跨文档条件。应在 boundary 处插入模型规定的起始符，或屏蔽那一个跨样本预测，并检查 position id、label 和 attention 的边界采用同一序列切分。
 
 ### 3.10.2 Packing 利用率
 
@@ -497,13 +497,13 @@ B_2        0   0   0  |  1    1   1
 
 ### 3.10.4 用一组文档复算 packing 与边界成本
 
-设文档 A 的序列为 $[BOS_A,a_1,a_2,EOS_A]$，文档 B 为 $[BOS_B,b_1,b_2,EOS_B]$，各有 4 个 token。若训练器按长度 8 为每篇文档单独建立一个 block，会为两篇共分配 16 个位置，其中 8 个是 padding，packing 利用率是 $8/16=50\%$。把两篇放入同一个长度 8 的 block 后，8 个位置都有效，利用率是 $8/8=100\%$。若每篇不训练 BOS，两篇共有 6 个有效预测目标，合并前后的 loss 分母都应为 6，而不是物理位置数 16 或 8。这个固定 block 账本说明，packing 改变矩阵形状，不应悄悄改变目标 token 的权重。
+设文档 A 的序列为 $[BOS_{A},a_{1},a_{2},EOS_{A}]$，文档 B 为 $[BOS_{B},b_{1},b_{2},EOS_{B}]$，各有 4 个 token。若训练器按长度 8 为每篇文档单独建立一个 block，会为两篇共分配 16 个位置，其中 8 个是 padding，packing 利用率是 $8/16=50\%$。把两篇放入同一个长度 8 的 block 后，8 个位置都有效，利用率是 $8/8=100\%$。若每篇不训练 BOS，两篇共有 6 个有效预测目标，合并前后的 loss 分母都应为 6，而不是物理位置数 16 或 8。这个固定 block 账本说明，packing 改变矩阵形状，不应悄悄改变目标 token 的权重。
 
-利用率提升没有自动决定文档之间能否互相读取。普通 causal attention 下， $b_1$ 的隐藏状态可以读取 A 的全部前缀，即使 `EOS_A` 和 `BOS_B` 都存在。若目标要求两篇独立，attention 还要使用 block-causal 边界；若 kernel 能跳过跨文档计算，两个长度 4 的因果块各处理 $4\times5/2=10$ 个可见位置对，共 20 对，而把它们当成一条长度 8 的流则有 $8\times9/2=36$ 对。实际内核可能使用不同的计数和填充策略；仅把 mask 写成稀疏矩阵、但内核仍做稠密计算，不一定省下这部分时间。这个手算只展示独立注意力的理论关系。
+利用率提升没有自动决定文档之间能否互相读取。普通 causal attention 下， $b_{1}$ 的隐藏状态可以读取 A 的全部前缀，即使 `EOS_A` 和 `BOS_B` 都存在。若目标要求两篇独立，attention 还要使用 block-causal 边界；若 kernel 能跳过跨文档计算，两个长度 4 的因果块各处理 $4\times5/2=10$ 个可见位置对，共 20 对，而把它们当成一条长度 8 的流则有 $8\times9/2=36$ 对。实际内核可能使用不同的计数和填充策略；仅把 mask 写成稀疏矩阵、但内核仍做稠密计算，不一定省下这部分时间。这个手算只展示独立注意力的理论关系。
 
-同一边界还必须出现在三个位置：attention mask 决定能读取哪些 token，position id 决定序列位置从哪里计起，label mask 决定跨文档的 next-token 目标是否参与损失。若 `BOS_B` 是 B 的合法起点，应由它预测 $b_1$；若 B 没有 BOS 且训练目标要求文档独立，就要屏蔽由 $a_2$ 预测 $b_1$ 的跨界目标。三个实现有一个漏掉边界，loss 仍可能正常下降，但学习到的条件分布已改变。
+同一边界还必须出现在三个位置：attention mask 决定能读取哪些 token，position id 决定序列位置从哪里计起，label mask 决定跨文档的 next-token 目标是否参与损失。若 `BOS_B` 是 B 的合法起点，应由它预测 $b_{1}$；若 B 没有 BOS 且训练目标要求文档独立，就要屏蔽由 $a_{2}$ 预测 $b_{1}$ 的跨界目标。三个实现有一个漏掉边界，loss 仍可能正常下降，但学习到的条件分布已改变。
 
-截断也要按任务处理。长 SFT 样本如果从末尾切掉回答，可能只剩条件文本；若从开头切掉 system 或问题，回答就失去正确上下文。可以统计截断前后的有效监督 token、保留下来的 role、被切断字段和样本数量，并拒绝有效 label mask 满足 $\sum_t m_t=0$ 的样本，其中 $m_t$ 表示该位置是否参与监督。因而一个训练 block 的审计至少同时记录文档起止、EOS/BOS、position ids、有效 label、padding 和截断计数；单一的高利用率数值不能证明样本协议正确。
+截断也要按任务处理。长 SFT 样本如果从末尾切掉回答，可能只剩条件文本；若从开头切掉 system 或问题，回答就失去正确上下文。可以统计截断前后的有效监督 token、保留下来的 role、被切断字段和样本数量，并拒绝有效 label mask 满足 $\sum_{t} m_{t}=0$ 的样本，其中 $m_{t}$ 表示该位置是否参与监督。因而一个训练 block 的审计至少同时记录文档起止、EOS/BOS、position ids、有效 label、padding 和截断计数；单一的高利用率数值不能证明样本协议正确。
 
 不同训练目标可以采用不同边界政策：预训练语料可能有意让后续文本承接前文；SFT packing 通常要保持每个对话样本的 role 和回答 mask；工具/RL 轨迹还要保留一次行动和观察的因果次序。数据是否跨样本可见，应是可说明的训练假设，而不是由 dataloader 的拼接结果偶然决定。
 
@@ -540,12 +540,12 @@ packing 的优化目标不只是提高 $\eta_{\mathrm{pack}}$。长度分布和 
 真正进入训练的是：
 
 ~~~math
-d_i=(M_i,z_i,m_i),
+d_{i}=(M_{i},z_{i},m_{i}),
 \qquad
-z_i=T(T_{\mathrm{chat}}(M_i))
+z_{i}=T(T_{\mathrm{chat}}(M_{i}))
 ~~~
 
-$M_i$ 是消息， $z_i$ 是 token ids， $m_i$ 是 label mask。JSON 字段名字可以不同，但这三个对象必须能被重建和审计。
+$M_{i}$ 是消息， $z_{i}$ 是 token ids， $m_{i}$ 是 label mask。JSON 字段名字可以不同，但这三个对象必须能被重建和审计。
 
 ### 3.11.2 数据质量边界
 
@@ -576,7 +576,7 @@ SFT 数据需要检查回答事实性、格式、角色、拒答、安全、长�
 可以写成：
 
 ~~~math
-d_i=(x_i,y_i^+,y_i^-)
+d_{i}=(x_{i},y_{i}^+,y_{i}^-)
 ~~~
 
 两条回答必须共享 prompt、tokenizer、模板和截断规则。否则模型可能学到长度、格式或截断位置的差异，而不是回答质量。
@@ -590,7 +590,7 @@ d_i=(x_i,y_i^+,y_i^-)
 GRPO、RLVR 或其他强化训练可能保存一个 prompt 的多个候选、组内 reward、验证器输出、环境状态和工具轨迹。可把一组数据抽象为：
 
 ~~~math
-G_i=\left(x_i,\{y_{i,j},r_{i,j},v_{i,j}\}_{j=1}^{n_i}\right)
+G_{i}=\left(x_{i},\{y_{i,j},r_{i,j},v_{i,j}\}_{j=1}^{n_{i}}\right)
 ~~~
 
 $y$ 是候选， $r$ 是奖励或相对分数， $v$ 是验证器证据。奖励来自字符串匹配、代码执行、数学检查还是人工偏好，会影响训练信号的含义，必须记录来源。
@@ -713,7 +713,7 @@ E'\in\mathbb{R}^{V'\times d}
 
 ### 3.15.2 新 token 如何获得语义
 
-随机初始化、旧子词均值或外部向量映射都只是新 embedding 行的起点。假设新词由两个旧子词表示，旧向量分别为 $e_1=(2,0)$、 $e_2=(0,4)$，简单均值初始化得到 $e_{\mathrm{new}}=(1,2)$；这个计算可复现，但它只说明如何生成初值，不能证明新 token 已经具有正确语义。只有继续训练数据实际出现该 token，并且输入 embedding、输出头、模板、labels 和 optimizer 都按新词表版本连接，模型才有机会学习它的读写作用。
+随机初始化、旧子词均值或外部向量映射都只是新 embedding 行的起点。假设新词由两个旧子词表示，旧向量分别为 $e_{1}=(2,0)$、 $e_{2}=(0,4)$，简单均值初始化得到 $e_{\mathrm{new}}=(1,2)$；这个计算可复现，但它只说明如何生成初值，不能证明新 token 已经具有正确语义。只有继续训练数据实际出现该 token，并且输入 embedding、输出头、模板、labels 和 optimizer 都按新词表版本连接，模型才有机会学习它的读写作用。
 
 扩词表的内存变化也应先算清。设新增 $K=2,000$ 个 token，hidden size $d=4,096$，每张矩阵要增加 $K\times d=8,192,000$ 个参数。若参数用 BF16 存储，单个新增矩阵约占 $16,384,000$ bytes，即 `15.625 MiB`；输入和不共享的输出矩阵合计约 `31.25 MiB`，尚未计入梯度、优化器状态、分片填充和 checkpoint 元数据。这个例子帮助判断词表扩张的直接参数账本；真实训练峰值还取决于 optimizer、并行布局和权重共享方式。
 
@@ -1102,12 +1102,12 @@ EOS 表示序列里写入了边界符号，不能替代 document attention mask�
 升级 tokenizer、chat template、processor、collator 或训练框架时，先固定原始样本和旧版本输入，再分别运行新旧转换链。token 数差异可以写成：
 
 ~~~math
-\Delta L_i=|T_{\mathrm{new}}(x_i)|-|T_{\mathrm{old}}(x_i)|,
+\Delta L_{i}=|T_{\mathrm{new}}(x_{i})|-|T_{\mathrm{old}}(x_{i})|,
 \qquad
-r_i=\frac{\Delta L_i}{|T_{\mathrm{old}}(x_i)|}
+r_{i}=\frac{\Delta L_{i}}{|T_{\mathrm{old}}(x_{i})|}
 ~~~
 
-其中 $r_i$ 仅在旧版本 token 长度大于零时定义；空输出应单独报告为 N/A 或编码失败。比如某条相同文本由 100 个 token 变成 85 个， $\DeltaL=-15$ 且相对长度变化 $r=-15\%$。这是长度差异，不代表质量提升；只有两边都成功编码同一非空原文且规范化口径一致时才能计算。若 tokenizer 版本改变了 Unicode 处理，应同时保存 raw 与 normalized 文本，并把不可直接比较的项标为失败或 N/A，不能用零填补。
+其中 $r_{i}$ 仅在旧版本 token 长度大于零时定义；空输出应单独报告为 N/A 或编码失败。比如某条相同文本由 100 个 token 变成 85 个， $\Delta L_{i}=-15$ 且相对长度变化 $r=-15\%$。这是长度差异，不代表质量提升；只有两边都成功编码同一非空原文且规范化口径一致时才能计算。若 tokenizer 版本改变了 Unicode 处理，应同时保存 raw 与 normalized 文本，并把不可直接比较的项标为失败或 N/A，不能用零填补。
 
 除 token 长度外，还要逐条比较可见 token 与 id、special-token 位置、assistant 生成起点、labels 右移后的目标、有效监督 token 数、EOS/PAD、position id、pack 边界和解码文本。对工具和多模态样本还要核对调用事件、载荷尺寸/数量和 dispatcher 收到的结构。差异必须按字段给出允许范围；不能因为模型最后一段回答“看起来正常”就跳过前面的接口偏差。
 

@@ -66,7 +66,7 @@ M_weight 是本 rank 实际持有的权重和元数据，M_state 是 KV/latent/�
 假设模型有 700 亿参数，权重用每参数 2 字节的 BF16 或 FP16 存储。只算权重 payload，十进制参数量换算为 GiB：
 
 ~~~math
-M_w=70\times10^9\times2/2^{30}\approx130.39\ \mathrm{GiB}.
+M_{w}=70\times10^9\times2/2^{30}\approx130.39\ \mathrm{GiB}.
 ~~~
 
 一张 80 GiB 卡放不下这份权重。把它复制到八张单卡副本只会得到八份各自仍需约 130.39 GiB 的模型，并不会把一份模型摊薄。若用 TP=4 均分可切权重，每卡的理想权重份额约为 130.39/4=32.60 GiB；真实布局还会有未切分权重、元数据、通信缓冲和运行时工作区，所以这个数只是下界。这个算例回答的是“模型能否放下”，还没回答并发状态是否能放下。
@@ -97,9 +97,9 @@ Tensor Parallel 把同一层的大矩阵、attention head 或相关 hidden 维�
 对线性层 Y=XW，列并行可以写成：
 
 ~~~math
-W=[W_1,\ldots,W_g],
+W=[W_{1},\ldots,W_{g}],
 \qquad
-Y=[XW_1,\ldots,XW_g].
+Y=[XW_{1},\ldots,XW_{g}].
 ~~~
 
 每个 rank 得到一段输出，下一层可能直接消费这段分片，也可能需要 all-gather。行并行则把 W 按输入维度切分，每个 rank 产生部分和：
@@ -107,10 +107,10 @@ Y=[XW_1,\ldots,XW_g].
 ~~~math
 W=
 \begin{bmatrix}
-W_1\\ \vdots\\ W_g
+W_{1}\\ \vdots\\ W_{g}
 \end{bmatrix},
 \qquad
-Y=\sum_{j=1}^{g}X_jW_j,
+Y=\sum_{j=1}^{g}X_{j}W_{j},
 ~~~
 
 这通常需要 all-reduce 或等价的聚合。具体通信点取决于 block 设计、attention/MoE 结构和 runtime。
@@ -120,7 +120,7 @@ Y=\sum_{j=1}^{g}X_jW_j,
 ~~~math
 M_{w,\mathrm{tp}}
 \approx
-\frac{M_w}{g_{\mathrm{tp}}}
+\frac{M_{w}}{g_{\mathrm{tp}}}
 +M_{\mathrm{replicated}}
 +M_{\mathrm{metadata}}.
 ~~~
@@ -131,7 +131,7 @@ M_replicated 包括 norm、embedding、router 或未切分小矩阵，不能默�
 M_{\mathrm{kv,tp}}
 \approx
 2LBT_{\mathrm{ctx}}
-H_{\mathrm{kv,rank}}D_hb,
+H_{\mathrm{kv,rank}}D_{h}b,
 \qquad
 H_{\mathrm{kv,rank}}\approx\frac{H_{\mathrm{kv}}}{g_{\mathrm{tp}}}.
 ~~~
@@ -195,7 +195,7 @@ M_{\mathrm{kv},s}.
 ~~~math
 T_{\mathrm{req}}
 \approx
-\sum_{s=1}^{g_{\mathrm{pp}}}T_s
+\sum_{s=1}^{g_{\mathrm{pp}}}T_{s}
 +\sum_{s=1}^{g_{\mathrm{pp}}-1}T_{\mathrm{comm},s}
 +T_{\mathrm{bubble}}.
 ~~~
@@ -239,7 +239,7 @@ PP 适合层数多、权重按层分割能解决容量、同一 stage 间通信�
 MoE 模型有多个 expert，但每个 token 通常只激活 top-k 个 expert。若 router 为 token x_i 选出集合 E_i，并给出权重 p_i,e，MoE 层可抽象为：
 
 ~~~math
-y_i=\sum_{e\in E_i}p_{i,e}f_e(x_i).
+y_{i}=\sum_{e\in E_{i}}p_{i,e}f_{e}(x_{i}).
 ~~~
 
 Expert Parallel 把不同 expert 放到不同 GPU。一个 iteration 需要经历 dispatch、expert compute 和 combine 三步：先把 token 发到拥有目标 expert 的 rank，完成局部 expert 计算，再把结果发回原 token 的位置。若 expert 与 token 不在同一 rank，通信通常表现为 all-to-all 或其分解。
@@ -247,11 +247,11 @@ Expert Parallel 把不同 expert 放到不同 GPU。一个 iteration 需要经�
 设本轮 token 数为 N，top-k 为 k，expert e 收到 n_e 个 token，则：
 
 ~~~math
-\sum_{e=1}^{E}n_e=kN,
+\sum_{e=1}^{E}n_{e}=kN,
 \qquad
 \bar n=\frac{kN}{E},
 \qquad
-R_{\mathrm{imbalance}}=\frac{\max_e n_e}{\bar n}.
+R_{\mathrm{imbalance}}=\frac{\max_{e} n_{e}}{\bar n}.
 ~~~
 
 R_imbalance 越高，最热 expert 越可能决定这一轮的完成时间；但它还没有包含跨节点链路、capacity padding、expert kernel shape 和 combine 顺序。若启用 capacity factor c，某个 expert 可接收的上限通常可近似为 c\bar n；超出的 token 可能被丢弃、重路由、padding 或采用 dropless 实现，四种选择对质量和吞吐不同。
@@ -325,7 +325,7 @@ G_reserved 不是浪费掉的 GPU，而是为了节点维护、故障替换或�
 ```math
 S_{\mathrm{aggregate}}
 \approx
-\sum_{r=1}^{R_{\mathrm{active}}}S_r
+\sum_{r=1}^{R_{\mathrm{active}}}S_{r}
 \approx
 R_{\mathrm{active}}S_{\mathrm{rep}}.
 ```
@@ -337,9 +337,9 @@ R_{\mathrm{active}}S_{\mathrm{rep}}.
 ```math
 C_{\mathrm{service}}
 =
-\sum_{r=1}^{R_{\mathrm{active}}}C_r,
+\sum_{r=1}^{R_{\mathrm{active}}}C_{r},
 \qquad
-C_r=\min\left(
+C_{r}=\min\left(
 C_{r,\mathrm{token}},
 C_{r,\mathrm{kv}},
 C_{r,\mathrm{queue}}
@@ -387,11 +387,11 @@ C_{r,\mathrm{queue}}
 对请求 i，可以先用 prompt token 数 P_i、预计输出 token 数 Y_i、当前已占用的 KV token K_i 和工具/多模态附加成本构造一个粗略分数：
 
 ~~~math
-\widehat C_i
+\widehat C_{i}
 =
-\alpha P_i
-+\beta \widehat Y_i
-+\gamma K_i
+\alpha P_{i}
++\beta \widehat Y_{i}
++\gamma K_{i}
 +\delta C_{i,\mathrm{extra}}.
 ~~~
 
@@ -400,13 +400,13 @@ P_i 主要影响 prefill，Y_i 影响 decode 持续时间，K_i 反映已经占�
 副本 r 的负载可以写成：
 
 ~~~math
-\widehat L_r
+\widehat L_{r}
 =
-\lambda_q Q_r
-+\lambda_t A_{r,\mathrm{tokens}}
-+\lambda_k K_{r,\mathrm{used}}
-+\lambda_p P_{r,\mathrm{pending}}
-+\lambda_f F_r.
+\lambda_{q} Q_{r}
++\lambda_{t} A_{r,\mathrm{tokens}}
++\lambda_{k} K_{r,\mathrm{used}}
++\lambda_{p} P_{r,\mathrm{pending}}
++\lambda_{f} F_{r}.
 ~~~
 
 Q_r 是排队请求数，A_tokens 是活动请求的预计剩余 token 负载，K_used 是 KV 使用量，P_pending 是等待 prefill 的 token 数，F_r 是故障、降级或冷启动惩罚。将不同单位相加前要做归一化；否则数值最大的字段会无意中支配路由。
@@ -416,9 +416,9 @@ Q_r 是排队请求数，A_tokens 是活动请求的预计剩余 token 负载，
 ~~~math
 r^\star
 =
-\arg\min_{r\in\mathcal H}\left(
-\widehat L_r
-+\eta\frac{\widehat C_i}{\widehat C_{r,\mathrm{remaining}}}
+\mathrm{arg\,min}_{r\in\mathcal H}\left(
+\widehat L_{r}
++\eta\frac{\widehat C_{i}}{\widehat C_{r,\mathrm{remaining}}}
 +\mu\widehat D_{i,r}
 \right),
 ~~~
@@ -475,7 +475,7 @@ TP 可能在每层触发 all-reduce 或 all-gather，EP 可能在每个 MoE 层�
 ~~~math
 T_{\mathrm{iter}}
 \approx
-\max_r T_{\mathrm{compute},r}
+\max_{r} T_{\mathrm{compute},r}
 +T_{\mathrm{critical\ comm}}
 +T_{\mathrm{sync}},
 ~~~
@@ -525,7 +525,7 @@ T_{\mathrm{iter}}
 ~~~math
 M_{\mathrm{kv},r}
 \approx
-2LBT_{\mathrm{ctx}}H_{\mathrm{kv},r}D_hb.
+2LBT_{\mathrm{ctx}}H_{\mathrm{kv},r}D_{h}b.
 ~~~
 
 2 表示 K 和 V 两份，L 是层数，B 是活动 sequence 数，T_ctx 是每条 sequence 已占用的 token 数，D_h 是 head dimension，b 是每个元素的字节数。MHA、GQA、MQA、MLA 或递归 state 会改变 H_kv,r 和 state 的含义；不能因为 runtime 使用 TP 就默认 cache 一定按完整 hidden 维度均匀切分。
@@ -617,7 +617,7 @@ TP、PP 或 EP group 中任何一个 rank 失效，都可能使整个执行组�
 多 GPU 部署最容易被忽略的是“请求状态属于谁”。权重可以在副本之间复制，KV Cache、递归 state 和 speculative 分支却属于某个具体请求和某个具体版本。对于请求 `r`，可以把状态写成：
 
 ```math
-\Sigma_r=(\mathrm{replica},\mathrm{layer\_range},\mathrm{position},
+\Sigma_{r}=(\mathrm{replica},\mathrm{layer\_range},\mathrm{position},
 \mathrm{kv\_blocks},\mathrm{model\_revision},\mathrm{layout},
 \mathrm{rng\_state},\mathrm{stream\_cursor},\mathrm{owner\_epoch})
 ```
@@ -633,7 +633,7 @@ TP、PP 或 EP group 中任何一个 rank 失效，都可能使整个执行组�
 | 活跃 | 源副本持有 owner epoch `e`，独占推进 token 和 KV block | 一个请求只能有一个可写 owner；同一 token 不能被重复提交 |
 | 冻结 | 在 token 边界停止调度，等待当前 GPU/NCCL 写入事件完成，再记录位置、block table、采样状态、协议状态和 stream cursor | snapshot 对应一个明确的生成位置且没有在途写入；外部工具调用另按幂等键确认 |
 | 传输 | 目标预留 KV 容量，分块接收 KV/latent state，并校验长度、dtype/layout、版本和 checksum | 未校验完成的部分状态不能进入 attention 或生成路径 |
-| 提交 | coordinator 将 owner epoch 从 `e` 原子提升为 `e+1`；目标确认后继续，源端旧 epoch 被 fence | 源和目标不能同时继续生成，客户端输出不重复、不倒退 |
+| 提交 | coordinator 将 owner epoch 从 `e` 原子提升为 $e+1$；目标确认后继续，源端旧 epoch 被 fence | 源和目标不能同时继续生成，客户端输出不重复、不倒退 |
 | 回退 | 传输/校验失败时撤销目标占用；源健康则恢复 owner，否则在新副本重算已确认前缀 | 不把半份 cache 当作有效状态；重算和工具副作用仍遵循独立恢复语义 |
 
 这个交接方案解释了为什么“把显存复制到另一张卡”不是完整迁移：还要解决并发写入、版本一致、输出提交和唯一 owner。短请求往往选择重算；长 RAG/Agent 请求才可能值得付状态搬运复杂度。支付、写库、发消息等副作用不能靠生成状态复制来保证 exactly-once，仍需按 §10.2 的幂等协议处理。
@@ -707,7 +707,7 @@ TP、PP、EP 切的是一次模型执行中的权重、层或 expert；Prefill/D
 
 先说明输入的含义：70B 是十进制参数量，FP16/BF16 权重按每参数 2 bytes 粗估；80 层、hidden size 8192、8 个 KV head 和 head dimension 128 是固定的 toy 模型结构。每个 rank 假设均匀分到权重、层与 KV head，`active_seq=24`、`ctx_tokens=4096` 表示每个副本的 24 条活动序列都已有同样长的上下文。现实中各请求长度不同，embedding、lm_head、norm、MoE 和 cache metadata 也不一定均匀分片；所以数字是比较布局的第一道容量筛选，而不是可上线的显存配置。
 
-代码先按 `tp × pp` 算每副本 GPU 数，再用 `ceil` 估每 stage 层数和每 rank KV head 数。权重用 `70×10^9×2` bytes 除以执行组大小，再换成 GiB；KV 按 K/V 两份、层数、活动序列、上下文长度、KV head、head dimension 与 bytes 相乘。预留的 8 GiB 是每卡额外扣除的运行余量；demo 没有单独模拟 CUDA graph、workspace、通信 buffer、碎片和 weight replication，因此 `fits=True` 只表示这个简化账本通过。
+代码先按 `tp × pp` 算每副本 GPU 数，再用 `ceil` 估每 stage 层数和每 rank KV head 数。权重用 $70\times 10^{9}\times 2$ bytes 除以执行组大小，再换成 GiB；KV 按 K/V 两份、层数、活动序列、上下文长度、KV head、head dimension 与 bytes 相乘。预留的 8 GiB 是每卡额外扣除的运行余量；demo 没有单独模拟 CUDA graph、workspace、通信 buffer、碎片和 weight replication，因此 `fits=True` 只表示这个简化账本通过。
 
 **代码状态：静态审阅，未运行（2026-11-02）。**
 
@@ -850,7 +850,7 @@ route_to= replica_1
 
 1. 单卡方案虽然副本最多，但 70B FP16 权重和 KV Cache 放不下；gpu_feasible 只表示 GPU 数量够用，fits 还要经过显存账本。
 2. `tp4_two_replicas` 每个副本 4 卡，可在 8 卡机器上放两个副本，toy 容量高于单个 8 卡副本。
-3. TP4/TP8 的 `tp_collective_payload_mib_per_decode_per_rank=60.0` 按 80 层、每层两次 hidden-size collective、24 个活动序列计算：单个 collective 的输入 payload 为 `24×8192×2` bytes，再乘 `2×80`。这是每 rank 参与 collective 的逻辑输入量，不是链路实际收发字节；后者取决于 TP group 大小、NCCL 算法、拓扑与 overlap。`pp_activation_payload_mib_per_decode=0.375` 是一次 decode iteration 中所有 pipeline stage 边界的逻辑 activation payload 总和；PP2 只有一个边界，因此对应 24 个 hidden vector。
+3. TP4/TP8 的 `tp_collective_payload_mib_per_decode_per_rank=60.0` 按 80 层、每层两次 hidden-size collective、24 个活动序列计算：单个 collective 的输入 payload 为 $24\times 8192\times 2$ bytes，再乘 $2\times 80$。这是每 rank 参与 collective 的逻辑输入量，不是链路实际收发字节；后者取决于 TP group 大小、NCCL 算法、拓扑与 overlap。`pp_activation_payload_mib_per_decode=0.375` 是一次 decode iteration 中所有 pipeline stage 边界的逻辑 activation payload 总和；PP2 只有一个边界，因此对应 24 个 hidden vector。
 4. `aggregate_active_seq` 只是把每副本假定能容纳的 24 条活动 sequence 乘以可行副本数，所以两个 TP4 副本得到 48；它不是 requests/s、output tokens/s 或 goodput。`capacity_choice` 仅按这个玩具容量上限选择，不表示实测性能最优。
 5. `route_to` 不按 round-robin，而是先排除 active sequence 已达上限的副本，再按 queued tokens、active sequence、可用槽位和新请求成本排序。以新请求 prompt=1200、max_new=256 为例，`request_cost=0.5×1200+256=856`；replica 0 有 3200 queued tokens、11 个 active sequence，余量槽 13，分数约为 3200+32×11+856/13=3617.85。replica 1 对应 900+32×8+856/16=1209.5，因此选 replica 1。0.5、32 是人为设定的权重。
 
@@ -858,7 +858,7 @@ route_to= replica_1
 
 例如单卡行可从输入手算：70B FP16 权重约 130.39 GiB，加 24×1.25=30 GiB 的 KV 与 8 GiB reserve，简化总量为 168.39 GiB，再与 80 GiB 卡容量比较。先沿输入和中间量核对总账，能分清模型状态超限与 GPU 数量不足，不必从 `fits=False` 倒推原因。
 
-通信字段同样只做 logical payload 账本。每个 decode step 的单次 TP collective 本地输入为 24×8192×2=393,216 bytes，即 0.375 MiB；乘以每层两次、80 层得到每 rank 60 MiB。PP=2 时每条 stage 边界传 24 个 hidden vector，所以 `(pp-1)×24×8192×2=393,216 bytes`，即 0.375 MiB。实际链路发送/接收量要结合 group size、算法、链路拓扑、协议和 overlap profile；代码没有 latency 预测器，也没有从这两个数推出延迟。
+通信字段同样只做 logical payload 账本。每个 decode step 的单次 TP collective 本地输入为 24×8192×2=393,216 bytes，即 0.375 MiB；乘以每层两次、80 层得到每 rank 60 MiB。PP=2 时每条 stage 边界传 24 个 hidden vector，所以 $(\mathrm{pp}-1)\times 24\times 8192\times 2=393,216 \mathrm{bytes}$，即 0.375 MiB。实际链路发送/接收量要结合 group size、算法、链路拓扑、协议和 overlap profile；代码没有 latency 预测器，也没有从这两个数推出延迟。
 
 因此读输出时分三步：先看 `gpu_feasible` 是否满足设备数量，再看 `fits` 是否同时满足数量和简化显存账，最后看 `aggregate_active_seq` 所依据的容量假设是否符合目标请求长度。需要用生产请求分布做 KV 长度分位数、workspace 峰值和 prefix-cache 命中重算；若把 `active_seq` 改成统一最大长度，得到的是保守边界，不是平均容量。此 demo 只使用 Python 标准库；要复用到实际部署，仍需把 shape/layout、非均匀分片和目标 GPU 的内存/通信实测补进账本。
 

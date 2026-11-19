@@ -57,16 +57,16 @@ train loss 和 validation loss 应按有效 token 口径汇总；grad norm 要�
 每个 optimizer step 可以记录：
 
 ~~~math
-h_t=
+h_{t}=
 (
 L_{\mathrm{train},t},
 L_{\mathrm{val},t},
-G_t,
-\eta_t,
-S_t,
-T_t,
-R_t,
-U_t,
+G_{t},
+\eta_{t},
+S_{t},
+T_{t},
+R_{t},
+U_{t},
 \Delta_{\mathrm{rank},t}
 )
 ~~~
@@ -106,44 +106,44 @@ checkpoint policy
 
 ### 9.2.1 有效 token loss 的分母
 
-令第 $t$ 个 batch 展平后有 $n_t$ 个 token 槽位， $m_j$ 表示第 $j$ 个位置是否参与监督，则：
+令第 $t$ 个 batch 展平后有 $n_{t}$ 个 token 槽位， $m_{j}$ 表示第 $j$ 个位置是否参与监督，则：
 
 ~~~math
-T_t
+T_{t}
 =
-\sum_{j=1}^{n_t}m_j
+\sum_{j=1}^{n_{t}}m_{j}
 ~~~
 
 ~~~math
-L_t
+L_{t}
 =
--\frac{1}{T_t}
-\sum_{j=1}^{n_t}
-m_j
-\log p_\theta(y_j\mid x_{1,\ldots,j-1})
+-\frac{1}{T_{t}}
+\sum_{j=1}^{n_{t}}
+m_{j}
+\log p_{\theta}(y_{j}\mid x_{1,\ldots,j-1})
 ~~~
 
-当 $T_t=0$ 时，这个平均值没有定义。工程上应记录并跳过空监督 batch，不能把它默认为 `loss=0`，因为这会伪造一条正常曲线。
+当 $T_{t}=0$ 时，这个平均值没有定义。工程上应记录并跳过空监督 batch，不能把它默认为 `loss=0`，因为这会伪造一条正常曲线。
 
-这里 $m_j\in\{0,1\}$， $n_t$ 是非负整数；只有 $T_t>0$ 时才可以把未归一化 token loss 除以它。若某个 rank 的局部 $T_t$ 为 0，但全局仍有有效 token，需要按全局未归一化 loss 和 token count 聚合，不能先把该 rank 的局部 mean 虚构为 0。
+这里 $m_{j}\in\{0,1\}$， $n_{t}$ 是非负整数；只有 $T_{t}>0$ 时才可以把未归一化 token loss 除以它。若某个 rank 的局部 $T_{t}$ 为 0，但全局仍有有效 token，需要按全局未归一化 loss 和 token count 聚合，不能先把该 rank 的局部 mean 虚构为 0。
 
-例如，四个 token 位置的单 token loss 是 [0.2, 0.8, 1.4, 9.0]，监督 mask 是 [1, 0, 1, 0]。只有第 1、3 个位置参与训练，所以 $T_t=1+1=2$，batch loss 为 $(0.2+1.4)/2=0.8$。第 4 个位置虽然 loss 高达 9.0，却被 mask 排除；若误把四个位置全平均，会得到 2.85，曲线就不再表示“每个有效目标 token 的平均损失”。这些数是教学输入，loss 单位按 nat 计。
+例如，四个 token 位置的单 token loss 是 [0.2, 0.8, 1.4, 9.0]，监督 mask 是 [1, 0, 1, 0]。只有第 1、3 个位置参与训练，所以 $T_{t}=1+1=2$，batch loss 为 $(0.2+1.4)/2=0.8$。第 4 个位置虽然 loss 高达 9.0，却被 mask 排除；若误把四个位置全平均，会得到 2.85，曲线就不再表示“每个有效目标 token 的平均损失”。这些数是教学输入，loss 单位按 nat 计。
 
 ### 9.2.2 异常指示量
 
 可以用一个指示量把不同信号投影到 step 轴：
 
-先把当前 loss 相对健康窗口的倍数记为 $r_t$，把参与比较且数据与聚合口径可比的 rank loss spread 记为 $\Delta_{\mathrm{rank},t}$；二者的具体定义分别在 9.4.2 和 9.10.3 给出。若 spike 窗口没有有限且大于零的基线，或 rank loss 含非有限值、rank 数据不可比，相应指标记为不可用，不得把“不可用”当作“未异常”，并从本步最大值计算中略去。
+先把当前 loss 相对健康窗口的倍数记为 $r_{t}$，把参与比较且数据与聚合口径可比的 rank loss spread 记为 $\Delta_{\mathrm{rank},t}$；二者的具体定义分别在 9.4.2 和 9.10.3 给出。若 spike 窗口没有有限且大于零的基线，或 rank loss 含非有限值、rank 数据不可比，相应指标记为不可用，不得把“不可用”当作“未异常”，并从本步最大值计算中略去。
 
 ~~~math
-a_t
+a_{t}
 =
 \max
 \left\{
-\mathbf{1}[\neg\mathrm{isfinite}(L_t)],
-\mathbf{1}[\neg\mathrm{isfinite}(G_t)],
-\mathbf{1}[T_t=0],
-\mathbf{1}[\mathrm{defined}(r_t)\land r_t\ge\tau_{\mathrm{spike}}],
+\mathbf{1}[\neg\mathrm{isfinite}(L_{t})],
+\mathbf{1}[\neg\mathrm{isfinite}(G_{t})],
+\mathbf{1}[T_{t}=0],
+\mathbf{1}[\mathrm{defined}(r_{t})\land r_{t}\ge\tau_{\mathrm{spike}}],
 \mathbf{1}[\mathrm{defined}(\Delta_{\mathrm{rank},t})\land\Delta_{\mathrm{rank},t}>\tau_{\mathrm{rank}}]
 \right\}
 ~~~
@@ -153,12 +153,12 @@ a_t
 ~~~math
 t^\*
 =
-\min\{t\mid a_t=1\}
+\min\{t\mid a_{t}=1\}
 ~~~
 
-$a_t=1$ 只表示需要保存现场和继续分析，不表示根因已经确定。rank loss 不同，可能只是各 rank 处理了不同难度的数据；只有在有效 token、数据 shard 和聚合方式可比时，差异才更支持同步问题。
+$a_{t}=1$ 只表示需要保存现场和继续分析，不表示根因已经确定。rank loss 不同，可能只是各 rank 处理了不同难度的数据；只有在有效 token、数据 shard 和聚合方式可比时，差异才更支持同步问题。
 
-看一个阈值命中的例子：某 step 的 loss 和梯度范数都有限， $T_t=64$，当前 spike 比值 $r_t=2.4$、项目阈值 $\tau_{\mathrm{spike}}=2.0$；rank loss spread 为 0.1、阈值为 0.5。五个候选条件依次得到 [0, 0, 0, 1, 0]，所以 $a_t=1$。它告诉我们“这个 step 要留现场”，却没有告诉我们是 batch、更新还是恢复状态造成了异常；后面仍要按时间轴核对证据。
+看一个阈值命中的例子：某 step 的 loss 和梯度范数都有限， $T_{t}=64$，当前 spike 比值 $r_{t}=2.4$、项目阈值 $\tau_{\mathrm{spike}}=2.0$；rank loss spread 为 0.1、阈值为 0.5。五个候选条件依次得到 [0, 0, 0, 1, 0]，所以 $a_{t}=1$。它告诉我们“这个 step 要留现场”，却没有告诉我们是 batch、更新还是恢复状态造成了异常；后面仍要按时间轴核对证据。
 
 ### 9.2.3 四个阶段的有限性检查
 
@@ -225,24 +225,24 @@ forward 已经出现 NaN，优先看输入、mask、logits 和算子；forward �
 设最近 k 个健康 step 的 loss 中位数为基线：
 
 ~~~math
-b_t
+b_{t}
 =
 \mathrm{median}(L_{t-k},\ldots,L_{t-1}),
 \qquad
-r_t
+r_{t}
 =
 \frac{
-L_t
+L_{t}
 }{
-b_t
+b_{t}
 }
 ~~~
 
-当 $r_t\ge\tau_{\mathrm{spike}}$ 时，可以把它标为候选 spike。2 到 3 倍可以作为某个项目的告警起点，但不是跨模型的标准；窗口长度、loss 方差、有效 token 数和数据混合都会改变解释。
+当 $r_{t}\ge\tau_{\mathrm{spike}}$ 时，可以把它标为候选 spike。2 到 3 倍可以作为某个项目的告警起点，但不是跨模型的标准；窗口长度、loss 方差、有效 token 数和数据混合都会改变解释。
 
 baseline 恰为 0 时，应把 spike 比值标为 `not_applicable` 并改用绝对 loss、梯度和数据证据，而不是在分母加一个极小数制造任意大的“告警”。 $\tau_{\mathrm{spike}}$ 也应为正的、预先记录的项目阈值。
 
-例如，三个健康 step 的 loss 是 2.40、2.18、2.05，中位数 $b_t=2.18$；当前 step 的 loss 是 5.80，于是 $r_t=5.80/2.18\approx2.66$。若项目预先设定阈值为 2.0，这一步会被标成候选 spike。这个比例只负责把 step 排到复查队列前面；要判断原因，还得检查同一步的梯度、有效 token、batch 内容和 optimizer 状态。第 9.12 节沿用这组数，把它与其他诊断信号接在一起。
+例如，三个健康 step 的 loss 是 2.40、2.18、2.05，中位数 $b_{t}=2.18$；当前 step 的 loss 是 5.80，于是 $r_{t}=5.80/2.18\approx2.66$。若项目预先设定阈值为 2.0，这一步会被标成候选 spike。这个比例只负责把 step 排到复查队列前面；要判断原因，还得检查同一步的梯度、有效 token、batch 内容和 optimizer 状态。第 9.12 节沿用这组数，把它与其他诊断信号接在一起。
 
 ### 9.4.3 三组对照
 
@@ -260,13 +260,13 @@ baseline 恰为 0 时，应把 spike 比值标为 `not_applicable` 并改用绝�
 
 大模型训练中的 spike 不只有“学习率太大”一种解释。不同研究追踪的是不同机制，适用的参数规模、优化器和诊断量也不同。它们提供的是可以检验的假设，不是看到 spike 后直接套用的通用处方。
 
-二阶矩的“滞后”可以先用一个单坐标例子看清。设 $\beta_2=0.9$，更新前 $v_{t-1}=1$。梯度先降到 $g_t=0.1$，则 $v_t=0.9\times1+0.1\times0.1^2=0.901$；下一步梯度回到 $g_{t+1}=1$，则 $v_{t+1}=0.9\times0.901+0.1\times1^2=0.9109$。梯度幅值增了 10 倍，二阶矩的平方根却只从约 0.949 增到约 0.954，因此只看 $g/\sqrt{v}$ 这个简化量，会从约 0.105 升到约 1.048。这个计算只隔离未偏差修正的二阶矩，忽略一阶矩、 $\epsilon$ 和完整 AdamW 更新；它帮助理解预条件器为何可能跟不上变化，不证明真实模型的 spike 必由此产生。
+二阶矩的“滞后”可以先用一个单坐标例子看清。设 $\beta_{2}=0.9$，更新前 $v_{t-1}=1$。梯度先降到 $g_{t}=0.1$，则 $v_{t}=0.9\times1+0.1\times0.1^2=0.901$；下一步梯度回到 $g_{t+1}=1$，则 $v_{t+1}=0.9\times0.901+0.1\times1^2=0.9109$。梯度幅值增了 10 倍，二阶矩的平方根却只从约 0.949 增到约 0.954，因此只看 $g/\sqrt{v}$ 这个简化量，会从约 0.105 升到约 1.048。这个计算只隔离未偏差修正的二阶矩，忽略一阶矩、 $\epsilon$ 和完整 AdamW 更新；它帮助理解预条件器为何可能跟不上变化，不证明真实模型的 spike 必由此产生。
 
 | 研究路线 | 机制解释与证据 | 处理思路 | 适用边界 |
 | --- | --- | --- | --- |
-| Adam instability | Molybog 等分析梯度估计随时间的相关结构，指出它可能让 Adam 更新范数放大、更新方向与下降方向变弱相关；研究覆盖 7B、30B、65B、546B，其中较小模型未出现同样的爆炸式 loss divergence | 先核对层内更新分布和矩估计；作者讨论了降低学习率、调小 $\epsilon$、减小 batch 或调整 $\beta_1/\beta_2$ 等路线 | 降学习率会延长训练；调小 $\epsilon$ 与低精度数值风险冲突；减小 batch 损失数据并行效率；改变矩估计常数也会改变正常阶段的历史响应。该理论不能证明所有 spike 都由 Adam 单独造成 |
-| 自适应预条件器失配 | Adam 的二阶矩满足 $v_t=\beta_2v_{t-1}+(1-\beta_2)g_t^2$。Bai 等观察到梯度骤降时， $v_t$ 可能按自身衰减而暂时跟不上随后上升的梯度；预条件后的曲率因此可能持续越过稳定阈值 | 检查逐层梯度、 $v_t$、更新量和 spike 时序是否吻合；需要时用 Hessian-vector product 近似梯度方向曲率；对照改变 $\beta_2$ 的固定 checkpoint 重放 | 论文用约 10M 参数、8 层合成推理 Transformer（900k 序列、batch 2048）观察到 7 次 spike；另在 SlimPajama 上训练 187M LLaMA 结构模型、用 100B tokens 报告多次 spike；测试了 $\beta_2=0.999,0.9,0.85$，较低值在这些设置中缓解 spike。严格理论是简化目标上的分析，高维非凸结论仍是实验支持 |
-| Spike-aware 优化器 | SPAM 用 Adam 二阶矩构造在线坐标级异常代理，按阈值重缩放梯度；另以固定间隔重置一阶和二阶状态，重置后加入短 warmup | 先验证 spike 是否伴随梯度峰值与动量污染，再评估重置间隔、阈值、warmup、质量和运行成本 | 论文分析用的 GSS 是同一梯度坐标跨训练步的回顾性比值，训练时的 $g_i^2/v_i$ 是在线代理，二者阈值不能互换；重置会丢弃优化器历史。PPL 和训练 token 配置见下文，结果绑定论文配方 |
+| Adam instability | Molybog 等分析梯度估计随时间的相关结构，指出它可能让 Adam 更新范数放大、更新方向与下降方向变弱相关；研究覆盖 7B、30B、65B、546B，其中较小模型未出现同样的爆炸式 loss divergence | 先核对层内更新分布和矩估计；作者讨论了降低学习率、调小 $\epsilon$、减小 batch 或调整 $\beta_{1}/\beta_{2}$ 等路线 | 降学习率会延长训练；调小 $\epsilon$ 与低精度数值风险冲突；减小 batch 损失数据并行效率；改变矩估计常数也会改变正常阶段的历史响应。该理论不能证明所有 spike 都由 Adam 单独造成 |
+| 自适应预条件器失配 | Adam 的二阶矩满足 $v_{t}=\beta_{2}v_{t-1}+(1-\beta_{2})g_{t}^2$。Bai 等观察到梯度骤降时， $v_{t}$ 可能按自身衰减而暂时跟不上随后上升的梯度；预条件后的曲率因此可能持续越过稳定阈值 | 检查逐层梯度、 $v_{t}$、更新量和 spike 时序是否吻合；需要时用 Hessian-vector product 近似梯度方向曲率；对照改变 $\beta_{2}$ 的固定 checkpoint 重放 | 论文用约 10M 参数、8 层合成推理 Transformer（900k 序列、batch 2048）观察到 7 次 spike；另在 SlimPajama 上训练 187M LLaMA 结构模型、用 100B tokens 报告多次 spike；测试了 $\beta_{2}=0.999,0.9,0.85$，较低值在这些设置中缓解 spike。严格理论是简化目标上的分析，高维非凸结论仍是实验支持 |
+| Spike-aware 优化器 | SPAM 用 Adam 二阶矩构造在线坐标级异常代理，按阈值重缩放梯度；另以固定间隔重置一阶和二阶状态，重置后加入短 warmup | 先验证 spike 是否伴随梯度峰值与动量污染，再评估重置间隔、阈值、warmup、质量和运行成本 | 论文分析用的 GSS 是同一梯度坐标跨训练步的回顾性比值，训练时的 $g_{i}^2/v_{i}$ 是在线代理，二者阈值不能互换；重置会丢弃优化器历史。PPL 和训练 token 配置见下文，结果绑定论文配方 |
 | GradientStabilizer | 该方法保持梯度方向，利用运行统计稳定梯度幅值；论文报告了 LLM FP16 预训练和 FP4 量化感知训练中的稳定性与学习率范围改善 | 作为更新幅值控制方案，与 clipping、学习率调整和原始优化器做同口径对照 | 稳定幅值无法证明梯度方向正确，也不能代替目标任务质量、吞吐和成本评估 |
 | Global norm clipping（工程基线） | 当整个梯度向量的范数超过阈值时，统一缩小梯度，方向不变 | 先按历史健康 step 的范数分布选择候选阈值，再统计裁剪率、裁剪前后更新量和目标质量 | 全局范数可能掩盖单层或单坐标异常；阈值过低会持续缩小正常更新；裁剪不能清理已经累积进 Adam 矩的历史异常，也不能修复数据或 loss 的错误 |
 | 逐张量自适应裁剪（AdaGC） | 每个参数张量按历史裁剪梯度范数的 EMA 设置动态上界，论文默认前 100 步用全局裁剪 warmup | 比较逐张量裁剪率、更新量、通信归约范围和同口径目标质量；不要只观察全局范数 | 其 spike score、并行布局与模型结果绑定论文设置；不同 DP/TP/PP 下局部范数归约范围可能不同，不能视作全局裁剪的逐张量等价实现 |
@@ -277,25 +277,25 @@ SPAM 还暴露了阈值方案的典型取舍。论文在 C4 的常规预训练�
 
 论文主表报告的 C4 预训练困惑度为：LLaMA-60M 上 Adam 34.09、SPAM 30.46；LLaMA-1B 上分别为 16.13 和 14.66。60M 参数模型的训练 token 数在论文内部不一致：主表列 1.1B，附录 D 表 7 列 1.3B。因此这些困惑度只能按论文作者报告引用，不能把 token 预算写成已统一的比较条件。
 
-这里还要区分两种 GSS 口径：论文分析时的回顾性指标，是某一坐标当前梯度绝对值除以该坐标跨训练步的历史均值；真实训练不可能预先保留完整历史，于是 SPAM 用 Adam 二阶矩构造在线代理 $g_i^2/V_i$，再按 $\mathrm{sign}(g_i)\sqrt{\theta V_i}$ 限幅。代理用于近似识别，不是原 GSS 的代数等价式；实验阈值只对论文实现的代理有意义。若实现遇到 $V_i=0$，该比值未定义，必须由实现明确处理零状态并记录，不能用任意小 $\epsilon$ 把它伪造成一个有效 spike 分数。
+这里还要区分两种 GSS 口径：论文分析时的回顾性指标，是某一坐标当前梯度绝对值除以该坐标跨训练步的历史均值；真实训练不可能预先保留完整历史，于是 SPAM 用 Adam 二阶矩构造在线代理 $g_{i}^2/V_{i}$，再按 $\mathrm{sign}(g_{i})\sqrt{\theta V_{i}}$ 限幅。代理用于近似识别，不是原 GSS 的代数等价式；实验阈值只对论文实现的代理有意义。若实现遇到 $V_{i}=0$，该比值未定义，必须由实现明确处理零状态并记录，不能用任意小 $\epsilon$ 把它伪造成一个有效 spike 分数。
 
-在 Bai 等人的分析里，需要区分严格的单步条件和便于实际监控的代理。对固定学习率的普通梯度下降，严格条件使用沿本次参数更新路径计算的加权平均 Hessian $\bar H_t$：
+在 Bai 等人的分析里，需要区分严格的单步条件和便于实际监控的代理。对固定学习率的普通梯度下降，严格条件使用沿本次参数更新路径计算的加权平均 Hessian $\bar H_{t}$：
 
 ~~~math
-\bar H_t
+\bar H_{t}
 =
-2\int_0^1(1-s)\nabla^2L(\theta_t-s\eta g_t)\,\mathrm{d}s,
+2\int_{0}^1(1-s)\nabla^2L(\theta_{t}-s\eta g_{t})\,\mathrm{d}s,
 \qquad
-\lambda_{\mathrm{grad}}(\bar H_t)
+\lambda_{\mathrm{grad}}(\bar H_{t})
 =
-\frac{g_t^{\mathsf T}\bar H_tg_t}{\lVert g_t\rVert_2^2}
+\frac{g_{t}^{\mathsf T}\bar H_{t}g_{t}}{\lVert g_{t}\rVert_{2}^2}
 ~~~
 
-当 $g_t$ 有限且 $\lVert g_t\rVert_2>0$ 时，这一普通梯度下降步的 loss 增加当且仅当 $\lambda_{\mathrm{grad}}(\bar H_t)>2/\eta$。真实网络中无法沿整段更新路径求出 $\bar H_t$，论文因此在小学习率近似下使用当前步的 Hessian 方向曲率；对 Adam，再用二阶矩预条件后的 $\widehat H_t$ 作实际监控代理。这个代理可以用 Hessian-vector product 估计，但需要额外二阶信息或迭代计算，不是普通训练日志中免费得到的指标，也不与严格路径平均条件等价。
+当 $g_{t}$ 有限且 $\lVert g_{t}\rVert_{2}>0$ 时，这一普通梯度下降步的 loss 增加当且仅当 $\lambda_{\mathrm{grad}}(\bar H_{t})>2/\eta$。真实网络中无法沿整段更新路径求出 $\bar H_{t}$，论文因此在小学习率近似下使用当前步的 Hessian 方向曲率；对 Adam，再用二阶矩预条件后的 $\widehat H_{t}$ 作实际监控代理。这个代理可以用 Hessian-vector product 估计，但需要额外二阶信息或迭代计算，不是普通训练日志中免费得到的指标，也不与严格路径平均条件等价。
 
-普通梯度下降的固定二次函数提供一个可复算直觉： $f(x)=\tfrac12hx^2$，一步后 $x_{t+1}=(1-\eta h)x_t$，损失比为 $f(x_{t+1})/f(x_t)=(1-\eta h)^2$。若 $\eta=0.001$、 $h=2400$，则 $\eta h=2.4$，参数变成 $-1.4x_t$，这一步损失约为原来的 $1.96$ 倍。这里 $h$ 是常数曲率，方向曲率条件恰好退化为 $h>2/\eta$；它只解释阈值直觉，不是 Adam 训练中 spike 大小或时刻的预测值。
+普通梯度下降的固定二次函数提供一个可复算直觉： $f(x)=\tfrac12hx^2$，一步后 $x_{t+1}=(1-\eta h)x_{t}$，损失比为 $f(x_{t+1})/f(x_{t})=(1-\eta h)^2$。若 $\eta=0.001$、 $h=2400$，则 $\eta h=2.4$，参数变成 $-1.4x_{t}$，这一步损失约为原来的 $1.96$ 倍。这里 $h$ 是常数曲率，方向曲率条件恰好退化为 $h>2/\eta$；它只解释阈值直觉，不是 Adam 训练中 spike 大小或时刻的预测值。
 
-SPAM 的论文报告在单张 H100 上测量 100 次迭代，LLaMA-60M 平均每步由 Adam 的 0.3666 秒增至 SPAM 的 0.3814 秒，约多 4%；这个测量说明检测与筛选有开销，不能直接外推到其他实现或硬件。对照方案时应逐项改变而非一次性混改：数据重放验证样本假设；单独改 $\beta_2$ 检验二阶矩响应；global clipping、AdaGC、SPAM 和 GradientStabilizer 分别对照整体范数、张量历史阈值、逐坐标代理与运行统计幅值控制；逐层 RMS 若持续随深度偏移，再把 Pre-LN/DeepNorm/Peri-LN 作为下一轮架构实验。所有比较都要固定 checkpoint、batch 顺序、token 预算与评估口径，并记录吞吐和目标能力。
+SPAM 的论文报告在单张 H100 上测量 100 次迭代，LLaMA-60M 平均每步由 Adam 的 0.3666 秒增至 SPAM 的 0.3814 秒，约多 4%；这个测量说明检测与筛选有开销，不能直接外推到其他实现或硬件。对照方案时应逐项改变而非一次性混改：数据重放验证样本假设；单独改 $\beta_{2}$ 检验二阶矩响应；global clipping、AdaGC、SPAM 和 GradientStabilizer 分别对照整体范数、张量历史阈值、逐坐标代理与运行统计幅值控制；逐层 RMS 若持续随深度偏移，再把 Pre-LN/DeepNorm/Peri-LN 作为下一轮架构实验。所有比较都要固定 checkpoint、batch 顺序、token 预算与评估口径，并记录吞吐和目标能力。
 
 来源：[Adam instability](https://arxiv.org/abs/2304.09871)、[Adaptive Preconditioners Trigger Loss Spikes in Adam](https://arxiv.org/abs/2506.04805v2)、[SPAM](https://arxiv.org/abs/2501.06842v2)、[GradientStabilizer](https://proceedings.mlr.press/v306/huang26bb.html)。
 
@@ -341,23 +341,23 @@ PyTorch 2.15 的 `torch.autograd.detect_anomaly(check_nan=True)` 会在反向计
 所有可训练参数梯度组成的全局范数为：
 
 ~~~math
-G_t
+G_{t}
 =
-\sqrt{\sum_i\lVert g_{t,i}\rVert_2^2}
+\sqrt{\sum_{i}\lVert g_{t,i}\rVert_{2}^2}
 ~~~
 
 给定阈值 $c>0$，且参与统计的梯度都有限时，global norm clipping 为：
 
 ~~~math
-g'_t
+g'_{t}
 =
 \begin{cases}
-\frac{c}{G_t}g_t,&G_t>c,\\
-g_t,&G_t\le c
+\frac{c}{G_{t}}g_{t},&G_{t}>c,\\
+g_{t},&G_{t}\le c
 \end{cases}
 ~~~
 
-它只在 $G_t>c$ 时缩短梯度，不改变梯度方向； $G_t=0$ 时直接走原梯度分支，不计算 $c/G_t$。clipping 的统计应包括裁剪前范数、裁剪后范数和触发比例。
+它只在 $G_{t}>c$ 时缩短梯度，不改变梯度方向； $G_{t}=0$ 时直接走原梯度分支，不计算 $c/G_{t}$。clipping 的统计应包括裁剪前范数、裁剪后范数和触发比例。
 
 例如，一个 toy 梯度向量为 $g=(6,8)$，所以 $G=\sqrt{6^2+8^2}=10$。阈值设为 $c=5$ 时，缩放系数是 $c/G=0.5$，裁剪后得到 $g'=(3,4)$，范数恰为 5，方向没有改变。若阈值设为 12，这个向量就不需要缩小。这里的数只演示公式；真实训练还要确认所有 rank 对应同一组全局梯度，而不是各自只裁剪本地分片。
 
@@ -366,12 +366,12 @@ g_t,&G_t\le c
 梯度大不一定等于参数更新大。记录：
 
 ~~~math
-u_t
+u_{t}
 =
 \frac{
-\lVert\theta_{t+1}-\theta_t\rVert_2
+\lVert\theta_{t+1}-\theta_{t}\rVert_{2}
 }{
-\lVert\theta_t\rVert_2
+\lVert\theta_{t}\rVert_{2}
 }
 ~~~
 
@@ -402,15 +402,15 @@ loss 不下降、grad norm 很小、参数更新很小，可能来自：
 g_{\mathrm{update}}
 =
 \frac{
-\sum_{b=1}^{A}G_b
+\sum_{b=1}^{A}G_{b}
 }{
-\sum_{b=1}^{A}T_b
+\sum_{b=1}^{A}T_{b}
 }
 ~~~
 
 直接平均每个 micro-batch 的 mean gradient，隐含每个 $T_{b}$ 相同。debug 要记录 accumulation boundary、每个 $T_{b}$、累计梯度和 clipping 时机。
 
-可以用一个标量坐标手算分母差异。假设第一个 micro-batch 有 $T_1=100$ 个有效 token，未归一化梯度和 $G_1=200$；第二个有 $T_2=300$，梯度和 $G_2=300$。正确的 token mean 为 $(200+300)/(100+300)=1.25$。两个局部 mean 分别是 $2$ 和 $1$，若直接等权平均会得到 $1.5$，比目标梯度大 $20\%$。这个例子只展示分母问题；实际向量梯度要先按各自有效 token 数加权累加，再在整个 accumulation window 上归一化，最后才按策略做 global clipping。
+可以用一个标量坐标手算分母差异。假设第一个 micro-batch 有 $T_{1}=100$ 个有效 token，未归一化梯度和 $G_{1}=200$；第二个有 $T_{2}=300$，梯度和 $G_{2}=300$。正确的 token mean 为 $(200+300)/(100+300)=1.25$。两个局部 mean 分别是 $2$ 和 $1$，若直接等权平均会得到 $1.5$，比目标梯度大 $20\%$。这个例子只展示分母问题；实际向量梯度要先按各自有效 token 数加权累加，再在整个 accumulation window 上归一化，最后才按策略做 global clipping。
 
 ### 9.6.5 深层信号传播也会影响训练稳定性
 
@@ -450,11 +450,11 @@ invalid numeric value
 ~~~math
 T_{\mathrm{attn}}
 =
-\sum_j a_j,
+\sum_{j} a_{j},
 \qquad
 T_{\mathrm{label}}
 =
-\sum_j m_j
+\sum_{j} m_{j}
 ~~~
 
 ~~~math
@@ -466,7 +466,7 @@ q_{\mathrm{label}}
 
 $T_{\mathrm{label}}=0$ 表示没有监督目标，应显式处理； $q_{\mathrm{label}}$ 很低不一定是错误，但需要结合任务和长度分布解释。
 
-$q_{\mathrm{label}}$ 的定义要求 $T_{\mathrm{attn}}>0$，且 label mask 是 attention mask 的子集；空样本或所有 attention 都被 mask 时该比例未定义。若 label 位落在 $a_j=0$ 的位置，问题不是“比例偏低”，而是数据格式或 mask 协议已经不一致。
+$q_{\mathrm{label}}$ 的定义要求 $T_{\mathrm{attn}}>0$，且 label mask 是 attention mask 的子集；空样本或所有 attention 都被 mask 时该比例未定义。若 label 位落在 $a_{j}=0$ 的位置，问题不是“比例偏低”，而是数据格式或 mask 协议已经不一致。
 
 例如，一个教学 batch 有 $T_{\mathrm{attn}}=1024$ 个可见 token，而 $T_{\mathrm{label}}=10$，则 $q_{\mathrm{label}}=10/1024\approx0.98\%$。这个数值本身不能判定错误：长 prompt、极短回答或特殊目标都可能产生较低比例。若任务预期回答约 200 个 token，下一步应 decode assistant/user span 并核对 label mask；若十个有效标签落在 user prompt、回答区全部被忽略，则有具体证据支持模板或 mask 错误。修正后还要核对有效 token 分母和对应 loss numerator，不能只比较平均 loss 是否变小。
 
@@ -507,13 +507,13 @@ AdamW 的简化更新为：
 ~~~math
 \theta_{t+1}
 =
-\theta_t
+\theta_{t}
 -
-\eta_t
-\frac{\hat m_t}
-{\sqrt{\hat v_t}+\epsilon}
+\eta_{t}
+\frac{\hat m_{t}}
+{\sqrt{\hat v_{t}}+\epsilon}
 -
-\eta_t\lambda\theta_t
+\eta_{t}\lambda\theta_{t}
 ~~~
 
 因此 loss spike 不能只看配置里的 peak lr，还要看：
@@ -525,7 +525,7 @@ AdamW 的简化更新为：
 - scheduler 是否按 optimizer step 前进；
 - checkpoint 恢复后 state 是否连续。
 
-这条简化式使用 $0\le\beta_1,\beta_2<1$、 $\epsilon>0$、 $\eta_t\ge0$，并把标准 AdamW 的 decoupled decay 写成单步参数更新项。实际框架的 $\epsilon$ 位置、foreach/fused kernel 和参数组排除规则仍需以其实现为准；NaN 的 m/v 或无效 learning rate 不会由该公式自行恢复。
+这条简化式使用 $0\le\beta_{1},\beta_{2}<1$、 $\epsilon>0$、 $\eta_{t}\ge0$，并把标准 AdamW 的 decoupled decay 写成单步参数更新项。实际框架的 $\epsilon$ 位置、foreach/fused kernel 和参数组排除规则仍需以其实现为准；NaN 的 m/v 或无效 learning rate 不会由该公式自行恢复。
 
 ### 9.8.1 学习率过大
 
@@ -568,11 +568,11 @@ FP16 动态范围较小，更容易 overflow/underflow；BF16 动态范围接近
 FP16 loss scaling 为：
 
 ~~~math
-\tilde L_t=S_tL_t,
+\tilde L_{t}=S_{t}L_{t},
 \qquad
-\tilde g_t=S_tg_t,
+\tilde g_{t}=S_{t}g_{t},
 \qquad
-g_t=\frac{\tilde g_t}{S_t}
+g_{t}=\frac{\tilde g_{t}}{S_{t}}
 ~~~
 
 它能降低小梯度 underflow 概率，却不能修复错误 loss，也不能防止缩放后的值 overflow。要记录：
@@ -655,10 +655,10 @@ PyTorch 2.15 文档还提供 `TORCH_DIST_NAN_CHECK=1`：它会在任意 backend 
 第 r 个 rank 有 $T_{t,r}$ 个有效 token、local mean loss 为 $L_{t,r}$，全局 loss 应为：
 
 ~~~math
-T_t=\sum_r T_{t,r},
+T_{t}=\sum_{r} T_{t,r},
 \qquad
-L_t=
-\frac{\sum_r T_{t,r}L_{t,r}}{T_t}
+L_{t}=
+\frac{\sum_{r} T_{t,r}L_{t,r}}{T_{t}}
 ~~~
 
 rank 间 spread：
@@ -666,12 +666,12 @@ rank 间 spread：
 ~~~math
 \Delta_{\mathrm{rank},t}
 =
-\max_r L_{t,r}-\min_r L_{t,r}
+\max_{r} L_{t,r}-\min_{r} L_{t,r}
 ~~~
 
 spread 必须结合不同数据难度和有效 token 解释，不能单独设一个跨任务固定阈值。
 
-全局 loss 要求所有 $T_{t,r}$ 为非负计数且 $T_t>0$； $\Delta_{\mathrm{rank}}$ 还要求参与比较的 $L_{t,r}$ 都有限、数据分片和 reduction 口径可比。某个 rank 的 loss 为 NaN 时，首先记录有限性失败和 collective 位置，不能继续把 spread 当作普通的数值差异。
+全局 loss 要求所有 $T_{t,r}$ 为非负计数且 $T_{t}>0$； $\Delta_{\mathrm{rank}}$ 还要求参与比较的 $L_{t,r}$ 都有限、数据分片和 reduction 口径可比。某个 rank 的 loss 为 NaN 时，首先记录有限性失败和 collective 位置，不能继续把 spread 当作普通的数值差异。
 
 两 rank 的小例子能看出为什么不能直接平均 local mean：rank 0 有 2 个有效 token、平均 loss 为 3；rank 1 有 6 个有效 token、平均 loss 为 1。它们的未归一化 loss 分别是 $2\times3=6$ 和 $6\times1=6$，所以全局 loss 为 $(6+6)/(2+6)=1.5$。若把两个 rank 的均值等权平均，会得到 2.0，因为它错误地让只有 2 个 token 的 rank 和有 6 个 token 的 rank 权重相同。这个分母问题与 9.6.4 的梯度累积相同，只是这里按 rank 汇总 loss。
 
@@ -1118,7 +1118,7 @@ step 6 的 loss 是 NaN、grad norm 是 Inf，因此进入 nonfinite 列表。�
 
 ### 练习九：比较 spike 缓解方案
 
-为同一个异常前 checkpoint 设计 global norm clipping、降低 $\beta_2$、SPAM 和 GradientStabilizer 四组对照。列出每种方案修改的状态或梯度量、额外超参数、可能丢失的信息、运行开销和质量回归指标。解释为什么“loss 恢复”单独不足以选方案。
+为同一个异常前 checkpoint 设计 global norm clipping、降低 $\beta_{2}$、SPAM 和 GradientStabilizer 四组对照。列出每种方案修改的状态或梯度量、额外超参数、可能丢失的信息、运行开销和质量回归指标。解释为什么“loss 恢复”单独不足以选方案。
 
 ### 练习十：从层间信号判断是否是架构问题
 

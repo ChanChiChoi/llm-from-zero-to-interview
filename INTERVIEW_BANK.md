@@ -942,21 +942,21 @@
    考察点：residual stream、LayerNorm、RMSNorm、Pre-LN、Post-LN、warmup、residual scaling、activation norm、update ratio。
    回答框架：Transformer 中 attention 和 FFN 把分支输出加回 residual stream。Pre-LN 的局部 Jacobian 显含恒等项，Post-LN 则在残差加法之后归一化。LayerNorm 对 hidden 维做中心化和缩放，RMSNorm 只按 RMS 缩放。Xiong 等人的分析和实验支持 Pre-LN 在其初始化与任务设置中较少依赖 warmup，不能据此判断所有现代 recipe 都可去掉 warmup。Admin 研究 residual-branch 参数扰动，NormFormer 调整 Pre-LN 的层间梯度幅度，DeepNorm 联合设计残差缩放与初始化。Kim 等人 2025 年用 Peri-LN 命名子层输入/输出外围归一化做法；Kan 等人 2026 年再以理论分析和 GPT-2 实验研究其稳定性。比较方案时，应绑定模型、深度、数据、optimizer、学习率、精度和真实逐层 activation/gradient/update 记录，不设通用通过阈值。
 
-31G. 如何系统比较 Sinusoidal、Learned Absolute、Relative Bias、RoPE 和 ALiBi？
-   考察点：注入位置、绝对/相对、长度外推、KV cache、工程复杂度。
-   回答框架：Sinusoidal 和 learned absolute 通常加到输入 embedding，前者固定多频率、后者学习绝对位置；relative representation/bias 更贴合 attention pairwise 距离；RoPE 旋转 Q/K，用绝对 position id 实现但点积体现相对位置；ALiBi 给 attention score 加距离偏置。RoPE 的频率按通道对跨多个量级变化，`base`、partial rotary、layout 和 position id 都属于 checkpoint/runtime 合同。PI 线性压缩新位置并做少量继续训练；YaRN 按波长分段平滑插值，作者报告比其对照方法少用约 10× token、2.5× steps；LongRoPE 搜索非均匀因子、分阶段扩展并单独恢复短上下文。不能横向比较这些研究的最大窗口数字；要在同 checkpoint 上控制训练预算，测原长度回归、不同位置检索、目标长度任务、吞吐和显存。
+31G. 如何区分 Sinusoidal、Learned Absolute、Shaw/T5 相对位置、RoPE 和 ALiBi？
+   考察点：位置进入计算的位置、相对距离、因果 mask、长度泛化证据。
+   回答框架：Sinusoidal 和 learned absolute 把位置向量加到输入；前者按固定频率生成，后者学习位置表。Shaw 用相对距离向量改变 key/value 交互，T5 用分桶后的标量偏置调整 attention logit。RoPE 按绝对位置旋转 Q/K，使单次 QK 点积含有相对位移项；这不保证完整模型在未见长度上可靠。ALiBi 对 causal score 加按 head 设置的线性距离惩罚，偏置可按任意距离计算也不等于任意长度都有效。位置公式、NoPE/因果 mask 的隐式线索、RoPE 扩展配方和长上下文任务能力要分开讨论。比较 PI、YaRN、LongRoPE 等扩展时，应固定 checkpoint 和训练预算，并检查原长度回归、不同位置与任务、吞吐和显存；论文报告的最大窗口不能横向当作通用能力结论。
 
 31H. 线上排查 RoPE / position id 异常时先看什么？
    考察点：KV cache、position id 连续性、packed sequence、prefix cache、long-context scaling。
    回答框架：先确认继续生成时新 token 的 position id 是否接在 cache length 之后，再看 prefix cache / sliding window 是否做了正确偏移，packed batch 中不同样本是否被 attention mask 隔离，目标上下文超过训练长度时是否配置 RoPE scaling、Position Interpolation、YaRN 或继续训练。很多问题不是 RoPE 公式错，而是工程路径中 position id 与真实 token 位置不一致。
 
-31I. 如何系统解释 attention mask、padding mask 和 loss mask 的区别？
-   考察点：可见性、padding、训练目标、SFT、信息泄漏。
-   回答框架：attention mask 控制 query 能从哪些 key/value 位置读信息；padding mask 标记补齐 token，通常要阻止真实 token 读取 pad，也不让 pad 参与 loss；loss mask 控制哪些位置计算训练损失。SFT 中 user token 通常不算 loss，但 assistant 仍要能看见 user prompt，所以不能把 loss mask 直接当 attention mask。排查时要同时看 decoded text、attention mask、labels、position ids、sample boundary 和 shift。
+31I. 如何区分 attention visibility、padding validity、loss mask、样本边界和 position ID？
+   考察点：可见性、padding、训练目标、SFT、packing、信息泄漏。
+   回答框架：attention visibility 控制 query 能读取哪些 key/value；padding validity 标记补齐位置，需按具体 batch/API 合同处理；loss mask 控制哪些标签计入目标。SFT 中 user token 可以被 assistant 读取，却不计入 assistant-only loss。若 packed 数据代表互相独立的样本，还要阻止跨样本读取并核对跨边界 shifted-label pair；连续文本流则可能有意保留跨文档上下文。position ID 只提供位置坐标，不替代可见性或标签约束。排查时查看解码后的输入、labels、样本边界、position IDs、移位方式和所用 API 的 mask 极性。
 
 31J. Prefix LM、bidirectional attention、causal attention 和 packed causal mask 分别解决什么问题？
-   考察点：可见性矩阵、理解/生成、跨样本泄漏、kernel fast path。
-   回答框架：bidirectional attention 允许非 padding token 互看，适合理解表征；causal attention 只看过去和自己，保证 next-token prediction 不看未来；Prefix LM 让 prefix 内部双向可见、target 因果可见并读取 prefix，适合条件生成；packed causal mask 则在每个样本内部 causal、样本之间完全不可见，防止 packing 造成跨样本泄漏。工程上还要检查全 mask 行和复杂 mask 是否导致 kernel 退化。
+   考察点：可见性矩阵、理解/生成、独立样本语义、监督目标。
+   回答框架：bidirectional attention 允许同一有效输入中的 token 双向读取；causal attention 在输入位置 $i$ 只读至当前位置，并配合向右移位的标签预测下一个 token；Prefix LM 让前缀内部双向可见，目标位置能读取完整前缀及目标前缀。Packed causal mask 只在每段都代表独立样本时才要求样本间隔离；连续文本流可能有意保留上下文，还要单独检查跨边界标签配对。实现时依据 API 版本确认布尔 mask 极性和位置约定；可见性规则本身不能证明某个 kernel fast path 或性能结论。
 
 31K. 如何从并行性、路径长度和硬件友好性解释 Transformer 的优势？
    考察点：training parallelism、parallel path length、attention pair count、GPU/TPU、矩阵乘。

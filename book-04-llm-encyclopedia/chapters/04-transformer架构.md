@@ -51,7 +51,7 @@ x_{l+1} &= u_{l}+\mathrm{FFN}_{l}(\mathrm{Norm}'_{l}(u_{l})).
 \end{aligned}
 ~~~
 
-x_l 是第 l 层输入，u_l 是 attention 残差后的中间表示。attention 让位置之间交换信息，FFN 对每个位置分别做非线性变换，Norm 控制表示尺度，residual 让主路径近似恒等映射。不同模型可能使用 RMSNorm、LayerNorm、SwiGLU、GQA 或不同的残差缩放，但这条主线仍然适合作为形状和功能的第一张地图。
+$x_{l}$ 是第 l 层输入，$u_{l}$ 是 attention 残差后的中间表示。attention 让位置之间交换信息，FFN 对每个位置分别做非线性变换，Norm 控制表示尺度，residual 让主路径近似恒等映射。不同模型可能使用 RMSNorm、LayerNorm、SwiGLU、GQA 或不同的残差缩放，但这条主线仍然适合作为形状和功能的第一张地图。
 
 ### 为什么适合规模化
 
@@ -154,7 +154,7 @@ k_{s}=R(\theta_{s})k.
 
 ### RoPE scaling 与外推
 
-训练长度为 T_train 时，直接把推理位置扩大到远高于 T_train，可能导致旋转相位分布偏离训练范围。位置插值、频率调整、分段 scaling 和长上下文继续训练都试图缓解这一问题，但各有短上下文、长上下文、数值和实现代价。
+训练长度为 $T_{\mathrm{train}}$ 时，直接把推理位置扩大到远高于 $T_{\mathrm{train}}$，可能导致旋转相位分布偏离训练范围。位置插值、频率调整、分段 scaling 和长上下文继续训练都试图缓解这一问题，但各有短上下文、长上下文、数值和实现代价。
 
 RoPE scaling 只解决位置映射的一部分问题，不会自动解决：
 
@@ -208,9 +208,9 @@ A(Q,K,V)
 
 $Q$ 的形状是 $[B,H,T_{q},d_{h}]$，$K/V$ 的形状是 $[B,H,T_{k},d_{h}]$。$QK^\top$ 的结果是 $[B,H,T_{q},T_{k}]$。$M$ 是 mask 或位置偏置。softmax 在 key 维度上归一化，最后把 $V$ 按权重相加。
 
-### 为什么除以 sqrt(d_h)
+### 为什么除以 $\sqrt{d_{h}}$
 
-若 Q 和 K 的各维近似独立、均值为零、方差为一，点积的方差大致随 d_h 增长。d_h 较大时，未经缩放的 score 可能让 softmax 过早饱和，几乎只选择一个位置，梯度变得不稳定。除以 sqrt(d_h) 把分数尺度拉回较可控范围。
+若 Q 和 K 的各维近似独立、均值为零、方差为一，点积的方差大致随 $d_{h}$ 增长。$d_{h}$ 较大时，未经缩放的 score 可能让 softmax 过早饱和，几乎只选择一个位置，梯度变得不稳定。除以 $\sqrt{d_{h}}$ 把分数尺度拉回较可控范围。
 
 这是一种统计近似，不意味着所有实际激活都满足独立同分布假设。低精度、归一化、量化和特殊 attention 变体都可能改变 score 的统计，需要实际监控。
 
@@ -248,7 +248,7 @@ $Q$ 的形状是 $[B,H,T_{q},d_{h}]$，$K/V$ 的形状是 $[B,H,T_{k},d_{h}]$。
 p_{i}=\frac{\exp(s_{i})}{\exp(1)+\exp(0)+\exp(-1)}.
 ~~~
 
-若三个 value 是标量 [10, 0, 4]，指数分别约为 2.7183、1 和 0.3679，分母约为 4.0862，因此权重约为 `[0.6652, 0.2447, 0.0900]`。加权输出为 $0.6652\times10+0.2447\times0+0.0900\times4\approx7.0125$。这个例子只展示“score 决定权重、value 决定内容”，不能据此解释真实模型的语义。
+若三个 value 是标量向量 $[10,0,4]$，指数分别约为 $2.7183$、$1$ 和 $0.3679$，分母约为 $4.0862$，因此权重约为 $[0.6652,0.2447,0.0900]$。加权输出为 $0.6652\times10+0.2447\times0+0.0900\times4\approx7.0125$。这个例子只展示“score 决定权重、value 决定内容”，不能据此解释真实模型的语义。
 
 ## 4.4 Causal Mask、Padding Mask 与信息边界
 
@@ -384,17 +384,17 @@ merge          [B,T,d]
 
 ### Multi-Query Attention
 
-MQA 保留 H_q 个 query head，但只使用一个 K head 和一个 V head。所有 query head 共享 K/V，KV cache 的 head 维从 H_q 降到 1。它节省显存和历史 K/V 读取，代价是 K/V 表达容量减少，是否损失质量需要训练实验确认。
+MQA 保留 $H_{q}$ 个 query head，但只使用一个 K head 和一个 V head。所有 query head 共享 K/V，KV cache 的 head 维从 $H_{q}$ 降到 1。它节省显存和历史 K/V 读取，代价是 K/V 表达容量减少，是否损失质量需要训练实验确认。
 
 ### Grouped-Query Attention
 
-GQA 介于 MHA 和 MQA 之间。H_q 个 query head 被划成 G 组，每组共享一个 K/V head，通常 H_q 是 G 的整数倍。每个 K/V head 被若干 query head 复用：
+GQA 介于 MHA 和 MQA 之间。$H_{q}$ 个 query head 被划成 G 组，每组共享一个 K/V head，通常 $H_{q}$ 是 G 的整数倍。每个 K/V head 被若干 query head 复用：
 
 ~~~math
 r=\frac{H_{q}}{H_{kv}}.
 ~~~
 
-r 是每个 K/V head 服务的 query head 数。KV cache 和 decode 读取压力大致按 H_kv 而不是 H_q 增长，实际速度还取决于 kernel、内存布局和 batch。
+r 是每个 K/V head 服务的 query head 数。KV cache 和 decode 读取压力大致按 $H_{\mathrm{kv}}$ 而不是 $H_{q}$ 增长，实际速度还取决于 kernel、内存布局和 batch。
 
 ### KV cache 的内存估算
 
@@ -412,7 +412,7 @@ M_{\mathrm{KV}}
 \approx 2LBT H_{kv}d_{h} b.
 ~~~
 
-前面的 2 是 K 和 V 两份。GQA 把 H_kv 降低，可以直接减少这部分显存；它并不减少 query 投影的所有计算，也不自动减少 MLP 或输出层成本。
+前面的 2 是 K 和 V 两份。GQA 把 $H_{\mathrm{kv}}$ 降低，可以直接减少这部分显存；它并不减少 query 投影的所有计算，也不自动减少 MLP 或输出层成本。
 
 例如 $L=2$、 $B=1$、 $T=4$、 $d_{h}=2$、BF16 每元素 $b=2$ 字节。MHA 的 $H_{\mathrm{kv}}=4$ 时 cache 为 $2\times2\times1\times4\times4\times2\times2=256$ 字节；GQA 设 $H_{\mathrm{kv}}=2$ 时为 128 字节；MQA 设 $H_{\mathrm{kv}}=1$ 时为 64 字节。这个计算只反映 K/V 元素数，未包含量化 scale、对齐或分配器开销。
 
@@ -622,7 +622,7 @@ Encoder 先双向编码输入，decoder 使用 causal self-attention 生成输�
 
 ### Cross-attention 的公式
 
-若 decoder query 为 Q_d，encoder 输出产生 K_e、V_e：
+若 decoder query 为 $Q_{d}$，encoder 输出产生 $K_{e}$、$V_{e}$：
 
 ~~~math
 \mathrm{CrossAttn}
@@ -687,7 +687,7 @@ y_{t}=g_{\theta}(S_{t},x_{t}).
 
 ### Delta rule 与 gated update
 
-以 Gated DeltaNet 论文的状态方向为例，令 S 的形状为 `[d_v,d_k]`，k 为 d_k 维列向量，v 为 d_v 维列向量，α、β 为标量遗忘门和写入门。一个具体递推式是：
+以 Gated DeltaNet 论文的状态方向为例，令 $S$ 的形状为 $[d_{v},d_{k}]$，$k$ 为 $d_{k}$ 维列向量，$v$ 为 $d_{v}$ 维列向量，$\alpha$、$\beta$ 为标量遗忘门和写入门。一个具体递推式是：
 
 ~~~math
 \begin{aligned}
@@ -697,7 +697,7 @@ S_{t}&=\bar S_{t-1}+\beta_{t} e_{t} k_{t}^\top.
 \end{aligned}
 ~~~
 
-e_t 是目标 value 与衰减后状态当前读出的误差，写入依赖旧状态，而不是无条件把新 value 相加。它等价于 S_t=α_t S_{t-1}(I-β_t k_t k_tᵀ)+β_t v_t k_tᵀ。α 控制整体遗忘，β 控制纠正幅度；这不是 KDA 的逐维门公式。单位范数 key 和门的约束也是稳定性条件，不能从一个裸递推式推导所有实现的数值性质。
+$e_{t}$ 是目标 value 与衰减后状态当前读出的误差，写入依赖旧状态，而不是无条件把新 value 相加。它等价于 $S_{t}=\alpha_{t}S_{t-1}(I-\beta_{t}k_{t}k_{t}^{\top})+\beta_{t}v_{t}k_{t}^{\top}$。$\alpha$ 控制整体遗忘，$\beta$ 控制纠正幅度；这不是 KDA 的逐维门公式。单位范数 key 和门的约束也是稳定性条件，不能从一个裸递推式推导所有实现的数值性质。
 
 用标量状态可以看清“纠错”与“叠加”的区别。令 $S=2$、$k=1$、$v=3$、$\alpha=1$、$\beta=0.5$，则旧读出为 $2$，误差为 $1$，更新得到 $2.5$；再写入同一对得到 $2.75$，而不是每次直接增加 $1.5$。
 
@@ -756,7 +756,7 @@ NoPE 通常表示某个路径不显式使用 RoPE、ALiBi 或其他传统位置�
 
 ### 稀疏路由
 
-MoE 把一个 FFN 替换为多个 expert，并由 router 为每个 token 选择 top-k expert。若共有 E 个 expert，每个 expert 参数量为 P_e，共享部分参数为 P_shared，其他参数为 P_r，则总参数可粗略写成：
+MoE 把一个 FFN 替换为多个 expert，并由 router 为每个 token 选择 top-k expert。若共有 E 个 expert，每个 expert 参数量为 $P_{e}$，共享部分参数为 $P_{\mathrm{shared}}$，其他参数为 $P_{r}$，则总参数可粗略写成：
 
 ~~~math
 P_{\mathrm{total}}

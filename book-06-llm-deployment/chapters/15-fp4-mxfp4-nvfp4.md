@@ -29,9 +29,9 @@ FP16 和 BF16 通常提供比整数更大的动态范围，适合激活和累加
 格点：
 
 ~~~math
-q_i=\mathrm{round}\left(\frac{x_i}{s}\right),
+q_{i}=\mathrm{round}\left(\frac{x_{i}}{s}\right),
 \qquad
-\hat{x}_i=sq_i
+\hat{x}_{i}=sq_{i}
 ~~~
 
 `x_i` 是原始值，`q_i` 是量化值，`s` 是 scale，`\hat{x}_i` 是反量化值。scale
@@ -52,9 +52,9 @@ FP4 的动机是让低比特码保留某种浮点式的指数/尾数结构，而
 ~~~math
 M_{\mathrm{block}}
 \approx
-n\frac{b_q}{8}
-+\frac{b_s}{8}
-+\frac{b_m}{8}
+n\frac{b_{q}}{8}
++\frac{b_{s}}{8}
++\frac{b_{m}}{8}
 ~~~
 
 `n` 是 block 中元素数量，`b_q` 是每个元素的 payload bit 数，`b_s` 是 scale 的
@@ -62,7 +62,7 @@ n\frac{b_q}{8}
 告诉我们 `n`、`b_s`、`b_m`、scale dtype、layout、累加 dtype 和未量化层。
 
 例如每 128 个元素共享一个 16 bit scale 和一个 8 bit metadata，则平均每元素还
-要承担 `24/128=0.1875 bit` 的额外存储。block 很小时，metadata 占比更大；block
+要承担 $24/128=0.1875 \mathrm{bit}$ 的额外存储。block 很小时，metadata 占比更大；block
 很大时，scale 对异常值的适应能力更弱。
 
 ### 1.3 低比特系统至少有五个 dtype
@@ -112,8 +112,8 @@ OCP《Microscaling Formats (MX) v1.0》把 MXFP4 定义为 E2M1 元素、每 32 
 一个 8 bit E8M0 scale。E8M0 只有指数位、没有尾数位或符号位，因此有限 scale 是
 2 的整数次幂。相比能够表示非 2 的整数次幂的 FP8 scale，这让尺度编码更简单，
 却也会把 scale 本身的可选位置限制在更稀疏的集合里。OCP 将它定义成一种向量格式：
-32 个 4 bit 元素与一个 8 bit scale 合起来为 `32×4+8=136` bit，即忽略补齐和布局
-开销时平均 `4.25 bit/element`。定义以[OCP MX v1.0 规范](https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf)
+32 个 4 bit 元素与一个 8 bit scale 合起来为 $32\times 4+8=136$ bit，即忽略补齐和布局
+开销时平均 $4.25 \mathrm{bit}/\mathrm{element}$。定义以[OCP MX v1.0 规范](https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf)
 为准。
 
 microscaling 的直觉是：把一个大 tensor 切成小组，每组用自己的动态范围。与整个
@@ -130,20 +130,20 @@ NVIDIA Transformer Engine 2.20.2 的 [NVFP4 文档](https://docs.nvidia.com/deep
 scale：
 
 ~~~math
-\hat{x}_i = c_i s_g s_{\mathrm{global}},
-\qquad c_i\in\mathrm{E2M1},\quad i\in B_g,\quad |B_g|=16
+\hat{x}_{i} = c_{i} s_{g} s_{\mathrm{global}},
+\qquad c_{i}\in\mathrm{E2M1},\quad i\in B_{g},\quad |B_{g}|=16
 ~~~
 
 E4M3 scale 的尾数位让它能表达非 2 的整数次幂的尺度；global scale 则把整张量先
 映射到 E4M3 与 E2M1 可覆盖的范围。这个设计增加了 scale 精度和每组 scale 数量，
 也需要保存 global scale。仅按一维分组计算，忽略 padding 与布局时为
-`4 + 8/16 + 32/N = 4.5 + 32/N bit/element`；这里 `N` 是 tensor 元素数，`32/N`
+$4 + 8/16 + 32/N = 4.5 + 32/N \mathrm{bit}/\mathrm{element}$；这里 `N` 是 tensor 元素数，$32/N$
 来自一个 FP32 global scale 的摊销。
 
 NVFP4 同样不等于一套固定不变的权重 recipe。Transformer Engine 2.20.2 文档说明，
 其训练 recipe 默认对权重使用 16×16 的二维 scaling，对激活和梯度使用一维的
 16-element scaling；其他工具和部署 artifact 可能采用不同 layout。后文的
-`4.5 + 32/N` 只计算一维分组的 scale 账本，不可直接当作所有 NVFP4 checkpoint 的
+$4.5 + 32/N$ 只计算一维分组的 scale 账本，不可直接当作所有 NVFP4 checkpoint 的
 文件大小。
 
 还要区分“格式 recipe”和“量化图接口”。[TensorRT 10.x 的量化类型文档](https://docs.nvidia.com/deeplearning/tensorrt/10.x.x/inference-library/work-quantized-types.html)
@@ -171,7 +171,7 @@ engine。
 | 元素码本 | 非负幅值 `0、0.5、1、1.5、2、3、4、6` 及其负值 | E2M1 | E2M1 |
 | 局部 scale | 未由“FP4”泛称规定 | 每 32 个元素一个 E8M0（8 bit） | 每 16 个元素一个 E4M3（8 bit） |
 | 全局 scale | 未由“FP4”泛称规定 | OCP MXFP4 定义中没有 | 每 tensor 一个 FP32 |
-| 名义存储 | 仅 payload 为 4 bit | `4+8/32 = 4.25 bit/element` | `4+8/16+32/N bit/element` |
+| 名义存储 | 仅 payload 为 4 bit | $4+8/32 = 4.25 \mathrm{bit}/\mathrm{element}$ | $4+8/16+32/N \mathrm{bit}/\mathrm{element}$ |
 | 关键差别 | 只描述标量码本 | E8M0 scale 只有指数、scale 是 2 的幂 | E4M3 block scale 加 FP32 global scale |
 | 仍需查证 | scale、packing、累加和 kernel | 实际 scale 布局、padding、kernel | 目标 recipe 的 1D/2D scaling、布局和 kernel |
 
@@ -215,10 +215,10 @@ artifact，打印实际 dtype 和 kernel，运行覆盖目标 shape 的 warm-up�
 的量化与重构可以写成：
 
 ~~~math
-q_i=Q\left(\frac{x_i}{s_g}\right),
+q_{i}=Q\left(\frac{x_{i}}{s_{g}}\right),
 \qquad
-\hat{x}_i=s_gD(q_i),
-\quad i\in B_g
+\hat{x}_{i}=s_{g}D(q_{i}),
+\quad i\in B_{g}
 ~~~
 
 `Q` 是量化或舍入函数，`D` 是从 payload 码表取值的反量化函数。若所有元素共享
@@ -229,18 +229,18 @@ block/group scale 是两者之间的工程折中。
 ### 3.2 异常值为什么会消耗小值的精度
 
 考虑一个 block 中 15 个值落在 `[-1,1]`，另一个值为 `20`。用 E2M1 的最大幅值 6
-做简化对称缩放时，令 `s=20/6≈3.33`。普通值落到较小的归一化范围；例如
-`0.9/3.33≈0.27`，最近的 E2M1 码值是 0.5，重构约为 `3.33×0.5≈1.67`，绝对
-误差约 0.77。若 `0.9` 单独位于一个 block，`s=0.9/6=0.15`，归一化值为 6，
+做简化对称缩放时，令 $s=20/6\approx 3.33$。普通值落到较小的归一化范围；例如
+$0.9/3.33\approx 0.27$，最近的 E2M1 码值是 0.5，重构约为 $3.33\times 0.5\approx 1.67$，绝对
+误差约 0.77。若 `0.9` 单独位于一个 block，$s=0.9/6=0.15$，归一化值为 6，
 可重构回 0.9。这个例子展示共享 scale 如何让大 outlier 挤压小值精度；它没有加入
 MX 的 E8M0 scale 舍入、NVFP4 的 E4M3/global scale 或舍入边界。
 
 可以把误差拆成两个方向：
 
 ~~~math
-\epsilon_i=x_i-\hat{x}_i,
+\epsilon_{i}=x_{i}-\hat{x}_{i},
 \qquad
-\mathrm{MSE}(B_g)=\frac{1}{|B_g|}\sum_{i\in B_g}\epsilon_i^2
+\mathrm{MSE}(B_{g})=\frac{1}{|B_{g}|}\sum_{i\in B_{g}}\epsilon_{i}^2
 ~~~
 
 平均 MSE 仍然只是一个诊断量。若小值位于 attention score、router、归一化或输出
@@ -290,7 +290,7 @@ baseline 与测试配置下的最高值，不是所有 FP4 负载的预测倍率
 分别计算把 block 最大值映射到 6 与 4 的候选，再按重构误差选一个。映射到 4 会放弃
 ±6 端点，却把 E2M1 的 `3` 放到 block 最大值的 75% 处；映射到 6 保留完整范围，因此
 不宜把所有 block 固定映射到 4。论文的 `[10,20,30,40]` 算例中，映射到 6 的候选重构
-为 `[9.75,19.5,26,39]`，MSE 为 `17.3125/4≈4.33`；映射到 4 时 scale 为 10，归一化
+为 `[9.75,19.5,26,39]`，MSE 为 $17.3125/4\approx 4.33$；映射到 4 时 scale 为 10，归一化
 码值 `[1,2,3,4]` 都可表示，重构误差为 0。这是候选选择机制的单 block 手算，不是模型
 质量或部署收益。论文实验认为按 MSE 选取整体表现较好；Transformer Engine 2.20.2 的
 接口默认误差度量却是 MAE，且默认未启用 4/6，两者设置不可混写。该版本文档列出的主要
@@ -301,15 +301,15 @@ global scale 上界 256。以上均是版本化 recipe 声明，不证明其他 
 另一个针对 E8M0 尺度间隔的路线是 Overflow-Aware Scaling（OAS）与 Macro Block
 Scaling（MBS）。这篇 2026 年 1 月的 arXiv v1 在 1×16 局部块上把最大值映射到更靠近
 E2M1 饱和端的范围。例如归一化最大值从 3.3 加倍到 6.6，最近码由 3 变成 6，两者
-相对误差都是 `0.3/3.3≈9.1%`；较小值同时获得约两倍的归一化动态范围，有机会从
+相对误差都是 $0.3/3.3\approx 9.1\%$；较小值同时获得约两倍的归一化动态范围，有机会从
 零码变成非零码。这是论文中归一化值的教学计算，不证明目标 artifact 的 scale 选择
 已经正确。
 
 MBS 再将 8 个连续的 1×16 子块合成 1×128 macro block，为该 macro block 增加一个
-8-bit mantissa 因子；局部 E8M0 scale 继续承载 2 的幂指数。例如 `α_max=3.3` 时，
-论文示意 scale 为 `6/3.3≈1.82=2^0×1.82`，可将指数部分并入局部 E8M0，并额外
+8-bit mantissa 因子；局部 E8M0 scale 继续承载 2 的幂指数。例如 $α_\mathrm{max}=3.3$ 时，
+论文示意 scale 为 $6/3.3\approx 1.82=2^{0}\times 1.82$，可将指数部分并入局部 E8M0，并额外
 存储 mantissa。只按 E2M1 payload、每 16 值一个 E8M0 和每 128 值一个 8-bit mantissa
-估算，为 `4+8/16+8/128=4.5625 bit/value`，仍未计布局与 padding。OAS 和 MBS
+估算，为 $4+8/16+8/128=4.5625 \mathrm{bit}/\mathrm{value}$，仍未计布局与 padding。OAS 和 MBS
 处理 scale 映射/精度，与 MR-GPTQ 的旋转加误差补偿不同；静态 MBS 计算较省，动态
 查表的精度更高但作者实现更慢。
 
@@ -576,7 +576,7 @@ scale 使用最大绝对值，普通值被除以 20，落在 `[-0.05,0.05]`。�
 
 ### 8.2 存储例子
 
-设线性层有 `N=4096×4096` 个权重，FP16 每元素 2 字节，FP4 payload 每元素 0.5
+设线性层有 $N=4096\times 4096$ 个权重，FP16 每元素 2 字节，FP4 payload 每元素 0.5
 字节；每 128 个权重共享一个 2 字节 scale，并有 1 字节 metadata，则：
 
 ~~~math
@@ -586,20 +586,20 @@ N\times0.5
 +\frac{N}{128}\times(2+1)
 ~~~
 
-`N=16,777,216` 时，payload 约 8 MiB，scale 和 metadata 约 0.375 MiB，总量约
+$N=16,777,216$ 时，payload 约 8 MiB，scale 和 metadata 约 0.375 MiB，总量约
 8.375 MiB；FP16 权重约 32 MiB。压缩比约为 `3.82`，不是简单把 2 字节除以 0.5
 就声称有 4 倍真实压缩。
 
 如果 runtime 还需要 FP16 workspace，峰值显存要再加解包缓冲、激活、通信副本和
 allocator 余量。容量规划使用峰值，不使用模型文件大小替代运行时账本。
 
-再按两个具体一维格式 profile 计算同一矩阵。设 `N=4096×4096=16,777,216`，不需
+再按两个具体一维格式 profile 计算同一矩阵。设 $N=4096\times 4096=16,777,216$，不需
 padding，FP16 权重为 32 MiB，FP4 payload 本身为 8 MiB：
 
 | 账本 | scale 字节 | 总大小 | 相对 FP16 的理论压缩比 |
 | --- | ---: | ---: | ---: |
-| OCP MXFP4：每 32 个值一个 E8M0 | `N/32 = 524,288`（0.5 MiB） | 8.5 MiB | `32/8.5 ≈ 3.76×` |
-| NVFP4 一维：每 16 个值一个 E4M3，另有 FP32 global scale | `N/16 + 4 = 1,048,580`（约 1 MiB） | 约 9 MiB | 约 `3.56×` |
+| OCP MXFP4：每 32 个值一个 E8M0 | $N/32 = 524,288$（0.5 MiB） | 8.5 MiB | $32/8.5 \approx  3.76\times $ |
+| NVFP4 一维：每 16 个值一个 E4M3，另有 FP32 global scale | $N/16 + 4 = 1,048,580$（约 1 MiB） | 约 9 MiB | 约 $3.56\times $ |
 
 这两个账本只比较 E2M1 payload 和上述 scale，不含对齐、转置副本、未量化层、
 engine workspace 或 KV。特别是 Transformer Engine 的 NVFP4 二维权重 scale 与一维
@@ -713,17 +713,17 @@ E8M0 scale 舍入、NVFP4 的 E4M3/global/2D scaling、物理 packing 或 Tensor
      'restored': [0.9, 0.9, 0.0, 0.0, 20.0, 0.0, 0.0, 0.0]}}
 ~~~
 
-手算时，block size 取 8，`s=20/6≈3.3333`，归一化值约为
+手算时，block size 取 8，$s=20/6\approx 3.3333$，归一化值约为
 `[0.27,0.24,0.006,-0.003,6,0.21,-0.18,0.012]`。最近码为
 `[0.5,0,0,0,6,0,0,0]`，乘回 scale 后，第一个 0.9 被重构为约 1.6667，20 保持
 不变，其余落到 0。平方误差和约为 `2.0799`，除以 8 得 MSE `0.25998`。
 
-block size 取 4 时，前一块 `s=0.9/6=0.15`，归一化后约为
+block size 取 4 时，前一块 $s=0.9/6=0.15$，归一化后约为
 `[6,5.333,0.133,-0.067]`，对应码值 `[6,6,0,0]`，重构为 `[0.9,0.9,0,0]`，
 平方误差和是 `0.0105`。后一块仍以 20 为最大值，最近码重构为 `[20,0,0,0]`，
-平方误差和为 `0.8516`。合计 `0.8621/8=0.1077625`，按代码保留五位小数为
-`0.10776`。存储账本中 8 个元素的 payload 为 `8×4/8=4 bytes`；一个 block
-额外 `2+1=3 bytes`，故分别是 7 bytes 和 `4+2×3=10 bytes`。
+平方误差和为 `0.8516`。合计 $0.8621/8=0.1077625$，按代码保留五位小数为
+`0.10776`。存储账本中 8 个元素的 payload 为 $8\times 4/8=4 \mathrm{bytes}$；一个 block
+额外 $2+1=3 \mathrm{bytes}$，故分别是 7 bytes 和 $4+2\times 3=10 \mathrm{bytes}$。
 
 block 从 8 缩小到 4 后，异常值只影响后一个 block，MSE 从约 `0.25998` 降为
 `0.10776`，但 scale 和 metadata 数量增加。这里使用真正的 E2M1 可表示值，却没有模拟 E4M3/E8M0 scale 量化、

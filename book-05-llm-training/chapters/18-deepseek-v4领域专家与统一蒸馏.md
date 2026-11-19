@@ -26,26 +26,26 @@ DeepSeek-V4 技术报告把后训练描述为两阶段流程：先针对数学�
 
 ### 第一阶段：领域专家培养
 
-设领域集合为 $D=\{d_1,...,d_K\}$。对领域 $d_k$，先使用领域数据和示范做监督微调，再用该领域的 prompts 与 reward signals 做强化学习。V4 报告称专家训练沿用 V3.2 后训练流程，并在 RL 阶段使用 GRPO；报告列举数学、代码、Agent 和指令跟随作为目标领域示例，但没有列出所有专家 checkpoint 的名称和完整训练配方。报告还说最终多教师蒸馏阶段使用 10 个以上教师。[技术报告 §5.1.1–5.1.2](https://arxiv.org/html/2606.19348v1#S5.SS1)
+设领域集合为 $D=\{d_{1},...,d_{K}\}$。对领域 $d_{k}$，先使用领域数据和示范做监督微调，再用该领域的 prompts 与 reward signals 做强化学习。V4 报告称专家训练沿用 V3.2 后训练流程，并在 RL 阶段使用 GRPO；报告列举数学、代码、Agent 和指令跟随作为目标领域示例，但没有列出所有专家 checkpoint 的名称和完整训练配方。报告还说最终多教师蒸馏阶段使用 10 个以上教师。[技术报告 §5.1.1–5.1.2](https://arxiv.org/html/2606.19348v1#S5.SS1)
 
-对于领域 $d_k$，一个带目标掩码的 SFT loss 可以写成：
+对于领域 $d_{k}$，一个带目标掩码的 SFT loss 可以写成：
 
 ```math
 \mathcal{L}_{\mathrm{SFT}}^{(k)}
-=-\frac{1}{M_k}\sum_t m_t\log p_\theta(y_t\mid x,y_{1:t-1}),
-\qquad M_k=\sum_t m_t>0.
+=-\frac{1}{M_{k}}\sum_{t} m_{t}\log p_{\theta}(y_{t}\mid x,y_{1:t-1}),
+\qquad M_{k}=\sum_{t} m_{t}>0.
 ```
 
-$x$ 是 prompt/上下文， $y_t$ 是第 $t$ 个目标 token， $m_t\in{0,1}$ 标记该位置是否计入 loss， $M_k$ 是本批次参与监督的 token 数。若 prompt 和回答都应学习，掩码可以覆盖两者；instruction tuning 常只监督 assistant 目标区间。用有效 token 数归一化，可以避免不同长度样本的 loss 尺度随 batch 总 token 数任意变化。
+$x$ 是 prompt/上下文， $y_{t}$ 是第 $t$ 个目标 token， $m_{t}\in{0,1}$ 标记该位置是否计入 loss， $M_{k}$ 是本批次参与监督的 token 数。若 prompt 和回答都应学习，掩码可以覆盖两者；instruction tuning 常只监督 assistant 目标区间。用有效 token 数归一化，可以避免不同长度样本的 loss 尺度随 batch 总 token 数任意变化。
 
 随后在有领域 reward signal 的环境中做 GRPO（Group Relative Policy Optimization）。通常做法是对同一个 prompt 采样一组回答，用组内相对奖励估计优势，减少对独立 value model 的依赖。下面公式是常见的教学化组内标准化写法，**不是** V4 报告公开的精确 advantage、归一化或 clipping 配置：
 
 ```math
-A_i=\frac{r_i-\mathrm{mean}(r_{1:G})}
+A_{i}=\frac{r_{i}-\mathrm{mean}(r_{1:G})}
 {\mathrm{std}(r_{1:G})+\epsilon},
 ```
 
-其中 $G$ 是同一 prompt 的回答数， $r_i$ 是 verifier、奖励模型或规则组合产生的 reward， $A_i$ 是组内相对优势，`std` 这里使用组内总体标准差。实际 GRPO 还涉及 policy ratio、clip、KL 项、token mask、长度处理和 rollout 过滤；V4 报告只说超参数与其既有研究接近，没有公开本章公式中的具体配置。GRPO 的通用推导和 V4 报告不能互相替代，前者帮助理解算法，后者支持关于 V4 的事实。
+其中 $G$ 是同一 prompt 的回答数， $r_{i}$ 是 verifier、奖励模型或规则组合产生的 reward， $A_{i}$ 是组内相对优势，`std` 这里使用组内总体标准差。实际 GRPO 还涉及 policy ratio、clip、KL 项、token mask、长度处理和 rollout 过滤；V4 报告只说超参数与其既有研究接近，没有公开本章公式中的具体配置。GRPO 的通用推导和 V4 报告不能互相替代，前者帮助理解算法，后者支持关于 V4 的事实。
 
 组内归一化能减少不同 prompt 的绝对奖励尺度差异，但它不是奖励正确性的证明。如果一组回答全部利用了 verifier 漏洞，最高的那个仍可能只是“漏洞利用得最好”。因此每个领域都需要独立检查器、反作弊测试、隐藏任务和人工抽样。
 
@@ -138,12 +138,12 @@ $C_{\mathrm{correct}}$ 和 $C_{\mathrm{format}}$ 分别表示结果正确、输�
 统一蒸馏让学生先 rollout，再让一个或多个领域教师在这些状态上提供 token 分布、下一步动作、错误批注、候选答案或最终 artifact。为了说明 Agent 场景中“学生状态”包含什么，可以把训练记录设计成：
 
 ```math
-u=(x,s_t,a_t,o_{t+1},y,u_T,v,\rho_e),
+u=(x,s_{t},a_{t},o_{t+1},y,u_{T},v,\rho_{e}),
 ```
 
-其中 $s_t$ 是学生在第 $t$ 步看到的完整状态， $a_t$ 是 token 或工具动作， $o_{t+1}$ 是环境 observation， $y$ 是最终结果， $u_T$ 是教师信号， $v$ 是 verifier， $\rho_e$ 是环境和协议版本。这是用于复现和审计的推荐 schema，不是 DeepSeek 报告披露的内部日志格式。若只记录用户 prompt 和最终文本，研究者就无法重建学生在哪个错误前缀上得到什么指导。
+其中 $s_{t}$ 是学生在第 $t$ 步看到的完整状态， $a_{t}$ 是 token 或工具动作， $o_{t+1}$ 是环境 observation， $y$ 是最终结果， $u_{T}$ 是教师信号， $v$ 是 verifier， $\rho_{e}$ 是环境和协议版本。这是用于复现和审计的推荐 schema，不是 DeepSeek 报告披露的内部日志格式。若只记录用户 prompt 和最终文本，研究者就无法重建学生在哪个错误前缀上得到什么指导。
 
-沿用“负数金额必须拒绝”的教学任务，一条记录可以写成：任务输入 $x$ 是“拒绝负数金额”；状态 $s_t$ 是学生把 -3 转成 3 的代码状态；动作 $a_t$ 是向 `src/amount.py` 写入该修改；观察 $o_{t+1}$ 是测试报告预期 reject、实际接受；产物 $y$ 是提交后的 patch；教师信号 $u_T$ 是“不要取绝对值，先保留符号并拒绝负数”；验证结果为 $v=\mathrm{fail}$；版本信息 $\rho_e$ 记录学生、代码仓库、测试和教师的各自 revision。读者可以据此还原教师看到的错误，而不只是看到最后一个失败分数。
+沿用“负数金额必须拒绝”的教学任务，一条记录可以写成：任务输入 $x$ 是“拒绝负数金额”；状态 $s_{t}$ 是学生把 -3 转成 3 的代码状态；动作 $a_{t}$ 是向 `src/amount.py` 写入该修改；观察 $o_{t+1}$ 是测试报告预期 reject、实际接受；产物 $y$ 是提交后的 patch；教师信号 $u_{T}$ 是“不要取绝对值，先保留符号并拒绝负数”；验证结果为 $v=\mathrm{fail}$；版本信息 $\rho_{e}$ 记录学生、代码仓库、测试和教师的各自 revision。读者可以据此还原教师看到的错误，而不只是看到最后一个失败分数。
 
 学生和教师的状态协议还包括工具调用格式与思考轨迹的保留策略。V4 报告称，其工具调用使用专用 `|DSML|` token 与 XML 格式；作者报告该格式可减少转义失败和工具调用错误，但没有给出独立复现和可横比的误差幅度。做 OPD 时，工具 schema、特殊 token、tokenizer 和版本必须进入状态/动作契约，否则两个模型的同一位置 log-prob 可能对应不同动作。[技术报告 §5.1.1](https://arxiv.org/html/2606.19348v1#S5.SS1)
 
@@ -153,32 +153,32 @@ DeepSeek-V4 报告将多教师目标写成加权 reverse KL。把它展开到学
 
 ```math
 \mathcal{L}_{\mathrm{OPD}}(\theta)
-=\mathbb{E}_{s\sim d_{\pi_\theta}}
-\left[\sum_{i=1}^{N}w_i\,
+=\mathbb{E}_{s\sim d_{\pi_{\theta}}}
+\left[\sum_{i=1}^{N}w_{i}\,
 D_{\mathrm{KL}}\left(
-\pi_\theta(\cdot\mid s)\|\pi_{E_i}(\cdot\mid s)
+\pi_{\theta}(\cdot\mid s)\|\pi_{E_{i}}(\cdot\mid s)
 \right)\right].
 ```
 
-$d_{\pi_\theta}$ 表示由学生策略访问到的状态分布， $\pi_{E_i}$ 是第 $i$ 个专家教师， $w_i$ 是报告所说的教师相对权重。报告解释，学生应在数学状态上向数学教师学习、在代码状态上向代码教师学习；但它没有公开 $w_i$ 是固定的、按样本指定的还是由何种路由器计算。因此公式中的状态期望用于解释 on-policy，不能被读成完整复现配方。论文给出的核心形式是 $\sum_i w_i D_{KL}(\pi_\theta\|\pi_{E_i})$，而不是本文为读者补上的状态期望记法。[技术报告 §5.1.2](https://arxiv.org/html/2606.19348v1#S5.SS1)
+$d_{\pi_{\theta}}$ 表示由学生策略访问到的状态分布， $\pi_{E_{i}}$ 是第 $i$ 个专家教师， $w_{i}$ 是报告所说的教师相对权重。报告解释，学生应在数学状态上向数学教师学习、在代码状态上向代码教师学习；但它没有公开 $w_{i}$ 是固定的、按样本指定的还是由何种路由器计算。因此公式中的状态期望用于解释 on-policy，不能被读成完整复现配方。论文给出的核心形式是 $\sum_{i} w_{i} D_{KL}(\pi_{\theta}\|\pi_{E_{i}})$，而不是本文为读者补上的状态期望记法。[技术报告 §5.1.2](https://arxiv.org/html/2606.19348v1#S5.SS1)
 
-在一个固定前缀 $s$ 上，若学生分布为 $p_S$、教师分布为 $p_T$，reverse KL 为：
+在一个固定前缀 $s$ 上，若学生分布为 $p_{S}$、教师分布为 $p_{T}$，reverse KL 为：
 
 ```math
-D_{\mathrm{KL}}(p_S\|p_T)
-=\sum_v p_S(v\mid s)\log\frac{p_S(v\mid s)}{p_T(v\mid s)}.
+D_{\mathrm{KL}}(p_{S}\|p_{T})
+=\sum_{v} p_{S}(v\mid s)\log\frac{p_{S}(v\mid s)}{p_{T}(v\mid s)}.
 ```
 
-权重方向很重要：每个 token 的差异由学生概率 $p_S(v\mid s)$ 加权，所以学生已经几乎不考虑的 token，在 reverse KL 中通常贡献很小；forward KL 则是 $D_{\mathrm{KL}}(p_T\Vert p_S)=\sum_{v\in\mathcal{V}}p_T(v\mid s)\log\bigl(p_T(v\mid s)/p_S(v\mid s)\bigr)$，由教师概率加权，更关注覆盖教师有质量的区域。reverse KL 因而常表现出偏向学生当前主要模式的性质，但它可能漏掉学生尚未探索到的教师模式。对词表做完整求和消除了动作抽样误差，不会自动解决 student support、教师覆盖或状态分布的问题。
+权重方向很重要：每个 token 的差异由学生概率 $p_{S}(v\mid s)$ 加权，所以学生已经几乎不考虑的 token，在 reverse KL 中通常贡献很小；forward KL 则是 $D_{\mathrm{KL}}(p_{T}\Vert p_{S})=\sum_{v\in\mathcal{V}}p_{T}(v\mid s)\log\bigl(p_{T}(v\mid s)/p_{S}(v\mid s)\bigr)$，由教师概率加权，更关注覆盖教师有质量的区域。reverse KL 因而常表现出偏向学生当前主要模式的性质，但它可能漏掉学生尚未探索到的教师模式。对词表做完整求和消除了动作抽样误差，不会自动解决 student support、教师覆盖或状态分布的问题。
 
-学生先按 $p_S$ 采样 token 时，可以用下式构造一个**采样估计量**：
+学生先按 $p_{S}$ 采样 token 时，可以用下式构造一个**采样估计量**：
 
 ```math
-\hat A_t^{\mathrm{KD}}
+\hat A_{t}^{\mathrm{KD}}
 =\mathrm{sg}\!\left[
-\log\frac{p_T(a_t\mid s_t)}{p_S(a_t\mid s_t)}
+\log\frac{p_{T}(a_{t}\mid s_{t})}{p_{S}(a_{t}\mid s_{t})}
 \right],
-\qquad a_t\sim p_S(\cdot\mid s_t).
+\qquad a_{t}\sim p_{S}(\cdot\mid s_{t}).
 ```
 
 $\mathrm{sg}$ 表示 stop-gradient。这个 log-ratio 不是一条可以直接当作监督标签的 reward；在 sampled-token 方案里，它作为 policy-gradient surrogate 的 advantage 信号，仍要乘上学生策略的梯度。学生采到一个教师也认为更好的 token 时，log-ratio 为正；反之为负。[MiniLLM](https://arxiv.org/abs/2306.08543v6) 也研究了 reverse-KL 与 on-policy 优化，但它的序列级目标、信用分配方法和模型规模实验属于另一套具体算法，不能把“都用了 reverse KL”理解成完全相同的实现。
@@ -189,13 +189,13 @@ Teacher 和 student 至少要在同一 tokenization、词表映射、prompt 模�
 
 只抽一个学生采样 token 来估计某个前缀上的 reverse-KL，估计器无偏并不代表单次信号稳定。下面用三 token 词表手算：
 
-| token | 学生 $p_S$ | 教师 $p_T$ | $\ln(p_S/p_T)$ | 从学生采到该 token 的概率 |
+| token | 学生 $p_{S}$ | 教师 $p_{T}$ | $\ln(p_{S}/p_{T})$ | 从学生采到该 token 的概率 |
 |---|---:|---:|---:|---:|
 | A | 0.60 | 0.70 | -0.154 | 0.60 |
 | B | 0.30 | 0.20 | 0.405 | 0.30 |
 | C | 0.10 | 0.10 | 0.000 | 0.10 |
 
-精确求和得到 $D_{\mathrm{KL}}(p_S \Vert p_T) = 0.60\times(-0.154) + 0.30\times0.405 + 0.10\times0 \approx 0.029$ nat。若每次只抽一个 token，样本可能是 `-0.154`，也可能是 `0.405`；当真实 KL 只有 `0.029` 时，单样本波动比均值大得多。把所有词表项的概率都放进求和，可在这个前缀上直接算出 KL 及其对 logits 的梯度，消除“只抽到哪个 token”引入的采样噪声。它仍然要采样学生前缀，所以序列/状态分布的波动并没有消失。
+精确求和得到 $D_{\mathrm{KL}}(p_{S} \Vert p_{T}) = 0.60\times(-0.154) + 0.30\times0.405 + 0.10\times0 \approx 0.029$ nat。若每次只抽一个 token，样本可能是 `-0.154`，也可能是 `0.405`；当真实 KL 只有 `0.029` 时，单样本波动比均值大得多。把所有词表项的概率都放进求和，可在这个前缀上直接算出 KL 及其对 logits 的梯度，消除“只抽到哪个 token”引入的采样噪声。它仍然要采样学生前缀，所以序列/状态分布的波动并没有消失。
 
 下面的 Python 3 标准库示例输入两个已归一化、词表对齐的离散分布，输出精确 reverse KL，以及“只采一个 student token 来估计 KL”时单样本 log-ratio 的标准差。把代码保存为 `.py` 文件后，用 `python3 <文件名>.py` 执行。它只核算固定前缀上的概率账本，不实现模型梯度或完整 OPD：
 
@@ -259,18 +259,18 @@ DeepSeek-V4 报告指出，已有实现常把 full-vocabulary KL 化为逐 token
 
 ```math
 p^*(v\mid s)
-=\frac{\prod_i p_{E_i}(v\mid s)^{w_i/W}}
-{\sum_u\prod_i p_{E_i}(u\mid s)^{w_i/W}},
-\qquad W=\sum_i w_i.
+=\frac{\prod_{i} p_{E_{i}}(v\mid s)^{w_{i}/W}}
+{\sum_{u}\prod_{i} p_{E_{i}}(u\mid s)^{w_{i}/W}},
+\qquad W=\sum_{i} w_{i}.
 ```
 
-也就是说，它是教师分布的归一化加权几何平均。若同一状态上两位教师等权，且它们给出 $p_A=(0.9,0.1)$ 与 $p_B=(0.2,0.8)$，使目标最小的分布是 $(\sqrt{0.18},\sqrt{0.08})$ 归一化后得到 $(0.6,0.4)$。直接对概率向量取算术平均则是 $(0.55,0.45)$；两者不是同一个目标。
+也就是说，它是教师分布的归一化加权几何平均。若同一状态上两位教师等权，且它们给出 $p_{A}=(0.9,0.1)$ 与 $p_{B}=(0.2,0.8)$，使目标最小的分布是 $(\sqrt{0.18},\sqrt{0.08})$ 归一化后得到 $(0.6,0.4)$。直接对概率向量取算术平均则是 $(0.55,0.45)$；两者不是同一个目标。
 
 这个两动作例子说明：当任务相关性不一样时，教师权重会改变学生最终偏好的分布；如果把所有教师不加区分地作用到所有状态，互相冲突的偏好可能被折中掉。V4 报告说明学生会按当前任务上下文选择相关能力，但没有披露具体路由器或冲突裁决规则。下节的 task label、verifier 和人工升级规则是工程设计建议，不是 V4 的已披露实现。
 
 ### 教师选择与冲突：报告披露了什么
 
-报告说明，学生应结合当前任务上下文向相关教师学习；目标领域例子包括数学、代码、Agent 和指令跟随，OPD 阶段使用 10 个以上教师。公式中的 $w_i$ 表示各教师的相对重要性。但报告没有给出可复现的教师路由器、具体权重表、权重是否随状态变化或无匹配教师时的回退规则。因此不能把下面的建议表说成 DeepSeek-V4 的实现。[技术报告 §5.1.2](https://arxiv.org/html/2606.19348v1#S5.SS1)
+报告说明，学生应结合当前任务上下文向相关教师学习；目标领域例子包括数学、代码、Agent 和指令跟随，OPD 阶段使用 10 个以上教师。公式中的 $w_{i}$ 表示各教师的相对重要性。但报告没有给出可复现的教师路由器、具体权重表、权重是否随状态变化或无匹配教师时的回退规则。因此不能把下面的建议表说成 DeepSeek-V4 的实现。[技术报告 §5.1.2](https://arxiv.org/html/2606.19348v1#S5.SS1)
 
 如果工程团队要实现自己的多教师路由，可以把路由条件和可审计信号显式化：
 
@@ -297,14 +297,14 @@ p^*(v\mid s)
 
 10 个教师同时保存就约 15.3 GiB；这还不包括教师权重、前向激活、学生梯度、优化器状态或轨迹数据。这是一个透明的内存账本示例，不是 V4 报告中的 batch、词表 dtype 或实测配置。
 
-为什么缓存 hidden state 而不是 logits？对一个前缀 $s$，教师末层表示 $h_T(s)\in R^d$ 经过词表输出头变成 logits：
+为什么缓存 hidden state 而不是 logits？对一个前缀 $s$，教师末层表示 $h_{T}(s)\in R^d$ 经过词表输出头变成 logits：
 
 ```math
-z_T(s)=W_{\mathrm{out},T}h_T(s)+b_T,
+z_{T}(s)=W_{\mathrm{out},T}h_{T}(s)+b_{T},
 \qquad W_{\mathrm{out},T}\in\mathbb{R}^{|V|\times d}.
 ```
 
-$h_T$ 只有 $d$ 个数，logits 有 `|V|` 个数。若二者采用同样 dtype 且 $|V|>d$，暂存 hidden state 比暂存 full-vocabulary logits 更省空间；代价是训练时必须重新加载输出头并计算完整 logits。因此该做法把“大量持久化 logits”的内存/存储压力转成“按需读输出头并重建”的计算和 I/O。注意 $z_T$ 仍是未归一化分数，形成 KL 前要经 `softmax` 得到 $p_T$；学生侧的 logits 也要按同一词表位置形成 $p_S$。
+$h_{T}$ 只有 $d$ 个数，logits 有 `|V|` 个数。若二者采用同样 dtype 且 $|V|>d$，暂存 hidden state 比暂存 full-vocabulary logits 更省空间；代价是训练时必须重新加载输出头并计算完整 logits。因此该做法把“大量持久化 logits”的内存/存储压力转成“按需读输出头并重建”的计算和 I/O。注意 $z_{T}$ 仍是未归一化分数，形成 KL 前要经 `softmax` 得到 $p_{T}$；学生侧的 logits 也要按同一词表位置形成 $p_{S}$。
 
 DeepSeek-V4 报告披露了针对这一瓶颈的系统设计：教师权重放在集中式分布存储中，做教师前向时再按需加载，并使用类似 ZeRO 的参数分片（把参数切片分散到多设备）降低单机 I/O 和 DRAM 压力；不把所有教师的 full-vocabulary logits 长期物化，而是集中缓存教师最后一层 hidden states，在学生训练时加载对应教师的输出头并即时重建 logits。数据派发按 teacher index 排序，使一个 mini-batch 只加载对应教师头，并让 GPU 上同时最多驻留一个教师输出头。权重和 hidden states 的加载/卸载异步执行，专用 TileLang GPU kernel 计算全词表 exact KL，并减少动态内存分配。报告还称其框架面向“有效无上限”的教师数设计，单个教师可能达到 trillion-parameter 规模；这是基础设施支持能力的描述，不能反推 V4 实际用了无上限数量或每位教师都达到该规模。[技术报告 §5.2.2](https://arxiv.org/html/2606.19348v1#S5.SS2)
 
@@ -343,11 +343,11 @@ DeepSeek-V4 报告披露了针对这一瓶颈的系统设计：教师权重放�
 ```math
 C_{\mathrm{task}}
 =C_{\mathrm{rollout}}
-+\sum_{i=1}^{N}q_iC_{\mathrm{teacher},i}
++\sum_{i=1}^{N}q_{i}C_{\mathrm{teacher},i}
 +C_{\mathrm{logit/KL}}+C_{\mathrm{verifier}}+C_{\mathrm{I/O}}+C_{\mathrm{storage}}.
 ```
 
-令每一项都按同一个“每训练任务”的成本单位计量： $C_{\mathrm{rollout}}$ 是学生生成轨迹的成本， $C_{\mathrm{\mathrm{teacher}}},i$ 是教师 $i$ 每处理一个 token/状态的前向成本， $C_{\mathrm{logit}}/KL$ 是输出头重建与 exact KL 计算成本， $C_{\mathrm{verifier}}$ 是验证成本， $C_I/O$ 是参数/hidden-state/轨迹传输成本， $C_{\mathrm{storage}}$ 是持久化成本。 $q_i$ 是一个训练样本或 batch 中教师 $i$ 实际处理的 token/状态数；它由教师覆盖、采样策略和数据路由决定。这个表达提醒我们：全词表方案省去的主要是 sampled-token 近似带来的动作采样噪声，并没有省去教师前向、输出头计算或分布式读写。
+令每一项都按同一个“每训练任务”的成本单位计量： $C_{\mathrm{rollout}}$ 是学生生成轨迹的成本， $C_{\mathrm{\mathrm{teacher}}},i$ 是教师 $i$ 每处理一个 token/状态的前向成本， $C_{\mathrm{logit}}/KL$ 是输出头重建与 exact KL 计算成本， $C_{\mathrm{verifier}}$ 是验证成本， $C_{I}/O$ 是参数/hidden-state/轨迹传输成本， $C_{\mathrm{storage}}$ 是持久化成本。 $q_{i}$ 是一个训练样本或 batch 中教师 $i$ 实际处理的 token/状态数；它由教师覆盖、采样策略和数据路由决定。这个表达提醒我们：全词表方案省去的主要是 sampled-token 近似带来的动作采样噪声，并没有省去教师前向、输出头计算或分布式读写。
 
 用假设的统一成本点做一次逐项核算。若学生 rollout 花 `1.20` 点，数学教师处理 `200` 个状态、每状态 `0.002` 点，代码教师处理 `50` 个状态、每状态 `0.004` 点，则两位教师合计 $200\times0.002+50\times0.004=0.60$ 点。再假设输出头重建与 KL 为 `0.50` 点、verifier 为 `0.15` 点、I/O 为 `0.25` 点、存储摊销为 `0.10` 点，总成本为 $1.20+0.60+0.50+0.15+0.25+0.10=2.80$ 点/任务。若独立同分布任务的成功率为 `0.70`，简化的期望成本为 $2.80/0.70=4.00$ 点/成功任务。
 
@@ -438,7 +438,7 @@ V4 报告称统一学生阶段使用“10 个以上”教师；V4.1-Flash 报告
 3. 实现一个组内标准化 reward，加入 verifier unknown 和超时样本的隔离统计。
 4. 设计领域专家到统一学生的 on-policy trace schema，至少记录状态、动作、工具 observation、教师版本和 verifier 版本。
 5. 做消融：仅领域 SFT、SFT+GRPO、离线蒸馏、on-policy distillation，在跨领域任务和单位成功成本上比较。
-6. 用 $p_S=(0.60,0.30,0.10)$ 与 $p_T=(0.70,0.20,0.10)$，手算 full-vocabulary reverse KL 和单 token log-ratio 的标准差；指出精确求和消除的误差来源及仍存在的 rollout 状态差异。
+6. 用 $p_{S}=(0.60,0.30,0.10)$ 与 $p_{T}=(0.70,0.20,0.10)$，手算 full-vocabulary reverse KL 和单 token log-ratio 的标准差；指出精确求和消除的误差来源及仍存在的 rollout 状态差异。
 7. 对两位教师分布推导 weighted reverse-KL 的归一化几何平均，并设计一个能检测错误 teacher routing 的跨领域测试。
 8. 估算全词表 logits 缓冲，按 V4 报告思路画出“教师参数/hidden state 读取 → 输出头重建 → exact KL”的数据流，再注明报告没有公开的峰值显存和 I/O 指标。
 9. 比较 Model Soups、GKD、MiniLLM 与 V4 OPD 的合并对象和成立条件，列一项原论文没有验证、但下一步值得做的控制变量实验。

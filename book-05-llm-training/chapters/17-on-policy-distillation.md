@@ -16,8 +16,8 @@ On-policy distillation（OPD）把学生自己的 rollout 放回训练环路：�
 
 ~~~math
 \mathcal{L}_{\mathrm{off}}
-=\mathbb{E}_{s\sim d_T}
-[-\log \pi_S(a_T\mid s)]
+=\mathbb{E}_{s\sim d_{T}}
+[-\log \pi_{S}(a_{T}\mid s)]
 ~~~
 
 $d_{T}$ 是教师示范产生的状态分布。这个训练目标可能很有效，因为教师示范往往质量高、格式稳定、容易批处理。但部署时学生从自己的历史开始生成，访问的是 $d_{S}$。一旦学生在某个位置选了教师不会选择的 token，后续前缀就不再属于 $d_{T}$。
@@ -26,7 +26,7 @@ $d_{T}$ 是教师示范产生的状态分布。这个训练目标可能很有效
 
 ~~~math
 P(\text{at least one error by }T)
-=1-\prod_{t=1}^{T}(1-q_t)
+=1-\prod_{t=1}^{T}(1-q_{t})
 ~~~
 
 真实语言生成中的错误并不独立，早期错误还会改变后续状态，所以这个公式不是能力定律。它的作用是说明：即便每个 token 的错误概率不大，轨迹足够长时，训练分布与部署分布之间的差异也不能忽略。
@@ -35,7 +35,7 @@ P(\text{at least one error by }T)
 
 这个问题在大模型之前就出现在 imitation learning 中。DAgger 的做法是让当前学生先走到自己会到达的状态，再向专家查询这些状态上的动作并把样本加入训练集。它的理论保证依赖在线学习、专家可查询和代价有界等假设；在 LLM 中，教师可能在错误前缀上失准，查询也可能很贵，所以 DAgger 提供的是问题来源和采样思路，不是 OPD 的性能保证。[DAgger](https://proceedings.mlr.press/v15/ross11a.html)
 
-这个教学近似要求 $T$ 为正整数，且每个 $q_t$ 是同一条件定义下的概率，满足 $0\leq q_t\leq1$。若某一步来自工具超时、权限拒绝或不可判定任务，就不应把它硬塞进“模型出错”的 $q_t$；这些事件需要在状态分布与环境失败率中单独记录。
+这个教学近似要求 $T$ 为正整数，且每个 $q_{t}$ 是同一条件定义下的概率，满足 $0\leq q_{t}\leq1$。若某一步来自工具超时、权限拒绝或不可判定任务，就不应把它硬塞进“模型出错”的 $q_{t}$；这些事件需要在状态分布与环境失败率中单独记录。
 
 学生自生成的错误状态可能包括：选错文件、误解接口、重复调用工具、把空结果当成事实、在测试失败后继续重复同一 patch，或者在数学推导中使用了不成立的假设。教师只提供一条从干净输入开始的最终答案，不能直接教会学生处理这些状态。
 
@@ -64,7 +64,7 @@ OPD 主要减少 $d_{T}$ 与 $d_{S}$ 的状态分布差异。它不自动解决�
 OPD 的样本不是孤立的 prompt 和 answer，而是一个带环境上下文的状态转移记录。可以把一个训练单元写成：
 
 ~~~math
-u=(x,s_t,a_t,o_{t+1},y,u_T,v,\rho_e)
+u=(x,s_{t},a_{t},o_{t+1},y,u_{T},v,\rho_{e})
 ~~~
 
 x 是任务输入， $s_{t}$ 是学生在第 t 步看到的状态， $a_{t}$ 是学生采取的 token 或工具动作， $o_{t+1}$ 是环境返回的 observation，y 是最终 artifact， $u_{T}$ 是教师信号，v 是 verifier 结果， $\rho_{e}$ 是环境和协议的版本信息。
@@ -86,7 +86,7 @@ x 是任务输入， $s_{t}$ 是学生在第 t 步看到的状态， $a_{t}$ 是
 
 缺少版本信息时，旧建议可能被误用于新环境；缺少失败状态时，学生只能学习教师的最终答案；缺少资源信息时，训练中看似有效的策略可能在线上完全不可用。
 
-沿用前面的负数解析例，一条具体记录可以是：任务输入 $x$ 是“拒绝负数金额”；状态 $s_t$ 是学生已把 -3 转成 3 的代码状态；动作 $a_t$ 是提交当前 patch；观察 $o_{t+1}$ 是测试报告“负数应拒绝，实际返回 3”；教师信号 $u_T$ 是“保留负号并在解析前拒绝”；验证结果为 $v=\mathrm{fail}$；版本信息 $\rho_e$ 记录学生 revision 7、仓库 revision 12 和测试 revision 4。这不是固定 schema 的唯一写法，而是把状态、动作、环境反馈、教师建议、验证结果和版本逐项对回公式中的字段。
+沿用前面的负数解析例，一条具体记录可以是：任务输入 $x$ 是“拒绝负数金额”；状态 $s_{t}$ 是学生已把 -3 转成 3 的代码状态；动作 $a_{t}$ 是提交当前 patch；观察 $o_{t+1}$ 是测试报告“负数应拒绝，实际返回 3”；教师信号 $u_{T}$ 是“保留负号并在解析前拒绝”；验证结果为 $v=\mathrm{fail}$；版本信息 $\rho_{e}$ 记录学生 revision 7、仓库 revision 12 和测试 revision 4。这不是固定 schema 的唯一写法，而是把状态、动作、环境反馈、教师建议、验证结果和版本逐项对回公式中的字段。
 
 ### 17.3 蒸馏目标的层次
 
@@ -96,39 +96,39 @@ x 是任务输入， $s_{t}$ 是学生在第 t 步看到的状态， $a_{t}$ 是
 
 ~~~math
 \mathcal{L}_{\mathrm{KD}}
-=-\frac{1}{Z}\sum_t m_t T^2
+=-\frac{1}{Z}\sum_{t} m_{t} T^2
 \sum_{v\in\mathcal{V}}
-p_T^{(T)}(v\mid s_t)\log p_S^{(T)}(v\mid s_t)
+p_{T}^{(T)}(v\mid s_{t})\log p_{S}^{(T)}(v\mid s_{t})
 ~~~
 
-$m_t$ 是有效监督 mask， $Z=\sum_t m_t$ 是归一化分母， $V$ 是词表， $T$ 是蒸馏温度， $p_T^{(T)}$ 表示教师使用温度 $T$ 后的 softmax 分布。 $T^2$ 是常见的梯度尺度补偿项；是否保留、如何与 hard label 混合，取决于具体实现。
+$m_{t}$ 是有效监督 mask， $Z=\sum_{t} m_{t}$ 是归一化分母， $V$ 是词表， $T$ 是蒸馏温度， $p_{T}^{(T)}$ 表示教师使用温度 $T$ 后的 softmax 分布。 $T^2$ 是常见的梯度尺度补偿项；是否保留、如何与 hard label 混合，取决于具体实现。
 
-这个 token-level 写法要求教师和学生在同一状态上使用可对应的词表与特殊 token 协议，温度 $T>0$，并且有效监督数 $Z=\sum_t m_t>0$。若样本经截断或 chat template 后没有剩余的 assistant token，它不是“零蒸馏损失的成功样本”，而是数据协议异常；应跳过并统计空监督率。完整 softmax 的每一项还必须是有限概率，和为一，不能把缺失的教师 logits 用零填充后继续训练。
+这个 token-level 写法要求教师和学生在同一状态上使用可对应的词表与特殊 token 协议，温度 $T>0$，并且有效监督数 $Z=\sum_{t} m_{t}>0$。若样本经截断或 chat template 后没有剩余的 assistant token，它不是“零蒸馏损失的成功样本”，而是数据协议异常；应跳过并统计空监督率。完整 softmax 的每一项还必须是有限概率，和为一，不能把缺失的教师 logits 用零填充后继续训练。
 
 温度较高时，教师低概率 token 的相对关系更容易被学生看到；温度较低时，监督更接近硬标签，教师的最高概率动作更突出。温度不是“越大越有知识”的开关，过高会把不确定性和错误一同扩散给学生。
 
-用两个候选 token 演示交叉熵：本例取蒸馏温度为 `1`，教师分布为 $p_T=(0.8,0.2)$，学生一开始为 $p_S=(0.5,0.5)$，则单位置交叉熵是 $-0.8 \ln 0.5-0.2 \ln 0.5\approx0.693$。若学生学成 $(0.7,0.3)$，交叉熵降到 $-0.8 \ln 0.7-0.2 \ln 0.3\approx0.526$，因为它更常给教师偏好的第一个 token。这里演示的是固定状态上的分布拟合；教师偏好仍不是任务正确性的证明。
+用两个候选 token 演示交叉熵：本例取蒸馏温度为 `1`，教师分布为 $p_{T}=(0.8,0.2)$，学生一开始为 $p_{S}=(0.5,0.5)$，则单位置交叉熵是 $-0.8 \ln 0.5-0.2 \ln 0.5\approx0.693$。若学生学成 $(0.7,0.3)$，交叉熵降到 $-0.8 \ln 0.7-0.2 \ln 0.3\approx0.526$，因为它更常给教师偏好的第一个 token。这里演示的是固定状态上的分布拟合；教师偏好仍不是任务正确性的证明。
 
 #### 17.3.2 Reverse-KL 与 sampled token 信号
 
 OPD 文献中常出现 student-to-teacher 的 reverse KL：
 
 ~~~math
-D_{\mathrm{KL}}(p_S\|p_T)
-=\sum_{v}p_S(v\mid s)
-\log\frac{p_S(v\mid s)}{p_T(v\mid s)}
+D_{\mathrm{KL}}(p_{S}\|p_{T})
+=\sum_{v}p_{S}(v\mid s)
+\log\frac{p_{S}(v\mid s)}{p_{T}(v\mid s)}
 ~~~
 
 学生从自己的策略采样 token 时，可以使用教师和学生在该 token 上的 log-probability 差异作为一个 token-level 信号：
 
 ~~~math
-r_t^{\mathrm{KD}}
-=\log p_T(a_t\mid s_t)-\log p_S(a_t\mid s_t)
+r_{t}^{\mathrm{KD}}
+=\log p_{T}(a_{t}\mid s_{t})-\log p_{S}(a_{t}\mid s_{t})
 ~~~
 
 对 $a_{t}$ 按学生分布取期望时，这个信号与最小化 $D_{\mathrm{KL}}$($p_{S}$\|$p_{T}$) 的方向相关。它和“教师在教师分布上给学生做交叉熵”不是同一个估计器，不能把两种方向的 KL 混写。
 
-reverse KL 要求在学生赋予正概率的动作上教师也有正概率；否则 $\log p_T(a_t\mid s_t)$ 和 KL 都没有有限值。有限精度实现通常使用稳定的 `log_softmax`、记录截断 top-k 的剩余质量，并对教师拒答、服务失败或版本不匹配标为 `unknown`，而不是把缺失 log-prob 当成一个很大的负 reward。只有两端概率来自同一状态快照、同一动作定义时，差值才具有蒸馏语义。
+reverse KL 要求在学生赋予正概率的动作上教师也有正概率；否则 $\log p_{T}(a_{t}\mid s_{t})$ 和 KL 都没有有限值。有限精度实现通常使用稳定的 `log_softmax`、记录截断 top-k 的剩余质量，并对教师拒答、服务失败或版本不匹配标为 `unknown`，而不是把缺失 log-prob 当成一个很大的负 reward。只有两端概率来自同一状态快照、同一动作定义时，差值才具有蒸馏语义。
 
 reverse KL 往往倾向于追逐教师的高概率 mode；当教师分布本身有多个合理答案或高熵时，学生可能过早收缩到单一表达。forward KL 更关心覆盖教师支持的多种可能性，但可能让学生保留更多低质量模式。选择哪一种，应该结合任务、教师熵、verifier 和独立多样性评估。
 
@@ -178,17 +178,17 @@ student rollout -> collect states and observations
 可以用一个示意权重表示“某个教师信号是否进入高权重监督”：
 
 ~~~math
-w_t=m_t\cdot q_T(s_t)\cdot q_V(y_t)
-\cdot\exp\left(-\lambda\sum_{j=1}^{t-1}D_j\right)
+w_{t}=m_{t}\cdot q_{T}(s_{t})\cdot q_{V}(y_{t})
+\cdot\exp\left(-\lambda\sum_{j=1}^{t-1}D_{j}\right)
 ~~~
 
-这里按 token 从 1 开始编号，求和只覆盖当前位置之前的分布差异； $t=1$ 时是空和。 $m_t$ 表示基本有效 mask， $q_T$ 是教师置信或校准质量， $q_V$ 是 verifier 对当前目标的支持， $D_j$ 是前面位置的分布差异， $\lambda$ 控制偏离累积的衰减。这个公式是教学性的组合，不是所有 OPD 方法的标准定义；它表达的工程直觉是：无效 token、低可信教师输出和远离教师支持区域的后段 token 不应拥有同样权重。
+这里按 token 从 1 开始编号，求和只覆盖当前位置之前的分布差异； $t=1$ 时是空和。 $m_{t}$ 表示基本有效 mask， $q_{T}$ 是教师置信或校准质量， $q_{V}$ 是 verifier 对当前目标的支持， $D_{j}$ 是前面位置的分布差异， $\lambda$ 控制偏离累积的衰减。这个公式是教学性的组合，不是所有 OPD 方法的标准定义；它表达的工程直觉是：无效 token、低可信教师输出和远离教师支持区域的后段 token 不应拥有同样权重。
 
-使用这类权重前，需要声明 $m_t\in\{0,1\}$、 $q_T,q_V\in[0,1]$、 $D_j\geq0$、 $\lambda\geq0$，并保证参与求和的量有限。教师无法回答、verifier 超时或状态已被撤销时， $q_T$ 或 $q_V$ 应为未知而不是主观补成 `0` 或 `1`；这类轨迹应从当前更新中隔离，同时作为数据或系统健康信号保留。
+使用这类权重前，需要声明 $m_{t}\in\{0,1\}$、 $q_{T},q_{V}\in[0,1]$、 $D_{j}\geq0$、 $\lambda\geq0$，并保证参与求和的量有限。教师无法回答、verifier 超时或状态已被撤销时， $q_{T}$ 或 $q_{V}$ 应为未知而不是主观补成 `0` 或 `1`；这类轨迹应从当前更新中隔离，同时作为数据或系统健康信号保留。
 
 对安全动作，权重不能替代执行器拒绝。教师说“可以写文件”不等于 student 获得写权限，教师生成的 SQL 不等于事务可以提交，教师建议访问某个 URL 也不等于网络策略允许访问。权限必须在 environment executor 层判定。
 
-例如，假设 $m_t=1$、教师置信度 $q_T=0.8$、独立检查支持 $q_V=1$，前缀差异和衰减参数满足 $lambda·\SigmaD_j=\ln 2$，则示意权重为 $w_t=0.8\times1\times e^{-\ln 2}=0.4$。若该 token 被 mask（$m_t=0$），权重就是 0。这个计算只说明各因子怎样缩放监督，不是某篇 OPD 方法的固定参数。
+例如，假设 $m_{t}=1$、教师置信度 $q_{T}=0.8$、独立检查支持 $q_{V}=1$，前缀差异和衰减参数满足 $\lambda\sum_{j\lt t}D_{j}=\ln 2$，则示意权重为 $w_{t}=0.8\times1\times e^{-\ln 2}=0.4$。若该 token 被 mask（$m_{t}=0$），权重就是 0。这个计算只说明各因子怎样缩放监督，不是某篇 OPD 方法的固定参数。
 
 如果教师的隐藏 reasoning 含敏感信息或未验证假设，不应无条件蒸馏完整思维链。更可审计的目标是最终可验证 artifact、工具 schema、证据引用、错误类别、安全拒答和结构化修复动作。需要展示推理时，也应区分用于训练的内部信号和可对外输出的解释。
 
@@ -226,14 +226,14 @@ s_4: 生成修复，公开和隐藏测试通过
 教师调用昂贵时，不能只比较学生参数量。设每个任务平均产生 n 个学生状态，每次教师调用成本为 $c_{T}$，学生状态采样和执行成本为 $c_{S}$，教师触发比例为 $p_{T}$，单位任务成本可粗略写成：
 
 ~~~math
-C_{\mathrm{task}}=c_S+n\,p_T\,c_T
+C_{\mathrm{task}}=c_{S}+n\,p_{T}\,c_{T}
 ~~~
 
 若把学生 rollout、工具和存储的固定成本分别记为 $C_{S}$，也可以写成：
 
 ~~~math
 C_{\mathrm{total}}
-=N_S C_S+N_T C_T+C_{\mathrm{storage}}+C_{\mathrm{verify}}
+=N_{S} C_{S}+N_{T} C_{T}+C_{\mathrm{storage}}+C_{\mathrm{verify}}
 ~~~
 
 $N_{S}$ 和 $N_{T}$ 分别是学生和教师 token/调用的计数， $C_{T}$ 往往远大于一个学生 token 的成本。缓存可以降低 $N_{T}$，但会引入一致性和隐私成本。
@@ -248,7 +248,7 @@ C_{\mathrm{success}}
 
 $P_{\mathrm{success}}$ 是独立任务上的真正成功率，要求 $0\lt P_{\mathrm{success}}\leq1$； $C_{\mathrm{task}}$ 要在相同货币、时间窗口和分摊口径下计量。若独立评估没有任何成功任务，单位成功成本没有定义，不能用 $\epsilon$ 伪造一个极大但看似可比较的数字。应报告零成功、样本数和置信区间，再先解决成功定义或能力问题。若 OPD 让学生成功率从 0.45 提高到 0.55，但教师调用量增加三倍，单位成功成本可能上升；若训练后线上可以少调用教师、少重试且延迟下降，收益才更可信。
 
-例如，取一组**假设值**：学生每个任务的基础成本 $c_S=1$ 个成本单位，平均产生 $n=4$ 个状态，教师触发比例 $p_T=0.25$，每次调用成本 $c_T=2$。则选择性调用的任务成本为 $C_{\mathrm{task}}=1+4\times0.25\times2=3$ 个单位。若同一口径下的假设成功率为 `0.60`，单位成功成本是 $3/0.60=5$。若另一种假设策略对每个状态都调用教师，成本为 $1+4\times1\times2=9$；若其假设成功率为 `0.75`，单位成功成本为 $9/0.75=12$。这些数只演示公式，既不是测量结果，也不是公平的策略比较；实际对比必须使用同一任务集合、成功定义和成本窗口。
+例如，取一组**假设值**：学生每个任务的基础成本 $c_{S}=1$ 个成本单位，平均产生 $n=4$ 个状态，教师触发比例 $p_{T}=0.25$，每次调用成本 $c_{T}=2$。则选择性调用的任务成本为 $C_{\mathrm{task}}=1+4\times0.25\times2=3$ 个单位。若同一口径下的假设成功率为 `0.60`，单位成功成本是 $3/0.60=5$。若另一种假设策略对每个状态都调用教师，成本为 $1+4\times1\times2=9$；若其假设成功率为 `0.75`，单位成功成本为 $9/0.75=12$。这些数只演示公式，既不是测量结果，也不是公平的策略比较；实际对比必须使用同一任务集合、成功定义和成本窗口。
 
 触发策略可以比较四个条件：所有状态调用教师、只在困难状态调用、复用离线缓存、完全不用教师。每个条件都按任务难度、错误类型、学生长度和工具状态分桶，否则平均值会掩盖教师只在简单题上有效的事实。
 
@@ -281,59 +281,59 @@ sampling_configuration
 
 “教师与学生的 log-probability 差”可以有两种不同用法：一是构造反向 KL 的期望目标，二是把采样到的差值当作 policy-gradient 更新的权重。两者在数学上相连，但实现时不能把后者简化成对单个差值直接做梯度下降。
 
-设状态为 $s_t$，学生采样到动作 $a_t$（文本任务中通常是 token），学生和教师分别给它概率 $p_S(a_t|s_t)$ 与 $p_T(a_t|s_t)$。定义 sampled log-ratio：
+设状态为 $s_{t}$，学生采样到动作 $a_{t}$（文本任务中通常是 token），学生和教师分别给它概率 $p_{S}(a_{t}|s_{t})$ 与 $p_{T}(a_{t}|s_{t})$。定义 sampled log-ratio：
 
 ~~~math
-r_t=\log p_T(a_t\mid s_t)-\log p_S(a_t\mid s_t)
+r_{t}=\log p_{T}(a_{t}\mid s_{t})-\log p_{S}(a_{t}\mid s_{t})
 ~~~
 
-固定这个前缀，并让 $a_t$ 按学生分布抽样，则：
+固定这个前缀，并让 $a_{t}$ 按学生分布抽样，则：
 
 ~~~math
-\mathbb{E}_{a_t\sim p_S(\cdot\mid s_t)}[r_t]
-=-D_{\mathrm{KL}}\left(p_S(\cdot\mid s_t)\|p_T(\cdot\mid s_t)\right)
+\mathbb{E}_{a_{t}\sim p_{S}(\cdot\mid s_{t})}[r_{t}]
+=-D_{\mathrm{KL}}\left(p_{S}(\cdot\mid s_{t})\|p_{T}(\cdot\mid s_{t})\right)
 ~~~
 
 若教师和学生完整词表分布都可用，可以直接计算并反向传播固定前缀上的 KL：
 
 ~~~math
-D_{\mathrm{KL}}(p_S\|p_T\mid s_t)
-=\sum_{v\in\mathcal{V}}p_S(v\mid s_t)
-\log\frac{p_S(v\mid s_t)}{p_T(v\mid s_t)}
+D_{\mathrm{KL}}(p_{S}\|p_{T}\mid s_{t})
+=\sum_{v\in\mathcal{V}}p_{S}(v\mid s_{t})
+\log\frac{p_{S}(v\mid s_{t})}{p_{T}(v\mid s_{t})}
 ~~~
 
 如果每个状态只采一个 token，反向 KL 的期望可以用策略梯度估计。对最小化 KL 的梯度，一个常见的单步 surrogate loss 写成：
 
 ~~~math
 \widehat{\mathcal{L}}_{t}^{\mathrm{PG}}
-=-\mathrm{sg}(r_t-b_t)\log p_S(a_t\mid s_t)
+=-\mathrm{sg}(r_{t}-b_{t})\log p_{S}(a_{t}\mid s_{t})
 ~~~
 
-`sg` 表示本次更新把括号内的 sampled 信号当常数； $b_t$ 是不依赖当前采样动作的 baseline。若加入 $m_t$ 或权重 $w_t$，还要说明它们由什么信息计算、是否依赖动作以及是否截断/归一化。实际 batch loss 可将右侧按有效 token 数归一化。反向传播穿过 $\log p_S(a_t|s_t)$，不能把采样到的 $-r_t$ 当成普通监督标签直接最小化；那样会遗漏 score-function 项，甚至把更新方向弄反。
+`sg` 表示本次更新把括号内的 sampled 信号当常数； $b_{t}$ 是不依赖当前采样动作的 baseline。若加入 $m_{t}$ 或权重 $w_{t}$，还要说明它们由什么信息计算、是否依赖动作以及是否截断/归一化。实际 batch loss 可将右侧按有效 token 数归一化。反向传播穿过 $\log p_{S}(a_{t}|s_{t})$，不能把采样到的 $-r_{t}$ 当成普通监督标签直接最小化；那样会遗漏 score-function 项，甚至把更新方向弄反。
 
-用两个动作可以手算出这两个量的关系。令学生分布为 $p_S=(0.5,0.5)$，教师分布为 $p_T=(0.8,0.2)$，动作记为 A、B。学生采到 A 时， $r_A=\ln(0.8/0.5)\approx0.470$；采到 B 时， $r_B=\ln(0.2/0.5)\approx-0.916$。按学生的采样概率取期望：
+用两个动作可以手算出这两个量的关系。令学生分布为 $p_{S}=(0.5,0.5)$，教师分布为 $p_{T}=(0.8,0.2)$，动作记为 A、B。学生采到 A 时， $r_{A}=\ln(0.8/0.5)\approx0.470$；采到 B 时， $r_{B}=\ln(0.2/0.5)\approx-0.916$。按学生的采样概率取期望：
 
 ~~~math
-\mathbb{E}_{a\sim p_S}[r(a)]
+\mathbb{E}_{a\sim p_{S}}[r(a)]
 =0.5(0.470)+0.5(-0.916)\approx-0.223
 ~~~
 
-直接计算也得到 $D_{\mathrm{KL}}(p_S\Vert p_T)=0.5 \ln(0.5/0.8)+0.5 \ln(0.5/0.2)\approx0.223$，所以 $E[r]=-D_{\mathrm{KL}}$。若用动作无关的 baseline $b=E[r]=-0.223$，两种动作的优势分别是 $r_A-b\approx0.693$、 $r_B-b\approx-0.693$：更新会提高 A、压低 B。关键在于这个值要乘在 $∇\log p_S(a|s)$ 上；仅对一次采样的 `-r` 求梯度，不会产生上述策略梯度。这里的教师偏好只代表教师分布，不证明 A 在任务上正确，因此仍需独立 verifier 或任务评测。
+直接计算也得到 $D_{\mathrm{KL}}(p_{S}\Vert p_{T})=0.5 \ln(0.5/0.8)+0.5 \ln(0.5/0.2)\approx0.223$，所以 $E[r]=-D_{\mathrm{KL}}$。若用动作无关的 baseline $b=E[r]=-0.223$，两种动作的优势分别是 $r_{A}-b\approx0.693$、 $r_{B}-b\approx-0.693$：更新会提高 A、压低 B。关键在于这个值要乘在 $∇\log p_{S}(a|s)$ 上；仅对一次采样的 `-r` 求梯度，不会产生上述策略梯度。这里的教师偏好只代表教师分布，不证明 A 在任务上正确，因此仍需独立 verifier 或任务评测。
 
-若目标是完整序列分布的反向 KL，则早先 token 会改变后续前缀，不能只用当前 token 的 $r_t$ 表示整段轨迹的信用。令 $R_t=\sum_{j=t}^{T}r_j$ 表示从第 $t$ 步开始的 log-ratio return；在固定教师、支持集满足要求的条件下，序列级反向 KL 的策略梯度可写为：
+若目标是完整序列分布的反向 KL，则早先 token 会改变后续前缀，不能只用当前 token 的 $r_{t}$ 表示整段轨迹的信用。令 $R_{t}=\sum_{j=t}^{T}r_{j}$ 表示从第 $t$ 步开始的 log-ratio return；在固定教师、支持集满足要求的条件下，序列级反向 KL 的策略梯度可写为：
 
 ~~~math
-\nabla_\theta D_{\mathrm{KL}}(p_S(\tau)\|p_T(\tau))
-=-\mathbb{E}_{\tau\sim p_S}
-\left[\sum_{t=1}^{T}(R_t-1)
-\nabla_\theta\log p_S(a_t\mid s_t)\right]
+\nabla_{\theta} D_{\mathrm{KL}}(p_{S}(\tau)\|p_{T}(\tau))
+=-\mathbb{E}_{\tau\sim p_{S}}
+\left[\sum_{t=1}^{T}(R_{t}-1)
+\nabla_{\theta}\log p_{S}(a_{t}\mid s_{t})\right]
 ~~~
 
 常数 `1` 是在该期望下可用的 action-independent baseline。这里的 return-to-go 会把后续位置的教师—学生差异分配给更早的动作。把每个已访问前缀当作固定样本、只拟合当前位置的条件分布，是较局部的目标；它与对完整序列 KL 求梯度不等价。MiniLLM 将两类信号结合：当前位置的词表级项加上估计未来差异的 policy-gradient 项，并使用教师混合采样和长度归一化控制退化输出与短答偏差。其重要代价是序列级项方差更高，教师混合的逐 token importance ratio 近似也改变了偏差—方差权衡。
 
 因此论文里写“OPD”还不够复现算法；至少要说明状态来自当前策略还是旧 rollout、比较的是局部条件分布还是完整序列、使用完整词表还是 sampled token、梯度是否经由策略采样估计、未来 token 如何分配信用，以及 baseline、裁剪和长度归一化如何设置。位置加权、教师熵门控、verifier gate 和 value baseline 分别作用在不同环节，不能统称为一种“更稳的 KL”。
 
-当 teacher/student tokenizer 不同， $p_T(v)$ 与 $p_S(v)$ 没有同一个词表索引，不能直接做 token-level KL。可选办法是使用共享 tokenizer、把教师输出转换为文本序列、在字符/词片段边界上对齐，或退回到动作、artifact 和 verifier 级别的目标。把不同 tokenizer 的 logits 按数组下标相乘，是数值上能运行但语义上错误的实现。
+当 teacher/student tokenizer 不同， $p_{T}(v)$ 与 $p_{S}(v)$ 没有同一个词表索引，不能直接做 token-level KL。可选办法是使用共享 tokenizer、把教师输出转换为文本序列、在字符/词片段边界上对齐，或退回到动作、artifact 和 verifier 级别的目标。把不同 tokenizer 的 logits 按数组下标相乘，是数值上能运行但语义上错误的实现。
 
 ### 17.10 为什么长轨迹后段的教师信号更危险
 
@@ -342,20 +342,20 @@ D_{\mathrm{KL}}(p_S\|p_T\mid s_t)
 可以用累计分布差异描述这种风险：
 
 ~~~math
-D_t^{\mathrm{cum}}=\sum_{j=1}^{t-1}
-D_{\mathrm{KL}}(p_S(\cdot\mid s_j)\|p_T(\cdot\mid s_j))
+D_{t}^{\mathrm{cum}}=\sum_{j=1}^{t-1}
+D_{\mathrm{KL}}(p_{S}(\cdot\mid s_{j})\|p_{T}(\cdot\mid s_{j}))
 ~~~
 
 这不是线上必须计算的唯一量，但它表达了一个事实：第 t 个 token 的监督质量不仅取决于当前 token，还取决于前缀已经偏离了多少。有效监督权重可以采用示意形式：
 
 ~~~math
-w_t=\mathbf{1}[D_t^{\mathrm{cum}}\leq\delta]
-\cdot q_T(s_t)\cdot q_V(s_t)
+w_{t}=\mathbf{1}[D_{t}^{\mathrm{cum}}\leq\delta]
+\cdot q_{T}(s_{t})\cdot q_{V}(s_{t})
 ~~~
 
 $\delta$ 是允许的偏离范围， $q_{T}$ 是教师置信或校准分数， $q_{V}$ 是 verifier 对状态/结果的支持。这里的乘法表示只有可信区域才参与高权重学习；实际工作也可以使用连续衰减，而不是直接截断。
 
-该示意要求 $\delta\geq0$，累计 KL 有限，且 $q_T,q_V$ 来自同版本的、范围明确的检查。没有 verifier 结论不等于 verifier 不支持，也不等于可以安全纳入可信区域；应报告未判定状态比例，避免过滤器仅在容易样本上显得可靠。
+该示意要求 $\delta\geq0$，累计 KL 有限，且 $q_{T},q_{V}$ 来自同版本的、范围明确的检查。没有 verifier 结论不等于 verifier 不支持，也不等于可以安全纳入可信区域；应报告未判定状态比例，避免过滤器仅在容易样本上显得可靠。
 
 例如，四个 token 前的局部分布差异依次为 `0.05、0.10、0.30` nat。按定义，前四个位置看到的累计差异依次为 `0、0.05、0.15、0.45` nat。若教学阈值 $\delta=0.2$，前三个位置仍在阈值内，第四个位置会被截断或降权。真实阈值和衰减方式要由具体方法决定；这个数例只演示“越往后，前缀差异可能累积”的计算。
 
@@ -369,7 +369,7 @@ $\delta$ 是允许的偏离范围， $q_{T}$ 是教师置信或校准分数， $
 
 这类方法的取舍是：过滤太少，训练容易发散或负迁移；过滤太多，学生只学习熟悉的简单区域，on-policy 的价值下降。需要同时报告被过滤的状态比例、过滤前后成功率和状态分布变化。
 
-例如，对学生刚采到的 token $A$，学生给出 $p_S(A|s)=0.80$，教师只给 $p_T(A|s)=0.02$，单 token log-ratio 是 $\ln(0.02/0.80)\approx-3.69$。这是一条极端不一致的监督信号，某些信赖域方法会把它裁剪、过滤或改用其他目标；具体判界由方法规定，不能把 `-3.69` 当作通用阈值。
+例如，对学生刚采到的 token $A$，学生给出 $p_{S}(A|s)=0.80$，教师只给 $p_{T}(A|s)=0.02$，单 token log-ratio 是 $\ln(0.02/0.80)\approx-3.69$。这是一条极端不一致的监督信号，某些信赖域方法会把它裁剪、过滤或改用其他目标；具体判界由方法规定，不能把 `-3.69` 当作通用阈值。
 
 #### 17.11.2 置信度与熵
 
@@ -378,7 +378,7 @@ $\delta$ 是允许的偏离范围， $q_{T}$ 是教师置信或校准分数， $
 教师 token 熵为：
 
 ~~~math
-H_T(s_t)=-\sum_{v}p_T(v\mid s_t)\log p_T(v\mid s_t)
+H_{T}(s_{t})=-\sum_{v}p_{T}(v\mid s_{t})\log p_{T}(v\mid s_{t})
 ~~~
 
 Entropy-Aware OPD 一类研究讨论了在教师高熵位置混合 forward KL、在低熵位置保持更精确模仿的思路。实践中应观察学生熵、pass@k、多样性和最终正确率；只看 top-1 对齐下降，可能错过学生已经丢失了合理候选的事实。
@@ -398,9 +398,9 @@ REOPOLD 把教师-学生 likelihood ratio 看作 token reward，并通过混合�
 设同一任务的学生轨迹为 $\tau_{1}$,..., $\tau_{G}$，每条有 verifier 结果 $v_{i}$。教师信号可以条件化在成功集合和失败集合上：
 
 ~~~math
-u_i=\mathrm{Teacher}(s_i,
-\{\tau_j:v_j=1\},
-\{\tau_j:v_j=0\})
+u_{i}=\mathrm{Teacher}(s_{i},
+\{\tau_{j}:v_{j}=1\},
+\{\tau_{j}:v_{j}=0\})
 ~~~
 
 这里的 $u_{i}$ 不是一个固定的概率公式，而是表示教师在同组对照上下文中给出的局部建议。成功轨迹提供可模仿的证据，失败轨迹提供需要避免的反例。它的价值取决于 verifier 质量和 peer rollout 是否真的有差异；如果所有轨迹共享同一漏洞，组内对比会放大共同错误。
@@ -465,12 +465,12 @@ OPD 最容易被错误评估成“学生和教师越来越像”。但目标不�
 
 ~~~math
 C_{\mathrm{total}}
-=N_S C_S+N_T C_T+C_{\mathrm{storage}}+C_{\mathrm{verify}}+C_{\mathrm{retry}}
+=N_{S} C_{S}+N_{T} C_{T}+C_{\mathrm{storage}}+C_{\mathrm{verify}}+C_{\mathrm{retry}}
 ~~~
 
 $N_{S}$ 和 $N_{T}$ 可以按 token、调用次数或 GPU 时间统计， $C_{T}$ 往往远高于学生单 token 成本。缓存可以降低 $N_{T}$，但会引入一致性和隐私成本。
 
-不论采用哪种计数单位， $N_S,N_T$ 和各成本项都应非负，且所有项必须换算到相同的时间窗口、货币和资源口径。token、调用次数与 GPU 小时不能直接相加；前式只是将每一项已经换算成成本后的账本，而不是把不同单位的原始计数相加。
+不论采用哪种计数单位， $N_{S},N_{T}$ 和各成本项都应非负，且所有项必须换算到相同的时间窗口、货币和资源口径。token、调用次数与 GPU 小时不能直接相加；前式只是将每一项已经换算成成本后的账本，而不是把不同单位的原始计数相加。
 
 若独立评估真正成功的任务数为 $N_{\mathrm{success}}$，单位成功任务成本为：
 
@@ -833,14 +833,14 @@ OPD 的损失下降很容易被误读成“学生已经学会了教师的能力�
 
 ~~~math
 d_{\mathrm{train}}(s)
-=\sum_{k=0}^{K}\alpha_k d_{\pi_{S,k}}(s),
+=\sum_{k=0}^{K}\alpha_{k} d_{\pi_{S,k}}(s),
 \qquad
-\sum_{k=0}^{K}\alpha_k=1.
+\sum_{k=0}^{K}\alpha_{k}=1.
 ~~~
 
 $\alpha_{k}$ 是各版本 rollout 的混合权重。若当前策略与旧策略差距很大，教师信号和学生 log-probability 可能已经不再对应同一个行为分布。工程上要为每条轨迹记录 behavior policy revision、生成时间、采样配置和环境 revision，并决定旧数据是丢弃、降权、重新生成，还是用明确的 importance ratio 进行校正。不要因为样本中的前缀由学生写出，就跳过这一步。
 
-这个混合写法要求轨迹集合非空， $\alpha_k\geq0$，并且每个正权重分量都能追溯到实际 policy revision。某个旧 rollout 因权限撤销、环境失效或日志不完整而无法重放时，不能继续带着权重进入当前梯度；它应标为不可用数据，而不是静默归入当前策略分布。
+这个混合写法要求轨迹集合非空， $\alpha_{k}\geq0$，并且每个正权重分量都能追溯到实际 policy revision。某个旧 rollout 因权限撤销、环境失效或日志不完整而无法重放时，不能继续带着权重进入当前梯度；它应标为不可用数据，而不是静默归入当前策略分布。
 
 一个实用的诊断顺序是：先按 policy revision 绘制状态访问比例，再比较当前学生在这些状态上的 log-probability，最后观察旧样本和新样本对梯度范数、成功率及恢复率的贡献。如果旧 rollout 占比不断增加而独立恢复率下降，问题可能是 replay 过期，而不是教师能力不足。
 
@@ -854,9 +854,9 @@ $\alpha_{k}$ 是各版本 rollout 的混合权重。若当前策略与旧策略�
 
 ~~~math
 \mathcal{L}_{\mathrm{teacher}}
-=-\mathbb{E}_{\tau\sim\pi_S}
-\left[\sum_t m_t w_t
-\bigl(\log p_T(a_t\mid s_t)-\log p_S(a_t\mid s_t)\bigr)\right].
+=-\mathbb{E}_{\tau\sim\pi_{S}}
+\left[\sum_{t} m_{t} w_{t}
+\bigl(\log p_{T}(a_{t}\mid s_{t})-\log p_{S}(a_{t}\mid s_{t})\bigr)\right].
 ~~~
 
 若同时存在任务结果 reward，则还需要明确它与教师项如何组合，以及哪个分量负责最终正确性：
@@ -864,7 +864,7 @@ $\alpha_{k}$ 是各版本 rollout 的混合权重。若当前策略与旧策略�
 ~~~math
 \mathcal{L}
 =\mathcal{L}_{\mathrm{teacher}}
--\beta\,\mathbb{E}_{\tau\sim\pi_S}[R_{\mathrm{task}}(\tau)]
+-\beta\,\mathbb{E}_{\tau\sim\pi_{S}}[R_{\mathrm{task}}(\tau)]
 +\lambda\,\mathcal{L}_{\mathrm{constraint}}.
 ~~~
 
@@ -975,7 +975,7 @@ On-policy distillation 的价值在于让教师看到学生真正会访问的状
 
 ## 17.24 练习
 
-1. 令 $p_S=(0.5,0.5)$、 $p_T=(0.8,0.2)$。分别计算两个动作的 sampled log-ratio、其学生期望、 $D_{\mathrm{KL}}(p_S\Vert p_T)$ 以及使用 $b=E[r]$ 后的优势。解释为什么一次采样的 `-r` 不是独立的监督 loss，并说明教师偏好仍不能替代任务正确性验证。
+1. 令 $p_{S}=(0.5,0.5)$、 $p_{T}=(0.8,0.2)$。分别计算两个动作的 sampled log-ratio、其学生期望、 $D_{\mathrm{KL}}(p_{S}\Vert p_{T})$ 以及使用 $b=E[r]$ 后的优势。解释为什么一次采样的 `-r` 不是独立的监督 loss，并说明教师偏好仍不能替代任务正确性验证。
 2. 给一个长度为 3 的学生 rollout，构造“当前位置 conditional KL”与“序列级 reverse-KL return-to-go”两种更新信号。指出第一个动作怎样改变后续状态，以及局部目标为什么看不到完整的时间信用。
 3. 设计一个同条件比较表，对照 MiniLLM、GKD、Bernoulli OPD、BOPD、Learning Dynamics、EOPD 和成功/失败 peer 多 rollout 路线。分别记录目标或教师构造、状态来源、更新机制、论文证据、成本和失败条件；说明为何这些公开数字不能直接排名，并避免将 peer-rollout 论文与 Multi-Teacher OPD 混称。
 4. 根据 Qwen3 表 21 计算 OPD 与 RL 在 AIME'24、AIME'25、LiveCodeBench v5 和 GPU-hours 上的差值。写出两条结论：一条由报告数字直接支持，另一条当前证据还不能支持。然后设计一个复现方案，至少控制起始 checkpoint、teacher、rollout 数、生成长度、GPU-hours、随机种子和独立评测。

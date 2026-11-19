@@ -79,15 +79,15 @@ KV head，每个 head 维度为 `D_h`，每元素占用 `b` 字节，则标准 M
 ~~~math
 M_{\mathrm{KV}}
 \approx
-2LBTH_{\mathrm{kv}}D_hb
+2LBTH_{\mathrm{kv}}D_{h}b
 ~~~
 
 前面的 `2` 对应 K 和 V。MHA 的 `H_kv` 通常等于 query head 数，GQA 的 KV head
-更少，MQA 可以进一步接近一个 KV head。`b=2` 对应 BF16/FP16 的理想 payload，
-`b=1` 对应 8 bit payload 的理想情况。
+更少，MQA 可以进一步接近一个 KV head。$b=2$ 对应 BF16/FP16 的理想 payload，
+$b=1$ 对应 8 bit payload 的理想情况。
 
 把这个式子先换成“每个已保存 token 的字节数”，更容易看出模型结构和请求长度各自
-怎样影响容量。取 `L=64`、`H_kv=8`、`D_h=128`、BF16 的 `b=2`，单条序列每多存
+怎样影响容量。取 $L=64$、$H_{\mathrm{kv}}=8$、$D_{h}=128$、BF16 的 $b=2$，单条序列每多存
 一个 token，就要在 64 层中保存两份各 8×128 个数值：
 
 ~~~math
@@ -97,7 +97,7 @@ m_{\mathrm{token}}
 =256\ \mathrm{KiB}
 ~~~
 
-因此同一结构下，32,768 个 token 的 payload 是 `256 KiB × 32,768 = 8 GiB`。
+因此同一结构下，32,768 个 token 的 payload 是 $256 \mathrm{KiB} \times  32,768 = 8 \mathrm{GiB}$。
 这让容量问题能沿三个轴拆开：模型的 KV head 和 head dimension 决定每 token
 成本；请求长度和并发数决定要保存多少 token；精度与 scale 决定每个值和每组额外
 占多少字节。改变其中一个轴，不能把其它轴当成也一起改变。
@@ -113,7 +113,7 @@ serving 开关改成 GQA；必须使用按该结构训练或转换、并经过�
 
 ### 2.2 一个 1M 上下文的计算
 
-假设 `L=64`、`B=1`、`T=131072`、`H_kv=8`、`D_h=128`，使用 BF16：
+假设 $L=64$、$B=1$、$T=131072$、$H_{\mathrm{kv}}=8$、$D_{h}=128$，使用 BF16：
 
 ~~~math
 M_{\mathrm{BF16}}
@@ -122,7 +122,7 @@ M_{\mathrm{BF16}}
 =32\ \mathrm{GiB}
 ~~~
 
-把长度增加到 `T=1,048,576`，其他条件不变，BF16 KV 约为 256 GiB。FP8 payload 的
+把长度增加到 $T=1,048,576$，其他条件不变，BF16 KV 约为 256 GiB。FP8 payload 的
 理想值约为 128 GiB，实际还要加 scale 和 metadata。
 
 长度翻八倍时，状态字节也翻八倍；并发 `B` 从 1 增到 4 时，同样会再乘四。也就是
@@ -138,8 +138,8 @@ bytes 和真实长度分布校准。
 
 长度分布还决定应该用什么“平均请求”做估算。假设 10 条活动请求中有 9 条各保存
 2,048 token，另 1 条保存 131,072 token，则总计是
-`9×2,048+131,072=149,504` token。在前述 256 KiB/token 的模型上，逻辑 BF16
-payload 为 `149,504/4,096=36.5 GiB`；若错误地拿短请求的 2,048 token 代表全部
+$9\times 2,048+131,072=149,504$ token。在前述 256 KiB/token 的模型上，逻辑 BF16
+payload 为 $149,504/4,096=36.5 \mathrm{GiB}$；若错误地拿短请求的 2,048 token 代表全部
 请求，就只会估到 5 GiB。长请求只占请求数的十分之一，却主导了状态字节。容量实验
 因此要保留按输入长度、生成长度、并发和 cache hit 分桶的联合分布，不能只看模型
 最大 context 或单一平均长度。
@@ -152,7 +152,7 @@ payload 为 `149,504/4,096=36.5 GiB`；若错误地拿短请求的 2,048 token �
 ~~~math
 b_{\mathrm{avg}}
 =
-b_q+\frac{b_s+b_m}{n}
+b_{q}+\frac{b_{s}+b_{m}}{n}
 ~~~
 
 `n` 越小，scale 开销占比越大；`n` 越大，局部动态范围越难覆盖。对于 K 和 V
@@ -192,9 +192,9 @@ variant、转换模式和 runtime/backend，而不是只写 `float8`。[ROCm 类
 对一个 K/V block `G`，可以用抽象量化模型表示：
 
 ~~~math
-q_i=Q\left(\frac{x_i}{s_G}\right),
+q_{i}=Q\left(\frac{x_{i}}{s_{G}}\right),
 \qquad
-\hat{x}_i=s_GD(q_i),
+\hat{x}_{i}=s_{G}D(q_{i}),
 \quad i\in G
 ~~~
 
@@ -206,8 +206,8 @@ per-head、per-channel 或 per-block，以及是否在转换时饱和。
 对于反量化 scale `s`，E4M3 的最大有限重构幅值约为 `448s`，最小 subnormal 为
 `2^-9 s`；低于它的输入可能变成零，超过范围的输入则取决于饱和模式。以 E4M3
 的最大有限值 448 为例，若某组最大绝对值为 500，采用 absmax scale 时
-`s=500/448≈1.1161`，该最大值归一化后恰为 448。组内一个 `x=1` 的值会先变成
-`1/s≈0.896`；E4M3 在这个区间最近的码值是 0.875，反量化得到约 `0.875×1.1161
+$s=500/448\approx 1.1161$，该最大值归一化后恰为 448。组内一个 $x=1$ 的值会先变成
+$1/s\approx 0.896$；E4M3 在这个区间最近的码值是 0.875，反量化得到约 `0.875×1.1161
 ≈0.9766`。这个算例展示 scale 与尾数格点如何共同决定重构误差；真实框架可能用
 校准数据、不同 group 或预计算 scale，并不一定按每组实时 absmax 处理。
 
@@ -223,11 +223,11 @@ per-tensor 与 per-attention-head；其中 head scale 需要 `llm-compressor` �
 K-per-channel，也不能推断其他 runtime 具有相同配置。
 
 一个小例子可以看出粒度为什么影响数值分辨率。假设两个 KV head 的最大绝对值分别
-为 448 和 0.448，使用 E4M3、反量化相乘 scale，并在第二个 head 中关注 `x=0.001`。
-若两头共用一个 scale，第一头决定 `s=448/448=1`；`0.001/s=0.001` 已接近
-E4M3 的最小 subnormal `2^-9≈0.001953`，最近码为该 subnormal，反量化误差约为
-`0.001953-0.001=0.000953`，相对误差约 95.3%。若每头独立，
-第二头的 scale 是 `0.448/448=0.001`，此时 `x/s=1`，可以落在更密集的普通数值
+为 448 和 0.448，使用 E4M3、反量化相乘 scale，并在第二个 head 中关注 $x=0.001$。
+若两头共用一个 scale，第一头决定 $s=448/448=1$；$0.001/s=0.001$ 已接近
+E4M3 的最小 subnormal $2^-9\approx 0.001953$，最近码为该 subnormal，反量化误差约为
+$0.001953-0.001=0.000953$，相对误差约 95.3%。若每头独立，
+第二头的 scale 是 $0.448/448=0.001$，此时 $x/s=1$，可以落在更密集的普通数值
 格点上。代价是每头保存和加载 scale，并要求写入、读取路径按相同 head 解释。
 这个构造例只展示动态范围差异；它不证明 per-head 对所有模型都更准确，也没有计入
 校准偏差、scale metadata 和 kernel 开销。
@@ -274,7 +274,7 @@ v0.32.0 文档公开了数据集校准和 per-head 路径；文档中的未校�
 Key 进入 query-key 相似度：
 
 ~~~math
-S_{t,j}=\frac{q_t k_j^{\mathsf{T}}}{\sqrt{D_h}}
+S_{t,j}=\frac{q_{t} k_{j}^{\mathsf{T}}}{\sqrt{D_{h}}}
 ~~~
 
 量化 K 会扰动 query-key score；即使两个位置的排序没有互换，score 差值变化也会
@@ -290,7 +290,7 @@ S_{t,j}=\frac{q_t k_j^{\mathsf{T}}}{\sqrt{D_h}}
 Value 进入加权和：
 
 ~~~math
-z_t=\sum_j a_{t,j}v_j
+z_{t}=\sum_{j} a_{t,j}v_{j}
 ~~~
 
 量化 V 会直接改变聚合后的表示。它未必改变 attention 的位置选择，却可能损失
@@ -300,19 +300,19 @@ z_t=\sum_j a_{t,j}v_j
 把机制缩成一个两位置的标量例子：假设 query-key logits 是 `[1, 0]`，softmax
 权重约为 `[0.731, 0.269]`。若 K 的量化误差把第一个 logit 从 1 改成 0.7，权重
 变成约 `[0.668, 0.332]`；排序没变，但第一处证据的权重少了约 0.063。若
-`V=[1, 0]`，聚合输出也从 0.731 降到 0.668。反过来，若 K 不变而第一个 V 值
-有 `+0.1` 误差，输出增加约 `0.731×0.1=0.0731`。这是单头两位置的机制推演，
+$V=[1, 0]$，聚合输出也从 0.731 降到 0.668。反过来，若 K 不变而第一个 V 值
+有 $+0.1$ 误差，输出增加约 $0.731\times 0.1=0.0731$。这是单头两位置的机制推演，
 不是模型准确率预测；它说明 K 误差先改变选择权重，V 误差则按现有权重进入内容。
 
-把 softmax 的中间值写出来可复核这个例子：`e^1≈2.718`，所以首位置权重为
-`2.718/(2.718+1)≈0.731`；扰动后 `e^{0.7}≈2.014`，权重变为
-`2.014/(2.014+1)≈0.668`。对小扰动，logit 变化 `\delta S_j` 引起的权重变化
+把 softmax 的中间值写出来可复核这个例子：$e^{1}\approx 2.718$，所以首位置权重为
+$2.718/(2.718+1)\approx 0.731$；扰动后 $e^{0.7}\approx 2.014$，权重变为
+$2.014/(2.014+1)\approx 0.668$。对小扰动，logit 变化 `\delta S_j` 引起的权重变化
 近似为：
 
 ~~~math
-\delta a_j
+\delta a_{j}
 \approx
-a_j\left(\delta S_j-\sum_k a_k\delta S_k\right)
+a_{j}\left(\delta S_{j}-\sum_{k} a_{k}\delta S_{k}\right)
 ~~~
 
 这说明所有位置的 logit 同时加上相同常数时，softmax 不变；真正改变位置选择的是
@@ -322,7 +322,7 @@ a_j\left(\delta S_j-\sum_k a_k\delta S_k\right)
 ~~~math
 \delta z
 \approx
-\sum_j \delta a_j v_j+\sum_j a_j\delta v_j
+\sum_{j} \delta a_{j} v_{j}+\sum_{j} a_{j}\delta v_{j}
 ~~~
 
 因此定位质量退化时，K-only/V-only 消融不只是方便的实验表格，而是在区分两条
@@ -378,7 +378,7 @@ allocate
 的 cache；只复用 page 而忽略 position scheme，则可能把错误的历史位置送入 attention。
 
 scale 是 payload 的解释条件，不是可随意覆盖的统计信息。假设某组 payload 中有
-一个码值 `q`，其反量化值 `D(q)=10`；scale 为 0.1 时原值重构为 1。若新 token
+一个码值 `q`，其反量化值 $D(q)=10$；scale 为 0.1 时原值重构为 1。若新 token
 到来后把整组 scale 改为 0.2，却不重新编码旧 payload，同一个 `q` 就会重构为 2。
 因此一个量化 page 要么保持既有 scale，要么在改 scale 时重编码整组，要么把新 token
 写入另一个独立 scale group。调度器、prefix share 和迁移协议都要遵守这条不变量。
@@ -433,7 +433,7 @@ pages。此时共享的是“payload 加解释它的 metadata”，而不是一�
 
 再假设 A 的最后一个 scale group 尚未闭合。新 token 到来后如果要为整个 group 更新
 amax，就不能让 B 同时读取一半按旧 scale、另一半按新 scale 的 page。假设旧值 4
-曾用 `s=4/448` 编码为最大码 448；新值 8 到来后若 scale 改成 `8/448`，旧码 448
+曾用 $s=4/448$ 编码为最大码 448；新值 8 到来后若 scale 改成 $8/448$，旧码 448
 会被解读为 8，而原值是 4。实现必须选择一种一致策略：暂存未闭合组、让该组保持
 固定 scale，或在独占状态下重新编码整组。若 page 已被多个请求共享，先做 copy-on-write
 再改写，或者把新增状态放进独立 page；不能只更新 scale 指针。
@@ -530,15 +530,15 @@ attention backend、batch 和采样设置，分别走 BF16 baseline 与 FP8 候�
 
 ### 7.1 一个数量级例子
 
-设 `L=64`、`H_kv=8`、`D_h=128`、`B=1`、`T=131072`。BF16 的理想 KV 约为
+设 $L=64$、$H_{\mathrm{kv}}=8$、$D_{h}=128$、$B=1$、$T=131072$。BF16 的理想 KV 约为
 32 GiB，FP8 payload 约为 16 GiB；如果 scale、metadata 和对齐额外占 8%，候选
 约为 17.28 GiB。它可以使一个 GPU 多容纳请求，或在相同并发下保留更长上下文。
 
 可把这笔差额手算成两个不同的决策量。单条 128K 请求由 32 GiB 降至 17.28 GiB，
-节省 `32-17.28=14.72 GiB`，相对减少 `14.72/32=46%`；同一 KV pool 的理论
-请求容量比例则是 `32/17.28≈1.85`，不是两倍。再假设可供 KV 使用的池恰有 40 GiB、
-请求长度都为 32,768 token：BF16 每请求 8 GiB，最多容纳 `floor(40/8)=5` 条；
-FP8 payload 加 8% 后每条 4.32 GiB，最多容纳 `floor(40/4.32)=9` 条。这里的
+节省 $32-17.28=14.72 \mathrm{GiB}$，相对减少 $14.72/32=46\%$；同一 KV pool 的理论
+请求容量比例则是 $32/17.28\approx 1.85$，不是两倍。再假设可供 KV 使用的池恰有 40 GiB、
+请求长度都为 32,768 token：BF16 每请求 8 GiB，最多容纳 $\left\lfloor 40/8 \right\rfloor=5$ 条；
+FP8 payload 加 8% 后每条 4.32 GiB，最多容纳 $\left\lfloor 40/4.32 \right\rfloor=9$ 条。这里的
 5 和 9 是均匀长度、没有额外 page 尾槽和并发 workspace 的理论整数上界，不能直接
 当成线上 batch size；实际需再按第 3 章的池分配和长度分布校正。
 
@@ -647,13 +647,13 @@ scale=1.0，因此它不是“只改变 KV 存储、其它计算完全不变”�
 | 报告中的问题 | 固定条件与观测 | 它说明什么 |
 | --- | --- | --- |
 | 128k 检索准确率骤降 | Llama-3.1-8B、H100、FlashAttention 3 的 Needle-in-a-Haystack case：BF16 91%，原 FP8 路径 13%；团队追到长 contraction 维度上的累加精度问题。加入 two-level accumulation，把部分和写入真正的 FP32 register 后恢复到 89% | FP8 出错不一定是 E4M3/KV 失真；QK/PV 累加、softmax 和长归约都属于数值路径。two-level accumulation 有额外寄存器成本，不能只看精度修复 |
-| 单请求 decode 何时变快 | Llama-3.1-8B、H100、单请求：ITL 随输入长度的拟合斜率由 `4.37×10^-5` 降到 `2.37×10^-5 ms/token`，intercept 从 6.44 ms 变为 6.58 ms，拟合 break-even 约 7,010 tokens | 降低每个历史 token 的读/算成本不代表短上下文立刻更快；固定转换开销会形成长度门槛 |
+| 单请求 decode 何时变快 | Llama-3.1-8B、H100、单请求：ITL 随输入长度的拟合斜率由 $4.37\times 10^-5$ 降到 $2.37\times 10^-5 \mathrm{ms}/\mathrm{token}$，intercept 从 6.44 ms 变为 6.58 ms，拟合 break-even 约 7,010 tokens | 降低每个历史 token 的读/算成本不代表短上下文立刻更快；固定转换开销会形成长度门槛 |
 | 混合 attention 的滑窗层是否都量化 | gpt-oss-20b、H100：旧 v0.10.2 FP8 ITL slope 为 BF16 的 96%、break-even 741,565 tokens；修复后的 v0.19.1 全 FP8 为 80%、跳过 128-token sliding-window 层后为 71%，对应 break-even 22,109 与 7,659 tokens | bounded window 的字节收益会饱和，量化/反量化成本却仍在；按层跳过有时比全模型统一 dtype 更合理 |
 | decode 快是否代表整条请求都快 | Gemma-4-E2B、H100、`head_dim=256`：FP8 ITL slope 为 BF16 的 68%，但长输入 TTFT 拟合二次项约增至 1.6×，与 two-level accumulation 的寄存器压力相关 | prefill 与 decode 的瓶颈不同；必须分别测 TTFT 与 ITL，不能拿 decode 斜率代替端到端 latency |
 
 可以从报告中手算一个 decode break-even，而不把“斜率更低”误读成“任何长度都更快”。
-报告对 Llama-3.1-8B、H100 的单请求拟合给出 BF16 的 `ITL=6.44+4.37×10^-5T`
-毫秒，FP8 的 `ITL=6.58+2.37×10^-5T` 毫秒，`T` 是输入上下文 token 数。令两者
+报告对 Llama-3.1-8B、H100 的单请求拟合给出 BF16 的 $\mathrm{ITL}=6.44+4.37\times 10^-5T$
+毫秒，FP8 的 $\mathrm{ITL}=6.58+2.37\times 10^-5T$ 毫秒，`T` 是输入上下文 token 数。令两者
 相等，得到：
 
 ~~~math
@@ -953,10 +953,10 @@ pprint(report, sort_dicts=False)
  'decision': 'selective_enablement'}
 ~~~
 
-先复核容量：每 token 的 BF16 状态是 `2×64×8×128×2=262,144` 字节，乘
-131,072 token 得 32 GiB；FP8 的 payload 减半为 16 GiB，再乘 `1+0.08` 得
-17.28 GiB。节省率是 `(32-17.28)/32=0.46`。再逐项对质量分：chat 的
-`0.975≥0.970`，通过；audit 的 `0.890<0.950`，未通过。因此 `quality_failures`
+先复核容量：每 token 的 BF16 状态是 $2\times 64\times 8\times 128\times 2=262,144$ 字节，乘
+131,072 token 得 32 GiB；FP8 的 payload 减半为 16 GiB，再乘 $1+0.08$ 得
+17.28 GiB。节省率是 $(32-17.28)/32=0.46$。再逐项对质量分：chat 的
+$0.975\geq 0.970$，通过；audit 的 $0.890\lt 0.950$，未通过。因此 `quality_failures`
 只含 audit，`actions` 只保留 audit 的 BF16 回退，最终是 `selective_enablement`。
 注意，代码没有从模型生成这两个分数，也不会根据 token 长度预测质量；这是把容量
 账和质量门禁并列检查的控制流演示。修改 scale overhead 只影响容量账，修改 quality

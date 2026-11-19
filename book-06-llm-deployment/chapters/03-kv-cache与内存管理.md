@@ -15,7 +15,7 @@
 对某一层的隐藏状态 X，self-attention 通常先计算：
 
 ~~~math
-Q=XW_Q,\qquad K=XW_K,\qquad V=XW_V.
+Q=XW_{Q},\qquad K=XW_{K},\qquad V=XW_{V}.
 ~~~
 
 当前 query 会和历史 key 做相似度计算，再用得到的权重聚合历史 value：
@@ -23,7 +23,7 @@ Q=XW_Q,\qquad K=XW_K,\qquad V=XW_V.
 ~~~math
 \mathrm{Attention}(Q,K,V)
 =\mathrm{softmax}\left(
-\frac{QK^\mathsf{T}}{\sqrt{D_h}}+M_{\mathrm{causal}}
+\frac{QK^\mathsf{T}}{\sqrt{D_{h}}}+M_{\mathrm{causal}}
 \right)V.
 ~~~
 
@@ -65,14 +65,14 @@ empty
 设模型有 L 层，第 l 层有 H_kv 个 K/V head，每个 head 的维度为 D_h，当前有 B 个请求，每条序列长度为 T_ctx。一层的 K 和 V 可以表示为：
 
 ~~~math
-K_l,V_l\in
-\mathbb{R}^{B\times H_{\mathrm{kv}}\times T_{\mathrm{ctx}}\times D_h}.
+K_{l},V_{l}\in
+\mathbb{R}^{B\times H_{\mathrm{kv}}\times T_{\mathrm{ctx}}\times D_{h}}.
 ~~~
 
 两个张量各占：
 
 ~~~math
-B\cdot H_{\mathrm{kv}}\cdot T_{\mathrm{ctx}}\cdot D_h\cdot b
+B\cdot H_{\mathrm{kv}}\cdot T_{\mathrm{ctx}}\cdot D_{h}\cdot b
 \quad\text{bytes}.
 ~~~
 
@@ -81,10 +81,10 @@ B\cdot H_{\mathrm{kv}}\cdot T_{\mathrm{ctx}}\cdot D_h\cdot b
 ~~~math
 M_{\mathrm{KV}}
 \approx
-2LB T_{\mathrm{ctx}}H_{\mathrm{kv}}D_h b.
+2LB T_{\mathrm{ctx}}H_{\mathrm{kv}}D_{h} b.
 ~~~
 
-其中 `B\geq0`、`T_ctx\geq0`，`L,H_kv,D_h` 为正整数，`b>0` 是每个元素的字节数，例如 FP16 和 BF16 通常是 2，FP8 或 INT8 的数据部分通常是 1。这个式子没有计入 block table、scale、对齐、复制、通信 buffer 和 allocator 元数据，所以它是容量模型的基础，不是最终显存读数；空活跃 batch 的理论 cache 可以是零，但不能据此推出服务已经完成了一次有效 decode。
+其中 `B\geq0`、`T_ctx\geq0`，`L,H_kv,D_h` 为正整数，$b\gt 0$ 是每个元素的字节数，例如 FP16 和 BF16 通常是 2，FP8 或 INT8 的数据部分通常是 1。这个式子没有计入 block table、scale、对齐、复制、通信 buffer 和 allocator 元数据，所以它是容量模型的基础，不是最终显存读数；空活跃 batch 的理论 cache 可以是零，但不能据此推出服务已经完成了一次有效 decode。
 
 ### 3.2.2 变长请求必须按总长度相加
 
@@ -97,7 +97,7 @@ S_{\mathrm{ctx}}=\sum_{i=1}^{B_{\mathrm{active}}}T_{\mathrm{ctx},i},
 ~~~math
 M_{\mathrm{KV}}
 \approx
-2L H_{\mathrm{kv}}D_h b\,S_{\mathrm{ctx}}.
+2L H_{\mathrm{kv}}D_{h} b\,S_{\mathrm{ctx}}.
 ~~~
 
 不要把 B_active * T_max 当成真实使用量，除非 runtime 确实按最大长度为每条请求完整预留。连续 batching、paged allocation 和 ragged kernel 往往按真实 token 数管理，但仍可能有 block rounding 和 padding 浪费。
@@ -107,17 +107,17 @@ M_{\mathrm{KV}}
 ~~~math
 M_{\mathrm{token}}
 \approx
-2L H_{\mathrm{kv}}D_h b.
+2L H_{\mathrm{kv}}D_{h} b.
 ~~~
 
-这个量要求 `L,H_kv,D_h` 为正且 `b>0`。它特别适合做容量规划。若可供 KV Cache 使用的显存预算为 `M_budget>0`，并且假定所有请求上下文长度都是 `T_ctx>0`，粗略并发上限为：
+这个量要求 `L,H_kv,D_h` 为正且 $b\gt 0$。它特别适合做容量规划。若可供 KV Cache 使用的显存预算为 $M_{\mathrm{budget}}\gt 0$，并且假定所有请求上下文长度都是 $T_{\mathrm{ctx}}\gt 0$，粗略并发上限为：
 
 ~~~math
 B_{\mathrm{rough}}
 \approx
 \left\lfloor
 \frac{M_{\mathrm{budget}}}
-{2L T_{\mathrm{ctx}}H_{\mathrm{kv}}D_h b}
+{2L T_{\mathrm{ctx}}H_{\mathrm{kv}}D_{h} b}
 \right\rfloor.
 ~~~
 
@@ -170,9 +170,9 @@ M_{\mathrm{KV}}
 ~~~math
 T_{\mathrm{ctx}}(t)=T_{\mathrm{in}}+t,
 \qquad
-K_l^{(t+1)}=K_l^{(t)}\mathbin{\|}K_{l,\mathrm{new}},
+K_{l}^{(t+1)}=K_{l}^{(t)}\mathbin{\|}K_{l,\mathrm{new}},
 \qquad
-V_l^{(t+1)}=V_l^{(t)}\mathbin{\|}V_{l,\mathrm{new}}.
+V_{l}^{(t+1)}=V_{l}^{(t)}\mathbin{\|}V_{l,\mathrm{new}}.
 ~~~
 
 符号 || 表示沿 sequence 维追加。实际 runtime 可能不真的执行一次大 tensor 的 concat，而是把新 token 写入下一个物理 block 的槽位；这是连续内存张量语义与分页存储实现之间的区别。
@@ -206,7 +206,7 @@ d^2.
 ~~~math
 C_{\mathrm{decode,attn}}
 \propto
-H_qT_{\mathrm{ctx}}D_h.
+H_{q}T_{\mathrm{ctx}}D_{h}.
 ~~~
 
 因此“有 KV Cache”与“长上下文 decode 不变慢”是两个不同命题。cache 消除的是历史 K/V 的重复计算；它没有消除新 query 对这些历史状态的访问。
@@ -224,7 +224,7 @@ H_qT_{\mathrm{ctx}}D_h.
 Multi-Head Attention（MHA）中，query、key、value 通常都有同样数量的 head：
 
 ~~~math
-H_{\mathrm{kv}}=H_q.
+H_{\mathrm{kv}}=H_{q}.
 ~~~
 
 每个 query head 拥有独立的 K/V 表示，表达能力和实现兼容性较好，但 cache 体积最大。若模型有 32 个 query head、每个 head 128 维，K/V 需要存储 32 份 head。
@@ -244,7 +244,7 @@ H_{\mathrm{kv}}=1.
 Grouped-Query Attention（GQA）把 query head 分成若干组，每组共享一个 K/V head。若每个 K/V head 服务 g 个 query head，则：
 
 ~~~math
-H_{\mathrm{kv}}=\frac{H_q}{g}.
+H_{\mathrm{kv}}=\frac{H_{q}}{g}.
 ~~~
 
 在其他变量相同的情况下，GQA 相对 MHA 的 cache 比例是：
@@ -252,7 +252,7 @@ H_{\mathrm{kv}}=\frac{H_q}{g}.
 ~~~math
 R_{\mathrm{GQA/MHA}}
 =\frac{M_{\mathrm{KV,GQA}}}{M_{\mathrm{KV,MHA}}}
-=\frac{H_{\mathrm{kv}}}{H_q}
+=\frac{H_{\mathrm{kv}}}{H_{q}}
 =\frac{1}{g}.
 ~~~
 
@@ -295,7 +295,7 @@ M_{\mathrm{MLA/token/layer}}
 T_{\mathrm{effective}}=\min(T_{\mathrm{ctx}},W).
 ~~~
 
-这里要求 `T_ctx\geq0` 且窗口 `W>0`。该层的 cache 预算可以按 `T_effective` 估算，而拥有 global attention 的层仍可能保留更长历史。混合模型不能用一个统一窗口替代所有层的状态。实现上还要考虑 RoPE、位置偏移、跨窗口摘要以及从 cache 中删除旧 token 后 attention mask 是否仍然正确。
+这里要求 `T_ctx\geq0` 且窗口 $W\gt 0$。该层的 cache 预算可以按 `T_effective` 估算，而拥有 global attention 的层仍可能保留更长历史。混合模型不能用一个统一窗口替代所有层的状态。实现上还要考虑 RoPE、位置偏移、跨窗口摘要以及从 cache 中删除旧 token 后 attention mask 是否仍然正确。
 
 ### 3.6.3 递归或线性 attention 的 state
 
@@ -305,8 +305,8 @@ T_{\mathrm{effective}}=\min(T_{\mathrm{ctx}},W).
 M_{\mathrm{history}}
 \approx
 B\sum_{l\in A}
-2\min(T_{\mathrm{ctx}},W_l)H_{\mathrm{kv},l}D_{h,l}b_l
-+B\sum_{l\in R}S_l b_l
+2\min(T_{\mathrm{ctx}},W_{l})H_{\mathrm{kv},l}D_{h,l}b_{l}
++B\sum_{l\in R}S_{l} b_{l}
 +M_{\mathrm{metadata}}.
 ~~~
 
@@ -385,12 +385,12 @@ W_{\mathrm{reserved}}
 ~~~math
 M_{\mathrm{KV,rank}}
 \approx
-\frac{2L H_{\mathrm{kv}}D_h b\,S_{\mathrm{ctx}}}{r}.
+\frac{2L H_{\mathrm{kv}}D_{h} b\,S_{\mathrm{ctx}}}{r}.
 ~~~
 
 但只有在 head 可分片、layout 和实现确实如此时才能除以 r。一些架构的 K/V、latent 或通信状态会复制；pipeline parallel 则按层分配，不是把所有 cache 简单平均。容量报告必须注明“单卡显存”还是“整机总显存”，并给出每 rank 的实际读数。
 
-把窗口和分片代入同一账本，可以看出“架构状态”和“设备放置”是两次不同的缩放。假设一个教学模型有 32 层、H_kv=8、D_h=128、BF16，单请求上下文为 8,192 token，若 32 层都保存全历史 GQA cache，则约为 1 GiB。再假设其中 12 层是 global attention，另外 20 层在模型定义中只保留最近 4,096 token，则有效的 layer-token 数为 `12×8192+20×4096=180224`，而全历史基线是 `32×8192=262144`；相除为 0.6875，因此理论 payload 约 0.6875 GiB。若 TP=4 且 8 个 KV heads 均匀分给 4 个 rank，理想每 rank 约 0.1719 GiB；实际是否分片、复制或另存状态，仍须查 layout 和设备读数。这个例子假定模型本身支持这些窗口，不是在服务端把任意 checkpoint 的历史截短；它也未计 pool rounding、通信和 workspace。
+把窗口和分片代入同一账本，可以看出“架构状态”和“设备放置”是两次不同的缩放。假设一个教学模型有 32 层、H_kv=8、D_h=128、BF16，单请求上下文为 8,192 token，若 32 层都保存全历史 GQA cache，则约为 1 GiB。再假设其中 12 层是 global attention，另外 20 层在模型定义中只保留最近 4,096 token，则有效的 layer-token 数为 $12\times 8192+20\times 4096=180224$，而全历史基线是 $32\times 8192=262144$；相除为 0.6875，因此理论 payload 约 0.6875 GiB。若 TP=4 且 8 个 KV heads 均匀分给 4 个 rank，理想每 rank 约 0.1719 GiB；实际是否分片、复制或另存状态，仍须查 layout 和设备读数。这个例子假定模型本身支持这些窗口，不是在服务端把任意 checkpoint 的历史截短；它也未计 pool rounding、通信和 workspace。
 
 落地时应按模型配置逐层列出 full-attention、windowed attention 和递归 state 三类，再把各层贡献相加；不能先用一个全局 `H_kv` 和统一最大长度替代混合结构。得到整机的理论状态后，再按实现检查每个 TP rank 的真实布局；如果分片不均或存在复制，容量门槛由最紧张的 rank 决定，而不是用各卡平均值掩盖单卡先 OOM。这样，模型结构、请求长度和并行布局才能落在同一份可核对的账本里。
 
@@ -423,7 +423,7 @@ attention kernel 仍然按逻辑顺序读取 token，只是在访问时通过 bl
 若 block size 为 S_block，第 i 个请求当前长度为 T_i，需要的 block 数为：
 
 ~~~math
-N_i=\left\lceil\frac{T_i}{S_{\mathrm{block}}}\right\rceil.
+N_{i}=\left\lceil\frac{T_{i}}{S_{\mathrm{block}}}\right\rceil.
 ~~~
 
 该式要求 `T_i\geq0` 为整数且 `S_block>0` 为正整数；空序列需要零个 block，但不能使用零 block size 进行所谓的“自动计算”。
@@ -432,9 +432,9 @@ N_i=\left\lceil\frac{T_i}{S_{\mathrm{block}}}\right\rceil.
 
 ~~~math
 A_{\mathrm{paged}}
-=S_{\mathrm{block}}\sum_{i=1}^{B}N_i,\qquad
+=S_{\mathrm{block}}\sum_{i=1}^{B}N_{i},\qquad
 W_{\mathrm{tail}}
-=A_{\mathrm{paged}}-\sum_{i=1}^{B}T_i.
+=A_{\mathrm{paged}}-\sum_{i=1}^{B}T_{i}.
 ~~~
 
 W_tail 是 token 槽位口径的内部浪费；还要加 block table、对齐、scale 和 allocator 元数据。block 越小，尾部浪费通常越小，但 table 更大、映射和 kernel 调度开销可能更高；block 越大，元数据更少，却可能浪费更多尾部空间。不存在脱离 workload 的万能 block size。
@@ -447,7 +447,7 @@ block size 会改变这一折中。仍用相同长度，S_block=64 时分别分�
 
 同一假设下，64-token block 的 108 个尾部槽位是 13.5 MiB，256-token block 的 428 个尾部槽位是 53.5 MiB；中间的 128-token 方案是 37.5 MiB。对应 block 数却分别为 87、45 和 23。这个换算只描述三条请求的尾部 payload，并不代表 table metadata 同比例变化，也不包含并发扩缩和 kernel 查表成本。Paged allocator 缓解了必须找到大段连续空间的外部碎片问题，但页池固定大小、空闲块是否仍驻留 GPU、尾块何时回收都由具体实现决定；读者应分别看槽位浪费、物理池占用和分配失败，不能把“总空闲字节够”当作分配一定成功。
 
-逻辑 block 数也不总等于需要新申请的物理 block 数。设 `S_block=4`、某请求已写 6 个 token，逻辑上占两个 block；再追加一个 token，`ceil(7/4)` 仍为 2，独占的尾 block 不需扩容。但若第二个 block 还被另一分支共享，写入前必须 copy-on-write：申请一个新物理 block，把已有的 `p4,p5` 复制过去，再写 `p6`。因此 scheduler 的分配预算除了序列长度，还要看共享引用和尾块是否可写；只按 `ceil(T/S_block)` 的差值做 admission 会漏掉分叉写入所需空间。
+逻辑 block 数也不总等于需要新申请的物理 block 数。设 `S_block=4`、某请求已写 6 个 token，逻辑上占两个 block；再追加一个 token，$\left\lceil 7/4 \right\rceil$ 仍为 2，独占的尾 block 不需扩容。但若第二个 block 还被另一分支共享，写入前必须 copy-on-write：申请一个新物理 block，把已有的 `p4,p5` 复制过去，再写 `p6`。因此 scheduler 的分配预算除了序列长度，还要看共享引用和尾块是否可写；只按 `ceil(T/S_block)` 的差值做 admission 会漏掉分叉写入所需空间。
 
 ### 3.8.3 地址换算与 copy-on-write 轨迹
 
@@ -460,7 +460,7 @@ p=\mathrm{block\_table}[b_{\mathrm{logical}}],\qquad
 \mathrm{slot}=pS_{\mathrm{block}}+o.
 ~~~
 
-例如 `i=9` 落在逻辑 block 2 的 offset 1；table[2] 是物理 block 11，简化的一维 token slot 是 `11×4+1=45`。真实 cache 的 slot mapping 还要结合层、K/V、head 和 kernel layout；这个乘加只解释地址翻译，不是通用 runtime ABI。
+例如 $i=9$ 落在逻辑 block 2 的 offset 1；table[2] 是物理 block 11，简化的一维 token slot 是 $11\times 4+1=45$。真实 cache 的 slot mapping 还要结合层、K/V、head 和 kernel layout；这个乘加只解释地址翻译，不是通用 runtime ABI。
 
 再看两个 decode 分支共享一个尚未填满的尾 block。下表假设分叉前已有 `p0…p5`，两条分支先共享物理 block 8 和 2：
 
@@ -516,11 +516,11 @@ copy-on-write 的关键不是“复制整条 cache”，而是只隔离将被改
 \frac{b_{\mathrm{new}}}{b_{\mathrm{old}}}.
 ~~~
 
-这里要求 `M_old>0`、`b_old>0` 和 `b_new>0`，且两边的 token 数、shape 和状态范围确实相同。例如 FP16/BF16 到 INT8，数据部分理论上约减半；到 FP8 也常是 1 byte 数据部分。但 scale、zero point、对齐和 kernel workspace 会让实际比例偏离，某些 runtime 还会在计算前把 cache 转回更高精度。
+这里要求 $M_{\mathrm{old}}\gt 0$、$b_{\mathrm{old}}\gt 0$ 和 $b_{\mathrm{new}}\gt 0$，且两边的 token 数、shape 和状态范围确实相同。例如 FP16/BF16 到 INT8，数据部分理论上约减半；到 FP8 也常是 1 byte 数据部分。但 scale、zero point、对齐和 kernel workspace 会让实际比例偏离，某些 runtime 还会在计算前把 cache 转回更高精度。
 
 用一组明确的假设把“数据减半”换成池占用：若 BF16 payload 是 1 GiB，候选 INT8 payload 是 512 MiB，scale 需要 40 MiB、残留区和对齐合计再占 24 MiB，则新路径共需 576 MiB，即 0.5625 GiB；相对 1 GiB payload 少 448 MiB，节省约 43.75%，不是 50%。这些 scale 和残留数字只是教学输入，且为简化比较暂不计 BF16 基线的 metadata；真实对照要使用目标 runtime 对整池的实际分配口径。
 
-scale 粒度本身也有可见的计数差异。仍假设 32 层、每层 8 个 KV heads，若一个 K 或 V head 各用一个 scale group，每层有 `2×8=16` 个组；若每个 head-channel 独立成组，且 `D_h=128`，则每层变为 `2×8×128=2048` 个组，数量扩大 128 倍。scale 是否按 token、block 或整个运行期复用会进一步改变元数据总字节和更新成本；这个计数只比较组数，不代表某个框架确实采用该 layout。核对配置时要读明白 scale 的轴、每组覆盖多少 cache 元素，以及新 token 到来后何时重定标。
+scale 粒度本身也有可见的计数差异。仍假设 32 层、每层 8 个 KV heads，若一个 K 或 V head 各用一个 scale group，每层有 $2\times 8=16$ 个组；若每个 head-channel 独立成组，且 $D_{h}=128$，则每层变为 $2\times 8\times 128=2048$ 个组，数量扩大 128 倍。scale 是否按 token、block 或整个运行期复用会进一步改变元数据总字节和更新成本；这个计数只比较组数，不代表某个框架确实采用该 layout。核对配置时要读明白 scale 的轴、每组覆盖多少 cache 元素，以及新 token 到来后何时重定标。
 
 ### 3.9.2 量化和反量化
 
@@ -531,7 +531,7 @@ q=\mathrm{clip}\left(\mathrm{round}\left(\frac{x}{s}\right)+z,\ q_{\min},q_{\max
 \hat{x}=s(q-z).
 ~~~
 
-x 是原始 K/V 值，q 是低精度整数，`s>0` 是 scale，z 是 zero point，q_min 和 q_max 是满足 `q_min <= q_max` 的整数表示范围，x_hat 是反量化近似。对称量化常取 z=0；scale 可以按 tensor、head、channel、token 或 block 统计。
+x 是原始 K/V 值，q 是低精度整数，$s\gt 0$ 是 scale，z 是 zero point，q_min 和 q_max 是满足 `q_min <= q_max` 的整数表示范围，x_hat 是反量化近似。对称量化常取 z=0；scale 可以按 tensor、head、channel、token 或 block 统计。
 
 粒度越细，通常越能跟踪局部分布，metadata 和读取 scale 的开销也越大；粒度越粗，管理简单，但异常值可能占据动态范围，使大部分值量化误差变大。K 和 V 的误差影响也不完全相同：K 参与 attention score，误差会改变权重分布；V 参与加权聚合，误差会改变输出内容。
 
@@ -539,22 +539,22 @@ x 是原始 K/V 值，q 是低精度整数，`s>0` 是 scale，z 是 zero point�
 
 这只是说明 scale 的合成算例，不是某个 runtime 的具体 kernel 或精度测量。实际 cache 选择量化轴时，必须考虑一个 scale 覆盖多少层、head、channel、token 或 block，以及这些 scale 在 decode 时是否能直接被 attention kernel 消费。分组缩小了异常值对其他值的影响，却会增加 scale 元数据和读取次数；把 scale 做得很细也可能让解量化访存、对齐或融合方式成为新瓶颈。因此应把“量化后的有效载荷字节”“scale/残留/对齐总字节”和“读取路径的实际耗时”分开记账。
 
-再用一组值对照整组定标与分组定标。设合成向量为 `[0.01, 0.02, 0.03, 1.0]`，整组共享 `s=1/127` 时，整数约为 `[1,3,4,127]`，反量化前三个值约为 `[0.00787,0.02362,0.03150]`；其中 0.01 的绝对误差约 0.00213。若把前三个小值作为一组、1.0 单独一组，前组 `s=0.03/127`，量化为 `[42,85,127]`，反量化约为 `[0.00992,0.02008,0.03]`，这三个值的误差都约为 0.00008。分组改善了小值精度，但多保存了一份 scale；真实实现还要算 scale 的精度、存储粒度和对齐，且不能假设所有 group 都能独立地按当前样本最大值定标。
+再用一组值对照整组定标与分组定标。设合成向量为 `[0.01, 0.02, 0.03, 1.0]`，整组共享 $s=1/127$ 时，整数约为 `[1,3,4,127]`，反量化前三个值约为 `[0.00787,0.02362,0.03150]`；其中 0.01 的绝对误差约 0.00213。若把前三个小值作为一组、1.0 单独一组，前组 $s=0.03/127$，量化为 `[42,85,127]`，反量化约为 `[0.00992,0.02008,0.03]`，这三个值的误差都约为 0.00008。分组改善了小值精度，但多保存了一份 scale；真实实现还要算 scale 的精度、存储粒度和对齐，且不能假设所有 group 都能独立地按当前样本最大值定标。
 
-量化误差如何传到输出，也可用一轮两值 attention 看清。假设 attention 权重为 `[0.75,0.25]`，V 为 `[0.2,1.0]`，加权结果是 `0.75×0.2+0.25×1.0=0.4`。若反量化后 V 变成 `[0.3,0.9]`，结果为 `0.45`，本轮输出偏差是 `0.05`。这只隔离了 V 的误差传播；K 的误差会先改变 QK 分数和 softmax 权重，所以不能用这一个例子替代对完整注意力路径的质量评估。
+量化误差如何传到输出，也可用一轮两值 attention 看清。假设 attention 权重为 `[0.75,0.25]`，V 为 `[0.2,1.0]`，加权结果是 $0.75\times 0.2+0.25\times 1.0=0.4$。若反量化后 V 变成 `[0.3,0.9]`，结果为 `0.45`，本轮输出偏差是 `0.05`。这只隔离了 V 的误差传播；K 的误差会先改变 QK 分数和 softmax 权重，所以不能用这一个例子替代对完整注意力路径的质量评估。
 
 ### 3.9.3 KIVI：K 与 V 为什么沿不同维度量化
 
 “把所有 cache 元素都转成 2 bit”会忽略 K、V 在 attention 中的作用不同。K 进入 `QK^T`，量化误差会改变 softmax 前后的注意力分布；V 进入按注意力权重加权的求和，误差沿着被选中 token 的 value 影响输出。因此，KIVI 先观察 cache 分布和 attention 输出误差，再分别选择量化轴：在其研究的模型中，K 的固定 channel 有较大 outlier，按 channel 分组可把 outlier 的动态范围限制在对应 channel；V 没有同样明显的 channel outlier，按 token 量化则把误差限制在单个 token，避免少数重要 token 被其他 token 拉宽量化范围。[KIVI 原论文 v2](https://arxiv.org/abs/2402.02750v2) 的分析是在指定模型、层和任务上得到，不是对所有 Transformer 的统计定律。
 
-KV 是逐 token 到达的流式状态，按 channel 量化 K 还带来实现问题：同一 channel 的一组 token 没收齐之前，scale 和 zero point 不稳定。KIVI 的状态因此分成“已量化组”和高精度 residual。用缩小的教学参数 `G=2`、`R=4` 追踪 6 个 token：K 的 token 1–2 已形成一组并量化，token 3–6 暂留高精度；V 的 token 1–2 已按 token 量化，最近的 token 3–6 暂留高精度。第 7 个 token 到来时，K 先把已满的 4-token residual 按 G 分组量化，再将 token 7 放入新的高精度 residual；V 则将 token 7 入队，把最旧的 token 3 逐 token 量化，继续保留最新 4 个 token。这里的 G、R 仅为看懂状态变化的玩具数值；论文实验使用的 group size 为 32、residual length 为 128。
+KV 是逐 token 到达的流式状态，按 channel 量化 K 还带来实现问题：同一 channel 的一组 token 没收齐之前，scale 和 zero point 不稳定。KIVI 的状态因此分成“已量化组”和高精度 residual。用缩小的教学参数 $G=2$、$R=4$ 追踪 6 个 token：K 的 token 1–2 已形成一组并量化，token 3–6 暂留高精度；V 的 token 1–2 已按 token 量化，最近的 token 3–6 暂留高精度。第 7 个 token 到来时，K 先把已满的 4-token residual 按 G 分组量化，再将 token 7 放入新的高精度 residual；V 则将 token 7 入队，把最旧的 token 3 逐 token 量化，继续保留最新 4 个 token。这里的 G、R 仅为看懂状态变化的玩具数值；论文实验使用的 group size 为 32、residual length 为 128。
 
 | 时刻 | 已量化 K | 高精度 K 残留 | 已量化 V | 高精度 V 残留 |
 | --- | --- | --- | --- | --- |
-| 6 个 token 后，教学 `G=2,R=4` | token 1–2，按 channel 分组 | token 3–6 | token 1–2，按 token 量化 | token 3–6 |
+| 6 个 token 后，教学 $G=2,R=4$ | token 1–2，按 channel 分组 | token 3–6 | token 1–2，按 token 量化 | token 3–6 |
 | 再到来 token 7 | token 1–6，按 channel 分组 | token 7 | token 1–3 | token 4–7 |
 
-这条路径要实现分组元数据管理、非对齐边界处理，以及和矩阵乘法融合的反量化 kernel；压缩比例不只是 `2/16`。还要加 scale/zero point、残留区、对齐、临时 workspace，并确认读取时的 kernel 是否直接消费低比特数据。KIVI 的系统实验以 Llama-2-7B、单张 A100 80GB 和 ShareGPT 合成 workload 为例，输入/输出平均长度约 161/338 token，并逐渐增大 batch 到 OOM；[论文报告](https://arxiv.org/abs/2402.02750)在相近峰值显存下 batch size 最多增至 4 倍、吞吐提高 2.35–3.47 倍。这里的吞吐收益包含低比特 cache 腾出容量后扩大 batch 的系统效应，不能当成单请求 kernel 提速，更不能把 2-bit 数据宽度直接解释为所有目标模型 cache 可缩小到八分之一或性能必然更快。
+这条路径要实现分组元数据管理、非对齐边界处理，以及和矩阵乘法融合的反量化 kernel；压缩比例不只是 $2/16$。还要加 scale/zero point、残留区、对齐、临时 workspace，并确认读取时的 kernel 是否直接消费低比特数据。KIVI 的系统实验以 Llama-2-7B、单张 A100 80GB 和 ShareGPT 合成 workload 为例，输入/输出平均长度约 161/338 token，并逐渐增大 batch 到 OOM；[论文报告](https://arxiv.org/abs/2402.02750)在相近峰值显存下 batch size 最多增至 4 倍、吞吐提高 2.35–3.47 倍。这里的吞吐收益包含低比特 cache 腾出容量后扩大 batch 的系统效应，不能当成单请求 kernel 提速，更不能把 2-bit 数据宽度直接解释为所有目标模型 cache 可缩小到八分之一或性能必然更快。
 
 当前 runtime 的量化合同还可能与 KIVI 算法不同。vLLM v0.32.0 的 [Quantized KV Cache 文档](https://docs.vllm.ai/en/v0.32.0/features/quantization/quantized_kvcache/)列出 per-tensor 和 per-attention-head FP8 scale；该版本页面说明 per-head 路径只适用于 Flash Attention backend，并需要 llm-compressor 校准。没有校准时页面列出的 scale 默认值为 1.0。它描述的是该版本公开的 FP8 路径，不等于实现了 KIVI 的 2-bit、K per-channel/V per-token 方案；具体可用配置仍需按目标版本、模型和 backend 核对。
 

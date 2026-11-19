@@ -64,12 +64,12 @@ MedAlign 则把输入从考试式问答换成了临床人员真实提出的 EHR 
 ```math
 \mathcal{L}_{\mathrm{SFT}}
 =-\frac{1}{M}
-\sum_t m_t\log p_\theta(y_t\mid x,y_{1:t-1})
+\sum_{t} m_{t}\log p_{\theta}(y_{t}\mid x,y_{1:t-1})
 \qquad
-M=\sum_t m_t>0
+M=\sum_{t} m_{t}>0
 ```
 
-$m_t$ 表示第 $t$ 个位置是否是预期的目标答案 token， $M$ 是这条样本或这个聚合窗口中的有效监督 token 数。用户问题、检索上下文、工具 observation 和 padding 通常不应在 assistant-only SFT 中被误算成目标；结构化字段、引用和拒答理由是否参与 loss，要由任务定义决定。分母使用有效 token 数，是为了避免长答案仅凭长度获得更大权重；按样本平均时则要明确采用了另一种加权策略。
+$m_{t}$ 表示第 $t$ 个位置是否是预期的目标答案 token， $M$ 是这条样本或这个聚合窗口中的有效监督 token 数。用户问题、检索上下文、工具 observation 和 padding 通常不应在 assistant-only SFT 中被误算成目标；结构化字段、引用和拒答理由是否参与 loss，要由任务定义决定。分母使用有效 token 数，是为了避免长答案仅凭长度获得更大权重；按样本平均时则要明确采用了另一种加权策略。
 
 这里的 $M>0$ 不是形式上的细节。若一条样本经模板渲染、截断或 mask 后没有任何 assistant token，它不是“loss 为零的好样本”，而是数据协议出了问题：可能是角色标记错了，可能是答案被截断，也可能是本来就只有检索材料。训练器可以跳过该 batch 或将它隔离复查，但必须记录空监督率；用 $\max(1, M)$ 或一个很小的分母把它算成正常 loss，会把数据损坏伪装成训练稳定。
 
@@ -166,11 +166,11 @@ R=R_{\mathrm{correct}}+\alpha R_{\mathrm{evidence}}
 
 ```math
 R_{\mathrm{severity}}
-=\frac{\sum_i s_i\,\mathbf{1}[\mathrm{error}_i]}
-{\sum_i s_i}
+=\frac{\sum_{i} s_{i}\,\mathbf{1}[\mathrm{error}_{i}]}
+{\sum_{i} s_{i}}
 ```
 
-$s_i$ 是第 $i$ 个错误的业务严重度，要求 $s_i\geq0$ 且 $\sum_i s_i>0$。一个漏掉药物过敏的样本不应和一个标点错误拥有相同权重。若评测集中根本没有被赋予严重度的项目，指标应报告为未定义，并补齐评测设计；把分母替换为一个小常数会得到貌似很低的风险率，却没有任何风险覆盖。还要报告专家之间的一致性、人工接管率、工具调用延迟和单位成功成本，因为领域系统的质量不只由模型文本决定。
+$s_{i}$ 是第 $i$ 个错误的业务严重度，要求 $s_{i}\geq0$ 且 $\sum_{i} s_{i}>0$。一个漏掉药物过敏的样本不应和一个标点错误拥有相同权重。若评测集中根本没有被赋予严重度的项目，指标应报告为未定义，并补齐评测设计；把分母替换为一个小常数会得到貌似很低的风险率，却没有任何风险覆盖。还要报告专家之间的一致性、人工接管率、工具调用延迟和单位成功成本，因为领域系统的质量不只由模型文本决定。
 
 ### 15.9 常见失败
 
@@ -235,14 +235,14 @@ Q=\alpha Q_{\mathrm{fact}}+\beta Q_{\mathrm{evidence}}
 
 领域数据不能只按专家觉得“重要”的案例采样。应按任务频率、风险、难度、用户群、工具状态和错误后果分层，保证训练集和评估集都覆盖常见任务与长尾边界。
 
-设领域任务桶为 $i$，采样比例为 $w_i$，验证成功率为 $q_i$，可以用加权目标观察配方变化：
+设领域任务桶为 $i$，采样比例为 $w_{i}$，验证成功率为 $q_{i}$，可以用加权目标观察配方变化：
 
 ~~~math
-Q_{\mathrm{domain}}=\sum_i w_iq_i,\qquad
-\sum_iw_i=1
+Q_{\mathrm{domain}}=\sum_{i} w_{i}q_{i},\qquad
+\sum_{i}w_{i}=1
 ~~~
 
-这里的任务桶集合必须非空， $w_i\geq0$，并且每个正权重桶都要有可评分的 $q_i$。某个长尾高风险桶缺样本、verifier 超时或专家尚未裁决时，应单独报告 `unknown`，不能悄悄把它从归一化分母中删掉。提高高风险桶的权重可能降低普通任务平均分，却提高业务安全性。最终配方要由领域评估结果和失败成本决定。
+这里的任务桶集合必须非空， $w_{i}\geq0$，并且每个正权重桶都要有可评分的 $q_{i}$。某个长尾高风险桶缺样本、verifier 超时或专家尚未裁决时，应单独报告 `unknown`，不能悄悄把它从归一化分母中删掉。提高高风险桶的权重可能降低普通任务平均分，却提高业务安全性。最终配方要由领域评估结果和失败成本决定。
 
 用合成数值看权重如何改变总分：普通任务占 90%，成功率为 0.95；高风险任务占 10%，成功率为 0.50，则 $Q=0.9\times0.95+0.1\times0.50=0.905$。若治理目标要求两个桶等权， $Q=0.5\times0.95+0.5\times0.50=0.725$。模型分桶表现完全没变，汇总数却相差 0.18；因此报告必须同时展示桶内结果和权重，不能把总分变化自动解释成模型能力变化。
 
@@ -296,9 +296,9 @@ R(y)
 ~~~math
 L_{\mathrm{train}}
 =L_{\mathrm{token}}
-+\lambda_1 L_{\mathrm{field}}
-+\lambda_2 L_{\mathrm{citation}}
-+\lambda_3 L_{\mathrm{format}}.
++\lambda_{1} L_{\mathrm{field}}
++\lambda_{2} L_{\mathrm{citation}}
++\lambda_{3} L_{\mathrm{format}}.
 ~~~
 
 这些项不必都反向传播。关键是把“模型说得像”和“任务完成了”分开记录。一个模型可能 token loss 下降，却把日期、单位或适用地区写错；字段级评估能更早暴露这种问题。
@@ -331,11 +331,11 @@ L_{\mathrm{train}}
 
 ~~~math
 R(\tau)
-=w_cR_{\mathrm{correct}}
-+w_eR_{\mathrm{evidence}}
-+w_fR_{\mathrm{format}}
-+w_pR_{\mathrm{process}}
--w_rR_{\mathrm{risk}}.
+=w_{c}R_{\mathrm{correct}}
++w_{e}R_{\mathrm{evidence}}
++w_{f}R_{\mathrm{format}}
++w_{p}R_{\mathrm{process}}
+-w_{r}R_{\mathrm{risk}}.
 ~~~
 
 本节讨论训练轨迹能否进入奖励排序；§15.7 讨论真实服务能否执行动作。训练门禁不会授予生产权限，生产授权仍由独立 policy engine 和执行器强制落实。
@@ -345,7 +345,7 @@ R(\tau)
 ~~~math
 D_{\mathrm{release}}(\tau)
 =\prod_{j\in\mathcal{C}_{\mathrm{hard}}}
-\mathbf 1[c_j(\tau)=1],
+\mathbf 1[c_{j}(\tau)=1],
 \qquad
 R_{\mathrm{soft}}(\tau)
 \text{ ranks only trajectories with }D_{\mathrm{release}}=1.
