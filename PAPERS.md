@@ -147,6 +147,10 @@ Transformer 核心机制入口：
 21. [Mamba-3](https://arxiv.org/abs/2603.15569)：指数梯形离散化、复值状态与 MIMO；质量和 kernel 数据绑定作者模型、训练配方、任务与硬件。
 22. [Jamba](https://arxiv.org/abs/2403.19887v2)：Transformer/Mamba 层间混合及部分 MoE；1:3 与 1:7 比较不是通用最优比例。
 23. [Native Sparse Attention](https://arxiv.org/abs/2502.11089v2)：层级稀疏 token 选择、原生训练和硬件对齐；64K 速度结果绑定论文的 8×A100、kernel、配置与基线。
+24. [GLU Variants Improve Transformer](https://arxiv.org/abs/2002.05202)：在 T5 序列到序列设置中比较 ReGLU、GEGLU、SwiGLU 等，并按近似等参数/等计算缩小门控版中间维度；C4 span-filling 和微调结果不能推出所有 decoder-only LLM 的普遍收益。
+25. [Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer](https://arxiv.org/abs/1701.06538)：稀疏门控 MoE 的早期方法和负载/带宽挑战；其实验含 LSTM 语言建模与机器翻译，不是 Transformer MoE 结果。
+26. [GShard](https://arxiv.org/abs/2006.16668) 与 [Mixtral of Experts](https://arxiv.org/abs/2401.04088)：分别展示 Transformer 中隔层 top-2 MoE 与 8-expert/top-2 MoE；模型规模、任务、设备和 active-parameter 口径按原文限定。
+27. [DeepSeekMoE](https://aclanthology.org/2024.acl-long.70/)：研究细粒度 routed experts 和 shared experts；论文实验不证明这些设计对所有模型、任务或硬件都更优。
 
 - [Multi-Layer Scheduling for MoE-Based LLM Reasoning](https://arxiv.org/abs/2602.21626)：研究请求级、引擎级和 expert 级的分层调度；作者报告的 TTFT/TPOT 变化绑定论文 workload、模型、集群和服务实现，不能由 router token 计数直接推出。
 
@@ -342,7 +346,7 @@ Scaling Law、Chinchilla、数据配比、分布式训练、训练稳定性。
 11. [Shampoo 与 Muon 的跨尺度超参迁移研究](https://arxiv.org/abs/2512.05620) 和 [SOAP, Muon, and Beyond](https://arxiv.org/abs/2607.20548)：分别比较 μP/weight decay 缩放，以及多十亿参数和大 batch 下的 SOAP/Muon；结论绑定各自的数据、规模、schedule、硬件与实现。
 12. [Understanding Warmup-Stable-Decay Learning Rates](https://arxiv.org/abs/2410.05192)：River Valley 假设、WSD-S 单分支 checkpoint 路径及其实验边界。
 13. [A Theory on Adam Instability in Large-Scale Machine Learning](https://arxiv.org/abs/2304.09871)、[Adaptive Preconditioners Trigger Loss Spikes in Adam](https://arxiv.org/abs/2506.04805v2)、[SPAM](https://arxiv.org/abs/2501.06842v2) 与 [GradientStabilizer](https://proceedings.mlr.press/v306/huang26bb.html)：分别分析 Adam 更新方向/时间相关梯度估计、二阶矩失配、尖峰检测与动量重置、梯度幅值稳定；模型规模、阈值和实验配方不同，不应将结果视为同一设置下的排名。
-14. [On Layer Normalization in the Transformer Architecture](https://proceedings.mlr.press/v119/xiong20b.html)、[DeepNet](https://arxiv.org/abs/2203.00555) 与 [Peri-LN](https://proceedings.mlr.press/v267/kim25u.html)：对照 Pre-LN 梯度路径、深度相关残差/初始化缩放和外围归一化位置；各自架构与初始化条件不同，证据不能直接迁移为现成模型的热切换方案。
+14. [On Layer Normalization in the Transformer Architecture](https://proceedings.mlr.press/v119/xiong20b.html)、[Admin](https://aclanthology.org/2020.emnlp-main.463/)、[NormFormer](https://arxiv.org/abs/2110.09456)、[DeepNet](https://arxiv.org/abs/2203.00555)、[Peri-LN（Kim 等，ICML 2025）](https://proceedings.mlr.press/v267/kim25u.html)与[后续稳定性分析（Kan 等，arXiv v2）](https://arxiv.org/abs/2510.09904)：分别讨论 Pre-LN 初始化梯度、residual-branch 依赖、层间梯度幅度、深度相关残差/初始化缩放、外围归一化及其后续稳定性分析；各自架构、任务和初始化条件不同，证据不能直接迁移为现成模型的热切换方案。
 
 - [LoFT: Low-Rank Adaptation That Behaves Like Full Fine-Tuning](https://proceedings.iclr.cc/paper_files/paper/2026/hash/7428310c0f97f1c6bb2ef1be99c1ec2a-Abstract-Conference.html)：研究低秩子空间中的 optimizer moment 表示；作者的质量和收敛报告绑定论文模型、目标层与训练设置，不等于所有 LoRA 实现都采用该优化器。
 

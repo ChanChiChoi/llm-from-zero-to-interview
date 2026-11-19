@@ -1244,8 +1244,6 @@ Load Balancing：负载均衡；控制不同 expert 的 token 分配和设备工
 
 Router Z-Loss：路由器 z 损失；惩罚 router logits 的 log-sum-exp 尺度，帮助缓解指数计算的低精度舍入不稳定；它不直接保证专家负载均匀。
 
-FFN / MoE Gate：FFN / MoE 架构门禁
-
 Residual Connection：残差连接
 
 Residual Stream：残差流 / 主隐藏状态通道
@@ -1260,7 +1258,11 @@ Pre-LN：前置归一化
 
 Post-LN：后置归一化
 
-Peri-LN：外围归一化；将 LayerNorm 放在注意力和 MLP 子层周边的 Transformer 归一化架构；论文报告了最高 3.2B 参数实验，需与其模型及训练设置绑定。
+Peri-LN：外围归一化；Kim 等人在 ICML 2025 论文中用此名称归纳 Transformer 子层输入和输出两侧都放置归一化的做法；论文报告了最高 3.2B 参数实验，结果需与其模型及训练设置绑定。
+
+Admin / Adaptive Model Initialization：自适应模型初始化；通过初始化调节训练早期对 residual branch 的依赖；论文证据绑定其机器翻译模型与训练设置。
+
+NormFormer：在 Pre-LN Transformer 中加入额外归一化和 attention head 缩放以缓解层间梯度幅度差异的方案；结果须绑定论文中的模型规模与预训练设置。
 
 Residual Scaling：残差缩放
 
@@ -1346,7 +1348,7 @@ Serving Pressure：推理服务压力
 
 Scaling Gate：规模化门禁
 
-SwiGLU：SwiGLU 门控激活 / SwiGLU 门控 MLP
+SwiGLU：SwiGLU 门控 MLP；SiLU/Swish gate 与 up 两条投影逐元素相乘后再下投影。若普通 FFN 中间宽度为 $4D$，近似等参数 SwiGLU 宽度约为 $8D/3$，实际模型还会按配置取整。
 
 Causal Mask：因果掩码
 

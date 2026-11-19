@@ -1,229 +1,95 @@
 # 第五章：FFN、SwiGLU、Gated MLP 与 MoE FFN
 
-## 0. 本讲范围与资料
+## 5.1 注意力之后，token 表示还要经过什么变换
 
-本章以公开论文和技术报告为资料边界：Transformer 原论文对 position-wise FFN 的定义，Shazeer 的 *GLU Variants Improve Transformer* 对 ReGLU / GEGLU / SwiGLU 的对比，PaLM 和 LLaMA 公开资料中对 SwiGLU / gated MLP 的采用，GShard、Switch Transformer、Mixtral of Experts、DeepSeekMoE 和 DeepSeek-V2 对 sparse MoE、top-k routing、专家负载、active parameters 与系统复杂度的公开描述。
+Transformer block 中的 attention 会让一个位置读取其他 token 的表示。读完上下文后，每个位置还要对自己的特征做非线性变换，才能把刚收集到的信息加工成下一层可用的表示。这个按位置分别应用的网络就是前馈网络（feed-forward network，FFN）；现代模型里也常叫 MLP。
 
-本章只讨论公开可验证的 FFN / gated MLP / MoE FFN 通用机制；不把某个闭源模型的 expert 数、hidden size、routing recipe 或负载均衡技巧写成行业标准，也不把 toy demo 的验收结果当成真实 benchmark。
+先用一个简单分工建立方向：attention 负责 token 之间的信息交换，FFN 负责把每个 token 当前的通道表示变换到新的表示。这个分工说明两者处理的轴不同，不代表 FFN 会把事实或概念存放在某个可直接定位的固定单元里。
 
-本章重点有三点：
+本章先从原始 Transformer 的两层 FFN 出发，再解释 SwiGLU 怎样在通道维加入门控，最后说明 MoE 怎样让不同 token 只计算一组专家中的一小部分。理解后，读者应能按相同口径比较普通 FFN 与 SwiGLU 的参数量，并区分 MoE 的总参数、每 token 使用的参数和实际服务成本。
 
-1. 将 FFN、SwiGLU、MoE routing、参数量、active parameters、expert capacity 和 load balance 写成 GitHub Markdown 更稳定的 MathJax 公式。
-2. 明确 dense FFN、SwiGLU/Gated MLP 和 MoE FFN 分别解决“非线性通道变换”“通道门控表达”和“稀疏激活扩容”三个层面的问题。
-3. 补一个 0 依赖 Python demo，审计 dense 4D FFN、SwiGLU 近似等参配置、MoE top-2 的总参数 / 激活参数、capacity overflow 和路由负载均衡。
+## 5.2 Dense FFN：每个位置共用参数，分别计算
 
-## 5.1 本章定位
+设输入张量为 $X\in\mathbb{R}^{B\times T\times D}$： $B$ 是 batch 大小， $T$ 是序列长度， $D$ 是模型宽度。取其中一个 token 的向量 $x_{b,t}\in\mathbb{R}^{D}$，FFN 先把它投影到宽度为 $M$ 的中间表示，再投影回 $D$：
 
-很多人学 Transformer 时，会把注意力机制当成唯一主角，把 FFN 当成“后面跟着的两层 MLP”。这是一个常见误区。
+~~~math
+h_{b,t}=\phi(x_{b,t}W_1+b_1),\qquad
+y_{b,t}=h_{b,t}W_2+b_2.
+~~~
 
-在现代大模型中，FFN/MLP 层通常占据大量参数和计算。Attention 负责 token 之间的信息路由，FFN 则负责对每个 token 的表示做非线性变换、特征组合和容量扩展。可以粗略理解为：
+这里 $W_1\in\mathbb{R}^{D\times M}$， $W_2\in\mathbb{R}^{M\times D}$， $\phi$ 是逐元素非线性函数；原始 Transformer 使用 ReLU。每个位置都执行这两步，但所有位置共用同一组 $W_1$、 $W_2$ 和偏置。换言之，FFN 不是给每个 token 单独存一套参数，而是把同一个函数分别应用到各位置。
 
-```text
-Attention: token 之间交换信息
-FFN/MLP: 每个 token 内部加工信息
-```
+从张量形状看，计算是 $[B,T,D]\rightarrow[B,T,M]\rightarrow[B,T,D]$。中间投影只改变每个 token 的通道维度，不在序列位置之间混合信息；token 间的读取由 attention 完成。原始定义可见 [Attention Is All You Need §3.3](https://arxiv.org/abs/1706.03762)。
 
-本章讲 Transformer block 中另一个核心模块：FFN。从原始 Transformer 的 ReLU FFN，到 GELU，再到现代 LLM 常用的 SwiGLU/Gated MLP，再到 MoE FFN。
+## 5.3 用参数量看中间层为什么会变宽
 
-学完本章，你应该能回答：
+忽略偏置时，两层 FFN 的参数量约为：
 
-1. Transformer FFN 为什么是 position-wise 的。
-2. FFN 在 Transformer 中到底起什么作用。
-3. 为什么现代 LLM 常用 SwiGLU，而不是普通 ReLU/GELU FFN。
-4. Gated MLP 的门控直觉是什么。
-5. 为什么 MoE 通常替换 FFN，而不是替换 attention。
-6. Switch、GShard、Mixtral、DeepSeekMoE 这些 MoE FFN 的核心 trade-off 是什么。
-7. 面试中如何解释 FFN、SwiGLU 和 MoE 的关系。
+~~~math
+P_{\mathrm{dense}}\approx DM+MD=2DM.
+~~~
 
-## 5.2 资料来源和可信边界
+若 $M=4D$，则矩阵参数约为 $8D^2$。原始 Transformer 选择了 $D=512$、 $M=2048$；后续模型也常用约 $4D$ 的中间宽度，但 $4D$ 是常见配置，不是每种模型都必须遵循的规则。
 
-本章主要参考以下公开资料：
+若把一次乘加计作两个浮点运算，两次矩阵乘法对每个 token 约需 $4DM$ FLOPs，尚未计入激活函数和其他开销。这个估算帮助读者比较不同宽度的 FFN；实际整层成本还会受序列长度、batch、数据类型、算子实现和硬件影响。
 
-1. Vaswani et al., 2017, *Attention Is All You Need*。原始 Transformer 使用 position-wise feed-forward networks，每个位置独立应用相同的两层全连接网络和 ReLU。
-2. Shazeer, 2020, *GLU Variants Improve Transformer*。系统测试 GLU 变体，发现部分 gated FFN 变体相对 ReLU/GELU 能提升 Transformer 质量，SwiGLU 后来成为现代 LLM 常用组件。
-3. Chowdhery et al., 2022, *PaLM*。PaLM 是大规模 decoder-only Transformer，公开使用 SwiGLU 等现代结构并展示 scaling 效果。
-4. Touvron et al., 2023, *LLaMA*。LLaMA 使用 RMSNorm、SwiGLU、RoPE 等组件，成为开源 LLM 架构基线。
-5. Lepikhin et al., 2020, *GShard*。使用 sparsely-gated MoE 和自动 sharding，把 Transformer 扩展到 600B+ 参数级别。
-6. Fedus et al., 2021/2022, *Switch Transformers*。简化 MoE routing，用每个 token 选择一个 expert 的方式扩展到 trillion-parameter 模型，并讨论通信、稳定性和低精度训练。
-7. Jiang et al., 2024, *Mixtral of Experts*。Mixtral 8x7B 使用 sparse MoE，每层有 8 个 FFN experts，每个 token 选 2 个专家，推理激活参数少于总参数。
-8. DeepSeek-AI, 2024, *DeepSeek-V2*。DeepSeekMoE 通过 sparse computation 经济地训练强模型，并和 MLA 一起优化训练和推理效率。
+## 5.4 GLU：让一条通道表示调节另一条
 
-需要注意：不同模型对 FFN hidden size、gate 维度、activation、expert 数、top-k routing、负载均衡的细节可能不同。本章重点讲通用机制和 trade-off，不把某个模型的私有配置泛化成标准。
+普通 FFN 先对一条投影结果应用激活函数。门控线性单元（gated linear unit，GLU）改为从同一个输入产生两条宽度为 $M$ 的支路：一条形成候选表示，另一条形成门控值，再逐元素相乘：
 
-## 5.3 原始 Transformer FFN 是什么
+~~~math
+u=xW_u+b_u,\qquad
+g=\phi(xW_g+b_g),\qquad
+h=u\odot g,\qquad
+y=hW_d+b_d.
+~~~
 
-原始 Transformer 每个 block 中有两个主要子层：
+$u$ 和 $g$ 都是长度为 $M$ 的向量， $\odot$ 表示对应位置相乘， $W_d$ 再把结果投回模型宽度。门控支路改变了每个通道的幅度：当某个位置的门控值较小时，对应候选特征的贡献也较小。它是可学习的连续调制，不是一个人工写死的开关，也不意味着某个通道永远对应某个固定语义。
 
-```text
-Multi-Head Attention
-Position-wise Feed-Forward Network
-```
+原始 GLU 通常用 sigmoid 产生门控值；GLU 变体会替换门控支路的激活函数。SwiGLU 在门控支路使用 SiLU/Swish；它因此不只是把 ReLU 换成另一个激活函数，而是包含 gate、up、down 三组投影的门控 MLP。
 
-原论文中的 FFN 形式是：
+## 5.5 SwiGLU 的三组投影
 
-```math
-\mathrm{FFN}(x)=\sigma(xW_1+b_1)W_2+b_2
-```
+令 $\mathrm{SiLU}(z)=z\,\sigma(z)$，其中 $\sigma$ 是 sigmoid 函数。对一个 token，SwiGLU 可写成：
 
-其中 `x` 是单个 token 位置的 hidden vector，`W_1` 把 hidden size 从 `d` 扩展到中间维度 `m`，`W_2` 再投回 `d`，`\sigma` 在原始 Transformer 中是 ReLU。也就是两层线性层，中间加非线性激活。
+~~~math
+g=\mathrm{SiLU}(xW_g),\qquad
+u=xW_u,\qquad
+y=(g\odot u)W_d.
+~~~
 
-它叫 position-wise，是因为同一个 FFN 独立作用在每个 token 位置上：
+这里 gate projection 和 up projection 都把宽度从 $D$ 变到 $M$，down projection 再从 $M$ 变回模型宽度。常见实现可以省略偏置；是否使用偏置由具体模型配置决定。PaLM 和 LLaMA 都公开采用 SwiGLU，但采用本身只能说明它是这些模型的结构选择，不能单独证明质量提升由这一处改动造成。
 
-```math
-y_i=\mathrm{FFN}(x_i),\qquad i=1,\ldots,T
-```
+## 5.6 参数匹配时，不要固定相同的中间宽度
 
-不同位置之间不在 FFN 中直接交互。token 之间的信息交换主要由 attention 完成。
+普通两矩阵 FFN 忽略偏置时约有 $2DM$ 个参数；SwiGLU 有 gate、up、down 三个矩阵，约有 $3DM$ 个参数。若两者采用相同的 $M$，SwiGLU 参数会多约一半。因此要比较近似相同参数量的配置，必须把 SwiGLU 中间宽度调小。
 
-这有一个重要设计分工：
+以普通 FFN 的 $M=4D$ 为参照，令两种网络的矩阵参数接近：
 
-```text
-Attention: mix across sequence dimension
-FFN: transform across hidden/channel dimension
-```
+~~~math
+3DM_{\mathrm{SwiGLU}}\approx2D(4D),\qquad
+M_{\mathrm{SwiGLU}}\approx\frac{8}{3}D.
+~~~
 
-从张量形状看：
+例如 $D=4096$ 时，普通 FFN 取 $M=16384$，有 $134{,}217{,}728$ 个矩阵参数。SwiGLU 取 $M=11008$，有 $135{,}266{,}304$ 个矩阵参数，约为前者的 $1.008$ 倍。这个数值只说明参数量接近；它不保证两种模型有相同质量、训练速度或推理延迟。
 
-```text
-X: [batch, seq_len, hidden_size]
-FFN: hidden_size -> intermediate_size -> hidden_size
-Output: [batch, seq_len, hidden_size]
-```
+## 5.7 SwiGLU 的实验证据能说明到哪里
 
-每个 token 使用同一组 FFN 参数，所以 FFN 像一个作用在 token 表示上的共享非线性函数。
+[Shazeer 的 GLU 变体研究](https://arxiv.org/abs/2002.05202)在 T5 序列到序列模型中比较了 ReGLU、GEGLU、SwiGLU 等 FFN 变体，并通过缩小门控版本的中间宽度匹配参数量和计算量。论文报告，GEGLU 和 SwiGLU 在 C4 span-filling 目标的 held-out log-perplexity 上较优；下游微调结果有噪声。这个证据支持“门控变体在该实验设置中表现较好”，不支持“所有 decoder-only LLM 都必然从 SwiGLU 获益”。
 
-## 5.4 FFN 为什么重要
+| 资料 | 公开内容 | 证据边界 |
+| --- | --- | --- |
+| [Shazeer, 2020](https://arxiv.org/abs/2002.05202) | 在 T5 序列到序列设置中等参数/等计算比较多种 GLU 变体；GEGLU、SwiGLU 的 held-out C4 指标较优 | 结论绑定该模型、C4 span-filling 训练和论文评测；微调结果并非每项都稳定领先 |
+| [PaLM, 2022](https://arxiv.org/abs/2204.02311) | 报告模型采用 SwiGLU，并说明门控 MLP 使用三组矩阵 | 多个架构改动同时存在，不能将整模型表现归因于 SwiGLU |
+| [LLaMA, 2023](https://arxiv.org/abs/2302.13971) | 报告使用 SwiGLU，并将中间宽度设为 PaLM 常用 $4D$ 的约 $2/3$ | 这是模型配置，不是对所有模型精确等质量或等延迟的证明 |
 
-如果只有 attention，没有 FFN，模型主要是在不同 token 的 Value 之间做线性加权组合。虽然 attention 权重来自非线性 softmax，但每层表达能力仍然受限。
+## 5.8 用短代码对应 SwiGLU 的张量形状
 
-FFN 提供了几个关键能力。
+下面的 PyTorch 层接收形状为 $[B,T,D]$ 的输入。两条上投影产生 $[B,T,M]$，逐元素相乘后由 down projection 返回 $[B,T,D]$。它展示的是 FFN 子层，不包含 attention、残差或归一化。
 
-第一，非线性变换。
+**代码状态：静态审阅，未运行。** 这是一个依赖 PyTorch 的最小模块片段，不是可独立运行的训练脚本。
 
-FFN 引入 ReLU/GELU/SwiGLU 等非线性，使模型能学习更复杂的特征组合。
-
-第二，通道维度扩展。
-
-典型 FFN 会把 hidden size 扩大到 4 倍左右，再投影回来：
-
-```text
-D -> 4D -> D
-```
-
-这给每个 token 提供更大的中间特征空间。
-
-第三，知识和模式存储。
-
-很多研究和工程直觉都认为 FFN/MLP 层承担了大量事实、模式和特征转换能力。Attention 负责把相关信息带到当前位置，FFN 负责把这些信息加工成下一层可用表示。
-
-第四，参数容量主体。
-
-在很多 Transformer 配置中，FFN 参数量远大于 attention 投影参数量。因此扩展模型容量时，FFN 是非常关键的部分。
-
-一句话：
-
-```text
-Attention 决定 token 从哪里拿信息，FFN 决定拿到信息后怎么加工。
-```
-
-## 5.5 ReLU、GELU 到 GLU
-
-原始 Transformer 使用 ReLU。
-
-后来很多语言模型使用 GELU。GELU 相比 ReLU 更平滑，在 BERT/GPT 系列中很常见。
-
-普通 FFN 可以写成：
-
-```math
-\mathrm{FFN}(x)=\phi(xW_1)W_2
-```
-
-GLU 类结构则引入门控：
-
-```math
-u=xW_u,\qquad g=\sigma_{\mathrm{gate}}(xW_g),\qquad y=(u\odot g)W_d
-```
-
-其中 `u` 是候选特征，`g` 是 gate branch，`\odot` 是逐元素乘法，`W_d` 是 down projection。
-
-直觉上，GLU 把 FFN 分成两条支路：
-
-1. value branch：产生候选特征。
-2. gate branch：决定哪些特征通过。
-
-也就是说，不是所有中间特征都同等进入下一层，而是由 gate 控制信息流。
-
-这和 attention 的“加权读取”有点类似，但发生在通道维度，而不是 token 维度。
-
-## 5.6 SwiGLU 是什么
-
-Shazeer 的 *GLU Variants Improve Transformer* 测试了多种 GLU 变体，例如 ReGLU、GEGLU、SwiGLU 等。
-
-SwiGLU 可以理解为：
-
-```math
-g=\mathrm{SiLU}(xW_g),\qquad u=xW_u
-```
-
-然后把 gate branch 和 up branch 逐元素相乘，再通过 down projection 回到 hidden size：
-
-```math
-y=(g\odot u)W_d
-```
-
-Swish 通常是：
-
-```math
-\mathrm{SiLU}(z)=z\cdot \frac{1}{1+\exp(-z)}
-```
-
-现代 LLM 中常见的 MLP 形式是：
-
-```text
-gate = SiLU(W_gate x)
-up = W_up x
-hidden = gate * up
-out = W_down hidden
-```
-
-这里的 SiLU 和 Swish 基本是同类表达。
-
-SwiGLU 的直觉：
-
-1. `W_up x` 产生候选特征。
-2. `SiLU(W_gate x)` 产生平滑门控。
-3. 两者逐元素相乘，选择性激活特征。
-4. `W_down` 把中间特征投回 hidden space。
-
-这比普通 FFN 多了一条 projection，但通常可以通过调整 intermediate size 控制参数量。
-
-## 5.7 为什么现代 LLM 爱用 SwiGLU
-
-LLaMA、PaLM 等模型把 SwiGLU/Gated FFN 推成了现代 LLM 的常见 recipe。
-
-原因可以从三层理解。
-
-第一，表达能力。
-
-门控结构让模型能对不同 token、不同上下文动态选择通道特征。它比简单的 ReLU/GELU 单支路更灵活。
-
-第二，训练效果。
-
-GLU 变体实验显示部分 gated FFN 能提升 Transformer 质量。实践中 SwiGLU 成为大模型常用选择。
-
-第三，工程可控。
-
-SwiGLU 仍然是矩阵乘法 + elementwise activation + elementwise multiply，非常适合 GPU/TPU。它不像 MoE 那样引入复杂 routing 和通信。
-
-所以 SwiGLU 是一个很好的工程折中：
-
-```text
-比普通 FFN 表达强很多，但实现复杂度远低于 MoE。
-```
-
-## 5.8 一个 PyTorch 版 SwiGLU MLP
-
-```python
+~~~python
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -240,566 +106,89 @@ class SwiGLUMLP(nn.Module):
         gate = F.silu(self.gate_proj(x))
         up = self.up_proj(x)
         return self.down_proj(gate * up)
-```
+~~~
 
-输入输出形状：
+公式把 token 表示写成行向量，因此映射矩阵的形状记作 $D\times M$；PyTorch 的 `nn.Linear(D, M)` 将权重存成 $M\times D$，执行的是同一个宽度映射。`nn.Linear` 作用于输入的最后一维，所以 batch 和序列维会保留；gate、up 的形状都是 $[B,T,M]$，输出形状是 $[B,T,D]$。代码中的乘法与上一节公式里的逐元素乘法一一对应。
 
-```text
-x: [batch, seq_len, hidden_size]
-gate/up: [batch, seq_len, intermediate_size]
-out: [batch, seq_len, hidden_size]
-```
+## 5.9 MoE：每个 token 只经过一部分 FFN 专家
 
-注意，FFN/MLP 对每个 token 独立作用，不直接混合序列维度。
+Dense FFN 对每个 token 使用同一个函数。若要增加模型可选择的 FFN 参数，又不让每个 token 都计算所有 FFN，可以准备 $E$ 个 expert，并由 router 根据当前 token 选择其中 $k$ 个。每个 expert 通常是一个 MLP。
 
-## 5.9 FFN 参数量和计算量
+对 token 表示 $x_i$，MoE 层的常见形式是：
 
-普通 FFN：
+~~~math
+y_i=\sum_{e\in\mathcal{S}(x_i)}w_e(x_i)F_e(x_i),\qquad
+|\mathcal{S}(x_i)|=k.
+~~~
 
-```text
-hidden_size -> intermediate_size -> hidden_size
-```
+$\mathcal{S}(x_i)$ 是 router 为该 token 选出的 expert 集合， $F_e$ 是第 $e$ 个 expert 的输出， $w_e$ 是合并各 expert 输出时使用的权重。许多实现会在选中的专家之间归一化权重，但路由和权重处理存在不同方案。
 
-参数量约为：
+可以把一次计算分成三步：
 
-```math
-P_{\mathrm{dense}}\approx 2dm
-```
+1. router 读取 token 表示，为可选 experts 打分并选出一小部分。
+2. 被选中的 experts 分别处理这个 token；其他 experts 在该 token 的这一步计算中不执行。
+3. router 权重把选中 experts 的结果合并，输出仍与输入 token 表示处于同一模型宽度。
 
-如果 `intermediate_size = 4 * hidden_size`，参数量约是：
+不同 token 可以选择不同的 expert 子集。这就是“稀疏激活”的含义：专家库很大，但单个 token 只走其中几条计算路径。
 
-```math
-m=4d,\qquad P_{\mathrm{dense}}\approx 8d^2
-```
+用两个 token 看 top-2 路由。下面假设 router 为它们选出不同的专家组合；专家编号和权重只是教学示意，不对应某个模型的实际配置。
 
-其中 `d` 是 hidden size，`m` 是 intermediate size。这里忽略 bias，因为大模型中 bias 相比矩阵参数通常很小，很多现代实现也直接不使用 FFN bias。
+| token | 选中的 experts | 加权后的输出 |
+| --- | --- | --- |
+| $x_1$ | $E_1,E_3$ | $w_1(x_1)F_1(x_1)+w_3(x_1)F_3(x_1)$ |
+| $x_2$ | $E_2,E_4$ | $w_2(x_2)F_2(x_2)+w_4(x_2)F_4(x_2)$ |
 
-SwiGLU MLP 有三组矩阵：
+两行展示了两件事：不同 token 可走不同的专家路径；每个 token 的输出仍由它选中的专家结果按 router 权重合并。实际路由和权重由模型计算，不是固定表格。
 
-```text
-gate_proj, up_proj, down_proj
-```
+## 5.10 总参数与每 token 使用参数是两本账
 
-参数量约为：
+假设有 $E$ 个大小相同、每个含 $P_e$ 个参数的 routed experts；模型其余总是参与计算的部分有 $P_{\mathrm{shared}}$ 个参数，router 有 $P_r$ 个参数。按这个简化口径，模型总参数为：
 
-```math
-P_{\mathrm{swiglu}}\approx 3dm
-```
+~~~math
+P_{\mathrm{total}}=P_{\mathrm{shared}}+EP_e+P_r.
+~~~
 
-为了让参数量接近普通 4D FFN，实际常把 SwiGLU intermediate size 设得比 `4d` 小。近似等参条件是：
+若每个 token 选择 $k$ 个 experts，每 token 参与的参数量（常称 active parameters）可近似记为：
 
-```math
-3dm\approx 8d^2,\qquad m\approx \frac{8}{3}d
-```
+~~~math
+P_{\mathrm{active}}(x)=P_{\mathrm{shared}}+kP_e+P_r.
+~~~
 
-面试中要能说明：
+若各 expert 大小不同，则把 $kP_e$ 换成被选中 experts 的参数量之和。具体模型卡可能采用不同的计数口径，尤其对共享层和 router 的处理应按来源核对。
 
-```text
-SwiGLU 多一条 gate projection，所以不能简单在相同 intermediate size 下和普通 FFN 比参数；通常会调小 hidden dim 以控制总参数和 FLOPs。
-```
+[Mixtral 8x7B 论文](https://arxiv.org/abs/2401.04088)报告每层有 8 个 FFN experts、每个 token 选择 2 个，并给出约 47B 的 sparse total 参数和约 13B 的 active 参数。这里的整模型 active/total 比例不能简单用 $2/8$ 代替，因为 attention、其他共享权重和计数口径也参与整模型统计。论文指出，active 参数数与推理计算开销相关，但它不包括 sparse total 参数对应的服务内存，也不反映设备利用率；路由和同一设备运行多个 experts 时的额外内存加载也会带来开销。服务时仍需保存所有可选 experts 的权重，但可以通过模型并行或 Expert Parallelism 分布到多张 GPU；这不等于每张 GPU 都存一整份。
 
-## 5.10 MoE FFN：把一个 FFN 变成多个专家
+因此至少要分开读三项：总参数描述整套权重规模；active 参数描述一个 token 参与的权重规模；FLOPs、显存、通信和延迟则要结合执行方式与硬件测量。 $P_{\mathrm{active}}(x)$ 不是端到端成本的替代指标。
 
-MoE 的核心思想是条件计算。
+## 5.11 SwiGLU 与 MoE 是两条不同的架构轴
 
-普通 dense FFN 是：
+SwiGLU 说明“一个 FFN 内部怎样形成通道表示”；MoE 说明“多个 FFN 中哪些会处理当前 token”。两者可以组合：一个 MoE expert 本身也可以是 SwiGLU MLP。Mixtral 就采用 SwiGLU 作为专家函数。
 
-```text
-每个 token 都经过同一个 FFN。
-```
+MoE 常放在 Transformer 的 FFN 子层，是因为 FFN 对每个 token 独立计算，router 可以按 token 选择计算路径，同时保留 attention 的 token 间信息交换结构。GShard、Switch 和 Mixtral 都采用了这类设计。这是常见架构选择，不是“attention 在理论上不能使用专家”的定理；一旦改动 attention 的路由，就会进一步改变 token 间的信息可见性和计算路径。
 
-MoE FFN 是：
+| 路线 | 论文披露的设计 | 阅读时保留的边界 |
+| --- | --- | --- |
+| [GShard](https://arxiv.org/abs/2006.16668) | 在 Transformer 中隔层用 position-wise MoE 替换 FFN，采用 top-2 路由并配套自动分片 | 论文的规模、吞吐和质量结果绑定多语翻译及 TPU 集群设置 |
+| [Switch Transformer](https://www.jmlr.org/papers/v23/21-0998.html) | 用 top-1 选择简化稀疏路由，并研究容量、负载均衡和低精度训练 | 不同路由实现对超容量 assignment 的处理不同；细节见第 21 章 |
+| [Mixtral](https://arxiv.org/abs/2401.04088) | 8 个 experts 中 top-2；单个 expert 是 SwiGLU FFN | 47B/13B 是作者模型的参数报告，不等于普遍质量、显存或延迟比例 |
+| [DeepSeekMoE](https://aclanthology.org/2024.acl-long.70/) | 研究更细粒度的 routed experts 与 shared experts | 论文实验不证明细粒度或共享专家在所有任务和设备上都更好 |
 
-```text
-每个 token 由 router 选择少数几个 experts，只经过被选中的 FFN。
-```
+路由细节、capacity 与 token-expert assignment、负载均衡、expert parallel 和 all-to-all 通信会改变训练和 serving 成本，本章只建立基础概念。具体路由路线见[第 21 章](./21-MoE路线Switch-GShard-Mixtral-DeepSeek.md)，Dense 与 MoE 的训练/服务账本见[第 22 章](./22-Dense与MoE训练服务trade-off.md)；模型案例见 [LLaMA 第 54 章](./54-LLaMA现代开源LLM基线.md)、[Mixtral 第 55 章](./55-Mistral-Mixtral高效与MoE.md)与[DeepSeek 第 58 章](./58-DeepSeek-V2-V3-R1架构训练.md)。
 
-每个 expert 通常就是一个 FFN/MLP。
+## 5.12 自测与本章小结
 
-如果有 8 个 experts，每个 token 只选 2 个：
+读模型配置时，可以按这个顺序核对：它是 dense FFN 还是 MoE？如果是 gated MLP，中间宽度是否与参数比较口径相符？如果是 MoE，每 token 选几个 expert，模型报告的 total/active 参数包括哪些部分？最后再查看容量、通信、服务内存和实测延迟，而不要从 active 参数直接猜结论。
 
-```text
-total FFN capacity = 8 experts
-active FFN compute per token = 2 experts
-```
+**面试回答示例：**
 
-这带来一个巨大优势：
+> Transformer 的 FFN 对每个 token 独立地做通道变换，参数在各位置间共享。SwiGLU 在 FFN 中增加 gate 和 up 两条投影，用逐元素乘法调节中间通道，因此相同中间宽度时它比两矩阵 FFN 参数多；比较时通常会缩小中间宽度。MoE 则在多个 FFN experts 中按 token 选择少数几个，所以总参数和每 token 使用参数需要分别统计。active 参数不等于 FLOPs、显存或延迟，路由、通信和硬件利用率还要单独看。
 
-```text
-总参数量可以很大，但每个 token 的激活计算相对较小。
-```
+**练习：**
 
-这就是 sparse activation。
+1. 对输入形状 $[B,T,D]$，分别写出两层 dense FFN 和 SwiGLU 的中间张量形状。
+2. 取 $D=4096$，计算 dense $M=4D$ 与 SwiGLU $M=11008$ 的近似矩阵参数量，并说明它们匹配的是什么、没有匹配什么。
+3. 用自己的话区分 GLU 的通道门控和 MoE 的 expert 路由；说明一个 MoE expert 为什么可以本身采用 SwiGLU。
+4. 阅读 Mixtral 论文，解释 47B total 与 13B active 分别描述什么，并列出 active 参数不能回答的两类 serving 成本问题。
+5. 需要了解 capacity、assignment overflow 和 all-to-all 时，沿第 21、22 章继续阅读，不把这些成本写成一个通用的通过/不通过阈值。
 
-## 5.11 为什么 MoE 通常替换 FFN，而不是 Attention
-
-MoE 最常见的位置是 FFN 层，而不是 attention 层。
-
-原因包括：
-
-1. FFN 本来就是 token-wise 独立计算，适合按 token 路由到不同专家。
-2. FFN 参数量大，替换成专家后能显著扩展模型容量。
-3. Attention 负责 token 间交互，如果按专家拆得太复杂，会影响全局信息路由。
-4. FFN expert 可以相对独立并行部署，更适合 expert parallelism。
-5. MoE 的主要目标是增加参数容量，而 FFN 是容量主体。
-
-所以 MoE FFN 可以理解为：
-
-```text
-把 Transformer block 中最占容量的 dense MLP，替换成多个稀疏激活的 MLP experts。
-```
-
-## 5.12 Router：MoE 的关键模块
-
-MoE 需要一个 router 决定每个 token 去哪个 expert。
-
-简化形式：
-
-```math
-r=xW_r,\qquad p=\mathrm{softmax}(r),\qquad \mathcal{E}_k=\mathrm{TopK}(p,k)
-```
-
-对选中的 expert，常见输出组合可以写成：
-
-```math
-\alpha_e=\frac{p_e}{\sum_{j\in\mathcal{E}_k}p_j},\qquad y=\sum_{e\in\mathcal{E}_k}\alpha_e f_e(x)
-```
-
-然后 token 只送到 top-k experts。
-
-Switch Transformer 使用更简单的 top-1 routing：每个 token 只选一个 expert。Mixtral 使用 top-2 routing：每个 token 选两个 experts，并组合输出。
-
-Top-1 routing 优点：
-
-1. 计算更省。
-2. 通信更简单。
-3. 路由实现更直接。
-
-Top-2 routing 优点：
-
-1. 表达更强。
-2. 对单个 expert 选择错误更鲁棒。
-3. 输出可由多个专家组合。
-
-Router 的难点是负载均衡。如果很多 token 都去同一个 expert，就会出现：
-
-1. 热点 expert 过载。
-2. 其他 expert 闲置。
-3. batch 内通信不均衡。
-4. 训练不稳定。
-
-所以 MoE 常配合 load balancing loss、capacity factor、token dropping 或 auxiliary-loss-free balancing 等设计。
-
-## 5.13 GShard、Switch、Mixtral、DeepSeekMoE 的演进
-
-GShard 展示了用 sparsely-gated MoE 和自动 sharding 把 Transformer 扩展到 600B+ 参数级别。它的重点是：
-
-1. 条件计算。
-2. 自动分片。
-3. 大规模 TPU 训练。
-4. 多语言翻译质量提升。
-
-Switch Transformer 进一步简化 MoE，把 routing 简化为 top-1。它强调：
-
-1. 简化通信和计算。
-2. 降低训练复杂度。
-3. 稳定低精度训练。
-4. 用 sparse activation 扩展到 trillion parameters。
-
-Mixtral 8x7B 把 MoE 带入开源 LLM 主流视野。公开摘要指出：每层有 8 个 feedforward blocks，每个 token 选 2 个 experts；每个 token 可访问 47B 参数，但推理只激活约 13B 参数。
-
-DeepSeek-V2 的 DeepSeekMoE 则强调经济训练和高效推理。它和 MLA 组合，说明现代架构会同时优化：
-
-```text
-FFN 容量 -> MoE
-KV cache -> MLA
-```
-
-## 5.14 Dense FFN、SwiGLU、MoE FFN 对比
-
-| 结构 | 核心思想 | 优点 | 代价 |
-|---|---|---|---|
-| ReLU/GELU FFN | 两层 MLP + 激活 | 简单稳定 | 表达较普通 |
-| SwiGLU/Gated MLP | 候选特征乘门控 | 表达更强，现代 LLM 常用 | 多一条 projection |
-| MoE FFN | 多个 experts，按 token 选择少数激活 | 总容量大，激活计算低 | routing、通信、负载均衡复杂 |
-
-可以把它们看成逐步增强：
-
-```text
-普通 FFN: 一个共享专家
-SwiGLU: 一个带门控的共享专家
-MoE FFN: 多个带或不带门控的专家，由 router 选择
-```
-
-## 5.15 MoE 的工程 Trade-off
-
-MoE 的优势很诱人：更多参数、更少激活计算。
-
-但工程代价也很明显。
-
-第一，通信成本。
-
-不同 token 要发到不同 expert，专家可能分布在不同 GPU/TPU 上，需要 all-to-all 通信。
-
-第二，负载均衡。
-
-Router 可能把大量 token 分到少数 expert，造成热点。
-
-第三，训练稳定性。
-
-MoE 比 dense 模型更容易出现 routing collapse、expert under-utilization、loss spike。
-
-第四，serving 复杂度。
-
-推理时要管理 expert placement、batch dispatch、token combine、cache 和延迟。
-
-第五，评估解释困难。
-
-不同 token 激活不同 expert，模型行为更分散。
-
-所以 MoE 不是免费午餐。
-
-它适合有强系统能力、追求大容量和成本效率的团队。对小团队或小模型，dense SwiGLU 往往更简单可靠。
-
-## 5.16 FFN / MoE 成本审计指标
-
-把 dense FFN、SwiGLU 和 MoE 放到同一张审计表里时，至少要区分三件事：总参数、每 token 激活参数、路由负载。
-
-dense FFN 每个 token 都使用同一个 FFN：
-
-```math
-P_{\mathrm{active}}=P_{\mathrm{total}}\approx P_{\mathrm{dense}}
-```
-
-MoE FFN 有 `E` 个 experts，但每个 token 只激活 top-k 个 experts：
-
-```math
-P_{\mathrm{total}}\approx E P_{\mathrm{expert}}+P_{\mathrm{router}}
-```
-
-```math
-P_{\mathrm{active}}\approx k P_{\mathrm{expert}}+P_{\mathrm{router}}
-```
-
-其中 `P_router` 通常远小于 expert 参数，但在严谨估算中要说明是否计入。
-
-路由容量要看 token 分布。设一个 batch 内有 `N` 个 token，每个 token 选 `k` 个 experts，平均每个 expert 收到：
-
-```math
-\bar n=\frac{Nk}{E}
-```
-
-如果 capacity factor 是 `\gamma`，单个 expert 的容量可粗略写成：
-
-```math
-C_e=\left\lceil \gamma\bar n\right\rceil
-```
-
-若第 `e` 个 expert 实际收到 `n_e` 个 token，则 overflow token 数为：
-
-```math
-O=\sum_{e=1}^{E}\max(0,n_e-C_e)
-```
-
-负载不均衡可以用最大负载和平均负载的比值粗略衡量：
-
-```math
-R_{\mathrm{load}}=\frac{\max_e n_e}{\bar n}
-```
-
-一个面试级 FFN / MoE 架构准入条件可以形式化为：
-
-```math
-G_{\mathrm{ffn}}=\mathbb{1}\{O=0,\ R_{\mathrm{load}}\le \tau_r,\ U_{\mathrm{expert}}\ge \tau_u\}
-```
-
-其中 `U_expert` 是至少收到一个 token 的 expert 占比。这组条件强调：MoE 不是只要 active parameters 小就好，还要看 router 是否均衡、capacity 是否溢出、通信是否可控、质量是否过线。
-
-### 5.16.1 最小可运行 FFN / MoE 成本审计 demo
-
-下面的 demo 不依赖 PyTorch，只用标准库估算 dense 4D FFN、SwiGLU 近似等参配置和 top-2 MoE 的参数量，并模拟 balanced routing 与 collapsed routing 的差异。
-
-```python
-from math import ceil, exp
-
-
-def dense_ffn_params(hidden_size: int, intermediate_size: int) -> int:
-    return 2 * hidden_size * intermediate_size
-
-
-def swiglu_params(hidden_size: int, intermediate_size: int) -> int:
-    return 3 * hidden_size * intermediate_size
-
-
-def softmax(logits):
-    max_logit = max(logits)
-    weights = [exp(x - max_logit) for x in logits]
-    total = sum(weights)
-    return [x / total for x in weights]
-
-
-def topk_indices(values, k):
-    return sorted(range(len(values)), key=lambda i: (-values[i], i))[:k]
-
-
-def make_logits(top_pair, num_experts):
-    logits = [-2.0] * num_experts
-    logits[top_pair[0]] = 3.0
-    logits[top_pair[1]] = 2.0
-    return logits
-
-
-def audit_routing(top_pairs, num_experts, top_k, capacity_factor):
-    counts = [0] * num_experts
-    for pair in top_pairs:
-        probs = softmax(make_logits(pair, num_experts))
-        for expert_id in topk_indices(probs, top_k):
-            counts[expert_id] += 1
-
-    token_count = len(top_pairs)
-    avg_load = token_count * top_k / num_experts
-    capacity = ceil(capacity_factor * avg_load)
-    overflow = sum(max(0, count - capacity) for count in counts)
-    load_ratio = max(counts) / avg_load if avg_load else 0.0
-    utilized = sum(1 for count in counts if count > 0)
-
-    return {
-        "counts": counts,
-        "capacity": capacity,
-        "overflow": overflow,
-        "load_ratio": round(load_ratio, 3),
-        "utilized_experts": utilized,
-        "gate_pass": overflow == 0 and load_ratio <= 1.5 and utilized >= int(0.75 * num_experts),
-    }
-
-
-hidden_size = 4096
-dense_intermediate = 4 * hidden_size
-swiglu_intermediate = 11008
-num_experts = 8
-top_k = 2
-capacity_factor = 1.25
-
-dense_params = dense_ffn_params(hidden_size, dense_intermediate)
-expert_params = swiglu_params(hidden_size, swiglu_intermediate)
-router_params = hidden_size * num_experts
-moe_total_params = num_experts * expert_params + router_params
-moe_active_params = top_k * expert_params + router_params
-
-balanced_pairs = [(0, 1), (2, 3), (4, 5), (6, 7)] * 3
-collapsed_pairs = [(0, 1)] * 10 + [(2, 3)] * 2
-
-balanced_audit = audit_routing(balanced_pairs, num_experts, top_k, capacity_factor)
-collapsed_audit = audit_routing(collapsed_pairs, num_experts, top_k, capacity_factor)
-
-print("dense_4d_params=", dense_params)
-print("swiglu_params=", expert_params)
-print("swiglu_to_dense_ratio=", round(expert_params / dense_params, 4))
-print("moe_total_params=", moe_total_params)
-print("moe_active_params=", moe_active_params)
-print("active_to_total_ratio=", f"{moe_active_params / moe_total_params:.4f}")
-print("balanced_audit=", balanced_audit)
-print("collapsed_audit=", collapsed_audit)
-print("best_route=", "balanced" if balanced_audit["gate_pass"] else "blocked")
-```
-
-预期输出：
-
-```text
-dense_4d_params= 134217728
-swiglu_params= 135266304
-swiglu_to_dense_ratio= 1.0078
-moe_total_params= 1082163200
-moe_active_params= 270565376
-active_to_total_ratio= 0.2500
-balanced_audit= {'counts': [3, 3, 3, 3, 3, 3, 3, 3], 'capacity': 4, 'overflow': 0, 'load_ratio': 1.0, 'utilized_experts': 8, 'gate_pass': True}
-collapsed_audit= {'counts': [10, 10, 2, 2, 0, 0, 0, 0], 'capacity': 4, 'overflow': 12, 'load_ratio': 3.333, 'utilized_experts': 4, 'gate_pass': False}
-best_route= balanced
-```
-
-这个 demo 要读出三点：
-
-1. `SwiGLU` 多一条 projection，所以 `11008` 这个中间维度让 `4096 -> 11008 -> 4096` 的 gated MLP 参数量接近普通 `4d` dense FFN。
-2. MoE 总参数可以约为单个 expert 的 `E` 倍，但 top-2 推理每 token 只激活约 `2/E` 的 expert 参数。
-3. 如果 router collapse 到少数 experts，即使 active parameters 看起来低，也会出现 capacity overflow、expert 利用不足和系统热点。
-
-## 5.17 FFN 和 Attention 的互补关系
-
-一个 Transformer block 可以这样理解：
-
-```text
-Attention: 收集上下文信息
-FFN: 加工当前 token 表示
-Residual: 保留和累积信息
-Norm: 稳定数值分布
-```
-
-如果 attention 找到了相关证据，但 FFN 不够强，模型可能无法把证据转换成正确推理。
-
-如果 FFN 很强，但 attention 没把相关信息带来，模型只能加工局部或错误信息。
-
-所以现代架构演进不是只优化 attention，也会优化 FFN：
-
-1. SwiGLU 提升 dense FFN 表达。
-2. MoE 提升参数容量。
-3. 更好的 routing 提升专家利用率。
-4. 更好的并行系统降低 MoE 通信代价。
-
-### 5.17.1 读懂新模型的 total parameters 与 active parameters
-
-近年的模型卡越来越常写成“`total parameters / active parameters`”。小白可以把它理解为：模型仓库里有很多专家，但每个 token 只调用其中一部分。`total` 更像模型的总容量，`active` 更像一次 token 路由时实际进入专家计算的参数规模。
-
-设模型有 `E` 个专家，每个 token 选 `k` 个专家，忽略共享层和 router 的细节，最简单的估算是：
-
-```math
-P_{\mathrm{total}}\approx E P_e
-```
-
-```math
-P_{\mathrm{active}}\approx k P_e
-```
-
-更接近工程现实的写法是：
-
-```math
-P_{\mathrm{total}}=P_{\mathrm{shared}}+E P_e+P_r
-```
-
-```math
-P_{\mathrm{active}}=P_{\mathrm{shared}}+k P_e+P_r
-```
-
-其中 `P_shared` 是所有 token 都会经过的共享参数，`P_e` 是单个 expert 的参数，`P_r` 是 router 参数。active 参数不是严格的 FLOPs 计数，因为 token padding、capacity overflow、all-to-all 通信、量化格式和 kernel 利用率都会改变真实延迟。
-
-#### 5.17.1.1 用前沿模型校准概念
-
-下表只用于建立阅读模型卡的参照系，不把不同模型的参数口径当成同一 benchmark：
-
-| 模型或系列 | 公开的参数/结构信号 | 阅读重点 | 证据边界 |
-|---|---|---|---|
-| Kimi K3 | 官方发布文章披露约 `2.8T total`、`16/896` 专家稀疏信号，并提到 KDA/AttnRes/Stable LatentMoE | MoE 容量、激活参数和混合 attention 是不同口径；active 参数及层级配置待模型卡/报告核验 | Kimi 官方发布文章；完整模型卡待核验 |
-| DeepSeek-V4-Pro / Flash | 约 `1.6T / 49B`、`284B / 13B` | active 参数与 CSA/HCA、1M context 的 serving 成本共同决定 | 官方模型卡 |
-| Qwen3.5 / Qwen3.6 | 约 `397B / 17B`、`35B / 3B`；采用 Gated DeltaNet + Gated Attention | active 参数不意味着全部层都是稀疏专家，结构需单独看 | 官方模型卡 |
-| Qwen3-Coder-Next | 约 `80B / 3B`，面向 coding agent | 任务专用训练和工具环境可能比总参数更影响 Agent 表现 | 官方模型卡 |
-| Mistral Small 4 | 约 `119B / 6.5B`，128 experts、top-4 | expert 数、top-k、共享层和量化共同影响实际吞吐 | 官方模型卡 |
-| Step 3.7 Flash | 约 `198B / 11B`，另有视觉 encoder | vision encoder、MoE active 参数和 speculative decoding 不应混为一个数字 | 官方模型卡 |
-| Qwen3.8-Max | 一方产品页宣称约 `2.4T MoE`、1M context | 产品页信息可作为线索，但公开技术报告/权重不足时不能补写未披露细节 | 一方产品页，部分表述待核验 |
-
-#### 5.17.1.2 active 参数、FLOPs 与显存不是同一个指标
-
-面试时最容易犯的错误是把 `P_active` 直接等同于“推理成本”。至少要区分：
-
-1. **参数存储**：通常需要加载或分片管理全部专家权重，因此更接近 `P_total`。
-2. **每 token 的矩阵计算**：只涉及选中的专家，近似受 `k` 影响。
-3. **通信与调度**：token dispatch、all-to-all、expert batching 可能让小 active 参数模型仍然很慢。
-4. **KV/state cache**：由 attention 或递归状态决定，不会因为 FFN 是 MoE 就自动消失。
-
-可以用一个简化的延迟模型提醒自己：
-
-```math
-T_{\mathrm{step}}\approx T_{\mathrm{shared}}+T_{\mathrm{expert}}(k)+T_{\mathrm{dispatch}}+T_{\mathrm{collect}}+T_{\mathrm{memory}}
-```
-
-因此，“总参数大、active 参数小”通常意味着容量与每 token 计算之间存在折中，而不是免费获得大模型质量。
-
-## 5.18 常见误区
-
-误区一：FFN 不重要，Transformer 主要靠 attention。
-
-更准确：attention 负责信息路由，FFN 负责非线性变换和容量扩展，二者都核心。
-
-误区二：SwiGLU 只是换了激活函数。
-
-更准确：SwiGLU 是 gated MLP，包含 gate/up/down 三个投影，门控机制改变了通道特征选择方式。
-
-误区三：MoE 就是让模型更大，所以一定更好。
-
-更准确：MoE 增加总参数但只激活部分专家，质量依赖 routing、负载均衡、数据、训练稳定性和系统实现。
-
-误区四：MoE 推理一定更快。
-
-更准确：激活 FLOPs 可能低，但 all-to-all 通信、expert dispatch 和 batch 不均衡可能带来延迟。
-
-误区五：Mixtral 8x7B 每次都用 47B 参数计算。
-
-更准确：每个 token 可以访问较大总参数空间，但推理只激活少数 experts，对应较少 active parameters。
-
-## 5.19 面试题
-
-### 题 1：Transformer FFN 的作用是什么？
-
-参考回答：
-
-```text
-Attention 负责 token 之间的信息交换，FFN 负责对每个 token 的 hidden representation 做非线性通道变换。它通常把 hidden size 扩展到更高维，再投影回来，提供非线性表达、特征组合和模型容量。很多 Transformer 的参数和计算大量集中在 FFN 层，所以它不是附属模块。
-```
-
-### 题 2：为什么现代 LLM 常用 SwiGLU？
-
-参考回答：
-
-```text
-SwiGLU 是 gated MLP。它用一条 up projection 产生候选特征，用一条 gate projection 经过 SiLU/Swish 产生门控，两者逐元素相乘后再 down projection。相比普通 ReLU/GELU FFN，它能更灵活地选择通道特征，实践中在 Transformer 中效果更好，同时仍然主要是矩阵乘和逐元素操作，工程实现简单。
-```
-
-### 题 3：SwiGLU 和普通 FFN 参数量怎么比？
-
-参考回答：
-
-```text
-普通 FFN 通常有 up 和 down 两个矩阵，参数约为 2 * hidden_size * intermediate_size。SwiGLU 有 gate、up、down 三个矩阵，参数约为 3 * hidden_size * intermediate_size。因此如果 intermediate size 相同，SwiGLU 参数更多。实际模型通常会把 SwiGLU 的 intermediate size 调小，例如接近 8D/3，让参数量和普通 4D FFN 接近。
-```
-
-### 题 4：为什么 MoE 通常替换 FFN？
-
-参考回答：
-
-```text
-因为 FFN 是 token-wise 独立计算，参数量大，适合按 token 路由到不同专家。把 FFN 换成多个 experts 后，每个 token 只激活少数专家，就能在保持每 token 计算相对较低的情况下扩大总参数容量。Attention 负责 token 间交互，直接做 MoE 更复杂，也不如 FFN 位置自然。
-```
-
-### 题 5：Switch Transformer 和 Mixtral 的 routing 有什么区别？
-
-参考回答：
-
-```text
-Switch Transformer 强调简化 MoE routing，每个 token 通常选择一个 expert，即 top-1 routing，降低通信和计算复杂度。Mixtral 8x7B 每层有 8 个 FFN experts，每个 token 选择 2 个 experts，属于 top-2 routing，表达更强但计算和通信也更复杂。两者都是 sparse MoE，但 routing 策略不同。
-```
-
-### 题 6：MoE 的主要工程难点是什么？
-
-参考回答：
-
-```text
-   主要难点包括 all-to-all 通信、负载均衡、routing collapse、expert 利用不均、训练稳定性、低精度训练、serving 时的 expert dispatch 和延迟控制。MoE 降低的是每 token 激活计算，不自动解决通信和系统复杂度，所以它需要模型和系统一起设计。
-```
-
-## 5.20 小练习
-
-1. 写出普通 FFN、GEGLU、SwiGLU 的公式，并比较差异。
-2. 用 PyTorch 实现一个 SwiGLU MLP，并打印中间张量形状。
-3. 计算 hidden size 为 4096 时，普通 4D FFN 的参数量约是多少。
-4. 计算同样 hidden size 下，SwiGLU 如果 intermediate size 为 `8D/3`，参数量约是多少。
-5. 画一个 MoE FFN 的 routing 流程图：token -> router -> top-k experts -> combine。
-6. 阅读 Switch Transformer 摘要，解释为什么它强调 simple and efficient sparsity。
-7. 阅读 Mixtral 摘要，解释“47B total / 13B active”这类说法的含义。
-8. 讨论为什么 MoE 适合大规模团队，但不一定适合所有小模型项目。
-9. 运行本章 FFN / MoE 成本审计 demo，解释为什么 collapsed routing 会导致 overflow 和 expert 利用不足。
-
-## 5.21 本章总结
-
-本章系统讲了 FFN、SwiGLU、Gated MLP 和 MoE FFN。
-
-核心结论：
-
-1. FFN 是 Transformer block 中和 attention 同等重要的模块。
-2. Attention 负责 token 间信息路由，FFN 负责 token 内通道变换和非线性加工。
-3. 原始 Transformer 使用 position-wise ReLU FFN，后来很多模型使用 GELU，再后来现代 LLM 大量采用 SwiGLU。
-4. SwiGLU 是 gated MLP，通过 gate/up/down 三个投影增强通道特征选择能力。
-5. SwiGLU 参数量比较时要注意 intermediate size，不能只看激活函数名。
-6. MoE FFN 把一个 dense FFN 变成多个 experts，由 router 为每个 token 选择少数 experts。
-7. MoE 的核心价值是扩大总参数容量，同时保持每 token 激活计算相对较低。
-8. MoE 的核心代价是 routing、通信、负载均衡、训练稳定性和 serving 复杂度。
-9. 现代大模型架构演进中，attention 优化和 FFN/MoE 优化同样关键。
-
-下一章会进入 Residual、LayerNorm、RMSNorm、Pre-Norm 与训练稳定性，重点讲为什么规范化和残差结构决定了深层 Transformer 能否稳定训练。
+本章从共享参数的 position-wise FFN 讲起，推到三矩阵 SwiGLU 和它的近似等参数宽度，再介绍 MoE 如何让每个 token 选择少量 FFN experts。下一章转向残差和归一化：FFN 与 attention 的输出怎样通过 residual stream 进入深层网络，并由 LayerNorm 或 RMSNorm 稳定处理，见[第 6 章](./06-residual-layernorm-rmsnorm-prenorm与训练稳定性.md)。此前 attention 的信息路由和 Q/K/V 前置概念见[第 2 章](./02-self-attention的信息路由本质.md)与[第 3 章](./03-qkv-attention-head与表示子空间.md)。

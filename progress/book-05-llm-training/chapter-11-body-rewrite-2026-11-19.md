@@ -28,3 +28,15 @@
 - 手工复核本轮新增的 SFT 平均损失、DPO margin/logit、GRPO 组内均值/标准差/advantage 示例。
 - 完成后检查 Markdown 公式、围栏、链接和 `git diff --check`；未运行测试或 PDF 构建。
 - 本记录只表示本轮正文教学修订，不代表重新审定书册或章节结构；若正文发现会改变主题范围或章节职责的新证据，应另按模块 01/02a 处理。
+
+## 2026-11-19：按更新后的模块 02 重写初学者讲解路径
+
+本节记录本日后续重写；它取代此前同日版本中对若干偏好方法采用变量代入和公式推导的讲解安排。
+
+- **范围：** 只重写第五册第十一章正文，不重新审查书册定位或章节结构。
+- **读者路径：** 以“3/4 + 1/4 = ?”贯穿示范、偏好比较、可验证奖励和在线采样；安全与领域任务使用各自完整场景。每个主知识点先说明真实对象、输入、动作和结果，再总结术语、一般规则与边界。
+- **方法讲解：** 将 SFT、RM、DPO、SimPO、GRPO、GSPO、DAPO、DCPO、DeepSeek-R1/RLVR、领域专家和 on-policy distillation 改为例子、完整回答对、rollout 表或决策表主导；保留方法选择、适用条件、优缺点及论文证据边界。
+- **PPO-RLHF：** 保留用户已认可的伪代码与六 token 贯穿算例；把 value、终止 mask、TD 误差、六步 GAE 和 returns 改成独立 math 公式块，修正已失效的 §1.3 裁剪交叉引用。
+- **代码：** 第 17 节已经验证的分析 demo 及说明原样保留。
+- **联网核验：** 对照 PPO、InstructGPT、DPO、DeepSeekMath、SimPO、DAPO、DrGRPO、GSPO、DCPO、DHPO、DeepSeek-R1 的原始论文，以及 GLM-5.3、gpt-oss、Grok 4.7 官方披露；补核 GAPO 已收录 EMNLP 2026 主会的 ACL Anthology 正式记录。新增来源证据写入 research/rlhf-preference-and-policy-optimization-2026.md。
+- **验收：** 检查章节标题、公式块、围栏、链接和补丁空白；本轮不运行测试或 PDF 构建。

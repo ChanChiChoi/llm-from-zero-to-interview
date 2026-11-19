@@ -934,13 +934,13 @@
    考察点：KV head 数、latent KV cache、缓存元素比例、训练/转换证据边界、FlashAttention / PagedAttention 的作用层面。
    回答框架：MHA 为每个 query head 保留一组 K/V；MQA 让多个 query heads 共用一组；GQA 在两者之间按组共享；MLA 则把 K/V 相关信息联合压到低维 latent，并在 DeepSeek-V2 形式中另存位置相关的 RoPE Key。相同 head 宽度等条件下，MQA/GQA 可按 K/V head 数估算缓存元素比例，但这不能直接推出全模型参数或端到端延迟比例。GQA 的 checkpoint 转换论文以组内 mean pooling 初始化，再继续训练；其约 5% 计算量结果来自 T5 encoder-decoder 实验，论文没有评估 decoder-only 模型。DeepSeek-V2 的消融和 MHA2MLA 的适配结果也都受各自模型、任务、训练与评测设置限制；MHA2MLA 不是零样本替换。FlashAttention 改进 attention kernel 的数据移动，PagedAttention 管理 serving 中的 KV block；二者不替代模型架构本身。
 
-31E. 如何系统解释 FFN、SwiGLU 和 MoE FFN 的关系？
-   考察点：position-wise FFN、SwiGLU 参数量、gated MLP、top-k routing、active parameters、expert capacity、load balancing。
-   回答框架：FFN 是 Transformer block 中对每个 token 独立应用的通道变换模块，attention 负责 token 间路由，FFN 负责 token 内非线性加工和容量扩展。普通 `d_ff=4d` FFN 有约 `8d²` 参数；SwiGLU 三矩阵若取 `d_ff≈8d/3`，可做近似等参数比较。Shazeer 的 GLU 变体研究在序列到序列 Transformer 上报告了部分门控形式优于 ReLU/GELU，但不能当作现代 decoder-only LLM 的通用收益保证。MoE 的研究分别在处理不同难点：GShard 把 top-2 路由与自动分片结合；Switch 简化到 top-1；ST-MoE 用 router z-loss 缓解 logits/数值不稳定；Expert Choice 让 expert 选固定 bucket，代价是每 token 的 expert 数可变；DeepSeek-V3 用路由 bias 调节 batch-wise 负载，并用 sequence-wise 辅助项避免单序列失衡。回答时要分开总参数、每 token active 参数、overflow、路由稳定性、通信和服务端尾延迟。
+31E. 如何说明 FFN、SwiGLU 和 MoE FFN 的关系？
+   考察点：position-wise FFN、门控投影、参数匹配、total/active 参数及成本边界。
+   回答框架：FFN 对每个 token 的表示独立应用相同参数，attention 承担 token 间信息交换。普通两矩阵 FFN 参数约为 $2DM$；SwiGLU 有 gate、up、down 三组矩阵，约为 $3DM$，所以比较时要调小中间宽度。Shazeer 的 GLU 变体结果来自 T5 序列到序列与 C4 目标，不能外推成所有 decoder-only 模型的必然收益。MoE 是另一条轴：router 为 token 选少量 FFN experts，而 expert 本身可以是 SwiGLU。total 参数、每 token 使用参数、权重存储、FLOPs、通信与延迟须分开核对；路由与 Dense/MoE 服务取舍见第 21、22 章。
 
 31F. 如何从 residual stream 和 norm placement 角度解释 Transformer 训练稳定性？
    考察点：residual stream、LayerNorm、RMSNorm、Pre-LN、Post-LN、warmup、residual scaling、activation norm、update ratio。
-   回答框架：Transformer 的 hidden state 可以看成 residual stream，attention 和 FFN 都是在这条主路径上写入增量。LayerNorm 做 re-centering 与 re-scaling，RMSNorm 只按 RMS 重缩放，二者表达与计算性质不同。Xiong 等人的 mean-field 分析解释了 Post-LN 初始化附近输出层梯度偏大、warmup 能缓冲这一问题；Pre-LN 初始梯度较平稳，但不等于所有 recipe 都可去掉 warmup。DeepNorm 同时调整 residual connection 与部分初始化，解决极深网络 update 增长问题，代表证据是多语翻译而非现代 decoder-only 预训练。μP 则是宽度参数化和小到大超参迁移，不能误说成单一初始化公式。要比较方案，应记录梯度/激活尺度、loss spikes、学习率 schedule、精度、深度/宽度和目标任务结果。
+   回答框架：Transformer 中 attention 和 FFN 把分支输出加回 residual stream。Pre-LN 的局部 Jacobian 显含恒等项，Post-LN 则在残差加法之后归一化。LayerNorm 对 hidden 维做中心化和缩放，RMSNorm 只按 RMS 缩放。Xiong 等人的分析和实验支持 Pre-LN 在其初始化与任务设置中较少依赖 warmup，不能据此判断所有现代 recipe 都可去掉 warmup。Admin 研究 residual-branch 参数扰动，NormFormer 调整 Pre-LN 的层间梯度幅度，DeepNorm 联合设计残差缩放与初始化。Kim 等人 2025 年用 Peri-LN 命名子层输入/输出外围归一化做法；Kan 等人 2026 年再以理论分析和 GPT-2 实验研究其稳定性。比较方案时，应绑定模型、深度、数据、optimizer、学习率、精度和真实逐层 activation/gradient/update 记录，不设通用通过阈值。
 
 31G. 如何系统比较 Sinusoidal、Learned Absolute、Relative Bias、RoPE 和 ALiBi？
    考察点：注入位置、绝对/相对、长度外推、KV cache、工程复杂度。

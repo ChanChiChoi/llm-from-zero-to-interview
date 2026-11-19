@@ -36,9 +36,9 @@
 
 扩展要求：补充 MHA / GQA / MQA / MLA 架构成本审计模块，用 0 依赖脚本输入 q heads、kv heads、head dim、latent dim、quality proxy、maturity 和 complexity，输出 KV cache MiB、relative saving、qkv ratio、serving score、failed gates、ranked architectures 和 best ready，并解释为什么 FlashAttention、PagedAttention 与 GQA / MLA 分别属于 kernel、memory manager 和 model architecture 层面的优化。
 
-扩展要求：补充 FFN / SwiGLU / MoE 成本审计模块，用 0 依赖脚本输入 hidden size、dense intermediate size、SwiGLU intermediate size、expert 数、top-k、capacity factor 和 toy routing logits，输出 dense params、SwiGLU params、MoE total params、active params、active-to-total ratio、expert counts、capacity、overflow、load ratio、utilized experts、failed gates 和 best route，并解释为什么 MoE 需要同时看 total parameters、active parameters、capacity overflow、load balance 和 all-to-all 通信。
+扩展要求：补充 FFN / SwiGLU / MoE 资源账本模块，用 0 依赖脚本输入 hidden size、dense/SwiGLU 中间宽度、expert 数、top-k、capacity factor 和教学用 routing 输入，分别输出参数量、每 token 选中参数量、assignment counts、capacity 与 overflow assignments，并标注教学假设。报告不得使用任意统一阈值输出 failed gates 或 best route；all-to-all、权重存储、FLOPs 和延迟应作为不同成本项，只有提供对应硬件、拓扑和 workload 数据时才给测量结果。
 
-扩展要求：补充 Residual / Norm 稳定性审计模块，用 0 依赖脚本输入 toy residual stack、norm placement、residual scale、depth、learning rate peak 和 warmup steps，输出 activation norm、update ratio、mean drift、early update pressure、Post-LN no-warmup / with-warmup 对比、Pre-RMSNorm scaled gate 和 failed gates，并解释为什么 residual stream、norm placement、warmup、residual scaling、optimizer 和 mixed precision 要一起审计。
+扩展要求：补充 Residual / Norm 训练轨迹分析模块，以绑定 model revision、depth、norm placement、initialization、residual scaling、optimizer、learning-rate schedule 和 dtype 的真实训练记录为输入，汇总逐层 residual-stream/branch activation norm、gradient norm、parameter-update norm、loss 与 non-finite 信号；区分 branch-output/stream 比值和 parameter-update/parameter 比值。报告只呈现观测和配置背景，不用 toy 输出、任意阈值或单一 gate 宣告训练稳定，也不从相关变化直接推断因果。
 
 扩展要求：补充 Position Encoding / RoPE / ALiBi 审计模块，用 0 依赖脚本输入 sinusoidal position、RoPE query/key 位置、ALiBi slope、训练上下文、目标上下文、KV cache length、new position ids 和 packed segments，输出 sinusoidal 向量样例、RoPE 相同相对距离分数、ALiBi 距离 bias、Position Interpolation 映射、position id audit issues、position encoding gate，并解释为什么位置编码要和 KV cache、packed sequence、prefix cache、sliding window、RoPE scaling 和长上下文评估一起审计。
 

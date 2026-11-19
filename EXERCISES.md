@@ -242,10 +242,10 @@
 31A. 用自己的话解释 QK circuit 和 OV circuit 的区别，并各举一个可能失败的例子。
 31B. 对照第 21 册第 3 章中的 head pattern 观察与剪枝研究，分别说明注意力图、逐个屏蔽和跨整网联合剪枝能支持什么结论；指出每种证据依赖的任务、指标和干预范围。
 31C. 对照[第 21 册第 4 章](book-21-transformer-architecture-evolution/chapters/04-mha-mqa-gqa-mla的演进与trade-off.md)及 [MQA](https://arxiv.org/abs/1911.02150)、[GQA](https://aclanthology.org/2023.emnlp-main.298/)、[DeepSeek-V2 MLA](https://arxiv.org/abs/2405.04434v5) 和 [MHA2MLA](https://aclanthology.org/2025.acl-long.1597/) 证据，比较共享 K/V heads 与低秩 latent cache；说明缓存元素比例、质量结果和实际 decode 延迟各自需要什么条件，指出 GQA uptraining 和 MLA checkpoint 转换证据的适用范围。
-31D. 运行第 21 册第 5 章的 FFN / MoE 成本审计 demo，解释 dense 4D FFN、SwiGLU 近似等参配置、MoE total parameters 和 active parameters 的差异。
-31E. 给定 12 个 token、8 个 experts、top-2 routing 和 capacity factor 1.25，手算 balanced routing 与 collapsed routing 的 expert counts、capacity、overflow 和 load ratio。
-31F. 运行第 21 册第 6 章的 Residual / Norm 稳定性审计 demo，解释 `plain_no_residual`、`residual_no_norm`、`post_layernorm` 和 `pre_rmsnorm_scaled` 的 gate 结果。
-31G. 用自己的话写出 Pre-LN、Post-LN、LayerNorm 和 RMSNorm 的公式，并说明 warmup 降低 early update pressure 的直觉。
+31D. 对照第 21 册第 5 章与 [Shazeer 的 GLU 变体研究](https://arxiv.org/abs/2002.05202)、[Mixtral 论文](https://arxiv.org/abs/2401.04088)，手算 dense 4D FFN 与近似等参 SwiGLU 的参数量；解释 MoE 的 total/active 参数各指什么，以及 active 参数为什么不能直接代表服务成本。
+31E. 结合第 21 册第 21 章，给定 12 个 token、8 个 experts、top-2 routing 和 capacity factor 1.25，手算 balanced routing 与 collapsed routing 的 expert counts、capacity、overflow assignments 和 load ratio；区分超额 assignment 数与受影响的唯一 token 数。
+31F. 令输入向量为 $x=[1,3]$、缩放参数为 $\gamma=[1,1]$、LayerNorm 偏移为 $\beta=[0,0]$；忽略 $\epsilon$，手算 LayerNorm 和 RMSNorm 的结果，并解释为什么两者输出不同。
+31G. 写出 Pre-LN 与 Post-LN 的 block 方程，比较它们的局部 Jacobian；结合 [Xiong 等人的分析](https://arxiv.org/abs/2002.04745)，说明 warmup 证据支持什么、不能推出什么，再概述 Admin、NormFormer、DeepNorm 和 Peri-LN 分别调整了哪部分。区分 Kim 等人 2025 年对 Peri-LN 的命名与实验，以及 Kan 等人 2026 年的后续稳定性分析。
 31H. 运行第 21 册第 7 章的 Position Encoding 审计 demo，解释为什么 `score_2_5` 和 `score_10_13` 相等、`key_2` 的 ALiBi bias 更负，以及 position gate 为什么失败。
 31I. 给定 `cache_len=128`、新 token position ids `[0,1,2]`、训练上下文 4096、目标上下文 32768，写出 position id audit 应该报出的风险，并说明如何修正。
 31J. 运行第 21 册第 8 章的 Mask 可见性审计 demo，解释 `prefix_counts`、`plain_causal_packing_leak`、`block_diag_packing_leak` 和 `mask_gate_pass` 分别说明什么。

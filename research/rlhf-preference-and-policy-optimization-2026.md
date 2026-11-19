@@ -163,6 +163,13 @@
   - 证据等级：source-backed（预印本中的方法定义和作者报告实验）。
   - 边界：结论绑定 Qwen2.5 家族、作者的 VeRL 训练实现、数学数据与奖励、损失定义和评测集合；幂律及其参数是该实验范围内的拟合，不构成所有模型家族、任务或后训练算法的普遍 scaling law。数据复用的收益也不证明任意重复或低质量数据都有效。
 
+## 2026-11-19 补充来源：GAPO 的正式会议版本
+
+- Jia et al., “Group Adaptive Clipping Policy Optimization,” ACL Anthology 记录为 2026.emnlp-main.1882，收录于 EMNLP 2026 主会论文集；[正式论文页面](https://aclanthology.org/2026.emnlp-main.1882/)。本轮阅读范围：正式论文页面元数据与摘要；并对照 arXiv v1 的摘要和方法目录。
+  - 来源支持：GAPO 是面向 GRPO/RLVR 的 plug-in clipping 改动，按 rollout advantage 调整 clipping boundary，不改 reward shaping，并保留 PPO/GSPO surrogate；摘要报告其在部分 Qwen/Llama 数学与代码 benchmark 上改善 Pass@1 和 Pass@k。
+  - 证据等级：source-backed（正式会议论文记录及作者摘要中的方法定义和结果主张）。
+  - 适用边界：摘要结论绑定作者所列模型、任务、base pass rate 和训练协议；会议收录不等于独立复现，也不能推出 GAPO 在所有 RLVR 任务上优于固定 clipping。章节将其用于说明研究状态与方法思路，不作跨方法总排名。
+
 ## 生命周期
 
 三阶段 PPO-style RLHF、pairwise RM 目标、PPO clipping 与 DPO 关系，以及偏好候选来源、DQO、RLVR 标注噪声和 DeepSeek-V3.2 公开方案：active。反馈质量、候选生成分布、RM 校准、PPO 采样/优势估计、KL 归约、verifier 与偏好冲突依模型、任务、标注协议和实现分别核验。

@@ -46,8 +46,8 @@ Transformer 让每个位置通过 attention 直接读取其他可见位置的表
 
 ~~~math
 \begin{aligned}
-u_l &= x_l+\mathrm{Attention}_l(\mathrm{Norm}_l(x_l)),\\
-x_{l+1} &= u_l+\mathrm{FFN}_l(\mathrm{Norm}'_l(u_l)).
+u_{l} &= x_{l}+\mathrm{Attention}_{l}(\mathrm{Norm}_{l}(x_{l})),\\
+x_{l+1} &= u_{l}+\mathrm{FFN}_{l}(\mathrm{Norm}'_{l}(u_{l})).
 \end{aligned}
 ~~~
 
@@ -87,10 +87,10 @@ B 是 batch size，T 是输入长度，d 是 hidden size，V 是词表大小。�
 
 ### Embedding 是查表，不是数值编码
 
-token id 是离散索引。给定词表大小 V 和隐藏宽度 d，embedding 矩阵 E 的形状是 [V,d]：
+token id 是离散索引。给定词表大小 $V$ 和隐藏宽度 $d$，embedding 矩阵 $E$ 的形状是 $[V,d]$：
 
 ~~~math
-h^{(0)}_t=E[x_t],
+h^{(0)}_{t}=E[x_{t}],
 \qquad
 E\in\mathbb{R}^{V\times d}.
 ~~~
@@ -102,10 +102,10 @@ id 为 7 并不意味着它在语义空间中靠近 id 为 8 的 token。连续�
 输出端通常要把 hidden state 投影到词表：
 
 ~~~math
-z_t=h_tW_{\mathrm{lm}}^\top+b.
+z_{t}=h_{t}W_{\mathrm{lm}}^\top+b.
 ~~~
 
-若 W_lm=E，输入 embedding 和输出 LM head 共享权重。这会减少约 Vd 个参数，并让输入和输出使用相同的 token 空间。共享不是“两个矩阵数值碰巧相同”，而是同一组参数的两条梯度路径。扩展词表、量化、LoRA 和 checkpoint 加载时必须检查共享关系是否仍然存在。
+若 $W_{\mathrm{lm}}=E$，输入 embedding 和输出 LM head 共享权重。这会减少约 $Vd$ 个参数，并让输入和输出使用相同的 token 空间。共享不是“两个矩阵数值碰巧相同”，而是同一组参数的两条梯度路径。扩展词表、量化、LoRA 和 checkpoint 加载时必须检查共享关系是否仍然存在。
 
 ### 为什么需要位置
 
@@ -143,14 +143,14 @@ PE(p,2i+1)&=\cos\left(p/10000^{2i/d}\right).
 RoPE 把二维子空间中的 Q、K 按位置旋转。若一个二维子向量为 q，位置 p 对应旋转矩阵 R(θ_p)，则：
 
 ~~~math
-q_p=R(\theta_p)q,
+q_{p}=R(\theta_{p})q,
 \qquad
-k_s=R(\theta_s)k.
+k_{s}=R(\theta_{s})k.
 ~~~
 
-在同一二维频率下，θ_p=pω、θ_s=sω，因此 q_p 与 k_s 的点积等于 qᵀR((s-p)ω)k。它依赖相对位置相位和内容，不是仅由距离决定。RoPE 通常作用于 Q 和 K，而不是把一个位置向量直接加到 embedding 上。base、旋转维度、频率和 position offset 都应保存在 checkpoint 配置中。
+在同一二维频率下，$\theta_{p}=p\omega$、$\theta_{s}=s\omega$，因此 $q_{p}$ 与 $k_{s}$ 的点积等于 $q^\top R((s-p)\omega)k$。它依赖相对位置相位和内容，不是仅由距离决定。RoPE 通常作用于 Q 和 K，而不是把一个位置向量直接加到 embedding 上。base、旋转维度、频率和 position offset 都应保存在 checkpoint 配置中。
 
-可用二维例子核对相对位移。令 q=(1,0)、k=(0,1)、ω=π/2，取 p=1、s=2，则 q_p=R(π/2)q=(0,1)，k_s=R(π)k=(0,-1)，所以 q_pᵀk_s=-1。相对式也给出 qᵀR((s-p)ω)k=qᵀR(π/2)k=-1。这个例子只核对旋转和点积关系，不代表训练中实际学到的向量。
+可用二维例子核对相对位移。令 $q=(1,0)$、$k=(0,1)$、$\omega=\pi/2$，取 $p=1$、$s=2$，则 $q_{p}=R(\pi/2)q=(0,1)$，$k_{s}=R(\pi)k=(0,-1)$，所以 $q_{p}^\top k_{s}=-1$。相对式也给出 $q^\top R((s-p)\omega)k=q^\top R(\pi/2)k=-1$。这个例子只核对旋转和点积关系，不代表训练中实际学到的向量。
 
 ### RoPE scaling 与外推
 
@@ -190,10 +190,10 @@ ALiBi 把与相对距离有关的线性偏置直接加到 attention logits。不
 对当前位置来说，query 表示“我想找什么”；key 表示“我可以如何被匹配”；value 表示“如果被选中，我提供什么内容”。这只是帮助初学者建立概念的比喻，真实 Q/K/V 都是由隐藏向量和可训练矩阵产生的：
 
 ~~~math
-Q=XW_Q,\qquad K=XW_K,\qquad V=XW_V.
+Q=XW_{Q},\qquad K=XW_{K},\qquad V=XW_{V}.
 ~~~
 
-如果 X 的形状是 [B,T,d]，单头 Q、K、V 的最后一维可以是 d_h。多头实现会把 d 拆成 H 个子空间。
+如果 $X$ 的形状是 $[B,T,d]$，单头 $Q$、$K$、$V$ 的最后一维可以是 $d_{h}$。多头实现会把 $d$ 拆成 $H$ 个子空间。
 
 ### Scaled Dot-Product Attention
 
@@ -202,11 +202,11 @@ Q=XW_Q,\qquad K=XW_K,\qquad V=XW_V.
 ~~~math
 A(Q,K,V)
 =\mathrm{softmax}\left(
-\frac{QK^\top}{\sqrt{d_h}}+M
+\frac{QK^\top}{\sqrt{d_{h}}}+M
 \right)V.
 ~~~
 
-Q 的形状是 [B,H,T_q,d_h]，K/V 的形状是 [B,H,T_k,d_h]。QK^T 的结果是 [B,H,T_q,T_k]。M 是 mask 或位置偏置。softmax 在 key 维度上归一化，最后把 V 按权重相加。
+$Q$ 的形状是 $[B,H,T_{q},d_{h}]$，$K/V$ 的形状是 $[B,H,T_{k},d_{h}]$。$QK^\top$ 的结果是 $[B,H,T_{q},T_{k}]$。$M$ 是 mask 或位置偏置。softmax 在 key 维度上归一化，最后把 $V$ 按权重相加。
 
 ### 为什么除以 sqrt(d_h)
 
@@ -219,7 +219,7 @@ Q 的形状是 [B,H,T_q,d_h]，K/V 的形状是 [B,H,T_k,d_h]。QK^T 的结果�
 存在至少一个可见 key、数值有限且尚未执行 attention dropout 时，softmax 后的权重满足每个 query 行和约为 1：
 
 ~~~math
-\sum_{s=1}^{T_k}P_{t,s}=1.
+\sum_{s=1}^{T_{k}}P_{t,s}=1.
 ~~~
 
 权重大的位置表示当前 head 在这一层对相应 value 做了更大的聚合，但它不等于模型最终答案的完整因果解释。后续 MLP、残差、其他层和不同 head 都会改变信息路径。
@@ -231,30 +231,30 @@ Q 的形状是 [B,H,T_q,d_h]，K/V 的形状是 [B,H,T_k,d_h]。QK^T 的结果�
 对长度 T 的 full attention，单个 head 的 score 矩阵含 T^2 个位置对。以下先按单个 head 计，计算和中间存储的关键项分别近似为：
 
 ~~~math
-\mathrm{cost}_{\mathrm{score}}=O(T^2d_h),
+\mathrm{cost}_{\mathrm{score}}=O(T^2d_{h}),
 \qquad
 \mathrm{memory}_{\mathrm{score}}=O(T^2).
 ~~~
 
 实际 kernel 可能不显式存完整 score 矩阵，但数学依赖关系仍然存在；FlashAttention 减少 IO 和中间存储，不会把精确 full attention 的连接数变成线性。
 
-多头 attention 的 score 计算项需乘 head 数 H，即 O(H T^2 d_h)；因为 d=H d_h，也可写成 O(T^2 d)。若完整物化 score，存储项是 O(H T^2)；融合 kernel 可避免保存完整矩阵，但不会省掉 full attention 对可见 query-key 对的计算。
+多头 attention 的 score 计算项需乘 head 数 $H$，即 $O(HT^2d_{h})$；因为 $d=Hd_{h}$，也可写成 $O(T^2d)$。若完整物化 score，存储项是 $O(HT^2)$；融合 kernel 可避免保存完整矩阵，但不会省掉 full attention 对可见 query-key 对的计算。
 
 ### 一个可手算的 attention 例子
 
 设一个 query 对三个 key 的未归一化 score 为 [1, 0, -1]，softmax 权重为：
 
 ~~~math
-p_i=\frac{\exp(s_i)}{\exp(1)+\exp(0)+\exp(-1)}.
+p_{i}=\frac{\exp(s_{i})}{\exp(1)+\exp(0)+\exp(-1)}.
 ~~~
 
-若三个 value 是标量 [10, 0, 4]，指数分别约为 2.7183、1 和 0.3679，分母约为 4.0862，因此权重约为 `[0.6652, 0.2447, 0.0900]`。加权输出为 `0.6652×10+0.2447×0+0.0900×4≈7.0125`。这个例子只展示“score 决定权重、value 决定内容”，不能据此解释真实模型的语义。
+若三个 value 是标量 [10, 0, 4]，指数分别约为 2.7183、1 和 0.3679，分母约为 4.0862，因此权重约为 `[0.6652, 0.2447, 0.0900]`。加权输出为 $0.6652\times10+0.2447\times0+0.0900\times4\approx7.0125$。这个例子只展示“score 决定权重、value 决定内容”，不能据此解释真实模型的语义。
 
 ## 4.4 Causal Mask、Padding Mask 与信息边界
 
 ### Causal mask
 
-decoder-only causal LM 在位置 t 预测下一个 token 时，只允许读取位置 s≤t 的信息。用一个 T×T 的允许矩阵表示：
+decoder-only causal LM 在位置 $t$ 预测下一个 token 时，只允许读取位置 $s\le t$ 的信息。用一个 $T\times T$ 的允许矩阵表示：
 
 ~~~math
 C_{t,s}=
@@ -314,11 +314,11 @@ for row in causal_mask(3):
 
 预期输出为 `[True, False, False]`、`[True, True, False]`、`[True, True, True]`，每一行分别表示该 query 可见的 key。这个布尔矩阵没有 batch、head、padding 和 dtype 语义，不能直接当作高性能 attention mask 使用。
 
-代码状态：静态审阅，未运行（2026-10-30）；仅依赖 Python 3 标准库，保存为 `demo.py` 后运行 `python3 demo.py`。预期输出为上述 3×3 下三角布尔矩阵。
+代码状态：静态审阅，未运行（2026-10-30）；仅依赖 Python 3 标准库，保存为 `demo.py` 后运行 `python3 demo.py`。预期输出为上述 $3\times3$ 下三角布尔矩阵。
 
 ### 缓存 query 要按绝对位置对齐
 
-缓存已有 P 个位置，再处理 Q 个新位置时，第 i 个新 query 的绝对位置为 P+i，允许读取的 key 满足 j≤P+i。不能简单对 `[Q,P+Q]` 做左上角下三角。例如 P=2、Q=1 时，正确行是 `[True,True,True]`，而不是 `[True,False,False]`。PyTorch 2.12 SDPA 对非方形 `is_causal=True` 使用左上对齐的 causal bias，因此这里按 query/key 绝对位置构造显式布尔 mask，并令 `is_causal=False`；该接口不允许同时传入 `attn_mask` 和 `is_causal=True`。
+缓存已有 $P$ 个位置，再处理 $Q$ 个新位置时，第 $i$ 个新 query 的绝对位置为 $P+i$，允许读取的 key 满足 $j\le P+i$。不能简单对 $[Q,P+Q]$ 做左上角下三角。例如 $P=2$、$Q=1$ 时，正确行是 `[True,True,True]`，而不是 `[True,False,False]`。PyTorch 2.12 SDPA 对非方形 `is_causal=True` 使用左上对齐的 causal bias，因此这里按 query/key 绝对位置构造显式布尔 mask，并令 `is_causal=False`；该接口不允许同时传入 `attn_mask` 和 `is_causal=True`。
 
 下面用 CPU float64、单 head、无位置编码或 dropout 演示 attention 局部机制；它不是完整 Transformer。三种检查分别验证未来隔离、逐位置缓存与全量对齐、padding key 隔离。
 
@@ -370,7 +370,7 @@ print("cache_max_error=", round(error, 12))
 
 ### Multi-Head Attention
 
-MHA 把 hidden width 拆成 H 个 query head、H 个 key head 和 H 个 value head。若 d=H d_h：
+MHA 把 hidden width 拆成 $H$ 个 query head、$H$ 个 key head 和 $H$ 个 value head。若 $d=Hd_{h}$：
 
 ~~~text
 X              [B,T,d]
@@ -391,7 +391,7 @@ MQA 保留 H_q 个 query head，但只使用一个 K head 和一个 V head。所
 GQA 介于 MHA 和 MQA 之间。H_q 个 query head 被划成 G 组，每组共享一个 K/V head，通常 H_q 是 G 的整数倍。每个 K/V head 被若干 query head 复用：
 
 ~~~math
-r=\frac{H_q}{H_{kv}}.
+r=\frac{H_{q}}{H_{kv}}.
 ~~~
 
 r 是每个 K/V head 服务的 query head 数。KV cache 和 decode 读取压力大致按 H_kv 而不是 H_q 增长，实际速度还取决于 kernel、内存布局和 batch。
@@ -402,19 +402,19 @@ r 是每个 K/V head 服务的 query head 数。KV cache 和 decode 读取压力
 
 ~~~math
 N_{\mathrm{KV}}
-=2B T H_{kv}d_h.
+=2B T H_{kv}d_{h}.
 ~~~
 
 若有 L 层、每元素 b 字节：
 
 ~~~math
 M_{\mathrm{KV}}
-\approx 2LBT H_{kv}d_h b.
+\approx 2LBT H_{kv}d_{h} b.
 ~~~
 
 前面的 2 是 K 和 V 两份。GQA 把 H_kv 降低，可以直接减少这部分显存；它并不减少 query 投影的所有计算，也不自动减少 MLP 或输出层成本。
 
-例如 `L=2`、`B=1`、`T=4`、`d_h=2`、BF16 每元素 `b=2` 字节。MHA 的 `H_kv=4` 时 cache 为 `2×2×1×4×4×2×2=256` 字节；GQA 设 `H_kv=2` 时为 128 字节；MQA 设 `H_kv=1` 时为 64 字节。这个计算只反映 K/V 元素数，未包含量化 scale、对齐或分配器开销。
+例如 $L=2$、 $B=1$、 $T=4$、 $d_{h}=2$、BF16 每元素 $b=2$ 字节。MHA 的 $H_{\mathrm{kv}}=4$ 时 cache 为 $2\times2\times1\times4\times4\times2\times2=256$ 字节；GQA 设 $H_{\mathrm{kv}}=2$ 时为 128 字节；MQA 设 $H_{\mathrm{kv}}=1$ 时为 64 字节。这个计算只反映 K/V 元素数，未包含量化 scale、对齐或分配器开销。
 
 ### MLA 与低维 latent cache
 
@@ -496,7 +496,7 @@ def kv_cache_bytes(
 print(kv_cache_bytes(32, 4, 8192, 8, 128, 2) / 1024**3)
 ~~~
 
-手算元素总数为 `2×32×4×8192×8×128=2,147,483,648` 个，乘以 2 字节得到 `4,294,967,296` 字节，即 `4.0 GiB`。输出已经包含 batch=4 的四条等长序列。这个结果只计算这些序列的 K/V 元素，不包括 allocator、workspace、权重、激活、分页碎片或 batch 之外的其他请求；它的作用是建立量级直觉。公式假设所有层都保存等长、相同宽度的 K/V；MLA、混合状态和分层滑窗模型应分别统计，量化还需计入 scale 等元数据。
+手算元素总数为 $2\times32\times4\times8192\times8\times128=2{,}147{,}483{,}648$ 个，乘以 $2$ 字节得到 $4{,}294{,}967{,}296$ 字节，即 $4.0\ \mathrm{GiB}$。输出已经包含 batch size 为 $4$ 的四条等长序列。这个结果只计算这些序列的 K/V 元素，不包括 allocator、workspace、权重、激活、分页碎片或 batch 之外的其他请求；它的作用是建立量级直觉。公式假设所有层都保存等长、相同宽度的 K/V；MLA、混合状态和分层滑窗模型应分别统计，量化还需计入 scale 等元数据。
 
 代码状态：静态审阅，未运行（2026-10-30）；仅依赖 Python 3 标准库，保存为 `demo.py` 后运行 `python3 demo.py`。预期输出为 `4.0`，单位按正文解释为 GiB；函数只计算 K/V 张量字节数。
 
@@ -508,7 +508,7 @@ Full attention 允许每个 query 访问所有可见 key，信息路径最直接
 
 ### Local 或 sliding-window attention
 
-Local attention 只让 query 访问邻近窗口。若窗口宽度为 w，理论连接数从 T² 降到约 Tw。对长度 8 的因果序列，full attention 有 `1+2+…+8=36` 个可见 query-key 对；若每个 query 最多看当前位置和前 2 个位置（`w=3`），局部模式有 `1+2+6×3=21` 对。它适合局部语法、音频帧或长文档的局部关联，但远端信息需要通过层间传播、全局 token、摘要或外部检索才能到达。
+Local attention 只让 query 访问邻近窗口。若窗口宽度为 w，理论连接数从 T² 降到约 Tw。对长度 8 的因果序列，full attention 有 $1+2+…+8=36$ 个可见 query-key 对；若每个 query 最多看当前位置和前 2 个位置（$w=3$），局部模式有 $1+2+6\times3=21$ 对。它适合局部语法、音频帧或长文档的局部关联，但远端信息需要通过层间传播、全局 token、摘要或外部检索才能到达。
 
 窗口并不自动等价于“长上下文理解”。若一个证据和问题距离超过所有可达路径，模型可能无法直接整合它。
 
@@ -521,16 +521,16 @@ Sparse attention 只保留预先设计的连接模式，可以是 block、global
 Linear attention 试图利用特征映射或计算重排，把显式的 QK^T 连接改成先聚合 K/V，再与 Q 交互。抽象地说，若 softmax kernel 可以近似为 φ(q)^Tφ(k)，则：
 
 ~~~math
-\sum_j
-\phi(q)^\top\phi(k_j)v_j^\top
+\sum_{j}
+\phi(q)^\top\phi(k_{j})v_{j}^\top
 =
 \phi(q)^\top
-\left(\sum_j\phi(k_j)v_j^\top\right).
+\left(\sum_{j}\phi(k_{j})v_{j}^\top\right).
 ~~~
 
 括号内的状态可以沿序列递推，避免显式保存 T×T 矩阵。代价是它通常改变了 softmax attention 的精确形式，表达、数值、归一化和硬件效率需要单独评估。
 
-上式只是未归一化分子。若采用非负特征映射的归一化 causal kernel attention，还需状态 z_t=Σ_{j≤t}φ(k_j)，并用 φ(q_t)ᵀz_t 归一化分子；分母为零或很小时要定义数值策略。固定特征维度和 head 宽度时，递推工作量随 T 线性增长，但其维度成本仍在，不能把它理解为所有尺度下常数成本。
+上式只是未归一化分子。若采用非负特征映射的归一化 causal kernel attention，还需状态 $z_{t}=\sum_{j\le t}\phi(k_{j})$，并用 $\phi(q_{t})^\top z_{t}$ 归一化分子；分母为零或很小时要定义数值策略。固定特征维度和 head 宽度时，递推工作量随 $T$ 线性增长，但其维度成本仍在，不能把它理解为所有尺度下常数成本。
 
 ### FlashAttention
 
@@ -577,12 +577,12 @@ Attention 把其他位置的信息引入当前位置，FFN 再在当前位置内
 
 ~~~math
 \mathrm{FFN}(x)
-=W_2\phi(W_1x+b_1)+b_2.
+=W_{2}\phi(W_{1}x+b_{1})+b_{2}.
 ~~~
 
 SwiGLU 等门控 FFN 使用多个投影分支，增加特征选择能力和参数容量。很多 LLM 的 FFN 参数量大于 attention 投影，因此只优化 attention 不能代表优化了整个模型。
 
-这里 FFN 式采用列向量 x：W_1 为 `[d_ff,d]`，W_2 为 `[d,d_ff]`。前面的批量 Q=XW_Q 则采用最后一维为特征的行向量约定；实现时应按相应转置关系对齐，不能直接混用左右乘法。
+这里 FFN 式采用列向量 $x$：$W_{1}$ 为 $[d_{\mathrm{ff}},d]$，$W_{2}$ 为 $[d,d_{\mathrm{ff}}]$。前面的批量 $Q=XW_{Q}$ 则采用最后一维为特征的行向量约定；实现时应按相应转置关系对齐，不能直接混用左右乘法。
 
 ### 残差尺度
 
@@ -627,7 +627,7 @@ Encoder 先双向编码输入，decoder 使用 causal self-attention 生成输�
 ~~~math
 \mathrm{CrossAttn}
 =\mathrm{softmax}
-\left(\frac{Q_dK_e^\top}{\sqrt{d_h}}+M_{de}\right)V_e.
+\left(\frac{Q_{d}K_{e}^\top}{\sqrt{d_{h}}}+M_{de}\right)V_{e}.
 ~~~
 
 self-attention 的 Q/K/V来自同一序列；cross-attention 的 Q 来自生成端，K/V 来自条件端。多模态模型可以让文本 query 读取图像 encoder 特征，检索系统也可以把外部表示作为条件，但具体架构必须区分“真正的 cross-attention”和“把证据文本拼到 prompt 中”。
@@ -678,9 +678,9 @@ self-attention 的 Q/K/V来自同一序列；cross-attention 的 Q 来自生成�
 标准 attention 显式保留历史 token 的 K/V，长度增加时 cache 线性增长；递归状态架构试图把历史压缩到固定或较小的状态中。抽象形式可以写成：
 
 ~~~math
-S_t=f_\theta(S_{t-1},x_t),
+S_{t}=f_{\theta}(S_{t-1},x_{t}),
 \qquad
-y_t=g_\theta(S_t,x_t).
+y_{t}=g_{\theta}(S_{t},x_{t}).
 ~~~
 
 这类状态像一个持续更新的记忆，而不是可逐项寻址的完整 token 表。它可能降低长序列的内存和计算，但也可能丢失精确的远端细节。
@@ -691,15 +691,15 @@ y_t=g_\theta(S_t,x_t).
 
 ~~~math
 \begin{aligned}
-\bar S_{t-1}&=\alpha_t S_{t-1},\\
-e_t&=v_t-\bar S_{t-1}k_t,\\
-S_t&=\bar S_{t-1}+\beta_t e_t k_t^\top.
+\bar S_{t-1}&=\alpha_{t} S_{t-1},\\
+e_{t}&=v_{t}-\bar S_{t-1}k_{t},\\
+S_{t}&=\bar S_{t-1}+\beta_{t} e_{t} k_{t}^\top.
 \end{aligned}
 ~~~
 
 e_t 是目标 value 与衰减后状态当前读出的误差，写入依赖旧状态，而不是无条件把新 value 相加。它等价于 S_t=α_t S_{t-1}(I-β_t k_t k_tᵀ)+β_t v_t k_tᵀ。α 控制整体遗忘，β 控制纠正幅度；这不是 KDA 的逐维门公式。单位范数 key 和门的约束也是稳定性条件，不能从一个裸递推式推导所有实现的数值性质。
 
-用标量状态可以看清“纠错”与“叠加”的区别。令 S=2、k=1、v=3、α=1、β=0.5，则旧读出为2，误差为1，更新得到2.5；再写入同一对得到2.75，而不是每次直接增加1.5。
+用标量状态可以看清“纠错”与“叠加”的区别。令 $S=2$、$k=1$、$v=3$、$\alpha=1$、$\beta=0.5$，则旧读出为 $2$，误差为 $1$，更新得到 $2.5$；再写入同一对得到 $2.75$，而不是每次直接增加 $1.5$。
 
 ~~~python
 def scalar_delta_step(state, key, value, alpha, beta):
@@ -760,17 +760,17 @@ MoE 把一个 FFN 替换为多个 expert，并由 router 为每个 token 选择 
 
 ~~~math
 P_{\mathrm{total}}
-=P_{\mathrm{shared}}+EP_e+P_r.
+=P_{\mathrm{shared}}+EP_{e}+P_{r}.
 ~~~
 
 若每个 token 只激活 k 个 expert，单 token 的激活参数近似为：
 
 ~~~math
 P_{\mathrm{active}}
-=P_{\mathrm{shared}}+kP_e+P_r.
+=P_{\mathrm{shared}}+kP_{e}+P_{r}.
 ~~~
 
-P_active 不是模型实际延迟的完整公式。路由、token dispatch、跨设备通信、expert 负载不均衡、KV cache、kernel 和权重加载都会影响服务成本。例如共享参数为 2B、4 个 expert 各为 1B、router 等其他参数为 0.1B、每 token 激活 k=2 个 expert 时，`P_total=2+4×1+0.1=6.1B`，`P_active=2+2×1+0.1=4.1B`。减少 active 参数不意味着部署可以不保存其余 expert 权重。
+$P_{\mathrm{active}}$ 不是模型实际延迟的完整公式。路由、token dispatch、跨设备通信、expert 负载不均衡、KV cache、kernel 和权重加载都会影响服务成本。例如共享参数为 $2\,\mathrm{B}$、$4$ 个 expert 各为 $1\,\mathrm{B}$、router 等其他参数为 $0.1\,\mathrm{B}$、每 token 激活 $k=2$ 个 expert 时，$P_{\mathrm{total}}=2+4\times1+0.1=6.1\,\mathrm{B}$，$P_{\mathrm{active}}=2+2\times1+0.1=4.1\,\mathrm{B}$。减少 active 参数不意味着部署可以不保存其余 expert 权重。
 
 ### Router 与负载均衡
 
@@ -852,7 +852,7 @@ def attention_shapes(batch, tokens, model_dim, query_heads, kv_heads):
 print(attention_shapes(2, 16, 64, 8, 2))
 ~~~
 
-预期返回的形状为 `hidden=(2,16,64)`、`q=(2,8,16,8)`、`k=v=(2,2,16,8)`、`group_size=4`。这个片段只验证 MHA/GQA 的形状关系，不执行 attention。它也没有验证 kernel 是否真的按照 group_size 复制或广播 K/V，真实实现仍需数值对齐测试。
+预期返回的形状为 $hidden=(2,16,64)$、 $q=(2,8,16,8)$、 $k=v=(2,2,16,8)$、 $group_{size}=4$。这个片段只验证 MHA/GQA 的形状关系，不执行 attention。它也没有验证 kernel 是否真的按照 group_size 复制或广播 K/V，真实实现仍需数值对齐测试。
 
 代码状态：静态审阅，未运行（2026-10-30）；仅依赖 Python 3 标准库，保存为 `demo.py` 后运行 `python3 demo.py`。预期 shape 字典如上；代码检查维度可整除关系，不验证实际 attention 数值或 kernel 行为。
 

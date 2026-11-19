@@ -58,7 +58,7 @@ tokenization 至少包含两个概念：
 token id 只是离散索引。id 为 100 的 token 不比 id 为 99 的 token 更“大”、更接近或更有意义。真正的语义表示来自 embedding 矩阵中对应的行：
 
 ~~~math
-e_i=E[i],\qquad E\in\mathbb{R}^{V\times d}.
+e_{i}=E[i],\qquad E\in\mathbb{R}^{V\times d}.
 ~~~
 
 V 是词表大小，d 是 hidden size，i 是 token id。模型接收的是 id 序列，embedding 查表后才得到连续向量。
@@ -86,7 +86,7 @@ chat template
 
 ~~~math
 N_{\mathrm{tokens}}
-=\sum_{i=1}^{B}T(x_i).
+=\sum_{i=1}^{B}T(x_{i}).
 ~~~
 
 若使用定长 padding，实际送入矩阵的 token 数还包括 padding：
@@ -100,7 +100,7 @@ padding waste 可以用下面的比例表示：
 
 ~~~math
 \mathrm{waste}
-=1-\frac{\sum_i T(x_i)}{B T_{\max}}.
+=1-\frac{\sum_{i} T(x_{i})}{B T_{\max}}.
 ~~~
 
 这个比例只描述 batch 内的填充浪费，不是模型质量指标。它会影响显存、吞吐和每个有效 token 的成本。按长度分桶、动态 padding 或 packing 可以减少浪费，但会增加数据管线复杂度。
@@ -143,7 +143,7 @@ def padding_report(lengths):
 print(padding_report([4, 5, 9]))
 ~~~
 
-手算时，有效 token 数为 `4+5+9=18`，定长 batch 的槽位数为 `3×9=27`，所以 waste 为 `1-18/27=1/3≈0.333333`，平均长度为 `18/3=6`。输出中的 waste_ratio 约为 0.333333。这个数字只反映三个长度的 batch 组织方式，不代表某个 tokenizer 的效率；要比较 tokenizer，必须先在同一语料和同一 normalization 规则下得到 lengths。
+手算时，有效 token 数为 $4+5+9=18$，定长 batch 的槽位数为 $3\times9=27$，所以 waste 为 $1-18/27=1/3\approx0.333333$，平均长度为 $18/3=6$。输出中的 waste_ratio 约为 0.333333。这个数字只反映三个长度的 batch 组织方式，不代表某个 tokenizer 的效率；要比较 tokenizer，必须先在同一语料和同一 normalization 规则下得到 lengths。
 
 代码状态：静态审阅，未运行（2026-10-30）；仅依赖 Python 3 标准库，保存为 `demo.py` 后运行 `python3 demo.py`。预期字段为 `samples=3`、`valid_tokens=18`、`padded_tokens=27`、`waste_ratio≈0.333333`、`mean_length=6.0`。
 
@@ -173,7 +173,7 @@ W_{\mathrm{lm}}\in\mathbb{R}^{V\times d}.
 P_{\mathrm{embed}}=Vd.
 ~~~
 
-输出 logits 的一次矩阵乘法大致涉及 [B,T,d] 与 [V,d] 的投影，V 变大也会增加输出计算和 softmax 成本。词表太小会让字符串切得很碎，词表太大则可能让长尾 token 统计稀疏、参数成本变高。
+输出 logits 的一次矩阵乘法大致涉及 $[B,T,d]$ 与 $[V,d]$ 的投影，$V$ 变大也会增加输出计算和 softmax 成本。词表太小会让字符串切得很碎，词表太大则可能让长尾 token 统计稀疏、参数成本变高。
 
 因此不存在脱离语料、语言、硬件和目标任务的“最佳词表大小”。比较词表时至少要同时看：
 
@@ -331,7 +331,7 @@ WordPiece 也使用子词词表，但它的候选选择通常与语言模型似�
 Unigram LM 把一个字符串的切分看成若干子词片段的组合，并给每个片段一个概率。若一种切分为 z=(z_1,\ldots,z_m)，可用：
 
 ~~~math
-P(x,z)=\prod_{j=1}^{m}P(z_j).
+P(x,z)=\prod_{j=1}^{m}P(z_{j}).
 ~~~
 
 给定字符串 x，tokenizer 可能选择概率较高的切分：
@@ -438,8 +438,8 @@ for text in ("\u00e9", "e\u0301", "\u4e2d"):
 对语言集合 L，可以按语言统计平均 token 数：
 
 ~~~math
-\bar T_\ell
-=\frac{1}{N_\ell}\sum_{i=1}^{N_\ell}T(x_i^\ell).
+\bar T_{\ell}
+=\frac{1}{N_{\ell}}\sum_{i=1}^{N_{\ell}}T(x_{i}^\ell).
 ~~~
 
 但平均长度不等于能力公平。还要在相同语义任务上比较质量、上下文截断率、每个有效字符成本和错误类型。tokenizer 的效率差异会通过训练 token 分配和上下文窗口放大，但它只是影响因素之一，不应把所有多语言差异都归因于切分。
@@ -547,7 +547,7 @@ decode 后是否保留、跳过或变换该 token
 L
 =-\frac{1}{|\mathcal{I}|}
 \sum_{t\in\mathcal{I}}
-\log p_\theta(y_t\mid y_{1:t-1},x),
+\log p_{\theta}(y_{t}\mid y_{1:t-1},x),
 ~~~
 
 其中 I 是 assistant completion 的有效位置集合，要求非空。若把 system、user 或 padding 误加入 I，训练目标就不再是预定的 assistant-only 目标，可能强化复述指令、生成角色标记或预测 padding；全序列监督本身也可以是有意选择的训练目标，不能脱离任务一概判错。
@@ -683,7 +683,7 @@ Tokenizer training 学习词表、merge 规则或子词概率模型。训练语�
 
 ### tokenizer 与 embedding 扩展
 
-如果新增 ΔV 个 token，embedding 至少要从 [V,d] 变成 [V+ΔV,d]。新增行的初始化可以来自随机分布、已有 token 平均值或专门的初始化策略，但初始化不等于模型已经理解新 token。需要通过包含新 token 的训练数据建立它与上下文之间的关系。
+如果新增 $\Delta V$ 个 token，embedding 至少要从 $[V,d]$ 变成 $[V+\Delta V,d]$。新增行的初始化可以来自随机分布、已有 token 平均值或专门的初始化策略，但初始化不等于模型已经理解新 token。需要通过包含新 token 的训练数据建立它与上下文之间的关系。
 
 若使用 weight tying，扩展后的 LM head 也必须有对应行。若使用分片、量化或 adapter，扩展还会涉及 checkpoint 格式和量化参数的兼容。
 
@@ -782,9 +782,9 @@ print(
 )
 ~~~
 
-这个审计结构检查长度、整数值域和 padding 标签，不判断模型回答质量，也不验证 id 是否小于模型词表大小。这里固定 ignore_index=-100；负数 -99 不是合法类别。`valid_labels` 是尚未 causal shift 的数量，不等于最终损失分母；空序列或 shift 后没有目标仍需要训练器拒绝。真实项目还应保存 tokenizer 文件哈希、版本、模板版本和 decode 回环结果。按当前输入手算，`raw_chars=2`、`normalized_chars=2`、`special_positions=[]`、`valid_labels=1`。
+这个审计结构检查长度、整数值域和 padding 标签，不判断模型回答质量，也不验证 id 是否小于模型词表大小。这里固定 ignore_index=-100；负数 -99 不是合法类别。`valid_labels` 是尚未 causal shift 的数量，不等于最终损失分母；空序列或 shift 后没有目标仍需要训练器拒绝。真实项目还应保存 tokenizer 文件哈希、版本、模板版本和 decode 回环结果。按当前输入手算，`raw_chars=2`、`normalized_chars=2`、 $special_{positions}=[]$、`valid_labels=1`。
 
-代码状态：静态审阅，未运行（2026-10-30）；仅依赖 Python 3 标准库，保存为 `demo.py` 后运行 `python3 demo.py`。预期返回 `raw_chars=2`、`normalized_chars=2`、`special_positions=[]`、`valid_labels=1`，其余字段与输入 token 和 id 列表一致；代码不验证词表上界或模型语义。
+代码状态：静态审阅，未运行（2026-10-30）；仅依赖 Python 3 标准库，保存为 `demo.py` 后运行 `python3 demo.py`。预期返回 `raw_chars=2`、`normalized_chars=2`、 $special_{positions}=[]$、`valid_labels=1`，其余字段与输入 token 和 id 列表一致；代码不验证词表上界或模型语义。
 
 ## 3.11 Tokenization 对训练目标和评估的影响
 
@@ -796,7 +796,7 @@ print(
 L_{\mathrm{token}}
 =-\frac{1}{N}
 \sum_{i=1}^{N}
-\log p_\theta(y_i\mid y_{1:i-1}),
+\log p_{\theta}(y_{i}\mid y_{1:i-1}),
 ~~~
 
 这里 N 是实际参与损失的预测目标数，必须大于零。采用内部 causal shift 的常见训练接口中，输入和 labels 对齐存储，但实际用 logits 的前 T-1 个位置预测 labels 的后 T-1 个位置；分母应在 shift、padding 和 prompt mask 后统计。相同的字符数据，如果 tokenizer 切成更多 token，就会产生更多预测位置和更长的依赖链。训练 token 数不是“文本量”的唯一表达，比较训练预算时必须说明 tokenizer。

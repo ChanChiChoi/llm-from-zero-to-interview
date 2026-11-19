@@ -41,14 +41,14 @@
 
 ~~~math
 P(y\mid x)
-=\prod_{t=1}^{T}P(y_t\mid x,y_{<t}).
+=\prod_{t=1}^{T}P(y_{t}\mid x,y_{1:t-1}).
 ~~~
 
 直接回答时，模型主要把计算压缩在一次生成轨迹中；多步推理则显式或隐式地保留中间状态 z：
 
 ~~~math
 P(y\mid x)
-=\sum_z P(y\mid x,z)P(z\mid x).
+=\sum_{z} P(y\mid x,z)P(z\mid x).
 ~~~
 
 这个分解是帮助理解的概率视角，并不意味着真实模型一定按一个可读的 z 变量运行。它说明了为什么多条候选、工具反馈或外部搜索可能有帮助：系统不再只依赖一条生成路径，而是给候选和验证分配额外计算。
@@ -70,7 +70,7 @@ z^(k) 是第 k 条候选的中间状态，y^(k) 是最终答案。候选集合�
 在工具或搜索环境中，状态不应只有自然语言历史。它至少应包含原问题、已满足约束、已执行动作、观察结果、未解决子目标、错误、剩余预算和当前候选。一个抽象状态转移为：
 
 ~~~math
-s_{t+1}=T(s_t,a_t,o_{t+1}),
+s_{t+1}=T(s_{t},a_{t},o_{t+1}),
 ~~~
 
 其中 s_t 是当前状态，a_t 是下一动作，o_(t+1) 是环境或工具观察，T 是状态更新函数。状态记录的作用是让系统知道动作是否已经发生、结果是否可信、下一步是否重复，以及最终结论是否满足原始约束。
@@ -97,9 +97,9 @@ Scratchpad 更强调中间工作区，可以包含草稿、表格、代码计划
 ~~~math
 R_{\mathrm{cot}}
 =\frac{1}{N}\sum_{i=1}^{N}
-\mathbf{1}[y_i^{\mathrm{direct}}=y_i^\star
+\mathbf{1}[y_{i}^{\mathrm{direct}}=y_{i}^\star
 \land
-y_i^{\mathrm{cot}}\ne y_i^\star].
+y_{i}^{\mathrm{cot}}\ne y_{i}^\star].
 ~~~
 
 常见原因包括简单题过度推理、把题外条件引入推导、早期猜测被后续文字合理化，以及长度增加导致关键约束被忽略。评估 CoT 时要同时报告复杂任务增益和简单任务回归，而不是只报总体平均准确率。
@@ -112,9 +112,9 @@ y_i^{\mathrm{cot}}\ne y_i^\star].
 模型输出 logits 为 l_i 时，温度 tau 后的概率为：
 
 ~~~math
-p_i(\tau)
-=\frac{\exp(l_i/\tau)}
-{\sum_j\exp(l_j/\tau)}.
+p_{i}(\tau)
+=\frac{\exp(l_{i}/\tau)}
+{\sum_{j}\exp(l_{j}/\tau)}.
 ~~~
 
 tau 越小，分布越尖锐，候选更接近贪心解码；tau 越大，尾部 token 获得更多机会。Top-p sampling 再从累计概率达到 p 的最小候选集采样。推理候选需要有差异，但过高温度会产生大量不可验证或偏离题意的路径，因此应在目标任务上测量候选质量和有效多样性。
@@ -128,9 +128,9 @@ Self-consistency 常先采样多条推理路径，再抽取和聚合最终答案
 令第 i 个问题的标准化候选答案为 a_i^(1),...,a_i^(K)，多数投票选择出现次数最多的类别：
 
 ~~~math
-\hat a_i
+\hat a_{i}
 =\mathrm{arg\,max}_{a}
-\sum_{k=1}^{K}\mathbf{1}[a_i^{(k)}=a].
+\sum_{k=1}^{K}\mathbf{1}[a_{i}^{(k)}=a].
 ~~~
 
 Self-consistency 论文 [arXiv:2203.11171v4](https://arxiv.org/abs/2203.11171v4) 研究了通过多条采样路径聚合答案的思路。多数投票在候选错误相互独立、正确答案有较大概率出现时更有帮助；如果模型系统性误读题意，多个候选会一致错。因而应同时报告单次准确率、候选中至少一条正确的比例、聚合后准确率和平均候选成本。
@@ -162,7 +162,7 @@ print(majority_vote(["42", "42", "41"]))
 ~~~math
 \hat a
 =\mathrm{arg\,max}_{a}
-\sum_{k:a_k=a}w(s_k).
+\sum_{k:a_{k}=a}w(s_{k}).
 ~~~
 
 权重函数 w 可以由规则验证、程序测试、log probability 或校准后的模型分数给出。评分器偏差会直接改变聚合结果；长度、格式和自信语气不应在没有校准时被当成正确性证据。
@@ -180,7 +180,7 @@ print(majority_vote(["42", "42", "41"]))
 给定问题 i 的候选分数 s_i1,...,s_iK，验证器重排选择：
 
 ~~~math
-\hat y_i=y_{ij^\star},
+\hat y_{i}=y_{ij^\star},
 \qquad
 j^\star=\mathrm{arg\,max}_{j}s_{ij}.
 ~~~
@@ -195,27 +195,27 @@ Pairwise accuracy 测量验证器是否给参考标注中更优的候选 a 高�
 ~~~math
 A_{\mathrm{pair}}
 =\frac{1}{|\mathcal{P}|}
-\sum_{(a,b)\in\mathcal{P}}\left(\mathbf{1}[s_a>s_b]+\frac{1}{2}\mathbf{1}[s_a=s_b]\right).
+\sum_{(a,b)\in\mathcal{P}}\left(\mathbf{1}[s_{a}>s_{b}]+\frac{1}{2}\mathbf{1}[s_{a}=s_{b}]\right).
 ~~~
 
 这里将平局计为半个正确排序；如采用其他规则，应在评估前固定并说明。它衡量相对排序，不等于从一组候选中选中正确答案的 top-1 accuracy。评估器还应报告 hard negative、长度切片、格式切片和真正的下游任务成功率。
 
 ### 校准
-ECE 和 Brier score 都要求 N>0。二分类置信度和标签应位于 [0,1]；ECE 分桶数 B 为正整数，分桶应覆盖每个样本且互不重叠，空桶不参与加权。没有校准样本时应报告 N/A，而不是把空集合当作完美校准。
+ECE 和 Brier score 都要求 $N>0$。二分类置信度和标签应位于 $[0,1]$；ECE 分桶数 $B$ 为正整数，分桶应覆盖每个样本且互不重叠，空桶不参与加权。没有校准样本时应报告 N/A，而不是把空集合当作完美校准。
 
 如果验证器输出 p_i，系统可能用阈值决定自动通过、拒答或转人工。把预测分数分成 B 个桶，ECE 可写成：
 
 ~~~math
 \mathrm{ECE}
-=\sum_{b=1}^{B}\frac{|S_b|}{N}
-\left|\mathrm{Acc}(S_b)-\mathrm{Conf}(S_b)\right|.
+=\sum_{b=1}^{B}\frac{|S_{b}|}{N}
+\left|\mathrm{Acc}(S_{b})-\mathrm{Conf}(S_{b})\right|.
 ~~~
 
 S_b 是第 b 个分桶，Acc 是实际正确率，Conf 是平均预测置信度。Brier score 为：
 
 ~~~math
 \mathrm{BS}
-=\frac{1}{N}\sum_{i=1}^{N}(p_i-y_i)^2,
+=\frac{1}{N}\sum_{i=1}^{N}(p_{i}-y_{i})^2,
 ~~~
 
 其中 y_i∈{0,1} 是真实标签；多分类时应使用按类别概率向量定义的 Brier score，而不能把类别 ID 直接代入这个标量公式。Guo 等人的 [On Calibration of Modern Neural Networks](https://arxiv.org/abs/1706.04599v2) 讨论了现代神经网络的校准和温度缩放；在 Agent 或高风险推理中，校准集必须独立于验证器训练集，并按任务和风险切片检查。
@@ -235,10 +235,10 @@ Outcome Reward Model（ORM）只看最终答案，标注便宜，适合有明确
 ### 步骤标签与第一处错误
 如果所有步骤都正确，第一处错误位置应记录为不存在；如果步骤标签缺失或步骤数为零，应从步骤准确率分母中排除并报告覆盖率；有效步骤总数为零时，步骤准确率应为 N/A。
 
-设第 i 个样本被切成 M_i 个步骤，q_ij=1 表示第 j 步正确，第一处错误位置为：
+设第 $i$ 个样本被切成 $M_{i}$ 个步骤，$q_{i,j}=1$ 表示第 $j$ 步正确，第一处错误位置为：
 
 ~~~math
-j_i^{\mathrm{err}}
+j_{i}^{\mathrm{err}}
 =\min\{j:q_{ij}=0\}.
 ~~~
 
@@ -248,28 +248,28 @@ j_i^{\mathrm{err}}
 
 ~~~math
 A_{\mathrm{step}}
-=\frac{\sum_i\sum_jq_{ij}}{\sum_iM_i}.
+=\frac{\sum_{i}\sum_{\mathrm{jq}}_{ij}}{\sum_{\mathrm{iM}}_{i}}.
 ~~~
 
 这个指标受切分粒度影响。把一个推导拆成五个小步骤会改变分母，因此报告时必须保留步骤切分规则和标注者一致性。
 
 ### 自动标注与人工成本
 
-若 a_ij=1 表示某一步可由规则、计算器、测试或工具自动标注，自动覆盖率为：
+若 $a_{i,j}=1$ 表示某一步可由规则、计算器、测试或工具自动标注，自动覆盖率为：
 
 ~~~math
 C_{\mathrm{auto}}
-=\frac{\sum_i\sum_ja_{ij}}{\sum_iM_i}.
+=\frac{\sum_{i}\sum_{\mathrm{ja}}_{ij}}{\sum_{\mathrm{iM}}_{i}}.
 ~~~
 
 人工成本可以粗略写成：
 
 ~~~math
 C_{\mathrm{label}}
-=\sum_i\sum_j(1-a_{ij})c_{ij},
+=\sum_{i}\sum_{j}(1-a_{ij})c_{ij},
 ~~~
 
-其中 `a_ij` 必须是 0/1 覆盖标记，`c_ij` 是该步骤人工切分、判断、复核和仲裁的有限非负成本；步骤数为零的样本不进入分母，并应单独报告覆盖率。有效步骤总数为零时覆盖率为 N/A。提高自动覆盖率不等于提高标签质量，自动规则仍需要抽样审计。
+其中 $a_{i,j}$ 必须是 $0/1$ 覆盖标记，$c_{i,j}$ 是该步骤人工切分、判断、复核和仲裁的有限非负成本；步骤数为 $0$ 的样本不进入分母，并应单独报告覆盖率。有效步骤总数为 $0$ 时覆盖率为 N/A。提高自动覆盖率不等于提高标签质量，自动规则仍需要抽样审计。
 
 ### PRM 剪枝
 
@@ -279,7 +279,7 @@ C_{\mathrm{label}}
 B_{t+1}
 =\mathrm{TopK}
 \left(
-\{b+a:b\in B_t,a\in\mathcal{A}(b)\},
+\{b+a:b\in B_{t},a\in\mathcal{A}(b)\},
 S_{\mathrm{process}}
 \right).
 ~~~
@@ -293,9 +293,9 @@ S_{\mathrm{process}}
 搜索推理把中间状态视作节点，把下一步推导、代码修改、子问题选择或工具调用视作动作。若状态为 s_t，动作集合为 A(s_t)，则：
 
 ~~~math
-a_t\in\mathcal{A}(s_t),
+a_{t}\in\mathcal{A}(s_{t}),
 \qquad
-s_{t+1}=T(s_t,a_t).
+s_{t+1}=T(s_{t},a_{t}).
 ~~~
 
 动作粒度过细会导致树迅速膨胀，粒度过粗又难以回退和定位错误。状态应包含搜索所需的约束、工具观察、测试结果和预算，而非只保存最终文本。
@@ -307,7 +307,7 @@ Beam width K 必须为正整数；frontier 为空时应明确终止或回退，�
 ~~~math
 F_{t+1}
 =\mathrm{TopK}\left(
-\{T(s,a):s\in F_t,a\in\mathcal{A}(s)\},
+\{T(s,a):s\in F_{t},a\in\mathcal{A}(s)\},
 S,K
 \right).
 ~~~
@@ -325,8 +325,8 @@ Tree of Thoughts 论文 [arXiv:2305.10601v2](https://arxiv.org/abs/2305.10601v2)
 
 ~~~math
 \mathrm{UCT}(v)
-=\frac{W_v}{N_v}
-+c\sqrt{\frac{\ln N_{\mathrm{parent}}}{N_v}},
+=\frac{W_{v}}{N_{v}}
++c\sqrt{\frac{\ln N_{\mathrm{parent}}}{N_{v}}},
 ~~~
 
 W_v 是节点累计价值，N_v 是访问次数，N_parent 是父节点访问次数，c 控制探索强度。未访问节点需要单独处理，不能直接代入分母。MCTS 并不自动解决评分器偏差、动作生成质量和环境模拟不准确的问题。
@@ -364,8 +364,8 @@ C_{\mathrm{correct}}
 从预算 B_1 增加到 B_2 的边际正确率收益与成本可以写成：
 
 ~~~math
-G(B_1,B_2)
-=\frac{A(B_2)-A(B_1)}{C(B_2)-C(B_1)}.
+G(B_{1},B_{2})
+=\frac{A(B_{2})-A(B_{1})}{C(B_{2})-C(B_{1})}.
 ~~~
 
 高预算策略可能提高准确率，却让 P95、token 成本或工具费用翻倍。应画出预算—准确率—成本曲线，并单独统计高预算仍失败、低价值请求误用高预算的浪费。
@@ -381,7 +381,7 @@ G(B_1,B_2)
 一条数学训练样本不应只有题面和答案，还可以包含步骤、难度、题型、来源、验证程序、模板指纹和污染风险：
 
 ~~~math
-m_i=(x_i,y_i^\star,z_i,q_i,d_i,t_i,s_i,r_i).
+m_{i}=(x_{i},y_{i}^\star,z_{i},q_{i},d_{i},t_{i},s_{i},r_{i}).
 ~~~
 
 x_i 是题目，y_i* 是参考答案，z_i 是步骤，q_i 是步骤标签，d_i 是难度，t_i 是题型，s_i 是来源或模板指纹，r_i 是风险标记。答案可由程序检查时，自动验证应优先于语言模型自评。
@@ -409,7 +409,7 @@ Benchmark contamination 指评估题或近重复题泄漏到训练数据，导�
 代码 Agent 的推理不能只看生成文本。更完整的链路是：理解需求、定位接口、生成补丁、运行公开测试、读取错误、修复、运行隐藏测试并检查安全边界。执行反馈是环境观察，不等于自然语言提示；它必须被结构化为退出码、测试结果、日志摘要和资源状态。
 
 ### pass@k 与 pass@1
-该估计要求 n 为正整数，k 为正整数且 1≤k≤n；当没有候选或 k 超出候选数时，结果不应静默补默认值。通过测试的候选数 c 也必须满足 0≤c≤n。
+该估计要求 $n$ 为正整数，$k$ 为正整数且 $1\le k\le n$；当没有候选或 $k$ 超出候选数时，结果不应静默补默认值。通过测试的候选数 $c$ 也必须满足 $0\le c\le n$。
 
 HumanEval 论文 [arXiv:2107.03374v2](https://arxiv.org/abs/2107.03374v2) 讨论了代码生成评估中的 pass@k。若从同一策略独立生成 n 个候选，其中 c 个通过测试，常用无偏估计为：
 
@@ -418,7 +418,7 @@ HumanEval 论文 [arXiv:2107.03374v2](https://arxiv.org/abs/2107.03374v2) 讨论
 =1-\frac{\binom{n-c}{k}}{\binom{n}{k}}.
 ~~~
 
-要求 1 <= k <= n。该估计把候选视为同一策略下的独立抽样结果，目标是估计从该策略中取 k 个候选至少有一个通过的概率；当 `n-c<k` 时组合数按 0 处理。它回答“候选集合中至少找到一个通过测试解的潜力”，不是一次调用默认成功率。生产系统还应报告 pass@1、隐藏测试、执行时间、资源占用和单位正确成本。
+要求 1 <= k <= n。该估计把候选视为同一策略下的独立抽样结果，目标是估计从该策略中取 k 个候选至少有一个通过的概率；当 $n-c\lt k$ 时组合数按 0 处理。它回答“候选集合中至少找到一个通过测试解的潜力”，不是一次调用默认成功率。生产系统还应报告 pass@1、隐藏测试、执行时间、资源占用和单位正确成本。
 
 ### 公开测试、隐藏测试与修复
 
@@ -441,7 +441,7 @@ HumanEval 论文 [arXiv:2107.03374v2](https://arxiv.org/abs/2107.03374v2) 讨论
 一条可审计评估样本可以写为：
 
 ~~~math
-e_i=(x_i,y_i^\star,V_i,P_i,z_i,q_i,g_i,r_i,b_i),
+e_{i}=(x_{i},y_{i}^\star,V_{i},P_{i},z_{i},q_{i},g_{i},r_{i},b_{i}),
 ~~~
 
 其中 x_i 是问题，y_i* 是参考答案，V_i 是候选集合，P_i 是变体，z_i 和 q_i 是步骤及标签，g_i 是能力切片，r_i 是风险标记，b_i 是推理预算。还要绑定模型、harness、提示、工具、随机种子和评估集版本。
@@ -458,14 +458,14 @@ D_{\mathrm{robust}}=A_{\mathrm{orig}}-A_{\mathrm{var}}.
 
 ### Paired Lift
 
-N 必须是两种配置都有有效结果且具备参考答案的配对样本数，并且 N>0；否则配对提升为 N/A。在同一批样本上比较新旧系统逐题正确性，配对提升为：
+$N$ 必须是两种配置都有有效结果且具备参考答案的配对样本数，并且 $N>0$；否则配对提升为 N/A。在同一批样本上比较新旧系统逐题正确性，配对提升为：
 
 ~~~math
 \Delta_{\mathrm{pair}}
 =\frac{1}{N}\sum_{i=1}^{N}
 \left(
-\mathbf{1}[\hat y_i^{\mathrm{new}}=y_i^\star]
--\mathbf{1}[\hat y_i^{\mathrm{base}}=y_i^\star]
+\mathbf{1}[\hat y_{i}^{\mathrm{new}}=y_{i}^\star]
+-\mathbf{1}[\hat y_{i}^{\mathrm{base}}=y_{i}^\star]
 \right).
 ~~~
 
@@ -476,7 +476,7 @@ N 必须是两种配置都有有效结果且具备参考答案的配对样本数
 令每个样本的正确性差异为 d_i，从 d_1,...,d_N 中有放回抽取第 b 个 bootstrap 样本：
 
 ~~~math
-\Delta^{(b)}=\frac{1}{N}\sum_{r=1}^{N}d_{i_r^{(b)}},
+\Delta^{(b)}=\frac{1}{N}\sum_{r=1}^{N}d_{i_{r}^{(b)}},
 \qquad
 \mathrm{CI}_{95\%}
 =\left[
@@ -565,7 +565,7 @@ print("paired lift=", lift, "| interval ordered=", interval[0] <= interval[1])
 ~~~
 代码状态：静态审阅，未运行（2026-10-30）；依赖 Python 3.8+ 标准库，保存为 `demo.py` 后运行 `python3 demo.py`。预期输出依次为 `unpaired bootstrap input rejected`、`invalid bootstrap rounds rejected`、`invalid paired input rejected` 和 `paired lift= 0.2 | interval ordered= True`。
 
-这是小样本教学实现，采用排序后 `floor(q × rounds)` 作为分位点索引；其他库可能使用插值或不同端点规则。固定随机种子便于复核同一实现，但不代表生产评估；生产方案还要考虑分层、聚类和多重比较。
+这是小样本教学实现，采用排序后 $\left\lfloor q \times rounds\right\rfloor$ 作为分位点索引；其他库可能使用插值或不同端点规则。固定随机种子便于复核同一实现，但不代表生产评估；生产方案还要考虑分层、聚类和多重比较。
 
 ## 12.11 Benchmark、污染与多维评估
 
@@ -580,7 +580,7 @@ SWE-bench 论文 [arXiv:2310.06770](https://arxiv.org/abs/2310.06770) 用真实�
 总体平均分可能被容易样本或大切片主导，掩盖中文、代码、长上下文、高风险工具或核心业务切片退化。对每个关键切片 s 记录：
 
 ~~~math
-\Delta_s=A_s^{\mathrm{new}}-A_s^{\mathrm{base}}.
+\Delta_{s}=A_{s}^{\mathrm{new}}-A_{s}^{\mathrm{base}}.
 ~~~
 
 Delta_s < 0 只说明方向上退化；空切片应记为 N/A。是否阻止发布还要结合样本量、置信区间、流量和严重度。高风险约束不应被其他低风险切片的提升抵消。
@@ -610,7 +610,7 @@ LLM judge 可以规模化进行 rubric 打分、两两偏好和错误分类，�
 
 ~~~math
 A_{\mathrm{jh}}
-=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[J_i=H_i].
+=\frac{1}{N}\sum_{i=1}^{N}\mathbf{1}[J_{i}=H_{i}].
 ~~~
 
 类别不平衡时，一致率可能被多数类别抬高，还应报告混淆矩阵、precision/recall、Cohen's kappa 或 pairwise win agreement，并按任务、长度和风险切片分析。
@@ -658,8 +658,8 @@ Factuality 关注答案是否符合真实事实；grounding 关注答案是否�
 
 ~~~math
 R_{\mathrm{severity}}
-=\frac{\sum_i w_{r_i}\mathbf{1}[\text{sample }i\text{ failed}]}
-{\sum_i w_{r_i}}.
+=\frac{\sum_{i} w_{r_{i}}\mathbf{1}[\text{sample }i\text{ failed}]}
+{\sum_{i} w_{r_{i}}}.
 ~~~
 
 权重必须事先定义，不能看到结果后为了让数字好看而改变。安全约束和禁止类行为应作为不可违反条件单独报告。
@@ -681,7 +681,7 @@ R_{\mathrm{severity}}
 =\left(
 \Delta_{\mathrm{pair}},
 \mathrm{CI}_{\mathrm{pair}},
-\min_{s\in\mathcal{S}}\Delta_s,
+\min_{s\in\mathcal{S}}\Delta_{s},
 R_{\mathrm{contam}},
 A_{\mathrm{jh}},
 C_{\mathrm{correct}},
