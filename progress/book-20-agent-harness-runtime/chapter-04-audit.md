@@ -45,14 +45,14 @@
 - **evidence：** 2026-11-18 复核 OpenAI Function Calling、Agents SDK tools 和 MCP 2026-07-28 server/tools 官方页面。细节和适用边界追加至[Agent 工具调用与安全研究记录](../../research/agent-tool-calling-security-2026.md)。动态 API 结论绑定访问日期和对应产品；MCP 结论绑定 2026-07-28 规范快照。
 - **example_status：** 4.9 以独立教学分支展示模型针对 r17 生成补丁、用户并发将文件改至 r18、执行器返回 conflict 且不写入、重读并重新授权后写成 r19、测试退出码 1、再改至 r20 并通过指定测试。版本与结果为教学构造，不是仓库或产品日志；明确目标测试通过不等于完整任务验收。
 - **code_status：** 删除旧的可执行 Python Registry auditor。本章不承诺读者运行代码；JSON Schema、YAML 和终端结果均为说明性片段，未声称已验证。未运行代码、测试、模型、API 或 benchmark。
-- **formula_status：** 删除字段覆盖率集合和 G_toolreg 聚合 gate。只保留 schema 拒绝率和执行器内部错误率两个分项定义，分别以所有工具提议和实际派发调用为分母；用 20 次合成调用演示口径，不设合格阈值。
+- **formula_status：** 删除字段覆盖率集合和 G_toolreg 聚合 gate。2026-11-19 连续复读时补齐 schema 拒绝率与执行器内部错误率的变量定义及分母阶段：分别统计进入 schema 校验的提议、实际派发调用；零分母报告 N/A，未知工具名、解析/策略/用户拒绝不跨阶段混计。20 次合成账本中全部提议均到达 schema 校验，因此仍为 `2/20`；执行器内部错误率为 `2/15`。不设合格阈值。
 - **visual_status：** 新增一张 Mermaid 工具调用流程图，节点依次展示解析、schema、策略、确认、执行、结果和 trace。已静态核对节点/箭头与代码围栏；未在 GitHub 页面确认渲染。
 - **link_status：** 正文引用 OpenAI Function Calling、Agents SDK tools 和 MCP 版本化规范，并链接本地研究记录。检查正文、审计、研究记录和目录中的本地 Markdown 链接目标；未检查全站外链可达性。
 - **sync_status：** 第四章目录摘要“定义可发现工具、参数、权限、副作用、错误和版本”仍准确；第五、六、八、九章及第十四章/第二十二册的职责交接已在正文注明。未改共享题库、练习集、术语表或知识图谱，本章练习已覆盖新增读者结果。
 
 ## 遗留风险与下一入口
 
+- 2026-11-19 连续复读时发现 §4.15.1 未先定义比例变量，schema 拒绝率也把全体工具提议误作分母；现改为按进入 schema 阶段的提议和已派发调用分别计数，并定义零样本状态。检查 §4.16 示例时将 `idempotency: compare_expected_revision` 改为 `revision_precondition`，以免把文件版本条件写成通用幂等保证。改动为解释和说明性 YAML，无可执行代码变化。
 - API 文档为动态页面，后续如再次使用其中的严格 schema 默认值、工具搜索或错误接口事实，应固定当时访问日和产品/API 版本。
 - 未做目标读者试读、GitHub Mermaid 实际渲染或外部链接全量可达性核验；章节内容没有声称已获得这些验证。
 - 下一入口为[第五章《文件系统与代码编辑》](../../book-20-agent-harness-runtime/chapters/05-文件系统与代码编辑.md)，承接本章 apply_patch 的工作区目标、版本、冲突和副作用问题，深入文件边界、并发改动、diff 与回滚。
-

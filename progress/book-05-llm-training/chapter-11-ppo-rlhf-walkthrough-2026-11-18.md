@@ -84,3 +84,9 @@
 - 为手算假设 tokenizer 将回答切成六个教学片段，并在正文明确这不是某个真实 tokenizer 的切分。逐项连接 rollout 记录的旧 log probability、reference log probability、policy/reference 差、逐 token KL reward，以及 reward model 对整条回答输出 `$1.50$` 单一分数；教学用 `$\beta=0.5$` 时，六个 reward 合计 `$1.47$`。
 - GAE 继续使用同六个位置，列出 critic 对每个生成前缀的 value、TD residual、advantage 和 returns。明确 critic 输出是每个前缀的价值预测，不是 token 偏好分；RM 输出的是整条回答的分数。PPO ratio 和 critic 平方误差也沿用第四个 token 的数值作说明。
 - 本次只扩写 §3 教学解释，没有改变方法结论、章节结构、配套索引或新增研究事实。手工复核 reward 求和、GAE 倒推、returns 和 ratio 数值；完成 `git diff --check`；未运行测试或 PDF 构建。
+
+## 本轮修复 GAE 新增行内公式渲染（2026-11-19）
+
+- 根据读者反馈排查未渲染的公式，原因是若干行内公式的开头 `$` 紧跟中文冒号或逗号，触发 Markdown/MathJax 边界解析问题。
+- 将 critic value 的引出句改为文字后接公式，把终止 mask 写成同一个公式组，并把六条 GAE 递推改成“token 的 advantage 为公式”的句式，避免 `$` 紧邻全角标点；计算内容和数值不变。
+- `git diff --check` 通过；未运行测试或 PDF 构建。
