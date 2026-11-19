@@ -8,7 +8,7 @@
 - **书册贡献：** 承接第四至第六章的工具、文件和终端事实，说明这些事实如何按任务、来源、版本、信任和 token 预算进入下一轮模型输入；补充分层任务状态、会话历史、工作区、trace 与 memory 的边界。
 - **中心问题：** 下一轮模型需要哪些信息，怎样在预算内保留必要内容、来源和时效，同时避免旧摘要或外部内容误导动作？
 - **预期结果：** 读者能沿一条 Coding Agent 任务选择上下文，压缩带截断标记的测试输出，辨认过期摘要，设计带 provenance 的 task state 和 context item，并按定义清楚的分母审查预算、覆盖、保真和信任边界。
-- **主要任务与讲解路径：** 系统/工程机制解释。用明确标为合成的显示名修复任务串起用户约束、当前文件、相邻测试、终端失败回执、截断 artifact、当前 diff、旧版本摘要和 token 预算。章内 4/5 测试回执承接第六章的同类教学构造，但不声称是同一真实运行。
+- **主要任务与讲解路径：** 系统/工程机制解释。用明确标为合成的显示名修复任务串起用户约束、当前文件、相邻测试、终端失败回执、截断 artifact、当前 diff、旧版本摘要和 token 预算。章内 $4/5$ 测试回执承接第六章的同类教学构造，但不声称是同一真实运行。
 
 ## 章级扫描与候选去向
 
@@ -41,7 +41,7 @@
 ## Evidence、示例与呈现状态
 
 - **evidence：** 2026-11-18 打开 Anthropic [on-demand compaction](https://platform.claude.com/docs/en/build-with-claude/compaction-on-demand)、[threshold compaction](https://platform.claude.com/docs/en/build-with-claude/compaction-threshold)、[preserved thinking](https://platform.claude.com/docs/en/build-with-claude/compaction-thinking-blocks)；OpenAI [Agents SDK Sessions](https://openai.github.io/openai-agents-python/sessions/) 与 [Agents API overview](https://developers.openai.com/api/docs/guides/agents-api/overview)；[OWASP LLM01:2025](https://genai.owasp.org/llmrisk/llm01-prompt-injection/)；[LongHarness Bench](https://arxiv.org/abs/2609.38137)。来源事实、日期、平台/model 边界及预印本证据范围记入[长上下文 Harness 与 Agent Memory 来源记录](../../research/long-context-harness-and-agent-memory-2026.md)。
-- **example_status：** 7.2、7.8、7.10、7.13 和 7.18 共用显示名任务。4/5 测试回执、rev-19、1,200-token 预算和各项 token 估算均为教学构造；7.18 手算预算利用率、关键项召回、上下文精确率、约束保留和 stale 率，并明确不是生产结果或通用阈值。
+- **example_status：** 7.2、7.8、7.10、7.13 和 7.18 共用显示名任务。$4/5$ 测试回执、rev-19、1,200-token 预算和各项 token 估算均为教学构造；7.18 手算预算利用率、关键项召回、上下文精确率、约束保留和 stale 率，并明确不是生产结果或通用阈值。
 - **code_status：** 无可执行代码。保留的文本/YAML 均是解释性片段，不对应产品 API schema；未运行测试、模型或 API，也未声称合成回执来自真实运行。
 - **formula_status：** 保留 5 个 MathJax 指标块，定义 `U_tok`、`R_key`、`P_ctx`、`C_cons`、`F_sum` 和 `R_stale`；显示名案例手算分子、分母和 N/A 边界。删除原固定阈值及聚合 `G_context`。
 - **visual_status：** 未增加 Mermaid 或图片；以数据来源表和预算审阅表展示分类、选择和前后变化。未做 GitHub MathJax 页面渲染核验。
@@ -50,6 +50,7 @@
 
 ## 遗留风险与下一入口
 
+- 2026-11-19 连续复读统一了正文中 $4/5$、$7/7$、$0/1$ 等比例的 MathJax 呈现，并将 §7.6 的文件摘要例子收回到显示名任务主线。逐步预算算例中的项目数、估值和各分母均可由表格复算；章级研究扫描仍适用，本轮未新增外部事实。
 - 没有目标读者试读；公式页面渲染及全站外链可达性未核验。
 - Anthropic compaction 的 beta header、trigger、model/platform 支持会变化；正文只保留截至 2026-11-18 读取的公开合同，后续使用时须重新核对目标平台。模型特定 thinking block 细节回到第二十四章。
 - 本章的 token 数、测试回执和上下文候选完全是教学构造；不能据此声称仓库运行过相关命令或系统达到任何生产阈值。

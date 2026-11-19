@@ -45,7 +45,7 @@
 ## Evidence、示例与呈现状态
 
 - **evidence：** 2026-11-18 打开 OWASP OS Command Injection、LLM06、LLM10、SSRF、Logging 指南；Claude Code permissions/sandbox、OpenAI Agents API sandbox、Docker Engine、Linux 6.18 cgroup v2、Linux man-pages 6.19 `setsid(2)`、Python 3.15.2 subprocess、npm CLI v11 scripts、Git reset/clean 官方页面。来源事实及版本/适用边界写入[Agent 工具调用与安全研究记录](../../research/agent-tool-calling-security-2026.md)。产品文档只说明相应产品公开规则，不外推成通用保证。
-- **example_status：** 6.2 Mermaid 展示执行链；6.4 的 JSON 是说明性结构片段，不对应实际产品 API、不可执行且未运行。6.7、6.11、6.12 分别补入确认范围、进程组脱离与 cgroup v2 清理、DNS rebinding 的具体过程。6.18 复用第五章 display-name 教学目标的独立假设分支，所有命令与 4/5 回执均为合成数据；不声称执行过 pytest。
+- **example_status：** 6.2 Mermaid 展示执行链；6.4 的 JSON 是说明性结构片段，不对应实际产品 API、不可执行且未运行。6.7、6.11、6.12 分别补入确认范围、进程组脱离与 cgroup v2 清理、DNS rebinding 的具体过程。6.18 复用第五章 display-name 教学目标的独立假设分支，所有命令与 $4/5$ 回执均为合成数据；不声称执行过 pytest。
 - **code_status：** 无可执行程序代码；仅 Mermaid 图和教学 JSON 片段。未运行代码、测试、模型、API 或 benchmark。
 - **formula_status：** 无公式。删除原聚合 `G_cmd` 与硬编码通过阈值；6.19 要求为每项审计声明适用对象/分母，并单列 unknown。
 - **visual_status：** 6.2 新增 Mermaid 端到端执行流程图。静态检查了节点、分支与围栏；未在 GitHub 页面确认渲染。
