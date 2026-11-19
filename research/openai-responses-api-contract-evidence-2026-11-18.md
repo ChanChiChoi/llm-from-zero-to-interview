@@ -45,3 +45,10 @@
 - 本记录没有运行 API 请求、验证 SDK 类型映射或测量计费。
 - 官方文档与模型目录持续更新；API 的支持 item、字段、模型、工具、状态、后台时窗和价格不能脱离访问日期作为永久合同。
 - 教学组织资料是课程实例或教学建议，不代表对所有读者均有效的教学效果研究。
+
+## 2026-11-19 官方文档复核补充
+
+以下是本日重新访问官方文档后确认的当前合同细节，适用边界仍限于页面列出的模式和条件：
+
+- 后台流式只用于默认完成窗口 <code>soonest</code>，创建时须设置 <code>stream=true</code>；<code>2h</code> 和 <code>8h</code> 请求应省略 <code>stream</code> 或设为 <code>false</code>。连接中断后，可以将最后事件的 <code>sequence_number</code> 作为 <code>starting_after</code> 恢复；若创建时未启用 streaming，不能事后再流式读取。来源：[Background mode](https://developers.openai.com/api/docs/guides/background)，2026-11-19 访问，章节 “Streaming a background response”。
+- Data controls 将默认完成窗口的后台 Response 数据磁盘暂存说明为约 10 分钟，用于运行请求并使响应可供检索；Modified Abuse Monitoring 下，默认完成窗口的后台响应只有显式设置 <code>store=true</code> 才遵循标准保留期。该说明不推广到其他完成窗口、组织配置或工具的数据保留。来源：[Data controls](https://developers.openai.com/api/docs/guides/your-data)，2026-11-19 访问，<code>/v1/responses</code> 条目。

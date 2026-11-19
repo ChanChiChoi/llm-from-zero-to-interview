@@ -59,8 +59,16 @@
 - 第 20 章旧稿三个缺失 source-note / audit-script 目标均已移除；第二十册其他章节剩余缺失目标列于 architecture-audit.md。
 - 已执行 git diff --check，未发现空白错误。
 
+## 连续复读补充（2026-11-19）
+
+沿第二十册目录复读本章，并将第 20 章与第十七章副作用恢复、第十八章上下文折叠、第十九章评估及第二十一章 workspace 主讲边界对照。章节职责和现有章节路线保持稳定；读者能够区分 API Response 终态、工具执行回执、对话续接与任务验收。
+
+针对快速变化的官方 API 合同，重新访问 OpenAI Background mode 和 Data controls 文档后，在正文 §20.7 补充默认 <code>soonest</code> 后台完成窗口约 10 分钟的磁盘暂存，以及 Modified Abuse Monitoring 下标准保留期的 <code>store=true</code> 条件；在 §20.8 写明只有默认窗口支持创建时的后台 streaming，<code>2h</code>/<code>8h</code> 请求不启用 streaming，及未创建为流式响应时不能事后流式读取。证据事实与边界补入[研究记录](../../research/openai-responses-api-contract-evidence-2026-11-18.md)。未运行 API、SDK 或书中代码。
+
+静态复核：H2 标题仍为 20.1—20.11 连续；无代码围栏或行内数学表达式；相关本地 Markdown 链接在本轮检查中缺失 0；<code>git diff --check</code> 通过。目标读者试读、GitHub 页面核验和全量外链可达性仍属于整册终验。
+
 ## 开放风险与下一入口
 
-- Responses API 页面、模型支持、保留边界、background options 和价格会更新；正文按 2026-11-18 访问官方文档绑定，后续需要随本章维护重新核验。
+- Responses API 页面、模型支持、保留边界、background options 和价格会更新；本轮按 2026-11-19 官方页面复核的条件补充正文，后续维护仍需重新核验。
 - 没有运行 API 请求、SDK、示例代码、benchmark 或自动化测试；没有做目标读者试读、GitHub 页面渲染或所有外链的长期可达性检查。
 - 下一入口：[第二十一章《Persistent Workspace》](../../book-20-agent-harness-runtime/chapters/21-persistent-workspace与状态边界.md)。本章精修完成；第二十册第 21—24 章及全套书精修 goal 继续 active。

@@ -25,15 +25,15 @@ Claude Code 的公开资料可以帮助我们分析一个真实的 AI 编码代�
 
 ## 11.2 用一个合成修复任务看证据怎么流动
 
-假设一个教学仓库有 **tests/test_login.py** 和 **src/login.py**。测试要求过期 token 返回 HTTP 401，现有实现却返回 HTTP 200。用户提出：“修复这个失败，并解释原因。”
+假设一个教学仓库有 `tests/test_login.py` 和 `src/login.py`。测试要求过期 token 返回 HTTP `401`，现有实现却返回 HTTP `200`。用户提出：“修复这个失败，并解释原因。”
 
 这只是合成案例，不是一次 Claude Code 运行。它让我们把“Agent 可能做什么”与“公开证据能证明什么”逐步分开。
 
 | 步骤 | 合成案例中的状态变化 | 官方资料支持的范围 | 仍须验证或不能推断的内容 |
 | --- | --- | --- | --- |
 | 收集上下文 | 工具搜索测试和实现，再读取相关文件及项目说明 | Claude Code 文档列出文件读取、搜索、项目上下文和指令文件等能力；公开工作循环把 gather context 列为一个阶段。[How Claude Code works](https://code.claude.com/docs/en/how-claude-code-works) | 不能仅凭这些能力清单断言某次任务读取了哪些文件、用了什么内部检索排序，或完整上下文如何拼接。 |
-| 形成修改提议 | 根据预期 401、实际 200 和代码路径，提出一个局部修正 | 文档说明模型借助工具行动，工具结果会回到循环中影响后续决定。 | “上下文构造器（Context Builder）”“规划器（planner）”是否是产品里的独立内部模块，公开资料没有证明。 |
-| 执行修改 | 请求文件工具修改 src/login.py，形成可查看的差异 | 官方文档描述了文件编辑能力和权限规则。 | 具体修改是否符合用户意图，要看实际 diff 和任务约束，不能由“编辑成功”推出。 |
+| 形成修改提议 | 根据预期 HTTP `401`、实际 HTTP `200` 和代码路径，提出一个局部修正 | 文档说明模型借助工具行动，工具结果会回到循环中影响后续决定。 | “上下文构造器（Context Builder）”“规划器（planner）”是否是产品里的独立内部模块，公开资料没有证明。 |
+| 执行修改 | 请求文件工具修改 `src/login.py`，形成可查看的差异 | 官方文档描述了文件编辑能力和权限规则。 | 具体修改是否符合用户意图，要看实际 diff 和任务约束，不能由“编辑成功”推出。 |
 | 运行验证 | 请求测试命令，得到通过或失败回执 | 文档描述了命令执行和验证能力；某些动作受权限模式和设置影响。 | 是否无需确认、是否进入 OS 沙箱、实际执行了什么命令，都取决于版本、平台和配置，需检查本次运行。 |
 | 交付结果 | 说明修改和测试结果，交给用户复核 | 官方工作循环包含 verify；公开界面可展示任务过程和结果。 | 测试通过只支持该测试在该环境中的结果，不证明所有功能、权限和安全要求均已满足。 |
 
@@ -100,9 +100,9 @@ flowchart LR
 
 ## 11.6 交互控制面和模型工具调用不是一件事
 
-在命令行界面中，用户输入的普通任务请求与产品控制命令承担不同职责。普通请求会进入代理工作循环；像 /permissions、/sandbox、/resume 这样的可见命令则用于调整、检查或恢复产品会话。文件读取、搜索、编辑和 Bash 等工具调用是模型在工作循环中使用的能力。把它们分开，才能判断一个操作是用户在管理产品，还是模型提议了任务动作。
+在命令行界面中，用户输入的普通任务请求与产品控制命令承担不同职责。普通请求会进入代理工作循环；像 `/permissions`、`/sandbox`、`/resume` 这样的可见命令则用于调整、检查或恢复产品会话。文件读取、搜索、编辑和 `Bash` 等工具调用是模型在工作循环中使用的能力。把它们分开，才能判断一个操作是用户在管理产品，还是模型提议了任务动作。
 
-这一区分并不表示每个可见命令都能改变所有界面或执行环境。当前设置文档说明，部分终端命令只在相应 CLI 表面提供；设置文件则按 user、shared project、project-local 和 managed 等作用域加载。分析一次任务时，要记录实际启动表面、设置来源和生效值，不要只根据仓库里存在一个配置文件就断定它已加载。[Settings files and precedence](https://code.claude.com/docs/en/settings)；[Configure permissions](https://code.claude.com/docs/en/permissions)
+这一区分并不表示每个可见命令都能改变所有界面或执行环境。当前设置文档说明，部分终端命令只在相应 CLI 表面提供；设置文件则按 `user`、`shared project`、`project-local` 和 `managed` 等作用域加载。分析一次任务时，要记录实际启动表面、设置来源和生效值，不要只根据仓库里存在一个配置文件就断定它已加载。[Settings files and precedence](https://code.claude.com/docs/en/settings)；[Configure permissions](https://code.claude.com/docs/en/permissions)
 
 一个实用的审计记录可以分成四列：
 
@@ -125,15 +125,15 @@ flowchart LR
 | 设置（settings）/ 组织托管策略（managed policy） | 控制产品设置、权限规则和组织策略 | 对应设置范围内的产品行为受这些配置影响 | 不是模型“记住了”的自然语言说明。 |
 | 文件 checkpoint | 支持恢复部分文件编辑状态 | 被追踪的文件编辑可以通过产品恢复界面回退 | 不是数据库事务、完整环境快照或外部副作用回滚。 |
 
-官方文档说明每个新会话从新的上下文窗口开始；CLAUDE.md 和自动记忆会作为上下文提供，而非强制配置。若要在工具调用前实施控制，文档指出可用 PreToolUse 钩子；但这仍需和操作系统级执行隔离区分。[How Claude remembers your project](https://code.claude.com/docs/en/memory)
+官方文档说明每个新会话从新的上下文窗口开始；`CLAUDE.md` 和 `AGENTS.md` 会作为上下文提供，而非强制配置。若要在工具调用前实施控制，文档指出可用 `PreToolUse` 钩子；但这仍需和操作系统级执行隔离区分。[How Claude remembers your project](https://code.claude.com/docs/en/memory)
 
 会话 transcript、项目指令、自动记忆和设置解决的是不同问题。前几类提供信息，设置改变产品行为；一个工具能否触碰文件或网络，还要看具体权限、运行环境和沙箱。不要因为提示词中写了“不能访问密钥”，就把它当成操作系统已经阻断访问。
 
 ## 11.8 文件 checkpoint 只恢复一部分状态
 
-官方文档说明，本机工作时 Claude Code 会将会话消息、工具调用和结果保存为 ~/.claude/projects 下的明文 JSON Lines（JSONL）transcript，并支持恢复、继续或分叉会话；检查点（checkpoint）会在启动新一轮的 prompt 前捕获文件状态，并记录产品文件编辑工具在当前会话中的文件变化。[How Claude Code works](https://code.claude.com/docs/en/how-claude-code-works)；[Checkpointing](https://code.claude.com/docs/en/checkpointing)
+官方文档说明，本机工作时 Claude Code 会将会话消息、工具调用和结果保存为 `~/.claude/projects` 下的明文 JSON Lines（JSONL）transcript，并支持恢复、继续或分叉会话；检查点（checkpoint）会在启动新一轮的 prompt 前捕获文件状态，并记录产品文件编辑工具在当前会话中的文件变化。[How Claude Code works](https://code.claude.com/docs/en/how-claude-code-works)；[Checkpointing](https://code.claude.com/docs/en/checkpointing)
 
-这两个机制不能合称为“完整快照”。例如，在教学任务里，模型用文件编辑工具修改了 src/login.py，随后在 shell 中运行测试。文件编辑可以被 checkpoint 机制追踪；测试进程可能已写日志、更新缓存或访问外部服务，这些副作用并不会因为恢复文件就自动撤销。文档也说明只由 Bash 改过的文件、外部手工修改及部分并行子 Agent 编辑不一定能通过当前会话 rewind 恢复。
+这两个机制不能合称为“完整快照”。例如，在教学任务里，模型用文件编辑工具修改了 `src/login.py`，随后在 shell 中运行测试。文件编辑可以被 checkpoint 机制追踪；测试进程可能已写日志、更新缓存或访问外部服务，这些副作用并不会因为恢复文件就自动撤销。文档也说明只由 `Bash` 改过的文件、外部手工修改及部分并行子 Agent 编辑不一定能通过当前会话 `rewind` 恢复。
 
 所以恢复一次 coding agent 任务时，要分别检查：
 
@@ -151,15 +151,15 @@ flowchart LR
 
 ### 权限规则说明产品如何处理工具请求
 
-Claude Code 当前权限文档描述了 allow（允许）、ask（询问）和 deny（拒绝）规则；文档中的规则顺序为 deny、ask、allow。权限模式和工具类型会改变哪些调用需要用户确认。这个产品权限层回答的是：Claude Code 对某个工具请求如何处理。它不等同于通用操作系统进程隔离，也不能只凭一次提示框证明整个运行时都受到了限制。[Configure permissions](https://code.claude.com/docs/en/permissions)
+Claude Code 当前权限文档描述了 `allow`（允许）、`ask`（询问）和 `deny`（拒绝）规则；匹配时优先级从高到低依次为 `deny`、`ask`、`allow`。权限模式和工具类型会改变哪些调用需要用户确认。这个产品权限层回答的是：Claude Code 对某个工具请求如何处理。它不等同于通用操作系统进程隔离，也不能只凭一次提示框证明整个运行时都受到了限制。[Configure permissions](https://code.claude.com/docs/en/permissions)
 
-/permissions 一类管理界面和模型生成的 Bash/文件/MCP 工具请求也应分开记录。审批通过只说明产品允许该动作继续；还要验证审批所覆盖的具体参数、真正执行的动作和执行结果。
+`/permissions` 一类管理界面和模型生成的 `Bash`/文件/MCP 工具请求也应分开记录。审批通过只说明产品允许该动作继续；还要验证审批所覆盖的具体参数、真正执行的动作和执行结果。
 
 ### OS 沙箱只覆盖文档列明的执行路径
 
-截至本章核对日期，Claude Code 的沙箱文档说明：本机沙箱在启用且依赖可用时，通过操作系统边界限制 Bash、PowerShell、Monitor 命令及其子进程；默认关闭。文档同时列出内建文件与 Web 工具、MCP servers、hooks、plugin monitors、LSP servers 和辅助进程在沙箱之外运行。原生 Windows 下命令也不在此沙箱中运行；出错时还存在请求无沙箱重试的路径。[Configure the sandboxed Bash tool](https://code.claude.com/docs/en/sandboxing)
+截至本章核对日期，Claude Code 的沙箱文档说明：本机沙箱在启用且依赖可用时，通过操作系统边界限制 `Bash`、`PowerShell`、`Monitor` 命令及其子进程；默认关闭。文档同时列出内建文件与 Web 工具、MCP servers、hooks、plugin monitors、LSP servers 和辅助进程在沙箱之外运行。原生 Windows 下命令也不在此沙箱中运行；出错时还存在请求无沙箱重试的路径。[Configure the sandboxed Bash tool](https://code.claude.com/docs/en/sandboxing)
 
-这使审计问题变得具体：测试命令是不是受沙箱约束？文件编辑工具是否在同一边界内？MCP server 自己访问外部系统的权限是什么？hook 的脚本和凭据由谁控制？不能从“Bash sandbox 已开启”推出“所有 Agent 动作都被同一个 OS 边界包住”。
+这使审计问题变得具体：测试命令是不是受沙箱约束？文件编辑工具是否在同一边界内？MCP server 自己访问外部系统的权限是什么？hook 的脚本和凭据由谁控制？不能从“`Bash` sandbox 已开启”推出“所有 Agent 动作都被同一个 OS 边界包住”。
 
 ### 扩展增加能力，也引入新的执行者
 
@@ -174,7 +174,7 @@ Claude Code 文档介绍了若干不同扩展点：
 
 ## 11.10 观察产品运行和评估任务结果
 
-产品运行留下的记录有不同用途。Claude Code 的本地 transcript 保存会话消息和工具交互；组织也可以配置 OpenTelemetry（OTel，可观测性标准）导出 metrics（指标）、events/logs（事件/日志）和可选 traces（轨迹）。监控文档把分布式 traces 标为 beta，并说明部分工具路径、命令或内容字段需要显式配置才会导出。因而“有遥测（telemetry）”不等于“有完整可重放轨迹”；导出内容也需要按敏感数据和保留策略审查。[Monitoring](https://code.claude.com/docs/en/monitoring-usage)
+产品运行留下的记录有不同用途。Claude Code 的本地 transcript 保存会话消息和工具交互；组织也可以配置 OpenTelemetry（OTel，可观测性框架与工具集）导出 metrics（指标）、events/logs（事件/日志）和可选 traces（轨迹）。OpenTelemetry 用于生成、收集和导出遥测数据，本身不是存储或可视化后端。[What is OpenTelemetry?](https://opentelemetry.io/docs/what-is-opentelemetry/) 监控文档把分布式 traces 标为 beta，并说明部分工具路径、命令或内容字段需要显式配置才会导出。因而“有遥测（telemetry）”不等于“有完整可重放轨迹”；导出内容也需要按敏感数据和保留策略审查。[Monitoring](https://code.claude.com/docs/en/monitoring-usage)
 
 审阅一项运行时，至少分开找这些证据：
 
@@ -234,7 +234,7 @@ Claude Code 文档介绍了若干不同扩展点：
 
 1. 将任务拆成输入、上下文来源、动作提议、权限决定、执行回执、文件差异、测试结果和最终验收。
 2. 为每项分别标注“官方公开描述”“假设的单次观察”“系统设计推断”或“未知”。
-3. 选一个 Bash 测试动作和一个 MCP 工具动作，分别追查权限、执行位置、沙箱覆盖和外部副作用；说明当前信息不足时要向哪份配置或回执补证。
+3. 选一个 `Bash` 测试动作和一个 MCP 工具动作，分别追查权限、执行位置、沙箱覆盖和外部副作用；说明当前信息不足时要向哪份配置或回执补证。
 4. 列出会话 transcript、项目指令、自动记忆、设置和文件检查点各自能证明什么、不能证明什么。
 5. 写一段面试回答，说明你怎样分析公开产品能力，又怎样避免把闭源内部细节说成事实。
 

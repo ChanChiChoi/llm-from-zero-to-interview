@@ -25,8 +25,8 @@
 ## Agent 会话与运行环境
 
 - [OpenAI Agents API：Pre-warm sandboxes](https://developers.openai.com/api/docs/guides/agents-api/environments/prewarmed)：官方 API 文档，访问日期 2026-11-19。阅读 “How it works” 及多个 session 附着同一 environment 的说明。
-  - 支持：文档将 environment 定义为 Agent 工具运行的 workspace，将 session 定义为 Agent 配置和 conversation；多个 session 可附着同一个 environment，共享文件、进程、已安装包和环境配置，而 conversation history 各自独立；共享环境中的修改对其他附着 session 可见。
-  - 边界：这是该 API 的环境合同，不能据此推导其他产品的 session 隔离或 workspace 保留方式。
+  - 支持：文档将 environment 定义为 Agent 工具运行的 workspace，将 session 定义为 Agent 配置和 conversation；新建的 standalone environment 可由多个 session 共用文件、进程、已安装包和环境配置，而 conversation history 各自独立；共享环境中的修改对其他附着 session 可见。
+  - 边界：官方文档明确旧环境仍可能是单 session lifecycle；这是该 API 对特定新建环境的合同，不能据此推导其他产品或旧环境的 session 隔离、workspace 生命周期和保留方式。
 - [OpenAI Help Center：Using Codex Cloud](https://help.openai.com/en/articles/20001545-using-codex-cloud)：官方产品帮助，页面在 2026-11-19 显示 18 天前更新。阅读 task workspace 与恢复说明。
   - 支持：每个 Cloud task 使用独立隔离 workspace；继续同一 task 可以恢复未完成工作，新 task 不会取回另一个 task 的未提交改动；文档说明 VM 保存状态从最近一次启动或恢复起最多可恢复 7 天，并明确这不是 conversation history 的保留期限。
   - 边界：恢复窗口只适用于该产品文档描述的保存 VM 状态，不能概括为通用 workspace 或对话保留政策；产品合同可能变化。

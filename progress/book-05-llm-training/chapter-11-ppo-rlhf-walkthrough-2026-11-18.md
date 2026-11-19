@@ -91,3 +91,11 @@
 - 将 critic value 的引出句改为文字后接公式，把终止 mask 写成同一个公式组，并把六条 GAE 递推改成“token 的 advantage 为公式”的句式，避免 `$` 紧邻全角标点；计算内容和数值不变。
 - `git diff --check` 通过；未运行测试或 PDF 构建。
 - 复查时又发现 reward shaping 解释中的 `$\beta$` 紧跟中文分号/逗号；改写为“增大 `$\beta$` 会……”和“不能把某个模型上的 `$\beta$` 直接照搬”，公式内容不变。再次运行 `git diff --check` 通过。
+- 另有总结句将 RM 分数 `$1.50$` 误放在反引号内，导致 GitHub 按代码显示；已去掉代码定界符。检查 PPO-RLHF 本段后，该处是唯一的行内数学表达式误用代码格式。
+
+## 本轮补足 PPO-RLHF 的背景、目的、适用范围与取舍（2026-11-19）
+
+- 在 §3 伪代码之前增加必要来由：区分 PPO 通用策略优化算法的提出背景，与语言模型为什么需要人类偏好信号；用本节算例中的 chosen/rejected 回答说明 RM 学到的偏好分数承担什么角色，再说明 PPO、clipping 和 reference KL 各自负责什么。
+- 在六步讲解后补充适用条件和优缺点，继续沿用同一道分数题：说明 PPO-RLHF 适合能收集偏好、能在线采样并评分且资源可接受的任务；指出 RM 代理分数不能证明算术正确，rollout 与多模型协作成本高，RM/critic 和超参数会影响训练结果；固定偏好对且无需在线采样时，引向下一节 DPO。
+- PPO 原论文、Ziegler 等人的语言偏好研究及 InstructGPT 技术报告的版本、支持内容和证据边界已补入 `research/rlhf-preference-and-policy-optimization-2026.md`。本轮不改伪代码、六步算例、章节结构或配套索引。
+- 检查：`git diff --check` 通过；未运行测试或 PDF 构建。

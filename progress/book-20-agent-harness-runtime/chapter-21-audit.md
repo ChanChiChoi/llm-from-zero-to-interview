@@ -52,6 +52,14 @@
 - 静态验收已完成：H2 21.1—21.8 连续；正文、研究记录、章审计、目录及本章新练习的 Markdown 本地链接目标缺失为 0；新架构行/交接链接有效；练习 35EP 和面试题 40AE 各出现一次；旧 Fable/Qwen provider 专题、自拟 R_workspace 公式和围栏代码均无残留；git diff --check 通过。
 - 未做目标读者试读或外链长期可达性核查；没有调用模型、API、SDK、benchmark、自动化测试或 PDF 构建。
 
+## 连续复读补充（2026-11-19）
+
+按第二十册目录连续复读本章，沿 task-42 的 r17→r18→r19 恢复案例检查事实来源、用户并发编辑、验证目标版本和交付证据。章节与第五章文件编辑、第七章上下文/记忆、第八章权限、第十章评估、第十七章 checkpoint、第十八章折叠、第二十章 provider conversation state 的分工清楚；没有发现新的结构缺口或需同步的配套主题。
+
+复核 OpenAI Agents API 预热环境官方页面后，在 §21.2 补充多 session 共享 environment 的适用条件：该行为针对新建的 standalone environments，旧环境仍可能沿用单 session 生命周期。研究记录已同步该条件；它是具体 API 合同，不推广为所有产品的 workspace 规则。其余官方与论文事实由本日已打开的原文和研究记录覆盖，没有运行产品、API、SDK 或代码。
+
+静态复读：H2 标题 21.1—21.8 连续；正文没有代码围栏或数学表达式；本轮检查的本地 Markdown 链接目标缺失 0；练习 35EP 和面试题 40AE 各出现一次；<code>git diff --check</code> 通过。目标读者试读和外链长期可达性仍属于整册终验。
+
 ## 交接
 
 下一步从[第二十二章 OpenAI-Compatible API 边界](../../book-20-agent-harness-runtime/chapters/22-openai-compatible-api边界.md)开始，检查兼容语义的章级职责和官方文档版本。随后第 23—24 章分别复核 Gemini 与 Claude 的 provider-specific 状态合同。第二十一册第 83 章的 Qwen3.6 source-note 缺失链接需在该册逐章审阅时解决。全套书精修 goal 保持 active；不更新 PDF 或 plan.md。

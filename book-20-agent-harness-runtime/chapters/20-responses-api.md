@@ -89,7 +89,7 @@ Responses API 提供几种不同的上下文续接方式。选择哪一种，取
 
 Response 对象默认存储并可按 ID 检索；官方文档将一般 Response application-state 保留说明为 30 天。创建 Response 时使用 <code>store=false</code> 可以关闭该类 Response 存储。Conversation 对象及其 items 有不同的生命周期，官方 Conversation State 文档说明它们不适用 Response 的 30 天 TTL。
 
-这不表示一个布尔值就能概括整条数据路径。Zero Data Retention、Modified Abuse Monitoring、背景处理、音频/图像/文件、prompt cache、托管容器和第三方 MCP 服务都有自己的条件。尤其是 background mode 为了处理请求和提供结果会临时存储数据，即使请求设置了 <code>store=false</code>。因此，涉及敏感数据时要按组织资格、处理模式、工具和输入类型检查[Data controls 文档](https://developers.openai.com/api/docs/guides/your-data)，不能从 <code>store=false</code> 推断“数据没有被保存”或“所有下游都已删除”。
+这不表示一个布尔值就能概括整条数据路径。Zero Data Retention、Modified Abuse Monitoring、背景处理、音频/图像/文件、prompt cache、托管容器和第三方 MCP 服务都有自己的条件。尤其是 background mode 为了处理请求和提供结果会临时存储数据，即使请求设置了 <code>store=false</code>。官方 Data controls 文档把默认 <code>soonest</code> 完成窗口的后台响应磁盘暂存说明为约 10 分钟，用于运行请求并让响应可供检索；启用 Modified Abuse Monitoring 时，后台响应只有显式设置 <code>store=true</code> 才遵循标准保留期。因此，涉及敏感数据时要按组织资格、处理模式、工具和输入类型检查[Data controls 文档](https://developers.openai.com/api/docs/guides/your-data)，不能从 <code>store=false</code> 推断“数据没有被保存”或“所有下游都已删除”。
 
 “API 数据不用于训练，除非显式同意”与“服务会为提供功能暂存或保留数据”是不同问题。接口字段不能替代组织的数据处理约定或第三方工具的保留政策。
 
@@ -99,7 +99,7 @@ Response 对象默认存储并可按 ID 检索；官方文档将一般 Response 
 
 取消也有接口边界：Responses 的 cancel endpoint 只适用于以 background mode 创建的响应。对同步响应，客户端关闭连接；对后台响应，API 可接受取消，但这不会撤销应用已经执行的自定义工具或其他外部动作。取消状态应和先前已经收到、已经执行的工具调用分别记录。[Cancel a response reference](https://developers.openai.com/api/reference/resources/responses/methods/cancel)
 
-如果后台请求创建时启用了 streaming，连接中断后可用最后收到的 <code>sequence_number</code> 作为 <code>starting_after</code> 续读。这个重连合同针对后台 Response 的流；不要据此宣称所有普通同步流都能从任意断点恢复。后台 2 小时或 8 小时窗口、模型资格、计费与 ZDR 暂存限制会变，应以[当前 Background 文档](https://developers.openai.com/api/docs/guides/background)为准。本章不抄固定模型名单或折扣价。
+当前官方指南只在默认 <code>soonest</code> 完成窗口下支持创建时设置 <code>stream=true</code> 的后台流式；选择 <code>2h</code> 或 <code>8h</code> 窗口时，应省略 <code>stream</code> 或设为 <code>false</code>。若连接中断，可用最后收到的 <code>sequence_number</code> 作为 <code>starting_after</code> 续读；创建响应时没有启用 streaming，就不能之后再开启流式读取。这个重连合同针对后台 Response 的流；不要据此宣称所有普通同步流都能从任意断点恢复。完成窗口、模型资格、计费与 ZDR 暂存限制可能变化，部署时应以[当前 Background 文档](https://developers.openai.com/api/docs/guides/background)为准。本章不抄固定模型名单或折扣价。
 
 ## 20.9 用量、错误与“响应完成”
 

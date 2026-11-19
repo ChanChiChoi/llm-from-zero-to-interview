@@ -45,15 +45,16 @@
 
 - **evidence：** 2026-11-18 打开 OpenTelemetry [Traces](https://opentelemetry.io/docs/concepts/signals/traces/)、[Metrics](https://opentelemetry.io/docs/concepts/signals/metrics/)、[Sampling](https://opentelemetry.io/docs/concepts/sampling/) 文档；W3C [Trace Context Recommendation](https://www.w3.org/TR/trace-context/)；OpenAI Agents SDK [Tracing](https://openai.github.io/openai-agents-python/tracing/)；OpenTelemetry GenAI [span conventions](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-spans.md)（状态 Development）。OpenTelemetry 当前旧文档已提示 GenAI 约定迁至独立 repo；事实限定为访问时 main 草案。隐私日志边界另参 OWASP [Logging Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html)。新增来源事实及版本/证据边界见[Agent 工具调用与安全研究记录](../../research/agent-tool-calling-security-2026.md)。
 - **evidence boundaries：** OpenAI SDK 的 `trace_include_sensitive_data` 当前默认值、`add_trace_processor()` 保留默认 exporter、单 processor 异常不阻断后续处理器，均为动态官方文档对该 SDK 的描述；未运行本地 SDK，需按 deployment lockfile 核验。GenAI semantic conventions 为 Development 草案；不代表所有 instrumentation 实际关闭内容采集。OpenTelemetry metrics 默认 cardinality limit 2000 只记入 research note，正文仅陈述其成本机制，不把此版本默认值外推为全系统约束。
-- **example_status：** 9.1—9.9 使用明确标注的合成显示名修复 trace，包含 rev-17→rev-18 的首轮失败、输出截断、通过受控 Artifact 继续诊断、rev-18→rev-19 的修正和 5/5 局部测试通过；另含 `.env` 在执行器派发前被拒、push 待审批未执行。数据均为教学构造，不是本地实际执行证据。
+- **example_status：** 9.1—9.9 使用明确标注的合成显示名修复 trace，包含 rev-17→rev-18 的首轮失败、输出截断、通过受控 Artifact 继续诊断、rev-18→rev-19 的修正和 $5/5$ 局部测试通过；另含 `.env` 在执行器派发前被拒、push 待审批未执行。数据均为教学构造，不是本地实际执行证据。
 - **code_status：** 移除旧 Python auditor；章节中无可执行代码，不运行代码、测试、模型、API 或 benchmark。
-- **formula_status：** 删去原聚合公式和固定 Gate；保留 4/5、5/5 作为合成回执，并展示三个按不同对象和分母定义的简单比例，无统一阈值。未核验 GitHub MathJax 页面渲染。
+- **formula_status：** 删去原聚合公式和固定 Gate；保留 $4/5$、$5/5$ 作为合成回执，并展示三个按不同对象和分母定义的简单比例，无统一阈值。未核验 GitHub MathJax 页面渲染。
 - **visual_status：** 使用 signal 对照表、事件时间线、状态层次和 replay 模式表帮助读者观察关系；无需新增 Mermaid 或图片。
 - **link_status：** 已静态核对第八、十、十七至十九章的本地链接目标；外部来源页面在本轮打开或在同日研究记录复核。未完成全站外链可达性检查。
 - **sync_status：** 重写[练习 35M](../../EXERCISES.md)为合成 trace 审阅、ID/版本、三类 replay、独立比例和 fail-closed 检查；更新[面试题 40K](../../INTERVIEW_BANK.md)，移除 12 项指标和 trace replay gate。第二十册目录摘要仍准确；未改简介、目录、plan.md 或 PDF。
 
 ## 遗留风险与下一入口
 
+- 2026-11-19 连续复读将时间线、失败排查路径和采样示例里的比例从行内代码改为 MathJax 数学表达；本轮未改变合成计数、运行结论或来源依据。
 - 未核验部署环境中具体 OpenAI Agents SDK、OTel SDK/Collector/exporter 的锁定版本与配置；正文将动态默认值写成当前文档事实而不是本地行为证明。
 - 没有目标读者试读；GitHub 外链可达性、页面图表/公式渲染及 trace UI 目标产品验证未完成。
 - 合成示例只展示可审阅的证据关系；生产系统仍需核对实际执行器回执、外部状态、权限与 Artifact ACL，不能将 trace 内容完整度直接作为副作用不存在或任务成功证明。

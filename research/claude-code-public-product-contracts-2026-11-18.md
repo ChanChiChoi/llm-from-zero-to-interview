@@ -1,6 +1,7 @@
 # Claude Code 公开产品合同与架构边界
 
-研究日期：2026-11-18  
+研究日期：Claude Code 文档扫描为 2026-11-18；OpenTelemetry 术语补核为 2026-11-19
+
 证据状态：source-backed；本记录只整理官方文档支持的产品事实，不表示已在本地运行或验证 Claude Code。
 
 ## 研究范围
@@ -24,6 +25,7 @@
 | [Extend Claude with skills](https://code.claude.com/docs/en/skills) | 官方在线文档，2026-11-18 访问 | skills 是可复用任务指引/工作流，可依据 scope 与配置加载。 |
 | [Plugins overview](https://code.claude.com/docs/en/plugins) | 官方在线文档，2026-11-18 访问 | plugin 可以把 skills、agents、hooks、MCP servers 等组件作为一组安装和加载。 |
 | [Monitoring](https://code.claude.com/docs/en/monitoring-usage) | 官方在线文档，2026-11-18 访问 | 产品支持配置 OpenTelemetry metrics、events/logs 和可选 distributed traces；当前文档把 traces 标为 beta。特定文件路径、命令和工具内容字段受配置开关控制，其中 OTEL_LOG_TOOL_CONTENT 与 OTEL_LOG_TOOL_DETAILS 可让遥测包含敏感项目内容或工具细节。 |
+| [What is OpenTelemetry?](https://opentelemetry.io/docs/what-is-opentelemetry/) | OpenTelemetry 官方在线文档，2026-11-19 访问 | 将 OpenTelemetry 定义为生成、收集和导出 traces、metrics、logs 等遥测数据的可观测性框架与工具集；它不是遥测存储或可视化后端。用于准确说明本章采用的 OTel 术语，不扩展 Claude Code 产品合同。 |
 
 ## 事实与边界
 
@@ -34,4 +36,3 @@
 - Session transcript、file checkpoint 和 OpenTelemetry 导出是不同观察/恢复能力。它们不自动构成完整执行快照，也不撤销所有外部副作用。
 - 公开文档是动态产品合同，不支持对其他版本、未公开模型 prompt、planner、内部路由算法或单次运行行为的无条件外推。
 - 本次仅核对公开文档；未执行 Claude Code、未验证本地配置、未复现工具行为或评估产品成功率。
-

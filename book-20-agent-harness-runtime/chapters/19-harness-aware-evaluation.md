@@ -38,8 +38,8 @@ Agent harness 控制 Agent 怎样接收上下文、调用工具和结束运行�
 
 |  | H1 | H2 |
 | --- | ---: | ---: |
-| M1 | 2/4 | 3/4 |
-| M2 | 3/4 | 3/4 |
+| M1 | $2/4$ | $3/4$ |
+| M2 | $3/4$ | $3/4$ |
 
 在 M1 上，换成 H2 多通过一个任务；在 M2 上，总通过数没有变化。若只报告两个模型上的平均成绩，读者可能会得到“H2 略好”的总结，却看不到它对 M1 和 M2 的作用不同。这种“某个 harness 与某个模型配在一起，效果偏离各自平均变化”的现象，就是模型与 harness 的交互。
 
@@ -47,7 +47,7 @@ Agent harness 控制 Agent 怎样接收上下文、调用工具和结束运行�
 
 把多个模型下切换 harness 的平均变化称为 harness 的**主效应**；把某个模型与某个 harness 配对后，额外偏离这个平均变化的部分称为**交互**。只看主效应会回答“平均而言哪种配置变化更好”，却可能掩盖“它只适合某些模型”。是否应采用某种配置，取决于产品是固定使用一类模型，还是要服务多个模型。
 
-真实比较常会遇到不完整矩阵：某些模型只在一个 harness 上运行，另一些 harness 又只搭配少数模型。这样的稀疏数据可以描述观察到的组合，但更难区分组件效应和模型—harness 交互。Han 与 Sun 对 Terminal-Bench 2.0 leaderboard 的分析，整体使用 105 个 harness–LLM 配对；他们把交互模型限制在完整交叉的 3 个 harness × 9 个模型子集上。该分析报告的模型效应和 harness 效应在所选数据中量级相近，但 leaderboard 是观察性数据，不能读成随机受控的普遍因果排名。[论文与设计边界](../../research/model-harness-interaction-attribution-2026-11-18.md#harness-与模型的统计分解)
+真实比较常会遇到不完整矩阵：某些模型只在一个 harness 上运行，另一些 harness 又只搭配少数模型。这样的稀疏数据可以描述观察到的组合，但更难区分组件效应和模型—harness 交互。Han 与 Sun 对 Terminal-Bench 2.0 leaderboard 的分析，整体使用 105 个 harness–LLM 配对；他们把交互模型限制在完整交叉的 $3\times9$ 配置子矩阵上，即 3 个 harness 与 9 个模型。该分析报告的模型效应和 harness 效应在所选数据中量级相近，但 leaderboard 是观察性数据，不能读成随机受控的普遍因果排名。[论文与设计边界](../../research/model-harness-interaction-attribution-2026-11-18.md#harness-与模型的统计分解)
 
 ## 19.4 配对任务，重复运行，并说明实验单位
 
@@ -76,7 +76,7 @@ Harvard CS2680 的课程讲义也用这四个层次介绍 Agent evaluation，并
 
 先把三层结果分开，再按各自适用的样本报告成功、失败、错误和无法判断。若环境在 Agent 启动前失败，这不是 Agent 解题失败；若 verifier 不能判断结果，也不能把它算作成功。不要默认把上述层次加权合成一个分数或上线门槛。
 
-《Trial by Trace》用 95 个机制任务比较 4 个 harness 和 9 个模型，并把任务结果与 harness criteria 分开评分；论文摘要报告，在其 3,420 个选中执行中，31.1% 完成了任务但至少违反一项 harness criterion。这个数字说明两层结果可以分离，适用范围仍是该预印本的任务、系统与判定标准；每个 cell 只有一个被选中的执行，不能用来估计各配置的随机方差。[论文版本与限制](../../research/model-harness-interaction-attribution-2026-11-18.md#trial-by-trace任务结果与-harness-履约分层)
+《Trial by Trace》用 95 个机制任务比较 4 个 harness 和 9 个模型，并把任务结果与 harness criteria 分开评分；论文摘要报告，在其 3,420 个选中执行中，$31.1\%$ 完成了任务但至少违反一项 harness criterion。这个数字说明两层结果可以分离，适用范围仍是该预印本的任务、系统与判定标准；每个 cell 只有一个被选中的执行，不能用来估计各配置的随机方差。[论文版本与限制](../../research/model-harness-interaction-attribution-2026-11-18.md#trial-by-trace任务结果与-harness-履约分层)
 
 怎样定义任务夹具、配置身份、Runner、独立验收、分母和运行故障分类，回看[第十章《Evaluation Harness》](10-evaluation-harness.md)。本章不重复建立一套新的评估脚手架。
 
@@ -110,7 +110,7 @@ Trace 能告诉我们一次运行按什么顺序发生了什么，但“先发�
 
 重试或多 Agent 若属于被比较的 harness，就把其全部消耗纳入预算，包括失败、超时和子 Agent 的调用。若两个系统资源预算不同，要明确写出；可以并列展示质量和成本，或在多个预算点比较质量—成本关系，不要把二者藏进一个不透明的总分。
 
-《Do More Agents Help?》用统一执行、工具、评分和 token 记账方式，在固定 GPT-4.1 上比较六种 multi-agent 工作流与单 Agent 参考。其主研究跨十组任务运行三次，每种配置每次评估 3,302 个样本。LLM-Debate 在 HumanEval 上比单 Agent 高 9.67 个百分点，但汇总准确率低 1.96 个百分点、token 用量为 1.39 倍；ChatEval 在 IFEval 有局部优势，汇总准确率较低且 token 用量为 4.34 倍。这说明单一 benchmark 的提升不能代表整体质量—成本结论；这些数字只属于论文所测配置和任务。[论文协议与数字边界](../../research/model-harness-interaction-attribution-2026-11-18.md#do-more-agents-help固定协议下的质量与-token-成本)
+《Do More Agents Help?》用统一执行、工具、评分和 token 记账方式，在固定 GPT-4.1 上比较六种 multi-agent 工作流与单 Agent 参考。其主研究跨十组任务运行三次，每种配置每次评估 3,302 个样本。LLM-Debate 在 HumanEval 上比单 Agent 高 $9.67$ 个百分点，但汇总准确率低 $1.96$ 个百分点、token 用量为 $1.39$ 倍；ChatEval 在 IFEval 有局部优势，汇总准确率较低且 token 用量为 $4.34$ 倍。这说明单一 benchmark 的提升不能代表整体质量—成本结论；这些数字只属于论文所测配置和任务。[论文协议与数字边界](../../research/model-harness-interaction-attribution-2026-11-18.md#do-more-agents-help固定协议下的质量与-token-成本)
 
 ## 19.8 检查改进是否只发生在被调过的题目上
 
@@ -118,7 +118,7 @@ Prompt、工具、retry policy 或 orchestration 经过 benchmark 反复调优�
 
 因此，要把调试和选择用的任务，与最终报告用的留出任务分开。若同一仓库、题目模板或模拟器机制在多个集合间重复，单纯隐藏测试样本未必就提供独立检验；可按仓库、任务族、模板或环境机制留出，并记录是否经过开发者多轮查看。对比时还要控制或报告额外推理、retry 和工具调用预算。
 
-《Harness-Delta Attribution》在固定模型权重的 harness 演化实验中，提出分别估计 benchmark overfitting、test-time scaling 和剩余收益的方法。作者在 21 个 search-set 显著提升的设置里，报告前两类收益平均分别占 54% 与 14%；其余部分是该方法定义下的可泛化改进上界。论文还发现，held-out 转移依任务、模型与演化框架而变化，validation 选择也没有稳定解决过拟合。这些数值是作者方法在特定研究设置中的分解，不是任意 Agent 项目的通用配比。[论文及其方法边界](../../research/model-harness-interaction-attribution-2026-11-18.md#harness-delta-attributionharness-演化后的收益来源)
+《Harness-Delta Attribution》在固定模型权重的 harness 演化实验中，提出分别估计 benchmark overfitting、test-time scaling 和剩余收益的方法。作者在 21 个 search-set 显著提升的设置里，报告前两类收益平均分别占 $54\%$ 与 $14\%$；其余部分是该方法定义下的可泛化改进上界。论文还发现，held-out 转移依任务、模型与演化框架而变化，validation 选择也没有稳定解决过拟合。这些数值是作者方法在特定研究设置中的分解，不是任意 Agent 项目的通用配比。[论文及其方法边界](../../research/model-harness-interaction-attribution-2026-11-18.md#harness-delta-attributionharness-演化后的收益来源)
 
 ## 19.9 近期研究各自回答了不同问题
 
@@ -149,6 +149,6 @@ Harvard 讲义和 Buffalo 课程大纲提供了组织评测知识的例子：先
 
 离线评估验证的是固定任务和环境下的表现；它不能单独证明线上请求分布、真实服务依赖和用户行为下也会得到相同结果。进入线上时应单独说明流量选择、版本与 rollout 范围，并分别记录任务结果、延迟、成本和人工接管；线上监控可发现新问题，但不能替代受控离线对照。两种数据回答不同问题，不应把它们拼成一个分数。
 
-面对一条“某 Agent 得分 70%”的报告，你可以按顺序问：这测的是裸模型还是完整系统？模型和 harness 是否交叉？任务是否匹配、运行是否重复？verifier 与 harness 履约是否分开？成本有没有包括失败与重试？测试集是否参与过调优？报告能否回到具体 artifact 和 trace？回答这些问题后，成绩才有清楚的适用范围。
+面对一条“某 Agent 得分 $70\%$”的报告，你可以按顺序问：这测的是裸模型还是完整系统？模型和 harness 是否交叉？任务是否匹配、运行是否重复？verifier 与 harness 履约是否分开？成本有没有包括失败与重试？测试集是否参与过调优？报告能否回到具体 artifact 和 trace？回答这些问题后，成绩才有清楚的适用范围。
 
 这章把归因停在实验比较和证据解释上；任务 fixture、执行环境与 verifier 的详细构造仍在第十章。统计区间与实验设计回到第七册第十章；provider 的状态、工具和安全合同分别由本册第二十、二十三、二十四章结合其官方版本材料说明。

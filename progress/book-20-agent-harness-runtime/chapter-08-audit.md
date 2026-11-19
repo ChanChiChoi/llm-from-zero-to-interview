@@ -39,7 +39,7 @@
 ## Evidence、示例与呈现状态
 
 - **evidence：** 2026-11-18 打开 OWASP [LLM06:2025 Excessive Agency](https://genai.owasp.org/llmrisk/llm062025-excessive-agency/?lang=us)、[Transaction Authorization](https://cheatsheetseries.owasp.org/cheatsheets/Transaction_Authorization_Cheat_Sheet.html)、[Logging](https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html)；Anthropic [Claude Code permissions](https://code.claude.com/docs/en/permissions) 与 [sandbox](https://code.claude.com/docs/en/sandboxing)；OpenAI [Agents API Sandbox security](https://developers.openai.com/api/docs/guides/agents-api/environments/security)；Docker [Engine security](https://docs.docker.com/engine/security/)；OWASP [Path Traversal](https://cheatsheetseries.owasp.org/cheatsheets/Path_Traversal_Prevention_Cheat_Sheet.html) 与 [SSRF](https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html)。来源事实、日期、适用范围和 Agent 审批绑定的工程推论写入[Agent 工具调用与安全确认来源记录](../../research/agent-tool-calling-security-2026.md)。
-- **example_status：** 8.1—8.16 复用一项合成显示名修复任务。8.16 六项请求的结果、rev-17 和 4/5 测试回执均为教学构造，非真实运行；四项比例分别为策略覆盖 6/6、拒绝后无副作用 2/3、已执行审批动作精确匹配 1/1、必须隔离的执行覆盖 1/1。每项只支持当前样例的诊断，不形成通用安全分数。
+- **example_status：** 8.1—8.16 复用一项合成显示名修复任务。8.16 六项请求的结果、rev-17 和 $4/5$ 测试回执均为教学构造，非真实运行；四项比例分别为策略覆盖 $6/6$、拒绝后无副作用 $2/3$、已执行审批动作精确匹配 $1/1$、必须隔离的执行覆盖 $1/1$。连续复读时补入测试执行环境的配置核验证据，使 $1/1$ 的分子有明确依据。每项只支持当前样例的诊断，不形成通用安全分数。
 - **code_status：** 删除旧 Python 权限沙箱 auditor；正文没有可执行代码，也未运行命令、测试、模型、API 或 benchmark。
 - **formula_status：** 保留四个行内比例和必要手算，分子/分母及零分母 N/A 均有解释；没有固定阈值或聚合 gate。未核验 GitHub MathJax 实际渲染。
 - **visual_status：** 用权限矩阵、控制面表、访问路径表和合成事件账本表达关系；未新增 Mermaid 或图片。
@@ -48,6 +48,7 @@
 
 ## 遗留风险与下一入口
 
+- 2026-11-19 连续复读补充区分角色访问控制与属性访问控制，并为合成账本中的隔离覆盖率增加环境配置核验事实；sandbox ID 仍只作环境关联标识，不单独作为隔离证据。没有新增外部事实，11 月 18 日来源扫描仍适用。
 - 没有目标读者试读；公式页面渲染和所有外链可达性未核验。
 - 本章引用的 Claude Code、OpenAI Agents API 和 Docker 产品文档绑定 2026-11-18 访问时的公开合同；具体平台、工具覆盖、默认值和部署配置后续需要按目标环境复核。
 - 合成账本用于展示定义明确的诊断口径；生产安全审计仍须使用实际执行证据、覆盖所有工具路径与主体，并检查环境与下游状态。

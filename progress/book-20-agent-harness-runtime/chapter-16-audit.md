@@ -64,3 +64,10 @@
 ## 下一入口
 
 [第二十册第十七章《Long-Running Agent 与 Checkpoint》](../../book-20-agent-harness-runtime/chapters/17-long-running-agent与checkpoint.md)。第十六章不展开 checkpoint/幂等内部机制；接续时按用户要求先重读《写作规范/总纲.md》，再重读本章适用模块及当前 progress handoff。
+
+## 连续复读补充（2026-11-19）
+
+- 完整复读本章，并对照第十五章的系统设计方案、第十七章的 checkpoint 深化和第十九章的 harness 归因入口。并发编辑事故仍能区分最早的过期写入与 verifier 漏检；timeout、trace 缺失、注入、循环和环境差异各自落到可核查证据，没有把症状清单变成通用 gate。
+- 统一教学构造中的文件路径、URL/query 字面值、`h0`/`h1`/`h2` 版本标记、`.env` 与 `HEAD` 的行内代码呈现；未改变案例事实、诊断结论、章节边界或配套题目。复用 2026-11-18 的固定研究扫描，未新增外部事实。
+- 本轮静态验收：H2 标题为 16.1—16.10 连续；无代码围栏和行内公式；改动涉及的相关正文/进度/研究文档共检查 523 个本地 Markdown 链接目标，缺失 0；`git diff --check` 通过。未运行代码、SDK、模型、服务、自动化测试或 PDF；未做目标读者试读。
+- 连续复读进度更新为第 16/24 章，下一篇为第十七章《Long-Running Agent 与 Checkpoint》。

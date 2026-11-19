@@ -17,7 +17,7 @@
 
 | 外部主题 | 外部证据与支持内容 | 读者作用/前置 | 修订后的去向 |
 |---|---|---|---|
-| API surface 与端点 | OpenAI API Overview、Chat Completions 和 Responses 参考把 endpoint、schema 与流式对象分开描述；Hugging Face 声明其兼容端点仅面向 chat completion | 读者先确认自己在迁移哪个 endpoint，不能按“OpenAI-compatible”推断全 API 支持 | 22.1 区分客户端/传输、请求/响应形状、服务行为；22.2 要求先固定 endpoint |
+| API surface 与端点 | OpenAI API Overview、Chat Completions 和 Responses 参考把 endpoint、schema 与流式对象分开描述；Hugging Face 分别提供 Chat Completion 和 Responses API (beta)，其指南称 Inference Providers 的 chat-completion 模型应兼容后者 | 读者先确认自己在迁移哪个 endpoint，不能按“OpenAI-compatible”推断全 API 支持或字段语义等价 | 22.1 区分客户端/传输、请求/响应形状、服务行为；22.2 要求先固定 endpoint |
 | 字段、角色和错误方式 | Anthropic 文档列出 system/developer 移位合并、strict 忽略、部分字段静默忽略或 400 | 区分字段出现、被接受与语义保留 | 22.2 说明支持、有条件/转换、不支持、未说明四种记录状态 |
 | 工具和结构化输出 | Anthropic strict 限制；vLLM parallel_tool_calls 与模型行为的条件 | 说明 schema 和工具调用不能仅按字段名对齐；宿主仍负责执行与授权 | 22.3 对齐选择、参数、call ID、并行、结果格式和拒绝，深层工具责任回链第 4、20 章 |
 | 模型与模板 | vLLM Chat Completions 依赖模型 chat template，且 user 会忽略 | 识别同一 server endpoint 下模型/模板仍可改变请求解释 | 22.2 提供固定版本实例；不再泛称所有 provider 都用同样的序列化差异 |
@@ -60,6 +60,14 @@
 - 本审计不记录外部知识结论的替代版本；事实、来源和证据边界保存在 research 记录中。
 - 静态检查状态：已通过。第二十二章 H2 顺序为 22.1—22.7，章节旧公式/占位符扫描为 0，未发现围栏代码；研究记录、正文、审计、目录、练习、面试题、架构地图和总交接中的本地链接目标缺失为 0；35EQ、40AF 条目各唯一；`git diff --check` 通过。
 - 未调用真实 API / SDK，未运行代码、自动化测试或模型；未构建或更新 PDF、未修改 plan.md。
+
+## 连续复读补充（2026-11-19）
+
+按目录连续复读本章，并复核 OpenAI、Anthropic、Google、DeepSeek、vLLM、Alibaba Cloud 和 Hugging Face 的官方文档，以及 arXiv:2611.15543v1 原文。大部分已有字段与边界仍有当前来源支持；没有调用真实 provider endpoint 或 SDK。
+
+Hugging Face Inference Providers 的当前文档已不支持旧稿和本章首轮扫描中“兼容端点仅面向 Chat Completion”的说法：文档现分别列出 Chat Completion 与 Responses API (beta)，且后者称所有该路由下的 chat-completion 模型都应兼容。已在 §22.1 改写，并在研究记录中区分官方 beta 声明与未逐项探测的实际语义；未据此扩写为完全兼容结论。
+
+静态复读：H2 标题 22.1—22.7 连续；无代码围栏或数学表达式；相关本地 Markdown 链接目标缺失 0；练习 35EQ 和面试题 40AF 各出现一次；<code>git diff --check</code> 通过。未运行 API、SDK、代码、模型、自动化测试或 benchmark。
 
 ## 未决事项
 

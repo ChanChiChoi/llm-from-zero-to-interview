@@ -69,17 +69,23 @@
 - **reader_path：** 用同一模型分数变化引出完整配置 → 明确比较问题 → 以 2×2 教学矩阵看平均变化与交互 → 定义 task/trial/trajectory/outcome → 分开 task outcome、harness criteria 和评测装置故障 → 从 trace 提候选原因并验证 → 报告预算与多 Agent 成本 → 检查 benchmark overfit → 比较研究证据的适用范围 → 写可复查 manifest 与报告。
 - **example_status：** 2×2 矩阵是明确的教学构造，四个任务、每格一次计数只用于解释主效应和配对交互，不代表实测、不支持统计显著性，也不估计随机运行波动。
 - **evidence_status：** 每项论文结果均标固定版本、评测对象与限制；Harness-Bench 摘要页和固定 v2 正文任务数冲突时，正文与 research note 注明差异；Trial by Trace 的单 cell 单次选中运行未作为方差证据；HDA 54%/14% 限于该论文方法和显著 search-set 设置；OpenAI 文档限于供应商工作流。
-- **formula_status / code_status：** 不适用。正文无公式、伪代码、可执行代码或本地脚本输出。移除原稿中未定义分母、未经来源支持的指标函数、加权聚合与固定 gate。
+- **formula_status / code_status：** 无作者自拟推导公式或可执行代码；将教学矩阵的成功比例、研究中的百分比/百分点/倍数等 13 项数值写成行内 MathJax，未添加综合得分或新 gate。移除原稿中未定义分母、未经来源支持的指标函数、加权聚合与固定 gate。
 - **visual_status：** 2×2 结果表、比较条件表、结果分层表和 research comparison 表足以表达本章对照；没有流程关系或行为机制必须画 Mermaid 图才能理解的情形。
 - **sync_status：** 更新目录第 19 章摘要，新增练习 35EN 和面试题 40AC，新增本审计和来源记录，更新第二十册架构地图及全局进度交接。简介没有单章摘要，无需改动。未改 plan.md、PDF、术语表或知识图谱。
 
 ## 静态验收与开放风险
 
-- H2 编号 19.1—19.10 连续；章节不含代码围栏、公式定界符、Python toy 声明或固定质量 gate。
+- H2 编号 19.1—19.10 连续；13 个行内 MathJax 表达式共 26 个定界符，均成对；章节不含代码围栏、Python toy 声明或固定质量 gate。
 - 正文、目录、研究记录、章节审计、练习/题库条目、架构审计和本交接共检查 78 个本地 Markdown 链接目标，缺失为 0；第 19 章—第 23 章另外检查 19 个目标，7 个缺失均属于待精修的第 20—23 章，已记入架构审计。章节中不存在旧 Grok 4.20、Gemini 3.8、GLM-5.1、DeepSeek Harness、GPT-5.6 Luna、Qwen3.6 等产品发布小节标题。
 - git diff --check 通过。未做目标读者试读、GitHub 页面渲染或所有外链长期可达性检查。
 - 未运行代码、模型、API、SDK、benchmark、自动化测试或 PDF 构建；未更新 PDF 或 plan.md。
 - 旧稿中无本地来源记录的 GLM-5.1、Qwen3.6-27B 和 Qwen3.6-35B-A3B 数字已移除。若后续任务需要纳入，先保存可复核原始来源和条件，再决定是否服务本章读者目标。
+
+## 连续复读补充（2026-11-19）
+
+- 完整复读本章并复走 §19.3 的模型×harness 交叉教学矩阵，确认主效应与配对交互的解释、实验单位、条件对齐和外推边界相符。对照第九章 Trace、第十章 Evaluation Harness、第十八章 context folding 和第七册统计设计后，章节职责与交接仍成立。
+- 复核 Han 与 Sun 的稀疏 leaderboard 分析、Trial by Trace 的单 cell 单次选择、Do More Agents Help 的任务/成本条件以及 HDA 的方法边界；沿用 2026-11-18 研究记录，没有引入新的外部事实。
+- 按模块 04 将教学比例、百分点、倍数和论文百分数等 13 项数值改成行内 MathJax，保留原数值、分母和来源结论；未增加自拟汇总公式或固定门槛。静态复核：H2 `19.1`—`19.10` 连续；26 个数学定界符配成 13 对；无代码围栏；相关本地 Markdown 链接缺失 0；`git diff --check` 通过。未运行代码、模型、API、SDK、benchmark 或测试；GitHub MathJax 实际页面渲染留作整册终验。
 
 ## 下一入口
 

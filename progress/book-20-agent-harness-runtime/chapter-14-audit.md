@@ -59,3 +59,10 @@
 ## 下一入口
 
 [第二十册第十五章《Agent Harness 系统设计》](../../book-20-agent-harness-runtime/chapters/15-agent-harness系统设计.md)。将本章的 capability discovery、权限和委派边界接入全书架构设计，复核各模块的数据/状态所有权及端到端验收。第二十册第 15—24 章和全套书其余内容继续精修。
+
+## 连续复读补充（2026-11-19）
+
+- 按第二十册目录顺序复读本章，并对照第十三章的产品边界、第十五章的系统设计职责及第二十二册协议主讲位置检查交接；章节结果、目录摘要和跨册分工仍一致。
+- 核对 A2A v1.0.1 的 Task ID 字段后，将表中 `A2A taskId` 改为“远端 Task ID”，并补明 Task 对象与 `GetTask`/`CancelTask` 参数使用字段 `id`、Message/更新事件以 `taskId` 引用同一逻辑标识，以及它与 JSON-RPC 外层请求 `id` 的区别。证据补充至[Agent 协议 Runtime 集成研究记录](../../research/agent-protocol-runtime-integration-evidence-2026-11-18.md)；本次核对限于固定 v1.0.1 官方规范，没有运行 SDK 或服务。
+- 本轮静态验收：H2 标题仍为 14.1—14.15；Markdown 围栏标记 2 个、配成 1 对；本轮检查的正文和维护文件本地链接目标缺失 0；`git diff --check` 通过。未核对 GitHub Mermaid 页面渲染、未试读、未运行协议实现/代码/测试或构建 PDF。
+- 连续复读进度更新为第 14/24 章，下一篇为第十五章《Agent Harness 系统设计》。

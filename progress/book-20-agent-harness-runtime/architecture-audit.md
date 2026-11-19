@@ -1,6 +1,6 @@
 # 第二十册《Agent Harness、Coding Agent Runtime 与智能体工程框架》架构审视
 
-审视日期：2026-11-19。阶段：册级初审、发现扫描、简介与目录重构完成；第 1—24 章章级扫描与首轮精修完成。2026-11-19 开始按目录顺序做整册连续复读，当前完成第 1—6/24 章；第 3 章复读修正一处样例结果笔误、一处比例单位问题及两项练习措辞，第 4 章补齐分项率定义和分母阶段并校正一个版本前置字段名，第 5 章将 stale-write 合成账本分母补入过期回滚请求，第 6 章跨章交接复读未发现正文或结构需修复项。
+审视日期：2026-11-19。阶段：册级初审、发现扫描、简介与目录重构完成；第 1—24 章章级扫描与首轮精修完成。2026-11-19 开始按目录顺序做整册连续复读，当前完成第 1—22/24 章；第 3 章复读修正一处样例结果笔误、一处比例单位问题及两项练习措辞，第 4 章补齐分项率定义和分母阶段并校正一个版本前置字段名，第 5 章将 stale-write 合成账本分母补入过期回滚请求，第 6 章跨章交接复读未发现正文或结构需修复项，第 7 章统一数学比例呈现并让文件摘要例子回到章节主线，第 8 章补齐合成沙箱账本的配置核验证据，第 9 章统一时间线与采样例中的比例 MathJax 呈现，第 10 章统一成功率数学呈现并重写分子/分母口径，第 11 章复核公开产品证据边界并修正路径/命令标记和 OpenTelemetry 定义，第 12 章核对固定源码与权限流程边界并规范字段、路径和包名标记，第 13 章收窄 Aider repo map 效果表述、移除未经承接的 OpenHands SDK 建议并修正工具风险泛化，第 14 章澄清 A2A 远端 Task ID 的字段名与 JSON-RPC 请求关联 ID 的区别，第 15 章区分本地业务任务与协议任务、明确幂等键与请求 ID，并在架构图中补出任务验收边界；第 16 章复读并发编辑诊断案例，规范合成路径、URL 和版本标签呈现；第 17—19 章复核长任务恢复、上下文折叠和 harness 归因边界，第 20 章复核 Responses API 后台 streaming/retention 细节并按 2026-11-19 官方文档补正文和证据，第 21 章复核 workspace 状态所有权和产品环境生命周期条件并按当日官方文档补正文及研究边界；第 22 章发现 Hugging Face Responses API (beta) 当前页面，修正兼容接口仅面向 Chat Completion 的过时概括并同步研究证据边界。
 
 ## 审视范围与方法
 
@@ -93,7 +93,6 @@
 
 13. 第十四章按 MCP `2026-07-28` 与 A2A v1.0.1 官方规范修正协议生命周期边界：区分新版 MCP 无协议会话核心、旧版握手、Draft Tasks extension 与 A2A Task；以订单重试教学构造追踪 MCP 只读发现、A2A AgentCard/委派、身份与本地策略、远端状态、Artifact、本地执行及独立验收。删除原协议覆盖率公式、汇总 gate 和 Python toy audit demo，改为可复走运行轨迹、失败恢复表和无分数评估/回放边界；更新练习 35R 与面试题 40P。详细去向见[第十四章精修审计](chapter-14-audit.md)。
 14. 第十五章完成系统综合设计精修。以合成登录错误修复任务串联任务契约、编排选择、架构责任图、Session/Task/Run/Workspace/Artifact/Effect 状态所有权、Context/Model/Capability 边界、权限/隔离/确认/验收、崩溃恢复、评估与部署。删除原通用模块覆盖公式、聚合系统上线 gate 和长 Python 审计 demo；将原有模块知识保留为一条可追踪设计过程，并把失败结果分为已知、拒绝、基础设施错误和 unknown。章节边界与第 16 章故障排查、第 17/21 章 checkpoint/workspace 专题保持衔接；替换练习 35S 并修订面试题 40C、40Q。详细取舍见[第十五章精修审计](chapter-15-audit.md)，来源证据见[系统设计外部资料记录](../../research/agent-harness-system-design-evidence-2026-11-18.md)。
-14. 第十五章完成系统综合设计精修。以合成登录错误修复任务串联任务契约、编排选择、架构责任图、Session/Task/Run/Workspace/Artifact/Effect 状态所有权、Context/Model/Capability 边界、权限/隔离/确认/验收、崩溃恢复、评估与部署。删除原通用模块覆盖公式、聚合系统上线 gate 和长 Python 审计 demo；将原有模块知识保留为一条可追踪设计过程，并把失败结果分为已知、拒绝、基础设施错误和 unknown。章节边界与第 16 章故障排查、第 17/21 章 checkpoint/workspace 专题保持衔接；替换练习 35S 并修订面试题 40C、40Q。详细取舍见[第十五章精修审计](chapter-15-audit.md)，来源证据见[系统设计外部资料记录](../../research/agent-harness-system-design-evidence-2026-11-18.md)。
 
 15. 第十六章将“实战坑清单”重构为一条并发编辑故障的证据诊断过程：复述契约、对齐 h0/h1/h2 事件、定位过期写入的最早偏离、区分执行故障与 verifier 漏检，再根据是否已派发/已回执/状态 unknown 选择恢复路径。保留权限、上下文、stale edit、命令副作用、注入、trace、eval、循环成本、MCP 工具过载和环境漂移十类主题，改为症状—证据—判断表；删除通用 coverage 公式、综合 pitfall gate 与约 400 行 Python auditor。将原宽泛定义/设计/产品比较问答回链到第 1、4、6—15 章，新增故障排查问答；用一项多步事故复盘练习替换七项跨章重复练习。详细去向见[第十六章精修审计](chapter-16-audit.md)，证据来源见[故障诊断、重试与运行证据记录](../../research/agent-harness-failure-diagnostics-evidence-2026-11-18.md)。
 16. 第十七章从 `task-42` 的 CI 回执迟写和代码审查响应丢失切入，区分模型上下文、Trace、checkpoint、workspace 与服务端状态；保留旧稿的检查点字段、状态机、幂等/提交协议、跨日续跑、版本/租约/预算、故障注入、分母和保留/取消主题，删除任意汇总公式、覆盖阈值及长审计 demo。增加条件写入、outbox/派发、服务方幂等合同、unknown 核查和 fencing 的故障边界；不宣称任意跨系统 exactly-once。补充 Chubby/etcd 原始资料，来源和范围见[checkpoint 与恢复研究记录](../../research/long-running-agent-checkpoint-recovery-evidence-2026-11-18.md)；正文取舍见[第十七章精修审计](chapter-17-audit.md)。同步目录、练习 35EL 和面试题 40AA，下一篇深化 Context Folding。
@@ -106,6 +105,18 @@
 
 22. 第二十四章将 Claude Sonnet 5.5 收窄为一个 Messages API/runtime 合同案例：以合成工单 742 区分 API 消息块、工具实际副作用和任务验收；保留 `between_tools`、原样 thinking/redacted-thinking 回放、model/prefix/account binding、强制 tool choice 限制、拒答类别、beta fallback 与 actual-model 追踪。校正旧稿未经当前文档支持的账号默认值断言，并记录 Platform 指南与官方 Cookbook 对 prefix mismatch 默认边界的差异。将 AA/DeepSWE 快照、价格/context 列表、Computer Use/Advisor/inline-tool 细节和重复 benchmark 条件移出正文；benchmark 归因回链第 19 章，compaction 回链第 18 章，工具/权限回链第 4/8/17 章。保留一段 monitorability 的条件化结论并链接现有 PMLR 研究记录。将 Fable 5.1 thinking-state 候选收束为 Sonnet 5.5 的方向性兼容边界，不新增独立主题。证据见[Sonnet 5.5 研究记录](../../research/model-update-2026-09/claude-sonnet-5.5-source-notes.md)，章节去向和静态验收见[第二十四章审计](chapter-24-audit.md)。同步目录、`BOOK_SERIES.md`、练习 35ES、题库 40AH 和知识图谱。
 
+## 连续复读补充（2026-11-19）
+
+- 第十四章复读未改变章级结构和协议/运行时分工。按 A2A v1.0.1 核对后，在 §14.7 区分远端 Task ID 与具体字段：Task 对象及 `GetTask`/`CancelTask` 参数使用 `id`，Message/更新事件使用 `taskId`，外层 JSON-RPC 请求 `id` 独立承担请求关联。证据补入研究记录；MCP `2026-07-28` 与 A2A v1.0.1 既有扫描仍适用。
+- 第十五章复读沿第十四章协议边界，明确本地 Task 与远端协议任务的标识分开保存；将客户端重试绑定稳定幂等键映射，区分传输请求关联 ID；在架构图中补出读取验收条件和 Artifact 的 Task Verifier，与固定样本 Evaluation Runner 分工清楚。既有 OpenAI、ADK、LangGraph、AWS/Microsoft 和 AOSA 扫描仍覆盖本章，不新增研究发现。
+- 第十六章复读复走并发编辑事故，保留过期整文件写入为最早偏离、测试遗漏任务约束为独立检测缺口；统一合成路径、URL/query 和版本标签的代码呈现。章级研究扫描仍适用，未新增事实或改变职责。
+- 第十七章连续复读沿 `task-42` 检查 CI 已完成但回执迟写与远端创建成功但响应丢失的不同恢复路径，确认 checkpoint、Trace、workspace、服务端事实、`unknown`、幂等合同和 fencing 的边界一致；与第十六章故障诊断、第十八章上下文折叠及第二十一章 workspace 主讲职责衔接清楚。复用 2026-11-18 研究记录，没有发现需改正文或架构的问题。
+- 第十八章连续复读确认 context folding 只改变下一轮模型输入，不改写 transcript、checkpoint、Trace、workspace 或 provider 事实；`task-42` 的约束、授权、revision 绑定结果、来源引用与 `unknown` effect 均有不同的保留/回查路径。它承接第七章输入构造和第十七章长任务状态，并向第十九章评测、第 20/23 章 provider 合同交接，未发现范围或职责断点。
+- 第十九章连续复读确认模型×harness 的比较单位、交叉矩阵与配对交互解释一致；任务 outcome、harness criteria 和评测装置状态分层，Trace 归因仍需独立核查。它承接第十章评测流程与第九章 trace 证据，向第二十章 provider API 合同继续交接；研究结论的分母与外推范围保持明确。
+- 第二十章连续复读确认 Response 终态、output item、宿主工具执行与任务验收保持分层。按 2026-11-19 官方 Background mode/Data controls 文档，补充后台 streaming 仅适用于默认 `soonest` 窗口、`2h`/`8h` 不启用 streaming，以及默认窗口约 10 分钟磁盘暂存和 MAM 的显式 `store=true` 条件；与第二十一章 workspace 所有权边界相接。
+- 第二十一章连续复读确认模型上下文、任务检查点、工作区文件、CI 结果和外部服务各自的事实来源；Git 版本关系、派生检索视图新鲜度、并发编辑冲突及按 revision 绑定的验证/交付形成同一恢复主线。按 OpenAI Agents API 预热环境官方页面收窄多 session 共享行为到新建 standalone environment，避免将旧环境生命周期外推。
+- 第二十二章连续复读确认兼容性要按具体 endpoint 和字段行为记录，而不是由 SDK 调用成功推断全面等价。重新核对发现 Hugging Face 当前同时列出 Chat Completion 和 Responses API (beta)；正文与研究记录现按两个接口面描述，并保留 beta 和未做真实 provider probe 的边界。
+
 ## 开放风险与交接
 
 - 第 21 章移除的 Claude Fable 5.1 provider thinking-state 候选已在第 24 章定向核验：其必要读者价值由 Sonnet 5.5 的 model-binding 兼容边界承接，不单独扩成 Fable 主题。Qwen3.6 source-note 链接仍在第二十一册第 83 章 §83.15，待该册逐章审阅时处理。
@@ -113,4 +124,4 @@
 - 第 1 章原有“0 依赖 Python demo”承诺、9 个固定阈值和约 330 行 toy auditor 已移除；内容改由完整合成修复轨迹、最小伪代码和任务特定验收解释。其余章节中仍有 Python demo 或自动 gate 的部分尚待逐章核验；决定删除代码时须保留必要的过程、数值解释和明确去向。
 - 第 2 章原有运行指标公式及 `G_runtime` 固定门槛已移除；核心观察意图改为记录 session/tenant 隔离、phase 转移、context 来源与新鲜度、adapter/parser/registry 错误、执行回执、恢复/checkpoint 和取消/超时事件，并要求为任何汇总率声明单位和分母。旧的 GPT-5.6 运行时归属快照由 OpenAI 当前公开 Agents API/SDK/Responses API 对比替代；Qwen3.7 Plus region/scope 能力细节待第二十二册第 47 章复核和承接，不能在第二十册正文里留作无去向内容。
 - GitHub 页面公式/图表渲染和全量外链可达性尚未核验；动态产品事实需按每章核验日期固定。
-- **当前入口：** [第二十册整册连续复读](continuous-read.md)，按目录顺序复读第 1—24 章；目前第 1—6 章完成。整册交接、平台呈现与最终门禁仍待处理；第二十四章取舍与静态验收见[章节审计](chapter-24-audit.md)。全套书精修 goal 继续 active。
+- **当前入口：** [第二十册整册连续复读](continuous-read.md)，按目录顺序复读第 1—24 章；目前第 1—22 章完成，下一章为 Gemini Interactions 与 thought-state 回放。整册交接、平台呈现与最终门禁仍待处理；第二十四章取舍与静态验收见[章节审计](chapter-24-audit.md)。全套书精修 goal 继续 active。

@@ -10,7 +10,7 @@
 
 ## 13.1 本章定位
 
-前面两章分别分析了 Claude Code 和 OpenCode。本章继续看 Codex、Cursor、Aider、SWE-agent/mini-SWE-agent 与 OpenHands，并沿一项小任务比较它们：仓库中的 `/api/profile` 对缺失 bearer token 返回 `200`，我们要修为 `401`、增加回归测试，而且不 push。此时不能只问“哪个 Agent 更强”，还要问用户启动的是哪个入口、代码在哪个执行环境、Agent 看到了什么、哪些动作会真的派发，以及结果由什么证据验收。
+前面两章分别分析了 Claude Code 和 OpenCode。本章继续看 Codex、Cursor、Aider、SWE-agent/mini-SWE-agent 与 OpenHands，并沿一项小任务比较它们：仓库中的 `/api/profile` 对缺失 bearer token 返回 HTTP `200`，我们要修为 HTTP `401`、增加回归测试，而且不执行 `git push`。此时不能只问“哪个 Agent 更强”，还要问用户启动的是哪个入口、代码在哪个执行环境、Agent 看到了什么、哪些动作会真的派发，以及结果由什么证据验收。
 
 产品表现受到模型、工具和预算，也受到上下文、编辑方式、权限、执行环境、交互表面与验证流程影响。只看品牌或模型名称，不能判断这些条件是否相同；只把差异统称为 harness，也会把模型和产品的真实差异抹掉。
 
@@ -64,7 +64,7 @@ User / Issue / IDE Selection / CLI Prompt
 
 Codex 不应再被概括为“轻量本地 CLI”。截至本章访问的官方资料，产品入口包括本地 CLI、IDE、desktop，以及在 OpenAI 管理计算机上执行任务的 Codex Cloud；不同入口的可见能力、workspace 与控制边界不能互相代替（[Codex CLI](https://developers.openai.com/codex/cli)、[ChatGPT Work and Codex](https://help.openai.com/en/articles/20001275-chatgpt-work-and-codex)、[Using Codex Cloud](https://help.openai.com/en/articles/20001545-using-codex-cloud)）。
 
-先用一个差异说明为什么 surface 很重要。开发者在本地 CLI 中启动任务时，Codex 的本地工作流面向当前本地仓库；在 Codex Cloud 中，任务会在 OpenAI 管理的计算机和准备好的环境里运行，工作文件位于云端任务 workspace。即使两边都叫 Codex，文件系统、网络、预装依赖和结果交接也可能不同。不能从“Codex 支持云端”推断本地终端命令运行在云上，也不能从本地 workspace-write 推断 Cloud 环境具有相同限制。
+先用一个差异说明为什么 surface 很重要。开发者在本地 CLI 中启动任务时，Codex 的本地工作流面向当前本地仓库；在 Codex Cloud 中，任务会在 OpenAI 管理的计算机和准备好的环境里运行，工作文件位于云端任务 workspace。即使两边都叫 Codex，文件系统、网络、预装依赖和结果交接也可能不同。不能从“Codex 支持云端”推断本地终端命令运行在云上，也不能从本地 `workspace-write` 推断 Cloud 环境具有相同限制。
 
 OpenAI 的本地 sandbox 文档把 `read-only`、`workspace-write` 和 `danger-full-access` 分为不同文件/命令权限模式，并另行说明 approval policy。审批提示影响是否需要用户作决定；sandbox 限定执行能力；自动审批审阅不改变 sandbox 本身的边界（[Sandboxing](https://learn.chatgpt.com/docs/sandboxing)）。具体任务仍要记录实际选用的模式、审批策略和网络设置，不能仅凭产品名判断。
 
@@ -100,14 +100,13 @@ Aider 官方文档把它定位为终端里的 AI pair programming 工具，工�
 
 第一个是 repo map。
 
-Aider 的 repo map 文档说明，它会构建仓库结构摘要，并按 token budget 选择内容提供给模型（[Repository map](https://aider.chat/docs/repomap.html)）。这解决了一个核心问题：大仓库不能全部塞进上下文，但 Agent 又需要知道整体结构。
+Aider 的 repo map 文档说明，它会构建仓库结构摘要，并按 token budget 选择内容提供给模型（[Repository map](https://aider.chat/docs/repomap.html)）。这回应了一个常见上下文问题：大仓库不能全部塞进模型输入，但 Agent 仍需要可用的结构线索。
 
-repo map 的设计目标是：
+对本章的认证修复任务，可以把 repo map 理解为用有限的结构摘要代替展开整份仓库，帮助模型定位值得读取的文件。下面概括的是这种设计意图，不表示本章测得了准确率或效率提升：
 
-1. 让模型看到全仓库的骨架。
-2. 帮助模型判断应该打开哪些文件。
-3. 降低无关上下文浪费。
-4. 让编辑更符合现有抽象。
+1. 在 token 预算内向模型提供仓库结构信息。
+2. 帮助模型找到可能与任务相关的文件。
+3. 避免把完整仓库内容都放入当前上下文。
 
 第二个是 chat modes。
 
@@ -166,7 +165,7 @@ Codex 和 Cursor 的官方文档都分别描述本地与云端路径；Claude Co
 
 ### 用一项修复任务对齐观察点
 
-下面是一项**教学构造**，不是某个产品的运行记录：仓库里 `/api/profile` 对缺失 bearer token 返回了 `200`，目标是修复为 `401` 并加回归测试；改动限于认证处理和相关测试，不创建远端分支、不 push。
+下面是一项**教学构造**，不是某个产品的运行记录：仓库里 `/api/profile` 对缺失 bearer token 返回了 HTTP `200`，目标是修复为 HTTP `401` 并加回归测试；改动限于认证处理和相关测试，不创建远端分支、不执行 `git push`。
 
 为说明如何沿着任务追踪比较，假设初始请求记录是 `Authorization: absent → HTTP 200`，而任务要求它返回 `401`。下表里的动作和回执也都是教学构造，不代表 Codex、Cursor 或任何其他 Agent 的实际输出：
 
@@ -174,10 +173,10 @@ Codex 和 Cursor 的官方文档都分别描述本地与云端路径；Claude Co
 |---|---|---|
 | 1. 定位 | 读取认证 handler 和对应测试；找到当前缺失 token 路径 | 能说明任务上下文是否包含相关实现与验收位置；不能说明 Agent 看过整个仓库 |
 | 2. 提议 | 提议把无凭据请求拒绝，并新增缺 token 回归测试 | 这是模型/Agent 提议；此时还不能说文件已改变 |
-| 3. 派发 | 宿主按授权写入限定文件；push 请求不在允许动作中 | 策略与实际派发分开；被拒绝的 push 不能被当成“没有尝试”或“已有隔离” |
+| 3. 派发 | 宿主按授权写入限定文件；`git push` 请求不在允许动作中 | 策略与实际派发分开；被拒绝的 `git push` 不能被当成“没有尝试”或“已有隔离” |
 | 4. 执行 | 合成测试回执为新增测试通过、有效凭据测试仍通过 | 只说明指定测试在该假设环境中的回执，不证明全部行为正确 |
 | 5. 检查 | 合成 diff 只含认证 handler 与测试；没有远端提交 | diff 支持范围检查；Git/远程副作用仍需结合执行记录核对 |
-| 6. 验收 | 独立检查缺 token 得到 401、有效 token 路径未回归、改动范围符合要求 | 这些条件支持本任务的结果；不能外推为产品整体能力排名 |
+| 6. 验收 | 独立检查缺 token 得到 HTTP `401`、有效 token 路径未回归、改动范围符合要求 | 这些条件支持本任务的结果；不能外推为产品整体能力排名 |
 
 逐步记录这条路径，比只记“任务成功”更有用：它能区分模型建议、宿主决定、真实副作用、测试回执和任务结论。若实际记录缺少某一环，应把它标为 unknown，而不是用最终回答补齐。
 
@@ -188,9 +187,9 @@ Codex 和 Cursor 的官方文档都分别描述本地与云端路径；Claude Co
 | 任务入口 | 本地 CLI、IDE Agent、Cloud task，或由平台承载的 Agent | 用户请求落在哪个 surface？运行代码的主机是谁管理？ |
 | 上下文 | issue 文本、仓库指令、认证 handler、相关测试、用户选区或工具输出 | Agent 看到了哪些输入？有哪些遗漏、陈旧或不可信内容？ |
 | 动作 | 读取文件、编辑补丁、运行指定测试、调用外部服务 | 哪些动作由 Agent 提议，哪些由宿主实际派发？ |
-| 控制边界 | 文件范围、命令审批、sandbox、网络与 secret 设置 | “需要确认”是否和“被隔离”分开？push 是否被单独限制？ |
+| 控制边界 | 文件范围、命令审批、sandbox、网络与 secret 设置 | “需要确认”是否和“被隔离”分开？`git push` 是否被单独限制？ |
 | 结果状态 | diff、测试输出、任务分支、会话事件、错误记录 | 实际改了什么？执行失败和任务失败是否被区分？ |
-| 验收与交接 | 复查缺 token 得到 401、有效 token 行为仍通过、diff 无越界、无 push | 哪些检查证明目标达成？哪些仍需人工审查？ |
+| 验收与交接 | 复查缺 token 得到 HTTP `401`、有效 token 行为仍通过、diff 无越界、无 `git push` | 哪些检查证明目标达成？哪些仍需人工审查？ |
 
 例如，Cloud 任务的测试通过只证明那个准备好的 workspace 中对应测试给出了通过回执；它不会自动证明本地工作区也同步了改动、没有遗漏其他接口，或服务端部署已安全。反过来，本地 IDE 的 diff review 也不能证明远端 CI 环境已重现同一结果。比较时把产物、执行回执与独立验收逐一对应起来。
 
@@ -267,7 +266,7 @@ coding agent 的工具通常包括：
 5. browser、web、MCP。
 6. custom tools 和内部平台工具。
 
-工具越多，能力越强，风险也越大。
+加入工具会扩大 Agent 可以提出的动作，也会增加需要检查授权、隔离和审计的路径。比较时应看各工具实际触及什么资源、在哪里执行，而不是用工具数量推断好坏。
 
 比较权限和执行边界时，至少分开四类机制：
 
@@ -278,7 +277,7 @@ coding agent 的工具通常包括：
 
 产品文档分别展示了不同组合，而不是一个通用的“安全等级”：OpenCode 的 permission 与其自身不提供 Agent sandbox 的边界见第十二章；Codex 文档将 sandbox mode 和 approval policy 分开；Claude Code 的 shell sandbox 只覆盖文档说明的命令路径；Cursor Cloud Agents 的网络与 runtime 也受环境配置影响（[Codex sandboxing](https://learn.chatgpt.com/docs/sandboxing)、[Claude Code sandboxing](https://code.claude.com/docs/en/sandboxing)、[Cursor runtime options](https://cursor.com/docs/cloud-agent/self-hosted/choose-runtime)）。SWE-agent/mini-SWE-agent 是研究 scaffold，不应因“benchmark runner”一词就推断每个环境都能隔离任意副作用。
 
-面试时可以用缺 token 修复任务举例：读取认证文件和写入 patch 是文件权限问题；运行测试是命令派发问题；访问远端 API 是网络权限问题；push 则是新的外部副作用。Prompt 可以表达任务约束，但要限制副作用还需在实际工具派发与执行环境中落实，并留下可检查的回执。
+面试时可以用缺 token 修复任务举例：读取认证文件和写入 patch 是文件权限问题；运行测试是命令派发问题；访问远端 API 是网络权限问题；`git push` 则是新的外部副作用。Prompt 可以表达任务约束，但要限制副作用还需在实际工具派发与执行环境中落实，并留下可检查的回执。
 
 ## 13.16 评估方式对比
 
@@ -319,7 +318,7 @@ coding agent 的评估也分多层。
 | 代码必须留在本机、开发者逐步 review | 本地执行位置、workspace 边界、diff 与撤销方式、测试命令 | Codex CLI、Claude Code CLI、OpenCode、Aider、Cursor 本地 Agent |
 | 编辑器选区和诊断是主要任务上下文 | IDE integration、索引/selection、diff review 和规则来源 | Cursor Agent、Claude Code IDE、Codex IDE、OpenCode IDE |
 | 任务需远程异步执行并交回 patch/branch | 云端机器归属、workspace 生命周期、网络/secret、分支和恢复 | Codex Cloud、Cursor Cloud Agents、Claude Code web/automation、OpenHands Canvas/runtime |
-| 需要固定配置重复跑研究任务 | 项目版本、模型、Agent scaffold、环境初始化、trajectory 与 verifier | mini-SWE-agent、OpenHands SDK；历史 SWE-agent 研究需固定版本 |
+| 需要固定配置重复跑研究任务 | 项目版本、模型、Agent scaffold、环境初始化、trajectory 与 verifier | mini-SWE-agent；OpenHands 需固定 Agent、runtime/backend 与项目 revision；历史 SWE-agent 研究需固定版本 |
 | 需要嵌入既有平台或切换 Agent | API/SDK/ACP 合同、Agent 与执行环境的责任归属、事件和权限映射 | OpenHands Agent Canvas/ACP、OpenCode Server/SDK 及各产品已公开 SDK |
 
 表中只是调研入口，不代表这些对象都满足企业要求，也不构成推荐排名。对任意候选，都要用自己的仓库、权限策略、网络约束和验收标准完成小范围验证；特别注意“产品可提供某能力”不等于“当前租户已启用该能力”。
@@ -357,9 +356,9 @@ coding agent 的评估也分多层。
 | 任务输入 | issue、测试、项目指令、IDE 选区分别如何提供？ | 任务文本、实际可见文件与会话记录 |
 | 模型与配置 | 运行时使用什么模型/provider、配置和预算？ | 产品设置、运行日志；未显示的字段标 unknown |
 | 工作区 | 哪个仓库副本被修改，结果如何交回？ | 本地路径说明、云端 workspace、branch/patch |
-| 动作与边界 | 读取、写入、测试、网络访问和 push 分别受到什么控制？ | permission/approval 配置、sandbox/runtime 文档、执行回执 |
+| 动作与边界 | 读取、写入、测试、网络访问和 `git push` 分别受到什么控制？ | permission/approval 配置、sandbox/runtime 文档、执行回执 |
 | 状态与恢复 | 中断或失败后保留哪些 session、patch、事件或 checkpoint？ | 产品记录和可复查产物；没有记录就注明 unknown |
-| 验收 | 哪个测试或人工 review 判断 401 修复和改动范围？ | verifier 版本、测试结果、diff 与 reviewer 结论 |
+| 验收 | 哪个测试或人工 review 判断 HTTP `401` 修复和改动范围？ | verifier 版本、测试结果、diff 与 reviewer 结论 |
 | 限制 | 哪些条件无法确认，或不满足团队要求？ | 未公开项、文档适用范围、待验证项 |
 
 这张表是记录卡，不计算产品总分。对“支持隔离执行”这样的表述，要追到具体 surface、运行时和策略；对“测试通过”，要写明测试和仓库状态。文档展示可选能力时，具体用户配置依然可能不同。

@@ -98,6 +98,7 @@ flowchart LR
     Events[(事件与 Trace)]
     Artifacts[(Artifact Store)]
     Cases[(固定任务与仓库快照)]
+    Verifier[Task Verifier]
     Eval[Evaluation Runner]
   end
   UI -->|提交任务| API
@@ -105,6 +106,7 @@ flowchart LR
   API -->|排队| Queue
   Queue -->|分配任务| Runtime
   TaskStore -->|加载任务状态| Runtime
+  TaskStore -->|验收条件| Verifier
   Runtime --> Context
   Registry -->|受限能力描述| Context
   Context --> Adapter
@@ -121,23 +123,27 @@ flowchart LR
   Runtime --> Events
   Workspace --> Artifacts
   Runtime --> Artifacts
+  Artifacts -->|补丁与验证回执| Verifier
+  Verifier -->|验收结论| Runtime
   Events -->|进度与结果| UI
   Cases --> Eval
   Artifacts --> Eval
   Eval -->|评估报告| Events
 ```
 
-读图时可以先只跟一条实线：UI 提交任务后，API 验证调用者并保存任务；队列把任务交给 Runtime；Runtime 向模型取回动作提议；Policy 决定哪些动作可执行；Executor 在受限 workspace 或外部连接器中运行它们；结果回到 Runtime，再被写入状态、trace 和 artifact。
+读图时可以先只跟一条实线：UI 提交任务后，API 验证调用者并保存任务；队列把任务交给 Runtime；Runtime 向模型取回动作提议；Policy 决定哪些动作可执行；Executor 在受限 workspace 或外部连接器中运行它们。Runtime 保存实际回执和待验收产物后，Task Verifier 将 Task Store 中的验收条件与 Artifact 中的补丁、测试证据对照，再把结论交回 Runtime 更新任务状态。
 
 每个方框背后不一定对应一个独立服务。单用户 CLI 可以把 API、队列和 Runtime 放进一个进程；团队异步服务通常会拆开。拆分的理由应来自并发、故障隔离、权限或扩缩容要求，而不是图上组件越多越像生产系统。
 
-图中的三个数据出口也不能混为一谈：Task / Session Store 保存当前任务状态和会话关联；事件与 Trace 保存发生顺序和审计证据；Artifact Store 保存补丁、仓库快照或测试产物等较大的交付数据。它们可以部署在相同产品中，但保留期限、访问权限和写入语义不同。
+图中的三个持久化数据出口也不能混为一谈：Task / Session Store 保存当前任务状态和会话关联；事件与 Trace 保存发生顺序和审计证据；Artifact Store 保存补丁、仓库快照或测试产物等较大的交付数据。Task Verifier 读取任务契约与实际产物来判断结果，不是第四种状态存储。它们可以部署在相同产品中，但保留期限、访问权限和写入语义不同。
 
 OpenAI Agents API 的公开架构把托管 Harness、执行环境和 application server 分开，并明确自管环境的启动、重连与清理责任；这可作为一种真实责任划分样本，但不是通用 Harness 的固定组件图。[Architecture](https://developers.openai.com/api/docs/guides/agents-api/architecture)；[Sandbox lifecycle](https://developers.openai.com/api/docs/guides/agents-api/environments/lifecycle)
 
 ## 15.5 把 Session、Task、Run、Workspace 和 Artifact 分开
 
 系统数据模型不是把所有信息塞进一个 session JSON。每类数据要有明确的范围、事实来源和生命周期。
+
+这里的 `Task` 指本地应用层的业务任务，不是 MCP Tasks 扩展句柄或 A2A `Task` 对象。同一业务任务可以关联多个协议请求或远端任务；保存时应保留协议命名空间和各自标识，不能用远端 ID 覆盖本地 `task_id`。跨协议接入边界见[第十四章](14-mcp-a2a与harness集成.md)。
 
 | 对象 | 保存什么 | 它不能单独证明什么 |
 |---|---|---|
@@ -171,7 +177,7 @@ OpenAI Agents API 的公开架构把托管 Harness、执行环境和 application
 
 | 步骤 | 谁在做什么 | 保存或检查的事实 |
 |---|---|---|
-| 1. 接收 | API 验证用户身份、租户、仓库权限和请求字段。 | 用调用者身份生成任务范围；客户端重试应通过同一逻辑请求标识，避免无意创建重复任务。 |
+| 1. 接收 | API 验证用户身份、租户、仓库权限和请求字段。 | 客户端以稳定幂等键重试；服务端按调用者/租户范围持久化键与 Task 的映射，同键重试返回已有 Task。传输层请求 ID 只做关联，不自动保证幂等。 |
 | 2. 固定输入 | Task Store 保存任务契约、仓库基准 revision 和验收器版本。 | 后续能识别任务从哪个代码起点开始，以及计划用什么标准验收。 |
 | 3. 分配执行 | Worker 领取任务，在隔离环境中建立对应 revision 的 workspace。 | 记录 workspace 与 run 的关联、环境镜像或依赖版本和资源预算。 |
 | 4. 构建上下文 | Context Builder 先读取项目规则和相关测试，再根据搜索结果补读登录校验代码。 | 记录来源标识、revision 和截断状态；外部 issue 文本按不可信内容处理。 |
@@ -218,7 +224,7 @@ Orchestrator 则管理有界循环：当前阶段、已完成步骤、最大时�
 
 | 失败点 | 本地已知事实 | 合理的恢复动作 |
 |---|---|---|
-| API 接收后客户端超时 | Task Store 已有相同逻辑请求标识。 | 返回已存在的 task，而不是新建另一个同样的任务。 |
+| API 接收后客户端超时 | Task Store 已持久化该调用者/租户范围内的幂等键与 Task 映射。 | 返回映射到该键的既有 Task；若同一键对应不同请求内容，按明确的冲突规则拒绝复用。 |
 | worker 在只读搜索时崩溃 | 没有发生外部写入；当前 run 未完成。 | 以相同输入和预算重试，保存新的 run 记录。 |
 | 补丁写入 workspace 后崩溃 | 磁盘是否保留取决于环境生命周期；模型输出不能证明文件状态。 | 重新连接或从已保存快照恢复，读取实际 diff，再决定继续或重建。 |
 | 远端服务接受操作但回执丢失 | 外部状态 unknown；本地缺少确认不等于操作没发生。 | 用稳定 operation ID 查询远端状态；确认前不盲目重放。 |

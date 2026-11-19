@@ -18,7 +18,7 @@
 
 这是读文档时的一组检查角度，不是某个协议标准规定的分层。OpenAI 自己也将 Chat Completions、Responses 和其他 API surface 分别列出；Responses 用 typed items 和事件流表达内容，与 Chat Completions 的 message/chunk 结构并不相同。[OpenAI API Overview](https://developers.openai.com/api/reference/overview) [Chat Completions reference](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create) 因此，目标写着“OpenAI-compatible”时，先确认它兼容的是哪个 endpoint、哪种请求和哪类模型。
 
-官方文档给出的范围也不一样。Google 说明其 OpenAI library support 仍处于 beta，并建议新集成直接使用 Gemini API；Hugging Face 的兼容端点目前只面向 chat completion，其他任务应使用自己的 Inference Client。Anthropic 则把 OpenAI SDK compatibility 描述为测试和评估 Claude API 的路径。它们都能降低某些调用改造成本，但不构成一份共同的全功能承诺。[Gemini OpenAI compatibility](https://ai.google.dev/gemini-api/docs/openai) [Hugging Face Inference Providers](https://huggingface.co/docs/inference-providers/index) [Anthropic OpenAI SDK compatibility](https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk)
+官方文档给出的范围也不一样。Google 说明其 OpenAI library support 仍处于 beta，并建议新集成直接使用 Gemini API；Hugging Face 分别列出 OpenAI SDK 兼容的 Chat Completion 接口和 Responses API（beta），后者文档称 Inference Providers 的 chat-completion 模型都应兼容。这个范围声明仍受 beta 状态限制，也没有证明每个字段和模型行为都与 OpenAI 等价。Anthropic 则把 OpenAI SDK compatibility 描述为测试和评估 Claude API 的路径。它们都能降低某些调用改造成本，但不构成一份共同的全功能承诺。[Gemini OpenAI compatibility](https://ai.google.dev/gemini-api/docs/openai) [Hugging Face Chat Completion](https://huggingface.co/docs/inference-providers/tasks/chat-completion) [Hugging Face Responses API（beta）](https://huggingface.co/docs/inference-providers/guides/responses-api) [Anthropic OpenAI SDK compatibility](https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk)
 
 ## 22.2 同名字段可能被支持、改写、忽略或拒绝
 

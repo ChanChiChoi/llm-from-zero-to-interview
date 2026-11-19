@@ -78,3 +78,10 @@
 - git diff --check 通过。
 - 未在 GitHub 确认 Mermaid 渲染；未检查所有外部链接的长期可达性，未做目标读者试读。
 - 未运行书中代码、OpenCode、模型、API、MCP、插件、测试、benchmark 或 PDF 构建；未更新 PDF 或 plan.md。
+
+## 连续复读补记（2026-11-19）
+
+- 沿目录复读第十二章，核对固定版本案例从配置/指令、Agent/工具、权限求值、宿主执行、扩展、Server/API/SDK、Session/Snapshot/compaction 到独立验收的解释链。与第十一章的闭源公开合同案例形成证据方法对照，并将统一维度比较交给第十三章；未发现需要改变章节分工、目录或配套资料的新主题。
+- 规范 HTTP 状态码、路径、版本/revision、配置字段、权限 action/effect、API 类型和 package 名称的代码标记；把 Session 源码路径补全为 `packages/core/src/session.ts`。澄清固定源码“取最后匹配规则”的实现范围，并按官方文档说明 saved approval 不覆盖显式 `deny`、求值为 `deny` 时在 plugin `permission/evaluate` hook 前返回。
+- 复用 2026-11-18 对 OpenCode `v2.3.2` / `c0ad18b` 的版本固定扫描。文档合同、定向源码路径及适用边界未变化；本轮未运行 OpenCode、插件、MCP、API 或测试。
+- 静态验收：正文 Mermaid 围栏标记共 2 行、成对；`git diff --check` 通过；对第 11、12 章正文及相关审计、连续复读、架构和全套进度/研究记录共 8 份 Markdown 检查 479 个本地链接目标，缺失 0。未检查 GitHub 页面图示渲染、未做真实部署审计或目标读者试读。

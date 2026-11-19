@@ -38,6 +38,7 @@
 - `TASK_STATE_AUTH_REQUIRED` 表示任务因需要认证/授权而中断。A2A 允许 agent 将处理授权请求的责任交回 client；协议要求通过带外渠道提供凭据，除非已另行协商扩展/带内机制。该状态不是“本地已批准某项具体副作用”的凭证；调用方仍需在执行点重新确认主体、目标、动作和 scope。
 - CancelTask 表示请求服务端尝试取消；成功并不保证。取消请求不撤销已经发生的外部副作用，Harness 仍需从执行器、对端状态和业务系统读取最终结果。
 - A2A 将自身定位为独立 agent 之间的协作/任务接口，将 MCP 定位为 agent 与工具、API、数据源及其他资源的连接接口。A2A agent 可以在内部使用 MCP，但一个协议不会替另一协议提供其状态、权限或验证语义。
+- 2026-11-19 字段核对：A2A v1.0.1 将远端任务标识在语义说明中称为 `taskId`；Task 对象字段与 JSON-RPC `GetTask`/`CancelTask` 参数字段名为 `id`，Message 和任务更新事件用 `taskId` 引用该任务。它们指向同一逻辑 Task ID，但不是可互换的字段名；外层 JSON-RPC 请求 `id` 又是请求/响应关联标识。[A2A Specification](https://a2a-protocol.org/v1.0.1/specification/) §§ 3.4.2、4.1.1、4.1.4、9.4.3、9.4.5。
 
 ## 可支持与不可外推的集成结论
 

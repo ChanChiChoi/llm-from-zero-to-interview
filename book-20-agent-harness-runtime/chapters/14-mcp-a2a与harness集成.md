@@ -126,8 +126,10 @@ A2A 的 `TASK_STATE_AUTH_REQUIRED` 表示远端任务因需要认证或授权而
 | 本地 Harness `task_id` | 本地 Runtime | 用户目标、约束、验收要求和本地恢复状态 | 不一定等于远端某个协议任务 |
 | MCP JSON-RPC `id` | MCP client | 请求与响应的关联 | 不等于远端业务对象授权 |
 | MCP Task handle | 实现 Tasks 扩展的 MCP server | 一次异步请求的执行状态与结果句柄 | MCP 核心必有的 session 或 A2A Task |
-| A2A `taskId` | A2A server | 远端委派任务 | 本地任务已验收 |
+| A2A 远端 Task ID | A2A server | 远端委派任务 | 本地任务已验收 |
 | A2A `contextId` | A2A server | 一组相关任务与消息的上下文关联 | 本地持久 workspace 或租户授权 |
+
+这里的“远端 Task ID”指同一个逻辑任务标识。A2A v1.0.1 的 Task 对象以及 `GetTask`、`CancelTask` 请求参数将字段写作 `id`；Message 和任务更新事件用 `taskId` 引用它。字段名随对象和操作而异，接入层应保留其协议语义，也不要把它与外层 JSON-RPC 请求的 `id` 混为一谈。[A2A Task 与操作定义](https://a2a-protocol.org/v1.0.1/specification/)
 
 A2A v1.0.1 定义 `SUBMITTED`、`WORKING`、`COMPLETED`、`FAILED`、`CANCELED`、`REJECTED`、`INPUT_REQUIRED` 和 `AUTH_REQUIRED` 等 Task 状态。Harness 可以把这些状态映射到自己的 UI 和恢复状态，但应保留原始状态、远端 Task ID 和更新时间，不能把不同的等待原因都映射成模糊的 `pending` 后丢掉差别。
 

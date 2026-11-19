@@ -28,6 +28,20 @@
   - 证据等级：source-backed（通用 PPO 方法与原论文实验）。
   - 适用边界：clip 是 surrogate objective 的操作，不是硬性的 KL 约束，也不保证参数更新后所有概率比率都在裁剪区间内。PPO 原论文不是语言模型 RLHF 结果；InstructGPT 等工作才将其用于偏好训练。
 
+### PPO 的原始算法动机与语言模型偏好训练的背景
+
+本轮问题与范围：核实 PPO 通用算法的提出背景，并区分它在语言模型人类偏好训练中的优化器角色；不比较 PPO 与现行方法的普遍优劣。检索记录：2026-11-19 使用 web 检索/打开 arXiv 原始论文；检索词包括 “Proximal Policy Optimization Algorithms original paper” 和 “Training language models to follow instructions with human feedback”。
+
+- Schulman et al., “Proximal Policy Optimization Algorithms,” arXiv:1707.06347v2（2017-08-28），[摘要与版本记录](https://arxiv.org/abs/1707.06347)及[论文 PDF](https://arxiv.org/pdf/1707.06347)。本轮于 2026-11-19 阅读摘要、§1、§2.1–2.2 和 §3。来源指出：普通策略梯度直接在同一轨迹上反复优化可能造成过大的策略更新；TRPO 限制新旧策略的 KL 差异，但近似求解受约束目标且实现较复杂；PPO 以 clipped surrogate 和一阶优化来控制更新，同时允许同一批样本进行多个 minibatch epoch。作者把 PPO 定位为较 TRPO 更易实现、在其实验中具有较好 sample complexity 的策略梯度方法；实验包括模拟机器人运动和 Atari。
+  - 证据等级：source-backed（论文摘要和所列实验范围）。
+  - 适用边界：这些是 PPO 通用强化学习算法的提出动机和作者在特定 benchmark 上的报告，不是语言模型偏好训练的证据，也不保证所有任务都更省样本或训练更快。
+- Ouyang et al., “Training language models to follow instructions with human feedback,” arXiv:2203.02155v1（2022），[论文 HTML](https://arxiv.org/html/2203.02155)。本轮于 2026-11-19 复核摘要、引言与方法概述。来源指出，下一 token 语言建模目标与按用户意图提供有帮助、安全的指令回答并不相同；InstructGPT 收集示范做 SFT、收集输出排序训练 reward model，再以 PPO 优化策略。
+  - 证据等级：source-backed（论文摘要、引言和所述训练流程）。
+  - 适用边界：支持该论文说明的模型、提示分布与训练流程；论文也报告 InstructGPT 仍会犯简单错误，不能据此推论 PPO 保证事实性或适用于所有偏好任务。
+- Ziegler et al., “Fine-Tuning Language Models from Human Preferences,” arXiv:1909.08593v2（2020-01-08），[摘要与版本记录](https://arxiv.org/abs/1909.08593)。本轮于 2026-11-19 复核摘要。来源将 reward learning 描述为把人类判断建模成 reward、从而用于自然语言任务的强化学习，并报告了文本续写与摘要实验。
+  - 证据等级：source-backed（论文摘要和指定任务）。
+  - 适用边界：只支持论文所列语言任务与实验；不能推出所有自然语言偏好均能被同一 reward model 准确表示。
+
 ## DPO 与固定偏好数据
 
 - Rafailov et al., “Direct Preference Optimization: Your Language Model is Secretly a Reward Model,” arXiv:2305.18290v3（2024-07-29），[论文 HTML](https://arxiv.org/html/2305.18290)，发表于 NeurIPS 2023。

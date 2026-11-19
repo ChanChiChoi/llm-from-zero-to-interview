@@ -25,7 +25,7 @@
 
 会话是模型交互的记录；工作区是工具读写文件和运行命令的环境。它们可以绑定，也可以分别创建和恢复。一个模型会话结束，不会自动删除或保存文件；恢复了对话，也不保证原来的运行环境、进程或依赖仍在。
 
-OpenAI Agents API 的预热环境文档把 environment 描述为工具运行的 workspace，把 session 描述为 Agent 配置和 conversation。多个 session 可以附着到同一个 environment，共享其中的文件、进程、已安装包和环境配置，但各自保留独立的对话历史。这说明共享工作区和共享对话是两种不同设置；这是该 API 的具体合同，不是所有 Agent 产品的通用规则。[官方文档](https://developers.openai.com/api/docs/guides/agents-api/environments/prewarmed)
+OpenAI Agents API 的预热环境文档把 environment 描述为工具运行的 workspace，把 session 描述为 Agent 配置和 conversation。多个 session 可以附着到同一个 environment，共享其中的文件、进程、已安装包和环境配置，但各自保留独立的对话历史。当前文档将这种多 session 共享行为限定为新建的 standalone environment；旧环境仍可能采用单 session 生命周期。这说明共享工作区和共享对话是两种不同设置；这是该 API 在特定环境版本下的合同，不是所有 Agent 产品的通用规则。[官方文档](https://developers.openai.com/api/docs/guides/agents-api/environments/prewarmed)
 
 产品的恢复期限也必须按具体功能理解。比如，Codex Cloud 帮助文档说明每个 task 使用独立 workspace，同一 task 可以继续；保存的 VM 状态从最近一次启动或恢复起最多有 7 天的恢复窗口。文档同时说明，这个窗口不是对话历史保留期限。[Codex Cloud 文档](https://help.openai.com/en/articles/20001545-using-codex-cloud) 这个例子不能推导出其他产品也保存七天，也不能把 VM、workspace 和 conversation 视作同一份数据。
 

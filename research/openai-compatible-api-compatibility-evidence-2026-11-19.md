@@ -38,7 +38,7 @@
 ### 3. 自托管服务可复用客户端形式，但还受模型与部署实现制约
 
 - [vLLM v0.30.0 OpenAI-Compatible Server](https://docs.vllm.ai/en/v0.30.0/serving/online_serving/openai_compatible_server/)，官方固定版本文档。文档将接口按 `/v1/completions`、`/v1/chat/completions`、`/v1/responses`、embeddings、audio 等分别列出，并限定适用模型类型。Chat Completions 需要文本生成模型和 chat template；该页写明 `user` 被忽略、Completions 的 `suffix` 不支持。额外采样参数可经客户端 `extra_body` 传递；模板配置和模型仓库中的 `generation_config.json` 也会影响实际行为。
-- [Hugging Face Inference Providers](https://huggingface.co/docs/inference-providers/index)，官方在线文档，访问于 2026-11-19。其 OpenAI 兼容端点面向 chat completion，路由器可自动选择 provider；其他任务（如 embeddings、图像或语音）需使用相应的 Inference Client。文档还允许选择或约束 provider，说明兼容路由可能同时包含模型服务选择这一层。
+- [Hugging Face Inference Providers](https://huggingface.co/docs/inference-providers/index)，官方在线文档，访问于 2026-11-19。入口分别列出 [Chat Completion](https://huggingface.co/docs/inference-providers/tasks/chat-completion)、[Responses API (beta)](https://huggingface.co/docs/inference-providers/guides/responses-api) 及其他任务能力。Chat Completion 页面说明它兼容 OpenAI SDK，并支持工具和流式；Responses API (beta) 指南使用 OpenAI SDK `/v1/responses` 路径，并称所有 Inference Providers chat-completion 模型都应与该 API 兼容。默认路由可自动选 provider，也可指定 provider。该兼容范围是访问时的 beta 产品文档声明；不能据此推出 Responses 的所有字段、hosted tools 或各 provider/model 的语义与 OpenAI 全面等价，也不能推导其他任务都须使用同一个客户端。
 - 证据边界：vLLM 的结论固定在 v0.30.0 文档和相应服务实现；Hugging Face 的任务与路由说明是访问时的在线状态。不能推断其他自托管框架、服务版本或模型均相同。
 
 ### 4. 供应商扩展、地区和具体模型可能改变可移植性

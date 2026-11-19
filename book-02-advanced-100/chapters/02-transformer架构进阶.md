@@ -32,17 +32,17 @@ flowchart LR
 
 ### 11.1 一个 token 怎样读取其他 token
 
-设一段序列的表示矩阵为 X∈R^(T×d)，T 是序列长度，d 是模型宽度。对一个 head，线性投影得到：
+设一段序列的表示矩阵为 $X\in\mathbb{R}^{T\times d}$， $T$ 是序列长度， $d$ 是模型宽度。对一个 head，线性投影得到：
 
 ~~~math
-Q=XW_Q,\qquad K=XW_K,\qquad V=XW_V
+Q=XW_{Q},\qquad K=XW_{K},\qquad V=XW_{V}
 ~~~
 
 
-其中 Q、K、V∈R^(T×d_h)，d_h 是单个 head 的维度。注意力分数、归一化权重和输出分别为：
+其中 $Q$、 $K$、 $V\in\mathbb{R}^{T\times d_{h}}$， $d_{h}$ 是单个 head 的维度。注意力分数、归一化权重和输出分别为：
 
 ~~~math
-S=\frac{QK^\mathsf T}{\sqrt{d_h}},
+S=\frac{QK^\mathsf T}{\sqrt{d_{h}}},
 \qquad
 A=\mathrm{softmax}_{\mathrm{row}}(S),
 \qquad
@@ -53,26 +53,26 @@ O=AV
 第 i 行的输出可以展开为：
 
 ~~~math
-O_i=\sum_{j=1}^{T}A_{ij}V_j
+O_{i}=\sum_{j=1}^{T}A_{ij}V_{j}
 ~~~
 
 
-A_ij 表示当前位置 i 从位置 j 读取多少 value。它不是固定卷积核，而是由当前输入内容决定的权重矩阵。
+$A_{ij}$ 表示当前位置 $i$ 从位置 $j$ 读取多少 value。它不是固定卷积核，而是由当前输入内容决定的权重矩阵。
 
 初学者可以把 Q 理解为“我现在想找什么”，把 K 理解为“我能被什么查询匹配”，把 V 理解为“匹配成功后真正提供的内容”。这三个比喻有助于读公式，但 Q/K/V 并不是人工规定的语义字段，而是通过训练学出来的投影空间。
 
 ### 11.2 为什么要除以平方根
 
-如果 Q 和 K 的每个维度均值接近 0、方差接近 1，那么点积是 d_h 个乘积之和，其方差大致随 d_h 增长。维度越大，未经缩放的 logits 越容易进入 softmax 的饱和区。
+如果 $Q$ 和 $K$ 的每个维度均值接近 $0$、方差接近 $1$，那么点积是 $d_{h}$ 个乘积之和，其方差大致随 $d_{h}$ 增长。维度越大，未经缩放的 logits 越容易进入 softmax 的饱和区。
 
-softmax 饱和会让一两个位置获得几乎全部概率，其他位置梯度很小，训练早期尤其不稳定。除以 √d_h 的作用是把分数尺度拉回可学习范围，而不是人为规定“每个 head 只能看多少位置”。
+softmax 饱和会让一两个位置获得几乎全部概率，其他位置梯度很小，训练早期尤其不稳定。除以 $\sqrt{d_{h}}$ 的作用是把分数尺度拉回可学习范围，而不是人为规定“每个 head 只能看多少位置”。
 
 数值实现还会在 softmax 前减去每行最大值：
 
 ~~~math
-\mathrm{softmax}(s)_j
-=\frac{\exp(s_j-\max_k s_k)}
-{\sum_u\exp(s_u-\max_k s_k)}
+\mathrm{softmax}(s)_{j}
+=\frac{\exp(s_{j}-\max_{k} s_{k})}
+{\sum_{u}\exp(s_{u}-\max_{k} s_{k})}
 ~~~
 
 
@@ -80,15 +80,15 @@ softmax 饱和会让一两个位置获得几乎全部概率，其他位置梯度
 
 ### 11.3 Attention matrix 是动态路由图
 
-A∈R^(T×T) 可以看成一张随输入变化的有向加权图：第 i 行是从查询位置 i 指向所有来源位置的边权。标准 dense attention 让所有位置对都有候选边；causal mask 则删除指向未来的边。
+$A\in\mathbb{R}^{T\times T}$ 可以看成一张随输入变化的有向加权图：第 $i$ 行是从查询位置 $i$ 指向所有来源位置的边权。标准 dense attention 让所有位置对都有候选边；causal mask 则删除指向未来的边。
 
 如果第 i 个 token 需要找到前文中某个实体、变量定义或约束，它可以通过 Q 与候选 K 的内容匹配，把权重集中到相关位置。与固定窗口卷积相比，attention 的连接模式依赖内容；与 RNN 相比，远处位置可以在一层内直接交互，不必经过逐时间步的隐藏状态传递。
 
-这也解释了 attention 的代价：每个查询都要和 T 个 key 比较，天然产生 T×T 的交互表。
+这也解释了 attention 的代价：每个查询都要和 $T$ 个 key 比较，天然产生 $T\times T$ 的交互表。
 
 ### 11.4 因果 mask 改变的是信息流
 
-自回归模型在训练时一次处理整段序列，但位置 i 不能读取未来位置 j>i。设未加 mask 的分数为 S，则：
+自回归模型在训练时一次处理整段序列，但位置 $i$ 不能读取未来位置 $j>i$。设未加 mask 的分数为 $S$，则：
 
 ~~~math
 \widetilde S_{ij}
@@ -108,14 +108,14 @@ softmax 后，未来位置的权重为零。mask 必须在 softmax 之前施加�
 多头注意力把模型宽度切成多个子空间：
 
 ~~~math
-\mathrm{head}_h
-=\mathrm{Attention}(XW_Q^{(h)},XW_K^{(h)},XW_V^{(h)})
+\mathrm{head}_{h}
+=\mathrm{Attention}(XW_{Q}^{(h)},XW_{K}^{(h)},XW_{V}^{(h)})
 ~~~
 
 
 ~~~math
 \mathrm{MHA}(X)
-=\mathrm{Concat}(\mathrm{head}_1,\ldots,\mathrm{head}_H)W_O
+=\mathrm{Concat}(\mathrm{head}_{1},\ldots,\mathrm{head}_{H})W_{O}
 ~~~
 
 
@@ -148,7 +148,7 @@ attention 权重可以告诉我们某一层、某一个 head 在聚合 value 时
 现代 Transformer 常把每个子层看成对主干表示的增量更新。以 Pre-Norm 为例：
 
 ~~~math
-x_{l+1}=x_l+\mathrm{Attention}(\mathrm{Norm}(x_l))
+x_{l+1}=x_{l}+\mathrm{Attention}(\mathrm{Norm}(x_{l}))
 ~~~
 
 
@@ -161,13 +161,13 @@ attention 负责跨位置的信息混合，MLP 负责每个位置的特征变换
 
 ### 把分数、权重和输出手算一遍
 
-使用本讲代码中的最后一个 query `q=[0.1,0.9]`、三个 key `k₀=[1,0]`、`k₁=[0,1]`、`k₂=[0.2,0.8]`，head 维度为 2。除以 `√2` 后的分数约为 `[0.0707,0.6364,0.5233]`。减去最大值再取指数，未归一化权重约为 `[0.568,1,0.893]`，除以总和 `2.461` 得到 `[0.2308,0.4063,0.3629]`。
+使用本讲代码中的最后一个 query $q=[0.1,0.9]$、三个 key $k_{0}=[1,0]$、 $k_{1}=[0,1]$、 $k_{2}=[0.2,0.8]$，head 维度为 $2$。除以 $\sqrt{2}$ 后的分数约为 $[0.0707,0.6364,0.5233]$。减去最大值再取指数，未归一化权重约为 $[0.568,1,0.893]$，除以总和 $2.461$ 得到 $[0.2308,0.4063,0.3629]$。
 
-把它们乘回三个 value `[10,0]`、`[0,10]`、`[3,7]`：第一维约 `0.2308×10+0.3629×3=3.397`，第二维约 `0.4063×10+0.3629×7=6.603`。于是读出的向量是 `[3.397,6.603]`。这一计算把“相关性”与“内容”分开：分数只决定读取比例，真正聚合的是 V；如果本位置是序列首 token，因果 mask 会令后两个位置权重为零，不能因为它们的内容匹配就读取未来。
+把它们乘回三个 value $[10,0]$、 $[0,10]$、 $[3,7]$：第一维约 $0.2308\times10+0.3629\times3=3.397$，第二维约 $0.4063\times10+0.3629\times7=6.603$。于是读出的向量是 $[3.397,6.603]$。这一计算把“相关性”与“内容”分开：分数只决定读取比例，真正聚合的是 $V$；如果本位置是序列首 token，因果 mask 会令后两个位置权重为零，不能因为它们的内容匹配就读取未来。
 
 ### 11.9 一个纯 Python 的单头实现
 
-输入为列表形式的 Q、K `[T,d_h]` 和 V `[T,d_v]`；函数返回输出 `[T,d_v]` 与路由权重 `[T,T]`。下面的代码用列表实现小规模 causal attention，适合手工检查每一步。它没有使用高效矩阵库，所以只用于教学。
+输入为列表形式的 $Q$、 $K$（形状为 $[T,d_{h}]$）和 $V$（形状为 $[T,d_{v}]$）；函数返回输出（形状为 $[T,d_{v}]$）与路由权重（形状为 $[T,T]$）。下面的代码用列表实现小规模 causal attention，适合手工检查每一步。它没有使用高效矩阵库，所以只用于教学。
 
 ~~~python
 import math
@@ -248,7 +248,7 @@ assert all(routes[i][j] < 1e-8 for i in range(3) for j in range(i + 1, 3))
 
 > **代码状态：静态审阅，未运行（2026-10-29）**
 
-最后一个断言验证了因果性。对给定的最后一个 query，路由权重约为 `[0.2308, 0.4063, 0.3629]`，聚合输出约为 `[3.3965, 6.6035]`。真正的 Transformer 还需要多头投影、batch 维、位置编码、残差、归一化和高效 kernel；这段代码只把“分数—mask—权重—value 聚合”这条主线显式化。
+最后一个断言验证了因果性。对给定的最后一个 query，路由权重约为 $[0.2308,0.4063,0.3629]$，聚合输出约为 $[3.3965,6.6035]$。真正的 Transformer 还需要多头投影、batch 维、位置编码、残差、归一化和高效 kernel；这段代码只把“分数—mask—权重—value 聚合”这条主线显式化。
 
 ### 11.10 从一次读取到模型行为
 
@@ -264,44 +264,44 @@ assert all(routes[i][j] < 1e-8 for i in range(3) for j in range(i + 1, 3))
 
 ### 12.1 复杂度从哪里来
 
-单个 head 的 Q、K、V 形状为 T×d_h。计算 QK^T 和 AV 的主要乘法量分别约为：
+单个 head 的 $Q$、 $K$、 $V$ 形状为 $T\times d_{h}$。计算 $QK^\top$ 和 $AV$ 的主要乘法量分别约为：
 
 ~~~math
-C_{QK}=O(T^2d_h),\qquad C_{AV}=O(T^2d_h)
+C_{QK}=O(T^2d_{h}),\qquad C_{AV}=O(T^2d_{h})
 ~~~
 
 
-H 个 head 合起来可近似写成 O(T²d_model)。Q/K/V 投影和输出投影是 O(Td_model²)，在短序列、大宽度模型中也可能占很大比例，但长上下文的独特瓶颈是 T²。
+$H$ 个 head 合起来可近似写成 $O(T^2d_{\mathrm{model}})$。 $Q/K/V$ 投影和输出投影是 $O(Td_{\mathrm{model}}^2)$，在短序列、大宽度模型中也可能占很大比例，但长上下文的独特瓶颈是 $T^2$。
 
 长度从 4K 变成 32K，T 增加 8 倍，交互数增加 64 倍。若把 32K 解释为 32,768、把 1M 解释为 1,000,000，交互数约增加 931 倍；若两者都按二进制单位理解（32 Ki tokens 与 1 Mi tokens），则增加 1,024 倍。比较上下文长度时应写清单位约定。这个数量级足以说明：把窗口声明得很大，必须同时说明采用了什么注意力结构、训练方式和推理成本。
 
 ### 12.2 训练显存与推理显存
 
-训练反向传播需要保存或重算中间值。若直接保存 attention logits 或 probabilities，形状通常是 [B,H,T,T]。单个 head、T=32768 时约有：
+训练反向传播需要保存或重算中间值。若直接保存 attention logits 或 probabilities，形状通常是 $[B,H,T,T]$。单个 head、 $T=32768$ 时约有：
 
 ~~~math
 32768^2=1,073,741,824
 ~~~
 
 
-个元素。即使每个元素 2 字节，也约 2 GiB，还未计入 batch、多头、反向保存和临时 buffer。FlashAttention 通过分块和在线 softmax 避免把完整矩阵写回高层显存，但并没有让精确 dense attention 的数学交互数消失；这是 IO 与中间存储优化，不是稀疏连接。其算法和适用边界见 [FlashAttention](https://arxiv.org/abs/2205.14135) 与 [FlashAttention-2](https://arxiv.org/abs/2307.08691)。
+个元素。即使每个元素占 $2$ 字节，也约 $2\ \mathrm{GiB}$，还未计入 batch、多头、反向保存和临时 buffer。FlashAttention 通过分块和在线 softmax 避免把完整矩阵写回高层显存，但并没有让精确 dense attention 的数学交互数消失；这是 IO 与中间存储优化，不是稀疏连接。其算法和适用边界见 [FlashAttention](https://arxiv.org/abs/2205.14135) 与 [FlashAttention-2](https://arxiv.org/abs/2307.08691)。
 
 自回归解码有另一种瓶颈。使用 KV Cache 后，第 t 步的新 query 仍需读取前 t 个 key/value，单步读量随 t 增长；缓存本身大致需要：
 
 ~~~math
 M_{\mathrm{KV}}
-=2BLT H_{\mathrm{KV}}d_h s
+=2BLT H_{\mathrm{KV}}d_{h} s
 ~~~
 
 
-其中 B 是 batch，L 是层数，T 是缓存长度，H_KV 是 K/V head 数，d_h 是 head dimension，s 是每个元素的字节数，2 表示 K 与 V。GQA/MQA 会直接缩小 H_KV，分页管理则减少碎片和调度浪费。
+其中 $B$ 是 batch， $L$ 是层数， $T$ 是缓存长度， $H_{\mathrm{KV}}$ 是 K/V head 数， $d_{h}$ 是 head dimension， $s$ 是每个元素的字节数， $2$ 表示 K 与 V。GQA/MQA 会直接缩小 $H_{\mathrm{KV}}$，分页管理则减少碎片和调度浪费。
 
 ### 12.3 局部和滑动窗口注意力
 
 如果每个位置只关注 w 个邻近位置，交互量近似为：
 
 ~~~math
-C_{\mathrm{window}}=O(Twd_h)
+C_{\mathrm{window}}=O(Twd_{h})
 ~~~
 
 
@@ -319,7 +319,7 @@ Longformer 和 BigBird 分别展示了局部/全局与块状稀疏模式；这�
 
 ### 12.5 低秩和线性 attention
 
-若认为 attention 交互矩阵存在可压缩结构，可以用低秩投影、landmark token 或 kernel feature map 减少显式 T×T 计算。Performer 是随机特征近似路线的代表，线性 attention 的抽象形式是：
+若认为 attention 交互矩阵存在可压缩结构，可以用低秩投影、landmark token 或 kernel feature map 减少显式 $T\times T$ 计算。Performer 是随机特征近似路线的代表，线性 attention 的抽象形式是：
 
 ~~~math
 \mathrm{Attention}(Q,K,V)
@@ -344,7 +344,7 @@ Longformer 和 BigBird 分别展示了局部/全局与块状稀疏模式；这�
 
 ### 12.7 加 mask 不等于省计算
 
-如果实现仍然构造完整 T×T logits，只是把远处位置设为负无穷，数学结果可能是稀疏的，底层乘法却仍然是 dense。要真正降低计算，需要：
+如果实现仍然构造完整 $T\times T$ logits，只是把远处位置设为 $-\infty$，数学结果可能是稀疏的，底层乘法却仍然是 dense。要真正降低计算，需要：
 
 1. 让 kernel 只读取保留的块；
 2. 使用专门的 sliding-window 或 block-sparse 实现；
@@ -353,7 +353,7 @@ Longformer 和 BigBird 分别展示了局部/全局与块状稀疏模式；这�
 
 ### 12.8 一个量级估算
 
-函数输入序列长度、batch、head、层数、窗口和 head dimension 等正整数，输出单层 score/window 交互数及 BF16 显存估算。下面的结果按 batch=1 计算：score 数是单层 dense attention 的矩阵元素上界，显存按未融合的 BF16 score 矩阵估算；KV Cache 则按给定层数和 KV heads 估算。因果 kernel 可能利用三角结构，FlashAttention 也不会物化完整 score 矩阵，所以这些数字不是实际峰值显存或 profiler 结果。
+函数输入序列长度、batch、head、层数、窗口和 head dimension 等正整数，输出单层 score/window 交互数及 BF16 显存估算。下面的结果按 $B=1$ 计算：score 数是单层 dense attention 的矩阵元素上界，显存按未融合的 BF16 score 矩阵估算；KV Cache 则按给定层数和 KV heads 估算。因果 kernel 可能利用三角结构，FlashAttention 也不会物化完整 score 矩阵，所以这些数字不是实际峰值显存或 profiler 结果。
 
 ~~~python
 def gibibytes(elements, bytes_per_element=2):
@@ -391,9 +391,9 @@ for length in [4096, 32768]:
 
 > **代码状态：静态审阅，未运行（2026-10-29）**
 
-例如 batch=1、32 heads、32 层、8 个 KV heads、head_dim=128 时，4K 输入对应单层未融合 score 约 1 GiB、KV Cache 约 0.5 GiB；32K 时分别约 64 GiB 和 4 GiB。窗口设为 4K 时，32K 的窗口交互上界约 8 GiB。它们是按公式计算的容量账本，不是实际峰值；真实显存还包括权重、激活、通信 buffer、allocator 碎片和并发请求。
+例如 $B=1$、 $32$ 个 heads、 $32$ 层、 $8$ 个 KV heads、 $d_{h}=128$ 时， $T=4\mathrm{K}$ 输入对应单层未融合 score 约 $1\ \mathrm{GiB}$、KV Cache 约 $0.5\ \mathrm{GiB}$； $T=32\mathrm{K}$ 时分别约 $64\ \mathrm{GiB}$ 和 $4\ \mathrm{GiB}$。窗口设为 $w=4\mathrm{K}$ 时， $T=32\mathrm{K}$ 的窗口交互上界约 $8\ \mathrm{GiB}$。它们是按公式计算的容量账本，不是实际峰值；真实显存还包括权重、激活、通信 buffer、allocator 碎片和并发请求。
 
-再单独算一个更容易检查的窗口例子。令 T=8192、窗口 w=512，单个 head 的 dense 候选交互数是 8192×8192=67,108,864；窗口内的候选数是 8192×512=4,194,304，正好少 16 倍。若把完整分数矩阵物化为 BF16，前者要 128 MiB，32 个 head 合计 4 GiB；窗口矩阵则是 8 MiB/头、256 MiB/层。这个比较只估算矩阵元素，因果三角、分块 kernel、反向保存和 batch 都会改变实际占用。它说明“窗口减少了候选边”是结构收益，“显存恰好降到 1/16”则只有在实现确实按窗口计算并且其他开销可忽略时才成立。
+再单独算一个更容易检查的窗口例子。令 $T=8{,}192$、窗口 $w=512$，单个 head 的 dense 候选交互数是 $8{,}192\times8{,}192=67{,}108{,}864$；窗口内的候选数是 $8{,}192\times512=4{,}194{,}304$，正好少 $16$ 倍。若把完整分数矩阵物化为 BF16，前者要 $128\ \mathrm{MiB}$， $32$ 个 head 合计 $4\ \mathrm{GiB}$；窗口矩阵则是 $8\ \mathrm{MiB}$/头、 $256\ \mathrm{MiB}$/层。这个比较只估算矩阵元素，因果三角、分块 kernel、反向保存和 batch 都会改变实际占用。它说明“窗口减少了候选边”是结构收益，“显存恰好降到 $1/16$”则只有在实现确实按窗口计算并且其他开销可忽略时才成立。
 
 近年的线性序列模型研究也没有沿着“attention 与 SSM 二选一”单线推进。例如 Log-Linear Attention 讨论在固定状态和显式二次交互之间保留中间形式；Gated DeltaNet-2 研究输入相关的擦除与写入门控。论文报告的速度、质量和规模结论都绑定其模型大小、数据、硬件与任务，不构成普遍胜出证据。读这类工作时要把它们放回本节的四种问题：是否改了连接/状态表示、节省了什么、损失可能出现在哪里、真实 kernel 是否兑现理论成本。[Log-Linear Attention](https://arxiv.org/abs/2506.04761)、[Gated DeltaNet-2](https://arxiv.org/abs/2605.22791)。
 
@@ -426,7 +426,7 @@ needle-in-a-haystack 可以作为入口，但它只测一种检索形式，不�
 一个残差子层可以抽象为：
 
 ~~~math
-x_{l+1}=x_l+F_l(x_l)
+x_{l+1}=x_{l}+F_{l}(x_{l})
 ~~~
 
 
@@ -454,15 +454,15 @@ Pre-LN 保留了较直接的 identity path。即使子层 F 的梯度不理想�
 
 Post-LN 让每层输出尺度被 norm 约束，在浅层模型和原始 Transformer 配置中可以工作；Xiong 等人的分析与实验显示，深层设置下它对初始化和 warmup 更敏感。它不是错误架构，而是在该类设置下深度扩展的工程裕量较小；其他结构仍需按目标配置验证。
 
-可以用局部 Jacobian 看出两个位置为何不能互换。Pre-LN 的导数近似为 $I+J_FJ_N$，Post-LN 则为 $J_N(I+J_F)$；矩阵乘法通常不交换，且后者把整个 residual sum 放进 norm 的变换中。用一维局部近似 $J_F=0.5$、$J_N=0.8$，Pre-LN 得 $1+0.5\times0.8=1.4$，Post-LN 得 $0.8(1+0.5)=1.2$。这不是两种架构训练质量的预测，而是说明梯度路径会因运算顺序而变；深层时逐层复合的差异会继续累积。
+可以用局部 Jacobian 看出两个位置为何不能互换。Pre-LN 的导数近似为 $I+J_{F}J_{N}$，Post-LN 则为 $J_{N}(I+J_{F})$；矩阵乘法通常不交换，且后者把整个 residual sum 放进 norm 的变换中。用一维局部近似 $J_{F}=0.5$、 $J_{N}=0.8$，Pre-LN 得 $1+0.5\times0.8=1.4$，Post-LN 得 $0.8(1+0.5)=1.2$。这不是两种架构训练质量的预测，而是说明梯度路径会因运算顺序而变；深层时逐层复合的差异会继续累积。
 
 ### 13.4 Sandwich-LN 和额外控制
 
 Sandwich-LN 的一种抽象形式是：
 
 ~~~math
-x_{l+1}=x_l+\mathrm{Norm}_2
-\left(F_l(\mathrm{Norm}_1(x_l))\right)
+x_{l+1}=x_{l}+\mathrm{Norm}_{2}
+\left(F_{l}(\mathrm{Norm}_{1}(x_{l}))\right)
 ~~~
 
 
@@ -470,16 +470,16 @@ x_{l+1}=x_l+\mathrm{Norm}_2
 
 ### 13.5 DeepNorm 与 residual scaling
 
-若每层都加入增量 Δx_l，则：
+若每层都加入增量 $\Delta x_{l}$，则：
 
 ~~~math
-x_L=x_0+\sum_{l=1}^{L}\Delta x_l
+x_{L}=x_{0}+\sum_{l=1}^{L}\Delta x_{l}
 ~~~
 
 
 深度变大时，增量累积可能使表示或梯度失控。DeepNorm/DeepNet 的核心思想是让 residual 缩放和初始化随深度配套设计，从而控制累积效应。应把它理解为一组架构与初始化规则，而不是简单在某一行代码乘一个常数；论文给出的系数依赖网络形态和深度，见 [DeepNet](https://arxiv.org/abs/2203.00555)。
 
-论文中的具体系数依赖 encoder/decoder、层数和残差定义。移植时需要核对公式、参数初始化、学习率和最终 norm，不能只复制一个 α。
+论文中的具体系数依赖 encoder/decoder、层数和残差定义。移植时需要核对公式、参数初始化、学习率和最终 norm，不能只复制一个 $\alpha$。
 
 2026 年 ICML 的 SpanNorm 延续了“残差通路与归一化位置需要联合设计”这条思路：它保留 PreNorm 的直接残差路径，同时在 residual 输出端加入 PostNorm 式归一化，并配合缩放策略。作者报告了对深层 dense 与 MoE Transformer 的理论和实验结果；这些结论仍绑定论文模型与设置，不应当成新的通用默认项。它适合作为 Pre-LN/Post-LN 之外的研究案例，帮助读者理解架构设计空间仍在变化。[SpanNorm](https://proceedings.mlr.press/v306/chao26b.html)
 
@@ -542,23 +542,23 @@ for scale in [1.0, 0.25, 0.125]:
 
 假设一次训练检查发现第 8、16、24 层的分支/主干范数比分别为 0.04、0.05、0.22，而这些层的梯度范数是 0.9、0.95、2.4。不能只因第 24 层的比值最大就认定 Pre-LN 失稳：要先确认该层是否刚好遇到更长输入、特定 batch 或 loss spike，再检查同一批样本的参数更新比率和验证损失。若长样本上比值突增而短样本稳定，可能是输入长度或激活分布与深度共同作用；若所有长度在相同层突增，则更该检查初始化、归一化参数和优化器状态。
 
-这种诊断也说明了几种方案的证据顺序。先确认实现使用了预期的 norm 位置和 residual scaling，再观察前向尺度，随后查看梯度与更新，最后比较任务质量和计算成本。若 DeepNorm 把发散率从 3/5 个随机种子降到 0/5，却多花了 8% 训练时间，应将稳定收益和额外成本同时报告；五个种子仍不足以证明所有规模都稳定。只有把机制、局部信号和最终任务放在同一实验中，才能判断改动解决的是梯度传递、表示尺度还是数据问题。
+这种诊断也说明了几种方案的证据顺序。先确认实现使用了预期的 norm 位置和 residual scaling，再观察前向尺度，随后查看梯度与更新，最后比较任务质量和计算成本。若 DeepNorm 把发散率从 $3/5$ 个随机种子降到 $0/5$，却多花了 $8\%$ 训练时间，应将稳定收益和额外成本同时报告；五个种子仍不足以证明所有规模都稳定。只有把机制、局部信号和最终任务放在同一实验中，才能判断改动解决的是梯度传递、表示尺度还是数据问题。
 
 ## 14. LayerNorm、RMSNorm、ScaleNorm 与统计维度
 
 ### 14.1 LayerNorm 的统计对象
 
-对一个 token 的 hidden vector x∈R^d，LayerNorm 在 hidden 维度上计算均值和方差；公式采用总体方差约定，学习到的 γ、β 是逐维参数。LayerNorm 的原始定义见 [Layer Normalization](https://arxiv.org/abs/1607.06450)：
+对一个 token 的 hidden vector $x\in\mathbb{R}^d$，LayerNorm 在 hidden 维度上计算均值和方差；公式采用总体方差约定，学习到的 $\gamma$、 $\beta$ 是逐维参数。LayerNorm 的原始定义见 [Layer Normalization](https://arxiv.org/abs/1607.06450)：
 
 ~~~math
-\mu=\frac{1}{d}\sum_{i=1}^{d}x_i,
+\mu=\frac{1}{d}\sum_{i=1}^{d}x_{i},
 \qquad
-\sigma^2=\frac{1}{d}\sum_{i=1}^{d}(x_i-\mu)^2
+\sigma^2=\frac{1}{d}\sum_{i=1}^{d}(x_{i}-\mu)^2
 ~~~
 
 
 ~~~math
-y_i=\gamma_i\frac{x_i-\mu}{\sqrt{\sigma^2+\epsilon}}+\beta_i
+y_{i}=\gamma_{i}\frac{x_{i}-\mu}{\sqrt{\sigma^2+\epsilon}}+\beta_{i}
 ~~~
 
 
@@ -566,15 +566,15 @@ y_i=\gamma_i\frac{x_i-\mu}{\sqrt{\sigma^2+\epsilon}}+\beta_i
 
 ### 14.2 RMSNorm 做了什么
 
-RMSNorm 只控制向量的均方根；这里采用 ε 加在均方根平方项中的常见写法，原论文的定义与实验见 [RMSNorm](https://arxiv.org/abs/1910.07467)：
+RMSNorm 只控制向量的均方根；这里采用 $\varepsilon$ 加在均方根平方项中的常见写法，原论文的定义与实验见 [RMSNorm](https://arxiv.org/abs/1910.07467)：
 
 ~~~math
-r(x)=\sqrt{\frac{1}{d}\sum_{i=1}^{d}x_i^2+\epsilon}
+r(x)=\sqrt{\frac{1}{d}\sum_{i=1}^{d}x_{i}^2+\epsilon}
 ~~~
 
 
 ~~~math
-y_i=\gamma_i\frac{x_i}{r(x)}
+y_{i}=\gamma_{i}\frac{x_{i}}{r(x)}
 ~~~
 
 
@@ -585,11 +585,11 @@ y_i=\gamma_i\frac{x_i}{r(x)}
 ScaleNorm 使用一个可学习标量按向量 L2 范数缩放，论文中的研究结论来自特定机器翻译设置，不能直接推广为所有 LLM 都更快或更准，见 [Transformers without Tears](https://arxiv.org/abs/1910.05895)：
 
 ~~~math
-y=g\frac{x}{\lVert x\rVert_2+\epsilon}
+y=g\frac{x}{\lVert x\rVert_{2}+\epsilon}
 ~~~
 
 
-其中 g 通常是一个可学习标量。与 RMSNorm 的逐维 γ 相比，ScaleNorm 对各维的可调自由度更少，强调整体向量尺度。
+其中 $g$ 通常是一个可学习标量。与 RMSNorm 的逐维 $\gamma$ 相比，ScaleNorm 对各维的可调自由度更少，强调整体向量尺度。
 
 ### 14.4 为什么 BatchNorm 不常用于 decoder LLM
 
@@ -597,15 +597,15 @@ BatchNorm 的统计跨 batch 或空间维度，语言模型的动态 batch、pad
 
 ### 14.5 epsilon 与精度
 
-ε 既影响除零保护，也影响小方差时的归一化尺度。过小可能在低精度下不稳定，过大则会让归一化偏离原本的统计量。替换 norm 时应固定或记录 ε、参数精度、累积精度和 kernel 实现。
+$\varepsilon$ 既影响除零保护，也影响小方差时的归一化尺度。过小可能在低精度下不稳定，过大则会让归一化偏离原本的统计量。替换 norm 时应固定或记录 $\varepsilon$、参数精度、累积精度和 kernel 实现。
 
 ### 14.6 norm 参数的 weight decay
 
-norm 的 γ/β 主要控制尺度和平移，通常从 weight decay 参数组中排除；这是经验配置，不是普适定理。若模型包含特殊 norm、门控 scale 或 adapter，应按参数功能和对照实验决定。
+norm 的 $\gamma/\beta$ 主要控制尺度和平移，通常从 weight decay 参数组中排除；这是经验配置，不是普适定理。若模型包含特殊 norm、门控 scale 或 adapter，应按参数功能和对照实验决定。
 
 ### 14.7 一个无框架比较
 
-为突出归一化统计量，下面令 LayerNorm/RMSNorm 的逐维 γ=1、β=0，并把 ScaleNorm 的目标范数设为 2；代码不模拟可学习 affine 参数。
+为突出归一化统计量，下面令 LayerNorm/RMSNorm 的逐维 $\gamma=1$、 $\beta=0$，并把 ScaleNorm 的目标范数设为 $2$；代码不模拟可学习 affine 参数。
 
 ~~~python
 import math
@@ -676,27 +676,27 @@ for name, function in [
 
 输入是长度 d 的有限向量，三个函数都返回相同长度的归一化向量。对 `[5, 6, 4, 5]`，LayerNorm 的输出均值为 0、RMS 和 L2 范数分别约为 1 和 2；RMSNorm 与 ScaleNorm 的均值约 0.9901，RMS 约 1，L2 约 2。三者控制的统计量不同，不能只看“输出看起来都差不多”就认为等价。
 
-用更小的向量手算差异：取 $x=[1,3]$。LayerNorm 的均值为 2、总体方差为 1，忽略很小的 ε 后输出约为 `[-1,1]`；RMSNorm 的尺度是 $\sqrt{(1^2+3^2)/2}=\sqrt5\approx2.236$，输出约 `[0.447,1.342]`，均值仍约 0.894；目标 L2 范数为 2 的 ScaleNorm 输出约 `[0.632,1.897]`。因此 LN 去掉共同偏移并按方差缩放，RMSNorm 保留均值而控制能量，ScaleNorm 只控制整体长度。代码把 affine 参数设为单位值，是在比较核心统计，不是在排名训练后的模型。
+用更小的向量手算差异：取 $x=[1,3]$。LayerNorm 的均值为 $2$、总体方差为 $1$，忽略很小的 $\varepsilon$ 后输出约为 $[-1,1]$；RMSNorm 的尺度是 $\sqrt{(1^2+3^2)/2}=\sqrt{5}\approx2.236$，输出约 $[0.447,1.342]$，均值仍约 $0.894$；目标 L2 范数为 $2$ 的 ScaleNorm 输出约 $[0.632,1.897]$。因此 LN 去掉共同偏移并按方差缩放，RMSNorm 保留均值而控制能量，ScaleNorm 只控制整体长度。代码把 affine 参数设为单位值，是在比较核心统计，不是在排名训练后的模型。
 
 归一化的统计轴是实现契约。输入张量若是 `[batch, sequence, hidden]`，常见 decoder norm 对每个 token 的最后一维单独计算。可固定 token 向量 $x=[5,6,4,5]$，先单独计算，再与另一个序列拼 batch、补 padding、改变 batch 顺序后重算；有效 token 的输出应一致。若输出变化，优先检查统计轴、padding 是否混入、fused kernel 的维度广播和自定义布局。相反，若实现按 batch 或 sequence 轴统计，改变同批样本便会改变归一化结果，训练和单 token decode 的行为可能不一致。
 
-ε 的影响在向量尺度很小时最明显。取 $x=[0,10^{-4}]$、$\epsilon=10^{-5}$，LayerNorm 方差约 $2.5\times10^{-9}$，尺度 $\sqrt{\sigma^2+\epsilon}\approx0.00316$，输出约 `[-0.0158,0.0158]`；若忽略 ε，输出会接近 `[-1,1]`。RMSNorm 使用平方均值加 ε，得到尺度约 0.00316，输出约 `[0,0.0316]`。若代码把 ε 加在平方根外、放进平方根内，或者参数精度不同，小向量下的结果会变化；检查定义、默认值和累积精度比只看函数名更可靠。
+$\varepsilon$ 的影响在向量尺度很小时最明显。取 $x=[0,10^{-4}]$、 $\epsilon=10^{-5}$，LayerNorm 方差约 $2.5\times10^{-9}$，尺度 $\sqrt{\sigma^2+\epsilon}\approx0.00316$，输出约 $[-0.0158,0.0158]$；若忽略 $\varepsilon$，输出会接近 $[-1,1]$。RMSNorm 使用平方均值加 $\varepsilon$，得到尺度约 $0.00316$，输出约 $[0,0.0316]$。若代码把 $\varepsilon$ 加在平方根外、放进平方根内，或者参数精度不同，小向量下的结果会变化；检查定义、默认值和累积精度比只看函数名更可靠。
 
-训练时 norm 统计与参数也会影响后续表示。LN 有逐维 γ/β，RMSNorm 通常有逐维 γ 而无 β，ScaleNorm 则以少量标量控制整体长度；这些参数训练后不再是单位映射。若替换 norm，除了输入输出数值，还需检查残差尺度、激活 RMS、更新幅度和目标 logits，并说明是从头训练、转换权重还是继续训练。常见实践会把 norm 参数排除在 weight decay 之外，但这属于训练配方，应随目标配置验证。
+训练时 norm 统计与参数也会影响后续表示。LN 有逐维 $\gamma/\beta$，RMSNorm 通常有逐维 $\gamma$ 而无 $\beta$，ScaleNorm 则以少量标量控制整体长度；这些参数训练后不再是单位映射。若替换 norm，除了输入输出数值，还需检查残差尺度、激活 RMS、更新幅度和目标 logits，并说明是从头训练、转换权重还是继续训练。常见实践会把 norm 参数排除在 weight decay 之外，但这属于训练配方，应随目标配置验证。
 
 精度与性能要分开归因。可将固定向量分别用 FP32 和目标 dtype 计算，记录均值、RMS、最大绝对误差及输出 logits 差异；再对目标 GPU 比较 fused/unfused 的训练、长 prompt prefill 和单 token decode。LayerNorm 多计算减均值，并不必然比 RMSNorm 慢；融合和内存读写可能盖过算术差异。若低精度下出现异常，要沿均值/方差累积、平方根、缩放参数与残差分支检查首个误差放大点，不能把 norm 当作自动消除异常值的保险。
 
 ### 14.8 平移、尺度和极端分量
 
-再用 $x=[1,3]$ 看共同偏移：LayerNorm 对 $[1,3]$ 与 $[6,8]$ 都得到约 `[-1,1]`，因为均值一起平移，中心化结果不变；RMSNorm 对前者输出约 `[0.447,1.342]`，对后者的 RMS $\sqrt{50}\approx7.071$，输出约 `[0.849,1.131]`。RMSNorm 保留均值方向，所以相同相对差异叠在更大的共同偏移上时，归一化方向不同。若把 `[1,3]` 乘以 2，忽略 ε 时 RMSNorm 输出不变，显示它对共同正尺度近似不敏感。
+再用 $x=[1,3]$ 看共同偏移：LayerNorm 对 $[1,3]$ 与 $[6,8]$ 都得到约 $[-1,1]$，因为均值一起平移，中心化结果不变；RMSNorm 对前者输出约 $[0.447,1.342]$，对后者的 RMS $\sqrt{50}\approx7.071$，输出约 $[0.849,1.131]$。RMSNorm 保留均值方向，所以相同相对差异叠在更大的共同偏移上时，归一化方向不同。若把 $[1,3]$ 乘以 $2$，忽略 $\varepsilon$ 时 RMSNorm 输出不变，显示它对共同正尺度近似不敏感。
 
-极端分量会把整个向量一起拉动。取 `[0,0,0,10]`，LayerNorm 的均值为 2.5、标准差约 4.330，输出约 `[-0.577,-0.577,-0.577,1.732]`；RMSNorm 的 RMS 为 5，输出 `[0,0,0,2]`。异常值不仅改变自己的位置，也改变其他维度的相对尺度；但 norm 没有把异常信息删除，只是按统计量重新缩放。排查某层爆点时，要比较归一化前后的分位数、最大值及残差主干，而不能只看 norm 后 RMS 被拉回 1。
+极端分量会把整个向量一起拉动。取 $[0,0,0,10]$，LayerNorm 的均值为 $2.5$、标准差约 $4.330$，输出约 $[-0.577,-0.577,-0.577,1.732]$；RMSNorm 的 RMS 为 $5$，输出 $[0,0,0,2]$。异常值不仅改变自己的位置，也改变其他维度的相对尺度；但 norm 没有把异常信息删除，只是按统计量重新缩放。排查某层爆点时，要比较归一化前后的分位数、最大值及残差主干，而不能只看 norm 后 RMS 被拉回 $1$。
 
 这两组计算给出选择 norm 时更准确的问题：目标是移除共同偏移、稳定整体能量，还是减少特定统计步骤？如果模型依赖表示中的共同偏移，LN 与 RMSNorm 会保留不同信息；若极端维度主导统计，两者都会耦合其他特征。ScaleNorm 更少参数，但只调向量总长度。公式说明各自做了什么，是否有助于目标模型仍要匹配权重、训练预算和评估切片验证。
 
-在迁移已训练模型时，不应只把 LN 调用替换成 RMSNorm 并期待现有权重仍适配。需要明确是否保留 affine 参数、γ 的初始化/迁移方式、β 是否删除、ε 取值，以及最终 norm 的变化；接着做固定样本 logits 对照和继续训练，再跑语言建模与下游任务回归。若目标只是推理加速，还要先 profile 现有 kernel，证明瓶颈在 norm 而非 attention、MLP 或显存读写。这样归一化选择才能和实际系统问题对上。
+在迁移已训练模型时，不应只把 LN 调用替换成 RMSNorm 并期待现有权重仍适配。需要明确是否保留 affine 参数、 $\gamma$ 的初始化/迁移方式、 $\beta$ 是否删除、 $\varepsilon$ 取值，以及最终 norm 的变化；接着做固定样本 logits 对照和继续训练，再跑语言建模与下游任务回归。若目标只是推理加速，还要先 profile 现有 kernel，证明瓶颈在 norm 而非 attention、MLP 或显存读写。这样归一化选择才能和实际系统问题对上。
 
-Affine 参数会重新塑造归一化后的向量。对前面的 LN 输出 `[-1,1]`，若取逐维 $\gamma=[2,0.5]、\beta=[1,-1]$，结果为 `[-1,-0.5]`；输出均值不再是 0。因而部署时不能只校验“norm 后均值为零”，还要加载训练后的 γ/β 和最终 norm 顺序。训练器通常把这些参数放进单独 weight-decay 组，但不同 recipe 会有差异；复现 checkpoint 应读取实际 optimizer parameter groups，而不是凭常见习惯推断。
+Affine 参数会重新塑造归一化后的向量。对前面的 LN 输出 $[-1,1]$，若取逐维 $\gamma=[2,0.5]、\beta=[1,-1]$，结果为 $[-1,-0.5]$；输出均值不再是 $0$。因而部署时不能只校验“norm 后均值为零”，还要加载训练后的 $\gamma/\beta$ 和最终 norm 顺序。训练器通常把这些参数放进单独 weight-decay 组，但不同 recipe 会有差异；复现 checkpoint 应读取实际 optimizer parameter groups，而不是凭常见习惯推断。
 
 BatchNorm 的困难则是统计量跨样本或空间位置共享：训练时一个 token 的结果可能依赖同批其他样本，增量 decode 时 batch 组成又会不断变化。相反，按 hidden 维独立计算的 norm 能让单 token 推理与变长 batch 使用一致定义；这也是第 14.7 的 batch 重排测试不仅是数值单测，还涉及服务的请求隔离。
 
@@ -718,7 +718,7 @@ Transformer block 通常交替包含 attention 和 MLP。attention 让不同位�
 
 ### 15.2 参数量与计算量
 
-普通 FFN 从 d_model 扩展到 d_ff，再投影回来，两个主要矩阵的参数量近似为：
+普通 FFN 从 $d_{\mathrm{model}}$ 扩展到 $d_{\mathrm{ff}}$，再投影回来，两个主要矩阵的参数量近似为：
 
 ~~~math
 P_{\mathrm{FFN}}
@@ -726,7 +726,7 @@ P_{\mathrm{FFN}}
 ~~~
 
 
-每个 token 的矩阵乘法量也与 d_model d_ff 成正比。若 d_ff=4d_model，参数量约为 8d_model²；一个带 Q/K/V/O 四个投影的 attention 模块约为 4d_model²。因此在许多 dense Transformer 中，MLP 的参数和 FLOPs 都不容忽略。
+每个 token 的矩阵乘法量也与 $d_{\mathrm{model}}\times d_{\mathrm{ff}}$ 成正比。若 $d_{\mathrm{ff}}=4d_{\mathrm{model}}$，参数量约为 $8d_{\mathrm{model}}^2$；一个带 $Q/K/V/O$ 四个投影的 attention 模块约为 $4d_{\mathrm{model}}^2$。因此在许多 dense Transformer 中，MLP 的参数和 FLOPs 都不容忽略。
 
 ### 15.3 激活函数的架构含义
 
@@ -784,7 +784,7 @@ P_{\mathrm{SwiGLU}}\approx3d_{\mathrm{model}}h
 ~~~
 
 
-要与普通 d_ff=4d_model 的 FFN 参数量 8d_model² 接近，需要：
+要与普通 $d_{\mathrm{ff}}=4d_{\mathrm{model}}$ 的 FFN 参数量 $8d_{\mathrm{model}}^2$ 接近，需要：
 
 ~~~math
 3d_{\mathrm{model}}h\approx8d_{\mathrm{model}}^2
@@ -824,9 +824,9 @@ for d_model in [1024, 4096]:
 
 > **代码状态：静态审阅，未运行（2026-10-29）**
 
-函数把参数量归一到 $d_{model}^2$，因此 GeLU 两矩阵 FFN 约为 $8d_{model}^2$，参数匹配后的 SwiGLU 也接近这个数量。以 $d_{model}=4096$ 为例，GeLU 用 $d_{ff}=16384$ 得 134,217,728 个权重；SwiGLU 用 $h=10923$ 得 134,221,824 个权重，只差 4,096，约 0.003%。若用 BF16 存储，单层这部分权重约 256 MiB；梯度、优化器状态、激活和切分填充还要另算。这个算例说明 8/3 是容量匹配近似，不代表两种网络有相同的表达或运行速度。
+函数把参数量归一到 $d_{\mathrm{model}}^2$，因此 GeLU 两矩阵 FFN 约为 $8d_{\mathrm{model}}^2$，参数匹配后的 SwiGLU 也接近这个数量。以 $d_{\mathrm{model}}=4096$ 为例，GeLU 用 $d_{\mathrm{ff}}=16{,}384$ 得 $134{,}217{,}728$ 个权重；SwiGLU 用 $h=10{,}923$ 得 $134{,}221{,}824$ 个权重，只差 $4{,}096$，约 $0.003\%$。若用 BF16 存储，单层这部分权重约 $256\ \mathrm{MiB}$；梯度、优化器状态、激活和切分填充还要另算。这个算例说明 $8/3$ 是容量匹配近似，不代表两种网络有相同的表达或运行速度。
 
-用 $u=2$ 固定内容支路，再改变控制值 $g$：$g=0$ 时 $u\mathrm{SiLU}(g)=0$；$g=2$ 时约为 3.524；$g=-2$ 时约为 -0.477。控制支路不是二值开关，而是连续地压低、放大或反向调制内容。MLP 在每个位置共享投影，但输入已含 attention 汇集的上下文；因此相同参数可以随语境产生不同变换。解释具体知识时，要固定输入条件做激活干预并看任务输出，不能把某个中间维直接命名为一条事实。
+用 $u=2$ 固定内容支路，再改变控制值 $g$： $g=0$ 时 $u\mathrm{SiLU}(g)=0$； $g=2$ 时约为 3.524； $g=-2$ 时约为 -0.477。控制支路不是二值开关，而是连续地压低、放大或反向调制内容。MLP 在每个位置共享投影，但输入已含 attention 汇集的上下文；因此相同参数可以随语境产生不同变换。解释具体知识时，要固定输入条件做激活干预并看任务输出，不能把某个中间维直接命名为一条事实。
 
 近期研究继续从不同方向改造固定激活。预印本 [PowLU](https://arxiv.org/abs/2605.25704) 针对 SwiGLU 大正值区间近似二次增长、低精度训练中可能放大异常值的问题，提出增长更缓的 rational-power 激活；作者在 Ling 的 7.9B 总参数 MoE（600B 训练 token）与 124B 总参数 MoE（800B token）设置中报告了预训练结果。[MoA](https://arxiv.org/abs/2605.26647) 则以输入相关门控混合多个激活函数，复用线性投影；论文摘要报告了 0.12B—2B dense 与 MoE 模型实验。两者面向的问题不同，模型规模和实验协议不可横向排名；这些作者结果足以说明它们是研究候选，不足以替代已验证的默认激活，也不能把收益单独归因于激活函数。
 
@@ -834,13 +834,13 @@ for d_model in [1024, 4096]:
 
 ### 15.8 门控输出为零，梯度也可能非零
 
-对 $h=u\mathrm{SiLU}(g)$，内容支路的导数是 $\partial h/\partial u=\mathrm{SiLU}(g)$，控制支路的导数是 $\partial h/\partial g=u\,\sigma(g)[1+g(1-\sigma(g))]$。沿用 $u=2$、$g=0$，此时 $h=0$，但 $\partial h/\partial g=1$。所以某次前向恰好得到零门控输出，不等于该通道不学习；反过来，负输入下 SiLU 的局部导数也可能为负。训练诊断要同时看前向激活、反向梯度和自然输入中的任务影响，不能只把“非零激活比例”当作活跃度。
+对 $h=u\mathrm{SiLU}(g)$，内容支路的导数是 $\partial h/\partial u=\mathrm{SiLU}(g)$，控制支路的导数是 $\partial h/\partial g=u\,\sigma(g)[1+g(1-\sigma(g))]$。沿用 $u=2$、 $g=0$，此时 $h=0$，但 $\partial h/\partial g=1$。所以某次前向恰好得到零门控输出，不等于该通道不学习；反过来，负输入下 SiLU 的局部导数也可能为负。训练诊断要同时看前向激活、反向梯度和自然输入中的任务影响，不能只把“非零激活比例”当作活跃度。
 
 这个导数还解释了为什么 gate 与 content 两条投影需要一起分析。若 $u$ 很大，即使 $\mathrm{SiLU}(g)$ 中等，输出和对 gate 的梯度都可能被放大；若 $u$ 接近零，gate 有变化也未必影响最终隐藏向量。对真实模型可以固定一组 token，分别扰动 $u$ 与 $g$ 所在分支，比较门控前后的激活分布和目标 logit；再用同一输入做分支消融，区分相关性与因果贡献。
 
 ### 15.9 从参数数转到训练资源
 
-参数量匹配并不意味着中间激活占用相同。取 2,048 个有效 token、BF16，普通 FFN 的 $d_{ff}=16,384$ 中间张量约为 $2,048\times16,384\times2=64$ MiB；SwiGLU 的 $h=10,923$，up 和 gate 两路投影各约 42.7 MiB，若同时物化便约 85.3 MiB。融合 kernel、激活重算、并行切分和反向保存策略会改变峰值，所以这只是中间张量账本，不等于整层训练显存。
+参数量匹配并不意味着中间激活占用相同。取 $2{,}048$ 个有效 token、BF16，普通 FFN 的 $d_{\mathrm{ff}}=16{,}384$ 中间张量约为 $2{,}048\times16{,}384\times2=64\ \mathrm{MiB}$；SwiGLU 的 $h=10{,}923$，up 和 gate 两路投影各约 $42.7\ \mathrm{MiB}$，若同时物化便约 $85.3\ \mathrm{MiB}$。融合 kernel、激活重算、并行切分和反向保存策略会改变峰值，所以这只是中间张量账本，不等于整层训练显存。
 
 这也说明对照实验要区分参数、计算、激活和实际时间。两个矩阵的普通 FFN 与三矩阵 SwiGLU 可通过调整 hidden width 匹配主要权重和矩阵乘法；但门控激活多出逐元素运算，并可能需要读写两路中间结果。测量时固定有效 token 数和 dtype，记录显存峰值、kernel 数、吞吐与 loss；若只匹配参数而忽略中间张量，无法回答更大的 SwiGLU 激活是否适合目标 batch 和硬件。
 
@@ -867,10 +867,10 @@ for d_model in [1024, 4096]:
 把 hidden vector 的相邻两个维度看成二维平面。位置 i 的旋转矩阵为：
 
 ~~~math
-R(\theta_i)=
+R(\theta_{i})=
 \begin{bmatrix}
-\cos\theta_i&-\sin\theta_i\\
-\sin\theta_i&\cos\theta_i
+\cos\theta_{i}&-\sin\theta_{i}\\
+\sin\theta_{i}&\cos\theta_{i}
 \end{bmatrix}
 ~~~
 
@@ -878,17 +878,17 @@ R(\theta_i)=
 对 query 和 key 分别应用：
 
 ~~~math
-q_i'=R(\theta_i)q_i,\qquad
-k_j'=R(\theta_j)k_j
+q_{i}'=R(\theta_{i})q_{i},\qquad
+k_{j}'=R(\theta_{j})k_{j}
 ~~~
 
 
-旋转矩阵满足正交性质 R(θ_i)^T R(θ_j)=R(θ_j−θ_i)，因此：
+旋转矩阵满足正交性质 $R(\theta_{i})^\top R(\theta_{j})=R(\theta_{j}-\theta_{i})$，因此：
 
 ~~~math
-(q_i')^\mathsf Tk_j'
-=q_i^\mathsf T
-R(\theta_j-\theta_i)k_j
+(q_{i}')^\mathsf Tk_{j}'
+=q_{i}^\mathsf T
+R(\theta_{j}-\theta_{i})k_{j}
 ~~~
 
 
@@ -896,19 +896,19 @@ R(\theta_j-\theta_i)k_j
 
 ### 16.3 频率与位置
 
-通常第 r 个二维子空间的角度与位置 i 和频率 ω_r 的乘积有关。一个常见约定是令频率基数 Θ>1、维度为偶数，并取 r=0,…,d_h/2−1：
+通常第 $r$ 个二维子空间的角度与位置 $i$ 和频率 $\omega_{r}$ 的乘积有关。一个常见约定是令频率基数 $\Theta>1$、维度为偶数，并取 $r=0,\ldots,d_{h}/2-1$：
 
 ~~~math
-\theta_{i,r}=i\omega_r
+\theta_{i,r}=i\omega_{r}
 ~~~
 
 
 ~~~math
-\omega_r=\Theta^{-2r/d_h}
+\omega_{r}=\Theta^{-2r/d_{h}}
 ~~~
 
 
-不同频率提供不同周期。高频对短距离变化敏感，低频变化慢，更适合表示较长距离。基数 θ、维度配对顺序和实现布局需要与模型配置保持一致；RoPE 的旋转构造见 [RoFormer](https://arxiv.org/abs/2104.09864)。实际实现还要考虑数据类型和 kernel。
+不同频率提供不同周期。高频对短距离变化敏感，低频变化慢，更适合表示较长距离。基数 $\theta$、维度配对顺序和实现布局需要与模型配置保持一致；RoPE 的旋转构造见 [RoFormer](https://arxiv.org/abs/2104.09864)。实际实现还要考虑数据类型和 kernel。
 
 ### 16.4 RoPE 与长度泛化
 
@@ -967,11 +967,11 @@ for i, j in [(1, 4), (3, 6), (2, 9)]:
 
 输入为两个二维向量和位置频率，函数返回旋转后的二维向量；三个位置对的绝对位置点积与相对位移点积逐项相等，示例数值包括 −0.63111691 和 −0.24694281。这个二维例子只验证旋转矩阵的代数性质，不代表完整 LLM 的长度能力。真正的 RoPE 还包括多频率维度、批量计算、缓存和精度处理。
 
-手算一个角度关系：令 q=k=[1,0]，query 在位置 i、key 在位置 j，频率取 1 弧度/位置。若 i=j，相对相位为 0，点积是 1；若 j−i=π/3，旋转后的点积为 cos(π/3)=0.5。把两个位置同时平移 5，位移仍是 π/3，点积依旧 0.5。这说明点积带有相对相位差，但不表示模型天然理解任意距离。真实 RoPE 使用多个频率，长距离时相位会绕转；位置插值或频率缩放改变模型经历的相位分布，仍要测量实际任务表现。
+手算一个角度关系：令 $q=k=[1,0]$，query 在位置 $i$、key 在位置 $j$，频率取 $1$ 弧度/位置。若 $i=j$，相对相位为 $0$，点积是 $1$；若 $j-i=\pi/3$，旋转后的点积为 $\cos(\pi/3)=0.5$。把两个位置同时平移 $5$，位移仍是 $\pi/3$，点积依旧 $0.5$。这说明点积带有相对相位差，但不表示模型天然理解任意距离。真实 RoPE 使用多个频率，长距离时相位会绕转；位置插值或频率缩放改变模型经历的相位分布，仍要测量实际任务表现。
 
 ### 16.7 位置扩展的回归方案
 
-位置扩展需要分开回答三个问题：接口能否接收目标长度；注意力计算是否仍能给远处证据合理分数；最终回答能否正确使用证据。最大可运行长度只回答第一个问题。插值会压缩位置范围、频率缩放会改变不同维度的相位变化；这两种变换可能让短文本仍然流畅，同时让长距离证据排序或中间位置引用退化。因此不能用单一最大窗口数字代替有效长度曲线。复现实验时要绑定 rotary dimension、频率 base 与排列、position id、缩放方法和多轮拼接策略；频率 $ω_r$ 是每个位置累积的弧度，实际角度是 $θ_{i,r}=iω_r$。
+位置扩展需要分开回答三个问题：接口能否接收目标长度；注意力计算是否仍能给远处证据合理分数；最终回答能否正确使用证据。最大可运行长度只回答第一个问题。插值会压缩位置范围、频率缩放会改变不同维度的相位变化；这两种变换可能让短文本仍然流畅，同时让长距离证据排序或中间位置引用退化。因此不能用单一最大窗口数字代替有效长度曲线。复现实验时要绑定 rotary dimension、频率 base 与排列、position id、缩放方法和多轮拼接策略；频率 $ω_{r}$ 是每个位置累积的弧度，实际角度是 $θ_{i,r}=iω_{r}$。
 
 构造回归集时，固定权重、提示模板和答案，只移动一条可核验事实的位置，例如分别放在 4K、8K 和 32K 附近，并把它轮换到输入开头、中间、末尾；同时加入相似诱饵和需要合并的第二条约束。先测训练长度以内的 perplexity/任务基线，再测训练长度附近是否平滑退化，最后报告各距离的召回、答案引用和延迟。只有一个关键词的 needle test 会把“找到字符串”误当成“整合证据”，因此还要包含多证据和长代码依赖。
 
@@ -997,12 +997,12 @@ ALiBi 在 attention logits 上加入距离相关的线性偏置；原论文的�
 
 ~~~math
 \widetilde S_{ij}
-=\frac{q_i^\mathsf Tk_j}{\sqrt{d_h}}
--m_h(i-j),\qquad j\le i
+=\frac{q_{i}^\mathsf Tk_{j}}{\sqrt{d_{h}}}
+-m_{h}(i-j),\qquad j\le i
 ~~~
 
 
-m_h 是第 h 个 head 的斜率。距离越远，默认分数越低，但这只是软偏置，不是把远处位置硬掩码。
+$m_{h}$ 是第 $h$ 个 head 的斜率。距离越远，默认分数越低，但这只是软偏置，不是把远处位置硬掩码。
 
 ### 17.2 多头斜率提供多尺度
 
@@ -1018,7 +1018,7 @@ m_h 是第 h 个 head 的斜率。距离越远，默认分数越低，但这只�
 
 ### 17.5 一个 bias 生成器
 
-输入序列长度 n 和非负斜率，函数返回 n×n 的加性 bias 矩阵；未来位置写为 `-inf`，供 softmax 前与 causal mask 组合。
+输入序列长度 $n$ 和非负斜率，函数返回 $n\times n$ 的加性 bias 矩阵；未来位置写为 $-\infty$，供 softmax 前与 causal mask 组合。
 
 ~~~python
 import math
@@ -1049,13 +1049,13 @@ for slope in [0.25, 1.0]:
 
 > **代码状态：静态审阅，未运行（2026-10-29）**
 
-当斜率为 0.25 时，最后一行从最远可见位置到当前 token 依次为 `[-1.0, -0.75, -0.5, -0.25, 0.0]`；未来位置则是 `-inf`，由 causal mask 屏蔽。
+当斜率为 $0.25$ 时，最后一行从最远可见位置到当前 token 依次为 $[-1.0,-0.75,-0.5,-0.25,0.0]$；未来位置则是 $-\infty$，由 causal mask 屏蔽。
 
-用内容分数和距离惩罚合起来算：query 在 $i=4$，key 分别在 $j=3$ 与 $j=1$，原始分数为 1.0、0.9，$m=0.1$。两者距离为 1 和 3，加 bias 后变成 0.9、0.6，softmax 权重约 0.574、0.426；不加 bias 时约 0.525、0.475。远处 key 仍然可见，只是需要更强的内容匹配抵消惩罚。若 $m=0.5$，分数会变为 0.5、−0.6，权重明显偏向近处。这个小例子说明斜率会直接改变路由概率，而不是只在模型输入中附带一个位置标签。
+用内容分数和距离惩罚合起来算：query 在 $i=4$，key 分别在 $j=3$ 与 $j=1$，原始分数为 1.0、0.9， $m=0.1$。两者距离为 1 和 3，加 bias 后变成 0.9、0.6，softmax 权重约 0.574、0.426；不加 bias 时约 0.525、0.475。远处 key 仍然可见，只是需要更强的内容匹配抵消惩罚。若 $m=0.5$，分数会变为 0.5、−0.6，权重明显偏向近处。这个小例子说明斜率会直接改变路由概率，而不是只在模型输入中附带一个位置标签。
 
-实现时，只有 $j\le i$ 的 key 使用 $-m_h(i-j)$，未来位置应由 causal mask 变成 $-\infty$；bias 不负责单独实现因果性。符号写反会奖励远处位置，mask 顺序错误则可能让未来 token 可见或令 softmax 出现非有限值。多头实现还要检查斜率张量是否按 `[batch,head,query,key]` 正确广播；把 32 个斜率误扩成 query 维时，输出仍可能流畅，却不再是预期的 head-wise 距离先验。
+实现时，只有 $j\le i$ 的 key 使用 $-m_{h}(i-j)$，未来位置应由 causal mask 变成 $-\infty$；bias 不负责单独实现因果性。符号写反会奖励远处位置，mask 顺序错误则可能让未来 token 可见或令 softmax 出现非有限值。多头实现还要检查斜率张量是否按 `[batch,head,query,key]` 正确广播；把 32 个斜率误扩成 query 维时，输出仍可能流畅，却不再是预期的 head-wise 距离先验。
 
-可以做一个最小反事实：固定 q/k 内容分数和 gold evidence，只改变 key 距离，先核对 logits 与 attention mass 是否随 $m_h$ 按预期变化，再检查最终任务答案。若 gold mass 变化但答案不变，位置 bias 已接入，后续 value/层间传递可能补偿；若 gold mass 不变，先查 bias 是否被 kernel 使用；若模型答案错误而局部数值正确，问题可能在训练分布或下游推理。Attention 权重可以定位计算路径，但不能单独证明模型理解了证据。
+可以做一个最小反事实：固定 q/k 内容分数和 gold evidence，只改变 key 距离，先核对 logits 与 attention mass 是否随 $m_{h}$ 按预期变化，再检查最终任务答案。若 gold mass 变化但答案不变，位置 bias 已接入，后续 value/层间传递可能补偿；若 gold mass 不变，先查 bias 是否被 kernel 使用；若模型答案错误而局部数值正确，问题可能在训练分布或下游推理。Attention 权重可以定位计算路径，但不能单独证明模型理解了证据。
 
 ### 17.6 RoPE、ALiBi 与绝对位置的选择表
 
@@ -1072,7 +1072,7 @@ for slope in [0.25, 1.0]:
 
 比较位置方案时，用受控训练或说明 checkpoint 继续训练的差异，并固定模型规模、数据/token budget、训练长度、优化器与评测模板。把同一事实放在 16、128、1024、8192 token 的距离，并轮换开头、中间、末尾，加入相似诱饵；分别记录短程语言建模、各距离召回、答案引用和 prefill/decode 延迟。能读取内部状态的 checkpoint 可补充按 head 的 gold evidence mass；黑盒 API 只能报告输入变化与最终答案，不能声称观察到了内部路由。平均分还要按距离切片，避免少数关键远距任务被总体准确率掩盖。
 
-实现检查可从一个 logits 单元开始。正确形式为 $QK^T/\sqrt{d_h}+b$；若误写成 $(QK^T+b)/\sqrt{d_h}$，当 $d_h=64$、距离 4、$m=0.1$ 时，惩罚会从 0.4 变成 0.05。再核对斜率是固定还是学习得到、按 head 还是按层共享、是否和 causal/padding mask 分开广播；把 query 与所有 key 的 position id 同加 10 后，依赖相对距离的 bias 和权重应保持不变。prefix cache 还要绑定模型、位置和斜率配置，配置变化时失效或清理旧缓存，避免新 query 与旧 key 使用不一致的坐标约定。
+实现检查可从一个 logits 单元开始。正确形式为 $QK^T/\sqrt{d_{h}}+b$；若误写成 $(QK^T+b)/\sqrt{d_{h}}$，当 $d_{h}=64$、距离 4、 $m=0.1$ 时，惩罚会从 0.4 变成 0.05。再核对斜率是固定还是学习得到、按 head 还是按层共享、是否和 causal/padding mask 分开广播；把 query 与所有 key 的 position id 同加 10 后，依赖相对距离的 bias 和权重应保持不变。prefix cache 还要绑定模型、位置和斜率配置，配置变化时失效或清理旧缓存，避免新 query 与旧 key 使用不一致的坐标约定。
 
 ### 17.7 从单行 bias 检查到多头广播
 
@@ -1090,18 +1090,18 @@ for slope in [0.25, 1.0]:
 
 ### 18.1 三种 head 组织
 
-标准 MHA 有 H 个 query heads，也有 H 个 K/V heads；MQA 仍保留 H 个 query heads，但只使用一个 K/V head；GQA 则使用介于 1 和 H 之间的 H_KV 个 K/V heads。
+标准 MHA 有 $H$ 个 query heads，也有 $H$ 个 K/V heads；MQA 仍保留 $H$ 个 query heads，但只使用 $1$ 个 K/V head；GQA 则使用介于 $1$ 和 $H$ 之间的 $H_{\mathrm{KV}}$ 个 K/V heads。
 
 ~~~math
 \begin{aligned}
-\mathrm{MHA}:&\quad H_Q=H,\ H_{\mathrm{KV}}=H\\
-\mathrm{MQA}:&\quad H_Q=H,\ H_{\mathrm{KV}}=1\\
-\mathrm{GQA}:&\quad H_Q=H,\ 1<H_{\mathrm{KV}}<H
+\mathrm{MHA}:&\quad H_{Q}=H,\ H_{\mathrm{KV}}=H\\
+\mathrm{MQA}:&\quad H_{Q}=H,\ H_{\mathrm{KV}}=1\\
+\mathrm{GQA}:&\quad H_{Q}=H,\ 1 < H_{\mathrm{KV}} < H
 \end{aligned}
 ~~~
 
 
-当 H_Q 能被 H_KV 整除时，每个 K/V head 服务 H_Q/H_KV 个 query heads。
+当 $H_{\mathrm{Q}}$ 能被 $H_{\mathrm{KV}}$ 整除时，每个 K/V head 服务 $H_{\mathrm{Q}}/H_{\mathrm{KV}}$ 个 query heads。
 
 ### 18.2 KV Cache 为什么受 head 数影响
 
@@ -1109,11 +1109,11 @@ for slope in [0.25, 1.0]:
 
 ~~~math
 N_{\mathrm{KV}}
-=2LTH_{KV}d_h
+=2LTH_{KV}d_{h}
 ~~~
 
 
-再乘 batch 和 dtype 字节数。GQA 把 H_KV 从 H 降到 G 后，缓存约变为原来的 G/H；MQA 的理论 head 维度则只剩 1/H。
+再乘 batch 和 dtype 字节数。GQA 把 $H_{\mathrm{KV}}$ 从 $H$ 降到 $G$ 后，缓存约变为原来的 $G/H$；MQA 的理论 head 维度则只剩 $1/H$。
 
 ### 18.3 质量与系统的折中
 
@@ -1167,35 +1167,35 @@ assert kv_cache_mib(1, 8192, 32, 8, 128) == kv_cache_mib(1, 8192, 32, 32, 128) /
 
 > **代码状态：静态审阅，未运行（2026-10-29）**
 
-当 batch=1、长度 8192、32 层、head_dim=128、BF16 时，32 个 KV heads 约需 4096 MiB，8 个需 1024 MiB，1 个需 128 MiB。缓存大小随 KV head 数线性缩放；这个账本没有包括权重、激活、allocator 碎片和多请求排队。线上容量规划要用真实引擎的峰值显存与 P95/P99 延迟验证。
+当 $B=1$、长度 $T=8192$、 $32$ 层、 $d_{h}=128$、BF16 时， $32$ 个 KV heads 约需 $4096\ \mathrm{MiB}$， $8$ 个需 $1024\ \mathrm{MiB}$， $1$ 个需 $128\ \mathrm{MiB}$。缓存大小随 KV head 数线性缩放；这个账本没有包括权重、激活、allocator 碎片和多请求排队。线上容量规划要用真实引擎的峰值显存与 $P_{95}/P_{99}$ 延迟验证。
 
-把 GQA 的结构关系接到数字上：H_Q=32、H_KV=8 时，每个 KV head 服务 32/8=4 个 query heads。若每层每个位置的 key 和 value 各有 8×128 个 BF16 数，每个 token、每层要存 2×8×128×2=4096 字节；32 层合计 131,072 字节，即 128 KiB/token。MHA 则为 512 KiB/token，所以在相同层数、head_dim、上下文和 dtype 下，GQA 的 KV 容量是四分之一。长度 8192 时便得到 1 GiB 对 4 GiB 的估算。
+把 GQA 的结构关系接到数字上： $H_{\mathrm{Q}}=32$、 $H_{\mathrm{KV}}=8$ 时，每个 KV head 服务 $32/8=4$ 个 query heads。若每层每个位置的 key 和 value 各有 $8\times128$ 个 BF16 数，每个 token、每层要存 $2\times8\times128\times2=4096$ 字节； $32$ 层合计 $131{,}072$ 字节，即 $128\ \mathrm{KiB/token}$。MHA 则为 $512\ \mathrm{KiB/token}$，所以在相同层数、`head_dim`、上下文和 `dtype` 下，GQA 的 KV 容量是四分之一。长度 $8192$ 时便得到 $1\ \mathrm{GiB}$ 对 $4\ \mathrm{GiB}$ 的估算。
 
-这笔节省主要发生在解码时缓存存储和读取，并不把 prefill 的 query 数、因果交互候选数按四分之一缩小。还要确认推理 kernel 是否直接支持 GQA 布局；若运行时把 KV 复制成 query-head 数，理论缓存优势可能被部分抵消。若某硬件的 tensor parallel 切分数大于 KV head 数，部署还可能需要复制 KV head 或采用非对称切分。因而模型配置、kernel 和并行拓扑必须合在一起看，不能仅凭 H_KV/H_Q 得出真实吞吐或质量结论。
+这笔节省主要发生在解码时缓存存储和读取，并不把 prefill 的 query 数、因果交互候选数按四分之一缩小。还要确认推理 kernel 是否直接支持 GQA 布局；若运行时把 KV 复制成 query-head 数，理论缓存优势可能被部分抵消。若某硬件的 tensor parallel 切分数大于 KV head 数，部署还可能需要复制 KV head 或采用非对称切分。因而模型配置、kernel 和并行拓扑必须合在一起看，不能仅凭 $H_{\mathrm{KV}}/H_{\mathrm{Q}}$ 得出真实吞吐或质量结论。
 
-读部署指标时，应把 prefill tokens/s、decode tokens/s、首 token 延迟和每输出 token 延迟拆开。短 prompt、长 prompt和长输出的缓存占比不同；同样的 1 GiB 节省，可能被更大并发利用，也可能被更长上下文消耗。若用缓存收益换 batch，必须复测 P95/P99 排队和请求级成功率，才能判断资源是否真正转化为用户可感知的服务能力。
+读部署指标时，应把 prefill tokens/s、decode tokens/s、首 token 延迟和每输出 token 延迟拆开。短 prompt、长 prompt和长输出的缓存占比不同；同样的 $1\ \mathrm{GiB}$ 节省，可能被更大并发利用，也可能被更长上下文消耗。若用缓存收益换 batch，必须复测 $P_{95}/P_{99}$ 排队和请求级成功率，才能判断资源是否真正转化为用户可感知的服务能力。
 
-还可以从配置检查 head 分组是否闭合：H_Q=32、H_KV=8 时组大小为 4；如果 H_Q 不能被 H_KV 整除，就需要定义不均匀映射或复制策略。权重转换时要确保 query head 与对应 K/V group 的顺序一致，不能仅通过 reshape 让张量形状“看起来正确”。因此 GQA 的验证除了缓存公式，还包括权重映射、单步 logits 回归和目标 serving kernel 的显存/带宽 profile。
+还可以从配置检查 head 分组是否闭合： $H_{\mathrm{Q}}=32$、 $H_{\mathrm{KV}}=8$ 时组大小为 $4$；如果 $H_{\mathrm{Q}}$ 不能被 $H_{\mathrm{KV}}$ 整除，就需要定义不均匀映射或复制策略。权重转换时要确保 query head 与对应 K/V group 的顺序一致，不能仅通过 reshape 让张量形状“看起来正确”。因此 GQA 的验证除了缓存公式，还包括权重映射、单步 logits 回归和目标 serving kernel 的显存/带宽 profile。
 
 ### 18.7 从公式推到并发预算
 
-上一节算出的单请求缓存为 GQA 约 1 GiB、MHA 约 4 GiB。若服务给 KV 预留 24 GiB，并留出 20% 水位，可用量是 19.2 GiB，理想情况下分别可容纳约 19 条和 4 条长度 8192 的请求；若同时维持 8 条，GQA 约需 8 GiB，MHA 约需 32 GiB。这个反事实显示了容量差异，但不是 p99 承诺：输出继续增长、分页块未填满、权重与临时激活、前缀共享和调度等待都会改变真实上限。
+上一节算出的单请求缓存为 GQA 约 $1\ \mathrm{GiB}$、MHA 约 $4\ \mathrm{GiB}$。若服务给 KV 预留 $24\ \mathrm{GiB}$，并留出 $20\%$ 水位，可用量是 $19.2\ \mathrm{GiB}$，理想情况下分别可容纳约 $19$ 条和 $4$ 条长度为 $8192$ 的请求；若同时维持 $8$ 条，GQA 约需 $8\ \mathrm{GiB}$，MHA 约需 $32\ \mathrm{GiB}$。这个反事实显示了容量差异，但不是 p99 承诺：输出继续增长、分页块未填满、权重与临时激活、前缀共享和调度等待都会改变真实上限。
 
-GQA 的节省主要落在 decode 缓存和历史 K/V 读取，prefill 仍要处理整段 prompt，不会按 $H_{KV}/H_Q$ 缩小 query 数或注意力候选交互。一次 decode 若要读取全部历史状态，理论字节量与该请求的缓存规模同阶；长输出、高并发更可能受缓存带宽约束，长 prompt、短输出则可能仍由 prefill 主导。PagedAttention 减少分配碎片，量化减少每个元素的字节数，二者解决的是不同环节。
+GQA 的节省主要落在 decode 缓存和历史 K/V 读取，prefill 仍要处理整段 prompt，不会按 $H_{KV}/H_{Q}$ 缩小 query 数或注意力候选交互。一次 decode 若要读取全部历史状态，理论字节量与该请求的缓存规模同阶；长输出、高并发更可能受缓存带宽约束，长 prompt、短输出则可能仍由 prefill 主导。PagedAttention 减少分配碎片，量化减少每个元素的字节数，二者解决的是不同环节。
 
 公式中的 $T$ 是模板序列化和 tokenizer 之后的模型位置数，不是字符数。长 system prompt、图像 patch 或音频帧都会改变它。容量评估应从请求轨迹记录 prompt/output token、缓存命中和取消时刻，按长度分位数与并发做压力测试；平均长度会漏掉长尾请求和 batch 内 padding/块浪费。
 
-部署对照固定模型权重、tokenizer、请求长度分布、并发和 dtype，记录 prefill/decode tokens/s、峰值显存及 P95/P99 延迟。MHA 转 GQA 时，还要写明 K/V 合并映射、继续训练预算、单步 logits 回归和长程质量；若 runtime 复制共享 K/V，纸面容量比例可能无法变成带宽收益。并行切分也要核对 $H_Q/H_{KV}$ 分组、跨 rank KV 复制和请求取消后的 block 回收。GQA 论文给出了从 MHA checkpoint uptraining 的路线，权重形状对齐本身并不保证行为无损：[GQA](https://arxiv.org/abs/2305.13245)。
+部署对照固定模型权重、tokenizer、请求长度分布、并发和 dtype，记录 prefill/decode tokens/s、峰值显存及 P95/P99 延迟。MHA 转 GQA 时，还要写明 K/V 合并映射、继续训练预算、单步 logits 回归和长程质量；若 runtime 复制共享 K/V，纸面容量比例可能无法变成带宽收益。并行切分也要核对 $H_{Q}/H_{KV}$ 分组、跨 rank KV 复制和请求取消后的 block 回收。GQA 论文给出了从 MHA checkpoint uptraining 的路线，权重形状对齐本身并不保证行为无损：[GQA](https://arxiv.org/abs/2305.13245)。
 
-Hybrid 架构应只对 attention 层累加缓存：$N_{KV}=2T\sum_{l\in\mathcal A}H_{KV,l}d_{h,l}$，再乘并发和每元素字节数；SSM 层的固定状态另列。若把所有层都按同一 attention 公式计算，就会错估混合模型。第 23 讲再讨论 attention 层的组织方式，这里先把它作为容量公式的边界。
+Hybrid 架构应只对 attention 层累加缓存： $N_{KV}=2T\sum_{l\in\mathcal A}H_{KV,l}d_{h,l}$，再乘并发和每元素字节数；SSM 层的固定状态另列。若把所有层都按同一 attention 公式计算，就会错估混合模型。第 23 讲再讨论 attention 层的组织方式，这里先把它作为容量公式的边界。
 
 ### 18.8 共享键值头会改变哪些自由度
 
 GQA 的一个 group 内，4 个 query head 读取相同的 K/V 表示，但仍可用各自的 query 形成不同注意力分布；共享的是供检索的历史内容空间，不是把 4 个 head 合成一个输出。比如一个 K/V head 保存了两个位置的 value，而四个 query 分别偏向位置 1、位置 2、两者混合和当前位置，它们仍可能得到四种不同的加权结果。不过，如果任务需要不同 head 为同一 token 保存互不相容的 key/value 特征，减少 K/V head 可能形成表示瓶颈。
 
-因此 MHA→GQA 的评估不应只检查 logits 平均误差。先用短输入做逐 token logits 回归和生成停止位置检查，再按长距复制、多实体指代、代码变量回查及普通语言建模分桶；同时固定吞吐测试的 prompt/output 长度和并发。若缓存减少四倍、decode 带宽下降，但长程实体绑定正确率从 92% 降到 86%，是否可接受取决于产品质量下限和成本收益。这个假设数字只是说明判定方式，真实模型必须用同一 checkpoint 转换路径和数据复测。
+因此 MHA→GQA 的评估不应只检查 logits 平均误差。先用短输入做逐 token logits 回归和生成停止位置检查，再按长距复制、多实体指代、代码变量回查及普通语言建模分桶；同时固定吞吐测试的 prompt/output 长度和并发。若缓存减少四倍、decode 带宽下降，但长程实体绑定正确率从 $92\%$ 降到 $86\%$，是否可接受取决于产品质量下限和成本收益。这个假设数字只是说明判定方式，真实模型必须用同一 checkpoint 转换路径和数据复测。
 
-并行拓扑也约束这种分组如何落到设备上。若 $H_Q=32,H_{KV}=8$，一个 KV head 服务 4 个 query heads；在 4 路 tensor parallel 下，理想地每个 rank 分到 8 个 query heads 和 2 个 KV heads，映射自然闭合。若并行度提高到 16 路，每个 rank 平均只有 2 个 query heads，却不足以给每 rank 分配一个独立 KV head，运行时可能需要复制 KV 或采用不同分片。复制能让算子执行，却会部分抵消显存收益；因此部署前要检查每个 rank 的 head 映射、collective 通信和单步输出，而不能把全局缓存公式当作每卡成本。
+并行拓扑也约束这种分组如何落到设备上。若 $H_{Q}=32,H_{KV}=8$，一个 KV head 服务 4 个 query heads；在 4 路 tensor parallel 下，理想地每个 rank 分到 8 个 query heads 和 2 个 KV heads，映射自然闭合。若并行度提高到 16 路，每个 rank 平均只有 2 个 query heads，却不足以给每 rank 分配一个独立 KV head，运行时可能需要复制 KV 或采用不同分片。复制能让算子执行，却会部分抵消显存收益；因此部署前要检查每个 rank 的 head 映射、collective 通信和单步输出，而不能把全局缓存公式当作每卡成本。
 
 参数转换还要分开看三个误差来源：把多个旧 K/V head 合并时，权重如何初始化；继续训练用了多少 token 和何种目标；服务侧是否正确应用共享布局。可以先用几百条固定短输入比较转换前后的逐位置 logits，再用多实体和长上下文样本检查行为差异，最后在真实并行拓扑测显存和 decode 带宽。若单卡输出一致、张量并行输出不同，优先检查 head 排布和跨 rank 复制；若两者都不同，再检查 uptraining 配方和质量回归。缓存节省是架构属性，实际延迟收益则是 kernel、带宽和批处理共同决定的系统结果。
 
@@ -1208,15 +1208,15 @@ Dense Transformer 的每个 token 都经过同一个 FFN。MoE 把它替换成 E
 设第 t 个 token 的路由 logits 为：
 
 ~~~math
-z_t=W_r x_t,\qquad
-p_t=\mathrm{softmax}(z_t)
+z_{t}=W_{r} x_{t},\qquad
+p_{t}=\mathrm{softmax}(z_{t})
 ~~~
 
 
-若选择的 expert 集合为 S_t，一个常见的路由加权形式为：
+若选择的 expert 集合为 $S_{t}$，一个常见的路由加权形式为：
 
 ~~~math
-y_t=\sum_{e\in S_t}p_{t,e}F_e(x_t)
+y_{t}=\sum_{e\in S_{t}}p_{t,e}F_{e}(x_{t})
 ~~~
 
 
@@ -1304,15 +1304,15 @@ print("counts =", counts)
 
 > **代码状态：静态审阅，未运行（2026-10-29）**
 
-结果为 assignments `[0, 0, 1, 0, 2]`、counts `[3, 1, 1]`，第一个 expert 获得了多数 token。这个 toy 现象就是下一节需要处理的负载不均衡问题。
+结果为 assignments $[0,0,1,0,2]$、counts $[3,1,1]$，第一个 expert 获得了多数 token。这个 toy 现象就是下一节需要处理的负载不均衡问题。
 
-top-2 的合并规则也需要算清。对 logits `[2,1,0,-1]`，softmax 约为 `[0.644,0.237,0.087,0.032]`，前两个 expert 入选。若入选权重重新归一化，约为 `[0.731,0.269]`；两个 expert 输出 `[2,0]` 和 `[0,4]` 时，合并结果约为 `[1.462,1.076]`。若不重新归一化，结果约为 `[1.288,0.948]`。阅读实现时要核对 top-k 权重是否归一化、是否乘回 router 概率以及是否再乘 residual scale。
+top-2 的合并规则也需要算清。对 logits $[2,1,0,-1]$，softmax 约为 $[0.644,0.237,0.087,0.032]$，前两个 expert 入选。若入选权重重新归一化，约为 $[0.731,0.269]$；两个 expert 输出 $[2,0]$ 和 $[0,4]$ 时，合并结果约为 $[1.462,1.076]$。若不重新归一化，结果约为 $[1.288,0.948]$。阅读实现时要核对 top-k 权重是否归一化、是否乘回 router 概率以及是否再乘 residual scale。
 
-稀疏激活不等于低存储。若每个 expert 的 MLP 有 $P$ 个参数，$E=16$、每 token 选 $k=2$，总专家权重约 $16P$，单 token 经过的专家约 $2P$；训练仍需保存或分布式持有全部专家权重和优化器状态。以 $d_{model}=4096$、宽度约 10,923 的 SwiGLU 为例，每个 expert 约有 134M 个权重，而 $E=16$ 时 router 主投影只有约 65,536 个权重。比较 dense 与 MoE 时，要说清固定的是总参数、训练 FLOPs 还是单位成功请求成本，并把通信、优化器状态和专家存储算进资源账本。
+稀疏激活不等于低存储。若每个 expert 的 MLP 有 $P$ 个参数， $E=16$、每 token 选 $k=2$，总专家权重约 $16P$，单 token 经过的专家约 $2P$；训练仍需保存或分布式持有全部专家权重和优化器状态。以 $d_{model}=4096$、宽度约 10,923 的 SwiGLU 为例，每个 expert 约有 134M 个权重，而 $E=16$ 时 router 主投影只有约 65,536 个权重。比较 dense 与 MoE 时，要说清固定的是总参数、训练 FLOPs 还是单位成功请求成本，并把通信、优化器状态和专家存储算进资源账本。
 
 expert 的领域功能不能从路由热图直接命名。比如代码 token 常去 expert 3，可能反映代码结构，也可能只是模板或位置相关。可配对输入：保持代码语义、改写说明模板并移动位置；再固定模板、换成自然语言内容；最后屏蔽或替换 expert 3，比较 logits 与代码任务成功率。路由统计能说明 token 被送到哪里，干预后的行为变化才为功能假设提供证据。
 
-观察分工时也要区分 token 级统计与任务级因果。假设 1000 个样本中，expert 3 接收 40% 的代码标点，却只接收 8% 的变量名；这可能意味着它识别格式边界，而不是“会写代码”。再把同一程序改成自然语言描述、保留语义但改变标点密度，如果路由分布随标点变化，原解释就需要收窄。消融时同时观察目标答案和中间路由：屏蔽该 expert 后其他 expert 可能接管负载，因此性能无变化不代表它原先无作用；负载改变而任务质量不变，可能说明功能冗余。分析 MoE 的 expert 需要把自然路由、配对反事实、受控干预和替代路径放在一起，避免把可视化现象写成内部语义事实。
+观察分工时也要区分 token 级统计与任务级因果。假设 $1{,}000$ 个样本中，expert $3$ 接收 $40\%$ 的代码标点，却只接收 $8\%$ 的变量名；这可能意味着它识别格式边界，而不是“会写代码”。再把同一程序改成自然语言描述、保留语义但改变标点密度，如果路由分布随标点变化，原解释就需要收窄。消融时同时观察目标答案和中间路由：屏蔽该 expert 后其他 expert 可能接管负载，因此性能无变化不代表它原先无作用；负载改变而任务质量不变，可能说明功能冗余。分析 MoE 的 expert 需要把自然路由、配对反事实、受控干预和替代路径放在一起，避免把可视化现象写成内部语义事实。
 
 训练和推理时的“选中”也不是完全相同的对象。训练可能加入 router noise、负载辅助损失或容量截断，推理则可能关闭噪声、采用不同的 capacity 处理；因此同一 token 的 top-k expert 可能变化。检查 checkpoint 时，应记录 train/eval 模式、路由温度、噪声开关、top-k 和归一化规则。一个 top-1 代码例只展示硬分配的接口，不等于训练时路由概率的完整梯度路径；若想解释模型为什么学会某种分工，还需把 gate logits、概率、实际 assignment 和 expert 参数更新放进同一时间序列。
 
@@ -1322,7 +1322,7 @@ expert 的领域功能不能从路由热图直接命名。比如代码 token 常
 
 ### 19.6 如何检验 expert 是否形成有用分工
 
-若将一批代码样本路由到 expert 3 的比例从通用文本的 12% 升到 48%，这只是相关性。可以构造 100 对保持程序语义、但替换注释模板和变量名的输入：若路由仍主要跟随代码语义，且屏蔽 expert 3 后代码任务成功率下降、普通对话变化较小，功能分工假设会得到更强支持；若改写模板就让路由比例回到 12%，模型可能主要识别格式而不是算法内容。每种条件都要使用相同问题、长度和采样温度，并对多个 checkpoint 重复。
+若将一批代码样本路由到 expert $3$ 的比例从通用文本的 $12\%$ 升到 $48\%$，这只是相关性。可以构造 $100$ 对保持程序语义、但替换注释模板和变量名的输入：若路由仍主要跟随代码语义，且屏蔽 expert $3$ 后代码任务成功率下降、普通对话变化较小，功能分工假设会得到更强支持；若改写模板就让路由比例回到 $12\%$，模型可能主要识别格式而不是算法内容。每种条件都要使用相同问题、长度和采样温度，并对多个 checkpoint 重复。
 
 还要将路由与容量、梯度和专家参数联系起来。一个 expert 频繁接收某类 token，不等于它独立承担该能力；其他 expert、attention 和 residual path 可能仍然冗余地编码相同功能。可比较对指定 expert 的屏蔽、交换或只读消融，再记录任务准确率、目标 logit 和专家负载变化。若消融没有影响，可能是该 expert 不重要，也可能是替代路径立即补偿；要结合激活干预和多层实验解释。路由热图是提出假设的入口，不是给 expert 贴领域标签的证据。
 
@@ -1342,15 +1342,15 @@ collapse 的表现不仅是平均利用率下降，还包括：
 
 ### 20.2 Auxiliary load-balancing loss
 
-在 Switch 的 top-1 形式中，设 N 是当前路由组中的 token 数，f_e 是硬路由到 expert e 的 token 比例，P_e 是 router 对该 expert 的平均 softmax 概率，E 是 expert 数；一个常见辅助损失为：
+在 Switch 的 top-1 形式中，设 $N$ 是当前路由组中的 token 数， $f_{e}$ 是硬路由到 expert $e$ 的 token 比例， $P_{e}$ 是 router 对该 expert 的平均 softmax 概率， $E$ 是 expert 数；一个常见辅助损失为：
 
 ~~~math
 \mathcal L_{\mathrm{aux}}
-=\alpha E\sum_{e=1}^{E}f_eP_e,
+=\alpha E\sum_{e=1}^{E}f_{e}P_{e},
 \qquad
-f_e=\frac{1}{N}\sum_{t=1}^{N}\mathbf{1}[\arg\max_j p_{t,j}=e],
+f_{e}=\frac{1}{N}\sum_{t=1}^{N}\mathbf{1}[\arg\max_{j} p_{t,j}=e],
 \qquad
-P_e=\frac{1}{N}\sum_{t=1}^{N}p_{t,e}
+P_{e}=\frac{1}{N}\sum_{t=1}^{N}p_{t,e}
 ~~~
 
 
@@ -1373,10 +1373,10 @@ c 太小会增加 token dropping 和训练信号损失；c 太大则需要更多
 
 ### 20.4 Router logits 的数值稳定
 
-logits 间差异过大时，softmax 会变尖，router 可能过早偏向少数 expert。另一个数值稳定问题是 log-sum-exp 的尺度过大。设 N 是当前路由组中的 token 数，z_t 是 token t 的 logits；ST-MoE 提出的 router z-loss 直接约束后者：
+logits 间差异过大时，softmax 会变尖，router 可能过早偏向少数 expert。另一个数值稳定问题是 log-sum-exp 的尺度过大。设 $N$ 是当前路由组中的 token 数， $z_{t}$ 是 token $t$ 的 logits；ST-MoE 提出的 router z-loss 直接约束后者：
 
 ~~~math
-\mathcal L_z
+\mathcal L_{z}
 =\frac{1}{N}\sum_{t=1}^{N}
 \left(\log\sum_{e=1}^{E}\exp z_{t,e}\right)^2
 ~~~
@@ -1454,36 +1454,36 @@ for factor in [1.0, 1.5, 2.0]:
 
 > **代码状态：静态审阅，未运行（2026-10-29）**
 
-真实 top-k 的 overflow 要按 assignment 而非 token 解释。8 个 token 的 expert 对若依次为 `[0,1]、[0,1]、[0,2]、[0,2]、[0,1]、[0,2]、[0,1]、[0,2]`，共有 16 个 assignment，负载为 `[8,4,4,0]`，平均每个 expert 4 个。capacity factor 取 1、1.25、1.5 时，槽位数分别为 4、5、6，expert 0 超槽数为 4、3、2，占 assignment 的 25%、18.75%、12.5%；但每个 token 仍有一条第二路可用，因此 overflow 数不等于完整丢失 token 数。最终影响取决于是否保留第二路、如何重新归一化权重及是否启用 fallback。
+真实 top-$k$ 的 overflow 要按 assignment 而非 token 解释。 $8$ 个 token 的 expert 对若依次为 $\left([0,1],[0,1],[0,2],[0,2],[0,1],[0,2],[0,1],[0,2]\right)$，共有 $16$ 个 assignment，负载为 $[8,4,4,0]$，平均每个 expert $4$ 个。capacity factor 取 $1$、 $1.25$、 $1.5$ 时，槽位数分别为 $4$、 $5$、 $6$，expert $0$ 超槽数为 $4$、 $3$、 $2$，占 assignment 的 $25\%$、 $18.75\%$、 $12.5\%$；但每个 token 仍有一条第二路可用，因此 overflow 数不等于完整丢失 token 数。最终影响取决于是否保留第二路、如何重新归一化权重及是否启用 fallback。
 
-再手算 Switch top-1 辅助损失。若 $E=4$、硬负载 $f=[0.5,0.25,0.25,0]$、平均概率 $P=[0.45,0.30,0.20,0.05]$，则 $E\sum f_eP_e=4(0.225+0.075+0.05)=1.4$，乘系数 $\alpha$ 后为 $1.4\alpha$；硬分配和概率都均匀时该项为 1。它只衡量这一公式下的路由分布，不包含任务质量。增大 $\alpha$ 可能降低负载偏斜，也可能压平有用 specialization，因此需要和验证任务一起看。
+再手算 Switch top-1 辅助损失。若 $E=4$、硬负载 $f=[0.5,0.25,0.25,0]$、平均概率 $P=[0.45,0.30,0.20,0.05]$，则 $E\sum f_{e}P_{e}=4(0.225+0.075+0.05)=1.4$，乘系数 $\alpha$ 后为 $1.4\alpha$；硬分配和概率都均匀时该项为 1。它只衡量这一公式下的路由分布，不包含任务质量。增大 $\alpha$ 可能降低负载偏斜，也可能压平有用 specialization，因此需要和验证任务一起看。
 
 诊断按“分配—容量—设备—任务”顺序进行。每个路由组、checkpoint 和任务切片分别记录硬负载、softmax 概率、熵、最大/平均比、overflow 与 fallback；同时标注 padding 是否计入分母、capacity 按全局 batch 还是 expert-parallel group 计算、top-k 权重如何归一化。全局均衡不能排除某个局部 group 溢出，单个小组的高比值也可能只是采样波动；应看多步时间序列与 per-group 分布，再判断热点是否持续。
 
-接着把负载映射到端到端时间。hidden size=4096、BF16 时，一个向量是 8 KiB；top-2 向两个 expert dispatch 并收回两份结果，原始载荷约 32 KiB/token，尚未计元数据、对齐和同步。分别 profile router、排序、dispatch、expert compute、combine 与等待；若负载变均匀但 step time 不降，瓶颈可能是通信启动、小批矩阵效率或固定同步。服务侧还要看 expert 排队、请求 P95/P99、drop/fallback 和任务成功率。固定模型与请求分布，逐步改变 $\alpha$、capacity factor 和拓扑，才能画出质量、显存、吞吐与尾延迟的成本曲线。
+接着把负载映射到端到端时间。hidden size 为 $4{,}096$、BF16 时，一个向量是 $8\ \mathrm{KiB}$；采用 top-2 路由时，向两个 expert dispatch 并收回两份结果，原始载荷约 $32\ \mathrm{KiB/token}$，尚未计元数据、对齐和同步。分别 profile router、排序、dispatch、expert compute、combine 与等待；若负载变均匀但 step time 不降，瓶颈可能是通信启动、小批矩阵效率或固定同步。服务侧还要看 expert 排队、请求 $P_{95}/P_{99}$、drop/fallback 和任务成功率。固定模型与请求分布，逐步改变 $\alpha$、capacity factor 和拓扑，才能画出质量、显存、吞吐与尾延迟的成本曲线。
 
-辅助损失的统计对象也必须写明：前述 $\mathcal L_{aux}$ 是 Switch top-1 归一化；top-2 若按 assignment 比例，分母是 $2N$，若按 token 是否命中过 expert 计算，定义不同。报告实现时要列出 router group、top-k、$f/P$ 分母、capacity 舍入和丢弃顺序。阈值也要结合 group size：8 个 assignment 分给 4 个 expert，均值只有 2，某个 expert 收到 4 个的最大/平均比虽为 2，仍可能由小样本波动造成。告警阈值应以目标 workload 的持续分布校准，不能照搬 toy 比例。
+辅助损失的统计对象也必须写明：前述 $\mathcal L_{aux}$ 是 Switch top-1 归一化；top-2 若按 assignment 比例，分母是 $2N$，若按 token 是否命中过 expert 计算，定义不同。报告实现时要列出 router group、top-k、 $f/P$ 分母、capacity 舍入和丢弃顺序。阈值也要结合 group size：8 个 assignment 分给 4 个 expert，均值只有 2，某个 expert 收到 4 个的最大/平均比虽为 2，仍可能由小样本波动造成。告警阈值应以目标 workload 的持续分布校准，不能照搬 toy 比例。
 
 ### 20.8 top-k 改变 capacity 分母
 
-再看一个 top-2 的组内账本：$N=1024$ 个 token、$E=8$ 个 expert、$c=1.25$。若 capacity 按 assignment 计算，路由总量是 $kN=2048$，平均每 expert 256 个 assignment，乘 capacity factor 后每个 expert 约有 320 个槽位；若照搬 top-1 的 $N/E$ 算法，只会分到 160 个槽位，实际等于把目标容量减半。某些实现会使用不同的舍入、分组或 token-priority 规则，所以公式中的 $N$ 和 $k$ 必须对应代码里的统计口径。
+再看一个 top-2 的组内账本： $N=1024$ 个 token、 $E=8$ 个 expert、 $c=1.25$。若 capacity 按 assignment 计算，路由总量是 $kN=2048$，平均每 expert 256 个 assignment，乘 capacity factor 后每个 expert 约有 320 个槽位；若照搬 top-1 的 $N/E$ 算法，只会分到 160 个槽位，实际等于把目标容量减半。某些实现会使用不同的舍入、分组或 token-priority 规则，所以公式中的 $N$ 和 $k$ 必须对应代码里的统计口径。
 
 当 expert 0 收到 400 个 assignment 时，320 个槽位意味着 80 个 overflow assignment，但不一定是 80 个完整 token 丢失：其中部分 token 的第二路可能仍被保留，也可能触发 fallback。若每个 token 的两路权重被重新归一化，第一路被丢弃后剩下的专家会承担全部权重；若没有重新归一化，输出幅度也会变化。于是 capacity 改动不仅影响吞吐和丢失率，还改变训练样本收到的有效路由权重。比较实验需同时记录 assignment overflow、完整 token drop、combine 权重和任务输出，而不能只报一个“drop rate”。
 
 容量估算还应按路由组而非全局均值做。若一个全局 batch 的 8 个 expert 看似平均各收 256 个 assignment，拆成 4 个 expert-parallel group 后，某组可能出现 `[400,200,200,224]`，另一组则是 `[112,300,306,306]`；全局聚合会掩盖第一组 expert 0 的局部 overflow。padding token 是否参与 $N$、每个组是否独立设 capacity、舍入是向上还是向下，都会改变边缘 token 去留。复现 paper 或阅读框架实现时，应把这些口径写到日志字段里，并把相同输入分别放在不同 batch 组合中检查结果是否变化。若容量门控随同批其他请求变化，服务端还必须确认这种耦合不会让请求顺序改变输出质量。
 
-增大 capacity factor 可以降低 overflow，却也会预留更多槽位；在固定 token 数下，这些槽位可能表现为空 padding 或低利用率矩阵行。若 $c$ 从 1.0 增到 1.5，容量增加 50%，并不表示有效 FLOPs 或任务质量也增加 50%；它只是给偏斜分配更多余地。选取 $c$ 时应画出 overflow、token drop、专家计算利用率、通信字节和验证质量曲线，并检查每个路由组的尾部，而不是根据全局平均利用率找一个看似平衡的点。极端偏斜若由 router collapse 引起，继续加容量可能只是掩盖分配问题，不能替代路由训练的诊断。
+增大 capacity factor 可以降低 overflow，却也会预留更多槽位；在固定 token 数下，这些槽位可能表现为空 padding 或低利用率矩阵行。若 $c$ 从 $1.0$ 增到 $1.5$，容量增加 $50\%$，并不表示有效 FLOPs 或任务质量也增加 $50\%$；它只是给偏斜分配更多余地。选取 $c$ 时应画出 overflow、token drop、专家计算利用率、通信字节和验证质量曲线，并检查每个路由组的尾部，而不是根据全局平均利用率找一个看似平衡的点。极端偏斜若由 router collapse 引起，继续加容量可能只是掩盖分配问题，不能替代路由训练的诊断。
 
 ## 21. Encoder-only、Decoder-only 与 Encoder–Decoder
 
 ### 21.1 三种信息流
 
-Encoder-only 通常使用双向 self-attention，位置 i 可以读取完整输入；decoder-only 使用 causal self-attention，位置 i 只能读取左侧上下文；encoder–decoder 则组合了 source encoder 和 target decoder。BERT、GPT 和 T5 分别提供了这些范式的代表实例：[BERT](https://arxiv.org/abs/1810.04805)、[GPT](https://cdn.openai.com/research-covers/language-unsupervised/language_understanding_paper.pdf) 与 [T5](https://arxiv.org/abs/1910.10683)：
+Encoder-only 通常使用双向 self-attention，位置 $i$ 可以读取完整输入；decoder-only 使用 causal self-attention，位置 $i$ 只能读取左侧上下文；encoder–decoder 则组合了 source encoder 和 target decoder。BERT、GPT 和 T5 分别提供了这些范式的代表实例：[BERT](https://arxiv.org/abs/1810.04805)、[GPT](https://cdn.openai.com/research-covers/language-unsupervised/language_understanding_paper.pdf) 与 [T5](https://arxiv.org/abs/1910.10683)：
 
 ~~~math
 \begin{aligned}
 \text{Encoder-only:}&\quad H=\mathrm{Enc}(X)\\
-\text{Decoder-only:}&\quad y_t\sim P(y_t\mid y_{1:t-1},x)\\
+\text{Decoder-only:}&\quad y_{t}\sim P(y_{t}\mid y_{1:t-1},x)\\
 \text{Encoder-decoder:}&\quad H=\mathrm{Enc}(X),\\
 &\quad Y=\mathrm{Dec}(Y_{1:t-1},H)
 \end{aligned}
@@ -1509,9 +1509,9 @@ decoder-only 的 next-token 目标可以把问答、翻译、摘要、代码和�
 encoder 先把 source 编码为 H，decoder 的每个位置通过 cross-attention 读取 H：
 
 ~~~math
-\mathrm{CrossAttn}(Q_{\mathrm{dec}},K_H,V_H)
+\mathrm{CrossAttn}(Q_{\mathrm{dec}},K_{H},V_{H})
 =\mathrm{softmax}
-\left(\frac{Q_{\mathrm{dec}}K_H^\mathsf T}{\sqrt{d_h}}\right)V_H
+\left(\frac{Q_{\mathrm{dec}}K_{H}^\mathsf T}{\sqrt{d_{h}}}\right)V_{H}
 ~~~
 
 
@@ -1597,13 +1597,13 @@ print("enc-dec =", encoder_decoder_masks(4, 2))
 
 ### 21.10 离散扩散改变生成过程，不等于新 backbone
 
-自回归模型按链式分解逐个提交 token：$p(x_{1:T})=\prod_t p(x_t\mid x_{1:t-1})$。离散扩散语言模型则先把一段 token 序列部分或全部破坏，再用去噪网络逐轮恢复被遮挡内容。常见的 absorbing-mask 设定按噪声步 $t$ 以一定概率把 token 替换为 `[MASK]`，模型学习从当前带噪序列预测原 token。它改变了训练目标和采样顺序；底层网络仍可使用 Transformer，因此“扩散”不是与 encoder-only/decoder-only 同一分类轴上的 backbone 名称。扩散目标也不固定唯一骨干：常见 masked diffusion 模型可采用 encoder-only 结构，一些较新的系统则采用 encoder–decoder，让较轻的 decoder 在每轮去噪中迭代；骨干选择会改变重复前向的成本，但仍是扩散目标之外的架构决策，具体例子与边界见[离散扩散语言模型综述](https://arxiv.org/abs/2610.33391)。
+自回归模型按链式分解逐个提交 token： $p(x_{1:T})=\prod_{t} p(x_{t}\mid x_{1:t-1})$。离散扩散语言模型则先把一段 token 序列部分或全部破坏，再用去噪网络逐轮恢复被遮挡内容。常见的 absorbing-mask 设定按噪声步 $t$ 以一定概率把 token 替换为 `[MASK]`，模型学习从当前带噪序列预测原 token。它改变了训练目标和采样顺序；底层网络仍可使用 Transformer，因此“扩散”不是与 encoder-only/decoder-only 同一分类轴上的 backbone 名称。扩散目标也不固定唯一骨干：常见 masked diffusion 模型可采用 encoder-only 结构，一些较新的系统则采用 encoder–decoder，让较轻的 decoder 在每轮去噪中迭代；骨干选择会改变重复前向的成本，但仍是扩散目标之外的架构决策，具体例子与边界见[离散扩散语言模型综述](https://arxiv.org/abs/2610.33391)。
 
 用四个 token 的序列 `把 猫 放 下` 做一个最小例子：若一次前向把“猫”和“下”遮住，模型对这两个原 token 的概率分别为 0.8 和 0.6，那么这两个位置的简化平均重建损失是 $[-\ln(0.8)-\ln(0.6)]/2\approx0.366$ nat/token。这个数只对应固定噪声样本上的 masked-token 交叉熵；完整训练目标通常还要对噪声比例或时间步取期望，并按具体参数化加权，不能把玩具值当成 MDLM 的完整目标。
 
 推理时，模型可以同时估计多个遮挡位置，再依置信度或调度规则逐步提交 token；但普通 absorbing-mask 过程一旦把位置从 `[MASK]` 提交为普通 token，就不能天然回头修改它。若系统允许 remask、token-to-token editing 或反复修订，需要相应的状态转移、训练目标和解码策略支持，不能把“多位置并行预测”直接解释成自动纠错。固定长度遮挡也会带来输出长度问题；block diffusion 通过分块生成或块级状态设计来处理序列长度与历史复用，具体方案仍要看模型和服务实现。
 
-因此成本比较应把每轮的并行宽度和迭代次数一起算。粗略地，$K$ 轮去噪的成本可记为 $K\,C_{\mathrm{forward}}$，自回归生成 $O$ 个 token 则约为 $O\,C_{\mathrm{decode\ step}}$；两项的单步工作量并不相同，还受上下文长度、KV 复用、批量、质量目标和硬件影响。轮数较少或一次预测多个位置，不足以单独证明端到端更快。LLaDA2.0 预印本报告了从自回归模型转换到 100B 总参数 block-diffusion 模型的三阶段训练方案，并进行 SFT/DPO 后训练；这是作者在该模型和评测上的研究报告，不是扩散模型普遍胜出的证明。[LLaDA2.0](https://arxiv.org/abs/2512.15745)。现代离散扩散语言模型的设计综述可参见 2026 年 10 月提交的 survey；其中的结构分类和性能讨论属于综述及其引用研究，仍需回到各原始论文核对。[How To Build A Modern Diffusion Language Model](https://arxiv.org/abs/2610.33391)。
+因此成本比较应把每轮的并行宽度和迭代次数一起算。粗略地， $K$ 轮去噪的成本可记为 $K\,C_{\mathrm{forward}}$，自回归生成 $O$ 个 token 则约为 $O\,C_{\mathrm{decode\ step}}$；两项的单步工作量并不相同，还受上下文长度、KV 复用、批量、质量目标和硬件影响。轮数较少或一次预测多个位置，不足以单独证明端到端更快。LLaDA2.0 预印本报告了从自回归模型转换到 100B 总参数 block-diffusion 模型的三阶段训练方案，并进行 SFT/DPO 后训练；这是作者在该模型和评测上的研究报告，不是扩散模型普遍胜出的证明。[LLaDA2.0](https://arxiv.org/abs/2512.15745)。现代离散扩散语言模型的设计综述可参见 2026 年 10 月提交的 survey；其中的结构分类和性能讨论属于综述及其引用研究，仍需回到各原始论文核对。[How To Build A Modern Diffusion Language Model](https://arxiv.org/abs/2610.33391)。
 
 理解训练细节可接到[第 3 章的 tokenizer、语料与预训练目标](03-tokenization数据与预训练进阶.md)，而 block 状态、并行解码和 KV 管理应回到[第 6 章的推理服务成本账本](06-推理部署与服务进阶.md)。
 
@@ -1618,14 +1618,14 @@ Transformer 的优势是显式读取任意历史 token，代价是 dense 交互�
 线性离散状态空间模型可以写为：
 
 ~~~math
-h_t=Ah_{t-1}+Bx_t,\qquad
-y_t=Ch_t+Dx_t
+h_{t}=Ah_{t-1}+Bx_{t},\qquad
+y_{t}=Ch_{t}+Dx_{t}
 ~~~
 
 
 A 控制历史状态如何衰减和混合，B 决定输入如何写入，C 决定状态如何读出，D 是输入的直接通路。对线性、时不变系统，可以把递推展开为卷积；训练时可用卷积或并行 scan，推理时可用状态递推。S4 和 Mamba 分别展示了结构化状态空间与选择性状态更新路线：[S4](https://arxiv.org/abs/2111.00396)、[Mamba](https://arxiv.org/abs/2312.00752)。
 
-离散化连续系统会得到带步长的 A_bar、B_bar 等参数。实际 S4、Mamba 等模型有更复杂的结构化参数化和数值处理，不能用四个矩阵的 toy 公式替代论文实现。
+离散化连续系统会得到带步长的 $\bar{A}$、 $\bar{B}$ 等参数。实际 S4、Mamba 等模型有更复杂的结构化参数化和数值处理，不能用四个矩阵的 toy 公式替代论文实现。
 
 ### 22.3 与 RNN、CNN、attention 的边界
 
@@ -1671,13 +1671,13 @@ for a in [0.2, 0.8]:
 
 > **代码状态：静态审阅，未运行（2026-10-29）**
 
-a 越接近 1，历史衰减越慢；输入 `[1,0,0,0,0]` 在 a=0.2 时产生 `[1,0.2,0.04,0.008,0.0016]`，在 a=0.8 时产生 `[1,0.8,0.64,0.512,0.4096]`。这只是状态记忆的直觉，不是 Mamba 的完整实现。
+a 越接近 $1$，历史衰减越慢；输入 $[1,0,0,0,0]$ 在 $a=0.2$ 时产生 $[1,0.2,0.04,0.008,0.0016]$，在 $a=0.8$ 时产生 $[1,0.8,0.64,0.512,0.4096]$。这只是状态记忆的直觉，不是 Mamba 的完整实现。
 
-再用含写入系数的递推手算一次：取 h_t=0.8h_{t−1}+0.2x_t、h_0=0、输入 `[1,0,1]`。第一步 h_1=0.2；第二步 h_2=0.8×0.2=0.16；第三步 h_3=0.8×0.16+0.2=0.328。第一条输入的贡献经过两个间隔后只剩 0.8²×0.2=0.128，最近输入贡献是 0.2，二者相加得到 0.328。A 控制历史衰减，B 控制当前写入，输出矩阵 C 再决定哪些状态维度被读出。
+再用含写入系数的递推手算一次：取 $h_{t}=0.8h_{t-1}+0.2x_{t}$、 $h_{0}=0$、输入 $[1,0,1]$。第一步 $h_{1}=0.2$；第二步 $h_{2}=0.8\times0.2=0.16$；第三步 $h_{3}=0.8\times0.16+0.2=0.328$。第一条输入的贡献经过两个间隔后只剩 $0.8^2\times0.2=0.128$，最近输入贡献是 $0.2$，二者相加得到 $0.328$。 $A$ 控制历史衰减， $B$ 控制当前写入，输出矩阵 $C$ 再决定哪些状态维度被读出。
 
 这个 toy 也能帮助设计反事实任务：同一随机标记放在近处或远处，其他 token 和答案不变，测其输出随距离如何变化；再把同一标记更新成新值，区分“仍能复述旧值”和“能跟踪最新值”。如果距离变长但最新值能力保持，可能是覆盖机制与精确检索不同；如果短距离也失败，再检查输入写入、状态初始化和输出读出。用这样的对照，能把一个准确率下降拆成写入、保留、更新或读出环节。
 
-这个小算式揭示了状态路线的基本折中：固定维度状态让每步更新成本不随完整历史长度线性增长，但过去信息被混合压缩，模型无法像 dense attention 一样直接寻址任意历史 token。选择性 SSM 试图让写入/遗忘随输入变化，改善固定递推的限制。Gated DeltaNet-2 将 key 侧擦除门控 $b_t$ 与 value 侧写入门控 $w_t$ 解耦，使它们不必共用一个标量；作者用 1.3B 参数模型和 100B FineWeb-Edu token 训练比较，并报告了其 recurrent 与加入滑动窗口 attention 的 hybrid 变体在若干语言、常识和 RULER 检索切片上的结果。这里的结论限于论文模型与任务；hybrid 结果还包含显式窗口 attention，不能全归因于递归状态更新。[Gated DeltaNet-2](https://arxiv.org/abs/2605.22791)。
+这个小算式揭示了状态路线的基本折中：固定维度状态让每步更新成本不随完整历史长度线性增长，但过去信息被混合压缩，模型无法像 dense attention 一样直接寻址任意历史 token。选择性 SSM 试图让写入/遗忘随输入变化，改善固定递推的限制。Gated DeltaNet-2 将 key 侧擦除门控 $b_{t}$ 与 value 侧写入门控 $w_{t}$ 解耦，使它们不必共用一个标量；作者用 1.3B 参数模型和 100B FineWeb-Edu token 训练比较，并报告了其 recurrent 与加入滑动窗口 attention 的 hybrid 变体在若干语言、常识和 RULER 检索切片上的结果。这里的结论限于论文模型与任务；hybrid 结果还包含显式窗口 attention，不能全归因于递归状态更新。[Gated DeltaNet-2](https://arxiv.org/abs/2605.22791)。
 
 ### 22.6 SSM 的评价维度
 
@@ -1685,17 +1685,17 @@ a 越接近 1，历史衰减越慢；输入 `[1,0,0,0,0]` 在 a=0.2 时产生 `[
 
 与 attention 对照时匹配模型规模、训练 token、数据、位置和 decode batch，并报告质量、prefill/decode 延迟、状态或 KV 字节及成功任务成本。若 SSM 吞吐更高但 5000 token 处开始丢 ID，应呈现效率与精确回忆的取舍；若复制保持而冲突约束失败，问题可能在状态绑定。标量例子只说明递推，不代表真实多维选择性状态的全部能力。
 
-状态容量也能按系统预算粗估。若每层持有 $d_s$ 个元素、共有 $L$ 层、每元素 $s$ 字节，单流状态约为 $Ld_ss$，并发 $B$ 条流再乘 $B$。以 32 层、每层 4096 个 BF16 元素为例，单流是 $32\times4096\times2=262,144$ 字节，即 256 KiB；真实模型还可能有卷积状态、门控或额外缓存，须从配置与实现补齐。训练 scan 的吞吐与单步递推延迟也要分开测。
+状态容量也能按系统预算粗估。若每层持有 $d_{s}$ 个元素、共有 $L$ 层、每元素 $s$ 字节，单流状态约为 $Ld_{s}s$，并发 $B$ 条流再乘 $B$。以 $32$ 层、每层 $4{,}096$ 个 BF16 元素为例，单流是 $32\times4{,}096\times2=262{,}144$ 字节，即 $256\ \mathrm{KiB}$；真实模型还可能有卷积状态、门控或额外缓存，须从配置与实现补齐。训练 scan 的吞吐与单步递推延迟也要分开测。
 
 流式实现还要验证状态生命周期：新请求从正确初态开始，结束或取消后释放状态，chunk 边界连续，批次重排不串流。对同一输入比较整段与分块处理，再并发运行两条内容不同的流，确认重置和隔离。数学递推正确并不能排除运行时状态复用错误。
 
 ### 22.7 记忆容量还要看请求生命周期
 
-常数大小状态只表示它不随完整历史长度线性增长，不表示状态可以在请求间随意共享。两条并发流若错误复用同一份 $h_t$，第二条流的输出就可能依赖第一条流的历史；在 batch 动态重排时，状态还必须跟着 request ID 移动，而不是跟着 batch 行号保留。每条流至少应绑定模型版本、层状态、卷积缓存、position/chunk 计数和取消标记。
+常数大小状态只表示它不随完整历史长度线性增长，不表示状态可以在请求间随意共享。两条并发流若错误复用同一份 $h_{t}$，第二条流的输出就可能依赖第一条流的历史；在 batch 动态重排时，状态还必须跟着 request ID 移动，而不是跟着 batch 行号保留。每条流至少应绑定模型版本、层状态、卷积缓存、position/chunk 计数和取消标记。
 
 做一个最小生命周期检查：同一序列先整段输入，再切成 3 个 chunk 输入，比较每个边界后的状态读出；然后用两条内容完全不同的序列交错执行 A1、B1、A2、B2，与分别单独执行 A、B 对照。若单流数值正确、交错后不一致，问题在状态隔离或重排，不在状态方程。生产评估还要包含请求取消、超时、批次扩缩和模型热切换；释放状态不及时会造成显存泄漏，错误重用则会造成跨用户信息污染。理论上的线性序列成本必须与这些状态治理成本一起看。
 
-并发状态的账本会把小数字放大。若一个教学配置的单流状态约为 256 KiB，1000 条并发流的纯状态合计约 250 MiB；这仍未包括卷积状态、allocator 对齐、请求元数据和模型权重。若系统同时运行 32 个 replica，必须确认该预算是每卡、每 replica 还是全服务口径。对短请求，状态初始化与调度开销可能超过递推本身；对长流，常驻状态有利于避免反复编码历史，但取消或断连后应尽快释放。将峰值并发、平均并发和取消后的残留状态分别测量，才能判断“常数状态”是否转化成实际的服务优势。
+并发状态的账本会把小数字放大。若一个教学配置的单流状态约为 $256\ \mathrm{KiB}$， $1{,}000$ 条并发流的纯状态合计约 $250\ \mathrm{MiB}$；这仍未包括卷积状态、allocator 对齐、请求元数据和模型权重。若系统同时运行 $32$ 个 replica，必须确认该预算是每卡、每 replica 还是全服务口径。对短请求，状态初始化与调度开销可能超过递推本身；对长流，常驻状态有利于避免反复编码历史，但取消或断连后应尽快释放。将峰值并发、平均并发和取消后的残留状态分别测量，才能判断“常数状态”是否转化成实际的服务优势。
 
 ## 23. Attention、SSM 与卷积的混合架构
 
@@ -1759,19 +1759,19 @@ for name, kinds in stacks.items():
 
 > **代码状态：静态审阅，未运行（2026-10-29）**
 
-T=8192 时，12 个 dense attention 层的交互 proxy 是 $12T^2=805,306,368$；示例 hybrid 含 3 个 attention、6 个 SSM 和 3 个卷积层，按 width=64 合计 $3T^2+9\times64T=206,045,184$，约为 dense 的 25.6%；mostly-SSM 为 $2T^2+10\times64T=139,460,608$，约为 17.3%。这只是交互数 proxy，不含各算子的真实常数、完整宽度、kernel、状态读写和质量，不能据此预测端到端速度。
+$T=8{,}192$ 时， $12$ 个 dense attention 层的交互 proxy 是 $12T^2=805{,}306{,}368$；示例 hybrid 含 $3$ 个 attention、 $6$ 个 SSM 和 $3$ 个卷积层，按 width $=64$ 合计 $3T^2+9\times64T=206{,}045{,}184$，约为 dense 的 $25.6\%$；mostly-SSM 为 $2T^2+10\times64T=139{,}460{,}608$，约为 $17.3\%$。这只是交互数 proxy，不含各算子的真实常数、完整宽度、kernel、状态读写和质量，不能据此预测端到端速度。
 
-一种可能的中间设计是让状态数量随上下文对数增长，在固定状态递归和显式二次交互之间调节记忆容量。Log-Linear Attention 用 Fenwick tree 把历史分成不同尺度的区间；在论文给出的形式下，训练计算为 $O(T\log T)$，每个前缀读取的状态数为 $O(\log T)$。例如 $T=8192$ 时，树深约为 $\log_2 8192=13$；这表示至多约 13 个区间状态参与一次读出，不表示只有 13 个标量或端到端成本就是 dense attention 的某个固定比例。作者将该框架实例化到 Mamba-2 和 Gated DeltaNet；其 700M—800M 模型实验显示若干任务有改善，但仍与 Transformer 存在性能差距，且区间内计算和反向传播需要更复杂的实现。[Log-Linear Attention](https://arxiv.org/abs/2506.04761)。Kimi Linear 的 KDA 是另一条具体路线，机制与论文设置见[第二十一册第 76 章](../../book-21-transformer-architecture-evolution/chapters/76-kda从delta规则到线性注意力.md)。这些研究结果不能自动外推到长文档问答或在线推理；公平对照要同时固定 token 预算、参数量、精度、硬件和 kernel 成熟度，并用单证据、多证据、复制和顺序任务检查状态压缩的代价。
+一种可能的中间设计是让状态数量随上下文对数增长，在固定状态递归和显式二次交互之间调节记忆容量。Log-Linear Attention 用 Fenwick tree 把历史分成不同尺度的区间；在论文给出的形式下，训练计算为 $O(T\log T)$，每个前缀读取的状态数为 $O(\log T)$。例如 $T=8192$ 时，树深约为 $\log_{2} 8192=13$；这表示至多约 13 个区间状态参与一次读出，不表示只有 13 个标量或端到端成本就是 dense attention 的某个固定比例。作者将该框架实例化到 Mamba-2 和 Gated DeltaNet；其 700M—800M 模型实验显示若干任务有改善，但仍与 Transformer 存在性能差距，且区间内计算和反向传播需要更复杂的实现。[Log-Linear Attention](https://arxiv.org/abs/2506.04761)。Kimi Linear 的 KDA 是另一条具体路线，机制与论文设置见[第二十一册第 76 章](../../book-21-transformer-architecture-evolution/chapters/76-kda从delta规则到线性注意力.md)。这些研究结果不能自动外推到长文档问答或在线推理；公平对照要同时固定 token 预算、参数量、精度、硬件和 kernel 成熟度，并用单证据、多证据、复制和顺序任务检查状态压缩的代价。
 
 混合层的放置顺序会改变信息流。若每四层才有一层 full attention，局部层的状态压缩必须把有用线索带到下一次全局读取；若最先的 attention 太稀疏，远距离证据可能在被精确访问前已被压缩。反过来，attention 层太密会吃掉预期的线性成本收益。因此应做层位 ablation：固定层数和算子数量，只改变 attention 所在深度，再比较不同证据距离的任务表现和每层状态/缓存开销。
 
 “成本低”也要说清具体哪一种成本。训练 wall-clock 受并行实现和硬件利用率影响；decode 成本受每 token 状态读写、batch 和带宽影响；质量成本则可能表现为需要更多生成 token 或重试。一个架构如果每秒 token 更多，但为了达到同等成功率需要更长输出，最终任务成本未必更低。将质量、训练成本、服务成本放在同一预算表，才有架构选择的可比条件。
 
-例如设 dense baseline 每个请求平均用 1 秒、任务成功率 80%，混合模型每个请求用 0.6 秒、成功率 60%。按“每次成功请求”的简单期望成本估算，dense 是 1/0.8=1.25 秒，混合模型是 0.6/0.6=1 秒；混合模型仍更省，但差距远小于单次时延看起来的 40%。若失败还会触发人工复核或二次调用，就要把这些成本也加进去。这个算例不是架构实测，只展示质量和系统指标必须一起折算。
+例如设 dense baseline 每个请求平均用 $1\ \mathrm{s}$、任务成功率 $80\%$，混合模型每个请求用 $0.6\ \mathrm{s}$、成功率 $60\%$。按“每次成功请求”的简单期望成本估算，dense 是 $1/0.8=1.25\ \mathrm{s}$，混合模型是 $0.6/0.6=1\ \mathrm{s}$；混合模型仍更省，但差距远小于单次时延看起来的 $40\%$。若失败还会触发人工复核或二次调用，就要把这些成本也加进去。这个算例不是架构实测，只展示质量和系统指标必须一起折算。
 
-同一 proxy 在不同长度下的比例也不同。按示例中的 width=64，T=1024 时 hybrid 约占 dense 的 29.7%，mostly-SSM 约 21.9%；T=8192 时已降到约 25.6% 和 17.3%；T=32768 时接近 25.1% 和 16.8%。这是因为线性项在短序列中占比更高，长度增加后 $T^2$ attention proxy 更快增长。它只说明这个玩具公式里的交互量变化，真实延迟还受投影、kernel 常数、并行度和内存流量影响。
+同一 proxy 在不同长度下的比例也不同。按示例中的 width $=64$， $T=1{,}024$ 时 hybrid 约占 dense 的 $29.7\%$，mostly-SSM 约 $21.9\%$； $T=8{,}192$ 时已降到约 $25.6\%$ 和 $17.3\%$； $T=32{,}768$ 时接近 $25.1\%$ 和 $16.8\%$。这是因为线性项在短序列中占比更高，长度增加后 $T^2$ attention proxy 更快增长。它只说明这个玩具公式里的交互量变化，真实延迟还受投影、kernel 常数、并行度和内存流量影响。
 
-所以混合结构的决策应先标明目标请求长度分布：若 90% 请求低于 1K token，理论长序列优势可能很难覆盖新增 kernel 和状态转换成本；若请求常达数万 token，再关注长距准确率、decode 缓存和状态隔离。长度分布决定哪一段曲线具有产品意义，不能只选择最有利的一个 benchmark 长度。
+所以混合结构的决策应先标明目标请求长度分布：若 $90\%$ 请求低于 $1\mathrm{K}$ token，理论长序列优势可能很难覆盖新增 kernel 和状态转换成本；若请求常达数万 token，再关注长距准确率、decode 缓存和状态隔离。长度分布决定哪一段曲线具有产品意义，不能只选择最有利的一个 benchmark 长度。
 
 这个比例还假设每次请求独立、成功定义一致、失败没有额外代价。若多次重试会改变成功概率，应从真实策略的请求轨迹估计期望成本；若失败任务严重度不同，则需要分层报告高风险 slice，而不能把它们压成一个均值。混合架构是否值得采用，最终取决于目标服务的延迟/成本预算和质量下限，而不是 proxy 曲线本身。
 
@@ -1792,7 +1792,7 @@ T=8192 时，12 个 dense attention 层的交互 proxy 是 $12T^2=805,306,368$�
 
 每次替换都用两类结果判断。一类是长程任务切片：随机 ID 复制、多约束合并、远距离代码定义回查，并按 evidence distance 分桶；另一类是系统分阶段 profile：训练 token/s 与峰值显存、长 prompt 的 prefill、长输出的 decode、状态/KV 字节与通信。短序列时投影和 kernel 启动成本可能主导，长序列时 $T^2$ 与线性状态路径的差异才更明显，因此至少测短、中、长三档，而不是把 8192 的 proxy 比例直接当成线上加速。
 
-总体平均值还可能掩盖一类不可接受的失败。假设请求中 90% 是短文本、混合架构成功率 96%，另 10% 是长文档、成功率 62%，总体成功率为 $0.9\times0.96+0.1\times0.62=92.6\%$；若长文档属于合同审查且最低要求为 90%，总体均值通过也不能让该切片上线。先为各切片设质量下限，再在满足约束的方案中比较成本，能避免用大量简单任务冲淡少数关键失效。这个原则同样适用于决定 attention 层位置：优化目标应绑定真实请求构成和失败代价，而不只是 proxy FLOPs。
+总体平均值还可能掩盖一类不可接受的失败。假设请求中 $90\%$ 是短文本、混合架构成功率 $96\%$，另 $10\%$ 是长文档、成功率 $62\%$，总体成功率为 $0.9\times0.96+0.1\times0.62=92.6\%$；若长文档属于合同审查且最低要求为 $90\%$，总体均值通过也不能让该切片上线。先为各切片设质量下限，再在满足约束的方案中比较成本，能避免用大量简单任务冲淡少数关键失效。这个原则同样适用于决定 attention 层位置：优化目标应绑定真实请求构成和失败代价，而不只是 proxy FLOPs。
 
 混合 runtime 还要把两类状态作为一个事务管理。每层 attention cache 需要记录位置、KV dtype 和 block 所属请求；SSM 状态需要记录 chunk 序号、初始状态及模型版本。请求在 decode 中途被重排或迁移时，两类状态必须同时跟随同一 request ID；若升级模型后只刷新 KV 而复用旧 SSM 状态，行为仍可能错误。可以在同一请求上注入取消、批次重排和版本切换，确认状态被完整迁移或一起失效。理论复杂度描述的是算子路径，真实服务还要保证状态路径的一致性。
 
@@ -1803,20 +1803,20 @@ T=8192 时，12 个 dense attention 层的交互 proxy 是 $12T^2=805,306,368$�
 
 ### 24.1 结构变量
 
-一个 decoder-only 模型的主要尺寸包括层数 L、模型宽度 d_model、query head 数 H_Q、K/V head 数 H_KV、head dimension d_h、MLP 中间宽度 d_ff、词表大小 V 和上下文长度 T。
+一个 decoder-only 模型的主要尺寸包括层数 $L$、模型宽度 $d_{\mathrm{model}}$、query head 数 $H_{\mathrm{Q}}$、K/V head 数 $H_{\mathrm{KV}}$、head dimension $d_{h}$、MLP 中间宽度 $d_{\mathrm{ff}}$、词表大小 $V$ 和上下文长度 $T$。
 
 通常：
 
 ~~~math
-d_{\mathrm{model}}=H_Qd_h
+d_{\mathrm{model}}=H_{Q}d_{h}
 ~~~
 
 
-GQA/MQA 只改变 H_KV，不改变 query 的总宽度关系。
+GQA/MQA 只改变 $H_{\mathrm{KV}}$，不改变 query 的总宽度关系。
 
 ### 24.2 深度和宽度
 
-增加深度会增加逐层组合、顺序延迟和训练稳定性压力；增加宽度会提高每层表示容量，但主要矩阵参数和 FLOPs 近似按 d_model² 增长。两者不是互换完全等价的旋钮。
+增加深度会增加逐层组合、顺序延迟和训练稳定性压力；增加宽度会提高每层表示容量，但主要矩阵参数和 FLOPs 近似按 $d_{\mathrm{model}}^2$ 增长。两者不是互换完全等价的旋钮。
 
 在一个带 dense attention 与普通 FFN 的 block 中，主要参数粗略为：
 
@@ -1830,15 +1830,15 @@ P_{\mathrm{ffn}}\approx2d_{\mathrm{model}}d_{\mathrm{ff}}
 ~~~
 
 
-如果 d_ff=4d_model，则每层约 12d_model²，再乘 L；embedding、输出头、norm、bias 和 MoE 需要另算。
+如果 $d_{\mathrm{ff}}=4d_{\mathrm{model}}$，则每层约 $12d_{\mathrm{model}}^2$，再乘 $L$；embedding、输出头、norm、bias 和 MoE 需要另算。
 
 ### 24.3 Head 数和 head dimension
 
-head 数和 d_h 共同决定子空间数量及每个子空间的宽度；d_h 过小会限制单头表示维度，过大则减少 head 数或增加矩阵计算。对齐要求随硬件、精度和 kernel 变化，因此具体尺寸必须在目标实现上测量，不能把某个 d_h 清单当成通用最优值。
+head 数和 $d_{h}$ 共同决定子空间数量及每个子空间的宽度； $d_{h}$ 过小会限制单头表示维度，过大则减少 head 数或增加矩阵计算。对齐要求随硬件、精度和 kernel 变化，因此具体尺寸必须在目标实现上测量，不能把某个 $d_{h}$ 清单当成通用最优值。
 
 ### 24.4 FFN 与 SwiGLU 尺寸
 
-普通 FFN d_ff 常接近 4d_model；SwiGLU 的三投影结构常把中间宽度调到约 8d_model/3。tensor parallel 要求 intermediate size 能均匀切分，因此配置中经常出现经过整除取整的数字。
+普通 FFN 的 $d_{\mathrm{ff}}$ 常接近 $4d_{\mathrm{model}}$；SwiGLU 的三投影结构常把中间宽度调到约 $8d_{\mathrm{model}}/3$。tensor parallel 要求 intermediate size 能均匀切分，因此配置中经常出现经过整除取整的数字。
 
 ### 24.5 硬件约束
 
@@ -1859,7 +1859,7 @@ head 数和 d_h 共同决定子空间数量及每个子空间的宽度；d_h 过
 
 ### 24.7 参数量估算
 
-尺寸之间存在连锁约束，而不是可以独立拨动的旋钮。先由 hidden 和 query heads 算出 d_h，再检查 KV heads 如何分组；接着由 attention 投影和 FFN hidden 估算每层参数，最后乘层数并补 embedding、词表与 norm。若任一步不整除，真实实现可能会填充或复制，估算就要修正。
+尺寸之间存在连锁约束，而不是可以独立拨动的旋钮。先由 hidden 和 query heads 算出 $d_{h}$，再检查 KV heads 如何分组；接着由 attention 投影和 FFN hidden 估算每层参数，最后乘层数并补 embedding、词表与 norm。若任一步不整除，真实实现可能会填充或复制，估算就要修正。
 
 下面把四个 attention 投影与 MLP 矩阵分开计数：普通两层 FFN 有 2 个主要矩阵，SwiGLU 有 up、gate、down 三个；输入模型宽度、中间宽度和层数，忽略 bias、norm、embedding 和输出头。
 
@@ -1893,9 +1893,9 @@ for name, hidden, projection_count in [
 
 > **代码状态：静态审阅，未运行（2026-10-29）**
 
-代码给出的 block stack 参数量约为 GeLU 6.442B、SwiGLU 6.476B。两者差异主要来自 SwiGLU 中间宽度取整，不是漏算了矩阵；二者都未含 embedding、输出头、norm、router 或共享权重。手算一层也能核对数量级：$d=4096$ 时四个 attention 投影约 $4d^2=67.1$M；$h=10923$ 的 SwiGLU 三张矩阵约 $3dh=134.2$M，约为 attention 的两倍。乘 32 层得到主干估算，权重以外的梯度、optimizer state 和激活还需另外计算。
+代码给出的 block stack 参数量约为 GeLU 6.442B、SwiGLU 6.476B。两者差异主要来自 SwiGLU 中间宽度取整，不是漏算了矩阵；二者都未含 embedding、输出头、norm、router 或共享权重。手算一层也能核对数量级： $d=4096$ 时四个 attention 投影约 $4d^2=67.1$M； $h=10923$ 的 SwiGLU 三张矩阵约 $3dh=134.2$M，约为 attention 的两倍。乘 32 层得到主干估算，权重以外的梯度、optimizer state 和激活还需另外计算。
 
-接着把全局维度映射到并行设备。$d_{model}=4096,H_Q=32$ 得到 $d_h=128$；若 $H_{KV}=8$，每个 KV head 服务 4 个 query heads。tensor parallel=8 时可理想地分到每 rank 4 个 Q heads 与 1 个 KV head；切分度改为 16 后，KV heads 不再一对一，框架可能复制 KV 或使用非对称布局。SwiGLU 的 $h=10923$ 也不一定能被 rank 数或 kernel tile 整除。配置检查要先算全局 head_dim/组大小，再列每 rank 张量形状，最后查目标框架和 kernel 是否支持；单看 hidden 能被 8 整除并不够。
+接着把全局维度映射到并行设备。 $d_{\mathrm{model}}=4096$、 $H_{\mathrm{Q}}=32$ 得到 $d_{h}=128$；若 $H_{\mathrm{KV}}=8$，每个 KV head 服务 $4$ 个 query heads。tensor parallel 度为 $8$ 时可理想地分到每 rank $4$ 个 Q heads 与 $1$ 个 KV head；切分度改为 $16$ 后，KV heads 不再一对一，框架可能复制 KV 或使用非对称布局。SwiGLU 的 $h=10{,}923$ 也不一定能被 rank 数或 kernel tile 整除。配置检查要先算全局 `head_dim`/组大小，再列每 rank 张量形状，最后查目标框架和 kernel 是否支持；单看 hidden 能被 $8$ 整除并不够。
 
 参数相近也不代表运行成本相近。矩阵形状会影响 padding、融合、通信和设备利用率；更深模型增加串行 block 与 pipeline 压力，更宽模型增大主要矩阵与参数存储，更长上下文增加注意力交互或状态缓存。MoE 还会把总参数存储、激活参数计算与 expert 通信拆成不同账目。架构审计需要同时报告理论参数/FLOPs、每 rank 形状、峰值激活、通信与目标硬件上的实测，不能只按参数量排名。
 
@@ -1903,13 +1903,13 @@ for name, hidden, projection_count in [
 
 词表与上下文会把这本账接到下一部分。词表大小 $V$ 每增加一项，未共享的 embedding 与输出头通常各增加约 $d_{model}$ 个权重；它还改变最后层 logits 计算。Tokenizer 若让同一语料平均 token 数减少，固定窗口能容纳更多文本，却可能增大词表矩阵；更长 context 则增加 attention 计算或缓存。审计尺寸时应代入真实 tokenizer、语料长度分布、prefill/decode 目标和权重共享方式，再确认这套配置是在目标约束下可训练、可切分且可服务。
 
-可以把参数账本进一步换成训练显存的量级。按代码的约 6.44B block-stack 参数，假设 BF16 权重 2 bytes、BF16 梯度 2 bytes、FP32 master weights 4 bytes、Adam 一阶/二阶状态各 4 bytes，则仅这部分约 $6.44\times10^9\times16\approx103$ GB（约 96 GiB）。这是显式假设下的优化器状态估算，未含 embedding/output head、激活、临时 buffer、碎片，也未考虑 ZeRO/FSDP 分片；若实现使用不同精度或 optimizer，数值会变。这样读者能看出“参数是 6.4B”并不等于“一张卡需要存 12.8GB 就能训练”。
+可以把参数账本进一步换成训练显存的量级。按代码的约 $6.44\times10^9$ 个 block-stack 参数，假设 BF16 权重各占 $2$ bytes、BF16 梯度各占 $2$ bytes、FP32 master weights 各占 $4$ bytes、Adam 一阶/二阶状态各占 $4$ bytes，则仅这部分约 $6.44\times10^9\times16\approx103\ \mathrm{GB}$（约 $96\ \mathrm{GiB}$）。这是显式假设下的优化器状态估算，未含 embedding/output head、激活、临时 buffer、碎片，也未考虑 ZeRO/FSDP 分片；若实现使用不同精度或 optimizer，数值会变。这样读者能看出“参数是 $6.4\times10^9$”并不等于“一张卡需要存 $12.8\ \mathrm{GB}$ 就能训练”。
 
 相同主干参数量也可有不同深宽组合。以主要参数近似 $P\propto Ld^2$，若把层数从 32 加到 64，保持此近似账本不变，宽度可缩到 $4096/\sqrt2\approx2896$。更深的模型每 token 串行经过更多 block，更窄模型的矩阵形状和 kernel 利用率又不同，因此相同参数量不等于相同延迟、稳定性或质量。这个推导只用于说明变量之间的约束；真实选择还要匹配 head、FFN、token budget、硬件和目标服务负载。
 
-词表也能代入同一数量账本。若 $V=32,000,d_{model}=4096$，一张 embedding/output 矩阵有 $Vd=131,072,000$ 个权重；BF16 存储约 262 MB（约 250 MiB）。若输入 embedding 与输出头不共享，需两张表；若权重绑定则只存一张，但输出 logits 仍要对每个位置计算与词表的相似度。tokenizer 的词表缩小可能减少这部分参数，却改变平均 token 数和序列长度，所以必须在同一语料上同时统计 tokens/document、词表投影计算和上下文覆盖量。
+词表也能代入同一数量账本。若 $V=32{,}000$、 $d_{\mathrm{model}}=4096$，一张 embedding/output 矩阵有 $Vd_{\mathrm{model}}=131{,}072{,}000$ 个权重；BF16 存储约 $262\ \mathrm{MB}$（约 $250\ \mathrm{MiB}$）。若输入 embedding 与输出头不共享，需两张表；若权重绑定则只存一张，但输出 logits 仍要对每个位置计算与词表的相似度。tokenizer 的词表缩小可能减少这部分参数，却改变平均 token 数和序列长度，所以必须在同一语料上同时统计 tokens/document、词表投影计算和上下文覆盖量。
 
-再核对代码里 256 对齐的后果：$8d/3$ 的整数宽度约为 10,922，向上取到 256 的倍数成为 11,008，比未对齐宽度多约 85 个通道；每层额外约 $3\times4096\times85\approx1.04$M 个 SwiGLU 权重，32 层多约 33.4M。取整让矩阵更适合目标 kernel，但也意味着“理论等参数”与真实 checkpoint 有小幅差异。写模型配置和比较实验时应记录最终 intermediate size，而不是只抄公式中的理想宽度。
+再核对代码里 256 对齐的后果： $8d/3$ 的整数宽度约为 10,922，向上取到 256 的倍数成为 11,008，比未对齐宽度多约 85 个通道；每层额外约 $3\times4096\times85\approx1.04$M 个 SwiGLU 权重，32 层多约 33.4M。取整让矩阵更适合目标 kernel，但也意味着“理论等参数”与真实 checkpoint 有小幅差异。写模型配置和比较实验时应记录最终 intermediate size，而不是只抄公式中的理想宽度。
 
 完整主干的粗估可以写成 $P\approx L(4d^2+3dh)$，其中只计 attention 和 SwiGLU 的主要矩阵。代入 $L=32,d=4096,h=11008$ 得到约 6.48B；若把 embedding/output head 或词表共享方式混进这项，就会重复或漏计。模型卡的“参数量”还可能包含 MoE 全部专家，报告时应说明这个公式覆盖了哪些模块，并用框架加载后的参数计数做最终核对。
 
@@ -1923,9 +1923,9 @@ for name, hidden, projection_count in [
 
 ### 25.2 再看六组字段
 
-1. attention：H_Q、H_KV、d_h、是否稀疏或混合；
+1. attention： $H_{\mathrm{Q}}$、 $H_{\mathrm{KV}}$、 $d_{h}$、是否稀疏或混合；
 2. position：RoPE base、scaling、ALiBi 或 relative bias；
-3. normalization：LayerNorm、RMSNorm、Pre/Post-LN、ε；
+3. normalization：LayerNorm、RMSNorm、Pre/Post-LN、 $\varepsilon$；
 4. MLP：激活函数、intermediate size、SwiGLU 或 MoE；
 5. scale：layers、hidden size、vocab、context；
 6. serving：KV Cache、quantization、kernel 和并行切分。
@@ -1934,11 +1934,11 @@ for name, hidden, projection_count in [
 
 ### 25.3 LLaMA 风格组合的读法
 
-如果配置包含 decoder-only、RMSNorm、RoPE、SwiGLU 和 H_KV<H_Q，它可以被描述为一种现代 decoder-only 组合，并且使用 GQA。这个判断说明架构结构，不应扩展成“因此一定更强”。质量还取决于数据、训练 token、后训练和评估。
+如果配置包含 decoder-only、RMSNorm、RoPE、SwiGLU 和 $H_{\mathrm{KV}} < H_{\mathrm{Q}}$，它可以被描述为一种现代 decoder-only 组合，并且使用 GQA。这个判断说明架构结构，不应扩展成“因此一定更强”。质量还取决于数据、训练 token、后训练和评估。
 
 ### 25.4 MoE 配置的读法
 
-如果看到 num_experts、top_k、capacity factor 或 auxiliary router loss，要把 total parameters 与 activated parameters 分开，并继续检查 expert parallel、通信拓扑、token drop、路由熵和热点延迟。
+如果看到 `num_experts`、`top_k`、capacity factor 或 auxiliary router loss，要把 total parameters 与 activated parameters 分开，并继续检查 expert parallel、通信拓扑、token drop、路由熵和热点延迟。
 
 ### 25.5 长上下文配置的读法
 
@@ -2022,7 +2022,7 @@ print(inspect_config(llama_like))
 
 > **代码状态：静态审阅，未运行（2026-10-29）**
 
-示例解析结果是 32 层、head_dim=128、GQA、相对 MHA 的 KV Cache 比例 0.25、MLP/hidden 比例 2.6875、RMSNorm 与 RoPE。代码只对字段做结构一致性检查，不验证权重、训练配方或长上下文能力。
+示例解析结果是 $32$ 层、`head_dim=128`、GQA、相对 MHA 的 KV Cache 比例 $0.25$、MLP/hidden 比例 $2.6875$、RMSNorm 与 RoPE。代码只对字段做结构一致性检查，不验证权重、训练配方或长上下文能力。
 
 因此审计结论应分层写：从 config 可以确认维度、声明的 norm/位置类型和 KV head 数；从权重 shape 可进一步核对投影是否匹配；从源码/运行时可确认 kernel、缓存布局和并行切分；从训练记录与评估才可判断长上下文和任务质量。缺哪类证据，就把结论停在哪一层。若外部模型卡只公布最大窗口和总参数量，仍不足以估算真实并发或判断某种架构机制是否有效。
 
@@ -2031,7 +2031,7 @@ print(inspect_config(llama_like))
 审计先固定模型 ID、revision、配置/权重文件哈希和 tokenizer/template 版本，再按以下顺序推理：
 
 1. **识别信息流**：判断 encoder、causal decoder、encoder–decoder 或混合状态，核对 mask 与生成协议。
-2. **检查维度**：计算 $d_h=d_{model}/H_Q$、GQA 分组 $H_Q/H_{KV}$ 和 MLP 投影宽度；标出不整除、复制或 padding。
+2. **检查维度**：计算 $d_{h}=d_{model}/H_{Q}$、GQA 分组 $H_{Q}/H_{KV}$ 和 MLP 投影宽度；标出不整除、复制或 padding。
 3. **估算资源**：按参数、KV/状态缓存、激活、精度和并行组分别记账，注明哪些数是公式估算。
 4. **核对实现**：通过源码、runtime 配置或小型回归确认 kernel、缓存布局、位置 offset、量化和 expert placement。
 5. **验证能力**：用长距离检索、目标任务和负载切片检验配置所暗示的能力；窗口字段本身不是有效长度证据。
@@ -2040,7 +2040,7 @@ print(inspect_config(llama_like))
 
 ### 25.8 同一配置的完整解读
 
-假设配置列出 32 层、hidden=4096、32 个 query heads、8 个 KV heads、intermediate=11008、RMSNorm 和 RoPE。可直接算得 $d_h=128$、GQA 组大小 4、$H_{KV}/H_Q=1/4$、MLP/hidden 比率约 2.69；若 batch=1、上下文 8192、BF16，逻辑 KV 估算约 1 GiB。配置能确认声明字段，权重 shape 可核对投影维度，源码/runtime 可核对 norm 顺序、RoPE scaling、KV layout、精度与并行实现；只有训练资料与任务评测能支持长上下文质量或 GQA 无损等结论。这里的 1 GiB 不是实测峰值，也不含分页碎片和并发。
+假设配置列出 $32$ 层、`hidden=4096`、 $32$ 个 query heads、 $8$ 个 KV heads、`intermediate=11008`、RMSNorm 和 RoPE。可直接算得 $d_{h}=128$、GQA 组大小 $4$、 $H_{\mathrm{KV}}/H_{\mathrm{Q}}=1/4$、MLP/hidden 比率约 $2.69$；若 `batch=1`、上下文长度为 $8{,}192$、BF16，逻辑 KV 估算约 $1\ \mathrm{GiB}$。配置能确认声明字段，权重 shape 可核对投影维度，源码/runtime 可核对 norm 顺序、RoPE scaling、KV layout、精度与并行实现；只有训练资料与任务评测能支持长上下文质量或 GQA 无损等结论。这里的 $1\ \mathrm{GiB}$ 不是实测峰值，也不含分页碎片和并发。
 
 若同一配置加入 64 experts、top-2，每个 token 激活两个专家，但总权重和优化器状态仍取决于全部专家。缺 capacity 统计范围就不能算 overflow；缺 expert-to-rank 映射和拓扑就不能估算 all-to-all。还需查 top-k 权重合并、fallback、router loss、量化 scale 和敏感算子的累积精度，避免从字段名补全未公开的实现。
 
