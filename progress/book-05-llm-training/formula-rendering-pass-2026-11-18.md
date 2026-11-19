@@ -20,4 +20,7 @@
 ## 补充修正（2026-11-19）
 
 - 根据反馈，修正第十一章 DPO 梯度说明中的未定义命令 `\Deltaref`，将 logit 写为与前文定义一致的 `$z=\beta(\Delta_{\theta}-\Delta_{\mathrm{ref}})$`。
+- 同步在 `写作规范/04-图表公式代码与引用.md` §6.2 增加规则：TeX 命令后不直接拼接文字下标，并用 `\Delta_{\mathrm{ref}}` 与错误形式 `\Deltaref` 对照说明。
 - 复核该行公式定界符和变量记号，并确认第十一章不再含 `\Deltaref`；未运行测试或 PDF 构建。
+- 根据反馈，补齐第一章 DPO loss 公式的嵌套闭合：在内层 `\right)` 后补上 `\right)` 和外层 `\right]`，使三层 `\left` / `\right` 按嵌套顺序配对。并在规范 §6.2 增加该配对规则。
+- 静态复核该公式的三个 `\left` 均有对应的 `\right`，括号顺序与公式结构一致；`git diff --check` 通过。未构建 PDF 或进行 GitHub 页面预览。
