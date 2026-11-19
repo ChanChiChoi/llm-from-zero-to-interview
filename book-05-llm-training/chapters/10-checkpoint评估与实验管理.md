@@ -27,7 +27,7 @@ e=
 (c,d,m,h,a,r)
 ```
 
-其中 `c` 是代码版本，`d` 是数据版本，`m` 是模型和 tokenizer 配置，`h` 是训练超参和硬件环境，`a` 是 checkpoint artifact，`r` 是评估结果。实验结论是否值得采信，取决于这些对象之间能否追溯和对齐，而不是取决于一个单独的总分。
+其中 $c$ 是代码版本， $d$ 是数据版本， $m$ 是模型和 tokenizer 配置， $h$ 是训练超参和硬件环境， $a$ 是 checkpoint artifact， $r$ 是评估结果。实验结论是否值得采信，取决于这些对象之间能否追溯和对齐，而不是取决于一个单独的总分。
 
 ```math
 E_evidence=(E_ckpt,E_eval,E_repro,E_compare,E_safety)
@@ -70,11 +70,11 @@ C_{\mathrm{base}}=
 \{model,opt,sched,rng,data,step,tok,config,tokenizer\}
 ```
 
-若训练确实启用了 FP16 loss scaler，则令 `C_precision={scaler}`；若使用 BF16 或其他不含 scaler 的配置，则 `C_precision=\varnothing`。完整恢复集合为 `C_resume=C_base\cup C_precision`。这样 manifest 中的精度、checkpoint 字段和恢复脚本必须使用同一份训练配置解释，不能把“这个字段常见”误写成所有任务都必需。
+若训练确实启用了 FP16 loss scaler，则令 $C_{\mathrm{precision}}={scaler}$；若使用 BF16 或其他不含 scaler 的配置，则 $C_{\mathrm{precision}}=\varnothing$。完整恢复集合为 $C_{\mathrm{resume}}=C_{\mathrm{base}}\cup C_{\mathrm{precision}}$。这样 manifest 中的精度、checkpoint 字段和恢复脚本必须使用同一份训练配置解释，不能把“这个字段常见”误写成所有任务都必需。
 
 用两个配置对照就能看出条件字段的作用：FP16 run 启用了 scaler，若 checkpoint 字段齐全却没有 scaler，则 $M_{\mathrm{missing}}=\{\mathrm{scaler}\}$，不能称为完整恢复；BF16 run 没有 scaler， $C_{\mathrm{precision}}=\varnothing$，缺少 scaler 不算缺项。但这两种 run 都需要 optimizer state；若 optimizer state 缺失，二者都不能从原更新轨迹无缝续训。
 
-恢复时要把缺失或版本不匹配的字段显式列出来。设 `available(u)` 表示当前 checkpoint 的字段 `u` 存在、版本匹配且能被训练脚本读取，则缺失集合为：
+恢复时要把缺失或版本不匹配的字段显式列出来。设 `available(u)` 表示当前 checkpoint 的字段 $u$ 存在、版本匹配且能被训练脚本读取，则缺失集合为：
 
 ```math
 M_{\mathrm{missing}}=
@@ -82,7 +82,7 @@ M_{\mathrm{missing}}=
 \neg\mathrm{available}(u)\}
 ```
 
-`M_missing` 为空时，只能说明恢复字段在文件层面齐全；仍需验证分片布局、数值有限性、数据 cursor 和恢复后的一步轨迹。若集合非空，就应明确这是“部分状态 checkpoint”，不能把它直接描述成可无缝恢复训练的版本。
+$M_{\mathrm{missing}}$ 为空时，只能说明恢复字段在文件层面齐全；仍需验证分片布局、数值有限性、数据 cursor 和恢复后的一步轨迹。若集合非空，就应明确这是“部分状态 checkpoint”，不能把它直接描述成可无缝恢复训练的版本。
 
 一个实用的 manifest 还应记录每个文件的大小、哈希、dtype、张量形状、写入版本和完成状态。这样加载失败时，工程师可以区分“代码不认识这个字段”“文件没有写完”和“文件内容已被破坏”，而不是把所有错误都归因于模型本身。
 
@@ -116,7 +116,7 @@ milestone: 用于评估和对比，按 token 数保存
 best: 根据评估指标选择，用于后训练或发布
 ```
 
-如果每 `f` 个 step 保存一次，总训练步数为 `S`，保存次数约为：
+如果每 $f$ 个 step 保存一次，总训练步数为 $S$，保存次数约为：
 
 ```math
 N_{\mathrm{save}}=
@@ -130,20 +130,20 @@ T_{\mathrm{lost,max}}=
 fB_{\mathrm{tok}}
 ```
 
-其中 `B_tok` 是每 step 消耗的 token 数。保存开销占比可以粗略估成：
+其中 $B_{\mathrm{tok}}$ 是每 step 消耗的 token 数。保存开销占比可以粗略估成：
 
 ```math
 R_{\mathrm{save}}=
 \frac{C_{\mathrm{save}}}{fT_{\mathrm{step}}}
 ```
 
-这里把每 step 的 token 数近似成常数；变长 batch 或动态 packing 时，更准确的做法是对故障窗口内实际消费的 token 求和。`f` 越小，容错越好，但 `R_save` 和存储压力越高。
+这里把每 step 的 token 数近似成常数；变长 batch 或动态 packing 时，更准确的做法是对故障窗口内实际消费的 token 求和。 $f$ 越小，容错越好，但 $R_{\mathrm{save}}$ 和存储压力越高。
 
-用一个构造账本把三个量连起来：假设每步消费 2,000,000 个有效 token，每 500 步保存一次，则一次故障最多回退约 `500×2,000,000=1,000,000,000` 个 token，即 1B。若训练共 12,000 步，保存次数约为 `ceil(12,000/500)=24` 次；每次保存占用 120 秒、平均 step 用时 4 秒，则串行保存开销近似为 `120/(500×4)=0.06`，即 6%。这些是便于比较策略的假设输入；异步保存会改变前台停顿时间，但不会消除 staging、I/O 和未完成写入的资源成本。
+用一个构造账本把三个量连起来：假设每步消费 2,000,000 个有效 token，每 500 步保存一次，则一次故障最多回退约 $500\times2,000,000=1,000,000,000$ 个 token，即 1B。若训练共 12,000 步，保存次数约为 $\lceil 12,000/500 \rceil=24$ 次；每次保存占用 120 秒、平均 step 用时 4 秒，则串行保存开销近似为 $120/(500\times4)=0.06$，即 6%。这些是便于比较策略的假设输入；异步保存会改变前台停顿时间，但不会消除 staging、I/O 和未完成写入的资源成本。
 
-这些量的有效域是 S>=0、f 为正整数、B_tok>=0、C_save>=0、T_step>0。训练尚未执行任何 step 时不应报告平均保存开销；若异步保存还未提交 manifest，已发起的写入也不能被计入可恢复版本数。
+这些量的有效域是 $S\ge0$、 $f$ 为正整数、 $B_{\mathrm{tok}}\ge0$、 $C_{\mathrm{save}}\ge0$、 $T_{\mathrm{step}}>0$。训练尚未执行任何 step 时不应报告平均保存开销；若异步保存还未提交 manifest，已发起的写入也不能被计入可恢复版本数。
 
-这里 `C_save` 是一次保存占用的墙钟时间，`T_step` 是一个训练 step 的平均时间；若保存与计算完全串行，`R_save` 近似表示保存带来的时间占比。异步写盘可以降低前台阻塞，但会增加显存/主机内存中的待写队列和“最新 checkpoint 尚未真正落盘”的窗口，因此还要记录发布状态，而不能只看保存函数返回。
+这里 $C_{\mathrm{save}}$ 是一次保存占用的墙钟时间， $T_{\mathrm{step}}$ 是一个训练 step 的平均时间；若保存与计算完全串行， $R_{\mathrm{save}}$ 近似表示保存带来的时间占比。异步写盘可以降低前台阻塞，但会增加显存/主机内存中的待写队列和“最新 checkpoint 尚未真正落盘”的窗口，因此还要记录发布状态，而不能只看保存函数返回。
 
 `latest`、`milestone` 和 `best` 是三种不同语义：latest 追求故障恢复距离短，milestone 追求按 consumed tokens 做公平纵向比较，best 追求某组评估目标下的候选选择。一个 checkpoint 可以同时属于多个集合，但保留策略不能把它们当成同一个对象。
 
@@ -170,7 +170,7 @@ R_{\mathrm{save}}=
 
 “sharded”描述的是存储布局，不等于“不能换并行规模”。有的格式保存了全局参数名和分片元数据，允许加载端重新切分；有的格式与当前 world size 或参数分片方式绑定，换机器数后需要转换。评估一个格式时，要把保存端和加载端的 world size、参数命名、dtype、词表大小以及 optimizer state 的布局一起记录。
 
-设模型参数量为 `P`，权重每个参数占 `b_w` 字节，则推理权重大小近似为：
+设模型参数量为 $P$，权重每个参数占 $b_w$ 字节，则推理权重大小近似为：
 
 ```math
 M_{\mathrm{eval}}=
@@ -186,18 +186,18 @@ P(b_w+b_g+b_m+b_v+b_{\mathrm{master}})
 +M_{\mathrm{meta}}
 ```
 
-保留策略应按唯一 artifact ID 求和，避免同一个 checkpoint 同时属于 latest、best 和 milestone 时被重复计费。令 `U_latest`、`U_best`、`U_mile` 分别表示三个角色引用的 artifact ID 集合，则：
+保留策略应按唯一 artifact ID 求和，避免同一个 checkpoint 同时属于 latest、best 和 milestone 时被重复计费。令 $U_{\mathrm{latest}}$、 $U_{\mathrm{best}}$、 $U_{\mathrm{mile}}$ 分别表示三个角色引用的 artifact ID 集合，则：
 
 ```math
 M_{\mathrm{retain}}=
 \sum_{c\in U_{\mathrm{latest}}\cup U_{\mathrm{best}}\cup U_{\mathrm{mile}}}M(c)
 ```
 
-这里 `M(c)` 是 artifact `c` 实际占用的存储，`latest` 偏容错，`best` 偏下游使用，`mile` 偏实验复盘。若 best 另存了一份独立的推理权重，它有自己的 ID 和大小，应另行计入；若它只是指向某个已有训练 checkpoint，则不能算两次。真实项目还要考虑 sharded checkpoint 合并、对象存储带宽和跨节点读取失败。
+这里 `M(c)` 是 artifact $c$ 实际占用的存储，`latest` 偏容错，`best` 偏下游使用，`mile` 偏实验复盘。若 best 另存了一份独立的推理权重，它有自己的 ID 和大小，应另行计入；若它只是指向某个已有训练 checkpoint，则不能算两次。真实项目还要考虑 sharded checkpoint 合并、对象存储带宽和跨节点读取失败。
 
 上式只是容量预算，不应被误读为精确的文件大小。压缩、稀疏格式、共享参数、元数据、索引、对齐填充和分片副本都会改变实际占用；优化器状态的 dtype 也可能与模型权重不同。工程上最好分别测量“写入前的逻辑大小”“对象存储实际大小”和“加载时的临时峰值”，因为 OOM 可能发生在恢复合并阶段，而不是发生在最终 artifact 的静态大小上。
 
-例如，构造一个 7B 参数模型，若评估权重按每参数 2 bytes 存储，则逻辑权重约为 `7×10^9×2=14×10^9` bytes；按 `1 GiB=2^30` bytes 换算约为 `13.04 GiB`，还未计入 tokenizer、索引和元数据。若仅为粗略规划而假设恢复状态每参数合计 16 bytes，则为 `112×10^9/2^30≈104.31 GiB`。这里的 16 bytes 是一个明确的 AdamW 状态账本假设，不是所有框架和精度都遵循的常数。按 ID 计保留量时，若 latest 为 `{c2,c3}`、best 为 `{c2}`、milestone 为 `{c1,c2}`，三个 artifact 各占 180 GiB，则唯一集合 `{c1,c2,c3}` 共 `3×180=540 GiB`；`c2` 虽有三个角色，仍只计一次。后面的 toy demo 给每份 checkpoint 设 180 GiB，是独立的构造输入，不是由前述简化参数账本推导出的文件测量值。
+例如，构造一个 7B 参数模型，若评估权重按每参数 2 bytes 存储，则逻辑权重约为 $7\times10^9\times2=14\times10^9$ bytes；按 $1 GiB=2^30$ bytes 换算约为 `13.04 GiB`，还未计入 tokenizer、索引和元数据。若仅为粗略规划而假设恢复状态每参数合计 16 bytes，则为 $112\times10^9/2^30\approx104.31 GiB$。这里的 16 bytes 是一个明确的 AdamW 状态账本假设，不是所有框架和精度都遵循的常数。按 ID 计保留量时，若 latest 为 `{c2,c3}`、best 为 `{c2}`、milestone 为 `{c1,c2}`，三个 artifact 各占 180 GiB，则唯一集合 `{c1,c2,c3}` 共 $3\times180=540 GiB$；`c2` 虽有三个角色，仍只计一次。后面的 toy demo 给每份 checkpoint 设 180 GiB，是独立的构造输入，不是由前述简化参数账本推导出的文件测量值。
 
 ## 4. 训练恢复和容错
 
@@ -244,7 +244,7 @@ global step 和 token count 正确
 \left|(s^+-s^-)-1\right|
 ```
 
-如果探针只跨越一个 optimizer step，还应检查 consumed tokens 的增量。设 `B_{\mathrm{tok}}^+` 是恢复后这一步按实际 batch 计算的预期 token 数，则：
+如果探针只跨越一个 optimizer step，还应检查 consumed tokens 的增量。设 $B_{\mathrm{tok}}^+$ 是恢复后这一步按实际 batch 计算的预期 token 数，则：
 
 ```math
 \delta_{\mathrm{tok}}=
@@ -259,9 +259,9 @@ R_{\mathrm{resume}}=
 (\delta_L,\delta_{\eta},\delta_{\mathrm{step}},\delta_{\mathrm{tok}})
 ```
 
-这个向量比一个真假值更有信息。`\delta_L` 较大，可能指向数据 batch、loss mask 或 optimizer state；`\delta_{\eta}` 异常，优先检查 scheduler 的 step 口径；`\delta_{\mathrm{step}}` 或 `\delta_{\mathrm{tok}}` 异常，则要检查 global step、gradient accumulation 和 data cursor。阈值 `\tau_L`、`\tau_{\eta}` 只能作为当前实验的比较尺度，不能被当成所有模型都适用的固定常数。
+这个向量比一个真假值更有信息。 $\delta_L$ 较大，可能指向数据 batch、loss mask 或 optimizer state； $\delta_{\eta}$ 异常，优先检查 scheduler 的 step 口径； $\delta_{\mathrm{step}}$ 或 $\delta_{\mathrm{tok}}$ 异常，则要检查 global step、gradient accumulation 和 data cursor。阈值 $\tau_L$、 $\tau_{\eta}$ 只能作为当前实验的比较尺度，不能被当成所有模型都适用的固定常数。
 
-相对偏差要求用于分母的 L^-、eta^- 和 B_tok^+ 都严格大于 0，且比较值有限。loss 恰为 0、初始学习率为 0 或恢复后没有有效 token 的情形，应分别报告绝对差、调度阶段或 `not_applicable`，而不是在分母加 epsilon 把“没有可比基线”伪装成一个稳定的小偏差。
+相对偏差要求用于分母的 $L^-$、 $\eta^-$ 和 $B_{\mathrm{tok}}^+$ 都严格大于 0，且比较值有限。loss 恰为 0、初始学习率为 0 或恢复后没有有效 token 的情形，应分别报告绝对差、调度阶段或 `not_applicable`，而不是在分母加 $\epsilon$ 把“没有可比基线”伪装成一个稳定的小偏差。
 
 还要注意，token count 连续并不能证明样本顺序连续。一个数据管道可能正好消费了相同数量的 token，却从另一个 shard 开始；因此 checkpoint 中的 data state 至少应包含数据版本、epoch 或 shard 顺序、当前 shard、样本/packed sequence 游标，以及必要时的 sampler 状态。恢复探针应把这些字段和日志里的 token 数放在同一张记录中。
 
@@ -269,7 +269,7 @@ R_{\mathrm{resume}}=
 
 以 PyTorch 2.15 的 Distributed Checkpoint（DCP）为例，分布式保存/读取接口处理各 rank 的本地分片和状态字典；应用仍要为自己的训练数据游标、配置 manifest 和版本发布定义完整性条件。`async_save` 把状态先 staging 到默认的 CPU 存储，再由后台线程执行保存；返回结果区分本地 staging 完成与 checkpoint 存储写入完成。前者意味着训练状态已有一份可继续写入的快照，后者才表示本次保存完成，应用应在后者成功后再把版本指针发布给读取者。异步 staging 会占用 CPU 或 pinned memory，多个未完成的写入会增加排队状态和内存压力；因此要同时记录 staging 与写入完成状态，并限制在途保存数。PyTorch 2.15 文档还明确说明，DCP 保存的 state dict 不保证跨 PyTorch 版本向后兼容。DCP 管理自己的保存/读取流程，但不会替应用提交对象存储事务或保证自定义 manifest 的原子发布；这些边界要按具体后端和版本进行恢复演练。[PyTorch 2.15 DCP 文档](https://docs.pytorch.org/docs/2.15/distributed.checkpoint.html)；[异步保存教程](https://docs.pytorch.org/tutorials/recipes/distributed_async_checkpoint_recipe.html)。
 
-可以用一组数值输入理解恢复探针。设中断前 `L^- = 2.00`、`η^- = 3×10^{-4}`、`s^- = 10,000`、`T^- = 50.000B`；恢复后第一步记录 `L^+ = 2.04`、相同学习率、`s^+ = 10,001`、`T^+ = 50.004B`，本步按 batch 预期消费 0.004B（4M）token。则 `δ_L=|2.04−2.00|/2.00=0.02`，学习率偏差为 0，step 偏差为 `|(10,001−10,000)−1|=0`，token 偏差为 `|(0.004−0.004)|/0.004=0`。若本项目预先设定 `τ_L=0.03`，这组观测通过这些探针；阈值只是本例的决策设置，不是通用常数。若实际 token 增量只有 0.0035B，则 `δ_tok=|0.0035−0.004|/0.004=0.125`，即 12.5%，应先检查 batch 计数和数据游标，而不是把它当作普通浮点噪声。
+可以用一组数值输入理解恢复探针。设中断前 $L^- = 2.00$、 $\eta^- = 3\times10^{-4}$、 $s^- = 10,000$、 $T^- = 50.000B$；恢复后第一步记录 $L^+ = 2.04$、相同学习率、 $s^+ = 10,001$、 $T^+ = 50.004B$，本步按 batch 预期消费 0.004B（4M）token。则 $\delta_L=|2.04−2.00|/2.00=0.02$，学习率偏差为 0，step 偏差为 $|(10,001−10,000)−1|=0$，token 偏差为 $|(0.004−0.004)|/0.004=0$。若本项目预先设定 $\tau_L=0.03$，这组观测通过这些探针；阈值只是本例的决策设置，不是通用常数。若实际 token 增量只有 0.0035B，则 $\delta_{\mathrm{tok}}=|0.0035−0.004|/0.004=0.125$，即 12.5%，应先检查 batch 计数和数据游标，而不是把它当作普通浮点噪声。
 
 因此，说明 checkpoint 恢复时，不能只停留在“调用 `load_state_dict`”。完整流程应先验证 artifact 和版本，再恢复所有训练状态，最后用 loss、学习率、step、token 增量和数据游标做一个短探针；如果某一项偏离，就根据偏差类型定位，而不是盲目继续训练。
 
@@ -328,13 +328,13 @@ PPL=
 \exp(L_{\mathrm{val}})
 ```
 
-手算一个只有两个有效目标 token 的构造例。若模型给真实 token 的概率分别为 `1/2` 和 `1/4`，mask 为 `[1,1,0]`（第三个位置不计入），则有效 token 平均交叉熵为 `L=−(ln(1/2)+ln(1/4))/2=(ln 2+ln 4)/2≈(0.6931+1.3863)/2=1.0397` nat。于是 `PPL=exp(1.0397)=√8≈2.83`。分母是 2 个有效目标，不是 3 个位置；这个小例只说明定义中的计算，不能拿来比较不同 tokenizer 或数据分布。
+手算一个只有两个有效目标 token 的构造例。若模型给真实 token 的概率分别为 $1/2$ 和 $1/4$，mask 为 `[1,1,0]`（第三个位置不计入），则有效 token 平均交叉熵为 $L=−(\ln(1/2)+\ln(1/4))/2=(\ln 2+\ln 4)/2\approx(0.6931+1.3863)/2=1.0397$ nat。于是 $PPL=\exp(1.0397)=\sqrt{8}\approx2.83$。分母是 2 个有效目标，不是 3 个位置；这个小例只说明定义中的计算，不能拿来比较不同 tokenizer 或数据分布。
 
-固定长度模型还要明确 stride（滑动窗口步长）。设最大上下文为 4，待评估序列为 `x1,…,x7`，使用 stride=2 的窗口 `[x1,x2,x3,x4]`、`[x3,x4,x5,x6]`、`[x5,x6,x7]`。第一窗计分 `x2,x3,x4` 三个目标；第二窗把重叠前缀 `x3,x4` 的 label mask 掉，只计新目标 `x5,x6`；第三窗 mask 掉 `x5,x6`，只计 `x7`。最终共计 `3+2+1=6` 个目标且每个只出现一次。若改成互不重叠的 4-token 窗口，第二窗开头 `x5` 没有左侧上下文，常见因果计分方式会漏掉它，只剩 5 个目标。stride 改变上下文与被计分 token 的组合，因此两条 PPL 曲线只有在窗口、mask 和分母口径一致时才可比较；固定长度模型的具体示例见[官方 PPL 说明](https://huggingface.co/docs/transformers/perplexity)。
+固定长度模型还要明确 stride（滑动窗口步长）。设最大上下文为 4，待评估序列为 $x_1,\ldots,x_7$，使用 $stride=2$ 的窗口 $[x_1,x_2,x_3,x_4]$、 $[x_3,x_4,x_5,x_6]$、 $[x_5,x_6,x_7]$。第一窗计分 $x_2,x_3,x_4$ 三个目标；第二窗把重叠前缀 $x3,x4$ 的 label mask 掉，只计新目标 $x5,x6$；第三窗 mask 掉 $x5,x6$，只计 $x_7$。最终共计 $3+2+1=6$ 个目标且每个只出现一次。若改成互不重叠的 4-token 窗口，第二窗开头 $x_5$ 没有左侧上下文，常见因果计分方式会漏掉它，只剩 5 个目标。stride 改变上下文与被计分 token 的组合，因此两条 PPL 曲线只有在窗口、mask 和分母口径一致时才可比较；固定长度模型的具体示例见[官方 PPL 说明](https://huggingface.co/docs/transformers/perplexity)。
 
 loss 越低，perplexity 越低，说明模型对验证集 token 的预测越好。这里的“更好”只针对给定 tokenizer、给定数据分布和给定预测目标；它不是对模型全部能力的排序。
 
-这里的有效 token 分母必须大于 0，L_val 必须是有限实数。PPL 是指数变换：很大的 loss 可能使有限精度实现溢出为 Inf，因此日志应保存原始 loss，并把 Inf PPL 标记为数值范围问题而非一个可排序的有限分数。
+这里的有效 token 分母必须大于 0， $L_{\mathrm{val}}$ 必须是有限实数。PPL 是指数变换：很大的 loss 可能使有限精度实现溢出为 Inf，因此日志应保存原始 loss，并把 Inf PPL 标记为数值范围问题而非一个可排序的有限分数。
 
 还要留意统计分母。若一个 batch 中有 padding、prompt-only token 或被排除的标签，不能把总序列长度当作有效 token 数。对比不同 checkpoint 时，最好同时保存有效 token 数、每个 domain 的 token 数和聚合方式；否则同一个 loss 数字可能来自不同的样本覆盖。
 
@@ -371,7 +371,7 @@ Perplexity 还受 tokenizer 的切分粒度影响。同一段文本被切成更�
 
 domain 划分也要保持稳定。若一次实验把“代码注释”放进 general，另一次把它放进 code，曲线变化可能只是分类规则变化。比较时应保存 domain 定义、样本清单或稳定的哈希抽样规则，并记录每个桶的有效 token 数。
 
-设验证集按 domain 分成 `D_k`，每个 domain 的 loss 为：
+设验证集按 domain 分成 $D_k$，每个 domain 的 loss 为：
 
 ```math
 L_k=
@@ -390,7 +390,7 @@ L_{\mathrm{all}}=
 \sum_k w_kL_k
 ```
 
-其中 `w_k` 来自各 domain 的有效 token 占比。checkpoint 对比时，不仅要看 `L_all` 是否下降，也要看是否存在：
+其中 $w_k$ 来自各 domain 的有效 token 占比。checkpoint 对比时，不仅要看 $L_{\mathrm{all}}$ 是否下降，也要看是否存在：
 
 ```math
 L_k^{new}-L_k^{old}>\tau_k
@@ -398,9 +398,9 @@ L_k^{new}-L_k^{old}>\tau_k
 
 这类 domain regression。
 
-每个 domain 的有效 token 分母都必须大于 0，权重满足 w_k>=0 且 sum_k w_k=1。空 domain 应从本次聚合中排除并记录为未评估，而不是以零 loss 参与平均；否则只改变切分或过滤规则就能人为降低总 loss。
+每个 domain 的有效 token 分母都必须大于 0，权重满足 $w_k\ge0$ 且 $\sum_k w_k=1$。空 domain 应从本次聚合中排除并记录为未评估，而不是以零 loss 参与平均；否则只改变切分或过滤规则就能人为降低总 loss。
 
-例如 general domain 有 80 个有效 token、平均 loss 为 2.0；code domain 有 20 个有效 token、平均 loss 为 3.0。按有效 token 聚合得到 `L_all=(80×2.0+20×3.0)/(80+20)=220/100=2.2`，权重分别为 0.8 和 0.2。若错误地把两个 domain 均值等权平均，会得到 2.5；那回答的是“每个 domain 权重相同”的另一个问题，不是这 100 个 token 的整体平均。选择哪一种聚合必须在实验间保持一致并写明。
+例如 general domain 有 80 个有效 token、平均 loss 为 2.0；code domain 有 20 个有效 token、平均 loss 为 3.0。按有效 token 聚合得到 $L_{\mathrm{all}}=(80\times2.0+20\times3.0)/(80+20)=220/100=2.2$，权重分别为 0.8 和 0.2。若错误地把两个 domain 均值等权平均，会得到 2.5；那回答的是“每个 domain 权重相同”的另一个问题，不是这 100 个 token 的整体平均。选择哪一种聚合必须在实验间保持一致并写明。
 
 per-domain loss 的价值在于把“平均变好”拆成多个可解释的变化。它还会提醒我们检查 domain 的采样比例和有效 token 数：如果某个 domain 很小，均值波动可能很大；如果 domain 定义或 tokenizer 发生变化，跨版本的数值也不能直接排成一条曲线。
 
@@ -433,7 +433,7 @@ Base model 训练阶段也需要下游 benchmark。
 E=(c,v_{tok},v_{template},D_{task},S_{split},P,F,G,M,H)
 ```
 
-这里 `c` 是 checkpoint，`D_task` 和 `S_split` 是任务数据及划分，`P` 是 prompt/few-shot 配置，`F` 是输入格式，`G` 是生成设置，`M` 是 metric/scorer，`H` 是 harness 及其版本。只有关键字段一致，两个分数才是在同一把尺子上测得。实际报告还要保留逐样本输入、模型输出、解析结果和评分，便于重算指标与定位异常。
+这里 $c$ 是 checkpoint， $D_{\mathrm{task}}$ 和 $S_{\mathrm{split}}$ 是任务数据及划分， $P$ 是 prompt/few-shot 配置， $F$ 是输入格式， $G$ 是生成设置， $M$ 是 metric/scorer， $H$ 是 harness 及其版本。只有关键字段一致，两个分数才是在同一把尺子上测得。实际报告还要保留逐样本输入、模型输出、解析结果和评分，便于重算指标与定位异常。
 
 代表性评测研究和工具分别处理不同层次的问题：
 
@@ -445,7 +445,7 @@ E=(c,v_{tok},v_{template},D_{task},S_{split},P,F,G,M,H)
 
 这几类工作不能互相替代：HELM 主要规定“看哪些场景和维度”，lm-eval 主要解决“如何以可复核方式执行任务”，统计检验回答“观察到的差距有多不确定”。它们都不能单独证明某个 benchmark 完整代表了目标用户的真实能力。
 
-对于准确率类指标，样本数为 `n`、观测准确率为 `p` 时，独立同分布的粗略标准误可以写成：
+对于准确率类指标，样本数为 $n$、观测准确率为 $p$ 时，独立同分布的粗略标准误可以写成：
 
 ```math
 \mathrm{SE}(p)\approx
@@ -454,9 +454,9 @@ E=(c,v_{tok},v_{template},D_{task},S_{split},P,F,G,M,H)
 
 它不是所有评测的完整置信区间，尤其不适用于有相关样本、生成式评分或复杂 judge 的场景，但足以提醒我们：几十道题上的几个百分点变化，未必比评测噪声大。更可靠的比较通常保留逐样本结果，使用配对样本分析，并固定 prompt、解码参数、评判模型和随机种子。
 
-这个近似要求 n>0、0<=p<=1，并把样本近似视作独立同分布的伯努利观测；p=0 或 p=1 时标准误公式给出 0，却不代表没有不确定性，尤其当样本量很小或评测集经过筛选时。
+这个近似要求 $n>0$、 $0\le p\le1$，并把样本近似视作独立同分布的伯努利观测； $p=0$ 或 $p=1$ 时标准误公式给出 0，却不代表没有不确定性，尤其当样本量很小或评测集经过筛选时。
 
-比较两个模型时，两个独立准确率的标准误并没有利用“同一道题同时测两个模型”的配对信息。令 `b` 是旧模型答对而新模型答错的样本数，`c` 是旧模型答错而新模型答对的样本数；新模型准确率减旧模型准确率为 `(c-b)/n`，McNemar 检验等配对检验主要看这两类不一致样本，而不是把两组总错误数当成互不相关。例如两模型在 1000 道题上各对 900 题，若 `b=c=30`，整体准确率相同；若 `b=10,c=30`，新模型净多答对 20 题，差值为 2 个百分点，但这是否稳定仍要结合不一致样本数量和检验区间判断。
+比较两个模型时，两个独立准确率的标准误并没有利用“同一道题同时测两个模型”的配对信息。令 $b$ 是旧模型答对而新模型答错的样本数， $c$ 是旧模型答错而新模型答对的样本数；新模型准确率减旧模型准确率为 `(c-b)/n`，McNemar 检验等配对检验主要看这两类不一致样本，而不是把两组总错误数当成互不相关。例如两模型在 1000 道题上各对 900 题，若 $b=c=30$，整体准确率相同；若 $b=10,c=30$，新模型净多答对 20 题，差值为 2 个百分点，但这是否稳定仍要结合不一致样本数量和检验区间判断。
 
 对连续分数或样本级奖励，可对同一题的 `(score_old, score_new)` 成对重采样，得到差值分布；不能分别独立重采样后再假装两组样本没有对应关系。还有两种不确定性要分开报告：在固定 checkpoint 上重采样测试题，估计题目样本的不确定性；改变训练 seed 或 few-shot 选择重复评测，观察训练和提示选择带来的波动。lm-eval 论文明确把 bootstrap 的题目分布波动与模型/提示随机性区分开。若同时筛查很多 benchmark、domain 和阈值，还会出现多重比较：应先声明主要指标和决策门槛，或对探索性比较做相应校正，避免从一长串结果里只挑显著项。检验选择应参照任务和指标性质，例如 [Dror et al. 的指南](https://aclanthology.org/P18-1128/)及其[常见 NLP 检验附录](https://arxiv.org/abs/1809.01448)；不能把 McNemar 或 paired bootstrap 当成所有生成式评测的通用按钮。
 
@@ -491,7 +491,7 @@ Regression eval 的目标是发现：
 
 这类样本可以叫 lost cases 或回归样本。
 
-设旧模型正确标记为 `z_i^{old}`，新模型正确标记为 `z_i^{new}`，回归率可以写成：
+设旧模型正确标记为 $z_i^{old}$，新模型正确标记为 $z_i^{new}$，回归率可以写成：
 
 ```math
 R_{\mathrm{reg}}=
@@ -502,7 +502,7 @@ R_{\mathrm{reg}}=
 }
 ```
 
-如果样本带业务权重 `w_i`，高风险回归率可以写成：
+如果样本带业务权重 $w_i$，高风险回归率可以写成：
 
 ```math
 R_{\mathrm{reg,w}}=
@@ -513,7 +513,7 @@ R_{\mathrm{reg,w}}=
 }
 ```
 
-例如旧模型在 80 道题上答对，新模型把其中 4 道改错，则 `R_reg=4/80=5%`。若新模型还在旧模型原先答错的题中新增答对 10 道，这 10 道不会抵消上述回归率；应同时报告新增正确数或总准确率，避免一个方向的变化掩盖另一个方向。
+例如旧模型在 80 道题上答对，新模型把其中 4 道改错，则 $R_{\mathrm{reg}}=4/80=5%$。若新模型还在旧模型原先答错的题中新增答对 10 道，这 10 道不会抵消上述回归率；应同时报告新增正确数或总准确率，避免一个方向的变化掩盖另一个方向。
 
 常见回归维度：
 
@@ -526,7 +526,7 @@ R_{\mathrm{reg,w}}=
 
 回归率的分母也决定了它回答什么问题。上式回答的是“旧模型答对的样本中，有多少被新模型弄错”；它没有衡量新模型在旧模型答错样本上的新增正确，也没有区分评判器噪声。对开放式生成任务，应保存旧模型和新模型的原始输出、评分依据及评判器版本，必要时进行人工复核，否则一个 judge 的偶然变化可能被误报成模型回归。
 
-R_reg 的分母要求至少存在一个旧模型答对的样本；加权版本还要求这些样本的总正权重大于 0，且 w_i 非负。若旧模型没有任何正确样本，回归率应为 `not_applicable`，不能因分母加 epsilon 而显示为 0；同时应另报新模型的新增正确和总体表现。
+$R_{\mathrm{reg}}$ 的分母要求至少存在一个旧模型答对的样本；加权版本还要求这些样本的总正权重大于 0，且 $w_{i}$ 非负。若旧模型没有任何正确样本，回归率应为 `not_applicable`，不能因分母加 $\epsilon$ 而显示为 0；同时应另报新模型的新增正确和总体表现。
 
 模型评估不能只看平均分提升。对实际系统而言，一次高风险场景的退化可能比多个低风险题目的小幅提升更重要，所以回归样本、业务规则和安全样本应当保留原始输出、评判依据和模型版本，而不是只保存一个汇总比例。
 
@@ -547,7 +547,7 @@ R_reg 的分母要求至少存在一个旧模型答对的样本；加权版本�
 
 这些字段还应尽量有可验证的引用：数据和 checkpoint 保存内容摘要或哈希，代码保存 commit 与未提交 diff，环境保存依赖锁文件和 CUDA/驱动信息，评估保存脚本、prompt、解码参数和逐样本结果。没有这些记录，实验也许能够再次运行，却很难确认运行的是同一个实验。
 
-指标本身也需要一条可追溯的血缘。每条记录应能连回 `run_id → checkpoint_id → eval_run_id`，并保存指标名、单位、样本集合或数据切分、聚合方式和计算脚本版本。只保留“accuracy=0.84”会丢掉它是哪个 checkpoint、哪一批题、哪种答案解析器算出来的；只保留哈希而无法取回原 artifact，也不能支持复核。实际管理中可以把大对象放在 artifact store，把轻量元数据放入数据库，但它们的引用关系和访问权限必须保持可解析。
+指标本身也需要一条可追溯的血缘。每条记录应能连回 `run_id → checkpoint_id → eval_run_id`，并保存指标名、单位、样本集合或数据切分、聚合方式和计算脚本版本。只保留“`accuracy=0.84`”会丢掉它是哪个 checkpoint、哪一批题、哪种答案解析器算出来的；只保留哈希而无法取回原 artifact，也不能支持复核。实际管理中可以把大对象放在 artifact store，把轻量元数据放入数据库，但它们的引用关系和访问权限必须保持可解析。
 
 假设一次实验记录为 `run_042 → ckpt_2000 → eval_017`，这一串引用应能打开同一 checkpoint、评测集版本和评分脚本；eval_017 再记录样本数 1,000、准确率 0.84 和逐题结果。若数据库里只剩 0.84，而 eval_017 已被删除，别人就无法查明错题、重算配对差异或确认分数对应的 checkpoint。
 
@@ -558,9 +558,9 @@ R_{\mathrm{run}}=
 (v_{\mathrm{code}},v_{\mathrm{data}},v_{\mathrm{tok}},v_{\mathrm{cfg}},h,s,A,M)
 ```
 
-其中 `v_code` 是代码版本，`v_data` 是数据版本，`v_tok` 是 tokenizer 版本，`v_cfg` 是模型和训练配置版本，`h` 是硬件和依赖环境，`s` 是随机种子，`A` 是 artifact 列表，`M` 是指标表。这里的 `R_run` 是一份可追溯记录，不是把实验压缩成 run name；例如只记录一个 git commit，却没有保存数据过滤规则和评估脚本版本，仍然无法解释结果。
+其中 $v_{\mathrm{code}}$ 是代码版本， $v_{\mathrm{data}}$ 是数据版本， $v_{\mathrm{tok}}$ 是 tokenizer 版本， $v_{\mathrm{cfg}}$ 是模型和训练配置版本， $h$ 是硬件和依赖环境， $s$ 是随机种子， $A$ 是 artifact 列表， $M$ 是指标表。这里的 $R_{\mathrm{run}}$ 是一份可追溯记录，不是把实验压缩成 run name；例如只记录一个 git commit，却没有保存数据过滤规则和评估脚本版本，仍然无法解释结果。
 
-可以先衡量记录层面的缺失情况。设 `U_repro` 是复现所需的字段集合，`M_repro` 是缺失、不可解析或无法取得原始 artifact 的字段集合：
+可以先衡量记录层面的缺失情况。设 $U_{\mathrm{repro}}$ 是复现所需的字段集合， $M_{\mathrm{repro}}$ 是缺失、不可解析或无法取得原始 artifact 的字段集合：
 
 ```math
 M_{\mathrm{repro}}=
@@ -573,9 +573,9 @@ C_{\mathrm{repro}}=
 1-\frac{|M_{\mathrm{repro}}|}{|U_{\mathrm{repro}}|}
 ```
 
-假设本次审计要求六项：代码 commit、数据版本、tokenizer、训练配置、checkpoint manifest 和评估脚本；其中数据版本与评估脚本无法解析，则 `|U_repro|=6`、`|M_repro|=2`，覆盖率为 `1−2/6=2/3≈66.7%`。这个比例只描述记录字段是否找得到，不能解释成“有 66.7% 概率复现成功”；缺失的数据版本还可能使整个因果比较失去依据。
+假设本次审计要求六项：代码 commit、数据版本、tokenizer、训练配置、checkpoint manifest 和评估脚本；其中数据版本与评估脚本无法解析，则 $|U_{\mathrm{repro}}|=6$、 $|M_{\mathrm{repro}}|=2$，覆盖率为 $1−2/6=2/3\approx66.7%$。这个比例只描述记录字段是否找得到，不能解释成“有 66.7% 概率复现成功”；缺失的数据版本还可能使整个因果比较失去依据。
 
-`C_repro` 只是记录覆盖率：它等于 1，仍不等于重新运行后每个数字都相同。真正做复现时，还要比较原实验与复现实验的指标偏差。例如对第 `j` 个指标，可以写成：
+$C_{\mathrm{repro}}$ 只是记录覆盖率：它等于 1，仍不等于重新运行后每个数字都相同。真正做复现时，还要比较原实验与复现实验的指标偏差。例如对第 $j$ 个指标，可以写成：
 
 ```math
 \Delta_{j}=
@@ -584,7 +584,7 @@ C_{\mathrm{repro}}=
 
 对于 loss、吞吐、benchmark 分数等指标，允许的偏差应分别定义，并说明数据顺序、硬件、随机性和评估脚本是否一致。这样，“可复现”才同时包含可取得的材料和重新运行后的证据，而不是一个没有定义的完整标记。
 
-该覆盖率要求 U_repro 非空，且 M_repro 是它的子集；空需求集合不应自动得到 100% 复现率。Delta_j 也只有在同一指标定义、同一单位和两个有限数值下才可比较，缺失 artifact 或不可比评估脚本应作为限制单列，而不是赋予零偏差。
+$\Delta_j$ 也只有在同一指标定义、同一单位和两个有限数值下才可比较，缺失 artifact 或不可比评估脚本应作为限制单列，而不是赋予零偏差。
 
 实验管理的核心也由此变得清楚：让别人能够取得同一组输入和 artifact，知道每次变化来自哪一个版本，并能判断复现实验与原实验的差异是否在合理范围内。
 
@@ -654,7 +654,7 @@ final_v2
 2. **轨迹级复现**：loss、学习率、吞吐和 token 进度在容差内相近，适合定位恢复和训练稳定性问题。
 3. **结论级复现**：关键评估结论、排序或业务决策保持一致，适合大规模分布式训练的实际对比。
 
-例如原实验验证 loss 为 2.300，复跑为 2.318，绝对差 `Δ_loss=0.018`；tokens/s 从 100,000 降到 96,000，下降 `4,000/100,000=4%`。若事先设定 loss 容差 0.03、吞吐容差 5%，这两个指标都在本例容差内，但只能说达到这些指标的轨迹级要求。它仍不能证明权重逐字节相同；如果目标只是结论级复现，还要核对主要 benchmark 的差值区间和选择决策是否稳定。
+例如原实验验证 loss 为 2.300，复跑为 2.318，绝对差 $\Delta_{\mathrm{loss}}=0.018$；tokens/s 从 100,000 降到 96,000，下降 $4,000/100,000=4\%$。若事先设定 loss 容差 0.03、吞吐容差 5%，这两个指标都在本例容差内，但只能说达到这些指标的轨迹级要求。它仍不能证明权重逐字节相同；如果目标只是结论级复现，还要核对主要 benchmark 的差值区间和选择决策是否稳定。
 
 不要承诺所有大规模分布式训练都能逐 bit 复现；但也不能用这个困难掩盖缺少数据版本、评估脚本或 checkpoint manifest 的记录问题。应当在实验开始前写清楚本次实验追求哪一种复现强度。
 
@@ -679,7 +679,7 @@ final_v2
 4. 只看一个 benchmark。
 5. 没有统计波动和多次实验。
 
-如果两个实验配置分别是 `h_A` 和 `h_B`，想验证的变量集合是 `V`，公平对比要求除 `V` 外的关键字段一致：
+如果两个实验配置分别是 $h_A$ 和 $h_B$，想验证的变量集合是 $V$，公平对比要求除 $V$ 外的关键字段一致：
 
 ```math
 D_{\mathrm{diff}}=
@@ -692,11 +692,11 @@ D_{\mathrm{diff}}=
 \mathbf{1}[E_A\ne E_B]\right)
 ```
 
-其中 `T_A/T_B` 是训练 token 数，`E_A/E_B` 是评估集和评估脚本版本。`\Delta_compare` 把对比中最容易被忽略的三类差异显式列出来：未列入研究变量的配置差异、训练量差异和评估定义差异。真实实验中很难做到所有变量完全一致，但至少要把差异记录清楚，不能把多变量变化包装成单变量结论。比如数据版本变化通常比学习率变化更可能改变结果，却最容易被一个“lr sweep”标题掩盖。
+其中 $T_A/T_B$ 是训练 token 数， $E_A/E_B$ 是评估集和评估脚本版本。 $\Delta_{\mathrm{compare}}$ 把对比中最容易被忽略的三类差异显式列出来：未列入研究变量的配置差异、训练量差异和评估定义差异。真实实验中很难做到所有变量完全一致，但至少要把差异记录清楚，不能把多变量变化包装成单变量结论。比如数据版本变化通常比学习率变化更可能改变结果，却最容易被一个“lr sweep”标题掩盖。
 
-所以，比较两个实验时，最重要的不是把结果表格做得很大，而是先写清楚反事实问题：如果只改变 `V`，结果是否仍然发生同样方向的变化？对照越接近这个问题，结论越有解释力。
+所以，比较两个实验时，最重要的不是把结果表格做得很大，而是先写清楚反事实问题：如果只改变 $V$，结果是否仍然发生同样方向的变化？对照越接近这个问题，结论越有解释力。
 
-例如想只比较学习率，令 `V={lr}`。Run A 与 Run B 都使用 `data_v5`、`tok_v2`、104.9B consumed tokens、4M tokens/batch 和 seed 42，只有 `lr` 从 `3e-4` 变成 `2e-4`，因此已列关键条件中 `D_diff=∅`。若拿 Run A 与一个使用 `data_v6` 且训练到 157.3B tokens 的 Run C 比较，则 `D_diff` 至少包含 `data_version`，训练量差为 `|157.3−104.9|=52.4B` tokens；即使 Run C 分数更高，也不能把差异归因于学习率。差异清单不会自动消除混杂，但能把结论范围限制在真实做过的对照上。
+例如想只比较学习率，令 $V=\{\mathrm{lr}\}$。Run A 与 Run B 都使用 `data_v5`、`tok_v2`、104.9B consumed tokens、4M tokens/batch 和 seed 42，只有 `lr` 从 `3e-4` 变成 `2e-4`，因此已列关键条件中 $D_{\mathrm{diff}}=∅$。若拿 Run A 与一个使用 `data_v6` 且训练到 157.3B tokens 的 Run C 比较，则 $D_{\mathrm{diff}}$ 至少包含 `data_version`，训练量差为 $|157.3−104.9|=52.4B$ tokens；即使 Run C 分数更高，也不能把差异归因于学习率。差异清单不会自动消除混杂，但能把结论范围限制在真实做过的对照上。
 
 ## 14. Checkpoint 选择流程
 
@@ -727,11 +727,11 @@ J(c)=
 -\mu \widetilde{C}_{\mathrm{infer}}(c)
 ```
 
-这里 `S_val`、`S_bench` 和 `S_safety` 应先按项目定义归一化，`R_reg` 是回归风险，`\widetilde{C}_{infer}` 是归一化后的推理成本。不能直接把 nats、准确率、百分比和毫秒相加，否则权重没有可解释的尺度。权重也不是固定真理，而是要和项目目标绑定：base model 可能更重视 validation / benchmark，面向企业部署的模型可能更重视 regression / safety / latency。
+这里 $S_{\mathrm{val}}$、 $S_{\mathrm{bench}}$ 和 $S_{\mathrm{safety}}$ 应先按项目定义归一化， $R_{\mathrm{reg}}$ 是回归风险， $\widetilde{C}_{\mathrm{infer}}$ 是归一化后的推理成本。不能直接把 nats、准确率、百分比和毫秒相加，否则权重没有可解释的尺度。权重也不是固定真理，而是要和项目目标绑定：base model 可能更重视 validation / benchmark，面向企业部署的模型可能更重视 regression / safety / latency。
 
 总分只是方便排序的工具，不应替代约束和人工判断。比如一个模型即使总分最高，只要它在必须遵守的格式或安全场景上明显退化，就不应因为其他分数高而掩盖问题。实践中可以先排除不可接受的候选，再在剩余版本中比较总分；也可以保留 Pareto 前沿，把“更低成本但略低分”和“更高能力但更贵”的候选交给业务目标决定。
 
-归一化的方向和尺度也要在看候选结果前固定。validation loss 越低越好，所以示例用 `1−loss/cap`；当 loss 达到或超过 cap，得分被截为 0。这不表示两个很差的 checkpoint 一样好，只表示这项指标在当前选择政策中不再区分它们，必要时应降低 cap、改用分段映射，或把 loss 设为资格门槛。benchmark 的算术平均是 macro-average：每个任务权重相同，题数多的任务不会自动占更大权重；如果项目按用户流量、风险或任务频率加权，权重必须有事先定义的依据，并把逐任务分数一起保留，避免平均值遮住单项退化。safety、regression 和成本分量也要说明“越高越好”还是“越低越好”、转换函数及分母。例如回归分数 `1−失败数/样本数` 依赖固定的回归集；样本集增删后，分数变化可能来自测量集合而非模型本身。
+归一化的方向和尺度也要在看候选结果前固定。validation loss 越低越好，所以示例用 $1-\mathrm{loss}/\mathrm{cap}$；当 loss 达到或超过 cap，得分被截为 0。这不表示两个很差的 checkpoint 一样好，只表示这项指标在当前选择政策中不再区分它们，必要时应降低 cap、改用分段映射，或把 loss 设为资格门槛。benchmark 的算术平均是 macro-average：每个任务权重相同，题数多的任务不会自动占更大权重；如果项目按用户流量、风险或任务频率加权，权重必须有事先定义的依据，并把逐任务分数一起保留，避免平均值遮住单项退化。safety、regression 和成本分量也要说明“越高越好”还是“越低越好”、转换函数及分母。例如回归分数 $1-N_{\mathrm{fail}}/N_{\mathrm{sample}}$ 依赖固定的回归集，其中 $N_{\mathrm{fail}}$ 是失败样本数， $N_{\mathrm{sample}}$ 是样本总数；样本集增删后，分数变化可能来自测量集合而非模型本身。
 
 硬门槛和软目标承担不同职责。硬门槛代表项目不可接受的条件，例如恢复字段缺失、稳定性检查失败、安全评测低于预注册阈值，或某个核心领域超过回归上限；它们不能被其他高分抵消。门槛应在看候选排名前登记，说明失败如何判定、评测集是哪一版，以及阈值是绝对值还是相对基线。通过门槛后，加权分数才用于表达可交换的偏好。若团队在观察结果后才把门槛改到刚好排除某个候选，就已经把选择数据用于制定政策，分数不再是预先声明的决策规则；这时应把它标成探索性选择，另用新的保留集或后续运行确认。
 
@@ -741,7 +741,7 @@ J(c)=
 
 这比“最后一个 checkpoint”稳健很多。
 
-用 demo 的固定权重手算一次选择。`ckpt_2000` 的 validation loss 为 2.18，预设上限为 4.0，故归一化 validation 分量为 `1−2.18/4=0.455`；三个 benchmark 的均值为 `(0.56+0.38+0.34)/3≈0.4267`；safety 得分为 0.94，100 个回归样本中失败 4 个，故 regression 得分为 `1−4/100=0.96`。按权重 0.40、0.30、0.15、0.15，加权值为 `0.40×0.455+0.30×0.4267+0.15×0.94+0.15×0.96≈0.595`。`ckpt_1000` 同法约为 0.565；`ckpt_3000` 的 validation loss 虽更低（2.16），却因 `stable=False`、安全分数低于 0.92 门槛、回归失败 11 次超过上限 5，且 code domain 触发回归而被硬门槛排除。此 toy policy 因而在合格候选中选择 `ckpt_2000`；改变 cap、权重或门槛会改变政策偏好，不会改变 checkpoint 本身的数据。
+用 demo 的固定权重手算一次选择。`ckpt_2000` 的 validation loss 为 2.18，预设上限为 4.0，故归一化 validation 分量为 $1−2.18/4=0.455$；三个 benchmark 的均值为 $(0.56+0.38+0.34)/3\approx0.4267$；safety 得分为 0.94，100 个回归样本中失败 4 个，故 regression 得分为 $1−4/100=0.96$。按权重 0.40、0.30、0.15、0.15，加权值为 $0.40\times0.455+0.30\times0.4267+0.15\times0.94+0.15\times0.96\approx0.595$。`ckpt_1000` 同法约为 0.565；`ckpt_3000` 的 validation loss 虽更低（2.16），却因 `stable=False`、安全分数低于 0.92 门槛、回归失败 11 次超过上限 5，且 code domain 触发回归而被硬门槛排除。此 toy policy 因而在合格候选中选择 `ckpt_2000`；改变 cap、权重或门槛会改变政策偏好，不会改变 checkpoint 本身的数据。
 
 ## 15. 最小可运行的 checkpoint 与实验管理 demo
 
@@ -1103,11 +1103,11 @@ bad_compare_changed= ['data_version', 'tokens_b']
 diagnostics= {'best_exists': True, 'best_complete': True, 'best_stable': True, 'resume_continuous': True, 'storage_under_budget': True, 'manifest_complete': True, 'fair_lr_compare': True, 'bad_compare_detected': True, 'safety_ok': True, 'regression_ok': True}
 ```
 
-这里 validation loss 用预先固定的 `val_loss_cap=4.0` 映射到 `[0,1]`，benchmark 和 safety 本身处于 `[0,1]`，regression 用失败数除以明确的样本数得到失败率后再转成得分；权重和为 1。先执行硬门槛，再计算加权分，所以较高平均分不能抵消缺状态、训练不稳定、安全失败或明显 domain regression。更换 loss cap、权重或门槛会改变选择结果，故这些配置必须作为实验记录的一部分，不能在看完分数后再挑一组有利权重。代码按 checkpoint ID 对 latest 与 best 做集合去重，当前输入中保留 `ckpt_2000` 和 `ckpt_3000` 两个唯一 artifact，因此存储量为 `2×180=360 GiB`；若 best 是独立导出的权重文件，则需要给它独立 ID 和 `size_gib` 账目。
+这里 validation loss 用预先固定的 `val_loss_cap=4.0` 映射到 `[0,1]`，benchmark 和 safety 本身处于 `[0,1]`，regression 用失败数除以明确的样本数得到失败率后再转成得分；权重和为 1。先执行硬门槛，再计算加权分，所以较高平均分不能抵消缺状态、训练不稳定、安全失败或明显 domain regression。更换 loss cap、权重或门槛会改变选择结果，故这些配置必须作为实验记录的一部分，不能在看完分数后再挑一组有利权重。代码按 checkpoint ID 对 latest 与 best 做集合去重，当前输入中保留 `ckpt_2000` 和 `ckpt_3000` 两个唯一 artifact，因此存储量为 $2\times180=360 GiB$；若 best 是独立导出的权重文件，则需要给它独立 ID 和 `size_gib` 账目。
 
 这个 demo 还刻意把几种常见边界显式处理：空 checkpoint 列表、重复/倒序 step、非递增 token 数、benchmark 键集合不一致会报错；无合格候选会返回 `None`；缺失配置字段会作为差异报告，不会被静默漏掉。示例使用三份结构完整的 checkpoint，因此正常路径会选择 `ckpt_2000`；如果把三个 checkpoint 的 `stable` 都设为 `False`，`best_checkpoint` 会返回 `None`，latest 保留策略仍可独立计算。
 
-还可以把几项输出对回手算账本：`save_overhead=0.0075` 即 `60/(1000×8)=0.75%`；相邻 checkpoint 相差 52.5B token、1000 step，因此每步约 0.0525B token，按 1000-step 间隔的最大回退量是 52.5B。保留策略取最近两个 checkpoint `{ckpt_2000, ckpt_3000}`，best 又指向 `ckpt_2000`，集合去重后仍是两个文件，故 `2×180=360 GiB`。这些结果来自代码中的合成输入，用来核对公式和分支，不能解释为一次训练实测。
+还可以把几项输出对回手算账本：`save_overhead=0.0075` 即 $60/(1000\times8)=0.75%$；相邻 checkpoint 相差 52.5B token、1000 step，因此每步约 0.0525B token，按 1000-step 间隔的最大回退量是 52.5B。保留策略取最近两个 checkpoint `{ckpt_2000, ckpt_3000}`，best 又指向 `ckpt_2000`，集合去重后仍是两个文件，故 $2\times180=360 GiB$。这些结果来自代码中的合成输入，用来核对公式和分支，不能解释为一次训练实测。
 
 这个 demo 的作用是把“选哪个 checkpoint”拆成可解释的观察：先列出恢复字段缺失，再按硬门槛筛候选；随后比较 validation / PPL / domain / benchmark / safety / regression，最后查看实验记录、对照差异和保留存储。它只模拟记录与决策，不实现模型训练、分布式 checkpoint、统计检验或生产存储事务。
 
@@ -1172,7 +1172,7 @@ train loss 降低只说明模型更好地拟合了当前训练目标。数据重
 
 ### 练习一：固定评测协议
 
-选两个 checkpoint 和一个生成式 benchmark，列出 `E` 中每个字段的实际值：checkpoint revision、tokenizer/chat template、数据与 split、few-shot 样本及顺序、prompt、generation 参数、答案抽取器、metric 和 harness commit。故意只更换 chat template 或 harness 版本重跑一小批样本，保存逐样本 outputs，判断分数变化来自模型还是评测协议。
+选两个 checkpoint 和一个生成式 benchmark，列出 $E$ 中每个字段的实际值：checkpoint revision、tokenizer/chat template、数据与 split、few-shot 样本及顺序、prompt、generation 参数、答案抽取器、metric 和 harness commit。故意只更换 chat template 或 harness 版本重跑一小批样本，保存逐样本 outputs，判断分数变化来自模型还是评测协议。
 
 ### 练习二：同题配对比较
 

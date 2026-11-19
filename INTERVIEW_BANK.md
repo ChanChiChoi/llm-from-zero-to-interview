@@ -3435,6 +3435,14 @@
      考察点：模型输入与 transcript/checkpoint/Trace/workspace 的边界；约束、授权、事实、假设、Artifact 和 unknown effect 的分类；来源与 revision 绑定；裁剪、摘要和外置检索；折叠后校验与独立评估。
      回答框架：先说明折叠改变的是下一轮模型可见的输入视图，不是任务 checkpoint 或外部事实。按信息类型处理：保留原意和来源的用户约束及授权；把观察事实绑定时间、revision 和查询结果；将假设与已验证结论分开；把长日志外置并保留可访问引用；对已派发但无回执的 effect 保持 unknown。留出输出和突发工具结果所需预算，不把某个触发百分比说成通用阈值。折叠后核对约束、授权范围、来源/版本、Artifact 权限与副作用状态；workspace 从 r42 变为 r43 时，重新判断旧 CI 结果和授权是否适用。评估时分别报告任务结果、约束遵守、来源支持、恢复正确性和成本，不以单个任务通过率证明折叠可靠，也不把不同模型、scaffold 与基准的结果合成总分。
 
+40AC. 如何判断一个 Agent 基准分数的变化来自模型、harness、环境，还是它们的交互？
+     考察点：完整系统配置；要估计的比较对象；配对任务、完整交叉与重复试验；task outcome 与 harness criteria 分层；trace 的观察边界；受控重放或消融；token、工具、时间和人工成本；调优数据与 held-out 任务。
+     回答框架：先把结果绑定到模型 snapshot、harness 版本、任务和环境、verifier、权限及预算，再说明这次比较只改变了什么。若要估计模型与 harness 的交互，需要让多个模型和多个 harness 在同一批任务上交叉运行；稀疏配对只支持较窄的观察结论。沿相同 task ID、初始状态和预算比较，并安排独立 trial 来观察运行波动；一次运行里的 retry 不能冒充多次独立重复。分别报告任务是否成功、harness 是否守约和环境/评分器错误。Trace 用于定位候选原因，随后要检查真实工具回执、状态与 artifact，并通过单项消融、受控重放或定向故障测试排除竞争解释。统计质量、成本和留出集表现，不用单个平均分或 trace grader 替代因果证据。
+
+40AD. 怎样区分 Responses API 完成、工具执行成功、任务验收通过和对话状态已保存？
+     考察点：Response 封套与 output item；completed/failed/incomplete；function_call 与 function_call_output 的 call_id；宿主执行器和 verifier；previous_response_id、Conversations API、store 与 retention 的边界。
+     回答框架：先读取 Response 的 status、error 和 incomplete_details，再按 type 遍历 output。若 output 含 function_call，它只表示模型提出调用；应用还要校验并执行工具，之后以原 call_id 回传 function_call_output。response completed 只能证明这次生成结束，工具回执说明执行器观察到了什么，独立 verifier 才判断任务结果是否满足契约。随后说明上下文是通过手工回放、previous_response_id 还是 Conversations API 续接，并分别核对 instructions 是否延续、Response 的 store 设置、Conversation 的生命周期以及 background mode 的临时存储。API 的 response ID、事件 sequence_number 和 conversation state 都不能单独证明 workspace 或外部业务副作用已经提交。
+
 40ZA. 如何设计工具调用 trace、replay 和审计体系？
       考察点：trace schema、span tree、ID propagation、version capture、argument lineage、permission trace、tool result trace、privacy masking、audit event、replay readiness、side-effect replay safety、metrics、alerts、eval linkage。
       回答框架：先把 trace 定义成一次工具调用的事实链，而不是普通文本日志。链路要覆盖用户请求、模型输入输出、Router 候选和过滤原因、tool call、raw / parsed / normalized / final arguments、权限决策、Executor 执行、tool result 投影、最终回答和用户可见错误。每个 span 要有稳定 ID、parent、时间、状态、输入输出摘要和 artifact 引用；版本要记录 model、prompt、tool schema、registry、router policy 和 adapter。Replay 分 trace-only、model replay 和 tool / sandbox replay，有副作用动作默认禁止 live replay。审计事件要记录 actor、tenant、tool、action、resource、decision、confirmation、timestamp、trace id 和 outcome。指标包括 trace schema completeness、ID tree integrity、version capture coverage、argument lineage coverage、permission trace completeness、tool result trace completeness、privacy masking coverage、audit event completeness、replay readiness rate、side effect replay safety、metric export coverage、alert owner coverage、eval linkage coverage 和 trace replay gate。核心观点是没有 trace 就没有可靠评估、调试、回放和安全追责。

@@ -2389,3 +2389,14 @@
 配套正文：[第二十册第十八章](book-20-agent-harness-runtime/chapters/18-context-folding上下文折叠.md)；来源证据见[Context Folding 与长任务压缩来源记录](research/context-folding-and-compaction-strategy-2026-11-18.md)。
 
 35EM. 沿用教学构造 `task-42`，把“不得修改测试”“用户只批准为 `r42` 申请一次代码审查”“`ci-884` 对 `r42` 通过”“兼容层问题是假设且已被排除”“审查请求已派发但回执 `unknown`”“完整 CI 日志可从 artifact 取回”分别归类为约束、授权、事实、假设/结论、未知副作用和外置来源。写一份适合下一轮模型输入的短折叠摘要，给每项事实保留来源、版本或回查入口。随后设 workspace 已被用户推进到 `r43`：指出哪些 CI 证据过期、用户授权是否仍覆盖新版本、哪些事实须重查；不得把作者知道的 `review-481` 写成 Runtime 已知事实。最后设计一项比较 self-summary、裁剪旧工具输出和从 checkpoint 重启的评估，分别报告任务结果、约束遵守、来源支持、恢复正确性与 token/调用成本，并说明样本数和固定 scaffold 的限制；不要合成单一总分或通用阈值。
+## 第二十册第十九章：Harness-Aware Evaluation
+
+配套正文：[第二十册第十九章](book-20-agent-harness-runtime/chapters/19-harness-aware-evaluation.md)；来源记录见[Model–Harness 交互与归因研究](research/model-harness-interaction-attribution-2026-11-18.md)。
+
+35EN. 设计一次 Agent harness 改动的受控比较：固定同一模型、任务夹具、环境 revision、独立 verifier 和总预算，只改变一个 harness 组件；再加入第二个模型，画出完整交叉矩阵。说明如何匹配初始状态、安排重复 trial、区分 trial 内部 retry 和独立重复、记录 task outcome、harness criteria、环境或评分器错误。为每格报告任务分母、重复结果、token 与工具成本；从 trace 中提出一个失败原因，并写出能排除竞争解释的对照或消融。最后留出一个未参与调优的任务族，解释它能验证什么、不能保证什么。不要把所有结果压成单一总分或固定 gate。
+
+## 第二十册第二十章：Responses API
+
+配套正文：[第二十册第二十章](book-20-agent-harness-runtime/chapters/20-responses-api.md)；官方合同与访问日期见[Responses API 证据记录](research/openai-responses-api-contract-evidence-2026-11-18.md)。
+
+35EO. 用一个教学构造的仓库任务“读取 src/parser.py，并指出 tokenize 对空输入的处理”复走一次 Responses API 工具回合。先写出模型返回的 function_call item，标明 call_id、name 和 arguments；再描述流式参数 delta 到达时客户端应保存什么、何时才可提交应用校验；随后写出工具以同一 call_id 返回 function_call_output 后，模型可能继续产生的 message。区分 response completed、工具执行回执和任务 verifier 通过分别能证明什么。最后比较手工回放 output items、previous_response_id 和 Conversations API 三种续接方式，并说明顶层 instructions 的延续、store=false、Conversation 保留、后台响应临时存储及 background-only cancel 的边界。全程只按本次官方文档合同推理，不把教学构造说成线上执行记录，也不把序号或 response ID 当作外部副作用证明。

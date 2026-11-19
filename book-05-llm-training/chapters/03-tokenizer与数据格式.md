@@ -42,7 +42,7 @@
 
 ### 3.1.1 编码和解码
 
-给定文本 `x`、tokenizer `T` 和词表大小 `V`，编码结果是：
+给定文本 $x$、tokenizer $T$ 和词表大小 $V$，编码结果是：
 
 ~~~math
 z=T(x)=(z_1,z_2,\ldots,z_L),
@@ -50,13 +50,13 @@ z=T(x)=(z_1,z_2,\ldots,z_L),
 z_t\in\{0,1,\ldots,V-1\}
 ~~~
 
-`L` 是这段文本的 token 数。解码器 `D` 将 token id 转回字符串：
+$L$ 是这段文本的 token 数。解码器 $D$ 将 token id 转回字符串：
 
 ~~~math
 \hat{x}=D(z)
 ~~~
 
-对可逆 tokenizer，理想情况下 `D(T(x))=x`，或至少在规定的规范化等价关系下相同。实际系统可能会规范化空白、Unicode、特殊字符或字节表示，因此复现时要区分原文相等和规范化后相等。
+对可逆 tokenizer，理想情况下 $D(T(x))=x$，或至少在规定的规范化等价关系下相同。实际系统可能会规范化空白、Unicode、特殊字符或字节表示，因此复现时要区分原文相等和规范化后相等。
 
 用一个假设的小词表看这两个函数：若它规定“猫”对应 id 42，那么编码结果是列表 [42]，解码 [42] 会得到“猫”。id 42 不是“猫”这个字符本身，只是当前词表给它分配的行号；换一份词表，同一字符串可能拆成多个 id，或者换一个 id。
 
@@ -91,13 +91,13 @@ z_t\in\{0,1,\ldots,V-1\}
 
 ### 3.1.4 规范化决定“可逆”究竟指什么
 
-完整编码链通常不是直接计算 `T(x)`，而是先经过规范化函数 `N`：
+完整编码链通常不是直接计算 `T(x)`，而是先经过规范化函数 $N$：
 
 ~~~math
 z=T(N(x))
 ~~~
 
-例如，Unicode 中看起来相同的 `é` 可以由一个预组字符表示，也可以由 `e` 加组合重音符表示；全角拉丁字母 `Ａ` 也可能被 NFKC 变为 ASCII `A`。如果 `N` 折叠了这些形式，解码器最多恢复规范化后的文本 `N(x)`，不能再恢复原始字节串 `x`。所以“可逆”需要说明是对原始字节、Unicode 字符序列，还是规范化等价类可逆。
+例如，Unicode 中看起来相同的 `é` 可以由一个预组字符表示，也可以由 $e$ 加组合重音符表示；全角拉丁字母 `Ａ` 也可能被 NFKC 变为 ASCII $A$。如果 $N$ 折叠了这些形式，解码器最多恢复规范化后的文本 `N(x)`，不能再恢复原始字节串 $x$。所以“可逆”需要说明是对原始字节、Unicode 字符序列，还是规范化等价类可逆。
 
 规范化能减少等价写法带来的词表碎片，却也可能改动代码标识符、数学符号、空格或用户原文。训练前应固定并保存 normalizer 版本；需要精确引用、代码执行或文本对齐的数据，要同时保留原始文本和参与 tokenization 的规范化文本，并让 offset、标签和 span 对齐同一版本。SentencePiece 的论文描述了空格保留、NFKC 规范化和可配置规则；它是一个具体工具设计，不能据此假定所有 tokenizer 都做相同规范化。
 
@@ -164,13 +164,13 @@ SentencePiece 是可承载不同子词算法的训练与编码工具；Unigram L
 
 ### 3.6.1 参数账本
 
-词表大小为 `V`，hidden size 为 `d`。输入 embedding 参数量约为：
+词表大小为 $V$，hidden size 为 $d$。输入 embedding 参数量约为：
 
 ~~~math
 P_{\mathrm{emb}}=Vd
 ~~~
 
-如果输出层不与 embedding 共享权重，输出投影也约为 `Vd`。给定 batch `B` 和序列长度 `L`，logits 形状为：
+如果输出层不与 embedding 共享权重，输出投影也约为 `Vd`。给定 batch $B$ 和序列长度 $L$，logits 形状为：
 
 ~~~math
 \ell\in\mathbb{R}^{B\times L\times V}
@@ -188,23 +188,23 @@ embedding 和输出层增大，低频 token 训练不足，softmax 和分片通�
 
 ### 3.6.4 一个词表扩大的账本
 
-设 hidden size `d=4096`，把词表从 `V=32,000` 扩到 `128,000`：输入 embedding 从约 `1.31 亿` 个参数增到 `5.24 亿`。若输出层不共享权重，还要再增加同样数量。全序列训练时，输出投影约需 `B·L·d·V` 次乘加；以 FLOPs 计通常再乘 2，尚未计入 softmax、通信和 padding。
+设 hidden size $d=4096$，把词表从 $V=32,000$ 扩到 $128,000$：输入 embedding 从约 `1.31 亿` 个参数增到 `5.24 亿`。若输出层不共享权重，还要再增加同样数量。全序列训练时，输出投影约需 $B\cdot L\cdot d\cdot V$ 次乘加；以 FLOPs 计通常再乘 2，尚未计入 softmax、通信和 padding。
 
-假设新 tokenizer 把一段文本从 `L=1,000` 个位置压到 `600` 个位置，比较 logits 的位置-词表格点数：
+假设新 tokenizer 把一段文本从 $L=1,000$ 个位置压到 `600` 个位置，比较 logits 的位置-词表格点数：
 
-| 配置 | `L × V` | 相对旧配置 |
+| 配置 | $L \times V$ | 相对旧配置 |
 | --- | ---: | ---: |
-| 旧词表：`1,000 × 32,000` | 3,200 万 | 1.0× |
-| 新词表：`600 × 128,000` | 7,680 万 | 2.4× |
+| 旧词表： $1,000 \times 32,000$ | 3,200 万 | 1.0× |
+| 新词表： $600 \times 128,000$ | 7,680 万 | 2.4× |
 
 这个教学账本只计算输出位置数乘词表大小；它显示序列缩短 40% 不代表输出层工作量也下降。实际选择还要算注意力和 MLP、embedding 参数、词表并行通信、输入 token 预算以及长上下文收益，不能从“每句话少几个 token”单独推出总训练更快。
 
 
-把 batch 也代入可以看到数量级。设 `B=2`、`d=4,096`。旧配置的输出投影约有 `2×1,000×4,096×32,000=262,144,000,000` 次乘加；新配置约有 `2×600×4,096×128,000=629,145,600,000` 次乘加，比例仍为 `2.4`。若把一次乘和一次加各计一个 FLOP，两者约为 `524.3 GFLOPs` 与 `1.258 TFLOPs`。这个局部账本尚未包含前向之外的反向传播、softmax、并行通信和 padding；共享 embedding 能省一份权重矩阵，却不能把输出分类从 `V=128,000` 个类别变小。比较 tokenizer 时应注明固定的是原文 bytes、训练 token 还是总 FLOPs，否则“预算相同”并没有统一含义。
+把 batch 也代入可以看到数量级。设 $B=2$、 $d=4,096$。旧配置的输出投影约有 $2\times1,000\times4,096\times32,000=262,144,000,000$ 次乘加；新配置约有 $2\times600\times4,096\times128,000=629,145,600,000$ 次乘加，比例仍为 `2.4`。若把一次乘和一次加各计一个 FLOP，两者约为 `524.3 GFLOPs` 与 `1.258 TFLOPs`。这个局部账本尚未包含前向之外的反向传播、softmax、并行通信和 padding；共享 embedding 能省一份权重矩阵，却不能把输出分类从 $V=128,000$ 个类别变小。比较 tokenizer 时应注明固定的是原文 bytes、训练 token 还是总 FLOPs，否则“预算相同”并没有统一含义。
 
 ### 3.6.5 不能只看平均压缩率
 
-定义一个语料桶 `D` 的每字节 token 比例：
+定义一个语料桶 $D$ 的每字节 token 比例：
 
 ~~~math
 \rho_{\mathrm{byte}}(D)
@@ -215,7 +215,7 @@ embedding 和输出层增大，低频 token 训练不足，softmax 和分片通�
 
 这个比例只在语料桶含有至少一个非空字节串时有定义；全空或解析失败的桶应单独报告覆盖问题，不能填写为零压缩率。还要按语言、代码、数学、JSON、长文档和短消息分别报告分位数。平均值可能掩盖低资源语言极端膨胀，或者掩盖 JSON 括号和缩进造成的额外 token。
 
-如果上下文窗口为 `C_tok`，某语料桶的平均每字符 token 比例为 `rho_char`，可粗略估计字符容量：
+如果上下文窗口为 $C_{\mathrm{tok}}$，某语料桶的平均每字符 token 比例为 $\rho_{\mathrm{char}}$，可粗略估计字符容量：
 
 ~~~math
 C_{\mathrm{char}}
@@ -223,11 +223,11 @@ C_{\mathrm{char}}
 \frac{C_{\mathrm{tok}}}{\rho_{\mathrm{char}}}
 ~~~
 
-这里 `C_{\mathrm{tok}}>0` 且 `\rho_{\mathrm{char}}>0`；空文本或未定义压缩率不能推出“无限字符容量”。这是成本和容量的直觉，不是精确的文档长度保证；special token、模板、padding、截断和语言混合都会改变实际结果。
+这里 $C_{\mathrm{tok}}>0$ 且 $\rho_{\mathrm{char}}>0$；空文本或未定义压缩率不能推出“无限字符容量”。这是成本和容量的直觉，不是精确的文档长度保证；special token、模板、padding、截断和语言混合都会改变实际结果。
 
-同一组长度数字对不同计算项的影响也不同。`L=1,000` 降到 `600` 时，依赖每个 token 线性处理的投影工作量在理想条件下约剩 `0.6`；若注意力按所有位置对计算，`L^2` 项约剩 `0.6^2=0.36`。但输出分类同时按词表大小 `V` 扩展，前面的教学账本得到输出投影变为 `2.4` 倍。模型在短序列或不同 kernel 下还可能由 MLP、通信、softmax 或 padding 主导，所以三个账本不能合并成一个“token 越少越快”的结论。
+同一组长度数字对不同计算项的影响也不同。 $L=1,000$ 降到 `600` 时，依赖每个 token 线性处理的投影工作量在理想条件下约剩 `0.6`；若注意力按所有位置对计算， $L^2$ 项约剩 $0.6^2=0.36$。但输出分类同时按词表大小 $V$ 扩展，前面的教学账本得到输出投影变为 `2.4` 倍。模型在短序列或不同 kernel 下还可能由 MLP、通信、softmax 或 padding 主导，所以三个账本不能合并成一个“token 越少越快”的结论。
 
-assistant-only label mask 也不一定自动缩小 logits 矩阵。许多实现先对完整 `B×L` 序列计算输出，再用 `ignore_index` 去掉不计 loss 的位置；只有训练器确实跳过某些位置的输出计算，才可以把它们从输出投影成本里扣除。查看 shape、logits 生成位置和 loss denominator，能区分“减少监督目标数”和“减少实际计算量”。
+assistant-only label mask 也不一定自动缩小 logits 矩阵。许多实现先对完整 $B\times L$ 序列计算输出，再用 `ignore_index` 去掉不计 loss 的位置；只有训练器确实跳过某些位置的输出计算，才可以把它们从输出投影成本里扣除。查看 shape、logits 生成位置和 loss denominator，能区分“减少监督目标数”和“减少实际计算量”。
 
 做项目规划时至少分开记录：输入 embedding 的参数存储、有效 token/更新数、最大和平均序列长度、注意力/激活账本、输出层 logits 形状、实际 batch padding、词表并行通信及硬件吞吐。这些是不同瓶颈的可观测量。词表增大带来的上下文容量收益可能有价值，但要明确它是在相同 bytes 下扩大覆盖，还是在相同 FLOPs 下改变模型看到的数据量；再用相应的 held-out 结果判断收益是否抵得过新增成本。
 
@@ -257,7 +257,7 @@ assistant-only label mask 也不一定自动缩小 logits 矩阵。许多实现�
 
 ### 3.6.7 从 token 统计走到训练预算
 
-假设一份原文包含 `1,000,000` bytes。旧 tokenizer 的统计值为 `0.5 token/byte`，则得到 `500,000` 个 token；候选 tokenizer 为 `0.4 token/byte`，同一份原文得到 `400,000` 个 token，固定原文字节时 token 数减少 20%。若改为固定 `500,000` token 的训练预算，候选 tokenizer 理论上可表示 `500,000/0.4=1,250,000` bytes，比旧配置多读 25% 的原始字节。两个账本回答不同问题，训练计划应写明采用哪一个。
+假设一份原文包含 $1,000,000$ bytes。旧 tokenizer 的统计值为 `0.5 token/byte`，则得到 $500,000$ 个 token；候选 tokenizer 为 `0.4 token/byte`，同一份原文得到 $400,000$ 个 token，固定原文字节时 token 数减少 20%。若改为固定 $500,000$ token 的训练预算，候选 tokenizer 理论上可表示 $500,000/0.4=1,250,000$ bytes，比旧配置多读 25% 的原始字节。两个账本回答不同问题，训练计划应写明采用哪一个。
 
 这项换算还没有包括新词表的 embedding 和输出层参数、不同长度带来的 attention/activation 成本、batch padding 和分布式词表通信。一个方向性的判断可以来自静态成本账本，正式能力结论则要使用匹配的 held-out 原文、记录训练 FLOPs 和更新数，并报告每个重要语言/领域的结果。若候选压缩只来自重复模板或高频单一语域，整体 token/byte 可能下降而目标能力切片退步，因此分桶统计和目标任务回归必须成对查看。
 
@@ -303,7 +303,7 @@ padding 是为了把不同长度样本放进规则张量。定义：
 a_t=\mathbf{1}[t<\ell]
 ~~~
 
-这里按右 padding 书写，`\ell` 是该样本在 padding 前的真实长度；若使用左 padding，应从真实起始位置或 collator 输出计算有效位置。不能总用 `z_t\ne z_{\mathrm{pad}}` 推断真实位置：有些训练配置会让 PAD 与 EOS 共用同一个 id；此时按 id 比较会把真实结束符也误判成 padding。模型的 causal mask 还要阻止当前位置看未来 token；packed 独立样本可能还需要 document/block mask。三类作用不同，不能混为一个“attention mask”。
+这里按右 padding 书写， $\ell$ 是该样本在 padding 前的真实长度；若使用左 padding，应从真实起始位置或 collator 输出计算有效位置。不能总用 $z_t\ne z_{\mathrm{pad}}$ 推断真实位置：有些训练配置会让 PAD 与 EOS 共用同一个 id；此时按 id 比较会把真实结束符也误判成 padding。模型的 causal mask 还要阻止当前位置看未来 token；packed 独立样本可能还需要 document/block mask。三类作用不同，不能混为一个“attention mask”。
 
 loss 也要忽略 PAD。很多 PyTorch 训练代码用 `ignore_index=-100` 表示不计算该位置，但 `-100` 是实现约定，不是模型词表中的真实 token：
 
@@ -321,11 +321,11 @@ z_t,&a_t=1\\
 
 沿着开头的问答，把可见符号当作简化 token：
 
-- input_ids：`[BOS, USER, 2+2?, U_END, ASSISTANT, 4, A_END, PAD]`
-- attention_mask：`[1, 1, 1, 1, 1, 1, 1, 0]`
-- labels：`[-100, -100, -100, -100, -100, 4, A_END, -100]`
+- `input_ids`： $[BOS, USER, 2+2?, U_{\mathrm{END}}, ASSISTANT, 4, A_{\mathrm{END}}, PAD]$
+- `attention_mask`：`[1, 1, 1, 1, 1, 1, 1, 0]`
+- labels： $[-100, -100, -100, -100, -100, 4, A_{\mathrm{END}}, -100]$
 
-这里 user 和 assistant 的真实 token 都可作为上下文，PAD 不可读；causal mask 另行保证每个位置看不到未来。模型内部右移时，ASSISTANT 位置的 logits 预测 4，4 位置的 logits 预测 A_END。这组数组把三个职责分开：padding mask 管真实位置，causal mask 管先后，label mask 管哪些答案需要学习。
+这里 user 和 assistant 的真实 token 都可作为上下文，PAD 不可读；causal mask 另行保证每个位置看不到未来。模型内部右移时，ASSISTANT 位置的 logits 预测 4，4 位置的 logits 预测 $A_{\mathrm{END}}$。这组数组把三个职责分开：padding mask 管真实位置，causal mask 管先后，label mask 管哪些答案需要学习。
 
 ### 3.8 Chat template：消息如何变成生成提示
 
@@ -337,7 +337,7 @@ z_t,&a_t=1\\
 M=((r_1,c_1),(r_2,c_2),\ldots,(r_K,c_K))
 ~~~
 
-其中 `r_k` 是 role，`c_k` 是内容。chat template `T_chat` 先把消息序列化为字符串或事件序列：
+其中 $r_k$ 是 role， $c_k$ 是内容。chat template $T_{\mathrm{chat}}$ 先把消息序列化为字符串或事件序列：
 
 ~~~math
 s=T_{\mathrm{chat}}(M)
@@ -349,7 +349,7 @@ s=T_{\mathrm{chat}}(M)
 z=T(s)
 ~~~
 
-因此训练和推理真正使用的是 `T(T_chat(M))`，而不是原始 JSON。模板可能决定 system、user、assistant、tool 的边界、换行、生成起点、EOS 和工具参数格式。
+因此训练和推理真正使用的是 $T(T_{\mathrm{chat}}(M))$，而不是原始 JSON。模板可能决定 system、user、assistant、tool 的边界、换行、生成起点、EOS 和工具参数格式。
 
 #### 3.8.2 模板不一致的症状
 
@@ -393,7 +393,7 @@ user tokens     -> ignore
 assistant tokens -> compute loss
 ~~~
 
-令 `m_t=1` 表示第 `t` 个 token 是监督目标，`m_t=0` 表示只作为条件，则 causal LM 的 masked loss 可以写成：
+令 $m_t=1$ 表示第 $t$ 个 token 是监督目标， $m_t=0$ 表示只作为条件，则 causal LM 的 masked loss 可以写成：
 
 ~~~math
 L_{\mathrm{SFT}}
@@ -404,7 +404,7 @@ m_{t+1}
 \log p_\theta(z_{t+1}\mid z_{1:t})
 ~~~
 
-教学代码常用 `max(\cdot,1)` 避免除零，但它不能把没有监督的位置变成有效样本。真实训练应要求 `\sum_{t=1}^{L-1}m_{t+1}>0`；若模板、截断或 role 标注让分子和监督分母都为空，应跳过并记录该样本，而不是以零 loss 混入 batch。分母使用有效 assistant token 数，避免不同回答长度让 loss 口径变化。system、user、tool result 和 padding 是否被 mask，要由训练目标决定，而不是机械按角色名称处理。
+教学代码常用 $\max(\cdot,1)$ 避免除零，但它不能把没有监督的位置变成有效样本。真实训练应要求 $\sum_{t=1}^{L-1}m_{t+1}>0$；若模板、截断或 role 标注让分子和监督分母都为空，应跳过并记录该样本，而不是以零 loss 混入 batch。分母使用有效 assistant token 数，避免不同回答长度让 loss 口径变化。system、user、tool result 和 padding 是否被 mask，要由训练目标决定，而不是机械按角色名称处理。
 
 #### 3.9.2 多轮和工具数据的 mask
 
@@ -414,7 +414,7 @@ m_{t+1}
 
 #### 3.9.3 Label 在模型里还要右移一位
 
-许多数据集把 `labels[t]` 与 `input_ids[t]` 按相同位置存储，但 causal LM 训练时会将 logits 和 labels 错开一位：位置 `t` 的 logits 预测 `labels[t+1]`。例如：
+许多数据集把 `labels[t]` 与 `input_ids[t]` 按相同位置存储，但 causal LM 训练时会将 logits 和 labels 错开一位：位置 $t$ 的 logits 预测 `labels[t+1]`。例如：
 
 | 位置 | 0 | 1 | 2 | 3 | 4 | 5 | 6 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -439,7 +439,7 @@ L_{\mathrm{sample}}
 {\sum_t m_{i,t}}
 ~~~
 
-假设样本 A 有 10 个监督 token、平均 loss 为 1；样本 B 有 100 个监督 token、平均 loss 为 2。token 平均是 `(10×1+100×2)/110≈1.91`，样本平均则是 `(1+2)/2=1.5`。前者让每个目标 token 权重相同，后者让每条样本权重相同；分布式训练还要保证跨 rank 聚合时的有效 token 分母口径一致。两种都可以是有意设计，但不能默默换口径。
+假设样本 A 有 10 个监督 token、平均 loss 为 1；样本 B 有 100 个监督 token、平均 loss 为 2。token 平均是 $(10\times1+100\times2)/110\approx1.91$，样本平均则是 $(1+2)/2=1.5$。前者让每个目标 token 权重相同，后者让每条样本权重相同；分布式训练还要保证跨 rank 聚合时的有效 token 分母口径一致。两种都可以是有意设计，但不能默默换口径。
 
 ## 3.10 预训练文本、EOS 与 packing
 
@@ -457,7 +457,7 @@ s_i=T(x_i)\oplus[z_{\mathrm{eos}}]
 S=s_1\oplus s_2\oplus\cdots\oplus s_n
 ~~~
 
-再按上下文长度 `C` 切成 block：
+再按上下文长度 $C$ 切成 block：
 
 ~~~math
 b_j=S_{jC:(j+1)C-1}
@@ -465,7 +465,7 @@ b_j=S_{jC:(j+1)C-1}
 
 EOS 告诉模型文档边界，但在普通 causal mask 下，后一个文档仍可看到前一个文档的历史。若希望样本完全独立，要使用 document-level attention mask 或分别计算样本；如果允许跨文档上下文，则必须在评估中接受这个训练假设。
 
-SFT packing 和预训练连续语料尤其不能混为一谈。假设把两个样本接成 `[BOS_A,A_1,A_2,END_A | BOS_B,B_1,B_2,END_B]`：普通 causal attention 会允许 `B_1` 读取 `A` 的全部 token；若两个样本应独立，必须在注意力上隔开两段，而 EOS 本身不会清除 KV 或改写 attention mask。小例子中的允许注意力矩阵是：
+SFT packing 和预训练连续语料尤其不能混为一谈。假设把两个样本接成 $[BOS_A,A_1,A_2,END_A | BOS_B,B_1,B_2,END_B]$：普通 causal attention 会允许 $B_1$ 读取 $A$ 的全部 token；若两个样本应独立，必须在注意力上隔开两段，而 EOS 本身不会清除 KV 或改写 attention mask。小例子中的允许注意力矩阵是：
 
 ~~~text
          BOS_A A_1 A_2 | BOS_B B_1 B_2
@@ -477,19 +477,19 @@ B_1        0   0   0  |  1    1   0
 B_2        0   0   0  |  1    1   1
 ~~~
 
-实现可以显式构造 block-causal mask，也可以把每个独立序列的 cumulative lengths 传给支持变长输入的 attention kernel。后者跳过跨样本的注意力计算；理论 attention 工作量可保持为 `\sum_i s_i^2`，而不是把总长度 `\sum_i s_i` 当成一个样本计算平方。具体格式、position id 是否在边界重置、padding 如何对齐，都由模型和训练 kernel 的 packing contract 决定。
+实现可以显式构造 block-causal mask，也可以把每个独立序列的 cumulative lengths 传给支持变长输入的 attention kernel。后者跳过跨样本的注意力计算；理论 attention 工作量可保持为 $\sum_i s_i^2$，而不是把总长度 $\sum_i s_i$ 当成一个样本计算平方。具体格式、position id 是否在边界重置、padding 如何对齐，都由模型和训练 kernel 的 packing contract 决定。
 
-边界还会影响 next-token label。若 `BOS_B` 是 `B_1` 的上下文，`B_1` 可以照常监督；若样本 B 没有 BOS，而它的首 token 在扁平流里紧接着 A，那么不能让 A 的末 token 来预测 B 的首 token，除非训练目标本来就允许跨文档条件。应在 boundary 处插入模型规定的起始符，或屏蔽那一个跨样本预测，并检查 position id、label 和 attention 的边界采用同一序列切分。
+边界还会影响 next-token label。若 `BOS_B` 是 $B_1$ 的上下文， $B_1$ 可以照常监督；若样本 B 没有 BOS，而它的首 token 在扁平流里紧接着 A，那么不能让 A 的末 token 来预测 B 的首 token，除非训练目标本来就允许跨文档条件。应在 boundary 处插入模型规定的起始符，或屏蔽那一个跨样本预测，并检查 position id、label 和 attention 的边界采用同一序列切分。
 
 ### 3.10.2 Packing 利用率
 
-固定 block 总位置数为 `M`，真实有效 token 数为 `V`，可以定义利用率：
+固定 block 总位置数为 $M$，真实有效 token 数为 $V$，可以定义利用率：
 
 ~~~math
 \eta_{\mathrm{pack}}=\frac{V}{M}
 ~~~
 
-这里 `M>0` 且 `0\le V\le M`；没有形成 block 的空输入不属于“利用率为 100%”的样本。利用率高只说明 padding 少，不说明边界正确。NeMo 的一个 SFT 实现把 pack 的 cumulative sequence lengths 传给变长 attention，避免样本间 attention；这是该训练栈的实现方式，不是所有框架都采用相同数据布局。应同时记录每个文档的起止位置、EOS 数、attention/block mask、position ids、padding 比例和被截断样本数。
+这里 $M>0$ 且 $0\le V\le M$；没有形成 block 的空输入不属于“利用率为 100%”的样本。利用率高只说明 padding 少，不说明边界正确。NeMo 的一个 SFT 实现把 pack 的 cumulative sequence lengths 传给变长 attention，避免样本间 attention；这是该训练栈的实现方式，不是所有框架都采用相同数据布局。应同时记录每个文档的起止位置、EOS 数、attention/block mask、position ids、padding 比例和被截断样本数。
 
 ### 3.10.3 截断策略
 
@@ -497,21 +497,21 @@ B_2        0   0   0  |  1    1   1
 
 ### 3.10.4 用一组文档复算 packing 与边界成本
 
-设文档 A 的序列为 `[BOS_A,a_1,a_2,EOS_A]`，文档 B 为 `[BOS_B,b_1,b_2,EOS_B]`，各有 4 个 token。若训练器按长度 8 为每篇文档单独建立一个 block，会为两篇共分配 16 个位置，其中 8 个是 padding，packing 利用率是 `8/16=50%`。把两篇放入同一个长度 8 的 block 后，8 个位置都有效，利用率是 `8/8=100%`。若每篇不训练 BOS，两篇共有 6 个有效预测目标，合并前后的 loss 分母都应为 6，而不是物理位置数 16 或 8。这个固定 block 账本说明，packing 改变矩阵形状，不应悄悄改变目标 token 的权重。
+设文档 A 的序列为 $[BOS_A,a_1,a_2,EOS_A]$，文档 B 为 $[BOS_B,b_1,b_2,EOS_B]$，各有 4 个 token。若训练器按长度 8 为每篇文档单独建立一个 block，会为两篇共分配 16 个位置，其中 8 个是 padding，packing 利用率是 $8/16=50\%$。把两篇放入同一个长度 8 的 block 后，8 个位置都有效，利用率是 $8/8=100\%$。若每篇不训练 BOS，两篇共有 6 个有效预测目标，合并前后的 loss 分母都应为 6，而不是物理位置数 16 或 8。这个固定 block 账本说明，packing 改变矩阵形状，不应悄悄改变目标 token 的权重。
 
-利用率提升没有自动决定文档之间能否互相读取。普通 causal attention 下，`b_1` 的隐藏状态可以读取 A 的全部前缀，即使 `EOS_A` 和 `BOS_B` 都存在。若目标要求两篇独立，attention 还要使用 block-causal 边界；若 kernel 能跳过跨文档计算，两个长度 4 的因果块各处理 `4×5/2=10` 个可见位置对，共 20 对，而把它们当成一条长度 8 的流则有 `8×9/2=36` 对。实际内核可能使用不同的计数和填充策略；仅把 mask 写成稀疏矩阵、但内核仍做稠密计算，不一定省下这部分时间。这个手算只展示独立注意力的理论关系。
+利用率提升没有自动决定文档之间能否互相读取。普通 causal attention 下， $b_1$ 的隐藏状态可以读取 A 的全部前缀，即使 `EOS_A` 和 `BOS_B` 都存在。若目标要求两篇独立，attention 还要使用 block-causal 边界；若 kernel 能跳过跨文档计算，两个长度 4 的因果块各处理 $4\times5/2=10$ 个可见位置对，共 20 对，而把它们当成一条长度 8 的流则有 $8\times9/2=36$ 对。实际内核可能使用不同的计数和填充策略；仅把 mask 写成稀疏矩阵、但内核仍做稠密计算，不一定省下这部分时间。这个手算只展示独立注意力的理论关系。
 
-同一边界还必须出现在三个位置：attention mask 决定能读取哪些 token，position id 决定序列位置从哪里计起，label mask 决定跨文档的 next-token 目标是否参与损失。若 `BOS_B` 是 B 的合法起点，应由它预测 `b_1`；若 B 没有 BOS 且训练目标要求文档独立，就要屏蔽由 `a_2` 预测 `b_1` 的跨界目标。三个实现有一个漏掉边界，loss 仍可能正常下降，但学习到的条件分布已改变。
+同一边界还必须出现在三个位置：attention mask 决定能读取哪些 token，position id 决定序列位置从哪里计起，label mask 决定跨文档的 next-token 目标是否参与损失。若 `BOS_B` 是 B 的合法起点，应由它预测 $b_1$；若 B 没有 BOS 且训练目标要求文档独立，就要屏蔽由 $a_2$ 预测 $b_1$ 的跨界目标。三个实现有一个漏掉边界，loss 仍可能正常下降，但学习到的条件分布已改变。
 
-截断也要按任务处理。长 SFT 样本如果从末尾切掉回答，可能只剩条件文本；若从开头切掉 system 或问题，回答就失去正确上下文。可以统计截断前后的有效监督 token、保留下来的 role、被切断字段和样本数量，并拒绝 `sum(mask)=0` 的样本。因而一个训练 block 的审计至少同时记录文档起止、EOS/BOS、position ids、有效 label、padding 和截断计数；单一的高利用率数值不能证明样本协议正确。
+截断也要按任务处理。长 SFT 样本如果从末尾切掉回答，可能只剩条件文本；若从开头切掉 system 或问题，回答就失去正确上下文。可以统计截断前后的有效监督 token、保留下来的 role、被切断字段和样本数量，并拒绝有效 label mask 满足 $\sum_t m_t=0$ 的样本，其中 $m_t$ 表示该位置是否参与监督。因而一个训练 block 的审计至少同时记录文档起止、EOS/BOS、position ids、有效 label、padding 和截断计数；单一的高利用率数值不能证明样本协议正确。
 
 不同训练目标可以采用不同边界政策：预训练语料可能有意让后续文本承接前文；SFT packing 通常要保持每个对话样本的 role 和回答 mask；工具/RL 轨迹还要保留一次行动和观察的因果次序。数据是否跨样本可见，应是可说明的训练假设，而不是由 dataloader 的拼接结果偶然决定。
 
 数据集划分也要发生在 packing 之前。若先把同一长文切成多个 block，再随机分配 block，前后片段可能分别进入训练和验证，后一个片段通过训练样本中的上下文泄漏文档内容。应先按文档或来源实体完成 train/validation/test 隔离，再在每个 split 内做去重、截断和 packing；记录 document id、切分规则和 pack 版本，后续重建才能避免跨集合串接。
 
-packing 的优化目标不只是提高 `η_pack`。长度分布和 padding 方向会影响每步 token 数，变长 kernel 需要正确的 cumulative sequence lengths，分布式训练还要确保各 rank 的有效目标分母一致。可以同时报告有效 token/物理位置、每 block 文档数、跨文档 attention 规则、截断数和每步 target count；若利用率提高但长回答被截断、边界标签变了，吞吐收益并没有保住原训练目标。
+packing 的优化目标不只是提高 $\eta_{\mathrm{pack}}$。长度分布和 padding 方向会影响每步 token 数，变长 kernel 需要正确的 cumulative sequence lengths，分布式训练还要确保各 rank 的有效目标分母一致。可以同时报告有效 token/物理位置、每 block 文档数、跨文档 attention 规则、截断数和每步 target count；若利用率提高但长回答被截断、边界标签变了，吞吐收益并没有保住原训练目标。
 
-例如，一个 1,140-token 的对话在上下文上限 `C=1,024` 时超长 116 个 token。若策略从尾部截断，假设前缀占 240、回答占 900，剩余容量只能保留 784 个回答 token，回答末尾和 EOS 一起丢失；若从头部截断，可能先失去系统指令或问题。真正要检查的是截断后保留的条件字段、监督 token 数和终止目标，而不是只统计“减少了 116 token”。对长文预训练也要记录 chunk overlap：重叠窗口会重复训练窗口边缘的 token，改变它们的有效曝光。
+例如，一个 1,140-token 的对话在上下文上限 $C=1,024$ 时超长 116 个 token。若策略从尾部截断，假设前缀占 240、回答占 900，剩余容量只能保留 784 个回答 token，回答末尾和 EOS 一起丢失；若从头部截断，可能先失去系统指令或问题。真正要检查的是截断后保留的条件字段、监督 token 数和终止目标，而不是只统计“减少了 116 token”。对长文预训练也要记录 chunk overlap：重叠窗口会重复训练窗口边缘的 token，改变它们的有效曝光。
 
 每次生成训练/验证切分后，应先冻结文档集合与其版本，再分别编码和 packing。对评估集，若采用滑窗，应记录窗口长、stride 和哪些 token 计入 loss，避免相邻窗口在聚合时重复计分却按唯一 token 数作分母。训练侧与评估侧可以使用不同的 attention 策略，但差异必须是显式配置，并在比较结果时按同一协议解释。
 
@@ -545,7 +545,7 @@ d_i=(M_i,z_i,m_i),
 z_i=T(T_{\mathrm{chat}}(M_i))
 ~~~
 
-`M_i` 是消息，`z_i` 是 token ids，`m_i` 是 label mask。JSON 字段名字可以不同，但这三个对象必须能被重建和审计。
+$M_i$ 是消息， $z_i$ 是 token ids， $m_i$ 是 label mask。JSON 字段名字可以不同，但这三个对象必须能被重建和审计。
 
 ### 3.11.2 数据质量边界
 
@@ -593,7 +593,7 @@ GRPO、RLVR 或其他强化训练可能保存一个 prompt 的多个候选、组
 G_i=\left(x_i,\{y_{i,j},r_{i,j},v_{i,j}\}_{j=1}^{n_i}\right)
 ~~~
 
-`y` 是候选，`r` 是奖励或相对分数，`v` 是验证器证据。奖励来自字符串匹配、代码执行、数学检查还是人工偏好，会影响训练信号的含义，必须记录来源。
+$y$ 是候选， $r$ 是奖励或相对分数， $v$ 是验证器证据。奖励来自字符串匹配、代码执行、数学检查还是人工偏好，会影响训练信号的含义，必须记录来源。
 
 一次 rollout 的审计记录通常还需要行为策略的模型 revision、采样参数、生成 token 的旧 log-probability、`group_id`、response/loss mask、终止原因、reward 分项、verifier 版本和环境事件。离线偏好对没有这些在线采样字段；来自在线 GRPO/RLVR 的轨迹则不能只压扁成 chosen/rejected 文本，否则很难复核样本由哪个策略产生、工具结果是否可信、奖励是否过期。不同算法的训练器 schema 不统一，这里列的是复现与追踪所需的账本字段，不是某个库的固定 API。
 
@@ -659,7 +659,7 @@ c_{\mathrm{boundary}}
 
 #### 3.14.2 粗略 token 账本
 
-图片高宽为 `H,W`，patch 边长为 `P`，若每个 patch 保留一个位置，视觉位置数粗略为：
+图片高宽为 $H,W$，patch 边长为 $P$，若每个 patch 保留一个位置，视觉位置数粗略为：
 
 ~~~math
 N_{\mathrm{image}}
@@ -679,11 +679,11 @@ N_{\mathrm{text}}
 +N_{\mathrm{special}}
 ~~~
 
-该估算要求 `H,W,P>0`，并把 padding、裁剪和多图顺序固定下来；零尺寸媒体或零 patch size 是预处理错误，不是零视觉 token。真实模型可能先压缩视觉表示，也可能使用连续 embedding 而不是词表 token。因此还要记录视觉 encoder 输出长度、时间采样、图像裁剪、projector 维度和训练时的对齐方式。
+该估算要求 $H,W,P>0$，并把 padding、裁剪和多图顺序固定下来；零尺寸媒体或零 patch size 是预处理错误，不是零视觉 token。真实模型可能先压缩视觉表示，也可能使用连续 embedding 而不是词表 token。因此还要记录视觉 encoder 输出长度、时间采样、图像裁剪、projector 维度和训练时的对齐方式。
 
-用一个纯教学参数看尺寸的影响：`448×448` 图像经 `14×14` patch 切分得到 `32×32=1,024` 个视觉位置。如果后续模块每 `2×2` 个 patch 合并成一个位置，则留下 `16×16=256` 个位置；若 16 帧都按此处理，合计是 `4,096` 个视觉位置，尚未计文本和时间戳。这个例子只演示“分辨率/帧数→模型序列长度”的路径，不是某个模型的 processor 配置。高分辨率 crop、动态分块和视频采帧策略会同时改变视觉信息、序列成本与显存。
+用一个纯教学参数看尺寸的影响： $448\times448$ 图像经 $14\times14$ patch 切分得到 $32\times32=1,024$ 个视觉位置。如果后续模块每 $2\times2$ 个 patch 合并成一个位置，则留下 $16\times16=256$ 个位置；若 16 帧都按此处理，合计是 $4,096$ 个视觉位置，尚未计文本和时间戳。这个例子只演示“分辨率/帧数→模型序列长度”的路径，不是某个模型的 processor 配置。高分辨率 crop、动态分块和视频采帧策略会同时改变视觉信息、序列成本与显存。
 
-音频也要把波形字节数、codec 帧数、量化码本数和语言模型的序列步数分开。若某 codec 每秒输出 `f` 帧、每帧有 `K` 个活跃 codebook，则原始离散 code 数可估为 `duration×f×K`；但模型可能把 codebooks 并行预测、交错排列或先压缩，所以不能把 code 总数直接当成自回归步数。多模态数据建议保存媒体文件 hash、采样/裁剪时间戳、processor revision、文本片段与媒体片段的对齐区间，以及每个处理阶段实际产生的序列长度。
+音频也要把波形字节数、codec 帧数、量化码本数和语言模型的序列步数分开。若某 codec 每秒输出 $f$ 帧、每帧有 $K$ 个活跃 codebook，则原始离散 code 数可估为 $duration\times f\times K$；但模型可能把 codebooks 并行预测、交错排列或先压缩，所以不能把 code 总数直接当成自回归步数。多模态数据建议保存媒体文件 hash、采样/裁剪时间戳、processor revision、文本片段与媒体片段的对齐区间，以及每个处理阶段实际产生的序列长度。
 
 #### 3.14.3 视觉、音频与文本的边界
 
@@ -701,7 +701,7 @@ N_{\mathrm{text}}
 4. chat template、工具模板和多模态处理器。
 5. checkpoint 分片、量化文件和服务端配置。
 
-原词表大小为 `V`，新增 `K` 个 token 后：
+原词表大小为 $V$，新增 $K$ 个 token 后：
 
 ~~~math
 V'=V+K,
@@ -713,9 +713,9 @@ E'\in\mathbb{R}^{V'\times d}
 
 ### 3.15.2 新 token 如何获得语义
 
-随机初始化、旧子词均值或外部向量映射都只是新 embedding 行的起点。假设新词由两个旧子词表示，旧向量分别为 `e_1=(2,0)`、`e_2=(0,4)`，简单均值初始化得到 `e_new=(1,2)`；这个计算可复现，但它只说明如何生成初值，不能证明新 token 已经具有正确语义。只有继续训练数据实际出现该 token，并且输入 embedding、输出头、模板、labels 和 optimizer 都按新词表版本连接，模型才有机会学习它的读写作用。
+随机初始化、旧子词均值或外部向量映射都只是新 embedding 行的起点。假设新词由两个旧子词表示，旧向量分别为 $e_1=(2,0)$、 $e_2=(0,4)$，简单均值初始化得到 $e_{\mathrm{new}}=(1,2)$；这个计算可复现，但它只说明如何生成初值，不能证明新 token 已经具有正确语义。只有继续训练数据实际出现该 token，并且输入 embedding、输出头、模板、labels 和 optimizer 都按新词表版本连接，模型才有机会学习它的读写作用。
 
-扩词表的内存变化也应先算清。设新增 `K=2,000` 个 token，hidden size `d=4,096`，每张矩阵要增加 `K×d=8,192,000` 个参数。若参数用 BF16 存储，单个新增矩阵约占 `16,384,000` bytes，即 `15.625 MiB`；输入和不共享的输出矩阵合计约 `31.25 MiB`，尚未计入梯度、优化器状态、分片填充和 checkpoint 元数据。这个例子帮助判断词表扩张的直接参数账本；真实训练峰值还取决于 optimizer、并行布局和权重共享方式。
+扩词表的内存变化也应先算清。设新增 $K=2,000$ 个 token，hidden size $d=4,096$，每张矩阵要增加 $K\times d=8,192,000$ 个参数。若参数用 BF16 存储，单个新增矩阵约占 $16,384,000$ bytes，即 `15.625 MiB`；输入和不共享的输出矩阵合计约 `31.25 MiB`，尚未计入梯度、优化器状态、分片填充和 checkpoint 元数据。这个例子帮助判断词表扩张的直接参数账本；真实训练峰值还取决于 optimizer、并行布局和权重共享方式。
 
 初始化方法需要按目标模型做短程对照。FOCUS 在 XLM-R 单语种适配中用辅助 fastText 空间，从源/目标共享词汇中寻找语义相近向量，再组合原模型 embedding；它不是面向现代生成式 LLM 的普遍配方。[Beyond Initialization Loss](https://arxiv.org/html/2608.03494v1) 在 Nemotron-3-Nano-30B-A3B 的 Hindi 扩展中加入 25,600 个 token，并在 100,000 篇 Sangraha Hindi 文档上报告 fertility 从 1.95 降至 1.25。该研究比较 20 多种初始化后发现，在其 Hindi 设置中，50-step CPT probe 比 step-zero 初始化 loss 更能作为选择信号；最佳方案的输入和输出矩阵使用了不同子词组合。模型、语种、数据和预算均有限，结果应转成待验证的实验设计，而非默认初始化规则。
 
@@ -729,7 +729,7 @@ E'\in\mathbb{R}^{V'\times d}
 
 ### 3.15.4 词表扩展需要模型状态迁移和回归
 
-以报告中的约数 `65K→128K`、`d=4,096` 作为教学账本，约增加 `63,000×4,096=258,048,000` 个 embedding 参数。若按 BF16 的 2 bytes/parameter 计，输入矩阵新增约 `516,096,000` bytes，即 `492.2 MiB`；不共享的输出矩阵还会增加约同样大小。实际 checkpoint/训练峰值还需计入量化格式、梯度、优化器状态、分片和对齐开销。这个例子说明词表新增行在大模型整体中可能不占多数，却足以影响设备内存、文件布局和词表并行。
+以报告中的约数 `65K→128K`、 $d=4,096$ 作为教学账本，约增加 $63,000\times4,096=258,048,000$ 个 embedding 参数。若按 BF16 的 2 bytes/parameter 计，输入矩阵新增约 $516,096,000$ bytes，即 `492.2 MiB`；不共享的输出矩阵还会增加约同样大小。实际 checkpoint/训练峰值还需计入量化格式、梯度、优化器状态、分片和对齐开销。这个例子说明词表新增行在大模型整体中可能不占多数，却足以影响设备内存、文件布局和词表并行。
 
 扩词表会建立一套新的模型状态：token id 到 embedding 行的映射，输入/输出矩阵形状，可能的 tied-weight 配置，optimizer state，模型配置、tokenizer 文件和分片 checkpoint 必须互相吻合。若直接用新矩阵加载旧 optimizer state，行数和状态槽位可能不匹配；若只更新 tokenizer，新增 id 会指向未训练的向量。迁移说明中应写清哪些旧行逐项复制、哪些新行重建、优化器哪些状态清零或扩展，以及恢复 checkpoint 的边界。
 
@@ -1041,7 +1041,7 @@ else:
 print("data format toy: ok")
 ~~~
 
-对这三个固定字符串，toy 词表会给出英文 `5/28≈0.179` token/字符，中文 `4/10=0.4` token/字符，代码 `13/36≈0.361` token/字符；中文 UTF-8 占 30 bytes，因此中文是 `4/30≈0.133` token/byte。它们只反映手工加入 `BASE_PIECES` 的结果，换一组片段就会改变，不是语言间优劣结论。`byte_fallback_roundtrip` 还用未加入词表的 🧪 字符检查字节回退并恢复原文；`assistant_label_count` 与 `prompt_label_count` 分开统计，说明输入可以包含完整对话而监督只落在 assistant 区域；`packed_eos_count` 说明文档结束符被保留；padding mask 来自原始有效长度而非 `token_id != pad_id`；`vocab_resize` 与 `tool_controls_registered` 分别说明新增工具 token 需要扩展词表/embedding，并登记为控制 token。toy 明确拒绝未知角色、空 SFT 监督、非法 token id、空文档和超长文档，因为这些情形需要显式模板或截断策略，不能由默认行为悄悄吞掉。该代码仍不是真实 BPE、生产 tokenizer、完整 attention mask 或模型训练器，读者应把同样的审计思路迁移到目标模型的官方 tokenizer 和数据处理器上。
+对这三个固定字符串，toy 词表会给出英文 $5/28\approx0.179$ token/字符，中文 $4/10=0.4$ token/字符，代码 $13/36\approx0.361$ token/字符；中文 UTF-8 占 30 bytes，因此中文是 $4/30\approx0.133$ token/byte。它们只反映手工加入 `BASE_PIECES` 的结果，换一组片段就会改变，不是语言间优劣结论。`byte_fallback_roundtrip` 还用未加入词表的 🧪 字符检查字节回退并恢复原文；`assistant_label_count` 与 `prompt_label_count` 分开统计，说明输入可以包含完整对话而监督只落在 assistant 区域；`packed_eos_count` 说明文档结束符被保留；padding mask 来自原始有效长度而非 `token_id != pad_id`；`vocab_resize` 与 `tool_controls_registered` 分别说明新增工具 token 需要扩展词表/embedding，并登记为控制 token。toy 明确拒绝未知角色、空 SFT 监督、非法 token id、空文档和超长文档，因为这些情形需要显式模板或截断策略，不能由默认行为悄悄吞掉。该代码仍不是真实 BPE、生产 tokenizer、完整 attention mask 或模型训练器，读者应把同样的审计思路迁移到目标模型的官方 tokenizer 和数据处理器上。
 
 代码的阅读顺序可以沿着同一条数据流进行。先看 `SPECIAL_TOKENS` 与 `BASE_PIECES` 如何建立词表和反向映射，再看 `tokenize_text` 如何执行最长片段匹配、未命中时如何把单个字符转换成 UTF-8 byte token；之后追踪 `serialize_chat` 如何加入 role 边界并生成 assistant label mask，最后对照 `pack_documents` 的有效长度、EOS 数和 padding 结果。这样读者可以从一个字符串一路跟到 id、训练目标和 block，而不是把几百行代码当成互不相干的工具函数。
 
@@ -1107,7 +1107,7 @@ EOS 表示序列里写入了边界符号，不能替代 document attention mask�
 r_i=\frac{\Delta L_i}{|T_{\mathrm{old}}(x_i)|}
 ~~~
 
-其中 `r_i` 仅在旧版本 token 长度大于零时定义；空输出应单独报告为 N/A 或编码失败。比如某条相同文本由 100 个 token 变成 85 个，`ΔL=-15` 且相对长度变化 `r=-15%`。这是长度差异，不代表质量提升；只有两边都成功编码同一非空原文且规范化口径一致时才能计算。若 tokenizer 版本改变了 Unicode 处理，应同时保存 raw 与 normalized 文本，并把不可直接比较的项标为失败或 N/A，不能用零填补。
+其中 $r_i$ 仅在旧版本 token 长度大于零时定义；空输出应单独报告为 N/A 或编码失败。比如某条相同文本由 100 个 token 变成 85 个， $\DeltaL=-15$ 且相对长度变化 $r=-15\%$。这是长度差异，不代表质量提升；只有两边都成功编码同一非空原文且规范化口径一致时才能计算。若 tokenizer 版本改变了 Unicode 处理，应同时保存 raw 与 normalized 文本，并把不可直接比较的项标为失败或 N/A，不能用零填补。
 
 除 token 长度外，还要逐条比较可见 token 与 id、special-token 位置、assistant 生成起点、labels 右移后的目标、有效监督 token 数、EOS/PAD、position id、pack 边界和解码文本。对工具和多模态样本还要核对调用事件、载荷尺寸/数量和 dispatcher 收到的结构。差异必须按字段给出允许范围；不能因为模型最后一段回答“看起来正常”就跳过前面的接口偏差。
 
