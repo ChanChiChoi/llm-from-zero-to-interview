@@ -240,8 +240,8 @@
 30. 用 PyTorch 生成 `[1,1,T,T]` 形状的 causal mask。
 31. 解释为什么 mask 要在 softmax 前加入。
 31A. 用自己的话解释 QK circuit 和 OV circuit 的区别，并各举一个可能失败的例子。
-31B. 运行第 21 册第 3 章的 QKV / Head 子空间审计 demo，解释 head redundancy 和 KV head ratio 分别对应什么工程问题。
-31C. 运行第 21 册第 4 章的 MHA / GQA / MQA / MLA 成本审计 demo，解释为什么 cache 最省不等于默认最适合上线。
+31B. 对照第 21 册第 3 章中的 head pattern 观察与剪枝研究，分别说明注意力图、逐个屏蔽和跨整网联合剪枝能支持什么结论；指出每种证据依赖的任务、指标和干预范围。
+31C. 对照[第 21 册第 4 章](book-21-transformer-architecture-evolution/chapters/04-mha-mqa-gqa-mla的演进与trade-off.md)及 [MQA](https://arxiv.org/abs/1911.02150)、[GQA](https://aclanthology.org/2023.emnlp-main.298/)、[DeepSeek-V2 MLA](https://arxiv.org/abs/2405.04434v5) 和 [MHA2MLA](https://aclanthology.org/2025.acl-long.1597/) 证据，比较共享 K/V heads 与低秩 latent cache；说明缓存元素比例、质量结果和实际 decode 延迟各自需要什么条件，指出 GQA uptraining 和 MLA checkpoint 转换证据的适用范围。
 31D. 运行第 21 册第 5 章的 FFN / MoE 成本审计 demo，解释 dense 4D FFN、SwiGLU 近似等参配置、MoE total parameters 和 active parameters 的差异。
 31E. 给定 12 个 token、8 个 experts、top-2 routing 和 capacity factor 1.25，手算 balanced routing 与 collapsed routing 的 expert counts、capacity、overflow 和 load ratio。
 31F. 运行第 21 册第 6 章的 Residual / Norm 稳定性审计 demo，解释 `plain_no_residual`、`residual_no_norm`、`post_layernorm` 和 `pre_rmsnorm_scaled` 的 gate 结果。

@@ -16,7 +16,7 @@
 
 分级不是把工具永久标成安全或危险。同一个 search_docs 对公开资料也许是低风险，对全体员工薪资则可能是高风险读取。必须同时看工具能力、当前用户、资源范围、具体参数和运行环境。
 
-工具定义可抽象为 $t_i=(\mathrm{name}_i,\mathrm{schema}_i,\mathrm{risk}_i,\mathrm{roles}_i,\mathrm{sideEffects}_i,f_i)$。一次调用的自动执行条件为：
+工具定义可抽象为 $t_{i}=(\mathrm{name}_{i},\mathrm{schema}_{i},\mathrm{risk}_{i},\mathrm{roles}_{i},\mathrm{sideEffects}_{i},f_{i})$。一次调用的自动执行条件为：
 
 ```math
 A(c)=I_{\mathrm{known}}\land I_{\mathrm{schema}}\land I_{\mathrm{identity}}\land I_{\mathrm{scope}}\land I_{\mathrm{budget}}\land I_{\mathrm{riskPolicy}}
@@ -333,11 +333,11 @@ R_{\mathrm{duplicate}}=\frac{\#\{\text{重复非幂等副作用}\}}{\#\{\text{�
 
 假设 10 条样例中，6 条证据充分且回答正确、2 条资料不足且正确拒答、1 条越权请求被阻断、1 条版本冲突转人工，可以分别报告：
 
-- 回答覆盖率：$6/10=60\%$。
-- 可回答样例正确率：$6/6=100\%$。
-- 资料不足时正确拒答率：$2/2=100\%$。
-- 越权尝试执行数：$0/1$。
-- 版本冲突处理：$1/1$ 转人工。
+- 回答覆盖率： $6/10=60\%$。
+- 可回答样例正确率： $6/6=100\%$。
+- 资料不足时正确拒答率： $2/2=100\%$。
+- 越权尝试执行数： $0/1$。
+- 版本冲突处理： $1/1$ 转人工。
 
 这些比例回答不同问题，不能相加成综合准确率。分母很小时还要明确样本数：6/6 只描述这 6 条可回答样例，1 条越权样本不能证明总体风险为零。出现 version_conflict 时，也不能把转人工算成普通拒答。
 

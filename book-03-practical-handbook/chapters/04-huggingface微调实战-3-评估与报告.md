@@ -32,21 +32,21 @@ task-level：生成结果、格式解析、事实检查、人工评分和坏例�
 ```math
 \mathcal{D}_{\mathrm{eval}}
 =
-\{(p_i,c_i,r_i)\}_{i=1}^{N}
+\{(p_{i},c_{i},r_{i})\}_{i=1}^{N}
 ```
 
 base 和 SFT 模型在同一 prompt、同一模板和同一生成参数下产生：
 
 ```math
-y_i^{\mathrm{base}}
+y_{i}^{\mathrm{base}}
 =
-G(\theta_{\mathrm{base}},p_i,g)
+G(\theta_{\mathrm{base}},p_{i},g)
 ```
 
 ```math
-y_i^{\mathrm{sft}}
+y_{i}^{\mathrm{sft}}
 =
-G(\theta_{\mathrm{sft}},p_i,g)
+G(\theta_{\mathrm{sft}},p_{i},g)
 ```
 
 其中 $g$ 包括 max_new_tokens、do_sample、temperature、top-p、停止 token 和随机种子。比较时只应改变模型参数；如果同时改变 prompt 或采样策略，就不能认定结果差异是 SFT 带来的。
@@ -85,7 +85,7 @@ eval_item = {
 类别数量也应报告：
 
 ```math
-N=\sum_{c\in\mathcal{C}}N_c
+N=\sum_{c\in\mathcal{C}}N_{c}
 ```
 
 总分掩盖类别回归时，分桶结果能告诉我们是格式变好了、事实性变差了，还是某个小类别样本太少。
@@ -152,7 +152,7 @@ A_{\mathrm{fmt}}
 =
 \frac{1}{N_{\mathrm{fmt}}}
 \sum_{i\in\mathcal{I}_{\mathrm{fmt}}}
-\mathbf{1}[\mathrm{valid}(y_i)]
+\mathbf{1}[\mathrm{valid}(y_{i})]
 ```
 
 关键词或检查点命中率只能作为粗粒度辅助：
@@ -177,14 +177,14 @@ def keyword_score(output, expected_points):
 ```
 其数学形式为：
 
-对每个样本，令 $M_i$ 为非空检查点的数量。只有 $M_i>0$ 时，下面的关键词得分才有定义；它是便于定位坏例的字符串指标，不是语义正确率。
+对每个样本，令 $M_{i}$ 为非空检查点的数量。只有 $M_{i}>0$ 时，下面的关键词得分才有定义；它是便于定位坏例的字符串指标，不是语义正确率。
 
 ```math
-K_i
+K_{i}
 =
-\frac{1}{M_i}
-\sum_{j=1}^{M_i}
-\mathbf{1}[q_{i,j}\subset y_i]
+\frac{1}{M_{i}}
+\sum_{j=1}^{M_{i}}
+\mathbf{1}[q_{i,j}\subset y_{i}]
 ```
 
 关键词命中不等于语义正确：模型可能使用同义词而没有命中，也可能在错误语境中重复关键词。事实性、推理质量和安全性需要人工 rubric、程序验证或经过审查的评审模型共同判断。
@@ -199,7 +199,7 @@ W_{\mathrm{sft}}
 \frac{1}{N}
 \sum_{i=1}^{N}
 \mathbf{1}
-[s(y_i^{\mathrm{sft}})>s(y_i^{\mathrm{base}})]
+[s(y_{i}^{\mathrm{sft}})>s(y_{i}^{\mathrm{base}})]
 ```
 
 更重要的是回归率：
@@ -210,7 +210,7 @@ R_{\mathrm{reg}}
 \frac{1}{N}
 \sum_{i=1}^{N}
 \mathbf{1}
-[s(y_i^{\mathrm{sft}})<s(y_i^{\mathrm{base}})]
+[s(y_{i}^{\mathrm{sft}})\lt s(y_{i}^{\mathrm{base}})]
 ```
 
 平均分上升仍可能伴随某个类别严重变差，因此报告应保存每个样本的 base 输出、SFT 输出、评分、类别和评语。

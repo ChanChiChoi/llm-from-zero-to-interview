@@ -142,10 +142,10 @@
   - 证据等级：source-backed（早期预印本中的方法与作者实验报告）。
   - 边界：目前是论文作者在所列模型、数学 benchmark 和 SimpleRL 配置下的结果；不支持跨任务或独立实现的通用排序。
 
-- Jia et al., “Group Adaptive Clipping Policy Optimization,” arXiv:2609.00444v1，[论文 HTML](https://arxiv.org/html/2609.00444v1)，版本日期 2026-08-31。实际阅读摘要、引言、方法概述与实验结果段。
+- Jia et al., “Group Adaptive Clipping Policy Optimization,” arXiv:2609.00444v1，[论文 HTML](https://arxiv.org/html/2609.00444v1)，版本日期 2026-08-31。2026-11-19 复核 arXiv 页面元数据，标注已被 EMNLP 2026 主会录用；实际阅读摘要、引言、方法概述与实验结果段。
   - 来源支持：GAPO 根据组内 rollout 的 advantage 调整 clipping 边界，保留 PPO/GSPO surrogate 而不改 reward shaping；作者报告其在 Qwen 与 Llama 模型的部分数学和代码 benchmark 上改善 Pass@1/Pass@k。
-  - 证据等级：source-backed（早期预印本中的方法和作者实验报告）。
-  - 边界：收益依赖作者定义的 base-pass-rate、模型、任务和训练协议；尚不能据此认定 advantage-adaptive clipping 是通用默认配置。
+  - 证据等级：source-backed（论文定义、作者实验报告及 arXiv 录用状态元数据）。
+  - 边界：录用状态不等于独立复现；收益依赖作者定义的 base-pass-rate、模型、任务和训练协议，不能据此认定 advantage-adaptive clipping 是通用默认配置。
 
 ## 2026-11-06 补充：GRPO 数学定义与 RL 后训练缩放
 

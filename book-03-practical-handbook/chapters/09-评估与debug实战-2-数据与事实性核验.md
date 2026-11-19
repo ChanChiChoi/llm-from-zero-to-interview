@@ -48,9 +48,9 @@
 时间敏感任务可以使用时间切分：
 
 ```math
-D_{\mathrm{train}}=\{z:t(z)<T_1\},\qquad
-D_{\mathrm{valid}}=\{z:T_1\le t(z)<T_2\},\qquad
-D_{\mathrm{test}}=\{z:t(z)\ge T_2\}
+D_{\mathrm{train}}=\{z:t(z)\lt T_{1}\},\qquad
+D_{\mathrm{valid}}=\{z:T_{1}\le t(z)\lt T_{2}\},\qquad
+D_{\mathrm{test}}=\{z:t(z)\ge T_{2}\}
 ```
 
 如果任务需要回答“上线后未来数据表现如何”，时间切分比随机切分更接近真实部署。它也可能让分布变化变得明显，因此报告里要同时给出时间段、业务版本和样本量。
@@ -58,11 +58,11 @@ D_{\mathrm{test}}=\{z:t(z)\ge T_2\}
 对于实体泄漏，先按实体分组再切分：
 
 ```math
-\mathrm{group}(z_i)=g_i,\qquad
-\mathrm{partition}(g_i)\in\{\mathrm{train},\mathrm{valid},\mathrm{test}\}
+\mathrm{group}(z_{i})=g_{i},\qquad
+\mathrm{partition}(g_{i})\in\{\mathrm{train},\mathrm{valid},\mathrm{test}\}
 ```
 
-同一个 $g_i$ 不得出现在多个分区。客服场景中的 `customer_id`、合同场景中的 `contract_id`、代码场景中的 `repository_id` 都可能是这种分组键。
+同一个 $g_{i}$ 不得出现在多个分区。客服场景中的 `customer_id`、合同场景中的 `contract_id`、代码场景中的 `repository_id` 都可能是这种分组键。
 
 ### 9.2.3 近重复检测：从精确哈希到 shingle 相似度
 
@@ -236,10 +236,10 @@ claim 2：特殊支付渠道可能需要五个工作日。
 
 ### 回答、证据和事实状态是三件事
 
-对回答 $a$ 做 claim 分解，得到 $C(a)=\{c_j\}_{j=1}^{k}$。给定证据集合 $E$，定义支持关系：
+对回答 $a$ 做 claim 分解，得到 $C(a)=\{c_{j}\}_{j=1}^{k}$。给定证据集合 $E$，定义支持关系：
 
 ```math
-\mathrm{support}(e,c_j)\in\{0,1,\mathrm{contradict}\}
+\mathrm{support}(e,c_{j})\in\{0,1,\mathrm{contradict}\}
 ```
 
 这不是语言模型天然提供的标签，而是需要规则、信息抽取、检索匹配、人工或另一个评估模型判断。至少要保存“哪一段证据支持哪一个 claim”，否则一个总分无法定位问题。
@@ -248,14 +248,14 @@ claim 2：特殊支付渠道可能需要五个工作日。
 
 ```math
 P_{\mathrm{support}}(a\mid E)=
-\frac{\sum_j w_j\mathbb{1}[\exists e\in E:\mathrm{support}(e,c_j)=1]}{\sum_j w_j}
+\frac{\sum_{j} w_{j}\mathbb{1}[\exists e\in E:\mathrm{support}(e,c_{j})=1]}{\sum_{j} w_{j}}
 ```
 
-这衡量回答中有多少内容有依据，不衡量回答是否完整。若要衡量问题所需事实的覆盖，应另外定义由问题和参考资料确定的必需事实集 $Q=\{q_j\}$，并为其指定有限正权重 $v_j$。完整性可以写成：
+这衡量回答中有多少内容有依据，不衡量回答是否完整。若要衡量问题所需事实的覆盖，应另外定义由问题和参考资料确定的必需事实集 $Q=\{q_{j}\}$，并为其指定有限正权重 $v_{j}$。完整性可以写成：
 
 ```math
 R_{\mathrm{required}}(a\mid Q,E)=
-\frac{\sum_{q_j\in Q}v_j\mathbb{1}[a\ \mathrm{covers}\ q_j]\mathbb{1}[E\ \mathrm{supports}\ q_j]}{\sum_{q_j\in Q}v_j}
+\frac{\sum_{q_{j}\in Q}v_{j}\mathbb{1}[a\ \mathrm{covers}\ q_{j}]\mathbb{1}[E\ \mathrm{supports}\ q_{j}]}{\sum_{q_{j}\in Q}v_{j}}
 ```
 
 两式分别要求回答 claim 的总权重大于 0、必需事实集的总权重大于 0；缺少相应集合时报告“不适用”。若回答有 claim，但证据不支持其中任何一条，支持率是 0，而不是“不适用”。例如，问题要求普通和特殊渠道两种到账时间，等权必需事实集含 2 条；回答只正确说明普通渠道，则完整性为 $1/2=0.5$。若回答还加入一个“当天到账”的无依据 claim，回答两条 claim 中只有一条受支持，则等权支持率也为 $1/2=0.5$；没有这个额外 claim 时支持率为 $1/1=1$。这里的完整性是教学定义，不能当作 FActScore 的原始指标；写清分子、分母和 claim 抽取规则，比背一个指标名更重要。
@@ -282,13 +282,13 @@ d(a,E)=
 
 拒答不是无条件越多越好。一个总是说“资料不足”的系统可能没有幻觉，却也无法完成有证据的任务。应同时测量有效回答率、正确回答率、证据不足时的拒答率和有证据时的过度拒答率。
 
-设正确回答收益为 $U_c$，无依据回答损失为 $L_h$，合理拒答收益为 $U_a$，过度拒答损失为 $L_o$，则一个简化的期望效用可以写成：
+设正确回答收益为 $U_{c}$，无依据回答损失为 $L_{h}$，合理拒答收益为 $U_{a}$，过度拒答损失为 $L_{o}$，则一个简化的期望效用可以写成：
 
 ```math
-U=\Pr(c)U_c-\Pr(h)L_h+\Pr(a)U_a-\Pr(o)L_o
+U=\Pr(c)U_{c}-\Pr(h)L_{h}+\Pr(a)U_{a}-\Pr(o)L_{o}
 ```
 
-高风险领域通常令 $L_h$ 很大，于是系统宁可在不确定时请求更多证据；低风险创作任务则可能更重视完成率。阈值应由任务后果决定，不应把一个领域的拒答策略复制到所有领域。
+高风险领域通常令 $L_{h}$ 很大，于是系统宁可在不确定时请求更多证据；低风险创作任务则可能更重视完成率。阈值应由任务后果决定，不应把一个领域的拒答策略复制到所有领域。
 
 ### 9.3.3 事实性评估的四个层次
 
@@ -329,11 +329,11 @@ confidence
 可以把错误严重度纳入风险加权：
 
 ```math
-R_{\mathrm{hall}}=\frac{\sum_j w_j\mathbb{1}[\mathrm{unsupported}(c_j)]}{\sum_j w_j},\qquad
-w_j=w_{\mathrm{base}}(c_j)\cdot w_{\mathrm{risk}}(c_j)
+R_{\mathrm{hall}}=\frac{\sum_{j} w_{j}\mathbb{1}[\mathrm{unsupported}(c_{j})]}{\sum_{j} w_{j}},\qquad
+w_{j}=w_{\mathrm{base}}(c_{j})\cdot w_{\mathrm{risk}}(c_{j})
 ```
 
-这里同样要求 claim 集合非空且 $\sum_jw_j>0$；否则幻觉风险率没有定义。这个权重设计让“低风险细节很多、高风险错误一个”的回答不会被简单平均掩盖。
+这里同样要求 claim 集合非空且 $\sum_{j}w_{j}>0$；否则幻觉风险率没有定义。这个权重设计让“低风险细节很多、高风险错误一个”的回答不会被简单平均掩盖。
 
 ### 9.3.5 零依赖 claim 支持检查器
 

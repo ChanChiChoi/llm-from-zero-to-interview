@@ -904,11 +904,11 @@
 
 28. 为什么需要 Multi-Head Attention？
    考察点：多个子空间、不同关系模式、信息路由。
-   回答框架：多个 head 可以并行关注不同类型的信息关系，比单头更灵活。
+   回答框架：每个 head 从完整输入学习独立的 Q/K/V 投影，可以并行形成多组读取权重和 Value 混合，再拼接并通过输出投影组合。它提供多路读取能力，不保证每个 head 都有固定、互不重叠的语义职责。
 
 29. MHA 的 shape 如何变化？
    考察点：`[B,T,d_model]`、`[B,h,T,d_head]`、scores `[B,h,T,T]`。
-   回答框架：Q/K/V 投影后 reshape 成多头，计算 scores，再 concat 回 `d_model`。
+   回答框架：每个 head 从完整的 `d_model` 输入做独立投影；实现可以把多个投影合并计算后整理出 head 维度。每头计算 scores 和 Value 混合，拼接后通过输出投影映射回 `d_model`。
 
 30. MHA、MQA、GQA 有什么区别？
    考察点：Q heads、K/V heads、KV Cache、推理效率。
@@ -916,7 +916,7 @@
 
 31. 增加 head 数会增加参数量吗？
    考察点：`d_model` 固定、`head_dim`、Q/K/V/O 参数量。
-   回答框架：`d_model` 固定时总投影矩阵通常不变，head 数主要改变子空间划分。
+   回答框架：在常见等宽 MHA 且总投影宽度固定时，Q/K/V/O 的总投影参数量通常不因 head 数本身而变；head 数增加会增加并行读取权重组并减小每头宽度。各 head 是独立学习的投影，不是把隐藏维度硬切成互不重叠的语义块。固定总 K/V 宽度时，单独增加 head 数也不意味着 KV cache 必然变大。
 
 31A. Transformer 为什么能成为大模型基础架构，而不是 RNN、CNN 或 SSM 直接胜出？
    考察点：route score、training parallelism、content routing、next-token prediction、scaling evidence、ecosystem readiness、deployment pressure。
@@ -928,11 +928,11 @@
 
 31C. 如何解释 QK Circuit、OV Circuit 和 attention head 子空间？
    考察点：QK 读哪里、OV 写什么、head subspace、head redundancy、KV head ratio。
-   回答框架：一个 attention head 不能只看 attention map。QK circuit 由 Query / Key 投影决定，负责从哪些 token 读取信息；OV circuit 由 Value 投影和输出投影决定，负责把读到的信息如何写回 residual stream。多头让模型在多个低维子空间中并行路由，但不同 head 可能功能重叠，训练后可以出现冗余。MHA / GQA / MQA 的系统差异主要体现在 Query head 和 K/V head 的数量关系上，减少 `H_kv` 可以降低 KV cache 和内存带宽压力。
+   回答框架：一个 attention head 不能只看 attention map。QK 视角说明输入怎样形成读取权重；OV 视角说明 Value 投影与输出投影怎样把读取内容映射到 head 输出。多个 head 各有从完整输入学习的投影，但这些表示不保证正交，也不保证对应固定语义模块。head pattern 是观察线索；是否影响任务行为要看指定任务下的屏蔽或其他干预，剪枝结论还需区分单个与联合移除。MHA / GQA / MQA 的 K/V head 数差异及缓存代价见后续架构题。
 
 31D. 如何系统比较 MHA、MQA、GQA 和 MLA？
-   考察点：KV head 数、latent KV cache、质量门禁、cache saving、FlashAttention / PagedAttention 边界。
-   回答框架：MHA 每个 query head 有独立 K/V，表达最完整但 KV cache 最大；MQA 保留多个 Q heads 但共享 1 组 K/V，cache 最省但可能损失质量；GQA 让一组 Q heads 共享 K/V，是质量和推理成本的折中；MLA 进一步把 K/V 信息压缩到 latent cache，减少的是缓存表示维度而不只是 KV head 数。不要把 cache 比例当成 attention 参数或全模型延迟比例。GQA 论文提供 MHA checkpoint 的转换案例：组内 K/V 权重 mean-pool 后继续预训练，作者报告约 5% 原训练 compute；但主要实验是 T5 encoder-decoder。Llama 2 另根据质量消融和多 GPU 分片/吞吐取舍，在 34B/70B 采用 GQA。还要区分 FlashAttention 是 kernel/IO 优化，PagedAttention 是 serving memory manager，MQA/GQA/MLA 是模型架构。
+   考察点：KV head 数、latent KV cache、缓存元素比例、训练/转换证据边界、FlashAttention / PagedAttention 的作用层面。
+   回答框架：MHA 为每个 query head 保留一组 K/V；MQA 让多个 query heads 共用一组；GQA 在两者之间按组共享；MLA 则把 K/V 相关信息联合压到低维 latent，并在 DeepSeek-V2 形式中另存位置相关的 RoPE Key。相同 head 宽度等条件下，MQA/GQA 可按 K/V head 数估算缓存元素比例，但这不能直接推出全模型参数或端到端延迟比例。GQA 的 checkpoint 转换论文以组内 mean pooling 初始化，再继续训练；其约 5% 计算量结果来自 T5 encoder-decoder 实验，论文没有评估 decoder-only 模型。DeepSeek-V2 的消融和 MHA2MLA 的适配结果也都受各自模型、任务、训练与评测设置限制；MHA2MLA 不是零样本替换。FlashAttention 改进 attention kernel 的数据移动，PagedAttention 管理 serving 中的 KV block；二者不替代模型架构本身。
 
 31E. 如何系统解释 FFN、SwiGLU 和 MoE FFN 的关系？
    考察点：position-wise FFN、SwiGLU 参数量、gated MLP、top-k routing、active parameters、expert capacity、load balancing。

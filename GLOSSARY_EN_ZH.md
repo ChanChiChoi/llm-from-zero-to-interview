@@ -1198,25 +1198,19 @@ QK Circuit：QK 电路 / 读哪里电路
 
 OV Circuit：OV 电路 / 写什么电路
 
-Head Subspace Audit：注意力头子空间审计
-
-Head Redundancy Rate：注意力头冗余率
+Attention-Head Redundancy：注意力头冗余；在指定模型、任务、指标和干预下观察到多个 head 可相互替代或部分可剪枝的现象，不代表存在通用的冗余比例或稳定的语义分工。
 
 KV Head：Key/Value 注意力头
 
 KV Head Ratio：KV 头压缩比例 / Query Head 与 KV Head 数量比
 
-Multi-Query Attention / MQA：多查询注意力；多个 query heads 共享一组 K/V，KV cache 最小，但共享可能带来质量或训练稳定性代价。
+Multi-Query Attention / MQA：多查询注意力；多个 query heads 共享一组 K/V。在 query head 数、每头宽度等条件对齐时，它减少显式 K/V 缓存元素；质量和解码速度取决于模型、训练及实现。
 
-Grouped-Query Attention / GQA：分组查询注意力；每组 query heads 共享 K/V，位于 MHA 与 MQA 之间；减少 KV heads 可按比例减少 K/V cache，但整层参数和质量不会按同一比例变化。
+Grouped-Query Attention / GQA：分组查询注意力；每组 query heads 共享 K/V，位于 MHA 与 MQA 之间。在每头宽度等条件匹配时，减少 KV heads 可按比例减少 K/V cache 元素；整层参数、质量和端到端延迟不会按同一比例变化。
 
-Multi-head Latent Attention / MLA：多头潜在注意力 / 多头低秩潜在注意力
+Multi-head Latent Attention / MLA：多头潜在注意力 / 多头低秩潜在注意力；DeepSeek-V2 形式将 K/V 相关信息联合压入低维 latent，并另存位置相关的 RoPE Key。
 
 Latent KV Cache：潜在 KV 缓存 / 低维 KV 缓存
-
-KV Cache Saving Rate：KV Cache 节省率
-
-Attention Architecture Gate：注意力架构门禁
 
 Output Projection：输出投影
 

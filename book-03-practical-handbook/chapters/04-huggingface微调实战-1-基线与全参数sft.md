@@ -37,12 +37,12 @@ Checkpoint 是一份模型快照，通常包含权重以及恢复模型结构所
 两者都必须满足的最低要求是：
 
 ```math
-0\leq x_{b,t}<V,
+0\leq x_{b,t}\lt V,
 \qquad
 V=\mathrm{vocab\_size}
 ```
 
-其中 $x_{b,t}$ 是 token id，$V$ 是 embedding 可接受的词表大小。如果 tokenizer 添加了新 token，必须同步扩展模型 embedding 和输出头；只改 tokenizer 文件不能凭空产生新的向量。
+其中 $x_{b,t}$ 是 token id， $V$ 是 embedding 可接受的词表大小。如果 tokenizer 添加了新 token，必须同步扩展模型 embedding 和输出头；只改 tokenizer 文件不能凭空产生新的向量。
 
 可复现记录还应包含仓库 revision、Transformers/PyTorch 版本、dtype、设备，以及是否执行了远程自定义代码。一个随时间变化的默认分支名称，不足以标识一个固定模型。
 
@@ -50,13 +50,13 @@ V=\mathrm{vocab\_size}
 
 ### 4.1.2 Causal LM 的 forward 形状
 
-给定序列 $x_0,\ldots,x_{T-1}$，自回归语言模型分解联合概率：
+给定序列 $x_{0},\ldots,x_{T-1}$，自回归语言模型分解联合概率：
 
 ```math
-p_\theta(x_0,\ldots,x_{T-1})
+p_\theta(x_{0},\ldots,x_{T-1})
 =
 \prod_{t=0}^{T-1}
-p_\theta(x_t\mid x_0,\ldots,x_{t-1})
+p_\theta(x_{t}\mid x_{0},\ldots,x_{t-1})
 ```
 
 模型输入和输出的形状通常是：
@@ -74,7 +74,7 @@ Z=f_\theta(X)\in\mathbb{R}^{B\times T\times V}
 =
 -\frac{1}{T-1}
 \sum_{t=0}^{T-2}
-\log p_\theta(x_{t+1}\mid x_0,\ldots,x_t)
+\log p_\theta(x_{t+1}\mid x_{0},\ldots,x_{t})
 ```
 
 许多 Hugging Face CausalLM 类在接收等长 labels 后会在内部完成 shift。自己写 loss 时要确认这一点；手动错位后再交给会再次错位的模型，会让目标错一位。
@@ -143,7 +143,7 @@ prompt → logits → 选择 token → 追加 token → logits → … → 停�
 ```math
 x_{t+1}
 =
-\arg\max_v p_\theta(v\mid x_{\leq t})
+\arg\max_{v} p_\theta(v\mid x_{\leq t})
 ```
 
 温度采样使用：
@@ -151,8 +151,8 @@ x_{t+1}
 ```math
 p_\tau(v)
 =
-\frac{\exp(z_v/\tau)}
-{\sum_u\exp(z_u/\tau)}
+\frac{\exp(z_{v}/\tau)}
+{\sum_{u}\exp(z_{u}/\tau)}
 ```
 
 这里 $\tau$ 是 temperature，避免和序列长度 $T$ 混淆。温度只改变已有分布的尖锐程度，不会增加模型知识。top-k 保留最高分的固定数量候选，top-p 保留累计概率达到阈值的最小候选集合；第3章已展开这两种过滤方式。
@@ -175,10 +175,10 @@ prompt_length = inputs["input_ids"].shape[-1]
 new_ids = output_ids[0, prompt_length:]
 print(tokenizer.decode(new_ids, skip_special_tokens=True))
 ```
-max_new_tokens 是新增 token 数。若 prompt 长度为 $T_p$，上限为 $M$，则：
+max_new_tokens 是新增 token 数。若 prompt 长度为 $T_{p}$，上限为 $M$，则：
 
 ```math
-T_{\mathrm{final}}\leq T_p+M
+T_{\mathrm{final}}\leq T_{p}+M
 ```
 
 评估时应切掉 prompt 再解码，否则问题中的关键词会被误算为模型输出。
@@ -380,16 +380,16 @@ prompt 的原文和 token 数。
 单轮样本可以写成：
 
 ```math
-(\mathrm{prompt}_i,\mathrm{response}_i)
+(\mathrm{prompt}_{i},\mathrm{response}_{i})
 ```
 
 完整训练序列是：
 
 ```math
-x_i
+x_{i}
 =
 \mathrm{Tokenize}
-(\mathrm{prompt}_i\oplus\mathrm{response}_i\oplus\mathrm{EOS})
+(\mathrm{prompt}_{i}\oplus\mathrm{response}_{i}\oplus\mathrm{EOS})
 ```
 
 只把 response 喂给模型会丢掉任务条件，只把 prompt 喂给模型又没有目标。SFT 的目标是提高：
@@ -491,10 +491,10 @@ prompt = tokenizer.apply_chat_template(
 add_generation_prompt=True 适合推理，把序列渲染到 assistant 即将开始的位置；训练样本已经含有 assistant 回答时，通常使用 False。一个模型的 role 标记、换行和结束 token 不能移植到另一个模型。模板的微小差异也会改变 token 边界和监督位置。
 ### 4.2.3 labels mask 的数学定义
 
-设完整序列为 $x_0,\ldots,x_{T-1}$，回答区域由 $m_t$ 标记：
+设完整序列为 $x_{0},\ldots,x_{T-1}$，回答区域由 $m_{t}$ 标记：
 
 ```math
-m_t=
+m_{t}=
 \begin{cases}
 0,& t\in\mathrm{prompt\ or\ padding}\\
 1,& t\in\mathrm{assistant\ response}
@@ -504,16 +504,16 @@ m_t=
 labels 写成：
 
 ```math
-y_t=
+y_{t}=
 \begin{cases}
--100,&m_t=0\\
-x_t,&m_t=1
+-100,&m_{t}=0\\
+x_{t},&m_{t}=1
 \end{cases}
 ```
 
 PyTorch 的交叉熵默认把 -100 当作 `ignore_index`。prompt token 仍然保留在 `input_ids` 中，作为回答的上下文；它们只是不会成为监督目标。参见 [PyTorch 2.14.0 CrossEntropyLoss 文档](https://docs.pytorch.org/docs/2.14/generated/torch.nn.CrossEntropyLoss.html)。
 
-若模型内部负责 causal shift，labels 与 input_ids 等长，位置 $t-1$ 的 logits 预测 labels 位置 $t$。令 $S=\sum_{t=1}^{T-1}m_t$ 为这个序列中真正参与监督的回答 token 数。下面的 assistant-only 目标只在 $S>0$ 时有定义；一个被截断到只剩 prompt 的样本不应进入 loss 的平均：
+若模型内部负责 causal shift，labels 与 input_ids 等长，位置 $t-1$ 的 logits 预测 labels 位置 $t$。令 $S=\sum_{t=1}^{T-1}m_{t}$ 为这个序列中真正参与监督的回答 token 数。下面的 assistant-only 目标只在 $S>0$ 时有定义；一个被截断到只剩 prompt 的样本不应进入 loss 的平均：
 
 ```math
 \mathcal{L}_{\mathrm{assistant}}
@@ -521,9 +521,9 @@ PyTorch 的交叉熵默认把 -100 当作 `ignore_index`。prompt token 仍然�
 -
 \frac{
 \sum_{t=1}^{T-1}
-m_t\log p_\theta(x_t\mid x_{0:t-1})
+m_{t}\log p_\theta(x_{t}\mid x_{0:t-1})
 }{
-\sum_{t=1}^{T-1}m_t
+\sum_{t=1}^{T-1}m_{t}
 }
 ```
 
@@ -624,7 +624,7 @@ labels 全是 -100。
 ```math
 n_{\mathrm{sup}}
 =
-\sum_{t=0}^{T-1}\mathbf{1}[y_t\neq-100]
+\sum_{t=0}^{T-1}\mathbf{1}[y_{t}\neq-100]
 ```
 
 样本至少要满足 $n_{\mathrm{sup}}>0$。如果任务要求完整 JSON、代码或回答，还要检查 EOS 是否存在、结构是否被截断。
@@ -972,7 +972,7 @@ labels。
 来源与任务元数据。
 ```
 
-考虑序列“用户问：天气？助手答：晴天 EOS”。若模板渲染成 8 个 token，前 4 个是问题，后 4 个是回答和 EOS，assistant-only labels 为 $[-100,-100,-100,-100,r_1,r_2,r_3,\mathrm{EOS}]$。input_ids 仍保留全部 8 个 token；若模型内部做 causal shift，位置 3 的 logits 预测 $r_1$。回答四个目标的 token loss 若为 1、2、1、2，平均值是 $6/4=1.5$；误把 prompt 的四个位置也纳入后，整体平均可能降到 $7/8=0.875$，看似更好，回答监督却没有改善。检查有效 labels 解码出的文本，并和 logits 的预测位置对照，才能确认监督边界。
+考虑序列“用户问：天气？助手答：晴天 EOS”。若模板渲染成 8 个 token，前 4 个是问题，后 4 个是回答和 EOS，assistant-only labels 为 $[-100,-100,-100,-100,r_{1},r_{2},r_{3},\mathrm{EOS}]$。input_ids 仍保留全部 8 个 token；若模型内部做 causal shift，位置 3 的 logits 预测 $r_{1}$。回答四个目标的 token loss 若为 1、2、1、2，平均值是 $6/4=1.5$；误把 prompt 的四个位置也纳入后，整体平均可能降到 $7/8=0.875$，看似更好，回答监督却没有改善。检查有效 labels 解码出的文本，并和 logits 的预测位置对照，才能确认监督边界。
 
 多轮对话中，assistant 可能先发起工具调用，再收到工具结果，最后给用户答复。是否训练工具调用格式、拒答标记或所有 assistant 消息，取决于目标；工具返回通常是外部程序生成的内容，不应无意中变成模型要复述的目标。用角色时间线标出 input token、目标 token 和 mask，能看清模型到底被要求生成什么。completion-only 的显式 prompt/completion 边界与 assistant-only 的多轮消息边界也不能混用。
 
@@ -997,26 +997,26 @@ labels。
 ```math
 \theta_{k+1}
 =
-\theta_k-\eta\widehat{g}_k
+\theta_{k}-\eta\widehat{g}_{k}
 ```
 
 全参数的适配自由度大，但基座模型原来的能力也更容易被新数据覆盖。小数据、大学习率或过多训练轮次会放大遗忘和过拟合。
 
 ### 4.3.2 显存估算
 
-设可训练参数量为 $P$，权重、梯度和一个优化器状态元素分别占 $b_w,b_g,b_o$ 字节，一个粗略训练内存表达为：
+设可训练参数量为 $P$，权重、梯度和一个优化器状态元素分别占 $b_{w},b_{g},b_{o}$ 字节，一个粗略训练内存表达为：
 
 ```math
 M_{\mathrm{train}}
 \approx
-P(b_w+b_g+2b_o)
+P(b_{w}+b_{g}+2b_{o})
 +
 M_{\mathrm{activation}}
 +
 M_{\mathrm{temporary}}
 ```
 
-AdamW 通常保存一阶和二阶状态，所以出现 $2b_o$。实现还可能保留 fp32 master weights、梯度 scaler、通信 buffer 和 allocator 缓存。激活内存又随 batch、序列长度、层数、隐藏维度和 checkpointing 改变。
+AdamW 通常保存一阶和二阶状态，所以出现 $2b_{o}$。实现还可能保留 fp32 master weights、梯度 scaler、通信 buffer 和 allocator 缓存。激活内存又随 batch、序列长度、层数、隐藏维度和 checkpointing 改变。
 
 fp16 权重约占 $2P$ 字节只是推理权重的量级；模型能生成不代表同一设备能全参数训练。
 
@@ -1094,7 +1094,7 @@ G
 ```math
 N_{\mathrm{token,step}}
 =
-\sum_i\sum_t\mathbf{1}[y_{i,t}\neq-100]
+\sum_{i}\sum_{t}\mathbf{1}[y_{i,t}\neq-100]
 ```
 
 当样本长度不同，逐 micro-batch 平均后再累积不一定等价于所有有效 token 的全局平均。严谨比较时要记录每步 token 数，必要时显式做 token-level normalization。

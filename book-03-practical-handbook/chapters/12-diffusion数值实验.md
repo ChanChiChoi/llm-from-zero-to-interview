@@ -27,73 +27,73 @@ flowchart LR
 
 ### 12.1.1 前向过程：每一步都保留一点信号，再加入一点噪声
 
-先区分两个方向。前向过程是我们规定的加噪规则：从真实样本 $x_0$ 出发，按时间步逐渐破坏它；反向过程是模型要近似的去噪规则：从接近高斯噪声的状态开始，逐步生成样本。这里的 $x_t$ 可以是一张图像，也可以是压缩后的潜变量（latent）张量；本节先用标量和向量解释同一套运算。
+先区分两个方向。前向过程是我们规定的加噪规则：从真实样本 $x_{0}$ 出发，按时间步逐渐破坏它；反向过程是模型要近似的去噪规则：从接近高斯噪声的状态开始，逐步生成样本。这里的 $x_{t}$ 可以是一张图像，也可以是压缩后的潜变量（latent）张量；本节先用标量和向量解释同一套运算。
 
 去噪扩散概率模型（Denoising Diffusion Probabilistic Model, DDPM）的一步正向过程为（见 [DDPM 原论文](https://arxiv.org/abs/2006.11239)）：
 
 ~~~math
-q(x_t\mid x_{t-1})=\mathcal{N}\left(\sqrt{1-\beta_t}x_{t-1},\beta_tI\right)
+q(x_{t}\mid x_{t-1})=\mathcal{N}\left(\sqrt{1-\beta_{t}}x_{t-1},\beta_{t}I\right)
 ~~~
 
-$\mathcal{N}$ 表示正态分布，括号中依次是均值和协方差矩阵；$I$ 是单位矩阵，表示各维度使用相同的方差 $\beta_t$，且这一步设定下不同维度的噪声互不相关。若把 $x$ 看成单个数，这个式子就是“以 $\sqrt{1-\beta_t}x_{t-1}$ 为中心、方差为 $\beta_t$”的钟形随机分布。
+$\mathcal{N}$ 表示正态分布，括号中依次是均值和协方差矩阵； $I$ 是单位矩阵，表示各维度使用相同的方差 $\beta_{t}$，且这一步设定下不同维度的噪声互不相关。若把 $x$ 看成单个数，这个式子就是“以 $\sqrt{1-\beta_{t}}x_{t-1}$ 为中心、方差为 $\beta_{t}$”的钟形随机分布。
 
 定义：
 
 ~~~math
-\alpha_t=1-\beta_t,\qquad
-\bar{\alpha}_t=\prod_{s=1}^{t}\alpha_s
+\alpha_{t}=1-\beta_{t},\qquad
+\bar{\alpha}_{t}=\prod_{s=1}^{t}\alpha_{s}
 ~~~
 
-标准离散 DDPM schedule 通常要求每个 $0<\beta_t<1$，因此 $0<\alpha_t<1$。$\beta_t$ 是一步加入的噪声方差，$\alpha_t$ 是这一步保留的信号比例；$\bar{\alpha}_t$ 则是从起点一路相乘后的累计保留率。若 $\beta_t$ 越界，平方根、后验方差和采样过程都不再满足这里的概率解释。
+标准离散 DDPM schedule 通常要求每个 $0<\beta_{t}<1$，因此 $0<\alpha_{t}<1$。 $\beta_{t}$ 是一步加入的噪声方差， $\alpha_{t}$ 是这一步保留的信号比例； $\bar{\alpha}_{t}$ 则是从起点一路相乘后的累计保留率。若 $\beta_{t}$ 越界，平方根、后验方差和采样过程都不再满足这里的概率解释。
 
 闭式加噪公式可以从逐步过程推出来。前两步是：
 
 ~~~math
-x_1=\sqrt{\alpha_1}x_0+\sqrt{\beta_1}\epsilon_1
+x_{1}=\sqrt{\alpha_{1}}x_{0}+\sqrt{\beta_{1}}\epsilon_{1}
 ~~~
 
 ~~~math
-x_2=\sqrt{\alpha_2}x_1+\sqrt{\beta_2}\epsilon_2
-=\sqrt{\alpha_1\alpha_2}x_0
-+\sqrt{\alpha_2\beta_1}\epsilon_1
-+\sqrt{\beta_2}\epsilon_2
+x_{2}=\sqrt{\alpha_{2}}x_{1}+\sqrt{\beta_{2}}\epsilon_{2}
+=\sqrt{\alpha_{1}\alpha_{2}}x_{0}
++\sqrt{\alpha_{2}\beta_{1}}\epsilon_{1}
++\sqrt{\beta_{2}}\epsilon_{2}
 ~~~
 
-由于 $\epsilon_1$、$\epsilon_2$ 是独立标准高斯，后两项仍是均值为 0 的高斯噪声，其方差为 $\alpha_2\beta_1+\beta_2=1-\alpha_1\alpha_2$。因此可以把多步噪声合并成一个标准高斯 $\epsilon$，得到一般形式。训练时先抽 $t$ 再一次性构造 $x_t$，不必真的从第 1 步循环到第 $t$ 步；这使 batch 中的样本可以独立抽取不同的噪声强度。
+由于 $\epsilon_{1}$、 $\epsilon_{2}$ 是独立标准高斯，后两项仍是均值为 0 的高斯噪声，其方差为 $\alpha_{2}\beta_{1}+\beta_{2}=1-\alpha_{1}\alpha_{2}$。因此可以把多步噪声合并成一个标准高斯 $\epsilon$，得到一般形式。训练时先抽 $t$ 再一次性构造 $x_{t}$，不必真的从第 1 步循环到第 $t$ 步；这使 batch 中的样本可以独立抽取不同的噪声强度。
 
-于是可以直接从 $x_0$ 构造任意时刻的 $x_t$：
+于是可以直接从 $x_{0}$ 构造任意时刻的 $x_{t}$：
 
 ~~~math
-x_t=\sqrt{\bar{\alpha}_t}x_0+\sqrt{1-\bar{\alpha}_t}\epsilon,
+x_{t}=\sqrt{\bar{\alpha}_{t}}x_{0}+\sqrt{1-\bar{\alpha}_{t}}\epsilon,
 \qquad\epsilon\sim\mathcal{N}(0,I)
 ~~~
 
-$\epsilon\sim\mathcal{N}(0,I)$ 表示每个维度各抽一个均值为 0、方差为 1 的标准高斯噪声；噪声张量与 $x_0$ 形状相同。两个平方根系数作用在标准差上，所以对应的信号和噪声方差比例才分别是 $\bar{\alpha}_t$ 与 $1-\bar{\alpha}_t$。
+$\epsilon\sim\mathcal{N}(0,I)$ 表示每个维度各抽一个均值为 0、方差为 1 的标准高斯噪声；噪声张量与 $x_{0}$ 形状相同。两个平方根系数作用在标准差上，所以对应的信号和噪声方差比例才分别是 $\bar{\alpha}_{t}$ 与 $1-\bar{\alpha}_{t}$。
 
 信噪比（signal-to-noise ratio, SNR）可以用下面的累计比值表示：
 
 ~~~math
-\mathrm{SNR}_t=\frac{\bar{\alpha}_t}{1-\bar{\alpha}_t}
+\mathrm{SNR}_{t}=\frac{\bar{\alpha}_{t}}{1-\bar{\alpha}_{t}}
 ~~~
 
-该有限 SNR 定义要求 $0<\bar{\alpha}_t<1$。干净边界约定 $\bar{\alpha}_0=1$，其 SNR 在扩展意义上为正无穷；这不是非法的干净样本，只是不能代入要求有限分母的噪声反解。代码中的 `step=0` 对应数学上的 `t=1`，即第一次加噪。
+该有限 SNR 定义要求 $0<\bar{\alpha}_{t}<1$。干净边界约定 $\bar{\alpha}_{0}=1$，其 SNR 在扩展意义上为正无穷；这不是非法的干净样本，只是不能代入要求有限分母的噪声反解。代码中的 `step=0` 对应数学上的 $t=1$，即第一次加噪。
 
 随着 $t$ 增大，信号占比通常下降。schedule 的本质是设计 SNR 如何变化，而不是随便生成一串 beta。不同训练配置可能采用不同 schedule；单凭一个时间步上的噪声强度，不能断言整条生成链更容易或更难。
 
-还要检查终点是否与采样初值相配。如果训练噪声日程的最后一个 $\bar{\alpha}_T$ 仍明显大于零，终点就保留了信号；推理却从纯高斯噪声开始时，训练和采样的边界可能不一致。零终端信噪比及相应的预测参数化、起始时间步调整，是针对特定噪声日程和模型检查点（checkpoint）提出的修正路线，不能脱离模型配置直接套用（[原论文](https://arxiv.org/abs/2305.08891v4)）。本章的短 schedule 只用于算式演示，不用于判断真实模型是否存在这种问题。
+还要检查终点是否与采样初值相配。如果训练噪声日程的最后一个 $\bar{\alpha}_{T}$ 仍明显大于零，终点就保留了信号；推理却从纯高斯噪声开始时，训练和采样的边界可能不一致。零终端信噪比及相应的预测参数化、起始时间步调整，是针对特定噪声日程和模型检查点（checkpoint）提出的修正路线，不能脱离模型配置直接套用（[原论文](https://arxiv.org/abs/2305.08891v4)）。本章的短 schedule 只用于算式演示，不用于判断真实模型是否存在这种问题。
 
 ### 12.1.2 训练目标和反向分布：预测的噪声怎样变成下一步
 
-训练时，干净样本 $x_0$、时间步 $t$ 和噪声 $\epsilon$ 都由训练过程提供。把它们代入前面的闭式公式得到 $x_t$，网络再根据 $x_t$ 和时间步预测噪声：
+训练时，干净样本 $x_{0}$、时间步 $t$ 和噪声 $\epsilon$ 都由训练过程提供。把它们代入前面的闭式公式得到 $x_{t}$，网络再根据 $x_{t}$ 和时间步预测噪声：
 
 ~~~math
-\hat{\epsilon}=\epsilon_\theta(x_t,t)
+\hat{\epsilon}=\epsilon_\theta(x_{t},t)
 ~~~
 
-噪声是一个方便的监督目标，因为它正是这次构造 $x_t$ 时抽出的随机量，训练过程知道答案。单个样本、单个时间步的简化损失为：
+噪声是一个方便的监督目标，因为它正是这次构造 $x_{t}$ 时抽出的随机量，训练过程知道答案。单个样本、单个时间步的简化损失为：
 
 ~~~math
-L_{\mathrm{simple}}=\|\epsilon-\epsilon_\theta(x_t,t)\|_2^2
+L_{\mathrm{simple}}=\|\epsilon-\epsilon_\theta(x_{t},t)\|_{2}^2
 ~~~
 
 实际训练会对训练样本、时间步和噪声取期望；常见做法是随机抽取 $t$。范数平方先对样本里的像素或 latent 元素求和，工程实现也可能先按元素取平均，再对 batch 和时间步平均。sum/mean 的区别会改变损失尺度，比较训练设置时要把它记下来。即使平均训练损失下降，也不能据此断言每个噪声区间或每类图像都学好了。
@@ -102,113 +102,113 @@ L_{\mathrm{simple}}=\|\epsilon-\epsilon_\theta(x_t,t)\|_2^2
 
 ~~~math
 L_{\mathrm{weighted}}
-=\mathbb{E}\left[w_t\left\|\epsilon-\epsilon_\theta(x_t,t)\right\|_2^2\right],
+=\mathbb{E}\left[w_{t}\left\|\epsilon-\epsilon_\theta(x_{t},t)\right\|_{2}^2\right],
 \qquad
-w_t=\min\left(1,\frac{\gamma}{\mathrm{SNR}_t}\right)
+w_{t}=\min\left(1,\frac{\gamma}{\mathrm{SNR}_{t}}\right)
 ~~~
 
-$\gamma$ 是截断阈值，不是模型参数。比如取 $\gamma=5$，SNR 为 10 的时间步权重为 0.5，SNR 为 2.57 的时间步权重为 1；这会改变不同去噪任务对参数更新的相对影响，不是对所有参数化都通用的常数。$x_0$ 预测、噪声预测和 $v$ 预测的权重换算不同，采用前要对齐训练目标和实现（[Min-SNR 论文](https://arxiv.org/abs/2303.09556v3)）。诊断时也应按时间步分桶看损失，避免整体平均掩盖高噪声区间的失败。
+$\gamma$ 是截断阈值，不是模型参数。比如取 $\gamma=5$，SNR 为 10 的时间步权重为 0.5，SNR 为 2.57 的时间步权重为 1；这会改变不同去噪任务对参数更新的相对影响，不是对所有参数化都通用的常数。 $x_{0}$ 预测、噪声预测和 $v$ 预测的权重换算不同，采用前要对齐训练目标和实现（[Min-SNR 论文](https://arxiv.org/abs/2303.09556v3)）。诊断时也应按时间步分桶看损失，避免整体平均掩盖高噪声区间的失败。
 
-现在从反向方向看。若同时知道干净样本 $x_0$ 和带噪样本 $x_t$，可以把前向过程中的相邻两步用贝叶斯公式合起来。给定 $x_0$ 时，前一状态的分布和下一步的加噪分布分别是：
+现在从反向方向看。若同时知道干净样本 $x_{0}$ 和带噪样本 $x_{t}$，可以把前向过程中的相邻两步用贝叶斯公式合起来。给定 $x_{0}$ 时，前一状态的分布和下一步的加噪分布分别是：
 
 ~~~math
-q(x_{t-1}\mid x_0)
-=\mathcal{N}\left(\sqrt{\bar{\alpha}_{t-1}}x_0,
+q(x_{t-1}\mid x_{0})
+=\mathcal{N}\left(\sqrt{\bar{\alpha}_{t-1}}x_{0},
 (1-\bar{\alpha}_{t-1})I\right),
 \qquad
-q(x_t\mid x_{t-1})
-=\mathcal{N}(\sqrt{\alpha_t}x_{t-1},\beta_t I)
+q(x_{t}\mid x_{t-1})
+=\mathcal{N}(\sqrt{\alpha_{t}}x_{t-1},\beta_{t} I)
 ~~~
 
-因此 $q(x_{t-1}\mid x_t,x_0)$ 正比于这两个高斯密度的乘积。把指数中的二次项配方，后验仍是高斯：
+因此 $q(x_{t-1}\mid x_{t},x_{0})$ 正比于这两个高斯密度的乘积。把指数中的二次项配方，后验仍是高斯：
 
 ~~~math
-q(x_{t-1}\mid x_t,x_0)
-=\mathcal{N}(\tilde{\mu}_t,\tilde{\beta}_t I)
+q(x_{t-1}\mid x_{t},x_{0})
+=\mathcal{N}(\tilde{\mu}_{t},\tilde{\beta}_{t} I)
 ~~~
 
 配方后得到后验方差和均值。对 $t>1$，两个高斯的精度相加再取倒数，整理后方差为：
 
 ~~~math
-\tilde{\beta}_t
+\tilde{\beta}_{t}
 =\left(\frac{1}{1-\bar{\alpha}_{t-1}}+
-\frac{\alpha_t}{\beta_t}\right)^{-1}
-=\beta_t\frac{1-\bar{\alpha}_{t-1}}{1-\bar{\alpha}_t}
+\frac{\alpha_{t}}{\beta_{t}}\right)^{-1}
+=\beta_{t}\frac{1-\bar{\alpha}_{t-1}}{1-\bar{\alpha}_{t}}
 ~~~
 
 ~~~math
-\tilde{\mu}_t
-=\frac{\sqrt{\bar{\alpha}_{t-1}}\beta_t}{1-\bar{\alpha}_t}x_0
-+\frac{\sqrt{\alpha_t}(1-\bar{\alpha}_{t-1})}{1-\bar{\alpha}_t}x_t
+\tilde{\mu}_{t}
+=\frac{\sqrt{\bar{\alpha}_{t-1}}\beta_{t}}{1-\bar{\alpha}_{t}}x_{0}
++\frac{\sqrt{\alpha_{t}}(1-\bar{\alpha}_{t-1})}{1-\bar{\alpha}_{t}}x_{t}
 ~~~
 
-在 $t=1$，前一状态就是已知的干净样本，公式给出 $\tilde{\beta}_1=0$；上面的精度相加说法只用于非退化的 $t>1$ 情形。
+在 $t=1$，前一状态就是已知的干净样本，公式给出 $\tilde{\beta}_{1}=0$；上面的精度相加说法只用于非退化的 $t>1$ 情形。
 
-真实采样时不知道 $x_0$。模型先根据 $x_t$ 和 $t$ 预测噪声，再反解一个干净样本估计：
+真实采样时不知道 $x_{0}$。模型先根据 $x_{t}$ 和 $t$ 预测噪声，再反解一个干净样本估计：
 
 ~~~math
-\hat{x}_0
-=\frac{x_t-\sqrt{1-\bar{\alpha}_t}\hat{\epsilon}}
-{\sqrt{\bar{\alpha}_t}}
+\hat{x}_{0}
+=\frac{x_{t}-\sqrt{1-\bar{\alpha}_{t}}\hat{\epsilon}}
+{\sqrt{\bar{\alpha}_{t}}}
 ~~~
 
-把 $\hat{x}_0$ 代回后验均值并整理，可得噪声参数化下常用的反向均值：
+把 $\hat{x}_{0}$ 代回后验均值并整理，可得噪声参数化下常用的反向均值：
 
 ~~~math
-\mu_\theta(x_t,t)=\frac{1}{\sqrt{\alpha_t}}
-\left(x_t-\frac{\beta_t}{\sqrt{1-\bar{\alpha}_t}}\hat{\epsilon}\right)
+\mu_\theta(x_{t},t)=\frac{1}{\sqrt{\alpha_{t}}}
+\left(x_{t}-\frac{\beta_{t}}{\sqrt{1-\bar{\alpha}_{t}}}\hat{\epsilon}\right)
 ~~~
 
 所以网络输出的 $\hat{\epsilon}$ 不是生成图像，也不是直接的“去噪后图像”；它先经过 schedule 的缩放，变成反向分布的均值。反向转移还需要一个方差，控制围绕该均值保留多少随机性。先用常见的后验方差设置作例子：
 
 ~~~math
-p_\theta(x_{t-1}\mid x_t)
-=\mathcal{N}(\mu_\theta(x_t,t),\tilde{\beta}_t I)
+p_\theta(x_{t-1}\mid x_{t})
+=\mathcal{N}(\mu_\theta(x_{t},t),\tilde{\beta}_{t} I)
 ~~~
 
 从这个分布采样时，一步更新为：
 
 ~~~math
-x_{t-1}=\mu_\theta(x_t,t)+\sqrt{\tilde{\beta}_t}\,z,
+x_{t-1}=\mu_\theta(x_{t},t)+\sqrt{\tilde{\beta}_{t}}\,z,
 \qquad z\sim\mathcal{N}(0,I)
 ~~~
 
-$z$ 是这一步额外抽取的随机噪声。取 $\bar{\alpha}_0=1$ 后，最后一步 $t=1$ 的后验方差为零，不再加入随机项；前面的步骤则保留后验不确定性。标准 DDPM 可以固定不同方差，Improved DDPM 还提出学习反向方差并加入变分下界（variational lower bound）项训练；简化的噪声 MSE 本身不会训练方差参数。该论文在其指定图像设置下报告了较少模型前向调用的结果，但不能据此推断任意模型检查点都可安全跳步（[Improved DDPM](https://arxiv.org/abs/2102.09672v1)）。
+$z$ 是这一步额外抽取的随机噪声。取 $\bar{\alpha}_{0}=1$ 后，最后一步 $t=1$ 的后验方差为零，不再加入随机项；前面的步骤则保留后验不确定性。标准 DDPM 可以固定不同方差，Improved DDPM 还提出学习反向方差并加入变分下界（variational lower bound）项训练；简化的噪声 MSE 本身不会训练方差参数。该论文在其指定图像设置下报告了较少模型前向调用的结果，但不能据此推断任意模型检查点都可安全跳步（[Improved DDPM](https://arxiv.org/abs/2102.09672v1)）。
 
-把训练过程和生成过程分开看，算法步骤就清楚了：训练时抽 $x_0,t,\epsilon$，构造 $x_t$，预测并比较目标，再更新网络；生成时在与训练终点匹配的约定下从 $x_T\sim\mathcal{N}(0,I)$ 开始，按时间步从大到小预测模型所约定的目标、换算反向分布并采样，直到得到 $x_0$。预测 $x_0$、预测 $\epsilon$ 和预测 $v$ 是不同输出参数化；切换输出目标时，训练目标、均值换算和 scheduler 配置都必须匹配。本章先把噪声预测这一种常见形式算清。
+把训练过程和生成过程分开看，算法步骤就清楚了：训练时抽 $x_{0},t,\epsilon$，构造 $x_{t}$，预测并比较目标，再更新网络；生成时在与训练终点匹配的约定下从 $x_{T}\sim\mathcal{N}(0,I)$ 开始，按时间步从大到小预测模型所约定的目标、换算反向分布并采样，直到得到 $x_{0}$。预测 $x_{0}$、预测 $\epsilon$ 和预测 $v$ 是不同输出参数化；切换输出目标时，训练目标、均值换算和 scheduler 配置都必须匹配。本章先把噪声预测这一种常见形式算清。
 
-速度目标（velocity prediction，也简称 $v$ 预测）不是另一份独立数据，而是同一对干净样本与噪声按时间步重新组合的一种目标。采用常见定义时，令 $a=\sqrt{\bar{\alpha}_t}$、$b=\sqrt{1-\bar{\alpha}_t}$：
+速度目标（velocity prediction，也简称 $v$ 预测）不是另一份独立数据，而是同一对干净样本与噪声按时间步重新组合的一种目标。采用常见定义时，令 $a=\sqrt{\bar{\alpha}_{t}}$、 $b=\sqrt{1-\bar{\alpha}_{t}}$：
 
 ~~~math
-x_t=ax_0+b\epsilon,
-\qquad v_t=a\epsilon-bx_0
+x_{t}=ax_{0}+b\epsilon,
+\qquad v_{t}=a\epsilon-bx_{0}
 ~~~
 
-这两个式子可以反解为 $x_0=ax_t-bv_t$、$\epsilon=bx_t+av_t$。因此在固定时间步上，预测 $v$ 仍能换回去噪所需的量；不同实现的 target 定义和 scheduler 约定必须一致，不能把名为 `v_prediction` 的输出直接塞进噪声预测公式。
+这两个式子可以反解为 $x_{0}=ax_{t}-bv_{t}$、 $\epsilon=bx_{t}+av_{t}$。因此在固定时间步上，预测 $v$ 仍能换回去噪所需的量；不同实现的 target 定义和 scheduler 约定必须一致，不能把名为 `v_prediction` 的输出直接塞进噪声预测公式。
 
 ### 12.1.3 两步手算：噪声预测误差会怎样改变反向结果
 
-用一个标量例子核对刚才几条公式。设两个时间步的 schedule 为 $\beta_1=0.1$、$\beta_2=0.2$，于是 $\alpha_1=0.9$、$\alpha_2=0.8$，累计值为 $\bar{\alpha}_1=0.9$、$\bar{\alpha}_2=0.72$。令干净输入 $x_0=1$，在闭式公式中抽到的合并噪声为 $\epsilon=-0.5$。
+用一个标量例子核对刚才几条公式。设两个时间步的 schedule 为 $\beta_{1}=0.1$、 $\beta_{2}=0.2$，于是 $\alpha_{1}=0.9$、 $\alpha_{2}=0.8$，累计值为 $\bar{\alpha}_{1}=0.9$、 $\bar{\alpha}_{2}=0.72$。令干净输入 $x_{0}=1$，在闭式公式中抽到的合并噪声为 $\epsilon=-0.5$。
 
 第二步的带噪输入为：
 
 ~~~math
-x_2=\sqrt{0.72}\times 1+\sqrt{0.28}\times(-0.5)
+x_{2}=\sqrt{0.72}\times 1+\sqrt{0.28}\times(-0.5)
 \approx 0.848528-0.264575=0.583953
 ~~~
 
-这里第一项是保留下来的信号，第二项是加进去的噪声贡献。假设模型恰好预测对了，$\hat{\epsilon}=-0.5$。先反解干净样本：
+这里第一项是保留下来的信号，第二项是加进去的噪声贡献。假设模型恰好预测对了， $\hat{\epsilon}=-0.5$。先反解干净样本：
 
 ~~~math
-\hat{x}_0
+\hat{x}_{0}
 =\frac{0.583953-\sqrt{0.28}\times(-0.5)}{\sqrt{0.72}}
 \approx 1
 ~~~
 
-再把这个估计放进真实后验的均值。$x_0$ 和 $x_2$ 前面的权重分别约为 0.6776 和 0.3194，因此：
+再把这个估计放进真实后验的均值。 $x_{0}$ 和 $x_{2}$ 前面的权重分别约为 0.6776 和 0.3194，因此：
 
 ~~~math
-\tilde{\mu}_2
+\tilde{\mu}_{2}
 \approx 0.67763\times 1+0.31944\times 0.583953
 \approx 0.8642
 ~~~
@@ -222,11 +222,11 @@ x_2=\sqrt{0.72}\times 1+\sqrt{0.28}\times(-0.5)
 \approx 0.8642
 ~~~
 
-后验方差为 $0.2\times(1-0.9)/(1-0.72)\approx0.0714$，标准差约为 0.2672。实际采样还会把标准差乘以一个独立标准高斯 $z$ 加到均值上。因而一次反向抽样不一定等于某条特定的正向路径上的中间值；这个方差表达的是给定当前 $x_t$ 后，前一状态仍有不确定性。闭式公式里的合并噪声 $\epsilon$ 也没有告诉我们这条正向路径中每一步各自抽到了什么噪声。
+后验方差为 $0.2\times(1-0.9)/(1-0.72)\approx0.0714$，标准差约为 0.2672。实际采样还会把标准差乘以一个独立标准高斯 $z$ 加到均值上。因而一次反向抽样不一定等于某条特定的正向路径上的中间值；这个方差表达的是给定当前 $x_{t}$ 后，前一状态仍有不确定性。闭式公式里的合并噪声 $\epsilon$ 也没有告诉我们这条正向路径中每一步各自抽到了什么噪声。
 
-现在故意让模型预测错：真实噪声仍是 $-0.5$，预测值改成 $-0.3$。噪声预测误差为 0.2；在当前时间步，均值对噪声预测的系数是 $\beta_2/(\sqrt{\alpha_2}\sqrt{1-\bar{\alpha}_2})\approx0.4226$，且公式中它带负号，所以反向均值相对正确预测偏移约 $-0.4226\times0.2=-0.0845$。同样大小的预测误差在不同时间步会乘上不同系数。
+现在故意让模型预测错：真实噪声仍是 $-0.5$，预测值改成 $-0.3$。噪声预测误差为 0.2；在当前时间步，均值对噪声预测的系数是 $\beta_{2}/(\sqrt{\alpha_{2}}\sqrt{1-\bar{\alpha}_{2}})\approx0.4226$，且公式中它带负号，所以反向均值相对正确预测偏移约 $-0.4226\times0.2=-0.0845$。同样大小的预测误差在不同时间步会乘上不同系数。
 
-该步的信号与噪声方差比例分别为 0.72 和 0.28，因此 $\mathrm{SNR}_2=0.72/0.28\approx2.57$。这个短 schedule 结束时仍保留不少原始信号，并没有到纯噪声。上面的手算验证了闭式加噪、噪声反解和后验均值彼此一致；它不能证明未训练模型能恢复图像，也不能把局部均方误差（mean squared error, MSE）直接换算成感知质量。真实网络预测高维像素或 latent，误差有空间结构，而且会在多步采样中传播。
+该步的信号与噪声方差比例分别为 0.72 和 0.28，因此 $\mathrm{SNR}_{2}=0.72/0.28\approx2.57$。这个短 schedule 结束时仍保留不少原始信号，并没有到纯噪声。上面的手算验证了闭式加噪、噪声反解和后验均值彼此一致；它不能证明未训练模型能恢复图像，也不能把局部均方误差（mean squared error, MSE）直接换算成感知质量。真实网络预测高维像素或 latent，误差有空间结构，而且会在多步采样中传播。
 
 ### 12.1.4 用纯 Python 审计公式
 
@@ -353,7 +353,7 @@ latent 空间通常比像素空间尺寸小，因而可减少去噪网络的计�
 有文本条件时，模型变成：
 
 ~~~math
-\hat{\epsilon}=\epsilon_\theta(x_t,t,c)
+\hat{\epsilon}=\epsilon_\theta(x_{t},t,c)
 ~~~
 
 $c$ 表示提示词（prompt）经文本编码器得到的条件表示；如果本节采用的模型结构接收其他条件，例如类别或图像特征，也可以用同一个符号表示。
@@ -365,7 +365,7 @@ $c$ 表示提示词（prompt）经文本编码器得到的条件表示；如果�
 =\epsilon_{\mathrm{uncond}}+s(\epsilon_{\mathrm{cond}}-\epsilon_{\mathrm{uncond}})
 ~~~
 
-这里的 $s$ 是差分记法中的 guidance scale：$s=0$ 只取无条件预测，$s=1$ 恰好回到条件预测。Classifier-Free Guidance 原论文使用另一记号 $w$：
+这里的 $s$ 是差分记法中的 guidance scale： $s=0$ 只取无条件预测， $s=1$ 恰好回到条件预测。Classifier-Free Guidance 原论文使用另一记号 $w$：
 
 ~~~math
 \epsilon_{\mathrm{paper}}
@@ -373,23 +373,23 @@ $c$ 表示提示词（prompt）经文本编码器得到的条件表示；如果�
 \qquad s=1+w
 ~~~
 
-把它接回采样器，每个时间步做四件事：固定当前的 $x_t$ 和 $t$；分别用空条件与文本条件预测噪声；按上式合成一份预测；把这份预测代入反向均值，再继续采样。CFG 改变的是送进反向更新的预测方向，并没有替换前向加噪公式。
+把它接回采样器，每个时间步做四件事：固定当前的 $x_{t}$ 和 $t$；分别用空条件与文本条件预测噪声；按上式合成一份预测；把这份预测代入反向均值，再继续采样。CFG 改变的是送进反向更新的预测方向，并没有替换前向加噪公式。
 
-所以原论文的 $w=0$ 与差分记法的 $s=1$ 都是条件预测基线。以标量 $\epsilon_{\mathrm{uncond}}=0.2$、$\epsilon_{\mathrm{cond}}=0.6$ 为例，取 $s=1.5$ 得 $0.2+1.5(0.6-0.2)=0.8$；用原论文记法取 $w=0.5$，则 $1.5(0.6)-0.5(0.2)=0.8$。两种记法算出同一结果，但参数的零点不同。若取 $s=0.5$，结果为 0.4，位于两种预测之间；$s=1.5$ 的 0.8 则超出条件预测，属于外推。scale 不是提示符合度的线性刻度，数值加倍不代表遵循程度加倍。Diffusers v0.35.1 的经典 Stable Diffusion pipeline 在未采用时间条件投影（time-conditioned projection）的路径中以 `guidance_scale=1` 表示不启用 CFG，并在大于 1 时启用；该 API 值对应差分记法的 $s$，不应直接当成论文的 $w$（[固定版本源码](https://github.com/huggingface/diffusers/blob/v0.35.1/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion.py)）。
+所以原论文的 $w=0$ 与差分记法的 $s=1$ 都是条件预测基线。以标量 $\epsilon_{\mathrm{uncond}}=0.2$、 $\epsilon_{\mathrm{cond}}=0.6$ 为例，取 $s=1.5$ 得 $0.2+1.5(0.6-0.2)=0.8$；用原论文记法取 $w=0.5$，则 $1.5(0.6)-0.5(0.2)=0.8$。两种记法算出同一结果，但参数的零点不同。若取 $s=0.5$，结果为 0.4，位于两种预测之间； $s=1.5$ 的 0.8 则超出条件预测，属于外推。scale 不是提示符合度的线性刻度，数值加倍不代表遵循程度加倍。Diffusers v0.35.1 的经典 Stable Diffusion pipeline 在未采用时间条件投影（time-conditioned projection）的路径中以 `guidance_scale=1` 表示不启用 CFG，并在大于 1 时启用；该 API 值对应差分记法的 $s$，不应直接当成论文的 $w$（[固定版本源码](https://github.com/huggingface/diffusers/blob/v0.35.1/src/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion.py)）。
 
 同一 pipeline 的 `negative_prompt`（负向提示）还会改变公式里的基线：它把负向提示的文本表示放进空条件分支的位置。因此该分支不再是数学推导里的真正空条件，而是“朝正向提示、远离负向提示”的接口实现；其他 pipeline 可能采用不同约定，应检查对应版本。该版本将两组文本表示拼成一个 batch 来减少前向调用次数，但 batch 中仍包含两组预测，计算量不会因此消失。
 
 这个预测差值为什么有用？score 是对数概率密度关于当前样本的梯度。由 Bayes 公式，有条件与无条件 score 之差对应条件对数概率的梯度：
 
 ~~~math
-\nabla_{x_t}\log p_t(x_t\mid c)
--\nabla_{x_t}\log p_t(x_t)
-=\nabla_{x_t}\log p_t(c\mid x_t)
+\nabla_{x_{t}}\log p_{t}(x_{t}\mid c)
+-\nabla_{x_{t}}\log p_{t}(x_{t})
+=\nabla_{x_{t}}\log p_{t}(c\mid x_{t})
 ~~~
 
 在噪声预测参数化且 score 估计准确的理想情况下，score 与噪声预测只差一个由时间步决定的比例因子。因此，把条件/无条件 score 差放大，可以把采样推向更符合条件的区域；换回噪声预测记法时就得到前面的 CFG 公式。这里是原论文的推导直觉，不是说训练出的神经网络一定对应一个精确概率密度或真实分类器；实际效果仍取决于模型、条件和采样轨迹。名称里的“无分类器”指不另训练一个噪声图像分类器，并不表示推理时没有额外计算。
 
-做这个差值时，两次预测必须使用同一个 $x_t$ 和同一个时间步 $t$，只替换条件输入；否则差值会混入不同噪声状态或不同随机样本的影响，不能再解释为条件带来的变化。
+做这个差值时，两次预测必须使用同一个 $x_{t}$ 和同一个时间步 $t$，只替换条件输入；否则差值会混入不同噪声状态或不同随机样本的影响，不能再解释为条件带来的变化。
 
 较大的 $s$ 会沿条件与无条件预测之差向外外推，通常更强调条件匹配，但论文观察到质量与多样性的取舍；具体 checkpoint 上也可能出现过曝或整体质量下降。CFG 每一步都需要两种预测，常把有条件和空条件输入拼到同一 batch 计算，但去噪网络承担的计算量仍会增加。它不是“越大越好”的旋钮，应在固定模型、提示词和采样预算下分桶比较。
 

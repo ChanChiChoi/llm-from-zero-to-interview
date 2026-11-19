@@ -10,7 +10,7 @@ Tokenization -> Special Token -> Chat Template -> Assistant-Only Label Mask -> E
 
 ### 推理优化链
 
-Self-Attention -> Attention Routing Audit -> Route Hit Rate -> Future Leak Rate -> Softmax Row Sum Check -> Scale Stability -> Interpretation Boundary -> QK Circuit -> OV Circuit -> Head Subspace Audit -> Head Redundancy Rate -> KV Head Ratio -> Multi-head Latent Attention -> Latent KV Cache -> KV Cache Saving Rate -> Attention Architecture Gate -> Causal Mask -> KV Cache -> KV Cache Budget -> KV Cache Per Token -> Decode Bandwidth Pressure -> Paged KV Block -> KV Cache Gate -> Prefill/Decode -> Continuous Batching -> Request Scheduling -> TTFT Regression -> TPOT Regression -> KV Pressure -> Prompt Cost Drift -> Cache Effectiveness -> Serving Gate -> Quantization -> Speculative Decoding -> Serving System
+Self-Attention -> Attention Routing Audit -> Route Hit Rate -> Future Leak Rate -> Softmax Row Sum Check -> Scale Stability -> Interpretation Boundary -> QK Circuit -> OV Circuit -> Attention-Head Redundancy -> KV Head Ratio -> Multi-head Latent Attention -> Latent KV Cache -> KV Cache Per Token -> KV Cache Budget -> Paged KV Block -> KV Cache -> Decode Bandwidth Pressure -> Prefill/Decode -> Continuous Batching -> Request Scheduling -> TTFT Regression -> TPOT Regression -> KV Pressure -> Prompt Cost Drift -> Cache Effectiveness -> Serving Gate -> Quantization -> Speculative Decoding -> Serving System
 
 压缩与量化决策子链：瓶颈定位（weights / activations / active KV / cold pages / retained tokens）-> 选择数值表示或模型结构路径 -> GPTQ / AWQ / SmoothQuant / SliderQuant / AAAC / InnerQ / QAT / distillation / pruning -> effective bits 与 scale/metadata -> artifact layout -> runtime parser + kernel + cache lifecycle -> 分桶质量 + peak memory + TTFT/TPOT -> rollout / rollback gate
 

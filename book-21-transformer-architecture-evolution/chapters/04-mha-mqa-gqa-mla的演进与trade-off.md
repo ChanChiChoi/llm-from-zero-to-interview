@@ -1,721 +1,157 @@
 # 第四章：MHA、MQA、GQA、MLA 的演进与 Trade-off
 
-## 0. 本讲范围与资料
+## 4.1 为什么注意力结构要改变 K/V 的保存方式
 
-本章以公开论文、技术报告和前序章节为资料边界：Transformer 原论文对 MHA 的定义，Shazeer 的 MQA 论文对增量解码内存带宽瓶颈的说明，Ainslie 等人的 GQA 论文对 MHA / MQA 折中和 uptraining 的讨论，Mistral 7B 技术报告中 GQA 与 Sliding Window Attention 的公开用法，DeepSeek-V2 / V3 技术报告中 MLA 对 KV cache 的低秩联合压缩设计，vLLM / PagedAttention 论文对 serving 侧 KV cache 分页管理的说明，以及 FlashAttention-2 对 attention kernel IO 和并行划分的优化边界。
+第二章解释了一个 attention head 如何用 Query、Key 和 Value 读取信息；第三章补充了多头注意力中各 head 如何从完整输入学习自己的投影。本章继续追问：如果每个 query head 都保存一套 K/V，生成长文本时会发生什么？
 
-本章只讨论公开可验证的 attention 架构与 serving 成本关系；不推断闭源模型的未公开实现，不把 DeepSeek-V2 报告中的具体节省比例机械推广到所有模型，也不把 toy demo 的选型分数当成真实 benchmark。
+自回归模型每生成一个 token，都会让新 Query 读取前文。推理系统通常把过去各层的 Key 和 Value 缓存起来，供后续 token 重用，这份运行时状态叫 **KV cache**。历史越长、同时服务的请求越多，缓存就越大；decode 每一步还需要读取这些历史 K/V。因此，注意力架构改动 K/V 时，通常同时影响缓存容量和读取流量。
 
-本章重点有三点：
+本章沿一条主线比较四种结构：MHA 为每个 query head 保留独立 K/V；MQA 让所有 query heads 共用一套 K/V；GQA 在两者之间分组共享；MLA 则把每个 token 的 K/V 相关信息联合压缩成较低维的 latent，并额外处理位置信息。第十一章再完整计算不同请求长度、并发和数据类型下的缓存容量。
 
-1. 将 KV cache 显存、KV head 比例、GQA 特例、MLA latent cache 和架构验收条件改成稳定 MathJax 表达。
-2. 明确 FlashAttention、PagedAttention、MQA / GQA / MLA 分别位于 kernel、serving memory manager 和 model architecture 三个层面。
-3. 补一个 0 依赖 Python demo，审计 MHA / GQA / MQA / MLA 的 cache MiB、相对节省率、quality gate、maturity gate 和 serving 选型。
+## 4.2 MHA：每个 Query Head 都有自己的 K/V
 
-## 4.1 本章定位
+标准多头注意力（Multi-Head Attention，MHA）有相同数量的 query heads 和 K/V heads。记 query head 数为 $H_q$，K/V head 数为 $H_{\mathrm{kv}}$；MHA 满足 $H_{\mathrm{kv}}=H_q$。每个 head 使用自己的查询、键和值投影，这是标准 Transformer 的多头结构。
 
-前两章已经讲清楚 Self-Attention、Q/K/V、attention head 和表示子空间。本章进入现代大模型注意力结构的工程演进：MHA、MQA、GQA、MLA。
-
-如果只从训练论文看，Multi-Head Attention 已经足够优雅。但到了大模型推理系统里，一个更现实的问题出现了：
-
-```text
-生成每个 token 时，模型都要读取历史 token 的 K/V cache。
-```
-
-上下文越长、batch 越大、层数越多、KV head 越多，KV cache 越大，内存带宽和显存压力越高。于是注意力结构的优化目标从“表达能力更强”逐渐变成：
-
-```text
-表达能力、KV cache、吞吐、延迟、显存、长上下文之间如何折中？
-```
-
-学完本章，你应该能回答：
-
-1. MHA、MQA、GQA、MLA 分别是什么。
-2. 为什么 MHA 表达强但推理贵。
-3. 为什么 MQA 能显著降低 KV cache，但可能损失质量。
-4. 为什么 GQA 成为现代 LLM 常用折中方案。
-5. MLA 为什么进一步把 K/V cache 压缩成 latent cache。
-6. FlashAttention、PagedAttention 和 MQA/GQA/MLA 分别优化什么层面。
-7. 面试中如何系统解释 attention 架构演进。
-
-## 4.2 资料来源和可信边界
-
-本章主要参考以下公开资料：
-
-1. Vaswani et al., 2017, *Attention Is All You Need*。提出 Multi-Head Attention，让模型在多个表示子空间联合关注信息。
-2. Shazeer, 2019, *Fast Transformer Decoding: One Write-Head is All You Need*。提出 Multi-Query Attention，指出增量解码时加载大量 K/V tensor 带来内存带宽瓶颈，共享 K/V 可显著加速。
-3. Ainslie et al., 2023, *GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints*。提出 Grouped-Query Attention，在 MHA 和 MQA 之间折中，质量接近 MHA、速度接近 MQA。
-4. Jiang et al., 2023, *Mistral 7B*。公开说明 Mistral 7B 使用 GQA 加速推理，并结合 Sliding Window Attention 降低长序列成本。
-5. DeepSeek-AI, 2024, *DeepSeek-V2*。提出 Multi-head Latent Attention，通过把 KV cache 显著压缩到 latent vector 中提升推理效率。
-6. DeepSeek-AI, 2024/2025, *DeepSeek-V3 Technical Report*。继续采用 MLA 和 DeepSeekMoE，说明 MLA 已被大规模 MoE 模型验证。
-7. Kwon et al., 2023, *PagedAttention/vLLM*。从 serving 系统角度解决 KV cache 动态增长、碎片和重复的问题。
-8. Dao, 2023, *FlashAttention-2*。从 GPU kernel 和 IO 角度优化 attention 计算，强调 attention 是长序列扩展主要瓶颈。
-
-需要注意：不同报告对 MLA 的实现细节公开程度不同，本章只基于公开论文和技术报告解释核心思想，不臆测闭源实现。
-
-## 4.3 为什么注意力结构开始围绕 KV Cache 演进
-
-训练时，Transformer 可以一次并行处理整个序列。
-
-推理时，decoder-only LLM 是逐 token 生成：
-
-```text
-prefix tokens -> generate token t -> append token t -> generate token t+1
-```
-
-为了避免每一步重新计算所有历史 token 的 K/V，系统会缓存每层每个历史 token 的 K/V，这就是 KV cache。
-
-对一个 decoder-only 模型，如果 batch size 是 `B`，层数是 `L`，上下文长度是 `T`，KV head 数是 `H_kv`，每个 head 的维度是 `d_h`，每个元素占 `b` 字节，KV cache 粗略显存可以写成：
+如果每个 Key 和 Value head 的宽度都为 $d_h$，那么一个 token 在一层中需要缓存的元素数为：
 
 ```math
-M_{\mathrm{kv}}\approx 2BLTH_{\mathrm{kv}}d_hb
+E_{\mathrm{KV}}=2H_{\mathrm{kv}}d_h
 ```
 
-前面的 `2` 来自 K 和 V 两份缓存。
+这里的 $2$ 表示一份 Key 和一份 Value。若 Key 与 Value 的宽度不同，应把 $2d_h$ 换成 $d_k+d_v$。只有在每头宽度 $d_h$ 固定时，增加 K/V heads 才会增加缓存元素；如果固定的是总 K/V 投影宽度 $H_{\mathrm{kv}}d_h$，仅把它切成更多 heads 并不会增加总缓存量。MQA/GQA 节省缓存，是因为它们在 query head 数量不变时减少了独立 K/V heads。
 
-这说明几个事实：
+## 4.3 MQA：保留多个 Query，共享一套 K/V
 
-1. 上下文长度翻倍，KV cache 约翻倍。
-2. batch size 翻倍，KV cache 约翻倍。
-3. KV head 数越多，cache 越大。
-4. 长上下文 serving 时，显存经常被 KV cache 吃掉，而不只是模型权重。
-5. 解码每个新 token 时，需要反复读取历史 K/V，内存带宽会成为瓶颈。
+多查询注意力（Multi-Query Attention，MQA）保留 $H_q$ 个 query heads，但只保留一个 K/V head，即 $H_{\mathrm{kv}}=1$。它们读取同一组历史 Key 和 Value，不过每个 query head 仍有自己的 Query。
 
-因此，现代注意力结构演进的主线之一就是：
+例如，四个 query heads 都可以使用同一组 $K_0,V_0$。由于四个 Query 不同，它们与 $K_0$ 计算出的注意力权重也可以不同，最终从共享的 Value 序列中读出不同内容。共享 K/V 不等于多个 head 被合并成一个 query head。
 
-```text
-如何少存 K/V，少读 K/V，同时尽量不损失模型质量？
-```
+在 head 宽度相同的条件下，MQA 每个 token 的 K/V 缓存约为对应 MHA 的 $1/H_q$。Shazeer 提出 MQA 时，关注的是增量解码反复读取历史 K/V 所造成的内存带宽开销；论文在当时的模型、任务和 TPU 设置中报告了更快的 decode，也报告了较小的质量变化。这是该论文实验的结论，不是所有模型都能获得相同速度或质量结果的保证（[Shazeer，2019](https://arxiv.org/html/1911.02150)）。
 
-## 4.4 MHA：表达完整，但 KV Cache 昂贵
+## 4.4 GQA：用 K/V 组数调节共享程度
 
-标准 Multi-Head Attention 中：
+分组查询注意力（Grouped-Query Attention，GQA）把 query heads 分成若干组，每组共享一对 K/V heads。设有 $H_q$ 个 query heads 和 $H_{\mathrm{kv}}$ 个 K/V heads；当 $H_q$ 能被 $H_{\mathrm{kv}}$ 整除时，每组包含 $g=H_q/H_{\mathrm{kv}}$ 个 query heads。
+
+假设 $H_q=4$ 且 $H_{\mathrm{kv}}=2$。那么 $Q_0,Q_1$ 共用 $K_0,V_0$， $Q_2,Q_3$ 共用 $K_1,V_1$。同一组内的两个 Query 仍分别计算自己的注意力权重，所以共享 K/V 会减少可学习的 K/V 表示数量，但不会让组内的查询行为完全相同。
+
+把 K/V head 数从少到多排列，MQA 是 $H_{\mathrm{kv}}=1$ 的端点，MHA 是 $H_{\mathrm{kv}}=H_q$ 的端点，中间取值就是 GQA。若 head 宽度和其他条件相同，GQA 的每 token 缓存量相对 MHA 约为 $H_{\mathrm{kv}}/H_q$。例如， $H_q=32$ 且 $H_{\mathrm{kv}}=8$ 时，K/V 缓存约为对应 MHA 的四分之一。
+
+GQA 也会改变训练得到的参数。Ainslie 等人展示了一种把已有 MHA checkpoint 转成 MQA/GQA 的做法：先将每组原 K/V 投影做平均池化，再继续预训练使模型适应新结构。论文报告其 T5 设置使用约 5% 的原始预训练计算量进行 uptraining；这个比例绑定论文中的 checkpoint、训练配方和 encoder-decoder 实验，不是通用转换成本（[Ainslie 等，2023](https://aclanthology.org/2023.emnlp-main.298/)）。
+
+## 4.5 MLA：压缩 K/V 表示，并单独保存位置部分
+
+多头潜变量注意力（Multi-head Latent Attention，MLA）与 GQA 的主要差别不在“再选一个更小的 K/V head 数”，而在于缓存什么表示。DeepSeek-V2 的 MLA 把当前 token 的隐藏表示先投影到一个较低维的 K/V latent，再由这个 latent 生成各 head 所需的内容相关 Key 和 Value：
 
 ```math
-H_q=H_{\mathrm{kv}}=H
-```
-
-每个 query head 有自己对应的 key head 和 value head。
-
-张量形状通常是：
-
-```text
-Q: [B, H, N, d_h]
-K: [B, H, N, d_h]
-V: [B, H, N, d_h]
-```
-
-MHA 的优势：
-
-1. 每个 head 有独立 Q/K/V 子空间。
-2. 表达能力完整。
-3. 训练和理论最标准。
-4. 原始 Transformer、BERT、早期 GPT 类模型都大量使用。
-
-MHA 的代价：
-
-1. 每个 head 都要缓存 K/V。
-2. 长上下文时 cache 显存高。
-3. 解码时内存带宽压力大。
-4. batch 做大时 KV cache 更容易成为瓶颈。
-
-如果模型有 `32` 个 heads，MHA 就有 `32` 个 K heads 和 `32` 个 V heads。对于长上下文和高并发 serving，这很贵。
-
-所以 MHA 是“表达优先”的设计，而不是“推理成本优先”的设计。
-
-## 4.5 MQA：一个 K/V Head 服务所有 Query Heads
-
-Multi-Query Attention 的核心思想很直接：
-
-```text
-保留多个 query heads，但让所有 query heads 共享同一组 K/V。
-```
-
-也就是：
-
-```math
-H_q=H,\qquad H_{\mathrm{kv}}=1
-```
-
-形状变成：
-
-```text
-Q: [B, H, N, d_h]
-K: [B, 1, N, d_h]
-V: [B, 1, N, d_h]
-```
-
-这样 KV cache 直接从 `H` 份降到 `1` 份。
-
-MQA 的优势：
-
-1. KV cache 大幅减少。
-2. 解码时内存带宽需求降低。
-3. 增量推理速度明显提升。
-4. 长上下文和大 batch 更友好。
-
-MQA 的代价：
-
-1. 所有 Q heads 共享同一套 K/V 表示。
-2. 表达能力可能下降。
-3. 某些任务或模型规模下质量可能受影响。
-4. 从已有 MHA checkpoint 直接改成 MQA 需要额外处理或再训练。
-
-Shazeer 的论文标题“One Write-Head is All You Need”很形象：推理慢的关键不是 query 数，而是重复读取大量 K/V。把 K/V 合并，可以显著降低带宽压力。
-
-## 4.6 GQA：MHA 和 MQA 之间的折中
-
-Grouped-Query Attention 是更实用的折中。
-
-它让一组 query heads 共享一个 K/V head：
-
-```math
-H_q=H,\qquad 1<H_{\mathrm{kv}}<H
-```
-
-例如：
-
-```text
-num_q_heads = 32
-num_kv_heads = 8
-```
-
-那么每个 K/V head 服务 `4` 个 query heads。
-
-GQA 的直觉：
-
-```text
-不要像 MHA 那样每个 query head 都有独立 K/V，也不要像 MQA 那样所有 query heads 只共享一套 K/V，而是分组共享。
-```
-
-GQA 的优势：
-
-1. KV cache 明显小于 MHA。
-2. 表达能力通常好于 MQA。
-3. 推理速度接近 MQA。
-4. 可以从 MHA checkpoint uptraining 得到。
-5. 已被 Mistral 7B 等公开模型采用。
-
-GQA 的代价：
-
-1. 仍然比 MQA cache 大。
-2. 质量和速度依赖 `num_kv_heads` 选择。
-3. 实现中需要处理 Q heads 到 KV heads 的映射。
-
-GQA 是现代 LLM 很常见的工程选择，因为它把质量损失和推理收益平衡得更好。
-
-## 4.7 MHA、MQA、GQA 的统一视角
-
-可以把三者看成同一个轴上的不同点：
-
-| 结构 | Q heads | KV heads | KV cache | 表达能力 | 推理效率 |
-|---|---:|---:|---:|---:|---:|
-| MHA | H | H | 最大 | 最完整 | 最低 |
-| GQA | H | G | 中等 | 接近 MHA | 接近 MQA |
-| MQA | H | 1 | 最小 | 可能下降 | 最高 |
-
-其中：
-
-```math
-1\le H_{\mathrm{kv}}\le H_q
-```
-
-所以：
-
-```math
-\mathrm{MHA}: H_{\mathrm{kv}}=H_q,\qquad \mathrm{MQA}: H_{\mathrm{kv}}=1
-```
-
-这也是为什么 GQA 可以叫 generalized multi-query attention。
-
-面试中可以这样概括：
-
-```text
-MHA、MQA、GQA 的核心差异不是 query heads，而是 KV heads 数量。减少 KV heads 可以降低 KV cache 和内存带宽，但会牺牲一部分 K/V 表示多样性。GQA 是质量和推理成本之间的折中。
-```
-
-## 4.8 MLA：从减少 KV Head 到压缩 KV 表示
-
-DeepSeek-V2 提出的 Multi-head Latent Attention 进一步推进了这个方向。
-
-GQA/MQA 的思路是：
-
-```text
-减少 KV head 数。
-```
-
-MLA 的思路更进一步：
-
-```text
-不要直接缓存完整 K/V，而是把 K/V 相关信息压缩成 latent cache。
-```
-
-DeepSeek-V2 报告明确说，MLA 通过把 KV cache 显著压缩到 latent vector 中，保证高效推理，并报告 KV cache 减少 93.3%、最大生成吞吐提升 5.76 倍。
-
-从直觉上看，MLA 想解决的问题是：
-
-1. MHA cache 太大。
-2. MQA/GQA 靠共享 K/V 减 cache，但可能限制表达。
-3. 能否保留多头 attention 的表达，同时用更紧凑的 latent 表示存历史信息？
-
-可以抽象为：
-
-```math
-c_t^{\mathrm{kv}}=x_tW_d^{\mathrm{kv}}
+c_t^{KV}=W^{DKV}h_t
 ```
 
 ```math
-k_t=c_t^{\mathrm{kv}}W_u^k,\qquad v_t=c_t^{\mathrm{kv}}W_u^v
+k_t^C=W^{UK}c_t^{KV},\qquad v_t^C=W^{UV}c_t^{KV}
 ```
 
-MLA 的价值在于把注意力结构和 serving 成本更深地绑定起来。它不是单纯换一个 head 数，而是在 K/V 表示本身上做压缩设计。
+其中， $c_t^{KV}$ 是同一 token 的压缩表示，$k_t^C$ 和 $v_t^C$ 分别表示由它得到的内容 Key 和 Value。推理时可以缓存 $c_t^{KV}$，而不必为每个 head 分别保存完整的 K/V。DeepSeek-V2 还指出，推理实现可将部分上投影吸收到 Query 和输出投影计算中，避免显式展开全部 K/V 张量。
 
-## 4.9 MLA 和 MoE 的关系
-
-DeepSeek-V2/V3 都是 MoE 模型，同时使用 MLA。
-
-这不是偶然。
-
-MoE 的特点是：
-
-1. 总参数量很大。
-2. 每个 token 只激活部分专家。
-3. 训练计算可以相对经济。
-4. serving 时仍然面临显存、通信、batch、KV cache 等压力。
-
-如果一个 MoE 模型支持长上下文，KV cache 仍然会随层数、长度、batch 增长。即使每 token 激活参数较少，KV cache 也不会自动消失。
-
-因此 MLA 对 MoE 很重要：
-
-```text
-MoE 降低每 token 计算成本，MLA 降低长上下文推理时的 KV cache 成本。
-```
-
-这说明现代大模型架构优化通常不是单点优化，而是组合拳：
-
-```text
-MoE + MLA + 高效并行 + FP8/量化 + serving 系统优化
-```
-
-## 4.10 FlashAttention、PagedAttention 和 MQA/GQA/MLA 的区别
-
-这些名字容易混在一起，但它们优化层面不同。
-
-FlashAttention 优化的是 attention kernel。
-
-它不改变 attention 数学结果，而是利用 GPU memory hierarchy，减少 HBM 读写，提高计算效率。FlashAttention-2 进一步优化并行和 work partitioning。
-
-PagedAttention 优化的是 KV cache 管理。
-
-它借鉴操作系统分页思想，减少 KV cache 的内存碎片和重复，提升 serving batch 能力。
-
-MQA/GQA/MLA 优化的是模型架构中的 K/V 表示。
-
-它们改变 KV heads 或 KV cache 表示，从源头减少需要存和读的 K/V。
-
-可以总结为：
-
-| 方法 | 优化层面 | 是否改变模型结构 | 主要目标 |
-|---|---|---|---|
-| FlashAttention | kernel/IO | 否 | 更快更省显存地算 attention |
-| PagedAttention | serving memory manager | 否 | 更高效管理 KV cache |
-| MQA | attention 架构 | 是 | 用 1 个 KV head 降低 cache |
-| GQA | attention 架构 | 是 | 分组 KV head，平衡质量和效率 |
-| MLA | attention 架构 | 是 | 用 latent cache 压缩 K/V 表示 |
-
-面试中一定要区分：FlashAttention 不是 MQA，PagedAttention 也不是 GQA。
-
-## 4.11 KV Cache 粗略计算
-
-假设：
-
-```text
-L = 32
-B = 16
-T = 8192
-d_h = 128
-b = 2
-```
-
-如果 MHA 有 `32` 个 KV heads：
+MLA 还需要保留位置信息。普通 RoPE 会让 Key 随 token 位置旋转；若把所有 Key 都压进同一个与位置无关的 latent，就不能直接沿用原来的位置计算。DeepSeek-V2 因此把内容部分与 RoPE 部分拆开：每个 head 使用内容 Key 与 Value，同时各 token 另有一份位置相关 Key $k_t^R$，并对它应用 RoPE：
 
 ```math
-M_{\mathrm{mha}}\approx 2\times 16\times 32\times 8192\times 32\times 128\times 2
+k_t^R=\mathrm{RoPE}(W^{KR}h_t)
 ```
 
-这里第一个 `2` 是 K/V 两份，最后的 `2` 是 bf16 bytes。
-
-如果 GQA 改成 `8` 个 KV heads，cache 约变成 MHA 的：
+Query 也有对应的内容与位置部分。把当前位置的 Query 记为 $q_t$，历史位置 $j$ 的 Key 记为 $k_j$，两者都由内容部分和 RoPE 部分拼接而成，因此注意力点积同时包含内容匹配和位置匹配：
 
 ```math
-\frac{8}{32}=\frac{1}{4}
+q_t^{\top}k_j=(q_t^C)^{\top}k_j^C+(q_t^R)^{\top}k_j^R
 ```
 
-如果 MQA 改成 `1` 个 KV head，cache 约变成 MHA 的：
+推理缓存因此包含 K/V latent 和位置 Key。按 DeepSeek-V2 论文的记号，每 token、每层需保存约 $d_c+d_h^R$ 个元素，其中 latent 宽度记为 $d_c$，位置 Key 宽度记为 $d_h^R$。这个记账方式说明 MLA 与 MQA/GQA 不是同一种“减少 head 数”的操作（[DeepSeek-V2，§2.1](https://arxiv.org/html/2405.04434v5)）。
+
+## 4.6 按每个 Token 的 K/V 状态比较
+
+在 K/V 宽度相同且不计数据类型字节数时，几种结构的每 token、每层缓存元素数可写成：
+
+| 结构 | 缓存的历史表示 | 每 token、每层缓存元素数 |
+| --- | --- | ---: |
+| MHA | 每个 query head 一组 Key 和 Value | $2H_qd_h$ |
+| MQA | 所有 query heads 共用一组 Key 和 Value | $2d_h$ |
+| GQA | 每组 query heads 共用一组 Key 和 Value | $2H_{\mathrm{kv}}d_h$ |
+| MLA（DeepSeek-V2 形式） | K/V latent 加一份位置 Key | $d_c+d_h^R$ |
+
+前三种公式假设每个 K/V head 的 Key、Value 宽度相等，且各结构使用相同的 head 宽度。只有在这些条件对齐时，MQA/GQA 相对 MHA 的缓存比例才是 $H_{\mathrm{kv}}/H_q$。这个比例描述的是 K/V 缓存元素数，不是全模型参数量或端到端延迟的节省比例。MLA 没有可直接代入的 K/V head 数；应比较 latent 宽度和位置 Key 宽度之和与显式 K/V 宽度，而不是把它当作“一个 KV head”。
+
+若所有层结构一致、每个请求的缓存长度都是 $T$、同时有 $B$ 条请求、元素占 $b$ 字节，则可以将每 token、每层元素数 $E_{\mathrm{KV}}$ 扩展为：
 
 ```math
-\frac{1}{32}
+M_{\mathrm{KV}}=B\times L\times T\times b\times E_{\mathrm{KV}}
 ```
 
-这就是为什么 KV head 数对 serving 成本影响巨大。
+这个简式只说明架构改变 $E_{\mathrm{KV}}$ 的方式。真实服务还要考虑请求长度分布、滑动窗口、层间差异、分页与量化；这些容量和分配问题由[第十一章](./11-kv-cache长上下文推理和显存增长问题.md)完整展开。
 
-当然，实际系统还要考虑 padding、碎片、block size、并行切分、cache quantization、prefix sharing、paged allocation 等因素。
+## 4.7 论文结果说明了什么，又没有说明什么
 
-## 4.12 训练和推理视角不同
+不同实验对 MQA、GQA、MLA 的质量与速度取舍并不完全相同。它们使用的模型、训练方式、任务和硬件不同，因此应把结果连同条件一起阅读。
 
-从训练视角看：
+| 来源与实验 | 作者报告的结果 | 适用边界 |
+| --- | --- | --- |
+| [Shazeer，2019](https://arxiv.org/abs/1911.02150)：翻译与语言建模实验 | MQA 在论文的 TPU 增量解码设置中更快，质量变化较小 | 旧模型、任务、固定形状与 TPU 条件；不是现代 GPU serving 的速度承诺 |
+| [Ainslie 等，2023](https://aclanthology.org/2023.emnlp-main.298/)：T5 checkpoint 转换与 uptraining | GQA 在所测任务中接近 MHA 的质量和 MQA 的解码速度 | 论文明确只评估 encoder-decoder 模型；转换成本取决于具体 recipe |
+| [DeepSeek-V2，附录 D.1](https://arxiv.org/html/2405.04434v5)：约 7B 的 dense MHA/GQA/MQA 对比 | 四个 hard benchmarks 上 MHA 高于 GQA-8 和 MQA | 为对齐参数量调整了层数；结果限于论文模型和四项任务 |
+| [DeepSeek-V2，附录 D.2](https://arxiv.org/html/2405.04434v5)：两种规模的 MoE MLA/MHA 对比 | 作者报告 MLA 的缓存分别约为对应 MHA 变体的 14% 和 4%，并在所列 benchmark 上分数更高 | 激活参数量有差异，仍是特定 MoE、token 预算与 benchmark；不能把整模型吞吐提升归因于 MLA 单一机制 |
+| [MHA2MLA，ACL 2025](https://aclanthology.org/2025.acl-long.1597/)：将已有模型适配到 MLA | 通过 partial-RoPE 与联合 SVD 等步骤微调；论文报告特定 Llama2-7B 实验缓存减少 92.19%、LongBench 约下降 1% | 不是零样本替换；数据量、质量和缓存比例绑定论文方法与模型 |
 
-1. MHA 表达最自然。
-2. 并行计算完整序列，KV cache 不是同一个问题。
-3. 训练关注 FLOPs、通信、激活显存、稳定性。
+因此，不能从这些论文推出“GQA 一定接近 MHA”或“MLA 总是更好”。可以得到的稳定结论是：减少独立 K/V 状态或压缩其表示，会减少按该公式计算的缓存元素；任务质量与实际解码速度仍需结合训练方法和目标实现判断。
 
-从推理视角看：
+## 4.8 架构、Kernel 与 Cache 管理不是同一种优化
 
-1. 逐 token decode，无法像训练那样完全并行序列维。
-2. KV cache 成为长期状态。
-3. 内存带宽、显存容量、batch packing、prefix sharing 非常关键。
-4. MQA/GQA/MLA 的收益更明显。
+| 方法 | 所在层面 | 主要改变什么 |
+| --- | --- | --- |
+| MQA、GQA、MLA | 模型的 attention 架构 | 改变 K/V head 的共享方式，或改变历史 K/V 的缓存表示 |
+| FlashAttention | attention kernel | 通过分块和在线 softmax 减少计算 attention 时的 HBM 读写；dense 版本仍计算完整 attention，不会改变历史 K/V 的总元素数（[FlashAttention](https://arxiv.org/html/2205.14135v2)） |
+| PagedAttention | serving cache 管理 | 通过 block/page 管理变长请求的 KV 内存；不改变模型的 attention 公式（[PagedAttention](https://arxiv.org/abs/2309.06180)） |
+| MoE | Transformer 的 FFN 路径 | 通过路由改变每个 token 使用哪些专家；可以与 MQA、GQA 或 MLA 组合，但它不是一种 attention cache 格式，详见[第五章](./05-ffn-swiglu-gated-mlp与moe-ffn.md) |
 
-这也是为什么很多架构创新越来越“推理优先”。
+同一个系统可以同时使用这些方法，因为它们解决的问题不同。[第十章](./10-o-n2-attention的计算与显存瓶颈.md)展开 attention 计算与 FlashAttention；第十一章讲 cache 管理和推理服务成本。线性注意力、SSM、KDA 与门控 MLA 则改变或组合了历史状态表示，分别见[第二十四章](./24-Linear-Attention基本思想与核技巧.md)、[第二十九章](./29-SSM数学直觉.md)、[第四十二章](./42-替代架构横向对比.md)及[第六十三章](./63-gated-mla门控潜变量注意力.md)。
 
-过去常见思路是：
+## 4.9 比较架构时需要核对的条件
 
-```text
-先训练一个好模型，再想办法部署。
-```
+读论文或模型配置时，可按以下顺序判断 K/V 结构带来的实际变化：
 
-现在更常见的是：
+1. **先看表示。** 记录 $H_q$、 $H_{\mathrm{kv}}$ 和每头宽度；如果是 MLA，则记录 latent 宽度和单独的位置 Key 宽度。确认模型的配置与技术报告描述的是同一版本。
+2. **再看训练来源。** 模型是原生按该结构训练，还是从其他结构转换后 uptraining/微调？转换后的质量不能仅由目标结构名称推断。
+3. **区分缓存节省与服务速度。** 结构公式能估算缓存元素，但实际 decode 速度还取决于 kernel、并行布局、请求长度与 batch。若实现显式复制共享 K/V，架构上的共享也不必然等于目标硬件上的同等流量节省。
+4. **在同一任务上复核质量。** 对齐模型规模、训练 token、上下文长度、数据、评测和解码设置；不能把不同论文中的单项分数拼成统一排名。
 
-```text
-训练前就考虑 serving 成本，把推理约束写进架构设计。
-```
+缓存更小只是结构成本的一部分。实际选择还要同时看质量要求、训练或转换代价、目标硬件实现和服务负载；本章不规定适用于所有模型的 MHA、GQA 或 MLA 默认值。
 
-## 4.13 什么时候选 MHA、MQA、GQA、MLA
+## 4.10 面试问题与练习
 
-如果是小模型、短上下文、研究实验：
+### 面试问题
 
-1. MHA 简单直接。
-2. 对质量最保守。
-3. 实现和分析最容易。
+**问题一：MHA、MQA 和 GQA 的核心区别是什么？**
 
-如果是追求极致解码速度、能接受一定质量折中：
+MHA 每个 query head 有独立 K/V；MQA 让所有 query heads 共用一组 K/V；GQA 则让若干 query heads 共用一组 K/V。Query heads 数量可以保持不变，因此组内不同 Query 仍能得到不同的注意力权重。
 
-1. MQA 很有吸引力。
-2. KV cache 最省。
-3. 适合带宽瓶颈明显的场景。
+**问题二：MLA 与 GQA 的缓存思路有什么不同？**
 
-如果是通用 LLM serving：
+GQA 仍缓存显式 K/V，但减少 K/V heads 数；MLA 把 K/V 相关信息联合映射到低维 latent，并在 DeepSeek-V2 设计中另缓存位置相关的 RoPE Key。因此不能用一个“KV head 数”完整描述 MLA 的缓存大小。
 
-1. GQA 往往是更稳的折中。
-2. 现代开源模型常用。
-3. 兼顾质量、cache、吞吐。
+**问题三：为什么不能说 GQA 总是质量接近 MHA、MLA 总是比 MHA 好？**
 
-如果是超大模型、长上下文、MoE、高并发 serving：
+质量结果依赖模型规模、训练 recipe、微调/转换方式、任务和评测。GQA 原论文的 uptraining 证据来自 T5 encoder-decoder，而 DeepSeek-V2 的 7B dense 消融在特定 hard benchmarks 上由 MHA 得分更高。每个结果都应按原论文条件解释。
 
-1. MLA 这类 latent cache 方案更值得关注。
-2. 它从表示层面进一步压缩 cache。
-3. 实现复杂度和复现难度也更高。
+**问题四：FlashAttention 和 PagedAttention 是否能替代 GQA？**
 
-工程选型永远不是只看论文效果，而是看：
+不能。FlashAttention 改进 attention kernel 的 IO；PagedAttention 管理推理时的 KV 内存；GQA 则改变模型中 K/V heads 的共享结构。它们可以组合使用。
 
-```text
-质量目标 + 上下文长度 + batch 并发 + 显存预算 + 延迟要求 + 实现复杂度
-```
+### 练习
 
-## 4.14 Attention 架构成本审计指标
+1. 假设 $H_q=8$ 且 $H_{\mathrm{kv}}=2$。写出每组 query heads 共用的 K/V，并在 K/V head 宽度不变时推导它相对 MHA 的缓存比例。
+2. 用一两段话解释为什么两个共用同一 K/V head 的 Query 仍可关注不同历史位置。
+3. 对照 MQA、GQA、MLA 的原始论文，分别写出它们改变的是共享 head 数、缓存表示，还是 checkpoint 训练方式，并标注各结果的模型和任务范围。
+4. 把 FlashAttention、PagedAttention、GQA、MLA、MoE 放到“kernel / serving cache 管理 / attention 架构 / FFN 路由”四个层面中，并解释哪些方法可以组合。
 
-为了把 MHA / MQA / GQA / MLA 的 trade-off 讲清楚，可以把候选注意力结构抽象成：
+## 4.11 本章总结
 
-```math
-a_i=(H_q,H_{\mathrm{kv}},d_h,d_c,d_r,q_i,m_i,c_i)
-```
+MHA 为每个 query head 保留独立 K/V。MQA 让所有 query heads 共享一组 K/V，GQA 再用组数调节共享程度；这两种结构仍然保留不同的 Query。MLA 改为缓存低维 K/V latent，并额外保存位置相关的 RoPE Key。
 
-其中 `H_q` 是 query head 数，`H_kv` 是 KV head 数，`d_h` 是 head dim，`d_c` 是 latent cache dim，`d_r` 是额外位置相关缓存维度，`q_i` 是质量代理分，`m_i` 是工程成熟度，`c_i` 是实现复杂度。
-
-普通 MHA / MQA / GQA 的 KV cache 可以写成：
-
-```math
-M_{\mathrm{kv}}(a_i)=2BLTH_{\mathrm{kv}}d_hb
-```
-
-MLA 这类 latent cache 的粗略缓存可以抽象为：
-
-```math
-M_{\mathrm{mla}}(a_i)\approx BLT(d_c+d_r)b
-```
-
-其中 `d_c` 是压缩 latent 维度，`d_r` 可以表示需要额外保留的位置相关 Key 部分。这个公式只是教学抽象，具体实现要以公开技术报告和源码为准。
-
-相对 MHA 的节省率：
-
-```math
-S_{\mathrm{save}}(a_i)=1-\frac{M(a_i)}{M_{\mathrm{mha}}}
-```
-
-Query head 到 KV head 的共享比例：
-
-```math
-\rho_{\mathrm{qkv}}=\frac{H_q}{H_{\mathrm{kv}}}
-```
-
-一个简化上线准入条件可以形式化为：
-
-```math
-G_{\mathrm{attn}}=\mathbb{1}[q_i\ge\tau_q\land S_{\mathrm{save}}(a_i)\ge\tau_s\land m_i\ge\tau_m]
-```
-
-这组指标不替代真实 ablation 和 serving 压测，但能让面试表达从“GQA 更快”升级为“它用多少 KV head 换来多少 cache 节省、可能损失多少质量、实现成熟度是否足够”。
-
-### 4.14.1 最小可运行 MHA / GQA / MQA / MLA 成本审计 demo
-
-下面的 demo 不依赖深度学习框架，只用标准库估算四种 attention 结构在同一 serving 场景下的 KV cache MiB、相对 MHA 节省率和简化选型 gate。
-
-```python
-configs = [
-    {"name": "mha_32kv", "q_heads": 32, "kv_heads": 32, "head_dim": 128, "quality": 1.00, "maturity": 0.95, "complexity": 0.10},
-    {"name": "gqa_8kv", "q_heads": 32, "kv_heads": 8, "head_dim": 128, "quality": 0.98, "maturity": 0.90, "complexity": 0.20},
-    {"name": "mqa_1kv", "q_heads": 32, "kv_heads": 1, "head_dim": 128, "quality": 0.92, "maturity": 0.82, "complexity": 0.18},
-    {"name": "mla_latent", "q_heads": 32, "kv_heads": None, "head_dim": 128, "latent_dim": 512, "rope_dim": 64, "quality": 0.99, "maturity": 0.65, "complexity": 0.45},
-]
-
-batch = 16
-layers = 32
-seq_len = 8192
-bytes_per_elem = 2
-
-
-def cache_mib(cfg):
-    if cfg["kv_heads"] is None:
-        elems = batch * layers * seq_len * (cfg["latent_dim"] + cfg["rope_dim"])
-    else:
-        elems = 2 * batch * layers * seq_len * cfg["kv_heads"] * cfg["head_dim"]
-    return round(elems * bytes_per_elem / 1024**2, 1)
-
-
-mha_cache = cache_mib(configs[0])
-records = {}
-for cfg in configs:
-    cache = cache_mib(cfg)
-    reduction = round(1 - cache / mha_cache, 3)
-    if cfg["kv_heads"] is None:
-        qkv_ratio = None
-    else:
-        qkv_ratio = round(cfg["q_heads"] / cfg["kv_heads"], 3)
-    cache_score = min(reduction / 0.95, 1.0)
-    score = (
-        0.55 * cfg["quality"]
-        + 0.25 * cache_score
-        + 0.20 * cfg["maturity"]
-        - 0.05 * cfg["complexity"]
-    )
-    failed = []
-    if cfg["quality"] < 0.95:
-        failed.append("quality")
-        score -= 0.08
-    if reduction < 0.50:
-        failed.append("cache_saving")
-    if cfg["maturity"] < 0.70:
-        failed.append("maturity")
-        score -= 0.04
-    records[cfg["name"]] = {
-        "cache_mib": cache,
-        "reduction_vs_mha": reduction,
-        "qkv_ratio": qkv_ratio,
-        "serving_score": round(score, 3),
-        "failed_gates": failed,
-    }
-
-ranked = sorted(records.items(), key=lambda item: item[1]["serving_score"], reverse=True)
-ready = [name for name, record in ranked if not record["failed_gates"]]
-
-print(f"records={records}")
-print(f"ranked={[name for name, _ in ranked]}")
-print(f"ready={ready}")
-print(f"best_ready={ready[0] if ready else None}")
-```
-
-运行结果应类似：
-
-```text
-records={'mha_32kv': {'cache_mib': 65536.0, 'reduction_vs_mha': 0.0, 'qkv_ratio': 1.0, 'serving_score': 0.735, 'failed_gates': ['cache_saving']}, 'gqa_8kv': {'cache_mib': 16384.0, 'reduction_vs_mha': 0.75, 'qkv_ratio': 4.0, 'serving_score': 0.906, 'failed_gates': []}, 'mqa_1kv': {'cache_mib': 2048.0, 'reduction_vs_mha': 0.969, 'qkv_ratio': 32.0, 'serving_score': 0.831, 'failed_gates': ['quality']}, 'mla_latent': {'cache_mib': 4608.0, 'reduction_vs_mha': 0.93, 'qkv_ratio': None, 'serving_score': 0.857, 'failed_gates': ['maturity']}}
-ranked=['gqa_8kv', 'mla_latent', 'mqa_1kv', 'mha_32kv']
-ready=['gqa_8kv']
-best_ready=gqa_8kv
-```
-
-这段 demo 的重点是：MHA 质量最稳但 cache 太大，MQA cache 最小但可能有质量验收条件，MLA cache 很省但实现成熟度和复现成本要单独评估，GQA 常成为通用 serving 的稳健折中。
-
-### 4.14.2 前沿模型把注意力从“选多少 KV head”推进到“如何表示历史状态”
-
-前面的 MHA、MQA、GQA、MLA 是一条清晰的演进轴，但 2026 年的新模型已经出现另一条轴：模型不一定把每个历史 token 都保存成显式 K/V，也可以用递归状态、门控线性注意力或局部/全局混合注意力来表示历史。
-
-小白可以先记住一句话：
-
-```text
-GQA/MLA 主要是在“少存一些 K/V”上做文章；KDA、Gated DeltaNet 等混合架构则是在“历史信息应该以什么状态存在”上重新设计。
-```
-
-#### 4.14.2.1 从 KV head 到状态类型
-
-设一个模型包含 `L_a` 个显式 attention 层和 `L_r` 个递归或线性注意力层。显式 attention 层通常按 token 保存 K/V；递归层则把历史压缩进状态 `S_t`。教学上可以写成：
-
-```math
-S_t=\alpha_t\odot S_{t-1}+u_t v_t^{\top}
-```
-
-```math
-y_t=\frac{q_t^{\top}S_t}{z_t+\epsilon}
-```
-
-这里 `alpha_t` 是由输入和门控产生的遗忘/衰减项，`u_t`、`v_t` 是当前 token 写入状态的向量，`z_t` 是可选归一化状态。真实模型可能使用不同的参数化、分块状态和 kernel；上式只用于说明“历史由固定大小状态递归更新”，不是某个模型的完整实现。
-
-对比而言，标准 attention 的历史成本近似是：
-
-```math
-M_{\mathrm{attn}}\approx 2BLT H_{\mathrm{kv}}d_h b
-```
-
-递归状态的成本更接近：
-
-```math
-M_{\mathrm{state}}\approx BL_r d_k d_v b
-```
-
-因此，线性/递归层在超长上下文下有机会把随 `T` 增长的 cache 变成近似固定大小的状态；代价是状态压缩可能丢失精确的任意 token 检索能力，且 GPU 上的矩阵更新不一定比成熟的 FlashAttention kernel 更快。
-
-#### 4.14.2.2 用公开模型校准这条演进线
-
-下表只记录已经能从模型卡、官方文档或一方产品页核对到的结构信号。参数和上下文长度不是本章重点，列出它们是为了帮助读者理解 total parameters、active parameters 和 attention 结构之间的关系。
-
-| 模型或系列 | 公开结构信号 | 对本章的启发 | 证据边界 |
-|---|---|---|---|
-| Kimi K3 | 官方发布文章提到 KDA、Gated MLA 与约 `2.8T` 规模；`3:1` 层比例和 `104B active` 待核验 | 递归状态与 latent attention 可以组合，不能再用“KV head 数”解释全部 cache | Kimi 官方发布文章；完整配置待核验 |
-| DeepSeek-V4-Pro / Flash | CSA 与 HCA 混合注意力，约 `1.6T / 49B` 和 `284B / 13B` | 长上下文优化同时涉及注意力模式和 active compute | 官方模型卡；参数为模型卡披露 |
-| Qwen3.5 / Qwen3.6 | Gated DeltaNet 与 Gated Attention 组合 | 线性/递归层和显式 attention 可以按层混合 | 官方模型卡；不要把它简化成纯 linear attention |
-| Gemma 4 | local sliding-window attention + global attention，并使用 p-RoPE 等位置机制 | 局部层降低 pair 数，全局层保留远距离路由，属于 pattern 级折中 | 官方 model card |
-| North Mini Code | `3:1` sliding-window RoPE 与 global NoPE 的组合 | NoPE 是某些层的显式位置处理选择，不等于模型完全没有顺序信息 | 官方模型卡 |
-
-其中，“total / active”必须谨慎阅读。对于有 `E` 个专家、每个 token 选择 `k` 个专家的 MoE，可以用一个简化公式表示：
-
-```math
-P_{\mathrm{total}}=P_{\mathrm{shared}}+E P_{\mathrm{expert}}+P_{\mathrm{router}}
-```
-
-```math
-P_{\mathrm{active}}=P_{\mathrm{shared}}+k P_{\mathrm{expert}}+P_{\mathrm{router}}
-```
-
-`P_active` 不是“每一步真实 FLOPs”的严格等价物。通信、shared layer、router、padding、expert capacity、量化格式和 kernel 利用率都会改变实际成本。面试中更准确的说法是：
-
-```text
-active parameters 描述每个 token 参与计算的参数子集；它不能单独推出延迟、吞吐或显存。
-```
-
-#### 4.14.2.3 如何把模型宣传语翻译成工程问题
-
-看到“1M context”“linear attention”“hybrid attention”时，至少要追问以下问题：
-
-1. 1M 是 API 的最大输入限制、模型训练上下文，还是在特定模板和推理设置下通过的评测长度？
-2. 全部层都是线性/递归层，还是只有部分层使用状态压缩，其他层仍保存完整 KV？
-3. 全局层的数量、位置模式和 KV cache 是否公开？
-4. 状态是否支持 prefix sharing、beam search、batch 合并和 checkpoint 恢复？
-5. 长上下文的质量是否有 needle retrieval 之外的多文档、代码和跨段推理评测？
-
-因此，架构选型不能只看“cache 减少百分比”。应同时测量：
-
-```math
-\mathrm{Cost}=f(\mathrm{prefill\ time},\mathrm{decode\ time},\mathrm{state\ memory},\mathrm{quality},\mathrm{kernel\ maturity})
-```
-
-对专家而言，这一节的核心变化是：attention 架构的 trade-off 已经从单一的 `H_kv / H_q` 比例，扩展为“显式 token cache、压缩 latent cache、递归状态、局部窗口和全局层”之间的组合优化。
-
-## 4.15 常见误区
-
-误区一：MQA/GQA 只是为了减少参数。
-
-更准确：主要是减少 KV cache 和内存带宽，不是参数量优化。
-
-误区二：GQA 一定比 MHA 差很多。
-
-更准确：合适的 GQA 可以质量接近 MHA，同时显著提高推理效率。
-
-误区三：FlashAttention 能解决 KV cache 过大。
-
-更准确：FlashAttention 优化 attention 计算 IO，不从架构上减少历史 K/V cache 总量。
-
-误区四：PagedAttention 是一种 attention 结构。
-
-更准确：PagedAttention 是 serving 系统中的 KV cache 管理算法。
-
-误区五：MLA 只是 GQA 的另一种名字。
-
-更准确：GQA 减少 KV head 数，MLA 压缩 KV 表示到 latent cache，层级不同。
-
-## 4.16 面试题
-
-### 题 1：MHA、MQA、GQA 的区别是什么？
-
-参考回答：
-
-```text
-MHA 中每个 query head 都有独立 K/V head，表达能力强但 KV cache 大。MQA 保留多个 query heads，但所有 query heads 共享一个 K/V head，显著降低 KV cache 和内存带宽，但可能有质量损失。GQA 是中间方案，让一组 query heads 共享一个 K/V head，质量通常接近 MHA，推理效率接近 MQA。
-```
-
-### 题 2：为什么 MQA/GQA 能提升推理速度？
-
-参考回答：
-
-```text
-Decoder-only 增量解码时，每生成一个 token 都要读取历史 token 的 K/V cache。KV cache 大小和 KV head 数成正比。MQA/GQA 减少 KV head 数，从而减少显存占用和内存带宽需求。很多推理场景不是纯算力瓶颈，而是读取 K/V 的带宽瓶颈，所以减少 K/V 能显著提升吞吐。
-```
-
-### 题 3：GQA 为什么比 MQA 更常见？
-
-参考回答：
-
-```text
-MQA 只有一个 K/V head，cache 最省，但所有 query heads 共享同一套 K/V，可能带来质量损失。GQA 保留多个 K/V groups，让一组 query heads 共享 K/V，在表达能力和推理效率之间折中。实践中 GQA 往往能接近 MHA 质量，同时获得接近 MQA 的推理收益，所以现代 LLM 很常用。
-```
-
-### 题 4：MLA 和 GQA 的区别是什么？
-
-参考回答：
-
-```text
-GQA 的核心是减少 KV head 数，让多个 query heads 分组共享 K/V head。MLA 的核心是把 K/V 相关信息压缩成 latent cache，再在 attention 时使用或恢复相关表示。也就是说，GQA 主要在 head 数量上省 cache，MLA 更进一步在 K/V 表示本身上做压缩。DeepSeek-V2 报告显示 MLA 能显著降低 KV cache 并提升吞吐。
-```
-
-### 题 5：FlashAttention、PagedAttention、GQA 分别优化什么？
-
-参考回答：
-
-```text
-FlashAttention 优化 attention kernel 和 GPU IO，不改变数学结果。PagedAttention 优化 serving 系统中的 KV cache 管理，减少碎片和重复。GQA 改变模型 attention 架构，减少 KV head 数，从源头降低 KV cache。三者可以组合使用，分别对应 kernel、memory manager 和 model architecture 三个层面。
-```
-
-## 4.17 小练习
-
-1. 推导 MHA、MQA、GQA 的 KV cache 大小比例。
-2. 假设 `num_q_heads=40`、`num_kv_heads=8`，说明每个 KV head 服务几个 Q heads。
-3. 解释为什么 KV cache 是长上下文 serving 的核心瓶颈之一。
-4. 阅读 MQA 论文摘要，找出“memory-bandwidth cost”这句话对应的工程问题。
-5. 阅读 GQA 论文摘要，解释为什么它是 MHA 和 MQA 的折中。
-6. 阅读 DeepSeek-V2 摘要，解释 MLA、MoE、KV cache 和吞吐之间的关系。
-7. 用一张表区分 FlashAttention、PagedAttention、MQA、GQA、MLA。
-8. 运行本章成本审计 demo，解释为什么 `gqa_8kv` 在 toy gate 中比 `mqa_1kv` 和 `mla_latent` 更适合作为默认上线方案。
-
-## 4.18 本章总结
-
-本章系统比较了 MHA、MQA、GQA、MLA 的演进与 trade-off。
-
-核心结论：
-
-1. MHA 表达能力完整，但每个 head 都有 K/V，推理 KV cache 昂贵。
-2. MQA 让所有 query heads 共享一个 K/V head，显著降低 cache 和内存带宽，但可能损失质量。
-3. GQA 让一组 query heads 共享一个 K/V head，是 MHA 和 MQA 之间的实用折中。
-4. MLA 进一步把 K/V 信息压缩到 latent cache，是面向长上下文和高效推理的更激进设计。
-5. KV cache 是 decoder-only LLM serving 的关键瓶颈之一，影响显存、batch、吞吐和延迟。
-6. FlashAttention 优化 kernel，PagedAttention 优化 cache 管理，MQA/GQA/MLA 优化模型结构，三者层面不同但可以组合。
-7. 现代注意力设计已经不只是模型表达问题，而是模型架构、推理系统和硬件效率共同优化的问题。
-
-下一章会进入 FFN、SwiGLU、Gated MLP 与 MoE FFN，重点讲 Transformer 中另一个被低估的主力模块：前馈网络。
+在宽度、层数、长度和数据类型等条件对齐时，减少 K/V heads 会按比例降低显式 K/V 缓存元素数；MLA 则按 latent 与位置 Key 的宽度估算。缓存容量公式本身不能推出任务质量或端到端 decode 加速。论文结果、训练方式、kernel 和服务设置都要分别核对。FlashAttention、PagedAttention 与 MoE 作用于不同层面，也可以和这些 attention 架构组合。

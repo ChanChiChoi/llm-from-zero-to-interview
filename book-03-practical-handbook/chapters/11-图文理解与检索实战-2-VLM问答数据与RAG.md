@@ -21,14 +21,14 @@ language model：结合视觉 token 和问题 token 生成回答
 设图像为 I，问题 token 为 q，回答 token 为 a：
 
 ~~~math
-H_v=f_v(I),\qquad Z_v=P(H_v),\qquad E_q=\mathrm{Emb}(q)
+H_{v}=f_{v}(I),\qquad Z_{v}=P(H_{v}),\qquad E_{q}=\mathrm{Emb}(q)
 ~~~
 
 最简单的拼接抽象是：
 
 ~~~math
-X=[Z_v;E_q],\qquad
-p(a\mid I,q)=\prod_{t=1}^{T}p(a_t\mid X,a_{1:t-1})
+X=[Z_{v};E_{q}],\qquad
+p(a\mid I,q)=\prod_{t=1}^{T}p(a_{t}\mid X,a_{1:t-1})
 ~~~
 
 实际模型可能使用 Q-Former、交叉注意力、特殊 image token、动态分辨率或原生统一 token 化。公式表达的是信息流，不是所有模型的实现细节。
@@ -121,10 +121,10 @@ OCR 与数字
 视觉幻觉率可以粗略写成：
 
 ~~~math
-R_{\mathrm{hall}}=\frac{1}{N}\sum_{i=1}^{N}H_i
+R_{\mathrm{hall}}=\frac{1}{N}\sum_{i=1}^{N}H_{i}
 ~~~
 
-其中 `H_i=1` 表示第 `i` 个回答包含没有视觉证据支持的关键断言，`H_i=0` 表示没有命中该类错误；该式要求评估样本数 $N>0$，且 `H_i` 是 0/1 标记。
+其中 $H_{i}=1$ 表示第 $i$ 个回答包含没有视觉证据支持的关键断言，$H_{i}=0$ 表示没有命中该类错误；该式要求评估样本数 $N>0$，且 $H_{i}$ 是 0/1 标记。
 
 这里的“无视觉证据”需要标注规则或人工审核定义，不能只用一个关键词列表代替所有判断。
 
@@ -239,7 +239,7 @@ print("bad_ids=", bad_ids)
 可以把一条样本写成：
 
 ~~~math
-d_i=(I_i,q_i,a_i,t_i,e_i,s_i,v_i)
+d_{i}=(I_{i},q_{i},a_{i},t_{i},e_{i},s_{i},v_{i})
 ~~~
 
 其中：
@@ -257,7 +257,7 @@ v_i：数据和模板版本
 训练数据集为 D={d_i}。任务覆盖率可以写成：
 
 ~~~math
-C_{\mathrm{task}}=\frac{|\{t_i:t_i\in T_{\mathrm{target}}\}|}{|T_{\mathrm{target}}|}
+C_{\mathrm{task}}=\frac{|\{t_{i}:t_{i}\in T_{\mathrm{target}}\}|}{|T_{\mathrm{target}}|}
 ~~~
 
 该覆盖率要求目标任务集合满足 $|T_{\mathrm{target}}|>0$，并且每个任务标签已经规范化。覆盖率只表示任务标签是否出现，不衡量数量、难度或正确性。目标任务没有专门样本时，模型仍可能依靠预训练迁移，但不能据此确认已经学会业务格式和拒答边界，应保留独立验证组。
@@ -293,7 +293,7 @@ safety：隐私、身份、敏感属性和危险操作
 多模态 SFT 的上下文通常包含系统消息、图片占位符、用户问题和 assistant 回答。一般只对 assistant 回答 token 计算损失：
 
 ~~~math
-m_k=\begin{cases}
+m_{k}=\begin{cases}
 1,& k\in A\\
 0,& k\in P
 \end{cases}
@@ -304,10 +304,10 @@ m_k=\begin{cases}
 对应的 masked loss 为：
 
 ~~~math
-L_{\mathrm{sft}}=-\frac{\sum_km_k\log p_\theta(y_k\mid c_k)}{\sum_km_k}
+L_{\mathrm{sft}}=-\frac{\sum_{k}m_{k}\log p_\theta(y_{k}\mid c_{k})}{\sum_{k}m_{k}}
 ~~~
 
-严格地说，这个 masked loss 要求有效 assistant token 数 $\sum_km_k>0$。如果截断或模板错误导致没有目标 token，loss 应报告为“不适用”并回溯样本，而不是用 `max(1, ...)` 伪造一个零监督损失。
+严格地说，这个 masked loss 要求有效 assistant token 数 $\sum_{k}m_{k}>0$。如果截断或模板错误导致没有目标 token，loss 应报告为“不适用”并回溯样本，而不是用 `max(1, ...)` 伪造一个零监督损失。
 
 如果把图片占位符或用户问题也放进监督区域，loss 下降可能只是模型学会复读输入，而不是学会根据图片回答。还要确认图片 token 与 label shift 的对应关系：不同模型的 processor 可能会扩展一个占位符为多个视觉 token，不能按字符串长度手写 mask。
 
@@ -511,7 +511,7 @@ with TemporaryDirectory() as directory:
 多模态 RAG 的基本对象包括两个集合：
 
 ~~~math
-D_T=\{d_i^T\}_{i=1}^{N_T},\qquad D_I=\{d_j^I\}_{j=1}^{N_I}
+D_{T}=\{d_{i}^T\}_{i=1}^{N_{T}},\qquad D_{I}=\{d_{j}^I\}_{j=1}^{N_{I}}
 ~~~
 
 图片条目至少应保留：
@@ -538,16 +538,16 @@ linked_doc_ids、tenant_id、acl、ocr_confidence、created_at
 如果文本、OCR 和图像检索分别得到分数，不能直接把 BM25、cosine 和模型 logits 相加。可以先按验证集做归一化，再使用：
 
 ~~~math
-s_I(q,I_j)=\lambda_1s_{\mathrm{img}}(q,I_j)
-+\lambda_2s_{\mathrm{ocr}}(q,I_j)
-+\lambda_3s_{\mathrm{cap}}(q,I_j),
-\qquad\sum_k\lambda_k=1
+s_{I}(q,I_{j})=\lambda_{1}s_{\mathrm{img}}(q,I_{j})
++\lambda_{2}s_{\mathrm{ocr}}(q,I_{j})
++\lambda_{3}s_{\mathrm{cap}}(q,I_{j}),
+\qquad\sum_{k}\lambda_{k}=1
 ~~~
 
 这里要求各权重非负，且分数归一化方法由同一验证集校准；权重和为 1 本身不能消除不同检索器的分布差异。图片召回后，通过 linked_doc_ids 扩展到相关文本：
 
 ~~~math
-E=TopK_T(q)\cup TopK_I(q)\cup Link(TopK_I(q))
+E=TopK_{T}(q)\cup TopK_{I}(q)\cup Link(TopK_{I}(q))
 ~~~
 
 三个集合都必须限定在当前租户和用户授权范围内。图片可见不代表其关联文本自动可见，关联扩展必须重新查权限；进入上下文前还要复核版本与授权。集合并集用于说明来源，实际实现仍要保留排序和类型化 ID，避免文字 ID 与图片 ID 冲突。
@@ -555,7 +555,7 @@ E=TopK_T(q)\cup TopK_I(q)\cup Link(TopK_I(q))
 上下文预算要显式分配：
 
 ~~~math
-B_{\mathrm{ctx}}=B_T+B_I+B_{\mathrm{ocr}}+B_{\mathrm{instruction}}+B_{\mathrm{answer}}
+B_{\mathrm{ctx}}=B_{T}+B_{I}+B_{\mathrm{ocr}}+B_{\mathrm{instruction}}+B_{\mathrm{answer}}
 ~~~
 
 如果把所有 OCR 文本和 top-20 图片都塞入上下文，模型可能在噪声中丢掉真正相关的证据。证据条目还需要带 ID、来源和版本，使回答中的引用可以回指原始对象。

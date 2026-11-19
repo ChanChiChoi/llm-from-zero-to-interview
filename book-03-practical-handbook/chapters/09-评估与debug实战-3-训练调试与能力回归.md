@@ -35,7 +35,7 @@ batch size 与梯度累积
 
 ```math
 \mathcal{L}(\theta)=
--\frac{1}{|T|}\sum_{t\in T}\log p_\theta(y_t\mid x_{1:t-1})
+-\frac{1}{|T|}\sum_{t\in T}\log p_\theta(y_{t}\mid x_{1:t-1})
 ```
 
 集合 $T$ 只应包含有效标签位置，并且必须满足 $|T|>0$；没有有效标签时，平均损失未定义，训练循环应报告数据或 mask 配置错误，而不是返回 0。padding、用户输入、被屏蔽的 assistant 前缀是否进入 $T$，会直接改变训练目标。
@@ -43,19 +43,19 @@ batch size 与梯度累积
 参数更新的抽象形式是：
 
 ```math
-\theta_{k+1}=\theta_k-\eta_k\,u_k(g_k),\qquad g_k=\nabla_\theta\mathcal{L}_k
+\theta_{k+1}=\theta_{k}-\eta_{k}\,u_{k}(g_{k}),\qquad g_{k}=\nabla_\theta\mathcal{L}_{k}
 ```
 
-其中 $u_k$ 表示优化器对梯度的变换。除了 loss，还应记录梯度范数、参数范数、更新范数和有效学习率：
+其中 $u_{k}$ 表示优化器对梯度的变换。除了 loss，还应记录梯度范数、参数范数、更新范数和有效学习率：
 
 ```math
-G_k=\lVert g_k\rVert_2,\qquad
-P_k=\lVert\theta_k\rVert_2,\qquad
-U_k=\lVert\theta_{k+1}-\theta_k\rVert_2,\qquad
-q_k=\frac{U_k}{P_k},\quad P_k>0
+G_{k}=\lVert g_{k}\rVert_{2},\qquad
+P_{k}=\lVert\theta_{k}\rVert_{2},\qquad
+U_{k}=\lVert\theta_{k+1}-\theta_{k}\rVert_{2},\qquad
+q_{k}=\frac{U_{k}}{P_{k}},\quad P_{k}>0
 ```
 
-这里的更新量比 $q_k$ 只在 $P_k>0$ 时定义；若参数范数为 0，应单独报告“相对更新量不适用”，不要用一个任意的 $\varepsilon$ 把定义域问题隐藏起来。当 $G_k$ 接近 0，可能是梯度确实很小，也可能是 loss 没有连接到目标参数；当 $G_k$ 极大或出现 NaN，常见原因是学习率、数据、精度、非法 logits 或 loss mask；当 $G_k$ 正常而 $U_k$ 接近 0，可能是学习率太小、优化器状态异常或参数未被更新。
+这里的更新量比 $q_{k}$ 只在 $P_{k}>0$ 时定义；若参数范数为 0，应单独报告“相对更新量不适用”，不要用一个任意的 $\varepsilon$ 把定义域问题隐藏起来。当 $G_{k}$ 接近 0，可能是梯度确实很小，也可能是 loss 没有连接到目标参数；当 $G_{k}$ 极大或出现 NaN，常见原因是学习率、数据、精度、非法 logits 或 loss mask；当 $G_{k}$ 正常而 $U_{k}$ 接近 0，可能是学习率太小、优化器状态异常或参数未被更新。
 
 ### 9.4.2 第一层：数据和标签不变量
 
@@ -103,25 +103,25 @@ loss 大幅振荡：学习率过大、batch 太小、数据分布混合或梯度
 梯度裁剪可以限制范数。对裁剪上限 $c\ge0$，当梯度范数大于 0 时：
 
 ```math
-g\leftarrow g\cdot\min\left(1,\frac{c}{\lVert g\rVert_2}\right),\quad \lVert g\rVert_2>0
+g\leftarrow g\cdot\min\left(1,\frac{c}{\lVert g\rVert_{2}}\right),\quad \lVert g\rVert_{2}>0
 ```
 
-当 $\lVert g\rVert_2=0$ 时梯度保持为 0；实现中若用 $\varepsilon>0$，它只是防止浮点除零的数值稳定项，不应被当作解决梯度为空的办法。裁剪可以缓解异常梯度，但不会修复错误标签和错误损失。若“触发裁剪的步数 / 总步数”长期接近 1，说明训练经常超过上限；若缩放系数 $\min(1,c/\lVert g\rVert_2)$ 接近 1，则表示裁剪很轻或未裁剪。应区分这两个量，再检查学习率、数据和数值稳定性。
+当 $\lVert g\rVert_{2}=0$ 时梯度保持为 0；实现中若用 $\varepsilon>0$，它只是防止浮点除零的数值稳定项，不应被当作解决梯度为空的办法。裁剪可以缓解异常梯度，但不会修复错误标签和错误损失。若“触发裁剪的步数 / 总步数”长期接近 1，说明训练经常超过上限；若缩放系数 $\min(1,c/\lVert g\rVert_{2})$ 接近 1，则表示裁剪很轻或未裁剪。应区分这两个量，再检查学习率、数据和数值稳定性。
 
 Adam 的基本形式是：
 
 ```math
-m_t=\beta_1m_{t-1}+(1-\beta_1)g_t,\qquad
-v_t=\beta_2v_{t-1}+(1-\beta_2)g_t^2
+m_{t}=\beta_{1}m_{t-1}+(1-\beta_{1})g_{t},\qquad
+v_{t}=\beta_{2}v_{t-1}+(1-\beta_{2})g_{t}^2
 ```
 
 ```math
-\hat m_t=\frac{m_t}{1-\beta_1^t},\qquad
-\hat v_t=\frac{v_t}{1-\beta_2^t},\qquad
-\theta_t=\theta_{t-1}-\eta\frac{\hat m_t}{\sqrt{\hat v_t}+\epsilon}
+\hat m_{t}=\frac{m_{t}}{1-\beta_{1}^t},\qquad
+\hat v_{t}=\frac{v_{t}}{1-\beta_{2}^t},\qquad
+\theta_{t}=\theta_{t-1}-\eta\frac{\hat m_{t}}{\sqrt{\hat v_{t}}+\epsilon}
 ```
 
-Adam 式中的 $\epsilon>0$ 是数值稳定项；同时通常要求 $0\le\beta_1,\beta_2<1$，学习率 $\eta>0$，并保证分母有限。恢复 checkpoint 时若漏掉 optimizer state，虽然模型参数被加载，动量和二阶统计却从头开始，前几步的行为可能明显不同。恢复训练的日志必须记录 global step、scheduler step、optimizer state 和随机状态。
+Adam 式中的 $\epsilon>0$ 是数值稳定项；同时通常要求 $0\le\beta_{1},\beta_{2}<1$，学习率 $\eta>0$，并保证分母有限。恢复 checkpoint 时若漏掉 optimizer state，虽然模型参数被加载，动量和二阶统计却从头开始，前几步的行为可能明显不同。恢复训练的日志必须记录 global step、scheduler step、optimizer state 和随机状态。
 
 ### 9.4.5 一个零依赖的最小训练实验
 
@@ -203,7 +203,7 @@ for features, _ in DATA:
     predictions.append(int(sigmoid(logit) >= 0.5))
 print("predictions=", predictions)
 ```
-损失采用 logits 形式的稳定二元交叉熵，避免截断概率后让损失与梯度失配。首步可手算：初始 logit 都是 0，概率都是 0.5，平均损失为 $\ln 2\approx0.6931$；第一维梯度合计 $-0.5-0.5=-1$，除以 4 后为 $-0.25$，第二维梯度合计 $0.5-0.5=0$，bias 梯度也为 0。学习率为 1 时，首步更新为 $w=[0.25,0]$、$b=0$，四条新 logit 为 $[0,0,0.25,0.25]$，对应更新后平均损失约为 0.6345。代码日志里的 loss 属于本步更新前的参数，而权重和 bias 属于更新后；最终预测单独使用最后一次更新后的参数。当前标签由第一维特征决定，数据线性可分，训练目标应趋向预测 `[0, 0, 1, 1]`。把 learning_rate 改成非常大的数，可以观察振荡或数值异常；把 DATA 中的 target 全改成同一个值，则可以观察到模型只学到常数基线。这个实验把“训练失败”转成了可以人为制造和观察的现象。
+损失采用 logits 形式的稳定二元交叉熵，避免截断概率后让损失与梯度失配。首步可手算：初始 logit 都是 0，概率都是 0.5，平均损失为 $\ln 2\approx0.6931$；第一维梯度合计 $-0.5-0.5=-1$，除以 4 后为 $-0.25$，第二维梯度合计 $0.5-0.5=0$，bias 梯度也为 0。学习率为 1 时，首步更新为 $w=[0.25,0]$、 $b=0$，四条新 logit 为 $[0,0,0.25,0.25]$，对应更新后平均损失约为 0.6345。代码日志里的 loss 属于本步更新前的参数，而权重和 bias 属于更新后；最终预测单独使用最后一次更新后的参数。当前标签由第一维特征决定，数据线性可分，训练目标应趋向预测 `[0, 0, 1, 1]`。把 learning_rate 改成非常大的数，可以观察振荡或数值异常；把 DATA 中的 target 全改成同一个值，则可以观察到模型只学到常数基线。这个实验把“训练失败”转成了可以人为制造和观察的现象。
 
 ### 9.4.6 真实训练中的定位顺序
 
@@ -295,20 +295,20 @@ latency_and_cost_before -> latency_and_cost_after
 +\lambda_{\mathrm{retain}}\mathcal{L}_{\mathrm{retain}}
 +\lambda_{\mathrm{format}}\mathcal{L}_{\mathrm{format}}
 +\lambda_{\mathrm{safety}}\mathcal{L}_{\mathrm{safety}}
-+\lambda_{\mathrm{anchor}}D\bigl(p_\theta\Vert p_{\theta_0}\bigr)
++\lambda_{\mathrm{anchor}}D\bigl(p_\theta\Vert p_{\theta_{0}}\bigr)
 +\Omega(\theta)
 ```
 
-$\theta_0$ 是微调前模型，$D$ 可以是输出分布的 KL 距离，$\Omega$ 可以是参数或 adapter 的正则项。实际训练未必显式使用这一个总目标，但这个分解提醒我们：只优化新任务 loss，就没有机制保护未被采样的旧能力。
+$\theta_{0}$ 是微调前模型， $D$ 可以是输出分布的 KL 距离， $\Omega$ 可以是参数或 adapter 的正则项。实际训练未必显式使用这一个总目标，但这个分解提醒我们：只优化新任务 loss，就没有机制保护未被采样的旧能力。
 
 目标提升量和保留退化量分别为：
 
 ```math
-\Delta_{\mathrm{target}}=S_{\mathrm{target}}(\theta)-S_{\mathrm{target}}(\theta_0)
+\Delta_{\mathrm{target}}=S_{\mathrm{target}}(\theta)-S_{\mathrm{target}}(\theta_{0})
 ```
 
 ```math
-\Delta_{\mathrm{retain}}=S_{\mathrm{retain}}(\theta)-S_{\mathrm{retain}}(\theta_0)
+\Delta_{\mathrm{retain}}=S_{\mathrm{retain}}(\theta)-S_{\mathrm{retain}}(\theta_{0})
 ```
 
 当 $\Delta_{\mathrm{target}}>0$ 而 $\Delta_{\mathrm{retain}}<0$ 时，应报告这两个方向，而不是把它们混成一个平均分。平均分掩盖某类样本退化的方式，与[第一部分讨论的 micro average](09-评估与debug实战-1-评测协议与benchmark.md)风险相同。
@@ -342,10 +342,10 @@ T\approx e\cdot N\cdot\ell
 可以记录相对更新量：
 
 ```math
-r_{\mathrm{update}}=\frac{\lVert\theta-\theta_0\rVert_2}{\lVert\theta_0\rVert_2},\quad \lVert\theta_0\rVert_2>0
+r_{\mathrm{update}}=\frac{\lVert\theta-\theta_{0}\rVert_{2}}{\lVert\theta_{0}\rVert_{2}},\quad \lVert\theta_{0}\rVert_{2}>0
 ```
 
-这个比值只在 $\lVert\theta_0\rVert_2>0$ 时有定义；若基座参数范数为 0，应报告相对更新量不适用，不能用任意 $\varepsilon$ 掩盖分母为 0。它不能单独预测质量，但能帮助比较不同微调方案是否施加了相近强度的改变。对 LoRA 等参数高效微调，还应记录 adapter 参数范数、合并前后行为以及目标层集合。
+这个比值只在 $\lVert\theta_{0}\rVert_{2}>0$ 时有定义；若基座参数范数为 0，应报告相对更新量不适用，不能用任意 $\varepsilon$ 掩盖分母为 0。它不能单独预测质量，但能帮助比较不同微调方案是否施加了相近强度的改变。对 LoRA 等参数高效微调，还应记录 adapter 参数范数、合并前后行为以及目标层集合。
 
 ### 9.5.4 解决退化的几条路线
 
@@ -375,7 +375,7 @@ r_{\mathrm{update}}=\frac{\lVert\theta-\theta_0\rVert_2}{\lVert\theta_0\rVert_2}
 \mathcal{L}_{\mathrm{KL}}=
 \frac{1}{|T|}\sum_{t\in T}
 D_{\mathrm{KL}}\left(
-p_{\theta_0}(\cdot\mid x_{1:t-1})
+p_{\theta_{0}}(\cdot\mid x_{1:t-1})
 \Vert
 p_{\theta}(\cdot\mid x_{1:t-1})
 \right)
@@ -390,10 +390,10 @@ Elastic Weight Consolidation 使用参数重要性估计，惩罚关键参数偏
 ```math
 \mathcal{L}_{\mathrm{EWC}}=
 \mathcal{L}_{\mathrm{target}}
-+\frac{\lambda}{2}\sum_i F_i(\theta_i-\theta_{0,i})^2
++\frac{\lambda}{2}\sum_{i} F_{i}(\theta_{i}-\theta_{0,i})^2
 ```
 
-$F_i$ 常由 Fisher 信息近似。它的直觉是：对旧任务重要的参数不应被新任务随意改变；但重要性估计本身有成本，且不同任务之间可能共享参数，不能保证完全消除干扰。
+$F_{i}$ 常由 Fisher 信息近似。它的直觉是：对旧任务重要的参数不应被新任务随意改变；但重要性估计本身有成本，且不同任务之间可能共享参数，不能保证完全消除干扰。
 
 #### 路线五：路由和分工
 
@@ -413,12 +413,12 @@ $F_i$ 常由 Fisher 信息近似。它的直觉是：对旧任务重要的参数
 可以用一个简化的效用表示：
 
 ```math
-U_{\mathrm{deploy}}=w_tS_{\mathrm{target}}+w_gS_{\mathrm{general}}+w_fS_{\mathrm{format}}+w_sS_{\mathrm{safety}}-\lambda_c(C-C_0)
+U_{\mathrm{deploy}}=w_{t}S_{\mathrm{target}}+w_{g}S_{\mathrm{general}}+w_{f}S_{\mathrm{format}}+w_{s}S_{\mathrm{safety}}-\lambda_{c}(C-C_{0})
 ```
 
-这里的各项分数应采用相同的 $[0,1]$ 范围，$w_t,w_g,w_f,w_s\ge0$ 且权重和为 1；$C$ 是候选方案的成本，$C_0$ 是比较基线的成本，两者要用相同单位，且都必须是有限的非负数；$\lambda_c\ge0$ 用来把成本差换算到分数尺度。这个公式只用于辅助比较方案，不是训练目标。权重应根据业务风险和用户可能承担的后果来定；安全和权限指标通常不能只靠加权平均决定。
+这里的各项分数应采用相同的 $[0,1]$ 范围， $w_{t},w_{g},w_{f},w_{s}\ge0$ 且权重和为 1； $C$ 是候选方案的成本， $C_{0}$ 是比较基线的成本，两者要用相同单位，且都必须是有限的非负数； $\lambda_{c}\ge0$ 用来把成本差换算到分数尺度。这个公式只用于辅助比较方案，不是训练目标。权重应根据业务风险和用户可能承担的后果来定；安全和权限指标通常不能只靠加权平均决定。
 
-例如使用 §9.5.6 `adapter_large` 的结果，权重为 $(0.40,0.20,0.15,0.25)$，候选与基线成本分别为 1.08 和 1.00、$\lambda_c=0.05$：效用为 $0.40\times0.90+0.20\times0.73+0.15\times0.94+0.25\times0.95-0.05\times(1.08-1.00)=0.8805$。相对基线，它的通用、格式和安全分数分别下降 0.09、0.04 和 0.03；如果发布规则要求这些维度最多下降 0.01，即使效用排序可接受，也必须先按硬门槛拒绝该方案。
+例如使用 §9.5.6 `adapter_large` 的结果，权重为 $(0.40,0.20,0.15,0.25)$，候选与基线成本分别为 1.08 和 1.00、 $\lambda_{c}=0.05$：效用为 $0.40\times0.90+0.20\times0.73+0.15\times0.94+0.25\times0.95-0.05\times(1.08-1.00)=0.8805$。相对基线，它的通用、格式和安全分数分别下降 0.09、0.04 和 0.03；如果发布规则要求这些维度最多下降 0.01，即使效用排序可接受，也必须先按硬门槛拒绝该方案。
 
 ### 9.5.6 一个零依赖退化分析器
 

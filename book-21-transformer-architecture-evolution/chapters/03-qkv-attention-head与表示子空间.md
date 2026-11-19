@@ -1,769 +1,134 @@
 # 第三章：Q、K、V、Attention Head 与表示子空间
 
-## 0. 本讲范围与资料
+## 3.1 从一次读取到多路读取
 
-本章以公开论文、公开技术报告和前序章节为资料边界：Transformer 原论文对 multi-head attention 的定义，BERT 及后续 attention head 分析对 head pattern 的观察，Michel 等人关于 head pruning 和冗余的实验结论，Abnar 和 Zuidema 对跨层 attention flow 的解释边界提醒，Transformer Circuits 对 QK / OV circuit 与 residual stream 的机制化拆解，Shazeer 的 MQA 论文和 Ainslie 等人的 GQA 论文对 K/V head 压缩和推理带宽瓶颈的解释，以及近期公开研究对 attention head 角色跨随机重训稳定性的谨慎讨论。
+上一章已经沿一个 Query 复走了单头注意力：Query 与各 Key 计算匹配分数，softmax 把分数变成读取权重，再用这些权重混合 Value。本章接着回答一个问题：为什么 Transformer 要并行计算多个这样的读取过程？
 
-本章只解释 Q/K/V、attention head、表示子空间、QK / OV 拆解、head 冗余、MHA / MQA / GQA 的形状和成本直觉；不把某个可视化 attention map 写成完整因果解释，不把 toy demo 的数值当成真实模型 benchmark，也不推断闭源模型的内部 head 分工。
+处理同一位置时，模型有时需要同时利用不同位置的信息。例如，在句子“米娅把文件移到了新目录，因为它已经损坏”中，模型处理“它”时可能需要比较代词与前文实体的关系，也要保留附近词语提供的局部信息。单头注意力在一次读取中只生成一组位置权重和一个 Value 混合结果；多头注意力则为同一输入生成多组独立的 Query、Key、Value 表示和读取结果，再把结果合并。这里的句子只说明“多路读取”的可能用途，不表示实际模型必定把某个 head 固定分配给代词或局部语法。
 
-本章重点有三点：
+读完本章，你应能沿张量形状复述多头注意力怎样计算；解释 QK 如何形成读取权重、OV 如何变换并写入读取内容；区分模型提供的多组投影能力与研究者观察到的 head pattern；并判断某个 head 可剪枝或 head 数变化能支持什么结论。单头读取细节见[第二章](02-self-attention的信息路由本质.md)；MHA、MQA、GQA、MLA 的结构演进和 KV cache 设计见[第四章](04-mha-mqa-gqa-mla的演进与trade-off.md)及[第十一章](11-kv-cache长上下文推理和显存增长问题.md)。
 
-1. 将 Q/K/V、multi-head attention、QK circuit、OV circuit、head dim 和 KV cache 成本改成稳定 MathJax 表达。
-2. 明确 head 可解释性的边界：head pattern 是线索，必须结合 ablation、activation patching、QK / OV 分解和任务行为变化。
-3. 补一个 0 依赖 Python demo，审计 QK 路由命中、OV 写入目标、head 冗余、解释风险，以及 MHA / GQA / MQA 的 KV cache 粗略成本。
+## 3.2 每个 head 都从完整输入学习自己的投影
 
-## 3.1 本章定位
-
-上一章从信息路由角度解释了 Self-Attention。本章继续深入：Q、K、V 和 attention head 到底在表示什么？为什么 Transformer 不只做一个 attention，而要做 multi-head attention？每个 head 是否真的学到了不同功能？为什么有些 head 可以剪掉？为什么 MQA、GQA 又要减少 K/V head？
-
-这些问题是 Transformer 架构面试的高频追问。只会说“多头可以关注不同位置”还不够，面试官可能继续问：
-
-1. 多头为什么比单头表达力强？
-2. QK 和 OV 可以如何分开理解？
-3. head_dim 变大会怎样？head 数变多会怎样？
-4. attention head 是否可解释？
-5. 如果很多 head 冗余，为什么还要多头？
-6. MQA/GQA 为什么减少 K/V head，而不是减少 Q head？
-
-本章会把 attention head 看成“在不同表示子空间中运行的信息路由器”。这比“多个头看不同位置”更准确。
-
-## 3.2 资料来源和可信边界
-
-本章主要参考以下公开资料：
-
-1. Vaswani et al., 2017, *Attention Is All You Need*。原论文提出 multi-head attention，说明多头允许模型在不同表示子空间、不同位置上联合关注信息。
-2. Devlin et al., 2018/2019, *BERT*。BERT 使用多层多头双向 Transformer，证明多头 self-attention 可形成强语言理解表示。
-3. Clark et al., 2019, *What Does BERT Look At?*。分析 BERT attention head，发现一些 head 关注 delimiter、固定位置偏移、全句信息，也有 head 与句法关系、共指关系相关。
-4. Michel et al., 2019, *Are Sixteen Heads Really Better than One?*。发现训练后的模型中大量 attention head 可在测试时剪掉而不显著影响性能，说明多头存在冗余和层间差异。
-5. Abnar and Zuidema, 2020, *Quantifying Attention Flow in Transformers*。指出跨层信息不断混合，raw attention weights 作为解释并不可靠，提出 attention rollout/flow 等后验方法。
-6. Shazeer, 2019, *Fast Transformer Decoding: One Write-Head is All You Need*。提出 MQA，指出增量解码时加载大量 K/V tensor 带来内存带宽瓶颈，共享 K/V 可加速推理。
-7. Ainslie et al., 2023, *GQA*。提出 grouped-query attention，在 MHA 和 MQA 之间折中，用较少 K/V heads 获得接近 MHA 的质量和接近 MQA 的速度。
-8. Transformer Circuits, *A Mathematical Framework for Transformer Circuits*。用 QK circuit 和 OV circuit 拆解 attention head 的“读哪里”和“写什么”两部分，为理解 head 功能提供机制解释视角。
-9. 近期关于 attention head role stability 的公开研究提醒：即使两个模型结构和数据相同，随机初始化和训练过程也可能让某些 head 功能位置发生变化，因此不能把“第几层第几个 head”过度解释成稳定命名模块。
-
-需要注意：attention head 的可解释性研究很有启发，但不能把某个 head 的可视化图当成完整因果解释。本章会区分“局部机制解释”“统计相关模式”和“最终模型行为”。
-
-## 3.3 从单头到多头：为什么一个 attention 不够
-
-单头 attention 做的事情是：
-
-```text
-在一个表示子空间里，计算每个 token 应该从哪些 token 读取信息，并把它们的 Value 加权混合。
-```
-
-但自然语言和代码中的关系不是单一类型。
-
-同一个 token 可能同时需要：
-
-1. 找前一个 token 的局部搭配。
-2. 找主语和谓语关系。
-3. 找代词指代实体。
-4. 找括号、引号、代码块边界。
-5. 找函数定义和调用。
-6. 找长上下文中的证据句。
-7. 找格式模板中的对应字段。
-
-如果只有一个 attention head，它只能生成一张 attention map。
-
-多头 attention 的直觉是：
-
-```text
-让模型在多个不同子空间里同时做信息路由，再把结果拼接起来。
-```
-
-原论文中的表达是，多头允许模型联合关注不同位置、不同表示子空间的信息。
-
-所以多头不是简单并行重复，而是把 hidden representation 切成多个 head，每个 head 用自己的 `W_Q`、`W_K`、`W_V` 学一个不同的信息路由和内容变换。
-
-## 3.4 多头注意力的数学形式
-
-输入张量可以写成：
+设一批输入序列的表示为 $X\in\mathbb{R}^{B\times N\times D}$： $B$ 是批量中的序列数， $N$ 是每条序列的位置数， $D$ 是每个位置的隐藏维度。以 self-attention 为例，同一个 $X$ 会送给所有 head。第 $h$ 个 head 有自己的可学习投影矩阵：
 
 ```math
-X\in\mathbb{R}^{B\times N\times D}
+W_h^Q\in\mathbb{R}^{D\times d_k},\qquad
+W_h^K\in\mathbb{R}^{D\times d_k},\qquad
+W_h^V\in\mathbb{R}^{D\times d_v}.
 ```
 
-其中 `B` 是 batch size，`N` 是序列长度，`D` 是 hidden size。第 `h` 个 head 的投影是：
+它们分别把输入映射为 Query、Key 和 Value：
 
 ```math
-Q_h=XW_h^Q,\qquad K_h=XW_h^K,\qquad V_h=XW_h^V
+Q_h=XW_h^Q,\qquad K_h=XW_h^K,\qquad V_h=XW_h^V.
 ```
 
-并且：
+因此， $Q_h$ 和 $K_h$ 的形状是 $B\times N\times d_k$， $V_h$ 的形状是 $B\times N\times d_v$。这里的关键是：每个投影都读取完整的 $D$ 维输入，再映射到自己的低维表示。概念上，模型不是把输入的前一段维度硬分给 head 1、后一段维度硬分给 head 2。实现可以把多个投影合并成一次大矩阵运算，再把结果整理成 head 维度；这种计算打包不改变每个 head 拥有独立可学习投影的定义。
+
+随后，每个 head 独立计算注意力分数、位置权重和 Value 混合：
 
 ```math
-Q_h,K_h,V_h\in\mathbb{R}^{B\times N\times d_h}
+A_h=\mathrm{softmax}\left(\frac{Q_hK_h^\top}{\sqrt{d_k}}+M\right),\qquad O_h=A_hV_h.
 ```
 
-第 `h` 个 head 的注意力权重和输出可以写成：
+softmax 沿 Key 所在的位置维度逐行计算，所以每个 Query 位置会得到一组对可见 Key 位置求和为 $1$ 的权重。 $M$ 是可选的注意力掩码：允许读取的位置不改变分数，被屏蔽的位置在 softmax 前加上负无穷。第二章已经解释缩放、softmax 和 mask 的作用；这里需要看清的是，每个 head 分别得到一张 $N\times N$ 的位置权重表和一个 $B\times N\times d_v$ 的输出。
+
+所有 head 的输出沿特征维拼接，再经过输出投影：
 
 ```math
-A_h=\mathrm{softmax}\left(\frac{Q_hK_h^\top}{\sqrt{d_h}}+M\right)
+\mathrm{MHA}(X)=\mathrm{Concat}(O_1,\ldots,O_H)W^O,
+\qquad W^O\in\mathbb{R}^{Hd_v\times D}.
 ```
+
+拼接保留各 head 的输出通道； $W^O$ 再让这些通道共同形成 $D$ 维结果，供 Transformer block 后续计算使用。原始 Transformer 论文给出的正是“每个 head 独立投影、分别做注意力、拼接后再投影”这一路径，并把不同位置和表示子空间上的联合读取作为多头设计的动机。[原论文 §3.2.2](https://arxiv.org/html/1706.03762v7#S3.SS2.SSS2)
+
+例如，只为追踪形状，设 $B=1$、 $N=3$、 $D=4$、 $H=2$，并令 $d_k=d_v=2$。输入 $X$ 的形状是 $1\times3\times4$。每个 head 都从这三个位置的完整四维表示分别得到形状为 $1\times3\times2$ 的 $Q_h$、 $K_h$ 和 $V_h$。 $Q_hK_h^\top$ 会为三个 Query 位置与三个 Key 位置形成 $1\times3\times3$ 的分数表；乘上 $V_h$ 后，该 head 输出 $1\times3\times2$。两个 head 拼接后回到 $1\times3\times4$，输出投影再把每个位置的四维结果映射到模型隐藏维度。这个小例子只展示尺寸之间的关系，不代表某个真实模型配置。
+
+在常见的等宽配置中， $d_k=d_v=d_h$ 且 $Hd_h=D$。这是便于保持总通道宽度的常见设计，不是所有注意力变体都必须满足的恒等式；需要区分 Query/Key 的维度 $d_k$、Value 的维度 $d_v$ 和模型隐藏维度 $D$。
+
+## 3.3 QK 决定读取权重，OV 决定写入内容
+
+理解 head 的功能，不能只看注意力图。固定一个 head $h$、Query 位置 $i$ 和候选来源位置 $j$，令它们进入本层前的行向量分别为 $x_i$ 和 $x_j$。未缩放的 QK 匹配分数可写成：
 
 ```math
-O_h=A_hV_h
+u_{ij}^{(h)}=x_iW_h^Q\left(x_jW_h^K\right)^\top
+=x_iW_h^Q(W_h^K)^\top x_j^\top.
 ```
 
-其中 `M` 是可选 mask，例如 causal mask。所有 head 拼接后再通过输出投影混回主 hidden space：
+实际进入 softmax 的 logit 还要按 $\sqrt{d_k}$ 缩放，并按需要加入掩码。softmax 将同一 Query 可见位置上的 logits 转成权重 $a_{ij}^{(h)}$。所以 QK 这部分描述了“在当前输入和可见范围下，位置 $i$ 怎样给各来源位置分配读取权重”。它不等于一个始终固定的关键词匹配表：输入变化时，Query 和 Key 也变化，权重会跟着变化。
+
+Value 先把来源位置 $j$ 的表示投影为 $x_jW_h^V$，然后按权重求和。拼接之后的输出投影会进一步混合各 head 的通道。把 $W^O$ 按各 head 对应的输入通道切成行块 $W_h^O\in\mathbb{R}^{d_v\times D}$，位置 $i$ 收到的多头结果可改写为：
 
 ```math
-\mathrm{MHA}(X)=\mathrm{Concat}(O_1,\ldots,O_H)W^O
+y_i=\sum_{h=1}^{H}\sum_{j=1}^{N}a_{ij}^{(h)}x_jW_h^VW_h^O.
 ```
 
-如果不考虑一些特殊变体，通常有：
+这个展开把多头输出写成各来源位置的加权贡献之和。 $W_h^VW_h^O$ 是一种便于理解的 OV 视角：它展示来源表示经过 Value 投影后，怎样映射到输出通道。QK 影响“读哪些位置、读多少”，OV 影响“读到的表示怎样变换并写入”。
+
+QK/OV 分解是分析单层 head 的代数视角，不是对最终预测的完整因果说明。权重受输入和 softmax 影响；head 输出还会与残差路径、其他 head、前馈层及后续层共同作用。若要判断某个 head 对任务行为有什么贡献，仍需结合任务输入、实际输出和干预证据。
+
+## 3.4 表示子空间不是互不相交的语义隔间
+
+不同的投影矩阵为模型提供了多组可学习的低维坐标表示。它们可以让不同 head 形成不同的匹配方式和 Value 变换，这就是“在不同表示子空间中读取”的含义。这里的“子空间”是对投影后表示的一种简写，不代表每个 head 占据隐藏向量中互不重叠的一块坐标，也不保证各投影正交。
+
+要把结构事实和功能结论分开：
+
+| 可以从结构直接知道 | 仍需要实验才能知道 |
+| --- | --- |
+| 每个 head 使用各自的 Query、Key、Value 投影，并独立形成一组读取权重 | 某个 head 在特定模型和任务上稳定呈现什么 pattern |
+| 多头输出会拼接，并由输出投影混合 | 某种 pattern 对任务指标或某个具体行为是否有因果贡献 |
+| 该结构允许多路读取结果并行出现 | 不同 head 是否专门分工、相互重叠，或可在其他模型中复现 |
+
+因此，较稳妥的说法是“多头结构提供了多组可学习的读取通道，训练后可能出现可观察的功能模式”；不应直接说“第几个 head 就是语法模块”或“每个 head 各自负责一种语义”。后一类判断必须说明模型、任务、输入、分析方法和复现范围。
+
+## 3.5 从 head pattern 到功能主张，需要什么证据
+
+观察 attention pattern 可以先提出假设。例如，研究者可以统计某个 head 是否常把权重放在相邻位置、分隔符或句法相关 token 上。[Clark 等人对 BERT 的分析](https://aclanthology.org/W19-4828/)确实观察到 delimiter、位置偏移、广域关注等模式，也报告部分模式与句法或共指关系相关。但这种观察说明“权重呈现什么规律”，本身并未证明 head 对任务必需或拥有唯一语义功能。
+
+再往前一步，可以屏蔽或干预 head 输出，观察目标任务的变化。这样的实验回答的是：在指定模型、数据、指标和干预方法下，保留或移除这个 head 会怎样影响行为。它比看图更接近因果问题，但仍不能单独回答这个 head 在所有任务中“是什么功能”。
+
+几个剪枝研究说明了为什么必须区分实验问题。Michel 等人在机器翻译和 BERT 自然语言推理模型中发现，逐个移除许多训练后 head 对测试指标影响不大；有些层只保留一个 head 也影响有限。可是当他们跨整网迭代剪枝时，为避免明显退化仍需保留大多数 head，机器翻译中的 encoder-decoder attention 也比 self-attention 更容易受剪枝影响。[这项研究](https://arxiv.org/html/1905.10650v3)说明“单个移除影响小”和“整网只需少数 head”不是同一个结论。
+
+Voita 等人在其机器翻译编码器实验中观察到位置、句法关系和低频词等模式；在他们采用的门控剪枝方法下，部分较专门的 head 最后才被剪掉。[该研究](https://arxiv.org/html/1905.09418v2)的结果与模型、翻译任务、数据域和剪枝规则绑定。Budhraja 等人随后发现，既有方法推断出的 head importance 并不能稳定预测哪些 head 更容易剪掉；在其 Transformer 翻译模型与 BERT 任务中，某些比例的随机剪枝经微调后也能保留表现。[这项研究](https://aclanthology.org/2020.emnlp-main.260/)提示，“解释上看起来重要”和“在给定剪枝协议下不可移除”是不同测量问题。
+
+剪枝判据仍在发展。例如，Findings of EMNLP 2026 的 HIES 将基于梯度的 head importance 与 attention entropy 结合，并在多种模型架构和语言、视觉、多模态数据集上进行比较。[论文](https://aclanthology.org/2026.findings-emnlp.2191/)展示的是一套特定的剪枝评分及其基线结果；attention entropy 在这里是方法中的统计信号，不是 head 功能或通用重要度的真值。
+
+近期对现代 LLM 的干预研究也显示，head 的作用可能取决于任务和其他 head 是否启用。Nam 等人提出的 causal head gating 在四个 Llama 3 系列模型变体及句法、常识、数学任务上筛选与任务表现相关的 head；作者报告同一个 head 的相关性会随任务和运行中的其他 head 改变，并把方法定位为候选子电路诊断，而非揭示 head 精确计算的完整解释。[NeurIPS 2025 论文](https://papers.nips.cc/paper_files/paper/2025/file/a7f530e11fa19e9551b7a51dbd0f336f-Paper-Conference.pdf)的范围限于其模型、任务和干预流程。另有一项 2026 年预印本比较独立初始化训练得到的 Transformer 语言模型，报告在其设置中中间层 head 的表示稳定性较低、residual stream 相对稳定；该结果尚未经过同行评审，也不能外推为所有模型的普遍规律。[该预印本](https://arxiv.org/abs/2602.16740)
+
+读 head 研究时，可以按证据层次追问：模式是否只在 attention map 中观察到？是否干预了 head 输出？评估的是单个 head 还是多个 head 一起移除？指标和任务是什么？更换任务、随机种子或模型后结论是否仍成立？这些问题能防止把“看到相关”写成“证明了功能”，也能防止把“这次能剪”写成“这个 head 没有作用”。
+
+## 3.6 Head 数、单头维度与 KV cache
+
+在常见的等宽 MHA 配置中，若模型隐藏宽度 $D$ 固定，head 数为 $H$，则每个 head 的宽度通常为 $d_h=D/H$。增加 head 数会增加并行的读取权重组，同时减小每组投影维度；减少 head 数则相反。因此，head 数是结构配置的一部分，不存在脱离模型、任务和训练设置的通用最优值。原始 Transformer 论文在近似固定计算量的机器翻译配置中观察到，单头比其最佳设置低 $0.9$ BLEU，而 head 数过多时结果也下降；这只支持论文所测设置中的非单调现象，不构成其他模型的 head 数处方。[原论文 §4.2](https://arxiv.org/html/1706.03762v7#S4.SS2)
+
+head 数也不能直接等同于 KV cache 大小。对使用完整 Key 和 Value 缓存的常规注意力，若 Key 与 Value 的每头宽度均为 $d_h$，近似缓存字节数为：
 
 ```math
-D=H d_h
+M_{\mathrm{KV}}\approx 2BLTH_{\mathrm{kv}}d_hb.
 ```
 
-这说明 multi-head attention 至少有三层含义：
+其中 $B$ 是同时缓存的序列数， $L$ 是层数， $T$ 是已缓存位置数， $H_{\mathrm{kv}}$ 是每层的 K/V head 数， $b$ 是每个元素占用的字节数，系数 $2$ 表示同时保存 Key 和 Value。若 K/V 每头宽度不同，更一般地写成 $BLTH_{\mathrm{kv}}(d_k+d_v)b$。
 
-1. 每个 head 有自己的 Q/K/V 投影。
-2. 每个 head 有自己的 attention map。
-3. 所有 head 输出再通过 `W_O` 混合回主 hidden space。
+标准 MHA 通常有 $H_{\mathrm{kv}}=H$，且等宽配置满足 $Hd_h=D$，所以每个 token 的总 K/V 宽度约为 $D$；在保持 $D$ 不变时，仅增加 head 数并相应减小每头宽度，不会自动增加 K/V 缓存总宽度。若增加 head 数时还保持每头宽度不变，总宽度才会随之增加。MQA 和 GQA 通过减少 K/V head 数来改变这一账本；MLA 使用不同的缓存表示。它们的具体结构、质量与推理取舍留在第四章和第十一章展开。
 
-如果只看 attention weights，会漏掉 Value 和 Output projection 的影响。一个 head 不只是“看哪里”，还包括“把看到的信息写成什么”。
+## 3.7 面试时怎样解释多头和 head 作用
 
-## 3.5 QK Circuit 和 OV Circuit
+可以按三个层次回答：多头注意力为同一输入应用多组独立的 Q/K/V 投影，使不同读取权重和 Value 变换并行计算，最后拼接并通过输出投影混合。用机制语言说，QK 影响读取权重，OV 影响读取内容怎样写入输出。至于某个 head 是否负责语法、共指或格式信息，要看具体模型和任务的观察与干预证据；剪枝实验只能说明在特定评价条件下移除它造成的影响，不能证明它在所有行为中都无用。head 数变化也不必然改变缓存大小，需同时看总 K/V 宽度和 K/V head 数。
 
-一个 attention head 可以拆成两部分理解。
+## 3.8 小练习
 
-第一部分是 QK circuit：
+1. 设输入形状为 $2\times5\times12$，使用 $H=3$ 个 head，且每个 head 的 $d_k=d_v=4$。写出单个 head 的 $Q_h$、注意力分数表和输出形状，再写出拼接及输出投影后的形状。
+2. 用自己的话解释为什么“每个 head 学一组不同投影”不等于“把输入维度硬切成互不重叠的几份”。
+3. 根据 QK 与 OV 的公式，指出注意力权重图能展示什么、看不到什么。
+4. 对比逐个屏蔽 head 与跨整网联合剪枝，说明两类结果分别支持什么结论。可以从 [Michel 等人的研究](https://arxiv.org/html/1905.10650v3)开始。
+5. 阅读 [Clark 等人的 BERT head 分析](https://aclanthology.org/W19-4828/)，把“观察到的 pattern”和“因果功能证据”各举一例，并说明两者的差别。
+6. 假设模型隐藏宽度 $D=4096$，比较 $H=32,d_h=128$ 与 $H=64,d_h=64$ 两种标准 MHA 设置的总 K/V 宽度。再说明改变 $H_{\mathrm{kv}}$ 为什么会影响缓存账本。
 
-```text
-QK: 决定从哪里读。
-```
+## 3.9 本章总结
 
-它由 `W_Q` 和 `W_K` 决定，影响 attention score：
+多头注意力不是把隐藏向量切成若干固定语义块，而是让每个 head 从完整输入学习自己的 Query、Key、Value 投影，并各自完成一次加权读取。各 head 的结果拼接后由输出投影混合回模型隐藏维度。QK 视角帮助分析读取权重怎样形成，OV 视角帮助分析 Value 怎样映射到输出；两者都只是局部机制分析，不能替代对整层和任务行为的因果研究。
 
-```math
-s_{ij}^{(h)}=(x_iW_h^Q)(x_jW_h^K)^\top
-```
+研究者确实在一些模型中观察到位置、分隔符、句法关系等 head pattern，也测得某些 head 在给定任务和剪枝方案下可移除或较重要。但 pattern、重要度和可剪枝性并非同一概念；逐个屏蔽、联合剪枝、不同任务和不同运行可能给出不同结果。因此，head 可以作为分析单元，却不应被当成普遍稳定、互不重叠的语义模块。
 
-第二部分是 OV circuit：
-
-```text
-OV: 决定读到的信息如何写入 residual stream。
-```
-
-它由 `W_V` 和 `W_O` 决定：
-
-```math
-c_{ij}^{(h)}=a_{ij}^{(h)}x_jW_h^VW_h^O
-```
-
-其中 `a_ij` 是第 `h` 个 head 中位置 `i` 对位置 `j` 的 attention weight，`W_h^O` 可以理解为输出投影中对应第 `h` 个 head 的那一块。
-
-这个拆法非常重要。
-
-很多初学者只看 attention map，以为 head 的作用就是“关注某个 token”。但真正的 head 功能包括：
-
-1. 通过 QK 选择源 token。
-2. 通过 OV 把源 token 的某些特征写到目标位置。
-
-举例：一个 head 可能在 QK 上关注前一个 token，但 OV 写入的是“前一个 token 的词性或括号状态”。另一个 head 也关注前一个 token，但写入的是完全不同的信息。
-
-所以只看 attention weight 不足以完整理解 head。
-
-## 3.6 表示子空间：Head 到底分工在哪里
-
-为什么说 head 工作在不同表示子空间？
-
-因为每个 head 的 Q/K/V 投影矩阵不同。它们把同一个 `X` 投影到不同低维空间：
-
-```text
-X -> Q_h/K_h/V_h in head h subspace
-```
-
-这些子空间可以学不同的匹配规则：
-
-1. 位置相关规则。
-2. 语法依赖规则。
-3. 共指规则。
-4. 分隔符规则。
-5. 局部 n-gram 规则。
-6. 长程引用规则。
-7. 格式复制规则。
-
-Clark 等人对 BERT 的分析发现，一些 attention heads 会关注 delimiter tokens、特定位置偏移，或者全句信息；也有一些 head 与句法关系、共指关系相关。
-
-这说明 head 确实可能形成某些可观察模式。
-
-但要小心：
-
-```text
-head 有模式，不等于 head 是稳定、唯一、不可替代的语义模块。
-```
-
-不同模型、不同层、不同随机种子、不同训练阶段，head 的分工都可能变化。
-
-## 3.7 Head 数和 Head Dim 的 Trade-off
-
-假设 hidden size 固定为 `D`，head 数是 `H`，每个 head 维度是：
-
-```math
-d_h=\frac{D}{H}
-```
-
-增加 head 数会带来：
-
-1. 更多独立 attention maps。
-2. 更多不同子空间路由。
-3. 每个 head 的维度更小。
-
-减少 head 数会带来：
-
-1. 每个 head 维度更大。
-2. attention maps 更少。
-3. 可能减少某些并行路由模式。
-
-所以 head 数不是越多越好。
-
-如果 head 太少，模型可能缺少足够的并行关系建模能力。
-
-如果 head 太多，每个 head 维度太小，单个 head 的表达能力可能受限，而且推理时 K/V cache 和内存访问成本也会上升。
-
-现代 LLM 中，head 数、hidden size、KV head 数、tensor parallel 切分方式都会一起设计。它不是纯理论超参数，而是架构和系统共同约束的结果。
-
-## 3.8 为什么有些 Head 可以剪掉
-
-Michel 等人的研究发现，训练好的多头注意力模型中，很多 head 可以在测试时移除而不显著影响性能。有些层甚至可以减少到单个 head。
-
-这似乎和“多头很重要”矛盾。
-
-其实不矛盾。
-
-原因可能包括：
-
-1. 多头在训练时提供优化路径，但训练后部分 head 冗余。
-2. 不同 head 之间功能重叠。
-3. 某些任务只需要部分关系。
-4. 残差连接和 FFN 可以补偿部分 head 删除。
-5. 重要 head 分布不均，有些层更依赖多头。
-
-这给我们的启发是：
-
-```text
-Multi-head attention 是一种容量和优化机制，不代表每个 head 都同等重要。
-```
-
-面试中如果被问“多头是否都必要”，不要简单回答“必要”。更好的回答是：多头整体提高表达和优化能力，但具体训练后可能存在冗余，可用于剪枝、压缩和解释分析。
-
-## 3.9 Head 的可解释性：能看，但不能迷信
-
-Attention head 可视化很直观。你可以画出 attention map，看某个 head 是否关注：
-
-1. 前一个 token。
-2. 标点符号。
-3. `[CLS]` 或分隔符。
-4. 主谓关系。
-5. 代词和先行词。
-6. 括号匹配。
-
-这很有帮助，但有三个风险。
-
-第一，raw attention 只是单层单 head 的权重。
-
-第二，跨层后信息会混合。Abnar 和 Zuidema 指出，Transformer 中不同 token 的信息跨层不断混合，raw attention weights 作为解释探针并不可靠。
-
-第三，最终行为还受 OV、FFN、残差、LayerNorm、logit lens 等影响。
-
-因此，解释 head 时更严谨的做法是结合：
-
-1. Attention pattern。
-2. Head ablation。
-3. Activation patching。
-4. OV/QK 分解。
-5. Input gradient 或 token ablation。
-6. 任务行为变化。
-
-简单说：
-
-```text
-Attention map 是线索，不是判决书。
-```
-
-## 3.10 为什么 MQA/GQA 要动 K/V Head
-
-标准 MHA 中，每个 Q head 都有自己的 K/V head：
-
-```text
-num_q_heads = num_kv_heads = H
-```
-
-推理时，decoder-only 模型需要为每层每个历史 token 缓存 K/V。
-
-如果 batch size 是 `B`，层数是 `L`，上下文长度是 `T`，KV head 数是 `H_{\mathrm{kv}}`，head dim 是 `d_h`，每个元素占 `b` 字节，那么 KV cache 粗略显存可以写成：
-
-```math
-M_{\mathrm{kv}}\approx 2BLTH_{\mathrm{kv}}d_hb
-```
-
-前面的 `2` 来自同时缓存 Key 和 Value。
-
-这就是长上下文推理的核心成本之一。
-
-MQA 的做法是：
-
-```text
-多个 Q heads 共享一组 K/V。
-```
-
-也就是：
-
-```text
-num_q_heads = H
-num_kv_heads = 1
-```
-
-这样 KV cache 和内存带宽大幅下降，增量解码更快。
-
-问题是 MQA 可能带来质量下降，因为所有 query heads 共享同一套 K/V 表示，表达能力受限。
-
-GQA 是折中：
-
-```text
-num_q_heads = H
-1 < num_kv_heads < H
-```
-
-每组 Q heads 共享一个 K/V head。GQA 试图获得接近 MHA 的质量和接近 MQA 的速度。
-
-这解释了为什么现代 LLM 经常从 MHA 走向 GQA：
-
-```text
-不是因为多头不重要，而是因为推理阶段 K/V cache 太贵。
-```
-
-## 3.11 Q Head 和 KV Head 的分离直觉
-
-为什么减少 K/V head，而不是减少 Q head？
-
-因为 Q head 决定“当前 token 用多少种不同方式发起查询”。保留多个 Q heads，模型仍然可以从不同查询子空间发问。
-
-K/V head 决定“历史 token 暴露多少套索引和内容表示”。减少 K/V heads 可以压缩缓存。
-
-GQA 的直觉是：
-
-```text
-让多个 query 子空间共享一部分历史索引和内容表示，在表达能力和缓存成本之间折中。
-```
-
-可以类比为：
-
-```text
-很多人可以问不同问题，但共享同一个简化档案库。
-```
-
-MHA 是每类问题都有独立档案库。MQA 是所有问题共享一个档案库。GQA 是几组问题共享几套档案库。
-
-## 3.12 代码：MHA 与 GQA 的形状差异
-
-标准 MHA：
-
-```text
-Q: [B, H, N, d_h]
-K: [B, H, N, d_h]
-V: [B, H, N, d_h]
-```
-
-GQA：
-
-```text
-Q: [B, H_q, N, d_h]
-K: [B, H_kv, N, d_h]
-V: [B, H_kv, N, d_h]
-```
-
-其中：
-
-```math
-H_q>H_{\mathrm{kv}},\qquad H_q\bmod H_{\mathrm{kv}}=0
-```
-
-计算 attention 时，需要把 K/V 按组映射到 Q heads。
-
-简化代码：
-
-```python
-import torch
-
-
-def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
-    # x: [batch, num_kv_heads, seq_len, head_dim]
-    if n_rep == 1:
-        return x
-    bsz, num_kv_heads, seq_len, head_dim = x.shape
-    x = x[:, :, None, :, :]
-    x = x.expand(bsz, num_kv_heads, n_rep, seq_len, head_dim)
-    return x.reshape(bsz, num_kv_heads * n_rep, seq_len, head_dim)
-```
-
-如果：
-
-```text
-num_q_heads = 32
-num_kv_heads = 8
-```
-
-那么：
-
-```text
-n_rep = 32 / 8 = 4
-```
-
-每个 K/V head 会服务 4 个 Q heads。
-
-这个例子说明：MHA/MQA/GQA 的差异不是 attention 公式变了，而是 Q heads 和 K/V heads 的数量关系变了。
-
-## 3.13 Head 和 Residual Stream
-
-Transformer Circuits 的一个重要视角是 residual stream。
-
-可以把每层的模块看成在 residual stream 上读写信息：
-
-```math
-r_{\ell+1}=r_\ell+\sum_{h=1}^{H}O_h(r_\ell)
-```
-
-这里省略了 normalization、输出投影、FFN 和具体层结构，只强调 attention heads 会从 residual stream 读取信息并把变换后的内容写回。
-
-一个 head 做两件事：
-
-1. 从 residual stream 中读 Q/K/V。
-2. 通过 OV 写回 residual stream。
-
-这使得不同 head、不同层可以组合成复杂电路。例如：
-
-1. 早层 head 复制前文 token 信息。
-2. 中层 head 组织语法和实体关系。
-3. 后层 head 把相关信息送到预测位置。
-
-这种说法是理解机制的有力工具，但不要过度简化成“第几层第几个 head 就固定负责某个任务”。真实大模型有大量 superposition、冗余和分布式表示。
-
-## 3.14 表示子空间和 Superposition
-
-所谓表示子空间，不是说每个 head 都有一个干净、人工可命名的语义空间。
-
-更现实的情况是：
-
-1. 模型隐藏维度有限。
-2. 任务特征很多。
-3. 不同特征可能叠加在同一组神经元或子空间中。
-4. Head 之间可能共享和重叠功能。
-5. 表示会随上下文动态变化。
-
-这就是 mechanistic interpretability 中常说的 superposition 问题。
-
-因此，“head 子空间”是一个有用抽象，但不是严格的人工分区。
-
-面试中可以这样表达：
-
-```text
-Multi-head attention 给模型提供了多个低维投影和路由通道，每个 head 可以学习不同类型的匹配和信息写入。但这些功能是分布式、可重叠、可能冗余的，不应过度解释成固定语义模块。
-```
-
-## 3.15 面试中如何解释 Head 的作用
-
-一个比较完整的回答可以分四层：
-
-第一层，公式层：
-
-```text
-每个 head 有独立 W_Q、W_K、W_V，计算自己的 attention map 和 value mixture。
-```
-
-第二层，表达层：
-
-```text
-多个 head 让模型在不同表示子空间中并行建模不同关系。
-```
-
-第三层，机制层：
-
-```text
-QK circuit 决定读哪里，OV circuit 决定写什么。
-```
-
-第四层，工程层：
-
-```text
-head 数影响表达能力、KV cache、内存带宽和推理吞吐。MHA、MQA、GQA 是质量和推理成本之间的 trade-off。
-```
-
-这样回答比“多个头关注不同位置”更有深度。
-
-## 3.16 常见误区
-
-误区一：每个 head 都有清晰语义。
-
-更准确：部分 head 可观察到语法、位置、delimiter 等模式，但很多 head 冗余或功能重叠。
-
-误区二：剪掉 head 不影响性能，所以多头没用。
-
-更准确：多头可能对训练、优化和鲁棒性有帮助，训练后存在冗余不等于训练时没用。
-
-误区三：MHA 一定比 GQA 好。
-
-更准确：MHA 表达更完整，但 GQA 在推理 KV cache 和速度上更优，现代 LLM 常需要系统 trade-off。
-
-误区四：Q/K/V 分开只是实现细节。
-
-更准确：Q/K/V 分开是匹配和内容传递解耦的关键设计。
-
-误区五：Attention head 只负责读信息。
-
-更准确：head 既通过 QK 决定读哪里，也通过 OV 决定写什么。
-
-## 3.17 QKV 与多头子空间审计指标
-
-把一个 head 只解释成“看哪里”容易过度简化。本章建议用下面这组指标把 QK 路由、OV 写入、head 冗余和 KV cache 成本一起讲清楚。
-
-一个 head 审计样本可以写成：
-
-```math
-e_i=(x_i,h_i,t_i,f_i,a_i,o_i,z_i)
-```
-
-其中 `x_i` 是输入上下文，`h_i` 是 head 编号，`t_i` 是期望被读取的 token，`f_i` 是期望写入的目标特征，`a_i` 是 attention weights，`o_i` 是该 head 的输出向量，`z_i` 是人工或任务层面的验证结果。
-
-QK 路由命中率：
-
-```math
-C_{\mathrm{qk}}=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[\arg\max_j a_{ij}=t_i]
-```
-
-OV 写入支持率：
-
-```math
-C_{\mathrm{ov}}=\frac{1}{N}\sum_{i=1}^{N}\mathbb{1}[\mathrm{top\_feature}(o_i)=f_i]
-```
-
-head 冗余率可以粗略定义为：
-
-```math
-R_{\mathrm{red}}=1-\frac{|\mathrm{unique}(\mathrm{signature}(h))|}{H}
-```
-
-其中 `signature(h)` 可以是一个简化的 head 功能签名，例如“主要读取哪个 token + 主要写入哪个特征”。真实模型里不能只靠这个定义做剪枝，但它适合解释“为什么有些 head 看起来重复”。
-
-GQA 的 KV head 压缩比可以写成：
-
-```math
-\rho_{\mathrm{kv}}=\frac{H_q}{H_{\mathrm{kv}}}
-```
-
-KV cache 节省率：
-
-```math
-S_{\mathrm{kv}}=1-\frac{H_{\mathrm{kv}}}{H_q}
-```
-
-一个简化审计准入条件可以形式化为：
-
-```math
-G_{\mathrm{head}}=\mathbb{1}[C_{\mathrm{qk}}\ge\tau_q\land C_{\mathrm{ov}}\ge\tau_o\land R_{\mathrm{red}}\le\tau_r\land S_{\mathrm{kv}}\ge\tau_s]
-```
-
-这组公式的重点是面试表达：多头不是只有 attention map，还要同时看 QK 是否读对、OV 是否写对、head 是否冗余，以及减少 K/V head 是否真的带来缓存收益。
-
-### 3.17.1 最小可运行 QKV / Head 子空间审计 demo
-
-下面的 demo 不依赖 PyTorch，只用 Python 标准库模拟 5 个 attention heads。它展示三件事：QK 路由命中不等于 OV 一定写对；两个 head 可能形成相似功能签名；从 MHA 到 GQA / MQA 时 KV cache 成本如何按 `num_kv_heads` 下降。
-
-```python
-import math
-
-tokens = ["prev_token", "subject", "delimiter", "evidence", "distractor"]
-feature_names = ["local_copy", "entity_state", "format_boundary", "evidence_fact"]
-
-key_bank = {
-    "prev_token": [1.0, 0.1, 0.0, 0.0],
-    "subject": [0.1, 1.0, 0.0, 0.0],
-    "delimiter": [0.0, 0.1, 1.0, 0.0],
-    "evidence": [0.1, 0.4, 0.0, 1.0],
-    "distractor": [0.7, 0.7, 0.0, 0.1],
-}
-
-heads = [
-    {"name": "previous_token_head", "query": [1.0, 0.0, 0.0, 0.0], "target": "prev_token", "feature": "local_copy"},
-    {"name": "subject_coref_head", "query": [0.0, 1.0, 0.0, 0.0], "target": "subject", "feature": "entity_state"},
-    {"name": "delimiter_head", "query": [0.0, 0.0, 1.0, 0.0], "target": "delimiter", "feature": "format_boundary"},
-    {"name": "delimiter_copy_head", "query": [0.0, 0.0, 0.9, 0.0], "target": "delimiter", "feature": "format_boundary"},
-    {"name": "misleading_attention_head", "query": [0.7, 0.7, 0.0, 0.0], "target": "evidence", "feature": "evidence_fact"},
-]
-
-value_features = {
-    "prev_token": [1.0, 0.1, 0.0, 0.0],
-    "subject": [0.0, 1.0, 0.1, 0.0],
-    "delimiter": [0.0, 0.0, 1.0, 0.0],
-    "evidence": [0.0, 0.2, 0.0, 1.0],
-    "distractor": [0.3, 0.3, 0.0, 0.1],
-}
-
-
-def dot(a, b):
-    return sum(x * y for x, y in zip(a, b))
-
-
-def softmax(scores):
-    m = max(scores)
-    exps = [math.exp(s - m) for s in scores]
-    total = sum(exps)
-    return [x / total for x in exps]
-
-
-def weighted_sum(weights, rows):
-    return [sum(w * row[i] for w, row in zip(weights, rows)) for i in range(len(rows[0]))]
-
-
-records = {}
-for head in heads:
-    scores = [dot(head["query"], key_bank[token]) / math.sqrt(len(head["query"])) for token in tokens]
-    weights = softmax(scores)
-    top_token = tokens[max(range(len(tokens)), key=lambda i: weights[i])]
-    output = weighted_sum(weights, [value_features[token] for token in tokens])
-    top_feature = feature_names[max(range(len(feature_names)), key=lambda i: output[i])]
-    signature = (top_token, top_feature)
-    records[head["name"]] = {
-        "top_token": top_token,
-        "target": head["target"],
-        "qk_hit": top_token == head["target"],
-        "top_feature": top_feature,
-        "expected_feature": head["feature"],
-        "ov_hit": top_feature == head["feature"],
-        "signature": signature,
-    }
-
-unique_signatures = {tuple(record["signature"]) for record in records.values()}
-metrics = {
-    "qk_route_hit": round(sum(r["qk_hit"] for r in records.values()) / len(records), 3),
-    "ov_write_hit": round(sum(r["ov_hit"] for r in records.values()) / len(records), 3),
-    "head_redundancy": round(1 - len(unique_signatures) / len(records), 3),
-    "interpretation_risk": round(
-        sum(r["qk_hit"] and not r["ov_hit"] or not r["qk_hit"] for r in records.values()) / len(records), 3
-    ),
-}
-
-
-def kv_cache_mib(batch, layers, seq_len, kv_heads, head_dim, bytes_per_elem):
-    bytes_used = 2 * batch * layers * seq_len * kv_heads * head_dim * bytes_per_elem
-    return round(bytes_used / 1024**2, 1)
-
-
-kv_cache = {
-    "mha_32kv": kv_cache_mib(1, 32, 4096, 32, 128, 2),
-    "gqa_8kv": kv_cache_mib(1, 32, 4096, 8, 128, 2),
-    "mqa_1kv": kv_cache_mib(1, 32, 4096, 1, 128, 2),
-}
-
-failed_gates = []
-if metrics["qk_route_hit"] < 0.8:
-    failed_gates.append("qk_route")
-if metrics["ov_write_hit"] < 0.8:
-    failed_gates.append("ov_write")
-if metrics["head_redundancy"] > 0.25:
-    failed_gates.append("head_redundancy")
-if metrics["interpretation_risk"] > 0.2:
-    failed_gates.append("interpretation_boundary")
-if kv_cache["gqa_8kv"] >= kv_cache["mha_32kv"]:
-    failed_gates.append("kv_cache_saving")
-
-print(f"records={records}")
-print(f"metrics={metrics}")
-print(f"kv_cache_mib={kv_cache}")
-print(f"failed_gates={failed_gates}")
-print(f"qkv_head_gate_pass={not failed_gates}")
-```
-
-运行结果应类似：
-
-```text
-records={'previous_token_head': {'top_token': 'prev_token', 'target': 'prev_token', 'qk_hit': True, 'top_feature': 'local_copy', 'expected_feature': 'local_copy', 'ov_hit': True, 'signature': ('prev_token', 'local_copy')}, 'subject_coref_head': {'top_token': 'subject', 'target': 'subject', 'qk_hit': True, 'top_feature': 'entity_state', 'expected_feature': 'entity_state', 'ov_hit': True, 'signature': ('subject', 'entity_state')}, 'delimiter_head': {'top_token': 'delimiter', 'target': 'delimiter', 'qk_hit': True, 'top_feature': 'format_boundary', 'expected_feature': 'format_boundary', 'ov_hit': True, 'signature': ('delimiter', 'format_boundary')}, 'delimiter_copy_head': {'top_token': 'delimiter', 'target': 'delimiter', 'qk_hit': True, 'top_feature': 'format_boundary', 'expected_feature': 'format_boundary', 'ov_hit': True, 'signature': ('delimiter', 'format_boundary')}, 'misleading_attention_head': {'top_token': 'distractor', 'target': 'evidence', 'qk_hit': False, 'top_feature': 'entity_state', 'expected_feature': 'evidence_fact', 'ov_hit': False, 'signature': ('distractor', 'entity_state')}}
-metrics={'qk_route_hit': 0.8, 'ov_write_hit': 0.8, 'head_redundancy': 0.2, 'interpretation_risk': 0.2}
-kv_cache_mib={'mha_32kv': 2048.0, 'gqa_8kv': 512.0, 'mqa_1kv': 64.0}
-failed_gates=[]
-qkv_head_gate_pass=True
-```
-
-这段 demo 的重点不是模拟真实 attention head，而是把面试里的四个关键点连起来：QK 决定读哪里，OV 决定写什么，多头可能存在冗余，GQA / MQA 的缓存收益来自减少 `H_kv`。
-
-## 3.18 面试题
-
-### 题 1：Multi-head attention 为什么有用？
-
-参考回答：
-
-```text
-Multi-head attention 让模型在多个表示子空间中并行做信息路由。每个 head 有独立的 Q/K/V 投影，可以学习不同的匹配规则和内容变换，例如局部位置、语法依赖、共指、分隔符、长程引用等。所有 head 的输出再拼接并通过输出投影混合回主 hidden space。它比单头更灵活，但训练后部分 head 可能冗余。
-```
-
-### 题 2：QK circuit 和 OV circuit 分别是什么？
-
-参考回答：
-
-```text
-QK circuit 决定 attention head 从哪里读信息，也就是 Query 和 Key 的匹配产生 attention pattern。OV circuit 决定读到的信息如何写回 residual stream，也就是 Value projection 和 Output projection 的组合。只看 attention map 只能看到读哪里，不能看到写什么，所以分析 head 时要同时考虑 QK 和 OV。
-```
-
-### 题 3：为什么有些 attention head 可以剪掉？
-
-参考回答：
-
-```text
-训练后的多头注意力里可能存在冗余。不同 head 的功能可能重叠，某些任务只依赖部分 head，残差和 FFN 也能补偿一部分删除带来的影响。研究发现很多 head 可在测试时移除而不明显影响性能。但这不说明多头没用，因为多头可能在训练优化、表达容量和鲁棒性上仍有作用。
-```
-
-### 题 4：MHA、MQA、GQA 的核心区别是什么？
-
-参考回答：
-
-```text
-MHA 是每个 query head 都有自己的 key/value head，表达能力强但 KV cache 大。MQA 是多个 query heads 共享一组 key/value，大幅降低增量解码时的 KV cache 和内存带宽，但可能有质量损失。GQA 是折中，让一组 query heads 共享一个 key/value head，减少 KV cache，同时尽量接近 MHA 的质量。
-```
-
-### 题 5：为什么减少 K/V head 能加速推理？
-
-参考回答：
-
-```text
-Decoder-only 增量推理时，每生成一个 token 都要读取历史 token 的 K/V cache。KV cache 大小和层数、序列长度、KV head 数、head dim 成正比。减少 K/V head 可以减少缓存显存和内存带宽需求，因此 MQA/GQA 能明显提升长上下文和大 batch 推理效率。
-```
-
-### 题 6：Attention head 是否可解释？
-
-参考回答：
-
-```text
-可以有限解释，但不能迷信。可视化 attention map 能发现一些 head 关注 delimiter、固定位置、语法关系或共指关系。但 raw attention 只是局部权重，跨层后信息会混合，最终行为还取决于 OV、FFN、残差和后续层。更严谨的解释需要结合 ablation、activation patching、attention flow、QK/OV 分解等方法。
-```
-
-## 3.19 小练习
-
-1. 手写 MHA 中 Q、K、V 的张量形状，并解释每一维含义。
-2. 用自己的话解释“QK 决定读哪里，OV 决定写什么”。
-3. 画一个 4-head attention 的示意图，给每个 head 假设一种可能功能。
-4. 阅读 *What Does BERT Look At?* 摘要，列出 BERT head 可能学到的几类 pattern。
-5. 阅读 *Are Sixteen Heads Really Better than One?* 摘要，解释 head pruning 说明了什么、没有说明什么。
-6. 给出 MHA、MQA、GQA 的 KV cache 大小对比公式。
-7. 用 PyTorch 实现一个 `repeat_kv` 函数，并解释它在 GQA 中的作用。
-8. 运行本章 QKV / Head 子空间审计 demo，解释为什么 `misleading_attention_head` 同时暴露 QK 路由和 OV 写入风险。
-
-## 3.20 本章总结
-
-本章深入讲了 Q、K、V、attention head 和表示子空间。
-
-核心结论：
-
-1. Q/K/V 分开是为了把匹配逻辑和内容传递解耦。
-2. Multi-head attention 让模型在多个表示子空间中并行做信息路由。
-3. 一个 head 不只是 attention map，还包括 QK circuit 和 OV circuit。
-4. QK 决定读哪里，OV 决定写什么。
-5. Attention head 可能学到语法、位置、共指、delimiter 等 pattern，但也可能冗余。
-6. Head 可解释性需要谨慎，raw attention 不能直接等同于因果解释。
-7. Head 数和 head dim 是表达能力、优化、KV cache 和推理吞吐之间的 trade-off。
-8. MQA/GQA 减少 K/V heads，是为了解决增量推理中的 KV cache 和内存带宽瓶颈。
-9. 现代 LLM 的 attention 设计已经从纯模型结构问题，变成模型架构和 serving 系统共同优化问题。
-
-下一章会系统比较 MHA、MQA、GQA、MLA 的演进与 trade-off，重点讲为什么现代大模型越来越重视 KV cache 压缩和推理效率。
+在常见固定隐藏宽度配置下，head 数增加会改变每个 head 的宽度和读取路由数量；它本身不意味着 K/V 总宽度或缓存必然变大。下一章将以 K/V head 数和缓存表示为主线，比较 MHA、MQA、GQA 与 MLA 的结构差异和推理代价。

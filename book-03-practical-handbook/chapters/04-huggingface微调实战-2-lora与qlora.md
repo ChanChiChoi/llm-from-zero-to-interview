@@ -11,7 +11,7 @@
 对一个线性层：
 
 ```math
-y=W_0x
+y=W_{0}x
 ```
 
 LoRA 改写为：
@@ -19,14 +19,14 @@ LoRA 改写为：
 ```math
 y
 =
-W_0x
+W_{0}x
 +
 \frac{\alpha}{r}BAx
 ```
 
 LoRA 的参数化来自原始论文；论文报告的效果与效率结论绑定其中的模型、任务和实验配置，不能直接推广成任意任务的保证。参见 [LoRA 原论文](https://arxiv.org/abs/2106.09685)。
 
-其中 $d_{\mathrm{in}}>0$、$d_{\mathrm{out}}>0$、$r$ 是正整数；当 $r\ll\min(d_{\mathrm{in}},d_{\mathrm{out}})$ 时，才把它称为低秩增量。缩放因子 $\alpha$ 可以为零，但这会让 adapter 在该层没有有效增量，通常不是有意义的训练配置。这里的矩阵维度为：
+其中 $d_{\mathrm{in}}>0$、 $d_{\mathrm{out}}>0$、 $r$ 是正整数；当 $r\ll\min(d_{\mathrm{in}},d_{\mathrm{out}})$ 时，才把它称为低秩增量。缩放因子 $\alpha$ 可以为零，但这会让 adapter 在该层没有有效增量，通常不是有意义的训练配置。这里的矩阵维度为：
 
 ```math
 A\in\mathbb{R}^{r\times d_{\mathrm{in}}},
@@ -36,7 +36,7 @@ B\in\mathbb{R}^{d_{\mathrm{out}}\times r},
 \Delta W=\frac{\alpha}{r}BA
 ```
 
-原始权重 $W_0$ 不更新，只有 $A$ 和 $B$ 参与优化。若 $r$ 远小于输入输出维度，新增参数量为：
+原始权重 $W_{0}$ 不更新，只有 $A$ 和 $B$ 参与优化。若 $r$ 远小于输入输出维度，新增参数量为：
 
 ```math
 N_{\mathrm{LoRA}}
@@ -48,7 +48,7 @@ LoRA 的低秩假设不是“所有任务变化都天然低秩”，而是一个
 
 ### 4.4.2 初始化与超参数
 
-PEFT v0.18.0 的默认初始化将 $B$ 置零，所以初始增量 $BA$ 为零，尚未训练的 adapter 不改变基座输出；其他初始化方式可能不同。常规缩放是 $\alpha/r$，启用 Rank-Stabilized LoRA 后为 $\alpha/\sqrt{r}$。$\alpha$ 控制增量幅度，`lora_dropout` 作用在适配分支上；把 alpha 设为 rank 的 2 倍或 4 倍只是常见搜索起点，不是定律。行为取决于配置和库版本，参见 [PEFT v0.18.0 LoRA 配置文档](https://huggingface.co/docs/peft/v0.18.0/package_reference/lora)。
+PEFT v0.18.0 的默认初始化将 $B$ 置零，所以初始增量 $BA$ 为零，尚未训练的 adapter 不改变基座输出；其他初始化方式可能不同。常规缩放是 $\alpha/r$，启用 Rank-Stabilized LoRA 后为 $\alpha/\sqrt{r}$。 $\alpha$ 控制增量幅度，`lora_dropout` 作用在适配分支上；把 alpha 设为 rank 的 2 倍或 4 倍只是常见搜索起点，不是定律。行为取决于配置和库版本，参见 [PEFT v0.18.0 LoRA 配置文档](https://huggingface.co/docs/peft/v0.18.0/package_reference/lora)。
 
 重要配置包括：
 
@@ -390,7 +390,7 @@ merge 后未做输出回归。
 
 因此训练报告应同时保存 base revision、adapter 配置、可训练参数量、有效训练 token 数和评估结果。
 
-rank 描述可表示的增量空间，不是越大越好。举一个能看清容量的 $2\times2$ 层：rank 1 时，$A\in\mathbb{R}^{1\times2}$、$B\in\mathbb{R}^{2\times1}$，所以 $\mathrm{rank}(BA)\leq1$，不能表示满秩更新；rank 2 虽能表示任意 $2\times2$ 更新，因子却需要 8 个参数，多于直接学习矩阵的 4 个。真实网络的层宽通常远大于 rank，低秩才可能节省参数，同时也会限制可表达方向。
+rank 描述可表示的增量空间，不是越大越好。举一个能看清容量的 $2\times2$ 层：rank 1 时， $A\in\mathbb{R}^{1\times2}$、 $B\in\mathbb{R}^{2\times1}$，所以 $\mathrm{rank}(BA)\leq1$，不能表示满秩更新；rank 2 虽能表示任意 $2\times2$ 更新，因子却需要 8 个参数，多于直接学习矩阵的 4 个。真实网络的层宽通常远大于 rank，低秩才可能节省参数，同时也会限制可表达方向。
 
 比较 rank=4 与 rank=16 时，应固定目标模块、数据、有效训练 token 和学习率搜索范围，并单独查看验证集中的不同任务类别。`target_modules` 也决定更新发生在哪里：只注入 q/v 投影与注入 q/k/v/o 及 MLP 投影是不同实验。训练前后都应核对实际模块名、可训练/冻结参数数和 adapter 范数；若增大 rank 只改善训练样本，可能是过拟合或数据不足。
 
@@ -411,7 +411,7 @@ LoRA 减少了需要训练的参数，但基座权重仍要放进内存。QLoRA 
 ```math
 y
 \approx
-\mathrm{dequant}(Q_4(W_0))x
+\mathrm{dequant}(Q_{4}(W_{0}))x
 +
 \frac{\alpha}{r}BAx
 ```

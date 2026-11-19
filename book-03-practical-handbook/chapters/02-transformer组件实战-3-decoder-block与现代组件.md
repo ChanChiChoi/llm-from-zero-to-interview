@@ -35,18 +35,18 @@ Y\in\mathbb{R}^{B\times T\times D}
 
 ```math
 \mathrm{FFN}(X)=
-\phi(XW_1+b_1)W_2+b_2
+\phi(XW_{1}+b_{1})W_{2}+b_{2}
 ```
 
 若中间维度为 $D_{\mathrm{ff}}$，则：
 
 ```math
-W_1\in\mathbb{R}^{D\times D_{\mathrm{ff}}},
+W_{1}\in\mathbb{R}^{D\times D_{\mathrm{ff}}},
 \qquad
-W_2\in\mathbb{R}^{D_{\mathrm{ff}}\times D}
+W_{2}\in\mathbb{R}^{D_{\mathrm{ff}}\times D}
 ```
 
-每个 token 使用同一组 $W_1,W_2$，但 token 之间不在 FFN 内直接交互。GELU、SiLU 或 SwiGLU 是不同的非线性和门控选择，不改变 FFN 作为逐位置变换的基本角色。
+每个 token 使用同一组 $W_{1},W_{2}$，但 token 之间不在 FFN 内直接交互。GELU、SiLU 或 SwiGLU 是不同的非线性和门控选择，不改变 FFN 作为逐位置变换的基本角色。
 
 ### 2.5.3 Pre-LN 与 Post-LN：归一化放在残差分支的哪里
 
@@ -77,13 +77,13 @@ Z=Y+\mathrm{FFN}(\mathrm{LN}(Y))
 本章使用层归一化（LayerNorm）的 `LayerNorm(D)` 配置，因此统计量沿每个 token 的最后一个隐藏维计算；PyTorch 2.15 文档将方差定义为有偏估计（`correction=0`），并说明训练和评估时都使用当前输入的统计量，见 [LayerNorm 文档](https://docs.pytorch.org/docs/2.15/generated/torch.nn.LayerNorm.html)。对一个 token 向量 $x\in\mathbb{R}^{D}$：
 
 ```math
-\mu=\frac{1}{D}\sum_{j=1}^{D}x_j,\qquad
-\sigma^2=\frac{1}{D}\sum_{j=1}^{D}(x_j-\mu)^2
+\mu=\frac{1}{D}\sum_{j=1}^{D}x_{j},\qquad
+\sigma^2=\frac{1}{D}\sum_{j=1}^{D}(x_{j}-\mu)^2
 ```
 
 ```math
-\mathrm{LN}(x)_j=
-\gamma_j\frac{x_j-\mu}{\sqrt{\sigma^2+\epsilon}}+\beta_j
+\mathrm{LN}(x)_{j}=
+\gamma_{j}\frac{x_{j}-\mu}{\sqrt{\sigma^2+\epsilon}}+\beta_{j}
 ```
 
 它不跨 batch 估计统计量，因此输入可以是 $[B,T,D]$，每个 token 的最后一维独立处理。Dropout（随机失活）在训练模式下随机置零并做尺度补偿，在评估模式下表现为恒等映射；这是 [PyTorch 2.15 Dropout 文档](https://docs.pytorch.org/docs/2.15/generated/torch.nn.Dropout.html)描述的模块行为。检查 attention mask 或残差等价性时要调用 eval 或将 dropout 设为 0，否则随机性会污染对照。
@@ -243,7 +243,7 @@ C_{\mathrm{ffn}}\approx O(BTDD_{\mathrm{ff}})
 当一个 block 的 loss、梯度或输出异常时，可以按数据路径检查：
 
 1. 输入是否真的是 $[B,T,D]$；
-2. q/k/v 拆头后是否为 $[B,H,T,d_h]$；
+2. q/k/v 拆头后是否为 $[B,H,T,d_{h}]$；
 3. mask 是否能广播到 $[B,H,T,T]$；
 4. 每个有效 query 是否至少有一个可见 key；
 5. norm 是否沿最后一维工作；
@@ -253,7 +253,7 @@ C_{\mathrm{ffn}}\approx O(BTDD_{\mathrm{ff}})
 
 这套顺序先检查各层的输入输出约定，再看数值范围，最后才比较训练曲线。这样可以把“Transformer 不收敛”拆成几个能逐一排查的问题。
 
-两个 token 的小例子能分清 block 内两类计算的职责。令 $x_1=[1,0]$、$x_2=[0,1]$。逐位置 FFN 分别计算 $F(x_1)$ 和 $F(x_2)$：两行共用同一组参数，但第二行不会在 FFN 内直接读取第一行；交换两行输入，输出也只会交换顺序。Attention 则先按 Q/K 权重汇聚其他位置的 V，再把上下文表示送入 FFN。因此前者做 token 间的信息交换，后者做单个 token 内部的非线性变换。
+两个 token 的小例子能分清 block 内两类计算的职责。令 $x_{1}=[1,0]$、 $x_{2}=[0,1]$。逐位置 FFN 分别计算 $F(x_{1})$ 和 $F(x_{2})$：两行共用同一组参数，但第二行不会在 FFN 内直接读取第一行；交换两行输入，输出也只会交换顺序。Attention 则先按 Q/K 权重汇聚其他位置的 V，再把上下文表示送入 FFN。因此前者做 token 间的信息交换，后者做单个 token 内部的非线性变换。
 
 残差的局部效果可用一维数值跟算。令某子层 $F(x)=0.2x$，输入 $x=2$，普通分支输出 0.4，残差结果为 $y=x+F(x)=2.4$；导数为 $dy/dx=1+0.2=1.2$，其中 1 来自恒等路径。若子层导数为 $-0.9$，残差后的导数是 0.1。恒等项提供直接的信号和梯度通路，却不保证梯度恒接近 1 或训练一定稳定；深层表现仍受归一化位置、初始化、学习率和分支尺度影响。
 
@@ -294,12 +294,12 @@ flowchart LR
 
 ### 2.6.2 二维旋转和偶奇维配对
 
-对二维向量 $(x_0,x_1)$，角度为 $\theta$ 的旋转是：
+对二维向量 $(x_{0},x_{1})$，角度为 $\theta$ 的旋转是：
 
 ```math
 \begin{bmatrix}
-x'_0\\
-x'_1
+x'_{0}\\
+x'_{1}
 \end{bmatrix}
 =
 \begin{bmatrix}
@@ -307,40 +307,40 @@ x'_1
 \sin\theta&\cos\theta
 \end{bmatrix}
 \begin{bmatrix}
-x_0\\
-x_1
+x_{0}\\
+x_{1}
 \end{bmatrix}
 ```
 
 即：
 
 ```math
-x'_0=x_0\cos\theta-x_1\sin\theta,\qquad
-x'_1=x_0\sin\theta+x_1\cos\theta
+x'_{0}=x_{0}\cos\theta-x_{1}\sin\theta,\qquad
+x'_{1}=x_{0}\sin\theta+x_{1}\cos\theta
 ```
 
 RoPE 把 head_dim 的维度按 $(0,1),(2,3),\ldots$ 两两分组。对位置 $p$ 和第 $i$ 个二维组，常见频率为：
 
 ```math
-\omega_i=\mathrm{base}^{-\frac{2i}{d_h}},\qquad
-\theta_{p,i}=p\omega_i
+\omega_{i}=\mathrm{base}^{-\frac{2i}{d_{h}}},\qquad
+\theta_{p,i}=p\omega_{i}
 ```
 
-因此 cos/sin 缓存的形状是 $[T,d_h/2]$，应用到 q、k 后 shape 不变。
+因此 cos/sin 缓存的形状是 $[T,d_{h}/2]$，应用到 q、k 后 shape 不变。
 
 ### 2.6.3 位置旋转如何产生相对距离
 
-设 $R_p$ 是位置 $p$ 对每个二维平面施加的旋转，并用 $\mathbf{q}$、$\mathbf{k}$ 表示 query 和 key 向量。旋转矩阵满足正交性和复合关系：
+设 $R_{p}$ 是位置 $p$ 对每个二维平面施加的旋转，并用 $\mathbf{q}$、 $\mathbf{k}$ 表示 query 和 key 向量。旋转矩阵满足正交性和复合关系：
 
 ```math
-R_p^\top R_r=R_{r-p}
+R_{p}^\top R_{r}=R_{r-p}
 ```
 
 于是：
 
 ```math
-(R_p \mathbf{q})^\top(R_r \mathbf{k})
-=\mathbf{q}^\top R_p^\top R_r \mathbf{k}
+(R_{p} \mathbf{q})^\top(R_{r} \mathbf{k})
+=\mathbf{q}^\top R_{p}^\top R_{r} \mathbf{k}
 =\mathbf{q}^\top R_{r-p}\mathbf{k}
 ```
 
@@ -352,7 +352,7 @@ R_p^\top R_r=R_{r-p}
 (R_{p+c}\mathbf{q})^{\top}(R_{r+c}\mathbf{k})=\mathbf{q}^{\top}R_{r-p}\mathbf{k}
 ```
 
-例如比较位置 $(0,1)$ 与 $(4,5)$，两组位置差都为 1；对固定的 $\mathbf{q}$、$\mathbf{k}$ 和同一组频率，它们产生相同的相对旋转项。这个关系可用于检查 RoPE offset：只给当前 query 加偏移、却没有让 cache key 保留原来的逻辑位置，会改变实际距离。它只说明固定向量的 RoPE 内积性质，不保证整个模型在改变 padding、mask、窗口边界或其他位置机制后保持输出不变。
+例如比较位置 $(0,1)$ 与 $(4,5)$，两组位置差都为 1；对固定的 $\mathbf{q}$、 $\mathbf{k}$ 和同一组频率，它们产生相同的相对旋转项。这个关系可用于检查 RoPE offset：只给当前 query 加偏移、却没有让 cache key 保留原来的逻辑位置，会改变实际距离。它只说明固定向量的 RoPE 内积性质，不保证整个模型在改变 padding、mask、窗口边界或其他位置机制后保持输出不变。
 
 ### 2.6.4 cos/sin cache 与 offset
 
@@ -412,7 +412,7 @@ register_buffer 让缓存随模块迁移到设备，但不把它们当作可训�
 
 ### 2.6.5 应用到 q 和 k，不应用到 v
 
-假设 q、k 形状为 $[B,H,T,d_h]$，cos、sin 为 $[T,d_h/2]$。先把缓存扩成 $[1,1,T,d_h/2]$，再对偶奇维旋转：
+假设 q、k 形状为 $[B,H,T,d_{h}]$，cos、sin 为 $[T,d_{h}/2]$。先把缓存扩成 $[1,1,T,d_{h}/2]$，再对偶奇维旋转：
 
 > 代码状态：静态审阅，未运行（2026-10-29）
 
@@ -590,7 +590,7 @@ print("weights_shape=", tuple(weights.shape))
 
 实现前先确认维度怎样配对。有的代码把偶数维和奇数维组成一对，有的先取前半维和后半维；两种都能表示二维旋转，但索引顺序、cos/sin 缓存和旋转函数必须使用同一种布局。布局不匹配时，shape 仍可能完全正确，算出的相位却对应错了通道。
 
-前面的相对位置结论可以用一个二维小例子复核。令 $q=k=[1,0]$，toy 频率取 1，位置 0 的角度为 0，位置 1 的角度取 $\pi/3$。位置 1 的 key 旋转为 $[1/2,\sqrt3/2]$，与位置 0 的 query 点积是 $1/2$；若两者处在同一位置，点积为 1。角度只是方便手算的假设，不是任何模型的真实频率。实际 head 会组合多个频率，score 还要经过投影并除以 $\sqrt{d_h}$。
+前面的相对位置结论可以用一个二维小例子复核。令 $q=k=[1,0]$，toy 频率取 1，位置 0 的角度为 0，位置 1 的角度取 $\pi/3$。位置 1 的 key 旋转为 $[1/2,\sqrt3/2]$，与位置 0 的 query 点积是 $1/2$；若两者处在同一位置，点积为 1。角度只是方便手算的假设，不是任何模型的真实频率。实际 head 会组合多个频率，score 还要经过投影并除以 $\sqrt{d_{h}}$。
 
 增量解码要同时更新位置、缓存和 mask。假设已有 3 个 cache token，现在追加 2 个 token，它们通常使用 position id 3、4；query 长度为 2，key 长度为 5，所以 score 的末两维是 $[2,5]$。若新 token 的 RoPE 位置仍从 0、1 开始，shape 不会报错，但它们会被当成历史开头；若 mask 仍只有 2 列，也没有覆盖缓存中的 3 个 key。调试时同时记录 query 绝对位置、cache 长度、key 总长和 mask shape。
 
@@ -607,12 +607,12 @@ RoPE 具有相对位置的代数性质，不等于模型具备任意长度的上
 上一部分已经定义了层归一化（LayerNorm）：它先减去均值，再按标准差缩放。均方根归一化（RMSNorm）不做中心化，只计算 root mean square（均方根）；这一设计及其动机见 [RMSNorm 原论文](https://arxiv.org/abs/1910.07467)：
 
 ```math
-r(x)=\sqrt{\frac{1}{D}\sum_{j=1}^{D}x_j^2+\epsilon}
+r(x)=\sqrt{\frac{1}{D}\sum_{j=1}^{D}x_{j}^2+\epsilon}
 ```
 
 ```math
-\mathrm{RMSNorm}(x)_j=
-w_j\frac{x_j}{r(x)}
+\mathrm{RMSNorm}(x)_{j}=
+w_{j}\frac{x_{j}}{r(x)}
 ```
 
 因此 LayerNorm 有 scale 和 bias 两组参数，RMSNorm 的常见实现只有一个 scale $w$。RMSNorm 的“更简单”不等价于“所有任务都更好”；它改变了归一化的对称性和数值路径，架构选择应通过训练稳定性、质量和吞吐实验判断。
@@ -655,27 +655,27 @@ print("first_token_rms=", round(rms.item(), 5))
 ```
 如果 weight 初始为 1 且 eps 很小，输出 token 的 RMS 会接近 1；它不保证 token 的均值接近 0，这正是它与 LayerNorm 的一个可观察差别。
 
-epsilon 让接近零的向量也有有限分母。以 $x=[0,0]$、$\epsilon=10^{-6}$ 为例，分母是 $10^{-3}$，输出仍为有限的零向量。低精度实现常把平方、均值和开方提升到 FP32，再把激活转回原 dtype；这能改善归约数值，但具体误差和速度仍取决于实现与硬件。比较两个实现时，应固定输入、检查有限值和误差，也记录输出 dtype。
+epsilon 让接近零的向量也有有限分母。以 $x=[0,0]$、 $\epsilon=10^{-6}$ 为例，分母是 $10^{-3}$，输出仍为有限的零向量。低精度实现常把平方、均值和开方提升到 FP32，再把激活转回原 dtype；这能改善归约数值，但具体误差和速度仍取决于实现与硬件。比较两个实现时，应固定输入、检查有限值和误差，也记录输出 dtype。
 
 ### 2.7.3 SwiGLU 的门控结构
 
 普通 FFN 是一条激活路径：
 
 ```math
-Y=W_2\phi(XW_1+b_1)+b_2
+Y=W_{2}\phi(XW_{1}+b_{1})+b_{2}
 ```
 
 SwiGLU 使用两条上投影分支；门控线性单元（gated linear unit，GLU）变体在 Transformer 前馈层中的形式与实验背景见 [Shazeer 的原论文](https://arxiv.org/abs/2002.05202)：
 
 ```math
-G=\mathrm{SiLU}(XW_g),\qquad
-U=XW_u
+G=\mathrm{SiLU}(XW_{g}),\qquad
+U=XW_{u}
 ```
 
 再逐元素门控并下投影：
 
 ```math
-Y=(G\odot U)W_d
+Y=(G\odot U)W_{d}
 ```
 
 其中 SiLU（也称 Swish）是 sigmoid-weighted linear unit，按元素定义为：
@@ -684,9 +684,9 @@ Y=(G\odot U)W_d
 \mathrm{SiLU}(z)=z\sigma(z)
 ```
 
-$G$ 可以理解为门控信号，$U$ 是候选特征；这个解释帮助理解计算图，但不应把每个通道的数值直接解释成离散“开关”。门控是连续乘法，梯度也会同时经过两条路径。
+$G$ 可以理解为门控信号， $U$ 是候选特征；这个解释帮助理解计算图，但不应把每个通道的数值直接解释成离散“开关”。门控是连续乘法，梯度也会同时经过两条路径。
 
-一个标量例子可以看出它为何不是开关。令 $x=1$，gate、up、down 三个投影的权重依次为 1、2、1，则 $\mathrm{SiLU}(1)\approx0.731$，up 分支为 2，输出约为 $0.731\times2=1.462$。当 $x=-1$ 时，$\mathrm{SiLU}(-1)\approx-0.269$，up 分支为 $-2$，乘积约为 0.538。负输入没有被直接清零；这是连续门控带来的非线性。
+一个标量例子可以看出它为何不是开关。令 $x=1$，gate、up、down 三个投影的权重依次为 1、2、1，则 $\mathrm{SiLU}(1)\approx0.731$，up 分支为 2，输出约为 $0.731\times2=1.462$。当 $x=-1$ 时， $\mathrm{SiLU}(-1)\approx-0.269$，up 分支为 $-2$，乘积约为 0.538。负输入没有被直接清零；这是连续门控带来的非线性。
 
 ### 2.7.4 参数量为什么常用约 $8D/3$
 

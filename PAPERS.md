@@ -109,6 +109,8 @@ Transformer、GPT、LLaMA、Mistral、MoE、SSM、S4、Mamba、RWKV、RetNet、H
 
 可解释性入口：[Transformer Feed-Forward Layers Are Key-Value Memories](https://arxiv.org/abs/2012.14913)：阅读 FFN 的 key–value memory 视角时，应保留论文的特定模型与机制分析范围，不把它理解成神经元存储事实的定论。
 
+Attention head 与剪枝证据入口：[What Does BERT Look at?](https://aclanthology.org/W19-4828/)（模式观察）、[Voita et al.](https://arxiv.org/abs/1905.09418)（机器翻译中的 head 角色与门控剪枝）、[Michel et al.](https://arxiv.org/abs/1905.10650)（单头屏蔽与全网联合剪枝）、[Budhraja et al.](https://aclanthology.org/2020.emnlp-main.260/)（importance 与 prunability 的差异）、[Causal Head Gating](https://papers.nips.cc/paper_files/paper/2025/file/a7f530e11fa19e9551b7a51dbd0f336f-Paper-Conference.pdf)（现代 LLM 的任务条件干预）、[Entropy Meets Importance](https://aclanthology.org/2026.findings-emnlp.2191/)（Findings EMNLP 2026 的剪枝评分方法）、[跨数据集剪枝普适性研究](https://doi.org/10.1587/transinf.2026PAL0001)（IEICE 2026 advance online，当前仅核对摘要）和 [Quantifying LLM Attention-Head Stability](https://arxiv.org/abs/2602.16740)（2026 年预印本的跨重训稳定性研究）。这些证据分别回答观察、任务干预、剪枝和重训稳定性问题，不能合并成通用的 head 语义标签；来源边界见[注意力研究记录](research/attention-mechanism-and-interpretation-2026.md)。
+
 建议补读论文线：
 
 1. Efficiently Modeling Long Sequences with Structured State Spaces / S4。
@@ -128,7 +130,7 @@ Transformer 核心机制入口：
 4. [RoFormer](https://arxiv.org/abs/2104.09864)：RoPE 的旋转位置机制。
 5. [ALiBi](https://arxiv.org/abs/2108.12409)：在 attention 分数中加入距离相关线性 bias 的位置方案。
 6. [RMSNorm](https://arxiv.org/abs/1910.07467) 与 [Pre-LN/Post-LN 分析](https://arxiv.org/abs/2002.04745)：归一化及深层 Transformer 梯度路径。
-7. [GQA](https://arxiv.org/abs/2305.13245)：共享 K/V heads 与 KV Cache 取舍。
+7. [Fast Transformer Decoding: One Write-Head is All You Need](https://arxiv.org/abs/1911.02150) 与 [GQA](https://aclanthology.org/2023.emnlp-main.298/)：MQA 的增量解码带宽动机，以及从 MHA checkpoint 通过组内 K/V mean pooling 和 uptraining 转到 GQA 的方法；前者结果绑定论文模型、任务和 TPU 设置，后者实验限于 T5 encoder-decoder，不能外推为通用质量或延迟保证。
 8. [Lost in the Middle](https://arxiv.org/abs/2307.03172)：长上下文中信息位置效应的研究实例。
 9. [Layer Normalization](https://arxiv.org/abs/1607.06450)、[ScaleNorm](https://arxiv.org/abs/1910.05895) 与 [GeLU](https://arxiv.org/abs/1606.08415)：归一化和激活的原始定义及实验范围。
 10. [Position Interpolation](https://arxiv.org/abs/2306.15595) 与 [YaRN](https://arxiv.org/abs/2309.00071)：RoPE 上下文扩展的代表性训练方案；结果受模型、训练预算和评测任务约束。
@@ -139,7 +141,7 @@ Transformer 核心机制入口：
 15. [Tensor Programs V / μTransfer](https://arxiv.org/abs/2203.03466)：通过 μP 参数化把部分宽度超参数从小模型迁移到大模型；不是单一初始化公式。
 16. [Expert Choice Routing](https://arxiv.org/abs/2202.09368)：让 expert 选择固定容量的 token bucket，缓解 token-choice 的专家负载不均，同时允许不同 token 激活不同数量的 expert。
 17. [DeepSeek-V3 Technical Report](https://arxiv.org/abs/2412.19437)：报告按专家负载调整 routing bias 的 auxiliary-loss-free batch balancing，并保留 sequence-wise 辅助损失防止单序列失衡；结果绑定其 MoE 与集群共设计。
-18. [DeepSeek-V2](https://arxiv.org/abs/2405.04434v5)：MLA 联合压缩 KV、通过解耦 RoPE 保留位置键；附录包含 MLA/MHA 对照。缓存降幅和质量结果绑定论文模型规模、token 预算和 benchmark。
+18. [DeepSeek-V2](https://arxiv.org/abs/2405.04434v5)：MLA 联合压缩 KV latent 并另存位置相关 RoPE Key；附录包含 MLA/MHA 对照，缓存降幅和质量结果绑定论文模型规模、激活参数、token 预算和 benchmark。[MHA2MLA（ACL 2025）](https://aclanthology.org/2025.acl-long.1597/)研究用 partial-RoPE、联合 SVD 与微调把指定 MHA 模型适配到 MLA；其缓存和 LongBench 结果不是零样本替换或通用转换保证。
 19. [Transformers are SSMs / Mamba-2](https://arxiv.org/abs/2405.21060)：SSD 将特定结构化 SSM 与 structured masked attention 联系起来；核心层加速不代表整模型或 serving 的通用收益。
 20. [Gated Delta Networks](https://arxiv.org/abs/2412.06464)：门控遗忘与 delta-rule 状态写入，并行训练及长上下文回忆边界。
 21. [Mamba-3](https://arxiv.org/abs/2603.15569)：指数梯形离散化、复值状态与 MIMO；质量和 kernel 数据绑定作者模型、训练配方、任务与硬件。
