@@ -1,7 +1,7 @@
 # 第二十册整册连续复读记录
 
 开始日期：2026-11-19  
-状态：进行中；第 22/24 章已复读。
+状态：进行中；第 23/24 章已复读。
 
 ## 复读路径与完成规则
 
@@ -33,13 +33,14 @@
 | 20 | Responses API | 已读并修正 | 沿 Response 封套、typed output item、一次自定义工具往返、SSE 事件、三种对话续接方式、保留边界、后台处理与 usage 复读；与第十七章任务副作用恢复、第十八章上下文折叠、第十九章评估及第二十一章 workspace 分工一致。11 月 19 日重查 OpenAI 官方 Background mode 与 Data controls 后，补齐后台流仅适用于默认 `soonest` 窗口、`2h`/`8h` 不启用 streaming、断线续读与约 10 分钟临时磁盘暂存的条件。未调用 API/SDK。 |
 | 21 | Persistent Workspace 与状态边界 | 已读并修正 | 沿 `task-42` 的 r17→r18→r19 检查对话、检查点、workspace、CI 和外部服务各自能证明什么；核对 Git 的 HEAD/index/working tree、派生索引新鲜度、并发编辑后的验证目标与 artifact 交接。与第 5、7—10、17—20 章的编辑、记忆、权限、评估、checkpoint 和 provider state 边界吻合。复核 Agents API 官方页面后，补充多 session 共享 environment 只适用于新建 standalone environments，旧环境可能保留单 session 生命周期。 |
 | 22 | OpenAI-Compatible API 边界 | 已读并修正 | 沿调用方迁移路径区分 SDK/传输、endpoint/schema 与实际服务行为；复核 Anthropic、Gemini、DeepSeek、vLLM、Alibaba、Hugging Face 等官方文档及 API 转换研究。发现 Hugging Face 当前文档新增 Responses API (beta)，修正“其兼容端点仅面向 Chat Completion”的过宽表述，改为说明两个独立接口面及 beta/未 probe 边界。与第 20 章原生 Responses、第 23/24 章 provider 状态、第 24 册服务端实现分工清楚。 |
+| 23 | Gemini Interactions 与 thought-state 回放 | 已读并修正 | 沿工单 742 的中断过程区分 Interaction 历史、SSE 事件恢复、长解码续接和宿主外部动作；复核五类 ID/token、逐轮配置、stateless thought/signature 回放、function `id`/`call_id`、Interaction status、存储期限与删除边界。重新打开当前 Google 官方 overview、API v1 reference、Thinking、Streaming、Background execution 文档及 Python SDK releases：关键字段和状态仍与正文一致；Thinking guide 仍称 thought signature 必需，而 API v1 reference 未标 required/optional，正文保留此证据边界。无需改动正文；未调用 endpoint 或运行 SDK。 |
 
 ## 累计跨章观察与待处理
 
-- 连续阅读已确认第 1—22 章从全局职责、Runtime 状态、工程工作流到工具合同、文件编辑、进程执行、上下文选择与折叠、权限/隔离、运行证据、任务评估、产品案例、协议集成、系统设计、故障诊断、长任务恢复、harness 评估、provider API 合同、持久 workspace 状态归属及 API 兼容边界逐层推进；第 2—22 章使用的恢复/调用例子均标清为独立教学分支。
-- 第 1 章伪代码明确标为非执行；第 3—22 章的案例状态均为教学构造。本轮未运行任何书中代码或测试。
+- 连续阅读已确认第 1—23 章从全局职责、Runtime 状态、工程工作流到工具合同、文件编辑、进程执行、上下文选择与折叠、权限/隔离、运行证据、任务评估、产品案例、协议集成、系统设计、故障诊断、长任务恢复、harness 评估、provider API 合同、持久 workspace 状态归属、API 兼容边界及 Gemini Interaction 状态逐层推进；第 2—23 章使用的恢复/调用例子均标清为独立教学分支。
+- 第 1 章伪代码明确标为非执行；第 3—23 章的案例状态均为教学构造。本轮未运行任何书中代码或测试。
 - 目标平台公式/图表呈现和外链全量可达性仍按本册架构审计的风险记录处理，不能由本地复读替代。
 
 ## 下一入口
 
-[第二十三章《Gemini Interactions 与 thought-state 回放》](../../book-20-agent-harness-runtime/chapters/23-gemini-interactions与thought-state回放.md)。沿目录顺序复核 Interactions 请求/响应、续接和 thought signature 的官方合同，特别检查前序 source-note 缺失链接并按当前官方文档补证据；与第二十章 Responses state、第十七章 checkpoint、第二十二章兼容端点边界及第二十四章 Claude thinking-state 案例衔接。不更新 PDF 或 `plan.md`。
+[第二十四章《Claude thinking-state 回放》](../../book-20-agent-harness-runtime/chapters/24-claude-thinking-state回放.md)。沿目录顺序复核 Messages API 的 thinking block 回放、工具交接、model/prefix/account binding 与 beta 边界；与第二十三章 Gemini Interaction 状态、第十七章 checkpoint、第二十章 Responses state 和第二十二章兼容端点边界衔接。不更新 PDF 或 `plan.md`。

@@ -57,7 +57,7 @@
 
 - 本轮改动文件：第七章正文、第二十册第 23 章的一条回链、第十七册架构审计、本章进度记录、全套进度交接、两份新增 research 记录及 GPT-6 research 更新。
 - 外部链接在正文中指向官方 benchmark release、研究论文和供应商文档；本次浏览复核了新增的 Terminal-Bench、OpenAI、Anthropic、Google、xAI 与 Qwen 关键来源，但没有批量探测所有既有链接。
-- 第二十册第 23 章及 `BOOK_SERIES.md` 仍引用不存在的 `research/model-update-2026-09/gemini-3.8-flash-source-notes.md`；待第二十册精修时补齐来源记录并回收相关链接。
+- 第二十册第 23 章精修时已从正文与 `BOOK_SERIES.md` 移除不存在的 `research/model-update-2026-09/gemini-3.8-flash-source-notes.md` 引用，并改链至官方 Interactions 状态证据记录；交叉链接记录和第二十册章节审计已确认该旧目标完成回收。
 - 第七章首轮精修完成，但因按用户要求没有运行 demo、旧章节代码动态验证与 GitHub 页面公式渲染，不能作为全册或全章最终门禁完成。
 
 下一入口：第十七册第八章《Browser 与 Computer Use Agent》，重点核对 DOM/accessibility tree/截图、执行通道选择、权限确认、不可逆动作、prompt injection 与 UI 评估是否构成完整可复核闭环。

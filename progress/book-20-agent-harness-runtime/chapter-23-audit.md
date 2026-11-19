@@ -69,3 +69,9 @@ Diátaxis 用来辨认教程、操作指南、参考和解释任务；它不是�
 - 检查本章正文、目录、`BOOK_SERIES.md`、练习、题库、知识图谱、章节审计、交叉链接记录、架构审计和全套交接中的 46 处相关本地链接，缺失为 0；读者材料中对旧 `gemini-3.8-flash-source-notes.md` 的引用为 0。
 - 练习 35ER 与面试题 40AG 各唯一；`git diff --check` 通过。
 - 未运行书中代码、SDK、真实 API、自动化测试、模型、benchmark 或 PDF；未验证 GitHub 页面渲染和外链长期可达性。
+
+## 连续复读补充（2026-11-19）
+
+- 重新打开当前 Google AI Studio Interactions overview、API v1 reference、Thinking、Streaming、Background execution 文档及 `googleapis/python-genai` 官方 release history，逐项复核正文中的 API version、逐轮配置、Interaction status、function `id`/`call_id`、SSE `event_id`、`continuation_token`、存储期限和后台轮询/重连事实。当前公开文档与正文一致，无需改动正文或配套读者材料。
+- `ThoughtStep.signature` 在 Thinking guide 中仍标作必需，API v1 reference 仍只列字段而未标 required/optional；正文将其保留为文档标记差异，没有调用 endpoint 来推断缺省字段行为。SDK release history 当前可见 v3.3.0；v3.0.0 的默认 API version 变更及特定 alias 的 `v1beta` 边界与正文一致。
+- 连续阅读确认本章与第 17 章外部副作用/幂等、第 20 章 Responses 状态、第 21 章 workspace 所有权、第 22 章兼容 API 迁移及第 24 章 Claude thinking-state provider 案例的职责衔接清楚。

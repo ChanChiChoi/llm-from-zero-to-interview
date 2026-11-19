@@ -1,6 +1,6 @@
 # 第二十册《Agent Harness、Coding Agent Runtime 与智能体工程框架》架构审视
 
-审视日期：2026-11-19。阶段：册级初审、发现扫描、简介与目录重构完成；第 1—24 章章级扫描与首轮精修完成。2026-11-19 开始按目录顺序做整册连续复读，当前完成第 1—22/24 章；第 3 章复读修正一处样例结果笔误、一处比例单位问题及两项练习措辞，第 4 章补齐分项率定义和分母阶段并校正一个版本前置字段名，第 5 章将 stale-write 合成账本分母补入过期回滚请求，第 6 章跨章交接复读未发现正文或结构需修复项，第 7 章统一数学比例呈现并让文件摘要例子回到章节主线，第 8 章补齐合成沙箱账本的配置核验证据，第 9 章统一时间线与采样例中的比例 MathJax 呈现，第 10 章统一成功率数学呈现并重写分子/分母口径，第 11 章复核公开产品证据边界并修正路径/命令标记和 OpenTelemetry 定义，第 12 章核对固定源码与权限流程边界并规范字段、路径和包名标记，第 13 章收窄 Aider repo map 效果表述、移除未经承接的 OpenHands SDK 建议并修正工具风险泛化，第 14 章澄清 A2A 远端 Task ID 的字段名与 JSON-RPC 请求关联 ID 的区别，第 15 章区分本地业务任务与协议任务、明确幂等键与请求 ID，并在架构图中补出任务验收边界；第 16 章复读并发编辑诊断案例，规范合成路径、URL 和版本标签呈现；第 17—19 章复核长任务恢复、上下文折叠和 harness 归因边界，第 20 章复核 Responses API 后台 streaming/retention 细节并按 2026-11-19 官方文档补正文和证据，第 21 章复核 workspace 状态所有权和产品环境生命周期条件并按当日官方文档补正文及研究边界；第 22 章发现 Hugging Face Responses API (beta) 当前页面，修正兼容接口仅面向 Chat Completion 的过时概括并同步研究证据边界。
+审视日期：2026-11-19。阶段：册级初审、发现扫描、简介与目录重构完成；第 1—24 章章级扫描与首轮精修完成。2026-11-19 开始按目录顺序做整册连续复读，当前完成第 1—23/24 章；第 3 章复读修正一处样例结果笔误、一处比例单位问题及两项练习措辞，第 4 章补齐分项率定义和分母阶段并校正一个版本前置字段名，第 5 章将 stale-write 合成账本分母补入过期回滚请求，第 6 章跨章交接复读未发现正文或结构需修复项，第 7 章统一数学比例呈现并让文件摘要例子回到章节主线，第 8 章补齐合成沙箱账本的配置核验证据，第 9 章统一时间线与采样例中的比例 MathJax 呈现，第 10 章统一成功率数学呈现并重写分子/分母口径，第 11 章复核公开产品证据边界并修正路径/命令标记和 OpenTelemetry 定义，第 12 章核对固定源码与权限流程边界并规范字段、路径和包名标记，第 13 章收窄 Aider repo map 效果表述、移除未经承接的 OpenHands SDK 建议并修正工具风险泛化，第 14 章澄清 A2A 远端 Task ID 的字段名与 JSON-RPC 请求关联 ID 的区别，第 15 章区分本地业务任务与协议任务、明确幂等键与请求 ID，并在架构图中补出任务验收边界；第 16 章复读并发编辑诊断案例，规范合成路径、URL 和版本标签呈现；第 17—19 章复核长任务恢复、上下文折叠和 harness 归因边界，第 20 章复核 Responses API 后台 streaming/retention 细节并按 2026-11-19 官方文档补正文和证据，第 21 章复核 workspace 状态所有权和产品环境生命周期条件并按当日官方文档补正文及研究边界；第 22 章发现 Hugging Face Responses API (beta) 当前页面，修正兼容接口仅面向 Chat Completion 的过时概括并同步研究证据边界；第 23 章重新核对当前 Google 官方 Interactions 文档与 SDK release history，确认正文恢复合同准确，并保留 thought signature requiredness 的文档差异。
 
 ## 审视范围与方法
 
@@ -117,6 +117,8 @@
 - 第二十一章连续复读确认模型上下文、任务检查点、工作区文件、CI 结果和外部服务各自的事实来源；Git 版本关系、派生检索视图新鲜度、并发编辑冲突及按 revision 绑定的验证/交付形成同一恢复主线。按 OpenAI Agents API 预热环境官方页面收窄多 session 共享行为到新建 standalone environment，避免将旧环境生命周期外推。
 - 第二十二章连续复读确认兼容性要按具体 endpoint 和字段行为记录，而不是由 SDK 调用成功推断全面等价。重新核对发现 Hugging Face 当前同时列出 Chat Completion 和 Responses API (beta)；正文与研究记录现按两个接口面描述，并保留 beta 和未做真实 provider probe 的边界。
 
+- 第二十三章连续复读沿工单 742 的中断恢复，区分 Interaction 历史、SSE 事件游标、长解码 token 与宿主副作用；当前 Google 官方 overview、API v1 reference、Thinking、Streaming、Background execution 文档及 Python SDK releases 均支持正文的字段、状态和保留边界。`ThoughtStep.signature` 在 Thinking guide 被标为必需，而 API v1 reference 未标 required/optional；正文保留该差异，不调用真实 endpoint 推断缺省字段行为。
+
 ## 开放风险与交接
 
 - 第 21 章移除的 Claude Fable 5.1 provider thinking-state 候选已在第 24 章定向核验：其必要读者价值由 Sonnet 5.5 的 model-binding 兼容边界承接，不单独扩成 Fable 主题。Qwen3.6 source-note 链接仍在第二十一册第 83 章 §83.15，待该册逐章审阅时处理。
@@ -124,4 +126,4 @@
 - 第 1 章原有“0 依赖 Python demo”承诺、9 个固定阈值和约 330 行 toy auditor 已移除；内容改由完整合成修复轨迹、最小伪代码和任务特定验收解释。其余章节中仍有 Python demo 或自动 gate 的部分尚待逐章核验；决定删除代码时须保留必要的过程、数值解释和明确去向。
 - 第 2 章原有运行指标公式及 `G_runtime` 固定门槛已移除；核心观察意图改为记录 session/tenant 隔离、phase 转移、context 来源与新鲜度、adapter/parser/registry 错误、执行回执、恢复/checkpoint 和取消/超时事件，并要求为任何汇总率声明单位和分母。旧的 GPT-5.6 运行时归属快照由 OpenAI 当前公开 Agents API/SDK/Responses API 对比替代；Qwen3.7 Plus region/scope 能力细节待第二十二册第 47 章复核和承接，不能在第二十册正文里留作无去向内容。
 - GitHub 页面公式/图表渲染和全量外链可达性尚未核验；动态产品事实需按每章核验日期固定。
-- **当前入口：** [第二十册整册连续复读](continuous-read.md)，按目录顺序复读第 1—24 章；目前第 1—22 章完成，下一章为 Gemini Interactions 与 thought-state 回放。整册交接、平台呈现与最终门禁仍待处理；第二十四章取舍与静态验收见[章节审计](chapter-24-audit.md)。全套书精修 goal 继续 active。
+- **当前入口：** [第二十册整册连续复读](continuous-read.md)，按目录顺序复读第 1—24 章；目前第 1—23 章完成，下一章为 Claude thinking-state 回放。整册交接、平台呈现与最终门禁仍待处理；第二十四章取舍与静态验收见[章节审计](chapter-24-audit.md)。全套书精修 goal 继续 active。
