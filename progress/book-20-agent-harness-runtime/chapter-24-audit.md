@@ -2,7 +2,7 @@
 
 ## 状态与范围
 
-- 状态：第二十册第 24 章完成本轮章级研究、正文精修和配套同步；第二十册整册连续复读、整册门禁和全书精修 goal 尚未完成。
+- 状态：第二十册第 24 章完成本轮章级研究、正文精修和配套同步；第二十册第 1—24 章连续复读已完成，整册门禁和全书精修 goal 尚未完成。
 - 主题：以 Claude API Messages API model ID `claude-sonnet-5-5` 为例，讲清工具回合的 API 状态、宿主执行事实、refusal/fallback 路由和任务验收之间的边界。
 - 目标读者：理解 Agent 工具循环和消息 API 基本结构的读者；首次需要理解的 `thinking`、`tool_use`、`tool_result` 与 refusal 字段在正文内解释。
 - 读者结果：读者能复走一轮工具调用，区分对话块、外部副作用和验收证据；能按模型/前缀/账号条件判断 thinking block 是否可续接；能从 refusal 响应确认类别、fallback 和实际答复模型。
@@ -48,4 +48,11 @@
 
 - 静态验收：H2 `24.1`—`24.5` 连续；本章、目录、章节审计、架构审计和 Sonnet 5.5 研究记录共检查 68 个本地 Markdown 链接，缺失 0；练习 `35ES` 与面试题 `40AH` 各唯一；`git diff --check` 通过。工单轨迹已沿 `r17`、`r18`、`r19` 复走，明确测试回执必须对应当前快照。章节没有公式、Mermaid 或可执行代码；未做 GitHub 页面渲染、外链长期可达性或目标读者试读。
 - 遗留边界：前缀 mismatch 的官方默认值仍有文档描述差异；目标 provider/account 若要上线，需要按该环境最新合同核验。未做 endpoint probe、目标读者试读和 GitHub 页面外链可达性复查。
-- 本轮未运行书中代码、SDK、真实 API、自动化测试、benchmark 或 PDF 构建；未更新 PDF 或 `plan.md`。第二十册整册复读和全书目标继续 active。
+- 本轮未运行书中代码、SDK、真实 API、自动化测试、benchmark 或 PDF 构建；未更新 PDF 或 `plan.md`。第二十册整册终验和全书目标继续 active。
+
+## 连续复读补充（2026-11-19）
+
+- 复走工单 742 的 `r17`→`r18`→`r19` 状态线，确认 thinking-block 回放、宿主文件副作用、测试回执和独立验收仍属不同事实来源；并与第 17 章 checkpoint、第 18 章 context folding、第 20—23 章 provider 状态合同衔接。
+- 重新核对 Anthropic 当前 Preserved thinking 文档后，发现原正文和来源记录把 Sonnet 5.5 对 Fable/Mythos 的兼容性概括得过宽。已按 Claude API 方向表改为版本化表述：Sonnet 5.5 生成的 block 可由 Fable/Mythos 5.2 和 Opus 5.5 读取；Fable/Mythos 5.1 生成的 block 对 Sonnet 5.5 为 limited support。兼容表仅代表 Claude API；Managed Agents、其他云平台及账户边界需按各自 surface 核验。
+- 重新核对 Preserved thinking、Prefix checks、Sonnet 5.5 What's New、Refusals and fallback、Prompting、Tool use、Transparency Hub、Cookbook 与 PMLR 论文；除上述兼容范围修正外，本章的 `between_tools`、前缀 mismatch 差异、拒答类别及 actual-model/fallback 说明仍受当前公开材料支持。没有调用 endpoint、SDK 或模型。
+- 更新后静态复核通过：H2 `24.1`—`24.5` 连续；本章、审计、连续复读、架构审计和研究记录共检查 36 个本地 Markdown 链接目标，缺失 0；练习 `35ES` 与面试题 `40AH` 各唯一；`git diff --check` 通过。章节无公式、Mermaid 或可执行代码；全册目标平台渲染和历史外链门禁仍未关闭。

@@ -2,6 +2,27 @@
 
 检索日期：2026-10-28。
 
+## Transformer attention 的定义、来源与结构边界
+
+- 来源：[Attention Is All You Need](https://arxiv.org/html/1706.03762v7)，Vaswani 等，arXiv v7（2023-08-02）。阅读位置：§§3.2.1–3.2.3、§3.5、§4。
+- 支持事实：论文将查询与各 Key 的点积除以 $\sqrt{d_k}$，沿 Key 位置作 softmax，再对 Value 加权求和；多头版本使用不同的可学习线性投影并行计算，再拼接、输出投影。Self-attention 的 Q/K/V 来自同一序列表示；encoder-decoder attention 的 Query 来自 decoder，而 K/V 来自 encoder。Decoder 自注意力在 softmax 前将非法未来位置对应的分数设为负无穷。因为该模型没有 recurrence 或 convolution，论文在输入表示中加入位置信息。
+- 证据等级：原始论文对算子的定义、架构说明和复杂度分析。
+- 适用边界：这些描述对应论文提出的 Transformer 形式；不同模型可替换位置表示、投影、可见性模式或 attention kernel。论文关于 self-attention 与 recurrent/convolutional 层的比较见上方复杂度小节，仅支持表中定义的层形式。
+
+## 早期序列到序列 attention 与双向编码器
+
+- 来源：[Neural Machine Translation by Jointly Learning to Align and Translate](https://arxiv.org/html/1409.0473)，Bahdanau、Cho 与 Bengio，arXiv v1（2014）；[BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding](https://arxiv.org/html/1810.04805)，Devlin 等，arXiv v2（2019-05-24）。阅读位置：Bahdanau 论文 §§2.1、3.1；BERT 摘要、引言和 §3。
+- 支持事实：Bahdanau 等让 decoder 在生成每个目标词时，根据当前 decoder 状态对 source annotations 计算 soft alignment，并加权形成该步 context vector；这不同于把全句压成一个固定向量。BERT 使用 masked-language-modeling 预训练深层双向 encoder 表示，使其每层能结合左右上下文。
+- 证据等级：原始论文中的模型定义和作者实验范围。
+- 适用边界：Bahdanau 论文研究的是英语—法语神经机器翻译中的 RNN encoder-decoder 注意力；BERT 的双向表示与下游效果对应其模型和预训练目标。二者说明 attention 和可见性模式的具体历史实例，不构成对所有任务统一优劣的结论。
+
+## Attention head 裁剪证据
+
+- 来源：[Are Sixteen Heads Really Better than One?](https://arxiv.org/html/1905.10650)，Michel、Levy 与 Neubig，arXiv v3（2019-11-04）。阅读位置：摘要、§§3.2–3.3、§§4.2–5。
+- 支持事实：在论文所测机器翻译模型与 BERT 自然语言推理模型中，许多训练后的 head 可分别在测试时裁剪而不显著影响该实验的结果；某些层可降为单头。跨全网共同裁剪时，大部分 head 仍须保留才能避免明显性能下降，且 encoder-decoder attention 比 self-attention 对裁剪更敏感。
+- 证据等级：原始论文的消融与裁剪实验。
+- 适用边界：这表明 head 重要性在论文模型、任务和裁剪方法中并不均匀；不能推出所有模型中的 head 都冗余，也不单独证明 attention weights 对最终预测没有解释价值。
+
 ## Self-attention 的标准复杂度与并行性
 
 - 来源：[Attention Is All You Need](https://arxiv.org/html/1706.03762v7)，Vaswani 等，arXiv v7（2023-08-02）。阅读位置：§4。

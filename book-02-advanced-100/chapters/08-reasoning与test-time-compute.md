@@ -57,17 +57,17 @@ flowchart TD
 直接回答只需对问题进行一次条件生成；CoT 则先生成轨迹，再在轨迹条件下生成答案。两者的差异可以写成：
 
 ~~~math
-p_\theta(y\mid x)
+p_{\theta}(y\mid x)
 ~~~
 
 
 ~~~math
-p_\theta(r,y\mid x)
-=p_\theta(r\mid x)\,p_\theta(y\mid x,r)
+p_{\theta}(r,y\mid x)
+=p_{\theta}(r\mid x)\,p_{\theta}(y\mid x,r)
 ~~~
 
 
-其中 $x$ 是问题，$r$ 是模型在 $x$ 条件下生成的中间轨迹，$y$ 是最终答案。第一式描述直接生成答案的条件分布；第二式表示先生成 $r$，再在 $(x,r)$ 条件下生成 $y$。实际系统再按选定的解码策略从这些分布产生输出；$r$ 不是预先提供给模型的输入。CoT 允许模型在生成答案之前多次更新上下文中的中间状态。
+其中 $x$ 是问题， $r$ 是模型在 $x$ 条件下生成的中间轨迹， $y$ 是最终答案。第一式描述直接生成答案的条件分布；第二式表示先生成 $r$，再在 $(x,r)$ 条件下生成 $y$。实际系统再按选定的解码策略从这些分布产生输出； $r$ 不是预先提供给模型的输入。CoT 允许模型在生成答案之前多次更新上下文中的中间状态。
 
 ### 87.2 为什么中间步骤可能有帮助
 
@@ -82,10 +82,10 @@ p_\theta(r,y\mid x)
 设直接回答和 CoT 都在数据集 D 上评估，最终答案准确率为：
 
 ~~~math
-A_m =
+A_{m} =
 \frac{1}{|D|}
-\sum_{(x_i,y_i)\in D}
-\mathbf{1}[\hat y_i^{(m)}=y_i]
+\sum_{(x_{i},y_{i})\in D}
+\mathbf{1}[\hat y_{i}^{(m)}=y_{i}]
 ~~~
 
 
@@ -97,20 +97,20 @@ CoT 的答案收益是：
 ~~~
 
 
-只有在两种策略使用同一任务集合、同一答案判定规则且 $|D|>0$ 时，$\Delta A_{\mathrm{cot}}$ 才能解释为答案准确率增量。若两条路径的拒答或格式失败规则不同，应先分别报告这些状态，再比较准确率。
+只有在两种策略使用同一任务集合、同一答案判定规则且 $|D|>0$ 时， $\Delta A_{\mathrm{cot}}$ 才能解释为答案准确率增量。若两条路径的拒答或格式失败规则不同，应先分别报告这些状态，再比较准确率。
 
 如果 CoT 平均增加 n 个输出 token、延迟 T 和风险 R，一个仅用于比较的效用可以写成：
 
 ~~~math
 U_{\mathrm{cot}}
 = A_{\mathrm{cot}}
-- \lambda_n n
-- \lambda_T T
-- \lambda_R R
+- \lambda_{n} n
+- \lambda_{T} T
+- \lambda_{R} R
 ~~~
 
 
-这个式子不是发布指标，而是提醒我们：推理文本的收益要和资源以及误导风险一起测量。$n$、$T$ 和 $R$ 必须分别定义单位，$\lambda_n$、$\lambda_T$、$\lambda_R$ 负责把它们换算到同一比较尺度；不能把 token、毫秒和风险事件直接相加。
+这个式子不是发布指标，而是提醒我们：推理文本的收益要和资源以及误导风险一起测量。 $n$、 $T$ 和 $R$ 必须分别定义单位， $\lambda_{n}$、 $\lambda_{T}$、 $\lambda_{R}$ 负责把它们换算到同一比较尺度；不能把 token、毫秒和风险事件直接相加。
 
 ### 87.3 CoT、scratchpad、rationale 和 hidden reasoning
 
@@ -170,7 +170,7 @@ S_{\mathrm{int}}
 = \frac{1}{N}
 \sum_{i=1}^{N}
 \mathbf{1}
-[f(x_i,r_i)\ne f(x_i,r'_i)]
+[f(x_{i},r_{i})\ne f(x_{i},r'_{i})]
 \qquad N>0
 ~~~
 
@@ -186,16 +186,16 @@ R_{\mathrm{lucky}}
 =
 \frac{
 \sum_{i=1}^{N}
-\mathbf{1}[\hat y_i=y_i]
-\mathbf{1}[\mathrm{valid}(r_i)=0]
+\mathbf{1}[\hat y_{i}=y_{i}]
+\mathbf{1}[\mathrm{valid}(r_{i})=0]
 }{
-\sum_{i=1}^{N} \mathbf{1}[\hat y_i=y_i]
+\sum_{i=1}^{N} \mathbf{1}[\hat y_{i}=y_{i}]
 },
-\qquad \sum_{i=1}^{N}\mathbf{1}[\hat y_i=y_i]>0
+\qquad \sum_{i=1}^{N}\mathbf{1}[\hat y_{i}=y_{i}]>0
 ~~~
 
 
-如果没有任何回答正确的样本，$R_{\mathrm{lucky}}$ 没有定义，应记为 `N/A`。这个比例高时，单看 final accuracy 会高估模型的可迁移求解能力。
+如果没有任何回答正确的样本， $R_{\mathrm{lucky}}$ 没有定义，应记为 `N/A`。这个比例高时，单看 final accuracy 会高估模型的可迁移求解能力。
 
 2026 年 TACL 论文 [KisMATH](https://aclanthology.org/2026.tacl-1.59/) 把一批数学 CoT 表示成因果依赖图，并在 1,671 道来自 MATH500、GSM8K 和 AIME 的问题及 15 个开源模型上做图对齐干预。作者报告部分推理节点会因干预而影响最终答案，这给“改步骤、看答案是否变化”提供了更结构化的研究范例。它的结论仍受数学题、自动抽取的图结构和特定开源模型约束；不能据此说所有用户可见 CoT 都忠实，也不能把干预敏感直接当作充分的忠实性证明。
 
@@ -386,17 +386,17 @@ CoT 常见失效包括强制所有任务分步导致成本增加、把流畅语�
 
 ~~~math
 P(a\mid x)
-= \sum_r P(a\mid x,r)P(r\mid x)
+= \sum_{r} P(a\mid x,r)P(r\mid x)
 ~~~
 
 
 系统无法枚举所有 r，只能用 N 次采样近似：
 
 ~~~math
-\hat P_N(a\mid x)
+\hat P_{N}(a\mid x)
 = \frac{1}{N}
 \sum_{i=1}^{N}
-\mathbf{1}[a_i=a]
+\mathbf{1}[a_{i}=a]
 ,
 \qquad N>0
 ~~~
@@ -406,7 +406,7 @@ P(a\mid x)
 
 ~~~math
 \hat a
-= \arg\max_a \hat P_N(a\mid x)
+= \arg\max_{a} \hat P_{N}(a\mid x)
 ~~~
 
 
@@ -418,13 +418,13 @@ P(a\mid x)
 
 温度改变 logits 分布：
 
-其中 $x$ 是输入问题，$y_{1:t-1}$ 是当前位置之前已经生成的 token 前缀；$T>0$ 控制分布的尖锐程度。
+其中 $x$ 是输入问题， $y_{1:t-1}$ 是当前位置之前已经生成的 token 前缀； $T>0$ 控制分布的尖锐程度。
 
 ~~~math
-p_T(y_t\mid y_{1:t-1},x)
+p_{T}(y_{t}\mid y_{1:t-1},x)
 = \mathrm{softmax}
 \left(
-\frac{z_t}{T}
+\frac{z_{t}}{T}
 \right),
 \qquad T>0
 ~~~
@@ -434,7 +434,7 @@ T 较低时分布更尖锐，路径更相似；T 较高时探索更多，但也�
 
 ### 88.3 多数投票的边界
 
-假设单条路径独立得到正确答案的概率为 p，N 为奇数，多数投票正确概率可写成：
+假设单条路径独立得到正确答案的概率为 $p$， $N$ 为奇数，多数投票正确概率可写成：
 
 ~~~math
 P_{\mathrm{maj}}(N,p)
@@ -445,7 +445,7 @@ p^j(1-p)^{N-j}
 ~~~
 
 
-这里要求 $N$ 为正奇数，且 $0\le p\le1$；公式只适用于二元正确/错误标签。若 $N$ 为偶数，需要先定义平票处理规则。当 $p$ 大于 0.5 且错误近似独立时，$N$ 增加通常提高多数正确概率。但大模型的路径共享参数、提示、训练偏差和早期解释，错误往往相关。可以用一个粗略有效样本数表示相关性损失：
+这里要求 $N$ 为正奇数，且 $0\le p\le1$；公式只适用于二元正确/错误标签。若 $N$ 为偶数，需要先定义平票处理规则。当 $p$ 大于 0.5 且错误近似独立时， $N$ 增加通常提高多数正确概率。但大模型的路径共享参数、提示、训练偏差和早期解释，错误往往相关。可以用一个粗略有效样本数表示相关性损失：
 
 ~~~math
 N_{\mathrm{eff}}
@@ -454,17 +454,17 @@ N_{\mathrm{eff}}
 ~~~
 
 
-rho 越大，名义上的多次采样带来的新增信息越少。若模型系统性误解问题，多数投票只会更稳定地重复错误。
+$\rho$ 越大，名义上的多次采样带来的新增信息越少。若模型系统性误解问题，多数投票只会更稳定地重复错误。
 
-用 `p=0.4`、`N=3` 看两种目标的区别。至少出现一次正确候选的概率是：
+用 $p=0.4$、 $N=3$ 看两种目标的区别。至少出现一次正确候选的概率是：
 
 ~~~math
 P_{hit}=1-(1-0.4)^3=1-0.216=0.784
 ~~~
 
-但多数投票选对的概率只有 `3×0.4²×0.6+0.4³=0.352`。候选池中有正确答案，不代表聚合器能找到它；当单条路径的正确率低于 0.5 时，多数投票甚至会偏向错误答案。若任务有可靠 verifier，并假设“有正确候选时”它能以 0.8 的概率选中正确项，则最终正确率至多约为 `0.784×0.8=0.627`；这个数仍高于多数投票，但还要扣除 verifier 在无正确候选时误选、以及工具失败等情况。
+但多数投票选对的概率只有 $3\times0.4^{2}\times0.6+0.4^{3}=0.352$。候选池中有正确答案，不代表聚合器能找到它；当单条路径的正确率低于 0.5 时，多数投票甚至会偏向错误答案。若任务有可靠 verifier，并假设“有正确候选时”它能以 0.8 的概率选中正确项，则最终正确率至多约为 $0.784\times0.8=0.627$；这个数仍高于多数投票，但还要扣除 verifier 在无正确候选时误选、以及工具失败等情况。
 
-再设五条候选的平均两两相关度约为 `rho=0.5`，有效样本数近似为 `5/(1+4×0.5)=1.67`，明显低于名义的 5 条。此近似只表示多样性损失的方向，不能当作严格统计估计；实务上应对重复答案、共同前缀、相同错误类型和扰动敏感性做分组统计。不同温度得到 5 条近似措辞、但共享同一错误假设的轨迹，不能算作五份独立证据。
+再设五条候选的平均两两相关度约为 $\rho=0.5$，有效样本数近似为 $5/(1+4\times0.5)=1.67$，明显低于名义的 5 条。此近似只表示多样性损失的方向，不能当作严格统计估计；实务上应对重复答案、共同前缀、相同错误类型和扰动敏感性做分组统计。不同温度得到 5 条近似措辞、但共享同一错误假设的轨迹，不能算作五份独立证据。
 
 ### 88.4 答案抽取和归一化
 
@@ -491,24 +491,24 @@ Self-consistency 的输入不是完整自然语言，而是可比较的答案类
 
 ### 88.5 加权投票和 verifier 选择
 
-多数投票只使用出现次数。加权投票还使用路径质量分 v_i：
+多数投票只使用出现次数。加权投票还使用路径质量分 $v_{i}$：
 
 ~~~math
 score(a)
 = \sum_{i=1}^{N}
-w_i\mathbf{1}[a_i=a]
+w_{i}\mathbf{1}[a_{i}=a]
 ~~~
 
 
-权重可以来自程序测试、PRM 分数、工具结果、路径置信度或成本惩罚。若 verifier 分数为 v_i，可用：
+权重可以来自程序测试、PRM 分数、工具结果、路径置信度或成本惩罚。若 verifier 分数为 $v_{i}$，可用：
 
 ~~~math
-w_i = \exp(v_i/\tau_v)
-\qquad \tau_v>0
+w_{i} = \exp(v_{i}/\tau_{v})
+\qquad \tau_{v}>0
 ~~~
 
 
-$v_i$ 是第 $i$ 条路径的 verifier 分数，$\tau_v$ 是正温度。$\tau_v$ 较小会让高分路径占据更大权重，较大则让权重差异变小；当温度增大时，权重趋近相等。模型自报置信度如果没有校准，不能直接当作可靠权重。
+$v_{i}$ 是第 $i$ 条路径的 verifier 分数， $\tau_{v}$ 是正温度。 $\tau_{v}$ 较小会让高分路径占据更大权重，较大则让权重差异变小；当温度增大时，权重趋近相等。模型自报置信度如果没有校准，不能直接当作可靠权重。
 
 更强的流程是先让 verifier 检查每条路径，再选择最高分候选。它可以在少数路径正确而多数路径错误时救回答案，但引入了 verifier 的偏差、成本和攻击面。因此报告时要分别给出：
 
@@ -526,19 +526,19 @@ cost per solved task：找到并选中正确解花了多少成本
 ~~~math
 H(A)
 =-\sum_{a\in\mathcal{A}}
-\hat P_N(a\mid x)\log\hat P_N(a\mid x)
+\hat P_{N}(a\mid x)\log\hat P_{N}(a\mid x)
 ~~~
 
 
 第一名和第二名的票数差可以归一化为 margin：
 
 ~~~math
-M_N
-= \hat P_N(a_1\mid x)-\hat P_N(a_2\mid x)
+M_{N}
+= \hat P_{N}(a_{1}\mid x)-\hat P_{N}(a_{2}\mid x)
 ~~~
 
 
-低熵、高 margin 通常表示路径更集中，但不代表答案一定正确。上式对 $\hat P_N=0$ 的项按 $0\log0=0$ 处理；如果答案类别少于两个，margin 不适用。系统可以把它当作是否继续采样的信号，再通过一个独立 verifier 或抽样校准确定阈值。
+低熵、高 margin 通常表示路径更集中，但不代表答案一定正确。上式对 $\hat P_{N}=0$ 的项按 $0\log0=0$ 处理；如果答案类别少于两个，margin 不适用。系统可以把它当作是否继续采样的信号，再通过一个独立 verifier 或抽样校准确定阈值。
 
 提前停止需要避免“刚好连续三次相同就停止”这类过强规则。更稳妥的做法是同时看样本数下限、margin、答案稳定窗口、验证分和剩余预算。
 
@@ -694,16 +694,16 @@ weighted_accuracy= 1.0
 ~~~
 
 
-shared_error 展示了多数路径共享同一错误时的边界；weighted 投票之所以成功，是因为 verifier 分数更高，而不是因为少数天然更可靠。
+`shared_error` 展示了多数路径共享同一错误时的边界；weighted 投票之所以成功，是因为 verifier 分数更高，而不是因为少数天然更可靠。
 
 ### 88.8 成本、适用性与证据边界
 
 若每条路径平均产生 n 个 token，采样 N 条，verifier 调用 k 次，则相对成本可写成：
 
 ~~~math
-C_N
+C_{N}
 = N(c_{\mathrm{out}}n+c_{\mathrm{call}})
- + c_v k
+ + c_{v} k
 ~~~
 
 
@@ -729,14 +729,14 @@ C_N
 Generator 负责提出候选，verifier 负责判断候选是否满足任务目标。Verifier 的输入可以包括问题 q、推理轨迹 r、答案 a、工具结果和约束；输出可以是布尔值、概率、排序分数、第一处错误或结构化失败原因。
 
 ~~~math
-s_i = v_\phi(q,r_i,a_i)
+s_{i} = v_{\phi}(q,r_{i},a_{i})
 ~~~
 
 
 如果有 $N>0$ 个候选，最简单的选择是：
 
 ~~~math
-i^\star = \arg\max_i s_i,\qquad a^\star=a_{i^\star}
+i^\star = \arg\max_{i} s_{i},\qquad a^\star=a_{i^\star}
 ~~~
 
 
@@ -747,21 +747,21 @@ Verifier 不是天然真值源。它也可能偏好冗长文字、被漂亮但�
 Outcome Reward Model，简称 ORM，评价最终答案或任务是否成功。其监督标签通常是：
 
 ~~~math
-z_i = \mathbf{1}[\mathrm{norm}(a_i)=\mathrm{norm}(a_i^\star)]
+z_{i} = \mathbf{1}[\mathrm{norm}(a_{i})=\mathrm{norm}(a_{i}^\star)]
 ~~~
 
 
-代码任务中 z_i 可以来自编译、公开/隐藏测试、静态扫描和执行约束；业务任务中可能来自外部状态查询。ORM 的 pointwise 损失可以写成：
+代码任务中 $z_{i}$ 可以来自编译、公开/隐藏测试、静态扫描和执行约束；业务任务中可能来自外部状态查询。ORM 的 pointwise 损失可以写成：
 
 ~~~math
 \mathcal{L}_{\mathrm{orm}}
 =-\frac{1}{M}
 \sum_{i=1}^{M}
 \left[
-z_i\log p_i+(1-z_i)\log(1-p_i)
+z_{i}\log p_{i}+(1-z_{i})\log(1-p_{i})
 \right]
 ,
-\qquad M>0,\quad 0<p_i<1
+\qquad M>0,\quad 0\lt p_{i}\lt 1
 ~~~
 
 
@@ -784,10 +784,10 @@ h_{i,t}=(q,u_{i,1},\ldots,u_{i,t-1})
 ~~~
 
 
-PRM 判断当前步骤 u_i,t 的质量：
+PRM 判断当前步骤 $u_{i,t}$ 的质量：
 
 ~~~math
-p_{i,t}=v_\psi(h_{i,t},u_{i,t})
+p_{i,t}=v_{\psi}(h_{i,t},u_{i,t})
 ~~~
 
 
@@ -802,44 +802,44 @@ z_{i,t}\log p_{i,t}
 +(1-z_{i,t})\log(1-p_{i,t})
 \right]
 ,
-\qquad K>0,\quad 0<p_{i,t}<1
+\qquad K>0,\quad 0\lt p_{i,t}\lt 1
 ~~~
 
 
-K 是所有轨迹的步骤标签总数，而不是候选条数。长轨迹的过程分数可以用平均、几何平均、最小值或平均 log 概率聚合：
+$K$ 是所有轨迹的步骤标签总数，而不是候选条数。长轨迹的过程分数可以用平均、几何平均、最小值或平均 log 概率聚合：
 
 ~~~math
-S_i^{\mathrm{mean}}
-=\frac{1}{T_i}\sum_t p_{i,t}
+S_{i}^{\mathrm{mean}}
+=\frac{1}{T_{i}}\sum_{t} p_{i,t}
 ,
-\qquad T_i>0
+\qquad T_{i}>0
 ~~~
 
 
 ~~~math
-S_i^{\mathrm{min}}=\min_{1\le t\le T_i}p_{i,t},
-\qquad T_i>0
+S_{i}^{\mathrm{min}}=\min_{1\le t\le T_{i}}p_{i,t},
+\qquad T_{i}>0
 ~~~
 
 
 ~~~math
-S_i^{\mathrm{logavg}}
-=\frac{1}{T_i}\sum_{t=1}^{T_i}\log p_{i,t},
-\qquad T_i>0,\quad 0<p_{i,t}\le1
+S_{i}^{\mathrm{logavg}}
+=\frac{1}{T_{i}}\sum_{t=1}^{T_{i}}\log p_{i,t},
+\qquad T_{i}>0,\quad 0\lt p_{i,t}\le1
 ~~~
 
 
-平均分允许少量低分步骤，最小值更保守，平均 log 分数能避免长链路的乘积过度惩罚。若某个步骤分数为 0，$S_i^{\mathrm{logavg}}$ 应记为 $-\infty$ 或按任务协议标为不可用，不能用人为的 $\epsilon$ 把它伪装成有限分数。任何聚合方式都只是局部步骤质量的代理，不等于严格的最终成功概率。
+平均分允许少量低分步骤，最小值更保守，平均 log 分数能避免长链路的乘积过度惩罚。若某个步骤分数为 0， $S_{i}^{\mathrm{logavg}}$ 应记为 $-\infty$ 或按任务协议标为不可用，不能用人为的 $\epsilon$ 把它伪装成有限分数。任何聚合方式都只是局部步骤质量的代理，不等于严格的最终成功概率。
 
 第一处错误可以定义为：
 
 ~~~math
-t_i^{\mathrm{err}}
-=\min\{t:p_{i,t}<\tau\}
+t_{i}^{\mathrm{err}}
+=\min\{t:p_{i,t}\lt \tau\}
 ~~~
 
 
-这里要求 $0\le p_{i,t}\le1$、$0\le\tau\le1$ 且 $1\le t\le T_i$。若不存在这样的 $t$，表示当前阈值下没有标出的错误，而不是证明整条路径一定正确；空集合的第一错步应记录为 `N/A`。
+这里要求 $0\le p_{i,t}\le1$、 $0\le\tau\le1$ 且 $1\le t\le T_{i}$。若不存在这样的 $t$，表示当前阈值下没有标出的错误，而不是证明整条路径一定正确；空集合的第一错步应记录为 `N/A`。
 
 ### 89.4 生成、评价和搜索的组合
 
@@ -857,16 +857,16 @@ Verifier 可以放在不同位置：
 一个融合分数可以写成：
 
 ~~~math
-S_i =
-\lambda_o s_i^{\mathrm{ORM}}
-+\lambda_p S_i^{\mathrm{PRM}}
-+\lambda_r R_i
--\lambda_c C_i
--\lambda_s Risk_i
+S_{i} =
+\lambda_{o} s_{i}^{\mathrm{ORM}}
++\lambda_{p} S_{i}^{\mathrm{PRM}}
++\lambda_{r} R_{i}
+-\lambda_{c} C_{i}
+-\lambda_{s} Risk_{i}
 ~~~
 
 
-R_i 是规则或程序验证分，C_i 是 token、延迟或工具成本。硬约束不应只作为一个可被高质量文本抵消的软分数；安全违规、无权限和不可接受副作用应在候选进入排序前排除。
+$R_{i}$ 是规则或程序验证分， $C_{i}$ 是 token、延迟或工具成本。硬约束不应只作为一个可被高质量文本抵消的软分数；安全违规、无权限和不可接受副作用应在候选进入排序前排除。
 
 ### 89.5 Verifier 数据和 hard negative
 
@@ -887,8 +887,8 @@ Hard negative 让 verifier 学会任务边界，而不是只学“格式像不�
 
 ~~~math
 A_{\mathrm{select}}
-=\frac{1}{M}\sum_j
-\mathbf{1}[z_{j,i_j^\star}=1]
+=\frac{1}{M}\sum_{j}
+\mathbf{1}[z_{j,i_{j}^\star}=1]
 ,
 \qquad M>0
 ~~~
@@ -898,33 +898,33 @@ A_{\mathrm{select}}
 
 ~~~math
 A_{\mathrm{oracle@N}}
-=\frac{1}{M}\sum_j
-\mathbf{1}[\max_i z_{j,i}=1]
+=\frac{1}{M}\sum_{j}
+\mathbf{1}[\max_{i} z_{j,i}=1]
 ,
 \qquad M>0
 ~~~
 
 
-oracle@N 高而 A_select 低，说明 generator 已经产生正确候选，瓶颈在 verifier 或控制器。反过来两者都低，说明系统首先缺少可用候选。
+$\mathrm{oracle}@N$ 高而 $A_{\mathrm{select}}$ 低，说明 generator 已经产生正确候选，瓶颈在 verifier 或控制器。反过来两者都低，说明系统首先缺少可用候选。
 
 ECE 可以写成：
 
 ~~~math
 \mathrm{ECE}
 =\sum_{b=1}^{B}
-\frac{|\mathcal{B}_b|}{M}
-\left|\mathrm{acc}(\mathcal{B}_b)-\mathrm{conf}(\mathcal{B}_b)\right|,
+\frac{|\mathcal{B}_{b}|}{M}
+\left|\mathrm{acc}(\mathcal{B}_{b})-\mathrm{conf}(\mathcal{B}_{b})\right|,
 \qquad M>0,\quad B>0
 ~~~
 
 
 Verifier 分数高但实际选择错误，会把所有上层 search 和 rerank 预算引向错误路径。
 
-把 generator 的候选覆盖和 verifier 的选择能力分开算。假设 100 道题各生成 4 个候选，其中 42 道至少出现一个正确答案，oracle@4 就是 `42/100=0.42`。实际 verifier 只在 32 道题上选中正确候选，则 selection accuracy 为 `32/100=0.32`，在“候选池确实有正确答案”的题目中条件选择率为 `32/42≈0.762`。剩余 58 道题没有正确候选，换一个更准的 verifier 也无法直接解决；要先改善 generator、数据覆盖或调用外部工具。
+把 generator 的候选覆盖和 verifier 的选择能力分开算。假设 100 道题各生成 4 个候选，其中 42 道至少出现一个正确答案，oracle@4 就是 $42/100=0.42$。实际 verifier 只在 32 道题上选中正确候选，则 selection accuracy 为 $32/100=0.32$，在“候选池确实有正确答案”的题目中条件选择率为 $32/42\approx0.762$。剩余 58 道题没有正确候选，换一个更准的 verifier 也无法直接解决；要先改善 generator、数据覆盖或调用外部工具。
 
 PRM 的聚合方式同样会改变排序。轨迹 A 两步分数为 `[0.98,0.20]`，平均分是 `0.59`、最小值是 `0.20`；轨迹 B 为 `[0.70,0.70]`，平均与最小值都是 `0.70`。平均分会选 B，但这只是在“任何一步低分都可能破坏整题”的假设下更谨慎；如果低分步骤是一个无害的表述变化，最小值会过度惩罚。聚合规则应在完整轨迹成功标签上比较，而不是只挑看起来保守的公式。
 
-阈值分类指标也不等价于 top-1 选择指标。假设 120 个步骤级判断中，`TP=45, FP=15, FN=10`，则 precision=`45/60=0.75`、recall=`45/55≈0.818`。但在候选排序任务里，即便这些 pooled 指标不错，只要每道题的最高分总被同一种错误推理占据，selection accuracy 仍可能很低。评估应保持问题分组，报告每题 top-1、候选池 oracle、各风险桶的错误选择与人工裁定结果。
+阈值分类指标也不等价于 top-1 选择指标。假设 120 个步骤级判断中， $\mathrm{TP}=45,\quad\mathrm{FP}=15,\quad\mathrm{FN}=10$，则 precision=$45/60=0.75$、recall=$45/55\approx0.818$。但在候选排序任务里，即便这些 pooled 指标不错，只要每道题的最高分总被同一种错误推理占据，selection accuracy 仍可能很低。评估应保持问题分组，报告每题 top-1、候选池 oracle、各风险桶的错误选择与人工裁定结果。
 
 ### 89.7 一个 ORM/PRM 选择实验
 
@@ -1124,24 +1124,24 @@ terminal：答案、测试、证明或预算是否达到终止条件
 形式化表示为：
 
 ~~~math
-s_{t+1}=T(s_t,a_t,o_{t+1})
+s_{t+1}=T(s_{t},a_{t},o_{t+1})
 ~~~
 
 
 ~~~math
-a_t\sim\pi_\theta(a\mid s_t)
+a_{t}\sim\pi_{\theta}(a\mid s_{t})
 ~~~
 
 
 ~~~math
-V_\phi(s_t)\approx P(\mathrm{success}\mid s_t)
+V_{\phi}(s_{t})\approx P(\mathrm{success}\mid s_{t})
 ~~~
 
 
 一条轨迹为：
 
 ~~~math
-\tau=(s_0,a_0,s_1,a_1,\ldots,s_T)
+\tau=(s_{0},a_{0},s_{1},a_{1},\ldots,s_{T})
 ~~~
 
 
@@ -1151,7 +1151,7 @@ V_\phi(s_t)\approx P(\mathrm{success}\mid s_t)
 \tau^\star
 =\arg\max_{\tau}
 \left[
-R(s_T)-\lambda_C C(\tau)-\lambda_R Risk(\tau)
+R(s_{T})-\lambda_{C} C(\tau)-\lambda_{R} Risk(\tau)
 \right]
 ~~~
 
@@ -1186,11 +1186,11 @@ Tree-of-Thought，简称 ToT，把 thought 作为可展开节点：
 
 BFS 按深度逐层展开，覆盖广但节点数容易爆炸。DFS 深入一条路径再回退，内存较小但可能在坏路径上浪费预算。Beam search 每层只保留评分最高的 B 个状态，是覆盖和成本之间的折中。
 
-设第 d 层 frontier 为 F_d，每个状态产生 K 个候选：
+设第 $d$ 层 frontier 为 $F_{d}$，每个状态产生 $K$ 个候选：
 
 ~~~math
 \mathcal{C}_{d+1}
-=\{T(s,a)\mid s\in\mathcal{F}_d,\ a\in\pi_K(s)\}
+=\{T(s,a)\mid s\in\mathcal{F}_{d},\ a\in\pi_{K}(s)\}
 ~~~
 
 
@@ -1199,7 +1199,7 @@ BFS 按深度逐层展开，覆盖广但节点数容易爆炸。DFS 深入一条
 ~~~math
 \mathcal{F}_{d+1}
 =\mathrm{TopB}_{s\in\mathcal{C}_{d+1}}
-\left[V_\phi(s)-\lambda_C C(s)\right]
+\left[V_{\phi}(s)-\lambda_{C} C(s)\right]
 ~~~
 
 
@@ -1228,7 +1228,7 @@ backpropagation：把结果回传到经过的节点
 ~~~
 
 
-Q 是动作的历史平均回报，N(s) 是父状态访问次数，N(s,a) 是动作访问次数，c 控制探索强度。一次 rollout 得到奖励 r 后，可以用增量平均更新：
+$Q$ 是动作的历史平均回报， $N(s)$ 是父状态访问次数， $N(s,a)$ 是动作访问次数， $c$ 控制探索强度。一次 rollout 得到奖励 $r$ 后，可以用增量平均更新：
 
 ~~~math
 Q_{\mathrm{new}}
@@ -1245,7 +1245,7 @@ PRM 可以在每一步评价局部状态，ORM 通常只能在完整答案后评
 
 ~~~math
 g(s)
-=\mathbf{1}[V_\phi(s)\ge\tau_v]
+=\mathbf{1}[V_{\phi}(s)\ge\tau_{v}]
 \mathbf{1}[C(s)\le B_{\mathrm{remain}}]
 \mathbf{1}[Policy(s)=\mathrm{allow}]
 ~~~
@@ -1267,7 +1267,7 @@ D+1, & K=1,\\
 ~~~
 
 
-K=1 时节点数为 D+1。Beam B 下，展开量可粗略写为：
+$K=1$ 时节点数为 $D+1$。Beam $B$ 下，展开量可粗略写为：
 
 ~~~math
 N_{\mathrm{beam}}\le 1+D\cdot B\cdot K
@@ -1279,7 +1279,7 @@ N_{\mathrm{beam}}\le 1+D\cdot B\cdot K
 ~~~math
 C_{\mathrm{search}}
 =N_{\mathrm{expand}}
-(c_{\mathrm{tok}}\bar n+c_v\bar k_v+c_t\bar k_t)
+(c_{\mathrm{tok}}\bar n+c_{v}\bar k_{v}+c_{t}\bar k_{t})
 ~~~
 
 
@@ -1486,7 +1486,7 @@ mcts= {'best_action': 'factor', 'mean_reward': 1.0, 'visits': {'shortcut': 1, 'f
 
 前面的 Beam 和 MCTS 说明控制器怎样决定“展开哪一个状态”。近年的另一条路线把预算用于并行生成多条推理轨迹，再用消息、摘要或聚合器综合结果。它不只是把同一条 CoT 写得更长：分支可以从不同中间假设出发，避免一个早期错误把整条串行轨迹带偏；代价是同时占用更多 KV Cache、批处理位置和协调步骤。
 
-用一个理想化例子算墙钟时间。系统生成 8 条候选，每条 256 tokens，单路生成速率 40 tokens/s。串行总生成时间约为 `8×256/40=51.2` 秒。若有 4 个等速并行 worker，分两波完成，每波最长约 `256/40=6.4` 秒，两波约 12.8 秒；再加 2 秒汇总与验证，约 14.8 秒。两种方案都生成 2,048 tokens，推理 token 和能耗不会自动变少；并行方案只是用 4 倍 worker 资源换取较低等待时间。真实系统还要计入调度、KV 内存、通信、任务长短差异和负载干扰。
+用一个理想化例子算墙钟时间。系统生成 8 条候选，每条 256 tokens，单路生成速率 40 tokens/s。串行总生成时间约为 $8\times256/40=51.2$ 秒。若有 4 个等速并行 worker，分两波完成，每波最长约 $256/40=6.4$ 秒，两波约 12.8 秒；再加 2 秒汇总与验证，约 14.8 秒。两种方案都生成 2,048 tokens，推理 token 和能耗不会自动变少；并行方案只是用 4 倍 worker 资源换取较低等待时间。真实系统还要计入调度、KV 内存、通信、任务长短差异和负载干扰。
 
 2026 年 ACL 论文 [PaCoRe](https://aclanthology.org/2026.acl-long.1253/) 探索多轮并行轨迹与消息传递式协调；[ParaThinker](https://aclanthology.org/2026.findings-emnlp.1469/) 把多个并行推理路径放进同一模型设计。作者报告的 HMMT/AIME 分数和延迟改善绑定各自模型、数据、token 预算与 KV reuse 条件，不能据此声称并行推理普遍优于串行搜索。读者应分别比较同 token、同延迟和同硬件预算下的 solve rate、P95、峰值显存、分支相关度和 verifier 错选率。
 
@@ -1546,8 +1546,8 @@ C(m,x)
 =c_{\mathrm{in}}n_{\mathrm{in}}
 +c_{\mathrm{out}}n_{\mathrm{out}}
 +c_{\mathrm{call}}N
-+c_{\mathrm{verify}}K_v
-+c_{\mathrm{tool}}K_t
++c_{\mathrm{verify}}K_{v}
++c_{\mathrm{tool}}K_{t}
 ~~~
 
 
@@ -1556,9 +1556,9 @@ C(m,x)
 ~~~math
 U(m,x)
 =Q(m,x)
--\lambda_C C(m,x)
--\lambda_T T(m,x)
--\lambda_R R(m,x)
+-\lambda_{C} C(m,x)
+-\lambda_{T} T(m,x)
+-\lambda_{R} R(m,x)
 ~~~
 
 
@@ -1569,7 +1569,7 @@ m^\star(x)
 =\arg\max_{m\in\mathcal{M}}U(m,x)
 \quad
 \mathrm{s.t.}\quad
-C(m,x)\le B_C,\ T(m,x)\le B_T
+C(m,x)\le B_{C},\ T(m,x)\le B_{T}
 ~~~
 
 
@@ -1614,17 +1614,17 @@ A_{\mathrm{final}}(N)
 定义从预算 $N-1$ 增加到 $N$ 的准确率增益（$N\ge1$）：
 
 ~~~math
-\Delta A_N=A_N-A_{N-1}
+\Delta A_{N}=A_{N}-A_{N-1}
 ~~~
 
 
 若单位成本带来的业务收益已经低于成本，继续增加采样并不划算。多数 margin、答案熵、verifier 分和剩余预算都可以参与提前停止：
 
 ~~~math
-Stop_N
-=\mathbf{1}[M_N\ge\tau_M]
-\lor\mathbf{1}[H_N\le\tau_H]
-\lor\mathbf{1}[V_N\ge\tau_V]
+Stop_{N}
+=\mathbf{1}[M_{N}\ge\tau_{M}]
+\lor\mathbf{1}[H_{N}\le\tau_{H}]
+\lor\mathbf{1}[V_{N}\ge\tau_{V}]
 ~~~
 
 
@@ -1650,8 +1650,8 @@ high-risk：工具验证、引用、人工确认或保守输出
 
 ~~~math
 CPS
-=\frac{\sum_{i=1}^{N} C_i}{\sum_{i=1}^{N} y_i},
-\qquad N>0,\quad \sum_{i=1}^{N}y_i>0
+=\frac{\sum_{i=1}^{N} C_{i}}{\sum_{i=1}^{N} y_{i}},
+\qquad N>0,\quad \sum_{i=1}^{N}y_{i}>0
 ~~~
 
 
@@ -1825,7 +1825,7 @@ cost_saved= 13.0
 T_{wall}=T_{queue}+T_{decode}+T_{tool}+T_{verify}+T_{network}
 ~~~
 
-例如单条路径生成 300 tokens、速率 30 tokens/s，Decode 约需 10 秒；两个必须串行的工具各等待 6 秒，验证 2 秒，排队 3 秒，总计约 `10+12+2+3=27` 秒。若用户时限是 30 秒，表面上还有 3 秒余量，但一次重试或网络长尾就可能超时。若两个只读工具互相独立并行，工具段可以从 12 秒降至约 6 秒，总时间约 21 秒；若二者有数据依赖，则不能为了并行而提前调用。
+例如单条路径生成 300 tokens、速率 30 tokens/s，Decode 约需 10 秒；两个必须串行的工具各等待 6 秒，验证 2 秒，排队 3 秒，总计约 $10+12+2+3=27$ 秒。若用户时限是 30 秒，表面上还有 3 秒余量，但一次重试或网络长尾就可能超时。若两个只读工具互相独立并行，工具段可以从 12 秒降至约 6 秒，总时间约 21 秒；若二者有数据依赖，则不能为了并行而提前调用。
 
 另一个策略可能生成 4 条各 150-token 的独立候选。串行 Decode 在 30 tokens/s 下约需 20 秒；4 路并行理想上只需 5 秒，再加 2 秒聚合、8 秒工具等待、2 秒验证和 1 秒排队，共 18 秒。它消耗的总生成 token 同样是 600，但需要并行硬件和更多瞬时显存。比较时应同时限制总 token、硬件并发和 wall-clock deadline，不能只说某方案“用了相同预算”。
 
@@ -1864,7 +1864,7 @@ T_{wall}=T_{queue}+T_{decode}+T_{tool}+T_{verify}+T_{network}
 ~~~
 
 
-把题目记为 x，参考答案为 a*，候选解法为 r，步骤标签为 z_t。结果标签：
+把题目记为 $x$，参考答案为 $a^{*}$，候选解法为 $r$，步骤标签为 $z_{t}$。结果标签：
 
 ~~~math
 z_{\mathrm{out}}
@@ -1875,7 +1875,7 @@ z_{\mathrm{out}}
 过程标签：
 
 ~~~math
-z_t\in\{0,1\}
+z_{t}\in\{0,1\}
 ~~~
 
 
@@ -1901,13 +1901,13 @@ CoT SFT 的 token 目标可以写成：
 ~~~math
 \mathcal{L}_{\mathrm{sft}}
 =-\frac{1}{Z}\sum_{i,t}
-m_{i,t}\log p_\theta(y_{i,t}\mid x_i,y_{i,<t})
+m_{i,t}\log p_{\theta}(y_{i,t}\mid x_{i},y_{i,\lt t})
 ,
 \qquad Z=\sum_{i,t}m_{i,t}>0
 ~~~
 
 
-m_i,t 是 loss mask，Z 是有效 token 数。可以只监督 assistant 解法和答案，避免把题目文本当成需要复述的目标。
+$m_{i,t}$ 是 loss mask， $Z$ 是有效 token 数。可以只监督 assistant 解法和答案，避免把题目文本当成需要复述的目标。
 
 结果监督的 ORM 损失：
 
@@ -1915,11 +1915,11 @@ m_i,t 是 loss mask，Z 是有效 token 数。可以只监督 assistant 解法�
 \mathcal{L}_{\mathrm{orm}}
 =-\frac{1}{M}\sum_{i,j}
 \left[
-z_{i,j}\log v_\phi(x_i,r_{i,j})
-+(1-z_{i,j})\log(1-v_\phi(x_i,r_{i,j}))
+z_{i,j}\log v_{\phi}(x_{i},r_{i,j})
++(1-z_{i,j})\log(1-v_{\phi}(x_{i},r_{i,j}))
 \right]
 ,
-\qquad M>0,\quad 0<v_\phi(x_i,r_{i,j})<1
+\qquad M>0,\quad 0\lt v_{\phi}(x_{i},r_{i,j})\lt 1
 ~~~
 
 
@@ -1929,15 +1929,15 @@ z_{i,j}\log v_\phi(x_i,r_{i,j})
 \mathcal{L}_{\mathrm{prm}}
 =-\frac{1}{K}\sum_{i,j,t}
 \left[
-z_{i,j,t}\log p_\psi(h_{i,j,t})
-+(1-z_{i,j,t})\log(1-p_\psi(h_{i,j,t}))
+z_{i,j,t}\log p_{\psi}(h_{i,j,t})
++(1-z_{i,j,t})\log(1-p_{\psi}(h_{i,j,t}))
 \right]
 ,
-\qquad K>0,\quad 0<p_\psi(h_{i,j,t})<1
+\qquad K>0,\quad 0\lt p_{\psi}(h_{i,j,t})\lt 1
 ~~~
 
 
-M 是候选数，K 是步骤标签总数；两个分母不能混用。
+$M$ 是候选数， $K$ 是步骤标签总数；两个分母不能混用。
 
 ### 92.3 CoT SFT 的收益和限制
 
@@ -1958,9 +1958,9 @@ M 是候选数，K 是步骤标签总数；两个分母不能混用。
 ~~~math
 \mathcal{D}_{\mathrm{keep}}
 =\{(x,r)\mid z_{\mathrm{out}}=1,
-S_{\mathrm{process}}\ge\tau_p,
+S_{\mathrm{process}}\ge\tau_{p},
 \mathrm{Format}(r)=1,
-\mathrm{Leak}(r)<\tau_l\}
+\mathrm{Leak}(r)\lt \tau_{l}\}
 ~~~
 
 
@@ -1973,10 +1973,10 @@ S_{\mathrm{process}}\ge\tau_p,
 难度分桶可按所需步骤数、符号复杂度、证明深度、工具依赖和人工标注。训练集和评估集都要保留桶分母：
 
 ~~~math
-A_b
-=\frac{\sum_i\mathbf{1}[difficulty_i=b]y_i}
-{\sum_i\mathbf{1}[difficulty_i=b]},
-\qquad N_b=\sum_i\mathbf{1}[difficulty_i=b]>0
+A_{b}
+=\frac{\sum_{i}\mathbf{1}[difficulty_{i}=b]y_{i}}
+{\sum_{i}\mathbf{1}[difficulty_{i}=b]},
+\qquad N_{b}=\sum_{i}\mathbf{1}[difficulty_{i}=b]>0
 ~~~
 
 
@@ -2000,16 +2000,16 @@ A_b
 
 ~~~math
 \rho_{\mathrm{leak}}
-=\frac{1}{N}\sum_i
+=\frac{1}{N}\sum_{i}
 \mathbf{1}\left[
-\max_j sim(x_i^{eval},x_j^{train})\ge\tau
+\max_{j} sim(x_{i}^{eval},x_{j}^{train})\ge\tau
 \right]
 ,
 \qquad N=|D_{\mathrm{eval}}|>0,\quad |D_{\mathrm{train}}|>0
 ~~~
 
 
-其中 $D_{\mathrm{eval}}$ 是待审计评估样本，$D_{\mathrm{train}}$ 是非空训练候选集合，$\tau$ 是预先设定的相似度阈值。它是风险估计，不是单凭相似度就能证明模型看过题目。泛化评估必须加入同构变体、数字替换、语言变化和新来源题目。
+其中 $D_{\mathrm{eval}}$ 是待审计评估样本， $D_{\mathrm{train}}$ 是非空训练候选集合， $\tau$ 是预先设定的相似度阈值。它是风险估计，不是单凭相似度就能证明模型看过题目。泛化评估必须加入同构变体、数字替换、语言变化和新来源题目。
 
 ### 92.7 一个过程感知的数据过滤器
 
@@ -2155,7 +2155,7 @@ NeurIPS 2025 的 [Rethinking Fine-Tuning when Scaling Test-Time Compute](https:/
 
 EMNLP 2026 的 [RAG over Thinking Traces Can Improve Reasoning Tasks](https://aclanthology.org/2026.emnlp-main.1964/) 则研究把生成的 thinking traces 建成检索语料，并用离线结构化方式让轨迹更便于检索，再以 retrieve-then-generate 流程测试数学、代码和科学基准。它与 ThinkRetrieve 都检索解题轨迹，但论文设置、轨迹加工方式、模型和评估任务不同；两者共同支持“检索对象可以是方法过程”，不意味着轨迹检索已经能跨领域替代事实检索、过程验证或模型自身求解。
 
-可以手工走一次“轨迹可借鉴，但数字不能照抄”的过程。目标题是 $3x+2=14$，检索到的相似题为 $2y+5=13$，其轨迹先把常数移到等式右侧，再除以变量系数：$2y=8$，所以 $y=4$。目标题可沿用“先隔离变量项”的结构，但必须把目标题自己的数值代入：$3x=14-2=12$，再算 $x=12/3=4$。若另一个近邻题是 $3z-2=14$，它的移项方向相反，直接复制“减去常数”的操作就会得到错误状态。这个小例子说明，检索到的过程应被当作候选策略或局部模板，系统仍须重新绑定当前题目的系数、符号和条件，并用代回检查：$3\times4+2=14$。评测时可以统计检索轨迹与目标题的操作结构一致率、数字/符号重新绑定错误率，以及最终验证通过率；相似度高本身不代表步骤可迁移。
+可以手工走一次“轨迹可借鉴，但数字不能照抄”的过程。目标题是 $3x+2=14$，检索到的相似题为 $2y+5=13$，其轨迹先把常数移到等式右侧，再除以变量系数： $2y=8$，所以 $y=4$。目标题可沿用“先隔离变量项”的结构，但必须把目标题自己的数值代入： $3x=14-2=12$，再算 $x=12/3=4$。若另一个近邻题是 $3z-2=14$，它的移项方向相反，直接复制“减去常数”的操作就会得到错误状态。这个小例子说明，检索到的过程应被当作候选策略或局部模板，系统仍须重新绑定当前题目的系数、符号和条件，并用代回检查： $3\times4+2=14$。评测时可以统计检索轨迹与目标题的操作结构一致率、数字/符号重新绑定错误率，以及最终验证通过率；相似度高本身不代表步骤可迁移。
 
 训练端与推理端可以通过同一套失败标签形成闭环，但标签的用途不同。训练数据筛选可剔除符号误用、无效等式和答案偶然正确的轨迹；运行时 verifier 则要决定眼前候选能否接受，不能用一个训练集平均分代替逐题判断；评估集负责判断这套策略是否迁移到未见题。若把测试集中的失败直接回灌训练，之后再在同一题上报告提升，就失去独立评估的含义。每一轮闭环都应保存样本来源、时间、检索语料版本和是否用于训练，确保成绩变化可以追溯到真实泛化而非题目记忆。
 
@@ -2192,11 +2192,11 @@ o = E(p,e,T)
 ~~~
 
 
-其中 E 是执行器，o 可以包含编译状态、标准输出、异常、每个测试的结果、运行时间和内存峰值。下一轮程序由模型根据问题和反馈生成：
+其中 $E$ 是执行器， $o$ 可以包含编译状态、标准输出、异常、每个测试的结果、运行时间和内存峰值。下一轮程序由模型根据问题和反馈生成：
 
 ~~~math
 p_{t+1}
-=G_\theta(x,p_t,o_t)
+=G_{\theta}(x,p_{t},o_{t})
 ~~~
 
 
@@ -2230,7 +2230,7 @@ p_{t+1}
 ~~~
 
 
-$n$、$c$、$k$ 均为整数，分别表示候选总数、通过测试的候选数和允许检查的候选数；定义域为 $n\ge1$、$0\le c\le n$、$1\le k\le n$。当 $n-c<k$ 时，分子按 $\binom{n-c}{k}=0$ 处理。这个无放回估计回答的是“从候选池抽查 $k$ 个时至少有一个通过测试的概率”，不是“系统一定会选中成功解”。如果生成器产生了正确程序，但选择器先挑了错误程序，实际用户成功率仍然可能很低。
+$n$、 $c$、 $k$ 均为整数，分别表示候选总数、通过测试的候选数和允许检查的候选数；定义域为 $n\ge1$、 $0\le c\le n$、 $1\le k\le n$。当 $n-c\lt k$ 时，分子按 $\binom{n-c}{k}=0$ 处理。这个无放回估计回答的是“从候选池抽查 $k$ 个时至少有一个通过测试的概率”，不是“系统一定会选中成功解”。如果生成器产生了正确程序，但选择器先挑了错误程序，实际用户成功率仍然可能很低。
 
 因此至少要同时记录：
 
@@ -2260,13 +2260,13 @@ cost per solved task：成功任务平均花费的生成与执行资源
 
 ~~~math
 s_{t+1}
-=\delta(s_t,a_t,o_t),
+=\delta(s_{t},a_{t},o_{t}),
 \qquad
-a_t\sim\pi_\theta(\cdot\mid x,s_t,o_{1:t-1})
+a_{t}\sim\pi_{\theta}(\cdot\mid x,s_{t},o_{1:t-1})
 ~~~
 
 
-s_t 是第 t 轮状态，a_t 是模型或控制器采取的动作，o_t 是执行器返回的观察。`delta` 不一定由神经网络完成，它可以是确定性的工作流代码。把状态转移交给控制器，有助于限制模型不能自行宣布“测试已经通过”。
+$s_{t}$ 是第 $t$ 轮状态， $a_{t}$ 是模型或控制器采取的动作， $o_{t}$ 是执行器返回的观察。`delta` 不一定由神经网络完成，它可以是确定性的工作流代码。把状态转移交给控制器，有助于限制模型不能自行宣布“测试已经通过”。
 
 公式中的 $o_{1:t-1}$ 表示此前各轮已经收到的执行器观察；控制器根据这些观察更新状态，再决定下一步动作。
 
@@ -2289,18 +2289,18 @@ resource: 时间、内存和调用次数
 
 如果只有最终的通过/失败标签，可以做结果监督或强化学习。若能知道是语法错误、边界错误还是超时，则可以构造更细的错误类别和修复样本。
 
-设第 i 个候选的所有测试通过指示为 y_i，部分测试通过比例为 q_i，归一化运行成本为 c_i，安全违规指示为 h_i，一个教学性的奖励可以写成：
+设第 $i$ 个候选的所有测试通过指示为 $y_{i}$，部分测试通过比例为 $q_{i}$，归一化运行成本为 $c_{i}$，安全违规指示为 $h_{i}$，一个教学性的奖励可以写成：
 
 ~~~math
-R_i
-=w_y y_i
- +w_q q_i
- -w_c c_i
- -w_h h_i
+R_{i}
+=w_{y} y_{i}
+ +w_{q} q_{i}
+ -w_{c} c_{i}
+ -w_{h} h_{i}
 ~~~
 
 
-y_i 是二值的完整通过信号，q_i 只能表示已测测试中的部分结果，c_i 和 h_i 分别反映资源与风险。这个式子适合解释信号组成，不代表所有任务都应使用线性奖励。对安全违规设很大的惩罚，也不能替代在执行前阻断危险动作。
+$y_{i}$ 是二值的完整通过信号， $q_{i}$ 只能表示已测测试中的部分结果， $c_{i}$ 和 $h_{i}$ 分别反映资源与风险。这个式子适合解释信号组成，不代表所有任务都应使用线性奖励。对安全违规设很大的惩罚，也不能替代在执行前阻断危险动作。
 
 部分通过率有一个容易被忽略的缺点：模型可能专门拟合可见测试，而不是实现题目要求。例如测试只覆盖正数，模型就生成只对正数工作的实现。解决办法包括隐藏测试、性质测试、输入变换、人工抽查和专门的反例生成。
 
@@ -2453,24 +2453,24 @@ attempt=2 passed=3/3 feedback=all tests passed
 
 前两种可以不更新参数，收益只发生在当前请求；后两种会改变数据分布或模型参数，需要独立评估。把“多采样后选一个”称为“模型学会了新知识”，通常是不准确的。
 
-设初始问题分布为 P_0(x)，生成器为 G_\theta，验证器为 V。一次合成数据流程为：
+设初始问题分布为 $P_{0}(x)$，生成器为 $G_{\theta}$，验证器为 $V$。一次合成数据流程为：
 
 ~~~math
-r_j\sim G_\theta(\cdot\mid x),
+r_{j}\sim G_{\theta}(\cdot\mid x),
 \qquad
-q_j=V(x,r_j),
+q_{j}=V(x,r_{j}),
 \qquad
 \mathcal{D}_{\mathrm{keep}}
-=\{(x,r_j)\mid q_j\ge\tau\}
+=\{(x,r_{j})\mid q_{j}\ge\tau\}
 ~~~
 
 
-其中 r_j 是第 j 个候选解，q_j 是验证分，τ 是保留阈值。只有将保留数据用于更新参数，才进入真正的训练闭环：
+其中 $r_{j}$ 是第 $j$ 个候选解， $q_{j}$ 是验证分， $\tau$ 是保留阈值。只有将保留数据用于更新参数，才进入真正的训练闭环：
 
 ~~~math
 \theta_{k+1}
 =\mathrm{Train}
-\left(\theta_k,\mathcal{D}_k^{\mathrm{keep}}\right)
+\left(\theta_{k},\mathcal{D}_{k}^{\mathrm{keep}}\right)
 ~~~
 
 
@@ -2517,14 +2517,14 @@ Self-Instruct 一类工作关注从少量种子任务扩展指令、输入和输
 
 三者不能进入同一个 SFT 桶。过程正确样本适合教模型解题；偶然正确样本可用于错误识别、偏好学习或 PRM 负样本；不可判定样本可以保留用于研究覆盖率，但不应被标成正向推理示范。
 
-设过程标签为 z_t，最终结果为 z_out，教学样本的保留条件可以写成：
+设过程标签为 $z_{t}$，最终结果为 $z_{\mathrm{out}}$，教学样本的保留条件可以写成：
 
 ~~~math
 I_{\mathrm{teach}}
 =z_{\mathrm{out}}
 \cdot
 \mathbf{1}\left[
-\frac{1}{T}\sum_{t=1}^{T}z_t\ge\tau_p
+\frac{1}{T}\sum_{t=1}^{T}z_{t}\ge\tau_{p}
 \right]
 \cdot
 \mathbf{1}[\mathrm{trace\_complete}=1],
@@ -2532,7 +2532,7 @@ I_{\mathrm{teach}}
 ~~~
 
 
-τ_p 是过程质量阈值，T 是可判断步骤数。这个式子没有解决标签本身的可靠性，只是把“答案正确”和“过程足够可信”显式分开。
+$\tau_{p}$ 是过程质量阈值， $T$ 是可判断步骤数。这个式子没有解决标签本身的可靠性，只是把“答案正确”和“过程足够可信”显式分开。
 
 ### 94.5 多样性、难度和数据混合
 
@@ -2553,11 +2553,11 @@ I_{\mathrm{teach}}
 ~~~math
 \mathcal{L}
 =\sum_{b=1}^{B}
-\alpha_b\mathcal{L}_b,
+\alpha_{b}\mathcal{L}_{b},
 \qquad
-\alpha_b\ge0,
+\alpha_{b}\ge0,
 \qquad
-\sum_{b=1}^{B}\alpha_b=1
+\sum_{b=1}^{B}\alpha_{b}=1
 ~~~
 
 
@@ -2796,16 +2796,16 @@ source_time, contamination_status
 分桶准确率为：
 
 ~~~math
-A_b
+A_{b}
 =
-\frac{1}{N_b}
+\frac{1}{N_{b}}
 \sum_{i:\,bucket(i)=b}
-\mathbf{1}[\hat y_i=y_i],
-\qquad N_b>0
+\mathbf{1}[\hat y_{i}=y_{i}],
+\qquad N_{b}>0
 ~~~
 
 
-N_b 是桶 b 中有效样本数。报告桶结果时还要给出 N_b；一个只有很少样本的高难度桶出现大幅波动，不能和大样本基础桶直接比较。
+$N_{b}$ 是桶 $b$ 中有效样本数。报告桶结果时还要给出 $N_{b}$；一个只有很少样本的高难度桶出现大幅波动，不能和大样本基础桶直接比较。
 
 ### 95.3 结果、过程和选择器指标
 
@@ -2815,7 +2815,7 @@ N_b 是桶 b 中有效样本数。报告桶结果时还要给出 N_b；一个只
 A
 =\frac{1}{N}
 \sum_{i=1}^{N}
-\mathbf{1}[\hat y_i=y_i],
+\mathbf{1}[\hat y_{i}=y_{i}],
 \qquad N>0
 ~~~
 
@@ -2824,7 +2824,7 @@ A
 
 ~~~math
 A_{\mathrm{oracle}@k}
-=\frac{1}{N}\sum_i
+=\frac{1}{N}\sum_{i}
 \mathbf{1}\left[
 \exists j\le k:\ y_{i,j}=1
 \right],
@@ -2834,13 +2834,13 @@ A_{\mathrm{oracle}@k}
 
 ~~~math
 A_{\mathrm{select}@k}
-=\frac{1}{N}\sum_i
-\mathbf{1}[y_{i,\,\hat j_i}=1],
+=\frac{1}{N}\sum_{i}
+\mathbf{1}[y_{i,\,\hat j_{i}}=1],
 \qquad N>0,\quad k>0
 ~~~
 
 
-y_{i,j} 表示第 i 道题的第 j 个候选是否正确，\hat j_i 是系统选择的候选。前者衡量候选生成能力，后者衡量生成器、验证器和控制器合在一起的能力。两者差距大时，优先检查选择器和验证器，而不是继续增加采样数。
+$y_{i,j}$ 表示第 $i$ 道题的第 $j$ 个候选是否正确， $\hat{j}_{i}$ 是系统选择的候选。前者衡量候选生成能力，后者衡量生成器、验证器和控制器合在一起的能力。两者差距大时，优先检查选择器和验证器，而不是继续增加采样数。
 
 过程评估不能只统计“步骤数”。可以检查：
 
@@ -2854,7 +2854,7 @@ y_{i,j} 表示第 i 道题的第 j 个候选是否正确，\hat j_i 是系统选
 ~~~
 
 
-如果每一步有二值标签 z_t，过程正确率可写为：
+如果每一步有二值标签 $z_{t}$，过程正确率可写为：
 
 ~~~math
 P_{\mathrm{step}}
@@ -2863,16 +2863,16 @@ P_{\mathrm{step}}
 ~~~
 
 
-K 是所有已标注步骤的数量。它不等于“整条解法正确率”；一条解法只要有一个关键步骤错误，最终可能就不可用。因此还可以报告全程通过比例和第一错步分布。
+$K$ 是所有已标注步骤的数量。它不等于“整条解法正确率”；一条解法只要有一个关键步骤错误，最终可能就不可用。因此还可以报告全程通过比例和第一错步分布。
 
 ### 95.4 代码任务的 pass@k 与重复采样成本
 
-代码任务要同时记录生成和执行成本。若每个候选生成 token 数为 L_j，执行时间为 t_j，单位价格和机器成本分别为 c_tok、c_exec，则一条任务的近似成本为：
+代码任务要同时记录生成和执行成本。若每个候选生成 token 数为 $L_{j}$，执行时间为 $t_{j}$，单位价格和机器成本分别为 $c_{\mathrm{tok}}$、 $c_{\mathrm{exec}}$，则一条任务的近似成本为：
 
 ~~~math
 C_{\mathrm{task}}
-=c_{\mathrm{tok}}\sum_{j=1}^{k}L_j
- +c_{\mathrm{exec}}\sum_{j=1}^{k}t_j
+=c_{\mathrm{tok}}\sum_{j=1}^{k}L_{j}
+ +c_{\mathrm{exec}}\sum_{j=1}^{k}t_{j}
  +C_{\mathrm{tool}}
 ~~~
 
@@ -2882,41 +2882,41 @@ C_{\mathrm{task}}
 ~~~math
 C_{\mathrm{solved}}
 =
-\frac{\sum_{i=1}^{N}C_i}
- {\sum_{i=1}^{N}\mathbf{1}[\mathrm{solved}_i=1]},
-\qquad N>0,\quad \sum_{i=1}^{N}\mathbf{1}[\mathrm{solved}_i=1]>0
+\frac{\sum_{i=1}^{N}C_{i}}
+ {\sum_{i=1}^{N}\mathbf{1}[\mathrm{solved}_{i}=1]},
+\qquad N>0,\quad \sum_{i=1}^{N}\mathbf{1}[\mathrm{solved}_{i}=1]>0
 ~~~
 
 
-当成功数为零时，$C_{\mathrm{solved}}$ 没有定义，应明确报告“没有成功任务”，而不是把一个平滑后的数误解为有效成本。
+当成功数为零时， $C_{\mathrm{solved}}$ 没有定义，应明确报告“没有成功任务”，而不是把一个平滑后的数误解为有效成本。
 
 如果增加 k 使 pass@k 上升，但 selection@k 不变，说明候选中有正确答案而选择器没有找到它；如果 selection@k 上升但成本增长更快，则需要比较单位成功成本和延迟分位数，而不是只看准确率。
 
 ### 95.5 校准、拒答与不确定性
 
-Reasoning Model 可能在长篇错误推理之后给出很高置信度。置信度 q_i 的校准可以用 Brier score 衡量：
+Reasoning Model 可能在长篇错误推理之后给出很高置信度。置信度 $q_{i}$ 的校准可以用 Brier score 衡量：
 
 ~~~math
 \mathrm{Brier}
-=\frac{1}{N}\sum_{i=1}^{N}(q_i-y_i)^2,
-\qquad N>0,\quad 0\le q_i\le1
+=\frac{1}{N}\sum_{i=1}^{N}(q_{i}-y_{i})^2,
+\qquad N>0,\quad 0\le q_{i}\le1
 ~~~
 
 
-q_i 是模型或系统给出的正确概率，y_i 是最终是否正确的 0/1 标签，越低通常越好。还可以把 q 分成若干区间，比较每个区间的平均置信度与实际准确率，得到 Expected Calibration Error：
+$q_{i}$ 是模型或系统给出的正确概率， $y_{i}$ 是最终是否正确的 $0/1$ 标签，越低通常越好。还可以把 $q$ 分成若干区间，比较每个区间的平均置信度与实际准确率，得到 Expected Calibration Error：
 
 ~~~math
 \mathrm{ECE}
 =\sum_{b=1}^{B}
-\frac{|I_b|}{N}
+\frac{|I_{b}|}{N}
 \left|
-\mathrm{acc}(I_b)-\mathrm{conf}(I_b)
+\mathrm{acc}(I_{b})-\mathrm{conf}(I_{b})
 \right|,
 \qquad N>0,\quad B>0
 ~~~
 
 
-I_b 是置信度桶，`acc` 是桶内准确率，`conf` 是桶内平均置信度。若模型没有可靠的概率输出，可以使用 verifier 分数、投票 margin 或经过校准的选择器分数，但必须在独立校准集上估计阈值。
+$I_{b}$ 是置信度桶， $\mathrm{acc}$ 是桶内准确率， $\mathrm{conf}$ 是桶内平均置信度。若模型没有可靠的概率输出，可以使用 verifier 分数、投票 margin 或经过校准的选择器分数，但必须在独立校准集上估计阈值。
 
 拒答也要拆开统计：
 
@@ -3163,13 +3163,13 @@ Chat Model 通常优先关注指令遵循、对话连续性、表达质量、工
 ~~~math
 U(\pi\mid x)
 =P_{\mathrm{success}}(\pi\mid x)
--\lambda_c C(\pi\mid x)
--\lambda_t T(\pi\mid x)
--\lambda_r R(\pi\mid x)
+-\lambda_{c} C(\pi\mid x)
+-\lambda_{t} T(\pi\mid x)
+-\lambda_{r} R(\pi\mid x)
 ~~~
 
 
-C 是 token、工具和机器成本，T 是延迟，R 是安全、隐私或错误动作风险。λ_c、λ_t、λ_r 是产品对各类代价的权重。对一个简单的问候请求，长搜索路径的成本可能远高于收益；对一个要修改生产数据库的请求，即使延迟增加，也可能需要更严格的验证和人工确认。
+$C$ 是 token、工具和机器成本， $T$ 是延迟， $R$ 是安全、隐私或错误动作风险。 $\lambda_{c}$、 $\lambda_{t}$、 $\lambda_{r}$ 是产品对各类代价的权重。对一个简单的问候请求，长搜索路径的成本可能远高于收益；对一个要修改生产数据库的请求，即使延迟增加，也可能需要更严格的验证和人工确认。
 
 难度路由器可以先估计任务特征：
 
@@ -3218,7 +3218,7 @@ valid(row) = 0 <= returned <= shipped
 R_{\mathrm{invalid}}
 =\frac{1}{N}
 \sum_{i=1}^{N}
-\mathbf{1}[\mathrm{valid}(row_i)=0]
+\mathbf{1}[\mathrm{valid}(row_{i})=0]
 ~~~
 
 
@@ -3416,7 +3416,7 @@ total_cost= 7.5
 ~~~
 
 
-这个案例中，库存程序仍然计算出了 B 的净值 -2，但验证状态为 `failed`，因为退货大于发货。问候语的 `not_required` 不进入已检查样本的通过率分母；方程通过、库存规则未通过，因此本例已检查任务的验证通过率为 1/2。计算结果和业务结论被分开保存，使用者可以看到异常，而不是把一个数值当成已经确认的事实。若任务要求写回库存系统，控制器还应在写入前增加权限检查、幂等键和人工确认；本例只完成读取和分析。
+这个案例中，库存程序仍然计算出了 B 的净值 $-2$，但验证状态为 `failed`，因为退货大于发货。问候语的 `not_required` 不进入已检查样本的通过率分母；方程通过、库存规则未通过，因此本例已检查任务的验证通过率为 $1/2$。计算结果和业务结论被分开保存，使用者可以看到异常，而不是把一个数值当成已经确认的事实。若任务要求写回库存系统，控制器还应在写入前增加权限检查、幂等键和人工确认；本例只完成读取和分析。
 
 ### 96.6 从实验到发布的比较方法
 

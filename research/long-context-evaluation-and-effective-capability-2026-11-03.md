@@ -30,6 +30,14 @@
 - **来源支持的事实：** RULER 提供可配置长度和任务复杂度，覆盖多类型/多数量 needle、variable tracking、多词聚合和 QA。作者对 17 个长上下文模型运行 13 项代表任务，并报告虽然模型在 vanilla NIAH 上接近满分，但只有约一半模型能在其 32K “satisfactory performance” 标准下维持表现。
 - **证据边界：** 这是合成任务套件；“满意”由作者在该论文中定义。论文明确指出位置控制、现实长任务相关性和 prompt robustness 等限制，不能把 32K 结果当成统一产品门槛。
 
+## Lost in the Middle：关键信息位置影响上下文使用
+
+- **来源与版本：** Liu et al., [Lost in the Middle: How Language Models Use Long Contexts](https://arxiv.org/html/2307.03172)，arXiv v3（2023-11-20），后发表于 TACL。
+- **阅读范围：** 摘要、§§2.1–2.3 的多文档问答设置与结果、§§3.1–3.2 的键值检索设置与结果。
+- **来源支持的事实：** 作者在多文档问答和合成键值检索中控制上下文长度及相关信息位置；在论文测试的模型和设置中，性能往往在相关信息靠近开头或结尾时较好，位于长上下文中间时会下降。作者还发现，扩展上下文窗口本身并不必然提高同长度输入上的信息使用表现。
+- **证据等级：** 原始论文的实验协议和作者报告结果。
+- **证据边界：** 结果绑定论文使用的 2023 年模型/API 版本、提示、任务和长度；其中键值任务是合成检索，多文档问答也按特定检索语料构造。不能把 U 形曲线视为所有当前模型的固定性质，也不能由此认定 attention 本身造成该现象。
+
 ## LongBench v1 与 v2：任务范围和长度单位
 
 - **LongBench v1 来源与版本：** Bai et al., [LongBench: A Bilingual, Multitask Benchmark for Long Context Understanding](https://arxiv.org/abs/2308.14508v2)，arXiv v2，2024-06-19。摘要和任务构造段落报告 21 个数据集、六类任务、英语平均 6,711 words、中文平均 13,386 characters；任务涵盖单/多文档 QA、摘要、few-shot、合成任务和代码补全。长度均值不是百万 token 指标，汇总也不消除任务异质性。

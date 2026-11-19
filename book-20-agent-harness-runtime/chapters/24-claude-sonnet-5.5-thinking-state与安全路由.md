@@ -43,7 +43,7 @@ thinking block 的可用性有三种彼此独立的绑定：
 | 前缀绑定 | block 之前的 `system`、`tools` 与所有旧消息是否仍和生成时相同 | 对 Sonnet 5.5，失败可能返回 400，也可能没有 400；不能只看 HTTP 状态判断 |
 | 账号绑定 | 生成 block 的账户与当前账户是否相同或关联 | 某些账户/托管组合会静默丢弃 block；部分 surface 可借 beta `input_transformations` 查看原因 |
 
-模型兼容不是对称矩阵。按当前官方兼容说明，Sonnet 5.5 不读取 Fable 或 Mythos 系列的 thinking blocks；而 Sonnet 5.5 生成的 blocks 只有在特定 API/Google 托管 surface 上，才可由 Opus 5.5、Fable 5.2 或 Mythos 5.2 读取。切模型前应查清“来源模型 → 目标模型 → provider”这条方向，不能把“Claude 模型”当成同一种状态格式。[官方 preserved-thinking 指南](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking)列出当前方向与平台条件。
+模型兼容不是对称矩阵，还要按版本读表。当前 Claude API 的方向表把 Sonnet 5.5 生成的 blocks 标为可由 Fable 5.2、Mythos 5.2 和 Opus 5.5 读取；来自 Fable 5.1 或 Mythos 5.1 的 blocks 对 Sonnet 5.5 则标为 limited support，并非一律不可读。该表描述 Claude API；切到 Managed Agents 或其他云平台时，应按对应 surface 的现行文档核对来源模型、目标模型、账户和平台条件。尤其 Sonnet 5.5 的 blocks 仅在生成账户或关联账户中可用，其他账户的请求可能成功但会丢弃 blocks。[官方 preserved-thinking 指南](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking)列出当前方向与平台条件。
 
 前缀变化也不只指 system prompt。重写、插入或删掉旧消息，或改动工具 schema，都可能使后续 thinking block 与原来的上下文不匹配。稳妥的续接方式是沿用原来的 system、tools 和历史，只在末尾追加新消息；若确实要改写历史，就不要把依赖旧前缀的 block 当成仍有效的状态。当前 [Platform 前缀检查指南](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking/prefix-checks)把 Sonnet 5.5 标为“可能返回 400”；[官方 Cookbook](https://platform.claude.com/cookbook/extended-thinking-extended-thinking-with-tool-use)仍以账号创建日期描述默认检查行为。两页对默认边界的说明粒度不一致，因此不要把某个日期推广成所有账户、模型和托管平台的通则；目标环境要按当前合同处理 400 与未报错两种结果。
 
