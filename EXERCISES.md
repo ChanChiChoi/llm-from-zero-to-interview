@@ -2407,3 +2407,9 @@
 配套正文：[第二十册第二十一章](book-20-agent-harness-runtime/chapters/21-persistent-workspace与状态边界.md)；研究证据见[Persistent Workspace 与 Agent 状态边界记录](research/persistent-workspaces-and-agent-state-evidence-2026-11-19.md)。
 
 35EP. 复走教学构造 task-42：Agent 基于工作区 r17 生成 patch-41 后暂停，用户在 IDE 修改同一函数，使当前工作区成为 r18；原任务检查点仍写着“patch 已准备好”，CI 是否有结果尚待查询。画出对话/模型上下文、记忆或检索索引、任务检查点、工作区、CI 和外部部署系统各自能证明什么；说明应从哪里确认当前文件、旧测试结果是否可复用、重叠修改如何处理，以及新验证应绑定哪个 revision。最后写一份简短的交接记录，包含来源版本、候选 diff、验证对象与未解决状态；指出 content hash、摘要和旧 CI 结果各自不能证明什么。全程把情景标为教学构造，不设计通用 gate，也不把 workspace 文件当作数据库或部署系统的回执。
+
+## 第二十册第二十二章：OpenAI-Compatible API 边界
+
+配套正文：[第二十册第二十二章](book-20-agent-harness-runtime/chapters/22-openai-compatible-api边界.md)；外部来源和证据边界见[兼容 API 研究记录](research/openai-compatible-api-compatibility-evidence-2026-11-19.md)。
+
+35EQ. 假设一个 Agent 通过 OpenAI SDK 调用 Chat Completions，并依赖中途出现的 developer 指令、严格工具参数、reasoning effort、流式工具调用和文件输入。只依据 Anthropic OpenAI SDK compatibility 官方文档，制作一张迁移记录卡：每项注明文档原话对应的行为、状态（明确支持、有条件或转换、明确不支持、未说明）、对调用方的影响和可选处理方式。区分“SDK 能发请求”“字段进入请求”和“原有行为得到保留”；指出哪些结论还需要当前账户与 endpoint 的集成验证，哪些不能从单次成功请求推广。再选 DeepSeek Responses 或 vLLM 作为第二个目标，只核对会话续接、模板或并行工具中的一项差异，并标明 endpoint、model 和文档版本范围。不得把文档未说明写成不支持，也不得把两家差异概括为所有兼容 API 的统一规则。

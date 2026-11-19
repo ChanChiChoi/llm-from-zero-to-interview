@@ -1,256 +1,96 @@
-# 第 22 章 OpenAI-Compatible API：字段相同，不代表语义相同
+# 第 22 章 OpenAI-Compatible API：字段相似，语义要逐项核对
 
-## 22.1 为什么“兼容”很容易被误读
+把一个已有 Agent 接到另一家模型服务时，改写客户端的 `base_url`、API key 和 model 名称，常常就能让请求发出去。但请求能发出，只说明客户端与某个接口完成了通信；它没有说明目标服务是否按调用方期待的方式处理每个字段。
 
-很多模型服务提供 OpenAI-compatible endpoint。客户端把 `model`、`messages`、`temperature` 和 `tools` 发送过去，服务返回看起来相似的 JSON，于是团队以为可以无成本切换模型。
+本章面向已经会用 SDK 或 HTTP 发送模型请求的读者，讨论如何判断一次迁移中哪些调用可以复用、哪些行为需要适配、哪些能力没有证据支持。这里从调用方看服务合同；OpenAI Responses API 的原生对象与事件见[第二十章](20-responses-api.md)，Gemini Interactions 与 thinking state 见[第二十三章](23-gemini-interactions与thought-state回放.md)，Claude 的 thinking-state 合同见[第二十四章](24-claude-sonnet-5.5-thinking-state与安全路由.md)。如何把推理引擎实现成兼容服务端，则属于[第二十四册第五十七章](../../book-24-llm-inference-engine/chapters/57-openai-compatible-api流式协议错误码和限流鉴权.md)。
 
-兼容通常只覆盖 HTTP 路径、基础字段和部分响应形状。真正影响结果的 tokenizer、chat template、reasoning、tool call、stream event、usage、错误、上下文限制和安全策略可能完全不同。接口能返回 200，只能证明请求被处理，不代表语义和能力等价。
+## 22.1 “兼容”要对应到具体接口
 
-## 22.2 五层兼容性
+“OpenAI-compatible”不是一个足以描述所有能力的完整清单。不同服务会把它用于不同接口范围：有的提供 Chat Completions，有的还提供 Responses 或 embeddings；有的只是允许复用 OpenAI 客户端语法，有的另有 provider 路由和模型专属字段。
 
-可以把兼容性拆成五层：
+先把三件事分开：
 
-1. **transport**：URL、HTTP、认证、超时和重试；
-2. **schema**：请求字段、响应字段、错误 JSON；
-3. **serialization**：role、特殊 token、tool、thinking 和多模态内容如何编码；
-4. **runtime**：context、KV/state、量化、采样和并行；
-5. **behavior**：拒答、工具选择、结构化输出、质量、延迟和计费。
+| 要核对的对象 | 要回答的问题 | 不能由什么直接推出 |
+|---|---|---|
+| 客户端与传输 | 这个 SDK 能否按目标服务的地址、认证方式和请求路径发出请求？ | 不能推出目标实现了所有 OpenAI API 端点 |
+| 请求与响应形状 | 当前端点接受哪些字段、返回哪些对象？ | 不能推出同名字段会按同一种语义处理 |
+| 服务行为与运行合同 | 角色、工具、流式事件、状态、用量和错误会怎样变化？ | 不能推出模型质量、工具效果或计费相同 |
 
-很多“兼容服务器”只承诺前两层。应用若依赖后三层，必须建立 capability matrix，而不能根据 SDK 能否连接判断。
+这是读文档时的一组检查角度，不是某个协议标准规定的分层。OpenAI 自己也将 Chat Completions、Responses 和其他 API surface 分别列出；Responses 用 typed items 和事件流表达内容，与 Chat Completions 的 message/chunk 结构并不相同。[OpenAI API Overview](https://developers.openai.com/api/reference/overview) [Chat Completions reference](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create) 因此，目标写着“OpenAI-compatible”时，先确认它兼容的是哪个 endpoint、哪种请求和哪类模型。
 
-## 22.3 Chat template 是隐藏协议
+官方文档给出的范围也不一样。Google 说明其 OpenAI library support 仍处于 beta，并建议新集成直接使用 Gemini API；Hugging Face 的兼容端点目前只面向 chat completion，其他任务应使用自己的 Inference Client。Anthropic 则把 OpenAI SDK compatibility 描述为测试和评估 Claude API 的路径。它们都能降低某些调用改造成本，但不构成一份共同的全功能承诺。[Gemini OpenAI compatibility](https://ai.google.dev/gemini-api/docs/openai) [Hugging Face Inference Providers](https://huggingface.co/docs/inference-providers/index) [Anthropic OpenAI SDK compatibility](https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk)
 
-不同模型可能使用不同的 system、user、assistant、tool 和 reasoning 标记。客户端直接拼字符串，或者把另一个模型的 template 传给后端，模型可能把工具结果当用户文本，把 assistant 前缀重复生成，或无法识别结束位置。
+## 22.2 同名字段可能被支持、改写、忽略或拒绝
 
-tokenizer 可以加载成功，仍然不代表 template 正确。golden request 应保存最终 token ids、特殊 token、工具 schema 序列化和 stop 条件，切换后做结构比较。
+判断字段能否迁移，不能只看它是否出现在 JSON 里。文档可能说明一个字段被处理、被映射成不同表示、只在特定模型上有效、被忽略，或触发错误；有些字段则没有公开说明。记录时可以使用下表的简短状态，但它们只是团队沟通用语，不是标准定义：
 
-## 22.4 Tool calling 的兼容边界
+| 记录状态 | 含义 |
+|---|---|
+| 文档明确支持 | 文档说明此端点和适用范围处理该能力 |
+| 有条件或有转换 | 字段可用，但语义、默认值、位置或模型条件不同 |
+| 明确不支持 | 文档说明会被忽略、报错或不可调用 |
+| 未说明 | 当前证据不足；不能据此写成支持或不支持 |
 
-一个服务可能接受 `tools` 字段，但模型并不可靠地产生结构化调用；另一个服务会返回 tool call，却要求客户端使用不同的 `tool_call_id` 或回传角色。并行工具、工具失败、参数增量和 JSON Schema 支持也各有差异。
+Anthropic 的兼容层展示了几种容易混淆的结果。`system` 和 `developer` 消息会被移到对话前部并合并进顶层 system 字段；即使原请求把它们放在后续轮次，它们也不会保留原位置。工具定义中的 `strict` 被忽略，所以“字段能发送”不等于工具参数得到严格 schema 保证。对于不支持的字段，文档还分别列出静默忽略和返回 400 的情况。[Anthropic 的兼容限制与字段表](https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk)
 
-适配层应区分：
+Responses 状态也不能仅凭同名字段推断。DeepSeek 文档说明其 Responses API 是无状态的，不支持 `previous_response_id` 和 `conversation`；`store` 固定为 false；`parallel_tool_calls` 被忽略，并始终启用并行工具调用。若应用依赖服务端会话续接或关闭并行，这些都是迁移决策的一部分，而不是小型格式差异。[DeepSeek Responses API 兼容说明](https://api-docs.deepseek.com/guides/responses_api/)
 
-```text
-native: 服务原生理解并验证
-adapted: 客户端转换后可用，已通过 golden tests
-unsupported: 应拒绝或路由其他后端
-```
+模型和运行时仍会影响接口行为。vLLM 文档限定 Chat Completions 适用于带 chat template 的文本生成模型，指出 `user` 参数会被忽略；并行工具调用的实际结果还取决于模型。这个例子说明：同一个 HTTP server 即使提供相同路由，换了模型或模板也可能改变请求解释。[vLLM v0.30.0 OpenAI-Compatible Server](https://docs.vllm.ai/en/v0.30.0/serving/online_serving/openai_compatible_server/)
 
-最危险的是把 unsupported 静默降级成普通文本。模型可能在回答中写出“调用工具”的文字，客户端却把它当完成答案，造成业务状态错误。
+## 22.3 工具、结构化输出和 reasoning 要按行为核对
 
-## 22.5 Reasoning 和 thinking 的差异
+工具调用至少涉及三件事：调用方怎样描述工具，服务怎样返回一次调用提议，宿主怎样把结果回传。调用参数可以通过 JSON 解析，却仍不代表 schema 被严格遵守，也不代表工具已经执行。Responses API 中的 function call 与宿主执行责任见[第二十章](20-responses-api.md)；通用工具授权与结果校验见[第四章](04-工具系统与tool-registry.md)。
 
-一个 provider 的 `reasoning_effort` 可能影响内部 token，另一个服务可能没有该字段，或者把它当成输出上限。一个 API 返回 reasoning summary，另一个只返回最终文本；一个 runtime 可以保留 item，另一个只能重新发送历史。
+Anthropic 的兼容文档明确指出 `strict` 会被忽略，并说明强 schema 输出应看原生 Claude API 的 structured outputs；vLLM 则说明设定 `parallel_tool_calls` 只能约束至多返回一个工具调用，开启它也不保证模型会给出多个调用。迁移工具工作流时，逐项对齐工具选择、参数 schema、调用 ID、并行规则、工具结果格式与拒绝行为；若其中一项不支持，就要决定是否调整应用流程或改用该服务的原生接口。
 
-迁移时要记录 effective budget、可见内容、stream event、usage 和 fallback。不能仅把 `high` 字符串转发过去，然后在产品页面继续声称用户获得了同等的“深度思考”。
+推理参数也不是跨 provider 的通用旋钮。Anthropic 的兼容层忽略 OpenAI 的 `reasoning_effort`，而 Gemini 文档对 `reasoning_effort` 给出了模型相关的行为和限制；Alibaba Model Studio 另外列出 `enable_thinking`、`search_options` 等非 OpenAI 标准字段，且部分模型的参数不同。字段名相似只说明调用者发出了一个值；它实际控制什么，需要回到目标服务、端点和模型的文档确认。[Anthropic compatibility](https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk) [Gemini compatibility](https://ai.google.dev/gemini-api/docs/openai) [Alibaba Model Studio OpenAI-compatible Chat](https://help.aliyun.com/en/model-studio/qwen-api-via-openai-chat-completions)
 
-## 22.6 Context 和 tokenizer 的差异
+同样的检查适用于 JSON 输出约束。要分别确认约束写在哪个请求字段、接受哪种 schema 子集、失败时是报错还是返回普通文本，以及拒绝或不完整输出如何表示。API 返回了可解析 JSON，只说明结果满足某种语法检查；业务值是否正确、工具能否安全执行仍由应用负责。
 
-两个服务的 token 数可能不同。相同中文、代码和特殊 token 在不同 tokenizer 下会产生不同长度；一个服务允许 1M，另一个可能在 128K 截断。应用需要在最终后端 tokenizer 上计数，并把服务端实际接收长度写入 trace。
+## 22.4 流式、会话状态、错误和用量是独立合同
 
-长上下文还涉及模板和工具 token。不能用客户端字符数估算 KV、价格和上下文剩余量。
+流式接口必须按具体 endpoint 读事件。OpenAI Chat Completions 使用包含 delta 的 chunk；Responses 流使用带事件类型的 item 生命周期事件。即使两个服务都接受 `stream=true`，调用方也应确认事件名称、字段、结束条件、用量何时出现，以及断线后的处理方式。Responses 事件的完整语义见[第二十章](20-responses-api.md)和[官方事件参考](https://developers.openai.com/api/reference/resources/responses/streaming-events)。
 
-## 22.7 Usage、计费和限流
+会话状态也要核对由谁持有。OpenAI Responses 的手工回放、`previous_response_id` 和 Conversations API 有不同的历史管理方式；DeepSeek 的 Responses 兼容实现则明确无状态；Gemini Interactions 的服务端续接合同见[第二十三章](23-gemini-interactions与thought-state回放.md)。不能因为请求都带有一组 messages 或 input，就假定服务端会自动恢复上一轮。
 
-兼容响应中的 usage 字段可能只包含输入和输出 token，不包含 reasoning、缓存命中、工具时间或多模态 token。不同后端的价格、速率限制和重试语义也不同。
+错误和用量字段还可能暴露“看起来成功”的差异。Anthropic 文档对同一兼容层同时列有被忽略的字段和返回 400 的字段；DeepSeek 的 usage 字段使用自己的 input/output 口径；Alibaba 可通过额外字段返回搜索工具使用统计。比较成本时要核对具体端点的用量定义、模型价格和工具计费说明，不能只把不同响应里的同名 token 字段相加。[DeepSeek Responses API](https://api-docs.deepseek.com/guides/responses_api/) [Alibaba Model Studio Chat 参数](https://help.aliyun.com/en/model-studio/qwen-api-via-openai-chat-completions)
 
-路由系统应保存 provider、model revision、输入输出 token、reasoning usage（若有）、cache hit、工具成本、重试和价格版本。否则迁移后看似 token 下降，实际账单却上升。
+2026 年的一篇 API 转换预印本进一步展示了 schema 检查的边界：作者在五个 translator codebase 的合成请求套件中，报告部分已完成转换通过了目标 schema 检查，却仍改变了作者所定义的 prompt、role 或 tool 信息；另一个独立流式试验发现部分翻译结果会让受测 OpenAI SDK 抛错或静默拼装错误。这是特定代码库、输入套件和 SDK 版本上的结果，不是生产流量发生率；它支持的是一个窄结论：解析成功本身不能证明对话信息在转换前后保持不变。[Liu et al., “Testing Conversation Preservation Across LLM APIs,” arXiv:2611.15543v1](https://arxiv.org/abs/2611.15543)
 
-## 22.8 错误与重试
+## 22.5 复走一次迁移：OpenAI SDK 调用 Anthropic 兼容层
 
-同样的 HTTP 429 可能表示速率限制、并发限制或账户额度；同样的 500 可能发生在模型执行前或外部工具已提交后。适配层应将 transport error、provider error、model refusal、tool error、policy denial 和 unknown execution 分开。
+假设一个 Agent 使用 OpenAI SDK 发起 Chat Completions 请求，依赖 developer 指令、严格工具参数和文件输入。把客户端改为使用 Claude API 地址、Anthropic key 和 Claude model 后，SDK 可以调用该兼容层；但迁移结论要看应用真正依赖的行为：
 
-只有明确可重试且没有副作用的错误才适合自动 retry。未知工具状态应先查询 call id 或幂等状态，不能因为客户端没有收到响应就重新发送。
+| 应用依赖 | 兼容文档说明 | 对迁移的影响 |
+|---|---|---|
+| 复用 OpenAI SDK 发请求 | 文档提供兼容用法，并要求更换 base URL、key 和 model | 客户端语法可以复用 |
+| developer 消息在中途改变指令 | system/developer 内容会合并并移到对话开头 | 依赖原位置和轮次的逻辑不能原样沿用 |
+| 工具参数严格符合 schema | `strict` 被忽略 | 不能把此调用当作严格结构化输出保证 |
+| 用户消息包含音频或文件 | 兼容层不支持并返回 400 | 需改用受支持输入路径、原生 API 或其他后端 |
+| 请求要求 reasoning effort | `reasoning_effort` 被忽略 | 不能把这个值记录成已生效的预算 |
 
-## 22.9 Capability matrix 示例
+因此，这不是简单的“可用/不可用”判断。若应用只需要 SDK 构造与发送基础文本请求，可以复用客户端；若依赖 mid-conversation 指令、严格 schema 或文件内容，就要改变调用方式、使用原生能力或选择别的后端。依据来自 Anthropic 文档对该兼容层的描述；没有对真实账户和当前 endpoint 进行 probe，所以不把文档外行为推断为已验证事实。
 
-| 能力 | 后端 A | 后端 B | 迁移动作 |
-| --- | --- | --- | --- |
-| chat template | native | adapted | 保存 token golden |
-| streaming tool | native | unsupported | 禁止流式工具 |
-| reasoning level | native | approximate | 记录实际预算 |
-| JSON schema | native | adapted | 本地验证并重试 |
-| 1M context | declared | 128K | 先路由/切分 |
-| usage detail | full | partial | 成本单独校准 |
+## 22.6 用一张有范围的兼容记录卡作决定
 
-表格的价值不是给后端贴好坏标签，而是让应用知道在哪些能力上可以迁移，在哪些能力上必须拒绝或降级。
+审查一次迁移时，先固定被讨论的对象：SDK 及其版本、base URL、API endpoint、provider、model、地区/工作空间和查阅日期。然后只记录应用实际依赖的能力，不必罗列整个接口的所有字段：
 
-## 22.10 Golden request 套件
+| 应用依赖的行为 | 目标文档或探测证据 | 记录状态 | 适配或限制 |
+|---|---|---|---|
+| messages 中角色与顺序 |  |  |  |
+| tool choice、调用 ID 与参数约束 |  |  |  |
+| reasoning / thinking 参数 |  |  |  |
+| stream 事件、终止与错误 |  |  |  |
+| 会话续接与历史保留 |  |  |  |
+| usage、价格和限额 |  |  |  |
+| 图片、音频或文件输入 |  |  |  |
 
-每个后端都应回放：短文本、中文、代码、多轮、工具成功、工具失败、并行工具、JSON Schema、reasoning level、长输入、图片或文件、流式取消和限流。保存请求 hash、token ids、item/event 序列、usage、错误和最终 artifact。
+状态可记“文档明确支持”“有条件或有转换”“明确不支持”或“未说明”，并为每项写明它适用的 endpoint、model 和文档版本。若某项对正确性或安全性关键，就设计针对该行为的集成用例，保留原始请求、响应或事件和最终应用结果；不要把一次成功调用当作整套接口完全兼容。集成验证只覆盖测试过的场景，也不能替代服务方文档或数据处理合同。
 
-先做协议结构比较，再做质量和性能。一个后端输出文本略有差异可能是模型质量变化；如果 tool call id 消失、event 顺序错了，则是适配 bug。
+供应商选择和自建推理 API 的关注点不同。比如 Hugging Face 的 OpenAI-compatible endpoint 可自动选择推理 provider，Alibaba 的 base URL 按区域和工作空间区分；这些信息会影响路由与部署边界，但不属于 OpenAI 请求 JSON 本身。[Hugging Face Inference Providers](https://huggingface.co/docs/inference-providers/index) [Alibaba Model Studio base URLs](https://help.aliyun.com/en/model-studio/base-url) 自建服务端的请求校验、SSE、错误码、鉴权和限流实现见[第二十四册第五十七章](../../book-24-llm-inference-engine/chapters/57-openai-compatible-api流式协议错误码和限流鉴权.md)。
 
-## 22.11 常见误区
+## 22.7 回到迁移问题
 
-把 HTTP 200 当语义成功；把兼容字段当标准；忽略 chat template；把 unsupported 静默转普通文本；用一个 tokenizer 计费所有后端；忽略 reasoning 和多模态 token；把所有错误都重试；只用平均质量判断迁移。
+OpenAI-compatible 可以降低客户端接入成本，但兼容范围必须落实到具体 endpoint、字段语义和服务行为。先确定 SDK 实际调用哪个 API，再查目标服务对角色、工具、reasoning、stream、状态、错误和用量的说明；对关键行为，记录支持条件、必要适配和未知项。超出目标服务明示范围的部分，要么换用原生接口，要么在应用中适配，要么不承诺该功能。
 
-## 22.12 面试回答与练习
-
-回答“OpenAI-compatible API 是否真的兼容”时，应说它通常只保证部分 transport/schema 兼容，仍要核对 template、tokenizer、tool、reasoning、stream、usage、错误、context 和行为。建立 capability matrix，使用 golden requests，明确 native/adapted/unsupported，并为降级和回滚设计协议。
-
-练习一：为两个后端设计十个 golden requests。
-
-练习二：为什么工具调用超时不能直接重试？
-
-练习三：一个后端只支持 128K，但客户端以为是 1M，如何在路由和协议层阻止静默截断？
-
-### 22.12.1 capability matrix 应该写到什么程度
-
-兼容性矩阵至少要包含：
-
-| 能力 | native | adapted | unsupported | 证据 |
-| --- | --- | --- | --- | --- |
-| chat/template |  |  |  | model card/config |
-| tokenizer/context |  |  |  | tokenizer/runtime |
-| streaming events |  |  |  | API test |
-| tool call/parallel |  |  |  | golden trace |
-| reasoning state |  |  |  | provider docs |
-| multimodal |  |  |  | processor test |
-| cancellation/usage |  |  |  | integration test |
-
-`native` 表示后端原生支持并能通过契约测试，`adapted` 表示 adapter 做了转换，`unsupported` 表示必须在路由前阻止。矩阵还要标 model revision 和 runtime revision，因为同一个 endpoint 的能力可能随版本变化。
-
-### 22.12.2 兼容层的三种错误
-
-第一种是显式错误：后端返回不支持，客户端可以降级或提示用户；第二种是适配错误：字段能发送但语义被改变，例如 reasoning 参数变成普通 max tokens；第三种是静默错误：网关截断 context、丢失 tool result 或把 unknown 当 failed。第三种最危险，应通过 preflight、usage 对账和 golden trace 阻断。
-
-### 22.12.3 worked example：128K 后端面对 1M 请求
-
-路由器在转发前要读取后端 capability，计算模板展开后的真实 token 和输出预留。如果 `T_input+T_output` 超过 128K，应进入检索/分批/异步/其他后端路径；禁止依赖后端默认截断。响应里记录实际模型、输入 token、截断状态和降级原因，客户端才能知道结果没有覆盖全部材料。
-
-### 22.12.4 conformance test
-
-一套最小 conformance test 要包含 tokenizer 计数、纯文本、长输入、system/developer 消息、结构化输出、并行工具、工具拒绝、流式断线、取消、usage、错误、媒体和未知副作用。对每条测试保存 request、event sequence、final state 和资源指标。
-
-通过 conformance test 只说明接口契约满足，不说明模型质量相同。还要用同一任务集比较答案、引用、工具成功、成本和 p99；所谓兼容不能被理解成行为等价。
-
-### 22.12.5 兼容性的五层验收条件
-
-迁移请求能否安全地路由到某个后端，可以用五层验收条件表达：
-
-```math
-G_{\mathrm{compat}}
-=G_{\mathrm{transport}}G_{\mathrm{schema}}G_{\mathrm{serialization}}G_{\mathrm{runtime}}G_{\mathrm{behavior}}
-```
-
-`G_transport` 只回答连接、认证和超时是否成立；`G_schema` 回答字段和错误对象能否解析；`G_serialization` 回答模板、tokenizer、工具参数和多模态内容是否按后端语义编码；`G_runtime` 回答上下文、采样、状态和资源约束是否满足；`G_behavior` 则回答工具选择、结构化输出、拒答和延迟是否达到业务要求。前两层通过而后三层失败时，接口仍可能返回 200，但结果已经不能视为兼容。
-
-例如，后端 B 能解析 `tools` 字段，却无法稳定产生合法参数，那么 `G_schema=1` 而 `G_behavior=0`。路由器应把它标记为 `adapted` 或 `unsupported`，而不是把一次偶然成功当作能力承诺。验收条件记录还要绑定 model revision 和 runtime revision，否则后端升级后，旧的兼容结论会悄悄失效。
-
-## 22.13 Preflight：在请求发出前发现不兼容
-
-兼容层最便宜的错误，是在发送请求前拒绝不满足约束的请求。preflight 至少要拿到目标后端的 model revision、tokenizer、chat template、上下文上限、输出预留、工具能力、结构化输出能力和速率限制，然后对展开后的真实输入计数。
-
-```math
-T_{\mathrm{request}}
-=T_{\mathrm{template(input)}}+T_{\mathrm{tools}}
- +T_{\mathrm{reserved\ output}}
-```
-
-若 `T_request` 超出目标后端上限，路由器应选择切分、检索、异步任务或其他后端；不能依赖服务端截断。中文、代码、图片和工具 schema 都可能让 token 数远大于字符数，客户端用自己的 tokenizer 估算只能作为早期提示，最终验收条件应使用目标后端实际 tokenizer 或已校准的 tokenizer。
-
-preflight 的结果要进 trace：
-
-```text
-target_provider, model_revision, tokenizer_hash
-template_hash, input_tokens, reserved_output
-capability_snapshot, route_decision, downgrade_reason
-```
-
-这样一次请求被切分或拒绝时，运维人员能知道是 context 不够、工具不支持、权限不允许还是预算不足，而不是只看到一个泛化的 400。
-
-## 22.14 Adapter 的语义转换与本地验证
-
-adapter 不只是字段重命名。它可能需要转换 role、模板、工具参数、结构化输出、流式事件、reasoning 配置、图片输入和 usage。每次转换都要有输入契约、输出契约和验证器。
-
-例如后端 B 不原生支持 JSON Schema，可以让模型输出普通文本再由本地 parser 验证，但这属于 `adapted`，不等于原生结构化输出。若 parser 失败，系统可以在无副作用条件下重试；如果该输出会触发外部动作，则必须停在 `needs_review`，不能把一次解析失败的文本直接执行。
-
-工具调用适配尤其要保留 call id 和状态。把 `function_call` 改成自然语言字符串会丢失参数边界、并行关系和重试依据；把 provider A 的 reasoning level 映射成 provider B 的 `max_tokens` 也只能称为近似预算，trace 必须记录实际使用的 token 和可见内容。
-
-## 22.15 Fallback、降级与回滚
-
-后端不可用时，fallback 不是“换一个 URL 再发同一个请求”。路由器要根据能力矩阵选择降级路径：只读问答可以切换较短 context 的模型；带工具的任务可能需要关闭并行或改为人工确认；不可逆副作用不能在未知执行状态下换后端重发。
-
-降级决策可以表示为：
-
-```math
-G_{\mathrm{route}}
-=G_{\mathrm{context}}
- G_{\mathrm{template}}
- G_{\mathrm{tool}}
- G_{\mathrm{policy}}
- G_{\mathrm{cost}}
-```
-
-某个检查失败时，系统要返回明确的 `route_decision` 和 `downgrade_reason`。不能只在 UI 上继续显示原模型名称，也不能把 128K 后端的截断结果伪装成覆盖 1M 文档的答案。
-
-回滚除了切回旧模型，还要回滚 adapter、template、tokenizer、capability snapshot 和 verifier。新 adapter 可能已经改变了工具 call id 或错误映射，即使模型本身不变也会造成行为回归。发布前为每个后端保存 golden trace，发生异常时按相同输入进行 shadow replay。
-
-## 22.16 worked example：把 1M 请求安全路由到 128K 后端
-
-假设应用收到一个约 900K token 的文档分析请求，主后端声明支持 1M，备用后端只有 128K。应用不能只根据请求字段 `context_length=1000000` 决定路由，还要检查模板展开、工具 schema、输出预留和后端实际能力证据。
-
-有三种安全结果：
-
-| 条件 | 路由动作 | 客户端可见信息 |
-| --- | --- | --- |
-| 主后端通过 preflight | 直接请求，保留真实 token 计数 | 模型 revision、输入覆盖范围 |
-| 主后端不可用，备用后端不够长 | 分块检索或异步 map/reduce | 分块范围、合并策略、遗漏风险 |
-| 主后端未知，备用后端不够长 | 拒绝或请求用户缩小范围 | 明确说明未执行，不生成伪完整答案 |
-
-如果采用 map/reduce，还要把每个块的来源、版本和局部结论保存下来，合并阶段不能声称看过没有进入上下文的文档。若任务包含工具调用，块级结果只能作为证据，外部提交仍需在完整权限和业务状态下单独验收。
-
-## 22.17 Conformance test：从接口相似到行为可解释
-
-每个兼容后端都要跑同一套 conformance test：中文和代码 token 计数、system/developer role、特殊 token、结构化输出、单工具、并行工具、工具拒绝、流式断线、取消、错误码、usage、图片或文件、超长输入和 unknown side effect。测试结果包含 request hash、event sequence、tool call id、最终状态和资源指标。
-
-测试通过只说明契约在给定 revision 上成立，不能证明答案质量相同。后续还要比较引用覆盖、工具选择、拒答、p95、单位成功成本和安全失败。后端升级后重新跑 conformance；若只依赖接口名称，模板或 tokenizer 的变化会在生产中才暴露。
-
-## 22.18 兼容层的最小内部模型
-
-一个可靠的兼容层至少要有四个对象：规范化请求、模型能力快照、事件状态机和外部动作记录。规范化请求保存真实 token、模板和媒体占位；能力快照记录上下文、工具、结构化输出、reasoning 和取消能力；事件状态机负责流式顺序；外部动作记录负责幂等和审计。
-
-如果只把请求 JSON 转发给后端，无法处理不同 tokenizer、工具事件或错误状态。兼容层应在发送前做 preflight，在返回后做 conformance 检查；未知字段默认不应被假设为等价。
-
-## 22.19 兼容性的三种结果
-
-后端适配可以是严格兼容、受限兼容或明确不兼容。严格兼容意味着事件、usage、错误、工具和状态契约都通过；受限兼容意味着某些能力被关闭并向调用方声明，例如不支持并行工具或多模态；不兼容则在执行前拒绝或转入人工选择。
-
-最危险的是“看起来成功”的部分兼容：文本返回 200，但特殊 token 被错误编码，或者工具调用被当成普通文本。此类问题必须由 token-level replay、schema 校验和最终状态断言捕获。
-
-## 22.20 兼容性回归的版本矩阵
-
-每次升级同时记录 provider、model revision、tokenizer、chat template、adapter、engine 和客户端版本。测试矩阵应覆盖短文本、长上下文、中文、代码、结构化输出、单/并行工具、流式断开、取消、错误重试和多模态占位。通过一组输入不代表所有模型版本都通过，结果必须绑定 revision。
-
-## 22.21 兼容适配器的内部数据流
-
-请求进入兼容层后，先解析调用方语义，再根据目标后端的能力快照进行编译。编译结果不只是一个 JSON，还应包含真实 token 计数、模板版本、媒体占位、工具 schema、超时、权限、缓存 key 和允许的 fallback。响应回来后，再把后端事件翻译成内部状态，而不是让业务代码直接依赖某一家 provider 的字段。
-
-这样可以把三个问题分开：请求能否被接受、模型能否正确生成、外部动作是否已经提交。HTTP 200 只回答第一个问题；第二个要看 token/模板和质量回归，第三个要看 tool event、幂等状态和业务 verifier。
-
-## 22.22 兼容层的错误分类
-
-错误至少分为输入不兼容、能力不支持、资源不足、模型生成失败、工具失败、动作状态未知和客户端取消。输入不兼容应在执行前拒绝；资源不足可以排队或降级；动作未知必须先查询状态，不能把整个请求重新发送当成默认恢复。
-
-错误对象应携带可重试性、已提交副作用、request id、backend revision 和用户可见范围。没有这些字段，调用方往往会在不安全的时机自动重试。
-
-## 22.23 兼容性的验收案例
-
-准备一组最小 golden cases：普通文本、中文和代码 token、system/developer role、长输入、结构化输出、单工具、并行工具、工具拒绝、流式断开、取消、超时、图片占位和未知错误。每个 case 保存请求 hash、事件序列、usage、finish reason、工具状态和最终 artifact。
-
-验收不是要求不同后端输出同样的 token，而是要求在声明支持的能力范围内，协议不丢事件、权限不扩大、输出可解析、外部动作不重复，并能明确告诉用户哪里发生了降级。
-
-## 22.24 兼容后端的能力快照
-
-能力快照应包含上下文上限、真实 tokenizer、chat template、special token、结构化输出、工具并发、多模态、reasoning、流式、取消、usage、错误和 cache 语义。快照带 revision 和生效日期，路由时只使用已验证字段；未知能力默认不开放高风险路径。
-
-## 22.25 兼容性不能隐藏质量差异
-
-接口兼容后，仍要比较事实性、引用、拒答、工具选择、长上下文有效长度和单位成功成本。adapter 只解决调用契约，不保证模型输出等价。若备用后端能力不足，应把范围、质量损失和未执行动作告知用户。
-
-## 22.26 OpenAI-compatible API 的阶段性判断与资料边界
-
-OpenAI-compatible 描述的是接口外形，不是模型、协议和运行时的完整等价。真正的迁移工作在 tokenizer/template、工具事件、推理状态、错误、计费和能力边界。preflight、adapter 验证、显式 fallback 和 conformance test 让不兼容在执行前可见；能连上服务只是第一道验收条件。
-
-具体兼容字段以各服务的官方 API、模型卡、tokenizer 和 runtime 文档为准；没有公开的内部映射不能靠兼容名称推断。
+如果面试被问“OpenAI-compatible API 是否能无改动替换”，回答应先说明复用哪一层：客户端构造、某个 endpoint 的 schema，还是应用依赖的完整行为。随后举一项具体差异，例如被忽略的 strict 字段、移动位置的 developer 消息或无状态的 Responses 实现，再说明会如何核对版本与证据。练习见[35EQ](../../EXERCISES.md)。

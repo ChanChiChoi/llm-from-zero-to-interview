@@ -3448,6 +3448,10 @@
      考察点：每类状态的所有者；摘要/索引与源文件的关系；workspace revision 与提交快照；并发修改；测试结果的版本绑定；外部副作用查询；artifact 交接；权限和保留边界。
      回答框架：先说清要确认的具体事实，再找到负责该事实的系统。模型上下文只能说明本轮看到了什么，记忆或解析索引要回查来源和版本，任务检查点记录运行进度但不证明文件现状。读取工作区当前 revision 和 diff；若旧 patch 的基线已变化，保留候选并检查冲突，在新版本上完成相关验证。CI 结果说明某次运行对指定版本报告了什么，外部部署或数据库状态则查询对应服务。交接 artifact 时附上来源 revision、变化、验证对象和未知事项；授权、租户隔离和数据保留另按产品与策略核对。
 
+40AF. 把现有 Agent 从 OpenAI API 迁到一个标注为 OpenAI-compatible 的服务，怎样判断能否无改动替换？
+     考察点：SDK/transport、endpoint 范围、字段处理方式、tool schema 与 call ID、reasoning 参数、流式事件、会话状态、usage、错误和版本/模型范围。
+     回答框架：先说清客户端调用的是哪个 endpoint，再区分客户端能发请求、目标接受该 schema、应用依赖的语义能否保留。按目标服务文档逐项记录明确支持、有条件或转换、明确不支持、未说明；用具体差异说明适配或功能收缩，例如 system/developer 消息被移位、strict 被忽略或 Responses API 无状态。对关键行为补充限定范围的集成用例，但不把一次成功或一份文档推广到其他 endpoint、model、provider 或版本；服务端 API 的鉴权、限流与实现细节另看第二十四册第五十七章。
+
 40ZA. 如何设计工具调用 trace、replay 和审计体系？
       考察点：trace schema、span tree、ID propagation、version capture、argument lineage、permission trace、tool result trace、privacy masking、audit event、replay readiness、side-effect replay safety、metrics、alerts、eval linkage。
       回答框架：先把 trace 定义成一次工具调用的事实链，而不是普通文本日志。链路要覆盖用户请求、模型输入输出、Router 候选和过滤原因、tool call、raw / parsed / normalized / final arguments、权限决策、Executor 执行、tool result 投影、最终回答和用户可见错误。每个 span 要有稳定 ID、parent、时间、状态、输入输出摘要和 artifact 引用；版本要记录 model、prompt、tool schema、registry、router policy 和 adapter。Replay 分 trace-only、model replay 和 tool / sandbox replay，有副作用动作默认禁止 live replay。审计事件要记录 actor、tenant、tool、action、resource、decision、confirmation、timestamp、trace id 和 outcome。指标包括 trace schema completeness、ID tree integrity、version capture coverage、argument lineage coverage、permission trace completeness、tool result trace completeness、privacy masking coverage、audit event completeness、replay readiness rate、side effect replay safety、metric export coverage、alert owner coverage、eval linkage coverage 和 trace replay gate。核心观点是没有 trace 就没有可靠评估、调试、回放和安全追责。
@@ -4227,9 +4231,9 @@
    考察点：standalone draft、attached head、model protocol fit。
    回答框架：它们都属于 speculative decoding 生态，但 draft 可能来自独立模型、EAGLE head、MTP/NEXTN head 或模型附加模块。接受长度和 draft 成本决定收益，tokenizer/template/cache 必须对齐。
 
-8. “OpenAI-compatible”为什么不等于 Responses API 兼容？
-   考察点：response item、reasoning channel、tool lifecycle、custom encoding。
-   回答框架：兼容层通常只保证基础请求形状；reasoning item、工具 call id、流式事件、chat template、custom encoding、MCP/A2A 生命周期仍可能不同，需要 capability matrix 和 trace replay。
+8. “OpenAI-compatible”为什么不一定等于 Responses API 兼容？
+   考察点：具体 endpoint 范围；Chat Completions message/chunk 与 Responses item/event 的差异；服务对 Responses 的单独支持声明。
+   回答框架：这个标签本身不能说明实现了哪个 API surface。Hugging Face 当前兼容端点只面向 chat completion；vLLM 与 DeepSeek 则分别公开 Responses API 文档，但仍需逐项核对状态、字段、工具和流式语义。先确定调用方使用的 endpoint，再查目标服务对该 endpoint 的明确范围；不能从 Chat Completions 兼容推出 Responses 兼容，也不能把某一家对 Responses 的实现外推给所有 provider。
 
 9. 1M context 为什么不能直接换算成并发能力？
    考察点：KV/state cache、prefill/decode、并发预算。
