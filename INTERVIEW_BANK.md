@@ -5579,69 +5579,41 @@
 
     官方文档把 multi-agent 变体标为 beta：可用 xAI SDK/Responses API，不支持 Chat Completions、client-side function calling/custom tools 或 `max_tokens`；内置工具和 Remote MCP 可用，多轮可用 `previous_response_id`。leader 与全部子 Agent 的 input/output/reasoning tokens 均计费，所有 server-side tool calls 也计费；比较 4/16 Agent 时要结合 `usage`、`server_side_tool_usage`、成功率、wall-clock 和单位成功成本。默认对子 Agent 只返回加密 opaque state，不会自动提供可读审计轨迹。
 
-## 2026-09 Gemini 3.8 Flash：Thinking、Interactions 与工具闭环
+## 2026-11 Gemini Interactions：状态恢复与宿主责任
 
-专题系统设计见[第二十册第 23 章](book-20-agent-harness-runtime/chapters/23-gemini-interactions与thought-state回放.md)；以下问题聚焦协议与面试回答。
+专题正文见[第二十册第 23 章](book-20-agent-harness-runtime/chapters/23-gemini-interactions与thought-state回放.md)。
 
-1. **Gemini 3.8 Flash 的 `low/medium/high` 是三个模型吗？**
+1. **`previous_interaction_id`、SSE `event_id` 和 `continuation_token` 分别恢复什么？**
 
-   不是。它们是同一基础模型的请求级 thinking 配置/预算档位；AA 的三个页面应归并为一个模型，不能由 effort 行推断三个 checkpoint、三套权重或三种架构。`minimal` 在该模型的 Google 官方字段中不支持，也不能自行补成合法档位。
+   `previous_interaction_id` 让服务端取回已存储的对话历史；`event_id` 用于恢复事件流；`continuation_token` 用于继续状态为 `requires_continuation` 的长解码。它们不能互换，也都不能证明宿主工具的外部副作用已经完成。
 
-2. **`max_output_tokens` 与 thinking budget 如何影响结果？**
+2. **传入 `previous_interaction_id` 后，上一轮配置会自动继承吗？**
 
-   请求预算可能同时覆盖 thinking token 与可见输出；预算过小会让思考或最终答案截断。比较档位时应固定模型 snapshot、任务、工具、输出上限，记录 thinking/visible output、TTFT/TPOT、工具轮数、重试、最终 artifact 和单位成功成本，而不是只比较回答长度。
+   不会。官方文档把 `tools`、`system_instruction` 和 `generation_config` 定义为当前 Interaction 的配置；下一轮若仍需要这些配置，调用方要重新指定。
 
-3. **Thought summary、thought signature 和普通对话历史有什么区别？**
+3. **thought summary 和 thought signature 有什么区别？**
 
-   thought summary 是面向开发者的摘要，不是完整 chain-of-thought；thought signature 是供协议维持推理连续性的 opaque 表示。它们不是永久记忆，也不是等同于 GPU KV cache。客户端应按文档原样保留/回放，不能假设每个 thought block 都有 summary，也不能把 signature 当可读推理文本。
+   summary 是可选的开发者可见摘要，不是完整隐藏推理；signature 是不透明的协议状态，按收到的内容保存和回放，不解码、不改写，也不作为思维链展示。Thinking guide 称每个 thought signature 必有；API v1 reference 列出该字段，但没有明确标注 required/optional。不能据此推断目标 endpoint 接受缺失 signature 的回放。
 
-4. **Interactions API 对 Agent runtime 的价值是什么？**
+4. **自定义 function call 如何与结果对应？**
 
-   它把长任务显式拆成 `thought`、`tool_call`、`tool_result`、`model_output` 等 steps，并可用 `previous_interaction_id` 做 stateful continuation；SSE 事件让运行时能审计 step 的开始、增量和结束。服务端生成调用意图，宿主仍负责权限、执行、超时、幂等、重试、回滚和 artifact verifier。
+   当前 API v1 reference 用 `FunctionCallStep.id` 对应 `FunctionResultStep.call_id`。该关系只关联调用与结果，不替宿主授权、执行工具或验证业务结果。
 
-5. **Search、URL Context、File Search、Code Execution 和 Function Calling 能否视为模型新结构？**
+5. **SSE 重连能保证工具副作用恰好执行一次吗？**
 
-   不能。它们是外部工具/应用上下文协议：检索或代码结果再次进入上下文，模型据此继续规划、修正或结束。File Search 的 embedding/chunk/store 也不是模型训练或永久记忆；Function Calling 只是结构化提案，真实执行权属于宿主。
+   不能。事件流恢复与宿主外部调用是不同状态。若进程在外部操作成功后、持久化回执前崩溃，宿主应查询外部系统或使用其幂等合同；结果无法确认时保留 unknown 状态，避免盲目重试。
 
-6. **Computer Use 的安全责任应该放在哪里？**
+6. **`incomplete` 与 `requires_continuation` 有何不同？**
 
-   模型根据截图提出 action intent 和归一化坐标，客户端执行动作并回传新状态。客户端必须做域名/资源 allowlist、权限与人工确认、敏感动作拦截、超时、审计和幂等；`regular/require_confirmation/blocked` 是安全决策入口，不代表模型已经完成点击或交易。
+   `requires_continuation` 提供 `continuation_token` 以继续长解码；`incomplete` 表示这条 Interaction 没有完整产出预期结果，不能视为任务成功。`max_output_tokens` 包含 thought tokens，是硬上限，可能让可见输出截断或为空。
 
-7. **怎样解释 Gemini 3.8 的 DataCurve 74% Pass@1？**
+7. **`store=false` 对应用的恢复设计有什么影响？**
 
-   它是 `gemini-3-8-flash` + high + `mini-swe-agent` + 工具/任务环境/verifier 的组合结果：本轮精确行有 `n_runs=4`、`n_attempted=447`、Pass@1 `73.8255%`、Pass@4 `85.8408%`、平均成本约 `$2.36` 和平均 `166.31` steps。不能把它写成裸模型分数，也不能迁移到 low/medium 或其他 Gemini 版本。
+   它关闭该 Interaction 的服务端存储，不能继续使用它的 `previous_interaction_id`，也不兼容后台执行。宿主若仍需跨请求恢复，就要自行保存必要历史、任务状态和外部执行回执，并单独管理保留与删除。
 
-8. **Gemini 3.8 的 Model Card 没有独立架构报告时，面试如何回答？**
+8. **如何让一次中断后的任务恢复可信？**
 
-说明公开资料能确认的是 API 能力、Model Card 继承关系、工具和评测设置；当前不能确认参数量、层数、MoE/稠密结构、训练数据、RL 算法或 verifier。把“使用更小 reasoning steps、工具迭代和验证”回答成公开系统行为，并明确内部机制仍是证据缺口。
-
-9. **Interactions API 的 `previous_interaction_id` 会继承哪些东西？**
-
-   它只让服务端取回 conversation history。`tools`、`system_instruction` 和 `generation_config`（包括 `thinking_level`、temperature）是当前 interaction-scoped，下一轮要重新指定；不能把 history 链接理解成整份运行配置自动继承。
-
-10. **`store=false`、stateless replay 和 retention 如何区分？**
-
-   `store=false` 是不保存该 Interaction，不能继续使用它的 `previous_interaction_id`，但客户端仍可自行维护完整 history 做 stateless 请求。官方当前写明付费/免费 Interaction 默认保留 55/1 天，并支持按 ID delete；这些是服务侧生命周期合同，不是永久记忆。
-
-11. **为什么 Gemini 文档对 function-call signature 的描述要谨慎？**
-
-   Thinking prose 把 Interactions signature 限于 thought/built-in tool steps；Tool combination prose 又称 Gemini 3+ 所有 tool call/result（含 function）都有 signature，并用 `function_response.id`。当前 API reference 与 2026-09-26 的 Google Python SDK main commit 则使用 `function_call.id` → `function_result.call_id`，typed custom-function steps 不声明 signature，且 `ThoughtStep.signature` 为 optional（与 Thinking 的“必有”也冲突）。`extra="allow"` 与 `UnknownStep.raw` 特指 Interactions 生成包 `_gaos`，同仓库 `_common.BaseModel` 使用 `extra="forbid"`；两套类型栈不能混淆。以上仍是 schema 而非 endpoint 行为。回答时保存实际 opaque fields，不伪造、不静默删除；未获 API key 时把 endpoint 行为标成未验证。
-
-12. **`max_output_tokens` 太小和降低 thinking level 的区别是什么？**
-
-   前者是包含 thought 与 visible output 的硬截止线，思考阶段触顶会让 Interaction `incomplete`、输出截断/为空且已生成 thought 仍计费；后者是请求级预算/策略控制。要降低成本和延迟，不能用过小的硬上限替代 level 路由。
-
-13. **Interactions SDK 的 schema 允许缺少 thought signature，为什么本地 replay toy 还会拒绝？**
-
-   二者是不同门禁。Google 的 Interactions 专属 `ThoughtStep.signature` 字段标为 optional；toy 默认把 stateless restore 中缺失的预期 thought signature 当成宿主安全策略失败，以免把可能丢失的 opaque state 当成完整回放。此 toy policy 不代表 API 400，也不推翻 SDK schema；要验证真实字段组合仍需授权 endpoint probe。
-
-14. **Gemini 3.8 Flash 的 `processing_call` / `processing_result` 是普通 function call 吗？**
-
-   不是。Video Understanding 文档把它们定义为媒体处理 step：模型通过 `processing_call.id` 请求读取视频片段或 transcript，返回的 `processing_result.call_id` 关联该结果。应把它们作为可审计的媒体证据读取轨迹保留；它们既不赋予任意文件权限，也不应套用普通自定义 function-call 的 signature 规则。
-
-15. **Agentic Video 一定比固定抽帧便宜、快吗？**
-
-   不一定。Static 默认按约 1 FPS 一次性抽帧，agentic 按问题动态读取 transcript、帧或音频。Google 文档对长视频报告最高约 88% 的总 token 减少和约 7% 的质量提升，但短于 5 分钟的视频可能因导航推理和处理往返增加 TTFT；自定义帧率/片段只支持 static。应在固定视频和问题上同时比较证据召回、时间定位、thought/tool-use tokens、TTFT、失败恢复与单位成功成本。
+   先选对话历史、事件流还是长解码对应的恢复机制，再核对宿主任务记录和外部服务状态。把 API status、工具回执和独立业务验收分开；接入清单固定 SDK version、API version、model ID 与存储策略。
 
 ## 2026-09 DeepSeek V4 Pro：reference inference、协议与证据边界
 

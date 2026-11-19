@@ -1608,26 +1608,19 @@
 
 8. 加入 multi-agent API contract gate：拒绝 Chat Completions、`max_tokens` 和 client-side/custom function tools；允许 Responses `previous_response_id`、内置工具与 Remote MCP。模拟 beta contract 变更、encrypted sub-agent state 未携带、token/tool usage 只记录 leader 的错误账本；最终报告应汇总所有 Agent 的 input/output/reasoning tokens、server-side tool calls、continuation success、wall-clock 与单位成功成本，不调用真实 API。
 
-## 2026-09 Gemini 3.8 Flash Thinking、Interactions 与 Computer Use 审计
+## 2026-11 Gemini Interactions：中断恢复与工具副作用
 
-配套正式章节：[Gemini Interactions：跨轮状态、签名回放与工具责任链](book-20-agent-harness-runtime/chapters/23-gemini-interactions与thought-state回放.md)。
+配套章节：[第二十册第 23 章](book-20-agent-harness-runtime/chapters/23-gemini-interactions与thought-state回放.md)。依据截至 2026-11-19 的官方 Interactions 文档完成本练习；不要求调用真实 API 或编写程序。
 
-构建一个不调用真实付费 API 的教学审计器，模拟 `gemini-3.8-flash` 的 `low/medium/high` thinking、共同 output budget、thought summary/signature、Interactions state、Search/URL/File/Code/function 工具、Computer Use、structured output、1M context、implicit caching 和外部 verifier。报告必须把 AA/DataCurve、Google 官方文档和本地 toy 分栏。
+设想 Agent 处理工单 742：它读取工单后提出 `add_comment` 调用。工单服务已接受评论，但宿主在写入本地执行回执前崩溃。用这条轨迹完成以下分析：
 
-实验至少覆盖：
+1. 画出状态所有权：分别标出 Gemini Interaction 历史、逐轮配置、function call/result、SSE 事件流、外部评论和任务验收结果由谁保存。
+2. 为 `Interaction id`、`previous_interaction_id`、function `id`/`call_id`、SSE `event_id` 和 `continuation_token` 各写一句用途，并说明它不能证明什么。不要把这五类标识合并为一个通用 checkpoint。
+3. 给出 stateful 与 stateless 两种续接方案。列出下一轮仍需传入的配置；说明 stateless 路径如何原样保留收到的 thought/signature 状态，以及 API 文档对 signature 必需性的表述边界。
+4. 设计宿主从崩溃恢复的判定：如何查询工单评论、何时使用外部幂等键、无法确认时如何保留 unknown 状态；解释为什么恢复 SSE 流本身不能安全地重放评论写入。
+5. 分别说明 `store=true` 与 `store=false` 对服务端历史、后台执行和后续 `previous_interaction_id` 的影响；列出删除 Interaction 后仍需由宿主单独处理的记录。
 
-1. thinking 消融：固定任务、模型 snapshot、工具和 verifier，对比 low/medium/high 的思考预算、可见输出、截断、TTFT/TPOT、工具轮数、成功率、总 token 和单位成功成本；验证 `minimal` 对 Gemini 3.8 是非法能力，而不是默认低档位。
-2. stateful/stateless replay：模拟 thought block、summary、opaque signature、`previous_interaction_id` 和手工回放；注入 signature 丢失、summary 缺失、乱序、重复和跨模型回放，检查状态连续性与安全失败。
-3. SSE trace：记录 `interaction.created`、step start/delta/stop、tool call/result 和 completed 事件，验证事件重连、重复消费、工具超时、取消和最终 artifact 的幂等。
-4. 工具组合对照：比较 Search grounding、URL Context、File Search、Code Execution、function calling 的检索/执行/结果回灌链路，记录 citation coverage、chunk recall、执行错误、重试和业务校验失败；明确工具不等于模型权重或永久记忆。
-5. Computer Use 安全：用截图和归一化 `1000x1000` 坐标模拟 action intent，注入 UI 漂移、遮挡、敏感操作、域名越权、重复点击和状态竞争，分别评估模型提案、宿主审批、执行回执和 verifier。
-6. Agentic Video 对照：固定视频 revision、问题位置和模型配置，比较默认 static 1 FPS 与按需 agentic transcript/frame/audio 读取；用合成 Interaction steps 覆盖 `processing_call.id` → `processing_result.call_id` 的配对、断线重放、超时/取消和媒体权限拒绝。记录关键事件召回、时间定位、processing 次数、thought/tool-use tokens、TTFT、端到端成功和单位成功成本；不要把文档中的最高 88% token 减少/约 7% 质量提升当成本地复现结果。
-6. 长上下文与缓存：比较 128K/512K/1M 输入、needle 位置、文档数量、重复前缀和 implicit-cache hit/miss，分开记录有效召回、TTFT、计费 token、KV/cache 代理和后续轮 TPOT，不能把服务侧缓存写成 GPU KV cache。
-7. 评测 manifest：重现 DataCurve high 的 `n_runs=4`、`n_attempted=447`、Pass@1/4、平均成本和 steps 字段；所有本地数字绑定任务、工具、环境、verifier 和代码版本，不宣称复现 Google 或 DataCurve 生产结果。
-8. 实现一个 0 依赖本地 replay toy，检查 stateful continuation 只继承 history、stateless replay 保留 signature、`function_call.id` → `function_result.call_id` 对齐、SSE completed/done 顺序、store/delete 和 `55/1` retention；记录未调用网络，勿将 toy 结果写成真实 endpoint 行为。
-9. 为同一份 Interaction history 生成两个 manifest：一个把 `tools`/`generation_config` 错误地当作跨 turn 继承，另一个按 interaction-scoped 重新指定；比较 schema、tool choice、thinking level 和 verifier 结果，说明为什么 `previous_interaction_id` 不是完整 runtime snapshot。
-10. 建立 signature 兼容性对照：比较 Thinking prose、Tool combination prose、当前 Interactions API reference 与固定 SDK schema。记录 Tool combination 的 `function_response.id` 与正式 reference/SDK 的 `function_result.call_id` 命名差异；记录 custom function signature 在 prose 与 typed schema 的差异，以及 `ThoughtStep.signature` prose 必需、schema optional 的差异。让 custom function signatures 缺省/存在两种 history 都能由本地 toy 保真 round-trip；对照 `extra="allow"`、`UnknownStep.raw`。结论必须区分 schema 声明和 endpoint 行为：不伪造、不静默删除实际 opaque fields；没有授权/API key 时不声称完成 capability probe。
-11. 审计固定 SDK `6d012889752f65c1a51d0ad6e5970fc97d19c4ca` 的 Interactions 类型路径：区分 `_gaos/types/interactions/*` schema 与普通 `_common.BaseModel`，核对 `_gaos` 的 `extra="allow"`、thought optional signature、custom function 未声明 signature 和 lenient `UnknownStep.raw`。扩展 demo 测试：schema profile 允许省略 thought signature，而默认宿主 replay gate 仍可以拒绝该 history；明确这是两种不同证据层，不声称 endpoint 真实拒绝。
+答案应能让读者判断“对话接上了”与“业务动作完成了”是否为同一件事，并绑定说明所依据的 API version 和文档查阅日期。
 
 ## 2026-09 DeepSeek V4 Pro reference implementation 审计练习
 

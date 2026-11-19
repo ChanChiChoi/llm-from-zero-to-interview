@@ -88,7 +88,7 @@
 
 ## 2026-09 新模型专题增补
 
-Gemini 3.8 Flash 的 Interactions 专题落点为第二十册第 23 章：本轮补明 Google Gen AI SDK 的 Interactions 专属 `_gaos` 生成 schema、`extra="allow"`、optional thought signature 与 lenient `UnknownStep.raw`，并与同仓库 `_common.BaseModel(extra="forbid")` 区分；同时补入 provider-managed 视频 `processing_call` / `processing_result` step、静态/agentic 取证差异和 token/TTFT 权衡。第十七册第 7 章提供任务设计与评测视角。第二十册、题库、练习与知识图谱将 schema 声明、宿主 replay policy 和真实 endpoint 行为分开；文档冲突尚需授权 probe，未推断 Gemini 内部架构或训练方法。详见 [Gemini 3.8 Flash 来源笔记](research/model-update-2026-09/gemini-3.8-flash-source-notes.md)。
+Gemini Interactions 的跨轮状态专题落点为第二十册第 23 章：以 Gemini Developer API 的公开 Interaction 合同为范围，说明 `previous_interaction_id`、function `id`/`call_id`、SSE `event_id` 与 `continuation_token` 各自恢复什么，并区分服务端对话历史、逐轮配置、thought signature、宿主工具副作用和 Interaction 保留期限。Thinking guide 与 API v1 reference 对 thought signature 必需性的标记粒度不同；正文保留该证据边界，不推断真实 endpoint 对缺省字段的行为，也不推断 Gemini 内部架构或训练方法。来源与版本范围见 [Gemini Interactions 状态证据记录](research/gemini-interactions-state-evidence-2026-11-19.md)。
 
 Claude Opus 5.5 的 compaction 增补接入第二十册第 7.25 节：对照 on-demand 与 threshold 两种 beta 状态机、平台兼容差异、Opus 5.5 threshold thinking 丢弃规则，以及账号创建时间影响的 prefix-check 默认策略；题库、练习和知识图谱同步区分 model binding 与 prefix binding。它们是 Anthropic 文档合同，不是本项目对 Messages API 的实测，也不构成参数、架构或训练 recipe 证据。
 

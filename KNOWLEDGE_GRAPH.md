@@ -966,47 +966,29 @@ Grok 4.20 -> Remote MCP `allowed_tools` -> smaller tool schema/context + smaller
 
 Grok 4.20 -> no dedicated arXiv technical report -> architecture/training/kernel/independent benchmark undisclosed -> reuse reasoning/Agent/tool/serving/evaluation chapters -> evidence boundary
 
-### Gemini 3.8 Flash
+### Gemini Interactions
 
-Artificial Analysis `gemini-3-8-flash` low/medium/high -> one canonical Gemini 3.8 Flash model -> effort is request configuration, not three checkpoints -> source-aware capability manifest
+Gemini Interactions API -> Interaction `id` / `previous_interaction_id` -> 服务端交互资源与已存储对话历史 -> 不等于宿主任务快照或外部业务事实
 
-Gemini 3.8 Flash -> `thinking_level=low/medium/high` + shared output budget -> reasoning/tool/output budget trade-off -> thinking ablation -> TTFT/TPOT/token/cost/success ledger
+`FunctionCallStep.id` -> `FunctionResultStep.call_id` -> 一次自定义工具请求和结果的关联 -> 宿主仍负责授权、执行回执、幂等与业务验收
 
-Gemini 3.8 Flash -> thought summary + opaque thought signature -> partial visible explanation plus cross-turn reasoning continuity -> stateful/stateless replay -> not full chain-of-thought, permanent memory or GPU KV cache
+SSE `event_id` -> 事件流恢复位置 -> 重新接收 Interaction stream -> 不代表重新执行工具副作用
 
-Gemini 3.8 Flash -> Interactions API -> `thought/tool_call/tool_result/model_output` steps + SSE -> observable Agent trace -> host executes tools and verifies artifacts
+`requires_continuation` + `continuation_token` -> 尚未结束的长解码 -> 按 API 合同继续生成 -> 不等于 previous Interaction 或 SSE 游标
 
-Gemini 3.8 Flash -> Search/URL Context/File Search/Code Execution/function calling -> external evidence or computation re-enters context -> plan/act/observe loop -> citation/schema/business verifier
+Stateful continuation -> 服务端取回 Interaction history -> tools / system_instruction / generation_config 每轮显式指定 -> 任务、工作区与执行账本仍由宿主管理
 
-Gemini 3.8 Flash -> Computer Use -> screenshot + action intent + normalized coordinates -> client approval/execution -> new screenshot/result -> UI drift, permission and side-effect risk
+Stateless replay -> 客户端保存并提交所需 history -> 原样保留实际收到的 thought/signature 状态 -> Thinking guide 与 API v1 reference 的 signature 必需性标记不一致；不推断缺省行为
 
-Gemini 3.8 Flash -> 1M input + implicit caching -> long-context and repeated-prefix serving trade-off -> recall/TTFT/billing/TPOT experiment -> not equivalent to model architecture or GPU KV cache
+`thought.summary` -> 可选开发者可见摘要 -> 不是完整隐藏推理；`thought.signature` -> 不透明协议状态 -> 不解码、不展示为 chain-of-thought
 
-Gemini 3.8 Flash -> DataCurve high `mini-swe-agent` row -> Pass@1/4 + cost + Agent steps -> model+harness+tools+environment+verifier result -> no migration to low/medium or adjacent Gemini
+`incomplete` -> 输出未完整完成 -> 不能作为任务成功 -> 检查宿主回执与独立 verifier
 
-Gemini 3.8 Flash -> no independent 3.8 architecture/training report -> API/runtime evidence only -> no parameter/MoE/RL/verifier claim -> evidence boundary
+`store=true` / `store=false` -> provider Interaction 保留和续接合同 -> 查阅日期绑定的保留窗口、后台和续接限制 -> 不等于应用 memory、workspace 或外部系统删除
 
-Gemini 3.8 Flash -> `store=true` + `previous_interaction_id` -> server-side conversation history -> tools/system/generation config remain interaction-scoped -> replay manifest must re-specify runtime controls
+API version + SDK version + model ID -> 可复核的接入条件 -> 避免把 SDK 默认值变化误当作模型能力变化
 
-Gemini 3.8 Flash -> `store=false` / 55-day paid / 1-day free / delete -> lifecycle and privacy control -> not permanent memory -> retention/deletion test
-
-Gemini 3.8 Flash -> `max_output_tokens` -> thought + visible output hard cutoff -> `incomplete`/truncation risk -> use thinking-level routing for cost control
-
-Gemini 3.8 Flash -> Thinking/Tool-combination prose vs current API reference -> signature required/optional and `function_response.id` vs `function_result.call_id` conflicts -> preserve raw opaque fields and separate wire schemas -> endpoint capability probe
-
-Gemini Interactions -> current API reference + pinned `python-genai` `_gaos` Step schema -> custom-function signatures undeclared, `ThoughtStep.signature` optional, Google Search signatures optional -> Interactions `_gaos` base `extra="allow"` vs separate `_common.BaseModel` `extra="forbid"` -> schema declaration is not endpoint prohibition -> lossless forward-compatible replay
-
-Gemini Interactions -> lenient open Step union + `UnknownStep.raw` -> unknown step/payload forward compatibility -> preserve raw event and version manifest -> no silent lossy downgrade
-
-Gemini 3.8 Flash -> tool context circulation -> built-in/custom server/client tools -> host permission/executor/verifier -> `validated` mode and side-effect audit
-
-Gemini 3.8 Flash -> replay toy -> local protocol evidence -> state/signature/id/SSE/retention/modality checks -> not real API/model/SLO evidence
-
-Gemini 3.8 Flash -> Interactions formal chapter (Book 20, Chapter 23) -> provider history vs host task ledger -> stateful/stateless recovery + idempotent tool effects -> capability probe and artifact verifier
-
-Gemini 3.8 Flash video input -> static 1-FPS context or agentic timeline navigation -> `processing_call.id` / `processing_result.call_id` -> query-conditioned transcript/frame/audio evidence -> media permission, timestamp provenance, TTFT/token/call-count evaluation
-
-Agentic video publisher claim (up to ~88% fewer tokens / ~7% higher quality on long-form content) -> workload-specific documentation result -> possible TTFT regression below 5 minutes -> independent fixed-video ablation needed; not an architecture/training claim
+`processing_call` / `processing_result` -> provider-managed media processing steps -> 与宿主自定义 function 调用分开记录 -> 不扩写成模型视频性能或 token 节省结论
 
 ### DeepSeek V4 Pro：实现证据扩展
 

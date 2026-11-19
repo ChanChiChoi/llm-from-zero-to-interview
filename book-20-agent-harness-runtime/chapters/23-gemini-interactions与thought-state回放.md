@@ -1,167 +1,97 @@
-# 第 23 章 Gemini Interactions：跨轮状态、签名回放与工具责任链
+# 第 23 章 Gemini Interactions：跨轮状态与恢复边界
 
-## 23.1 长任务的状态放在哪里
+## 23.1 恢复一轮对话，不等于恢复整个任务
 
-Agent 调用模型、执行工具、收到结果，再继续推理。跨轮继续时，系统至少要回答：历史由谁保存？哪些参数会继承？断线重试如何避免重复副作用？何时删除交互数据？
+设想一个 Agent 正在处理工单 742：它先读取工单，再准备添加一条评论并总结结果。运行到一半时，客户端断线或进程崩溃。恢复时至少要回答三个不同的问题：模型能否接着已有对话生成？刚才的事件流从哪里继续读取？评论到底有没有写入工单？
 
-Gemini Interactions API 把一轮交互暴露为有序 steps，并提供服务端存储和 `previous_interaction_id` 延续能力。它提供 API 级历史管理与交互可观测性，不等于模型拥有永久记忆，也不替宿主保存文件、权限、工具执行结果或业务状态。
+Gemini Interactions API 为第一类问题提供 Interaction 历史和续接方式，也为流式响应与长解码提供各自的恢复信息。但 API 里的对话历史不是任务数据库：它不能证明外部评论是否已写入，也不保存宿主的权限决定、工作区版本或业务验收结果。本章要沿着工单示例分清这些状态分别由谁持有，再据此选择恢复路径。
 
-本章以已出现在 Artificial Analysis 和 DataCurve DeepSWE 的 `Gemini 3.8 Flash` 为锚点。这里记录的是 Google API/runtime 契约，不能由这些字段反推参数量、Transformer 结构、训练配方或内部 verifier。来源与榜单配置见[研究笔记](../../research/model-update-2026-09/gemini-3.8-flash-source-notes.md)。
+Interactions 的文档在 2026 年 6 月宣布 API 正式可用，并建议新项目采用；实际接入仍应固定自己使用的 API 版本、SDK 版本和模型标识。[Interactions overview](https://aistudio.google.com/docs/interactions-overview)
 
-## 23.2 Interaction 是一轮执行记录
+## 23.2 五种标识指向五种不同的恢复对象
 
-一次 Interaction 可以包含用户输入、thought、内置工具调用/结果、自定义 function call/response 和最终 model output。流式调用还会产生创建、step 开始、增量、step 结束和完成等事件：
+一条恢复记录里可能出现几个看起来相似的 ID 或 token。它们不能互换：有的指向一轮服务端交互，有的配对工具往返，有的只恢复事件流，还有的继续尚未完成的长解码。
 
-```text
-user_input -> thought -> tool_call -> tool_result -> thought -> model_output
-```
-
-有序 steps 让运行时可以区分模型规划、工具执行、结果回灌和最终输出。只保存答案文本会丢掉归因所需的状态，也无法解释工具成本、重复动作和最终成功。
-
-API step 不是完整生产 trace。宿主仍需记录授权决策、环境版本、副作用回执和最终 artifact；模型生成 `tool_call` 不代表调用已经执行或获得权限。
-
-## 23.3 Stateful 与 stateless：两种状态所有权
-
-| 维度 | Stateful continuation | Stateless replay |
-| --- | --- | --- |
-| 历史持有人 | 服务端依据 `previous_interaction_id` 取回已存储历史 | 客户端保存并提交所需历史 steps |
-| 延续方式 | 引用前一轮完成的 Interaction ID | 原序提交需继续的历史内容 |
-| 主要优点 | 请求体较小，服务端维护交互历史 | 客户端控制持久化、审计和跨系统恢复 |
-| 主要风险 | 历史有保留期；删除或过期后不能继续 | 容易漏字段、重排 steps 或重复执行工具 |
-| 每轮仍要显式传入 | tools、system instruction、generation config | tools、system instruction、generation config |
-
-关键边界：`previous_interaction_id` 继承 conversation history，不是完整 runtime snapshot。`tools`、`system_instruction` 和 `generation_config`（包括 thinking level、temperature）按当前 Interaction 生效，下一轮必须重新指定所需配置。
-
-```text
-stateful: create(turn_1, tools=A, config=X) -> id=I1
-          create(turn_2, previous_interaction_id=I1, tools=B, config=Y)
-          # I1 提供历史；B/Y 是本轮显式配置
-
-stateless: client 保存完整原序历史与 opaque fields
-           create(turn_2, replayed_history=H1, tools=B, config=Y)
-```
-
-应用任务状态应另有权威记录，例如 task ID、workspace revision、权限、待执行副作用和 verifier 状态。Interaction ID 是服务资源引用，不能代替任务数据库或 checkpoint。
-
-## 23.4 Thought summary 与 signature：保留协议状态，不读取隐藏思维
-
-- `summary` 是可选的开发者可见摘要，不是完整 chain-of-thought；某些响应可能没有 summary。
-- `signature` 是用于协议延续的 opaque 字段。调用方不应尝试解密、重建或改写，也不能把它展示为可读推理。
-- Stateless replay 要保留实际返回的兼容状态块和必要工具上下文；摘要不能替代原始状态。
-
-官方资料存在多处需要保留的范围差异，不能把不同 API 的名字和字段表强行合并：
-
-| 资料 | 自定义函数 step / 关联 ID | signature 声明 |
+| 标识 | 它指向什么 | 它能帮助恢复什么 |
 |---|---|---|
-| Thinking prose | Interactions 标准 function call | signature 限于 thought 与 built-in tool；排除标准 function call；同时称每个 thought signature 必有 |
-| Tool combination prose | `function_call` 与 `function_response`，两者按 `id` 配对 | 称 Gemini 3+ 所有 tool call/result（包括自定义 function）都有 signature |
-| 当前 Interactions API reference | `function_call.id` → `function_result.call_id` | `FunctionCallStep`/`FunctionResultStep` 不声明 signature；`ThoughtStep.signature` 标为 optional |
-| Google Gen AI Python SDK | 与当前 API reference 相同 | 生成 schema 不声明 custom-function signature，thought signature optional；Google Search call/result signature optional |
+| Interaction `id` | 服务端的一条交互资源 | 获取、轮询或删除这条 Interaction；后台运行会先返回它 |
+| `previous_interaction_id` | 前一条已存储 Interaction | 创建后续 Interaction 时，让服务端取回前一轮对话历史 |
+| function call 的 `id` 与结果的 `call_id` | 一次自定义工具请求及其结果 | 把宿主回传的结果关联到模型提出的那次调用 |
+| SSE `event_id` | 流中的一个事件位置 | 断线后从流中的相应位置恢复接收事件 |
+| `continuation_token` | 一次尚未结束的长解码 | 在状态为 `requires_continuation` 时，按接口要求继续该次生成 |
 
-2026-09-28 通过 7890 复核，Google overview 现在链接到 [`Interactions API reference`](https://ai.google.dev/api/interactions-api)；旧 `/api/interactions` 路径返回 404。SDK 当前 `main` 最新可见提交固定为 [`6d012889752f65c1a51d0ad6e5970fc97d19c4ca`](https://github.com/googleapis/python-genai/tree/6d012889752f65c1a51d0ad6e5970fc97d19c4ca)，相关生成字段文件与 9 月 24 日 revision `4742c9a5c213a587add126a500a271824e2f0add` 的 SHA 完全相同。当前正式 schema 因而更支持 Thinking 的窄口径，但它只说明 typed fields；SDK `BaseModel extra="allow"` 会保留 extra fields，lenient open union 以 `UnknownStep.raw` 保存未知 step，所以不能把字段未声明解释成服务端禁止或绝不返回。
+其中 function 的关联方式以当前 API v1 reference 为准：`FunctionCallStep.id` 对应 `FunctionResultStep.call_id`。它与 `previous_interaction_id` 属于不同层次；工具结果不会因为对话历史可取回就自动写进外部系统。[Interactions API v1 reference](https://aistudio.google.com/api-reference/interactions-api?api-version=v1)
 
-工程上以**具体 endpoint/version 的 raw response** 为准：保存所有实际返回的 opaque/extra fields，不自行伪造或剥除；按 Interactions 的 `function_call.id` → `function_result.call_id` 关联，不把 Tool combination 的 `function_response.id` 或 GenerateContent 的 `functionResponse` 名称直接移植进另一套 wire schema。当前 API reference 对 `ThoughtStep.signature` optional 与 Thinking prose“必有”仍不一致；没有真实 endpoint/API key 时应明确标成未裁决，而不是选一条文档冒充已验证的服务端行为。
+## 23.3 Stateful 与 stateless：选择谁来保存对话历史
 
-这里的 `BaseModel` 要按生成包范围精确引用：Interactions client 使用 `google/genai/_gaos/interactions.py` 与 `google/genai/_gaos/types/interactions/*`；其 `google/genai/_gaos/types/basemodel.py` 才是 `extra="allow"` 的 typed model base。仓库中另一个 `google/genai/_common.py` 的 `BaseModel` 配置 `extra="forbid"`，属于不同 SDK 类型模块，不能据此否定或泛化 Interactions 的模型行为。Interactions 的 `FunctionCallStep`/`FunctionResultStep` typed fields 未声明 signature，`ThoughtStep.signature` 是 optional；Step union 用 lenient `parse_open_union`，将未知 payload 放进 `UnknownStep.raw`。详细文件路径、revision 与 SHA 见来源笔记 §19。
+**Stateful continuation** 让服务端根据 `previous_interaction_id` 取回此前存储的对话历史。调用方不必在每个请求里重新发送整段历史，但必须明确传入这一轮仍需要的配置。官方文档说明，`tools`、`system_instruction` 和 `generation_config` 都作用于当前 Interaction；如果下一轮仍要使用它们，就要在下一次请求中重新指定。
 
-本章 replay toy 的 `thought.signature` 默认必需门禁是**宿主的保守 stateless-replay 策略**，不是 SDK schema 的 required 字段：schema profile 可接受该字段缺省，但应用仍应原样保存实际收到的签名，并由 capability probe 决定缺失状态的恢复策略。schema optional 也不证明真实 endpoint 一定省略签名。
+**Stateless replay** 由客户端保存并提交后续所需的历史。这样，宿主可以在自己的持久存储里管理重放材料，但也必须保留协议需要的步骤和字段，不能把摘要或最终文本当作完整历史。两种方式解决的是“模型对话从哪里接上”，都不会自动恢复工单评论、文件改动或其他外部副作用。
 
-## 23.5 SSE 恢复与工具副作用：事件重连不保证恰好执行一次
-
-事件消费、工具执行和 Interaction 状态不是一个原子事务：
+下面是概念示意，不是可直接发送的 API 请求体；它只展示历史来源和逐轮配置的区别。
 
 ```text
-收到 tool_call -> 宿主授权 -> 工具产生副作用
-            -> 宿主写回执行回执 -> SSE 断开/客户端重连
+Stateful:
+  create(turn_1, tools=A, config=X) -> Interaction I1
+  create(turn_2, previous_interaction_id=I1, tools=B, config=Y)
+  # I1 提供对话历史；本轮需要的 B 和 Y 仍显式传入
+
+Stateless:
+  client 保存并重放所需历史 H1
+  create(history=H1, current_input=turn_2, tools=B, config=Y)
 ```
 
-若系统在写回执前崩溃，恢复逻辑可能再次执行同一调用。Harness 应建立独立执行账本，记录 task/interaction/step 或 call ID、工具名、参数哈希、策略决策、执行状态、回执、结果哈希、环境 revision 和幂等键。
+因此，宿主还要为工单 742 保存独立的 task 状态，例如当前工单版本、已授权动作、调用回执和验收状态。Interaction ID 是服务端交互资源的引用，不是完整 runtime snapshot。[Interactions overview](https://aistudio.google.com/docs/interactions-overview)
 
-将宿主幂等键绑定到任务与调用身份；未知副作用要先查询状态或进入人工恢复，不能盲目重试。工具结果按 call ID 回填，最终由独立 verifier 检查 artifact，而不是以模型回复作为验收。SSE 事件顺序与重放语义应按当前 schema/SDK 探测，不假设网络重连会让工具恰好执行一次。
+## 23.4 Thought summary 可缺省；signature 是不透明的协议状态
 
-## 23.6 工具上下文循环与权限边界
+Thinking 文档把 thought summary 描述为可选的开发者可见摘要；它可能为空或不存在，也不是完整的隐藏推理。signature 则是供协议继续交互使用的不透明字段。调用方不应尝试解码、重建或改写它，也不应把它当成可展示的推理文本。[Thinking guide](https://aistudio.google.com/docs/thinking)
 
-Google 文档把 Search、Maps、URL Context、File Search 等描述为服务端工具；Code Execution 有自己的结果步骤；自定义 function calling 与 Computer Use 则需要客户端/宿主执行真实动作。一个 Interaction 中可以交错出现工具意图、观察结果和后续输出。
+stateless replay 时，应按文档要求原样保留实际收到的 thought blocks 和相关签名。这里有一处需要如实表达的文档边界：Thinking guide 称每个 thought 都有 signature；API v1 reference 列出了 `ThoughtStep.signature`，但没有明确标注该字段必需还是可选。因而，字段表没有标注 required 不能证明服务端接受缺少 signature 的回放。若应用依赖缺省字段的行为，应针对目标 API 版本确认；在此之前，不要静默删除实际收到的签名，也不要自行补造一个。
 
-工具目录不等于宿主授权。宿主仍需校验租户、资源、参数、allowlist、审批、超时、出站网络、幂等和业务结果。结构化输出只约束形状，不证明语义正确。
+## 23.5 工具提议、外部执行和结果回传是三个动作
 
-审计时分开记录：模型提出的调用、策略是否允许、执行器与环境、工具回执、verifier 是否接受产物。这个分层与通用[工具 registry](04-工具系统与tool-registry.md)、[权限沙箱](08-权限模型与安全沙箱.md)和[状态边界](21-persistent-workspace与状态边界.md)一致。
+回到工单 742。模型可以提出 `add_comment` 的 function call；这个 step 表示模型请求宿主考虑执行，不表示工单服务已经收到评论。宿主先检查当前用户、工单和参数是否获准，再调用工单服务，记录执行结果，最后按 API 的工具结果格式把结果关联回原调用。
 
-### 视频处理 step：Provider-managed 的媒体读取闭环
+危险的窗口出现在“外部服务已执行、宿主还没持久化回执”之间。假如评论已写入而宿主随即崩溃，重连后再次看到相同工具请求，并不能说明评论尚未写入。事件流恢复不会替外部调用提供 exactly-once 保证。宿主应先用外部服务提供的幂等键或查询接口核实状态；若无法确认结果，应把该动作保留为未知并进入明确的恢复流程，不要盲目重试。
 
-Gemini 3.8 Flash 的官方视频文档描述了专用 `processing_call` / `processing_result` steps：前者请求加载指定视频片段或 transcript（有 `id`），后者以 `call_id` 关联返回内容。它们让动态媒体选择可见于 Interaction trace，但不等于应用自定义 function，也不能据此推断 endpoint 的普通 function signature 规则。应用应保留媒体对象版本、时间范围、处理请求/结果及答案引用；服务端提供媒体处理 step，也不替宿主做租户授权和资源访问控制。
+Google 管理的工具步骤与自定义 function 也要分开看。API reference 还定义了媒体处理用的 `processing_call` / `processing_result` steps；它们表示 provider 管理的处理过程，不是宿主自定义函数的另一种写法。无论是哪种工具，应用自己的资源授权和业务验收边界仍由宿主负责。
 
-静态路径默认每秒取一帧；agentic 路径按问题动态读取帧、transcript 或音频，长视频可减少输入 token，但增加导航思考和处理往返。Usage 需区分 `total_thought_tokens` 与 `total_tool_use_tokens`。Google 报告的“最多约 88% 少用 token、约 7% 质量提升”是文档中的长视频比较描述；短于 5 分钟的片段可能因导航而增加 TTFT，自定义 FPS/区间也只支持 static。代码任务的通用评估维度与产物验收见[第十七册第七章](../../book-17-agent-tool-use/chapters/07-code-agent.md)；视频处理 step 的媒体对象、时间范围、工具回执与答案引用仍由本章按 Interactions API 合同单独记录。
+本册第 4 章讲工具注册，第 8 章讲权限，第 17 章讲副作用与幂等，第 21 章讲持久工作区和事实来源；本章只把这些通用机制接到 Gemini 的 Interaction step 与 ID 合同上。
 
-## 23.7 Thinking 预算、硬截止线与 `incomplete`
+## 23.6 状态、事件流和长解码需要不同的恢复动作
 
-Gemini 3.8 Flash 官方页将 stable alias 的输入上限列为 `1,048,576`、输出上限列为 `65,536`；Thinking 文档支持 `low`、`medium`、`high`，`minimal` 不在该模型的合法配置中。档位是请求级运行控制，不是不同 checkpoint。
+Interactions API 区分以下状态：
 
-`max_output_tokens` 可能同时消耗 thought tokens 与可见输出预算。它是硬截止线，不等于降低 thinking level：在思考阶段触顶时，Interaction 可能以 `incomplete` 结束，最终输出为空或截断，但已生成 thought tokens 仍可能计费。评测应分开记录 thinking level、max output、thought/output usage、工具轮次、重试和完成状态。
+| 状态 | 调用方要判断什么 |
+|---|---|
+| `in_progress` | 交互仍在运行 |
+| `requires_action` | API 正等待所需的调用方动作 |
+| `completed` | 这条 Interaction 已完成 |
+| `failed`、`cancelled` | 交互以失败或取消结束 |
+| `incomplete` | 交互未完整产出预期结果；不能当作成功完成 |
+| `requires_continuation` | 长解码可以继续，需按要求回传 `continuation_token` |
 
-降低成本/延迟时，应做按任务的 thinking-level 路由和预算实验，而不是把硬上限压得过低。low/medium/high 对比要固定模型版本、任务、工具与 verifier，并报告 artifact 成功、TTFT/TPOT、工具失败和单位成功成本。
+SSE 的 `event_id` 用于恢复事件流；`continuation_token` 用于继续尚未完成的生成；`previous_interaction_id` 用于让服务端取回已存储的对话历史。恢复事件流不会重新执行宿主工具，续接生成也不等于恢复外部副作用。后台执行同样以 Interaction ID 为入口，调用方可轮询状态、订阅事件流或重新连接。[Streaming](https://aistudio.google.com/docs/streaming) · [Background execution](https://aistudio.google.com/docs/background-execution)
 
-## 23.8 存储、删除、缓存与长期记忆
+`max_output_tokens` 是硬上限，并包含 thought tokens。若生成在思考阶段触及上限，Interaction 可能以 `incomplete` 结束，可见输出可能截断或为空；已经产生的 thought tokens 仍可能计入用量。因此，判断工单任务是否完成时，不能只看是否收到某个 SSE 事件或模型有没有给出一句总结：还要核对 API 状态、外部执行回执和任务自己的验收结果。[Thinking guide](https://aistudio.google.com/docs/thinking)
 
-已核验的文档快照描述 Interactions 默认 `store=true`；当时付费层默认保留 55 天、免费层 1 天，付费项目可配置保留窗口并按 ID 删除。`store=false` 会关闭服务端存储，不能与 `background=true` 或后续 `previous_interaction_id` 延续一起使用。保留期限是会变化的服务合同，部署前应按账户、区域和当前产品文档复核。
+## 23.7 存储期限决定服务端历史能保留多久
 
-| 概念 | 所属层 | 不能混同为 |
-| --- | --- | --- |
-| Interaction retention | 服务端 API 资源保留/删除 | 应用永久记忆 |
-| 应用 memory | 宿主维护的长期知识 | 模型会话历史 |
-| implicit caching | 服务侧重复前缀复用 | GPU KV cache |
-| GPU KV cache | 单次生成的注意力状态 | 应用长期记忆 |
-| thought signature | 协议回放所需 opaque 字段 | 可读思维链 |
+截至 2026-11-19，Google 文档说明 Interactions 默认使用 `store=true`；当时列出的默认保留期为付费项目 55 天、免费项目 1 天，付费项目还可配置 7、14、28 或 55 天的保留窗口，并可按 ID 删除 Interaction。这些值属于查阅日期对应的产品合同，实际部署要重新核对目标项目和当前文档。
 
-`store=false` 不会自动替宿主保存 history；`store=true` 也不表示应用可把历史当永久记忆。删除 Interaction 后，还要分别检查应用日志、workspace、工具产物和外部系统记录的保留/清理策略。
+`store=false` 会关闭该 Interaction 的服务端存储，因此它不能用于之后通过 `previous_interaction_id` 续接，也不兼容后台执行。若宿主需要跨请求恢复，就必须在自己的系统里保管所需历史和任务状态，并另行设定访问、保留及删除规则。删除服务端 Interaction 不会自动删除应用日志、工作区文件、工单评论或其他外部系统记录；这些数据有各自的所有者和生命周期。[Interactions overview](https://aistudio.google.com/docs/interactions-overview)
 
-## 23.9 最小 harness 与 capability probe
+## 23.8 恢复时按状态来源逐项对账
 
-将 provider history 与应用任务状态分成两份账本：
+面对一次中断，先问“我现在要恢复的是什么”，再选择相应的 API 状态或宿主记录：
 
-| Provider Interaction ledger | Host task ledger |
-| --- | --- |
-| model ID、Interaction ID、previous ID | task/tenant/workspace ID 与 revision |
-| 原始 step/event 顺序、opaque fields | 工具 schema、版本、权限、审批 |
-| store、保留策略、删除状态 | call ID、幂等键、执行器、副作用回执 |
-| thinking level、输出上限、usage | verifier、最终 artifact、验收状态 |
-| endpoint、SDK、API version | 去重、重试预算、错误与恢复决定 |
+1. 要接着对话历史生成，确认服务端存储和 `previous_interaction_id` 是否仍可用；stateless 路径则提交完整、未被改写的所需历史。
+2. 要接着收事件，使用事件流恢复信息；不要把恢复事件误当成重新执行工具。
+3. 要接着尚未完成的生成，检查 `requires_continuation` 并使用对应的 `continuation_token`。
+4. 要判断外部动作是否生效，查询宿主执行账本或外部系统；状态未知时先消除不确定性，再决定是否重试。
+5. 只有 API 状态、外部回执和业务验收都满足任务要求，才把应用任务标记为完成。
 
-最小 capability probe 应覆盖：
+接入记录应固定 API version、SDK version 和 model ID。Google Gen AI Python SDK 的 release history 记载，v3.0.0 将 Gemini Developer API 的默认版本从 `v1beta` 改为 `v1`，而部分模型别名仍只在 `v1beta` 可用；默认值可能随 SDK 改变，不能代替应用显式选择接口版本。[SDK release history](https://github.com/googleapis/python-genai/releases)
 
-1. Stateful continuation 恢复哪些 history，工具和 generation config 是否需要重发；
-2. store=false、background、delete 和过期 ID 的错误行为；
-3. Stateless thought/tool history 中 opaque fields 的实际位置；
-4. `function_call.id` 与 `function_result.call_id` 的关联，以及实际 signature/extra 字段；
-5. SSE 断线、重复事件、工具超时和副作用幂等；
-6. max output 触顶、incomplete、thought/visible usage；
-7. 当前账户的 retention、删除和日志配置。
-
-没有真实 endpoint 授权时，可以用合成协议测试验证 harness 的失败路径；结果必须标记为 local toy，不能冒充 Gemini 服务端行为。
-
-## 23.10 面试回答模板与常见误区
-
-回答“如何让多轮 Gemini Agent 在断线后可靠恢复”时，按四层组织：
-
-1. **History**：选择 stateful previous ID 或客户端 stateless replay，明确谁持有历史；
-2. **Configuration**：每轮重新声明工具、system instruction 和 generation config；
-3. **Execution**：保存原始 steps/signatures 与 call/result ID；工具由宿主授权、幂等执行并记录回执；
-4. **Verification**：从真实 workspace/外部系统读取状态，用独立 verifier 验 artifact；将 incomplete、失败和未知副作用留在未完成状态。
-
-常见误区包括：把 previous ID 当完整 checkpoint；把 summary 当完整推理、signature 当可读文本；静默合并官方文档的字段范围差异；混淆服务端历史、implicit cache、GPU KV cache 与长期 memory；SSE 重连后无条件重试工具；只检查最终文本；把 API/runtime 行为写成 Gemini 3.8 的内部架构或训练算法。
-
-## 23.11 小结与证据边界
-
-Interactions 将一次 Agent turn 表示为可追踪 steps，并提供 stateful history continuation。可靠性仍由 harness 补齐：保存配置和环境版本、保留 opaque state、分离模型意图与工具权限、对副作用做幂等处理、从外部系统恢复事实，并通过独立 verifier 验收。
-
-本章属于官方 API/runtime 契约与系统设计建议。公开资料没有确认 Gemini 3.8 的参数规模、内部架构、训练配方、signature 编码或服务端 exactly-once 语义。
-
-## 23.12 参考资料
-
-- [Gemini 3.8 Flash 模型页](https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash)
-- [Thinking](https://ai.google.dev/gemini-api/docs/thinking)
-- [Interactions API](https://ai.google.dev/gemini-api/docs/interactions-overview)
-- [Thought signatures](https://ai.google.dev/gemini-api/docs/thought-signatures)
-- [Tool combination](https://ai.google.dev/gemini-api/docs/tool-combination)
-- [Google Gen AI Python SDK pinned revision `6d012889`](https://github.com/googleapis/python-genai/tree/6d012889752f65c1a51d0ad6e5970fc97d19c4ca)
-- [Gemini 3.8 Flash 来源摘记与快照哈希](../../research/model-update-2026-09/gemini-3.8-flash-source-notes.md)
+本章的范围是公开 Interactions API 与宿主恢复责任。官方文档说明的是其公开合同，不据此推断模型参数、内部架构、训练方法、signature 编码或服务端恰好执行一次工具的语义。更完整的来源范围、版本和未验证项见[Gemini Interactions 状态证据记录](../../research/gemini-interactions-state-evidence-2026-11-19.md)。

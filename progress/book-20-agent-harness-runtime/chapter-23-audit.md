@@ -1,6 +1,6 @@
 # 第二十三章精修审计
 
-审计日期：2026-11-19。状态：外部扫描与范围决定完成，正文重写进行中。
+审计日期：2026-11-19。状态：外部扫描、正文重写、配套同步与静态验收完成。
 
 ## 章节职责与读者结果
 
@@ -17,13 +17,14 @@
 | 外部主题 | 证据所支持的范围 | 读者结果与修订去向 |
 |---|---|---|
 | Interactions surface 与 API version | 当前官方 overview 称 API 已 GA 并推荐新项目；API reference 提供 `/v1`，SDK release notes 记录 v3.0 默认值从 `v1beta` 转为 `v1` | 开篇说明需同时固定 SDK、API version 与 model；不把新默认版本说成模型能力变化 |
-| Interaction history 与逐轮配置 | `previous_interaction_id` 让服务端取回历史；tools、system instruction、generation config 只作用于当次 Interaction，需逐轮重发 | 23.1—23.3 说明服务端会话续接不是应用任务快照，并与 host ledger 分开 |
-| steps、thought summary 与 signature | API v1 reference 定义有序 typed steps；Thinking guide 要求无状态重发 thought blocks 和 built-in tool signatures；signature 不能当作可读推理 | 23.3—23.4 解释原样保留及官方必需性表述差异，不写 SDK 内部类实现 |
-| 工具请求与结果关联 | `FunctionCallStep.id` 与 `FunctionResultStep.call_id` 配对；授权、执行回执和外部事实仍由宿主维护 | 23.5 用一条有副作用的调用轨迹连接 API step 与第 4、8、17 章 |
-| stream 恢复与 long decode | SSE 事件含 `event_id`；API 有 `requires_continuation` 和 opaque `continuation_token`；SDK 增加相应 continuation 支持 | 23.2、23.6 分开事件流恢复、生成续接和 `previous_interaction_id`，不把任一 token 当作外部副作用恢复凭据 |
+| Interaction history 与逐轮配置 | `previous_interaction_id` 让服务端取回历史；tools、system instruction、generation config 只作用于当次 Interaction，需逐轮重发 | 23.1—23.3 说明服务端会话续接不是应用任务快照，并与 host task state 分开 |
+| 恢复标识 | Interaction `id`、`previous_interaction_id`、function `id`/`call_id`、SSE `event_id` 与 `continuation_token` 分属资源、对话、工具往返、事件流和长解码 | 23.2 集中对照五种标识，避免将不同恢复机制合称 checkpoint |
+| steps、thought summary 与 signature | API v1 reference 定义有序 typed steps；Thinking guide 要求无状态重发 thought blocks 和 built-in tool signatures；signature 不能当作可读推理 | 23.4 解释原样保留及官方必需性表述差异，不写 SDK 内部类实现 |
+| 工具请求与结果关联 | `FunctionCallStep.id` 与 `FunctionResultStep.call_id` 配对；授权、执行回执和外部事实仍由宿主维护 | 23.5 用工单评论故障窗口连接 API step 与第 4、8、17、21 章 |
+| stream 恢复与 long decode | SSE 事件含 `event_id`；API 有 `requires_continuation` 和 opaque `continuation_token` | 23.2、23.6 分开事件流恢复、生成续接和 `previous_interaction_id`，不把任一 token 当作外部副作用恢复凭据 |
 | 状态、预算与不完整结果 | API status 有 `incomplete` 和 `requires_continuation`；Thinking guide 说 `max_output_tokens` 包含 thoughts，可能硬截断并产出 incomplete | 23.6 解释状态判定；删掉特定型号 token 上限和成本/质量评测处方 |
-| Interaction store、保留和删除 | 文档记录默认 store、付费/免费保留期、可配付费期限、按 ID 删除以及 `store=false` 的限制 | 23.7 绑定查阅日期，区分 provider 资源和应用 memory/workspace；部署前要求复核项目合同 |
-| provider-managed media steps | API v1 reference 有 `processing_call` / `processing_result` 类型 | 仅在工具 step 边界中说明其不等于客户端 function；删除旧稿视频 token/质量百分比和模型性能段落 |
+| Interaction store、保留和删除 | 文档记录默认 store、付费/免费保留期、可配付费期限、按 ID 删除以及 `store=false` 的限制 | 23.7 绑定查阅日期，区分 provider 资源和应用 task/workspace；部署前要求复核项目合同 |
+| provider-managed media steps | API v1 reference 有 `processing_call` / `processing_result` 类型 | 23.5 简要说明其不等于自定义 function；删除旧稿视频 token/质量百分比和模型性能段落 |
 | 通用任务 checkpoint 与评测 | 相关状态所有权、幂等和 verifier 机制已有本册第 17、21 章及第七册覆盖 | 本章只说明 provider API 的交接边界，不另造统一 probe 套件或评分门禁 |
 
 ### 章节组织样本
@@ -46,17 +47,25 @@ Diátaxis 用来辨认教程、操作指南、参考和解释任务；它不是�
 
 ## 新正文路线
 
-1. 用长任务中断切入，区分一次 provider Interaction 与应用 task。
-2. 用简表说明 `id`/`previous_interaction_id`、function `id`/`call_id`、SSE `event_id` 和 `continuation_token` 各自恢复什么。
-3. 沿同一 function call 例子讲 stateful history 和 stateless replay；说明配置重发、thought/signature 原样保存。
-4. 讲清 summary 与 opaque signature 的差别，并如实保留两处官方文档对 required 的表达差异。
-5. 追踪宿主授权、外部副作用、call result 回灌、断线后查询和 verifier 验收；把 built-in/provider-managed steps 与自定义 function 分开。
-6. 解释 background/status/incomplete/continuation 与存储/删除合同，并将动态值限定为查阅日快照。
-7. 回到“恢复后哪些事实仍成立”，列出当前接入需记录的 SDK、API version、model 与未知项。
+1. 用工单评论任务中断切入，区分恢复对话、事件流、长解码和外部业务动作。
+2. 逐项辨认 Interaction `id`、`previous_interaction_id`、function `id`/`call_id`、SSE `event_id` 与 `continuation_token`。
+3. 对照 stateful history 与 stateless replay，解释逐轮重发配置和实际收到的 thought/signature 状态。
+4. 区分可选的 thought summary 与 opaque signature，并如实保留 Thinking guide 与 API reference 的必需性标记差异。
+5. 追踪 function 提议、宿主授权、外部执行、回执关联与未知结果核查；说明 provider-managed media step 的边界。
+6. 解释 Interaction status、事件流/长解码恢复和 `max_output_tokens` 导致的 `incomplete`。
+7. 交代 `store`、保留期、删除以及宿主独立数据的生命周期，动态值绑定查阅日期。
+8. 以状态来源逐项对账收束，并记录 API/SDK/model 版本和未验证边界。
 
 ## 配套和未决风险
 
-- [2026-11-16 交叉链接记录](chapter-23-crosslink-note.md)指出原研究文件缺失；本轮补建 research 证据笔记并将替换正文与 `BOOK_SERIES.md` 中的失效引用。
+- [交叉链接记录](chapter-23-crosslink-note.md)中的缺失 source-note 目标已从正文与 `BOOK_SERIES.md` 移除；新研究记录已建立并链接。
 - `thought.signature` 的必需性在 Thinking guide 与 API v1 reference 的标记粒度不同；本轮不调用真实 endpoint，按 endpoint/SDK 版本将该边界留给接入方验证。
 - 保留期、API version、SDK continuation 行为均可能变化，正文会注明文档日期和适用产品范围。
-- 当前状态：正文、目录、`BOOK_SERIES.md`、旧 2026-09 练习和相关面试题尚待同步；静态验收未执行。
+- 正文、目录、`BOOK_SERIES.md`、练习、面试题、知识图谱、第二十册架构地图及全套进度交接均已同步。
+
+## 静态验收
+
+- 正文 H2 `23.1`—`23.8` 连续；Markdown 围栏成对；无占位符。唯一的 `text` 围栏明确标为概念示意，不是可执行 API 请求。
+- 检查本章正文、目录、`BOOK_SERIES.md`、练习、题库、章节审计、交叉链接记录与架构审计中的 11 个相关本地目标，缺失为 0；读者材料中对旧 `gemini-3.8-flash-source-notes.md` 的引用为 0。
+- `git diff --check` 通过。
+- 未运行书中代码、SDK、真实 API、自动化测试、模型、benchmark 或 PDF；未验证 GitHub 页面渲染和外链长期可达性。
