@@ -28,9 +28,9 @@
 
 扩展要求：补充 PyTorch engineering interview readiness 模块，用 0 依赖脚本审计回答是否覆盖 tensor、autograd、Module、DataLoader、training loop、AMP / memory、DDP、debug / profiling 和 Transformer components，并输出 topic coverage、formula checks、debug coverage、red flags、revision plan 和 gate pass，作为项目面试前的自检报告。
 
-扩展要求：补充 Transformer 架构选择审计模块，用 0 依赖脚本输入 toy architectures 的 route steps、training parallelism、content routing、next-token prediction alignment、scaling evidence、ecosystem readiness、hardware fit、ICL support、long-context efficiency、KV efficiency 和 streaming state，输出 route score、foundation score、deployment pressure、failed gates、ranked architectures 和 weakest architecture，并解释为什么 Transformer 作为基础主干是多维度综合胜出，而不是在长上下文、KV cache 或流式状态上没有代价。
+扩展要求：完成 Transformer 架构比较证据简报。选定相同任务和可比的模型/训练条件，分别记录信息路径、训练并行、状态表示、长上下文检索、证据位置与分散度、KV/流式成本、硬件与生态条件；每项结论注明来源、模型/版本、评测协议和未覆盖范围。用对齐表呈现取舍，不构造 route score、foundation score、总排名或任意通过门槛，也不预设 Transformer 在所有任务上综合胜出。
 
-扩展要求：补充 Attention 路由审计模块，用 0 依赖脚本输入 toy attention cases 的 query、keys、visible mask、expected route、interpretation support，输出 top route、route hit、future mass、raw entropy、scaled entropy、row sum、route hit rate、future leak rate、avg entropy gain、interpretation risk rate、failed cases、failed gates 和 attention routing gate，并解释为什么 Self-Attention 的 mask、softmax 和缩放都正确时，仍可能因为 lost-in-the-middle 或解释边界失败。
+扩展要求：补充 Attention 信息路径证据简报。选定一个任务和有来源依据的模型/示例，说明 mask 允许哪些位置交互、attention 如何加权 value，以及这条计算路径不能保证什么；若比较模型行为，用保持其他输入条件不变的证据反事实，并记录模型版本、提示、输出和限制。将 mask 计算、任务证据使用和内部机制解释分开；没有实际模型运行时标为来源分析或教学推演，不生成 toy route hit、attention entropy 或通用通过门槛。
 
 扩展要求：补充 QKV / Head 子空间审计模块，用 0 依赖脚本输入 toy heads 的 query、key bank、value features、target token 和 target feature，输出 QK route hit、OV write hit、head redundancy、interpretation risk、MHA / GQA / MQA KV cache MiB、failed gates 和 qkv head gate，并解释为什么 attention head 要同时看 QK 读哪里、OV 写什么、head 功能冗余和 KV head 压缩。
 
@@ -48,9 +48,9 @@
 
 扩展要求：完成 Attention Cost Evidence Brief。给定 batch、query heads、query/key 长度、head dimension、dtype 与 mask，推导 pair 数、主要矩阵乘 FLOPs，以及只有在 score/prob 矩阵确实被物化时才适用的 payload 估算；用一个 causal 例子区分可见 pair、dense tensor shape 与 kernel 实际工作量，再手动追踪两块 online-softmax 状态的合并。若报告速度或峰值显存，固定模型、设备、runtime/kernel、shape、dtype、mask 与测量方法，并把 profile 结果和理论账本分开；不设置任意总分或通过阈值。说明 FlashAttention 优化 dense exact attention 的分块与 IO，sliding window 改变可见关系，PagedAttention 管理 serving KV 的物理分配，GQA 改变模型的 KV-head 结构。
 
-扩展要求：补充 KV Cache 长上下文 serving 成本审计模块，用 0 依赖脚本输入 layers、batch、sequence length、query heads、KV heads、head dim、dtype bytes、prompt length 分布和 KV block size，输出 MHA / GQA / MQA KV cache GiB、GQA 相对 MHA 节省率、32K 长上下文 cache GiB、per-token cache KiB、decode read GiB per step、paged blocks、waste tokens、waste ratio、failed gates 和 KV cache gate，并解释为什么 KV cache 是推理运行时状态、GQA/MQA/MLA 是模型结构优化、PagedAttention 是 serving memory manager、FlashAttention 是 kernel / IO 优化。
+扩展要求：完成 KV Cache Capacity Brief。选定并记录一个模型配置和请求 workload，按层列出显式 K/V、latent cache、窗口或递归状态；用活跃请求的实际长度、每层状态维度和数据类型计算逻辑 payload 与单 token 增量，说明并行分片/复制如何影响单卡账目。比较 MHA/GQA/MQA 时只把相同维度与精度下的 KV head 比例当作 payload 关系；MLA 使用具体 latent 与位置相关维度。另行说明 PagedAttention 的物理分配、前缀共享和尾块浪费，以及它们与逻辑 payload 的区别。吞吐、延迟或质量主张必须绑定模型、设备、runtime、并发和测量方法；不使用任意成本阈值或通用 KV cache pass gate。
 
-扩展要求：补充 ICL / Token Retrieval 审计模块，用 0 依赖脚本输入 few-shot 示例、query、expected label、task labels、示例位置、噪声标记和冲突示例，输出 label space coverage、format consistency、top example、predicted label、retrieval label match、middle relevant examples、conflicting relevant examples、middle evidence risk、conflict rate、failed gates 和 ICL gate，并解释为什么 few-shot prompt 要同时审计标签空间、格式、上下文证据使用、位置风险、检索标签匹配和冲突样本。
+扩展要求：完成 ICL Context Dependence Brief。固定并记录模型 revision、任务、数据、prompt 格式和生成设置，构造无示例/有示例、反事实映射，以及适用时的标签置换、示例顺序和证据位置对照；逐桶报告输入长度、准确率或 exact match、证据使用错误和代表性失败样本。把上下文依赖行为、模型参数先验、外部检索质量与机制解释分开；说明训练数据是否包含类似任务通常无法确认。不得用 Jaccard 等 toy 相似度模拟模型的检索行为，也不设置通用 ICL 通过门槛或固定阈值。
 
 ## 项目 3：LoRA/SFT 中文助手
 

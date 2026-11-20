@@ -233,9 +233,9 @@
     考察点：VQA v2 互补图像对、POPE 对象幻觉探测、MMMU 学科推理、DocVQA/ANLS 格式边界、ChartQA 数值容差、AudioBench 任务覆盖、Video-MME/MLVU/LVOmniBench 长视频、LongShOTBench 开放式 rubric 与 verifier 人工校准、MMLongBench-Doc 跨页证据、NIAH/Lost in the Middle/RULER/NoLiMa/LongBench 的难度路线。
     回答框架：先按失败类型选择测量工具：VQA v2 检查答案是否随图像反事实变化，POPE 通过存在/不存在对象探测幻觉，MMMU 看专业知识与多模态推理，DocVQA 看单页读取但要审计 ANLS、prompt suffix 和输出长度，ChartQA 看读数与派生计算，AudioBench 分开语音/环境声/副语言，Video-MME/MLVU 覆盖视频时长和任务类型，LVOmniBench 提供长音视频多选诊断，LongShOTBench 则以单轮/多轮开放题和逐标准项 rubric 检查跨模态推理；其 verifier 与人工的一致性只支持论文抽样子集，多轮上下文使用理想前轮回答。MMLongBench-Doc 测跨页、多模态和不可回答问题。长文本侧用 NIAH 做检索冒烟、Lost in the Middle 查位置敏感、RULER 增加多针/组合复杂度、NoLiMa 降低词面重叠、LongBench 系列补真实多任务。再指出各 benchmark 的构题、指标、模态预处理和预算不同；每项只支持其任务协议下的结论，应并列报告切片并补目标分布 holdout，不能拼一个跨模态排行榜。来源与范围见[第七册第七章正文](book-07-evaluation-experiments/chapters/07-多模态与长上下文评估.md)和[本次新增的多模态协议记录](research/multimodal-longcontext-evaluation-protocols-2026-11-03.md)。
 
-49F. RULER、NoLiMa、LongBench v2/Pro、MRCR v2 和 LongHarness 各自解决了哪类长上下文评测缺口？
+49F. RULER、NoLiMa、LongBench v2/Pro、MRCR v2、LongHarness、LURCH 与 CRE 各自补上哪类长上下文评测证据？
     考察点：合成复杂度控制、低词面重叠、自然任务/专家构题、固定复杂度极长长度曲线、模型与 harness 的系统组合、长度单位与方法边界。
-    回答框架：先把测试拆开：RULER 在 NIAH 之外加入多 needle、多跳与聚合，用可控合成任务检查长度和复杂度；NoLiMa v3 降低问题与证据的词面重叠，报告 13 个模型中 11 个在 32K 低于各自短上下文基线的一半，但这仍是特定 needle/haystack 协议；LongBench v2 用 503 道高难多选题覆盖单/多文档、对话、代码和结构化数据，但其长度单位是 words；LongBench Pro v1 用 1,500 条中英文样本、任务分层和 token 长度细分，公开预印本最大 256K；DeepMind MRCR v2 固定相对简单的多轮共指任务并扩到 8M，适合测超长位置曲线，不代表复杂推理；LongHarness Bench v1 比较四种 Agent harness 与直接推理在四类长上下文任务上的质量和成本，结果绑定具体模型与实现，也不是 1M 通用能力测试。最后说明 NIAH/Lost in the Middle 检查输入与位置，真实业务 holdout 负责目标分布；不同模型、harness、工具权限、长度单位和预算下的分数不能拼成一条排行榜。论文实验和版本边界见[第七册第十三章研究记录](research/long-context-evaluation-and-effective-capability-2026-11-03.md)。
+    回答框架：先把测试拆开：RULER 在 NIAH 之外加入多 needle、多跳与聚合，用可控合成任务检查长度和复杂度；NoLiMa v3 降低问题与证据的词面重叠，报告 13 个模型中 11 个在 32K 低于各自短上下文基线的一半，但这仍是特定 needle/haystack 协议；LongBench v2 用 503 道高难多选题覆盖单/多文档、对话、代码和结构化数据，但其长度单位是 words；LongBench Pro v1 用 1,500 条中英文样本、任务分层和 token 长度细分，公开预印本最大 256K；DeepMind MRCR v2 固定相对简单的多轮共指任务并扩到 8M，适合测超长位置曲线，不代表复杂推理；LongHarness Bench v1 比较四种 Agent harness 与直接推理在四类长上下文任务上的质量和成本，结果绑定具体模型与实现，也不是 1M 通用能力测试。LURCH v1 用 evidence scope、dispersion 和 reasoning depth 描述样本难度，在其 6,550 个样本和 4 个模型中报告条件相关；属性及 reasoning graph 有自动标注，不能作因果或普遍结论。CRE v1 在特定 GSM8K/ARC-Challenge 设置中交叉改变任务位置、filler 和上下文长度；每格样本少且 API/provider 有异质性，只展示一种控制方法。最后说明 NIAH/Lost in the Middle 检查输入与位置，真实业务 holdout 负责目标分布；不同模型、harness、工具权限、长度单位和预算下的分数不能拼成一条排行榜。论文实验和版本边界见[长上下文评测研究记录](research/long-context-evaluation-and-effective-capability-2026-11-03.md)。
 
 49G. Model Card、HELM、CheckList、G-Eval 和 Evaluation Card 分别补上了模型发布与评估证据链的什么缺口？
     考察点：披露与验证的区别、共同评测条件、行为测试、LLM judge 校准、评测运行可追溯性、claim 粒度。
@@ -968,15 +968,15 @@
 
 31M. 如何系统审计 O(n^2) Attention 的计算与显存瓶颈？
    考察点：query-key pair 数、主要矩阵乘 FLOPs、score 矩阵是否物化、在线 softmax、causal mask 与训练/prefill/decode。
-   回答框架：先写 $S/P$ 的 shape 为 $[B,H_q,T_q,T_k]$，pair 数为 $BH_qT_qT_k$；只计 $QK^\top$ 和 $PV$ 时，主要 FLOPs 约为 $4BH_qT_qT_kd_h$。若实现物化 dense score 或 probability，单张矩阵 payload 才按 $BH_qT_qT_ks$ 估算；平方计算量不代表 attention 必须保存平方级中间矩阵。FlashAttention 用分块和在线 softmax 避免持久化完整 $S/P$，并可在反向中重算 tile；它仍处理 dense $T^2$ pair，浮点次序也不承诺逐位相同。Causal mask 的理论可见 pair 为 $T(T+1)/2$，但 dense 分配和实际执行量取决于 kernel。训练/prefill 使用整段 query，decode 单步 $T_q=1$、$T_k=t$，历史 KV 的容量和带宽转到第十一章。最后将复杂度账本与目标硬件上的 profile 分开。
+   回答框架：先写 $S/P$ 的 shape 为 $[B,H_q,T_q,T_k]$，pair 数为 $BH_qT_qT_k$；只计 $QK^\top$ 和 $PV$ 时，主要 FLOPs 约为 $4BH_qT_qT_kd_h$。若实现物化 dense score 或 probability，单张矩阵 payload 才按 $BH_qT_qT_k\,s$ 估算；平方计算量不代表 attention 必须保存平方级中间矩阵。FlashAttention 用分块和在线 softmax 避免持久化完整 $S/P$，并可在反向中重算 tile；它仍处理 dense $T^2$ pair，浮点次序也不承诺逐位相同。Causal mask 的理论可见 pair 为 $T(T+1)/2$，但 dense 分配和实际执行量取决于 kernel。训练/prefill 使用整段 query，decode 单步 $T_q=1$、$T_k=t$，历史 KV 的容量和带宽转到第十一章。最后将复杂度账本与目标硬件上的 profile 分开。
 
 31N. 如何系统审计 KV Cache、长上下文推理和显存增长？
-   考察点：KV cache formula、per-token cache、prefill/decode、decode bandwidth、MQA/GQA/MLA、PagedAttention、prefix sharing、cache gate。
-   回答框架：先写出 KV cache 公式 `L * B * T * H_kv * D_h * 2 * bytes`，强调它是推理时每个活跃请求的运行时状态，不是权重显存。Prefill 中 `T_q=T_k=n`，负责构建 prompt cache 并影响 TTFT；decode 中 `T_q=1,T_k=past+1`，单步计算线性但要读取历史 K/V，常受显存容量和带宽限制。MHA、MQA、GQA 的核心差异是 `H_kv`，GQA/MQA 降低 cache 和读取带宽；MLA 压缩 KV 表示本身。PagedAttention 不是新 attention 公式，而是用 block/page 管理变长请求、碎片、prefix sharing 和 continuous batching。最后用 KV cache gate 同时看 cache GiB、每 token cache 增长、decode 读取量、block 浪费、质量回归和 TTFT/TPOT。
+   考察点：KV cache 逐层更新、cache payload 估算、prefill/decode、MQA/GQA/MLA、PagedAttention，以及模型上下文长度与服务容量的区别。
+   回答框架：因果 Transformer prefill 后保存各层 prompt 位置的 K/V；继续生成时只计算新位置，把新 K/V 加入对应层，并让新 query 读取已缓存历史。在参数、旧 token、位置编号和旧位置可见规则固定且逐位置运算确定的条件下，数学上的缓存结果与前缀重算相同，浮点实现仍可能有舍入差异。若有 $L$ 层、$B$ 个同长度请求，每层的 K/V head 数和维度相同，则显式全局 KV payload 约为 $2LBTH_{kv}d_hs$ bytes；请求长度不同时按各请求实际长度求和。MQA/GQA 改变 K/V head 数，MLA 改变所存表示，质量和延迟收益仍要按具体模型评估。PagedAttention 改变 KV blocks 的物理分配，continuous batching 改变活跃请求集合，二者都不直接减少相同活跃 token 所需的逻辑 KV payload；前缀共享可避免重复存储兼容状态。最后区分声明的上下文长度、目标设备容量和有效检索能力。
 
 31O. 如何系统审计 In-Context Learning 和显式 token 检索能力？
-   考察点：ICL、few-shot demonstrations、label space、format consistency、context evidence use、middle evidence risk、token retrieval audit。
-   回答框架：先强调 ICL 不更新参数，而是把任务说明、示例、标签和证据作为上下文条件进入固定参数前向推理。Few-shot 示例不只提供正确答案，还提供标签空间、输入分布、输出格式和任务 framing；因此要检查 label space coverage、示例格式一致性和输入输出映射。显式 token 检索能力要看模型能否定位并使用上下文中的相关示例、文档证据、工具字段或变量定义，而不是只靠参数先验。长上下文还要做位置分桶，特别检查中间证据、首尾偏置、冲突相似示例和噪声 chunk。最后用 ICL gate 把标签空间、格式、retrieval label match、中间证据风险、conflict rate 和验证集准确率组合起来，而不是只凭单个 prompt demo 判断有效。
+   考察点：固定参数下的上下文条件化、示例的信息组成、上下文证据使用、顺序/位置敏感性、内外部检索的分工，以及机制结论的证据范围。
+   回答框架：ICL 是模型不做本次参数更新、而以当前上下文为条件完成预测的行为；任务提示和 demonstrations 都可能提供信息。Min 等人在所测分类和多选任务中发现，随机替换示例标签有时只造成较小影响，输入分布、标签空间与格式也有作用，但这不等于正确映射在所有任务中都不重要。可用保持其余内容不变的反事实映射测试上下文依赖，并分别改变示例顺序和证据位置；单次成功或 attention 权重不能证明稳定检索。Induction heads、潜在任务推断和类梯度下降解释有不同实验范围，ICL 与标准梯度下降是否等价仍是开放问题。RAG 的检索器负责从外部语料取候选，生成模型还要正确使用进入上下文的证据；这两步需分开评估。
 
 31P. MoE 的 load-balancing loss、router z-loss 和 DeepSeek-V3 的 bias update 分别控制什么？
    考察点：expert token fraction、router probability、router logits 数值范围、batch-wise 与 sequence-wise balance。
@@ -1902,7 +1902,7 @@
 
 3. 什么是 lost in the middle？
    考察点：长上下文、位置偏置、中间信息、检索鲁棒性。
-   回答框架：模型在长上下文中更容易使用开头和结尾信息，忽略中间位置的信息，说明长窗口不等于均匀使用所有位置。
+   回答框架：Liu 等人在其多文档 QA 与合成键值检索设置中报告位置相关的性能变化，中间证据在部分条件下较难利用。它说明位置应被控制和报告；现象受模型、任务和填充内容影响，不是所有模型固定的 U 形规律，也不能单凭曲线解释内部机制。
 
 4. 如何把 4k context 模型扩展到 128k？
    考察点：RoPE scaling、continued pretraining、长数据、SFT、评估、KV Cache。
@@ -1926,7 +1926,7 @@
 
 9. 如何评估 lost in the middle？
    考察点：证据位置、分桶、准确率曲线、位置偏置。
-   回答框架：把同一证据放在开头、25%、50%、75%、结尾等位置，比较准确率；如果中间明显更差，就说明存在 lost in the middle。
+   回答框架：固定问题、答案、证据和总 token 长度，把目标分别放在开头、中间、结尾；再独立改变长度与填充文本，按每个条件报告样本数、准确率和不确定性。中间位置较差表示该任务和设置有位置敏感性，不代表普遍规律或已定位到内部机制。
 
 10. 长上下文评估为什么要测短任务回归？
     考察点：RoPE scaling、继续训练、短任务退化、产品能力。

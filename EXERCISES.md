@@ -254,8 +254,9 @@
 31M. 用 [Kaplan scaling laws](https://arxiv.org/abs/2001.08361) 和 [Chinchilla](https://arxiv.org/abs/2203.15556) 的原始设定比较 held-out loss、模型/数据范围和固定训练计算目标。说明 70B/1.4T 与 Gopher 对照能支持什么、不能推出固定 token/parameter 比；再列出数据处理或服务目标发生变化时需要补充的证据。
 31N. 给定 $B=1$、$H_q=32$、$T_q=T_k=32768$、$d_h=128$ 和 BF16，计算 dense pair 数、$QK^\top$ 与 $PV$ 的主要 FLOPs、以及一张 score 矩阵的 payload。再把长度加倍，说明哪些量会变为四倍，并列出估算未包含的成本。
 31O. 对长度 $T=8192$ 的 causal self-attention，比较可见 pair 数、dense score 矩阵 shape 和实际 kernel 工作量；再用第十章的两块教学权重与 value 合并全局输出，解释为什么不能直接平均局部输出，以及 FlashAttention 改变的显存项是什么。
-31P. 运行第 21 册第 11 章的 KV Cache 成本审计 demo，解释 `mha_8k_cache_gib`、`gqa_8k_cache_gib`、`gqa_cache_per_token_kib`、`decode_read_gib_per_step`、`paged_waste_ratio` 和 `kv_cache_gate_pass` 分别说明什么。
+31P. 给定长度为 $n$ 的 prompt 和随后生成的 $y_1,y_2$，逐层说明 prefill 结束时 cache 中有哪些 K/V；再说明为了预测 $y_2$，模型需要计算哪个新位置、把哪些新 K/V 加入 cache，以及它怎样读取旧位置。列出缓存结果与整段重算等价所需的条件。
 31Q. 给定 `L=32`、`B=16`、`T=8192`、`H_q=32`、`H_kv=8`、`D_h=128`、fp16，手算 GQA KV cache 显存，并说明把 `H_kv` 降到 4 可能带来哪些质量和工程风险。
+31R. 用一组任意映射示例构造 few-shot prompt，并设计只改动目标映射的反事实对照。说明输出随映射变化能支持什么结论、不能证明什么机制；再设计单独的顺序或证据位置对照，避免把多个变化混在一次比较里。
 32. 比较 attention visibility、padding validity、loss mask 与独立样本边界的职责；说明一个 prompt token 为什么可以被读取却不计入 assistant-only loss。
 33. 用自己的话解释 GPT 和 BERT 的训练目标区别。
 34. 画出 decoder-only Transformer block 的数据流。
@@ -279,9 +280,9 @@
 52. 设计把 position embedding 替换成 RoPE 的接口。
 53. 打印 miniGPT 每一层输出 shape，确认数据流。
 54. 训练一个 miniGPT。
-54A. 写一个 0 依赖 Transformer 架构选择审计 demo，输入 toy architectures 的 route steps、training parallelism、content routing、next-token prediction alignment、scaling evidence、ecosystem readiness、hardware fit、ICL support、long-context efficiency、KV efficiency 和 streaming state，输出 ranked architectures、foundation score、deployment pressure、failed gates 和 weakest architecture；要求解释为什么 Transformer 综合过线但仍有长上下文和 KV cache 压力。
-54B. 写一个 0 依赖 Attention 路由审计 demo，输入 toy cases 的 query、keys、visible mask、expected route、interpretation support，输出每个 case 的 top route、route hit、future mass、raw entropy、scaled entropy、row sum、route hit rate、future leak rate、avg entropy gain、interpretation risk rate、failed cases、failed gates 和 attention routing gate；要求至少构造一个 causal mask 正确但 route miss 的样本。
-54C. 写一个 0 依赖 ICL / token retrieval 审计 demo，输入 few-shot 示例、query、expected label、task labels、示例位置和噪声标记，输出 label space coverage、format consistency、top example、predicted label、retrieval label match、middle relevant examples、conflicting relevant examples、middle evidence risk、conflict rate、failed gates 和 ICL gate；要求至少构造一个相关示例在中间位置的样本和一个近尾冲突示例覆盖正确标签的样本。
+54A. 完成 Transformer 架构比较证据简报：为相同任务对齐可比较的模型或训练条件，分别记录信息路径、训练并行、状态表示、长上下文检索、KV/流式成本、硬件与生态证据；每个结论注明评测协议和边界。说明为何不能用一个 toy 总分或固定门槛给架构排普遍名次。
+54B. 给定一组 query、key、value 和 causal mask，手算一个位置的 attention 输出；再设计一个只改变目标证据的反事实输入，说明输出变化能支持什么上下文使用结论、不能证明什么内部机制。区分 mask/softmax 计算正确、证据是否被用对、attention 权重能否解释输出；不构造通用 route score 或通过门槛。
+54C. 为一个固定模型 revision 和任务写 ICL 行为评估方案，包含 zero-shot 与 few-shot 对照、仅改变映射的反事实样本，以及独立的示例顺序/证据位置对照。列出需保存的模型、数据、prompt、生成设置和分桶结果；解释为什么 toy 字符串相似度不能代替模型检索实验，也不能由单个任务的成功推出通用能力。
 
 ## 阶段 3：训练与对齐验收
 
@@ -573,14 +574,14 @@
 103. 解释为什么不能只修改 `max_position_embeddings` 来获得长上下文能力。
 104. 用自己的话解释 Position Interpolation 和 RoPE scaling。
 105. 设计一个长上下文 continued pretraining 数据混合方案。
-106. 设计一个检测 lost in the middle 的评估集。
+106. 设计一个长上下文位置评估集：包括单条证据与多条证据、答案存在与缺失样本；说明怎样固定问题、证据和总长度，怎样分别改变位置、填充文本和证据分散度，以及每项对照能识别什么、不能说明什么。
 107. 列出把 4k 模型扩展到 128k 的完整步骤。
 108. 分析长上下文训练对 attention 计算、显存和 KV Cache 的影响。
 109. 设计一个长上下文 SFT 样本，要求答案必须依赖远距离证据。
 110. 用 3 分钟回答“长上下文和 RAG 是什么关系”。
 111. 解释为什么最大 context window 不能代表真实长上下文能力。
 112. 设计一个 needle-in-a-haystack 测试，并写出它不能覆盖的 3 类真实任务。
-113. 设计一个 lost in the middle 评估，按证据位置输出准确率表。
+113. 固定模型、任务和同一条证据，在开头、中间、结尾位置对照回答；至少再选择两种上下文长度和两类填充文本，逐格报告样本数与准确率。解释不同位置的分差受模型、任务和 filler 条件限制，不能据此断定内部机制。
 114. 构造一个需要 3 条分散证据才能回答的长文档 QA 样本。
 115. 构造一个包含相似错误证据的抗干扰长上下文样本。
 116. 设计一个引用准确性评估规则，检查引用是否支持答案。
@@ -763,7 +764,7 @@
 6G. 为同一个客服问答任务比较 G-Eval、Prometheus 2 和 SAJA：分别画出一次样本从输入、评分到汇总的路径，指出它们依赖 token 概率、专用 evaluator 训练数据或人工校准标签中的哪些资源；分别选择标签一致、模型排序、绝对分数校准或自动放行指标。再设计一组仅改变答案事实、仅反转 rubric 的反事实样本，并用独立 holdout 检查候选方法在目标数据上的边界；解释论文 headline score 为什么不能直接横向排名。
 6H. 为同一个评估计划比较 GSM8K、GSM-Symbolic/GSM-NoOp、ORM/PRM/ProcessBench、EvalPlus、LiveCodeBench、SWE-bench Verified、SWE-Bench Pro 与 Pro V2：每条路线说明测量对象、关键操作、论文或官方报告支持的结论、作者设置中的限制，以及针对该限制的下一步补证。区分过程步骤准确率与 CoT 的参数/反事实忠实性探针各自能支持什么。对照 2026 年 Verified/Pro 审计与 Pro V2 修订，固定 benchmark 版本、split、harness 和测试政策。为一项数学任务和一项代码助手任务各选一条主路径，设计固定回归集、滚动新题和独立 holdout 的分工；说明为何这些分数不能合成一个总分。
 6I. 为一个“多页合同 + 图表附件 + 会议录音”的助手设计评估组合。比较 DocVQA/ANLS、MMLongBench-Doc、ChartQA、AudioBench，以及 NIAH、Lost in the Middle、RULER、NoLiMa、LongBench v2 各自能测的失败；如果会议有同步视频，再评估 Video-MME/MLVU、LVOmniBench 和 LongShOTBench 是否适配该目标。选出主任务基准和补充探针，写出各自的样本构造、指标、答案/证据格式、提示与预处理版本、一个重要限制，以及针对该限制的私有对照。若使用 LongShOTBench，另说明 rubric 级 verifier 怎样对照人工标准校准，并指出其理想前轮答案和单次生成边界。最后说明为什么不能把这些分数平均成一个“多模态长上下文总分”。
-6J. 为一个声明支持 1M context 的研究助手设计一套评测证据链。分别说明 NIAH、Lost in the Middle、RULER、NoLiMa、LongBench v1/v2、LongBench Pro、MRCR v2 和 LongHarness Bench 各自补上什么缺口、使用什么长度单位、最容易误读的结论是什么；特别说明 LongHarness 比较的是长上下文任务中的模型—harness 系统质量与成本，不是通用 1M 能力榜。组合成“输入/位置冒烟 → 受控复杂度 → 自然任务覆盖 → 1M 目标语料与 harness 对照”的评测矩阵。固定 tokenizer、模板、工具权限、推理预算和文档来源，设计至少一个冲突归因与一个不可回答对照；按任务和长度报告正确率、证据召回、引用支持、P95、单位成功成本与不确定性，并指出哪些结果仍不能支持“模型有效使用任意 1M 输入”。
+6J. 为一个声明支持 1M context 的研究助手设计一套评测证据链。分别说明 NIAH、Lost in the Middle、RULER、NoLiMa、LongBench v1/v2、LongBench Pro、MRCR v2、LongHarness Bench、LURCH 和 CRE 各自补上什么缺口、使用什么长度单位、最容易误读的结论是什么；特别说明 LongHarness 比较的是模型—harness 系统质量与成本，LURCH 的证据范围/分散度/推理深度是论文提出的样本属性，CRE 控制特定推理任务的位置、填充内容和长度，二者都不构成通用 1M 能力榜。组合成“输入/位置冒烟 → 受控复杂度 → 自然任务覆盖 → 目标语料与 harness 对照”的评测矩阵。固定 tokenizer、模板、工具权限、推理预算和文档来源，设计至少一个冲突归因与一个不可回答对照；按任务和长度报告正确率、证据召回、引用支持、P95、单位成功成本与不确定性，并指出哪些结果仍不能支持“模型有效使用任意 1M 输入”。
 6K. 选择一个刚发布的 frontier model claim，先拆成模型身份、架构/接口、任务能力和产品效果等最小命题，再比较 Model Card、Datasheet、HELM、CheckList、G-Eval 与 Evaluation Card 分别解决什么问题。为每种方法写出输入、操作机制、它能支持的结论、作者结果或证据、主要限制及下一步补证；再用 Claim Ledger 记录来源、revision、harness、预算、独立性和未知项。最后选一项厂商 benchmark、一项第三方 provider/config 测量和一项固定 harness 的独立评测，说明为何缺失榜单行不等于零分，也不能借用相邻模型的结果。用一组明确标为合成的 0—1 评分、子 claim 权重和条件字段数，手算内部证据分数、覆盖率和条件完整率；解释为何这些比率不能解释成真实性概率。再审阅 Opus 5.5 两份发布材料的 OSWorld 标签差异，并把每个数字绑定来源、版本和成功定义。
 6L. 为一个要自动处理真实工作流的 Agent 设计评测组合，比较 SWE-bench、SWE-Gym、Terminal-Bench 2.0、WebArena、OSWorld、BrowserGym、τ-bench、ToolSandbox、AgentDojo、GAIA、ScienceAgentBench、PaperBench、METR 和 Gaia2。每种选用的方法都写清任务对象、机制、判定器、作者证据、限制和下一步补证；明确区分 benchmark、实验框架、训练资源、难度标尺与动态环境。再设计工具合同审计，验证工具前置条件、状态变化和 grader 实际读取字段，并说明为什么“潜在缺陷”不能直接推出 Agent 曾触发或榜单结论已改变。
  6M. 为一个长上下文 Agent 设计质量—成本与持久记忆评测：固定同一模型、任务输入、权限和预算，比较至少两个 harness，逐任务报告质量、调用/token 成本和延迟；再分别用 AdaMem、Memora、Mem2ActBench、OP-Bench 与 PS-Bench 的问题设计记忆写入、过期/撤回、工具参数落地、过度个性化和安全意图判断对照。纳入无记忆、相关记忆、无关记忆、过期记忆及撤回后残留等样本，明确哪些结果只能说明对应 benchmark 条件，不能合并成单一记忆分数或泛化为产品安全结论。

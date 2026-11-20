@@ -859,6 +859,8 @@ $\alpha_{k}$ 是各版本 rollout 的混合权重。若当前策略与旧策略�
 \bigl(\log p_{T}(a_{t}\mid s_{t})-\log p_{S}(a_{t}\mid s_{t})\bigr)\right].
 ~~~
 
+这是定义在学生 rollout 分布上的期望目标，不是对一次采样得到的负 log-ratio 直接做普通监督下降；若使用 sampled token，更新应按 §17.9 的 stop-gradient policy-gradient surrogate 构造。若 $m_{t}$ 或 $w_{t}$ 依赖当前动作或后续状态，也要说明估计器如何处理这种依赖。
+
 若同时存在任务结果 reward，则还需要明确它与教师项如何组合，以及哪个分量负责最终正确性：
 
 ~~~math

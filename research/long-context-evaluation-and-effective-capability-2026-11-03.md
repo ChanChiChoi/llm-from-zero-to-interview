@@ -1,6 +1,11 @@
 # 长上下文评测与有效能力：来源证据
 
-检索与阅读日期：2026-11-03。本记录保存论文和官方 benchmark 文档支持的任务设计、版本、数字与证据边界；书册审阅决定与去向只写在 `progress/`。
+检索与阅读日期：2026-11-03；新增论文核对日期：2026-11-20。本记录保存论文和官方 benchmark 文档支持的任务设计、版本、数字与证据边界；书册审阅决定与去向只写在 `progress/`。
+
+## 教学与组织材料（2026-11-20）
+
+- **Stanford CS224V Fall 2026 课程安排：** [课程日程](https://web.stanford.edu/class/cs224v/schedule.html)，核读 11/11 的 “Long-Context Long-Horizon Deep Researcher” 和 11/16 的 “Agent Context Management”。日程把跨文档阅读、分析、比较，与上下文压缩、外部存储、长期记忆分作相邻课题；可作为从模型内上下文利用过渡到外部状态管理的组织样本。它只记录课程实际编排，不证明这种顺序普遍更优；系统/harness 细节仍由相关章节主讲。
+- **技术博客（页面署名 wh）：** [Evaluating Long Context (Reasoning) Ability](https://nrehiew.github.io/blog/long_context/)，2026-11-20 核读 “Existing Long Context Evaluation” 与 “What makes a good long context benchmark?”。文章将长上下文任务拆成相关信息定位与后续任务推理，并指出只扩大搜索空间不足以代表真实长程推理；这是作者的基准设计观点和自建 LongCodeEdit 案例，不作为普遍 benchmark 结论。作者页面未提供足以独立判断身份的详细介绍，因此仅借其解释路线作教学参照，核心事实仍以原始论文核验。
 
 ## NoLiMa v3：降低词面捷径
 
@@ -29,6 +34,20 @@
 - **阅读范围：** 摘要、§3 benchmark 设计、§4 实验结果与 limitations。
 - **来源支持的事实：** RULER 提供可配置长度和任务复杂度，覆盖多类型/多数量 needle、variable tracking、多词聚合和 QA。作者对 17 个长上下文模型运行 13 项代表任务，并报告虽然模型在 vanilla NIAH 上接近满分，但只有约一半模型能在其 32K “satisfactory performance” 标准下维持表现。
 - **证据边界：** 这是合成任务套件；“满意”由作者在该论文中定义。论文明确指出位置控制、现实长任务相关性和 prompt robustness 等限制，不能把 32K 结果当成统一产品门槛。
+
+## LURCH：长度之外的证据布局与推理难度
+
+- **来源与版本：** Qin et al., [Beyond Context Length: Characterising the Difficulty of Long-Context Reasoning](https://arxiv.org/abs/2610.22067v1)，arXiv v1，提交于 2026-10-15。
+- **阅读范围：** 摘要、§1、§§4.1—4.4、§§5.1—5.4、结论及附录 E 的 reasoning-graph annotation validation。
+- **来源支持的事实：** LURCH 从 17 个来源保留 6,550 个自然长上下文英文 QA 样本，原文上下文长度为 32K—256K tokens。作者提出 evidence scope（需要找到多少信息）、evidence dispersion（证据在上下文中分布多广）和 reasoning depth（证据到答案图中的依赖步数）作为补充长度的任务属性；在所测 4 个模型和该数据集内，三者与较低表现相关，证据分散样本随上下文变长退化更明显。
+- **证据边界：** 这是单版预印本；结果是 LURCH 任务中的条件相关而非因果效应。evidence 扩展与 reasoning graph 含自动标注；两位模型标注者的 depth 完全一致率为 65.6%、Spearman 相关为 0.48，最终分析选用其中一个标注者的图。样本来源、任务构成、图标注和 4 模型集合都限制外推，三个属性不是被证明适用于全部任务的完备度量。
+
+## CRE：推理任务中的位置、填充内容与长度控制
+
+- **来源与版本：** Zhang et al., [Positional Failures in Long-Context LLMs: A Blind Spot in Reasoning Benchmarks](https://arxiv.org/abs/2605.23170v1)，arXiv v1，提交于 2026-05-22。
+- **阅读范围：** 摘要、§1、§§3.1—3.5、§4 结果和 Limitations。
+- **来源支持的事实：** Context Rot Evaluation (CRE) 在 GSM8K 与 ARC-Challenge 任务中交叉控制 target-task 位置、filler 内容和上下文长度；论文使用 8K/32K/64K 三档长度、三类 filler、end/middle 位置和每条件 50 个样本，覆盖 9 个经不同 provider API 运行的模型。作者报告位置影响随模型、filler 和长度而变化，并主张推理任务也需要位置控制。
+- **证据边界：** 这是单版预印本和受限任务样本；每格 N=50，许多 64K 结果只有一个 seed；provider/API 异质性影响跨模型幅度比较，ARC-Challenge 结果功效有限。该设计展示一种因子控制方法，不是已验证的通用 benchmark 规范；文中 duplicate-at-end probe 也不隔离内部机制或构成产品修复方案。
 
 ## Lost in the Middle：关键信息位置影响上下文使用
 

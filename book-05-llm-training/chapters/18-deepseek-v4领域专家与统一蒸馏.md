@@ -343,11 +343,11 @@ DeepSeek-V4 报告披露了针对这一瓶颈的系统设计：教师权重放�
 ```math
 C_{\mathrm{task}}
 =C_{\mathrm{rollout}}
-+\sum_{i=1}^{N}q_{i}C_{\mathrm{teacher},i}
-+C_{\mathrm{logit/KL}}+C_{\mathrm{verifier}}+C_{\mathrm{I/O}}+C_{\mathrm{storage}}.
++\sum_{i=1}^{N}q_{i}c_{\mathrm{teacher},i}
++C_{\mathrm{logits/KL}}+C_{\mathrm{verifier}}+C_{\mathrm{I/O}}+C_{\mathrm{storage}}.
 ```
 
-令每一项都按同一个“每训练任务”的成本单位计量： $C_{\mathrm{rollout}}$ 是学生生成轨迹的成本， $C_{\mathrm{\mathrm{teacher}}},i$ 是教师 $i$ 每处理一个 token/状态的前向成本， $C_{\mathrm{logit}}/KL$ 是输出头重建与 exact KL 计算成本， $C_{\mathrm{verifier}}$ 是验证成本， $C_{I}/O$ 是参数/hidden-state/轨迹传输成本， $C_{\mathrm{storage}}$ 是持久化成本。 $q_{i}$ 是一个训练样本或 batch 中教师 $i$ 实际处理的 token/状态数；它由教师覆盖、采样策略和数据路由决定。这个表达提醒我们：全词表方案省去的主要是 sampled-token 近似带来的动作采样噪声，并没有省去教师前向、输出头计算或分布式读写。
+令总成本按“每训练任务”计量： $C_{\mathrm{rollout}}$ 是学生生成轨迹的成本， $q_i$ 是教师 $i$ 在该任务中需要评分的学生状态数， $c_{\mathrm{teacher},i}$ 是教师 $i$ 每处理一个状态的前向成本，因此二者相乘后也是每任务成本；教师覆盖、采样策略和数据路由会改变 $q_i$。 $C_{\mathrm{logits/KL}}$ 是输出头重建与 exact KL 计算成本， $C_{\mathrm{verifier}}$ 是验证成本， $C_{\mathrm{I/O}}$ 是参数、hidden state 和轨迹传输成本， $C_{\mathrm{storage}}$ 是持久化成本。这样各项都落在同一任务成本口径上。全词表方案省去的主要是 sampled-token 近似带来的动作采样噪声，并没有省去教师前向、输出头计算或分布式读写。
 
 用假设的统一成本点做一次逐项核算。若学生 rollout 花 `1.20` 点，数学教师处理 `200` 个状态、每状态 `0.002` 点，代码教师处理 `50` 个状态、每状态 `0.004` 点，则两位教师合计 $200\times0.002+50\times0.004=0.60$ 点。再假设输出头重建与 KL 为 `0.50` 点、verifier 为 `0.15` 点、I/O 为 `0.25` 点、存储摊销为 `0.10` 点，总成本为 $1.20+0.60+0.50+0.15+0.25+0.10=2.80$ 点/任务。若独立同分布任务的成功率为 `0.70`，简化的期望成本为 $2.80/0.70=4.00$ 点/成功任务。
 

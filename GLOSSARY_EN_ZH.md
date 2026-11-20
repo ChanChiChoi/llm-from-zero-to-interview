@@ -188,27 +188,23 @@ In-Context Learning / ICL：上下文学习
 
 Few-Shot Demonstration：少样本示例
 
-Label Space Coverage：标签空间覆盖率
+Label Space：标签空间
 
-Demonstration Format Consistency：示例格式一致性
+Explicit Context Retrieval（本书用语）：显式上下文检索；指相关信息已在输入中时，模型能否定位并在回答中正确使用其内容和条件。它是行为描述，不是统一基准或已证实的内部机制。
 
-Context Evidence Use：上下文证据使用
-
-Token Retrieval Audit：token 检索审计
-
-Retrieval Label Match：检索标签匹配率
-
-ICL Conflict Rate：上下文学习冲突率
-
-Middle Evidence Risk：中间证据风险
-
-ICL Gate：上下文学习门禁
+Induction Head：归纳头；一种 Transformer circuit 假说/机制，在重复上下文模式中利用先前 token 及其后继来形成续写线索。小型模型中有机制分析，大型模型对一般 ICL 的解释范围仍有限。
 
 Position Extrapolation：位置外推
 
 Position Interpolation：位置插值
 
 Lost in the Middle：中间信息遗失现象
+
+Evidence Scope：证据范围；回答依赖的必要信息量。长上下文任务的样本级难度描述之一，不是通用标准指标。
+
+Evidence Dispersion：证据分散度；必要证据在上下文中的位置分布范围。LURCH 以此描述样本难度；其度量和发现绑定论文数据与标注。
+
+Reasoning Depth：推理深度；从给定证据到答案所需的依赖步骤数量。LURCH 的 reasoning graph 是一种任务分析方法，不能视为所有任务的唯一复杂度尺度。
 
 Long Context Continued Pretraining：长上下文继续预训练
 
@@ -1334,7 +1330,7 @@ Attention Pair Count：注意力位置对数量；dense score 张量含 $BH_qT_q
 
 Quadratic Attention Cost：二次注意力成本
 
-Attention Score Memory：注意力分数矩阵显存；仅在实现物化 score 张量时按 $BH_qT_qT_ks$ 估算，在线/分块算法可避免保存完整矩阵
+Attention Score Memory：注意力分数矩阵显存；仅在实现物化 score 张量时按 $BH_qT_qT_k\,s$ 估算，在线/分块算法可避免保存完整矩阵
 
 Prefill Attention Cost：预填充注意力成本
 
@@ -1378,7 +1374,7 @@ Decode Bandwidth Pressure：解码带宽压力
 
 Paged KV Block：分页 KV 缓存块
 
-KV Cache Gate：KV Cache 门禁
+KV Cache Gate：KV Cache 容量检查（项目级条件需由模型配置、设备预算和请求 workload 明确推导）
 
 Batched Prefill Audit：批量 Prefill 审计
 
@@ -8936,7 +8932,7 @@ KV Cache Equivalence Check：KV Cache 等价性检查
 
 KV Cache Memory Formula：KV Cache 显存公式
 
-KV Cache Gate：KV Cache 门禁
+KV Cache Gate：KV Cache 容量验收条件；只对已声明的模型、设备、并发和请求分布有效，不是通用阈值。
 
 ## Content Audit Supplement Terms
 
@@ -9057,6 +9053,10 @@ BrowseComp：面向 browsing agent 的网页检索 benchmark，要求模型通�
 SimpleQA：短事实问答 benchmark，用于评估模型事实性、校准和“知道自己不知道”的能力。
 
 RULER：长上下文能力 benchmark，覆盖检索、多 needle、多跳、聚合和 QA 等比简单 needle 测试更系统的任务。
+
+LURCH：2026 年的长上下文推理预印本 benchmark，按 evidence scope、evidence dispersion 和 reasoning depth 描述样本难度；结果是其 6,550 个样本和所测模型中的观察性关联，部分属性来自自动标注。
+
+Context Rot Evaluation（CRE）：2026 年的位置敏感推理评测预印本，在选定任务上交叉改变任务位置、填充内容和上下文长度；不是统一 benchmark 标准，样本数和 provider/API 差异限制外推。
 
 NoLiMa：长上下文关联检索 benchmark；通过降低问题与目标证据的词面重叠，检查模型能否用潜在关联定位信息；仍是特定人工构造任务，不代表开放式业务推理。
 

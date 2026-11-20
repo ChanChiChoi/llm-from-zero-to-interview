@@ -165,8 +165,10 @@ Transformer 核心机制入口：
 1. [Position Interpolation](https://arxiv.org/abs/2306.15595) 把位置映射回预训练范围；[YaRN](https://arxiv.org/abs/2309.00071) 按 RoPE 波长选择插值并增加 attention scaling；[LongRoPE](https://arxiv.org/abs/2402.13753) 通过非均匀搜索和分阶段适配报告 2,048K；[LongLoRA](https://arxiv.org/abs/2309.12307) 研究长上下文微调成本。各论文结果受模型、训练预算和评测任务约束，最大窗口不能代替有效长度。
 2. [Longformer](https://arxiv.org/abs/2004.05150) 与 [BigBird](https://arxiv.org/abs/2007.14062) 以局部/全局/随机稀疏连接改变 token 交互图；[Ring Attention](https://arxiv.org/abs/2310.01889) 把 blockwise attention 分布到多设备；[FlashAttention](https://arxiv.org/abs/2205.14135) 与 [PagedAttention](https://arxiv.org/abs/2309.06180) 优化 HBM 数据移动和 KV 状态管理。这些路线缓解的瓶颈不同，不应合并成一个“上下文扩展倍数”。
 3. [Lost in the Middle](https://arxiv.org/abs/2307.03172) 控制证据位置；[RULER](https://arxiv.org/abs/2404.06654v3) 加入多 needle、多跳和聚合的可控复杂度；[NoLiMa v3](https://arxiv.org/abs/2502.05167v3) 降低问题与证据的词面重叠；[LongBench v1](https://arxiv.org/abs/2308.14508v2) 扩展中英文多任务覆盖；[LongBench v2](https://arxiv.org/abs/2412.15204v2) 以高难长上下文题测理解与推理，长度用 words 而非 tokens；[LongBench Pro v1](https://arxiv.org/abs/2601.02872v1) 提供 8K–256K token 的中英自然样本和细分长度/依赖类别，仍是 2026 年预印本。
-4. [Google DeepMind MRCR v2](https://github.com/google-deepmind/eval_hub/blob/master/eval_hub/mrcr_v2/README.md) 固定较简单的多轮共指任务复杂度并扩大长度，适合看极长输入上的曲线；2026-11-03 查阅的仓库说明可生成到 8M，但任务、工具和噪声模型有明确边界。OpenAI [MRCR / Graphwalks 发布说明](https://openai.com/index/gpt-4-1/)提供相近的厂商任务设计入口，不能与 DeepMind 变体混分。
+4. [Google DeepMind MRCR v2](https://github.com/google-deepmind/eval_hub/blob/master/eval_hub/mrcr_v2/README.md) 固定较简单的多轮共指任务复杂度并扩大长度，适合看极长输入上的曲线；2026-11-20 复核的仓库说明可生成到 8M，但任务、工具和噪声模型有明确边界，复现须记录仓库 revision。OpenAI [MRCR / Graphwalks 发布说明](https://openai.com/index/gpt-4-1/)提供相近的厂商任务设计入口，不能与 DeepMind 变体混分。
 5. needle 冒烟成绩不等于跨任务有效利用。基准分数不能脱离数据、提示、长度单位、推理预算、工具权限和 harness 直接排名；具体任务组合见[第七册第十三章](book-07-evaluation-experiments/chapters/13-1m-context有效能力评测.md)和[长上下文评测研究记录](research/long-context-evaluation-and-effective-capability-2026-11-03.md)。
+6. [LURCH](https://arxiv.org/abs/2610.22067v1) 将 evidence scope、evidence dispersion 和 reasoning depth 作为长度之外的样本难度属性；单版预印本报告的是其任务和模型集合内的关联，不是因果或普遍度量。
+7. [Context Rot Evaluation (CRE)](https://arxiv.org/abs/2605.23170v1) 在选定推理任务上控制任务位置、filler 和上下文长度；每格样本数、任务与 provider/API 边界限制其外推，仅展示一种实验设计。
 6. [REALM](https://arxiv.org/abs/2002.08909)、[Dense Passage Retrieval](https://arxiv.org/abs/2004.04906)、[RAG](https://arxiv.org/abs/2005.11401) 与 [RETRO](https://arxiv.org/abs/2112.04426)：检索增强语言模型的早期路线，分别比较潜在检索预训练、检索器、生成时文档边缘化和 chunked cross-attention。
 7. [Self-attention Does Not Need O(n^2) Memory](https://arxiv.org/abs/2112.05682)、[Linformer](https://arxiv.org/abs/2006.04768) 与 [Performer](https://arxiv.org/abs/2009.14794)：Rabe 与 Staats 区分二次计算和二次额外内存；Linformer 与 Performer 分别研究低秩和随机特征近似。复杂度、近似误差和任务结果按各自算法与实验条件阅读。
 7. [RAG Survey](https://arxiv.org/abs/2312.10997)：按 retrieval、generation、augmentation 和 evaluation 组织后续 RAG 研究；综述用于建立地图，具体结论仍回到原始论文和目标系统。
@@ -572,6 +574,8 @@ ReAct、Toolformer、function calling、MCP、A2A、agent evaluation、coding ag
 
 - [LongBench Pro v1](https://arxiv.org/abs/2601.02872v1)：以自然产生的双语长文样本扩展长上下文评估；阅读时检查长度、任务类型和证据位置分布，不能据此替代目标语料。
 - [LongHarness Bench v1](https://arxiv.org/abs/2609.38137v1)：评测长上下文 harness 在多条件检索与跨文档推理任务中的质量—成本差异；结果绑定预印本任务、模型与 harness 配置，不能泛化为 harness 排名。
+- [LURCH v1](https://arxiv.org/abs/2610.22067v1)：提出 evidence scope、dispersion 与 reasoning depth 三类样本难度属性；分析属观察性结果，证据和推理图标注也有自动化边界。
+- [Context Rot Evaluation v1](https://arxiv.org/abs/2605.23170v1)：对特定推理任务交叉控制位置、填充文本和上下文长度；预印本的样本数、任务和异构 API 条件限制了普遍外推。
 - [Relevant Is Not Warranted: Evidence-Force Calibration for Cited RAG](https://arxiv.org/abs/2605.28044)：FORCEBENCH 用对比证据检查引用是否足以支持声明的具体范围和强度；报告值绑定 198 对样本与四个 judge。
 - [RAG-Safety-Bench: Reliable Evaluation of Retrieval-Augmented LLM Safety](https://aclanthology.org/2026.emnlp-main.2246/)：用非 RAG、答案包含文档、相关但不含答案文档和随机安全文档四种条件分离检索文档影响；论文测试五个开源模型，不能外推为所有模型或生产语料的安全率。
 - [From Recall to Forgetting: Benchmarking Long-Term Memory for Personalized Agents](https://aclanthology.org/2026.findings-acl.1337/) 与 [Mem2ActBench](https://aclanthology.org/2026.acl-long.370/)：分别研究长期个性化记忆的更新/遗忘和任务型 Agent 中的记忆行动使用；任务合同不同，不合并为单一记忆能力分数。

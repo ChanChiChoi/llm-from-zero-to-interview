@@ -116,3 +116,11 @@
 - **来源支持的事实**：报告明确说明 `--kv-cache-dtype fp8` 在 FlashAttention 3 路径中会让 QK 与 score-value attention matmul 也在 FP8 E4M3 域执行，因此该路径不等于只改变 KV 存储字节数。H100/FA3、Llama-3.1-8B 的 128K needle-in-a-haystack 评测中，BF16 为 91%、早期 FP8 路径为 13%；two-level accumulation 把部分和写入真正的 FP32 register 后恢复到 89%，但增加寄存器压力并拖慢部分长 prefill。报告的质量评测使用 per-tensor、未校准 `scale=1.0`，其质量结果不能直接当作 calibrated scale 或其它 attention/backend 的保证。
 - **来源支持的性能数据**：H100 单请求 Llama-3.1-8B 的拟合 ITL slope/intercept 从 BF16 的 `4.37×10^-5 ms/token`、`6.44 ms` 变为 FP8 的 `2.37×10^-5 ms/token`、`6.58 ms`；表中报告约 7,010-token break-even。H100 上 gpt-oss-20b 的历史 v0.10.2 FP8 slope 为 BF16 的 96%、break-even 741,565 token；报告的修复后 v0.19.1 全 FP8 为 80%、22,109 token，跳过 128-token sliding-window 层后为 71%、7,659 token。并发 8、150 个约 20K input/2K output 请求的 Llama-3.1-8B throughput 试验中，output throughput 从 450.3 增至 517.5 token/s，median ITL 从 15.18 降至 12.93 ms。报告还给出 B200/FlashInfer 与 `head_dim=256` 模型结果，显示 backend、硬件、滑窗比例和 head dimension 会改变性能/质量取舍。
 - **证据等级与边界**：`source-backed`，属于作者团队的工程验证报告，不是跨 runtime 的独立 benchmark。所有数字绑定报告指定的模型、H100/B200、FlashAttention 3/FlashInfer、并发、上下文长度和软件路径；未校准 scale 下的报告结果不能代表所有校准方案。ITL slope、break-even、TTFT 和并发 output throughput 口径不同，不可互换或按单一倍数外推。
+
+## 17. KV 逐步计算、复杂度与窗口 cache 的课程讲解
+
+- **研究问题与检索范围**：怎样为已声明具备 Transformer 前置的读者建立“旧位置何以复用、每步读取什么、窗口改变什么”的讲解路径。2026-11-20 用 Stanford 站内检索 `site:web.stanford.edu/class/msande319 "Lecture 5" KV Caching`，核对课程主页与讲义 PDF。
+- **来源与版本**：Anay Mehrotra（lecturer and scribe），[Stanford MS&E 319 Lecture 5: KV Caching, Sparse Attention, and Compression](https://web.stanford.edu/class/msande319/lectures/lecture-5-notes.pdf)，2026-10-06 讲义；[Autumn 2026 课程页](https://web.stanford.edu/class/msande319/)，2026-11-20 检索。
+- **实际阅读位置**：讲义第 1–5 页，§§1.1–1.3、Algorithm 2 和 Proposition 2–4、§2.1；课程页的 Lecture 5/6 主题和指定论文。
+- **材料支持的解释与公式**：先按单层单个新位置写出 query/key/value 的生成、cache 更新、历史 key 打分和 value 加权，再说明较早位置的查询和 MLP 输出无需重算；缓存与整段前缀重算等价的前提是参数、位置编号、旧前缀的 mask/position rule 不变。课程在单头宽度 $d$、MLP 宽度与 $d$ 成正比的简化下逐项数出缓存与未缓存生成的 attention、position-wise 计算量，并给出每层、$S$ 个序列、长度 $t$、元素字节数 $b$ 的 cache 公式 $2SLtdb$。它还区分每步读取整段历史带来的潜在带宽限制与 FLOPs，并说明 sliding window 的直接可读历史有限，但跨多层隐藏表示仍可能传递较早的信息。
+- **证据等级与边界**：课程 notes 是研究型授课材料，适合核对推导拆分和讲解路径，不是 wall-clock benchmark，也不证明某一种组织方式对所有读者都有教学效果。其复杂度推导依赖讲义声明的标准 dense causal attention 和宽度简化；窗口跨层信息传播是结构解释，不等于所有远距离检索任务均有效。
