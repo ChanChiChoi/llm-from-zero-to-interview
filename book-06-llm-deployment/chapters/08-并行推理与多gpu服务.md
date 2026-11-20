@@ -69,7 +69,7 @@ $M_{\mathrm{weight}}$ 是本 rank 实际持有的权重和元数据，$M_{\mathr
 M_{w}=70\times10^9\times2/2^{30}\approx130.39\ \mathrm{GiB}.
 ~~~
 
-一张 80 GiB 卡放不下这份权重。把它复制到八张单卡副本只会得到八份各自仍需约 130.39 GiB 的模型，并不会把一份模型摊薄。若用 TP=4 均分可切权重，每卡的理想权重份额约为 130.39/4=32.60 GiB；真实布局还会有未切分权重、元数据、通信缓冲和运行时工作区，所以这个数只是下界。这个算例回答的是“模型能否放下”，还没回答并发状态是否能放下。
+一张 80 GiB 卡放不下这份权重。把它复制到八张单卡副本只会得到八份各自仍需约 130.39 GiB 的模型，并不会把一份模型摊薄。若用 $\mathrm{TP}=4$ 均分可切权重，每卡的理想权重份额约为 130.39/4=32.60 GiB；真实布局还会有未切分权重、元数据、通信缓冲和运行时工作区，所以这个数只是下界。这个算例回答的是“模型能否放下”，还没回答并发状态是否能放下。
 
 再看活动 KV。假设一个标准全注意力模型有 80 层、8 个 KV head、head dimension 为 128、BF16 KV，每个请求已有 4096 个 token，则 K、V 两份状态的字节数为：
 
@@ -82,7 +82,7 @@ M_{\mathrm{kv}}
 
 24 条同长度活动请求约需 24×1.25=30 GiB。于是“权重 TP 后每卡约 32.6 GiB”并不表示每卡只需 32.6 GiB；KV、临时 buffer、显存碎片和突发余量也要进入同一张 rank 级账本。若这些状态已能放下，但队列仍超出 TTFT 或 goodput 目标，继续把单副本扩大到更多 rank 未必合算，复制已能独立服务的执行组可能更直接。先找出不等式中最紧的一项，才知道应该切模型、切请求阶段，还是增加副本。
 
-改变上下文长度会迅速改变这张账。全注意力 KV 与 token 数近似线性：把 4096 token 增至 8192，24 条请求的 KV 从 30 GiB 增至约 60 GiB；在理想 TP=4 下，每卡约有 32.60 GiB 权重+15 GiB KV+8 GiB reserve=55.60 GiB。若同一组 24 条请求都达到 32,768 token，KV 总量约为 30×8=240 GiB，TP=4 每卡约 32.60+60+8=100.60 GiB，已经超过 80 GiB；TP=8 的均匀估算约为 16.30+30+8=54.30 GiB。这个结果不是“TP8 一定可用”：它假设 KV head 正好分片且无额外复制，真实 attention layout、workspace 和并发形状仍需复核。它只展示部署输入从 4K 改成 32K 后，首要瓶颈可能从权重转为活动 KV。
+改变上下文长度会迅速改变这张账。全注意力 KV 与 token 数近似线性：把 4096 token 增至 8192，24 条请求的 KV 从 30 GiB 增至约 60 GiB；在理想 $\mathrm{TP}=4$ 下，每卡约有 32.60 GiB 权重+15 GiB KV+8 GiB reserve=55.60 GiB。若同一组 24 条请求都达到 32,768 token，KV 总量约为 30×8=240 GiB，$\mathrm{TP}=4$ 每卡约 32.60+60+8=100.60 GiB，已经超过 80 GiB；$\mathrm{TP}=8$ 的均匀估算约为 16.30+30+8=54.30 GiB。这个结果不是“TP8 一定可用”：它假设 KV head 正好分片且无额外复制，真实 attention layout、workspace 和并发形状仍需复核。它只展示部署输入从 4K 改成 32K 后，首要瓶颈可能从权重转为活动 KV。
 
 把路线串起来，可以按“先容量、再关键路径、再服务隔离”判断。权重或活动状态超出单卡预算时，先比较量化、TP/PP/EP 和上下文限制；模型能放下但单请求一层的计算太慢时，才看同机 TP 是否减少该层时间；单请求延迟可接受而队列和请求吞吐不达标时，比较加副本与调度；Prefill 长 prompt 持续打断 Decode、而完整状态又能负担跨池移动时，再把 P/D 当成资源池切分候选。它们不是同一层次的“并行度旋钮”：模型分片回答每个请求如何共同执行，副本回答多少请求可独立推进，P/D 解耦回答同一请求的两个阶段由哪些资源服务。
 
@@ -94,7 +94,7 @@ M_{\mathrm{kv}}
 
 Tensor Parallel 把同一层的大矩阵、attention head 或相关 hidden 维度切到多个 rank。它不是简单地“每张卡跑一遍模型”，而是让 rank 在一次 forward 内共同完成一个逻辑层。
 
-对线性层 Y=XW，列并行可以写成：
+对线性层 $Y=XW$，列并行可以写成：
 
 ~~~math
 W=[W_{1},\ldots,W_{g}],
@@ -156,15 +156,15 @@ $V_{\mathrm{comm}}$ 是实际 collective 搬运的字节数，$B_{\mathrm{link}}
 
 TP 更适合同一节点内有 NVLink/NVSwitch 等高速互联、模型层内矩阵足够大且单卡容量确实不足的场景。它的代价是每层通信、rank 同步和故障域扩大：一个 rank 退出，整个 TP group 往往都要摘除。选择 TP 时要同时报告每 rank 显存、collective 时间占比、节点内/跨节点链路和副本数量。
 
-用一个小矩阵可以看清两种切分各自交付什么。令输入 X 的 shape 为 4×8，权重 W 的 shape 为 8×16，输出 Y=XW 的 shape 为 4×16。按输出维做 TP=4 列切分时，每个 rank 持有 8×4 的 $W_{i}$，独立得到 4×4 的 $Y_{i}$，最后沿输出维拼接；四个 rank 一起覆盖原来的 4×8 与 8×16 运算。若按输入维做行切分，每个 rank 持有 2×16 的 $W_{i}$ 和相应的 4×2 输入片段 $X_{i}$，各自产生 4×16 的部分和，必须在 rank 间求和才能得到完整 Y。行切分的结果不是把四份输出拼起来，而是归约部分和；把这两类 collective 角色混为一谈，会误读张量布局和通信量。
+用一个小矩阵可以看清两种切分各自交付什么。令输入 X 的 shape 为 4×8，权重 W 的 shape 为 8×16，输出 $Y=XW$ 的 shape 为 4×16。按输出维做 $\mathrm{TP}=4$ 列切分时，每个 rank 持有 8×4 的 $W_{i}$，独立得到 4×4 的 $Y_{i}$，最后沿输出维拼接；四个 rank 一起覆盖原来的 4×8 与 8×16 运算。若按输入维做行切分，每个 rank 持有 2×16 的 $W_{i}$ 和相应的 4×2 输入片段 $X_{i}$，各自产生 4×16 的部分和，必须在 rank 间求和才能得到完整 Y。行切分的结果不是把四份输出拼起来，而是归约部分和；把这两类 collective 角色混为一谈，会误读张量布局和通信量。
 
 这个 toy 矩阵里，总计有 4×8×16=512 个乘加位置；均匀分成四片时，每 rank 处理 128 个位置。并行并不意味着一次前向就精确快四倍：输入广播、部分和归约、同步、未切分算子和 kernel 效率都会占时间。生产模型的矩阵大得多，但决策逻辑相同：并行组要比较“减少了多少本地计算或权重”与“把多少张量放入通信路径”。对小 batch、短生成或小矩阵，通信与 kernel launch 占比可能比计算更显眼；对大矩阵和足够大的 batch，计算才更容易摊薄固定通信成本。
 
 再用 24 条活动 sequence、hidden size 8192、BF16 activation 估一层 collective 的本地输入张量：24×8192×2=393,216 bytes，约 0.375 MiB。若每个 decoder block 两次 collective、共 80 层，则每 rank 每个 decode iteration 接触到的逻辑输入 payload 是 0.375×2×80=60 MiB。它不等于网络收发的 fabric bytes：AllReduce 的算法可能让每个 rank 多轮发送和接收，AllGather、ReduceScatter 的 payload 关系也不同，消息还可能与计算重叠。这个推演的用途是确定要 profile 哪些操作和 rank，而不是从 60 MiB 直接换算延迟。
 
-KV head 的分片同样要从实际模型配置读起。若模型有 8 个 KV head 且 TP=4，某些布局可以让每 rank 持有 2 个 head；若 TP=16，则不能简单说每 rank 都持有半个 head。runtime 可能复制 KV head、改变并行维度或采用不同 cache layout。GQA/MQA 让 KV head 少于 query head，因此权重切分比例和 KV 切分比例也可能不同。开始估算前应先固定模型 revision、attention 类型、TP group 与 runtime 版本，再查看每 rank 的实际分配或配置说明。
+KV head 的分片同样要从实际模型配置读起。若模型有 8 个 KV head 且 $\mathrm{TP}=4$，某些布局可以让每 rank 持有 2 个 head；若 $\mathrm{TP}=16$，则不能简单说每 rank 都持有半个 head。runtime 可能复制 KV head、改变并行维度或采用不同 cache layout。GQA/MQA 让 KV head 少于 query head，因此权重切分比例和 KV 切分比例也可能不同。开始估算前应先固定模型 revision、attention 类型、TP group 与 runtime 版本，再查看每 rank 的实际分配或配置说明。
 
-所以 TP 不能只用“单卡算力乘 rank 数”来评价。对同一 workload 至少要测 TP=1 的单 rank 基线与同节点 TP 候选，并记录 batch/序列长度、每层 collective 次数和耗时、有效带宽、每 rank 内存、TPOT 尾部及 group 故障恢复。如果吞吐提高来自更大 batch，却使单请求尾延迟越过 SLO，应报告为另一种取舍；如果容量满足但 collective 已占 decode 关键路径，继续加 TP 可能反而降低每个成功请求的效率。
+所以 TP 不能只用“单卡算力乘 rank 数”来评价。对同一 workload 至少要测 $\mathrm{TP}=1$ 的单 rank 基线与同节点 TP 候选，并记录 batch/序列长度、每层 collective 次数和耗时、有效带宽、每 rank 内存、TPOT 尾部及 group 故障恢复。如果吞吐提高来自更大 batch，却使单请求尾延迟越过 SLO，应报告为另一种取舍；如果容量满足但 collective 已占 decode 关键路径，继续加 TP 可能反而降低每个成功请求的效率。
 
 ## 3. Pipeline Parallel 推理
 
@@ -226,11 +226,11 @@ PP 适合层数多、权重按层分割能解决容量、同一 stage 间通信�
 
 每个方案都要记录 gpus_per_replica、replica 数、单卡权重/状态峰值、collective 或 activation 传输时间、P95/P99 和故障恢复时间。理论上能放下只是必要条件，不是选型结论。
 
-可以用一组明确标为教学假设的 stage 时间理解“单请求延迟”和“多请求吞吐”为什么会给 PP 不同评价。假设 PP=2 的 stage 0 处理一个 microbatch 需 11 ms，stage 1 需 13 ms，边界传输需 0.5 ms，且忽略排队与启动开销。一个请求必须依次经过两段，首个结果至少约 11+0.5+13=24.5 ms；不能把两段的计算相除后说单请求延迟只有 13 ms。若有多个互不依赖的 microbatch，stage 0 处理下一个 batch 时 stage 1 可处理前一个；当传输能与前一批计算重叠时，稳定输出间隔可接近慢 stage 的 13 ms，若传输与 stage 计算争用同一资源则会更长。真实在线请求有变长、动态到达、取消和背压，是否能保持这种流水重叠必须由 trace 验证。
+可以用一组明确标为教学假设的 stage 时间理解“单请求延迟”和“多请求吞吐”为什么会给 PP 不同评价。假设 $\mathrm{PP}=2$ 的 stage 0 处理一个 microbatch 需 11 ms，stage 1 需 13 ms，边界传输需 0.5 ms，且忽略排队与启动开销。一个请求必须依次经过两段，首个结果至少约 11+0.5+13=24.5 ms；不能把两段的计算相除后说单请求延迟只有 13 ms。若有多个互不依赖的 microbatch，stage 0 处理下一个 batch 时 stage 1 可处理前一个；当传输能与前一批计算重叠时，稳定输出间隔可接近慢 stage 的 13 ms，若传输与 stage 计算争用同一资源则会更长。真实在线请求有变长、动态到达、取消和背压，是否能保持这种流水重叠必须由 trace 验证。
 
 这个例子也说明 TP 与 PP 的观察指标不同。TP 将同一层的计算拆给多个 rank，检查每次 layer collective 是否被隐藏、每 rank 是否同步；PP 将层串在不同 stage 上，检查最慢 stage、首 token 经过的 stage 数、并发是否足以填流水，以及 stage 之间是否出现空等。若一个请求占有 12 ms 的前段层和 12 ms 的后段层，单请求仍需经过两段；只有同时有其他请求可填充流水，空闲卡才会减少。把 stage 数增加到 4 可能降低每卡权重，却新增边界与负载失衡机会。
 
-比较时还要使用同一个显存与服务预算。设目标工作集确实需要 110 GiB 权重和 20 GiB KV，单卡总账已超过 80 GiB；即使 PP=2 把按层状态均匀分成两份，每卡约 65 GiB 加各自 workspace，PP 解决了容量门槛。若单卡模型本来只需 35 GiB，且服务的唯一问题是吞吐，PP 不会复制出第二个独立队列；同样八卡可能用作两个 TP=4 副本，提供并行计算与两个服务队列。反过来若模型需要超过四卡的 rank 级状态，双副本本身就不成立，因为每份权重都要完整放进一个四卡 group。
+比较时还要使用同一个显存与服务预算。设目标工作集确实需要 110 GiB 权重和 20 GiB KV，单卡总账已超过 80 GiB；即使 $\mathrm{PP}=2$ 把按层状态均匀分成两份，每卡约 65 GiB 加各自 workspace，PP 解决了容量门槛。若单卡模型本来只需 35 GiB，且服务的唯一问题是吞吐，PP 不会复制出第二个独立队列；同样八卡可能用作两个 $\mathrm{TP}=4$ 副本，提供并行计算与两个服务队列。反过来若模型需要超过四卡的 rank 级状态，双副本本身就不成立，因为每份权重都要完整放进一个四卡 group。
 
 实际筛选可以按“先能放，再测关键路径，最后算故障域”做：量化和 cache 预算后仍放不下才启用分片；若 TP 的 collective 主要留在高速节点内且层内计算明显获益，优先实测 TP；若按层切分更自然且 stage 负载可平衡，再测 PP；混用 TP×PP 时逐项列出 rank 组、stage 布局、通信边界和每 rank 状态。最终至少用低并发首 token、高并发混长请求、prefix 命中/未命中和单 stage/rank 故障回放。训练时的 microbatch pipeline 利用率或只测长 prompt 的平均吞吐，都不足以推出在线 PP 的 SLO 表现。
 
@@ -270,7 +270,7 @@ EP 适合 expert 数量大、单个 expert 权重无法在每卡复制、节点�
 
 负载均衡还分成两种不同动作：调度器在请求或 iteration 之间改变到达负载；EPLB 或路由策略改变 token/expert 到 rank 的映射。前者不一定修复某个固定 expert 热点，后者也不能把等待在网关中的长 prompt 平分给副本。复制热 expert 可以把计算映射到额外 rank，但要复制权重、维护路由映射并校验重映射期间的版本一致；它也可能减少该 rank 的 KV 可用空间。解决热点的验收指标应包括重映射前后最慢 rank 的服务时间、质量和 KV headroom，而不只是全局平均 token 数。
 
-EP 还要和其他并行维度同时记账。vLLM 当前部署文档给出的一个组合例子是 TP=2、DP=4：MoE expert 形成 8 rank 的 EP group，attention 则在各 DP group 内按 TP=2 切分。这个例子说明一个模型不是“全层都用 EP”：attention、dense layer、shared expert 与 routed expert 的布局可能各不相同，显存和通信都应按 layer type 拆开。即便 expert 权重总量能分到八卡，attention 的 TP collective、DP 请求分发和 MoE all-to-all 仍可能同时存在。这样的组合不能用一个 `parallel_size=8` 概括。
+EP 还要和其他并行维度同时记账。vLLM 当前部署文档给出的一个组合例子是 $\mathrm{TP}=2$、$\mathrm{DP}=4$：MoE expert 形成 8 rank 的 EP group，attention 则在各 DP group 内按 $\mathrm{TP}=2$ 切分。这个例子说明一个模型不是“全层都用 EP”：attention、dense layer、shared expert 与 routed expert 的布局可能各不相同，显存和通信都应按 layer type 拆开。即便 expert 权重总量能分到八卡，attention 的 TP collective、DP 请求分发和 MoE all-to-all 仍可能同时存在。这样的组合不能用一个 `parallel_size=8` 概括。
 
 上面 8 个 expert 的分布还可以按 rank 汇总。若 4 个 EP rank 各放两个 expert，并按 `[e0,e1]`、`[e2,e3]`、`[e4,e5]`、`[e6,e7]` 放置，则各 rank 的 assignment 数为 16+12=28、10+8=18、6+5=11、4+3=7，平均 16，最忙 rank/平均 rank=28/16=1.75。即使每个 rank 都有相同数量的 expert，工作量也不平衡；真实映射还可能让多个热门 expert 落在同一个 rank。运维仪表盘因此既要展示 expert 维度的 max/mean，也要展示 rank 聚合后的等待和完成时间，否则很难判断应该重映射 expert，还是调整 EP/DP group。
 
@@ -679,7 +679,7 @@ TP、PP、EP 切的是一次模型执行中的权重、层或 expert；Prefill/D
 
 这个算例说明，P/D 的取舍不能只比较 Prefill GPU 利用率和 Decode GPU 利用率，也不能从“阶段特征不同”直接推出应当解耦。若输入更短，KV bytes/request 会降低，阶段干扰可能仍是主瓶颈；若前缀复用率高，Prefill 计算会下降，但 cache 位置和远端读取成本会更重要；若请求输出很长，Decode 池更容易成为瓶颈。应使用同一组到达 trace 做共置、chunked prefill 和解耦三种候选，分别报告 P/D 吞吐、TTFT、TPOT/TBT、传输字节、KV 目标预留峰值、P99 和 SLO goodput。第六章讲调度策略与阶段干扰；这里重点是并行和资源池布局的联合决策。
 
-状态传输还会回到单请求首 token 预算。若 4096 token prompt 的 Prefill profile 为 180 ms，目标副本分配与首个 decode step 共需 50 ms，SLO 要求 TTFT≤300 ms，那么忽略排队时原有路径为 230 ms。若 1.25 GiB 的 KV 以 20 GiB/s 有效带宽传输、再加 15 ms 序列化和校验，而且这部分完全落在首 token 路径上，新增成本约 77.5 ms，总计 307.5 ms，超过预算 7.5 ms。若有层间流式传输能和 Prefill 或其他工作重叠，关键路径上新增的时间可能更少；应量“未被隐藏的部分”，不能把完整传输时间必然加到 TTFT，也不能假设传输都被隐藏。
+状态传输还会回到单请求首 token 预算。若 4096 token prompt 的 Prefill profile 为 180 ms，目标副本分配与首个 decode step 共需 50 ms，SLO 要求 $\mathrm{TTFT}\leq300$ ms，那么忽略排队时原有路径为 230 ms。若 1.25 GiB 的 KV 以 20 GiB/s 有效带宽传输、再加 15 ms 序列化和校验，而且这部分完全落在首 token 路径上，新增成本约 77.5 ms，总计 307.5 ms，超过预算 7.5 ms。若有层间流式传输能和 Prefill 或其他工作重叠，关键路径上新增的时间可能更少；应量“未被隐藏的部分”，不能把完整传输时间必然加到 TTFT，也不能假设传输都被隐藏。
 
 因此 P/D 的 go/no-go 结论应同时有三类数：按阶段 profile 得到的有效计算余量、KV transfer 的字节与关键路径时间、在目标到达过程下实际满足 TTFT 和 TBT/TPOT 的 goodput。只报告分离后 P 利用率下降或 D batch 变大，不能证明资源效率改善；如果请求量不足、网卡被其他服务共享、prefix cache 与 locality 冲突，分池还会留下无法互借的闲置资源。论文表中的倍率各回答特定实验问题，应作为“应测什么”的例子，而不是部署方案的预期收益。
 
@@ -693,7 +693,7 @@ TP、PP、EP 切的是一次模型执行中的权重、层或 expert；Prefill/D
 | --- | --- | --- | --- |
 | 共置执行 + chunked prefill | 同一执行池服务 P 与 D，减少 cache 跨池搬运；chunked prefill 限制长 prompt 对 decode iteration 的打断 | vLLM [动态文档](https://github.com/vllm-project/vllm/blob/main/docs/features/disagg_prefill.md)（访问于 2026-11-02）将 disaggregated prefill 标为 experimental，并说明该功能本身不提高吞吐；chunked prefill 也能控制 tail ITL | P/D 共用 GPU 和调度资源，P/D 相互干扰仍需靠 chunk/batch 调节；流量小、网络慢或 KV 很大时，共置可能更划算。见[批处理与调度章](06-批处理与调度.md)。 |
 | [DistServe](https://arxiv.org/abs/2401.09670v3) | 把 P、D 放到不同 GPU 池，按 TTFT/TPOT SLO 分别分配资源和并行度，并按集群带宽放置两池以减少 KV 传输 | v3 作者在不同模型/工作负载中报告最高 7.4× 请求率；OPT-66B/LongBench summarization 对 vLLM 报告 4.3× 请求率或 12.6× 更严格 SLO，SLO attainment 目标为 90% | 分离减少 phase interference，却新增 KV transfer 和池间资源碎片；倍率不等同于任意系统吞吐。改进方向是把 P/D 分别测量、联合优化，而非仅增加 decode 卡。 |
-| [Mooncake](https://arxiv.org/abs/2407.00079v3) | 在 P/D 分离基础上，让 KV cache 成为调度中心，利用 CPU/DRAM/SSD 和 RDMA 做多层 cache，做 cache-aware placement、热点迁移与过载早拒绝 | 2024 年 v3 论文使用与 Llama 2 70B 同架构的 dummy model、A800 80GB/NVLink 节点及最高 800 Gbps 节点互联；真实 trace 回放对照 10 个 prefill+10 个 decode 实例与 20 个 vLLM 实例，设 TTFT≤30 s、TBT≤0.1 s。两者近 100% 请求达到 TTFT 门槛；Mooncake 约 100% 达到 TBT，vLLM 约 57%，Mooncake 在该实验中多处理约 75% 满足 SLO 的请求 | 这是特定硬件、论文模型、真实 trace 和 SLO 下的作者报告；实例数量不能脱离实例规格解释成相同 GPU 数或通用每卡倍率。cache locality 可能和均衡冲突。后续要记录复用节省是否超过远端取数与热点排队成本。 |
+| [Mooncake](https://arxiv.org/abs/2407.00079v3) | 在 P/D 分离基础上，让 KV cache 成为调度中心，利用 CPU/DRAM/SSD 和 RDMA 做多层 cache，做 cache-aware placement、热点迁移与过载早拒绝 | 2024 年 v3 论文使用与 Llama 2 70B 同架构的 dummy model、A800 80GB/NVLink 节点及最高 800 Gbps 节点互联；真实 trace 回放对照 10 个 prefill+10 个 decode 实例与 20 个 vLLM 实例，设 $\mathrm{TTFT}\leq30$ s、$\mathrm{TBT}\leq0.1$ s。两者近 100% 请求达到 TTFT 门槛；Mooncake 约 100% 达到 TBT，vLLM 约 57%，Mooncake 在该实验中多处理约 75% 满足 SLO 的请求 | 这是特定硬件、论文模型、真实 trace 和 SLO 下的作者报告；实例数量不能脱离实例规格解释成相同 GPU 数或通用每卡倍率。cache locality 可能和均衡冲突。后续要记录复用节省是否超过远端取数与热点排队成本。 |
 | [TaiChi](https://arxiv.org/abs/2508.01989v1) | 指出共置和完全解耦分别适合不同 TTFT/TPOT 约束；用 P-heavy/D-heavy 节点、配置滑杆与调度，在两者间形成 hybrid，并把资源从已满足 SLO 的请求转向有违约风险的请求 | arXiv v1 报告在 balanced TTFT/TPOT SLO 条件下 goodput 比其对照系统最高提升 77% | 这是作者特定系统和 SLO sweep 的结果；引入混合节点能力和 latency-shifting scheduler，状态路由也更复杂。设计上应先按 SLO 位置选架构，再比较配置，不把“解耦”当成默认答案。 |
 | [SmartGen](https://arxiv.org/abs/2607.28150v1) | 面对 P→D 阶段的 KV 网络瓶颈，先 profile 重要 token 并 proactive 传输，Decode 再并行按需取回缺失项，后台 speculative 传完剩余 cache | 2026 arXiv v1 作者报告 GovReport 上 full-KV transfer 对照的 TTST 最多约为 SmartGen 的 4.3 倍；测试包含 L20 GPU 和 25 Gbps RDMA 场景 | 选择误差会改变注意力上下文，按需取数可能拖慢后续 token；结果绑定模型、稀疏选择方法和网络。应一起评估长上下文质量、TTST/TPOT、网络占用和 cache 命中。 |
 
@@ -858,7 +858,7 @@ route_to= replica_1
 
 例如单卡行可从输入手算：70B FP16 权重约 130.39 GiB，加 24×1.25=30 GiB 的 KV 与 8 GiB reserve，简化总量为 168.39 GiB，再与 80 GiB 卡容量比较。先沿输入和中间量核对总账，能分清模型状态超限与 GPU 数量不足，不必从 `fits=False` 倒推原因。
 
-通信字段同样只做 logical payload 账本。每个 decode step 的单次 TP collective 本地输入为 24×8192×2=393,216 bytes，即 0.375 MiB；乘以每层两次、80 层得到每 rank 60 MiB。PP=2 时每条 stage 边界传 24 个 hidden vector，所以 $(\mathrm{pp}-1)\times 24\times 8192\times 2=393,216 \mathrm{bytes}$，即 0.375 MiB。实际链路发送/接收量要结合 group size、算法、链路拓扑、协议和 overlap profile；代码没有 latency 预测器，也没有从这两个数推出延迟。
+通信字段同样只做 logical payload 账本。每个 decode step 的单次 TP collective 本地输入为 24×8192×2=393,216 bytes，即 0.375 MiB；乘以每层两次、80 层得到每 rank 60 MiB。$\mathrm{PP}=2$ 时每条 stage 边界传 24 个 hidden vector，所以 $(\mathrm{pp}-1)\times 24\times 8192\times 2=393,216 \mathrm{bytes}$，即 0.375 MiB。实际链路发送/接收量要结合 group size、算法、链路拓扑、协议和 overlap profile；代码没有 latency 预测器，也没有从这两个数推出延迟。
 
 因此读输出时分三步：先看 `gpu_feasible` 是否满足设备数量，再看 `fits` 是否同时满足数量和简化显存账，最后看 `aggregate_active_seq` 所依据的容量假设是否符合目标请求长度。需要用生产请求分布做 KV 长度分位数、workspace 峰值和 prefix-cache 命中重算；若把 `active_seq` 改成统一最大长度，得到的是保守边界，不是平均容量。此 demo 只使用 Python 标准库；要复用到实际部署，仍需把 shape/layout、非均匀分片和目标 GPU 的内存/通信实测补进账本。
 
@@ -872,7 +872,7 @@ route_to= replica_1
 
 先算容量，再谈速度。假设权重使用 FP16，70B 权重约为 130.4 GiB；在 demo 的 toy workload 下，24 条活动请求的 KV 共约 30 GiB，另有每卡 8 GiB 的运行余量。单卡方案的权重本身就超过 80 GiB，不能通过增加副本解决；副本复制的是完整权重，不会把一份 130 GiB 的模型拆小。
 
-这里要把几本账分开：24 条 sequence、每条 4096 token 的 BF16 KV 总量约 30 GiB；8 GiB 是代码中每张 GPU 单独保留的余量，不包含在这 30 GiB KV 里。均匀 TP=4 时，每卡的简化账本是 130.39/4=32.60 GiB 权重、30/4=7.50 GiB KV、8 GiB reserve，合计 48.10 GiB。TP=8 时，每卡是 16.30+3.75+8=28.05 GiB。TP4×PP2 同样用 8 张卡，每卡理想权重和 KV 份额也是 16.30+3.75 GiB，再加 8 GiB reserve。实际模型的未切分层、rank 不整除、workspace、量化元数据和 stage 不均衡都会抬高部分 rank 峰值，因此不能把这组均匀分片数字当作正式容量承诺。
+这里要把几本账分开：24 条 sequence、每条 4096 token 的 BF16 KV 总量约 30 GiB；8 GiB 是代码中每张 GPU 单独保留的余量，不包含在这 30 GiB KV 里。均匀 $\mathrm{TP}=4$ 时，每卡的简化账本是 130.39/4=32.60 GiB 权重、30/4=7.50 GiB KV、8 GiB reserve，合计 48.10 GiB。$\mathrm{TP}=8$ 时，每卡是 16.30+3.75+8=28.05 GiB。TP4×PP2 同样用 8 张卡，每卡理想权重和 KV 份额也是 16.30+3.75 GiB，再加 8 GiB reserve。实际模型的未切分层、rank 不整除、workspace、量化元数据和 stage 不均衡都会抬高部分 rank 峰值，因此不能把这组均匀分片数字当作正式容量承诺。
 
 容量也取决于长度分布，而不只是活动序列数。若 24 条活动请求里 19 条为 4K、5 条为 32K，在同一标准 attention 假设下，KV 是 19×1.25+5×10=73.75 GiB；TP4 每卡约 18.44 GiB KV，加上权重 32.60 和 reserve 8，共约 59.04 GiB。若把全部请求误当成 4K，会低估这组混合工作集；若全部按 32K 估，又会得到过于保守的均匀上界。应从请求 trace 得到同时活动长度的联合分布，并计入 block rounding 和最大 rank 的局部状态。上述 59.04 GiB 仍没有显式计算 runtime workspace 与不均匀权重，所以只是规划下界。
 

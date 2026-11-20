@@ -91,8 +91,8 @@ exponent、mantissa、特殊值、舍入方式、subnormal 是否存在以及 sc
 OCP MX 规范中的 E2M1 将 4 bit 分成 1 个符号位、2 个指数位和 1 个尾数位；它能表示
 的非负幅值为 `0、0.5、1、1.5、2、3、4、6`，负值有对应幅值，最大幅值为 6，
 没有 Inf 和 NaN 编码，并支持 subnormal。规范要求转换至少支持 roundTiesToEven，
-超出范围时支持饱和到最大幅值。一个量化值可抽象写成 `x̂ᵢ = s_g cᵢ`：`cᵢ` 从
-E2M1 码本中选择，`s_g` 是该组的 scale。码本决定组内能选哪些数，scale 决定这组
+超出范围时支持饱和到最大幅值。一个量化值可抽象写成 $\hat{x}_{i}=s_{g}c_{i}$：$c_{i}$ 从
+E2M1 码本中选择，$s_{g}$ 是该组的 scale。码本决定组内能选哪些数，scale 决定这组
 数落在原张量的哪个范围；两者的舍入误差会叠加。[OCP MX v1.0](https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf)
 还规定了转换约定，代码中仅选最近码值不等于完整实现该规范的舍入。
 

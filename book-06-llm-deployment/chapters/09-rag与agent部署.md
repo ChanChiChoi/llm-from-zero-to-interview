@@ -393,7 +393,7 @@ runbook 应从 request_id 找到实际 revision，再沿检索、组装、模型
 s_{t+1}=F(s_{t},o_{t},a_{t},e_{t})
 ```
 
-$s_{t}$ 是第 t 步的版本化状态，$o_{t}$ 是观察，$a_{t}$ 是模型提出的动作，$e_{t}$ 是工具或外部环境返回的结果。F 不是模型自由决定的函数，而是包含 schema、权限、预算、并发和恢复规则的 orchestrator。例如，t=0 时状态为 `awaiting_lookup`，模型提出读取工单，权限检查通过后工具返回 `ticket_open`，F 才将状态更新为 `awaiting_user_decision`；模型直接说“已关闭”不会让状态跳到 `committed`。这条状态走查说明每个变量对应一次可观察事件，具体恢复和版本冲突规则见第十章。
+$s_{t}$ 是第 t 步的版本化状态，$o_{t}$ 是观察，$a_{t}$ 是模型提出的动作，$e_{t}$ 是工具或外部环境返回的结果。F 不是模型自由决定的函数，而是包含 schema、权限、预算、并发和恢复规则的 orchestrator。例如，$t=0$ 时状态为 `awaiting_lookup`，模型提出读取工单，权限检查通过后工具返回 `ticket_open`，F 才将状态更新为 `awaiting_user_decision`；模型直接说“已关闭”不会让状态跳到 `committed`。这条状态走查说明每个变量对应一次可观察事件，具体恢复和版本冲突规则见第十章。
 
 ### 8.1 计划和执行要分开
 
@@ -832,7 +832,7 @@ diagnostics= {'citation_ids_exist': True, 'read_tool_allowed': True, 'write_tool
 
 这里的“允许”不是给模型看的自然语言愿望，而是由程序检查的状态和字段。例如，引用校验器可以拒绝一个没有证据 ID 的回答，工具执行器可以拒绝一个缺少租户字段的请求，状态存储可以拒绝从 `dispatched` 直接跳到 `completed` 而没有下游回执的事件。
 
-一次任务的成功概率也不是某一个模型分数。设 \(R\) 表示召回到足够证据，\(E\) 表示证据被正确组装，\(A\) 表示答案忠实于证据，\(X\) 表示工具动作在授权和事务语义上正确，则：
+一次任务的成功概率也不是某一个模型分数。设 $R$ 表示召回到足够证据，$E$ 表示证据被正确组装，$A$ 表示答案忠实于证据，$X$ 表示工具动作在授权和事务语义上正确，则：
 
 ~~~math
 P(\text{success}) = P(R)P(E\mid R)P(A\mid E,R)P(X\mid A,E,R)
@@ -892,7 +892,7 @@ P(\text{success}) = P(R)P(E\mid R)P(A\mid E,R)P(X\mid A,E,R)
 
 该员工的问题只涉及两条政策时，RAG 适合先筛选证据；但如果法务要比较一份 300 页合同中的所有交叉引用，单纯取若干 chunk 可能会丢失全局条件。这里不能用“长上下文一定更好”或“RAG 一定更便宜”做决定，而要把材料完整性、更新频率、权限粒度、延迟和成本放在同一个账本里。
 
-设系统输入 token 数为 \($T_{p}$\)，输出 token 数为 \($T_{o}$\)，检索和重排固定耗时为 \($L_{r}$\)，模型 prefill 每个 token 的平均耗时为 \(a\)，decode 每个 token 的平均耗时为 \(b\)，工具耗时为 \($L_{x}$\)，则一个粗略延迟模型是：
+设系统输入 token 数为 $T_{p}$，输出 token 数为 $T_{o}$，检索和重排固定耗时为 $L_{r}$，模型 prefill 每个 token 的平均耗时为 $a$，decode 每个 token 的平均耗时为 $b$，工具耗时为 $L_{x}$，则一个粗略延迟模型是：
 
 ~~~math
 L_{total} \approx L_{r} + aT_{p} + bT_{o} + L_{x}
@@ -963,7 +963,7 @@ L_{e2e}=L_{queue}+L_{rewrite}+L_{retrieve}+L_{rerank}+L_{assemble}+L_{model}+L_{
 - `committed_unknown_rate`：需要恢复处理的未知提交比例。
 - `unit_success_cost`：每个成功完成任务消耗的模型、检索和工具成本。
 
-最后一个指标尤其重要。若总成本为 \(C\)，成功完成的任务数为 \($N_{s}$\)，单位成功任务成本为：
+最后一个指标尤其重要。若总成本为 $C$，成功完成的任务数为 $N_{s}$，单位成功任务成本为：
 
 ~~~math
 C_{success}=\frac{C}{N_{s}},\qquad N_{s}>0

@@ -958,17 +958,17 @@
    考察点：可见性矩阵、理解/生成、独立样本语义、监督目标。
    回答框架：bidirectional attention 允许同一有效输入中的 token 双向读取；causal attention 在输入位置 $i$ 只读至当前位置，并配合向右移位的标签预测下一个 token；Prefix LM 让前缀内部双向可见，目标位置能读取完整前缀及目标前缀。Packed causal mask 只在每段都代表独立样本时才要求样本间隔离；连续文本流可能有意保留上下文，还要单独检查跨边界标签配对。实现时依据 API 版本确认布尔 mask 极性和位置约定；可见性规则本身不能证明某个 kernel fast path 或性能结论。
 
-31K. 如何从并行性、路径长度和硬件友好性解释 Transformer 的优势？
-   考察点：training parallelism、parallel path length、attention pair count、GPU/TPU、矩阵乘。
-   回答框架：RNN 的序列内部有时间步递推依赖，远距离信息路径随序列长度增长；小卷积核 CNN 虽然并行，但远距离依赖需要多层扩大感受野。Transformer 在训练时一次性计算 Q/K/V 和所有可见 pair 的 attention score，可见 token 一层内直接交互，大部分计算是规则 dense matmul，适合 GPU/TPU 和分布式系统。代价是 full attention 有 `n^2` pair，长上下文成本会成为瓶颈。
+31K. Transformer 的位置并行、依赖路径和每层计算量分别说明什么？
+   考察点：Vaswani Table 1、sequential operations、maximum path length、训练与自回归生成、总计算与硬件执行。
+   回答框架：原论文对标准层的比较给出 self-attention `O(n²d)` 计算、`O(1)` 序列串行操作和 `O(1)` 位置路径；recurrent layer 为 `O(nd²)`、`O(n)`、`O(n)`。因果 mask 限制训练时可见边，但不要求逐 token 执行同一层；自回归生成仍按 token 依赖顺序继续。规则矩阵乘适合 GPU/TPU，但总操作数、内存流量、通信与实际墙钟吞吐必须分开。
 
-31L. Scaling law、Chinchilla 和 serving pressure 放在一起应该怎么讲？
-   考察点：scaling evidence、compute-optimal training、tokens per parameter、undertraining、serving pressure、scaling gate。
-   回答框架：先说清 scaling law 是在给定 tokenizer、数据、架构、recipe 和 loss 口径下拟合的经验关系，再定义“最优”到底是固定预训练 FLOPs 下的 loss，还是含 serving 的生命周期成本。Kaplan 2020 在其设置下估计参数随 compute 约按 C^0.73、数据约按 C^0.27 增长；Chinchilla 用 400 多个较小模型估计出参数和数据近似等比例扩展，并以 70B/1.4T 与 280B/300B 的同预算结果支持减少大模型 undertraining。后续数据受限研究把重复 epoch 纳入模型；inference-aware 研究指出高请求量时较小、训练更久的模型可能有更低总成本；Llama 3 报告也称其较小模型为满足相同推理预算而训练得更久。最后说明这些结果不能直接变成固定 token/parameter 比：要核对数据是否重复、参数/FLOPs 计数和曲线外推范围，再用目标任务评估和目标集群 serving 数据做决策。
+31L. Scaling law、Chinchilla 和下游能力变化应如何按证据边界解释？
+   考察点：held-out cross-entropy、compute-optimal training、数据质量、Emergent Abilities、评估指标和外推范围。
+   回答框架：Kaplan 等人在指定模型、数据与训练范围内拟合参数量、训练 token 和计算量与 held-out cross-entropy 的幂律关系；这不是跨模型族固定的指数，也不直接预测所有下游能力。Chinchilla 在其固定预训练计算目标下支持共同规划参数和 token，70B/1.4T 对照不能变成普遍 token/parameter 常数。2026 ICLR 的 QualityPajama 研究报告特定数据干预会改变拟合系数、指数和计算最优配比。Wei 等人定义的 emergent ability 与 Schaeffer 等人关于指标分辨率的解释共同提醒：要固定模型系列、任务、样本数、prompt、评分指标和运行条件，不能只由一条离散 accuracy 曲线推广到所有能力。
 
 31M. 如何系统审计 O(n^2) Attention 的计算与显存瓶颈？
-   考察点：attention pair count、score/probability memory、prefill、decode、FlashAttention、PagedAttention、GQA、sliding window。
-   回答框架：先写 `S/A` 的 shape 为 `[B,H,T_q,T_k]`；full self-attention 的 pair count 是 `BHT^2`，`QK^T` 与 `AV` 的主要计算量均随 `T^2` 增长。Decode 单步通常 `T_q=1,T_k=t`，注意力工作量对当前历史长度近似线性，但会读取历史 KV。估算朴素中间矩阵时，需说明实现是否同时物化 score 与 probability；causal mask 改变有效配对，不一定改变 naive tensor 的分配形状。dense FlashAttention 减少 HBM IO 和二次中间存储，逐行统计量随 `T` 增长，但不减少 dense pair 数；浮点顺序、FP8 路径与 block-sparse 连接图分别记录数值或算子边界。PagedAttention 管理 serving KV cache，GQA/MQA 改变模型 KV-head 结构。最后按目标 GPU、dtype、shape、mask、服务负载和 SLO 设计 profiling。
+   考察点：query-key pair 数、主要矩阵乘 FLOPs、score 矩阵是否物化、在线 softmax、causal mask 与训练/prefill/decode。
+   回答框架：先写 $S/P$ 的 shape 为 $[B,H_q,T_q,T_k]$，pair 数为 $BH_qT_qT_k$；只计 $QK^\top$ 和 $PV$ 时，主要 FLOPs 约为 $4BH_qT_qT_kd_h$。若实现物化 dense score 或 probability，单张矩阵 payload 才按 $BH_qT_qT_ks$ 估算；平方计算量不代表 attention 必须保存平方级中间矩阵。FlashAttention 用分块和在线 softmax 避免持久化完整 $S/P$，并可在反向中重算 tile；它仍处理 dense $T^2$ pair，浮点次序也不承诺逐位相同。Causal mask 的理论可见 pair 为 $T(T+1)/2$，但 dense 分配和实际执行量取决于 kernel。训练/prefill 使用整段 query，decode 单步 $T_q=1$、$T_k=t$，历史 KV 的容量和带宽转到第十一章。最后将复杂度账本与目标硬件上的 profile 分开。
 
 31N. 如何系统审计 KV Cache、长上下文推理和显存增长？
    考察点：KV cache formula、per-token cache、prefill/decode、decode bandwidth、MQA/GQA/MLA、PagedAttention、prefix sharing、cache gate。

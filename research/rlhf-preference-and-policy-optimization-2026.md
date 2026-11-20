@@ -111,7 +111,7 @@
 ### GRPO 系列的 reduction、采样与 clipping 变体
 
 - Yu et al., “DAPO: An Open-Source LLM Reinforcement Learning System at Scale,” arXiv:2503.14476v2，[论文 HTML](https://arxiv.org/html/2503.14476)。实际阅读摘要、引言、方法和 Table 1。
-  - 来源支持：DAPO 将 Clip-Higher、动态采样、token-level loss 和 overlong 处理组合进大规模 reasoning RL recipe。作者在 Qwen2.5-32B base、AIME24 Avg@32 设置的 progressive ablation 中报告 naive GRPO 30 分，逐步加入组件后达到 50；分数序列为 30、36、38、41、42、50。
+  - 来源支持：DAPO 将非对称 Clip-Higher、动态采样、全批有效 token mean loss 和 overlong 处理组合进大规模 reasoning RL recipe；动态采样过滤全对/全错组，overlong filtering 对被截断样本屏蔽 policy loss，soft overlong punishment 对软区间回答调整 reward。作者在 Qwen2.5-32B base、AIME24 Avg@32 设置的 progressive ablation 中报告 naive GRPO 30 分，逐步加入组件后达到 50；分数序列为 30、36、38、41、42、50。
   - 证据等级：source-backed（arXiv 论文指定实验和作者报告）。
   - 边界：这是逐步累加 recipe 的分析，不能视作各组件互相独立的随机化因果估计；分数绑定模型、题集、32 次采样、temperature=1、top-p=0.7 和论文实现。
 
@@ -126,7 +126,7 @@
   - 边界：“unbiased”对应论文给出的 policy-gradient 推导及其采样假设；实验结果绑定模型、训练集、模板和硬件，未证明任何任务下均优于带长度归一化方法。
 
 - Yang et al., “DCPO: Dynamic Clipping Policy Optimization,” arXiv:2509.02333v2，[论文 HTML](https://arxiv.org/html/2509.02333)。实际阅读方法、RUR 定义和主要表格。
-  - 来源支持：该论文的 DCPO 全称为 Dynamic Clipping Policy Optimization，按旧 token 概率构造动态 clipping，并加入 advantage 平滑及 response 内 token mean。作者在四个 Qwen 系列设置、400 个训练 step 上报告 GRPO、GSPO、DCPO 的平均 Response Utilization Ratio 分别为 43.8%、45.6%、71.8%；其 Qwen2.5-Math-7B AIME24 Avg@1/32 报告 46.7/38.8。
+  - 来源支持：该论文的 DCPO 全称为 Dynamic Clipping Policy Optimization，按旧 token 概率构造动态 clipping，并加入当前/累计 reward 的平滑 advantage 及 OTM。论文式（8）先在每条 response 内对有效 token loss 求 mean，再跨 response 求和，不再按整批 token 数或 response 数取 mean。作者在四个 Qwen 系列设置、400 个训练 step 上报告 GRPO、GSPO、DCPO 的平均 Response Utilization Ratio 分别为 43.8%、45.6%、71.8%；其 Qwen2.5-Math-7B AIME24 Avg@1/32 报告 46.7/38.8。
   - 证据等级：source-backed（预印本的机制定义和指定实验）。
   - 边界：RUR 是论文定义的非零 advantage 回答占比，不是正确率、正向梯度占比或最终能力指标；数字受模型、模板、任务和训练配置限制。
 
@@ -169,6 +169,18 @@
   - 来源支持：GAPO 是面向 GRPO/RLVR 的 plug-in clipping 改动，按 rollout advantage 调整 clipping boundary，不改 reward shaping，并保留 PPO/GSPO surrogate；摘要报告其在部分 Qwen/Llama 数学与代码 benchmark 上改善 Pass@1 和 Pass@k。
   - 证据等级：source-backed（正式会议论文记录及作者摘要中的方法定义和结果主张）。
   - 适用边界：摘要结论绑定作者所列模型、任务、base pass rate 和训练协议；会议收录不等于独立复现，也不能推出 GAPO 在所有 RLVR 任务上优于固定 clipping。章节将其用于说明研究状态与方法思路，不作跨方法总排名。
+
+## 2026-11-20 补充来源：面向初学者的算法讲解路径
+
+本次检索范围：第五册第十一章的 PPO-RLHF、DPO、GRPO、GSPO 与长推理训练方法；检索重点包括讲义、课程 walkthrough、例子如何对应算法步骤，以及实现层面怎样呈现采样、反馈、优势、ratio 和更新。检索词包括 `RLHF course PPO implementation walkthrough`、`DPO lecture step by step`、`GRPO tutorial worked example`、`GRPO end-to-end environment tutorial`。教学资料用于改进解释顺序和例子设计；其中的定义与效果主张仍回查相应原论文或固定版本官方文档。
+
+- Nathan Lambert, [Post-Training Course, Lecture 1: Overview](https://rlhfbook.com/teach/course/lec1-chap1-3/)，作者课程讲义；2026-11-20 阅读 reward modeling 与 RLHF 训练流程部分（网页约第 628–663 行）。材料先让同 prompt 的 chosen/rejected 产生排序信号，再按“采 prompts → policy 生成回答 → RM 评分 → 加 reference KL → 更新 policy”讲流程。可用于组织偏好反馈到策略更新的教学顺序；不能单独支撑 PPO/RM 的一般效果或所有实现细节。
+- Nathan Lambert, [Post-Training Course, Lecture 4: RL Implementation & Practice](https://rlhfbook.com/teach/course/lec4-chap6-p2/)，作者课程讲义；2026-11-20 阅读 PPO、GAE、GRPO 对照和 loss aggregation 部分（网页约第 559–704、898–1020 行）。材料把代码对象、执行顺序、critic/GAE 与组内优势差异并列，并用 5-token/10-token 和不同 reduction 展示序列长度如何改变 token 权重。可支持本章用数据流、执行轨迹和资源账本解释算法步骤；数值示例仅是课程教学示例，不能当作普遍训练结果。
+- Nathan Lambert, [Post-Training Course, Lecture 6: Direct Preference Optimization](https://rlhfbook.com/teach/course/lec6-chap8-dpo/)，作者课程讲义；2026-11-20 阅读第 1–6 页、DPO 推导概览、经典 RLHF 与 DPO 流程对照（网页约第 13–98 行及第 508 行附近）。材料明确将经典流程拆为偏好对、reward model、RL policy update，并把 DPO 组织为直接作用于偏好对的训练目标。可帮助解释 DPO 在整体流程中的位置与它省略的训练阶段；推导正确性和方法边界仍以 DPO 原论文 Rafailov et al.（本记录上文）为准。
+- Hugging Face, [Advanced Understanding of GRPO in DeepSeekMath](https://huggingface.co/docs/course/chapter12/3b)，课程单元（页面标明作者 Shirin Yamani）；2026-11-20 阅读 overview、group sampling、example、advantage 与 policy update 部分（网页约第 114–153、203–212 行）。材料用一道算术题让读者先看一组完整回答，再沿评分、组内比较和更新往下走，适合作为 GRPO “一组回答贯穿过程”的教学组织参考。该单元部分地方把数学任务的 RM/verifier 表述得较宽泛；本章的自动验收机制仍按 DeepSeekMath 等原论文及具体 verifier 定义说明，不照搬教学网页的术语口径。
+- Hugging Face, [End-to-end OpenEnv walkthrough: train a reasoning agent with GRPO (OpenEnv v0.6.0)](https://huggingface.co/docs/openenv/v0.6.0/tutorials/end-to-end-walkthrough)，固定版本官方实践教程；2026-11-20 阅读开篇任务流程（网页约第 101–109 行）。材料以“连接环境 → 接入训练器 → GRPO 微调 → 查看训练日志”的整体任务线组织内容。可支持把训练算法放在环境、数据、训练和观察结果的完整执行场景中；不能证明模型效果，也不替代 GRPO 的论文定义。
+
+- 证据类型：以上是解释来源，用于选择教学次序、例子粒度和过程追踪方式；算法事实另以本记录前面的 PPO、DPO、DeepSeekMath/GRPO、GSPO、DAPO 与 DCPO 原始来源核验。未发现可直接借用且覆盖本章 DAPO、DCPO 全流程的高质量初学者 walkthrough，因此这两节由作者自建任务轨迹，分别追踪长答案求和和同题正确解法的动态 reward/clipping/loss 状态。
 
 ## 生命周期
 

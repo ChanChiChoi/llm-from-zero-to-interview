@@ -1322,19 +1322,23 @@ Sliding Window Attention：滑动窗口注意力
 
 Mask Visibility Audit：掩码可见性审计
 
-Parallel Path Length：并行路径长度 / 信息路径长度
+Parallel Path Length：并行路径长度 / 信息路径长度；计算图中两个序列位置之间传递信息所需经过的层数，不代表实际墙钟时间或信息必然被正确利用。
 
-Attention Pair Count：注意力成对计算数量
+Sequential Operations：串行操作数；依赖计算图中必须按序完成的序列位置操作数，与总 FLOPs 和设备实测吞吐不同。
+
+Universal Approximation：通用逼近；在指定输入域、函数类和模型假设下，存在参数可将目标函数逼近到任意误差；不保证高效表示、训练可达或长度外泛化。
+
+Emergent Ability：涌现能力；按特定操作化定义，在小模型上未观察到、在较大模型上观察到且不能由小规模结果简单外推的任务表现；结论受模型点、任务、指标和样本分辨率影响。
+
+Attention Pair Count：注意力位置对数量；dense score 张量含 $BH_qT_qT_k$ 个位置对，不等于 FLOPs、物化内存或墙钟时间
 
 Quadratic Attention Cost：二次注意力成本
 
-Attention Score Memory：注意力分数矩阵显存
+Attention Score Memory：注意力分数矩阵显存；仅在实现物化 score 张量时按 $BH_qT_qT_ks$ 估算，在线/分块算法可避免保存完整矩阵
 
 Prefill Attention Cost：预填充注意力成本
 
 Decode Attention Cost：解码阶段注意力成本
-
-Attention Cost Gate：注意力成本门禁
 
 Training FLOPs Estimate：训练 FLOPs 估算
 
@@ -1345,8 +1349,6 @@ Tokens per Parameter：每参数训练 token 数
 Undertrained Model：训练不足模型
 
 Serving Pressure：推理服务压力
-
-Scaling Gate：规模化门禁
 
 SwiGLU：SwiGLU 门控 MLP；SiLU/Swish gate 与 up 两条投影逐元素相乘后再下投影。若普通 FFN 中间宽度为 $4D$，近似等参数 SwiGLU 宽度约为 $8D/3$，实际模型还会按配置取整。
 

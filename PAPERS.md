@@ -151,6 +151,8 @@ Transformer 核心机制入口：
 25. [Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer](https://arxiv.org/abs/1701.06538)：稀疏门控 MoE 的早期方法和负载/带宽挑战；其实验含 LSTM 语言建模与机器翻译，不是 Transformer MoE 结果。
 26. [GShard](https://arxiv.org/abs/2006.16668) 与 [Mixtral of Experts](https://arxiv.org/abs/2401.04088)：分别展示 Transformer 中隔层 top-2 MoE 与 8-expert/top-2 MoE；模型规模、任务、设备和 active-parameter 口径按原文限定。
 27. [DeepSeekMoE](https://aclanthology.org/2024.acl-long.70/)：研究细粒度 routed experts 和 shared experts；论文实验不证明这些设计对所有模型、任务或硬件都更优。
+28. [Yun 等人的通用逼近定理](https://openreview.net/forum?id=ByxRM0Ntvr)、[Hahn 的 self-attention 形式语言限制](https://aclanthology.org/2020.tacl-1.11/)与 [Chiang、Cholak 的后续构造](https://aclanthology.org/2022.acl-long.527/)：对照紧致域函数逼近、无限增长形式序列、hard/soft attention、识别准确率和交叉熵的不同条件。
+29. [Emergent Abilities of Large Language Models](https://arxiv.org/abs/2206.07682)、[PaLM](https://arxiv.org/abs/2204.02311) 与 [Are Emergent Abilities of Large Language Models a Mirage?](https://papers.neurips.cc/paper_files/paper/2023/hash/adc98a266f45005c403b8311ca7e8bd7-Abstract-Conference.html)：比较涌现能力的定义、指定 benchmark 上的规模观察，以及指标/样本分辨率对跃迁外观的影响；不据此断言所有能力都有或没有普遍阈值。
 
 - [Multi-Layer Scheduling for MoE-Based LLM Reasoning](https://arxiv.org/abs/2602.21626)：研究请求级、引擎级和 expert 级的分层调度；作者报告的 TTFT/TPOT 变化绑定论文 workload、模型、集群和服务实现，不能由 router token 计数直接推出。
 
@@ -166,6 +168,7 @@ Transformer 核心机制入口：
 4. [Google DeepMind MRCR v2](https://github.com/google-deepmind/eval_hub/blob/master/eval_hub/mrcr_v2/README.md) 固定较简单的多轮共指任务复杂度并扩大长度，适合看极长输入上的曲线；2026-11-03 查阅的仓库说明可生成到 8M，但任务、工具和噪声模型有明确边界。OpenAI [MRCR / Graphwalks 发布说明](https://openai.com/index/gpt-4-1/)提供相近的厂商任务设计入口，不能与 DeepMind 变体混分。
 5. needle 冒烟成绩不等于跨任务有效利用。基准分数不能脱离数据、提示、长度单位、推理预算、工具权限和 harness 直接排名；具体任务组合见[第七册第十三章](book-07-evaluation-experiments/chapters/13-1m-context有效能力评测.md)和[长上下文评测研究记录](research/long-context-evaluation-and-effective-capability-2026-11-03.md)。
 6. [REALM](https://arxiv.org/abs/2002.08909)、[Dense Passage Retrieval](https://arxiv.org/abs/2004.04906)、[RAG](https://arxiv.org/abs/2005.11401) 与 [RETRO](https://arxiv.org/abs/2112.04426)：检索增强语言模型的早期路线，分别比较潜在检索预训练、检索器、生成时文档边缘化和 chunked cross-attention。
+7. [Self-attention Does Not Need O(n^2) Memory](https://arxiv.org/abs/2112.05682)、[Linformer](https://arxiv.org/abs/2006.04768) 与 [Performer](https://arxiv.org/abs/2009.14794)：Rabe 与 Staats 区分二次计算和二次额外内存；Linformer 与 Performer 分别研究低秩和随机特征近似。复杂度、近似误差和任务结果按各自算法与实验条件阅读。
 7. [RAG Survey](https://arxiv.org/abs/2312.10997)：按 retrieval、generation、augmentation 和 evaluation 组织后续 RAG 研究；综述用于建立地图，具体结论仍回到原始论文和目标系统。
 8. [HNSW](https://arxiv.org/abs/1603.09320)、[FAISS](https://arxiv.org/abs/1702.08734)、[BEIR](https://arxiv.org/abs/2104.08663) 与 [MTEB](https://arxiv.org/abs/2210.07316)：近似检索系统和跨任务评估；目标语料仍要单独测过滤后召回和端到端质量。
 9. [MonoT5](https://arxiv.org/abs/2003.06713) 与 [ColBERT](https://arxiv.org/abs/2004.12832)：生成式精排与 late-interaction 检索设计。

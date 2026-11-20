@@ -250,10 +250,10 @@
 31I. 假设某个 decode 路径使用连续递增的绝对 position ids，给定 `cache_len=128`、新 token position ids `[0,1,2]`、训练上下文 4096、目标上下文 32768。指出 cache 续接处的编号不一致，并写出通常应使用的位置序列；再说明目标长度超过训练范围时，还需要查哪些扩展配置和任务证据，为什么不能仅凭修改窗口字段宣布能力成立。
 31J. 对照第 21 册第 8 章，分别画出连续文本流的 causal mask 与两条独立样本的 packed causal mask。指出哪些可见边会造成未来读取或跨样本读取，并检查 shifted label 是否把一条样本末尾错误地配成下一条样本的目标；说明 EOS 为什么不能单独建立 attention 边界。
 31K. 手画 prefix 长度为 2、target 长度为 4 的 Prefix LM 可见矩阵，逐行说明可读取的位置；再说明这个矩阵本身没有规定哪些 token 是训练目标或如何计算 loss。
-31L. 运行第 21 册第 9 章的并行与 Scaling 审计 demo，解释 `arch_cost`、`loss_best`、`ready_best` 和 `scaling_gate_pass` 分别说明什么。
-31M. 给定固定训练 FLOPs 预算，列出 3 个不同参数量 / token 数候选，并判断哪个候选可能 undertrained、哪个 serving pressure 最高。
-31N. 运行第 21 册第 10 章的 Attention 成本审计 demo，解释 `short_vs_long_pair_multiplier`、`full_32k_score_tensor_gib`、`prefill_32k_tflops_per_layer`、`decode_one_step_32k_tflops_per_layer` 和 `attention_cost_gate_pass` 分别说明什么。
-31O. 给定 `B=1`、`H=32`、`T=32768`、`D_h=128` 和 fp16，手算 full score tensor、score+prob tensor、causal visible score tensor 的显存，并解释为什么 causal mask 不能根治平方瓶颈。
+31L. 对照 [Yun 等人的通用逼近定理](https://openreview.net/forum?id=ByxRM0Ntvr)、[Hahn 的形式语言限制](https://aclanthology.org/2020.tacl-1.11/)和 [Chiang 与 Cholak 的构造](https://aclanthology.org/2022.acl-long.527/)，列出它们各自的输入长度、位置编码/注意力设定、评价指标和结论。解释为什么紧致域上的存在性定理、无限增长字符串上的渐近限制，以及分类准确率与交叉熵不是同一问题。
+31M. 用 [Kaplan scaling laws](https://arxiv.org/abs/2001.08361) 和 [Chinchilla](https://arxiv.org/abs/2203.15556) 的原始设定比较 held-out loss、模型/数据范围和固定训练计算目标。说明 70B/1.4T 与 Gopher 对照能支持什么、不能推出固定 token/parameter 比；再列出数据处理或服务目标发生变化时需要补充的证据。
+31N. 给定 $B=1$、$H_q=32$、$T_q=T_k=32768$、$d_h=128$ 和 BF16，计算 dense pair 数、$QK^\top$ 与 $PV$ 的主要 FLOPs、以及一张 score 矩阵的 payload。再把长度加倍，说明哪些量会变为四倍，并列出估算未包含的成本。
+31O. 对长度 $T=8192$ 的 causal self-attention，比较可见 pair 数、dense score 矩阵 shape 和实际 kernel 工作量；再用第十章的两块教学权重与 value 合并全局输出，解释为什么不能直接平均局部输出，以及 FlashAttention 改变的显存项是什么。
 31P. 运行第 21 册第 11 章的 KV Cache 成本审计 demo，解释 `mha_8k_cache_gib`、`gqa_8k_cache_gib`、`gqa_cache_per_token_kib`、`decode_read_gib_per_step`、`paged_waste_ratio` 和 `kv_cache_gate_pass` 分别说明什么。
 31Q. 给定 `L=32`、`B=16`、`T=8192`、`H_q=32`、`H_kv=8`、`D_h=128`、fp16，手算 GQA KV cache 显存，并说明把 `H_kv` 降到 4 可能带来哪些质量和工程风险。
 32. 比较 attention visibility、padding validity、loss mask 与独立样本边界的职责；说明一个 prompt token 为什么可以被读取却不计入 assistant-only loss。

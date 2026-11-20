@@ -63,3 +63,20 @@
 - 为偏好打分、组内 advantage、token/sequence ratio、动态采样、动态 clipping 与 OTM 等核心调用补充 `【核心】` 注释；其余注释说明输入约定、mask、评分器、终止/截断或不训练额外模型等要点。
 - 保留每个算法自己的完整例子、变量语义和原有正文解释；不改 §3 PPO-RLHF、数学公式、研究结论或第 17 节 demo。伪代码仍是机制骨架，不声明为可执行实现。
 - 静态检查 `git diff --check`、Markdown 围栏和公式/链接边界；未运行测试或 PDF 构建。
+
+## 2026-11-19：重写 §4–§9 伪代码配套讲解
+
+- 按用户指出的问题，重新通读完整模块 02，并复核第十一章伪代码和下方步骤是否逐个对应。六种独立方法继续使用各自的完整例子，不共用一个例子代替机制说明。
+- DPO、SimPO、GRPO、GSPO、DAPO、DCPO 的步骤现在按伪代码调用顺序展开，明确指出每一步由哪个函数处理、输入输出怎样变化，以及这些信号如何到达 policy 更新；补足核心函数注释。
+- 修正 GSPO 手算中“从长回答抽五个代表位置就计算整句 ratio”的不严谨说法，改为明确的五位置教学回答；为 DCPO 伪代码补上 prompt 历史的初始化，并在算例中对齐历史写入、累计标准化、动态 clip、token ratio、OTM 和 RUR/evaluate。
+- 复核并清除 DPO 的重复例子标题；检查其余算法例子与调用步骤的顺序。PPO-RLHF 的既有六步讲解和第 17 节已验证 demo 保留。
+- 机制边界依据本轮核对的 DPO、SimPO、DeepSeekMath/GRPO、GSPO、DAPO、DCPO 原始论文；研究记录同步补充 DAPO 的 token reduction/超长处理与 DCPO OTM 的逐回答 mean 后求和定义。未运行测试或 PDF 构建。
+
+## 2026-11-20：依据教学型联网来源重写算法讲解步骤
+
+- 依用户要求重读当前模块 02、03、04、05 与新增《联网数据来源》，并重新核对恢复入口和本章交接记录。将课程讲义、公开 notes 与实践 walkthrough 作为教学路径的默认检索来源，与论文机制核验并行使用。
+- 新增研究资料记录在 `research/rlhf-preference-and-policy-optimization-2026.md`：阅读 RLHF & Post-Training Course 的 PPO/RLHF、DPO 讲义，Hugging Face GRPO worked example 和 OpenEnv v0.6.0 端到端教程；记录它们适用于讲解顺序和过程追踪的范围，并注明不能替代原论文事实核验。
+- 重写 §4–§9 的例子步骤：各段仍以自身伪代码为全局骨架并使用独立任务；把 DPO/SimPO 改为追踪偏好对与 policy/reference 比较，把 GRPO 改为追踪整组候选如何收到测试反馈并变成 token 更新，把 GSPO 的局部 token ratio 改为位置表后汇总成回答级 ratio，把 DAPO 的长度处理改为自然结束/硬截断状态表，把 DCPO 的 advantage 平滑、动态 clipping 和 OTM 改为状态/资源账本。只在能推广机制时保留公式或数值关系，删去单独换算 logistic loss 的段落。
+- 将 §11 的 DrGRPO 长度归一化说明改为短答/长答在三种 loss reduction 下的对照表；在 §20 增列课程与实现型教学资料供读者继续学习。保留已认可的 §3 PPO-RLHF 伪代码与六 token 算例，保留 §17 已验证 demo 的可执行代码和输出。
+- 按公式规范给行内数学与全角标点留出分界空格，并在 DPO 例子之后补一条汇总目标式，将公式放在具体过程之后作一般化。
+- 本轮核验课程和教学资料的具体页面；算法事实沿用并对照 research 中已经记录的 PPO、DPO、DeepSeekMath/GRPO、GSPO、DAPO、DCPO 与 DrGRPO 原始来源。更新后检查 `git diff --check`、Markdown 围栏、行内公式定界符、全角标点边界和本地链接；未运行测试或 PDF 构建。
