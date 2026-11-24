@@ -222,7 +222,7 @@ forward 已经出现 NaN，优先看输入、mask、logits 和算子；forward �
 
 ### 9.4.2 基于窗口的候选检测
 
-设最近 k 个健康 step 的 loss 中位数为基线：
+先固定 loss 的统计口径，再用最近 k 个有限且口径可比的历史 step 计算候选基线：
 
 ~~~math
 b_{t}
@@ -244,9 +244,13 @@ baseline 恰为 0 时，应把 spike 比值标为 `not_applicable` 并改用绝�
 
 例如，三个健康 step 的 loss 是 2.40、2.18、2.05，中位数 $b_{t}=2.18$；当前 step 的 loss 是 5.80，于是 $r_{t}=5.80/2.18\approx2.66$。若项目预先设定阈值为 2.0，这一步会被标成候选 spike。这个比例只负责把 step 排到复查队列前面；要判断原因，还得检查同一步的梯度、有效 token、batch 内容和 optimizer 状态。第 9.12 节沿用这组数，把它与其他诊断信号接在一起。
 
+这里的三个历史 step 是用于说明计算的健康样本。第 9.12 节的玩具代码只过滤非有限值，再取最近三个有限观测；它不会因为某个历史 step 曾触发候选阈值，就自动把该 step 从后续窗口剔除。生产系统若采用“健康窗口”作为基线，还需明确定义怎样确认并排除异常点；单靠有限性检查不能推出健康。
+
 ### 9.4.3 三组对照
 
 数据对照：保存 spike batch 的 sample id、来源、长度、token 分布、特殊 token 和 label mask；在健康 checkpoint 上重放。如果旧参数对这批数据也高 loss，问题更像样本、模板或标签；只有新参数高 loss，数据可能只是触发器。
+
+异常也可能藏在 checkpoint 的 embedding 行里。NVIDIA NeMo AutoModel 0.7.0 的排障文档记录：少数输入 embedding 行可能是零、近零或非有限值；训练在对应 token ID 出现前看似正常，该 token 出现后却可能产生极大的 embedding gradient，并主导全局梯度范数。若异常只随特定 token 出现，应同时检查 token ID、对应 embedding 行和 checkpoint；该文档只把 embedding 行修复用于确认过的 checkpoint 缺陷，并不把它当成坏数据、数值精度或 optimizer state 问题的通用修复。[NVIDIA NeMo AutoModel 0.7.0 troubleshooting](https://docs.nvidia.com/nemo/automodel/v0.7/model-coverage/troubleshooting)。
 
 状态对照：把 spike 前后的 grad norm、learning rate、warmup、loss scale、optimizer step 和恢复时间放在同一时间轴。loss 和 grad norm 同时升高，更支持更新或监督信号异常；loss 升高但其他状态平稳，要优先检查 batch 难度和聚合口径。
 
@@ -271,7 +275,7 @@ baseline 恰为 0 时，应把 spike 比值标为 `not_applicable` 并改用绝�
 | Global norm clipping（工程基线） | 当整个梯度向量的范数超过阈值时，统一缩小梯度，方向不变 | 先按历史健康 step 的范数分布选择候选阈值，再统计裁剪率、裁剪前后更新量和目标质量 | 全局范数可能掩盖单层或单坐标异常；阈值过低会持续缩小正常更新；裁剪不能清理已经累积进 Adam 矩的历史异常，也不能修复数据或 loss 的错误 |
 | 逐张量自适应裁剪（AdaGC） | 每个参数张量按历史裁剪梯度范数的 EMA 设置动态上界，论文默认前 100 步用全局裁剪 warmup | 比较逐张量裁剪率、更新量、通信归约范围和同口径目标质量；不要只观察全局范数 | 其 spike score、并行布局与模型结果绑定论文设置；不同 DP/TP/PP 下局部范数归约范围可能不同，不能视作全局裁剪的逐张量等价实现 |
 
-AdaGC 的作者把 spike score 定义为 loss 序列中偏离前 1,000 个观测的滚动均值至少 10 个标准差的比例；表 7 在 Llama-2 7B（9,000 steps）、Mixtral 8×1B（36,000 steps）和 ERNIE 10B-A1.4B（21,000 steps）报告的分数为 0，而 GlobalGC 分别为 0.0333%、0.0144% 和 0.0100%。这个“0”只表示没有命中该论文的统计阈值，不代表没有任何训练异常；论文报告的下游准确率增量也绑定相应 benchmark 和训练配置。[AdaGC（ICML 2026）](https://proceedings.mlr.press/v306/wang26dg.html)。
+AdaGC 论文将 spike score 定义为 loss 时间序列中偏离前 1,000 个值的滚动均值至少 10 个标准差的点所占比例。作者在 Llama-2 7B（9,000 steps）、Mixtral 8×1B（36,000 steps）和 ERNIE 10B-A1.4B（21,000 steps）上报告的 AdaGC score 均为 0；对应 GlobalGC 分别为 0.0333%、0.0144% 和 0.0100%。这些数值绑定论文的训练设置。该 score 衡量的是论文定义的逐点 loss 异常，不能与本节的窗口 loss ratio 直接比较；“0”表示没有观测点达到其判据，不代表训练中不存在其他异常。论文摘要还报告了相对 GlobalGC 的下游准确率变化，但这些结果同样受相应 benchmark 和配置限制。[AdaGC（ICML 2026）](https://proceedings.mlr.press/v306/wang26dg.html)。
 
 SPAM 还暴露了阈值方案的典型取舍。论文在 C4 的常规预训练设置用 $\Delta T=500$、重置后 warmup 150 步、在线阈值 $\theta=5000$；消融在 LLaMA-130M 上发现，把间隔从 2500 缩短到 500 时验证困惑度改善，继续缩短则开始退化；阈值太小会把有效梯度也压掉。它说明参数应联合验证，不能把论文里的 500/150/5000 当作通用默认值。
 

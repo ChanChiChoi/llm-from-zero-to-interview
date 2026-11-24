@@ -47,6 +47,8 @@ GLM-5 的公开定位把模型能力、稀疏长上下文结构和训练基础�
 
 长序列中，标准 causal attention 让当前位置访问全部历史 key/value。DSA（DeepSeek Sparse Attention）的核心抽象是增加一个轻量 indexer：先为历史位置估计相关性，只把 top-k 候选交给主 attention。
 
+固定窗口、Longformer/BigBird 等稀疏连接模式与 query-conditioned 选择的概念比较见[第十九章 19.6 节](19-Sliding-Window与稀疏注意力.md)；本节继续限定 GLM-5 自身的配置与证据边界。
+
 对当前位置 `t` 和历史位置 `i`，可以用教学式写成：
 
 ```math

@@ -4,9 +4,80 @@ GPT-6.1 Sol -> Artificial Analysis canonical -> OpenAI model contract -> reasoni
 
 ## 核心依赖链
 
+### MoE 路由与专家结构链
+
+Position-wise FFN -> MoE FFN -> Token-choice Top-k -> Router scores/weights -> Token-expert assignments -> Expert dispatch/packing -> Expert FFN -> Unpermute/combine -> Transformer residual path
+
+Token-choice Top-k -> Expert capacity/overflow -> load balancing and training stability (第五册第四章) -> Dense/MoE training and serving comparison (第二十一册第二十二章)
+
+Total Parameters ↔ Active Parameters ↔ Resident Weights -> Training state + expert compute + exposed communication -> Prefill/Decode expert batching and weight movement -> matched-quality / matched-budget Dense-MoE comparison
+
+Expert-choice routing -> each expert selects a fixed token bucket -> variable number of experts per token
+
+DeepSeekMoE -> fine-grained expert segmentation + always-active shared experts -> paper-specific specialization analysis -> task/model evidence boundary
+
 ### 语言模型链
 
-Tokenization -> Special Token -> Chat Template -> Assistant-Only Label Mask -> EOS Coverage -> Embedding -> Transformer -> Transformer Backbone -> Residual Stream -> Norm Placement -> Pre-LN -> Post-LN -> RMSNorm -> Residual Scaling -> Permutation Equivariance -> Position Encoding -> Sinusoidal Position Encoding -> Learned Absolute Position Embedding -> Relative Position Representation -> Relative Position Bias -> RoPE -> ALiBi -> Position Interpolation -> RoPE Scaling -> Position ID Audit -> Attention Mask -> Loss Mask -> Bidirectional Attention -> Prefix LM -> Packed Sequence Mask -> Independent-Sample Boundary -> Block-Diagonal Causal Mask -> Sliding Window Attention -> Mask Visibility Audit -> Parallel Path Length -> Attention Pair Count -> Quadratic Attention Cost -> Attention Score Memory -> Online Softmax -> FlashAttention -> Prefill Attention Cost -> Decode Attention Cost -> Training FLOPs Estimate -> Training-Loop Throughput -> Wall-Clock Availability -> Wall-Clock Throughput -> Time-to-Train -> Compute-Optimal Training -> Tokens per Parameter -> Undertrained Model -> Serving Pressure -> Position-wise FFN -> SwiGLU -> Gated MLP -> MoE FFN -> Top-k Routing -> Expert Capacity -> Active Parameters -> Architecture Selection Gate -> In-Context Learning -> Few-Shot Demonstration -> Label Space -> Demonstration Order Sensitivity -> Explicit Context Retrieval -> Induction Head -> Lost in the Middle -> Training Parallelism -> Content Routing -> Expressive Power -> Universal Approximation -> Formal-Language Limits -> Empirical Scaling Law -> Compute-Optimal Training -> Data-Quality Scaling -> Emergent-Ability Metrics -> Ecosystem Readiness -> Deployment Pressure -> Attention-SSM Hybrid Readiness -> Next-Token Prediction -> Cross Entropy -> Pretraining -> SFT -> RLHF/DPO -> Chat Model
+Tokenization -> Special Token -> Chat Template -> Assistant-Only Label Mask -> EOS Coverage -> Embedding -> Transformer -> Transformer Backbone -> Residual Stream -> Norm Placement -> Pre-LN -> Post-LN -> RMSNorm -> Residual Scaling -> Permutation Equivariance -> Position Encoding -> Sinusoidal Position Encoding -> Learned Absolute Position Embedding -> Relative Position Representation -> Relative Position Bias -> RoPE -> ALiBi -> Position Interpolation -> RoPE Scaling -> Position ID Audit -> Attention Mask -> Loss Mask -> Bidirectional Attention -> Prefix LM -> Packed Sequence Mask -> Independent-Sample Boundary -> Block-Diagonal Causal Mask -> Sliding Window Attention -> Mask Visibility Audit -> Parallel Path Length -> Attention Pair Count -> Quadratic Attention Cost -> Attention Score Memory -> Online Softmax -> FlashAttention -> Prefill Attention Cost -> Decode Attention Cost -> Training FLOPs Estimate -> Training-Loop Throughput -> Wall-Clock Availability -> Wall-Clock Throughput -> Time-to-Train -> Compute-Optimal Training -> Tokens per Parameter -> Undertrained Model -> Serving Pressure -> Position-wise FFN -> SwiGLU -> Gated MLP -> MoE FFN -> Top-k Routing -> Expert Capacity -> Active Parameters -> Architecture Selection Gate -> In-Context Learning -> Few-Shot Demonstration -> Label Space -> Demonstration Order Sensitivity -> Explicit Context Retrieval -> Induction Head -> Lost in the Middle -> Inductive Bias -> Convolutional Locality -> Shift Equivariance -> Recurrent State -> Explicit Token History -> Memory-Recall Trade-off -> Training Parallelism -> Content Routing -> Expressive Power -> Universal Approximation -> Formal-Language Limits -> Empirical Scaling Law -> Compute-Optimal Training -> Data-Quality Scaling -> Emergent-Ability Metrics -> Ecosystem Readiness -> Deployment Pressure -> Attention-SSM Hybrid Readiness -> Next-Token Prediction -> Cross Entropy -> Pretraining -> SFT -> RLHF/DPO -> Chat Model
+
+GPT 历史链（第二十一册第 51—53 章）：GPT（后称 GPT-1）：生成式预训练 + 任务监督微调 -> GPT-2：零样本迁移评估 -> GPT-3：zero/one/few-shot ICL（评测时无梯度更新） -> Chinchilla：固定计算预算下的预训练参数/token 配比 -> InstructGPT：GPT-3 基座 + 示范/SFT + 偏好比较/RM + PPO -> ChatGPT（2022 发布期）：GPT-3.5 后训练 + 多轮对话产品入口；行为变化不等同于 Transformer block 替换
+
+LLaMA 架构演进链（第二十一册第 54 章）：原始 LLaMA：稠密 decoder-only + Pre-Norm/RMSNorm + RoPE + SwiGLU（组合既有设计） -> Llama 2：上下文扩展 + 较大模型采用 GQA -> Llama 3/3.1：稠密主干 + GQA + 版本化上下文扩展 -> Llama 4：MoE + early fusion 原生多模态；系列名不表示固定 block
+
+Mistral/Mixtral 架构链（第二十一册第 55 章）：Mistral 7B v0.1 -> GQA 共享 K/V head -> 缩减 KV 状态与读取量；SWA 限制单层直接可见历史 -> 层间传播跨度不等于有效上下文 -> Mixtral 8x7B 以每层 8 个 FFN experts / 每 token top-2 路由扩展总权重容量 -> 区分约 $47\mathrm{B}$ 总参数与约 $13\mathrm{B}$ 激活参数 -> 论文 benchmark 和开放权重许可按版本与披露边界读取。
+
+闭源多模态模型证据链（第二十一册第 56 章）：Gemini 1.0 -> decoder-only Transformer + 联合图像/音频/视频/文本训练的公开报告 -> Gemini 1.5 -> sparse MoE 报告 + 独立标注的长上下文实验；GPT-4V -> 图像输入与高层训练披露 + GPT-4 内部架构细节未公开；Claude 3 -> 图像接口与发布方视觉评估 -> 内部视觉编码/融合路径未知。模型接口、架构披露、产品窗口和 NIAH 结果分别记录，不把测试召回等同于通用长程理解。
+
+开放权重训练工程证据链（第二十一册第 57 章）：Qwen2.5 -> 7T 到 18T 预训练规模 + 数据 mixture/领域样本 + 分阶段长序列训练；Llama 3.1 -> 15.6T 文本 token + 128K tokenizer + 数据清洗/配比与大规模训练系统；Gemma 2 -> 2B/9B/27B 分尺寸预算 + 小尺寸蒸馏、27B 从头训练。权重、训练语料、处理代码、训练 recipe 和许可证分开核对；自报 token 与 benchmark 不构成可比质量排名。
+
+DeepSeek 版本路线（第二十一册第 58 章）：V2 -> MLA 低秩 KV latent + 解耦 RoPE key + DeepSeekMoE shared/routed experts；V3 -> 延续 MLA/DeepSeekMoE + routing bias 参与 top-k 选择、原 affinity 保留输出 gate + sequence-wise 辅助平衡 + MTP 顺序预测目标；V3-Base -> R1-Zero（无预先 SFT 的直接 RL）/ R1（冷启动、RL、拒绝采样与混合 SFT、第二轮 RL）；R1 生成推理数据 -> Qwen2.5/Llama 稠密学生 SFT。分别记录架构、训练目标、后训练路线与评测，不把它们合并成同一模型或普遍效率/能力结论。
+
+Compute-optimal 训练链（第二十一册第 52 章）：固定训练 FLOPs + 预训练损失目标 -> 参数量与训练 token 共同分配 -> Chinchilla（参数量 $N=70\,\mathrm{B}$、训练 token 数 $D=1.4\,\mathrm{T}$）与 Gopher 同预算检验；系统扩展支链：PaLM（参数量 $N=540\,\mathrm{B}$、训练 token 数 $D=780\,\mathrm{B}$）-> Pathways + $6{,}144$ TPU v4 -> 区分 model-FLOPs utilization 与 hardware-FLOPs utilization。数据受限、重复 token、参数定义、训练 recipe 或目标变化时须重新估计，不能把 $D/N\approx20$ 的经验比例当作恒定法则。
+
+主流模型横向比较轴（第二十一册第 59 章）：固定模型/version/revision -> 架构信息路径（组件组合、attention/KV 表示、稠密或条件专家） / 训练与适配（scaling、预算、SFT/RL、MTP、蒸馏） / 用户接口（对话、图像、长上下文） / 公开披露与评测条件；分别记录直接披露、有限推断和未知项 -> 不将总/激活参数、训练 token、窗口字段、benchmark 分数或产品体验合成架构优劣排名。序列架构家族比较见第 42 章，未来结构判断见第 60 章。
+
+新架构主张判断（第二十一册第 60 章）：固定版本与资料 -> 定位变化层（模型结构 / 训练 / 执行实现 / 外部检索或 Agent 闭环） -> 追踪信息对象与机制 -> 预测资源变化及任务压力点 -> 将报告、配置、行为与硬件证据对齐主张 -> 区分已披露、观察、推断和未知；MLA 缓存表示、MoE 条件参数、SSM 递归状态、检索/记忆及工具闭环属于不同信息路径，不据单个 benchmark 或产品接口推出内部架构或通用赢家。序列家族比较见第 42 章，组合设计与开放问题见第 50 章，历史模型矩阵见第 59 章。
+
+Dense attention IO subchain: Materialized Score/Probability -> HBM Round Trips -> Attention Tiling -> Online Softmax -> FlashAttention
+
+Decode kernel subchain: Small Query Batch -> K/V Sequence Splitting -> Partial Softmax Statistics -> Global Statistics Merge -> Flash-Decoding
+
+稀疏 attention 模式链：Dense causal visibility -> Causal sliding window -> Dilated window -> Longformer task-global links -> BigBird local/random/global links -> Query-conditioned selection (DSA) -> 多层信息路径 -> 任务级证据读取；attention pattern -> token mask -> block mask/layout -> query-block 到 key-block 索引 -> dynamic router 与 selection cost -> selected-support attention -> kernel execution（第 20、26 章）
+
+长序列方法链：Longformer -> 局部/扩张窗口 + task-global 位置；BigBird -> local + random + global 图；Reformer -> LSH candidate -> bucket sorting -> chunk attention -> reversible residual 重构层激活 + FFN chunking 限峰值内存。连接选择、attention 候选和训练激活存储属于不同机制（第 27 章）。
+
+SSM/S4/Mamba 链：连续动力学与离散假设 -> 固定 LTI 递归及冲激响应卷积（第 29 章）-> HiPPO 按指定测度做有限维在线投影 -> NPLR 正规加低秩 -> 酉坐标变换为 DPLR -> 双线性离散化 -> 截断生成函数/resolvent -> Woodbury 低秩修正 -> Cauchy 核与单位根求值 -> 逆 FFT 还原有限卷积核 -> 固定参数的卷积/递归双视图（第 31 章）-> Mamba 输入依赖的 $\Delta_t,B_t,C_t$ -> 时间变化状态递归 -> 仿射更新结合律与 Selective Scan -> 局部卷积/选择性 SSM/门控支路组成 Mamba block（第 32 章）-> 硬件实现与效率（第 33 章）、能力边界（第 34 章）-> Mamba-2 将状态转移限为标量乘单位矩阵、递归展开为 $M=L\odot(CB^\mathsf{T})$ 的半可分离结构，并用块内矩阵乘法和跨块状态传递实现 SSD（第 35 章）-> 跨架构证据（第 36 章）。
+
+RWKV 链（第 37 章）：RWKV-4 token shift 与逐通道归一化 WKV 向量状态 -> RWKV-5 Eagle 每头矩阵状态与固定 decay -> RWKV-6 Finch 输入依赖 token shift/decay -> RWKV-7 Goose 广义 delta 状态更新（衰减、方向性移除、replacement-key 写入）-> 整段序列扫描与自回归递归是同一更新关系的不同执行形态 -> 固定状态仅相对于序列长度 $T$，状态容量仍依赖层数与通道/头维度；RWKV-8 的 DeepEmbed/ROSA 属实验扩展组件，不与 v4—v7 的 WKV 方程合并。
+
+RetNet 链（第 38 章）：因果距离衰减 $D$ 与 query-key 内容分数 -> 衰减后的 key-value 外积累计为矩阵状态 $S_t$ -> parallel retention 的整段因果计算 / recurrent retention 的逐 token 更新 / chunkwise recurrent 的块内并行与块间状态传递 -> multi-scale 固定 head decay + 位置相位 + GroupNorm 与门控 -> 固定状态尺寸不随序列长度 $T$ 增长，但不等于历史 token 可独立寻址；与 RWKV WKV、softmax attention 及通用线性注意力保持方程边界（第 37、24—25、42 章）。
+
+Hyena 链（第 39 章）：输入投影与短卷积形成 value/gate 流 -> 隐式位置滤波器生成长核 -> 因果 FFT 长卷积与逐位置 gate 按阶交替 -> 对角 gate 矩阵与 Toeplitz 卷积矩阵构成数据控制算子 -> 长度参数解耦不等于零成本核生成或稳定位置外推 -> 原论文与后续 AR 结果须按词表、长度、训练样本和模型配置分别解释；算子 benchmark 不等于完整模型速度。
+
+早期混合序列路线（第 40 章）：Mega 的多维 damped EMA -> EMA 表示参与 gated attention 的 Q/K 与 update gate -> Mega-chunk 将 attention 限在固定块内；GSS 的窄 DSS 上下文流与另一投影逐点相乘 -> H3 的 shift SSM 对齐前序 key、key/value 乘法写入 -> diagonal SSM 积累关联并由 query 读取 -> GSS-Hybrid / H3-attention 保留标准 Transformer 层；结构都含门控但路径不同，实验按各自 LRA / TPUv4 / 合成任务和训练配置解释。
+
+卷积序列模型复兴（第 41 章）：局部 depthwise Conv1D 在 QKV 投影后加入邻域特征 -> attention 继续做全局内容相关读取 -> 显式/隐式长核以相对位移共享权重传播长程信息 -> H3+LongConvs 以长卷积替换 SSM 核但仍保留 attention -> StripedHyena 将 attention 与 gated Hyena convolution 混合 -> 感受野、query-time 寻址、训练卷积成本和增量生成状态分别判断；Qwen3、Pile 与 ZeroScrolls 结果按不同模型和协议解释。
+
+Mamba 硬件路径（第 33 章）：输入依赖参数 $(\Delta,A,B,C)$ -> HBM 载入 -> SRAM 内离散化与并行 scan -> SRAM 内状态读出 -> 只写回序列输出；backward recomputation 避免物化扩展状态到 HBM -> 固定长度状态减少随 $T$ 增长的 KV cache 占用 -> 算子基准 / 整模推理 / 训练显存分开解释。
+
+序列信息流对比链：RNN 隐状态递归 -> 固定 LTI SSM 状态/卷积双视图 -> 因果 CNN 的有限感受野与 dilation -> causal Attention 对 mask 可见 K/V 的内容相关访问 -> 位置路径与任务读出分开 -> 完整序列并行计算与自回归逐步状态分开 -> 替代架构选型（第 42 章）-> Attention/SSM 混合（第 43 章）。
+替代架构比较链（第 42 章）：先区分 kernel、sequence mixer、block/主干与完整系统 -> 对齐显式 K/V、有限特征/递归状态、卷积核和 hybrid 的历史表示与查询路径 -> 用局部预测、状态追踪、复制和长文本抽取等任务检验训练后的行为 -> 分开报告完整序列复杂度、单 token 更新、历史状态、硬件执行和生态信号 -> 结论绑定模型版本、训练预算、任务格式、上下文与设备，不汇总为家族级胜负。
+Attention–SSM 混合链（第 43 章）：显式逐位置 K/V 查询与递归状态摘要 -> 层间串接（Jamba、Mamba-2-Hybrid）与层内并行 head（Hymba）两种融合粒度 -> 比例和层位置消融 -> 质量、长上下文切片与速度预测分开解释 -> 把 MoE、meta tokens、局部/全局 Attention 等共设计从混合本身的效果中分开 -> 第 44 章比较卷积、SSM、Attention 的模块职责。
+Attention–卷积–SSM 模块路径（第 44 章）：相对位移共享的局部/长卷积 -> 前缀递归写入 SSM 状态 -> query 对 mask 可见历史的显式读取 -> 区分卷积修正 Attention 投影、长卷积替换序列混合算子及 Attention–SSM 融合位置 -> 按任务切片和匹配条件消融模块贡献 -> 外部证据检索转交第 45 章。
+外部检索增强架构链（第 45 章）：参数知识 / 请求上下文 / 外部语料 -> 离线索引与请求时检索 -> 候选筛选和证据组装 -> 提示上下文注入 / 潜在文档边缘化（RAG-Sequence、RAG-Token）/ 检索增强预训练（REALM）/ 层内 chunked cross-attention（RETRO）-> 固定检索或按需检索（Self-RAG）-> context relevance / answer faithfulness / answer relevance / citation support -> 与长上下文、长期记忆（第 46 章）和 Agentic Search（第 49 章）划界。
+模型记忆架构链（第 46 章）：当前上下文与请求级 KV cache -> 过去片段编码和状态生命周期 -> 外部 K/V + kNN/门控读取（Memorizing Transformer）/冻结编码器 + SideNet 读写（LongMem）/潜在情景矩阵与事实编辑（Larimar）/GDN-2 更新的原生递归状态（MemT-1.0）-> 按长文本建模、示例使用、事实编辑/遗忘及多轮记忆任务分别评估 -> 与外部语料 RAG（第 45 章）、Agent 运行状态（第 49 章）和普通解码 KV cache（第 11 章）划界；论文结果绑定各自任务和测量协议。
+MoE–SSM–Attention 组合链（第 47 章）：Attention/SSM 选择序列混合路径，MoE 通常选择 FFN 参数路径 -> Jamba 在混合 Attention–Mamba 主干的部分 MLP 引入 MoE -> BlackMamba 以 Mamba 加 routed MLP 移除显式 Attention 路径 -> Routing Mamba 将共享路由专家化放进 Mamba 投影，并在 Samba 与 FFN-MoE 上评估 -> 分别隔离混合主干、FFN-MoE 与 SSM 投影专家化的增量 -> 结果绑定各论文模型、数据、预算与测量口径，不把三组件并置等同于协同增益；详见[第四十七章研究记录](research/moe-ssm-attention-composition-2026-11-23.md)。
+视觉语言与长视频中的 Mamba 链（第 48 章）：混合器位置（视觉编码器 / connector / 语言主干 / 跨模态融合）-> 图像网格序列化（VSS 扫描 vs Q-Mamba 查询与压缩）-> SSM 融合前的局部 token 对齐与全局分布对齐 -> 长视频中 Mamba 视频状态更新、Attention 文本读取与主干内视觉压缩（VAMBA / TimeViper）-> 按摘要、问答、定位、检索和长视频任务分别核对证据，不将模块位置或跨论文指标拼成统一优劣排名；详见[第四十八章研究记录](research/multimodal-mamba-architectures-2026-11-23.md)。
+Mamba 能力证据链（第 34 章）：任务类型（复制 / MQAR / 函数 ICL / Markov 预测 / 多证据理解）-> 目标位置、条目密度与相关性信号 -> 递归状态路径与显式 K/V 寻址差异 -> 版本、训练预算和提示协议 -> 按目标 workload 分桶评估；行为得分与内部机制解释分开，pure SSM 与 hybrid 结果分开。
+跨架构替代证据链（第 36 章）：复杂度只说明资源路径 -> 匹配规模与 token 预算下的任务结果 -> 复制/检索和 ICL 的任务区分 -> Mamba-3 等版本差异 -> pure SSM 与 hybrid 分开归因；局部结果不外推为架构家族整体替代。
+
+Agentic 架构链（第 49 章）：语言模型单次输出 -> 工具调用请求 -> ReAct 提示交错 / Toolformer 工具微调 / Gorilla 文档检索与微调 -> 宿主解析和执行 -> 环境动作与回执 -> observation 返回模型 -> 外部检索、持久记忆与 verifier 分路 -> Agent benchmark 成绩绑定模型、控制器、工具、环境、规则、verifier 和预算；不从整系统表现反推隐藏模型结构。详见[第四十九章研究记录](research/agentic-model-architecture-boundaries-2026-11-23.md)。
+
+未来架构综合链（第 50 章）：历史信息的显式读取 / 递归压缩 / 外部检索 -> 层间交错 / 层内 heads / 独立记忆分支 / Attention 分数融合 -> 组合粒度改变信息交互位置 -> 组件收益受训练共适配、任务、规模与实现条件共同影响 -> 当前证据支持研究设计空间扩展，不支持统一架构胜者；结论保留为条件化趋势推断。详见[第五十章研究记录](research/future-architecture-composition-2026-11-23.md)。
+
+RoPE 长上下文扩展链：RoPE -> Position Interpolation -> NTK-aware / Dynamic NTK -> YaRN -> 非均匀频率/位置映射（LongRoPE / LongRoPE2 / MrRoPE / Jet-Long）-> 长上下文继续训练与位置扰动训练（Llama 3 / Shuffle the Context）-> Position Robustness -> Effective Context Evaluation
+
+小模型与端侧效率链：参数预算分配（depth/width/layer-wise scaling/weight sharing）+ 训练数据与后训练 -> 任务能力；模型结构/量化/输入压缩 -> 不同权重、KV、计算与信息路径账本 -> 目标设备内存层次 + runtime/kernel 支持 -> 文件大小、峰值运行内存、prefill/decode、任务质量与能耗/热稳态的分项测量 -> 仅在匹配任务、设备和负载的条件下判断效率。
 
 ### 推理优化链
 
@@ -370,7 +441,32 @@ Paper Reading -> Hypothesis -> Baseline -> Experiment -> Ablation -> Error Analy
 
 Long Context -> KV Cache -> 压缩表示 -> CSA/HCA -> 异构 KV Cache -> Serving Engine
 
-Sequence Modeling -> Linear Attention -> Delta Rule -> Gated DeltaNet -> KDA -> KDA/MLA Hybrid
+Sequence Modeling -> Linear Attention -> Kernel Feature Factorization -> Causal Prefix State (S_t, z_t)
+
+Efficient Attention -> distinguish pair count / IO traffic / operator or state / KV capacity -> compare cost saved and information access retained -> task- and hardware-conditioned choice
+
+Efficient Attention -> Dense IO-aware execution -> FlashAttention -> same dense interactions with reduced intermediate materialization and HBM traffic
+
+Efficient Attention -> Sparse interaction graph -> local/global/random/block/LSH candidates -> fewer computed pairs with a changed support set
+
+Efficient Attention -> Kernel/feature factorization -> finite-dimensional causal state -> linear sequence growth under fixed feature width; softmax equivalence depends on the chosen kernel
+
+KV Cache -> compact representation -> lower decode-state memory -> dense query-key work may remain
+
+Linear Attention -> Softmax Kernel Approximation -> Performer/FAVOR+ -> Positive Orthogonal Random Features -> Kernel Estimation Error and Normalized Attention Error
+
+Linear Attention -> key-value fast-weight state -> Delta Rule (key-directed prediction-residual write) -> Gated DeltaNet (scalar alpha decay + scalar beta correction) -> KDA (per-key-channel decay + scalar beta) -> Gated DeltaNet-2 v2 (channel erase b + channel write w)
+Gated DeltaNet: alpha (whole old-state decay) != beta (current residual write strength) != output gate (readout/output path)
+Gated DeltaNet -> recurrent state readout -> chunkwise WY/UT training -> block-entry state + causal intra-chunk corrections -> carried boundary state
+Gated DeltaNet state size per head -> O(d_k d_v), independent of token count; per-token updates still cost compute and finite state does not preserve an address for every historical token
+MLA -> per-token shared KV latent -> low-rank key/value projections -> token-indexed global attention -> cache payload O(T d_c) (+ a position branch when the model uses one)
+DeepSeek-V2 MLA -> shared KV latent + decoupled RoPE key -> position-aware compressed cache -> key/value projection absorption during decode
+Kimi K3 Gated MLA v2 -> NoPE per-token KV latent (rank 512 in pinned config) -> global attention -> input-dependent full-rank channel output gate -> output modulation != latent/explicit route selection
+MLA latent cache -> O(T d_c) per layer -> differs from KDA fixed recurrent state; compression reduces per-token width but preserves sequence-length growth
+KDA -> per-key-channel Diag(alpha) decay -> value prediction error -> scalar beta rank-one write -> query readout S^T q
+KDA alpha (per-key-channel old-state decay) != beta (current error write strength) != output gate (readout/output path)
+Kimi Linear v2 -> per-key-channel decay + chunkwise WY/UT; Kimi K3 v2 -> bounded log-decay g_min=-5 + full-rank output gate -> version-specific parameterization
+Gated DeltaNet-2 v2 -> channel-wise decay + erase gate b_t over key/read directions + write gate w_t over value channels -> Gated DeltaNet and KDA as parameter-tied special cases -> author-reported matched 1.3B / 100B FineWeb-Edu experiments -> evidence bounded to paper tasks and hardware
 
 Residual Stream -> Hyper-Connections -> 双随机矩阵 -> Sinkhorn 投影 -> mHC -> 深层信号稳定性
 
@@ -780,7 +876,7 @@ GLM-5.3 benchmark footnotes -> harness/tool/container/timeout/domain whitelist/T
 
 ### Kimi K3
 
-Kimi K3 -> sequence-length scaling -> KDA + Gated MLA (3:1, terminal Gated MLA) -> lower-bounded decay `g_min=5` -> recurrent state + global content interaction -> KDA context parallelism/state-aware prefix cache
+Kimi K3 -> sequence-length scaling -> KDA + Gated MLA (3:1, terminal Gated MLA) -> lower-bounded decay `g_min=-5` -> recurrent state + global content interaction -> KDA context parallelism/state-aware prefix cache
 
 Kimi K3 -> depth scaling -> Block AttnRes (8 blocks x 12 layers + embedding) -> block-level state -> cross-stage communication/memory reduction -> depth-selective residual flow
 

@@ -1,237 +1,85 @@
 # 第三十七章：RWKV：RNN 式状态与 Transformer 式训练
 
-## 37.1 RWKV 的核心目标
+RWKV 不是一条跨版本不变的公式。RWKV-4 以逐通道衰减的加权 key-value 统计承载历史；RWKV-5/6 把每个头的状态扩成矩阵；RWKV-7 又改变了状态更新规则。本章沿这条演进线解释两种信息流：time-mixing 怎样把先前 token 的内容压进状态，channel-mixing 怎样在当前位置变换通道；整段训练为何能利用并行计算，生成时又为何只需递归传递状态。
 
-RWKV 试图把两种能力结合：训练时使用类似 Transformer 的并行计算，推理时使用类似 RNN 的固定状态。它不保存每个历史 token 的完整 K/V，而是维护按时间衰减的加权统计，当前 token 通过 time-mix 和 channel-mix 读取/更新状态。
+## 37.1 RWKV 的设计目标：整段训练并行，生成时递归传状态
 
-这个方向的重要性不在于一个缩写，而在于它提出了一个系统问题：能否把长序列的训练并行和在线推理状态同时设计，而不接受 full attention 的 cache 增长。
+标准自注意力在每个位置都能同序列中已有位置的 key/value 交互。自回归生成时，这些历史表示通常逐 token 保留，因此缓存会随已处理序列变长。普通递归网络走另一条路：把过去汇总为状态，每步更新状态再处理新 token；生成状态不必按历史 token 数累加，但训练路径容易被逐步递推牵制。
 
-## 37.2 小白直觉：带遗忘速度的加权账本
+RWKV 的目标是把训练和生成都放在同一套序列更新关系中：对已知训练序列，可以并行计算各位置的线性投影，并用序列扫描计算有时间依赖的 WKV；生成时，每个新 token 读取并更新前一时刻的状态。论文所说的“Transformer 式训练”指这种整段输入上的并行计算方式，不表示 RWKV 具有标准 Transformer 的 full self-attention，也不表示每个时间步彼此独立。[RWKV 原始论文](https://arxiv.org/html/2305.13048)同时给出 time-parallel 和 RNN-like inference 两种计算视图。
 
-普通 RNN 把历史压成一个状态；RWKV 的 time-mix 更像多个带不同衰减速度的账本。最近的 token 权重较大，较早 token 逐渐衰减；当前 query 的内容又决定从账本中读取什么。
+## 37.2 RWKV-4 的 Time-mixing 与 Channel-mixing
 
-如果某个 token 很重要，模型需要把它写进合适的通道并让衰减足够慢；如果它过时，模型需要让旧贡献消失。固定衰减与内容门控共同决定记忆。
+RWKV-4 的一个 block 交替处理时间信息和通道信息。设第 $t$ 个位置输入 block 的向量为 $x_t\in\mathbb{R}^{D}$。token shift 为不同投影准备不同的输入：每个投影把当前向量和上一位置的向量按可学习的逐通道系数混合，再映射成对应的 receptance、key 或 value。可写成 $x_t^{(z)}=\mu_z\odot x_t+(1-\mu_z)\odot x_{t-1}$，其中 $z$ 表示 $r,k,v$ 中的一种投影，$\mu_z$ 是该投影的混合系数。
 
-## 37.3 WKV 的教学抽象
+Time-mixing 把 $k_t$ 和 $v_t$ 送入 WKV，得到带历史信息的向量；receptance $r_t$ 经过 sigmoid 后逐通道门控这个读出，结果再经过输出映射和残差路径。这里的 token shift 只直接混合相邻位置表示；更远历史由递归状态承载，并不是把窗口扩大到所有原文 token。
 
-可以把一个通道的历史统计写成：
+Channel-mixing 使用同样的当前/前一位置输入混合，但处理目标不同：它对 $k'_t$ 做逐通道的平方 ReLU 变换，再由 $r'_t$ 控制输出。它提供当前位置上的非线性通道变换，不独立保存一份跨时间 WKV 历史。RWKV-4 原论文以“time-mixing 管跨时间的加权信息，channel-mixing 管 token 内部的非线性变换”描述两者分工；[Johan Wind 的 RWKV 讲解](https://johanwind.github.io/2023/03/23/rwkv_details.html)也沿着这一 block 结构解释了各变量如何对应到最小实现。
 
-~~~math
-N_t=\sum_{i\le t}e^{-(t-i)w}k_i v_i,\qquad
-D_t=\sum_{i\le t}e^{-(t-i)w}k_i
-~~~
+## 37.3 WKV：带衰减和当前项加权的归一化状态
 
-输出近似为：
+RWKV-4 的 WKV 可以看作逐通道归一化加权和。对当前时刻 $t$，此前位置 $i$ 的 key 决定其内容权重，距离当前越远，逐通道衰减越多；当前位置另有一个可学习的 time-first bonus $u$。每个通道上的完整关系为：
 
 ~~~math
-y_t=\frac{N_t+u\,k_t v_t}{D_t+u\,k_t}
+\mathrm{wkv}_t =
+\frac{
+\sum_{i=1}^{t-1}\exp\bigl(-(t-1-i)w+k_i\bigr)\odot v_i
++ \exp(u+k_t)\odot v_t
+}{
+\sum_{i=1}^{t-1}\exp\bigl(-(t-1-i)w+k_i\bigr)
++ \exp(u+k_t)
+}.
 ~~~
 
-其中 `w` 控制衰减，`u` 是当前 token 的 bonus/直接通路。实际 RWKV 版本对 time-mix、key/value/receptance 和数值稳定有具体参数化；上式只解释“衰减加权统计”。
+这里 $k_i,v_i,w,u$ 都是宽度为 $D$ 的向量，指数、乘法、加法和除法均按通道计算；$w$ 是非负的逐通道衰减率。分子把加权 value 累加起来，分母累加同一组权重，因此 WKV 是各通道分别归一化的历史汇总。当前位置的权重是 $\exp(u+k_t)$，其中 $u$ 使模型能特别处理当前输入；这不是把当前位置永久写入一个独立 cache。
 
-## 37.4 Time-mix 和 Channel-mix
-
-time-mix 处理跨时间信息，channel-mix 提供 token 内部的非线性变换。一个教学化 time-mix 可以写成：
+同一运算也能写成分子状态 $a_t$、分母状态 $b_t$ 的递归：
 
 ~~~math
-\tilde x_t=\mu_t\odot x_t+(1-\mu_t)\odot x_{t-1}
+\begin{aligned}
+a_0 &= b_0 = 0,\\
+\mathrm{wkv}_t
+&= \frac{a_{t-1}+\exp(u+k_t)\odot v_t}
+{b_{t-1}+\exp(u+k_t)},\\
+a_t &= \exp(-w)\odot a_{t-1}+\exp(k_t)\odot v_t,\\
+b_t &= \exp(-w)\odot b_{t-1}+\exp(k_t).
+\end{aligned}
 ~~~
 
-receptance gate 再控制输出：
+读出当前 token 时，分子和分母状态先代表此前历史，再把带 bonus 的当前项加入这一次读出；写给后续位置的 $a_t,b_t$ 则以 $\exp(k_t)$ 更新，不把 $u$ 重复累计。这个差别正是旧稿把当前 bonus 当成线性系数乘在 key 上时会丢掉的部分。原论文附录 D 还用辅助指数 $p_t$ 对分子、分母共同重标度，避免直接计算很大的指数；因此上式说明 RWKV-4 的数学递归，并不等同于完整数值实现。[原论文 §3.1 与附录 D](https://arxiv.org/html/2305.13048)给出了该归一化式、递归形式及稳定化状态。
+
+## 37.4 并行训练与递归推理：同一算子的两种执行方式
+
+训练时，一条序列中的 token 都已知。各位置的 token shift 和线性投影可以批量执行；WKV 则沿时间依赖此前累计状态。RWKV-4 原论文把 WKV 称为按时间推进的 scan，并指出主要矩阵乘法可并行。递归更新可表达为一系列仿射状态变换，因而可使用 scan、分块扫描或专用 kernel 加速；这些执行方法保留了 token 顺序依赖，并没有把位置之间的关系删掉。
+
+自回归生成时，下一 token 依赖当前模型输出，所以模型仍需按 token 推进。每层只需带上这一版本所需的 shift 输入和 WKV 状态，处理新 token 后写回下一状态。整段训练与逐 token 生成使用的是同一因果更新关系，只是输入已知程度和执行组织不同。RWKV-5/6/7 的论文也给出了每头矩阵状态的递归与并行形式；具体并行效率取决于算法和实现，不能从“可并行”直接推出某硬件上的吞吐优势。[Eagle and Finch](https://openreview.net/pdf?id=soz1SEiPeq)与[RWKV-7 论文](https://openreview.net/pdf/74011cffc1082ac9394afde92802c810c51baabf.pdf)分别展示了后续版本的状态更新和并行表示。
+
+## 37.5 RWKV-5/6/7：从矩阵状态到可修正记忆
+
+RWKV-4 的 numerator/denominator 是逐通道向量状态。RWKV 后续版本改变了每个头承载的状态对象和更新能力；这些版本不能用 RWKV-4 的归一化公式替代。
+
+| 版本 | 状态与主要更新 | 相对前版的变化 |
+| --- | --- | --- |
+| RWKV-4 | 逐通道 numerator/denominator 向量，按固定的可学习衰减累计，并在读出中加入当前项 bonus。 | 以紧凑的加权统计替代逐位置保存整段 key/value。 |
+| RWKV-5 Eagle | 每个 head 保存矩阵形状的 key-value 状态；状态按可学习的逐通道衰减更新，并配合 head 级归一化与门控。 | 从向量统计转为矩阵状态，能在每个头中表示更多 key-value 关联。 |
+| RWKV-6 Finch | 保留每头矩阵状态；token shift 和衰减改为依赖输入的动态形式。 | 当前和前一位置的表示可调节输入混合与每通道衰减，而不再只使用固定的 shift/decay。 |
+| RWKV-7 Goose | 每头矩阵状态经过逐通道衰减和方向性移除，再写入新的 value-key 关联。 | 以广义 delta 规则更新记忆；论文把 v6 的输入依赖插值改回较简单的 token shift，将主要变化放在状态演化。 |
+
+在 RWKV-5/6/7 中，矩阵状态表示每个头所维护的 key-value 关联；把它称为“更大的向量状态”会掩盖其二维读写结构。[Eagle and Finch 论文](https://openreview.net/pdf?id=soz1SEiPeq)报告 RWKV-5 的矩阵状态和固定 decay，以及 RWKV-6 的输入依赖 token shift 与动态 decay。RWKV-7 仍按每头矩阵状态运行，但改用可修正的状态演化。对单个 head，设状态为 $S_t\in\mathbb{R}^{d_h\times d_h}$，其递归可写为：
 
 ~~~math
-y_t=\sigma(r_t)\odot \operatorname{WKV}(k_t,v_t)
+S_0=0,\qquad
+S_t=S_{t-1}\left(\mathrm{diag}(w_t)
+-\hat{\kappa}_t^{\mathsf T}(a_t^{\mathrm{iclr}}\odot\hat{\kappa}_t)\right)
++v_t^{\mathsf T}\tilde{k}_t.
 ~~~
 
-channel-mix 类似 gated FFN，通过不同投影产生 key/value 和 gate。具体版本的 layer norm、residual 和 token shift 需要查对应实现。
+其中 $w_t$ 是逐通道衰减，$\hat{\kappa}_t$ 是归一化的 removal key，$a_t^{\mathrm{iclr}}$ 是逐通道的 in-context learning rate，$\tilde{k}_t$ 是 replacement key，$v_t$ 是待写入的 value。这里用上标将 ICL rate 与 RWKV-4 的 numerator 状态 $a_t$ 区分开；RWKV-7 论文将 ICL rate 记为 $a_t$。括号中的对角衰减压低旧状态；后面的秩一减项沿 removal key 方向修正旧关联；最后的外积把新关联写入状态。移除方向与写入 key 被分别定义，因此更新不只是“把所有旧记忆一起衰减，再把新 key-value 相加”。更新后的每头状态由 receptance 读出，再经过 head normalization、当前项 bonus、gate 和输出映射；具体组合随版本而变。RWKV-7 的形式化状态追踪结论限于论文给出的理论设定；本节只把它用于解释更新机制，不将其扩展为通用语言模型优越性主张。[RWKV-7 正式论文](https://openreview.net/pdf/74011cffc1082ac9394afde92802c810c51baabf.pdf)给出 removal/replacement key 定义、状态递归和理论边界。
 
-## 37.5 并行训练和递归推理
+## 37.6 固定状态的含义、版本证据与 RWKV-8 边界
 
-训练时，所有位置的 time-mix 可以通过并行 prefix/scan 或核化形式计算；推理时只保存每层的统计 state。状态大小不随历史长度增长：
+“状态不随上下文长度增长”只表示处理更多 token 时，不必为每个历史位置继续追加一份状态。它不表示状态大小与模型宽度、层数或头维度无关。RWKV-4 原论文附录 D 描述每层五个宽度为 $D$ 的向量状态：time-mixing 输入、channel-mixing 输入、WKV 分子、WKV 分母和稳定化指数；按该表述，状态元素数随层数约为 $5LD$。RWKV-5/6/7 的每头矩阵状态则按层和 head 维度增长，量级为 $Lh d_h^2$，还需加上各版本的 shift 等状态。因此“固定”是相对于已读 token 数 $T$ 而言，并非小到可以忽略模型维度。
 
-~~~math
-M_{\mathrm{state}}\approx L\cdot H\cdot d_{\mathrm{state}}\cdot b
-~~~
+这些递归状态是模型学到的压缩表示，不是可按 token 位置任意寻址的原文副本。由此可以说明它与显式历史 key/value 的访问方式不同；但状态维度本身不能证明某类精确召回任务必然失败，也不能证明模型已具备可靠的任意检索能力。检索和复制结论需要固定模型版本、任务构造与评测条件；跨架构选型由第四十二章承接，外部检索结构由第四十五章承接。
 
-但 state 不是可随机访问的原文。对长流服务，固定 state 能减少内存；对多证据引用，可能需要外部检索或 global path。
-
-## 37.6 一个教学版衰减状态
-
-~~~python
-import math
-
-
-def rwkv_like(values, decay, bonus=0.0):
-    numerator = 0.0
-    denominator = 0.0
-    outputs = []
-    for key, value in values:
-        numerator = math.exp(-decay) * numerator + key * value
-        denominator = math.exp(-decay) * denominator + key
-        outputs.append((numerator + bonus * key * value)
-                       / (denominator + bonus * key + 1e-8))
-    return outputs
-
-
-print(rwkv_like([(1.0, 2.0), (0.2, 8.0), (1.0, 3.0)], decay=0.4))
-~~~
-
-这个代码没有 gate、向量通道和稳定的 log-space 计算，只帮助观察 decay 和 bonus 对近期/当前信息的影响。
-
-## 37.7 内容记忆的边界
-
-RWKV 的衰减统计可以保留趋势和近期事实，但历史 token 被汇总。若两个实体的 key/value 统计相近，后续 query 可能不能恢复区别。长程精确复制、变量绑定和冲突版本是关键评测。
-
-适合的任务包括流式生成、持续对话、低内存边缘推理和顺序信号；需要任意文档跳转的任务要加入 retrieval 或 attention 补偿。
-
-## 37.8 与 Transformer 的 trade-off
-
-Transformer 的 attention score 随 query 动态访问显式历史，ICL 和多证据组合更自然；RWKV 的固定 state 让 decode 内存稳定，训练/推理路径统一得更像 RNN。两者都需要成熟 kernel、量化和 serving。
-
-RWKV 不应被描述成“完全没有 attention 的 Transformer”。它保留了 time-mix/channel-mix 的设计和对并行训练的追求，信息流是递归统计而非 full token attention。
-
-## 37.9 常见失败模式
-
-包括 decay 参数导致 state 消失或爆炸、log-space 稳定性错误、time-mix 位置错位、padding 更新状态、训练并行与递归推理不一致、state 迁移丢层、以及将模型版本的 WKV 实现混写。
-
-排查先在短序列对比逐步 reference，再测不同长度和 dtype；保存每层 state checksum；做 prefix continuation、batch reorder、preemption 和跨请求隔离。
-
-## 37.10 机制与边界：状态统计与内容寻址的折中
-
-RWKV 类更新通常把过去压成加权 key-value 统计，提供比单向量 state 更丰富的内容相关读写；但统计容量仍由通道/矩阵维度决定。衰减参数提供时间尺度先验，receptance 提供输出门控，两者在训练中共同形成记忆策略。
-
-论文和实现比较要关注：time-mix 的具体公式、WKV 的数值表示、训练并行算法、state shape、量化支持和长程任务，而不是只看“RNN-like”标签。
-
-## 37.11 面试追问、误区与练习
-
-**问：RWKV 如何兼顾训练并行和推理递归？**
-
-标准回答：它把跨时间计算写成可并行的加权统计/scan 形式用于训练，同时在推理时维护等价或近似的递归 state；状态固定但不保留所有历史 token。
-
-**问：RWKV 的主要代价是什么？**
-
-标准回答：精确任意历史检索和复杂 ICL 可能受状态压缩影响；kernel、状态恢复、长程评测和生态也需要单独验证。
-
-常见误区包括把 time-mix 当滑窗、把 state 当 KV、把所有版本用同一 WKV 公式描述，以及忽略数值稳定。
-
-练习：实现不同 decay 的加权 state，加入 STORE/RESET/冲突版本任务，比较精确 recall 和 state 大小。
-
-## 37.12 衰减参数和记忆时间尺度
-
-RWKV 类路径的时间混合依赖不同的衰减速度。快衰减维度关注近期 token，慢衰减维度保留更长趋势；如果所有维度的时间尺度相近，模型要么忘得太快，要么被旧信息污染。
-
-训练时可以统计不同 channel 的有效 half-life，并在局部复制、长程复制和冲突版本任务上做相关性分析。half-life 长不一定代表事实保留好，因为 state 还要承载内容和 query 对齐。
-
-## 37.13 RWKV 与显式检索的边界
-
-递归 WKV 可以低成本处理持续流，但当前 query 不能任意回看每个历史 token。需要精确引用时，可以保留外部索引或少数显式 attention 层。一个实用系统不是把两条路径互斥，而是让 RWKV 负责扫描、retrieval 负责定位。
-
-## 37.14 训练形态与递推形态的等价性
-
-RWKV 类模型常希望训练时利用并行矩阵运算，推理时只保留递归状态。两种路径必须有相同的时间混合、初始化和边界语义；如果训练使用完整序列而推理每段 reset，模型看到的历史分布就不同。
-
-用同一 prefix 做 parallel、chunk 和 recurrent 对照，保存每一步 hidden、logits、state norm 和最终 token。差异若随长度增长，优先检查衰减、累计精度、padding 和 chunk boundary。
-
-## 37.15 适用任务和回退策略
-
-RWKV 适合连续文本流、固定状态预测和资源受限的 decode；需要任意远程引用或多版本冲突时，保留 retrieval 或 global attention。路由器要按任务风险选择路径，并在引用验证失败时回读原文。
-
-## 37.16 用半衰期和容量理解 RWKV 的状态
-
-对某个时间混合通道，若衰减因子近似为 a，旧信息影响可用 a^j 描述。半衰期为：
-
-~~~math
-j_{1/2}=\frac{\log 0.5}{\log a}
-~~~
-
-但 RWKV 的 state 不只保存一条标量衰减曲线。不同 channel、key-value 统计和 receptance 共同决定最终可读信息。一个 channel 的半衰期很长，只表示它不容易忘记，不表示它能区分两个相似实体；多个实体写入同一统计量时仍会发生干扰。
-
-可以构造四类最小任务来区分这些能力：短距复制、远距复制、两个实体冲突、无目标时的误报。分别改变序列长度、实体数量和 state 维度，记录 exact match、false positive、state norm 和每 token 更新时间。这样能够回答“RWKV 记忆很长吗”之外更具体的问题：它记住的是什么，能否被正确读取，代价是多少。
-
-## 37.17 WKV 的数值稳定与实现版本
-
-带指数权重的累计在长序列上容易出现下溢、溢出或大数相除。工程实现往往使用 log-space、分块归一化、重标度或专门 kernel；这些细节会影响并行训练和递归推理的一致性。不同 RWKV 版本在 time-mix、channel-mix、WKV 表达和 state shape 上并不完全相同。
-
-因此复现论文公式时不能只抄一个递推式。应先写一个高精度 reference，再与优化 kernel 对照：
-
-~~~math
-\epsilon_t=\lVert s_t^{(\mathrm{ref})}
--s_t^{(\mathrm{kernel})}\rVert_\infty
-~~~
-
-检查 ε_t 是否随长度增长，检查 BF16/FP16 是否比 FP32 更早失稳，并把 padding、reset 和 chunk 边界纳入测试。若模型输出变化只发生在很长序列，短样本的单元测试并不能证明服务安全。
-
-## 37.18 状态服务的生命周期
-
-RWKV 的固定状态降低了按 token 保存 KV 的压力，却引入了另一类服务契约。状态必须与请求、模型 revision、tokenizer、dtype 和 batch slot 绑定；请求结束后要销毁或显式交还，不能依赖调用方“记得清空”。抢占和迁移时需要保存每层 state，而不只是最后一个 token 的位置。
-
-推测解码也会放大这个问题。若草稿模型先写入 RWKV state，主模型拒绝部分候选，系统必须回滚到接受前的 state；只回滚 token 文本而不回滚状态，会让被拒绝 token 继续影响后续输出。这个约束说明固定状态并不等于无状态，反而要求 serving engine 明确管理状态版本。
-
-## 37.19 WKV 的数值和状态语义
-
-RWKV 类模型用带衰减的加权状态表达历史，训练时希望并行计算，推理时按递归状态更新。指数权重、归一化和有限精度决定了旧 token 的影响是否稳定；长序列中应检查分子/分母的尺度、溢出、下溢和空状态初始化。
-
-验证时比较 full parallel、chunked 和 step recurrence 的 logits，并加入不同长度、padding、reset、batch reorder 和 state restore。只在短序列上通过，不代表在线长流中的状态语义正确。
-
-## 37.20 RWKV 的服务状态契约
-
-每个请求需要保存 time-mix/channel-mix 所需的 state、逻辑位置、模型 revision、adapter、dtype 和 reset 标记。状态不能跨租户共享，也不能因为 prefix 文本相同就直接复用；不同系统提示或权重版本可能改变隐状态。
-
-与 KV cache 相比，RWKV 状态更小但更难回读原文。高风险引用任务仍需要外部 artifact 或检索；状态快照只能说明模型当时的内部表示，不能替代来源、权限和删除记录。
-
-## 37.21 WKV 状态的数值稳定与服务检查
-
-一个简化的递归表示为：
-
-```math
-a_t=\lambda_t a_{t-1}+\exp(k_t)v_t,
-\qquad
-b_t=\lambda_t b_{t-1}+\exp(k_t),
-\qquad
-y_t=\frac{a_t}{b_t}.
-```
-
-真实实现会使用 log-sum-exp、分组状态或更稳定的重参数化。服务端不能直接把 `a_t`、`b_t` 当作跨版本可读的普通缓存；dtype、decay、key scaling、position 和 reset 都属于 state schema。长流压测要检查状态范数、NaN、chunk continuation 和从 snapshot 恢复后的 token 一致性。
-
-## 37.22 用状态容量解释“记得久”
-
-递归模型的状态大小固定，并不代表可无损记住的事实数量固定不变。状态中的通道、key-value 统计、衰减时间尺度和输出门控共同决定可分辨的信息。可以把状态容量写成教学化的约束：
-
-```math
-I_{\mathrm{usable}}
-\le f(d_{\mathrm{state}},H,\{j_{1/2,h}\},\mathrm{precision},\mathrm{training})
-```
-
-这个函数没有通用闭式解，但它提醒我们不要只报告“每请求 state 只有多少字节”。如果多个实体共享同一统计量，状态仍可能发生冲突；如果所有 channel 都快速衰减，远程信息会消失；如果慢衰减 channel 太多，旧信息又会污染新 query。
-
-最小能力实验应同时包含远距复制、两个实体冲突、版本更新和无目标误报。比较 exact recall、冲突选择率、state norm、每 token 更新时间和 snapshot 大小，才能知道固定状态节省了什么，又牺牲了什么。
-
-## 37.23 训练课程与在线分布必须一致
-
-训练阶段可以使用并行 scan，在线阶段却按 token 更新 state。若训练样本经常在短段边界 reset，而线上请求持续数十万 token，模型会面对不同的状态分布；反过来，训练中总是保留完整历史，线上频繁抢占和恢复，也可能造成状态断裂。
-
-训练回归要加入 chunk continuation、padding、reset、state restore 和 batch reorder。每个实验保存 prefix 后的 state checksum 和下一 token logits，比较 parallel、chunked、recurrent 三条路径。若差异只在长序列出现，优先排查累计精度和边界语义，而不是先增加模型层数。
-
-## 37.24 一个在线状态事故
-
-某服务为了复用 batch slot，在请求 A 结束后把 slot 交给请求 B，但只清除了 token offset，没有清理每层 WKV state。B 的第一个回答仍然流畅，却偶尔引用 A 的实体。这个事故很难通过普通质量均值发现，因为只有相似主题或特定长历史才会触发。
-
-正确的生命周期是：请求绑定 state owner 和 model revision，完成/取消时原子释放，slot 复用前做零状态或 checksum 检查，snapshot/restore 必须带 schema、dtype、position 和租户。状态比文本更隐蔽，不能依赖调用方“记得 reset”。
-
-## 37.25 证据范围与路线选择
-
-RWKV 的公开论文和实现支持其并行训练、递归推理和 WKV 路线；不同版本的 time-mix、WKV 数值形式、state shape 和 kernel 不能互换。本文用加权 key-value 统计解释机制，不把教学递推式当作所有版本的完整实现。
-
-工程选择应按查询形态决定：持续流和固定状态任务可以优先考虑递归路线；需要任意远程精确引用时，应加入外部检索、少量 global attention 或原文回读。架构名称不能替代任务评测和状态服务演练。
-
-## 37.26 WKV 数值路径与状态隔离
-
-RWKV 的 WKV 计算看似只是加权历史，但长序列上会遇到指数衰减、累计尺度和低精度问题。实现通常需要重标度或稳定的递推形式；验证时应比较 reference、并行 scan 和单步路径在不同长度、dtype、衰减参数下的输出误差。
-
-服务侧还要把 WKV state 当作租户隔离对象。请求结束、取消、超时和 batch slot 复用都必须原子清理；snapshot 要带模型 revision、time-mix 配置、position/step 和 checksum。一个主题相关的错误回答可能不是模型能力问题，而是旧请求 state 没有清干净。
-
-## 37.27 小结与资料边界
-
-RWKV 可参考 *RWKV: Reinventing RNNs for the Transformer Era*（https://arxiv.org/abs/2305.13048）。不同 RWKV 版本的 time-mix/WKV 细节不同，本文采用教学抽象。
-
-RWKV 的价值是把并行训练和固定推理状态放在一条路线中。它证明了 attention 之外存在有工程意义的序列信息流，但不自动解决所有长程检索问题。
+截至 2026-11-23，RWKV 官方 wiki 将 RWKV-8/Heron 标为实验阶段，并列出 DeepEmbed 与 ROSA。官方材料把 DeepEmbed 描述为按 token index 读取、参与 FFN 的 learned embedding；ROSA 则是后缀自动机式的序列检索组件。它们与 v4—v7 的 WKV 状态方程属于不同组件层次；本次查阅到的官方材料和作者页面未呈现一篇统一的同行评审 RWKV-8 论文来替代前述状态更新链。因而这里把它们作为在研扩展标记，不据此推出成熟度、普遍性能或 RWKV-4—7 的统一新公式。[RWKV 官方架构资料](https://www.rwkv.cn/docs/RWKV-Wiki/RWKV-Architecture)列出 RWKV-8 的实验状态、DeepEmbed 与 ROSA；[作者的 RWKV-8 页面](https://github.com/BlinkDL/RWKV-LM/blob/main/RWKV-8.md)则将其放在 “RWKV-8 and beyond” 的探索框架中。

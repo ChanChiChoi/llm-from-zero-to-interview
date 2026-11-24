@@ -50,31 +50,31 @@ $x$ 是任务输入， $\tau$ 是模型产生的动作和文本轨迹， $y$ 是
 
 因此，基本正确性更适合写成集合关系：
 
-```math
+~~~math
 C(x, y)=\mathbf{1}[y\in Y^*(x)]
-```
+~~~
 
 $C$ 是 correctness， $\mathcal{Y}^*(x)$ 是任务允许的结果集合。若把正确答案硬编码成一个字符串，verifier 就会把表达形式误当成知识本身。
 
 真实任务还需要格式、权限、副作用和预算条件。令：
 
-```math
+~~~math
 F(x,y)=\mathbf{1}[y\text{ 满足输出协议}]
-```
+~~~
 
-```math
+~~~math
 P(\tau,e)=\mathbf{1}[\tau\text{ 在环境 }e\text{ 中没有违反权限和安全约束}]
-```
+~~~
 
-```math
+~~~math
 B(\tau,e)=\mathbf{1}[\text{时间、token、CPU、内存和工具调用均未超出预算}]
-```
+~~~
 
 一次结果真正可用的条件可以写成：
 
-```math
+~~~math
 S(x,\tau,e)=C(x,y)\cdot F(x,y)\cdot P(\tau,e)\cdot B(\tau,e)
-```
+~~~
 
 这里的乘法不是说所有项目都必须用一个乘法 reward 实现，而是在语义上表达“任意关键条件失败，都不能称为完整成功”。它的定义域也要求 $C$、 $F$、 $P$、 $B$ 都已经得到可信的 `pass` 或 `fail` 结论；编译器崩溃、数据快照缺失、网络超时或策略版本不明时，正确状态是 `unknown`，不能偷偷代入零或一。安全违规不能仅仅是一个很小的负分，因为答案质量高不应该抵消越权读取、泄露 secret 或修改生产数据。
 
@@ -88,17 +88,17 @@ verifier 负责观察并判断，reward mapper 负责把判断转换成优化器
 
 最简单的结果奖励是：
 
-```math
+~~~math
 r_{\mathrm{out}}(\tau)=\mathbf{1}[V(x,\tau,e)=1]
-```
+~~~
 
 $V$ 可以是规则函数、测试执行器或等价性判断器。这个奖励清晰，但很稀疏：一条长轨迹直到最后才知道结果是 0 还是 1。更完整的奖励可能包含格式、过程、成本和安全诊断：
 
-```math
+~~~math
 R(\tau)=D_{\mathrm{safety}}D_{\mathrm{permission}}D_{\mathrm{budget}}
 \left(R_{\mathrm{out}}+\alpha R_{\mathrm{process}}
       -\beta C_{\mathrm{length}}-\gamma C_{\mathrm{retry}}\right)
-```
+~~~
 
 $D_{\mathrm{safety}}$、 $D_{\mathrm{permission}}$ 和 $D_{\mathrm{budget}}$ 是 0/1 诊断量，表示是否满足不可折中的约束； $R_{\mathrm{out}}$ 是结果奖励； $R_{\mathrm{process}}$ 是中间进展奖励； $C_{\mathrm{length}}$ 和 $C_{\mathrm{retry}}$ 是预算以内的软成本； $\alpha$、 $\beta$、 $\gamma$ 是权重。这个公式是一种可解释的设计框架，不是所有 RLVR 实现都必须照搬的固定算法。
 
@@ -106,12 +106,12 @@ $D_{\mathrm{safety}}$、 $D_{\mathrm{permission}}$ 和 $D_{\mathrm{budget}}$ 是
 
 实际系统更应该先保存原始向量：
 
-```math
+~~~math
 d(\tau)=
 (d_{\mathrm{format}},d_{\mathrm{correct}},d_{\mathrm{independent}},
  d_{\mathrm{safety}},d_{\mathrm{permission}},d_{\mathrm{timeout}},
  d_{\mathrm{length}},d_{\mathrm{tool\_cost}})
-```
+~~~
 
 向量中的布尔值和数值必须有明确的定义。例如 $d_{\mathrm{timeout}}=1$ 是“发生了超时”，还是“在超时预算内完成”？建议使用字段名表达方向，或者在 schema 中记录取值含义；否则不同组件会把同一个 1 理解成相反的事情。
 
@@ -136,9 +136,9 @@ d(\tau)=
 
 一种示意性的组合是：
 
-```math
+~~~math
 R_{\mathrm{process}}(\tau)=\sum_{t=1}^{T}w_{t} q(s_{t},a_{t},s_{t+1})
-```
+~~~
 
 $s_{t}$ 是第 $t$ 步状态， $a_{t}$ 是动作， $q$ 判断这一步是否带来真实进展， $w_{t}$ 是时间或任务阶段权重， $T$ 是轨迹长度。关键不在于奖励密度，而在于 $q$ 是否绑定状态变化。
 
@@ -189,15 +189,15 @@ $s_{t}$ 是第 $t$ 步状态， $a_{t}$ 是动作， $q$ 判断这一步是否�
 
 假设 $\mathcal{Y}^*(x)$ 是可接受结果集合。verifier 的 soundness 关心错误答案是否被接受，completeness 关心正确答案是否被拒绝。对有限挑战集，可以用经验统计量表示：
 
-```math
+~~~math
 \widehat{\mathrm{Soundness}}
 =1-\frac{\mathrm{FalseAccept}}{N_{\mathrm{invalid}}}
-```
+~~~
 
-```math
+~~~math
 \widehat{\mathrm{Completeness}}
 =\frac{\mathrm{TrueAccept}}{N_{\mathrm{valid}}}
-```
+~~~
 
 $N_{\mathrm{invalid}}$ 是已知错误答案数量， $N_{\mathrm{valid}}$ 是已知正确答案数量。soundness 高意味着不容易放过错误，completeness 高意味着不容易错杀正确表达。这里的经验 soundness 更接近已标注无效样本上的条件拒绝率（specificity / true negative rate），不等同于已接受结果中正确答案的 precision；两者的分母必须分开，否则一个偏向拒绝的 verifier 可能看起来很“严格”，却完全不能接受合理答案。
 
@@ -211,10 +211,10 @@ $N_{\mathrm{invalid}}$ 是已知错误答案数量， $N_{\mathrm{valid}}$ 是�
 
 假设失败类别为 $j=1,...,m$，每一类权重为 $w_{j}$，verifier 对该类别的覆盖为 $c_{j}$，可以用下面的近似量描述覆盖：
 
-```math
+~~~math
 \mathrm{Coverage}_{\mathrm{failure}}
 =\frac{\sum_{j=1}^{m}w_{j}c_{j}}{\sum_{j=1}^{m}w_{j}}
-```
+~~~
 
 这里需要有非空失败类别， $w_{j}\geq0$、 $0\leq c_{j}\leq1$，且 $\sum_{j=1}^{m}w_{j}>0$；零权重类别可以保留在表中，但不能支持“已覆盖”的结论。这个量不是数学真理，因为失败类别的划分和权重本身也可能有偏差。它的作用是提醒工程师：verifier 的复杂度不等于覆盖率。一个只有字符串比较的复杂系统，可能仍然漏掉越权、回归和证据不支持；一个简单的只读执行器，可能覆盖了更重要的失败类别。
 
@@ -302,30 +302,30 @@ GRPO（Group Relative Policy Optimization）的一种核心直觉是：对同一
 
 给定问题 $x$，从旧策略 $\pi_{\mathrm{old}}$ 采样 $G$ 条轨迹：
 
-```math
+~~~math
 \tau_{1},\tau_{2},\ldots,\tau_{G}
 \sim \pi_{\mathrm{old}}(\cdot\mid x)
-```
+~~~
 
 verifier 得到对应奖励 $r_{1},...,r_{G}$。组均值和标准差为：
 
-```math
+~~~math
 \mu_{G}=\frac{1}{G}\sum_{j=1}^{G}r_{j}
-```
+~~~
 
-```math
+~~~math
 \sigma_{G}=\sqrt{\frac{1}{G}\sum_{j=1}^{G}(r_{j}-\mu_{G})^2}
-```
+~~~
 
 组内标准化优势可以写成：
 
-```math
+~~~math
 A_{i}=
 \begin{cases}
 \dfrac{r_{i}-\mu_{G}}{\sigma_{G}}, & \sigma_{G}>0,\
 0, & \sigma_{G}=0.
 \end{cases}
-```
+~~~
 
 $G$ 是每道题的候选数量。 $A_{i}$ 是相对信号，不是绝对正确概率：它只说明第 $i$ 条轨迹在同组中高于还是低于平均水平。
 
@@ -337,15 +337,15 @@ $G$ 是每道题的候选数量。 $A_{i}$ 是相对信号，不是绝对正确�
 
 策略更新使用新旧策略对同一动作的概率比：
 
-```math
+~~~math
 \rho_{i,t}(\theta)=
 \frac{\pi_{\theta}(a_{i,t}\mid s_{i,t})}
      {\pi_{\mathrm{old}}(a_{i,t}\mid s_{i,t})}
-```
+~~~
 
 $a_{i,t}$ 是第 $i$ 条轨迹在位置 $t$ 的 token 或动作， $s_{i,t}$ 是动作之前的状态。常见的 clipped surrogate objective 可以写成示意形式：
 
-```math
+~~~math
 L_{\mathrm{clip}}(\theta)=
 \mathbb{E}\left[
 \frac{1}{G}\sum_{i=1}^{G}\frac{1}{T_{i}}
@@ -355,7 +355,7 @@ L_{\mathrm{clip}}(\theta)=
 \mathrm{clip}(\rho_{i,t},1-\varepsilon,1+\varepsilon)A_{i}
 \right)
 \right]
-```
+~~~
 
 $T_{i}$ 是第 $i$ 条轨迹中参与策略损失的 token 数， $\epsilon$ 控制一次更新的概率变化范围。不同实现可能使用序列级平均、全 batch token 平均、不同 mask 或不同 KL 估计，所以这条公式应理解为结构化示意，不能据此断言所有 GRPO 代码逐项相同。
 
@@ -365,10 +365,10 @@ $T_{i}$ 是第 $i$ 条轨迹中参与策略损失的 token 数， $\epsilon$ 控
 
 为了避免策略离参考模型过远，通常还会加入 KL 约束或 KL 惩罚：
 
-```math
+~~~math
 L(\theta)=L_{\mathrm{clip}}(\theta)
 -\beta D_{\mathrm{KL}}(\pi_{\theta}\,\|\,\pi_{\mathrm{ref}})
-```
+~~~
 
 $\pi_{\mathrm{ref}}$ 是参考策略， $\beta$ 控制偏离代价。KL 太弱，策略可能快速坍缩到 verifier 的漏洞；KL 太强，策略更新又可能小到无法产生新能力。真正的调参依据应该是独立任务表现、奖励分量、长度、拒答率和成本，而不只是训练 loss 是否平滑。
 
@@ -378,18 +378,18 @@ $\pi_{\mathrm{ref}}$ 是参考策略， $\beta$ 控制偏离代价。KL 太弱�
 
 若使用序列平均：
 
-```math
+~~~math
 L_{\mathrm{seq}}=\frac{1}{G}\sum_{i=1}^{G}
 \frac{1}{T_{i}}\sum_{t=1}^{T_{i}}\ell_{i,t}
-```
+~~~
 
 若使用有效 token 平均：
 
-```math
+~~~math
 L_{\mathrm{token}}=
 \frac{\sum_{i=1}^{G}\sum_{t=1}^{T_{i}}\ell_{i,t}}
      {\sum_{i=1}^{G}T_{i}}
-```
+~~~
 
 $\ell_{i,t}$ 可以是带优势和概率比的 token 损失。两种写法都可能合理，但必须在实验记录中明确。长回答比例变化时，如果没有说明归一化口径，训练版本之间的 reward 或 loss 对比没有可比性。
 
@@ -465,12 +465,12 @@ DAPO 中的 decoupled clip 可以理解为对概率比的上下边界分别控�
 
 识别 reward hacking 的一种实用方法是抽取高奖励轨迹进行独立重放。设主 verifier 判定成功，但独立 verifier、隐藏测试或专家抽样至少有一个判定失败，则称为 disagreement。其经验比例为：
 
-```math
+~~~math
 \widehat{p}_{\mathrm{disagree}}
 =\frac{1}{N}\sum_{k=1}^{N}
 \mathbf{1}[V_{\mathrm{main}}(\tau_{k})=1
 \land V_{\mathrm{independent}}(\tau_{k})=0]
-```
+~~~
 
 $N$ 是抽样轨迹数。这个比例不是唯一的安全指标，但持续升高通常说明模型正在利用评分器与真实任务之间的缝隙。防御手段包括隐藏变体、独立实现、随机化测试、只读工具、资源限制、输出长度分桶和人工抽样。把所有 verifier 规则全部暴露给模型有助于调试，却可能降低它作为独立检查的价值。
 
@@ -524,17 +524,17 @@ RLVR 的评估不能只报告训练 verifier score。至少要把下列集合分
 
 verifier 的经验 precision 和 recall 可以写成：
 
-```math
+~~~math
 \widehat{\mathrm{Precision}}
 =\frac{\mathrm{TrueAccept}}
        {\mathrm{TrueAccept}+\mathrm{FalseAccept}}
-```
+~~~
 
-```math
+~~~math
 \widehat{\mathrm{Recall}}
 =\frac{\mathrm{TrueAccept}}
        {\mathrm{TrueAccept}+\mathrm{FalseReject}}
-```
+~~~
 
 这里的 precision 回答“被接受的结果有多少真的正确”，recall 回答“已知正确结果有多少被接受”。它们需要有人工或独立程序提供的参考标签，不能直接拿主 verifier 自己的输出计算。
 
@@ -542,10 +542,10 @@ precision 的分母 `TrueAccept + FalseAccept` 与 recall 的分母 `TrueAccept 
 
 迁移差距可以用一个简单的诊断量表示：
 
-```math
+~~~math
 \Delta_{\mathrm{transfer}}
 =S_{\mathrm{independent}}-S_{\mathrm{train\ verifier}}
-```
+~~~
 
 例如，某模型在训练 verifier 的固定集合上通过 $90/100=90\%$，在新题和独立 verifier 上通过 $66/100=66\%$，则迁移差距为 $66\%-90\%=-24$ 个百分点。这个差距提示主判定分数没有完全迁移，但不能单独区分 verifier 漏洞和新题难度变化。
 
@@ -553,9 +553,9 @@ precision 的分母 `TrueAccept + FalseAccept` 与 recall 的分母 `TrueAccept 
 
 还要按长度分桶报告条件正确率：
 
-```math
+~~~math
 P(\mathrm{correct}\mid L\in[b_{j},b_{j+1}))
-```
+~~~
 
 $L$ 是输出 token 数， $[b_{j},b_{j+1})$ 是长度区间。若长回答的 verifier 通过率上升，但独立正确率不变，模型可能只是用更多 token 做搜索或重复，而不是提高单步推理质量。
 
@@ -569,30 +569,30 @@ RLVR 的成本不仅是策略模型 forward。每个问题可能生成 $G$ 条 r
 
 一个训练 step 的粗略账本是：
 
-```math
+~~~math
 C_{\mathrm{step}}
 =C_{\mathrm{rollout}}+C_{\mathrm{verify}}
  +C_{\mathrm{reference}}+C_{\mathrm{storage}}+C_{\mathrm{retry}}
-```
+~~~
 
 这些项应为非负成本，并以同一训练窗口、货币和分摊规则记录。若只把 GPU forward 记入 $C_{\mathrm{rollout}}$ 而把测试集群、缓存、失败重试或人工复核留在另一张账上，后面的单位成功成本会低估 RLVR 的实际资源消耗。
 
 若 $N_{\mathrm{success}}$ 是独立评估中真正完成任务的数量，单位成功任务成本可以写成：
 
-```math
+~~~math
 C_{\mathrm{unit\ success}}
 =\frac{C_{\mathrm{training}}+C_{\mathrm{evaluation}}+C_{\mathrm{operations}}}
        {N_{\mathrm{success}}}
-```
+~~~
 
 这个指标要求 $N_{\mathrm{success}}>0$，而且成功必须按独立 verifier、权限和预算的共同定义统计。若独立评估中没有成功任务，单位成功成本未定义，不能被写成零；三个成本项还要使用同一时间窗口、货币与分摊口径。这个指标会惩罚“通过率提高但答案变得极长”“每道题采样几十次才成功”“verifier 需要昂贵人工复核”等方案。它不是唯一目标，但比单独看 reward 更接近生产决策。
 
 如果一次尝试的成本为 $C_{\mathrm{attempt}}$，真正成功的概率为 $p_{\mathrm{success}}$，在独立重试近似成立时，期望成功一次的成本大致为：
 
-```math
+~~~math
 \mathbb{E}[C_{\mathrm{success}}]
 \approx\frac{C_{\mathrm{attempt}}}{p_{\mathrm{success}}}
-```
+~~~
 
 这里要求 $C_{\mathrm{attempt}}\geq0$ 且 $0\lt p_{\mathrm{success}}\leq1$。当成功概率为零时，期望成功成本不是一个有限可比较的数，而是“当前策略没有观察到成功”；当不同尝试有不同成本或重试会改变环境状态时，不能把平均成本和平均成功率简单相除。这个近似在重试会改变环境状态、失败样本相关或存在固定启动成本时会失真，但足以说明一个问题：提升单次通过率和减少每次尝试成本，可能同样重要。
 

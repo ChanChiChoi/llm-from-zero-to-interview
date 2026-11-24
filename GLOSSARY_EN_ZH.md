@@ -1126,25 +1126,84 @@ Sliding Window Attention：滑动窗口注意力
 
 Sparse Attention：稀疏注意力
 
+Block-sparse Attention：块稀疏注意力；把 token 连接按 query/key tile 组织，整块无有效连接时才可作为一个执行单元跳过。块内仍可能需要应用 token 级 mask；块粒度会影响索引开销和无效计算。
+
+Global Attention：全局注意力；为指定 token 增加跨全序列连接。连接方向取决于任务和 mask，双向 encoder 规则不能直接用于 causal decoder。
+
+Dilated Sliding-Window Attention：扩张滑动窗口注意力；以固定间隔选择窗口内位置，在单层连接数相近时触及更远位置，但会跳过部分邻近 token。
+
+Longformer：长文档 Transformer；原论文将局部/扩张窗口与任务指定 global attention 组合用于长文档任务。
+
+BigBird：局部、随机与全局连接组合的稀疏 Transformer；原论文的表达性结论依赖其理论设定，不保证任意模型的任务质量或硬件速度。
+
+Reformer：长序列 Transformer；原论文结合 LSH attention、可逆残差层和前馈分块，分别改变 attention 候选与训练激活内存。
+
+Locality-Sensitive Hashing Attention (LSH Attention)：局部敏感哈希注意力；按 query/key 的哈希桶和排序分块形成近似候选，候选内 softmax 不等于对全部 key 的 dense attention。
+
+Reversible Residual Layer：可逆残差层；通过两路耦合更新从后层状态重构前层激活，减少按层保存中间值的需求；反向过程需重算变换，不减少 attention 连接数。
+
 Linear Attention：线性注意力
 
-State Space Model / SSM：状态空间模型
+Feature Map：特征映射；将 query/key 映到向量，使所选相似度可写成特征内积。有限维映射决定了所用 kernel，并不自动等于 softmax kernel。
+FAVOR+：Fast Attention Via positive Orthogonal Random features；Performer 使用的随机特征注意力方法，以正值映射估计 softmax kernel，并用正交随机方向改善特定条件下的估计误差。
+Orthogonal Random Features (ORF)：正交随机特征；在各向同性采样和相应构造条件下，使随机投影方向正交以减少估计方差；有限维空间中的全正交方向数受维度限制。
+Positive Random Features (PRF)：正值随机特征；每个随机特征分量为正，使其内积估计的未归一化 kernel 分数为正，但不单独保证归一化 attention 输出无偏或数值稳定。
+
+State Space Model / SSM：状态空间模型；用隐状态随时间的转移、输入注入和输出读出描述序列动力学。具体模型还需注明离散化、状态结构及参数是否随输入变化。
+
+Causal Convolution：因果卷积；时刻的输出只依赖当前及过去输入的卷积。因果性由卷积核方向和 padding 等实现规则共同保证；膨胀卷积改变访问间隔并扩大感受野。
+
+Depthwise Convolution：逐通道卷积；每个通道使用自己的卷积核独立处理序列位置，不在该卷积运算中混合通道。跨通道信息由线性投影等其他运算承担。
+
+Long Convolution：长卷积；以跨越较长序列范围的共享位移核做因果混合，核可以直接学习或由结构化参数生成。较长感受野本身不等于 query 依赖的内容寻址。
+
+Receptive Field：感受野；某个输出在计算图中能够接收影响的输入位置集合。卷积核宽度、层数和膨胀率决定最大历史跨度；跨度内是否每个位置都可达仍取决于各层连接布局。
+
+Linear Time-Invariant System / LTI System：线性时不变系统；状态转移和输入输出映射不随序列位置改变，因此固定初始条件下可由同一冲激响应表示为因果卷积。
+
+Zero-Order Hold / ZOH：零阶保持；假设每个采样区间的输入保持常数，并据此对连续线性系统精确积分得到离散状态转移。精确性依赖区间内输入恒定的假设。
+
+Impulse Response：冲激响应；系统对单位脉冲输入产生的输出序列。固定线性时不变 SSM 中，状态部分的第 $j$ 个核系数为 $C\bar{A}^{j}\bar{B}$ 这一项；它对应输入经过 $j$ 步状态转移后再由输出读出的结果。
+
+Decay Half-Life：衰减半衰期；它表示标量模态的线性影响降至初值一半所需步数。在 $0<a<1$ 范围内，该模态的每步衰减系数记为 $a$ 时，半衰期按 $\ln(0.5)/\ln(a)$ 计算；这个尺度不是任务级记忆长度或精确召回率。
+
+HiPPO / High-order Polynomial Projection Operators：高阶多项式投影算子；按指定时间测度将历史函数在线投影到有限维多项式子空间并维护投影系数。“最优”针对该测度下的函数近似问题，不表示无损保存历史 token。
+
+Normal Plus Low-Rank (NPLR)：正规矩阵加低秩项；S4 原论文将相关 HiPPO 状态矩阵表示为正规部分与低秩修正之和，以便作稳定的结构化变换。
+
+Diagonal Plus Low-Rank (DPLR)：对角加低秩表示；S4 在酉坐标变换后使用的状态矩阵形式，可借助 Woodbury 恒等式计算低秩修正，但不单独保证端到端速度。
+
+Resolvent：矩阵 resolvent；S4 卷积核生成函数中的 $(I-z\bar{A})^{-1}$ 矩阵逆，用来把逐项状态矩阵幂的序列计算转为结构化求逆。
+
+Cauchy Kernel：Cauchy 核；由互异节点之间倒数差构成的结构化核运算，在 S4 的 DPLR 生成函数中承接对角 resolvent 的计算；快速算法的复杂度取决于所采用的 Cauchy 乘法方法与假设。
 
 Structured State Space Model / S4：结构化状态空间模型 S4
 
-Mamba：选择性状态空间序列模型 Mamba
+Mamba：选择性状态空间序列模型；由当前层输入生成时间步长 $\Delta_t$、输入写入映射 $B_t$ 和状态读出映射 $C_t$，使状态递归按位置依赖输入内容。
 
-Selective Scan：选择性扫描机制
+Selective Scan：选择性扫描；将逐 token 仿射状态更新按原序组合成结合运算，并以并行前缀 scan 求各位置状态。结合不等于交换，且不消除自回归生成对前一步状态的依赖。
+
+Structured State Space Duality / SSD：结构化状态空间对偶；Mamba-2 工作中，特定标量乘单位矩阵状态转移的 SSM 与半可分离矩阵形式之间的结构联系，不表示任意 SSM 与标准 softmax attention 普遍等价。
+
+Semiseparable Matrix：半可分离矩阵；具有秩结构的矩阵族。在因果 SSM 的特定表示中，其相关三角子块的秩受状态维度限制，可据此压缩表示并设计分块算法。
 
 RWKV：结合 RNN 式状态递推与 Transformer 式训练目标的序列模型路线
 
 RetNet / Retentive Network：保留网络 / RetNet 架构
 
-Hyena：基于隐式长卷积的长序列建模架构
+Hyena：交替组合隐式参数化因果长卷积与输入依赖逐点门控的序列算子；其数据控制来自门控流，不等同于逐 query-key softmax attention。
+
+Mega：将多维阻尼指数移动平均引入 gated attention 表示路径的序列模块；完整 Mega 保留全长 attention，Mega-chunk 则限制块内 attention。
+
+GSS / Gated State Space：用 DSS 上下文化较窄的输入投影流，再与另一投影逐点相乘的状态空间层；其乘法门控不表示状态转移矩阵逐 token 动态生成。
+
+H3 / Hungry Hungry Hippos：组合 shift SSM、diagonal SSM 与 key/value/query 乘法交互的序列层，用于显式构造前序线索、长程关联与查询读出路径。
 
 Hybrid Architecture：混合架构，如 Attention + SSM + Convolution
 
 FlashAttention：用 IO-aware tiling、online softmax 与必要重算减少 attention 中间矩阵 HBM 读写的实现；dense 核心保留完整 attention 配对，仍有二次 pair 计算。FP8 低精度和 block-sparse 变体分别需说明数值误差与连接图。
+
+Flash-Decoding：面向少 query、长 K/V 历史的 decode 并行路线；沿 K/V 维分段计算，并合并各段的 softmax 统计与加权输出。它增加归并工作，不改变可见 key 集合；收益取决于上下文长度、并行度和具体 kernel。
 
 Attention Complexity：注意力复杂度
 
@@ -1202,6 +1261,8 @@ KV Head Ratio：KV 头压缩比例 / Query Head 与 KV Head 数量比
 
 Multi-Query Attention / MQA：多查询注意力；多个 query heads 共享一组 K/V。在 query head 数、每头宽度等条件对齐时，它减少显式 K/V 缓存元素；质量和解码速度取决于模型、训练及实现。
 
+Multi-Query Associative Recall / MQAR：多查询关联召回任务；给定多组 key-value 事实，再按 query 返回相应 value 的受控评测。不同论文的条目数量、位置、干扰和训练协议可能不同，MQAR 结果不能直接等同于自然文本检索能力。
+
 Grouped-Query Attention / GQA：分组查询注意力；每组 query heads 共享 K/V，位于 MHA 与 MQA 之间。在每头宽度等条件匹配时，减少 KV heads 可按比例减少 K/V cache 元素；整层参数、质量和端到端延迟不会按同一比例变化。
 
 Multi-head Latent Attention / MLA：多头潜在注意力 / 多头低秩潜在注意力；DeepSeek-V2 形式将 K/V 相关信息联合压入低维 latent，并另存位置相关的 RoPE Key。
@@ -1226,6 +1287,12 @@ Gated MLP：门控多层感知机
 
 MoE FFN：混合专家前馈网络；多个 routed experts 由 router 按 token 稀疏激活，可另有每 token 执行的 shared experts；必须区分总参数、active 参数、router 和 shared 路径。
 
+Fine-grained Expert Segmentation：细粒度专家切分；把 routed FFN expert 拆成更窄的子 expert，并按架构配套调整激活数以增加组合粒度；不自动保证可解释的语义专业化。
+
+Shared Expert：共享专家；在一层 MoE 中对每个 token 固定激活的 expert 路径；它可能被设计来承载常见信息，但具体学到什么要看模型证据。
+
+Expert Specialization：专家专业化；不同 expert 学到不同表示变换的程度；router 使用频率或 expert id 本身不证明其对应人类可命名的领域。
+
 Router：路由器 / MoE 路由器
 
 Top-k Routing：Top-k 专家路由；token-choice 路由按每个 token 的 router 分数选 k 个 experts；固定 k 不保证每个 expert 收到相同 token 数。
@@ -1235,6 +1302,10 @@ Expert Choice Routing：专家选择路由；每个 expert 选固定容量的 to
 Expert Capacity：专家容量；单个 expert 在一次 dispatch 中可接收的 token 上限；超限后可能丢弃、回退或转发，需统计 overflow 和 dropped-token 口径。
 
 Active Parameters：激活参数量；一次 token forward 实际使用的参数近似，MoE 中通常计 dense 主干、路由器、shared experts 和被选中的 routed experts；不等于总权重存储或完整 FLOPs。
+
+Resident Weights / Weight Residency：驻留权重 / 权重驻留；某时刻放在指定设备内存中的权重；受分片、复制、精度、缓存和 offload 影响，不等于 total 或 active parameters。
+
+Exposed Communication Time：暴露通信时间；没有被独立计算重叠隐藏、仍位于端到端关键路径上的通信等待；不等同于传输的总字节数。
 
 Load Balancing：负载均衡；控制不同 expert 的 token 分配和设备工作量；batch-wise 均衡不保证每条序列内部均衡，也不等同于 router 数值稳定。
 
@@ -1270,6 +1341,8 @@ Early Update Pressure：早期更新压力
 
 Normalization Stability Gate：归一化稳定性门禁
 
+Inductive Bias：归纳偏置；架构或学习规则预先施加的限制与偏好，影响哪些模式较容易被表示或从有限数据中学到；不等同于预测错误或“无偏”。
+
 Position Encoding / Positional Encoding：位置编码
 
 Sinusoidal Position Encoding：正弦位置编码
@@ -1290,9 +1363,21 @@ Position Interpolation：位置插值
 
 RoPE Scaling：RoPE 缩放
 
+NTK-aware Scaling / Dynamic NTK：RoPE 频率调整启发式；前者通过调整 RoPE base 让不同频率发生不同幅度的变化，后者再将变化与当前序列长度关联。名称不表示它由严格 NTK 定理直接推出；动态映射的缓存行为还取决于实现。
+
+NTK-by-parts：YaRN 中按频率区间分别保留、插值或平滑过渡的处理方式；它是 RoPE 频率分配方案，不等于从 NTK 理论直接推导出的统一结论。
+
 YaRN：RoPE 上下文扩展方法；按波长对不同频率做分段/平滑插值，并配合温度校正与继续训练；论文效率数字只适用于作者比较设置。
 
 LongRoPE：长距离 RoPE 扩展方法；搜索维度相关的非均匀插值因子并分阶段延长上下文，同时单独评估短上下文恢复。
+
+LongRoPE2：RoPE 长上下文扩展方案；结合逐维位置因子搜索与长短窗口混合训练，证据限于预印本报告的模型和评测。
+
+MrRoPE：用 mixed-radix 视角组织 RoPE 维度频率变化并提出渐进映射；实验结果受论文所测 checkpoint 与任务限制。
+
+Jet-Long：局部 RoPE 窗口与长度自适应远程位置映射的组合方案；缓存 Key 的位置校正不重算历史 hidden states 和 Values，因此缓存路径不等同于完整前缀重算。
+
+Shuffle the Context：通过扰动训练样本的 RoPE indices 并进行 self-distillation 来训练位置鲁棒性；结果限于论文模型和任务。
 
 Position ID Audit：位置编号审计
 
@@ -9152,7 +9237,7 @@ KDA / Kimi Delta Attention：Kimi 系列公开的递归/门控注意力路线；
 
 Gated DeltaNet：门控 DeltaNet；把递归或线性状态更新与显式门控结合，常与 Gated Attention 组成 hybrid architecture。
 
-Gated MLA：门控 Multi-head Latent Attention；把 latent cache 与门控/注意力结构组合，具体实现以模型卡为准。
+Gated MLA：Kimi K3 报告中的 Multi-head Latent Attention 变体；在逐 token KV latent 上进行全局 attention，再用输入依赖的逐通道 full-rank output gate 调制 attention 输出，不等于显式 KV 与 latent KV 间的动态选路。
 
 NoPE / No Position Embedding：无显式位置嵌入/位置变换；不等于没有顺序信息，causal mask、递归状态和 attention pattern 仍可编码顺序。
 
@@ -9210,7 +9295,7 @@ Model-Attached Speculative Decoding：模型附加式推测解码；draft 能力
 
 DSpark：DeepSeek 资料中的附加 speculative decoding 模块；应视为同一基础模型的解码组件，而不是新基础 checkpoint。
 
-MTP / Multi-Token Prediction：多 token 预测；由模型 head 产生多个未来 token 候选，供 target verify 或 speculative decoding 使用。
+MTP / Multi-Token Prediction：多 token 预测；训练目标是在当前位置监督多个未来 token 位置。部分模型可复用附加模块生成 speculative draft，但这是可选推理用途，不是 MTP 的定义，也不保证特定接受长度或延迟收益。
 
 NEXTN：多 token 候选/推测解码路线的模型或引擎术语；具体接口和含义依模型卡/推理框架文档。
 
@@ -9682,6 +9767,8 @@ Raw CoT / Reasoning Text：原始链式思考/推理文本；gpt-oss 工具循�
 Provider Compatibility Gate：供应商兼容性门禁；把 Harmony 渲染、API shape、tool call/result、streaming、状态回放与模型质量 eval 分层，不能用单轮 200 或一个 benchmark 分数替代全部验证。
 
 Variable-effort Reasoning：可变推理档位；gpt-oss 的 `low/medium/high` 是同一权重的 test-time compute 配置，影响 CoT 长度、成本和延迟，不是三个基础模型。
+
+Open-weight Model：开放权重模型；发布方提供可取得的模型参数/权重，但这个事实本身不说明训练数据、数据处理代码、完整训练 recipe、评测记录和许可证都已开放。
 
 Open-weight Safety Boundary：开放权重安全边界；发布方 model card 的安全结果不能替代下游微调、工具权限、沙箱、输出过滤、审计和副作用治理。
 
@@ -10302,3 +10389,7 @@ Discrete Diffusion Language Model / dLLM：离散扩散语言模型；对离散 
 Block Diffusion Language Model / BDLM：块扩散语言模型；以 token block 组织扩散训练或生成，以协调块内并行与块间顺序。block size、缓存复用和序列长度行为由具体模型与服务实现决定。
 
 Masked Diffusion Language Model / MDLM：掩码扩散语言模型；前向过程将部分离散 token 替换为 mask 状态，模型按噪声条件恢复原 token。固定噪声样本的交叉熵不等于完整训练目标；后者通常还涉及噪声步期望和参数化权重。
+
+Per-Layer Embeddings / PLE：逐层嵌入；Gemma 3n 的模型设计之一，将附加嵌入按层提供给 Transformer；其缓存与内存行为属于该模型的实现说明，不是所有架构的通用机制。
+
+MatFormer：嵌套 Transformer 架构；在较大模型中组织可抽取或选择的较小子模型。嵌套结构本身不保证特定设备上的驻留内存、延迟或能耗收益。

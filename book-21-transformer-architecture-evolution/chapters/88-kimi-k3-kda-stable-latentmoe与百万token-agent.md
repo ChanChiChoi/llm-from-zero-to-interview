@@ -26,7 +26,7 @@
 
 K3 的 backbone 每三个 KDA 层接一个 Gated MLA 层，末尾额外放置一个 Gated MLA，保证最终层具备全局注意力。MLA 层使用 NoPE。直觉上，KDA 用递归状态低成本保存序列中的可更新记忆，Gated MLA 周期性提供全局 token-to-token 交互，门控再决定全局路径写回多少。
 
-K3 report 还披露 lower-bounded decay：令 `g_min=5`，将衰减参数通过 scaled sigmoid 映射，使 retention factor 不会过小。这样 diagonal/off-diagonal tile 可以统一使用 dense TensorCore 矩阵乘法，减少专门 position-pair diagonal path。它是数值参数化与 kernel 形状共同设计的例子：一个看似训练稳定性的下界，也影响 serving kernel 是否能保持规则矩阵计算。
+K3 report 还披露 lower-bounded decay：令 `g_min=-5`，将衰减参数通过 scaled sigmoid 映射，使 retention factor 不会过小。这样 diagonal/off-diagonal tile 可以统一使用 dense TensorCore 矩阵乘法，减少专门 position-pair diagonal path。它是数值参数化与 kernel 形状共同设计的例子：一个看似训练稳定性的下界，也影响 serving kernel 是否能保持规则矩阵计算。
 
 ```math
 S_t = \mathrm{Decay}(\alpha_t) \odot S_{t-1} + \mathrm{Update}(k_t,v_t,q_t),

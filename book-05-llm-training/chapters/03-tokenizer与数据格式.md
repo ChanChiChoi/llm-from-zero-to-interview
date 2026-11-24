@@ -170,7 +170,7 @@ SentencePiece 是可承载不同子词算法的训练与编码工具；Unigram L
 P_{\mathrm{emb}}=Vd
 ~~~
 
-如果输出层不与 embedding 共享权重，输出投影也约为 `Vd`。给定 batch $B$ 和序列长度 $L$，logits 形状为：
+如果输出层不与 embedding 共享权重，输出投影也约为 $Vd$。给定 batch $B$ 和序列长度 $L$，logits 形状为：
 
 ~~~math
 \ell\in\mathbb{R}^{B\times L\times V}
@@ -279,7 +279,7 @@ assistant-only label mask 也不一定自动缩小 logits 矩阵。许多实现�
 
 查看具体模型时，应确认 token 字符串、id、`special` 属性、解码行为、模板插入方式和停止条件。
 
-还要区分“模板插入的控制 token”和“用户正文里长得像控制 token 的普通文本”。有的 tokenizer 会把输入文本中完全匹配的标记直接编码成专用 id；若外部文档包含类似 `<|assistant|>` 的字面串，它可能被解析成结构，而不是普通引用文本。预处理器应按目标协议转义、清洗或作为不可信内容标注，并在固定样例中确认控制标记只由模板产生。Hugging Face 的 `apply_chat_template` 提供 `sanitize_control_tokens` 作为一个实现例子；该选项和行为依赖 Transformers 版本及模板，不是所有框架的通用默认保护。
+还要区分“模板插入的控制 token”和“用户正文里长得像控制 token 的普通文本”。有的 tokenizer 会把输入文本中完全匹配的标记直接编码成专用 id；若外部文档包含类似 `<|assistant|>` 的字面串，它可能被解析成结构，而不是普通引用文本。预处理器应按目标协议转义、清洗或作为不可信内容标注，并在固定样例中确认控制标记只由模板产生。Hugging Face 当前滚动 API 文档中的 `apply_chat_template` 提供 `sanitize_control_tokens`：开启后，消息、工具、文档和模板变量等输入字段里的控制 token 字面串按普通文本编码，模板本身写入的控制 token 仍作为结构标记；具体行为依赖 Transformers 版本和模板。这只能处理序列化边界，不能替代对抗提示注入的安全措施。
 
 ### 3.7.2 EOS 的训练与推理语义
 
@@ -291,7 +291,7 @@ assistant-only label mask 也不一定自动缩小 logits 矩阵。许多实现�
 | assistant 回合完成 | 停止本轮采样并把回答交给调用方 | 如果漏停会继续生成；过早停会截断答案 |
 | 工具交接 | 停止模型采样，校验并派发 tool call，等待工具结果后再继续 | 如果当普通答案展示，工具不会执行；如果把普通文本当交接，会误触发调用 |
 
-OpenAI 的 gpt-oss Harmony 文档给出一个具体协议例子：`<|end|>` 结束消息，`<|return|>` 表示模型完成当前回复，`<|call|>` 表示向工具交接。这三个字符串是该协议的 token，不是通用词表；别的模型可能用不同标记或把消息终止和回合终止映射到不同 id。训练标签、生成停止 id、tool dispatcher 与对话历史拼接方式必须共用同一份版本化协议定义。
+OpenAI 的 [gpt-oss Harmony 格式说明](https://github.com/openai/harmony/blob/main/docs/format.md)给出一个具体协议例子：`<|end|>` 结束消息，`<|return|>` 表示模型完成当前回复，`<|call|>` 表示向工具交接。该说明还区分了生成停止标记与持久化历史：生成结果末尾的 `<|return|>` 在追加到下一轮对话历史前应替换为 `<|end|>`，而监督目标可以保留 `<|return|>`。因此训练目标、生成停止 id、tool dispatcher 和历史序列化可能各有明确边界，必须遵循同一份版本化协议定义；这些字符串不是跨模型通用词表。
 
 预训练文档常在结尾追加 EOS；chat 模型则可能每条消息、每个 assistant 回合和工具交接都有不同边界。训练里漏掉结束标记，会让模型不容易学会何时停；服务端把停止 id 配错，可能不停生成或过早结束。停止条件优先按 token id/结构事件处理，不要只靠解码后的字符串匹配，因为 byte-level tokenizer、特殊 token 解码和流式输出可能把同一可见字符串拆开或延后输出。
 
@@ -369,7 +369,7 @@ z=T(s)
 
 #### 3.8.4 模板是可执行的数据协议
 
-模板不只是把 role 名称替换成几个字符串。它可能按消息是否为最后一条、是否有工具、content 是文本还是图像块、assistant 属于哪个 channel 等条件分支。推理端的两个常见选项也不能互换：`add_generation_prompt=True` 通常在对话尾部追加一个新的 assistant 起始头；`continue_final_message=True` 则去掉末尾结束标记，让模型接着已有 assistant 前缀生成。Hugging Face Transformers 的文档规定二者不能同时启用，并明确模板是否支持 generation prompt 取决于模型实现。
+模板不只是把 role 名称替换成几个字符串。它可能按消息是否为最后一条、是否有工具、content 是文本还是图像块、assistant 属于哪个 channel 等条件分支。推理端的两个常见选项也不能互换：`add_generation_prompt=True` 通常在对话尾部追加一个新的 assistant 起始头；`continue_final_message=True` 则去掉末尾结束标记，让模型接着已有 assistant 前缀生成。Hugging Face 当前滚动的 [tokenizer API 文档](https://huggingface.co/docs/transformers/main_classes/tokenizer#transformers.PreTrainedTokenizerBase.apply_chat_template)规定二者不能同时启用，并明确模板是否支持 generation prompt 取决于模型实现。使用时应按项目锁定的 Transformers 版本确认接口行为。
 
 模板本身已经可能写入 BOS、EOS 和角色边界。若先 `apply_chat_template(..., tokenize=False)` 得到字符串，再由 tokenizer 编码，通常需要 `add_special_tokens=False`，否则第二次编码可能再插一套 BOS/EOS。能直接在模板函数里 `tokenize=True` 时，框架会把生成后的控制标记作为实际 special token 编码，减少重复插入风险。若改模板、模型 revision 或库版本，应保存渲染结果和 token ids 做回归，而不是只检查模板字符串是否“看起来一样”。
 

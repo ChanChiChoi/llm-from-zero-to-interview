@@ -1,240 +1,178 @@
 # 第三十五章：Mamba-2 与 State-Space Duality
 
-## 35.1 为什么需要重新看 SSM 与 Attention 的关系
+读到 Mamba-2 的论文标题“Transformers are SSMs”，容易把它理解成“状态空间模型就是 Transformer”。标题指向的是一条更具体的联系：某类有结构限制的状态递归，可以改写成带特殊因果掩码的矩阵计算；同一结构又能拆成适合分块执行的算法。理解这条链，才能看清 Mamba-2 为什么调整状态参数化、SSD 算法怎样并行，以及这些结果没有证明什么。
 
-Mamba 的选择性 state 让 SSM 更适合离散序列，但训练时的 scan、硬件利用和模型扩展仍有优化空间。Mamba-2 相关工作从 state space duality 出发，说明某些结构化状态更新可以与一种受约束的 attention/半可分离矩阵计算互相转换。
+本章从一个 head 的递归状态开始，逐步展开成序列矩阵，再由矩阵结构推到 chunk 间状态传递。这里的状态维度记为 $N$，head 通道维度记为 $P$。第三十四章讨论 Mamba 的任务级信息读取边界；本章解释 Mamba-2 与 SSD 的机制；第三十六章再讨论 SSM 是否能替代 Transformer 的证据。
 
-这里的“dual”不是说 SSM 和标准 attention 完全等价，也不是把所有 attention 都改成 SSM。它提供了一个分析工具：同一组序列变换可以从递归状态、卷积核或结构化矩阵三个角度表达，从而选择更适合训练/推理的计算路径。
+## 35.1 SSD 的三个含义与 Mamba-2 要解决的问题
 
-## 35.2 从递归到半可分离矩阵
+SSD 是 Structured State Space Duality 的缩写。在 Mamba-2 相关工作里，它至少指三个彼此相连、但不能混为一谈的对象：
 
-考虑标量或对角状态更新：
+| 名称 | 指什么 | 能说明什么 |
+| --- | --- | --- |
+| SSD 层 | 一类结构受限的选择性状态空间层 | 指定了状态转移、输入写入和输出读出的参数化 |
+| SSD 理论框架 | 状态空间递归与半可分离矩阵、某类结构化 attention 形式之间的关系 | 说明在什么结构条件下可以换一种数学表示 |
+| SSD 算法 | 利用半可分离矩阵分块计算的实现路径 | 说明怎样结合块内矩阵乘法与块间状态传递 |
 
-~~~math
-s_t=a_t\odot s_{t-1}+b_t\odot u_t
-~~~
+它们回答的问题不同：层是“计算什么”，理论联系是“为什么能换一种表示”，算法是“怎样计算得更合适”。论文把三者连在一起，但“有对偶关系”本身不是一个可以直接执行的 kernel，也不是对所有序列模型的等价声明。[Dao 与 Gu 的 ICML 2024 论文](https://proceedings.mlr.press/v235/dao24a.html)从状态空间、结构化矩阵和 attention 变体之间的联系出发，提出 SSD 框架和新的分块算法。
 
-展开后，输出在位置 t 对位置 i 的影响可以写成：
+理解算法动机时，先区分两种计算需求。逐步递归天然保留一个紧凑状态，适合逐 token 更新；训练阶段则希望并行处理整段序列。前缀 scan 可以并行化递归，但直接展开状态张量会产生很大的中间量。另一方面，矩阵乘法能很好地利用现代加速器，却不能为了并行就把长度为 $T$ 的序列关系无条件展开成稠密 $T\times T$ 矩阵。SSD 的目标是在保留递归结构的前提下，找出其中能分块计算的部分。
 
-~~~math
-y_t=\sum_{i\le t}c_t\odot
-\left(\prod_{j=i+1}^{t}a_j\right)
-\odot b_i\odot u_i
-~~~
+## 35.2 Mamba-2 对状态递归施加了什么结构
 
-对应的 token-token 权重不是任意矩阵，而具有由前缀乘积构成的结构。它可以被视作半可分离（semiseparable）矩阵：对角线附近和低秩/结构化部分容易表示，完整自由度低于标准 attention。
-
-## 35.3 State Space Duality 的三种视角
-
-同一层可以从三个角度理解：
-
-1. **递归视角**：每个 token 更新 state，适合单步 decode。
-2. **卷积视角**：线性时不变或局部近似下生成 kernel，适合并行训练。
-3. **结构化矩阵视角**：用半可分离/扫描结构表达所有位置间的影响，寻找高效并行算法。
-
-选择视角取决于阶段。训练希望高并行、较大矩阵和少写回；推理希望固定 state、低内存和低启动开销。dual 的价值在于让研究者不必把一种实现路径写死。
-
-## 35.4 与标准 attention 的差异
-
-标准 attention 的权重为：
+先看一个简化的 Mamba-2 head。每个时间步 $t$ 有一个标量状态衰减 $a_t$，一个写入向量 $b_t$，以及一个读出向量 $c_t$。输入和输出沿 head 通道有 $P$ 个分量，状态有 $N$ 个分量。状态矩阵 $H_t$ 的形状是 $N\times P$：
 
 ~~~math
-A_{ti}=\operatorname{softmax}(q_t^\top k_i)
+H_t = a_t H_{t-1} + b_t X_t^\mathsf{T},
+\qquad
+Y_t = H_t^\mathsf{T}c_t.
 ~~~
 
-每个 query 都可以根据内容独立改变对历史的排序。SSM dual 产生的权重通常受 state transition、输入选择和结构化前缀乘积约束：
+这里 $X_t,Y_t\in\mathbb{R}^{P}$，$b_t,c_t\in\mathbb{R}^{N}$，$a_t\in\mathbb{R}$。论文讨论的离散参数化中，$a_t$ 是由输入决定的标量衰减，取值在 $[0,1]$。外积 $b_tX_t^\mathsf{T}$ 把当前输入写入 $N\times P$ 的状态；读出时用 $c_t$ 沿状态维度压回 $P$ 个通道。$I_N$ 表示 $N\times N$ 单位矩阵。关键限制是同一个 $a_t$ 作用于 $N$ 个状态坐标，相当于转移矩阵 $A_t=a_t I_N$，而不是为每个状态坐标单独设置不同衰减。
+
+这与 Mamba-1 的核心选择性状态空间层有一个重要差异。按论文中的视角，Mamba-1 用对角状态转移，每个输入通道可看作一个 $P=1$ 的状态变换；Mamba-2 则把转移结构收紧为标量乘单位矩阵，并让同一组状态读写在 $P>1$ 个 head 通道上工作。这样牺牲了部分状态转移自由度，使得状态维度 $N$ 与 head 维度 $P$ 的计算能更自然地组织成矩阵乘法。$N$ 表示状态有多少维，$P$ 表示每个 head 并行处理多少通道；两者不能因为都叫“维度”就当作同一个量。[论文 §2.4](https://arxiv.org/html/2405.21060)解释了标量乘单位矩阵与较大 head 维度这两项变化。
+
+完整的 Mamba-2 block 还包括输入投影、门控、输出投影和归一化等设计。它们与 SSD 核心层协同组成模型，但不是由状态递归与矩阵表达之间的对偶定理自动推出的。[论文 §7.1](https://arxiv.org/html/2405.21060)分别讨论了 block 结构和核心 SSM 计算。讨论某个公式时，应先确认它描述的是核心状态变换，还是整个 block。
+
+## 35.3 从递归展开到半可分离矩阵
+
+先把一个状态坐标的递归写成标量形式。设初始状态为零：
 
 ~~~math
-W_{ti}=c_t\odot
-\left(\prod_{j=i+1}^{t}a_j\right)
-\odot b_i
+h_t = a_t h_{t-1} + b_t x_t,
+\qquad
+y_t = c_t h_t.
 ~~~
 
-它可以表达输入依赖记忆，却未必拥有任意 `T×T` 内容相似矩阵的自由度。这种限制换来了状态和计算结构，不能用“等价 attention”一句话抹平。
-
-## 35.5 Chunked state-space duality
-
-长序列训练可以分成 chunk。每个 chunk 内使用并行结构计算局部输出，同时保存一个边界 state；下一个 chunk 以该 state 为初始值。设第 c 个 chunk 的状态变换为：
+把前一时刻的状态代回去，当前输出就包含当前输入和此前各位置写入的贡献：
 
 ~~~math
-s_{\mathrm{out}}^{(c)}
-=A^{(c)}s_{\mathrm{in}}^{(c)}+b^{(c)}
+y_t
+= \sum_{i=1}^{t}
+\left(c_t b_i\right)
+\left(\prod_{j=i+1}^{t} a_j\right)x_i.
 ~~~
 
-跨 chunk 可以用仿射变换合并，局部计算则能在 GPU 上并行。chunk size 决定并行度、workspace 和边界通信；太小会增加调度，太大则减少流式性。
+乘积中的索引从 $i+1$ 到 $t$，表示信息从位置 $i$ 写入后，经过后续每一步的状态转移才到达位置 $t$。当 $i=t$ 时，这是空乘积，按约定取 $1$，所以当前输入不会额外乘上一段历史衰减。
 
-## 35.6 一个教学版 chunk scan
-
-~~~python
-def affine_compose(left, right):
-    # 每个变换表示 s_out = a * s_in + b
-    a1, b1 = left
-    a2, b2 = right
-    return a2 * a1, a2 * b1 + b2
-
-
-def run_chunks(values, decay, chunk_size):
-    state = 0.0
-    outputs = []
-    for start in range(0, len(values), chunk_size):
-        for value in values[start:start + chunk_size]:
-            state = decay * state + (1.0 - decay) * value
-            outputs.append(state)
-    return outputs
-
-
-print(run_chunks([1, 0, 0, 2, 0, 0], 0.9, chunk_size=2))
-~~~
-
-这段代码仍按 token 循环，目的是展示 chunk 边界不应重置 state。真正 SSD/Mamba-2 实现会在 chunk 内采用更高效的矩阵/scan 算法。
-
-## 35.7 为什么训练 kernel 需要重新设计
-
-如果把每个状态维度逐 token 更新，GPU 可能处于低 occupancy；如果把所有 token 展成 dense 关系矩阵，又失去 SSM 的内存优势。结构化矩阵算法试图在两者之间找到并行块：减少不必要的中间写回，让 state transition 和输入投影尽量融合。
-
-最终性能取决于 state dimension、chunk、batch、dtype、GPU 架构和 kernel 实现。论文中的 FLOPs 下降不能直接换算成服务 latency。
-
-## 35.8 Mamba-2 对系统设计的启发
-
-一个层可能同时需要：训练路径的并行 kernel、推理路径的递归 state、checkpoint 中的参数结构、state snapshot 格式和不同长度的调度。若只实现 forward，不实现 state continuation，模型无法可靠在线化。
-
-服务端可按请求类型选择：短输入大 batch 使用并行 prefill，长流使用递归 decode；暂停、迁移和恢复时保存 chunk 边界 state 以及 model revision、dtype、position contract。
-
-## 35.9 与 hybrid attention 的关系
-
-SSM dual 不会消除显式 attention 的价值。混合模型可以让大多数层使用结构化 state，少数层承担任意内容寻址；也可以在多模态 token、工具结果或文档边界打开 global path。这样可以把最昂贵的自由度用在高价值位置。
-
-但混合增加了 schedule、cache 和评测矩阵。要知道是 SSM 负责局部趋势，attention 负责精确证据，还是二者都在重复同一工作。
-
-## 35.10 常见失败模式
-
-包括把递归/卷积/结构化矩阵三种公式当成无条件等价；chunk 边界错误；state transition 复合顺序颠倒；训练和推理使用不同 `A/B/C` 参数；scan kernel 对短序列反而慢；以及把 Mamba-2 的研究结构推断到没有公开细节的模型。
-
-排查先做标量 reference：逐步递归与 chunk 组合输出一致；再验证向量/矩阵 kernel；最后测不同 chunk、batch、长度和 dtype。对外部模型只写公开资料能支持的结构。
-
-## 35.11 机制与边界：半可分离结构的能力边界
-
-半可分离矩阵为序列影响提供结构化自由度。它比单一固定卷积更灵活，比任意 dense attention 更受约束。理解其秩、状态维度、输入依赖和层间组合，有助于解释为什么多层 SSM 仍能形成复杂长程模式，也有助于识别哪些查询可能造成状态碰撞。
-
-研究比较应报告参数、state size、chunk size、训练/推理路径、kernel 和任务级证据。不要把“dual”当成性能保证，也不要把结构化表示的表达能力等同于 full attention。
-
-## 35.12 面试追问、误区与练习
-
-**问：State-Space Duality 说明 SSM 等于 Transformer 吗？**
-
-标准回答：不等于。它说明某些状态更新可以与结构化的 attention-like 矩阵表达互换，帮助设计训练/推理算法；标准 attention 的任意内容寻址自由度和 SSM 的递归约束仍然不同。
-
-**问：为什么要做 chunked scan？**
-
-标准回答：在保持跨 chunk state continuity 的同时，把局部计算并行化，平衡 GPU 利用率、workspace、边界通信和流式恢复成本。
-
-常见误区包括把每个状态模型都叫 SSD、忽略合并顺序、只看理论复杂度，以及不验证 chunk continuation。
-
-练习：实现标量 affine transform scan，比较逐步递归、chunk 内并行抽象和错误重置 state 三种结果，扩展到不同 chunk size。
-
-## 35.13 Duality 为什么重要
-
-State-Space Duality 的价值在于把看似不同的 attention-like 计算和状态空间递推放到一个可互相转换的视角中。训练可以使用更适合 GPU 的矩阵或卷积形式，推理可以使用递归 state；但转换成立需要满足具体代数条件。
-
-因此读论文时要同时看 parallel form、recurrent form、chunk form 和边界 state 的定义。只记住“二者等价”而忽略初始化、归一化和有限精度，会导致实现错误。
-
-## 35.14 从等价计算到工程选择
-
-若 parallel form 适合 prefill，recurrent form 适合 decode，chunk form 可能是折中。真实系统应按阶段选择 kernel，并验证三种路径的 logits 一致性：
+回到前面含有 $N$ 个状态坐标和 $P$ 个 head 通道的递归，同样展开状态矩阵后，每个位置的向量输出为：
 
 ~~~math
-\left\|y_{\mathrm{parallel}}-y_{\mathrm{chunk}}\right\|
-\le \epsilon,\qquad
-\left\|y_{\mathrm{chunk}}-y_{\mathrm{recurrent}}\right\|
-\le \epsilon
+Y_t =
+\sum_{i=1}^{t}
+\left(c_t^\mathsf{T} b_i\right)
+\left(\prod_{j=i+1}^{t} a_j\right) X_i.
 ~~~
 
-误差门限要和任务指标绑定，不能只看张量平均误差。
+标量例子里的衰减乘积没有变化；这里写入与读出之间增加了内积 $c_t^\mathsf{T}b_i$，而被加权的 $X_i$ 是 $P$ 维向量。
 
-## 35.15 duality 的代数条件和边界
-
-State-Space Duality 连接的是满足特定结构条件的状态更新与矩阵化序列计算，不是“任意 RNN 都等于 attention”。当输入投影、状态转移、归一化或门控改变时，等价关系可能需要重新推导。有限长度、初始 state、padding 和数值精度也会让理论等价变成近似等价。
-
-阅读一个 duality 结果时，可以依次核对：矩阵的下三角因果结构是什么，状态合并是否满足结合律，输入和输出投影在哪里，chunk 边界携带哪些信息，以及实现是否保留了同一归一化。少看一个条件，就可能把论文中的某个特例误写成普遍定律。
-
-## 35.16 chunk size 是算法和硬件的共同参数
-
-chunk 越大，矩阵运算越容易获得 GPU 并行，单次 kernel 的固定开销占比下降；但 workspace、边界延迟和抢占粒度都会上升。chunk 越小，更接近在线流式执行，状态传递更频繁，可能受 launch 和同步影响。
-
-设每个 chunk 的计算时间为 t_c、边界传递时间为 t_s、chunk 数为 N_c，粗略端到端时间是：
+把每个位置的向量按时间排成矩阵：$B,C\in\mathbb{R}^{T\times N}$，其中第 $i$ 行 $B_{i,:}=b_i^\mathsf{T}$ 是写入向量，第 $t$ 行 $C_{t,:}=c_t^\mathsf{T}$ 是读出向量；$X,Y\in\mathbb{R}^{T\times P}$ 分别是输入和输出序列。定义因果下三角矩阵 $L$：
 
 ~~~math
-T\approx N_c t_c+(N_c-1)t_s
+L_{ti} =
+\begin{cases}
+\displaystyle\prod_{j=i+1}^{t} a_j, & i\le t,\\
+0, & i>t.
+\end{cases}
 ~~~
 
-真实系统还会受 batch、负载不均、通信和 cache 命中影响。压测时应把 chunk size 作为一等变量，同时记录吞吐、p99、workspace、恢复时间和输出误差。
+每个位置对的状态衰减由 $L$ 给出，写入与读出向量的配对由 $CB^\mathsf{T}$ 给出。因此序列变换矩阵 $M$ 可以写成：
 
-## 35.17 从研究公式到 serving engine
+~~~math
+M = L \odot (CB^\mathsf{T}),
+\qquad
+Y = MX.
+~~~
 
-要把 Mamba-2 类结构放进 serving engine，至少要实现四个对象：参数权重、parallel kernel、recurrent state 和 state transition 的版本契约。scheduler 还要知道请求处于 prefill、decode、paused 还是 rollback 状态，并在 batch 重排时移动对应 state。
+符号 $\odot$ 表示逐元素乘法。$M$ 的第 $t,i$ 项只在 $i\le t$ 时非零，因此未来输入不会影响过去输出。对角线上的 $L_{tt}=1$，对应每个位置的即时写入和读出。这就是从递归形式走到矩阵形式的关键：每一项都沿同一条因果状态路径计算，矩阵只是把所有位置对的贡献并列摆出。
 
-一个可靠的升级路径是先用标量 reference 验证递归和 chunk 组合，再用向量实现替换，最后接入 fused kernel 和量化。每一步都保留同一组 golden logits 和 state checksum。这样性能优化不会把“理论等价”变成无法定位的线上差异。
+这个矩阵不是任意的稠密因果矩阵。跨越一段时间边界的下三角子块，可以把“历史位置写入”“中间状态转移”“当前读出”分解开；中间传递的信息只通过 $N$ 维状态。因此这类子块的秩受状态维度 $N$ 限制，这种秩受限的结构称为半可分离。它不表示整个 $T\times T$ 矩阵都是低秩，也不表示任意跨块作用都是秩一。论文把 SSM 的矩阵形式与半可分离结构联系起来，并据此构造直接作用于压缩结构的算法，见[论文 §§3.2–3.4](https://arxiv.org/html/2405.21060)。
 
-## 35.18 Duality 不等于能力完全等价
+矩阵写法也不等于必须真的分配一张 $T\times T$ 矩阵。若把所有元素都显式算出再乘 $X$，仍然会承担二次规模的中间量。这里的矩阵表达主要用于看清结构：许多位置间影响由同一个小状态传递，而不是彼此独立存储。
 
-State-Space Duality 说明某些状态空间计算可以改写成半可分离或类似 attention 的矩阵计算，从而帮助训练 kernel 设计；它不意味着 SSM 与标准 softmax attention 在任意输入、参数和任务上完全相同。中间的参数化、归一化、因果约束、门控和数值误差都决定了实际函数族。
+## 35.4 矩阵表达为何像 attention，又为何不等于标准 attention
 
-阅读公式时要区分三种“等价”：代数重排等价、在特定参数下的数值近似等价、在任务指标上的经验相近。只有第一种可以直接由推导证明；后两种必须通过实验支持。
+式 $M=L\odot(CB^\mathsf{T})$ 与 attention 的记号存在一组直观对应：位置 $t$ 的读出向量 $c_t$ 类似 query，位置 $i$ 的写入向量 $b_i$ 类似 key，输入 $X_i$ 类似 value；$L_{ti}$ 则控制因果方向以及信息经过状态转移后的衰减。论文用这种对应建立了 SSM 与结构化 masked attention 之间的联系。这个类比说明矩阵在比较哪些读写向量，不等于它使用了标准 Transformer 的注意力权重。
 
-## 35.19 Chunk size 同时影响算法和硬件
+还要留意，$M$ 不是对所有输入都相同的固定矩阵。$a_t,b_t,c_t$ 会随当前层输入而变化，所以 $Y=MX$ 表示在给定这组输入相关参数后，对序列值 $X$ 的矩阵计算；它不表示整个选择性层对任意输入都是一个固定线性映射。
 
-chunk 太小，边界通信、kernel launch 和状态合并开销上升；chunk 太大，片上内存不足、激活占用和长序列尾延迟上升。更重要的是，chunk 内的并行计算和 chunk 间的递归状态必须保持相同的因果顺序。
+标准 softmax attention 通常先由 query-key 相似度形成分数，再对可见位置做 softmax 归一化。上面的 SSD 形式没有 softmax，而是把读写向量配对结果与状态转移掩码逐元素相乘。掩码 $L$ 也不是任意 padding mask：它的下三角数值来自 $a_j$ 的累积乘积。状态转移的标量约束、因果结构、输入相关读写共同限定了它能表示的序列变换；论文将这一形式归入 structured masked attention。[论文 §2.4](https://arxiv.org/html/2405.21060)给出两者的矩阵关系和与标准 attention 的差别。
 
-应对多个 chunk size 测 full、chunked、step 三路输出误差，并记录 tokens/s、峰值显存、通信时间和 p99。在线服务还要测不同请求长度混合、取消和 preemption；论文中的最佳 chunk 不一定是生产 batch 的最佳 chunk。
+同一组递归与矩阵式的对应可以用一个三步算例核对。下面的数值只是教学设定：取 $b=(1,2,1)$、$c=(1,1,1)$、$x=(3,4,2)$，并令 $a_2=0.2$、$a_3=0.1$，初始状态 $h_0=0$。递归依次得到：
 
-## 35.20 数值误差、边界 state 与恢复
+~~~math
+h_1 = 3,\qquad
+h_2 = 0.2\times 3 + 2\times 4 = 8.6,\qquad
+h_3 = 0.1\times 8.6 + 1\times 2 = 2.86.
+~~~
 
-parallel、chunk 和 recurrent 三条路径在有限精度下通常只能近似一致。误差会在长序列的状态合并中累积，尤其当衰减、归一化或门控接近极端值时。验证不应只比较最终 logits 的平均误差，还要比较 top-k、停止 token、长流状态和任务级 exact recall。
+将同一过程写成矩阵，位置 1 到位置 3 的衰减是 $a_2a_3=0.02$，位置 2 到位置 3 的衰减是 $a_3=0.1$，对角线衰减为 $1$：
 
-checkpoint 要说明保存的是 chunk 边界 state、完整 activation 还是可以重算的输入引用。若只保存边界 state，必须绑定 chunk size、参数和归一化版本；若 chunk size 变了，旧 state 可能无法解释。迁移时更安全的路径是回到最近的兼容边界重算，并把重复计算记入恢复成本。
+~~~math
+M =
+\begin{bmatrix}
+1 & 0 & 0\\
+0.2 & 2 & 0\\
+0.02 & 0.2 & 1
+\end{bmatrix},
+\qquad
+Mx =
+\begin{bmatrix}
+3\\
+8.6\\
+2.86
+\end{bmatrix}.
+~~~
 
-## 35.21 用三种等价性做回归
+两种表示给出相同输出，因为它们记录的是相同的读写和衰减路径。这个例子只核对代数关系，不证明某种实现更快，也不表示 SSD 使用标准 softmax attention。严格地说，论文说明的是某个有结构限制的 SSM 子类与特定结构化 masked attention 形式之间的精确联系；不能把它扩展成任意 SSM、任意 attention 或整个 Transformer 都彼此等价。
 
-阅读 State-Space Duality 时，可以做三种逐层验证。第一种是代数验证：在小维度上比较递归展开与矩阵形式；第二种是数值验证：在相同 dtype、chunk 和参数下比较 hidden、logits 和 state；第三种是任务验证：比较 exact recall、长流分类和恢复后的输出。
+## 35.5 分块 SSD 怎样连接局部矩阵乘法与跨块状态
 
-这三层不能互相替代。代数相同但实现可能因 layout、mask 或累计精度产生误差；数值接近但任务可能在决策边界翻转；任务平均分相同也不代表每个位置都一致。对生产 kernel，应保存输入、参数 revision、chunk size、state checksum 和误差分位数，避免只保留最终 benchmark。
+若只看矩阵式，容易问：既然 $M$ 是因果矩阵，怎样避免构造整张矩阵？答案是把序列切成长度为 $Q$ 的 chunks。块对角部分只描述每个 chunk 内部的位置关系；两个不同 chunk 之间的影响则通过有限维状态传递。分块算法因此把较大的序列计算拆成 chunk 内矩阵乘法和 chunk 间的状态扫描。
 
-## 35.22 SSD 等价的使用边界
+设第 $c$ 个 chunk 覆盖位置 $s_c$ 到 $e_c$。它从入边界状态 $H_{\mathrm{in}}^{(c)}$ 开始，处理完后可写成一个仿射变换：
 
-State Space Duality 提供的是一组结构联系和可转换的计算路径，不意味着任意 Transformer 都能无损替换成 Mamba-2，也不意味着训练并行路径和在线递归路径在有限精度下自动一致。阅读论文时要区分理论等价、特定参数化下的算法等价和实际 kernel 的近似。
+~~~math
+H_{\mathrm{out}}^{(c)}
+= \alpha_c H_{\mathrm{in}}^{(c)} + S_c,
+\qquad
+\alpha_c = \prod_{j=s_c}^{e_c} a_j.
+~~~
 
-一个最小验证可以对同一组参数和输入比较 full sequence、chunked scan、recurrent update 的 hidden 最大误差，并按长度、dtype、chunk size 和 state reset 分桶。只有误差、任务质量和吞吐都在验收条件内，才能把速度优势写成工程结论。
+$H_{\mathrm{in}}^{(c)}$、$H_{\mathrm{out}}^{(c)}$ 和 $S_c$ 的形状都是 $N\times P$；$\alpha_c$ 是标量。它表示这个 chunk 内状态转移的总衰减；$S_c$ 是假设 chunk 入状态为零时，由 chunk 内输入写入并累积得到的状态摘要。于是下一块的真实入状态等于上一块的出状态：
 
-## 35.23 Mamba-2 与 attention 的职责边界
+~~~math
+H_{\mathrm{in}}^{(c+1)} = H_{\mathrm{out}}^{(c)}.
+~~~
 
-Mamba-2 的线性状态路径适合流式、长序列和压缩历史；attention 仍擅长按当前 query 选择任意历史 token。对趋势预测和持续音频，两者差异可能很小；对两个同名实体、版本冲突、精确数字和引用任务，必须做内容寻址测试。混合方案的价值不是宣布谁取代谁，而是让状态扫描承担大多数 token，让少量显式路径承担高精度回读。
+这条等式是跨块连续性的核心。若把每个 chunk 都从零状态启动，chunk 内部计算可能仍然自洽，但前面 chunk 写入的信息不会进入后续输出，原序列变换就变了。
 
-## 35.24 State-Space Duality 的工程含义
+对第 $c$ 个 chunk 中的位置 $t$，输出可拆成零入状态时算出的局部结果，加上真实边界状态沿块内转移传播后的读出：
 
-Mamba-2/State-Space Duality 的代表论文为 https://arxiv.org/abs/2405.21060。具体结构、算法和模型配置要以论文版本、官方代码和 checkpoint 为准。
+~~~math
+Y_t
+= Y_t^{(0)}
++ \left(\prod_{j=s_c}^{t} a_j\right)
+\left(H_{\mathrm{in}}^{(c)}\right)^\mathsf{T} c_t.
+~~~
 
-Mamba-2 的重要启发是：架构和实现路径可以双向设计。递归 state、卷积和结构化矩阵各自服务不同阶段，但它们的等价关系有条件，不能替代任务级证据。
+这里 $Y_t^{(0)}$ 是第一阶段计算的块内局部输出；第二项就是最后一个阶段要补回的块外历史贡献。
 
-## 35.25 Duality 不是无损格式转换
+整个 SSD 算法可以按四个相连阶段理解：
 
-同一组状态更新可以有递归、卷积、块矩阵或 scan 表达，但每种表达依赖因果 mask、参数化、边界 state 和浮点路径。把公式改写成矩阵形式后，kernel 仍可能使用不同的累积顺序、padding 和 truncation；因此“数学上等价”不能直接变成“输出 bitwise 相同”。
+| 阶段 | 计算内容 | 在输出中的作用 |
+| --- | --- | --- |
+| 块内局部输出 | 对每个 chunk 假设零入状态，计算块对角部分的局部贡献 | 得到当前块内部的信息流 |
+| 块摘要 | 汇总每个 chunk 的 $S_c$ 和 $\alpha_c$ | 将整块压缩成可传递的状态变换 |
+| 边界状态扫描 | 按因果顺序组合 chunk 变换，可在更短的 chunk 序列上做前缀 scan，求出每个 chunk 的真实入状态 | 把所有更早 chunk 的影响传到当前块 |
+| 边界状态读出 | 将真实入状态按块内衰减传播，并通过当前读出向量映射到各位置 | 补上块外历史对当前块输出的贡献 |
 
-工程上应给等价性加条件：相同参数 revision、position、initial state、chunk、dtype、归一化和 mask。条件变化时，结论降级为近似或需要重新实验。
+在矩阵视角里，第一阶段计算块对角矩阵作用；块外部分沿共享状态分解，摘要扫描承担较短的跨块路径，最后将边界状态的贡献加回输出。局部矩阵乘法利用加速器擅长的并行计算，边界扫描保留 SSM 的状态结构。算法既不需要完整物化 $T\times T$ 矩阵，也没有消除因果依赖；它是把同一因果计算安排成两种规模不同、职责互补的运算。[论文 §6](https://arxiv.org/html/2405.21060)给出 SSD 分块矩阵算法，[作者的算法讲解](https://tridao.me/blog/2024/mamba2-part3-algorithm/)则按块内计算、状态传递和边界输出解释这一过程。
 
-## 35.26 Chunk 与 checkpoint 的联合设计
+## 35.6 对偶关系和效率结果的适用边界
 
-chunk size 既决定 parallel scan 的效率，也决定可保存的恢复边界。chunk 较大可以减少边界开销，却增加重算和临时激活；chunk 较小便于恢复，却增加 kernel launch、状态合并和 metadata。可用教学近似表示：
+从递归展开到矩阵乘法，是在同一组状态参数和初始条件下重排同一个计算。若把初始状态改为非零，矩阵乘法还要加上初始状态沿各时间步传播的边界贡献；若改变 $A_t$ 的结构、读写参数或因果掩码，也必须重新确认所用的矩阵关系。理论上的代数相同，并不意味着不同 kernel 的浮点累积顺序会产生 bitwise 完全一致的输出。
 
-```math
-C_{\mathrm{total}}(c)
-=C_{\mathrm{compute}}(c)+C_{\mathrm{boundary}}(c)
- +C_{\mathrm{checkpoint}}(c)+C_{\mathrm{recompute}}(c).
-```
+效率数字也要对齐比较对象。Dao 与 Gu 报告，专门实现的 SSD 核心层在论文测试设置下，相对 Mamba 的优化 selective scan 实现快 $2$–$8$ 倍；这支持的是该核心层和该组实现条件下的结果。[论文摘要和算法章节](https://arxiv.org/html/2405.21060)没有给出“任意 Mamba-2 完整模型、任意 GPU 或在线请求都快 $2$–$8$ 倍”的保证。完整模型还包含投影、门控、归一化及其他计算；服务延迟又会受到 batch、序列长度、调度和内存访问影响。本章不把核心层效率数字改写成整模型或 serving 的通用性能结论。
 
-线上应根据故障率、SLO、存储带宽和请求长度选择，而不是直接使用论文默认 chunk。恢复测试要比较同一 suffix 在 full、chunk、snapshot restore 和迁移路径的 logits 与任务结果。
-
-## 35.27 Mamba-2 与 attention 的混合使用
-
-State Space Duality 允许研究者用类似矩阵/attention 的视角设计训练 kernel，但生产系统仍可以让 Mamba-2 负责长流扫描，让少量 attention 或 retrieval 负责精确查询。混合时显式记录两种历史表示和交接位置；不能把 Mamba state 当作完整 K/V，也不能在没有训练交接层的情况下假设它们可互换。
-
-最终评估将三种证据放在一起：代数/数值等价、目标任务质量、真实 runtime 成本。若第一项通过而第三项不通过，问题是 kernel 或调度；若前两项通过而引用失败，问题是状态可寻址性；若 chunk restore 失败，问题是 serving contract。这个分层能把 Mamba-2 的启发转化为可执行判断。
+所以，SSD 最有用的结论是一条结构与算法的桥：受限状态递归可以被看成半可分离矩阵，半可分离结构又让分块矩阵计算与跨块状态传递成为可能。它解释了 Mamba-2 怎样调整状态结构，并为硬件友好的训练算法提供设计空间；它没有证明标准 softmax attention 与 SSM 全面等价，也没有单凭代数关系决定哪种架构在所有任务上更好。判断替代能力仍需比较匹配任务和训练条件下的证据，这正是下一章的范围。

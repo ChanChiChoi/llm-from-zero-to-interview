@@ -30,20 +30,20 @@ DeepSeek-V4 技术报告把后训练描述为两阶段流程：先针对数学�
 
 对于领域 $d_{k}$，一个带目标掩码的 SFT loss 可以写成：
 
-```math
+~~~math
 \mathcal{L}_{\mathrm{SFT}}^{(k)}
 =-\frac{1}{M_{k}}\sum_{t} m_{t}\log p_{\theta}(y_{t}\mid x,y_{1:t-1}),
 \qquad M_{k}=\sum_{t} m_{t}>0.
-```
+~~~
 
 $x$ 是 prompt/上下文， $y_{t}$ 是第 $t$ 个目标 token， $m_{t}\in{0,1}$ 标记该位置是否计入 loss， $M_{k}$ 是本批次参与监督的 token 数。若 prompt 和回答都应学习，掩码可以覆盖两者；instruction tuning 常只监督 assistant 目标区间。用有效 token 数归一化，可以避免不同长度样本的 loss 尺度随 batch 总 token 数任意变化。
 
 随后在有领域 reward signal 的环境中做 GRPO（Group Relative Policy Optimization）。通常做法是对同一个 prompt 采样一组回答，用组内相对奖励估计优势，减少对独立 value model 的依赖。下面公式是常见的教学化组内标准化写法，**不是** V4 报告公开的精确 advantage、归一化或 clipping 配置：
 
-```math
+~~~math
 A_{i}=\frac{r_{i}-\mathrm{mean}(r_{1:G})}
 {\mathrm{std}(r_{1:G})+\epsilon},
-```
+~~~
 
 其中 $G$ 是同一 prompt 的回答数， $r_{i}$ 是 verifier、奖励模型或规则组合产生的 reward， $A_{i}$ 是组内相对优势，`std` 这里使用组内总体标准差。实际 GRPO 还涉及 policy ratio、clip、KL 项、token mask、长度处理和 rollout 过滤；V4 报告只说超参数与其既有研究接近，没有公开本章公式中的具体配置。GRPO 的通用推导和 V4 报告不能互相替代，前者帮助理解算法，后者支持关于 V4 的事实。
 
@@ -118,10 +118,10 @@ print("mean advantage:", round(sum(advantages) / len(advantages), 6))
 
 训练记录应将结果质量和策略约束分开：
 
-```math
+~~~math
 S=C_{\mathrm{correct}}\cdot C_{\mathrm{format}}
 \cdot P_{\mathrm{permission}}\cdot B_{\mathrm{budget}}.
-```
+~~~
 
 $C_{\mathrm{correct}}$ 和 $C_{\mathrm{format}}$ 分别表示结果正确、输出格式通过的指示量； $P_{\mathrm{permission}}$ 和 $B_{\mathrm{budget}}$ 分别表示权限合规、预算未超限的指示量。这里的乘法表达“任一硬条件失败都不能称为完整成功”的语义。若权限或预算状态未知，不能强行填 0 或 1；应该保留 `unknown`，修复环境或隔离该轨迹。奖励高不能抵消越权、隐私泄露或未授权副作用。
 
@@ -137,9 +137,9 @@ $C_{\mathrm{correct}}$ 和 $C_{\mathrm{format}}$ 分别表示结果正确、输�
 
 统一蒸馏让学生先 rollout，再让一个或多个领域教师在这些状态上提供 token 分布、下一步动作、错误批注、候选答案或最终 artifact。为了说明 Agent 场景中“学生状态”包含什么，可以把训练记录设计成：
 
-```math
+~~~math
 u=(x,s_{t},a_{t},o_{t+1},y,u_{T},v,\rho_{e}),
-```
+~~~
 
 其中 $s_{t}$ 是学生在第 $t$ 步看到的完整状态， $a_{t}$ 是 token 或工具动作， $o_{t+1}$ 是环境 observation， $y$ 是最终结果， $u_{T}$ 是教师信号， $v$ 是 verifier， $\rho_{e}$ 是环境和协议版本。这是用于复现和审计的推荐 schema，不是 DeepSeek 报告披露的内部日志格式。若只记录用户 prompt 和最终文本，研究者就无法重建学生在哪个错误前缀上得到什么指导。
 
@@ -151,35 +151,35 @@ u=(x,s_{t},a_{t},o_{t+1},y,u_{T},v,\rho_{e}),
 
 DeepSeek-V4 报告将多教师目标写成加权 reverse KL。把它展开到学生 rollout 访问到的前缀上，可以写为：
 
-```math
+~~~math
 \mathcal{L}_{\mathrm{OPD}}(\theta)
 =\mathbb{E}_{s\sim d_{\pi_{\theta}}}
 \left[\sum_{i=1}^{N}w_{i}\,
 D_{\mathrm{KL}}\left(
 \pi_{\theta}(\cdot\mid s)\|\pi_{E_{i}}(\cdot\mid s)
 \right)\right].
-```
+~~~
 
 $d_{\pi_{\theta}}$ 表示由学生策略访问到的状态分布， $\pi_{E_{i}}$ 是第 $i$ 个专家教师， $w_{i}$ 是报告所说的教师相对权重。报告解释，学生应在数学状态上向数学教师学习、在代码状态上向代码教师学习；但它没有公开 $w_{i}$ 是固定的、按样本指定的还是由何种路由器计算。因此公式中的状态期望用于解释 on-policy，不能被读成完整复现配方。论文给出的核心形式是 $\sum_{i} w_{i} D_{KL}(\pi_{\theta}\|\pi_{E_{i}})$，而不是本文为读者补上的状态期望记法。[技术报告 §5.1.2](https://arxiv.org/html/2606.19348v1#S5.SS1)
 
 在一个固定前缀 $s$ 上，若学生分布为 $p_{S}$、教师分布为 $p_{T}$，reverse KL 为：
 
-```math
+~~~math
 D_{\mathrm{KL}}(p_{S}\|p_{T})
 =\sum_{v} p_{S}(v\mid s)\log\frac{p_{S}(v\mid s)}{p_{T}(v\mid s)}.
-```
+~~~
 
 权重方向很重要：每个 token 的差异由学生概率 $p_{S}(v\mid s)$ 加权，所以学生已经几乎不考虑的 token，在 reverse KL 中通常贡献很小；forward KL 则是 $D_{\mathrm{KL}}(p_{T}\Vert p_{S})=\sum_{v\in\mathcal{V}}p_{T}(v\mid s)\log\bigl(p_{T}(v\mid s)/p_{S}(v\mid s)\bigr)$，由教师概率加权，更关注覆盖教师有质量的区域。reverse KL 因而常表现出偏向学生当前主要模式的性质，但它可能漏掉学生尚未探索到的教师模式。对词表做完整求和消除了动作抽样误差，不会自动解决 student support、教师覆盖或状态分布的问题。
 
 学生先按 $p_{S}$ 采样 token 时，可以用下式构造一个**采样估计量**：
 
-```math
+~~~math
 \hat A_{t}^{\mathrm{KD}}
 =\mathrm{sg}\!\left[
 \log\frac{p_{T}(a_{t}\mid s_{t})}{p_{S}(a_{t}\mid s_{t})}
 \right],
 \qquad a_{t}\sim p_{S}(\cdot\mid s_{t}).
-```
+~~~
 
 $\mathrm{sg}$ 表示 stop-gradient。这个 log-ratio 不是一条可以直接当作监督标签的 reward；在 sampled-token 方案里，它作为 policy-gradient surrogate 的 advantage 信号，仍要乘上学生策略的梯度。学生采到一个教师也认为更好的 token 时，log-ratio 为正；反之为负。[MiniLLM](https://arxiv.org/abs/2306.08543v6) 也研究了 reverse-KL 与 on-policy 优化，但它的序列级目标、信用分配方法和模型规模实验属于另一套具体算法，不能把“都用了 reverse KL”理解成完全相同的实现。
 
@@ -257,12 +257,12 @@ DeepSeek-V4 报告指出，已有实现常把 full-vocabulary KL 化为逐 token
 
 报告把多个教师的 reverse KL 按相对权重求和。在固定状态、不加额外约束且所有相关 token 上教师概率非零时，最小化该目标的学生分布满足：
 
-```math
+~~~math
 p^*(v\mid s)
 =\frac{\prod_{i} p_{E_{i}}(v\mid s)^{w_{i}/W}}
 {\sum_{u}\prod_{i} p_{E_{i}}(u\mid s)^{w_{i}/W}},
 \qquad W=\sum_{i} w_{i}.
-```
+~~~
 
 也就是说，它是教师分布的归一化加权几何平均。若同一状态上两位教师等权，且它们给出 $p_{A}=(0.9,0.1)$ 与 $p_{B}=(0.2,0.8)$，使目标最小的分布是 $(\sqrt{0.18},\sqrt{0.08})$ 归一化后得到 $(0.6,0.4)$。直接对概率向量取算术平均则是 $(0.55,0.45)$；两者不是同一个目标。
 
@@ -290,19 +290,19 @@ p^*(v\mid s)
 
 全词表目标不是只保存“教师选中的下一个 token”。对每个学生前缀，训练要拿到教师对整个词表的分布；多教师还会把教师权重、教师推理和 logits 缓冲的成本乘上去。可以先估算 logits 本身的体积：假设一批有 8,192 个 token 位置、词表 100,000 项、每个 logit 用 BF16 两字节表示，那么单个教师 logits 是
 
-```math
+~~~math
 8{,}192\times100{,}000\times2
 =1{,}638{,}400{,}000\text{ bytes}\approx1.53\text{ GiB}.
-```
+~~~
 
 10 个教师同时保存就约 15.3 GiB；这还不包括教师权重、前向激活、学生梯度、优化器状态或轨迹数据。这是一个透明的内存账本示例，不是 V4 报告中的 batch、词表 dtype 或实测配置。
 
 为什么缓存 hidden state 而不是 logits？对一个前缀 $s$，教师末层表示 $h_{T}(s)\in R^d$ 经过词表输出头变成 logits：
 
-```math
+~~~math
 z_{T}(s)=W_{\mathrm{out},T}h_{T}(s)+b_{T},
 \qquad W_{\mathrm{out},T}\in\mathbb{R}^{|V|\times d}.
-```
+~~~
 
 $h_{T}$ 只有 $d$ 个数，logits 有 `|V|` 个数。若二者采用同样 dtype 且 $|V|>d$，暂存 hidden state 比暂存 full-vocabulary logits 更省空间；代价是训练时必须重新加载输出头并计算完整 logits。因此该做法把“大量持久化 logits”的内存/存储压力转成“按需读输出头并重建”的计算和 I/O。注意 $z_{T}$ 仍是未归一化分数，形成 KL 前要经 `softmax` 得到 $p_{T}$；学生侧的 logits 也要按同一词表位置形成 $p_{S}$。
 
@@ -340,12 +340,12 @@ DeepSeek-V4 报告披露了针对这一瓶颈的系统设计：教师权重放�
 
 两阶段流程会增加教师推理、轨迹存储、验证器执行和多领域调度成本。对多教师 full-vocabulary OPD，单位训练任务成本至少要拆开学生 rollout、每个教师的前向、logit 重建与 KL、验证和 I/O：
 
-```math
+~~~math
 C_{\mathrm{task}}
 =C_{\mathrm{rollout}}
 +\sum_{i=1}^{N}q_{i}c_{\mathrm{teacher},i}
 +C_{\mathrm{logits/KL}}+C_{\mathrm{verifier}}+C_{\mathrm{I/O}}+C_{\mathrm{storage}}.
-```
+~~~
 
 令总成本按“每训练任务”计量： $C_{\mathrm{rollout}}$ 是学生生成轨迹的成本， $q_i$ 是教师 $i$ 在该任务中需要评分的学生状态数， $c_{\mathrm{teacher},i}$ 是教师 $i$ 每处理一个状态的前向成本，因此二者相乘后也是每任务成本；教师覆盖、采样策略和数据路由会改变 $q_i$。 $C_{\mathrm{logits/KL}}$ 是输出头重建与 exact KL 计算成本， $C_{\mathrm{verifier}}$ 是验证成本， $C_{\mathrm{I/O}}$ 是参数、hidden state 和轨迹传输成本， $C_{\mathrm{storage}}$ 是持久化成本。这样各项都落在同一任务成本口径上。全词表方案省去的主要是 sampled-token 近似带来的动作采样噪声，并没有省去教师前向、输出头计算或分布式读写。
 

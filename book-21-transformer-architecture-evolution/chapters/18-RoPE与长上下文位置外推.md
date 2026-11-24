@@ -1,267 +1,66 @@
-# 第十八章：RoPE、NTK Scaling、YaRN 与长上下文位置外推
+# 第十八章：RoPE 长上下文扩展：插值、频率缩放与训练
 
-## 18.1 位置编码解决的不是“给 token 编号”
+第十七章比较了具体模型公开的 RoPE 配置和上下文字段。本章继续追问：当一个预训练模型要读比训练序列更长的输入时，位置映射怎样改变，模型还需要怎样适配？先记住一条边界：RoPE 函数可以计算任意位置的旋转角，并不等于模型已经学会利用任意长度的上下文。
 
-self-attention 本身对输入排列缺少顺序感。如果不加入位置信息，`A B` 和 `B A` 可能共享同一种内容集合表示。位置编码提供顺序线索，但不同方法对相对距离、外推长度、局部性和实现成本的偏好不同。
+## 18.1 位置映射范围不等于有效上下文
 
-RoPE 的重要性在于，它不是简单把位置向量加到 hidden 上，而是对 query/key 做位置相关旋转，使注意力点积显式携带相对位移。现代长上下文方案又会调整位置频率、插值策略、训练长度或 attention 结构。把所有方法统称为“RoPE scaling”会掩盖它们的差异。
+讨论“把模型扩到 $128\mathrm{K}$”时，至少有四个不同的问题：
 
-## 18.2 RoPE 的二维旋转
+| 描述 | 它回答什么 | 单独不能说明什么 |
+| --- | --- | --- |
+| 配置或接口上限 | 当前配置、模型卡或调用入口允许多长输入 | 模型在该长度上是否能正确利用信息 |
+| 训练序列长度 | 权重在训练中看过多长的序列 | 推理时能否直接处理更长序列 |
+| 位置映射范围 | 位置索引如何转成 RoPE 频率和相位 | 权重是否已适应改变后的位置信号 |
+| 有效上下文 | 指定模型在指定任务、位置和评测条件下表现如何 | 脱离任务后可泛化到哪些能力 |
 
-对 head 向量的每两个维度组成一个二维平面。位置 `p` 的旋转矩阵为：
+第七章已经解释，RoPE 按位置旋转 Query 和 Key，使注意力交互带有相对位移信息。本章不再推导二维旋转，而关注训练分布之外的位置相位如何处理。直接使用原位置映射时，一些频率分量会进入训练中很少或没有出现的相位范围；修改映射可以减轻这一分布变化，却无法单独教会权重在新长度上检索、组合和使用证据。第十三章专门讨论长距离证据使用与位置敏感行为；这里先把“改位置”和“测能力”分开。
 
-~~~math
-R(\theta)=\begin{bmatrix}\cos\theta&-\sin\theta\\\sin\theta&\cos\theta\end{bmatrix}
-~~~
+## 18.2 Position Interpolation：把新位置映回训练区间
 
-第 `i` 个频率的角度为：
+假设模型训练时的最大序列长度是 $L_{\text{train}}$，希望扩到 $L_{\text{target}}$。PI 把每个输入位置按扩展倍率压回原范围：$s=L_{\text{target}}/L_{\text{train}}$，原位置 $p$ 映射为：
 
-~~~math
-\theta_{p,i}=p\,\omega_i
-~~~
+$p' = \frac{p}{s}$
 
-于是：
+例如，从 $2\mathrm{K}$ 扩到 $8\mathrm{K}$，扩展倍率为 $4$；测试输入中位于 $6\mathrm{K}$ 的 token，其位置坐标会映到 $1.5\mathrm{K}$。RoPE 的旋转函数可以在非整数位置上取值，因此位置映射本身是连续的。新 token 不再要求模型直接处理训练时未见过的高位置坐标。
 
-~~~math
-q'_p=R(p\omega_i)q_p,\qquad k'_r=R(r\omega_i)k_r
-~~~
+这种稳定性有代价：所有位置间隔也按相同比例缩小。$6\mathrm{K}$ 与 $6.004\mathrm{K}$ 之间原有的间隔，在映射后只有四分之一；模型在短序列训练中学到的邻近关系也需要适应新间距。因此 PI 的论文方案包括少量长上下文微调，而不是只改一个位置字段。作者在 LLaMA 7B—65B 上报告从 $2\mathrm{K}$ 扩展到最多 $32\mathrm{K}$，并在其设置中用最多 $1{,}000$ 步微调取得结果；这些数字绑定论文模型、数据和评测，不能看作通用长度保证。[Position Interpolation 原论文](https://arxiv.org/html/2306.15595)
 
-旋转的内积包含 `((p-r)\omega_i)` 的相对位置项。高频维度更敏感于近邻变化，低频维度提供更长周期，但超出训练范围后会遇到相位外推和混叠问题。
+## 18.3 NTK-aware 与 YaRN：按频率分配位置变化
 
-## 18.3 最小实现与 shape
+PI 对所有频率采用同一缩放比例。RoPE 的频率却覆盖不同时间尺度：较快的分量在训练窗口内反复旋转，较慢的分量可能连一次完整周期都没有。因此，一种自然思路是少动已经充分训练的频段，把更多变化留给训练时覆盖不足的频段。
 
-~~~python
-import torch
+NTK-aware scaling 是社区提出的 RoPE base 调整启发式。它不等价于“把位置整体除以扩展倍率”，而是让不同频率随 base 改变的幅度不同，以减少 PI 对高频间距的压缩。Dynamic NTK 又把缩放和当前序列长度联系起来：短输入可沿用原有映射，序列增长后再逐渐改变频率。它仍是推理期的位置规则；具体实现如何处理已经缓存的状态，属于第十一章的 KV cache 边界。YaRN 论文将 NTK-aware 和 Dynamic NTK 回顾为先前的社区方法；可对照[研究者讲解](https://blog.korolevalab.com/blog/2026/transformer-architectures-09-long/)理解这些频率映射。
 
+YaRN 将按频率分段的 NTK-by-parts 与 attention logit 温度缩放结合。训练窗内转动次数很多的频率基本保留，转动不足的频率做更多插值，中间频段平滑过渡；作者另按扩展倍率调整 attention 的分数尺度。这里的“NTK”名称来自方法谱系，不意味着该方案是由严格 NTK 定理直接推出的。YaRN 原论文发表于 ICLR 2024；作者在 LLaMA/Llama 2 的指定设置中报告其训练数据和步数效率，并举例比较 Llama 2 7B 从 $4\mathrm{K}$ 扩到 $8\mathrm{K}$ 时，YaRN 用 $400$ 步取得与 PI $1{,}000$ 步相近的滑窗困惑度结果。这是论文条件下的对比，不应推广成所有模型的固定效率比。[YaRN ICLR 2024 论文](https://proceedings.iclr.cc/paper_files/paper/2024/file/874a4d89f2d04b4bcf9a2c19545cf040-Paper-Conference.pdf)；[作者更新的 arXiv 版本](https://arxiv.org/html/2309.00071)
 
-def apply_rope(x, position_ids, base=10_000.0):
-    # x: [batch, heads, seq, head_dim], head_dim 必须为偶数
-    b, h, t, d = x.shape
-    inv_freq = 1.0 / (base ** (torch.arange(0, d, 2, device=x.device) / d))
-    angles = position_ids[:, None, :, None] * inv_freq[None, None, None, :]
-    cos, sin = angles.cos(), angles.sin()
-    even, odd = x[..., 0::2], x[..., 1::2]
-    rotated_even = even * cos - odd * sin
-    rotated_odd = even * sin + odd * cos
-    return torch.stack((rotated_even, rotated_odd), dim=-1).flatten(-2)
+## 18.4 从手工频段规则到非均匀与长度自适应映射
 
+预设频段的规则仍要决定每个维度应缩放多少。LongRoPE 把这一选择改成搜索问题：不同 RoPE 维度、不同 token 位置可以使用不同缩放因子，作者用进化搜索寻找因子，并逐步从 $256\mathrm{K}$ 扩到 $2{,}048\mathrm{K}$，之后再调整映射以恢复 $8\mathrm{K}$ 短上下文表现。论文在 LLaMA 2 与 Mistral 上报告了这些结果；它展示的是一套搜索和训练流程，不是把任意 checkpoint 的位置配置改大便能得到 $2\mathrm{M}$ 能力。[LongRoPE 原论文](https://arxiv.org/html/2402.13753)
 
-x = torch.randn(2, 4, 8, 16)
-positions = torch.arange(8).repeat(2, 1)
-print(apply_rope(x, positions).shape)
-~~~
+ICLR 2026 的 MrRoPE 从 mixed-radix 角度统一 PI、NTK 和 YaRN 所体现的维度缩放，并提出渐进式频率转换。论文报告其无微调实验覆盖 LLaMA 2 7B、LLaMA 3 8B、Qwen 2.5 3B 及 RULER、Needle-in-a-Haystack、InfiniteBench、LongBench 等任务。它让“如何分配各维度的扩展量”成为显式设计选择；论文中的比较范围仍由这些模型和任务限定。[MrRoPE，ICLR 2026](https://proceedings.iclr.cc/paper_files/paper/2026/file/69413f87e5a34897cd010ca698097d0a-Paper-Conference.pdf)
 
-输出仍为 [2, 4, 8, 16]。工程代码要核对 position dtype、batch 广播、interleaved/half-split 排布、KV cache 追加位置和长位置精度。一个“能运行”的 RoPE 可能因为维度排列不同而与 checkpoint 不兼容。
+NeurIPS 2026 的 Jet-Long 则同时保留一个局部 RoPE 窗口，并为更远位置使用随当前长度变化的映射；其目标是在短输入上保持基模型的注意力规则，在长输入上扩展位置范围。作者在 Qwen 3 1.7B、4B、8B 上测到 $128\mathrm{K}$，并补充 LLaMA 3 8B 与后训练 Qwen 3 结果。论文中的 RULER、HELMET-RAG 和 PG-19 结果只支持相应 checkpoint 和测试设置。Jet-Long 还需要处理动态映射下缓存的历史状态；作者明确说明，对缓存 Key 做位置校正不会重算历史 hidden state 和 Value，因此保留缓存的解码不等同于在每一步重新处理整个前缀。状态细节留给第十一章，融合 kernel 的性能测量留给第二十章。[Jet-Long 原论文](https://arxiv.org/html/2607.07740)；[NeurIPS 2026 作者仓库](https://github.com/jet-ai-projects/jet-long)
 
-## 18.4 为什么短训长测会失败
+## 18.5 位置坐标之外：训练如何让模型适应长序列
 
-假设训练最大长度为 `L_train`，推理长度为 `L_test>L_train`。直接把 position id 递增到 `L_test` 会产生训练中没有出现的角度。常见现象包括 perplexity 上升、远处 token 相关性下降、重复、局部注意力异常和中间证据丢失。
+改位置映射解决的是模型收到什么位置信号；继续训练解决的是权重如何适应这些信号及长序列数据。两者常出现在同一扩展方案中，但应该分开记录。
 
-注意，修改位置公式只能解决坐标范围的一部分问题。模型还要在长样本上学习跨段任务、正确使用长距离证据，并让训练时的 attention mask、position reset 和推理 cache 一致。一个可以处理 `L_test` 的 kernel 不代表模型已经学会 `L_test`。
+Llama 3 技术报告是一个具体例子：它报告使用 RoPE base frequency $500{,}000$，并描述 Llama 3 405B 如何从 $8\mathrm{K}$ 开始分六个阶段扩到 $128\mathrm{K}$，长上下文训练阶段约使用 $800\mathrm{B}$ training tokens。报告用短上下文评测恢复和 needle-in-a-haystack 任务作为这次训练的适配判断。它说明公开的长上下文方案可以包含频率设置和大量继续预训练；它并未证明单独调整 base frequency 就产生了报告中的能力，也不是其他模型应照搬的训练预算。[Llama 3 技术报告，第 3.2、3.4.2 节](https://arxiv.org/html/2407.21783)
 
-## 18.5 位置插值与频率缩放
+LongRoPE2 将逐维因子搜索与长短上下文混合训练结合：长序列使用重缩放 RoPE，短序列使用原始 RoPE；其预印本在 LLaMA 3 8B 与 Phi-3 mini 3.8B 上评估。ICML 2026 的 Shuffle the Context 则不只选择一套缩放因子，而是扰动训练序列的 RoPE 索引形成不同位置视图，再用 self-distillation 约束预测一致性；论文报告的实验模型是 LLaMA 3 8B 和 Qwen 3 4B。[LongRoPE2 预印本](https://arxiv.org/html/2502.20082)；[Shuffle the Context，ICML 2026](https://proceedings.mlr.press/v306/li26cs.html)
 
-位置插值把长位置压回训练范围，例如：
+这些工作分别调整位置映射、训练长度分布和位置扰动下的训练目标。谈“支持 $128\mathrm{K}$”时，应同时问位置规则是否变化、权重是否更新、训练中出现了哪些长度，以及效果在哪些测试任务上测得；不要把模型配置的窗口数字与训练能力或任务表现混为一谈。
 
-~~~math
-p'=p\cdot\frac{L_{train}}{L_{test}}
-~~~
+## 18.6 怎样比较位置扩展方案与上下文声明
 
-频率缩放则调整 `\omega_i`，降低相位变化速度。二者都在改变模型看到的相对距离分布，可能保留长程稳定性，却牺牲近距离分辨率。实践中还可能配合少量长文本继续训练、分段损失或分层频率策略。
+下表比较的是方法改变的对象和证据关注点，不是排行榜。方法名称相同也不保证配置、训练过程或实现完全相同，必须回到具体论文与 checkpoint。
 
-这些公式是解释性抽象。具体 implementation 可能按维度、层或 attention 类型采用不同缩放，必须对照模型配置和代码，而不能只修改一个 `rope_theta` 就宣称复现了某论文。
+| 方法路线 | 主要变化 | 训练状态 | 需要核对的证据 |
+| --- | --- | --- | --- |
+| PI | 统一缩小位置坐标，所有频率共同压缩 | 论文中通过少量长上下文微调适配 | 原模型、扩展倍率、微调数据/步数、短上下文保持 |
+| NTK-aware / Dynamic NTK | 改变 RoPE base 或让缩放随当前序列长度变化 | 主要作为推理期位置规则 | 使用的具体配置、目标长度及动态规则是否兼容模型状态 |
+| YaRN | 按频率分段变化，并调整 attention 分数尺度 | 论文方案包含微调，也报告不微调设置 | 论文定义、模型实现、训练设置和评测长度要分开 |
+| LongRoPE / MrRoPE / Jet-Long | 逐维/逐位置搜索、mixed-radix 渐进映射，或局部/远程组合映射 | 具体路线从无微调推理到搜索/分阶段适配不等 | 固定 checkpoint、位置规则、缓存路径，以及同一任务和长度上的对照 |
+| 继续训练与位置训练 | 位置映射之外更新权重、混合长短序列或约束位置扰动下的一致性 | 需要报告训练数据、长度分布与计算预算 | 短上下文保留、长任务效果和结果是否绑定原实验条件 |
 
-## 18.6 NTK-aware scaling、YaRN 与 ALiBi 的位置
-
-NTK-aware scaling 的直觉是让不同频率维度以不同方式调整，使核函数在更长范围内保持较平滑的相似性。YaRN 组合了位置插值、频率处理和训练/温度方面的策略，目标是以较少额外训练扩展上下文。ALiBi 不加位置 embedding，而是把与距离成比例的偏置加入 attention score：
-
-~~~math
-s_{ij}=\frac{q_i k_j^\top}{\sqrt{d}}-m_h|i-j|
-~~~
-
-ALiBi 的 recency bias 使外推行为与 RoPE 不同。它们不是简单的“谁更先进”，而是不同 inductive bias。比较时应固定训练长度、模型规模、长程任务和 kernel。
-
-## 18.7 一个位置外推实验矩阵
-
-最小实验至少包含四个轴：训练长度、测试长度、证据位置和任务类型。比如训练 2K，测试 2K/8K/32K；把 passkey 放在开头/中间/结尾；再加入多证据合并和数字复制。
-
-~~~python
-def scaled_position(position, train_len, test_len):
-    return position * train_len / test_len
-
-
-for test_len in (2_048, 8_192, 32_768):
-    mapped = scaled_position(test_len - 1, 2_048, test_len)
-    print(test_len, round(mapped, 2))
-~~~
-
-这段代码只是展示插值关系。真实结果要从 logits、loss、exact match、引用准确率和吞吐中读出，不能凭位置映射值估计能力。
-
-## 18.8 位置与 KV cache 的契约
-
-RoPE 通常在生成时作用于新 query 和新 key。若 prefill 后继续 decode，新增 token 必须使用连续的 position id；prefix cache 复用时，缓存内容和起始位置必须匹配。多轮对话压缩、滑窗截断、streaming attention sink 和文档重排都会改变位置契约。
-
-常见 bug 是：恢复请求时 position 从 0 重新开始；对 K 做过一次旋转后又重复旋转；不同 tensor parallel worker 使用不同 position；batch 内 padding 把位置推进；或长上下文 scaling 只改了 query 没改 key。排查可以在固定短序列上比较逐 token logits，再逐步增加长度。
-
-## 18.9 训练稳定与精度问题
-
-长位置的 sin/cos 计算、半精度角度、超长 position id 和不同 GPU kernel 可能带来数值差异。角度过大时，低精度计算会放大误差；位置缩放后近邻频率又可能过于接近。要检查 cos²+sin²≈1、旋转前后范数、不同 dtype logits 差异和超长分桶 loss。
-
-位置机制还与 attention temperature、softmax 稳定、长样本 curriculum 和数据 packing 相互作用。只看短序列 loss 下降，不能说明长位置训练完成。
-
-## 18.10 位置方案的比较
-
-| 方法 | 位置进入方式 | 主要优势 | 主要风险 |
-|---|---|---|---|
-| Learned absolute | 加到 embedding | 简单、训练范围内直接 | 外推弱 |
-| Sinusoidal | 固定函数 | 无额外参数 | 长度和频率不匹配 |
-| RoPE | 旋转 Q/K | 相对位移自然、生态成熟 | 长位置相位外推 |
-| ALiBi | score 线性偏置 | 结构简单、recency 先验 | 任务/距离偏置可能过强 |
-| 插值/缩放 | 改位置映射或频率 | 可扩展现有 checkpoint | 近远程分辨率 trade-off |
-
-## 18.11 机制与边界：外推的真正问题是核和任务分布
-
-位置编码定义了不同位置表示的相似性核，但模型能力还由 attention 内容寻址、训练分布和层间传播决定。两个方法可能有相近的短文本 perplexity，却在精确检索、跨段推理和局部代码补全上表现不同。
-
-长上下文训练常需要同时调节：长样本比例、数据去重、loss 权重、位置分布、检索任务和 memory/compute budget。若只增加 `max_position_embeddings`，那通常只是接口层变化。评测需区分“模型在长输入上不崩”和“模型能在长输入中正确找到证据”。
-
-## 18.12 面试追问、误区与练习
-
-**问：RoPE 为什么能表达相对位置？**
-
-标准回答：对 query 和 key 按各自位置旋转后，二者内积中的旋转相对角与位置差有关，因此 attention score 同时含有内容相似性和相对位移信息。
-
-**问：把上下文窗口从 8K 改成 128K 就完成长上下文扩展了吗？**
-
-标准回答：没有。还要核对位置缩放/插值、长文本训练、mask、KV cache、精度、有效检索和跨段评测。接口上限只是必要条件。
-
-常见误区包括把 RoPE 的 theta 当成最大长度、混淆 interleaved 与 split-half 实现、只改 config 不改 kernel、把 YaRN/NTK scaling 当作同一算法，以及忽略缓存恢复的 position id。
-
-练习：在同一小模型上实现直接 RoPE、线性插值和 ALiBi，对 2K 训练/8K 测试的数字复制、局部 next-token 和中间证据任务做分桶评估。
-
-## 18.13 相位分辨率与长度外推
-
-RoPE 的不同频率维度承担不同时间尺度。高频维度能区分近邻位置，但周期更短；低频维度变化慢，适合远距离趋势，却可能缺少局部精度。长度扩展实际上是在分配这两类分辨率。
-
-可以把某个频率的角度写成：
-
-~~~math
-\theta_{p,i}=p\omega_i,\qquad
-\Delta\theta_{p,r,i}=(p-r)\omega_i
-~~~
-
-当相位差超出训练分布，模型可能出现混叠；当所有频率都被过度压缩，远处位置难以区分。位置外推的实验要同时看近距复制和远距定位，不能只看最大长度。
-
-## 18.14 从数学运行到任务可用
-
-把 position id 送进 kernel 并不证明 RoPE 扩展成功。应做四层验收：旋转数值与参考实现一致，mask 和 cache offset 正确，长度曲线不出现异常断点，长程任务的证据和引用通过验收。
-
-恢复和 prefix sharing 还要测：同一前缀一次性处理与分块处理的 logits 是否一致；同一 token 位置在不同 batch 排列中是否保持 position；模型升级后旧 cache 是否被拒绝。
-
-## 18.15 RoPE 外推的实验设计
-
-位置外推至少需要两个维度的对照。第一维是长度：训练长度、略超出长度和远超长度；第二维是任务：局部 next-token、远距复制、中间证据、相对距离判断和多轮 cache 恢复。只在长文本 perplexity 上变好，不能证明精确定位能力变好。
-
-对每个长度 L，记录：
-
-~~~math
-R(L)=\Pr(\text{exact answer}\mid L),\qquad
-\Delta_{\mathrm{cache}}(L)
-=\lVert y_{\mathrm{full}}-y_{\mathrm{chunk}}\rVert_\infty
-~~~
-
-前者是任务能力，后者是执行一致性。若任务指标下降而 cache 一致，可能是训练外推不足；若 cache 误差先出现，优先查 position offset、旋转实现或分页恢复。
-
-## 18.16 位置缩放与内容分辨率的交换
-
-RoPE 通过相位差把相对位置带入 Q/K 关系。缩放位置相当于重新分配相位变化速度：远距离位置更容易保持在训练分布附近，但近邻位置的分辨率可能降低。不同频率维度的影响并不相同，不能用一个“最大长度倍数”概括所有任务。
-
-长上下文训练还需要让数据分布真正出现远距离依赖。只修改位置函数而不提供长距离监督，模型可能接受长输入，却没有学会在远端寻找证据。这是接口上限、训练长度和有效能力之间的差别。
-
-## 18.17 RoPE 与 cache、并行和多模态
-
-在线服务要保存逻辑 position、segment、window offset 和模型 revision。prefix cache 命中时，复用的不只是 K/V 数值，还包括它们对应的位置语义；多模态 token 插入、图像 patch 数变化和分块视频采样都可能改变 position 序列。
-
-因此 position bug 往往表现为偶发的长文档错误、跨 chunk 变化或多模态时间错位。最小回归应覆盖一次性运行、chunked prefill、continuous batching、prefix sharing、量化和恢复。
-
-## 18.18 相位误差如何变成任务误差
-
-RoPE 对第 p 个位置的每个二维子空间施加与 p 成比例的旋转。若训练最大位置为 `L_train`，测试位置达到 `L_test`，外推方法实质上是在改变角度随位置的增长速度。低频分量可以提供长距离相对位置，高频分量则更容易在长位置上产生快速相位变化和分辨率损失。
-
-这解释了一个常见现象：模型可能在长上下文的主题总结上表现不错，却在精确位置、数字复制和两个相邻证据的顺序判断上退化。评估不能只测 perplexity，应加入位置交换、重复实体、跨段引用和数字精确匹配。
-
-## 18.19 外推实验要同时测长度和位置
-
-一个最小矩阵固定模型和 tokenizer，只改变最大长度、缩放策略、证据位置和任务类型：短训短测、短训长测、长训长测、随机位置、首尾位置、中间位置和跨段组合。每个格子报告 loss、needle recall、引用支持率、数字准确率、格式通过率、TTFT、KV 显存和 p99。
-
-如果某策略在 128K 的平均分提高，却让 8K 短任务下降，说明它改变了整个位置分布而非只补长尾；如果 loss 正常但中间位置失败，问题可能是有效检索而不是单纯位置外推。发布材料中的 context claim 只能作为测试入口，不能直接转成“可进行任意长程推理”。
-
-## 18.20 位置方案与 cache、并行和多模态
-
-位置编码不是只存在于一次前向中。增量 decode 需要 position offset 正确，prefix cache 需要绑定 position scheme 和模板，chunked prefill 需要保持块间位置连续，tensor/pipeline parallel 需要保证分片后的 position ids 一致。多模态模型还要定义图像 patch、音频帧和文本 token 如何共享或分离位置坐标。
-
-因此位置方案升级要做 token-level 和 logit-level golden replay。缓存命中、长输入、断点恢复、batch reorder、图片/音频占位和 speculative rollback 都要覆盖；只比较最终短文本无法发现位置偏移一位、EOS 错位或媒体 token 位置漂移。
-
-## 18.21 位置扩展的验收条件顺序
-
-长上下文位置方案不应一次性用大模型和长文档验收。先做数学单元测试：固定 `q`、`k` 和位置，比较参考旋转与实现旋转的最大误差；再做 cache 一致性测试：把同一输入一次性 prefill 和分块 prefill，比较每个位置的 logits；最后才做任务曲线和生产压测。
-
-```math
-e_rope = max over p,i of distance(R_impl(p,i), R_ref(p,i))
-```
-
-在分块路径中，若第一个 chunk 长度为 `u`，第二个 chunk 的 position 必须从 `u` 继续，而不是从 0 重置。prefix cache 还要绑定模型 revision、RoPE 参数、tokenizer/template 和媒体 processor；否则 cache 命中会把旧位置语义复用到新协议上。这个错误通常不会在短样本立刻暴露，却会在长文档中造成局部证据错位。
-
-## 18.22 一个可手算的外推例子
-
-设模型在 2K 上训练，测试长度为 8K。把一个关键数字放在 `p=1536`、`p=4096` 和 `p=7168`，其余 token 使用相同的干扰模板。直接外推、线性位置插值和频率缩放都跑三组任务：局部 next-token、精确复制和跨段引用。
-
-局部 next-token 可能在三种方案下都正常，因为它主要使用邻近 token；精确复制更容易暴露高频相位分辨率损失；跨段引用还会受到干扰和训练分布影响。若插值方案的复制率上升但局部任务下降，说明它在长短任务之间做了交换；若只有 cache 分块路径失败，则先修 position offset，不应把问题归因于模型外推能力。
-
-报告结果时至少分开：`R_local(L)`、`R_copy(p,L)`、`R_ground(p,L)`、cache logit error、TTFT 和峰值 KV。一个“支持 8K”的结论只有在这些指标和具体 prompt/harness 都写清楚时才有意义。
-
-## 18.23 从相位误差到检索失败的链路
-
-位置扩展的风险可以沿一条可测链路理解：位置公式改变角度，角度改变 query/key 的相对相位，相位改变 attention score，score 改变证据选择，最终表现为 recall、引用或多段推理下降。对某一频率 `omega_i`，位置误差 `Delta p` 造成的角度误差近似为：
-
-~~~math
-\Delta\theta_i=\omega_i\Delta p.
-~~~
-
-高频维度对位置误差更敏感，低频维度更容易覆盖长距离，但低频又可能降低近距离区分度。因而不能只测最长长度的平均 perplexity；应分别改变证据位置、长度、干扰数量和实体冲突，绘制位置—任务成功率矩阵。若中间位置和边界位置差异很大，问题可能是训练分布、attention bias、模板或 cache，而不只是 rope 参数。
-
-## 18.24 RoPE scaling 的实现契约
-
-长上下文配置至少包含 base/theta、频率缩放、位置插值、最大训练长度、最大推理长度、维度排列、层/维度策略和 KV cache position。把配置中的一个字段改大，不等价于复现某个 NTK-aware 或 YaRN 配方；不同实现可能同时改变频率、温度、训练数据和 attention 层行为。
-
-发布前要做三条路径对照：完整 prefill、增量 decode 和 chunked/恢复 decode。对同一个 prefix，保存每一步 position id、旋转后的 Q/K checksum 和 logits；如果只比较最终答案，采样噪声会掩盖位置错位。多模态模型还要单独定义图像 patch、视频帧和文本位置的坐标系，不能把媒体 token 随意接在文本 position 后就认为对齐正确。
-
-## 18.25 长上下文评估的最小矩阵
-
-一个有辨识力的矩阵至少包含：短/长长度，证据在开头/中间/末尾，单证据/多证据，独立实体/冲突实体，直接回答/引用来源，以及 full/streaming/cache restore。可以记录：
-
-~~~math
-A_{\mathrm{exact}}(L,p),
-\qquad
-A_{\mathrm{cite}}(L,p),
-\qquad
-E_{\mathrm{logit}}(L,p),
-~~~
-
-其中 `L` 是长度，`p` 是证据相对位置。`A_exact` 只说明答案对不对，`A_cite` 还要求来源和字段正确，`E_logit` 用于发现实现路径差异。对一个 1M claim，真正重要的不是单点能否放入请求，而是这些曲线在目标长度、成本和 p99 验收条件下是否仍然可用。
-
-## 18.26 RoPE scaling 和 NoPE 不能混为一谈
-
-没有显式 RoPE 或其他位置变换，不等于模型没有顺序信息。顺序可能来自 causal mask、训练数据中的排列统计、卷积/状态路径、token 内容和实现中的递推步数。NoPE 需要回答的是模型如何获得、保持和泛化顺序，而不是简单得出“没有位置编码”。
-
-因此比较 RoPE、ALiBi、NoPE 或混合位置方案时，应固定模型规模、数据、训练长度和 tokenizer，分别测试顺序交换、局部语法、远程复制、长上下文位置、cache restore 和多模态时间对齐。公开模型若没有披露完整位置实现，正文只能记录可观察行为和证据范围，不能用模型名称推断内部方案。
-
-## 18.27 公开证据与工程边界
-
-RoPE 原始论文、位置插值、NTK-aware scaling 和 YaRN 资料可以支持各自的公式与实验设定；具体模型的长上下文训练配方、位置实现、token budget 和 serving cache 要以该版本配置、技术报告和复现实验核对。一个位置方案在论文长度上有效，不等于在任意模型、任意任务和任意媒体输入上有效。
-
-## 18.28 小结
-
-RoPE 原始论文为 *RoFormer: Enhanced Transformer with Rotary Position Embedding*（https://arxiv.org/abs/2104.09864）；ALiBi 见 https://arxiv.org/abs/2108.12409。NTK scaling、YaRN 及各模型的长上下文方案应以对应论文、模型卡和实现版本为准。
-
-RoPE 的价值是把位置和内容寻址结合得很自然，但长上下文不是调一个数字。位置公式、训练长度、有效任务和 cache 契约必须一起通过验证。
+比较两种方案时，先锁定同一个 base checkpoint、tokenizer 和原训练长度，再核对目标位置怎样映射、是否更新权重、训练样本长度与 token 量，最后对齐任务、位置和指标。只在一份合成 needle 任务上成功，说明该任务条件下的检索结果；不能单独证明跨文档推理、长程代码理解或任意位置的信息使用。第十三章负责任务和位置敏感评测；第十一章、第十九章和第二十章分别处理 cache 状态、稀疏连接和 attention kernel。第六十四章、第六十七章与第七十二章讨论其他位置或顺序机制，不应与本章的位置缩放方法混为一类。

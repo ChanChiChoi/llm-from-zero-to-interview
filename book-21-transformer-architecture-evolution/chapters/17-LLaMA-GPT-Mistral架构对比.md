@@ -1,254 +1,76 @@
-# 第十七章：LLaMA、GPT、Mistral 风格架构对比
+# 17. LLaMA、GPT、Mistral 风格架构对比
 
-## 17.1 先分清“家族名”和“可观察结构”
+“GPT 用什么架构？”这个问题需要先补上版本。GPT-3 的论文公开了层数、宽度和注意力模式；GPT-4 技术报告说它是预测下一个 token 的 Transformer，却没有披露内部 block 规格；OpenAI 后来公开的 gpt-oss 又采用了 MoE、GQA 和局部/全局注意力组合。它们都叫 GPT，但不能据此认为内部结构相同。
 
-GPT、LLaMA、Mistral 既可以指一系列模型，也可以指一组常被复用的设计习惯。面试和工程讨论中最危险的说法是“某模型就是某家族，所以所有细节都一样”。公开资料通常只披露部分层结构、训练配方和推理接口；闭源模型更不应根据输出行为反推完整架构。
+LLaMA 和 Mistral 也一样。本章不把品牌名当作架构模板，而是用公开版本说明怎样读 block 选择、配置字段和证据边界。我们要回答的是“这个版本采用什么结构”，而不是“哪个家族更强”。
 
-更稳妥的比较方式是逐项记录：是否 decoder-only、位置机制、attention 的 Q/K/V 头数、FFN 激活、normalization、窗口或稀疏 mask、词表和 tokenizer、训练上下文、后训练模板以及 serving 支持。模型名字只是索引，结构字段才是证据。
+## 17.1 先问“哪一个版本”，再问“什么架构”
 
-## 17.2 三种风格的历史角色
+模型家族名通常包含多个时期、规模和用途不同的模型。比较之前，先锁定模型 ID、版本，以及它是基础模型还是指令微调版本。论文描述的方法、模型卡公开的配置、固定版本配置文件记录的字段，能支持的结论也不一样。
 
-GPT 系列把 decoder-only、自回归 next-token prediction 和规模化训练推到主流位置。它的核心价值是统一目标和大规模上下文学习；具体后续版本的内部细节不一定公开。
+以 GPT 为例，GPT-3 论文把 175B 模型描述为沿用 GPT-2 架构，特别指出层间交替使用密集注意力和局部稀疏注意力；报告还给出层数、隐藏宽度和注意力头数。GPT-4 技术报告只说明模型以预测文档下一个 token 为预训练目标，并能接收图像和文本输入；报告明确不提供架构、模型规模等细节，因此不能从 GPT-3 或产品表现反推出 GPT-4 的内部结构。[GPT-3 论文](https://arxiv.org/abs/2005.14165)；[GPT-4 技术报告](https://cdn.openai.com/papers/gpt-4.pdf)
 
-LLaMA 系列对开源生态的影响在于提供了一个可复现、可扩展的现代 decoder-only 基线。RoPE、RMSNorm、SwiGLU、更成熟的数据和训练 token 组合，被许多后续模型采用。
+gpt-oss-20b 则有不同的公开模型卡：它是 24 层的 MoE Transformer，每个 token 激活约 3.6B 参数，并采用 GQA 与局部/全局注意力交替。这个版本能用于讨论 OpenAI 公布的架构，但不能据此推断 GPT-4 或其他 API 模型也使用相同结构。[gpt-oss 模型卡](https://deploymentsafety.openai.com/gpt-oss/architecture)
 
-Mistral 7B 则把“同等参数下如何更高效”放到台前，公开资料明确讨论了 GQA 和 Sliding Window Attention。它说明模型能力不能只看参数量，attention 头共享、局部窗口、数据质量和训练配方都能改变实际表现。
+因此，读到“GPT 使用某种注意力”时，要继续追问来源指的是 GPT-2、GPT-3、gpt-oss，还是一个没有公开配置的产品模型。相同做法也适用于 LLaMA 与 Mistral。
 
-## 17.3 核心模块的共同骨架
+## 17.2 用同一张 decoder block 图确定比较坐标
 
-现代 decoder block 通常可以写成：
+本书第十六章已经说明，decoder-only 模型沿因果方向处理 token：当前层的表示经过注意力子层和前馈子层，再进入下一层。各版本常共享这个大体骨架，却可以替换或调整其中的部件。读模型卡时，下面这些坐标能帮助我们分清它们改了哪里：
 
-~~~math
-h' = h + \operatorname{Attn}(\operatorname{Norm}(h))
-~~~
+| 比较坐标 | 读配置时要问什么 | 它描述什么 |
+| --- | --- | --- |
+| 位置表示 | 位置向量加在什么位置，或位置关系怎样进入注意力？ | 模型怎样获得 token 顺序信息 |
+| 归一化 | 用什么归一化函数，放在子层之前还是之后？ | block 中激活值如何被规范化 |
+| 注意力头 | query heads 与 key/value heads 各有多少，是否分组共享？ | 注意力通道的组织方式及 KV 状态规模 |
+| 可见范围 | 每层读取全部前文，还是只读取局部窗口？不同层的规则是否不同？ | 当前表示能从哪些较早位置取得信息 |
+| 前馈子层 | 是普通稠密 FFN、门控 FFN，还是 MoE 专家层？ | 注意力之后怎样变换表示、是否按 token 路由到专家 |
+| 上下文相关字段 | 来源写的是训练序列长度、`context_len`、`max_position_embeddings`，还是 `sliding_window`？ | 这些字段各自描述的范围，不应被压成一个数字 |
 
-~~~math
-h_{\mathrm{out}} = h' + \operatorname{FFN}(\operatorname{Norm}(h'))
-~~~
+这些字段是比较工具，不是每个模型都必须填满的检查表。来源没有公开某个部件时，标记为未知比从家族名补全更可靠。归一化和注意力机制的细节分别见[第六章](06-residual-layernorm-rmsnorm-prenorm与训练稳定性.md)和[第四章](04-mha-mqa-gqa-mla的演进与trade-off.md)；本章只解释它们怎样帮助我们读具体版本。
 
-常见的 Pre-Norm 版本先做 RMSNorm，再进入 attention/FFN；部分模型的具体 residual、norm 放置和 bias 选择不同。RMSNorm 的教学形式为：
+## 17.3 位置、归一化与前馈子层：同一主干里的不同部件
 
-~~~math
-\operatorname{RMSNorm}(x)=\gamma\odot\frac{x}{\sqrt{\frac{1}{d}\sum_{i=1}^{d}x_i^2+\epsilon}}
-~~~
+GPT-2 的公开参考实现把 token embedding 与可学习的位置表相加，在注意力和 MLP 子层前使用 LayerNorm，MLP 使用 GELU。GPT-3 论文说明它沿用 GPT-2 架构，只有注意力模式是特别指出的例外。因此，把这些细节作为 GPT-3 公开设计基线，是由论文和参考实现共同支持的判断；它不代表后来的闭源 GPT 模型。[OpenAI GPT-2 参考实现](https://github.com/openai/gpt-2/blob/master/src/model.py)；[GPT-3 论文 §2.1](https://arxiv.org/abs/2005.14165)
 
-它不做均值中心化，计算路径更简洁。不能由“用了 RMSNorm”直接断言一定更稳定；稳定性还取决于初始化、学习率、残差缩放、精度和训练规模。
+原始 LLaMA 论文报告了另一组选择：在 Transformer 子层前进行预归一化，归一化函数采用 RMSNorm；前馈子层采用 SwiGLU；位置信息通过每层的旋转位置嵌入 RoPE 加入，而不是使用可学习的绝对位置表。Meta 后续的 Llama 3 技术报告称其仍是标准稠密 Transformer，并在公开的 8B 配置表中列出 SwiGLU、RoPE 与 GQA；表中 RoPE 基频为 500,000。Llama 3.1 官方模型卡另外列出 128K 上下文和 GQA。这里引用的论文表与模型卡各自对应不同的公开说明，不应把某个字段悄悄挪到所有 LLaMA 版本上。[原始 LLaMA 论文](https://arxiv.org/abs/2302.13971)；[Llama 3 技术报告](https://arxiv.org/abs/2407.21783)；[Llama 3.1 官方模型卡](https://github.com/meta-llama/llama-models/blob/main/models/llama3_1/MODEL_CARD.md)
 
-## 17.4 MHA、GQA 与 MQA 的实际差异
+Mistral 7B v0.1 也采用预归一化。它的固定配置记录 `rms_norm_eps=1e-5`、`rope_theta=10000` 和 `hidden_act=silu`；与之对应的 Transformers v4.34.0 参考实现显示，block 在 attention 与 MLP 子层前使用 RMSNorm，RoPE 作用于 Q/K，MLP 将 SiLU 门控分支与另一投影逐元素相乘。这里的实现核验只解释这一固定配置，不代表后续 Mistral 版本都使用相同组件。[Mistral v0.1 固定配置](https://huggingface.co/mistralai/Mistral-7B-v0.1/blob/93bc63fc98d90b891e2ab513e1ebb7480424cec3/config.json)；[Transformers v4.34.0 Mistral 实现](https://github.com/huggingface/transformers/blob/v4.34.0/src/transformers/models/mistral/modeling_mistral.py)
 
-设 query head 数为 `H_q`，KV head 数为 `H_{kv}`，每个 head 维度为 `d_h`。MHA 是 `H_q=H_{kv}`；MQA 近似为 `H_{kv}=1`；GQA 将多个 query head 绑定到一个 KV group：
+gpt-oss 的模型卡则明确记录了 RMSNorm、RoPE 和带 SwiGLU 激活的 MoE 前馈层。它仍使用 Transformer decoder 主干，但前馈子层不再是每个 token 都经过同一组稠密权重：路由器为 token 选择专家。专家路由机制见[第二十一章](21-MoE路线Switch-GShard-Mixtral-DeepSeek.md)，Dense 与 MoE 的训练/服务成本见[第二十二章](22-Dense与MoE训练服务trade-off.md)。
 
-~~~math
-g(h)=\left\lfloor\frac{h}{H_q/H_{kv}}\right\rfloor
-~~~
+位置编码决定模型如何把顺序线索放进计算，归一化和前馈子层则决定每层表示怎样变化。它们是可分别替换的设计点，不是“GPT”“LLaMA”这些名字自带的定义。RoPE 的位置关系与扩展方法见[第七章](07-position-encoding总览-sinusoidal-learned-relative-rope-alibi.md)和[第十八章](18-RoPE与长上下文位置外推.md)。
 
-每个 KV head 的历史 cache 大小近似为：
+## 17.4 MHA 与 GQA：看清 Q 头和 KV 头是否一一对应
 
-~~~math
-M_{KV}=2\cdot B\cdot T\cdot H_{kv}\cdot d_h\cdot b
-~~~
+注意力配置中，query heads 负责提出不同的查询；key 和 value heads 提供被查询的位置表示和值。MHA 为每个 query head 配有各自的 K/V head。MQA 让所有 query heads 共用一组 K/V。GQA 位于两者之间：先把 query heads 分组，每组共享一组 K/V。GQA 论文把这种中间方案作为降低 KV 状态读取量的设计，并在其特定的 T5 uptraining 实验中报告：GQA 的质量接近 MHA，速度接近 MQA。这个结果受实验配置约束，不等于所有 GQA 模型在所有硬件上都会达到同样的速度或质量。[GQA 原论文](https://arxiv.org/abs/2305.13245)
 
-其中 `2` 对应 K 和 V，`b` 是每元素字节数。GQA 在减少 cache 的同时，让不同 query head 共享历史表示，可能损失一部分表达自由度。它不是单纯“免费压缩”，需要在 perplexity、长程检索和真实 batch 上验证。
+配置里的头数能让这层关系变得具体。Llama 3 8B 和 Mistral 7B v0.1 的论文都列出 32 个 query heads、8 个 KV heads；按 GQA 分组时，每组对应 4 个 query heads。gpt-oss-20b 的模型卡列出 64 个 query heads、8 个 KV heads，每组对应 8 个 query heads。KV heads 少于 query heads，意味着不同 query 组复用同一组 K/V；它直接改变注意力的结构和缓存中的 KV 数量，但模型质量、实际吞吐仍受其他因素影响。
 
-## 17.5 SwiGLU 与 FFN 预算
+GPT-3 175B 论文列出 96 个注意力头，并称其架构沿用 GPT-2、只有 attention pattern 例外。GPT-2 参考实现为各个头分别生成 Q、K、V，因此可以把这两个来源合起来，将 GPT-3 公开基线视为 MHA 设计。这里是对指定公开版本的来源推断；它不能用于猜测未披露 GPT 模型的 KV 头数。KV cache 的容量计算与推理阶段影响由[第十一章](11-kv-cache长上下文推理和显存增长问题.md)主讲。
 
-普通 FFN 可以写成：
+## 17.5 Dense 与滑动窗口：局部窗口不等于总上下文
 
-~~~math
-\operatorname{FFN}(x)=W_2\,\sigma(W_1x)
-~~~
+注意力头的数量描述了通道怎样组织，可见范围则描述每层能从哪些 token 读信息。普通因果注意力允许位置查看全部较早 token。局部窗口注意力只开放附近一段位置。即使某层只看局部范围，上一层的表示也可能已经汇集更远处的信息；层层传递后，一个 token 的影响可以跨出单层窗口。它说明“局部可见”不等于“模型永远看不到窗口外的信息”，但这种间接传递不保证模型能可靠检索任意距离的内容。
 
-SwiGLU 形式常写为：
+Mistral 7B v0.1 论文给出的滑动窗口宽度为 4,096，模型有 32 层；论文据此报告约 131K token 的理论 attention span，同时在表格中把 `context_len` 列为 8,192。理论 span 描述信息在层间可能传播的最远范围，不等同于该版本训练和声明的上下文窗口。固定 revision 的官方配置还把 `max_position_embeddings` 写为 32,768，并单独记录 `sliding_window=4096`。这几个值来自不同字段与材料，不能把配置上限直接解释成已训练、已验证或可靠使用的上下文长度。[Mistral 7B 论文](https://arxiv.org/abs/2310.06825)；[固定 revision 的 Mistral 配置](https://huggingface.co/mistralai/Mistral-7B-v0.1/blob/93bc63fc98d90b891e2ab513e1ebb7480424cec3/config.json)
 
-~~~math
-\operatorname{SwiGLU}(x)=W_2\left(\operatorname{SiLU}(W_gx)\odot W_upx\right)
-~~~
+局部与全局层也可以交替。GPT-3 论文和 gpt-oss 模型卡都报告局部窗口与密集注意力交替；gpt-oss 的模型卡把局部带宽列为 128。全局层提供跨序列读取路径，局部层则限制该层的直接可见范围。Mistral 7B v0.1 论文使用的是滑动窗口设计，并报告在特定窗口、序列长度和经过修改的 attention 实现下的速度与缓存收益。这些收益是该论文的实验结果，不是仅凭“使用 SWA”就能推出的普遍结论。
 
-它引入 gate 分支和 up 分支，通常需要调整 hidden size，才能在参数/FLOPs 预算下公平比较。只看中间维度相同会误判成本，因为矩阵数量和投影形状都改变。
+LLaMA 的长上下文版本也显示，窗口、位置机制和训练长度必须分开看。Llama 3 的技术报告描述从原始 8K 上下文继续训练到 128K；Llama 3.1 官方模型卡列出 128K context length。长上下文的 RoPE 扩展、训练适配和评测边界详见[第十八章](18-RoPE与长上下文位置外推.md)。本章只要求读者辨认来源中的字段，不把一个最大数字当成模型能可靠利用所有位置的证据。
 
-## 17.6 用配置表而不是宣传语比较
+## 17.6 用版本化对照得出有限结论
 
-| 维度 | GPT 风格公开基线 | LLaMA 风格基线 | Mistral 风格公开基线 |
-|---|---|---|---|
-| 主体 | decoder-only | decoder-only | decoder-only |
-| 训练目标 | causal LM | causal LM | causal LM |
-| 位置 | 版本相关 | RoPE 常见 | RoPE + 局部窗口常见 |
-| KV | 版本相关 | GQA 等变体 | GQA |
-| FFN | 版本相关 | SwiGLU 常见 | SwiGLU 常见 |
-| 长序列 | 版本和服务相关 | 需外推/训练验证 | SWA 与全局路径取舍 |
-| 证据 | 官方技术资料 | 论文/模型卡 | Mistral 7B 论文 |
+下表把论文和模型卡中可核验的版本放在一起。它用来练习定位结构与辨认未知项，不构成质量或推理速度排名。
 
-表中的“常见”不是所有版本的事实。实际选型应把具体 revision、tokenizer、chat template、上下文和权重路径写入实验记录。
+| 指定对象 | 来源支持的结构事实 | 读取时要保留的边界 |
+| --- | --- | --- |
+| GPT-3 175B | 96 层、96 个注意力头；GPT-2 架构基线；层间交替 dense 与局部稀疏 attention；上下文窗口 2,048（[论文](https://arxiv.org/abs/2005.14165)） | GPT-2 参考实现可补充公开基线的可学习绝对位置、LayerNorm、GELU 与 MHA（[实现](https://github.com/openai/gpt-2/blob/master/src/model.py)）；不能推广到 GPT-4 等未披露模型 |
+| GPT-4 技术报告 | 说明 Transformer、自回归 next-token 预训练、图像/文本输入（[技术报告](https://cdn.openai.com/papers/gpt-4.pdf)） | 报告未披露 block 结构或模型规模；应记录为未知 |
+| gpt-oss-20b | 24 层 MoE；64 个 query heads、8 个 KV heads；RoPE；局部窗口与 dense 层交替（[模型卡](https://deploymentsafety.openai.com/gpt-oss/architecture)） | 模型卡列出 128K 上下文和 128-token 局部带宽；仅代表 gpt-oss 版本 |
+| Llama 3 / 3.1 8B | 论文列出 32 层、32 个 query heads、8 个 KV heads、SwiGLU、RoPE（[Llama 3 报告](https://arxiv.org/abs/2407.21783)）；官方 3.1 卡列出 GQA 和 128K context（[模型卡](https://github.com/meta-llama/llama-models/blob/main/models/llama3_1/MODEL_CARD.md)） | 论文表、3.1 卡和具体 config 是不同证据对象；引用时注明用的是哪一项 |
+| Mistral 7B v0.1 | 32 层、32 个 query heads、8 个 KV heads、4,096 窗口；论文表列 `context_len=8,192`（[论文](https://arxiv.org/abs/2310.06825)）；固定配置与 v4.34.0 实现记录 RMSNorm、RoPE 和 SiLU 门控 MLP（[配置](https://huggingface.co/mistralai/Mistral-7B-v0.1/blob/93bc63fc98d90b891e2ab513e1ebb7480424cec3/config.json)、[实现](https://github.com/huggingface/transformers/blob/v4.34.0/src/transformers/models/mistral/modeling_mistral.py)） | 固定配置另列 `max_position_embeddings=32,768`；不能将字段合并成同一“有效上下文” |
 
-## 17.7 一个 KV 预算计算器
+表中一个版本比另一个版本多了局部窗口、GQA 或 MoE，只能说明这些公开配置的结构不同。若要比较能力、质量或速度，还必须对齐模型规模、tokenizer、训练数据与训练配方、长上下文训练、后训练、软件和硬件、输入负载与评测协议。模型间的 benchmark 分数或单次吞吐差异不能单独证明某个 block 设计更优。
 
-~~~python
-def kv_cache_mib(batch, tokens, kv_heads, head_dim, bytes_per_value=2):
-    raw = 2 * batch * tokens * kv_heads * head_dim * bytes_per_value
-    return raw / (1024 ** 2)
-
-
-for name, kv_heads in (("MHA", 32), ("GQA", 8), ("MQA", 1)):
-    print(name, round(kv_cache_mib(8, 32_000, kv_heads, 128), 1), "MiB")
-~~~
-
-这段代码只估算一个层的 K/V；完整模型还要乘以层数，并考虑分页、对齐、量化 scale、临时 workspace 和多请求共享。它适合在设计评审时快速识别“权重能放下但 KV 放不下”的情况。
-
-## 17.8 Mistral 的滑窗和全局能力
-
-滑窗 attention 限制当前位置直接看的历史范围。它能降低每层的 attention 计算和 cache 需求，但远处证据要通过层间传播或特殊 global token 传递。一个深度为 `L`、窗口为 `w` 的粗略直接感受野可近似为 `Lw`，但这不是精确可用上下文，因为内容选择、残差和层间混合会改变有效路径。
-
-长文档任务如果需要随机访问任意位置，纯滑窗可能不够；如果数据高度局部、输入持续流动，滑窗可能是合理的带宽策略。评估应包括局部语言建模、远距复制和跨段问答，不能只看短 benchmark。
-
-## 17.9 训练与推理边界
-
-同一个架构在训练和 serving 中的瓶颈不一样。训练更关心激活、全序列 attention 和通信；推理更关心 KV cache、decode 带宽、batch、tokenizer 和模板。GQA 对推理 cache 直接有利，但训练质量可能需要更多数据或不同 head 配置；SWA 减少访问范围，却要求 kernel 和 mask 实现一致。
-
-模型对比还要控制后训练。一个强大的 instruction tuning 或 reasoning recipe 可能掩盖 base architecture 的差异；如果要回答“架构贡献是多少”，需要同数据、同 token、同后训练预算的消融。
-
-## 17.10 常见失败模式
-
-最常见的错误是把“LLaMA-like”写成完整架构事实；把 Mistral 的 SWA 误写成所有版本都只看局部；把 GQA 的 KV head 数和 query head 数混淆；只比较参数量不比较 active FLOPs；把模型卡的上下文上限当作有效长程能力；以及把 API 兼容当作 tokenizer/模板兼容。
-
-排查时先打印 config、tokenizer special tokens、position ids、attention mask 和实际 batch shape。再用同一 prompt 测 greedy logits、一致性和 cache 命中；最后才对 benchmark 差异做结构解释。
-
-## 17.11 机制与边界：比较应落到 Pareto 前沿
-
-架构选择可以看成多目标优化：
-
-~~~math
-\max\; Q(\text{quality}),\qquad
-\min\; (M_{KV},T_{\mathrm{latency}},C_{\mathrm{train}},C_{\mathrm{serve}})
-~~~
-
-没有一个模型在所有目标上同时最优。GQA、SWA、SwiGLU、RoPE 都是具体预算下的取舍。若部署是低并发短 prompt，KV 压缩的收益可能小于 kernel 兼容性；若是高并发长对话，KV 和调度可能比单 token FLOPs 更重要。
-
-## 17.12 面试切入点与资料范围
-
-**问：为什么 GQA 常被认为是 MHA 和 MQA 的折中？**
-
-标准回答：它让多个 query head 共享一个 KV group，减少 KV cache 和读取带宽，同时比单组 MQA 保留更多独立 K/V 表达；最终质量和速度要用同一模型族、同一硬件及真实 workload 验证。
-
-**问：比较 LLaMA 和 Mistral 时最少看哪些字段？**
-
-标准回答：decoder block、norm、RoPE、Q/K/V head 数、窗口/稀疏 mask、FFN、训练长度、tokenizer、后训练模板和 serving kernel。只看参数量或模型名字不够。
-
-练习：选两个公开模型，读取 config 并填出上述字段；用第 17.7 节计算理论 KV，和实际显存 profile 对比，解释差值来自哪里。
-
-LLaMA 可参考 https://arxiv.org/abs/2302.13971；Mistral 7B 的公开架构说明见 https://arxiv.org/abs/2310.06825；GPT-3 的 decoder-only 与 ICL 背景见 https://arxiv.org/abs/2005.14165。闭源 GPT 版本的未披露结构不要用家族名推断。
-
-## 17.13 用同一资源表比较模型
-
-比较 GPT-like、LLaMA-like 和 Mistral-like 模型时，建议把配置与系统指标放在同一张表：
-
-~~~text
-layers
-hidden_size
-attention_heads
-kv_heads
-ffn_type
-position_scheme
-context_training_length
-total_parameters
-active_parameters
-kv_bytes_per_token
-~~~
-
-再追加实际的 prefill tokens/s、decode tokens/s、TTFT、TPOT、p99 和任务质量。结构上的 GQA 或滑窗只有在这些资源指标中才有可验证的含义。
-
-## 17.14 差异来自模块还是训练配方
-
-若两个模型配置相近，能力差异可能来自数据、token 数、去重、优化器、学习率、后训练和评测污染。要证明某个模块带来收益，需要在相同基座上做 controlled ablation，而不能把不同公司的完整模型直接当作模块实验。
-
-一个合格的对比至少包括原始模型、替换模块、相同训练 token、相同 tokenizer、相同解码和同一任务集。否则结论应写成“模型系统表现不同”，而不是“模块 X 证明更好”。
-
-## 17.15 配置差异如何传导到显存
-
-对 decoder-only 模型，单层 KV cache 的粗略字节数可写成：
-
-~~~math
-M_{\mathrm{KV/layer}}
-\approx 2T H_{\mathrm{kv}}d_h b
-~~~
-
-其中 T 是已处理 token 数，H_kv 是 KV head 数，d_h 是 head dimension，b 是每个元素的字节数。GQA/MQA 通过减少 H_kv 降低 cache，而不会直接减少 query head 数。滑窗则限制一部分层的有效 T，但可能需要 global 层或检索补偿。
-
-这类公式能把架构配置和系统指标接起来。两个模型参数量相近，若 KV heads、位置策略、窗口和 dtype 不同，长上下文并发能力可能完全不同。
-
-## 17.16 品牌比较要拆成可复现实验
-
-GPT、LLaMA 和 Mistral 不是三个单一固定结构，而是一组随版本变化的模型家族。比较时要先锁定 checkpoint、revision、tokenizer 和 prompt template，再把 attention、FFN、position、context training 和后训练单独列出。
-
-若使用闭源模型，公开资料通常只能支持接口、上下文声明、评测条件和产品行为，不能支持未披露的层数、专家路由或训练 recipe。技术判断应写成“公开资料显示”或“实验观察到”，不应把架构猜测当作事实。
-
-## 17.17 从架构选择到部署选择
-
-小模型、高吞吐和低延迟场景可能偏好滑窗、GQA、量化和成熟 kernel；复杂多证据任务可能更重视 full attention、长上下文训练和引用能力。Mistral 类高效设计的价值不只是某个窗口公式，而是把模型规模、训练配方和 serving 目标一起设计。
-
-面试中可以用 Pareto 语言总结：固定质量验收条件后比较显存和延迟，固定成本约束后比较任务质量，再把迁移、生态和故障恢复纳入长期决策。这样不会把品牌名变成未经条件限定的排名。
-
-## 17.18 用配置表把比较落到可计算对象
-
-比较 LLaMA、GPT 或 Mistral 风格模型时，至少记录层数 `L`、hidden size `d`、query/KV head 数、head dimension、FFN 中间维度、词表、上下文、位置方案、归一化、激活、MoE 配置、dtype 和 tokenizer。只写家族名会把架构事实、训练配方和产品能力混在一起。
-
-对单层 decode，KV payload 的教学估算为：
-
-```math
-M_{\mathrm{KV}}
-\approx 2BTH_{\mathrm{kv}}d_hb
-```
-
-GQA/MQA 通过降低 `H_kv` 改变缓存和带宽压力；它不会自动提高知识质量。SwiGLU、层数和 hidden size 则影响参数量、FLOPs 和表达能力。比较时要把“更省 KV”与“更强模型”分开测量。
-
-## 17.19 模块差异和训练配方如何拆开
-
-一个模型分数领先，原因可能来自数据量、数据质量、继续预训练、指令数据、RL、长上下文 curriculum、tokenizer 或评估协议，而不只是 attention/FFN 结构。公平对照需要固定参数规模、训练 token、数据混合、优化器和上下文预算，或者明确这是端到端系统比较而不是架构消融。
-
-对公开闭源模型，通常只能确认发布材料明确披露的结构和能力，不能把社区反推的层数、训练 token 或内部 router 当成事实。对开源模型，也要绑定 commit、config、权重 revision 和 tokenizer；同名模型的不同量化和 chat template 可能不是同一个实验对象。
-
-## 17.20 从架构选择到部署选择
-
-选择 GQA、MQA、滑窗或 MoE 时，服务目标同样重要。低延迟短输出可能受 decode 带宽主导，长 prompt 批处理可能受 prefill 计算主导，多租户 Agent 还要考虑 prefix cache、工具事件和 KV 增长。应把质量、显存、吞吐、p99、故障回退和模型协议一起放进决策矩阵。
-
-一个模型若需要自定义 kernel 或特殊 tokenizer，迁移到普通 serving runtime 的成本可能超过它在单卡 benchmark 上的收益。架构比较最终要落到 Pareto 前沿：在目标硬件、任务和 SLO 下，哪些方案没有被另一方案同时在质量、成本和可靠性上压倒。
-
-## 17.21 一个可计算的模型架构账本
-
-比较模型家族时，最好把每个结论写成一条可复核的账。以单请求 decode 为例，先从配置得到每 token 的 KV payload：
-
-```math
-m_kv_per_token = 2 L H_kv d_h b
-```
-
-再把上下文长度、并发和可用显存代入：
-
-```math
-M_kv_total = B T m_kv_per_token + M_metadata + M_slack
-```
-
-如果 Mistral 风格模型使用滑动窗口，不能简单把 `T` 全部替换成窗口大小。需要知道哪些层是局部的、是否存在 global token、prefix cache 是否能跨窗口复用，以及工具结果是否会触发全局回看。LLaMA 风格的 GQA 可以直接减少 `H_kv`，但质量变化仍需要同一训练预算下的消融。GPT 风格的闭源模型如果没有公开 `H_kv`，只能记录未知，不能从 decode 速度反推唯一结构。
-
-一个完整的账本还要包括 tokenizer、上下文训练长度、chat template、量化、kernel、硬件、采样和评测 harness。只要其中一项不同，最终的 tokens/s 或 benchmark 分数就不再是纯架构比较。书写时应把“可观察的配置事实”“在当前环境测到的现象”和“由结构推断的假设”分成三列。
-
-## 17.22 从模块差异到任务失败模式
-
-架构选择的价值最终要通过失败类型体现。GQA/MQA 主要影响 KV 读取和缓存容量，可能在长输出高并发时改善吞吐，却不一定解决复杂推理；滑动窗口主要改变远距离信息路径，可能让局部代码补全更便宜，却在跨文件引用上需要 global token 或 RAG；SwiGLU/FFN 影响 token 内变换和参数预算，不能直接解释所有长上下文能力。
-
-因此，实验要按任务切片：局部 next-token、远距数字复制、跨段引用、工具 JSON、长输出 decode 和混合长度压测。若质量只在跨段引用下降，应优先查窗口和位置；若质量保持而 p99 下降，应查 cache/调度；若小模型在短任务胜出而长任务失败，可能是训练数据或上下文 curriculum，不应把结果简化为“某家族架构更强”。
-
-## 17.23 迁移成本也是架构成本
-
-一个模型在论文或单卡 benchmark 上占优，不等于它能低成本迁移到现有服务。自定义 tokenizer、chat template、RoPE 变体、KV layout、MoE dispatch、量化格式和 speculative draft 接口都可能需要 engine 适配。适配工作还包括 golden logit、prefix cache key、streaming stop reason、监控字段和回滚 artifact。
-
-可以把迁移决策写成：
-
-```math
-U_migrate = Delta_Q - lambda_1 Delta_C_serve
-             - lambda_2 C_adapter - lambda_3 R_unknown
-```
-
-`Delta_Q` 是在目标任务上的质量变化，`C_adapter` 是适配和维护成本，`R_unknown` 是公开资料不足或实现未验证带来的风险。它不是财务模型，而是防止选型只盯着参数和榜单。对闭源模型，应把协议限制、速率限制、数据保留和供应商切换成本一起记入账本。
-
-## 17.24 小结
-
-GPT 提供统一生成目标和规模化主线，LLaMA 形成现代开源 decoder 基线，Mistral 把高效 attention 与小模型性能推向工程实践。真正可迁移的知识不是记住品牌，而是能从 head、position、FFN、mask、训练和 serving 预算解释每个设计的收益和代价。
+实际阅读模型架构时，可以按这样的顺序推进：先锁定模型名、版本和来源；再把位置表示、归一化、头数、可见范围与 FFN 对齐；对每个字段确认它的定义和适用版本；最后把来源明确写出的事实与自己的推断分开。家族名帮助我们找入口，具体版本和公开证据才支持架构结论。GPT 谱系的变化见[第五十一章](51-GPT-decoder-only-scaling-ICL.md)；注意力变体、归一化、位置机制、KV cache 与 MoE 的完整解释分别见本册[第四章](04-mha-mqa-gqa-mla的演进与trade-off.md)、[第六章](06-residual-layernorm-rmsnorm-prenorm与训练稳定性.md)、[第七章](07-position-encoding总览-sinusoidal-learned-relative-rope-alibi.md)、[第十一章](11-kv-cache长上下文推理和显存增长问题.md)、[第十八章](18-RoPE与长上下文位置外推.md)、MoE 路由和 Dense/MoE 成本的[第二十一章](21-MoE路线Switch-GShard-Mixtral-DeepSeek.md)/[第二十二章](22-Dense与MoE训练服务trade-off.md)，以及小模型和端侧效率的[第二十三章](23-小模型边缘模型与高效Transformer.md)。

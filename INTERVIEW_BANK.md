@@ -823,9 +823,9 @@
    考察点：序列概率、联合概率、条件概率分解。
    回答框架：语言模型为 token 序列分配概率；自回归模型用链式法则分解为 `∏ P(x_t | x_{1:t-1})`。
 
-6. 为什么 GPT 使用 next-token prediction？
-   考察点：自监督、训练目标和生成过程一致、可扩展性。
-   回答框架：文本天然提供标签，目标简单统一，适合大规模预训练，并且和自回归生成一致。
+6. 为什么 GPT 使用 next-token prediction？这能说明 decoder-only 哪些优势，又不能证明什么？
+   考察点：从 token 序列构造监督、训练目标与生成接口的衔接、架构与目标的区别、跨任务证据边界。
+   回答框架：文本序列中的真实后继 token 可作为自监督目标；decoder-only 用同一条因果主干处理前缀和续写，因而能把多种生成任务表示成不同的上下文格式。它解释了通用生成接口为何适合规模化使用，但不能证明 next-token 目标或 decoder-only 在所有任务上都更好；encoder-decoder 和非因果目标在具体配方与任务下也能表现出优势。参见[第二十一册第十六章](book-21-transformer-architecture-evolution/chapters/16-Decoder-only与通用LLM.md)。
 
 7. 训练和推理有什么区别？
    考察点：label、teacher forcing、并行训练、逐 token 生成、decoding。
@@ -919,8 +919,8 @@
    回答框架：在常见等宽 MHA 且总投影宽度固定时，Q/K/V/O 的总投影参数量通常不因 head 数本身而变；head 数增加会增加并行读取权重组并减小每头宽度。各 head 是独立学习的投影，不是把隐藏维度硬切成互不重叠的语义块。固定总 K/V 宽度时，单独增加 head 数也不意味着 KV cache 必然变大。
 
 31A. Transformer 为什么能成为大模型基础架构，而不是 RNN、CNN 或 SSM 直接胜出？
-   考察点：route score、training parallelism、content routing、next-token prediction、scaling evidence、ecosystem readiness、deployment pressure。
-   回答框架：先承认没有单一架构在所有指标上最优。RNN/LSTM 有状态和流式优势，但训练并行性弱、远距离路径长；CNN 并行和硬件友好，但内容相关路由不如 attention；SSM/Mamba-like 路线长上下文和状态效率强，但大规模通用 LLM、ICL、生态和迁移证据仍需积累。Transformer 胜在 self-attention 一跳内容路由、训练时可并行、decoder-only + next-token 目标统一、scaling law / GPT-3 / Chinchilla / LLaMA 等证据充分、训练推理生态成熟。代价是 `O(T^2)` attention、KV cache 和流式状态压力，所以后续才有 GQA/MLA、FlashAttention、PagedAttention、sliding window、SSM 和 hybrid 架构。
+   考察点：局部连接、递归状态、内容相关位置交互、训练与生成的计算路径、论文证据范围。
+   回答框架：先说明不同架构把不同结构写进了计算：卷积提供局部窗口与跨位置共享；RNN/SSM 沿序列更新状态；Transformer 让当前位置按内容交互 mask 允许的位置。标准 Transformer 的训练能并行计算多个序列位置，但不能据此说所有 SSM 训练都必须逐 token 串行；S4 可用卷积表示完整序列，Mamba 的选择机制使用并行 scan，生成时则仍需更新状态。Vaswani 等人的原论文报告两项机器翻译任务及其模型/系统设置，不能单独证明任意任务、硬件或现代模型的总体胜出。比较时固定任务、状态/缓存表示与实现条件，再谈内容访问、局部性、流式处理、训练成本和生态；细节见第二十一册第十四章及第九、三十、四十二章。
 
 31B. 如何从信息路由角度审计 Self-Attention 是否可靠？
    考察点：Q/K/V、attention score、softmax、causal mask、route hit、future leak、lost-in-the-middle、interpretation boundary。
@@ -983,12 +983,100 @@
    回答框架：负载均衡损失把 token 分配比例和 router 平均概率拉向均衡，主要控制 expert 使用分布；router z-loss 惩罚 router logits 的 log-sum-exp，主要降低低精度指数运算的数值不稳定，不负责均匀分流。DeepSeek-V3 按 batch expert load 动态调整 routing bias，但 gate 权重仍取未加 bias 的 affinity；报告还用 sequence-wise 辅助损失限制单条序列的极端偏斜。因此要分别看 token counts/overflow、router logits 与 z-loss、每序列 expert 分布、all-to-all 时间和最终任务质量。
 
 31Q. 为什么 MoE 的“active parameters”不能单独预测实际速度？
-   考察点：总权重驻留、top-k expert FLOPs、容量丢弃、all-to-all、设备拓扑、batch 与尾延迟。
-   回答框架：active 参数只是每 token 被调用的权重近似；推理或训练还要考虑全部 expert 权重是否驻留、token 到 expert 的 dispatch/combine、负载偏斜、batch padding/capacity、跨节点网络和 kernel 利用率。Switch、GShard、DeepSeek-V3 的结论来自不同任务、硬件和并行方案，不能用论文参数或单个 active 参数数字直接推算本地吞吐。应固定输入输出 token、batch、并发和设备拓扑，分别测 tokens/s、P95/P99、显存、overflow、每 expert 负载和通信时间。
+   考察点：训练里的稀疏计算与全模型状态、通信关键路径；服务里的权重驻留、prefill/decode、KV 与 SLO。
+   回答框架：active 参数近似描述每 token 经过的参数路径，不代表完整训练或服务成本。训练还要处理所有参数的模型/优化器状态、路由负载、expert kernel、buffer、通信与 checkpoint；系统能重叠通信时可减少暴露等待，却不会自动减少数据量。服务还要看完整 expert 权重放在哪里、是否 offload、prefill/decode 的 expert batch、attention KV 和目标延迟。性能结论须绑定模型、硬件、精度、runtime、负载及测量分母，不能从 active 数字换算成通用吞吐。
 
 31R. 为什么 active KV payload 和 prefix-cache working set 不能用同一个容量数字？
    考察点：活动请求状态、可复用前缀、trace、淘汰策略、coverage、分页槽位和租户隔离。
    回答框架：active KV 保存当前请求继续生成所需的状态，先按活跃请求的真实上下文和每 token 字节数估算，再加 block 尾槽与元数据；prefix working set 则按请求 trace、前缀重合、LRU 等策略和目标 coverage 估算未来复用所需的驻留量。两者的时间范围、淘汰语义和分母不同；KVSET 的 request coverage 也不等同于普通 request hit rate。多租户场景还要先确定授权命名空间，不能为了扩大 hit rate 取消 cache salt 或权限边界。
+
+31S. 为什么不能用“GPT”“LLaMA”或“Mistral”家族名直接回答模型采用什么 block？
+   考察点：具体模型 ID / revision、论文与模型卡的披露边界、配置字段语义、事实与实现推断。
+   回答框架：先固定对象和来源。GPT-3 论文公开其特定架构基线，GPT-4 技术报告没有披露 block 规格，gpt-oss-20b 的公开模型卡又列出自己的 MoE/GQA 结构；不能把 GPT-3 或 gpt-oss 的字段迁移给 GPT-4。Llama 3 报告与 Llama 3.1 模型卡也应按各自版本引用。Mistral 7B v0.1 的论文 `context_len`、固定配置的 `max_position_embeddings`、滑窗宽度和理论信息传播跨度代表不同量；Transformer v4.34.0 的实现细节只能解释被核对的配置，不能推广到整个家族。来源未披露时写“未知”，跨模型 benchmark 也不能单独归因某个 block 更优。配套正文：[第二十一册第十七章](book-21-transformer-architecture-evolution/chapters/17-LLaMA-GPT-Mistral架构对比.md)。
+
+31T. 模型配置写着 $128\mathrm{K}$ context，是否说明它能可靠使用 $128\mathrm{K}$ 上下文？
+   考察点：配置上限、训练序列长度、位置映射和任务级有效上下文的区别；位置缩放与权重适配；证据条件。
+   回答框架：不能只凭配置字段下结论。PI 把推理位置映回训练区间，YaRN 等方法重新分配频率变化，但映射可计算不等于权重已学会处理更长序列；继续训练和位置扰动训练又改变了适配路径。应固定 checkpoint、原训练长度、位置规则、训练数据与 token 量，再看不同长度、证据位置和任务上的结果及短上下文保持。结论只覆盖实际评测的模型和任务，配置长度本身不是通用能力证明。配套正文：[第二十一册第十八章](book-21-transformer-architecture-evolution/chapters/18-RoPE与长上下文位置外推.md)。
+
+31U. Sliding-window attention 如何传递窗口之外的信息？
+   考察点：单层直接可见集合、跨层信息路径、Longformer/BigBird pattern，以及结构可达性与实际质量的区别。
+   回答框架：窗口宽度 $W$ 表示本层可读 token 总数并包含当前位置，causal 位置 $i$ 只能直接读取最近的 $W$ 个位置。较早 token 的信息可以先进入邻近位置的 hidden state，再沿后续层的窗口边继续传播；这只是可能路径，不保证细节保留或任务正确。Longformer 原论文的 task-global 规则服务于双向长文档任务，不能直接照搬进 causal decoder；BigBird 加入 random、local、global 三类边，理论表达性不等于给定模型质量或目标硬件速度。配套正文：[第二十一册第十九章](book-21-transformer-architecture-evolution/chapters/19-Sliding-Window与稀疏注意力.md)。
+
+31V. decode 时 query 行很少、历史 K/V 很长，Flash-Decoding 怎样增加并行度？它与 FlashAttention、PagedAttention 分别改变什么？
+   考察点：并行轴、分段 softmax 统计归并、attention 可见集合、KV 物理映射与测量边界。
+   回答框架：Flash-Decoding 沿 K/V 序列拆分工作，让多个分段并行计算局部 attention，再按各段的 log-sum-exp/softmax 统计合并输出；这增加一个归并步骤，但保留同一可见 key 集合。FlashAttention 主要减少 dense attention 中间矩阵的 HBM 往返，PagedAttention 通过 block table 管理 KV 的物理映射；它们可在不同层面组合。具体收益要分开看 kernel latency、KV 占用与端到端吞吐/延迟，并固定硬件、shape、dtype 和实现版本。配套正文：[第二十一册第二十章](book-21-transformer-architecture-evolution/chapters/20-FlashAttention与PagedAttention.md)。
+
+31W. GShard、Switch、Mixtral 与 DeepSeekMoE 分别改变了 MoE FFN 路由或 expert 结构的哪一部分？为什么不能从这些论文直接推出哪种路线普遍更快、或 expert 已分别成为数学/代码专家？
+   考察点：GShard top-2 变体与自动分片、Switch top-1、Mixtral 每层 8 个 FFN expert/top-2、DeepSeekMoE 的细粒度切分与 shared expert；架构机制和实验边界。
+   回答框架：按原始论文报告，GShard 的 top-2 变体与 XLA 自动分片系统共同出现在大规模多语翻译设置；Switch 简化到每 token 一个 expert；Mixtral 8x7B 每层有八个 FFN expert、每 token 选两个；DeepSeekMoE 在对应架构中把 routed FFN 切得更细并固定激活 shared expert。它们不是统一模型、数据和硬件上的控制实验，不能按路线名排序速度。expert 是在 hidden features 上学习到的变换，路由频率不等于稳定语义分工；要看作者定义、消融和任务证据。MoE 的详细成本选择见第二十一册第二十二章。配套正文：[第二十一册第二十一章](book-21-transformer-architecture-evolution/chapters/21-MoE路线Switch-GShard-Mixtral-DeepSeek.md)。
+
+31X. 怎样判断一项 Dense/MoE 结果真正比较了结构成本，还是只比较了各自的系统配置？
+   考察点：相同训练预算与相同质量目标两类问题、训练/serving 分母、模型与系统共设计、证据适用范围。
+   回答框架：先说明问题是在相同训练资源下比较质量，还是在相同质量下比较训练成本；服务侧再固定任务质量、输入/输出分布、并发、量化、硬件、runtime 和延迟 SLO。DeepSeek-V3 报告的官方训练 GPU 小时不含此前架构/算法/数据研究与消融，且没有同质量 Dense 对照；MegaBlocks 的同验证损失速度结果绑定其小中型模型、A100、top-1 路由和 block-sparse 实现。两者能说明系统设计会改变结果，不能拼成 MoE 架构的普遍优势。配套正文：[第二十一册第二十二章](book-21-transformer-architecture-evolution/chapters/22-Dense与MoE训练服务trade-off.md)。
+
+31Y. 参数共享、GQA 与 INT4 分别改变哪些端侧成本？怎样判断它们适不适合目标设备？
+   考察点：唯一权重与重复计算、KV heads 与 KV 读取、数值精度和算子支持；模型质量与设备测量边界。
+   回答框架：相邻 block 共享可以减少唯一权重存储和搬运，但仍会重复执行该 block；GQA 减少 KV heads，影响 KV 状态与 decode 读取，不会自动缩小 FFN 权重；INT4 改变权重表示，实际收益还取决于精度损失、元数据、runtime 和目标硬件是否有合适算子。端侧判断要固定任务质量、模型版本、输入/输出负载、芯片、runtime/kernel，再分别看文件体积、峰值运行内存、prefill、decode 和能耗。MobileLLM 的 iPhone 13 profile、Gemma 3n 的官方结构说明和 MobileMoE 的特定手机/自定义算子测试不能互相替代，也不能推出任意手机上的普遍结论。配套正文：[第二十一册第二十三章](book-21-transformer-architecture-evolution/chapters/23-小模型边缘模型与高效Transformer.md)。
+31Z. Linear Attention 怎样把因果 attention 改写为固定形状的递推状态？推导时为什么必须同时累计分子与归一化分母？说明精确重排依赖什么 kernel 假设、何时它才等于 softmax attention，并分别解释训练前缀计算和逐 token 解码的成本边界。
+31AA. Performer 与第 24 章所讲的 Linear Transformer 在“线性”来源上有什么区别？说明 FAVOR+ 中正值特征和正交随机方向分别做什么，为什么 softmax kernel 估计无偏并不推出归一化 attention 输出无偏；再比较论文的正值 ORF MSE 结论、带范数条件的三角 ORF 矩阵收敛结论和 FlashAttention 的计算目标。
+   考察点：有限特征内积、结合律、$S_t/z_t$ 状态、固定特征宽度、精确代数与 softmax 近似的区别。
+   回答框架：若 $K(q,k)=\phi(q)^{\mathsf T}\phi(k)$，可把 key/value 外积前缀和与 key 特征前缀和分别累积，再由 query 读取；缺少第二项就无法保留行归一化。重排只对所选 kernel 精确，只有该 kernel 本身等于指数点积时结果才是标准 softmax；固定 $r,d_k,d_v$ 时核心工作关于序列长度线性，但训练反向的存储、投影和硬件效率仍取决于实现。配套正文：[第二十一册第二十四章](book-21-transformer-architecture-evolution/chapters/24-Linear-Attention基本思想与核技巧.md)。
+31AB. 稀疏 mask 中有很多零，为什么 GPU 仍可能执行大部分对应的矩阵 tile？说明一个 block 何时才能整体跳过，以及 block size 如何同时影响块内多算、索引开销和硬件利用率。再区分动态 router 的候选评分、索引构建与主 attention；即使主 attention 对选中块计算正确，为什么仍不能据此宣称等于 dense attention 或端到端更快？配套正文：[第二十一册第二十六章](book-21-transformer-architecture-evolution/chapters/26-稀疏与块稀疏Attention.md)。
+31AC. Reformer 怎样用 LSH 将 attention 候选限制在排序后的 bucket/chunk？多轮 hash 改变什么，为什么结果仍是 full attention 的近似？再说明 reversible residual 与 FFN chunking 分别改变训练中的哪类激活内存，以及它们为何不能合并成一个 $O(L\log L)$ 的 attention 复杂度结论。配套正文：[第二十一册第二十七章](book-21-transformer-architecture-evolution/chapters/27-Longformer-BigBird-Reformer.md)。
+31AD. 为什么 FlashAttention 提高 dense attention 的 IO 效率，却没有消除其随序列长度平方级增长的配对计算？比较 FlashAttention、稀疏 attention 和线性/核 attention 分别改变的数据路径、可见连接或计算算子；再说明 KV cache 压缩解决的是什么成本，以及哪几类方法可以组合。最后指出为什么不能只凭渐近复杂度给出跨任务、跨硬件的替代结论。配套正文：[第二十一册第二十八章](book-21-transformer-architecture-evolution/chapters/28-高效Attention为何未替代标准Attention.md)。
+31AE. 对固定参数离散 SSM，从 $x_t=\bar A x_{t-1}+\bar B u_t$ 推导 $K_j=C\bar A^j\bar B$ 与因果卷积输出；指出零初始状态、时不变参数和直接通路 $D u_t$ 分别如何进入推导。然后说明为什么这只是递归与卷积的数学等价，不足以推出卷积路径总是更快、状态半衰期等于任务记忆，或所有输入依赖更新都能用一个固定卷积核表示。配套正文：[第二十一册第二十九章](book-21-transformer-architecture-evolution/chapters/29-SSM数学直觉.md)。
+31AF. 对因果 RNN、固定 LTI SSM、时序 CNN 与 causal self-attention，分别说明历史保存在什么表示里、末尾 query 通过什么路径接触远处错误码，以及各自能保证和不能保证什么。再区分图上的路径长度、历史信息是否保留和答案是否正确；说明整段训练的并行计算与自回归生成的顺序依赖，以及各架构生成时的状态或缓存差别。配套正文：[第二十一册第三十章](book-21-transformer-architecture-evolution/chapters/30-SSM-RNN-CNN-Attention信息流对比.md)。
+31AG. HiPPO 的“最优投影”具体相对于什么目标成立？说明 S4 如何把 HiPPO 状态矩阵从 NPLR 变换为 DPLR，并解释为什么直接特征分解会遇到数值问题。接着沿生成函数、resolvent、Woodbury、Cauchy 核到逆 FFT 讲清长度为 $L$ 的卷积核怎样得到；指出其中哪项是数学等价、哪项是论文给定算法的复杂度结论，以及它们为何不能单独证明完整模型在目标硬件上更快。配套正文：[第二十一册第三十一章](book-21-transformer-architecture-evolution/chapters/31-S4核心思想.md)。
+31AH. Mamba 相对固定 LTI SSM 改变了哪些参数？说明输入依赖的 $\Delta_t,B_t,C_t$ 如何形成时变状态递归，为什么逐位置仿射更新仍可通过结合 scan 并行求状态，以及结合律为什么不等于交换律。再概括 Mamba block 的主支路与门控支路，并把论文合成任务的证据限制在其任务设置内；不要把 scan 说成消除自回归依赖，也不要把选择性写成任意历史精确检索保证。配套正文：[第二十一册第三十二章](book-21-transformer-architecture-evolution/chapters/32-Mamba与Selective-Scan.md)。
+31AI. Mamba 怎样避免 Selective Scan 把 $(B,L,D,N)$ 扩展状态反复写入 HBM？说明 fusion、片上 SRAM 中扫描和反向重计算各解决哪项开销；再区分 A100 上的 scan 算子 benchmark、端到端 batch decode 与训练显存表分别能支持什么结论。最后解释固定大小状态为何不等于“整个模型恒定显存”或“decode 必然更快”。配套正文：[第二十一册第三十三章](book-21-transformer-architecture-evolution/chapters/33-Mamba训练推理与硬件效率.md)。
+
+31AJ. 为什么不能用一次 ICL 成功或一个 retrieval benchmark 概括 Mamba 的上下文能力？
+    考察点：精确关联召回与规则学习的区别、固定状态与显式 K/V 的读取路径、任务分布、模型版本和评测协议。
+    回答框架：先区分回归/函数学习、Markov 序列预测、复制或 MQAR 等任务；Grazzi 等人在特定函数近似和 NLP 设置中报告 Mamba 与 Transformer 接近，Park 等人的任务分布实验则显示 sparse parity、decision tree 和 vector-valued MQAR 结果不同，Markov 链结果也只适用于论文定义的生成过程。固定递归状态改变历史信息的保留与读取路径，但不单独证明所有查询必败；单条检索成功也不能推出多条目精确召回。回答时固定模型/checkpoint、训练预算、prompt、上下文和评分方式，并把纯 SSM 与 hybrid 分开。配套正文：[第二十一册第三十四章](book-21-transformer-architecture-evolution/chapters/34-Mamba局限与证据边界.md)。
+
+31AK. “Transformers are SSMs”在 Mamba-2/SSD 论文中具体成立于什么结构条件？请从递归说明 $M=L\odot(CB^\mathsf{T})$ 的来源，解释半可分离矩阵、Q/K/V 类比和标准 softmax attention 的差异，再概述 SSD 如何用 chunk 摘要传递跨块状态。最后说明论文的 $2$–$8$ 倍结果比较了什么、不能推出什么。
+    考察点：标量乘单位矩阵的状态转移、输入相关的写入/读出、状态维度与 head 维度、因果衰减掩码、无 softmax、块内/块间计算和核心层结果的证据范围。
+    回答框架：从 $A_t=a_tI_N$ 和零初始状态下的递归展开得到因果矩阵；$B,C,X$ 与 Q/K/V 只是受限类比，$L$ 带有累积衰减且无 softmax，因此不能称为标准 attention 或所有 SSM 与 Transformer 等价。半可分离秩受状态维度限制；分块算法计算局部输出和状态摘要、扫描真实入边界状态，再补上边界状态对块内输出的贡献。论文的速度数字是其特定 SSD 核心层与优化 selective scan 实现的比较，不等于所有完整模型或 serving 的收益。配套正文：[第二十一册第三十五章](book-21-transformer-architecture-evolution/chapters/35-Mamba-2与State-Space-Duality.md)。
+
+31AL. “SSM 会不会替代 Transformer？”请用一项匹配规模实验、一项复制/检索结果和一项 ICL 或新版本研究回答；区分纯 SSM 与 hybrid，并说明证据支持到哪里。
+    考察点：模型与训练条件、任务定义、MMLU 训练 token 差异、复制与 ICL 的任务区别、Mamba-3 retrieval 条件及 hybrid 归因。
+    回答框架：Waleffe 等人的约 8B 对照显示纯 Mamba 系列在部分任务上有竞争力，1.1T 设置的 5-shot MMLU 有差距，3.5T 只比较 Mamba-2 与 Transformer 且差距缩小；Jelassi 等人的复制结果对应特定的精确复制/查找任务，而 Markov 链 ICL 结果对应另一类任务。Mamba-3 在部分 retrieval 切片有改善，但不覆盖所有提取任务；Mamba-2-Hybrid 的成绩归于 hybrid。现有公开证据支持 SSM 是可竞争路线，尚不能推出普遍取代。配套正文：[第二十一册第三十六章](book-21-transformer-architecture-evolution/chapters/36-SSM替代Transformer的证据与争议.md)。
+
+31AM. RWKV 怎样把整段训练与递归生成放在同一条信息流中？请用 RWKV-4 的 WKV 状态式解释当前位置的 bonus、历史衰减和后续状态写入，再比较 RWKV-5/6/7 的状态形状与更新变化；最后说明固定状态边界以及 RWKV-8 的当前证据状态。
+    考察点：WKV 分子/分母递归、逐通道衰减与归一化、time-mixing/channel-mixing、扫描并行性、每头矩阵状态、v6 动态 decay、v7 移除/替换 key、状态维度与序列长度的区别。
+    回答框架：RWKV-4 用 key 加权的历史 value 和当前项 bonus 形成逐通道归一化读出，并以未加 bonus 的当前权重更新供后续位置使用的 numerator/denominator。token shift 混合相邻输入，receptance 门控 time-mixing 输出；channel-mixing 做逐位置非线性变换。训练可并行计算位置投影并用 scan 类算法执行递归依赖，生成则逐 token 更新状态，所以“并行”不表示时间步独立或采用 full self-attention。RWKV-5 扩成每头矩阵状态，RWKV-6 加入输入依赖 shift/decay，RWKV-7 用广义 delta 状态更新；状态不随已读 token 数增长，但随层与通道/头维度增长。截至 2026-11-23，官方资料称 RWKV-8 仍处实验阶段，DeepEmbed/ROSA 是不同组件，不能当作 v4—v7 方程的简单替换。配套正文：[第二十一册第三十七章](book-21-transformer-architecture-evolution/chapters/37-RWKV状态与训练.md)。
+
+31AN. RetNet 的 parallel、recurrent 与 chunkwise recurrent 为什么可以对应同一 retention 映射？从因果衰减矩阵推到 key-value 矩阵状态，再说明位置相位、multi-scale decay 和 GroupNorm 各自承担什么作用；最后解释固定状态相对于序列长度的含义，以及原论文效率比较不能外推到哪些条件。
+    考察点：下三角衰减矩阵、递归展开、$d_k\times d_v$ 状态、块内/块间贡献、固定 head decay、score normalization 与 softmax 的差别、论文实验条件。
+    回答框架：并行式对 $QK^{\mathsf T}$ 施加因果距离衰减后乘 $V$；递归式把每个 $k_t^{\mathsf T}v_t$ 写入 $S_t=\gamma S_{t-1}+k_t^{\mathsf T}v_t$，再由 $q_t$ 读取。Chunkwise 在块内并行，跨块将上一状态按 $\gamma^B$ 衰减后与当前块贡献合并。RetNet 的 $\gamma$ 按 head 固定，位置相位编码与距离衰减分工；score 缩放和 GroupNorm 不构成 softmax 概率。固定的是状态对历史长度的存储尺寸，不是对模型宽度、逐步计算或精确历史寻址的保证。论文的训练/推理成本结果绑定原文的模型规模、语料、A100、序列长度、chunk 和 PyTorch 实现。配套正文：[第二十一册第三十八章](book-21-transformer-architecture-evolution/chapters/38-RetNet并行递推统一.md)。
+31AO. Hyena 的 order-$N$ 递归如何把输入依赖性加入长卷积？写出投影流、卷积与逐点 gate 的关系，说明 implicit filter 为什么能让参数量不随核长线性增长，以及 FFT 线性卷积的补零作用。再比较原论文 $131072$ 长度、词表 $30$ 的关联回忆结果与后续 v3 机制研究的 AR 设置；解释为什么二者不能互相直接否定，并区分算子速度和完整模型速度。配套正文：[第二十一册第三十九章](book-21-transformer-architecture-evolution/chapters/39-Hyena隐式长卷积.md)。
+31AP. Mega、GSS 与 H3 都包含状态或门控，但三者各自把这些运算放在哪里？用 Mega 的 EMA→Q/K→attention→update gate、GSS 的窄 DSS 流与乘法投影、H3 的 shift/diagonal SSM 与 query 读取来说明差别；再解释 H3-attention 和 GSS-Hybrid 保留标准 attention 的方式，以及为何各论文的 benchmark 不能合并成一个架构胜负结论。配套正文：[第二十一册第四十章](book-21-transformer-architecture-evolution/chapters/40-Mega-Gated-State-Space与H3.md)。
+
+31AU. 为什么在 Q/K/V 投影后插入局部 depthwise Conv1D 可能改善 Transformer 表示，却不等于用卷积取代 attention？解释固定相对位移核与 query-key 内容寻址的区别，再比较 Qwen3 局部卷积、H3+LongConvs 和 StripedHyena 的结构及各自实验边界；最后指出长卷积训练的 FFT 复杂度不能直接推出逐 token decode 的低延迟。配套正文：[第二十一册第四十一章](book-21-transformer-architecture-evolution/chapters/41-卷积序列模型复兴.md)。
+31AW. 有人说“SSM 是 $O(T)$，所以一定比 attention 快；固定状态又不可能检索历史”。这两句话分别混淆了哪些概念？请从比较层级、历史表示与查询路径、训练/生成成本、任务证据和硬件实现解释，并给出能支持条件化结论的最小评测信息。配套正文：[第二十一册第四十二章](book-21-transformer-architecture-evolution/chapters/42-替代架构横向对比.md)。
+31AY. Attention–SSM 混合的层间交错与层内并行 head 有何结构差异？请用 Jamba、Mamba-2-Hybrid 和 Hymba 说明各自的融合粒度，再解释为什么 $1:3$ 与 $1:7$、$1:1$ 与 $1:5$ 等论文比例不能汇总成一个通用最优值，并区分实验成绩、速度预测和整模型共设计的贡献。配套正文：[第二十一册第四十三章](book-21-transformer-architecture-evolution/chapters/43-Attention与SSM混合架构.md)。
+31BA. 卷积、SSM 和 Attention 可以怎样理解为三种不同的历史信息路径？回答时区分短卷积与长卷积、递归状态更新与 query 对 mask 可见 key/value 的内容相关读取；再用 Qwen3 的局部卷积和 H3+LongConvs 说明卷积可以怎样嵌入不同主干位置，并指出为什么这些实例不足以得出普遍模块排名。配套正文：[第二十一册第四十四章](book-21-transformer-architecture-evolution/chapters/44-Attention-卷积-SSM模块分工.md)。
+31BC. 描述一次检索增强回答从外部语料到最终答案的完整信息流，并比较提示级证据注入、RAG-Sequence/RAG-Token、REALM/RETRO 模型内检索与 Self-RAG 按需检索的接入差异。再说明如何分别评估检索上下文相关性、回答忠实度、任务正确性和引用支持，并划清 RAG、长上下文、跨会话记忆和 Agentic Search 的职责。配套正文：[第二十一册第四十五章](book-21-transformer-architecture-evolution/chapters/45-Retrieval-Augmented-Architecture.md)。
+31BE. Memory-Augmented Transformer 中的“记忆”有哪些不同实现？请沿过去信息的表示、写入/更新、查询读取和融合位置比较 Memorizing Transformer、LongMem、Larimar 与 MemT-1.0；再区分它们与普通解码 KV cache、RAG 语料及 Agent 运行状态，并说明各自论文结果支持到什么任务和测量条件，为什么不能仅凭“长期记忆”名称或单项效率数字判断架构优劣。配套正文：[第二十一册第四十六章](book-21-transformer-architecture-evolution/chapters/46-Memory-Augmented-Transformer.md)。
+31BF. 为什么 MoE、SSM 与 Attention 不能当成三个可直接相加的同类模块？请比较 Jamba 的混合主干加 FFN-MoE、BlackMamba 的 Mamba 加 routed MLP，以及 Routing Mamba 在 Mamba 投影和 Samba 混合主干中的专家化位置。再说明各论文的消融分别支持什么、缺少哪些对照时不能断言协同增益，并把 Routing Mamba 的 FLOPs 数字限定在原论文配置与 forward 口径。配套正文：[第二十一册第四十七章](book-21-transformer-architecture-evolution/chapters/47-MoE-SSM-Attention组合.md)。
+31BG. 分析一个视觉语言模型加入 Mamba 后，必须先确认哪些架构位置？请比较语言主干替换、VSS/Q-Mamba 视觉连接器、AlignMamba 融合前对齐，以及 VAMBA/TimeViper 对长视频与文本读取的分路；再用 captioning、grounding、检索和长视频任务说明为什么结构名称或总分不能证明通用替代能力，并限定跨论文比较所需的匹配条件。配套正文：[第二十一册第四十八章](book-21-transformer-architecture-evolution/chapters/48-多模态混合架构.md)。
+31BH. ReAct、Toolformer 和 Gorilla 分别把工具使用能力放在提示、模型训练还是外部检索？模型输出工具请求后，谁真正执行动作、维护环境事实并返回观察？请用 AgentBench、OSWorld 或 τ-bench 说明为什么 Agent 成绩取决于完整交互配置、不能直接证明某种 Transformer block 或隐藏 planner 存在；最后说出何种条件下固定工作流比模型自主选择下一动作更合适。配套正文：[第二十一册第四十九章](book-21-transformer-architecture-evolution/chapters/49-Agentic-Model-Architecture.md)。
+31BI. “未来大模型会不会抛弃 Transformer？”请比较层间、head 级、记忆分支和 attention 分数融合的代表设计，并说明 Mamba-3 为什么表明递归路径也仍在独立演进。回答中区分论文已观察到的结构与效果、作者提出的趋势，以及尚未解决的规模/任务外推问题；最后给出一个带证据边界的结论。配套正文：[第二十一册第五十章](book-21-transformer-architecture-evolution/chapters/50-未来大模型架构演进.md)。
+31BJ. GPT-1、GPT-2 和 GPT-3 的主要变化是什么？回答时区分生成式预训练后的任务微调、GPT-2 的零样本迁移评估和 GPT-3 的 zero/one/few-shot ICL 设置；说明 GPT-3 评测时是否更新参数、ICL 表现能支持什么历史判断，以及为什么不能把 scaling law 的损失曲线外推为所有任务能力的通用定律。再指出具体 block、compute-optimal 配比和 RLHF 分别由哪些章节展开。
+31BK. 什么叫 compute-optimal training？请用 Chinchilla 与 Gopher 说明在近似相同训练预算下，模型参数和训练 token 可以怎样重新分配；再用 PaLM 解释 Pathways 的多 TPU 系统效率与参数/token 最优比例为何是不同问题。最后说明数据、参数统计、FLOPs 口径和优化器设置怎样限制比例外推，并区分预训练损失与下游或部署目标。
+31BL. InstructGPT 和 ChatGPT 如何改变 GPT 模型的使用方式？请说明 SFT、偏好比较/奖励模型和 PPO 分别接收什么训练信号，并区分模型架构、后训练行为与对话产品入口。结合 InstructGPT 论文的偏好结果，说明评价分布、标注群体和能力边界；再解释为什么发布期产品体验不能直接作为内部架构证据。
+31BM. LLaMA 系列的现代稠密基线由哪些组件组成？请比较原始 LLaMA、Llama 2、Llama 3.1 与 Llama 4 的架构变化，指出 RMSNorm、RoPE 和 SwiGLU 并非 LLaMA 首创，以及 GQA、MoE 和原生多模态分别出现在哪些版本。最后区分模型卡上下文声明、有效上下文和可复用训练事实。
+31BN. Mistral 7B v0.1 和 Mixtral 8x7B 分别用哪些结构改变 KV 状态、单层历史可见范围和 FFN 计算？请解释 Mixtral 约 $47\mathrm{B}$ 总参数与每 token 约 $13\mathrm{B}$ 激活参数的差异，并说明为什么激活参数较少仍不能推出权重常驻、路由通信和服务成本消失。最后用各自论文的 benchmark 条件说明整体结果为何不能归因于单个模块或推广为普遍排名。
+31BO. Gemini 1.0、Gemini 1.5、GPT-4V 与 Claude 3 的公开资料分别披露了哪些内部结构、输入接口和长上下文实验？请用 Gemini 1.0 的技术报告、Gemini 1.5 的 MoE 报告、GPT-4V system card/GPT-4 报告及 Claude 3 模型卡说明披露深度为何不同；再区分发布时窗口、private preview 和 NIAH 召回结果，并指出至少两项仍不能从公开资料推断的内部结构。
+31BP. 为什么开放权重不等于完整训练可复现？请以 Qwen2.5、Llama 3.1 和 Gemma 2 为例，分别说明报告公开了哪些数据、tokenizer、训练阶段或蒸馏事实，权重之外仍缺哪些复现材料，以及具体尺寸的许可为什么必须单独检查。不要把不同报告的 token 数或 benchmark 分数当成统一质量排名。
+31BQ. DeepSeek-V2、V3 与 R1 的“创新”分别发生在哪一层？请区分 MLA/DeepSeekMoE 的架构、V3 的路由负载均衡和 MTP 目标、R1-Zero/R1 的后训练，以及 R1-Distill 的学生基座。追问 V3 routing bias 如何改变专家选择而不改变输出 gate、MTP 为什么不等同 speculative decoding，并说明论文里的自报参数、性能和训练结果各自能支持到哪里。配套正文：[第二十一册第五十八章](book-21-transformer-architecture-evolution/chapters/58-DeepSeek-V2-V3-R1架构训练.md)。
+31BR. 面试官问“近几代大模型的架构创新，谁做得最好”，你会怎样把这个问题改写成可回答的比较？请先固定模型版本，再分别说明架构组件、训练/后训练和用户接口的变化；用 GQA/SWA/MLA 或 Dense/MoE 说明参数字段为何不能代替实际成本，用 GPT-3/Chinchilla 说明任务行为与计算预算不是同一主张，并用闭源多模态报告说明哪些内部细节仍未知。最后说清跨论文 benchmark 在什么条件下才能比较，以及缺少何种消融时不能把整模型差异归因于单个模块。配套正文：[第二十一册第五十九章](book-21-transformer-architecture-evolution/chapters/59-主流模型架构创新横向对比.md)。
+31BT. 新模型发布称“长上下文成本更低、效果更好”，你会怎样判断这是内部架构变化、训练变化、执行实现还是外部检索/Agent 系统贡献？请用 MLA、MoE、递归状态和 ReAct 中至少两项说明它们改变的对象和需要观察的成本/任务，再说明应核对哪些版本、对照或消融；若产品只公开 API 行为，应把哪些内部细节留作未知？配套正文：[第二十一册第六十章](book-21-transformer-architecture-evolution/chapters/60-下一代架构判断框架.md)。
+31BU. KDA 的逐通道衰减、delta 写入强度和 output gate 分别控制什么？请用 $\bar S_t=\mathrm{Diag}(\alpha_t)S_{t-1}$、$e_t=v_t-\bar S_t^{\mathsf T}k_t$、$S_t=\bar S_t+\beta_tk_te_t^{\mathsf T}$ 解释一次状态更新；再比较 Kimi Linear v2 与 Kimi K3 v2 报告中的参数化变化，说明哪些是 KDA 的通用机制、哪些仅属于特定版本，并指出其与 Gated DeltaNet 和 Gated MLA 的章节边界。配套正文：[第二十一册第六十一章](book-21-transformer-architecture-evolution/chapters/61-kda递归注意力.md)。
+
+31BV. 面试官问 Gated DeltaNet 为什么把“忘掉旧状态”和“改写当前关联”放进同一个更新。请从 $A_{t-1}$ 出发说明衰减后如何计算预测误差、$\alpha_t$ 与 $\beta_t$ 分别控制什么，并用在线回归解释 delta correction。追问 chunkwise WY 怎样保留递归语义并增加块内并行，再区分它与 KDA、Gated DeltaNet-2 的 gate 维度及各自证据边界。配套正文：[第二十一册第六十二章](book-21-transformer-architecture-evolution/chapters/62-gated-deltanet门控线性注意力.md)。
+
+31BW. 请解释 Kimi K3 的 Gated MLA。先用共享 KV latent 写出 MLA 的压缩路径，再写出输入依赖的逐通道输出门；说明该 gate 为什么调制 attention result、却不等于在 latent/explicit 两路间选路。追问 DeepSeek-V2 decoupled RoPE 与 Kimi K3 NoPE 对 cache payload 有何影响，并比较 token 级 latent cache 与 KDA 递归状态的序列长度成本。配套正文：[第二十一册第六十三章](book-21-transformer-architecture-evolution/chapters/63-gated-mla门控潜变量注意力.md)。
 
 32. 什么是 causal mask？
    考察点：下三角 mask、未来 token、attention scores、softmax。
@@ -1069,6 +1157,10 @@
 51. 教学 miniGPT 和真实 LLM 差距在哪里？
    考察点：tokenizer、RoPE、RMSNorm、SwiGLU、FlashAttention、KV Cache、分布式训练。
    回答框架：miniGPT 用于理解结构，真实 LLM 需要更复杂架构和大规模工程系统。
+
+52. Transformer 能不能用于流式、在线和低延迟任务？
+   考察点：流式输入与输出的区别、自回归依赖、prefill/decode、历史状态、TTFT/TPOT、模型与 serving 的边界。
+   回答框架：因果 decoder 可以逐 token 输出，但后续 token 依赖前一步，首 token 也要等已有输入完成必要计算；流式输入还要处理分段可见性、位置和跨段状态。全上下文 KV 让后续 token 访问历史，但状态随保留上下文增长。chunked prefill 等 runtime 调度可以缓和长 prefill 对活动 decode 的干扰，却不改变模型的生成依赖。判断瓶颈时分别看 TTFT、TPOT/ITL 和请求计时边界，并区分输入策略、模型计算和排队调度。配套正文：[第二十一册第十五章](book-21-transformer-architecture-evolution/chapters/15-Transformer流式在线与低延迟局限.md)。
 
 ## 训练
 

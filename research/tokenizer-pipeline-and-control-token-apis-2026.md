@@ -21,6 +21,11 @@
 - 当前滚动文档的 `apply_chat_template` 参数包含 `sanitize_control_tokens=False`。开启后，消息、工具和文档内容中出现的控制 token 字面文本按普通文本编码，模板本身写入的控制 token 仍作为控制 token。文档将控制 token 定义为 tokenizer 的 special tokens，以及 `tokenizer.chat_control_tokens` 中的新增控制 token；未设置该属性时，会从模板文本及其字符串字面量中推断。
 - 该参数只证明当前文档记录的 Transformers 接口行为；该页面未在本次阅读中固定到具体发行版本。不能据此推断其他库、旧版本或自定义序列化链路具有同一行为，也不能将其视为对自然语言 prompt injection 的通用防护。
 
+### 2026-11-24 复核
+
+- 重新核对的 [Transformers 当前 tokenizer API](https://huggingface.co/docs/transformers/main_classes/tokenizer#transformers.PreTrainedTokenizerBase.apply_chat_template)还将模板变量纳入 `sanitize_control_tokens` 的输入范围；未显式设置 `tokenizer.chat_control_tokens` 时，文档说明会从模板文本和其中的字符串字面量推断控制 token。页面仍是滚动文档，不能据此固定到某个发行版本。
+- 来源：[OpenAI Harmony 格式说明](https://github.com/openai/harmony/blob/main/docs/format.md)，OpenAI 官方公开仓库，复核日期 2026-11-24。该协议区分 `<|end|>`（消息结束）、`<|return|>`（本次生成停止）和 `<|call|>`（工具交接）。将生成结果写入后续对话历史时，尾部 `<|return|>` 应改为 `<|end|>`；监督训练目标则可以以 `<|return|>` 结束。此转换仅是该协议的序列化规则，不能泛化为其他模型格式。
+
 ## 算法论文与延伸材料
 
 - [Formalizing BPE Tokenization](https://arxiv.org/abs/2309.08715)，arXiv:2309.08715，2023-09-15。论文形式化讨论实用 BPE 的语义，并比较 SentencePiece 与 Hugging Face tokenizer 在规则构造下的关系，也讨论增量和流式处理。该论文是形式化研究材料，不替代具体库的当前官方文档。

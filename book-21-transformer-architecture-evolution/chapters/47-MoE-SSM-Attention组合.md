@@ -1,254 +1,51 @@
-# 第四十七章：MoE + SSM + Attention 的未来组合可能
+# 第四十七章：MoE、SSM 与 Attention 的组合设计：架构位置与证据
 
-## 47.1 三种技术优化不同预算
+## 47.1 Attention/SSM 与 MoE 改变的是不同结构位置
 
-MoE 扩大参数容量并让每个 token 只激活部分专家；SSM 降低长流历史状态成本；attention 提供精确的内容寻址和全局组合。三者的组合不是简单相加，而是把容量、历史和交互三个预算分开。
+一个 Transformer block 通常由序列混合部分和逐 token 的 FFN 组成。序列混合部分决定当前位置怎样使用序列中的其他信息：Attention 根据当前 query 读取可见的 key/value，SSM 则沿序列更新并读取递归状态。FFN 对每个位置的表示作非线性变换。
 
-一个可能的 block 是：共享局部/SSM 路径处理所有 token，MoE FFN 提供条件容量，少量 global attention 负责证据对齐。具体模型是否采用这种组合，必须以公开模型卡/技术报告为准；本章讨论架构设计空间。
+MoE 通常改造的是 FFN 这条参数路径：router 根据 token 表示选择一个或多个 expert，再将选中 expert 的输出合并。它改变“当前位置经过哪组参数”，本身不规定历史信息如何跨 token 传播。因此，Attention/SSM 和 MoE 不是三个同类的序列算子；前两者主要决定序列信息路径，MoE 通常决定条件参数路径。
 
-## 47.2 三类成本的抽象
+MoE 也可以进入 SSM 内部投影。此时它不再只是替换 FFN，而会改变状态更新模块内部由哪些参数处理 token。判断一个组合架构，至少要问两件事：序列由什么模块混合，专家化落在 FFN 还是序列模块内部。只列出“MoE、SSM、Attention”三个名称，还不能看出实际数据流。
 
-可以把每层计算写成：
+## 47.2 Jamba：在 Attention–Mamba 主干的 MLP 位置加入 MoE
 
-~~~math
-C_l=C_{\mathrm{state}}+
-C_{\mathrm{MoE,active}}+
-C_{\mathrm{global}}
-~~~
+Jamba 展示了一个清楚的三者组合：层间交错 Attention 和 Mamba；每层的序列混合模块之后接 MLP；部分 MLP 被 MoE 替换。token 先经过所在层的 Attention 或 Mamba，再由普通 MLP 或被选中的 experts 变换。MoE 的插入不改变该层究竟采用 Attention 还是 Mamba。[AI21 的架构说明图](https://www.ai21.com/blog/announcing-jamba/)可以帮助辨认这两个层级；精确配置和实验结论以[Jamba 正式论文](https://proceedings.iclr.cc/paper_files/paper/2025/file/a9ed43fa31dc8b4a7d7a673d713dcb5f-Paper-Conference.pdf)为准。
 
-其中 global 层不一定每层存在，MoE active 由 router 决定，state 更新可以固定大小。内存则包括：
+论文把几个选择分开报告：一个重复 block 有八层，其中 Attention 与 Mamba 的比例为 1:7；每隔两层，普通 MLP 替换为 MoE；每个 MoE 层有 16 个 experts，每个 token 选择 top-2。这里的 1:7 不是其他模型必须照抄的比例，而是该论文在自身比较中选择的配置。
 
-~~~math
-M=M_{\mathrm{weights,total}}+
-M_{\mathrm{KV,global}}+
-M_{\mathrm{state}}+
-M_{\mathrm{expert/comm}}
-~~~
+作者先用 1.3B 参数模型训练 250B tokens，对比没有 MoE 的不同 Attention/Mamba 比例。1:3 与 1:7 在报告的指标上差别不大，1:7 计算更省，因此作者在后续较大模型中采用它。接着，作者用 7B、50B-token 的实验比较纯 Attention、纯 Mamba 和不带 MoE 的 hybrid；在这些设置下 hybrid 结果较好。另一个消融再在 hybrid 上加入 MoE，作者报告多个基准和 log-prob 指标改善。这样分开做的消融能说明论文设置下各个改动提供了什么信息；它不能证明每种规模、训练配方或任务中都会出现同样增益。
 
-MoE 可能减少 active compute，却不自动减少总权重；SSM 可能减少 state 随长度增长，却不自动消除少量 global KV。
+## 47.3 BlackMamba：Mamba 序列路径与 routed MLP 的组合
 
-## 47.3 小白直觉：工厂、流水线和档案柜
+BlackMamba 去掉显式 Attention 路径：序列经过 Mamba 状态更新后，再进入 routed MLP；router 据当前位置的表示选择 FFN experts。与 Jamba 相比，这个设计把问题收窄为“SSM 主干能否和条件 FFN 容量共同训练”，不再同时检验显式 Attention 对模型行为的贡献。
 
-MoE 像很多专业工厂，当前零件只送到少数工厂；SSM 像流水线上的状态记录，持续处理大量输入；attention 像档案柜，遇到关键问题时精确查资料。
+论文报告了 340M/1.5B 和 630M/2.8B 的前向激活/总参数配置，并在自建语料上训练 300B tokens。作者对这些模型报告了语言建模、下游任务以及训练 FLOPs 和生成时间的比较。应把这些结果留在其模型规模、语料、实现和计时方式内解读；它们不是与 Jamba 的同条件对照，也不能推出所有 SSM-MoE 模型都比 Transformer 或 hybrid 更快。[BlackMamba 原论文](https://arxiv.org/abs/2402.01771)给出的首先是一个不同组合位置的研究实例。
 
-组合成功的前提是工厂不要拥堵、流水线不要丢关键状态、档案柜不要被所有 token 同时打开。每一类资源都需要自己的监控和预算。
+## 47.4 Routing Mamba：把专家化移入 SSM 投影，并扩展到混合主干
 
-## 47.4 路由顺序的选择
+Mamba block 内有多个功能不同的投影。把每个投影都独立改成 MoE，不保证得到一组彼此协调的 expert 路径。Routing Mamba 的做法是在选定投影上建立专家，并共享相关投影之间的路由决定；对原始 Mamba 的一组实验还让部分较小的投影与卷积参数由 experts 共享。这样做改变的是 SSM 内部状态计算的参数路径，不是把整个 Mamba block 换成普通 FFN。
 
-可以先 state 再 MoE：
+这篇 NeurIPS 2025 论文先比较独立专家化若干 Mamba 投影的方案，再评估其共享路由方法。作者报告，简单地逐个投影套用 MoE 在其设置下经常没有改善、部分配置还会退化；RoM 的选择性专家化和共享路由则在其 Mamba 及 hybrid 实验中得到较好的验证困惑度结果。这是对具体 Mamba 参数化和路由设计的发现，不表示所有 SSM 内部 MoE 都必须采用同一种共享方式。
 
-~~~math
-h'_t=\operatorname{SSM}(x_t),\qquad
-y_t=\operatorname{MoE}(h'_t)
-~~~
+为检验它能否进入混合主干，作者以包含 Mamba 与滑动窗口 Attention 的 Samba 为对象。在一组 SlimPajama 训练对照中，数据为 20B tokens、硬件为 8 张 A100；RoM 配置使用 421M 前向激活参数、1.0B 总参数，和 511M 参数的 Samba expand=4 比较。论文表中两者在 4K 验证长度的困惑度分别约为 9.77 和 9.78，一次 4K forward 的 FLOPs 分别为 4.74T 和 6.13T。作者据此报告约 23% 的 FLOPs 差值。这是特定结构和一次 forward 口径下的比较，不能改写成端到端训练时长或线上延迟节省。[Routing Mamba 的 NeurIPS 2025 正式论文](https://papers.nips.cc/paper_files/paper/2025/file/79bc44e53e8a981ac1510d4c24ba3d71-Paper-Conference.pdf)还单独比较 RoM 与 FFN-MoE 的组合；在相近的激活参数设置下，两种方案的平均任务准确率接近，并未显示组合必然提高平均分。
 
-也可以先 MoE 再 global attention：
+## 47.5 比较专家化位置与序列混合路径
 
-~~~math
-h'_t=\operatorname{MoE}(x_t),\qquad
-y_t=\operatorname{Attn}(h'_t)
-~~~
+| 组合 | 序列混合路径 | MoE 的位置 | 这项设计主要检验什么 |
+| --- | --- | --- | --- |
+| Jamba | Attention 与 Mamba 层间交错 | 部分层的 MLP | 在混合序列主干上加入条件 FFN 容量后，论文指标怎样变化 |
+| BlackMamba | Mamba | Mamba 后的 routed MLP | 不使用显式 Attention 时，SSM 与 FFN-MoE 能否组成有竞争力的模型 |
+| Routing Mamba on Samba | Mamba 与滑动窗口 Attention | 选定 Mamba 投影；另有与 FFN-MoE 联合的实验 | 专家化 SSM 内部路径、共享路由及其与混合主干的关系 |
 
-顺序影响 router 输入、专家 specialization 和 global 证据形态。若 state 已压缩历史，MoE 看到的是摘要；若 attention 在 MoE 后，能对齐专家处理后的表示。需要做 layer order ablation。
+这三种位置不能被压成一个“统一 MoE 层”。在 Jamba 和 BlackMamba 中，MoE 替换 FFN；在 Routing Mamba 中，expert 参与生成 SSM 状态路径所需的投影。一个模型是否还有 Attention、Attention 采用什么范围、router 读到哪一层表示，都由具体架构定义。即使两篇论文使用同一个名称，也不能据此假设它们有相同的路由输入、expert 功能或通信路径。
 
-## 47.5 共享专家和状态路径
+组合设计带来的研究问题也随插入位置而变：FFN-MoE 主要改变每个 token 的非线性参数变换；SSM 投影专家化会进入状态更新模块内部；若多个子模块共享路由，还要检验共享决定是否适合这些子模块的计算关系。论文里的结构图、层配置和消融表应一起阅读，不能只凭模型名或总参数量推断路径。
 
-MoE 可以保留 shared FFN 处理公共知识，再让 routed experts 处理 token/domain 特化；SSM 可以作为所有 token 的低成本公共路径。这样可减少路由完全失效时的质量崩溃。
+## 47.6 组合收益需要能隔离主效应与交互的消融
 
-代价是 shared path 可能让 active compute 增加，state 和 expert 输出的尺度也要校准。共享专家不是免费 fallback，应记录其 token 量和梯度。
+若要判断三类结构选择各自贡献了什么，实验应包含能拆开它们的控制模型：固定序列主干后比较 dense FFN 与 FFN-MoE；固定参数化后比较 Attention、SSM 和混合序列路径；如果研究 MoE 进入 SSM 投影，再把它与只改 FFN 的版本比较。若还要声称两处专家化彼此协同，就需要直接比较联合方案与各自单独加入的方案。只有完整三组件模型而没有这些对照，无法分辨收益来自哪个模块，也无法证明存在交互增益。
 
-## 47.6 一个资源估算器
+对照还要交代数据、训练 token、模型结构、前向激活参数与总参数、计算口径、序列长度、任务和实现版本。参数量、计算量、训练速度、生成速度和上下文行为回答的是不同问题，应分别报告。Jamba 的拆分消融、BlackMamba 的 Mamba-MoE 实验和 Routing Mamba 在 Samba 上的投影/FFN 对照提供了不同强度、不同范围的证据；它们不构成跨论文总排名。
 
-~~~python
-def combined_cost(tokens, global_layers, total_layers,
-                  active_experts, expert_cost,
-                  state_cost, global_cost, network_cost):
-    state = tokens * total_layers * state_cost
-    moe = tokens * active_experts * expert_cost
-    global_part = tokens * global_layers * global_cost
-    network = tokens * active_experts * network_cost
-    return {
-        "state": round(state, 2),
-        "moe_active": round(moe, 2),
-        "global": round(global_part, 2),
-        "expert_network": round(network, 2),
-        "total": round(state + moe + global_part + network, 2),
-    }
-
-
-print(combined_cost(
-    tokens=100_000, global_layers=4, total_layers=32,
-    active_experts=2, expert_cost=0.8, state_cost=0.2,
-    global_cost=2.0, network_cost=0.15,
-))
-~~~
-
-这个模型只用于容量评审，不能预测真实 latency；它把被忽略的 expert network 单独列出，避免只看 active expert GEMM。
-
-## 47.7 训练难点
-
-训练要同时稳定三种选择：state gate、MoE router 和 global attention。state 可能过度压缩，router 可能专家塌缩，global 层可能成为所有任务的 shortcut。辅助损失、路径 dropout、专家均衡和长程 probe 都要纳入训练监控。
-
-数据 mixture 还会影响专家分工。若代码、多语言和推理数据比例变化，expert routing 可能重新组织；checkpoint 续训必须记录数据和 router 版本。
-
-## 47.8 Serving 难点
-
-一个请求可能同时需要：global KV block、state tensor、专家权重和 all-to-all buffer。scheduler 要决定请求在哪些 worker 上执行、状态如何迁移、热门专家是否复制、global 层是否分池。
-
-推测解码/抢占时，要对 KV、state、router 临时选择和 expert output 一起提交或回滚。任何一个状态不同步都会导致不可复现的生成。
-
-## 47.9 适用场景
-
-大规模多领域服务、长周期 Agent、长日志流、多模态视频和高并发长上下文是组合路线的候选。短问答、低并发边缘设备和严格确定性服务可能更偏 dense 或较简单 hybrid。
-
-组合架构的主要价值可能是单位成功成本，而不是所有 benchmark 都领先。要先明确业务失败的代价。
-
-## 47.10 常见失败模式
-
-包括 total/active 参数混淆、global 层 KV 没计入、state 与 expert router 分布不一致、热门专家拖慢 p99、跨节点 all-to-all、量化后 gate/route 漂移、请求恢复只保存一类状态和复杂度叙事超过公开证据。
-
-排查要按层记录路径、state bytes、expert counts、KV blocks、通信、kernel 和恢复 checksum；使用 dense/state-only/MoE-only/global-only ablation。
-
-## 47.11 机制与边界：组合的真正风险是状态耦合
-
-三种技术的内部状态会相互影响：state 改变 router 输入，router 改变 token 表示和 global 需求，global attention 又可能改变后续 state。耦合让表达力更强，也让故障定位更难。
-
-可以引入显式 contract：每个路径声明输入/输出 shape、提交点、版本、dtype、位置和回滚语义。没有 contract 的组合只能在单次 forward demo 中成立。
-
-## 47.12 面试追问、误区与练习
-
-**问：MoE、SSM、attention 组合时谁解决什么问题？**
-
-标准回答：MoE 主要扩展条件容量，SSM 主要降低长流状态成本，attention 主要提供精确全局内容寻址；组合收益取决于路由、通信、KV/state 生命周期和任务分工。
-
-**问：为什么 active FLOPs 低仍可能服务很慢？**
-
-标准回答：专家通信、路由、热门专家排队、global KV、state 更新和 kernel fallback 可能主导端到端 latency。
-
-常见误区包括把三个名字写成一条宣传句、只算 active expert、忽略状态提交和把未公开模型结构当事实。
-
-练习：为多租户长文档服务设计 MoE+SSM+attention 的状态 schema、worker 拓扑、故障回滚和 quality/cost gate。
-
-## 47.13 三种稀疏的不同含义
-
-MoE 稀疏的是 FFN 专家计算，SSM/递归路径稀疏的是历史访问，attention 稀疏可能是可见边或 token/block。它们的资源收益和错误模式不同，不能把三个模块相加后称为“整体稀疏”。
-
-评估要分别记录专家负载、state bytes、attention block、通信和精确证据 recall。组合模型的总成本大致为：
-
-~~~math
-C_{\mathrm{total}}
-=C_{\mathrm{router}}
-+C_{\mathrm{state}}
-+C_{\mathrm{attention}}
-+C_{\mathrm{communication}}
-~~~
-
-## 47.14 组合路线的回退和调度
-
-当专家热点、state 不稳定或 global evidence 缺失时，系统需要可观测回退：减少并发、改用 dense layer、增加显式 attention、检索原文或转人工。调度器必须知道每条路径的资源，而不是只按 token 数排队。
-
-## 47.15 路由器要感知任务风险
-
-MoE router 选择专家，路径 router 选择 attention/SSM，产品 router 选择模型和工具。三层路由叠加时，低概率的组合路径可能成为质量或安全风险。高风险请求要限制可选路径，并保留显式 verifier。
-
-## 47.16 组合模型的容量规划
-
-规划时必须把静态和动态资源分开。静态部分包括 dense 权重、专家权重和 kernel workspace；动态部分包括专家 dispatch、global KV、recursive state、工具结果和 fallback 的峰值。可以用一个请求级账本表示：
-
-```math
-M_{\mathrm{peak}}
-=M_{\mathrm{dense}}
-+M_{\mathrm{expert\_resident}}
-+M_{\mathrm{KV,global}}
-+M_{\mathrm{state}}
-+M_{\mathrm{dispatch}}
-+M_{\mathrm{workspace}}
-```
-
-假设平均每个 token 激活两个专家，平均并发 1,000 个请求，但其中 5% 的请求属于长文档任务，并且 30% 的 token 被路由到同一个热门专家。平均 active FLOPs 可能看起来很低，热门专家的队列和 all-to-all buffer 却决定 P99。容量规划至少要用短/长请求混合、专家负载分位数和失败回退场景，而不能只用平均 token。
-
-实际部署可以先按三种工作负载做上界：普通短问答、长上下文回读、需要工具的长周期任务。分别记录 `expert_load_p99`、`global_kv_bytes`、`state_bytes`、跨设备通信、fallback rate 和单位成功成本。若某条路径超预算，回退到 dense 或显式检索时也要把它的权重和延迟算进账本，否则系统会在压力下出现“模型本身没超，但回退把 GPU 吃满”的二次故障。
-
-## 47.17 三种路由叠加后的尾延迟
-
-MoE router、attention/SSM path router 和服务层 model router 可能同时作决定。每层路由都带来候选选择、状态准备和失败回退；串联之后，平均延迟看起来正常，p99 却可能被少数热门专家、global evidence 或跨设备 state 迁移拉高。
-
-可以把一次请求的尾延迟近似分成：
-
-~~~math
-T_{\mathrm{tail}}
-=T_{\mathrm{queue}}+T_{\mathrm{expert}}
-+T_{\mathrm{state}}+T_{\mathrm{global}}
-+T_{\mathrm{communication}}+T_{\mathrm{fallback}}
-~~~
-
-压测时要记录 expert load skew、state update time、attention KV bytes 和 fallback rate。只报告 active parameters 不能解释这些尾部成本。
-
-## 47.18 组合训练中的目标冲突
-
-MoE 负载均衡希望专家分布更均匀，SSM gate 可能希望不同 token 使用不同更新强度，attention 路径又可能只在少量证据 token 上激活。若把所有 gate 都加同一种均匀正则，可能压平真正有意义的稀疏性；完全不约束，又可能出现专家热点或路径塌缩。
-
-训练报告应分别列出 load-balance loss、路径熵、state norm、global attention 使用率和任务质量。正则项的目标不是让每种路由看起来均匀，而是在容量、稳定性和任务所需的信息访问之间找到平衡。
-
-## 47.19 组合模型的故障回退
-
-当某个专家不可用时，系统可以选择备用专家、dense fallback 或拒绝请求；当 state 校验失败时，应重算 prefix 或走显式 attention；当 global evidence 不足时，应检索原文或降低自动化等级。回退策略必须在训练和评估中出现，否则线上回退会变成未测试的新模型。
-
-高风险任务还要限制路由自由度，保留可解释的路径和 verifier。模型结构越复杂，越不能把安全验收条件只放在最终文本上。
-
-## 47.20 三类模块组合时 router 不是唯一控制器
-
-MoE router 决定 token 进入哪些 expert，attention/SSM schedule 决定信息如何跨 token 流动。二者叠加后，系统还要控制 expert capacity、state ownership、global evidence path、通信和 fallback。一个 token 被路由到 SSM expert，不代表它可以访问同一请求的所有历史 state；不同 expert 的 state 不能无条件混用。
-
-设计时先明确路由粒度：token、sequence、layer 还是 request；再定义 capacity overflow、drop、reroute 和恢复。对高风险任务，global attention 或 retrieval 可能是硬性条件，不能因为 router 认为某个 expert 便宜就跳过。
-
-## 47.21 组合架构的容量模型
-
-总成本至少包括 dense 主干、expert 激活、expert 间通信、attention KV、SSM state 和临时 workspace：
-
-```math
-C_{\mathrm{total}}
-=C_{\mathrm{dense}}+C_{\mathrm{expert}}
- +C_{\mathrm{comm}}+C_{\mathrm{KV}}
- +C_{\mathrm{state}}+C_{\mathrm{workspace}}
-```
-
-active parameters 降低单 token 的部分计算，不会自动降低所有显存；expert 权重可能仍驻留，KV/state 还随请求增长。容量规划要按 expert load、长短请求混合、通信拓扑和 p99 测量。
-
-## 47.22 组合架构的训练与回退
-
-训练中要检查 router load balance、expert collapse、state reset、attention mask 和长上下文任务；服务中要检查动态 batch、preemption、跨节点通信、cache key、量化和 unsupported fallback。新组合结构上线前保存完整 manifest：expert 配置、layer schedule、position、KV/state schema、router revision 和 kernel。
-
-当某个 expert、kernel 或 global path 失败时，回退应保持输出协议、权限和状态语义。可以降低并发、切换 dense expert 或拒绝任务，但不能静默把未验证的 state 交给另一个路径。
-
-## 47.23 路由粒度决定组合成本
-
-MoE、SSM 和 attention 的组合首先要决定路由粒度。token-level 路由最灵活，却可能产生大量 dispatch 和 state owner；sequence-level 路由更容易管理，但可能把一个混合任务送进不合适的路径；layer-level 路由简单稳定，却无法按难度动态分配精确证据预算。
-
-可以做一个三档消融：固定 dense/SSM/attention，按 token 动态路由，按 request 风险路由。每档固定质量、token budget 和硬件，记录 expert histogram、通信、KV/state bytes、路由延迟、误路由、fallback、引用支持和 p99。若 token-level 的质量增益被通信和状态迁移抵消，sequence-level 可能是更好的工程折中。
-
-容量规划还必须同时考虑 total parameters、active parameters、专家权重驻留、KV、state 和 workspace。一个“每 token 只激活两个 expert”的说法不能推导整机显存或单位成功成本。
-
-## 47.24 组合模型的选择条件
-
-MoE、SSM 和 attention 的基础资料可参考 GShard（https://arxiv.org/abs/2006.16668）、Mamba（https://arxiv.org/abs/2312.00752）和 Transformer（https://arxiv.org/abs/1706.03762）。三者组合的具体模型必须以公开实现为准。
-
-未来组合的关键不是把所有新模块放进模型，而是让容量、历史状态和精确交互各有明确职责，并能被训练、服务和审计。
-
-## 47.25 组合模型的状态所有权
-
-MoE expert、SSM state 和 attention KV 的所有权可能不同。token 路由到 expert 后，状态是按 token、sequence 还是 request 保留；expert 被迁移时 state 是否随之迁移；attention 分支能否读取其他 expert 产生的状态；这些都必须明确，否则 batch reorder 和 preemption 时会出现隐性串线。
-
-每个 state handle 至少绑定 request、model revision、expert/layer、logical position、dtype、schema 和 owner。未提交的候选状态不能写入正式 state；expert overflow、kernel error 和 worker 故障应从最近 committed point 回退。
-
-## 47.26 组合路由的错误归因
-
-组合模型的一次错误可能来自 expert 选择、attention mask、SSM state、通信顺序、量化或最终 decoder。要在 trace 中记录 router decision、expert load、state checksum、KV page、通信耗时、fallback 和证据任务结果。
-
-如果关键 token 被送到不具备所需历史的 expert，属于路由/状态路径问题；如果证据可达但输出错，属于表示/训练/读取问题；如果只在跨节点发生，属于通信或布局问题。把这些错误都归因于“模型能力”会浪费调试预算。
-
-## 47.27 组合架构的匹配实验
-
-至少比较 dense attention+FFN、attention+MoE、SSM+MoE、attention+SSM、三者联合和带 retrieval 的回退路径。固定 token、参数或 active compute 口径，记录局部任务、远距复制、多证据、专家热点、结构化工具、通信、state/KV、p99 和单位成功成本。
-
-如果联合模型只在平均语言 loss 上提升，却在高风险引用或工具任务下降，不能用更高 active efficiency 放行。组合复杂度只有在其负责的失败类型和资源目标上形成可解释收益时才值得维护。
+现有证据留下了几个仍需实验回答的问题：专家更适合放在 FFN 还是 SSM 投影；不同位置是否应该共享路由；最优插入密度是否随主干、任务和规模改变；在更大训练预算和不同检索/长上下文任务上能否复现收益。本章只归纳这些具体组合的证据，不预测一个所有模型都会采用的配方。更广的模型演进判断由第五十章承担。

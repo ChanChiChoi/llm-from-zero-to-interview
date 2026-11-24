@@ -61,13 +61,13 @@ MedAlign 则把输入从考试式问答换成了临床人员真实提出的 EHR 
 
 监督微调适合教模型领域语言、输入输出格式、工作流程和工具协议。样本可以包括问题、必要上下文、专家答案、引用、结构化字段和失败原因：
 
-```math
+~~~math
 \mathcal{L}_{\mathrm{SFT}}
 =-\frac{1}{M}
 \sum_{t} m_{t}\log p_{\theta}(y_{t}\mid x,y_{1:t-1})
 \qquad
 M=\sum_{t} m_{t}>0
-```
+~~~
 
 $m_{t}$ 表示第 $t$ 个位置是否是预期的目标答案 token， $M$ 是这条样本或这个聚合窗口中的有效监督 token 数。用户问题、检索上下文、工具 observation 和 padding 通常不应在 assistant-only SFT 中被误算成目标；结构化字段、引用和拒答理由是否参与 loss，要由任务定义决定。分母使用有效 token 数，是为了避免长答案仅凭长度获得更大权重；按样本平均时则要明确采用了另一种加权策略。
 
@@ -99,10 +99,10 @@ claim -> evidence -> confidence -> action -> escalation
 
 SFT 模仿一个示范答案，RL 可以让模型在多个候选中偏向更符合领域目标的结果。奖励可以来自规则、测试、专家偏好、引用检查、格式校验和安全策略：
 
-```math
+~~~math
 R=R_{\mathrm{correct}}+\alpha R_{\mathrm{evidence}}
 +\beta R_{\mathrm{format}}-\gamma R_{\mathrm{risk}}
-```
+~~~
 
 奖励权重不是越多越好。若引用格式权重过大，模型可能生成形式正确但内容无关的引用；若拒答惩罚过强，模型会在证据不足时冒险回答。
 
@@ -122,11 +122,11 @@ R=R_{\mathrm{correct}}+\alpha R_{\mathrm{evidence}}
 
 例如毛利率可以先按定义计算：
 
-```math
+~~~math
 \mathrm{GrossMargin}
 =\frac{\mathrm{Revenue}-\mathrm{COGS}}
 {\mathrm{Revenue}}
-```
+~~~
 
 用一组同币种、同主体、同期间口径的合成数值复算：若收入为 `100`、销货成本（COGS）为 `64`，毛利是 $100−64=36$，毛利率为 $36/100=0.36=36\%$。若上一可比期间收入同为 `100`、COGS 为 `69`，则毛利率为 $(100−69)/100=31%$；变化是 $31%−36%=−5$ 个百分点。此算例只演示算术，不表示任何公司实际表现；要把变化归因于汇率、价格或成本结构，还必须逐项回到来源证据。
 
@@ -164,11 +164,11 @@ R=R_{\mathrm{correct}}+\alpha R_{\mathrm{evidence}}
 
 评估指标也要和任务结构对应。事实问答可以报告关键字段准确率，计算任务要报告可复算率，引用任务要报告支持主张的比例，工具任务要报告 schema 合法率、成功率和副作用率；拒答则要同时报告在应拒场景上的召回率和在正常场景上的误拒率。对高风险字段，可以用严重性加权错误：
 
-```math
+~~~math
 R_{\mathrm{severity}}
 =\frac{\sum_{i} s_{i}\,\mathbf{1}[\mathrm{error}_{i}]}
 {\sum_{i} s_{i}}
-```
+~~~
 
 $s_{i}$ 是第 $i$ 个错误的业务严重度，要求 $s_{i}\geq0$ 且 $\sum_{i} s_{i}>0$。一个漏掉药物过敏的样本不应和一个标点错误拥有相同权重。若评测集中根本没有被赋予严重度的项目，指标应报告为未定义，并补齐评测设计；把分母替换为一个小常数会得到貌似很低的风险率，却没有任何风险覆盖。还要报告专家之间的一致性、人工接管率、工具调用延迟和单位成功成本，因为领域系统的质量不只由模型文本决定。
 
@@ -210,10 +210,10 @@ SFT 适合教模型领域词汇、格式、流程和工具协议；偏好优化�
 
 可以将单条样本的质量分数写成：
 
-```math
+~~~math
 Q=\alpha Q_{\mathrm{fact}}+\beta Q_{\mathrm{evidence}}
  +\gamma Q_{\mathrm{format}}-\lambda Q_{\mathrm{risk}}
-```
+~~~
 
 在高风险领域， $Q_{\mathrm{fact}}$ 和 $Q_{\mathrm{risk}}$ 不能被低风险格式分抵消。若事实正确率为 `0.96`，但关键过敏字段召回只有 `0.70`，平均事实分会掩盖最危险的错误。评估应报告 critical-field recall、unsupported claim rate、人工接管率和错误严重度，而不是只有一个总体准确率。
 
@@ -434,13 +434,13 @@ N_{\mathrm{successful\ tasks}}
 
 可以为一条样本定义结构化损失：
 
-```math
+~~~math
 \mathcal{L}
 =\lambda_{\mathrm{text}}\mathcal{L}_{\mathrm{text}}
 +\lambda_{\mathrm{evidence}}\mathcal{L}_{\mathrm{evidence}}
 +\lambda_{\mathrm{calc}}\mathcal{L}_{\mathrm{calc}}
 +\lambda_{\mathrm{action}}\mathcal{L}_{\mathrm{action}}.
-```
+~~~
 
 这不是要求训练时一定使用四个独立 head，而是提醒我们：如果只对最终文本算 loss，就很难知道模型究竟错在事实、计算、决策还是表达。工程上可以先用普通 SFT 训练格式，再用规则、程序和人工复核分别评测这四类行为。
 
@@ -458,13 +458,13 @@ N_{\mathrm{successful\ tasks}}
 
 一个简单的发布决策表达可以写成：
 
-```math
+~~~math
 D_{\mathrm{release}}
 =\mathbf{1}[Q\ge Q_{\min}]
 \mathbf{1}[R\le R_{\max}]
 \mathbf{1}[C\le C_{\max}]
 \mathbf{1}[P=1],
-```
+~~~
 
 其中 $Q$ 是独立任务质量， $R$ 是严重性加权风险， $C$ 是单位成功任务成本， $P$ 表示协议、权限和回滚测试全部通过， $D_{\mathrm{release}}$ 是发布决策的诊断量。 $Q$、 $R$、 $C$ 及其阈值必须是有限、同一评估版本下的量；若关键任务桶未评分、风险项未知、没有成功任务，或恢复演练尚未通过，决策应是“不可发布”，而不是把未知当作满足阈值。乘法形式表达的是硬性条件：不能用平均质量抵消一次越权写入，也不能用低价格抵消不可审计的错误结论。
 

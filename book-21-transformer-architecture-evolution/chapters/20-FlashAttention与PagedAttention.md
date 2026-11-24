@@ -1,291 +1,90 @@
 # 第二十章：FlashAttention、PagedAttention 与 Attention Kernel 优化
 
-## 20.1 两个名字解决的是两层不同问题
+## 20.1 先分清四类优化对象
 
-FlashAttention 和 PagedAttention 经常被放在同一张“推理优化”清单里，但它们优化的对象不同。FlashAttention 是 attention 计算的 kernel/算法重排：不显式 materialize 巨大的 score/probability 矩阵，利用 GPU SRAM 做分块和在线 softmax，结果仍可与标准 attention 对齐。PagedAttention 是 KV cache 的内存管理和寻址方案：把每个请求的历史分成固定 block，通过 block table 管理动态增长、共享和回收。
+第十章统计 attention 要计算多少 query-key 位置对，并解释 online softmax 怎样跨块归一化；第十一章估算生成期间每个请求保存多少 KV。这里继续追问：这些计算和状态在 GPU 上怎样移动、分工和寻址？
 
-前者主要减少 attention 中间结果的 HBM 读写，后者主要减少 KV cache 的碎片和预留浪费。一个 serving engine 可以同时使用两者，也可以只使用其中一个。
+| 方法 | 改变什么 | 是否改变原 attention 的可见位置 | 主要缓解的问题 |
+| --- | --- | --- | --- |
+| FlashAttention | 把完整 attention 按 tile 计算，减少 score/probability 中间量在 HBM 与片上存储之间的往返 | 否 | 物化中间矩阵的数据搬运和额外存储 |
+| Flash-Decoding | 将 decode 时较长的 K/V 维度分段并行计算，再合并各段结果 | 否 | 单步 query 行少，GPU 并行度不足 |
+| PagedAttention | 用 block table 将逻辑 KV block 映射到不连续物理 block | 否 | 动态 KV 分配的连续预留浪费及前缀状态共享 |
+| Block-sparse attention | 跳过被 mask 排除的 query-key block | 是 | 计算较少的位置对；布局和 kernel 另有约束 |
 
-## 20.2 标准 attention 为什么会产生中间矩阵
+前三种改变计算的组织方式或 K/V 的存放与寻址；block-sparse 则改变 attention 连接图，见[第十九章](19-Sliding-Window与稀疏注意力.md)和[第二十六章](26-稀疏与块稀疏Attention.md)。把它们统称为“attention 加速”会遮住各自的成本和语义边界。
 
-标准计算为：
+## 20.2 FlashAttention：完整 attention 怎样减少中间数据往返
 
-~~~math
-S=\frac{QK^\top}{\sqrt{d}},\qquad
-A=\operatorname{softmax}(S),\qquad
-O=AV
-~~~
+GPU 把 Q/K/V 和中间结果放在高带宽显存（HBM）中；寄存器与 shared memory 等片上存储离计算单元更近，但容量有限。kernel 是 GPU 上执行的一段计算程序。直接 attention 通常先算所有允许的 score，再对每行做 softmax，最后用概率加权汇总 value。若把 score 和 probability 都写入 HBM，两个中间矩阵在多个计算阶段之间来回读写；它们的 shape 和 pair 数已在[第十章](10-o-n2-attention的计算与显存瓶颈.md)说明。FlashAttention 的观察是，这些中间结果不必先存成完整的 $N\times N$ 矩阵。
 
-若 query 和 key 长度都是 `N`，`S` 和 `A` 的元素规模为 `N^2`。训练时需要保存反向传播所需的中间量，推理时虽然可以避免保存全部梯度，但 naive kernel 仍可能在 GPU 全局内存中读写这些矩阵。问题不只是 FLOPs，而是 HBM 带宽和工作集大小。
+FlashAttention 按 tile 处理 Q、K、V。针对同一批 query 行，kernel 逐块读取对应的 K/V，计算局部 score，并把局部 softmax 结果并入每行的累计状态：
 
-FlashAttention 的目标是分块处理 `Q/K/V`，在片上存储一个小块的 score，做完 softmax 累积后丢弃，不把完整 `N×N` 矩阵写回 HBM。它没有把数学 attention 近似成线性 attention，因而应区分“memory-efficient exact attention”和“approximate attention”。
+| 每行状态 | 含义 | 后续用途 |
+| --- | --- | --- |
+| $m$ | 已处理 score 的最大值 | 为指数运算保持数值稳定 |
+| $\ell$ | 相对该最大值的指数权重和 | 保留全局 softmax 的归一化分母 |
+| $u$ | 同一套指数权重对 V 的加权和 | 保留 attention 输出的分子 |
 
-## 20.3 在线 softmax 的稳定公式
+处理新 tile 时，局部最大值可能改变 $m$，因此旧的 $\ell$ 与 $u$ 必须按新的最大值重标定，再合入当前 tile。所有有效 K/V 块处理后，以 $u/\ell$ 得到该行输出。这个状态沿用第十章的在线 softmax 推导；本节关注的是：每块短暂留在片上完成计算，而不把完整 score/probability 写回 HBM。原始 [FlashAttention 论文](https://arxiv.org/abs/2205.14135)给出 exact attention 算法和 IO 分析；Berkeley 的[课程讲义](https://scalable-ai.eecs.berkeley.edu/F2026/assets/lecture_slides/lecture6.pdf)用 S/P 中间矩阵的 HBM 往返图示说明了问题。
 
-对一行 score，直接计算 `exp(s_j)` 可能溢出。分块 online softmax 维护最大值 `m`、归一化和 `l` 以及加权 value 累积 `o`。合并新块时可以写成：
+这里的 exact 表示它仍对同一个可见集合计算标准 softmax attention，没有用稀疏图或核近似替代 dense 连接。tile 顺序改变后浮点加法顺序也会变化，所以结果允许有舍入误差，不承诺逐位一致。训练 backward 可以重新计算 tile 的 score/probability，减少需要保存的中间结果，但代价是重复计算；权重、optimizer state 和其他层 activation 仍计入训练显存。
 
-~~~math
-m_{new}=\max(m, m_b)
-~~~
+FlashAttention 因而减少的是 attention 中间数据的 HBM 流量和额外存储，不会把 dense 的 query-key pair 计算从二次量级变成线性量级。若原实现已经受其他矩阵乘、短序列启动开销或服务调度限制，IO 改善也不必然成为同等幅度的端到端加速。
 
-~~~math
-l_{new}=e^{m-m_{new}}l+e^{m_b-m_{new}}l_b
-~~~
+## 20.3 Kernel 演进：并行划分、硬件流水与 decode
 
-~~~math
-o_{new}=e^{m-m_{new}}o+e^{m_b-m_{new}}o_b
-~~~
+FlashAttention 的版本演进主要是对不同 GPU 上的瓶颈重新安排工作，而不是改变 softmax attention 的数学定义。
 
-最后输出 `o/l`。这组式子说明为什么不需要保存完整概率矩阵，同时保持数值稳定。实际 FlashAttention 会进一步处理 causal mask、warp work partition、shared memory 和反向传播。
+| 路线 | 针对的瓶颈 | 主要变化 |
+| --- | --- | --- |
+| FlashAttention（2022） | 中间矩阵反复读写 HBM | 使用片上 tiling 和在线 softmax，减少中间矩阵物化 |
+| FlashAttention-2（2023） | thread block/warp 工作分配不均、共享内存通信和非矩阵乘操作 | 沿序列维增加并行工作，调整 warp 分工；论文的效率数据来自其 A100 等测试配置 |
+| FlashAttention-3（2024） | Hopper Tensor Core 与数据搬运能力未充分重叠 | 使用异步调度与 warp specialization 交叠搬运和矩阵计算，并研究 FP8 路径；H100 结果及数值误差比较绑定论文设置 |
+| FlashAttention-4（2026） | Blackwell 上矩阵计算吞吐与共享内存、指数运算等资源的扩展不对称 | 重新设计异步矩阵流水、tile 调度和 softmax 相关计算；性能结论绑定 B200、dtype、长度及对照库版本 |
 
-## 20.4 一个教学版分块 attention
+这些层次的变化见 [FlashAttention-2 原论文](https://arxiv.org/abs/2307.08691)、作者在 [Stanford CRFM 的说明](https://crfm.stanford.edu/2023/07/17/flash2)、[FlashAttention-3 原论文](https://arxiv.org/abs/2407.08608)和 [FlashAttention-4 原论文](https://arxiv.org/abs/2603.05451)。以 FA4 为例，论文将测试固定在 B200、FP16/BF16、指定长度与 head shape，并和 cuDNN 9.13、Triton 等基线比较；同一论文还注明后续 cuDNN 版本吸收了相关技术后表现接近 FA4。因此该数字只能说明对应实验里的实现比较，不能当作当前库或所有 GPU 的固定排名。
 
-~~~python
-import math
-import torch
-
-
-def blocked_attention(q, k, v, block=2):
-    # q/k/v: [seq, dim]，仅用于展示在线 softmax思想
-    n, d = q.shape
-    out = torch.zeros_like(q)
-    for start in range(0, n, block):
-        q_block = q[start:start + block]
-        scores = q_block @ k.T / math.sqrt(d)
-        future = torch.arange(n)[None, :] > torch.arange(start, min(start + block, n))[:, None]
-        scores = scores.masked_fill(future, float("-inf"))
-        out[start:start + q_block.size(0)] = scores.softmax(dim=-1) @ v
-    return out
-
-
-q = k = v = torch.randn(6, 4)
-print(blocked_attention(q, k, v).shape)
-~~~
-
-这个版本仍然一次性生成每个 query block 的 score，不是生产级 FlashAttention；它只让读者看到“按 query block 处理”的接口。真正的 kernel 还要把 key/value 分块并在线合并，且要处理 `[batch, heads, seq, dim]`、变长 batch 和 dtype。
-
-## 20.5 PagedAttention 解决 KV cache 的动态内存问题
-
-自回归生成中，每个请求的 KV cache 随输出增长，不同请求长度不同、结束时间不同。如果为每个请求预留一段连续最大内存，会产生内部碎片；如果频繁搬移连续数组，会产生复制成本。PagedAttention 借鉴虚拟内存，把逻辑序列分成固定大小的 token block，物理 block 不要求连续。
-
-逻辑位置 `p` 对应：
-
-~~~math
-b=\left\lfloor\frac{p}{B}\right\rfloor,\qquad o=p\bmod B
-~~~
-
-其中 `B` 是 block token 数。请求维护一个 block table：
-
-~~~text
-logical block 0 -> physical block 17
-logical block 1 -> physical block 03
-logical block 2 -> physical block 42
-~~~
-
-attention kernel 根据 table 找到对应物理页，模型逻辑上仍看到连续历史。
-
-## 20.6 分页 cache 的最小模型
-
-~~~python
-class ToyPagedKV:
-    def __init__(self, block_size, num_blocks):
-        self.block_size = block_size
-        self.free = list(range(num_blocks))
-        self.tables = {}
-        self.lengths = {}
-
-    def append(self, request_id, token):
-        length = self.lengths.get(request_id, 0)
-        if length % self.block_size == 0:
-            if not self.free:
-                raise MemoryError("no free KV block")
-            self.tables.setdefault(request_id, []).append(self.free.pop())
-        self.lengths[request_id] = length + 1
-        return self.tables[request_id][-1], length % self.block_size, token
-
-    def release(self, request_id):
-        for block in self.tables.pop(request_id, []):
-            self.free.append(block)
-        self.lengths.pop(request_id, None)
-
-
-cache = ToyPagedKV(block_size=4, num_blocks=3)
-for token in range(9):
-    print(cache.append("A", token))
-cache.release("A")
-print("free", cache.free)
-~~~
-
-这个 demo 只管理 token 到 block 的映射，没有真正存 K/V，也没有并发锁、引用计数、prefix sharing 或 GPU kernel。它用来说明：请求的逻辑长度和物理存储位置是两个概念。
-
-## 20.7 Prefix sharing 和引用计数
-
-多个请求共享相同 system prompt 或对话前缀时，可以让它们的 block table 指向同一组物理 block。共享 block 不能被任一请求原地修改，因此追加新 token 时采用 copy-on-write 或只在新 block 写入。释放时要用引用计数：
-
-~~~math
-\operatorname{refcount}(b)=\#\{r\mid b\in\operatorname{table}(r)\}
-~~~
-
-只有计数归零才能回收到 free list。错误的回收会导致两个请求输出互相污染，错误的引用不释放则会造成隐性内存泄漏。
-
-## 20.8 两种技术如何组合
-
-FlashAttention 的输入可以是分页寻址后的 K/V block，PagedAttention 负责从哪些物理页取数据，Flash-like kernel 负责如何在 GPU 上高效计算 score/softmax/value。组合的关键是 block size、head layout、page table lookup、变长 batch 和 prefix sharing 的一致性。
-
-如果 block 太小，页表和索引开销上升；太大则尾部碎片增加。若 prefix sharing 很多，物理页节省明显；若请求短且没有共享，收益可能小于管理开销。需要按 prompt 长度分布和并发测量，而不是只引用论文中的吞吐数字。
-
-## 20.9 常见失败模式
-
-FlashAttention 侧的失败包括 mask 错误、非 contiguous tensor、head_dim 或 dtype 不支持、因果/非因果模式混淆、数值误差造成 logits 差异和 fallback 到慢 kernel。PagedAttention 侧的失败包括 block table 越界、释放后仍被引用、batch 重排不更新 owner、prefix cache 跨 tokenizer/template 误复用、preemption 只保存逻辑长度而没有物理映射。
-
-排查顺序是：在小序列上对比 dense reference 的 logits；打印每个 request 的逻辑 token、physical block、offset 和 refcount；验证 append、release、rollback、swap、resume；再看 profiler 中到底使用了哪一个 kernel。不要看到 API 名称就假定优化已经生效。
-
-## 20.10 训练、推理和显存边界
-
-FlashAttention 对训练的收益通常包括降低 activation memory 和 HBM traffic；PagedAttention 的主要价值出现在动态 serving，因为训练 batch 往往已固定、序列 padding/packing 策略不同。反之，Paged KV 管理不能消除 attention score 的计算，FlashAttention 也不能解决请求间 KV 碎片。
-
-KV 的总容量仍可粗略写为：
-
-~~~math
-M_{KV}=2\cdot L\cdot B\cdot T\cdot H_{kv}\cdot d_h\cdot b
-~~~
-
-分页减少的是浪费和共享成本，并没有改变每个已存 token 的基础信息量。GQA、KV 量化、滑窗、latent cache 和递归 state 才会改变 payload 或历史形式。
-
-## 20.11 机制与边界：不要用“理论复杂度”替代 roofline 分析
-
-FlashAttention 通常仍保留 `O(N^2d)` 的算术计算量，只降低中间矩阵的内存占用和读写；它的优势来自 memory hierarchy、tile、occupancy 和 work partition。PagedAttention 的额外成本是页表查找、block gather、调度和可能的碎片；其收益来自提高可用 batch 和减少预留浪费。
-
-对端到端系统应分别记录：prefill/decode tokens/s、TTFT、TPOT、峰值显存、KV 使用率、碎片率、page fault/eviction、prefix hit rate、kernel fallback 和 p99。一个优化可能提升吞吐却让单请求延迟变差，必须绑定 SLO。
-
-## 20.12 面试追问、误区与练习
-
-**问：FlashAttention 是不是把 attention 复杂度从二次降成线性？**
-
-标准回答：通常不是。它在保持精确 attention 结果的前提下，用分块和 online softmax 减少中间矩阵的 HBM 读写，实际速度和显存更好，但数学 score 交互仍可能是二次。
-
-**问：PagedAttention 是不是压缩了 KV？**
-
-标准回答：主要是分页管理动态 KV 的物理存储，降低碎片、支持共享和灵活增长；它不等于低秩压缩或量化，单 token KV payload 仍由模型的 head 数、维度和 dtype 决定。
-
-常见误区包括把两个技术当作同一算法、混淆 page/block 与 OS 页、只看显存不看 kernel、prefix sharing 没做引用计数，以及把框架集成名当作实际 kernel 证据。
-
-练习：实现一个 dense reference、blocked attention 和 toy paged KV；为 100 个不同长度请求计算连续预留、分页和 prefix sharing 的理论浪费，列出仍未计入的 runtime 成本。
-
-## 20.13 两种优化分别改变什么
-
-FlashAttention 主要优化 attention 的 IO：在片上分块计算，避免把完整 score 和 probability 矩阵反复写回显存。PagedAttention 主要优化 KV cache 的物理管理：把历史按 block 分配，减少连续内存和请求长度变化带来的碎片。
-
-因此二者可以组合，不能互相替代。FlashAttention 不会自动解决请求之间的 KV 碎片，PagedAttention 也不会自动让 score 计算变成线性。
-
-## 20.14 从论文复杂度到服务指标
-
-评估 attention kernel 时记录：
-
-~~~text
-flops
-global_memory_bytes
-kernel_time
-occupancy
-prefill_tokens_per_second
-decode_tokens_per_second
-kv_fragmentation
-peak_memory
-p99
-~~~
-
-相同 FLOPs 的 kernel 可能因为内存访问和形状不同而有完全不同的时间。服务端还要把 block 分配、释放、共享、抢占和重算纳入压测。
-
-## 20.15 Kernel 优化要放回内存层次
-
-FlashAttention 的核心不是改变 attention 的数学结果，而是通过 tiling、在线 softmax 和片上内存复用，减少中间矩阵写回 HBM。PagedAttention 主要解决的是自回归服务中 KV cache 的动态分配、碎片和共享。二者可以组合，但不应把“更快的 attention kernel”和“更好的 cache allocator”当成同一个优化。
-
-分析一个 kernel 时要问：计算量在哪里，数据从哪一级内存读写，是否受 HBM 带宽限制，是否有足够并行度，变长 batch 是否导致 padding 浪费。理论 FLOPs 不变时，memory traffic、occupancy、kernel launch 和 page indirection 仍然会改变真实 tokens/s。
-
-## 20.16 PagedAttention 的正确性不只是显存不爆
-
-分页 cache 的逻辑序列通过 block table 映射到物理 page。每次 token 追加、batch 重排、preemption、prefix sharing 和释放都必须保持逻辑位置到物理页的一致性。page 被共享时需要引用计数或 copy-on-write；请求结束时不能提前释放仍被其他请求使用的前缀。
-
-一个最小回归顺序是：单请求无共享、变长 batch、共享前缀、分叉后写入、抢占恢复、取消释放和长序列扩容。每一步比较 full recompute 与 cache decode 的 logits，记录 request id、logical position、page id、revision 和 checksum。这样才能区分“容量优化成功”和“输出悄悄错位”。
-
-## 20.17 用端到端实验而不是论文数字验收
-
-基准至少包含短输入/长输入、短输出/长输出、低并发/高并发、相同前缀/随机前缀、取消、抢占和 OOM 注入。报告 TTFT、TPOT、吞吐、p50/p95/p99、峰值显存、page waste、prefix hit、preemption 次数和单位成功成本。
-
-FlashAttention 路径应额外检查数值误差、mask、causal 边界、不同 dtype 和长序列；PagedAttention 路径应额外检查 block table、引用计数和跨租户 cache key。若为了性能触发稠密 fallback，应把它作为可观察事件，不能在总平均值中隐藏。
-
-本文所述 FlashAttention 可参考论文 https://arxiv.org/abs/2205.14135，PagedAttention 可参考论文 https://arxiv.org/abs/2309.06180；具体 API、kernel 支持范围和 vLLM/SGLang 行为随版本变化，应以对应实现和基准为准。
-
-## 20.18 在线 softmax 和分页 cache 的共同正确性
-
-FlashAttention 的在线 softmax 与 PagedAttention 的 block table 看起来属于不同层，但它们在 serving 中会共同影响输出。kernel 先按逻辑 token 顺序读取多个物理 block，再对 score 做稳定归一化；如果 page table 漏掉一个 block、重复一个 block 或把 padding 当作有效 token，online softmax 仍然会得到一个数值稳定但语义错误的结果。
-
-因此正确性测试不能只检查 `NaN` 或输出 shape。对每个请求保存逻辑位置到物理页的映射、每个 query 的有效 key 数、mask 后的 score 范围和最终 logits checksum，并与 full recompute reference 比较。一个合理的回归矩阵包括：单 block、跨 block 边界、共享 prefix、分叉写入、释放后复用、抢占恢复和不同长度混合 batch。
+训练与 prefill 往往有较多 query 行可并行；decode 每一步通常只有一个或少量新 query，却要读取不断增长的历史 K/V。若只沿 query 行并行，batch 较小时可用工作可能不足。Flash-Decoding 将 K/V 序列切成若干分段，在各段上并行计算 query 的局部 attention。每段返回与 20.2 节相同类型的行统计 $(m_j,\ell_j,u_j)$：$m_j$ 是该段 score 最大值，$\ell_j$ 是相对该最大值的指数和，$u_j$ 是对应的加权 value 和。归并时先统一各段的指数参考点，再相加分母与分子：
 
 ```math
-E_logit = max over t,v of abs(logit_cached(t,v) - logit_full(t,v))
+m = \max_j m_j,\qquad
+\ell = \sum_j \exp(m_j-m)\ell_j,\qquad
+u = \sum_j \exp(m_j-m)u_j,\qquad
+o = \frac{u}{\ell}.
 ```
 
-如果 `E_logit` 只在 block 边界出现，优先查 offset 和 mask；如果所有位置都出现相同尺度误差，查 dtype、scale 或 kernel；如果释放另一个请求后才出错，查 reference count 和 owner 更新。这样可以把“FlashAttention 数值误差”和“PagedAttention 物理映射错误”分开。
+因此分段结果不能直接做算术平均；按归一化统计加权后，才得到对全部允许 key 的同一次 softmax。这个拆分与归并过程见 [PyTorch 团队的 Flash-Decoding 说明](https://pytorch.org/blog/flash-decoding/)。它增加了一次跨分段归并，适用收益取决于上下文长度、并行规模和实际 kernel；它没有删掉被允许的历史位置，也不是 KV cache 分页本身。
 
-## 20.19 从单请求节省到并发容量
+## 20.4 PagedAttention：逻辑连续的 KV 与物理分散的 block
 
-假设设备可用 KV 容量为 `M_cap`，每个请求的有效 KV 为 `m_i`，连续预留带来的浪费为 `w_i`，分页 metadata 和共享管理成本为 `m_meta`，则可用并发不是简单的 `M_cap / mean(m_i)`，而应近似看成：
+自回归生成的 K/V 随 token 逐步增加。如果系统为每条请求预留最大长度的一整段连续显存，短请求会占着尚未使用的位置；请求长度变化也让共享和回收困难。PagedAttention 把每条逻辑 KV 序列切成固定 token 数的 block，再用 block table 将逻辑位置映射到物理显存 block。相邻逻辑块可以放在物理上互不相邻的位置。
+
+设请求 $r$ 的 token 位置从 $0$ 开始，block 容量为 $B$。位置 $t$ 落在第 $b$ 个逻辑块内的偏移 $o$，该逻辑块对应的物理块编号为 $p$：
 
 ```math
-N_admit = max N such that sum_i(m_i + w_i) + m_meta <= M_cap
+b=\left\lfloor\frac{t}{B}\right\rfloor,\qquad
+o=t\bmod B,\qquad
+p=P_r[b].
 ```
 
-分页降低 `w_i`，prefix sharing 降低重复前缀的 `m_i`，FlashAttention 主要影响 prefill workspace 和内存流量。三者对并发容量的贡献不同。短请求很多时，metadata 和调度成本可能占比上升；长请求很多时，KV payload 和 admission 变成主导；混合流量还要留出短请求的 deadline 余量。
+其中 $P_r$ 是请求 $r$ 的 block table。比如 $B=4$ 时，逻辑块 $0$ 可以指向物理块 $12$，逻辑块 $1$ 指向物理块 $3$；逻辑顺序仍是 $0$ 至 $7$。这些物理编号仅用于说明映射关系。[PagedAttention 原论文](https://arxiv.org/abs/2309.06180v1)说明了 logical block、physical block 和 block table 的设计。
 
-一个有用的压测是固定总 token 数，分别改变请求切分方式：少量长请求、许多短请求、相同前缀请求和完全随机前缀请求。比较 continuous batching、paged cache 和 prefix sharing 的 TTFT、TPOT、峰值显存、碎片率、prefix hit、fallback 和单位成功成本。这样才能知道优化是否真正提升了产品容量，而不是只让单条 microbenchmark 更漂亮。
+decode kernel 沿请求的 table 找到每个 K/V block，按逻辑 token 顺序读取；分段 score 仍要对同一 query 的全部有效 key 做全局 softmax 归一化。把所有物理块先复制、拼成新的连续大张量再 attention，会重新引入分页原本要避免的数据移动。分页降低最大长度预留浪费并允许按需增长，不会减少每个活跃 token 的逻辑 KV payload；每条请求未填满的尾块仍可能留下最多 $B-1$ 个 token 槽位。块越小，尾部空槽上限越低，但同样数量的 token 需要更长的 block table；块越大则相反，因此 block size 是元数据、尾块浪费和访问成本之间的实现取舍。
 
-## 20.20 从 roofline 到真实 kernel 选择
+地址查找、变长处理和非连续访问也要付出成本。PagedAttention 原论文在其特定测试中报告，attention kernel latency 比优化过的 FasterTransformer 基线高约 20%–26%；论文也单独报告了更灵活的内存管理对系统并发与吞吐的作用。[原论文 §7.1](https://arxiv.org/abs/2309.06180v1)中的 kernel 差值不能当作当前 vLLM kernel 的常数，也不能据此否定或保证其他负载下的端到端收益。
 
-FlashAttention 通过 tiling、在线 softmax 和减少中间矩阵读写改善 attention kernel 的内存行为，但收益取决于序列长度、head dimension、dtype、mask、GPU 架构和 batch。对短序列，启动和调度常数可能占主导；对长 prefill，HBM 访问和 workspace 可能占主导；对 decode，瓶颈又可能转成 KV 读取和小 batch。
+## 20.5 共享前缀：复用 KV 并保护分支写入
 
-因此选择 kernel 时应先标注阶段和瓶颈：
+并行采样、beam search 或重复 system prompt 会产生相同前缀。若前缀 KV blocks 完全相同且其计算条件兼容，多个请求可以在 block table 中引用同一组只读物理块，而不必各留一份副本。请求分叉后，新增 token 逐步写入自己的状态；若下一次写入会改动仍被其他请求引用的 block，就必须先复制该块或采用等价的隔离规则。引用计数归零后，物理块才可回到空闲池。[PagedAttention 原论文](https://arxiv.org/abs/2309.06180v1)以 parallel sampling 说明了共享前缀、引用计数与 copy-on-write。
 
-~~~math
-T_{\mathrm{kernel}}
-\gtrsim\max\left(
-\frac{F}{P_{\mathrm{compute}}},
-\frac{B_{\mathrm{HBM}}}{BW_{\mathrm{HBM}}},
-\frac{B_{\mathrm{workspace}}}{BW_{\mathrm{workspace}}}
-\right).
-~~~
+PagedAttention 提供了共享 block 的表示方式；自动 prefix cache 的 key、淘汰策略和适配器/多模态区分属于 engine 实现。例如 [vLLM 的 Automatic Prefix Caching 文档](https://docs.vllm.ai/en/stable/features/automatic_prefix_caching/)按前缀和 block 内容识别可复用状态，并说明具体 KV cache group 与版本条件。复用前提是影响 K/V 的模型状态、token 序列、位置和相关配置一致；不兼容的 tokenization、位置规则或模型适配不能因为文本看起来相同就共享。活跃请求仍引用的 block 不能作为普通 cache 条目随意淘汰。
 
-这个 roofline 只提供下界，不能替代 profiler。实际压测还要看 fused kernel 是否生效、非支持形状是否 fallback、mask 是否引入分支、量化/FP8 是否改变累加精度。报告“用了 FlashAttention”时，应同时给出 shape、dtype、版本和是否包含 fallback。
+## 20.6 组合与后端选择：名称不等于执行路径
 
-## 20.21 PagedAttention 的 allocator 不变量
+FlashAttention 与 PagedAttention 可以处理系统里的不同部分：前者计算 attention 时减少中间矩阵搬运，后者为动态 K/V 提供逻辑到物理的 block 映射。Flash-Decoding 还可以针对少量 query、长历史增加 K/V 维并行。是否能把分页读取、指定 FlashAttention 版本、mask 和某种 dtype 组合在一个 fused kernel 中，取决于具体后端是否支持那种布局和 shape；概念上互补不代表任一框架都会自动组合。
 
-分页 KV cache 的正确性依赖逻辑 token 顺序与物理 block table 的映射。对请求 `r`，可以抽象成：
+高层 SDPA API 也不能单独证明 kernel 路径。以 PyTorch 2.15 文档为例，SDPA 会在可用实现间选择，融合 kernel 有输入限制，不同后端的浮点结果可能有细微差异；需要某个特定 backend 时，可通过[受控选择入口](https://docs.pytorch.org/docs/2.15/generated/torch.nn.attention.sdpa_kernel.html)限定路径，相关限制见 [SDPA API 文档](https://docs.pytorch.org/docs/2.15/generated/torch.nn.functional.scaled_dot_product_attention.html)。因此应按具体 PyTorch 版本、shape、dtype、mask 和设备解释实际路径，不凭 API 名称推断一定调用了 FlashAttention。
 
-~~~math
-\mathrm{logical\_token}(r,j)
-\longrightarrow
-(\mathrm{block\_id},\mathrm{offset}),
-~~~
+比较效果时，先区分 kernel latency、端到端吞吐与延迟、KV 占用和可接纳请求数。PagedAttention 的 block table 可能增加单次访问开销，却减少为最长长度预留的空间；更多请求能同时放入设备时，系统结果可能与单 kernel 的快慢不同。服务调度与端到端压测由相应推理系统资料主讲，参见[第六册第六章《批处理与调度》](../../book-06-llm-deployment/chapters/06-批处理与调度.md)和[第二十四册第五十三章《构建 serving engine 的 benchmark 指标和调参实验框架》](../../book-24-llm-inference-engine/chapters/53-构建serving-engine的benchmark指标和调参实验框架.md)。其他 KV 分配路线，如 [vAttention](https://arxiv.org/abs/2405.04437v3)，也采用不同的映射和内存管理机制；分页是一种设计选择，不是所有推理系统的前提。
 
-并要求每个有效逻辑位置恰好映射一次，已释放 block 不再被请求引用，共享 prefix 只有在引用计数正确时才能复用。分叉写入时，父请求和子请求应共享只读 prefix，首个写入位置触发 copy-on-write；若直接覆盖共享页，两个请求的 logits 会同时变化。
-
-回归应覆盖 block 边界、变长 batch、prefix sharing、分叉后写入、抢占、取消释放、page reuse 和 snapshot/restore。每次记录 request id、logical position、block table、owner 和 checksum。数值稳定但映射错误的输出最难排查，所以 allocator invariant 要在 kernel 之前单独测试。
-
-## 20.22 把优化收益换算成并发容量
-
-设设备可用 KV 容量为 `M_cap`，请求 `i` 的有效 cache 为 `m_i`，分页浪费为 `w_i`，元数据为 `m_meta`，则接入集合 `A` 需要满足：
-
-~~~math
-\sum_{i\in A}(m_i+w_i)+m_{\mathrm{meta}}
-\le M_{\mathrm{cap}}.
-~~~
-
-FlashAttention 主要降低 attention 中间读写和 workspace，PagedAttention 主要降低 `w_i` 和动态分配碎片，prefix sharing 主要降低相同前缀的重复 `m_i`。三者不能把收益简单相加。短请求很多时，元数据和调度占比会上升；长请求很多时，KV payload 和 admission 是主导；共享前缀不同时，prefix cache 的收益又会消失。
-
-容量实验应固定总输入/输出 token 数，改变请求切分方式：少量长请求、许多短请求、相同前缀和随机前缀。报告 TTFT、TPOT、p99、峰值显存、page waste、prefix hit、fallback、OOM 和单位成功成本。单请求显存下降而混合流量 p99 上升，不能算完整优化成功。
-
-## 20.23 资料边界与小结
-
-FlashAttention-2 论文见 https://arxiv.org/abs/2307.08691；PagedAttention/vLLM 论文见 https://arxiv.org/abs/2309.06180。具体 kernel 支持、block size、量化 cache、prefix cache 和调度策略必须以所用引擎版本的官方文档和 profiler 为准。
-
-FlashAttention 优化“怎么算”，PagedAttention 优化“历史放在哪里、怎么增长和共享”。把这两个层次拆开，才能正确判断长上下文服务的瓶颈。
+因此，读到“用了 FlashAttention”时，追问它保留了哪些连接、实际采用哪个版本和 kernel；读到“用了 PagedAttention”时，追问 block table 和共享状态怎样维护、测量的是 kernel 还是系统结果。只有把算子计算、KV 寻址、设备版本和请求工作负载分别说清，才能判断一次优化究竟改变了什么。

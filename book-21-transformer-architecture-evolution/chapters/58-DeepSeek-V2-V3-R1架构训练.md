@@ -1,264 +1,147 @@
 # 第 58 章 DeepSeek-V2、V3 与 R1：MLA、MoE、MTP 和推理强化
 
-## 58.1 DeepSeek 系列为什么值得单独学习
+DeepSeek-V2、V3 与 R1 经常被放进同一条“架构高效、训练便宜、推理更强”的叙事里，但它们并不是一个模型上的四个开关。V2 与 V3 报告讨论 Transformer 架构、稀疏专家和训练系统；R1 与 R1-Zero 则以 V3-Base 为架构基座，重点变化在后训练。读这条路线时，先问清楚对象是哪一个版本，再区分架构、训练目标、后训练阶段和作者报告的评测结果。
 
-DeepSeek 系列把几个通常分开讨论的方向放在了同一条路线中：注意力的 KV 压缩、稀疏专家、训练效率、多 token prediction 和可验证推理强化。它的研究价值不在于提供一个单点技巧，而在于展示架构、训练和推理成本如何协同设计。
+本章重点比较公开资料能确认的结构关系。MLA 和 MoE 的完整一般机制分别见[第四章](04-mha-mqa-gqa-mla的演进与trade-off.md)、[第十一章](11-kv-cache长上下文推理和显存增长问题.md)和[第二十一章](21-MoE路线Switch-GShard-Mixtral-DeepSeek.md)；稀疏专家的训练与服务成本见[第二十二章](22-Dense与MoE训练服务trade-off.md)。RLVR/GRPO 的训练原理见[第五册第十六章](../../book-05-llm-training/chapters/16-rlvr与可验证奖励.md)，DeepSeek-R1 的完整后训练与蒸馏路线见[第十六册第十七章](../../book-16-reasoning-models/chapters/17-deepseek-r1的rlvr与蒸馏路线.md)。
 
-阅读时必须按版本区分。DeepSeek-V2、V3 和 R1 的模型规模、训练配方、后训练目标和公开资料不同；不能把其中一个版本的结构直接套到另一个版本，也不能把社区对未公开版本的猜测写成事实。
+## 58.1 版本边界：从模型名称回到公开对象
 
-## 58.2 MLA 解决 KV cache 的哪一部分
+先把基础模型、后训练 checkpoint 和蒸馏模型分开，才能判断技术报告里的一项结构属于谁。以下关系以 DeepSeek 技术报告和官方发布仓库为依据，不把产品名或系列名当作结构说明。
 
-普通 attention 在 decode 时为每个历史 token 保存 key 和 value。MLA 的基本直觉是保存更紧凑的 latent 表示，再在计算时恢复或在 latent 空间完成必要的投影。
+### 58.1.1 区分基础模型、指令模型与推理 checkpoint
 
-设隐藏表示为 h_t，压缩 latent 为 c_t：
+| 名称 | 在公开路线中的位置 | 阅读时的区分 |
+|---|---|---|
+| DeepSeek-V2 | 采用 MLA 与 DeepSeekMoE 的 MoE 模型 | 关注 V2 报告披露的注意力、专家结构与模型配置 |
+| DeepSeek-V3-Base | V3 后训练和 R1/R1-Zero 的基础模型 | 它是后续路线的共同架构起点 |
+| DeepSeek-V3 | V3 报告中的模型及其训练、后训练结果 | 架构延续 V2 的 MLA 与 DeepSeekMoE，并披露新的负载均衡和 MTP 训练目标 |
+| DeepSeek-R1-Zero | 从 V3-Base 直接进行强化学习的 checkpoint | 没有先做监督微调；改变的是训练路线，不是声明一种新 backbone |
+| DeepSeek-R1 | 以 V3-Base 为基础的多阶段后训练模型 | 增加冷启动数据、采样筛选、SFT 和后续 RL |
+| DeepSeek-R1-Distill-Qwen/Llama | 用 R1 生成数据微调的稠密学生模型 | 基座分别来自 Qwen 与 Llama，不是 R1 主模型的缩小版架构 |
 
-~~~math
-c_t=W_{\mathrm{down}}h_t,\qquad
-\hat k_t=W_{\mathrm{up}}^kc_t,\qquad
-\hat v_t=W_{\mathrm{up}}^vc_t
-~~~
+DeepSeek-R1 论文与官方仓库都说明，R1 和 R1-Zero 建立在 V3-Base 上；官方仓库列出的主模型是 671B 总参数、每 token 激活 37B 参数。蒸馏模型则以 Qwen2.5 和 Llama 系列为基础。[R1 技术报告 v2](https://arxiv.org/html/2501.12948v2)；[官方模型仓库](https://github.com/deepseek-ai/DeepSeek-R1)
 
-如果 cache 保存 c_t，理想 payload 可能低于完整 K/V；真实实现还要考虑位置部分、投影计算、量化、对齐和 kernel。MLA 的目标不是删除 attention，而是把长上下文 serving 的状态和带宽问题纳入架构。
+### 58.1.2 将数字和结论绑定报告、配置与评测口径
 
-## 58.3 latent cache 的信息瓶颈
+总参数和每 token 激活参数描述不同账目：前者说明模型参数规模，后者说明稀疏路由下每个 token 参与计算的参数范围。两者都不能单独告诉我们完整权重是否驻留显存、跨设备通信量是多少，或某个服务请求需要多少时间。第二十二章讨论这些结构对资源的影响。
 
-压缩维度越小，存储越省，但不同历史可能映射到相似 latent。对主题摘要，压缩可能足够；对数字、代码标识符和版本冲突，细节损失会更明显。
+同样，论文中的 benchmark、吞吐和 cache 比较只能支持对应模型、版本、任务、评估框架和测量方式下的观察。它们不能组成 V2、V3、R1 的统一排行榜，也不能证明相同设计搬到其他实现后会有相同结果。
 
-可以把压缩决策写成：
+## 58.2 DeepSeek-V2：MLA 与 DeepSeekMoE 的架构组合
 
-~~~math
-\min_C\;
-L_{\mathrm{task}}(C(H))
-+\lambda L_{\mathrm{cache}}(C(H))
-~~~
+V2 报告给出的架构重点是把注意力历史状态压缩与稀疏专家前馈网络放在同一个 Transformer 里。两者改变的对象不同：MLA 改变注意力层为历史 token 保存的表示；DeepSeekMoE 改变 FFN 中哪些专家参与当前 token 的计算。[DeepSeek-V2 技术报告 v5](https://arxiv.org/html/2405.04434v5)
 
-其中 task loss 应包含精确引用和关键字段，而不只是 perplexity。若只优化语言流畅度，latent 可能保留主题却删除改变结论的例外条件。
+### 58.2.1 MLA 的联合低秩 KV 表示与解耦位置键
 
-## 58.4 DeepSeekMoE 的容量分配
+标准注意力在生成时需要为历史 token 保留 key 和 value。V2 的 Multi-head Latent Attention（MLA）把与 key/value 有关的内容压到共享的低秩 latent 表示中，避免逐头保存完整的 K/V 表示。MLA 还单独保留携带 RoPE 的位置相关 key：内容通道进入压缩 latent，位置通道仍以自己的表示参与注意力。
 
-MoE 把一个大的 FFN 拆成多个专家，每个 token 只使用少数专家。DeepSeekMoE 相关公开资料强调更细粒度专家和共享专家等设计方向，目标是改善专家利用率和参数效率。
+因此，MLA 不是“没有 KV cache”，而是改变每个历史位置缓存的内容。注意力仍需按当前 query 读取因果范围内的历史；低秩投影、RoPE 分支以及如何在 latent 空间计算的细节见第四章和第十一章。本章只用 V2 报告确认这套结构在具体模型中的位置，不把论文 cache 对比扩展成通用显存或吞吐承诺。
 
-抽象表示为：
+### 58.2.2 DeepSeekMoE 的共享专家与细粒度路由专家
 
-~~~math
-y_t=f_{\mathrm{shared}}(x_t)
-+\sum_{e\in\mathrm{TopK}(r(x_t))}
-g_{t,e}f_e(x_t)
-~~~
+V2 将 FFN 替换为共享专家与路由专家组成的 DeepSeekMoE。共享专家为各 token 提供共同的 FFN 路径，路由器再为每个 token 选择一部分细粒度专家。V2 报告给出的配置是：每个 MoE 层有 2 个共享专家、160 个路由专家，每个 token 激活 6 个路由专家。
 
-共享路径提供所有 token 都需要的通用变换，路由专家承载更细的分工。这里是教学抽象，具体专家数量、共享方式、路由和损失要以对应技术报告为准。
+这个配置使 V2 的总参数达到 236B，而每个 token 激活 21B 参数。专家稀疏让每个 token 不必计算全部路由专家，却没有让未激活专家的权重凭空消失；权重如何放置、token 如何分发及通信如何执行仍属于系统成本。第二十一章解释专家路由，第二十二章讨论这些成本怎样进入训练和服务账目。
 
-## 58.5 MoE 的训练和通信成本
+### 58.2.3 V2 报告数据能说明什么
 
-MoE 每 token 的矩阵乘可以减少，但路由和通信不能忽略：
+DeepSeek-V2 报告记录 236B 总参数、21B 每 token 激活参数与 128K 上下文。128K 是报告所述模型经过长上下文扩展后的配置和评估范围；报告还给出了对应的 NIAH 测试。它不能单独证明模型在任意长文任务上都能准确使用全部上下文。
 
-~~~math
-C_{\mathrm{MoE}}
-\approx C_{\mathrm{expert\_matmul}}
-+C_{\mathrm{router}}
-+C_{\mathrm{dispatch}}
-+C_{\mathrm{alltoall}}
-~~~
+报告中的模型对比使用发布方内部评估框架与规定的实验设置。它可以说明作者在该设置中观察到的结果，不能将结果全归因于 MLA 或 DeepSeekMoE，也不能外推为所有 MLA/MoE 模型都更快、更便宜或质量更高。
 
-在多节点训练中，all-to-all 的带宽、拓扑和拥塞可能决定吞吐。训练稳定性还依赖专家负载、容量、token drop、路由 logits 和 auxiliary loss。
+## 58.3 DeepSeek-V3：沿用架构并改变负载均衡方案
 
-因此报告 MoE 模型时，同时给出 total parameters、active parameters、专家数、top-k、通信拓扑和实际 tokens/s，比只给一个总参数更有意义。
+V3 沿用 V2 报告中的 MLA 和 DeepSeekMoE 结构。它仍是稀疏 MoE：公开报告给出 671B 总参数、每 token 激活 37B 参数。V3 的一个结构性变化不是换掉 MLA 或 MoE，而是调整专家路由的负载均衡方式。[DeepSeek-V3 技术报告 v2](https://arxiv.org/html/2412.19437v2)
 
-## 58.6 V3 的系统化优化视角
+### 58.3.1 V2 到 V3 的结构继承与规模变化
 
-DeepSeek-V3 相关报告展示了大规模 MoE 训练的系统和配方问题。学习重点包括：如何让大量专家稳定训练，如何控制通信和显存，如何利用低精度，如何做数据和训练阶段安排，以及如何通过多 token 目标改善训练信号。
+V3 报告说明其采用在 V2 中验证过的 MLA 与 DeepSeekMoE。由此可以沿用“低秩 KV latent 加解耦位置 key”与“共享专家加路由专家”这两条结构线索；不能把 V2 的所有训练配置或专家数量直接搬到 V3。
 
-这些优化互相耦合。低精度可能降低成本，却增加路由、归一化和梯度稳定要求；专家数量增加容量，却增加通信和负载均衡；更长上下文提升任务能力，却提高 cache 和训练资源。
+671B 总参数、37B 每 token 激活参数描述的是 V3 报告中的模型规模。与 V2 的数字并列，可以看清不同版本的参数口径，但不构成质量或效率的因果比较。DeepSeek-V3 报告还记录 14.8T 预训练 token；完整训练预算和口径属于训练工程分析，本章不据此作跨报告的成本结论。
 
-## 58.7 Multi-Token Prediction 的目标
+### 58.3.2 Auxiliary-loss-free routing bias 与序列级辅助平衡
 
-标准 next-token prediction 在位置 t 预测 x_{t+1}。MTP 还让模型预测更远的 token，例如：
+MoE 中，路由分数决定哪些专家接收当前 token。若少数专家持续收到过多 token，负载倾斜就会造成等待和通信不均。V3 报告的 auxiliary-loss-free 策略为每个路由专家引入一个 bias，并将它加到 affinity score 上决定 top-k 专家。这个 bias 只参与“选谁”：输出加权仍使用原始 affinity score。
 
-~~~math
-\mathcal{L}_{\mathrm{MTP}}
-=\sum_{k=1}^{K}\lambda_k
-\left[-\sum_t
-\log P_\theta(x_{t+k}\mid x_{1:t})\right]
-~~~
+每个训练步结束后，报告按整个 batch 的专家负载调节 bias：超载专家的 bias 下调，负载偏低的专家 bias 上调。这样的反馈改变下一步的选择倾向，不是把 bias 当作普通可学习参数用梯度下降更新。报告还使用一个很小的 sequence-wise auxiliary loss，防止单条序列内部出现极端失衡。前者看整批训练 token 的负载，后者补充看单条序列内的负载；一般 MoE 路由与负载均衡机制见第二十一章。
 
-它提供更丰富的训练信号，也可能为推理时的多 token 草稿或 speculative decoding 提供结构基础。不同实现可能使用独立预测头、共享 trunk 或其他形式，不能把这个公式当作所有模型的完整实现。
+### 58.3.3 报告中的 token dropping 与系统协同边界
 
-MTP 的质量要看近 token 和远 token 的损失、生成一致性、额外参数、训练成本以及推理接受长度。预测得更远不等于目标模型会接受草稿。
+V3 报告称，借助其负载均衡策略，训练过程中不丢弃 token；推理阶段也采用专门的负载均衡策略以避免 token dropping。这个结论应绑定报告里的训练框架与部署策略，不能自动迁移到其他 MoE 实现。
 
-## 58.8 Reasoning RL 和可验证奖励
+同一报告还讨论 FP8 训练、DualPipe、跨节点通信和显存优化。它们说明 MoE 架构要和训练系统共同考虑，但不是 MLA 或 MTP 本身的定义。第二十二章进一步讨论 MoE 的系统与成本边界；本章不从作者的 H800 系统报告推出其他集群或负载下的普遍加速。
 
-R1 相关路线把强化学习用于数学、代码等可以自动验证的推理任务。设结果验证器为 V(y,x)，奖励可以抽象成：
+## 58.4 MTP：训练目标与推测解码不是同一件事
 
-~~~math
-r(x,y)=\mathbf{1}[\mathrm{Verify}(x,y)]
--\lambda\mathrm{FormatError}(y)
-~~~
+V3 报告将 Multi-Token Prediction（MTP）作为训练目标：在标准 next-token prediction 之外，对多个未来位置提供预测监督。报告作者提出，这会增加训练信号密度，并可能帮助模型预先组织未来预测所需的表示；这些是作者对设计目标的解释，最终效果仍应以报告所述消融和评测为限。
 
-可验证奖励的优势是减少主观偏好代理，让正确答案、编译测试或证明检查成为反馈来源；局限是验证器覆盖有限，模型可能优化格式、钻验证器漏洞或在不可验证任务上迁移不稳。
+### 58.4.1 V3 的顺序预测模块与因果链
 
-推理模型还要考虑 test-time compute。增加思考 token、采样候选、投票或工具调用会提高成功率的可能性，也会提高延迟和成本。
+V3 的 MTP 模块按预测深度顺序连接。预测更远的 token 时，会沿着前一预测深度继续使用相应的表示，保持从输入到未来位置的因果链。它不同于让几个互不依赖的输出头各自从同一份主干表示并行猜多个未来 token。
 
-## 58.9 推理成本的分解
+读者可以把差异概括为：MTP 增加了“训练时监督到哪些未来位置”，而不是取消自回归依赖，也不是让模型一次生成多个彼此无关的答案。V3 报告的消融可支持其模型和训练设置中的实验观察，不能保证其他模型只要添加 MTP 就会得到相同收益。
 
-一个 reasoning 请求的单位成本可以写成：
+### 58.4.2 训练目标、作者解释与消融范围
 
-~~~math
-C_{\mathrm{reason}}
-=C_{\mathrm{prefill}}
-+C_{\mathrm{think\_decode}}
-+C_{\mathrm{tool}}
-+C_{\mathrm{verify}}
-+C_{\mathrm{retry}}
-~~~
+在训练阶段，每个预测深度都对应未来 token 的目标，额外损失将更远的预测纳入训练。V3 报告使用顺序式模块保持完整 causal chain，并报告了 MTP 相关消融。作者把该目标与更密集的训练信号、可能的数据效率和未来表示规划联系起来；这类解释是设计动机，不等于跨模型的普遍实测结论。
 
-如果只看最终答案质量，可能忽略思考长度过长、重复采样或失败重试带来的成本。系统应记录 visible output、hidden/reasoning token（若接口提供统计）、工具时间、验证次数和总 p95。
+理解 MTP 的技术作用时，要分别看预测目标、模型结构和实验结果。仅凭“预测多个未来 token”这句话，不能推断训练步数减少、数据利用率必然提高或最终生成质量必然改善。
 
-## 58.10 一个简化的验证式 RL 实验
+### 58.4.3 推理时丢弃模块与可选 speculative reuse
 
-下面代码展示“生成—验证—记录奖励”的最小闭环：
+V3 报告指出，MTP 的主要目标是改善主模型训练，因此普通推理可以丢弃 MTP 模块，让主模型独立工作；另一种选择是把这些模块复用于 speculative decoding，以尝试降低生成延迟。
 
-~~~python
-def verify_answer(answer, gold):
-    normalized = answer.strip().lower()
-    return int(normalized == gold.strip().lower())
+这两个用途不能合并成一个概念。MTP 训练损失规定模型学什么；speculative decoding 则需要 draft 候选、target 验证以及接受或回退的运行协议。报告提出模块复用的可能路径，不代表所有推理后端默认启用，也不提供任意工作负载下的接受长度或延迟保证。
 
+## 58.5 R1：V3-Base 架构上的两种后训练路线
 
-def score_candidates(candidates, gold):
-    return [
-        {"answer": item, "reward": verify_answer(item, gold)}
-        for item in candidates
-    ]
+R1 的关键区别在后训练路线，而非另造一个 attention 或 MoE backbone。R1 论文明确称 R1-Zero 和 R1 都在 V3-Base 上训练；R1 使用来自 V3 的非推理数据，解决 Zero 路线中可读性和语言混杂等问题。[DeepSeek-R1 论文 v2](https://arxiv.org/html/2501.12948v2)
 
+### 58.5.1 R1-Zero：不经预先 SFT 的直接 RL 案例
 
-print(score_candidates(["42", "41", "42"], "42"))
-~~~
+R1-Zero 从 V3-Base 开始，不先用监督微调建立一批冷启动示范，而是直接进行大规模 RL。R1 论文将其优化算法描述为 Group Relative Policy Optimization（GRPO），并在数学、代码和逻辑任务上使用规则奖励：正确性奖励检查答案或代码结果，格式奖励检查回答是否符合指定形式。
 
-真实 RL 还要处理轨迹采样、优势估计、KL、批次、奖励稀疏、格式约束和验证器可靠性。这个例子的作用是说明“奖励来自可观察结果”，而不是说明已经实现 R1。
+这里的“可验证”有明确任务边界：数学题可以检查指定答案，代码可以编译并运行测试；这不意味着所有开放问答、写作或真实业务任务都能得到同样可靠的自动奖励。GRPO、verifier 和 RLVR 的训练细节见[第五册第十六章](../../book-05-llm-training/chapters/16-rlvr与可验证奖励.md)，R1-Zero 的过程和限制见[第十六册第十七章](../../book-16-reasoning-models/chapters/17-deepseek-r1的rlvr与蒸馏路线.md)。
 
-## 58.11 MLA、MoE、MTP 和 RL 的组合
+论文报告了 R1-Zero 在规则可验证推理任务中的输出变化，也记录了重复、可读性较差和语言混杂等局限。这些是特定训练设置和评测中的作者观察，不能直接推广为所有 RL 模型必然出现的行为。
 
-四条路线分别作用于不同层面：
+### 58.5.2 完整 R1：冷启动、采样筛选、混合 SFT 与第二轮 RL
 
-| 方向 | 主要目标 | 主要成本 |
-| --- | --- | --- |
-| MLA | 压缩历史 attention 状态 | latent 投影、信息瓶颈、kernel |
-| MoE | 增加总容量并控制激活计算 | 路由、通信、负载均衡 |
-| MTP | 增强训练/草稿预测信号 | 额外头、训练目标和一致性 |
-| Reasoning RL | 提升可验证任务推理 | rollout、验证、长输出成本 |
+完整 R1 在同一 V3-Base 架构上加入了面向可读性与更广泛使用场景的阶段：
 
-组合后不能简单把每个收益相加。MLA 改变 cache，MTP 影响 speculative，MoE 影响每一步的执行图，RL 改变输出长度和使用工具的行为。最终必须做端到端消融。
+1. 收集数千条冷启动推理示范，对 V3-Base 做 SFT，为后续 RL 提供更易读的起始输出。
+2. 进行第一轮 RL，继续改进推理表现，并加入语言一致性信号以缓解语言混杂。
+3. 从第一轮 RL checkpoint 生成推理轨迹，通过拒绝采样筛选，再与一般写作、问答等非推理样本合并进行 SFT。
+4. 进行第二轮 RL：推理任务主要采用规则奖励，一般任务使用模型奖励，并继续处理语言一致性和其他行为目标。
 
-## 58.12 评估 DeepSeek 路线
+这条路线说明，最终 R1 不能简单概括成“GRPO 训练出来的模型”。冷启动、轨迹筛选、不同来源的 SFT 数据和第二轮 RL 都改变训练信号。每阶段的数据、奖励与超参数属于 R1 论文及其专章的范围；当前章节只用它们说明 R1 与 V3-Base 的关系。
 
-架构侧测试 MLA cache bytes、长上下文 recall、latent 量化和投影时间；MoE 侧测试专家负载、通信、active FLOPs、token drop 和 p99；MTP 侧测试 acceptance length、额外开销和错误回退；reasoning 侧测试 verifier accuracy、思考长度、答案正确率和单位成功成本。
+### 58.5.3 从作者报告中保留结果与限制的并存
 
-还要做组合消融：
+R1 论文报告了数学、代码和其他 benchmark 上的结果，并公开其提示、基线与评测设置。读这些表格时，应同时保留模型 checkpoint、采样设置、任务、评分和比较对象；发布方结果不是独立复现，也不表示相同训练流程能迁移到所有开放任务。
 
-~~~text
-baseline dense attention
-  -> + MLA
-  -> + MoE
-  -> + MTP
-  -> + reasoning post-training
-~~~
+论文也明确列出 R1-Zero 的可读性、重复和语言混杂问题，且完整 R1 的训练路线加入冷启动、采样筛选、非推理数据和额外奖励来处理这些目标。能确认的是作者公开了这些阶段和他们的评估；不能从“反思”或“aha”叙述推出模型具有人的意识、稳定自我监控或跨任务通用推理能力。
 
-每次只改变一个主要因素，才能知道收益来自哪里。
+## 58.6 R1 蒸馏 checkpoint 与版本化证据汇总
 
-## 58.13 常见误区
+DeepSeek 将 R1 生成的推理数据用于训练多个稠密学生模型。这个分支把 R1 的输出作为监督数据，基座却来自 Qwen2.5 与 Llama 系列，因此它和 671B 的 R1 主模型在结构、参数和训练流程上都应分开记录。
 
-第一，把 MLA 写成“没有 KV cache”。第二，用 total parameters 宣称每 token 成本。第三，把 MTP 直接等同于 speculative decoding。第四，把 R1 的 reasoning RL 写成通用任务都能提升。第五，把可验证奖励的成功推广到开放式主观任务。第六，忽略模型版本和公开资料的边界。
+### 58.6.1 Qwen/Llama 蒸馏模型不是 R1 主模型的架构复制
 
-## 58.14 MLA、MoE、MTP 与 RL 的耦合
+R1 论文与官方仓库列出基于 Qwen 与 Llama 的不同尺寸蒸馏 checkpoint。训练这些模型时，团队用 R1 生成的数据监督微调学生；论文把这组实验描述为 SFT 蒸馏路线，没有在这些蒸馏学生上采用 R1 主模型那套 RL 阶段。
 
-MLA 主要改变历史表示和 KV 资源，MoE 改变条件容量和通信，MTP 改变训练/草稿预测目标，R1 路线改变后训练和 test-time compute。它们可以互相增强，也会互相引入约束：MLA 的投影影响 speculative kernel，MoE 的路由影响草稿一致性，MTP 的远 token 目标影响生成分布，RL 又可能改变输出长度和工具行为。
+所以“R1 蒸馏模型”表示其训练数据来自 R1，不表示学生网络仍是 DeepSeek-V3-Base 的 MoE 架构。回答它们的参数量或架构问题时，应回到各自 Qwen/Llama 基座的配置；讨论推理数据的来源时，再追溯 R1 报告。
 
-评估不能把这些优化的收益简单相加。应分别做 MLA 开关、MoE 路由、MTP head、RL 后训练和 serving kernel 的消融，并记录质量、显存、通信、接受长度和单位成功成本。
+### 58.6.2 V2、V3、R1 与 Distill 的公开证据矩阵
 
-## 58.15 推理强化的可验证边界
+| 版本 | 架构关系 | 本章关注的训练变化 | 可由公开资料支持的范围 |
+|---|---|---|---|
+| V2 | MLA + DeepSeekMoE | V2 的报告模型与配置 | 低秩 KV latent、解耦 RoPE key、共享/路由专家及报告规模 |
+| V3 | 延续 MLA + DeepSeekMoE | routing bias 平衡、sequence-wise 辅助损失、MTP | 报告中的路由规则、因果预测模块、token dropping 声明和配置 |
+| R1-Zero | V3-Base 架构 | 无预先 SFT 的直接 RL | 规则正确性/格式奖励及论文所述训练路线 |
+| R1 | V3-Base 架构 | 冷启动、RL、拒绝采样、混合 SFT、第二轮 RL | 作者公开的阶段和相应评测边界 |
+| R1-Distill | Qwen/Llama 稠密基座 | 使用 R1 生成数据做监督微调 | 学生的基座、训练数据来源和论文报告的蒸馏设置 |
 
-数学和代码任务有 verifier，可以把结果正确性转成奖励；开放问答、复杂工具和现实世界任务的奖励更难可靠定义。R1 式 reasoning RL 的公开证据不能自动说明所有任务都能用同样的 RLVR 配方。
+从这张表可以得出一个有限但实用的判断：MLA 和 DeepSeekMoE 属于 V2/V3 的架构线；V3 的 MTP 是训练目标并可选支持推测解码复用；R1 是在 V3-Base 上开展的后训练路线；R1-Distill 则将生成数据迁移到其他稠密基座。公开报告能支持这些版本关系和作者披露的结果，不能补齐所有内部 recipe、生产 kernel、服务配置或其他任务上的因果收益。
 
-对 reasoning 模型要区分：思考 token 数、最终答案正确率、过程是否可验证、工具调用是否正确和用户可接受延迟。更长的思考链可能提高质量，也可能增加错误搜索、成本和暴露敏感轨迹的风险。
-
-## 58.16 公开模型阅读的证据卡
-
-每个版本都应建立一张证据卡：公开结构、训练目标、参数口径、上下文、量化、benchmark 条件、未知字段和可复现实验。V2、V3、R1 的内容必须分开登记，不能用系列名替代版本。
-
-如果资料只支持“采用某类路线”，正文就只写到该层；只有技术报告或代码明确给出层表、路由和训练配方时，才可写成具体事实。这种克制是研究阅读的一部分。
-
-## 58.17 MLA、MoE 和训练路线要分开讲
-
-DeepSeek-V2/V3/R1 公开材料常被放在一条“更高效、更会推理”的叙事里，但架构、训练和后训练是不同层。MLA 主要改变 KV/latent 表示和 serving 资源，MoE 改变参数激活与通信，R1 路线强调可验证奖励、推理和蒸馏；不能把三者的效果混成一个神奇模块。
-
-阅读时建立配置—资源—能力映射：MLA 需要测 KV 与 decode 带宽，MoE 需要测 expert load 和通信，RLVR 需要测 verifier、rollout、推理长度和泛化。每项都要绑定公开报告和实验条件。
-
-## 58.18 公开技术报告的可验证范围
-
-技术报告可以支持公开写出的结构、训练阶段、公开 benchmark 和数据规模。它通常不能支持每个路由阈值、全部数据筛选、内部失败轨迹、闭源服务的动态预算和真实产品 harness。读者应为每条结论标记证据类型：
-
-| 结论 | 可以直接写 | 仍需限定 |
-| --- | --- | --- |
-| MLA/latent 路线 | 报告明确描述的结构和缓存目标 | 具体 kernel、量化误差和服务吞吐 |
-| MoE 训练 | 公开的专家、路由和训练阶段 | 全部通信优化、溢出处理和失败 run |
-| reasoning RL | 公开的奖励、rollout 或蒸馏流程 | 是否迁移到开放任务、真实预算和隐藏 verifier |
-| benchmark | 给定版本、模板和预算下的自报结果 | 跨 harness 的普遍能力和单位成功成本 |
-
-例如“R1 类路线提高了数学推理”可以由公开评测在相应条件下支持；“相同 RL 配方适合所有开放任务”则超出了证据范围。严谨的文章要同时说明已知和未知：未知不是空白占位，而是决定下一步实验、复现和面试回答语气的边界。
-
-如果多个版本共享系列名，还要按版本建立 evidence card，记录 model id、训练阶段、输出协议、推理预算、工具、评估集和日期。这样才能避免把 V2 的 MLA、V3 的系统优化和 R1 的后训练路线拼成一个并不存在的单一模型。
-
-## 58.19 R1 类推理路线的工程代价
-
-推理能力提升可能带来更长 reasoning token、更高 KV/state 占用、更大尾延迟和更复杂的安全/协议状态。部署时应把 reasoning budget、工具、verifier、stream event、cost per successful task 和高风险拒答一起评估；模型分数提高不等于产品单位任务成本降低。
-
-## 58.20 资料范围与训练判断
-
-DeepSeek-V2 技术报告是 MLA 和 DeepSeekMoE 的主要公开来源；DeepSeek-V3 报告讨论了大规模 MoE 训练和工程优化；DeepSeek-R1 报告讨论了 reasoning RL 和蒸馏路线。不同版本和接口的细节应以对应官方资料为准。
-
-DeepSeek 路线的核心启示是：模型创新正在把网络结构、KV 状态、训练目标、验证器和推理调度放在一起优化。读者应学会画出完整资源和证据链，而不是只记住四个缩写。
-
-## 58.21 面试问题与练习
-
-**问：MLA 和 GQA 都在优化 KV cache，有什么不同？**
-
-GQA 通过减少 KV head 数共享历史表示；MLA 进一步把历史表示压到 latent 空间并在计算时恢复或使用，压缩机制和信息瓶颈不同。
-
-**问：MTP 是否等于 speculative decoding？**
-
-不是。MTP 是训练或模型预测目标，speculative decoding 是用 draft 预测并由 target 验证的推理算法；MTP 可能提供草稿信号，但还需要接受/拒绝协议。
-
-**练习：**设计 DeepSeek 路线的四阶段消融表，包含 cache、专家负载、接受长度、推理 token、答案正确率和单位成功成本。
-
-资料入口：
-
-- DeepSeek-V2: https://arxiv.org/abs/2405.04434
-- DeepSeek-V3: https://arxiv.org/abs/2412.19437
-- DeepSeek-R1: https://arxiv.org/abs/2501.12948
-
-## 58.22 结构、训练和推理解耦再耦合
-
-MLA 主要改变历史表示和 KV 资源，MoE 改变参数激活与通信，MTP 改变预测目标，RL/验证器改变推理行为；它们可以分别研究，却会在完整系统里重新耦合。MLA 的 cache 节省可能提高并发，MTP 的草稿质量可能改变 speculative acceptance，reasoning token 增长又会放大 KV、调度和单位成功成本。
-
-一个严谨的消融按层次展开：dense/MHA baseline，替换 MLA，加入 MoE，加入 MTP，再加入 RL/蒸馏；每步固定主要训练和解码条件，报告 cache bytes、expert load、acceptance length、reasoning tokens、答案质量、p99 和成功成本。这样才能避免把整套系统的收益归因给其中一个缩写。
-
-## 58.23 训练路线的阶段性结论
-
-DeepSeek 路线的学习重点是把 MLA/MoE、训练效率、reasoning、蒸馏、验证器、KV/state 和 serving 调度放进同一条证据链。架构、训练和推理成本相互耦合，公开报告支持到的范围之外不能用产品名称补全未知细节。
-
-## 58.24 四条证据链的连接方式
-
-阅读 DeepSeek 路线时，可以分别建立架构、训练、推理和任务四条链。架构链记录 MLA/MoE 的信息与资源路径；训练链记录 data、SFT、RL、蒸馏和 verifier；推理链记录 reasoning token、MTP/speculative、KV 和调度；任务链记录数学、代码、工具、安全、延迟和成本。
-
-四条链只有通过 controlled experiment 才能连接。例如 reasoning 质量提高可能来自 RL、蒸馏、更多 test-time budget 或更好的 verifier；MLA 的 cache 节省可能被更长 reasoning token 抵消。若没有分阶段消融，不能把系统总收益归给单一组件。
-
-## 58.25 版本、口径和未知项
-
-模型家族名不能替代版本。总参数与 active parameters、训练上下文与服务上限、模型卡 benchmark 与独立 harness、MTP 训练目标与 speculative runtime 都应分开记录。公开技术报告支持的内容要绑定 revision 和发布日期；产品页信号若缺少技术报告，只能作为一方观察。
-
-一个可靠的模型卡阅读表包含：claim、来源、版本、条件、可复现实验、未知和失效日期。这样才能在新版本发布后只更新受影响的命题，不把旧数字或内部推测扩散到整个家族。
-
-## 58.26 DeepSeek 路线的工程取舍
-
-这条路线的可迁移启发是把稀疏参数、压缩历史、可验证奖励和推理服务共同建模，而不是直接复刻某个模块。部署者要问：active compute 是否真的降低 GPU/通信成本，MLA/其他 cache 是否兼容目标 engine，reasoning budget 是否满足 p99，RLVR/verifier 是否覆盖业务任务，蒸馏是否保持安全和工具协议。
-
-最终用 target workload 做 gate：质量、引用/代码/工具成功率、KV/通信、TTFT/TPOT、p99、单位成功成本、回退和治理都通过后，才把公开路线转成生产设计。否则它仍然是重要的研究锚点，而不是无条件的架构推荐。
+本章新增的来源版本、阅读位置和证据边界见[DeepSeek-V2/V3/R1 研究记录](../../research/deepseek-v2-v3-r1-architecture-training-2026-11-24.md)。
