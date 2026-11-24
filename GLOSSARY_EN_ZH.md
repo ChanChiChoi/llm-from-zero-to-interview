@@ -1199,7 +1199,7 @@ GSS / Gated State Space：用 DSS 上下文化较窄的输入投影流，再与�
 
 H3 / Hungry Hungry Hippos：组合 shift SSM、diagonal SSM 与 key/value/query 乘法交互的序列层，用于显式构造前序线索、长程关联与查询读出路径。
 
-Hybrid Architecture：混合架构，如 Attention + SSM + Convolution
+Hybrid Architecture：混合架构，将局部/全局 attention、SSM/递归状态或卷积等序列处理路径组合在层间或层内；局部/全局描述 attention 的可见范围，递归状态描述历史的表示与更新方式，两者是可共存的设计轴。
 
 FlashAttention：用 IO-aware tiling、online softmax 与必要重算减少 attention 中间矩阵 HBM 读写的实现；dense 核心保留完整 attention 配对，仍有二次 pair 计算。FP8 低精度和 block-sparse 变体分别需说明数值误差与连接图。
 
@@ -9221,9 +9221,9 @@ Duplicate Side-Effect Rate：重复副作用率；因 fallback 导致的重复�
 
 Skill / MCP Lifecycle：Skill / MCP 生命周期；用于判断 Skill、MCP、Connector、Plugin、Workflow 等生态技术是处于新兴、抢占生态位、标准化、被模型能力吸收，还是过渡/退潮阶段。
 
-MetaP：Meta 在 Llama 4 发布中提到的训练稳定性相关技术信号；在本项目中作为前沿训练 recipe 观察项，不把具体实现泛化为通用标准。
+MetaP：Meta 在 Llama 4 发布资料中称用于设置关键模型超参数的训练技术，举例包括逐层学习率与初始化尺度，并称所选超参数可迁移到不同 batch size、模型宽度、深度和训练 token 数；具体公式、实现与量化误差口径在所查发布资料中未公开，不等同于 μP，也不等同于长上下文位置机制。
 
-iRoPE：Meta 在 Llama 4 发布中提到的 RoPE 相关位置编码信号；在本项目中作为超长上下文和位置编码观察项处理。
+iRoPE：Meta 在 Llama 4 发布资料中对多数层使用 RoPE、交错 NoPE 注意力层及推理期 attention temperature scaling 的称谓；Scout 的 scaled RoPE 是可独立核查的配置，后续文献也有更宽用法。
 
 GOAT（Generative Offensive Agent Tester）：Pavlova 等人在 ICML 2025 发表的多轮自适应红队方法；攻击模型根据目标模型的回复调整下一轮策略。论文指标绑定其 JailbreakBench、对话预算与 Judge 配置，不是自动红队的统一标准。
 
@@ -9239,9 +9239,11 @@ Gated DeltaNet：门控 DeltaNet；把递归或线性状态更新与显式门控
 
 Gated MLA：Kimi K3 报告中的 Multi-head Latent Attention 变体；在逐 token KV latent 上进行全局 attention，再用输入依赖的逐通道 full-rank output gate 调制 attention 输出，不等于显式 KV 与 latent KV 间的动态选路。
 
-NoPE / No Position Embedding：无显式位置嵌入/位置变换；不等于没有顺序信息，causal mask、递归状态和 attention pattern 仍可编码顺序。
+NoPE / No Position Encoding：在指定路径的 token 输入和 attention 计算中不显式加入位置特征（如绝对位置向量、Q/K 旋转或相对位置偏置）；具体口径按论文/模型配置确认。它不等于整网没有顺序线索：causal mask、上游局部混合或递归状态都可能形成隐式位置信息，但顺序、距离和绝对位置能力仍需分别验证。
 
-p-RoPE：一种模型特定的 RoPE 位置处理信号；阅读时需结合模型卡和实现，不能把名字泛化成统一标准。
+P-RoPE (Periodic RoPE)：周期性旋转位置编码；在周期宽度 $W$ 内按位置模 $W$ 复用 RoPE 相位。跨周期边界时，相对偏移可能从 $d$ 变成 $d-W$，所以不能与 partial/fractional RoPE（只旋转部分 head 维度）混为一谈；具体模型结论应绑定论文版本和评测条件。
+
+HP-RoPE (Harmonic Periodic RoPE)：谐波周期性 RoPE；通过令频率 $\theta_i'=2\pi m_i/W$（$m_i\in\mathbb{Z}$）使一个窗口宽度后旋转矩阵回到单位矩阵 $R_W=I$，从而消除周期边界处的旋转不一致。该代数性质不等于无限上下文理解保证。
 
 CSA / HCA：DeepSeek-V4 资料中的混合注意力缩写；用于描述不同注意力/历史表示路径，具体全称和实现以官方模型卡为准。
 
@@ -9344,7 +9346,7 @@ Evaluation Card：评测卡；把一次模型评测的模型元数据、benchmar
 Policy-Adaptive Safety Classifier：策略自适应安全分类器；把自然语言安全策略映射为安全分，不能替代权限、沙箱和治理。
 Policy Shift Score (PSS)：政策翻转分；按同一图像和风险类别配对政策相反的样本，只有模型在两种政策下都预测正确才算该翻转对通过；用于观察策略边界遵循，不能替代分类、校准和端到端动作评估。
 
-Gated Attention：门控显式注意力；用 token、通道或层级 gate 控制显式 attention 路径与递归/局部路径的组合，具体参数化依模型而定。
+Gated Attention：门控注意力；本章专指 SDPA 输出后、输出投影前由当前输入生成 sigmoid gate 的 softmax attention 变体；它调节 query/head 的聚合输出特征，固定本层 Q/K/V 时不改写 softmax token 权重或可见集合，也不负责路径路由或跳过 attention 计算。与 Gated DeltaNet 的状态更新门及 Gated MLA 的模型结构区分。
 
 CSA / Compressed Sparse Attention：压缩稀疏注意力；DeepSeek-V4 资料中的压缩注意力路径名称，用于降低长上下文历史访问成本。
 
@@ -9660,6 +9662,8 @@ Activated Parameters：激活参数；某个 token 路径实际参与主要计�
 
 Paged KV Pool：分页 KV 状态池；为显式 attention 的 key/value 以 page/block 方式分配、复用和回收的 runtime 资源，不能代表混合模型的全部历史状态。
 
+Recursive State / Recurrent State：递归状态；序列模型将前一状态与当前输入映射为新状态、供后续计算继续使用的内部表示。它通常不为每个历史 token 保留独立地址，但张量结构、组件数量和精度依架构而定；固定状态宽度仅表示其大小不直接随上下文长度增长，不代表总成本恒定或任务信息完全保留。
+
 KDA State Pool：KDA 递归状态池；保存 KDA/线性 attention 路径的 recurrent state，生命周期、shape、写回和恢复不同于 paged KV pool，可能先成为并发瓶颈。
 
 MTP Acceptance：多 token prediction 接受率；draft/target speculative 路径中被 target 验证并提交的 token 统计，必须和回滚、verify 成本、工具边界和 task success 分开。
@@ -9750,7 +9754,9 @@ Codex evidence boundary：GPT-5.3 Codex 的 Artificial Analysis Intelligence Ind
 
 GPT-OSS：OpenAI 的开放权重 text-only autoregressive MoE 模型族；本项目记录 `gpt-oss-120b` 与 `gpt-oss-20b`，不把 `high` effort 当成新 checkpoint。
 
-Active Parameters：激活参数；一个 token 当前路径参与主要计算的参数口径。它不等于总权重显存、KV cache、通信 buffer、workspace 或并发容量。
+Total Parameters：总参数量；按明确发布口径统计模型纳入的全部参数，包括所有 expert 权重、共享部分及其他计入项。需核实 embedding、output head、router、shared expert 与 tied weights 是否计入。
+
+Active Parameters：激活参数量；模型报告中按一个 token 的路由路径统计的参数规模，通常含选中 expert 与来源计入的共同路径。路由和非专家层口径依来源而异；它不等于 FLOPs、驻留权重字节、KV cache、通信 buffer、workspace、延迟或质量。
 
 MXFP4：一种块/组尺度的低比特浮点表示；gpt-oss 模型卡将 MoE 权重的 post-training quantization 与部署目标绑定。公开资料不等于所有后端 kernel、误差和硬件 profiling 已确认。
 

@@ -1,356 +1,167 @@
-# 第 71 章 Recursive State Cache：固定状态不等于没有缓存
+# 第 71 章 Recursive State Cache：递归状态缓存
 
-## 71.1 state cache 的定义
+前面几章介绍了 Mamba、RetNet、Kimi Delta Attention 等递归或线性注意力路线。本章把视角收拢到一个问题：模型已经读过一段前缀后，下一步究竟把什么留在内存里？
 
-递归 attention 或 DeltaNet 类层不保存每个历史 token 的完整 KV，而保存随时间更新的状态 `S_t`。它仍然是缓存，只是缓存的单位从 token 变成了 state：
+显式 KV cache 为各历史位置保留表示，后续 query 可以逐位置访问。递归架构则在每个新 token 到来时更新模型状态，再从当前状态生成输出。这个差别会改变内存随上下文增长的方式，也改变模型访问历史的路径。理解递归状态，需要同时看清更新公式、整段输入时的并行执行、序列边界以及具体实现保存了哪些对象。
 
-```math
-S_t=F(S_{t-1},x_t;\theta_t)
-```
+## 71.1 从逐 token 的历史地址转向递归状态
 
-如果 state 大小不随 `T` 线性增长，超长上下文的内存曲线可能更平缓；但 state 是压缩表示，不支持像显式 KV 那样任意定位原文。
+KV cache 和递归状态都让模型在生成时延续此前的信息，但它们保留历史的方式不同。前者为每个历史位置留一个可访问的槽位；后者把前缀经过一系列更新映射为固定结构的内部表示。
 
-## 71.2 与 KV cache 的运行时差异
+### 71.1.1 显式 KV 为每个位置保留独立槽位
 
-KV 可以按 block 分配、淘汰、共享和重算；recursive state 需要记录 step、层级、门控统计、版本和 reset 边界。它不是一段可以随意拼接的 tensor。
+自回归 Transformer 生成到位置 $t$ 时，会把各层此前位置的 key 和 value 留在缓存中。新 query 可以与这些 key 逐个计算相关性，再用对应的 value 构成输出。假设已经处理 $T$ 个 token，缓存里仍能区分位置 $1$、位置 $2$，一直到位置 $T$。
 
-迁移 state 时，模型 revision、dtype、并行布局、位置处理和更新顺序必须一致。服务端如果把 state 绑定在 batch slot，而请求在 continuous batching 中移动，极容易产生错位。
+这些向量不是原始 token，也不是可直接阅读的句子；它们是模型为注意力运算形成的表示。关键在于每个位置有自己的地址，所以后来的 query 可以为不同历史位置分配不同权重。普通 KV 缓存的逻辑容量会随着保留的 token 数增长。混合模型中哪些层采用这条路径，见[第 69 章](69-显式kv-cache在混合架构中的角色.md)；每个位置改存低维 latent 的情况见[第 70 章](70-latent-cache压缩历史表示.md)。
 
-## 71.3 state 的事务模型
+### 71.1.2 递归状态将前缀映射为模型内部表示
 
-一次更新可以分为：
+递归路线不把每个历史位置都留作独立记录。模型先有一个状态；收到新 token 后，将旧状态与当前输入一起映射成新状态。后续输出依赖这个新状态和当前输入。历史对预测的影响存在于状态中，但模型没有一列可供 query 直接点名的 token 地址。
 
-```text
-read committed state
-  -> create temporary state
-  -> apply token updates
-  -> verify
-  -> commit or rollback
-```
+因此，“递归状态”不是一份文字摘要，也不自动意味着它保留了前缀中的全部信息。它是某个模型定义的可更新表示，保存哪些历史关系、以何种精度保存，取决于状态结构、训练结果和任务。它可以是向量、矩阵，也可以由数个不同作用的张量组成。
 
-speculative decode、工具失败恢复和 preemption 都需要这个边界。draft token 不能直接覆盖正式 state；外部状态未知时也不能把未确认的计划写进 committed state。
+## 71.2 状态在每个 token 上怎样更新并产生输出
 
-## 71.4 speculative decode 的例子
+要读懂递归模型，先分清两件事：状态如何变化，以及模型如何从状态生成当前输出。通用记号可以表达这两步，但不同架构的状态结构和更新规则并不相同。
 
-设正式状态为 `S_t`，draft 产生 `x_{t+1:t+K}`。runtime 先在临时副本上更新；target 接受前 `a` 个 token 后，只提交：
+### 71.2.1 转移与读出是状态机制的两部分
+
+将第 $t$ 个输入记为 $x_t$，状态记为 $s_t$，参数记为 $\theta$。一般递归计算可以写成：
 
 ```math
-S_{t+a}=\mathrm{Update}(S_t,x_{t+1:t+a})
+s_t=F(s_{t-1},x_t;\theta),\qquad
+y_t=G(s_t,x_t;\theta).
 ```
 
-拒绝 token 的 state 被丢弃。如果 target 在拒绝位置重新生成一个 token，则该 token 要经过同一套更新和提交逻辑。最终输出、state、grammar 和 usage 必须使用同一个 accepted prefix。
+函数 $F$ 负责让新输入改变状态：它可以保留一部分旧值、衰减旧信息、写入新内容，或按模型规则修正已有表示。函数 $G$ 则让当前输入从更新后的状态中读出与本步输出有关的信息。这里的两个函数是解释结构的抽象，不是某个统一 API；只看状态更新而不看读出，也无法说明模型如何使用历史。
 
-## 71.5 batch 和 padding
+### 71.2.2 RetNet 用矩阵状态展示累计、衰减与查询
 
-batch 中请求长度不同，padding 不能更新 state；请求完成后也不能继续写入。合并/拆分 batch 前后，针对相同 prefix 的 state 应保持数值一致。
-
-一个常见 bug 是为了让 tensor shape 对齐而继续执行 padding update。模型文本结果可能只在长序列或特定 batch 顺序下出错，因此必须使用 checksum 和单请求 baseline 对照。
-
-## 71.6 snapshot、restore 和迁移
-
-state snapshot 至少包含 tensor、step、model revision、dtype、layout、position、request owner 和 checksum。restore 时检查 workspace/task 仍然属于同一租户，模型和 kernel 版本是否兼容，外部工具调用是否可能已经提交。
-
-如果不兼容，可以重新从最近的显式 checkpoint 或文本摘要重算；不能静默把旧 state 喂给新模型。
-
-## 71.7 评测 state 一致性
-
-对同一 prefix 做 full recompute、cache continuation、batch continuation、snapshot restore 和 speculative accept/reject。保存每层 state norm、checksum、最终 logits 和 token。
-
-允许数值误差时给出 tolerance，不能只比较字符串。若差异随长度放大，检查累计误差、state precision、gate 饱和和更新顺序；若只在恢复出现，检查序列化和版本。
-
-## 71.8 失败模式
-
-state reset 漏掉，造成跨请求污染；preemption 只保存 token offset；batch padding 更新 state；拒绝 draft 后不回滚；完成请求仍持有 state；不同 worker 使用不同 layer order；租户隔离缺失；固定 state 被误写成无缓存。
-
-## 71.9 资源和并发
-
-state 固定并不代表没有容量限制。每个请求仍有 state 数量、dtype、snapshot、workspace 和 scheduler metadata。若 state update kernel 吞吐不足，GPU 可能在长 decode 中受限于状态带宽，而不是矩阵乘。
-
-容量规划应测请求数、state GiB、snapshot 频率、恢复延迟、state update time 和 p99。对高风险长任务，可以限制并发或采用专用 state pool。
-
-## 71.10 面试回答与练习
-
-回答“recursive state cache 和 KV cache 有什么不同”时，应说前者保存固定大小的递归历史表示，后者保存按 token 的显式 K/V；前者省长历史存储但有压缩和精确检索代价，serving 重点是 reset、snapshot、restore、rollback、版本和隔离。
-
-练习一：给出一次包含 accepted 和 rejected token 的 trace，标出 state commit 与 rollback。
-
-练习二：设计一个检测 padding 更新 state 的 batch 测试。
-
-练习三：列出 state restore 的五个兼容检查。
-
-### 71.10.1 递归 state 的提交语义
-
-对 token 序列 `x_{1:t}`，state 更新可以写成：
+RetNet 的 retention 提供了一个可以直接展开的例子。它把 key 和 value 的外积累加进矩阵状态，并按因子 $\gamma$ 衰减旧状态：
 
 ```math
-S_t=F(S_{t-1},x_t),\qquad S_0=\mathrm{reset}(request)
+S_t=\gamma S_{t-1}+K_t^{\mathsf T}V_t,\qquad
+o_t=Q_tS_t.
 ```
 
-在普通 decode 中，`S_t` 可以提交；在 speculative decoding 中，draft token 只产生临时 `S'`，target 接受前不能覆盖正式 `S_t`。因此 cache API 需要 `begin_step`、`commit_step` 和 `rollback_step` 这类明确语义。
+这里 $K_t$、$V_t$、$Q_t$ 分别由当前 token 的隐藏表示投影得到；$S_t$ 是当前前缀对应的矩阵状态。取教学设定 $S_0=0$、$\gamma=\tfrac{1}{2}$，令 $X_i=K_i^{\mathsf T}V_i$，前三步的状态轨迹为：
 
-### 71.10.2 batch 和 padding 的陷阱
+```math
+S_1=X_1,\qquad
+S_2=\tfrac{1}{2}X_1+X_2,\qquad
+S_3=\tfrac{1}{4}X_1+\tfrac{1}{2}X_2+X_3.
+```
 
-如果 padding token 也调用 `F`，state 会被无意义输入改变；如果 batch 重排时把 state 指针按序号而不是 request ID 迁移，两个请求会互相污染。测试应改变 batch size、padding、请求加入/退出顺序、preemption 和恢复位置，比较单请求基线与批处理结果。
+第 3 步的 query 通过 $o_3=Q_3S_3$ 读取这个累计结果。展开后，每个历史位置仍对输出产生贡献，但贡献经过同一个状态矩阵组合在一起；模型没有分别保存三个 $X_i$ 的 KV 槽位。改变 $\gamma$ 会改变历史贡献随距离衰减的速度，改变 query 则会改变如何读取累计的 key-value 关系。
 
-### 71.10.3 容量和生命周期
+这是 RetNet 的 retention 形式，不是所有递归状态的通用方程。[RetNet 原论文](https://arxiv.org/html/2307.08621v1)还给出 parallel 和 chunkwise recurrent 计算形式；该论文中的具体状态、实验和效率数字均应按其模型与实验设置理解。
 
-固定大小 state 省去了随 `T` 增长的部分存储，但 state 数量随并发增长。每个 state 仍要有 owner、dtype、层/头、step、position、model revision 和租约。请求取消、超时和 tenant 删除时，state 必须立即回收或进入可审计的清理流程。
+### 71.2.3 Mamba-2 的状态由 SSM 和记忆卷积窗口共同组成
 
-### 71.10.4 与显式 KV 的路由
+真实实现中，一个模块可能同时保存不同种类的局部历史。[Mamba 官方仓库 v2.2.4 的 Mamba2 实现](https://github.com/state-spaces/mamba/blob/v2.2.4/mamba_ssm/modules/mamba2.py)在单 token 的 `step` 方法中同时接收 `conv_state` 和 `ssm_state`：
 
-连续流预测、低延迟对话和长日志处理可能适合 recursive state；需要随机引用、审计和精确回放的任务可以保留显式 KV 或 RAG。一个 hybrid router 要能知道当前 state 只能支持什么查询，不能因为 cache 便宜就接受超出它记忆能力的任务。
+1. 当前隐藏表示先经过输入投影，生成局部卷积和状态更新所需的量。
+2. `conv_state` 移动窗口并纳入当前投影结果。这个窗口让后续计算能读取最近几个位置的局部输入。
+3. 卷积结果产生 SSM 更新所需的 $x$、$B$、$C$ 等量；`ssm_state` 按当前衰减和输入贡献更新。
+4. 输出从更新后的 `ssm_state` 读出，再经过门控、归一化及输出投影。
 
-## 71.11 state 的代数和可组合性
+所以，`conv_state` 和 `ssm_state` 虽都携带过去的信息，职责并不一样：一个保存有限宽度卷积所需的近邻窗口，一个保存递归 SSM 的累积状态。源码中的 `allocate_inference_cache` 按配置创建这两个对象，形状也随配置变化。这个例子说明 Mamba2 的 `step` 状态是一个组合；其他模型可以采用不同组成，不能由这个版本推出统一的“每层一个 state tensor”接口。
 
-显式 KV 可以按 token block 拼接，递归 state 通常不能随意拼接。若对前缀 A 得到 state S_A，对前缀 B 得到 state S_B，通常不存在一个简单的 concat，使其等于按 A、B 连续处理得到的 S_AB。必须用更新函数继续运行：
+## 71.3 递归定义不等于训练必须逐 token 串行
 
-~~~math
-S_{AB}=F^\star(S_A,B)
-~~~
+式子 $s_t=F(s_{t-1},x_t)$ 描述了第 $t$ 步对前一步状态的依赖，但不代表实现只能在硬件上一次处理一个 token。整段输入已知时，满足特定代数结构的递归可以改写成并行扫描或分块计算。
 
-只有在特定线性或可结合结构下，才可能把状态块以组合运算合并。这个差异影响 context parallelism、缓存共享和跨 worker 迁移。
+### 71.3.1 递归是依赖关系，不是唯一执行算法
 
-## 71.12 状态版本和可观测性
+自回归解码时，模型每次通常只得到一个新 token，显式执行一次状态转移很自然：从 $s_{t-1}$ 和 $x_t$ 算出 $s_t$，再产生下一步的 logits。训练时，整段 token 往往同时已知；如果更新关系允许合并或扫描多个转移，就可以并行处理多个位置，不必把计算图照着逐步解码的顺序展开。
 
-每个 state snapshot 应记录模型 revision、层 schedule、dtype、position、step、owner、创建原因和校验摘要。监控还要保存 state bytes、update time、snapshot time、restore time、rollback count、跨 worker 迁移次数和异常 reset。
+这两种执行方式的共同点是实现同一个模型所定义的序列关系；不同点是中间状态怎样调度和物化。训练前向、训练反向、预填充和逐 token decode 也可能采用不同 kernel，不能看到模型有递归方程，就断定所有阶段都采用相同的串行算法。
 
-出现答案回归时，按 trace 回放：先比较 token 前缀，再比较每层 state norm 和 checksum，最后比较 logits。只比较最终字符串会把数值漂移、状态错位和采样差异混在一起。
+### 71.3.2 并行扫描和整段计算如何利用已知序列
 
-## 71.13 与显式 KV 的能力路由
+Mamba 论文用 SSM 说明了这一点。对线性时不变的 SSM，递归形式可以展开为整段卷积；当 Mamba 让状态更新参数依赖输入时，就不能简单套用固定卷积核。论文采用 selective scan，并通过并行扫描、kernel fusion 和重计算减少状态物化与内存往返。
 
-路由器要知道 state 的能力边界。连续预测、摘要和重复日志可以优先使用 recursive state；精确引用、随机回放、冲突审计和需要用户核验的任务应保留显式 KV 或 retrieval。
+这说明并行化依赖更新关系和硬件实现，不是“递归”这个词本身带来的保证。[Mamba 原论文](https://arxiv.org/html/2312.00752v2)讨论了其具体形式和算法。论文报告的吞吐优势属于对应模型、实现和测试设置；它不能替代读者对另一个递归模型、不同 GPU 或不同 batch 的测量。
 
-如果请求在执行中从低风险摘要升级为高风险发布审计，系统应允许从 state 路径切换到原文路径，并把切换原因写入审计记录。固定使用一种 cache 会让资源优化变成能力误用。
+### 71.3.3 Chunkwise recurrent 如何连接块内并行与块间状态
 
-## 71.14 状态回滚不只是复制一个 tensor
+另一种组织方式是把长序列分成连续块。在 RetNet 的 chunkwise recurrent 表示中，模型先用并行表示处理块内 token，再把这段计算形成的状态传给下一块。于是，一个块内部可以同时计算多个位置，块之间仍保持递归的信息传递。
 
-递归 state 往往与 step、position、gate 统计、临时 workspace 和 scheduler metadata 一起变化。speculative decode 拒绝候选时，必须回滚所有依赖候选 token 的对象；只恢复主 state 而保留位置或统计量，会产生难以复现的漂移。
+若把序列记为 $A$、$B$ 两个相邻块，处理 $B$ 的初态就是处理完 $A$ 后的末状态。这样的分块结构兼顾了块内并行和跨块连续性。RetNet 论文中的块长和具体组合关系是方法设计的一部分；训练 chunk、分段推理和服务系统的 batch 切分含义不同，不能把一个配置直接套到另一个用途。
 
-可以把一次状态事务表示为：
+## 71.4 固定长度带来什么收益，又改变什么能力
 
-~~~text
-begin(request, base_step)
-  -> update(state, token)
-  -> update(position, metadata)
-  -> verify
-  -> commit or rollback
-~~~
+递归状态的主要内存特征，是其大小在固定层数和固定状态维度下不随已处理 token 数直接增长。换来的变化是：历史不再留作一组可逐位置寻址的记录，模型必须依靠状态更新和读出保留任务所需信息。
 
-事务日志应能回答哪些 token 已提交、哪些 token 只在 draft 分支中出现，以及恢复后使用了哪个 model revision。
+### 71.4.1 按上下文长度计算 cache，保留维度与并发账本
 
-## 71.15 state migration 的一致性
+在有 $T$ 个历史位置时，标准 KV cache 按每个 token 的 key/value 表示累积存储；逐 token latent cache 仍为每个位置保留一个较窄表示；固定维度递归状态则保存每层的一组状态分量。可以把单个请求的状态 payload 粗略写成：
 
-跨 worker 迁移 state 时，物理 layout、设备 dtype、层顺序和并行 rank 必须一致。若不同 worker 使用不同 kernel 或不同精度，允许的误差要预先定义，并在迁移前后比较 logits 和任务结果。
-
-迁移也涉及安全：state owner、租户、权限和外部工具上下文不能被另一个请求继承。请求取消时，应释放设备内存和元数据租约；只删除 tensor 而保留索引，会造成后续 slot 复用错误。
-
-## 71.16 state cache 的容量模型
-
-递归状态不随 token 线性增长，但会随层数、state 维度、dtype、并发和 snapshot 频率增长。可以写成：
-
-~~~math
-M_{\mathrm{state}}
-=N_{\mathrm{request}}
-\sum_{\ell=1}^{L}d_{\ell}b_{\ell}
-+M_{\mathrm{snapshot}}
-+M_{\mathrm{metadata}}
-~~~
-
-如果每层有多个 state 或同时存在 draft、target 两份分支，实际容量还会增加。固定状态不等于免费状态，也不等于可以取消 admission control。
-
-## 71.17 状态事务的提交语义
-
-生成 token、更新 state、更新 position、调用工具和写入外部副作用不一定同时成功。state cache 可以采用 begin、update、verify、commit/rollback 的事务语义；工具副作用则需要更强的幂等和人工确认。
-
-状态回滚只回滚模型内部对象，不代表已经发出的邮件、写入的数据库或执行的命令可以自动撤销。Agent runtime 必须把 state transaction 和 external side effect 分开记录。
-
-## 71.18 state cache 与租户隔离
-
-状态对象应带 request id、owner、tenant、model revision、position、dtype、checksum 和过期时间。batch slot 复用、worker 迁移、请求取消和异常重启都要释放 owner 和租约。
-
-恢复测试要故意交错两个租户的长流请求，并比较单独运行与批处理运行的 logits。只要出现差异，就应先查 state 生命周期，而不是把错误归因于模型随机性。
-
-## 71.19 从状态定义走向生命周期
-
-Recursive State Cache 是对历史 state 的生命周期管理，不是“把 cache 删除”。只要模型使用递归路径，就必须为 state 建立 owner、step、版本、事务、容量和恢复规则。
-
-资料入口可以参考 Qwen/Kimi 公开模型资料、递归 attention 论文和 SGLang 等 serving 文档；具体 state layout 和事务保证属于实现细节。
-
-## 71.20 state cache 与 KV cache 的边界
-
-KV cache 通常按 token 保存显式 K/V，recursive state cache 保存经过递归更新后的状态。前者有较清晰的 token 地址，后者更像一个随序列推进的 checkpoint。两者都叫 cache，却有不同的生命周期：
-
-| 维度 | KV cache | recursive state cache |
-| --- | --- | --- |
-| 增长 | 常随 token 或窗口增长 | 通常固定或受控增长 |
-| 地址 | token/page 可定位 | 依赖 step 和更新路径 |
-| 恢复 | 恢复 K/V 和位置 | 恢复 state、step、版本和更新语义 |
-| 证据回读 | 相对直接 | 需要 provenance 或外部索引 |
-| 共享 | prefix sharing 较成熟 | 需验证 state owner 和边界 |
-
-把 state 当作普通 KV page 处理，容易遗漏 reset、状态事务和版本不兼容。
-
-## 71.21 state lifecycle
-
-一个可操作的状态机是：
-
-~~~text
-EMPTY
-  -> RESERVED
-  -> PREFILLING
-  -> ACTIVE
-  -> SNAPSHOTTED
-  -> MIGRATING
-  -> ACTIVE
-  -> COMMITTED
-  -> RELEASED
-~~~
-
-异常路径还包括 CANCELLED、EXPIRED、CORRUPTED 和 ROLLBACK。每个状态都要定义 owner、租约、可读写权限和可转移的字段。特别是 MIGRATING 期间，旧 worker 和新 worker 不能同时提交不同版本的 state。
-
-## 71.22 owner 和租约
-
-state 的 owner 不应只是一条 request id。实际系统至少需要：
-
-~~~text
-tenant
-conversation
-request
-model revision
-adapter revision
-policy context
-logical position
-lease expiry
-~~~
-
-请求超时、客户端断开或 worker 崩溃后，租约负责回收 state。若没有租约，长任务会把 state 永久占住；若租约太短，正在运行的请求会被误回收。续租和释放操作需要幂等，避免重试造成 double free。
-
-## 71.23 snapshot 的完整性
-
-一个可恢复 snapshot 至少包括：
-
-1. state tensors。
-2. logical position 和 segment boundary。
-3. model、adapter、position 和 kernel revision。
-4. dtype、量化 scale 和 layout。
-5. random sampling state。
-6. provenance 和 source range。
-7. checksum、创建时间和过期时间。
-
-只保存 state tensor 可能让模型“能继续说话”，但不能保证与不间断运行相同。恢复测试应逐 token 比较 logits，允许的误差要与 dtype 和 kernel 的数值特性绑定。
-
-## 71.24 preemption 和迁移
-
-当高优先级请求抢占低优先级请求时，state 要在 GPU、CPU 或远端存储之间迁移。迁移成本近似为：
-
-~~~math
-T_{\mathrm{move}}
-\approx
-\frac{\mathrm{bytes(state)}}{\mathrm{link\ bandwidth}}
-+T_{\mathrm{serialize}}
-+T_{\mathrm{deserialize}}.
-~~~
-
-若 state 小，迁移可能比重新 prefill 便宜；若 state 大、链路慢或压缩/解压耗时，重算反而更快。调度器应基于实际测量做选择，并记录恢复后的质量差异。
-
-## 71.25 batch slot 复用
-
-连续 batching 会复用 batch slot。KV cache 通常有 page table，state cache 还需要把 slot 与 state owner 绑定。请求结束后，必须先阻断后续读写，再释放 slot，最后回收 state。释放顺序错误可能造成新请求短暂读到旧请求 state。
-
-一个最小并发回归是：交错运行两个不同租户的长流请求，随机取消其中一个，再让新请求复用其 slot；比较单独运行与批处理运行的每个有效 token 输出。任何差异都应作为 state isolation bug 处理。
-
-## 71.26 state 的事务语义
-
-工具调用、推测解码和多 Agent 分支都会产生 tentative state。可以为每个 state 维护 committed step 和 speculative step：
-
-~~~math
-s_{\mathrm{visible}}
-=s_{\mathrm{committed}}
-+s_{\mathrm{tentative}}.
-~~~
-
-只有经过 target 验证或工具结果确认后，tentative 部分才能提交。工具失败、用户取消或安全策略拒绝时，系统应回滚到最后一个合法 committed step。输出文本回滚而 state 不回滚，会使下一轮模型基于未显示的内容继续推理。
-
-## 71.27 state 与权限边界
-
-递归状态可能包含用户文档、工具结果和隐式偏好。若同一 state 跨权限域继续使用，后续回答即使没有直接引用原文，也可能泄露权限变化前的信息。权限变化、文档撤销和租户切换都应触发：
-
-1. state invalidate 或重建。
-2. provenance 重新检查。
-3. cache sharing 重新授权。
-4. 日志和 snapshot 脱敏。
-
-“同一会话”不能自动等于“永远可以继续使用同一状态”。
-
-## 71.28 容量规划
-
-state cache 容量不仅是 tensor bytes，还包括 metadata、租约和迁移副本：
-
-~~~math
-M_{\mathrm{state\ pool}}
-=N_{\mathrm{active}}
+```math
+M_{\mathrm{state}}\approx
+\sum_{\ell=1}^{L}
 \left(
-M_{\mathrm{tensor}}
-+M_{\mathrm{metadata}}
-+M_{\mathrm{snapshot}}
-+M_{\mathrm{migration}}
+\sum_{j=1}^{J_\ell} n_{\ell,j}b_{\ell,j}
++M_{\ell,\mathrm{local}}
 \right).
-~~~
-
-长运行 Agent 可能同时拥有 active state、checkpoint state 和 retry branch。若只按 active request 数估算，失败重试和迁移高峰会造成 OOM。容量模型要纳入最大 branch 数、保存频率和过期回收延迟。
-
-## 71.29 监控和告警
-
-建议监控：
-
-~~~text
-active state count
-state bytes
-snapshot bytes
-lease expiry count
-migration rate
-restore latency
-restore mismatch
-cross-tenant access denial
-state checksum failure
-rollback rate
-task success after resume
-~~~
-
-不要只看 GPU memory。state 泄露、快照积压和恢复错误可能在显存正常时发生。线上一次恢复后任务失败，应关联模型 revision、kernel、position 和 state checksum。
-
-## 71.30 recursive state 的能力验收条件
-
-固定大小 state 解决的是存储增长问题，不自动解决随机回读、精确引用和跨请求隔离。路由器在接受任务前应判断它需要的是连续预测、局部上下文还是任意位置证据；后两者可能需要显式 KV、RAG 或保留原文。
-
-## 71.31 一次状态错误的定位顺序
-
-出现长对话结果漂移时，先比较 reset 和 owner，再比较 token/position 对齐、padding 和 batch slot，之后检查 dtype、kernel 版本、snapshot 序列化和 speculative rollback。这个顺序从边界错误到数值误差，能避免一开始就重训模型。
-
-## 71.32 state cache 的单位成本
-
-容量不只由 state tensor 决定，还包括每请求 metadata、snapshot、租约、恢复时间和监控。可以用：
-
-```math
-C_{\mathrm{task}}
-=C_{\mathrm{update}}+C_{\mathrm{snapshot}}
-+C_{\mathrm{recovery}}+C_{\mathrm{verification}}.
 ```
 
-当递归 state 减少显存却增加恢复和验证成本时，必须用成功任务成本判断，而不能只看 bytes/token。
+其中 $L$ 是层数，$J_\ell$ 是第 $\ell$ 层的状态分量数，$n_{\ell,j}$ 是分量中的标量数量，$b_{\ell,j}$ 是每个标量的字节数，$M_{\ell,\mathrm{local}}$ 表示该层有限窗口等局部状态占用。固定配置下，这个账本不按 $T$ 逐个增加位置槽位；并发请求数增加时，驻留状态仍会相应增加。
 
-## 71.33 state 和显式证据的组合
+所以“常数内存”必须带上比较对象：它表示相对上下文长度 $T$ 的常数，而不是与层数、维度、精度、局部窗口和活跃请求数都无关。它也不表示每步更新没有计算成本，更不能直接推出更低的整段处理时间。
 
-递归 state 适合携带连续任务的历史压缩表示，但审计系统仍需保存原始证据、引用位置和版本。不能把 state snapshot 当成可读的业务记录，也不能因为 state 固定大小就删除用户要求保留的文档。
+| 历史表示 | 缓存怎样随 $T$ 变化 | 后续如何读取历史 |
+| --- | --- | --- |
+| 显式 KV | 每保留一个位置增加一组 key/value | query 可对可见位置分别寻址 |
+| 逐 token latent | 每个位置增加较窄的 latent 表示 | query 仍可对位置分别计算权重 |
+| 递归状态 | 固定配置下不因 $T$ 增加新的位置槽位 | query 从累计状态中读出模型保留的信息 |
 
-## 71.34 reset 的语义
+### 71.4.2 无 token 地址后的读取与保真问题
 
-reset 不是简单把 tensor 置零，还要清除 step、position、gate 统计、owner、租约、grammar 和未提交候选。请求完成、租户删除、权限撤销和模型切换都可能要求不同程度的 reset；每种 reset 都应有测试和审计事件。
+显式 KV 允许当前 query 分别比较每个保留位置的 key；递归状态只让 query 访问更新后的内部表示。对模型来说，历史 token 仍可能影响预测，但这条信息路径不是逐 token 的地址查询。
 
-## 71.35 state cache 的容量压测
+因此，需要问的不是“递归模型一定忘掉某类信息吗”，而是“在目标任务和干扰条件下，它的输出还能不能完成需要的读取”。可以把一个事实放在不同上下文距离处，改变干扰 token 数、重复次数和提示格式，再检查模型是否正确定位、复述或据此推理。有限维度和有限精度意味着容量约束，但单凭状态大小不能证明某类任务必然失败；任务质量需要实验回答。Mamba 的精确复制、检索和 ICL 证据集中在[第 34 章](34-Mamba局限与证据边界.md)。
 
-改变并发、平均序列长度、snapshot 频率、迁移比例、拒绝候选比例和 state dtype，记录 state GiB、update time、snapshot/restore 延迟、p99、错误和清理延迟。固定 state 的单请求成本很小，不代表高并发的总资源没有上限。
+### 71.4.3 以质量、内存和运行条件共同比较
 
-## 71.36 小结
+比较递归架构与显式注意力时，先使模型质量目标可比，再记录模型规模、层数与宽度、训练数据和预算。评估应同时包含长距离复制或检索任务、代表性语言建模指标、状态或 KV 的逻辑 payload、实际峰值显存、decode 延迟和吞吐。
 
-Recursive State Cache 是一个有 owner、租约、版本、事务、容量和安全边界的状态系统。它的难点不是把 state 放进字典，而是保证批处理、抢占、迁移、恢复、回滚和权限变化后仍然与模型语义一致。只有完成并发隔离和恢复回归，递归架构的低内存优势才有生产意义。
+这些数字还受上下文长度、batch、dtype、kernel、GPU、并发数和测量区间影响。把训练前向吞吐与生成吞吐放在一起，或把理论状态大小当成实测显存，都会混淆比较对象。某篇论文的某个模型结果只支持对应设置下的判断，不能只凭它宣布递归状态普遍更快或模型能力不受影响。
+
+## 71.5 序列边界与分块决定状态怎样延续
+
+状态不是一个跨所有文本自动连续的全局记忆。模型必须知道哪段输入属于同一个序列，才能决定何时延续状态、何时从初态开始；若实现将多个序列拼接在一起，边界处理会改变模型实际看到的信息。
+
+### 71.5.1 初始化、reset 与 packed sequence 边界
+
+新序列从模型规定的初始状态开始。常见教学推导会设 $s_0=0$，但实际架构也可能定义其他初始化方式。序列推进时，每个 token 更新所属序列的状态；序列结束后，下一条无关序列不能继续继承前一条的状态，否则历史信息会跨样本泄漏。
+
+Mamba 论文的 boundary resetting 讨论了把独立序列拼接时的隔离问题，并给出通过状态参数处理边界的做法。这里的结论是模型计算必须尊重边界语义，不是每个框架都提供同名 reset 接口。padding、packed sequence、batch slot 复用的具体行为取决于模型的 mask、segment 标记和状态更新实现。
+
+### 71.5.2 分块处理怎样传递状态并核对一致性
+
+把一段输入拆成前缀 $A$ 和后缀 $B$ 时，若二者本来属于同一序列，处理 $B$ 应从处理完 $A$ 后得到的状态继续。若在 $B$ 开始时重新初始化，计算的就不是“分块处理同一序列”，而是“处理另一条新序列”。
+
+核对实现时，可以对同一输入比较整段处理与连续分块处理的输出和最终状态。比较前需对齐初始状态、分块边界、mask、精度和归一化方式；浮点运算顺序变化可能带来小误差，容差应与目标实现相称。这是验证某个模型和实现是否保留同一序列语义的方法，不构成所有递归模型都支持任意状态保存、恢复或迁移的承诺。
+
+## 71.6 数学状态与运行时缓存是两个设计层次
+
+递归方程定义模型如何携带历史；程序实现还要决定在设备内存中实际保存哪些数据。最直接的做法是每步读写更新后的状态，但这不是唯一可能的缓存布局。
+
+### 71.6.1 同一状态可有不同存储和读取表示
+
+数学状态 $s_t$ 指足以表达当前递归进度、并继续后续计算的中间表示。运行时缓存则是实现把计算继续下去所保存的数据，可能是更新后的状态张量，也可能是检查点、近期输入或这些对象的组合。两种实现即使保存内容不同，只要在约定精度和操作范围内产生一致输出并能继续正确更新，也可能表示同一递归过程。
+
+这一区分对于阅读推理优化很重要：论文标题写“cache state”时，要检查实现缓存的是状态本身、状态检查点还是重建状态所需的数据；变量名相同也不保证数学含义相同。边界状态能否恢复、浮点误差如何传播、内存访问会不会改变，都需结合具体更新式和实现验证。
+
+### 71.6.2 ReplaySSM：将近期输入放进缓存的限界示例
+
+ReplaySSM 预印本以 Mamba-2 和 Gated DeltaNet 为对象，将递归状态组织成一个 checkpoint 和一个近期输入缓冲。大多数步骤把新输入放入缓冲；缓冲满时再把这一段贡献折叠回 checkpoint。模型因而不必在每一步都用相同方式写回完整状态。
+
+作者称这一表示在其实现中与常规递归解码的输出在浮点误差范围内匹配。可以从[ReplaySSM 原论文](https://arxiv.org/html/2610.13778v1)和[作者团队的机制说明](https://dao-lab.ai/blog/2026/replayssm/)看到完整关系。本章采用它说明缓存布局可以不同于递归方程里的 $S_t$；它仍是新预印本，结论绑定其 Mamba-2/Gated DeltaNet 实现与评测条件，不代表任意递归模型都适用，也不据此推导通用速度收益。
+
+### 71.6.3 模型状态机制与 serving 生命周期的职责边界
+
+架构层要回答的是：状态由哪些模型内存组成，输入怎样更新它，输出怎样从中读出，序列和 chunk 边界怎样定义。实际服务系统还要决定状态归属哪个请求、何时驻留或释放、怎样并发调度、是否支持快照和迁移。这些是特定框架及其版本的系统设计，不存在由递归方程自动推出的统一事务 API。
+
+本章关注前一组模型机制。关于混合模型的实际状态缓存管理和 serving 调度，应结合[第二十四册推理引擎](../../book-24-llm-inference-engine/目录.md)及具体框架版本阅读。

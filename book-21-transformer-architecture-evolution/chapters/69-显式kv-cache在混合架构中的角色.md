@@ -1,324 +1,128 @@
-# 第 69 章 显式 KV Cache 在混合架构中的角色：不是有了递归状态就能删掉 KV
+# 第 69 章 显式 KV Cache 在混合架构中的角色
 
-## 69.1 混合模型为什么仍然需要显式 KV
+混合架构把不同的历史处理路径放进同一个模型：有的层按 token 保存 key/value（KV），有的层只看局部窗口，有的层把每个位置压进较窄的 latent，还有的层递归更新固定形状的 state。这里的“cache”因此不是一种统一的数据结构。判断一个模型是否减少了显式 KV，要逐层确认它保存什么、能读取哪些位置，以及这些表示怎样随上下文变长。
 
-递归或线性层可以用固定状态扫描历史，但显式 attention 仍然需要直接读取 K/V。一个 hybrid 模型可能同时拥有局部 KV、global KV、latent cache 和 recursive state。把它们统称为 cache，会隐藏它们在大小、读写、回滚和共享上的差异。
+本章以前置的[第 11 章：KV Cache 长上下文推理和显存增长问题](11-kv-cache长上下文推理和显存增长问题.md)为基线，重点讨论混合层表怎样映射为逻辑 payload。第[65 章](65-hybrid-attention局部全局与递归状态.md)比较序列路径；第[63 章](63-gated-mla门控潜变量注意力.md)与第[70 章](70-latent-cache压缩历史表示.md)分别承担 MLA 和 latent cache；第[71 章](71-recursive-state-cache递归状态缓存.md)讲递归状态生命周期。分页布局和 serving 调度留给[第 20 章](20-FlashAttention与PagedAttention.md)及[第二十四册](../../book-24-llm-inference-engine/目录.md)。
 
-因此看到“模型使用递归 attention”时，不能直接推断“线上没有 KV cache”。只要仍有一部分层做显式 attention，长请求就会保留对应层的历史表示。
+## 69.1 混合模型中的 KV 是按注意力路径保留的状态
 
-## 69.2 按层计算资源
+理解混合模型的 cache，先把“层做什么”与“层留下什么”分开。注意力路径可能保留逐 token 的表示，递归路径则在每个新 token 到来时更新状态；它们都延续了历史信息，却提供不同的读取方式，也有不同的容量增长曲线。
 
-对保存完整历史的层，KV 教学估算为：
+### 69.1.1 全局 attention 为保留位置写入 K/V
 
-```math
-M_{\mathrm{KV},l}=2BLTH_{\mathrm{kv},l}d_{h,l}b_l
-```
+在标准 causal attention 层，输入位置经投影得到 key 和 value。Prefill 阶段一次处理提示词并生成这些表示；decode 阶段每来一个新 token，只需为新位置追加 K/V。后续位置的 query 会对允许访问的历史 key 计算权重，再从对应 value 中取出加权内容。
 
-如果只有 global layer 集合 `L_g` 保存完整 KV：
+例如，第五个 token 到来时，该层可以用自己的 query 比较前四个位置的 keys，并按所得权重组合四个 values。缓存保留了“哪个位置对应哪组 K/V”，所以该层具备按位置直接读取历史的路径。它并不保证 query 一定选中正确证据，也不保证模型会正确解释读到的内容；这些属于模型能力和任务表现，不能仅凭 cache 结构推出。
 
-```math
-M_{\mathrm{KV,total}}=\sum_{l\in L_g}M_{\mathrm{KV},l}
-```
+通常每层分别产生自己的 K/V，因此普通全局 attention 的 payload 随保留 token 数增长。第 11 章给出单层与整模型的基础估算；混合模型的关键变化是只有一部分层走这条路径，且不同层的 head 数、维度和保留长度可能不同。
 
-局部窗口为 `w_l` 时，活跃长度可以替换为窗口或页数；递归 state 需要单独计算，不能把它直接当作 KV 的一个更小 dtype。
+### 69.1.2 局部 KV、latent cache 与递归 state 代表不同历史
 
-## 69.3 一个四层 global 的例子
+不同路径都可能被统称为 cache，但它们保留的信息形式并不相同：
 
-假设模型有 32 层，只有 4 层保存全局 KV，其余层使用 local 或 state。理想情况下完整 KV payload 约是全层保存的八分之一。但如果这 4 层的 head 数更高、使用 FP16、还要保留 prefix metadata 和 workspace，实际比例可能更大。
+| 历史表示 | 每个位置留下什么 | 后续读取方式 | 典型增长方式 |
+| --- | --- | --- | --- |
+| 全局显式 K/V | 每个可访问 token 的 key 和 value | Query 可按内容读取整个保留前缀 | 随保留长度增长 |
+| 局部窗口 K/V | 可见窗口内各 token 的 key 和 value | 只能直接读取本层窗口内的位置 | 窗口固定时受窗口大小限制 |
+| 逐 token latent | 每个 token 的压缩 latent，可能由它重建 attention 所需表示 | 仍可按位置进行 attention，但使用压缩表示 | 随 token 数增长，单位置 payload 改变 |
+| 递归 state | 输入不断更新的固定形状或有限组状态 | Query 读取累计状态，通常不能直接寻址任一原始位置 | 对递归模型通常不随前缀长度线性增长 |
 
-更重要的是，这 4 层仍然决定长上下文的精确检索上限。容量规划若只看递归层固定状态，会高估并发；能力评估若只看递归层，又会漏掉 global path 的贡献。
+局部窗口的“少存”来自保留范围受限；latent cache 改变每个位置的表示宽度；递归路径把历史持续归并到 state 中。三者不是同一种压缩倍率。MLA 的 latent 细节见[第 70 章](70-latent-cache压缩历史表示.md)，递归 state 的更新和恢复见[第 71 章](71-recursive-state-cache递归状态缓存.md)。
 
-## 69.4 KV 的生命周期
+### 69.1.3 层表需要记录表示类型和可见历史
 
-prefill 把输入写入 cache，decode 追加新 token，continuous batching 读取活跃页，完成/取消释放；prefix cache 可能共享相同前缀，preemption 可能 swap、重算或压缩。混合模型还要让每个层知道自己的 cache 类型。
+只读到模型使用“attention”或“hybrid”仍不足以估算缓存。逐层审阅时至少要确定混合器类型、该层可见的历史范围、保存的是普通 K/V 还是 latent/state、每位置或每层的状态形状，以及长度增加时保留量如何变化。若报告或配置没有披露某项，就把它标成未知，不能按同家族其他模型补猜。
 
-每个对象至少需要 owner、request id、layer type、dtype、position range、page id、revision 和引用计数。不能只用一个 `past_key_values` 指针覆盖 local、global、latent 和 recursive state。
+一个简化的层表可以写成这样：
 
-## 69.5 调度和 admission control
+| 层路径 | 可见范围 | 需要核对的持久状态 | 主要容量变量 |
+| --- | --- | --- | --- |
+| Full attention | 全部 causal 前缀 | 逐 token 的 K/V | 保留 token、KV heads、head dimension、dtype |
+| Sliding-window attention | 最近窗口 | 窗口内逐 token 的 K/V | 窗口长度及每层 KV 形状 |
+| GDN/KDA 等递归路径 | 历史被并入递归更新 | 每层或每头的递归 state | 状态形状、精度和请求数 |
+| MLA 类路径 | 可跨全前缀读取 | 逐 token latent 及必要的附加表示 | token 数、latent 维度及附加项 |
 
-长请求进入时，scheduler 要估算最坏的 global KV、局部窗口、递归 state、临时 workspace 和输出长度。若只按输入 token 数 admission，可能低估某些层的峰值；若只看显存静态权重，又无法处理多个请求的增长。
+这张表记录的是模型计算所需的逻辑状态。实际运行时的物理布局、分页与调度由推理引擎决定；两者不能混为一张容量表。
 
-一个粗略容量条件是：
+## 69.2 混合架构选择显式路径的位置与形式
 
-```math
-M_{\mathrm{weights}}+M_{\mathrm{KV}}+M_{\mathrm{state}}
-+M_{\mathrm{workspace}}\le M_{\mathrm{usable\ GPU}}
-```
+“混合”描述的是若干计算路径如何共存，不预先规定它们的缓存格式。层间交错、同层并行、注意力可见范围和跨层共享是不同设计轴；分析时应分别回答“哪些层读取哪些历史”和“系统保留了哪些表示”。
 
-真实服务还需给通信、碎片、CUDA graph 和其他 batch 留余量。
+### 69.2.1 层间交错只让部分层增长为显式历史
 
-## 69.6 一个偶发 cache 错误的排查
+Qwen3.8-Next 技术报告描述的基础架构每四层安排一层 global attention，其余三层使用 Gated DeltaNet（GDN）；报告还说明，在 continued pretraining 阶段将这些 full-attention 层替换成 Qwen Sparse Attention（QSA）。这是特定模型与训练阶段的安排，不能简化成所有阶段都固定使用同一张层表。[报告](https://arxiv.org/html/2608.30320v1)把 GDN 的递归状态与 attention 的逐 token 读取作为不同路径讨论；其中 QSA 的索引会挑选供稀疏 attention 计算的位置，但这件事本身并没有说明完整 KV payload 会按什么策略保存或淘汰。
 
-先用单请求、短输入比较 full recompute 与 cache decode；再打开 batching、prefix sharing、preemption、量化和 speculative。每一步记录 layer id、position、page id、state step 和 checksum。
+Kimi K3 报告则描述了每三个 Kimi Delta Attention（KDA）层后接一层 Gated MLA，并在主干末端再放置 Gated MLA。这里 KDA 使用递归状态，Gated MLA 为 token 位置保留低维 latent 并重建 attention 所需内容；它不是普通的每头完整 K/V。[Kimi K3 报告](https://arxiv.org/html/2607.24653v2)提供的是该模型的具体布局，不是所有混合架构的推荐比例。两例共同说明：层数比例只能告诉我们路径放在哪里，容量仍要按实际表示核算。
 
-如果只有 batch 失败，查 page index、padding mask 和请求重排；如果只有恢复失败，查 snapshot 是否包含 global KV 和 recursive state；如果只有 speculative 失败，查 candidate commit/rollback 是否跨 cache 类型一致。
+### 69.2.2 层内 hybrid heads 与跨层 KV sharing 改变不同成本
 
-## 69.7 prefix cache 的边界
+Hymba 采用同一层内并行的 attention heads 与 state-space heads。并行分支让该层同时使用可寻址的注意力路径与状态路径；论文还分别研究局部/全局 attention 和相邻层 KV sharing。前者改变注意力的可见范围，后者改变重复保存的表示数量，不能把它们都概括成“多一个 state 分支”。
 
-显式 KV prefix cache 可以共享固定 system prompt 或文档前缀，但 hybrid 模型还要决定 latent/state 是否也能共享。共享条件包括相同 model revision、tokenizer/template、position、dtype、layer schedule 和策略版本。某一层命中而另一层未命中时，scheduler 需要正确拼接，不应把部分命中误报成全命中。
+[Hymba 论文](https://arxiv.org/html/2411.13676)报告的质量、cache 和吞吐观察来自其小模型、训练配方和评测设置。若一组实验同时加入 hybrid heads、调整窗口并共享 KV，就只能把结果归于该组合，不能单独证明某个设计带来了全部收益。跨层共享还必须确认被共享的 K/V 在投影、位置处理和运行时布局上确实可复用。
 
-prefix cache 还涉及租户权限。缓存中含有一个租户的文档，不能因为 token 前缀相同就跨租户复用。
+### 69.2.3 全局、窗口与稀疏路径改变的不是同一个量
 
-## 69.8 评估维度
+全局、窗口和稀疏 attention 首先描述 query 可以读取哪些 token；普通 K/V、latent 与递归 state 则描述历史怎样保存。两组概念有关联，但不能互相替代：
 
-测 page allocation、prefix hit、last-block waste、state snapshot、preemption、FP8/低精度 KV、speculative rollback、长上下文 evidence recall 和 p99。报告每种 layer path 的显存，而不是只给总 KV GiB。
-
-## 69.9 常见失败
-
-以为递归 state 取代所有 KV；global layer 数未计入容量；层索引错位；local/global position 不一致；只释放 KV 未释放 state；prefix cache hash 不完整；跨请求共享；恢复后 cache step 错误；只测单请求 happy path。
-
-## 69.10 面试回答与练习
-
-回答“混合架构还要不要 KV cache”时，应说只要有显式 attention 层就需要对应 KV；递归/latent 路径改变的是部分历史表示和资源模型。容量要按层、cache 类型、窗口、dtype、state 和临时空间计算，生命周期要覆盖 batching、preemption、prefix sharing 和 rollback。
-
-练习一：给定 32 层中 8 个 global layer，计算理想全层 KV 比例。
-
-练习二：设计一个 batch 重排导致 KV 错位的回放。
-
-练习三：列出 hybrid prefix cache 的共享条件。
-
-### 69.10.1 按层计算显式 KV
-
-设 hybrid 模型有 `L_e` 个显式 attention 层，每层 KV head 数为 `H_kv`，head dimension 为 `d_h`，序列长度为 `T`，元素字节数为 `b`，则显式 KV payload 可粗略写成：
-
-```math
-M_{\mathrm{KV,explicit}}
-\approx2B L_e T H_{\mathrm{kv}}d_h b
-```
-
-递归或 latent 层还需要各自的 state，不能把 `L_e/L` 直接当作总显存比例。若 global 层的 head 或维度更大，真实比例可能高于层数比例。
-
-### 69.10.2 cache 类型和调度器
-
-allocator 要知道一个 request 同时拥有显式 KV、latent cache、recursive state 和临时 speculative state。preemption 时可选择保存显式 block、重算局部层或迁移 state；恢复时必须保证各类状态对应同一个 token prefix 和 position。
-
-prefix sharing 只有在模型 revision、template、position/reset、dtype、tenant 和 cache layout 都一致时才安全。混合架构不能沿用只考虑 token 前缀的简单 cache key。
-
-### 69.10.3 worked example：为什么少数 global 层仍昂贵
-
-32 层模型中只有 8 层使用 global attention，看似只需四分之一显式 KV。但若这 8 层的 `H_kv d_h` 是其他层的两倍，并且每层需要额外通信 buffer，实际显式 payload 接近一半甚至更高。容量规划必须按层配置读取，而不是只看“8/32”。
-
-### 69.10.4 质量验收条件
-
-显式层往往承担精确检索或引用路径。量化、淘汰或减少这些层的 cache 时，应测数字复制、版本冲突、长文档引用和工具历史。性能优化如果只保持 perplexity，却损害关键证据召回，不能视为无损。
-
-## 69.11 显式 KV 的价值不只是精度
-
-显式 KV 还承担可回放、可检查和可迁移的作用。调试长上下文时，可以对某个层、某个 head 或某个位置做遮挡，观察 logits 如何改变；递归 state 或 latent cache 则更难直接定位原始证据。
-
-因此混合架构即使把大部分历史交给 state，也可能保留少量显式 KV 作为精确证据通道、审计通道或 fallback。显式路径的比例不是越低越好，而要和任务风险、引用要求及可观测性一起决定。
-
-## 69.12 KV budget 与 admission control
-
-请求进入服务前，可以估算每个 global layer 的 KV 需求：
-
-~~~math
-M_i\approx 2B_iT_iH_{\mathrm{kv}}d_hb
-~~~
-
-再将请求需求和可用 block pool 比较。若没有足够预算，系统应拒绝、排队、缩短上下文、改走 retrieval 或选择更高压缩路径；不能在执行中随机丢掉某些关键页。
-
-admission control 还要考虑未来 decode 长度。只按 prompt token 分配，可能在生成一半时耗尽 KV；只按 max_new_tokens 预留，又会降低并发。可采用可增长配额和可观测 preemption，但必须保证已提交状态和回滚状态一致。
-
-## 69.13 显式 KV 与 prefix cache 的区别
-
-请求内 KV 是某个请求当前前缀的执行状态；prefix cache 是可以被多个请求复用的共享结果。共享前必须验证 tokenizer、模板、模型 revision、position、权限和 dtype。即使 token 前缀相同，不同 system policy 或 adapter 也可能使隐藏状态不同。
-
-混合架构中还要把 global KV、local window 和 recursive state 分开标注。只共享一类 cache 而遗漏另一类，会造成“命中率很高但输出错误”的隐蔽问题。
-
-## 69.14 显式 KV 的压缩和回退边界
-
-混合模型通常不会在所有层使用同一种历史表示。某些层保存完整 K/V，某些层保存滑窗，某些层保存递归 state。请求增长时，runtime 必须知道每层的逻辑位置和物理布局，不能用一个统一的 token offset 代替所有路径。
-
-当显式 KV 预算不足时，回退策略要有顺序：先释放已完成请求的缓存，再尝试 prefix sharing 或重计算；如果任务允许，再减少输出预算或切换 retrieval；高风险任务则应拒绝而不是静默丢页。任何压缩或重算都要进入 trace。
-
-## 69.15 KV 的精确回放实验
-
-对同一 prefix 保存全量 KV，然后分别执行单请求 decode、continuous batching、preemption restore 和 speculative accept/reject。比较每层 K/V 的 shape、dtype、page id、logical position 和最终 logits。
-
-再对一个 global layer 做单页遮挡。如果输出没有变化，可能该页没有被读取，也可能 query 路径失效；如果输出变化但引用没有变化，说明模型有冗余路径。遮挡实验能把 cache 存在和 cache 真正被使用区分开。
-
-## 69.16 KV admission 是长上下文服务的门
-
-KV cache 不是请求开始时一次性分配完就结束。scheduler 需要根据输入长度、预计输出、并发和层配置判断请求是否有资格进入 GPU。可增长的配额要防止生成中途耗尽，过度预留又会降低并发。
-
-一个简化的 admission 条件是：
-
-~~~math
-M_{\mathrm{required}}
-=M_{\mathrm{weights}}+M_{\mathrm{workspace}}
-+M_{\mathrm{KV}}(T_{\mathrm{in}}+T_{\mathrm{planned\ out}})
-\le M_{\mathrm{budget}}
-~~~
-
-估计错误时应有排队、缩短上下文、检索回读或拒绝路径，不能静默丢掉重要 cache page。
-
-## 69.17 显式 KV 与压缩路径的职责
-
-完整 KV 保留每个历史 token 的位置化 K/V，适合 query-time 精确访问；latent、state 和滑窗保存的是压缩或局部历史，适合降低内存。混合模型需要按层记录哪一种路径承担什么任务。
-
-当 verifier 需要解释答案时，显式 KV 仍不能替代原文 provenance；当请求需要恢复时，latent/state 也不能只用 token offset 重建。cache、证据和状态是三个不同的对象。
-
-## 69.18 KV 的淘汰、共享和安全
-
-淘汰策略要考虑请求优先级、未完成输出、prefix sharing、租户权限和模型 revision。共享 prefix 前要验证模板、adapter、position、dtype 和 policy；相同 token 字符串不保证隐藏状态语义相同。
-
-请求结束后要释放物理 page、索引和元数据。高风险系统还要确认被删除的 cache 不会从共享池、snapshot 或日志中重新读出。
-
-## 69.19 从 cache 结构走向生产验证
-
-显式 KV 在混合架构中仍是精确历史读取的基础。递归和 latent state 可以降低部分成本，却不能让 allocator、scheduler 和容量规划消失。生产验证应把“是否能缓存”拆成四个问题：分配是否正确、读取是否正确、释放是否安全、恢复是否可重复。
-
-最小回归包含 full prefill 与 incremental decode 对照、不同 page/block 大小、长短请求混合、prefix sharing、抢占、取消、batch reorder 和模型灰度。对每个请求记录 cache owner、layer kind、position range、dtype、model revision 和 block table checksum；比较输出 token、KV bytes、命中率、碎片率、抢占恢复时间和跨租户读取。混合模型还要分别统计 global KV、local window、latent 和 recursive state，不能用一个平均 cache bytes 掩盖峰值。
-
-容量规划应使用峰值而不是平均：
-
-```math
-M_{\mathrm{peak}}
-=M_{\mathrm{weights}}+M_{\mathrm{KV,global}}
-+M_{\mathrm{KV,local}}+M_{\mathrm{latent}}
-+M_{\mathrm{state}}+M_{\mathrm{metadata}}+M_{\mathrm{workspace}}.
-```
-
-若 cache 校验失败，系统必须选择重算、显式路径或拒绝请求，并将原因写入 trace。模型层表和 cache 语义必须以具体实现为准，但 allocator、scheduler、租户隔离和故障回退是所有混合架构都绕不开的部署问题。
-
-## 69.20 KV cache 保存的到底是什么
-
-在 decoder-only Transformer 中，某一层的历史 token 会产生 key 和 value。增量 decode 时，过去 token 的 K/V 不再重复计算，当前 query 只需要与缓存中的 key 做匹配，再读取 value。对长度 L、batch B、KV head 数 H、head dimension d 和每元素字节数 s，粗略显存是：
-
-~~~math
-M_{\mathrm{KV}}
-=2L B H d s.
-~~~
-
-这里的 2 是 K 和 V 两种张量，不是层数；完整模型还要乘以 layer 数，并加 page metadata、对齐、临时 workspace 和通信 buffer。把一个单层公式当成整机显存，是容量规划中最常见的低估。
-
-## 69.21 混合架构为什么仍然需要显式 KV
-
-递归 state 和 latent cache 能够压缩一部分历史，但显式 KV 仍有四个不可替代的作用：
-
-1. 直接访问近期 token，保证局部语法和格式。
-2. 为 global attention 提供可寻址的远程候选。
-3. 在高风险任务中保留可回读的原子证据。
-4. 作为 state/latent 路径失败后的 fallback。
-
-因此，“混合架构减少 KV”更准确的说法是“减少某些层、某些窗口或某些路径的 KV”，而不是“KV 不再重要”。如果 global layer 的请求比例很低但每次都需要完整历史，少量显式路径仍可能主导峰值显存。
-
-## 69.22 prefill 和 decode 的缓存差异
-
-Prefill 一次处理长输入，可以并行计算 K/V；decode 每生成一个 token，就向缓存追加一列或一个 page。两阶段的瓶颈不同：
-
-| 阶段 | 主要压力 | 常见优化 |
+| 设计变化 | 直接改变 | 不能单独推出 |
 | --- | --- | --- |
-| prefill | 矩阵计算、输入带宽、长 prompt | chunked prefill、FlashAttention、context parallel |
-| decode | KV 读带宽、调度、page 访问 | paged cache、GQA/MLA、continuous batching |
+| 全局 attention 改为滑动窗口 | 本层可见位置；标准窗口实现可将保留长度限制在窗口内 | 窗口外信息对整模完全不可达，或其他层不会传递它 |
+| Dense attention 改为 sparse attention | 每个 query 实际参与核心 attention 计算的位置集合 | 主 KV cache 必定只保存被当前 query 选中的位置 |
+| 普通 K/V 改为 latent | 每个位置保存的表示及其维度 | cache 不再随 token 数增长，或 latent 无损保留所有细节 |
+| Attention 层改为递归路径 | 历史的更新与访问方式 | 固定状态一定能完成每种逐位置检索任务 |
+| 跨层 KV sharing | 多层间是否重复保存可复用表示 | 任意相邻层的 K/V 都可以安全共享 |
 
-混合架构还要记录不同层的 cache 类型。state 层可能只有固定状态，local 层保存窗口，global 层保存更多页面。调度器不能用一个统一的“每 token KV bytes”估计所有请求。
+以 QSA 为例，Qwen 报告说明索引器先对 micro-block 打分，再为每个 query 选出 token 位置供核心稀疏 attention 使用；报告还分别分析了索引与 attention 计算开销。因为所选位置会随 query 变化，不能由“稀疏读取”直接断定服务端可丢弃其余 token 的主 K/V。若实现确实只保留部分主 K/V，还需要报告或固定版本实现说明它如何应对后续 query 选中其他位置、如何恢复遗漏表示。本章不把这一未披露策略写成架构必然行为。
 
-## 69.23 page allocator 的正确性
+## 69.3 按层计算显式 KV payload
 
-Paged KV cache 把逻辑序列切成固定大小的 page，再通过 block table 映射到物理显存。它解决的是碎片和动态增长问题，不改变模型需要的历史表示。一个逻辑 token 的地址至少依赖：
+架构层表可以转成普通逐 token K/V 的逻辑 payload 估算。这个公式只回答“按声明的层和形状，需要保存多少 K/V 元素”；它不包含递归状态、latent、权重、临时 workspace 或分页元数据，也不直接等于设备实际显存。
 
-~~~text
-request id
-layer id
-logical token index
-page size
-block table
-model revision
-~~~
+### 69.3.1 全局 K/V 层按保留 token 数逐层求和
 
-混合架构中，local window 滑动会释放旧 page，global path 可能继续保留另一个 page 集合。若 allocator 只按请求释放、不按路径记录 owner，可能出现 use-after-free 或错误共享。
+对每层独立存储普通 K/V 的层集合 $\mathcal{A}_{\mathrm{KV}}$，令 $B$ 为批内请求数，$T_{i,\ell}$ 为请求 $i$ 在第 $\ell$ 层实际保留的位置数，$H_{\mathrm{kv},\ell}$ 为该层 KV head 数，$d_{h,\ell}$ 为每个 head 的维度，$b_{\ell}$ 为每个元素的字节数。K 与 V 各保存一份，因此批内普通 KV payload 可估为：
 
-## 69.24 cache 命中不是字符串命中
+```math
+M_{\mathrm{KV,payload}}
+\approx
+2\sum_{i=1}^{B}\sum_{\ell\in\mathcal{A}_{\mathrm{KV}}}
+T_{i,\ell}H_{\mathrm{kv},\ell}d_{h,\ell}b_{\ell}.
+```
 
-Prefix cache 共享的前提不只是 token ids 相同，还包括：
+全局层通常让 $T_{i,\ell}$ 等于当前保留的 causal 前缀长度；标准滑动窗口层可简化为该前缀长度与窗口 $w_{\ell}$ 的较小值。批内请求长度不同时，应逐请求相加，不能用最大上下文长度乘整个 batch 来冒充实际利用率，也不能忘记 padding 或运行时分配粒度可能带来的额外占用。
 
-1. tokenizer 和 special token 版本一致。
-2. 模型权重、adapter、量化和 position 处理一致。
-3. system prompt、权限域和 policy context 一致。
-4. attention mask、segment/reset 和 layer schedule 一致。
-5. cache page 没有被其他租户污染。
+集合 $\mathcal{A}_{\mathrm{KV}}$ 只包含独立保存普通显式 K/V 的层。若模型跨层共享同一份 K/V，应按唯一存储项核算，而不是按引用它的层数重复相加；若要估算单卡占用，还须结合张量并行如何切分 heads 和层。这个口径与[第 11 章](11-kv-cache长上下文推理和显存增长问题.md)的整模型基线一致，只是把求和限制到真实使用普通 K/V 的层。
 
-相同的可见文本在不同 adapter 或权限上下文下，hidden state 可能不同。高风险系统不能只用字符串 hash 作为共享 key。
+### 69.3.2 窗口、GQA、latent 与 state 分别改动账本字段
 
-## 69.25 显式 KV 的版本和事务
+读公式时可把每种设计对应到具体字段。窗口改变 $T_{i,\ell}$；Grouped-Query Attention（GQA）或 Multi-Query Attention（MQA）改变 $H_{\mathrm{kv},\ell}$；KV 量化改变 $b_{\ell}$；跨层共享改变实际存储的独立副本数。每一种变化影响的字段不同，必须查本模型配置与实现，不能拿“global 层占比”代替它们。
 
-请求生成时，KV cache 不是普通只读文件。新 token 到来会追加写入，推测解码可能先写入候选，再因为 target 拒绝而回滚；beam 或多 Agent 分支可能共享前缀后各自追加。可以把状态分为：
+MLA 类 latent cache 仍可能按 token 保存表示，但每个位置存的是 latent 及模型规定的附加信息，应另建一项账本，不能把其维度直接填进普通 K/V head 数。递归 state 则按每请求、每层的状态张量形状和 dtype 单独记账；固定状态大小表示它不随历史 token 数线性增长，不代表状态开销为零。分页块、scale、对齐、索引器和 workspace 属于实现或辅助状态，也应按各自定义统计，而非混入普通 K/V 公式。
 
-~~~text
-committed prefix
-tentative suffix
-checkpoint snapshot
-released pages
-~~~
+### 69.3.3 少数 global 层的比例只在等形状假设下成立
 
-只有被接受的 token 才能从 tentative 迁移到 committed。回滚时要恢复 page length、logical position、sampling state 和与混合路径相关的 state/latent。只删除输出文本而保留 KV，会造成下一次读取看见不存在的 token。
+看一个只用于核算比例的例子：单条请求有 $32$ 层，每层形状相同，$H_{\mathrm{kv}}=8$、$d_h=128$，使用 BF16（每元素 $2$ bytes），保留 $8192$ 个 token。若所有层都存普通全前缀 K/V，payload 为 $1$ GiB；若只有 $4$ 层如此，其余层的状态先不计，普通 K/V payload 为 $128$ MiB，也就是全层基线的 $1/8$；若有 $8$ 层，则为 $256$ MiB，即 $1/4$。这只是同形状、同长度、同精度条件下的比例演示。
 
-## 69.26 offload 与多级缓存
+真实模型中，少数 global 层可能有不同的 KV head 数、head dimension 或精度；窗口层也会留下自己的窗口 K/V，latent 与递归路径各有 payload。因而 $4/32$ 不等于整模型总状态就是全模型的八分之一，更不能推出实际显存或推理时间也降低到八分之一。容量管理和设备占用的完整分析见[第二十四册 KV Cache 章节](../../book-24-llm-inference-engine/目录.md)。
 
-GPU KV、CPU KV、远端 KV 和重算之间存在明确 trade-off：
+## 69.4 评估保留路径的质量与成本
 
-~~~math
-T_{\mathrm{next}}
-=T_{\mathrm{GPU\ read}}
-+T_{\mathrm{PCIe/NVLink}}
-+T_{\mathrm{remote}}
-+T_{\mathrm{recompute}}.
-~~~
+显式逐位置读取可以提供一种访问路径，是否有助于目标任务仍要测量。合适的评估既要看模型找不找得到目标信息，也要把层位置、表示形式、计算预算和服务环境记录下来，避免从单一 benchmark 推出普遍架构结论。
 
-短请求通常不值得把 KV 搬到远端；长请求可能宁可接受一次传输也不愿重新 prefill。混合架构可以把近期 local KV 留在 GPU，把低频 global page 放在 CPU 或外部存储，但访问模式必须可预测，否则 p99 会被偶发 page miss 拉高。
+### 69.4.1 检索与复制任务应针对目标信息粒度
 
-## 69.27 安全和租户隔离
+若要判断哪条路径保留了什么能力，测试集应覆盖不同的信息粒度：精确复制编号或字符串、远距离事实检索、跨段组合、多个相似候选之间消歧、冲突版本判断，以及一般语言任务。精确匹配、答案级准确率和证据位置命中率回答的是不同问题；对只检查最终答案的 benchmark，不能直接声称模型确实读到了正确原文位置。
 
-KV 里面包含模型对输入的中间表示，仍可能携带敏感信息。需要：
+已有论文展示了这种任务条件差异。[Griffin](https://arxiv.org/html/2402.19427v1)分别研究 synthetic copy/retrieval 与 phonebook lookup，并把 full-attention KV、local cache 和 recurrent state 的容量分开核算；[Hymba](https://arxiv.org/html/2411.13676)报告了其架构下的 recall 实验；[Qwen3.8-Next](https://arxiv.org/html/2608.30320v1)则比较 QSA 与 full-attention 配置在 RULER 和 8-needle MRCR 等长上下文任务上的表现。三者使用的模型、训练预算、数据和评测设置不同，不能把分数直接横向比较，也不能由某一组结果推出所有递归模型都会丢失远程细节。
 
-1. 以租户和权限域隔离 page pool 或至少隔离分配和引用。
-2. 取消请求后清理物理 page 和 block table。
-3. 禁止跨 policy context 共享 prefix。
-4. 监控 snapshot、日志和 crash dump 是否带出缓存。
-5. 对缓存迁移和远端 offload 加密并记录审计。
+### 69.4.2 消融应隔离层位置、数量与表示方式
 
-“模型没有直接输出 secret”不等于 cache 没有泄露风险。安全边界应覆盖 allocator、snapshot 和运维工具。
+要回答“多少显式层是否足够”，实验至少要分开改变显式层的数量与位置、注意力范围（global、window 或 sparse）、保存形式（普通 K/V 或 latent）以及递归路径。层的位置也可能重要：前、中、后层承担的变换不同，所以只比较层数不能替代位置消融。
 
-## 69.28 一个容量估算例子
+比较时应尽量对齐模型规模、训练数据与 token 数、上下文长度、优化设置、评测集和训练/推理预算。若替换路径同时改变参数量、计算量或训练成本，就记录这些差异，按质量—资源曲线比较；若多个组件一起变化，只能报告联合结果。Qwen 报告明确提醒，其 GDN hybrid 架构消融不能隔离所有组件的因果贡献；同样的审慎也适用于其它混合模型。需要看懂 GDN、KDA 或 MLA 内部机制时，分别回到[第 65 章](65-hybrid-attention局部全局与递归状态.md)、[第 71 章](71-recursive-state-cache递归状态缓存.md)和[第 70 章](70-latent-cache压缩历史表示.md)。
 
-假设模型有 40 层，B=4，历史长度 L=32768，GQA 使用 8 个 KV head，每个 head dimension 为 128，BF16 每元素 2 字节，则：
+### 69.4.3 报告质量、payload 与系统成本的条件
 
-~~~math
-M_{\mathrm{KV}}
-=40\times2\times32768\times4\times8\times128\times2
-~~~
+一份可复核的比较应同时给出：各层采用的表示和可见范围；普通 K/V 与 latent/state 的逻辑 payload 随上下文长度如何变化；复制、检索和常规任务的质量指标；以及 prefill、decode 的测量条件。若报告系统延迟或吞吐，还需注明模型版本、硬件、kernel、dtype、batch/并发和计时口径。
 
-约为 5 GiB，尚未计入 page metadata 和其他激活。若把 KV head 从 8 降到 2，理想化缓存降到四分之一，但 query head、attention kernel 和质量不会自动保持不变。若混合架构只有一半层保存完整 KV，还要明确另一半层是否使用 state、local window 或 latent，而不能直接再乘一个 0.5。
-
-## 69.29 评测显式 KV 的四条曲线
-
-KV 优化应分别测：
-
-1. cache bytes：每个请求、每层和每 token 的实际占用。
-2. access latency：decode 读缓存的带宽和 page miss。
-3. quality：精确检索、格式遵循、冲突版本和引用。
-4. lifecycle：共享、抢占、迁移、恢复、回滚和释放。
-
-压缩后质量下降却不影响短问答时，说明回归集不够；显存下降但 p99 上升时，说明 offload 或 page 访问成为瓶颈；单请求正常而多租户失败时，优先查共享 key 和 allocator，而不是模型参数。
-
-## 69.30 显式 KV 仍然承担精确回读
-
-在混合架构中，递归或 latent state 负责压缩历史，显式 KV 仍可能承担局部精确注意力、最近上下文、工具 schema 和格式约束。它的价值不只是“旧架构遗留”，而是为需要逐 token 对齐的部分提供可寻址证据。
-
-因此 cache 设计要按层和表示类型分账：局部 KV 的长度、全局 KV 的共享、latent/state 的固定或压缩大小，以及 speculative 临时页。把所有表示加总成一个 `kv_cache_bytes` 会丢掉调度和回滚语义。
-
-## 69.31 显式 KV 的淘汰与回退
-
-当显存压力增加，可以优先淘汰可重算的局部 KV、降低 speculative 窗口或转入异步处理；但不能静默删除唯一的递归 state 或外部工具状态。每种 cache 都要标明可重算、可迁移、可共享和可丢弃属性。
-
-一个请求因 KV 不足而回退到短上下文时，用户应知道遗漏范围；如果回退仍声称完整分析，就把资源失败变成事实错误。
-
-## 69.32 端到端验证
-
-比较显式 KV 开启、关闭、部分淘汰和跨 worker 迁移四种路径，验证 logits、输出、引用、工具事件、显存和 p99。对相同 prefix，cache hit 与 full recompute 的差异应落在明确数值容差内；否则先修 cache contract，再谈压缩收益。
-
-## 69.33 小结
-
-显式 KV 是混合架构中的精确历史通道、回退通道和 serving 基础设施。它的成本可以通过 GQA、MLA、窗口、分页、offload 和重算降低，但每种优化都改变了地址、带宽、事务或质量边界。完整的 KV 设计必须把数学缓存公式、页面分配、版本契约、租户隔离和端到端 p99 放在同一套测试中。
+逻辑 payload 不是整机显存；实际占用还受分页粒度、对齐、索引器、临时 buffer、并发请求和运行时分配影响。理论上读更少的 K/V 也不自动带来更低延迟，实际收益取决于索引开销、内存布局和 kernel。第 20 章讲 FlashAttention 与 PagedAttention，第六册和第二十四册讲推理服务及性能验收；本章只把架构路径和逻辑状态账本说清。结论应落在具体模型、任务和测量条件上：显式 attention 提供逐位置读取的机制，latent 与递归路径改变历史表示，哪种组合值得保留由质量和资源证据共同决定。

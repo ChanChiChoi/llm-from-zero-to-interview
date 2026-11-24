@@ -1,40 +1,31 @@
-# 第五册第 7 章精修记录（2026-11-24）
+# 第7章精修交接（本轮重做）
 
-## 本轮范围与依据
+日期：2026-11-24
+正文：`book-05-llm-training/chapters/07-分布式训练.md`
+研究证据：`research/distributed-training-refinement-evidence-2026-11-24.md`
 
-本记录从写作规范模块 02a 起按本轮任务重新审阅，并按第五册第 7 章契约检查正文。本轮不读取或沿用既有 `progress/` 记录；章节顺序按正文从第 7 章继续，不跳章。精修以保留分布式训练主线、纠正版本敏感事实、减少重复并强化证据边界为目标。
+## 本轮范围
 
-## 本轮新审阅结论
+按第五册目录顺序完成第7章。本轮按用户要求忽略既有 `progress/` 记录作为导航或完成状态依据；第7章按本章契约和当前正文重新核对。正文继续沿“全局更新如何跨 rank 切分、通信、同步和恢复”的中心组织。
 
-- 章节的 DP、ZeRO/FSDP、TP、PP、SP/CP、EP、检查点及故障诊断主线与契约相符；公式与教学账本按所给假设基本自洽。
-- DDP 正文和延伸阅读仍引用 PyTorch 2.14，而本轮按 PyTorch 2.15 文档核验；需统一版本引用及文档默认值说明。
-- DP 表格“增加吞吐和 global batch”容易被读成吞吐与 batch 必然同时增长；应说明在固定 global batch 与固定每卡 batch 的不同扩展条件。
-- 7.11 有部分通用激活重计算介绍与第八册范围相邻；保留其对 FSDP、TP、PP 显存和通信的影响，把泛化讲解压缩到服务本章目标的程度。
-- 资源账本代码明确标记为静态审阅，不执行；将审阅日期更新为本轮日期。
-- Megatron Core `latest` 文档的 CP 与层级并行说明需标注本轮核验日期，避免把持续更新文档当作固定版本接口。
+## 精修内容
 
-## 本轮核对的主来源
+- 第7.11节对齐已确认契约的 H2/H3 标题，将内容限定为激活重算与 FSDP、TP/CP、PP 的通信和执行调度交互；把重算机制、分段估算和论文性能证据明确留给第8章。
+- 使用 PyTorch FSDP2 2.15 文档限定参数聚集和 `reshard_after_forward` 的描述，并指出重算是否引发再次 all-gather 取决于区域、wrap 边界、配置和运行时。
+- 第7.13.3节区分 DCP 自身 checkpoint metadata 与应用管理的同一步提交标记，按 PyTorch DCP 2.15 明确 async staging、保存完成、全局 `.metadata`、文件创建假设及跨版本兼容边界。
+- 第7.14.3节把不完整恢复点表述与 DCP 保存完成及应用层标记对齐；第7.19资料边界表也改为相同语义。
+- 第7.17账本按 $DP\times TP\times PP$ 的同一混合布局重算每卡状态份额：总参数先按 TP/PP 分成每 rank 的本地模型片，再按 DP 阶段估计状态；梯度 bucket 调整到本地梯度份额可容纳的教学值，修正原账本把 6B 全模型状态误记到每张混合并行 rank 的问题。
+- 资源账本按公式静态复核：每 rank 0.75B 本地参数对应 DDP 约 8.4 GiB、ZeRO-3 约 1.05 GiB；1 GiB bucket 在 DP=8 ring 模型下每 rank 发送约 1.75 GiB，按 200 GB/s 理想链路约 0.0094 秒。未运行教学 Python 片段。
+- 原有 DualPipe、bubble 口径、CP/Ring Attention、DynaTrain、MoE capacity 和资源 toy 数值保持在论文/文档实际范围内；教学 Python 片段仅静态审阅，未运行。
 
-- PyTorch 2.15 DDP：`https://docs.pytorch.org/docs/2.15/generated/torch.nn.parallel.DistributedDataParallel.html`
-- PyTorch 2.15 FSDP2：`https://docs.pytorch.org/docs/2.15/distributed.fsdp.fully_shard.html`
-- PyTorch 2.15 Distributed Checkpoint：`https://docs.pytorch.org/docs/2.15/distributed.checkpoint.html`
-- PyTorch 2.15 发布说明：`https://pytorch.org/blog/pytorch-2-15-release-blog/`
-- Megatron Core 并行策略与 Context Parallelism 官方文档：
-  - `https://docs.nvidia.com/megatron-core/developer-guide/latest/user-guide/parallelism-guide.html`
-  - `https://docs.nvidia.com/megatron-core/developer-guide/latest/user-guide/features/context_parallel.html`
-- NCCL 官方文档：`https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/overview.html`
-- 本章采用的激活重计算、PaLM、DeepSeek-V3 等论文主张按各论文设置限定，详细事实与边界另记于 research 证据文件。
+## 验收状态
 
-## 修改与验收
+- 正文 98 个 H2/H3 标题与第7章契约逐项一致。
+- 29 个 Markdown 链接目标中，4 个是本地链接且均可解析；未发现缺失目标。
+- 130 个 `~~~` 围栏标记成对；围栏外未发现奇数个未转义 `$` 定界符。
+- 正文、研究证据和本交接文件未发现尾随空格；正文 `git diff --check` 通过。
+- 未执行教学代码、测试、训练、模型、基准或 PDF 构建。
 
-- DP 对照表改成明确表达：扩大数据并行处理能力；固定每卡 batch 时可扩大 global batch，避免暗示吞吐与 global batch 必然同时增长。
-- 将 DDP 全局 loss 缩放、不等长输入和 bucket 说明，以及推荐阅读链接统一到 PyTorch 2.15 文档。
-- 将激活检查点开头改为状态分片与激活显存的分工，并保留分段重算示例、定量研究结果及其配置边界。
-- 更新资源账本的静态审阅日期和 Megatron `latest` 文档核对日期为 2026-11-24；toy 代码只读审阅，未运行。
-- 新增对应来源证据文件：`research/distributed-training-system-and-api-evidence-2026-11-24.md`。
+## 下一步
 
-静态验收：`git diff --check -- book-05-llm-training/chapters/07-分布式训练.md` 通过；Markdown 代码围栏配对；本地链接均可解析；正文不存在遗留的 PyTorch 2.14 DDP 引用。未执行代码、测试或 PDF 构建。
-
-## 后续顺序
-
-本章完成后，从第 8 章开始依次精修，不参考既有 `progress/` 断点跳转。
+本章静态验收完成后，从第8章契约开始，按目录顺序阅读契约与正文，再做研究、正文修订和新交接；不要按旧进度记录跳章。

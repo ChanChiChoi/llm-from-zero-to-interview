@@ -1,341 +1,183 @@
-# 第 70 章 Latent Cache：压缩历史表示的收益与信息瓶颈
+# 第 70 章 Latent Cache：压缩历史表示
 
-## 70.1 为什么 cache 可以不保存完整 K/V
+上一章说明，混合架构可以在不同层保存普通 K/V、窗口内 K/V、逐 token latent 或递归状态。本章把镜头收窄到 latent cache：每个历史位置仍保留一个能被当前 query 寻址的表示，但该表示不再直接保存完整的多头 key 与 value。读完后，你应能解释 latent 怎么形成、attention 怎样使用它、它和其他压缩方式改变了什么，以及为什么“缓存字节变少”还不能单独证明模型质量和生成速度都更好。
 
-完整 K/V 能保留每个 token 的高维表示，却占用大量显存。latent cache 把历史投影到较低维 `c_t`，运行时通过投影或专用 attention 使用它。它和 prefix cache 的“复用相同 K/V”不同，重点是改变历史表示本身。
+## 70.1 从显式 K/V 到逐 token latent
 
-压缩换来的不是免费空间。低维表示可能无法同时保留实体、数字、顺序、引用和局部语法；读取阶段还要花 projection、解码或特殊 kernel。真正的 trade-off 是“少保存多少”与“丢失哪些可验证细节”。
+### 70.1.1 显式 K/V cache 的逐 token 账本
 
-## 70.2 压缩公式
-
-一个简单的线性压缩/恢复模型为：
+在常规自回归 Transformer 中，每层为历史位置保留 key 和 value，后续生成可以直接复用。若每层有 $H_{\mathrm{kv}}$ 个独立 KV head/group、每个向量宽度为 $d_h$、每个元素占 $b$ 字节，则一个 token 在一层的逻辑 payload 为：
 
 ```math
-c_t=W_dh_t,\qquad
-\hat k_t=W_kc_t,\qquad
-\hat v_t=W_vc_t
+M_{\mathrm{explicit}}^{(\mathrm{token,layer})}
+= 2H_{\mathrm{kv}}d_hb.
 ```
 
-显式 cache 每 token 的理想元素量约为 `2H_{kv}d_h`，latent cache 约为 `d_c`。理想 payload 比例：
+这里的 $H_{\mathrm{kv}}$ 已经把 MHA、GQA、MQA 的 head/group 差异纳入记账；公式只数 K/V 元素，不包含页表、对齐、临时工作区或服务运行时元数据。完整的显式 cache 容量会随着层数、同时运行的请求和每个请求保留的 token 数继续增加。第 11 章从生成流程讲解 KV cache，第 69 章则把普通 KV payload 放入混合模型的逐层账本。
+
+### 70.1.2 一个共享 latent 联合承载 key 与 value 信息
+
+Multi-Head Latent Attention（MLA）让模型先把当前位置的 hidden state 投影到较窄的共同表示，再由这个表示生成 key 与 value：
 
 ```math
-\rho=\frac{d_c}{2H_{kv}d_h}
+c_t^{KV}=W^{DKV}h_t,\qquad
+k_t^{C}=W^{UK}c_t^{KV},\qquad
+v_t^{C}=W^{UV}c_t^{KV}.
 ```
 
-如果 `H_{kv}=8,d_h=128,d_c=512`，则 `\rho=512/(2\times8\times128)=0.25`，理想 payload 约减少 75%。真实实现还要加 scale、metadata、对齐、projection workspace 和可能保留的高精度路径。
+若 $h_t\in\mathbb{R}^{d}$，则 $c_t^{KV}\in\mathbb{R}^{d_c}$；$W^{DKV}$ 把 hidden state 下投影到 latent 空间，$W^{UK}$ 与 $W^{UV}$ 分别把同一个 latent 映射到 key/value 所需的表示。MLA 的关键不是先算出完整 K/V 再用外部压缩器编码，而是让注意力层围绕这个较窄的表示工作，推理时为每个位置缓存 $c_t^{KV}$。
 
-## 70.3 表示压缩与访问压缩
+DeepSeek-V2 论文将它称为 key/value joint compression。论文的 cache 公式、矩阵形状和具体模型中的位置分支见[原始报告](https://arxiv.org/html/2405.04434v5#sec_2.1.2)；[第 63 章](63-gated-mla门控潜变量注意力.md)进一步讲解 MLA 的计算和 Kimi K3 的 Gated MLA 配置。本章只取理解“每个位置存什么、之后怎样读”的最小机制。
 
-表示压缩改变每个历史 token 的表示维度；访问压缩则只读取一部分 token、摘要块或候选页。前者可能造成重建误差，后者可能漏掉正确证据。两者可以组合，但评测要能区分“证据被存坏了”和“证据没有被访问”。
+### 70.1.3 每个位置仍可寻址，缓存仍随长度增长
 
-## 70.4 信息瓶颈的直觉
+Latent cache 不是把前文汇总成一份固定大小的摘要。位置 $s$ 有自己的 $c_s^{KV}$，当前 query 仍可以对各个历史位置计算 attention 权重；压缩的是每个位置的表示宽度，而不是历史位置的数量。因此，在层数和 latent 宽度固定时，cache 随上下文长度 $T$ 仍近似按 $O(Td_c)$ 增长。
 
-一段长文本中，主题摘要可能只需要少量维度；但精确数字和版本差异需要保留更多细节。latent dimension `d_c` 太小，模型可能把“错误率 2%”和“错误率 20%”压成相似状态；太大则显存收益下降。
+这点也把 MLA 与递归序列状态分开：递归层逐 token 更新一个状态，通常不保留每个历史位置的独立地址。两者都可能降低某种 KV 存储压力，却保留了不同的读取能力和误差来源。[第 69 章](69-显式kv-cache在混合架构中的角色.md)比较了这些状态类型；[第 71 章](71-recursive-state-cache递归状态缓存.md)负责递归状态的更新与生命周期。
 
-因此选择 latent dimension 不能只看平均 perplexity。要看数字准确率、代码测试、证据召回、引用支持和冲突识别。
+## 70.2 Attention 怎样直接读取 latent
 
-## 70.5 一个四段文档实验
+### 70.2.1 把 key 上投影折入 query 路径
 
-文档分为背景、实验设置、结果表和结论。问题分别要求主题摘要、找结果数字、比较两版本和引用表格行。对 full KV、latent 256、latent 512、latent 1024 做对照。
-
-如果主题摘要都正确，但 256 在数字和版本比较上明显下降，说明压缩保留了语义主题却丢了高精度关系。此时可以让结果表和 global evidence 走显式路径，而不是把所有 latent 维度翻倍。
-
-## 70.6 读取与 kernel 成本
-
-latent cache 的服务路径是：
-
-```text
-encode -> compress -> store -> read/project -> attend
-```
-
-压缩减少了存储和带宽，却可能增加 projection 和 kernel launch。若每次 decode 都把 latent 恢复成完整 K/V，部分收益会被恢复成本抵消；如果直接在 latent 空间 attention，模型表达和 kernel 需要重新设计。
-
-压测要分别记录 prefill compression、decode projection、memory bandwidth、kernel occupancy、TTFT、TPOT 和并发，而不是只看 cache 文件大小。
-
-## 70.7 cache 的版本和回滚
-
-latent cache 需要保存 projection revision、dtype、scale、layout、position range 和 token range。speculative decode 产生临时 latent 时，只在 target 接受后 commit；拒绝分支必须释放，不能因为内容“只是压缩向量”就忽略状态污染。
-
-跨模型版本不能因为 shape 相同就复用旧 latent。投影矩阵、位置处理和归一化变化都会改变语义。
-
-## 70.8 量化的区别
-
-KV quantization 仍保存每个 token 的 K/V，只改变精度；latent cache 改变表示维度和读取路径。两者可以叠加，但误差来源不同。实验应分别比较 FP16 latent、低精度 latent、FP16 projection 和低精度 projection，确定退化来自哪里。
-
-## 70.9 评估与诊断
-
-按 token 类型做 sensitivity test：替换数字、实体、表格列名、代码标识符和工具参数，检查答案和引用变化。还要把证据放在上下文开头、中间和结尾，观察压缩是否放大 lost-in-the-middle。
-
-如果平均 loss 好而 citation support 下降，说明压缩保留了可生成的主题，却损失了可归因的细节。生产系统应允许回退到显式检索或高精度 cache。
-
-## 70.10 常见失败
-
-把 latent cache 当 prefix cache；只比较存储体积；压缩丢数字和来源；prefix hash 没有 projection 版本；跨版本复用；量化与压缩误差叠加；speculative reject 不回滚；fallback 时没有清空旧 latent。
-
-## 70.11 面试回答与练习
-
-回答“latent cache 和 KV cache 的区别”时，应说 KV 保存可直接读取的 K/V，latent cache 保存压缩历史并在读取时投影或用专用 attention；latent 省状态但有信息瓶颈和额外计算。要按精确任务和真实 kernel 评估，而不是只看理论压缩比。
-
-练习一：实现一个线性 encoder/decoder toy cache，比较维度、重建误差和 attention 输出。
-
-练习二：设计一个能发现数字信息损失的测试集。
-
-练习三：列出 latent cache snapshot/restore 必须保存的字段。
-
-### 70.11.1 压缩率和重构误差的关系
-
-设原始历史表示为 `H`，压缩器为 `C`，重构或读取映射为 `D`，则：
+如果先从缓存 latent 重建每个历史 key，再与 query 做点积，仍能得到标准 attention 的分数，但会重新付出构造整段 K 的计算和数据搬运。MLA 的低秩结构允许改变乘法次序。对第 $i$ 个 head，$W^{UK}_i$ 表示 key 上投影中属于该 head 的部分：
 
 ```math
-\hat H=D(C(H)),\qquad
-E_{\mathrm{repr}}=\lVert H-\hat H\rVert
+q_{t,i}^{\mathsf T}k_{s,i}^{C}
+= q_{t,i}^{\mathsf T}W^{UK}_ic_s^{KV}
+= \left((W^{UK}_i)^{\mathsf T}q_{t,i}\right)^{\mathsf T}c_s^{KV}.
 ```
 
-表示误差小不等于任务误差小。一个小数字、版本标识或引用边界可能在整体 MSE 中占比很小，却决定最终回答是否正确。评估应把重构误差与任务级 evidence recall、citation support 和结构化字段准确率联系起来。
+于是可以先把当前 query 映射到与 latent 对齐的空间，再与已缓存的各位置 latent 打分，而不必为了求分数先展开每个 $k_{s,i}^{C}$。这是矩阵结合律给出的代数重排，不是近似注意力；[DeepSeek-V2 §2.1.2](https://arxiv.org/html/2405.04434v5)把这种重排称为将上投影吸收到 query 路径。
 
-### 70.11.2 latent 读取的额外成本
+代数上允许吸收不等于所有 kernel 都以同一种方式执行。具体实现可能融合投影、分块读取或在某处物化中间量；若实现仍重建整段 K，缓存载荷减少未必能按相同比例减少读取流量或延迟。[Lior Sinai 的 MLA 讲解与 Julia 实现](https://liorsinai.github.io/machine-learning/2025/02/22/mla.html)专门分析了未吸收投影时的 decode 代价以及吸收后的计算路径。
 
-显式 KV 可以直接按 query 读取；latent cache 可能需要投影、解码或专用 kernel。若压缩节省的显存带宽小于投影和通信成本，TPOT 不一定改善。latent state 还可能不适合随意拼接、分割或跨 request 共享，allocator 需要理解其 shape 和生命周期。
+### 70.2.2 把 value 上投影与输出投影合并
 
-### 70.11.3 质量消融
-
-按 latent dimension、量化精度、压缩频率和读取路径做消融。任务至少包含局部问答、远程数字、跨段冲突、代码长文件和工具历史。若只有高维 latent 才保持引用能力，系统可以对 global 层使用高维、对局部层使用低维，而不是统一设置。
-
-### 70.11.4 snapshot 的一致性
-
-snapshot 必须与 position、层编号、模型 revision、压缩器版本、dtype 和 request owner 绑定。恢复时先验证 checksum 和 shape，再把 state 重新挂接到 scheduler；压缩器升级不能静默读取旧 latent。失败时应能重算或回退显式路径。
-
-## 70.12 压缩率和任务保真不是同一个坐标
-
-压缩率只描述状态大小变化，不能描述信息价值变化。两个压缩器都把历史缩小四倍，一个可能保留数字和引用，另一个可能只保留主题；二者的产品价值完全不同。
-
-可以绘制二维曲线：横轴是状态 bytes 或压缩 ratio，纵轴分别画主题质量、exact match、evidence recall、citation support 和 p99。若只画一个总分，关键任务的损失可能被普通摘要样本掩盖。
-
-## 70.13 选择性保真
-
-实际系统可以把历史分成普通背景、结构化字段、最新事件和高风险证据。背景使用高压缩 latent，结构化字段保留精确表示，最新窗口保留完整 KV，高风险查询触发原文 retrieval。
-
-一个简单的路由函数为：
-
-~~~math
-p_t=\mathrm{Route}(value(t),risk,query)
-~~~
-
-value 不应只由模型自己决定。可以利用文档类型、字段、用户权限、任务标签和历史失败率，避免模型为了节省成本把重要证据压缩掉。
-
-## 70.14 压缩器的训练目标
-
-如果压缩器只用重构误差训练，可能保留平均语义而删除稀有但关键的字段。训练数据应加入数字、否定、版本、表格、代码和冲突样本，并对这些字段提高权重。
-
-评估时要把压缩器和主模型分开消融：原文直接 attention、固定摘要、学习 latent、latent 加原文回读。这样才能判断问题来自压缩器、主模型还是回读策略。
-
-## 70.15 压缩 cache 的错误预算
-
-可以把 latent cache 的总错误拆为四类：投影误差、量化误差、访问误差和协议误差。它们的表现不同：投影误差常集中在高频细节，量化误差可能随长度累积，访问误差表现为漏读，协议误差表现为错位或跨版本污染。
-
-~~~math
-E_{\mathrm{total}}
-\approx E_{\mathrm{projection}}
-+E_{\mathrm{quantization}}
-+E_{\mathrm{access}}
-+E_{\mathrm{protocol}}
-~~~
-
-这个式子用于排查，不是严格可加定理。先分别运行高精度全显式、低精度全显式、高精度 latent 和低精度 latent，才能判断是哪种误差主导。
-
-## 70.16 长文档的双通道读取
-
-一个实用流程是先用 latent 读取完成粗筛，再由 query 生成候选来源范围，最后用显式原文或 RAG 回读高价值片段。粗筛阶段追求覆盖和低成本，回读阶段追求 exactness 和 provenance。
-
-回读结果应包含文档 revision、段落范围、原始 token 或字符偏移，以及压缩表示中的候选分数。没有这些字段，最终答案即使正确，也无法判断它是否真正支持了引用。
-
-## 70.17 压缩比不是唯一目标
-
-设原始 cache 为 B_full，latent cache 为 B_latent，压缩比可以写成：
-
-~~~math
-\rho=\frac{B_{\mathrm{full}}}{B_{\mathrm{latent}}}
-~~~
-
-但真正的系统收益还要扣除投影、临时 buffer、索引、provenance 和回读成本。一个压缩比很高的实现，如果 projection kernel 读放大严重，TPOT 可能反而上升。
-
-评估应画 memory、latency、exact recall、citation support 和单位成功成本的多维曲线，而不是只报一个 rho。
-
-## 70.18 关键字段的压缩验收条件
-
-数字、否定、版本、时间、权限和代码标识符通常比主题摘要更脆弱。训练或评估压缩器时，应对这些字段建立专项样本，并要求 latent 粗筛能够触发原文回读。
-
-若压缩后只保留“文档讲了什么”，却丢掉“哪个版本、何时生效、例外条件是什么”，系统会产生流畅但不可审计的答案。字段级 recall 比整体相似度更适合高风险任务。
-
-## 70.19 压缩 cache 的回滚和迁移
-
-推测解码、请求分叉和跨 worker 迁移都要求 latent 与投影状态一致。候选 token 被拒绝时，要恢复压缩表示、position、projection workspace 和 provenance；迁移时要确认设备、dtype、压缩器 revision 和 layout。
-
-可以保留一段显式原文作为安全窗口，其余历史使用 latent。这样提高了回滚和回读可靠性，却会减少可压缩比例，最终仍需用任务和容量曲线做选择。
-
-## 70.20 从压缩表示走向服务回退
-
-Latent cache 是表示压缩与 serving 设计的结合。它可以降低历史状态，却把压缩误差、projection kernel、版本和回滚引入系统。上线时不应只有“latent 可用/不可用”两个状态，而应定义逐请求回退策略：低风险普通背景可以继续使用 latent；数字、否定、版本、权限和工具参数等高价值字段触发原文回读；checksum、revision 或 shape 不一致时直接重算或走显式 KV。
-
-一个简单的回退判据可以写成：
+注意力权重确定后，每个 head 要对历史 value 做加权求和。由于 value 是 latent 的线性上投影，可以先对 latent 按该 head 的权重求和，再把结果映射回 value 空间：
 
 ```math
-G_{\mathrm{latent}}
-=G_{\mathrm{version}}
-\land G_{\mathrm{checksum}}
-\land G_{\mathrm{evidence\_recall}}
-\land G_{\mathrm{latency}}
+o_{t,i}
+= \sum_{s\le t} a_{t,s,i}W^{UV}_ic_s^{KV}
+= W^{UV}_i\sum_{s\le t}a_{t,s,i}c_s^{KV}.
 ```
 
-其中 `G_evidence_recall` 不是模型自评，而是通过带来源的字段测试或 verifier 检查。回退本身也要计费：projection、原文读取、额外模型调用和重试可能让单位成功成本上升。压测应比较全显式、全 latent、按风险回退和 cache 失效四种模式，报告 memory、TPOT、引用支持、回退率、恢复成功率和 p99。具体 latent layout 和是否恢复 K/V，以对应模型和引擎实现为准。
+随后还可以把 value 上投影与 attention 输出投影合并。不同 head 的权重一般不同，所以仍须为各 head 形成相应的加权 latent 结果；合并投影并不会把所有 head 的 attention 变成同一组权重。DeepSeek-V2 §2.1.2 给出的吸收路径避免必须生成完整历史 V 张量，同时保留原有的加权汇总关系。
 
-## 70.21 latent cache 的信息瓶颈
+这也说明低维 cache 不能被理解为“读一个摘要向量就结束”。每个 query 仍要从它能访问的位置中算出权重、汇总内容，再投影为 attention 输出；如果要讨论推理速度，必须进一步看实现如何组织这些操作。
 
-设原始历史表示为 H，压缩器为 C，latent 为 Z=C(H)，读取器为 R。系统输出可以抽象成：
+### 70.2.3 RoPE 位置路径影响 latent 定义与字节数
 
-~~~math
-Z=C(H),\qquad
-\hat H=R(Z),\qquad
-y=f(q,\hat H).
-~~~
+RoPE 会按 token 位置旋转 query/key 的通道。旋转与低秩投影通常不能随意交换，因此“缓存 latent”还要说明位置如何进入 key。DeepSeek-V2 将内容相关的 K/V latent 与共享的 RoPE key 分开；推理缓存包含这两类逐位置信息，不能只把 $d_c$ 当作它的完整 cache 宽度。按论文定义，MLA 每 token、每层需计入 $d_c+d_h^R$ 个元素，其中 $d_h^R$ 是额外位置 key 的维度。
 
-只要 Z 的维度或数量小于 H，系统就存在信息瓶颈。目标不是重构每个 token，而是在给定任务集合上保留足够的信息：
+并非所有 latent attention 都使用同一位置方案。[第 63 章](63-gated-mla门控潜变量注意力.md)区分 DeepSeek-V2 的 decoupled RoPE 与 Kimi K3 报告中的 NoPE 配置；后者是具体模型设计，不是 MLA 的通用定义。另一条路线是 KV-Latent：它缩减既有注意力头维度，并针对低维 query/key 修改 RoPE 频率采样。其作者在 [ACL 2025 论文](https://aclanthology.org/2025.acl-long.77/)中报告了特定模型上的继续训练和评测结果，不能据此推断任意模型都可直接采用同样的频率表。
 
-~~~math
-\min_C\ 
-L_{\mathrm{task}}(f(q,C(H)))
-+\lambda\operatorname{cost}(C(H)).
-~~~
+### 70.2.4 预训练联合学习与 checkpoint 缩维是两种路径
 
-如果只用平均语言 loss 训练或评估，压缩器可能保留流畅主题，却删除数字、否定和版本条件。高风险场景必须把这些字段单独纳入质量验收条件。
+DeepSeek-V2 式 MLA 把 latent 投影和模型其他参数一起训练，让网络学习哪些维度适合未来的 attention 读写。KV-Latent 则从已有 LLaMA checkpoint 出发，缩减 Q/K 与 V/O 的 head 维度，再用两阶段训练恢复能力。两者都能减少 cache 载荷，却不是同一个压缩算法：参数初始化、位置处理、训练信号和压缩误差都不同。
 
-## 70.22 token latent 与 summary latent
+KV-Latent 的两阶段方案包括层内蒸馏与继续语言建模；当 latent/head 维度继续变窄时，少量追加训练未必能恢复原能力。这类结果提醒我们，表示维度必须结合训练过程和任务要求评价，而不能只看张量 shape。[KV-Latent: Dimensional-level KV Cache Reduction with Frequency-aware Rotary Positional Embedding](https://aclanthology.org/2025.acl-long.77/)给出了方法和实验细节。
 
-latent cache 至少有两种形态：
+## 70.3 不同压缩方法改变不同的轴
 
-1. token latent：每个历史 token 都有一个较小 latent，保留相对位置和较细粒度寻址。
-2. summary latent：多个 token 聚合成一个摘要块，缓存更小但地址和细节更粗。
+“压缩 KV cache”可能表示改变每个数的位宽、每个位置的表示维度、保留的 token 集合，也可能表示不再保存逐 token 历史。它们可以组合，但应按改变对象分别记账：
 
-token latent 的压缩比可能没有 summary 高，但更容易做局部回读；summary latent 适合重复背景和主题摘要，却不适合直接承载精确表格。系统可以把两者组合：近期 token 保留 token latent，远端重复背景使用 summary latent，关键字段单独保存原文索引。
+| 方法 | 主要改变什么 | 历史是否仍按位置寻址 |
+| --- | --- | --- |
+| Latent / 低秩表示 | 每个 token 存储的特征维度 | 是，通常每位置保留 latent |
+| MQA/GQA | 独立 K/V head 或 group 数 | 是，按 KV 组存储 |
+| 量化 | 每个数值占用的 bit 数及数值误差 | 是，向量位置和维度仍在 |
+| Token selection / eviction | 被读取或保留的历史位置集合 | 取决于是否实际删除位置 |
+| 递归状态 | 用逐步更新的状态承接前缀历史 | 否，不为所有历史位置保留独立地址 |
 
-## 70.23 压缩比和有效能力
+### 70.3.1 MQA/GQA 共享 head 与 latent 压缩维度
 
-定义表示压缩比：
+MQA/GQA 减少独立 key/value 表示的组数；latent cache 则把 K/V 的信息投到较窄的坐标空间。前者改变的是 head/group 轴，后者改变的是每个位置的表示方式和宽度。两者有可能组合，因此比较模型时要同时记录 KV group 数、latent 宽度、每值精度和任何额外位置分量。
 
-~~~math
-\rho=\frac{\mathrm{bytes}(Z)}{\mathrm{bytes}(H)}.
-~~~
+不能把两种方法简单写成彼此替代的“cache 压缩倍数”。GQA 中某个 K/V 组仍保存其向量；MLA latent 中每个位置也仍有独立 code。它们减少的是不同的乘数，实际能否叠加以及叠加后的模型质量要由具体结构和训练验证。[第 4 章](04-mha-mqa-gqa-mla的演进与trade-off.md)讨论 MHA/MQA/GQA/MLA 的历史关系。
 
-rho 越小，理论缓存收益越大，但质量曲线不一定单调。常见情况是压缩比从 1 降到 0.5 时几乎不损失质量，继续降到 0.1 后数字和冲突任务突然崩溃。这说明信息损失可能集中在少数关键字段，而不是平均发生。
+### 70.3.2 量化减少每个数值的位宽
 
-因此报告应画 quality-versus-rho 曲线，并按任务类型和证据位置分桶。只报一个压缩比会把“能压缩主题摘要”和“能压缩法律证据”混为一谈。
+量化通常保留相同的向量维度和 token 位置，只用较少 bit 表示每个数值；由此引入的误差与 latent 降维导致的信息容量限制不是一回事。量化还可能需要 scale、反量化和适配 kernel，这些都会影响实际字节数或推理代价。
 
-## 70.24 provenance 不能被压缩掉
+两者可以串接，例如先把每 token 的 latent 维度减小，再降低 latent 数值精度。但组合后的误差不能当成两个独立数字机械相乘，必须在目标模型和任务上一起测。具体 KV 量化格式和 runtime 支持由第二十四册处理。
 
-如果 latent 只保存向量，没有来源范围，后续模型即使生成了正确结论，也无法说明它来自哪份文档。每个 latent block 至少应绑定：
+### 70.3.3 Token selection 与 eviction 改变位置集合
 
-~~~text
-source document
-source span or token range
-document revision
-position range
-compressor revision
-dtype and quantization
-checksum
-~~~
+稀疏读取让 query 只计算部分历史位置的 attention；淘汰则实际不再保留某些历史表示。前者可能减少计算，却不必然减少已分配的 cache；后者减少存储，但会让被删除的位置无法直接回读。两种情况都与“每个保留位置变窄”不同。
 
-provenance 不一定进入模型 hidden，但必须存在于 serving metadata。压缩器返回候选时，retrieval 或 verifier 可以沿来源回读原文；没有来源，系统只能把语义相似当作证据。
+SALS 将两种轴结合：它先把 pre-RoPE 多头 key 投到低秩 latent 空间，再在 latent 空间选出 token，只重建入选 key，并对 value 使用通道量化。该论文用特定模型和任务测试这种组合；它说明维度压缩与 token 选择能够协同，却不表示每种 latent cache 都只保存选中的 token。[SALS 正式论文](https://papers.neurips.cc/paper_files/paper/2025/hash/00a0ebcad584c59dbc439c2af8793638-Abstract-Conference.html)展开了它的稀疏选择机制；本书的第 26 章及第 74、77 章承担稀疏与压缩 attention 的详细讨论。
 
-## 70.25 动态压缩比
+### 70.3.4 递归状态把逐 token 历史改成时间更新
 
-所有请求使用相同压缩比通常不是最优。可以按 query 风险、任务类型和证据要求选择：
+递归状态随着新 token 到来而更新，空间通常由模型状态维度决定；它不保留可直接索引的每个历史位置。Latent cache 则仍保留位置集合，只把每个位置的 K/V 表示变窄。因此，两者可能都降低显式 KV 载荷，却不能把 token latent 称为“固定大小记忆”，也不能把递归状态看成“把所有 KV 向量压缩成一长串 token latent”。[第 71 章](71-recursive-state-cache递归状态缓存.md)讨论 state 的表示与生命周期。
 
-| 任务 | 压缩策略 |
-| --- | --- |
-| 普通主题摘要 | 较高压缩比 |
-| 多文档比较 | 中等压缩比并保留版本 |
-| 代码 patch | 关键文件显式或低压缩 |
-| 安全/权限审计 | 原文回读和字段验收条件 |
-| 长期对话偏好 | summary latent + 用户可见 memory |
+## 70.4 表示容量的瓶颈必须用任务保真来判断
 
-动态策略会增加路由和 batch 复杂度。若压缩比不同导致 kernel shape 碎片化，平均显存可能下降而吞吐下降。需要把 quality、cache bytes、batch 分裂和 p99 一起测。
+### 70.4.1 信息瓶颈是容量直觉，不是 MLA 的通用训练目标
 
-## 70.26 latent 与位置的关系
+较窄的 latent 给每个位置设置了表示预算：经由这个 code，后续 query 能使用的信息受投影结构和维度约束。从这个角度说它形成了“瓶颈”，但这只是描述容量受限的直观说法。[经典 Information Bottleneck 方法](https://arxiv.org/abs/physics/0004057)另有明确的信息论目标；DeepSeek-V2 的 MLA 章节与 KV-Latent 的方法定义并没有把该互信息目标列为通用 cache 压缩训练目标。
 
-压缩器必须明确位置处理发生在压缩前还是压缩后。若 hidden 已经含有位置相关信息，直接跨位置复用 latent 可能改变语义；若位置单独保存，则读取器需要在正确的 position 上恢复。prefix cache 的 key 因而至少包含 token prefix、position scheme、model revision 和 adapter。
+MLA 也不要求逐维重建原 hidden state 或原始 full-rank K/V。端到端训练的模型可以在 latent 空间中学习有用表示，而 checkpoint 后处理方案则要面对原模型能力能否恢复的问题。评估时应问“目标任务还能否正确读取所需信息”，而不是只问“latent 能否还原某个中间张量”。
 
-长上下文中，位置误差可能表现成“latent 记忆差”。诊断时应先做同一内容、不同起始 position 的对照，再做不同内容、同一 position 的对照。前者变化大，说明位置路径或 cache offset 有问题；后者变化大，才更可能是内容压缩能力问题。
+### 70.4.2 Key 与 Value 可以采用不同的维度预算
 
-## 70.27 量化顺序
+Key 参与 query-key 匹配，影响哪些历史位置获得较大权重；Value 提供按这些权重汇总的内容。改变二者维度的直接后果不同，因此某个模型可以分别分配 key 和 value 的预算。KV-Latent 研究了 $d_{qk}$ 与 $d_{vo}$ 的不同组合，并报告其测试中的性能对 $d_{vo}$ 更敏感。
 
-压缩和量化有两种顺序：
+这个发现不能提升为“Value 总比 Key 重要”或“Key 总能压得更多”的普遍规则。它来自特定 checkpoint、训练预算和基准；在其他模型中，关键证据可能正好需要精确的 key 匹配，或者模型能从上游状态中补偿部分误差。实际设计应通过分层消融来验证。
 
-~~~text
-H -> compress -> quantize latent
-H -> quantize hidden -> compress
-~~~
+### 70.4.3 按信息类型、距离和干扰测量保真
 
-两者误差分布不同。先压缩再量化可以让 scale 适应 latent 分布，但可能放大压缩后少数重要通道；先量化 hidden 再压缩，压缩器接收的信号已经有量化噪声。部署时应固定顺序并用同一 calibration set 比较，而不是只看最终 bit width。
+单一的长上下文平均分容易掩盖 cache 压缩对不同信息的影响。一个面向长文本问答的评测可以分别检查精确实体、数字、日期、版本、否定词、相互冲突的事实、跨段组合与同义改写；再改变事实的位置、距 query 的 token 数、干扰内容和上下文长度。代码或检索场景也应加入目标任务常见的标识符、路径或精确字符串。
 
-## 70.28 回读和 fallback
+还要分清中间代理和最终任务结果。若方案从一个已训练 checkpoint 转换而来，可以比较 attention logits、attention 输出或教师模型蒸馏损失；这些分数有助于发现误差从哪一层产生，却不能代替最终问答、复制或生成任务。若 MLA 与模型一起训练，内部表示不必和原始 full K/V 数值相似，因而更应使用与读者目标一致的任务指标。
 
-latent 路径应能回答“何时不信任压缩”。可用信号包括：
+## 70.5 Cache 字节数、读取成本与任务质量需要一起比较
 
-1. query 涉及数字、版本、否定、权限或引用。
-2. latent 检索得分低或多个候选分歧大。
-3. verifier 发现 claim 没有 source span。
-4. compress revision 与当前模型不匹配。
-5. latent decode 产生异常 norm 或 NaN。
+### 70.5.1 以 latent 和附加位置项计算逻辑 payload
 
-fallback 可以扩大 latent、保留更近窗口、读取显式 KV、调用外部 RAG 或直接拒答。高风险任务宁愿增加一次回读，也不能把不可追溯的摘要当作完整证据。
+若每个历史 token 缓存 $d_c$ 个 latent 元素，以及 $d_{\mathrm{pos}}$ 个位置相关元素，分别以 $b_c$ 与 $b_{\mathrm{pos}}$ 字节存储，则一层每 token 的 latent payload 为：
 
-## 70.29 snapshot 与 speculative 的事务
+```math
+M_{\mathrm{latent}}^{(\mathrm{token,layer})}
+= d_cb_c+d_{\mathrm{pos}}b_{\mathrm{pos}}.
+```
 
-推测解码会先让 draft 路径产生候选。若候选被 target 拒绝，latent cache 也必须回滚到被接受前缀。可以把每次追加标为 transaction：
+与同一配置下普通 K/V 对齐后，可写成逻辑 payload 比例：
 
-~~~text
-begin(prefix_revision)
-append tentative latent
-verify target tokens
-commit accepted prefix
-rollback rejected suffix
-~~~
+```math
+\rho_{\mathrm{payload}}
+= \frac{d_cb_c+d_{\mathrm{pos}}b_{\mathrm{pos}}}
+       {2H_{\mathrm{kv}}d_hb_{\mathrm{explicit}}}.
+```
 
-snapshot 不仅保存 latent 数组，还要保存 logical position、source range、量化 scale、压缩器 revision 和 provenance。只恢复数组而不恢复 metadata，会产生难以发现的引用错位。
+若各部分使用相同精度，$b_c=b_{\mathrm{pos}}=b_{\mathrm{explicit}}$，字节数中的 $b$ 可以约去。DeepSeek-V2 的位置项是 decoupled RoPE key，对应 $d_{\mathrm{pos}}=d_h^R$；没有独立位置分支的方案也应依据其公开结构填写，而不是套用该配置。总账还需乘以层数、请求数和实际保留的位置数，并将 scale、页元数据、对齐和工作区另行计入。
 
-## 70.30 端到端评测
+这个比例只说明给定形状下的逻辑载荷；它不包含质量损失、projection FLOPs、运行时暂存、通信或 kernel 效率。latent 每位置依然有记录，所以单纯减小 $d_c$ 不会把 $T$ 方向的线性增长消掉。
 
-latent cache 评测至少包含 full KV、latent-only、latent-plus-explicit verification 和外部 RAG 四条路径。指标包括：
+### 70.5.2 分开节省的带宽与新增的投影计算
 
-~~~text
-cache bytes per token
-peak GPU memory
-projection FLOPs
-TTFT
-TPOT
-P95/P99
-evidence recall
-exact numeric accuracy
-citation support
-fallback rate
-restore error
-unit successful-task cost
-~~~
+Decode 时每产生一个 token，都要读取历史表示并计算可见位置的 attention。latent 更窄可以降低每步读取的数据量，但每个位置的 latent 还要参与 key 打分和值汇总；如果实现先完整重建所有 K/V，重建本身可能增加计算和内存流量。投影吸收、专用融合 kernel 或选择性重建会改变这笔成本，但不能只凭代数推导给出实测速度。
 
-如果 latent-only 质量高但 citation support 低，应增加 provenance 和回读，而不是继续追求压缩；如果质量不变但 p99 变差，应查投影 kernel 和不规则访问；如果显存没有下降，应查临时 buffer 和 metadata。
+因此至少要分别观察 cache payload/峰值设备内存、实际内存流量、prefill 时间、time to first token、逐 token decode 延迟、吞吐和目标任务质量。短序列可能还未从节省的历史读取中获益，却已经承担额外映射成本；长序列则可能更受历史读取带宽约束。究竟何时交叉，要在目标模型、batch、精度、硬件和实现上测量，不能用“更少元素”直接推出统一的加速比例。
 
-## 70.31 latent cache 的压缩比不是唯一目标
+### 70.5.3 固定预算消融才能解释表示方案的收益
 
-压缩比高但读取投影昂贵、量化误差大或无法共享时，端到端收益可能为负。除了 `M_latent/M_kv`，还要报告每 token 读取 FLOPs、内存带宽、cache hit、恢复时间和任务质量。对低并发短请求，固定的投影开销可能比省下的 cache 更大。
+有意义的压缩比较需要固定或明确报告 checkpoint、训练数据与 token 数、上下文范围、精度、batch、硬件、baseline 和测量 harness。随后分开改变 latent width、key/value 维度、位置处理方式和 token selection，才能初步判断哪项变化带来收益或损失。如果模型同时改变 MoE、层结构、训练数据和 cache 表示，结果只支持这套配置的联合表现。
 
-## 70.32 压缩表示的可逆性和证据边界
+比较“同等 cache 字节下谁的质量更高”和“同等质量下谁占用更少”回答的是两个不同问题。两种口径都应报告完整任务指标与上下文长度，而不是只挑最好的压缩率、一个平均 benchmark 分数或一次峰值吞吐。
 
-latent 通常不是原文的可逆编码，不能把它当成审计证据或删除原始数据后的等价备份。需要引用、删除和人工复核的系统应保留受控原文或可验证索引；latent 只作为模型计算状态。租户删除时，latent cache、投影临时 buffer 和相关日志都要进入删除清单。
+## 70.6 公开结果能证明什么
 
-## 70.33 量化、迁移和 speculative 的组合测试
+### 70.6.1 DeepSeek-V2 的整模型数字不等于 MLA 单因素吞吐
 
-低精度 latent 在普通 decode 上可能稳定，在长序列迁移或拒绝候选回滚时放大误差。测试应覆盖量化前后、snapshot/restore、worker migration、accepted/rejected speculative prefix 和 batch 重排，并比较 state checksum、logits 和最终协议事件。
+DeepSeek-V2 的架构章节支持 MLA 的 joint latent、key/value 上投影吸收和 decoupled RoPE cache 账本。论文摘要还报告，相比 DeepSeek 67B，DeepSeek-V2 的 KV cache 减少 93.3%，最大 generation throughput 达到 5.76 倍。但 DeepSeek-V2 同时改变了模型架构，采用 DeepSeekMoE，并包含自己的训练和部署设置；这些是整模型比较数字，不能据此说 MLA 单独带来同等幅度的 cache/吞吐收益。
 
-## 70.34 小结
+### 70.6.2 KV-Latent 显示维度与任务、训练预算相关
 
-Latent cache 的本质是有约束的信息压缩。它的价值不在于把数字变小，而在于在质量验收条件下减少显存、带宽和调度压力。有效实现必须同时解决压缩误差、位置、量化、来源、回滚和 fallback；任何只展示压缩率的方案，都没有证明它能用于真实长上下文任务。
+ACL 2025 的 KV-Latent 在 LLaMA-3-8B GQA 配置中，将 $d_{qk}$ 与 $d_{vo}$ 从 128 降到 64，并按作者方案继续训练。其 Table 1 报告：4K 序列下 BF16 cache 从 491 MB 降到 245 MB；MMLU、OBQA 与 AI2-ARC 的平均分由 42.1 变为 41.3，论文所报 Needle-in-a-Haystack pass ratio 保持在 92%。当两种维度进一步降到 16 时，cache 为 64 MB、所报 NIAH pass ratio 为 6%。这组结果能说明该论文设置中存在质量与维数的关系；不能推出统一最低 rank，也不能把 3,840-token、随机插入短句、50 次试验的 NIAH 结果等同于所有长文档检索能力。
+
+### 70.6.3 SALS 的结果属于低秩、选择与量化的组合
+
+NeurIPS 2025 的 SALS 将低秩 key latent、token selection、入选 key reconstruction 和 value quantization 组合起来，并在 LLaMA2-7B-Chat、Mistral-7B-v0.2 及特定长上下文评测设置中报告质量与吞吐。作者指出，较短序列的重建开销会抵消一部分稀疏读取收益，较长序列下其特定配置的加速更明显。这个例子说明稀疏选择能与 latent compression 协作，也说明 throughput 不能归因于某一个轴；论文的硬件、模型、选择比例和 baseline 都是结果条件。
+
+判断任何 latent cache 方案时，先问每个位置具体缓存什么、query 如何从中读取、位置编码是否另占空间；再问哪些任务经过了评估、拿什么 baseline 比、增加了哪些计算。压缩比是容量账本的一项输入，只有和任务保真及实际读取成本放在一起，才能支持工程选择。

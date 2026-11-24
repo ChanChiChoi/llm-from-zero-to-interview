@@ -1,281 +1,156 @@
-# 第 67 章 iRoPE：超长上下文的位置机制不能只看名字
+# 第 67 章 iRoPE：局部 RoPE、全局 NoPE 与超长上下文
 
-## 67.1 长上下文为什么需要重新考虑位置
+读到 Llama 4 的 iRoPE，先把四个可分别配置的问题拆开：Q/K 是否接受 RoPE 变换、每层可以读取哪些历史 token、query 是否按位置缩放、RoPE 频率是否重映射。Llama 4 把其中几项组合使用，但它们各自改变的机制不同。
 
-模型在短文本上训练时，position id、RoPE 频率和 attention pattern 都处在一个有限范围。推理时把最大长度扩大到数十万或百万 token，会遇到两个问题：位置相位超出训练分布，以及远距离 attention 的信号被局部噪声淹没。
+本章把 iRoPE 放回它最明确的公开语境——Llama 4。Meta 发布说明称，Scout 的大多数层使用 RoPE，模型交错了不使用位置编码的注意力层，并在推理期调整注意力温度；Meta 把名称中的 “i” 解释为 interleaved。[Meta 发布说明](https://ai.meta.com/blog/llama-4-multimodal-intelligence/)；发布当天的 [Hugging Face 工程说明](https://huggingface.co/blog/llama4-release)进一步展示了三层局部 RoPE attention 与一层全局 NoPE attention 的结构。
 
-iRoPE 这类名称常被用来指一种模型特定的位置处理或 RoPE 改进路线。不同资料可能对缩写有不同展开，不能只凭名字写出完整公式。更可靠的学习方法，是先回到通用问题：位置如何编码、长位置如何外推、哪些层/头使用全局路径、训练如何覆盖新的长度。
+这种组合为长距离信息提供不同的读取路径。它本身不说明模型在任意超长任务中都能找到、整合并引用远处证据；实际能力还取决于训练数据、具体权重配置、执行后端和评测任务。
 
-## 67.2 RoPE 的基本公式
+## 67.1 iRoPE 的名称与公开口径
 
-对位置 `p` 的 query 和 key，RoPE 使用旋转矩阵：
+### 67.1.1 Meta 发布资料中的 iRoPE 命名
 
-```math
-q'_p=R(p)q_p,\qquad k'_r=R(r)k_r
-```
+Meta 在发布说明中把 RoPE 层与交错的 NoPE 层，以及推理期 attention temperature scaling 放在 iRoPE 的介绍中。Hugging Face 的发布期说明同样将交错 NoPE 和温度缩放统称为 iRoPE。这个名称描述 Llama 4 的组合方案；不同来源对术语的范围仍有差别，引用时应回到来源原文。
 
-在二维子空间中，旋转角可以抽象为：
+发布期工程说明还披露一个具体的层安排：每四层中有一层使用 NoPE，另外三层使用 RoPE。它的注意力范围也与位置变换交叉组合：RoPE 层使用 chunked causal attention，NoPE 层使用全前缀 causal attention。读者可以把这些事实理解为一组公开配置，而不是由“iRoPE”三个字必然推出的公式。
 
-```math
-\theta_{p,i}=p\,\omega_i
-```
+### 67.1.2 位置变换、可见范围与温度缩放是不同配置轴
 
-点积会包含相对位置 `p-r` 的相位关系。不同频率维度同时提供短距离和长距离的周期结构，但超出训练范围后可能出现相位混叠、注意力漂移和外推退化。
+注意力层至少包含下面几项相互独立的问题。Llama 4 将其中若干项配对使用：
 
-## 67.3 长度扩展的几条路线
-
-position interpolation 把更长的 position 映射回训练范围；frequency scaling 改变 `\omega_i`；YaRN 等方法在插值、温度和训练策略上做组合；ALiBi 或 relative bias 则从另一条路径提供距离偏置。
-
-这些方法解决的是位置范围，不等于解决长文档任务。模型还需要见过长样本、跨段证据和正确的训练/推理 mask。一个位置公式可以运行到 1M，不代表模型能在 1M 中找到三处冲突证据。
-
-## 67.4 iRoPE 的阅读方法
-
-读到 iRoPE 时，至少核对五件事：它作用于所有层还是部分层；是改变频率、position id、旋转组合还是 attention 路径；是否和 local/global schedule 配合；训练是否覆盖目标长度；公开 benchmark 是否测试了中间位置和跨段推理。
-
-如果只有模型卡一句“支持超长上下文”，它可以证明发布方声明，不能证明所有位置都同等有效。具体层表和公式未公开时，应使用“公开资料显示该方向关注……”而不是编造实现。
-
-## 67.5 一个位置外推例子
-
-训练长度为 32K，推理长度为 256K。若简单把 position id 乘到 256K，角度可能进入训练中从未出现的区域；若压缩到 32K 范围，远处相邻位置的相位差变小，模型可能难以区分两个相隔很远的证据。
-
-这体现一个 trade-off：保留相位范围有助于外推稳定，保留距离分辨率有助于区分位置。iRoPE 或其他改进路线的价值，应由长度、位置和任务分桶实验决定。
-
-## 67.6 训练的配套条件
-
-长上下文继续训练需要长样本比例、长度 curriculum、位置采样、学习率、batch 和 loss weighting 的协同。若长样本主要是重复网页，模型见过很长的 token，却没有学会远距离引用；若长训比例过高，短上下文能力可能回归。
-
-每个阶段都要保存短任务基线、长程 retrieval、lost-in-the-middle、代码跨文件和训练恢复结果。位置方法不能脱离数据和训练稳定性单独验收。
-
-## 67.7 Serving 的位置合同
-
-runtime 要正确生成 position id、attention mask、page offset、prefix cache 位置和多轮 continuation。packed batch 和 prefix sharing 不能让两个请求共享错误的 position；preemption restore 要包含当前 step 和位置状态。
-
-量化、speculative decode、local window 和混合 attention 也可能使用不同的位置路径。golden replay 应比较 token ids、position metadata 和 logits，而不只是最终文本。
-
-## 67.8 评测曲线
-
-在 32K、128K、256K、512K 和目标长度上做单证据、多证据、顺序交换、干扰、冲突和引用任务。把证据放在开头、中间和结尾，记录 evidence recall、answer accuracy、citation support、p95、KV/state 和失败类型。
-
-如果长度增加但 needle recall 不变、跨段归因下降，说明位置覆盖不等于有效能力；如果只有中间位置下降，要继续查 attention pattern、训练数据和 context packing。
-
-## 67.9 常见误区
-
-把 iRoPE 名称当统一标准；把 position interpolation 当长上下文训练；把 FlashAttention 当位置外推；只测末尾 needle；忽略短任务回归；把产品 window 当有效长度；没有固定模型 revision 和 harness。
-
-## 67.10 面试回答与练习
-
-回答“如何评价一种超长上下文位置机制”时，应先核对公开定义和公式，再从位置编码、训练长度、数据任务、mask、cache 和 serving 一起看；用不同长度、位置、干扰和引用任务测能力曲线，并报告成本和短任务回归。对未公开的 iRoPE 细节明确标待核验。
-
-练习一：比较 position interpolation、frequency scaling 和 continued pretraining 各自解决的问题。
-
-练习二：设计一个检测 lost-in-the-middle 的位置分桶实验。
-
-练习三：列出长上下文 checkpoint restore 需要校验的三个 position 字段。
-
-### 67.10.1 超长位置扩展的三条路
-
-位置扩展通常包含三类思路：改变位置到角度的映射，让训练时较短的范围覆盖更长索引；继续训练或微调，让模型在目标长度上看到真实任务；改变注意力访问路径，用局部、全局或递归状态降低长序列成本。它们解决的不是同一个问题。
-
-只改变映射，可能改善数值外推，却没有教模型在远处找证据；只做长训，若 kernel、KV 和数据没有跟上，模型可以训练但无法部署；只做稀疏访问，可能降低成本却切断关键远程依赖。因此 iRoPE 这类名称需要放回完整系统解释。
-
-### 67.10.2 一个位置曲线实验
-
-固定模型和任务，将唯一证据分别放在 1%、25%、50%、75% 和 99% 位置，再加入多证据、版本冲突和引用。对长度从 32K 递增到 1M，画出 evidence recall、citation support 和 p95。若长度扩展后首尾稳定而中间下降，说明位置覆盖不等于均匀有效能力；若所有位置下降，可能是资源、mask 或训练问题。
-
-同时做短任务回归。位置缩放可能让长任务变好，却改变短距离相位，导致代码、数学或格式任务退化。长上下文发布不能只报最大长度和单个 long benchmark。
-
-### 67.10.3 serving 位置状态
-
-prefix cache、chunked prefill、context parallelism 和 checkpoint restore 都必须保持 position id、segment/reset、block offset 和模型 revision 一致。缓存命中如果使用了错误的起始位置，输出可能仍然有文本，却在长文档引用上发生系统性偏移。
-
-### 67.10.4 位置外推的误差来源
-
-长位置失败可能来自不同原因：角度映射在远处周期混淆，训练样本没有覆盖目标距离，attention mask 没有真正开放远程路径，或者 cache 的 block offset 与逻辑位置不一致。它们都可能表现为“长上下文效果下降”，但修复方法分别是位置实验、数据/继续训练、mask 设计和 serving 修复。
-
-可以做一个四组诊断：短位置/短数据、长位置/短数据、短位置/长数据、长位置/长数据。长位置本身改善而长数据不改善，说明数值路径可运行但模型没有学会使用；长数据改善而长位置不改善，说明训练信号存在但外推映射仍是瓶颈。
-
-### 67.10.5 评估结果如何写得准确
-
-不要写“支持 10M”这种脱离条件的句子。更准确的报告包括模型 revision、训练/推理长度、任务类型、证据位置、干扰、输出预算、是否使用检索、p95 和引用指标。一个模型在 10M 的单 needle 上成功，不等于能在 10M 的多证据冲突任务上稳定工作；一个模型在异步研究任务上可用，也不等于交互式服务满足延迟。
-
-## 67.11 位置插值的直觉与限制
-
-设训练最大位置为 L_train，推理位置为 p。最简单的位置插值把 p 映射为：
-
-~~~math
-\tilde p=p\frac{L_{\mathrm{train}}}{L_{\mathrm{infer}}}
-~~~
-
-它把新位置压回训练范围，可能改善数值外推，却降低远处位置之间的分辨率。频率缩放则改变角速度，让长位置的相位变化更平缓或更快；两者都不能自动增加训练中没有的长程任务信号。
-
-位置策略选择要和长训练配合。只做插值，模型可能能运行到长长度却不会使用中间证据；只做长训练，位置映射不稳又会造成远端退化。四组对照实验应分离位置映射和数据长度的作用。
-
-## 67.12 iRoPE 类名称的证据卡
-
-对于 iRoPE 这类缩写，证据卡应记录：官方全称、首次来源、作用层、是否改变频率、是否配合 local/global mask、训练长度、公开代码和 benchmark。若只有产品页一句话，应把结构字段标为未公开。
-
-实验观察也要绑定模型 revision。不同版本可能使用相同名称但更改参数、上下文、训练和 serving。名称相同不代表数学实现相同。
-
-## 67.13 长位置的分层诊断
-
-长上下文失败可以按四层诊断：
-
-1. API/runtime：请求是否被截断，token 数和位置是否正确。
-2. 数值位置：相位、频率、插值和 dtype 是否稳定。
-3. 信息访问：mask、global layer、KV/state 是否能到达证据。
-4. 任务使用：训练数据和后训练是否让模型学会整合远端证据。
-
-每层都要有独立测试。把所有退化都称为“RoPE 外推问题”，会错过截断、cache offset 和数据缺失。
-
-## 67.14 从位置公式走向长上下文实验
-
-iRoPE 的学习重点不是记住一个新缩写，而是把位置映射、长上下文训练、attention 路径和 serving 合同拆开测量。一个有区分力的实验矩阵至少包含：原始短长度、位置插值、长上下文继续训练和两者同时使用四组；每组再按证据位置、干扰量和任务类型分桶。这样才能判断收益来自位置公式、长数据课程还是简单的更大计算预算。
-
-可以把位置实验的观测写成：
-
-```math
-Y=f_{\theta}(X,\pi,\mathcal{M},\mathcal{D},H)
-```
-
-`pi` 是位置映射，`M` 是 attention mask/局部全局模式，`D` 是长度数据课程，`H` 是 serving harness。固定其中三个再改变一个，才能知道长上下文失败来自哪层。指标应同时覆盖远端 passkey、分散证据合并、冲突版本、middle position、引用 span、TTFT、TPOT 和 KV/state bytes。
-
-工程回归还要覆盖 position offset、chunk continuation、batch reorder、prefix cache、snapshot restore、媒体 token 和 speculative rollback。位置公式在单次 full-sequence forward 中正确，不代表在线增量路径正确。公开资料支持的范围应与模型版本绑定；缺少正式技术报告时，只能讨论这些可验证问题，不能把社区对 iRoPE 的展开当成确定架构。
-
-## 67.15 位置编码真正要解决的三个问题
-
-位置机制经常被概括成“让模型知道顺序”，但超长上下文至少包含三项不同目标：
-
-1. 方向：A 是否出现在 B 前面。
-2. 距离：A 与 B 相隔多少 token，或属于哪个相对距离桶。
-3. 地址：A 位于哪一段、哪一页、哪一个版本，能否被精确回读。
-
-一个模型可能在方向任务上很好，在距离任务上只保留粗粒度信息，在地址任务上依赖外部检索。iRoPE 或其他位置变体的评价不能只看“能否处理更长 token”，应分别测这三种能力。
-
-## 67.16 RoPE 的相位直觉
-
-RoPE 把 query 和 key 的二维子空间按位置旋转。对一个频率为 omega 的二维分量，可写为：
-
-~~~math
-R(p)=
-\begin{bmatrix}
-\cos(p\omega)&-\sin(p\omega)\\
-\sin(p\omega)&\cos(p\omega)
-\end{bmatrix}.
-~~~
-
-当 q 和 k 分别在位置 p、r 旋转后做点积，结果包含与 p-r 相关的相位项，因此模型可以利用相对位置关系。问题在于，位置变长后，某些频率可能经历更多周期，远距离位置的相位会出现混淆；低频分量又可能在很长区间内分辨率不足。
-
-这解释了为什么简单把 max position 从 32K 改成 1M 不等于完成长上下文扩展。索引可以进入模型，训练和相位分布却未必支持它。
-
-## 67.17 位置插值、频率缩放和长训
-
-三种常见操作解决不同问题：
-
-| 方法 | 主要改变 | 不能单独保证 |
+| 配置轴 | 它改变什么 | Llama 4 发布期示例 |
 | --- | --- | --- |
-| position interpolation | 把长位置映射回训练范围 | 远程证据使用能力 |
-| frequency scaling | 改变相位变化速度 | 真实长程任务训练信号 |
-| continued pretraining | 让模型看到目标长度数据 | 数值位置路径和 serving 正确 |
+| Q/K 位置变换 | query 和 key 是否按 token 位置旋转 | RoPE 层应用 RoPE；NoPE 层跳过该旋转 |
+| 注意力可见范围 | 当前 query 可以读取哪些历史 key/value | RoPE 层使用分块因果 mask；NoPE 层使用全前缀因果 mask |
+| query 温度调节 | attention logits 随当前位置怎样缩放 | 配置启用时，对 NoPE 层的 query 按位置乘以系数 |
+| RoPE 频率缩放 | 各频段的旋转角怎样随位置变化 | Meta 参考实现单独暴露配置字段，注释指出 Scout 使用 scaled RoPE |
 
-用训练长度 L_train、推理长度 L_infer 和位置 p 表示最简单插值：
+RoPE 决定位置如何进入 Q/K；mask 决定本层能访问哪些 token；query scale 改变当前 query 与可见 key 的打分幅度。频率缩放改变 RoPE 的旋转频率，和层间交错也可以分别核查。理解这些轴，能避免把“无 RoPE”“全局 attention”“超长外推”当作同一件事。
 
-~~~math
-\tilde p=p\frac{L_{\mathrm{train}}}{L_{\mathrm{infer}}}.
-~~~
+### 67.1.3 本章与相邻章节的分工
 
-插值可能改善外推稳定，却降低远处位置之间的分辨率。频率缩放可以在不同频段做更细的取舍，但仍需要用真实任务验证。长训让模型接触更长样本，却要付出数据、显存、训练稳定性和短任务回归成本。
+[第 18 章](18-RoPE与长上下文位置外推.md)讲 Position Interpolation、NTK-aware、YaRN 等一般 RoPE 外推方法；[第 64 章](64-nope与隐式顺序.md)讲 NoPE 路径的顺序线索和长度泛化边界；[第 65 章](65-hybrid-attention局部全局与递归状态.md)比较局部、全局与递归状态等通用历史路径；[第 68 章](68-metap与超参数迁移.md)讲 MetaP 的公开主张、超参数迁移及其与长上下文扩展之间的证据边界；训练配方与稳定性由第五册主讲；第 69—71 章分别展开显式 KV、latent cache 与递归状态缓存；[第 72 章](72-prope与局部全局位置.md)讨论其他分层位置策略。
 
-## 67.18 为什么长样本不等于长能力
+本章只回顾理解 Llama 4 路径所需的基础，重点放在 NoPE/局部 RoPE 怎样交错、temperature tuning 怎样作用于特定路径，以及这些组件与公开长上下文主张之间的证据边界。
 
-把许多互不相关的网页拼成一个百万 token 样本，只增加了长度，不会教模型跨段检索。有效长上下文样本至少应包含：
+## 67.2 RoPE 局部路径与 NoPE 全局路径怎样交错
 
-1. 证据和问题之间有真实依赖。
-2. 证据位置随机化，避免固定末尾捷径。
-3. 多个相似实体和版本冲突。
-4. 需要组合多个远程片段。
-5. 对不可回答或缺失证据有拒答要求。
+### 67.2.1 RoPE 层的旋转与 chunked causal attention
 
-如果训练数据中的答案总在最后一段，模型可能学会“读最后一段”而不是使用位置机制。评估时要随机化证据位置并加入不可用证据，才能把位置能力和位置捷径区分开。
+RoPE 在生成 attention logits 之前，按 token 位置旋转 query 和 key。第 18 章已推导旋转相位如何使点积包含相对位置关系，本章只需记住：RoPE 作用于 Q/K 的位置表达，不直接决定这一层能访问多远的 key。
 
-## 67.19 位置与 serving 的联合故障
+Llama 4 发布期示例把 RoPE 与分块注意力配在一起。在分块 mask 生效的调用路径中，每个 token 只能读取自己所在 chunk 中、不晚于自己的 token；落在其他 chunk 的 key 在该层对它不可见。发布期工程说明给出的 chunk size 是 $8192$ token。具体实现是否在所有调用阶段都应用该 mask，还要按 runtime 路径核对。
 
-长上下文失败不一定是模型本身。常见 runtime 错误包括：
+### 67.2.2 NoPE 层的全局因果读取
 
-1. tokenizer 版本不同导致 token 数和位置错位。
-2. chunked prefill 的 block offset 少加或多加。
-3. prefix cache 在不同起始 position 下错误命中。
-4. preemption 恢复了 K/V，却没有恢复 position metadata。
-5. speculative decoding 拒绝 token 后 position advance 没有回滚。
-6. context parallel 重排后 global position 被当作 local position。
+NoPE 层不对 Q/K 施加 RoPE。在多 token 的调用中，Llama 4 参考实现为 NoPE 层选择 global causal mask，当前位置可以与此前全部 token 的 key 计算相关性，再从相应 value 中读取内容。逐 token 解码时缓存只包含当前位置及此前位置，因此也没有未来 key 可读；该代码路径的 mask 细节见 67.6.2。
 
-golden replay 应同时比较 token ids、position ids、block offsets、mask 和 logits。最终文本相同不能证明中间位置状态正确，因为采样可能掩盖了小的 logits 差异。
+因此，Llama 4 的“全局”描述的是该层的可见范围；“NoPE”描述该层 Q/K 跳过 RoPE。两者在发布期配置中配对，但承担不同职责。开启温度调节时，query 还会得到位置相关的尺度因子，所以下面的 NoPE 计算并非在任何情况下都完全没有显式位置依赖。
 
-## 67.20 四组实验分离位置和数据
+### 67.2.3 追踪一个跨 chunk 事实经过相邻层
 
-为了判断问题来自位置映射还是训练数据，可以做四组对照：
+用一个教学设置观察架构路径，并假设该层确实应用局部 chunk mask。把 token 分成长度为 $4$ 的 chunk，分别是 $0$–$3$ 和 $4$–$7$；假设 query 位于位置 $6$，相关事实位于位置 $1$。这里的 chunk size 只是演示参数，Llama 4 发布期公开值为 $8192$；具体服务实现的逐 token 解码路径可能采用不同 mask，不能从这张示意表推出。
 
-| 位置路径 | 数据长度 | 解释 |
+| 经过的层 | query $6$ 能读取的位置 | 事实位置 $1$ 是否能直接进入该层 |
 | --- | --- | --- |
-| 短位置 | 短数据 | baseline |
-| 长位置 | 短数据 | 数值外推影响 |
-| 短位置 | 长数据 | 长任务训练影响 |
-| 长位置 | 长数据 | 联合方案 |
+| RoPE 局部层 | $4,5,6$ | 否，位置 $1$ 在另一个 chunk |
+| NoPE 全局层 | $0$ 至 $6$ | 能，因果前缀包含位置 $1$ |
+| 后续 RoPE 局部层 | $4,5,6$ | 不能重新读取位置 $1$，但位置 $6$ 的当前表示已包含前一层计算出的结果 |
 
-如果长位置/短数据能够运行但长程任务不提升，说明 kernel 和数值路径可行，训练信号不足；如果长数据/短位置提升而长位置/长数据退化，说明位置映射带来新的瓶颈；如果只有联合方案通过，说明不能把任何一个技巧单独宣传成完整解法。
+在全局层，位置 $6$ 的 query 可以从位置 $1$ 的 value 读取信息，attention 输出再经残差路径进入下一层。之后局部层处理的是更新后的 token 表示。这展示了远程信息可能怎样跨过局部边界；模型仍可能给远程内容分配低权重、在层间改写掉它，或没能用它回答问题。结构提供可达路径，任务成功需要单独评估。
 
-## 67.21 位置分桶的评测表
+## 67.3 NoPE 路径上的推理期温度调节
 
-长度维度不能只测一个最大值。对每个长度，证据至少放在 1%、25%、50%、75% 和 99% 位置，并加入单证据、多证据、冲突版本和引用任务。报告：
+### 67.3.1 长前缀中的 softmax 竞争
 
-~~~text
-length
-evidence position
-needle recall
-multi-evidence accuracy
-conflict resolution
-citation support
-short-context regression
-TTFT
-peak KV/state
-~~~
+当 query 可见的 key 数量增多时，softmax 要在更多候选之间分配概率。Nakanishi 的 [Scalable-Softmax 研究](https://arxiv.org/abs/2501.19399)分析了候选数增长时注意力分布可能变平的问题，并提出一套替代 softmax 的方法。这篇论文提供温度缩放设计的研究动机；具体头、数据和任务的表现仍须单独验证。
 
-如果首尾位置稳定而中间位置下降，通常要继续查训练分布、attention pattern 和压缩路径；如果所有位置随长度下降，先查截断、位置映射、KV/state 和资源不足。
+Meta 的参考实现代码注释引用了这项研究，但 Llama 4 使用的是按当前位置定制的 query scaling 路径。理解动机时可以借鉴“在长前缀中保持打分差异”的问题，描述具体实现时则应以模型代码和 checkpoint 配置为准。
 
-## 67.22 iRoPE 名称的证据卡
+### 67.3.2 位置依赖的 query scale 与 logit 变化
 
-面对一个只在产品页出现的缩写，证据卡至少记录：
+Meta 参考实现为当前位置 $m$ 计算因子。下面用 $a$ 表示代码中的 `attn_scale`，用 $s$ 表示 `floor_scale`；位置编号从 $0$ 开始。令 $q_m$ 是位置 $m$ 的 query 向量，$k_j$ 是位置 $j$ 的 key 向量，$d_k$ 是 key 向量维度，$z_{m,j}$ 表示缩放前的点积 logit：
 
-1. 首次公开来源和日期。
-2. 是否给出全称、公式或配置字段。
-3. 作用于所有层、部分层还是某种 serving path。
-4. 是否与 local/global schedule 或长训绑定。
-5. 是否有公开代码和可复现实验。
-6. context claim 使用的模型 revision、harness 和输出预算。
+```math
+\begin{aligned}
+g(m) &= 1 + a \log\left(\left\lfloor \frac{m+1}{s} \right\rfloor + 1\right), \\
+\widetilde{q}_m &= g(m)q_m, \\
+z_{m,j} &= \frac{q_m^\mathsf{T}k_j}{\sqrt{d_k}}, \qquad
+\widetilde{z}_{m,j}=g(m)z_{m,j}.
+\end{aligned}
+```
 
-如果只有一句“支持更长上下文”，正文可以讨论位置外推的通用问题，但不能补写不存在的层表和超参数。模型名相同也不意味着不同 revision 的位置实现相同。
+分段取整使调节在短位置范围内保持为 $1$，跨过 `floor_scale` 后才逐段增加。这里的 $\log$ 是自然对数。当 $m+1<s$ 时，$g(m)=1$；达到第一个边界时，因子变为 $1+a\log 2$。query 乘以 $g(m)$ 后，所有可见 key 对应的 dot-product logit 同比例放大，softmax 分布随之更集中。工程资料把这条路径称为 temperature tuning；从 logits 角度看，它提高了逆温度。
 
-## 67.23 一个最小位置曲线实验
+### 67.3.3 锐化权重不是新增证据或长程能力保证
 
-可以为每个样本生成一个唯一的随机标识，放在不同位置，要求模型输出标识、段落序号和引用。逐步增加长度并固定干扰 token 数和输出预算。若模型只输出正确标识而段落序号错误，说明语义检索尚可但地址能力不足；若引用支持率下降而答案 accuracy 不变，说明模型可能依赖先验或猜测。
+位置缩放会改变当前 query 对可见 key 的权重分布，却不会增加可见的 token，也不会补上缺少的跨段训练样本。放大 logits 后，模型更容易集中于高分 key；若高分候选来自干扰或训练偏差，集中度本身不会让证据变正确。
 
-实验还应加入“证据不存在”样本。长上下文模型如果在缺失证据时仍然给出确定答案，最大 context claim 不能被解释为可靠的长文档理解。
+因此需要把位置缩放和评测结果绑在具体模型 revision、配置、长度与任务上。Hugging Face 发布说明把温度调节称为可能促成 Scout 10M context 的因素，原文措辞是推测；公开材料没有提供单独关闭这项机制、保持其余设置不变的完整消融。章节只报告这项推测的来源，不把它写成已证实因果关系。
 
-## 67.24 iRoPE 类位置策略的核心实验
+## 67.4 Scout 的 RoPE 频率缩放与 iRoPE 术语差异
 
-位置机制的实验要把“能接收长输入”和“能使用长输入”分开。构造同一事实出现在开头、中间、末尾和多个干扰段的检索任务，再改变长度、位置间距和证据数量。报告 exact match、引用位置、干扰敏感度和随长度的斜率，而不是只给一个最大 context 数字。
+### 67.4.1 Scout 的 scaled RoPE 是可独立核验的配置
 
-如果长位置的准确率下降，可能来自位置外推、训练数据不足、attention 稀释、KV 预算或检索策略；iRoPE 只是在其中一层提供位置表示，不能单独解释所有曲线。
+Meta 当前参考实现的 `args.py` 把 `use_scaled_rope`、`rope_scaling_factor`、`rope_high_freq_factor` 与 `nope_layer_interval`、`attention_chunk_size`、`attn_temperature_tuning` 分别设置。源码注释说明 Scout 使用 scaled RoPE；验证代码在启用时会为缺失的缩放参数填入回退值。回退值只说明该实现如何补缺，实际 checkpoint 和 runtime 配置仍应单独读取。
 
-## 67.25 位置、缓存和请求拼接
+Meta 参考代码的 [`model.py`](https://github.com/meta-llama/llama-models/blob/main/models/llama4/model.py) 还展示了频率缩放怎样改变不同波段的 RoPE 频率，而不是把整段 position id 简单除以一个常数。读者已在[第 18 章](18-RoPE与长上下文位置外推.md)学习通用频率扩展方法；这里保留 Scout 是一个模型配置案例。参数定义见可变的 [Meta main 分支 `args.py`](https://github.com/meta-llama/llama-models/blob/main/models/llama4/args.py)，结论绑定 2026-11-24 查阅的代码状态。
 
-prefix cache 复用时，位置状态必须和 token prefix、模板、模型 revision 一起匹配。把同一文本放在不同 document offset 却复用同一 cache，可能得到语义相同但位置不同的错误；batch 中的 padding 和 chunked prefill 也必须保持位置连续。
+### 67.4.2 后续论文对 iRoPE 的较宽描述
 
-调试时保存每个 chunk 的 start/end position、mask hash、cache page 和模型版本。单请求正确、chunk 或迁移错误时，优先比较这些 metadata，而不是先怀疑模型权重。
+ICLR 2026 的 [Frequency Entropy 论文](https://proceedings.iclr.cc/paper_files/paper/2026/hash/0aee38a6fe9fffc8b658cfb1d872c1d5-Abstract-Conference.html)把 iRoPE 描述为两项组合：层间交错 RoPE/NoPE，以及按比例缩放 RoPE 旋转角。论文在 Llama 4 Scout 上计算频率熵，使用 WikiText-103 构造 4,096-token 输入，并分析 RoPE 维度在模型表示中的使用。
 
-## 67.26 长上下文收益的工程验收条件
+这是一种较宽的文献用法。Meta 发布页把 iRoPE 的突出定义放在 interleaved 层和推理期温度缩放上；其参考实现又将 Scout frequency scaling 暴露为单独配置轴。正文以 Meta 的发布口径说明命名，同时介绍研究文献采用的较宽解释。频率熵分析不等于 10M 长任务评测，也不能单独证明 scaled RoPE 带来整个模型的上下文能力。
 
-上线前同时验证质量、prefill 时间、峰值显存、KV/state 占用、p95、超长请求拒绝和降级策略。若 1M 输入只能在低并发离线完成，服务应把它标为离线能力，而不是给在线接口一个无条件的长度承诺。
+## 67.5 Llama 4 的 10M context claim 能证明什么
 
-## 67.27 小结
+### 67.5.1 训练长度、mid-training 扩展与输入窗口
 
-超长位置机制解决的是位置表示和外推的一部分问题。可用的长上下文还需要真实跨段训练、正确的 mask 和 cache、足够的状态/显式访问路径、位置分桶评测以及成本可接受的 serving。iRoPE 的具体定义只有在官方资料完整披露时才能写成模型事实；其他部分应保持为通用机制和可验证实验。
+Meta 发布说明对 Scout 作了几项披露：其预训练和后训练长度为 256K；mid-training 使用专门数据集开展长上下文扩展；发布时宣称输入 context 可达 10M。发布资料没有完整给出这些阶段的长度课程、数据比例或所有训练配置，章节按原文分别陈述，不自行补出未公开的阶段细节。
+
+这些披露说明超长窗口与中期训练扩展共同出现。读者不应把窗口扩展只归因于一个位置公式：本章讨论的位置表示与 attention 路径只是架构侧的信息，训练样本和评测设置也会影响长输入任务的结果。[第 68 章](68-metap与超参数迁移.md)进一步区分 MetaP 的超参数迁移主张与专门 mid-training 的长上下文披露；训练配方与稳定性排障见第五册[第 5 章](../../book-05-llm-training/chapters/05-预训练目标与训练循环.md)和[第 9 章](../../book-05-llm-training/chapters/09-训练稳定性与debug.md)。
+
+### 67.5.2 针尖与长代码 NLL 的证据范围
+
+Meta 发布页提到针尖检索结果，以及在 10M token 代码上累计 negative log-likelihood 的测量。这两类结果覆盖的是具体检索和语言建模视角。针尖实验没有自动覆盖跨段多证据合并、版本冲突和缺失证据拒答；代码 NLL 也不能单独回答模型能否依据超长仓库定位并正确整合多个文件中的证据。
+
+这些是 Meta 报告的结果，不是本地复现。公开页面没有给出足以把 10M 结果因果归到 iRoPE 某一组件的完整对照。产品窗口代表模型/服务宣称可接受的输入长度；任务级有效上下文还要看问题类型和证据结构。
+
+### 67.5.3 任务级有效长度应按位置与证据结构分层
+
+要判断某一长度对某项任务是否有效，至少同时记录：
+
+| 维度 | 需要改变或观察的条件 |
+| --- | --- |
+| 长度与位置 | 多个长度档；证据位于开头、中间、末尾，并避免固定位置捷径 |
+| 证据结构 | 单条证据、分散多证据、冲突版本、证据缺失 |
+| 输出质量 | 检索命中、答案正确、引用段落是否支持答案、无证据时是否拒答 |
+| 资源条件 | 模型 revision、推理后端、输入/输出 token、并发与 prefill/decode 成本 |
+
+对照时固定 tokenizer、模型权重、任务模板和输出预算，再比较位置或长度变化。报告应分别标明最大输入窗口、特定任务上的效果曲线和目标 runtime 中的可服务长度。一次针尖命中不能代替文档理解评估，单一最大长度也不能表达所有证据位置的成功率。
+
+## 67.6 路径计算、缓存与失败边界
+
+### 67.6.1 局部层与全局层的计算账本
+
+若每四层中三层使用长度为 $w$ 的局部 chunk attention、一层读取完整的 $n$ token 前缀，且执行后端能利用局部结构，则一个四层组的 attention 工作量可粗略写成：
+
+```math
+C_{\mathrm{attn}} \sim 3\,O(nw d_{\mathrm{model}}) + O(n^2 d_{\mathrm{model}}).
+```
+
+这里 $d_{\mathrm{model}}$ 表示该层所有 attention heads 合计的投影宽度；表达式省略 Q/K/V 投影的细节、MLP、MoE、通信、mask 构建和 kernel 固定开销。它只用于看分块 mask 生效时随序列长度增长的趋势。全局层仍有 dense attention 的二次项，所以这组路径不等于整网线性复杂度。局部 mask 只有被具体 kernel 利用时，才会减少相应计算；单凭 mask 中有许多不可见格子，不能推出实测加速。Meta 当前 main 分支的单 token 调用还有一项 mask 边界，见下一小节。
+
+vLLM 在 2025 年 4 月的发布期工程说明给出一组条件化示例：vLLM v0.8.3 起，8 张 H100 上 Scout 可服务 1M、Maverick 约 430K；8 张 H200 上分别报告 Scout 3.6M、Maverick 1M，并建议用多节点部署接近 Scout 10M。[vLLM 发布期说明](https://vllm.ai/blog/2025-04-05-llama4)展示了权重配置、backend、GPU 和并行方式会影响实际可服务长度。这些是特定日期和软件配置的报告值，不是当前通用上限。
+
+### 67.6.2 chunk mask 不等同于 KV eviction
+
+注意力 mask 控制某层本次计算读取哪些 key/value；cache 策略决定历史 K/V 是否保留、淘汰或压缩。Meta 参考实现按 token 位置写入 K/V，并把截至当前位置的缓存前缀交给 attention；当一次调用处理多个 token 时，局部或全局 mask 再限定可见范围。当前 main 分支只在序列长度大于 $1$ 时构造这两种 mask。序列长度为 $1$ 时两个 mask 都保持 `None`，block 会回退到同为 `None` 的全局 mask，attention 调用因此没有显式局部 mask。这个代码路径不能证明单 token 解码仍限制在局部 chunk；应检查目标 runtime 的实际实现和版本。
+
+因此，结构图上“局部层”既不能直接推出 KV cache 按窗口截断，也不能保证每个逐 token 解码路径都沿用局部 mask。不同 serving engine 可能采用不同 mask、cache 布局或回收策略，需检查具体实现与运行配置。混合架构中的显式 KV 及其他 cache 表示由[第 69—71 章](69-显式kv-cache在混合架构中的角色.md)继续展开。
+
+### 67.6.3 把位置、训练与运行时故障分开定位
+
+超长输入退化可能来自不同层面：位置相位外推不稳、训练样本没有教会模型使用远处证据、global attention 对大量 key 分配不当、cache/runtime 对输入施加限制，或评测任务只测到了简单检索。定位时先按位置机制、长训数据、注意力路径和具体运行配置分别找证据，再决定要比较哪项组件。
+
+[第 18 章](18-RoPE与长上下文位置外推.md)负责一般 RoPE 扩展比较；[第 68 章](68-metap与超参数迁移.md)负责 MetaP 与超参数迁移证据，并说明训练 token horizon、训练序列长度和推理上下文窗口的区别；通用训练稳定性由第五册第 9 章主讲；第 69—71 章分析 cache 表示与序列长度成本。本章关注的发布期 iRoPE 描述组合了局部和全局两类位置/信息路径；具体实现的调用边界、公开配置与评测证据共同决定可支持的结论范围。

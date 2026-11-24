@@ -2,9 +2,9 @@
 
 ## 3.0 模型看到的不是句子，而是一串带协议的整数
 
-人看到的是中文句子、英文段落、Python 函数和一组对话消息；模型在 embedding 层之前看到的是 token id。Tokenizer 决定字符串如何映射成整数，数据格式决定这些整数哪些是内容、哪些是角色边界、哪些是工具事件，label mask 决定哪些位置真正参与训练。
+人看到的是中文句子、英文段落、Python 函数和对话消息；进入 embedding 层前，模型接收的是 token id。Tokenizer 规定字符串如何映射为整数，消息格式标记内容、角色边界和工具事件，label mask 则规定哪些位置参与损失计算。
 
-先看一条最小样本：用户问“2+2 等于几？”，assistant 回答“4”。模板把两条消息排成带角色边界的序列；tokenizer 把整个序列换成整数 id；模型输入保留问题和答案上下文，但 assistant-only 训练只把“4”和结束标记设为预测目标。用户看到的是一句问答，训练器实际需要同时知道“模型看见什么”和“哪些位置要算 loss”。
+例如，用户问“2+2 等于几？”，assistant 回答“4”。模板先把两条消息序列化并标出角色边界，tokenizer 再将序列编码为整数。模型可以读取问题和答案上下文；若采用 assistant-only 监督，只有“4”和结束标记参与损失计算。训练样本因此必须同时定义模型的输入范围与预测目标。
 
 初学者可以先记住这条链路：
 
@@ -36,7 +36,7 @@
 | 格式错位如何定位和复发预防 | 本章给出契约检查项 | [第十九册 Tokenizer 与格式故障手册](../../book-19-practitioner-playbook/chapters/03-tokenizer与格式坑.md) |
 | 图像、音频、视频的任务与表示方法 | 本章只明确训练记录里的媒体边界、占位符和数量账本 | [第十五册多模态专题](../../book-15-multimodal-generative-models/简介.md) |
 
-本章沿着一条训练输入链展开：先固定原文、规范化、模板与 tokenizer 的版本，再把编码结果接到控制符号、监督标签和 packing 边界，最后设计可复查的协议回归。BPE、Unigram 和字节表示只作为理解接口差异的背景；算法推导与 tokenizer 评测指标由第二册第三章完整主讲。末尾的无依赖示例展示一套小型审计器的结构，代码当前只作静态审阅。
+本章依次检查原文与规范化规则、模板和 tokenizer 版本，再把编码结果连接到控制符号、监督标签和 packing 边界，最后用协议回归确认训练与推理遵守相同约定。BPE、Unigram 和字节表示在此用于说明接口差异；算法推导与 tokenizer 指标由第二册第三章主讲。
 
 ## 3.1 Tokenizer 的输入、输出和不变量
 
@@ -75,7 +75,7 @@ $L$ 是这段文本的 token 数。解码器 $D$ 将 token id 转回字符串：
 | 解码 | 是否跳过 special token、空格如何恢复 |
 | 模板 | 消息如何序列化，生成从哪里开始 |
 
-这份记录最好成为模型版本 manifest，而不是散落在预处理代码里的默认值。至少固定 tokenizer 文件及其 hash、词表和 added-token 映射、normalizer、pre-tokenizer、BPE merge ranks 或 Unigram 模型、special-token id、chat template、processor 配置、padding / truncation 规则，以及训练样本的 label mask 和 packing 规则。只记一个仓库名或模型名不够：同一个模型目录里的 tokenizer 文件也可能被更新，服务端还可能自行覆盖 EOS 或模板。
+这份清单应进入模型版本 manifest：用稳定 revision 和文件 hash 标识 tokenizer、模板与 processor，同时记录会影响编码或目标位置的参数，如 normalizer、词表、special-token id、padding / truncation、label mask 和 packing。只记仓库名或模型名不够，因为同一目录中的文件可能更新，服务端也可能覆盖 EOS 或模板。
 
 ### 3.1.3 Tokenizer 的不变量
 
@@ -99,29 +99,17 @@ z=T(N(x))
 
 例如，Unicode 中看起来相同的 `é` 可以由一个预组字符表示，也可以由 $e$ 加组合重音符表示；全角拉丁字母 `Ａ` 也可能被 NFKC 变为 ASCII $A$。如果 $N$ 折叠了这些形式，解码器最多恢复规范化后的文本 `N(x)`，不能再恢复原始字节串 $x$。所以“可逆”需要说明是对原始字节、Unicode 字符序列，还是规范化等价类可逆。
 
-规范化能减少等价写法带来的词表碎片，却也可能改动代码标识符、数学符号、空格或用户原文。训练前应固定并保存 normalizer 版本；需要精确引用、代码执行或文本对齐的数据，要同时保留原始文本和参与 tokenization 的规范化文本，并让 offset、标签和 span 对齐同一版本。SentencePiece 的论文描述了空格保留、NFKC 规范化和可配置规则；它是一个具体工具设计，不能据此假定所有 tokenizer 都做相同规范化。
+规范化能减少等价写法带来的词表碎片，却也可能改动代码标识符、数学符号、空格或用户原文。训练前应固定并保存 normalizer 版本；需要精确引用、代码执行或文本对齐的数据，要同时保留原始文本和参与 tokenization 的规范化文本，并让 offset、标签和 span 对齐同一版本。[SentencePiece 的实现文档](https://github.com/google/sentencepiece/blob/master/doc/normalization.md)说明其默认规则采用 NFKC 变体并可自定义；这只是一个工具的配置，不代表所有 tokenizer 都执行相同规范化。
 
 规范化是否有利还取决于目标任务。[van der Goot 的 ACL 2026 研究](https://aclanthology.org/2026.findings-acl.530/)在 2,307 种语言、每种 1,000 条样本上，以 1—5 字符 n-gram Naive Bayes 比较 NFC 和原文；十个数据划分中不规范化的准确率都更高，均值为 91.75% 对 91.70%。差距很小，但说明组合字符可能携带语言或输入来源信号。这个实验不是 LLM 预训练或通用文本质量测试，不能推出“不要规范化”；应把它理解为一项反例，提醒你依据任务比较 raw / normalized 两种输入，并明确可逆性和对齐成本。
 
 ### 3.1.5 把编码过程变成可回放记录
 
-这个原则也适用于行尾。ASCII 文件 `a\r\nb` 使用 CRLF 时占 4 bytes；若预处理把 CRLF 统一为 LF，模型输入变成 `a\nb`，占 3 bytes。规范化后的 tokenizer ids 可以一致，但字符/行偏移已不再直接指向原文件位置。处理代码 span、补丁和文档引用时，要同时保存原始偏移与进入模型的规范化偏移，或保存能在两者之间转换的映射。
+这个原则也适用于行尾。ASCII 文件 `a\r\nb` 使用 CRLF 时占 4 bytes；若预处理把 CRLF 统一为 LF，模型输入变成 `a\nb`，占 3 bytes。对代码 span、补丁和文档引用，字符偏移可能不再指向原文件，因此要保留 raw 与 normalized 文本、normalizer 版本，以及两者间可复查的 offset 映射。NFC 合并组合字符也可能改变 span；若标签仍引用旧坐标，错位不一定会触发解析错误。
 
-对自然语言问答，折叠这类形式可能无害；对代码、引文、签名、文档坐标或字符级标注，原始字节与 span 可能有意义。此时同时保存 raw 样本标识、原文或受控引用、规范化文本、normalizer 版本和两者间的 offset 映射。后续模板、tokenizer 和标签所指的 span 必须引用同一规范化版本；否则一个标在原文第 2 个 code point 的答案片段，可能在 NFC 文本中变成第 1 个 code point，产生错位但不一定报错。
+对每个固定样本保存一条可回放转换链：结构化消息、模板渲染结果、规范化文本、token ids、特殊事件位置、attention mask、labels，以及 padding、截断和 packing 元数据。还要分开记录 `source_bytes`、`input_length` 和 `valid_target_count`：一条含 40 个输入 token 的 assistant-only 样本，可能只有 12 个有效目标；模板多插入控制 token 会增加输入长度，却未必改变监督分母。这样跨版本差异才能定位到模板、切分、截断还是 mask，而不是只比较 `encode(text)`。
 
-一个可复查样本应按顺序保存：结构化消息、模板渲染结果、规范化文本、token ids、可见 token、特殊事件位置、attention mask、labels、padding/truncation 和 packing 元数据。比如 user 消息经过模板产生 role 头，再由 tokenizer 编码为整数；user token 可以参与 assistant 的上下文 attention，却在 assistant-only SFT 中被设为 ignore label。这个区别让读者看到“模型看见什么”和“模型被要求预测什么”是两份不同的记录。
-
-manifest 的版本字段应能回答输入最终如何产生：原始文本编码、normalizer 和 pre-tokenizer 配置、词表和 merge/model 文件 hash、added tokens、special-token id、chat template、processor、collator、最大长度、padding/truncation 与 loss mask 规则。任何一个会影响 ids 或目标位置的配置变化，都应生成新的 manifest revision；只存模型名称或 JSON 字段名，无法重建相同的训练输入。
-
-再看一个更小的协议变更：若当前 tokenizer 把字符串 `cat` 编成 `[120]`，某个新词表把相同表面 token 编成 `[312]`，这两个 id 只是各自词表中的索引，模型会分别读取 embedding 的第 120 行或第 312 行。即使碰巧都是 id 120，只要两个 tokenizer 的第 120 行代表不同片段，旧 checkpoint 对新输入的解释也会错位。因此 manifest 不只是为排障准备的文档，而是说明权重行与输入符号如何对应的模型资产。
-
-转换链还要区分三个“看起来长度相同”的概念：原文字符/字节长度、tokenizer 输出长度、参与 loss 的有效目标长度。假设一条对话经过模板得到 40 个 token，其中 system/user/context 占 28 个、assistant 答案占 12 个；若是 assistant-only SFT，输入仍有 40 个位置，但有效监督分母是 12（若答案末尾 EOS 也参与训练则按实际目标再计入）。若模板多插入 3 个控制 token，输入变成 43 个位置，答案目标数未必变化。把这三个数量分开记录，才能判断 token 成本变化来自模板、切分还是监督范围。
-
-因此，对每个固定样本至少保留 `input_length`、`valid_target_count` 和 `source_bytes`，并记录它们采用的分母定义。跨版本统计时，若 input token 增加而 valid target 不变，可能只是模板头变长；若 valid target 下降，则可能是 mask、截断或回答字段变化。仅比较 tokenizer 的 `encode(text)` 结果，无法覆盖整条训练数据接口。
-
-数据 manifest 还应区分配置文件的名称和内容身份。仓库名、branch 或模型 alias 可能指向可变文件；hash 可以识别实际 tokenizer、template 和 processor 字节，但不能代替说明其字段意义。因此同时保存稳定 revision/hash、可读参数、预处理软件版本和样本 schema version。训练数据缓存的键也应绑定这些 revision；若只按原始样本 ID 命中缓存，更新模板后可能误用旧 token ids 与旧 labels。
-
-若训练期启用随机子词切分，固定原文和 tokenizer 文件也可能因采样种子产生不同 ids。此时重现记录还要含采样开关、温度/概率参数、epoch 或随机种子；验证、推理和数据审计则应说明采用确定性最优切分还是同一采样策略。可复现不是要求每一处都确定，而是让任何随机变换都有可重建的输入条件。
+manifest 应同时保存稳定 revision/hash、可读配置、预处理软件与样本 schema 版本；训练缓存键也要绑定这些版本，避免模板更新后误用旧 ids 和 labels。若启用随机子词切分，还需记录采样开关、参数、epoch 或随机种子；验证、推理和审计采用确定性切分还是相同采样策略也要明确。可复现不是要求所有变换都确定，而是让每个随机步骤都有可重建的输入条件。
 
 ## 3.2 切分方法在训练协议里的位置
 
@@ -327,9 +315,9 @@ z_{t},&a_{t}=1\\
 
 这里 user 和 assistant 的真实 token 都可作为上下文，PAD 不可读；causal mask 另行保证每个位置看不到未来。模型内部右移时，ASSISTANT 位置的 logits 预测 4，4 位置的 logits 预测 $A_{\mathrm{END}}$。这组数组把三个职责分开：padding mask 管真实位置，causal mask 管先后，label mask 管哪些答案需要学习。
 
-### 3.8 Chat template：消息如何变成生成提示
+## 3.8 Chat template：消息如何变成生成提示
 
-#### 3.8.1 两层转换
+### 3.8.1 两层转换
 
 消息对象可以写成：
 
@@ -351,7 +339,7 @@ z=T(s)
 
 因此训练和推理真正使用的是 $T(T_{\mathrm{chat}}(M))$，而不是原始 JSON。模板可能决定 system、user、assistant、tool 的边界、换行、生成起点、EOS 和工具参数格式。
 
-#### 3.8.2 模板不一致的症状
+### 3.8.2 模板不一致的症状
 
 训练模板和推理模板不同，常见症状包括：
 
@@ -363,19 +351,19 @@ z=T(s)
 
 因此模板应像模型权重一样版本化。评估和线上服务必须使用与训练数据一致的序列化规则，除非实验明确研究模板迁移。
 
-#### 3.8.3 生成提示和训练标签
+### 3.8.3 生成提示和训练标签
 
 推理时通常把 assistant 起始标记放在输入末尾，要求模型从这里开始生成。SFT 时则把完整 assistant 内容放入序列，同时生成 label mask。二者使用同一模板但 mask 不同：推理没有真实 assistant label，训练有。
 
-#### 3.8.4 模板是可执行的数据协议
+### 3.8.4 模板是可执行的数据协议
 
 模板不只是把 role 名称替换成几个字符串。它可能按消息是否为最后一条、是否有工具、content 是文本还是图像块、assistant 属于哪个 channel 等条件分支。推理端的两个常见选项也不能互换：`add_generation_prompt=True` 通常在对话尾部追加一个新的 assistant 起始头；`continue_final_message=True` 则去掉末尾结束标记，让模型接着已有 assistant 前缀生成。Hugging Face 当前滚动的 [tokenizer API 文档](https://huggingface.co/docs/transformers/main_classes/tokenizer#transformers.PreTrainedTokenizerBase.apply_chat_template)规定二者不能同时启用，并明确模板是否支持 generation prompt 取决于模型实现。使用时应按项目锁定的 Transformers 版本确认接口行为。
 
 模板本身已经可能写入 BOS、EOS 和角色边界。若先 `apply_chat_template(..., tokenize=False)` 得到字符串，再由 tokenizer 编码，通常需要 `add_special_tokens=False`，否则第二次编码可能再插一套 BOS/EOS。能直接在模板函数里 `tokenize=True` 时，框架会把生成后的控制标记作为实际 special token 编码，减少重复插入风险。若改模板、模型 revision 或库版本，应保存渲染结果和 token ids 做回归，而不是只检查模板字符串是否“看起来一样”。
 
-### 3.9 Label mask：输入可以完整，监督必须有边界
+## 3.9 Label mask：输入可以完整，监督必须有边界
 
-#### 3.9.1 Assistant-only SFT
+### 3.9.1 Assistant-only SFT
 
 一个对话样本可能是：
 
@@ -406,13 +394,13 @@ m_{t+1}
 
 教学代码常用 $\max(\cdot,1)$ 避免除零，但它不能把没有监督的位置变成有效样本。真实训练应要求 $\sum_{t=1}^{L-1}m_{t+1}>0$；若模板、截断或 role 标注让分子和监督分母都为空，应跳过并记录该样本，而不是以零 loss 混入 batch。分母使用有效 assistant token 数，避免不同回答长度让 loss 口径变化。system、user、tool result 和 padding 是否被 mask，要由训练目标决定，而不是机械按角色名称处理。
 
-#### 3.9.2 多轮和工具数据的 mask
+### 3.9.2 多轮和工具数据的 mask
 
 如果目标是生成 assistant 回复，历史 user 和 tool result 通常是条件；如果目标是学习生成 tool call，tool call 的函数名和参数应成为监督区域；如果目标是预测工具结果，则需要明确结果是否来自可信环境，不能把未验证的字符串当作标准答案。
 
 对偏好训练，chosen/rejected 都应在相同 prompt 和模板下计算回答 token 的对数概率。对 GRPO、RLVR 等轨迹数据，还可能需要组内候选、奖励、验证器和环境状态，不能用单一 assistant mask 表示全部监督。
 
-#### 3.9.3 Label 在模型里还要右移一位
+### 3.9.3 Label 在模型里还要右移一位
 
 许多数据集把 `labels[t]` 与 `input_ids[t]` 按相同位置存储，但 causal LM 训练时会将 logits 和 labels 错开一位：位置 $t$ 的 logits 预测 `labels[t+1]`。例如：
 
@@ -499,21 +487,13 @@ B_2        0   0   0  |  1    1   1
 
 设文档 A 的序列为 $[BOS_{A},a_{1},a_{2},EOS_{A}]$，文档 B 为 $[BOS_{B},b_{1},b_{2},EOS_{B}]$，各有 4 个 token。若训练器按长度 8 为每篇文档单独建立一个 block，会为两篇共分配 16 个位置，其中 8 个是 padding，packing 利用率是 $8/16=50\%$。把两篇放入同一个长度 8 的 block 后，8 个位置都有效，利用率是 $8/8=100\%$。若每篇不训练 BOS，两篇共有 6 个有效预测目标，合并前后的 loss 分母都应为 6，而不是物理位置数 16 或 8。这个固定 block 账本说明，packing 改变矩阵形状，不应悄悄改变目标 token 的权重。
 
-利用率提升没有自动决定文档之间能否互相读取。普通 causal attention 下， $b_{1}$ 的隐藏状态可以读取 A 的全部前缀，即使 `EOS_A` 和 `BOS_B` 都存在。若目标要求两篇独立，attention 还要使用 block-causal 边界；若 kernel 能跳过跨文档计算，两个长度 4 的因果块各处理 $4\times5/2=10$ 个可见位置对，共 20 对，而把它们当成一条长度 8 的流则有 $8\times9/2=36$ 对。实际内核可能使用不同的计数和填充策略；仅把 mask 写成稀疏矩阵、但内核仍做稠密计算，不一定省下这部分时间。这个手算只展示独立注意力的理论关系。
+利用率并不决定文档能否互相读取。普通 causal attention 下，$b_{1}$ 仍能看到 A 的前缀；若目标要求两篇独立，就必须在 attention 边界隔开。两个长度 4 的因果块各有 $4\times5/2=10$ 个可见位置对，共 20 对；把它们当成长度 8 的连续流则有 $8\times9/2=36$ 对。这只是理论计数，若 kernel 仍做稠密计算，稀疏 mask 不一定带来相同的实际节省。
 
-同一边界还必须出现在三个位置：attention mask 决定能读取哪些 token，position id 决定序列位置从哪里计起，label mask 决定跨文档的 next-token 目标是否参与损失。若 `BOS_B` 是 B 的合法起点，应由它预测 $b_{1}$；若 B 没有 BOS 且训练目标要求文档独立，就要屏蔽由 $a_{2}$ 预测 $b_{1}$ 的跨界目标。三个实现有一个漏掉边界，loss 仍可能正常下降，但学习到的条件分布已改变。
+边界要在 attention、position id 和 label 三处一致：前者限制可读上下文，第二项定义位置，最后一项决定跨文档预测是否进入损失。若 `BOS_B` 是 B 的合法起点，应由它预测 $b_{1}$；若没有 BOS 且文档独立，就屏蔽由 $a_{2}$ 预测 $b_{1}$ 的目标。不同训练任务可以选择不同的可见性，但必须将其写成明确策略；高利用率和正常下降的 loss 都不能证明边界正确。审计至少报告文档起止、EOS/BOS、position ids、有效目标数和 padding。
 
-截断也要按任务处理。长 SFT 样本如果从末尾切掉回答，可能只剩条件文本；若从开头切掉 system 或问题，回答就失去正确上下文。可以统计截断前后的有效监督 token、保留下来的 role、被切断字段和样本数量，并拒绝有效 label mask 满足 $\sum_{t} m_{t}=0$ 的样本，其中 $m_{t}$ 表示该位置是否参与监督。因而一个训练 block 的审计至少同时记录文档起止、EOS/BOS、position ids、有效 label、padding 和截断计数；单一的高利用率数值不能证明样本协议正确。
+截断规则也要回到目标字段。一个 1,140-token 的对话在 $C=1,024$ 时超长 116 个 token：若前缀占 240、回答占 900，从尾部截断会只保留 784 个回答 token，并丢掉回答末尾和 EOS；从头部截断则可能删掉 system 或问题。应统计被切字段、保留的 role 与有效监督数，并拒绝 $\sum_{t}m_{t}=0$ 的样本。长文 chunk 若有 overlap，也要报告重复计入的边缘 token。
 
-不同训练目标可以采用不同边界政策：预训练语料可能有意让后续文本承接前文；SFT packing 通常要保持每个对话样本的 role 和回答 mask；工具/RL 轨迹还要保留一次行动和观察的因果次序。数据是否跨样本可见，应是可说明的训练假设，而不是由 dataloader 的拼接结果偶然决定。
-
-数据集划分也要发生在 packing 之前。若先把同一长文切成多个 block，再随机分配 block，前后片段可能分别进入训练和验证，后一个片段通过训练样本中的上下文泄漏文档内容。应先按文档或来源实体完成 train/validation/test 隔离，再在每个 split 内做去重、截断和 packing；记录 document id、切分规则和 pack 版本，后续重建才能避免跨集合串接。
-
-packing 的优化目标不只是提高 $\eta_{\mathrm{pack}}$。长度分布和 padding 方向会影响每步 token 数，变长 kernel 需要正确的 cumulative sequence lengths，分布式训练还要确保各 rank 的有效目标分母一致。可以同时报告有效 token/物理位置、每 block 文档数、跨文档 attention 规则、截断数和每步 target count；若利用率提高但长回答被截断、边界标签变了，吞吐收益并没有保住原训练目标。
-
-例如，一个 1,140-token 的对话在上下文上限 $C=1,024$ 时超长 116 个 token。若策略从尾部截断，假设前缀占 240、回答占 900，剩余容量只能保留 784 个回答 token，回答末尾和 EOS 一起丢失；若从头部截断，可能先失去系统指令或问题。真正要检查的是截断后保留的条件字段、监督 token 数和终止目标，而不是只统计“减少了 116 token”。对长文预训练也要记录 chunk overlap：重叠窗口会重复训练窗口边缘的 token，改变它们的有效曝光。
-
-每次生成训练/验证切分后，应先冻结文档集合与其版本，再分别编码和 packing。对评估集，若采用滑窗，应记录窗口长、stride 和哪些 token 计入 loss，避免相邻窗口在聚合时重复计分却按唯一 token 数作分母。训练侧与评估侧可以使用不同的 attention 策略，但差异必须是显式配置，并在比较结果时按同一协议解释。
+数据集须先按文档或来源实体划分 train/validation/test，再在各 split 内编码、截断和 packing；否则同一长文的相邻 block 可能分落训练与验证集。评估使用滑窗时，应固定窗口长、stride 和计分 token，避免重叠位置被重复计分却按唯一 token 数作分母。训练与评估可以采用不同 attention 策略，但要分别记录配置及每步有效 target count、每 block 文档数和截断率；这些账本用于判断利用率提升是否改变了训练目标。
 
 ## 3.11 训练任务的数据格式：JSON 只是容器
 
@@ -557,9 +537,9 @@ SFT 数据需要检查回答事实性、格式、角色、拒答、安全、长�
 
 把数据保存成 token ids 后，还应记录原始样本 id、tokenizer hash、template hash、规范化版本、token ids、labels、mask、截断方向和截断原因。仅保存 `input_ids` 而不保存原文和协议版本，无法判断新模型里同一个 id 还表示不表示同一片段，也无法重新生成正确的 assistant mask。
 
-### 3.12 偏好、强化和可验证数据格式
+## 3.12 偏好、强化和可验证数据格式
 
-#### 3.12.1 Pairwise preference
+### 3.12.1 Pairwise preference
 
 最常见的偏好结构是同一个 prompt 下有两个回答：
 
@@ -585,7 +565,7 @@ d_{i}=(x_{i},y_{i}^+,y_{i}^-)
 
 例如，同一个 prompt“2+2 等于几？”，chosen 可以是“4”，rejected 是“5”，criteria 标为 correctness。数据里保存的是同一问题下的比较关系；它不等同于一个带标准答案的普通 SFT 样本，训练器还必须知道两段回答各自的 token 范围。
 
-#### 3.12.2 组内候选和验证器
+### 3.12.2 组内候选和验证器
 
 GRPO、RLVR 或其他强化训练可能保存一个 prompt 的多个候选、组内 reward、验证器输出、环境状态和工具轨迹。可把一组数据抽象为：
 
@@ -599,13 +579,13 @@ $y$ 是候选， $r$ 是奖励或相对分数， $v$ 是验证器证据。奖励
 
 一个教学组可以有三个候选：“4”“5”“四”。若数学验证器只检查数值等价，三个结果的 reward 可以是 1、0、1；验证记录还要说明“4”和“四”如何被解析。若评分器只做字符串精确匹配，第三项就可能得 0。候选文本相同，奖励口径不同，训练信号也会不同。
 
-#### 3.12.3 长度和偏好偏差
+### 3.12.3 长度和偏好偏差
 
 如果 chosen 几乎总比 rejected 长，偏好优化可能学习冗长；如果安全回答总是拒绝，模型可能过度拒答；如果 judge 对格式有偏好，模型可能优化表面结构。偏好目标常用整段回答的 log-probability 或其比值，回答 token 数和 tokenizer 切分都会影响聚合尺度，所以不能在更换 tokenizer 后沿用旧 token-level 长度统计或未经校准的 loss。偏好数据要做长度、语言、领域、风险等级和错误类型的分层统计，并固定是否按 token、按回答或按 pair 平均。
 
-### 3.13 Tool calling：数据格式连接模型和外部副作用
+## 3.13 Tool calling：数据格式连接模型和外部副作用
 
-#### 3.13.1 一条完整轨迹
+### 3.13.1 一条完整轨迹
 
 一个工具轨迹可能是：
 
@@ -620,7 +600,7 @@ $y$ 是候选， $r$ 是奖励或相对分数， $v$ 是验证器证据。奖励
 
 结构化轨迹至少要把三个事件分开：assistant 产生带 recipient 的调用与参数；运行时校验后由工具执行并以工具名作为来源返回结果；assistant 读取结果后再产生最终消息。OpenAI gpt-oss 的 Harmony 示例把 recipient 放在 assistant header、JSON 约束放在格式元数据中，并以专用 call 标记交接；这展示了“调用内容”和“调度控制”如何同时编码。它只是一个已发布协议实例，训练别的模型必须按该模型 template 重建边界。
 
-#### 3.13.2 Schema 和边界检查
+### 3.13.2 Schema 和边界检查
 
 工具样本至少要检查：
 
@@ -638,15 +618,15 @@ c_{\mathrm{boundary}}
 
 分别表示工具名、JSON 语法、参数 schema、结果对应关系和角色边界。即使这些字段全部正确，也不能推出运行时安全；权限、幂等、超时、重试、确认和未知状态属于 Agent runtime 的职责。
 
-#### 3.13.3 训练与运行时的边界
+### 3.13.3 训练与运行时的边界
 
 训练可以教模型生成合法参数，不能保证工具授权正确，也不能让一个有副作用的 API 自动变成安全动作。生产系统仍需在执行前校验 schema、权限和用户确认，并记录调用 trace。
 
 对每条轨迹，至少保存调用样本的原始输入、模型生成的 recipient / arguments、handoff 位置、tool schema revision、执行结果来源、调用状态（成功/错误/超时/取消）、环境时间和 assistant 后续回答。通常模型生成的工具选择、参数和交接标记参与 assistant loss；工具观察结果是否参与 loss 由训练目标决定。若训练数据伪造一个成功结果、却没有环境 trace，模型会学到的是一段“看起来像工具轨迹”的文本，而不是经验证的工具行为。
 
-### 3.14 多模态 token 与占位符
+## 3.14 多模态 token 与占位符
 
-#### 3.14.1 `<image>` 不一定是一个视觉 token
+### 3.14.1 `<image>` 不一定是一个视觉 token
 
 多模态输入常见结构为：
 
@@ -657,7 +637,7 @@ c_{\mathrm{boundary}}
 
 `<image>` 可能是一个文本侧占位符，真实视觉信息由 vision encoder、projector、resampler 或 cross-attention 提供。它也可能展开成多个 patch embedding。不能只数字符串中有几个 `<image>` 就推断视觉序列长度。
 
-#### 3.14.2 粗略 token 账本
+### 3.14.2 粗略 token 账本
 
 图片高宽为 $H,W$，patch 边长为 $P$，若每个 patch 保留一个位置，视觉位置数粗略为：
 
@@ -685,7 +665,7 @@ N_{\mathrm{text}}
 
 音频也要把波形字节数、codec 帧数、量化码本数和语言模型的序列步数分开。若某 codec 每秒输出 $f$ 帧、每帧有 $K$ 个活跃 codebook，则原始离散 code 数可估为 $duration\times f\times K$；但模型可能把 codebooks 并行预测、交错排列或先压缩，所以不能把 code 总数直接当成自回归步数。多模态数据建议保存媒体文件 hash、采样/裁剪时间戳、processor revision、文本片段与媒体片段的对齐区间，以及每个处理阶段实际产生的序列长度。
 
-#### 3.14.3 视觉、音频与文本的边界
+### 3.14.3 视觉、音频与文本的边界
 
 多模态数据必须同时检查模态内质量和模态间对齐：图片是否真的对应 caption，音频转写是否与时间戳一致，视频标题描述的是画面还是频道，多个图片占位符是否和输入对象顺序一致。数据格式能表示模态，不代表模型已经学会模态关系。
 
@@ -715,13 +695,9 @@ E'\in\mathbb{R}^{V'\times d}
 
 随机初始化、旧子词均值或外部向量映射都只是新 embedding 行的起点。假设新词由两个旧子词表示，旧向量分别为 $e_{1}=(2,0)$、 $e_{2}=(0,4)$，简单均值初始化得到 $e_{\mathrm{new}}=(1,2)$；这个计算可复现，但它只说明如何生成初值，不能证明新 token 已经具有正确语义。只有继续训练数据实际出现该 token，并且输入 embedding、输出头、模板、labels 和 optimizer 都按新词表版本连接，模型才有机会学习它的读写作用。
 
-扩词表的内存变化也应先算清。设新增 $K=2,000$ 个 token，hidden size $d=4,096$，每张矩阵要增加 $K\times d=8,192,000$ 个参数。若参数用 BF16 存储，单个新增矩阵约占 $16,384,000$ bytes，即 `15.625 MiB`；输入和不共享的输出矩阵合计约 `31.25 MiB`，尚未计入梯度、优化器状态、分片填充和 checkpoint 元数据。这个例子帮助判断词表扩张的直接参数账本；真实训练峰值还取决于 optimizer、并行布局和权重共享方式。
+初始化方法要按目标模型做短程对照。FOCUS 在 XLM-R 单语种适配中用目标 tokenizer 训练的 fastText 辅助空间，寻找语义相近的共享 token，再组合源模型 embedding；论文并未验证它是现代生成式 LLM 的通用配方。[Beyond Initialization Loss](https://arxiv.org/html/2608.03494v1) 在 Nemotron-3-Nano-30B-A3B 的 Hindi 扩展中加入 25,600 个 token，并在 100,000 篇 Sangraha Hindi 文档上报告 fertility 从 1.95 降至 1.25。该研究比较 20 多种初始化后发现，在其 Hindi 设置中，50-step CPT probe 比 step-zero 初始化 loss 更能筛选候选；最佳方案对输入与输出矩阵采用不同子词组合。模型、语种、数据和预算均有限，这些结果应转成待验证的实验设计。
 
-初始化方法需要按目标模型做短程对照。FOCUS 在 XLM-R 单语种适配中用辅助 fastText 空间，从源/目标共享词汇中寻找语义相近向量，再组合原模型 embedding；它不是面向现代生成式 LLM 的普遍配方。[Beyond Initialization Loss](https://arxiv.org/html/2608.03494v1) 在 Nemotron-3-Nano-30B-A3B 的 Hindi 扩展中加入 25,600 个 token，并在 100,000 篇 Sangraha Hindi 文档上报告 fertility 从 1.95 降至 1.25。该研究比较 20 多种初始化后发现，在其 Hindi 设置中，50-step CPT probe 比 step-zero 初始化 loss 更能作为选择信号；最佳方案的输入和输出矩阵使用了不同子词组合。模型、语种、数据和预算均有限，结果应转成待验证的实验设计，而非默认初始化规则。
-
-若仍能控制源 tokenizer 的 BPE 合并表，可评估沿用旧 merge ranks 并追加新合并的路线。arXiv v1 的 LFM2 案例在保留旧 token id 映射后，为新 token 做子词均值初始化，先进行 embedding-only 适配，再对全模型做多语言继续预训练；作者报告 65K 扩至 128K 后，Hindi、Vietnamese、Thai 的 token 数分别约减少 2.4、2.6、4.0 倍。其 2.2–3.7 倍每字符解码速度是压缩比例与参考设备吞吐合成的估计；同一报告还测得更大词表在部分设备上的每 token 解码下降，并指出英语、代码等压缩较少的切片可能出现每字符回退。报告只覆盖 LFM2 家族、指定设备和继续训练方案，不能证明独立替换第三方 tokenizer 同样有效。[方法、实验条件与限制](https://arxiv.org/html/2607.15232)
-
-因此，扩词表应走完一条可回滚的状态链：冻结源 tokenizer 与旧 id 映射；统计新 token 的语料频次和目标域覆盖；生成新矩阵并记录初始化版本；在 embedding-only 和全模型阶段分别记录训练数据、token 预算和 checkpoint；重编码代表样本并重算 packing；最后比较目标语言质量、原支持语言回归、总训练成本和目标设备的每字符延迟。若训练数据根本未生成新增 token，或输出头缺少对应行，配置表里的新 vocab size 并不代表模型已经学会扩展后的协议。
+若仍能控制源 tokenizer 的 BPE 合并表，可评估保留旧映射并沿原规则追加合并。arXiv v1 的 LFM2 案例先用新 embedding 行做 embedding-only 适配，再对全模型进行多语言继续预训练；65K 扩至 128K 后，作者报告 Hindi、Vietnamese、Thai 的 token 数分别约减少 2.4、2.6、4.0 倍。2.2–3.7 倍每字符解码速度是压缩率与参考设备吞吐合成的估计；更大词表也会提高每 token 成本，使英语、代码等压缩较少的切片可能回退。结果只覆盖 LFM2 家族、指定设备和训练方案，不能外推到独立替换第三方 tokenizer。[方法、实验条件与限制](https://arxiv.org/html/2607.15232)
 
 ### 3.15.3 旧数据和新词表
 
@@ -1119,17 +1095,19 @@ Gold set 需要覆盖输入表示、消息控制和 batch 边界。文本样本�
 
 ### 3.18.5 版本通过条件
 
-发布前把每个变更分为三类：预期编码变化、需适配的格式变化、阻断的监督或接口变化。预期变化要列出样本范围和新的 token/byte 分布；格式变化须同时修改训练和推理使用的模板/processor 并保留旧版本回放；角色丢失、有效 label 变零、EOS 停止不一致、旧 id 错映射、媒体载荷断链或未授权数据混入都应阻止切换。若变化目标仅是压缩，评估必须同时报告目标任务、原有语言/代码回归和成本账本；若目标是修复协议，则至少证明固定正例的转换结果稳定、负例被拒绝或正确隔离。这样回归集既能给新协议留出变化空间，也能防止静默改写训练目标。
+发布前把差异分为预期编码变化、需配套适配的格式变化和阻断的监督/接口变化。前两类要注明样本范围、影响桶和回滚版本；角色丢失、有效 labels 归零、EOS 停止不一致、旧 id 错映射、工具事件误解析、媒体载荷断链或未授权数据混入应阻断发布。以压缩为目标的更新还要比较目标任务、原语言/代码能力与成本；协议修复则要验证固定正例稳定、负例被拒绝或隔离。
 
-回归结果还应按语料桶和字段维度解释。比如一轮模板更新让平均输入长度只增加 1%，但 assistant label 的 P95 长度增加 18%，可能会改变长回答在 batch 中的权重和截断概率；若只比较全局 token 总数，这种变化会被大量短样本稀释。版本报告应同时给样本数、分母、p50/p95/p99、空监督比例、截断率和 token/byte，而不是仅给一个均值。
+组件变化应对应到明确的检查项：
 
-对每项差异指定负责人和处理决定：与目标功能一致且通过质量回归的编码差异可以接受；需要同步服务端或训练器的 schema 变化应先做灰度和回滚准备；角色丢失、有效 labels 归零、旧 token 错映射、工具调用内容被误解析或媒体载荷错配属于阻断问题。只有把“预期变化”和“训练目标改变”分开记录，评审者才知道一项 token 变短是否值得承担新 checkpoint 与数据重编码成本。
+| 变更组件 | 重点比较 |
+| --- | --- |
+| normalizer | raw/normalized text、offset、Unicode 覆盖样本 |
+| tokenizer | token ids、special-token 位置、词表与 embedding 行、token/byte 分布 |
+| chat template | role 事件、assistant 起点、labels、stop id |
+| processor | 媒体载荷与占位符的数量、顺序和形状 |
+| collator | padding、packing、position id、有效目标分母 |
 
-回归流程还应把版本依赖的产物分清。改 normalizer 时，重点比较 raw/normalized text、offset 和覆盖的 Unicode 样本；改 tokenizer 文件时，检查 ids、词表边界、embedding 行和 token/byte 分布；改 chat template 时，检查角色事件、assistant 起点、labels 和 stop id；改 processor 时，检查媒体载荷与占位符；改 collator 时，检查 padding、packing、position id 和分母。一个总版本号可以绑定这些组件，但每个子组件都应能单独识别，才容易定位差异来源。
-
-差异记录至少要包含固定样本键、旧/新组件 revision、预期变化、观测结果、影响桶、处理结论和回滚指针。exact-match 适用于声明不应变化的 id/格式；统计容差适用于允许分布波动的长度指标；模型任务质量则需要成对样本与明确的计算预算。选择哪种门槛取决于组件契约，不能用全局 token 总量替代所有检查。
-
-若多个组件同时更新，最好先单独记录每项期望的输入输出差异，避免把 tokenizer、模板和 collator 的效应混在同一批模型输出里。无法分批发布时，至少在回归清单中标出变更组合，并保留组件级快照，让旧版链路可以独立重放。这样出现回归时，维护者可以先比较规范化文本，再比较模板事件、ids、labels 和 runtime 结果，而不是从最终回答猜测故障发生在哪一层。
+报告应按语料桶和字段提供样本数、分母、p50/p95/p99、空监督比例和截断率；全局 token 均值可能掩盖 assistant label 长度等分布变化。每条差异记录固定样本键、旧/新组件 revision、预期与观测值、处理决定、负责人和回滚指针。声明不变的 id/格式用 exact-match，允许波动的长度统计用明确容差，任务质量用成对样本与预算；多个组件同时升级时保留组件级快照，方便从规范化文本逐层回放到 runtime 事件。
 
 ## 3.19 资料边界与延伸阅读
 

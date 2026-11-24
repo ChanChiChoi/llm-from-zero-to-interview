@@ -2,7 +2,7 @@
 
 ## 9.0 稳定训练不是一条光滑的 loss 曲线
 
-训练开始后，loss 通常总体下降，但不会沿一条光滑直线前进。某个 batch 可能让 loss 短暂升高，某次浮点运算可能产生 Inf，某个 rank 可能在 collective 前退出，checkpoint 恢复后 scheduler 也可能跳到错误的阶段。
+训练稳定时，loss 的长期趋势通常下降，但单步仍会波动。某个 batch 可能让 loss 暂时升高，浮点运算可能产生 Inf，某个 rank 可能在 collective 前退出，checkpoint 恢复后 scheduler 也可能跳到错误阶段。
 
 真正难的地方在于：日志里看到的往往是最后一个症状，而不是最早发生的错误。一个错误的 label mask 可能先改变有效 token 分母，再改变梯度，随后表现为 loss spike，最后才变成模型能力下降。如果一看到 spike 就降低学习率，可能只是在改变症状，仍然没有修复目标数据。
 
@@ -268,14 +268,16 @@ baseline 恰为 0 时，应把 spike 比值标为 `not_applicable` 并改用绝�
 
 | 研究路线 | 机制解释与证据 | 处理思路 | 适用边界 |
 | --- | --- | --- | --- |
-| Adam instability | Molybog 等分析梯度估计随时间的相关结构，指出它可能让 Adam 更新范数放大、更新方向与下降方向变弱相关；研究覆盖 7B、30B、65B、546B，其中较小模型未出现同样的爆炸式 loss divergence | 先核对层内更新分布和矩估计；作者讨论了降低学习率、调小 $\epsilon$、减小 batch 或调整 $\beta_{1}/\beta_{2}$ 等路线 | 降学习率会延长训练；调小 $\epsilon$ 与低精度数值风险冲突；减小 batch 损失数据并行效率；改变矩估计常数也会改变正常阶段的历史响应。该理论不能证明所有 spike 都由 Adam 单独造成 |
-| 自适应预条件器失配 | Adam 的二阶矩满足 $v_{t}=\beta_{2}v_{t-1}+(1-\beta_{2})g_{t}^2$。Bai 等观察到梯度骤降时， $v_{t}$ 可能按自身衰减而暂时跟不上随后上升的梯度；预条件后的曲率因此可能持续越过稳定阈值 | 检查逐层梯度、 $v_{t}$、更新量和 spike 时序是否吻合；需要时用 Hessian-vector product 近似梯度方向曲率；对照改变 $\beta_{2}$ 的固定 checkpoint 重放 | 论文用约 10M 参数、8 层合成推理 Transformer（900k 序列、batch 2048）观察到 7 次 spike；另在 SlimPajama 上训练 187M LLaMA 结构模型、用 100B tokens 报告多次 spike；测试了 $\beta_{2}=0.999,0.9,0.85$，较低值在这些设置中缓解 spike。严格理论是简化目标上的分析，高维非凸结论仍是实验支持 |
-| Spike-aware 优化器 | SPAM 用 Adam 二阶矩构造在线坐标级异常代理，按阈值重缩放梯度；另以固定间隔重置一阶和二阶状态，重置后加入短 warmup | 先验证 spike 是否伴随梯度峰值与动量污染，再评估重置间隔、阈值、warmup、质量和运行成本 | 论文分析用的 GSS 是同一梯度坐标跨训练步的回顾性比值，训练时的 $g_{i}^2/v_{i}$ 是在线代理，二者阈值不能互换；重置会丢弃优化器历史。PPL 和训练 token 配置见下文，结果绑定论文配方 |
-| GradientStabilizer | 该方法保持梯度方向，利用运行统计稳定梯度幅值；论文报告了 LLM FP16 预训练和 FP4 量化感知训练中的稳定性与学习率范围改善 | 作为更新幅值控制方案，与 clipping、学习率调整和原始优化器做同口径对照 | 稳定幅值无法证明梯度方向正确，也不能代替目标任务质量、吞吐和成本评估 |
-| Global norm clipping（工程基线） | 当整个梯度向量的范数超过阈值时，统一缩小梯度，方向不变 | 先按历史健康 step 的范数分布选择候选阈值，再统计裁剪率、裁剪前后更新量和目标质量 | 全局范数可能掩盖单层或单坐标异常；阈值过低会持续缩小正常更新；裁剪不能清理已经累积进 Adam 矩的历史异常，也不能修复数据或 loss 的错误 |
-| 逐张量自适应裁剪（AdaGC） | 每个参数张量按历史裁剪梯度范数的 EMA 设置动态上界，论文默认前 100 步用全局裁剪 warmup | 比较逐张量裁剪率、更新量、通信归约范围和同口径目标质量；不要只观察全局范数 | 其 spike score、并行布局与模型结果绑定论文设置；不同 DP/TP/PP 下局部范数归约范围可能不同，不能视作全局裁剪的逐张量等价实现 |
+| [Adam instability（Molybog 等）](https://arxiv.org/abs/2304.09871) | Molybog 等分析梯度估计随时间的相关结构，指出它可能让 Adam 更新范数放大、更新方向与下降方向变弱相关；研究覆盖 7B、30B、65B、546B，其中较小模型未出现同样的爆炸式 loss divergence | 先核对层内更新分布和矩估计；作者讨论了降低学习率、调小 $\epsilon$、减小 batch 或调整 $\beta_{1}/\beta_{2}$ 等路线 | 降学习率会延长训练；调小 $\epsilon$ 与低精度数值风险冲突；减小 batch 损失数据并行效率；改变矩估计常数也会改变正常阶段的历史响应。该理论不能证明所有 spike 都由 Adam 单独造成 |
+| [Adaptive Preconditioners Trigger Loss Spikes in Adam（Bai 等，v2）](https://arxiv.org/abs/2506.04805v2) | Adam 的二阶矩满足 $v_{t}=\beta_{2}v_{t-1}+(1-\beta_{2})g_{t}^2$。Bai 等观察到梯度骤降时， $v_{t}$ 可能按自身衰减而暂时跟不上随后上升的梯度；预条件后的曲率因此可能持续越过稳定阈值 | 检查逐层梯度、 $v_{t}$、更新量和 spike 时序是否吻合；需要时用 Hessian-vector product 近似梯度方向曲率；对照改变 $\beta_{2}$ 的固定 checkpoint 重放 | 论文用约 10M 参数、8 层合成推理 Transformer（900k 序列、batch 2048）观察到 7 次 spike；另在 SlimPajama 上训练 187M LLaMA 结构模型、用 100B tokens 报告多次 spike；测试了 $\beta_{2}=0.999,0.9,0.85$，较低值在这些设置中缓解 spike。理论分析依赖简化目标，高维非凸结论仍来自实验 |
+| [SPAM（v2）](https://arxiv.org/abs/2501.06842v2) | SPAM 用 Adam 二阶矩构造在线坐标级异常代理，按阈值重缩放梯度；另以固定间隔重置一阶和二阶状态，重置后加入短 warmup | 先验证 spike 是否伴随梯度峰值与动量污染，再评估重置间隔、阈值、warmup、质量和运行成本 | 论文分析用的 GSS 是同一梯度坐标跨训练步的回顾性比值，训练时的 $g_{i}^2/V_{i}$ 是在线代理，二者阈值不能互换；重置会丢弃优化器历史。PPL 和训练 token 配置见下文，结果绑定论文配方 |
+| [GradientStabilizer（ICML 2026）](https://proceedings.mlr.press/v306/huang26bb.html) | 该方法保持梯度方向，利用运行统计稳定梯度幅值；论文报告了 LLM FP16 预训练和 FP4 量化感知训练中的稳定性与学习率范围改善 | 作为更新幅值控制方案，与 clipping、学习率调整和原始优化器做同口径对照 | 稳定幅值无法证明梯度方向正确，也不能代替目标任务质量、吞吐和成本评估 |
+| [Global norm clipping（Pascanu 等，工程基线）](https://arxiv.org/abs/1211.5063) | 当整个梯度向量的范数超过阈值时，统一缩小梯度，方向不变 | 先按历史健康 step 的范数分布选择候选阈值，再统计裁剪率、裁剪前后更新量和目标质量 | 全局范数可能掩盖单层或单坐标异常；阈值过低会持续缩小正常更新；裁剪不能清理已经累积进 Adam 矩的历史异常，也不能修复数据或 loss 的错误 |
+| [逐张量自适应裁剪（AdaGC，ICML 2026）](https://arxiv.org/abs/2502.11034v3) | 每个参数张量按历史裁剪梯度范数的 EMA 设置动态上界，论文默认前 100 步用全局裁剪 warmup | 比较逐张量裁剪率、更新量、通信归约范围和同口径目标质量；不要只观察全局范数 | 论文实现为计算逐张量范数在 TP 组内 all-reduce；该归约范围和模型并行布局相关，不能视作任意 DP/TP/PP 配置下都等价于全局裁剪 |
 
-AdaGC 论文将 spike score 定义为 loss 时间序列中偏离前 1,000 个值的滚动均值至少 10 个标准差的点所占比例。作者在 Llama-2 7B（9,000 steps）、Mixtral 8×1B（36,000 steps）和 ERNIE 10B-A1.4B（21,000 steps）上报告的 AdaGC score 均为 0；对应 GlobalGC 分别为 0.0333%、0.0144% 和 0.0100%。这些数值绑定论文的训练设置。该 score 衡量的是论文定义的逐点 loss 异常，不能与本节的窗口 loss ratio 直接比较；“0”表示没有观测点达到其判据，不代表训练中不存在其他异常。论文摘要还报告了相对 GlobalGC 的下游准确率变化，但这些结果同样受相应 benchmark 和配置限制。[AdaGC（ICML 2026）](https://proceedings.mlr.press/v306/wang26dg.html)。
+AdaGC 论文 v3 将 spike score 定义为：loss 时间序列中偏离此前 1,000 个观测值的滚动均值至少 10 个标准差的点所占比例。作者在 Llama-2 7B（9,000 steps）、Mixtral 8×1B（36,000 steps）和 ERNIE 10B-A1.4B（21,000 steps）上报告的 AdaGC score 均为 0；对应 GlobalGC 表列值分别为 0.0333%、0.0144% 和 0.0100%。[AdaGC v3 表 5](https://arxiv.org/abs/2502.11034v3)
+
+Mixtral 一项存在原文表内的算术不一致：表列 52 次 spike/36,000 steps，却给出 0.0144%；按“spike 次数 ÷ steps × 100%”重算为 0.1444%。因此这里保留表列值并标明差异，不把它当作复算后的精确比例。这些数值绑定论文的训练设置。该 score 衡量的是论文定义的逐点 loss 异常，不能与本节的窗口 loss ratio 直接比较；“0”表示没有观测点达到其判据，不代表训练中不存在其他异常。论文摘要还报告了相对 GlobalGC 的下游准确率变化，但这些结果同样受相应 benchmark 和配置限制。[ICML 2026 正式版](https://proceedings.mlr.press/v306/wang26dg.html)。
 
 SPAM 还暴露了阈值方案的典型取舍。论文在 C4 的常规预训练设置用 $\Delta T=500$、重置后 warmup 150 步、在线阈值 $\theta=5000$；消融在 LLaMA-130M 上发现，把间隔从 2500 缩短到 500 时验证困惑度改善，继续缩短则开始退化；阈值太小会把有效梯度也压掉。它说明参数应联合验证，不能把论文里的 500/150/5000 当作通用默认值。
 
@@ -283,7 +285,7 @@ SPAM 还暴露了阈值方案的典型取舍。论文在 C4 的常规预训练�
 
 这里还要区分两种 GSS 口径：论文分析时的回顾性指标，是某一坐标当前梯度绝对值除以该坐标跨训练步的历史均值；真实训练不可能预先保留完整历史，于是 SPAM 用 Adam 二阶矩构造在线代理 $g_{i}^2/V_{i}$，再按 $\mathrm{sign}(g_{i})\sqrt{\theta V_{i}}$ 限幅。代理用于近似识别，不是原 GSS 的代数等价式；实验阈值只对论文实现的代理有意义。若实现遇到 $V_{i}=0$，该比值未定义，必须由实现明确处理零状态并记录，不能用任意小 $\epsilon$ 把它伪造成一个有效 spike 分数。
 
-在 Bai 等人的分析里，需要区分严格的单步条件和便于实际监控的代理。对固定学习率的普通梯度下降，严格条件使用沿本次参数更新路径计算的加权平均 Hessian $\bar H_{t}$：
+先把固定学习率普通梯度下降的一步条件单独写清楚，再与 Bai 等人的 Adam 分析区分。沿实际更新路径积分得到的加权平均 Hessian $\bar H_{t}$ 给出普通梯度下降的精确一步条件：
 
 ~~~math
 \bar H_{t}
@@ -295,7 +297,20 @@ SPAM 还暴露了阈值方案的典型取舍。论文在 C4 的常规预训练�
 \frac{g_{t}^{\mathsf T}\bar H_{t}g_{t}}{\lVert g_{t}\rVert_{2}^2}
 ~~~
 
-当 $g_{t}$ 有限且 $\lVert g_{t}\rVert_{2}>0$ 时，这一普通梯度下降步的 loss 增加当且仅当 $\lambda_{\mathrm{grad}}(\bar H_{t})>2/\eta$。真实网络中无法沿整段更新路径求出 $\bar H_{t}$，论文因此在小学习率近似下使用当前步的 Hessian 方向曲率；对 Adam，再用二阶矩预条件后的 $\widehat H_{t}$ 作实际监控代理。这个代理可以用 Hessian-vector product 估计，但需要额外二阶信息或迭代计算，不是普通训练日志中免费得到的指标，也不与严格路径平均条件等价。
+当 $g_{t}$ 有限且 $\lVert g_{t}\rVert_{2}>0$ 时，普通梯度下降的损失变化可精确写成 $L(\theta_{t+1})-L(\theta_t)=-\eta\lVert g_t\rVert_2^2+\tfrac{1}{2}\eta^2 g_t^{\mathsf T}\bar H_tg_t$；因此这一步 loss 增加当且仅当 $\lambda_{\mathrm{grad}}(\bar H_{t})>2/\eta$。这是对普通梯度下降的路径积分恒等式，不是 Bai 等人对真实 LLM 训练提供的直接观测量。
+
+Bai 等人的论文从局部二次近似分析 Adam，并把二阶矩对角预条件和动量修正纳入预条件 Hessian $\widehat H_t$：
+
+~~~math
+\widehat H_t=
+\frac{1}{1-\beta_1^t}\frac{1-\beta_1}{1+\beta_1}
+\operatorname{diag}\left(\frac{1}{\sqrt{\widehat v_t}+\epsilon}\right)H_t,
+\qquad
+\lambda_{\mathrm{grad}}(\widehat H_t)=
+\frac{g_t^{\mathsf T}\widehat H_tg_t}{\lVert g_t\rVert_2^2}
+~~~
+
+论文把当前梯度方向曲率 $\lambda_{\mathrm{grad}}(\widehat H_t)$ 与 $2/\eta$ 比较，在其分析和实验设置中预测 loss spike；这不是普通梯度下降的严格路径条件，也不是跨模型保证成立的预警阈值。估计该量需要 Hessian-vector product 或其他二阶近似，不能从普通训练日志直接读出。实际诊断时，应先用梯度、二阶矩、更新量和 spike 时序检验机制假设，再决定是否值得承担这项额外计算。
 
 普通梯度下降的固定二次函数提供一个可复算直觉： $f(x)=\tfrac12hx^2$，一步后 $x_{t+1}=(1-\eta h)x_{t}$，损失比为 $f(x_{t+1})/f(x_{t})=(1-\eta h)^2$。若 $\eta=0.001$、 $h=2400$，则 $\eta h=2.4$，参数变成 $-1.4x_{t}$，这一步损失约为原来的 $1.96$ 倍。这里 $h$ 是常数曲率，方向曲率条件恰好退化为 $h>2/\eta$；它只解释阈值直觉，不是 Adam 训练中 spike 大小或时刻的预测值。
 
@@ -631,6 +646,8 @@ scaler.update()
 随机种子不同会导致本地随机路径不同，但不自动等于通信错误；是否要求逐位一致要由训练目标和实现决定。
 
 DDP 的构造、forward 和输出反向传播都可能是跨 rank 同步点；各进程的参数注册顺序也必须一致。若 rank 走了不同控制流或不同步调用 collective，可能 hang 或造成同步错误。排查时把每个 rank 的 micro-step、forward/backward 边界、collective 序号和首个异常时间一起记录。[PyTorch 2.15 DistributedDataParallel 文档](https://docs.pytorch.org/docs/2.15/generated/torch.nn.parallel.DistributedDataParallel.html)。
+
+若使用 DDP 的 `no_sync()` 做梯度累积，context 内的梯度先留在本地，退出后第一次 forward-backward 才同步；forward 也必须放在 context 内，否则同步仍会发生。排查时应把预期同步 step、实际 collective 序号和累积窗口一起记下，避免把有意延后的 all-reduce 当作 rank 卡住。[PyTorch 2.15 `no_sync()` 文档](https://docs.pytorch.org/docs/2.15/generated/torch.nn.parallel.DistributedDataParallel.html)。
 
 ### 9.10.2 逐级缩小
 
@@ -1051,38 +1068,22 @@ step 6 的 loss 是 NaN、grad norm 是 Inf，因此进入 nonfinite 列表。�
 
 推荐阅读：
 
-- PyTorch autograd anomaly detection：
-  https://docs.pytorch.org/docs/2.15/autograd.html
-- PyTorch clip_grad_norm_：
-  https://docs.pytorch.org/docs/2.15/generated/torch.nn.utils.clip_grad_norm_.html
-- PyTorch automatic mixed precision：
-  https://docs.pytorch.org/docs/2.15/amp.html
-- PyTorch DistributedDataParallel：
-  https://docs.pytorch.org/docs/2.15/generated/torch.nn.parallel.DistributedDataParallel.html
-- PyTorch FSDP：
-  https://docs.pytorch.org/docs/2.15/fsdp.html
-- PyTorch debugging environment variables：
-  https://docs.pytorch.org/docs/2.15/debugging_environment_variables.html
-- PyTorch Distributed Checkpoint：
-  https://docs.pytorch.org/docs/2.15/distributed.checkpoint.html
-- On the difficulty of training Recurrent Neural Networks：
-  https://arxiv.org/abs/1211.5063
-- Mixed Precision Training：
-  https://arxiv.org/abs/1710.03740
-- A Theory on Adam Instability in Large-Scale Machine Learning：
-  https://arxiv.org/abs/2304.09871
-- Adaptive Preconditioners Trigger Loss Spikes in Adam：
-  https://arxiv.org/abs/2506.04805v2
-- SPAM: Spike-Aware Adam with Momentum Reset for Stable LLM Training：
-  https://arxiv.org/abs/2501.06842v2
-- GradientStabilizer: Fix the Norm, Not the Gradient：
-  https://proceedings.mlr.press/v306/huang26bb.html
-- On Layer Normalization in the Transformer Architecture：
-  https://proceedings.mlr.press/v119/xiong20b.html
-- DeepNet: Scaling Transformers to 1,000 Layers：
-  https://arxiv.org/abs/2203.00555
-- Peri-LN: Revisiting Normalization Layer in Transformer Architecture：
-  https://proceedings.mlr.press/v267/kim25u.html
+- [PyTorch autograd anomaly detection](https://docs.pytorch.org/docs/2.15/autograd.html)
+- [PyTorch `clip_grad_norm_`](https://docs.pytorch.org/docs/2.15/generated/torch.nn.utils.clip_grad_norm_.html)
+- [PyTorch automatic mixed precision](https://docs.pytorch.org/docs/2.15/amp.html)
+- [PyTorch DistributedDataParallel](https://docs.pytorch.org/docs/2.15/generated/torch.nn.parallel.DistributedDataParallel.html)
+- [PyTorch FSDP](https://docs.pytorch.org/docs/2.15/fsdp.html)
+- [PyTorch debugging environment variables](https://docs.pytorch.org/docs/2.15/debugging_environment_variables.html)
+- [PyTorch Distributed Checkpoint](https://docs.pytorch.org/docs/2.15/distributed.checkpoint.html)
+- [On the difficulty of training Recurrent Neural Networks](https://arxiv.org/abs/1211.5063)
+- [Mixed Precision Training](https://arxiv.org/abs/1710.03740)
+- [A Theory on Adam Instability in Large-Scale Machine Learning](https://arxiv.org/abs/2304.09871)
+- [Adaptive Preconditioners Trigger Loss Spikes in Adam (v2)](https://arxiv.org/abs/2506.04805v2)
+- [SPAM: Spike-Aware Adam with Momentum Reset for Stable LLM Training (v2)](https://arxiv.org/abs/2501.06842v2)
+- [GradientStabilizer: Fix the Norm, Not the Gradient](https://proceedings.mlr.press/v306/huang26bb.html)
+- [On Layer Normalization in the Transformer Architecture](https://proceedings.mlr.press/v119/xiong20b.html)
+- [DeepNet: Scaling Transformers to 1,000 Layers](https://arxiv.org/abs/2203.00555)
+- [Peri-LN: Revisiting Normalization Layer in Transformer Architecture](https://proceedings.mlr.press/v267/kim25u.html)
 
 阈值、warmup 长度、是否跳过异常样本、是否回滚以及恢复后要求逐位一致还是统计一致，都属于目标系统的实验配置。资料可以说明机制和接口，不能替项目做这些选择。
 

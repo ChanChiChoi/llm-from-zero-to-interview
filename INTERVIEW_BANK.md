@@ -1077,6 +1077,17 @@
 31BV. 面试官问 Gated DeltaNet 为什么把“忘掉旧状态”和“改写当前关联”放进同一个更新。请从 $A_{t-1}$ 出发说明衰减后如何计算预测误差、$\alpha_t$ 与 $\beta_t$ 分别控制什么，并用在线回归解释 delta correction。追问 chunkwise WY 怎样保留递归语义并增加块内并行，再区分它与 KDA、Gated DeltaNet-2 的 gate 维度及各自证据边界。配套正文：[第二十一册第六十二章](book-21-transformer-architecture-evolution/chapters/62-gated-deltanet门控线性注意力.md)。
 
 31BW. 请解释 Kimi K3 的 Gated MLA。先用共享 KV latent 写出 MLA 的压缩路径，再写出输入依赖的逐通道输出门；说明该 gate 为什么调制 attention result、却不等于在 latent/explicit 两路间选路。追问 DeepSeek-V2 decoupled RoPE 与 Kimi K3 NoPE 对 cache payload 有何影响，并比较 token 级 latent cache 与 KDA 递归状态的序列长度成本。配套正文：[第二十一册第六十三章](book-21-transformer-architecture-evolution/chapters/63-gated-mla门控潜变量注意力.md)。
+31BX. 面试官问：“NoPE 是否意味着模型不知道 token 顺序？”先写出无位置特征且无位置 mask 时的置换等变关系，再解释固定 causal mask 如何打破任意置换对称、但不等同于显式相对距离偏置。接着区分顺序判断、相对距离/近期性和绝对位置索引，并说明需要怎样的对照任务；最后用 Kimi K3 v2 解释 MLA 的 Q/K NoPE 与 KDA 的位置敏感混合如何共存，以及为什么 1M 上下文不能单独归因 NoPE。配套正文：[第二十一册第六十四章](book-21-transformer-architecture-evolution/chapters/64-nope与隐式顺序.md)。
+31BY. 面试官问混合架构里局部 attention、全局 attention 和递归状态分别保存什么。请区分 attention 可见范围与状态更新方式，再解释层间交错和同层并行；用 Griffin、Qwen3.8-Flash-Next 或 Kimi K3 说明一条远程事实何时可直接寻址、何时必须由递归 state 保留。最后说明为什么层比例和长上下文窗口不能单独证明检索质量或速度优势。配套正文：[第二十一册第六十五章](book-21-transformer-architecture-evolution/chapters/65-hybrid-attention局部全局与递归状态.md)。
+31BZ. 面试官说一个 MoE 是 671B total、37B activated/token，这两个数字分别回答什么？请沿每层 expert bank 和 token route set 说明计数关系，并指出 shared expert、dense 层和报告纳入规则会怎样影响整模型数字。接着区分单 token active、批次专家并集、原始权重字节、FLOPs 与 GPU 显存；最后列出跨模型比较前要核验的 revision、字段定义和未披露项。配套正文：[第二十一册第六十六章](book-21-transformer-architecture-evolution/chapters/66-total-parameters与active-parameters.md)。
+31CA. 请解释 Meta 发布资料中的 iRoPE 指什么，并分别说明 RoPE 位置变换、attention mask、NoPE 层的推理期 query scaling、Scout 的 scaled RoPE 改变什么。再沿一条跨 chunk 远程事实说明全局层提供了什么信息路径、为什么路径存在仍不保证回答正确。最后区分 10M 输入窗口声明、针尖检索、10M 代码 NLL、长上下文 mid-training 与组件级因果证据；说明 ICLR 2026 文献使用更宽 iRoPE 术语时应怎样标注来源口径。配套正文：[第二十一册第六十七章](book-21-transformer-architecture-evolution/chapters/67-irope与超长上下文位置机制.md)。
+31CB. Meta 称 MetaP 可帮助设置逐层学习率和初始化尺度，并把所选超参数迁移到不同宽度、深度、batch 和训练 token 数。请解释超参数迁移怎样使用 proxy 与 target，以及为什么 μP/μTransfer 能帮助理解这个研究问题、却不能当作 MetaP 的实现。再用 Tensor Programs V 与 Complete(d)P 说明宽度、深度、batch、训练 horizon 和 sequence length 的迁移条件并不相同；最后区分 Meta 对 Llama 4 10M 长上下文的 mid-training 披露与 MetaP 主张，指出还需要什么组件消融才能建立因果关系。配套正文：[第二十一册第六十八章](book-21-transformer-architecture-evolution/chapters/68-metap与超参数迁移.md)。
+31CC. 面试官给出一张混合模型层表，包含 global attention、滑动窗口、QSA、Gated MLA 与 GDN/KDA。请逐项说明哪些路径保存普通逐 token K/V、哪些保存 latent 或递归 state、各路径的长度增长方式是什么；再写出普通显式 K/V 的逐层 payload 估算，并指出层数比例示例依赖哪些同形状假设。最后解释为什么 sparse attention 的读取集合不等于主 KV 的保留策略，并说明要比较检索质量、payload 和 decode 延迟还需要报告哪些条件。配套正文：[第二十一册第六十九章](book-21-transformer-architecture-evolution/chapters/69-显式kv-cache在混合架构中的角色.md)。
+31CD. 给你一个已训练的 MHA/GQA checkpoint：请比较把 K/V 联合投影到逐 token latent 并与模型一起训练，和缩减既有 Q/K、V/O 维度后用少量继续训练恢复能力这两种方案。沿一条 query 说明 key projection 如何折入 query、value 聚合如何折入输出投影；再解释 RoPE 位置分支可能怎样改变 cache 账本。最后设计同等质量与同等 payload 两种比较，说明哪些精确回读任务、decode 指标和训练条件需要报告；为什么“latent 维数更低”与“信息瓶颈目标已优化”不是同一个结论？配套正文：[第二十一册第七十章](book-21-transformer-architecture-evolution/chapters/70-latent-cache压缩历史表示.md)。
+31CE. 面试官给出 RetNet 的递归式 $S_t=\gamma S_{t-1}+K_t^{\mathsf T}V_t$、读出 $o_t=Q_tS_t$，请展开前三步并说明 query 如何从累计状态读取历史贡献。再对比显式 KV 与固定递归 state 的内存随 $T$ 变化和读取路径；解释为什么固定状态不等于整体推理成本固定或模型质量必然不变。随后用 Mamba-2 v2.2.4 实现说明 conv_state 与 ssm_state 的不同作用，区分并行训练、chunkwise 计算和单 token decode；最后讨论 ReplaySSM 以 checkpoint 加近期输入缓冲表示状态的意义，并说明该预印本案例不能证明哪些通用性能结论。配套正文：[第二十一册第七十一章](book-21-transformer-architecture-evolution/chapters/71-recursive-state-cache递归状态缓存.md)。
+31CF. 面试官给出标准 RoPE 频率和宽度为 $W$ 的 causal SWA。请解释位置相位与可见集合各自由什么决定，沿一对跨周期边界的 query/key 推导 P-RoPE 的 wrap error；再说明 HP-RoPE 的整数谐波频率怎样令 $R_W=I$。最后分析 MiniWin 的全局 NoPE 路径、八层配置以及论文 v2 的边界移动诊断分别支持什么结论、不能外推什么能力。配套正文：[第二十一册第七十二章](book-21-transformer-architecture-evolution/chapters/72-prope与局部全局位置.md)。
+
+31CG. 请从一个 query/head 的 SDPA 输出出发，写出 G1 如何由当前 hidden state 生成 sigmoid gate，并解释它为何调节聚合后的特征而不改变本层固定 Q/K/V 的 softmax token 权重。再区分 G1 与 G2 的位置、head-specific/shared 与 headwise/elementwise 两组轴，并用 15A2B 论文消融和长上下文设置说明能支持哪些结果；最后解释为什么 gate 稀疏不等于 token sparse 或实际计算跳过。配套正文：[第二十一册第七十三章](book-21-transformer-architecture-evolution/chapters/73-gated-attention门控显式注意力.md)。
 
 32. 什么是 causal mask？
    考察点：下三角 mask、未来 token、attention scores、softmax。
@@ -4306,7 +4317,7 @@
 
 1. Kimi K3 公开线索中的“无显式 position embedding”是否等于没有位置信息？（K3 report/config 已固定相关证据，但仍要区分 K3 配置与一般论文机制）
    考察点：NoPE、causal mask、KDA 递归状态、隐式顺序。
-   回答框架：NoPE 只表示某个分支不显式施加 RoPE/ALiBi；顺序仍可由因果可见性、递归更新、衰减和局部/全局 pattern 提供。不要把教学抽象公式当成完整实现。
+   回答框架：NoPE 要注明路径范围。Kimi K3 报告中的 MLA 层不对 Q/K 直接施加位置变换；因果 mask 仍限定前缀可见性，交错 KDA 提供 position-sensitive、recency-aware 的混合。顺序、距离和绝对索引要分别测量，也不能由模型窗口长度归因单一组件。参见第二十一册第六十四章与第六十三、六十五、八十八章。
 
 2. 为什么 total parameters 不能直接代表 MoE 推理成本？
    考察点：total/active 参数、shared layer、router、通信、KV cache。
@@ -4360,9 +4371,9 @@
     考察点：动作状态解析、权限不扩大、有限重试、幂等和状态查询、后端协议兼容、用户状态沟通。
     回答框架：先查动作账本和外部状态，再分类错误。无副作用且预算未耗尽时才有限重试；状态未知时先查询，已提交的动作不重放；策略拒绝或撤权不能换模型绕过。兼容后端还要保留同一主体、数据区域、scope、schema 和授权版本，或明确收窄到只读/信息路径。分别用安全保持率、真实重复副作用率、正常任务完成率和误解率评估，空分母记 N/A。参见[第八册第十六章](book-08-ai-safety-alignment/chapters/16-fallback-routing与安全降级.md)。
 
-15. p-RoPE、Gated Attention 和 CSA/HCA 分别改变了什么？
+15. P-RoPE、Gated Attention 和 CSA/HCA 分别改变了什么？
     考察点：位置策略、路径门控、压缩注意力、模型卡证据边界。
-    回答框架：p-RoPE 关注位置处理策略，Gated Attention 控制显式 attention 路径贡献，CSA/HCA 压缩长历史访问；具体参数化不能从名字推断，要测长上下文、精确检索和 serving cache。
+    回答框架：本书第 72 章的 P-RoPE 指 Periodic RoPE，用位置模窗口宽度复用旋转相位；跨周期边界可能把滞后 $d$ 表成 $d-W$，HP-RoPE 通过 $R_W=I$ 消除该旋转差异，但不改变 mask。第 73 章的 Gated Attention 专指 SDPA 输出后的输入依赖 sigmoid 特征门；固定本层 Q/K/V 时不改写 softmax 权重，也不路由到别的路径或自动跳过 attention 计算。CSA/HCA 改变长历史读取/表示；各自的模型与效果结论须绑定来源和任务条件。
 
 ## 2026-09 Frontier Architecture Updates
 

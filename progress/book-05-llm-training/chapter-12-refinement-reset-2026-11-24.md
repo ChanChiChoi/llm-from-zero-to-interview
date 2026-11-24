@@ -1,35 +1,27 @@
-# 第12章精修记录（重置流程）
+# 第十二章精修记录（2026-11-24）
 
-日期：2026-11-24
-章节：`book-05-llm-training/chapters/12-多模态训练.md`
+本记录根据本轮实际章节审阅新增；章节先后按 `book-05-llm-training/chapters/` 中的文件顺序推进，未使用既有 progress 记录决定范围。
 
-## 执行范围
+## 修改文件
 
-- 按用户重置要求从章节规范模块 02a 开始工作，跳过模块 01；本轮不读取既有 `progress/` 记录。
-- 对照第12章章节契约，按正文中的任务监督、模态桥接、数据对齐、资源和评估主线审阅全部章节内容。
-- 对分阶段多模态训练、文档模型和训练配方中的论文数字查阅原始论文或作者技术报告。
+- 正文：`book-05-llm-training/chapters/12-多模态训练.md`
+- 研究证据：`research/multimodal-training-refinement-evidence-2026-11-24.md`
 
-## 正文修订
+## 精修内容
 
-- 更正 Donut 的 SynthDoG 规模：原文写成英、韩、日三种语言各 40 万份；论文实际报告英文、中文、日文、韩文各 50 万份。
-- 补充 Donut 的预训练边界：推理路径不依赖外部 OCR，但论文预训练使用 1,100 万张英文扫描文档的 OCR 伪标签，并结合多语言 SynthDoG 数据。
-- 收紧文档理解部分重复的字段值互换例子，并保留字符识别、版面关系、字段抽取和真实域验证之间的区别。
-
-## 研究记录
-
-本轮查阅的原始论文与作者报告、证据等级和适用边界，记录在 [`research/multimodal-training-refinement-2026-11-24.md`](../../research/multimodal-training-refinement-2026-11-24.md)。重点核对了 Donut、Pix2Struct、LayoutLMv3、SigLIP、MM1、JEST、Qwen3-VL、Qwen3-Omni 与 Qwen3.5-Omni。
-
-Qwen3.5-Omni 报告把 S2 总量称为约 4T token，而模态分项相加为 4.29T。正文保留报告原有总量和分项，并明确不把分项改写成精确总量。
+- 将 Qwen3-VL 的平方根归一化逐 token loss 说明改为贴近技术报告的表述，并保留完整权重定义未公开的边界。
+- 明确 Qwen3.5-Omni 分项 token 预算合计 4.29T、报告总量概括约 4T 的口径差异，不自行调平。
+- 改写 Frame Pack 的 token 与 attention 预算解释，明确 token 增至 8 倍时普通 full attention 的 score cell 量级约增至 64 倍。
+- 将 CogVideoX 的 timestep 消融限定为论文设置，并准确描述 40K steps 时列出的五个验证时间点。
+- 区分 Min-SNR-5 的 ViT-B/FID 10 收敛速度实验与 ViT-XL/$x_0$/约 7M iteration 的 FID 2.06 结果。
 
 ## 验收
 
-- 正文所有章节标题和小节编号与第12章契约对应。
-- 检查 57 个 Markdown 链接，没有未解析的本地目标。
-- 检查 fenced code/math block：反引号围栏 26 行、波浪号围栏 80 行，均成对闭合。
-- `git diff --check -- 'book-05-llm-training/chapters/12-多模态训练.md'` 通过。
-- 新增研究记录的尾随空白检查通过。
-- 未运行章节 demo，未执行 PDF 构建。
+- 对照第十二章契约核对章节骨架，未发现缺少的主体标题。
+- Markdown 静态检查：围栏配对正常、行内 `$` 分隔符为偶数、本地链接目标缺失 0、尾随空白 0。
+- `git diff --check -- book-05-llm-training/chapters/12-多模态训练.md research/multimodal-training-refinement-evidence-2026-11-24.md` 通过。
+- 未运行代码示例、模型训练、测试或 PDF 构建。
 
-## 后续
+## 待续
 
-按目录顺序进入第13章；继续使用本次重置后的规范与研究流程，不从旧 `progress/` 记录恢复导航。
+本轮第五册精修继续按实际章节文件顺序处理第十三章及后续章节；各章事实修改另按需要补充一手研究证据。

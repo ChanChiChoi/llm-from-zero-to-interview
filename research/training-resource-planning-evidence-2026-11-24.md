@@ -6,6 +6,13 @@
 
 ## 公式口径
 
+### 恢复 checkpoint 的梯度状态
+
+- **证据等级：A，官方框架文档/实现。** PyTorch Distributed Checkpoint 2.15.0 教程中的训练状态示例保存 model 与 optimizer state；当前 NVIDIA Megatron-LM checkpoint 配置将 optimizer、RNG 与 wgrad/dgrad 保存分别配置，梯度有独立的可选保存间隔。
+- **本章采用的计算口径：** optimizer step 边界的恢复点按模型权重、optimizer 状态、可能存在的 FP32 master weights 与附加状态估算，默认不加当前梯度；若 checkpoint 位于 gradient-accumulation 中途且实现需要无损续训，则把梯度按实际精度另计。例中 7B 模型每参数 14 bytes 对应 BF16 权重 + 两个 FP32 Adam moments + FP32 master copy；中途梯度若为 BF16，再加 2 bytes/parameter。
+- **边界：** 框架、优化器、精度、checkpoint 时点和是否允许在 step 边界恢复都会改变实际状态；Megatron-LM 的 `main` 分支是移动来源，本次仅记录 2026-11-24 观察到的配置，不代表所有版本默认设置。
+- **来源：** [PyTorch Distributed Checkpoint 教程 2.15.0](https://docs.pytorch.org/tutorials/recipes/distributed_checkpoint_recipe.html)；[NVIDIA Megatron-LM checkpoint 配置（main，2026-11-24 访问）](https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/training/config/training_config.py)。
+
 ### Dense Transformer 的 `6ND` 近似
 
 - **证据等级：A，原始论文。** Chinchilla 将训练 FLOPs 近似为 $6ND$，其中 $N$ 是参数量、$D$ 是训练 token 数；其附录按前向/反向操作计数，并与更细的架构 FLOPs 计算作比较，差异在所列模型中约为几个百分点到 10%。

@@ -64,6 +64,9 @@ Mamba 硬件路径（第 33 章）：输入依赖参数 $(\Delta,A,B,C)$ -> HBM 
 替代架构比较链（第 42 章）：先区分 kernel、sequence mixer、block/主干与完整系统 -> 对齐显式 K/V、有限特征/递归状态、卷积核和 hybrid 的历史表示与查询路径 -> 用局部预测、状态追踪、复制和长文本抽取等任务检验训练后的行为 -> 分开报告完整序列复杂度、单 token 更新、历史状态、硬件执行和生态信号 -> 结论绑定模型版本、训练预算、任务格式、上下文与设备，不汇总为家族级胜负。
 Attention–SSM 混合链（第 43 章）：显式逐位置 K/V 查询与递归状态摘要 -> 层间串接（Jamba、Mamba-2-Hybrid）与层内并行 head（Hymba）两种融合粒度 -> 比例和层位置消融 -> 质量、长上下文切片与速度预测分开解释 -> 把 MoE、meta tokens、局部/全局 Attention 等共设计从混合本身的效果中分开 -> 第 44 章比较卷积、SSM、Attention 的模块职责。
 Attention–卷积–SSM 模块路径（第 44 章）：相对位移共享的局部/长卷积 -> 前缀递归写入 SSM 状态 -> query 对 mask 可见历史的显式读取 -> 区分卷积修正 Attention 投影、长卷积替换序列混合算子及 Attention–SSM 融合位置 -> 按任务切片和匹配条件消融模块贡献 -> 外部证据检索转交第 45 章。
+Hybrid Attention 路径账本（第 65 章）：局部 attention 的单层有限可见窗口 -> global attention 对可见前缀的位置寻址（同时检查稀疏选择或 latent payload）-> 递归状态逐 token 更新但不保留逐 token 地址 -> 层间交错与同层并行区分融合粒度，mask/稀疏选择属于另一设计轴 -> 按远程精确回读、状态保留和干扰检索分桶 -> 分开报告 prefill/decode、cache/state 字节数与任务质量 -> 衔接第 43 章融合形式、第 44 章模块职责及第 69—71 章缓存表示。
+混合架构显式 KV 逐层账本（第 69 章）：全局 K/V 按位置保留 -> 局部 K/V 受窗口限制 -> MLA latent 按 token 压缩 -> GDN/KDA 递归更新 state -> 将 attention 可见范围（global/window/sparse）与历史表示（K/V/latent/state）分轴 -> 只对普通 K/V 层逐层求和逻辑 payload，并把 latent/state/allocator 分开 -> 以复制、远程检索、冲突候选和组件消融验证路径贡献 -> 衔接第 11 章基础公式、第 63/70/71 章表示机制、第 65 章路径比较、第 20 章和第二十四册 serving。
+Total/Active parameter 计数链（第 66 章）：声明统计口径 $C$ -> 逐层累加全部 expert 与共享/其他参数得到 total -> 对每个 token 逐层累加实际路由集合得到 active -> 对一批 token 求 route union 但不把它当作逐 token active -> 参数数乘精度字节只估原始权重载荷 -> 分开记录 FLOPs、驻留显存、延迟和质量 -> 为跨模型数字绑定 model ID/revision、字段定义与来源；连接第 47、55 章 MoE 架构案例和第五册第 13 章训练预算。
 外部检索增强架构链（第 45 章）：参数知识 / 请求上下文 / 外部语料 -> 离线索引与请求时检索 -> 候选筛选和证据组装 -> 提示上下文注入 / 潜在文档边缘化（RAG-Sequence、RAG-Token）/ 检索增强预训练（REALM）/ 层内 chunked cross-attention（RETRO）-> 固定检索或按需检索（Self-RAG）-> context relevance / answer faithfulness / answer relevance / citation support -> 与长上下文、长期记忆（第 46 章）和 Agentic Search（第 49 章）划界。
 模型记忆架构链（第 46 章）：当前上下文与请求级 KV cache -> 过去片段编码和状态生命周期 -> 外部 K/V + kNN/门控读取（Memorizing Transformer）/冻结编码器 + SideNet 读写（LongMem）/潜在情景矩阵与事实编辑（Larimar）/GDN-2 更新的原生递归状态（MemT-1.0）-> 按长文本建模、示例使用、事实编辑/遗忘及多轮记忆任务分别评估 -> 与外部语料 RAG（第 45 章）、Agent 运行状态（第 49 章）和普通解码 KV cache（第 11 章）划界；论文结果绑定各自任务和测量协议。
 MoE–SSM–Attention 组合链（第 47 章）：Attention/SSM 选择序列混合路径，MoE 通常选择 FFN 参数路径 -> Jamba 在混合 Attention–Mamba 主干的部分 MLP 引入 MoE -> BlackMamba 以 Mamba 加 routed MLP 移除显式 Attention 路径 -> Routing Mamba 将共享路由专家化放进 Mamba 投影，并在 Samba 与 FFN-MoE 上评估 -> 分别隔离混合主干、FFN-MoE 与 SSM 投影专家化的增量 -> 结果绑定各论文模型、数据、预算与测量口径，不把三组件并置等同于协同增益；详见[第四十七章研究记录](research/moe-ssm-attention-composition-2026-11-23.md)。
@@ -76,6 +79,8 @@ Agentic 架构链（第 49 章）：语言模型单次输出 -> 工具调用请�
 未来架构综合链（第 50 章）：历史信息的显式读取 / 递归压缩 / 外部检索 -> 层间交错 / 层内 heads / 独立记忆分支 / Attention 分数融合 -> 组合粒度改变信息交互位置 -> 组件收益受训练共适配、任务、规模与实现条件共同影响 -> 当前证据支持研究设计空间扩展，不支持统一架构胜者；结论保留为条件化趋势推断。详见[第五十章研究记录](research/future-architecture-composition-2026-11-23.md)。
 
 RoPE 长上下文扩展链：RoPE -> Position Interpolation -> NTK-aware / Dynamic NTK -> YaRN -> 非均匀频率/位置映射（LongRoPE / LongRoPE2 / MrRoPE / Jet-Long）-> 长上下文继续训练与位置扰动训练（Llama 3 / Shuffle the Context）-> Position Robustness -> Effective Context Evaluation
+
+Llama 4 iRoPE 证据链：Meta 发布语境中的 RoPE + 交错 NoPE + 推理期温度调节 -> 发布期 RoPE 局部 chunk mask / NoPE 全局 causal mask -> NoPE query scaling 改变 logits 而非可见范围 -> Scout scaled RoPE 独立配置 -> 256K 预训练/后训练、专门数据 mid-training 与 10M 输入窗口/针尖/代码 NLL 披露 -> 按来源、revision 和任务分开报告，不将整体长上下文结果归因于单一组件；详见[iRoPE 研究记录](research/irope-long-context-evidence-2026-11-24.md)。
 
 小模型与端侧效率链：参数预算分配（depth/width/layer-wise scaling/weight sharing）+ 训练数据与后训练 -> 任务能力；模型结构/量化/输入压缩 -> 不同权重、KV、计算与信息路径账本 -> 目标设备内存层次 + runtime/kernel 支持 -> 文件大小、峰值运行内存、prefill/decode、任务质量与能耗/热稳态的分项测量 -> 仅在匹配任务、设备和负载的条件下判断效率。
 
@@ -461,8 +466,20 @@ Gated DeltaNet -> recurrent state readout -> chunkwise WY/UT training -> block-e
 Gated DeltaNet state size per head -> O(d_k d_v), independent of token count; per-token updates still cost compute and finite state does not preserve an address for every historical token
 MLA -> per-token shared KV latent -> low-rank key/value projections -> token-indexed global attention -> cache payload O(T d_c) (+ a position branch when the model uses one)
 DeepSeek-V2 MLA -> shared KV latent + decoupled RoPE key -> position-aware compressed cache -> key/value projection absorption during decode
+Latent cache read -> key up-projection absorbed into query scoring -> value up-projection folded into output mapping -> avoid full-history K/V materialization algebraically; kernel realization and latency remain implementation-dependent
+KV representation axes -> latent width (per-position feature dimension) != GQA/MQA (KV head sharing) != quantization (bits per value) != token selection/eviction (position set) != recurrent state (time-axis representation)
+Latent cache evaluation -> logical payload + position bytes + actual read/reconstruction cost + task fidelity by information type/distance/interference; “information bottleneck” is a capacity analogy unless a specific mutual-information objective is defined
 Kimi K3 Gated MLA v2 -> NoPE per-token KV latent (rank 512 in pinned config) -> global attention -> input-dependent full-rank channel output gate -> output modulation != latent/explicit route selection
+NoPE attention path -> no direct explicit position feature in Q/K/score -> fixed causal mask may expose prefix order -> upstream local/recurrent mixing may pass relative recency -> order / distance / absolute index require separate evidence
+RoPE phase vs attention visibility -> positional rotation vs causal SWA mask -> P-RoPE $\varphi(t)=t\bmod W$ -> boundary-crossing lag $d$ becomes $d-W$ -> wrap error when $R_W\ne I$ -> HP-RoPE $\theta_i'=2\pi m_i/W$ -> $R_W=I$ removes rotation mismatch -> MiniWin local SWA-P-RoPE/HP-RoPE + global NoPE -> cross-window access comes from global path -> 16k results remain bounded to arXiv v2 model/config/tasks
+Kimi K3 v2 -> NoPE on MLA Q/K + position-sensitive, recency-aware KDA mixing -> global content interaction; 1M context also depends on long-context data and progressive training, not a NoPE-only causal attribution
 MLA latent cache -> O(T d_c) per layer -> differs from KDA fixed recurrent state; compression reduces per-token width but preserves sequence-length growth
+Recursive state -> s_t=F(s_{t-1},x_t) -> fixed state width with respect to T -> no independently addressable token slots -> task-level fidelity measurement
+RetNet -> matrix recurrence S_t=gamma S_{t-1}+K_t^T V_t -> query readout Q_t S_t -> parallel / recurrent / chunkwise recurrent execution forms
+Mamba2 v2.2.4 -> conv_state local window + ssm_state recurrent memory -> model-specific state tuple, not a universal single-tensor contract
+Mathematical recurrent state -> direct tensor / checkpoint + recent-input buffer (ReplaySSM preprint) -> outputs and continuation state checked within numerical tolerance -> runtime cache layout is implementation-specific
+Sequence boundary -> initialize/reset per model semantics -> independent packed sequence isolation -> chunk continuation passes final state -> compare whole-sequence and segmented outputs
+Fixed-state memory -> per-layer state dimensions × precision × active sequences -> independent of T at fixed configuration -> decode cost and task quality remain separately measured
 KDA -> per-key-channel Diag(alpha) decay -> value prediction error -> scalar beta rank-one write -> query readout S^T q
 KDA alpha (per-key-channel old-state decay) != beta (current error write strength) != output gate (readout/output path)
 Kimi Linear v2 -> per-key-channel decay + chunkwise WY/UT; Kimi K3 v2 -> bounded log-decay g_min=-5 + full-rank output gate -> version-specific parameterization
@@ -1476,6 +1493,10 @@ first bad step -> fixed-batch replay + checkpoint/RNG/data-cursor audit -> data/
 PyTorch DCP 2.15 -> rank-local shard save/load + load-time reshard -> no cross-version `state_dict` compatibility guarantee -> real-state resume drill
 
 TierCheck preprint -> local/peer differential state + remote base checkpoint -> global commit marker/watermark -> software/node/rack failure-specific recovery -> benchmark on target topology/storage before adopting author-reported latency
+
+### 超参数迁移与 MetaP 证据链
+
+Meta Llama 4 发布页 -> MetaP 设置逐层学习率/初始化尺度的定性主张 -> 所选超参数跨 batch、模型宽度、深度和训练 token 数迁移 -> 官方未给出公式/代码/proxy-target 实验细节 -> μP/μTransfer 提供公开的宽度迁移参照且跨深度有 caveat -> Complete(d)P 为 batch/token horizon 引入独立 scaling rules -> 训练 token horizon ≠ training sequence length ≠ inference context window -> Meta 专门数据 mid-training 与 Scout 10M 输入窗口是另一条公开因果叙述 -> 不将长上下文能力归因给 MetaP；详见[第六十八章](book-21-transformer-architecture-evolution/chapters/68-metap与超参数迁移.md)及[研究记录](research/metap-hyperparameter-transfer-long-context-evidence-2026-11-24.md)。
 
 ### Claude Sonnet 5.5：Thinking State、API contract 与安全路由
 

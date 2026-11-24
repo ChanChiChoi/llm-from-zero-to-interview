@@ -1,360 +1,213 @@
-# 第 66 章 Total Parameters 与 Active Parameters：两个数字如何同时为真
+# 第 66 章 Total Parameters 与 Active Parameters：按统计口径读懂模型规模
 
-## 66.1 “模型有多少参数”为什么不是一个答案
+MoE 模型发布时常同时写着“总参数很多”和“每个 token 只激活一部分”。这两个数字不矛盾：一个数模型中纳入统计的全部参数，另一个数按特定口径统计的单 token 路径。要读懂它们，先把模型里有哪些权重、一个 token 经过哪些专家、一个请求触及哪些专家，以及这些权重占多少字节分开。
 
-介绍稀疏 MoE 或混合模型时，经常同时看到 total parameters 和 active parameters。初学者会问：到底是 500 亿还是 5000 亿？答案是两个数字描述不同对象。
+本章只讲参数数字的含义和比较边界。MoE 与 SSM、Attention 的组件分工见[第 47 章](47-MoE-SSM-Attention组合.md)，Mixtral 的架构案例见[第 55 章](55-Mistral-Mixtral高效与MoE.md)；训练 FLOPs 与预算计算见[第五册第 13 章](../../book-05-llm-training/chapters/13-训练成本与资源规划.md)。
 
-total parameters 是 checkpoint 中可训练权重的总量，包含所有 experts、共享层和路由未选中的参数；active parameters 是一次 token 前向实际参与计算的参数量，通常包含被选中的 experts 和共享路径。它更接近单 token 的计算量，但不一定等于显存占用或服务成本。
+## 66.1 两个数字回答不同问题
 
-## 66.2 MoE 的简单公式
+看到“模型有多少参数”，先问这是什么统计口径。Total Parameters 和 Active Parameters 关注的对象不同；它们也都不能直接替代存储、计算或服务测量。
 
-设有 `E` 个 experts，每个 token 选择 `k` 个，单个 expert 的参数量为 `P_e`，共享参数为 `P_s`，则理想化：
+### 66.1.1 Total Parameters：清点模型的参数库存
+
+Total Parameters（总参数量）通常统计报告口径纳入的全部模型参数：共享层、所有专家，以及其他被计入的参数。一个 MoE 层即使有很多专家，对于总参数量来说，这些专家仍都属于模型的参数集合。
+
+统计时要看来源是否包含 embedding、output head、router、shared expert，是否把 tied weights（共享权重）重复计数，以及是否单列 non-embedding parameters。模型卡若同时报告 total 与 non-embedding 两个字段，说明“模型参数总数”本身也需要记录定义，不能仅靠模型名字猜。
+
+### 66.1.2 Active Parameters：追踪一个 token 经过的权重路径
+
+Active Parameters（激活参数量）通常描述一个 token 在前向路径中会使用多少参数。MoE 的 router 在每层根据当前 token 的隐藏表示选出若干专家；该 token 经过被选中专家，同时经过按报告口径计入的共享路径。下一层会重新路由，因此一个 token 并没有一组贯穿全模型不变的专家。
+
+课程讲义常用等大小专家说明这一点：若每个专家有 $P$ 个参数，一层有 $E$ 个专家，而 token 选中 $k$ 个，那么专家库共有 $EP$ 个参数，这个 token 选中的专家部分是 $kP$。讲义还指出，router 与通信有额外成本，保存模型时仍要考虑整组专家参数。[Stanford MS&E 319 课程讲义 §1.1](https://web.stanford.edu/class/msande319/lectures/lecture-4-notes.pdf)
+
+这里的 active 是一种按 token 路径统计的参数口径，并非严格的 FLOPs 计数。来源是否把注意力、router、共享层、embedding 等一并纳入，需要回到该模型的论文或模型卡确认。
+
+### 66.1.3 参数量是报告口径，不是唯一物理量
+
+参数量先是一个计数：有多少模型权重值被纳入统计。它不说明这些值保存成什么格式、分布在哪些设备，也不说明前向时执行了多少算术。比如量化会改变每个权重的存储字节数，但不会因为一个 BF16 权重变成 INT4 表示，就把它变成四分之一的“参数个数”。
+
+来源也可能分别报告 total、activated、non-embedding 等数字。这些字段的分母不同，必须保留字段名和来源，不能把它们揉成一个模糊的“模型大小”。
+
+## 66.2 从一层 MoE 算到整模型
+
+在 MoE 中，router 先为当前 token 计算各专家的分数，再选择本层要执行的专家。专家输出经路由权重组合后进入后续计算。由于每一层都有自己的 router，一个 token 在不同 MoE 层可以走过不同专家集合。
+
+记第 $\ell$ 个 MoE 层第 $e$ 个专家的参数量为 $P_{\ell,e}$，该层共有 $E_\ell$ 个专家，token $x$ 在该层选出的专家集合为 $S_\ell(x)$。以下公式只表达“按一套固定的计数约定 $C$ 统计”，并不预设所有模型报告的 $C$ 相同。
+
+### 66.2.1 Total：把全部 expert 权重计入
+
+令 $N_{\mathrm{shared}}(C)$ 表示统计约定中单独归入共享部分的参数，$N_{\mathrm{other}}(C)$ 表示其他纳入计数的参数。三类参数按约定 $C$ 划成互不重叠的集合；遇到 tied weights 时按来源说明的去重规则处理。这样，整模型的总量可以按专家层逐层清点：
 
 ```math
-P_{\mathrm{total}}=P_s+E P_e
+N_{\mathrm{total}}(C)
+=
+N_{\mathrm{shared}}(C)
++
+\sum_{\ell=1}^{L_{\mathrm{MoE}}}
+\sum_{e=1}^{E_\ell} P_{\ell,e}
++
+N_{\mathrm{other}}(C)
+```
+
+这里每个专家都计入，不论某个特定 token 会不会选到它。如果各层专家数或宽度不同，就对每层、每个专家实际的参数量求和，而不是把一个平均 expert size 当成精确模型账本。
+
+### 66.2.2 Active：按每层路由集合累加
+
+对一个 token $x$，只把每层实际选中的专家加入该 token 的专家路径，再加上来源口径计入的共同路径：
+
+```math
+N_{\mathrm{active}}(x;C)
+=
+N_{\mathrm{shared,path}}(x;C)
++
+\sum_{\ell=1}^{L_{\mathrm{MoE}}}
+\sum_{e\in S_\ell(x)} P_{\ell,e}
++
+N_{\mathrm{other,path}}(x;C)
+```
+
+$N_{\mathrm{shared,path}}$ 和 $N_{\mathrm{other,path}}$ 特意带有 path 标记，因为“哪些共享参数算进 active”也要依来源定义。若专家大小不同，不能只数被选中的专家个数；必须把实际选中集合中的参数量相加。
+
+### 66.2.3 一个等大小专家模型的总量与逐 token 计数
+
+下面用一个教学设定核对全模型与 token 路径的差别。假设有 4 个 MoE 层，每层 8 个等大小专家，每个专家有 $0.25$B 个参数；共同路径中按本例口径计入 $2$B 个参数；每个 token 在每层选择 2 个专家。忽略模型中其他细分差异，路由路径可写成：
+
+| MoE 层 | 该 token 选中的专家集合 | 本层计入 active 的专家参数 |
+| --- | --- | ---: |
+| 第 1 层 | $S_1(x)=\{2,7\}$ | $2\times0.25$B |
+| 第 2 层 | $S_2(x)=\{1,4\}$ | $2\times0.25$B |
+| 第 3 层 | $S_3(x)=\{3,5\}$ | $2\times0.25$B |
+| 第 4 层 | $S_4(x)=\{2,8\}$ | $2\times0.25$B |
+
+同一个 token 在每个 MoE 层都选两个专家，但不同层的集合可以不同。总参数把 4 层中的 8 个专家全部计入；active 则只加上该 token 每层选中的 2 个专家和共同路径：
+
+```math
+N_{\mathrm{total}}
+=
+2+4\times8\times0.25
+=
+10\ \mathrm{B}
 ```
 
 ```math
-P_{\mathrm{active}}\approx P_s+kP_e
+N_{\mathrm{active}}
+=
+2+4\times2\times0.25
+=
+4\ \mathrm{B}
 ```
 
-如果 `E=64,k=2`，active 的 expert 部分约为总 expert 部分的 `1/32`。但真实模型还要计算 router、shared expert、embedding、输出层、top-k capacity、padding 和通信。
+所以本例中，expert bank 的选中部分是 $2/8=25\%$，而全模型 active/total 是 $4/10=40\%$。这些数是为了讲清口径而设的教学值，不对应任何真实模型的参数披露。
 
-## 66.3 active 不等于显存
+### 66.2.4 k/E 只适用于等大小的 expert bank
 
-推理时通常要把所有 expert 权重放在 GPU、CPU 或远端存储中，或者在请求到来时加载。因此显存需求更接近常驻权重和 cache，而不是单 token active 参数。
+如果同一层的专家大小相同，而且每个 token 固定选 $k$ 个，那么该层专家库中被选中的参数比例是 $k/E$。这个比例只描述专家库本身。例如上一例的每层专家比例为 $2/8$，而全模型比例还受到共同路径影响。
 
-训练时所有 expert 也可能需要 optimizer state、梯度和 checkpoint。active FLOPs 降低了计算，但 all-to-all 通信、expert load imbalance 和路由 buffer 仍然存在。
+多层模型要先算每层，再合并全模型计数。若专家大小不等、每层 top-k 不同，或某些层走 dense 路径，就不能用一个全局 $k/E$ 代表整模型。正确做法是保留每层参数量和路由规则，并说明来源报告的 Active Parameters 有没有包含共同路径。
 
-## 66.4 一个容量估算
+## 66.3 每 token 活跃参数、请求内并集与存储字节
 
-假设共享参数 20B，64 个 expert 每个 10B，每 token 选 2 个，则：
+单 token active 不能回答一个请求会触及多少不同专家，也不能回答权重占多少字节。要回答这两个问题，需要分别记录 token 集合的并集和指定存储格式。
+
+### 66.3.1 路由集合按层、按 token 变化
+
+在同一层中，router 根据输入表示为专家打分；不同 token 可以得到不同的 $S_\ell(x)$。当一个 token 继续进入下一 MoE 层时，新的隐藏状态进入下一 router，得到新的专家集合。top-k 说的是“每个 token 在每个相关层选几个”，不是“整个模型只存在几个活跃专家”。
+
+这也是为什么不能把模型简化成一个全局固定的专家子集。每 token 的 active 数可以稳定，而专家身份随 token 和层改变。
+
+### 66.3.2 一批 token 的专家并集可以更大
+
+对一个 token 批次 $B$，第 $\ell$ 层至少被某个 token 选中的专家集合是：
 
 ```math
-P_{\mathrm{total}}=20+64\times10=660\mathrm{B}
+U_\ell(B)=\bigcup_{x\in B}S_\ell(x)
 ```
+
+只看专家库时，这个批次触及的不同专家权重为 $\sum_{e\in U_\ell(B)}P_{\ell,e}$。它可能远大于单个 token 的 $kP$，因为不同 token 可能走向不同专家；但这个并集也不等于每个 token 都执行了所有这些专家。请求或批次中的并集描述的是“哪些专家至少被用到”，逐 token active 描述的是“一个 token 的路由路径”，两者是不同账本。
+
+### 66.3.3 参数个数乘精度字节只估原始权重载荷
+
+若 $N$ 个参数都按同一种格式存储，每个参数占 $b$ 字节，可以先估原始权重载荷：
 
 ```math
-P_{\mathrm{active}}\approx20+2\times10=40\mathrm{B}
+M_{\mathrm{raw}}\approx N\times b
 ```
 
-若 BF16 每参数 2 字节，仅权重总存储约为 `660B\times2=1.32TB`，active 计算路径约使用 40B 参数的矩阵乘，但服务仍可能需要容纳 1.32TB 权重或采用 expert offload。把 40B 写成“只需 80GB 显存”是错误的，因为 KV、workspace、复制和并发没有算。
+例如 10B 个参数若全按 BF16 的 2 bytes/parameter 存储，原始权重载荷约为 $20$ GB（按十进制单位）。这不是 GPU 显存估算：量化的 scale/zero-point、padding、混合精度、运行时 workspace、KV/state、activation、复制与 allocator 开销都尚未计入。若权重按设备分片，各卡持有的字节也不同于集群全量。
 
-## 66.5 路由和负载均衡
+checkpoint 的 tensor 排列方式也不等于运行时的参数统计。Hugging Face Transformers 团队说明，其 MoE 加载路径可以把 checkpoint 中分别保存的 expert tensors 转换并打包到 runtime tensor；这是该 Transformers 加载实现的行为，不是参数个数发生变化的定义。[MoE 权重加载说明](https://huggingface.co/blog/moe-transformers)
 
-router 为每个 token 计算 expert 分数并选择 top-k。若大量 token 选择同一个 expert，该 expert 过载，其他 expert 空闲；系统可能丢 token、padding 到 capacity 或增加通信等待。
+## 66.4 用公开模型看数字，不混成同一口径
 
-训练中常加入 load balancing loss。一个教学化形式可以惩罚 token 分配比例 `f_e` 与 router probability `p_e` 的偏差：
+下面的数字保留各自来源的表述和结构信息。它们说明发布方怎样报告 total 与 active，不是把不同模型的参数统计重新统一审计后的精确值。
 
-```math
-L_{\mathrm{balance}}\propto E\sum_{e=1}^{E}f_ep_e
-```
+| 模型与来源 | 报告的 Total / Active | 来源同时披露的路由信息 | 阅读时保留的边界 |
+| --- | --- | --- | --- |
+| [Mixtral 8x7B 论文](https://arxiv.org/abs/2401.04088) | 47B total / 13B active | 每层 8 个 feed-forward experts；每 token 每层选 2 个 | 两个数是论文报告值；不能只用 $2/8$ 精确重算整模型 Active |
+| [DeepSeek-V3 技术报告 v2](https://arxiv.org/abs/2412.19437v2) | 671B total / 37B activated per token | 除前三层外使用 MoE；每个 MoE 层有 1 个 shared expert 和 256 个 routed experts，每 token 选择 8 个 routed experts | 整模型计数还涉及共享路径和非专家部分；不应仅用 $8/256$ 推导报告值 |
+| [Qwen3-30B-A3B 官方模型卡](https://huggingface.co/Qwen/Qwen3-30B-A3B) | 30.5B total / 3.3B activated | 同页还列 29.9B non-embedding、128 个 experts、8 个 activated experts | 页面提供了多个统计字段；记录访问时页面和模型 revision，不能仅由字段名称推断所有包含规则 |
 
-具体正则和实现依模型而定。路由均衡不是纯训练指标，还影响线上专家并行和 p99。
+### 66.4.1 Mixtral：top-2 不等于整模型的 active 比例
 
-## 66.6 active FLOPs 与 token 级成本
+Mixtral 的论文说明，每层包含 8 个前馈专家，router 对每个 token 选择 2 个。这里的 top-2 关系解释了每个 token 为什么只经过一部分 expert bank；它并不意味着整模型 active/total 必须恰好是 $2/8$，因为全模型还包含共享和非专家部分，参数数也按论文报告口径汇总。[Mixtral of Experts](https://arxiv.org/abs/2401.04088)
 
-MoE 可以降低每 token 的 expert FLOPs，但 prefill 中的大 batch、padding、通信和 shared path 可能改变结果。decode batch 小时，专家矩阵乘可能难以填满 GPU，active 参数少却不一定更快。
+### 66.4.2 DeepSeek-V3：共享 expert 与 routed experts 都要看
 
-容量规划要同时记录：total weight GiB、active FLOPs、expert dispatch bytes、all-to-all time、KV cache、batch throughput 和 p99。参数量只是一项输入，不是完整成本模型。
+报告 §4.2 说明除前三层外采用 MoE；每个 MoE 层包含 1 个 shared expert 与 256 个 routed experts，每 token 选择 8 个 routed experts。这个结构能解释 active 路径由共享与选中专家共同组成，但不能只用 8 除以 256 推出表中的整模型报告值，因为它还绑定其他模型层和统计范围。[DeepSeek-V3 Technical Report v2](https://arxiv.org/abs/2412.19437v2)
 
-## 66.7 训练和推理的差异
+### 66.4.3 Qwen3：同一模型卡并列 total、activated 与 non-embedding
 
-训练要为所有 experts 保存梯度和 optimizer state，checkpoint 也包含全量参数；推理可以使用 expert parallel、offload、量化和按需加载。训练中的 token 路由分布可能和线上请求不同，不能直接把训练 active ratio 当作生产负载。
+Qwen3-30B-A3B 的官方模型卡把 total、activated、non-embedding 和 expert 数量并列披露。“30B-A3B”是便于识别的模型名，不应替代卡片里的字段。non-embedding 数量也提醒我们：参数统计可能对 embedding 另作口径；若拿模型卡、论文表格或模型名横向比较，先确认每列数字的定义。模型卡是访问时的在线页面，尚未固定 revision。[Qwen3-30B-A3B 模型卡](https://huggingface.co/Qwen/Qwen3-30B-A3B)
 
-量化还要问是所有专家同样精度，还是按专家/层使用不同 precision。冷门 expert 被量化后可能只在少数任务上退化，平均分不一定能发现。
+### 66.4.4 发布数字留在各自版本与定义下比较
 
-## 66.8 参数口径的审计
+比较数字时，至少记录模型 ID、论文版本或模型权重 revision、访问日期、字段原名和来源给出的包含范围。再核对 shared expert、router、embedding、output head、tied weights、每层专家数及 top-k 是否披露。来源没有说明的部分标为 unknown，而不是用相邻字段、模型名或专家比例补齐。
 
-看到发布材料的“总参数”和“激活参数”，要核对是否包含 embedding、LM head、shared expert、router、adapter 和稀疏比例；还要记录 token-level 还是 sequence-level active、top-k 是否固定、不同模态是否使用不同路径。
+## 66.5 参数数字不等于算力、内存、延迟和质量
 
-如果来源只给一个营销数字而没有 config、层数、expert 数和 top-k，就只能把它当发布方口径，不能反推出完整架构。
+Total 与 Active 是有用的架构统计，但不是完整资源模型，也不能说明模型质量。要从参数量推到其他结论，必须加入相应的计算口径、存储格式、系统实现或质量评估。
 
-## 66.9 常见误区
+### 66.5.1 Active Parameters 和 FLOPs 有关联但不是同一量
 
-把 active 参数当常驻显存；把 total 参数当每 token FLOPs；忽略 shared layer；忽略专家通信；只测平均负载不测热点；将 total、active 和 dense-equivalent 混用；从参数量猜测模型质量。
+在每个专家大小相同、每个 token 执行相同形状矩阵乘的条件下，选中 $k$ 个专家会让专家矩阵的计算量随 $kP$ 增长。Stanford 课程讲义按乘法和加法分开计数，给出一层选中专家部分约 $2kP$ FLOPs per token 的近似，并明确 router 和通信会另加成本。[课程讲义 §1.1](https://web.stanford.edu/class/msande319/lectures/lecture-4-notes.pdf)
 
-## 66.10 面试回答与练习
+这是特定线性层与计数约定下的近似，不是整模型 FLOPs 公式。Attention、dense/shared layers、router、序列长度、矩阵形状和 FLOP 计数方式都会改变总计算量；训练还包括反向传播与优化器状态。第五册第 13 章负责训练计算量与预算估算，本章的 active 数字不能替代那套账本。
 
-回答“MoE 500B 为什么能用较小 active 参数运行”时，应区分总权重和每 token 激活路径，说明 top-k、shared expert、专家并行、通信、权重常驻和 KV cache 的差异。active 参数更接近单 token 计算，却不能单独决定显存、吞吐或成本。
+### 66.5.2 Total Parameters 和 GPU 显存不是同一量
 
-练习一：给定 `P_s=20B,E=64,P_e=10B,k=2`，计算 total 和 ideal active。
+Total 参数量乘以指定格式的每参数字节数，只能估算原始权重载荷。模型分片后各设备驻留的权重不同；量化元数据、scale、对齐与 packing 会影响权重字节；实际运行还需要 KV/state、activation、workspace 和缓存等内存。即使某个 token 的 active 数很小，也不能据此断言 GPU 只需要容纳这些 active 权重。
 
-练习二：列出为什么 active FLOPs 低但 p99 仍可能高的四个原因。
+反过来，resident weight bytes 是特定 checkpoint、精度、分片和 runtime 下的部署状态，不能当作架构固有的第三种参数量。比较时把“参数个数”“模型文件字节”“整机/单卡峰值显存”分开记录。
 
-练习三：设计一个专家热点监控面板，至少包括路由比例、capacity、丢 token、通信和 p99。
+### 66.5.3 延迟要看路由执行和 workload
 
-### 66.10.1 参数量的教学分解
+每 token 选择较少专家，并不单独保证端到端更快。路由分发和结果聚合、跨设备通信、专家矩阵的实际批量、权重布局、prefill/decode 形状与 kernel 实现都参与执行时间。课程讲义将 router 与通信列为额外成本；Transformers 团队的文章也把 expert backend 和 expert parallelism 作为单独的实现问题讨论。[Stanford MS&E 319 课程讲义](https://web.stanford.edu/class/msande319/lectures/lecture-4-notes.pdf) · [Transformers MoE 实现文章](https://huggingface.co/blog/moe-transformers) 这些材料支持“active 参数不足以预测端到端速度”，不构成跨设备或跨 runtime 的通用速度公式。更细的训练和服务代价交由第五册训练章节、第二十二章及推理系统书册展开。
 
-对含 shared 参数 `P_s`、`E` 个 expert、每个 expert 参数 `P_e`、每 token 激活 `k` 个 expert 的 MoE，可以写：
+### 66.5.4 总参数不能单独预测模型质量
 
-```math
-P_{\mathrm{total}}=P_s+E P_e
-```
+Total 描述模型中可用的参数容量，Active 描述一个 token 的路径口径；它们都不能单独推出验证集 loss、任务能力或用户体验。2026 年一项 arXiv v1 MoE 配置研究报告，在超过 2,000 次预训练、约 10M–300M active parameters、总参数最高 6.6B 的实验中，对每步 active FFN 参数作匹配后，增加 inactive experts 参数在作者所测设置中改善了 held-out loss。[Slicing and Dicing: Configuring Optimal Mixtures of Experts v1](https://arxiv.org/abs/2605.11689v1)
 
-理想 active 参数近似为：
+这项结果提醒我们，active 参数相同的模型仍可能因 total expert capacity 不同而产生不同结果；它不是“加专家一定更好”的普遍规律，也不能直接外推到数百亿或数千亿规模、其他数据配比和其他训练预算。质量结论应引用具体任务和评估，不由一个参数数字代替。
 
-```math
-P_{\mathrm{active}}=P_s+kP_e
-```
+## 66.6 审核并呈现模型参数数字
 
-如果存在 shared expert、router、embedding、output head 和多个层，公式需要逐层相加。它的作用是说明 total 和 active 关注不同问题，不是提供任何具体模型的真实参数统计。
+遇到参数量声明时，读者应能复述“它在统计什么”，而不只是记住一个数字。把来源和统计字段写全，缺少的条件就保持未知；存储、计算和质量分别报告。
 
-### 66.10.2 active 参数不等于单 token 成本
+### 66.6.1 先记录来源、模型 revision 与计入范围
 
-一个 token 即使只激活两个 expert，也可能需要把 token 通过 all-to-all 发到远端 GPU；专家权重可能已经常驻显存，通信和负载不均衡会决定延迟。router 热点会造成某个 expert 满载、capacity overflow 或 token drop。长上下文请求还要为 KV/state 分配资源，与 active FLOPs 没有直接比例关系。
+核对具体模型 ID、论文版本或模型卡 revision、权重/配置 revision、访问日期及发布方原字段。进一步查阅是否计入全部专家、shared expert、router、embedding、output head 与 tied weights，以及 Active 是 per token 还是其他范围。只看到模型名或二手摘要时，不能把缺少的统计规则补成确定事实。
 
-因此容量规划至少同时看 total weight、active FLOPs、expert traffic、权重驻留、KV bytes、batch 和 p99。发布材料中“active 参数更小”不能直接翻译成“显存更小或成本更低”。
+### 66.6.2 用分栏报告比较，不从缺失字段反推
 
-### 66.10.3 worked example：理想和现实
+一份可审阅的参数简报可以分开列出：
 
-设 `P_s=20B`、`E=64`、`P_e=10B`、`k=2`，则理想 total 为 `660B`，active 为 `40B`。如果 token 均匀分配，计算路径可能接近 40B 的量级；如果 20% token 集中到少数 expert，热点 GPU 的处理时间和通信会决定尾延迟，平均 active 参数没有反映这个问题。
+| 字段 | 应记录的内容 |
+| --- | --- |
+| Total Parameters | 发布方原数字、定义和来源版本 |
+| Active Parameters | 原字段名称、是否按 token 统计、报告披露的共同路径/专家范围 |
+| 结构字段 | 每层 expert 数、top-k、shared expert、dense/MoE 层分布 |
+| 其他计数范围 | embedding、output head、router、tied weights、non-embedding 的说明或 unknown |
+| 存储/运行 | precision/quantization、原始权重载荷估算、单卡/集群驻留显存或实测值，并注明如何测得 |
+| 性能/质量 | FLOPs、tokens/s、延迟与质量指标各自的 workload、硬件、版本、benchmark 和日期 |
 
-### 66.10.4 量化和参数口径
-
-total/active 还要注明参数是否包含 embedding、共享层、量化后的存储格式和 router。一个模型的参数数量可以按训练精度统计，部署显存却按量化 payload 统计；两个数字没有矛盾，但不能混在同一列比较。
-
-## 66.11 参数量、FLOPs 和带宽的三角关系
-
-total parameters 主要回答模型权重容量，active parameters 近似回答一个 token 经过多少专家计算；二者都不能单独回答实际速度。一个 MoE 请求还要支付 router、token permutation、通信、padding 和权重读取。
-
-可以用三个账本并列：
-
-~~~math
-N_{\mathrm{total}}\rightarrow M_{\mathrm{weight}},
-\qquad
-N_{\mathrm{active}}\rightarrow C_{\mathrm{matmul}},
-\qquad
-C_{\mathrm{comm}}\rightarrow \mathrm{latency\ and\ bandwidth}
-~~~
-
-如果权重分散在多个设备，active 计算很小也可能等待远端专家；如果专家集中在一个设备，热点会让 p99 变差。参数口径必须和部署拓扑一起解释。
-
-## 66.12 训练 token 的专家分布
-
-专家是否学到分工，不能只看路由概率。应比较不同数据域、语言、代码和长度 bucket 的 expert assignment、负载和质量。一个专家很热门，可能代表它承担通用功能，也可能说明 router 塌缩。
-
-可以计算专家负载熵：
-
-~~~math
-H_{\mathrm{load}}
-=-\sum_{e=1}^{E}p_e\log p_e
-~~~
-
-负载熵高不一定更好，因为均衡路由可能损害语义分工；负载熵低也不一定失败，因为少数专家可能确实适合通用 token。它必须和 token drop、任务质量、通信和梯度一起分析。
-
-## 66.13 面向选型的参数报告模板
-
-一份可比较的模型卡至少给出：total parameters、active parameters、非专家参数、专家数量、top-k、权重 dtype、KV/state dtype、最大 batch、上下文长度、prefill/ decode 吞吐和硬件。
-
-如果厂商只公开其中一部分，应将未知字段标为未知。不要用 total 参数除以专家数猜 active，也不要用单次 API 价格反推模型实际 FLOPs。
-
-## 66.14 参数口径与权重常驻
-
-MoE 的 active parameters 描述一次 token 经过的计算路径，不表示只有这些权重驻留在 GPU。若专家权重分片在不同设备，token 仍需通信；若采用 offload，active FLOPs 低也可能等待权重搬运。
-
-可以把单 token 的服务成本拆成：
-
-~~~math
-C_{\mathrm{token}}
-=C_{\mathrm{dense}}
-+C_{\mathrm{active\ expert}}
-+C_{\mathrm{router}}
-+C_{\mathrm{communication}}
-+C_{\mathrm{weight\ movement}}
-~~~
-
-因此 total/active 只能作为第一层口径，实际吞吐还要绑定拓扑、batch、专家热点、dtype 和 kernel。
-
-## 66.15 专家负载的可观测性
-
-路由器输出的概率和实际执行的 token fraction 可能不同。容量限制、token drop、padding、top-k 和跨 rank dispatch 都会改变最终负载。应记录每个专家的输入 token、溢出、等待时间、输出质量和梯度。
-
-负载均衡损失下降不等于服务均衡；某些专家可能承担高价值但低频任务，强行均匀会损害 specialization。质量、负载熵、通信和 p99 要一起分析。
-
-## 66.16 面试中的完整参数回答
-
-回答“一个 100B MoE 模型到底多大”时，应先问 total 还是 active，再问非专家参数、专家数量、top-k、共享专家、权重 dtype、常驻位置、KV/state 和通信。若资料缺少字段，就明确标为未知。
-
-对比模型时，最好同时给出：权重存储、单 token 计算、每请求 KV/state、专家通信、量化和 batch 影响。这样才能把两个看似矛盾的数字放回同一资源账本。
-
-## 66.17 从参数量走向成本模型
-
-Total parameters 描述模型拥有多少权重，active parameters 描述一个 token 走过多少参数路径。二者都重要，但还必须和权重常驻、KV、通信、负载均衡、量化和 batch 一起解释。发布数字要保留口径和模型版本。
-
-本章的 MoE 参数关系是教学模型；具体 expert 数、shared path、top-k 和 active 统计以官方 config、技术报告和模型卡为准。
-
-## 66.18 三种“参数量”口径
-
-面试和模型卡中常见的参数数字至少有三种含义：
-
-1. total parameters：所有共享层和所有 expert 的权重总量。
-2. active parameters：一次 token 路由实际参与矩阵乘法的参数量。
-3. resident parameters：某一设备或某一时刻实际驻留在显存中的参数量。
-
-这三个数字可能完全不同。MoE 可能拥有很大的 total，但每个 token 只激活少量 expert；量化和 offload 可能降低 resident bytes，却不改变数学上的 parameter count；shared attention、embedding、router 和 output head 是否计入，也会改变公布口径。
-
-看到“某模型是 400B，但每 token 只用 20B”时，不能直接把 20B 当成显存需求或总计算量。至少要问：20B 是否包含 shared path？是否按 BF16、FP8 还是量化权重统计？top-k 是按 token 还是按 layer？通信和 router overhead 是否计入？
-
-## 66.19 MoE 参数公式
-
-设有 E 个 expert，每个 expert 的参数量为 P_e，共享部分参数量为 P_s，router 和其他小模块为 P_r，则：
-
-~~~math
-P_{\mathrm{total}}
-=P_s+E P_e+P_r.
-~~~
-
-如果每个 token 在每层选择 k 个 expert，理想化的 active 参数为：
-
-~~~math
-P_{\mathrm{active}}
-\approx P_s+kP_e+P_r.
-~~~
-
-这只是参数访问量的近似，不等于 FLOPs 的精确值。不同 expert 的 hidden size、shared expert、top-k 组合、capacity overflow、token dropping 和 fused kernel 都会改变实际计算。若 attention 占了很大比例，active FFN 参数的减少也不会按相同比例降低全模型计算。
-
-## 66.20 参数量与 FLOPs 的关系
-
-对一个 dense linear layer，输入 token 数为 T 时，矩阵乘法成本大约与输入维度、输出维度和 T 的乘积有关。MoE 的 expert 参数稀疏化降低的是每个 token 访问的专家矩阵，不代表所有设备都只保存 active expert：
-
-~~~math
-F_{\mathrm{token}}
-\approx F_{\mathrm{shared}}
-+kF_{\mathrm{expert}}
-+F_{\mathrm{router}}
-+F_{\mathrm{attention}}.
-~~~
-
-训练时还要乘以 forward/backward 的常数，并考虑 all-to-all 通信；推理时 decode 的单 token 计算、prefill 的矩阵利用率和 batch 形状又不同。因此 active parameters 适合作为“每 token 计算路径”的解释，不应直接当成吞吐预测公式。
-
-## 66.21 为什么 total 大仍可能昂贵
-
-total parameters 影响至少四类成本：
-
-1. 权重存储：所有 expert 权重可能需要在集群中保存。
-2. 加载和初始化：启动服务需要读取、反量化和建立权重布局。
-3. 路由与通信：token 发送到远端 expert 需要 all-to-all。
-4. 容错与升级：更多分片、更多 expert 增加重启和灰度复杂度。
-
-一个 token active 20B 不代表一张 GPU 只需放 20B。若请求混合会访问所有 expert，服务仍需让这些 expert 可被快速调度；若 expert 采用按需加载，磁盘和网络延迟可能成为新瓶颈。
-
-## 66.22 负载均衡改变有效 active 成本
-
-理论上每个 token 选择 k 个 expert，实际可能出现热门 expert 过载、冷门 expert 空闲。令第 e 个 expert 收到 n_e 个 token，则负载均衡可以观察：
-
-~~~math
-\mathrm{CV}
-=\frac{\operatorname{std}(n_e)}
-{\operatorname{mean}(n_e)}.
-~~~
-
-CV 高时，平均 active 参数仍然没有变，但尾部设备的等待、显存和通信时间会变差。capacity factor 会限制每个 expert 能接收的 token 数，超出的 token 可能被丢弃、送回 shared path 或重新路由。评估必须记录 token drop、expert overflow、all-to-all bytes 和最慢 rank，而不是只看平均 GPU 利用率。
-
-## 66.23 一个数字例子
-
-假设共享部分 10B，有 E=64 个 expert，每个 expert 5B，router 0.1B，每个 token 选择 k=2，则：
-
-~~~math
-P_{\mathrm{total}}
-=10+64\times5+0.1
-=330.1\mathrm{B},
-~~~
-
-理想 active 参数约为：
-
-~~~math
-P_{\mathrm{active}}
-=10+2\times5+0.1
-=20.1\mathrm{B}.
-~~~
-
-这个例子说明为什么模型可以同时拥有很大的容量和较小的 token 路径。但如果共享 attention、embedding、通信和未融合的 router kernel 占据大量成本，实际 throughput 可能远低于一个 20B dense 模型的直觉估计。
-
-## 66.24 参数量、显存和量化
-
-权重显存的粗略估算是：
-
-~~~math
-M_{\mathrm{weight}}
-\approx P_{\mathrm{resident}}\times s_{\mathrm{weight}}
-+M_{\mathrm{scale}}
-+M_{\mathrm{layout}}.
-~~~
-
-BF16 每参数通常按 2 字节估算，FP8/INT4 的平均字节数更低，但 scale、zero point、padding、混合精度层和临时 buffer 会增加额外占用。量化降低的是存储和可能的带宽，不自动改变 total/active parameter 的定义。
-
-MoE 还要区分全量加载、expert sharding 和按需加载。全量加载启动快但占用更多显存；按需加载节省 resident memory，却可能增加 cache miss、网络读取和尾延迟。
-
-## 66.25 参数量与上下文成本要分开
-
-长上下文系统的主要增量可能来自 KV/state，而不是权重。服务容量模型至少写成：
-
-~~~math
-M_{\mathrm{request}}
-=M_{\mathrm{weights}}
-+M_{\mathrm{KV/state}}
-+M_{\mathrm{activation}}
-+M_{\mathrm{workspace}}.
-~~~
-
-一个 total 参数更大的 MoE 模型，如果 active 路径和 KV/state 设计更节省，可能在特定 batch 下更容易服务；反过来，一个 total 较小的 dense 模型如果使用较大的 MHA KV cache，也可能受长上下文限制。不能只按参数排序推断推理成本。
-
-## 66.26 对比模型时的统一报告格式
-
-为了避免营销数字互相误导，建议每次对比都给出：
-
-~~~text
-model revision
-total parameters
-active parameters definition
-shared parameters
-expert count and top-k
-resident weight bytes
-KV/state bytes per request
-precision and quantization
-FLOPs or measured tokens/s
-communication bytes
-batch and sequence length
-quality harness and date
-~~~
-
-如果某个字段未公开，应写 unknown，而不是用同系列模型或社区猜测补齐。尤其是闭源模型，产品页可能公布上下文和价格，却没有 total/active 的内部结构证据。
-
-## 66.27 训练、推理和更新的不同账本
-
-训练 active 参数影响前向、反向和 optimizer state；推理 active 参数影响 token 路径；checkpoint 和发布包仍要处理 total 权重。训练还需要为 expert 梯度、optimizer states、通信和 checkpoint 保存空间付费。
-
-因此一个架构选择可能在推理上很划算，在训练上却因为 all-to-all 和负载不均衡变贵；也可能训练吞吐不错，但线上小 batch decode 的 expert 路由不规则，尾延迟很差。架构评估必须分别测 pretraining、prefill、decode 和模型升级。
-
-## 66.28 active 参数的三个口径
-
-“active”至少可能指每个 token 实际参与矩阵乘的 expert 参数、一次请求实际被调度到的参数，或某个产品宣传中的激活规模。三者不一定相同。MoE 的 router 可能选择 top-k expert，但 resident weight、通信 buffer、共享层和 runtime workspace 仍然占用显存。
-
-因此应同时报告：总参数 `N_total`、每 token active 参数 `N_active`、常驻权重 `N_resident`、临时激活 `M_activation` 和通信量 `B_comm`。一个模型可以在 FLOPs 上看起来很小，却因所有 expert 都要常驻而无法在目标 GPU 上部署。
-
-## 66.29 一个容量账本例子
-
-假设共有 64 个 expert，每个 token 选择 2 个，expert 总参数为 64B，共享参数为 8B。理想 active 参数约为 `8+64×2/64=10B`，但若所有 expert 都以 BF16 常驻，权重仍需要约 `64B×2 bytes=128GB`，还没有计入量化 scale、通信和 workspace。
-
-这个例子说明 active 参数适合描述 token 级计算，不适合单独描述显存和故障域。若采用 expert offload，计算成本、PCIe/NVLink 流量和尾延迟又会改变，必须用真实硬件压测验证。
-
-## 66.30 用统一分母比较模型
-
-跨模型比较时，至少绑定相同的输入/输出长度、batch、硬件、精度、并行方式、cache、工具和 reasoning effort。报告质量时用每个成功任务的 active FLOPs、延迟和显存，而不是用“参数量越小越快”的口号。MoE、稠密模型和混合架构的成本账本可以不同，但分母必须可解释。
-
-## 66.31 active FLOPs 也有误差
-
-理论 active 参数假设 router 均匀、kernel 满载、没有 padding 和通信；真实系统还会受到 token drop、expert capacity、batch 形状、跨卡 all-to-all 和量化回退影响。profile 时要同时保存 router histogram、实际 matmul shape、空转时间和通信占比。
-
-## 66.32 模型发布表的最小字段
-
-比较模型时至少列 `N_total`、`N_active/token`、`N_resident`、精度、KV/state、通信、上下文、训练/推理硬件、batch、输出长度、质量和单位成功成本。缺失字段不能用 active 参数猜出来，应标为未知或待核验。
-
-## 66.33 训练更新和服务加载不是同一账本
-
-训练需要 optimizer state、gradient、activation 和通信 buffer；服务需要权重、KV/state、workspace、batch 和网络。一个模型适合训练并不意味着同样的 active 参数适合在线服务，容量规划必须分别建账。
-
-## 66.34 小结
-
-Total parameters 说明模型容量和权重总账，active parameters 说明 token 经过的条件路径，resident parameters 说明当前设备真正承担的存储。它们都不能单独代表质量、吞吐或成本。只有把参数口径、量化、KV/state、通信、负载均衡、batch 和评测条件放到同一张账本，模型之间的比较才有意义。
+回答面试中的“一个 MoE 模型到底有多大”，先区分 total 与 active，再说明每 token 的路由和发布方的计数范围，最后指出显存、吞吐、延迟和质量还需独立口径。数字缺失时保留 unknown；不要把 Active 当作模型文件大小或一张 GPU 的容量承诺。
