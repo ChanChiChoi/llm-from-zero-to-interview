@@ -148,6 +148,8 @@ Kimi Linear 报告用 Palindrome、Multi-Query Associative Recall（MQAR）和 S
 
 KDA 的状态更新思想可以跨模型版本复用，但具体门的参数化、输出门和层间排布要逐版本说明。Kimi Linear 报告 v2 将 KDA 描述为以逐 key 通道的对角衰减扩展 Gated DeltaNet，并报告 Kimi Linear 使用三层 KDA 配一层全局 MLA。这个比例属于该模型的结构安排，不是 KDA 的定义。
 
+Kimi Linear 如何把这组 token-mixing layers 与 MoE channel mixing 组成模型、以及 1.4T 对照和 5.7T 发布 checkpoint 的证据边界，见[第 76 章](76-kda从delta规则到线性注意力.md)。
+
 Kimi K3 报告 v2 保留 KDA 状态递归，同时调整了衰减参数化：报告对比 Kimi Linear 的负 Softplus 形式，描述 K3 用带下界的 scaled sigmoid 限制每步 log-decay，并给出 $g_{\min}=-5$；作者把这一范围与累积衰减的倒数范围及块内矩阵计算联系起来。报告还将 Kimi Linear 的低秩 output gate 改为 headwise RMSNorm 后的输入相关 full-rank output gate。它们是 K3 版本的参数化与实现选择，不能改写成所有 KDA 必须采用的方程。
 
 层间组合也有版本边界：K3 报告描述每三层 KDA 接一层 Gated MLA，并在末端另加 Gated MLA；Gated MLA 的潜变量 cache 和门控由[第 63 章](63-gated-mla门控潜变量注意力.md)主讲，K3 的完整层表、MoE 与其他组件见[第 88 章](88-kimi-k3-kda-stable-latentmoe与百万token-agent.md)。读 KDA 时保留这条判断：方程说明一种状态转换，具体模型报告说明一次参数化和层组合，kernel 报告说明一条实现路径；三者不能互相代替。

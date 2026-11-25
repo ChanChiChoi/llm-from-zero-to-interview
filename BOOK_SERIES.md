@@ -8,7 +8,7 @@
 
 当前状态：24 本主书正文第一版已完成，`book-llm-engineer/` 补充篇第一版已完成。项目已进入常态化全书精修与常态化新模型、新知识点更新阶段，重点是公式修正、代码 demo 补充、联网校验、广度审计、深度增强和纵向训练文件同步；其中第二十四册 `book-24-llm-inference-engine/` 当前落盘第 1-60 章已完成阶段性精修与纵向同步。
 
-1. `book-01-core-30/`：第一册，大模型算法岗核心主线；以文本语言模型从输入、表示、训练到生成和验证的生命周期建立书系共同基础，并提供各专题的阅读入口，不替代专题深挖或项目实战。
+1. `book-01-core-30/`：第一册，大模型工程入门与面试主线；面向刚进入大模型领域的读者，以文本模型从输入、训练、生成到验证的工作链路建立共同基础，着重机制解释、项目决策和故障诊断，不替代专题深挖或完整项目实战。
 2. `book-02-advanced-100/`：第二册，进阶 124 讲，沿建模、架构、数据、训练、对齐、Serving、应用和研究判断形成连续主线；多模态部分拆分为理解与对齐、图像/视频生成、语音交互、评估与研究四个单元。第二部分覆盖现代 Transformer 变体、SSM/S4/Mamba 与混合架构。
 3. `book-03-practical-handbook/`：第三册，18 章实战项目教材，沿实现基础、训练适配、推理、RAG 证据回答、Agent 受控动作、离线评估、轨迹与线上验证、多模态选读、作品集、项目答辩、系统设计和论文复现形成可复核交付闭环；RAG 与 Agent 分章讲解并在项目接口处衔接。
 4. `book-04-llm-encyclopedia/`：第四册，大模型百科全书，用于概念速查。
@@ -108,10 +108,10 @@ Anthropic 官方模型目录继续核验 Claude Sonnet 5：第四册记录 `clau
 
 DeepSWE v1.1 快照作为评测方法专题接入第七册、第十七册和第二十册：第七册拆解 Pass@1、区间、成本和 Agent steps 的统计口径，第十七册审计工具回执、权限、上下文与恢复，第二十册固定 `mini-swe-agent`、verifier、重试和环境版本。排行榜行记录的是完整 Agent 系统组合，不能把分数直接归因于基础模型；原始快照与待核验字段见 [`research/model-update-2026-09/deepswe-snapshot-notes.md`](research/model-update-2026-09/deepswe-snapshot-notes.md)。
 
-DeepSeek V4.1-Flash 接入第二十一册第 81 章：先用 CED 分开 prefill/decode，再学习 CSA2、层次化索引、FP4 global KV 和 SWA Bounded Replay，随后连接 MoE、Engram、mHC、DSpark、多模态 prompt 与协议迁移。第五册承接 45T 多模态预训练和 `SFT -> RL -> OPD`，第六册承接 HBM/SSD/replay/cache 账本，第七册、第十七册和第二十册承接 Agent harness、verifier、工具权限和恢复评估。模型卡与技术报告的自报数字必须和独立实测分栏；固定 HF 仓库已公开 reference `model.py`/TileLang `kernel.py`，但完整 production kernel、线上接受率和独立 profiling 仍待核验。
-本轮再补入 vLLM `v0.30.0` stable release/source evidence：第二十一册第 81 章新增 stable registry、NVIDIA/ROCm V4.1 package、PyPI artifact 与 release-note 面试点，并明确 `release surface -> full-weight load -> target profile -> acceptance/SLO` 的证据阶梯。v0.30.0 的 registry 或 wheel 不能替代完整权重、DSpark verify/rollback、FP4 质量、EPD 和生产验收。
+DeepSeek V4.1-Flash 接入第二十一册第 81 章：先固定 1017 checkpoint 与 0909 技术报告的证据对象，再讲 CED、CSA2/HSI、SWA Bounded Replay、FP4 global KV、MoE/Engram、Single-Pass mHC、DSpark 和视觉输入路径。第六册与第二十四册承接 cache、serving 与测量，第十五册承接多模态，第五册与第十六册承接训练和后训练，第十七册与第二十册承接 Agent runtime/评估；第 81 章不重复 API、Harness 或引擎协议。
+vLLM v0.30.0 registry/PyPI 与 SGLang release/PR 均作为固定版本的系统集成材料保留在 PAPERS.md 的跨册 runtime 来源栏，不再作为第二十一册第 81 章的架构内容。第二十四册第 32.43 节承接 V4.1 的 EPD、分层 cache 与 reference runtime；这些资料不证明本机权重加载、目标硬件性能或生产 SLO。
 
-2026-09-29 补入 SGLang DeepSeek-V4 runtime 两条证据：第 81.20 节记录 `v0.5.20` AMD/HIP 的 DSpark graph replay、unified-KV/SWA ring 与 FP4 indexer schedule；第 81.21 节记录 main PR #39313 的 guarded mixed-precision MegaMoE shared-expert fusion，以及为保留 alternate-stream overlap 而 fork 整段 fused region。#39313 的实验只绑定 4×B300 上的 DeepSeek-V4-Flash-0731；不迁移为 V4.1 成绩，也不代表 stable `v0.5.20`、独立复现或生产验收。
+SGLang DeepSeek-V4 AMD/HIP 的 DSpark graph replay、unified-KV/SWA ring、FP4 indexer PR 和 MegaMoE shared-expert fusion 仍绑定各自固定版本、实现与负载；其中吞吐实验对象是 DeepSeek-V4-Flash-0731，不迁移为 V4.1-Flash-1017 的架构或性能证据，详见 PAPERS.md 跨册 runtime 来源栏。
 
 K2 Horizon MoVA 36B/A4B 接入第二十一册第 82 章：先学习 36B total/4B active proxy 与 dense/sparse layer 排布，再学习 MoVA value routing、FFN MoE、GQA KV cache、512K 分阶段训练和 TP/EP serving。第五册承接 0.9B 卡片披露的 MOPD 边界，第六册承接双重 dispatch、KV、workspace 和通信账本；第二十一册同章介绍 K2 7B Uno 的 LoRA diffusion draft 与 `Psi-Spec` rejection verification。Uno 是官方关联 adapter/论文技术，不是排行榜新增模型；完整训练 recipe、接受率和生产 profiling 仍待核验。
 

@@ -17,7 +17,7 @@
 | 观察的瓶颈 | 机制轴与代表方法 | 首要失效线索 | 深入阅读 |
 | --- | --- | --- | --- |
 | 深层表示被固定残差累加，重要层输出不易单独调用 | 深度方向聚合：AttnRes、DCA | 层输出/梯度随深度失衡；增加上下文无法修复 | [第二十一册第 75 章](../../book-21-transformer-architecture-evolution/chapters/75-attention-residuals深度方向注意力.md)；[AttnRes 原文](https://arxiv.org/abs/2603.15031)；[DCA 原文](https://proceedings.mlr.press/v267/heddes25a.html) |
-| 长前缀的显式 KV 随 token 增长 | 递归状态：KDA；混合显式与递归记忆：Kimi Linear | 精确名称召回、远距离键值关联或状态恢复失败 | [第二十一册第 76 章](../../book-21-transformer-architecture-evolution/chapters/76-kda从delta规则到线性注意力.md)；[Kimi Linear v2](https://arxiv.org/abs/2510.26692v2) |
+| 长前缀的显式 KV 随 token 增长 | 递归状态：KDA；混合显式与递归记忆：Kimi Linear | 精确名称召回、远距离键值关联或状态恢复失败 | [第二十一册第 61 章：KDA 状态机制](../../book-21-transformer-architecture-evolution/chapters/61-kda递归注意力.md)；[第 76 章：Kimi Linear 混合案例](../../book-21-transformer-architecture-evolution/chapters/76-kda从delta规则到线性注意力.md)；[Kimi Linear v2](https://arxiv.org/abs/2510.26692v2) |
 | 历史 KV 成本过高，需减少候选数量或表示大小 | 压缩与索引：CSA/HCA、QSA | 压缩重建误差、候选召回、尾部恢复需分别观测 | [DeepSeek V4 技术报告](https://arxiv.org/html/2606.19348)；[第二十一册第 77 章](../../book-21-transformer-architecture-evolution/chapters/77-csa-hca从压缩kv到百万上下文.md)、[第 83 章](../../book-21-transformer-architecture-evolution/chapters/83-qwen3.8-qsa-gated-residual-n-gram-muon.md) |
 | 多条残差流的映射偏用、放大或衰减某一路 | 流间混合约束：mHC；分支门控：Gated Residual | 流占用、混合矩阵、梯度/激活与训练开销 | [第二十一册第 78 章](../../book-21-transformer-architecture-evolution/chapters/78-mhc双随机残差连接.md)、[第 83 章](../../book-21-transformer-architecture-evolution/chapters/83-qwen3.8-qsa-gated-residual-n-gram-muon.md)；[mHC v2](https://arxiv.org/html/2512.24880v2) |
 | 需要为 token 的 value 表示或短程重复模式增加容量 | Value 路径专家：MoVA；局部查表：N-gram Embedding | 路由负载/通信，或随机查表带宽与容量 | [第二十一册第 82 章](../../book-21-transformer-architecture-evolution/chapters/82-k2-horizon-mova-36b-a4b与uno.md)、[第 83 章](../../book-21-transformer-architecture-evolution/chapters/83-qwen3.8-qsa-gated-residual-n-gram-muon.md) |
@@ -71,7 +71,7 @@
 | 主题 | 深入阅读 |
 | --- | --- |
 | AttnRes 与深度方向选择 | [第 75 章](../../book-21-transformer-architecture-evolution/chapters/75-attention-residuals深度方向注意力.md) |
-| KDA 与线性注意力 | [第 76 章](../../book-21-transformer-architecture-evolution/chapters/76-kda从delta规则到线性注意力.md) |
+| KDA 递归机制与 Kimi Linear 混合模型 | [第 61 章：KDA 机制](../../book-21-transformer-architecture-evolution/chapters/61-kda递归注意力.md)、[第 76 章：Kimi Linear 案例](../../book-21-transformer-architecture-evolution/chapters/76-kda从delta规则到线性注意力.md) |
 | CSA/HCA 与压缩 KV | [第 77 章](../../book-21-transformer-architecture-evolution/chapters/77-csa-hca从压缩kv到百万上下文.md) |
 | mHC 双随机残差连接 | [第 78 章](../../book-21-transformer-architecture-evolution/chapters/78-mhc双随机残差连接.md) |
 | Mistral Small 4；Step 3.5 Flash | [第 79 章](../../book-21-transformer-architecture-evolution/chapters/79-mistral-small-4混合推理与eagle量化.md)；[第 80 章](../../book-21-transformer-architecture-evolution/chapters/80-step-3-5-flash的mtp与滑动窗口moe.md) |

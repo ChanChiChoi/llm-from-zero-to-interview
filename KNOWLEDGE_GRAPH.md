@@ -445,6 +445,7 @@ Paper Reading -> Hypothesis -> Baseline -> Experiment -> Ablation -> Error Analy
 ### 2026-09 新模型架构分支
 
 Long Context -> KV Cache -> 压缩表示 -> CSA/HCA -> 异构 KV Cache -> Serving Engine
+CSA -> feature-wise learned pooling + stride-m overlap -> compressed KV entries -> separate Lightning Indexer scores compressed entries -> query-dependent top-k -> shared-KV MQA + local raw window -> compression loss + selection misses; HCA -> non-overlapping m'-span pooling -> dense read over completed compressed entries -> no top-k indexer
 
 Sequence Modeling -> Linear Attention -> Kernel Feature Factorization -> Causal Prefix State (S_t, z_t)
 
@@ -472,6 +473,7 @@ Latent cache evaluation -> logical payload + position bytes + actual read/recons
 Kimi K3 Gated MLA v2 -> NoPE per-token KV latent (rank 512 in pinned config) -> global attention -> input-dependent full-rank channel output gate -> output modulation != latent/explicit route selection
 NoPE attention path -> no direct explicit position feature in Q/K/score -> fixed causal mask may expose prefix order -> upstream local/recurrent mixing may pass relative recency -> order / distance / absolute index require separate evidence
 RoPE phase vs attention visibility -> positional rotation vs causal SWA mask -> P-RoPE $\varphi(t)=t\bmod W$ -> boundary-crossing lag $d$ becomes $d-W$ -> wrap error when $R_W\ne I$ -> HP-RoPE $\theta_i'=2\pi m_i/W$ -> $R_W=I$ removes rotation mismatch -> MiniWin local SWA-P-RoPE/HP-RoPE + global NoPE -> cross-window access comes from global path -> 16k results remain bounded to arXiv v2 model/config/tasks
+Softmax SDPA Q,K,V -> per-query/head feature output -> pre-output-projection, query-dependent sigmoid G1 -> feature modulation while fixed-layer attention weights/mask stay unchanged -> query-dependent nonlinearity in the low-rank V/O mapping -> feature sparsity is not token sparse attention or compute skipping -> Qwen3-Next 3:1 GDN/gated-attention layout is a hybrid example, not gate-only efficiency evidence
 Kimi K3 v2 -> NoPE on MLA Q/K + position-sensitive, recency-aware KDA mixing -> global content interaction; 1M context also depends on long-context data and progressive training, not a NoPE-only causal attribution
 MLA latent cache -> O(T d_c) per layer -> differs from KDA fixed recurrent state; compression reduces per-token width but preserves sequence-length growth
 Recursive state -> s_t=F(s_{t-1},x_t) -> fixed state width with respect to T -> no independently addressable token slots -> task-level fidelity measurement
@@ -483,11 +485,18 @@ Fixed-state memory -> per-layer state dimensions × precision × active sequence
 KDA -> per-key-channel Diag(alpha) decay -> value prediction error -> scalar beta rank-one write -> query readout S^T q
 KDA alpha (per-key-channel old-state decay) != beta (current error write strength) != output gate (readout/output path)
 Kimi Linear v2 -> per-key-channel decay + chunkwise WY/UT; Kimi K3 v2 -> bounded log-decay g_min=-5 + full-rank output gate -> version-specific parameterization
+Kimi Linear v2 -> 3 KDA token-mixing layers + 1 global MLA/NoPE layer, each followed by MoE channel mixing -> 1.4T matched-configuration comparison vs 5.7T release-checkpoint/Moonlight comparison -> quality, cache, prefill and TPOT claims remain bound to their own model stage and batch conditions
 Gated DeltaNet-2 v2 -> channel-wise decay + erase gate b_t over key/read directions + write gate w_t over value channels -> Gated DeltaNet and KDA as parameter-tied special cases -> author-reported matched 1.3B / 100B FineWeb-Edu experiments -> evidence bounded to paper tasks and hardware
 
-Residual Stream -> Hyper-Connections -> 双随机矩阵 -> Sinkhorn 投影 -> mHC -> 深层信号稳定性
+Residual Stream -> Hyper-Connections -> 多路残差流 -> H_res 双随机约束 -> 每条输出流为凸组合 + 残差项流轴总量守恒 + 非扩张 -> 精确连乘保持双随机；有限 20 轮 Sinkhorn 为近似 -> 深层传播稳定性边界
 
-Transformer Depth -> 标准残差 -> Attention Residuals -> Block AttnRes -> 深度历史选择 -> Pipeline/Inference 优化
+mHC -> Birkhoff 多面体含置换顶点与均匀重心 -> 欠混合或过混合仍可能发生 -> cmHC（2026-11 arXiv 预印本）几何收缩方案 -> 独立核验作者的训练与 Ascend profiling 主张
+
+mHC 有限 Sinkhorn -> 行列约束误差随迭代与矩阵条件变化 -> mHC-lite（2026-01 arXiv 预印本）n! 置换凸组合 -> 精确约束与参数/算力成本另行权衡
+
+Transformer Depth -> 标准残差累加 embedding + 子层增量 -> Full AttnRes（每个目标深度的静态伪查询；RMSNorm key/raw value；沿来源轴 softmax）-> token-dependent depth weights（zero-init = uniform average）-> Block AttnRes（completed block summaries + current partial sum）-> online-softmax 两阶段读取 / pipeline cache / fused kernel -> 质量、状态与通信成本分别评估
+
+AttnRes variants -> Low-Rank AttnRes（routing key 降维、value 保持全宽）/ RD-AttnRes（QK 路由与 V 内容读取解耦）/ Multi-Stream AttnRes（多尺度序列视图后分别读深度）-> 各自结果绑定论文模型、预算与评测协议
 
 Post-Training -> 领域专家培养 -> GRPO -> on-policy distillation -> 统一模型能力
 
@@ -539,9 +548,9 @@ Kimi K3 -> 发布文章披露 -> KDA / AttnRes / Stable LatentMoE -> 论文机�
 
 ### Mistral Small 4 与 Step 3.5 Flash
 
-Mistral Small 4 -> 稀疏 MoE -> total/active parameter ledger -> reasoning_effort -> EAGLE draft head -> NVFP4 -> speculative serving audit
+Mistral Small 4 -> Mistral3 conditional-generation wrapper / Mistral4 text config -> MLA latent cache -> routed/shared expert ledger -> 6B/6.5B/8B source discrepancy -> reasoning_effort -> EAGLE proposal/target verification/rollback -> NVFP4 scale hierarchy -> artifact pairing and serving audit
 
-Step 3.5 Flash -> 稀疏 MoE/top-8 routing -> 3:1 SWA/full attention -> MTP-3 -> acceptance length -> Context Manager -> harness-aware long-task evaluation
+Step 3.5 Flash -> backbone 196B/11B 与含 MTP-3 的 198B/13B 参数口径 -> leading Full + 11 组 S3F1（33 SWA/12 Full） -> 288 routed + 1 shared/top-8 MoE -> 三个未来偏移 -> draft/verify 接受前缀与单层单 token serving 配方 -> Context Manager harness -> 结果归因
 
 模型卡公开的结构字段、推测解码机制和 Agent harness 策略分别记录；吞吐、接受率、完整训练配方和后端支持仍需绑定版本与实验核验。
 
@@ -594,9 +603,9 @@ DeepSWE -> 113 Tasks / 91 Repositories / 5 Languages -> mini-SWE-agent -> Tool H
 
 ### DeepSeek V4.1-Flash
 
-DeepSeek V4.1-Flash -> 552B Backbone -> CED (20-layer Causal Encoder + 20-layer Decoder) -> 8B Prefill / 16B Decode Active Proxy -> Global KV Projection
+DeepSeek V4.1-Flash-1017 -> 20-layer Causal Encoder + 20-layer Decoder -> layer-dependent global-KV projections; per-layer SWA state remains separate
 
-DeepSeek V4.1-Flash -> CSA2 -> Full/Reindex/Reuse -> Shared Main KV + Indexer K -> Hierarchical Sparse Indexer -> Candidate Pool Recall -> Top-K Recall -> Global KV 890 Bytes/Token
+DeepSeek V4.1-Flash -> CSA2 Full/Reindex/Reuse -> shared main KV + indexer K + refreshed/reused Top-K -> HSI candidate-pool recall -> final Top-K recall -> global KV 890 bytes/token
 
 DeepSeek V4.1-Flash -> FP4 Main KV (E2M1 + E4M3 Scale) -> Quantization Error -> Long-Context Retrieval Evaluation
 
@@ -606,11 +615,11 @@ DeepSeek V4.1-Flash -> 384 Routed Experts + 1 Shared Expert -> 6 Routed Experts/
 
 DeepSeek V4.1-Flash -> Engram Conditional Memory -> Token Lookup -> Conditional Model Memory -> Ablation/Hit-Miss Audit
 
-DeepSeek V4.1-Flash -> Single-Pass mHC -> Residual Stream Mixing -> Mega-mHC Kernel -> Deep Signal Stability
+DeepSeek V4.1-Flash -> Single-Pass mHC -> previous-layer A coefficient -> fused input-mixing path -> author-reported activation traffic reduction
 
 DeepSeek V4.1-Flash -> DSpark -> Semi-autoregressive Draft -> Confidence-Scheduled Verification -> Acceptance Length -> Effective Tokens/Target Call -> Speculative Serving Audit
 
-DeepSeek V4.1-Flash -> DeepSeek-ViT -> 2D-RoPE + 3x3 Pixel-Unshuffle -> MLP Projector -> Joint Vision/Text Tokens -> Multimodal Prompt/Permission Audit
+DeepSeek V4.1-Flash -> DeepSeek-ViT -> 2D-RoPE + 3x3 Pixel-Unshuffle -> MLP Projector -> Joint Vision/Text Tokens -> modality-specific MoE load-balance bias
 
 DeepSeek V4.1-Flash -> 45T Multimodal Pretraining Tokens -> 64K Sparse Attention Training -> 34T Context Extension Data -> 1M Context Evaluation
 
@@ -621,8 +630,6 @@ On-Policy Distillation -> On-Policy Representation Distillation (OPRD) -> Hidden
 On-Policy Distillation -> On-Policy Transition Distillation (OPTD) -> Layerwise Log-Probability Increments -> Depthwise Prediction Consistency
 Shared-Base Specialist Checkpoints -> Training-Free OPD (TF-OPD) -> Specialist-Rollout Second Moments -> Layerwise Least-Squares Merge; rollout source differs from strict current-student OPD
 OPD Capability Evaluation -> Answer Marking -> Answer Correctness -> Correct-Answer Stopping/Closure -> Overgeneration and Budget Audit
-
-DeepSeek V4.1-Flash -> Numeric Reasoning Effort (1-100) -> Token/Latency/Quality Budget -> Tool Calls/Timeout/Unit Success Cost
 
 DeepSeek V4.1-Flash -> Fixed HF Revision -> Reference `model.py`/TileLang `kernel.py` -> SWA Ring + Compressed KV + Candidate/Indexer + mHC/Sinkhorn -> Source/Runtime Audit
 
@@ -895,7 +902,7 @@ GLM-5.3 benchmark footnotes -> harness/tool/container/timeout/domain whitelist/T
 
 Kimi K3 -> sequence-length scaling -> KDA + Gated MLA (3:1, terminal Gated MLA) -> lower-bounded decay `g_min=-5` -> recurrent state + global content interaction -> KDA context parallelism/state-aware prefix cache
 
-Kimi K3 -> depth scaling -> Block AttnRes (8 blocks x 12 layers + embedding) -> block-level state -> cross-stage communication/memory reduction -> depth-selective residual flow
+Kimi K3 -> depth scaling -> Block AttnRes (report v2: 8 blocks, “12-layer size”, partial final block + separate embedding source; fixed config attn_res_block_size=12) -> block-level state -> cross-stage communication/memory path -> depth-selective residual flow; do not conflate block count, block width, and residual sublayer count
 
 Kimi K3 -> width scaling -> Stable LatentMoE -> latent routed experts + full-width shared experts -> RMSNorm + SiTU-GLU -> Quantile Balancing -> frozen bias/fixed Top-k -> expert load/communication ledger
 
@@ -1106,6 +1113,8 @@ API version + SDK version + model ID -> 可复核的接入条件 -> 避免把 SD
 ### DeepSeek V4 Pro：实现证据扩展
 
 HF revision `b5968e...` -> fixed config/encoding/inference artifact -> reproducible file identity -> no full-weight download claim
+
+Book 21 ch. 74 -> generic CSA/HCA compression and query-reading mechanism; ch. 77 -> preview Pro/Flash layer schedule -> 1M benchmark and separate efficiency baselines -> heterogeneous cache/reference inference paths -> workload-bound SGLang results; ch. 78 -> mHC mechanism
 
 `Compressor` -> gated compressed KV + overlap state -> block-boundary continuity -> heterogeneous KV/cache lifecycle
 

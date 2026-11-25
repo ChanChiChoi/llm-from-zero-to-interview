@@ -67,7 +67,7 @@ OpenAI 的 [Agent Evals 文档](https://developers.openai.com/api/docs/guides/ag
 
 ### 10.1.1 资料与证据边界
 
-- [OpenAI Agent Evals](https://developers.openai.com/api/docs/guides/agent-evals) 建议先用单条 trace 定位工作流问题，再转向固定数据集和重复评测。截至 2026-11-16，OpenAI 官方[评测指南](https://developers.openai.com/api/docs/guides/evals)说明既有托管 Evals 已于 2026-10-31 进入只读期，平台计划于 2026-11-30 下线；接入或迁移时须复核[官方时间表](https://developers.openai.com/api/docs/deprecations)。这只是服务生命周期信息，不改变单条轨迹的诊断方法。
+- [OpenAI Agent Evals](https://developers.openai.com/api/docs/guides/agent-evals) 建议先用单条 trace 定位工作流问题，再转向固定数据集和重复评测。截至 2026-11-25，官方[时间表](https://developers.openai.com/api/docs/deprecations)将托管 Evals dashboard、API 与 graders 列为只读，计划于 2026-11-30 关闭；[迁移指南](https://developers.openai.com/api/docs/guides/evals)仍记录了 2026-10-31 进入只读期的时间安排。接入或迁移时应复核官方时间表。这只是服务生命周期信息，不改变单条轨迹的诊断方法。
 - [Agentic CLEAR](https://aclanthology.org/2026.acl-demo.74/) 已发表于 ACL 2026 System Demonstrations，提出 system、trace 和 node 三层诊断；论文在四个 benchmark、七种 agent 设置和数万次模型调用上报告了与人工错误标注的对齐及任务成功预测能力，结论受其数据、模型和评审协议约束。
 - [AgentRx](https://www.microsoft.com/en-us/research/blog/systematic-debugging-for-ai-agents-introducing-the-agentrx-framework/) 是 Microsoft Research 对框架和 115 条人工标注失败轨迹的介绍；发布方报告的定位提升数字不是本地复现结果。
 - [OpenTelemetry GenAI spans](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-spans.md) 将完整输入、输出及工具内容列为可能敏感且体积较大的数据，并建议默认不记录；该页面是动态开发中规范，部署时须固定采用的版本。

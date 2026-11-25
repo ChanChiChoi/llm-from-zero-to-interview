@@ -1,6 +1,6 @@
 # 第二十一册《Transformer 架构详解、升级变种与未来架构演进》架构审视
 
-审视日期：2026-11-20；状态更新：2026-11-24。册级架构审视完成；截至本次更新，已完成第 1—72 章正文首轮审阅与修订。第 12 章两处、第 14 章一处、第 18 章一处、第 20 章两处、第 21 章一处及第 24—27、29—33、35、37—44、52 章公式和第 53—55、61—72、88 章公式的 GitHub MathJax 实际渲染尚待验收；第 32、33、43 章 Mermaid 的 GitHub 页面渲染也待验。第 56—60 章无公式、代码或 Mermaid 图；第 73—95 章尚未逐章审阅，共 23 章，不能据目录提前判定章节内容正确或可合并。全套书精修 goal 继续 active；不更新 PDF 或 `plan.md`。
+审视日期：2026-11-20；状态更新：2026-11-25。册级架构审视完成；截至本次更新，已完成第 1—81 章正文首轮审阅与修订。第 12 章两处、第 14 章一处、第 18 章一处、第 20 章两处、第 21 章一处及第 24—27、29—33、35、37—44、52 章公式和第 53—55、61—81、88 章公式的 GitHub MathJax 实际渲染尚待验收；第 32、33、43 章 Mermaid 的 GitHub 页面渲染也待验。第 56—60 章无公式、代码或 Mermaid 图；第 82—95 章尚未逐章审阅，共 14 章，不能据目录提前判定章节内容正确或可合并。全套书精修 goal 继续 active；不更新 PDF 或 `plan.md`。
 
 ## 书册契约
 
@@ -113,3 +113,51 @@
 依据 DeepSeek-V2 v5 与 Kimi K3 v2 原论文，及 Moonshot 官方固定 config revision，核对 MLA 的 KV latent、可吸收投影、decoupled RoPE、Kimi K3 NoPE、输出 gate 公式与参数披露。来源版本、阅读位置和不能据整模型成绩归因给 gate 的边界见[Gated MLA 研究记录](../../research/kimi-gated-mla-evidence-2026-11-24.md)。同步 reader TOC、设计 TOC、练习 31BV、面试题 31BW、`PAPERS.md` 第 60 项与 `KNOWLEDGE_GRAPH.md`；术语表已有 Gated MLA 条目，未重复添加。
 
 静态验收：正文、大纲和两份目录的 7 个 H2、8 个 H3 名称、层级和顺序匹配；输出 gate 的作用位置、latent/位置分支维度、每 token cache 账本及三组教学数值已手工核对；新增本地链接目标存在，配套编号唯一。`git diff --check` 通过。公式源码与形状已静态核对，GitHub MathJax 实际渲染、目标读者试读、外链终审和全册连续复读仍待验收。未运行测试或构建，未更新 PDF/`plan.md`。第二十一册第 1—63 章已完成首轮正文修订，第 64—95 章共 32 章待精修，下一入口为第 64 章《NoPE：没有显式位置变换，不等于没有顺序》。全套书精修 goal 继续 active。
+
+## 第七十五章完成时的入口（2026-11-25）
+
+第七十五章《Attention Residuals》按主题思想不变重写。旧稿已区分深度选择与 token self-attention，也给出简化的 Full 计算代码，但示例用任意分数说明 softmax，未沿论文的同 key=value 来源向量走查 RMSNorm 打分、深度权重和 raw value 聚合；零初始化的均匀平均、Block 首次/后续读入候选集、块提交及最终输出读入也未构成完整轨迹。旧稿对残差子层/块宽计数、论文消融和 K3 配置比较概括，且把 K3 “12-layer size”直接表述为每块 12 层。新稿按“标准残差—Full 定义与 token 轨迹—Block 状态轨迹—训练与推理成本—论文证据—K3 实例—后续变体”展开，并明确标准残差从 $h_1=v_0$ 初始化。
+
+核心方法与数字依据 Kimi Team 原论文；Kimi K3 report v2 和固定 Hugging Face config revision 只作为 K3 个案配置；AMD MI355X/TokenSpeed 文章只支持其特定 kernel 实践。Low-Rank、RD 与 Multi-Stream 结果分别限定于各自预印本实验。完整来源、版本、阅读位置和不能外推的范围见[AttnRes 研究记录](../../research/attention-residuals-evidence-2026-11-24.md)。第 61 章负责 KDA 机制，第 76 章负责 Kimi Linear 混合模型案例，第 78 章负责 mHC，第 88 章负责 K3 全模型；本章不将 K3 总成绩归因给 AttnRes。
+
+已新增[第七十五章大纲](../../写作规范/全套书不同册的章节大纲结构/book-21-transformer-architecture-evolution/75-Attention-Residuals深度方向聚合.md)，重写正文并同步 reader/design TOC、练习第 1 题、面试题 31CI 与 Frontier Architecture Q1、AttnRes/伪查询/Block AttnRes 术语、`PAPERS.md` 和 `KNOWLEDGE_GRAPH.md`。大纲、正文和两份目录的 8 个 H2、29 个 H3 标题名称、层级和顺序匹配；11 个 math 围栏成对、行内 `$` 定界平衡，无 `\operatorname` 或意外双反斜杠。相关本地链接目标存在，面试题号唯一，`git diff --check` 通过。
+
+数学源码与含义、Markdown/math 围栏、本地链接和题号唯一性已完成静态检查；`git diff --check` 已通过。GitHub MathJax 页面尚未实际渲染，故公式视觉验收未完成；目标读者试读、外链终审和第二十一册连续复读仍属整册门禁。未运行程序、测试、模型、API、kernel、benchmark 或 PDF 构建；未更新 PDF 或 `plan.md`。第 77 章与第 74 章重复讲解 CSA/HCA 的旧稿问题仍待按序精修。第二十一册第 1—75 章已完成首轮正文修订，第 76—95 章共 20 章待精修，下一入口为第 76 章《Kimi Delta Attention：从可更新记忆到线性注意力》。全套书精修 goal 继续 active。
+
+
+## 第七十六章完成时的结构与证据边界（2026-11-25）
+
+第六十一章主讲 KDA 的递归状态机制；第七十六章转为 Kimi Linear 模型级案例，解释 KDA、全局 MLA、NoPE 与 MoE 的分工，并区分 1.4T matched runs 和 5.7T 发布 checkpoint。KDA/MLA 的 3:1 层比仅是该报告配置，不作为通用配比；第六十三章、第六十四章、第六十五章和第六十九章分别承担 Gated MLA、NoPE、混合路径比较和 cache 表示，第八十八章承担 Kimi K3 全模型案例。
+
+本章正文、大纲和两份目录现有 7 个 H2、21 个 H3，标题、层级与顺序一致。1.4T 质量结果、5.7T 发布模型、RULER@1M、KV cache、prefill 与 TPOT 数字均绑定论文 v2 的相应表格/图及各自条件，详细研究来源与边界见[Kimi Linear 模型级证据记录](../../research/kimi-linear-model-evidence-2026-11-25.md)。正文跨章链接和配套资料同步情况、修改诊断与验收结果见[第七十六章精修审计](chapter-76-audit.md)。公式源码检查已完成，GitHub MathJax 实际页面渲染仍待验；不更新 PDF。第二十一册第 1—76 章已完成首轮正文修订，第 77—95 章共 19 章待精修，下一入口为第七十七章《CSA/HCA：从压缩 KV 到百万上下文》。全套书精修 goal 继续 active。
+
+## 第七十七章完成时的结构与证据边界（2026-11-25）
+
+第七十七章从第七十四章承接 CSA/HCA 通用机制，收束到 V4 preview Pro/Flash 的逐层配置、1M 评测与独立资源基线、异构 cache、固定参考实现和有明确硬件/负载的 SGLang 案例。旧稿重复展开第七十四章的机制，插入不能代表真实推理路径的玩具公式/代码，并混入 API、Agent harness 和 DataCurve 结果；重写后按来源版本、模型层表、质量、资源、缓存与实现证据组织。具体诊断和写作决定见[第七十七章精修审计](chapter-77-audit.md)，正文设计见[章节大纲](../../写作规范/全套书不同册的章节大纲结构/book-21-transformer-architecture-evolution/77-DeepSeek-V4百万上下文配置与推理实现.md)，新知识来源与证据限制见[DeepSeek-V4 百万上下文研究记录](../../research/deepseek-v4-million-context-implementation-2026-11-25.md)。
+
+已更新正文、读者目录与设计目录，并将练习入口和知识图谱关联到本章；`PAPERS.md` 已有正确的第 77 章责任说明，无需重复改写。正文、大纲及两份目录的 7 个 H2、20 个 H3 名称、层级和顺序一致；正文、两份目录与 `EXERCISES.md` 的本地 Markdown 链接检查无失效项，`git diff --check` 通过。正文与练习新增的行内公式定界源码已静态检查，数学含义已按报告与配置核对；GitHub MathJax 实际渲染仍待验收。未运行代码、测试、模型或 benchmark，未更新 PDF 或 `plan.md`。第二十一册第 1—77 章已完成首轮正文审阅与修订，第 78—95 章共 18 章待精修，下一入口为第七十八章《mHC：用双随机矩阵约束残差流》。全套书精修 goal 继续 active。
+
+## 第七十八章完成时的结构与证据边界（2026-11-25）
+
+第七十八章主讲 mHC 对 H_res 残差流混合矩阵的双随机约束；只对残差项说明流轴总和/均值守恒、谱范数非扩张和精确矩阵乘积封闭，不将这些性质推广为整层范数恒定或全训练绝对稳定。Sinkhorn 从 exp(logits) 出发，论文顺序为先列后行；实验用 20 轮近似，不能表述为有限迭代严格双随机。论文 n=4、27B 下游结果与 6.7% 大规模训练时间开销均保留作者设置。原始 HC、mHC-lite 与 cmHC 来源、教学资料、证据等级和版本边界见[研究记录](../../research/mhc-manifold-constrained-hyper-connections-2026-11-25.md)。
+
+正文、大纲和两份目录的 9 个 H2、26 个 H3 标题名称、层级和顺序一致；练习、面试题、术语、PAPERS.md 和知识图谱已同步。第 84 章旧稿 Sinkhorn 示意顺序与 mHC 论文 Eq. 9 不同，保留到顺序审阅第 84 章时处理。GitHub MathJax 公式视觉验收仍待完成；不更新 PDF 或 plan.md。第二十一册第 1—78 章已完成首轮正文审阅与修订，第 79—95 章共 17 章待精修，下一入口为第七十九章《Mistral Small 4：混合推理与 EAGLE/NVFP4 部署》。全套书精修 goal 继续 active。
+
+## 第七十九章完成时的结构与证据边界（2026-11-25）
+
+第七十九章保留 Mistral Small 4 模型案例，重写为“发布对象分层—固定配置与 MLA/MoE—参数及 cache 账本—请求级 reasoning effort—EAGLE 候选验证与残差校正—Mistral 草稿制品边界—NVFP4 格式与资源边界—逐项部署评估”。配置与实现推导限定到所引用的 revision；发布方 6B/8B 与模型卡约 6.5B 的 active 参数口径并列保留；256K 产品窗口不从配置的 1,048,576 位置字段外推。EAGLE 的精确采样只相对于实际 verifier 分布，所查 Mistral 卡未标注草稿代际，也未确认 EAGLE 与 NVFP4 checkpoint 的配对结果。完整来源和未验证项见[研究记录](../../research/mistral-small-4-eagle-nvfp4-2026-11-25.md)。
+
+旧稿将请求配置、模型结构、EAGLE、NVFP4、多模态/API、工具和许可证揉在一起，且把独立制品写成可直接组合；现按第 79 章完整大纲重写正文，收窄产品层信息，补入 MLA latent cache 的实现级估算和 EAGLE 接受/残差修正的可追踪推理。同步两份目录、`PAPERS.md`、`EXERCISES.md`、`INTERVIEW_BANK.md` 与 `KNOWLEDGE_GRAPH.md`。详见[第七十九章精修审计](chapter-79-audit.md)。
+
+第二十一册第 1—79 章已完成首轮正文审阅与修订，第 80—95 章共 16 章待精修；下一入口为第八十章《Step 3.5 Flash：MTP-3、滑动窗口和 11B 激活参数》。本章含 MathJax 公式，源码与数学含义已静态核对，GitHub 页面实际渲染仍待验收。目标读者试读、外链终审和第二十一册连续复读仍属于全册门禁。全套书精修 goal 继续 active。
+
+
+## 第八十章完成时的结构与证据边界（2026-11-25）
+
+第八十章把 Step 3.5 Flash 的参数统计、45 层注意力布局、MTP 训练偏移和推测解码运行时分开说明。正文依据配置还原为 leading Full 加 11 组 S3F1（33 个 SWA、12 个 Full），手算 4096-token/512-window 的可见 pair 账，并把 30B-A3B 消融限定为 proxy 实验。MTP-3 表示三个额外未来预测偏移，不能直接换算为每轮接受或提交的 token 数。报告 196B/11B、含 MTP-3 的 198B/13B 和模型卡 196.81B 口径并列保留；公开资料没有完整对账。运行时对照绑定当前模型卡和 vLLM recipe，未作本地模型测试。
+
+正文、[完整章节大纲](../../写作规范/全套书不同册的章节大纲结构/book-21-transformer-architecture-evolution/80-Step-3.5-Flash-S3F1-MTP-3与11B激活参数.md)、读者目录、设计目录和配套索引已同步。来源版本、检索词及边界见[研究记录](../../research/step-3-5-flash-s3f1-mtp-evidence-2026-11-25.md)；旧稿诊断与修改范围见[第八十章精修审计](chapter-80-audit.md)。
+
+正文与大纲各有 9 个 H2、22 个 H3，标题顺序一致；两份目录也列出 80.1–80.9 与下级标题。四组 math 围栏源码成对，pair 数和标准 speculative sampling 状态关系已静态核对，跨章本地链接存在，git diff --check 通过。GitHub MathJax 实际页面渲染尚待验收；未运行代码、测试、模型、API、kernel、benchmark 或 PDF 构建，未更新 PDF 或 plan.md。目标读者试读、外链终审和第二十一册连续复读仍属于全册门禁。
+
+第二十一册第 1—80 章已完成首轮正文审阅与修订，第 81—95 章共 15 章待精修；下一入口为第八十一章《DeepSeek V4.1-Flash：CED、CSA2、缓存重算与原生多模态》。全套书精修 goal 继续 active。

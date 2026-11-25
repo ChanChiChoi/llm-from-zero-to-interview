@@ -9348,9 +9348,9 @@ Policy Shift Score (PSS)：政策翻转分；按同一图像和风险类别配�
 
 Gated Attention：门控注意力；本章专指 SDPA 输出后、输出投影前由当前输入生成 sigmoid gate 的 softmax attention 变体；它调节 query/head 的聚合输出特征，固定本层 Q/K/V 时不改写 softmax token 权重或可见集合，也不负责路径路由或跳过 attention 计算。与 Gated DeltaNet 的状态更新门及 Gated MLA 的模型结构区分。
 
-CSA / Compressed Sparse Attention：压缩稀疏注意力；DeepSeek-V4 资料中的压缩注意力路径名称，用于降低长上下文历史访问成本。
+CSA / Compressed Sparse Attention：压缩稀疏注意力；DeepSeek-V4 中先用逐特征 learned pooling 以步幅 $m$ 重叠压缩 KV，再由独立 compressed-key indexer 按 query 选择 top-$k$ 压缩条目。top-$k$ 选的是压缩条目，不是原 token 的金标准证据。
 
-HCA / Heavily Compressed Attention：高度压缩注意力；DeepSeek-V4 资料中的高压缩注意力路径名称，具体 cache 和压缩实现以官方资料为准。
+HCA / Heavily Compressed Attention：高度压缩注意力；DeepSeek-V4 中以更大跨度 $m'$ 对不重叠 KV 块做 learned pooling，并对因果可见的压缩条目 dense read；dense 指压缩域，不是原始 token 全历史。
 
 Native Multimodal Token Budget：原生多模态 token 预算；把图像、音频、视频输入的处理 token 与文本、工具和输出共同纳入上下文、显存和成本预算。
 
@@ -9358,29 +9358,33 @@ Reasoning/Agent Unit Cost：推理/Agent 单位成本；以成功任务而不是
 
 ## 2026-09 Frontier Architecture Updates
 
-Attention Residuals / AttnRes：注意力残差；沿网络深度对历史层表示做输入相关加权聚合，不等同于 token self-attention。
+Attention Residuals / AttnRes：注意力残差；将 token embedding 与此前子层输出增量作为深度来源，每个读入位置用可学习伪查询对 RMSNorm 后的 key（同一来源向量）打分，沿深度 softmax 后加权 raw value。查询参数不依赖 token，但来源随 token 变化，因此权重可随 token 改变；零初始化伪查询得到均匀平均，不等同于恒等残差初始化，也不等同于 token self-attention。
+
+Pseudo-query：伪查询；AttnRes 中按目标深度位置学习、对输入 token 共享的向量，用来与历史深度来源的归一化 key 匹配；“伪”指它不是由当前 token 状态动态投影得到，不能据此误判读入权重对 token 不变。
 
 DenseFormer：深度加权平均；在 Transformer 层之间加权汇聚当前与历史表示，增加跨深度的信息复用。
 
 DeepCrossAttention / DCA：深度交叉注意力；以输入相关权重组合不同深度的层输出，目标是减少固定残差累加导致的信息稀释。
 
-Block Attention Residuals：分块注意力残差；块内累加、块间对块表示做注意力，以减少深度历史表示的存储和通信。
+Block Attention Residuals：分块注意力残差；连续子层在块内累加为 partial sum，块完成后只把块摘要作为跨块来源；读入时可见 embedding、已完成块和（块内后续位置）当前 partial。Attention 与 FFN 各自读取，输出端还需最终聚合；减少长期来源存储与通信，但不跳过子层计算。
 
 Kimi Delta Attention / KDA：Kimi Delta Attention；带逐通道衰减和 delta 更新的线性注意力状态机制。
 
 Delta Rule：Delta 规则；把当前 key/value 看作对关联记忆状态的定向纠正与写入。
 
-Compressed Sparse Attention / CSA：压缩稀疏注意力；先压缩序列维 KV，再对压缩条目做稀疏 top-k 选择。
+Compressed Sparse Attention / CSA：压缩稀疏注意力；DeepSeek-V4 机制中先按块内位置对各特征维 learned pooling，使用重叠的 a/b 两流以步幅 $m$ 形成约 $n/m$ 条压缩 KV，再由独立的 Lightning Indexer 对可见压缩条目做 query-dependent top-$k$。压缩表征损失与选择漏项分别评估。
 
-Heavily Compressed Attention / HCA：高度压缩注意力；更激进地压缩 KV，但在压缩表示上保持 dense attention。
+Heavily Compressed Attention / HCA：高度压缩注意力；DeepSeek-V4 机制中使用非重叠的特征级 learned pooling，每 $m'$ 个 token 形成一个共享 K=V 的压缩条目，不经 indexer，对已完成的压缩序列 dense read，并与近期 raw KV window 共用 core attention。
 
-Manifold-Constrained Hyper-Connections / mHC：流形约束超连接；将残差映射约束到双随机矩阵集合，以改善深层信号传播稳定性。
+Manifold-Constrained Hyper-Connections / mHC：流形约束超连接；将 HC 的残差流混合映射 H_res 约束到双随机矩阵集合，以限制残差路径的深层增益。有限步 Sinkhorn 是近似，不能单独保证完整网络或训练过程绝对稳定。
 
 Hyper-Connections / HC：超连接；把单条残差流扩成多条并学习流间连接，以增加残差表示的混合方式；其稳定性和通信成本需要单独评估。
 
-Doubly Stochastic Matrix：双随机矩阵；元素非负且每行、每列之和均为 1。
+Birkhoff Polytope：Birkhoff 多面体；所有双随机矩阵构成的凸多面体，也等于置换矩阵的凸包。
 
-Sinkhorn Projection：Sinkhorn 投影；通过交替行归一化和列归一化，把正矩阵近似投影到双随机矩阵集合。
+Doubly Stochastic Matrix：双随机矩阵；元素非负且每行、每列之和均为 1；行列和约束的是矩阵映射，不代表向量范数恒定。
+
+Sinkhorn Projection：Sinkhorn 投影；从正矩阵出发交替缩放列和与行和，有限轮得到双随机矩阵的近似；mHC 论文先列归一化后行归一化，实验使用 20 轮。
 
 Heterogeneous KV Cache：异构 KV Cache；不同层或路径使用不同压缩倍率、维度、窗口和淘汰策略的缓存系统。
 
@@ -9476,11 +9480,11 @@ Benchmark Harness Manifest：评测 harness 清单；记录模型 revision、eff
 
 Mistral Small 4 119B A6B：Mistral 的稀疏 MoE 模型；模型卡给出约 119B 总参数、约 6.5B 激活参数、128 experts/4 active、256K context，并支持 `reasoning_effort=none/high`。
 
-MTP-3 / 3-way Multi-Token Prediction：三路多 token 预测；一次主干前向产生多个候选 token，再由目标模型验证，实际收益取决于接受长度和后端实现。
+MTP-3 / 3-way Multi-Token Prediction：三个额外未来偏移的预测头；训练目标数量不等于运行时每轮提交数量，是否用作草稿及接受多少 token 取决于 serving backend。
 
-Step 3.5 Flash：StepFun 的稀疏 MoE 模型；模型卡给出约 196.81B 总参数、约 11B 激活参数、288 routed experts 加 1 shared expert、top-8 路由和 256K context。
+Step 3.5 Flash：StepFun 的稀疏 MoE 模型；技术报告按 backbone 报告 196B/11B，含 MTP-3 表格约为 198B/13B；模型卡另列 196.81B（196B backbone + 0.81B Head），参数范围未完全对齐。backbone 为 45 层、288 routed + 1 shared experts、top-8。
 
-3:1 Sliding-Window/Full Attention：每三个滑动窗口注意力层配一个全注意力层的模型卡配置描述；它降低部分层的 pair 数，不等于整体复杂度都变成线性。
+3:1 Sliding-Window/Full Attention：Step 3.5 配置从一个 leading Full 开始，之后重复 11 组“3 个 SWA + 1 个 Full”，共 33 个 SWA 与 12 个 Full；它降低部分层的 pair 数，不等于整体复杂度都变成线性。
 
 EAGLE Draft Head：训练好的推测解码草稿头；先提出候选 token，再由目标模型验证，必须以接受率、回退比例和后端支持评估收益。
 
@@ -9542,11 +9546,11 @@ DeepSeek-R1-0528：DeepSeek API 官方发布页标注 2025/05/28 的版本；页
 
 ## 2026-09 DeepSeek V4.1-Flash
 
-Causal Encoder-Decoder (CED)：因果编码器-解码器；DeepSeek V4.1-Flash 模型卡描述的 40 层结构，由 20 层 causal encoder 和 20 层 decoder 组成，decoder 的 global KV 从最终 encoder hidden states 投影。不能自动等同于双向 encoder 或传统翻译 Transformer。
+Causal Encoder-Decoder (CED)：因果编码器-解码器；DeepSeek V4.1-Flash 的 40 层结构由 20 层 causal encoder 和 20 层 decoder 组成；各 decoder 层从 encoder 最终 hidden states 经层相关投影获得 global KV，SWA K/V 仍逐层生成。不能自动等同于双向 encoder 或传统翻译 Transformer。
 
-SWA Bounded Replay：滑动窗口有界重放；不把全部 SWA KV 持久化，而在恢复时重放最近 `n_win` 个 token 重建状态，用持久化空间换重算和恢复延迟。
+SWA Bounded Replay：滑动窗口有界重放；在局部状态缺失时只回放最近 n_win 个 token，以减少长期持久化 SWA KV；跨层依赖会触及窗口起点之前的状态，因此它是近似恢复，不保证与完整前向完全一致。
 
-CSA2：Compressed Sparse Attention 2，压缩稀疏注意力 2；V4.1 模型卡公开的跨层 KV/index 复用机制，包含 `Full`、`Reindex`、`Reuse` 三种静态模式。
+CSA2：Compressed Sparse Attention 2，压缩稀疏注意力 2；DeepSeek V4.1-Flash 报告使用的跨层 main-KV/indexer-K/Top-K 生成与复用机制，包含 Full、Reindex、Reuse 三种模式。复用 global 状态不等于复用上一层 attention 输出；每层仍保留自己的 query 与 SWA K/V。
 
 Hierarchical Sparse Indexer：层次化稀疏索引器；先由 Full Mode layer 形成候选池，再让后续 indexing layer 在候选池内继续选择，降低深层 indexer 对完整上下文的依赖，但候选池漏检会造成不可恢复的召回损失。
 
@@ -9554,7 +9558,7 @@ FP4 Main KV Cache：FP4 主 KV 缓存；V4.1 模型卡称使用 E2M1 main KV、�
 
 Engram Conditional Memory：Engram 条件记忆；模型卡披露的 196B 参数、按 token lookup 稀疏访问的模型内记忆组件；不能直接等同于外部 RAG 或 KV cache。
 
-DSpark Speculative Decoding：DSpark 推测解码；模型卡描述的半自回归草稿生成与按置信度调度验证路径，实际吞吐取决于接受长度、验证成本、后端和状态回退。
+DSpark Speculative Decoding：DSpark 推测解码；DeepSeek V4.1-Flash 报告描述的附加 draft network，可并行提出多个未来位置，再由 target model 验证连续前缀。候选数不等于接受长度或加速倍数，实际吞吐取决于接受、验证、后端和状态回退。
 
 Numeric Reasoning Effort：数值推理预算；V4.1 encoding 说明中的 1--100 整数控制面，`low=50`、`high=75`、`max=100`，不是多个基础模型或统一跨厂商标尺。
 
@@ -9814,7 +9818,7 @@ Claude Opus 4.7 Evidence Boundary：Opus 4.7 证据边界；AA 有 adaptive/max 
 
 KDA/Gated MLA Hybrid：KDA 与门控 MLA 混合注意力；K3 report 中每 3 个 KDA 后接 1 个 Gated MLA，末尾另置 Gated MLA，用递归状态和周期性全局交互平衡长序列成本。
 
-Block Attention Residuals：块级注意力残差；K3 使用 8 个 block、每 block 12 层，并额外保留 embedding representation，沿深度选择历史表示。
+Block Attention Residuals：块级注意力残差；Kimi K3 技术报告 v2 描述 8 个块、每块 “12-layer size”、可不完整的末块和单独的 embedding 来源，并计为 9 个深度来源；固定 config revision 含 `attn_res_block_size=12`。此处 8 是块数、12 是报告块宽设置，不能与其他 AttnRes 实验的子层计数互换。
 
 Stable LatentMoE：稳定潜空间 MoE；routed expert 在 latent width 中计算，shared expert 保留 full-width 路径，聚合后用 RMSNorm 稳定尺度。
 
@@ -9932,9 +9936,9 @@ Sibling evidence boundary：同一产品家族的不同 model ID 仍必须分开
 
 DeepSeek V4 Pro 0813：DeepSeek V4 Pro 的 Artificial Analysis/官方 API 锚点；AA 标题为 `Reasoning, Max Effort`，官方 API 模型名为 `deepseek-v4-pro`。不能把 AA 标题、API model ID 和 DataCurve harness 行混成一个身份。
 
-CSA（Compressed Sparse Attention）：压缩稀疏注意力；先沿序列压缩 KV，再用 indexer 对压缩条目打分并选择 top-k。压缩误差和候选漏检是两个独立风险。
+CSA（Compressed Sparse Attention）：压缩稀疏注意力；DeepSeek-V4 的重叠双流 feature-wise pooling 先形成压缩 KV，Lightning Indexer 再对压缩候选打分选 top-$k$；主 attention 另与近期 raw window 联合读取。压缩损失和 indexer 漏选是两个风险。
 
-HCA（Heavily Compressed Attention）：重压缩注意力；以更大跨度压缩 KV，但在压缩后的条目上保留 dense read。它与 CSA 的“压缩后稀疏选择”路径不同。
+HCA（Heavily Compressed Attention）：重压缩注意力；以更大跨度的非重叠 feature-wise pooling 形成较短 KV 序列，在压缩表示上 dense read，不使用 CSA 的 indexer/top-$k$；仍可能损失块内细节。
 
 DeepSeek V4 Responses Stateless：DeepSeek Responses 的无状态协议边界；当前文档不支持 `previous_response_id`、`conversation`、`background`、`store`。会话持久化、工具执行、权限和 verifier 必须由宿主负责。
 

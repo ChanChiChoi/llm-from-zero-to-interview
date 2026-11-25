@@ -11,10 +11,18 @@
 对 query 位置 $i$ 和注意力头 $h$，softmax 根据 $q_i^h$ 与可见 key 的相似度生成权重，再对对应的 value 加权求和。本小节围绕这个聚合对象说明 attention weight 表示“本头在可见位置间如何分配读取权重”，而头输出是一个由多个 value 混合成的特征向量；它为之后辨认 gate 所调节的对象提供必要前置。
 
 ~~~math
+s_{ij}^h=\frac{q_i^h(k_j^h)^\top}{\sqrt{d_k}},
+\qquad
+\alpha_{ij}^h=
+\frac{\exp(s_{ij}^h)}
+{\sum_{r\in\mathcal{V}(i)}\exp(s_{ir}^h)},
+\qquad
 a_i^h=\sum_{j\in\mathcal{V}(i)}\alpha_{ij}^h v_j^h,
 \qquad
 \sum_{j\in\mathcal{V}(i)}\alpha_{ij}^h=1.
 ~~~
+
+这里的可见集合 $\mathcal{V}(i)$ 已由 mask 限定；$a_i^h$ 是对可见 value 的加权聚合。
 
 ### 73.1.2 G1 在 SDPA 后、输出投影前逐元素调节结果
 
@@ -25,7 +33,7 @@ g_i^h=\sigma(x_iW_g^h),
 \qquad
 \widetilde{a}_i^h=a_i^h\odot g_i^h,
 \qquad
-o_i=\operatorname{Concat}_h(\widetilde{a}_i^h)W_O.
+o_i=\mathrm{Concat}_h(\widetilde{a}_i^h)W_O.
 ~~~
 
 ### 73.1.3 gate 调节注意力结果，不负责选择另一条计算路径
@@ -86,7 +94,7 @@ Gated Attention 的收益应按模型规模、训练数据、序列长度、优�
 
 ### 73.4.2 Dense 实验报告更稳定训练与较大的学习率容忍度
 
-在 1.7B dense 模型上，作者报告 SDPA sigmoid gate 减少训练 loss spikes，并在较大的学习率设置下改善稳定性。一个 400B-token、batch 1024、最大学习率 $4\times10^{-3}$ 的 28-layer 对照中，PPL 从 7.499 到 7.404，MMLU 从 50.21 到 51.15；3.5T-token 组另使用 batch 2048 和最大学习率 $4.5\times10^{-3}$。论文也报告某些更大学习率的 baseline 训练失败，而带 gate 的对应组可训练。结果属于作者给出的配置消融，不能简化为加 gate 就自动稳定训练。
+在 1.7B dense 模型上，作者报告 SDPA sigmoid gate 减少训练 loss spikes，并在较大的学习率设置下改善稳定性。加入 gate 时，实验减少 FFN width 以匹配总参数量。一个 400B-token、batch 1024、最大学习率 $4\times10^{-3}$ 的 28-layer 对照中，PPL 从 7.499 到 7.404，MMLU 从 50.21 到 51.15；3.5T-token 组另使用 batch 2048 和最大学习率 $4.5\times10^{-3}$。论文也报告某些更大学习率的 baseline 训练失败，而带 gate 的对应组可训练。结果属于作者给出的配置消融，不能简化为加 gate 就自动稳定训练。
 
 ### 73.4.3 参数与延迟成本属于论文的实验配置
 
@@ -148,8 +156,4 @@ G1 的索引是 query、head 和输出特征维；attention weights 的索引则
 ### 73.7.4 按相同训练/任务对齐比较 gate 位置与计算收益
 
 比较 gate 位置、粒度与共享方式时，应固定模型规模、数据、训练 token、序列长度和优化预算，并分别报告语言模型质量、下游任务、gate 分布、attention map 与资源测量。若问题是计算节省，还要区分“结果乘小”与“实际不执行某 kernel”：只有后者才可能减少相应计算，而且必须在明确的实现、硬件和 workload 上测量。论文的 G1 结果并不证明 gate 的统计稀疏能自动变成执行稀疏。
-
-### 本章回顾
-
-Gated Attention 的 G1 是 SDPA 后、输出投影前的 query-dependent sigmoid 输出门。它在固定 Q/K/V 的单层前向中调节聚合后的特征，不改写该次 softmax token 权重，也不选择另一条路径。Qiu 等人的质量、稳定性、sink 与长上下文结果有各自的实验条件；Qwen3-Next 提供的是一项具体模型实现与混合层布局。读这些证据时，应始终区分 gate 特征、token attention、训练后行为和实际执行成本。
 

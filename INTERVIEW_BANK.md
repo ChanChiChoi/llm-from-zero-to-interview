@@ -1088,6 +1088,9 @@
 31CF. 面试官给出标准 RoPE 频率和宽度为 $W$ 的 causal SWA。请解释位置相位与可见集合各自由什么决定，沿一对跨周期边界的 query/key 推导 P-RoPE 的 wrap error；再说明 HP-RoPE 的整数谐波频率怎样令 $R_W=I$。最后分析 MiniWin 的全局 NoPE 路径、八层配置以及论文 v2 的边界移动诊断分别支持什么结论、不能外推什么能力。配套正文：[第二十一册第七十二章](book-21-transformer-architecture-evolution/chapters/72-prope与局部全局位置.md)。
 
 31CG. 请从一个 query/head 的 SDPA 输出出发，写出 G1 如何由当前 hidden state 生成 sigmoid gate，并解释它为何调节聚合后的特征而不改变本层固定 Q/K/V 的 softmax token 权重。再区分 G1 与 G2 的位置、head-specific/shared 与 headwise/elementwise 两组轴，并用 15A2B 论文消融和长上下文设置说明能支持哪些结果；最后解释为什么 gate 稀疏不等于 token sparse 或实际计算跳过。配套正文：[第二十一册第七十三章](book-21-transformer-architecture-evolution/chapters/73-gated-attention门控显式注意力.md)。
+31CH. 从一段 $m=2$ 的历史写出 CSA 的 a/b 重叠压缩条目，并说明 Lightning Indexer 的 top-$k$ 作用在压缩 KV 还是原始 token 上。随后对比跨度 $m'$ 的 HCA 为什么不做 indexer 也能 dense read；把压缩损失、候选漏选、未完成块的 causal availability 和近期 raw window 分别放进一次 query 的数据流，并说明哪些复杂度只是 entry count、还不是实际延迟。配套正文：[第二十一册第七十四章](book-21-transformer-architecture-evolution/chapters/74-csa-hca压缩注意力.md)。
+31CI. 给出三条历史来源与一个伪查询，按 AttnRes 的同一 key=value 定义算 RMSNorm 分数、深度 softmax 和 raw-value 加权结果；再说明伪查询零初始化时为何得到均匀平均、并非恒等残差。用两个块、每块两次写入追踪块首、块内第二次读入、块边界提交和最终输出头的候选集合；回答时区分 residual sublayer 数 $L$、块数 $N$、块宽 $S$，并说明 Full/Block 的复杂度估算不能直接推出延迟。配套正文：[第二十一册第七十五章](book-21-transformer-architecture-evolution/chapters/75-attention-residuals深度方向注意力.md)。
+31CJ. 请沿 Kimi Linear v2 的四层周期说明 KDA、全局 MLA 和 MoE channel mixing 分别处理什么；解释 NoPE 如何与 KDA 的位置路径配合，并指出全局 MLA 提供按位置读取入口为何不保证精确召回。接着比较 1.4T 同规模架构对照与 5.7T Kimi Linear/Moonlight 发布模型比较，说明参数、训练阶段和评测长度的差别；最后区分 token-level cache reduction、batch-one Figure 7 latency 与 Figure 1 更大 batch TPOT，指出每组结果仍缺哪些复现或因果证据。配套正文：[第二十一册第七十六章](book-21-transformer-architecture-evolution/chapters/76-kda从delta规则到线性注意力.md)。
 
 32. 什么是 causal mask？
    考察点：下三角 mask、未来 token、attention scores、softmax。
@@ -4373,17 +4376,19 @@
 
 15. P-RoPE、Gated Attention 和 CSA/HCA 分别改变了什么？
     考察点：位置策略、路径门控、压缩注意力、模型卡证据边界。
-    回答框架：本书第 72 章的 P-RoPE 指 Periodic RoPE，用位置模窗口宽度复用旋转相位；跨周期边界可能把滞后 $d$ 表成 $d-W$，HP-RoPE 通过 $R_W=I$ 消除该旋转差异，但不改变 mask。第 73 章的 Gated Attention 专指 SDPA 输出后的输入依赖 sigmoid 特征门；固定本层 Q/K/V 时不改写 softmax 权重，也不路由到别的路径或自动跳过 attention 计算。CSA/HCA 改变长历史读取/表示；各自的模型与效果结论须绑定来源和任务条件。
+    回答框架：本书第 72 章的 P-RoPE 指 Periodic RoPE，用位置模窗口宽度复用旋转相位；跨周期边界可能把滞后 $d$ 表成 $d-W$，HP-RoPE 通过 $R_W=I$ 消除该旋转差异，但不改变 mask。第 73 章的 Gated Attention 专指 SDPA 输出后的输入依赖 sigmoid 特征门；固定本层 Q/K/V 时不改写 softmax 权重，也不路由到别的路径或自动跳过 attention 计算。第 74 章的 CSA 先用 learned pooling 形成重叠 compressed KV，再以独立 compressed indexer keys 为 query 选择 top-$k$ 条目；HCA 用更大跨度的非重叠 pooling，并在已完成的压缩序列上 dense read。两者都保留近期 raw window，压缩损失与 CSA 的 indexer 漏选是不同问题。具体模型和效果结论仍绑定来源、版本与任务条件。
 
 ## 2026-09 Frontier Architecture Updates
 
-1. Attention Residuals 与普通 residual、token self-attention 的作用轴分别是什么？请写出 Full/Block AttnRes 的公式，并说明伪查询为何利于批量计算。
+1. Attention Residuals 与普通 residual、token self-attention 的作用轴分别是什么？请写出 Full AttnRes 的 key/value、打分和深度 softmax 关系，解释静态伪查询如何产生 token 相关权重，以及零初始化为什么是均匀平均。再追踪一个两块、每块两次写入的 Block 候选集合、partial sum、块提交和最终输出读取，并区分 $L$、$N$、$S$ 与算术/存储/实测延迟。
 2. Kimi Delta Attention 的 `alpha`、`beta`、delta correction 分别控制什么？为什么固定状态不等于不会遗忘？
 3. 为什么 Kimi Linear 要混合 KDA 与全局 MLA？请比较精确检索、状态大小、prefill 和 decode kernel。
 4. DeepSeek V4 的 CSA 与 HCA 如何区分？压缩误差、top-k 漏检和滑动窗口分别属于哪一层风险？
 5. 1M context 为什么不能直接换算成并发数？请列出压缩 KV、indexer、局部窗口、权重和 workspace 的显存项。
-6. mHC 为什么使用双随机矩阵？请解释 Birkhoff polytope、矩阵乘法封闭性和 Sinkhorn 近似的限制。
-7. 如何公平比较标准残差、AttnRes、KDA 和 mHC？回答需固定模型规模、训练 token、硬件、并行策略、cache、吞吐和质量评测。
+6. mHC 约束哪一个映射？双随机矩阵的行和、列和、谱范数与连乘性质分别说明什么，20 轮 Sinkhorn 还留下什么近似？
+   回答框架：约束的是 H_res；行和对应每条输出流的凸组合，列和对应残差项的流轴总和守恒，谱范数至多为 1 且精确双随机矩阵连乘仍双随机。非扩张不等于恒范数，有限轮 Sinkhorn 不保证严格双随机，H_pre/H_post 和完整子层也不受同一约束。
+7. 怎样设计同条件实验验证 mHC 的收益，又怎样与 AttnRes、KDA 或 CSA/HCA 区分？
+   回答框架：先在同模型、数据、训练 token、扩展率、硬件和并行策略下比较标准残差、HC、mHC，同时看训练质量、传播增益、矩阵误差、激活内存、通信和吞吐。AttnRes、KDA、CSA/HCA 改变的信息轴不同，需分别对齐深度读取、序列状态或 KV/cache 目标；不直接横比各自论文数字。
 8. DenseFormer、DCA、AttnRes 与 HC/mHC 分别在改哪条信息路径？回答时应区分深度方向聚合和多路残差流混合，并说明各自证据来自什么实验设置。
    回答框架：DenseFormer 做 depth-weighted averaging，DCA 与 AttnRes 用可学习的深度聚合选择历史层表示；HC 扩展残差流并学习混合，mHC 再约束残差混合矩阵。它们都不等于 token 维的长上下文注意力；DCA 的速度结果、AttnRes 的 scaling 实验和 mHC 的 wall-time 不能跨论文直接比较。
 
@@ -4528,29 +4533,29 @@
 
 ## 2026-09 Mistral Small 4 与 Step 3.5 Flash
 
-1. Mistral Small 4 的 119B 总参数和约 6.5B 激活参数分别影响什么？
-   考察点：MoE 权重存储、专家分片、每 token 计算和通信。
-   回答框架：激活参数近似主要矩阵乘规模；权重、KV cache、expert dispatch 和 all-to-all 仍按部署总规模核算。
+1. Mistral Small 4 的 total parameters、active parameters 与 MLA KV cache 分别影响什么？公开的 6B、6.5B 和包含嵌入/输出层的 8B 应怎样处理？
+   考察点：MoE 权重存储、每 token 计算、专家分片/通信、缓存状态和来源口径。
+   回答框架：总参数关联完整权重存储；active 只近似每 token 的计算账本；MLA cache 是随上下文增长的独立状态。发布文章写 6B/含嵌入输出 8B，模型卡写约 6.5B，公开材料未精确对账，应保留差异。
 
 2. `reasoning_effort=none/high` 是否代表两个模型？如何设计公平实验？
    考察点：请求级配置、质量/延迟/成本、评测控制变量。
    回答框架：它是同一模型的模式配置；固定任务、版本、工具和输出上限，比较成功率、TTFT、TPOT、p95、输出长度和单位成功成本。
 
-3. EAGLE 草稿头与 NVFP4 量化分别改变哪一层？
-   考察点：推测解码、数值表示、接受率和误差。
-   回答框架：EAGLE 改变候选生成/验证路径，NVFP4 改变权重或计算表示；两者不能把宣传加速倍数直接相乘，需按后端消融。
+3. EAGLE 与 NVFP4 能否直接组合，EAGLE 的分布保持又相对哪个模型成立？
+   考察点：草稿与 verifier、拒绝校正、量化后的目标分布、artifact/runtime 兼容。
+   回答框架：EAGLE 校正使结果服从当前 verifier 的分布；若 verifier 是 NVFP4 target，不能由此推出与 BF16 target 相同。Mistral 发布的 head 与量化 checkpoint 是独立制品，公开模型卡未确认组合结果；需按固定 revision 和后端做兼容及任务消融，不能相乘宣传数字。
 
-4. Step 3.5 Flash 的 3:1 sliding-window/full attention 为什么不是 O(n)？
-   考察点：局部 pair、周期性全注意力和长程检索。
-   回答框架：窗口层近似 `O(nw)`，full 层仍接近 `O(n^2)`；混合比例降低平均成本，但远程信息依赖 full 层和跨层传播。
+4. 固定配置中的 45 层怎样组成 S3F1？为什么不能只说“每四层重复一次”？
+   考察点：层编号、起始 Full、周期块和 FFN 类型。
+   回答框架：先数第 0 层 leading Full，再数 11 组各含 3 个 SWA、1 个 Full，合计 33 个 SWA 和 12 个 Full；前三个 dense FFN 与注意力类型是不同属性。
 
-5. MTP-3 的有效吞吐由什么决定？
-   考察点：接受长度、验证开销、回退、批处理和 kernel 支持。
-   回答框架：有效 token 可近似为 `1+E[A]`；草稿接受率、目标验证并行度、同步和后端支持共同决定收益，不保证三倍吞吐。
+5. MTP-3 为什么不能直接解释成每轮提交三个 token？
+   考察点：未来偏移、草稿候选、目标验证和接受前缀。
+   回答框架：三个额外目标为 $x_{t+2}$、$x_{t+3}$、$x_{t+4}$；标准验证轮的提交量取决于连续接受的前缀、拒绝修正和停止条件，不由头数单独决定。
 
-6. Step 3.5 的 Context Manager 应记录哪些字段？
-   考察点：模型与 harness 边界、状态重启和失败归因。
-   回答框架：记录上下文阈值、重启次数、压缩/重放策略、工具 schema、模型与 harness revision、硬件、超时和最终 artifact，不能把重启策略归因于模型记忆。
+6. 哪些证据可以支持 Step 3.5 的成本或质量主张？
+   考察点：30B proxy 消融、MTP 运行时配方和 agent harness。
+   回答框架：分别绑定模型规模、MTP 开关、数据/训练量、prefill/decode 口径和 benchmark harness；proxy 消融、随机输入 serving 示例与带 Context Manager 的任务成绩回答不同问题。
 
 ## 2026-09 Grok 4.6 官方接口核验
 
@@ -4723,95 +4728,34 @@
    考察点：模型输出与宿主执行器分层。
    回答框架：它们是输出协议能力；工具执行、权限、网络、沙箱、审批、超时和审计由宿主系统负责，不能据此推断内部架构。
 
-## 2026-09 DeepSeek V4.1-Flash 架构与部署
+## 2026-11 DeepSeek V4.1-Flash 架构与证据边界
 
-1. Causal Encoder-Decoder 为什么适合输入密集型 Agent？
+1. **CED 把哪些工作从 decoder 路径中分离出来？**
+   回答要点：20 层 causal encoder 为输入位置形成表示；各 decoder 层从最终 encoder hidden states 通过独立投影取得 global KV 与压缩表示。Decoder 仍要逐层计算自己的输出和 SWA 状态。报告中的 prefill 近似依赖长输入假设，不是普遍延迟减半。
 
-   回答要点：先区分 prefill 与 decode，再解释 20 层 causal encoder、20 层 decoder、global KV 从最终 encoder states 投影的公开描述；8B/16B 是激活参数代理，不是 FLOPs 或延迟保证，需用输入/输出 token、通信、cache 和 TTFT/TPOT 实测验证。
+2. **CSA2 的 Full、Reindex、Reuse 分别生成或复用什么？**
+   回答要点：Full 建立 main KV、indexer K 与 Top-K；Reindex 复用 main KV/indexer K、按本层 query 更新 Top-K；Reuse 沿用共享 main KV 和最近的 Top-K，但仍计算本层 query、SWA 与 attention 输出。
 
-2. SWA Bounded Replay 把什么成本换成了什么成本？
+3. **为什么候选池与最终 Top-K 是两道不同的 recall 门？**
+   回答要点：HSI 先按块内最大 index score 选候选块，最多 2,048 个 8-position blocks，即 16,384 个位置；后续再在池内选 Top-512。候选池漏掉的位置不可能被后续层找回，报告没有通用召回保证。
 
-   回答要点：减少 SWA KV 的持久化 HBM/SSD，增加恢复时的 bounded replay compute、校验和可能的恢复延迟；必须绑定窗口边界、position offset、tokenizer、model revision 和压缩尾部，不能说“无 SSD 即无恢复成本”。
+4. **Bounded Replay 为什么不是精确 cache restore？**
+   回答要点：跨层 SWA 表示对更早层级状态存在递归依赖；精确重建约需 L×n_win 范围的历史工作，而报告路径只回放 n_win。它用较小持久 cache 换重算，并截断窗口起点前的影响，不能承诺 logits 完全相同。
 
-3. CSA2 的 `Full`、`Reindex`、`Reuse` 与 Hierarchical Sparse Indexer 如何协作？
+5. **890 bytes/token 能否直接换算成一张卡的显存？**
+   回答要点：不能。它是报告给出的 global KV 每 token 字节口径；还需说明权重精度、SWA、索引、batch、workspace、并发和并行布局。约 1/4 的 global-KV 比例与约 1/8 的 persistent-KV 比例分母不同。
 
-   回答要点：三种静态层模式分别承担基准建立、索引重算和跨层复用；第一 Full Mode layer 形成候选池，后续 indexer 在候选池内工作。要同时分析候选池漏检、Top-K 漏检、跨层状态一致性和候选建立成本。
+6. **FP4 E2M1 与 E4M3 scale 怎样影响 cache 账本？**
+   回答要点：main KV 的 payload 为 E2M1，每 16 个 channel 共用一个 E4M3 scale；SWA 保持 FP8。存储量下降不等于 attention 计算自动变快，还需测质量、召回、dequant、带宽及端到端延迟。
 
-4. 890 bytes/token 能否直接换算成单卡显存？
+7. **MoE 与 Engram 都很大，为什么不能当成同一种稀疏计算？**
+   回答要点：MoE 依 token 路由选择专家执行 FFN；Engram 依 token n-gram hash 读取 checkpoint 内的条件记忆。它们和逐请求增长的 KV cache、可独立更新的 RAG 索引都有不同地址来源与生命周期。
 
-   回答要点：不能。它是模型卡的 global KV footprint；HBM 还包括权重、SWA、indexer、未封存尾部、量化 scale、workspace、通信 buffer 和并发请求。报告要注明 global KV、精度、模型 revision、上下文和 batch。
+8. **DSpark 一次提出五个位置，为什么不等于五 token 接受或五倍加速？**
+   回答要点：五个位置是 drafter 的候选；目标模型仍需验证连续前缀，拒绝后要修正并从确认状态继续。接受长度、目标验证成本和调度器共同决定收益；与第 80 章 MTP-3 的训练路径也不同。
 
-5. 如何评估 FP4 main KV 的收益而不是只复述压缩率？
-
-   回答要点：固定 FP4 E2M1 与 scale 粒度、模型 revision、硬件和 batch，同时测 cache bytes、带宽、dequant 时间、局部复制、远端 evidence recall、Agent 成功率、p95 和单位成功成本。
-
-6. `reasoning_effort=100` 是否是一个新模型？
-
-   回答要点：不是，是同一模型的请求级推理预算；V4.1 编码说明还给出 1--100 连续范围与 `low=50`、`high=75`、`max=100` 别名。比较 effort 时固定任务、harness、工具、输出上限和超时。
-
-7. 没有 Jinja chat template 会带来什么迁移风险？
-
-   回答要点：需要使用独立 encoder；DSML 工具标签有前导空格，中途 system message 和图像顺序也有协议语义。应做 prompt、parser、流式工具调用、多图和错误恢复回归，不能只替换 model ID。
-
-8. 为什么 V4.1-Flash 的 DeepSWE 74.2 不能直接和别的模型排序？
-
-   回答要点：它是模型 revision + `mini-swe-agent`/DeepSeek Harness + 工具 + 环境 + verifier + timeout/retry/context policy 的组合结果；要一起报告任务版本、effort、harness、artifact、失败类型和区间，不归因给基础模型单项能力。
-
-9. HF reference implementation 已经有 `forward_spec`，能否说 DSpark 已经接入推测解码？
-
-   回答要点：不能。`model.py` 暴露 DSpark block/forward path，但 `generate.py` 的参考入口仍调用普通 `model.forward`，README 也称 generation 为 plain autoregressive sampling；还缺 draft/verify/rollback、接受长度和状态一致性实测。
-
-10. `inference/config.json` 的 `index_topk=512`、候选池 `2048 × 8` 与模型卡/技术报告字段不一致时，哪个是真的？
-
-    回答要点：先标注 artifact、revision 和用途；模型卡/报告是公开架构描述，inference config 是该参考 runtime 的执行快照，不能把两者拼成一个跨后端配置。应在 manifest 中同时保存来源和代码哈希。
-
-11. 如何证明一份 reference kernel 真能服务线上长上下文？
-
-   回答要点：分层验收源码可解析、权重转换、单卡/多卡正确性、CUDA/TileLang 执行、候选召回/量化误差、TTFT/TPOT/p99、故障恢复、工具 acceptance 和成本；源码存在或 Python 编译通过只完成最前面的门禁。
-
-12. vLLM `v0.30.0` registry 已经登记 `DeepseekV41ForCausalLM` 和 `DSparkV41DraftModel`，这能证明什么？
-
-   回答要点：它证明 v0.30.0 stable release/source 有 V4.1 专用 release surface，强于未绑定 tag 的 main，也不同于 v0.29.0 的历史负证据；但 registry 不证明完整权重、依赖、目标 GPU/ROCm、数值正确性、DSpark acceptance 或生产 SLO。
-
-13. vLLM v0.30.0 的 PyPI wheel 能下载，是否就等于 DeepSeek V4.1 已经可以生产部署？
-
-   回答要点：不能。PyPI metadata/wheel 只证明可分发 artifact；还要绑定模型 revision、权重分片与转换、平台分支、kernel、硬件、batch/context、FP4 质量、candidate/index recall、draft/target verify、rollback、tool/verifier 和 p99。
-
-14. release notes 中的 FlashMLA、Mega-mHC、Engram prefetch 和 XGrammar strict parameters 应如何归因？
-
-   回答要点：它们是 vLLM `v0.30.0` runtime/release 的实现变化或接入说明，适合回答 serving 工程演进；不能据此声称 DeepSeek 论文新增了这些算法，也不能把 release note 数字当作本机 benchmark 或模型独立能力。
-
-15. 为什么要同时保留 vLLM v0.29.0 的负证据和 v0.30.0 的正证据？
-
-   回答要点：tag 是时间和发布面的边界。v0.29.0 registry 未出现 V4.1 专用类名，不能被 main 代码反向填充；v0.30.0 已出现专用入口，说明后来进入 stable，但两者都不能跳过 full-weight load、target hardware 和 acceptance gate。
-
-16. DeepSeek Harness 的 provider ID 为什么不能直接改名？
-
-   回答要点：provider ID 被保存的请求、session、默认模型和 credential reference 使用。改名应新建 provider 后删除旧 provider，避免历史 trace 失去身份；密钥只保存为可引用的 secret，不能回显明文。
-
-17. Harness provider 手工声明支持 reasoning/image，能否证明真实 endpoint 支持？
-
-   回答要点：不能。这只是 route configuration 或 capability claim，必须用 endpoint probe 验证请求字段、响应能力、错误语义和实际 served model，并把结果写进 capability manifest。
-
-18. MCP 断线重连为什么要重新发现工具，并在预算耗尽时注销旧工具？
-
-   回答要点：server 的 schema、能力、权限和版本可能变化；复用旧 registry 会把过期合同当成有效合同。重连应重新同步 namespace/schema/权限，预算耗尽后清空工具并进入人工或显式恢复流程。
-
-19. GitHub review webhook 返回 `202` 是否代表 Agent 已完成代码审查？
-
-   回答要点：不代表。`202` 只代表签名请求被异步接纳；重复 delivery 可能创建多个 session。任务完成、测试通过、artifact digest 和 verifier 通过必须分别记录，入站 secret 认证也不等于出站 GitHub 写权限。
-
-20. 如何把模型输出、Harness、executor 和 verifier 的状态分开？
-
-   回答要点：至少拆成 `model_intent -> admitted -> authorized -> executed -> verified`；每一步保存 call/delivery ID、schema hash、权限决定、executor receipt、幂等键、artifact digest 和最终状态，不能用最终文本或 HTTP 状态码代替。
-
-21. DeepSeek Harness preview 能否补齐 V4.1 的模型架构闭环？
-
-   回答要点：不能。它补的是 provider/session/plugin/MCP/webhook 的 runtime 合同；参数、训练 recipe、完整权重、生产 kernel、DSpark acceptance、目标硬件和 SLO 仍要独立证据。相关 toy 只能标为 `local_protocol_toy`。
-
-22. SGLang v0.5.20 的 DeepSeek-V4 AMD/HIP 补丁分别解决了哪些容易漏掉的 runtime 不变量？
-
-   回答要点：PR #39116 说明 graph replay 使用捕获时的固定 `swa_loc` 地址；每步只重绑 Python 引用会让 replay 读旧 ring slots，应原位更新 buffer，并区分 exact token count 与 padded length。PR #38192 把 per-request SWA ring 与可共享 full-attention KV 分开计入统一池容量。PR #37764 融合 FP4 indexer 的 schedule-prep，仍要保留 workspace 生命周期、graph capture 边界和大 batch fallback。`+83.6%` 与 `+15.3%` 是 release 的 AMD/HIP 指定负载报告，不是模型分数或本机复现；DSA top-k PR #37591 不能直接算作 V4.1 技术，因为其代码测试主要指向 V3.2/GLM-5.2。
+9. **1017 的 benchmark 提升能否归因给 CED 或 CSA2？**
+   回答要点：不能。发布方在指定 benchmark/harness 下报告整体版本差异，没有逐组件消融。需要固定其余条件的对照，分别检验结构、精度和验证路径。
 
 ## 2026-09 K2 Horizon MoVA 与 Uno
 
@@ -5366,7 +5310,7 @@
 ## 2026-09 Kimi K3：架构与 Agent 协议
 
 1. K3 为什么采用 KDA 与 Gated MLA 的 3:1 混合？答：KDA 维护低成本递归状态，Gated MLA 周期性提供全局内容交互；末尾额外的 Gated MLA 保证最后一层仍具备 global attention。
-2. K3 的 8 个 Block AttnRes block 与普通残差有什么区别？答：它沿深度方向对历史表示做选择性聚合，按 block 而不是按层保存跨 stage 状态；它不替代 token 维度的长上下文注意力。
+2. K3 的 Block AttnRes 报告中的 “8 个块、12-layer size” 各指什么？答：Kimi K3 技术报告 v2 将层划分为 8 个块，每块为 12-layer size，末块可以不完整，并把 embedding 作为单独来源；固定 config revision 的 `attn_res_block_size` 为 12。这里的 8 是块数，12 是报告的块宽设置，不能与原论文其他实验或 Kimi Linear 的 residual sublayer 计数混为一谈。它沿深度读取历史表示，不替代 token 维度的长上下文注意力。
 3. Quantile Balancing 如何不同于 auxiliary loss？答：报告描述它从 router-score quantiles 直接得到 expert bias，并通过 coordinate minimization 追求最大得分的 balanced assignment；推理时使用冻结 bias + fixed Top-k。
 4. K3 的 `think/response/tool` channel 为什么要保留 tool/index？答：channel 和 index 是 replay、工具结果归属、重试幂等和跨模型迁移的协议状态；只保存最终可见文本会丢失这些边界。
 5. `104B activated` 能否直接换算显存？答：不能。total/activated、resident weights、KV cache、通信 buffer、workspace 和并发都要分账。

@@ -67,7 +67,7 @@ Claude Opus 5 作为接口核验专题接在上述路线之后：先读第四册
 
 DeepSWE v1.1 评测专题贯穿第七册、第十七册和第二十册：先读 [`deepswe-snapshot-notes.md`](research/model-update-2026-09/deepswe-snapshot-notes.md) 的任务范围与 21 个配置，再用固定模型 revision、effort、工具、verifier、超时、重试和上下文策略复现实验。报告 Pass@1 区间、成本、输出 token、Agent steps、失败类型和最终 artifact，禁止将 `mini-swe-agent` 组合结果写成基础模型能力或与其他 harness 分数直接合并。
 
-DeepSeek V4.1-Flash 路线接在第二十一册第 80 章之后：阅读第 81 章的 CED、CSA2、Hierarchical Sparse Indexer、FP4 KV、SWA replay、Engram、DSpark 和原生多模态，再用第六册做 cache/replay/effort 预算，用第五册和第十六册审阅预训练、RL/OPD 与可验证 Agent 数据，用第七册/第十七册/第二十册固定 harness、verifier、权限和恢复协议。固定 revision 的 reference inference tree 用于核对 runtime 账本，但 `forward_spec` 不等于生成入口已接入 speculative scheduler；官方模型卡的 8B/16B active、890 bytes/global-KV-token 与 Agent 评测数字只作为带条件参考，不替代目标硬件和任务实测。
+DeepSeek V4.1-Flash 路线接在第二十一册第 80 章之后：阅读第 81 章的模型身份、CED、CSA2/HSI、Bounded Replay、FP4 global KV、MoE/Engram、mHC、DSpark、视觉路径与证据边界；再用第六册和第二十四册学习 cache、serving 与测量，用第五册/第十六册学习训练和后训练，用第十五册学习多模态模型，用第十七册/第二十册学习 Agent harness、verifier、工具权限和恢复评估。固定 revision 和 1017 benchmark 均按来源版本与评测条件解读，不把整体分数归因于单一架构组件。
 当前 serving 顺序补充为：固定 HF reference -> vLLM main -> vLLM `v0.30.0` stable release/source -> SGLang main/stable 对照 -> 完整权重 -> 数值/召回/DSpark acceptance -> 目标硬件与 tool/verifier/SLO。v0.30.0 registry、wheel 和 release notes 只能通过 release-surface gate，不能跳过 full-weight、FP4、EPD、rollback 与生产门禁。
 
 K2 Horizon MoVA 36B/A4B 路线接在第二十一册第 81 章之后：阅读第 82 章的 dense/sparse layer 排布、MoVA value routing、FFN top-k、GQA KV cache、512K 分阶段训练和 TP/EP serving，再用第五册区分 0.9B 的 MOPD 披露与 36B 未公开 recipe，用第六册建立双路由 dispatch/通信/显存账本。随后学习 K2 7B Uno 的冻结 AR base、LoRA diffusion draft 与 `Psi-Spec` rejection verification，并用固定 revision、采样器、硬件和 harness 测接受长度、回退和有效 token。Uno 只作为锚点周边技术，不新增模型候选。

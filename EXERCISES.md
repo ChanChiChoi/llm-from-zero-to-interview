@@ -1266,7 +1266,7 @@
 16. 设计 fallback routing capability matrix，比较主模型、只读模型、人工审核和拒答路径的工具权限、状态兼容、成本和风险。
 17. 以论文 v2 的 MiniWin 为对象，画出 `SSSL × 2` 中局部与全局层的职责，并对照局部层使用标准 RoPE、P-RoPE、HP-RoPE 时哪些结构保持不变。用一个跨窗口 query 说明全局 NoPE 层提供的可见路径；再设计一个移动周期起点的机制诊断和两项任务评测，分别写明能检验什么、不能推出什么。
 18. 对同一组 Q、K、V 和 mask，先计算一个 query/head 的 softmax 权重与 SDPA 输出，再应用 G1 的逐特征 sigmoid gate；说明本层哪些量保持不变。随后设计 G1/G2 位置及 head-specific/shared、headwise/elementwise 的对照，分别报告质量、gate 分布和实测计算成本，并解释为什么 feature gate 稀疏不等于 token attention 稀疏或跳过 attention kernel。
-19. 为 CSA/HCA 设计压缩注意力评测，比较原始 KV、只局部、只压缩和混合路径的检索召回、压缩误差、TTFT、TPOT 和单位成功成本。
+19. 按[第二十一册第七十四章](book-21-transformer-architecture-evolution/chapters/74-csa-hca压缩注意力.md)，用 $m=2$ 写出三个 CSA overlapping entries，再用一组 indexer 分数手算 top-$k$；对 12 个位置的 $m'=3$ HCA 计算压缩条目数，并解释 dense read 的对象。设计对照分别测 learned compression 误差、indexer 漏选、local-window 补偿和端到端质量/延迟；说明 entry count 与实际 FLOPs、KV bytes、答案召回的区别。
 20. 用统一的模型 revision、校准样本和 workload 比较 GPTQ、AWQ、SmoothQuant、FP8 KV、KIVI 或 TurboQuant 中至少四条路线：先说明各自量化对象与误差机制，再记录 effective bits（含 scale）、质量切片、kernel 路径、峰值显存、TTFT、TPOT、吞吐和并发；明确标注不同论文数字不可直接排名，并设计一个能区分“算法误差”与“kernel fallback”的消融。
 21. 对权重 [-0.9, -0.2, 0.3, 1.1] 使用有符号 INT4 对称码本 [-7, 7] 手算 scale、整数码和反量化结果；再加入一个 outlier，说明它如何改变 group scale、普通值的分辨率和 clipping 的代价。
 22. 给定一个 2×2 的假设逆 Hessian和一次权重舍入误差，按 GPTQ 更新式计算剩余坐标的补偿量。解释该 Hessian为何来自校准激活的层重建目标而不是整个模型任务 loss，并对照 RTN、GPTQ 在误差处理和转换成本上的差别。
@@ -1278,20 +1278,23 @@
 
 ## 2026-09 Frontier Architecture Updates
 
-1. 手算三层 Full AttnRes 的 softmax 权重，并实现 Block AttnRes 的 partial sum。
+1. 对同一组 Full AttnRes source bank 手算 key=value 的 RMSNorm 分数、深度 softmax 和 raw-value 加权结果；比较静态伪查询下两个 token 为何仍可有不同权重，并解释零初始化为何得到均匀平均。再用两个两写入块列出每次 attention/FFN 读入可见的 embedding、已完成块与 partial sum，追踪块提交和最终输出读取；最后估算 Full/Block 的算术与来源存储阶数，并说明它们不能直接当作实测延迟。
 2. 用零依赖 Python 实现 KDA 递推，比较逐通道 `alpha` 与标量衰减的状态轨迹。
 3. 写一个二维 CSA/HCA toy cache，分别统计压缩误差、top-k 召回和滑动窗口补偿。
-4. 实现 Sinkhorn 迭代，记录双随机误差随迭代轮数的变化，并比较负值输入与正值 logits 的差异。
-5. 设计同预算架构消融，比较标准 residual、AttnRes、KDA+MLA 和 mHC 的 loss、梯度、显存、通信与成功检索率。
+4. 从正 logits 的指数矩阵开始，手算一轮“先列归一化、后行归一化”，分别记录行和与列和；再说明有限轮 Sinkhorn 的误差、收敛极限和 mHC 论文 20 轮设置的含义。不要把负 logits 当作直接归一化矩阵。
+5. 为标准 residual、HC 与 mHC 设计同模型、同数据、同 token 预算的直接对照，记录 loss、复合传播增益、有限 Sinkhorn 行列误差、峰值激活、吞吐和 pipeline 通信。另说明 AttnRes、KDA/MLA 和 CSA/HCA 改变的信息轴不同，需按各自目标另设实验，不能合并跨论文成绩。配套正文：[第二十一册第七十八章](book-21-transformer-architecture-evolution/chapters/78-mhc双随机残差连接.md)。
+6. 阅读 Kimi Linear v2，画出三个 KDA token-mixing layers、一个全局 MLA layer 和逐层 MoE channel mixing 的周期；再分别整理 1.4T 同规模对照、5.7T checkpoint/Moonlight 比较、Figure 7 batch-one 曲线和 Figure 1 更大 batch 的 TPOT 主张。说明每组证据能回答什么，为什么它们不能合并成一个“3:1 架构带来全部收益”的结论。配套正文：[第二十一册第七十六章](book-21-transformer-architecture-evolution/chapters/76-kda从delta规则到线性注意力.md)。
 
 ## 2026-09 Mistral Small 4 与 Step 3.5 Flash
 
-1. 为 Mistral Small 4 的 `none/high` 模式写一份固定任务、工具、硬件和输出上限的对照实验表，报告质量、TTFT、TPOT、p95 和单位成功成本。
-2. 估算 119B BF16 与 NVFP4 权重的理论存储，并把专家分片、scale、KV cache、路由 buffer 和 workspace 单独列账。
-3. 写一个 toy EAGLE 推测解码模拟器，改变平均接受长度和草稿成本，输出目标模型调用次数、有效 token 和回退比例。
-4. 实现 Step 3.5 的 3:1 SWA/full causal pair 统计，比较窗口大小和 full 层周期对长程访问预算的影响。
-5. 为 MTP-3 加入 top-8 MoE 路由容量因子，记录专家负载方差、overflow、all-to-all token 数和验证阶段峰值。
-6. 扩展 BrowseComp toy harness：在工具轨迹 token 使用量超过 80% 时分别实现 `Summary`、`Discard-75%`、`Discard-all`，并加入 N 条轨迹选最少 steps 的并行基线；区分模型失败、工具失败、上下文重启、超时和最终 artifact 未完成，比较 Pass@1、steps、工具成本、证据可追溯率与 artifact 完成率。把 DeepSeek V3.2 报告的 `51.4/67.6*` 标为 Search Agent/BrowseComp harness 参考值，不作为 toy 的预期分数或裸模型基线。
+配套正文：[第二十一册第七十九章](book-21-transformer-architecture-evolution/chapters/79-mistral-small-4混合推理与eagle量化.md)与[第八十章](book-21-transformer-architecture-evolution/chapters/80-step-3-5-flash的mtp与滑动窗口moe.md)。
+
+1. 为 Mistral Small 4 的 `none/high` 模式写一份固定模型 revision、任务、工具、硬件和输出上限的对照实验表，报告任务质量、输出长度、TTFT、TPOT、p95 和单位成功成本；说明哪些是发布方描述、哪些是实测观察。
+2. 为 119B 参数模型分开计算 BF16 原始权重字节数、4-bit payload 下界、每层每 token 320 个 BF16 数值的 MLA cache 账本，以及 256K 单序列估算；把尺度、未量化张量、专家分片、路由 buffer、并发与 workspace 另列，并保留 6B/6.5B/8B 激活参数口径差异。
+3. 用两个 token 的目标分布与草稿分布手算 EAGLE 接受率和拒绝残差，追踪一轮候选的接受前缀、替代 token 与缓存回滚；再解释当 verifier 换成 NVFP4 checkpoint 时，分布保持保证和相对 BF16 的质量比较各自回答什么问题。
+4. 根据固定 revision 的 `layer_types` 还原 0–44 层，核对 leading Full、11 组 S3F1、33 个 SWA 和 12 个 Full；另标出前三个 dense FFN 层。
+5. 对 $n=4096$、$W=512$ 手算因果 pair 数及 45 层合计，改变 $n$ 和 $W$ 后解释增长项；列出 pair 数没有覆盖的 query heads、投影、访存和 kernel 开销。
+6. 按 MTP 偏移标出标准 LM head 与 MTP-1/2/3 的目标位置，逐候选计算一次草稿验证的接受与修正；再设计固定 checkpoint、任务、后端和负载的 MTP A/B，分别报告质量、接受前缀、draft/verify 延迟与吞吐，并说明 BrowseComp 的 Context Manager 属于 harness。
 
 ## 2026-09 Grok 4.6 接口与 Harness 审计
 
@@ -1413,24 +1416,13 @@
 5. 构造 fully async rollout 的 completed/partial/fresh 队列，改变 serving weight version，报告 staleness 分布、排队顺序、policy-lag 与 verified success；验证排序不会自动丢弃 stale sample。
 6. 将上游 Qwen2.5-0.5B 四卡测试改写成可执行验收 manifest，标出模型、GPU 拓扑、queue pool、commit step、数据集、环境版本和预期断言；在没有实际执行前只能记录为 test design/source evidence。
 
-## 2026-09 DeepSeek V4.1-Flash 架构、缓存与协议验收
+## 2026-11 DeepSeek V4.1-Flash 架构、缓存与证据验收
 
-1. 构造输入 1M token、输出 4K token 的 CED/decoder-only 计算代理账本，分别报告 prefill、decode、active-parameter proxy、TTFT 和 TPOT；在报告中说明代理量不能替代 FLOPs profiler。
-2. 实现 SWA cache 的 `persist`/`replay` 两种恢复路径，注入错误 position offset、窗口边界、模型 revision 和未封存尾部，要求门禁返回失败而不是继续解码。
-3. 用 toy block 构造 `Full -> Reindex -> Reuse` 层序列，统计 candidate recall、Top-K recall、indexer 次数、cache bytes 和跨层复用命中；把候选召回和 Top-K 漏检分开报告。
-4. 对二维 KV 向量实现 E2M1-like FP4、INT8 和 BF16 教学表示，按 group size 测量量化误差、scale metadata 和检索排序变化；不要把 toy 数字写成 V4.1 kernel 性能。脚本中的 E2M1-like codebook 仅作起点，不能替代真实 E2M1 packing 和 dequant kernel。
-5. 模拟 3-token DSpark 草稿，改变 acceptance length 和验证成本，比较目标调用数、有效 token、回退次数和 p95；加入草稿/目标 cache 不一致的恢复测试。
-6. 根据独立 `encoding.py` 设计协议回归，覆盖 `reasoning_effort` 整数和别名、DSML 前导空格标签、中途 system message、交错图片、流式工具调用和 malformed output。
-7. 设计多模态 Agent 的安全评测：图像中分别放普通文字、伪 system 指令、越权工具参数和恶意链接，记录模型识别、策略拒绝、工具执行和审计日志四层结果。
-8. 复读模型卡 Agent 评测表，为 Terminal-Bench、DeepSWE、AutomationBench 和 Agent's Last Exam 建立条件表，标明哪些数字是发布方自报，哪些字段还没有独立复现。
-
-9. 下载固定 revision 的文本源码（不下载权重），对 `inference/` Python 文件做 AST/编译检查，并把 `model.py` 的 `forward_spec` 调用链与 `generate.py` 的普通自回归调用链画成两张图；说明为什么这不能推出 DSpark 吞吐。
-10. 根据 `inference/config.json` 建立 reference-runtime manifest，分别记录 `index_topk`、候选池、Engram、mHC/Sinkhorn、MTP/DSpark target 和量化 dtype；故意混入模型卡的 global KV 字段，设计 schema 检查拒绝未经来源标注的合并配置。
-11. 为 EPD + SWA Bounded Replay 写一个恢复模拟：分别让 global KV 命中/SWA 缺失、候选池缺失、源码 revision 不一致和 DSML 版本不一致，输出 replay token、拒绝原因、恢复延迟和 `not_applicable` 指标。
-
-12. 读取 vLLM `v0.30.0` 的 release API、registry、NVIDIA/ROCm V4.1 package 和 PyPI metadata，生成 source-aware manifest；把 `stable release surface`、`wheel available`、`full-weight load`、`numerical check`、`target profile` 和 `production SLO` 设为独立状态，禁止由前一项自动填充后一项。
-13. 对照 vLLM `v0.29.0`、`main` 和 `v0.30.0`，画出 `DeepseekV41ForCausalLM`/`DSparkV41DraftModel` 的 registry 时间线；验证“main 有类”“stable tag 有类”“wheel 能安装”“draft/target verify 能运行”四个断言不能互相替代。
-14. 从 v0.30.0 release notes 抽取 FlashMLA V4.1 MXFP8 whole-KV、Mega-mHC、Engram async prefetch、DSpark state folding 和 XGrammar strict tool parameters，分别写出 runtime integration、模型机制、质量 benchmark 三栏，并把没有直接证据的栏标为 `unverified`。
+1. 对照 0909 与 1017 固定配置，列出本章使用的结构字段并复原 CED/CSA2 层分组。将报告明确的 mode 与配置字段分栏，不以字段相同推断权重或训练过程完全相同。
+2. 用 2,048 个 8-position blocks 计算候选池最大位置数，与最终 Top-512 对照；再用合成分数构造块级漏检例，分别说明 candidate-pool recall 与最终 Top-K recall。
+3. 按每个 payload 4 bit、16 个 channel 共用一个 E4M3 scale，推算名义 bits/channel；列出对齐、layout、metadata 和反量化开销未计入的部分，并设计质量、召回、带宽和时延的联合验证表。
+4. 分别为 SWA 持久化和 128-token Bounded Replay 建立存储—重算账本。设计一个因模型 revision、position offset 或窗口边界不一致而不可安全复用状态的例子，并给出拒绝条件和恢复质量指标。
+5. 设计一个能区分 CED、CSA2、FP4 和 DSpark 贡献的评测计划：固定数据、checkpoint、硬件、引擎、提示/输出长度和 verifier，每次只改变一个因素；说明现有 0909/1017 整体分数为什么不能代替这些消融。
 
 ## 2026-09 K2 Horizon MoVA 与 Uno 验收
 
@@ -1635,11 +1627,14 @@
 
 ## 2026-09 DeepSeek V4 Pro CSA/HCA、Responses 与 harness 审计
 
+架构配置、preview 结果与推理实现：[第二十一册第七十七章](book-21-transformer-architecture-evolution/chapters/77-csa-hca从压缩kv到百万上下文.md)；CSA/HCA 通用压缩和读取机制见[第二十一册第七十四章](book-21-transformer-architecture-evolution/chapters/74-csa-hca压缩注意力.md)。
+
 1. 为 V4 Pro 建立三层 manifest：AA 的 `deepseek-v4-pro` 配置、官方 `deepseek-v4-pro` API/配置、DataCurve 的 `mini_swe_agent_deepseek_v4_pro_max`；分别记录 release date、model ID、snapshot、effort、harness、工具、环境和 verifier，禁止把三层字段合并成一个模型结论。
 2. 扩展 CSA/HCA toy：输入 block compression stride、CSA top-k、HCA dense read、滑动窗口、尾部 token 和因果 mask，输出压缩倍率、候选召回、最终 evidence recall、KV bytes、indexer bytes 和 attention FLOPs 代理值；明确 toy 不复现生产 kernel。
 3. 建立 1.6T/49B MoE serving 账本，加入 384 routed experts、6 selected、1 shared、resident weights、FP4/FP8 scale、dispatch/combine、KV/indexer cache、workspace 和 batch；比较专家热点、通信量、p99 和单位成功成本，不能用 49B 直接当完整显存。
 4. 写 stateless Responses replay toy：模拟 `function_call`、`apply_patch`、并行工具、工具回执、失败重试和宿主持久化；注入 `previous_response_id`、`conversation`、`background`、`store` 等不支持字段，验证 capability probe、静默忽略检测、权限和幂等门禁。
 5. 对 `low/high/max` 固定任务、工具、revision 和 verifier，报告 reasoning/visible output、TTFT、TPOT、工具轮数、失败类型、Pass@1、成本和 steps；说明 effort 行不是三个 checkpoint，并把 DataCurve 数字与本地 toy 结果分栏。
+6. 用技术报告 v1 与固定 Pro config revision 重建 Flash/Pro preview 层表；按 $1{,}048{,}576$ 个位置估算 CSA/HCA 候选数，并把 `max_position_embeddings`、MRCR/CorpusQA 成绩、相对 V3.2 的 FLOPs/KV 比例、BF16 GQA8 cache 比例及 SGLang PR 延迟案例分成不同证据栏，注明每栏能支持和不能推出的结论。
 
 ## 2026-11 DeepSeek-V4 后训练：多教师全词表 OPD
 
@@ -1653,6 +1648,8 @@
 6. 根据报告建立 `effort × context_policy × task` 评估矩阵，覆盖 Non-think、Think High、Think Max，以及工具调用轨迹跨用户轮次保留、普通对话新轮次清除和 user-message 模拟工具调用的边界。固定任务与工具环境，记录答案正确、正确后停止、轨迹 token、工具错误、TTFT 和单位成功成本；把报告作者披露与本地验证结果分列。
 
 ## 2026-09 DeepSeek V4 Flash SGLang：分支缓存与 kernel 证据审计
+
+对应的版本边界、缓存状态和框架结果见[第二十一册第七十七章](book-21-transformer-architecture-evolution/chapters/77-csa-hca从压缩kv到百万上下文.md)；本节练习将其扩展为可复核的实现和 serving 验收任务。
 
 1. 写一个不依赖 SGLang/CUDA 的混合状态 cache toy：记录 Full/Compressed KV、SWA slots、共享 prefix node、分支点 state、eviction 与 restore。先模拟 chunked prefill 释放滑出窗口 slots，再让 sibling requests 在共享前缀分叉；比较“仅 Full KV 命中”与“Full KV + 对应 SWA branch state 均可复用”的判定，并注入缺失状态、过期 branch key 和不一致恢复点。
 2. 为 PR #34565 的 workload 建立可复现实验 manifest，固定 `DeepSeek-V4-Flash-0731`、TP=2、FlashInfer MXFP4、DSpark、24,576 shared-prefix tokens、8,192 question tokens、128 output tokens、64 requests/8 groups、chunk size、缓存开关和测量区间。分别记录 token hit rate、cached tokens、mean/p95 TTFT、input throughput；标注这些数字是 PR 自报而非本地复现。

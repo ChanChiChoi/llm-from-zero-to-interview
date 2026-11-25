@@ -206,6 +206,8 @@ Mamba 精确检索与 ICL 证据入口：[Repeat After Me: Transformers are Bett
 
 70. Gated Attention 的 SDPA 输出门：[Gated Attention for Large Language Models（NeurIPS 2025）](https://proceedings.neurips.cc/paper_files/paper/2025/hash/904e89bb4e632e75fb47f093b620b257-Abstract-Conference.html)、[Qwen3-Next-80B-A3B-Instruct 固定 revision](https://huggingface.co/Qwen/Qwen3-Next-80B-A3B-Instruct/blob/c7646fbcc61b04c51c1dacf7abf1d2e4df785524/README.md)、[Sebastian Raschka 的机制讲解](https://sebastianraschka.com/llm-architecture-gallery/gated-attention/)、[SinkProbe arXiv v2](https://arxiv.org/abs/2609.08574v2) 与 [Attention Sinks as Spectral Spikes arXiv v1](https://arxiv.org/abs/2611.20403v1)。用于区分 G1 输出特征门、G2—G5 的位置消融、headwise/elementwise 与 head-specific/shared 设置，并限定 sink、训练稳定性和 RULER 结果的实验条件；后续小型受控训练与局部梯度理论不外推为所有规模上的门控效果。详见[Gated Attention 输出门研究记录](research/gated-attention-output-gating-evidence-2026-11-24.md)。
 
+71. CSA/HCA 压缩 KV 与 query 读取机制：[DeepSeek-V4 技术报告 arXiv v1 §2.3](https://arxiv.org/html/2606.19348v1#S2.SS3)、[Stanford MS&E 319 Lecture 5](https://web.stanford.edu/class/msande319/lectures/lecture-5-notes.pdf)、[逐式机制与 cost-model 笔记](https://github.com/zyeric/v4-attn-notes/blob/main/docs/notes/01-csa-hca-definition.md) 和 [Transformers DeepSeek-V4 architecture docs](https://huggingface.co/docs/transformers/model_doc/deepseek_v4)。分别用于核对 learned coordinatewise pooling、CSA overlap/indexer top-$k$、HCA 非重叠压缩与压缩域 dense read、近期 raw window 和 entry-count 成本；可变 GitHub note 与框架文档只作解释/实现入口，事实定义回到报告。具体 V4 配置、1M 效率数值与 inference 实现见第 77 章，不能外推为通用加速保证。详见[CSA/HCA 机制研究记录](research/csa-hca-mechanism-evidence-2026-11-24.md)。
+
 - [Multi-Layer Scheduling for MoE-Based LLM Reasoning](https://arxiv.org/abs/2602.21626)：研究请求级、引擎级和 expert 级的分层调度；作者报告的 TTFT/TPOT 变化绑定论文 workload、模型、集群和服务实现，不能由 router token 计数直接推出。
 
 这些论文的实验结论要按其模型、数据和评测设置阅读，不能直接当作所有现代 LLM 的配置或性能保证。
@@ -859,7 +861,7 @@ Model editing 与 unlearning 补读入口：[EVOKE](https://proceedings.iclr.cc/
 4. [Qwen3.6-35B-A3B](https://huggingface.co/Qwen/Qwen3.6-35B-A3B)：hybrid attention、长上下文和 speculative decoding 入口。
 5. [Qwen-AgentWorld-35B-A3B](https://huggingface.co/Qwen/Qwen-AgentWorld-35B-A3B)：world model/Agent environment 训练和评测边界。
 6. [Kimi K3 官方发布文章](https://www.kimi.com/en/blog/kimi-k3)：KDA、Gated MLA、规模与长上下文的发布披露入口；NoPE、层比例和 total/active 参数已由 K3 技术报告与固定 config 补证，serving/kernel 仍须看实现资料。
-7. [Mistral Small 4](https://huggingface.co/mistralai/Mistral-Small-4-119B-2603)：MoE、EAGLE、NVFP4 和统一 Instruct/Reasoning/Devstral 路线。
+7. [Mistral Small 4 模型卡](https://huggingface.co/mistralai/Mistral-Small-4-119B-2603)、[固定 config revision](https://huggingface.co/mistralai/Mistral-Small-4-119B-2603/blob/7ecb947/config.json)与[官方发布文章](https://mistral.ai/news/mistral-small-4/)：统一 Instruct/Reasoning/Devstral 的发布主张、MoE/MLA 字段及 6B/6.5B/8B 激活参数口径差异；独立的 [EAGLE 草稿制品](https://huggingface.co/mistralai/Mistral-Small-4-119B-2603-eagle/tree/9a8ea22)与 [NVFP4 检查点](https://huggingface.co/mistralai/Mistral-Small-4-119B-2603-NVFP4/tree/084d625)尚不能据模型卡认定可组合。见[第 79 章研究记录](research/mistral-small-4-eagle-nvfp4-2026-11-25.md)。
 8. [Leanstral 1.5](https://huggingface.co/mistralai/Leanstral-1.5-119B-A6B)：Lean 4 形式化证明 coding agent。
 9. [Shieldstral 1.0 模型卡](https://huggingface.co/mistralai/Shieldstral-1.0-3B) 与 [Mistral 官方产品目录](https://docs.mistral.ai/models/shieldstral-1-0)：策略自适应多模态分类器；保留模型卡/报告 3B 与产品目录 3.8B 的规格口径差异。
 10. [Step 3.7 Flash](https://huggingface.co/stepfun-ai/Step-3.7-Flash)：MoE、视觉 encoder、reasoning levels、MTP/EAGLE 与低精度入口。
@@ -892,11 +894,11 @@ Model editing 与 unlearning 补读入口：[EVOKE](https://proceedings.iclr.cc/
 
 ### 2026-10 新模型架构与发布资料
 
-1. [Kimi Linear: An Expressive, Efficient Attention Architecture](https://arxiv.org/abs/2510.26692)：Kimi Delta Attention、门控线性状态、DPLR 简化与混合 MLA。
+1. [Kimi Linear: An Expressive, Efficient Attention Architecture v2](https://arxiv.org/abs/2510.26692v2)：KDA 状态机制、3:1 KDA/全局 MLA 与 MoE block、NoPE 选择、1.4T 同规模对照、5.7T 发布 checkpoint 及分 batch 的 cache/TPOT 证据。机制见第二十一册第 61 章；模型级组合与结果边界见第 76 章。来源边界见[Kimi Linear 模型证据记录](research/kimi-linear-model-evidence-2026-11-25.md)。
 2. [Attention Residuals](https://arxiv.org/abs/2603.15031)：沿深度选择历史表示、Block AttnRes、流水线通信与两阶段推理。
-3. [Multi-Stream Attention Residuals](https://arxiv.org/abs/2610.13630)：摘要提出多头深度路由作为 AttnRes 的多流扩展；完整论文、实验表和实现仍需核对，不据摘要比较通用收益。
+3. [Multi-Stream Attention Residuals](https://arxiv.org/abs/2610.13630)：已检查 v1 全文的机制、实验表与补充材料；以多尺度 causal depthwise convolution 形成多流视图，再分别读取深度历史。作者报告 18B/28B MoE 设置和 12 项下游 benchmark；这是预印本中的作者结果，不与其他论文跨协议排名。
 4. [DeepSeek-V4 Technical Report](https://arxiv.org/abs/2606.19348v1)：CSA/HCA、mHC、Muon、FP4/FP8、GRPO 与 on-policy distillation。
-5. [Step 3.5 Flash Technical Report](https://arxiv.org/abs/2602.10604)：稀疏 MoE、滑动窗口/全注意力混合与 MTP-3；模型卡中的部署和评测字段仍需绑定 revision、硬件与后端。
+5. [Step 3.5 Flash Technical Report v2](https://arxiv.org/abs/2602.10604v2)：45 层 backbone、leading Full 后 11 组 S3F1、SWA query-head 扩展、head-wise gate、MTP 偏移与 30B-A3B 消融；参数统计和运行时边界见[第 80 章研究记录](research/step-3-5-flash-s3f1-mtp-evidence-2026-11-25.md)。
 6. [xAI Models](https://docs.x.ai/developers/models)：Grok 4.6 的 500K context、reasoning effort、结构化输出和工具接口；这是官方模型文档，不是架构论文。
 
 7. [Anthropic Models Overview](https://platform.claude.com/docs/en/models/overview)：Claude Opus 5 的模型 ID、1M context、最大输出、adaptive thinking、平台与价格字段；这是官方模型目录，不是架构论文。
@@ -915,7 +917,11 @@ Model editing 与 unlearning 补读入口：[EVOKE](https://proceedings.iclr.cc/
 1. [DenseFormer（NeurIPS 2024）](https://arxiv.org/abs/2402.02622)：以 depth-weighted averaging 汇聚当前层和历史层表示；用于理解深度方向信息复用的早期方案。
 2. [DeepCrossAttention（ICML 2025）](https://proceedings.mlr.press/v267/heddes25a.html)：输入相关的 depth-wise cross-attention；论文的语言建模速度/质量结果绑定其训练配置和基线。
 3. [Hyper-Connections](https://arxiv.org/abs/2409.19606)：扩展多路 residual streams 并学习流间连接，为理解 mHC 的前身和稳定性问题提供入口。
-4. [mHC: Manifold-Constrained Hyper-Connections](https://arxiv.org/abs/2512.24880)：将残差流混合映射约束到双随机矩阵集合；有限步 Sinkhorn 和论文训练开销需按其模型与实现条件理解。
+4. [mHC：PMLR/ICML 2026 正式出版页](https://proceedings.mlr.press/v306/xie26aa.html)及[arXiv 全文 v2](https://arxiv.org/html/2512.24880)：将 HC 的残差流混合映射约束到 Birkhoff 多面体；有限步 Sinkhorn、27B 结果与 n=4 系统开销均绑定论文实验设置。
+5. [Low-Rank Attention Residuals（arXiv v2）](https://arxiv.org/abs/2607.09694)：用低维 key 进行深度路由，同时保留 full-width values；作者在 1B/4B 设置报告的 loss、下游分数和 step throughput 绑定其训练及 kernel 条件。
+6. [Role-Decoupled Attention Residuals（arXiv v1）](https://arxiv.org/abs/2608.01075)：将 QK 匹配路径与 V 内容路径的读取权重解耦；120M/343M、每种五组配对 seed、约 2B token 的 NLL 结果属于作者报告的小规模设置，仍需更长训练、跨数据和更强 baseline。
+7. [mHC-lite（arXiv v1）](https://arxiv.org/abs/2601.05732)：用置换矩阵的 softmax 凸组合直接构造双随机残差映射，作者报告了稳定性与吞吐实验；其参数化含 n! 个置换项，且未作独立复现。
+8. [cmHC（arXiv v1，2026-11-20）](https://arxiv.org/abs/2611.27193)：讨论 Birkhoff 多面体中的欠混合/过混合并提出几何收缩；6B/300B MoE 与 Ascend fused operator 结果仍是新预印本作者报告。
 
 ### 第二册架构与训练稳定性新研究
 
@@ -967,17 +973,23 @@ Model editing 与 unlearning 补读入口：[EVOKE](https://proceedings.iclr.cc/
 
 ### DeepSeek V4.1-Flash
 
-1. [DeepSeek-V4.1-Flash model card](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash)：固定 revision `dba1be0a40aa45a94ad051997016db3960a90277` 的模型卡，披露 CED、CSA2、FP4 KV、Engram、DSpark、原生多模态、训练规模和 Agent 评测协议；它是模型卡，不等于独立论文复现。
-2. [DeepSeek-V4.1-Flash Technical Report](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/blob/main/DeepSeek_V41_Tech_Report.pdf)：官方 51 页技术报告；本轮已逐页提取并核对 CED、CSA2、HSI、mHC、Engram、DSpark、FP4 KV、训练基础设施、SWA replay 和 Agent 评测边界。完整 production kernel、线上接受率和独立 profiling 仍待核验；仓库 reference kernel 另按源码 artifact 记录。
-3. [DeepSeek-V4.1-Flash API Release](https://api-docs.deepseek.com/news/news260910)：API alias、兼容路由和服务端发布日期入口；路由说明带日期，不能替代权重身份。
-4. [DeepSeek-V4.1-Flash fixed-revision inference tree](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/tree/dba1be0a40aa45a94ad051997016db3960a90277/inference)：`model.py`、TileLang `kernel.py`、权重转换、Engram/vision 和 DSpark forward path 的 reference implementation；官方 README 明确它不是生产 serving engine，`generate.py` 仍走普通自回归生成。
-5. [DeepSeek `deepseek-recipe` pinned commit](https://github.com/deepseek-ai/deepseek-recipe/tree/8cadfede7063c896b944e7bae05daa3549ae97ea)：固定源码归档 SHA-256 `1116ca33e9dc62a913fb9214578c400f1704e6bca33487f4a4c31b32c67a21a6`；记录协议转换、V4.1 encoding/tokenizer、增量流式 parser、图像 quota 和 mock server 接线。它不是推理后端、工具执行器或 verifier。
-6. [vLLM v0.30.0 release](https://github.com/vllm-project/vllm/releases/tag/v0.30.0) 与 [stable registry](https://raw.githubusercontent.com/vllm-project/vllm/v0.30.0/vllm/model_executor/models/registry.py)：tag commit `ced6857afa0ea7b2e3f0846a62e1394e90f15607`，registry 已登记 `DeepseekV41ForCausalLM`/`DSparkV41DraftModel`；这是 V4.1 stable release/source evidence，不是完整权重、硬件 profiling 或生产 acceptance。
-7. [PyPI vLLM 0.30.0 metadata](https://pypi.org/pypi/vllm/0.30.0/json)：固定 release artifact、wheel 和 sdist 的大小/SHA-256；它证明可分发包存在，不证明当前环境安装成功、target/draft verify、FP4 质量或线上 SLO。
-8. [DeepSeek Harness quickstart](https://deepseek-harness.github.io/deepseek-harness/en/guide/quickstart)、[providers](https://deepseek-harness.github.io/deepseek-harness/en/guide/providers)、[architecture/reference](https://deepseek-harness.github.io/deepseek-harness/en/reference/)、[MCP memory](https://deepseek-harness.github.io/deepseek-harness/en/guide/mcp-memory) 和 [GitHub review](https://deepseek-harness.github.io/deepseek-harness/en/guide/github-review)：官方 Preview runtime 文档，覆盖 provider/session/plugin/MCP/webhook 合同；它不是 V4.1 技术报告或内部架构证据。
-9. [SGLang v0.5.20 release notes](https://github.com/sgl-project/sglang/releases/tag/v0.5.20) 与 [PR #39116](https://github.com/sgl-project/sglang/pull/39116)、[#38192](https://github.com/sgl-project/sglang/pull/38192)、[#37764](https://github.com/sgl-project/sglang/pull/37764)：DeepSeek-V4 AMD/HIP 路径中的 DSpark graph replay、unified-KV/SWA ring 容量记账、FP4 indexer schedule fusion。发布数字绑定指定实现/负载，不是模型能力或独立复现；具体边界见 V4.1 研究笔记。
+#### 架构与版本证据
 
-该协议 artifact 的面试价值在于把 `model -> protocol -> transport -> executor -> verifier` 分层。README 列出的 `logprobs`、server-side web search、JSON Schema/strict enforcement、`n>1`、Responses context storage 和 encrypted thinking 未支持项属于该适配器 commit 的能力边界，不能改写成 V4.1 模型能力的负面证明；图像 fetcher 的 SSRF 警告也必须保留。
+1. [DeepSeek-V4.1-Flash Technical Report v1](https://arxiv.org/html/2609.19969v1)：2026-09 发布模型的 CED、CSA2、HSI、SWA Bounded Replay、FP4 global KV、MoE/Engram、Single-Pass mHC、DSpark 和视觉路径；论文结果仍绑定报告版本与实验条件。
+2. [0909 原始固定配置](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/blob/dba1be0a40aa45a94ad051997016db3960a90277/inference/config.json)：固定 revision 的模型层与 reference inference 字段，不代表托管服务或生产内核配置。
+3. [DeepSeek-V4.1-Flash-1017 模型卡](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash-1017)与[1017 固定配置](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash-1017/blob/1bae0e1088993b9b82de08f59de5be5a34e42170/config.json)：当前公开更新对象及其配置快照。两代配置只在本章使用的结构字段上相符，不证明权重、数据、后训练和 runtime 完全相同。
+4. [DeepSeek 官方更新日志](https://api-docs.deepseek.com/updates/)：1017 benchmark 的发布方分数与条件，包括 Terminal-Bench 的 Claude Code framework、DeepSWE 的 Mini-SWE-V2 framework、HLE 纯文本子集及 ZeroBench Pass@5；整体分数没有逐组件架构归因。
+5. [DeepSeek-V4.1-Flash 架构证据记录](research/deepseek-v4.1-flash-architecture-evidence-2026-11-25.md)：固定来源、版本对照和证据范围。
+6. 教学组织参考：[TRAIL Labs：DeepSeek V4.1 Flash: smaller KV cache, same post-training](https://www.traillabs.ai/en/blog/deepseek-v4-1-flash-tech-report)；[Stanford MS&E 319 Lecture 5: KV Caching, Sparse Attention, and Compression](https://web.stanford.edu/class/msande319/lectures/lecture-5-notes.pdf)。前者作者说明未复现模型，后者以通用概念与 V4 为例；二者用于讲解组织，不作为 V4.1 配置或性能证据。
+
+#### 跨册系统与协议来源（非本册内部架构证据）
+
+1. [DeepSeek-V4.1-Flash fixed-revision inference tree](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/tree/dba1be0a40aa45a94ad051997016db3960a90277/inference)：reference model、TileLang kernel、权重转换和 DSpark forward path；不能单独证明生产 serving 或接受长度。
+2. [DeepSeek API 发布页](https://api-docs.deepseek.com/news/news260910)：带日期的服务 alias 与 API 路由入口，不是固定权重身份。
+3. [DeepSeek deepseek-recipe 固定 commit](https://github.com/deepseek-ai/deepseek-recipe/tree/8cadfede7063c896b944e7bae05daa3549ae97ea)：协议转换、prompt/tokenizer 和流式解析；不是模型推理后端、工具执行器或 verifier。
+4. [vLLM v0.30.0 release](https://github.com/vllm-project/vllm/releases/tag/v0.30.0)与[stable model registry](https://raw.githubusercontent.com/vllm-project/vllm/v0.30.0/vllm/model_executor/models/registry.py)：固定 release 中的 V4.1 model/draft registry；不证明完整权重、目标硬件数值正确性或生产 SLO。相关 wheel 元数据见 [PyPI vLLM 0.30.0](https://pypi.org/pypi/vllm/0.30.0/json)。
+5. [DeepSeek Harness 官方文档](https://deepseek-harness.github.io/deepseek-harness/en/reference/)：provider/session/plugin/MCP/webhook runtime 合同，不是模型内部架构。
+6. [SGLang v0.5.20 release notes](https://github.com/sgl-project/sglang/releases/tag/v0.5.20)及[PR #39116](https://github.com/sgl-project/sglang/pull/39116)、[#38192](https://github.com/sgl-project/sglang/pull/38192)、[#37764](https://github.com/sgl-project/sglang/pull/37764)：固定版本中的 AMD/HIP、DSpark、unified-KV/SWA ring 和 FP4 indexer integration 线索；发布数字绑定各自实现与负载。
 
 ### K2 Horizon MoVA 与 Uno
 
@@ -1112,6 +1124,7 @@ Opus 4.8 的分数是发布方特定 harness 的结果，不能单凭摘要表�
 3. [固定 HF revision/config](https://huggingface.co/moonshotai/Kimi-K3/tree/f831ab66814297da540d832a5235f8e904f29d06)：确认 `KimiK3ForConditionalGeneration`、93 layers、69 KDA + 24 Gated MLA、`q_lora_rank=1536`、`kv_lora_rank=512`、896 experts/top-16/2 shared 和 1,048,576 context；完整权重 metadata 不等于本地下载。
 4. [FlashKDA](https://github.com/MoonshotAI/FlashKDA)：master commit `7afb9f454f160a6c4bbc0999beca0a8c40a38934`、`chunk_kda` backend、recurrent state、SM90+/CUDA 12.9+/PyTorch 2.4+ 和 H20/GB200 仓库 benchmark。
 5. [vLLM K3 recipe](https://recipes.vllm.ai/moonshotai/Kimi-K3)：hybrid KV manager、MLA/KDA 双状态、prefix caching、DCP/TP/TEP/DEP/PP 拓扑、Blackwell FP8 KV 与 tool-call parser 兼容性提示。
+6. [Kimi K3 技术报告 v2 §2.2](https://arxiv.org/html/2607.24653v2) 与[固定 config revision](https://huggingface.co/moonshotai/Kimi-K3/blob/2496450e92e425c886db095102a52a6682ca3970/config.json)：报告描述 8 个块、12-layer size、partial final block 和独立 embedding 来源；该 revision 的 `attn_res_block_size` 为 12。报告措辞与配置字段应按 K3 个案记录，不与原论文的块数/子层宽实验混用。
 
 K3 report 与固定 config 是官方配置证据，不等于完整训练 recipe、目标硬件 profiling 或独立复现报告；完整权重未下载，FlashKDA 已固定公开 commit，vLLM recipe 已公开但 stable upstream merge、线上 acceptance 和端到端 serving 收益仍待核验。
 
@@ -1171,7 +1184,7 @@ K3 report 与固定 config 是官方配置证据，不等于完整训练 recipe�
 3. [V4 Pro GA 公告](https://api-docs.deepseek.com/news/news260813)、[Responses API](https://api-docs.deepseek.com/guides/responses_api)、[Thinking](https://api-docs.deepseek.com/guides/thinking) 和 [Tool Calls](https://api-docs.deepseek.com/guides/tool_calls)：`low/high/max`、Codex 优化、stateless Responses、工具协议和 reasoning/tool loop 的官方运行时证据。
 4. [Artificial Analysis V4 Pro](https://artificialanalysis.ai/models/deepseek-v4-pro) 与 [DataCurve DeepSWE](https://deepswe.datacurve.ai/)：榜单配置与 Agent harness 结果；DataCurve 的 Pass@1 `62.831858%`、Pass@4 `88.495575%` 只适用于 `max + mini-swe-agent + 工具/环境/verifier`，不写成裸模型分数。
 
-本轮没有把 V4 Pro 资料写成全新的架构章节，因为 CSA/HCA、mHC、MoE、低精度和后训练已有第二十一册第 77/78 章及 DeepSeek V4/V4.1 专题承载；生产 kernel、硬件 profiling、完整 recipe、线上 acceptance 和独立复现仍待核验。
+CSA/HCA 的核心机制由第二十一册第 74 章主讲，第 77 章负责 V4 具体模型配置、模型级效率结果、低精度、cache 管理与 inference implementation；mHC 另由第 78 章主讲。已有资料用于定位来源和章节分工，不代替独立硬件 profiling、线上 acceptance 或复现。
 
 ### DeepSeek V4 Flash：SGLang serving implementation artifacts
 

@@ -156,13 +156,13 @@
 
 - **问题与时间窗**：检查 2025—2026 的归一化/残差方案、FFN 激活、状态式注意力、混合架构和离散扩散语言模型是否改变本章对机制、成本、骨干分类或评测边界的解释。
 - **来源类型与阅读范围**：SpanNorm 为 ICML 2026 PMLR 官方页摘要；PowLU 为 arXiv v1 摘要、§4.2.2–4.2.3、§4.3.1；MoA 为 arXiv v2 摘要；Log-Linear Attention 为 arXiv v3 摘要、§1、§3、§4、§5；Gated DeltaNet-2 为 arXiv v1 摘要、§3.1、§4 设置和检索结果；LLaDA2.0 为 arXiv v2 摘要、§4、§5 概述和 §6.1；2026 年扩散综述为 arXiv v1 摘要、§3.5、§5.1。新来源事实和各自证据边界分别写入 research 笔记。
-- **Kimi Linear**：本轮没有重述其论文实验结论；保留为专题入口，正文链接至第二十一册第 76 章的 KDA 讲解，不在本册重复机制史或 K3 配置。
+- **Kimi Linear**：本轮没有重述其论文实验结论；保留为专题入口，KDA 递归机制转链第二十一册第 61 章，Kimi Linear 的混合模型与实验转链第 76 章，不在本册重复机制史或 K3 配置。
 
 | 候选 | 去向 | 证据边界与结构决定 |
 | --- | --- | --- |
 | SpanNorm | 第 13 讲 PreNorm/PostNorm/DeepNorm 比较后作为残差与输出归一化联合设计的研究例子 | PMLR 页摘要支持直接残差路径、PostNorm 式输出归一化、缩放及 dense/MoE 理论/实验；未引入默认配置或未核对的数字。 |
 | PowLU、MoA | 第 15 讲固定激活、SwiGLU 后的两个不同 FFN 研究方向 | PowLU 说明增长控制与大规模训练稳定性候选；MoA 说明 token-adaptive 激活混合。分别保留论文规模和证据边界，不作横向排名或普适收益结论。 |
-| Log-Linear Attention | 第 23 讲补充固定状态和完整 attention 之间的多尺度状态路线及成本例 | 加入 Fenwick-tree 区间状态、论文算法的渐近量级和 8192 token 树深算例，同时写明状态数不等于字节数、存在质量差距和实现复杂度；KDA 专题转链第二十一册第 76 章。 |
+| Log-Linear Attention | 第 23 讲补充固定状态和完整 attention 之间的多尺度状态路线及成本例 | 加入 Fenwick-tree 区间状态、论文算法的渐近量级和 8192 token 树深算例，同时写明状态数不等于字节数、存在质量差距和实现复杂度；KDA 递归机制转链第二十一册第 61 章，Kimi Linear 混合模型转链第 76 章。 |
 | Gated DeltaNet-2 | 第 22 讲补充 key 侧擦除门和 value 侧写入门的解耦机制及论文评测范围 | 标明 1.3B/100B FineWeb-Edu 训练设置，并区分 recurrent 与含 sliding-window attention 的 hybrid 结果；不把结果外推为普遍领先。 |
 | LLaDA2.0、现代 dLLM 综述 | 第 21 讲解释扩散目标与网络骨干的分类关系 | 保留 AR→100B 总参数模型的三阶段 block-diffusion 与 SFT/DPO 作者报告；加上 masked diffusion 的 encoder-only 和部分现代 encoder–decoder 设计作为综述所述实例，不据此推断普遍速度优势。 |
 | 其它架构候选 | 不增讲、不重排 | 章节原有 attention、位置、GQA/MQA、MoE、SSM、混合和配置账本已经覆盖本章承诺；新增研究可放入既有讲次，未发现改变范围或讲次依赖关系的证据。 |
@@ -197,7 +197,7 @@
 - **example_status**：15 讲均有独立算例或状态轨迹；新增数字包括 PowLU 的 7.9B/600B token、124B/800B token 作者设置，Gated DeltaNet-2 的 1.3B/100B FineWeb-Edu 训练设置，以及 Log-Linear Attention 的 log₂(8192)=13 树深。它们分别是论文条件或结构演示，不是生产测量。
 - **formula_status**：复核全章公式的定义、shape、量纲及条件；新增的训练计算阶 O(T log T)、状态阶 O(log T) 与 log₂(8192)=13 树深例和论文算法相符。围栏配对、行内美元分隔符均平衡；未使用 PDF 验收。
 - **code_status**：15 个 Python 标准库代码块分别位于第 11—25 讲，涵盖 attention、attention/cache 账本、residual、norm、FFN 参数、RoPE、ALiBi、KV、MoE 路由/capacity、mask、标量 SSM、混合成本、尺寸和配置审计。静态阅读全部代码块；代码语句未改。本轮在 progress 中找不到旧“已验证（2026-10-07）”标签对应的命令、输入范围、实测输出与边界记录，故将 15 个标签统一改为“静态审阅，未运行（2026-10-29）”；没有运行示例或自动化测试。
-- **link_status**：共 45 个 Markdown 链接；4 个相对本地链接目标全部存在，无断链。一个新增交叉链接指向第二十一册第 76 章 KDA 专题。
+- **link_status**：共 45 个 Markdown 链接；4 个相对本地链接目标全部存在，无断链。第 23 讲分别链接第二十一册第 61 章 KDA 机制与第 76 章 Kimi Linear 混合模型案例。
 - **visual_status**：保留开篇一张 Mermaid 前向/成本关系图，attention 路线、位置编码、架构选择等关系继续用比较表和状态账本表达；未新增装饰图。Mermaid 静态语法结构可读，GitHub 目标页面渲染未核验，不能据源码静态检查关闭渲染门禁。
 - **sync_status**：在 PAPERS.md 补充 Log-Linear Attention、Gated DeltaNet-2；在 EXERCISES.md、INTERVIEW_BANK.md 增加对应的容量/机制/边界问题；在 GLOSSARY_EN_ZH.md 增补 SpanNorm、PowLU、MoA、Log-Linear Attention、Gated DeltaNet-2、dLLM/BDLM/MDLM。简介、目录和章节入口未变，当前摘要仍准确；PDF 未构建或更新。
 - **open_risks**：SpanNorm 仅核对出版页摘要，MoA 仅核对预印本摘要；两者正文不包含未验证的细节数字。新方法的作者实验不是独立复现；hybrid 评测需单列显式 attention 成本。15 个代码块当前只有静态审阅状态。GitHub Mermaid 目标渲染待可访问目标环境核验。

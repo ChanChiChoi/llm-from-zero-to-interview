@@ -83,7 +83,7 @@ GDN 的状态大小固定，适合持续处理长前缀；但它不能保证在�
 GDN -> GDN -> GDN -> Gated Attention
 ```
 
-这是一种“多数层便宜记忆、少数层精确检索”的预算分配。Gated Attention 还用门控控制显式 attention 分支的幅度，避免它在深层 residual 中无限放大。
+这是一种“多数层便宜记忆、少数层精确检索”的预算分配。Gated Attention 的 G1 在 SDPA 输出后、输出投影前用输入依赖 sigmoid 门调节 head features；固定本层 Q/K/V 时不改写该层 softmax 权重，也不表示在 GDN 与显式 attention 间路由或跳过 attention kernel（机制见 [Qiu 等，NeurIPS 2025](https://proceedings.neurips.cc/paper_files/paper/2025/hash/904e89bb4e632e75fb47f093b620b257-Abstract-Conference.html)）。这组 3:1 布局的路径和计算差异不能归因于 output gate 单独节省 attention 计算。
 
 Flash-Next 在继续预训练时把这些 full-attention 层换成 QSA。这里要区分两个说法：Flash 的总体模型卡仍把 token mixing 描述为 GDN + QSA；QSA 的核心仍是显式 attention，只是先通过 indexer 选择稀疏上下文。不能把“有 GDN”简写成“整个模型已经没有 attention”。
 

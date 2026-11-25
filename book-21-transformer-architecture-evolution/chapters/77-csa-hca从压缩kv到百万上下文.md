@@ -1,178 +1,135 @@
-# CSA/HCA：从压缩 KV 到百万上下文
+# DeepSeek-V4：百万上下文配置与推理实现
 
-> 资料来源：DeepSeek V4 官方模型卡、V4 Preview 公告与技术报告 `arXiv:2606.19348`（核验日期 2026-09-09）。本章解释报告公开的架构，不把发布方的 FLOPs 比例外推为所有硬件的保证。
+> 本章以 DeepSeek-V4 技术报告 v1 的 Pro/Flash preview 为模型级结果对象，使用 Hugging Face 固定 revision `b5968e9190ef611bbf34a7229255be88a0e937c1` 核对公开配置和参考代码。CSA/HCA 的压缩与 query 读取机制见[第 74 章](74-csa-hca压缩注意力.md)；这里聚焦 V4 层表、百万 token 评测、资源基线、异构缓存和具体实现证据。后续 Pro-0813 与 V4.1-Flash 不与 preview 论文数据混用。
 
-## 先算一笔 KV Cache 账
+## 77.1 先确定模型与来源版本
 
-全注意力在生成时需要保留历史 key/value。假设有 `T` 个 token、每个 KV 条目有 `d` 个元素、使用 `b` 字节存储，那么单层缓存近似为 `2Tdb`。当 `T` 从 8K 变成 1M 时，缓存不是“多一点”，而是按序列长度线性增长。多层、多请求和 batch 会进一步放大显存压力。
+“DeepSeek-V4”在报告、模型配置和后续 checkpoint 中对应不同证据对象。本章的层配置、Table 7 结果和 FLOPs/KV 估算来自 2026-04-26 的 [DeepSeek-V4 技术报告 v1](https://arxiv.org/html/2606.19348v1)；Pro preview 的配置与参考实现链接锁定在同一个 [Hugging Face revision](https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/tree/b5968e9190ef611bbf34a7229255be88a0e937c1)。报告定义模型设计和实验结果，固定配置对应一个可检查的 artifact，参考代码公开一种执行路径。三者都不能单独证明托管 API 或生产 serving 的实际运行形态。
 
-单纯把上下文窗口字段改成 1M，只说明接口允许更长输入；真正困难是让模型在这个长度下仍有可接受的检索质量、延迟、显存和成本。DeepSeek V4 的 CSA/HCA 试图在 KV 表示层面压缩历史，再在压缩表示上做选择或注意力。
+### 77.1.1 V4 preview 报告定义模型规模与百万窗口
 
-## CSA：先压缩，再稀疏选择
+技术报告将 Pro 定义为 1.6T 总参数、49B 激活参数，将 Flash 定义为 284B 总参数、13B 激活参数；两个 preview 模型的上下文窗口都是 1M token。参数规模说明 MoE 模型的权重总量和每 token 激活量，窗口则描述可处理序列长度。这些值来自报告中的 preview 模型设置，不能据此推断每个 1M 输入都能被准确检索。
 
-Compressed Sparse Attention（CSA）先把连续 token 的 KV 沿序列维压缩。报告源码描述为：每 `m` 个 token 汇聚成一个压缩条目，序列长度大致变成原来的 `1/m`。随后，DeepSeek Sparse Attention 的 indexer 为每个 query 计算压缩条目分数，只保留 top-k 压缩块进入核心注意力。
+### 77.1.2 固定配置与参考代码是指定版本的实现证据
 
-这包含两个不同动作：
+Pro preview 的固定 [config.json](https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/b5968e9190ef611bbf34a7229255be88a0e937c1/config.json) 暴露 `num_hidden_layers`、`index_topk`、`sliding_window`、`compress_ratios`、`q_lora_rank` 和 MoE 配置。文件可用于核对论文中公开的架构设置，不能证明服务端必然采用同样的 kernel、精度或并行拓扑。固定 revision 下的 [inference/model.py](https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/b5968e9190ef611bbf34a7229255be88a0e937c1/inference/model.py) 与 [inference/kernel.py](https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/b5968e9190ef611bbf34a7229255be88a0e937c1/inference/kernel.py) 是公开参考代码；源码存在不等于权重已下载或本机推理已复现。
 
-1. **压缩**减少候选数量，但可能损失块内细节。
-2. **稀疏选择**进一步减少每个 query 实际访问的候选。
+### 77.1.3 Pro-0813 与 preview 需要分开记账
 
-如果把两步混成“稀疏注意力”，就无法分析错误来源：压缩可能让相关 token 在汇聚时被稀释，top-k 可能在选择阶段漏掉相关块。
+[官方 Pro-0813 模型卡](https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro-0813) 将它标为 superseding preview 的正式发布，并说明它沿用 preview 结构、附带 DSpark draft head。它是后续 checkpoint，不能把它的评测结果回填到 preview 论文 Table 7。V4.1-Flash 则有另一套架构，留给[第 81 章](81-deepseek-v4.1-flash-causal-encoder-decoder.md)；API、reasoning effort 产品行为和 Agent harness 结果不属于本章的架构配置主线。
 
-一个教学化的压缩可以写成：
+## 77.2 Flash 与 Pro 的逐层配置怎样兑现混合注意力
 
-```math
-c_j=\sum_{r=0}^{m-1}z_{j,r}x_{jm+r},
-```
+第 74 章解释了 CSA/HCA 分别怎样压缩和读取历史；这里看它们如何被放进具体模型的层表。两种 preview 模型都采用 $m=4$ 的 CSA、$m'=128$ 的 HCA 和 $128$ token 的局部窗口，但层数、CSA top-k、query heads 与 MoE 容量不同。下表中的配置来自技术报告 §4.2.1；固定 Pro config 可复核对应字段。
 
-其中 `x` 是原始 KV 条目，`z` 是压缩权重。真实报告还定义了压缩 KV、indexer key、因果可见性和局部滑动窗口；上式只是帮助理解“多个 token 变成一个条目”的简化表达。
+| 模型 | 注意力层排布 | CSA 配置 | HCA 配置 | 其他长上下文配置 | MoE 配置 |
+| --- | --- | --- | --- | --- | --- |
+| V4-Flash | 43 层；前 2 层纯 SWA，后续交错 CSA/HCA；按排布为 21 CSA、20 HCA | $m=4$，top-k $512$ | $m'=128$ | 局部窗口 $128$；$64$ 个 query heads，head dimension $512$，query compression dimension $1024$ | $256$ routed + $1$ shared；每 token 激活 $6$ 个 routed experts |
+| V4-Pro | 61 层；前 2 层 HCA，后续交错 CSA/HCA；按排布为 30 CSA、31 HCA | $m=4$，top-k $1024$ | $m'=128$ | 局部窗口 $128$；$128$ 个 query heads，head dimension $512$，query compression dimension $1536$ | $384$ routed + $1$ shared；每 token 激活 $6$ 个 routed experts |
 
-## HCA：更激进压缩，但保留 dense attention
+MoE 与注意力层数共同构成完整架构，但它们回答不同问题：MoE 稀疏选择改变每个 token 的 FFN 计算路径，CSA/HCA 改变历史 KV 的存储粒度和 query 读取规模。mHC、MoE 路由和 MTP 的机制分别由[第 78 章](78-mhc双随机残差连接.md)、[第 21 章](21-MoE路线Switch-GShard-Mixtral-DeepSeek.md)及[第 58 章](58-DeepSeek-V2-V3-R1架构训练.md)承担，本章不把它们当作 CSA/HCA 的子机制。
 
-Heavily Compressed Attention（HCA）使用比 CSA 更大的压缩跨度 `m'`，把更多 token 汇聚成单个条目，但在压缩后的条目上保持 dense attention。它没有 CSA 的 top-k 稀疏选择，因此每个 query 会访问可见的压缩条目集合。
+### 77.2.1 Flash：前两层走纯 SWA，后续交错 CSA 与 HCA
 
-CSA 更像“较温和压缩 + 稀疏检索”，HCA 更像“重压缩 + 密集读取”。两者可以交错放在不同层，用不同的误差和计算路径换取整体效率。报告还保留滑动窗口分支，为最近 token 提供未被大幅压缩的局部信息。
+Flash 的 43 个 Transformer 层中，最初 2 层使用纯 Sliding Window Attention，其余层交错使用 CSA 和 HCA。CSA 的压缩率为 $4$，每个 query 的 indexer top-k 上限为 $512$；HCA 的压缩率为 $128$。两类混合注意力层都另有 $128$ token 局部窗口。报告还给出 $64$ 个 query heads、head dimension $512$ 和 query compression dimension $1024$。
 
-## 为什么需要局部滑动窗口
+### 77.2.2 Pro：两层 HCA 起步，随后交错 CSA 与 HCA
 
-压缩条目适合远距离趋势和粗粒度检索，却可能损失刚刚出现的变量、标点、局部语法或代码缩进。滑动窗口让 query 同时访问最近的一段原始 KV，形成“远处压缩、近处精细”的组合。因果约束要求当前位置只能看到此前已经完成压缩的块，以及允许的局部历史，不能因压缩实现而偷看未来 token。
+Pro 的 61 个 Transformer 层先放置 2 个 HCA 层，后续交错 CSA/HCA。其 CSA top-k 上限为 $1024$，HCA 压缩率仍为 $128$，局部窗口仍为 $128$；相比 Flash，Pro 的 query heads 增至 $128$，query compression dimension 为 $1536$。固定配置中 `num_hidden_layers=61`、`index_topk=1024`、`sliding_window=128`、`q_lora_rank=1536` 与按层排列的 `compress_ratios` 可与报告相互核对。
 
-## KV Cache 不再是单一数组
+### 77.2.3 把压缩比例换算成一百万 token 时的候选规模
 
-在普通 GQA 中，不同层通常有相对统一的 KV 布局；CSA/HCA 混合后，不同层的压缩倍率、indexer 维度、滑动窗口长度和未完成尾部都可能不同。DeepSeek V4 报告因此描述了异构 KV Cache：
+在接近配置上限的 $1{,}048{,}576$ 个位置处，按序列维压缩比例估算，CSA 约有 $1{,}048{,}576/4=262{,}144$ 个全局压缩候选；每 query 的主 attention 至多选择 Flash 的 $512$ 个或 Pro 的 $1024$ 个压缩条目。HCA 约有 $1{,}048{,}576/128=8{,}192$ 个压缩条目，每个 query 对所有因果可见的 HCA 条目做密集读取；两种路径还各自读取最近的 $128$ 个原始位置。
 
-- CSA/HCA 的压缩 KV。
-- 稀疏选择所需的 indexer 状态。
-- 滑动窗口最近 token。
-- 尚未达到压缩块边界的尾部 token。
-- 共享前缀和磁盘复用所需的状态。
+这些是序列末端附近的候选条目数估算，忽略压缩块边界和未完成尾部。它们显示了配置如何限制或缩短 query 的读取集合，但不包含 entry width、量化 scale、indexer 打分和 kernel 工作量，不能直接当作实际显存字节、FLOPs 或延迟。
 
-Serving engine 不能只按“每 token 固定字节数”分配缓存，而需要记录不同层、不同请求和不同缓存段的形状与淘汰规则。
+## 77.3 百万 token 窗口和百万 token 检索成绩是两类证据
 
-## 一个最小压缩与 top-k 示例
+Pro 固定配置的 `max_position_embeddings=1048576` 对应报告所称的 1M 窗口。这个字段描述模型配置允许的序列长度；它本身不是检索质量指标。报告 Table 7 进一步分别列出 MRCR 1M 与 CorpusQA 1M 的结果，并按 Non-Think、High、Max 三种 reasoning effort 报分。表中的 effort 档是同一系列模型的不同推理模式，不是三个权重 checkpoint。
 
-```python
+### 77.3.1 `max_position_embeddings` 描述配置容量
 
-def compress(values, weights, block_size):
-    compressed = []
-    for start in range(0, len(values), block_size):
-        block = values[start:start + block_size]
-        w = weights[start:start + block_size]
-        z = sum(w) or 1.0
-        compressed.append(sum(x * a for x, a in zip(block, w)) / z)
-    return compressed
+设置一个 million-token position embedding 上限，表明模型和实现为该序列长度预留了位置处理能力。读者仍要问：给定任务需要找什么信息，证据离 query 多远，有多少干扰项，评测判定规则是什么。配置字段回答“能输入多长”，不能替代这些问题。
 
+### 77.3.2 按报告原指标比较 MRCR 1M 与 CorpusQA 1M
 
-def top_k_indices(scores, k):
-    return sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:k]
+DeepSeek-V4 技术报告 v1 Table 7 的长上下文分数如下；分数口径保留报告原名，不将其改写成百分比准确率。
 
-values = [1.0, 2.0, 10.0, 11.0, 3.0, 4.0]
-compressed = compress(values, [1.0] * len(values), block_size=2)
-scores = [0.2, 1.4, 0.7]
-chosen = top_k_indices(scores, k=2)
-print("compressed:", compressed)
-print("chosen blocks:", chosen)
-```
+| 模型 / reasoning effort | MRCR 1M (MMR) | CorpusQA 1M (ACC) |
+| --- | ---: | ---: |
+| Flash / Non-Think | 37.5 | 15.5 |
+| Flash / High | 76.9 | 59.3 |
+| Flash / Max | 78.7 | 60.5 |
+| Pro / Non-Think | 44.7 | 35.6 |
+| Pro / High | 83.3 | 56.5 |
+| Pro / Max | 83.5 | 62.0 |
 
-这个示例没有实现真实的向量 KV、causal mask、indexer 或 GPU kernel，只用于演示压缩和选择是两个阶段。工程实现需要明确压缩权重、精度、块边界、top-k、局部窗口和 cache eviction。
+这些是作者报告的模型评测值。不同 effort 有不同计算/推理预算，分数差异不能解释为架构层表或 CSA/HCA 的独立因果效应。MRCR 用于上下文检索；论文称 CorpusQA 更接近真实问答场景，但这一表述不等于对所有长文档和真实工作流的验证。
 
-## 成本指标必须绑定基线
+### 77.3.3 128K 之后的下降限制“百万上下文”结论
 
-DeepSeek V4 报告给出 1M 场景下相对 V3.2 的单 token FLOPs 和 KV Cache 比例，也给出相对 BF16 GQA8 基线的缓存比例。它们回答的是不同问题：一个是同系列版本对比，一个是与特定注意力配置对比。正式评估时至少要记录：模型版本、上下文长度、精度、batch、硬件、是否包含 indexer、是否包含滑动窗口和 cache 命中情况。
+报告指出，Pro 的 MRCR 检索表现到 $128\text{K}$ 较稳定，超过这一长度后出现下降；在 $1\text{M}$ 处仍能在报告的比较中保持有竞争力的分数。这比“1M context 一定能记住全部内容”更窄，也更有用：容量支持、指定 benchmark 检索、真实任务可靠性是三个不同判断。
 
-## 局限与面试追问
+## 77.4 资源节省要按基线和精度拆开解释
 
-压缩会带来信息损失；稀疏 top-k 会带来漏检风险；异构 cache 增加调度和实现复杂度；FP4/FP8 还会引入量化误差。CSA/HCA 不是无条件替代全注意力，而是把计算和存储预算集中在更有价值的历史表示上。
+技术报告分别给出相对 DeepSeek-V3.2 的单 token FLOPs/KV cache 估算，以及相对 BF16 GQA8 baseline 的缓存比例。两种比较的模型、精度和分母都不同，必须各自保留；报告还把混合精度列为效率来源之一，所以不能把全部变化都归因给 CSA/HCA。
 
-**问：CSA 和 HCA 的核心区别？** CSA 在压缩后还做稀疏 top-k 选择；HCA 进行更强压缩，但在压缩条目上保持 dense attention。
+### 77.4.1 V3.2 对照是模型级单 token FLOPs 与 KV 估算
 
-**问：为什么还需要滑动窗口？** 为近期 token 保留精细信息，弥补压缩远程表示对局部细节的损失。
+在 $1\text{M}$ token 设置下，报告估算 V4-Pro 使用 DeepSeek-V3.2 单 token inference FLOPs 的 $27\%$、KV cache 的 $10\%$；V4-Flash 分别为 $10\%$ 和 $7\%$。FLOPs 按 equivalent FP8 FLOPs 计。这些是作者给出的模型级效率估算，不是同一 GPU 上的 online latency 测试，也不代表 batch、prefill/decode 比例变化后的吞吐。
 
-**问：1M context 是否意味着模型能准确检索任意位置？** 不是。窗口容量、有效检索、延迟、显存和评测分布是不同指标。
+### 77.4.2 BF16 GQA8 的约 2% 使用另一种缓存基线
 
-**问：Serving engine 最难的地方是什么？** 不是只把 KV Cache 做大，而是管理不同层的压缩倍率、稀疏索引、局部窗口、未完成尾部和共享前缀。
+报告还以 BF16、GQA8、head dimension $128$ 的注意力配置为缓存 baseline，称 V4 系列在 1M 场景下 KV cache 约为该基线的 $2\%$。它回答的是“相对某个常见 BF16 attention 配置，KV cache 缩到多少”；它与前一节的 V3.2 相对比例使用不同分母，不能组合成同一项节省率。
 
-## 小练习
+### 77.4.3 压缩率之外还有混合精度和索引计算
 
-1. 将示例改为二维 key/value 向量，并实现按块平均压缩。
-2. 加入 causal mask，验证当前位置不会读取未来压缩块。
-3. 比较无压缩、CSA 风格和 HCA 风格的缓存元素数。
-4. 设计一个检索评测，分别测压缩损失、top-k 漏检和局部窗口补偿。
+V4 将 KV 中 RoPE 相关维度存为 BF16，其他维度存为 FP8；报告称这种混合表示相较全 BF16 的 KV cache 几乎减半。Lightning Indexer 计算采用 FP4，MoE routed expert weights 也使用 FP4。长上下文效率来自压缩序列长度、稀疏筛选和低精度存储/计算等共同设计；报告并未通过完整的 1M 单因素消融将每项收益精确分账。
 
-## 2026-09-20 更新：V4 Pro 的模型、effort 与 harness 账本
+## 77.5 异构 KV cache 保存不同更新规则的状态
 
-本章的架构主线现在以 `DeepSeek V4 Pro 0813` 作为活动锚点，但必须把三种身份分开：
+混合层的 cache 不再是每层相同长度、每 token 固定字节数的一块数组。DeepSeek-V4 报告把 cache 分成 CSA/HCA 的 classical KV 和保存 SWA/未完成压缩 token 的 state cache；Lightning Indexer 还有维度不同的 key。不同状态长度、写入时机和恢复条件不同，必须在模型状态账本中分别理解。
 
-| 层 | 本轮证据 | 能回答什么 |
-|---|---|---|
-| 榜单配置 | Artificial Analysis 的 `deepseek-v4-pro`，标题为 `Reasoning, Max Effort` | 第三方目录、速度/指数、context 和 release date 的观察 |
-| 模型与 API | 官方 V4 Pro 公告、模型卡、配置和 Responses/Thinking 文档 | `deepseek-v4-pro`、`low/high/max`、1.6T/49B、1M、CSA/HCA 及协议边界 |
-| Agent 评测系统 | DataCurve 的 `mini_swe_agent_deepseek_v4_pro_max` | 该模型配置在固定 harness、工具、环境和 verifier 下的 Pass@1/Pass@4、成本和 steps |
+### 77.5.1 主 KV 与 state cache 的条目和更新规则不同
 
-DataCurve 本轮记录为 Pass@1 `62.831858%`、Pass@4 `88.495575%`、平均成本 `$1.6660232187`、平均输出 `105998.9` token、平均 `154.71` steps，`n_runs=4`。这些数字不是“V4 Pro 的裸能力”，因为它们同时包含 max effort、`mini-swe-agent`、工具宿主、任务集、执行环境和 verifier。面试中若只说“V4 Pro 的 SWE 是 62.8%”，就丢掉了最重要的实验条件。
+CSA/HCA 的压缩条目在压缩块完成后进入主 KV cache；indexer 保存自己的检索 key；SWA state cache 保留最近的原始 token KV；当前块中还不足以形成压缩条目的 token 和 hidden states 必须留在 tail buffer。随着请求推进，完整块可进入压缩序列，未完成的尾部仍按 token 状态保留。这里描述的是 V4 公开 cache 布局，不是可套用到任意 hybrid 模型的通用实现。
 
-官方配置补充了本章的实现账本：61 层、384 routed experts、每 token 6 个 routed experts、1 个 shared expert、`q_lora_rank=1536`、`o_lora_rank=1024`、`index_topk=1024`、YaRN factor 16 和 FP8 quantization。它们是公开 artifact 的配置字段，不等于某次 API 服务一定使用完全相同的 kernel，也不能由配置直接推出实际吞吐。
+### 77.5.2 LCM 对齐块把两种压缩流放入共同布局
 
-API 层还提出一个容易被忽视的面试点：DeepSeek Responses 是 stateless，不支持 `previous_response_id`、`conversation`、`background` 或 `store`；function tools、`apply_patch` 和并行工具调用仍需要宿主执行器、权限、幂等和 verifier。也就是说，百万上下文的 cache/state 设计不能把“模型能读到历史”误写成“服务端自动替用户保存会话”。
+报告用 $\mathrm{lcm}(m,m')$ 个原始 token 作为 CSA/HCA 主 cache 的对齐跨度。V4 取 $m=4$、$m'=128$ 时，$\mathrm{lcm}(4,128)=128$：每个跨度包含 $32$ 个 CSA 压缩条目和 $1$ 个 HCA 压缩条目。这让两类压缩流可以映射进共同的主 cache block；框架的物理 page 大小和分配实现仍可能不同。
 
-**面试追问：为什么 `max` 不是一个新模型？** 因为官方将其定义为同一 V4 Pro API 的 reasoning effort，改变请求级 test-time compute/预算行为；只有当权重、model ID 或 revision 明确变化时，才有理由单独建立模型身份。`max` 的 DataCurve 行仍必须作为独立配置记录，不能和 low/high 或 V4 Flash 的结果混用。
+### 77.5.3 前缀缓存复用到完整块，窗口状态另行管理
 
-**面试追问：CSA/HCA、mHC、Muon 和 on-policy distillation 是同一层面的技术吗？** 不是。CSA/HCA 是注意力与 KV serving 结构，mHC 是残差流的几何约束，Muon 是优化器/参数更新路径，on-policy distillation 是后训练中的能力合并流程。把它们按“V4 的四个模块”并列，会掩盖架构、优化、后训练和 serving 的责任边界。
+报告的 on-disk cache 可以复用已经完成的 CSA/HCA 压缩条目。若共享前缀末尾落在未完成压缩块中，那一段原 token state 并未作为压缩条目存入磁盘，恢复时仍须重算。SWA 原始 KV 的更新规律不同，报告分别比较完整 SWA 缓存、周期 checkpoint 和不缓存 SWA 的存储—重算取舍。通用前缀缓存的数据结构与引擎实现见[第二十四册第 23 章](../../book-24-llm-inference-engine/chapters/23-prefix-caching与prompt-cache.md)；本章只说明 V4 特有的状态边界。
 
-## 官方 inference implementation：从架构描述到可追踪执行路径
+## 77.6 固定实现和框架案例展示结构之外的执行条件
 
-模型卡和论文告诉我们为什么要压缩 KV；固定 Hugging Face artifact 则让我们看到“压缩、索引、局部窗口、专家和残差混合”在参考实现中如何连起来。2026-09-20 固定的 V4 Pro revision 是 `b5968e9190ef611bbf34a7229255be88a0e937c1`。本节只讨论公开代码路径，不宣称完整权重已下载或本机 GPU 推理已成功。
+论文告诉我们设计和报告估算，固定参考代码让读者检查模型实现路径，而框架 [SGLang v0.5.20 release](https://github.com/sgl-project/sglang/releases/tag/v0.5.20) 与 PR 描述某些 GPU 与 workload 下的实测。三类材料的证据层级不同；以下数字均是来源报告值，不是本地运行结果。
 
-### 参考实现的状态图
+### 77.6.1 固定参考实现把配置连接到模型与 kernel 文件
 
-```text
-token hidden state
-  -> gated KV compressor (ratio 128/4, overlap tail)
-  -> learned indexer score + causal mask + top-k
-  -> compressed sparse attention
-  -> 128-token local sliding window
-  -> MLA low-rank Q/O path
-  -> MoE top-6 routed + 1 shared expert
-  -> Hyper-Connections / Sinkhorn mixing
-  -> next block / MTP prediction
-```
+Pro preview 固定 revision 下的 [`inference/model.py`](https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/b5968e9190ef611bbf34a7229255be88a0e937c1/inference/model.py) 中，attention 按 `compress_ratios[layer_id]` 选择层路径，并为 CSA 路径配置 indexer；[`inference/kernel.py`](https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/b5968e9190ef611bbf34a7229255be88a0e937c1/inference/kernel.py) 提供 FP4/FP8 GEMM、稀疏 attention 与 Sinkhorn 相关 kernel。它们适合作为“配置如何进入一个公开实现”的代码入口。实现文件存在并不能证明其在某张卡、某个 batch 或服务端 API 中取得相同性能。
 
-这里的“状态”不是一块统一的 KV 数组。压缩 KV、indexer 所需的候选状态、局部窗口和压缩块边界的 overlap state 必须分别管理。对 serving engine 来说，prefix hit、eviction、decode continuation 和恢复都要知道当前层属于 CSA/HCA 哪条路径，以及尾部是否已经完成压缩。
+### 77.6.2 SWA 分支点缓存的收益绑定共享前缀负载
 
-### 从 `model.py` 读出的实现证据
+SGLang v0.5.20 的 unified-tree [PR #34565](https://github.com/sgl-project/sglang/pull/34565) 为共享前缀请求保留 SWA 状态的分叉点。在 DeepSeek-V4-Flash-0731 的一个内部 shared-prefix 模拟中，64 条请求分成 8 组，每组共享 24,576 token 的 system prompt，question 为 8,192 token、输出 128 token。开启窗口外状态释放时，PR 报告 token hit rate 从 $43.81\%$ 升至 $60.75\%$，mean TTFT 从 $1.570\text{s}$ 降至 $1.070\text{s}$；release note 用四舍五入值 $43.8\%\to60.8\%$ 与 $1.57\text{s}\to1.07\text{s}$。
 
-- `Compressor` 使用 gated KV pooling；ratio=4 的路径保留 overlap state，避免块边界切断因果历史。
-- `Indexer` 对压缩 KV 计算 learned score，施加 causal mask 后做 top-k；参考 inference 路径中的 indexer 还有 FP4 模拟量化。压缩损失和 top-k 漏检因此必须分开测量。
-- `Attention` 同时维护 MLA 低秩投影、compressed-KV sparse attention 和 `window_size=128` 的局部窗口；窗口不是“额外的完整注意力”，而是对近期细节的补偿分支。
-- `Gate` 的前三层使用 token-id hash routing，后续使用 `sqrtsoftplus` score routing；selection bias 只改变候选专家选择，不改变 routing weight。该字段来自公开 inference code，不应外推成完整训练策略。
-- `MoE` 为 top-6 routed experts + 1 shared expert，专家按 tensor parallel 分片；`MTPBlock` 公开了 multi-token prediction block。MTP 仍要单独记录 draft、verify、accepted length、rollback 与 committed cache，不能看到类名就宣称端到端 speculative decoding 已验收。
-- `Block` 用 `hc_mult=4` 和 20 轮 Sinkhorn 近似双随机残差混合，与第 78 章的 mHC 数学主线相连；这是残差流约束，不是 CSA/HCA 的一种变体。
+这个案例说明压缩 KV 命中不保证 SWA 分支状态也能恢复，cache 结构要保留正确的 branch point。它是 SGLang PR 作者在指定请求分组和共享 prompt 上的结果，不是本地复现，也不代表任意生产流量的 hit rate 或 TTFT。
 
-### `kernel.py` 的低精度与部署边界
+### 77.6.3 B200 kernel 与 SM120 serving 数字不能合并成一个加速倍数
 
-TileLang 参考 kernel 显示了 `[128,128]` block 的 FP8 activation quantization、FP4 quantization、FP8/FP4 GEMM、稀疏 attention online softmax 和 HC Sinkhorn 路径；FP4 权重沿 K 维打包后参与 GEMM。官方 inference README 的 `EXPERTS=384`、`MP=8` 是转换示例参数，不能改写为所有硬件的生产 TP/EP 结论。FP4/FP8 的 scale、KV cache dtype、专家 dispatch、workspace 和通信需要与 GPU 型号、并行拓扑及 batch 一起 profiling。
+SGLang v0.5.20 release 报告，B200/SM100-103 上的 TRT-LLM CSA/HCA attention kernel 相对 FlashMLA，prefill 约 $1.2\times$、decode 约 $1.45\times$；对应 [PR #30805](https://github.com/sgl-project/sglang/pull/30805) 的 FP8、TP=1 kernel 级比较，不是模型端到端延迟。
 
-因此本章新增的实现证据可以回答“公开参考代码怎么把概念串起来”，但还不能回答“线上 1M context 一定达到多少 tokens/s”。后者需要固定权重、commit、GPU、batch、prefill/decode 比例、cache 命中、压缩召回和 verifier，并把发布方 benchmark 与本地结果分栏。
+另一条 [PR #29927](https://github.com/sgl-project/sglang/pull/29927) 针对 4× RTX PRO 6000（SM120）上的 V4-Flash serving 路径，发布说明报告 batch 1、8K 输入的 TPOT 从 $36.1\text{ms}$ 降至 $10.5\text{ms}$，并报告从 8K 到 128K 输入时 TTFT 约下降 $20\%$。该改动包括 paged-MQA indexer、FP4 MoE backend 和 page-split 等多项优化。硬件、baseline、指标和实现范围均与 B200 kernel 比较不同，不能把两组数字相乘或写成 V4 的通用加速率。
 
-## 2026-09 更新：SGLang 的 SWA 分支点缓存与 V4 serving kernel
+## 77.7 用四种证据分别回答四个问题
 
-### 共享前缀的两个状态不能混成一个 cache hit
+读到“支持百万上下文”时，先分别问配置允许多长、指定任务上检索如何、相对哪个 baseline 节省资源、哪个引擎和 workload 下测得什么延迟。V4 的公开证据说明：一套具体的 CSA/HCA 层表、局部窗口、低精度、缓存布局和服务内核共同支撑了长上下文；报告没有把百万窗口、任意任务的质量保证和通用线上速度合成一个结论。
 
-把一个大 system prompt 后接多个 Agent 子任务想成树：共同前缀只 prefill 一次，每个分支追加自己的 question 和 tool history。普通 radix cache 可能保留完整 KV，但 DeepSeek V4 还要维护滑动窗口分支的状态。chunked prefill 清理窗口外的 SWA slots 后，后续 sibling 即使命中 Full KV，也未必能从正确的分叉位置恢复 SWA；此时服务端需要重新计算相应前缀，或者会错误地把不完整状态当作完整命中。
+### 77.7.1 配置、质量、资源和延迟不能互相代替
 
-SGLang `v0.5.20` 的统一 radix tree PR [#34565](https://github.com/sgl-project/sglang/pull/34565) 让 SWA 状态在分支点继续保留：先按分支位置调整窗口外 slots，把新分支插入 tree，再清理其余无用状态。这样 branch point 成为一等缓存边界。它需要额外状态占用，因此优化目标不是“永远不释放”，而是在复用概率、缓存容量和后续请求之间做生命周期管理。
+最大位置数是配置事实；MRCR/CorpusQA 是模型在指定评测条件下的质量结果；FLOPs/KV 比例是相对基线的报告估算；SGLang PR 数字是指定硬件和负载的框架性能报告。做横向比较时先对齐模型版本、baseline、指标、精度、硬件与 workload。不能用 context 字段代替检索结果，不能用 cache 比例代替 latency，也不能把 kernel 倍数写成模型能力提升。
 
-PR 的 DeepSeek-V4-Flash-0731 shared-prefix workload 固定 TP=2、FlashInfer MXFP4、DSpark，system prompt 24,576 tokens，question 8,192，output 128；64 条请求分成 8 个共享前缀组。开启 out-of-window free 时，branch-point caching 把 token hit rate 从 `43.81%` 提到 `60.75%`，mean TTFT 从 `1.570s` 降至 `1.070s`，p95 TTFT 从 `3.427s` 降至 `2.373s`；input throughput 从 `66.3K` 到 `70.5K tokens/s`。这是 SGLang PR 自报的指定负载结果，不是本地复现，也不能替代真实 Agent workload 的 p95/p99 与单位成功成本。
+### 77.7.2 将机制、服务和版本问题交回相应章节
 
-面试追问应落到状态账本：Full KV、压缩 KV、indexer state、SWA slots 和 overlap tail 是否分别有 owner、branch key、TTL、eviction 与 restore 规则？工具调用造成分支后，`call_id`、工具结果和 verifier artifact 是否也绑定在同一个 task lineage？只报一个 prefix hit rate 会掩盖这些问题。
-
-### CSA/HCA kernel 优化必须绑定硬件与 baseline
-
-SGLang `v0.5.20` release 还收录了两类 DeepSeek V4 serving 路径：
-
-| 后端/硬件 | 发布的实现证据 | 数字应如何理解 |
-|---|---|---|
-| B200（SM100/103） | TRT-LLM attention kernel 覆盖 V4 的 CSA/HCA，与 FlashMLA 比较 | PR #30805 报告 FP8/TP1 单元 kernel prefill 约 `1.2x`、decode 约 `1.45x`；不是 Agent 端到端或所有 V4 变体结果 |
-| 4× RTX PRO 6000（SM120） | DeepGEMM paged-MQA sparse indexer、FlashInfer sparse prefill、DeepGEMM FP4 MoE 与 SWA page-split 改进 | PR #29927 报告相对 torch fallback 的单请求 TPOT 最多 `3.4x`；同一 PR 将 HC prenorm 的附加贡献约 `3.2%` 单独披露，baseline/backend 条件必须同时报告 |
-
-硬件专用实现说明 attention 的收益来自多层协作：稀疏索引 kernel 影响候选准备，CSA/HCA kernel 影响实际读取，MoE backend 影响 expert compute，SWA page layout 影响每步内存搬运。不能把某一个 kernel 的倍数当成模型能力提升。SGLang release/PR 记录的是框架实现证据；本机没有相同 GPU、完整权重和固定 benchmark 时，只能标为发布方结果，不能声称复现或生产 acceptance。
+CSA/HCA 的压缩与读取机制回到[第 74 章](74-csa-hca压缩注意力.md)；mHC、MoE 和 V4.1-Flash 分别见[第 78 章](78-mhc双随机残差连接.md)、[第 21 章](21-MoE路线Switch-GShard-Mixtral-DeepSeek.md)和[第 81 章](81-deepseek-v4.1-flash-causal-encoder-decoder.md)。KV cache 账本可接读[第六册第 3 章](../../book-06-llm-deployment/chapters/03-kv-cache与内存管理.md)，PagedAttention 和引擎性能测试可接读[第二十四册第 17 章](../../book-24-llm-inference-engine/chapters/17-pagedattention的核心思想.md)与[第 53 章](../../book-24-llm-inference-engine/chapters/53-构建serving-engine的benchmark指标和调参实验框架.md)。
